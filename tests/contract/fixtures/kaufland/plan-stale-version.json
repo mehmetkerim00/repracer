@@ -1,0 +1,125 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "kaufland/dispatch/stale-version",
+  "channel": "KAUFLAND",
+  "apiVersion": "2.44.0",
+  "title": "Устаревшая версия записи не уходит в канал; её подтверждение — NOT_APPLIED",
+  "description": "INV-03: в план попали версии 2 и 4 одной единицы записи цены и дубль версии 4. В пакет идёт только версия 4; версия 2 — STALE_VERSION, дубль — DUPLICATE_ACTION; запись CHANNEL_MIN_PRICE отклоняется всегда [Р-41, KFL_C04]. Затем подтверждение старой записи после окна: в канале значение новой версии — NOT_APPLIED с наблюдением [KFL_C08]. Запросов на запись нет.",
+  "tags": ["mandatory:stale-version", "planning", "confirm", "conservative:KFL_C04", "conservative:KFL_C08", "conservative:KFL_C10"],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": ["docs/domain-model.md#INV-03", "docs/decisions.md#Р-41", "vendor/kaufland/seller-api-v2/2026-09-14/openapi.json#GET /units/{id_unit}"]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": { "externalAccountId": "syn-seller-0001", "marketplaces": ["de", "at"] },
+    "credentials": {
+      "seller": { "clientKey": "syn-seller-client-key-0001", "secretKey": "syn-seller-secret-key-0001" },
+      "partner": { "clientKey": "syn-partner-client-key-0001", "secretKey": "syn-partner-secret-key-0001" }
+    },
+    "partner": true,
+    "adapter": { "confirmationWindowMs": 600000 }
+  },
+  "steps": [
+    {
+      "id": "plan",
+      "kind": "call",
+      "method": "planDispatch",
+      "args": [
+        [
+          {
+            "channelWriteId": "cw-0501",
+            "writeScope": { "writeScopeId": "ws-price-de-5001", "field": "PRICE", "scopeKey": "kaufland|acct-1|de|5001", "identity": { "marketplace": "de", "externalUnitId": "5001" } },
+            "version": 2, "idempotencyKey": "cw-0501:2", "attemptNo": 1,
+            "value": { "field": "PRICE", "price": { "amountMinor": 1000, "currency": "EUR", "basis": "GROSS" } }
+          },
+          {
+            "channelWriteId": "cw-0502",
+            "writeScope": { "writeScopeId": "ws-price-de-5001", "field": "PRICE", "scopeKey": "kaufland|acct-1|de|5001", "identity": { "marketplace": "de", "externalUnitId": "5001" } },
+            "version": 4, "idempotencyKey": "cw-0502:4", "attemptNo": 1,
+            "value": { "field": "PRICE", "price": { "amountMinor": 1100, "currency": "EUR", "basis": "GROSS" } }
+          },
+          {
+            "channelWriteId": "cw-0503",
+            "writeScope": { "writeScopeId": "ws-price-de-5001", "field": "PRICE", "scopeKey": "kaufland|acct-1|de|5001", "identity": { "marketplace": "de", "externalUnitId": "5001" } },
+            "version": 4, "idempotencyKey": "cw-0503:4", "attemptNo": 1,
+            "value": { "field": "PRICE", "price": { "amountMinor": 1100, "currency": "EUR", "basis": "GROSS" } }
+          },
+          {
+            "channelWriteId": "cw-0504",
+            "writeScope": { "writeScopeId": "ws-qty-SYN-OFFER-5002", "field": "QUANTITY", "scopeKey": "kaufland|acct-1|SYN-OFFER-5002", "identity": { "marketplace": "de", "externalUnitId": "5002", "externalOfferId": "SYN-OFFER-5002" } },
+            "version": 1, "idempotencyKey": "cw-0504:1", "attemptNo": 1,
+            "value": { "field": "QUANTITY", "quantity": 3 }
+          },
+          {
+            "channelWriteId": "cw-0505",
+            "writeScope": { "writeScopeId": "ws-price-de-5003", "field": "PRICE", "scopeKey": "kaufland|acct-1|de|5003", "identity": { "marketplace": "de", "externalUnitId": "5003" } },
+            "version": 1, "idempotencyKey": "cw-0505:1", "attemptNo": 1,
+            "value": { "field": "CHANNEL_MIN_PRICE", "minPrice": { "amountMinor": 900, "currency": "EUR", "basis": "GROSS" } }
+          }
+        ]
+      ],
+      "expect": {
+        "batches": [
+          {
+            "batchId": { "$regex": "^kfl:de:[0-9a-f]{16}$" },
+            "operation": "POST /units/bulk",
+            "requestCount": 1,
+            "budgetCharges": [],
+            "items": [{ "channelWriteId": "cw-0502", "version": 4 }, { "channelWriteId": "cw-0504" }]
+          }
+        ],
+        "rejected": {
+          "$unordered": [
+            { "channelWriteId": "cw-0505", "error": { "code": "UNSUPPORTED", "class": "PERMANENT" } },
+            { "channelWriteId": "cw-0501", "error": { "code": "STALE_VERSION", "class": "PERMANENT", "scope": "ITEM" } },
+            { "channelWriteId": "cw-0503", "error": { "code": "DUPLICATE_ACTION", "class": "PERMANENT" } }
+          ]
+        }
+      }
+    },
+    {
+      "id": "confirm-stale-write",
+      "kind": "call",
+      "method": "confirm",
+      "args": [
+        [
+          {
+            "channelWriteId": "cw-0501",
+            "writeScope": { "writeScopeId": "ws-price-de-5001", "field": "PRICE", "scopeKey": "kaufland|acct-1|de|5001", "identity": { "marketplace": "de", "externalUnitId": "5001" } },
+            "expected": { "field": "PRICE", "price": { "amountMinor": 1000, "currency": "EUR", "basis": "GROSS" } },
+            "dispatchedAt": { "$clockIso": -700000 }
+          }
+        ]
+      ],
+      "expect": [
+        { "channelWriteId": "cw-0501", "status": "NOT_APPLIED", "observation": { "field": "PRICE", "value": { "price": { "amountMinor": 1100 } } } }
+      ]
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "get-5001",
+      "request": { "method": "GET", "path": "/v2/units/5001", "query": { "storefront": "de" } },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": {
+            "id_unit": 5001, "storefront": "de", "currency": "EUR", "listing_price": 1100, "price": 1100, "amount": 4,
+            "id_offer": "SYN-OFFER-5001", "id_product": 500501, "is_live": true, "date_lastchange_iso": "2026-09-14T09:55:00Z"
+          }
+        }
+      }
+    }
+  ],
+  "expect": {
+    "logs": [
+      { "code": "KFL_C04_SMART_PRICING_REFUSED", "count": 1, "question": "K-07" },
+      { "code": "KFL_C10_PRICE_BASIS_GROSS_ASSUMED", "count": 1 },
+      { "code": "KFL_C08_CONFIRM_TIME_GRANULARITY", "count": 1, "question": "K-15" }
+    ],
+    "noAlerts": true
+  }
+}

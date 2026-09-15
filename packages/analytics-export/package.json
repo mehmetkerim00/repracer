@@ -1,0 +1,22 @@
+{
+  "name": "@repracer/analytics-export",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PostgreSQL day partitions → ClickHouse (Р-20, Р-23): price intents and decisions with reason parameters, checks and exchange rate; NO_OP with its reason code (Р-81); completed channel writes with end reasons. Core intent archive per tenant with the strategy versions and rulesets its explanations refer to, verified by expanding every explanation from the archive alone (Р-79). Idempotent inserts, row-count verification, partition_export bookkeeping; compression benchmark.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@repracer/pricing-model": "0.1.0",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test test/*.test.ts",
+    "bench": "node --experimental-strip-types --disable-warning=ExperimentalWarning bench/compression.bench.ts"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "name": "@repracer/contract-tests",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Contract test stand: channel adapters replayed against recorded/synthetic channel exchanges, no network. Base for the channel simulator.",
+  "type": "module",
+  "dependencies": {
+    "@repracer/channel-port": "0.1.0",
+    "@repracer/input-sanity": "0.1.0",
+    "@repracer/kaufland-adapter": "0.1.0",
+    "@repracer/kaufland-client": "0.1.0",
+    "@repracer/pricing-model": "0.1.0",
+    "@repracer/pricing-pipeline": "0.1.0",
+    "@repracer/pricing-store-pg": "0.1.0",
+    "@repracer/write-dispatcher": "0.1.0",
+    "@repracer/console-model": "0.1.0",
+    "@repracer/identity": "0.1.0"
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec src/harness.test.ts src/kaufland.contract.test.ts src/kaufland.pipeline.pg.test.ts src/console.test.ts src/console.pg.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "exports": {
+    "./stand": "./src/console/stand.ts",
+    "./pg-store": "./src/harness/pg-store.ts"
+  }
+}

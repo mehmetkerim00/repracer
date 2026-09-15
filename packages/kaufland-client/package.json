@@ -1,0 +1,20 @@
+{
+  "name": "@repracer/kaufland-client",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Typed Kaufland Seller API v2 client: generated types + thin transport (auth, retries). No domain logic.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "kauflandSpec": {
+    "path": "vendor/kaufland/seller-api-v2/2026-09-14/openapi.json",
+    "sha256": "aab93ded6c855247b7213163cede0364fdac4769774c1dd3765c39c7171cc388",
+    "version": "2.44.0"
+  },
+  "scripts": {
+    "generate": "openapi-typescript ../../vendor/kaufland/seller-api-v2/2026-09-14/openapi.json --output src/generated/schema.ts",
+    "verify-spec": "cd ../.. && shasum -a 256 -c vendor/kaufland/seller-api-v2/2026-09-14/SHA256SUMS --status 2>/dev/null || (cd vendor/kaufland/seller-api-v2/2026-09-14 && shasum -a 256 -c SHA256SUMS)",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

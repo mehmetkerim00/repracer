@@ -1,0 +1,137 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "kaufland/inbound/webhook-duplicate",
+  "channel": "KAUFLAND",
+  "apiVersion": "2.44.0",
+  "title": "Дубль уведомления item_unit_changed",
+  "description": "Kaufland повторяет уведомление с тем же id_message (повтор после неуспешной доставки, до ~12 ч). Адаптер без состояния: оба раза возвращает тот же deliveryId и те же sourceEventId наблюдений, по которым ядро отбрасывает дубль. Третье уведомление с другим id_message даёт другой deliveryId. Запросов к API нет; токен адреса вебхука не попадает в журнал.",
+  "tags": ["mandatory:webhook-duplicate", "inbound"],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": ["https://sellerapi.kaufland.com/?page=push-notifications#notification-requests", "https://sellerapi.kaufland.com/?page=push-notifications#callback-url-unreachable"]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": { "externalAccountId": "syn-seller-0001", "marketplaces": ["de", "at"] },
+    "credentials": {
+      "seller": { "clientKey": "syn-seller-client-key-0001", "secretKey": "syn-seller-secret-key-0001" },
+      "partner": { "clientKey": "syn-partner-client-key-0001", "secretKey": "syn-partner-secret-key-0001" }
+    },
+    "partner": true,
+    "secrets": ["wh_tok_synthetic_0001"]
+  },
+  "steps": [
+    {
+      "id": "first-delivery",
+      "kind": "inbound",
+      "delivery": {
+        "method": "POST",
+        "url": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0001",
+        "headers": { "Shop-Timestamp": { "$clockSeconds": -30 }, "Shop-Signature": { "$signWith": "seller" } },
+        "body": {
+          "event_name": "item_unit_changed",
+          "resource": "/units/4001/",
+          "id_message": "5f0c3a0e9b1d4c2a8e7f6a5b4c3d2e1f",
+          "storefront": "de",
+          "payload": {
+            "id_unit": 4001, "id_item": 70001, "condition": "new", "location": "DE", "warehouse": "", "amount": 12, "price": 2599,
+            "delivery_time": "b", "delivery_time_min": 2, "delivery_time_max": 3, "shipping_group": "Synthetic group", "note": "",
+            "reference_price": 0, "seller": { "pseudonym": "Synthetic Seller" }, "shipping_rate": 0,
+            "date_inserted": "2026-01-01T00:00:00Z", "date_lastchange": "2026-09-14T09:59:00Z", "listing_price": 2599, "id_offer": "SYN-OFFER-4001",
+            "item": { "id_item": 70001, "title": "Synthetic product 1", "eans": ["2000000000017"], "id_category": 1, "url": "https://example.invalid/product/1", "is_valid": true },
+            "is_live": true
+          }
+        }
+      },
+      "expect": {
+        "kind": "EVENTS",
+        "deliveryId": "kaufland:5f0c3a0e9b1d4c2a8e7f6a5b4c3d2e1f",
+        "acknowledgeStatus": 200,
+        "events": [
+          {
+            "kind": "OBSERVATION",
+            "observation": {
+              "identity": { "marketplace": "de", "externalUnitId": "4001", "externalOfferId": "SYN-OFFER-4001", "channelProductRef": { "$absent": true } },
+              "field": "PRICE", "source": "PUSH_EVENT", "observedAt": "2026-09-14T09:59:00.000Z",
+              "sourceEventId": "kaufland:5f0c3a0e9b1d4c2a8e7f6a5b4c3d2e1f:PRICE",
+              "value": { "field": "PRICE", "price": { "amountMinor": 2599, "currency": "EUR", "basis": "GROSS" } },
+              "effectivePrice": { "amountMinor": 2599 }
+            }
+          },
+          {
+            "kind": "OBSERVATION",
+            "observation": {
+              "field": "QUANTITY", "source": "PUSH_EVENT",
+              "sourceEventId": "kaufland:5f0c3a0e9b1d4c2a8e7f6a5b4c3d2e1f:QUANTITY",
+              "value": { "field": "QUANTITY", "quantity": 12 }
+            }
+          }
+        ]
+      }
+    },
+    { "id": "kaufland-retries-later", "kind": "advanceClock", "ms": 60000 },
+    {
+      "id": "duplicate-delivery",
+      "kind": "inbound",
+      "delivery": {
+        "method": "POST",
+        "url": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0001",
+        "headers": { "Shop-Timestamp": { "$clockSeconds": -90 }, "Shop-Signature": { "$signWith": "seller" } },
+        "body": {
+          "event_name": "item_unit_changed",
+          "resource": "/units/4001/",
+          "id_message": "5f0c3a0e9b1d4c2a8e7f6a5b4c3d2e1f",
+          "storefront": "de",
+          "payload": {
+            "id_unit": 4001, "id_item": 70001, "condition": "new", "location": "DE", "warehouse": "", "amount": 12, "price": 2599,
+            "delivery_time": "b", "delivery_time_min": 2, "delivery_time_max": 3, "shipping_group": "Synthetic group", "note": "",
+            "reference_price": 0, "seller": { "pseudonym": "Synthetic Seller" }, "shipping_rate": 0,
+            "date_inserted": "2026-01-01T00:00:00Z", "date_lastchange": "2026-09-14T09:59:00Z", "listing_price": 2599, "id_offer": "SYN-OFFER-4001",
+            "item": { "id_item": 70001, "title": "Synthetic product 1", "eans": ["2000000000017"], "id_category": 1, "url": "https://example.invalid/product/1", "is_valid": true },
+            "is_live": true
+          }
+        }
+      },
+      "expect": {
+        "kind": "EVENTS",
+        "deliveryId": "kaufland:5f0c3a0e9b1d4c2a8e7f6a5b4c3d2e1f",
+        "acknowledgeStatus": 200,
+        "events": [
+          { "kind": "OBSERVATION", "observation": { "field": "PRICE", "sourceEventId": "kaufland:5f0c3a0e9b1d4c2a8e7f6a5b4c3d2e1f:PRICE", "observedAt": "2026-09-14T09:59:00.000Z" } },
+          { "kind": "OBSERVATION", "observation": { "field": "QUANTITY", "sourceEventId": "kaufland:5f0c3a0e9b1d4c2a8e7f6a5b4c3d2e1f:QUANTITY" } }
+        ]
+      }
+    },
+    {
+      "id": "next-event-different-id",
+      "kind": "inbound",
+      "delivery": {
+        "method": "POST",
+        "url": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0001",
+        "headers": { "Shop-Timestamp": { "$clockSeconds": -5 }, "Shop-Signature": { "$signWith": "seller" } },
+        "body": {
+          "event_name": "item_unit_out_of_stock",
+          "resource": "/units/4001/",
+          "id_message": "6a1d4b1f0c2e5d3b9f8a7b6c5d4e3f2a",
+          "storefront": "de",
+          "payload": { "id_unit": 4001, "amount": 0, "price": 2599, "listing_price": 2599, "id_offer": "SYN-OFFER-4001", "date_lastchange": "2026-09-14T10:00:55Z", "is_live": false }
+        }
+      },
+      "expect": {
+        "kind": "EVENTS",
+        "deliveryId": "kaufland:6a1d4b1f0c2e5d3b9f8a7b6c5d4e3f2a",
+        "events": [
+          { "kind": "OBSERVATION", "observation": { "field": "PRICE", "sourceEventId": "kaufland:6a1d4b1f0c2e5d3b9f8a7b6c5d4e3f2a:PRICE" } },
+          { "kind": "OBSERVATION", "observation": { "field": "QUANTITY", "value": { "quantity": 0 }, "liveness": { "isLive": false, "reasons": [] } } }
+        ]
+      }
+    }
+  ],
+  "exchanges": [],
+  "expect": {
+    "noLogCodes": ["KFL_C07_WEBHOOK_SIGNATURE_VARIANT", "KFL_C12_WEBHOOK_TIMESTAMP_WINDOW", "KFL_C15_UNKNOWN_EVENT"],
+    "noAlerts": true
+  }
+}

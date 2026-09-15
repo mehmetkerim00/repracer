@@ -1,0 +1,24 @@
+{
+  "name": "@repracer/identity",
+  "version": "0.1.0",
+  "private": true,
+  "description": "External identity (Р-78, ADR-0013): verification of the identity provider token (OIDC, RS256/ES256 via JWKS) and mapping of the external subject to our memberships and roles, read from the database on every request. No passwords, sessions, MFA or invitations — those are the provider's.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./pg": "./src/pg.ts",
+    "./test-issuer": "./src/test-issuer.ts"
+  },
+  "dependencies": {
+    "@repracer/pricing-model": "0.1.0",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@repracer/pricing-store-pg": "0.1.0",
+    "@types/pg": "8.23.1"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec src/identity.test.ts src/jwks.test.ts test/identity.pg.test.ts"
+  }
+}

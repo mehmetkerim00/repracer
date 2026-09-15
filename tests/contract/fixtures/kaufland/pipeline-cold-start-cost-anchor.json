@@ -1,0 +1,439 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "kaufland/pipeline/cold-start-cost-anchor",
+  "channel": "KAUFLAND",
+  "apiVersion": "2.44.0",
+  "title": "Холодный старт: без истории снимок сверяется с себестоимостью, без якорей — не используется",
+  "description": "Три новых товара без истории, без принятых снимков и без нашей цены. Первый: себестоимость 10.00, Buy Box 17.80 — правдоподобно по себестоимости, решение 17.75 уходит в канал. Второй: себестоимость 10.00, канал отдал 1780.00 — в 178 раз выше себестоимости (не ровно ×100, ошибку единиц по признаку не поймать), отказ PRICE_ABOVE_COST_ANCHOR. Третий: себестоимость не объявлена, одно чужое предложение, истории нет — сверить не с чем, отказ NO_PLAUSIBILITY_ANCHOR вместо слепого принятия (слепое пятно холодного старта шага 7).",
+  "tags": [
+    "mandatory:pipeline-cold-start",
+    "pipeline",
+    "input-sanity",
+    "r-49"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "docs/decisions.md#Р-49"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn-seller-0001",
+      "marketplaces": [
+        "de",
+        "at"
+      ]
+    },
+    "credentials": {
+      "seller": {
+        "clientKey": "syn-seller-client-key-0001",
+        "secretKey": "syn-seller-secret-key-0001"
+      }
+    },
+    "secrets": [
+      "wh_tok_synthetic_0007"
+    ],
+    "pricing": {
+      "scopes": [
+        {
+          "writeScopeId": "ws-price-de-4201",
+          "productId": "prod-4201",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "4201",
+          "channelProductRef": "362100001",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": null,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-4201"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-4201"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-4201-v1",
+            "unitCostMinor": 1000,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-4202",
+          "productId": "prod-4202",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "4202",
+          "channelProductRef": "362100002",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": null,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-4202"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-4202"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-4202-v1",
+            "unitCostMinor": 1000,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-4203",
+          "productId": "prod-4203",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "4203",
+          "channelProductRef": "362100003",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": null,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-4203"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-4203"
+          }
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "poll-new-products",
+      "kind": "pipelinePoll",
+      "queries": [
+        {
+          "marketplace": "de",
+          "channelProductRef": "362100001",
+          "condition": "new"
+        },
+        {
+          "marketplace": "de",
+          "channelProductRef": "362100002",
+          "condition": "new"
+        },
+        {
+          "marketplace": "de",
+          "channelProductRef": "362100003",
+          "condition": "new"
+        }
+      ],
+      "expect": {
+        "failures": [],
+        "snapshots": [
+          {
+            "channelProductRef": "362100001",
+            "verdict": "ACCEPT",
+            "anchorsUsed": [
+              "COST"
+            ],
+            "warnings": [],
+            "engineInvocations": 1,
+            "scopes": [
+              {
+                "writeScopeId": "ws-price-de-4201",
+                "decision": {
+                  "outcome": "APPROVED",
+                  "finalMinor": 1775
+                }
+              }
+            ]
+          },
+          {
+            "channelProductRef": "362100002",
+            "verdict": "REJECT",
+            "alarmClass": "OUTLIER",
+            "engineInvocations": 0,
+            "reason": {
+              "code": "PRICE_ABOVE_COST_ANCHOR",
+              "params": {
+                "field": "buybox",
+                "valueMinor": 178000,
+                "costMinor": 1000
+              }
+            }
+          },
+          {
+            "channelProductRef": "362100003",
+            "verdict": "REJECT",
+            "alarmClass": "ANCHOR_MISSING",
+            "engineInvocations": 0,
+            "reason": {
+              "code": "NO_PLAUSIBILITY_ANCHOR"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "buybox-362100001",
+      "request": {
+        "method": "GET",
+        "path": "/v2/buybox",
+        "query": {
+          "id_product": "362100001",
+          "storefront": "de",
+          "condition": "new",
+          "limit": "10"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": {
+            "id_product": 362100001,
+            "condition": "new",
+            "storefront": "de",
+            "num_units": 2,
+            "units": [
+              {
+                "buybox_rank": 1,
+                "seller": "Synthetic Competitor",
+                "price": 17.8,
+                "delivery_time_min": 1,
+                "delivery_time_max": 2,
+                "shipping_rate": 0,
+                "fulfillment_type": "fulfilled_by_merchant",
+                "condition": "new"
+              },
+              {
+                "buybox_rank": 2,
+                "seller": "Synthetic Seller",
+                "price": 18.5,
+                "delivery_time_min": 1,
+                "delivery_time_max": 2,
+                "shipping_rate": 0,
+                "fulfillment_type": "fulfilled_by_merchant",
+                "condition": "new",
+                "id_unit": 4201,
+                "id_offer": "SYN-OFFER-4201"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "buybox-362100002",
+      "request": {
+        "method": "GET",
+        "path": "/v2/buybox",
+        "query": {
+          "id_product": "362100002",
+          "storefront": "de",
+          "condition": "new",
+          "limit": "10"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": {
+            "id_product": 362100002,
+            "condition": "new",
+            "storefront": "de",
+            "num_units": 2,
+            "units": [
+              {
+                "buybox_rank": 1,
+                "seller": "Synthetic Competitor",
+                "price": 1780,
+                "delivery_time_min": 1,
+                "delivery_time_max": 2,
+                "shipping_rate": 0,
+                "fulfillment_type": "fulfilled_by_merchant",
+                "condition": "new"
+              },
+              {
+                "buybox_rank": 2,
+                "seller": "Synthetic Seller",
+                "price": 1850,
+                "delivery_time_min": 1,
+                "delivery_time_max": 2,
+                "shipping_rate": 0,
+                "fulfillment_type": "fulfilled_by_merchant",
+                "condition": "new",
+                "id_unit": 4202,
+                "id_offer": "SYN-OFFER-4202"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "buybox-362100003",
+      "request": {
+        "method": "GET",
+        "path": "/v2/buybox",
+        "query": {
+          "id_product": "362100003",
+          "storefront": "de",
+          "condition": "new",
+          "limit": "10"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": {
+            "id_product": 362100003,
+            "condition": "new",
+            "storefront": "de",
+            "num_units": 2,
+            "units": [
+              {
+                "buybox_rank": 1,
+                "seller": "Synthetic Competitor",
+                "price": 17.8,
+                "delivery_time_min": 1,
+                "delivery_time_max": 2,
+                "shipping_rate": 0,
+                "fulfillment_type": "fulfilled_by_merchant",
+                "condition": "new"
+              },
+              {
+                "buybox_rank": 2,
+                "seller": "Synthetic Seller",
+                "price": 18.5,
+                "delivery_time_min": 1,
+                "delivery_time_max": 2,
+                "shipping_rate": 0,
+                "fulfillment_type": "fulfilled_by_merchant",
+                "condition": "new",
+                "id_unit": 4203,
+                "id_offer": "SYN-OFFER-4203"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "patch-4201-1775",
+      "request": {
+        "method": "PATCH",
+        "path": "/v2/units/4201",
+        "query": {
+          "storefront": "de"
+        },
+        "body": {
+          "listing_price": 1775
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": {
+            "id_unit": 4201,
+            "storefront": "de",
+            "currency": "EUR",
+            "listing_price": 1775,
+            "price": 1775,
+            "amount": 5,
+            "id_offer": "SYN-OFFER-4201",
+            "is_live": true,
+            "date_lastchange_iso": "2026-09-14T10:00:00Z"
+          }
+        }
+      }
+    }
+  ],
+  "expect": {
+    "alerts": [
+      {
+        "code": "COMPETITOR_SNAPSHOT_REJECTED",
+        "severity": "WARNING",
+        "count": 2
+      },
+      {
+        "code": "COMPETITOR_UNIT_SCALE_SUSPECT",
+        "count": 0
+      }
+    ],
+    "pipeline": {
+      "rejectedSnapshots": [
+        {
+          "reasonCode": "PRICE_ABOVE_COST_ANCHOR",
+          "alarmClass": "OUTLIER"
+        },
+        {
+          "reasonCode": "NO_PLAUSIBILITY_ANCHOR",
+          "alarmClass": "ANCHOR_MISSING"
+        }
+      ],
+      "writes": [
+        {
+          "writeScopeId": "ws-price-de-4201",
+          "amountMinor": 1775,
+          "status": "APPLIED"
+        }
+      ]
+    }
+  }
+}

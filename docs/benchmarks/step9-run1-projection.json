@@ -1,0 +1,558 @@
+{
+  "format": "repracer.bench/decision-path/v2",
+  "startedFor": "step-9",
+  "environment": {
+    "node": "v22.22.3",
+    "cpu": "Apple M1",
+    "cores": 8,
+    "memoryGb": 8,
+    "postgres": "PostgreSQL 16.13 (Homebrew) on aarch64-apple-darwin22.5.0, compiled by Apple clang version 14.0.3 (clang-1403.0.22.14.1), 64-bit",
+    "settings": [
+      {
+        "name": "fsync",
+        "setting": "on",
+        "unit": null
+      },
+      {
+        "name": "max_connections",
+        "setting": "100",
+        "unit": null
+      },
+      {
+        "name": "max_wal_size",
+        "setting": "1024",
+        "unit": "MB"
+      },
+      {
+        "name": "shared_buffers",
+        "setting": "16384",
+        "unit": "8kB"
+      },
+      {
+        "name": "synchronous_commit",
+        "setting": "on",
+        "unit": null
+      },
+      {
+        "name": "work_mem",
+        "setting": "4096",
+        "unit": "kB"
+      }
+    ]
+  },
+  "workload": {
+    "skus": 10000,
+    "storefronts": 2,
+    "scopes": 20000,
+    "changedShare": 0.1,
+    "baseRatePerSecond": 18.47,
+    "peakRatePerSecond": 184.72,
+    "secondsPerRun": 15,
+    "shiftWindow": "projection"
+  },
+  "timings": {
+    "seed": {
+      "totalSeconds": 11.5,
+      "steps": {
+        "user": 0,
+        "tenant": 0.01,
+        "membership": 0,
+        "account": 0,
+        "strategy": 0,
+        "products": 0.11,
+        "scopePlan": 0.02,
+        "writeScopes": 1.15,
+        "offerMappings": 0.91,
+        "minPrices": 1.8,
+        "maxPrices": 1.85,
+        "costProfiles": 0.76,
+        "feeEstimates": 0.12,
+        "observedState": 0.14,
+        "competitorState": 0.25,
+        "competitorDaily20d": 3.85
+      }
+    },
+    "enableEngine": {
+      "scopes": 20000,
+      "updateSeconds": 1.31,
+      "commitSecondsDeferredChecks": 0.75
+    },
+    "moveWindowBaseSeedSeconds": 1.19,
+    "baseWindowProducts": 4999,
+    "baseEvaluationContextMs": {
+      "p50": 6.29,
+      "p95": 9.08
+    },
+    "moveWindowPeakSeedSeconds": 9.12,
+    "peakWindowProducts": 6073,
+    "peakEvaluationContextMs": {
+      "p50": 7.25,
+      "p95": 9.15
+    }
+  },
+  "results": [
+    {
+      "phase": "commit",
+      "name": "decision commit (+10% write, dispatch) W=1",
+      "params": {
+        "changedShare": 0.1,
+        "pool": 1,
+        "workers": 1
+      },
+      "seconds": 15.02,
+      "ops": 6629,
+      "throughput": 441.3399150392367,
+      "p50": 1.8589590000010503,
+      "p95": 4.9707500000004075,
+      "p99": 5.64587500000016,
+      "max": 37.71520899999996,
+      "errors": {},
+      "eventLoopUtilization": 0.14,
+      "waits": {
+        "CPU": 0.94,
+        "Client:ClientRead": 0.04,
+        "idle in transaction": 0.01,
+        "IO:DataFileWrite": 0,
+        "IO:WALInitSync": 0
+      }
+    },
+    {
+      "phase": "commit",
+      "name": "decision commit (+10% write, dispatch) W=4",
+      "params": {
+        "changedShare": 0.1,
+        "pool": 4,
+        "workers": 4
+      },
+      "seconds": 15.02,
+      "ops": 15063,
+      "throughput": 1002.9660870635935,
+      "p50": 3.2164580000026035,
+      "p95": 8.869375000002037,
+      "p99": 10.921917000006943,
+      "max": 85.20558299999902,
+      "errors": {},
+      "eventLoopUtilization": 0.43,
+      "waits": {
+        "CPU": 2.9,
+        "Client:ClientRead": 0.76,
+        "idle in transaction": 0.19,
+        "IO:WALWrite": 0.08,
+        "idle": 0.05,
+        "LWLock:WALWrite": 0.01
+      }
+    },
+    {
+      "phase": "commit",
+      "name": "decision commit (+10% write, dispatch) W=8",
+      "params": {
+        "changedShare": 0.1,
+        "pool": 8,
+        "workers": 8
+      },
+      "seconds": 15.04,
+      "ops": 17274,
+      "throughput": 1148.2725612636211,
+      "p50": 5.761625000006461,
+      "p95": 15.30937499999709,
+      "p99": 19.366416000004392,
+      "max": 110.16991599999892,
+      "errors": {},
+      "eventLoopUtilization": 0.95,
+      "waits": {
+        "CPU": 4.66,
+        "Client:ClientRead": 2.76,
+        "idle in transaction": 0.27,
+        "IO:WALWrite": 0.12,
+        "idle": 0.12,
+        "LWLock:WALWrite": 0.02,
+        "LWLock:LockManager": 0.01,
+        "IO:DataFileExtend": 0,
+        "LWLock:WALInsert": 0
+      }
+    },
+    {
+      "phase": "commit",
+      "name": "decision commit (+10% write, dispatch) W=16",
+      "params": {
+        "changedShare": 0.1,
+        "pool": 16,
+        "workers": 16
+      },
+      "seconds": 15.03,
+      "ops": 16826,
+      "throughput": 1119.478361874563,
+      "p50": 11.810750000004191,
+      "p95": 29.713916000007885,
+      "p99": 45.2453749999986,
+      "max": 165.0391249999957,
+      "errors": {},
+      "eventLoopUtilization": 0.98,
+      "waits": {
+        "Client:ClientRead": 10.02,
+        "CPU": 4.96,
+        "idle in transaction": 0.37,
+        "LWLock:WALWrite": 0.17,
+        "idle": 0.14,
+        "LWLock:LockManager": 0.11,
+        "IO:WALWrite": 0.09,
+        "LWLock:BufferContent": 0.04,
+        "LWLock:WALInsert": 0.01,
+        "IO:DataFileExtend": 0.01,
+        "LWLock:XidGen": 0,
+        "Lock:transactionid": 0,
+        "IO:WALInitWrite": 0
+      }
+    },
+    {
+      "phase": "sweep",
+      "name": "decision commit open rate=18.47",
+      "params": {
+        "pool": 32,
+        "changedShare": 0.1,
+        "targetRate": 18.47
+      },
+      "seconds": 9.97,
+      "ops": 185,
+      "throughput": 18.564935192033495,
+      "p50": 5.948474624063238,
+      "p95": 20.487510045117233,
+      "p99": 76.70903354136681,
+      "max": 76.92818738346978,
+      "errors": {},
+      "eventLoopUtilization": 0.04,
+      "waits": {
+        "Client:ClientRead": 1.18,
+        "CPU": 0.09,
+        "idle in transaction": 0.01,
+        "IO:WALWrite": 0.01
+      },
+      "extra": {
+        "maxInFlight": 2
+      }
+    },
+    {
+      "phase": "sweep",
+      "name": "decision commit open rate=184.72",
+      "params": {
+        "pool": 32,
+        "changedShare": 0.1,
+        "targetRate": 184.72
+      },
+      "seconds": 9.99,
+      "ops": 1847,
+      "throughput": 184.79815785151985,
+      "p50": 2.3902337293257006,
+      "p95": 6.127697075193282,
+      "p99": 7.91803947367589,
+      "max": 27.645201127816108,
+      "errors": {},
+      "eventLoopUtilization": 0.08,
+      "waits": {
+        "Client:ClientRead": 2.66,
+        "CPU": 0.38,
+        "idle in transaction": 0.06
+      },
+      "extra": {
+        "maxInFlight": 4
+      }
+    },
+    {
+      "phase": "sweep",
+      "name": "decision commit open rate=400",
+      "params": {
+        "pool": 32,
+        "changedShare": 0.1,
+        "targetRate": 400
+      },
+      "seconds": 10,
+      "ops": 4000,
+      "throughput": 400.02958054736035,
+      "p50": 1.6272080000053393,
+      "p95": 5.135416000004625,
+      "p99": 6.85587499999383,
+      "max": 30.88629100000253,
+      "errors": {},
+      "eventLoopUtilization": 0.13,
+      "waits": {
+        "Client:ClientRead": 6.6,
+        "CPU": 0.74,
+        "idle in transaction": 0.05,
+        "LWLock:WALWrite": 0.02,
+        "IO:WALWrite": 0.02
+      },
+      "extra": {
+        "maxInFlight": 8
+      }
+    },
+    {
+      "phase": "sweep",
+      "name": "decision commit open rate=800",
+      "params": {
+        "pool": 32,
+        "changedShare": 0.1,
+        "targetRate": 800
+      },
+      "seconds": 10,
+      "ops": 8000,
+      "throughput": 799.8193540803986,
+      "p50": 2.606374999988475,
+      "p95": 94.87083399998664,
+      "p99": 168.0633749999979,
+      "max": 381.77666699999827,
+      "errors": {},
+      "eventLoopUtilization": 0.45,
+      "waits": {
+        "Client:ClientRead": 26.59,
+        "CPU": 2.97,
+        "idle in transaction": 0.42,
+        "LWLock:LockManager": 0.11,
+        "LWLock:WALWrite": 0.06,
+        "IO:WALWrite": 0.05,
+        "idle": 0.03,
+        "null": 0.01,
+        "LWLock:ProcArray": 0.01,
+        "LWLock:BufferContent": 0.01,
+        "IO:DataFileExtend": 0.01
+      },
+      "extra": {
+        "maxInFlight": 133
+      }
+    },
+    {
+      "phase": "sweep",
+      "name": "decision commit open rate=1200",
+      "params": {
+        "pool": 32,
+        "changedShare": 0.1,
+        "targetRate": 1200
+      },
+      "seconds": 17.86,
+      "ops": 12000,
+      "throughput": 671.9458167405963,
+      "p50": 1614.3882086666708,
+      "p95": 7510.321000333337,
+      "p99": 10026.120083333328,
+      "max": 10969.669041999994,
+      "errors": {},
+      "eventLoopUtilization": 0.98,
+      "waits": {
+        "Client:ClientRead": 22.25,
+        "CPU": 7.37,
+        "idle in transaction": 0.88,
+        "LWLock:LockManager": 0.43,
+        "LWLock:WALWrite": 0.34,
+        "LWLock:WALInsert": 0.26,
+        "idle": 0.17,
+        "IO:WALWrite": 0.13,
+        "LWLock:BufferContent": 0.12,
+        "Lock:transactionid": 0.03,
+        "LWLock:ProcArray": 0.01,
+        "LWLock:XidGen": 0.01,
+        "IO:DataFileExtend": 0,
+        "IPC:ProcArrayGroupUpdate": 0
+      },
+      "extra": {
+        "maxInFlight": 3980
+      }
+    },
+    {
+      "phase": "path",
+      "name": "full evaluation closed W=16 (base window, projection)",
+      "params": {
+        "movesPerHour": 66500,
+        "shiftWindow": "projection",
+        "workers": 16
+      },
+      "seconds": 15.05,
+      "ops": 4556,
+      "throughput": 302.8153167233886,
+      "p50": 43.18279099999927,
+      "p95": 132.98112499999115,
+      "p99": 166.94341600002372,
+      "max": 314.0561250000028,
+      "errors": {},
+      "eventLoopUtilization": 0.98,
+      "waits": {
+        "Client:ClientRead": 7.61,
+        "CPU": 7.52,
+        "idle in transaction": 0.36,
+        "IO:DataFileRead": 0.12,
+        "LWLock:LockManager": 0.11,
+        "IO:WALWrite": 0.06,
+        "IO:DataFileWrite": 0.05,
+        "idle": 0.04,
+        "LWLock:BufferContent": 0.03,
+        "LWLock:WALWrite": 0.03,
+        "LWLock:WALInsert": 0.01,
+        "IO:DataFileExtend": 0.01,
+        "LWLock:BufferMapping": 0
+      },
+      "extra": {
+        "transactionsPerEvaluation": 2.37,
+        "storeCallsPerEvaluation": {
+          "loadEvaluationContext": 1,
+          "commitEvaluation": 1,
+          "recordDispatch": 0.37
+        },
+        "storeMsPerEvaluation": {
+          "commitEvaluation": 29.58,
+          "loadEvaluationContext": 19.41,
+          "recordDispatch": 3.47
+        },
+        "verdicts": {
+          "ACCEPT:NO_CHANGE": 2868,
+          "ACCEPT:APPROVED": 1688
+        },
+        "alerts": {}
+      }
+    },
+    {
+      "phase": "path",
+      "name": "full evaluation open base=18.47/s (projection)",
+      "params": {
+        "movesPerHour": 66500,
+        "shiftWindow": "projection",
+        "targetRate": 18.47
+      },
+      "seconds": 14.96,
+      "ops": 277,
+      "throughput": 18.52054442191116,
+      "p50": 13.170681097748457,
+      "p95": 19.16978383460082,
+      "p99": 32.11147838344914,
+      "max": 91.17949876692728,
+      "errors": {},
+      "eventLoopUtilization": 0.03,
+      "waits": {
+        "Client:ClientRead": 10.87,
+        "CPU": 0.2,
+        "IO:DataFileRead": 0.01,
+        "idle in transaction": 0.01,
+        "IO:WALWrite": 0
+      },
+      "extra": {
+        "maxInFlight": 2,
+        "transactionsPerEvaluation": 2.36,
+        "storeCallsPerEvaluation": {
+          "loadEvaluationContext": 1,
+          "commitEvaluation": 1,
+          "recordDispatch": 0.36
+        },
+        "storeMsPerEvaluation": {
+          "loadEvaluationContext": 7.53,
+          "commitEvaluation": 5.93,
+          "recordDispatch": 0.45
+        },
+        "verdicts": {
+          "ACCEPT:NO_CHANGE": 178,
+          "ACCEPT:APPROVED": 99
+        },
+        "alerts": {}
+      }
+    },
+    {
+      "phase": "path",
+      "name": "full evaluation closed W=16 (peak window, projection)",
+      "params": {
+        "movesPerHour": 665000,
+        "shiftWindow": "projection",
+        "workers": 16
+      },
+      "seconds": 15.07,
+      "ops": 4187,
+      "throughput": 277.78391385879513,
+      "p50": 43.116957999998704,
+      "p95": 144.64412499999162,
+      "p99": 171.73791699999128,
+      "max": 224.58245899999747,
+      "errors": {},
+      "eventLoopUtilization": 0.95,
+      "waits": {
+        "CPU": 9.12,
+        "Client:ClientRead": 6.05,
+        "idle in transaction": 0.3,
+        "IO:DataFileRead": 0.16,
+        "idle": 0.08,
+        "LWLock:BufferMapping": 0.06,
+        "IPC:BufferIO": 0.05,
+        "LWLock:LockManager": 0.05,
+        "LWLock:WALWrite": 0.05,
+        "IO:WALWrite": 0.04,
+        "LWLock:BufferContent": 0.02,
+        "IO:DataFileWrite": 0.01,
+        "IO:WALInitWrite": 0,
+        "IO:DataFileExtend": 0
+      },
+      "extra": {
+        "transactionsPerEvaluation": 2.31,
+        "storeCallsPerEvaluation": {
+          "loadEvaluationContext": 1,
+          "commitEvaluation": 1,
+          "recordDispatch": 0.31
+        },
+        "storeMsPerEvaluation": {
+          "loadEvaluationContext": 28.77,
+          "commitEvaluation": 25.93,
+          "recordDispatch": 2.46
+        },
+        "verdicts": {
+          "ACCEPT:APPROVED": 1297,
+          "ACCEPT:NO_CHANGE": 2890
+        },
+        "alerts": {}
+      }
+    },
+    {
+      "phase": "path",
+      "name": "full evaluation open peak=184.72/s (projection)",
+      "params": {
+        "movesPerHour": 665000,
+        "shiftWindow": "projection",
+        "targetRate": 184.72
+      },
+      "seconds": 15.01,
+      "ops": 2771,
+      "throughput": 184.56714958863182,
+      "p50": 15.018948954879306,
+      "p95": 49.94558458647225,
+      "p99": 169.53470676692086,
+      "max": 415.00721052629524,
+      "errors": {},
+      "eventLoopUtilization": 0.29,
+      "waits": {
+        "Client:ClientRead": 20.22,
+        "CPU": 2.99,
+        "idle in transaction": 0.11,
+        "LWLock:LockManager": 0.07,
+        "IO:DataFileRead": 0.06,
+        "idle": 0.02,
+        "IPC:BufferIO": 0.02,
+        "IO:WALWrite": 0.01,
+        "IO:DataFileWrite": 0.01,
+        "IO:DataFileExtend": 0,
+        "LWLock:BufferMapping": 0,
+        "LWLock:BufferContent": 0
+      },
+      "extra": {
+        "maxInFlight": 40,
+        "transactionsPerEvaluation": 2.28,
+        "storeCallsPerEvaluation": {
+          "loadEvaluationContext": 1,
+          "commitEvaluation": 1,
+          "recordDispatch": 0.28
+        },
+        "storeMsPerEvaluation": {
+          "loadEvaluationContext": 12.58,
+          "commitEvaluation": 9.1,
+          "recordDispatch": 0.8
+        },
+        "verdicts": {
+          "ACCEPT:NO_CHANGE": 1987,
+          "ACCEPT:APPROVED": 784
+        },
+        "alerts": {}
+      }
+    }
+  ]
+}

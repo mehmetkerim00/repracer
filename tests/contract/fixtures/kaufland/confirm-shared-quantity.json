@@ -1,0 +1,91 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "kaufland/confirm/shared-quantity-across-storefronts",
+  "channel": "KAUFLAND",
+  "apiVersion": "2.44.0",
+  "title": "Подтверждение остатка по id_offer на обеих витринах",
+  "description": "Р-35: остаток общий для unit с одним id_offer на de и at. Запись шла через unit на de; подтверждение читает все unit с этим id_offer [KFL_C14]. Сначала at ещё показывает старое значение и не в продаже: адаптер запрашивает причины через /units/status (только для not-live, KFL_C16) и возвращает PENDING. Через 30 с обе витрины совпадают — APPLIED.",
+  "tags": ["confirm", "quantity", "conservative:KFL_C14", "conservative:KFL_C16", "conservative:KFL_C08"],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": ["https://sellerapi.kaufland.com/?page=inventory", "vendor/kaufland/seller-api-v2/2026-09-14/openapi.json#GET /units", "vendor/kaufland/seller-api-v2/2026-09-14/openapi.json#POST /units/status"]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": { "externalAccountId": "syn-seller-0001", "marketplaces": ["de", "at"] },
+    "credentials": { "seller": { "clientKey": "syn-seller-client-key-0001", "secretKey": "syn-seller-secret-key-0001" } },
+    "adapter": { "confirmationWindowMs": 600000 }
+  },
+  "steps": [
+    {
+      "id": "confirm-while-propagating",
+      "kind": "call",
+      "method": "confirm",
+      "args": [
+        [
+          {
+            "channelWriteId": "cw-0601",
+            "writeScope": { "writeScopeId": "ws-qty-SYN-OFFER-6001", "field": "QUANTITY", "scopeKey": "kaufland|acct-1|SYN-OFFER-6001", "identity": { "marketplace": "de", "externalUnitId": "6001", "externalOfferId": "SYN-OFFER-6001" } },
+            "expected": { "field": "QUANTITY", "quantity": 9 },
+            "dispatchedAt": { "$clockIso": -20000 }
+          }
+        ]
+      ],
+      "expect": [{ "channelWriteId": "cw-0601", "status": "PENDING", "checkAfter": { "$clockIso": 30000 } }]
+    },
+    { "id": "wait", "kind": "advanceClock", "ms": 30000 },
+    {
+      "id": "confirm-after-propagation",
+      "kind": "call",
+      "method": "confirm",
+      "args": [
+        [
+          {
+            "channelWriteId": "cw-0601",
+            "writeScope": { "writeScopeId": "ws-qty-SYN-OFFER-6001", "field": "QUANTITY", "scopeKey": "kaufland|acct-1|SYN-OFFER-6001", "identity": { "marketplace": "de", "externalUnitId": "6001", "externalOfferId": "SYN-OFFER-6001" } },
+            "expected": { "field": "QUANTITY", "quantity": 9 },
+            "dispatchedAt": "2026-09-14T09:59:40.000Z"
+          }
+        ]
+      ],
+      "expect": [{ "channelWriteId": "cw-0601", "status": "APPLIED", "observation": { "field": "QUANTITY", "value": { "quantity": 9 }, "identity": { "marketplace": "de" } } }]
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "units-de-1",
+      "request": { "method": "GET", "path": "/v2/units", "query": { "storefront": "de", "id_offer": "SYN-OFFER-6001", "limit": "100" } },
+      "response": { "status": 200, "body": { "data": [{ "id_unit": 6001, "storefront": "de", "currency": "EUR", "listing_price": 1500, "price": 1500, "amount": 9, "id_offer": "SYN-OFFER-6001", "is_live": true }], "pagination": { "offset": 0, "limit": 100, "total": 1 } } }
+    },
+    {
+      "id": "units-at-1",
+      "request": { "method": "GET", "path": "/v2/units", "query": { "storefront": "at", "id_offer": "SYN-OFFER-6001", "limit": "100" } },
+      "response": { "status": 200, "body": { "data": [{ "id_unit": 6002, "storefront": "at", "currency": "EUR", "listing_price": 1550, "price": 1550, "amount": 0, "id_offer": "SYN-OFFER-6001", "is_live": false }], "pagination": { "offset": 0, "limit": 100, "total": 1 } } }
+    },
+    {
+      "id": "status-at",
+      "request": { "method": "POST", "path": "/v2/units/status", "query": { "storefront": "at" }, "body": { "unit_ids": [6002] } },
+      "response": { "status": 200, "body": { "data": [{ "id_unit": 6002, "status_code": 200, "is_live": false, "reasons": [{ "reason": "stock_update_needed", "reason_description": "Synthetic description", "details_url": "https://example.invalid/help" }] }] } }
+    },
+    {
+      "id": "units-de-2",
+      "request": { "method": "GET", "path": "/v2/units", "query": { "storefront": "de", "id_offer": "SYN-OFFER-6001", "limit": "100" } },
+      "response": { "status": 200, "body": { "data": [{ "id_unit": 6001, "storefront": "de", "currency": "EUR", "listing_price": 1500, "price": 1500, "amount": 9, "id_offer": "SYN-OFFER-6001", "is_live": true }] } }
+    },
+    {
+      "id": "units-at-2",
+      "request": { "method": "GET", "path": "/v2/units", "query": { "storefront": "at", "id_offer": "SYN-OFFER-6001", "limit": "100" } },
+      "response": { "status": 200, "body": { "data": [{ "id_unit": 6002, "storefront": "at", "currency": "EUR", "listing_price": 1550, "price": 1550, "amount": 9, "id_offer": "SYN-OFFER-6001", "is_live": true }] } }
+    }
+  ],
+  "expect": {
+    "logs": [
+      { "code": "KFL_C14_SHARED_QUANTITY_PROPAGATION", "count": 1, "question": "K-06", "details": { "idOffer": "SYN-OFFER-6001", "distinctAmounts": 2 } },
+      { "code": "KFL_C16_UNITS_STATUS_ON_DEMAND", "count": 1, "details": { "units": 1 } },
+      { "code": "KFL_C08_CONFIRM_TIME_GRANULARITY", "count": 1 }
+    ],
+    "noAlerts": true
+  }
+}

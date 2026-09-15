@@ -1,0 +1,510 @@
+{
+  "environment": {
+    "node": "v22.22.3",
+    "cpu": "Apple M1",
+    "cores": 8,
+    "memoryGb": 8,
+    "postgres": "PostgreSQL 16.13 (Homebrew) on aarch64-apple-darwin22.5.0, compiled by Apple clang version 14.0.3 (clang-1403.0.22.14.1), 64-bit",
+    "settings": [
+      {
+        "name": "effective_cache_size",
+        "setting": "524288",
+        "unit": "8kB"
+      },
+      {
+        "name": "fsync",
+        "setting": "on",
+        "unit": null
+      },
+      {
+        "name": "max_connections",
+        "setting": "100",
+        "unit": null
+      },
+      {
+        "name": "max_wal_size",
+        "setting": "1024",
+        "unit": "MB"
+      },
+      {
+        "name": "shared_buffers",
+        "setting": "16384",
+        "unit": "8kB"
+      },
+      {
+        "name": "synchronous_commit",
+        "setting": "on",
+        "unit": null
+      },
+      {
+        "name": "wal_level",
+        "setting": "replica",
+        "unit": null
+      },
+      {
+        "name": "work_mem",
+        "setting": "4096",
+        "unit": "kB"
+      }
+    ]
+  },
+  "seed": {
+    "seed": {
+      "totalSeconds": 20.4,
+      "steps": {
+        "user": 0,
+        "tenant": 0,
+        "membership": 0,
+        "account": 0,
+        "strategy": 0,
+        "products": 0.12,
+        "scopePlan": 0.02,
+        "writeScopes": 1.18,
+        "offerMappings": 0.83,
+        "minPrices": 1.91,
+        "maxPrices": 1.95,
+        "costProfiles": 9.31,
+        "feeEstimates": 0.13,
+        "observedState": 0.19,
+        "competitorState": 0.32,
+        "competitorDaily20d": 3.91
+      }
+    },
+    "enableEngine": {
+      "scopes": 20000,
+      "updateSeconds": 4.17,
+      "commitSecondsDeferredChecks": 0.76,
+      "deferredCheckMsPerScope": 0.04
+    }
+  },
+  "bounds": {
+    "singleWriteScopeLevel": [
+      {
+        "label": "ENGINE scope: deferred check + FOR UPDATE product",
+        "meanMs": 1.04,
+        "p50": 0.97,
+        "p95": 1.21
+      },
+      {
+        "label": "OFF scope: no deferred check",
+        "meanMs": 0.53,
+        "p50": 0.52,
+        "p95": 0.61
+      }
+    ],
+    "singleProductLevel": {
+      "label": "PRODUCT level: checks every ENGINE scope of the product (2 storefronts)",
+      "meanMs": 1.06,
+      "p50": 1.03,
+      "p95": 1.25
+    },
+    "bulkOneTransaction": [
+      {
+        "label": "ENGINE scopes",
+        "rows": 2000,
+        "insertMs": 196.28,
+        "commitMs": 74.62,
+        "commitMsPerRow": 0.04,
+        "insertMsPerRow": 0.1
+      },
+      {
+        "label": "OFF scopes",
+        "rows": 500,
+        "insertMs": 50.54,
+        "commitMs": 3.36,
+        "commitMsPerRow": 0.01,
+        "insertMsPerRow": 0.1
+      }
+    ]
+  },
+  "results": [
+    {
+      "phase": "commit",
+      "name": "intent+decision (+10% write) closed W=1",
+      "throughput": 473.46,
+      "p50": 1.85,
+      "p95": 3.22,
+      "p99": 4.25,
+      "errors": 0,
+      "eventLoopUtilization": 0.16,
+      "waits": {
+        "CPU": 0.61,
+        "Client:ClientRead": 0.29,
+        "idle in transaction": 0.08,
+        "idle": 0.01,
+        "IO:DataFileRead": 0,
+        "IO:WALInitWrite": 0
+      }
+    },
+    {
+      "phase": "commit",
+      "name": "intent+decision (+10% write) closed W=2",
+      "throughput": 940.33,
+      "p50": 1.89,
+      "p95": 3.32,
+      "p99": 4.5,
+      "errors": 0,
+      "eventLoopUtilization": 0.25,
+      "waits": {
+        "CPU": 1.35,
+        "Client:ClientRead": 0.5,
+        "idle in transaction": 0.09,
+        "IO:WALWrite": 0.03,
+        "idle": 0.01,
+        "IO:WALInitSync": 0,
+        "LWLock:WALWrite": 0,
+        "IO:DataFileExtend": 0
+      }
+    },
+    {
+      "phase": "commit",
+      "name": "intent+decision (+10% write) closed W=4",
+      "throughput": 1800.55,
+      "p50": 1.88,
+      "p95": 3.66,
+      "p99": 5.5,
+      "errors": 0,
+      "eventLoopUtilization": 0.55,
+      "waits": {
+        "CPU": 2.73,
+        "Client:ClientRead": 0.81,
+        "idle in transaction": 0.31,
+        "IO:WALWrite": 0.06,
+        "idle": 0.04,
+        "LWLock:WALWrite": 0.03,
+        "IO:DataFileExtend": 0.01,
+        "LWLock:LockManager": 0,
+        "IO:WALInitWrite": 0
+      }
+    },
+    {
+      "phase": "commit",
+      "name": "intent+decision (+10% write) closed W=8",
+      "throughput": 1996.26,
+      "p50": 3.67,
+      "p95": 6.47,
+      "p99": 8.55,
+      "errors": 0,
+      "eventLoopUtilization": 0.95,
+      "waits": {
+        "CPU": 4.31,
+        "Client:ClientRead": 2.94,
+        "idle in transaction": 0.41,
+        "IO:WALWrite": 0.1,
+        "idle": 0.08,
+        "LWLock:WALWrite": 0.06,
+        "LWLock:LockManager": 0.04,
+        "LWLock:BufferContent": 0.02,
+        "IO:DataFileExtend": 0.01,
+        "IO:WALInitSync": 0
+      }
+    },
+    {
+      "phase": "commit",
+      "name": "intent+decision (+10% write) closed W=16",
+      "throughput": 1902.06,
+      "p50": 7.84,
+      "p95": 12.48,
+      "p99": 17.02,
+      "errors": 0,
+      "eventLoopUtilization": 0.99,
+      "waits": {
+        "Client:ClientRead": 10.77,
+        "CPU": 4.24,
+        "idle in transaction": 0.53,
+        "LWLock:WALWrite": 0.14,
+        "idle": 0.1,
+        "IO:WALWrite": 0.09,
+        "LWLock:LockManager": 0.05,
+        "Lock:transactionid": 0.01,
+        "LWLock:BufferContent": 0.01,
+        "IO:DataFileExtend": 0.01,
+        "null": 0,
+        "IO:WALInitSync": 0,
+        "LWLock:WALInsert": 0,
+        "LWLock:MultiXactGen": 0
+      }
+    },
+    {
+      "phase": "commit",
+      "name": "intent+decision (+10% write) closed W=32",
+      "throughput": 1610.09,
+      "p50": 17.26,
+      "p95": 32.35,
+      "p99": 92.75,
+      "errors": 0,
+      "eventLoopUtilization": 0.98,
+      "waits": {
+        "Client:ClientRead": 25.31,
+        "CPU": 4.7,
+        "idle in transaction": 0.75,
+        "LWLock:WALWrite": 0.38,
+        "LWLock:LockManager": 0.21,
+        "idle": 0.18,
+        "LWLock:BufferContent": 0.13,
+        "IO:WALWrite": 0.12,
+        "LWLock:WALInsert": 0.05,
+        "LWLock:ProcArray": 0.01,
+        "Lock:transactionid": 0.01,
+        "Lock:extend": 0.01,
+        "IO:WALInitWrite": 0,
+        "IO:DataFileExtend": 0,
+        "IO:WALInitSync": 0,
+        "IO:SLRUWrite": 0,
+        "LWLock:MultiXactGen": 0
+      }
+    },
+    {
+      "phase": "sweep",
+      "name": "intent+decision open rate=18.47",
+      "throughput": 18.56,
+      "p50": 8.06,
+      "p95": 13.41,
+      "p99": 17.65,
+      "errors": 0,
+      "eventLoopUtilization": 0.03,
+      "waits": {
+        "Client:ClientRead": 0.89,
+        "CPU": 0.1,
+        "idle in transaction": 0.01
+      }
+    },
+    {
+      "phase": "sweep",
+      "name": "intent+decision open rate=184.72",
+      "throughput": 184.75,
+      "p50": 2.43,
+      "p95": 10.28,
+      "p99": 114.24,
+      "errors": 0,
+      "eventLoopUtilization": 0.12,
+      "waits": {
+        "Client:ClientRead": 13.29,
+        "CPU": 0.49,
+        "idle in transaction": 0.05,
+        "IO:WALWrite": 0.01,
+        "idle": 0.01,
+        "LWLock:LockManager": 0.01
+      }
+    },
+    {
+      "phase": "sweep",
+      "name": "intent+decision open rate=400",
+      "throughput": 400.04,
+      "p50": 1.7,
+      "p95": 4.9,
+      "p99": 84.2,
+      "errors": 0,
+      "eventLoopUtilization": 0.15,
+      "waits": {
+        "Client:ClientRead": 26.23,
+        "CPU": 1.1,
+        "idle in transaction": 0.1,
+        "LWLock:WALInsert": 0.02,
+        "LWLock:LockManager": 0.02,
+        "IO:WALWrite": 0.01,
+        "LWLock:WALWrite": 0.01
+      }
+    },
+    {
+      "phase": "sweep",
+      "name": "intent+decision open rate=800",
+      "throughput": 799.92,
+      "p50": 1.61,
+      "p95": 87.49,
+      "p99": 183.52,
+      "errors": 0,
+      "eventLoopUtilization": 0.28,
+      "waits": {
+        "Client:ClientRead": 29.88,
+        "CPU": 1.57,
+        "idle in transaction": 0.44,
+        "LWLock:WALWrite": 0.03,
+        "idle": 0.03,
+        "IO:WALWrite": 0.02,
+        "LWLock:BufferContent": 0.02,
+        "LWLock:WALInsert": 0.01,
+        "LWLock:LockManager": 0.01,
+        "LWLock:MultiXactGen": 0.01
+      }
+    },
+    {
+      "phase": "sweep",
+      "name": "intent+decision open rate=1200",
+      "throughput": 1199.89,
+      "p50": 1.52,
+      "p95": 51.22,
+      "p99": 126.78,
+      "errors": 0,
+      "eventLoopUtilization": 0.36,
+      "waits": {
+        "Client:ClientRead": 29.29,
+        "CPU": 2.02,
+        "idle in transaction": 0.52,
+        "IO:WALWrite": 0.06,
+        "LWLock:WALWrite": 0.06,
+        "idle": 0.02,
+        "LWLock:BufferContent": 0.02,
+        "LWLock:LockManager": 0.01,
+        "IO:WALInitWrite": 0.01,
+        "IO:WALInitSync": 0.01,
+        "LWLock:WALInsert": 0.01
+      }
+    },
+    {
+      "phase": "sweep",
+      "name": "intent+decision open rate=1600",
+      "throughput": 1571.38,
+      "p50": 204.51,
+      "p95": 304.75,
+      "p99": 317.68,
+      "errors": 0,
+      "eventLoopUtilization": 0.88,
+      "waits": {
+        "Client:ClientRead": 26.61,
+        "CPU": 4.07,
+        "idle in transaction": 0.67,
+        "idle": 0.18,
+        "LWLock:BufferContent": 0.13,
+        "LWLock:LockManager": 0.11,
+        "LWLock:WALWrite": 0.1,
+        "IO:WALWrite": 0.08,
+        "LWLock:WALInsert": 0.02,
+        "Lock:transactionid": 0.02,
+        "IO:DataFileExtend": 0.01,
+        "LWLock:XactSLRU": 0.01,
+        "LWLock:ProcArray": 0.01
+      }
+    },
+    {
+      "phase": "sweep",
+      "name": "intent+decision open rate=2400",
+      "throughput": 1688.39,
+      "p50": 2082.89,
+      "p95": 4031.91,
+      "p99": 4186.59,
+      "errors": 0,
+      "eventLoopUtilization": 0.99,
+      "waits": {
+        "Client:ClientRead": 26.03,
+        "CPU": 4.46,
+        "idle in transaction": 0.71,
+        "LWLock:WALWrite": 0.25,
+        "idle": 0.18,
+        "LWLock:LockManager": 0.13,
+        "IO:WALWrite": 0.1,
+        "LWLock:WALInsert": 0.05,
+        "LWLock:BufferContent": 0.05,
+        "IPC:ProcArrayGroupUpdate": 0.01,
+        "LWLock:MultiXactGen": 0,
+        "Lock:transactionid": 0,
+        "IO:DataFileExtend": 0,
+        "LWLock:ProcArray": 0,
+        "LWLock:BufferMapping": 0
+      }
+    },
+    {
+      "phase": "multiproc",
+      "name": "intent+decision closed 2 processes × W=8",
+      "throughput": 1727.85,
+      "p50": 7.31,
+      "p95": 20.65,
+      "p99": 46.48,
+      "errors": 0,
+      "eventLoopUtilization": 0.97,
+      "waits": {
+        "Client:ClientRead": 9.57,
+        "CPU": 5.16,
+        "idle in transaction": 0.65,
+        "LWLock:WALWrite": 0.16,
+        "IO:WALWrite": 0.14,
+        "idle": 0.12,
+        "LWLock:LockManager": 0.06,
+        "LWLock:BufferContent": 0.02,
+        "LWLock:ProcArray": 0.02,
+        "IPC:BufferIO": 0.01,
+        "LWLock:MultiXactGen": 0.01,
+        "IO:DataFileExtend": 0.01,
+        "LWLock:WALInsert": 0.01,
+        "LWLock:WALBufMapping": 0.01,
+        "IPC:ProcArrayGroupUpdate": 0.01,
+        "LWLock:XidGen": 0,
+        "Lock:transactionid": 0
+      }
+    },
+    {
+      "phase": "multiproc",
+      "name": "intent+decision closed 4 processes × W=8",
+      "throughput": 1294.27,
+      "p50": 8.12,
+      "p95": 143.64,
+      "p99": 260.28,
+      "errors": 0,
+      "eventLoopUtilization": 0.93,
+      "waits": {
+        "Client:ClientRead": 21.71,
+        "CPU": 7.11,
+        "idle in transaction": 1.22,
+        "LWLock:LockManager": 0.56,
+        "LWLock:WALWrite": 0.26,
+        "LWLock:WALInsert": 0.26,
+        "LWLock:BufferContent": 0.22,
+        "Lock:extend": 0.14,
+        "idle": 0.12,
+        "IO:WALWrite": 0.11,
+        "Lock:transactionid": 0.09,
+        "IO:DataFileExtend": 0.01,
+        "LWLock:MultiXactGen": 0.01,
+        "LWLock:BufferMapping": 0.01
+      }
+    },
+    {
+      "phase": "partitions",
+      "name": "baseline (5 decision partitions) W=8",
+      "throughput": 1437.38,
+      "p50": 4.94,
+      "p95": 9.24,
+      "p99": 13.3,
+      "errors": 0,
+      "eventLoopUtilization": 0.96,
+      "waits": {
+        "CPU": 4.38,
+        "Client:ClientRead": 2.87,
+        "idle in transaction": 0.4,
+        "IO:WALWrite": 0.15,
+        "idle": 0.08,
+        "LWLock:WALWrite": 0.04,
+        "LWLock:LockManager": 0.02,
+        "LWLock:BufferContent": 0,
+        "Timeout:SpinDelay": 0,
+        "IO:DataFileWrite": 0,
+        "LWLock:ProcArray": 0,
+        "IO:DataFileRead": 0
+      }
+    },
+    {
+      "phase": "partitions",
+      "name": "steady state (empty past partitions) (35 decision partitions) W=8",
+      "throughput": 1635.4,
+      "p50": 4.43,
+      "p95": 8.4,
+      "p99": 10.09,
+      "errors": 0,
+      "eventLoopUtilization": 0.95,
+      "waits": {
+        "CPU": 4.77,
+        "Client:ClientRead": 2.58,
+        "idle in transaction": 0.39,
+        "IO:WALWrite": 0.1,
+        "idle": 0.08,
+        "LWLock:WALWrite": 0.04,
+        "LWLock:LockManager": 0.02,
+        "LWLock:MultiXactGen": 0.01,
+        "LWLock:ProcArray": 0,
+        "Lock:transactionid": 0,
+        "LWLock:WALInsert": 0,
+        "LWLock:BufferContent": 0
+      }
+    }
+  ]
+}

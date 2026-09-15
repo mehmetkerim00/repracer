@@ -1,0 +1,22 @@
+{
+  "name": "@repracer/pricing-pipeline",
+  "version": "0.1.0",
+  "private": true,
+  "description": "End-to-end price decision path: snapshot → input sanity → strategy → intent → Price Gate → write plan → channel adapter. Storage behind a port; in-memory store for the contract stand.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@repracer/channel-port": "0.1.0",
+    "@repracer/input-sanity": "0.1.0",
+    "@repracer/price-gate": "0.1.0",
+    "@repracer/pricing-model": "0.1.0",
+    "@repracer/strategy-engine": "0.1.0",
+    "@repracer/write-dispatcher": "0.1.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test src/*.test.ts"
+  }
+}

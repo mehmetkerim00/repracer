@@ -1,0 +1,644 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "kaufland/pipeline/happy-path",
+  "channel": "KAUFLAND",
+  "apiVersion": "2.44.0",
+  "title": "Сквозной путь: buy_box_changed → проверка входов → стратегия → Gate → запись; затем NO_OP",
+  "description": "Проигрыш Buy Box: снимок принят, стратегия MATCH_BUYBOX предлагает 17.75 (на 5 центов ниже 17.80), Gate одобряет в границах 15.00–25.00, третья проверка границ перед записью проходит, адаптер отправляет PATCH. Следующее уведомление — мы выигрываем Buy Box: intent NO_OP, решение NO_CHANGE, в канал ничего не уходит.",
+  "tags": [
+    "pipeline",
+    "e2e"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "https://sellerapi.kaufland.com/?page=push-notifications#events",
+      "vendor/kaufland/seller-api-v2/2026-09-14/openapi.json#GET /buybox",
+      "docs/decisions.md#Р-42"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn-seller-0001",
+      "marketplaces": [
+        "de",
+        "at"
+      ]
+    },
+    "credentials": {
+      "seller": {
+        "clientKey": "syn-seller-client-key-0001",
+        "secretKey": "syn-seller-secret-key-0001"
+      }
+    },
+    "secrets": [
+      "wh_tok_synthetic_0007"
+    ],
+    "pricing": {
+      "scopes": [
+        {
+          "writeScopeId": "ws-price-de-4101",
+          "productId": "prod-4101",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "4101",
+          "channelProductRef": "362000001",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-4101"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-4101"
+          }
+        }
+      ],
+      "competitorDaily": {
+        "de|362000001|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ]
+      },
+      "competitorState": {
+        "de|362000001|new": {
+          "observedAt": "2026-09-14T09:00:00.000Z",
+          "buyboxMinor": 1795,
+          "lowestMinor": 1795
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "id": "lost-buybox",
+      "kind": "pipelineInbound",
+      "delivery": {
+        "method": "POST",
+        "url": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0007",
+        "headers": {
+          "Shop-Timestamp": {
+            "$clockSeconds": -30
+          },
+          "Shop-Signature": {
+            "$signWith": "seller"
+          }
+        },
+        "body": {
+          "event_name": "buy_box_changed",
+          "resource": "/buybox?id_product=362000001&condition=new",
+          "id_message": "a0000000000000000000000000000001",
+          "storefront": "de",
+          "payload": {
+            "buy_box_change": "lost",
+            "id_product": 362000001,
+            "condition": "new",
+            "timestamp": "2026-09-14T09:59:30Z",
+            "eans": [
+              "2000000000017"
+            ],
+            "winner_offer": {
+              "seller": {
+                "pseudonym": "Synthetic Competitor"
+              },
+              "prices": {
+                "total_price": {
+                  "amount": 1780,
+                  "currency_code": "EUR"
+                },
+                "sales_price": {
+                  "amount": 1780,
+                  "currency_code": "EUR"
+                },
+                "shipping_cost": {
+                  "amount": 0,
+                  "currency_code": "EUR"
+                }
+              },
+              "delivery_time": {
+                "min": 1,
+                "max": 2
+              }
+            },
+            "seller_offer": {
+              "rank": 2,
+              "id_unit": 4101,
+              "id_offer": "SYN-OFFER-4101",
+              "seller": {
+                "pseudonym": "Synthetic Seller"
+              },
+              "prices": {
+                "total_price": {
+                  "amount": 1850,
+                  "currency_code": "EUR"
+                },
+                "sales_price": {
+                  "amount": 1850,
+                  "currency_code": "EUR"
+                },
+                "shipping_cost": {
+                  "amount": 0,
+                  "currency_code": "EUR"
+                },
+                "target_price": {
+                  "amount": 1779,
+                  "currency_code": "EUR"
+                }
+              },
+              "delivery_time": {
+                "min": 1,
+                "max": 3
+              }
+            },
+            "offers": [
+              {
+                "rank": 1,
+                "seller": {
+                  "pseudonym": "Synthetic Competitor"
+                },
+                "prices": {
+                  "total_price": {
+                    "amount": 1780,
+                    "currency_code": "EUR"
+                  },
+                  "sales_price": {
+                    "amount": 1780,
+                    "currency_code": "EUR"
+                  },
+                  "shipping_cost": {
+                    "amount": 0,
+                    "currency_code": "EUR"
+                  }
+                },
+                "delivery_time": {
+                  "min": 1,
+                  "max": 2
+                }
+              },
+              {
+                "rank": 2,
+                "id_unit": 4101,
+                "id_offer": "SYN-OFFER-4101",
+                "seller": {
+                  "pseudonym": "Synthetic Seller"
+                },
+                "prices": {
+                  "total_price": {
+                    "amount": 1850,
+                    "currency_code": "EUR"
+                  },
+                  "sales_price": {
+                    "amount": 1850,
+                    "currency_code": "EUR"
+                  },
+                  "shipping_cost": {
+                    "amount": 0,
+                    "currency_code": "EUR"
+                  }
+                },
+                "delivery_time": {
+                  "min": 1,
+                  "max": 3
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "inbound": {
+          "kind": "EVENTS"
+        },
+        "snapshots": [
+          {
+            "verdict": "ACCEPT",
+            "engineInvocations": 1,
+            "scopes": [
+              {
+                "writeScopeId": "ws-price-de-4101",
+                "stages": [
+                  {
+                    "stage": "SANITY",
+                    "outcome": "ACCEPT"
+                  },
+                  {
+                    "stage": "STRATEGY",
+                    "outcome": "CHANGED",
+                    "reason": {
+                      "code": "BUYBOX_UNDERCUT",
+                      "params": {
+                        "buyboxMinor": 1780,
+                        "undercutMinor": 5,
+                        "targetMinor": 1775
+                      }
+                    }
+                  },
+                  {
+                    "stage": "GATE",
+                    "outcome": "APPROVED",
+                    "reason": {
+                      "code": "APPROVED",
+                      "params": {
+                        "finalMinor": 1775,
+                        "floorMinor": 1500,
+                        "ceilingMinor": 2500
+                      }
+                    }
+                  },
+                  {
+                    "stage": "WRITE_RECHECK",
+                    "outcome": "PASS"
+                  },
+                  {
+                    "stage": "DISPATCH_PLAN",
+                    "outcome": "PLANNED"
+                  },
+                  {
+                    "stage": "DISPATCH",
+                    "outcome": "ACCEPTED"
+                  }
+                ],
+                "intent": {
+                  "intentClass": "CHANGED",
+                  "proposedMinor": 1775,
+                  "referenceMinor": 1780,
+                  "ruleCode": "MATCH_BUYBOX",
+                  "currentMinor": 1850
+                },
+                "decision": {
+                  "outcome": "APPROVED",
+                  "decisionClass": "CHANGED",
+                  "finalMinor": 1775,
+                  "minPriceIds": [
+                    "min-4101"
+                  ],
+                  "maxPriceIds": [
+                    "max-4101"
+                  ],
+                  "rejectionReason": null
+                },
+                "dispatch": {
+                  "status": "ACCEPTED",
+                  "appliedImmediately": true
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "one-minute-later",
+      "kind": "advanceClock",
+      "ms": 60000
+    },
+    {
+      "id": "won-buybox",
+      "kind": "pipelineInbound",
+      "delivery": {
+        "method": "POST",
+        "url": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0007",
+        "headers": {
+          "Shop-Timestamp": {
+            "$clockSeconds": -20
+          },
+          "Shop-Signature": {
+            "$signWith": "seller"
+          }
+        },
+        "body": {
+          "event_name": "buy_box_changed",
+          "resource": "/buybox?id_product=362000001&condition=new",
+          "id_message": "a0000000000000000000000000000002",
+          "storefront": "de",
+          "payload": {
+            "buy_box_change": "won",
+            "id_product": 362000001,
+            "condition": "new",
+            "timestamp": "2026-09-14T10:00:40Z",
+            "eans": [
+              "2000000000017"
+            ],
+            "winner_offer": {
+              "seller": {
+                "pseudonym": "Synthetic Seller"
+              },
+              "prices": {
+                "total_price": {
+                  "amount": 1775,
+                  "currency_code": "EUR"
+                },
+                "sales_price": {
+                  "amount": 1775,
+                  "currency_code": "EUR"
+                },
+                "shipping_cost": {
+                  "amount": 0,
+                  "currency_code": "EUR"
+                }
+              },
+              "delivery_time": {
+                "min": 1,
+                "max": 3
+              }
+            },
+            "seller_offer": {
+              "rank": 1,
+              "id_unit": 4101,
+              "id_offer": "SYN-OFFER-4101",
+              "seller": {
+                "pseudonym": "Synthetic Seller"
+              },
+              "prices": {
+                "total_price": {
+                  "amount": 1775,
+                  "currency_code": "EUR"
+                },
+                "sales_price": {
+                  "amount": 1775,
+                  "currency_code": "EUR"
+                },
+                "shipping_cost": {
+                  "amount": 0,
+                  "currency_code": "EUR"
+                }
+              },
+              "delivery_time": {
+                "min": 1,
+                "max": 3
+              }
+            },
+            "offers": [
+              {
+                "rank": 1,
+                "id_unit": 4101,
+                "id_offer": "SYN-OFFER-4101",
+                "seller": {
+                  "pseudonym": "Synthetic Seller"
+                },
+                "prices": {
+                  "total_price": {
+                    "amount": 1775,
+                    "currency_code": "EUR"
+                  },
+                  "sales_price": {
+                    "amount": 1775,
+                    "currency_code": "EUR"
+                  },
+                  "shipping_cost": {
+                    "amount": 0,
+                    "currency_code": "EUR"
+                  }
+                },
+                "delivery_time": {
+                  "min": 1,
+                  "max": 3
+                }
+              },
+              {
+                "rank": 2,
+                "seller": {
+                  "pseudonym": "Synthetic Competitor"
+                },
+                "prices": {
+                  "total_price": {
+                    "amount": 1780,
+                    "currency_code": "EUR"
+                  },
+                  "sales_price": {
+                    "amount": 1780,
+                    "currency_code": "EUR"
+                  },
+                  "shipping_cost": {
+                    "amount": 0,
+                    "currency_code": "EUR"
+                  }
+                },
+                "delivery_time": {
+                  "min": 1,
+                  "max": 2
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "snapshots": [
+          {
+            "verdict": "ACCEPT",
+            "engineInvocations": 1,
+            "scopes": [
+              {
+                "stages": [
+                  {
+                    "stage": "SANITY",
+                    "outcome": "ACCEPT"
+                  },
+                  {
+                    "stage": "STRATEGY",
+                    "outcome": "NO_OP",
+                    "reason": {
+                      "code": "ALREADY_WINNING_BUYBOX"
+                    }
+                  },
+                  {
+                    "stage": "GATE",
+                    "outcome": "NO_CHANGE"
+                  }
+                ],
+                "decision": {
+                  "decisionClass": "NO_OP",
+                  "finalMinor": null
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "patch-4101-1775",
+      "request": {
+        "method": "PATCH",
+        "path": "/v2/units/4101",
+        "query": {
+          "storefront": "de"
+        },
+        "body": {
+          "listing_price": 1775
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": {
+            "id_unit": 4101,
+            "storefront": "de",
+            "currency": "EUR",
+            "listing_price": 1775,
+            "price": 1775,
+            "amount": 5,
+            "id_offer": "SYN-OFFER-4101",
+            "is_live": true,
+            "date_lastchange_iso": "2026-09-14T10:00:00Z"
+          }
+        }
+      }
+    }
+  ],
+  "expect": {
+    "noAlerts": true,
+    "pipeline": {
+      "scopes": [
+        {
+          "writeScopeId": "ws-price-de-4101",
+          "pricingMode": "ENGINE",
+          "currentPriceMinor": 1775
+        }
+      ],
+      "competitorState": {
+        "de|362000001|new": {
+          "currency": "EUR"
+        }
+      },
+      "writes": [
+        {
+          "writeScopeId": "ws-price-de-4101",
+          "amountMinor": 1775,
+          "version": 1,
+          "status": "APPLIED"
+        }
+      ],
+      "decisions": [
+        {
+          "outcome": "APPROVED"
+        },
+        {
+          "outcome": "NO_CHANGE",
+          "decisionClass": "NO_OP"
+        }
+      ],
+      "rejectedSnapshots": [],
+      "halts": []
+    }
+  }
+}

@@ -1,0 +1,16 @@
+✔ Р-83 control: with nothing changed the queued write goes out after the in-flight one (737.021291ms)
+✔ Р-83: the unit cost rose between decision and dispatch — the margin floor blocks the write (28.090583ms)
+✔ Р-83: the VAT rate rose between decision and dispatch — the margin floor blocks the write (29.661542ms)
+✔ Р-83: the ECB rate changed between decision and dispatch — the converted cost blocks the write (24.195334ms)
+✔ Р-83: min_price rose between decision and dispatch — the absolute floor blocks the write (29.462875ms)
+✔ Р-83: a retry is a dispatch too — the cost rose after a transient channel error, the retry does not go out (17.608833ms)
+✔ Р-83: the cost rose between reading the context and the commit — the decision is not committed and nothing is sent (8.726459ms)
+✔ Р-83: the floor arithmetic in the database equals the code — margin price and cost conversion on 3000 random inputs each (46.647292ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1825.678042

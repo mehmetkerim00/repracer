@@ -1,0 +1,517 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "kaufland/pipeline/halt-review-failed-manual-release",
+  "channel": "KAUFLAND",
+  "apiVersion": "2.44.0",
+  "title": "Выборка при проверке остановки не прошла: остановка продлена; владелец снимает её вручную с заметкой",
+  "description": "Окно проверки истекло, но в свежей выборке один из двух товаров снова пришёл в центах вместо евро (×100): запись SAMPLE_FAILED в журнале, следующая проверка через окно, цены из данных конкурентов по-прежнему заблокированы. Владелец разобрался и снимает остановку вручную — число попыток не ограничено, заметка обязательна [Р-52]. Повторная проверка находит, что проверять нечего.",
+  "tags": [
+    "mandatory:pipeline-halt-manual-release",
+    "pipeline",
+    "r-52"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "docs/decisions.md#Р-52"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn-seller-0001",
+      "marketplaces": [
+        "de",
+        "at"
+      ]
+    },
+    "credentials": {
+      "seller": {
+        "clientKey": "syn-seller-client-key-0001",
+        "secretKey": "syn-seller-secret-key-0001"
+      }
+    },
+    "secrets": [
+      "wh_tok_synthetic_0007"
+    ],
+    "pricing": {
+      "scopes": [
+        {
+          "writeScopeId": "ws-price-de-4101",
+          "productId": "prod-4101",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "4101",
+          "channelProductRef": "362000001",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-4101"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-4101"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-4102",
+          "productId": "prod-4102",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "4102",
+          "channelProductRef": "362000002",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 2450,
+          "minPrice": {
+            "amountMinor": 2000,
+            "id": "min-4102"
+          },
+          "maxPrice": {
+            "amountMinor": 3500,
+            "id": "max-4102"
+          }
+        }
+      ],
+      "competitorDaily": {
+        "de|362000001|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362000002|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          }
+        ]
+      },
+      "competitorState": {
+        "de|362000001|new": {
+          "observedAt": "2026-09-14T09:00:00.000Z",
+          "buyboxMinor": 1795,
+          "lowestMinor": 1795
+        },
+        "de|362000002|new": {
+          "observedAt": "2026-09-14T09:00:00.000Z",
+          "buyboxMinor": 2400,
+          "lowestMinor": 2400
+        }
+      },
+      "halts": [
+        {
+          "marketplace": "de",
+          "haltedAt": "2026-09-14T09:20:00.000Z",
+          "reasonCode": "CHANNEL_MASS_SHIFT",
+          "reviewWindowSeconds": 1800
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "review-due-halt",
+      "kind": "pipelineReviewHalts",
+      "sampleSize": 5,
+      "expect": [
+        {
+          "outcome": "SAMPLE_FAILED",
+          "sampleSize": 2,
+          "failedCount": 1,
+          "snapshots": [],
+          "failures": [
+            {
+              "channelProductRef": "362000001",
+              "reason": "UNIT_SCALE_X100"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "owner-releases-halt",
+      "kind": "pipelineReleaseHalt",
+      "haltIndex": 0,
+      "membershipId": "membership-owner",
+      "note": "Проверено вручную: цены витрины верны, сбой разбора устранён",
+      "expect": {
+        "released": true
+      }
+    },
+    {
+      "id": "next-review-nothing-due",
+      "kind": "pipelineReviewHalts",
+      "sampleSize": 5,
+      "expect": []
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "buybox-362000001-cents",
+      "request": {
+        "method": "GET",
+        "path": "/v2/buybox",
+        "query": {
+          "id_product": "362000001",
+          "storefront": "de",
+          "condition": "new",
+          "limit": "10"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": {
+            "id_product": 362000001,
+            "condition": "new",
+            "storefront": "de",
+            "num_units": 2,
+            "units": [
+              {
+                "buybox_rank": 1,
+                "seller": "Synthetic Competitor",
+                "price": 1780,
+                "delivery_time_min": 1,
+                "delivery_time_max": 2,
+                "shipping_rate": 0,
+                "fulfillment_type": "fulfilled_by_merchant",
+                "condition": "new"
+              },
+              {
+                "buybox_rank": 2,
+                "seller": "Synthetic Seller",
+                "price": 1850,
+                "delivery_time_min": 1,
+                "delivery_time_max": 2,
+                "shipping_rate": 0,
+                "fulfillment_type": "fulfilled_by_merchant",
+                "condition": "new",
+                "id_unit": 4101,
+                "id_offer": "SYN-OFFER-4101"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "buybox-362000002",
+      "request": {
+        "method": "GET",
+        "path": "/v2/buybox",
+        "query": {
+          "id_product": "362000002",
+          "storefront": "de",
+          "condition": "new",
+          "limit": "10"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": {
+            "id_product": 362000002,
+            "condition": "new",
+            "storefront": "de",
+            "num_units": 2,
+            "units": [
+              {
+                "buybox_rank": 1,
+                "seller": "Synthetic Competitor",
+                "price": 23.9,
+                "delivery_time_min": 1,
+                "delivery_time_max": 2,
+                "shipping_rate": 0,
+                "fulfillment_type": "fulfilled_by_merchant",
+                "condition": "new"
+              },
+              {
+                "buybox_rank": 2,
+                "seller": "Synthetic Seller",
+                "price": 24.5,
+                "delivery_time_min": 1,
+                "delivery_time_max": 2,
+                "shipping_rate": 0,
+                "fulfillment_type": "fulfilled_by_merchant",
+                "condition": "new",
+                "id_unit": 4102,
+                "id_offer": "SYN-OFFER-4102"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "expect": {
+    "alerts": [
+      {
+        "code": "PRICING_CHANNEL_RESUMED",
+        "severity": "WARNING",
+        "count": 1,
+        "details": {
+          "kind": "MANUAL"
+        }
+      },
+      {
+        "code": "COMPETITOR_UNIT_SCALE_SUSPECT",
+        "count": 0
+      }
+    ],
+    "logs": [
+      {
+        "code": "HALT_REVIEW_FAILED",
+        "count": 1
+      },
+      {
+        "code": "HALT_MANUALLY_RELEASED",
+        "count": 1
+      }
+    ],
+    "pipeline": {
+      "halts": [
+        {
+          "releasedKind": "MANUAL"
+        }
+      ],
+      "haltReviews": [
+        {
+          "kind": "AUTO_SAMPLE",
+          "outcome": "SAMPLE_FAILED",
+          "sampleSize": 2,
+          "failedCount": 1
+        },
+        {
+          "kind": "MANUAL_RELEASE",
+          "outcome": "RELEASED"
+        }
+      ],
+      "intents": [],
+      "decisions": [],
+      "writes": []
+    }
+  }
+}

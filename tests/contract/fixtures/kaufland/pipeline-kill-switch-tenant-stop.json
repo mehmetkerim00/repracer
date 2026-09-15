@@ -1,0 +1,234 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "kaufland/pipeline/kill-switch-tenant-stop",
+  "channel": "KAUFLAND",
+  "apiVersion": "2.44.0",
+  "title": "Kill switch тенанта: фиксированная цена тоже стоит, права по ролям",
+  "description": "Р-69, Р-70, OQ-125: наблюдатель не может остановить цены; оператор останавливает весь тенант. Фиксированная цена 15.00 (не из данных конкурентов) при остановке человеком удерживается с PRICING_STOPPED — в отличие от системной остановки витрины [Р-51]. Оператор не может возобновить остановку тенанта, владелец возобновляет с заметкой, после чего та же цена одобряется и уходит в очередь записей.",
+  "tags": [
+    "pipeline",
+    "price-gate",
+    "r-69",
+    "r-70",
+    "oq-125"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "docs/decisions.md#Р-69",
+      "docs/decisions.md#Р-70"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-15T09:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn-seller-0001",
+      "marketplaces": [
+        "de",
+        "at"
+      ]
+    },
+    "credentials": {
+      "seller": {
+        "clientKey": "syn-seller-client-key-0001",
+        "secretKey": "syn-seller-secret-key-0001"
+      }
+    },
+    "secrets": [
+      "wh_tok_synthetic_0007"
+    ],
+    "pricing": {
+      "scopes": [
+        {
+          "writeScopeId": "ws-price-de-4601",
+          "productId": "prod-4601",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "4601",
+          "channelProductRef": "362004601",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-fixed-1500",
+            "version": 1,
+            "params": {
+              "type": "FIXED",
+              "priceMinor": 1500
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1600,
+          "minPrice": {
+            "amountMinor": 1000,
+            "id": "min-4601"
+          },
+          "maxPrice": {
+            "amountMinor": 5000,
+            "id": "max-4601"
+          }
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "viewer-cannot-stop",
+      "kind": "pricingStop",
+      "op": "stop",
+      "scope": "TENANT",
+      "membershipId": "membership-viewer",
+      "note": "Synthetic stand check of the kill switch",
+      "expect": {
+        "status": "FORBIDDEN"
+      }
+    },
+    {
+      "id": "operator-stops-tenant",
+      "kind": "pricingStop",
+      "op": "stop",
+      "scope": "TENANT",
+      "membershipId": "membership-operator",
+      "note": "Synthetic stand check of the kill switch",
+      "expect": {
+        "status": "STOPPED",
+        "stop": {
+          "scope": "TENANT",
+          "channelAccountId": null
+        }
+      }
+    },
+    {
+      "id": "operator-stops-tenant-again",
+      "kind": "pricingStop",
+      "op": "stop",
+      "scope": "TENANT",
+      "membershipId": "membership-owner",
+      "note": "Synthetic stand check of the kill switch",
+      "expect": {
+        "status": "ALREADY_ACTIVE"
+      }
+    },
+    {
+      "id": "fixed-price-held-by-stop",
+      "kind": "pipelineRecompute",
+      "writeScopeId": "ws-price-de-4601",
+      "trigger": {
+        "type": "COST_CHANGE"
+      },
+      "expect": {
+        "decision": {
+          "outcome": "HELD",
+          "rejectionReason": "PRICING_STOPPED"
+        }
+      }
+    },
+    {
+      "id": "operator-cannot-resume-tenant",
+      "kind": "pricingStop",
+      "op": "release",
+      "stopIndex": 0,
+      "membershipId": "membership-operator",
+      "note": "Operator tries to resume the tenant",
+      "expect": {
+        "status": "FORBIDDEN"
+      }
+    },
+    {
+      "id": "owner-resumes",
+      "kind": "pricingStop",
+      "op": "release",
+      "stopIndex": 0,
+      "membershipId": "membership-owner",
+      "note": "Kill switch checked, resuming",
+      "expect": {
+        "status": "RELEASED"
+      }
+    },
+    {
+      "id": "fixed-price-after-resume",
+      "kind": "pipelineRecompute",
+      "writeScopeId": "ws-price-de-4601",
+      "trigger": {
+        "type": "COST_CHANGE"
+      },
+      "expect": {
+        "decision": {
+          "outcome": "APPROVED",
+          "finalMinor": 1500
+        }
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "patch-4601-1500",
+      "request": {
+        "method": "PATCH",
+        "path": "/v2/units/4601",
+        "query": {
+          "storefront": "de"
+        },
+        "body": {
+          "listing_price": 1500
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": {
+            "id_unit": 4601,
+            "storefront": "de",
+            "currency": "EUR",
+            "listing_price": 1500,
+            "price": 1500,
+            "amount": 5,
+            "id_offer": "SYN-OFFER-4601",
+            "is_live": true,
+            "date_lastchange_iso": "2026-09-15T09:00:00Z"
+          }
+        }
+      }
+    }
+  ],
+  "expect": {
+    "alerts": [
+      {
+        "code": "PRICING_STOPPED_BY_PERSON",
+        "severity": "CRITICAL",
+        "count": 1
+      },
+      {
+        "code": "PRICING_RESUMED_BY_PERSON",
+        "severity": "WARNING",
+        "count": 1
+      }
+    ],
+    "pipeline": {
+      "stops": [
+        {
+          "scope": "TENANT"
+        }
+      ],
+      "decisions": [
+        {
+          "outcome": "HELD",
+          "rejectionReason": "PRICING_STOPPED",
+          "finalMinor": null
+        },
+        {
+          "outcome": "APPROVED",
+          "finalMinor": 1500
+        }
+      ],
+      "writes": [
+        {
+          "amountMinor": 1500
+        }
+      ]
+    }
+  }
+}

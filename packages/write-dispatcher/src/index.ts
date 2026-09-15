@@ -1,0 +1,26 @@
+export {
+  createWriteDispatcher,
+  type ClaimResult,
+  type DispatchStep,
+  type DueKind,
+  type DueScope,
+  type RecordedOutcome,
+  type ScopeDispatchReport,
+  type SweepOptions,
+  type WriteDispatcher,
+  type WriteDispatcherDeps,
+  type WriteQueueStore,
+} from './dispatcher.ts';
+export {
+  backoffMs,
+  coreError,
+  DEFAULT_RETRY_POLICY,
+  channelRefusal,
+  planOutcomeTransition,
+  planReconciliationTransition,
+  sameWriteValue,
+  type OutcomeTransition,
+  type Reconciliation,
+  type RetryPolicy,
+  type WriteReason,
+} from './transitions.ts';

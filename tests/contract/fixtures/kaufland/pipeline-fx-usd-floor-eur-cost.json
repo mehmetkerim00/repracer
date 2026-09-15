@@ -1,0 +1,301 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "kaufland/pipeline/fx-usd-floor-eur-cost",
+  "channel": "KAUFLAND",
+  "apiVersion": "2.44.0",
+  "title": "Пол маржи витрины в USD при себестоимости в EUR: перевод по курсу ЕЦБ, курс хранится в решении",
+  "description": "Себестоимость товара 10.00 EUR хранится в валюте возникновения [Р-61]. Для amazon.com (USD, нетто) она переводится по курсу ЕЦБ 1.1551 за 2026-09-14, загруженному до решения, с округлением вверх: 11.56 USD; пол маржи 20 % при комиссии 15 % — 17.79 USD. Для витрины Kaufland de та же себестоимость без перевода даёт пол 19.15 EUR брутто. Фиксированная цена 15.00 отклонена на обеих; у решения в USD записан курс, у решения в EUR курса нет.",
+  "tags": [
+    "mandatory:pipeline-fx-usd-floor",
+    "pipeline",
+    "price-gate",
+    "r-61"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "docs/decisions.md#Р-61",
+      "docs/decisions.md#Р-63",
+      "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-15T09:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn-seller-0001",
+      "marketplaces": [
+        "de",
+        "at"
+      ]
+    },
+    "credentials": {
+      "seller": {
+        "clientKey": "syn-seller-client-key-0001",
+        "secretKey": "syn-seller-secret-key-0001"
+      }
+    },
+    "secrets": [
+      "wh_tok_synthetic_0007"
+    ],
+    "pricing": {
+      "scopes": [
+        {
+          "writeScopeId": "ws-price-de-4501",
+          "productId": "prod-4501",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "4501",
+          "channelProductRef": "362004501",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-fixed-1500",
+            "version": 1,
+            "params": {
+              "type": "FIXED",
+              "priceMinor": 1500
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1600,
+          "minPrice": {
+            "amountMinor": 1000,
+            "id": "min-4501"
+          },
+          "maxPrice": {
+            "amountMinor": 5000,
+            "id": "max-4501"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-4501-eur-de",
+            "unitCostMinor": 1000,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
+          },
+          "guardrails": {
+            "guardrailIds": [
+              "g-margin-de-4501"
+            ],
+            "minMarginBp": 2000
+          }
+        },
+        {
+          "writeScopeId": "ws-price-us-4501",
+          "productId": "prod-4501",
+          "channelAccountId": "20000000-0000-4000-8000-000000000002",
+          "marketplace": "ATVPDKIKX0DER",
+          "externalUnitId": "4502",
+          "channelProductRef": "B0SYNTH4501",
+          "condition": "new",
+          "currency": "USD",
+          "basis": "NET",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-fixed-1500",
+            "version": 1,
+            "params": {
+              "type": "FIXED",
+              "priceMinor": 1500
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1600,
+          "minPrice": {
+            "amountMinor": 1000,
+            "id": "min-4502"
+          },
+          "maxPrice": {
+            "amountMinor": 5000,
+            "id": "max-4502"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-4501-eur-us",
+            "unitCostMinor": 1000,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "SALES_TAX_EXCLUDED"
+            }
+          },
+          "guardrails": {
+            "guardrailIds": [
+              "g-margin-us-4501"
+            ],
+            "minMarginBp": 2000
+          },
+          "taxRegime": "SALES_TAX_EXCLUDED"
+        }
+      ],
+      "accounts": [
+        {
+          "channelAccountId": "20000000-0000-4000-8000-000000000002",
+          "channel": "AMAZON",
+          "region": "NA",
+          "marketplaces": [
+            "ATVPDKIKX0DER"
+          ]
+        }
+      ],
+      "marketplaces": {
+        "ATVPDKIKX0DER": {
+          "currency": "USD",
+          "basis": "NET"
+        }
+      },
+      "fxRates": [
+        {
+          "source": "ECB",
+          "rateDate": "2026-09-14",
+          "base": "EUR",
+          "quote": "USD",
+          "rateMicros": 1155100,
+          "availableFrom": "2026-09-14T15:30:00.000Z"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "recompute-eur-cost-eur-price",
+      "kind": "pipelineRecompute",
+      "writeScopeId": "ws-price-de-4501",
+      "trigger": {
+        "type": "COST_CHANGE"
+      },
+      "expect": {
+        "stages": [
+          {
+            "stage": "STRATEGY",
+            "outcome": "CHANGED",
+            "reason": {
+              "code": "FIXED_PRICE"
+            }
+          },
+          {
+            "stage": "GATE",
+            "outcome": "REJECTED",
+            "reason": {
+              "code": "BELOW_MARGIN_FLOOR",
+              "params": {
+                "proposedMinor": 1500,
+                "floorMinor": 1915
+              }
+            }
+          }
+        ],
+        "decision": {
+          "outcome": "REJECTED",
+          "rejectionReason": "BELOW_MARGIN_FLOOR",
+          "currency": "EUR",
+          "effectiveFloorMinor": 1915,
+          "fx": null
+        }
+      }
+    },
+    {
+      "id": "recompute-eur-cost-usd-price",
+      "kind": "pipelineRecompute",
+      "writeScopeId": "ws-price-us-4501",
+      "trigger": {
+        "type": "COST_CHANGE"
+      },
+      "expect": {
+        "stages": [
+          {
+            "stage": "STRATEGY",
+            "outcome": "CHANGED",
+            "reason": {
+              "code": "FIXED_PRICE"
+            }
+          },
+          {
+            "stage": "GATE",
+            "outcome": "REJECTED",
+            "reason": {
+              "code": "BELOW_MARGIN_FLOOR",
+              "params": {
+                "proposedMinor": 1500,
+                "floorMinor": 1779
+              }
+            }
+          }
+        ],
+        "decision": {
+          "outcome": "REJECTED",
+          "rejectionReason": "BELOW_MARGIN_FLOOR",
+          "currency": "USD",
+          "effectiveFloorMinor": 1779,
+          "fx": {
+            "source": "ECB",
+            "rateDate": "2026-09-14",
+            "base": "EUR",
+            "quote": "USD",
+            "rateMicros": 1155100,
+            "from": "EUR",
+            "to": "USD",
+            "sourceAmountMinor": 1000,
+            "convertedAmountMinor": 1156,
+            "rounding": "UP"
+          }
+        }
+      }
+    }
+  ],
+  "exchanges": [],
+  "expect": {
+    "alerts": [
+      {
+        "code": "PRICE_REJECTED_BY_BOUND",
+        "severity": "WARNING",
+        "count": 2,
+        "details": {
+          "reason": "BELOW_MARGIN_FLOOR"
+        }
+      }
+    ],
+    "pipeline": {
+      "decisions": [
+        {
+          "writeScopeId": "ws-price-de-4501",
+          "rejectionReason": "BELOW_MARGIN_FLOOR",
+          "fx": null,
+          "reasonParams": {
+            "proposedMinor": 1500,
+            "floorMinor": 1915
+          }
+        },
+        {
+          "writeScopeId": "ws-price-us-4501",
+          "rejectionReason": "BELOW_MARGIN_FLOOR",
+          "fx": {
+            "source": "ECB",
+            "rateDate": "2026-09-14",
+            "base": "EUR",
+            "quote": "USD",
+            "rateMicros": 1155100,
+            "from": "EUR",
+            "to": "USD",
+            "sourceAmountMinor": 1000,
+            "convertedAmountMinor": 1156,
+            "rounding": "UP"
+          },
+          "reasonParams": {
+            "proposedMinor": 1500,
+            "floorMinor": 1779
+          }
+        }
+      ],
+      "writes": []
+    }
+  }
+}

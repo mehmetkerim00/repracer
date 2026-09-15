@@ -1,0 +1,69 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "kaufland/reports/competitors-comparer",
+  "channel": "KAUFLAND",
+  "apiVersion": "2.44.0",
+  "title": "Отчёт competitors-comparer для сверки: запрос и опрос",
+  "description": "Р-36: CSV competitors-comparer используется только для сверки. POST возвращает 202 с id_report; значения status в спецификации не перечислены, поэтому готовность определяется ссылкой url: без неё — PENDING, со ссылкой — DONE. Неподдерживаемый тип отчёта — UNSUPPORTED без обращения к каналу.",
+  "tags": ["reports"],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": ["vendor/kaufland/seller-api-v2/2026-09-14/openapi.json#POST /reports/competitors-comparer", "vendor/kaufland/seller-api-v2/2026-09-14/openapi.json#GET /reports/{id_report}"]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": { "externalAccountId": "syn-seller-0001", "marketplaces": ["de", "at"] },
+    "credentials": { "seller": { "clientKey": "syn-seller-client-key-0001", "secretKey": "syn-seller-secret-key-0001" } }
+  },
+  "steps": [
+    {
+      "id": "unsupported-report",
+      "kind": "call",
+      "method": "requestReport",
+      "args": ["sales-new", "de"],
+      "expectThrows": { "code": "UNSUPPORTED" }
+    },
+    {
+      "id": "request",
+      "kind": "call",
+      "method": "requestReport",
+      "args": ["competitors-comparer", "de"],
+      "expect": { "reportType": "competitors-comparer", "channelReportId": "9001", "requestedAt": "2026-09-14T10:00:00.000Z" }
+    },
+    {
+      "id": "poll-pending",
+      "kind": "call",
+      "method": "pollReport",
+      "args": [{ "reportType": "competitors-comparer", "channelReportId": "9001", "requestedAt": "2026-09-14T10:00:00.000Z" }],
+      "expect": { "status": "PENDING", "checkAfter": { "$clockIso": 300000 } }
+    },
+    { "id": "wait", "kind": "advanceClock", "ms": 300000 },
+    {
+      "id": "poll-done",
+      "kind": "call",
+      "method": "pollReport",
+      "args": [{ "reportType": "competitors-comparer", "channelReportId": "9001", "requestedAt": "2026-09-14T10:00:00.000Z" }],
+      "expect": { "status": "DONE", "downloadUrl": "https://example.invalid/reports/9001.csv" }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "request-report",
+      "request": { "method": "POST", "path": "/v2/reports/competitors-comparer", "query": { "storefront": "de" } },
+      "response": { "status": 202, "body": { "data": { "id_report": 9001, "report_name": "competitors-comparer", "storefront": "de", "parameters": [] } } }
+    },
+    {
+      "id": "poll-1",
+      "request": { "method": "GET", "path": "/v2/reports/9001" },
+      "response": { "status": 200, "body": { "data": { "id_report": 9001, "status": "pending", "date_requested": "2026-09-14T10:00:00Z", "url": "", "report_name": "competitors-comparer", "storefront": "de", "parameters": [] } } }
+    },
+    {
+      "id": "poll-2",
+      "request": { "method": "GET", "path": "/v2/reports/9001" },
+      "response": { "status": 200, "body": { "data": { "id_report": 9001, "status": "done", "date_requested": "2026-09-14T10:00:00Z", "url": "https://example.invalid/reports/9001.csv", "report_name": "competitors-comparer", "storefront": "de", "parameters": [] } } }
+    }
+  ],
+  "expect": { "noAlerts": true }
+}

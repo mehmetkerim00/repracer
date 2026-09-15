@@ -1,0 +1,102 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "kaufland/competitors/buybox-pull",
+  "channel": "KAUFLAND",
+  "apiVersion": "2.44.0",
+  "title": "GET /buybox: цены double переводятся в центы, своё предложение — по id_unit",
+  "description": "Р-36: /buybox — основной источник конкурентов вместе с buy_box_changed. Спецификация: price — number «в валюте витрины»; адаптер считает это евро и округляет до центов [KFL_C06, K-17], включая значения с ошибкой представления (17.95, 4.95, 19.99). Своё предложение определяется по наличию id_unit [KFL_C18]. Запросы с витриной вне аккаунта и нечисловым id_product отклоняются без обращения к каналу.",
+  "tags": ["competitors", "conservative:KFL_C06", "conservative:KFL_C18"],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": ["vendor/kaufland/seller-api-v2/2026-09-14/openapi.json#GET /buybox"]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": { "externalAccountId": "syn-seller-0001", "marketplaces": ["de", "at"] },
+    "credentials": { "seller": { "clientKey": "syn-seller-client-key-0001", "secretKey": "syn-seller-secret-key-0001" } }
+  },
+  "steps": [
+    {
+      "id": "read-competitors",
+      "kind": "call",
+      "method": "readCompetitors",
+      "args": [
+        [
+          { "marketplace": "de", "channelProductRef": "362000001", "condition": "new" },
+          { "marketplace": "fr", "channelProductRef": "362000001", "condition": "new" },
+          { "marketplace": "de", "channelProductRef": "abc", "condition": "new" }
+        ]
+      ],
+      "expect": {
+        "snapshots": [
+          {
+            "marketplace": "de",
+            "channelProductRef": "362000001",
+            "condition": "new",
+            "source": "KAUFLAND_BUYBOX",
+            "observedAt": "2026-09-14T10:00:00.000Z",
+            "completeness": { "kind": "TOP_N", "n": 10 },
+            "buybox": { "price": { "amountMinor": 1795, "currency": "EUR", "basis": "GROSS" }, "isSelf": false },
+            "offers": {
+              "$exact": [
+                {
+                  "rank": 1, "sellerRef": "Synthetic Competitor", "isSelf": false,
+                  "price": { "amountMinor": 1795, "currency": "EUR", "basis": "GROSS" },
+                  "shipping": { "amountMinor": 0, "currency": "EUR", "basis": "GROSS" },
+                  "totalPrice": { "amountMinor": 1795, "currency": "EUR", "basis": "GROSS" },
+                  "condition": "new", "fulfillment": "fulfilled_by_merchant", "deliveryDays": { "min": 1, "max": 2 }
+                },
+                {
+                  "rank": 2, "sellerRef": "Synthetic Seller", "isSelf": true,
+                  "price": { "amountMinor": 1850, "currency": "EUR", "basis": "GROSS" },
+                  "shipping": { "amountMinor": 495, "currency": "EUR", "basis": "GROSS" },
+                  "totalPrice": { "amountMinor": 2345, "currency": "EUR", "basis": "GROSS" },
+                  "condition": "new", "fulfillment": "fulfilled_by_merchant", "deliveryDays": { "min": 1, "max": 3 }
+                },
+                {
+                  "rank": 3, "sellerRef": "Synthetic Other", "isSelf": false,
+                  "price": { "amountMinor": 1999, "currency": "EUR", "basis": "GROSS" },
+                  "shipping": { "amountMinor": 250, "currency": "EUR", "basis": "GROSS" },
+                  "totalPrice": { "amountMinor": 2249, "currency": "EUR", "basis": "GROSS" },
+                  "condition": "new", "fulfillment": "fulfilled_by_kaufland", "deliveryDays": { "min": null, "max": null }
+                }
+              ]
+            }
+          }
+        ],
+        "failures": [
+          { "query": { "marketplace": "fr" }, "error": { "code": "PRECONDITION_FAILED" } },
+          { "query": { "channelProductRef": "abc" }, "error": { "code": "VALIDATION" } }
+        ]
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "buybox-362000001",
+      "request": { "method": "GET", "path": "/v2/buybox", "query": { "id_product": "362000001", "storefront": "de", "condition": "new", "limit": "10" } },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": {
+            "id_product": 362000001, "condition": "new", "storefront": "de", "num_units": 3,
+            "units": [
+              { "buybox_rank": 2, "seller": "Synthetic Seller", "price": 18.5, "delivery_time_min": 1, "delivery_time_max": 3, "shipping_rate": 4.95, "fulfillment_type": "fulfilled_by_merchant", "condition": "new", "id_unit": 4101, "id_offer": "SYN-OFFER-4101" },
+              { "buybox_rank": 1, "seller": "Synthetic Competitor", "price": 17.95, "delivery_time_min": 1, "delivery_time_max": 2, "shipping_rate": 0, "fulfillment_type": "fulfilled_by_merchant", "condition": "new" },
+              { "buybox_rank": 3, "seller": "Synthetic Other", "price": 19.99, "shipping_rate": 2.5, "fulfillment_type": "fulfilled_by_kaufland", "condition": "new" }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "expect": {
+    "logs": [
+      { "code": "KFL_C06_BUYBOX_PRICE_UNITS", "count": 1, "question": "K-17" },
+      { "code": "KFL_C18_BUYBOX_IS_SELF_BY_ID_UNIT", "count": 1 }
+    ],
+    "noAlerts": true
+  }
+}

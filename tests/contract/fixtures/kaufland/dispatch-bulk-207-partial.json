@@ -1,0 +1,128 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "kaufland/dispatch/bulk-207-partial",
+  "channel": "KAUFLAND",
+  "apiVersion": "2.44.0",
+  "title": "POST /units/bulk: 207 с частичным успехом",
+  "description": "Пакет из четырёх записей на витрине de. Kaufland принимает первую, отклоняет вторую (валидация цены), отклоняет запись остатка с требованием listing_price и не возвращает строку по четвёртому unit. Ожидается: ACCEPTED с наблюдением, REJECTED VALIDATION, REJECTED PRECONDITION_FAILED/REQUIRES_HUMAN [KFL_C03], OUTCOME_UNKNOWN [KFL_C09]. Тело запроса проверяется точно: запись остатка не несёт listing_price.",
+  "tags": ["mandatory:bulk-207-partial", "dispatch", "conservative:KFL_C03", "conservative:KFL_C09"],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": ["vendor/kaufland/seller-api-v2/2026-09-14/openapi.json#POST /units/bulk (207)", "https://sellerapi.kaufland.com/?page=inventory"]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": { "externalAccountId": "syn-seller-0001", "marketplaces": ["de", "at"] },
+    "credentials": {
+      "seller": { "clientKey": "syn-seller-client-key-0001", "secretKey": "syn-seller-secret-key-0001" },
+      "partner": { "clientKey": "syn-partner-client-key-0001", "secretKey": "syn-partner-secret-key-0001" }
+    },
+    "partner": true
+  },
+  "steps": [
+    {
+      "id": "dispatch-bulk",
+      "kind": "call",
+      "method": "dispatch",
+      "args": [
+        {
+          "batchId": "kfl:de:0000000000000001",
+          "operation": "POST /units/bulk",
+          "budgetCharges": [],
+          "requestCount": 1,
+          "items": [
+            {
+              "channelWriteId": "cw-0001",
+              "writeScope": { "writeScopeId": "ws-price-de-1001", "field": "PRICE", "scopeKey": "kaufland|acct-1|de|1001", "identity": { "marketplace": "de", "externalUnitId": "1001" } },
+              "version": 3, "idempotencyKey": "cw-0001:3", "attemptNo": 1,
+              "value": { "field": "PRICE", "price": { "amountMinor": 1999, "currency": "EUR", "basis": "GROSS" } }
+            },
+            {
+              "channelWriteId": "cw-0002",
+              "writeScope": { "writeScopeId": "ws-price-de-1002", "field": "PRICE", "scopeKey": "kaufland|acct-1|de|1002", "identity": { "marketplace": "de", "externalUnitId": "1002" } },
+              "version": 1, "idempotencyKey": "cw-0002:1", "attemptNo": 1,
+              "value": { "field": "PRICE", "price": { "amountMinor": 2499, "currency": "EUR", "basis": "GROSS" } }
+            },
+            {
+              "channelWriteId": "cw-0003",
+              "writeScope": { "writeScopeId": "ws-qty-SYN-OFFER-0003", "field": "QUANTITY", "scopeKey": "kaufland|acct-1|SYN-OFFER-0003", "identity": { "marketplace": "de", "externalUnitId": "1003", "externalOfferId": "SYN-OFFER-0003" } },
+              "version": 2, "idempotencyKey": "cw-0003:2", "attemptNo": 1,
+              "value": { "field": "QUANTITY", "quantity": 7 }
+            },
+            {
+              "channelWriteId": "cw-0004",
+              "writeScope": { "writeScopeId": "ws-price-de-1004", "field": "PRICE", "scopeKey": "kaufland|acct-1|de|1004", "identity": { "marketplace": "de", "externalUnitId": "1004" } },
+              "version": 1, "idempotencyKey": "cw-0004:1", "attemptNo": 1,
+              "value": { "field": "PRICE", "price": { "amountMinor": 1500, "currency": "EUR", "basis": "GROSS" } }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "batchId": "kfl:de:0000000000000001",
+        "attemptsMade": 1,
+        "outcomes": [
+          {
+            "channelWriteId": "cw-0001",
+            "status": "ACCEPTED",
+            "appliedImmediately": true,
+            "observation": {
+              "identity": { "marketplace": "de", "externalUnitId": "1001" },
+              "field": "PRICE",
+              "source": "SYNC_RESPONSE",
+              "observedAt": "2026-09-14T10:00:00.000Z",
+              "value": { "field": "PRICE", "price": { "amountMinor": 1999, "currency": "EUR", "basis": "GROSS" } }
+            }
+          },
+          { "channelWriteId": "cw-0002", "status": "REJECTED", "error": { "code": "VALIDATION", "class": "PERMANENT", "scope": "ITEM", "httpStatus": 400 } },
+          { "channelWriteId": "cw-0003", "status": "REJECTED", "error": { "code": "PRECONDITION_FAILED", "class": "REQUIRES_HUMAN", "scope": "ITEM", "raiseAlert": true } },
+          { "channelWriteId": "cw-0004", "status": "OUTCOME_UNKNOWN", "error": { "code": "UNKNOWN", "scope": "ITEM", "raiseAlert": true } }
+        ]
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "bulk-1",
+      "request": {
+        "method": "POST",
+        "path": "/v2/units/bulk",
+        "query": { "storefront": "de" },
+        "body": [
+          { "id_unit": 1001, "unit_data": { "listing_price": 1999 } },
+          { "id_unit": 1002, "unit_data": { "listing_price": 2499 } },
+          { "id_unit": 1003, "unit_data": { "amount": 7 } },
+          { "id_unit": 1004, "unit_data": { "listing_price": 1500 } }
+        ]
+      },
+      "response": {
+        "status": 207,
+        "body": {
+          "data": [
+            {
+              "id_unit": 1001,
+              "status_code": 200,
+              "unit": {
+                "id_unit": 1001, "storefront": "de", "currency": "EUR", "condition": "new", "status": "available",
+                "listing_price": 1999, "price": 1999, "amount": 5, "id_offer": "SYN-OFFER-0001", "id_product": 500001,
+                "fulfillment_type": "fulfilled_by_merchant", "is_live": true, "date_lastchange_iso": "2026-09-14T10:00:00Z"
+              }
+            },
+            { "id_unit": 1002, "status_code": 400, "message": "Validation failed", "errors": [{ "field": "listing_price", "message": "This value is not valid." }] },
+            { "id_unit": 1003, "status_code": 400, "message": "Validation failed", "errors": [{ "field": "listing_price", "message": "This value should not be blank." }] }
+          ]
+        }
+      }
+    }
+  ],
+  "expect": {
+    "logs": [
+      { "code": "KFL_C09_BULK_ITEM_MISSING", "count": 1, "details": { "idUnit": 1004 } },
+      { "code": "KFL_C03_QUANTITY_WITHOUT_LISTING_PRICE", "count": 1, "question": "K-13" }
+    ],
+    "noLogCodes": ["KFL_C02_NO_TRANSPORT_RETRY_FOR_WRITES", "KFL_C05_MINIMUM_PRICE_OBSERVED"],
+    "noAlerts": true
+  }
+}

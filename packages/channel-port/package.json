@@ -1,0 +1,13 @@
+{
+  "name": "@repracer/channel-port",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ChannelAdapter port: the contract every channel adapter (Amazon, eBay, Kaufland, Otto) implements. Types only, no channel or domain logic.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

@@ -1,0 +1,117 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "kaufland/budget/exhausted",
+  "channel": "KAUFLAND",
+  "apiVersion": "2.44.0",
+  "title": "Исчерпанный клиентский бюджет запросов: запись не отправляется",
+  "description": "Бюджет продавца уменьшен до 1 запроса в секунду при запасе 2 [KFL_C01, K-04]. Два обратных чтения тратят запас; следующая запись не уходит в канал — REJECTED RATE_LIMITED с retryAt ровно через 1 с, attemptsMade = 0. После сдвига часов на 1 с запись отправляется и принимается. Строгое воспроизведение гарантирует, что лишнего запроса не было.",
+  "tags": ["mandatory:budget-exhausted", "budget", "conservative:KFL_C01"],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": ["https://sellerapi.kaufland.com/?page=rate-limits", "docs/channel-capabilities.md#K-04"]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": { "externalAccountId": "syn-seller-0001", "marketplaces": ["de", "at"] },
+    "credentials": {
+      "seller": { "clientKey": "syn-seller-client-key-0001", "secretKey": "syn-seller-secret-key-0001" },
+      "partner": { "clientKey": "syn-partner-client-key-0001", "secretKey": "syn-partner-secret-key-0001" }
+    },
+    "partner": true,
+    "budget": { "seller": { "ratePerSecond": 1, "burst": 2 }, "partner": { "ratePerSecond": 100, "burst": 100 } }
+  },
+  "steps": [
+    {
+      "id": "reads-drain-budget",
+      "kind": "call",
+      "method": "readBack",
+      "repeat": 2,
+      "args": [
+        [
+          {
+            "writeScope": { "writeScopeId": "ws-price-de-8001", "field": "PRICE", "scopeKey": "kaufland|acct-1|de|8001", "identity": { "marketplace": "de", "externalUnitId": "8001" } },
+            "fields": ["PRICE"]
+          }
+        ]
+      ],
+      "expect": { "failures": [], "observations": [{ "field": "PRICE", "value": { "price": { "amountMinor": 1200 } } }] }
+    },
+    {
+      "id": "write-refused-by-budget",
+      "kind": "call",
+      "method": "dispatch",
+      "args": [
+        {
+          "batchId": "kfl:de:0000000000000801",
+          "operation": "PATCH /units/{id_unit}",
+          "budgetCharges": [],
+          "requestCount": 1,
+          "items": [
+            {
+              "channelWriteId": "cw-0801",
+              "writeScope": { "writeScopeId": "ws-price-de-8001", "field": "PRICE", "scopeKey": "kaufland|acct-1|de|8001", "identity": { "marketplace": "de", "externalUnitId": "8001" } },
+              "version": 7, "idempotencyKey": "cw-0801:7", "attemptNo": 1,
+              "value": { "field": "PRICE", "price": { "amountMinor": 1150, "currency": "EUR", "basis": "GROSS" } }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "attemptsMade": 0,
+        "outcomes": [
+          {
+            "channelWriteId": "cw-0801",
+            "status": "REJECTED",
+            "error": { "code": "RATE_LIMITED", "class": "TRANSIENT", "scope": "BATCH", "retryAt": { "$clockIso": 1000 }, "raiseAlert": false }
+          }
+        ]
+      }
+    },
+    { "id": "wait-for-refill", "kind": "advanceClock", "ms": 1000 },
+    {
+      "id": "write-after-refill",
+      "kind": "call",
+      "method": "dispatch",
+      "args": [
+        {
+          "batchId": "kfl:de:0000000000000801",
+          "operation": "PATCH /units/{id_unit}",
+          "budgetCharges": [],
+          "requestCount": 1,
+          "items": [
+            {
+              "channelWriteId": "cw-0801",
+              "writeScope": { "writeScopeId": "ws-price-de-8001", "field": "PRICE", "scopeKey": "kaufland|acct-1|de|8001", "identity": { "marketplace": "de", "externalUnitId": "8001" } },
+              "version": 7, "idempotencyKey": "cw-0801:7", "attemptNo": 2,
+              "value": { "field": "PRICE", "price": { "amountMinor": 1150, "currency": "EUR", "basis": "GROSS" } }
+            }
+          ]
+        }
+      ],
+      "expect": { "attemptsMade": 1, "outcomes": [{ "channelWriteId": "cw-0801", "status": "ACCEPTED", "appliedImmediately": true }] }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "get-8001-a",
+      "request": { "method": "GET", "path": "/v2/units/8001", "query": { "storefront": "de" } },
+      "response": { "status": 200, "body": { "data": { "id_unit": 8001, "storefront": "de", "currency": "EUR", "listing_price": 1200, "price": 1200, "amount": 1, "id_offer": "SYN-OFFER-8001", "is_live": true } } }
+    },
+    {
+      "id": "get-8001-b",
+      "request": { "method": "GET", "path": "/v2/units/8001", "query": { "storefront": "de" } },
+      "response": { "status": 200, "body": { "data": { "id_unit": 8001, "storefront": "de", "currency": "EUR", "listing_price": 1200, "price": 1200, "amount": 1, "id_offer": "SYN-OFFER-8001", "is_live": true } } }
+    },
+    {
+      "id": "patch-8001",
+      "request": { "method": "PATCH", "path": "/v2/units/8001", "query": { "storefront": "de" }, "body": { "listing_price": 1150 } },
+      "response": { "status": 200, "body": { "data": { "id_unit": 8001, "storefront": "de", "currency": "EUR", "listing_price": 1150, "price": 1150, "amount": 1, "id_offer": "SYN-OFFER-8001", "is_live": true, "date_lastchange_iso": "2026-09-14T10:00:01Z" } } }
+    }
+  ],
+  "expect": {
+    "logs": [{ "code": "KFL_C01_REQUEST_BUDGET", "count": 1, "question": "K-04", "details": { "exhaustedKey": "kaufland:seller:syn-seller-0001", "cost": 1 } }],
+    "noAlerts": true
+  }
+}

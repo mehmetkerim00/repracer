@@ -1,0 +1,107 @@
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { after, test } from 'node:test';
+import { CHANNEL_DERIVED_PARAM_KEYS, COMPETITOR_RULE_DERIVED_KEYS, type PriceDecisionDraft, type PriceIntentDraft } from '@repracer/pricing-model';
+import type { MemorySeedScope } from '@repracer/pricing-pipeline';
+import { createPool, inTenant, PgPricingStore, seedPricingWorld } from '../src/index.ts';
+import { approved, contextOf, explained } from './drafts.ts';
+import { requireEnv } from './isolated-db.ts';
+
+/**
+ * Р-85 в базе: реестр производных ключей совпадает с кодом; отклонённая цена из данных конкурентов попадает в вечное ядро без
+ * предложенной цены и отклонения; слепок с производным ключом база не принимает; строки до миграции очищаются той же функцией.
+ * Данные синтетические.
+ */
+
+const pool = createPool(requireEnv('REPRACER_PG_URL'), { max: 4, applicationName: 'repracer-r85-test' });
+after(async () => {
+  await pool.end();
+});
+
+const ACCOUNT = '20000000-0000-4000-8000-000000000085';
+const BUYBOX = { strategyId: 'st-buybox', version: 1, params: { type: 'MATCH_BUYBOX', undercutMinor: 5, holdWhenWinning: false, atBound: 'CAP' }, deadbandMinor: 0 } as const;
+const now = () => new Date().toISOString();
+
+function scope(n: number): MemorySeedScope {
+  return {
+    writeScopeId: `ws-${n}`, productId: `prod-${n}`, channelAccountId: ACCOUNT, marketplace: 'de', externalUnitId: String(8500 + n),
+    channelProductRef: `36285${n}`, condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'ENGINE', strategy: BUYBOX,
+    currentPriceMinor: 1850, minPrice: { amountMinor: 1800, id: `min-${n}` }, maxPrice: { amountMinor: 2500, id: `max-${n}` },
+  };
+}
+
+test('Р-85: the derived-key registry in the database equals the code', async () => {
+  const { rows: [r] } = await pool.query('SELECT security.channel_derived_param_keys() AS by_code, security.channel_rule_derived_param_keys() AS by_rule');
+  assert.deepEqual(r.by_code, CHANNEL_DERIVED_PARAM_KEYS);
+  assert.deepEqual(r.by_rule, [...COMPETITOR_RULE_DERIVED_KEYS]);
+  assert.ok(Object.keys(r.by_code).length >= 5);
+});
+
+test('Р-85: a rejected Buy Box proposal reaches the eternal core without the proposed price, the deviation and the derived target', async () => {
+  const w = await seedPricingWorld(pool, { fixtureTenantId: '10000000-0000-4000-8000-000000000085', fixtureChannelAccountId: ACCOUNT, marketplaces: ['de'], clock: now(), seed: { scopes: [scope(1)] } });
+  const store = new PgPricingStore(pool);
+  const ctx = await contextOf(store, w.tenantId, w.ids.dbId('ws-1'));
+  const base = approved(ctx, 1900);
+  const proposed = 1715;
+  const intent: PriceIntentDraft = {
+    ...base.intent, ruleCode: 'MATCH_BUYBOX', proposedMinor: proposed, referenceMinor: 1720,
+    reason: { code: 'BUYBOX_UNDERCUT', params: { buyboxMinor: 1720, undercutMinor: 5, targetMinor: proposed, currency: 'EUR' } },
+    explanation: [{ code: 'BUYBOX_UNDERCUT', params: { buyboxMinor: 1720, undercutMinor: 5, targetMinor: proposed, currency: 'EUR' } }],
+  };
+  const detail = { code: 'BELOW_MIN_PRICE' as const, params: { proposedMinor: proposed, minMinor: 1800, deviationBp: 473, currency: 'EUR' } };
+  const decision: PriceDecisionDraft = {
+    ...base.decision, outcome: 'REJECTED', decisionClass: 'REJECTED_BY_GATE', finalMinor: null, rejectionReason: 'BELOW_MIN_PRICE', reason: detail, boundDeviationBp: 473,
+    checks: [{ check: 'PRICE_STOP', passed: true, detail: null }, { check: 'LOWER_BOUND', passed: false, detail }],
+  };
+  // Цена из данных конкурентов объясняется снимком и проверкой входов (CHECK price_decision_explanation_competitor_inputs)
+  const d = explained({ context: ctx, intent, decision }, { competitorSnapshotId: randomUUID(), source: 'KAUFLAND_BUYBOX', observedAt: now() });
+  const r = await store.commitEvaluation(w.tenantId, {
+    key: { channelAccountId: ctx.scope.channelAccountId, marketplace: ctx.scope.marketplace, channelProductRef: ctx.scope.channelProductRef, condition: ctx.scope.condition },
+    now: now(), decisions: [d],
+  });
+  assert.equal(r.status, 'COMMITTED', JSON.stringify(r));
+  const [row] = await inTenant(pool, w.tenantId, async (tx) => (await tx.query(
+    `SELECT c.proposed_amount_minor, c.bound_deviation_bp, c.dangerous, c.reason_params, c.explanation, c.competitor_derived,
+            dd.proposed_amount_minor AS hot_proposed, dd.bound_deviation_bp AS hot_deviation
+       FROM tenant_data.price_intent_core c JOIN channel_data.price_decision dd ON dd.tenant_id = c.tenant_id AND dd.price_decision_id = c.price_decision_id
+      WHERE c.tenant_id = $1`, [w.tenantId])).rows);
+  assert.ok(row);
+  assert.deepEqual([row.competitor_derived, row.proposed_amount_minor, row.bound_deviation_bp, row.dangerous], [true, null, null, false]);
+  assert.equal(Number(row.hot_proposed), proposed, 'the hot decision (30 days, channel class) keeps the proposed price');
+  assert.equal(row.hot_deviation, 473);
+  assert.deepEqual(Object.keys(row.reason_params).sort(), ['currency', 'minMinor']);
+  // Имена вырезанных ключей в withheld — не данные; в параметрах причин их нет, значений нет нигде
+  const values: number[] = [];
+  const paramKeys: string[] = [];
+  const walk = (v: unknown): void => {
+    if (typeof v === 'number') values.push(v);
+    else if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === 'object') {
+      const o = v as Record<string, unknown>;
+      if (o.params && typeof o.params === 'object') paramKeys.push(...Object.keys(o.params));
+      Object.values(o).forEach(walk);
+    }
+  };
+  walk(row.explanation);
+  assert.deepEqual(values.filter((n) => n === proposed || n === 473 || n === 1720), [], JSON.stringify(row.explanation));
+  assert.deepEqual(paramKeys.filter((k) => ['targetMinor', 'proposedMinor', 'deviationBp'].includes(k)), [], JSON.stringify(row.explanation));
+  assert.ok(JSON.stringify(row.explanation).includes('"withheld"'), 'the stripped keys are named as withheld');
+});
+
+test('Р-85: the database refuses an explanation with a derived key and cleans rows written before the migration', async () => {
+  const legacy = {
+    format: 'r80.1',
+    strategy: { reason: { code: 'CAPPED_AT_MIN_PRICE', params: { targetMinor: 1400, minMinor: 1500, currency: 'EUR' } }, steps: [{ code: 'BUYBOX_UNDERCUT', params: { undercutMinor: 5, targetMinor: 1400, currency: 'EUR' }, withheld: ['x'] }] },
+    gate: { failed: { check: 'LOWER_BOUND', detail: { code: 'BELOW_MIN_PRICE', params: { proposedMinor: 1400, minMinor: 1500, deviationBp: 667, currency: 'EUR' } } } },
+  };
+  const { rows: [r] } = await pool.query(
+    `SELECT security.explanation_derives_no_channel($1::jsonb, true) AS before, security.strip_channel_derived($1::jsonb, true) AS cleaned,
+            security.explanation_derives_no_channel(security.strip_channel_derived($1::jsonb, true), true) AS after,
+            security.explanation_derives_no_channel(security.strip_channel_derived($1::jsonb, false), false) AS after_tenant_rule,
+            security.strip_channel_derived($1::jsonb, false) -> 'gate' AS tenant_rule_gate`, [JSON.stringify(legacy)]);
+  assert.deepEqual([r.before, r.after, r.after_tenant_rule], [false, true, true]);
+  assert.deepEqual(r.cleaned.strategy.reason, { code: 'CAPPED_AT_MIN_PRICE', params: { minMinor: 1500, currency: 'EUR' } });
+  assert.deepEqual(r.cleaned.strategy.steps[0], { code: 'BUYBOX_UNDERCUT', params: { undercutMinor: 5, currency: 'EUR' }, withheld: ['x'] });
+  assert.deepEqual(r.cleaned.gate.failed.detail, { code: 'BELOW_MIN_PRICE', params: { minMinor: 1500, currency: 'EUR' }, withheld: ['deviationBp', 'proposedMinor'] });
+  assert.deepEqual(r.tenant_rule_gate, legacy.gate, 'a fixed or margin price keeps its proposed price: it is not derived from a competitor');
+});

@@ -1,0 +1,13 @@
+{
+  "name": "@repracer/input-sanity",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Plausibility checks of competitor snapshots before the strategy engine (Р-42). Pure functions, no I/O.",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": { "@repracer/channel-port": "0.1.0", "@repracer/pricing-model": "0.1.0" },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test src/*.test.ts"
+  }
+}

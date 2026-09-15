@@ -1,0 +1,25 @@
+{
+  "name": "repracer",
+  "private": true,
+  "description": "repracer monorepo (TypeScript, Р-33)",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "services/*",
+    "tests/contract"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm test --workspaces --if-present",
+    "test:repo": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec scripts/test/*.test.ts",
+    "check:tests": "node scripts/check-test-inclusion.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.2",
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,0 +1,302 @@
+{
+  "format": "repracer.bench/decision-path/v1",
+  "startedFor": "step-8",
+  "environment": {
+    "node": "v22.22.3",
+    "cpu": "Apple M1",
+    "cores": 8,
+    "memoryGb": 8,
+    "postgres": "PostgreSQL 16.13 (Homebrew) on aarch64-apple-darwin22.5.0, compiled by Apple clang version 14.0.3 (clang-1403.0.22.14.1), 64-bit",
+    "settings": [
+      {
+        "name": "effective_cache_size",
+        "setting": "524288",
+        "unit": "8kB"
+      },
+      {
+        "name": "fsync",
+        "setting": "on",
+        "unit": null
+      },
+      {
+        "name": "max_connections",
+        "setting": "100",
+        "unit": null
+      },
+      {
+        "name": "max_wal_size",
+        "setting": "1024",
+        "unit": "MB"
+      },
+      {
+        "name": "shared_buffers",
+        "setting": "16384",
+        "unit": "8kB"
+      },
+      {
+        "name": "synchronous_commit",
+        "setting": "on",
+        "unit": null
+      },
+      {
+        "name": "wal_level",
+        "setting": "replica",
+        "unit": null
+      },
+      {
+        "name": "work_mem",
+        "setting": "4096",
+        "unit": "kB"
+      }
+    ]
+  },
+  "workload": {
+    "skus": 10000,
+    "storefronts": 2,
+    "engineScopes": 20000,
+    "changedShare": 0.1,
+    "baseRatePerSecond": 18.47,
+    "peakRatePerSecond": 184.72,
+    "secondsPerRun": 15
+  },
+  "timings": {
+    "seed": {
+      "totalSeconds": 11.39,
+      "steps": {
+        "user": 0,
+        "tenant": 0,
+        "membership": 0,
+        "account": 0,
+        "strategy": 0,
+        "products": 0.12,
+        "scopePlan": 0.02,
+        "writeScopes": 1.22,
+        "offerMappings": 0.81,
+        "minPrices": 1.82,
+        "maxPrices": 1.82,
+        "costProfiles": 0.8,
+        "feeEstimates": 0.12,
+        "observedState": 0.14,
+        "competitorState": 0.24,
+        "competitorDaily20d": 3.72
+      }
+    },
+    "enableEngine": {
+      "scopes": 20000,
+      "updateSeconds": 7.27,
+      "commitSecondsDeferredChecks": 0.72,
+      "deferredCheckMsPerScope": 0.04
+    },
+    "moveWindowBaseSeedSeconds": 0.69,
+    "baseWindowMovesReturned": {
+      "moves": 0,
+      "windowProducts": 5000
+    },
+    "baseWindowSanityContextMs": {
+      "p50": 6.38,
+      "p95": 7.51
+    },
+    "moveWindowPeakSeedSeconds": 6.97,
+    "peakWindowMovesReturned": {
+      "moves": 36,
+      "windowProducts": 5903
+    },
+    "peakWindowSanityContextMs": {
+      "p50": 128.42,
+      "p95": 134.54
+    },
+    "peakOpenLoop": "not sustainable: closed-loop 33.66/s < 1.2 × 184.72/s"
+  },
+  "results": [
+    {
+      "phase": "path",
+      "name": "full evaluation closed W=16 (base window)",
+      "params": {
+        "movesPerHour": 66500,
+        "workers": 16
+      },
+      "seconds": 15.06,
+      "ops": 3963,
+      "throughput": 263.1114188828514,
+      "p50": 56.83387500000026,
+      "p95": 91.50500000000102,
+      "p99": 147.70924999999988,
+      "max": 212.14820899999904,
+      "errors": {},
+      "eventLoopUtilization": 0.98,
+      "waits": {
+        "Client:ClientRead": 10.09,
+        "CPU": 5.19,
+        "idle in transaction": 0.32,
+        "idle": 0.12,
+        "LWLock:LockManager": 0.06,
+        "IO:DataFileRead": 0.06,
+        "IO:DataFileWrite": 0.05,
+        "IO:WALWrite": 0.03,
+        "LWLock:WALWrite": 0.01,
+        "LWLock:XidGen": 0,
+        "LWLock:XactSLRU": 0,
+        "IO:DataFileExtend": 0
+      },
+      "extra": {
+        "storeCallsPerEvaluation": {
+          "findPriceScopes": 1,
+          "loadSanityContext": 1,
+          "recordMove": 1,
+          "acceptSnapshot": 1,
+          "resolveBounds": 1,
+          "loadCost": 1,
+          "isChannelHalted": 1,
+          "loadGuardrails": 1,
+          "countChangesLastHour": 1,
+          "commitDecision": 1,
+          "markDispatched": 0.09,
+          "recordDispatch": 0.09
+        },
+        "storeMsPerEvaluation": {
+          "loadSanityContext": 15.63,
+          "commitDecision": 10.76,
+          "findPriceScopes": 8.13,
+          "acceptSnapshot": 4.63,
+          "loadCost": 3.86,
+          "resolveBounds": 3.65,
+          "recordMove": 3.6,
+          "countChangesLastHour": 3.2,
+          "loadGuardrails": 3.1,
+          "isChannelHalted": 2.88,
+          "recordDispatch": 0.52,
+          "markDispatched": 0.51
+        },
+        "verdicts": {
+          "ACCEPT:NO_CHANGE": 3598,
+          "ACCEPT:APPROVED": 365
+        },
+        "alerts": {}
+      }
+    },
+    {
+      "phase": "path",
+      "name": "full evaluation open base=18.47/s",
+      "params": {
+        "movesPerHour": 66500,
+        "targetRate": 18.47
+      },
+      "seconds": 14.96,
+      "ops": 277,
+      "throughput": 18.51430324933796,
+      "p50": 20.41004381955281,
+      "p95": 24.752988368425576,
+      "p99": 26.901834233089176,
+      "max": 29.68816823308589,
+      "errors": {},
+      "eventLoopUtilization": 0.04,
+      "waits": {
+        "Client:ClientRead": 10.68,
+        "CPU": 0.32,
+        "IO:DataFileRead": 0,
+        "idle": 0
+      },
+      "extra": {
+        "maxInFlight": 1,
+        "storeCallsPerEvaluation": {
+          "findPriceScopes": 1,
+          "loadSanityContext": 1,
+          "recordMove": 1,
+          "acceptSnapshot": 1,
+          "resolveBounds": 1,
+          "loadCost": 1,
+          "isChannelHalted": 1,
+          "loadGuardrails": 1,
+          "countChangesLastHour": 1,
+          "commitDecision": 1,
+          "markDispatched": 0.13,
+          "recordDispatch": 0.13
+        },
+        "storeMsPerEvaluation": {
+          "loadSanityContext": 9.91,
+          "findPriceScopes": 3.5,
+          "commitDecision": 2.32,
+          "acceptSnapshot": 0.83,
+          "resolveBounds": 0.79,
+          "loadCost": 0.78,
+          "recordMove": 0.58,
+          "countChangesLastHour": 0.45,
+          "loadGuardrails": 0.42,
+          "isChannelHalted": 0.31,
+          "markDispatched": 0.16,
+          "recordDispatch": 0.12
+        },
+        "verdicts": {
+          "ACCEPT:NO_CHANGE": 241,
+          "ACCEPT:APPROVED": 36
+        },
+        "alerts": {}
+      }
+    },
+    {
+      "phase": "path",
+      "name": "full evaluation closed W=16 (peak window)",
+      "params": {
+        "movesPerHour": 665000,
+        "workers": 16
+      },
+      "seconds": 15.3,
+      "ops": 515,
+      "throughput": 33.66357472707266,
+      "p50": 469.6167920000007,
+      "p95": 566.2246250000026,
+      "p99": 592.1333339999983,
+      "max": 629.1663750000007,
+      "errors": {},
+      "eventLoopUtilization": 0.24,
+      "waits": {
+        "CPU": 14.96,
+        "Client:ClientRead": 0.52,
+        "IO:BufFileWrite": 0.28,
+        "IO:DataFileRead": 0.06,
+        "idle in transaction": 0.05,
+        "IO:BufFileRead": 0.04,
+        "idle": 0.02,
+        "IPC:BufferIO": 0.02,
+        "LWLock:BufferMapping": 0.02,
+        "LWLock:LockManager": 0.01,
+        "IO:WALWrite": 0.01
+      },
+      "extra": {
+        "storeCallsPerEvaluation": {
+          "findPriceScopes": 1,
+          "loadSanityContext": 1,
+          "recordMove": 1,
+          "acceptSnapshot": 1,
+          "resolveBounds": 1,
+          "loadCost": 1,
+          "isChannelHalted": 1,
+          "loadGuardrails": 1,
+          "countChangesLastHour": 1,
+          "commitDecision": 1,
+          "markDispatched": 0.1,
+          "recordDispatch": 0.1
+        },
+        "storeMsPerEvaluation": {
+          "loadSanityContext": 439.05,
+          "findPriceScopes": 10.39,
+          "commitDecision": 8.79,
+          "loadCost": 2.42,
+          "resolveBounds": 2.38,
+          "acceptSnapshot": 2.18,
+          "recordMove": 1.92,
+          "countChangesLastHour": 1.36,
+          "loadGuardrails": 1.02,
+          "isChannelHalted": 0.87,
+          "markDispatched": 0.53,
+          "recordDispatch": 0.47
+        },
+        "verdicts": {
+          "ACCEPT:NO_CHANGE": 461,
+          "ACCEPT:APPROVED": 54
+        },
+        "alerts": {}
+      }
+    }
+  ]
+}

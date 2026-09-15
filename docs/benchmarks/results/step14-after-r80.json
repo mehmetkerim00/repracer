@@ -1,0 +1,77 @@
+{
+  "measuredAt": "2026-09-15T06:50:03.434Z",
+  "seed": 14,
+  "scopes": 400,
+  "rate": 185,
+  "evaluations": 12000,
+  "seconds": 65,
+  "achievedRate": 185,
+  "verdicts": {
+    "ACCEPT:APPROVED": 3769,
+    "ACCEPT:NO_CHANGE": 6798,
+    "ACCEPT:REJECTED": 1433
+  },
+  "alerts": {
+    "PRICE_REJECTED_BY_BOUND": 1433,
+    "CURRENT_PRICE_OUTSIDE_BOUNDS": 2
+  },
+  "classShares": {
+    "CHANGED": 0.314,
+    "NO_OP": 0.567,
+    "REJECTED_BY_GATE": 0.119
+  },
+  "decision": {
+    "byClass": [
+      {
+        "intent_class": "CHANGED",
+        "rows": 3769,
+        "row_bytes": 1585,
+        "explanation_bytes": 661,
+        "explanation_text": 712
+      },
+      {
+        "intent_class": "NO_OP",
+        "rows": 6798,
+        "row_bytes": 983,
+        "explanation_bytes": 0,
+        "explanation_text": 0
+      },
+      {
+        "intent_class": "REJECTED_BY_GATE",
+        "rows": 1433,
+        "row_bytes": 1966,
+        "explanation_bytes": 758,
+        "explanation_text": 764
+      }
+    ],
+    "rows": 12000,
+    "tableBytesPerRow": 1726
+  },
+  "intent": {
+    "rows": 12000,
+    "tableBytesPerRow": 1243
+  },
+  "core": {
+    "byClass": [
+      {
+        "intent_class": "CHANGED",
+        "rows": 3769,
+        "row_bytes": 1259,
+        "explanation_bytes": 879,
+        "explanation_raw_bytes": 879
+      },
+      {
+        "intent_class": "REJECTED_BY_GATE",
+        "rows": 1433,
+        "row_bytes": 1423,
+        "explanation_bytes": 961,
+        "explanation_raw_bytes": 961
+      }
+    ],
+    "rows": 5202,
+    "tableBytesPerRow": 1559,
+    "gzipBytesPerRow": 166,
+    "brotliBytesPerRow": 75,
+    "gzipExplanationBytesPerRow": 29
+  }
+}

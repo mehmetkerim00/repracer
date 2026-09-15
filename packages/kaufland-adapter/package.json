@@ -1,0 +1,17 @@
+{
+  "name": "@repracer/kaufland-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "KauflandAdapter: implementation of @repracer/channel-port for Kaufland Seller API v2.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@repracer/channel-port": "0.1.0",
+    "@repracer/kaufland-client": "0.1.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

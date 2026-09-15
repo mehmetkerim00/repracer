@@ -1,0 +1,21 @@
+{
+  "name": "@repracer/pricing-worker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pricing path instance behind the broker: consumes competitor snapshots and write-scope events, dispatches queued writes (Р-64), runs the outbox relay under an advisory lock (Р-34).",
+  "type": "module",
+  "exports": { ".": "./src/worker.ts" },
+  "dependencies": {
+    "@repracer/broker": "0.1.0",
+    "@repracer/channel-port": "0.1.0",
+    "@repracer/pricing-pipeline": "0.1.0",
+    "@repracer/pricing-store-pg": "0.1.0",
+    "@repracer/write-dispatcher": "0.1.0",
+    "pg": "8.23.0"
+  },
+  "devDependencies": { "@types/pg": "8.23.1" },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec test/*.test.ts"
+  }
+}

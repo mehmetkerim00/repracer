@@ -1,0 +1,1130 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "kaufland/pipeline/mass-shift-halt",
+  "channel": "KAUFLAND",
+  "apiVersion": "2.44.0",
+  "title": "Массовый сдвиг с одинаковым коэффициентом: остановка цен из данных конкурентов",
+  "description": "За 15 минут 19 товаров витрины у разных продавцов подорожали ровно втрое; двадцатый снимок (×3.01) по отдельности правдоподобен — в пределах истории, — но вместе с остальными даёт 20 из 21 товара в одну сторону с разбросом коэффициента около нуля: это ошибка разбора, а не рынок [Р-50]. Вердикт HALT_CHANNEL, CRITICAL-алерт. Дальше [Р-51]: следующий снимок другого товара отклоняется с CHANNEL_HALTED без алерта; пересчёт MATCH_BUYBOX по уже принятому снимку отклоняет Gate — цена выведена из данных конкурентов; фиксированная цена, которой конкуренты не нужны, одобряется и уходит в канал.",
+  "tags": [
+    "mandatory:pipeline-mass-shift",
+    "pipeline",
+    "input-sanity",
+    "r-50",
+    "r-51"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "https://sellerapi.kaufland.com/?page=push-notifications#events",
+      "vendor/kaufland/seller-api-v2/2026-09-14/openapi.json#GET /buybox",
+      "docs/decisions.md#Р-42",
+      "docs/decisions.md#Р-50",
+      "docs/decisions.md#Р-51"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn-seller-0001",
+      "marketplaces": [
+        "de",
+        "at"
+      ]
+    },
+    "credentials": {
+      "seller": {
+        "clientKey": "syn-seller-client-key-0001",
+        "secretKey": "syn-seller-secret-key-0001"
+      }
+    },
+    "secrets": [
+      "wh_tok_synthetic_0007"
+    ],
+    "pricing": {
+      "scopes": [
+        {
+          "writeScopeId": "ws-price-de-4101",
+          "productId": "prod-4101",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "4101",
+          "channelProductRef": "362000001",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-4101"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-4101"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-4102",
+          "productId": "prod-4102",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "4102",
+          "channelProductRef": "362000002",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 2450,
+          "minPrice": {
+            "amountMinor": 2000,
+            "id": "min-4102"
+          },
+          "maxPrice": {
+            "amountMinor": 3500,
+            "id": "max-4102"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-4103",
+          "productId": "prod-4103",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "4103",
+          "channelProductRef": "362000003",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-fixed",
+            "version": 1,
+            "params": {
+              "type": "FIXED",
+              "priceMinor": 2000
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1900,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-4103"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-4103"
+          }
+        }
+      ],
+      "competitorDaily": {
+        "de|362000001|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362000002|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          }
+        ]
+      },
+      "competitorState": {
+        "de|362000001|new": {
+          "observedAt": "2026-09-14T09:00:00.000Z",
+          "buyboxMinor": 1795,
+          "lowestMinor": 1795
+        },
+        "de|362000002|new": {
+          "observedAt": "2026-09-14T09:00:00.000Z",
+          "buyboxMinor": 2400,
+          "lowestMinor": 2400
+        }
+      },
+      "moves": [
+        {
+          "marketplace": "de",
+          "productRef": "362000900|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 30000,
+          "sellerRef": "syn-seller-00"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000901|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 30000,
+          "sellerRef": "syn-seller-01"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000902|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 30000,
+          "sellerRef": "syn-seller-02"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000903|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 30000,
+          "sellerRef": "syn-seller-03"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000904|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 30000,
+          "sellerRef": "syn-seller-04"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000905|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 30000,
+          "sellerRef": "syn-seller-05"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000906|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 30000,
+          "sellerRef": "syn-seller-06"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000907|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 30000,
+          "sellerRef": "syn-seller-07"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000908|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 30000,
+          "sellerRef": "syn-seller-08"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000909|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 30000,
+          "sellerRef": "syn-seller-09"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000910|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 30000,
+          "sellerRef": "syn-seller-10"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000911|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 30000,
+          "sellerRef": "syn-seller-11"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000912|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 30000,
+          "sellerRef": "syn-seller-12"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000913|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 30000,
+          "sellerRef": "syn-seller-13"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000914|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 30000,
+          "sellerRef": "syn-seller-14"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000915|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 30000,
+          "sellerRef": "syn-seller-15"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000916|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 30000,
+          "sellerRef": "syn-seller-16"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000917|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 30000,
+          "sellerRef": "syn-seller-17"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000918|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 30000,
+          "sellerRef": "syn-seller-18"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "product-before-shift",
+      "kind": "pipelineInbound",
+      "delivery": {
+        "method": "POST",
+        "url": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0007",
+        "headers": {
+          "Shop-Timestamp": {
+            "$clockSeconds": -50
+          },
+          "Shop-Signature": {
+            "$signWith": "seller"
+          }
+        },
+        "body": {
+          "event_name": "buy_box_changed",
+          "resource": "/buybox?id_product=362000002&condition=new",
+          "id_message": "a0000000000000000000000000000007",
+          "storefront": "de",
+          "payload": {
+            "buy_box_change": "lost",
+            "id_product": 362000002,
+            "condition": "new",
+            "timestamp": "2026-09-14T09:59:10Z",
+            "eans": [
+              "2000000000017"
+            ],
+            "winner_offer": {
+              "seller": {
+                "pseudonym": "Synthetic Competitor"
+              },
+              "prices": {
+                "total_price": {
+                  "amount": 2390,
+                  "currency_code": "EUR"
+                },
+                "sales_price": {
+                  "amount": 2390,
+                  "currency_code": "EUR"
+                },
+                "shipping_cost": {
+                  "amount": 0,
+                  "currency_code": "EUR"
+                }
+              },
+              "delivery_time": {
+                "min": 1,
+                "max": 2
+              }
+            },
+            "seller_offer": {
+              "rank": 2,
+              "id_unit": 4102,
+              "id_offer": "SYN-OFFER-4102",
+              "seller": {
+                "pseudonym": "Synthetic Seller"
+              },
+              "prices": {
+                "total_price": {
+                  "amount": 2450,
+                  "currency_code": "EUR"
+                },
+                "sales_price": {
+                  "amount": 2450,
+                  "currency_code": "EUR"
+                },
+                "shipping_cost": {
+                  "amount": 0,
+                  "currency_code": "EUR"
+                }
+              },
+              "delivery_time": {
+                "min": 1,
+                "max": 3
+              }
+            },
+            "offers": [
+              {
+                "rank": 1,
+                "seller": {
+                  "pseudonym": "Synthetic Competitor"
+                },
+                "prices": {
+                  "total_price": {
+                    "amount": 2390,
+                    "currency_code": "EUR"
+                  },
+                  "sales_price": {
+                    "amount": 2390,
+                    "currency_code": "EUR"
+                  },
+                  "shipping_cost": {
+                    "amount": 0,
+                    "currency_code": "EUR"
+                  }
+                },
+                "delivery_time": {
+                  "min": 1,
+                  "max": 2
+                }
+              },
+              {
+                "rank": 2,
+                "id_unit": 4102,
+                "id_offer": "SYN-OFFER-4102",
+                "seller": {
+                  "pseudonym": "Synthetic Seller"
+                },
+                "prices": {
+                  "total_price": {
+                    "amount": 2450,
+                    "currency_code": "EUR"
+                  },
+                  "sales_price": {
+                    "amount": 2450,
+                    "currency_code": "EUR"
+                  },
+                  "shipping_cost": {
+                    "amount": 0,
+                    "currency_code": "EUR"
+                  }
+                },
+                "delivery_time": {
+                  "min": 1,
+                  "max": 3
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "snapshots": [
+          {
+            "verdict": "ACCEPT",
+            "engineInvocations": 1,
+            "scopes": [
+              {
+                "writeScopeId": "ws-price-de-4102",
+                "decision": {
+                  "outcome": "APPROVED",
+                  "finalMinor": 2385
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "twentieth-product-shifts",
+      "kind": "pipelineInbound",
+      "delivery": {
+        "method": "POST",
+        "url": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0007",
+        "headers": {
+          "Shop-Timestamp": {
+            "$clockSeconds": -30
+          },
+          "Shop-Signature": {
+            "$signWith": "seller"
+          }
+        },
+        "body": {
+          "event_name": "buy_box_changed",
+          "resource": "/buybox?id_product=362000001&condition=new",
+          "id_message": "a0000000000000000000000000000005",
+          "storefront": "de",
+          "payload": {
+            "buy_box_change": "lost",
+            "id_product": 362000001,
+            "condition": "new",
+            "timestamp": "2026-09-14T09:59:30Z",
+            "eans": [
+              "2000000000017"
+            ],
+            "winner_offer": {
+              "seller": {
+                "pseudonym": "Synthetic Competitor"
+              },
+              "prices": {
+                "total_price": {
+                  "amount": 5400,
+                  "currency_code": "EUR"
+                },
+                "sales_price": {
+                  "amount": 5400,
+                  "currency_code": "EUR"
+                },
+                "shipping_cost": {
+                  "amount": 0,
+                  "currency_code": "EUR"
+                }
+              },
+              "delivery_time": {
+                "min": 1,
+                "max": 2
+              }
+            },
+            "seller_offer": {
+              "rank": 2,
+              "id_unit": 4101,
+              "id_offer": "SYN-OFFER-4101",
+              "seller": {
+                "pseudonym": "Synthetic Seller"
+              },
+              "prices": {
+                "total_price": {
+                  "amount": 1850,
+                  "currency_code": "EUR"
+                },
+                "sales_price": {
+                  "amount": 1850,
+                  "currency_code": "EUR"
+                },
+                "shipping_cost": {
+                  "amount": 0,
+                  "currency_code": "EUR"
+                }
+              },
+              "delivery_time": {
+                "min": 1,
+                "max": 3
+              }
+            },
+            "offers": [
+              {
+                "rank": 1,
+                "seller": {
+                  "pseudonym": "Synthetic Competitor"
+                },
+                "prices": {
+                  "total_price": {
+                    "amount": 5400,
+                    "currency_code": "EUR"
+                  },
+                  "sales_price": {
+                    "amount": 5400,
+                    "currency_code": "EUR"
+                  },
+                  "shipping_cost": {
+                    "amount": 0,
+                    "currency_code": "EUR"
+                  }
+                },
+                "delivery_time": {
+                  "min": 1,
+                  "max": 2
+                }
+              },
+              {
+                "rank": 2,
+                "id_unit": 4101,
+                "id_offer": "SYN-OFFER-4101",
+                "seller": {
+                  "pseudonym": "Synthetic Seller"
+                },
+                "prices": {
+                  "total_price": {
+                    "amount": 1850,
+                    "currency_code": "EUR"
+                  },
+                  "sales_price": {
+                    "amount": 1850,
+                    "currency_code": "EUR"
+                  },
+                  "shipping_cost": {
+                    "amount": 0,
+                    "currency_code": "EUR"
+                  }
+                },
+                "delivery_time": {
+                  "min": 1,
+                  "max": 3
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "snapshots": [
+          {
+            "verdict": "HALT_CHANNEL",
+            "alarmClass": "CHANNEL_SHIFT",
+            "engineInvocations": 0,
+            "scopes": [],
+            "reason": {
+              "code": "CHANNEL_MASS_SHIFT",
+              "params": {
+                "direction": "UP",
+                "sameDirection": 20,
+                "products": 21
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "next-product-while-halted",
+      "kind": "pipelineInbound",
+      "delivery": {
+        "method": "POST",
+        "url": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0007",
+        "headers": {
+          "Shop-Timestamp": {
+            "$clockSeconds": -20
+          },
+          "Shop-Signature": {
+            "$signWith": "seller"
+          }
+        },
+        "body": {
+          "event_name": "buy_box_changed",
+          "resource": "/buybox?id_product=362000002&condition=new",
+          "id_message": "a0000000000000000000000000000006",
+          "storefront": "de",
+          "payload": {
+            "buy_box_change": "lost",
+            "id_product": 362000002,
+            "condition": "new",
+            "timestamp": "2026-09-14T09:59:40Z",
+            "eans": [
+              "2000000000017"
+            ],
+            "winner_offer": {
+              "seller": {
+                "pseudonym": "Synthetic Competitor"
+              },
+              "prices": {
+                "total_price": {
+                  "amount": 2380,
+                  "currency_code": "EUR"
+                },
+                "sales_price": {
+                  "amount": 2380,
+                  "currency_code": "EUR"
+                },
+                "shipping_cost": {
+                  "amount": 0,
+                  "currency_code": "EUR"
+                }
+              },
+              "delivery_time": {
+                "min": 1,
+                "max": 2
+              }
+            },
+            "seller_offer": {
+              "rank": 2,
+              "id_unit": 4102,
+              "id_offer": "SYN-OFFER-4102",
+              "seller": {
+                "pseudonym": "Synthetic Seller"
+              },
+              "prices": {
+                "total_price": {
+                  "amount": 2385,
+                  "currency_code": "EUR"
+                },
+                "sales_price": {
+                  "amount": 2385,
+                  "currency_code": "EUR"
+                },
+                "shipping_cost": {
+                  "amount": 0,
+                  "currency_code": "EUR"
+                }
+              },
+              "delivery_time": {
+                "min": 1,
+                "max": 3
+              }
+            },
+            "offers": [
+              {
+                "rank": 1,
+                "seller": {
+                  "pseudonym": "Synthetic Competitor"
+                },
+                "prices": {
+                  "total_price": {
+                    "amount": 2380,
+                    "currency_code": "EUR"
+                  },
+                  "sales_price": {
+                    "amount": 2380,
+                    "currency_code": "EUR"
+                  },
+                  "shipping_cost": {
+                    "amount": 0,
+                    "currency_code": "EUR"
+                  }
+                },
+                "delivery_time": {
+                  "min": 1,
+                  "max": 2
+                }
+              },
+              {
+                "rank": 2,
+                "id_unit": 4102,
+                "id_offer": "SYN-OFFER-4102",
+                "seller": {
+                  "pseudonym": "Synthetic Seller"
+                },
+                "prices": {
+                  "total_price": {
+                    "amount": 2385,
+                    "currency_code": "EUR"
+                  },
+                  "sales_price": {
+                    "amount": 2385,
+                    "currency_code": "EUR"
+                  },
+                  "shipping_cost": {
+                    "amount": 0,
+                    "currency_code": "EUR"
+                  }
+                },
+                "delivery_time": {
+                  "min": 1,
+                  "max": 3
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "snapshots": [
+          {
+            "verdict": "REJECT",
+            "alarmClass": "CHANNEL_HALTED",
+            "engineInvocations": 0,
+            "reason": {
+              "code": "CHANNEL_HALTED"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "buybox-recompute-while-halted",
+      "kind": "pipelineRecompute",
+      "writeScopeId": "ws-price-de-4102",
+      "trigger": {
+        "type": "SCHEDULE"
+      },
+      "expect": {
+        "stages": [
+          {
+            "stage": "STRATEGY"
+          },
+          {
+            "stage": "GATE",
+            "outcome": "REJECTED",
+            "reason": {
+              "code": "CHANNEL_HALTED"
+            }
+          }
+        ],
+        "decision": {
+          "rejectionReason": "CHANNEL_HALTED",
+          "decisionClass": "REJECTED_BY_GATE",
+          "finalMinor": null
+        }
+      }
+    },
+    {
+      "id": "fixed-price-recompute-while-halted",
+      "kind": "pipelineRecompute",
+      "writeScopeId": "ws-price-de-4103",
+      "trigger": {
+        "type": "SCHEDULE"
+      },
+      "expect": {
+        "stages": [
+          {
+            "stage": "STRATEGY",
+            "outcome": "CHANGED",
+            "reason": {
+              "code": "FIXED_PRICE"
+            }
+          },
+          {
+            "stage": "GATE",
+            "outcome": "APPROVED"
+          },
+          {
+            "stage": "WRITE_RECHECK",
+            "outcome": "PASS"
+          },
+          {
+            "stage": "DISPATCH_PLAN",
+            "outcome": "PLANNED"
+          },
+          {
+            "stage": "DISPATCH",
+            "outcome": "ACCEPTED"
+          }
+        ],
+        "decision": {
+          "outcome": "APPROVED",
+          "finalMinor": 2000
+        }
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "patch-4102-2385",
+      "request": {
+        "method": "PATCH",
+        "path": "/v2/units/4102",
+        "query": {
+          "storefront": "de"
+        },
+        "body": {
+          "listing_price": 2385
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": {
+            "id_unit": 4102,
+            "storefront": "de",
+            "currency": "EUR",
+            "listing_price": 2385,
+            "price": 2385,
+            "amount": 5,
+            "id_offer": "SYN-OFFER-4102",
+            "is_live": true,
+            "date_lastchange_iso": "2026-09-14T10:00:00Z"
+          }
+        }
+      }
+    },
+    {
+      "id": "patch-4103-2000",
+      "request": {
+        "method": "PATCH",
+        "path": "/v2/units/4103",
+        "query": {
+          "storefront": "de"
+        },
+        "body": {
+          "listing_price": 2000
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": {
+            "id_unit": 4103,
+            "storefront": "de",
+            "currency": "EUR",
+            "listing_price": 2000,
+            "price": 2000,
+            "amount": 5,
+            "id_offer": "SYN-OFFER-4103",
+            "is_live": true,
+            "date_lastchange_iso": "2026-09-14T10:00:00Z"
+          }
+        }
+      }
+    }
+  ],
+  "expect": {
+    "alerts": [
+      {
+        "code": "PRICING_CHANNEL_HALTED",
+        "severity": "CRITICAL",
+        "count": 1
+      },
+      {
+        "code": "COMPETITOR_SNAPSHOT_REJECTED",
+        "count": 0
+      }
+    ],
+    "pipeline": {
+      "halts": [
+        {
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "reasonCode": "CHANNEL_MASS_SHIFT",
+          "releasedAt": null
+        }
+      ],
+      "rejectedSnapshots": [
+        {
+          "verdict": "HALT_CHANNEL",
+          "reasonCode": "CHANNEL_MASS_SHIFT",
+          "alarmClass": "CHANNEL_SHIFT"
+        },
+        {
+          "verdict": "REJECT",
+          "reasonCode": "CHANNEL_HALTED",
+          "alarmClass": "CHANNEL_HALTED"
+        }
+      ],
+      "decisions": [
+        {
+          "writeScopeId": "ws-price-de-4102",
+          "outcome": "APPROVED"
+        },
+        {
+          "writeScopeId": "ws-price-de-4102",
+          "outcome": "REJECTED",
+          "rejectionReason": "CHANNEL_HALTED"
+        },
+        {
+          "writeScopeId": "ws-price-de-4103",
+          "outcome": "APPROVED"
+        }
+      ],
+      "writes": [
+        {
+          "writeScopeId": "ws-price-de-4102",
+          "amountMinor": 2385,
+          "status": "APPLIED"
+        },
+        {
+          "writeScopeId": "ws-price-de-4103",
+          "amountMinor": 2000,
+          "status": "APPLIED"
+        }
+      ]
+    }
+  }
+}

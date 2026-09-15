@@ -1,0 +1,215 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "kaufland/subscriptions/ensure",
+  "channel": "KAUFLAND",
+  "apiVersion": "2.44.0",
+  "title": "Подписки: оставить совпадающую, включить старую, событие вне перечня спецификации",
+  "description": "item_unit_changed уже подписан на нужный адрес — без запросов. order_unit_new подписан на старый адрес и выключен — PATCH с полным телом и is_active = true. buy_box_changed нет в перечне event_name спецификации 2.44.0 [KFL_C17, K-18]: POST пробуется, 400 validation → подписка неактивна и алерт. Адрес с токеном аккаунта [Р-40] не попадает в журнал и алерты. Мир: ранний доступ к buy_box_changed выдан (Р-45).",
+  "tags": [
+    "subscriptions",
+    "conservative:KFL_C17"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "https://sellerapi.kaufland.com/?page=push-notifications#modifying-a-subscription",
+      "vendor/kaufland/seller-api-v2/2026-09-14/openapi.json#GET /subscriptions"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn-seller-0001",
+      "marketplaces": [
+        "de",
+        "at"
+      ]
+    },
+    "credentials": {
+      "seller": {
+        "clientKey": "syn-seller-client-key-0001",
+        "secretKey": "syn-seller-secret-key-0001"
+      }
+    },
+    "secrets": [
+      "wh_tok_synthetic_0003"
+    ],
+    "adapter": {
+      "buyBoxChangedAccess": "GRANTED"
+    }
+  },
+  "steps": [
+    {
+      "id": "ensure",
+      "kind": "call",
+      "method": "ensureSubscriptions",
+      "args": [
+        [
+          {
+            "event": "item_unit_changed",
+            "marketplace": "de",
+            "callbackUrl": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0003"
+          },
+          {
+            "event": "order_unit_new",
+            "marketplace": "de",
+            "callbackUrl": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0003"
+          },
+          {
+            "event": "buy_box_changed",
+            "marketplace": "de",
+            "callbackUrl": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0003"
+          }
+        ]
+      ],
+      "expect": [
+        {
+          "spec": {
+            "event": "item_unit_changed"
+          },
+          "channelSubscriptionId": "101",
+          "active": true,
+          "error": {
+            "$absent": true
+          }
+        },
+        {
+          "spec": {
+            "event": "order_unit_new"
+          },
+          "channelSubscriptionId": "102",
+          "active": true
+        },
+        {
+          "spec": {
+            "event": "buy_box_changed"
+          },
+          "channelSubscriptionId": "",
+          "active": false,
+          "error": {
+            "code": "VALIDATION",
+            "httpStatus": 400
+          }
+        }
+      ]
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "list-de",
+      "request": {
+        "method": "GET",
+        "path": "/v2/subscriptions",
+        "query": {
+          "storefront": "de",
+          "limit": "30",
+          "offset": "0"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": [
+            {
+              "id_subscription": 101,
+              "callback_url": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0003",
+              "fallback_email": "ops@example.invalid",
+              "event_name": "item_unit_changed",
+              "is_active": true,
+              "storefront": "de"
+            },
+            {
+              "id_subscription": 102,
+              "callback_url": "https://hooks.example.invalid/kaufland/wh_tok_old",
+              "fallback_email": "ops@example.invalid",
+              "event_name": "order_unit_new",
+              "is_active": false,
+              "storefront": "de"
+            }
+          ],
+          "pagination": {
+            "offset": 0,
+            "limit": 30,
+            "total": 2
+          }
+        }
+      }
+    },
+    {
+      "id": "patch-102",
+      "request": {
+        "method": "PATCH",
+        "path": "/v2/subscriptions/102",
+        "body": {
+          "callback_url": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0003",
+          "fallback_email": "ops@example.invalid",
+          "event_name": "order_unit_new",
+          "is_active": true,
+          "storefront": "de"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": {
+            "id_subscription": 102,
+            "callback_url": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0003",
+            "fallback_email": "ops@example.invalid",
+            "event_name": "order_unit_new",
+            "is_active": true,
+            "storefront": "de"
+          }
+        }
+      }
+    },
+    {
+      "id": "post-buy-box-changed",
+      "request": {
+        "method": "POST",
+        "path": "/v2/subscriptions",
+        "query": {
+          "storefront": "de"
+        },
+        "body": {
+          "callback_url": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0003",
+          "fallback_email": "ops@example.invalid",
+          "event_name": "buy_box_changed"
+        }
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "type": "/problems/validation-error",
+          "message": "Validation failed",
+          "errors": [
+            {
+              "field": "event_name",
+              "message": "The value you selected is not a valid choice."
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "expect": {
+    "logs": [
+      {
+        "code": "KFL_C17_SUBSCRIPTION_EVENT_NOT_IN_SPEC",
+        "count": 1,
+        "question": "K-18",
+        "details": {
+          "event": "buy_box_changed"
+        }
+      }
+    ],
+    "alerts": [
+      {
+        "code": "KAUFLAND_SUBSCRIPTION_EVENT_REJECTED",
+        "severity": "WARNING",
+        "count": 1
+      }
+    ]
+  }
+}

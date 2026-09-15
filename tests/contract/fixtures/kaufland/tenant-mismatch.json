@@ -1,0 +1,60 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "kaufland/security/tenant-mismatch",
+  "channel": "KAUFLAND",
+  "apiVersion": "2.44.0",
+  "title": "Тенант из сообщения не владеет аккаунтом: отказ без обращения к каналу",
+  "description": "Р-31: адаптер сверяет тенант и аккаунт по каталогу до любого запроса. Чужой тенант — REJECTED TENANT_MISMATCH и CRITICAL; неизвестный аккаунт — PRECONDITION_FAILED и WARNING. Список обменов пуст: любой запрос к Kaufland провалит сценарий.",
+  "tags": ["security", "tenant-isolation"],
+  "provenance": { "kind": "SYNTHETIC_FROM_DOCS", "sources": ["docs/decisions.md#Р-31"] },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": { "externalAccountId": "syn-seller-0001", "marketplaces": ["de", "at"] },
+    "credentials": { "seller": { "clientKey": "syn-seller-client-key-0001", "secretKey": "syn-seller-secret-key-0001" } }
+  },
+  "steps": [
+    {
+      "id": "dispatch-for-foreign-tenant",
+      "kind": "call",
+      "method": "dispatch",
+      "ctx": { "tenantId": "10000000-0000-4000-8000-000000000999" },
+      "args": [
+        {
+          "batchId": "kfl:de:0000000000000901",
+          "operation": "PATCH /units/{id_unit}",
+          "budgetCharges": [],
+          "requestCount": 1,
+          "items": [
+            {
+              "channelWriteId": "cw-0901",
+              "writeScope": { "writeScopeId": "ws-price-de-9001", "field": "PRICE", "scopeKey": "kaufland|acct-1|de|9001", "identity": { "marketplace": "de", "externalUnitId": "9001" } },
+              "version": 1, "idempotencyKey": "cw-0901:1", "attemptNo": 1,
+              "value": { "field": "PRICE", "price": { "amountMinor": 999, "currency": "EUR", "basis": "GROSS" } }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "attemptsMade": 0,
+        "outcomes": [{ "channelWriteId": "cw-0901", "status": "REJECTED", "error": { "code": "TENANT_MISMATCH", "class": "REQUIRES_HUMAN", "scope": "ACCOUNT", "raiseAlert": true } }]
+      }
+    },
+    {
+      "id": "read-for-unknown-account",
+      "kind": "call",
+      "method": "readCompetitors",
+      "ctx": { "channelAccountId": "20000000-0000-4000-8000-000000000999" },
+      "args": [[{ "marketplace": "de", "channelProductRef": "362000001", "condition": "new" }]],
+      "expect": { "snapshots": [], "failures": [{ "error": { "code": "PRECONDITION_FAILED", "scope": "ACCOUNT" } }] }
+    }
+  ],
+  "exchanges": [],
+  "expect": {
+    "alerts": [
+      { "code": "KAUFLAND_TENANT_MISMATCH", "severity": "CRITICAL", "count": 1, "tenantId": "10000000-0000-4000-8000-000000000999" },
+      { "code": "KAUFLAND_ACCOUNT_UNAVAILABLE", "severity": "WARNING", "count": 1, "details": { "reason": "NOT_FOUND" } }
+    ]
+  }
+}

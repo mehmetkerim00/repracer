@@ -1,0 +1,142 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "kaufland/pipeline/enable-margin-without-cost",
+  "channel": "KAUFLAND",
+  "apiVersion": "2.44.0",
+  "title": "Включение маржинальной стратегии без себестоимости: предупреждение до включения",
+  "description": "Шаг 12, G, и Р-77: у предложения стратегия целевой маржи и минимальная маржа 15 %, но себестоимость не задана. Включение не проходит молча и не превращается в отказы Gate потом: pipeline возвращает предупреждение MARGIN_WITHOUT_COST с типом стратегии и явным списком, кому нужна себестоимость (стратегии и минимальной марже), режим остаётся OFF. Стратегия хранится на выключенном предложении и в памяти, и в PostgreSQL — тип известен без косвенного вывода. Повторное включение с подтверждением предупреждений включает репрайсинг.",
+  "tags": [
+    "pipeline",
+    "price-gate",
+    "step-12-g"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "docs/decisions.md#Р-43"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-15T09:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn-seller-0001",
+      "marketplaces": [
+        "de",
+        "at"
+      ]
+    },
+    "credentials": {
+      "seller": {
+        "clientKey": "syn-seller-client-key-0001",
+        "secretKey": "syn-seller-secret-key-0001"
+      }
+    },
+    "secrets": [
+      "wh_tok_synthetic_0007"
+    ],
+    "pricing": {
+      "scopes": [
+        {
+          "writeScopeId": "ws-price-de-4701",
+          "productId": "prod-4701",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "4701",
+          "channelProductRef": "362004701",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "OFF",
+          "strategy": {
+            "strategyId": "st-margin-2500",
+            "version": 1,
+            "params": {
+              "type": "TARGET_MARGIN",
+              "targetMarginBp": 2500
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1600,
+          "minPrice": {
+            "amountMinor": 1000,
+            "id": "min-4701"
+          },
+          "maxPrice": {
+            "amountMinor": 5000,
+            "id": "max-4701"
+          },
+          "guardrails": {
+            "guardrailIds": [
+              "g-margin-de-4701"
+            ],
+            "minMarginBp": 1500
+          }
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "enable-warns",
+      "kind": "pipelineEnableRepricing",
+      "writeScopeId": "ws-price-de-4701",
+      "expect": {
+        "enabled": false,
+        "problems": [],
+        "warnings": [
+          {
+            "code": "MARGIN_WITHOUT_COST",
+            "params": {
+              "strategyType": "TARGET_MARGIN",
+              "requiredBy": "STRATEGY,MIN_MARGIN",
+              "minMarginBp": 1500,
+              "cause": "COST_PROFILE_MISSING"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "enable-acknowledged",
+      "kind": "pipelineEnableRepricing",
+      "writeScopeId": "ws-price-de-4701",
+      "expect": {
+        "enabled": true,
+        "problems": [],
+        "warnings": [
+          {
+            "code": "MARGIN_WITHOUT_COST",
+            "params": {
+              "strategyType": "TARGET_MARGIN",
+              "requiredBy": "STRATEGY,MIN_MARGIN",
+              "minMarginBp": 1500,
+              "cause": "COST_PROFILE_MISSING"
+            }
+          }
+        ]
+      },
+      "acknowledgeWarnings": true
+    }
+  ],
+  "exchanges": [],
+  "expect": {
+    "logs": [
+      {
+        "code": "REPRICING_WARNINGS_NOT_ACKNOWLEDGED",
+        "count": 1
+      }
+    ],
+    "noAlerts": true,
+    "pipeline": {
+      "scopes": [
+        {
+          "pricingMode": "ENGINE"
+        }
+      ],
+      "decisions": [],
+      "writes": []
+    }
+  }
+}

@@ -1,0 +1,126 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "kaufland/subscriptions/buybox-early-access",
+  "channel": "KAUFLAND",
+  "apiVersion": "2.44.0",
+  "title": "buy_box_changed без раннего доступа: подписка не пробуется",
+  "description": "Р-45: buy_box_changed — ранний доступ у аккаунт-менеджера. Пока доступ не выдан, адаптер не отправляет запрос подписки на это событие и возвращает неактивное состояние без алерта; остальные подписки приводятся как обычно.",
+  "tags": [
+    "subscriptions",
+    "r-45"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "docs/decisions.md#Р-45"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn-seller-0001",
+      "marketplaces": [
+        "de",
+        "at"
+      ]
+    },
+    "credentials": {
+      "seller": {
+        "clientKey": "syn-seller-client-key-0001",
+        "secretKey": "syn-seller-secret-key-0001"
+      }
+    },
+    "secrets": [
+      "wh_tok_synthetic_0008"
+    ]
+  },
+  "steps": [
+    {
+      "id": "ensure",
+      "kind": "call",
+      "method": "ensureSubscriptions",
+      "args": [
+        [
+          {
+            "event": "buy_box_changed",
+            "marketplace": "de",
+            "callbackUrl": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0008"
+          },
+          {
+            "event": "item_unit_changed",
+            "marketplace": "de",
+            "callbackUrl": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0008"
+          }
+        ]
+      ],
+      "expect": [
+        {
+          "spec": {
+            "event": "buy_box_changed"
+          },
+          "active": false,
+          "channelSubscriptionId": "",
+          "error": {
+            "code": "PRECONDITION_FAILED",
+            "raiseAlert": false
+          }
+        },
+        {
+          "spec": {
+            "event": "item_unit_changed"
+          },
+          "active": true,
+          "channelSubscriptionId": "201"
+        }
+      ]
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "list-de",
+      "request": {
+        "method": "GET",
+        "path": "/v2/subscriptions",
+        "query": {
+          "storefront": "de",
+          "limit": "30",
+          "offset": "0"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": [
+            {
+              "id_subscription": 201,
+              "callback_url": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0008",
+              "fallback_email": "ops@example.invalid",
+              "event_name": "item_unit_changed",
+              "is_active": true,
+              "storefront": "de"
+            }
+          ],
+          "pagination": {
+            "offset": 0,
+            "limit": 30,
+            "total": 1
+          }
+        }
+      }
+    }
+  ],
+  "expect": {
+    "logs": [
+      {
+        "code": "KFL_BUYBOX_EARLY_ACCESS_NOT_GRANTED",
+        "count": 1
+      }
+    ],
+    "noLogCodes": [
+      "KFL_C17_SUBSCRIPTION_EVENT_NOT_IN_SPEC"
+    ],
+    "noAlerts": true
+  }
+}

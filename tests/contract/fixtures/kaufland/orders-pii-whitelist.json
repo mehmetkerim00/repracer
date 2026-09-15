@@ -1,0 +1,80 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "kaufland/orders/pii-whitelist",
+  "channel": "KAUFLAND",
+  "apiVersion": "2.44.0",
+  "title": "GET /order-units: только поля белого списка, без PII покупателя",
+  "description": "Ответ /order-units содержит покупателя, адреса и телефон (синтетические строки-метки). Адаптер берёт только id_order, id_order_unit, id_offer, storefront, status, ts_created_iso [Р-4]; стенд проверяет, что метки PII не появились ни в результатах, ни в журнале. Строки чужой витрины (pl) отбрасываются; неизвестный статус держит резервацию (OPEN) и пишется в журнал.",
+  "tags": ["orders", "privacy"],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": ["vendor/kaufland/seller-api-v2/2026-09-14/openapi.json#GET /order-units"]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": { "externalAccountId": "syn-seller-0001", "marketplaces": ["de", "at"] },
+    "credentials": { "seller": { "clientKey": "syn-seller-client-key-0001", "secretKey": "syn-seller-secret-key-0001" } },
+    "pii": ["erika.synthetic@example.invalid", "Synthstrasse", "Synthstadt", "+49 000 0000001", "Erika", "Mustersynth"]
+  },
+  "steps": [
+    {
+      "id": "read-order-lines",
+      "kind": "call",
+      "method": "readOrderLines",
+      "args": [{ "since": "2026-09-13T10:00:00.000Z", "limit": 50 }],
+      "expect": {
+        "items": {
+          "$exact": [
+            { "externalOrderRef": "SYN-ORDER-0001", "externalOrderLineRef": "7001", "identity": { "marketplace": "de", "externalOfferId": "SYN-OFFER-4101" }, "quantity": 1, "orderedAt": "2026-09-14T08:00:00.000Z", "status": "OPEN" },
+            { "externalOrderRef": "SYN-ORDER-0002", "externalOrderLineRef": "7002", "identity": { "marketplace": "at", "externalOfferId": "SYN-OFFER-4101" }, "quantity": 1, "orderedAt": "2026-09-14T08:30:00.000Z", "status": "CANCELLED" },
+            { "externalOrderRef": "SYN-ORDER-0004", "externalOrderLineRef": "7004", "identity": { "marketplace": "de", "externalOfferId": "SYN-OFFER-4102" }, "quantity": 1, "orderedAt": "2026-09-14T09:30:00.000Z", "status": "OPEN" }
+          ]
+        },
+        "nextCursor": { "$absent": true }
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "order-units-page-1",
+      "request": {
+        "method": "GET",
+        "path": "/v2/order-units",
+        "query": { "ts_updated_from_iso": "2026-09-13T10:00:00.000Z", "sort": "ts_updated:desc", "limit": "50", "offset": "0" }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": [
+            {
+              "id_order_unit": 7001, "id_order": "SYN-ORDER-0001", "ts_created_iso": "2026-09-14T08:00:00Z", "ts_updated_iso": "2026-09-14T08:00:00Z",
+              "status": "need_to_be_sent", "price": 1850, "id_offer": "SYN-OFFER-4101", "revenue_gross": 1850, "revenue_net": 1555, "note": "Erika Mustersynth note",
+              "storefront": "de", "currency": "EUR", "shipping_rate": 495, "fulfillment_type": "fulfilled_by_merchant",
+              "buyer": { "id_buyer": 99001, "email": "erika.synthetic@example.invalid" },
+              "billing_address": { "first_name": "Erika", "last_name": "Mustersynth", "street": "Synthstrasse", "house_number": "1", "postcode": "00001", "city": "Synthstadt", "phone": "+49 000 0000001", "country": "DE" },
+              "shipping_address": { "first_name": "Erika", "last_name": "Mustersynth", "street": "Synthstrasse", "house_number": "1", "postcode": "00001", "city": "Synthstadt", "phone": "+49 000 0000001", "country": "DE" }
+            },
+            {
+              "id_order_unit": 7002, "id_order": "SYN-ORDER-0002", "ts_created_iso": "2026-09-14T08:30:00Z", "status": "cancelled", "id_offer": "SYN-OFFER-4101", "storefront": "at",
+              "buyer": { "id_buyer": 99002, "email": "erika.synthetic@example.invalid" }, "cancel_reason": "synthetic"
+            },
+            {
+              "id_order_unit": 7003, "id_order": "SYN-ORDER-0003", "ts_created_iso": "2026-09-14T09:00:00Z", "status": "open", "id_offer": "SYN-OFFER-4101", "storefront": "pl"
+            },
+            {
+              "id_order_unit": 7004, "id_order": "SYN-ORDER-0004", "ts_created_iso": "2026-09-14T09:30:00Z", "status": "weird_new_status", "id_offer": "SYN-OFFER-4102", "storefront": "de",
+              "shipping_address": { "first_name": "Erika", "city": "Synthstadt" }
+            }
+          ],
+          "pagination": { "offset": 0, "limit": 50, "total": 4 }
+        }
+      }
+    }
+  ],
+  "expect": {
+    "logs": [{ "code": "KFL_ORDER_STATUS_UNKNOWN", "count": 1, "details": { "status": "weird_new_status" } }],
+    "noAlerts": true
+  }
+}

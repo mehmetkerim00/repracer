@@ -1,0 +1,111 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "kaufland/inbound/webhook-bad-signature",
+  "channel": "KAUFLAND",
+  "apiVersion": "2.44.0",
+  "title": "Уведомление с плохой подписью и другие отказы приёма",
+  "description": "Р-40: токен в адресе вебхука только маршрутизирует, подпись проверяется всегда. Подпись чужим секретом — 401 SIGNATURE_INVALID, алерт и KFL_C07. Без заголовков подписи — 401 без алерта. Верная подпись, но Shop-Timestamp старше 13 ч — 401 [KFL_C12]. Верная подпись, но тенант из адреса не владеет аккаунтом — 404 TENANT_MISMATCH и CRITICAL [Р-31]. Контроль: то же тело с верной подписью принимается.",
+  "tags": ["mandatory:webhook-bad-signature", "inbound", "security", "conservative:KFL_C07", "conservative:KFL_C12", "conservative:KFL_C13"],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": ["https://sellerapi.kaufland.com/?page=push-notifications#notification-requests", "https://sellerapi.kaufland.com/?page=rest-api#signing-requests"]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": { "externalAccountId": "syn-seller-0001", "marketplaces": ["de", "at"] },
+    "credentials": {
+      "seller": { "clientKey": "syn-seller-client-key-0001", "secretKey": "syn-seller-secret-key-0001" },
+      "partner": { "clientKey": "syn-partner-client-key-0001", "secretKey": "syn-partner-secret-key-0001" }
+    },
+    "partner": true,
+    "secrets": ["wh_tok_synthetic_0001"]
+  },
+  "steps": [
+    {
+      "id": "signed-with-wrong-secret",
+      "kind": "inbound",
+      "delivery": {
+        "method": "POST",
+        "url": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0001",
+        "headers": { "Shop-Timestamp": { "$clockSeconds": -10 }, "Shop-Signature": { "$signWith": { "secretKey": "not-the-seller-secret" } } },
+        "body": { "event_name": "order_unit_new", "resource": "/order-units/7001/", "id_message": "0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e", "storefront": "de", "payload": [] }
+      },
+      "expect": { "kind": "REJECTED", "responseStatus": 401, "error": { "code": "SIGNATURE_INVALID", "class": "REQUIRES_HUMAN", "raiseAlert": true } }
+    },
+    {
+      "id": "signed-with-partner-secret",
+      "kind": "inbound",
+      "delivery": {
+        "method": "POST",
+        "url": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0001",
+        "headers": { "Shop-Timestamp": { "$clockSeconds": -10 }, "Shop-Signature": { "$signWith": "partner" } },
+        "body": { "event_name": "order_unit_new", "resource": "/order-units/7001/", "id_message": "0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e", "storefront": "de", "payload": [] }
+      },
+      "expect": { "kind": "REJECTED", "responseStatus": 401, "error": { "code": "SIGNATURE_INVALID" } }
+    },
+    {
+      "id": "no-signature-headers",
+      "kind": "inbound",
+      "delivery": {
+        "method": "POST",
+        "url": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0001",
+        "headers": { "Shop-Timestamp": { "$clockSeconds": -10 } },
+        "body": { "event_name": "order_unit_new", "resource": "/order-units/7001/", "id_message": "0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e", "storefront": "de", "payload": [] }
+      },
+      "expect": { "kind": "REJECTED", "responseStatus": 401, "error": { "code": "SIGNATURE_INVALID", "raiseAlert": false } }
+    },
+    {
+      "id": "valid-signature-stale-timestamp",
+      "kind": "inbound",
+      "delivery": {
+        "method": "POST",
+        "url": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0001",
+        "headers": { "Shop-Timestamp": { "$clockSeconds": -50000 }, "Shop-Signature": { "$signWith": "seller" } },
+        "body": { "event_name": "order_unit_new", "resource": "/order-units/7001/", "id_message": "0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e", "storefront": "de", "payload": [] }
+      },
+      "expect": { "kind": "REJECTED", "responseStatus": 401, "error": { "code": "SIGNATURE_INVALID", "message": { "$regex": "window" }, "raiseAlert": false } }
+    },
+    {
+      "id": "valid-signature-foreign-tenant",
+      "kind": "inbound",
+      "delivery": {
+        "method": "POST",
+        "url": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0001",
+        "claimed": { "tenantId": "10000000-0000-4000-8000-000000000999" },
+        "headers": { "Shop-Timestamp": { "$clockSeconds": -10 }, "Shop-Signature": { "$signWith": "seller" } },
+        "body": { "event_name": "order_unit_new", "resource": "/order-units/7001/", "id_message": "0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e", "storefront": "de", "payload": [] }
+      },
+      "expect": { "kind": "REJECTED", "responseStatus": 404, "error": { "code": "TENANT_MISMATCH", "scope": "ACCOUNT", "raiseAlert": true } }
+    },
+    {
+      "id": "control-valid",
+      "kind": "inbound",
+      "delivery": {
+        "method": "POST",
+        "url": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0001",
+        "headers": { "shop-timestamp": { "$clockSeconds": -10 }, "shop-signature": { "$signWith": "seller" } },
+        "body": { "event_name": "order_unit_new", "resource": "/order-units/7001/", "id_message": "0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e", "storefront": "de", "payload": [] }
+      },
+      "expect": {
+        "kind": "EVENTS",
+        "deliveryId": "kaufland:0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e",
+        "acknowledgeStatus": 200,
+        "events": [{ "kind": "RESOURCE_CHANGED", "resource": "/order-units/7001/", "occurredAt": "2026-09-14T09:59:50.000Z" }]
+      }
+    }
+  ],
+  "exchanges": [],
+  "expect": {
+    "logs": [
+      { "code": "KFL_C07_WEBHOOK_SIGNATURE_VARIANT", "count": 2, "question": "K-02" },
+      { "code": "KFL_C12_WEBHOOK_TIMESTAMP_WINDOW", "count": 1, "question": "K-03" },
+      { "code": "KFL_C13_ORDER_DECREMENT_UNKNOWN", "count": 1 }
+    ],
+    "alerts": [
+      { "code": "KAUFLAND_WEBHOOK_SIGNATURE_INVALID", "severity": "WARNING", "count": 2 },
+      { "code": "KAUFLAND_TENANT_MISMATCH", "severity": "CRITICAL", "count": 1 }
+    ]
+  }
+}

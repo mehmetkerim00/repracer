@@ -1,0 +1,63 @@
+# --- Secrets & credentials (никогда не коммитим) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*credentials*.json
+secrets/
+.secrets/
+
+# --- Production / seller data (Amazon AUP/DPP: не должно попадать в репозиторий) ---
+dumps/
+exports/
+*.dump
+*.sql.gz
+data/prod/
+
+# --- OS / editors ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*~
+
+# --- Logs & temp ---
+logs/
+*.log
+# Логи доказательств шагов (docs/evidence) — часть репозитория: на них ссылаются отчёты и ADR.
+!docs/evidence/*.log
+tmp/
+.tmp/
+coverage/
+
+# --- Build outputs & dependencies (стек не выбран; общие шаблоны) ---
+node_modules/
+dist/
+build/
+out/
+target/
+bin/
+obj/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+# vendor/ — только для зависимостей сборки других языков; снимки спецификаций каналов (vendor/kaufland) хранятся в репозитории.
+vendor/*
+!vendor/kaufland/
+
+# --- Infrastructure ---
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform.lock.hcl.bak
+kubeconfig*

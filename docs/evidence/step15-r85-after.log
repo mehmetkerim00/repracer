@@ -1,0 +1,11 @@
+✔ Р-85: a capped Buy Box target is not kept — the uncapped target would give the Buy Box price (1.651667ms)
+✔ Р-85: a rejected competitor-derived proposal keeps neither the proposed price nor its deviation from the bound (0.206542ms)
+✔ Р-85: an approved Buy Box undercut keeps only the published price — the target is not repeated (0.114541ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 132.4005

@@ -1,0 +1,96 @@
+✔ Р-83 control: with nothing changed the queued write goes out after the in-flight one (453.010125ms)
+✖ Р-83: the unit cost rose between decision and dispatch — the margin floor blocks the write (26.895625ms)
+✖ Р-83: the VAT rate rose between decision and dispatch — the margin floor blocks the write (29.78925ms)
+✖ Р-83: the ECB rate changed between decision and dispatch — the converted cost blocks the write (24.473083ms)
+✔ Р-83: min_price rose between decision and dispatch — the absolute floor blocks the write (23.886667ms)
+✖ Р-83: a retry is a dispatch too — the cost rose after a transient channel error, the retry does not go out (16.376417ms)
+✖ Р-83: the cost rose between reading the context and the commit — the decision is not committed and nothing is sent (10.204458ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 2
+ℹ fail 5
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1040709.475167
+
+✖ failing tests:
+
+test at test/write-recheck.pg.test.ts:146:1
+✖ Р-83: the unit cost rose between decision and dispatch — the margin floor blocks the write (26.895625ms)
+  AssertionError [ERR_ASSERTION]: cost: the write reached the channel: [{"action":"DISPATCHED","channelWriteId":"6498897e-1f74-4f69-aabc-364605667603","version":2,"attemptNo":1,"outcome":"ACCEPTED","recorded":"APPLIED","reason":null},{"action":"IDLE"}]
+      at assertBlocked (file://<repo>/packages/pricing-store-pg/test/write-recheck.pg.test.ts:131:10)
+      at TestContext.<anonymous> (file://<repo>/packages/pricing-store-pg/test/write-recheck.pg.test.ts:150:9)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.run (node:internal/test_runner/test:1054:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:744:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at test/write-recheck.pg.test.ts:153:1
+✖ Р-83: the VAT rate rose between decision and dispatch — the margin floor blocks the write (29.78925ms)
+  AssertionError [ERR_ASSERTION]: VAT: the write reached the channel: [{"action":"DISPATCHED","channelWriteId":"a8846daa-3192-4352-babf-b941a09925f3","version":2,"attemptNo":1,"outcome":"ACCEPTED","recorded":"APPLIED","reason":null},{"action":"IDLE"}]
+      at assertBlocked (file://<repo>/packages/pricing-store-pg/test/write-recheck.pg.test.ts:131:10)
+      at TestContext.<anonymous> (file://<repo>/packages/pricing-store-pg/test/write-recheck.pg.test.ts:157:9)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.run (node:internal/test_runner/test:1054:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:744:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at test/write-recheck.pg.test.ts:160:1
+✖ Р-83: the ECB rate changed between decision and dispatch — the converted cost blocks the write (24.473083ms)
+  AssertionError [ERR_ASSERTION]: FX: the write reached the channel: [{"action":"DISPATCHED","channelWriteId":"392a4440-86a3-49a5-8c15-25b333c4540c","version":2,"attemptNo":1,"outcome":"ACCEPTED","recorded":"APPLIED","reason":null},{"action":"IDLE"}]
+      at assertBlocked (file://<repo>/packages/pricing-store-pg/test/write-recheck.pg.test.ts:131:10)
+      at TestContext.<anonymous> (file://<repo>/packages/pricing-store-pg/test/write-recheck.pg.test.ts:166:9)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.run (node:internal/test_runner/test:1054:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:744:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at test/write-recheck.pg.test.ts:176:1
+✖ Р-83: a retry is a dispatch too — the cost rose after a transient channel error, the retry does not go out (16.376417ms)
+  AssertionError [ERR_ASSERTION]: retry: the write reached the channel: [{"action":"DISPATCHED","channelWriteId":"26b0ed75-b47e-4bb7-b236-eaa67ac843d2","version":1,"attemptNo":2,"outcome":"ACCEPTED","recorded":"APPLIED","reason":null},{"action":"IDLE"}]
+      at assertBlocked (file://<repo>/packages/pricing-store-pg/test/write-recheck.pg.test.ts:131:10)
+      at TestContext.<anonymous> (file://<repo>/packages/pricing-store-pg/test/write-recheck.pg.test.ts:185:9)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.run (node:internal/test_runner/test:1054:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:744:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at test/write-recheck.pg.test.ts:188:1
+✖ Р-83: the cost rose between reading the context and the commit — the decision is not committed and nothing is sent (10.204458ms)
+  AssertionError [ERR_ASSERTION]: the database accepted a price below the new margin floor: {"status":"COMMITTED","rejectedSnapshotId":null,"divergenceCaseId":null,"decisions":[{"writeScopeId":"93a5d7b7-48b2-420e-a7f0-75062ffc58d9","intentId":"efc84c15-ca45-4cf4-b8a2-1f6ec22c9a33","decisionId":"80d63a9e-b1bd-4810-8898-29617fff50c6","pendingWriteId":null,"write":{"channelWriteId":"dd51fb3d-6865-4ffc-acc8-c3b8405d2b0f","writeScope":{"writeScopeId":"93a5d7b7-48b2-420e-a7f0-75062ffc58d9","field":"PRICE","scopeKey":"[\"de\", \"8306\"]","identity":{"marketplace":"de","externalUnitId":"8306"}},"version":1,"idempotencyKey":"5d4bbf61320e95b2f8351a17e22cc3e25f5a5956543c258969ae95346c7d60f2","value":{"field":"PRICE","price":{"amountMinor":1610,"currency":"EUR","basis":"GROSS"}},"attemptNo":1}}]}
+      at TestContext.<anonymous> (file://<repo>/packages/pricing-store-pg/test/write-recheck.pg.test.ts:192:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.run (node:internal/test_runner/test:1054:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:744:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'COMMITTED',
+    expected: 'COMMITTED',
+    operator: 'notStrictEqual',
+    diff: 'simple'
+  }

@@ -1,0 +1,168 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "kaufland/dispatch/error-classification",
+  "channel": "KAUFLAND",
+  "apiVersion": "2.44.0",
+  "title": "Классификация ошибок записи: 422, 400 на весь пакет, 503, 401",
+  "description": "422 action-not-allowed на PATCH: лимит правок не документирован, поэтому REQUIRES_HUMAN с алертом [KFL_C11, K-05]. 400 validation на весь bulk (нарушение правил пакета) — REJECTED VALIDATION со scope BATCH для каждой записи. 503 на bulk — исход неизвестен: OUTCOME_UNKNOWN CHANNEL_UNAVAILABLE без повтора POST [KFL_C02]. 401 — AUTH_INVALID на весь аккаунт. Классы строже умолчаний порта не ослабляются.",
+  "tags": ["dispatch", "errors", "conservative:KFL_C11", "conservative:KFL_C02"],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": ["https://sellerapi.kaufland.com/?page=error-responses", "vendor/kaufland/seller-api-v2/2026-09-14/openapi.json#POST /units/bulk"]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": { "externalAccountId": "syn-seller-0001", "marketplaces": ["de", "at"] },
+    "credentials": { "seller": { "clientKey": "syn-seller-client-key-0001", "secretKey": "syn-seller-secret-key-0001" } }
+  },
+  "steps": [
+    {
+      "id": "patch-422",
+      "kind": "call",
+      "method": "dispatch",
+      "args": [
+        {
+          "batchId": "kfl:de:0000000000001101", "operation": "PATCH /units/{id_unit}", "budgetCharges": [], "requestCount": 1,
+          "items": [
+            {
+              "channelWriteId": "cw-1101",
+              "writeScope": { "writeScopeId": "ws-price-de-1101", "field": "PRICE", "scopeKey": "kaufland|acct-1|de|1101", "identity": { "marketplace": "de", "externalUnitId": "1101" } },
+              "version": 9, "idempotencyKey": "cw-1101:9", "attemptNo": 1,
+              "value": { "field": "PRICE", "price": { "amountMinor": 1299, "currency": "EUR", "basis": "GROSS" } }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "attemptsMade": 1,
+        "outcomes": [
+          {
+            "channelWriteId": "cw-1101", "status": "REJECTED",
+            "error": { "code": "ACTION_NOT_ALLOWED", "class": "REQUIRES_HUMAN", "raiseAlert": true, "httpStatus": 422, "channelCode": "/problems/action-not-allowed" }
+          }
+        ]
+      }
+    },
+    {
+      "id": "bulk-400-whole-request",
+      "kind": "call",
+      "method": "dispatch",
+      "args": [
+        {
+          "batchId": "kfl:de:0000000000001102", "operation": "POST /units/bulk", "budgetCharges": [], "requestCount": 1,
+          "items": [
+            {
+              "channelWriteId": "cw-1102",
+              "writeScope": { "writeScopeId": "ws-price-de-1201", "field": "PRICE", "scopeKey": "kaufland|acct-1|de|1201", "identity": { "marketplace": "de", "externalUnitId": "1201" } },
+              "version": 1, "idempotencyKey": "cw-1102:1", "attemptNo": 1,
+              "value": { "field": "PRICE", "price": { "amountMinor": 1000, "currency": "EUR", "basis": "GROSS" } }
+            },
+            {
+              "channelWriteId": "cw-1103",
+              "writeScope": { "writeScopeId": "ws-price-de-1202", "field": "PRICE", "scopeKey": "kaufland|acct-1|de|1202", "identity": { "marketplace": "de", "externalUnitId": "1202" } },
+              "version": 1, "idempotencyKey": "cw-1103:1", "attemptNo": 1,
+              "value": { "field": "PRICE", "price": { "amountMinor": 1100, "currency": "EUR", "basis": "GROSS" } }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "attemptsMade": 1,
+        "outcomes": [
+          { "channelWriteId": "cw-1102", "status": "REJECTED", "error": { "code": "VALIDATION", "class": "PERMANENT", "scope": "BATCH", "httpStatus": 400 } },
+          { "channelWriteId": "cw-1103", "status": "REJECTED", "error": { "code": "VALIDATION", "scope": "BATCH" } }
+        ]
+      }
+    },
+    {
+      "id": "bulk-503-unknown-outcome",
+      "kind": "call",
+      "method": "dispatch",
+      "args": [
+        {
+          "batchId": "kfl:de:0000000000001103", "operation": "POST /units/bulk", "budgetCharges": [], "requestCount": 1,
+          "items": [
+            {
+              "channelWriteId": "cw-1104",
+              "writeScope": { "writeScopeId": "ws-price-de-1203", "field": "PRICE", "scopeKey": "kaufland|acct-1|de|1203", "identity": { "marketplace": "de", "externalUnitId": "1203" } },
+              "version": 1, "idempotencyKey": "cw-1104:1", "attemptNo": 1,
+              "value": { "field": "PRICE", "price": { "amountMinor": 1500, "currency": "EUR", "basis": "GROSS" } }
+            },
+            {
+              "channelWriteId": "cw-1105",
+              "writeScope": { "writeScopeId": "ws-price-de-1204", "field": "PRICE", "scopeKey": "kaufland|acct-1|de|1204", "identity": { "marketplace": "de", "externalUnitId": "1204" } },
+              "version": 1, "idempotencyKey": "cw-1105:1", "attemptNo": 1,
+              "value": { "field": "PRICE", "price": { "amountMinor": 1600, "currency": "EUR", "basis": "GROSS" } }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "attemptsMade": 1,
+        "outcomes": [
+          { "channelWriteId": "cw-1104", "status": "OUTCOME_UNKNOWN", "error": { "code": "CHANNEL_UNAVAILABLE", "class": "TRANSIENT", "scope": "BATCH", "httpStatus": 503 } },
+          { "channelWriteId": "cw-1105", "status": "OUTCOME_UNKNOWN", "error": { "code": "CHANNEL_UNAVAILABLE" } }
+        ]
+      }
+    },
+    {
+      "id": "patch-401",
+      "kind": "call",
+      "method": "dispatch",
+      "args": [
+        {
+          "batchId": "kfl:de:0000000000001104", "operation": "PATCH /units/{id_unit}", "budgetCharges": [], "requestCount": 1,
+          "items": [
+            {
+              "channelWriteId": "cw-1106",
+              "writeScope": { "writeScopeId": "ws-price-de-1205", "field": "PRICE", "scopeKey": "kaufland|acct-1|de|1205", "identity": { "marketplace": "de", "externalUnitId": "1205" } },
+              "version": 1, "idempotencyKey": "cw-1106:1", "attemptNo": 1,
+              "value": { "field": "PRICE", "price": { "amountMinor": 1700, "currency": "EUR", "basis": "GROSS" } }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "attemptsMade": 1,
+        "outcomes": [{ "channelWriteId": "cw-1106", "status": "REJECTED", "error": { "code": "AUTH_INVALID", "class": "REQUIRES_HUMAN", "scope": "ACCOUNT", "raiseAlert": true } }]
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "patch-1101-422",
+      "request": { "method": "PATCH", "path": "/v2/units/1101", "query": { "storefront": "de" }, "body": { "listing_price": 1299 } },
+      "response": { "status": 422, "body": { "type": "/problems/action-not-allowed", "message": "Action not allowed", "errors": [] } }
+    },
+    {
+      "id": "bulk-400",
+      "request": {
+        "method": "POST", "path": "/v2/units/bulk", "query": { "storefront": "de" },
+        "body": [{ "id_unit": 1201, "unit_data": { "listing_price": 1000 } }, { "id_unit": 1202, "unit_data": { "listing_price": 1100 } }]
+      },
+      "response": { "status": 400, "body": { "type": "/problems/validation-error", "message": "Validation failed", "errors": [{ "field": "units", "message": "Synthetic whole-request validation error." }] } }
+    },
+    {
+      "id": "bulk-503",
+      "request": {
+        "method": "POST", "path": "/v2/units/bulk", "query": { "storefront": "de" },
+        "body": [{ "id_unit": 1203, "unit_data": { "listing_price": 1500 } }, { "id_unit": 1204, "unit_data": { "listing_price": 1600 } }]
+      },
+      "response": { "status": 503, "body": { "type": "/problems/service-unavailable", "message": "Service unavailable", "errors": [] } }
+    },
+    {
+      "id": "patch-1205-401",
+      "request": { "method": "PATCH", "path": "/v2/units/1205", "query": { "storefront": "de" }, "body": { "listing_price": 1700 } },
+      "response": { "status": 401, "body": { "type": "/problems/unauthorized", "message": "Unauthorized", "errors": [] } }
+    }
+  ],
+  "expect": {
+    "logs": [
+      { "code": "KFL_C11_NO_EDIT_BUDGET", "count": 1, "question": "K-05" },
+      { "code": "KFL_C02_NO_TRANSPORT_RETRY_FOR_WRITES", "count": 1, "details": { "status": "503" } }
+    ],
+    "noAlerts": true
+  }
+}

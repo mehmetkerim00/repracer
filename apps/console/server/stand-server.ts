@@ -1,0 +1,324 @@
+import { createServer, type ServerResponse } from 'node:http';
+import { fileURLToPath } from 'node:url';
+import {
+  boundsView, can, decisionList, decisionTrace, describe, LOCALES, messagesFor, planStop, productList, rejectedView, stopView,
+  type Locale, type StopTarget, type Viewer,
+} from '@repracer/console-model';
+import {
+  buildStandWorlds, memoryStandDirectory, pgStandUsers, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_ISSUER, type LiveWorld,
+} from '@repracer/contract-tests/stand';
+import { createAuthenticator, hasSecondFactor, remoteJwks, staticJwks, type Authenticator, type Principal } from '@repracer/identity';
+import { createTestIssuer } from '@repracer/identity/test-issuer';
+import { NOTE_MAX, NOTE_MIN, type BoundsIndexItem, type EnableResult, type NoteRequest, type SessionView, type StopRequest, type WorldSummary } from '../src/api-types.ts';
+
+/**
+ * Сервер стенда для интерфейса [Р-67]. Только 127.0.0.1, данные синтетические.
+ * Вход [Р-78]: паролей и сессий у нас нет — запрос несёт токен поставщика identity (`Authorization: Bearer`), сервер проверяет
+ * подпись, издателя, получателя и сроки, находит пользователя по (издатель, subject) и читает членства и роли при каждом запросе.
+ * На стенде поставщика заменяет локальный имитатор (как имитаторы каналов); в работе — поставщик из ADR-0013.
+ * Права действий проверяет хранилище пути решения (на PostgreSQL — БД), сервер дублирует проверку, чтобы ответить 403 до вызова.
+ * Автор действия — пользователь токена: его членство сверяет хранилище (находка 4). Тексты — на языке запроса [Р-72].
+ */
+
+export interface ApiRequest {
+  method: string;
+  url: string;
+  body: unknown;
+  authorization?: string | undefined;
+  cookie?: string | undefined;
+}
+
+export interface ApiResponse {
+  status: number;
+  body: unknown;
+  setCookies?: string[];
+}
+
+export interface StandIdentity {
+  authenticator: Authenticator;
+  /** Имитатор поставщика — только стенд: выдаёт токен синтетического пользователя по роли */
+  simulator?: { token(account: (typeof STAND_ACCOUNTS)[number]): string; expiresInSeconds: number };
+}
+
+export const LOCALE_COOKIE = 'repracer_locale';
+
+const isLocale = (v: unknown): v is Locale => typeof v === 'string' && (LOCALES as readonly string[]).includes(v);
+
+function cookies(header: string | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const part of (header ?? '').split(';')) {
+    const i = part.indexOf('=');
+    if (i > 0) out[part.slice(0, i).trim()] = part.slice(i + 1).trim();
+  }
+  return out;
+}
+
+function note(raw: unknown): string | null {
+  const text = typeof raw === 'string' ? raw.trim() : '';
+  return text.length >= NOTE_MIN && text.length <= NOTE_MAX ? text : null;
+}
+
+function parseTarget(live: LiveWorld, raw: unknown): StopTarget | null {
+  const t = raw as Partial<{ kind: string; channelAccountId: string; marketplace: string }> | null;
+  if (t?.kind === 'TENANT') return { kind: 'TENANT' };
+  const account = live.accounts.find((a) => a.channelAccountId === t?.channelAccountId);
+  if (!account) return null;
+  if (t?.kind === 'CHANNEL_ACCOUNT') return { kind: 'CHANNEL_ACCOUNT', channelAccountId: account.channelAccountId };
+  if (t?.kind === 'STOREFRONT' && typeof t.marketplace === 'string' && account.marketplaces.includes(t.marketplace)) {
+    return { kind: 'STOREFRONT', channelAccountId: account.channelAccountId, marketplace: t.marketplace };
+  }
+  return null;
+}
+
+export function createStandApi(worlds: readonly LiveWorld[], identity: StandIdentity) {
+  const localeCookie = (l: Locale) => `${LOCALE_COOKIE}=${l}; SameSite=Strict; Path=/; Max-Age=31536000`;
+
+  return async function handle(req: ApiRequest): Promise<ApiResponse> {
+    const url = new URL(req.url, 'http://stand');
+    const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+    const jar = cookies(req.cookie);
+    const requested = url.searchParams.get('locale');
+    const locale: Locale = isLocale(requested) ? requested : isLocale(jar[LOCALE_COOKIE]) ? jar[LOCALE_COOKIE] : 'de';
+    const m = messagesFor(locale);
+    const s = m.ui.server;
+    const ok = (body: unknown, setCookies?: string[]): ApiResponse => ({ status: 200, body, ...(setCookies ? { setCookies } : {}) });
+    const fail = (status: number, code: string, message: string): ApiResponse => ({ status, body: { error: { code, message } } });
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    // Токен поставщика проверяется при каждом запросе; недействительный токен — как его отсутствие
+    const principal: Principal | null = await identity.authenticator.authenticate(req.authorization);
+    const sessionView = (l: Locale): SessionView => ({
+      user: principal ? { subject: principal.subject, email: principal.email } : null, locale: l,
+      simulator: identity.simulator ? STAND_ACCOUNTS.map((a) => ({ role: a.role, label: m.values[a.role] })) : null,
+    });
+
+    if (parts[0] !== 'api') return fail(404, 'NOT_FOUND', s.notFound);
+
+    if (parts[1] === 'session') {
+      if (req.method === 'GET' && parts.length === 2) return ok(sessionView(locale));
+      if (req.method === 'POST' && parts[2] === 'locale') {
+        if (!isLocale(body.locale)) return fail(400, 'BAD_LOCALE', s.notFound);
+        return ok(sessionView(body.locale), [localeCookie(body.locale)]);
+      }
+      return fail(404, 'NOT_FOUND', s.notFound);
+    }
+
+    // Имитатор поставщика стенда: токен синтетического пользователя; в работе этого адреса нет
+    if (parts[1] === 'stand-issuer' && parts[2] === 'token') {
+      if (!identity.simulator) return fail(404, 'NOT_FOUND', s.notFound);
+      if (req.method !== 'POST') return fail(405, 'METHOD', s.method);
+      const account = STAND_ACCOUNTS.find((a) => a.role === body.role);
+      if (!account) return fail(400, 'UNKNOWN_ACCOUNT', s.unknownAccount);
+      return ok({ accessToken: identity.simulator.token(account), tokenType: 'Bearer', expiresIn: identity.simulator.expiresInSeconds });
+    }
+
+    if (!principal) return fail(401, 'UNAUTHENTICATED', s.unauthenticated);
+    if (parts[1] !== 'worlds') return fail(404, 'NOT_FOUND', s.notFound);
+
+    // Роль — из членства при каждом запросе; мира без членства для пользователя нет
+    const viewerIn = (live: LiveWorld): Viewer | null => {
+      const membership = principal.memberships.find((x) => x.tenantId === live.identityTenantId);
+      return membership ? { membershipId: live.membershipAlias(membership.membershipId), role: membership.role } : null;
+    };
+
+    if (parts.length === 2) {
+      if (req.method !== 'GET') return fail(405, 'METHOD', s.method);
+      const visible = worlds.flatMap((live) => {
+        const viewer = viewerIn(live);
+        return viewer ? [{ live, viewer }] : [];
+      });
+      return ok(await Promise.all(visible.map(async ({ live, viewer }): Promise<WorldSummary> => {
+        const w = await live.view(viewer);
+        return {
+          id: w.id, title: w.title, description: w.description, failures: live.failures, scopes: w.state.scopes.length, decisions: w.state.decisions.length,
+          rejected: rejectedView(w, m).items.length, activeStops: w.state.stops.filter((x) => x.releasedAt === null).length,
+          activeHalts: w.state.halts.filter((h) => h.releasedAt === null).length, role: m.values[viewer.role],
+        };
+      })));
+    }
+
+    const live = worlds.find((w) => w.id === parts[2]);
+    const viewer = live ? viewerIn(live) : null;
+    if (!live || !viewer) return fail(404, 'WORLD_NOT_FOUND', s.notFound);
+    const world = await live.view(viewer);
+    const screen = parts[3];
+    const param = parts[4] ?? null;
+    const ctx = (channelAccountId?: string | null) => live.callContext(channelAccountId ?? live.accounts[0]!.channelAccountId);
+
+    if (req.method === 'GET') {
+      switch (screen) {
+        case 'products': return ok(productList(world, m));
+        case 'decisions': {
+          if (param === null) return ok(decisionList(world, m));
+          const trace = decisionTrace(world, param, m);
+          return trace ? ok(trace) : fail(404, 'DECISION_NOT_FOUND', s.notFound);
+        }
+        case 'rejected': return ok(rejectedView(world, m));
+        case 'bounds': {
+          if (param === null) {
+            return ok(productList(world, m).rows.map((r): BoundsIndexItem => ({ writeScopeId: r.unit.writeScopeId, label: r.unit.label, minPrice: r.minPrice, maxPrice: r.maxPrice })));
+          }
+          const b = boundsView(world, param, m);
+          return b ? ok(b) : fail(404, 'SCOPE_NOT_FOUND', s.notFound);
+        }
+        case 'stop': return ok(stopView(world, m));
+        default: return fail(404, 'NOT_FOUND', s.notFound);
+      }
+    }
+    if (req.method !== 'POST') return fail(405, 'METHOD', s.method);
+
+    if (screen === 'stop' && param === 'plan') {
+      const target = parseTarget(live, body.target);
+      return target ? ok(planStop(world, target, m)) : fail(400, 'BAD_TARGET', s.badTarget);
+    }
+
+    // Kill switch человеком [Р-69, Р-70]; журнал аудита пишет хранилище [Р-76]
+    if (screen === 'stop' && param === null) {
+      const r = body as Partial<StopRequest>;
+      const target = parseTarget(live, r.target);
+      if (!target) return fail(400, 'BAD_TARGET', s.badTarget);
+      if (!can(viewer.role, 'STOP_PRICING')) return fail(403, 'FORBIDDEN', s.forbidden);
+      if (r.confirmed !== true) return fail(400, 'NOT_CONFIRMED', s.notConfirmed);
+      const text = note(r.note);
+      if (!text) return fail(400, 'NOTE_REQUIRED', s.noteRequired(NOTE_MIN, NOTE_MAX));
+      const plan = planStop(world, target, m);
+      const result = await live.pipeline.stopPricing(ctx(target.kind === 'TENANT' ? null : target.channelAccountId), {
+        scope: target.kind, channelAccountId: target.kind === 'TENANT' ? null : target.channelAccountId,
+        marketplace: target.kind === 'STOREFRONT' ? target.marketplace : null, stoppedAt: live.clock.iso(), stoppedByMembershipId: viewer.membershipId,
+        stoppedByUserId: principal.userId, note: text,
+      });
+      if (result.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
+      if (result.status === 'ALREADY_ACTIVE') return fail(409, 'ALREADY_STOPPED', s.alreadyStopped);
+      return ok({ message: s.stopped(plan.impact.text), stop: stopView(await live.view(viewer), m) });
+    }
+
+    if (screen === 'stops' && param !== null && parts[5] === 'resume') {
+      const stop = world.state.stops.find((x) => x.stopId === param && x.releasedAt === null);
+      if (!stop) return fail(404, 'NOT_ACTIVE', s.notActive);
+      if (!can(viewer.role, stop.scope === 'TENANT' ? 'RESUME_TENANT_STOP' : 'RESUME_CHANNEL_STOP')) return fail(403, 'FORBIDDEN', s.forbidden);
+      const r = body as Partial<NoteRequest>;
+      if (r.confirmed !== true) return fail(400, 'NOT_CONFIRMED', s.notConfirmed);
+      const text = note(r.note);
+      if (!text) return fail(400, 'NOTE_REQUIRED', s.noteRequired(NOTE_MIN, NOTE_MAX));
+      // Р-88: снятие остановки тенанта — только со вторым фактором; хранилище и БД проверяют то же
+      const mfa = hasSecondFactor(principal.amr);
+      if (stop.scope === 'TENANT' && !mfa) return fail(403, 'MFA_REQUIRED', s.mfaRequired);
+      const result = await live.pipeline.resumePricing(ctx(stop.channelAccountId), stop.stopId, { membershipId: viewer.membershipId, userId: principal.userId, mfa, note: text, at: live.clock.iso() });
+      if (result.status === 'MFA_REQUIRED') return fail(403, 'MFA_REQUIRED', s.mfaRequired);
+      if (result.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
+      if (result.status !== 'RELEASED') return fail(404, 'NOT_ACTIVE', s.notActive);
+      return ok({ message: s.resumed, stop: stopView(await live.view(viewer), m) });
+    }
+
+    // Системная остановка витрины [Р-51, Р-52]: ручное снятие — с заметкой
+    if (screen === 'halts' && param !== null && parts[5] === 'release') {
+      const halt = world.state.halts.find((h) => h.haltId === param && h.releasedAt === null);
+      if (!halt) return fail(404, 'NOT_ACTIVE', s.notActive);
+      if (!can(viewer.role, 'RELEASE_CHANNEL_HALT')) return fail(403, 'FORBIDDEN', s.forbidden);
+      const r = body as Partial<NoteRequest>;
+      if (r.confirmed !== true) return fail(400, 'NOT_CONFIRMED', s.notConfirmed);
+      const text = note(r.note);
+      if (!text) return fail(400, 'NOTE_REQUIRED', s.noteRequired(NOTE_MIN, NOTE_MAX));
+      const result = await live.pipeline.releaseHaltManually(ctx(halt.channelAccountId), halt.haltId, { membershipId: viewer.membershipId, userId: principal.userId }, text);
+      return result.released ? ok({ message: s.released, stop: stopView(await live.view(viewer), m) }) : fail(404, 'NOT_ACTIVE', s.notActive);
+    }
+
+    // Шаг 12, G и Р-77: включение с предупреждениями по типу стратегии
+    if (screen === 'scopes' && param !== null && parts[5] === 'enable') {
+      const scope = world.state.scopes.find((x) => x.writeScopeId === param);
+      if (!scope) return fail(404, 'SCOPE_NOT_FOUND', s.notFound);
+      if (!can(viewer.role, 'ENABLE_REPRICING')) return fail(403, 'FORBIDDEN', s.forbidden);
+      const result = await live.pipeline.enableRepricing(ctx(scope.channelAccountId), scope.writeScopeId, { acknowledgeWarnings: body.acknowledgeWarnings === true });
+      return ok({
+        enabled: result.enabled, problems: result.problems.map((p) => describe(p, m)), warnings: result.warnings.map((w) => describe(w, m)),
+      } satisfies EnableResult);
+    }
+    return fail(404, 'NOT_FOUND', s.notFound);
+  };
+}
+
+export type StandIdentityMode = { kind: 'simulator' } | { kind: 'oidc'; issuer: string; audience: string; jwksUrl: string };
+
+const OIDC_VARS = ['OIDC_ISSUER', 'OIDC_AUDIENCE', 'OIDC_JWKS_URL'] as const;
+
+/**
+ * Режим входа стенда — только явно: STAND_IDENTITY=simulator (имитатор поставщика, синтетические пользователи) или
+ * STAND_IDENTITY=oidc (настоящий поставщик, нужны все три OIDC_*). Опечатка или неполная конфигурация — отказ запуска,
+ * а не молчаливый имитатор с открытой выдачей токенов; имитатор при заданных OIDC_* тоже не запускается.
+ */
+export function resolveStandIdentityMode(env: Readonly<Record<string, string | undefined>>): StandIdentityMode {
+  const present = OIDC_VARS.filter((v) => env[v]);
+  if (env.STAND_IDENTITY === 'oidc') {
+    const missing = OIDC_VARS.filter((v) => !env[v]);
+    if (missing.length > 0) throw new Error(`STAND_IDENTITY=oidc requires ${OIDC_VARS.join(', ')}; missing: ${missing.join(', ')}`);
+    if (!/^https:\/\//.test(env.OIDC_ISSUER!) || !/^https:\/\//.test(env.OIDC_JWKS_URL!)) throw new Error('OIDC_ISSUER and OIDC_JWKS_URL must be https URLs');
+    return { kind: 'oidc', issuer: env.OIDC_ISSUER!, audience: env.OIDC_AUDIENCE!, jwksUrl: env.OIDC_JWKS_URL! };
+  }
+  if (env.STAND_IDENTITY === 'simulator') {
+    if (present.length > 0) throw new Error(`STAND_IDENTITY=simulator refuses ${present.join(', ')}: the simulator issues tokens for any stand role`);
+    return { kind: 'simulator' };
+  }
+  throw new Error('STAND_IDENTITY must be "simulator" or "oidc": the stand does not choose the sign-in mode on its own');
+}
+
+const MAX_BODY_BYTES = 64 * 1024;
+
+function send(res: ServerResponse, r: ApiResponse): void {
+  res.writeHead(r.status, {
+    'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...(r.setCookies ? { 'set-cookie': r.setCookies } : {}),
+  });
+  res.end(JSON.stringify(r.body));
+}
+
+async function main(): Promise<void> {
+  const port = Number(process.env.STAND_PORT ?? 4318);
+  let handle: ReturnType<typeof createStandApi>;
+  // Режим входа выбирает тот, кто запускает, явно (находка 6): стенд не включает имитатор молча при неполной конфигурации
+  const mode = resolveStandIdentityMode(process.env);
+  const external = mode.kind === 'oidc' ? { issuer: mode.issuer, audience: mode.audience, jwks: remoteJwks(mode.jwksUrl) } : null;
+  const issuer = external ? null : createTestIssuer({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE });
+  const simulator = issuer ? { token: (a: (typeof STAND_ACCOUNTS)[number]) => issuer.token(a.subject, { email: a.email }), expiresInSeconds: 900 } : undefined;
+  const verify = external ?? { issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer!.jwks) };
+  if (process.env.REPRACER_PG_URL) {
+    const { createPool } = await import('@repracer/pricing-store-pg');
+    const { PgIdentityDirectory } = await import('@repracer/identity/pg');
+    const { pgStoreFactory } = await import('@repracer/contract-tests/pg-store');
+    const url = process.env.REPRACER_PG_URL;
+    const pool = createPool(url, { max: 8, applicationName: 'repracer-stand' });
+    const directory = new PgIdentityDirectory(pool as never);
+    const memberUsers = await pgStandUsers(directory, createPool(url.replace('svc_app@', 'svc_onboarding@'), { max: 1 }));
+    const worlds = await buildStandWorlds({
+      filter: (sc) => !sc.tags.includes('memory-only'),
+      storeFactory: pgStoreFactory(pool, createPool(url.replace('svc_app@', 'svc_dispatcher@'), { max: 2 }), createPool(url.replace('svc_app@', 'svc_fx_loader@'), { max: 1 }), { memberUsers }),
+    });
+    handle = createStandApi(worlds, { authenticator: createAuthenticator({ ...verify, directory }), ...(simulator ? { simulator } : {}) });
+  } else {
+    const worlds = await buildStandWorlds();
+    handle = createStandApi(worlds, { authenticator: createAuthenticator({ ...verify, directory: memoryStandDirectory(worlds) }), ...(simulator ? { simulator } : {}) });
+  }
+  const fallback = messagesFor('de').ui.server;
+  const server = createServer(async (req, res) => {
+    let size = 0;
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      size += (chunk as Buffer).length;
+      if (size > MAX_BODY_BYTES) return send(res, { status: 413, body: { error: { code: 'TOO_LARGE', message: fallback.tooLarge } } });
+      chunks.push(chunk as Buffer);
+    }
+    let body: unknown;
+    try {
+      body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : undefined;
+    } catch {
+      return send(res, { status: 400, body: { error: { code: 'BAD_JSON', message: fallback.badJson } } });
+    }
+    try {
+      send(res, await handle({ method: req.method ?? 'GET', url: req.url ?? '/', body, authorization: req.headers.authorization, cookie: req.headers.cookie }));
+    } catch (error) {
+      // Ни тело запроса, ни токен в журнал не пишутся — только метод, путь и сообщение ошибки
+      console.error('stand request failed', req.method, new URL(req.url ?? '/', 'http://stand').pathname, error instanceof Error ? error.message : error);
+      send(res, { status: 500, body: { error: { code: 'STAND_ERROR', message: fallback.standError } } });
+    }
+  });
+  server.listen(port, '127.0.0.1', () => console.log(`stand on http://127.0.0.1:${port}/api/session (${process.env.REPRACER_PG_URL ? 'PostgreSQL' : 'memory'})`));
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) await main();

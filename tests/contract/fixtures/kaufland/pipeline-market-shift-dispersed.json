@@ -1,0 +1,526 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "kaufland/pipeline/market-shift-dispersed",
+  "channel": "KAUFLAND",
+  "apiVersion": "2.44.0",
+  "title": "Массовый рост цен с разными коэффициентами: рыночное событие, канал не останавливается",
+  "description": "За 15 минут 19 товаров витрины подорожали на 40–202% у разных продавцов, двадцатый — на 50%. Все в одну сторону, но коэффициенты разные (разброс ln-коэффициента намного выше 0.005) — так выглядит рынок, а не ошибка разбора [Р-50]. Снимок принят с предупреждением MARKET_SHIFT_DISPERSED, остановки нет, решение 26.95 уходит в канал.",
+  "tags": [
+    "pipeline",
+    "input-sanity",
+    "r-50"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "docs/decisions.md#Р-50"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn-seller-0001",
+      "marketplaces": [
+        "de",
+        "at"
+      ]
+    },
+    "credentials": {
+      "seller": {
+        "clientKey": "syn-seller-client-key-0001",
+        "secretKey": "syn-seller-secret-key-0001"
+      }
+    },
+    "secrets": [
+      "wh_tok_synthetic_0007"
+    ],
+    "pricing": {
+      "scopes": [
+        {
+          "writeScopeId": "ws-price-de-4101",
+          "productId": "prod-4101",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "4101",
+          "channelProductRef": "362000001",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 2600,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-4101"
+          },
+          "maxPrice": {
+            "amountMinor": 3000,
+            "id": "max-4101"
+          }
+        }
+      ],
+      "competitorDaily": {
+        "de|362000001|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ]
+      },
+      "competitorState": {
+        "de|362000001|new": {
+          "observedAt": "2026-09-14T09:00:00.000Z",
+          "buyboxMinor": 1795,
+          "lowestMinor": 1795
+        }
+      },
+      "moves": [
+        {
+          "marketplace": "de",
+          "productRef": "362000800|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 14000,
+          "sellerRef": "syn-seller-00"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000801|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 14900,
+          "sellerRef": "syn-seller-01"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000802|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 15800,
+          "sellerRef": "syn-seller-02"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000803|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 16700,
+          "sellerRef": "syn-seller-03"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000804|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 17600,
+          "sellerRef": "syn-seller-04"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000805|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 18500,
+          "sellerRef": "syn-seller-05"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000806|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 19400,
+          "sellerRef": "syn-seller-06"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000807|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 20300,
+          "sellerRef": "syn-seller-07"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000808|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 21200,
+          "sellerRef": "syn-seller-08"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000809|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 22100,
+          "sellerRef": "syn-seller-09"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000810|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 23000,
+          "sellerRef": "syn-seller-10"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000811|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 23900,
+          "sellerRef": "syn-seller-11"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000812|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 24800,
+          "sellerRef": "syn-seller-12"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000813|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 25700,
+          "sellerRef": "syn-seller-13"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000814|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 26600,
+          "sellerRef": "syn-seller-14"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000815|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 27500,
+          "sellerRef": "syn-seller-15"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000816|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 28400,
+          "sellerRef": "syn-seller-16"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000817|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 29300,
+          "sellerRef": "syn-seller-17"
+        },
+        {
+          "marketplace": "de",
+          "productRef": "362000818|new",
+          "evaluatedAt": "2026-09-14T09:55:00.000Z",
+          "moveBp": 30200,
+          "sellerRef": "syn-seller-18"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "market-moves-up",
+      "kind": "pipelineInbound",
+      "delivery": {
+        "method": "POST",
+        "url": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0007",
+        "headers": {
+          "Shop-Timestamp": {
+            "$clockSeconds": -30
+          },
+          "Shop-Signature": {
+            "$signWith": "seller"
+          }
+        },
+        "body": {
+          "event_name": "buy_box_changed",
+          "resource": "/buybox?id_product=362000001&condition=new",
+          "id_message": "a0000000000000000000000000000011",
+          "storefront": "de",
+          "payload": {
+            "buy_box_change": "lost",
+            "id_product": 362000001,
+            "condition": "new",
+            "timestamp": "2026-09-14T09:59:30Z",
+            "eans": [
+              "2000000000017"
+            ],
+            "winner_offer": {
+              "seller": {
+                "pseudonym": "Synthetic Competitor"
+              },
+              "prices": {
+                "total_price": {
+                  "amount": 2700,
+                  "currency_code": "EUR"
+                },
+                "sales_price": {
+                  "amount": 2700,
+                  "currency_code": "EUR"
+                },
+                "shipping_cost": {
+                  "amount": 0,
+                  "currency_code": "EUR"
+                }
+              },
+              "delivery_time": {
+                "min": 1,
+                "max": 2
+              }
+            },
+            "seller_offer": {
+              "rank": 2,
+              "id_unit": 4101,
+              "id_offer": "SYN-OFFER-4101",
+              "seller": {
+                "pseudonym": "Synthetic Seller"
+              },
+              "prices": {
+                "total_price": {
+                  "amount": 2600,
+                  "currency_code": "EUR"
+                },
+                "sales_price": {
+                  "amount": 2600,
+                  "currency_code": "EUR"
+                },
+                "shipping_cost": {
+                  "amount": 0,
+                  "currency_code": "EUR"
+                }
+              },
+              "delivery_time": {
+                "min": 1,
+                "max": 3
+              }
+            },
+            "offers": [
+              {
+                "rank": 1,
+                "seller": {
+                  "pseudonym": "Synthetic Competitor"
+                },
+                "prices": {
+                  "total_price": {
+                    "amount": 2700,
+                    "currency_code": "EUR"
+                  },
+                  "sales_price": {
+                    "amount": 2700,
+                    "currency_code": "EUR"
+                  },
+                  "shipping_cost": {
+                    "amount": 0,
+                    "currency_code": "EUR"
+                  }
+                },
+                "delivery_time": {
+                  "min": 1,
+                  "max": 2
+                }
+              },
+              {
+                "rank": 2,
+                "id_unit": 4101,
+                "id_offer": "SYN-OFFER-4101",
+                "seller": {
+                  "pseudonym": "Synthetic Seller"
+                },
+                "prices": {
+                  "total_price": {
+                    "amount": 2600,
+                    "currency_code": "EUR"
+                  },
+                  "sales_price": {
+                    "amount": 2600,
+                    "currency_code": "EUR"
+                  },
+                  "shipping_cost": {
+                    "amount": 0,
+                    "currency_code": "EUR"
+                  }
+                },
+                "delivery_time": {
+                  "min": 1,
+                  "max": 3
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "snapshots": [
+          {
+            "verdict": "ACCEPT",
+            "engineInvocations": 1,
+            "warnings": [
+              {
+                "code": "MARKET_SHIFT_DISPERSED",
+                "params": {
+                  "direction": "UP",
+                  "sameDirection": 20,
+                  "products": 20
+                }
+              }
+            ],
+            "scopes": [
+              {
+                "decision": {
+                  "outcome": "APPROVED",
+                  "finalMinor": 2695
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "patch-4101-2695",
+      "request": {
+        "method": "PATCH",
+        "path": "/v2/units/4101",
+        "query": {
+          "storefront": "de"
+        },
+        "body": {
+          "listing_price": 2695
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": {
+            "id_unit": 4101,
+            "storefront": "de",
+            "currency": "EUR",
+            "listing_price": 2695,
+            "price": 2695,
+            "amount": 5,
+            "id_offer": "SYN-OFFER-4101",
+            "is_live": true,
+            "date_lastchange_iso": "2026-09-14T10:00:00Z"
+          }
+        }
+      }
+    }
+  ],
+  "expect": {
+    "noAlerts": true,
+    "pipeline": {
+      "halts": [],
+      "rejectedSnapshots": [],
+      "writes": [
+        {
+          "amountMinor": 2695,
+          "status": "APPLIED"
+        }
+      ]
+    }
+  }
+}

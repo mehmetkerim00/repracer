@@ -1,0 +1,403 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "kaufland/pipeline/fx-cross-channel-anchor-no-rate",
+  "channel": "KAUFLAND",
+  "apiVersion": "2.44.0",
+  "title": "Якорь «тот же EAN» при разной валюте без курса ЕЦБ: явное предупреждение вместо молчаливого пропуска",
+  "description": "Ссылка того же EAN с amazon.com в USD, курса ЕЦБ в системе нет. Якорь не применяется, и это видно: предупреждение CROSS_CHANNEL_FX_UNAVAILABLE с каналом, валютой и причиной, проверка якоря — SKIPPED с пояснением [Р-63]. Снимок оценивается по истории цен. Только на памяти: курсы — общий справочник платформы, в общей базе стенда их засевают другие сценарии.",
+  "tags": [
+    "pipeline",
+    "input-sanity",
+    "r-63",
+    "memory-only"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "docs/decisions.md#Р-61",
+      "docs/decisions.md#Р-63",
+      "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-15T09:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn-seller-0001",
+      "marketplaces": [
+        "de",
+        "at"
+      ]
+    },
+    "credentials": {
+      "seller": {
+        "clientKey": "syn-seller-client-key-0001",
+        "secretKey": "syn-seller-secret-key-0001"
+      }
+    },
+    "secrets": [
+      "wh_tok_synthetic_0007"
+    ],
+    "pricing": {
+      "scopes": [
+        {
+          "writeScopeId": "ws-price-de-4701",
+          "productId": "prod-4701",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "4701",
+          "channelProductRef": "362004701",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-4701"
+          },
+          "maxPrice": {
+            "amountMinor": 9500,
+            "id": "max-4701"
+          },
+          "gtin": "2000000047018"
+        }
+      ],
+      "accounts": [
+        {
+          "channelAccountId": "20000000-0000-4000-8000-000000000002",
+          "channel": "AMAZON",
+          "region": "NA",
+          "marketplaces": [
+            "ATVPDKIKX0DER"
+          ]
+        }
+      ],
+      "competitorDaily": {
+        "de|362004701|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ]
+      },
+      "crossChannel": {
+        "de|362004701|new": [
+          {
+            "channel": "AMAZON",
+            "marketplace": "ATVPDKIKX0DER",
+            "referenceMinor": 2050,
+            "currency": "USD",
+            "observedAt": "2026-09-15T08:00:00.000Z"
+          }
+        ]
+      }
+    }
+  },
+  "steps": [
+    {
+      "id": "usd-reference-without-rate",
+      "kind": "pipelineInbound",
+      "delivery": {
+        "method": "POST",
+        "url": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0007",
+        "headers": {
+          "Shop-Timestamp": {
+            "$clockSeconds": -30
+          },
+          "Shop-Signature": {
+            "$signWith": "seller"
+          }
+        },
+        "body": {
+          "event_name": "buy_box_changed",
+          "resource": "/buybox?id_product=362004701&condition=new",
+          "id_message": "a0000000000000000000000000000471",
+          "storefront": "de",
+          "payload": {
+            "buy_box_change": "lost",
+            "id_product": 362004701,
+            "condition": "new",
+            "timestamp": "2026-09-15T08:59:30Z",
+            "eans": [
+              "2000000000017"
+            ],
+            "winner_offer": {
+              "seller": {
+                "pseudonym": "Synthetic Competitor"
+              },
+              "prices": {
+                "total_price": {
+                  "amount": 1780,
+                  "currency_code": "EUR"
+                },
+                "sales_price": {
+                  "amount": 1780,
+                  "currency_code": "EUR"
+                },
+                "shipping_cost": {
+                  "amount": 0,
+                  "currency_code": "EUR"
+                }
+              },
+              "delivery_time": {
+                "min": 1,
+                "max": 2
+              }
+            },
+            "seller_offer": {
+              "rank": 2,
+              "id_unit": 4701,
+              "id_offer": "SYN-OFFER-4701",
+              "seller": {
+                "pseudonym": "Synthetic Seller"
+              },
+              "prices": {
+                "total_price": {
+                  "amount": 1850,
+                  "currency_code": "EUR"
+                },
+                "sales_price": {
+                  "amount": 1850,
+                  "currency_code": "EUR"
+                },
+                "shipping_cost": {
+                  "amount": 0,
+                  "currency_code": "EUR"
+                }
+              },
+              "delivery_time": {
+                "min": 1,
+                "max": 3
+              }
+            },
+            "offers": [
+              {
+                "rank": 1,
+                "seller": {
+                  "pseudonym": "Synthetic Competitor"
+                },
+                "prices": {
+                  "total_price": {
+                    "amount": 1780,
+                    "currency_code": "EUR"
+                  },
+                  "sales_price": {
+                    "amount": 1780,
+                    "currency_code": "EUR"
+                  },
+                  "shipping_cost": {
+                    "amount": 0,
+                    "currency_code": "EUR"
+                  }
+                },
+                "delivery_time": {
+                  "min": 1,
+                  "max": 2
+                }
+              },
+              {
+                "rank": 2,
+                "id_unit": 4701,
+                "id_offer": "SYN-OFFER-4701",
+                "seller": {
+                  "pseudonym": "Synthetic Seller"
+                },
+                "prices": {
+                  "total_price": {
+                    "amount": 1850,
+                    "currency_code": "EUR"
+                  },
+                  "sales_price": {
+                    "amount": 1850,
+                    "currency_code": "EUR"
+                  },
+                  "shipping_cost": {
+                    "amount": 0,
+                    "currency_code": "EUR"
+                  }
+                },
+                "delivery_time": {
+                  "min": 1,
+                  "max": 3
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "snapshots": [
+          {
+            "verdict": "ACCEPT",
+            "anchorsUsed": [
+              "HISTORY"
+            ],
+            "warnings": [
+              {
+                "code": "CROSS_CHANNEL_FX_UNAVAILABLE",
+                "params": {
+                  "channel": "AMAZON",
+                  "marketplace": "ATVPDKIKX0DER",
+                  "currency": "USD",
+                  "expected": "EUR",
+                  "cause": "FX_RATE_UNAVAILABLE"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "patch-4701-1775",
+      "request": {
+        "method": "PATCH",
+        "path": "/v2/units/4701",
+        "query": {
+          "storefront": "de"
+        },
+        "body": {
+          "listing_price": 1775
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": {
+            "id_unit": 4701,
+            "storefront": "de",
+            "currency": "EUR",
+            "listing_price": 1775,
+            "price": 1775,
+            "amount": 5,
+            "id_offer": "SYN-OFFER-4701",
+            "is_live": true,
+            "date_lastchange_iso": "2026-09-14T10:00:00Z"
+          }
+        }
+      }
+    }
+  ],
+  "expect": {
+    "pipeline": {
+      "writes": [
+        {
+          "writeScopeId": "ws-price-de-4701",
+          "amountMinor": 1775,
+          "status": "APPLIED"
+        }
+      ]
+    }
+  }
+}

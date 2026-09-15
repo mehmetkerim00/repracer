@@ -1,0 +1,68 @@
+:root { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; color: #1d2330; background: #f6f7f9; font-size: 14px; }
+body { margin: 0; }
+.app header { display: flex; gap: 16px; align-items: baseline; padding: 12px 24px; background: #1d2330; color: #fff; }
+.app header h1 { font-size: 18px; margin: 0; }
+.app header .muted { color: #b8c0cc; }
+main { padding: 16px 24px 48px; }
+a { color: #1f5fbf; }
+h2 { margin: 8px 0 4px; }
+h3 { margin: 12px 0 6px; font-size: 15px; }
+.muted { color: #5c6677; }
+.small { font-size: 12px; }
+.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.nowrap { white-space: nowrap; }
+.table-wrap { overflow-x: auto; background: #fff; border: 1px solid #dde1e7; border-radius: 6px; }
+table { border-collapse: collapse; width: 100%; }
+th, td { padding: 8px 10px; border-bottom: 1px solid #eceff3; vertical-align: top; text-align: left; }
+th { background: #f0f2f5; font-weight: 600; font-size: 12px; }
+.actions { display: flex; flex-direction: column; gap: 4px; white-space: nowrap; }
+.badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; border: 1px solid transparent; }
+.tone-ok { background: #e3f4e8; color: #17613a; }
+.tone-progress { background: #e4edfb; color: #1f4f99; }
+.tone-warn { background: #fff3d6; color: #7a5200; }
+.tone-stop { background: #fde4e1; color: #9b1c12; }
+.tone-off { background: #eceff3; color: #4a5363; }
+.tone-unknown { background: #fff; color: #5c6677; border-color: #c9ced6; border-style: dashed; }
+p.headline { font-size: 18px; font-weight: 600; padding: 8px 12px; border-radius: 6px; }
+.cell .muted { margin-top: 2px; max-width: 260px; }
+.gaps { margin-top: 20px; padding: 10px 14px; border: 1px dashed #c9a227; background: #fffbea; border-radius: 6px; }
+.gaps h3 { margin-top: 0; }
+.gap-note { color: #7a5200; }
+.loading { color: #1f4f99; }
+.error { color: #9b1c12; background: #fde4e1; padding: 8px 12px; border-radius: 6px; }
+.notice { background: #e3f4e8; color: #17613a; padding: 8px 12px; border-radius: 6px; }
+.tabs { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.tabs a.active { font-weight: 700; text-decoration: none; color: #1d2330; border-bottom: 2px solid #1d2330; }
+.steps { list-style: none; padding: 0; counter-reset: step; }
+.step { background: #fff; border: 1px solid #dde1e7; border-left: 4px solid #c9ced6; border-radius: 6px; margin: 10px 0; padding: 8px 14px; counter-increment: step; }
+.step-head { display: flex; gap: 10px; align-items: center; }
+.step-head h3::before { content: counter(step) '. '; }
+.status-OK { border-left-color: #2e9e5b; }
+.status-STOP { border-left-color: #c0392b; }
+.status-WARN { border-left-color: #d49a00; }
+.status-UNKNOWN { border-left-color: #8a93a3; border-left-style: dashed; }
+.items { list-style: none; padding-left: 4px; margin: 4px 0; }
+.items li { margin: 3px 0; }
+.mark { display: inline-block; min-width: 112px; font-size: 12px; }
+.outcome-PASS { color: #17613a; }
+.outcome-FAIL { color: #9b1c12; font-weight: 600; }
+.outcome-SKIPPED, .outcome-NOT_RUN { color: #5c6677; }
+.label { font-weight: 600; }
+.reason { margin-left: 116px; }
+.cards { display: flex; flex-wrap: wrap; gap: 12px; }
+.card { background: #fff; border: 1px solid #dde1e7; border-radius: 6px; padding: 10px 14px; min-width: 220px; flex: 1 1 220px; }
+.card.stopped { border-color: #c0392b; background: #fff6f5; }
+.card.emphasis { border-color: #1d2330; }
+.card .big { font-size: 22px; font-weight: 700; margin: 4px 0; font-variant-numeric: tabular-nums; }
+.breakdown { margin-top: 12px; }
+.line-MARGIN td { font-weight: 700; }
+.line-PRICE td { background: #f7f9fc; }
+.confirm { background: #fff; border: 2px solid #c0392b; border-radius: 8px; padding: 12px 16px; margin: 12px 0; max-width: 720px; }
+.confirm textarea { display: block; width: 100%; margin-top: 4px; font: inherit; }
+.buttons { display: flex; gap: 10px; margin-top: 10px; }
+button { font: inherit; padding: 6px 14px; border-radius: 6px; border: 1px solid #b8c0cc; background: #fff; cursor: pointer; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+button.danger { background: #c0392b; border-color: #c0392b; color: #fff; }
+.worlds { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.groups { display: flex; flex-wrap: wrap; gap: 12px; list-style: none; padding: 0; }
+.index li { margin: 4px 0; }

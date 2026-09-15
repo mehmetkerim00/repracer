@@ -1,0 +1,595 @@
+{
+  "format": "repracer.bench/decision-path/v1",
+  "startedFor": "step-8",
+  "environment": {
+    "node": "v22.22.3",
+    "cpu": "Apple M1",
+    "cores": 8,
+    "memoryGb": 8,
+    "postgres": "PostgreSQL 16.13 (Homebrew) on aarch64-apple-darwin22.5.0, compiled by Apple clang version 14.0.3 (clang-1403.0.22.14.1), 64-bit",
+    "settings": [
+      {
+        "name": "effective_cache_size",
+        "setting": "524288",
+        "unit": "8kB"
+      },
+      {
+        "name": "fsync",
+        "setting": "on",
+        "unit": null
+      },
+      {
+        "name": "max_connections",
+        "setting": "100",
+        "unit": null
+      },
+      {
+        "name": "max_wal_size",
+        "setting": "1024",
+        "unit": "MB"
+      },
+      {
+        "name": "shared_buffers",
+        "setting": "16384",
+        "unit": "8kB"
+      },
+      {
+        "name": "synchronous_commit",
+        "setting": "on",
+        "unit": null
+      },
+      {
+        "name": "wal_level",
+        "setting": "replica",
+        "unit": null
+      },
+      {
+        "name": "work_mem",
+        "setting": "4096",
+        "unit": "kB"
+      }
+    ]
+  },
+  "workload": {
+    "skus": 10000,
+    "storefronts": 2,
+    "engineScopes": 20000,
+    "changedShare": 0.1,
+    "baseRatePerSecond": 18.47,
+    "peakRatePerSecond": 184.72,
+    "secondsPerRun": 15
+  },
+  "timings": {
+    "seed": {
+      "totalSeconds": 23.01,
+      "steps": {
+        "user": 0,
+        "tenant": 0,
+        "membership": 0,
+        "account": 0,
+        "strategy": 0,
+        "products": 0.16,
+        "scopePlan": 0.02,
+        "writeScopes": 1.23,
+        "offerMappings": 0.99,
+        "minPrices": 1.98,
+        "maxPrices": 2.02,
+        "costProfiles": 9.24,
+        "feeEstimates": 0.14,
+        "observedState": 0.18,
+        "competitorState": 0.43,
+        "competitorDaily20d": 6.08
+      }
+    },
+    "enableEngine": {
+      "scopes": 20000,
+      "updateSeconds": 1.27,
+      "commitSecondsDeferredChecks": 0.71,
+      "deferredCheckMsPerScope": 0.04
+    },
+    "moveWindowBaseSeedSeconds": 1.1,
+    "baseWindowMovesReturned": {
+      "moves": 0,
+      "windowProducts": 5000
+    },
+    "baseWindowSanityContextMs": {
+      "p50": 6.11,
+      "p95": 6.91
+    },
+    "moveWindowPeakSeedSeconds": 11.56,
+    "peakWindowMovesReturned": {
+      "moves": 28,
+      "windowProducts": 5628
+    },
+    "peakWindowSanityContextMs": {
+      "p50": 79.8,
+      "p95": 86.83
+    },
+    "peakOpenLoop": "not sustainable: closed-loop 58.51/s < 1.2 × 184.72/s"
+  },
+  "results": [
+    {
+      "phase": "path",
+      "name": "full evaluation closed W=16 (base window)",
+      "params": {
+        "movesPerHour": 66500,
+        "workers": 16
+      },
+      "seconds": 15.07,
+      "ops": 2456,
+      "throughput": 162.9348696468384,
+      "p50": 95.45266699999775,
+      "p95": 145.21704099999988,
+      "p99": 181.38329099999828,
+      "max": 274.48662500000137,
+      "errors": {
+        "observation at 2026-09-14 16:11:40.269+00 is older than current 2026-09-14 16:11:40.282+00": 1
+      },
+      "eventLoopUtilization": 0.91,
+      "waits": {
+        "CPU": 9.77,
+        "Client:ClientRead": 5.5,
+        "idle in transaction": 0.28,
+        "idle": 0.11,
+        "IO:WALWrite": 0.08,
+        "LWLock:WALWrite": 0.05,
+        "LWLock:LockManager": 0.04,
+        "LWLock:BufferMapping": 0.04,
+        "IO:DataFileWrite": 0.03,
+        "LWLock:BufferContent": 0.03,
+        "IO:DataFileRead": 0.02,
+        "Lock:extend": 0,
+        "LWLock:WALInsert": 0
+      },
+      "extra": {
+        "storeCallsPerEvaluation": {
+          "findPriceScopes": 1,
+          "loadSanityContext": 1,
+          "recordMove": 1,
+          "acceptSnapshot": 1,
+          "resolveBounds": 1,
+          "loadCost": 1,
+          "isChannelHalted": 1,
+          "loadGuardrails": 1,
+          "countChangesLastHour": 1,
+          "commitDecision": 1,
+          "markDispatched": 0.11,
+          "recordDispatch": 0.11
+        },
+        "storeMsPerEvaluation": {
+          "findPriceScopes": 40.64,
+          "loadSanityContext": 21.34,
+          "commitDecision": 9.75,
+          "loadCost": 7.58,
+          "recordMove": 4.12,
+          "acceptSnapshot": 3.33,
+          "resolveBounds": 2.82,
+          "countChangesLastHour": 2.55,
+          "loadGuardrails": 2.46,
+          "isChannelHalted": 2.12,
+          "markDispatched": 0.52,
+          "recordDispatch": 0.52
+        },
+        "verdicts": {
+          "ACCEPT:NO_CHANGE": 2179,
+          "ACCEPT:APPROVED": 277
+        },
+        "alerts": {}
+      }
+    },
+    {
+      "phase": "path",
+      "name": "full evaluation open base=18.47/s",
+      "params": {
+        "movesPerHour": 66500,
+        "targetRate": 18.47
+      },
+      "seconds": 14.98,
+      "ops": 277,
+      "throughput": 18.49734899015952,
+      "p50": 33.94818544360896,
+      "p95": 41.09877696240437,
+      "p99": 49.69448090976948,
+      "max": 93.08477378947282,
+      "errors": {},
+      "eventLoopUtilization": 0.04,
+      "waits": {
+        "Client:ClientRead": 10.63,
+        "CPU": 0.57,
+        "IO:DataFileRead": 0.02,
+        "idle in transaction": 0.02,
+        "IO:WALWrite": 0
+      },
+      "extra": {
+        "maxInFlight": 2,
+        "storeCallsPerEvaluation": {
+          "findPriceScopes": 1,
+          "loadSanityContext": 1,
+          "recordMove": 1,
+          "acceptSnapshot": 1,
+          "resolveBounds": 1,
+          "loadCost": 1,
+          "isChannelHalted": 1,
+          "loadGuardrails": 1,
+          "countChangesLastHour": 1,
+          "commitDecision": 1,
+          "markDispatched": 0.12,
+          "recordDispatch": 0.12
+        },
+        "storeMsPerEvaluation": {
+          "findPriceScopes": 15.23,
+          "loadSanityContext": 10.62,
+          "loadCost": 2.62,
+          "commitDecision": 2.36,
+          "acceptSnapshot": 0.84,
+          "resolveBounds": 0.74,
+          "recordMove": 0.57,
+          "countChangesLastHour": 0.45,
+          "loadGuardrails": 0.41,
+          "isChannelHalted": 0.3,
+          "markDispatched": 0.15,
+          "recordDispatch": 0.12
+        },
+        "verdicts": {
+          "ACCEPT:APPROVED": 33,
+          "ACCEPT:NO_CHANGE": 244
+        },
+        "alerts": {}
+      }
+    },
+    {
+      "phase": "path",
+      "name": "full evaluation closed W=16 (peak window)",
+      "params": {
+        "movesPerHour": 665000,
+        "workers": 16
+      },
+      "seconds": 15.16,
+      "ops": 887,
+      "throughput": 58.5095476075697,
+      "p50": 271.20362499999464,
+      "p95": 327.0070839999971,
+      "p99": 383.95008300000336,
+      "max": 448.97579199999745,
+      "errors": {},
+      "eventLoopUtilization": 0.37,
+      "waits": {
+        "CPU": 13.97,
+        "Client:ClientRead": 0.9,
+        "IO:BufFileWrite": 0.59,
+        "IO:DataFileRead": 0.14,
+        "idle in transaction": 0.14,
+        "IO:BufFileRead": 0.08,
+        "LWLock:LockManager": 0.04,
+        "idle": 0.04,
+        "IO:DataFileWrite": 0.03,
+        "IO:WALWrite": 0.03,
+        "IPC:BufferIO": 0.01,
+        "LWLock:BufferMapping": 0.01,
+        "LWLock:WALWrite": 0.01
+      },
+      "extra": {
+        "storeCallsPerEvaluation": {
+          "findPriceScopes": 1,
+          "loadSanityContext": 1,
+          "recordMove": 1,
+          "acceptSnapshot": 1,
+          "resolveBounds": 1,
+          "loadCost": 1,
+          "isChannelHalted": 1,
+          "loadGuardrails": 1,
+          "countChangesLastHour": 1,
+          "commitDecision": 1,
+          "markDispatched": 0.12,
+          "recordDispatch": 0.12
+        },
+        "storeMsPerEvaluation": {
+          "loadSanityContext": 240.59,
+          "findPriceScopes": 9.94,
+          "commitDecision": 8.15,
+          "acceptSnapshot": 2.26,
+          "resolveBounds": 2.25,
+          "loadCost": 2.24,
+          "recordMove": 1.79,
+          "countChangesLastHour": 1.39,
+          "loadGuardrails": 1.15,
+          "isChannelHalted": 0.85,
+          "markDispatched": 0.71,
+          "recordDispatch": 0.59
+        },
+        "verdicts": {
+          "ACCEPT:NO_CHANGE": 781,
+          "ACCEPT:APPROVED": 106
+        },
+        "alerts": {}
+      }
+    },
+    {
+      "phase": "variant",
+      "name": "triggers ON,  RLS ON W=1",
+      "params": {
+        "triggers": true,
+        "rls": true,
+        "pool": 1,
+        "workers": 1
+      },
+      "seconds": 15.03,
+      "ops": 8433,
+      "throughput": 561.0571173011056,
+      "p50": 1.6171249999897555,
+      "p95": 2.88504200000898,
+      "p99": 3.181916999994428,
+      "max": 22.216666000007535,
+      "errors": {},
+      "eventLoopUtilization": 0.14,
+      "waits": {
+        "CPU": 0.64,
+        "Client:ClientRead": 0.33,
+        "idle": 0.01,
+        "idle in transaction": 0.01,
+        "IO:DataFileRead": 0,
+        "IO:WALWrite": 0
+      }
+    },
+    {
+      "phase": "variant",
+      "name": "triggers ON,  RLS ON W=8",
+      "params": {
+        "triggers": true,
+        "rls": true,
+        "pool": 8,
+        "workers": 8
+      },
+      "seconds": 15.03,
+      "ops": 32623,
+      "throughput": 2170.1483482125514,
+      "p50": 3.4352919999946607,
+      "p95": 5.919833000007202,
+      "p99": 7.161916999990353,
+      "max": 24.942457999990438,
+      "errors": {},
+      "eventLoopUtilization": 0.88,
+      "waits": {
+        "CPU": 4.72,
+        "Client:ClientRead": 2.19,
+        "idle in transaction": 0.42,
+        "LWLock:WALWrite": 0.32,
+        "IO:WALWrite": 0.23,
+        "idle": 0.07,
+        "IO:DataFileRead": 0.01,
+        "IO:DataFileExtend": 0.01,
+        "LWLock:BufferContent": 0.01,
+        "LWLock:LockManager": 0
+      }
+    },
+    {
+      "phase": "variant",
+      "name": "triggers OFF, RLS ON W=1",
+      "params": {
+        "triggers": false,
+        "rls": true,
+        "pool": 1,
+        "workers": 1
+      },
+      "seconds": 15.01,
+      "ops": 13836,
+      "throughput": 921.8386002924213,
+      "p50": 1.0454160000081174,
+      "p95": 1.2569160000130069,
+      "p99": 1.4361659999995027,
+      "max": 7.150540999980876,
+      "errors": {},
+      "eventLoopUtilization": 0.2,
+      "waits": {
+        "CPU": 0.63,
+        "Client:ClientRead": 0.29,
+        "idle in transaction": 0.04,
+        "IO:WALWrite": 0.02,
+        "idle": 0.02
+      }
+    },
+    {
+      "phase": "variant",
+      "name": "triggers OFF, RLS ON W=8",
+      "params": {
+        "triggers": false,
+        "rls": true,
+        "pool": 8,
+        "workers": 8
+      },
+      "seconds": 15.04,
+      "ops": 52853,
+      "throughput": 3515.11447785345,
+      "p50": 2.174750000005588,
+      "p95": 3.1580830000166316,
+      "p99": 4.47116700001061,
+      "max": 16.638624999992317,
+      "errors": {},
+      "eventLoopUtilization": 0.95,
+      "waits": {
+        "CPU": 3.75,
+        "Client:ClientRead": 3.1,
+        "idle in transaction": 0.57,
+        "IO:WALWrite": 0.21,
+        "LWLock:WALWrite": 0.14,
+        "idle": 0.14,
+        "LWLock:LockManager": 0.03,
+        "LWLock:BufferContent": 0.03,
+        "LWLock:WALBufMapping": 0,
+        "IO:SLRUWrite": 0,
+        "IO:DataFileExtend": 0
+      }
+    },
+    {
+      "phase": "variant",
+      "name": "triggers ON,  RLS OFF W=1",
+      "params": {
+        "triggers": true,
+        "rls": false,
+        "pool": 1,
+        "workers": 1
+      },
+      "seconds": 15.02,
+      "ops": 9141,
+      "throughput": 608.5382337936687,
+      "p50": 1.4845830000122078,
+      "p95": 2.712333999981638,
+      "p99": 2.9966669999994338,
+      "max": 16.86233400000492,
+      "errors": {},
+      "eventLoopUtilization": 0.15,
+      "waits": {
+        "CPU": 0.59,
+        "Client:ClientRead": 0.35,
+        "idle in transaction": 0.04,
+        "IO:DataFileRead": 0.01,
+        "idle": 0.01
+      }
+    },
+    {
+      "phase": "variant",
+      "name": "triggers ON,  RLS OFF W=8",
+      "params": {
+        "triggers": true,
+        "rls": false,
+        "pool": 8,
+        "workers": 8
+      },
+      "seconds": 15.01,
+      "ops": 34549,
+      "throughput": 2301.97201842041,
+      "p50": 3.198583999997936,
+      "p95": 5.692042000009678,
+      "p99": 7.263208999997005,
+      "max": 50.41162499997881,
+      "errors": {},
+      "eventLoopUtilization": 0.93,
+      "waits": {
+        "CPU": 4.69,
+        "Client:ClientRead": 2.51,
+        "idle in transaction": 0.39,
+        "IO:WALWrite": 0.18,
+        "idle": 0.12,
+        "LWLock:WALWrite": 0.07,
+        "LWLock:BufferContent": 0.01,
+        "IO:DataFileExtend": 0.01,
+        "LWLock:BufferMapping": 0,
+        "LWLock:LockManager": 0
+      }
+    },
+    {
+      "phase": "variant",
+      "name": "triggers OFF, RLS OFF W=1",
+      "params": {
+        "triggers": false,
+        "rls": false,
+        "pool": 1,
+        "workers": 1
+      },
+      "seconds": 15.01,
+      "ops": 14930,
+      "throughput": 994.6209692181632,
+      "p50": 0.9662079999980051,
+      "p95": 1.1719589999993332,
+      "p99": 1.3308749999850988,
+      "max": 4.312166999996407,
+      "errors": {},
+      "eventLoopUtilization": 0.22,
+      "waits": {
+        "CPU": 0.6,
+        "Client:ClientRead": 0.31,
+        "idle in transaction": 0.04,
+        "idle": 0.02,
+        "IO:WALWrite": 0.02,
+        "IO:DataFileExtend": 0
+      }
+    },
+    {
+      "phase": "variant",
+      "name": "triggers OFF, RLS OFF W=8",
+      "params": {
+        "triggers": false,
+        "rls": false,
+        "pool": 8,
+        "workers": 8
+      },
+      "seconds": 15.05,
+      "ops": 58697,
+      "throughput": 3899.378805432605,
+      "p50": 1.9879159999836702,
+      "p95": 2.748749999998836,
+      "p99": 3.426459000009345,
+      "max": 11.505624999990687,
+      "errors": {},
+      "eventLoopUtilization": 0.95,
+      "waits": {
+        "CPU": 3.67,
+        "Client:ClientRead": 3.12,
+        "idle in transaction": 0.65,
+        "IO:WALWrite": 0.24,
+        "LWLock:WALWrite": 0.17,
+        "idle": 0.09,
+        "IO:DataFileExtend": 0.02,
+        "LWLock:BufferContent": 0.01,
+        "LWLock:LockManager": 0
+      }
+    },
+    {
+      "phase": "variant",
+      "name": "triggers ON,  RLS ON (repeat) W=1",
+      "params": {
+        "triggers": true,
+        "rls": true,
+        "pool": 1,
+        "workers": 1
+      },
+      "seconds": 15.03,
+      "ops": 8381,
+      "throughput": 557.5923028004128,
+      "p50": 1.6157079999975394,
+      "p95": 3.0723329999891575,
+      "p99": 3.375166000012541,
+      "max": 18.93766600001254,
+      "errors": {},
+      "eventLoopUtilization": 0.14,
+      "waits": {
+        "CPU": 0.62,
+        "Client:ClientRead": 0.33,
+        "idle": 0.02,
+        "idle in transaction": 0.02,
+        "IO:DataFileRead": 0
+      }
+    },
+    {
+      "phase": "variant",
+      "name": "triggers ON,  RLS ON (repeat) W=8",
+      "params": {
+        "triggers": true,
+        "rls": true,
+        "pool": 8,
+        "workers": 8
+      },
+      "seconds": 15.05,
+      "ops": 32041,
+      "throughput": 2129.1221444534676,
+      "p50": 3.4880840000114404,
+      "p95": 6.269499999994878,
+      "p99": 7.478000000002794,
+      "max": 18.12616699998034,
+      "errors": {},
+      "eventLoopUtilization": 0.92,
+      "waits": {
+        "CPU": 4.91,
+        "Client:ClientRead": 2.39,
+        "idle in transaction": 0.38,
+        "IO:WALWrite": 0.16,
+        "idle": 0.07,
+        "LWLock:WALWrite": 0.03,
+        "LWLock:LockManager": 0.02,
+        "IO:DataFileExtend": 0.01,
+        "LWLock:XidGen": 0,
+        "IO:DataFileRead": 0
+      }
+    }
+  ]
+}

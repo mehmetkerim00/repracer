@@ -1,0 +1,136 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "kaufland/dispatch/timeout-unknown-outcome",
+  "channel": "KAUFLAND",
+  "apiVersion": "2.44.0",
+  "title": "Тайм-аут записи: исход неизвестен, повтора нет, обратное чтение и подтверждение",
+  "description": "Kaufland не отвечает на PATCH до тайм-аута клиента. Запись могла примениться, поэтому транспорт её не повторяет [KFL_C02]: исход OUTCOME_UNKNOWN, одна попытка. Ядро делает обратное чтение — канал показывает новое значение — и подтверждение даёт APPLIED без повторной записи.",
+  "tags": ["mandatory:timeout-unknown-outcome", "dispatch", "readback", "confirm", "conservative:KFL_C02"],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": ["vendor/kaufland/seller-api-v2/2026-09-14/openapi.json#PATCH /units/{id_unit}", "vendor/kaufland/seller-api-v2/2026-09-14/openapi.json#GET /units/{id_unit}"]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": { "externalAccountId": "syn-seller-0001", "marketplaces": ["de", "at"] },
+    "credentials": {
+      "seller": { "clientKey": "syn-seller-client-key-0001", "secretKey": "syn-seller-secret-key-0001" },
+      "partner": { "clientKey": "syn-partner-client-key-0001", "secretKey": "syn-partner-secret-key-0001" }
+    },
+    "partner": true,
+    "client": { "timeoutMs": 40 }
+  },
+  "steps": [
+    {
+      "id": "patch-times-out",
+      "kind": "call",
+      "method": "dispatch",
+      "args": [
+        {
+          "batchId": "kfl:de:0000000000000201",
+          "operation": "PATCH /units/{id_unit}",
+          "budgetCharges": [],
+          "requestCount": 1,
+          "items": [
+            {
+              "channelWriteId": "cw-0201",
+              "writeScope": { "writeScopeId": "ws-price-de-3001", "field": "PRICE", "scopeKey": "kaufland|acct-1|de|3001", "identity": { "marketplace": "de", "externalUnitId": "3001" } },
+              "version": 5, "idempotencyKey": "cw-0201:5", "attemptNo": 1,
+              "value": { "field": "PRICE", "price": { "amountMinor": 2199, "currency": "EUR", "basis": "GROSS" } }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "attemptsMade": 1,
+        "outcomes": [
+          { "channelWriteId": "cw-0201", "status": "OUTCOME_UNKNOWN", "error": { "code": "TIMEOUT", "class": "TRANSIENT", "scope": "BATCH" } }
+        ]
+      }
+    },
+    { "id": "core-waits", "kind": "advanceClock", "ms": 5000 },
+    {
+      "id": "read-back",
+      "kind": "call",
+      "method": "readBack",
+      "args": [
+        [
+          {
+            "writeScope": { "writeScopeId": "ws-price-de-3001", "field": "PRICE", "scopeKey": "kaufland|acct-1|de|3001", "identity": { "marketplace": "de", "externalUnitId": "3001" } },
+            "fields": ["PRICE"]
+          }
+        ]
+      ],
+      "expect": {
+        "failures": [],
+        "observations": [
+          {
+            "field": "PRICE",
+            "source": "READBACK",
+            "identity": { "marketplace": "de", "externalUnitId": "3001" },
+            "value": { "field": "PRICE", "price": { "amountMinor": 2199, "currency": "EUR", "basis": "GROSS" } },
+            "observedAt": "2026-09-14T10:00:01.000Z",
+            "liveness": { "isLive": true }
+          }
+        ]
+      }
+    },
+    {
+      "id": "confirm",
+      "kind": "call",
+      "method": "confirm",
+      "args": [
+        [
+          {
+            "channelWriteId": "cw-0201",
+            "writeScope": { "writeScopeId": "ws-price-de-3001", "field": "PRICE", "scopeKey": "kaufland|acct-1|de|3001", "identity": { "marketplace": "de", "externalUnitId": "3001" } },
+            "expected": { "field": "PRICE", "price": { "amountMinor": 2199, "currency": "EUR", "basis": "GROSS" } },
+            "dispatchedAt": "2026-09-14T10:00:00.000Z"
+          }
+        ]
+      ],
+      "expect": [{ "channelWriteId": "cw-0201", "status": "APPLIED", "observation": { "field": "PRICE", "value": { "price": { "amountMinor": 2199 } } } }]
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "patch-3001-timeout",
+      "note": "Канал получил запрос, но ответа нет до тайм-аута клиента",
+      "request": { "method": "PATCH", "path": "/v2/units/3001", "query": { "storefront": "de" }, "body": { "listing_price": 2199 } },
+      "fault": "TIMEOUT"
+    },
+    {
+      "id": "get-3001-readback",
+      "request": { "method": "GET", "path": "/v2/units/3001", "query": { "storefront": "de" } },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": {
+            "id_unit": 3001, "storefront": "de", "currency": "EUR", "listing_price": 2199, "price": 2199, "amount": 2,
+            "id_offer": "SYN-OFFER-3001", "id_product": 500301, "is_live": true, "date_lastchange_iso": "2026-09-14T10:00:01Z"
+          }
+        }
+      }
+    },
+    {
+      "id": "get-3001-confirm",
+      "request": { "method": "GET", "path": "/v2/units/3001", "query": { "storefront": "de" } },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": {
+            "id_unit": 3001, "storefront": "de", "currency": "EUR", "listing_price": 2199, "price": 2199, "amount": 2,
+            "id_offer": "SYN-OFFER-3001", "id_product": 500301, "is_live": true, "date_lastchange_iso": "2026-09-14T10:00:01Z"
+          }
+        }
+      }
+    }
+  ],
+  "expect": {
+    "logs": [{ "code": "KFL_C02_NO_TRANSPORT_RETRY_FOR_WRITES", "count": 1, "question": "K-14", "details": { "status": "TIMEOUT" } }],
+    "noLogCodes": ["KFL_C08_CONFIRM_TIME_GRANULARITY"],
+    "noAlerts": true
+  }
+}

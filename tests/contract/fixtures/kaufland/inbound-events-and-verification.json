@@ -1,0 +1,177 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "kaufland/inbound/events-and-verification",
+  "channel": "KAUFLAND",
+  "apiVersion": "2.44.0",
+  "title": "Проверка адреса подписки и разбор событий",
+  "description": "GET mode=subscribe&challenge: ответ ровно challenge, небезопасный challenge — отказ. buy_box_changed «lost» → снимок конкурентов топ-N с target_price как подсказкой канала (суммы уже в минимальных единицах). item_unit_changed с minimum_price → наблюдения и CRITICAL: Smart Pricing включён вне системы [KFL_C05]. item_unit_deleted → OFFER_REMOVED. Неизвестное событие → RESOURCE_CHANGED [KFL_C15]. Событие витрины, не подключённой к аккаунту, подтверждается без данных.",
+  "tags": ["inbound", "competitors", "conservative:KFL_C05", "conservative:KFL_C15", "conservative:KFL_C18"],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": ["https://sellerapi.kaufland.com/?page=push-notifications#callback-url-verification", "https://sellerapi.kaufland.com/?page=push-notifications#events"]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": { "externalAccountId": "syn-seller-0001", "marketplaces": ["de"] },
+    "credentials": { "seller": { "clientKey": "syn-seller-client-key-0001", "secretKey": "syn-seller-secret-key-0001" } },
+    "secrets": ["wh_tok_synthetic_0002"]
+  },
+  "steps": [
+    {
+      "id": "subscribe-verification",
+      "kind": "inbound",
+      "delivery": { "method": "GET", "url": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0002?mode=subscribe&challenge=dd4aeae00158dc91de38585805ad7410" },
+      "expect": { "kind": "VERIFICATION", "responseStatus": 200, "responseBody": "dd4aeae00158dc91de38585805ad7410" }
+    },
+    {
+      "id": "verification-unsafe-challenge",
+      "kind": "inbound",
+      "delivery": { "method": "GET", "url": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0002?mode=subscribe&challenge=%3Cscript%3E" },
+      "expect": { "kind": "REJECTED", "responseStatus": 400 }
+    },
+    {
+      "id": "buy-box-lost",
+      "kind": "inbound",
+      "delivery": {
+        "method": "POST",
+        "url": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0002",
+        "headers": { "Shop-Timestamp": { "$clockSeconds": -60 }, "Shop-Signature": { "$signWith": "seller" } },
+        "body": {
+          "event_name": "buy_box_changed",
+          "resource": "/buybox?id_product=362000001&condition=new",
+          "id_message": "d7e4a9c6b3f8d2e7a4c9b6f3a8d2c9e1",
+          "storefront": "de",
+          "payload": {
+            "buy_box_change": "lost",
+            "id_product": 362000001,
+            "condition": "new",
+            "timestamp": "2026-09-14T11:58:30+02:00",
+            "eans": ["2000000000017"],
+            "winner_offer": {
+              "seller": { "pseudonym": "Synthetic Competitor" },
+              "prices": { "total_price": { "amount": 1795, "currency_code": "EUR" }, "sales_price": { "amount": 1795, "currency_code": "EUR" }, "shipping_cost": { "amount": 0, "currency_code": "EUR" } },
+              "delivery_time": { "min": 1, "max": 2 }
+            },
+            "seller_offer": {
+              "rank": 2, "id_unit": 4101, "id_offer": "SYN-OFFER-4101",
+              "seller": { "pseudonym": "Synthetic Seller" },
+              "prices": {
+                "total_price": { "amount": 2345, "currency_code": "EUR" }, "sales_price": { "amount": 1850, "currency_code": "EUR" },
+                "shipping_cost": { "amount": 495, "currency_code": "EUR" }, "target_price": { "amount": 1790, "currency_code": "EUR" }
+              },
+              "delivery_time": { "min": 1, "max": 3 }
+            },
+            "offers": [
+              {
+                "rank": 1, "seller": { "pseudonym": "Synthetic Competitor" },
+                "prices": { "total_price": { "amount": 1795, "currency_code": "EUR" }, "sales_price": { "amount": 1795, "currency_code": "EUR" }, "shipping_cost": { "amount": 0, "currency_code": "EUR" } },
+                "delivery_time": { "min": 1, "max": 2 }
+              },
+              {
+                "rank": 2, "id_unit": 4101, "id_offer": "SYN-OFFER-4101", "seller": { "pseudonym": "Synthetic Seller" },
+                "prices": { "total_price": { "amount": 2345, "currency_code": "EUR" }, "sales_price": { "amount": 1850, "currency_code": "EUR" }, "shipping_cost": { "amount": 495, "currency_code": "EUR" } },
+                "delivery_time": { "min": 1, "max": 3 }
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "kind": "EVENTS",
+        "deliveryId": "kaufland:d7e4a9c6b3f8d2e7a4c9b6f3a8d2c9e1",
+        "events": [
+          {
+            "kind": "COMPETITOR_SNAPSHOT",
+            "snapshot": {
+              "marketplace": "de",
+              "channelProductRef": "362000001",
+              "condition": "new",
+              "source": "KAUFLAND_BUY_BOX_CHANGED",
+              "sourceEventId": "kaufland:d7e4a9c6b3f8d2e7a4c9b6f3a8d2c9e1",
+              "observedAt": "2026-09-14T09:58:30.000Z",
+              "completeness": { "kind": "TOP_N", "n": 10 },
+              "buybox": { "price": { "amountMinor": 1795, "currency": "EUR", "basis": "GROSS" }, "isSelf": false },
+              "channelSuggestedPrice": { "amountMinor": 1790, "currency": "EUR", "basis": "GROSS" },
+              "offers": [
+                { "rank": 1, "isSelf": false, "sellerRef": "Synthetic Competitor", "price": { "amountMinor": 1795 }, "totalPrice": { "amountMinor": 1795 } },
+                { "rank": 2, "isSelf": true, "price": { "amountMinor": 1850 }, "shipping": { "amountMinor": 495 }, "totalPrice": { "amountMinor": 2345 }, "deliveryDays": { "min": 1, "max": 3 } }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "unit-changed-with-minimum-price",
+      "kind": "inbound",
+      "delivery": {
+        "method": "POST",
+        "url": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0002",
+        "headers": { "Shop-Timestamp": { "$clockSeconds": -20 }, "Shop-Signature": { "$signWith": "seller" } },
+        "body": {
+          "event_name": "item_unit_changed",
+          "resource": "/units/4101/",
+          "id_message": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+          "storefront": "de",
+          "payload": { "id_unit": 4101, "amount": 5, "price": 1600, "listing_price": 1850, "minimum_price": 1500, "id_offer": "SYN-OFFER-4101", "date_lastchange": "2026-09-14T09:59:30Z", "is_live": true }
+        }
+      },
+      "expect": {
+        "kind": "EVENTS",
+        "events": [
+          { "kind": "OBSERVATION", "observation": { "field": "PRICE", "value": { "price": { "amountMinor": 1850 } }, "effectivePrice": { "amountMinor": 1600 } } },
+          { "kind": "OBSERVATION", "observation": { "field": "QUANTITY", "value": { "quantity": 5 } } },
+          { "kind": "OBSERVATION", "observation": { "field": "CHANNEL_MIN_PRICE", "value": { "field": "CHANNEL_MIN_PRICE", "minPrice": { "amountMinor": 1500, "currency": "EUR", "basis": "GROSS" } } } }
+        ]
+      }
+    },
+    {
+      "id": "unit-deleted",
+      "kind": "inbound",
+      "delivery": {
+        "method": "POST",
+        "url": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0002",
+        "headers": { "Shop-Timestamp": { "$clockSeconds": -15 }, "Shop-Signature": { "$signWith": "seller" } },
+        "body": { "event_name": "item_unit_deleted", "resource": "/units/4102/", "id_message": "b2c3d4e5f60718293a4b5c6d7e8f9001", "storefront": "de", "payload": { "id_unit": 4102, "id_offer": "SYN-OFFER-4102" } }
+      },
+      "expect": {
+        "kind": "EVENTS",
+        "events": [{ "kind": "OFFER_REMOVED", "identity": { "marketplace": "de", "externalUnitId": "4102", "externalOfferId": "SYN-OFFER-4102" }, "occurredAt": "2026-09-14T09:59:45.000Z" }]
+      }
+    },
+    {
+      "id": "unknown-event",
+      "kind": "inbound",
+      "delivery": {
+        "method": "POST",
+        "url": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0002",
+        "headers": { "Shop-Timestamp": { "$clockSeconds": -5 }, "Shop-Signature": { "$signWith": "seller" } },
+        "body": { "event_name": "voucher_changed", "resource": "/vouchers/1/", "id_message": "c3d4e5f60718293a4b5c6d7e8f900112", "storefront": "de", "payload": [] }
+      },
+      "expect": { "kind": "EVENTS", "events": [{ "kind": "RESOURCE_CHANGED", "resource": "/vouchers/1/" }] }
+    },
+    {
+      "id": "storefront-not-enabled",
+      "kind": "inbound",
+      "delivery": {
+        "method": "POST",
+        "url": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0002",
+        "headers": { "Shop-Timestamp": { "$clockSeconds": -5 }, "Shop-Signature": { "$signWith": "seller" } },
+        "body": { "event_name": "item_unit_changed", "resource": "/units/4201/", "id_message": "d4e5f60718293a4b5c6d7e8f90011223", "storefront": "at", "payload": { "id_unit": 4201, "amount": 1, "listing_price": 1000 } }
+      },
+      "expect": { "kind": "EVENTS", "deliveryId": "kaufland:d4e5f60718293a4b5c6d7e8f90011223", "events": [], "acknowledgeStatus": 200 }
+    }
+  ],
+  "exchanges": [],
+  "expect": {
+    "logs": [
+      { "code": "KFL_C18_BUYBOX_IS_SELF_BY_ID_UNIT", "count": 1 },
+      { "code": "KFL_C05_MINIMUM_PRICE_OBSERVED", "count": 1, "question": "K-08" },
+      { "code": "KFL_C15_UNKNOWN_EVENT", "count": 1 },
+      { "code": "KFL_INBOUND_STOREFRONT_NOT_ENABLED", "count": 1, "details": { "storefront": "at" } }
+    ],
+    "alerts": [{ "code": "KAUFLAND_SMART_PRICING_ACTIVE", "severity": "CRITICAL", "count": 1, "details": { "idUnit": 4101, "storefront": "de" } }]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "@repracer/write-dispatcher",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Write dispatcher (Р-64): sends queued channel writes in write_scope_id order, one in flight per write scope; supersedes with a recorded reason, retries transient errors, reconciles unknown outcomes by read-back. Storage behind a port.",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": { "@repracer/channel-port": "0.1.0", "@repracer/pricing-model": "0.1.0" },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test src/*.test.ts"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "name": "@repracer/pricing-store-pg",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PricingStore on PostgreSQL: RLS tenant context per transaction, intent + decision + price write in one transaction with pinned bound versions (Р-54).",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@repracer/channel-port": "0.1.0",
+    "@repracer/input-sanity": "0.1.0",
+    "@repracer/price-gate": "0.1.0",
+    "@repracer/pricing-model": "0.1.0",
+    "@repracer/pricing-pipeline": "0.1.0",
+    "@repracer/write-dispatcher": "0.1.0",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@repracer/analytics-export": "0.1.0",
+    "@types/pg": "8.23.1"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec test/*.pg.test.ts",
+    "bench": "node --experimental-strip-types --disable-warning=ExperimentalWarning bench/decision-path.bench.ts"
+  }
+}
