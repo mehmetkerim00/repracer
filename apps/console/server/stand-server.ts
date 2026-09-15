@@ -218,7 +218,10 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       if (r.confirmed !== true) return fail(400, 'NOT_CONFIRMED', s.notConfirmed);
       const text = note(r.note);
       if (!text) return fail(400, 'NOTE_REQUIRED', s.noteRequired(NOTE_MIN, NOTE_MAX));
-      const result = await live.pipeline.releaseHaltManually(ctx(halt.channelAccountId), halt.haltId, { membershipId: viewer.membershipId, userId: principal.userId }, text);
+      // Находка 12 ревью шага 15 [Р-88]: ручное снятие системной остановки — со вторым фактором; хранилище и БД проверяют то же
+      const mfa = hasSecondFactor(principal.amr);
+      if (!mfa) return fail(403, 'MFA_REQUIRED', s.mfaRequired);
+      const result = await live.pipeline.releaseHaltManually(ctx(halt.channelAccountId), halt.haltId, { membershipId: viewer.membershipId, userId: principal.userId, mfa }, text);
       return result.released ? ok({ message: s.released, stop: stopView(await live.view(viewer), m) }) : fail(404, 'NOT_ACTIVE', s.notActive);
     }
 
@@ -283,12 +286,15 @@ async function main(): Promise<void> {
     const { PgIdentityDirectory } = await import('@repracer/identity/pg');
     const { pgStoreFactory } = await import('@repracer/contract-tests/pg-store');
     const url = process.env.REPRACER_PG_URL;
+    // Р-90: у каждой роли подключения — свой пул. Путь решения — svc_app; остановки и снятия консоли — svc_admin; тенанты стенда —
+    // svc_provisioning; вход — svc_authenticator
+    const role = (login: string, max: number) => createPool(url.replace('svc_app@', `${login}@`), { max, applicationName: `repracer-stand-${login}` });
     const pool = createPool(url, { max: 8, applicationName: 'repracer-stand' });
-    const directory = new PgIdentityDirectory(pool as never);
-    const memberUsers = await pgStandUsers(directory, createPool(url.replace('svc_app@', 'svc_onboarding@'), { max: 1 }));
+    const directory = new PgIdentityDirectory(role('svc_authenticator', 2) as never);
+    const memberUsers = await pgStandUsers(directory, role('svc_onboarding', 1));
     const worlds = await buildStandWorlds({
       filter: (sc) => !sc.tags.includes('memory-only'),
-      storeFactory: pgStoreFactory(pool, createPool(url.replace('svc_app@', 'svc_dispatcher@'), { max: 2 }), createPool(url.replace('svc_app@', 'svc_fx_loader@'), { max: 1 }), { memberUsers }),
+      storeFactory: pgStoreFactory(pool, role('svc_dispatcher', 2), role('svc_fx_loader', 1), { memberUsers, adminPool: role('svc_admin', 4), provisioningPool: role('svc_provisioning', 1) }),
     });
     handle = createStandApi(worlds, { authenticator: createAuthenticator({ ...verify, directory }), ...(simulator ? { simulator } : {}) });
   } else {

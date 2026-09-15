@@ -7,10 +7,14 @@ import { createPool, type PgPool } from '../src/index.ts';
  * repracer_template) — CREATE DATABASE … TEMPLATE, без повторного применения миграций: роли кластера уже созданы.
  * Нужны REPRACER_PG_URL (роль приложения) и REPRACER_PG_ADMIN_URL (суперпользователь стенда). Без них тест падает [Р-84].
  */
+export type TestRole = 'svc_app' | 'svc_fx_loader' | 'svc_dispatcher' | 'svc_exporter' | 'svc_admin' | 'svc_provisioning' | 'svc_authenticator';
+
 export interface IsolatedDatabase {
   name: string;
-  url(role: 'svc_app' | 'svc_fx_loader' | 'svc_dispatcher' | 'svc_exporter'): string;
-  pool(role: 'svc_app' | 'svc_fx_loader' | 'svc_dispatcher' | 'svc_exporter', max?: number): PgPool;
+  url(role: TestRole): string;
+  pool(role: TestRole, max?: number): PgPool;
+  /** Суперпользователь стенда в этой базе — только для данных платформы теста (строки возможностей, статус витрины) */
+  superuser(sql: string, params?: unknown[]): Promise<void>;
   drop(): Promise<void>;
 }
 
@@ -48,6 +52,16 @@ export async function createIsolatedDatabase(prefix: string): Promise<IsolatedDa
       const p = createPool(url(role), { max, applicationName: `repracer-${prefix}` });
       pools.push(p);
       return p;
+    },
+    async superuser(sql, params = []) {
+      const u = new URL(adminUrl);
+      u.pathname = `/${name}`;
+      const a = createPool(u.toString(), { max: 1, applicationName: 'repracer-isolated-db' });
+      try {
+        await a.query(sql, params);
+      } finally {
+        await a.end();
+      }
     },
     async drop() {
       for (const p of pools) await p.end();

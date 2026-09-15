@@ -1,0 +1,38 @@
+✖ finding 7: a budgeted retry refused because the storefront day boundary became unconfirmed ends with a reason and an alert; the sweep survives and does not repeat it (589.099541ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 794.39375
+
+✖ failing tests:
+
+test at test/budget-retry-dispatch.pg.test.ts:54:1
+✖ finding 7: a budgeted retry refused because the storefront day boundary became unconfirmed ends with a reason and an alert; the sweep survives and does not repeat it (589.099541ms)
+  error: retry of a budgeted write: the day boundary of storefront EBAY_DE is not confirmed (Р-65)
+      at /Users/kerim/Desktop/repracer/node_modules/pg/lib/client.js:694:17
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async file:///Users/kerim/Desktop/repracer/packages/pricing-store-pg/src/write-queue.ts:174:39
+      at async inTenant (file:///Users/kerim/Desktop/repracer/packages/pricing-store-pg/src/db.ts:80:16)
+      at async runScope (file:///Users/kerim/Desktop/repracer/packages/write-dispatcher/src/dispatcher.ts:178:21) {
+    length: 236,
+    severity: 'ERROR',
+    code: '23514',
+    detail: undefined,
+    hint: undefined,
+    position: undefined,
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: 'PL/pgSQL function tenant_data.channel_write_budget_day_on_retry() line 14 at RAISE',
+    schema: undefined,
+    table: undefined,
+    column: undefined,
+    dataType: undefined,
+    constraint: undefined,
+    file: 'pl_exec.c',
+    line: '3911',
+    routine: 'exec_stmt_raise'
+  }

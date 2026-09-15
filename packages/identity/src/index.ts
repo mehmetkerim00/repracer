@@ -42,6 +42,7 @@ export function hasSecondFactor(amr: readonly string[]): boolean {
 
 export interface Principal extends ResolvedUser, ExternalSubject {
   email: string | null;
+  emailVerified: boolean;
   amr: string[];
 }
 
@@ -62,7 +63,7 @@ export function createAuthenticator(options: Omit<VerifyOptions, 'jwks'> & { jwk
         throw error;
       }
       const user = await options.directory.resolve({ issuer: token.issuer, subject: token.subject });
-      return user ? { ...user, issuer: token.issuer, subject: token.subject, email: token.email, amr: token.amr } : null;
+      return user ? { ...user, issuer: token.issuer, subject: token.subject, email: token.email, emailVerified: token.emailVerified, amr: token.amr } : null;
     },
   };
 }

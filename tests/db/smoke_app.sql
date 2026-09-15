@@ -1,4 +1,4 @@
--- Run as svc_app (member of repracer_app). Synthetic data only.
+-- Run as svc_app (member of repracer_app) after smoke_provision.sql (Р-90). Synthetic data only.
 \set ON_ERROR_STOP 1
 \set QUIET 1
 
@@ -30,18 +30,39 @@ END $$;
 \set mB '''b2000000-0000-0000-0000-00000000000b'''
 
 -- ---------------------------------------------------------------- tenants
+-- Р-90: тенанты A и B создала роль создания тенанта (smoke_provision.sql). У роли пути решения прав на это нет — ни с пользователем
+-- сессии, ни со вторым фактором: база их у этой роли не принимает
 BEGIN;
-SELECT set_config('app.tenant_id', :tA, true), set_config('app.user_id', :uA, true) \gset
-INSERT INTO platform.app_user (user_id, email, mfa_enabled) VALUES (:uA, 'owner-a@example.test', true);
-INSERT INTO tenant_data.tenant (tenant_id, name, data_region) VALUES (:tA, 'Tenant A', 'EU');
-INSERT INTO tenant_data.membership (tenant_id, membership_id, user_id, role, status) VALUES (:tA, :mA, :uA, 'OWNER', 'ACTIVE');
+SELECT set_config('app.tenant_id', :tA, true), set_config('app.user_id', :uA, true), set_config('app.auth_mfa', 'on', true) \gset
+DO $$ BEGIN
+  IF security.current_user_id() IS NOT NULL OR security.session_mfa() THEN
+    RAISE EXCEPTION 'the decision path role is trusted with a session user or a second factor'; END IF;
+  RAISE NOTICE 'PASS reject | session user and second factor set by the decision path are ignored (Р-90)';
+END $$;
+SELECT pg_temp.expect_fail('decision path creates a user (Р-90)', $q$
+  INSERT INTO platform.app_user (user_id, email) VALUES (gen_random_uuid(), 'forged@example.test') $q$);
+SELECT pg_temp.expect_fail('decision path creates a tenant (Р-90)', $q$
+  INSERT INTO tenant_data.tenant (tenant_id, name, data_region) VALUES ('a0000000-0000-0000-0000-00000000000a', 'Tenant A again', 'EU') $q$);
+SELECT pg_temp.expect_fail('decision path inserts an OWNER membership (finding 2, Р-90)', $q$
+  INSERT INTO tenant_data.membership (tenant_id, user_id, role, status) VALUES ('a0000000-0000-0000-0000-00000000000a', 'b1000000-0000-0000-0000-00000000000b', 'OWNER', 'ACTIVE') $q$);
+SELECT pg_temp.expect_fail('decision path changes a role (Р-90)', $q$
+  UPDATE tenant_data.membership SET role = 'OWNER' WHERE membership_id = 'a2000000-0000-0000-0000-0000000000a0' $q$);
+SELECT pg_temp.expect_fail('decision path activates a membership (finding 3, Р-90)', $q$
+  UPDATE tenant_data.membership SET status = 'ACTIVE' WHERE membership_id = 'a2000000-0000-0000-0000-0000000000a0' $q$);
+SELECT pg_temp.expect_fail('decision path forges an audit event (finding 5, Р-90)', $q$
+  INSERT INTO audit.audit_event (tenant_id, occurred_at, actor_type, actor_user_id, actor_membership_id, action, entity_type)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', now(), 'USER', 'a1000000-0000-0000-0000-00000000000a', 'a2000000-0000-0000-0000-00000000000a', 'pricing.stop_released', 'price_stop') $q$);
+SELECT pg_temp.expect_fail('decision path stops pricing as a person (Р-90)', $q$
+  INSERT INTO tenant_data.price_stop (tenant_id, scope_type, stopped_by_membership_id, stop_note) VALUES ('a0000000-0000-0000-0000-00000000000a', 'TENANT', 'a2000000-0000-0000-0000-00000000000a', 'forged stop by the decision path') $q$);
+SELECT pg_temp.expect_fail('decision path invites a member (Р-90)', $q$
+  SELECT security.invite_member('a0000000-0000-0000-0000-00000000000a', 'x@example.test', 'VIEWER', sha256('x'), interval '1 day') $q$);
+SELECT pg_temp.expect_fail('decision path provisions a tenant (Р-90)', $q$
+  SELECT security.provision_tenant(gen_random_uuid(), 'x', 'EU', '[]') $q$);
+SELECT pg_temp.expect_fail('decision path assumes the administrative role (Р-90)', $q$ SET ROLE repracer_admin $q$);
 COMMIT;
 
 BEGIN;
-SELECT set_config('app.tenant_id', :tB, true), set_config('app.user_id', :uB, true) \gset
-INSERT INTO platform.app_user (user_id, email, mfa_enabled) VALUES (:uB, 'owner-b@example.test', true);
-INSERT INTO tenant_data.tenant (tenant_id, name, data_region) VALUES (:tB, 'Tenant B', 'EU');
-INSERT INTO tenant_data.membership (tenant_id, membership_id, user_id, role, status) VALUES (:tB, :mB, :uB, 'OWNER', 'ACTIVE');
+SELECT set_config('app.tenant_id', :tB, true) \gset
 INSERT INTO tenant_data.product (tenant_id, product_id, sku, kind) VALUES (:tB, 'b3000000-0000-0000-0000-000000000001', 'B-SKU', 'SIMPLE');
 COMMIT;
 
@@ -75,11 +96,11 @@ DO $$ BEGIN
   IF (SELECT count(*) FROM tenant_data.tenant) <> 0 THEN RAISE EXCEPTION 'rows visible without tenant context'; END IF;
   RAISE NOTICE 'PASS isolation | no context -> 0 rows';
 END $$;
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM security.list_user_tenants('a1000000-0000-0000-0000-00000000000a')) THEN
-    RAISE EXCEPTION 'resolver failed'; END IF;
-  RAISE NOTICE 'PASS resolver | list_user_tenants works without context';
-END $$;
+-- Находка 13 ревью шага 15, Р-90: членства по пользователю и по внешнему входу отдаёт только роль входа
+SELECT pg_temp.expect_fail('decision path lists the tenants of a user (finding 13, Р-90)', $q$
+  SELECT * FROM security.list_user_tenants('a1000000-0000-0000-0000-00000000000a') $q$);
+SELECT pg_temp.expect_fail('decision path resolves an external identity (finding 13, Р-90)', $q$
+  SELECT * FROM security.resolve_external_identity('https://idp.example.test', 'subject') $q$);
 COMMIT;
 
 -- ---------------------------------------------------------------- Kaufland: scopes, min_price, Smart Pricing
@@ -312,19 +333,23 @@ SELECT pg_temp.ok('next review moved after a failed sample', $q$
   UPDATE channel_data.pricing_halt SET next_review_at = now() + interval '30 minutes' WHERE pricing_halt_id = 'ab000000-0000-0000-0000-000000000001' $q$);
 SELECT pg_temp.expect_fail('AUTO release backed only by a failed sample (Р-52)', $q$
   UPDATE channel_data.pricing_halt SET released_at = now(), released_kind = 'AUTO' WHERE pricing_halt_id = 'ab000000-0000-0000-0000-000000000001' $q$);
--- Ручное снятие — в сессии участника; запись журнала без немедленной проверки: снятие в той же транзакции проверяется при фиксации (0053)
-SELECT set_config('app.user_id', :uA, true) \gset
--- pg_temp.ok ставит SET CONSTRAINTS ALL IMMEDIATE до конца транзакции: проверку снятия снова откладываем до UPDATE
-SET CONSTRAINTS ALL DEFERRED;
-INSERT INTO channel_data.pricing_halt_review (tenant_id, pricing_halt_id, kind, outcome, sample_size, failed_count, membership_id, note) VALUES ('a0000000-0000-0000-0000-00000000000a', 'ab000000-0000-0000-0000-000000000001', 'MANUAL_RELEASE', 'RELEASED', 0, 0, 'a2000000-0000-0000-0000-00000000000a', 'data verified with the channel');
-SELECT pg_temp.ok('manual release by a member with a note and a journal record (Р-52)', $q$
-  UPDATE channel_data.pricing_halt SET released_at = now(), released_kind = 'MANUAL', released_by_membership_id = 'a2000000-0000-0000-0000-00000000000a', release_note = 'data verified with the channel' WHERE pricing_halt_id = 'ab000000-0000-0000-0000-000000000001' $q$);
-SELECT pg_temp.expect_fail('release twice', $q$
-  UPDATE channel_data.pricing_halt SET release_note = 'released again later' WHERE pricing_halt_id = 'ab000000-0000-0000-0000-000000000001' $q$);
+-- Ручное снятие — действие человека в административном сервисе со вторым фактором (smoke_admin.sql, Р-90); путь решения его не может
+-- даже с пользователем и вторым фактором в своей сессии
+SELECT set_config('app.user_id', :uA, true), set_config('app.auth_mfa', 'on', true) \gset
+SELECT pg_temp.expect_fail('manual release by the decision path with a session user and a second factor set (Р-90)', $q$
+  DO $x$ BEGIN
+    INSERT INTO channel_data.pricing_halt_review (tenant_id, pricing_halt_id, kind, outcome, sample_size, failed_count, membership_id, note) VALUES ('a0000000-0000-0000-0000-00000000000a', 'ab000000-0000-0000-0000-000000000001', 'MANUAL_RELEASE', 'RELEASED', 0, 0, 'a2000000-0000-0000-0000-00000000000a', 'data verified with the channel');
+    UPDATE channel_data.pricing_halt SET released_at = now(), released_kind = 'MANUAL', released_by_membership_id = 'a2000000-0000-0000-0000-00000000000a', release_note = 'data verified with the channel' WHERE pricing_halt_id = 'ab000000-0000-0000-0000-000000000001';
+  END $x$ $q$);
 SELECT pg_temp.expect_fail('UPDATE append-only halt review', $q$ UPDATE channel_data.pricing_halt_review SET note = 'rewritten afterwards' $q$);
 -- ---------------------------------------------------------------- Р-49 (0032)
 SELECT pg_temp.ok('rejected snapshot with reason', $q$
   INSERT INTO channel_data.rejected_competitor_snapshot (tenant_id, channel_account_id, channel, marketplace, channel_product_ref, condition, source, observed_at, received_at, verdict, reason_code, alarm_class, ruleset_version) VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', '362000001', 'new', 'KAUFLAND_BUYBOX', now(), now(), 'REJECT', 'UNIT_SCALE_X100', 'UNIT_SCALE', 'r49.1') $q$);
+-- Р-71 (правило 29 проверки схемы заменено поведением, Р-93): сумма в параметрах без валюты не сохраняется, с валютой — сохраняется
+SELECT pg_temp.expect_fail('rejected snapshot details: an amount without its currency (Р-71)', $q$
+  INSERT INTO channel_data.rejected_competitor_snapshot (tenant_id, channel_account_id, channel, marketplace, channel_product_ref, condition, source, observed_at, received_at, verdict, reason_code, alarm_class, ruleset_version, details) VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', '362000071', 'new', 'KAUFLAND_BUYBOX', now(), now(), 'REJECT', 'UNIT_SCALE_X100', 'UNIT_SCALE', 'r49.1', '{"valueMinor": 150000}') $q$);
+SELECT pg_temp.ok('rejected snapshot details: the same amount with its currency (Р-71)', $q$
+  INSERT INTO channel_data.rejected_competitor_snapshot (tenant_id, channel_account_id, channel, marketplace, channel_product_ref, condition, source, observed_at, received_at, verdict, reason_code, alarm_class, ruleset_version, details) VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', '362000071', 'new', 'KAUFLAND_BUYBOX', now(), now(), 'REJECT', 'UNIT_SCALE_X100', 'UNIT_SCALE', 'r49.1', '{"valueMinor": 150000, "currency": "EUR"}') $q$);
 SELECT pg_temp.expect_fail('HALT_CHANNEL with a per-product reason', $q$
   INSERT INTO channel_data.rejected_competitor_snapshot (tenant_id, channel_account_id, channel, marketplace, channel_product_ref, condition, source, observed_at, received_at, verdict, reason_code, alarm_class, ruleset_version) VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', '362000001', 'new', 'KAUFLAND_BUYBOX', now(), now(), 'HALT_CHANNEL', 'UNIT_SCALE_X100', 'UNIT_SCALE', 'r49.1') $q$);
 SELECT pg_temp.ok('snapshot without a plausibility anchor (Р-49)', $q$

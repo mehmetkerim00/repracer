@@ -208,15 +208,19 @@ async function seedWorld(pool: PgPool): Promise<Omit<BenchWorld, 'scopes'>> {
   const now = new Date().toISOString();
   const steps: Record<string, number> = {};
   const started = performance.now();
+  // Р-90: тенант и владельца создаёт роль создания тенанта — у роли пути решения этих прав нет
+  const provisioning = createPool(APP_URL!.replace('svc_app@', 'svc_provisioning@'), { max: 1, applicationName: `${APP}-provisioning` });
+  const t0 = performance.now();
+  await provisioning.query('SELECT security.provision_tenant($1, $2, $3, $4::jsonb)', [tenantId, 'Synthetic bench tenant', 'EU',
+    JSON.stringify([{ membershipId, userId, email: `bench-${tenantId.slice(0, 8)}@example.test`, role: 'OWNER' }])]);
+  await provisioning.end();
+  steps.tenant = round((performance.now() - t0) / 1000);
   await inTenant(pool, tenantId, async (tx) => {
     const step = async (label: string, sql: string, params: unknown[]) => {
       const t = performance.now();
       await tx.query(sql, params);
       steps[label] = round((performance.now() - t) / 1000);
     };
-    await step('user', 'INSERT INTO platform.app_user (user_id, email) VALUES ($1, $2)', [userId, `bench-${tenantId.slice(0, 8)}@example.test`]);
-    await step('tenant', `INSERT INTO tenant_data.tenant (tenant_id, name, data_region) VALUES ($1, 'Synthetic bench tenant', 'EU')`, [tenantId]);
-    await step('membership', `INSERT INTO tenant_data.membership (tenant_id, membership_id, user_id, role, status) VALUES ($1, $2, $3, 'OWNER', 'ACTIVE')`, [tenantId, membershipId, userId]);
     await step('account',
       `INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, external_account_id, marketplaces, credentials_ref, connected_by_membership_id)
        VALUES ($1, $2, 'KAUFLAND', $3, '{de,at}', 'secret-ref:synthetic', $4)`, [tenantId, accountId, `syn-bench-${tenantId.slice(0, 8)}`, membershipId]);
@@ -225,7 +229,9 @@ async function seedWorld(pool: PgPool): Promise<Omit<BenchWorld, 'scopes'>> {
     await step('strategy',
       `INSERT INTO tenant_data.pricing_strategy (tenant_id, pricing_strategy_id, version, name, type, params, triggers, status, created_by_membership_id)
        VALUES ($1, $2, 1, 'bench-buybox', 'MATCH_BUYBOX', $3, '{COMPETITOR_CHANGE,SCHEDULE}', 'ACTIVE', $4)`,
-      [tenantId, strategyId, JSON.stringify({ type: 'MATCH_BUYBOX', undercutMinor: 5, holdWhenWinning: true, atBound: 'CAP', deadbandMinor: 0 }), membershipId]);
+      [tenantId, strategyId, JSON.stringify({ type: 'MATCH_BUYBOX', holdWhenWinning: true, atBound: 'CAP', deadbandMinor: 0 }), membershipId]);
+    // Р-91: подрез — не в вечной версии стратегии, а в таблице с 18-месячным сроком
+    await tx.query(`INSERT INTO channel_data.pricing_strategy_undercut (tenant_id, pricing_strategy_id, version, undercut_minor) VALUES ($1, $2, 1, 5)`, [tenantId, strategyId]);
     await step('products',
       `INSERT INTO tenant_data.product (tenant_id, product_id, sku, kind, gtin)
        SELECT $1, gen_random_uuid(), 'bench-' || g, 'SIMPLE', lpad(g::text, 13, '4') FROM generate_series(1, $2::int) g`, [tenantId, SKUS]);

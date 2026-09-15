@@ -7,7 +7,14 @@ import type { PricingStoreFactory } from './runner.ts';
  * Каждый сценарий — новый синтетический тенант; идентификаторы сценария переводятся в UUID и обратно,
  * поэтому ожидания сценария одни и те же для хранилища в памяти и для базы.
  */
-export function pgStoreFactory(pool: PgPool, scanPool: PgPool, fxLoaderPool: PgPool, options: { memberUsers?: Readonly<Record<string, string>> } = {}): PricingStoreFactory {
+/**
+ * Р-90: pool — роль пути решения (svc_app), adminPool — административного сервиса (остановки и снятия человеком),
+ * provisioningPool — создания тенанта.
+ */
+export function pgStoreFactory(
+  pool: PgPool, scanPool: PgPool, fxLoaderPool: PgPool,
+  options: { memberUsers?: Readonly<Record<string, string>>; adminPool: PgPool; provisioningPool: PgPool },
+): PricingStoreFactory {
   return async (seed, world) => {
     const seeded = await seedPricingWorld(pool, {
       fixtureTenantId: world.tenantId,
@@ -16,9 +23,11 @@ export function pgStoreFactory(pool: PgPool, scanPool: PgPool, fxLoaderPool: PgP
       clock: world.clock,
       seed,
       fxLoaderPool,
+      provisioningPool: options.provisioningPool,
+      adminPool: options.adminPool,
       ...(options.memberUsers ? { memberUsers: options.memberUsers } : {}),
     });
-    const inner = new PgPricingStore(pool);
+    const inner = new PgPricingStore(pool, { adminPool: options.adminPool });
     const conflicts = [...(seed.commitConflicts ?? [])];
     const store = translateStore(inner, seeded.ids, {
       // Р-54: параллельное изменение границы между чтением и фиксацией — отдельной транзакцией, как второй пользователь

@@ -174,6 +174,8 @@ export interface HaltReviewRecord {
   membershipId?: string;
   /** Пользователь сессии ручного снятия (находка 4) */
   userId?: string;
+  /** Находка 12 ревью шага 15 [Р-88]: ручное снятие — со вторым фактором */
+  mfa?: boolean;
   note?: string;
   at: Instant;
 }

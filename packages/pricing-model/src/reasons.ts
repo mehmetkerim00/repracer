@@ -172,6 +172,7 @@ export const DISPATCH_REASON_CODES = [
   'WRITE_RETRY_SCHEDULED',
   'WRITE_OUTCOME_RECONCILED',
   'WRITE_SCOPE_BLOCKED',
+  'WRITE_BUDGET_DAY_UNCONFIRMED',
 ] as const;
 export type DispatchReasonCode = (typeof DISPATCH_REASON_CODES)[number];
 
@@ -187,6 +188,7 @@ export const WRITE_END_REASON_CODES = [
   'PRICING_STOPPED',
   'WRITE_PRICING_MODE_CHANGED',
   'WRITE_EDIT_BUDGET_EXHAUSTED',
+  'WRITE_BUDGET_DAY_UNCONFIRMED',
 ] as const satisfies readonly AnyReasonCode[];
 export type WriteEndReasonCode = (typeof WRITE_END_REASON_CODES)[number];
 
@@ -345,9 +347,9 @@ export const REASON_PARAMS: Readonly<Record<AnyReasonCode, ParamSchema>> = {
   FIXED_PRICE: { targetMinor: money('TENANT'), currency: currency() },
   MARGIN_TARGET: { marginBp: bp('TENANT'), targetMinor: money('TENANT'), currency: currency() },
   BUYBOX_MATCH: { buyboxMinor: money('CHANNEL'), targetMinor: money('CHANNEL_DERIVED'), currency: currency() },
-  BUYBOX_UNDERCUT: { buyboxMinor: money('CHANNEL'), undercutMinor: money('TENANT'), targetMinor: money('CHANNEL_DERIVED'), currency: currency() },
+  BUYBOX_UNDERCUT: { buyboxMinor: money('CHANNEL'), undercutMinor: money('CHANNEL_DERIVED'), targetMinor: money('CHANNEL_DERIVED'), currency: currency() },
   LOWEST_MATCH: { lowestMinor: money('CHANNEL'), scope: oneOf(LOWEST_SCOPES, 'TENANT'), n: count('CHANNEL', N), targetMinor: money('CHANNEL_DERIVED'), currency: currency() },
-  LOWEST_UNDERCUT: { lowestMinor: money('CHANNEL'), undercutMinor: money('TENANT'), scope: oneOf(LOWEST_SCOPES, 'TENANT'), n: count('CHANNEL', N), targetMinor: money('CHANNEL_DERIVED'), currency: currency() },
+  LOWEST_UNDERCUT: { lowestMinor: money('CHANNEL'), undercutMinor: money('CHANNEL_DERIVED'), scope: oneOf(LOWEST_SCOPES, 'TENANT'), n: count('CHANNEL', N), targetMinor: money('CHANNEL_DERIVED'), currency: currency() },
   CAPPED_AT_MIN_PRICE: { targetMinor: money('CHANNEL_DERIVED'), minMinor: money('TENANT'), currency: currency() },
   CAPPED_AT_MAX_PRICE: { targetMinor: money('CHANNEL_DERIVED'), maxMinor: money('TENANT'), currency: currency() },
   ALREADY_AT_TARGET: { targetMinor: money('CHANNEL_DERIVED'), currency: currency() },
@@ -438,6 +440,8 @@ export const REASON_PARAMS: Readonly<Record<AnyReasonCode, ParamSchema>> = {
   WRITE_RETRY_SCHEDULED: { code: oneOf(WRITE_ERROR_CODES, 'TENANT'), attempt: count('TENANT'), at: instant('TENANT') },
   WRITE_OUTCOME_RECONCILED: { result: oneOf(RECONCILE_RESULTS, 'TENANT') },
   WRITE_SCOPE_BLOCKED: { code: oneOf(WRITE_ERROR_CODES, 'TENANT'), action: oneOf(SELLER_ACTIONS, 'TENANT') },
+  // Находка 7 шага 15 [Р-65]: повтор записи с бюджетом правок, когда граница суток витрины перестала быть подтверждённой
+  WRITE_BUDGET_DAY_UNCONFIRMED: { marketplace: id('TENANT') },
 };
 
 export const SANITY_NOTE_PARAMS: Readonly<Record<SanityNoteCode, ParamSchema>> = {

@@ -18,12 +18,16 @@ import { approved, contextOf, explained } from './drafts.ts';
 
 const PG_URL = process.env.REPRACER_PG_URL;
 const pool = PG_URL ? createPool(PG_URL, { max: 4, applicationName: 'repracer-step14-test' }) : null;
+const provisioning = PG_URL ? createPool(PG_URL.replace('svc_app@', 'svc_provisioning@'), { max: 1, applicationName: 'repracer-test-provisioning' }) : null;
+const admin = PG_URL ? createPool(PG_URL.replace('svc_app@', 'svc_admin@'), { max: 2, applicationName: 'repracer-test-admin' }) : null;
 const exporter = PG_URL ? createPool(PG_URL.replace('svc_app@', 'svc_exporter@'), { max: 2, applicationName: 'repracer-step14-exporter' }) : null;
 // Р-84: без базы тест не пропускается, а падает
 if (!pool) throw new Error('REPRACER_PG_URL is required: database tests do not skip (Р-84)');
 const skip = false;
 after(async () => {
   await pool?.end();
+  await provisioning?.end();
+  await admin?.end();
   await exporter?.end();
 });
 
@@ -41,7 +45,7 @@ function scopeSeed(n: number): MemorySeedScope {
 }
 
 const seed = (scopes: MemorySeedScope[], extra: { halts?: Array<{ marketplace: string; haltedAt: string }> } = {}): Promise<SeededPricingWorld> =>
-  seedPricingWorld(pool!, { fixtureTenantId: TENANT, fixtureChannelAccountId: ACCOUNT, marketplaces: ['de'], clock: now(), seed: { scopes, ...extra } as never });
+  seedPricingWorld(pool!, { provisioningPool: provisioning!, adminPool: admin!, fixtureTenantId: TENANT, fixtureChannelAccountId: ACCOUNT, marketplaces: ['de'], clock: now(), seed: { scopes, ...extra } as never });
 
 /** Итог фиксации строкой: и результат, и ошибка БД — чтобы сверить причину отказа */
 const outcomeOf = (p: Promise<unknown>) => p.then((r) => JSON.stringify(r), (e: unknown) => String(e instanceof Error ? e.message : e));
@@ -68,7 +72,7 @@ test('finding 2: the explanation dictionary and the permission matrix in the dat
 });
 
 test('finding 4: a stop, a resume and a manual halt release are accepted only from the session user of the membership; the audit author is that user', { skip }, async () => {
-  const store = new PgPricingStore(pool!);
+  const store = new PgPricingStore(pool!, { adminPool: admin! });
   const w = await seed([scopeSeed(1)], { halts: [{ marketplace: 'de', haltedAt: now() }] });
   const member = (alias: string) => w.ids.dbId(alias);
   const user = (alias: string) => w.ids.dbId(standUserOf(alias));
@@ -79,7 +83,8 @@ test('finding 4: a stop, a resume and a manual halt release are accepted only fr
 
   // Оператор пишет от членства владельца — отказ; без пользователя сессии — отказ; от своего членства — принято
   assert.equal((await store.stopPricing(w.tenantId, record('membership-owner', user('membership-operator')))).status, 'FORBIDDEN');
-  const noSession = await outcomeOf(inTenant(pool!, w.tenantId, (tx) => tx.query(
+  // Административный сервис (Р-90) без пользователя сессии
+  const noSession = await outcomeOf(inTenant(admin!, w.tenantId, (tx) => tx.query(
     `INSERT INTO tenant_data.price_stop (tenant_id, scope_type, stopped_at, stopped_by_membership_id, stop_note) VALUES ($1, 'TENANT', now(), $2, 'Synthetic stop without session user')`,
     [w.tenantId, member('membership-owner')])));
   assert.match(noSession, /not the membership of the session user/);
@@ -96,7 +101,7 @@ test('finding 4: a stop, a resume and a manual halt release are accepted only fr
   const [halt] = await inTenant(pool!, w.tenantId, async (tx) => (await tx.query('SELECT pricing_halt_id FROM channel_data.pricing_halt WHERE tenant_id = $1', [w.tenantId])).rows);
   assert.ok(halt, 'the seeded halt exists');
   const manual = (membership: string, userId: string | undefined) => ({
-    kind: 'MANUAL_RELEASE' as const, outcome: 'RELEASED' as const, sampleSize: 0, failedCount: 0, details: {}, membershipId: member(membership),
+    kind: 'MANUAL_RELEASE' as const, mfa: true, outcome: 'RELEASED' as const, sampleSize: 0, failedCount: 0, details: {}, membershipId: member(membership),
     ...(userId ? { userId } : {}), note: 'Synthetic manual release for the author check', at: now(),
   });
   assert.match(await outcomeOf(store.releaseHalt(w.tenantId, halt.pricing_halt_id, manual('membership-operator', user('membership-owner')))), /session user/);
@@ -113,7 +118,7 @@ test('finding 4: a stop, a resume and a manual halt release are accepted only fr
 });
 
 test('finding 10, Р-80: a NO_OP decision keeps no snapshot reference; a stored explanation repeats no row column; decision intent columns come from the intent', { skip }, async () => {
-  const store = new PgPricingStore(pool!);
+  const store = new PgPricingStore(pool!, { adminPool: admin! });
   const w = await seed([scopeSeed(1), scopeSeed(2)]);
   const ctx = await contextOf(store, w.tenantId, w.ids.dbId('ws-1'));
   const key = { channelAccountId: ctx.scope.channelAccountId, marketplace: ctx.scope.marketplace, channelProductRef: ctx.scope.channelProductRef, condition: ctx.scope.condition };
@@ -151,7 +156,7 @@ test('finding 10, Р-80: a NO_OP decision keeps no snapshot reference; a stored 
   const copy = explained(approved(ctx2, 1950));
   copy.decision.explanation = { ...copy.decision.explanation!, strategy: { ...copy.decision.explanation!.strategy, ruleCode: 'FIXED' } as never };
   const key2 = { ...key, channelProductRef: ctx2.scope.channelProductRef };
-  assert.match(await outcomeOf(store.commitEvaluation(w.tenantId, { key: key2, now: now(), decisions: [copy] })), /explanation_no_column_copies/);
+  assert.match(await outcomeOf(store.commitEvaluation(w.tenantId, { key: key2, now: now(), decisions: [copy] })), /explanation_no_column_copies|explanation_keys_declared/);
 });
 
 test('Р-86: the partitions of the decision and the core keep the default storage — the in-database compression of step 14 is withdrawn', { skip }, async () => {
@@ -174,7 +179,7 @@ test('Р-86: the partitions of the decision and the core keep the default storag
 });
 
 test('Р-79: the core archive exported by the exporter role explains every row without the database; a confirmation without dictionaries is refused', { skip }, async () => {
-  const store = new PgPricingStore(pool!);
+  const store = new PgPricingStore(pool!, { adminPool: admin! });
   const w = await seed([scopeSeed(4)]);
   const ctx = await contextOf(store, w.tenantId, w.ids.dbId('ws-4'));
   const r = await store.commitEvaluation(w.tenantId, {

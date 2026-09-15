@@ -16,6 +16,9 @@ const PG_URL = process.env.REPRACER_PG_URL;
 const pool = PG_URL ? createPool(PG_URL, { max: 4, applicationName: 'repracer-console-pg' }) : null;
 const scanPool = PG_URL ? createPool(PG_URL.replace('svc_app@', 'svc_dispatcher@'), { max: 2, applicationName: 'repracer-console-pg-dispatcher' }) : null;
 const fxLoaderPool = PG_URL ? createPool(PG_URL.replace('svc_app@', 'svc_fx_loader@'), { max: 1, applicationName: 'repracer-console-pg-fx' }) : null;
+// Р-90: остановки и снятия сценариев — административный сервис; тенанты — роль создания тенанта
+const adminPool = PG_URL ? createPool(PG_URL.replace('svc_app@', 'svc_admin@'), { max: 2, applicationName: 'repracer-console-pg-admin' }) : null;
+const provisioningPool = PG_URL ? createPool(PG_URL.replace('svc_app@', 'svc_provisioning@'), { max: 1, applicationName: 'repracer-console-pg-provisioning' }) : null;
 // Р-84: без базы тест не пропускается, а падает
 if (!pool) throw new Error('REPRACER_PG_URL is required: database tests do not skip (Р-84)');
 const skip = false;
@@ -29,7 +32,7 @@ let pgWorlds: LiveWorld[] = [];
 let memoryWorlds: LiveWorld[] = [];
 before(async () => {
   if (!pool) return;
-  pgWorlds = await buildStandWorlds({ filter: onPg, storeFactory: pgStoreFactory(pool, scanPool!, fxLoaderPool!) });
+  pgWorlds = await buildStandWorlds({ filter: onPg, storeFactory: pgStoreFactory(pool, scanPool!, fxLoaderPool!, { adminPool: adminPool!, provisioningPool: provisioningPool! }) });
   memoryWorlds = await buildStandWorlds({ filter: onPg });
 });
 
@@ -37,6 +40,8 @@ after(async () => {
   await pool?.end();
   await scanPool?.end();
   await fxLoaderPool?.end();
+  await adminPool?.end();
+  await provisioningPool?.end();
 });
 
 test('A, Р-68: on PostgreSQL every competitor-derived decision shows all five steps from the stored explanation', { skip }, async (t) => {

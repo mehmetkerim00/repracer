@@ -114,6 +114,7 @@ async function partitionBytes(pool: PgPool, table: string): Promise<number> {
 
 async function main(): Promise<void> {
   const pool = createPool(APP_URL!, { max: WORKERS + 4, applicationName: 'repracer-bench-explanation' });
+  const provisioning = createPool(APP_URL!.replace('svc_app@', 'svc_provisioning@'), { max: 1, applicationName: 'repracer-bench-provisioning' });
   const offers = Array.from({ length: SCOPES }, (_, i) => offer(i));
   const competitorDaily: Record<string, Array<{ day: string; minMinor: number; maxMinor: number }>> = {};
   const competitorState: Record<string, { observedAt: string; buyboxMinor: number; lowestMinor: number }> = {};
@@ -127,6 +128,7 @@ async function main(): Promise<void> {
     competitorState[key] = { observedAt: new Date(Date.now() - 3_600_000).toISOString(), buyboxMinor: o.market, lowestMinor: o.market };
   }
   const world = await seedPricingWorld(pool, {
+    provisioningPool: provisioning,
     fixtureTenantId: '10000000-0000-4000-8000-000000000141', fixtureChannelAccountId: ACCOUNT, marketplaces: ['de', 'at'], clock: new Date().toISOString(),
     seed: { scopes: offers.map((o) => o.scope), competitorDaily, competitorState },
   });
@@ -223,6 +225,7 @@ async function main(): Promise<void> {
   console.log(out);
   if (process.env.BENCH_OUT) writeFileSync(process.env.BENCH_OUT, `${out}\n`);
   await pool.end();
+  await provisioning.end();
 }
 
 await main();

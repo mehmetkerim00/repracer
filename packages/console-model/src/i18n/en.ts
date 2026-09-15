@@ -31,7 +31,7 @@ const titles: Record<AnyReasonCode, string> = {
   HALT_AUTO_RELEASED: 'Halt released automatically', HALT_REVIEW_FAILED: 'Halt extended', HALT_MANUALLY_RELEASED: 'Halt released manually',
   MARGIN_WITHOUT_COST: 'Margin without cost', STRATEGY_MISSING: 'No strategy', WRITE_SUPERSEDED_BY_NEWER_VERSION: 'Replaced by a newer price', WRITE_RETRIES_EXHAUSTED: 'Retries exhausted',
   WRITE_PRICING_MODE_CHANGED: 'Pricing mode changed', WRITE_EDIT_BUDGET_EXHAUSTED: 'Edit budget used up', WRITE_QUEUED_BEHIND_IN_FLIGHT: 'Queued behind previous write',
-  WRITE_RETRY_SCHEDULED: 'Retry scheduled', WRITE_OUTCOME_RECONCILED: 'Outcome reconciled', WRITE_SCOPE_BLOCKED: 'Offer blocked',
+  WRITE_RETRY_SCHEDULED: 'Retry scheduled', WRITE_OUTCOME_RECONCILED: 'Outcome reconciled', WRITE_SCOPE_BLOCKED: 'Offer blocked', WRITE_BUDGET_DAY_UNCONFIRMED: 'Storefront day not confirmed',
 };
 
 const deviation = (f: Fmt) => opt(f, 'deviationBp', () => ` by ${f.bp('deviationBp')}`);
@@ -144,6 +144,7 @@ const reasons: Record<AnyReasonCode, Template> = {
   WRITE_RETRIES_EXHAUSTED: (f) => `Not sent: the channel failed ${f.count('attempts')} times (${f.value('code')}); an alert was raised.`,
   WRITE_PRICING_MODE_CHANGED: (f) => `Not sent: the pricing mode changed to ${f.value('mode')}.`,
   WRITE_EDIT_BUDGET_EXHAUSTED: (f) => `Not sent: the daily edit budget is used up${f.has('used') && f.has('limit') ? ` (${f.count('used')} of ${f.count('limit')})` : ''}${opt(f, 'budgetDay', () => ` for ${f.date('budgetDay')}`)}${opt(f, 'timeZone', () => ` (${f.raw('timeZone')})`)}${opt(f, 'resetsAt', () => `; it renews at ${f.when('resetsAt')}`)}.`,
+  WRITE_BUDGET_DAY_UNCONFIRMED: (f) => `Not sent: the retry needs the edit budget of the current day, but the day boundary of storefront ${f.raw('marketplace')} is not confirmed. The write ended; a new price decision is possible once the storefront time zone is confirmed.`,
   WRITE_QUEUED_BEHIND_IN_FLIGHT: () => 'Queued: the channel has not answered the previous write yet; the dispatcher sends this one next.',
   WRITE_RETRY_SCHEDULED: (f) => `Temporary channel error (${f.value('code')}); attempt ${f.count('attempt')} after ${f.when('at')}.`,
   WRITE_OUTCOME_RECONCILED: (f) => `The outcome was unknown; reading back showed the price was ${f.value('result')}.`,
@@ -327,6 +328,7 @@ export const en = {
     strategy: {
       none: 'Not set', noneDetail: 'The price is not calculated', fixed: 'Fixed price', targetMargin: 'Target margin',
       marginOfNet: (pct: string) => `${pct} of net revenue`, buybox: 'Buy Box', lowest: 'Beat the lowest', undercut: (amount: string) => `undercut by ${amount}`,
+      undercutNotKept: 'undercut not kept (18 months after the strategy version was replaced)',
       match: 'match', holdWhenWinning: 'keep when winning', capAtBound: 'outside bounds — use the bound', holdAtBound: 'outside bounds — keep the price',
       marketScope: 'against the whole market', visibleScope: 'against visible offers', landed: 'including shipping',
       deadband: (amount: string) => `threshold ${amount}`, version: (n: number) => `version ${n}`,

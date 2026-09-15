@@ -44,6 +44,13 @@ SELECT pg_temp.expect_fail('retry while the storefront day boundary is unconfirm
   UPDATE tenant_data.channel_write SET status = 'DISPATCHED', attempt_count = attempt_count + 1, next_attempt_at = NULL
    WHERE channel_write_id = 'a9000000-0000-0000-0000-000000000012' $q$);
 UPDATE platform.marketplace SET time_zone_status = 'CONFIRMED' WHERE channel = 'EBAY' AND marketplace = 'EBAY_DE';
+-- Р-75, Р-61 (правила 23 и 33 проверки схемы заменены поведением, Р-93): справочник объяснения и курс ЕЦБ неизменяемы даже для суперпользователя
+SELECT pg_temp.expect_fail('explanation ruleset is immutable (Р-75)', $q$
+  UPDATE platform.explanation_ruleset SET definition = definition WHERE ruleset_id = 'r49.1' $q$);
+INSERT INTO platform.fx_rate (source, rate_date, base_currency, quote_currency, rate, available_from, source_ref)
+VALUES ('ECB', DATE '2001-01-02', 'EUR', 'USD', 0.9423, TIMESTAMPTZ '2001-01-02 16:00+00', 'smoke r61 (rolled back)');
+SELECT pg_temp.expect_fail('ECB rate is immutable (Р-61)', $q$
+  UPDATE platform.fx_rate SET rate = 1.5 WHERE source_ref = 'smoke r61 (rolled back)' $q$);
 SELECT pg_temp.expect_fail('manual halt without a member and a note', $q$
   INSERT INTO channel_data.pricing_halt (tenant_id, channel_account_id, channel, marketplace, reason_code, details, halted_at)
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000003', 'EBAY', 'EBAY_DE', 'MANUAL', '{}', now()) $q$);

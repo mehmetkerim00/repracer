@@ -130,7 +130,8 @@ export async function pgStandUsers(directory: PgIdentityDirectory, onboardingPoo
       continue;
     }
     const { token } = await issueSignupInvitation(onboardingPool as never, account.email);
-    users[account.membershipAlias] = await directory.acceptInvitation(token, subject, account.email);
+    // Имитатор поставщика выдаёт синтетический адрес стенда как подтверждённый (email_verified); настоящий поставщик — ADR-0013
+    users[account.membershipAlias] = await directory.acceptInvitation(token, subject, account.email, true);
   }
   return users;
 }

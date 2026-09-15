@@ -38,11 +38,14 @@ const BUYBOX = { strategyId: 'st-buybox', version: 1, params: { type: 'MATCH_BUY
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const pool = PG_URL ? createPool(PG_URL, { max: 4, applicationName: 'repracer-proof' }) : null;
+// Р-90: тенант доказательства создаёт роль создания тенанта
+const provisioning = PG_URL ? createPool(PG_URL.replace('svc_app@', 'svc_provisioning@'), { max: 1, applicationName: 'repracer-proof-provisioning' }) : null;
 const admin = ADMIN_URL ? new pg.Pool({ connectionString: ADMIN_URL, max: 2 }) : null;
 const children: ChildProcess[] = [];
 after(async () => {
   for (const c of children) c.kill('SIGKILL');
   await pool?.end();
+  await provisioning?.end();
   await admin?.end();
 });
 
@@ -109,6 +112,7 @@ async function runProof(options: { keyed: boolean; killOne: boolean }): Promise<
 
   const nowMs = Date.now();
   const world = await seedPricingWorld(pool!, {
+    provisioningPool: provisioning!,
     fixtureTenantId: '10000000-0000-4000-8000-000000000001', fixtureChannelAccountId: ACCOUNT, marketplaces: ['de', 'at'], clock: new Date(nowMs).toISOString(),
     seed: {
       scopes: scopes(),

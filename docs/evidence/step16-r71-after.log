@@ -1,0 +1,5 @@
+# Шаг 16, Р-71 после исправления (0060): scripts/db/prepare.sh, смоук-тест tests/db/smoke_app.sql
+
+psql:tests/db/smoke_app.sql:350: NOTICE:  PASS reject | rejected snapshot details: an amount without its currency (Р-71) | new row for relation "rejected_competitor_snapshot" violates check constraint "rejected_competitor_snapshot_de
+psql:tests/db/smoke_app.sql:352: NOTICE:  PASS accept | rejected snapshot details: the same amount with its currency (Р-71)
+database repracer_eu ready

@@ -899,6 +899,8 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       // Как триггер pricing_halt_release_role_guard (0048): право по матрице и членство пользователя сессии
       if (!m || !can(m.role, 'RELEASE_CHANNEL_HALT')) throw new Error(`membership ${review.membershipId} may not release a channel halt`);
       if (m.userId !== review.userId) throw new Error(`membership ${review.membershipId} is not the membership of the session user`);
+      // Как pricing_halt_release_role_guard (0058): ручное снятие — со вторым фактором (находка 12, Р-88)
+      if (!review.mfa) throw new Error(`releasing channel halt ${haltId} manually requires a second factor (finding 12, Р-88)`);
     }
     this.haltReviews.push({ ...review, haltId });
     h.releasedAt = review.at;

@@ -105,7 +105,7 @@ test('Р-74, Р-75, Р-80: the explanation references dictionaries, repeats no r
   assert.equal(explanation.strategy.steps, undefined, 'the chain is the reason itself');
   // Обязательный ключ канала buyboxMinor не перечисляется: реестр знает его; развёрнутая причина помечает его вырезанным
   // Р-85: цель «Buy Box минус подрез» — производная от цены конкурента, в слепке её нет; реестр знает ключ
-  assert.deepEqual(explanation.strategy.reason, { code: 'BUYBOX_UNDERCUT', params: { undercutMinor: 5, currency: 'EUR' } });
+  assert.deepEqual(explanation.strategy.reason, { code: 'BUYBOX_UNDERCUT', params: { currency: 'EUR' } });
 
   const { value, gaps } = expandExplanation(explanation, row, { rulesets: [sanityRuleset, gate], strategies: [strategy] });
   assert.deepEqual(gaps, []);
@@ -116,6 +116,7 @@ test('Р-74, Р-75, Р-80: the explanation references dictionaries, repeats no r
     [true, [], 'APPROVED', 1500, 1775, 'MATCH_BUYBOX', 'r49.1']);
   assert.deepEqual([value.strategy.type, value.strategy.params.undercutMinor, value.strategy.params.currency], ['MATCH_BUYBOX', 5, 'EUR']);
   assert.deepEqual(value.strategy.steps.map((r) => r.code), ['BUYBOX_UNDERCUT']);
+  // Р-91: подрез в слепке не хранится, развёрнутый вид берёт его из версии стратегии, пока он у неё есть
   assert.deepEqual(value.strategy.reason, { code: 'BUYBOX_UNDERCUT', params: { undercutMinor: 5, currency: 'EUR' }, withheld: ['buyboxMinor', 'targetMinor'] });
   // Необязательный ключ канала сохраняется в списке: без него нельзя отличить «не было» от «вырезано»
   assert.deepEqual(explainedReason({ code: 'INVALID_AMOUNT', params: { field: 'OFFER_PRICE', offerRank: 2 } }), { code: 'INVALID_AMOUNT', params: { field: 'OFFER_PRICE' }, withheld: ['offerRank'] });

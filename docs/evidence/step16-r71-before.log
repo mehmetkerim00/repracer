@@ -1,0 +1,9 @@
+# Шаг 16, Р-71 до исправления (0060): scripts/db/prepare.sh, смоук-тест tests/db/smoke_app.sql
+# Сумма без ключа currency в details отклонённого снимка принята базой — проверка security.jsonb_amounts_have_currency не срабатывала
+# Прямой вызов: security.jsonb_amounts_have_currency('{"valueMinor": 150000}') = t
+
+500:psql:tests/db/smoke_app.sql:343: NOTICE:  PASS reject | manual release by the decision path with a session user and a second factor set (Р-90) | membership a2000000-0000-0000-0000-00000000000a is not the membership of the session user
+506:psql:tests/db/smoke_app.sql:344: NOTICE:  PASS reject | UPDATE append-only halt review | permission denied for table pricing_halt_review
+512:psql:tests/db/smoke_app.sql:347: NOTICE:  PASS accept | rejected snapshot with reason
+518:psql:tests/db/smoke_app.sql:350: ERROR:  EXPECTED FAILURE DID NOT HAPPEN: rejected snapshot details: an amount without its currency (Р-71)
+519-КОНТЕКСТ:  PL/pgSQL function pg_temp_3.expect_fail(text,text) line 6 at RAISE

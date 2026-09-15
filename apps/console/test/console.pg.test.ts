@@ -23,15 +23,19 @@ const pool = createPool(PG_URL, { max: 6, applicationName: 'repracer-console-pg'
 const scanPool = createPool(PG_URL.replace('svc_app@', 'svc_dispatcher@'), { max: 2 });
 const fxPool = createPool(PG_URL.replace('svc_app@', 'svc_fx_loader@'), { max: 1 });
 const onboardingPool = createPool(PG_URL.replace('svc_app@', 'svc_onboarding@'), { max: 1 });
+// Р-90: консоль — административный сервис (остановки, роли); вход — роль входа; тенанты стенда — роль создания тенанта
+const adminPool = createPool(PG_URL.replace('svc_app@', 'svc_admin@'), { max: 4 });
+const authenticatorPool = createPool(PG_URL.replace('svc_app@', 'svc_authenticator@'), { max: 2 });
+const provisioningPool = createPool(PG_URL.replace('svc_app@', 'svc_provisioning@'), { max: 1 });
 let memberUsers: Record<string, string> = {};
 const WORLD = 'kaufland/pipeline/happy-path';
 
 let handle: ReturnType<typeof createStandApi>;
 let worlds: LiveWorld[] = [];
 before(async () => {
-  const directory = new PgIdentityDirectory(pool as never);
+  const directory = new PgIdentityDirectory(authenticatorPool as never);
   memberUsers = await pgStandUsers(directory, onboardingPool);
-  worlds = await buildStandWorlds({ filter: (s) => s.id === WORLD, storeFactory: pgStoreFactory(pool, scanPool!, fxPool!, { memberUsers }) });
+  worlds = await buildStandWorlds({ filter: (s) => s.id === WORLD, storeFactory: pgStoreFactory(pool, scanPool!, fxPool!, { memberUsers, adminPool, provisioningPool }) });
   const issuer = createTestIssuer({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE });
   handle = createStandApi(worlds, {
     authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory }),
@@ -43,6 +47,9 @@ after(async () => {
   await scanPool.end();
   await fxPool.end();
   await onboardingPool.end();
+  await adminPool.end();
+  await authenticatorPool.end();
+  await provisioningPool.end();
 });
 
 /** Токен имитатора поставщика в заголовке и язык в cookie */
@@ -69,7 +76,7 @@ test('Р-78, Р-76, finding 4 on PostgreSQL: the stop and the resume are audited
     ['pricing.stop_created', 'USER', STAND_ACCOUNTS.find((a) => a.role === 'OPERATOR')!.email, 'OPERATOR', 'TENANT', 'Synthetic kill switch on PostgreSQL']);
 
   // Роль меняется в базе — владелец в своей сессии со вторым фактором [Р-88]; следующий запрос с тем же токеном уже с новой ролью
-  await inTenant(pool, world.identityTenantId, (tx) => tx.query(
+  await inTenant(adminPool, world.identityTenantId, (tx) => tx.query(
     `UPDATE tenant_data.membership SET role = 'VIEWER' WHERE membership_id = (SELECT actor_membership_id FROM audit.audit_event WHERE entity_type = 'price_stop' LIMIT 1)`),
     memberUsers['membership-owner'], { mfa: true });
   const asViewer = (await handle({ method: 'GET', url: api('stop'), body: undefined, ...operator })).body as StopView;

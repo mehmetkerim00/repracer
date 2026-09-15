@@ -539,11 +539,11 @@ export function createPricingPipeline(deps: PipelineDeps) {
     },
 
     /** Р-52: ручное снятие — без ограничения числа попыток, с обязательной заметкой */
-    async releaseHaltManually(ctx: AdapterCallContext, haltId: string, actor: { membershipId: string; userId: string }, note: string): Promise<{ released: boolean }> {
+    async releaseHaltManually(ctx: AdapterCallContext, haltId: string, actor: { membershipId: string; userId: string; mfa: boolean }, note: string): Promise<{ released: boolean }> {
       const halt = await store.getHalt(ctx.tenantId, haltId);
       if (!halt) return { released: false };
       await store.releaseHalt(ctx.tenantId, haltId, {
-        kind: 'MANUAL_RELEASE', outcome: 'RELEASED', sampleSize: 0, failedCount: 0, details: {}, membershipId: actor.membershipId, userId: actor.userId, note, at: deps.now(),
+        kind: 'MANUAL_RELEASE', outcome: 'RELEASED', sampleSize: 0, failedCount: 0, details: {}, membershipId: actor.membershipId, userId: actor.userId, mfa: actor.mfa, note, at: deps.now(),
       });
       await emit(ctx, [
         { kind: 'log', level: 'INFO', code: 'HALT_MANUALLY_RELEASED', message: 'HALT_MANUALLY_RELEASED', details: { haltId, membershipId: actor.membershipId } },

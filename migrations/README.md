@@ -95,7 +95,12 @@ SET LOCAL app.user_id   = '<uuid>';   -- если действие пользо�
 | **0053** | Находки 1–4 и Р-88: журнал проверок остановки (запись о снятии — только при снятии в той же транзакции), остановка не вставляется снятой, автоматическое снятие — система по чистой выборке после окна; `platform.identity_invitation`, приём приглашения — единственный путь привязки, роль `repracer_onboarding`; второй фактор сессии для снятия остановки тенанта и смены роли |
 | **0054** | Отмена сжатия ядра в секциях [Р-86]: хранение по умолчанию, без порога, `ensure_partitions` как в 0022 |
 | **0055** | C2: день бюджета правок при повторе — текущий день витрины; D2: обход диспетчера — повторы и сверки только действующих единиц |
-| **0056** | Проверка схемы v12 — последняя в наборе: правила 0050 без сжатия + перепроверка пола, производные от данных канала, приглашения и второй фактор, журнал проверок, день бюджета и обход |
+| **0056** | Проверка схемы v12 (заменена 0061): правила 0050 без сжатия + перепроверка пола, производные от данных канала, приглашения и второй фактор, журнал проверок, день бюджета и обход |
+| **0057** | Находка 7 ревью шага 15: причина завершения записи `WRITE_BUDGET_DAY_UNCONFIRMED` — повтор записи с бюджетом правок при неподтверждённой границе суток витрины |
+| **0058** | Р-90: роли подключения — `repracer_admin`, `repracer_provisioning`, `repracer_authenticator`, `repracer_audit_writer`; у пути решения нет вставки аудита, членств, тенантов, пользователей, остановок человеком, функций входа и приглашений; пользователь сессии и второй фактор — только у административного сервиса; `security.provision_tenant`; находки 2, 3, 5, 9–13 |
+| **0059** | Р-91: подрез стратегии — `channel_data.pricing_strategy_undercut` (18 месяцев после замены версии), не в вечной версии стратегии и не в слепке; находка 15: проверка ключей слепка fail-closed (`security.explanation_keys_declared`) |
+| **0060** | Р-71: `security.jsonb_amounts_have_currency` не ловила сумму без ключа `currency` (NULL в условии `IF`) — проверка валюты сумм в БД не работала с 0042; найдено переводом правила 29 на поведение (Р-93) |
+| **0061** | Проверка схемы v13 — последняя в наборе, Р-93: свойства каталога, привилегии ролей [Р-90], данные справочников и поведенческие проверки в откатываемой подтранзакции (Р-83, находка 15, Р-91); правила по именам удалены |
 
 Миграции шага 4 (0015–0023) предполагают **отсутствие production-данных**: переносимые таблицы проверяются на пустоту,
 и миграция падает, если в них есть строки. До первого production-развёртывания набор можно схлопнуть.
@@ -122,7 +127,47 @@ SET LOCAL app.user_id   = '<uuid>';   -- если действие пользо�
 3. Нет FK из `tenant_data` в `channel_data`, `audit`, `legal`.
 4. Партиционированная таблица ⇔ политика `DROP_PARTITION`. Данные тенанта удаляются по времени только с `requires_export`.
 5. Таблицы аналитического слоя (`channel_observation`, `competitor_snapshot`, `channel_write_response`, `fee_actual`)
-   в PostgreSQL не возвращаются — проверка схемы (`0023`, `0029`, `0031`, `0033`, `0035`, `0039`, `0041`, `0043`, `0047`, `0050`, `0056`).
+   в PostgreSQL не возвращаются — проверка схемы (`0023`, `0029`, `0031`, `0033`, `0035`, `0039`, `0041`, `0043`, `0047`, `0050`, `0056`, `0061`).
 6. Индекс — только вместе с запросом, который его использует (комментарий над индексом).
 7. Последняя миграция набора — проверка схемы; при добавлении таблиц копия проверки переносится в конец.
 8. Представление — только `WITH (security_invoker = true)`: RLS применяется от имени читающего (проверка `0029`).
+9. Правило проверки схемы проверяет поведение либо не существует [Р-93]: не сверять имена триггеров, ограничений и ключей и текст функций
+   (`position(... IN pg_get_functiondef(...))`). Допустимы свойства каталога, которые и есть поведение (RLS, привилегии, реестр, сроки),
+   данные справочников и действие в откатываемой подтранзакции с ожидаемым отказом и контрольным успехом (образец — 0061).
+
+## Р-93: чем заменены правила проверки 0056, сверявшие имена
+
+Доказательство разницы: на схеме с недостижимой перепроверкой пола при отправке правило 42 проверки 0056 проходит, 0061 падает —
+[docs/evidence/step16-r93-name-rule-on-regression.log](../docs/evidence/step16-r93-name-rule-on-regression.log),
+[docs/evidence/step16-r93-behaviour-rule-on-regression.log](../docs/evidence/step16-r93-behaviour-rule-on-regression.log).
+
+| Правило 0056 | Что сверяло | Чем заменено (поведение) |
+|---|---|---|
+| 1–11 | RLS, регистрация, политики, append-only, сроки, партиции, FK, BYPASSRLS, SECURITY DEFINER, представления, шаблон остатка Kaufland | Остались в 0061 (свойства каталога и данные) |
+| 12 | Имена триггеров потолка при создании и отправке (Р-43, Р-44) | `smoke_app.sql` «dispatch above lowered max_price (Р-44, check 3)»; `store.pg.test.ts` «the database refuses a price above max_price…» |
+| 13 | Имена ограничений «без округления до границы», «причина отказа обязательна» | `smoke_app.sql` «clamp to floor instead of rejection (Р-44)», «REJECTED without a reason» |
+| 14 | Имя ограничения «потолок не в guardrail» | `smoke_app.sql` «guardrail carrying a ceiling (moved to max_price, Р-43)» |
+| 15 | НДС по умолчанию DE и AT | Остались в 0061 (данные) |
+| 16 | Имя триггера журнала снятия (Р-52) | `smoke_app.sql` «manual release without a journal record (Р-52)»; `smoke_admin.sql`; `audit-guards.pg.test.ts` находка 1 |
+| 17 | Имя триггера копирования признака цены по конкурентам (Р-51) | `smoke_app.sql` «competitor_derived: from intent rule_code, copied into the decision (Р-51)» |
+| 18 | Имена ограничений валют (Р-57) | `smoke_app.sql` «currency outside EUR and USD» |
+| 19 | Имя ограничения и текст функции налогового режима витрины (Р-58) | `smoke_app.sql` «USD write scope attached to a EUR gross storefront», «net price basis with VAT regime»; данные витрин — в 0061 |
+| 20, 21 | Наличие проекций и имя ограничения параметров отказа (OQ-93, OQ-94, OQ-98) | `store.pg.test.ts` «OQ-93, OQ-94, OQ-98: projections keep currency and suggested price, the latest move, and the rejection parameters» |
+| 22 | Имена ограничений причины завершения и триггера объявления записи (Р-64) | `write-queue.pg.test.ts` (A2: записи не теряются), `budget-retry-dispatch.pg.test.ts`; привилегии обхода — в 0061 |
+| 23 | Имена триггеров неизменяемого курса и курса в решении (Р-61) | `smoke_r65.sql` «ECB rate is immutable (Р-61)»; `fx-day-boundary.pg.test.ts` «Р-61 in the database: a decision on a converted cost is refused without its exchange rate…»; привилегия загрузчика — в 0061 |
+| 24, 26 | Текст функций закрытия дня и имена триггеров пояса витрины (Р-62, Р-65) | `fx-day-boundary.pg.test.ts` «Р-65: a US storefront has no substituted day boundary…»; `smoke_r65.sql` «budgeted write while the storefront day boundary is unconfirmed», «budget day is not the current storefront day»; `smoke_retention.sql`; данные поясов США — в 0061 |
+| 25 | Текст ограничений с `data_region` (Р-60) | `smoke_app.sql` «tenant in wrong region DB»; `write-recheck.pg.test.ts` — витрина Amazon US в тенанте базы EU |
+| 27 | Имена триггеров остановок и текст функции остановки тенанта (Р-69, Р-70) | `step12.pg.test.ts` (аккаунт, подключённый после остановки тенанта), `smoke_app.sql` остановки Р-51, `audit-guards.pg.test.ts` |
+| 28, 32, 39, 40 | Имена ограничений слепка, текст функции копии в ядро, NO_OP, копии столбцов (Р-68, Р-74, Р-80) | `step14.pg.test.ts` «finding 10, Р-80…», `channel-derived.pg.test.ts`, `undercut-eternal.pg.test.ts`; срок ссылки на снимок — в 0061 |
+| 29 | Имена ограничений «сумма с валютой» (Р-71) | `smoke_app.sql` «rejected snapshot details: an amount without its currency (Р-71)». **Поведенческая проверка нашла дефект:** функция не ловила отсутствующий ключ `currency` — исправлено 0060 ([до](../docs/evidence/step16-r71-before.log), [после](../docs/evidence/step16-r71-after.log)) |
+| 30 | Имя ограничения и текст функции «опасное» (Р-73) | `channel-derived.pg.test.ts` (флаг «опасное» у отклонённой цены из данных конкурентов), `console.test.ts` «Р-73, C…» |
+| 31, 37, 38 | Текст ограничения роли OPERATOR, текст функций матрицы прав и пользователя сессии (OQ-125, OQ-129, находка 4) | `step14.pg.test.ts` «finding 2: … the permission matrix in the database equal the code», «finding 4…»; `step12.pg.test.ts` |
+| 33 | Имена триггера неизменяемого справочника и FK (Р-75) | `smoke_r65.sql` «explanation ruleset is immutable (Р-75)»; `step14.pg.test.ts` «finding 2: the explanation dictionary … equal the code»; append-only стратегий — правило 3 |
+| 34 | Имена триггеров аудита остановок (Р-76) | `step14.pg.test.ts` «finding 4…», `role-separation.pg.test.ts`, `smoke_admin.sql` |
+| 35 | Имя и текст ограничения стратегии при ENGINE (Р-77) | `smoke_app.sql` «ENGINE without a strategy (Р-77)» |
+| 36 | Отсутствие объектов входа по имени, число функций роли входа | `identity.pg.test.ts` «the password and session objects of step 13 no longer exist», привязка только приглашением; привилегии — в 0061 |
+| 41 | Имя ограничения самодостаточного архива (Р-79) | `step14.pg.test.ts` «Р-79: the core archive … a confirmation without dictionaries is refused»; `archive.test.ts`; привилегии экспортёра — в 0061 |
+| 42 | Текст триггеров записи: `assert_price_floor` (Р-83) | 0061 — поведение в подтранзакции; `write-recheck.pg.test.ts` |
+| 43 | Имена ограничений и функции производных ключей (Р-85) | 0061 — поведение (находка 15, Р-91); `channel-derived.pg.test.ts`, `undercut-eternal.pg.test.ts` |
+| 44 | Имена триггеров и текст функций журнала проверок и второго фактора (находки 1–3, Р-88) | `audit-guards.pg.test.ts`, `smoke_admin.sql` (находка 12) |
+| 45 | Имя триггера дня бюджета при повторе и текст функции обхода (C2, D2) | `smoke_r65.sql` (C2), `dispatcher-defects.pg.test.ts` (D2); привилегия столбцов обхода — в 0061 |

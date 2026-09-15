@@ -32,7 +32,7 @@ const titles: Record<AnyReasonCode, string> = {
   HALT_AUTO_RELEASED: 'Anhalten automatisch aufgehoben', HALT_REVIEW_FAILED: 'Anhalten verlängert', HALT_MANUALLY_RELEASED: 'Anhalten manuell aufgehoben',
   MARGIN_WITHOUT_COST: 'Marge ohne Einstandskosten', STRATEGY_MISSING: 'Keine Strategie', WRITE_SUPERSEDED_BY_NEWER_VERSION: 'Durch neueren Preis ersetzt', WRITE_RETRIES_EXHAUSTED: 'Wiederholungen ausgeschöpft',
   WRITE_PRICING_MODE_CHANGED: 'Preismodus geändert', WRITE_EDIT_BUDGET_EXHAUSTED: 'Änderungsbudget aufgebraucht', WRITE_QUEUED_BEHIND_IN_FLIGHT: 'Wartet auf vorherige Übertragung',
-  WRITE_RETRY_SCHEDULED: 'Wiederholung geplant', WRITE_OUTCOME_RECONCILED: 'Ergebnis abgeglichen', WRITE_SCOPE_BLOCKED: 'Angebot blockiert',
+  WRITE_RETRY_SCHEDULED: 'Wiederholung geplant', WRITE_OUTCOME_RECONCILED: 'Ergebnis abgeglichen', WRITE_SCOPE_BLOCKED: 'Angebot blockiert', WRITE_BUDGET_DAY_UNCONFIRMED: 'Tagesgrenze der Storefront unbestätigt',
 };
 
 const deviation = (f: Fmt) => opt(f, 'deviationBp', () => ` um ${f.bp('deviationBp')}`);
@@ -145,6 +145,7 @@ const reasons: Record<AnyReasonCode, Template> = {
   WRITE_RETRIES_EXHAUSTED: (f) => `Nicht gesendet: der Kanal ist ${f.count('attempts')}-mal fehlgeschlagen (${f.value('code')}); ein Alarm wurde ausgelöst.`,
   WRITE_PRICING_MODE_CHANGED: (f) => `Nicht gesendet: der Preismodus wurde auf ${f.value('mode')} geändert.`,
   WRITE_EDIT_BUDGET_EXHAUSTED: (f) => `Nicht gesendet: das tägliche Änderungsbudget ist aufgebraucht${f.has('used') && f.has('limit') ? ` (${f.count('used')} von ${f.count('limit')})` : ''}${opt(f, 'budgetDay', () => ` für ${f.date('budgetDay')}`)}${opt(f, 'timeZone', () => ` (${f.raw('timeZone')})`)}${opt(f, 'resetsAt', () => `; es erneuert sich ${f.when('resetsAt')}`)}.`,
+  WRITE_BUDGET_DAY_UNCONFIRMED: (f) => `Nicht gesendet: die Wiederholung braucht das Änderungsbudget des aktuellen Tages, aber die Tagesgrenze der Storefront ${f.raw('marketplace')} ist nicht bestätigt. Die Übertragung wurde beendet; eine neue Preisentscheidung ist möglich, sobald die Zeitzone der Storefront bestätigt ist.`,
   WRITE_QUEUED_BEHIND_IN_FLIGHT: () => 'In der Warteschlange: der Kanal hat die vorherige Übertragung noch nicht beantwortet; diese wird als Nächstes gesendet.',
   WRITE_RETRY_SCHEDULED: (f) => `Vorübergehender Kanalfehler (${f.value('code')}); Versuch ${f.count('attempt')} nach ${f.when('at')}.`,
   WRITE_OUTCOME_RECONCILED: (f) => `Das Ergebnis war unbekannt; das Zurücklesen zeigt: der Preis wurde ${f.value('result')}.`,
@@ -328,6 +329,7 @@ export const de: Messages = {
     strategy: {
       none: 'Nicht festgelegt', noneDetail: 'Der Preis wird nicht berechnet', fixed: 'Festpreis', targetMargin: 'Zielmarge',
       marginOfNet: (pct: string) => `${pct} vom Nettoerlös`, buybox: 'Buy Box', lowest: 'Niedrigsten schlagen', undercut: (amount: string) => `um ${amount} unterbieten`,
+      undercutNotKept: 'Unterbietung nicht mehr gespeichert (18 Monate nach Ersatz der Strategieversion)',
       match: 'angleichen', holdWhenWinning: 'bei Gewinn beibehalten', capAtBound: 'außerhalb der Grenzen — Grenze verwenden', holdAtBound: 'außerhalb der Grenzen — Preis beibehalten',
       marketScope: 'gegen den gesamten Markt', visibleScope: 'gegen sichtbare Angebote', landed: 'einschließlich Versand',
       deadband: (amount: string) => `Schwelle ${amount}`, version: (n: number) => `Version ${n}`,

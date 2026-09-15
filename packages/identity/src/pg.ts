@@ -7,6 +7,7 @@ import type { ExternalSubject, IdentityDirectory, ResolvedUser } from './index.t
  * Сопоставление внешнего пользователя на PostgreSQL. Чтение — функцией SECURITY DEFINER роли входа
  * (security.resolve_external_identity, 0048), роли — из tenant_data.membership. Привязка (издатель, subject) → пользователь
  * создаётся ТОЛЬКО приёмом приглашения [Р-88, 0053]: у приложения нет вставки в platform.external_identity.
+ * Р-90 (0058): пул — роли входа repracer_authenticator; у роли пути решения этих функций нет.
  */
 
 const hashToken = (token: string): Buffer => createHash('sha256').update(token, 'utf8').digest();
@@ -35,12 +36,13 @@ export class PgIdentityDirectory implements IdentityDirectory {
   }
 
   /**
-   * Приём приглашения: subject и email — из ПРОВЕРЕННОГО токена поставщика; email должен совпасть с адресом приглашения.
-   * Возвращает пользователя; членство приглашения становится действующим.
+   * Приём приглашения: subject, email и email_verified — из ПРОВЕРЕННОГО токена поставщика; email подтверждён поставщиком и
+   * совпадает с адресом приглашения (находка 11). Вход, уже привязанный к пользователю, принимает приглашение в другой тенант
+   * (находка 10, Р-9). Возвращает пользователя; членство приглашения становится действующим.
    */
-  async acceptInvitation(token: string, subject: ExternalSubject, email: string | null): Promise<string> {
-    const { rows: [row] } = await this.pool.query('SELECT security.accept_identity_invitation($1, $2, $3, $4) AS user_id',
-      [hashToken(token), subject.issuer, subject.subject, email]);
+  async acceptInvitation(token: string, subject: ExternalSubject, email: string | null, emailVerified: boolean): Promise<string> {
+    const { rows: [row] } = await this.pool.query('SELECT security.accept_identity_invitation($1, $2, $3, $4, $5) AS user_id',
+      [hashToken(token), subject.issuer, subject.subject, email, emailVerified]);
     return row.user_id;
   }
 }
@@ -55,7 +57,7 @@ export async function issueSignupInvitation(onboardingPool: pg.Pool, email: stri
   return { invitationId: row.id, token };
 }
 
-/** Приглашение участника тенанта — в сессии владельца или администратора со вторым фактором (транзакция вызывающего) */
+/** Приглашение участника тенанта — в сессии владельца или администратора со вторым фактором; транзакция пула административного сервиса (Р-90) */
 export async function inviteMember(
   tx: { query: pg.Pool['query'] }, input: { tenantId: string; email: string; role: MemberRole; ttlSeconds?: number },
 ): Promise<{ invitationId: string; userId: string; membershipId: string; token: string }> {

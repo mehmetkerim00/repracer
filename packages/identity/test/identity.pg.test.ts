@@ -7,25 +7,46 @@ import { inviteMember, issueSignupInvitation, PgIdentityDirectory } from '../src
 import { createTestIssuer } from '../src/test-issuer.ts';
 
 /**
- * Р-78, Р-88 на PostgreSQL: пользователь сопоставляется по (издатель, subject); привязка создаётся только приёмом приглашения;
- * приглашает владелец или администратор со вторым фактором; роль меняется со вторым фактором и применяется сразу.
+ * Р-78, Р-88, Р-90 на PostgreSQL: пользователь сопоставляется по (издатель, subject) ролью входа; привязка создаётся только
+ * приёмом приглашения на адрес, подтверждённый поставщиком; приглашает владелец или администратор со вторым фактором из
+ * административного сервиса; роль меняется со вторым фактором и применяется сразу; пользователь состоит в нескольких тенантах (Р-9).
  * Данные синтетические.
  */
 
 const PG_URL = process.env.REPRACER_PG_URL;
 if (!PG_URL) throw new Error('REPRACER_PG_URL is required: database tests do not skip (Р-84)');
+const login = (name: string, max = 1) => createPool(PG_URL.replace('svc_app@', `${name}@`), { max, applicationName: `repracer-identity-${name}` });
+// Р-90: путь решения, административный сервис, вход, онбординг, создание тенанта — разные роли подключения
 const pool = createPool(PG_URL, { max: 4, applicationName: 'repracer-identity-test' });
-const onboarding = createPool(PG_URL.replace('svc_app@', 'svc_onboarding@'), { max: 1, applicationName: 'repracer-identity-onboarding' });
+const admin = login('svc_admin', 2);
+const authenticator = login('svc_authenticator', 2);
+const onboarding = login('svc_onboarding');
+const provisioning = login('svc_provisioning');
 after(async () => {
-  await pool.end();
-  await onboarding.end();
+  for (const p of [pool, admin, authenticator, onboarding, provisioning]) await p.end();
 });
 
 const ISSUER = 'https://idp.stand.repracer.test';
 const email = (tag: string) => `${tag}-${randomUUID().slice(0, 8)}@stand.repracer.test`;
+const directory = new PgIdentityDirectory(authenticator as never);
 
-test('Р-88: a provider subject is linked only by accepting an invitation for its own email; the application cannot link directly', async () => {
-  const directory = new PgIdentityDirectory(pool as never);
+async function signUp(address: string) {
+  const subject = { issuer: ISSUER, subject: `sub-${randomUUID()}` };
+  const { token } = await issueSignupInvitation(onboarding as never, address);
+  return { subject, userId: await directory.acceptInvitation(token, subject, address, true) };
+}
+
+function worldOf(ownerId: string, n: number) {
+  return seedPricingWorld(pool, {
+    fixtureTenantId: `10000000-0000-4000-8000-00000000031${n}`, fixtureChannelAccountId: `20000000-0000-4000-8000-00000000031${n}`, marketplaces: ['de'],
+    clock: new Date().toISOString(), seed: { scopes: [] }, memberUsers: { 'membership-owner': ownerId }, provisioningPool: provisioning,
+  });
+}
+
+const invite = (tenantId: string, userId: string, address: string, role: 'PRICING_MANAGER' | 'VIEWER' = 'PRICING_MANAGER') =>
+  inTenant(admin, tenantId, (tx) => inviteMember(tx, { tenantId, email: address, role }), userId, { mfa: true });
+
+test('Р-88, findings 11 and 13: a provider subject is linked only by accepting an invitation for its own verified email; the decision path neither links nor resolves', async () => {
   const subject = { issuer: ISSUER, subject: `sub-${randomUUID()}` };
   const address = email('owner');
 
@@ -33,54 +54,74 @@ test('Р-88: a provider subject is linked only by accepting an invitation for it
     /permission denied/, 'the application has no insert on external identities');
   await assert.rejects(pool.query(`SELECT security.issue_signup_invitation('x@stand.repracer.test', '\\x00'::bytea, interval '1 day')`), /permission denied/,
     'only the onboarding role issues signup invitations');
+  await assert.rejects(pool.query('SELECT * FROM security.resolve_external_identity($1, $2)', [ISSUER, subject.subject]), /permission denied/,
+    'finding 13: the decision path does not read memberships by external identity');
 
   const { token } = await issueSignupInvitation(onboarding as never, address);
-  await assert.rejects(directory.acceptInvitation(token, subject, email('someone-else')), /another email/);
-  await assert.rejects(directory.acceptInvitation('not-the-token', subject, address), /unknown, used or expired/);
-  const userId = await directory.acceptInvitation(token, subject, address.toUpperCase());
+  await assert.rejects(directory.acceptInvitation(token, subject, email('someone-else'), true), /another email/);
+  await assert.rejects(directory.acceptInvitation('not-the-token', subject, address, true), /unknown, used or expired/);
+  await assert.rejects(directory.acceptInvitation(token, subject, address, false), /has not verified the email/, 'finding 11: an unverified email does not link');
+  const userId = await directory.acceptInvitation(token, subject, address.toUpperCase(), true);
   assert.equal((await directory.resolve(subject))?.userId, userId);
-  await assert.rejects(directory.acceptInvitation(token, { issuer: ISSUER, subject: `sub-${randomUUID()}` }, address), /unknown, used or expired/, 'a token links once');
+  await assert.rejects(directory.acceptInvitation(token, { issuer: ISSUER, subject: `sub-${randomUUID()}` }, address, true), /unknown, used or expired/, 'a token links once');
 
   const seenByOther = await inTenant(pool, '00000000-0000-0000-0000-000000000000', async (tx) => (await tx.query('SELECT count(*)::int AS n FROM platform.external_identity')).rows[0].n, randomUUID());
   assert.equal(seenByOther, 0);
 });
 
-test('Р-88: an owner with a second factor invites a member; without it, or as an operator, the invitation is refused; a role change needs the factor and applies at once', async () => {
-  const directory = new PgIdentityDirectory(pool as never);
+test('Р-88, Р-90: an owner with a second factor invites a member from the administrative service; without it, as an operator or from the decision path the invitation is refused; a role change needs the factor and applies at once', async () => {
   const idp = createTestIssuer({ issuer: ISSUER, audience: 'repracer-console' });
-  const ownerSubject = { issuer: ISSUER, subject: `sub-${randomUUID()}` };
-  const ownerEmail = email('owner');
-  const { token: ownerToken } = await issueSignupInvitation(onboarding as never, ownerEmail);
-  const ownerId = await directory.acceptInvitation(ownerToken, ownerSubject, ownerEmail);
-  const world = await seedPricingWorld(pool, {
-    fixtureTenantId: '10000000-0000-4000-8000-000000000314', fixtureChannelAccountId: '20000000-0000-4000-8000-000000000314', marketplaces: ['de'],
-    clock: new Date().toISOString(), seed: { scopes: [] }, memberUsers: { 'membership-owner': ownerId },
-  });
+  const { userId: ownerId } = await signUp(email('owner'));
+  const world = await worldOf(ownerId, 4);
   const operatorUser = world.ids.dbId('user-operator');
 
   const memberEmail = email('pricing');
-  await assert.rejects(inTenant(pool, world.tenantId, (tx) => inviteMember(tx, { tenantId: world.tenantId, email: memberEmail, role: 'PRICING_MANAGER' }), ownerId),
-    /second factor/);
-  await assert.rejects(inTenant(pool, world.tenantId, (tx) => inviteMember(tx, { tenantId: world.tenantId, email: memberEmail, role: 'PRICING_MANAGER' }), operatorUser, { mfa: true }),
-    /owner or admin/);
-  await assert.rejects(inTenant(pool, world.tenantId, (tx) => inviteMember(tx, { tenantId: world.tenantId, email: memberEmail, role: 'OWNER' }), ownerId, { mfa: true }),
-    /cannot be granted/);
-  const invited = await inTenant(pool, world.tenantId, (tx) => inviteMember(tx, { tenantId: world.tenantId, email: memberEmail, role: 'PRICING_MANAGER' }), ownerId, { mfa: true });
+  const inviteAs = (userId: string, mfa: boolean, role: 'PRICING_MANAGER' | 'OWNER' = 'PRICING_MANAGER', viaPool = admin) =>
+    inTenant(viaPool, world.tenantId, (tx) => inviteMember(tx, { tenantId: world.tenantId, email: memberEmail, role: role as never }), userId, { mfa });
+  await assert.rejects(inviteAs(ownerId, true, 'PRICING_MANAGER', pool), /permission denied/, 'Р-90: not from the decision path');
+  await assert.rejects(inviteAs(ownerId, false), /second factor/);
+  await assert.rejects(inviteAs(operatorUser, true), /owner or admin/);
+  await assert.rejects(inviteAs(ownerId, true, 'OWNER'), /cannot be granted/);
+  const invited = await inviteAs(ownerId, true);
 
   const memberSubject = { issuer: ISSUER, subject: `sub-${randomUUID()}` };
   const auth = createAuthenticator({ issuer: ISSUER, audience: 'repracer-console', jwks: staticJwks(idp.jwks), directory });
   assert.equal(await auth.authenticate(`Bearer ${idp.token(memberSubject.subject)}`), null, 'not linked before the invitation is accepted');
-  await directory.acceptInvitation(invited.token, memberSubject, memberEmail);
+  await directory.acceptInvitation(invited.token, memberSubject, memberEmail, true);
   const member = (await auth.authenticate(`Bearer ${idp.token(memberSubject.subject)}`))!.memberships.find((m) => m.tenantId === world.tenantId)!;
   assert.deepEqual([member.membershipId, member.role], [invited.membershipId, 'PRICING_MANAGER']);
 
-  const setRole = (userId: string | undefined, mfa: boolean) => inTenant(pool, world.tenantId, (tx) => tx.query(
+  const setRole = (userId: string | undefined, mfa: boolean, viaPool = admin) => inTenant(viaPool, world.tenantId, (tx) => tx.query(
     `UPDATE tenant_data.membership SET role = 'VIEWER' WHERE membership_id = $1`, [invited.membershipId]), userId, { mfa });
+  await assert.rejects(setRole(ownerId, true, pool), /permission denied/, 'Р-90: the decision path does not change roles');
   await assert.rejects(setRole(ownerId, false), /second factor/);
   await assert.rejects(setRole(undefined, true), /another active owner or admin/);
   await assert.rejects(setRole(invited.userId, true), /another active owner or admin/, 'nobody changes their own role');
   await setRole(ownerId, true);
   assert.equal((await auth.authenticate(`Bearer ${idp.token(memberSubject.subject)}`))!.memberships.find((m) => m.tenantId === world.tenantId)!.role, 'VIEWER');
+});
+
+test('finding 10, Р-9: a linked user accepts an invitation to a second tenant with the same sign-in; a second sign-in of the same provider and a sign-in of another user are refused', async () => {
+  const addressA = email('agency');
+  const a = await signUp(addressA);
+  const { userId: ownerB } = await signUp(email('owner-b'));
+  const worldA = await worldOf(a.userId, 5);
+  const worldB = await worldOf(ownerB, 6);
+
+  const toB = await invite(worldB.tenantId, ownerB, addressA);
+  assert.equal(toB.userId, a.userId, 'the invitation is for the existing user');
+  assert.equal(await directory.acceptInvitation(toB.token, a.subject, addressA, true), a.userId);
+  const tenants = (await directory.resolve(a.subject))!.memberships.map((m) => m.tenantId).sort();
+  assert.deepEqual(tenants, [worldA.tenantId, worldB.tenantId].sort(), 'one sign-in, two tenants');
+
+  const worldC = await worldOf(ownerB, 7);
+  const toC = await invite(worldC.tenantId, ownerB, addressA, 'VIEWER');
+  await assert.rejects(directory.acceptInvitation(toC.token, { issuer: ISSUER, subject: `sub-${randomUUID()}` }, addressA, true),
+    /already linked to another sign-in/, 'relinking a user to another subject of the same provider is not supported (OQ-148)');
+
+  const addressD = email('someone');
+  const toD = await invite(worldC.tenantId, ownerB, addressD, 'VIEWER');
+  await assert.rejects(directory.acceptInvitation(toD.token, a.subject, addressD, true), /linked to another user/, 'a sign-in linked to another user does not accept an invitation of someone else');
 });
 
 test('the password and session objects of step 13 no longer exist', async () => {

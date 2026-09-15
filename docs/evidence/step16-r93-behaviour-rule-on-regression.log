@@ -1,0 +1,7 @@
+# Шаг 16, Р-93: та же схема с недостижимой перепроверкой пола при отправке
+# Проверка 0061 (поведение в откатываемой подтранзакции):
+BEGIN
+psql:migrations/0061_verify_schema_invariants_v13.sql:372: ERROR:  schema invariant violations:
+behaviour check (Р-83, finding 15, Р-91): a price write below the recomputed margin floor was dispatched
+КОНТЕКСТ:  PL/pgSQL function inline_code_block line 356 at RAISE
+exit=3

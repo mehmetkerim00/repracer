@@ -51,6 +51,8 @@ export function strategyLabel(def: StrategyDefinition | null, currency: string, 
   const money = (v: number) => m.money(v, currency);
   const tail = `${def.deadbandMinor > 0 ? `; ${s.deadband(money(def.deadbandMinor))}` : ''} (${s.version(def.version)})`;
   const atBound = (v: 'CAP' | 'HOLD') => (v === 'CAP' ? s.capAtBound : s.holdAtBound);
+  // Р-91: подрез хранится 18 месяцев после замены версии стратегии; без него — «не хранится», а не «сравняться»
+  const undercut = (u: number | undefined) => (u === undefined ? s.undercutNotKept : u > 0 ? s.undercut(money(u)) : s.match);
   const competitorDerived = COMPETITOR_DERIVED_RULES.has(p.type);
   switch (p.type) {
     case 'FIXED':
@@ -60,13 +62,13 @@ export function strategyLabel(def: StrategyDefinition | null, currency: string, 
     case 'MATCH_BUYBOX':
       return {
         label: s.buybox,
-        detail: `${p.undercutMinor > 0 ? s.undercut(money(p.undercutMinor)) : s.match}${p.holdWhenWinning ? `; ${s.holdWhenWinning}` : ''}; ${atBound(p.atBound)}${tail}`,
+        detail: `${undercut((p as { undercutMinor?: number }).undercutMinor)}${p.holdWhenWinning ? `; ${s.holdWhenWinning}` : ''}; ${atBound(p.atBound)}${tail}`,
         competitorDerived,
       };
     case 'BEAT_LOWEST':
       return {
         label: s.lowest,
-        detail: `${p.undercutMinor > 0 ? s.undercut(money(p.undercutMinor)) : s.match}, ${p.scope === 'MARKET' ? s.marketScope : s.visibleScope}${p.compareLanded ? `, ${s.landed}` : ''}; ${atBound(p.atBound)}${tail}`,
+        detail: `${undercut((p as { undercutMinor?: number }).undercutMinor)}, ${p.scope === 'MARKET' ? s.marketScope : s.visibleScope}${p.compareLanded ? `, ${s.landed}` : ''}; ${atBound(p.atBound)}${tail}`,
         competitorDerived,
       };
   }

@@ -14,11 +14,13 @@ import { approved, commit, contextOf, explained } from './drafts.ts';
 
 const PG_URL = process.env.REPRACER_PG_URL;
 const pool = PG_URL ? createPool(PG_URL, { max: 6, applicationName: 'repracer-store-pg-test' }) : null;
+const provisioning = PG_URL ? createPool(PG_URL.replace('svc_app@', 'svc_provisioning@'), { max: 1, applicationName: 'repracer-test-provisioning' }) : null;
 // Р-84: без базы тест не пропускается, а падает
 if (!pool) throw new Error('REPRACER_PG_URL is required: database tests do not skip (Р-84)');
 const skip = false;
 after(async () => {
   await pool?.end();
+  await provisioning?.end();
 });
 
 const ACCOUNT = '20000000-0000-4000-8000-000000000001';
@@ -36,7 +38,7 @@ function scopeSeed(n: number, strategy: MemorySeedScope['strategy']): MemorySeed
 }
 
 async function seed(scopes: MemorySeedScope[]): Promise<SeededPricingWorld> {
-  return seedPricingWorld(pool!, {
+  return seedPricingWorld(pool!, { provisioningPool: provisioning!,
     fixtureTenantId: '10000000-0000-4000-8000-000000000001', fixtureChannelAccountId: ACCOUNT, marketplaces: ['de', 'at'], clock: now(), seed: { scopes },
   });
 }

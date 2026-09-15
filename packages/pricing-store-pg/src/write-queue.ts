@@ -73,8 +73,12 @@ function dispatchRefusal(error: unknown, write: Row): { status: 'DISCARDED_STALE
   const e = error as { code?: string; message?: string; constraint?: string };
   const message = e.message ?? '';
   const currency = write.currency as string;
+  // Находка 7 шага 15 [Р-65, 0055]: повтор записи с бюджетом правок при неподтверждённой границе суток витрины — завершение с причиной.
+  // Раньше отказ не распознавался: захват пробрасывал ошибку, обход диспетчера падал на каждом круге, запись висела без алерта (Р-64)
+  let m = /retry of a budgeted write: the day boundary of storefront (\S+) is not confirmed/.exec(message);
+  if (m) return { status: 'DISCARDED_STALE', reason: { code: 'WRITE_BUDGET_DAY_UNCONFIRMED', params: { marketplace: m[1]! } } };
   // Р-83 (0051): пол вычислен заново — min_price и пол маржи; пол не вычисляется — отдельное сообщение (не <NULL> в числе)
-  let m = /value (\d+) is below effective price floor (\d+) \(min_price (\d+), margin floor (\d+|none), min margin (\d+|none) bp\)/.exec(message);
+  m = /value (\d+) is below effective price floor (\d+) \(min_price (\d+), margin floor (\d+|none), min margin (\d+|none) bp\)/.exec(message);
   if (m) {
     return {
       status: 'DISCARDED_STALE',

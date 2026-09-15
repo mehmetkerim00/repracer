@@ -70,6 +70,10 @@ export function translateStore<T extends object = PricingStore>(inner: T, ids: I
 export interface SeedWorldInput {
   /** Роль загрузчика курсов (repracer_fx_loader) — только для seed.fxRates [Р-61] */
   fxLoaderPool?: PgPool;
+  /** Р-90: роль создания тенанта (repracer_provisioning) — тенант, пользователи и членства одной функцией security.provision_tenant */
+  provisioningPool: PgPool;
+  /** Р-90: роль административного сервиса (repracer_admin) — только для seed.stops: остановку ставит человек в своей сессии */
+  adminPool?: PgPool;
   fixtureTenantId: string;
   fixtureChannelAccountId: string;
   marketplaces: string[];
@@ -192,7 +196,7 @@ export async function seedPricingWorld(pool: PgPool, input: SeedWorldInput): Pro
     const cached = capabilities.get(channel);
     if (cached) return cached;
     const { rows: [cap] } = await tx.query(
-      `SELECT capability_id, version, write_scope_kind, write_scope_key_template FROM platform.channel_capability
+      `SELECT capability_id, version, write_scope_kind, write_scope_key_template, budget_scope_attribute FROM platform.channel_capability
         WHERE channel = $1 AND field = 'PRICE' AND status = 'ACTIVE' ORDER BY valid_from DESC LIMIT 1`,
       [channel],
     );
@@ -222,25 +226,32 @@ export async function seedPricingWorld(pool: PgPool, input: SeedWorldInput): Pro
     ids.alias(s.writeScopeId, info.writeScopeId);
     // Идентичность предложения по шаблону возможности канала: Kaufland — unit, Amazon — регион и SKU
     const kaufland = account.channel === 'KAUFLAND';
+    const ebay = account.channel === 'EBAY';
     const identity = {
       region: account.region, marketplace: s.marketplace,
       external_unit_id: kaufland ? s.externalUnitId : null, external_sku: kaufland ? null : `syn-sku-${s.externalUnitId}`,
+      // eBay: бюджет правок — на листинг [Р-19]; листинг стенда — синтетический, уже на Inventory API (миграции нет, Р-2)
+      external_listing_id: ebay ? `syn-listing-${s.externalUnitId}` : null,
     };
     await tx.query(
       `INSERT INTO tenant_data.write_scope
          (tenant_id, write_scope_id, channel_account_id, channel, field, product_id, capability_id, capability_version,
-          scope_kind, scope_key, currency, price_basis, tax_regime, pricing_mode, status)
-       VALUES ($1, $2, $3, $4, 'PRICE', $5, $6, $7, $8, tenant_data.derive_scope_key($9::jsonb, $10::text[]), $11, $12, $13, 'OFF', $14)`,
+          scope_kind, scope_key, currency, price_basis, tax_regime, pricing_mode, status, budget_scope_key)
+       VALUES ($1, $2, $3, $4, 'PRICE', $5, $6, $7, $8, tenant_data.derive_scope_key($9::jsonb, $10::text[]), $11, $12, $13, 'OFF', $14, $15)`,
       [tenantId, info.writeScopeId, account.id, account.channel, productId, cap.capability_id, cap.version, cap.write_scope_kind,
        JSON.stringify(identity), cap.write_scope_key_template, s.currency, s.basis,
-       s.taxRegime ?? (s.basis === 'GROSS' ? 'VAT_INCLUDED' : 'SALES_TAX_EXCLUDED'), s.status ?? 'ACTIVE'],
+       s.taxRegime ?? (s.basis === 'GROSS' ? 'VAT_INCLUDED' : 'SALES_TAX_EXCLUDED'), s.status ?? 'ACTIVE',
+       // Бюджет правок [Р-19]: ключ — атрибут предложения из возможности канала (у eBay — листинг); у Kaufland и Amazon бюджета нет
+       cap.budget_scope_attribute ? (identity as Record<string, string | null>)[cap.budget_scope_attribute] ?? null : null],
     );
     await tx.query(
       `INSERT INTO tenant_data.offer_mapping
-         (tenant_id, product_id, channel_account_id, channel, region, marketplace, channel_offer_key, external_unit_id, external_sku, channel_product_ref, condition, status, price_write_scope_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'ACTIVE', $12)`,
+         (tenant_id, product_id, channel_account_id, channel, region, marketplace, channel_offer_key, external_unit_id, external_sku, channel_product_ref, condition, status, price_write_scope_id,
+          external_listing_id, ebay_listing_format, ebay_migration_status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'ACTIVE', $12, $13, $14, $15)`,
       [tenantId, productId, account.id, account.channel, account.region, s.marketplace, `offer:${s.externalUnitId}`, identity.external_unit_id, identity.external_sku,
-       s.channelProductRef, s.condition.toUpperCase(), info.writeScopeId],
+       s.channelProductRef, s.condition.toUpperCase(), info.writeScopeId,
+       identity.external_listing_id, ebay ? 'FIXED_PRICE' : null, ebay ? 'NOT_REQUIRED' : null],
     );
 
     let strategyId: string | null = null;
@@ -250,13 +261,19 @@ export async function seedPricingWorld(pool: PgPool, input: SeedWorldInput): Pro
         strategyId = randomUUID();
         strategies.set(s.strategy.strategyId, strategyId);
         ids.alias(s.strategy.strategyId, strategyId);
+        // Р-91: версия стратегии (вечная, архивируется с ядром) — без подреза; подрез — в таблице с 18-месячным сроком
+        const { undercutMinor, ...stored } = s.strategy.params as Record<string, unknown>;
         for (let v = 1; v <= s.strategy.version; v++) {
           await tx.query(
             `INSERT INTO tenant_data.pricing_strategy (tenant_id, pricing_strategy_id, version, name, type, params, triggers, status, created_by_membership_id)
              VALUES ($1, $2, $3, $4, $5, $6, $7, 'ACTIVE', $8)`,
             [tenantId, strategyId, v, s.strategy.strategyId, s.strategy.params.type,
-             JSON.stringify({ ...s.strategy.params, deadbandMinor: s.strategy.deadbandMinor }), ['COMPETITOR_CHANGE', 'COST_CHANGE', 'SCHEDULE'], membershipId],
+             JSON.stringify({ ...stored, deadbandMinor: s.strategy.deadbandMinor }), ['COMPETITOR_CHANGE', 'COST_CHANGE', 'SCHEDULE'], membershipId],
           );
+          if (undercutMinor !== undefined) {
+            await tx.query(`INSERT INTO channel_data.pricing_strategy_undercut (tenant_id, pricing_strategy_id, version, undercut_minor) VALUES ($1, $2, $3, $4)`,
+              [tenantId, strategyId, v, undercutMinor]);
+          }
         }
       }
     }
@@ -298,13 +315,25 @@ export async function seedPricingWorld(pool: PgPool, input: SeedWorldInput): Pro
     };
 
 
+  // Участники стенда (DEFAULT_MEMBERS): у каждого свой пользователь. Тенант, пользователи и членства создаёт роль создания тенанта
+  // одной функцией (Р-90): у роли пути решения нет вставки в tenant, app_user и membership
+  const memberUsers = new Map<string, string>([[OWNER_MEMBERSHIP_ALIAS, userId]]);
+  const provisioned: Array<{ membershipId: string; userId: string; email: string; role: string }> = [
+    { membershipId, userId, email: `owner-${tag}@example.test`, role: 'OWNER' },
+  ];
+  for (const m of seed.members ?? DEFAULT_MEMBERS) {
+    if (m.membershipId === OWNER_MEMBERSHIP_ALIAS) continue;
+    const otherUser: string = input.memberUsers?.[m.membershipId] ?? randomUUID();
+    const otherMembership: string = randomUUID();
+    provisioned.push({ membershipId: otherMembership, userId: otherUser, email: `${m.role.toLowerCase()}-${tag}@example.test`, role: m.role });
+    ids.alias(m.membershipId, otherMembership);
+    ids.alias(m.userId ?? standUserOf(m.membershipId), otherUser);
+    memberUsers.set(m.membershipId, otherUser);
+  }
+  await input.provisioningPool.query('SELECT security.provision_tenant($1, $2, $3, $4::jsonb)',
+    [tenantId, `Synthetic tenant ${tag}`, 'EU', JSON.stringify(provisioned)]);
+
   await inTenant(pool, tenantId, async (tx) => {
-    if (!input.memberUsers?.[OWNER_MEMBERSHIP_ALIAS]) {
-      await tx.query('INSERT INTO platform.app_user (user_id, email) VALUES ($1, $2)', [userId, `owner-${tag}@example.test`]);
-    }
-    await tx.query(`INSERT INTO tenant_data.tenant (tenant_id, name, data_region) VALUES ($1, $2, 'EU')`, [tenantId, `Synthetic tenant ${tag}`]);
-    await tx.query(`INSERT INTO tenant_data.membership (tenant_id, membership_id, user_id, role, status) VALUES ($1, $2, $3, 'OWNER', 'ACTIVE')`,
-      [tenantId, membershipId, userId]);
     await tx.query(
       `INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, external_account_id, marketplaces, credentials_ref, connected_by_membership_id)
        VALUES ($1, $2, 'KAUFLAND', $3, $4, 'secret-ref:synthetic', $5)`,
@@ -403,27 +432,12 @@ export async function seedPricingWorld(pool: PgPool, input: SeedWorldInput): Pro
     }
   }, userId);
 
-  // Участники стенда (DEFAULT_MEMBERS): у каждого свой пользователь; пользователь создаётся только в своей сессии (app_user_signup)
-  const memberUsers = new Map<string, string>([[OWNER_MEMBERSHIP_ALIAS, userId]]);
-  for (const m of seed.members ?? DEFAULT_MEMBERS) {
-    if (m.membershipId === OWNER_MEMBERSHIP_ALIAS) continue;
-    const existingUser = input.memberUsers?.[m.membershipId];
-    const otherUser: string = existingUser ?? randomUUID();
-    const otherMembership: string = randomUUID();
-    await inTenant(pool, tenantId, async (tx) => {
-      if (!existingUser) await tx.query('INSERT INTO platform.app_user (user_id, email) VALUES ($1, $2)', [otherUser, `${m.role.toLowerCase()}-${tag}@example.test`]);
-      await tx.query(`INSERT INTO tenant_data.membership (tenant_id, membership_id, user_id, role, status) VALUES ($1, $2, $3, $4, 'ACTIVE')`,
-        [tenantId, otherMembership, otherUser, m.role]);
-    }, otherUser);
-    ids.alias(m.membershipId, otherMembership);
-    ids.alias(m.userId ?? standUserOf(m.membershipId), otherUser);
-    memberUsers.set(m.membershipId, otherUser);
-  }
-  // Остановки человеком сценария [Р-69, Р-70]: от сессии автора — триггер прав сверяет пользователя
+  // Остановки человеком сценария [Р-69, Р-70]: от сессии автора в административном сервисе — триггер прав сверяет пользователя (Р-90)
   for (const st of seed.stops ?? []) {
+    if (!input.adminPool) throw new Error('seed.stops requires adminPool (repracer_admin, Р-90)');
     const alias = st.membershipId ?? OWNER_MEMBERSHIP_ALIAS;
     const account = st.scope === 'TENANT' ? null : (st.channelAccountId ? ids.dbId(st.channelAccountId) : accountId);
-    await inTenant(pool, tenantId, (tx) => tx.query(
+    await inTenant(input.adminPool, tenantId, (tx) => tx.query(
       `INSERT INTO tenant_data.price_stop (tenant_id, scope_type, channel_account_id, marketplace, stopped_at, stopped_by_membership_id, stop_note)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [tenantId, st.scope, account, st.scope === 'STOREFRONT' ? st.marketplace ?? null : null, st.stoppedAt, ids.dbId(alias), st.note ?? 'Synthetic stop of the scenario'],

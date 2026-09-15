@@ -40,6 +40,8 @@ export interface VerifiedToken {
   /** Методы аутентификации (RFC 8176), например `pwd`, `otp`, `hwk` — по ним будет проверяться MFA для опасных действий (OQ-132) */
   amr: string[];
   email: string | null;
+  /** OIDC email_verified: адрес подтверждён поставщиком; без true приглашение не принимается (находка 11) */
+  emailVerified: boolean;
 }
 
 export interface VerifyOptions {
@@ -118,6 +120,7 @@ export async function verifyToken(token: string, options: VerifyOptions): Promis
     expiresAt: claims.exp as number,
     amr: Array.isArray(claims.amr) ? claims.amr.filter((x): x is string => typeof x === 'string') : [],
     email: typeof claims.email === 'string' ? claims.email : null,
+    emailVerified: claims.email_verified === true,
   };
 }
 

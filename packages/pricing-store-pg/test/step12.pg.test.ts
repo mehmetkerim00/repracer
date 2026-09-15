@@ -15,11 +15,15 @@ import { approved, commit, contextOf } from './drafts.ts';
 
 const PG_URL = process.env.REPRACER_PG_URL;
 const pool = PG_URL ? createPool(PG_URL, { max: 4, applicationName: 'repracer-step12-test' }) : null;
+const provisioning = PG_URL ? createPool(PG_URL.replace('svc_app@', 'svc_provisioning@'), { max: 1, applicationName: 'repracer-test-provisioning' }) : null;
+const admin = PG_URL ? createPool(PG_URL.replace('svc_app@', 'svc_admin@'), { max: 2, applicationName: 'repracer-test-admin' }) : null;
 // Р-84: без базы тест не пропускается, а падает
 if (!pool) throw new Error('REPRACER_PG_URL is required: database tests do not skip (Р-84)');
 const skip = false;
 after(async () => {
   await pool?.end();
+  await provisioning?.end();
+  await admin?.end();
 });
 
 const TENANT = '10000000-0000-4000-8000-000000000012';
@@ -39,7 +43,7 @@ function scopeSeed(n: number, strategy: MemorySeedScope['strategy'], channelAcco
 }
 
 const seed = (scopes: MemorySeedScope[]): Promise<SeededPricingWorld> =>
-  seedPricingWorld(pool!, { fixtureTenantId: TENANT, fixtureChannelAccountId: ACCOUNT, marketplaces: ['de', 'at'], clock: now(), seed: { scopes } });
+  seedPricingWorld(pool!, { provisioningPool: provisioning!, adminPool: admin!, fixtureTenantId: TENANT, fixtureChannelAccountId: ACCOUNT, marketplaces: ['de', 'at'], clock: now(), seed: { scopes } });
 
 /** Счётчик транзакций: BEGIN на соединении пула и одиночные запросы пула (каждый — своя транзакция) */
 function countingPool(inner: PgPool): { pool: PgPool; transactions: () => number; reset: () => void } {
@@ -149,7 +153,7 @@ test('Р-68: the channel parameter keys in the database are the registry keys', 
 });
 
 test('Р-69, Р-70, OQ-125 in the database: a tenant stop holds every price, covers an account connected later, and only the owner resumes it', { skip }, async () => {
-  const store = new PgPricingStore(pool!);
+  const store = new PgPricingStore(pool!, { adminPool: admin! });
   const w = await seed([scopeSeed(2, FIXED)]);
   const member = (alias: string) => w.ids.dbId(alias);
   // Автор — пользователь сессии: членство и пользователь одного участника (находка 4)
@@ -192,7 +196,7 @@ test('Р-69, Р-70, OQ-125 in the database: a tenant stop holds every price, cov
 });
 
 test('Р-69: a system halt is only for broken channel data — a person cannot create one', { skip }, async () => {
-  const store = new PgPricingStore(pool!);
+  const store = new PgPricingStore(pool!, { adminPool: admin! });
   const w = await seed([scopeSeed(4, BUYBOX)]);
   await assert.rejects(
     store.haltChannel(w.tenantId, { channelAccountId: w.channelAccountId, marketplace: 'de', reasonCode: 'MANUAL' as never, details: {}, haltedAt: now() }),

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildExplanation, eternalCoreOf, type GateProfile, type PriceDecisionDraft, type PriceIntentDraft, type StrategyDefinition } from './index.ts';
+import { buildExplanation, eternalCoreOf, type GateProfile, type PriceDecisionDraft, type PriceIntentDraft, type Reason, type StrategyDefinition } from './index.ts';
 
 /**
  * Р-85: вечное ядро (слепок и столбцы, которые ядро хранит вместе со справочником стратегий) не позволяет ВОССТАНОВИТЬ цену
@@ -86,3 +86,65 @@ test('Р-85: an approved Buy Box undercut keeps only the published price — the
   assert.deepEqual(recoverable(stored, [BUYBOX], BUYBOX - UNDERCUT), []);
   assert.equal(JSON.stringify(stored.explanation).includes('targetMinor'), false);
 });
+
+/** Отклонённая Gate цена из данных конкурентов: что осталось бы в вечном ядре */
+function rejected(ruleCode: 'MATCH_BUYBOX' | 'BEAT_LOWEST', proposed: number, reference: number, detail: Reason, deviation: number | null) {
+  const intent = baseIntent({
+    ruleCode, proposedMinor: proposed, referenceMinor: reference,
+    reason: { code: 'BUYBOX_UNDERCUT', params: { buyboxMinor: reference, undercutMinor: UNDERCUT, targetMinor: proposed, currency: 'EUR' } },
+    explanation: [{ code: 'BUYBOX_UNDERCUT', params: { buyboxMinor: reference, undercutMinor: UNDERCUT, targetMinor: proposed, currency: 'EUR' } }],
+  });
+  // Проверки — в порядке профиля: прошедшие до отказавшей, затем отказавшая [Р-75]
+  const failed = detail.code === 'STEP_LIMIT' ? 'STEP' : detail.code === 'ABOVE_MAX_PRICE' ? 'UPPER_BOUND' : 'LOWER_BOUND';
+  const order = gateWithStep.definition.CHANGED;
+  const checks = [...order.slice(0, order.indexOf(failed)).map((check) => ({ check, passed: true, detail: null })), { check: failed, passed: false, detail }];
+  const decision = baseDecision({
+    outcome: 'REJECTED', decisionClass: 'REJECTED_BY_GATE', finalMinor: null, rejectionReason: detail.code as PriceDecisionDraft['rejectionReason'], boundDeviationBp: deviation,
+    reason: detail, checks,
+  });
+  const built = buildExplanation({ snapshot: { source: 'KAUFLAND_BUYBOX' }, sanity: null, intent, decision, minMarginBp: null, channelHalt: null, priceStop: null }, gateWithStep);
+  return eternalCoreOf(intent, decision, built);
+}
+
+const gateWithStep: GateProfile = { rulesetId: 'g74.1', kind: 'GATE', definition: { CHANGED: ['PRICE_STOP', 'LOWER_BOUND', 'UPPER_BOUND', 'STEP'], NO_OP: gate.definition.NO_OP } };
+
+test('finding 16: a competitor-derived rejection below the margin floor keeps neither the proposed price nor its deviation', () => {
+  const proposed = BUYBOX - UNDERCUT;
+  const stored = rejected('MATCH_BUYBOX', proposed, BUYBOX, { code: 'BELOW_MARGIN_FLOOR', params: { proposedMinor: proposed, floorMinor: 1800, minMinor: 1500, minMarginBp: 1000, deviationBp: 139, currency: 'EUR' } }, 139);
+  assert.deepEqual(recoverable(stored, [BUYBOX], null), []);
+  assert.equal(numbersIn(stored).includes(139), false, 'deviation from the margin floor is not kept');
+  assert.equal(JSON.stringify(stored.explanation).includes('undercutMinor'), false, 'Р-91: the undercut is not kept either');
+});
+
+test('finding 16: a competitor-derived rejection above max_price keeps neither the proposed price nor its deviation', () => {
+  const reference = 2605;
+  const proposed = reference - UNDERCUT;
+  const stored = rejected('MATCH_BUYBOX', proposed, reference, { code: 'ABOVE_MAX_PRICE', params: { proposedMinor: proposed, maxMinor: 2500, deviationBp: 400, currency: 'EUR' } }, 400);
+  assert.deepEqual(recoverable(stored, [reference], null), []);
+  assert.equal(numbersIn(stored).includes(400), false);
+});
+
+test('finding 16: a competitor-derived step-limit rejection keeps the current price and the limit, not the step that gives the proposed price', () => {
+  const proposed = BUYBOX - UNDERCUT;
+  const stored = rejected('MATCH_BUYBOX', proposed, BUYBOX, { code: 'STEP_LIMIT', params: { stepBp: 405, limitBp: 300, currentMinor: 1850, proposedMinor: proposed, currency: 'EUR' } }, null);
+  assert.deepEqual(recoverable(stored, [BUYBOX], null), []);
+  assert.equal(numbersIn(stored).includes(405), false, 'the step with the current price would give the proposed price');
+});
+
+test('finding 16, Р-91: an approved lowest-price undercut compared with shipping keeps no undercut — published price, undercut and own shipping would give the lowest landed price', () => {
+  const lowestLanded = 1720;
+  const ownShipping = 495;
+  const published = lowestLanded - UNDERCUT - ownShipping;
+  const params = { lowestMinor: lowestLanded, undercutMinor: UNDERCUT, scope: 'VISIBLE_TOP_N', n: 3, targetMinor: published, currency: 'EUR' };
+  const intent = baseIntent({ ruleCode: 'BEAT_LOWEST', proposedMinor: published, referenceMinor: lowestLanded, reason: { code: 'LOWEST_UNDERCUT', params }, explanation: [{ code: 'LOWEST_UNDERCUT', params }] });
+  const stored = eternal(intent, baseDecision({ finalMinor: published, reason: { code: 'APPROVED', params: { finalMinor: published, floorMinor: 1000, ceilingMinor: 2500, currency: 'EUR' } } }));
+  assert.equal(JSON.stringify(stored.explanation).includes('undercutMinor'), false);
+  assert.deepEqual(numbersIn(stored).filter((n) => n === lowestLanded || n === UNDERCUT || n === lowestLanded - UNDERCUT), []);
+});
+
+test('Р-91: an approved Buy Box undercut keeps the published price but not the undercut that would give the Buy Box price', () => {
+  const stored = eternal(baseIntent({}), baseDecision({}));
+  assert.equal(JSON.stringify(stored.explanation).includes('undercutMinor'), false);
+  assert.equal(numbersIn(stored.explanation).includes(UNDERCUT), false);
+});
+

@@ -164,7 +164,7 @@ async function runPipelineStep(
       const dump = (await store.dump()) as { halts?: Array<{ haltId: string }> };
       const halt = dump.halts?.[step.haltIndex];
       if (!halt) return { failure: `${step.id}: no halt #${step.haltIndex}` };
-      return { result: await pipeline.releaseHaltManually(callContext(step.ctx, step.id, scenario, clock), halt.haltId, { membershipId: step.membershipId, userId: standUserOf(step.membershipId) }, step.note) };
+      return { result: await pipeline.releaseHaltManually(callContext(step.ctx, step.id, scenario, clock), halt.haltId, { membershipId: step.membershipId, userId: standUserOf(step.membershipId), mfa: true }, step.note) };
     }
     case 'pricingMutation': {
       try {

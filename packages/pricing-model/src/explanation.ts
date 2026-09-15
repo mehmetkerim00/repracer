@@ -317,13 +317,20 @@ export function explanationRowOf(
 /** Слепок со справочниками — полное объяснение для экрана; чего нет в справочниках — в gaps */
 export function expandExplanation(e: DecisionExplanation, row: ExplanationRow, dict: ExplanationDictionary): { value: ExpandedExplanation; gaps: ExplanationGap[] } {
   const gaps: ExplanationGap[] = [];
-  const expand = (r: ExplainedReason, config: Readonly<Record<string, Value>> = {}): ExpandedReason => {
+  const expand = (r: ExplainedReason, config: Readonly<Record<string, Value>> = {}, fromStrategy: Readonly<Record<string, Value>> = {}): ExpandedReason => {
     const schema = paramSchema(r.code);
     const params: Record<string, Value> = { ...(r.params ?? {}) };
     // Обязательные ключи канала вырезаются всегда — список из реестра; необязательные и необъявленные — из слепка
     const withheld = new Set(r.withheld ?? []);
     for (const [k, spec] of Object.entries(schema ?? {})) {
       if ((spec.class === 'CHANNEL' || spec.class === 'CHANNEL_DERIVED') && !spec.optional && !Object.hasOwn(params, k)) withheld.add(k);
+    }
+    // Р-91: подрез в слепке не хранится; пока он есть у версии стратегии (18 месяцев после её замены) — берётся оттуда. В архиве его нет
+    for (const [k, v] of Object.entries(fromStrategy)) {
+      if (schema?.[k] && !Object.hasOwn(params, k)) {
+        params[k] = v;
+        withheld.delete(k);
+      }
     }
     for (const [k, v] of Object.entries(config)) {
       if (schema?.[k]?.class === 'CONFIG' && !Object.hasOwn(params, k) && !withheld.has(k)) params[k] = v;
@@ -353,7 +360,9 @@ export function expandExplanation(e: DecisionExplanation, row: ExplanationRow, d
   const s = e.strategy;
   const def = row.strategyId === null ? null : dict.strategies.find((d) => d.strategyId === row.strategyId && d.version === row.strategyVersion) ?? null;
   if (row.strategyId !== null && !def) gaps.push({ kind: 'STRATEGY', ref: `${row.strategyId}@${row.strategyVersion}` });
-  const reason = expand(s.reason);
+  const undercut = (def?.params as { undercutMinor?: unknown } | undefined)?.undercutMinor;
+  const fromStrategy: Record<string, Value> = typeof undercut === 'number' ? { undercutMinor: undercut } : {};
+  const reason = expand(s.reason, {}, fromStrategy);
   const intentClass: IntentClass = s.intentClass ?? 'CHANGED';
 
   const profile = row.gateProfile === null ? undefined : dict.rulesets.find((x): x is GateProfile => x.kind === 'GATE' && x.rulesetId === row.gateProfile);
@@ -391,7 +400,7 @@ export function expandExplanation(e: DecisionExplanation, row: ExplanationRow, d
         params: def ? { ...(def.params as Record<string, Value>), deadbandMinor: def.deadbandMinor, currency: s.currency } : {},
         ruleCode: row.ruleCode, intentClass, trigger: row.trigger, currentMinor: s.currentMinor, proposedMinor: row.proposedMinor,
         boundsAtStrategy: { ...s.boundsAtStrategy }, currency: s.currency, reason,
-        steps: s.chain ? s.chain.map((r) => expand(r)) : [...(s.steps ?? []).map((r) => expand(r)), reason],
+        steps: s.chain ? s.chain.map((r) => expand(r, {}, fromStrategy)) : [...(s.steps ?? []).map((r) => expand(r, {}, fromStrategy)), reason],
       },
       gate: {
         profile: row.gateProfile, outcome: row.outcome, reason: gateReason, checks, notRun, profileKnown,

@@ -64,6 +64,8 @@ export type DispatchStep =
   | { action: 'ENDED'; channelWriteId: string; status: string; reason: WriteReason }
   | { action: 'WAITING'; channelWriteId: string; status: 'DISPATCHED' | 'ACCEPTED' }
   | { action: 'RETRY_LATER'; channelWriteId: string; at: Instant }
+  /** Единица не обработана: ошибка хранилища или неизвестный отказ базы — алерт, остальной обход продолжается (находка 7 шага 15) */
+  | { action: 'ERROR'; errorCode: string }
   | { action: 'IDLE' };
 
 export interface ScopeDispatchReport {
@@ -98,11 +100,14 @@ export interface WriteDispatcher {
 
 /** Больше захватов за один вызов по единице не нужно: синхронный канал освобождает единицу сразу, асинхронный — нет */
 const MAX_CLAIMS_PER_CALL = 8;
+/** Повтор алерта об одной и той же ошибке единицы — не чаще раза в час: без лавины CRITICAL на каждом круге обхода (как D2) */
+const SCOPE_ERROR_REALERT_MS = 3_600_000;
 
 export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatcher {
   const policy: RetryPolicy = { ...DEFAULT_RETRY_POLICY, ...deps.policy };
   const callTimeoutMs = deps.callTimeoutMs ?? 60_000;
   const tails = new Map<string, Promise<unknown>>();
+  const scopeErrorAlertedAt = new Map<string, number>();
 
   function serialized<T>(key: string, fn: () => Promise<T>): Promise<T> {
     const previous = tails.get(key) ?? Promise.resolve();
@@ -232,7 +237,20 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
       const worker = async () => {
         while (next < unique.length) {
           const item = unique[next++]!;
-          reports.push(await this.dispatchScope(item.tenantId, item.writeScopeId));
+          try {
+            reports.push(await this.dispatchScope(item.tenantId, item.writeScopeId));
+          } catch (error) {
+            // Одна единица не роняет обход остальных, и её сбой не молчит [Р-64]. В алерт — только код ошибки: текст базы может нести суммы
+            const errorCode = String((error as { code?: unknown }).code ?? 'UNKNOWN');
+            reports.push({ tenantId: item.tenantId, writeScopeId: item.writeScopeId, steps: [{ action: 'ERROR', errorCode }] });
+            const key = `${item.tenantId}:${item.writeScopeId}:${errorCode}`;
+            const at = Date.parse(deps.now());
+            const last = scopeErrorAlertedAt.get(key);
+            if (last === undefined || at - last >= SCOPE_ERROR_REALERT_MS) {
+              scopeErrorAlertedAt.set(key, at);
+              await alert(item.tenantId, 'PRICE_WRITE_DISPATCH_ERROR', 'CRITICAL', { writeScopeId: item.writeScopeId, dueKind: item.dueKind, errorCode });
+            }
+          }
         }
       };
       await Promise.all(Array.from({ length: Math.max(1, Math.min(options.concurrency ?? 8, unique.length)) }, worker));

@@ -20,7 +20,10 @@ done
 
 echo "== smoke"
 "${PSQL[@]}" -d "$DB" -f tests/db/smoke_setup.sql
+# Р-90: тенанты — ролью создания тенанта; путь решения — ролью приложения; остановки, роли и снятия — административным сервисом
+PGUSER=svc_provisioning "${PSQL[@]}" -d "$DB" -f tests/db/smoke_provision.sql
 PGUSER=svc_app "${PSQL[@]}" -d "$DB" -f tests/db/smoke_app.sql
+PGUSER=svc_admin "${PSQL[@]}" -d "$DB" -f tests/db/smoke_admin.sql
 "${PSQL[@]}" -d "$DB" -f tests/db/smoke_r65.sql
 PGUSER=svc_scheduler "${PSQL[@]}" -d "$DB" -f tests/db/smoke_retention.sql
 PGUSER=svc_scheduler "${PSQL[@]}" -d "$DB" -Atc "SELECT maintenance.ensure_partitions(now())" > /dev/null

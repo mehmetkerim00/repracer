@@ -26,6 +26,18 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_onboarding') THEN
     CREATE ROLE svc_onboarding LOGIN IN ROLE repracer_onboarding;
   END IF;
+  -- Р-90: административный сервис (консоль) — права приложения + остановки человеком, роли и отзыв участников, приглашения
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_admin') THEN
+    CREATE ROLE svc_admin LOGIN IN ROLE repracer_admin;
+  END IF;
+  -- Р-90: создание тенанта с владельцем и участниками (онбординг, посев стенда) — только security.provision_tenant
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_provisioning') THEN
+    CREATE ROLE svc_provisioning LOGIN IN ROLE repracer_provisioning;
+  END IF;
+  -- Р-90: вход — сопоставление внешнего пользователя с членствами и приём приглашения
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_authenticator') THEN
+    CREATE ROLE svc_authenticator LOGIN IN ROLE repracer_authenticator;
+  END IF;
   -- Экспортёр дневных секций в ClickHouse [Р-20]
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_exporter') THEN
     CREATE ROLE svc_exporter LOGIN IN ROLE repracer_exporter;

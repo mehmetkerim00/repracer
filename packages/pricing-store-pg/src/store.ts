@@ -47,6 +47,11 @@ type Row = Record<string, any>;
 
 export interface PgPricingStoreOptions {
   /**
+   * Р-90: пул административного сервиса (роль repracer_admin) — остановки человеком и ручное снятие системной остановки.
+   * Без него эти действия недоступны: путь решения работает ролью repracer_app, у которой прав на них нет.
+   */
+  adminPool?: PgPool;
+  /**
    * Только для замера шага 9: окно сдвига из журнала движений (DISTINCT ON по competitor_move, как в шаге 8)
    * вместо проекции competitor_move_latest [OQ-93]. В работе — projection.
    */
@@ -59,11 +64,15 @@ const iso = (v: string) => new Date(v).toISOString();
 
 const COMPETITOR_RULES = ['MATCH_BUYBOX', 'BEAT_LOWEST', 'POSITION'];
 
-/** Строки единицы записи цены: предложение, единица, товар, версии записи, стратегия */
+/**
+ * Строки единицы записи цены: предложение, единица, товар, версии записи, стратегия.
+ * Р-91: подрез стратегии — из channel_data.pricing_strategy_undercut (18 месяцев после замены версии), не из вечной версии стратегии
+ */
 const SCOPE_COLUMNS = `
   s.write_scope_id, s.product_id, s.channel_account_id, s.channel, m.marketplace, m.external_unit_id, m.external_sku, m.channel_product_ref, m.condition,
   s.scope_key, p.gtin, s.currency, s.price_basis, s.tax_regime, s.pricing_mode, s.status, s.pricing_strategy_id, s.pricing_strategy_version, s.created_at,
-  ps.params AS strategy_params, ss.latest_version_accepted, ss.last_sent_amount_minor`;
+  CASE WHEN ud.undercut_minor IS NULL THEN ps.params ELSE ps.params || jsonb_build_object('undercutMinor', ud.undercut_minor) END AS strategy_params,
+  ss.latest_version_accepted, ss.last_sent_amount_minor`;
 
 const SCOPE_FROM = `
     FROM tenant_data.offer_mapping m
@@ -73,6 +82,8 @@ const SCOPE_FROM = `
     JOIN tenant_data.write_scope_sync_state ss ON ss.tenant_id = s.tenant_id AND ss.write_scope_id = s.write_scope_id
     LEFT JOIN tenant_data.pricing_strategy ps
       ON ps.tenant_id = s.tenant_id AND ps.pricing_strategy_id = s.pricing_strategy_id AND ps.version = s.pricing_strategy_version
+    LEFT JOIN channel_data.pricing_strategy_undercut ud
+      ON ud.tenant_id = ps.tenant_id AND ud.pricing_strategy_id = ps.pricing_strategy_id AND ud.version = ps.version
    WHERE m.tenant_id = $1 AND m.status <> 'ENDED'`;
 
 /** Последние версии границ на обоих уровнях — как tenant_data.effective_min_price / effective_max_price; alias sc */
@@ -440,17 +451,24 @@ function dbReason(error: unknown, amountMinor: number | null, currency: string):
 
 export class PgPricingStore implements PricingStore {
   private readonly pool: PgPool;
+  private readonly adminPool: PgPool | null;
   private readonly contextQuery: string;
   private readonly writeQueue: PgWriteQueueStore;
 
   constructor(pool: PgPool, options: PgPricingStoreOptions = {}) {
     this.pool = pool;
+    this.adminPool = options.adminPool ?? null;
     this.writeQueue = new PgWriteQueueStore(pool);
     this.contextQuery = contextSql(options.shiftWindowSource === 'move_log' ? WINDOW_MOVE_LOG : WINDOW_PROJECTION);
   }
 
   private tx<T>(tenantId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
     return inTenant(this.pool, tenantId, fn);
+  }
+
+  private admin(action: string): PgPool {
+    if (!this.adminPool) throw new Error(`${action} needs the administrative database role (Р-90): construct PgPricingStore with adminPool`);
+    return this.adminPool;
   }
 
   // --- оценка: транзакция 1 ----------------------------------------------------
@@ -718,9 +736,16 @@ export class PgPricingStore implements PricingStore {
     // Версия — следующая за последней созданной; монотонность и вытеснение старых записей обеспечивают триггеры
     const { rows: [writeRow] } = await tx.query(
       `INSERT INTO tenant_data.channel_write
-         (tenant_id, write_scope_id, field, amount_minor, currency, price_basis, version, origin, price_decision_id, trigger_received_at)
-       SELECT $1, $2, 'PRICE', $3, $4, $5, ss.latest_version_created + 1, 'PRICE_DECISION', $6, $7
+         (tenant_id, write_scope_id, field, amount_minor, currency, price_basis, version, origin, price_decision_id, trigger_received_at, budget_scope_key, budget_day)
+       SELECT $1, $2, 'PRICE', $3, $4, $5, ss.latest_version_created + 1, 'PRICE_DECISION', $6, $7, s.budget_scope_key,
+              -- Бюджет правок [Р-19]: день — текущий местный день витрины; неподтверждённый пояс отклоняет триггер (Р-65)
+              CASE WHEN s.budget_scope_key IS NOT NULL THEN (
+                SELECT (now() AT TIME ZONE m.time_zone)::date
+                  FROM tenant_data.offer_mapping om JOIN platform.marketplace m ON m.channel = s.channel AND m.marketplace = om.marketplace
+                 WHERE om.tenant_id = s.tenant_id AND om.price_write_scope_id = s.write_scope_id
+                 ORDER BY om.created_at LIMIT 1) END
          FROM tenant_data.write_scope_sync_state ss
+         JOIN tenant_data.write_scope s ON s.tenant_id = ss.tenant_id AND s.write_scope_id = ss.write_scope_id
         WHERE ss.tenant_id = $1 AND ss.write_scope_id = $2
        RETURNING channel_write_id, version, idempotency_key`,
       [tenantId, scope.writeScopeId, decision.finalMinor, decision.currency, decision.basis, decisionId, intent.createdAt],
@@ -815,8 +840,8 @@ export class PgPricingStore implements PricingStore {
     const channelAccountId = record.scope === 'TENANT' ? null : record.channelAccountId;
     const marketplace = record.scope === 'STOREFRONT' ? record.marketplace : null;
     try {
-      // Автор — пользователь сессии (app.user_id): триггер прав сверяет с ним членство (находка 4)
-      return await inTenant(this.pool, tenantId, async (tx) => {
+      // Автор — пользователь сессии (app.user_id): триггер прав сверяет с ним членство (находка 4); сессия — административного сервиса (Р-90)
+      return await inTenant(this.admin('stopPricing'), tenantId, async (tx) => {
         const { rows: [created] } = await tx.query(
           `INSERT INTO tenant_data.price_stop (tenant_id, scope_type, channel_account_id, marketplace, stopped_at, stopped_by_membership_id, stop_note)
            VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -840,8 +865,9 @@ export class PgPricingStore implements PricingStore {
   }
 
   async releaseStop(tenantId: string, stopId: string, release: StopRelease): Promise<StopResult> {
+    const adminPool = this.admin('releaseStop');
     try {
-      return await inTenant(this.pool, tenantId, async (tx) => {
+      return await inTenant(adminPool, tenantId, async (tx) => {
         const { rows: [released] } = await tx.query(
           `UPDATE tenant_data.price_stop SET released_at = $3, released_by_membership_id = $4, release_note = $5
             WHERE tenant_id = $1 AND price_stop_id = $2 AND released_at IS NULL
@@ -1054,8 +1080,9 @@ export class PgPricingStore implements PricingStore {
   }
 
   async releaseHalt(tenantId: string, haltId: string, review: HaltReviewRecord): Promise<void> {
-    // Ручное снятие — в сессии пользователя (находка 4); автоматическое — системой, без пользователя
-    await inTenant(this.pool, tenantId, async (tx) => {
+    // Ручное снятие — в сессии пользователя административного сервиса со вторым фактором (находки 4, 12; Р-90); автоматическое — системой
+    const manualRelease = review.kind === 'MANUAL_RELEASE';
+    await inTenant(manualRelease ? this.admin('releaseHalt (manual)') : this.pool, tenantId, async (tx) => {
       await PgPricingStore.insertReview(tx, tenantId, haltId, review);
       const manual = review.kind === 'MANUAL_RELEASE';
       const { rowCount } = await tx.query(
@@ -1065,7 +1092,7 @@ export class PgPricingStore implements PricingStore {
         [tenantId, haltId, review.at, manual ? 'MANUAL' : 'AUTO', manual ? review.membershipId ?? null : null, manual ? review.note ?? null : null],
       );
       if (rowCount !== 1) throw new Error(`pricing halt ${haltId} is not active`);
-    }, review.kind === 'MANUAL_RELEASE' ? review.userId : undefined);
+    }, manualRelease ? review.userId : undefined, { mfa: manualRelease && review.mfa === true });
   }
 
   async recordFailedReview(tenantId: string, haltId: string, review: HaltReviewRecord, nextReviewAt: Instant): Promise<void> {
