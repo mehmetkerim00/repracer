@@ -41,7 +41,7 @@ before(async () => {
       ARRAY['channel_account','marketplace','external_sku'], 'external_listing_id', '{"limit": 250, "quantity_reserve": 50, "unaccounted_margin": 10}', 'SYNC', false, 'CHANNEL_INFO')`);
   await db.superuser(`UPDATE platform.marketplace SET time_zone_status = 'CONFIRMED' WHERE channel = 'EBAY' AND marketplace = 'EBAY_DE'`);
   pool = db.pool('svc_app');
-  world = await seedPricingWorld(pool, { provisioningPool: db.pool('svc_provisioning', 1),
+  world = await seedPricingWorld(pool, { provisioningPool: db.pool('svc_provisioning', 1), adminPool: db.pool('svc_admin', 2),
     fixtureTenantId: '10000000-0000-4000-8000-000000000160', fixtureChannelAccountId: ACCOUNT, marketplaces: ['de'], clock: now(),
     seed: { scopes: [ebayScope], accounts: [{ channelAccountId: EBAY_ACCOUNT, channel: 'EBAY', marketplaces: ['EBAY_DE'] }] },
   });

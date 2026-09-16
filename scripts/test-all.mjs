@@ -6,8 +6,10 @@
 // Раньше «зелёное» значило «зелёное при этих переменных окружения»: без базы 53 теста из 189 молча пропускались,
 // а на шаге 15 четыре файла (17 тестов, включая проверку Р-83) не входили ни в один скрипт.
 import { spawn } from 'node:child_process';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, relative, sep } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { findUnincludedTests } from './check-test-inclusion.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -20,9 +22,18 @@ if (inclusion.total === 0 || inclusion.unincluded.length > 0 || inclusion.listed
   process.exit(1);
 }
 
+// Журнал выполненных файлов: каждый процесс node пишет путь своего тестового файла (scripts/test-ledger.mjs)
+const ledgerDir = mkdtempSync(join(tmpdir(), 'repracer-test-ledger-'));
+const ledger = join(ledgerDir, 'executed.txt');
+const ledgerEnv = {
+  ...process.env,
+  REPRACER_TEST_LEDGER: ledger,
+  NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import ${pathToFileURL(join(root, 'scripts', 'test-ledger.mjs')).href}`.trim(),
+};
+
 function run(args) {
   return new Promise((resolve) => {
-    const child = spawn('npm', args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: process.env });
+    const child = spawn('npm', args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: ledgerEnv });
     let output = '';
     for (const stream of [child.stdout, child.stderr]) {
       stream.on('data', (chunk) => {
@@ -55,6 +66,13 @@ for (const r of runs) {
   if (own === 0) problems.push(`${r.name}: no test summary found`);
 }
 if (totals.tests === 0) problems.push('no tests ran');
+// Р-89: каждый включённый в сборку файл действительно выполнился (скрипт мог назвать файл, но отфильтровать его или не дойти до него)
+const executed = new Set(existsSync(ledger) ? readFileSync(ledger, 'utf8').split('\n').filter(Boolean).map((f) => relative(root, f).split(sep).join('/')) : []);
+rmSync(ledgerDir, { recursive: true, force: true });
+const notExecuted = inclusion.included.filter((f) => !executed.has(f));
+for (const f of notExecuted) console.error(`INCLUDED BUT NOT EXECUTED: ${f}`);
+if (notExecuted.length > 0) problems.push(`${notExecuted.length} included test files did not run`);
+console.log(`TEST FILES ${JSON.stringify({ included: inclusion.included.length, executed: executed.size, notExecuted: notExecuted.length })}`);
 for (const k of ['fail', 'skipped', 'todo', 'cancelled']) if (totals[k] > 0) problems.push(`${totals[k]} ${k}`);
 console.log(`\nTEST TOTALS ${JSON.stringify({ suites: summaries, ...totals })}`);
 if (problems.length > 0) {

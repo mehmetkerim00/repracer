@@ -87,7 +87,8 @@ test('finding 4: a stop, a resume and a manual halt release are accepted only fr
   const noSession = await outcomeOf(inTenant(admin!, w.tenantId, (tx) => tx.query(
     `INSERT INTO tenant_data.price_stop (tenant_id, scope_type, stopped_at, stopped_by_membership_id, stop_note) VALUES ($1, 'TENANT', now(), $2, 'Synthetic stop without session user')`,
     [w.tenantId, member('membership-owner')])));
-  assert.match(noSession, /not the membership of the session user/);
+  // Р-97 (0066): без пользователя сессии административный сервис не пишет вовсе — отказ раньше проверки автора
+  assert.match(noSession, /without a person/);
   const stopped = await store.stopPricing(w.tenantId, record('membership-operator', user('membership-operator')));
   assert.equal(stopped.status, 'STOPPED');
   const stopId = stopped.status === 'STOPPED' ? stopped.stop.stopId : '';
@@ -105,13 +106,15 @@ test('finding 4: a stop, a resume and a manual halt release are accepted only fr
     ...(userId ? { userId } : {}), note: 'Synthetic manual release for the author check', at: now(),
   });
   assert.match(await outcomeOf(store.releaseHalt(w.tenantId, halt.pricing_halt_id, manual('membership-operator', user('membership-owner')))), /session user/);
-  assert.match(await outcomeOf(store.releaseHalt(w.tenantId, halt.pricing_halt_id, manual('membership-operator', undefined))), /session user/);
+  // Р-97 (0066): без пользователя сессии административный сервис не пишет вовсе
+  assert.match(await outcomeOf(store.releaseHalt(w.tenantId, halt.pricing_halt_id, manual('membership-operator', undefined))), /without a person/);
   await store.releaseHalt(w.tenantId, halt.pricing_halt_id, manual('membership-operator', user('membership-operator')));
 
-  const audit = await inTenant(pool!, w.tenantId, async (tx) => (await tx.query(
+  // Р-96: журнал аудита читает административный сервис, у пути решения чтения аудита нет
+  const audit = await inTenant(admin!, w.tenantId, async (tx) => (await tx.query(
     `SELECT e.action, e.actor_user_id, m.user_id AS membership_user FROM audit.audit_event e
        JOIN tenant_data.membership m ON m.tenant_id = e.tenant_id AND m.membership_id = e.actor_membership_id
-      WHERE e.tenant_id = $1 AND e.actor_type = 'USER' ORDER BY e.recorded_at`, [w.tenantId])).rows);
+      WHERE e.tenant_id = $1 AND e.actor_type = 'USER' AND e.action NOT LIKE 'admin_change.%' ORDER BY e.recorded_at`, [w.tenantId])).rows);
   assert.deepEqual(audit.map((a) => a.action), ['pricing.stop_created', 'pricing.stop_released', 'pricing.halt_released']);
   assert.deepEqual(audit.map((a) => a.actor_user_id), [user('membership-operator'), user('membership-admin'), user('membership-operator')]);
   assert.ok(audit.every((a) => a.actor_user_id === a.membership_user));

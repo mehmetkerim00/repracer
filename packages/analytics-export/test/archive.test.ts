@@ -19,7 +19,10 @@ const core = (i: number, over: Record<string, unknown> = {}) => ({
   reason_params: { finalMinor: 1775, currency: 'EUR' }, effective_floor_minor: '1500', effective_ceiling_minor: '2500', bound_deviation_bp: null,
   gate_profile: 'g74.1', sanity_ruleset: 'r49.1', explanation, ...over,
 });
-const strategy = (version: number) => ({ tenant_id: T, pricing_strategy_id: S1, version, params: { type: 'MATCH_BUYBOX', undercutMinor: 5, holdWhenWinning: true, atBound: 'CAP', deadbandMinor: 0 } });
+// Р-91: в вечной версии стратегии подреза нет — он живёт 18 месяцев в channel_data.pricing_strategy_undercut
+const strategy = (version: number) => ({ tenant_id: T, pricing_strategy_id: S1, version, params: { type: 'MATCH_BUYBOX', holdWhenWinning: true, atBound: 'CAP', deadbandMinor: 0 } });
+/** Версия стратегии, выгруженная до 0059: подрез в параметрах (OQ-150) */
+const strategyWithUndercut = (version: number) => ({ ...strategy(version), params: { ...strategy(version).params, undercutMinor: 5 } });
 const rulesets = [
   { ruleset_id: 'r49.1', kind: 'SANITY', definition: { rules: ['STRUCTURE', 'INTERNAL_ANCHOR'], config: { TOO_FEW_COMPETITOR_OFFERS: { minOffers: 3 } } } },
   { ruleset_id: 'g74.1', kind: 'GATE', definition: { CHANGED: ['PRICE_STOP', 'LOWER_BOUND'], NO_OP: ['PRICE_STOP'] } },
@@ -43,3 +46,15 @@ test('Р-79: an archive without the strategy version is not self-contained and s
   assert.throws(() => buildCoreArchiveBundle({ tenantId: T, partitionName: 'p', core: [core(1), core(2, { tenant_id: OTHER })], strategies: [], rulesets }), /Р-23/);
   assert.throws(() => archiveKey('all-tenants', 'tenant_data.price_intent_core', 'p'), /tenant UUID/);
 });
+
+test('OQ-150, Р-91: a strategy version carrying the undercut is neither archived nor accepted from an archive read back', () => {
+  const withUndercut = strategyWithUndercut(2);
+  assert.throws(() => buildCoreArchiveBundle({ tenantId: T, partitionName: 'tenant_data.price_intent_core_y2026m09', core: [core(1)], strategies: [withUndercut], rulesets }),
+    /carries the undercut/, 'the exporter refuses to archive the undercut');
+  const clean = strategy(2);
+  const bundle = buildCoreArchiveBundle({ tenantId: T, partitionName: 'tenant_data.price_intent_core_y2026m09', core: [core(1)], strategies: [clean], rulesets });
+  assert.equal(verifyCoreArchiveBundle(bundle).rows, 1);
+  // Архив, выгруженный до 0059 (OQ-150): проверка при чтении обратно его распознаёт
+  assert.throws(() => verifyCoreArchiveBundle({ ...bundle, dictionary: { ...bundle.dictionary, strategies: [withUndercut] } }), /carries the undercut/);
+});
+

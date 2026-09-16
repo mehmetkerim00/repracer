@@ -1,23 +1,34 @@
 #!/usr/bin/env node
-// Р-89: тест, не входящий в сборку, считается несуществующим. Проверка: каждый файл *.test.ts репозитория
-// совпадает с аргументом скрипта `test` своего пакета (workspace) или скрипта `test:repo` корня.
-// Причина: 17 тестов шага 15, включая проверку Р-83, запускались только вручную — откат защиты прошёл бы зелёным.
+// Р-89: тест, не входящий в сборку, считается несуществующим. Проверка: каждый файл *.test.{ts,tsx,mts,cts,js,mjs,cjs} репозитория
+// совпадает с аргументом скрипта `test` своего пакета (workspace) или скрипта `test:repo` корня; файл, названный в скрипте, существует.
+// Шаг 17 (находка 8 ревью шага 16): список файлов — из git (отслеживаемые и неигнорируемые), а не обход с пропуском каталогов по имени:
+// тест в каталоге build на любой глубине и .test.tsx больше не выпадают. Вне git — обход без символических ссылок.
+import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, existsSync, statSync } from 'node:fs';
 import { join, relative, dirname, basename, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const TEST_FILE = /\.test\.(?:ts|mts|mjs|js)$/;
-const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'coverage']);
+export const TEST_FILE = /\.test\.(?:ts|tsx|mts|cts|js|mjs|cjs)$/;
 
 function walk(dir, root, out) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (entry.isDirectory()) {
-      if (!SKIP_DIRS.has(entry.name)) walk(join(dir, entry.name), root, out);
-    } else if (TEST_FILE.test(entry.name)) {
+      if (entry.name !== 'node_modules' && entry.name !== '.git') walk(join(dir, entry.name), root, out);
+    } else if (entry.isFile() && TEST_FILE.test(entry.name)) {
       out.push(relative(root, join(dir, entry.name)).split(sep).join('/'));
     }
   }
   return out;
+}
+
+/** Все тестовые файлы репозитория: из git, если это рабочая копия; иначе обход */
+export function listTestFiles(root) {
+  try {
+    const out = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    return out.split('\0').filter((f) => f && TEST_FILE.test(f) && !f.split('/').includes('node_modules') && existsSync(join(root, f))).sort();
+  } catch {
+    return walk(root, root, []).sort();
+  }
 }
 
 // Аргументы вида `test/*.pg.test.ts`: звёздочка допускается только в имени файла — так её раскрывают и shell, и node --test.
@@ -35,7 +46,8 @@ function scriptFiles(script) {
   return (script ?? '').split(/\s+/).filter((a) => TEST_FILE.test(a.replace(/\*/g, 'x')));
 }
 
-export function findUnincludedTests(root) {
+/** Файлы, которые сборка должна запустить: раскрытые аргументы скриптов test пакетов и test:repo корня */
+export function includedTestFiles(root) {
   const rootPkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
   const packages = [{ dir: '.', scripts: [rootPkg.scripts?.['test:repo']] }];
   for (const pattern of rootPkg.workspaces ?? []) {
@@ -58,8 +70,13 @@ export function findUnincludedTests(root) {
       }
     }
   }
-  const all = walk(root, root, []);
-  return { total: all.length, unincluded: all.filter((f) => !included.has(f)), listedButMissing };
+  return { included, listedButMissing };
+}
+
+export function findUnincludedTests(root) {
+  const { included, listedButMissing } = includedTestFiles(root);
+  const all = listTestFiles(root);
+  return { total: all.length, all, included: [...included].sort(), unincluded: all.filter((f) => !included.has(f)), listedButMissing };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

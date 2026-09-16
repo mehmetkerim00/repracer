@@ -1,0 +1,18 @@
+control run: 1 checks
+CAUGHT   row OQ-151: channel_data.pricing_strategy_undercut_guard(): «IF EXISTS (SELECT 1 FROM tenant_data.write_scope s…» → «IF false AND EXISTS (SELECT 1 …» (2 s)
+   ✗ fails undercut-eternal.pg.test.ts «Р-91: the strategy version keeps its type» — Р-91: the strategy version keeps its type without the undercut; the undercut lives apart, is superseded with the version and still reaches the engine [OQ-151: the undercut of a pin
+CAUGHT   row OQ-151: DROP TRIGGER b_write_scope_pins_live_strategy_version ON tenant_data.write_scope (2 s)
+   ✗ fails undercut-eternal.pg.test.ts «Р-91: the strategy version keeps its type» — Р-91: the strategy version keeps its type without the undercut; the undercut lives apart, is superseded with the version and still reaches the engine [OQ-151: a scope is not pinned
+CAUGHT   row OQ-151: DROP TRIGGER zb_write_scope_release_strategy_version ON tenant_data.write_scope (1 s)
+   ✗ fails undercut-eternal.pg.test.ts «Р-91: the strategy version keeps its type» — Р-91: the strategy version keeps its type without the undercut; the undercut lives apart, is superseded with the version and still reaches the engine [the released version starts i
+
+| Строка Р-93 | Инвариант | Мутация | Поймана | Заявленные проверки на мутации |
+|---|---|---|---|---|
+| OQ-151 | подрез закреплённой версии стратегии не начинает срок хранения | `channel_data.pricing_strategy_undercut_guard(): «IF EXISTS (SELECT 1 FROM tenant_data.write_scope s…» → «IF false AND EXISTS (SELECT 1 …»` | да | ✗ undercut-eternal.pg.test.ts «Р-91: the strategy version keeps its type» |
+| OQ-151 | подрез закреплённой версии стратегии не начинает срок хранения | `DROP TRIGGER b_write_scope_pins_live_strategy_version ON tenant_data.write_scope` | да | ✗ undercut-eternal.pg.test.ts «Р-91: the strategy version keeps its type» |
+| OQ-151 | подрез закреплённой версии стратегии не начинает срок хранения | `DROP TRIGGER zb_write_scope_release_strategy_version ON tenant_data.write_scope` | да | ✗ undercut-eternal.pg.test.ts «Р-91: the strategy version keeps its type» |
+
+Строк с мутациями: 1; ложных (хотя бы одна мутация не поймана заявленными проверками): **0** — —.
+Мутаций: 3; не поймано: **0**.
+Не мутировались: 1–11 (свойства каталога остались в проверке схемы (0067)); 15 (данные справочника НДС остались в проверке схемы (0067)); 36 (правило проверяло отсутствие объектов входа).
+✗ — проверка упала на мутации (поймала), ✓ — осталась зелёной.

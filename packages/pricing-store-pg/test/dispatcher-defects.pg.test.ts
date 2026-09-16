@@ -17,10 +17,12 @@ import { requireEnv } from './isolated-db.ts';
 const url = requireEnv('REPRACER_PG_URL');
 const pool = createPool(url, { max: 4, applicationName: 'repracer-dispatcher-defects' });
 const provisioning = createPool(url.replace('svc_app@', 'svc_provisioning@'), { max: 1, applicationName: 'repracer-test-provisioning' });
+const admin = createPool(url.replace('svc_app@', 'svc_admin@'), { max: 2, applicationName: 'repracer-test-admin' });
 const scanPool = createPool(url.replace('svc_app@', 'svc_dispatcher@'), { max: 2, applicationName: 'repracer-dispatcher-scan' });
 after(async () => {
   await pool.end();
   await provisioning.end();
+  await admin.end();
   await scanPool.end();
 });
 
@@ -70,7 +72,7 @@ const scopeStatus = (w: SeededPricingWorld, n: number) => inTenant(pool, w.tenan
   'SELECT status FROM tenant_data.write_scope WHERE tenant_id = $1 AND write_scope_id = $2', [w.tenantId, w.ids.dbId(`ws-${n}`)])).rows[0].status);
 
 test('D1: an outcome unknown past the limit blocks the write scope with one CRITICAL alert and leaves the sweep', async () => {
-  const w = await seedPricingWorld(pool, { provisioningPool: provisioning, fixtureTenantId: '10000000-0000-4000-8000-000000000150', fixtureChannelAccountId: ACCOUNT, marketplaces: ['de'], clock: now(), seed: { scopes: [scope(1)] } });
+  const w = await seedPricingWorld(pool, { provisioningPool: provisioning, adminPool: admin, fixtureTenantId: '10000000-0000-4000-8000-000000000150', fixtureChannelAccountId: ACCOUNT, marketplaces: ['de'], clock: now(), seed: { scopes: [scope(1)] } });
   const write = await dispatched(w, 1);
   const { queue, dispatcher, alerts } = harness(w, later(2 * 3_600_000));
   await queue.recordOutcome(w.tenantId, write, { channelWriteId: write.channelWriteId, status: 'OUTCOME_UNKNOWN', error: { class: 'TRANSIENT', code: 'TIMEOUT', scope: 'ITEM', message: 'synthetic', raiseAlert: false } }, now(), DEFAULT_RETRY_POLICY);
@@ -88,7 +90,7 @@ test('D1: an outcome unknown past the limit blocks the write scope with one CRIT
 });
 
 test('D2: a retry in a held write scope is not swept — no alert storm; the scope active again, the retry is due', async () => {
-  const w = await seedPricingWorld(pool, { provisioningPool: provisioning, fixtureTenantId: '10000000-0000-4000-8000-000000000151', fixtureChannelAccountId: ACCOUNT, marketplaces: ['de'], clock: now(), seed: { scopes: [scope(2)] } });
+  const w = await seedPricingWorld(pool, { provisioningPool: provisioning, adminPool: admin, fixtureTenantId: '10000000-0000-4000-8000-000000000151', fixtureChannelAccountId: ACCOUNT, marketplaces: ['de'], clock: now(), seed: { scopes: [scope(2)] } });
   const write = await dispatched(w, 2);
   const { queue, dispatcher, alerts } = harness(w, later(600_000));
   await queue.recordOutcome(w.tenantId, write, { channelWriteId: write.channelWriteId, status: 'REJECTED', error: { class: 'TRANSIENT', code: 'RATE_LIMITED', scope: 'ITEM', message: 'synthetic', raiseAlert: false } }, now(), DEFAULT_RETRY_POLICY);

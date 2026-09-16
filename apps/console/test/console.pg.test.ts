@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import type { DecisionListItem, DecisionTrace, StopView } from '@repracer/console-model';
-import { buildStandWorlds, pgStandUsers, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
+import { buildStandWorlds, pgStandJoinMember, pgStandUsers, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_EMAILS, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { pgStoreFactory } from '@repracer/contract-tests/pg-store';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
 import { PgIdentityDirectory } from '@repracer/identity/pg';
@@ -35,7 +35,7 @@ let worlds: LiveWorld[] = [];
 before(async () => {
   const directory = new PgIdentityDirectory(authenticatorPool as never);
   memberUsers = await pgStandUsers(directory, onboardingPool);
-  worlds = await buildStandWorlds({ filter: (s) => s.id === WORLD, storeFactory: pgStoreFactory(pool, scanPool!, fxPool!, { memberUsers, adminPool, provisioningPool }) });
+  worlds = await buildStandWorlds({ filter: (s) => s.id === WORLD, storeFactory: pgStoreFactory(pool, scanPool!, fxPool!, { memberUsers, memberEmails: STAND_EMAILS, joinMember: pgStandJoinMember(adminPool, directory), adminPool, provisioningPool }) });
   const issuer = createTestIssuer({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE });
   handle = createStandApi(worlds, {
     authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory }),
@@ -66,7 +66,8 @@ test('Р-78, Р-76, finding 4 on PostgreSQL: the stop and the resume are audited
   const stopped = await handle({ method: 'POST', url: api('stop'), body: { target: { kind: 'TENANT' }, note: 'Synthetic kill switch on PostgreSQL', confirmed: true }, ...operator });
   assert.equal(stopped.status, 200, JSON.stringify(stopped.body));
 
-  const rows = await inTenant(pool, world.identityTenantId, async (tx) => (await tx.query(
+  // Р-96: журнал аудита читает административный сервис
+  const rows = await inTenant(adminPool, world.identityTenantId, async (tx) => (await tx.query(
     `SELECT e.action, e.actor_type, m.role AS member_role, u.email, e.changes FROM audit.audit_event e
        JOIN tenant_data.membership m ON m.tenant_id = e.tenant_id AND m.membership_id = e.actor_membership_id
        JOIN platform.app_user u ON u.user_id = e.actor_user_id

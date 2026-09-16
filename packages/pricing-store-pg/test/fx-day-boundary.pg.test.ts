@@ -16,6 +16,7 @@ import { explained } from './drafts.ts';
 const PG_URL = process.env.REPRACER_PG_URL;
 const pool = PG_URL ? createPool(PG_URL, { max: 4, applicationName: 'repracer-fx-test' }) : null;
 const provisioning = PG_URL ? createPool(PG_URL.replace('svc_app@', 'svc_provisioning@'), { max: 1, applicationName: 'repracer-test-provisioning' }) : null;
+const admin = PG_URL ? createPool(PG_URL.replace('svc_app@', 'svc_admin@'), { max: 2, applicationName: 'repracer-test-admin' }) : null;
 const fxLoaderPool = PG_URL ? createPool(PG_URL.replace('svc_app@', 'svc_fx_loader@'), { max: 1, applicationName: 'repracer-fx-test-loader' }) : null;
 // Р-84: без базы тест не пропускается, а падает
 if (!pool) throw new Error('REPRACER_PG_URL is required: database tests do not skip (Р-84)');
@@ -23,6 +24,7 @@ const skip = false;
 after(async () => {
   await pool?.end();
   await provisioning?.end();
+  await admin?.end();
   await fxLoaderPool?.end();
 });
 
@@ -61,7 +63,7 @@ function approved(context: ScopeEvaluationContext, amountMinor: number, at: stri
 }
 
 async function seedUs(n: number, fxRates: NonNullable<Parameters<typeof seedPricingWorld>[1]['seed']['fxRates']>, extra: Partial<Parameters<typeof seedPricingWorld>[1]['seed']> = {}) {
-  return seedPricingWorld(pool!, { provisioningPool: provisioning!,
+  return seedPricingWorld(pool!, { provisioningPool: provisioning!, adminPool: admin!,
     fixtureTenantId: '10000000-0000-4000-8000-000000000001', fixtureChannelAccountId: KAUFLAND, marketplaces: ['de', 'at'], clock: new Date().toISOString(),
     fxLoaderPool: fxLoaderPool!,
     seed: { scopes: [usScope(n)], accounts: [{ channelAccountId: AMAZON_US, channel: 'AMAZON', region: 'NA', marketplaces: ['ATVPDKIKX0DER'] }], fxRates, ...extra },
@@ -102,7 +104,7 @@ test('Р-63 on PostgreSQL: with only a stale ECB rate the same-EAN anchor declin
     condition: 'new', gtin: '2000000082016', currency: 'EUR', basis: 'GROSS', pricingMode: 'ENGINE', strategy: BUYBOX, currentPriceMinor: 1850,
     minPrice: { amountMinor: 1500, id: 'min-8201' }, maxPrice: { amountMinor: 2500, id: 'max-8201' },
   };
-  const world = await seedPricingWorld(pool!, { provisioningPool: provisioning!,
+  const world = await seedPricingWorld(pool!, { provisioningPool: provisioning!, adminPool: admin!,
     fixtureTenantId: '10000000-0000-4000-8000-000000000001', fixtureChannelAccountId: KAUFLAND, marketplaces: ['de', 'at'], clock: iso(nowMs), fxLoaderPool: fxLoaderPool!,
     seed: {
       scopes: [de], fxRates: [rate],

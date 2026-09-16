@@ -2,8 +2,8 @@ import { fileURLToPath } from 'node:url';
 import type { AdapterCallContext } from '@repracer/channel-port';
 import type { StandAccount, StandWorld, Viewer } from '@repracer/console-model';
 import { MemoryIdentityDirectory } from '@repracer/identity';
-import { issueSignupInvitation, type PgIdentityDirectory } from '@repracer/identity/pg';
-import type { PgPool } from '@repracer/pricing-store-pg';
+import { inviteMember, issueSignupInvitation, type PgIdentityDirectory } from '@repracer/identity/pg';
+import { inTenant, type PgPool } from '@repracer/pricing-store-pg';
 import { DEFAULT_MEMBERS, type PricingPipeline, type PricingStore } from '@repracer/pricing-pipeline';
 import { kauflandUnderTest } from '../adapters.ts';
 import { memoryStoreFactory, runScenario, type PricingStoreFactory } from '../harness/runner.ts';
@@ -37,6 +37,24 @@ export const STAND_ACCOUNTS: ReadonlyArray<{ membershipAlias: string; userAlias:
   email: `${m.membershipId.slice('membership-'.length)}@stand.repracer.test`,
   displayName: `Stand ${m.role.toLowerCase().replace('_', ' ')}`,
 }));
+
+/** Адреса участников стенда (псевдоним членства → email): создание тенанта сверяет адрес существующего пользователя (находка 5, 0066) */
+export const STAND_EMAILS: Readonly<Record<string, string>> = Object.fromEntries(STAND_ACCOUNTS.map((a) => [a.membershipAlias, a.email]));
+
+/**
+ * Вход участника стенда в новый мир: владелец со вторым фактором приглашает по адресу, участник принимает приглашение своим
+ * входом у имитатора поставщика (находка 5 ревью шага 16 — существующий пользователь не присоединяется созданием тенанта).
+ */
+export function pgStandJoinMember(adminPool: PgPool, directory: PgIdentityDirectory) {
+  return async (input: { tenantId: string; ownerUserId: string; membershipAlias: string; role: string; email: string }) => {
+    const account = STAND_ACCOUNTS.find((a) => a.membershipAlias === input.membershipAlias);
+    if (!account) throw new Error(`unknown stand member ${input.membershipAlias}`);
+    const invitation = await inTenant(adminPool, input.tenantId,
+      (tx) => inviteMember(tx, { tenantId: input.tenantId, email: input.email, role: input.role as never }), input.ownerUserId, { mfa: true });
+    const userId = await directory.acceptInvitation(invitation.token, { issuer: STAND_ISSUER, subject: account.subject }, input.email, true);
+    return { userId, membershipId: invitation.membershipId };
+  };
+}
 
 export interface LiveWorld {
   id: string;

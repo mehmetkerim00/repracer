@@ -73,6 +73,11 @@ function strategyDefinition(r: PgRow): StrategyDefinition {
 export function buildCoreArchiveBundle(input: { tenantId: string; partitionName: string; core: PgRow[]; strategies: PgRow[]; rulesets: PgRow[] }): CoreArchiveBundle {
   const foreign = [...input.core, ...input.strategies].find((r) => r.tenant_id !== input.tenantId);
   if (foreign) throw new Error(`archive of tenant ${input.tenantId} received a row of tenant ${foreign.tenant_id} (Р-23)`);
+  // OQ-150 [Р-91]: подрез стратегии в вечном архиве позволяет вывести цену конкурента из опубликованной цены — выгрузка отказывает
+  const withUndercut = input.strategies.find((s) => typeof s.params === 'object' && s.params !== null && 'undercutMinor' in (s.params as object));
+  if (withUndercut) {
+    throw new Error(`strategy version ${String(withUndercut.pricing_strategy_id)}@${String(withUndercut.version)} carries the undercut: it is not archived (Р-91, OQ-150)`);
+  }
   const strategyRefs = new Set(input.core.filter((r) => r.pricing_strategy_id !== null && r.pricing_strategy_id !== undefined).map((r) => strategyKey(r.pricing_strategy_id, r.pricing_strategy_version)));
   const rulesetRefs = new Set(input.core.flatMap((r) => [r.gate_profile, r.sanity_ruleset]).filter((x): x is string => typeof x === 'string'));
   return {
@@ -88,6 +93,11 @@ export function buildCoreArchiveBundle(input: { tenantId: string; partitionName:
 /** Развернуть каждое объяснение архива только по самому архиву; пробелы — по строкам */
 export function verifyCoreArchiveBundle(bundle: CoreArchiveBundle): { rows: number; selfContained: boolean; gaps: Array<{ priceIntentId: string; gaps: ExplanationGap[] }> } {
   if (bundle.format !== CORE_ARCHIVE_FORMAT) throw new Error(`unknown archive format ${String(bundle.format)}`);
+  // OQ-150: проверка читает архив обратно — подрез не проходит и здесь (архивы до 0059 распознаются при первом развёртывании)
+  const withUndercut = bundle.dictionary.strategies.find((s) => typeof s.params === 'object' && s.params !== null && 'undercutMinor' in (s.params as object));
+  if (withUndercut) {
+    throw new Error(`archived strategy version ${String(withUndercut.pricing_strategy_id)}@${String(withUndercut.version)} carries the undercut (Р-91, OQ-150)`);
+  }
   const dictionary = {
     strategies: bundle.dictionary.strategies.map(strategyDefinition),
     rulesets: bundle.dictionary.rulesets.map((r) => ({ rulesetId: r.ruleset_id, kind: r.kind, definition: r.definition }) as ExplanationRuleset),

@@ -5,7 +5,7 @@ import {
   type Locale, type StopTarget, type Viewer,
 } from '@repracer/console-model';
 import {
-  buildStandWorlds, memoryStandDirectory, pgStandUsers, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_ISSUER, type LiveWorld,
+  buildStandWorlds, memoryStandDirectory, pgStandJoinMember, pgStandUsers, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_EMAILS, STAND_ISSUER, type LiveWorld,
 } from '@repracer/contract-tests/stand';
 import { createAuthenticator, hasSecondFactor, remoteJwks, staticJwks, type Authenticator, type Principal } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
@@ -230,7 +230,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       const scope = world.state.scopes.find((x) => x.writeScopeId === param);
       if (!scope) return fail(404, 'SCOPE_NOT_FOUND', s.notFound);
       if (!can(viewer.role, 'ENABLE_REPRICING')) return fail(403, 'FORBIDDEN', s.forbidden);
-      const result = await live.pipeline.enableRepricing(ctx(scope.channelAccountId), scope.writeScopeId, { acknowledgeWarnings: body.acknowledgeWarnings === true });
+      const result = await live.pipeline.enableRepricing(ctx(scope.channelAccountId), scope.writeScopeId, { acknowledgeWarnings: body.acknowledgeWarnings === true, userId: principal.userId });
       return ok({
         enabled: result.enabled, problems: result.problems.map((p) => describe(p, m)), warnings: result.warnings.map((w) => describe(w, m)),
       } satisfies EnableResult);
@@ -290,11 +290,15 @@ async function main(): Promise<void> {
     // svc_provisioning; вход — svc_authenticator
     const role = (login: string, max: number) => createPool(url.replace('svc_app@', `${login}@`), { max, applicationName: `repracer-stand-${login}` });
     const pool = createPool(url, { max: 8, applicationName: 'repracer-stand' });
+    const adminPool = role('svc_admin', 4);
     const directory = new PgIdentityDirectory(role('svc_authenticator', 2) as never);
     const memberUsers = await pgStandUsers(directory, role('svc_onboarding', 1));
     const worlds = await buildStandWorlds({
       filter: (sc) => !sc.tags.includes('memory-only'),
-      storeFactory: pgStoreFactory(pool, role('svc_dispatcher', 2), role('svc_fx_loader', 1), { memberUsers, adminPool: role('svc_admin', 4), provisioningPool: role('svc_provisioning', 1) }),
+      storeFactory: pgStoreFactory(pool, role('svc_dispatcher', 2), role('svc_fx_loader', 1), {
+        memberUsers, memberEmails: STAND_EMAILS, adminPool, provisioningPool: role('svc_provisioning', 1),
+        joinMember: pgStandJoinMember(adminPool, directory),
+      }),
     });
     handle = createStandApi(worlds, { authenticator: createAuthenticator({ ...verify, directory }), ...(simulator ? { simulator } : {}) });
   } else {

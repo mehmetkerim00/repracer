@@ -141,7 +141,9 @@ async function runPipelineStep(
     case 'pipelineRecompute':
       return { result: await pipeline.recompute(callContext(step.ctx, step.id, scenario, clock), step.writeScopeId, step.trigger) };
     case 'pipelineEnableRepricing':
-      return { result: await pipeline.enableRepricing(callContext(step.ctx, step.id, scenario, clock), step.writeScopeId, step.acknowledgeWarnings ? { acknowledgeWarnings: true } : {}) };
+      return { result: await pipeline.enableRepricing(callContext(step.ctx, step.id, scenario, clock), step.writeScopeId,
+        // Р-97: включение — действие владельца сценария в административном сервисе
+        { ...(step.acknowledgeWarnings ? { acknowledgeWarnings: true } : {}), userId: standUserOf('membership-owner') }) };
     case 'pricingStop': {
       const ctx = callContext(step.ctx, step.id, scenario, clock);
       if (step.op === 'stop') {

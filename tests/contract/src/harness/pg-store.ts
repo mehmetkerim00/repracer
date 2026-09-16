@@ -13,7 +13,10 @@ import type { PricingStoreFactory } from './runner.ts';
  */
 export function pgStoreFactory(
   pool: PgPool, scanPool: PgPool, fxLoaderPool: PgPool,
-  options: { memberUsers?: Readonly<Record<string, string>>; adminPool: PgPool; provisioningPool: PgPool },
+  options: {
+    memberUsers?: Readonly<Record<string, string>>; memberEmails?: Readonly<Record<string, string>>; adminPool: PgPool; provisioningPool: PgPool;
+    joinMember?: (input: { tenantId: string; ownerUserId: string; membershipAlias: string; role: string; email: string }) => Promise<{ userId: string; membershipId: string }>;
+  },
 ): PricingStoreFactory {
   return async (seed, world) => {
     const seeded = await seedPricingWorld(pool, {
@@ -26,6 +29,8 @@ export function pgStoreFactory(
       provisioningPool: options.provisioningPool,
       adminPool: options.adminPool,
       ...(options.memberUsers ? { memberUsers: options.memberUsers } : {}),
+      ...(options.memberEmails ? { memberEmails: options.memberEmails } : {}),
+      ...(options.joinMember ? { joinMember: options.joinMember } : {}),
     });
     const inner = new PgPricingStore(pool, { adminPool: options.adminPool });
     const conflicts = [...(seed.commitConflicts ?? [])];

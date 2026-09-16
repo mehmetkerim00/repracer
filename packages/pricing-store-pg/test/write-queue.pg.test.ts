@@ -19,6 +19,7 @@ import { explained } from './drafts.ts';
 const PG_URL = process.env.REPRACER_PG_URL;
 const pool = PG_URL ? createPool(PG_URL, { max: 24, applicationName: 'repracer-write-queue-test' }) : null;
 const provisioning = PG_URL ? createPool(PG_URL.replace('svc_app@', 'svc_provisioning@'), { max: 1, applicationName: 'repracer-test-provisioning' }) : null;
+const admin = PG_URL ? createPool(PG_URL.replace('svc_app@', 'svc_admin@'), { max: 2, applicationName: 'repracer-test-admin' }) : null;
 const scanPool = PG_URL ? createPool(PG_URL.replace('svc_app@', 'svc_dispatcher@'), { max: 2, applicationName: 'repracer-write-queue-scan' }) : null;
 // Р-84: без базы тест не пропускается, а падает
 if (!pool) throw new Error('REPRACER_PG_URL is required: database tests do not skip (Р-84)');
@@ -26,6 +27,7 @@ const skip = false;
 after(async () => {
   await pool?.end();
   await provisioning?.end();
+  await admin?.end();
   await scanPool?.end();
 });
 
@@ -151,7 +153,7 @@ export async function runQueueWorkload(options: {
 }): Promise<QueueWorkloadResult> {
   const intervalMs = options.intervalMs ?? 15;
   const seeds = Array.from({ length: options.scopes }, (_, i) => scopeSeed(7000 + i));
-  const world = await seedPricingWorld(pool!, { provisioningPool: provisioning!,
+  const world = await seedPricingWorld(pool!, { provisioningPool: provisioning!, adminPool: admin!,
     fixtureTenantId: '10000000-0000-4000-8000-000000000001', fixtureChannelAccountId: ACCOUNT, marketplaces: ['de', 'at'], clock: now(), seed: { scopes: seeds },
   });
   const tenantId = world.tenantId;
@@ -217,7 +219,8 @@ export async function runQueueWorkload(options: {
     }
   }
 
-  return inTenant(pool!, tenantId, async (tx) => {
+  // Итоги читает административный сервис: у пути решения нет чтения outbox (Р-96)
+  return inTenant(admin!, tenantId, async (tx) => {
     const { rows: latest } = await tx.query(
       `SELECT ss.write_scope_id, ss.latest_version_created,
               coalesce((SELECT w.amount_minor FROM tenant_data.channel_write w

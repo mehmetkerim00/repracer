@@ -24,7 +24,7 @@ import type {
   EvaluationContext,
   HaltInfo,
   HaltRecord,
-  HaltReviewRecord,
+  HaltReviewRecord, HaltSampleObservation, HaltSampleReview,
   PriceScopeContext,
   PricingStore,
   ProductKey,
@@ -534,14 +534,15 @@ export class PgPricingStore implements PricingStore {
       try {
         if (writeScopeIds.length > 0) {
           // Решения по одной единице фиксируются по очереди (версия записи); FOR SHARE товара упорядочивает фиксацию
-          // с изменением границ, которое берёт FOR UPDATE на товар в отложенной проверке [Р-54]
+          // с изменением границ, которое берёт FOR UPDATE на товар в отложенной проверке [Р-54]. Права UPDATE на товар у пути
+          // решения нет (Р-96): блокировку товара берёт функция базы (0065)
           await tx.query(
             `SELECT s.write_scope_id FROM tenant_data.write_scope s
-               JOIN tenant_data.product p ON p.tenant_id = s.tenant_id AND p.product_id = s.product_id
               WHERE s.tenant_id = $1 AND s.write_scope_id = ANY ($2::uuid[])
-              ORDER BY s.write_scope_id FOR NO KEY UPDATE OF s FOR SHARE OF p`,
+              ORDER BY s.write_scope_id FOR NO KEY UPDATE OF s`,
             [tenantId, writeScopeIds],
           );
+          await tx.query('SELECT tenant_data.lock_decision_products($1, $2::uuid[])', [tenantId, writeScopeIds]);
           // Версия контекста перечитывается уже под блокировкой
           const { rows } = await tx.query(VERSION_SQL, [tenantId, writeScopeIds]);
           const byScope = new Map(rows.map((r) => [r.write_scope_id as string, r]));
@@ -801,8 +802,8 @@ export class PgPricingStore implements PricingStore {
     });
   }
 
-  async setPricingMode(tenantId: string, writeScopeId: string, mode: PriceScopeContext['pricingMode']): Promise<void> {
-    await this.tx(tenantId, (tx) => tx.query(
+  async setPricingMode(tenantId: string, writeScopeId: string, mode: PriceScopeContext['pricingMode'], userId?: string): Promise<void> {
+    await inTenant(this.admin('setPricingMode'), tenantId, (tx) => tx.query(
       `UPDATE tenant_data.write_scope
           SET pricing_mode = $3::text,
               -- Р-77: стратегия остаётся при выключении; только Smart Pricing Kaufland её не имеет [Р-12]
@@ -810,7 +811,8 @@ export class PgPricingStore implements PricingStore {
               pricing_strategy_version = CASE WHEN $3::text <> 'KAUFLAND_SMART_PRICING' THEN pricing_strategy_version END
         WHERE tenant_id = $1 AND write_scope_id = $2`,
       [tenantId, writeScopeId, mode],
-    ));
+      // Р-97: без пользователя сессии база смену режима не принимает
+    ), userId);
   }
 
   // --- остановки ------------------------------------------------------------------
@@ -890,7 +892,7 @@ export class PgPricingStore implements PricingStore {
    * Горячие окна: intent 3 дня, решение 30 дней (Р-28); дальше слепок доступен в ядре intent и архиве.
    */
   async readConsoleState(tenantId: string, now: Instant): Promise<ConsoleState> {
-    return this.tx(tenantId, async (tx) => {
+    return inTenant(this.admin('readConsoleState'), tenantId, async (tx) => {
       const q = async (sql: string, params: unknown[] = [tenantId]) => (await tx.query(sql, params)).rows;
       const [scopeJson] = await q(`WITH sc AS (SELECT ${SCOPE_COLUMNS} ${SCOPE_FROM})
         SELECT coalesce(json_agg(${SCOPE_JSON} ORDER BY sc.created_at, sc.write_scope_id), '[]') AS scopes FROM sc`, [tenantId, now]);
@@ -1080,35 +1082,40 @@ export class PgPricingStore implements PricingStore {
   }
 
   async releaseHalt(tenantId: string, haltId: string, review: HaltReviewRecord): Promise<void> {
-    // Ручное снятие — в сессии пользователя административного сервиса со вторым фактором (находки 4, 12; Р-90); автоматическое — системой
-    const manualRelease = review.kind === 'MANUAL_RELEASE';
-    await inTenant(manualRelease ? this.admin('releaseHalt (manual)') : this.pool, tenantId, async (tx) => {
+    // Р-52, находки 4, 12, Р-90: ручное снятие — в сессии пользователя административного сервиса со вторым фактором.
+    // Автоматическое снятие путь решения не пишет: его вычисляет база по выборке (reviewHaltBySample, 0063)
+    if (review.kind !== 'MANUAL_RELEASE') {
+      throw new Error('an automatic halt release is computed by the database from the recorded sample (0063): use recordHaltSample and reviewHaltBySample');
+    }
+    await inTenant(this.admin('releaseHalt (manual)'), tenantId, async (tx) => {
       await PgPricingStore.insertReview(tx, tenantId, haltId, review);
-      const manual = review.kind === 'MANUAL_RELEASE';
       const { rowCount } = await tx.query(
         `UPDATE channel_data.pricing_halt
-            SET released_at = $3, released_kind = $4, released_by_membership_id = $5, release_note = $6
+            SET released_at = $3, released_kind = 'MANUAL', released_by_membership_id = $4, release_note = $5
           WHERE tenant_id = $1 AND pricing_halt_id = $2 AND released_at IS NULL`,
-        [tenantId, haltId, review.at, manual ? 'MANUAL' : 'AUTO', manual ? review.membershipId ?? null : null, manual ? review.note ?? null : null],
+        [tenantId, haltId, review.at, review.membershipId ?? null, review.note ?? null],
       );
       if (rowCount !== 1) throw new Error(`pricing halt ${haltId} is not active`);
-    }, manualRelease ? review.userId : undefined, { mfa: manualRelease && review.mfa === true });
+    }, review.userId, { mfa: review.mfa === true });
   }
 
-  async recordFailedReview(tenantId: string, haltId: string, review: HaltReviewRecord, nextReviewAt: Instant): Promise<void> {
-    await this.tx(tenantId, async (tx) => {
-      await PgPricingStore.insertReview(tx, tenantId, haltId, review);
-      const { rowCount } = await tx.query(
-        `UPDATE channel_data.pricing_halt SET next_review_at = $3 WHERE tenant_id = $1 AND pricing_halt_id = $2 AND released_at IS NULL`,
-        [tenantId, haltId, nextReviewAt],
-      );
-      if (rowCount !== 1) throw new Error(`pricing halt ${haltId} is not active`);
-    });
+  /** Находка 2 ревью шага 16 [0063]: путь решения пишет только наблюдения выборки проверки остановки */
+  async recordHaltSample(tenantId: string, haltId: string, samples: readonly HaltSampleObservation[], _now: Instant): Promise<void> {
+    if (samples.length === 0) return;
+    await this.tx(tenantId, (tx) => tx.query(
+      `INSERT INTO channel_data.pricing_halt_sample (tenant_id, pricing_halt_id, channel_product_ref, observed_at, verdict, reason_code)
+       SELECT $1, $2, x.ref, x.observed_at, x.verdict, x.reason FROM jsonb_to_recordset($3::jsonb) AS x(ref text, observed_at timestamptz, verdict text, reason text)`,
+      [tenantId, haltId, JSON.stringify(samples.map((o) => ({ ref: o.channelProductRef, observed_at: o.observedAt, verdict: o.verdict, reason: o.reasonCode })))]));
+  }
+
+  /** Итог проверки выборки и автоматическое снятие — функция базы; срок и размер выборки она берёт сама, момент — не позже часов базы (0065) */
+  async reviewHaltBySample(tenantId: string, haltId: string, now: Instant): Promise<HaltSampleReview> {
+    return this.tx(tenantId, async (tx) => (await tx.query('SELECT channel_data.review_halt_by_sample($1, $2, $3) AS outcome', [tenantId, haltId, now])).rows[0].outcome as HaltSampleReview);
   }
 
   /** Состояние тенанта в форме InMemoryPricingStore.dump() — для ожиданий сценариев стенда */
   async dumpState(tenantId: string) {
-    return this.tx(tenantId, async (tx) => {
+    return inTenant(this.admin('dumpState'), tenantId, async (tx) => {
       const q = async (sql: string) => (await tx.query(sql, [tenantId])).rows;
       const scopes = await q(`SELECT s.write_scope_id, s.pricing_mode, ss.latest_version_accepted, ss.last_sent_amount_minor, o.observed_amount_minor
                                 FROM tenant_data.write_scope s

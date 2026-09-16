@@ -165,6 +165,19 @@ export interface HaltInfo {
   nextReviewAt: Instant;
 }
 
+/**
+ * Находка 2 ревью шага 16 [Р-52, 0063]: наблюдение выборки проверки системной остановки. Путь решения записывает только наблюдения;
+ * итог проверки и автоматическое снятие вычисляет хранилище (в PostgreSQL — функция channel_data.review_halt_by_sample).
+ */
+export interface HaltSampleObservation {
+  channelProductRef: string;
+  observedAt: Instant;
+  verdict: 'ACCEPT' | 'REJECT' | 'READ_FAILED' | 'MASS_SHIFT';
+  reasonCode: string | null;
+}
+
+export type HaltSampleReview = 'RELEASED' | 'SAMPLE_FAILED' | 'NO_SAMPLE' | 'NOT_DUE' | 'NOT_ACTIVE';
+
 export interface HaltReviewRecord {
   kind: 'AUTO_SAMPLE' | 'MANUAL_RELEASE';
   outcome: 'RELEASED' | 'SAMPLE_FAILED';
@@ -246,7 +259,8 @@ export interface PricingStore {
   getPriceScope(tenantId: string, writeScopeId: string): Promise<PriceScopeContext | null>;
   resolveBounds(tenantId: string, writeScopeId: string): Promise<BoundsRead>;
   /** Включение режима ENGINE; реализация обязана отказать без обеих границ (как триггер 0030) */
-  setPricingMode(tenantId: string, writeScopeId: string, mode: PriceScopeContext['pricingMode']): Promise<void>;
+  /** Р-97: смена режима — действие человека; userId — пользователь сессии административного сервиса */
+  setPricingMode(tenantId: string, writeScopeId: string, mode: PriceScopeContext['pricingMode'], userId?: string): Promise<void>;
 
   listDueHalts(tenantId: string, channelAccountId: string, now: Instant): Promise<HaltInfo[]>;
   getHalt(tenantId: string, haltId: string): Promise<HaltInfo | null>;
@@ -255,7 +269,10 @@ export interface PricingStore {
   /** Запись в журнал и снятие остановки — одна транзакция */
   releaseHalt(tenantId: string, haltId: string, review: HaltReviewRecord): Promise<void>;
   /** Запись в журнал и перенос следующей проверки — одна транзакция */
-  recordFailedReview(tenantId: string, haltId: string, review: HaltReviewRecord, nextReviewAt: Instant): Promise<void>;
+  /** Наблюдения выборки проверки остановки (0063): у пути решения нет прав писать саму проверку и снятие */
+  recordHaltSample(tenantId: string, haltId: string, samples: readonly HaltSampleObservation[], now: Instant): Promise<void>;
+  /** Итог проверки выборки вычисляет хранилище: провал — новый срок; достаточно чистых наблюдений после срока — автоматическое снятие */
+  reviewHaltBySample(tenantId: string, haltId: string, now: Instant): Promise<HaltSampleReview>;
 
   /**
    * Остановка человеком [Р-69, Р-70]: право — у ролей PRICING_PERMISSIONS.STOP_PRICING, заметка обязательна.

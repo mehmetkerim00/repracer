@@ -1,15 +1,30 @@
 -- Р-65 после smoke_app.sql, от суперпользователя: запись с бюджетом правок требует подтверждённой границы суток витрины
 \set ON_ERROR_STOP 1
 \set tA 'a0000000-0000-0000-0000-00000000000a'
-CREATE FUNCTION pg_temp.expect_fail(label text, q text) RETURNS void LANGUAGE plpgsql AS $$
+CREATE FUNCTION pg_temp.expect_fail(label text, q text, reason text DEFAULT NULL) RETURNS void LANGUAGE plpgsql AS $$
+-- Р-94: reason — ожидаемая причина отказа (SQLSTATE или шаблон сообщения); отказ по другой причине — провал проверки.
+-- Р-95: при repracer.smoke_collect = on (мутационная проверка) провал не останавливает прогон, а пишется предупреждением CHECK FAILED.
+DECLARE
+  failure text;
 BEGIN
   BEGIN
     EXECUTE q;
-    RAISE EXCEPTION 'EXPECTED FAILURE DID NOT HAPPEN: %', label;
-  EXCEPTION WHEN others THEN
-    IF SQLERRM LIKE 'EXPECTED FAILURE DID NOT HAPPEN%' THEN RAISE; END IF;
-    RAISE NOTICE 'PASS reject | % | %', label, left(SQLERRM, 110);
+    RAISE EXCEPTION 'did not happen' USING ERRCODE = 'RS001';
+  EXCEPTION
+    WHEN SQLSTATE 'RS001' THEN
+      failure := 'EXPECTED FAILURE DID NOT HAPPEN';
+    WHEN others THEN
+      IF reason IS NULL OR SQLSTATE = reason OR SQLERRM ~* reason THEN
+        RAISE NOTICE 'PASS reject | % | %', label, left(SQLERRM, 110);
+        RETURN;
+      END IF;
+      failure := format('EXPECTED FAILURE HAD ANOTHER REASON (expected %s, got %s %s)', reason, SQLSTATE, left(SQLERRM, 160));
   END;
+  IF current_setting('repracer.smoke_collect', true) = 'on' THEN
+    RAISE WARNING 'CHECK FAILED: % | %', label, failure;
+  ELSE
+    RAISE EXCEPTION '%: %', failure, label;
+  END IF;
 END $$;
 BEGIN;
 UPDATE platform.marketplace SET time_zone_status = 'TO_VERIFY' WHERE channel = 'EBAY' AND marketplace = 'EBAY_DE';
@@ -51,6 +66,41 @@ INSERT INTO platform.fx_rate (source, rate_date, base_currency, quote_currency, 
 VALUES ('ECB', DATE '2001-01-02', 'EUR', 'USD', 0.9423, TIMESTAMPTZ '2001-01-02 16:00+00', 'smoke r61 (rolled back)');
 SELECT pg_temp.expect_fail('ECB rate is immutable (Р-61)', $q$
   UPDATE platform.fx_rate SET rate = 1.5 WHERE source_ref = 'smoke r61 (rolled back)' $q$);
+-- Р-73, Р-85, Р-94: ядро intent, вставленное мимо решения (суперпользователем), тоже проверяется своими ограничениями
+CREATE FUNCTION pg_temp.core_variant(overrides jsonb) RETURNS text LANGUAGE plpgsql AS $$
+DECLARE
+  cols text;
+BEGIN
+  SELECT string_agg(quote_ident(attname), ', ' ORDER BY attnum) INTO cols FROM pg_attribute
+   WHERE attrelid = 'tenant_data.price_intent_core'::regclass AND attnum > 0 AND NOT attisdropped AND attgenerated = '';
+  RETURN format('INSERT INTO tenant_data.price_intent_core (%s) SELECT %s FROM tenant_data.price_intent_core src, jsonb_populate_record(NULL::tenant_data.price_intent_core, to_jsonb(src) || %L::jsonb) AS r WHERE src.intent_class = %L LIMIT 1',
+                cols, regexp_replace(cols, '([^, ]+)', 'r.\1', 'g'), overrides || jsonb_build_object('price_intent_id', gen_random_uuid(), 'price_decision_id', gen_random_uuid()), 'CHANGED');
+END $$;
+SELECT pg_temp.expect_fail('eternal core: dangerous flag against the deviation (Р-73)', pg_temp.core_variant('{"bound_deviation_bp": 2000, "dangerous": false}'),
+  'price_intent_core_dangerous_consistent');
+SELECT pg_temp.expect_fail('eternal core: a competitor-derived rejection keeps its proposed price (Р-85)', pg_temp.core_variant('{"rule_code": "MATCH_BUYBOX", "intent_class": "REJECTED_BY_GATE", "decision_outcome": "REJECTED", "final_amount_minor": null, "rejection_reason": "ABOVE_MAX_PRICE", "reason_params": {"maxMinor": 5000, "currency": "EUR"}, "bound_deviation_bp": null, "dangerous": false}'),
+  'price_intent_core_competitor_rejection_not_kept');
+SELECT pg_temp.expect_fail('eternal core: an undeclared reason parameter in the explanation (finding 15)', pg_temp.core_variant('{"explanation": {"format":"r80.1","strategy":{"reason":{"code":"FIXED_PRICE","params":{"target":1780}}}}}'),
+  'price_intent_core_explanation_keys_declared');
+-- Находка 4 ревью шага 16, Р-93: append-only проверяется попыткой изменения, а не именем триггера. Суперпользователь обходит права, но не
+-- триггер: у каждой append-only таблицы, в которой есть строка, изменение одной строки обязано отклоняться именно триггером неизменяемости
+DO $$
+DECLARE
+  t regclass;
+  has_row boolean;
+  uncovered text[] := '{}';
+BEGIN
+  FOR t IN SELECT table_name FROM security.table_registry WHERE mutation_mode = 'append_only' ORDER BY table_name::text LOOP
+    EXECUTE format('SELECT EXISTS (SELECT 1 FROM %s)', t) INTO has_row;
+    IF has_row THEN
+      PERFORM pg_temp.expect_fail(format('append-only %s', t),
+        format('UPDATE %1$s SET tenant_id = tenant_id WHERE (tableoid, ctid) = (SELECT tableoid, ctid FROM %1$s LIMIT 1)', t), 'append-only table');
+    ELSE
+      uncovered := uncovered || t::text;
+    END IF;
+  END LOOP;
+  RAISE NOTICE 'append-only tables without rows in the smoke world (not checked here): %', array_to_string(uncovered, ', ');
+END $$;
 SELECT pg_temp.expect_fail('manual halt without a member and a note', $q$
   INSERT INTO channel_data.pricing_halt (tenant_id, channel_account_id, channel, marketplace, reason_code, details, halted_at)
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000003', 'EBAY', 'EBAY_DE', 'MANUAL', '{}', now()) $q$);

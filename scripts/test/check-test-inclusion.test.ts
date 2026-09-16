@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -49,6 +50,25 @@ test('a script naming a file that does not exist is reported, so a renamed test 
   });
   try {
     assert.deepEqual(findUnincludedTests(root).listedButMissing, ['packages/a: test/renamed.pg.test.ts']);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('step 17: .test.tsx, .test.cts and .test.cjs count as tests; a test under a nested build directory is not skipped; git-ignored output is', () => {
+  const root = repo({
+    'package.json': JSON.stringify({ workspaces: ['apps/*'] }),
+    '.gitignore': 'dist/\n',
+    'apps/web/package.json': pkg('node --test src/*.test.ts'),
+    'apps/web/src/a.test.ts': '', 'apps/web/src/screen.test.tsx': '', 'apps/web/src/legacy.test.cjs': '', 'apps/web/src/types.test.cts': '',
+    'apps/web/src/build/nested.test.ts': '',
+    'apps/web/dist/compiled.test.js': '',
+  });
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    const result = findUnincludedTests(root);
+    assert.deepEqual(result.unincluded.sort(), ['apps/web/src/build/nested.test.ts', 'apps/web/src/legacy.test.cjs', 'apps/web/src/screen.test.tsx', 'apps/web/src/types.test.cts']);
+    assert.equal(result.all.includes('apps/web/dist/compiled.test.js'), false, 'git-ignored build output is not a source test');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

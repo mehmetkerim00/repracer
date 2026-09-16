@@ -3,15 +3,30 @@
 \set ON_ERROR_STOP 1
 \set QUIET 1
 
-CREATE FUNCTION pg_temp.expect_fail(label text, q text) RETURNS void LANGUAGE plpgsql AS $$
+CREATE FUNCTION pg_temp.expect_fail(label text, q text, reason text DEFAULT NULL) RETURNS void LANGUAGE plpgsql AS $$
+-- Р-94: reason — ожидаемая причина отказа (SQLSTATE или шаблон сообщения); отказ по другой причине — провал проверки.
+-- Р-95: при repracer.smoke_collect = on (мутационная проверка) провал не останавливает прогон, а пишется предупреждением CHECK FAILED.
+DECLARE
+  failure text;
 BEGIN
   BEGIN
     EXECUTE q;
-    RAISE EXCEPTION 'EXPECTED FAILURE DID NOT HAPPEN: %', label;
-  EXCEPTION WHEN others THEN
-    IF SQLERRM LIKE 'EXPECTED FAILURE DID NOT HAPPEN%' THEN RAISE; END IF;
-    RAISE NOTICE 'PASS reject | % | %', label, left(SQLERRM, 110);
+    RAISE EXCEPTION 'did not happen' USING ERRCODE = 'RS001';
+  EXCEPTION
+    WHEN SQLSTATE 'RS001' THEN
+      failure := 'EXPECTED FAILURE DID NOT HAPPEN';
+    WHEN others THEN
+      IF reason IS NULL OR SQLSTATE = reason OR SQLERRM ~* reason THEN
+        RAISE NOTICE 'PASS reject | % | %', label, left(SQLERRM, 110);
+        RETURN;
+      END IF;
+      failure := format('EXPECTED FAILURE HAD ANOTHER REASON (expected %s, got %s %s)', reason, SQLSTATE, left(SQLERRM, 160));
   END;
+  IF current_setting('repracer.smoke_collect', true) = 'on' THEN
+    RAISE WARNING 'CHECK FAILED: % | %', label, failure;
+  ELSE
+    RAISE EXCEPTION '%: %', failure, label;
+  END IF;
 END $$;
 
 -- Тенант A: владелец, администратор и оператор (для проверок ролей в smoke_admin.sql); тенант B: владелец
@@ -25,6 +40,24 @@ SELECT security.provision_tenant('b0000000-0000-0000-0000-00000000000b', 'Tenant
 ]'::jsonb);
 DO $$ BEGIN RAISE NOTICE 'PASS accept | tenants A and B provisioned with their owners (Р-90)'; END $$;
 
+-- Р-60, Р-94: тенант региона US в базе EU отклоняет именно проверка региона
+SELECT pg_temp.expect_fail('tenant in wrong region DB (Р-60)', $q$
+  SELECT security.provision_tenant('c0000000-0000-0000-0000-0000000000c2', 'US tenant', 'US', '[{"userId": "c1000000-0000-0000-0000-0000000000c2", "email": "us-owner@example.test", "role": "OWNER"}]') $q$,
+  'does not match database region');
+-- Находка 5 ревью шага 16 (0066): существующий пользователь не присоединяется к новому тенанту мимо приглашения
+SELECT pg_temp.expect_fail('existing user attached as a member without an invitation (step 16 finding 5)', $q$
+  SELECT security.provision_tenant('c0000000-0000-0000-0000-0000000000c3', 'Attach', 'EU', '[
+    {"userId": "c1000000-0000-0000-0000-0000000000c3", "email": "attach-owner@example.test", "role": "OWNER"},
+    {"userId": "a1000000-0000-0000-0000-00000000000a", "email": "owner-a@example.test", "role": "ADMIN"}]') $q$,
+  'only by an invitation of its owner');
+SELECT pg_temp.expect_fail('existing user provisioned as owner under another email (step 16 finding 5)', $q$
+  SELECT security.provision_tenant('c0000000-0000-0000-0000-0000000000c4', 'Other email', 'EU', '[
+    {"userId": "a1000000-0000-0000-0000-00000000000a", "email": "someone-else@example.test", "role": "OWNER"}]') $q$,
+  'does not match the user');
+SELECT pg_temp.expect_fail('existing user who never signed in provisioned as owner (step 16 finding 5)', $q$
+  SELECT security.provision_tenant('c0000000-0000-0000-0000-0000000000c5', 'Never signed in', 'EU', '[
+    {"userId": "a1000000-0000-0000-0000-00000000000a", "email": "owner-a@example.test", "role": "OWNER"}]') $q$,
+  'has never signed in');
 SELECT pg_temp.expect_fail('tenant provisioned without an owner (Р-90)', $q$
   SELECT security.provision_tenant('c0000000-0000-0000-0000-0000000000c1', 'No owner', 'EU', '[{"userId": "c1000000-0000-0000-0000-0000000000c1", "email": "x@example.test", "role": "ADMIN"}]') $q$);
 SELECT pg_temp.expect_fail('provisioning role inserts a membership directly (Р-90)', $q$

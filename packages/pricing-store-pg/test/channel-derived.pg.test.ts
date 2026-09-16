@@ -15,9 +15,11 @@ import { requireEnv } from './isolated-db.ts';
 
 const pool = createPool(requireEnv('REPRACER_PG_URL'), { max: 4, applicationName: 'repracer-r85-test' });
 const provisioning = createPool(requireEnv('REPRACER_PG_URL').replace('svc_app@', 'svc_provisioning@'), { max: 1, applicationName: 'repracer-test-provisioning' });
+const admin = createPool(requireEnv('REPRACER_PG_URL').replace('svc_app@', 'svc_admin@'), { max: 2, applicationName: 'repracer-test-admin' });
 after(async () => {
   await pool.end();
   await provisioning.end();
+  await admin.end();
 });
 
 const ACCOUNT = '20000000-0000-4000-8000-000000000085';
@@ -40,7 +42,7 @@ test('Р-85: the derived-key registry in the database equals the code', async ()
 });
 
 test('Р-85: a rejected Buy Box proposal reaches the eternal core without the proposed price, the deviation and the derived target', async () => {
-  const w = await seedPricingWorld(pool, { provisioningPool: provisioning, fixtureTenantId: '10000000-0000-4000-8000-000000000085', fixtureChannelAccountId: ACCOUNT, marketplaces: ['de'], clock: now(), seed: { scopes: [scope(1)] } });
+  const w = await seedPricingWorld(pool, { provisioningPool: provisioning, adminPool: admin, fixtureTenantId: '10000000-0000-4000-8000-000000000085', fixtureChannelAccountId: ACCOUNT, marketplaces: ['de'], clock: now(), seed: { scopes: [scope(1)] } });
   const store = new PgPricingStore(pool);
   const ctx = await contextOf(store, w.tenantId, w.ids.dbId('ws-1'));
   const base = approved(ctx, 1900);
@@ -62,7 +64,8 @@ test('Р-85: a rejected Buy Box proposal reaches the eternal core without the pr
     now: now(), decisions: [d],
   });
   assert.equal(r.status, 'COMMITTED', JSON.stringify(r));
-  const [row] = await inTenant(pool, w.tenantId, async (tx) => (await tx.query(
+  // Р-96: вечное ядро читает административный сервис
+  const [row] = await inTenant(admin, w.tenantId, async (tx) => (await tx.query(
     `SELECT c.proposed_amount_minor, c.bound_deviation_bp, c.dangerous, c.reason_params, c.explanation, c.competitor_derived,
             dd.proposed_amount_minor AS hot_proposed, dd.bound_deviation_bp AS hot_deviation
        FROM tenant_data.price_intent_core c JOIN channel_data.price_decision dd ON dd.tenant_id = c.tenant_id AND dd.price_decision_id = c.price_decision_id
@@ -113,7 +116,7 @@ test('finding 16: a database refusal at commit (the margin floor rose after the 
   // Пол маржи 10 % при комиссии 10 % и НДС 19 %: себестоимость 10,00 € → 15,24 €; 11,00 € → 16,76 €
   const cost = (unitCostMinor: number): CostInputs => ({ currency: 'EUR', costProfileId: `cp-86-${unitCostMinor}`, unitCostMinor, fixedFeeMinor: 0, feeRateBp: 1000, tax: { regime: 'VAT_INCLUDED', vatRateBp: 1900 } });
   const w = await seedPricingWorld(pool, {
-    provisioningPool: provisioning, fixtureTenantId: '10000000-0000-4000-8000-000000000086', fixtureChannelAccountId: ACCOUNT, marketplaces: ['de'], clock: now(),
+    provisioningPool: provisioning, adminPool: admin, fixtureTenantId: '10000000-0000-4000-8000-000000000086', fixtureChannelAccountId: ACCOUNT, marketplaces: ['de'], clock: now(),
     seed: { scopes: [{ ...scope(2), minPrice: { amountMinor: 1000, id: 'min-2' }, cost: cost(1000), guardrails: { minMarginBp: 1000 } }] },
   });
   const store = new PgPricingStore(pool);
@@ -133,7 +136,8 @@ test('finding 16: a database refusal at commit (the margin floor rose after the 
   });
   assert.equal(r.status, 'CONTEXT_CHANGED', JSON.stringify(r));
   assert.equal(r.status === 'CONTEXT_CHANGED' ? r.reason.code : null, 'BELOW_MARGIN_FLOOR', 'the refusal goes back to the pipeline as a hot reason, it is not stored');
-  const [counts] = await inTenant(pool, w.tenantId, async (tx) => (await tx.query(
+  // Р-96: вечное ядро путь решения только дописывает; читает его административный сервис
+  const [counts] = await inTenant(admin, w.tenantId, async (tx) => (await tx.query(
     `SELECT (SELECT count(*)::int FROM channel_data.price_decision WHERE tenant_id = $1) AS decisions,
             (SELECT count(*)::int FROM tenant_data.price_intent_core WHERE tenant_id = $1) AS core,
             (SELECT count(*)::int FROM tenant_data.channel_write WHERE tenant_id = $1) AS writes`, [w.tenantId])).rows);

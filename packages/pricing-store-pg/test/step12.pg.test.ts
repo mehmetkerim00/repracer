@@ -124,7 +124,8 @@ test('Р-68, Р-59: a competitor-derived evaluation stores the explanation, its 
   t.diagnostic(`transactions per evaluation (context, commit with explanation and reference, dispatch outcome): ${transactions}`);
   assert.ok(transactions <= 3, `Р-59: ${transactions} transactions`);
 
-  const [row] = await inTenant(pool!, w.tenantId, async (tx) => (await tx.query(
+  // Р-96: вечное ядро читает административный сервис
+  const [row] = await inTenant(admin!, w.tenantId, async (tx) => (await tx.query(
     `SELECT d.explanation, c.explanation AS core_explanation, r.competitor_snapshot_id, r.source, d.sanity_ruleset, d.gate_profile, d.outcome, d.pricing_strategy_version,
             d.xmin::text AS decision_tx, c.xmin::text AS core_tx, r.xmin::text AS ref_tx,
             pg_column_size(d.explanation) AS explanation_bytes, pg_column_size(d.*) AS decision_row_bytes, pg_column_size(r.*) AS ref_row_bytes

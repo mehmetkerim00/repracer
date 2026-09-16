@@ -72,8 +72,11 @@ export interface SeedWorldInput {
   fxLoaderPool?: PgPool;
   /** Р-90: роль создания тенанта (repracer_provisioning) — тенант, пользователи и членства одной функцией security.provision_tenant */
   provisioningPool: PgPool;
-  /** Р-90: роль административного сервиса (repracer_admin) — только для seed.stops: остановку ставит человек в своей сессии */
-  adminPool?: PgPool;
+  /**
+   * Р-90, Р-96: роль административного сервиса (repracer_admin). Конфигурация тенанта — аккаунты, товары, единицы записи, границы,
+   * стратегии, себестоимость, остановки — действие человека в административном сервисе; у роли пути решения прав на это нет.
+   */
+  adminPool: PgPool;
   fixtureTenantId: string;
   fixtureChannelAccountId: string;
   marketplaces: string[];
@@ -81,6 +84,16 @@ export interface SeedWorldInput {
   seed: MemorySeed;
   /** Существующие пользователи для членств сценария (псевдоним членства → user_id): один вход во все миры стенда [OQ-128, Р-9] */
   memberUsers?: Readonly<Record<string, string>>;
+  /**
+   * Адреса участников (псевдоним членства → email). Для СУЩЕСТВУЮЩЕГО пользователя адрес обязан совпадать с его адресом:
+   * создание тенанта присоединяет существующего пользователя только владельцем и только его адресом (находка 5 ревью шага 16, 0066).
+   */
+  memberEmails?: Readonly<Record<string, string>>;
+  /**
+   * Вход СУЩЕСТВУЮЩЕГО участника (не владельца) в создаваемый тенант: приглашение владельца и его приём (находка 5 ревью шага 16).
+   * Создание тенанта присоединяет только владельца; остальные существующие пользователи входят приглашением — как в работе.
+   */
+  joinMember?: (input: { tenantId: string; ownerUserId: string; membershipAlias: string; role: string; email: string }) => Promise<{ userId: string; membershipId: string }>;
 }
 
 export interface SeededPricingWorld {
@@ -154,7 +167,11 @@ async function insertCost(tx: Tx, tenantId: string, membershipId: string, s: Sco
   return rows[0]!.cost_profile_id;
 }
 
-export async function seedPricingWorld(pool: PgPool, input: SeedWorldInput): Promise<SeededPricingWorld> {
+/**
+ * Синтетический мир стенда и тестов. pool — роль пути решения: посев его не использует (конфигурацию пишет административная роль,
+ * Р-96) и оставлен в сигнатуре, чтобы вызывающий код явно держал оба пула.
+ */
+export async function seedPricingWorld(_pool: PgPool, input: SeedWorldInput): Promise<SeededPricingWorld> {
   // Курсы ЕЦБ — справочник платформы: загружает роль загрузчика, курс дня неизменяем (повторный посев того же дня — без изменений)
   if (input.seed.fxRates?.length) {
     if (!input.fxLoaderPool) throw new Error('seed.fxRates requires fxLoaderPool (repracer_fx_loader)');
@@ -319,21 +336,35 @@ export async function seedPricingWorld(pool: PgPool, input: SeedWorldInput): Pro
   // одной функцией (Р-90): у роли пути решения нет вставки в tenant, app_user и membership
   const memberUsers = new Map<string, string>([[OWNER_MEMBERSHIP_ALIAS, userId]]);
   const provisioned: Array<{ membershipId: string; userId: string; email: string; role: string }> = [
-    { membershipId, userId, email: `owner-${tag}@example.test`, role: 'OWNER' },
+    { membershipId, userId, email: input.memberEmails?.[OWNER_MEMBERSHIP_ALIAS] ?? `owner-${tag}@example.test`, role: 'OWNER' },
   ];
+  const invited: Array<{ membershipId: string; role: string; userId?: string; email: string }> = [];
   for (const m of seed.members ?? DEFAULT_MEMBERS) {
     if (m.membershipId === OWNER_MEMBERSHIP_ALIAS) continue;
-    const otherUser: string = input.memberUsers?.[m.membershipId] ?? randomUUID();
+    const email = input.memberEmails?.[m.membershipId] ?? `${m.role.toLowerCase()}-${tag}@example.test`;
+    // Находка 5 ревью шага 16: существующего пользователя создание тенанта не присоединяет — он входит приглашением владельца
+    if (input.memberUsers?.[m.membershipId]) {
+      if (!input.joinMember) throw new Error(`existing user for ${m.membershipId} needs joinMember: provisioning attaches only the owner (step 16 finding 5)`);
+      invited.push({ membershipId: m.membershipId, role: m.role, ...(m.userId ? { userId: m.userId } : {}), email });
+      continue;
+    }
+    const otherUser: string = randomUUID();
     const otherMembership: string = randomUUID();
-    provisioned.push({ membershipId: otherMembership, userId: otherUser, email: `${m.role.toLowerCase()}-${tag}@example.test`, role: m.role });
+    provisioned.push({ membershipId: otherMembership, userId: otherUser, email, role: m.role });
     ids.alias(m.membershipId, otherMembership);
     ids.alias(m.userId ?? standUserOf(m.membershipId), otherUser);
     memberUsers.set(m.membershipId, otherUser);
   }
   await input.provisioningPool.query('SELECT security.provision_tenant($1, $2, $3, $4::jsonb)',
     [tenantId, `Synthetic tenant ${tag}`, 'EU', JSON.stringify(provisioned)]);
+  for (const m of invited) {
+    const joined = await input.joinMember!({ tenantId, ownerUserId: userId, membershipAlias: m.membershipId, role: m.role, email: m.email });
+    ids.alias(m.membershipId, joined.membershipId);
+    ids.alias(m.userId ?? standUserOf(m.membershipId), joined.userId);
+    memberUsers.set(m.membershipId, joined.userId);
+  }
 
-  await inTenant(pool, tenantId, async (tx) => {
+  await inTenant(input.adminPool, tenantId, async (tx) => {
     await tx.query(
       `INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, external_account_id, marketplaces, credentials_ref, connected_by_membership_id)
        VALUES ($1, $2, 'KAUFLAND', $3, $4, 'secret-ref:synthetic', $5)`,
@@ -434,7 +465,6 @@ export async function seedPricingWorld(pool: PgPool, input: SeedWorldInput): Pro
 
   // Остановки человеком сценария [Р-69, Р-70]: от сессии автора в административном сервисе — триггер прав сверяет пользователя (Р-90)
   for (const st of seed.stops ?? []) {
-    if (!input.adminPool) throw new Error('seed.stops requires adminPool (repracer_admin, Р-90)');
     const alias = st.membershipId ?? OWNER_MEMBERSHIP_ALIAS;
     const account = st.scope === 'TENANT' ? null : (st.channelAccountId ? ids.dbId(st.channelAccountId) : accountId);
     await inTenant(input.adminPool, tenantId, (tx) => tx.query(
@@ -454,7 +484,7 @@ export async function seedPricingWorld(pool: PgPool, input: SeedWorldInput): Pro
     tenantId, userId, ownerMembershipId: membershipId, channelAccountId: accountId, ids,
     async setBound(fixtureWs, bound, value) {
       const info = scopeInfo(fixtureWs);
-      const id = await inTenant(pool, tenantId, async (tx) => {
+      const id = await inTenant(input.adminPool, tenantId, async (tx) => {
         let amountMinor = value?.amountMinor;
         if (amountMinor === undefined) {
           // Снятие границы — новая неактивная версия (append-only)
@@ -475,14 +505,15 @@ export async function seedPricingWorld(pool: PgPool, input: SeedWorldInput): Pro
     async setCost(fixtureWs, cost) {
       if (!cost) throw new Error('setCost(null) is not representable: cost_profile is append-only');
       const info = scopeInfo(fixtureWs);
-      const id = await inTenant(pool, tenantId, (tx) => insertCost(tx, tenantId, membershipId, info, cost, clock), userId);
+      const id = await inTenant(input.adminPool, tenantId, (tx) => insertCost(tx, tenantId, membershipId, info, cost, clock), userId);
       ids.alias(cost.costProfileId, id);
     },
     async connectAccount(account, newScopes) {
-      await inTenant(pool, tenantId, async (tx) => {
+      await inTenant(input.adminPool, tenantId, async (tx) => {
         await connectAccountRow(tx, account, `syn-${account.channel.toLowerCase()}-${tag}-${accounts.size}`);
         for (const s of newScopes) await seedScope(tx, s);
-      });
+        // Р-97: подключение аккаунта — действие владельца в административном сервисе
+      }, userId);
     },
   };
 }

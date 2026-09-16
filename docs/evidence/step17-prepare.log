@@ -1,0 +1,1288 @@
+== 0001_foundation.sql
+psql:migrations/0001_foundation.sql:21: NOTICE:  role "postgres" has already been granted membership in role "repracer_owner" by role "postgres"
+psql:migrations/0001_foundation.sql:21: NOTICE:  role "postgres" has already been granted membership in role "repracer_resolver" by role "postgres"
+psql:migrations/0001_foundation.sql:21: NOTICE:  role "postgres" has already been granted membership in role "repracer_retention" by role "postgres"
+== 0002_tenancy_identity.sql
+== 0003_channels.sql
+== 0004_catalog.sql
+== 0005_offers_write_scopes.sql
+== 0006_pricing_rules.sql
+== 0007_inventory.sql
+== 0008_channel_writes_price_history.sql
+== 0009_channel_data.sql
+== 0010_ebay_migration.sql
+== 0011_audit.sql
+== 0012_retention.sql
+== 0013_resolver.sql
+== 0014_verify_schema_invariants.sql
+== 0015_tiering_foundation.sql
+psql:migrations/0015_tiering_foundation.sql:14: NOTICE:  role "postgres" has already been granted membership in role "repracer_exporter" by role "postgres"
+== 0016_move_channel_analytics.sql
+== 0017_price_intent_decision_hot.sql
+== 0018_channel_write_hot.sql
+== 0019_price_history_hot_daily.sql
+== 0020_reservation_lifecycle.sql
+== 0021_legal_hold_and_purge.sql
+== 0022_retention_v2.sql
+== 0023_verify_schema_invariants_v2.sql
+== 0024_price_intent_classes.sql
+== 0025_price_daily_immutable.sql
+== 0026_reservation_stale_alert_and_purge.sql
+== 0027_kaufland_scopes_and_sources.sql
+== 0028_fix_engine_mode_guard.sql
+== 0029_verify_schema_invariants_v3.sql
+== 0030_price_bounds_and_input_sanity.sql
+== 0031_verify_schema_invariants_v4.sql
+== 0032_anchors_halt_review_vat.sql
+== 0033_verify_schema_invariants_v5.sql
+== 0034_multicurrency_tax_projections.sql
+== 0035_verify_schema_invariants_v6.sql
+== 0036_write_dispatcher.sql
+== 0037_fx_rates_day_boundary_region.sql
+== 0038_outbox_relay.sql
+== 0039_verify_schema_invariants_v7.sql
+== 0040_storefront_time_zone_manual_halt.sql
+== 0041_verify_schema_invariants_v8.sql
+== 0042_explanation_stops_roles.sql
+== 0043_verify_schema_invariants_v9.sql
+== 0044_explanation_dictionary.sql
+== 0045_stop_audit_roles_strategy.sql
+== 0046_identity_sessions.sql
+== 0047_verify_schema_invariants_v10.sql
+== 0048_external_identity_audit_author.sql
+== 0049_explanation_columns_compression_archive.sql
+== 0050_verify_schema_invariants_v11.sql
+== 0051_price_floor_recheck.sql
+== 0052_channel_derived_not_eternal.sql
+== 0053_audit_guards_invitations_mfa.sql
+== 0054_revert_partition_compression.sql
+== 0055_budget_retry_due_scopes.sql
+== 0056_verify_schema_invariants_v12.sql
+== 0057_budget_day_unconfirmed_end_reason.sql
+== 0058_role_separation.sql
+psql:migrations/0058_role_separation.sql:40: NOTICE:  role "repracer_admin" has already been granted membership in role "repracer_app" by role "postgres"
+== 0059_undercut_not_eternal_fail_closed.sql
+== 0060_amounts_have_currency_null_logic.sql
+== 0061_verify_schema_invariants_v13.sql
+== 0062_decision_path_allow_list.sql
+== 0063_halt_review_by_database.sql
+== 0064_explanation_constraints_consolidated.sql
+== 0065_decision_lock_halt_review_clock.sql
+== 0066_admin_person_audit_relink_explanation_values.sql
+== 0067_verify_schema_invariants_v14.sql
+ ensure_partitions 
+-------------------
+                 4
+(1 строка)
+
+ ensure_partitions 
+-------------------
+                 0
+(1 строка)
+
+== smoke
+ provision_tenant 
+------------------
+ 
+(1 строка)
+
+ provision_tenant 
+------------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_provision.sql:41: NOTICE:  PASS accept | tenants A and B provisioned with their owners (Р-90)
+psql:tests/db/smoke_provision.sql:46: NOTICE:  PASS reject | tenant in wrong region DB (Р-60) | tenant region US does not match database region EU
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_provision.sql:52: NOTICE:  PASS reject | existing user attached as a member without an invitation (step 16 finding 5) | existing user a1000000-0000-0000-0000-00000000000a joins a tenant as ADMIN only by an invitation of its owner 
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_provision.sql:56: NOTICE:  PASS reject | existing user provisioned as owner under another email (step 16 finding 5) | the provisioned email of existing user a1000000-0000-0000-0000-00000000000a does not match the user (step 16 f
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_provision.sql:60: NOTICE:  PASS reject | existing user who never signed in provisioned as owner (step 16 finding 5) | existing user a1000000-0000-0000-0000-00000000000a has never signed in: an owner is provisioned after acceptin
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_provision.sql:62: NOTICE:  PASS reject | tenant provisioned without an owner (Р-90) | a tenant is provisioned together with its owner
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_provision.sql:64: NOTICE:  PASS reject | provisioning role inserts a membership directly (Р-90) | permission denied for schema tenant_data
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_provision.sql:66: NOTICE:  PASS reject | provisioning role inserts a tenant directly (Р-90) | permission denied for schema tenant_data
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_provision.sql:67: NOTICE:  PASS reject | provisioning role reads tenant data (Р-90) | permission denied for schema tenant_data
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_provision.sql:69: NOTICE:  PASS reject | provisioning role writes the audit log (Р-90) | permission denied for schema audit
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:60: NOTICE:  PASS reject | tenant without OWNER | permission denied for table tenant
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:62: NOTICE:  PASS reject | tenant in wrong region DB | permission denied for table tenant
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:71: NOTICE:  PASS isolation | tenant A sees 0 products of tenant B
+psql:tests/db/smoke_app.sql:73: NOTICE:  PASS reject | insert row for another tenant | administrative change of tenant_data.product by user a1000000-0000-0000-0000-00000000000a who is not an active
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:78: NOTICE:  PASS reject | direct partition access | permission denied for table price_intent_d20260915
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:85: NOTICE:  PASS isolation | no context -> 0 rows
+psql:tests/db/smoke_app.sql:106: NOTICE:  PASS reject | offer identity does not match scope key | offer identity does not produce scope_key ["de", "U1"] (template {channel_account,marketplace,external_unit_id
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:109: NOTICE:  PASS accept | offer attached to derived scope
+ ok 
+----
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:111: NOTICE:  PASS reject | ENGINE without min_price (Р-5) | new row for relation "write_scope" violates check constraint "write_scope_engine_has_strategy"
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:114: NOTICE:  PASS reject | tenant-level min_price (Р-18) | new row for relation "min_price" violates check constraint "min_price_scope_type_check"
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:117: NOTICE:  PASS reject | min_price version gap | tenant_data.min_price: version must be 1 (got 2)
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:121: NOTICE:  PASS reject | ENGINE with min_price but without max_price (Р-43) | new row for relation "write_scope" violates check constraint "write_scope_engine_has_strategy"
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:125: NOTICE:  PASS reject | ENGINE with min_price above max_price (Р-43) | new row for relation "write_scope" violates check constraint "write_scope_engine_has_strategy"
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:130: NOTICE:  PASS reject | guardrail carrying a ceiling (moved to max_price, Р-43) | new row for relation "guardrail" violates check constraint "guardrail_ceiling_moved_to_max_price"
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:132: NOTICE:  PASS reject | ENGINE without a strategy (Р-77) | new row for relation "write_scope" violates check constraint "write_scope_engine_has_strategy"
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:136: NOTICE:  PASS accept | strategy kept while OFF (Р-77)
+ ok 
+----
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:138: NOTICE:  PASS accept | ENGINE with product min_price, max_price and a strategy
+ ok 
+----
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:145: NOTICE:  PASS reject | deactivate the only min_price while ENGINE | write_scope a6000000-0000-0000-0000-000000000001 has pricing_mode ENGINE but no active min_price at PRODUCT or
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:146: NOTICE:  PASS reject | UPDATE append-only min_price | permission denied for table min_price
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:148: NOTICE:  PASS reject | Smart Pricing without tenant opt-in (Р-12) | tenant has not opted in to Kaufland Smart Pricing
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:151: NOTICE:  PASS reject | CHANNEL_MIN_PRICE write in ENGINE mode (Р-12) | CHANNEL_MIN_PRICE may be written only in KAUFLAND_SMART_PRICING mode
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:162: NOTICE:  PASS reject | decision floor below min_price | decision floor 900 is below effective min_price 1000
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:165: NOTICE:  PASS reject | approved price below floor | new row for relation "price_decision_d20260914" violates check constraint "price_decision_check1"
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:179: NOTICE:  PASS accept | CHANGED -> price_intent_core, NO_OP not kept in core (Р-27, Р-38)
+psql:tests/db/smoke_app.sql:182: NOTICE:  PASS reject | decision for an intent of another write_scope | channel_data.price_decision_d20260914: write_scope 3bb12c00-5c1d-4ed6-9ca4-5bc3b3c07015 does not exist
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:185: NOTICE:  PASS reject | second decision for the same intent | new row for relation "price_decision_d20260914" violates check constraint "price_decision_rejection_reason_iff
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:188: NOTICE:  PASS reject | PRICE write not equal to decision | PRICE write must equal an approved price_decision of the same write_scope
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:193: NOTICE:  PASS reject | same version again (INV-03) | version 1 is not greater than latest created version 1 of write_scope a6000000-0000-0000-0000-000000000001
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:202: NOTICE:  PASS accept | v2 supersedes v1; v1 moved to channel_write_history (Р-20)
+psql:tests/db/smoke_app.sql:207: NOTICE:  PASS reject | NO_OP decision with an explanation (Р-74) | new row for relation "price_decision_d20260914" violates check constraint "price_decision_explanation_by_class
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:211: NOTICE:  PASS reject | NO_OP decision with an unknown no-change reason (Р-74) | new row for relation "price_decision_d20260914" violates check constraint "price_decision_no_change_reason_cod
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:214: NOTICE:  PASS reject | write discarded without a reason (Р-64) | new row for relation "channel_write" violates check constraint "channel_write_end_explained"
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:217: NOTICE:  PASS reject | write ended with an amount without its currency (Р-71) | new row for relation "channel_write" violates check constraint "channel_write_end_params_currency"
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:221: NOTICE:  PASS reject | write history ended without a reason (Р-64) | new row for relation "channel_write_history_d20260916" violates check constraint "channel_write_history_end_ex
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:223: NOTICE:  PASS reject | direct DELETE of an open write | channel_write rows are removed only on completion
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:226: NOTICE:  PASS reject | older version insert after newer (INV-03) | version 1 is not greater than latest created version 2 of write_scope a6000000-0000-0000-0000-000000000001
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:239: NOTICE:  PASS accept | decision above max_price stored as REJECTED (Р-44)
+ ok 
+----
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:245: NOTICE:  PASS accept | rejection by max_price kept in price_intent_core as REJECTED_BY_GATE (Р-44)
+psql:tests/db/smoke_app.sql:249: NOTICE:  PASS reject | rejection without its reason parameters (OQ-98) | new row for relation "price_decision_d20260914" violates check constraint "price_decision_rejection_explained"
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:253: NOTICE:  PASS reject | rejection parameters with an amount without its currency (Р-71) | new row for relation "price_decision_d20260914" violates check constraint "price_decision_amounts_have_currenc
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:257: NOTICE:  PASS reject | decision exchange rate without its fields (Р-61) | new row for relation "price_decision_d20260914" violates check constraint "price_decision_fx_shape"
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:262: NOTICE:  PASS reject | decision explanation with an undeclared reason parameter (finding 15) | new row for relation "price_decision_d20260914" violates check constraint "price_decision_explanation_keys_dec
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:265: NOTICE:  PASS reject | rejection reason ABOVE_MAX_PRICE for a price below the ceiling | rejection reason ABOVE_MAX_PRICE contradicts proposed price 4000
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:268: NOTICE:  PASS reject | decision ceiling above effective max_price | decision ceiling 6000 is above effective max_price 5000 (Р-43)
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:271: NOTICE:  PASS reject | decision without ceiling (Р-43) | new row for relation "price_decision_d20260914" violates check constraint "price_decision_bounds_present"
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:274: NOTICE:  PASS reject | clamp to floor instead of rejection (Р-44) | new row for relation "price_decision_d20260914" violates check constraint "price_decision_no_bound_clamp"
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:277: NOTICE:  PASS reject | REJECTED without a reason | new row for relation "price_decision_d20260914" violates check constraint "price_decision_rejection_reason_iff
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:280: NOTICE:  PASS accept | bound cannot be computed: REJECTED with empty bounds is stored
+ ok 
+----
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:283: NOTICE:  PASS reject | BOUND_UNRESOLVABLE with an approval | new row for relation "price_decision_d20260914" violates check constraint "price_decision_rejection_reason_iff
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:290: NOTICE:  PASS reject | write created above lowered max_price (Р-44, check 2) | value 1250 is above effective max_price 1200 (at creation)
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:293: NOTICE:  PASS reject | dispatch above lowered max_price (Р-44, check 3) | value 1250 is above effective max_price 1200 (at dispatch)
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:310: NOTICE:  PASS accept | competitor_derived: from intent rule_code, copied into the decision (Р-51)
+psql:tests/db/smoke_app.sql:319: NOTICE:  PASS accept | a halt schedules its review after the window (Р-52)
+psql:tests/db/smoke_app.sql:322: NOTICE:  PASS reject | competitor-derived approval while halted (Р-51) | competitor-derived pricing is halted by pricing_halt ab000000-0000-0000-0000-000000000001 for write_scope a600
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:325: NOTICE:  PASS accept | halted rejection of a competitor-derived price is stored
+ ok 
+----
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:327: NOTICE:  PASS reject | dispatch of a competitor-derived write while halted (Р-51) | competitor-derived pricing is halted by pricing_halt ab000000-0000-0000-0000-000000000001 for write_scope a600
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:330: NOTICE:  PASS accept | manual price approved while halted (Р-51)
+ ok 
+----
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:333: NOTICE:  PASS accept | manual price write created while halted (Р-51)
+ ok 
+----
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:335: NOTICE:  PASS accept | manual price write dispatched while halted (Р-51)
+ ok 
+----
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:338: NOTICE:  PASS reject | second active halt for the same storefront | new row for relation "pricing_halt" violates check constraint "pricing_halt_system_only"
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:340: NOTICE:  PASS reject | release without kind and person | pricing halt ab000000-0000-0000-0000-000000000001 released without a review record (Р-52)
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:342: NOTICE:  PASS reject | change halt reason | channel_data.pricing_halt: only columns [0:4]={released_at,released_by_membership_id,release_note,released_kin
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:345: NOTICE:  PASS reject | manual release without a journal record (Р-52) | pricing halt ab000000-0000-0000-0000-000000000001 released without a review record (Р-52)
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:347: NOTICE:  PASS reject | manual release record without a note | new row for relation "pricing_halt_review" violates check constraint "pricing_halt_review_check2"
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:354: NOTICE:  PASS reject | the administrative service records an automatic review without a person (Р-97) | administrative change of channel_data.pricing_halt_review without a person: the administrative service writes 
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:357: NOTICE:  PASS reject | the administrative service moves the next review without a person (Р-97) | administrative change of channel_data.pricing_halt without a person: the administrative service writes only on
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:361: NOTICE:  PASS reject | automatic review recorded in a user session (finding 3) | an automatic halt review is a system action and is not recorded in a user session
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:366: NOTICE:  PASS accept | rejected snapshot with reason
+ ok 
+----
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:369: NOTICE:  PASS reject | rejected snapshot details: an amount without its currency (Р-71) | new row for relation "rejected_competitor_snapshot" violates check constraint "rejected_competitor_snapshot_de
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:371: NOTICE:  PASS accept | rejected snapshot details: the same amount with its currency (Р-71)
+ ok 
+----
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:373: NOTICE:  PASS reject | HALT_CHANNEL with a per-product reason | new row for relation "rejected_competitor_snapshot" violates check constraint "rejected_competitor_snapshot_ch
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:375: NOTICE:  PASS accept | snapshot without a plausibility anchor (Р-49)
+ ok 
+----
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:377: NOTICE:  PASS reject | missing anchor filed under another alarm class | new row for relation "rejected_competitor_snapshot" violates check constraint "rejected_competitor_snapshot_an
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:379: NOTICE:  PASS reject | own-price deviation is no longer a rejection reason (Р-49) | new row for relation "rejected_competitor_snapshot" violates check constraint "rejected_competitor_snapshot_re
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:380: NOTICE:  PASS reject | UPDATE append-only rejected snapshot | permission denied for table rejected_competitor_snapshot
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:387: NOTICE:  PASS accept | VAT defaults DE 1900 bp / AT 2000 bp without a declaration (Р-53)
+psql:tests/db/smoke_app.sql:389: NOTICE:  PASS accept | product declares a reduced VAT rate
+ ok 
+----
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:394: NOTICE:  PASS accept | declared product VAT rate overrides the country default (Р-53)
+psql:tests/db/smoke_app.sql:396: NOTICE:  PASS reject | VAT rate above 30% | new row for relation "product_vat_rate" violates check constraint "product_vat_rate_rate_bp_check"
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:398: NOTICE:  PASS reject | VAT rate for a country outside Release 1.0 | country PL has no VAT regime: product VAT rate is not applicable (Р-58)
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:400: NOTICE:  PASS reject | VAT rate version skipped | tenant_data.product_vat_rate: version must be 2 (got 3)
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:401: NOTICE:  PASS reject | UPDATE append-only VAT rate | permission denied for table product_vat_rate
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:410: NOTICE:  PASS reject | dispatch below raised min_price (INV-02 at dispatch) | value 1250 is below effective price floor 1300 (min_price 1300, margin floor none, min margin none bp) at disp
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:416: NOTICE:  PASS accept | dispatch v2
+ ok 
+----
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:418: NOTICE:  PASS reject | pricing_mode switch with in-flight write (Р-12) | write_scope a6000000-0000-0000-0000-000000000001 has unfinished writes; pricing_mode cannot change
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:420: NOTICE:  PASS accept | accept v2
+ ok 
+----
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:424: NOTICE:  PASS accept | ACCEPTED price write recorded in price_history
+psql:tests/db/smoke_app.sql:428: NOTICE:  PASS accept | price_daily is not built before the day is closed (Р-29)
+psql:tests/db/smoke_app.sql:433: NOTICE:  PASS reject | direct INSERT into price_daily | permission denied for table price_daily
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:434: NOTICE:  PASS reject | direct UPDATE of price_daily | permission denied for table price_daily
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:435: NOTICE:  PASS reject | DELETE price_daily | permission denied for table price_daily
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:436: NOTICE:  PASS reject | UPDATE price_history | permission denied for table price_history
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:437: NOTICE:  PASS reject | DELETE price_history | permission denied for table price_history
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:439: NOTICE:  PASS reject | decrease watermark directly | tenant_data.write_scope_sync_state is maintained by triggers only
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:445: NOTICE:  PASS accept | v2 APPLIED -> moved to history
+ ok 
+----
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:449: NOTICE:  PASS accept | hot channel_write holds only unfinished writes
+psql:tests/db/smoke_app.sql:457: NOTICE:  PASS accept | switch to KAUFLAND_SMART_PRICING
+ ok 
+----
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:460: NOTICE:  PASS reject | price_intent in Smart Pricing mode | channel_data.price_intent_d20260916 requires a PRICE write_scope in ENGINE mode (got PRICE / KAUFLAND_SMART_PR
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:463: NOTICE:  PASS reject | channel floor below our min_price | value 900 is below effective price floor 1000 (min_price 1000, margin floor none, min margin none bp) at creat
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:466: NOTICE:  PASS accept | CHANNEL_MIN_PRICE write in Smart Pricing mode
+ ok 
+----
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:468: NOTICE:  PASS reject | tenant opt-out while scopes in Smart Pricing | switch all write scopes out of KAUFLAND_SMART_PRICING before opting out
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:481: NOTICE:  PASS reject | Amazon EU quantity sync without side-effects ack (INV-11) | new row for relation "write_scope" violates check constraint "write_scope_check6"
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:488: NOTICE:  PASS reject | ERP_MIRROR source in Release 1.0 (Р-15) | new row for relation "stock_source" violates check constraint "stock_source_release_1_0_modes"
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:492: NOTICE:  PASS reject | direct on_hand update in INTERNAL_POOL | INTERNAL_POOL on_hand is changed only via stock_movement
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:502: NOTICE:  PASS accept | reservation CREATED with TTL exactly 24h (Р-25)
+psql:tests/db/smoke_app.sql:506: NOTICE:  PASS reject | duplicate reservation for order line | duplicate key value violates unique constraint "reservation_tenant_id_channel_account_id_channel_order_line_ke
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:508: NOTICE:  PASS reject | CONSUMED without source confirmation (Р-25) | reservation transition CREATED -> CONSUMED is not allowed
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:512: NOTICE:  PASS reject | confirmation with a different external order id (Р-25) | new row for relation "reservation" violates check constraint "reservation_confirmation_matches_order"
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:515: NOTICE:  PASS reject | TTL release before expiry | reservation ac000000-0000-0000-0000-000000000001 has not expired yet
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:520: NOTICE:  PASS accept | source confirmed reservation by external order id
+psql:tests/db/smoke_app.sql:526: NOTICE:  PASS accept | CONSUMED after confirmation decrements INTERNAL_POOL once (10 -> 8)
+psql:tests/db/smoke_app.sql:528: NOTICE:  PASS reject | reopen consumed reservation | reservation transition CONSUMED -> CREATED is not allowed
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:544: NOTICE:  PASS reject | auction marked migratable | new row for relation "offer_mapping" violates check constraint "offer_mapping_check6"
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:546: NOTICE:  PASS reject | migration without consent (INV-12) | listing L1 has no valid migration consent matching a fresh preflight check
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:554: NOTICE:  PASS reject | migration with consent but no fresh re-check | listing L1 has no valid migration consent matching a fresh preflight check
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:558: NOTICE:  PASS accept | migration with consent and fresh identical check
+ ok 
+----
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:561: NOTICE:  PASS reject | un-migrate (irreversible) | ebay_migration_status transition MIGRATED -> REQUIRED is not allowed
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:575: NOTICE:  PASS reject | increase uses reserved margin (241 > 240) (Р-19) | new row for relation "edit_budget" violates check constraint "edit_budget_quantity_limit"
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:581: NOTICE:  PASS accept | decrease may use margin: 200 + 50 = 250
+ ok 
+----
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:583: NOTICE:  PASS reject | failed retry beyond 250 (all attempts count) | new row for relation "edit_budget" violates check constraint "edit_budget_total_limit"
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:594: NOTICE:  PASS accept | USD price write scope with sales tax regime (Р-57)
+ ok 
+----
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:597: NOTICE:  PASS reject | USD write scope attached to a EUR gross storefront (Р-57, Р-58) | write_scope a6000000-0000-0000-0000-0000000000e1 (USD NET SALES_TAX_EXCLUDED) does not match storefront KAUFLA
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:603: NOTICE:  PASS reject | net price basis with VAT regime (Р-58) | new row for relation "write_scope" violates check constraint "write_scope_tax_regime_basis"
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:609: NOTICE:  PASS reject | price write scope without tax regime (Р-58) | new row for relation "write_scope" violates check constraint "write_scope_tax_regime_for_price"
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:615: NOTICE:  PASS reject | currency outside EUR and USD | new row for relation "write_scope" violates check constraint "write_scope_supported_currency"
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:618: NOTICE:  PASS reject | VAT rate for a sales tax country (Р-58) | country US has no VAT regime: product VAT rate is not applicable (Р-58)
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_app.sql:622: NOTICE:  PASS accept | storefront reference: EU gross with VAT, US net with sales tax (Р-58)
+psql:tests/db/smoke_admin.sql:51: NOTICE:  PASS accept | the system halt is written to the audit log by the trigger (Р-76)
+psql:tests/db/smoke_admin.sql:58: NOTICE:  PASS reject | manual halt release without a second factor (finding 12, Р-88) | releasing channel halt ab000000-0000-0000-0000-000000000090 manually requires a second factor (finding 12, Р-8
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_admin.sql:65: NOTICE:  PASS accept | manual halt release by a member with a second factor, a note and a journal record (Р-52, Р-88)
+ ok 
+----
+ 
+(1 строка)
+
+psql:tests/db/smoke_admin.sql:67: NOTICE:  PASS reject | release twice | pricing halt ab000000-0000-0000-0000-000000000090 is already released
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_admin.sql:73: NOTICE:  PASS accept | the audit event of the release is written by the trigger with the session user as author (Р-76)
+psql:tests/db/smoke_admin.sql:100: NOTICE:  PASS reject | approval while the tenant is stopped by a person (Р-69) | pricing is stopped by price_stop 1bf85cf9-4779-4a07-81c1-f812a7cf46db for write_scope a6000000-0000-0000-0000-
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_admin.sql:103: NOTICE:  PASS reject | dispatch while the tenant is stopped by a person (Р-69) | pricing is stopped by price_stop 1bf85cf9-4779-4a07-81c1-f812a7cf46db for write_scope a6000000-0000-0000-0000-
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_admin.sql:108: NOTICE:  PASS reject | insert an OWNER membership directly (finding 2, Р-90) | permission denied for table membership
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_admin.sql:111: NOTICE:  PASS reject | forge an audit event (finding 5, Р-90) | permission denied for table audit_event
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_admin.sql:114: NOTICE:  PASS accept | owner with a second factor invites a member (Р-88)
+psql:tests/db/smoke_admin.sql:116: NOTICE:  PASS reject | activate an invited membership without accepting the invitation (finding 3) | membership 28d5389b-0a91-4892-8fa3-6432192e9a25 becomes active only by accepting its invitation (finding 3)
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_admin.sql:121: NOTICE:  PASS reject | an admin promotes an operator to owner (finding 9) | only an owner grants, removes or revokes the owner role (finding 9)
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_admin.sql:123: NOTICE:  PASS reject | an admin grants the admin role (finding 9) | an admin does not grant, remove or revoke the admin role (finding 9)
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_admin.sql:125: NOTICE:  PASS reject | an admin demotes the owner (finding 9) | only an owner grants, removes or revokes the owner role (finding 9)
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_admin.sql:127: NOTICE:  PASS accept | an admin changes an operator to pricing manager with a second factor (Р-88)
+ ok 
+----
+ 
+(1 строка)
+
+psql:tests/db/smoke_admin.sql:130: NOTICE:  PASS reject | role change without a second factor (Р-88) | changing a role or revoking access requires a second factor (Р-88)
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_admin.sql:133: NOTICE:  PASS accept | the owner revokes the admin with a second factor
+ ok 
+----
+ 
+(1 строка)
+
+psql:tests/db/smoke_admin.sql:135: NOTICE:  PASS reject | a revoked membership is restored | revoked membership a2000000-0000-0000-0000-0000000000ad is not restored; invite the user again
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_admin.sql:140: NOTICE:  PASS accept | role change and revocation are written to the audit log by the trigger (Р-90)
+psql:tests/db/smoke_admin.sql:148: NOTICE:  PASS reject | administrative change without a person (Р-97) | administrative change of tenant_data.product without a person: the administrative service writes only on an ex
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_admin.sql:152: NOTICE:  PASS reject | administrative change by a user outside the tenant (Р-97) | administrative change of tenant_data.product by user b1000000-0000-0000-0000-00000000000b who is not an active
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_admin.sql:161: NOTICE:  REACHED | administrative change audited (Р-97)
+psql:tests/db/smoke_admin.sql:161: NOTICE:  PASS accept | administrative change by a person is written to the audit log (Р-97)
+psql:tests/db/smoke_path.sql:42: NOTICE:  PASS reject | session user and second factor set by the decision path are ignored (Р-90)
+psql:tests/db/smoke_path.sql:47: NOTICE:  PASS reject | path creates an eBay migration consent (Р-96, Р-2) | permission denied for table migration_consent
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_path.sql:50: NOTICE:  PASS reject | path records a listing migration check (Р-96, Р-2) | permission denied for table listing_migration_check
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_path.sql:52: NOTICE:  PASS reject | path starts a listing migration (Р-96, Р-2) | permission denied for table offer_mapping
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_path.sql:54: NOTICE:  PASS reject | path opts the tenant into Kaufland Smart Pricing (Р-96, Р-12, Р-41) | permission denied for table tenant
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_path.sql:57: NOTICE:  PASS reject | path lowers min_price (Р-96, Р-5) | permission denied for table min_price
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_path.sql:60: NOTICE:  PASS reject | path raises max_price (Р-96, Р-43) | permission denied for table max_price
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_path.sql:63: NOTICE:  PASS reject | path changes the unit cost (Р-96, Р-83) | permission denied for table cost_profile
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_path.sql:66: NOTICE:  PASS reject | path changes the minimum margin (Р-96) | permission denied for table guardrail
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_path.sql:68: NOTICE:  PASS reject | path changes the fee estimate (Р-96, Р-83) | permission denied for table fee_estimate
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_path.sql:71: NOTICE:  PASS reject | path creates a strategy version (Р-96) | permission denied for table pricing_strategy
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_path.sql:73: NOTICE:  PASS reject | path switches a write scope to another pricing mode (Р-96) | permission denied for table write_scope
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_path.sql:76: NOTICE:  PASS reject | path connects a channel account (Р-96) | permission denied for table channel_account
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_path.sql:78: NOTICE:  PASS reject | path creates a product (Р-96) | permission denied for table product
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_path.sql:80: NOTICE:  PASS reject | path moves stock (Р-96) | permission denied for table stock_movement
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_path.sql:82: NOTICE:  PASS reject | path schedules the review of a halt (finding 2 ревью шага 16) | permission denied for table pricing_halt
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_path.sql:85: NOTICE:  PASS reject | path writes an automatic halt review (finding 2 ревью шага 16) | permission denied for table pricing_halt_review
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_path.sql:88: NOTICE:  PASS reject | path reads the audit log (Р-96) | permission denied for table audit_event
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_path.sql:91: NOTICE:  PASS reject | path forges an audit event (finding 5, Р-90) | permission denied for table audit_event
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_path.sql:92: NOTICE:  PASS reject | path reads memberships (Р-96) | permission denied for table membership
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_path.sql:94: NOTICE:  PASS reject | path inserts an OWNER membership (finding 2, Р-90) | permission denied for table membership
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_path.sql:96: NOTICE:  PASS reject | path activates a membership (finding 3, Р-90) | permission denied for table membership
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_path.sql:97: NOTICE:  PASS reject | path creates a tenant (Р-90) | permission denied for table tenant
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_path.sql:98: NOTICE:  PASS reject | path creates a user (Р-90) | permission denied for table app_user
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_path.sql:100: NOTICE:  PASS reject | path stops pricing as a person (Р-90) | permission denied for table price_stop
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_path.sql:102: NOTICE:  PASS reject | path invites a member (Р-90) | permission denied for function invite_member
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_path.sql:103: NOTICE:  PASS reject | path provisions a tenant (Р-90) | permission denied for function provision_tenant
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_path.sql:105: NOTICE:  PASS reject | path lists the tenants of a user (finding 13, Р-90) | permission denied for function list_user_tenants
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_path.sql:107: NOTICE:  PASS reject | path resolves an external identity (finding 13, Р-90) | permission denied for function resolve_external_identity
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_path.sql:108: NOTICE:  PASS reject | path assumes the administrative role (Р-90) | permission denied to set role "repracer_admin"
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_path.sql:119: NOTICE:  PASS accept | the decision path reads the decision context (Р-96)
+psql:tests/db/smoke_r65.sql:33: NOTICE:  PASS reject | budgeted write while the storefront day boundary is unconfirmed (Р-65) | edit budget day of storefront EBAY_DE is not confirmed (Р-65): budgeted writes are refused until the day bound
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_r65.sql:37: NOTICE:  PASS reject | budget day is not the current storefront day (Р-65) | budget_day 2026-09-15 is not the current day 2026-09-16 of storefront EBAY_DE (Europe/Berlin)
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_r65.sql:39: NOTICE:  PASS reject | US storefront confirmed without a time zone | new row for relation "marketplace" violates check constraint "marketplace_time_zone_known_if_confirmed"
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_r65.sql:50: NOTICE:  PASS reject | retry after midnight is charged to today, whose budget is exhausted (C2, Р-19) | new row for relation "edit_budget" violates check constraint "edit_budget_total_limit"
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_r65.sql:56: NOTICE:  PASS reject | no attempt charged to a past budget day (C2)
+psql:tests/db/smoke_r65.sql:60: NOTICE:  PASS reject | retry while the storefront day boundary is unconfirmed (C2, Р-65) | retry of a budgeted write: the day boundary of storefront EBAY_DE is not confirmed (Р-65)
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_r65.sql:64: NOTICE:  PASS reject | explanation ruleset is immutable (Р-75) | append-only table platform.explanation_ruleset: UPDATE is forbidden
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_r65.sql:68: NOTICE:  PASS reject | ECB rate is immutable (Р-61) | append-only table platform.fx_rate: UPDATE is forbidden
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_r65.sql:80: NOTICE:  PASS reject | eternal core: dangerous flag against the deviation (Р-73) | new row for relation "price_intent_core_y2026m09_h01" violates check constraint "price_intent_core_dangerous_c
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_r65.sql:82: NOTICE:  PASS reject | eternal core: a competitor-derived rejection keeps its proposed price (Р-85) | new row for relation "price_intent_core_y2026m09_h01" violates check constraint "price_intent_core_competitor_
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_r65.sql:84: NOTICE:  PASS reject | eternal core: an undeclared reason parameter in the explanation (finding 15) | new row for relation "price_intent_core_y2026m09_h01" violates check constraint "price_intent_core_explanation
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_r65.sql:103: NOTICE:  PASS reject | append-only audit.audit_event | append-only table audit.audit_event_y2026m09: UPDATE is forbidden
+psql:tests/db/smoke_r65.sql:103: NOTICE:  PASS reject | append-only channel_data.listing_migration_check | append-only table channel_data.listing_migration_check: UPDATE is forbidden
+psql:tests/db/smoke_r65.sql:103: NOTICE:  PASS reject | append-only channel_data.price_decision | append-only table channel_data.price_decision_d20260914: UPDATE is forbidden
+psql:tests/db/smoke_r65.sql:103: NOTICE:  PASS reject | append-only channel_data.price_intent | append-only table channel_data.price_intent_d20260914: UPDATE is forbidden
+psql:tests/db/smoke_r65.sql:103: NOTICE:  PASS reject | append-only maintenance.retention_run | append-only table maintenance.retention_run: UPDATE is forbidden
+psql:tests/db/smoke_r65.sql:103: NOTICE:  PASS reject | append-only tenant_data.channel_write_history | append-only table tenant_data.channel_write_history_d20260916: UPDATE is forbidden
+psql:tests/db/smoke_r65.sql:103: NOTICE:  PASS reject | append-only tenant_data.max_price | append-only table tenant_data.max_price: UPDATE is forbidden
+psql:tests/db/smoke_r65.sql:103: NOTICE:  PASS reject | append-only tenant_data.migration_consent | append-only table tenant_data.migration_consent: UPDATE is forbidden
+psql:tests/db/smoke_r65.sql:103: NOTICE:  PASS reject | append-only tenant_data.migration_consent_item | append-only table tenant_data.migration_consent_item: UPDATE is forbidden
+psql:tests/db/smoke_r65.sql:103: NOTICE:  PASS reject | append-only tenant_data.min_price | append-only table tenant_data.min_price: UPDATE is forbidden
+psql:tests/db/smoke_r65.sql:103: NOTICE:  PASS reject | append-only tenant_data.outbox_event | append-only table tenant_data.outbox_event_d20260916: UPDATE is forbidden
+psql:tests/db/smoke_r65.sql:103: NOTICE:  PASS reject | append-only tenant_data.price_history | append-only table tenant_data.price_history_y2026m09_h01: UPDATE is forbidden
+psql:tests/db/smoke_r65.sql:103: NOTICE:  PASS reject | append-only tenant_data.price_intent_core | append-only table tenant_data.price_intent_core_y2026m09_h01: UPDATE is forbidden
+psql:tests/db/smoke_r65.sql:103: NOTICE:  PASS reject | append-only tenant_data.pricing_strategy | append-only table tenant_data.pricing_strategy: UPDATE is forbidden
+psql:tests/db/smoke_r65.sql:103: NOTICE:  PASS reject | append-only tenant_data.stock_allocation | append-only table tenant_data.stock_allocation: UPDATE is forbidden
+psql:tests/db/smoke_r65.sql:103: NOTICE:  PASS reject | append-only tenant_data.stock_movement | append-only table tenant_data.stock_movement: UPDATE is forbidden
+psql:tests/db/smoke_r65.sql:103: NOTICE:  append-only tables without rows in the smoke world (not checked here): channel_data.competitor_move, channel_data.price_decision_snapshot_ref, channel_data.pricing_halt_review, channel_data.pricing_halt_sample, channel_data.rejected_competitor_snapshot, legal.migration_consent_record, maintenance.price_day_close, platform.external_identity, platform.external_identity_revocation, tenant_data.cost_profile, tenant_data.divergence_policy, tenant_data.guardrail, tenant_data.migration_consent_revocation, tenant_data.price_daily, tenant_data.price_daily_correction, tenant_data.product_vat_rate
+psql:tests/db/smoke_r65.sql:106: NOTICE:  PASS reject | manual halt without a member and a note | new row for relation "pricing_halt" violates check constraint "pricing_halt_system_only"
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_retention.sql:30: NOTICE:  PASS reject | direct DELETE from append-only as scheduler | append-only table tenant_data.min_price: DELETE is forbidden
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_retention.sql:31: NOTICE:  PASS reject | purge ACTIVE tenant | tenant b0000000-0000-0000-0000-00000000000b must be a CUSTOMER in OFFBOARDING or CLOSED
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+ drop_expired_partitions 
+-------------------------
+                      10
+(1 строка)
+
+ drop_expired_partitions 
+-------------------------
+                       5
+(1 строка)
+
+ drop_expired_partitions 
+-------------------------
+                       0
+(1 строка)
+
+ drop_expired_partitions 
+-------------------------
+                       0
+(1 строка)
+
+ drop_expired_partitions 
+-------------------------
+                       0
+(1 строка)
+
+ drop_expired_partitions 
+-------------------------
+                       0
+(1 строка)
+
+price_history partitions (ARCHIVE export pending, must stay): 4 -> 4
+price_intent partitions (force drop after 14 days, must go): 6 -> 0
+         action          | count 
+-------------------------+-------
+ PARTITION_DROPPED       |     3
+ PARTITION_FORCE_DROPPED |    12
+(2 строки)
+
+archive export row count mismatch -> partition kept: 1
+verified export on both layers -> partition dropped (0 = gone): 0
+price days closed: 4 ; price_daily rows: 1 ; second run closes (expect 0): 0
+stale confirmed reservation alerts (expect 1 then 0, outbox 1): 1 0 1
+reservation 2 stays (Р-30, expect CONFIRMED_BY_SOURCE): CONFIRMED_BY_SOURCE
+psql:tests/db/smoke_retention.sql:106: NOTICE:  PASS reject | correction must supersede the current head | correction must supersede the current correction ad100000-0000-0000-0000-000000000001 of t
+psql:tests/db/smoke_retention.sql:106: NOTICE:  PASS reject | UPDATE of immutable price_daily | permission denied for table price_daily
+ corrected | min_amount_minor | change_count 
+-----------+------------------+--------------
+ t         |             1200 |            2
+(1 строка)
+
+channel rows purged: 4
+psql:tests/db/smoke_retention.sql:144: NOTICE:  PASS reject | purge tenant data without price_history confirmation (OQ-22) | tenant a0000000-0000-0000-0000-00000000000a has price evidence; deletion requires explicit confirmation (OQ-22
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+tenant rows purged: 37
+eBay consents kept in legal hold (Р-26): 1
+ ch_done | pg_done | legal_hold_until 
+---------+---------+------------------
+ t       | t       | 2029-09-16
+(1 строка)
+
+         action          | count 
+-------------------------+-------
+ PARTITION_CREATED       |    97
+ PARTITION_DROPPED       |     4
+ PARTITION_FORCE_DROPPED |    12
+ TENANT_PURGED           |     2
+(4 строки)
+
+     name      | status 
+---------------+--------
+ closed tenant | CLOSED
+(1 строка)
+
+database repracer_eu ready

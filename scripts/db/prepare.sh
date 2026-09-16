@@ -20,10 +20,12 @@ done
 
 echo "== smoke"
 "${PSQL[@]}" -d "$DB" -f tests/db/smoke_setup.sql
-# Р-90: тенанты — ролью создания тенанта; путь решения — ролью приложения; остановки, роли и снятия — административным сервисом
+# Р-90, Р-96: тенанты — ролью создания тенанта; конфигурация, остановки, роли и снятия — административным сервисом
 PGUSER=svc_provisioning "${PSQL[@]}" -d "$DB" -f tests/db/smoke_provision.sql
-PGUSER=svc_app "${PSQL[@]}" -d "$DB" -f tests/db/smoke_app.sql
+PGUSER=svc_admin "${PSQL[@]}" -d "$DB" -f tests/db/smoke_app.sql
 PGUSER=svc_admin "${PSQL[@]}" -d "$DB" -f tests/db/smoke_admin.sql
+# Р-96: путь решения может только вычислить и записать цену — остальное отклоняется отсутствием права
+PGUSER=svc_app "${PSQL[@]}" -d "$DB" -f tests/db/smoke_path.sql
 "${PSQL[@]}" -d "$DB" -f tests/db/smoke_r65.sql
 PGUSER=svc_scheduler "${PSQL[@]}" -d "$DB" -f tests/db/smoke_retention.sql
 PGUSER=svc_scheduler "${PSQL[@]}" -d "$DB" -Atc "SELECT maintenance.ensure_partitions(now())" > /dev/null

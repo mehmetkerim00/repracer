@@ -1,15 +1,30 @@
 -- Run as svc_scheduler (member of repracer_retention) after smoke_app.sql.
 \set ON_ERROR_STOP 1
 
-CREATE FUNCTION pg_temp.expect_fail(label text, q text) RETURNS void LANGUAGE plpgsql AS $$
+CREATE FUNCTION pg_temp.expect_fail(label text, q text, reason text DEFAULT NULL) RETURNS void LANGUAGE plpgsql AS $$
+-- Р-94: reason — ожидаемая причина отказа (SQLSTATE или шаблон сообщения); отказ по другой причине — провал проверки.
+-- Р-95: при repracer.smoke_collect = on (мутационная проверка) провал не останавливает прогон, а пишется предупреждением CHECK FAILED.
+DECLARE
+  failure text;
 BEGIN
   BEGIN
     EXECUTE q;
-    RAISE EXCEPTION 'EXPECTED FAILURE DID NOT HAPPEN: %', label;
-  EXCEPTION WHEN others THEN
-    IF SQLERRM LIKE 'EXPECTED FAILURE DID NOT HAPPEN%' THEN RAISE; END IF;
-    RAISE NOTICE 'PASS reject | % | %', label, left(SQLERRM, 110);
+    RAISE EXCEPTION 'did not happen' USING ERRCODE = 'RS001';
+  EXCEPTION
+    WHEN SQLSTATE 'RS001' THEN
+      failure := 'EXPECTED FAILURE DID NOT HAPPEN';
+    WHEN others THEN
+      IF reason IS NULL OR SQLSTATE = reason OR SQLERRM ~* reason THEN
+        RAISE NOTICE 'PASS reject | % | %', label, left(SQLERRM, 110);
+        RETURN;
+      END IF;
+      failure := format('EXPECTED FAILURE HAD ANOTHER REASON (expected %s, got %s %s)', reason, SQLSTATE, left(SQLERRM, 160));
   END;
+  IF current_setting('repracer.smoke_collect', true) = 'on' THEN
+    RAISE WARNING 'CHECK FAILED: % | %', label, failure;
+  ELSE
+    RAISE EXCEPTION '%: %', failure, label;
+  END IF;
 END $$;
 
 SELECT pg_temp.expect_fail('direct DELETE from append-only as scheduler', $q$ DELETE FROM tenant_data.min_price $q$);
@@ -56,10 +71,12 @@ SELECT count(*) AS stale_outbox FROM tenant_data.outbox_event WHERE topic = 'ale
 SELECT status AS reservation_2_status FROM channel_data.reservation WHERE reservation_id = 'ac000000-0000-0000-0000-000000000002' \gset
 \echo 'reservation 2 stays (Р-30, expect CONFIRMED_BY_SOURCE):' :reservation_2_status
 
--- Р-29: поправки от имени приложения
-\c - svc_app
+-- Удаление по сроку выше сняло и текущую секцию журнала аудита (now() + 19 месяцев): поправка человека пишется в аудит (Р-97)
+SELECT maintenance.ensure_partitions(now()) IS NOT NULL AS partitions_ensured \gset
+-- Р-29: поправки вносит человек через административный сервис (Р-96: у пути решения поправок нет)
+\c - svc_admin
 BEGIN;
-SELECT set_config('app.tenant_id', 'a0000000-0000-0000-0000-00000000000a', true) \gset
+SELECT set_config('app.tenant_id', 'a0000000-0000-0000-0000-00000000000a', true), set_config('app.user_id', 'a1000000-0000-0000-0000-00000000000a', true) \gset
 INSERT INTO tenant_data.price_daily_correction (tenant_id, price_daily_correction_id, write_scope_id, price_type, price_day,
   min_amount_minor, max_amount_minor, first_amount_minor, first_accepted_at, last_amount_minor, last_accepted_at, change_count,
   min_floor_minor, reason, created_by_membership_id)
@@ -92,15 +109,30 @@ COMMIT;
 \c - svc_scheduler
 
 -- Reconnect dropped the session temp schema: recreate the helper
-CREATE FUNCTION pg_temp.expect_fail(label text, q text) RETURNS void LANGUAGE plpgsql AS $$
+CREATE FUNCTION pg_temp.expect_fail(label text, q text, reason text DEFAULT NULL) RETURNS void LANGUAGE plpgsql AS $$
+-- Р-94: reason — ожидаемая причина отказа (SQLSTATE или шаблон сообщения); отказ по другой причине — провал проверки.
+-- Р-95: при repracer.smoke_collect = on (мутационная проверка) провал не останавливает прогон, а пишется предупреждением CHECK FAILED.
+DECLARE
+  failure text;
 BEGIN
   BEGIN
     EXECUTE q;
-    RAISE EXCEPTION 'EXPECTED FAILURE DID NOT HAPPEN: %', label;
-  EXCEPTION WHEN others THEN
-    IF SQLERRM LIKE 'EXPECTED FAILURE DID NOT HAPPEN%' THEN RAISE; END IF;
-    RAISE NOTICE 'PASS reject | % | %', label, left(SQLERRM, 110);
+    RAISE EXCEPTION 'did not happen' USING ERRCODE = 'RS001';
+  EXCEPTION
+    WHEN SQLSTATE 'RS001' THEN
+      failure := 'EXPECTED FAILURE DID NOT HAPPEN';
+    WHEN others THEN
+      IF reason IS NULL OR SQLSTATE = reason OR SQLERRM ~* reason THEN
+        RAISE NOTICE 'PASS reject | % | %', label, left(SQLERRM, 110);
+        RETURN;
+      END IF;
+      failure := format('EXPECTED FAILURE HAD ANOTHER REASON (expected %s, got %s %s)', reason, SQLSTATE, left(SQLERRM, 160));
   END;
+  IF current_setting('repracer.smoke_collect', true) = 'on' THEN
+    RAISE WARNING 'CHECK FAILED: % | %', label, failure;
+  ELSE
+    RAISE EXCEPTION '%: %', failure, label;
+  END IF;
 END $$;
 
 -- Tenant closure for tenant A (has price_history)

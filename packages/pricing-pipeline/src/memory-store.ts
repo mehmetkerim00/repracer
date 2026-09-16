@@ -1,5 +1,5 @@
 import { EXPLANATION_RULESETS } from './dictionary.ts';
-import type { ConsoleAuditRow } from './store.ts';
+import type { HaltSampleObservation, HaltSampleReview, ConsoleAuditRow } from './store.ts';
 import type { CompetitorQuery, FieldWrite, Instant, OfferIdentity, PriceBasis, WriteOutcome } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange, SanityContext } from '@repracer/input-sanity';
 import { assertWriteWithinBounds, NO_GUARDRAILS, type GuardrailSet } from '@repracer/price-gate';
@@ -208,6 +208,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   private readonly members: ConsoleMemberRow[];
   readonly moves: Array<{ marketplace: string; productRef: string; evaluatedAt: Instant; moveBp: number; verdict: string; sellerRef: string | null }> = [];
   readonly halts: HaltRow[] = [];
+  private readonly haltSamples: Array<HaltSampleObservation & { haltId: string; recordedAt: Instant }> = [];
   readonly haltReviews: Array<HaltReviewRecord & { haltId: string }> = [];
   readonly stops: ConsoleStopRow[] = [];
   /** Журнал аудита остановок [Р-76] — как audit.audit_event */
@@ -852,7 +853,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     return { bounds: this.boundsOf(row), version: this.contextVersion(row) };
   }
 
-  async setPricingMode(_tenantId: string, writeScopeId: string, mode: PriceScopeContext['pricingMode']): Promise<void> {
+  async setPricingMode(_tenantId: string, writeScopeId: string, mode: PriceScopeContext['pricingMode'], _userId?: string): Promise<void> {
     const row = this.scope(writeScopeId);
     if (mode === 'ENGINE') this.assertBounds(row);
     // Как CHECK write_scope_engine_has_strategy (0045): движок без стратегии не включается [Р-77]
@@ -901,18 +902,52 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       if (m.userId !== review.userId) throw new Error(`membership ${review.membershipId} is not the membership of the session user`);
       // Как pricing_halt_release_role_guard (0058): ручное снятие — со вторым фактором (находка 12, Р-88)
       if (!review.mfa) throw new Error(`releasing channel halt ${haltId} manually requires a second factor (finding 12, Р-88)`);
+    } else {
+      throw new Error('an automatic halt release is computed by reviewHaltBySample from the recorded sample (0063), not written by the decision path');
     }
     this.haltReviews.push({ ...review, haltId });
     h.releasedAt = review.at;
-    h.releasedKind = review.kind === 'AUTO_SAMPLE' ? 'AUTO' : 'MANUAL';
+    h.releasedKind = 'MANUAL';
     this.auditHalt('pricing.halt_released', haltId, review.at, review.kind === 'MANUAL_RELEASE' ? review.membershipId ?? null : null, review.kind === 'MANUAL_RELEASE' ? review.note ?? null : null);
   }
 
-  async recordFailedReview(_tenantId: string, haltId: string, review: HaltReviewRecord, nextReviewAt: Instant): Promise<void> {
+  /** Наблюдения выборки проверки остановки — как channel_data.pricing_halt_sample (0063) */
+  async recordHaltSample(_tenantId: string, haltId: string, samples: readonly HaltSampleObservation[], now: Instant): Promise<void> {
     const h = this.halts.find((x) => x.haltId === haltId);
-    if (!h || h.releasedAt !== null) throw new Error(`pricing halt ${haltId} is not active`);
-    this.haltReviews.push({ ...review, haltId });
-    h.nextReviewAt = nextReviewAt;
+    if (!h) throw new Error(`pricing halt ${haltId} does not exist`);
+    for (const sample of samples) this.haltSamples.push({ ...sample, haltId, recordedAt: now });
+  }
+
+  /** Итог проверки выборки — как channel_data.review_halt_by_sample (0063): путь решения не пишет проверку и снятие сам */
+  async reviewHaltBySample(_tenantId: string, haltId: string, now: Instant): Promise<HaltSampleReview> {
+    const h = this.halts.find((x) => x.haltId === haltId && x.releasedAt === null && x.reasonCode === 'CHANNEL_MASS_SHIFT');
+    if (!h) return 'NOT_ACTIVE';
+    if (Date.parse(now) < Date.parse(h.nextReviewAt)) return 'NOT_DUE';
+    const eligible = new Set<string>();
+    for (const s of this.scopes.values()) {
+      if (s.channelAccountId !== h.channelAccountId || (h.marketplace !== null && s.marketplace !== h.marketplace)) continue;
+      if (s.pricingMode !== 'ENGINE' || !s.strategy || !COMPETITOR_STRATEGIES.has(s.strategy.params.type)) continue;
+      eligible.add(s.channelProductRef);
+    }
+    const required = Math.max(1, Math.min(5, eligible.size));
+    // Принятые наблюдения — только по товарам остановленной витрины (0065)
+    const haltedRefs = new Set([...this.scopes.values()]
+      .filter((s) => s.channelAccountId === h.channelAccountId && (h.marketplace === null || s.marketplace === h.marketplace)).map((s) => s.channelProductRef));
+    const due = Date.parse(h.nextReviewAt);
+    const rows = this.haltSamples.filter((x) => x.haltId === haltId && Date.parse(x.recordedAt) >= due && Date.parse(x.observedAt) >= due && Date.parse(x.observedAt) <= Date.parse(now));
+    const failed = rows.filter((x) => x.verdict !== 'ACCEPT').length;
+    const accepted = new Set(rows.filter((x) => x.verdict === 'ACCEPT' && haltedRefs.has(x.channelProductRef)).map((x) => x.channelProductRef)).size;
+    if (failed > 0) {
+      this.haltReviews.push({ kind: 'AUTO_SAMPLE', outcome: 'SAMPLE_FAILED', sampleSize: accepted + failed, failedCount: failed, details: { required }, at: now, haltId });
+      h.nextReviewAt = new Date(Date.parse(now) + h.reviewWindowSeconds * 1000).toISOString();
+      return 'SAMPLE_FAILED';
+    }
+    if (accepted < required) return 'NO_SAMPLE';
+    this.haltReviews.push({ kind: 'AUTO_SAMPLE', outcome: 'RELEASED', sampleSize: accepted, failedCount: 0, details: { required }, at: now, haltId });
+    h.releasedAt = now;
+    h.releasedKind = 'AUTO';
+    this.auditHalt('pricing.halt_released', haltId, now, null, null);
+    return 'RELEASED';
   }
 
   private rememberStrategy(def: StrategyDefinition): void {

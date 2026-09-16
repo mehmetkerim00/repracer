@@ -57,3 +57,8 @@ VALUES
    'ACCOUNT_REGION_MARKETPLACE_SKU', ARRAY['channel_account','region','marketplace','external_sku'], NULL, NULL, 'ASYNC', false, 'AMAZON_INFO')
 ON CONFLICT DO NOTHING;
 RESET ROLE;
+
+-- Смоук-мир (tests/db) и сценарии стенда живут в фиксированной дате: секции суточных таблиц под неё создаются явно,
+-- иначе прогон зависит от текущей даты (секции price_intent — суточные, ensure_partitions(now()) покрывает только вчера…+3)
+SELECT maintenance.ensure_partitions('2026-09-15 12:00+00'::timestamptz);
+SELECT maintenance.ensure_partitions(now());

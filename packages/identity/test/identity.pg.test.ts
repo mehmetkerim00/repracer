@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { after, test } from 'node:test';
 import { createPool, inTenant, seedPricingWorld } from '@repracer/pricing-store-pg';
 import { createAuthenticator, staticJwks } from '../src/index.ts';
-import { inviteMember, issueSignupInvitation, PgIdentityDirectory } from '../src/pg.ts';
+import { inviteMember, inviteRelink, issueSignupInvitation, PgIdentityDirectory } from '../src/pg.ts';
 import { createTestIssuer } from '../src/test-issuer.ts';
 
 /**
@@ -33,13 +33,15 @@ const directory = new PgIdentityDirectory(authenticator as never);
 async function signUp(address: string) {
   const subject = { issuer: ISSUER, subject: `sub-${randomUUID()}` };
   const { token } = await issueSignupInvitation(onboarding as never, address);
-  return { subject, userId: await directory.acceptInvitation(token, subject, address, true) };
+  return { subject, address, userId: await directory.acceptInvitation(token, subject, address, true) };
 }
 
-function worldOf(ownerId: string, n: number) {
+// Находка 5 ревью шага 16: существующий пользователь становится владельцем нового тенанта только своим адресом
+function worldOf(owner: { userId: string; address: string }, n: number) {
   return seedPricingWorld(pool, {
     fixtureTenantId: `10000000-0000-4000-8000-00000000031${n}`, fixtureChannelAccountId: `20000000-0000-4000-8000-00000000031${n}`, marketplaces: ['de'],
-    clock: new Date().toISOString(), seed: { scopes: [] }, memberUsers: { 'membership-owner': ownerId }, provisioningPool: provisioning,
+    clock: new Date().toISOString(), seed: { scopes: [] }, memberUsers: { 'membership-owner': owner.userId },
+    memberEmails: { 'membership-owner': owner.address }, provisioningPool: provisioning, adminPool: admin,
   });
 }
 
@@ -65,14 +67,16 @@ test('Р-88, findings 11 and 13: a provider subject is linked only by accepting 
   assert.equal((await directory.resolve(subject))?.userId, userId);
   await assert.rejects(directory.acceptInvitation(token, { issuer: ISSUER, subject: `sub-${randomUUID()}` }, address, true), /unknown, used or expired/, 'a token links once');
 
-  const seenByOther = await inTenant(pool, '00000000-0000-0000-0000-000000000000', async (tx) => (await tx.query('SELECT count(*)::int AS n FROM platform.external_identity')).rows[0].n, randomUUID());
-  assert.equal(seenByOther, 0);
+  // Р-96: у пути решения чтения сопоставлений нет вовсе — отказ по правам, а не пустой ответ политики
+  await assert.rejects(inTenant(pool, '00000000-0000-0000-0000-000000000000', (tx) => tx.query('SELECT count(*)::int AS n FROM platform.external_identity'), randomUUID()),
+    /permission denied for table external_identity$/);
 });
 
 test('Р-88, Р-90: an owner with a second factor invites a member from the administrative service; without it, as an operator or from the decision path the invitation is refused; a role change needs the factor and applies at once', async () => {
   const idp = createTestIssuer({ issuer: ISSUER, audience: 'repracer-console' });
-  const { userId: ownerId } = await signUp(email('owner'));
-  const world = await worldOf(ownerId, 4);
+  const owner = await signUp(email('owner'));
+  const ownerId = owner.userId;
+  const world = await worldOf(owner, 4);
   const operatorUser = world.ids.dbId('user-operator');
 
   const memberEmail = email('pricing');
@@ -95,7 +99,8 @@ test('Р-88, Р-90: an owner with a second factor invites a member from the admi
     `UPDATE tenant_data.membership SET role = 'VIEWER' WHERE membership_id = $1`, [invited.membershipId]), userId, { mfa });
   await assert.rejects(setRole(ownerId, true, pool), /permission denied/, 'Р-90: the decision path does not change roles');
   await assert.rejects(setRole(ownerId, false), /second factor/);
-  await assert.rejects(setRole(undefined, true), /another active owner or admin/);
+  // Р-97 (0066): смена роли без пользователя сессии — отказ стража административной записи
+  await assert.rejects(setRole(undefined, true), /without a person/);
   await assert.rejects(setRole(invited.userId, true), /another active owner or admin/, 'nobody changes their own role');
   await setRole(ownerId, true);
   assert.equal((await auth.authenticate(`Bearer ${idp.token(memberSubject.subject)}`))!.memberships.find((m) => m.tenantId === world.tenantId)!.role, 'VIEWER');
@@ -104,23 +109,23 @@ test('Р-88, Р-90: an owner with a second factor invites a member from the admi
 test('finding 10, Р-9: a linked user accepts an invitation to a second tenant with the same sign-in; a second sign-in of the same provider and a sign-in of another user are refused', async () => {
   const addressA = email('agency');
   const a = await signUp(addressA);
-  const { userId: ownerB } = await signUp(email('owner-b'));
-  const worldA = await worldOf(a.userId, 5);
-  const worldB = await worldOf(ownerB, 6);
+  const b = await signUp(email('owner-b'));
+  const worldA = await worldOf(a, 5);
+  const worldB = await worldOf(b, 6);
 
-  const toB = await invite(worldB.tenantId, ownerB, addressA);
+  const toB = await invite(worldB.tenantId, b.userId, addressA);
   assert.equal(toB.userId, a.userId, 'the invitation is for the existing user');
   assert.equal(await directory.acceptInvitation(toB.token, a.subject, addressA, true), a.userId);
   const tenants = (await directory.resolve(a.subject))!.memberships.map((m) => m.tenantId).sort();
   assert.deepEqual(tenants, [worldA.tenantId, worldB.tenantId].sort(), 'one sign-in, two tenants');
 
-  const worldC = await worldOf(ownerB, 7);
-  const toC = await invite(worldC.tenantId, ownerB, addressA, 'VIEWER');
+  const worldC = await worldOf(b, 7);
+  const toC = await invite(worldC.tenantId, b.userId, addressA, 'VIEWER');
   await assert.rejects(directory.acceptInvitation(toC.token, { issuer: ISSUER, subject: `sub-${randomUUID()}` }, addressA, true),
     /already linked to another sign-in/, 'relinking a user to another subject of the same provider is not supported (OQ-148)');
 
   const addressD = email('someone');
-  const toD = await invite(worldC.tenantId, ownerB, addressD, 'VIEWER');
+  const toD = await invite(worldC.tenantId, b.userId, addressD, 'VIEWER');
   await assert.rejects(directory.acceptInvitation(toD.token, a.subject, addressD, true), /linked to another user/, 'a sign-in linked to another user does not accept an invitation of someone else');
 });
 
@@ -128,4 +133,33 @@ test('the password and session objects of step 13 no longer exist', async () => 
   const { rows } = await pool.query(`SELECT to_regclass('platform.user_credential') AS credential, to_regclass('platform.user_session') AS session,
                                             to_regprocedure('security.open_session(uuid, bytea, interval)') AS open_session`);
   assert.deepEqual(rows[0], { credential: null, session: null, open_session: null });
+});
+
+test('Р-98: a sign-in is relinked only by a new invitation of the tenant owner with a second factor; the old sign-in resolves nobody and both steps are audited', async () => {
+  const address = email('relink');
+  const owner = await signUp(address);
+  const world = await worldOf(owner, 8);
+  const relinkAs = (userId: string | undefined, mfa: boolean, viaPool = admin) =>
+    inTenant(viaPool, world.tenantId, (tx) => inviteRelink(tx, { tenantId: world.tenantId, userId: owner.userId }), userId, { mfa });
+
+  await assert.rejects(relinkAs(owner.userId, true, pool), /permission denied/, 'Р-90: the decision path does not relink');
+  await assert.rejects(relinkAs(owner.userId, false), /second factor/);
+  await assert.rejects(relinkAs(world.ids.dbId('user-operator'), true), /only an active owner/);
+
+  const moved = { issuer: ISSUER, subject: `sub-${randomUUID()}` };
+  const plain = await issueSignupInvitation(onboarding as never, address);
+  await assert.rejects(directory.acceptInvitation(plain.token, moved, address, true), /a relink needs a relink invitation/, 'an ordinary invitation does not relink');
+
+  const invitation = await relinkAs(owner.userId, true);
+  assert.equal(await directory.acceptInvitation(invitation.token, moved, address, true), owner.userId);
+  assert.equal((await directory.resolve(moved))!.userId, owner.userId, 'the new sign-in is the user');
+  assert.equal(await directory.resolve(owner.subject), null, 'the revoked sign-in resolves nobody');
+
+  const again = await relinkAs(owner.userId, true);
+  await assert.rejects(directory.acceptInvitation(again.token, owner.subject, address, true), /was unlinked/, 'the revoked sign-in accepts nothing');
+
+  const actions = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
+    `SELECT action FROM audit.audit_event WHERE tenant_id = $1 AND entity_type = 'identity_invitation' ORDER BY recorded_at, audit_event_id`,
+    [world.tenantId])).rows.map((r) => r.action as string), owner.userId);
+  assert.deepEqual(actions.slice(0, 2), ['identity.relink_invited', 'identity.relinked'], 'Р-98: the invitation and the relink are audited');
 });

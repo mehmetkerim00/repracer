@@ -4,16 +4,31 @@
 \set ON_ERROR_STOP 1
 \set QUIET 1
 
-CREATE FUNCTION pg_temp.expect_fail(label text, q text) RETURNS void LANGUAGE plpgsql AS $$
+CREATE FUNCTION pg_temp.expect_fail(label text, q text, reason text DEFAULT NULL) RETURNS void LANGUAGE plpgsql AS $$
+-- Р-94: reason — ожидаемая причина отказа (SQLSTATE или шаблон сообщения); отказ по другой причине — провал проверки.
+-- Р-95: при repracer.smoke_collect = on (мутационная проверка) провал не останавливает прогон, а пишется предупреждением CHECK FAILED.
+DECLARE
+  failure text;
 BEGIN
   BEGIN
     EXECUTE q;
     SET CONSTRAINTS ALL IMMEDIATE;
-    RAISE EXCEPTION 'EXPECTED FAILURE DID NOT HAPPEN: %', label;
-  EXCEPTION WHEN others THEN
-    IF SQLERRM LIKE 'EXPECTED FAILURE DID NOT HAPPEN%' THEN RAISE; END IF;
-    RAISE NOTICE 'PASS reject | % | %', label, left(SQLERRM, 110);
+    RAISE EXCEPTION 'did not happen' USING ERRCODE = 'RS001';
+  EXCEPTION
+    WHEN SQLSTATE 'RS001' THEN
+      failure := 'EXPECTED FAILURE DID NOT HAPPEN';
+    WHEN others THEN
+      IF reason IS NULL OR SQLSTATE = reason OR SQLERRM ~* reason THEN
+        RAISE NOTICE 'PASS reject | % | %', label, left(SQLERRM, 110);
+        RETURN;
+      END IF;
+      failure := format('EXPECTED FAILURE HAD ANOTHER REASON (expected %s, got %s %s)', reason, SQLSTATE, left(SQLERRM, 160));
   END;
+  IF current_setting('repracer.smoke_collect', true) = 'on' THEN
+    RAISE WARNING 'CHECK FAILED: % | %', label, failure;
+  ELSE
+    RAISE EXCEPTION '%: %', failure, label;
+  END IF;
 END $$;
 
 CREATE FUNCTION pg_temp.ok(label text, q text) RETURNS void LANGUAGE plpgsql AS $$
@@ -29,13 +44,18 @@ SELECT set_config('app.tenant_id', 'a0000000-0000-0000-0000-00000000000a', true)
 -- ---------------------------------------------------------------- находка 12: ручное снятие системной остановки
 INSERT INTO channel_data.pricing_halt (tenant_id, pricing_halt_id, channel_account_id, channel, marketplace, reason_code, details)
 VALUES ('a0000000-0000-0000-0000-00000000000a', 'ab000000-0000-0000-0000-000000000090', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'CHANNEL_MASS_SHIFT', '{"sameDirection": 20}');
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM audit.audit_event WHERE entity_id = 'ab000000-0000-0000-0000-000000000090' AND action = 'pricing.halt_created' AND actor_type = 'SYSTEM') THEN
+    RAISE EXCEPTION 'the system halt is not in the audit log'; END IF;
+  RAISE NOTICE 'PASS accept | the system halt is written to the audit log by the trigger (Р-76)';
+END $$;
 SELECT pg_temp.expect_fail('manual halt release without a second factor (finding 12, Р-88)', $q$
   DO $x$ BEGIN
     INSERT INTO channel_data.pricing_halt_review (tenant_id, pricing_halt_id, kind, outcome, sample_size, failed_count, membership_id, note)
     VALUES ('a0000000-0000-0000-0000-00000000000a', 'ab000000-0000-0000-0000-000000000090', 'MANUAL_RELEASE', 'RELEASED', 0, 0, 'a2000000-0000-0000-0000-00000000000a', 'data verified with the channel');
     UPDATE channel_data.pricing_halt SET released_at = now(), released_kind = 'MANUAL', released_by_membership_id = 'a2000000-0000-0000-0000-00000000000a', release_note = 'data verified with the channel'
      WHERE pricing_halt_id = 'ab000000-0000-0000-0000-000000000090';
-  END $x$ $q$);
+  END $x$ $q$, 'requires a second factor');
 SELECT set_config('app.auth_mfa', 'on', true) \gset
 SET CONSTRAINTS ALL DEFERRED;
 INSERT INTO channel_data.pricing_halt_review (tenant_id, pricing_halt_id, kind, outcome, sample_size, failed_count, membership_id, note)
@@ -51,6 +71,37 @@ DO $$ BEGIN
     RAISE EXCEPTION 'the manual release is not in the audit log with its author'; END IF;
   RAISE NOTICE 'PASS accept | the audit event of the release is written by the trigger with the session user as author (Р-76)';
 END $$;
+
+-- ---------------------------------------------------------------- Р-69, Р-94: остановка тенанта человеком — решение и отправка отклоняются ею
+SAVEPOINT stop_check;
+-- Единица цены тенанта A после smoke_app.sql — в режиме Smart Pricing; для проверки она возвращается в движок со стратегией (откатывается)
+UPDATE tenant_data.channel_write SET status = 'DISCARDED_STALE', end_reason = 'WRITE_PRICING_MODE_CHANGED', end_params = '{"mode": "OFF"}'
+ WHERE write_scope_id = 'a6000000-0000-0000-0000-000000000001' AND status IN ('PENDING', 'FAILED', 'BLOCKED');
+UPDATE tenant_data.write_scope SET pricing_mode = 'OFF' WHERE write_scope_id = 'a6000000-0000-0000-0000-000000000001';
+UPDATE tenant_data.write_scope SET pricing_strategy_id = 'a9000000-0000-0000-0000-000000000001', pricing_strategy_version = 1, pricing_mode = 'ENGINE'
+ WHERE write_scope_id = 'a6000000-0000-0000-0000-000000000001';
+INSERT INTO channel_data.price_intent (tenant_id, price_intent_id, created_at, write_scope_id, created_by_membership_id, trigger_type, proposed_amount_minor, currency, price_basis, expires_at, rule_code)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'a7000000-0000-0000-0000-000000000090', now(), 'a6000000-0000-0000-0000-000000000001', 'a2000000-0000-0000-0000-00000000000a', 'MANUAL', 1300, 'EUR', 'GROSS', now() + interval '10 minutes', 'MANUAL'),
+       ('a0000000-0000-0000-0000-00000000000a', 'a7000000-0000-0000-0000-000000000091', now(), 'a6000000-0000-0000-0000-000000000001', 'a2000000-0000-0000-0000-00000000000a', 'MANUAL', 1310, 'EUR', 'GROSS', now() + interval '10 minutes', 'MANUAL');
+INSERT INTO channel_data.price_decision (tenant_id, price_decision_id, intent_created_at, price_intent_id, write_scope_id, outcome, final_amount_minor, currency, price_basis, effective_floor_minor, min_price_ids, effective_ceiling_minor, max_price_ids, explanation, sanity_ruleset, gate_profile)
+SELECT tenant_id, 'a8000000-0000-0000-0000-000000000090', created_at, price_intent_id, write_scope_id, 'APPROVED', 1300, 'EUR', 'GROSS', 1000, ARRAY[gen_random_uuid()], 5000, ARRAY[gen_random_uuid()],
+       '{"format":"r80.1","snapshot":{"source":"KAUFLAND_BUYBOX"},"sanity":{"anchorsUsed":[],"checks":[]},"strategy":{"reason":{"code":"FIXED_PRICE"}}}', 'r49.1', 'g74.1'
+  FROM channel_data.price_intent WHERE price_intent_id = 'a7000000-0000-0000-0000-000000000090';
+INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, amount_minor, currency, price_basis, version, origin, price_decision_id)
+SELECT 'a0000000-0000-0000-0000-00000000000a', 'a9000000-0000-0000-0000-000000000090', 'a6000000-0000-0000-0000-000000000001', 'PRICE', 1300, 'EUR', 'GROSS', ss.latest_version_created + 1, 'PRICE_DECISION', 'a8000000-0000-0000-0000-000000000090'
+  FROM tenant_data.write_scope_sync_state ss WHERE ss.write_scope_id = 'a6000000-0000-0000-0000-000000000001';
+INSERT INTO tenant_data.price_stop (tenant_id, scope_type, stopped_by_membership_id, stop_note)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'TENANT', 'a2000000-0000-0000-0000-00000000000a', 'smoke stop of the whole tenant');
+SELECT pg_temp.expect_fail('approval while the tenant is stopped by a person (Р-69)', $q$
+  INSERT INTO channel_data.price_decision (tenant_id, intent_created_at, price_intent_id, write_scope_id, outcome, final_amount_minor, currency, price_basis, effective_floor_minor, min_price_ids, effective_ceiling_minor, max_price_ids, explanation, sanity_ruleset, gate_profile)
+  SELECT tenant_id, created_at, price_intent_id, write_scope_id, 'APPROVED', 1310, 'EUR', 'GROSS', 1000, ARRAY[gen_random_uuid()], 5000, ARRAY[gen_random_uuid()],
+         '{"format":"r80.1","snapshot":{"source":"KAUFLAND_BUYBOX"},"sanity":{"anchorsUsed":[],"checks":[]},"strategy":{"reason":{"code":"FIXED_PRICE"}}}', 'r49.1', 'g74.1'
+    FROM channel_data.price_intent WHERE price_intent_id = 'a7000000-0000-0000-0000-000000000091' $q$,
+  'pricing is stopped by price_stop');
+SELECT pg_temp.expect_fail('dispatch while the tenant is stopped by a person (Р-69)', $q$
+  UPDATE tenant_data.channel_write SET status = 'DISPATCHED', attempt_count = attempt_count + 1 WHERE channel_write_id = 'a9000000-0000-0000-0000-000000000090' $q$,
+  'pricing is stopped by price_stop');
+ROLLBACK TO SAVEPOINT stop_check;
 
 -- ---------------------------------------------------------------- находки 2, 3, 5: прямых прав нет и у административного сервиса
 SELECT pg_temp.expect_fail('insert an OWNER membership directly (finding 2, Р-90)', $q$
@@ -86,5 +137,26 @@ DO $$ BEGIN
   IF (SELECT count(*) FROM audit.audit_event WHERE entity_type = 'membership' AND action IN ('membership.role_changed', 'membership.status_changed')) < 2 THEN
     RAISE EXCEPTION 'role and access changes are not in the audit log'; END IF;
   RAISE NOTICE 'PASS accept | role change and revocation are written to the audit log by the trigger (Р-90)';
+END $$;
+ROLLBACK;
+
+-- ---------------------------------------------------------------- Р-97 (0066): административная запись — только от человека, в аудите
+BEGIN;
+SELECT set_config('app.tenant_id', 'a0000000-0000-0000-0000-00000000000a', true), set_config('app.user_id', '', true) \gset
+SELECT pg_temp.expect_fail('administrative change without a person (Р-97)', $q$
+  INSERT INTO tenant_data.product (tenant_id, product_id, sku, kind) VALUES ('a0000000-0000-0000-0000-00000000000a', 'a3970000-0000-0000-0000-000000000001', 'R97-SKU', 'SIMPLE') $q$,
+  'without a person');
+SELECT set_config('app.user_id', 'b1000000-0000-0000-0000-00000000000b', true) \gset
+SELECT pg_temp.expect_fail('administrative change by a user outside the tenant (Р-97)', $q$
+  INSERT INTO tenant_data.product (tenant_id, product_id, sku, kind) VALUES ('a0000000-0000-0000-0000-00000000000a', 'a3970000-0000-0000-0000-000000000001', 'R97-SKU', 'SIMPLE') $q$,
+  'not an active member of tenant');
+SELECT set_config('app.user_id', 'a1000000-0000-0000-0000-00000000000a', true) \gset
+INSERT INTO tenant_data.product (tenant_id, product_id, sku, kind) VALUES ('a0000000-0000-0000-0000-00000000000a', 'a3970000-0000-0000-0000-000000000001', 'R97-SKU', 'SIMPLE');
+DO $$ BEGIN
+  RAISE NOTICE 'REACHED | administrative change audited (Р-97)';
+  IF NOT EXISTS (SELECT 1 FROM audit.audit_event WHERE entity_type = 'tenant_data.product' AND action = 'admin_change.insert'
+                    AND entity_id = 'a3970000-0000-0000-0000-000000000001' AND actor_user_id = 'a1000000-0000-0000-0000-00000000000a') THEN
+    RAISE EXCEPTION 'an administrative change is not in the audit log (Р-97)'; END IF;
+  RAISE NOTICE 'PASS accept | administrative change by a person is written to the audit log (Р-97)';
 END $$;
 ROLLBACK;

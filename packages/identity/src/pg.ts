@@ -57,6 +57,19 @@ export async function issueSignupInvitation(onboardingPool: pg.Pool, email: stri
   return { invitationId: row.id, token };
 }
 
+/**
+ * Р-98: перепривязка входа участника — только приглашением владельца тенанта со вторым фактором (транзакция пула администратора
+ * в сессии владельца). Приём приглашения новым входом того же поставщика отзывает прежнюю привязку; автоматической перепривязки нет.
+ */
+export async function inviteRelink(
+  tx: { query: pg.Pool['query'] }, input: { tenantId: string; userId: string; ttlSeconds?: number },
+): Promise<{ invitationId: string; token: string }> {
+  const { token, sha256 } = newInvitationToken();
+  const { rows: [row] } = await tx.query('SELECT security.invite_relink($1, $2, $3, make_interval(secs => $4)) AS id',
+    [input.tenantId, input.userId, sha256, input.ttlSeconds ?? 7 * 86_400]);
+  return { invitationId: row.id, token };
+}
+
 /** Приглашение участника тенанта — в сессии владельца или администратора со вторым фактором; транзакция пула административного сервиса (Р-90) */
 export async function inviteMember(
   tx: { query: pg.Pool['query'] }, input: { tenantId: string; email: string; role: MemberRole; ttlSeconds?: number },

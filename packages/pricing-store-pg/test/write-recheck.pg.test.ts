@@ -48,7 +48,7 @@ const alerts: Array<Parameters<AlertSink['raise']>[0]> = [];
 before(async () => {
   db = await createIsolatedDatabase('r83');
   pool = db.pool('svc_app');
-  world = await seedPricingWorld(pool, { provisioningPool: db.pool('svc_provisioning', 1),
+  world = await seedPricingWorld(pool, { provisioningPool: db.pool('svc_provisioning', 1), adminPool: db.pool('svc_admin', 2),
     fixtureTenantId: '10000000-0000-4000-8000-000000000083', fixtureChannelAccountId: ACCOUNT, marketplaces: ['de'], clock: now(),
     fxLoaderPool: db.pool('svc_fx_loader', 1),
     seed: {

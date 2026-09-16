@@ -26,7 +26,7 @@ let w: SeededPricingWorld;
 before(async () => {
   w = await seedPricingWorld(app, {
     fixtureTenantId: '10000000-0000-4000-8000-000000000190', fixtureChannelAccountId: '20000000-0000-4000-8000-000000000190', marketplaces: ['de'],
-    clock: new Date().toISOString(), seed: { scopes: [] }, provisioningPool: provisioning,
+    clock: new Date().toISOString(), seed: { scopes: [] }, provisioningPool: provisioning, adminPool: admin,
   });
 });
 
@@ -76,7 +76,8 @@ test('Р-90: a session user and a second factor are accepted only from the admin
     note: 'Synthetic manual release of the role check', at: new Date().toISOString(),
   });
   // Путь решения, настроенный с собственным пулом вместо административного, — как скомпрометированный или ошибочный сервис
-  assert.match(await refusal(new PgPricingStore(app, { adminPool: app }).releaseHalt(w.tenantId, halt.pricing_halt_id, review(true))), /session user/);
+  // Р-96: у роли пути решения нет вставки записи проверки остановки — отказ по правам раньше проверки пользователя сессии
+  assert.match(await refusal(new PgPricingStore(app, { adminPool: app }).releaseHalt(w.tenantId, halt.pricing_halt_id, review(true))), /permission denied for table pricing_halt_review$/);
   assert.match(await refusal(new PgPricingStore(app).releaseHalt(w.tenantId, halt.pricing_halt_id, review(true))), /administrative database role/);
   const store = new PgPricingStore(app, { adminPool: admin });
   assert.match(await refusal(store.releaseHalt(w.tenantId, halt.pricing_halt_id, review(false))), /second factor/);
@@ -90,7 +91,8 @@ test('Р-90: the audit log is still written — by triggers, with the session us
     note: 'Synthetic stop of the role separation check',
   });
   assert.equal(result.status, 'STOPPED');
-  const events = await inTenant(app, w.tenantId, async (tx) => (await tx.query(
+  // Р-96: журнал аудита читает административный сервис
+  const events = await inTenant(admin, w.tenantId, async (tx) => (await tx.query(
     `SELECT action, actor_type, actor_user_id FROM audit.audit_event WHERE tenant_id = $1 AND entity_id = $2`,
     [w.tenantId, result.status === 'STOPPED' ? result.stop.stopId : null])).rows);
   assert.deepEqual(events, [{ action: 'pricing.stop_created', actor_type: 'USER', actor_user_id: w.userId }]);

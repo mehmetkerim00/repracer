@@ -28,6 +28,7 @@ import {
 import { runStrategy } from '@repracer/strategy-engine';
 import { channelRefusal, type DispatchStep, type WriteDispatcher } from '@repracer/write-dispatcher';
 import type {
+  HaltSampleObservation,
   CommittedDecision,
   DecisionToCommit,
   DispatchRecorded,
@@ -401,13 +402,14 @@ export function createPricingPipeline(deps: PipelineDeps) {
     const tenantId = ctx.tenantId;
     const now = deps.now();
     const queries = await store.pickReviewSample(tenantId, halt, sampleSize);
-    const nextReviewAt = new Date(Date.parse(now) + halt.reviewWindowSeconds * 1000).toISOString();
     if (queries.length === 0) {
       await emit(ctx, [{ kind: 'log', level: 'WARN', code: 'HALT_REVIEW_NO_SAMPLE', message: 'HALT_REVIEW_NO_SAMPLE', details: { haltId: halt.haltId } }]);
       return { haltId: halt.haltId, outcome: 'NO_SAMPLE', sampleSize: 0, failedCount: 0, failures: [], snapshots: [] };
     }
     const read = await adapter.readCompetitors(ctx, queries);
     const failures: HaltReviewReport['failures'] = read.failures.map((f) => ({ channelProductRef: f.query.channelProductRef, reason: f.error.code }));
+    // Находка 2 ревью шага 16 [0063]: путь решения записывает только наблюдения выборки; итог и снятие вычисляет хранилище
+    const samples: HaltSampleObservation[] = read.failures.map((f) => ({ channelProductRef: f.query.channelProductRef, observedAt: now, verdict: 'READ_FAILED', reasonCode: f.error.code }));
     const moves: Array<{ moveBp: number; sellerRef: string | null }> = [];
     for (const snapshot of read.snapshots) {
       const key: ProductKey = { channelAccountId: ctx.channelAccountId, marketplace: snapshot.marketplace, channelProductRef: snapshot.channelProductRef, condition: snapshot.condition };
@@ -416,22 +418,28 @@ export function createPricingPipeline(deps: PipelineDeps) {
       const verdict = evaluateSnapshot(snapshot, { ...context.sanity, channel: { halt: null, recentMoves: [] } }, deps.sanityConfig);
       if (verdict.move) moves.push({ moveBp: verdict.move.moveBp, sellerRef: verdict.move.sellerRef });
       if (verdict.verdict !== 'ACCEPT') failures.push({ channelProductRef: snapshot.channelProductRef, reason: verdict.reason.code });
+      samples.push(verdict.verdict === 'ACCEPT'
+        ? { channelProductRef: snapshot.channelProductRef, observedAt: snapshot.observedAt, verdict: 'ACCEPT', reasonCode: null }
+        : { channelProductRef: snapshot.channelProductRef, observedAt: snapshot.observedAt, verdict: 'REJECT', reasonCode: verdict.reason.code });
     }
     const sampleShift = assessShift(moves, deps.sanityConfig?.massShift);
-    if (sampleShift.parseErrorSuspected) failures.push({ channelProductRef: '*', reason: 'CHANNEL_MASS_SHIFT' });
-    const sampleSizeTaken = queries.length;
-    const review = {
-      sampleSize: sampleSizeTaken, failedCount: Math.min(failures.length, sampleSizeTaken),
-      details: { failures: failures.map((f) => `${f.channelProductRef}:${f.reason}`).join(',').slice(0, 500), spread: sampleShift.spread },
-      at: now,
-    };
-
-    if (failures.length > 0) {
-      await store.recordFailedReview(tenantId, halt.haltId, { kind: 'AUTO_SAMPLE', outcome: 'SAMPLE_FAILED', ...review }, nextReviewAt);
-      await emit(ctx, [{ kind: 'log', level: 'WARN', code: 'HALT_REVIEW_FAILED', message: 'HALT_REVIEW_FAILED', details: { haltId: halt.haltId, sampleSize: sampleSizeTaken, failed: failures.length, nextReviewAt } }]);
-      return { haltId: halt.haltId, outcome: 'SAMPLE_FAILED', sampleSize: sampleSizeTaken, failedCount: review.failedCount, failures, snapshots: [] };
+    if (sampleShift.parseErrorSuspected) {
+      failures.push({ channelProductRef: '*', reason: 'CHANNEL_MASS_SHIFT' });
+      samples.push({ channelProductRef: '*', observedAt: now, verdict: 'MASS_SHIFT', reasonCode: 'CHANNEL_MASS_SHIFT' });
     }
-    await store.releaseHalt(tenantId, halt.haltId, { kind: 'AUTO_SAMPLE', outcome: 'RELEASED', ...review, failedCount: 0 });
+    const sampleSizeTaken = queries.length;
+    await store.recordHaltSample(tenantId, halt.haltId, samples, now);
+    const outcome = await store.reviewHaltBySample(tenantId, halt.haltId, now);
+
+    if (outcome === 'SAMPLE_FAILED') {
+      await emit(ctx, [{ kind: 'log', level: 'WARN', code: 'HALT_REVIEW_FAILED', message: 'HALT_REVIEW_FAILED', details: { haltId: halt.haltId, sampleSize: sampleSizeTaken, failed: failures.length } }]);
+      return { haltId: halt.haltId, outcome: 'SAMPLE_FAILED', sampleSize: sampleSizeTaken, failedCount: Math.min(failures.length, sampleSizeTaken), failures, snapshots: [] };
+    }
+    if (outcome !== 'RELEASED') {
+      // Выборки не хватило (или остановка уже снята, или срок не наступил) — остановка остаётся до следующей проверки
+      await emit(ctx, [{ kind: 'log', level: 'WARN', code: 'HALT_REVIEW_NO_SAMPLE', message: 'HALT_REVIEW_NO_SAMPLE', details: { haltId: halt.haltId, outcome, sampleSize: sampleSizeTaken } }]);
+      return { haltId: halt.haltId, outcome: 'NO_SAMPLE', sampleSize: sampleSizeTaken, failedCount: 0, failures, snapshots: [] };
+    }
     await emit(ctx, [
       { kind: 'log', level: 'INFO', code: 'HALT_AUTO_RELEASED', message: 'HALT_AUTO_RELEASED', details: { haltId: halt.haltId, sampleSize: sampleSizeTaken } },
       { kind: 'alert', code: 'PRICING_CHANNEL_RESUMED', severity: 'WARNING', details: { haltId: halt.haltId, sampleSize: sampleSizeTaken, kind: 'AUTO' } },
@@ -491,7 +499,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
      * Включение репрайсинга [Р-43]: без обеих границ режим не меняется. Маржинальная стратегия или пол по марже без
      * себестоимости — предупреждение до включения; включить можно только явно подтвердив его (шаг 12).
      */
-    async enableRepricing(ctx: AdapterCallContext, writeScopeId: string, options: { acknowledgeWarnings?: boolean } = {}): Promise<{ enabled: boolean; problems: Reason[]; warnings: Reason[] }> {
+    async enableRepricing(ctx: AdapterCallContext, writeScopeId: string, options: { acknowledgeWarnings?: boolean; userId?: string } = {}): Promise<{ enabled: boolean; problems: Reason[]; warnings: Reason[] }> {
       const loaded = await store.loadScopeContext(ctx.tenantId, writeScopeId, deps.now());
       if (!loaded) return { enabled: false, problems: [{ code: 'NO_SCOPE_FOR_PRODUCT', params: { writeScopeId } }], warnings: [] };
       const { scope, bounds } = loaded.context;
@@ -509,7 +517,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
         await emit(ctx, [{ kind: 'log', level: 'WARN', code: 'REPRICING_WARNINGS_NOT_ACKNOWLEDGED', message: 'REPRICING_WARNINGS_NOT_ACKNOWLEDGED', details: { writeScopeId, warnings: codes(warnings) } }]);
         return { enabled: false, problems: [], warnings };
       }
-      await store.setPricingMode(ctx.tenantId, writeScopeId, 'ENGINE');
+      await store.setPricingMode(ctx.tenantId, writeScopeId, 'ENGINE', options.userId);
       return { enabled: true, problems: [], warnings };
     },
 

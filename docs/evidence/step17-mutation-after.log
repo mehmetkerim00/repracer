@@ -1,0 +1,493 @@
+control run: 83 checks
+CAUGHT   row 12: DROP TRIGGER ba_channel_write_ceiling_insert ON tenant_data.channel_write (4 s)
+   ✗ fails smoke «write created above lowered max_price (Р-44, check 2)» — CHECK FAILED: write created above lowered max_price (Р-44, check 2)
+   ✓ green smoke «dispatch above lowered max_price (Р-44, check 3)»
+   ✓ green store.pg.test.ts «refuses a price above max_price»
+CAUGHT   row 12: DROP TRIGGER ba_channel_write_ceiling_dispatch ON tenant_data.channel_write (4 s)
+   ✓ green smoke «write created above lowered max_price (Р-44, check 2)»
+   ✗ fails smoke «dispatch above lowered max_price (Р-44, check 3)» — CHECK FAILED: dispatch above lowered max_price (Р-44, check 3)
+   ✓ green store.pg.test.ts «refuses a price above max_price»
+CAUGHT   row 13: ALTER TABLE channel_data.price_decision DROP CONSTRAINT price_decision_no_bound_clamp (3 s)
+   ✗ fails smoke «clamp to floor instead of rejection (Р-44)» — CHECK FAILED: clamp to floor instead of rejection (Р-44)
+   ✓ green smoke «REJECTED without a reason»
+CAUGHT   row 13: ALTER TABLE channel_data.price_decision DROP CONSTRAINT price_decision_rejection_reason_iff (3 s)
+   ✓ green smoke «clamp to floor instead of rejection (Р-44)»
+   ✗ fails smoke «REJECTED without a reason» — CHECK FAILED: REJECTED without a reason
+CAUGHT   row 16: DROP TRIGGER c_pricing_halt_release_journal ON channel_data.pricing_halt (3 s)
+   ✗ fails smoke «manual release without a journal record (Р-52)» — CHECK FAILED: manual release without a journal record (Р-52)
+   ✓ green smoke «manual halt release by a member with a second factor, a note and a journal record (Р-52, Р-88)»
+   ✓ green audit-guards.pg.test.ts «finding 1»
+CAUGHT   row 14: ALTER TABLE tenant_data.guardrail DROP CONSTRAINT guardrail_ceiling_moved_to_max_price (3 s)
+   ✗ fails smoke «guardrail carrying a ceiling (moved to max_price, Р-43)» — CHECK FAILED: guardrail carrying a ceiling (moved to max_price, Р-43)
+CAUGHT   row 17: DROP TRIGGER aa_price_decision_copy_derivation ON channel_data.price_decision (3 s)
+   ✗ fails smoke «competitor_derived is not derived from rule_code» — ERROR:  competitor_derived is not derived from rule_code
+CAUGHT   row 18: ALTER TABLE tenant_data.write_scope DROP CONSTRAINT write_scope_supported_currency (3 s)
+   ✗ fails smoke «currency outside EUR and USD» — CHECK FAILED: currency outside EUR and USD
+CAUGHT   row 19: ALTER TABLE tenant_data.write_scope DROP CONSTRAINT write_scope_tax_regime_for_price (3 s)
+   ✓ green smoke «USD write scope attached to a EUR gross storefront (Р-57, Р-58)»
+   ✓ green smoke «net price basis with VAT regime (Р-58)»
+   ✗ fails smoke «price write scope without tax regime (Р-58)» — CHECK FAILED: price write scope without tax regime (Р-58)
+CAUGHT   row 20, 21: ALTER TABLE channel_data.price_decision DROP CONSTRAINT price_decision_rejection_explained (4 s)
+   ✗ fails smoke «rejection without its reason parameters (OQ-98)» — CHECK FAILED: rejection without its reason parameters (OQ-98)
+   ✓ green store.pg.test.ts «OQ-93, OQ-94, OQ-98»
+CAUGHT   row 22: ALTER TABLE tenant_data.channel_write DROP CONSTRAINT channel_write_end_explained (7 s)
+   ✗ fails smoke «write discarded without a reason (Р-64)» — CHECK FAILED: write discarded without a reason (Р-64)
+   ✓ green smoke «write history ended without a reason (Р-64)»
+   ✓ green write-queue.pg.test.ts
+   ✓ green budget-retry-dispatch.pg.test.ts
+CAUGHT   row 22: ALTER TABLE tenant_data.channel_write_history DROP CONSTRAINT channel_write_history_end_explained (7 s)
+   ✓ green smoke «write discarded without a reason (Р-64)»
+   ✗ fails smoke «write history ended without a reason (Р-64)» — CHECK FAILED: write history ended without a reason (Р-64)
+   ✓ green write-queue.pg.test.ts
+   ✓ green budget-retry-dispatch.pg.test.ts
+CAUGHT   row 23: DROP TRIGGER zz_fx_rate_immutable ON platform.fx_rate (3 s)
+   ✗ fails smoke «ECB rate is immutable (Р-61)» — CHECK FAILED: ECB rate is immutable (Р-61)
+   ✓ green smoke «decision exchange rate without its fields (Р-61)»
+   ✓ green fx-day-boundary.pg.test.ts «Р-61 in the database»
+CAUGHT   row 22: DROP TRIGGER zz_channel_write_announce_dispatch ON tenant_data.channel_write (7 s)
+   ✓ green smoke «write discarded without a reason (Р-64)»
+   ✓ green smoke «write history ended without a reason (Р-64)»
+   ✗ fails write-queue.pg.test.ts — control — without the dispatcher queued writes stay PENDING (step 9 defect), but every one is announced and every supersession explained [a PENDING write has no scope.write.v1 even
+   ✓ green budget-retry-dispatch.pg.test.ts
+CAUGHT   row 23: DROP TRIGGER aa_price_decision_fx_recorded ON channel_data.price_decision (3 s)
+   ✓ green smoke «ECB rate is immutable (Р-61)»
+   ✓ green smoke «decision exchange rate without its fields (Р-61)»
+   ✗ fails fx-day-boundary.pg.test.ts «Р-61 in the database» — Р-61 in the database: a decision on a converted cost is refused without its exchange rate and stored with it [Missing expected rejection.']
+CAUGHT   row 23: ALTER TABLE channel_data.price_decision DROP CONSTRAINT price_decision_fx_shape (2 s)
+   ✓ green smoke «ECB rate is immutable (Р-61)»
+   ✗ fails smoke «decision exchange rate without its fields (Р-61)» — CHECK FAILED: decision exchange rate without its fields (Р-61)
+   ✓ green fx-day-boundary.pg.test.ts «Р-61 in the database»
+CAUGHT   row 24, 26: ALTER TABLE platform.marketplace DROP CONSTRAINT marketplace_time_zone_known_if_confirmed (2 s)
+   ✓ green smoke «budgeted write while the storefront day boundary is unconfirmed (Р-65)»
+   ✓ green smoke «budget day is not the current storefront day (Р-65)»
+   ✗ fails smoke «US storefront confirmed without a time zone» — CHECK FAILED: US storefront confirmed without a time zone
+   ✓ green fx-day-boundary.pg.test.ts «Р-65: a US storefront»
+CAUGHT   row 24, 26: DROP TRIGGER aa_channel_write_budget_day_tz ON tenant_data.channel_write (3 s)
+   ✗ fails smoke «budgeted write while the storefront day boundary is unconfirmed (Р-65)» — CHECK FAILED: budgeted write while the storefront day boundary is unconfirmed (Р-65)
+   ✗ fails smoke «budget day is not the current storefront day (Р-65)» — CHECK FAILED: budget day is not the current storefront day (Р-65)
+   ✓ green smoke «US storefront confirmed without a time zone»
+   ✓ green fx-day-boundary.pg.test.ts «Р-65: a US storefront»
+CAUGHT   row 24, 26: DROP TRIGGER aa_price_daily_day_tz ON tenant_data.price_daily (2 s)
+   ✓ green smoke «budgeted write while the storefront day boundary is unconfirmed (Р-65)»
+   ✓ green smoke «budget day is not the current storefront day (Р-65)»
+   ✓ green smoke «US storefront confirmed without a time zone»
+   ✗ fails fx-day-boundary.pg.test.ts «Р-65: a US storefront» — Р-65: a US storefront has no substituted day boundary; Amazon US and eBay US are marked to verify separately [Missing expected rejection.']
+CAUGHT   row 25: DROP TRIGGER tenant_region_guard ON tenant_data.tenant (2 s)
+   ✗ fails smoke «tenant in wrong region DB (Р-60)» — CHECK FAILED: tenant in wrong region DB (Р-60)
+CAUGHT   row 27: ALTER TABLE channel_data.pricing_halt DROP CONSTRAINT pricing_halt_system_only (3 s)
+   ✓ green smoke «competitor-derived approval while halted (Р-51)»
+   ✓ green smoke «approval while the tenant is stopped by a person (Р-69)»
+   ✓ green smoke «dispatch while the tenant is stopped by a person (Р-69)»
+   ✓ green smoke «dispatch of a competitor-derived write while halted (Р-51)»
+   ✓ green smoke «manual halt release without a second factor (finding 12, Р-88)»
+   ✗ fails step12.pg.test.ts — Р-69: a system halt is only for broken channel data — a person cannot create one [Missing expected rejection.']
+   ✓ green audit-guards.pg.test.ts
+CAUGHT   row 27: DROP TRIGGER aa_price_stop_role_guard ON tenant_data.price_stop (3 s)
+   ✓ green smoke «competitor-derived approval while halted (Р-51)»
+   ✓ green smoke «approval while the tenant is stopped by a person (Р-69)»
+   ✓ green smoke «dispatch while the tenant is stopped by a person (Р-69)»
+   ✓ green smoke «dispatch of a competitor-derived write while halted (Р-51)»
+   ✓ green smoke «manual halt release without a second factor (finding 12, Р-88)»
+   ✗ fails step12.pg.test.ts — Р-69, Р-70, OQ-125 in the database: a tenant stop holds every price, covers an account connected later, and only the owner resumes it [Expected values to be strictly equal:]
+   ✗ fails audit-guards.pg.test.ts — finding 2: a price stop cannot be inserted already released [The input did not match the regular expression /created active/. Input:]; Р-88: releasing the tenant stop needs a secon
+CAUGHT   row 27: DROP TRIGGER ab_price_decision_stop_guard ON channel_data.price_decision (3 s)
+   ✓ green smoke «competitor-derived approval while halted (Р-51)»
+   ✗ fails smoke «approval while the tenant is stopped by a person (Р-69)» — CHECK FAILED: approval while the tenant is stopped by a person (Р-69)
+   ✓ green smoke «dispatch while the tenant is stopped by a person (Р-69)»
+   ✓ green smoke «dispatch of a competitor-derived write while halted (Р-51)»
+   ✓ green smoke «manual halt release without a second factor (finding 12, Р-88)»
+   ✓ green step12.pg.test.ts
+   ✓ green audit-guards.pg.test.ts
+CAUGHT   row 27: DROP TRIGGER bb_channel_write_stop_guard ON tenant_data.channel_write (3 s)
+   ✓ green smoke «competitor-derived approval while halted (Р-51)»
+   ✓ green smoke «approval while the tenant is stopped by a person (Р-69)»
+   ✗ fails smoke «dispatch while the tenant is stopped by a person (Р-69)» — CHECK FAILED: dispatch while the tenant is stopped by a person (Р-69)
+   ✓ green smoke «dispatch of a competitor-derived write while halted (Р-51)»
+   ✓ green smoke «manual halt release without a second factor (finding 12, Р-88)»
+   ✓ green step12.pg.test.ts
+   ✓ green audit-guards.pg.test.ts
+CAUGHT   row 27: DROP TRIGGER ca_pricing_halt_release_role_guard ON channel_data.pricing_halt (2 s)
+   ✓ green smoke «competitor-derived approval while halted (Р-51)»
+   ✓ green smoke «approval while the tenant is stopped by a person (Р-69)»
+   ✓ green smoke «dispatch while the tenant is stopped by a person (Р-69)»
+   ✓ green smoke «dispatch of a competitor-derived write while halted (Р-51)»
+   ✗ fails smoke «manual halt release without a second factor (finding 12, Р-88)» — CHECK FAILED: manual halt release without a second factor (finding 12, Р-88)
+   ✓ green step12.pg.test.ts
+   ✓ green audit-guards.pg.test.ts
+CAUGHT   row 28, 32, 39, 40: ALTER TABLE channel_data.price_decision DROP CONSTRAINT price_decision_explanation_by_class (3 s)
+   ✗ fails smoke «NO_OP decision with an explanation (Р-74)» — CHECK FAILED: NO_OP decision with an explanation (Р-74)
+   ✓ green smoke «NO_OP decision with an unknown no-change reason (Р-74)»
+   ✓ green step14.pg.test.ts «finding 10, Р-80»
+   ✓ green channel-derived.pg.test.ts
+   ✓ green undercut-eternal.pg.test.ts
+CAUGHT   row 28, 32, 39, 40: ALTER TABLE channel_data.price_decision DROP CONSTRAINT price_decision_no_change_reason_code (3 s)
+   ✓ green smoke «NO_OP decision with an explanation (Р-74)»
+   ✗ fails smoke «NO_OP decision with an unknown no-change reason (Р-74)» — CHECK FAILED: NO_OP decision with an unknown no-change reason (Р-74)
+   ✓ green step14.pg.test.ts «finding 10, Р-80»
+   ✓ green channel-derived.pg.test.ts
+   ✓ green undercut-eternal.pg.test.ts
+CAUGHT   row 28, 32, 39, 40: DROP TRIGGER a0_price_decision_intent_columns ON channel_data.price_decision (2 s)
+   ✓ green smoke «NO_OP decision with an explanation (Р-74)» — not reached (tests/db/smoke_app.sql: ERROR:  null value in column "trigger_type" of relation "price_decision_d20260914" violates not-null constraint)
+   ✓ green smoke «NO_OP decision with an unknown no-change reason (Р-74)» — not reached (tests/db/smoke_app.sql: ERROR:  null value in column "trigger_type" of relation "price_decision_d20260914" violates not-null constraint)
+   ✗ fails step14.pg.test.ts «finding 10, Р-80» — finding 10, Р-80: a NO_OP decision keeps no snapshot reference; a stored explanation repeats no row column; decision intent columns come from the intent [null value in column "trig
+   ✗ fails channel-derived.pg.test.ts — Р-85: a rejected Buy Box proposal reaches the eternal core without the proposed price, the deviation and the derived target [null value in column "trigger_type" of relation "price_
+   ✗ fails undercut-eternal.pg.test.ts — Р-91: an approved Buy Box price reaches the eternal core without the undercut [null value in column "trigger_type" of relation "price_decision_d20260916" violates not-null constrai
+CAUGHT   row 28, 32, 39, 40: DROP TRIGGER a_price_decision_snapshot_ref_guard ON channel_data.price_decision_snapshot_ref (3 s)
+   ✓ green smoke «NO_OP decision with an explanation (Р-74)»
+   ✓ green smoke «NO_OP decision with an unknown no-change reason (Р-74)»
+   ✗ fails step14.pg.test.ts «finding 10, Р-80» — finding 10, Р-80: a NO_OP decision keeps no snapshot reference; a stored explanation repeats no row column; decision intent columns come from the intent [The input did not match th
+   ✓ green channel-derived.pg.test.ts
+   ✓ green undercut-eternal.pg.test.ts
+CAUGHT   row 29: ALTER TABLE channel_data.price_decision DROP CONSTRAINT price_decision_amounts_have_currency (2 s)
+   ✓ green smoke «rejected snapshot details: an amount without its currency (Р-71)»
+   ✗ fails smoke «rejection parameters with an amount without its currency (Р-71)» — CHECK FAILED: rejection parameters with an amount without its currency (Р-71)
+   ✓ green smoke «write ended with an amount without its currency (Р-71)»
+CAUGHT   row 29: ALTER TABLE channel_data.rejected_competitor_snapshot DROP CONSTRAINT rejected_competitor_snapshot_details_cur (2 s)
+   ✗ fails smoke «rejected snapshot details: an amount without its currency (Р-71)» — CHECK FAILED: rejected snapshot details: an amount without its currency (Р-71)
+   ✓ green smoke «rejection parameters with an amount without its currency (Р-71)»
+   ✓ green smoke «write ended with an amount without its currency (Р-71)»
+CAUGHT   row 29: ALTER TABLE tenant_data.channel_write DROP CONSTRAINT channel_write_end_params_currency (2 s)
+   ✓ green smoke «rejected snapshot details: an amount without its currency (Р-71)»
+   ✓ green smoke «rejection parameters with an amount without its currency (Р-71)»
+   ✗ fails smoke «write ended with an amount without its currency (Р-71)» — CHECK FAILED: write ended with an amount without its currency (Р-71)
+CAUGHT   row 31, 37, 38: CREATE OR REPLACE FUNCTION security.pricing_permission(p_role text, p_action text) RETURNS boolean LANGUAGE sq (2 s)
+   ✗ fails step14.pg.test.ts «finding 2» — finding 2: the explanation dictionary and the permission matrix in the database equal the code [OPERATOR × RESUME_TENANT_STOP]
+   ✓ green step14.pg.test.ts «finding 4»
+   ✗ fails step12.pg.test.ts — Р-69, Р-70, OQ-125 in the database: a tenant stop holds every price, covers an account connected later, and only the owner resumes it [Expected values to be strictly equal:]
+CAUGHT   row 30: ALTER TABLE tenant_data.price_intent_core DROP CONSTRAINT price_intent_core_dangerous_consistent (2 s)
+   ✗ fails smoke «eternal core: dangerous flag against the deviation (Р-73)» — CHECK FAILED: eternal core: dangerous flag against the deviation (Р-73)
+   ✓ green channel-derived.pg.test.ts
+CAUGHT   row 31, 37, 38: tenant_data.price_stop_role_guard(): «IF security.current_user_id() IS NULL OR u IS DIST…» → «IF false THEN…» (3 s)
+   ✓ green step14.pg.test.ts «finding 2»
+   ✗ fails step14.pg.test.ts «finding 4» — finding 4: a stop, a resume and a manual halt release are accepted only from the session user of the membership; the audit author is that user [Expected values to be strictly equal
+   ✓ green step12.pg.test.ts
+CAUGHT   row 33: DROP TRIGGER explanation_ruleset_immutable ON platform.explanation_ruleset (3 s)
+   ✗ fails smoke «explanation ruleset is immutable (Р-75)» — CHECK FAILED: explanation ruleset is immutable (Р-75)
+   ✓ green step14.pg.test.ts «finding 2»
+CAUGHT   row 34: DROP TRIGGER zb_pricing_halt_audit ON channel_data.pricing_halt (3 s)
+   ✓ green smoke «the manual release is not in the audit log with its author» — not reached (tests/db/smoke_admin.sql: ERROR:  the system halt is not in the audit log)
+   ✗ fails smoke «the system halt is not in the audit log» — ERROR:  the system halt is not in the audit log
+   ✓ green step14.pg.test.ts «finding 4»
+   ✓ green role-separation.pg.test.ts
+CAUGHT   row 34: DROP TRIGGER zb_price_stop_audit ON tenant_data.price_stop (3 s)
+   ✓ green smoke «the manual release is not in the audit log with its author»
+   ✓ green smoke «the system halt is not in the audit log»
+   ✗ fails step14.pg.test.ts «finding 4» — finding 4: a stop, a resume and a manual halt release are accepted only from the session user of the membership; the audit author is that user [Expected values to be strictly deep-
+   ✗ fails role-separation.pg.test.ts — Р-90: the audit log is still written — by triggers, with the session user of the administrative service as the author [Expected values to be strictly deep-equal:]
+CAUGHT   row 34: DROP TRIGGER zb_pricing_halt_review_audit ON channel_data.pricing_halt_review (3 s)
+   ✗ fails smoke «the manual release is not in the audit log with its author» — ERROR:  the manual release is not in the audit log with its author
+   ✓ green smoke «the system halt is not in the audit log»
+   ✗ fails step14.pg.test.ts «finding 4» — finding 4: a stop, a resume and a manual halt release are accepted only from the session user of the membership; the audit author is that user [Expected values to be strictly deep-
+   ✓ green role-separation.pg.test.ts
+CAUGHT   row 35: ALTER TABLE tenant_data.write_scope DROP CONSTRAINT write_scope_engine_has_strategy (3 s)
+   ✗ fails smoke «ENGINE without a strategy (Р-77)» — CHECK FAILED: ENGINE without a strategy (Р-77)
+CAUGHT   row 41: ALTER TABLE maintenance.partition_export DROP CONSTRAINT partition_export_core_archive_self_contained (3 s)
+   ✗ fails step14.pg.test.ts «Р-79» — Р-79: the core archive exported by the exporter role explains every row without the database; a confirmation without dictionaries is refused [The input did not match the regular ex
+CAUGHT   row 42: tenant_data.channel_write_before_update(): «NEW.floor_at_dispatch_minor := tenant_data.assert_…» → «NEW.floor_at_dispatch_minor :=…» (3 s)
+   ✗ fails verify 0061_verify_schema_invariants_v13.sql — ERROR:  schema invariant violations:
+behaviour check (Р-83, finding 15, Р-91): a price write below the recomputed margin floor was dispatched
+   ✗ fails write-recheck.pg.test.ts — Р-83: the unit cost rose between decision and dispatch — the margin floor blocks the write [cost: the write reached the channel: [{"action":"DISPATCHED","channelWriteId":"9a0134e9-
+CAUGHT   row 43: ALTER TABLE tenant_data.price_intent_core DROP CONSTRAINT price_intent_core_competitor_rejection_not_kept (3 s)
+   ✓ green verify 0061_verify_schema_invariants_v13.sql
+   ✓ green smoke «decision explanation with an undeclared reason parameter (finding 15)»
+   ✗ fails smoke «eternal core: a competitor-derived rejection keeps its proposed price (Р-85)» — CHECK FAILED: eternal core: a competitor-derived rejection keeps its proposed price (Р-85)
+   ✓ green smoke «eternal core: an undeclared reason parameter in the explanation (finding 15)»
+   ✓ green channel-derived.pg.test.ts
+   ✓ green undercut-eternal.pg.test.ts
+CAUGHT   row 43: ALTER TABLE channel_data.price_decision DROP CONSTRAINT price_decision_explanation_keys_declared (3 s)
+   ✓ green verify 0061_verify_schema_invariants_v13.sql
+   ✗ fails smoke «decision explanation with an undeclared reason parameter (finding 15)» — CHECK FAILED: decision explanation with an undeclared reason parameter (finding 15)
+   ✓ green smoke «eternal core: a competitor-derived rejection keeps its proposed price (Р-85)»
+   ✓ green smoke «eternal core: an undeclared reason parameter in the explanation (finding 15)»
+   ✓ green channel-derived.pg.test.ts
+   ✓ green undercut-eternal.pg.test.ts
+CAUGHT   row 43: ALTER TABLE tenant_data.price_intent_core DROP CONSTRAINT price_intent_core_explanation_keys_declared (3 s)
+   ✓ green verify 0061_verify_schema_invariants_v13.sql
+   ✓ green smoke «decision explanation with an undeclared reason parameter (finding 15)»
+   ✓ green smoke «eternal core: a competitor-derived rejection keeps its proposed price (Р-85)»
+   ✗ fails smoke «eternal core: an undeclared reason parameter in the explanation (finding 15)» — CHECK FAILED: eternal core: an undeclared reason parameter in the explanation (finding 15)
+   ✓ green channel-derived.pg.test.ts
+   ✓ green undercut-eternal.pg.test.ts
+CAUGHT   row 44: DROP TRIGGER a_pricing_halt_review_guard ON channel_data.pricing_halt_review (2 s)
+   ✓ green smoke «manual halt release without a second factor (finding 12, Р-88)»
+   ✗ fails audit-guards.pg.test.ts — finding 1: a manual release review without the release, from a viewer, or for a released halt is refused; the real release is accepted [The input did not match the regular expressi
+CAUGHT   row 44: tenant_data.price_stop_role_guard(): «AND NOT security.session_mfa() THEN…» → «AND false THEN…» (3 s)
+   ✓ green smoke «manual halt release without a second factor (finding 12, Р-88)»
+   ✗ fails audit-guards.pg.test.ts — Р-88: releasing the tenant stop needs a second factor; a storefront stop does not [Expected values to be strictly equal:]
+CAUGHT   row 44: DROP TRIGGER zc_pricing_halt_review_released_in_tx ON channel_data.pricing_halt_review (3 s)
+   ✓ green smoke «manual halt release without a second factor (finding 12, Р-88)»
+   ✗ fails audit-guards.pg.test.ts — finding 1: a manual release review without the release, from a viewer, or for a released halt is refused; the real release is accepted [a release record without the release fails a
+CAUGHT   row 45: DROP TRIGGER ab_channel_write_budget_day_retry ON tenant_data.channel_write (2 s)
+   ✗ fails smoke «retry after midnight is charged to today, whose budget is exhausted (C2, Р-19)» — CHECK FAILED: retry after midnight is charged to today, whose budget is exhausted (C2, Р-19)
+   ✗ fails smoke «retry while the storefront day boundary is unconfirmed (C2, Р-65)» — CHECK FAILED: retry while the storefront day boundary is unconfirmed (C2, Р-65)
+   ✓ green dispatcher-defects.pg.test.ts
+CAUGHT   row Р-96: GRANT INSERT ON tenant_data.migration_consent TO repracer_app (2 s)
+   ✗ fails verify 0067_verify_schema_invariants_v14.sql — ERROR:  schema invariant violations:
+tenant_data.migration_consent: INSERT of the decision path does not match the allow list (Р-96)
+   ✓ green smoke «path creates an eBay migration consent (Р-96, Р-2)»
+   ✓ green smoke «path opts the tenant into Kaufland Smart Pricing (Р-96, Р-12, Р-41)»
+   ✓ green smoke «path lowers min_price (Р-96, Р-5)»
+   ✓ green smoke «path changes the unit cost (Р-96, Р-83)»
+   ✓ green smoke «path schedules the review of a halt (finding 2 ревью шага 16)»
+   ✓ green smoke «path writes an automatic halt review (finding 2 ревью шага 16)»
+   ✓ green smoke «path forges an audit event (finding 5, Р-90)»
+   ✓ green smoke «the decision path role is trusted with a session user or a second factor»
+CAUGHT   row Р-96: GRANT UPDATE ON tenant_data.tenant TO repracer_app (3 s)
+   ✗ fails verify 0067_verify_schema_invariants_v14.sql — ERROR:  schema invariant violations:
+tenant_data.tenant: UPDATE of the decision path does not match the allow list (Р-96)
+   ✓ green smoke «path creates an eBay migration consent (Р-96, Р-2)»
+   ✗ fails smoke «path opts the tenant into Kaufland Smart Pricing (Р-96, Р-12, Р-41)» — CHECK FAILED: path opts the tenant into Kaufland Smart Pricing (Р-96, Р-12, Р-41)
+   ✓ green smoke «path lowers min_price (Р-96, Р-5)»
+   ✓ green smoke «path changes the unit cost (Р-96, Р-83)»
+   ✓ green smoke «path schedules the review of a halt (finding 2 ревью шага 16)»
+   ✓ green smoke «path writes an automatic halt review (finding 2 ревью шага 16)»
+   ✓ green smoke «path forges an audit event (finding 5, Р-90)»
+   ✓ green smoke «the decision path role is trusted with a session user or a second factor»
+CAUGHT   row Р-96: GRANT INSERT ON tenant_data.min_price TO repracer_app (3 s)
+   ✗ fails verify 0067_verify_schema_invariants_v14.sql — ERROR:  schema invariant violations:
+tenant_data.min_price: INSERT of the decision path does not match the allow list (Р-96)
+   ✓ green smoke «path creates an eBay migration consent (Р-96, Р-2)»
+   ✓ green smoke «path opts the tenant into Kaufland Smart Pricing (Р-96, Р-12, Р-41)»
+   ✗ fails smoke «path lowers min_price (Р-96, Р-5)» — CHECK FAILED: path lowers min_price (Р-96, Р-5)
+   ✓ green smoke «path changes the unit cost (Р-96, Р-83)»
+   ✓ green smoke «path schedules the review of a halt (finding 2 ревью шага 16)»
+   ✓ green smoke «path writes an automatic halt review (finding 2 ревью шага 16)»
+   ✓ green smoke «path forges an audit event (finding 5, Р-90)»
+   ✓ green smoke «the decision path role is trusted with a session user or a second factor»
+CAUGHT   row Р-96: GRANT UPDATE ON channel_data.pricing_halt TO repracer_app (3 s)
+   ✗ fails verify 0067_verify_schema_invariants_v14.sql — ERROR:  schema invariant violations:
+channel_data.pricing_halt: UPDATE of the decision path does not match the allow list (Р-96)
+   ✓ green smoke «path creates an eBay migration consent (Р-96, Р-2)»
+   ✓ green smoke «path opts the tenant into Kaufland Smart Pricing (Р-96, Р-12, Р-41)»
+   ✓ green smoke «path lowers min_price (Р-96, Р-5)»
+   ✓ green smoke «path changes the unit cost (Р-96, Р-83)»
+   ✗ fails smoke «path schedules the review of a halt (finding 2 ревью шага 16)» — CHECK FAILED: path schedules the review of a halt (finding 2 ревью шага 16)
+   ✓ green smoke «path writes an automatic halt review (finding 2 ревью шага 16)»
+   ✓ green smoke «path forges an audit event (finding 5, Р-90)»
+   ✓ green smoke «the decision path role is trusted with a session user or a second factor»
+CAUGHT   row Р-96: GRANT INSERT ON tenant_data.cost_profile TO repracer_app (3 s)
+   ✗ fails verify 0067_verify_schema_invariants_v14.sql — ERROR:  schema invariant violations:
+tenant_data.cost_profile: INSERT of the decision path does not match the allow list (Р-96)
+   ✓ green smoke «path creates an eBay migration consent (Р-96, Р-2)»
+   ✓ green smoke «path opts the tenant into Kaufland Smart Pricing (Р-96, Р-12, Р-41)»
+   ✓ green smoke «path lowers min_price (Р-96, Р-5)»
+   ✗ fails smoke «path changes the unit cost (Р-96, Р-83)» — CHECK FAILED: path changes the unit cost (Р-96, Р-83)
+   ✓ green smoke «path schedules the review of a halt (finding 2 ревью шага 16)»
+   ✓ green smoke «path writes an automatic halt review (finding 2 ревью шага 16)»
+   ✓ green smoke «path forges an audit event (finding 5, Р-90)»
+   ✓ green smoke «the decision path role is trusted with a session user or a second factor»
+CAUGHT   row Р-96: GRANT INSERT ON channel_data.pricing_halt_review TO repracer_app (3 s)
+   ✗ fails verify 0067_verify_schema_invariants_v14.sql — ERROR:  schema invariant violations:
+channel_data.pricing_halt_review: INSERT of the decision path does not match the allow list (Р-96)
+   ✓ green smoke «path creates an eBay migration consent (Р-96, Р-2)»
+   ✓ green smoke «path opts the tenant into Kaufland Smart Pricing (Р-96, Р-12, Р-41)»
+   ✓ green smoke «path lowers min_price (Р-96, Р-5)»
+   ✓ green smoke «path changes the unit cost (Р-96, Р-83)»
+   ✓ green smoke «path schedules the review of a halt (finding 2 ревью шага 16)»
+   ✗ fails smoke «path writes an automatic halt review (finding 2 ревью шага 16)» — CHECK FAILED: path writes an automatic halt review (finding 2 ревью шага 16)
+   ✓ green smoke «path forges an audit event (finding 5, Р-90)»
+   ✓ green smoke «the decision path role is trusted with a session user or a second factor»
+CAUGHT   row Р-96: GRANT INSERT ON audit.audit_event TO repracer_app (3 s)
+   ✗ fails verify 0067_verify_schema_invariants_v14.sql — ERROR:  schema invariant violations:
+audit.audit_event: INSERT of the decision path does not match the allow list (Р-96)
+   ✓ green smoke «path creates an eBay migration consent (Р-96, Р-2)»
+   ✓ green smoke «path opts the tenant into Kaufland Smart Pricing (Р-96, Р-12, Р-41)»
+   ✓ green smoke «path lowers min_price (Р-96, Р-5)»
+   ✓ green smoke «path changes the unit cost (Р-96, Р-83)»
+   ✓ green smoke «path schedules the review of a halt (finding 2 ревью шага 16)»
+   ✓ green smoke «path writes an automatic halt review (finding 2 ревью шага 16)»
+   ✗ fails smoke «path forges an audit event (finding 5, Р-90)» — CHECK FAILED: path forges an audit event (finding 5, Р-90)
+   ✓ green smoke «the decision path role is trusted with a session user or a second factor»
+CAUGHT   row находка 2: channel_data.review_halt_by_sample(uuid,uuid,timestamptz): «IF failed > 0 THEN…» → «IF false THEN…» (2 s)
+   ✗ fails audit-guards.pg.test.ts «finding 3» — finding 3, step 16 finding 2: an automatic release is computed by the database from the recorded sample — the decision path writes neither the review nor the release [Expected valu
+CAUGHT   row Р-96: GRANT EXECUTE ON FUNCTION security.invite_member(uuid, text, text, bytea, interval) TO repracer_app (3 s)
+   ✗ fails verify 0067_verify_schema_invariants_v14.sql — ERROR:  schema invariant violations:
+security.invite_member(uuid,text,text,bytea,interval): SECURITY DEFINER function executable by the decision path is not in the allow list (Р-96)
+   ✓ green smoke «path creates an eBay migration consent (Р-96, Р-2)»
+   ✓ green smoke «path opts the tenant into Kaufland Smart Pricing (Р-96, Р-12, Р-41)»
+   ✓ green smoke «path lowers min_price (Р-96, Р-5)»
+   ✓ green smoke «path changes the unit cost (Р-96, Р-83)»
+   ✓ green smoke «path schedules the review of a halt (finding 2 ревью шага 16)»
+   ✓ green smoke «path writes an automatic halt review (finding 2 ревью шага 16)»
+   ✓ green smoke «path forges an audit event (finding 5, Р-90)»
+   ✓ green smoke «the decision path role is trusted with a session user or a second factor»
+CAUGHT   row находка 2: channel_data.review_halt_by_sample(uuid,uuid,timestamptz): «IF v_at < h.next_review_at THEN…» → «IF false THEN…» (1 s)
+   ✗ fails audit-guards.pg.test.ts «finding 3» — finding 3, step 16 finding 2: an automatic release is computed by the database from the recorded sample — the decision path writes neither the review nor the release [Expected valu
+CAUGHT   row находка 2: channel_data.review_halt_by_sample(uuid,uuid,timestamptz): «IF accepted < required THEN…» → «IF false THEN…» (2 s)
+   ✗ fails audit-guards.pg.test.ts «finding 3» — finding 3, step 16 finding 2: an automatic release is computed by the database from the recorded sample — the decision path writes neither the review nor the release [new row for r
+CAUGHT   row находка 4: ALTER TABLE tenant_data.min_price DISABLE TRIGGER zz_append_only (3 s)
+   ✗ fails smoke «append-only tenant_data.min_price» — CHECK FAILED: append-only tenant_data.min_price
+   ✓ green smoke «append-only channel_data.price_decision»
+   ✓ green smoke «append-only channel_data.price_intent»
+   ✓ green smoke «append-only tenant_data.pricing_strategy»
+CAUGHT   row находка 4: ALTER TABLE channel_data.price_decision DISABLE TRIGGER zz_append_only (3 s)
+   ✓ green smoke «append-only tenant_data.min_price»
+   ✗ fails smoke «append-only channel_data.price_decision» — CHECK FAILED: append-only channel_data.price_decision
+   ✓ green smoke «append-only channel_data.price_intent»
+   ✓ green smoke «append-only tenant_data.pricing_strategy»
+CAUGHT   row находка 4: ALTER TABLE channel_data.price_intent DISABLE TRIGGER zz_append_only (3 s)
+   ✓ green smoke «append-only tenant_data.min_price»
+   ✓ green smoke «append-only channel_data.price_decision»
+   ✗ fails smoke «append-only channel_data.price_intent» — CHECK FAILED: append-only channel_data.price_intent
+   ✓ green smoke «append-only tenant_data.pricing_strategy»
+CAUGHT   row находка 4: ALTER TABLE tenant_data.pricing_strategy DISABLE TRIGGER zz_append_only (3 s)
+   ✓ green smoke «append-only tenant_data.min_price»
+   ✓ green smoke «append-only channel_data.price_decision»
+   ✓ green smoke «append-only channel_data.price_intent»
+   ✗ fails smoke «append-only tenant_data.pricing_strategy» — CHECK FAILED: append-only tenant_data.pricing_strategy
+CAUGHT   row Р-97: DROP TRIGGER a0_admin_write_person ON tenant_data.product (3 s)
+   ✗ fails verify 0067_verify_schema_invariants_v14.sql — ERROR:  schema invariant violations:
+tenant_data.product: administrative INSERT without the person guard (Р-97)
+   ✗ fails smoke «administrative change without a person (Р-97)» — CHECK FAILED: administrative change without a person (Р-97)
+   ✗ fails smoke «administrative change by a user outside the tenant (Р-97)» — CHECK FAILED: administrative change by a user outside the tenant (Р-97)
+   ✓ green smoke «the administrative service records an automatic review without a person (Р-97)»
+CAUGHT   row находка 4: CREATE OR REPLACE FUNCTION security.forbid_mutation() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN coal (3 s)
+   ✗ fails smoke «append-only tenant_data.min_price» — CHECK FAILED: append-only tenant_data.min_price
+   ✗ fails smoke «append-only channel_data.price_decision» — CHECK FAILED: append-only channel_data.price_decision
+   ✗ fails smoke «append-only channel_data.price_intent» — CHECK FAILED: append-only channel_data.price_intent
+   ✗ fails smoke «append-only tenant_data.pricing_strategy» — CHECK FAILED: append-only tenant_data.pricing_strategy
+CAUGHT   row Р-97: DROP TRIGGER zz_admin_write_audit ON tenant_data.product (2 s)
+   ✗ fails verify 0067_verify_schema_invariants_v14.sql — ERROR:  schema invariant violations:
+tenant_data.product: administrative INSERT is not written to the audit log (Р-97)
+   ✓ green smoke «administrative change without a person (Р-97)»
+   ✓ green smoke «administrative change by a user outside the tenant (Р-97)»
+   ✓ green smoke «the administrative service records an automatic review without a person (Р-97)»
+CAUGHT   row Р-97: DROP TRIGGER a0_admin_write_person ON channel_data.pricing_halt_review (2 s)
+   ✗ fails verify 0067_verify_schema_invariants_v14.sql — ERROR:  schema invariant violations:
+channel_data.pricing_halt_review: administrative INSERT without the person guard (Р-97)
+   ✓ green smoke «administrative change without a person (Р-97)»
+   ✓ green smoke «administrative change by a user outside the tenant (Р-97)»
+   ✗ fails smoke «the administrative service records an automatic review without a person (Р-97)» — CHECK FAILED: the administrative service records an automatic review without a person (Р-97)
+CAUGHT   row Р-97: security.admin_session(): «pg_has_role(session_user, 'repracer_admin', 'MEMBE…» → «false…» (2 s)
+   ✓ green verify 0067_verify_schema_invariants_v14.sql
+   ✗ fails smoke «administrative change without a person (Р-97)» — CHECK FAILED: administrative change without a person (Р-97)
+   ✗ fails smoke «administrative change by a user outside the tenant (Р-97)» — CHECK FAILED: administrative change by a user outside the tenant (Р-97)
+   ✗ fails smoke «the administrative service records an automatic review without a person (Р-97)» — CHECK FAILED: the administrative service records an automatic review without a person (Р-97)
+CAUGHT   row Р-97: security.require_person_for_admin_write(): «IF security.admin_session() THEN…» → «IF false THEN…» (2 s)
+   ✓ green verify 0067_verify_schema_invariants_v14.sql
+   ✗ fails smoke «administrative change without a person (Р-97)» — CHECK FAILED: administrative change without a person (Р-97)
+   ✗ fails smoke «administrative change by a user outside the tenant (Р-97)» — CHECK FAILED: administrative change by a user outside the tenant (Р-97)
+   ✗ fails smoke «the administrative service records an automatic review without a person (Р-97)» — CHECK FAILED: the administrative service records an automatic review without a person (Р-97)
+CAUGHT   row находка 5: security.provision_tenant(uuid,text,text,jsonb): «IF m ->> 'role' IS DISTINCT FROM 'OWNER' THEN…» → «IF false THEN…» (3 s)
+   ✗ fails smoke «existing user attached as a member without an invitation (step 16 finding 5)» — CHECK FAILED: existing user attached as a member without an invitation (step 16 finding 5)
+   ✓ green smoke «existing user provisioned as owner under another email (step 16 finding 5)»
+   ✓ green smoke «existing user who never signed in provisioned as owner (step 16 finding 5)»
+CAUGHT   row находка 5: security.provision_tenant(uuid,text,text,jsonb): «IF lower(trim(m ->> 'email')) IS DISTINCT FROM exi…» → «IF false THEN…» (3 s)
+   ✓ green smoke «existing user attached as a member without an invitation (step 16 finding 5)»
+   ✗ fails smoke «existing user provisioned as owner under another email (step 16 finding 5)» — CHECK FAILED: existing user provisioned as owner under another email (step 16 finding 5)
+   ✓ green smoke «existing user who never signed in provisioned as owner (step 16 finding 5)»
+CAUGHT   row находка 5: security.provision_tenant(uuid,text,text,jsonb): «IF NOT EXISTS (SELECT 1 FROM platform.external_ide…» → «IF false AND NOT EXISTS (SELEC…» (2 s)
+   ✓ green smoke «existing user attached as a member without an invitation (step 16 finding 5)»
+   ✓ green smoke «existing user provisioned as owner under another email (step 16 finding 5)»
+   ✗ fails smoke «existing user who never signed in provisioned as owner (step 16 finding 5)» — CHECK FAILED: existing user who never signed in provisioned as owner (step 16 finding 5)
+CAUGHT   row Р-98: security.accept_identity_invitation(bytea,text,text,text,boolean): «IF NOT inv.relink THEN…» → «IF false THEN…» (2 s)
+   ✗ fails identity.pg.test.ts «Р-98» — Р-98: a sign-in is relinked only by a new invitation of the tenant owner with a second factor; the old sign-in resolves nobody and both steps are audited [Missing expected rejectio
+CAUGHT   row Р-98: security.accept_identity_invitation(bytea,text,text,text,boolean): «IF EXISTS (SELECT 1 FROM platform.external_identit…» → «IF false THEN…» (2 s)
+   ✗ fails identity.pg.test.ts «Р-98» — Р-98: a sign-in is relinked only by a new invitation of the tenant owner with a second factor; the old sign-in resolves nobody and both steps are audited [Missing expected rejectio
+CAUGHT   row Р-98: security.invite_relink(uuid,uuid,bytea,interval): «IF NOT security.session_mfa() THEN…» → «IF false THEN…» (2 s)
+   ✗ fails identity.pg.test.ts «Р-98» — Р-98: a sign-in is relinked only by a new invitation of the tenant owner with a second factor; the old sign-in resolves nobody and both steps are audited [Missing expected rejectio
+CAUGHT   row Р-98: security.invite_relink(uuid,uuid,bytea,interval): «AND m.status = 'ACTIVE' AND m.role = 'OWNER') THEN…» → «AND m.status = 'ACTIVE') THEN…» (2 s)
+   ✗ fails identity.pg.test.ts «Р-98» — Р-98: a sign-in is relinked only by a new invitation of the tenant owner with a second factor; the old sign-in resolves nobody and both steps are audited [Missing expected rejectio
+UNCAUGHT row OQ-151: channel_data.pricing_strategy_undercut_guard(): «IF EXISTS (SELECT 1 FROM tenant_data.write_scope s…» → «IF false AND EXISTS (SELECT 1 …» (2 s)
+   ✓ green undercut-eternal.pg.test.ts «Р-91: the strategy version keeps its type»
+CAUGHT   row OQ-151: DROP TRIGGER b_write_scope_pins_live_strategy_version ON tenant_data.write_scope (2 s)
+   ✗ fails undercut-eternal.pg.test.ts «Р-91: the strategy version keeps its type» — Р-91: the strategy version keeps its type without the undercut; the undercut lives apart, is superseded with the version and still reaches the engine [OQ-151: a scope is not pinned
+CAUGHT   row OQ-151: DROP TRIGGER zb_write_scope_release_strategy_version ON tenant_data.write_scope (2 s)
+   ✗ fails undercut-eternal.pg.test.ts «Р-91: the strategy version keeps its type» — Р-91: the strategy version keeps its type without the undercut; the undercut lives apart, is superseded with the version and still reaches the engine [the released version starts i
+CAUGHT   row находка 6: security.param_value_valid(jsonb,jsonb): «IF spec IS NULL THEN…» → «IF true THEN RETURN true; END …» (3 s)
+   ✗ fails undercut-eternal.pg.test.ts «finding 15» — finding 15: the database registry of declared keys equals the code; an undeclared parameter, an unknown code or an unknown field is refused [an amount as a string]
+CAUGHT   row находка 6: security.explanation_node_declared(jsonb,text,boolean): «IF path = '$' AND (node -> 'format') IS DISTINCT F…» → «IF false AND (node -> 'format'…» (3 s)
+   ✗ fails undercut-eternal.pg.test.ts «finding 15» — finding 15: the database registry of declared keys equals the code; an undeclared parameter, an unknown code or an unknown field is refused [another explanation format]
+CAUGHT   row находка 6: security.explanation_node_declared(jsonb,text,boolean): «OR (w.value #>> '{}') !~ '^[A-Za-z][A-Za-z0-9_]{0,…» → «…» (2 s)
+   ✗ fails undercut-eternal.pg.test.ts «finding 15» — finding 15: the database registry of declared keys equals the code; an undeclared parameter, an unknown code or an unknown field is refused [a withheld name that is not an identifi
+
+| Строка Р-93 | Инвариант | Мутация | Поймана | Заявленные проверки на мутации |
+|---|---|---|---|---|
+| 12 | Р-43, Р-44: потолок при создании и отправке записи | `DROP TRIGGER ba_channel_write_ceiling_insert ON tenant_data.channel_write` | да | ✗ smoke «write created above lowered max_price (Р-44, check 2)»<br>✓ smoke «dispatch above lowered max_price (Р-44, check 3)»<br>✓ store.pg.test.ts «refuses a price above max_price» |
+| 12 | Р-43, Р-44: потолок при создании и отправке записи | `DROP TRIGGER ba_channel_write_ceiling_dispatch ON tenant_data.channel_write` | да | ✓ smoke «write created above lowered max_price (Р-44, check 2)»<br>✗ smoke «dispatch above lowered max_price (Р-44, check 3)»<br>✓ store.pg.test.ts «refuses a price above max_price» |
+| 13 | Р-44: без округления до границы, причина отказа обязательна | `ALTER TABLE channel_data.price_decision DROP CONSTRAINT price_decision_no_bound_clamp` | да | ✗ smoke «clamp to floor instead of rejection (Р-44)»<br>✓ smoke «REJECTED without a reason» |
+| 13 | Р-44: без округления до границы, причина отказа обязательна | `ALTER TABLE channel_data.price_decision DROP CONSTRAINT price_decision_rejection_reason_iff` | да | ✓ smoke «clamp to floor instead of rejection (Р-44)»<br>✗ smoke «REJECTED without a reason» |
+| 14 | Р-43: потолок не в guardrail | `ALTER TABLE tenant_data.guardrail DROP CONSTRAINT guardrail_ceiling_moved_to_max_price` | да | ✗ smoke «guardrail carrying a ceiling (moved to max_price, Р-43)» |
+| 16 | Р-52: снятие остановки только с записью журнала | `DROP TRIGGER c_pricing_halt_release_journal ON channel_data.pricing_halt` | да | ✗ smoke «manual release without a journal record (Р-52)»<br>✓ smoke «manual halt release by a member with a second factor, a note and a journal record (Р-52, Р-88)»<br>✓ audit-guards.pg.test.ts «finding 1» |
+| 17 | Р-51: признак цены по конкурентам копируется в решение | `DROP TRIGGER aa_price_decision_copy_derivation ON channel_data.price_decision` | да | ✗ smoke «competitor_derived is not derived from rule_code» |
+| 18 | Р-57: валюты EUR и USD | `ALTER TABLE tenant_data.write_scope DROP CONSTRAINT write_scope_supported_currency` | да | ✗ smoke «currency outside EUR and USD» |
+| 19 | Р-58: налоговый режим единицы записи цены | `ALTER TABLE tenant_data.write_scope DROP CONSTRAINT write_scope_tax_regime_for_price` | да | ✓ smoke «USD write scope attached to a EUR gross storefront (Р-57, Р-58)»<br>✓ smoke «net price basis with VAT regime (Р-58)»<br>✗ smoke «price write scope without tax regime (Р-58)» |
+| 20, 21 | OQ-98: отказ хранит параметры причины | `ALTER TABLE channel_data.price_decision DROP CONSTRAINT price_decision_rejection_explained` | да | ✗ smoke «rejection without its reason parameters (OQ-98)»<br>✓ store.pg.test.ts «OQ-93, OQ-94, OQ-98» |
+| 22 | Р-64: завершение записи — с причиной; ждущая запись объявляется событием | `ALTER TABLE tenant_data.channel_write DROP CONSTRAINT channel_write_end_explained` | да | ✗ smoke «write discarded without a reason (Р-64)»<br>✓ smoke «write history ended without a reason (Р-64)»<br>✓ write-queue.pg.test.ts<br>✓ budget-retry-dispatch.pg.test.ts |
+| 22 | Р-64: завершение записи — с причиной; ждущая запись объявляется событием | `ALTER TABLE tenant_data.channel_write_history DROP CONSTRAINT channel_write_history_end_explained` | да | ✓ smoke «write discarded without a reason (Р-64)»<br>✗ smoke «write history ended without a reason (Р-64)»<br>✓ write-queue.pg.test.ts<br>✓ budget-retry-dispatch.pg.test.ts |
+| 22 | Р-64: завершение записи — с причиной; ждущая запись объявляется событием | `DROP TRIGGER zz_channel_write_announce_dispatch ON tenant_data.channel_write` | да | ✓ smoke «write discarded without a reason (Р-64)»<br>✓ smoke «write history ended without a reason (Р-64)»<br>✗ write-queue.pg.test.ts<br>✓ budget-retry-dispatch.pg.test.ts |
+| 23 | Р-61: курс ЕЦБ неизменяем; курс — в решении с переводом себестоимости | `DROP TRIGGER zz_fx_rate_immutable ON platform.fx_rate` | да | ✗ smoke «ECB rate is immutable (Р-61)»<br>✓ smoke «decision exchange rate without its fields (Р-61)»<br>✓ fx-day-boundary.pg.test.ts «Р-61 in the database» |
+| 23 | Р-61: курс ЕЦБ неизменяем; курс — в решении с переводом себестоимости | `DROP TRIGGER aa_price_decision_fx_recorded ON channel_data.price_decision` | да | ✓ smoke «ECB rate is immutable (Р-61)»<br>✓ smoke «decision exchange rate without its fields (Р-61)»<br>✗ fx-day-boundary.pg.test.ts «Р-61 in the database» |
+| 23 | Р-61: курс ЕЦБ неизменяем; курс — в решении с переводом себестоимости | `ALTER TABLE channel_data.price_decision DROP CONSTRAINT price_decision_fx_shape` | да | ✓ smoke «ECB rate is immutable (Р-61)»<br>✗ smoke «decision exchange rate without its fields (Р-61)»<br>✓ fx-day-boundary.pg.test.ts «Р-61 in the database» |
+| 24, 26 | Р-62, Р-65: граница суток — пояс витрины | `ALTER TABLE platform.marketplace DROP CONSTRAINT marketplace_time_zone_known_if_confirmed` | да | ✓ smoke «budgeted write while the storefront day boundary is unconfirmed (Р-65)»<br>✓ smoke «budget day is not the current storefront day (Р-65)»<br>✗ smoke «US storefront confirmed without a time zone»<br>✓ fx-day-boundary.pg.test.ts «Р-65: a US storefront» |
+| 24, 26 | Р-62, Р-65: граница суток — пояс витрины | `DROP TRIGGER aa_channel_write_budget_day_tz ON tenant_data.channel_write` | да | ✗ smoke «budgeted write while the storefront day boundary is unconfirmed (Р-65)»<br>✗ smoke «budget day is not the current storefront day (Р-65)»<br>✓ smoke «US storefront confirmed without a time zone»<br>✓ fx-day-boundary.pg.test.ts «Р-65: a US storefront» |
+| 24, 26 | Р-62, Р-65: граница суток — пояс витрины | `DROP TRIGGER aa_price_daily_day_tz ON tenant_data.price_daily` | да | ✓ smoke «budgeted write while the storefront day boundary is unconfirmed (Р-65)»<br>✓ smoke «budget day is not the current storefront day (Р-65)»<br>✓ smoke «US storefront confirmed without a time zone»<br>✗ fx-day-boundary.pg.test.ts «Р-65: a US storefront» |
+| 25 | Р-60: тенант в базе своего региона | `DROP TRIGGER tenant_region_guard ON tenant_data.tenant` | да | ✗ smoke «tenant in wrong region DB (Р-60)» |
+| 27 | Р-69, Р-70: остановки человеком и системные | `ALTER TABLE channel_data.pricing_halt DROP CONSTRAINT pricing_halt_system_only` | да | ✓ smoke «competitor-derived approval while halted (Р-51)»<br>✓ smoke «approval while the tenant is stopped by a person (Р-69)»<br>✓ smoke «dispatch while the tenant is stopped by a person (Р-69)»<br>✓ smoke «dispatch of a competitor-derived write while halted (Р-51)»<br>✓ smoke «manual halt release without a second factor (finding 12, Р-88)»<br>✗ step12.pg.test.ts<br>✓ audit-guards.pg.test.ts |
+| 27 | Р-69, Р-70: остановки человеком и системные | `DROP TRIGGER aa_price_stop_role_guard ON tenant_data.price_stop` | да | ✓ smoke «competitor-derived approval while halted (Р-51)»<br>✓ smoke «approval while the tenant is stopped by a person (Р-69)»<br>✓ smoke «dispatch while the tenant is stopped by a person (Р-69)»<br>✓ smoke «dispatch of a competitor-derived write while halted (Р-51)»<br>✓ smoke «manual halt release without a second factor (finding 12, Р-88)»<br>✗ step12.pg.test.ts<br>✗ audit-guards.pg.test.ts |
+| 27 | Р-69, Р-70: остановки человеком и системные | `DROP TRIGGER ab_price_decision_stop_guard ON channel_data.price_decision` | да | ✓ smoke «competitor-derived approval while halted (Р-51)»<br>✗ smoke «approval while the tenant is stopped by a person (Р-69)»<br>✓ smoke «dispatch while the tenant is stopped by a person (Р-69)»<br>✓ smoke «dispatch of a competitor-derived write while halted (Р-51)»<br>✓ smoke «manual halt release without a second factor (finding 12, Р-88)»<br>✓ step12.pg.test.ts<br>✓ audit-guards.pg.test.ts |
+| 27 | Р-69, Р-70: остановки человеком и системные | `DROP TRIGGER bb_channel_write_stop_guard ON tenant_data.channel_write` | да | ✓ smoke «competitor-derived approval while halted (Р-51)»<br>✓ smoke «approval while the tenant is stopped by a person (Р-69)»<br>✗ smoke «dispatch while the tenant is stopped by a person (Р-69)»<br>✓ smoke «dispatch of a competitor-derived write while halted (Р-51)»<br>✓ smoke «manual halt release without a second factor (finding 12, Р-88)»<br>✓ step12.pg.test.ts<br>✓ audit-guards.pg.test.ts |
+| 27 | Р-69, Р-70: остановки человеком и системные | `DROP TRIGGER ca_pricing_halt_release_role_guard ON channel_data.pricing_halt` | да | ✓ smoke «competitor-derived approval while halted (Р-51)»<br>✓ smoke «approval while the tenant is stopped by a person (Р-69)»<br>✓ smoke «dispatch while the tenant is stopped by a person (Р-69)»<br>✓ smoke «dispatch of a competitor-derived write while halted (Р-51)»<br>✗ smoke «manual halt release without a second factor (finding 12, Р-88)»<br>✓ step12.pg.test.ts<br>✓ audit-guards.pg.test.ts |
+| 28, 32, 39, 40 | Р-68, Р-74, Р-80: слепок по классам, код причины NO_OP, столбцы intent в решении, NO_OP без ссылки на снимок | `ALTER TABLE channel_data.price_decision DROP CONSTRAINT price_decision_explanation_by_class` | да | ✗ smoke «NO_OP decision with an explanation (Р-74)»<br>✓ smoke «NO_OP decision with an unknown no-change reason (Р-74)»<br>✓ step14.pg.test.ts «finding 10, Р-80»<br>✓ channel-derived.pg.test.ts<br>✓ undercut-eternal.pg.test.ts |
+| 28, 32, 39, 40 | Р-68, Р-74, Р-80: слепок по классам, код причины NO_OP, столбцы intent в решении, NO_OP без ссылки на снимок | `ALTER TABLE channel_data.price_decision DROP CONSTRAINT price_decision_no_change_reason_code` | да | ✓ smoke «NO_OP decision with an explanation (Р-74)»<br>✗ smoke «NO_OP decision with an unknown no-change reason (Р-74)»<br>✓ step14.pg.test.ts «finding 10, Р-80»<br>✓ channel-derived.pg.test.ts<br>✓ undercut-eternal.pg.test.ts |
+| 28, 32, 39, 40 | Р-68, Р-74, Р-80: слепок по классам, код причины NO_OP, столбцы intent в решении, NO_OP без ссылки на снимок | `DROP TRIGGER a0_price_decision_intent_columns ON channel_data.price_decision` | да | ✓ smoke «NO_OP decision with an explanation (Р-74)» (not reached (tests/db/smoke_app.sql: ERROR:  null value in column "trigger_type" of relation "price_decision_d20260914" violates not-null constraint))<br>✓ smoke «NO_OP decision with an unknown no-change reason (Р-74)» (not reached (tests/db/smoke_app.sql: ERROR:  null value in column "trigger_type" of relation "price_decision_d20260914" violates not-null constraint))<br>✗ step14.pg.test.ts «finding 10, Р-80»<br>✗ channel-derived.pg.test.ts<br>✗ undercut-eternal.pg.test.ts |
+| 28, 32, 39, 40 | Р-68, Р-74, Р-80: слепок по классам, код причины NO_OP, столбцы intent в решении, NO_OP без ссылки на снимок | `DROP TRIGGER a_price_decision_snapshot_ref_guard ON channel_data.price_decision_snapshot_ref` | да | ✓ smoke «NO_OP decision with an explanation (Р-74)»<br>✓ smoke «NO_OP decision with an unknown no-change reason (Р-74)»<br>✗ step14.pg.test.ts «finding 10, Р-80»<br>✓ channel-derived.pg.test.ts<br>✓ undercut-eternal.pg.test.ts |
+| 29 | Р-71: сумма с валютой | `ALTER TABLE channel_data.price_decision DROP CONSTRAINT price_decision_amounts_have_currency` | да | ✓ smoke «rejected snapshot details: an amount without its currency (Р-71)»<br>✗ smoke «rejection parameters with an amount without its currency (Р-71)»<br>✓ smoke «write ended with an amount without its currency (Р-71)» |
+| 29 | Р-71: сумма с валютой | `ALTER TABLE tenant_data.channel_write DROP CONSTRAINT channel_write_end_params_currency` | да | ✓ smoke «rejected snapshot details: an amount without its currency (Р-71)»<br>✓ smoke «rejection parameters with an amount without its currency (Р-71)»<br>✗ smoke «write ended with an amount without its currency (Р-71)» |
+| 29 | Р-71: сумма с валютой | `ALTER TABLE channel_data.rejected_competitor_snapshot DROP CONSTRAINT rejected_competitor_snapshot_details_cur` | да | ✗ smoke «rejected snapshot details: an amount without its currency (Р-71)»<br>✓ smoke «rejection parameters with an amount without its currency (Р-71)»<br>✓ smoke «write ended with an amount without its currency (Р-71)» |
+| 30 | Р-73: «опасное» согласовано с отклонением | `ALTER TABLE tenant_data.price_intent_core DROP CONSTRAINT price_intent_core_dangerous_consistent` | да | ✗ smoke «eternal core: dangerous flag against the deviation (Р-73)»<br>✓ channel-derived.pg.test.ts |
+| 31, 37, 38 | OQ-125, OQ-129, находка 4: матрица прав остановок, автор — пользователь сессии | `CREATE OR REPLACE FUNCTION security.pricing_permission(p_role text, p_action text) RETURNS boolean LANGUAGE sq` | да | ✗ step14.pg.test.ts «finding 2»<br>✓ step14.pg.test.ts «finding 4»<br>✗ step12.pg.test.ts |
+| 31, 37, 38 | OQ-125, OQ-129, находка 4: матрица прав остановок, автор — пользователь сессии | `tenant_data.price_stop_role_guard(): «IF security.current_user_id() IS NULL OR u IS DIST…» → «IF false THEN…»` | да | ✓ step14.pg.test.ts «finding 2»<br>✗ step14.pg.test.ts «finding 4»<br>✓ step12.pg.test.ts |
+| 33 | Р-75: справочник объяснения неизменяем | `DROP TRIGGER explanation_ruleset_immutable ON platform.explanation_ruleset` | да | ✗ smoke «explanation ruleset is immutable (Р-75)»<br>✓ step14.pg.test.ts «finding 2» |
+| 34 | Р-76: остановки и снятия — в журнале аудита | `DROP TRIGGER zb_price_stop_audit ON tenant_data.price_stop` | да | ✓ smoke «the manual release is not in the audit log with its author»<br>✓ smoke «the system halt is not in the audit log»<br>✗ step14.pg.test.ts «finding 4»<br>✗ role-separation.pg.test.ts |
+| 34 | Р-76: остановки и снятия — в журнале аудита | `DROP TRIGGER zb_pricing_halt_audit ON channel_data.pricing_halt` | да | ✓ smoke «the manual release is not in the audit log with its author» (not reached (tests/db/smoke_admin.sql: ERROR:  the system halt is not in the audit log))<br>✗ smoke «the system halt is not in the audit log»<br>✓ step14.pg.test.ts «finding 4»<br>✓ role-separation.pg.test.ts |
+| 34 | Р-76: остановки и снятия — в журнале аудита | `DROP TRIGGER zb_pricing_halt_review_audit ON channel_data.pricing_halt_review` | да | ✗ smoke «the manual release is not in the audit log with its author»<br>✓ smoke «the system halt is not in the audit log»<br>✗ step14.pg.test.ts «finding 4»<br>✓ role-separation.pg.test.ts |
+| 35 | Р-77: движок без стратегии не включается | `ALTER TABLE tenant_data.write_scope DROP CONSTRAINT write_scope_engine_has_strategy` | да | ✗ smoke «ENGINE without a strategy (Р-77)» |
+| 41 | Р-79: подтверждённый архив ядра — со справочниками | `ALTER TABLE maintenance.partition_export DROP CONSTRAINT partition_export_core_archive_self_contained` | да | ✗ step14.pg.test.ts «Р-79» |
+| 42 | Р-83: пол с полом маржи перед каждой отправкой | `tenant_data.channel_write_before_update(): «NEW.floor_at_dispatch_minor := tenant_data.assert_…» → «NEW.floor_at_dispatch_minor :=…»` | да | ✗ verify 0061_verify_schema_invariants_v13.sql<br>✗ write-recheck.pg.test.ts |
+| 43 | Р-85, Р-91, находка 15: из вечного ядра не выводится значение канала | `ALTER TABLE tenant_data.price_intent_core DROP CONSTRAINT price_intent_core_competitor_rejection_not_kept` | да | ✓ verify 0061_verify_schema_invariants_v13.sql<br>✓ smoke «decision explanation with an undeclared reason parameter (finding 15)»<br>✗ smoke «eternal core: a competitor-derived rejection keeps its proposed price (Р-85)»<br>✓ smoke «eternal core: an undeclared reason parameter in the explanation (finding 15)»<br>✓ channel-derived.pg.test.ts<br>✓ undercut-eternal.pg.test.ts |
+| 43 | Р-85, Р-91, находка 15: из вечного ядра не выводится значение канала | `ALTER TABLE channel_data.price_decision DROP CONSTRAINT price_decision_explanation_keys_declared` | да | ✓ verify 0061_verify_schema_invariants_v13.sql<br>✗ smoke «decision explanation with an undeclared reason parameter (finding 15)»<br>✓ smoke «eternal core: a competitor-derived rejection keeps its proposed price (Р-85)»<br>✓ smoke «eternal core: an undeclared reason parameter in the explanation (finding 15)»<br>✓ channel-derived.pg.test.ts<br>✓ undercut-eternal.pg.test.ts |
+| 43 | Р-85, Р-91, находка 15: из вечного ядра не выводится значение канала | `ALTER TABLE tenant_data.price_intent_core DROP CONSTRAINT price_intent_core_explanation_keys_declared` | да | ✓ verify 0061_verify_schema_invariants_v13.sql<br>✓ smoke «decision explanation with an undeclared reason parameter (finding 15)»<br>✓ smoke «eternal core: a competitor-derived rejection keeps its proposed price (Р-85)»<br>✗ smoke «eternal core: an undeclared reason parameter in the explanation (finding 15)»<br>✓ channel-derived.pg.test.ts<br>✓ undercut-eternal.pg.test.ts |
+| 44 | Находки 1–3, Р-88: журнал проверок, автоматическое снятие, второй фактор | `DROP TRIGGER a_pricing_halt_review_guard ON channel_data.pricing_halt_review` | да | ✓ smoke «manual halt release without a second factor (finding 12, Р-88)»<br>✗ audit-guards.pg.test.ts |
+| 44 | Находки 1–3, Р-88: журнал проверок, автоматическое снятие, второй фактор | `DROP TRIGGER zc_pricing_halt_review_released_in_tx ON channel_data.pricing_halt_review` | да | ✓ smoke «manual halt release without a second factor (finding 12, Р-88)»<br>✗ audit-guards.pg.test.ts |
+| 44 | Находки 1–3, Р-88: журнал проверок, автоматическое снятие, второй фактор | `tenant_data.price_stop_role_guard(): «AND NOT security.session_mfa() THEN…» → «AND false THEN…»` | да | ✓ smoke «manual halt release without a second factor (finding 12, Р-88)»<br>✗ audit-guards.pg.test.ts |
+| 45 | C2: день бюджета при повторе — текущий день витрины | `DROP TRIGGER ab_channel_write_budget_day_retry ON tenant_data.channel_write` | да | ✗ smoke «retry after midnight is charged to today, whose budget is exhausted (C2, Р-19)»<br>✗ smoke «retry while the storefront day boundary is unconfirmed (C2, Р-65)»<br>✓ dispatcher-defects.pg.test.ts |
+| Р-96 | путь решения — только вычисление и запись цены | `GRANT INSERT ON tenant_data.migration_consent TO repracer_app` | да | ✗ verify 0067_verify_schema_invariants_v14.sql<br>✓ smoke «path creates an eBay migration consent (Р-96, Р-2)»<br>✓ smoke «path opts the tenant into Kaufland Smart Pricing (Р-96, Р-12, Р-41)»<br>✓ smoke «path lowers min_price (Р-96, Р-5)»<br>✓ smoke «path changes the unit cost (Р-96, Р-83)»<br>✓ smoke «path schedules the review of a halt (finding 2 ревью шага 16)»<br>✓ smoke «path writes an automatic halt review (finding 2 ревью шага 16)»<br>✓ smoke «path forges an audit event (finding 5, Р-90)»<br>✓ smoke «the decision path role is trusted with a session user or a second factor» |
+| Р-96 | путь решения — только вычисление и запись цены | `GRANT UPDATE ON tenant_data.tenant TO repracer_app` | да | ✗ verify 0067_verify_schema_invariants_v14.sql<br>✓ smoke «path creates an eBay migration consent (Р-96, Р-2)»<br>✗ smoke «path opts the tenant into Kaufland Smart Pricing (Р-96, Р-12, Р-41)»<br>✓ smoke «path lowers min_price (Р-96, Р-5)»<br>✓ smoke «path changes the unit cost (Р-96, Р-83)»<br>✓ smoke «path schedules the review of a halt (finding 2 ревью шага 16)»<br>✓ smoke «path writes an automatic halt review (finding 2 ревью шага 16)»<br>✓ smoke «path forges an audit event (finding 5, Р-90)»<br>✓ smoke «the decision path role is trusted with a session user or a second factor» |
+| Р-96 | путь решения — только вычисление и запись цены | `GRANT INSERT ON tenant_data.min_price TO repracer_app` | да | ✗ verify 0067_verify_schema_invariants_v14.sql<br>✓ smoke «path creates an eBay migration consent (Р-96, Р-2)»<br>✓ smoke «path opts the tenant into Kaufland Smart Pricing (Р-96, Р-12, Р-41)»<br>✗ smoke «path lowers min_price (Р-96, Р-5)»<br>✓ smoke «path changes the unit cost (Р-96, Р-83)»<br>✓ smoke «path schedules the review of a halt (finding 2 ревью шага 16)»<br>✓ smoke «path writes an automatic halt review (finding 2 ревью шага 16)»<br>✓ smoke «path forges an audit event (finding 5, Р-90)»<br>✓ smoke «the decision path role is trusted with a session user or a second factor» |
+| Р-96 | путь решения — только вычисление и запись цены | `GRANT INSERT ON tenant_data.cost_profile TO repracer_app` | да | ✗ verify 0067_verify_schema_invariants_v14.sql<br>✓ smoke «path creates an eBay migration consent (Р-96, Р-2)»<br>✓ smoke «path opts the tenant into Kaufland Smart Pricing (Р-96, Р-12, Р-41)»<br>✓ smoke «path lowers min_price (Р-96, Р-5)»<br>✗ smoke «path changes the unit cost (Р-96, Р-83)»<br>✓ smoke «path schedules the review of a halt (finding 2 ревью шага 16)»<br>✓ smoke «path writes an automatic halt review (finding 2 ревью шага 16)»<br>✓ smoke «path forges an audit event (finding 5, Р-90)»<br>✓ smoke «the decision path role is trusted with a session user or a second factor» |
+| Р-96 | путь решения — только вычисление и запись цены | `GRANT UPDATE ON channel_data.pricing_halt TO repracer_app` | да | ✗ verify 0067_verify_schema_invariants_v14.sql<br>✓ smoke «path creates an eBay migration consent (Р-96, Р-2)»<br>✓ smoke «path opts the tenant into Kaufland Smart Pricing (Р-96, Р-12, Р-41)»<br>✓ smoke «path lowers min_price (Р-96, Р-5)»<br>✓ smoke «path changes the unit cost (Р-96, Р-83)»<br>✗ smoke «path schedules the review of a halt (finding 2 ревью шага 16)»<br>✓ smoke «path writes an automatic halt review (finding 2 ревью шага 16)»<br>✓ smoke «path forges an audit event (finding 5, Р-90)»<br>✓ smoke «the decision path role is trusted with a session user or a second factor» |
+| Р-96 | путь решения — только вычисление и запись цены | `GRANT INSERT ON channel_data.pricing_halt_review TO repracer_app` | да | ✗ verify 0067_verify_schema_invariants_v14.sql<br>✓ smoke «path creates an eBay migration consent (Р-96, Р-2)»<br>✓ smoke «path opts the tenant into Kaufland Smart Pricing (Р-96, Р-12, Р-41)»<br>✓ smoke «path lowers min_price (Р-96, Р-5)»<br>✓ smoke «path changes the unit cost (Р-96, Р-83)»<br>✓ smoke «path schedules the review of a halt (finding 2 ревью шага 16)»<br>✗ smoke «path writes an automatic halt review (finding 2 ревью шага 16)»<br>✓ smoke «path forges an audit event (finding 5, Р-90)»<br>✓ smoke «the decision path role is trusted with a session user or a second factor» |
+| Р-96 | путь решения — только вычисление и запись цены | `GRANT INSERT ON audit.audit_event TO repracer_app` | да | ✗ verify 0067_verify_schema_invariants_v14.sql<br>✓ smoke «path creates an eBay migration consent (Р-96, Р-2)»<br>✓ smoke «path opts the tenant into Kaufland Smart Pricing (Р-96, Р-12, Р-41)»<br>✓ smoke «path lowers min_price (Р-96, Р-5)»<br>✓ smoke «path changes the unit cost (Р-96, Р-83)»<br>✓ smoke «path schedules the review of a halt (finding 2 ревью шага 16)»<br>✓ smoke «path writes an automatic halt review (finding 2 ревью шага 16)»<br>✗ smoke «path forges an audit event (finding 5, Р-90)»<br>✓ smoke «the decision path role is trusted with a session user or a second factor» |
+| Р-96 | путь решения — только вычисление и запись цены | `GRANT EXECUTE ON FUNCTION security.invite_member(uuid, text, text, bytea, interval) TO repracer_app` | да | ✗ verify 0067_verify_schema_invariants_v14.sql<br>✓ smoke «path creates an eBay migration consent (Р-96, Р-2)»<br>✓ smoke «path opts the tenant into Kaufland Smart Pricing (Р-96, Р-12, Р-41)»<br>✓ smoke «path lowers min_price (Р-96, Р-5)»<br>✓ smoke «path changes the unit cost (Р-96, Р-83)»<br>✓ smoke «path schedules the review of a halt (finding 2 ревью шага 16)»<br>✓ smoke «path writes an automatic halt review (finding 2 ревью шага 16)»<br>✓ smoke «path forges an audit event (finding 5, Р-90)»<br>✓ smoke «the decision path role is trusted with a session user or a second factor» |
+| находка 2 | автоматическое снятие — итог базы по выборке, не запись пути решения | `channel_data.review_halt_by_sample(uuid,uuid,timestamptz): «IF failed > 0 THEN…» → «IF false THEN…»` | да | ✗ audit-guards.pg.test.ts «finding 3» |
+| находка 2 | автоматическое снятие — итог базы по выборке, не запись пути решения | `channel_data.review_halt_by_sample(uuid,uuid,timestamptz): «IF accepted < required THEN…» → «IF false THEN…»` | да | ✗ audit-guards.pg.test.ts «finding 3» |
+| находка 2 | автоматическое снятие — итог базы по выборке, не запись пути решения | `channel_data.review_halt_by_sample(uuid,uuid,timestamptz): «IF v_at < h.next_review_at THEN…» → «IF false THEN…»` | да | ✗ audit-guards.pg.test.ts «finding 3» |
+| находка 4 | append-only проверяется попыткой изменения | `ALTER TABLE tenant_data.min_price DISABLE TRIGGER zz_append_only` | да | ✗ smoke «append-only tenant_data.min_price»<br>✓ smoke «append-only channel_data.price_decision»<br>✓ smoke «append-only channel_data.price_intent»<br>✓ smoke «append-only tenant_data.pricing_strategy» |
+| находка 4 | append-only проверяется попыткой изменения | `ALTER TABLE channel_data.price_decision DISABLE TRIGGER zz_append_only` | да | ✓ smoke «append-only tenant_data.min_price»<br>✗ smoke «append-only channel_data.price_decision»<br>✓ smoke «append-only channel_data.price_intent»<br>✓ smoke «append-only tenant_data.pricing_strategy» |
+| находка 4 | append-only проверяется попыткой изменения | `ALTER TABLE channel_data.price_intent DISABLE TRIGGER zz_append_only` | да | ✓ smoke «append-only tenant_data.min_price»<br>✓ smoke «append-only channel_data.price_decision»<br>✗ smoke «append-only channel_data.price_intent»<br>✓ smoke «append-only tenant_data.pricing_strategy» |
+| находка 4 | append-only проверяется попыткой изменения | `ALTER TABLE tenant_data.pricing_strategy DISABLE TRIGGER zz_append_only` | да | ✓ smoke «append-only tenant_data.min_price»<br>✓ smoke «append-only channel_data.price_decision»<br>✓ smoke «append-only channel_data.price_intent»<br>✗ smoke «append-only tenant_data.pricing_strategy» |
+| находка 4 | append-only проверяется попыткой изменения | `CREATE OR REPLACE FUNCTION security.forbid_mutation() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN coal` | да | ✗ smoke «append-only tenant_data.min_price»<br>✗ smoke «append-only channel_data.price_decision»<br>✗ smoke «append-only channel_data.price_intent»<br>✗ smoke «append-only tenant_data.pricing_strategy» |
+| Р-97 | административная запись — только по действию человека и вся в аудите | `DROP TRIGGER a0_admin_write_person ON tenant_data.product` | да | ✗ verify 0067_verify_schema_invariants_v14.sql<br>✗ smoke «administrative change without a person (Р-97)»<br>✗ smoke «administrative change by a user outside the tenant (Р-97)»<br>✓ smoke «the administrative service records an automatic review without a person (Р-97)» |
+| Р-97 | административная запись — только по действию человека и вся в аудите | `DROP TRIGGER zz_admin_write_audit ON tenant_data.product` | да | ✗ verify 0067_verify_schema_invariants_v14.sql<br>✓ smoke «administrative change without a person (Р-97)»<br>✓ smoke «administrative change by a user outside the tenant (Р-97)»<br>✓ smoke «the administrative service records an automatic review without a person (Р-97)» |
+| Р-97 | административная запись — только по действию человека и вся в аудите | `DROP TRIGGER a0_admin_write_person ON channel_data.pricing_halt_review` | да | ✗ verify 0067_verify_schema_invariants_v14.sql<br>✓ smoke «administrative change without a person (Р-97)»<br>✓ smoke «administrative change by a user outside the tenant (Р-97)»<br>✗ smoke «the administrative service records an automatic review without a person (Р-97)» |
+| Р-97 | административная запись — только по действию человека и вся в аудите | `security.require_person_for_admin_write(): «IF security.admin_session() THEN…» → «IF false THEN…»` | да | ✓ verify 0067_verify_schema_invariants_v14.sql<br>✗ smoke «administrative change without a person (Р-97)»<br>✗ smoke «administrative change by a user outside the tenant (Р-97)»<br>✗ smoke «the administrative service records an automatic review without a person (Р-97)» |
+| Р-97 | административная запись — только по действию человека и вся в аудите | `security.admin_session(): «pg_has_role(session_user, 'repracer_admin', 'MEMBE…» → «false…»` | да | ✓ verify 0067_verify_schema_invariants_v14.sql<br>✗ smoke «administrative change without a person (Р-97)»<br>✗ smoke «administrative change by a user outside the tenant (Р-97)»<br>✗ smoke «the administrative service records an automatic review without a person (Р-97)» |
+| находка 5 | создание тенанта не присоединяет существующего пользователя мимо приглашения | `security.provision_tenant(uuid,text,text,jsonb): «IF m ->> 'role' IS DISTINCT FROM 'OWNER' THEN…» → «IF false THEN…»` | да | ✗ smoke «existing user attached as a member without an invitation (step 16 finding 5)»<br>✓ smoke «existing user provisioned as owner under another email (step 16 finding 5)»<br>✓ smoke «existing user who never signed in provisioned as owner (step 16 finding 5)» |
+| находка 5 | создание тенанта не присоединяет существующего пользователя мимо приглашения | `security.provision_tenant(uuid,text,text,jsonb): «IF lower(trim(m ->> 'email')) IS DISTINCT FROM exi…» → «IF false THEN…»` | да | ✓ smoke «existing user attached as a member without an invitation (step 16 finding 5)»<br>✗ smoke «existing user provisioned as owner under another email (step 16 finding 5)»<br>✓ smoke «existing user who never signed in provisioned as owner (step 16 finding 5)» |
+| находка 5 | создание тенанта не присоединяет существующего пользователя мимо приглашения | `security.provision_tenant(uuid,text,text,jsonb): «IF NOT EXISTS (SELECT 1 FROM platform.external_ide…» → «IF false AND NOT EXISTS (SELEC…»` | да | ✓ smoke «existing user attached as a member without an invitation (step 16 finding 5)»<br>✓ smoke «existing user provisioned as owner under another email (step 16 finding 5)»<br>✗ smoke «existing user who never signed in provisioned as owner (step 16 finding 5)» |
+| Р-98 | перепривязка входа — только приглашением владельца, прежний вход отозван | `security.accept_identity_invitation(bytea,text,text,text,boolean): «IF NOT inv.relink THEN…» → «IF false THEN…»` | да | ✗ identity.pg.test.ts «Р-98» |
+| Р-98 | перепривязка входа — только приглашением владельца, прежний вход отозван | `security.accept_identity_invitation(bytea,text,text,text,boolean): «IF EXISTS (SELECT 1 FROM platform.external_identit…» → «IF false THEN…»` | да | ✗ identity.pg.test.ts «Р-98» |
+| Р-98 | перепривязка входа — только приглашением владельца, прежний вход отозван | `security.invite_relink(uuid,uuid,bytea,interval): «IF NOT security.session_mfa() THEN…» → «IF false THEN…»` | да | ✗ identity.pg.test.ts «Р-98» |
+| Р-98 | перепривязка входа — только приглашением владельца, прежний вход отозван | `security.invite_relink(uuid,uuid,bytea,interval): «AND m.status = 'ACTIVE' AND m.role = 'OWNER') THEN…» → «AND m.status = 'ACTIVE') THEN…»` | да | ✗ identity.pg.test.ts «Р-98» |
+| OQ-151 | подрез закреплённой версии стратегии не начинает срок хранения | `channel_data.pricing_strategy_undercut_guard(): «IF EXISTS (SELECT 1 FROM tenant_data.write_scope s…» → «IF false AND EXISTS (SELECT 1 …»` | **нет** | ✓ undercut-eternal.pg.test.ts «Р-91: the strategy version keeps its type» |
+| OQ-151 | подрез закреплённой версии стратегии не начинает срок хранения | `DROP TRIGGER b_write_scope_pins_live_strategy_version ON tenant_data.write_scope` | да | ✗ undercut-eternal.pg.test.ts «Р-91: the strategy version keeps its type» |
+| OQ-151 | подрез закреплённой версии стратегии не начинает срок хранения | `DROP TRIGGER zb_write_scope_release_strategy_version ON tenant_data.write_scope` | да | ✗ undercut-eternal.pg.test.ts «Р-91: the strategy version keeps its type» |
+| находка 6 | слепок проверяется по видам и значениям параметров, а не только по именам ключей | `security.param_value_valid(jsonb,jsonb): «IF spec IS NULL THEN…» → «IF true THEN RETURN true; END …»` | да | ✗ undercut-eternal.pg.test.ts «finding 15» |
+| находка 6 | слепок проверяется по видам и значениям параметров, а не только по именам ключей | `security.explanation_node_declared(jsonb,text,boolean): «IF path = '$' AND (node -> 'format') IS DISTINCT F…» → «IF false AND (node -> 'format'…»` | да | ✗ undercut-eternal.pg.test.ts «finding 15» |
+| находка 6 | слепок проверяется по видам и значениям параметров, а не только по именам ключей | `security.explanation_node_declared(jsonb,text,boolean): «OR (w.value #>> '{}') !~ '^[A-Za-z][A-Za-z0-9_]{0,…» → «…»` | да | ✗ undercut-eternal.pg.test.ts «finding 15» |
+
+Строк с мутациями: 33; ложных (хотя бы одна мутация не поймана заявленными проверками): **1** — OQ-151.
+Мутаций: 83; не поймано: **1**.
+Не мутировались: 1–11 (свойства каталога остались в 0061); 15 (данные справочника НДС остались в 0061); 36 (правило проверяло отсутствие объектов входа).
+✗ — проверка упала на мутации (поймала), ✓ — осталась зелёной.

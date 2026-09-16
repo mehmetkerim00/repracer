@@ -15,12 +15,14 @@ import { approved, commit, contextOf, explained } from './drafts.ts';
 const PG_URL = process.env.REPRACER_PG_URL;
 const pool = PG_URL ? createPool(PG_URL, { max: 6, applicationName: 'repracer-store-pg-test' }) : null;
 const provisioning = PG_URL ? createPool(PG_URL.replace('svc_app@', 'svc_provisioning@'), { max: 1, applicationName: 'repracer-test-provisioning' }) : null;
+const admin = PG_URL ? createPool(PG_URL.replace('svc_app@', 'svc_admin@'), { max: 2, applicationName: 'repracer-test-admin' }) : null;
 // Р-84: без базы тест не пропускается, а падает
 if (!pool) throw new Error('REPRACER_PG_URL is required: database tests do not skip (Р-84)');
 const skip = false;
 after(async () => {
   await pool?.end();
   await provisioning?.end();
+  await admin?.end();
 });
 
 const ACCOUNT = '20000000-0000-4000-8000-000000000001';
@@ -38,13 +40,13 @@ function scopeSeed(n: number, strategy: MemorySeedScope['strategy']): MemorySeed
 }
 
 async function seed(scopes: MemorySeedScope[]): Promise<SeededPricingWorld> {
-  return seedPricingWorld(pool!, { provisioningPool: provisioning!,
+  return seedPricingWorld(pool!, { provisioningPool: provisioning!, adminPool: admin!,
     fixtureTenantId: '10000000-0000-4000-8000-000000000001', fixtureChannelAccountId: ACCOUNT, marketplaces: ['de', 'at'], clock: now(), seed: { scopes },
   });
 }
 
 test('RLS: another tenant sees neither the scope nor its context and writes nothing for it', { skip }, async () => {
-  const store = new PgPricingStore(pool!);
+  const store = new PgPricingStore(pool!, { adminPool: admin! });
   const a = await seed([scopeSeed(1, BUYBOX)]);
   const b = await seed([scopeSeed(1, BUYBOX)]);
   const wsA = a.ids.dbId('ws-1');
@@ -59,7 +61,7 @@ test('RLS: another tenant sees neither the scope nor its context and writes noth
 });
 
 test('Р-54: a bound changed between reading and commit rolls everything back', { skip }, async () => {
-  const store = new PgPricingStore(pool!);
+  const store = new PgPricingStore(pool!, { adminPool: admin! });
   const w = await seed([scopeSeed(2, BUYBOX)]);
   const ws = w.ids.dbId('ws-2');
   const stale = await contextOf(store, w.tenantId, ws);
@@ -71,7 +73,7 @@ test('Р-54: a bound changed between reading and commit rolls everything back', 
 });
 
 test('the database refuses a price above max_price even when the application claims a wider ceiling', { skip }, async () => {
-  const store = new PgPricingStore(pool!);
+  const store = new PgPricingStore(pool!, { adminPool: admin! });
   const w = await seed([scopeSeed(3, FIXED)]);
   const ws = w.ids.dbId('ws-3');
   const result = await commit(store, w.tenantId, approved(await contextOf(store, w.tenantId, ws), 3000, 3000));
@@ -81,7 +83,7 @@ test('the database refuses a price above max_price even when the application cla
 });
 
 test('Р-51 in the database: a halt changes the context of competitor-derived decisions, fixed prices still go out', { skip }, async () => {
-  const store = new PgPricingStore(pool!);
+  const store = new PgPricingStore(pool!, { adminPool: admin! });
   const w = await seed([scopeSeed(4, BUYBOX), scopeSeed(5, FIXED)]);
   const buyboxWs = w.ids.dbId('ws-4');
   const fixedWs = w.ids.dbId('ws-5');
@@ -99,14 +101,16 @@ test('Р-51 in the database: a halt changes the context of competitor-derived de
 });
 
 test('Р-54: a concurrent bound change serialises with the decision commit and forces a recompute', { skip }, async () => {
-  const store = new PgPricingStore(pool!);
+  const store = new PgPricingStore(pool!, { adminPool: admin! });
   const w = await seed([scopeSeed(6, BUYBOX)]);
   const ws = w.ids.dbId('ws-6');
   const drafts = approved(await contextOf(store, w.tenantId, ws), 1800);
-  const other = await pool!.connect();
+  // Р-96: границы меняет административный сервис; путь решения лишь ждёт его блокировку
+  const other = await admin!.connect();
   let settled = false;
   try {
-    await other.query(`BEGIN; SELECT set_config('app.tenant_id', '${w.tenantId}', true)`);
+    // Р-97: изменение границы — действие владельца в сессии административного сервиса
+    await other.query(`BEGIN; SELECT set_config('app.tenant_id', '${w.tenantId}', true), set_config('app.user_id', '${w.userId}', true)`);
     await other.query(
       `INSERT INTO tenant_data.max_price (tenant_id, scope_type, write_scope_id, currency, price_basis, amount_minor, version, created_by_membership_id)
        VALUES ($1, 'WRITE_SCOPE', $2, 'EUR', 'GROSS', 2400, 2, $3)`,
@@ -126,7 +130,7 @@ test('Р-54: a concurrent bound change serialises with the decision commit and f
 });
 
 test('writes of one scope: the first goes out, later ones queue behind it and supersede each other', { skip }, async () => {
-  const store = new PgPricingStore(pool!);
+  const store = new PgPricingStore(pool!, { adminPool: admin! });
   const w = await seed([scopeSeed(7, FIXED)]);
   const ws = w.ids.dbId('ws-7');
   const context = await contextOf(store, w.tenantId, ws);
@@ -146,7 +150,7 @@ test('writes of one scope: the first goes out, later ones queue behind it and su
 });
 
 test('OQ-93, OQ-94, OQ-98: projections keep currency and suggested price, the latest move, and the rejection parameters', { skip }, async () => {
-  const store = new PgPricingStore(pool!);
+  const store = new PgPricingStore(pool!, { adminPool: admin! });
   const w = await seed([scopeSeed(8, BUYBOX)]);
   const ws = w.ids.dbId('ws-8');
   const key = { channelAccountId: w.channelAccountId, marketplace: 'de', channelProductRef: '36298', condition: 'new' };

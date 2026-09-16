@@ -52,7 +52,8 @@ test('finding 1: a manual release review without the release, from a viewer, or 
   assert.match(await outcome(inTenant(admin, w.tenantId, review('membership-operator'), w.ids.dbId(standUserOf('membership-operator')), { mfa: true })), /did not happen/,
     'a release record without the release fails at commit');
   assert.match(await outcome(inTenant(admin, w.tenantId, review('membership-viewer'), w.ids.dbId(standUserOf('membership-viewer')), { mfa: true })), /may not release/);
-  const events = await inTenant(pool, w.tenantId, async (tx) => (await tx.query(`SELECT count(*)::int AS n FROM audit.audit_event WHERE tenant_id = $1 AND action = 'pricing.halt_released'`, [w.tenantId])).rows[0].n);
+  // Р-96: журнал аудита читает административный сервис
+  const events = await inTenant(admin, w.tenantId, async (tx) => (await tx.query(`SELECT count(*)::int AS n FROM audit.audit_event WHERE tenant_id = $1 AND action = 'pricing.halt_released'`, [w.tenantId])).rows[0].n);
   assert.equal(events, 0, 'no audit event survives a refused release');
 
   await store.releaseHalt(w.tenantId, halt.pricing_halt_id, {
@@ -75,27 +76,63 @@ test('finding 2: a price stop cannot be inserted already released', async () => 
   assert.equal(await outcome(insert(false)), 'accepted');
 });
 
-test('finding 3: an automatic release needs the system, a clean sample at the release and an elapsed window', async () => {
+test('finding 3, step 16 finding 2: an automatic release is computed by the database from the recorded sample — the decision path writes neither the review nor the release', async () => {
   const w = await world([{ marketplace: 'de', haltedAt: ago(3_600_000), reviewWindowSeconds: 60 }, { marketplace: 'at', haltedAt: ago(10_000), reviewWindowSeconds: 3600 }]);
   const store = new PgPricingStore(pool, { adminPool: admin });
   const halts = await inTenant(pool, w.tenantId, async (tx) => (await tx.query('SELECT pricing_halt_id, marketplace FROM channel_data.pricing_halt WHERE tenant_id = $1', [w.tenantId])).rows);
   const due = halts.find((h) => h.marketplace === 'de')!.pricing_halt_id;
   const early = halts.find((h) => h.marketplace === 'at')!.pricing_halt_id;
-  const auto = (sampleSize: number) => ({ kind: 'AUTO_SAMPLE' as const, outcome: 'RELEASED' as const, sampleSize, failedCount: 0, details: {}, at: now() });
+  const accept = (ref: string, observedAt = now()) => ({ channelProductRef: ref, observedAt, verdict: 'ACCEPT' as const, reasonCode: null });
+  const halt = async (id: string) => (await inTenant(pool, w.tenantId, async (tx) => (await tx.query(
+    'SELECT released_at, released_kind, next_review_at FROM channel_data.pricing_halt WHERE tenant_id = $1 AND pricing_halt_id = $2', [w.tenantId, id])).rows))[0];
 
   // Пользователь сессии бывает только у административного сервиса (Р-90): автоматическое снятие в такой сессии — отказ
   const inUserSession = inTenant(admin, w.tenantId, async (tx) => {
     await tx.query(`INSERT INTO channel_data.pricing_halt_review (tenant_id, pricing_halt_id, kind, outcome, sample_size, failed_count) VALUES ($1, $2, 'AUTO_SAMPLE', 'RELEASED', 3, 0)`, [w.tenantId, due]);
     await tx.query(`UPDATE channel_data.pricing_halt SET released_at = now(), released_kind = 'AUTO' WHERE tenant_id = $1 AND pricing_halt_id = $2`, [w.tenantId, due]);
   }, w.ids.dbId(standUserOf('membership-owner')));
-  assert.match(await outcome(inUserSession), /system action/);
-  assert.match(await outcome(store.releaseHalt(w.tenantId, early, auto(3))), /after the review window/);
-  const mismatched = inTenant(pool, w.tenantId, async (tx) => {
-    await tx.query(`INSERT INTO channel_data.pricing_halt_review (tenant_id, pricing_halt_id, kind, outcome, sample_size, failed_count, reviewed_at) VALUES ($1, $2, 'AUTO_SAMPLE', 'RELEASED', 3, 0, now() - interval '1 minute')`, [w.tenantId, due]);
-    await tx.query(`UPDATE channel_data.pricing_halt SET released_at = now(), released_kind = 'AUTO' WHERE tenant_id = $1 AND pricing_halt_id = $2`, [w.tenantId, due]);
-  });
-  assert.match(await outcome(mismatched), /clean sample reviewed at the release/);
-  assert.equal(await outcome(store.releaseHalt(w.tenantId, due, auto(3))), 'accepted');
+  assert.match(await outcome(inUserSession), /automatic halt review is a system action/);
+
+  // Подделка шага 16 (сдвиг срока, запись проверки, снятие) — у пути решения нет ни одного из этих прав (Р-96)
+  assert.match(await outcome(inTenant(pool, w.tenantId, (tx) => tx.query(
+    `UPDATE channel_data.pricing_halt SET next_review_at = now() - interval '1 day' WHERE tenant_id = $1 AND pricing_halt_id = $2`, [w.tenantId, early]))),
+  /permission denied for table pricing_halt$/);
+  assert.match(await outcome(inTenant(pool, w.tenantId, (tx) => tx.query(
+    `INSERT INTO channel_data.pricing_halt_review (tenant_id, pricing_halt_id, kind, outcome, sample_size, failed_count) VALUES ($1, $2, 'AUTO_SAMPLE', 'RELEASED', 3, 0)`, [w.tenantId, due]))),
+  /permission denied for table pricing_halt_review$/);
+  assert.match(await outcome(inTenant(pool, w.tenantId, (tx) => tx.query(
+    `INSERT INTO channel_data.pricing_halt_sample (tenant_id, pricing_halt_id, channel_product_ref, observed_at, recorded_at, verdict) VALUES ($1, $2, '3621461', now(), now() + interval '1 day', 'ACCEPT')`,
+    [w.tenantId, early]))),
+  /permission denied for table pricing_halt_sample$/, 'the time a sample is recorded is set by the database');
+  assert.match(await outcome(store.releaseHalt(w.tenantId, due, { kind: 'AUTO_SAMPLE', outcome: 'RELEASED', sampleSize: 3, failedCount: 0, details: {}, at: now() })),
+    /computed by the database from the recorded sample/);
+
+  // Срок не наступил: чистая выборка не снимает остановку, и момент из будущего срок не сокращает
+  await store.recordHaltSample(w.tenantId, early, [accept('3621461')], now());
+  assert.equal(await store.reviewHaltBySample(w.tenantId, early, new Date(Date.now() + 86_400_000).toISOString()), 'NOT_DUE');
+
+  // Срок наступил: без наблюдений, с наблюдением до срока и с наблюдением чужого товара — выборки нет
+  assert.equal(await store.reviewHaltBySample(w.tenantId, due, now()), 'NO_SAMPLE');
+  await store.recordHaltSample(w.tenantId, due, [accept('3621461', ago(3_590_000)), accept('9999999')], now());
+  assert.equal(await store.reviewHaltBySample(w.tenantId, due, now()), 'NO_SAMPLE');
+  assert.equal((await halt(due)).released_at, null);
+
+  // Чистое наблюдение рядом с неудачным — проверка не прошла, срок сдвинут на окно
+  await store.recordHaltSample(w.tenantId, due, [accept('3621461'), { channelProductRef: '3621462', observedAt: now(), verdict: 'READ_FAILED', reasonCode: 'CHANNEL_TIMEOUT' }], now());
+  assert.equal(await store.reviewHaltBySample(w.tenantId, due, now()), 'SAMPLE_FAILED');
+  const failed = await halt(due);
+  assert.equal(failed.released_at, null);
+  assert.ok(new Date(failed.next_review_at).getTime() > Date.now() + 30_000, 'the next review waits for the window');
+
+  // Чистая выборка после окна — снятие базой, запись проверки AUTO_SAMPLE, повтор не снимает второй раз
+  const fresh = await world([{ marketplace: 'de', haltedAt: ago(3_600_000), reviewWindowSeconds: 60 }]);
+  const [freshHalt] = await inTenant(pool, fresh.tenantId, async (tx) => (await tx.query('SELECT pricing_halt_id FROM channel_data.pricing_halt WHERE tenant_id = $1', [fresh.tenantId])).rows);
+  await store.recordHaltSample(fresh.tenantId, freshHalt.pricing_halt_id, [accept('3621461')], now());
+  assert.equal(await store.reviewHaltBySample(fresh.tenantId, freshHalt.pricing_halt_id, now()), 'RELEASED');
+  const released = await store.dumpState(fresh.tenantId);
+  assert.deepEqual(released.halts.map((h: { releasedKind: string | null }) => h.releasedKind), ['AUTO']);
+  assert.deepEqual(released.haltReviews.map((r: { kind: string; outcome: string }) => [r.kind, r.outcome]), [['AUTO_SAMPLE', 'RELEASED']]);
+  assert.equal(await store.reviewHaltBySample(fresh.tenantId, freshHalt.pricing_halt_id, now()), 'NOT_ACTIVE');
 });
 
 test('Р-88: releasing the tenant stop needs a second factor; a storefront stop does not', async () => {

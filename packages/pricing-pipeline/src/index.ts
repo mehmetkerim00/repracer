@@ -25,7 +25,7 @@ export type {
   EvaluationContext,
   HaltInfo,
   HaltRecord,
-  HaltReviewRecord,
+  HaltSampleObservation, HaltSampleReview, HaltReviewRecord,
   PriceScopeContext,
   PricingStore,
   ProductKey,
