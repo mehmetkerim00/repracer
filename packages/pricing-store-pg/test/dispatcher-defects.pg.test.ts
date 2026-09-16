@@ -94,7 +94,8 @@ test('D2: a retry in a held write scope is not swept — no alert storm; the sco
   const write = await dispatched(w, 2);
   const { queue, dispatcher, alerts } = harness(w, later(600_000));
   await queue.recordOutcome(w.tenantId, write, { channelWriteId: write.channelWriteId, status: 'REJECTED', error: { class: 'TRANSIENT', code: 'RATE_LIMITED', scope: 'ITEM', message: 'synthetic', raiseAlert: false } }, now(), DEFAULT_RETRY_POLICY);
-  const setStatus = (status: string) => inTenant(pool, w.tenantId, (tx) => tx.query('UPDATE tenant_data.write_scope SET status = $3 WHERE tenant_id = $1 AND write_scope_id = $2', [w.tenantId, w.ids.dbId('ws-2'), status]));
+  // Находка 4 ревью шага 17 (0068): удержание и снятие удержания единицы — действие человека в административном сервисе, не пути решения
+  const setStatus = (status: string) => inTenant(admin, w.tenantId, (tx) => tx.query('UPDATE tenant_data.write_scope SET status = $3 WHERE tenant_id = $1 AND write_scope_id = $2', [w.tenantId, w.ids.dbId('ws-2'), status]), w.userId);
 
   await setStatus('HELD');
   for (let i = 0; i < 3; i++) assert.equal((await dispatcher.sweep({ pendingMinAgeMs: 0 })).due, 0, `sweep ${i + 1} found the held retry`);

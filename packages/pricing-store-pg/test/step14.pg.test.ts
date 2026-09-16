@@ -82,7 +82,7 @@ test('finding 4: a stop, a resume and a manual halt release are accepted only fr
   });
 
   // Оператор пишет от членства владельца — отказ; без пользователя сессии — отказ; от своего членства — принято
-  assert.equal((await store.stopPricing(w.tenantId, record('membership-owner', user('membership-operator')))).status, 'FORBIDDEN');
+  assert.equal((await store.stopPricing(w.tenantId, record('membership-owner', user('membership-operator')))).status, 'FORBIDDEN', 'finding 4: a stop is not written in the name of another membership');
   // Административный сервис (Р-90) без пользователя сессии
   const noSession = await outcomeOf(inTenant(admin!, w.tenantId, (tx) => tx.query(
     `INSERT INTO tenant_data.price_stop (tenant_id, scope_type, stopped_at, stopped_by_membership_id, stop_note) VALUES ($1, 'TENANT', now(), $2, 'Synthetic stop without session user')`,

@@ -1,0 +1,923 @@
+TEST INCLUSION {"testFiles":38,"unincluded":0,"listedButMissing":0}
+
+> @repracer/console@0.1.0 test
+> node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec test/console.test.ts test/console.pg.test.ts
+
+✔ Р-78, Р-76, finding 4 on PostgreSQL: the stop and the resume are audited with the token user as author, role, note and scope; a role changed in the database applies at once (214.048208ms)
+✔ Р-74 on PostgreSQL: a NO_OP decision has no explanation in the database and the trace names the gap (26.08375ms)
+✔ Р-78: no password and no session — every request carries a provider token; missing, forged, expired, foreign or unlinked tokens are refused alike (110.686916ms)
+✔ stand API serves every screen of every world in German and English and refuses unknown addresses (26.627208ms)
+✔ screens render from the dictionary: sign-in, products with the effective floor, why this price with a NO_OP gap, rejected, bounds, stop with the audit log (194.85525ms)
+✔ Р-69, Р-76, OQ-129: a viewer cannot stop; an operator stops; the operator and the pricing manager cannot resume a tenant stop, the admin can; every step is in the audit log (3.006667ms)
+✔ Р-52: a system halt is released by an operator with a note; a viewer may not (0.798709ms)
+✔ G, Р-77: enabling a margin price without cost warns with the strategy type and who needs the cost (1.501167ms)
+✔ no endless spinner: a request that gets no answer ends with an error the screen can show (51.201667ms)
+✔ finding 6: the sign-in mode of the stand is explicit — a partial OIDC configuration or a simulator next to OIDC settings refuses to start (0.584667ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 729.996917
+
+> @repracer/analytics-export@0.1.0 test
+> node --experimental-strip-types --disable-warning=ExperimentalWarning --test test/*.test.ts
+
+TAP version 13
+# Subtest: Р-79: the core archive carries exactly the strategy versions and rulesets its explanations refer to and expands without the database
+ok 1 - Р-79: the core archive carries exactly the strategy versions and rulesets its explanations refer to and expands without the database
+  ---
+  duration_ms: 3.508208
+  type: 'test'
+  ...
+# Subtest: Р-79: an archive without the strategy version is not self-contained and says which row; rows of another tenant are refused (Р-23)
+ok 2 - Р-79: an archive without the strategy version is not self-contained and says which row; rows of another tenant are refused (Р-23)
+  ---
+  duration_ms: 0.410667
+  type: 'test'
+  ...
+# Subtest: OQ-150, Р-91: a strategy version carrying the undercut is neither archived nor accepted from an archive read back
+ok 3 - OQ-150, Р-91: a strategy version carrying the undercut is neither archived nor accepted from an archive read back
+  ---
+  duration_ms: 0.273
+  type: 'test'
+  ...
+# Subtest: OQ-98, Р-61: a rejected decision carries its reason parameters, checks and the exchange rate into ClickHouse
+ok 4 - OQ-98, Р-61: a rejected decision carries its reason parameters, checks and the exchange rate into ClickHouse
+  ---
+  duration_ms: 1.820917
+  type: 'test'
+  ...
+# Subtest: Р-27: intent classes split — CHANGED keeps inputs and reason, NO_OP collapses into one row with the decision outcome
+ok 5 - Р-27: intent classes split — CHANGED keeps inputs and reason, NO_OP collapses into one row with the decision outcome
+  ---
+  duration_ms: 0.368042
+  type: 'test'
+  ...
+# Subtest: Р-64: a superseded write keeps its end reason and the newer write it lost to
+ok 6 - Р-64: a superseded write keeps its end reason and the newer write it lost to
+  ---
+  duration_ms: 0.175333
+  type: 'test'
+  ...
+1..6
+# tests 6
+# suites 0
+# pass 6
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 115.44625
+
+> @repracer/broker@0.1.0 test
+> node --experimental-strip-types --disable-warning=ExperimentalWarning --test test/*.test.ts
+
+TAP version 13
+# Subtest: within a write scope events go out by scope_seq, not by transaction start time
+ok 1 - within a write scope events go out by scope_seq, not by transaction start time
+  ---
+  duration_ms: 1.01725
+  type: 'test'
+  ...
+# Subtest: a scope_seq gap holds the rest of that scope, other scopes are not delayed; the gap closes or is released after the timeout
+ok 2 - a scope_seq gap holds the rest of that scope, other scopes are not delayed; the gap closes or is released after the timeout
+  ---
+  duration_ms: 0.374375
+  type: 'test'
+  ...
+# Subtest: re-reading the overlap window does not publish an event twice
+ok 3 - re-reading the overlap window does not publish an event twice
+  ---
+  duration_ms: 0.160041
+  type: 'test'
+  ...
+1..3
+# tests 3
+# suites 0
+# pass 3
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 96.119958
+
+> @repracer/console-model@0.1.0 test
+> node --experimental-strip-types --disable-warning=ExperimentalWarning --test src/*.test.ts
+
+TAP version 13
+# Subtest: Р-72: the German and English dictionaries have the same keys, and every reason code has a title and a text
+ok 1 - Р-72: the German and English dictionaries have the same keys, and every reason code has a title and a text
+  ---
+  duration_ms: 1.991625
+  type: 'test'
+  ...
+# Subtest: Р-71: an amount is formatted only with the currency of the reason; without it the screen says so
+ok 2 - Р-71: an amount is formatted only with the currency of the reason; without it the screen says so
+  ---
+  duration_ms: 0.813833
+  type: 'test'
+  ...
+# Subtest: Р-68: a channel value withheld from the explanation is marked, not invented
+ok 3 - Р-68: a channel value withheld from the explanation is marked, not invented
+  ---
+  duration_ms: 0.195666
+  type: 'test'
+  ...
+# Subtest: D: four codes stay limited, each with the reason a parameter is impossible
+ok 4 - D: four codes stay limited, each with the reason a parameter is impossible
+  ---
+  duration_ms: 0.328084
+  type: 'test'
+  ...
+# Subtest: unknown codes and optional parameters: problems only where the registry is violated
+ok 5 - unknown codes and optional parameters: problems only where the registry is violated
+  ---
+  duration_ms: 0.244916
+  type: 'test'
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 5
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 113.541792
+
+> @repracer/fx-rates@0.1.0 test
+> node --experimental-strip-types --disable-warning=ExperimentalWarning --test test/*.test.ts
+
+TAP version 13
+# Subtest: parses the ECB daily file: one date, all currencies, rates as exact decimal strings
+ok 1 - parses the ECB daily file: one date, all currencies, rates as exact decimal strings
+  ---
+  duration_ms: 2.030125
+  type: 'test'
+  ...
+# Subtest: anything unexpected is refused rather than guessed
+ok 2 - anything unexpected is refused rather than guessed
+  ---
+  duration_ms: 0.302833
+  type: 'test'
+  ...
+# Subtest: Р-61: the day rate loads once, reloading the same rate changes nothing, a different rate for the same day is refused
+ok 3 - Р-61: the day rate loads once, reloading the same rate changes nothing, a different rate for the same day is refused
+  ---
+  duration_ms: 9.5665
+  type: 'test'
+  ...
+1..3
+# tests 3
+# suites 0
+# pass 3
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 94.294083
+
+> @repracer/identity@0.1.0 test
+> node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec src/identity.test.ts src/jwks.test.ts test/identity.pg.test.ts
+
+✔ a valid provider token resolves to our user and memberships; roles are read on every request (9.062ms)
+✔ forged, foreign, expired and algorithm-confused tokens are rejected (2.830708ms)
+✔ RS256 needs a key of at least 2048 bits (57.447375ms)
+✔ finding 5: fifty concurrent requests on a cold cache make one request to the provider (28.917916ms)
+✔ finding 5: a provider outage after the cache expired keeps sign-in working on the last keys, with one request per refresh window (23.377709ms)
+✔ finding 5: a flood of tokens with unknown key ids does not become a flood of provider requests — even after the cache expired (14.1235ms)
+✔ finding 5: a hanging provider times out; without usable keys sign-in fails closed, beyond the stale limit too (160.101125ms)
+✔ finding 5: an oversized or empty key set is refused (13.6505ms)
+✔ Р-88, findings 11 and 13: a provider subject is linked only by accepting an invitation for its own verified email; the decision path neither links nor resolves (39.643667ms)
+✔ Р-88, Р-90: an owner with a second factor invites a member from the administrative service; without it, as an operator or from the decision path the invitation is refused; a role change needs the factor and applies at once (32.47475ms)
+✔ finding 10, Р-9: a linked user accepts an invitation to a second tenant with the same sign-in; a second sign-in of the same provider and a sign-in of another user are refused (15.228875ms)
+✔ the password and session objects of step 13 no longer exist (0.416083ms)
+✔ Р-98: a sign-in is relinked only by a new invitation of the tenant owner with a second factor; the old sign-in resolves nobody and both steps are audited (21.218041ms)
+✔ Р-98, step 17 finding 3: two invitations accepted at the same time link one sign-in of the provider, not two (418.19875ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 685.60475
+
+> @repracer/input-sanity@0.1.0 test
+> node --experimental-strip-types --disable-warning=ExperimentalWarning --test src/*.test.ts
+
+TAP version 13
+# Subtest: normal snapshot is accepted with the anchors it was checked against
+ok 1 - normal snapshot is accepted with the anchors it was checked against
+  ---
+  duration_ms: 2.31425
+  type: 'test'
+  ...
+# Subtest: OQ-90 closed: our own price far from the market only warns, the snapshot is accepted
+ok 2 - OQ-90 closed: our own price far from the market only warns, the snapshot is accepted
+  ---
+  duration_ms: 0.335792
+  type: 'test'
+  ...
+# Subtest: cold start with cost: corrupted snapshot rejected by the cost anchor, normal one accepted
+ok 3 - cold start with cost: corrupted snapshot rejected by the cost anchor, normal one accepted
+  ---
+  duration_ms: 0.853291
+  type: 'test'
+  ...
+# Subtest: no primary anchor at all: fail closed
+ok 4 - no primary anchor at all: fail closed
+  ---
+  duration_ms: 0.103042
+  type: 'test'
+  ...
+# Subtest: internal consistency: an outlier used by the strategy rejects, an unused outlier warns
+ok 5 - internal consistency: an outlier used by the strategy rejects, an unused outlier warns
+  ---
+  duration_ms: 0.306167
+  type: 'test'
+  ...
+# Subtest: same EAN on another channel of the tenant anchors a snapshot without cost and history
+ok 6 - same EAN on another channel of the tenant anchors a snapshot without cost and history
+  ---
+  duration_ms: 0.299666
+  type: 'test'
+  ...
+# Subtest: history band is the fourth anchor
+ok 7 - history band is the fourth anchor
+  ---
+  duration_ms: 0.09
+  type: 'test'
+  ...
+# Subtest: Р-50: many products shifting by an almost identical factor across sellers halts the channel
+ok 8 - Р-50: many products shifting by an almost identical factor across sellers halts the channel
+  ---
+  duration_ms: 0.175
+  type: 'test'
+  ...
+# Subtest: Р-50: dispersed factors are a market event, not a halt
+ok 9 - Р-50: dispersed factors are a market event, not a halt
+  ---
+  duration_ms: 0.393583
+  type: 'test'
+  ...
+# Subtest: Р-50: one seller shifting many products is a market event, even with an identical factor
+ok 10 - Р-50: one seller shifting many products is a market event, even with an identical factor
+  ---
+  duration_ms: 0.382916
+  type: 'test'
+  ...
+# Subtest: Р-50: the share counts every product that moved in the window, not only the large moves the store returns
+ok 11 - Р-50: the share counts every product that moved in the window, not only the large moves the store returns
+  ---
+  duration_ms: 0.18875
+  type: 'test'
+  ...
+# Subtest: unit scale error against the last accepted value is its own alarm class
+ok 12 - unit scale error against the last accepted value is its own alarm class
+  ---
+  duration_ms: 0.080542
+  type: 'test'
+  ...
+# Subtest: Р-55: stale snapshot rejected with an alert; own offer mismatch opens a divergence, not a rejection
+ok 13 - Р-55: stale snapshot rejected with an alert; own offer mismatch opens a divergence, not a rejection
+  ---
+  duration_ms: 0.120334
+  type: 'test'
+  ...
+# Subtest: halted channel rejects silently; structure errors are rejected
+ok 14 - halted channel rejects silently; structure errors are rejected
+  ---
+  duration_ms: 0.1175
+  type: 'test'
+  ...
+1..14
+# tests 14
+# suites 0
+# pass 14
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 104.014375
+
+> @repracer/price-gate@0.1.0 test
+> node --experimental-strip-types --disable-warning=ExperimentalWarning --test src/*.test.ts
+
+TAP version 13
+# Subtest: price within both bounds is approved with bound sources recorded
+ok 1 - price within both bounds is approved with bound sources recorded
+  ---
+  duration_ms: 1.388333
+  type: 'test'
+  ...
+# Subtest: above max price is rejected and classified exactly like below min price
+ok 2 - above max price is rejected and classified exactly like below min price
+  ---
+  duration_ms: 0.16525
+  type: 'test'
+  ...
+# Subtest: missing or inverted bound: rejected as BOUND_UNRESOLVABLE with a critical alert
+ok 3 - missing or inverted bound: rejected as BOUND_UNRESOLVABLE with a critical alert
+  ---
+  duration_ms: 0.191834
+  type: 'test'
+  ...
+# Subtest: margin floor that cannot be computed makes the bound unresolvable
+ok 4 - margin floor that cannot be computed makes the bound unresolvable
+  ---
+  duration_ms: 0.277125
+  type: 'test'
+  ...
+# Subtest: Р-58: margin floor follows the tax regime of the storefront price
+ok 5 - Р-58: margin floor follows the tax regime of the storefront price
+  ---
+  duration_ms: 0.288041
+  type: 'test'
+  ...
+# Subtest: margin floor raises the effective floor
+ok 6 - margin floor raises the effective floor
+  ---
+  duration_ms: 0.087084
+  type: 'test'
+  ...
+# Subtest: NO_OP intent becomes NO_CHANGE; current price outside bounds raises a warning
+ok 7 - NO_OP intent becomes NO_CHANGE; current price outside bounds raises a warning
+  ---
+  duration_ms: 0.252334
+  type: 'test'
+  ...
+# Subtest: step and rate guardrails hold or reject by policy
+ok 8 - step and rate guardrails hold or reject by policy
+  ---
+  duration_ms: 0.0785
+  type: 'test'
+  ...
+# Subtest: halted channel, expired intent and inactive scope are refused
+ok 9 - halted channel, expired intent and inactive scope are refused
+  ---
+  duration_ms: 0.3745
+  type: 'test'
+  ...
+# Subtest: repricing cannot be enabled without both bounds (Р-43)
+ok 10 - repricing cannot be enabled without both bounds (Р-43)
+  ---
+  duration_ms: 0.445791
+  type: 'test'
+  ...
+# Subtest: Р-77: the warning names the strategy type and who needs the cost — no inference from the minimum margin
+ok 11 - Р-77: the warning names the strategy type and who needs the cost — no inference from the minimum margin
+  ---
+  duration_ms: 0.173833
+  type: 'test'
+  ...
+# Subtest: Р-75: Gate runs its checks exactly in the order of the profile stored with explanations
+ok 12 - Р-75: Gate runs its checks exactly in the order of the profile stored with explanations
+  ---
+  duration_ms: 0.093666
+  type: 'test'
+  ...
+# Subtest: third check before the write uses fresh bounds
+ok 13 - third check before the write uses fresh bounds
+  ---
+  duration_ms: 0.079125
+  type: 'test'
+  ...
+1..13
+# tests 13
+# suites 0
+# pass 13
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 98.964458
+
+> @repracer/pricing-model@0.1.0 test
+> node --experimental-strip-types --disable-warning=ExperimentalWarning --test src/*.test.ts
+
+TAP version 13
+# Subtest: Р-61: EUR cost converts to USD rounding up and reports the rate it used
+ok 1 - Р-61: EUR cost converts to USD rounding up and reports the rate it used
+  ---
+  duration_ms: 0.91575
+  type: 'test'
+  ...
+# Subtest: Р-61: USD floor from a EUR cost — cost 10.00 EUR, fee 15 %, margin 20 %, net price
+ok 2 - Р-61: USD floor from a EUR cost — cost 10.00 EUR, fee 15 %, margin 20 %, net price
+  ---
+  duration_ms: 0.17825
+  type: 'test'
+  ...
+# Subtest: Р-63: a USD reference converts to EUR to the nearest cent
+ok 3 - Р-63: a USD reference converts to EUR to the nearest cent
+  ---
+  duration_ms: 0.081875
+  type: 'test'
+  ...
+# Subtest: a rate not yet loaded at decision time, a stale rate and an unsupported pair fail closed
+ok 4 - a rate not yet loaded at decision time, a stale rate and an unsupported pair fail closed
+  ---
+  duration_ms: 0.148
+  type: 'test'
+  ...
+# Subtest: gross price for margin is the smallest price reaching the margin
+ok 5 - gross price for margin is the smallest price reaching the margin
+  ---
+  duration_ms: 1.093083
+  type: 'test'
+  ...
+# Subtest: margin math fails closed
+ok 6 - margin math fails closed
+  ---
+  duration_ms: 0.132917
+  type: 'test'
+  ...
+# Subtest: Р-58: the same cost gives a lower floor for a net US price than for a gross EU price
+ok 7 - Р-58: the same cost gives a lower floor for a net US price than for a gross EU price
+  ---
+  duration_ms: 0.0695
+  type: 'test'
+  ...
+# Subtest: Р-72: every reason code has a parameter schema, no texts; one parameter name has one source class everywhere
+ok 8 - Р-72: every reason code has a parameter schema, no texts; one parameter name has one source class everywhere
+  ---
+  duration_ms: 2.377708
+  type: 'test'
+  ...
+# Subtest: Р-71: an amount without currency, an undeclared or mistyped parameter is a problem
+ok 9 - Р-71: an amount without currency, an undeclared or mistyped parameter is a problem
+  ---
+  duration_ms: 0.804292
+  type: 'test'
+  ...
+# Subtest: Р-74, Р-75, Р-80: the explanation references dictionaries, repeats no row columns, keeps no channel values and expands back to the full view
+ok 10 - Р-74, Р-75, Р-80: the explanation references dictionaries, repeats no row columns, keeps no channel values and expands back to the full view
+  ---
+  duration_ms: 1.757917
+  type: 'test'
+  ...
+# Subtest: Р-69, Р-70, Р-73: stop coverage, roles and dangerous changes
+ok 11 - Р-69, Р-70, Р-73: stop coverage, roles and dangerous changes
+  ---
+  duration_ms: 0.127875
+  type: 'test'
+  ...
+# Subtest: Р-85: a capped Buy Box target is not kept — the uncapped target would give the Buy Box price
+ok 12 - Р-85: a capped Buy Box target is not kept — the uncapped target would give the Buy Box price
+  ---
+  duration_ms: 5.592833
+  type: 'test'
+  ...
+# Subtest: Р-85: a rejected competitor-derived proposal keeps neither the proposed price nor its deviation from the bound
+ok 13 - Р-85: a rejected competitor-derived proposal keeps neither the proposed price nor its deviation from the bound
+  ---
+  duration_ms: 1.2855
+  type: 'test'
+  ...
+# Subtest: Р-85: an approved Buy Box undercut keeps only the published price — the target is not repeated
+ok 14 - Р-85: an approved Buy Box undercut keeps only the published price — the target is not repeated
+  ---
+  duration_ms: 0.230208
+  type: 'test'
+  ...
+# Subtest: finding 16: a competitor-derived rejection below the margin floor keeps neither the proposed price nor its deviation
+ok 15 - finding 16: a competitor-derived rejection below the margin floor keeps neither the proposed price nor its deviation
+  ---
+  duration_ms: 0.207833
+  type: 'test'
+  ...
+# Subtest: finding 16: a competitor-derived rejection above max_price keeps neither the proposed price nor its deviation
+ok 16 - finding 16: a competitor-derived rejection above max_price keeps neither the proposed price nor its deviation
+  ---
+  duration_ms: 0.240209
+  type: 'test'
+  ...
+# Subtest: finding 16: a competitor-derived step-limit rejection keeps the current price and the limit, not the step that gives the proposed price
+ok 17 - finding 16: a competitor-derived step-limit rejection keeps the current price and the limit, not the step that gives the proposed price
+  ---
+  duration_ms: 0.112542
+  type: 'test'
+  ...
+# Subtest: finding 16, Р-91: an approved lowest-price undercut compared with shipping keeps no undercut — published price, undercut and own shipping would give the lowest landed price
+ok 18 - finding 16, Р-91: an approved lowest-price undercut compared with shipping keeps no undercut — published price, undercut and own shipping would give the lowest landed price
+  ---
+  duration_ms: 0.189667
+  type: 'test'
+  ...
+# Subtest: Р-91: an approved Buy Box undercut keeps the published price but not the undercut that would give the Buy Box price
+ok 19 - Р-91: an approved Buy Box undercut keeps the published price but not the undercut that would give the Buy Box price
+  ---
+  duration_ms: 0.085458
+  type: 'test'
+  ...
+1..19
+# tests 19
+# suites 0
+# pass 19
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 134.299292
+
+> @repracer/pricing-pipeline@0.1.0 test
+> node --experimental-strip-types --disable-warning=ExperimentalWarning --test src/*.test.ts
+
+TAP version 13
+# Subtest: tiers follow volatility and fit the budget by demoting the least volatile first
+ok 1 - tiers follow volatility and fit the budget by demoting the least volatile first
+  ---
+  duration_ms: 40.836334
+  type: 'test'
+  ...
+# Subtest: catch-up after a lost subscription restores subscriptions, then stock, then prices by tier
+ok 2 - catch-up after a lost subscription restores subscriptions, then stock, then prices by tier
+  ---
+  duration_ms: 0.850958
+  type: 'test'
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 2
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 153.894958
+
+> @repracer/pricing-store-pg@0.1.0 test
+> node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec test/*.pg.test.ts
+
+✔ finding 1: a manual release review without the release, from a viewer, or for a released halt is refused; the real release is accepted (105.654667ms)
+✔ finding 2: a price stop cannot be inserted already released (24.603041ms)
+✔ finding 3, step 16 finding 2: an automatic release is computed by the database from the recorded sample — the decision path writes neither the review nor the release (100.333041ms)
+✔ Р-88: releasing the tenant stop needs a second factor; a storefront stop does not (36.435875ms)
+✔ finding 3: an automatic release needs as many accepted products as the sample requires (84.704541ms)
+✔ finding 7: a budgeted retry refused because the storefront day boundary became unconfirmed ends with a reason and an alert; the sweep survives and does not repeat it (752.501917ms)
+✔ Р-85: the derived-key registry in the database equals the code (8.530167ms)
+✔ Р-85: a rejected Buy Box proposal reaches the eternal core without the proposed price, the deviation and the derived target (123.309542ms)
+✔ Р-85: the database refuses an explanation with a derived key and cleans rows written before the migration (4.977459ms)
+✔ finding 16: a database refusal at commit (the margin floor rose after the context was read) stores nothing — no decision and no proposed price in the eternal core (70.883792ms)
+✔ D1: an outcome unknown past the limit blocks the write scope with one CRITICAL alert and leaves the sweep (174.221583ms)
+✔ D2: a retry in a held write scope is not swept — no alert storm; the scope active again, the retry is due (83.07375ms)
+✔ Р-61 in the database: a decision on a converted cost is refused without its exchange rate and stored with it (163.231791ms)
+✔ Р-63 on PostgreSQL: with only a stale ECB rate the same-EAN anchor declines a USD reference explicitly (41.927458ms)
+✔ Р-65: a US storefront has no substituted day boundary; Amazon US and eBay US are marked to verify separately (49.352083ms)
+✔ Р-90: the decision path roles cannot write the audit log, memberships, tenants, users, human stops, invitations or identities — even with a session user and a second factor set (83.546791ms)
+✔ Р-90: a session user and a second factor are accepted only from the administrative service; a manual halt release by the decision path is refused (21.262375ms)
+✔ Р-90: the audit log is still written — by triggers, with the session user of the administrative service as the author (7.160834ms)
+✔ finding 13: only the authenticator role resolves external identities (11.364042ms)
+✔ Р-68, Р-59: a competitor-derived evaluation stores the explanation, its core copy and the snapshot reference in one transaction; at most three transactions (172.465458ms)
+ℹ transactions per evaluation (context, commit with explanation and reference, dispatch outcome): 3
+ℹ explanation 619 B, decision row 1920 B, snapshot reference row 117 B
+✔ Р-68: the channel parameter keys in the database are the registry keys (1.319375ms)
+✔ Р-69, Р-70, OQ-125 in the database: a tenant stop holds every price, covers an account connected later, and only the owner resumes it (129.200083ms)
+✔ Р-69: a system halt is only for broken channel data — a person cannot create one (59.863041ms)
+✔ finding 2: the explanation dictionary and the permission matrix in the database equal the code (130.979917ms)
+✔ finding 4: a stop, a resume and a manual halt release are accepted only from the session user of the membership; the audit author is that user (84.272125ms)
+✔ finding 10, Р-80: a NO_OP decision keeps no snapshot reference; a stored explanation repeats no row column; decision intent columns come from the intent (101.740292ms)
+✔ Р-86: the partitions of the decision and the core keep the default storage — the in-database compression of step 14 is withdrawn (5.39625ms)
+✔ Р-79: the core archive exported by the exporter role explains every row without the database; a confirmation without dictionaries is refused (60.908667ms)
+✔ RLS: another tenant sees neither the scope nor its context and writes nothing for it (176.1715ms)
+✔ Р-54: a bound changed between reading and commit rolls everything back (35.129083ms)
+✔ the database refuses a price above max_price even when the application claims a wider ceiling (37.511666ms)
+✔ Р-51 in the database: a halt changes the context of competitor-derived decisions, fixed prices still go out (74.932208ms)
+✔ Р-54: a concurrent bound change serialises with the decision commit and forces a recompute (353.424833ms)
+✔ writes of one scope: the first goes out, later ones queue behind it and supersede each other (258.173791ms)
+✔ OQ-93, OQ-94, OQ-98: projections keep currency and suggested price, the latest move, and the rejection parameters (104.176917ms)
+✔ Р-91: the strategy version keeps its type without the undercut; the undercut lives apart, is superseded with the version and still reaches the engine (104.514167ms)
+✔ Р-91: an approved Buy Box price reaches the eternal core without the undercut (40.9215ms)
+✔ finding 15: the database registry of declared keys equals the code; an undeclared parameter, an unknown code or an unknown field is refused (28.266708ms)
+WRITE_QUEUE_RESULT {"mode":"no-dispatcher","scopes":40,"decisionsPerScope":6,"approvedDecisions":240,"dispatchedByEvaluation":44,"queuedBehindInFlight":196,"dispatchedByDispatcher":0,"strandedPending":36,"scopesWithLostLatestPrice":36,"orderViolations":0,"endedWithoutReason":0,"dispatchDueEvents":40,"strandedWithoutEvent":0,"sweepFound":0,"receivedTotal":44,"handOffSteps":{},"sweepSteps":{},"finalStatuses":{"PENDING":36,"APPLIED":44,"SUPERSEDED":160}}
+✔ control — without the dispatcher queued writes stay PENDING (step 9 defect), but every one is announced and every supersession explained (1441.971958ms)
+WRITE_QUEUE_RESULT {"mode":"hand-off","scopes":40,"decisionsPerScope":6,"approvedDecisions":240,"dispatchedByEvaluation":77,"queuedBehindInFlight":163,"dispatchedByDispatcher":23,"strandedPending":0,"scopesWithLostLatestPrice":0,"orderViolations":0,"endedWithoutReason":0,"dispatchDueEvents":60,"strandedWithoutEvent":0,"sweepFound":0,"receivedTotal":100,"handOffSteps":{"WAITING":37,"DISPATCHED":23,"IDLE":23},"sweepSteps":{},"finalStatuses":{"APPLIED":100,"SUPERSEDED":140}}
+✔ Р-64: hand-off to the dispatcher — no price change is lost behind an in-flight write, the safety sweep finds nothing (862.475833ms)
+WRITE_QUEUE_RESULT {"mode":"sweep-only","scopes":40,"decisionsPerScope":6,"approvedDecisions":240,"dispatchedByEvaluation":82,"queuedBehindInFlight":158,"dispatchedByDispatcher":35,"strandedPending":0,"scopesWithLostLatestPrice":0,"orderViolations":0,"endedWithoutReason":0,"dispatchDueEvents":76,"strandedWithoutEvent":0,"sweepFound":35,"receivedTotal":117,"handOffSteps":{},"sweepSteps":{"DISPATCHED":35,"IDLE":35},"finalStatuses":{"APPLIED":117,"SUPERSEDED":123}}
+✔ Р-64: events lost — the safety sweep alone delivers every latest price (985.510167ms)
+✔ Р-83 control: with nothing changed the queued write goes out after the in-flight one (997.731917ms)
+✔ Р-83: the unit cost rose between decision and dispatch — the margin floor blocks the write (114.902542ms)
+✔ Р-83: the VAT rate rose between decision and dispatch — the margin floor blocks the write (172.805333ms)
+✔ Р-83: the ECB rate changed between decision and dispatch — the converted cost blocks the write (27.954792ms)
+✔ Р-83: min_price rose between decision and dispatch — the absolute floor blocks the write (25.222584ms)
+✔ Р-83: a retry is a dispatch too — the cost rose after a transient channel error, the retry does not go out (17.571875ms)
+✔ Р-83: the cost rose between reading the context and the commit — the decision is not committed and nothing is sent (11.527667ms)
+✔ Р-83: the floor arithmetic in the database equals the code — margin price and cost conversion on 3000 random inputs each (58.077ms)
+ℹ tests 49
+ℹ suites 0
+ℹ pass 49
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4153.021875
+
+> @repracer/strategy-engine@0.1.0 test
+> node --experimental-strip-types --disable-warning=ExperimentalWarning --test src/*.test.ts
+
+TAP version 13
+# Subtest: match buy box with undercut proposes a CHANGED intent with the reason chain
+ok 1 - match buy box with undercut proposes a CHANGED intent with the reason chain
+  ---
+  duration_ms: 2.753333
+  type: 'test'
+  ...
+# Subtest: competitor-following target below min price is capped at the bound (CAP) or held (HOLD)
+ok 2 - competitor-following target below min price is capped at the bound (CAP) or held (HOLD)
+  ---
+  duration_ms: 0.15475
+  type: 'test'
+  ...
+# Subtest: fixed price above max price is not capped: the conflict must reach the Gate
+ok 3 - fixed price above max price is not capped: the conflict must reach the Gate
+  ---
+  duration_ms: 0.077834
+  type: 'test'
+  ...
+# Subtest: already winning the buy box is NO_OP
+ok 4 - already winning the buy box is NO_OP
+  ---
+  duration_ms: 0.09225
+  type: 'test'
+  ...
+# Subtest: difference smaller than the deadband is NO_OP
+ok 5 - difference smaller than the deadband is NO_OP
+  ---
+  duration_ms: 0.172333
+  type: 'test'
+  ...
+# Subtest: target margin computes the gross price and fails closed without VAT
+ok 6 - target margin computes the gross price and fails closed without VAT
+  ---
+  duration_ms: 0.253208
+  type: 'test'
+  ...
+# Subtest: beat lowest compares landed prices and subtracts own shipping
+ok 7 - beat lowest compares landed prices and subtracts own shipping
+  ---
+  duration_ms: 0.320416
+  type: 'test'
+  ...
+# Subtest: market-wide lowest needs CHEAPEST_ONLY or FULL: a top-10 snapshot is not enough
+ok 8 - market-wide lowest needs CHEAPEST_ONLY or FULL: a top-10 snapshot is not enough
+  ---
+  duration_ms: 0.070625
+  type: 'test'
+  ...
+# Subtest: stale snapshot does not meet the requirement
+ok 9 - stale snapshot does not meet the requirement
+  ---
+  duration_ms: 0.322459
+  type: 'test'
+  ...
+# Subtest: availability on Kaufland sources: buy box via pull; early-access push does not count; market minimum unavailable
+ok 10 - availability on Kaufland sources: buy box via pull; early-access push does not count; market minimum unavailable
+  ---
+  duration_ms: 0.7435
+  type: 'test'
+  ...
+1..10
+# tests 10
+# suites 0
+# pass 10
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 97.543625
+
+> @repracer/write-dispatcher@0.1.0 test
+> node --experimental-strip-types --disable-warning=ExperimentalWarning --test src/*.test.ts
+
+TAP version 13
+# Subtest: a scope whose claim throws does not stop the sweep: other scopes are processed, one CRITICAL alert, no repeat within an hour
+ok 1 - a scope whose claim throws does not stop the sweep: other scopes are processed, one CRITICAL alert, no repeat within an hour
+  ---
+  duration_ms: 2.244958
+  type: 'test'
+  ...
+# Subtest: accepted by the channel: applied immediately or waiting for confirmation
+ok 2 - accepted by the channel: applied immediately or waiting for confirmation
+  ---
+  duration_ms: 0.750083
+  type: 'test'
+  ...
+# Subtest: unknown outcome is never retried blindly: read-back first
+ok 3 - unknown outcome is never retried blindly: read-back first
+  ---
+  duration_ms: 0.670334
+  type: 'test'
+  ...
+# Subtest: transient error: retry with backoff, not earlier than retryAt; exhausted attempts end with a reason
+ok 4 - transient error: retry with backoff, not earlier than retryAt; exhausted attempts end with a reason
+  ---
+  duration_ms: 0.150167
+  type: 'test'
+  ...
+# Subtest: permanent error discards, human-required error blocks the write scope, budget exhaustion is its own end
+ok 5 - permanent error discards, human-required error blocks the write scope, budget exhaustion is its own end
+  ---
+  duration_ms: 0.096209
+  type: 'test'
+  ...
+# Subtest: reconciliation: applied value accepts, missing value of a dispatched write retries the same version at once
+ok 6 - reconciliation: applied value accepts, missing value of a dispatched write retries the same version at once
+  ---
+  duration_ms: 0.18825
+  type: 'test'
+  ...
+# Subtest: D1: an outcome that stays unknown past the limit stops the reconciliation and blocks the write scope — for a dispatched and an accepted write
+ok 7 - D1: an outcome that stays unknown past the limit stops the reconciliation and blocks the write scope — for a dispatched and an accepted write
+  ---
+  duration_ms: 0.18325
+  type: 'test'
+  ...
+1..7
+# tests 7
+# suites 0
+# pass 7
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 111.513042
+
+> @repracer/pricing-worker@0.1.0 test
+> node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec test/*.test.ts
+
+file:///Users/kerim/Desktop/repracer/services/pricing-worker/test/order-behind-broker.test.ts:31
+if (!(BROKERS && PG_URL && ADMIN_URL)) throw new Error('REPRACER_KAFKA_BROKERS, REPRACER_PG_URL and REPRACER_PG_ADMIN_URL are required: the test does not skip (Р-84)');
+                                             ^
+
+Error: REPRACER_KAFKA_BROKERS, REPRACER_PG_URL and REPRACER_PG_ADMIN_URL are required: the test does not skip (Р-84)
+    at file:///Users/kerim/Desktop/repracer/services/pricing-worker/test/order-behind-broker.test.ts:31:46
+    at ModuleJob.run (node:internal/modules/esm/module_job:343:25)
+    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:681:26)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5)
+
+Node.js v22.22.3
+✖ test/order-behind-broker.test.ts (132.425041ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 136.888833
+
+✖ failing tests:
+
+test at test/order-behind-broker.test.ts:1:1
+✖ test/order-behind-broker.test.ts (132.425041ms)
+  'test failed'
+npm error Lifecycle script `test` failed with error:
+npm error code 1
+npm error path /Users/kerim/Desktop/repracer/services/pricing-worker
+npm error workspace @repracer/pricing-worker@0.1.0
+npm error location /Users/kerim/Desktop/repracer/services/pricing-worker
+npm error command failed
+npm error command sh -c node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec test/*.test.ts
+
+
+> @repracer/contract-tests@0.1.0 test
+> node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec src/harness.test.ts src/kaufland.contract.test.ts src/kaufland.pipeline.pg.test.ts src/console.test.ts src/console.pg.test.ts
+
+✔ A, Р-68: on PostgreSQL every competitor-derived decision shows all five steps from the stored explanation (1384.507917ms)
+ℹ PostgreSQL worlds: 22, decisions: 29, competitor-derived: 19
+✔ A: the trace on PostgreSQL equals the trace on the memory store, step by step (181.268333ms)
+✔ Р-67, Р-72: every pricing world renders all screens in German and English without invented or empty values (166.374875ms)
+✔ Р-68, Р-74: decisions that change or reject a price carry an explanation; a NO_OP decision keeps only its reason code and says so (2.321125ms)
+✔ Р-71, Р-72: every reason the stand shows is fully explained in both languages, or its limit is named (10.242708ms)
+ℹ reason codes seen on stand screens: 33
+✔ B: the happy path decision shows the whole way from snapshot to channel confirmation, in both languages (0.576333ms)
+✔ Р-73, C: a Gate rejection more than 10 % beyond the bound is dangerous; the screen counts it with the limit and the deviation (0.379792ms)
+✔ D, F: the product list shows the effective floor with min_price as its part; the floor is broken down to the cent and matches the Gate (0.473333ms)
+✔ Р-69, Р-70, OQ-125: the kill switch stops every price of the tenant; only the owner resumes a tenant stop (0.580375ms)
+✔ Р-69: the kill-switch world holds a fixed price with PRICING_STOPPED; a system halt is shown separately and never blocks fixed prices (0.411083ms)
+✔ matchers: exact rejects extra keys, subset ignores them, operators work (1.255ms)
+✔ scenario validation refuses unreviewed recordings (0.161291ms)
+✔ auth checker verifies the signature against the synthetic seller secret (0.48775ms)
+✔ scripted channel: order, exact body and leftovers are enforced (0.291583ms)
+✔ scripted TIMEOUT fault resolves only through the client abort signal (13.5225ms)
+✔ runner fails a scenario when the adapter makes an unscripted request (15.42ms)
+✔ recorder redaction removes buyer PII and remaps ids consistently (1.006583ms)
+✔ all mandatory scenarios are present (0.797625ms)
+✔ kaufland/budget/exhausted — Исчерпанный клиентский бюджет запросов: запись не отправляется [budget-exhausted.json] (23.238875ms)
+✔ kaufland/confirm/shared-quantity-across-storefronts — Подтверждение остатка по id_offer на обеих витринах [confirm-shared-quantity.json] (2.0095ms)
+✔ kaufland/dispatch/rate-limited-429 — 429 при записи: повтор после паузы и исчерпание попыток [dispatch-429.json] (4.36175ms)
+✔ kaufland/dispatch/bulk-207-partial — POST /units/bulk: 207 с частичным успехом [dispatch-bulk-207-partial.json] (1.049583ms)
+✔ kaufland/dispatch/error-classification — Классификация ошибок записи: 422, 400 на весь пакет, 503, 401 [dispatch-error-classification.json] (1.213375ms)
+✔ kaufland/dispatch/timeout-unknown-outcome — Тайм-аут записи: исход неизвестен, повтора нет, обратное чтение и подтверждение [dispatch-timeout-unknown-outcome.json] (40.697166ms)
+✔ kaufland/inbound/events-and-verification — Проверка адреса подписки и разбор событий [inbound-events-and-verification.json] (1.821167ms)
+✔ kaufland/orders/pii-whitelist — GET /order-units: только поля белого списка, без PII покупателя [orders-pii-whitelist.json] (0.90125ms)
+✔ kaufland/pipeline/above-max-price — Решение выше max_price: отклонено Gate и сохранено как REJECTED_BY_GATE [pipeline-above-max-price.json] (4.303291ms)
+✔ kaufland/pipeline/bound-unresolvable — Невозможно вычислить границу: запись не уходит, алерт [pipeline-bound-unresolvable.json] (3.087625ms)
+✔ kaufland/pipeline/bounds-version-changed — Граница изменилась между чтением и фиксацией решения: откат и пересчёт [pipeline-bounds-version-changed.json] (1.729792ms)
+✔ kaufland/pipeline/cold-start-cost-anchor — Холодный старт: без истории снимок сверяется с себестоимостью, без якорей — не используется [pipeline-cold-start-cost-anchor.json] (2.582958ms)
+✔ kaufland/pipeline/divergence-and-stale — Правка цены продавцом в кабинете канала — кейс расхождения, а не отказ снимка; устаревший снимок — отказ с предупреждением [pipeline-divergence-and-stale.json] (2.267625ms)
+✔ kaufland/pipeline/enable-margin-without-cost — Включение маржинальной стратегии без себестоимости: предупреждение до включения [pipeline-enable-margin-without-cost.json] (0.513583ms)
+✔ kaufland/pipeline/fx-cross-channel-anchor-converted — Якорь «тот же EAN на другом канале» при разной валюте: ссылка в USD переводится по курсу ЕЦБ [pipeline-fx-cross-channel-anchor-converted.json] (3.025416ms)
+✔ kaufland/pipeline/fx-cross-channel-anchor-no-rate — Якорь «тот же EAN» при разной валюте без курса ЕЦБ: явное предупреждение вместо молчаливого пропуска [pipeline-fx-cross-channel-anchor-no-rate.json] (1.410333ms)
+✔ kaufland/pipeline/fx-usd-floor-eur-cost — Пол маржи витрины в USD при себестоимости в EUR: перевод по курсу ЕЦБ, курс хранится в решении [pipeline-fx-usd-floor-eur-cost.json] (0.661125ms)
+✔ kaufland/pipeline/halt-auto-release — Остановка снимается автоматически: свежая независимая выборка прошла проверки [pipeline-halt-auto-release.json] (3.882459ms)
+✔ kaufland/pipeline/halt-review-failed-manual-release — Выборка при проверке остановки не прошла: остановка продлена; владелец снимает её вручную с заметкой [pipeline-halt-review-failed-manual-release.json] (1.122625ms)
+✔ kaufland/pipeline/happy-path — Сквозной путь: buy_box_changed → проверка входов → стратегия → Gate → запись; затем NO_OP [pipeline-happy-path.json] (1.961208ms)
+✔ kaufland/pipeline/kill-switch-tenant-stop — Kill switch тенанта: фиксированная цена тоже стоит, права по ролям [pipeline-kill-switch-tenant-stop.json] (1.421791ms)
+✔ kaufland/pipeline/market-shift-dispersed — Массовый рост цен с разными коэффициентами: рыночное событие, канал не останавливается [pipeline-market-shift-dispersed.json] (0.82775ms)
+✔ kaufland/pipeline/mass-shift-halt — Массовый сдвиг с одинаковым коэффициентом: остановка цен из данных конкурентов [pipeline-mass-shift-halt.json] (1.557542ms)
+✔ kaufland/pipeline/max-price-missing — Нет max_price: репрайсинг не включается [pipeline-max-price-missing.json] (0.455083ms)
+✔ kaufland/pipeline/notification-without-payload — Уведомление buy_box_changed без данных: опрос /buybox и тот же путь решения [pipeline-notification-without-payload.json] (0.849041ms)
+✔ kaufland/pipeline/oq90-own-price-trap — Ловушка OQ-90: наша цена-заглушка не блокирует правдоподобный снимок [pipeline-oq90-own-price-trap.json] (0.548792ms)
+✔ kaufland/pipeline/sanity-x100-high — Снимок с ценой в 100 раз выше нормы: отклонён на входе, до движка не дошёл, алерт [pipeline-sanity-x100-high.json] (0.814583ms)
+✔ kaufland/pipeline/sanity-x100-low — Снимок с ценой в 100 раз ниже нормы: отклонён на входе, до движка не дошёл, алерт [pipeline-sanity-x100-low.json] (2.106083ms)
+✔ kaufland/pipeline/tax-regimes-margin-floor — Одна себестоимость, разные налоговые режимы: пол маржи в EUR брутто и в USD нетто различается [pipeline-tax-regimes-margin-floor.json] (0.9855ms)
+✔ kaufland/pipeline/write-queue-second-not-lost — Две записи подряд по одной единице: вторая не теряется за записью в полёте [pipeline-write-queue-second-not-lost.json] (42.827375ms)
+✔ kaufland/pipeline/write-superseded-with-reason — Вытеснение записи из очереди новой версией — с записанной причиной [pipeline-write-superseded-with-reason.json] (41.896375ms)
+✔ kaufland/dispatch/stale-version — Устаревшая версия записи не уходит в канал; её подтверждение — NOT_APPLIED [plan-stale-version.json] (0.620083ms)
+✔ kaufland/competitors/buybox-pull — GET /buybox: цены double переводятся в центы, своё предложение — по id_unit [read-competitors-buybox.json] (0.342917ms)
+✔ kaufland/reports/competitors-comparer — Отчёт competitors-comparer для сверки: запрос и опрос [reports-competitors-comparer.json] (0.641833ms)
+✔ kaufland/subscriptions/buybox-early-access — buy_box_changed без раннего доступа: подписка не пробуется [subscriptions-buybox-early-access.json] (0.583417ms)
+✔ kaufland/subscriptions/ensure — Подписки: оставить совпадающую, включить старую, событие вне перечня спецификации [subscriptions-ensure.json] (0.576834ms)
+✔ kaufland/security/tenant-mismatch — Тенант из сообщения не владеет аккаунтом: отказ без обращения к каналу [tenant-mismatch.json] (0.176042ms)
+✔ kaufland/inbound/webhook-bad-signature — Уведомление с плохой подписью и другие отказы приёма [webhook-bad-signature.json] (0.405959ms)
+✔ kaufland/inbound/webhook-duplicate — Дубль уведомления item_unit_changed [webhook-duplicate.json] (1.580458ms)
+✔ conservative rule coverage (0.17225ms)
+ℹ 
+covered   KFL_C01_REQUEST_BUDGET (K-04)
+covered   KFL_C02_NO_TRANSPORT_RETRY_FOR_WRITES (K-14)
+covered   KFL_C03_QUANTITY_WITHOUT_LISTING_PRICE (K-13)
+covered   KFL_C04_SMART_PRICING_REFUSED (K-07)
+covered   KFL_C05_MINIMUM_PRICE_OBSERVED (K-08)
+covered   KFL_C06_BUYBOX_PRICE_UNITS (K-17)
+covered   KFL_C07_WEBHOOK_SIGNATURE_VARIANT (K-02)
+covered   KFL_C08_CONFIRM_TIME_GRANULARITY (K-15)
+covered   KFL_C09_BULK_ITEM_MISSING
+covered   KFL_C10_PRICE_BASIS_GROSS_ASSUMED (K-12)
+covered   KFL_C11_NO_EDIT_BUDGET (K-05)
+covered   KFL_C12_WEBHOOK_TIMESTAMP_WINDOW (K-03)
+covered   KFL_C13_ORDER_DECREMENT_UNKNOWN (K-11)
+covered   KFL_C14_SHARED_QUANTITY_PROPAGATION (K-06)
+covered   KFL_C15_UNKNOWN_EVENT
+covered   KFL_C16_UNITS_STATUS_ON_DEMAND (K-04)
+covered   KFL_C17_SUBSCRIPTION_EVENT_NOT_IN_SPEC (K-18)
+covered   KFL_C18_BUYBOX_IS_SELF_BY_ID_UNIT
+covered   KFL_C19_NOTIFICATION_WITHOUT_PAYLOAD
+✔ [pg] kaufland/pipeline/above-max-price [pipeline-above-max-price.json] (122.776917ms)
+✔ [pg] kaufland/pipeline/bound-unresolvable [pipeline-bound-unresolvable.json] (43.696625ms)
+✔ [pg] kaufland/pipeline/bounds-version-changed [pipeline-bounds-version-changed.json] (47.15725ms)
+✔ [pg] kaufland/pipeline/cold-start-cost-anchor [pipeline-cold-start-cost-anchor.json] (54.495875ms)
+✔ [pg] kaufland/pipeline/divergence-and-stale [pipeline-divergence-and-stale.json] (50.989ms)
+✔ [pg] kaufland/pipeline/enable-margin-without-cost [pipeline-enable-margin-without-cost.json] (19.85475ms)
+✔ [pg] kaufland/pipeline/fx-cross-channel-anchor-converted [pipeline-fx-cross-channel-anchor-converted.json] (41.670125ms)
+✔ [pg] kaufland/pipeline/fx-usd-floor-eur-cost [pipeline-fx-usd-floor-eur-cost.json] (37.596667ms)
+✔ [pg] kaufland/pipeline/halt-auto-release [pipeline-halt-auto-release.json] (71.833917ms)
+✔ [pg] kaufland/pipeline/halt-review-failed-manual-release [pipeline-halt-review-failed-manual-release.json] (42.619791ms)
+✔ [pg] kaufland/pipeline/happy-path [pipeline-happy-path.json] (38.7675ms)
+✔ [pg] kaufland/pipeline/kill-switch-tenant-stop [pipeline-kill-switch-tenant-stop.json] (41.581125ms)
+✔ [pg] kaufland/pipeline/market-shift-dispersed [pipeline-market-shift-dispersed.json] (32.49675ms)
+✔ [pg] kaufland/pipeline/mass-shift-halt [pipeline-mass-shift-halt.json] (73.663083ms)
+✔ [pg] kaufland/pipeline/max-price-missing [pipeline-max-price-missing.json] (25.645542ms)
+✔ [pg] kaufland/pipeline/notification-without-payload [pipeline-notification-without-payload.json] (28.517333ms)
+✔ [pg] kaufland/pipeline/oq90-own-price-trap [pipeline-oq90-own-price-trap.json] (26.598625ms)
+✔ [pg] kaufland/pipeline/sanity-x100-high [pipeline-sanity-x100-high.json] (38.974875ms)
+✔ [pg] kaufland/pipeline/sanity-x100-low [pipeline-sanity-x100-low.json] (18.301084ms)
+✔ [pg] kaufland/pipeline/tax-regimes-margin-floor [pipeline-tax-regimes-margin-floor.json] (28.657875ms)
+✔ [pg] kaufland/pipeline/write-queue-second-not-lost [pipeline-write-queue-second-not-lost.json] (97.466958ms)
+✔ [pg] kaufland/pipeline/write-superseded-with-reason [pipeline-write-superseded-with-reason.json] (100.179209ms)
+ℹ tests 80
+ℹ suites 0
+ℹ pass 80
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1844.508708
+
+> test:repo
+> node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec scripts/test/*.test.ts
+
+(node:47286) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/kerim/Desktop/repracer/scripts/test/check-test-inclusion.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/kerim/Desktop/repracer/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ a test file that no script runs is reported; an explicitly listed file and a glob count as included (21.069375ms)
+✔ a script naming a file that does not exist is reported, so a renamed test cannot silently drop out (8.221959ms)
+✔ step 17: .test.tsx, .test.cts and .test.cjs count as tests; a test under a nested build directory is not skipped; git-ignored output is (24.122ms)
+✔ the real repository has every test file in the build (11.718292ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 134.166334
+TEST FILES {"included":38,"executed":38,"notExecuted":0}
+
+TEST TOTALS {"suites":16,"tests":240,"pass":239,"fail":1,"skipped":0,"todo":0,"cancelled":0}
+BUILD RED: workspaces: npm exited with 1; 1 fail

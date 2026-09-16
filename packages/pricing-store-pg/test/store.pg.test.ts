@@ -183,5 +183,6 @@ test('OQ-93, OQ-94, OQ-98: projections keep currency and suggested price, the la
   // Отказ без параметров необъясним — БД его не принимает
   const unexplained = approved(context, 1400);
   unexplained.decision = { ...rejected.decision, reason: { code: 'BELOW_MIN_PRICE', params: {} } };
-  await assert.rejects(store.commitEvaluation(w.tenantId, { key, now: now(), decisions: [explained(unexplained, { competitorSnapshotId: '00000000-0000-4000-8000-00000000c0de', source: 'KAUFLAND_BUY_BOX_CHANGED', observedAt: snapshot.observedAt })] }), /price_decision_rejection_explained|bound deviation/);
+  await assert.rejects(store.commitEvaluation(w.tenantId, { key, now: now(), decisions: [explained(unexplained, { competitorSnapshotId: '00000000-0000-4000-8000-00000000c0de', source: 'KAUFLAND_BUY_BOX_CHANGED', observedAt: snapshot.observedAt })] }), /price_decision_rejection_explained|bound deviation/,
+    'OQ-98: a rejection without its reason parameters is refused');
 });

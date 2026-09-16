@@ -1,6 +1,6 @@
 import type { FxApplied } from './fx.ts';
 import type { HaltRef, StopRef } from './policy.ts';
-import { CHANNEL_PARAM_KEYS, COMPETITOR_RULE_DERIVED_KEYS, paramSchema } from './reasons.ts';
+import { CHANNEL_PARAM_KEYS, COMPETITOR_RULE_DERIVED_KEYS, paramSchema, SANITY_RULES } from './reasons.ts';
 import { isCompetitorDerived, type GateOutcome, type IntentClass, type PriceDecisionDraft, type PriceIntentDraft, type Reason, type SanityCheckRecord, type StrategyDefinition, type TriggerType } from './types.ts';
 
 /**
@@ -19,6 +19,48 @@ import { isCompetitorDerived, type GateOutcome, type IntentClass, type PriceDeci
  */
 
 export const EXPLANATION_FORMAT = 'r80.1';
+
+/**
+ * Находка 8 ревью шага 17: вид значения каждого скалярного поля слепка — не только параметров причин. Реестр дублирован в БД
+ * (`security.explanation_field_kinds()`, 0070); совпадение проверяет undercut-eternal.pg.test.ts. Поле без вида БД отклоняет.
+ * Виды: code — код из заглавных букв (источник, проверка Gate, якорь), uuid, id — идентификатор витрины или записи; n — допускает null.
+ */
+export interface FieldKind { k: string; n?: true; v?: readonly string[] }
+export const EXPLANATION_FIELD_KINDS: Readonly<Record<string, FieldKind>> = {
+  '$.format': { k: 'enum', v: [EXPLANATION_FORMAT] },
+  '$.snapshot.source': { k: 'code' },
+  '$.sanity.checks[].rule': { k: 'enum', v: SANITY_RULES },
+  '$.sanity.checks[].outcome': { k: 'enum', v: ['PASS', 'FAIL', 'SKIPPED'] },
+  '$.sanity.anchorsUsed': { k: 'codeList' },
+  '$.strategy.intentClass': { k: 'enum', v: ['NO_OP'] },
+  '$.strategy.currentMinor': { k: 'money', n: true },
+  '$.strategy.currency': { k: 'currency' },
+  '$.strategy.boundsAtStrategy.minMinor': { k: 'money' },
+  '$.strategy.boundsAtStrategy.maxMinor': { k: 'money' },
+  '$.strategy.boundsAtStrategy.currency': { k: 'currency' },
+  '$.gate.failed.check': { k: 'code' },
+  '$.gate.minMarginBp': { k: 'bp' },
+  '$.gate.fx.source': { k: 'enum', v: ['ECB'] },
+  '$.gate.fx.rateDate': { k: 'date' },
+  '$.gate.fx.base': { k: 'enum', v: ['EUR'] },
+  '$.gate.fx.quote': { k: 'currency' },
+  '$.gate.fx.rateMicros': { k: 'rateMicros' },
+  '$.gate.fx.from': { k: 'currency' },
+  '$.gate.fx.to': { k: 'currency' },
+  '$.gate.fx.sourceAmountMinor': { k: 'money' },
+  '$.gate.fx.convertedAmountMinor': { k: 'money' },
+  '$.gate.fx.rounding': { k: 'enum', v: ['UP', 'NEAREST'] },
+  '$.context.channelHalt.haltId': { k: 'uuid' },
+  '$.context.channelHalt.reasonCode': { k: 'enum', v: ['CHANNEL_MASS_SHIFT'] },
+  '$.context.channelHalt.marketplace': { k: 'id', n: true },
+  '$.context.channelHalt.haltedAt': { k: 'instant' },
+  '$.context.priceStop.stopId': { k: 'uuid' },
+  '$.context.priceStop.scope': { k: 'enum', v: ['TENANT', 'CHANNEL_ACCOUNT', 'STOREFRONT'] },
+  '$.context.priceStop.channelAccountId': { k: 'uuid', n: true },
+  '$.context.priceStop.marketplace': { k: 'id', n: true },
+  '$.context.priceStop.stoppedAt': { k: 'instant' },
+  '$.context.priceStop.stoppedByMembershipId': { k: 'uuid' },
+};
 
 type Params = Reason['params'];
 type Value = string | number | boolean | null;

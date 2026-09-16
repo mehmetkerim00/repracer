@@ -16,11 +16,13 @@ BEGIN
     WHEN SQLSTATE 'RS001' THEN
       failure := 'EXPECTED FAILURE DID NOT HAPPEN';
     WHEN others THEN
-      IF reason IS NULL OR SQLSTATE = reason OR SQLERRM ~* reason THEN
+      -- Р-94 (шаг 18): причина обязательна и сверяется с текстом отказа — SQLSTATE недостаточно (42501 дают и защитные триггеры)
+      IF reason IS NOT NULL AND SQLERRM ~* reason THEN
         RAISE NOTICE 'PASS reject | % | %', label, left(SQLERRM, 110);
         RETURN;
       END IF;
-      failure := format('EXPECTED FAILURE HAD ANOTHER REASON (expected %s, got %s %s)', reason, SQLSTATE, left(SQLERRM, 160));
+      failure := CASE WHEN reason IS NULL THEN format('EXPECTED FAILURE HAS NO DECLARED REASON (got %s %s)', SQLSTATE, left(SQLERRM, 160))
+                      ELSE format('EXPECTED FAILURE HAD ANOTHER REASON (expected %s, got %s %s)', reason, SQLSTATE, left(SQLERRM, 160)) END;
   END;
   IF current_setting('repracer.smoke_collect', true) = 'on' THEN
     RAISE WARNING 'CHECK FAILED: % | %', label, failure;
@@ -59,11 +61,11 @@ SELECT pg_temp.expect_fail('existing user who never signed in provisioned as own
     {"userId": "a1000000-0000-0000-0000-00000000000a", "email": "owner-a@example.test", "role": "OWNER"}]') $q$,
   'has never signed in');
 SELECT pg_temp.expect_fail('tenant provisioned without an owner (Р-90)', $q$
-  SELECT security.provision_tenant('c0000000-0000-0000-0000-0000000000c1', 'No owner', 'EU', '[{"userId": "c1000000-0000-0000-0000-0000000000c1", "email": "x@example.test", "role": "ADMIN"}]') $q$);
+  SELECT security.provision_tenant('c0000000-0000-0000-0000-0000000000c1', 'No owner', 'EU', '[{"userId": "c1000000-0000-0000-0000-0000000000c1", "email": "x@example.test", "role": "ADMIN"}]') $q$, 'a tenant is provisioned together with its owner');
 SELECT pg_temp.expect_fail('provisioning role inserts a membership directly (Р-90)', $q$
-  INSERT INTO tenant_data.membership (tenant_id, user_id, role, status) VALUES ('b0000000-0000-0000-0000-00000000000b', 'a1000000-0000-0000-0000-00000000000a', 'OWNER', 'ACTIVE') $q$);
+  INSERT INTO tenant_data.membership (tenant_id, user_id, role, status) VALUES ('b0000000-0000-0000-0000-00000000000b', 'a1000000-0000-0000-0000-00000000000a', 'OWNER', 'ACTIVE') $q$, '^permission denied for schema tenant_data$');
 SELECT pg_temp.expect_fail('provisioning role inserts a tenant directly (Р-90)', $q$
-  INSERT INTO tenant_data.tenant (name, data_region) VALUES ('direct', 'EU') $q$);
-SELECT pg_temp.expect_fail('provisioning role reads tenant data (Р-90)', $q$ SELECT count(*) FROM tenant_data.product $q$);
+  INSERT INTO tenant_data.tenant (name, data_region) VALUES ('direct', 'EU') $q$, '^permission denied for schema tenant_data$');
+SELECT pg_temp.expect_fail('provisioning role reads tenant data (Р-90)', $q$ SELECT count(*) FROM tenant_data.product $q$, '^permission denied for schema tenant_data$');
 SELECT pg_temp.expect_fail('provisioning role writes the audit log (Р-90)', $q$
-  INSERT INTO audit.audit_event (tenant_id, occurred_at, actor_type, action, entity_type) VALUES ('a0000000-0000-0000-0000-00000000000a', now(), 'SYSTEM', 'forged.event', 'price_stop') $q$);
+  INSERT INTO audit.audit_event (tenant_id, occurred_at, actor_type, action, entity_type) VALUES ('a0000000-0000-0000-0000-00000000000a', now(), 'SYSTEM', 'forged.event', 'price_stop') $q$, '^permission denied for schema audit$');

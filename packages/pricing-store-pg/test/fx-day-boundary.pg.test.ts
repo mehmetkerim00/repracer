@@ -85,7 +85,8 @@ test('Р-61 in the database: a decision on a converted cost is refused without i
 
   const withoutRate = approved(loaded.context, 2100, at);
   withoutRate.decision.fx = null;
-  await assert.rejects(store.commitEvaluation(world.tenantId, { key, now: at, decisions: [explained({ context: loaded.context, ...withoutRate })] }), /without the exchange rate it was converted at/);
+  await assert.rejects(store.commitEvaluation(world.tenantId, { key, now: at, decisions: [explained({ context: loaded.context, ...withoutRate })] }), /without the exchange rate it was converted at/,
+    'Р-61: a decision on a converted cost without its exchange rate is refused');
 
   const withRate = approved(loaded.context, 2100, at);
   const result = await store.commitEvaluation(world.tenantId, { key, now: at, decisions: [explained({ context: loaded.context, ...withRate })] });
@@ -146,7 +147,7 @@ test('Р-65: a US storefront has no substituted day boundary; Amazon US and eBay
         `INSERT INTO tenant_data.price_daily (tenant_id, write_scope_id, price_type, price_day, day_tz, currency, price_basis, min_amount_minor, max_amount_minor,
            first_amount_minor, first_accepted_at, last_amount_minor, last_accepted_at, change_count, min_floor_minor)
          VALUES ($1, $2, 'REGULAR', current_date - 3, $3, 'USD', 'NET', 2000, 2000, 2000, now() - interval '3 days', 2000, now() - interval '3 days', 1, 1000)`,
-        [world.tenantId, ws, dayTz]), /does not match the storefront time zone <NULL>/);
+        [world.tenantId, ws, dayTz]), /does not match the storefront time zone <NULL>/, `Р-65: a price day of a US storefront is not closed in ${dayTz}`);
     }
   } finally {
     await scheduler.end();

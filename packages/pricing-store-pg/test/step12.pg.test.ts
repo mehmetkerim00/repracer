@@ -164,7 +164,7 @@ test('Р-69, Р-70, OQ-125 in the database: a tenant stop holds every price, cov
     note: 'Synthetic kill switch in the database', ...over,
   });
 
-  assert.equal((await store.stopPricing(w.tenantId, stop('membership-viewer'))).status, 'FORBIDDEN');
+  assert.equal((await store.stopPricing(w.tenantId, stop('membership-viewer'))).status, 'FORBIDDEN', 'OQ-129: a viewer does not stop pricing');
   const stopped = await store.stopPricing(w.tenantId, stop('membership-operator'));
   assert.ok(stopped.status === 'STOPPED');
   assert.equal((await store.stopPricing(w.tenantId, stop('membership-owner'))).status, 'ALREADY_ACTIVE');
@@ -185,7 +185,7 @@ test('Р-69, Р-70, OQ-125 in the database: a tenant stop holds every price, cov
   assert.deepEqual(stops, [{ scope_type: 'TENANT', channel_account_id: null }], 'one tenant object, not a set of account stops');
 
   const release = (alias: string) => ({ membershipId: member(alias), userId: userOf(alias), mfa: true, note: 'Synthetic resume after the check', at: now() });
-  assert.equal((await store.releaseStop(w.tenantId, stopped.stop.stopId, release('membership-operator'))).status, 'FORBIDDEN');
+  assert.equal((await store.releaseStop(w.tenantId, stopped.stop.stopId, release('membership-operator'))).status, 'FORBIDDEN', 'OQ-125: an operator does not resume a tenant stop');
   assert.equal((await store.releaseStop(w.tenantId, stopped.stop.stopId, release('membership-owner'))).status, 'RELEASED');
   const resumed = await commit(store, w.tenantId, approved(await contextOf(store, w.tenantId, w.ids.dbId('ws-3')), 2000));
   assert.equal(resumed.status, 'COMMITTED', JSON.stringify(resumed));
@@ -201,6 +201,7 @@ test('Р-69: a system halt is only for broken channel data — a person cannot c
   const w = await seed([scopeSeed(4, BUYBOX)]);
   await assert.rejects(
     store.haltChannel(w.tenantId, { channelAccountId: w.channelAccountId, marketplace: 'de', reasonCode: 'MANUAL' as never, details: {}, haltedAt: now() }),
-    /pricing_halt/,
+    /pricing_halt_system_only/,
+    'Р-69: a person cannot create a system halt',
   );
 });

@@ -34,6 +34,10 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_provisioning') THEN
     CREATE ROLE svc_provisioning LOGIN IN ROLE repracer_provisioning;
   END IF;
+  -- Р-102: синхронизация остатка — только остатки и резервации, без цен и без аудита
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_stock') THEN
+    CREATE ROLE svc_stock LOGIN IN ROLE repracer_stock;
+  END IF;
   -- Р-90: вход — сопоставление внешнего пользователя с членствами и приём приглашения
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_authenticator') THEN
     CREATE ROLE svc_authenticator LOGIN IN ROLE repracer_authenticator;

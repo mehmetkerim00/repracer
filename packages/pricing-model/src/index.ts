@@ -25,6 +25,8 @@ export type {
 export { COMPETITOR_DERIVED_RULES, isCompetitorDerived, markAcceptedBySanity } from './types.ts';
 export * from './reasons.ts';
 export {
+  EXPLANATION_FIELD_KINDS,
+  type FieldKind,
   buildExplanation,
   channelKeysIn,
   expandExplanation,

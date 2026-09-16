@@ -27,6 +27,10 @@ PGUSER=svc_admin "${PSQL[@]}" -d "$DB" -f tests/db/smoke_admin.sql
 # Р-96: путь решения может только вычислить и записать цену — остальное отклоняется отсутствием права
 PGUSER=svc_app "${PSQL[@]}" -d "$DB" -f tests/db/smoke_path.sql
 "${PSQL[@]}" -d "$DB" -f tests/db/smoke_r65.sql
+# Р-103: у каждой append-only таблицы есть строка, изменение отклоняет триггер неизменяемости (откатываемая транзакция)
+"${PSQL[@]}" -d "$DB" -f tests/db/smoke_append_only.sql
+# Р-102: роль синхронизации остатка — только остатки и резервации
+PGUSER=svc_stock "${PSQL[@]}" -d "$DB" -f tests/db/smoke_stock.sql
 PGUSER=svc_scheduler "${PSQL[@]}" -d "$DB" -f tests/db/smoke_retention.sql
 PGUSER=svc_scheduler "${PSQL[@]}" -d "$DB" -Atc "SELECT maintenance.ensure_partitions(now())" > /dev/null
 echo "database ${DB} ready"

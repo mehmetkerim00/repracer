@@ -43,7 +43,8 @@ export function stopCovers(stop: Pick<StopRef, 'scope' | 'channelAccountId' | 'm
 export const MEMBER_ROLES = ['OWNER', 'ADMIN', 'OPERATOR', 'PRICING_MANAGER', 'INVENTORY_MANAGER', 'VIEWER'] as const;
 export type MemberRole = (typeof MEMBER_ROLES)[number];
 
-export type PricingAction = 'VIEW_PRICING' | 'STOP_PRICING' | 'RESUME_TENANT_STOP' | 'RESUME_CHANNEL_STOP' | 'RELEASE_CHANNEL_HALT' | 'ENABLE_REPRICING';
+export type PricingAction = 'VIEW_PRICING' | 'STOP_PRICING' | 'RESUME_TENANT_STOP' | 'RESUME_CHANNEL_STOP' | 'RELEASE_CHANNEL_HALT' | 'ENABLE_REPRICING'
+  | 'MANAGE_PRICING' | 'MANAGE_CATALOG' | 'MANAGE_TENANT' | 'GIVE_MIGRATION_CONSENT';
 
 /**
  * Права на цены (шаг 13, OQ-129). Стоп-кран — у каждого, кто отвечает за цены: владелец, администратор, оператор,
@@ -58,9 +59,16 @@ export const PRICING_PERMISSIONS: Readonly<Record<PricingAction, readonly Member
   RESUME_CHANNEL_STOP: ['OWNER', 'ADMIN', 'OPERATOR', 'PRICING_MANAGER'],
   RELEASE_CHANNEL_HALT: ['OWNER', 'ADMIN', 'OPERATOR', 'PRICING_MANAGER'],
   ENABLE_REPRICING: ['OWNER', 'ADMIN', 'OPERATOR', 'PRICING_MANAGER'],
+  // Шаг 18 [Р-100]: административная запись проверяет роль, а не только членство (security.admin_write_action, 0068)
+  MANAGE_PRICING: ['OWNER', 'ADMIN', 'PRICING_MANAGER'],
+  MANAGE_CATALOG: ['OWNER', 'ADMIN', 'INVENTORY_MANAGER'],
+  MANAGE_TENANT: ['OWNER', 'ADMIN'],
+  // Р-101: согласие на необратимую миграцию eBay — только владелец (и только от своего имени, со вторым фактором — в БД)
+  GIVE_MIGRATION_CONSENT: ['OWNER'],
 };
 
-export const PRICING_ACTIONS: readonly PricingAction[] = ['VIEW_PRICING', 'STOP_PRICING', 'RESUME_TENANT_STOP', 'RESUME_CHANNEL_STOP', 'RELEASE_CHANNEL_HALT', 'ENABLE_REPRICING'];
+export const PRICING_ACTIONS: readonly PricingAction[] = ['VIEW_PRICING', 'STOP_PRICING', 'RESUME_TENANT_STOP', 'RESUME_CHANNEL_STOP', 'RELEASE_CHANNEL_HALT', 'ENABLE_REPRICING',
+  'MANAGE_PRICING', 'MANAGE_CATALOG', 'MANAGE_TENANT', 'GIVE_MIGRATION_CONSENT'];
 
 export function can(role: MemberRole, action: PricingAction): boolean {
   return PRICING_PERMISSIONS[action].includes(role);

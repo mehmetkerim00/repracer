@@ -32,11 +32,17 @@ const scope: MemorySeedScope = {
   currentPriceMinor: 1850, minPrice: { amountMinor: 1500, id: 'min-1' }, maxPrice: { amountMinor: 2500, id: 'max-1' },
 };
 
-async function world(halts: Array<{ marketplace: string; haltedAt: string; reviewWindowSeconds?: number }>) {
+async function world(halts: Array<{ marketplace: string; haltedAt: string; reviewWindowSeconds?: number }>, scopes: MemorySeedScope[] = [scope]) {
   return seedPricingWorld(pool, { provisioningPool: provisioning, adminPool: admin,
-    fixtureTenantId: '10000000-0000-4000-8000-000000000146', fixtureChannelAccountId: ACCOUNT, marketplaces: ['de', 'at'], clock: now(), seed: { scopes: [scope], halts },
+    fixtureTenantId: '10000000-0000-4000-8000-000000000146', fixtureChannelAccountId: ACCOUNT, marketplaces: ['de', 'at'], clock: now(), seed: { scopes, halts },
   });
 }
+
+/** Единица со стратегией по рынку: попадает в размер выборки проверки остановки */
+const buyboxScope = (n: number): MemorySeedScope => ({
+  ...scope, writeScopeId: `ws-${n}`, productId: `prod-${n}`, externalUnitId: `1460${n}`, channelProductRef: `362147${n}`,
+  strategy: { strategyId: 'st-buybox', version: 1, params: { type: 'MATCH_BUYBOX', undercutMinor: 5, holdWhenWinning: true, atBound: 'CAP' }, deadbandMinor: 0 },
+});
 
 const reason = (e: unknown) => String((e as Error).message);
 const outcome = (p: Promise<unknown>) => p.then(() => 'accepted', reason);
@@ -109,17 +115,18 @@ test('finding 3, step 16 finding 2: an automatic release is computed by the data
 
   // Срок не наступил: чистая выборка не снимает остановку, и момент из будущего срок не сокращает
   await store.recordHaltSample(w.tenantId, early, [accept('3621461')], now());
-  assert.equal(await store.reviewHaltBySample(w.tenantId, early, new Date(Date.now() + 86_400_000).toISOString()), 'NOT_DUE');
+  assert.equal(await store.reviewHaltBySample(w.tenantId, early, new Date(Date.now() + 86_400_000).toISOString()), 'NOT_DUE',
+    'NOT_DUE: the review window has not elapsed and a moment in the future does not shorten it');
 
   // Срок наступил: без наблюдений, с наблюдением до срока и с наблюдением чужого товара — выборки нет
-  assert.equal(await store.reviewHaltBySample(w.tenantId, due, now()), 'NO_SAMPLE');
+  assert.equal(await store.reviewHaltBySample(w.tenantId, due, now()), 'NO_SAMPLE', 'NO_SAMPLE: nothing was observed');
   await store.recordHaltSample(w.tenantId, due, [accept('3621461', ago(3_590_000)), accept('9999999')], now());
-  assert.equal(await store.reviewHaltBySample(w.tenantId, due, now()), 'NO_SAMPLE');
+  assert.equal(await store.reviewHaltBySample(w.tenantId, due, now()), 'NO_SAMPLE', 'NO_SAMPLE: a stale observation and a product outside the storefront do not count');
   assert.equal((await halt(due)).released_at, null);
 
   // Чистое наблюдение рядом с неудачным — проверка не прошла, срок сдвинут на окно
   await store.recordHaltSample(w.tenantId, due, [accept('3621461'), { channelProductRef: '3621462', observedAt: now(), verdict: 'READ_FAILED', reasonCode: 'CHANNEL_TIMEOUT' }], now());
-  assert.equal(await store.reviewHaltBySample(w.tenantId, due, now()), 'SAMPLE_FAILED');
+  assert.equal(await store.reviewHaltBySample(w.tenantId, due, now()), 'SAMPLE_FAILED', 'SAMPLE_FAILED: one failed observation fails the review');
   const failed = await halt(due);
   assert.equal(failed.released_at, null);
   assert.ok(new Date(failed.next_review_at).getTime() > Date.now() + 30_000, 'the next review waits for the window');
@@ -127,6 +134,12 @@ test('finding 3, step 16 finding 2: an automatic release is computed by the data
   // Чистая выборка после окна — снятие базой, запись проверки AUTO_SAMPLE, повтор не снимает второй раз
   const fresh = await world([{ marketplace: 'de', haltedAt: ago(3_600_000), reviewWindowSeconds: 60 }]);
   const [freshHalt] = await inTenant(pool, fresh.tenantId, async (tx) => (await tx.query('SELECT pricing_halt_id FROM channel_data.pricing_halt WHERE tenant_id = $1', [fresh.tenantId])).rows);
+  // Наблюдение позже момента проверки не считается (выборка — до момента, 0065)
+  await store.recordHaltSample(fresh.tenantId, freshHalt.pricing_halt_id, [accept('3621461', new Date(Date.now() + 120_000).toISOString())], now());
+  assert.equal(await store.reviewHaltBySample(fresh.tenantId, freshHalt.pricing_halt_id, now()), 'NO_SAMPLE', 'NO_SAMPLE: an observation after the review moment does not count');
+  // Проверка идёт только в контексте своего тенанта
+  assert.match(await outcome(inTenant(pool, w.tenantId, (tx) => tx.query('SELECT channel_data.review_halt_by_sample($1, $2, now())', [fresh.tenantId, freshHalt.pricing_halt_id]))),
+    /outside the tenant context/, 'the review of a halt runs only in the context of its own tenant');
   await store.recordHaltSample(fresh.tenantId, freshHalt.pricing_halt_id, [accept('3621461')], now());
   assert.equal(await store.reviewHaltBySample(fresh.tenantId, freshHalt.pricing_halt_id, now()), 'RELEASED');
   const released = await store.dumpState(fresh.tenantId);
@@ -149,7 +162,19 @@ test('Р-88: releasing the tenant stop needs a second factor; a storefront stop 
   };
   const tenantStop = await stop('TENANT');
   const release = (mfa: boolean) => ({ ...owner, mfa, note: 'Synthetic resume for the factor check', at: now() });
-  assert.equal((await store.releaseStop(w.tenantId, tenantStop, release(false))).status, 'MFA_REQUIRED');
+  assert.equal((await store.releaseStop(w.tenantId, tenantStop, release(false))).status, 'MFA_REQUIRED', 'Р-88: the tenant stop is not released without a second factor');
   assert.equal((await store.releaseStop(w.tenantId, tenantStop, release(true))).status, 'RELEASED');
   assert.equal((await store.releaseStop(w.tenantId, await stop('STOREFRONT'), release(false))).status, 'RELEASED');
 });
+
+test('finding 3: an automatic release needs as many accepted products as the sample requires', async () => {
+  const w = await world([{ marketplace: 'de', haltedAt: ago(3_600_000), reviewWindowSeconds: 60 }], [buyboxScope(2), buyboxScope(3)]);
+  const store = new PgPricingStore(pool, { adminPool: admin });
+  const [h] = await inTenant(pool, w.tenantId, async (tx) => (await tx.query('SELECT pricing_halt_id FROM channel_data.pricing_halt WHERE tenant_id = $1', [w.tenantId])).rows);
+  const accept = (ref: string) => ({ channelProductRef: ref, observedAt: now(), verdict: 'ACCEPT' as const, reasonCode: null });
+  await store.recordHaltSample(w.tenantId, h.pricing_halt_id, [accept('3621472')], now());
+  assert.equal(await store.reviewHaltBySample(w.tenantId, h.pricing_halt_id, now()), 'NO_SAMPLE', 'NO_SAMPLE: fewer accepted products than the sample requires');
+  await store.recordHaltSample(w.tenantId, h.pricing_halt_id, [accept('3621473')], now());
+  assert.equal(await store.reviewHaltBySample(w.tenantId, h.pricing_halt_id, now()), 'RELEASED', 'both products of the storefront accepted: the halt is released');
+});
+

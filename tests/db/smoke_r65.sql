@@ -14,11 +14,13 @@ BEGIN
     WHEN SQLSTATE 'RS001' THEN
       failure := 'EXPECTED FAILURE DID NOT HAPPEN';
     WHEN others THEN
-      IF reason IS NULL OR SQLSTATE = reason OR SQLERRM ~* reason THEN
+      -- Р-94 (шаг 18): причина обязательна и сверяется с текстом отказа — SQLSTATE недостаточно (42501 дают и защитные триггеры)
+      IF reason IS NOT NULL AND SQLERRM ~* reason THEN
         RAISE NOTICE 'PASS reject | % | %', label, left(SQLERRM, 110);
         RETURN;
       END IF;
-      failure := format('EXPECTED FAILURE HAD ANOTHER REASON (expected %s, got %s %s)', reason, SQLSTATE, left(SQLERRM, 160));
+      failure := CASE WHEN reason IS NULL THEN format('EXPECTED FAILURE HAS NO DECLARED REASON (got %s %s)', SQLSTATE, left(SQLERRM, 160))
+                      ELSE format('EXPECTED FAILURE HAD ANOTHER REASON (expected %s, got %s %s)', reason, SQLSTATE, left(SQLERRM, 160)) END;
   END;
   IF current_setting('repracer.smoke_collect', true) = 'on' THEN
     RAISE WARNING 'CHECK FAILED: % | %', label, failure;
@@ -30,13 +32,13 @@ BEGIN;
 UPDATE platform.marketplace SET time_zone_status = 'TO_VERIFY' WHERE channel = 'EBAY' AND marketplace = 'EBAY_DE';
 SELECT pg_temp.expect_fail('budgeted write while the storefront day boundary is unconfirmed (Р-65)', $q$
   INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, quantity, version, origin, budget_scope_key, budget_day)
-  VALUES ('a0000000-0000-0000-0000-00000000000a', gen_random_uuid(), 'a6000000-0000-0000-0000-000000000003', 'QUANTITY', 2, 90, 'STOCK_RECALC', 'L1', (now() AT TIME ZONE 'Europe/Berlin')::date) $q$);
+  VALUES ('a0000000-0000-0000-0000-00000000000a', gen_random_uuid(), 'a6000000-0000-0000-0000-000000000003', 'QUANTITY', 2, 90, 'STOCK_RECALC', 'L1', (now() AT TIME ZONE 'Europe/Berlin')::date) $q$, 'edit budget day of storefront EBAY_DE is not confirmed');
 UPDATE platform.marketplace SET time_zone_status = 'CONFIRMED' WHERE channel = 'EBAY' AND marketplace = 'EBAY_DE';
 SELECT pg_temp.expect_fail('budget day is not the current storefront day (Р-65)', $q$
   INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, quantity, version, origin, budget_scope_key, budget_day)
-  VALUES ('a0000000-0000-0000-0000-00000000000a', gen_random_uuid(), 'a6000000-0000-0000-0000-000000000003', 'QUANTITY', 2, 90, 'STOCK_RECALC', 'L1', (now() AT TIME ZONE 'Europe/Berlin')::date - 1) $q$);
+  VALUES ('a0000000-0000-0000-0000-00000000000a', gen_random_uuid(), 'a6000000-0000-0000-0000-000000000003', 'QUANTITY', 2, 90, 'STOCK_RECALC', 'L1', (now() AT TIME ZONE 'Europe/Berlin')::date - 1) $q$, 'is not the current day .* of storefront');
 SELECT pg_temp.expect_fail('US storefront confirmed without a time zone', $q$
-  UPDATE platform.marketplace SET time_zone_status = 'CONFIRMED' WHERE marketplace = 'EBAY_US' $q$);
+  UPDATE platform.marketplace SET time_zone_status = 'CONFIRMED' WHERE marketplace = 'EBAY_US' $q$, 'marketplace_time_zone_known_if_confirmed');
 -- C2 (ретроспективное ревью шага 14): повтор записи после полуночи витрины расходует бюджет ТЕКУЩЕГО дня, а не дня создания.
 -- Бюджет сегодняшнего дня листинга L1 исчерпан smoke_app.sql (200 + 50 = 250). Запись переводится в FAILED, её день
 -- переносится на вчера (как если бы она была создана до полуночи), и повтор обязан упереться в сегодняшний лимит.
@@ -47,7 +49,7 @@ UPDATE tenant_data.channel_write SET budget_day = budget_day - 1 WHERE channel_w
 SET LOCAL session_replication_role = origin;
 SELECT pg_temp.expect_fail('retry after midnight is charged to today, whose budget is exhausted (C2, Р-19)', $q$
   UPDATE tenant_data.channel_write SET status = 'DISPATCHED', attempt_count = attempt_count + 1, next_attempt_at = NULL
-   WHERE channel_write_id = 'a9000000-0000-0000-0000-000000000012' $q$);
+   WHERE channel_write_id = 'a9000000-0000-0000-0000-000000000012' $q$, 'edit_budget_total_limit');
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM tenant_data.edit_budget WHERE budget_scope_key = 'L1' AND budget_day < (now() AT TIME ZONE 'Europe/Berlin')::date) THEN
     RAISE EXCEPTION 'a retry charged the edit budget of a past day';
@@ -57,15 +59,15 @@ END $$;
 UPDATE platform.marketplace SET time_zone_status = 'TO_VERIFY' WHERE channel = 'EBAY' AND marketplace = 'EBAY_DE';
 SELECT pg_temp.expect_fail('retry while the storefront day boundary is unconfirmed (C2, Р-65)', $q$
   UPDATE tenant_data.channel_write SET status = 'DISPATCHED', attempt_count = attempt_count + 1, next_attempt_at = NULL
-   WHERE channel_write_id = 'a9000000-0000-0000-0000-000000000012' $q$);
+   WHERE channel_write_id = 'a9000000-0000-0000-0000-000000000012' $q$, 'retry of a budgeted write: the day boundary of storefront');
 UPDATE platform.marketplace SET time_zone_status = 'CONFIRMED' WHERE channel = 'EBAY' AND marketplace = 'EBAY_DE';
 -- Р-75, Р-61 (правила 23 и 33 проверки схемы заменены поведением, Р-93): справочник объяснения и курс ЕЦБ неизменяемы даже для суперпользователя
 SELECT pg_temp.expect_fail('explanation ruleset is immutable (Р-75)', $q$
-  UPDATE platform.explanation_ruleset SET definition = definition WHERE ruleset_id = 'r49.1' $q$);
+  UPDATE platform.explanation_ruleset SET definition = definition WHERE ruleset_id = 'r49.1' $q$, 'append-only table platform.explanation_ruleset: UPDATE is forbidden');
 INSERT INTO platform.fx_rate (source, rate_date, base_currency, quote_currency, rate, available_from, source_ref)
 VALUES ('ECB', DATE '2001-01-02', 'EUR', 'USD', 0.9423, TIMESTAMPTZ '2001-01-02 16:00+00', 'smoke r61 (rolled back)');
 SELECT pg_temp.expect_fail('ECB rate is immutable (Р-61)', $q$
-  UPDATE platform.fx_rate SET rate = 1.5 WHERE source_ref = 'smoke r61 (rolled back)' $q$);
+  UPDATE platform.fx_rate SET rate = 1.5 WHERE source_ref = 'smoke r61 (rolled back)' $q$, 'append-only table platform.fx_rate: UPDATE is forbidden');
 -- Р-73, Р-85, Р-94: ядро intent, вставленное мимо решения (суперпользователем), тоже проверяется своими ограничениями
 CREATE FUNCTION pg_temp.core_variant(overrides jsonb) RETURNS text LANGUAGE plpgsql AS $$
 DECLARE
@@ -82,26 +84,8 @@ SELECT pg_temp.expect_fail('eternal core: a competitor-derived rejection keeps i
   'price_intent_core_competitor_rejection_not_kept');
 SELECT pg_temp.expect_fail('eternal core: an undeclared reason parameter in the explanation (finding 15)', pg_temp.core_variant('{"explanation": {"format":"r80.1","strategy":{"reason":{"code":"FIXED_PRICE","params":{"target":1780}}}}}'),
   'price_intent_core_explanation_keys_declared');
--- Находка 4 ревью шага 16, Р-93: append-only проверяется попыткой изменения, а не именем триггера. Суперпользователь обходит права, но не
--- триггер: у каждой append-only таблицы, в которой есть строка, изменение одной строки обязано отклоняться именно триггером неизменяемости
-DO $$
-DECLARE
-  t regclass;
-  has_row boolean;
-  uncovered text[] := '{}';
-BEGIN
-  FOR t IN SELECT table_name FROM security.table_registry WHERE mutation_mode = 'append_only' ORDER BY table_name::text LOOP
-    EXECUTE format('SELECT EXISTS (SELECT 1 FROM %s)', t) INTO has_row;
-    IF has_row THEN
-      PERFORM pg_temp.expect_fail(format('append-only %s', t),
-        format('UPDATE %1$s SET tenant_id = tenant_id WHERE (tableoid, ctid) = (SELECT tableoid, ctid FROM %1$s LIMIT 1)', t), 'append-only table');
-    ELSE
-      uncovered := uncovered || t::text;
-    END IF;
-  END LOOP;
-  RAISE NOTICE 'append-only tables without rows in the smoke world (not checked here): %', array_to_string(uncovered, ', ');
-END $$;
+-- Неизменяемость всех append-only таблиц проверяется попыткой изменения в tests/db/smoke_append_only.sql (Р-103)
 SELECT pg_temp.expect_fail('manual halt without a member and a note', $q$
   INSERT INTO channel_data.pricing_halt (tenant_id, channel_account_id, channel, marketplace, reason_code, details, halted_at)
-  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000003', 'EBAY', 'EBAY_DE', 'MANUAL', '{}', now()) $q$);
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000003', 'EBAY', 'EBAY_DE', 'MANUAL', '{}', now()) $q$, 'pricing_halt_system_only');
 ROLLBACK;

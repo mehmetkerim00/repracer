@@ -14,11 +14,13 @@ BEGIN
     WHEN SQLSTATE 'RS001' THEN
       failure := 'EXPECTED FAILURE DID NOT HAPPEN';
     WHEN others THEN
-      IF reason IS NULL OR SQLSTATE = reason OR SQLERRM ~* reason THEN
+      -- Р-94 (шаг 18): причина обязательна и сверяется с текстом отказа — SQLSTATE недостаточно (42501 дают и защитные триггеры)
+      IF reason IS NOT NULL AND SQLERRM ~* reason THEN
         RAISE NOTICE 'PASS reject | % | %', label, left(SQLERRM, 110);
         RETURN;
       END IF;
-      failure := format('EXPECTED FAILURE HAD ANOTHER REASON (expected %s, got %s %s)', reason, SQLSTATE, left(SQLERRM, 160));
+      failure := CASE WHEN reason IS NULL THEN format('EXPECTED FAILURE HAS NO DECLARED REASON (got %s %s)', SQLSTATE, left(SQLERRM, 160))
+                      ELSE format('EXPECTED FAILURE HAD ANOTHER REASON (expected %s, got %s %s)', reason, SQLSTATE, left(SQLERRM, 160)) END;
   END;
   IF current_setting('repracer.smoke_collect', true) = 'on' THEN
     RAISE WARNING 'CHECK FAILED: % | %', label, failure;
@@ -27,8 +29,8 @@ BEGIN
   END IF;
 END $$;
 
-SELECT pg_temp.expect_fail('direct DELETE from append-only as scheduler', $q$ DELETE FROM tenant_data.min_price $q$);
-SELECT pg_temp.expect_fail('purge ACTIVE tenant', $q$ SELECT maintenance.purge_tenant_channel_data('b0000000-0000-0000-0000-00000000000b') $q$);
+SELECT pg_temp.expect_fail('direct DELETE from append-only as scheduler', $q$ DELETE FROM tenant_data.min_price $q$, 'append-only table tenant_data.min_price: DELETE is forbidden');
+SELECT pg_temp.expect_fail('purge ACTIVE tenant', $q$ SELECT maintenance.purge_tenant_channel_data('b0000000-0000-0000-0000-00000000000b') $q$, 'must be a CUSTOMER in OFFBOARDING or CLOSED');
 
 SELECT count(*) AS ph_before FROM pg_inherits WHERE inhparent = 'tenant_data.price_history'::regclass \gset
 SELECT count(*) AS intent_before FROM pg_inherits WHERE inhparent = 'channel_data.price_intent'::regclass \gset
@@ -122,11 +124,13 @@ BEGIN
     WHEN SQLSTATE 'RS001' THEN
       failure := 'EXPECTED FAILURE DID NOT HAPPEN';
     WHEN others THEN
-      IF reason IS NULL OR SQLSTATE = reason OR SQLERRM ~* reason THEN
+      -- Р-94 (шаг 18): причина обязательна и сверяется с текстом отказа — SQLSTATE недостаточно (42501 дают и защитные триггеры)
+      IF reason IS NOT NULL AND SQLERRM ~* reason THEN
         RAISE NOTICE 'PASS reject | % | %', label, left(SQLERRM, 110);
         RETURN;
       END IF;
-      failure := format('EXPECTED FAILURE HAD ANOTHER REASON (expected %s, got %s %s)', reason, SQLSTATE, left(SQLERRM, 160));
+      failure := CASE WHEN reason IS NULL THEN format('EXPECTED FAILURE HAS NO DECLARED REASON (got %s %s)', SQLSTATE, left(SQLERRM, 160))
+                      ELSE format('EXPECTED FAILURE HAD ANOTHER REASON (expected %s, got %s %s)', reason, SQLSTATE, left(SQLERRM, 160)) END;
   END;
   IF current_setting('repracer.smoke_collect', true) = 'on' THEN
     RAISE WARNING 'CHECK FAILED: % | %', label, failure;
@@ -135,13 +139,16 @@ BEGIN
   END IF;
 END $$;
 
+-- OQ-153 (шаг 18): привязки входа живут, пока жив пользователь — у действующего пользователя они не удаляются
+SELECT pg_temp.expect_fail('sign-ins of an active user are purged (OQ-153)', $q$
+  SELECT maintenance.purge_user_identities('a1000000-0000-0000-0000-00000000000a') $q$, 'are kept while the user is not disabled');
+
 -- Tenant closure for tenant A (has price_history)
 UPDATE tenant_data.tenant SET status = 'OFFBOARDING' WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a';
 SELECT maintenance.purge_tenant_channel_data('a0000000-0000-0000-0000-00000000000a') AS channel_rows_purged \gset
 \echo 'channel rows purged:' :channel_rows_purged
 UPDATE tenant_data.tenant SET status = 'CLOSED', closed_at = now() WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a';
-SELECT pg_temp.expect_fail('purge tenant data without price_history confirmation (OQ-22)',
-  $q$ SELECT maintenance.purge_tenant_data('a0000000-0000-0000-0000-00000000000a') $q$);
+SELECT pg_temp.expect_fail('purge tenant data without price_history confirmation (OQ-22)', $q$ SELECT maintenance.purge_tenant_data('a0000000-0000-0000-0000-00000000000a') $q$, 'has price evidence; deletion requires explicit confirmation');
 SELECT maintenance.purge_tenant_data('a0000000-0000-0000-0000-00000000000a', true) AS tenant_rows_purged \gset
 \echo 'tenant rows purged:' :tenant_rows_purged
 SELECT count(*) AS legal_consents FROM legal.migration_consent_record WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a' \gset

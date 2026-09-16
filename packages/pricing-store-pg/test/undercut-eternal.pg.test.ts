@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
-import { REASON_PARAMS, SANITY_NOTE_PARAMS, type PriceIntentDraft } from '@repracer/pricing-model';
+import { EXPLANATION_FIELD_KINDS, REASON_PARAMS, SANITY_NOTE_PARAMS, type PriceIntentDraft } from '@repracer/pricing-model';
 import type { MemorySeedScope } from '@repracer/pricing-pipeline';
 import { createPool, inTenant, PgPricingStore, seedPricingWorld, type SeededPricingWorld } from '../src/index.ts';
 import { approved, contextOf, explained } from './drafts.ts';
@@ -69,10 +69,11 @@ test('Р-91: the strategy version keeps its type without the undercut; the under
   assert.match(await refusal(qa(insertVersion(2, { type: 'MATCH_BUYBOX', undercutMinor: 5, holdWhenWinning: false, atBound: 'CAP', deadbandMinor: 0 }))), /pricing_strategy_undercut_not_eternal/);
   assert.match(await refusal(qa(insertVersion(2, { type: 'MATCH_BUYBOX', holdWhenWinning: false, atBound: 'CAP', deadbandMinor: 0 }))), /needs its undercut/);
 
-  await inTenant(admin, w.tenantId, async (tx) => {
+  // OQ-151: новая версия создаётся, пока старая закреплена за единицей записи — подрез старой при этом не истекает
+  assert.equal(await refusal(inTenant(admin, w.tenantId, async (tx) => {
     await tx.query(insertVersion(2, { type: 'MATCH_BUYBOX', holdWhenWinning: false, atBound: 'CAP', deadbandMinor: 0 }), [w.tenantId, strategyId]);
     await tx.query('INSERT INTO channel_data.pricing_strategy_undercut (tenant_id, pricing_strategy_id, version, undercut_minor) VALUES ($1, $2, 2, 7)', [w.tenantId, strategyId]);
-  }, w.userId);
+  }, w.userId)), 'accepted', 'OQ-151: a new version is created while the old one is still pinned');
   const undercuts = () => q('SELECT version, superseded_at IS NOT NULL AS superseded FROM channel_data.pricing_strategy_undercut WHERE tenant_id = $1 AND pricing_strategy_id = $2 ORDER BY version');
   // OQ-151 (0066): единица записи всё ещё закреплена за версией 1 — её подрез не начинает срок хранения
   assert.deepEqual(await undercuts(), [{ version: 1, superseded: false }, { version: 2, superseded: false }], 'a pinned version keeps its undercut (OQ-151)');
@@ -117,6 +118,10 @@ test('finding 15: the database registry of declared keys equals the code; an und
       .map(([k, v]) => [k, { k: v.kind, ...(v.nullable ? { n: true } : {}), ...(v.values ? { v: [...v.values] } : {}) }]))]));
   const { rows: [kinds] } = await pool.query('SELECT security.eternal_param_kinds() AS kinds');
   assert.deepEqual(kinds.kinds, expectedKinds, 'the kinds registry of the database equals the code');
+  // Находка 8 ревью шага 17 (0070): вид есть у каждого скалярного поля слепка, не только у параметров причин
+  const expectedFields = Object.fromEntries(Object.entries(EXPLANATION_FIELD_KINDS).map(([k, v]) => [k, { k: v.k, ...(v.n ? { n: true } : {}), ...(v.v ? { v: [...v.v] } : {}) }]));
+  const { rows: [fields] } = await pool.query('SELECT security.explanation_field_kinds() AS kinds');
+  assert.deepEqual(fields.kinds, expectedFields, 'the field kinds registry of the database equals the code');
 
   const check = async (explanation: object, competitorDerived: boolean) =>
     (await pool.query('SELECT security.explanation_keys_declared($1::jsonb, $2) AS ok', [JSON.stringify(explanation), competitorDerived])).rows[0].ok;
@@ -131,6 +136,17 @@ test('finding 15: the database registry of declared keys equals the code; an und
   assert.equal(await check({ ...valid, gate: { failed: { check: 'UPPER_BOUND', detail: { code: 'ABOVE_MAX_PRICE', params: { source: 'CONSOLE', currency: 'EUR' } } } } }, false), false,
     'an enum value outside the registry');
   assert.equal(await check({ ...valid, format: 'r74.1' }, false), false, 'another explanation format');
+  // Находка 8: поля слепка и значения видов — не произвольный текст и не произвольные числа
+  assert.equal(await check({ ...valid, strategy: { ...valid.strategy, currentMinor: 'Konkurent Mustermann GmbH 17,49 EUR' } }, false), false, 'a free text in strategy.currentMinor');
+  assert.equal(await check({ ...valid, strategy: { ...valid.strategy, currency: 'XYZ' } }, false), false, 'a currency outside EUR and USD');
+  assert.equal(await check({ ...valid, context: { priceStop: { stopId: '00000000-0000-4000-8000-000000000001', scope: 'TENANT', channelAccountId: null, marketplace: null,
+    stoppedAt: '2026-99-99T99:99:99Z', stoppedByMembershipId: '00000000-0000-4000-8000-000000000002' } } }, false), false, 'an invalid moment in the price stop context');
+  assert.equal(await check({ ...valid, strategy: { ...valid.strategy, reason: { code: 'SMALL_MOVE', params: { minFactor: 1749 } } } }, false), false, 'a ratio outside its range');
+  assert.equal(await check({ ...valid, strategy: { ...valid.strategy, reason: { code: 'INTENT_EXPIRED', params: { waitedSeconds: -5 } } } }, false), false, 'a negative count');
+  assert.equal(await check({ ...valid, strategy: { ...valid.strategy, reason: { code: 'NO_SCOPE_FOR_PRODUCT', params: { writeScopeId: 'competitor buybox 1749 EUR seller X' } } } }, false), false,
+    'a free text as an id');
+  assert.equal(await check({ ...valid, context: { priceStop: { stopId: '00000000-0000-4000-8000-000000000001', scope: 'TENANT', channelAccountId: null, marketplace: null,
+    stoppedAt: '2026-09-14T10:00:00.000Z', stoppedByMembershipId: '00000000-0000-4000-8000-000000000002' } } }, false), true, 'a valid price stop context is accepted');
   assert.equal(await check({ ...valid, strategy: { ...valid.strategy, reason: { code: 'FIXED_PRICE', params: { currency: 'EUR' }, withheld: ['buybox 1780'] } } }, false), false,
     'a withheld name that is not an identifier');
   assert.equal(await check({ ...valid, buybox: 1780 }, false), false, 'unknown field of the format');

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { after, test } from 'node:test';
 import { createPool, inTenant, seedPricingWorld } from '@repracer/pricing-store-pg';
 import { createAuthenticator, staticJwks } from '../src/index.ts';
@@ -143,8 +143,11 @@ test('Р-98: a sign-in is relinked only by a new invitation of the tenant owner 
     inTenant(viaPool, world.tenantId, (tx) => inviteRelink(tx, { tenantId: world.tenantId, userId: owner.userId }), userId, { mfa });
 
   await assert.rejects(relinkAs(owner.userId, true, pool), /permission denied/, 'Р-90: the decision path does not relink');
-  await assert.rejects(relinkAs(owner.userId, false), /second factor/);
-  await assert.rejects(relinkAs(world.ids.dbId('user-operator'), true), /only an active owner/);
+  await assert.rejects(relinkAs(owner.userId, false), /second factor/, 'Р-98: a relink invitation without a second factor');
+  await assert.rejects(relinkAs(world.ids.dbId('user-operator'), true), /only an active owner/, 'Р-98: only an active owner relinks');
+  const stranger = await signUp(email('stranger'));
+  await assert.rejects(inTenant(admin, world.tenantId, (tx) => inviteRelink(tx, { tenantId: world.tenantId, userId: stranger.userId }), owner.userId, { mfa: true }),
+    /is not an active member/, 'Р-98: a relink is issued only to a member of the tenant');
 
   const moved = { issuer: ISSUER, subject: `sub-${randomUUID()}` };
   const plain = await issueSignupInvitation(onboarding as never, address);
@@ -163,3 +166,31 @@ test('Р-98: a sign-in is relinked only by a new invitation of the tenant owner 
     [world.tenantId])).rows.map((r) => r.action as string), owner.userId);
   assert.deepEqual(actions.slice(0, 2), ['identity.relink_invited', 'identity.relinked'], 'Р-98: the invitation and the relink are audited');
 });
+
+test('Р-98, step 17 finding 3: two invitations accepted at the same time link one sign-in of the provider, not two', async () => {
+  const ownerB = await signUp(email('race-owner-b'));
+  const ownerC = await signUp(email('race-owner-c'));
+  const worldB = await worldOf(ownerB, 1);
+  const worldC = await worldOf(ownerC, 2);
+  const address = email('race');
+  const toB = await invite(worldB.tenantId, ownerB.userId, address);
+  const toC = await invite(worldC.tenantId, ownerC.userId, address, 'VIEWER');
+  const sha256 = (token: string) => createHash('sha256').update(token, 'utf8').digest();
+
+  const first = await authenticator.connect();
+  try {
+    await first.query('BEGIN');
+    await first.query('SELECT security.accept_identity_invitation($1, $2, $3, $4, true)', [sha256(toB.token), ISSUER, `sub-${randomUUID()}`, address]);
+    let settled = false;
+    const second = directory.acceptInvitation(toC.token, { issuer: ISSUER, subject: `sub-${randomUUID()}` }, address, true)
+      .then((userId) => userId, (error: Error) => error).finally(() => { settled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    assert.equal(settled, false, 'Р-98: the second acceptance waits for the first');
+    await first.query('COMMIT');
+    const outcome = await second;
+    assert.ok(outcome instanceof Error && /already has an active sign-in/.test(outcome.message), `Р-98: two active sign-ins of one provider for one user: ${String(outcome)}`);
+  } finally {
+    first.release();
+  }
+});
+

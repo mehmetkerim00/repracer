@@ -1,278 +1,429 @@
-// Р-95: мутационная проверка схемы. Каждая мутация снимает одну защиту (триггер, ограничение или проверку в теле функции) в копии
-// шаблона базы; ожидаемые проверки обязаны на ней упасть. Проверка, которая остаётся зелёной без своей защиты, не существует [Р-94].
+// Р-95: мутационная проверка схемы. Каждая мутация снимает одну защиту (триггер, ограничение, право или проверку в теле функции) в копии
+// шаблона базы. Проверка, которая остаётся зелёной без своей защиты, не существует [Р-94].
 //
-// expect:
-//   { smoke: 'метка проверки', reached? }  — смоук-тест tests/db с этой меткой провален (не случился отказ или отказ по другой причине);
-//                                             reached — строка успеха для проверок DO-блоком, у которых метка есть только в тексте провала;
-//   { node: 'путь/к/файлу.test.ts', test } — тест с подстрокой test в названии провален (test: null — любой тест файла);
-//   { verify: 'migrations/00NN_….sql' }    — проверка схемы падает.
-// Каталог шага 17 (А): строки таблицы соответствия Р-93 (migrations/README.md) и ровно те проверки, которые таблица заявляет.
+// Р-99 (шаг 18): у КАЖДОЙ мутации — свои проверки (own). Мутация поймана, только если упала своя проверка и с совпавшей причиной;
+// падение проверки соседней мутации той же строки — не поимка.
+//
+// Проверка:
+//   { smoke: 'метка', reached? }                      — смоук-тест tests/db с этой меткой провален: pg_temp.expect_fail сам сверяет причину
+//                                                        (не случился отказ или отказ по другой причине); reached — строка успеха для
+//                                                        проверок DO-блоком, у которых метка есть только в тексте провала;
+//   { node: 'путь/к/файлу.test.ts', test, reason }    — тест с подстрокой test в названии провален И текст провала совпал с reason
+//                                                        (регулярное выражение: сообщение утверждения или ожидаемый шаблон отказа);
+//   { verify: 'migrations/00NN_….sql', reason }       — проверка схемы падает с сообщением, совпавшим с reason.
 
 const dropTrigger = (name, table) => `DROP TRIGGER ${name} ON ${table}`;
 const dropConstraint = (name, table) => `ALTER TABLE ${table} DROP CONSTRAINT ${name}`;
 /** Проверка в теле функции делается недостижимой: текст from заменяется на to */
 const replaceInFunction = (fn, from, to) => ({ fn, from, to });
+/** Мутация и её собственные проверки */
+const m = (apply, ...own) => ({ apply, own });
+
+const VERIFY = 'migrations/0071_verify_schema_invariants_v15.sql';
+const T = (file) => `packages/pricing-store-pg/test/${file}`;
+const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
+const node = (file, test, reason) => ({ node: file, test, reason });
+const verify = (reason) => ({ verify: VERIFY, reason });
 
 export const R93_ROWS = [
   {
     row: '12', invariant: 'Р-43, Р-44: потолок при создании и отправке записи',
-    expect: [{ smoke: 'write created above lowered max_price (Р-44, check 2)' }, { smoke: 'dispatch above lowered max_price (Р-44, check 3)' },
-      { node: 'packages/pricing-store-pg/test/store.pg.test.ts', test: 'refuses a price above max_price' }],
-    mutations: [dropTrigger('ba_channel_write_ceiling_insert', 'tenant_data.channel_write'), dropTrigger('ba_channel_write_ceiling_dispatch', 'tenant_data.channel_write')],
+    mutations: [
+      m(dropTrigger('ba_channel_write_ceiling_insert', 'tenant_data.channel_write'), smoke('write created above lowered max_price (Р-44, check 2)')),
+      m(dropTrigger('ba_channel_write_ceiling_dispatch', 'tenant_data.channel_write'), smoke('dispatch above lowered max_price (Р-44, check 3)')),
+    ],
   },
   {
     row: '13', invariant: 'Р-44: без округления до границы, причина отказа обязательна',
-    expect: [{ smoke: 'clamp to floor instead of rejection (Р-44)' }, { smoke: 'REJECTED without a reason' }],
-    mutations: [dropConstraint('price_decision_no_bound_clamp', 'channel_data.price_decision'), dropConstraint('price_decision_rejection_reason_iff', 'channel_data.price_decision')],
+    mutations: [
+      m(dropConstraint('price_decision_no_bound_clamp', 'channel_data.price_decision'), smoke('clamp to floor instead of rejection (Р-44)')),
+      m(dropConstraint('price_decision_rejection_reason_iff', 'channel_data.price_decision'), smoke('REJECTED without a reason')),
+    ],
   },
   {
     row: '14', invariant: 'Р-43: потолок не в guardrail',
-    expect: [{ smoke: 'guardrail carrying a ceiling (moved to max_price, Р-43)' }],
-    mutations: [dropConstraint('guardrail_ceiling_moved_to_max_price', 'tenant_data.guardrail')],
+    mutations: [m(dropConstraint('guardrail_ceiling_moved_to_max_price', 'tenant_data.guardrail'), smoke('guardrail carrying a ceiling (moved to max_price, Р-43)'))],
   },
   {
     row: '16', invariant: 'Р-52: снятие остановки только с записью журнала',
-    expect: [{ smoke: 'manual release without a journal record (Р-52)' }, { smoke: 'manual halt release by a member with a second factor, a note and a journal record (Р-52, Р-88)' },
-      { node: 'packages/pricing-store-pg/test/audit-guards.pg.test.ts', test: 'finding 1' }],
-    mutations: [dropTrigger('c_pricing_halt_release_journal', 'channel_data.pricing_halt')],
+    mutations: [m(dropTrigger('c_pricing_halt_release_journal', 'channel_data.pricing_halt'), smoke('manual release without a journal record (Р-52)'))],
   },
   {
     row: '17', invariant: 'Р-51: признак цены по конкурентам копируется в решение',
-    expect: [{ smoke: 'competitor_derived is not derived from rule_code', reached: 'competitor_derived: from intent rule_code, copied into the decision (Р-51)' }],
-    mutations: [dropTrigger('aa_price_decision_copy_derivation', 'channel_data.price_decision')],
+    mutations: [m(dropTrigger('aa_price_decision_copy_derivation', 'channel_data.price_decision'),
+      smoke('competitor_derived is not derived from rule_code', 'competitor_derived: from intent rule_code, copied into the decision (Р-51)'))],
   },
   {
     row: '18', invariant: 'Р-57: валюты EUR и USD',
-    expect: [{ smoke: 'currency outside EUR and USD' }],
-    mutations: [dropConstraint('write_scope_supported_currency', 'tenant_data.write_scope')],
+    mutations: [m(dropConstraint('write_scope_supported_currency', 'tenant_data.write_scope'), smoke('currency outside EUR and USD'))],
   },
   {
     row: '19', invariant: 'Р-58: налоговый режим единицы записи цены',
-    expect: [{ smoke: 'USD write scope attached to a EUR gross storefront (Р-57, Р-58)' }, { smoke: 'net price basis with VAT regime (Р-58)' }, { smoke: 'price write scope without tax regime (Р-58)' }],
-    mutations: [dropConstraint('write_scope_tax_regime_for_price', 'tenant_data.write_scope')],
+    mutations: [m(dropConstraint('write_scope_tax_regime_for_price', 'tenant_data.write_scope'),
+      smoke('net price basis with VAT regime (Р-58)'), smoke('price write scope without tax regime (Р-58)'))],
   },
   {
     row: '20, 21', invariant: 'OQ-98: отказ хранит параметры причины',
-    expect: [{ smoke: 'rejection without its reason parameters (OQ-98)' }, { node: 'packages/pricing-store-pg/test/store.pg.test.ts', test: 'OQ-93, OQ-94, OQ-98' }],
-    mutations: [dropConstraint('price_decision_rejection_explained', 'channel_data.price_decision')],
+    mutations: [m(dropConstraint('price_decision_rejection_explained', 'channel_data.price_decision'), smoke('rejection without its reason parameters (OQ-98)'),
+      node(T('store.pg.test.ts'), 'OQ-93, OQ-94, OQ-98', 'OQ-98: a rejection without its reason parameters is refused'))],
   },
   {
     row: '22', invariant: 'Р-64: завершение записи — с причиной; ждущая запись объявляется событием',
-    expect: [{ smoke: 'write discarded without a reason (Р-64)' }, { smoke: 'write history ended without a reason (Р-64)' },
-      { node: 'packages/pricing-store-pg/test/write-queue.pg.test.ts', test: null }, { node: 'packages/pricing-store-pg/test/budget-retry-dispatch.pg.test.ts', test: null }],
-    mutations: [dropConstraint('channel_write_end_explained', 'tenant_data.channel_write'), dropConstraint('channel_write_history_end_explained', 'tenant_data.channel_write_history'),
-      dropTrigger('zz_channel_write_announce_dispatch', 'tenant_data.channel_write')],
+    mutations: [
+      m(dropConstraint('channel_write_end_explained', 'tenant_data.channel_write'), smoke('write discarded without a reason (Р-64)')),
+      m(dropConstraint('channel_write_history_end_explained', 'tenant_data.channel_write_history'), smoke('write history ended without a reason (Р-64)')),
+      m(dropTrigger('zz_channel_write_announce_dispatch', 'tenant_data.channel_write'),
+        node(T('write-queue.pg.test.ts'), 'control — without the dispatcher', 'has no scope.write.v1 event')),
+    ],
   },
   {
     row: '23', invariant: 'Р-61: курс ЕЦБ неизменяем; курс — в решении с переводом себестоимости',
-    expect: [{ smoke: 'ECB rate is immutable (Р-61)' }, { smoke: 'decision exchange rate without its fields (Р-61)' },
-      { node: 'packages/pricing-store-pg/test/fx-day-boundary.pg.test.ts', test: 'Р-61 in the database' }],
-    mutations: [dropTrigger('zz_fx_rate_immutable', 'platform.fx_rate'), dropTrigger('aa_price_decision_fx_recorded', 'channel_data.price_decision'),
-      dropConstraint('price_decision_fx_shape', 'channel_data.price_decision')],
+    mutations: [
+      m(dropTrigger('zz_fx_rate_immutable', 'platform.fx_rate'), smoke('ECB rate is immutable (Р-61)')),
+      m(dropTrigger('aa_price_decision_fx_recorded', 'channel_data.price_decision'),
+        node(T('fx-day-boundary.pg.test.ts'), 'Р-61 in the database', 'Р-61: a decision on a converted cost without its exchange rate is refused')),
+      m(dropConstraint('price_decision_fx_shape', 'channel_data.price_decision'), smoke('decision exchange rate without its fields (Р-61)')),
+    ],
   },
   {
     row: '24, 26', invariant: 'Р-62, Р-65: граница суток — пояс витрины',
-    expect: [{ node: 'packages/pricing-store-pg/test/fx-day-boundary.pg.test.ts', test: 'Р-65: a US storefront' }, { smoke: 'budgeted write while the storefront day boundary is unconfirmed (Р-65)' },
-      { smoke: 'budget day is not the current storefront day (Р-65)' }, { smoke: 'US storefront confirmed without a time zone' }],
-    mutations: [dropConstraint('marketplace_time_zone_known_if_confirmed', 'platform.marketplace'), dropTrigger('aa_channel_write_budget_day_tz', 'tenant_data.channel_write'),
-      dropTrigger('aa_price_daily_day_tz', 'tenant_data.price_daily')],
+    mutations: [
+      m(dropConstraint('marketplace_time_zone_known_if_confirmed', 'platform.marketplace'), smoke('US storefront confirmed without a time zone')),
+      m(dropTrigger('aa_channel_write_budget_day_tz', 'tenant_data.channel_write'),
+        smoke('budgeted write while the storefront day boundary is unconfirmed (Р-65)'), smoke('budget day is not the current storefront day (Р-65)')),
+      m(dropTrigger('aa_price_daily_day_tz', 'tenant_data.price_daily'),
+        node(T('fx-day-boundary.pg.test.ts'), 'Р-65: a US storefront', 'Р-65: a price day of a US storefront is not closed in')),
+    ],
   },
   {
     row: '25', invariant: 'Р-60: тенант в базе своего региона',
-    expect: [{ smoke: 'tenant in wrong region DB (Р-60)' }],
-    mutations: [dropTrigger('tenant_region_guard', 'tenant_data.tenant')],
+    mutations: [m(dropTrigger('tenant_region_guard', 'tenant_data.tenant'), smoke('tenant in wrong region DB (Р-60)'))],
   },
   {
     row: '27', invariant: 'Р-69, Р-70: остановки человеком и системные',
-    expect: [{ node: 'packages/pricing-store-pg/test/step12.pg.test.ts', test: null }, { smoke: 'competitor-derived approval while halted (Р-51)' },
-      { smoke: 'approval while the tenant is stopped by a person (Р-69)' }, { smoke: 'dispatch while the tenant is stopped by a person (Р-69)' },
-      { smoke: 'dispatch of a competitor-derived write while halted (Р-51)' }, { node: 'packages/pricing-store-pg/test/audit-guards.pg.test.ts', test: null },
-      { smoke: 'manual halt release without a second factor (finding 12, Р-88)' }],
-    mutations: [dropConstraint('pricing_halt_system_only', 'channel_data.pricing_halt'), dropTrigger('aa_price_stop_role_guard', 'tenant_data.price_stop'),
-      dropTrigger('ab_price_decision_stop_guard', 'channel_data.price_decision'), dropTrigger('bb_channel_write_stop_guard', 'tenant_data.channel_write'),
-      dropTrigger('ca_pricing_halt_release_role_guard', 'channel_data.pricing_halt')],
+    mutations: [
+      m(dropConstraint('pricing_halt_system_only', 'channel_data.pricing_halt'),
+        node(T('step12.pg.test.ts'), 'Р-69: a system halt is only for broken channel data', 'Р-69: a person cannot create a system halt')),
+      m(dropTrigger('aa_price_stop_role_guard', 'tenant_data.price_stop'),
+        node(T('step12.pg.test.ts'), 'Р-69, Р-70, OQ-125 in the database', 'OQ-129: a viewer does not stop pricing|OQ-125: an operator does not resume a tenant stop')),
+      m(dropTrigger('ab_price_decision_stop_guard', 'channel_data.price_decision'), smoke('approval while the tenant is stopped by a person (Р-69)')),
+      m(dropTrigger('bb_channel_write_stop_guard', 'tenant_data.channel_write'), smoke('dispatch while the tenant is stopped by a person (Р-69)')),
+      m(dropTrigger('ca_pricing_halt_release_role_guard', 'channel_data.pricing_halt'), smoke('manual halt release without a second factor (finding 12, Р-88)')),
+    ],
   },
   {
     row: '28, 32, 39, 40', invariant: 'Р-68, Р-74, Р-80: слепок по классам, код причины NO_OP, столбцы intent в решении, NO_OP без ссылки на снимок',
-    // Шаг 17: ограничения explanation_no_channel_data, explanation_derives_no_channel, explanation_no_column_copies снятие 0064 — их удаление
-    // не меняло поведения (те же строки отклоняет explanation_keys_declared, строка 43); мутировать больше нечего
-    expect: [{ smoke: 'NO_OP decision with an explanation (Р-74)' }, { smoke: 'NO_OP decision with an unknown no-change reason (Р-74)' },
-      { node: 'packages/pricing-store-pg/test/step14.pg.test.ts', test: 'finding 10, Р-80' }, { node: 'packages/pricing-store-pg/test/channel-derived.pg.test.ts', test: null },
-      { node: 'packages/pricing-store-pg/test/undercut-eternal.pg.test.ts', test: null }],
-    mutations: [dropConstraint('price_decision_explanation_by_class', 'channel_data.price_decision'), dropConstraint('price_decision_no_change_reason_code', 'channel_data.price_decision'),
-      dropTrigger('a0_price_decision_intent_columns', 'channel_data.price_decision'), dropTrigger('a_price_decision_snapshot_ref_guard', 'channel_data.price_decision_snapshot_ref')],
+    mutations: [
+      m(dropConstraint('price_decision_explanation_by_class', 'channel_data.price_decision'), smoke('NO_OP decision with an explanation (Р-74)')),
+      m(dropConstraint('price_decision_no_change_reason_code', 'channel_data.price_decision'), smoke('NO_OP decision with an unknown no-change reason (Р-74)')),
+      m(dropTrigger('a0_price_decision_intent_columns', 'channel_data.price_decision'),
+        node(T('step14.pg.test.ts'), 'finding 10, Р-80', 'strictly deep-equal')),
+      m(dropTrigger('a_price_decision_snapshot_ref_guard', 'channel_data.price_decision_snapshot_ref'),
+        node(T('step14.pg.test.ts'), 'finding 10, Р-80', 'keeps no snapshot reference')),
+    ],
   },
   {
     row: '29', invariant: 'Р-71: сумма с валютой',
-    expect: [{ smoke: 'rejected snapshot details: an amount without its currency (Р-71)' }, { smoke: 'rejection parameters with an amount without its currency (Р-71)' },
-      { smoke: 'write ended with an amount without its currency (Р-71)' }],
-    mutations: [dropConstraint('price_decision_amounts_have_currency', 'channel_data.price_decision'), dropConstraint('channel_write_end_params_currency', 'tenant_data.channel_write'),
-      dropConstraint('rejected_competitor_snapshot_details_currency', 'channel_data.rejected_competitor_snapshot')],
+    mutations: [
+      m(dropConstraint('price_decision_amounts_have_currency', 'channel_data.price_decision'), smoke('rejection parameters with an amount without its currency (Р-71)')),
+      m(dropConstraint('channel_write_end_params_currency', 'tenant_data.channel_write'), smoke('write ended with an amount without its currency (Р-71)')),
+      m(dropConstraint('rejected_competitor_snapshot_details_currency', 'channel_data.rejected_competitor_snapshot'),
+        smoke('rejected snapshot details: an amount without its currency (Р-71)')),
+    ],
   },
   {
     row: '30', invariant: 'Р-73: «опасное» согласовано с отклонением',
-    expect: [{ smoke: 'eternal core: dangerous flag against the deviation (Р-73)' }, { node: 'packages/pricing-store-pg/test/channel-derived.pg.test.ts', test: null }],
-    mutations: [dropConstraint('price_intent_core_dangerous_consistent', 'tenant_data.price_intent_core')],
+    mutations: [m(dropConstraint('price_intent_core_dangerous_consistent', 'tenant_data.price_intent_core'), smoke('eternal core: dangerous flag against the deviation (Р-73)'))],
   },
   {
     row: '31, 37, 38', invariant: 'OQ-125, OQ-129, находка 4: матрица прав остановок, автор — пользователь сессии',
-    expect: [{ node: 'packages/pricing-store-pg/test/step14.pg.test.ts', test: 'finding 2' }, { node: 'packages/pricing-store-pg/test/step14.pg.test.ts', test: 'finding 4' },
-      { node: 'packages/pricing-store-pg/test/step12.pg.test.ts', test: null }],
     mutations: [
-      `CREATE OR REPLACE FUNCTION security.pricing_permission(p_role text, p_action text) RETURNS boolean LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$ SELECT true $$`,
-      replaceInFunction('tenant_data.price_stop_role_guard()', 'IF security.current_user_id() IS NULL OR u IS DISTINCT FROM security.current_user_id() THEN', 'IF false THEN'),
+      m(`CREATE OR REPLACE FUNCTION security.pricing_permission(p_role text, p_action text) RETURNS boolean LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$ SELECT true $$`,
+        node(T('step14.pg.test.ts'), 'finding 2', 'the matrix is not trivially all-true|×')),
+      m(replaceInFunction('tenant_data.price_stop_role_guard()', 'IF security.current_user_id() IS NULL OR u IS DISTINCT FROM security.current_user_id() THEN', 'IF false THEN'),
+        node(T('step14.pg.test.ts'), 'finding 4', 'finding 4: a stop is not written in the name of another membership')),
     ],
   },
   {
     row: '33', invariant: 'Р-75: справочник объяснения неизменяем',
-    expect: [{ smoke: 'explanation ruleset is immutable (Р-75)' }, { node: 'packages/pricing-store-pg/test/step14.pg.test.ts', test: 'finding 2' }],
-    mutations: [dropTrigger('explanation_ruleset_immutable', 'platform.explanation_ruleset')],
+    mutations: [m(dropTrigger('explanation_ruleset_immutable', 'platform.explanation_ruleset'), smoke('explanation ruleset is immutable (Р-75)'))],
   },
   {
     row: '34', invariant: 'Р-76: остановки и снятия — в журнале аудита',
-    expect: [{ node: 'packages/pricing-store-pg/test/step14.pg.test.ts', test: 'finding 4' }, { node: 'packages/pricing-store-pg/test/role-separation.pg.test.ts', test: null },
-      { smoke: 'the manual release is not in the audit log with its author', reached: 'the audit event of the release is written by the trigger' },
-      { smoke: 'the system halt is not in the audit log', reached: 'the system halt is written to the audit log by the trigger' }],
-    mutations: [dropTrigger('zb_price_stop_audit', 'tenant_data.price_stop'), dropTrigger('zb_pricing_halt_audit', 'channel_data.pricing_halt'),
-      dropTrigger('zb_pricing_halt_review_audit', 'channel_data.pricing_halt_review')],
+    mutations: [
+      m(dropTrigger('zb_price_stop_audit', 'tenant_data.price_stop'),
+        node(T('role-separation.pg.test.ts'), 'the audit log is still written', 'pricing.stop_created')),
+      m(dropTrigger('zb_pricing_halt_audit', 'channel_data.pricing_halt'),
+        smoke('the system halt is not in the audit log', 'the system halt is written to the audit log by the trigger')),
+      m(dropTrigger('zb_pricing_halt_review_audit', 'channel_data.pricing_halt_review'),
+        smoke('the manual release is not in the audit log with its author', 'the audit event of the release is written by the trigger')),
+    ],
   },
   {
     row: '35', invariant: 'Р-77: движок без стратегии не включается',
-    expect: [{ smoke: 'ENGINE without a strategy (Р-77)' }],
-    mutations: [dropConstraint('write_scope_engine_has_strategy', 'tenant_data.write_scope')],
+    mutations: [m(dropConstraint('write_scope_engine_has_strategy', 'tenant_data.write_scope'), smoke('ENGINE without a strategy (Р-77)'))],
   },
   {
     row: '41', invariant: 'Р-79: подтверждённый архив ядра — со справочниками',
-    expect: [{ node: 'packages/pricing-store-pg/test/step14.pg.test.ts', test: 'Р-79' }],
-    mutations: [dropConstraint('partition_export_core_archive_self_contained', 'maintenance.partition_export')],
+    mutations: [m(dropConstraint('partition_export_core_archive_self_contained', 'maintenance.partition_export'),
+      node(T('step14.pg.test.ts'), 'Р-79', 'partition_export_core_archive_self_contained'))],
   },
   {
     row: '42', invariant: 'Р-83: пол с полом маржи перед каждой отправкой',
-    expect: [{ verify: 'migrations/0067_verify_schema_invariants_v14.sql' }, { node: 'packages/pricing-store-pg/test/write-recheck.pg.test.ts', test: null }],
-    mutations: [replaceInFunction('tenant_data.channel_write_before_update()',
+    mutations: [m(replaceInFunction('tenant_data.channel_write_before_update()',
       "NEW.floor_at_dispatch_minor := tenant_data.assert_price_floor(NEW.tenant_id, NEW.write_scope_id, NEW.amount_minor, 'at dispatch');",
-      'NEW.floor_at_dispatch_minor := (SELECT f.min_price_minor FROM tenant_data.effective_price_floor(NEW.tenant_id, NEW.write_scope_id) f);')],
+      'NEW.floor_at_dispatch_minor := (SELECT f.min_price_minor FROM tenant_data.effective_price_floor(NEW.tenant_id, NEW.write_scope_id) f);'),
+    verify('below the recomputed margin floor was dispatched'),
+    node(T('write-recheck.pg.test.ts'), 'the unit cost rose between decision and dispatch', 'the write reached the channel'))],
   },
   {
     row: '43', invariant: 'Р-85, Р-91, находка 15: из вечного ядра не выводится значение канала',
-    expect: [{ verify: 'migrations/0067_verify_schema_invariants_v14.sql' }, { smoke: 'decision explanation with an undeclared reason parameter (finding 15)' },
-      { smoke: 'eternal core: a competitor-derived rejection keeps its proposed price (Р-85)' }, { smoke: 'eternal core: an undeclared reason parameter in the explanation (finding 15)' },
-      { node: 'packages/pricing-store-pg/test/channel-derived.pg.test.ts', test: null }, { node: 'packages/pricing-store-pg/test/undercut-eternal.pg.test.ts', test: null }],
-    mutations: [dropConstraint('price_intent_core_competitor_rejection_not_kept', 'tenant_data.price_intent_core'),
-      dropConstraint('price_decision_explanation_keys_declared', 'channel_data.price_decision'),
-      dropConstraint('price_intent_core_explanation_keys_declared', 'tenant_data.price_intent_core')],
+    mutations: [
+      m(dropConstraint('price_intent_core_competitor_rejection_not_kept', 'tenant_data.price_intent_core'),
+        smoke('eternal core: a competitor-derived rejection keeps its proposed price (Р-85)')),
+      m(dropConstraint('price_decision_explanation_keys_declared', 'channel_data.price_decision'),
+        smoke('decision explanation with an undeclared reason parameter (finding 15)'), verify('undeclared reason parameter was stored')),
+      m(dropConstraint('price_intent_core_explanation_keys_declared', 'tenant_data.price_intent_core'),
+        smoke('eternal core: an undeclared reason parameter in the explanation (finding 15)')),
+    ],
   },
   {
     row: '44', invariant: 'Находки 1–3, Р-88: журнал проверок, автоматическое снятие, второй фактор',
-    expect: [{ node: 'packages/pricing-store-pg/test/audit-guards.pg.test.ts', test: null }, { smoke: 'manual halt release without a second factor (finding 12, Р-88)' }],
-    mutations: [dropTrigger('a_pricing_halt_review_guard', 'channel_data.pricing_halt_review'), dropTrigger('zc_pricing_halt_review_released_in_tx', 'channel_data.pricing_halt_review'),
-      replaceInFunction('tenant_data.price_stop_role_guard()', "AND NOT security.session_mfa() THEN", 'AND false THEN')],
+    mutations: [
+      m(dropTrigger('a_pricing_halt_review_guard', 'channel_data.pricing_halt_review'),
+        node(T('audit-guards.pg.test.ts'), 'finding 1', 'may not release')),
+      m(dropTrigger('zc_pricing_halt_review_released_in_tx', 'channel_data.pricing_halt_review'),
+        node(T('audit-guards.pg.test.ts'), 'finding 1', 'a release record without the release fails at commit')),
+      m(replaceInFunction('tenant_data.price_stop_role_guard()', 'AND NOT security.session_mfa() THEN', 'AND false THEN'),
+        node(T('audit-guards.pg.test.ts'), 'Р-88: releasing the tenant stop needs a second factor', 'Р-88: the tenant stop is not released without a second factor')),
+    ],
   },
   {
     row: '45', invariant: 'C2: день бюджета при повторе — текущий день витрины',
-    expect: [{ smoke: 'retry after midnight is charged to today, whose budget is exhausted (C2, Р-19)' }, { smoke: 'retry while the storefront day boundary is unconfirmed (C2, Р-65)' },
-      { node: 'packages/pricing-store-pg/test/dispatcher-defects.pg.test.ts', test: null }],
-    mutations: [dropTrigger('ab_channel_write_budget_day_retry', 'tenant_data.channel_write')],
+    mutations: [m(dropTrigger('ab_channel_write_budget_day_retry', 'tenant_data.channel_write'),
+      smoke('retry after midnight is charged to today, whose budget is exhausted (C2, Р-19)'), smoke('retry while the storefront day boundary is unconfirmed (C2, Р-65)'))],
   },
 ];
 
-/** Защиты шага 17: мутация — возврат одного права пути решения или снятие проверки; ожидается провал проверки с причиной отказа [Р-94] */
+const AG = T('audit-guards.pg.test.ts');
+const UE = T('undercut-eternal.pg.test.ts');
+const ID = 'packages/identity/test/identity.pg.test.ts';
+const pathRight = (table, privilege) => verify(`${table.replace('.', '\\.')}: ${privilege} of the decision path does not match the allow list`);
+
+/** Защиты шага 17 и строки, пропущенные в каталоге шага 17 (находка 7 ревью шага 17) */
 export const STEP17_ROWS = [
   {
     row: 'Р-96', invariant: 'путь решения — только вычисление и запись цены',
-    expect: [
-      { smoke: 'path creates an eBay migration consent (Р-96, Р-2)' }, { smoke: 'path opts the tenant into Kaufland Smart Pricing (Р-96, Р-12, Р-41)' },
-      { smoke: 'path lowers min_price (Р-96, Р-5)' }, { smoke: 'path changes the unit cost (Р-96, Р-83)' },
-      { smoke: 'path schedules the review of a halt (finding 2 ревью шага 16)' }, { smoke: 'path writes an automatic halt review (finding 2 ревью шага 16)' },
-      { smoke: 'path forges an audit event (finding 5, Р-90)' }, { verify: 'migrations/0067_verify_schema_invariants_v14.sql' },
-      { smoke: 'the decision path role is trusted with a session user or a second factor', reached: 'session user and second factor set by the decision path are ignored (Р-90)' },
-    ],
     mutations: [
-      'GRANT INSERT ON tenant_data.migration_consent TO repracer_app', 'GRANT UPDATE ON tenant_data.tenant TO repracer_app',
-      'GRANT INSERT ON tenant_data.min_price TO repracer_app', 'GRANT INSERT ON tenant_data.cost_profile TO repracer_app',
-      'GRANT UPDATE ON channel_data.pricing_halt TO repracer_app', 'GRANT INSERT ON channel_data.pricing_halt_review TO repracer_app',
-      'GRANT INSERT ON audit.audit_event TO repracer_app',
-      // Членство repracer_app в repracer_admin невозможно (административная роль — член пути решения): снимается право приглашать
-      'GRANT EXECUTE ON FUNCTION security.invite_member(uuid, text, text, bytea, interval) TO repracer_app',
+      m('GRANT INSERT ON tenant_data.migration_consent TO repracer_app', smoke('path creates an eBay migration consent (Р-96, Р-2)'), pathRight('tenant_data.migration_consent', 'INSERT')),
+      m('GRANT UPDATE ON tenant_data.tenant TO repracer_app', smoke('path opts the tenant into Kaufland Smart Pricing (Р-96, Р-12, Р-41)'), pathRight('tenant_data.tenant', 'UPDATE')),
+      m('GRANT INSERT ON tenant_data.min_price TO repracer_app', smoke('path lowers min_price (Р-96, Р-5)'), pathRight('tenant_data.min_price', 'INSERT')),
+      m('GRANT INSERT ON tenant_data.cost_profile TO repracer_app', smoke('path changes the unit cost (Р-96, Р-83)'), pathRight('tenant_data.cost_profile', 'INSERT')),
+      m('GRANT UPDATE ON channel_data.pricing_halt TO repracer_app', smoke('path schedules the review of a halt (finding 2 ревью шага 16)'), pathRight('channel_data.pricing_halt', 'UPDATE')),
+      m('GRANT INSERT ON channel_data.pricing_halt_review TO repracer_app', smoke('path writes an automatic halt review (finding 2 ревью шага 16)'),
+        pathRight('channel_data.pricing_halt_review', 'INSERT')),
+      m('GRANT INSERT ON audit.audit_event TO repracer_app', smoke('path forges an audit event (finding 5, Р-90)'), pathRight('audit.audit_event', 'INSERT')),
+      m('GRANT EXECUTE ON FUNCTION security.invite_member(uuid, text, text, bytea, interval) TO repracer_app', smoke('path invites a member (Р-90)'),
+        verify('security\\.invite_member.*SECURITY DEFINER function executable by the decision path')),
+      m(`CREATE OR REPLACE FUNCTION tenant_data.lock_decision_products(p_tenant_id uuid, p_write_scope_ids uuid[]) RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$ BEGIN NULL; END $$`,
+        node(T('store.pg.test.ts'), 'Р-54: a concurrent bound change serialises', 'decision commit must wait for the bound change')),
     ],
   },
   {
     row: 'находка 2', invariant: 'автоматическое снятие — итог базы по выборке, не запись пути решения',
-    expect: [{ node: 'packages/pricing-store-pg/test/audit-guards.pg.test.ts', test: 'finding 3' }],
     mutations: [
-      replaceInFunction('channel_data.review_halt_by_sample(uuid,uuid,timestamptz)', 'IF failed > 0 THEN', 'IF false THEN'),
-      replaceInFunction('channel_data.review_halt_by_sample(uuid,uuid,timestamptz)', 'IF accepted < required THEN', 'IF false THEN'),
-      replaceInFunction('channel_data.review_halt_by_sample(uuid,uuid,timestamptz)', 'IF v_at < h.next_review_at THEN', 'IF false THEN'),
+      m(replaceInFunction('channel_data.review_halt_by_sample(uuid,uuid,timestamptz)', 'IF failed > 0 THEN', 'IF false THEN'), node(AG, 'finding 3', 'SAMPLE_FAILED: one failed observation fails the review')),
+      m(replaceInFunction('channel_data.review_halt_by_sample(uuid,uuid,timestamptz)', 'IF accepted < required THEN', 'IF false THEN'), node(AG, 'finding 3', 'NO_SAMPLE: fewer accepted products than the sample requires')),
+      m(replaceInFunction('channel_data.review_halt_by_sample(uuid,uuid,timestamptz)', 'IF v_at < h.next_review_at THEN', 'IF false THEN'), node(AG, 'finding 3', 'NOT_DUE: the review window has not elapsed')),
+      m(replaceInFunction('channel_data.review_halt_by_sample(uuid,uuid,timestamptz)', 'v_at      timestamptz := least(p_at, now());', 'v_at      timestamptz := p_at;'),
+        node(AG, 'finding 3', 'NOT_DUE: the review window has not elapsed and a moment in the future does not shorten it')),
+      m(replaceInFunction('channel_data.review_halt_by_sample(uuid,uuid,timestamptz)', 'AND sm.observed_at <= v_at;', ';'), node(AG, 'finding 3', 'NO_SAMPLE: an observation after the review moment does not count')),
+      m(replaceInFunction('channel_data.review_halt_by_sample(uuid,uuid,timestamptz)', 'AND om.channel_product_ref = sm.channel_product_ref))', '))'),
+        node(AG, 'finding 3', 'NO_SAMPLE: a stale observation and a product outside the storefront do not count')),
+      m(replaceInFunction('channel_data.review_halt_by_sample(uuid,uuid,timestamptz)', 'IF p_tenant_id IS DISTINCT FROM security.current_tenant_id() THEN', 'IF false THEN'),
+        node(AG, 'finding 3', 'the review of a halt runs only in the context of its own tenant')),
     ],
   },
   {
-    row: 'находка 4', invariant: 'append-only проверяется попыткой изменения',
-    // Проверяются таблицы, где в смоук-мире есть строки; пустые (audit_event, pricing_halt_review, external_identity и др.) названы в выводе
-    // smoke_r65.sql как непокрытые — их неизменяемость держит тот же триггер, но поведением здесь она не проверена
-    expect: [{ smoke: 'append-only tenant_data.min_price' }, { smoke: 'append-only channel_data.price_decision' }, { smoke: 'append-only channel_data.price_intent' },
-      { smoke: 'append-only tenant_data.pricing_strategy' }],
+    row: 'находка 4', invariant: 'неизменяемость проверяется попыткой изменения',
     mutations: [
-      'ALTER TABLE tenant_data.min_price DISABLE TRIGGER zz_append_only', 'ALTER TABLE channel_data.price_decision DISABLE TRIGGER zz_append_only',
-      'ALTER TABLE channel_data.price_intent DISABLE TRIGGER zz_append_only', 'ALTER TABLE tenant_data.pricing_strategy DISABLE TRIGGER zz_append_only',
-      `CREATE OR REPLACE FUNCTION security.forbid_mutation() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN coalesce(NEW, OLD); END $$`,
+      m('ALTER TABLE tenant_data.min_price DISABLE TRIGGER zz_append_only', smoke('append-only tenant_data.min_price')),
+      m('ALTER TABLE channel_data.price_decision DISABLE TRIGGER zz_append_only', smoke('append-only channel_data.price_decision')),
+      m('ALTER TABLE channel_data.price_intent DISABLE TRIGGER zz_append_only', smoke('append-only channel_data.price_intent')),
+      m('ALTER TABLE tenant_data.pricing_strategy DISABLE TRIGGER zz_append_only', smoke('append-only tenant_data.pricing_strategy')),
+      m(`CREATE OR REPLACE FUNCTION security.forbid_mutation() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN coalesce(NEW, OLD); END $$`,
+        smoke('append-only tenant_data.min_price'), verify('forbid_mutation does not refuse an UPDATE')),
     ],
   },
   {
     row: 'Р-97', invariant: 'административная запись — только по действию человека и вся в аудите',
-    expect: [{ smoke: 'administrative change without a person (Р-97)' }, { smoke: 'administrative change by a user outside the tenant (Р-97)' },
-      { smoke: 'the administrative service records an automatic review without a person (Р-97)' },
-      { verify: 'migrations/0067_verify_schema_invariants_v14.sql' }],
     mutations: [
-      dropTrigger('a0_admin_write_person', 'tenant_data.product'),
-      dropTrigger('zz_admin_write_audit', 'tenant_data.product'),
-      dropTrigger('a0_admin_write_person', 'channel_data.pricing_halt_review'),
-      replaceInFunction('security.require_person_for_admin_write()', 'IF security.admin_session() THEN', 'IF false THEN'),
-      replaceInFunction('security.admin_session()', "pg_has_role(session_user, 'repracer_admin', 'MEMBER')", 'false'),
+      m(dropTrigger('a0_admin_write_person_insert', 'tenant_data.product'), smoke('administrative change without a person (Р-97)'),
+        verify('tenant_data\\.product: administrative INSERT without the person guard')),
+      m(dropTrigger('zz_admin_write_audit_insert', 'tenant_data.product'),
+        smoke('an administrative change is not in the audit log (Р-97)', 'administrative change by a person is written to the audit log (Р-97)'),
+        verify('tenant_data\\.product: administrative INSERT is not written to the audit log')),
+      m(dropTrigger('a0_admin_write_person_insert', 'channel_data.pricing_halt_review'), smoke('the administrative service records an automatic review without a person (Р-97)')),
+      m(replaceInFunction('security.require_person_for_admin_write()', 'IF r IS NULL THEN', 'IF false THEN'), smoke('administrative change by a user outside the tenant (Р-97)')),
+      m(replaceInFunction('security.audit_admin_write()', 'IF NOT security.admin_session() THEN', 'IF true THEN'),
+        smoke('an administrative change is not in the audit log (Р-97)', 'administrative change by a person is written to the audit log (Р-97)')),
+      m(replaceInFunction('security.admin_session()', "pg_has_role(session_user, 'repracer_admin', 'MEMBER')", 'false'), smoke('administrative change without a person (Р-97)')),
     ],
   },
   {
     row: 'находка 5', invariant: 'создание тенанта не присоединяет существующего пользователя мимо приглашения',
-    expect: [{ smoke: 'existing user attached as a member without an invitation (step 16 finding 5)' },
-      { smoke: 'existing user provisioned as owner under another email (step 16 finding 5)' },
-      { smoke: 'existing user who never signed in provisioned as owner (step 16 finding 5)' }],
     mutations: [
-      replaceInFunction('security.provision_tenant(uuid,text,text,jsonb)', "IF m ->> 'role' IS DISTINCT FROM 'OWNER' THEN", 'IF false THEN'),
-      replaceInFunction('security.provision_tenant(uuid,text,text,jsonb)', "IF lower(trim(m ->> 'email')) IS DISTINCT FROM existing.email THEN", 'IF false THEN'),
-      replaceInFunction('security.provision_tenant(uuid,text,text,jsonb)', 'IF NOT EXISTS (SELECT 1 FROM platform.external_identity e WHERE e.user_id = existing.user_id', 'IF false AND NOT EXISTS (SELECT 1 FROM platform.external_identity e WHERE e.user_id = existing.user_id'),
+      m(replaceInFunction('security.provision_tenant(uuid,text,text,jsonb)', "IF m ->> 'role' IS DISTINCT FROM 'OWNER' THEN", 'IF false THEN'),
+        smoke('existing user attached as a member without an invitation (step 16 finding 5)')),
+      m(replaceInFunction('security.provision_tenant(uuid,text,text,jsonb)', "IF lower(trim(m ->> 'email')) IS DISTINCT FROM existing.email THEN", 'IF false THEN'),
+        smoke('existing user provisioned as owner under another email (step 16 finding 5)')),
+      m(replaceInFunction('security.provision_tenant(uuid,text,text,jsonb)', 'IF NOT EXISTS (SELECT 1 FROM platform.external_identity e WHERE e.user_id = existing.user_id',
+        'IF false AND NOT EXISTS (SELECT 1 FROM platform.external_identity e WHERE e.user_id = existing.user_id'),
+        smoke('existing user who never signed in provisioned as owner (step 16 finding 5)')),
     ],
   },
   {
     row: 'Р-98', invariant: 'перепривязка входа — только приглашением владельца, прежний вход отозван',
-    expect: [{ node: 'packages/identity/test/identity.pg.test.ts', test: 'Р-98' }],
     mutations: [
-      replaceInFunction('security.accept_identity_invitation(bytea,text,text,text,boolean)', 'IF NOT inv.relink THEN', 'IF false THEN'),
-      replaceInFunction('security.accept_identity_invitation(bytea,text,text,text,boolean)', 'IF EXISTS (SELECT 1 FROM platform.external_identity_revocation rv WHERE rv.issuer = p_issuer AND rv.subject = p_subject) THEN', 'IF false THEN'),
-      replaceInFunction('security.invite_relink(uuid,uuid,bytea,interval)', 'IF NOT security.session_mfa() THEN', 'IF false THEN'),
-      replaceInFunction('security.invite_relink(uuid,uuid,bytea,interval)', "AND m.status = 'ACTIVE' AND m.role = 'OWNER') THEN", "AND m.status = 'ACTIVE') THEN"),
+      m(replaceInFunction('security.accept_identity_invitation(bytea,text,text,text,boolean)', 'IF NOT inv.relink THEN', 'IF false THEN'),
+        node(ID, 'Р-98', 'a relink needs a relink invitation|an ordinary invitation does not relink')),
+      m(replaceInFunction('security.accept_identity_invitation(bytea,text,text,text,boolean)',
+        'IF EXISTS (SELECT 1 FROM platform.external_identity_revocation rv WHERE rv.issuer = p_issuer AND rv.subject = p_subject) THEN', 'IF false THEN'),
+        node(ID, 'Р-98', 'was unlinked|the revoked sign-in accepts nothing')),
+      m(replaceInFunction('security.invite_relink(uuid,uuid,bytea,interval)', 'IF NOT security.session_mfa() THEN', 'IF false THEN'), node(ID, 'Р-98', 'a relink invitation without a second factor')),
+      m(replaceInFunction('security.invite_relink(uuid,uuid,bytea,interval)', "AND m.status = 'ACTIVE' AND m.role = 'OWNER') THEN", "AND m.status = 'ACTIVE') THEN"),
+        node(ID, 'Р-98', 'only an active owner relinks')),
+      m(replaceInFunction('security.invite_relink(uuid,uuid,bytea,interval)',
+        "IF NOT EXISTS (SELECT 1 FROM tenant_data.membership m WHERE m.tenant_id = p_tenant_id AND m.user_id = p_user_id AND m.status = 'ACTIVE') THEN", 'IF false THEN'),
+        node(ID, 'Р-98', 'a relink is issued only to a member of the tenant')),
+      m(dropTrigger('a_external_identity_one_active', 'platform.external_identity'), node(ID, 'step 17 finding 3', 'the second acceptance waits for the first|two active sign-ins of one provider')),
+      m(replaceInFunction('platform.external_identity_one_active()', "PERFORM pg_advisory_xact_lock(hashtextextended('platform.external_identity:' || NEW.user_id::text || ':' || NEW.issuer, 0));", ''),
+        node(ID, 'step 17 finding 3', 'the second acceptance waits for the first')),
+      m(replaceInFunction('security.resolve_external_identity(text,text)',
+        'AND NOT EXISTS (SELECT 1 FROM platform.external_identity_revocation rv WHERE rv.issuer = e.issuer AND rv.subject = e.subject)', ''),
+        node(ID, 'Р-98', 'the revoked sign-in resolves nobody')),
+      m(dropTrigger('zz_identity_relinked_audit', 'platform.identity_invitation'), node(ID, 'Р-98', 'the invitation and the relink are audited')),
+      m(dropTrigger('zz_identity_relink_invited_audit', 'platform.identity_invitation'), node(ID, 'Р-98', 'the invitation and the relink are audited')),
     ],
   },
   {
     row: 'OQ-151', invariant: 'подрез закреплённой версии стратегии не начинает срок хранения',
-    expect: [{ node: 'packages/pricing-store-pg/test/undercut-eternal.pg.test.ts', test: 'Р-91: the strategy version keeps its type' }],
     mutations: [
-      replaceInFunction('channel_data.pricing_strategy_undercut_guard()', 'IF EXISTS (SELECT 1 FROM tenant_data.write_scope s', 'IF false AND EXISTS (SELECT 1 FROM tenant_data.write_scope s'),
-      dropTrigger('b_write_scope_pins_live_strategy_version', 'tenant_data.write_scope'),
-      dropTrigger('zb_write_scope_release_strategy_version', 'tenant_data.write_scope'),
+      m(replaceInFunction('channel_data.pricing_strategy_undercut_guard()', 'IF EXISTS (SELECT 1 FROM tenant_data.write_scope s', 'IF false AND EXISTS (SELECT 1 FROM tenant_data.write_scope s'),
+        node(UE, 'Р-91: the strategy version keeps its type', 'the undercut of a pinned version does not start expiring')),
+      m(dropTrigger('b_write_scope_pins_live_strategy_version', 'tenant_data.write_scope'),
+        node(UE, 'Р-91: the strategy version keeps its type', 'a scope is not pinned back')),
+      m(dropTrigger('zb_write_scope_release_strategy_version', 'tenant_data.write_scope'),
+        node(UE, 'Р-91: the strategy version keeps its type', 'the released version starts its 18 months')),
+      m(replaceInFunction('tenant_data.pricing_strategy_supersede_undercut()', "AND s.status <> 'RETIRED')", 'AND false)'),
+        node(UE, 'Р-91: the strategy version keeps its type', 'a new version is created while the old one is still pinned')),
     ],
   },
   {
     row: 'находка 6', invariant: 'слепок проверяется по видам и значениям параметров, а не только по именам ключей',
-    expect: [{ node: 'packages/pricing-store-pg/test/undercut-eternal.pg.test.ts', test: 'finding 15' }],
     mutations: [
-      replaceInFunction('security.param_value_valid(jsonb,jsonb)', 'IF spec IS NULL THEN', 'IF true THEN RETURN true; END IF; IF spec IS NULL THEN'),
-      replaceInFunction('security.explanation_node_declared(jsonb,text,boolean)', "IF path = '$' AND (node -> 'format') IS DISTINCT FROM", "IF false AND (node -> 'format') IS DISTINCT FROM"),
-      replaceInFunction('security.explanation_node_declared(jsonb,text,boolean)', "OR (w.value #>> '{}') !~ '^[A-Za-z][A-Za-z0-9_]{0,63}$'", ''),
+      m(replaceInFunction('security.param_value_valid(jsonb,jsonb)', "RETURN t = 'number' AND v::text ~ '^-?[0-9]+$';", "RETURN t = 'number';"),
+        node(UE, 'finding 15', 'an amount that is not minor units')),
+      m(replaceInFunction('security.param_value_valid(jsonb,jsonb)', "RETURN t = 'string' AND s IN ('EUR', 'USD');", "RETURN t = 'string';"),
+        node(UE, 'finding 15', 'a currency that is not an ISO code|a currency outside EUR and USD')),
+      m(replaceInFunction('security.param_value_valid(jsonb,jsonb)', "RETURN t = 'string' AND (NOT spec ? 'v' OR (spec -> 'v') ? s);", "RETURN t = 'string';"),
+        node(UE, 'finding 15', 'an enum value outside the registry')),
+      m(replaceInFunction('security.param_value_valid(jsonb,jsonb)', "RETURN t = 'number' AND v::text ~ '^-?[0-9]+$';", "RETURN t IN ('number', 'string') AND v::text ~ '^\"?-?[0-9]+\"?$';"),
+        node(UE, 'finding 15', 'an amount as a string')),
+      // Формат r80.1 держит вид поля $.format (0070); отдельная проверка формата в теле функции удалена как дубль
+      m(replaceInFunction('security.explanation_field_kinds()', '"$.format":{"k":"enum","v":["r80.1"]}', '"$.format":{"k":"code"}'),
+        node(UE, 'finding 15', 'another explanation format')),
+      m(replaceInFunction('security.explanation_node_declared(jsonb,text,boolean)', "OR (w.value #>> '{}') !~ '^[A-Za-z][A-Za-z0-9_]{0,63}$'", ''),
+        node(UE, 'finding 15', 'a withheld name that is not an identifier')),
     ],
   },
-]
+];
 
+const SA = 'packages/pricing-store-pg/test/audit-guards.pg.test.ts';
+/** Защиты шага 18 */
+export const STEP18_ROWS = [
+  {
+    row: 'Р-101', invariant: 'согласие на миграцию eBay — только владелец, от своего имени, со вторым фактором',
+    mutations: [
+      m(replaceInFunction('tenant_data.migration_consent_guard()', 'AND (security.current_user_id() IS NULL OR NEW.user_id IS DISTINCT FROM security.current_user_id()) THEN', 'AND false THEN'),
+        smoke('eBay consent in the name of the owner by another member (Р-101)')),
+      m(replaceInFunction('tenant_data.migration_consent_guard()', "AND role = 'OWNER' AND status = 'ACTIVE') THEN", "AND status = 'ACTIVE') THEN"),
+        smoke('eBay consent by an admin in their own name (Р-101)')),
+      m(replaceInFunction('tenant_data.migration_consent_guard()', 'AND NOT security.session_mfa() THEN', 'AND false THEN'), smoke('eBay consent by the owner without a second factor (Р-101)')),
+    ],
+  },
+  {
+    row: 'Р-100', invariant: 'административная запись проверяет роль и административные столбцы',
+    mutations: [
+      m(replaceInFunction('security.require_person_for_admin_write()', "IF action <> 'OWN_GUARD' AND NOT security.pricing_permission(r, action) THEN", 'IF false THEN'),
+        smoke('an operator lowers min_price (Р-100)')),
+      m(dropTrigger('a0_admin_write_person_update', 'tenant_data.write_scope'), smoke('pricing mode changed without a person (step 17 finding 1)'),
+        verify('tenant_data\\.write_scope: administrative UPDATE without the person guard')),
+      m(replaceInFunction('security.admin_write_action(text)', "('tenant_data.min_price', 'MANAGE_PRICING'), ", ''),
+        verify('tenant_data\\.min_price: no administrative action is declared')),
+      m(replaceInFunction('security.require_person_for_admin_write()', 'IF row_tenant = security.platform_tenant_id() THEN', 'IF false THEN'),
+        smoke('administrative change in the platform tenant (step 17 finding 9)')),
+    ],
+  },
+  {
+    row: 'находка 4 (шаг 17)', invariant: 'путь решения не пишет действия человека в свои таблицы',
+    mutations: [
+      m('GRANT INSERT ON channel_data.pricing_halt TO repracer_app', smoke('path inserts a halt released by a person (step 17 finding 4)'), pathRight('channel_data.pricing_halt', 'INSERT')),
+      m('GRANT UPDATE ON channel_data.divergence_case TO repracer_app', smoke('path resolves a divergence case for a person (step 17 finding 4)'),
+        pathRight('channel_data.divergence_case', 'UPDATE')),
+      m(dropTrigger('a1_write_scope_path_status_guard', 'tenant_data.write_scope'), smoke('path unblocks a write scope (step 17 finding 4)'), smoke('path holds a write scope (step 17 finding 4)')),
+    ],
+  },
+  {
+    row: 'находка 5 (шаг 17)', invariant: 'срок проверки остановки переносится со вторым фактором и в аудите',
+    mutations: [
+      m(dropTrigger('a1_pricing_halt_review_schedule_guard', 'channel_data.pricing_halt'), smoke('the review of a halt moved without a second factor (step 17 finding 5)')),
+      m(dropTrigger('zz_admin_write_audit_update', 'channel_data.pricing_halt'),
+        smoke('the moved review of a halt is not in the audit log (step 17 finding 5)', 'a moved review of a halt is written to the audit log (step 17 finding 5)'),
+        verify('channel_data\\.pricing_halt: administrative UPDATE is not written to the audit log')),
+    ],
+  },
+  {
+    row: 'находка 8 (шаг 17)', invariant: 'виды значений у каждого скалярного поля слепка',
+    mutations: [
+      m(replaceInFunction('security.explanation_node_declared(jsonb,text,boolean)', "ELSIF NOT security.param_value_valid(v, fields -> (path || '.' || k)) THEN", 'ELSIF false THEN'),
+        node(UE, 'finding 15', 'a free text in strategy.currentMinor')),
+      m(replaceInFunction('security.param_value_valid(jsonb,jsonb)', "RETURN t = 'string' AND s IN ('EUR', 'USD');", "RETURN t = 'string' AND s ~ '^[A-Z]{3}$';"),
+        node(UE, 'finding 15', 'a currency outside EUR and USD')),
+      m(replaceInFunction('security.param_value_valid(jsonb,jsonb)', 'PERFORM s::timestamptz;', 'NULL;'), node(UE, 'finding 15', 'an invalid moment in the price stop context')),
+      m(replaceInFunction('security.param_value_valid(jsonb,jsonb)', 'BETWEEN 0 AND 1000;', 'IS NOT NULL;'), node(UE, 'finding 15', 'a ratio outside its range')),
+      m(replaceInFunction('security.param_value_valid(jsonb,jsonb)', "RETURN t = 'number' AND v::text ~ '^[0-9]+$';", "RETURN t = 'number';"), node(UE, 'finding 15', 'a negative count')),
+      m(replaceInFunction('security.param_value_valid(jsonb,jsonb)', "RETURN t = 'string' AND s ~ '^[A-Za-z0-9_.:@-]{1,128}$';", "RETURN t = 'string';"),
+        node(UE, 'finding 15', 'a free text as an id')),
+    ],
+  },
+  {
+    row: 'Р-102', invariant: 'роль остатков — только остатки и резервации',
+    mutations: [
+      m('GRANT SELECT ON tenant_data.min_price TO repracer_stock', smoke('stock role reads prices (Р-102)'), verify('tenant_data\\.min_price: SELECT of the stock role does not match its allow list')),
+      m('GRANT UPDATE ON tenant_data.write_scope TO repracer_stock', verify('tenant_data\\.write_scope: UPDATE of the stock role does not match its allow list')),
+      // Членство ролей общее для кластера, а не для копии базы: такую мутацию нельзя откатить удалением копии — в каталог не входит
+    ],
+  },
+  {
+    row: 'Р-103', invariant: 'неизменяемость таблиц, у которых раньше не было строк, проверяется попыткой изменения',
+    mutations: [
+      m('ALTER TABLE tenant_data.guardrail DISABLE TRIGGER zz_append_only', smoke('append-only tenant_data.guardrail')),
+      m('ALTER TABLE channel_data.pricing_halt_review DISABLE TRIGGER zz_append_only', smoke('append-only channel_data.pricing_halt_review')),
+      m('ALTER TABLE platform.external_identity_revocation DISABLE TRIGGER zz_append_only', smoke('append-only platform.external_identity_revocation')),
+      m('ALTER TABLE tenant_data.price_daily_correction DISABLE TRIGGER zz_append_only', smoke('append-only tenant_data.price_daily_correction')),
+    ],
+  },
+  {
+    row: 'OQ-153', invariant: 'привязки входа удаляются только у отключённого пользователя',
+    mutations: [
+      m(replaceInFunction('maintenance.purge_user_identities(uuid)', 'IF NOT EXISTS (SELECT 1 FROM platform.app_user u WHERE u.user_id = p_user_id AND u.status = \'DISABLED\') THEN', 'IF false THEN'),
+        smoke('sign-ins of an active user are purged (OQ-153)')),
+    ],
+  },
+];
 
-/** Строки таблицы, у которых нечего снимать: правило проверяло отсутствие объектов или свойства каталога, оставшиеся в 0061 */
+/** Строки таблицы, у которых нечего снимать: правило проверяло отсутствие объектов или свойства каталога, оставшиеся в проверке схемы */
 export const R93_NOT_MUTATED = [
   { row: '1–11', why: 'свойства каталога остались в проверке схемы (0067)' },
   { row: '15', why: 'данные справочника НДС остались в проверке схемы (0067)' },
