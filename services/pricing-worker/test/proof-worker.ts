@@ -47,6 +47,7 @@ const worker = await startWorker({
   alerts: { raise: async (a) => void process.send?.({ kind: 'alert', workerId, code: a.code }) },
   logger: { log: () => undefined },
   partitionsConcurrently: 4,
+  consumerGroupSuffix: `-proof-${runId}`,
   sweepIntervalMs: 2_000,
   onConsumed: async (message, id) => {
     const seq = message.topic.startsWith('raw.') ? (JSON.parse(message.value) as { productSeq?: number }).productSeq ?? null : null;

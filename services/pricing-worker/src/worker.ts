@@ -37,6 +37,8 @@ export interface WorkerOptions {
   logger: AdapterLogger;
   partitionsConcurrently?: number;
   sweepIntervalMs?: number;
+  /** Суффикс групп потребителей — для стенда порядка (у каждого прогона свои смещения); в работе не используется */
+  consumerGroupSuffix?: string;
   /** Наблюдение за потреблением — для стенда порядка; в работе не используется */
   onConsumed?: (message: ReceivedMessage, workerId: string) => Promise<void>;
 }
@@ -81,7 +83,7 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
   };
 
   consumers.push(await runKeyedConsumer(kafka, {
-    groupId: 'repracer-pricing-path', topics: [TOPICS.rawCompetitorSnapshot], partitionsConcurrently: options.partitionsConcurrently ?? 4, onPoison: poison,
+    groupId: `repracer-pricing-path${options.consumerGroupSuffix ?? ''}`, topics: [TOPICS.rawCompetitorSnapshot], partitionsConcurrently: options.partitionsConcurrently ?? 4, onPoison: poison,
     handle: async (message) => {
       await options.onConsumed?.(message, options.workerId);
       const envelope = JSON.parse(message.value) as SnapshotEnvelope;
@@ -96,7 +98,7 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
   }));
 
   consumers.push(await runKeyedConsumer(kafka, {
-    groupId: 'repracer-write-dispatcher', topics: [TOPICS.scopeWrite], partitionsConcurrently: options.partitionsConcurrently ?? 4, onPoison: poison,
+    groupId: `repracer-write-dispatcher${options.consumerGroupSuffix ?? ''}`, topics: [TOPICS.scopeWrite], partitionsConcurrently: options.partitionsConcurrently ?? 4, onPoison: poison,
     handle: async (message) => {
       await options.onConsumed?.(message, options.workerId);
       const event = JSON.parse(message.value) as { tenantId: string; writeScopeId: string };

@@ -42,7 +42,16 @@ const pool = PG_URL ? createPool(PG_URL, { max: 4, applicationName: 'repracer-pr
 const provisioning = PG_URL ? createPool(PG_URL.replace('svc_app@', 'svc_provisioning@'), { max: 1, applicationName: 'repracer-proof-provisioning' }) : null;
 // Р-96: конфигурацию мира доказательства пишет административная роль
 const adminService = PG_URL ? createPool(PG_URL.replace('svc_app@', 'svc_admin@'), { max: 2, applicationName: 'repracer-proof-admin' }) : null;
-const admin = ADMIN_URL ? new pg.Pool({ connectionString: ADMIN_URL, max: 2 }) : null;
+// Журнал доказательства — в той же базе, куда пишут экземпляры (PG_URL): административный адрес указывает на базу postgres.
+// Шаг 20: до исправления схема proof создавалась в базе postgres, запись журнала в экземплярах падала, и каждое сообщение
+// уходило в «отравленные» — первый прогон в CI (шаг 19) обработал ноль сообщений
+const journalAdminUrl = (() => {
+  const admin = new URL(ADMIN_URL!);
+  admin.pathname = new URL(PG_URL!).pathname;
+  return admin.toString();
+})();
+const admin = ADMIN_URL ? new pg.Pool({ connectionString: journalAdminUrl, max: 2 }) : null;
+const alertsByCode = new Map<string, number>();
 const children: ChildProcess[] = [];
 after(async () => {
   for (const c of children) c.kill('SIGKILL');
@@ -72,7 +81,10 @@ function spawnWorker(workerId: string, runId: string): Promise<ChildProcess> {
   });
   children.push(child);
   return new Promise((resolve, reject) => {
-    child.on('message', (m: { kind?: string }) => { if (m?.kind === 'ready') resolve(child); });
+    child.on('message', (m: { kind?: string; code?: string }) => {
+      if (m?.kind === 'ready') resolve(child);
+      if (m?.kind === 'alert' && m.code) alertsByCode.set(m.code, (alertsByCode.get(m.code) ?? 0) + 1);
+    });
     child.on('exit', (code) => reject(new Error(`worker ${workerId} exited with ${code} before ready`)));
   });
 }
@@ -96,6 +108,9 @@ interface ProofResult {
   strandedPending: number;
   outOfOrderRejections: number;
   workersThatConsumed: number;
+  messagesPublished: number;
+  snapshotsConsumed: number;
+  alerts: Record<string, number>;
   adapterCalls: number;
   decisionsApproved: number;
 }
@@ -109,9 +124,11 @@ async function runProof(options: { keyed: boolean; killOne: boolean }): Promise<
   const existing = await kadmin.listTopics();
   const stale = [TOPICS.rawCompetitorSnapshot, TOPICS.scopeWrite].filter((t) => existing.includes(t));
   if (stale.length) await kadmin.deleteTopics({ topics: stale, timeout: 30_000 });
+  // Удаление топика в брокере асинхронно: создание до его окончания находит «существующий» топик, который затем исчезает
+  for (let i = 0; i < 60 && (await kadmin.listTopics()).some((t) => stale.includes(t)); i++) await sleep(500);
   await kadmin.disconnect();
-  await sleep(2_000);
   await ensureTopics(kafka, [{ topic: TOPICS.rawCompetitorSnapshot, numPartitions: 12 }, { topic: TOPICS.scopeWrite, numPartitions: 12 }]);
+  alertsByCode.clear();
 
   const nowMs = Date.now();
   const world = await seedPricingWorld(pool!, {
@@ -230,6 +247,7 @@ async function runProof(options: { keyed: boolean; killOne: boolean }): Promise<
   return {
     consumedFirstOutOfOrder, redeliveries, adapterVersionViolations, scopesWithLostLatestPrice: lost, strandedPending: state.pending,
     outOfOrderRejections: state.outOfOrder, workersThatConsumed: Number(w.n), adapterCalls: calls.length, decisionsApproved: state.approved,
+    messagesPublished: messages.length, snapshotsConsumed: seen.size === 0 ? 0 : [...seen.values()].reduce((n, set) => n + set.size, 0), alerts: Object.fromEntries(alertsByCode),
   };
 }
 
@@ -237,6 +255,10 @@ test('Р-24, Р-64: three pricing path instances behind the broker, one killed m
   await prepareJournal();
   const result = await runProof({ keyed: true, killOne: true });
   console.log(`BROKER_ORDER_RESULT ${JSON.stringify(result)}`);
+  // Шаг 20: пустой прогон не доказывает порядок — каждое опубликованное сообщение обработано, отравленных нет
+  assert.equal(result.snapshotsConsumed, result.messagesPublished, 'every published snapshot is consumed at least once');
+  assert.equal(result.alerts.BROKER_MESSAGE_POISONED ?? 0, 0, 'no message is poisoned');
+  assert.ok(result.decisionsApproved > 0 && result.adapterCalls > 0, 'decisions were made and reached the channel');
   assert.ok(result.workersThatConsumed >= 3, 'the rebalance did not spread partitions over several instances');
   assert.equal(result.consumedFirstOutOfOrder, 0, 'a snapshot of a product was processed after a later snapshot of the same product');
   assert.equal(result.adapterVersionViolations, 0, 'the channel received an older version after a newer one');
@@ -249,5 +271,6 @@ test('control — publishing without the partition key, the same checker finds r
   await prepareJournal();
   const result = await runProof({ keyed: false, killOne: false });
   console.log(`BROKER_ORDER_CONTROL ${JSON.stringify(result)}`);
+  assert.equal(result.snapshotsConsumed, result.messagesPublished, 'the control consumed every published snapshot');
   assert.ok(result.consumedFirstOutOfOrder + result.outOfOrderRejections > 0, 'without the key reordering is expected; a checker that sees none proves nothing');
 });

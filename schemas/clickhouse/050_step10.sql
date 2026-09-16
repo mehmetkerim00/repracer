@@ -10,8 +10,8 @@
 
 ALTER TABLE repracer_analytics.price_decision
     ADD COLUMN IF NOT EXISTS reason_code   LowCardinality(String) DEFAULT '' AFTER rejection_reason,
-    ADD COLUMN IF NOT EXISTS reason_params String CODEC(ZSTD(3)) DEFAULT '{}' AFTER reason_code,
-    ADD COLUMN IF NOT EXISTS checks        String CODEC(ZSTD(3)) DEFAULT '[]' AFTER violations,
+    ADD COLUMN IF NOT EXISTS reason_params String DEFAULT '{}' CODEC(ZSTD(3)) AFTER reason_code,
+    ADD COLUMN IF NOT EXISTS checks        String DEFAULT '[]' CODEC(ZSTD(3)) AFTER violations,
     ADD COLUMN IF NOT EXISTS fx            Nullable(String) CODEC(ZSTD(3)) AFTER fee_inputs,
     ADD COLUMN IF NOT EXISTS fx_rate_date  Nullable(Date) AFTER fx,
     ADD COLUMN IF NOT EXISTS fx_from       LowCardinality(Nullable(String)) AFTER fx_rate_date;
@@ -25,7 +25,7 @@ ALTER TABLE repracer_analytics.price_decision
 
 ALTER TABLE repracer_analytics.price_intent
     ADD COLUMN IF NOT EXISTS reason_code   LowCardinality(String) DEFAULT '' AFTER rule_code,
-    ADD COLUMN IF NOT EXISTS reason_params String CODEC(ZSTD(3)) DEFAULT '{}' AFTER reason_code;
+    ADD COLUMN IF NOT EXISTS reason_params String DEFAULT '{}' CODEC(ZSTD(3)) AFTER reason_code;
 
 ALTER TABLE repracer_analytics.channel_write_completed
     ADD COLUMN IF NOT EXISTS end_reason             LowCardinality(Nullable(String)) AFTER final_status,
