@@ -114,6 +114,13 @@ function decisionPair(i: number): { intent: PgRow; decision: PgRow } {
     fee_inputs: withFx ? { tax: { regime: 'SALES_TAX_EXCLUDED' }, feeRateBp: 1500, unitCostMinor: 1156, fixedFeeMinor: 0 } : null,
     fx: withFx ? { to: 'USD', base: 'EUR', from: 'EUR', quote: 'USD', source: 'ECB', rateDate: w.at.toISOString().slice(0, 10), rounding: 'UP', rateMicros: 1_155_100, sourceAmountMinor: 1000, convertedAmountMinor: 1156 } : null,
     violations: failing ? [failing] : [], checks, competitor_derived: true,
+    // Шаг 20: столбцы решения шагов 12–14 (NOT NULL с 0049) — первый прогон в CI упал на них: генератор был старше схемы.
+    // Слепок r80.1 — в PostgreSQL; в ClickHouse решение уходит без слепка (rows.ts), вечная копия — ядро и архив [Р-79]
+    rule_code: intent.rule_code, trigger_type: intent.trigger_type, proposed_amount_minor: target, pricing_strategy_version: intent.pricing_strategy_version,
+    explanation: { format: 'r80.1', snapshot: { source: 'KAUFLAND_BUYBOX', observedAt: intent.inputs.snapshotObservedAt },
+      sanity: { anchorsUsed: ['COST', 'HISTORY'], checks: [{ code: 'WITHIN_HISTORY', params: {} }] },
+      strategy: { currentMinor: current, currency: intent.currency, reason: { code: 'FIXED_PRICE', params: { targetMinor: target, currency: intent.currency } } } },
+    sanity_ruleset: 'r49.1', gate_profile: 'g74.1',
   };
   return { intent, decision };
 }
