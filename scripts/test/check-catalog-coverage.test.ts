@@ -11,12 +11,22 @@ const protections = [
   { kind: 'check', table: 'tenant_data.t', name: 't_new_check', fn: null },
   { kind: 'check', table: 'tenant_data.t', name: 't_catalogued_check', fn: null },
 ];
-const catalogText = `m(dropConstraint('t_catalogued_check', 'tenant_data.t'))\nm(replaceInFunction('tenant_data.body_mutated()', 'IF x', 'IF false'))`;
+const catalogText = `m(dropConstraint('t_catalogued_check', 'tenant_data.t'))\nm(replaceInFunction('tenant_data.body_mutated()', 'IF x', 'IF false'))\nm(dropTrigger('a00_new_guard', 'tenant_data.other'))`;
 
-test('a new trigger or check without a catalog row is reported; the baseline, a quoted name and a mutated trigger function are not', () => {
+test('a new protection needs a catalog row naming it with its table; a mutated trigger function covers only baseline entries', () => {
   const { missing, resolved } = coverage({ protections, catalogText, baseline: ['trigger tenant_data.t a00_old_guard', 'check tenant_data.t t_gone'] });
+  // a00_new_guard назван в каталоге для другой таблицы — не засчитан; b_body_mutated — единственный триггер своей мутированной функции
   assert.deepEqual(missing, ['check tenant_data.t t_new_check', 'trigger tenant_data.t a00_new_guard']);
   assert.deepEqual(resolved, ['check tenant_data.t t_gone'], 'a baseline entry that is gone is reported, not silently kept');
+});
+
+test('a mutated function shared by several triggers covers none of them', () => {
+  const shared = [
+    { kind: 'trigger', table: 'tenant_data.a', name: 'a0_person', fn: 'security.person_guard' },
+    { kind: 'trigger', table: 'tenant_data.b', name: 'a0_person', fn: 'security.person_guard' },
+  ];
+  const { missing } = coverage({ protections: shared, catalogText: "m(replaceInFunction('security.person_guard()', 'IF u IS NULL', 'IF false'))\nm(dropTrigger('a0_person', 'tenant_data.a'))", baseline: [] });
+  assert.deepEqual(missing, ['trigger tenant_data.b a0_person']);
 });
 
 test('a name mentioned without quotes (for example inside DISABLE TRIGGER text) does not count as a catalog row', () => {
