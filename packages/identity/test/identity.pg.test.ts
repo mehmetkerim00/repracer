@@ -194,3 +194,21 @@ test('Р-98, step 17 finding 3: two invitations accepted at the same time link o
   }
 });
 
+test('Р-98, step 18 finding 6: a sign-in is linked only in READ COMMITTED — a stricter snapshot does not see a link committed after it began', async () => {
+  const owner = await signUp(email('iso-owner'));
+  const world = await worldOf(owner, 3);
+  const address = email('iso');
+  const invitation = await invite(world.tenantId, owner.userId, address);
+  const sha256 = (token: string) => createHash('sha256').update(token, 'utf8').digest();
+  const client = await authenticator.connect();
+  try {
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
+    const outcome = await client.query('SELECT security.accept_identity_invitation($1, $2, $3, $4, true)', [sha256(invitation.token), ISSUER, `sub-${randomUUID()}`, address])
+      .then(() => 'linked', (error: Error) => error.message);
+    await client.query('ROLLBACK');
+    assert.match(outcome, /linked only in READ COMMITTED/, 'step 18 finding 6: a link in REPEATABLE READ is refused');
+  } finally {
+    client.release();
+  }
+});
+

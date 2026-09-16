@@ -31,6 +31,12 @@ BEGIN
 END $$;
 
 
+CREATE FUNCTION pg_temp.ok(label text, q text) RETURNS void LANGUAGE plpgsql AS $$
+BEGIN
+  EXECUTE q;
+  SET CONSTRAINTS ALL IMMEDIATE;
+  RAISE NOTICE 'PASS accept | %', label;
+END $$;
 BEGIN;
 SELECT set_config('app.tenant_id', 'a0000000-0000-0000-0000-00000000000a', true) \gset
 -- Разрешённое: движение остатка пересчитывает пул; резервации читаются
@@ -50,14 +56,32 @@ SELECT pg_temp.expect_fail('stock role writes a price intent (Р-102)', $q$
   INSERT INTO channel_data.price_intent (tenant_id, write_scope_id, trigger_type, proposed_amount_minor, currency, price_basis, expires_at)
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', 'MANUAL', 1, 'EUR', 'GROSS', now() + interval '1 minute') $q$,
   '^permission denied for table price_intent$');
-SELECT pg_temp.expect_fail('stock role changes a write scope (Р-102)', $q$
-  UPDATE tenant_data.write_scope SET status = 'BLOCKED' $q$, '^permission denied for table write_scope$');
+SELECT pg_temp.expect_fail('stock role changes the pricing of a write scope (Р-102)', $q$
+  UPDATE tenant_data.write_scope SET pricing_mode = 'OFF' $q$, '^permission denied for table write_scope$');
 SELECT pg_temp.expect_fail('stock role writes the audit log (Р-102)', $q$
   INSERT INTO audit.audit_event (tenant_id, occurred_at, actor_type, action, entity_type) VALUES ('a0000000-0000-0000-0000-00000000000a', now(), 'SYSTEM', 'stock.forged', 'stock_pool') $q$,
   '^permission denied for schema audit$');
 SELECT pg_temp.expect_fail('stock role reads memberships (Р-102)', $q$ SELECT count(*) FROM tenant_data.membership $q$, '^permission denied for table membership$');
 SELECT pg_temp.expect_fail('stock role creates a product (Р-102)', $q$
   INSERT INTO tenant_data.product (tenant_id, sku, kind) VALUES ('a0000000-0000-0000-0000-00000000000a', 'stock-forged', 'SIMPLE') $q$, '^permission denied for table product$');
+-- Р-105 (шаг 19, OQ-152): запись в канал — только поле QUANTITY; право ограничено видом поля, а не таблицей
+SELECT pg_temp.ok('the stock role completes a quantity write (Р-105)', $q$
+  UPDATE tenant_data.channel_write SET status = 'ACCEPTED' WHERE channel_write_id = 'a9000000-0000-0000-0000-000000000012' $q$);
+SELECT pg_temp.ok('the stock role creates a quantity write (Р-105)', $q$
+  INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, quantity, version, origin, budget_scope_key, budget_day)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a9190000-0000-4000-8000-000000000001', 'a6000000-0000-0000-0000-000000000003', 'QUANTITY', 4, 3, 'STOCK_RECALC', 'L1', (now() AT TIME ZONE 'Europe/Berlin')::date) $q$);
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM tenant_data.channel_write WHERE field <> 'QUANTITY') OR EXISTS (SELECT 1 FROM tenant_data.write_scope WHERE field <> 'QUANTITY')
+     OR NOT EXISTS (SELECT 1 FROM tenant_data.channel_write WHERE field = 'QUANTITY') THEN
+    RAISE EXCEPTION 'the stock role sees price writes or does not see quantity writes (Р-105)'; END IF;
+  RAISE NOTICE 'PASS accept | the stock role sees only quantity writes and their write scopes (Р-105)';
+END $$;
+-- Цена в запись канала: отказ даёт первой проверка пола (у роли нет права читать границы) — это не собственная проверка политики;
+-- собственные проверки политики — видимость (выше) и вставка в историю записей, где триггера с чтением границ нет
+SELECT pg_temp.expect_fail('stock role writes price history of a channel write (Р-105)', $q$
+  INSERT INTO tenant_data.channel_write_history (tenant_id, channel_write_id, finished_at, write_scope_id, field, amount_minor, currency, price_basis, version, origin, final_status, attempt_count, created_at)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', gen_random_uuid(), now(), 'a6000000-0000-0000-0000-000000000001', 'PRICE', 1, 'EUR', 'GROSS', 9, 'STOCK_RECALC', 'APPLIED', 1, now()) $q$,
+  'new row violates row-level security policy for table "channel_write_history');
 -- Изоляция тенанта: чужой остаток не виден
 SELECT set_config('app.tenant_id', 'b0000000-0000-0000-0000-00000000000b', true) \gset
 DO $$ BEGIN

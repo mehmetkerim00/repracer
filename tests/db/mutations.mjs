@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0071_verify_schema_invariants_v15.sql';
+const VERIFY = 'migrations/0073_verify_schema_invariants_v16.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 const node = (file, test, reason) => ({ node: file, test, reason });
@@ -70,8 +70,9 @@ export const R93_ROWS = [
   {
     row: '22', invariant: 'Р-64: завершение записи — с причиной; ждущая запись объявляется событием',
     mutations: [
-      m(dropConstraint('channel_write_end_explained', 'tenant_data.channel_write'), smoke('write discarded without a reason (Р-64)')),
-      m(dropConstraint('channel_write_history_end_explained', 'tenant_data.channel_write_history'), smoke('write history ended without a reason (Р-64)')),
+      // Шаг 19 [Р-104]: channel_write_end_explained удалено (0072) — его отказ давало ограничение истории записей
+      m(dropConstraint('channel_write_history_end_explained', 'tenant_data.channel_write_history'),
+        smoke('write discarded without a reason (Р-64)'), smoke('write history ended without a reason (Р-64)')),
       m(dropTrigger('zz_channel_write_announce_dispatch', 'tenant_data.channel_write'),
         node(T('write-queue.pg.test.ts'), 'control — without the dispatcher', 'has no scope.write.v1 event')),
     ],
@@ -117,9 +118,9 @@ export const R93_ROWS = [
       m(dropConstraint('price_decision_explanation_by_class', 'channel_data.price_decision'), smoke('NO_OP decision with an explanation (Р-74)')),
       m(dropConstraint('price_decision_no_change_reason_code', 'channel_data.price_decision'), smoke('NO_OP decision with an unknown no-change reason (Р-74)')),
       m(dropTrigger('a0_price_decision_intent_columns', 'channel_data.price_decision'),
-        node(T('step14.pg.test.ts'), 'finding 10, Р-80', 'strictly deep-equal')),
+        smoke('decision intent columns are taken from the client, not from the intent (Р-80)', 'decision intent columns come from the intent, not from the client (Р-80)')),
       m(dropTrigger('a_price_decision_snapshot_ref_guard', 'channel_data.price_decision_snapshot_ref'),
-        node(T('step14.pg.test.ts'), 'finding 10, Р-80', 'keeps no snapshot reference')),
+        node(T('step14.pg.test.ts'), 'finding 10, Р-80', 'finding 10: a snapshot reference of a NO_OP decision is refused')),
     ],
   },
   {
@@ -154,9 +155,9 @@ export const R93_ROWS = [
       m(dropTrigger('zb_price_stop_audit', 'tenant_data.price_stop'),
         node(T('role-separation.pg.test.ts'), 'the audit log is still written', 'pricing.stop_created')),
       m(dropTrigger('zb_pricing_halt_audit', 'channel_data.pricing_halt'),
-        smoke('the system halt is not in the audit log', 'the system halt is written to the audit log by the trigger')),
+        smoke('the system halt is not in the audit log', 'the system halt is written to the audit log by the trigger (Р-76)')),
       m(dropTrigger('zb_pricing_halt_review_audit', 'channel_data.pricing_halt_review'),
-        smoke('the manual release is not in the audit log with its author', 'the audit event of the release is written by the trigger')),
+        smoke('the manual release is not in the audit log with its author', 'the audit event of the release is written by the trigger with the session user as author (Р-76)')),
     ],
   },
   {
@@ -166,7 +167,7 @@ export const R93_ROWS = [
   {
     row: '41', invariant: 'Р-79: подтверждённый архив ядра — со справочниками',
     mutations: [m(dropConstraint('partition_export_core_archive_self_contained', 'maintenance.partition_export'),
-      node(T('step14.pg.test.ts'), 'Р-79', 'partition_export_core_archive_self_contained'))],
+      node(T('step14.pg.test.ts'), 'Р-79', 'Р-79: a verified archive of the core without the explanation dictionary is refused'))],
   },
   {
     row: '42', invariant: 'Р-83: пол с полом маржи перед каждой отправкой',
@@ -181,17 +182,16 @@ export const R93_ROWS = [
     mutations: [
       m(dropConstraint('price_intent_core_competitor_rejection_not_kept', 'tenant_data.price_intent_core'),
         smoke('eternal core: a competitor-derived rejection keeps its proposed price (Р-85)')),
-      m(dropConstraint('price_decision_explanation_keys_declared', 'channel_data.price_decision'),
-        smoke('decision explanation with an undeclared reason parameter (finding 15)'), verify('undeclared reason parameter was stored')),
+      // Шаг 19 [Р-104]: price_decision_explanation_keys_declared удалено (0072) — тот же слепок в той же вставке проверяет ядро
       m(dropConstraint('price_intent_core_explanation_keys_declared', 'tenant_data.price_intent_core'),
-        smoke('eternal core: an undeclared reason parameter in the explanation (finding 15)')),
+        smoke('eternal core: an undeclared reason parameter in the explanation (finding 15)'), smoke('decision explanation with an undeclared reason parameter (finding 15)'),
+        verify('undeclared reason parameter was stored')),
     ],
   },
   {
     row: '44', invariant: 'Находки 1–3, Р-88: журнал проверок, автоматическое снятие, второй фактор',
     mutations: [
-      m(dropTrigger('a_pricing_halt_review_guard', 'channel_data.pricing_halt_review'),
-        node(T('audit-guards.pg.test.ts'), 'finding 1', 'may not release')),
+      m(dropTrigger('a_pricing_halt_review_guard', 'channel_data.pricing_halt_review'), smoke('automatic review recorded in a user session (finding 3)')),
       m(dropTrigger('zc_pricing_halt_review_released_in_tx', 'channel_data.pricing_halt_review'),
         node(T('audit-guards.pg.test.ts'), 'finding 1', 'a release record without the release fails at commit')),
       m(replaceInFunction('tenant_data.price_stop_role_guard()', 'AND NOT security.session_mfa() THEN', 'AND false THEN'),
@@ -264,7 +264,9 @@ export const STEP17_ROWS = [
         smoke('an administrative change is not in the audit log (Р-97)', 'administrative change by a person is written to the audit log (Р-97)'),
         verify('tenant_data\\.product: administrative INSERT is not written to the audit log')),
       m(dropTrigger('a0_admin_write_person_insert', 'channel_data.pricing_halt_review'), smoke('the administrative service records an automatic review without a person (Р-97)')),
-      m(replaceInFunction('security.require_person_for_admin_write()', 'IF r IS NULL THEN', 'IF false THEN'), smoke('administrative change by a user outside the tenant (Р-97)')),
+      // Шаг 19 [Р-104]: проверка участника в страже удалена как дубль (0072) — постороннего отклоняет журнал аудита: событие USER без членства
+      m(dropConstraint('audit_event_check1', 'audit.audit_event'),
+        smoke('administrative change by a user outside the tenant (Р-97)'), smoke('administrative change in the platform tenant (step 17 finding 9)')),
       m(replaceInFunction('security.audit_admin_write()', 'IF NOT security.admin_session() THEN', 'IF true THEN'),
         smoke('an administrative change is not in the audit log (Р-97)', 'administrative change by a person is written to the audit log (Р-97)')),
       m(replaceInFunction('security.admin_session()', "pg_has_role(session_user, 'repracer_admin', 'MEMBER')", 'false'), smoke('administrative change without a person (Р-97)')),
@@ -273,6 +275,7 @@ export const STEP17_ROWS = [
   {
     row: 'находка 5', invariant: 'создание тенанта не присоединяет существующего пользователя мимо приглашения',
     mutations: [
+      // Шаг 19 [Р-104]: роль и адрес проверяются у уже входившего пользователя (smoke_setup.sql) — отказ «никогда не входил» их не маскирует
       m(replaceInFunction('security.provision_tenant(uuid,text,text,jsonb)', "IF m ->> 'role' IS DISTINCT FROM 'OWNER' THEN", 'IF false THEN'),
         smoke('existing user attached as a member without an invitation (step 16 finding 5)')),
       m(replaceInFunction('security.provision_tenant(uuid,text,text,jsonb)', "IF lower(trim(m ->> 'email')) IS DISTINCT FROM existing.email THEN", 'IF false THEN'),
@@ -316,7 +319,7 @@ export const STEP17_ROWS = [
       m(dropTrigger('zb_write_scope_release_strategy_version', 'tenant_data.write_scope'),
         node(UE, 'Р-91: the strategy version keeps its type', 'the released version starts its 18 months')),
       m(replaceInFunction('tenant_data.pricing_strategy_supersede_undercut()', "AND s.status <> 'RETIRED')", 'AND false)'),
-        node(UE, 'Р-91: the strategy version keeps its type', 'a new version is created while the old one is still pinned')),
+        node(UE, 'Р-91: the strategy version keeps its type', 'OQ-151: a new version is created while the old one is still pinned')),
     ],
   },
   {
@@ -332,7 +335,7 @@ export const STEP17_ROWS = [
         node(UE, 'finding 15', 'an amount as a string')),
       // Формат r80.1 держит вид поля $.format (0070); отдельная проверка формата в теле функции удалена как дубль
       m(replaceInFunction('security.explanation_field_kinds()', '"$.format":{"k":"enum","v":["r80.1"]}', '"$.format":{"k":"code"}'),
-        node(UE, 'finding 15', 'another explanation format')),
+        node(UE, 'finding 15', 'finding 6: an explanation format shaped as a code other than r80.1')),
       m(replaceInFunction('security.explanation_node_declared(jsonb,text,boolean)', "OR (w.value #>> '{}') !~ '^[A-Za-z][A-Za-z0-9_]{0,63}$'", ''),
         node(UE, 'finding 15', 'a withheld name that is not an identifier')),
     ],
@@ -346,23 +349,22 @@ export const STEP18_ROWS = [
     row: 'Р-101', invariant: 'согласие на миграцию eBay — только владелец, от своего имени, со вторым фактором',
     mutations: [
       m(replaceInFunction('tenant_data.migration_consent_guard()', 'AND (security.current_user_id() IS NULL OR NEW.user_id IS DISTINCT FROM security.current_user_id()) THEN', 'AND false THEN'),
-        smoke('eBay consent in the name of the owner by another member (Р-101)')),
-      m(replaceInFunction('tenant_data.migration_consent_guard()', "AND role = 'OWNER' AND status = 'ACTIVE') THEN", "AND status = 'ACTIVE') THEN"),
-        smoke('eBay consent by an admin in their own name (Р-101)')),
+        smoke('eBay consent in the name of another owner (Р-101)')),
+      // Шаг 19 [Р-104]: проверка владельца удалена из стража согласия (0072) — роль проверяет общий страж (строка Р-100)
       m(replaceInFunction('tenant_data.migration_consent_guard()', 'AND NOT security.session_mfa() THEN', 'AND false THEN'), smoke('eBay consent by the owner without a second factor (Р-101)')),
     ],
   },
   {
     row: 'Р-100', invariant: 'административная запись проверяет роль и административные столбцы',
     mutations: [
-      m(replaceInFunction('security.require_person_for_admin_write()', "IF action <> 'OWN_GUARD' AND NOT security.pricing_permission(r, action) THEN", 'IF false THEN'),
-        smoke('an operator lowers min_price (Р-100)')),
+      m(replaceInFunction('security.require_person_for_admin_write()', "IF action <> 'OWN_GUARD' AND r IS NOT NULL AND NOT security.pricing_permission(r, action) THEN", 'IF false THEN'),
+        smoke('an operator lowers min_price (Р-100)'), smoke('eBay consent by an admin in their own name (Р-101)'), smoke('write scope status changed by a viewer (step 18 finding 1)'),
+        smoke('consent revoked by an admin (Р-101)')),
       m(dropTrigger('a0_admin_write_person_update', 'tenant_data.write_scope'), smoke('pricing mode changed without a person (step 17 finding 1)'),
         verify('tenant_data\\.write_scope: administrative UPDATE without the person guard')),
       m(replaceInFunction('security.admin_write_action(text)', "('tenant_data.min_price', 'MANAGE_PRICING'), ", ''),
         verify('tenant_data\\.min_price: no administrative action is declared')),
-      m(replaceInFunction('security.require_person_for_admin_write()', 'IF row_tenant = security.platform_tenant_id() THEN', 'IF false THEN'),
-        smoke('administrative change in the platform tenant (step 17 finding 9)')),
+      // Шаг 19: отдельная проверка платформенного тенанта удалена (0072) — у него нет участников, отказывает проверка членства (строка Р-97)
     ],
   },
   {
@@ -402,6 +404,8 @@ export const STEP18_ROWS = [
     mutations: [
       m('GRANT SELECT ON tenant_data.min_price TO repracer_stock', smoke('stock role reads prices (Р-102)'), verify('tenant_data\\.min_price: SELECT of the stock role does not match its allow list')),
       m('GRANT UPDATE ON tenant_data.write_scope TO repracer_stock', verify('tenant_data\\.write_scope: UPDATE of the stock role does not match its allow list')),
+      m('GRANT UPDATE (pricing_mode) ON tenant_data.write_scope TO repracer_stock',
+        smoke('stock role changes the pricing of a write scope (Р-102)'), verify('tenant_data\\.write_scope\\.pricing_mode: UPDATE of the stock role is not in its allow list')),
       // Членство ролей общее для кластера, а не для копии базы: такую мутацию нельзя откатить удалением копии — в каталог не входит
     ],
   },
@@ -419,6 +423,110 @@ export const STEP18_ROWS = [
     mutations: [
       m(replaceInFunction('maintenance.purge_user_identities(uuid)', 'IF NOT EXISTS (SELECT 1 FROM platform.app_user u WHERE u.user_id = p_user_id AND u.status = \'DISABLED\') THEN', 'IF false THEN'),
         smoke('sign-ins of an active user are purged (OQ-153)')),
+    ],
+  },
+];
+
+const PERSON_GUARD = 'security.require_person_for_admin_write()';
+/** Защиты шага 19: находки ревью шага 18, Р-101 для элементов и отзывов, Р-105, Р-107, проверка схемы 0073 */
+export const STEP19_ROWS = [
+  {
+    row: 'находка 1 (шаг 18)', invariant: 'в сессии административного сервиса любое изменение строки — под стражем человека и в аудите',
+    mutations: [
+      // Пропуск стража для рабочих столбцов удалён (0072); мутация, возвращающая пропуск, ловится только журналом аудита: событие USER без
+      // пользователя сессии не пишется (audit_event_check). Две защиты держат одно — отдельной строки у добавленного кода нет (ADR-0019)
+      m(replaceInFunction(PERSON_GUARD, 'IF u IS NULL THEN', 'IF false THEN'),
+        smoke('the administrative service records an automatic review without a person (Р-97)')),
+      m(replaceInFunction('security.audit_admin_write()', '    -- Находка 1 ревью шага 18: в журнал попадает и изменение рабочих столбцов административным сервисом\n  END IF;',
+        "    IF NOT cols && TG_ARGV THEN RETURN NULL; END IF;\n  END IF;"),
+        smoke('a status change of a write scope by a person is not in the audit log (step 18 finding 1)', 'a status change of a write scope by a person is written to the audit log (step 18 finding 1)')),
+    ],
+  },
+  {
+    row: 'Р-101 (находка 2, шаг 18)', invariant: 'листинг в согласие добавляет владелец, давший его, со вторым фактором, в той же транзакции, по предполётной проверке; отзыв — владелец от своего имени со вторым фактором',
+    mutations: [
+      m(replaceInFunction('tenant_data.migration_consent_item_guard()', 'IF c.user_id IS NULL OR c.user_id IS DISTINCT FROM security.current_user_id() THEN', 'IF false THEN'),
+        smoke('listing added to a consent by another owner (Р-101)')),
+      m(replaceInFunction('tenant_data.migration_consent_item_guard()', 'IF NOT security.session_mfa() THEN', 'IF false THEN'), smoke('listing added to a consent without a second factor (Р-101)')),
+      m(replaceInFunction('tenant_data.migration_consent_item_guard()', 'IF c.given_at <> now() THEN', 'IF false THEN'), smoke('listing added to a consent given in an earlier transaction (Р-101)')),
+      m(replaceInFunction('tenant_data.migration_consent_item_guard()', 'IF NOT EXISTS (SELECT 1 FROM channel_data.listing_migration_check lc', 'IF false AND EXISTS (SELECT 1 FROM channel_data.listing_migration_check lc'),
+        smoke('listing added to a consent without a preflight check (Р-101, Р-2)')),
+      m(replaceInFunction('tenant_data.migration_consent_revocation_guard()', 'IF mem.membership_id IS NULL OR NEW.revoked_by_membership_id IS DISTINCT FROM mem.membership_id THEN', 'IF false THEN'),
+        smoke('consent revoked in the name of another owner (Р-101)')),
+      m(replaceInFunction('tenant_data.migration_consent_revocation_guard()', 'IF NOT security.session_mfa() THEN', 'IF false THEN'), smoke('consent revoked without a second factor (Р-101)')),
+    ],
+  },
+  {
+    row: 'Р-107 (находка 3, шаг 18)', invariant: 'ручной intent — только человек в административном сервисе, от своего имени, с правом менять цену',
+    mutations: [
+      m(replaceInFunction('channel_data.price_intent_manual_guard()', 'IF mem.membership_id IS NULL OR NEW.created_by_membership_id IS DISTINCT FROM mem.membership_id THEN', 'IF false THEN'),
+        smoke('manual price intent in the name of another member (Р-107)')),
+      m(replaceInFunction('channel_data.price_intent_manual_guard()', "IF NOT security.pricing_permission(mem.role, 'ENABLE_REPRICING') THEN", 'IF false THEN'),
+        smoke('manual price intent by a viewer (Р-107)')),
+      m(replaceInFunction('channel_data.price_intent_manual_guard()', "NOT (NEW.trigger_type = 'MANUAL' OR NEW.rule_code = 'MANUAL' OR NEW.created_by_membership_id IS NOT NULL)",
+        "NOT (NEW.trigger_type = 'MANUAL' AND NEW.created_by_membership_id IS NULL)"),
+        smoke('path creates a manual price intent of the owner (Р-107)')),
+    ],
+  },
+  {
+    row: 'находка 4 (шаг 18)', invariant: 'системную остановку ставит проверка входов пути решения, а не человек',
+    mutations: [
+      m(replaceInFunction('channel_data.pricing_halt_insert_guard()', 'IF security.admin_session() THEN', 'IF false THEN'), smoke('system halt created by a person (step 18 finding 4)')),
+      m(`DROP TRIGGER a00_pricing_halt_insert_guard ON channel_data.pricing_halt;
+         CREATE TRIGGER a00_pricing_halt_insert_guard BEFORE INSERT ON channel_data.pricing_halt FOR EACH ROW WHEN (false) EXECUTE FUNCTION channel_data.pricing_halt_insert_guard()`,
+        smoke('system halt created by a person (step 18 finding 4)'), verify('pricing_halt: trigger a00_pricing_halt_insert_guard has a WHEN condition that is not in the list')),
+    ],
+  },
+  {
+    row: 'находка 6 (шаг 18)', invariant: 'одна действующая привязка входа — и при изоляции строже READ COMMITTED',
+    mutations: [
+      m(replaceInFunction('platform.external_identity_one_active()', "IF current_setting('transaction_isolation') <> 'read committed' THEN", 'IF false THEN'),
+        node(ID, 'step 18 finding 6', 'step 18 finding 6: a link in REPEATABLE READ is refused')),
+      m('ALTER FUNCTION platform.external_identity_one_active() SECURITY INVOKER', verify('platform\\.external_identity_one_active\\(\\): owned by repracer_resolver but not SECURITY DEFINER')),
+    ],
+  },
+  {
+    row: 'находка 5 (шаг 18)', invariant: 'привязки входа удаляет только удаление привязок отключённого пользователя',
+    mutations: [
+      m('GRANT DELETE ON platform.external_identity_revocation TO repracer_retention',
+        smoke('retention role deletes sign-in revocations directly (step 18 finding 5)'), verify('role repracer_retention may delete sign-in links')),
+      m('GRANT DELETE ON platform.external_identity TO repracer_retention',
+        smoke('retention role deletes sign-in links directly (step 18 finding 5)'), verify('role repracer_retention may delete sign-in links')),
+      m(replaceInFunction('security.forbid_mutation()', "IF TG_OP = 'DELETE' AND current_user IN ('repracer_retention', 'repracer_identity_purger') THEN", "IF TG_OP = 'DELETE' THEN"),
+        verify('security\\.forbid_mutation does not refuse a DELETE')),
+    ],
+  },
+  {
+    row: 'находка 7 (шаг 18)', invariant: 'скаляр на месте узла слепка — отказ',
+    mutations: [
+      m(replaceInFunction('security.explanation_node_declared(jsonb,text,boolean)', "IF jsonb_typeof(node) NOT IN ('object', 'array') THEN", 'IF false THEN'),
+        node(UE, 'finding 15', 'step 18 finding 7: a scalar among the sanity checks is refused as a declared-keys violation')),
+      // Сама находка: элементы массива проверялись только если это объекты
+      m(replaceInFunction('security.explanation_node_declared(jsonb,text,boolean)', 'IF NOT security.explanation_node_declared(v, path || \'[]\', p_competitor_derived) THEN',
+        "IF jsonb_typeof(v) = 'object' AND NOT security.explanation_node_declared(v, path || '[]', p_competitor_derived) THEN"),
+        node(UE, 'finding 15', 'step 18 finding 7: a scalar among the strategy steps is refused|step 18 finding 7: a scalar among the sanity checks is refused')),
+    ],
+  },
+  {
+    row: 'Р-105', invariant: 'роль остатков пишет в канал только поле QUANTITY',
+    mutations: [
+      m("ALTER POLICY stock_quantity ON tenant_data.channel_write_history USING (tenant_id = security.current_tenant_id()) WITH CHECK (tenant_id = security.current_tenant_id())",
+        smoke('stock role writes price history of a channel write (Р-105)'), verify('channel_write_history: policy stock_quantity of the stock role is not limited to the QUANTITY field')),
+      m("ALTER POLICY stock_quantity ON tenant_data.channel_write USING (tenant_id = security.current_tenant_id()) WITH CHECK (tenant_id = security.current_tenant_id())",
+        smoke('the stock role sees price writes or does not see quantity writes (Р-105)', 'the stock role sees only quantity writes and their write scopes (Р-105)'),
+        verify('channel_write: policy stock_quantity of the stock role is not limited to the QUANTITY field')),
+      m("ALTER POLICY stock_quantity ON tenant_data.write_scope USING (tenant_id = security.current_tenant_id())",
+        smoke('the stock role sees price writes or does not see quantity writes (Р-105)', 'the stock role sees only quantity writes and their write scopes (Р-105)'),
+        verify('write_scope: policy stock_quantity of the stock role is not limited to the QUANTITY field')),
+      m('GRANT UPDATE (pricing_mode) ON tenant_data.write_scope TO repracer_stock', verify('tenant_data\\.write_scope\\.pricing_mode: UPDATE of the stock role is not in its allow list')),
+    ],
+  },
+  {
+    row: 'шаг 19: атрибуты функций защит', invariant: 'функция служебной роли исполняется её правами',
+    mutations: [
+      m('ALTER FUNCTION security.audit_admin_write() SECURITY INVOKER',
+        smoke('an administrative change is not in the audit log (Р-97)', 'administrative change by a person is written to the audit log (Р-97)'),
+        verify('security\\.audit_admin_write\\(\\): owned by repracer_audit_writer but not SECURITY DEFINER')),
     ],
   },
 ];

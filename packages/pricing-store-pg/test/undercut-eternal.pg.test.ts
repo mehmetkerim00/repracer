@@ -66,14 +66,15 @@ test('Р-91: the strategy version keeps its type without the undercut; the under
 
   const insertVersion = (v: number, params: object) => `INSERT INTO tenant_data.pricing_strategy (tenant_id, pricing_strategy_id, version, name, type, params, triggers, status, created_by_membership_id)
     VALUES ($1, $2, ${v}, 'st-buybox', 'MATCH_BUYBOX', '${JSON.stringify(params)}', '{COMPETITOR_CHANGE}', 'ACTIVE', '${w.ownerMembershipId}')`;
-  assert.match(await refusal(qa(insertVersion(2, { type: 'MATCH_BUYBOX', undercutMinor: 5, holdWhenWinning: false, atBound: 'CAP', deadbandMinor: 0 }))), /pricing_strategy_undercut_not_eternal/);
-  assert.match(await refusal(qa(insertVersion(2, { type: 'MATCH_BUYBOX', holdWhenWinning: false, atBound: 'CAP', deadbandMinor: 0 }))), /needs its undercut/);
-
   // OQ-151: новая версия создаётся, пока старая закреплена за единицей записи — подрез старой при этом не истекает
   assert.equal(await refusal(inTenant(admin, w.tenantId, async (tx) => {
     await tx.query(insertVersion(2, { type: 'MATCH_BUYBOX', holdWhenWinning: false, atBound: 'CAP', deadbandMinor: 0 }), [w.tenantId, strategyId]);
     await tx.query('INSERT INTO channel_data.pricing_strategy_undercut (tenant_id, pricing_strategy_id, version, undercut_minor) VALUES ($1, $2, 2, 7)', [w.tenantId, strategyId]);
   }, w.userId)), 'accepted', 'OQ-151: a new version is created while the old one is still pinned');
+  // Р-104: отказы версии без подреза и с подрезом в вечной версии — после создания версии 2: вставка новой версии запускает замену
+  // подреза, и без проверки закрепления отказ дала бы она, а не утверждение OQ-151 выше
+  assert.match(await refusal(qa(insertVersion(3, { type: 'MATCH_BUYBOX', undercutMinor: 5, holdWhenWinning: false, atBound: 'CAP', deadbandMinor: 0 }))), /pricing_strategy_undercut_not_eternal/);
+  assert.match(await refusal(qa(insertVersion(3, { type: 'MATCH_BUYBOX', holdWhenWinning: false, atBound: 'CAP', deadbandMinor: 0 }))), /needs its undercut/);
   const undercuts = () => q('SELECT version, superseded_at IS NOT NULL AS superseded FROM channel_data.pricing_strategy_undercut WHERE tenant_id = $1 AND pricing_strategy_id = $2 ORDER BY version');
   // OQ-151 (0066): единица записи всё ещё закреплена за версией 1 — её подрез не начинает срок хранения
   assert.deepEqual(await undercuts(), [{ version: 1, superseded: false }, { version: 2, superseded: false }], 'a pinned version keeps its undercut (OQ-151)');
@@ -107,54 +108,116 @@ test('Р-91: an approved Buy Box price reaches the eternal core without the unde
   assert.equal(JSON.stringify(core.explanation).includes('undercutMinor'), false, JSON.stringify(core.explanation));
 });
 
-test('finding 15: the database registry of declared keys equals the code; an undeclared parameter, an unknown code or an unknown field is refused', async () => {
+test('finding 15: the database registry of declared keys equals the code; an undeclared parameter, an unknown code or an unknown field is refused', async (t) => {
   const expected = Object.fromEntries(Object.entries({ ...REASON_PARAMS, ...SANITY_NOTE_PARAMS }).sort(([a], [b]) => a.localeCompare(b))
     .map(([code, schema]) => [code, Object.entries(schema).filter(([, v]) => v.class !== 'CHANNEL' && v.class !== 'CHANNEL_DERIVED').map(([k]) => k).sort()]));
   const { rows: [registry] } = await pool.query('SELECT security.eternal_param_keys() AS keys');
-  assert.deepEqual(registry.keys, expected);
+  await t.test(`finding 15: check 1`, async () => {
+    assert.deepEqual(registry.keys, expected);
+  });
   // Находка 6 ревью шага 16 (0066): в базе объявлены и виды значений, а не только имена ключей
   const expectedKinds = Object.fromEntries(Object.entries({ ...REASON_PARAMS, ...SANITY_NOTE_PARAMS }).sort(([a], [b]) => a.localeCompare(b))
     .map(([code, schema]) => [code, Object.fromEntries(Object.entries(schema).filter(([, v]) => v.class !== 'CHANNEL' && v.class !== 'CHANNEL_DERIVED')
       .map(([k, v]) => [k, { k: v.kind, ...(v.nullable ? { n: true } : {}), ...(v.values ? { v: [...v.values] } : {}) }]))]));
   const { rows: [kinds] } = await pool.query('SELECT security.eternal_param_kinds() AS kinds');
-  assert.deepEqual(kinds.kinds, expectedKinds, 'the kinds registry of the database equals the code');
+  await t.test(`finding 15: check 2`, async () => {
+    assert.deepEqual(kinds.kinds, expectedKinds, 'the kinds registry of the database equals the code');
+  });
   // Находка 8 ревью шага 17 (0070): вид есть у каждого скалярного поля слепка, не только у параметров причин
   const expectedFields = Object.fromEntries(Object.entries(EXPLANATION_FIELD_KINDS).map(([k, v]) => [k, { k: v.k, ...(v.n ? { n: true } : {}), ...(v.v ? { v: [...v.v] } : {}) }]));
   const { rows: [fields] } = await pool.query('SELECT security.explanation_field_kinds() AS kinds');
-  assert.deepEqual(fields.kinds, expectedFields, 'the field kinds registry of the database equals the code');
+  await t.test(`finding 15: check 3`, async () => {
+    assert.deepEqual(fields.kinds, expectedFields, 'the field kinds registry of the database equals the code');
+  });
 
   const check = async (explanation: object, competitorDerived: boolean) =>
     (await pool.query('SELECT security.explanation_keys_declared($1::jsonb, $2) AS ok', [JSON.stringify(explanation), competitorDerived])).rows[0].ok;
   const valid = { format: 'r80.1', strategy: { currentMinor: 1850, currency: 'EUR', reason: { code: 'FIXED_PRICE', params: { targetMinor: 1900, currency: 'EUR' } } } };
-  assert.equal(await check(valid, false), true);
-  assert.equal(await check({ ...valid, strategy: { ...valid.strategy, reason: { code: 'FIXED_PRICE', params: { target: 1900, currency: 'EUR' } } } }, false), false, 'undeclared key "target"');
-  assert.equal(await check({ ...valid, strategy: { ...valid.strategy, reason: { code: 'MADE_UP_REASON', params: {} } } }, false), false, 'unknown reason code');
+  await t.test(`finding 15: check 4`, async () => {
+    assert.equal(await check(valid, false), true);
+  });
+  await t.test(`finding 15: check 5`, async () => {
+    assert.equal(await check({ ...valid, strategy: { ...valid.strategy, reason: { code: 'FIXED_PRICE', params: { target: 1900, currency: 'EUR' } } } }, false), false, 'undeclared key "target"');
+  });
+  await t.test(`finding 15: check 6`, async () => {
+    assert.equal(await check({ ...valid, strategy: { ...valid.strategy, reason: { code: 'MADE_UP_REASON', params: {} } } }, false), false, 'unknown reason code');
+  });
   // Находка 6: значение проверяется по виду — сумма строкой, валюта не кодом ISO, значение вне перечисления, чужой формат, имя в withheld
-  assert.equal(await check({ ...valid, strategy: { ...valid.strategy, reason: { code: 'FIXED_PRICE', params: { targetMinor: '1900', currency: 'EUR' } } } }, false), false, 'an amount as a string');
-  assert.equal(await check({ ...valid, strategy: { ...valid.strategy, reason: { code: 'FIXED_PRICE', params: { targetMinor: 1900.5, currency: 'EUR' } } } }, false), false, 'an amount that is not minor units');
-  assert.equal(await check({ ...valid, strategy: { ...valid.strategy, reason: { code: 'FIXED_PRICE', params: { targetMinor: 1900, currency: 'euro' } } } }, false), false, 'a currency that is not an ISO code');
-  assert.equal(await check({ ...valid, gate: { failed: { check: 'UPPER_BOUND', detail: { code: 'ABOVE_MAX_PRICE', params: { source: 'CONSOLE', currency: 'EUR' } } } } }, false), false,
-    'an enum value outside the registry');
-  assert.equal(await check({ ...valid, format: 'r74.1' }, false), false, 'another explanation format');
+  await t.test(`finding 15: check 7`, async () => {
+    assert.equal(await check({ ...valid, strategy: { ...valid.strategy, reason: { code: 'FIXED_PRICE', params: { targetMinor: '1900', currency: 'EUR' } } } }, false), false, 'an amount as a string');
+  });
+  await t.test(`finding 15: check 8`, async () => {
+    assert.equal(await check({ ...valid, strategy: { ...valid.strategy, reason: { code: 'FIXED_PRICE', params: { targetMinor: 1900.5, currency: 'EUR' } } } }, false), false, 'an amount that is not minor units');
+  });
+  await t.test(`finding 15: check 9`, async () => {
+    assert.equal(await check({ ...valid, strategy: { ...valid.strategy, reason: { code: 'FIXED_PRICE', params: { targetMinor: 1900, currency: 'euro' } } } }, false), false, 'a currency that is not an ISO code');
+  });
+  await t.test(`finding 15: check 10`, async () => {
+    assert.equal(await check({ ...valid, gate: { failed: { check: 'UPPER_BOUND', detail: { code: 'ABOVE_MAX_PRICE', params: { source: 'CONSOLE', currency: 'EUR' } } } } }, false), false,
+      'an enum value outside the registry');
+  });
+  await t.test(`finding 15: check 11`, async () => {
+    assert.equal(await check({ ...valid, format: 'r74.1' }, false), false, 'another explanation format');
+  });
   // Находка 8: поля слепка и значения видов — не произвольный текст и не произвольные числа
-  assert.equal(await check({ ...valid, strategy: { ...valid.strategy, currentMinor: 'Konkurent Mustermann GmbH 17,49 EUR' } }, false), false, 'a free text in strategy.currentMinor');
-  assert.equal(await check({ ...valid, strategy: { ...valid.strategy, currency: 'XYZ' } }, false), false, 'a currency outside EUR and USD');
-  assert.equal(await check({ ...valid, context: { priceStop: { stopId: '00000000-0000-4000-8000-000000000001', scope: 'TENANT', channelAccountId: null, marketplace: null,
-    stoppedAt: '2026-99-99T99:99:99Z', stoppedByMembershipId: '00000000-0000-4000-8000-000000000002' } } }, false), false, 'an invalid moment in the price stop context');
-  assert.equal(await check({ ...valid, strategy: { ...valid.strategy, reason: { code: 'SMALL_MOVE', params: { minFactor: 1749 } } } }, false), false, 'a ratio outside its range');
-  assert.equal(await check({ ...valid, strategy: { ...valid.strategy, reason: { code: 'INTENT_EXPIRED', params: { waitedSeconds: -5 } } } }, false), false, 'a negative count');
-  assert.equal(await check({ ...valid, strategy: { ...valid.strategy, reason: { code: 'NO_SCOPE_FOR_PRODUCT', params: { writeScopeId: 'competitor buybox 1749 EUR seller X' } } } }, false), false,
-    'a free text as an id');
-  assert.equal(await check({ ...valid, context: { priceStop: { stopId: '00000000-0000-4000-8000-000000000001', scope: 'TENANT', channelAccountId: null, marketplace: null,
-    stoppedAt: '2026-09-14T10:00:00.000Z', stoppedByMembershipId: '00000000-0000-4000-8000-000000000002' } } }, false), true, 'a valid price stop context is accepted');
-  assert.equal(await check({ ...valid, strategy: { ...valid.strategy, reason: { code: 'FIXED_PRICE', params: { currency: 'EUR' }, withheld: ['buybox 1780'] } } }, false), false,
-    'a withheld name that is not an identifier');
-  assert.equal(await check({ ...valid, buybox: 1780 }, false), false, 'unknown field of the format');
-  assert.equal(await check({ ...valid, strategy: { ...valid.strategy, steps: [{ code: 'BUYBOX_UNDERCUT', params: { undercutMinor: 5, currency: 'EUR' } }] } }, false), false, 'Р-91: undercut');
+  await t.test(`finding 15: check 12`, async () => {
+    assert.equal(await check({ ...valid, strategy: { ...valid.strategy, currentMinor: 'Konkurent Mustermann GmbH 17,49 EUR' } }, false), false, 'a free text in strategy.currentMinor');
+  });
+  await t.test(`finding 15: check 13`, async () => {
+    assert.equal(await check({ ...valid, strategy: { ...valid.strategy, currency: 'XYZ' } }, false), false, 'a currency outside EUR and USD');
+  });
+  await t.test(`finding 15: check 14`, async () => {
+    assert.equal(await check({ ...valid, context: { priceStop: { stopId: '00000000-0000-4000-8000-000000000001', scope: 'TENANT', channelAccountId: null, marketplace: null,
+      stoppedAt: '2026-99-99T99:99:99Z', stoppedByMembershipId: '00000000-0000-4000-8000-000000000002' } } }, false), false, 'an invalid moment in the price stop context');
+  });
+  await t.test(`finding 15: check 15`, async () => {
+    assert.equal(await check({ ...valid, strategy: { ...valid.strategy, reason: { code: 'SMALL_MOVE', params: { minFactor: 1749 } } } }, false), false, 'a ratio outside its range');
+  });
+  await t.test(`finding 15: check 16`, async () => {
+    assert.equal(await check({ ...valid, strategy: { ...valid.strategy, reason: { code: 'INTENT_EXPIRED', params: { waitedSeconds: -5 } } } }, false), false, 'a negative count');
+  });
+  await t.test(`finding 15: check 17`, async () => {
+    assert.equal(await check({ ...valid, strategy: { ...valid.strategy, reason: { code: 'NO_SCOPE_FOR_PRODUCT', params: { writeScopeId: 'competitor buybox 1749 EUR seller X' } } } }, false), false,
+      'a free text as an id');
+  });
+  await t.test(`finding 15: check 18`, async () => {
+    assert.equal(await check({ ...valid, context: { priceStop: { stopId: '00000000-0000-4000-8000-000000000001', scope: 'TENANT', channelAccountId: null, marketplace: null,
+      stoppedAt: '2026-09-14T10:00:00.000Z', stoppedByMembershipId: '00000000-0000-4000-8000-000000000002' } } }, false), true, 'a valid price stop context is accepted');
+  });
+  await t.test(`finding 15: check 19`, async () => {
+    assert.equal(await check({ ...valid, strategy: { ...valid.strategy, reason: { code: 'FIXED_PRICE', params: { currency: 'EUR' }, withheld: ['buybox 1780'] } } }, false), false,
+      'a withheld name that is not an identifier');
+  });
+  await t.test(`finding 15: check 20`, async () => {
+    assert.equal(await check({ ...valid, buybox: 1780 }, false), false, 'unknown field of the format');
+  });
+  await t.test(`finding 15: check 21`, async () => {
+    assert.equal(await check({ ...valid, strategy: { ...valid.strategy, steps: [{ code: 'BUYBOX_UNDERCUT', params: { undercutMinor: 5, currency: 'EUR' } }] } }, false), false, 'Р-91: undercut');
+  });
   const gate = { failed: { check: 'LOWER_BOUND', detail: { code: 'BELOW_MIN_PRICE', params: { proposedMinor: 1400, minMinor: 1500, currency: 'EUR' } } } };
-  assert.equal(await check({ ...valid, gate }, true), false, 'a competitor-derived rejection keeps no proposed price');
-  assert.equal(await check({ ...valid, gate }, false), true, 'a fixed price keeps its proposed price');
+  await t.test(`finding 15: check 22`, async () => {
+    assert.equal(await check({ ...valid, gate }, true), false, 'a competitor-derived rejection keeps no proposed price');
+  });
+  await t.test(`finding 15: check 23`, async () => {
+    assert.equal(await check({ ...valid, gate }, false), true, 'a fixed price keeps its proposed price');
+  });
 
+  // Находка 6 ревью шага 16: формат — перечисление r80.1, а не любой код (реестр видов полей)
+  await t.test('finding 15: finding 6 — an explanation format shaped as a code', async () => {
+    assert.equal(await check({ ...valid, format: 'R74_1' }, false), false, 'finding 6: an explanation format shaped as a code other than r80.1 is refused');
+  });
+  // Находка 7 ревью шага 18 (0072): скаляр в массиве слепка и скалярный корень — не объявленный узел
+  await t.test('finding 15: step 18 finding 7 — a scalar among the strategy steps', async () => {
+    assert.equal(await check({ ...valid, strategy: { ...valid.strategy, steps: [1780] } }, false), false, 'step 18 finding 7: a scalar among the strategy steps is refused');
+  });
+  await t.test('finding 15: step 18 finding 7 — a scalar among the sanity checks', async () => {
+    // Отказ — значением false (нарушение ограничения ключей слепка), а не ошибкой разбора в середине проверки
+    const outcome = await check({ ...valid, sanity: { anchorsUsed: [], checks: ['Konkurent 17,49 EUR'] } }, false).catch((error: Error) => `error: ${error.message}`);
+    assert.equal(outcome, false, outcome === true ? 'step 18 finding 7: a scalar among the sanity checks is refused' : 'step 18 finding 7: a scalar among the sanity checks is refused as a declared-keys violation');
+  });
+  await t.test('finding 15: step 18 finding 7 — a scalar explanation', async () => {
+    assert.equal((await pool.query('SELECT security.explanation_keys_declared($1::jsonb, false) AS ok', ['1780'])).rows[0].ok, false, 'step 18 finding 7: a scalar explanation is refused');
+  });
   const store = new PgPricingStore(pool);
   const ctx = await contextOf(store, w.tenantId, w.ids.dbId('ws-1'));
   const d = explained(approved(ctx, 1900), { competitorSnapshotId: '00000000-0000-4000-8000-000000009102', source: 'KAUFLAND_BUYBOX', observedAt: now() });

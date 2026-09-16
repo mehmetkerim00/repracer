@@ -44,31 +44,30 @@ BEGIN;
 SELECT set_config('app.tenant_id', 'a0000000-0000-0000-0000-00000000000a', true), set_config('app.user_id', 'a1000000-0000-0000-0000-00000000000a', true) \gset
 
 -- ---------------------------------------------------------------- находка 12: ручное снятие системной остановки
-INSERT INTO channel_data.pricing_halt (tenant_id, pricing_halt_id, channel_account_id, channel, marketplace, reason_code, details)
-VALUES ('a0000000-0000-0000-0000-00000000000a', 'ab000000-0000-0000-0000-000000000090', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'CHANNEL_MASS_SHIFT', '{"sameDirection": 20}');
+-- Остановку ab..01 поставил путь решения (smoke_app.sql): человек системную остановку не создаёт (0072)
 DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM audit.audit_event WHERE entity_id = 'ab000000-0000-0000-0000-000000000090' AND action = 'pricing.halt_created' AND actor_type = 'SYSTEM') THEN
+  IF NOT EXISTS (SELECT 1 FROM audit.audit_event WHERE entity_id = 'ab000000-0000-0000-0000-000000000001' AND action = 'pricing.halt_created' AND actor_type = 'SYSTEM') THEN
     RAISE EXCEPTION 'the system halt is not in the audit log'; END IF;
   RAISE NOTICE 'PASS accept | the system halt is written to the audit log by the trigger (Р-76)';
 END $$;
 SELECT pg_temp.expect_fail('manual halt release without a second factor (finding 12, Р-88)', $q$
   DO $x$ BEGIN
     INSERT INTO channel_data.pricing_halt_review (tenant_id, pricing_halt_id, kind, outcome, sample_size, failed_count, membership_id, note)
-    VALUES ('a0000000-0000-0000-0000-00000000000a', 'ab000000-0000-0000-0000-000000000090', 'MANUAL_RELEASE', 'RELEASED', 0, 0, 'a2000000-0000-0000-0000-00000000000a', 'data verified with the channel');
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'ab000000-0000-0000-0000-000000000001', 'MANUAL_RELEASE', 'RELEASED', 0, 0, 'a2000000-0000-0000-0000-00000000000a', 'data verified with the channel');
     UPDATE channel_data.pricing_halt SET released_at = now(), released_kind = 'MANUAL', released_by_membership_id = 'a2000000-0000-0000-0000-00000000000a', release_note = 'data verified with the channel'
-     WHERE pricing_halt_id = 'ab000000-0000-0000-0000-000000000090';
+     WHERE pricing_halt_id = 'ab000000-0000-0000-0000-000000000001';
   END $x$ $q$, 'requires a second factor');
 SELECT set_config('app.auth_mfa', 'on', true) \gset
 SET CONSTRAINTS ALL DEFERRED;
 INSERT INTO channel_data.pricing_halt_review (tenant_id, pricing_halt_id, kind, outcome, sample_size, failed_count, membership_id, note)
-VALUES ('a0000000-0000-0000-0000-00000000000a', 'ab000000-0000-0000-0000-000000000090', 'MANUAL_RELEASE', 'RELEASED', 0, 0, 'a2000000-0000-0000-0000-00000000000a', 'data verified with the channel');
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'ab000000-0000-0000-0000-000000000001', 'MANUAL_RELEASE', 'RELEASED', 0, 0, 'a2000000-0000-0000-0000-00000000000a', 'data verified with the channel');
 SELECT pg_temp.ok('manual halt release by a member with a second factor, a note and a journal record (Р-52, Р-88)', $q$
   UPDATE channel_data.pricing_halt SET released_at = now(), released_kind = 'MANUAL', released_by_membership_id = 'a2000000-0000-0000-0000-00000000000a', release_note = 'data verified with the channel'
-   WHERE pricing_halt_id = 'ab000000-0000-0000-0000-000000000090' $q$);
+   WHERE pricing_halt_id = 'ab000000-0000-0000-0000-000000000001' $q$);
 SELECT pg_temp.expect_fail('release twice', $q$
-  UPDATE channel_data.pricing_halt SET release_note = 'released again later' WHERE pricing_halt_id = 'ab000000-0000-0000-0000-000000000090' $q$, 'is already released');
+  UPDATE channel_data.pricing_halt SET release_note = 'released again later' WHERE pricing_halt_id = 'ab000000-0000-0000-0000-000000000001' $q$, 'is already released');
 DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM audit.audit_event WHERE entity_id = 'ab000000-0000-0000-0000-000000000090' AND action = 'pricing.halt_released'
+  IF NOT EXISTS (SELECT 1 FROM audit.audit_event WHERE entity_id = 'ab000000-0000-0000-0000-000000000001' AND action = 'pricing.halt_released'
                   AND actor_type = 'USER' AND actor_user_id = 'a1000000-0000-0000-0000-00000000000a') THEN
     RAISE EXCEPTION 'the manual release is not in the audit log with its author'; END IF;
   RAISE NOTICE 'PASS accept | the audit event of the release is written by the trigger with the session user as author (Р-76)';
@@ -150,8 +149,7 @@ SELECT pg_temp.expect_fail('administrative change without a person (Р-97)', $q$
   'without a person');
 SELECT set_config('app.user_id', 'b1000000-0000-0000-0000-00000000000b', true) \gset
 SELECT pg_temp.expect_fail('administrative change by a user outside the tenant (Р-97)', $q$
-  INSERT INTO tenant_data.product (tenant_id, product_id, sku, kind) VALUES ('a0000000-0000-0000-0000-00000000000a', 'a3970000-0000-0000-0000-000000000001', 'R97-SKU', 'SIMPLE') $q$,
-  'not an active member of tenant');
+  INSERT INTO tenant_data.product (tenant_id, product_id, sku, kind) VALUES ('a0000000-0000-0000-0000-00000000000a', 'a3970000-0000-0000-0000-000000000001', 'R97-SKU', 'SIMPLE') $q$, 'audit_event_check1');
 SELECT set_config('app.user_id', 'a1000000-0000-0000-0000-00000000000a', true) \gset
 INSERT INTO tenant_data.product (tenant_id, product_id, sku, kind) VALUES ('a0000000-0000-0000-0000-00000000000a', 'a3970000-0000-0000-0000-000000000001', 'R97-SKU', 'SIMPLE');
 DO $$ BEGIN
@@ -166,17 +164,21 @@ ROLLBACK;
 -- ---------------------------------------------------------------- Шаг 18 (0068): Р-101, Р-100, находки 1, 5, 9 ревью шага 17
 BEGIN;
 -- Р-101: согласие на миграцию eBay — только владелец, от своего имени, со вторым фактором сессии
-SELECT set_config('app.tenant_id', 'a0000000-0000-0000-0000-00000000000a', true), set_config('app.user_id', 'a1000000-0000-0000-0000-0000000000a0', true),
+SELECT set_config('app.tenant_id', 'a0000000-0000-0000-0000-00000000000a', true), set_config('app.user_id', 'a1000000-0000-0000-0000-0000000000ad', true),
        set_config('app.auth_mfa', 'on', true) \gset
-SELECT pg_temp.expect_fail('eBay consent in the name of the owner by another member (Р-101)', $q$
-  INSERT INTO tenant_data.migration_consent (tenant_id, channel_account_id, membership_id, user_id, mfa_verified_at, disclosure_version, disclosure_text_sha256, other_tools_declaration, typed_confirmation, expires_at)
-  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000003', 'a2000000-0000-0000-0000-00000000000a', 'a1000000-0000-0000-0000-00000000000a', now(), 'd1', sha256('text'), 'NONE', 'I understand', now() + interval '3 days') $q$,
-  'only by the session user in their own name');
-SELECT set_config('app.user_id', 'a1000000-0000-0000-0000-0000000000ad', true) \gset
+-- Роль проверяет общий страж административной записи (действие GIVE_MIGRATION_CONSENT, 0068); отдельная проверка владельца удалена как дубль (0072)
 SELECT pg_temp.expect_fail('eBay consent by an admin in their own name (Р-101)', $q$
   INSERT INTO tenant_data.migration_consent (tenant_id, channel_account_id, membership_id, user_id, mfa_verified_at, disclosure_version, disclosure_text_sha256, other_tools_declaration, typed_confirmation, expires_at)
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000003', 'a2000000-0000-0000-0000-0000000000ad', 'a1000000-0000-0000-0000-0000000000ad', now(), 'd1', sha256('text'), 'NONE', 'I understand', now() + interval '3 days') $q$,
-  'requires an ACTIVE OWNER');
+  'role ADMIN may not GIVE_MIGRATION_CONSENT');
+-- Р-104 (шаг 19): имя проверяется у второго владельца — у не-владельца отказ дал бы проверка роли
+SELECT set_config('app.user_id', 'a1000000-0000-0000-0000-00000000000a', true) \gset
+UPDATE tenant_data.membership SET role = 'OWNER' WHERE membership_id = 'a2000000-0000-0000-0000-0000000000ad';
+SELECT set_config('app.user_id', 'a1000000-0000-0000-0000-0000000000ad', true) \gset
+SELECT pg_temp.expect_fail('eBay consent in the name of another owner (Р-101)', $q$
+  INSERT INTO tenant_data.migration_consent (tenant_id, channel_account_id, membership_id, user_id, mfa_verified_at, disclosure_version, disclosure_text_sha256, other_tools_declaration, typed_confirmation, expires_at)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000003', 'a2000000-0000-0000-0000-00000000000a', 'a1000000-0000-0000-0000-00000000000a', now(), 'd1', sha256('text'), 'NONE', 'I understand', now() + interval '3 days') $q$,
+  'only by the session user in their own name');
 SELECT set_config('app.user_id', 'a1000000-0000-0000-0000-00000000000a', true), set_config('app.auth_mfa', '', true) \gset
 SELECT pg_temp.expect_fail('eBay consent by the owner without a second factor (Р-101)', $q$
   INSERT INTO tenant_data.migration_consent (tenant_id, channel_account_id, membership_id, user_id, mfa_verified_at, disclosure_version, disclosure_text_sha256, other_tools_declaration, typed_confirmation, expires_at)
@@ -187,7 +189,7 @@ SELECT pg_temp.expect_fail('eBay consent by the owner without a second factor (�
 SELECT set_config('app.user_id', 'a1000000-0000-0000-0000-0000000000a0', true), set_config('app.auth_mfa', 'on', true) \gset
 SELECT pg_temp.expect_fail('an operator lowers min_price (Р-100)', $q$
   INSERT INTO tenant_data.min_price (tenant_id, scope_type, product_id, currency, price_basis, amount_minor, version, created_by_membership_id)
-  VALUES ('a0000000-0000-0000-0000-00000000000a', 'PRODUCT', 'a5000000-0000-0000-0000-000000000001', 'EUR', 'GROSS', 1, 99, 'a2000000-0000-0000-0000-0000000000a0') $q$,
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'PRODUCT', 'a5000000-0000-0000-0000-000000000001', 'EUR', 'GROSS', 1, 2, 'a2000000-0000-0000-0000-0000000000a0') $q$,
   'role OPERATOR may not MANAGE_PRICING');
 
 -- Находка 1: смена режима единицы записи административным сервисом — от человека и в аудите
@@ -198,12 +200,11 @@ SELECT pg_temp.expect_fail('pricing mode changed without a person (step 17 findi
 -- Находка 9: строки платформенного тенанта не пишутся административным сервисом
 SELECT set_config('app.user_id', 'a1000000-0000-0000-0000-00000000000a', true), set_config('app.tenant_id', '00000000-0000-0000-0000-000000000000', true) \gset
 SELECT pg_temp.expect_fail('administrative change in the platform tenant (step 17 finding 9)', $q$
-  INSERT INTO tenant_data.product (tenant_id, sku, kind) VALUES ('00000000-0000-0000-0000-000000000000', 'ghost', 'SIMPLE') $q$, 'in the platform tenant');
+  INSERT INTO tenant_data.product (tenant_id, sku, kind) VALUES ('00000000-0000-0000-0000-000000000000', 'ghost', 'SIMPLE') $q$, 'audit_event_check1');
 
 -- Находка 5: перенос срока проверки остановки — со вторым фактором и в аудите
 SELECT set_config('app.tenant_id', 'a0000000-0000-0000-0000-00000000000a', true), set_config('app.auth_mfa', 'on', true) \gset
-INSERT INTO channel_data.pricing_halt (tenant_id, pricing_halt_id, channel_account_id, channel, marketplace, reason_code, halted_at)
-VALUES ('a0000000-0000-0000-0000-00000000000a', 'ab180000-0000-4000-8000-000000000001', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'at', 'CHANNEL_MASS_SHIFT', now());
+-- Остановку ab18 витрины at поставил путь решения (smoke_app.sql)
 SELECT set_config('app.auth_mfa', '', true) \gset
 SELECT pg_temp.expect_fail('the review of a halt moved without a second factor (step 17 finding 5)', $q$
   UPDATE channel_data.pricing_halt SET next_review_at = now() + interval '10 years' WHERE pricing_halt_id = 'ab180000-0000-4000-8000-000000000001' $q$,
@@ -218,3 +219,83 @@ DO $$ BEGIN
 END $$;
 ROLLBACK;
 
+-- ---------------------------------------------------------------- Шаг 19 (0072): находки ревью шага 18, Р-101 [Р-104]
+BEGIN;
+SELECT set_config('app.tenant_id', 'a0000000-0000-0000-0000-00000000000a', true), set_config('app.user_id', '', true), set_config('app.auth_mfa', 'on', true) \gset
+-- Находка 1: статус единицы записи в сессии административного сервиса — под стражем и в аудите
+SELECT pg_temp.expect_fail('write scope status changed by the administrative service without a person (step 18 finding 1)', $q$
+  UPDATE tenant_data.write_scope SET status = 'HELD' WHERE write_scope_id = 'a6000000-0000-0000-0000-000000000001' $q$,
+  'administrative change of tenant_data.write_scope without a person');
+SELECT set_config('app.user_id', 'a1000000-0000-0000-0000-0000000000a9', true) \gset
+SELECT pg_temp.expect_fail('write scope status changed by a viewer (step 18 finding 1)', $q$
+  UPDATE tenant_data.write_scope SET status = 'HELD' WHERE write_scope_id = 'a6000000-0000-0000-0000-000000000001' $q$,
+  'role VIEWER may not');
+SELECT set_config('app.user_id', 'a1000000-0000-0000-0000-00000000000a', true) \gset
+UPDATE tenant_data.write_scope SET status = 'HELD' WHERE write_scope_id = 'a6000000-0000-0000-0000-000000000001';
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM audit.audit_event WHERE entity_type = 'tenant_data.write_scope' AND action = 'admin_change.update'
+                    AND entity_id = 'a6000000-0000-0000-0000-000000000001' AND changes -> 'columns' ? 'status') THEN
+    RAISE EXCEPTION 'a status change of a write scope by a person is not in the audit log (step 18 finding 1)'; END IF;
+  RAISE NOTICE 'PASS accept | a status change of a write scope by a person is written to the audit log (step 18 finding 1)';
+END $$;
+ROLLBACK;
+
+BEGIN;
+-- Р-101 для элементов согласия. Каждая проверка — на строке, где остальные ветки стража и ограничения проходят: второй владелец
+-- (у не-владельца отказ дала бы проверка роли), согласие этой транзакции, существующая предполётная проверка непривязанного листинга
+SELECT set_config('app.tenant_id', 'a0000000-0000-0000-0000-00000000000a', true), set_config('app.user_id', 'a1000000-0000-0000-0000-00000000000a', true),
+       set_config('app.auth_mfa', 'on', true) \gset
+UPDATE tenant_data.membership SET role = 'OWNER' WHERE membership_id = 'a2000000-0000-0000-0000-0000000000ad';
+INSERT INTO channel_data.listing_migration_check (tenant_id, listing_migration_check_id, channel_account_id, listing_id, checked_at, listing_snapshot_sha256, verdict, ruleset_version)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'af190000-0000-4000-8000-000000000001', 'a4000000-0000-0000-0000-000000000003', 'L3', now(), sha256('snapshot-3'), 'READY', 'v1');
+INSERT INTO tenant_data.migration_consent (tenant_id, migration_consent_id, channel_account_id, membership_id, user_id, mfa_verified_at, disclosure_version, disclosure_text_sha256, other_tools_declaration, typed_confirmation, expires_at)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'ae190000-0000-4000-8000-000000000001', 'a4000000-0000-0000-0000-000000000003', 'a2000000-0000-0000-0000-00000000000a', 'a1000000-0000-0000-0000-00000000000a', now(), 'd1', sha256('text'), 'NONE', 'I understand', now() + interval '3 days');
+SELECT set_config('app.user_id', 'a1000000-0000-0000-0000-0000000000ad', true) \gset
+SELECT pg_temp.expect_fail('listing added to a consent by another owner (Р-101)', $q$
+  INSERT INTO tenant_data.migration_consent_item (tenant_id, migration_consent_id, listing_id, listing_migration_check_id, listing_snapshot_sha256, verdict_at_consent, acknowledged_losses)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'ae190000-0000-4000-8000-000000000001', 'L3', 'af190000-0000-4000-8000-000000000001', sha256('snapshot-3'), 'READY', '{}') $q$,
+  'only by the owner who gave it');
+SELECT set_config('app.user_id', 'a1000000-0000-0000-0000-00000000000a', true), set_config('app.auth_mfa', '', true) \gset
+SELECT pg_temp.expect_fail('listing added to a consent without a second factor (Р-101)', $q$
+  INSERT INTO tenant_data.migration_consent_item (tenant_id, migration_consent_id, listing_id, listing_migration_check_id, listing_snapshot_sha256, verdict_at_consent, acknowledged_losses)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'ae190000-0000-4000-8000-000000000001', 'L3', 'af190000-0000-4000-8000-000000000001', sha256('snapshot-3'), 'READY', '{}') $q$,
+  'adding a listing to a migration consent requires a second factor');
+SELECT set_config('app.auth_mfa', 'on', true) \gset
+-- Согласие ae..01 дал этот владелец в прошлой транзакции (smoke_app.sql); листинга L3 в нём нет
+SELECT pg_temp.expect_fail('listing added to a consent given in an earlier transaction (Р-101)', $q$
+  INSERT INTO tenant_data.migration_consent_item (tenant_id, migration_consent_id, listing_id, listing_migration_check_id, listing_snapshot_sha256, verdict_at_consent, acknowledged_losses)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'ae000000-0000-0000-0000-000000000001', 'L3', 'af190000-0000-4000-8000-000000000001', sha256('snapshot-3'), 'READY', '{}') $q$,
+  'only in the transaction that gives it');
+SELECT pg_temp.expect_fail('listing added to a consent without a preflight check (Р-101, Р-2)', $q$
+  INSERT INTO tenant_data.migration_consent_item (tenant_id, migration_consent_id, listing_id, listing_migration_check_id, listing_snapshot_sha256, verdict_at_consent, acknowledged_losses)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'ae190000-0000-4000-8000-000000000001', 'L3', gen_random_uuid(), sha256('snapshot-3'), 'READY', '{}') $q$,
+  'refers to no preflight check of this listing');
+
+-- Р-101 для отзыва согласия: от своего имени и со вторым фактором; роль (только владелец) проверяет общий страж — ветка удалена (0072)
+SELECT pg_temp.expect_fail('consent revoked in the name of another owner (Р-101)', $q$
+  INSERT INTO tenant_data.migration_consent_revocation (tenant_id, migration_consent_id, revoked_by_membership_id)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'ae000000-0000-0000-0000-000000000001', 'a2000000-0000-0000-0000-0000000000ad') $q$,
+  'revoked only in the name of the session user');
+SELECT set_config('app.auth_mfa', '', true) \gset
+SELECT pg_temp.expect_fail('consent revoked without a second factor (Р-101)', $q$
+  INSERT INTO tenant_data.migration_consent_revocation (tenant_id, migration_consent_id, revoked_by_membership_id)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'ae000000-0000-0000-0000-000000000001', 'a2000000-0000-0000-0000-00000000000a') $q$,
+  'revoking a migration consent requires a second factor');
+ROLLBACK;
+
+BEGIN;
+SELECT set_config('app.tenant_id', 'a0000000-0000-0000-0000-00000000000a', true), set_config('app.user_id', 'a1000000-0000-0000-0000-0000000000ad', true),
+       set_config('app.auth_mfa', 'on', true) \gset
+SELECT pg_temp.expect_fail('consent revoked by an admin (Р-101)', $q$
+  INSERT INTO tenant_data.migration_consent_revocation (tenant_id, migration_consent_id, revoked_by_membership_id)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'ae000000-0000-0000-0000-000000000001', 'a2000000-0000-0000-0000-0000000000ad') $q$,
+  'role ADMIN may not GIVE_MIGRATION_CONSENT');
+
+-- Находка 4 ревью шага 18: человек не ставит системную остановку. Остановка всего аккаунта (без витрины) — единственная ещё не
+-- действующая: остановки витрин de и at уже стоят, и без стража отказ дал бы индекс одной действующей остановки
+SELECT set_config('app.user_id', 'a1000000-0000-0000-0000-00000000000a', true) \gset
+SELECT pg_temp.expect_fail('system halt created by a person (step 18 finding 4)', $q$
+  INSERT INTO channel_data.pricing_halt (tenant_id, channel_account_id, channel, marketplace, reason_code, halted_at)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', NULL, 'CHANNEL_MASS_SHIFT', now()) $q$,
+  'a person does not create a system halt');
+ROLLBACK;

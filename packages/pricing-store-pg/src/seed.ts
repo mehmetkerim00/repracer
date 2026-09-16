@@ -168,7 +168,7 @@ async function insertCost(tx: Tx, tenantId: string, membershipId: string, s: Sco
 }
 
 /**
- * Синтетический мир стенда и тестов. pool — роль пути решения: посев его не использует (конфигурацию пишет административная роль,
+ * Синтетический мир стенда и тестов. pool — роль пути решения: посев использует его только для системных остановок (конфигурацию пишет административная роль,
  * Р-96) и оставлен в сигнатуре, чтобы вызывающий код явно держал оба пула.
  */
 export async function seedPricingWorld(_pool: PgPool, input: SeedWorldInput): Promise<SeededPricingWorld> {
@@ -454,14 +454,16 @@ export async function seedPricingWorld(_pool: PgPool, input: SeedWorldInput): Pr
         [tenantId, accountId, m.marketplace, m.productRef.slice(0, cut), m.productRef.slice(cut + 1).toUpperCase(), m.evaluatedAt, m.moveBp, m.sellerRef ?? null],
       );
     }
-    for (const h of seed.halts ?? []) {
-      await tx.query(
-        `INSERT INTO channel_data.pricing_halt (tenant_id, channel_account_id, channel, marketplace, reason_code, halted_at, review_window)
-         VALUES ($1, $2, 'KAUFLAND', $3, 'CHANNEL_MASS_SHIFT', $4, make_interval(secs => $5))`,
-        [tenantId, accountId, h.marketplace, h.haltedAt, h.reviewWindowSeconds ?? 1800],
-      );
-    }
   }, userId);
+
+  // Системные остановки сценария — ролью пути решения: человек в административном сервисе системную остановку не ставит (0072, Р-69)
+  for (const h of seed.halts ?? []) {
+    await inTenant(_pool, tenantId, (tx) => tx.query(
+      `INSERT INTO channel_data.pricing_halt (tenant_id, channel_account_id, channel, marketplace, reason_code, halted_at, review_window)
+       VALUES ($1, $2, 'KAUFLAND', $3, 'CHANNEL_MASS_SHIFT', $4, make_interval(secs => $5))`,
+      [tenantId, accountId, h.marketplace, h.haltedAt, h.reviewWindowSeconds ?? 1800],
+    ));
+  }
 
   // Остановки человеком сценария [Р-69, Р-70]: от сессии автора в административном сервисе — триггер прав сверяет пользователя (Р-90)
   for (const st of seed.stops ?? []) {

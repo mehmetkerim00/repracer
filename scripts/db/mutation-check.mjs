@@ -98,14 +98,38 @@ async function nodeTest(file, db, tpl) {
   const r = await run('node', ['--experimental-strip-types', '--disable-warning=ExperimentalWarning', '--test', '--test-reporter=tap', relative(cwd, resolve(root, file))],
     { cwd, env: { REPRACER_PG_URL: url.toString(), REPRACER_PG_ADMIN_URL: adminUrl, REPRACER_PG_TEMPLATE: tpl } });
   const failed = [...r.out.matchAll(/^\s*not ok \d+ - (.*)$/gm)].map((m) => {
-    // Причина провала — блок TAP YAML после «not ok» (error, expected, actual) до следующего теста
-    const after = r.out.slice((m.index ?? 0) + m[0].length, (m.index ?? 0) + 4000);
+    // Шаг 19 [Р-99]: причина провала — ФАКТИЧЕСКИЙ результат: поле error без текста ожидаемого шаблона и поле actual.
+    // Поле expected и шаблон в сообщении assert.match («did not match the regular expression /…/») не учитываются: они совпадают
+    // с причиной при любом отказе (ревью шага 18, находка 9)
+    const after = r.out.slice((m.index ?? 0) + m[0].length, (m.index ?? 0) + 6000);
     const end = after.search(/^\s*(?:not )?ok \d+ - /m);
-    const block = (end >= 0 ? after.slice(0, end) : after).replace(/\s+/g, ' ');
-    return { name: m[1], why: block.slice(0, 1500) };
+    const block = end >= 0 ? after.slice(0, end) : after;
+    return { name: m[1], why: tapFailure(block) };
   });
   const passed = [...r.out.matchAll(/^\s*ok \d+ - (.*)$/gm)].map((m) => m[1]);
   return { code: r.code, failed, passed, out: r.out };
+}
+
+/** Поле YAML блока TAP: однострочное значение или блок «|-» до следующего ключа того же отступа */
+function tapField(block, key) {
+  const lines = block.split('\n');
+  const i = lines.findIndex((l) => new RegExp(`^\\s*${key}:`).test(l));
+  if (i < 0) return '';
+  const indent = lines[i].match(/^\s*/)[0].length;
+  const first = lines[i].replace(new RegExp(`^\\s*${key}:\\s*`), '');
+  const rest = [];
+  for (let j = i + 1; j < lines.length; j++) {
+    const ind = lines[j].match(/^\s*/)[0].length;
+    if (lines[j].trim() !== '' && ind <= indent) break;
+    rest.push(lines[j]);
+  }
+  return [first.replace(/^\|-?$/, ''), ...rest].join(' ').replace(/\s+/g, ' ').trim();
+}
+function tapFailure(block) {
+  const error = tapField(block, 'error')
+    .replace(/The input did not match the regular expression \/.*?\/\. Input:/s, 'Input:')
+    .replace(/The input was expected to not match the regular expression \/.*?\/\. Input:/s, 'Input:');
+  return `${error} ${tapField(block, 'actual')}`.trim().slice(0, 1500);
 }
 
 /** Проверки одной конфигурации базы: что провалилось из ожидаемого */
@@ -123,11 +147,19 @@ async function evaluate(expect, id, mutation) {
     const smokeChecks = expect.filter((x) => x.smoke);
     if (smokeChecks.length > 0) {
       const s = await smoke(db);
+      // Шаг 19 [Р-99]: метка сверяется ЦЕЛИКОМ (до « | » или конца строки), а не подстрокой; своей поимкой считается только
+      // «отказа не было» и исключение DO-блока с текстом, равным метке. «Отказ по другой причине» — упала проверка, но мутацию
+      // поймала другая защита (ревью шага 18, находка 8)
+      const lines = s.out.split('\n');
       for (const e of smokeChecks) {
-        const label = e.smoke.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const hit = new RegExp(`CHECK FAILED: ${label}|FAILURE DID NOT HAPPEN: ${label}|HAD ANOTHER REASON[^\\n]*${label}|ERROR:[^\\n]*${label}`).exec(s.out);
-        const reached = s.out.includes(e.reached ?? e.smoke);
-        results.push({ e, failed: Boolean(hit), detail: hit ? hit[0].slice(0, 180) : reached ? '' : `not reached (${s.stopped ?? 'label absent'})` });
+        const didNot = lines.find((l) => l.includes(`CHECK FAILED: ${e.smoke} | EXPECTED FAILURE DID NOT HAPPEN`) || l.endsWith(`EXPECTED FAILURE DID NOT HAPPEN: ${e.smoke}`)
+          || /ERROR:\s+(.*)$/.exec(l)?.[1] === e.smoke);
+        const other = lines.find((l) => l.includes(`CHECK FAILED: ${e.smoke} | EXPECTED FAILURE HAD ANOTHER REASON`) || l.includes(`CHECK FAILED: ${e.smoke} | EXPECTED FAILURE HAS NO DECLARED REASON`)
+          || l.endsWith(`: ${e.smoke}`) && /EXPECTED FAILURE HAD ANOTHER REASON/.test(l));
+        const reachedBy = e.reached ?? e.smoke;
+        const reached = lines.some((l) => l.includes(`| ${reachedBy} |`) || l.endsWith(`| ${reachedBy}`) || l.includes(`CHECK FAILED: ${e.smoke} |`) || /ERROR:\s+(.*)$/.exec(l)?.[1] === e.smoke);
+        const hit = didNot ?? other;
+        results.push({ e, failed: Boolean(hit), ownReason: Boolean(didNot), detail: hit ? hit.slice(0, 300) : reached ? '' : `not reached (${s.stopped ?? 'label absent'})` });
       }
     }
     const files = [...new Set(expect.filter((x) => x.node).map((x) => x.node))];
@@ -151,8 +183,8 @@ const describeExpect = (e) => e.smoke !== undefined ? `smoke «${e.smoke}»` : e
 const describeMutation = (m) => typeof m === 'string' ? m.replace(/\s+/g, ' ').slice(0, 110) : `${m.fn}: «${m.from.slice(0, 50)}…» → «${m.to.slice(0, 30)}…»`;
 const sameCheck = (a, b) => describeExpect(a) === describeExpect(b);
 
-const { R93_ROWS, STEP17_ROWS = [], STEP18_ROWS = [], R93_NOT_MUTATED = [] } = await import(pathToFileURL(catalogPath).href);
-const rows = [...R93_ROWS, ...(process.argv.includes('--r93-only') ? [] : [...STEP17_ROWS, ...STEP18_ROWS])].filter((r) => !only || only.includes(r.row));
+const { R93_ROWS, STEP17_ROWS = [], STEP18_ROWS = [], STEP19_ROWS = [], R93_NOT_MUTATED = [] } = await import(pathToFileURL(catalogPath).href);
+const rows = [...R93_ROWS, ...(process.argv.includes('--r93-only') ? [] : [...STEP17_ROWS, ...STEP18_ROWS, ...STEP19_ROWS])].filter((r) => !only || only.includes(r.row));
 
 // Р-99: у каждой мутации — свои проверки; у проверки теста и проверки схемы — обязательная причина (тест и проверка схемы падают по многим причинам)
 for (const r of rows) {
@@ -167,7 +199,8 @@ for (const r of rows) {
   for (const m of r.mutations) for (const e of m.own) if (!r.expect.some((x) => sameCheck(x, e))) r.expect.push(e);
 }
 /** Своя проверка поймала мутацию: проверка упала и причина совпала (у смоук-проверки причину сверяет сам expect_fail) */
-const ownCatch = (result, own) => result.failed && own.some((e) => sameCheck(e, result.e)) && (!result.e.reason || new RegExp(result.e.reason).test(result.why ?? result.detail));
+const ownCatch = (result, own) => result.failed && own.some((e) => sameCheck(e, result.e))
+  && (result.e.smoke !== undefined ? result.ownReason : new RegExp(result.e.reason).test(result.why ?? result.detail));
 
 // 1. Контроль без мутации: каждая ожидаемая проверка зелёная
 const allExpect = [];

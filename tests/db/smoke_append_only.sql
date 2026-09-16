@@ -40,12 +40,11 @@ VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-0000000
 INSERT INTO channel_data.price_decision_snapshot_ref (tenant_id, price_decision_id, decided_at, write_scope_id, competitor_snapshot_id, source, observed_at)
 SELECT tenant_id, price_decision_id, decided_at, write_scope_id, 'a9103000-0000-4000-8000-000000000001', 'KAUFLAND_BUYBOX', decided_at
   FROM channel_data.price_decision WHERE price_decision_id = 'a8000000-0000-0000-0000-000000000001';
-INSERT INTO channel_data.pricing_halt (tenant_id, pricing_halt_id, channel_account_id, channel, marketplace, reason_code, halted_at)
-VALUES ('a0000000-0000-0000-0000-00000000000a', 'ab103000-0000-4000-8000-000000000001', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'at', 'CHANNEL_MASS_SHIFT', now() - interval '2 hours');
+-- Остановка витрины at — фикстура smoke_app.sql (одна действующая остановка на витрину)
 INSERT INTO channel_data.pricing_halt_sample (tenant_id, pricing_halt_id, channel_product_ref, observed_at, verdict, reason_code)
-VALUES ('a0000000-0000-0000-0000-00000000000a', 'ab103000-0000-4000-8000-000000000001', 'R103-1', now(), 'READ_FAILED', 'CHANNEL_TIMEOUT');
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'ab180000-0000-4000-8000-000000000001', 'R103-1', now(), 'READ_FAILED', 'CHANNEL_TIMEOUT');
 INSERT INTO channel_data.pricing_halt_review (tenant_id, pricing_halt_id, kind, outcome, sample_size, failed_count, reviewed_at)
-VALUES ('a0000000-0000-0000-0000-00000000000a', 'ab103000-0000-4000-8000-000000000001', 'AUTO_SAMPLE', 'SAMPLE_FAILED', 1, 1, now());
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'ab180000-0000-4000-8000-000000000001', 'AUTO_SAMPLE', 'SAMPLE_FAILED', 1, 1, now());
 INSERT INTO channel_data.rejected_competitor_snapshot (tenant_id, channel_account_id, channel, marketplace, channel_product_ref, condition, source, observed_at,
   received_at, verdict, reason_code, alarm_class, ruleset_version)
 VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R103-1', 'new', 'KAUFLAND_BUYBOX', now(), now(), 'REJECT', 'INVALID_AMOUNT', 'STRUCTURE', 'r49.1');

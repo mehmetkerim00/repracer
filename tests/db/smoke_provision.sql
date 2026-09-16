@@ -31,11 +31,12 @@ BEGIN
   END IF;
 END $$;
 
--- Тенант A: владелец, администратор и оператор (для проверок ролей в smoke_admin.sql); тенант B: владелец
+-- Тенант A: владелец, администратор, оператор и наблюдатель (для проверок ролей в smoke_admin.sql); тенант B: владелец
 SELECT security.provision_tenant('a0000000-0000-0000-0000-00000000000a', 'Tenant A', 'EU', '[
   {"membershipId": "a2000000-0000-0000-0000-00000000000a", "userId": "a1000000-0000-0000-0000-00000000000a", "email": "owner-a@example.test", "role": "OWNER", "mfaEnabled": true},
   {"membershipId": "a2000000-0000-0000-0000-0000000000ad", "userId": "a1000000-0000-0000-0000-0000000000ad", "email": "admin-a@example.test", "role": "ADMIN"},
-  {"membershipId": "a2000000-0000-0000-0000-0000000000a0", "userId": "a1000000-0000-0000-0000-0000000000a0", "email": "operator-a@example.test", "role": "OPERATOR"}
+  {"membershipId": "a2000000-0000-0000-0000-0000000000a0", "userId": "a1000000-0000-0000-0000-0000000000a0", "email": "operator-a@example.test", "role": "OPERATOR"},
+  {"membershipId": "a2000000-0000-0000-0000-0000000000a9", "userId": "a1000000-0000-0000-0000-0000000000a9", "email": "viewer-a@example.test", "role": "VIEWER"}
 ]'::jsonb);
 SELECT security.provision_tenant('b0000000-0000-0000-0000-00000000000b', 'Tenant B', 'EU', '[
   {"membershipId": "b2000000-0000-0000-0000-00000000000b", "userId": "b1000000-0000-0000-0000-00000000000b", "email": "owner-b@example.test", "role": "OWNER", "mfaEnabled": true}
@@ -46,15 +47,16 @@ DO $$ BEGIN RAISE NOTICE 'PASS accept | tenants A and B provisioned with their o
 SELECT pg_temp.expect_fail('tenant in wrong region DB (Р-60)', $q$
   SELECT security.provision_tenant('c0000000-0000-0000-0000-0000000000c2', 'US tenant', 'US', '[{"userId": "c1000000-0000-0000-0000-0000000000c2", "email": "us-owner@example.test", "role": "OWNER"}]') $q$,
   'does not match database region');
--- Находка 5 ревью шага 16 (0066): существующий пользователь не присоединяется к новому тенанту мимо приглашения
+-- Находка 5 ревью шага 16 (0066): существующий пользователь не присоединяется к новому тенанту мимо приглашения; роль и адрес проверяются
+-- у уже входившего пользователя (smoke_setup.sql), «никогда не входил» — у владельца тенанта A до его первого входа
 SELECT pg_temp.expect_fail('existing user attached as a member without an invitation (step 16 finding 5)', $q$
   SELECT security.provision_tenant('c0000000-0000-0000-0000-0000000000c3', 'Attach', 'EU', '[
     {"userId": "c1000000-0000-0000-0000-0000000000c3", "email": "attach-owner@example.test", "role": "OWNER"},
-    {"userId": "a1000000-0000-0000-0000-00000000000a", "email": "owner-a@example.test", "role": "ADMIN"}]') $q$,
+    {"userId": "c1000000-0000-0000-0000-0000000000cc", "email": "signed-in@example.test", "role": "ADMIN"}]') $q$,
   'only by an invitation of its owner');
 SELECT pg_temp.expect_fail('existing user provisioned as owner under another email (step 16 finding 5)', $q$
   SELECT security.provision_tenant('c0000000-0000-0000-0000-0000000000c4', 'Other email', 'EU', '[
-    {"userId": "a1000000-0000-0000-0000-00000000000a", "email": "someone-else@example.test", "role": "OWNER"}]') $q$,
+    {"userId": "c1000000-0000-0000-0000-0000000000cc", "email": "someone-else@example.test", "role": "OWNER"}]') $q$,
   'does not match the user');
 SELECT pg_temp.expect_fail('existing user who never signed in provisioned as owner (step 16 finding 5)', $q$
   SELECT security.provision_tenant('c0000000-0000-0000-0000-0000000000c5', 'Never signed in', 'EU', '[

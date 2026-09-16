@@ -157,6 +157,28 @@ SELECT pg_temp.expect_fail('CHANNEL_MIN_PRICE write in ENGINE mode (Р-12)', $q$
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', 'CHANNEL_MIN_PRICE', 1000, 'EUR', 'GROSS', 1, 'SMART_PRICING_FLOOR') $q$, 'CHANNEL_MIN_PRICE may be written only in KAUFLAND_SMART_PRICING mode');
 COMMIT;
 
+-- Р-104 (шаг 19): у каждой проверки решения свой ещё не решённый intent — иначе без проверяемой защиты отказ давала уникальность решения
+CREATE FUNCTION pg_temp.fresh_intent(p_id uuid, p_at timestamptz, p_proposed bigint, p_rule text DEFAULT 'MANUAL') RETURNS void LANGUAGE sql AS $f$
+  INSERT INTO channel_data.price_intent (tenant_id, price_intent_id, created_at, write_scope_id, created_by_membership_id, trigger_type, proposed_amount_minor, currency, price_basis, expires_at, rule_code)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', p_id, p_at, 'a6000000-0000-0000-0000-000000000001', 'a2000000-0000-0000-0000-00000000000a', 'MANUAL', p_proposed, 'EUR', 'GROSS', p_at + interval '50 minutes', p_rule)
+$f$;
+
+BEGIN;
+SELECT set_config('app.tenant_id', :tA, true), set_config('app.user_id', :uA, true) \gset
+-- Р-104: решение со столбцами intent, заданными клиентом иначе, чем в intent, хранит столбцы intent (a0_price_decision_intent_columns).
+-- Проверка стоит до первой вставки решения без этих столбцов: без триггера та падает на NOT NULL и прерывает файл раньше проверки
+SELECT pg_temp.ok('decision with client-supplied intent columns', $q$
+  SELECT pg_temp.fresh_intent('a7190000-0000-4000-8000-000000000006', '2026-09-14 10:45+00', 1200);
+  INSERT INTO channel_data.price_decision (tenant_id, price_decision_id, intent_created_at, price_intent_id, write_scope_id, outcome, final_amount_minor, currency, price_basis, effective_floor_minor, min_price_ids, effective_ceiling_minor, max_price_ids, explanation, sanity_ruleset, gate_profile, rule_code, trigger_type, proposed_amount_minor)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a8190000-0000-4000-8000-000000000006', '2026-09-14 10:45+00', 'a7190000-0000-4000-8000-000000000006', 'a6000000-0000-0000-0000-000000000001', 'APPROVED', 1200, 'EUR', 'GROSS', 1000, ARRAY[gen_random_uuid()], 5000, ARRAY[gen_random_uuid()], '{"format":"r80.1","strategy":{"reason":{"code":"FIXED_PRICE"}}}', NULL, 'g74.1', 'FIXED', 'COST_CHANGE', 1111) $q$);
+DO $$ BEGIN
+  IF (SELECT (rule_code, trigger_type, proposed_amount_minor) FROM channel_data.price_decision WHERE price_decision_id = 'a8190000-0000-4000-8000-000000000006')
+     IS DISTINCT FROM ('MANUAL'::text, 'MANUAL'::text, 1200::bigint) THEN
+    RAISE EXCEPTION 'decision intent columns are taken from the client, not from the intent (Р-80)'; END IF;
+  RAISE NOTICE 'PASS accept | decision intent columns come from the intent, not from the client (Р-80)';
+END $$;
+ROLLBACK;
+
 -- ---------------------------------------------------------------- Price Gate, versions, dispatch, history
 BEGIN;
 SELECT set_config('app.tenant_id', :tA, true), set_config('app.user_id', :uA, true) \gset
@@ -210,16 +232,18 @@ DO $$ BEGIN
 END $$;
 -- Р-94: проверки ниже ожидают конкретную причину отказа — удаление их защиты делает проверку красной (мутационная проверка, Р-95)
 SELECT pg_temp.expect_fail('NO_OP decision with an explanation (Р-74)', $q$
+  SELECT pg_temp.fresh_intent('a7190000-0000-4000-8000-000000000001', '2026-09-14 10:40+00', 1200);
   INSERT INTO channel_data.price_decision (tenant_id, intent_created_at, price_intent_id, write_scope_id, outcome, currency, price_basis, effective_floor_minor, min_price_ids, effective_ceiling_minor, max_price_ids, explanation, no_change_reason)
-  VALUES ('a0000000-0000-0000-0000-00000000000a', '2026-09-14 10:10+00', 'a7000000-0000-0000-0000-000000000003', 'a6000000-0000-0000-0000-000000000001', 'NO_CHANGE', 'EUR', 'GROSS', 1000, ARRAY[gen_random_uuid()], 5000, ARRAY[gen_random_uuid()], '{"format":"r80.1","snapshot":{"source":"KAUFLAND_BUYBOX"},"sanity":{"anchorsUsed":[],"checks":[]},"strategy":{"reason":{"code":"FIXED_PRICE"}}}', 'ALREADY_AT_TARGET') $q$,
+  VALUES ('a0000000-0000-0000-0000-00000000000a', '2026-09-14 10:40+00', 'a7190000-0000-4000-8000-000000000001', 'a6000000-0000-0000-0000-000000000001', 'NO_CHANGE', 'EUR', 'GROSS', 1000, ARRAY[gen_random_uuid()], 5000, ARRAY[gen_random_uuid()], '{"format":"r80.1","snapshot":{"source":"KAUFLAND_BUYBOX"},"sanity":{"anchorsUsed":[],"checks":[]},"strategy":{"reason":{"code":"FIXED_PRICE"}}}', 'ALREADY_AT_TARGET') $q$,
   'price_decision_explanation_by_class');
 SELECT pg_temp.expect_fail('NO_OP decision with an unknown no-change reason (Р-74)', $q$
+  SELECT pg_temp.fresh_intent('a7190000-0000-4000-8000-000000000002', '2026-09-14 10:41+00', 1200);
   INSERT INTO channel_data.price_decision (tenant_id, intent_created_at, price_intent_id, write_scope_id, outcome, currency, price_basis, effective_floor_minor, min_price_ids, effective_ceiling_minor, max_price_ids, explanation, no_change_reason)
-  VALUES ('a0000000-0000-0000-0000-00000000000a', '2026-09-14 10:10+00', 'a7000000-0000-0000-0000-000000000003', 'a6000000-0000-0000-0000-000000000001', 'NO_CHANGE', 'EUR', 'GROSS', 1000, ARRAY[gen_random_uuid()], 5000, ARRAY[gen_random_uuid()], NULL, 'NOT_A_REASON') $q$,
+  VALUES ('a0000000-0000-0000-0000-00000000000a', '2026-09-14 10:41+00', 'a7190000-0000-4000-8000-000000000002', 'a6000000-0000-0000-0000-000000000001', 'NO_CHANGE', 'EUR', 'GROSS', 1000, ARRAY[gen_random_uuid()], 5000, ARRAY[gen_random_uuid()], NULL, 'NOT_A_REASON') $q$,
   'price_decision_no_change_reason_code');
 SELECT pg_temp.expect_fail('write discarded without a reason (Р-64)', $q$
   UPDATE tenant_data.channel_write SET status = 'DISCARDED_STALE' WHERE channel_write_id = 'a9000000-0000-0000-0000-000000000002' $q$,
-  'channel_write_end_explained');
+  'channel_write_history_end_explained');
 SELECT pg_temp.expect_fail('write ended with an amount without its currency (Р-71)', $q$
   UPDATE tenant_data.channel_write SET status = 'DISCARDED_STALE', end_reason = 'WRITE_RETRIES_EXHAUSTED', end_params = '{"floorMinor": 1000}' WHERE channel_write_id = 'a9000000-0000-0000-0000-000000000002' $q$,
   'channel_write_end_params_currency');
@@ -252,22 +276,25 @@ DO $$ BEGIN
   RAISE NOTICE 'PASS accept | rejection by max_price kept in price_intent_core as REJECTED_BY_GATE (Р-44)';
 END $$;
 SELECT pg_temp.expect_fail('rejection without its reason parameters (OQ-98)', $q$
+  SELECT pg_temp.fresh_intent('a7190000-0000-4000-8000-000000000003', '2026-09-14 10:42+00', 6000);
   INSERT INTO channel_data.price_decision (tenant_id, intent_created_at, price_intent_id, write_scope_id, outcome, rejection_reason, currency, price_basis, effective_floor_minor, min_price_ids, effective_ceiling_minor, max_price_ids, reason_params, explanation, sanity_ruleset, gate_profile, bound_deviation_bp)
-  VALUES ('a0000000-0000-0000-0000-00000000000a', '2026-09-14 10:20+00', 'a7000000-0000-0000-0000-000000000010', 'a6000000-0000-0000-0000-000000000001', 'REJECTED', 'ABOVE_MAX_PRICE', 'EUR', 'GROSS', 1000, ARRAY[gen_random_uuid()], 5000, ARRAY[gen_random_uuid()], '{}', '{"format":"r80.1","snapshot":{"source":"KAUFLAND_BUYBOX"},"sanity":{"anchorsUsed":[],"checks":[]},"strategy":{"reason":{"code":"FIXED_PRICE"}}}', 'r49.1', 'g74.1', 2000) $q$,
+  VALUES ('a0000000-0000-0000-0000-00000000000a', '2026-09-14 10:42+00', 'a7190000-0000-4000-8000-000000000003', 'a6000000-0000-0000-0000-000000000001', 'REJECTED', 'ABOVE_MAX_PRICE', 'EUR', 'GROSS', 1000, ARRAY[gen_random_uuid()], 5000, ARRAY[gen_random_uuid()], '{}', '{"format":"r80.1","snapshot":{"source":"KAUFLAND_BUYBOX"},"sanity":{"anchorsUsed":[],"checks":[]},"strategy":{"reason":{"code":"FIXED_PRICE"}}}', 'r49.1', 'g74.1', 2000) $q$,
   'price_decision_rejection_explained');
 SELECT pg_temp.expect_fail('rejection parameters with an amount without its currency (Р-71)', $q$
+  SELECT pg_temp.fresh_intent('a7190000-0000-4000-8000-000000000004', '2026-09-14 10:43+00', 6000);
   INSERT INTO channel_data.price_decision (tenant_id, intent_created_at, price_intent_id, write_scope_id, outcome, rejection_reason, currency, price_basis, effective_floor_minor, min_price_ids, effective_ceiling_minor, max_price_ids, reason_params, explanation, sanity_ruleset, gate_profile, bound_deviation_bp)
-  VALUES ('a0000000-0000-0000-0000-00000000000a', '2026-09-14 10:20+00', 'a7000000-0000-0000-0000-000000000010', 'a6000000-0000-0000-0000-000000000001', 'REJECTED', 'ABOVE_MAX_PRICE', 'EUR', 'GROSS', 1000, ARRAY[gen_random_uuid()], 5000, ARRAY[gen_random_uuid()], '{"maxMinor": 5000}', '{"format":"r80.1","snapshot":{"source":"KAUFLAND_BUYBOX"},"sanity":{"anchorsUsed":[],"checks":[]},"strategy":{"reason":{"code":"FIXED_PRICE"}}}', 'r49.1', 'g74.1', 2000) $q$,
+  VALUES ('a0000000-0000-0000-0000-00000000000a', '2026-09-14 10:43+00', 'a7190000-0000-4000-8000-000000000004', 'a6000000-0000-0000-0000-000000000001', 'REJECTED', 'ABOVE_MAX_PRICE', 'EUR', 'GROSS', 1000, ARRAY[gen_random_uuid()], 5000, ARRAY[gen_random_uuid()], '{"maxMinor": 5000}', '{"format":"r80.1","snapshot":{"source":"KAUFLAND_BUYBOX"},"sanity":{"anchorsUsed":[],"checks":[]},"strategy":{"reason":{"code":"FIXED_PRICE"}}}', 'r49.1', 'g74.1', 2000) $q$,
   'price_decision_amounts_have_currency');
 SELECT pg_temp.expect_fail('decision exchange rate without its fields (Р-61)', $q$
   INSERT INTO channel_data.price_decision (tenant_id, intent_created_at, price_intent_id, write_scope_id, outcome, final_amount_minor, currency, price_basis, effective_floor_minor, min_price_ids, effective_ceiling_minor, max_price_ids, explanation, sanity_ruleset, gate_profile, fx)
   VALUES ('a0000000-0000-0000-0000-00000000000a', '2026-09-14 10:21+00', 'a7000000-0000-0000-0000-000000000011', 'a6000000-0000-0000-0000-000000000001', 'APPROVED', 4000, 'EUR', 'GROSS', 1000, ARRAY[gen_random_uuid()], 5000, ARRAY[gen_random_uuid()], '{"format":"r80.1","snapshot":{"source":"KAUFLAND_BUYBOX"},"sanity":{"anchorsUsed":[],"checks":[]},"strategy":{"reason":{"code":"FIXED_PRICE"}}}', 'r49.1', 'g74.1', '{"source": "ECB"}') $q$,
   'price_decision_fx_shape');
 SELECT pg_temp.expect_fail('decision explanation with an undeclared reason parameter (finding 15)', $q$
+  SELECT pg_temp.fresh_intent('a7190000-0000-4000-8000-000000000005', '2026-09-14 10:44+00', 4000);
   INSERT INTO channel_data.price_decision (tenant_id, intent_created_at, price_intent_id, write_scope_id, outcome, final_amount_minor, currency, price_basis, effective_floor_minor, min_price_ids, effective_ceiling_minor, max_price_ids, explanation, sanity_ruleset, gate_profile)
-  VALUES ('a0000000-0000-0000-0000-00000000000a', '2026-09-14 10:21+00', 'a7000000-0000-0000-0000-000000000011', 'a6000000-0000-0000-0000-000000000001', 'APPROVED', 4000, 'EUR', 'GROSS', 1000, ARRAY[gen_random_uuid()], 5000, ARRAY[gen_random_uuid()],
+  VALUES ('a0000000-0000-0000-0000-00000000000a', '2026-09-14 10:44+00', 'a7190000-0000-4000-8000-000000000005', 'a6000000-0000-0000-0000-000000000001', 'APPROVED', 4000, 'EUR', 'GROSS', 1000, ARRAY[gen_random_uuid()], 5000, ARRAY[gen_random_uuid()],
           '{"format":"r80.1","snapshot":{"source":"KAUFLAND_BUYBOX"},"sanity":{"anchorsUsed":[],"checks":[]},"strategy":{"reason":{"code":"FIXED_PRICE","params":{"target":1780}}}}', 'r49.1', 'g74.1') $q$,
-  'price_decision_explanation_keys_declared');
+  'price_intent_core_explanation_keys_declared');
 SELECT pg_temp.expect_fail('rejection reason ABOVE_MAX_PRICE for a price below the ceiling', $q$
   INSERT INTO channel_data.price_decision (tenant_id, intent_created_at, price_intent_id, write_scope_id, outcome, rejection_reason, currency, price_basis, effective_floor_minor, min_price_ids, effective_ceiling_minor, max_price_ids, reason_params, explanation, sanity_ruleset, gate_profile)
   VALUES ('a0000000-0000-0000-0000-00000000000a', '2026-09-14 10:21+00', 'a7000000-0000-0000-0000-000000000011', 'a6000000-0000-0000-0000-000000000001', 'REJECTED', 'ABOVE_MAX_PRICE', 'EUR', 'GROSS', 1000, ARRAY[gen_random_uuid()], 5000, ARRAY[gen_random_uuid()], '{"smoke": true}', '{"format":"r80.1","snapshot":{"source":"KAUFLAND_BUYBOX"},"sanity":{"anchorsUsed":[],"checks":[]},"strategy":{"reason":{"code":"FIXED_PRICE"}}}', 'r49.1', 'g74.1') $q$, 'rejection reason ABOVE_MAX_PRICE contradicts proposed price');
@@ -301,27 +328,29 @@ SELECT pg_temp.expect_fail('dispatch above lowered max_price (Р-44, check 3)', 
   'above effective max_price .*at dispatch');
 ROLLBACK;
 
-BEGIN;
-SELECT set_config('app.tenant_id', :tA, true), set_config('app.user_id', :uA, true) \gset
 -- ---------------------------------------------------------------- Р-51, Р-52 (0032)
-INSERT INTO channel_data.price_intent (tenant_id, price_intent_id, created_at, write_scope_id, created_by_membership_id, trigger_type, proposed_amount_minor, currency, price_basis, expires_at, rule_code)
-VALUES (:tA, 'a7000000-0000-0000-0000-000000000020', '2026-09-14 10:30+00', 'a6000000-0000-0000-0000-000000000001', :mA, 'MANUAL', 1300, 'EUR', 'GROSS', '2026-09-14 11:00+00', 'MATCH_BUYBOX'),
-       (:tA, 'a7000000-0000-0000-0000-000000000021', '2026-09-14 10:31+00', 'a6000000-0000-0000-0000-000000000001', :mA, 'MANUAL', 1300, 'EUR', 'GROSS', '2026-09-14 11:00+00', 'MANUAL'),
-       (:tA, 'a7000000-0000-0000-0000-000000000022', '2026-09-14 10:32+00', 'a6000000-0000-0000-0000-000000000001', :mA, 'MANUAL', 1310, 'EUR', 'GROSS', '2026-09-14 11:00+00', 'MATCH_BUYBOX');
+-- Р-69, находка 4 ревью шага 18 (0072): системную остановку ставит проверка входов пути решения, а не человек в административном
+-- сервисе. Цены из данных конкурентов при остановке проверяются от роли пути решения, ручная цена и снятие — от административного
+\c - svc_app
+\ir smoke_helpers.sql
+BEGIN;
+SELECT set_config('app.tenant_id', :tA, true) \gset
+INSERT INTO channel_data.price_intent (tenant_id, price_intent_id, created_at, write_scope_id, pricing_strategy_id, pricing_strategy_version, trigger_type, proposed_amount_minor, currency, price_basis, expires_at, rule_code)
+VALUES (:tA, 'a7000000-0000-0000-0000-000000000020', '2026-09-14 10:30+00', 'a6000000-0000-0000-0000-000000000001', 'a9000000-0000-0000-0000-000000000001', 1, 'COMPETITOR_CHANGE', 1300, 'EUR', 'GROSS', '2026-09-14 11:00+00', 'MATCH_BUYBOX'),
+       (:tA, 'a7000000-0000-0000-0000-000000000022', '2026-09-14 10:32+00', 'a6000000-0000-0000-0000-000000000001', 'a9000000-0000-0000-0000-000000000001', 1, 'COMPETITOR_CHANGE', 1310, 'EUR', 'GROSS', '2026-09-14 11:00+00', 'MATCH_BUYBOX');
 INSERT INTO channel_data.price_decision (tenant_id, price_decision_id, intent_created_at, price_intent_id, write_scope_id, outcome, final_amount_minor, rejection_reason, currency, price_basis, effective_floor_minor, min_price_ids, effective_ceiling_minor, max_price_ids, reason_params, explanation, sanity_ruleset, gate_profile)
 VALUES (:tA, 'a8000000-0000-0000-0000-000000000020', '2026-09-14 10:30+00', 'a7000000-0000-0000-0000-000000000020', 'a6000000-0000-0000-0000-000000000001', 'APPROVED', 1300, NULL, 'EUR', 'GROSS', 1000, ARRAY[gen_random_uuid()], 5000, ARRAY[gen_random_uuid()], '{"smoke": true}', '{"format":"r80.1","snapshot":{"source":"KAUFLAND_BUYBOX"},"sanity":{"anchorsUsed":[],"checks":[]},"strategy":{"reason":{"code":"FIXED_PRICE"}}}', 'r49.1', 'g74.1');
 DO $$ BEGIN
-  IF NOT (SELECT competitor_derived FROM channel_data.price_decision WHERE price_decision_id = 'a8000000-0000-0000-0000-000000000020')
-     OR (SELECT competitor_derived FROM channel_data.price_intent WHERE price_intent_id = 'a7000000-0000-0000-0000-000000000021') THEN
+  IF NOT (SELECT competitor_derived FROM channel_data.price_decision WHERE price_decision_id = 'a8000000-0000-0000-0000-000000000020') THEN
     RAISE EXCEPTION 'competitor_derived is not derived from rule_code'; END IF;
   RAISE NOTICE 'PASS accept | competitor_derived: from intent rule_code, copied into the decision (Р-51)';
 END $$;
 INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, amount_minor, currency, price_basis, version, origin, price_decision_id)
 VALUES (:tA, 'a9000000-0000-0000-0000-000000000003', 'a6000000-0000-0000-0000-000000000001', 'PRICE', 1300, 'EUR', 'GROSS', 3, 'PRICE_DECISION', 'a8000000-0000-0000-0000-000000000020');
-INSERT INTO channel_data.pricing_halt (tenant_id, pricing_halt_id, channel_account_id, channel, marketplace, reason_code, details)
-VALUES (:tA, 'ab000000-0000-0000-0000-000000000001', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'CHANNEL_MASS_SHIFT', '{"sameDirection": 20}');
+INSERT INTO channel_data.pricing_halt (tenant_id, channel_account_id, channel, marketplace, reason_code, details)
+VALUES (:tA, 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'CHANNEL_MASS_SHIFT', '{"sameDirection": 20}');
 DO $$ BEGIN
-  IF (SELECT next_review_at - halted_at FROM channel_data.pricing_halt WHERE pricing_halt_id = 'ab000000-0000-0000-0000-000000000001') <> interval '30 minutes' THEN
+  IF (SELECT next_review_at - halted_at FROM channel_data.pricing_halt WHERE marketplace = 'de' AND released_at IS NULL) <> interval '30 minutes' THEN
     RAISE EXCEPTION 'next_review_at is not halted_at + review_window'; END IF;
   RAISE NOTICE 'PASS accept | a halt schedules its review after the window (Р-52)';
 END $$;
@@ -333,20 +362,62 @@ SELECT pg_temp.ok('halted rejection of a competitor-derived price is stored', $q
   VALUES ('a0000000-0000-0000-0000-00000000000a', gen_random_uuid(), '2026-09-14 10:32+00', 'a7000000-0000-0000-0000-000000000022', 'a6000000-0000-0000-0000-000000000001', 'REJECTED', NULL, 'CHANNEL_HALTED', 'EUR', 'GROSS', 1000, ARRAY[gen_random_uuid()], 5000, ARRAY[gen_random_uuid()], '{"smoke": true}', '{"format":"r80.1","snapshot":{"source":"KAUFLAND_BUYBOX"},"sanity":{"anchorsUsed":[],"checks":[]},"strategy":{"reason":{"code":"FIXED_PRICE"}}}', 'r49.1', 'g74.1') $q$);
 SELECT pg_temp.expect_fail('dispatch of a competitor-derived write while halted (Р-51)', $q$
   UPDATE tenant_data.channel_write SET status = 'DISPATCHED', attempt_count = 1 WHERE channel_write_id = 'a9000000-0000-0000-0000-000000000003' $q$, 'competitor-derived pricing is halted by pricing_halt');
+SELECT pg_temp.expect_fail('second active halt for the same storefront', $q$
+  INSERT INTO channel_data.pricing_halt (tenant_id, channel_account_id, channel, marketplace, reason_code)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'CHANNEL_MASS_SHIFT') $q$, 'pricing_halt_active_uq');
+-- Р-107, находка 3 ревью шага 18: путь решения не создаёт «ручную цену владельца» — единица записи здесь в режиме ENGINE, и без стража
+-- intent был бы принят
+SELECT pg_temp.expect_fail('path creates a manual price intent of the owner (Р-107)', $q$
+  INSERT INTO channel_data.price_intent (tenant_id, created_at, write_scope_id, created_by_membership_id, trigger_type, proposed_amount_minor, currency, price_basis, expires_at, rule_code)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', '2026-09-14 10:33+00', 'a6000000-0000-0000-0000-000000000001', 'a2000000-0000-0000-0000-00000000000a', 'MANUAL', 1300, 'EUR', 'GROSS', '2026-09-14 11:00+00', 'MANUAL') $q$,
+  'a manual price intent is created only by a person in the administrative service in the name of the session user');
+ROLLBACK;
+
+-- Фикстура остановок витрин de (проверки ниже) и at (smoke_admin.sql) — от суперпользователя, как строки smoke_append_only.sql:
+-- у роли пути решения нет права задавать идентификатор остановки, а проверкам ниже нужны известные идентификаторы
+\c - postgres
+BEGIN;
+SELECT set_config('app.tenant_id', :tA, true) \gset
+INSERT INTO channel_data.pricing_halt (tenant_id, pricing_halt_id, channel_account_id, channel, marketplace, reason_code, details)
+VALUES (:tA, 'ab000000-0000-0000-0000-000000000001', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'CHANNEL_MASS_SHIFT', '{"sameDirection": 20}'),
+       (:tA, 'ab180000-0000-4000-8000-000000000001', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'at', 'CHANNEL_MASS_SHIFT', '{"sameDirection": 20}');
+COMMIT;
+\c - svc_admin
+\ir smoke_helpers.sql
+
+BEGIN;
+SELECT set_config('app.tenant_id', :tA, true), set_config('app.user_id', :uA, true) \gset
+INSERT INTO channel_data.price_intent (tenant_id, price_intent_id, created_at, write_scope_id, created_by_membership_id, trigger_type, proposed_amount_minor, currency, price_basis, expires_at, rule_code)
+VALUES (:tA, 'a7000000-0000-0000-0000-000000000021', '2026-09-14 10:31+00', 'a6000000-0000-0000-0000-000000000001', :mA, 'MANUAL', 1300, 'EUR', 'GROSS', '2026-09-14 11:00+00', 'MANUAL');
+DO $$ BEGIN
+  IF (SELECT competitor_derived FROM channel_data.price_intent WHERE price_intent_id = 'a7000000-0000-0000-0000-000000000021') THEN
+    RAISE EXCEPTION 'a manual intent is marked competitor-derived'; END IF;
+  RAISE NOTICE 'PASS accept | a manual intent is not competitor-derived (Р-51)';
+END $$;
+-- Р-107: ручной intent — от своего имени и с правом менять цену (единица записи в режиме ENGINE: без стража intent был бы принят)
+SELECT pg_temp.expect_fail('manual price intent in the name of another member (Р-107)', $q$
+  INSERT INTO channel_data.price_intent (tenant_id, created_at, write_scope_id, created_by_membership_id, trigger_type, proposed_amount_minor, currency, price_basis, expires_at, rule_code)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', '2026-09-14 10:34+00', 'a6000000-0000-0000-0000-000000000001', 'a2000000-0000-0000-0000-0000000000ad', 'MANUAL', 1300, 'EUR', 'GROSS', '2026-09-14 11:00+00', 'MANUAL') $q$,
+  'in the name of the session user, not by the decision path');
+SELECT set_config('app.user_id', 'a1000000-0000-0000-0000-0000000000a9', true) \gset
+SELECT pg_temp.expect_fail('manual price intent by a viewer (Р-107)', $q$
+  INSERT INTO channel_data.price_intent (tenant_id, created_at, write_scope_id, created_by_membership_id, trigger_type, proposed_amount_minor, currency, price_basis, expires_at, rule_code)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', '2026-09-14 10:35+00', 'a6000000-0000-0000-0000-000000000001', 'a2000000-0000-0000-0000-0000000000a9', 'MANUAL', 1300, 'EUR', 'GROSS', '2026-09-14 11:00+00', 'MANUAL') $q$,
+  'role VIEWER may not set a manual price');
+SELECT set_config('app.user_id', :uA, true) \gset
 SELECT pg_temp.ok('manual price approved while halted (Р-51)', $q$
   INSERT INTO channel_data.price_decision (tenant_id, price_decision_id, intent_created_at, price_intent_id, write_scope_id, outcome, final_amount_minor, rejection_reason, currency, price_basis, effective_floor_minor, min_price_ids, effective_ceiling_minor, max_price_ids, reason_params, explanation, sanity_ruleset, gate_profile)
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'a8000000-0000-0000-0000-000000000021', '2026-09-14 10:31+00', 'a7000000-0000-0000-0000-000000000021', 'a6000000-0000-0000-0000-000000000001', 'APPROVED', 1300, NULL, 'EUR', 'GROSS', 1000, ARRAY[gen_random_uuid()], 5000, ARRAY[gen_random_uuid()], '{"smoke": true}', '{"format":"r80.1","snapshot":{"source":"KAUFLAND_BUYBOX"},"sanity":{"anchorsUsed":[],"checks":[]},"strategy":{"reason":{"code":"FIXED_PRICE"}}}', 'r49.1', 'g74.1') $q$);
 SELECT pg_temp.ok('manual price write created while halted (Р-51)', $q$
   INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, amount_minor, currency, price_basis, version, origin, price_decision_id)
-  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a9000000-0000-0000-0000-000000000004', 'a6000000-0000-0000-0000-000000000001', 'PRICE', 1300, 'EUR', 'GROSS', 4, 'PRICE_DECISION', 'a8000000-0000-0000-0000-000000000021') $q$);
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a9000000-0000-0000-0000-000000000004', 'a6000000-0000-0000-0000-000000000001', 'PRICE', 1300, 'EUR', 'GROSS', 3, 'PRICE_DECISION', 'a8000000-0000-0000-0000-000000000021') $q$);
 SELECT pg_temp.ok('manual price write dispatched while halted (Р-51)', $q$
   UPDATE tenant_data.channel_write SET status = 'DISPATCHED', attempt_count = 1 WHERE channel_write_id = 'a9000000-0000-0000-0000-000000000004' $q$);
-SELECT pg_temp.expect_fail('second active halt for the same storefront', $q$
-  INSERT INTO channel_data.pricing_halt (tenant_id, channel_account_id, channel, marketplace, reason_code)
-  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'CHANNEL_MASS_SHIFT') $q$, 'pricing_halt_active_uq');
 -- «release without kind and person» удалена (Р-94): её отклоняла проверка журнала Р-52, это та же проверка, что ниже
 SELECT pg_temp.expect_fail('change halt reason', $q$
   UPDATE channel_data.pricing_halt SET reason_code = 'MANUAL' WHERE pricing_halt_id = 'ab000000-0000-0000-0000-000000000001' $q$, 'channel_data.pricing_halt: only columns');
+-- Р-104: со вторым фактором и автором-участником — единственная причина отказа остаётся журнал проверки
+SELECT set_config('app.auth_mfa', 'on', true) \gset
 SELECT pg_temp.expect_fail('manual release without a journal record (Р-52)', $q$
   UPDATE channel_data.pricing_halt SET released_at = now(), released_kind = 'MANUAL', released_by_membership_id = 'a2000000-0000-0000-0000-00000000000a', release_note = 'data verified with the channel' WHERE pricing_halt_id = 'ab000000-0000-0000-0000-000000000001' $q$,
   'released without a review record');
@@ -364,7 +435,7 @@ SELECT pg_temp.expect_fail('the administrative service moves the next review wit
   'without a person');
 SELECT set_config('app.user_id', :uA, true) \gset
 SELECT pg_temp.expect_fail('automatic review recorded in a user session (finding 3)', $q$
-  INSERT INTO channel_data.pricing_halt_review (tenant_id, pricing_halt_id, kind, outcome, sample_size, failed_count) VALUES ('a0000000-0000-0000-0000-00000000000a', 'ab000000-0000-0000-0000-000000000001', 'AUTO_SAMPLE', 'RELEASED', 5, 0) $q$,
+  INSERT INTO channel_data.pricing_halt_review (tenant_id, pricing_halt_id, kind, outcome, sample_size, failed_count) VALUES ('a0000000-0000-0000-0000-00000000000a', 'ab000000-0000-0000-0000-000000000001', 'AUTO_SAMPLE', 'SAMPLE_FAILED', 5, 1) $q$,
   'automatic halt review is a system action');
 -- Автоматическое снятие в сессии пользователя отдельной причиной не проверяется: без записи проверки его раньше отклоняет Р-52
 -- («released without a review record»), а запись автоматической проверки в сессии пользователя не создаётся (проверка выше)
@@ -557,8 +628,10 @@ VALUES (:tA, 'a4000000-0000-0000-0000-000000000003', 'L1', now() - interval '1 h
 SELECT set_config('app.auth_mfa', 'on', true) \gset
 INSERT INTO tenant_data.migration_consent (tenant_id, migration_consent_id, channel_account_id, membership_id, user_id, mfa_verified_at, disclosure_version, disclosure_text_sha256, other_tools_declaration, typed_confirmation, expires_at)
 VALUES (:tA, 'ae000000-0000-0000-0000-000000000001', 'a4000000-0000-0000-0000-000000000003', :mA, :uA, now(), 'd1', sha256('text'), 'NONE', 'I understand', now() + interval '3 days');
+-- Р-101 (шаг 19): элемент — в той же транзакции, что согласие, со вторым фактором, по существующей предполётной проверке листинга
 INSERT INTO tenant_data.migration_consent_item (tenant_id, migration_consent_id, listing_id, listing_migration_check_id, listing_snapshot_sha256, verdict_at_consent, acknowledged_losses)
-VALUES (:tA, 'ae000000-0000-0000-0000-000000000001', 'L1', gen_random_uuid(), sha256('snapshot-1'), 'READY_WITH_LOSSES', ARRAY['BEST_OFFER']);
+SELECT :tA, 'ae000000-0000-0000-0000-000000000001', 'L1', lc.listing_migration_check_id, sha256('snapshot-1'), 'READY_WITH_LOSSES', ARRAY['BEST_OFFER']
+  FROM channel_data.listing_migration_check lc WHERE lc.tenant_id = :tA AND lc.listing_id = 'L1' ORDER BY lc.checked_at DESC LIMIT 1;
 SELECT pg_temp.expect_fail('migration with consent but no fresh re-check', $q$
   UPDATE tenant_data.offer_mapping SET ebay_migration_status = 'MIGRATION_STARTED' WHERE offer_mapping_id = 'ad000000-0000-0000-0000-000000000001' $q$, 'has no valid migration consent matching a fresh preflight check');
 INSERT INTO channel_data.listing_migration_check (tenant_id, channel_account_id, listing_id, checked_at, listing_snapshot_sha256, verdict, ruleset_version)

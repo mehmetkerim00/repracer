@@ -33,3 +33,9 @@ RESET ROLE;
 SET ROLE repracer_owner;
 UPDATE platform.marketplace SET time_zone_status = 'CONFIRMED' WHERE channel = 'EBAY' AND marketplace = 'EBAY_DE';
 RESET ROLE;
+
+-- Р-104 (шаг 19): уже входивший пользователь без тенанта — проверки роли и адреса при создании тенанта (smoke_provision.sql, находка 5
+-- ревью шага 16) отказывают своей причиной, а не отказом «никогда не входил». Синтетические адрес и subject.
+INSERT INTO platform.app_user (user_id, email) VALUES ('c1000000-0000-0000-0000-0000000000cc', 'signed-in@example.test') ON CONFLICT DO NOTHING;
+INSERT INTO platform.external_identity (issuer, subject, user_id)
+VALUES ('https://idp.smoke.repracer.test', 'signed-in-without-tenant', 'c1000000-0000-0000-0000-0000000000cc') ON CONFLICT DO NOTHING;

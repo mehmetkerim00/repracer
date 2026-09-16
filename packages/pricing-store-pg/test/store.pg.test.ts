@@ -118,7 +118,8 @@ test('Р-54: a concurrent bound change serialises with the decision commit and f
     );
     // Отложенная проверка границ выполняется сейчас и держит FOR UPDATE на товаре до конца транзакции
     await other.query('SET CONSTRAINTS ALL IMMEDIATE');
-    const pending = commit(store, w.tenantId, drafts).finally(() => { settled = true; });
+    // Р-104: отказ фиксации без ожидания блокировки захватывается — иначе тест падает необработанным отказом, а не своим утверждением
+    const pending = commit(store, w.tenantId, drafts).then((r) => r, (e: unknown) => ({ status: `refused: ${String(e)}` })).finally(() => { settled = true; });
     await new Promise((resolve) => setTimeout(resolve, 300));
     assert.equal(settled, false, 'decision commit must wait for the bound change');
     await other.query('COMMIT');

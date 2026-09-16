@@ -30,6 +30,13 @@ BEGIN
 END $$;
 
 SELECT pg_temp.expect_fail('direct DELETE from append-only as scheduler', $q$ DELETE FROM tenant_data.min_price $q$, 'append-only table tenant_data.min_price: DELETE is forbidden');
+-- Находка 5 ревью шага 18 (0072): привязки входа и их отзывы удаляет только функция удаления пользователя (роль repracer_identity_purger)
+SELECT pg_temp.expect_fail('retention role deletes sign-in revocations directly (step 18 finding 5)', $q$
+  DO $x$ BEGIN SET LOCAL ROLE repracer_retention; DELETE FROM platform.external_identity_revocation; END $x$ $q$,
+  '^permission denied for (table external_identity_revocation|schema platform)$');
+SELECT pg_temp.expect_fail('retention role deletes sign-in links directly (step 18 finding 5)', $q$
+  DO $x$ BEGIN SET LOCAL ROLE repracer_retention; DELETE FROM platform.external_identity; END $x$ $q$,
+  '^permission denied for (table external_identity|schema platform)$');
 SELECT pg_temp.expect_fail('purge ACTIVE tenant', $q$ SELECT maintenance.purge_tenant_channel_data('b0000000-0000-0000-0000-00000000000b') $q$, 'must be a CUSTOMER in OFFBOARDING or CLOSED');
 
 SELECT count(*) AS ph_before FROM pg_inherits WHERE inhparent = 'tenant_data.price_history'::regclass \gset

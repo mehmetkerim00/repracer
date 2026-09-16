@@ -151,7 +151,7 @@ test('finding 10, Р-80: a NO_OP decision keeps no snapshot reference; a stored 
   const ref = (r: { price_decision_id: string; decided_at: Date; write_scope_id: string }) => inTenant(pool!, w.tenantId, (tx) => tx.query(
     `INSERT INTO channel_data.price_decision_snapshot_ref (tenant_id, price_decision_id, decided_at, write_scope_id, competitor_snapshot_id, source, observed_at)
      VALUES ($1, $2, $3, $4, gen_random_uuid(), 'KAUFLAND_BUYBOX', now())`, [w.tenantId, r.price_decision_id, r.decided_at, r.write_scope_id]));
-  assert.match(await outcomeOf(ref(rows[1])), /NO_OP decision .* keeps no snapshot reference/);
+  assert.match(await outcomeOf(ref(rows[1])), /NO_OP decision .* keeps no snapshot reference/, 'finding 10: a snapshot reference of a NO_OP decision is refused');
   assert.equal(await outcomeOf(ref(rows[0]).then(() => 'accepted')), '"accepted"', 'a CHANGED decision may have a snapshot reference');
 
   // Копия столбца в слепке — отказ БД, даже если приложение её положило
@@ -210,5 +210,6 @@ test('Р-79: the core archive exported by the exporter role explains every row w
   assert.deepEqual(recorded, { verified: true, explanation_dictionary_included: true });
   assert.match(await outcomeOf(exporter!.query(
     `INSERT INTO maintenance.partition_export (parent_table, partition_name, target, exported_rows, verified_at, explanation_dictionary_included)
-     VALUES ('tenant_data.price_intent_core', 'tenant_data.price_intent_core_y1999m01', 'ARCHIVE', 0, now(), false)`)), /partition_export_core_archive_self_contained/);
+     VALUES ('tenant_data.price_intent_core', 'tenant_data.price_intent_core_y1999m01', 'ARCHIVE', 0, now(), false)`)), /partition_export_core_archive_self_contained/,
+    'Р-79: a verified archive of the core without the explanation dictionary is refused');
 });
