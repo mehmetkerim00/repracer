@@ -622,8 +622,8 @@ SELECT pg_temp.expect_fail('auction marked migratable', $q$
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'a5000000-0000-0000-0000-000000000001', 'a4000000-0000-0000-0000-000000000003', 'EBAY', 'EBAY_DE', 'L2/A-1', 'A-1', 'L2', 'AUCTION', 'REQUIRED') $q$, 'offer_mapping_check6');
 SELECT pg_temp.expect_fail('migration without consent (INV-12)', $q$
   UPDATE tenant_data.offer_mapping SET ebay_migration_status = 'MIGRATION_STARTED' WHERE offer_mapping_id = 'ad000000-0000-0000-0000-000000000001' $q$, 'has no valid migration consent matching a fresh preflight check');
-INSERT INTO channel_data.listing_migration_check (tenant_id, channel_account_id, listing_id, checked_at, listing_snapshot_sha256, verdict, ruleset_version)
-VALUES (:tA, 'a4000000-0000-0000-0000-000000000003', 'L1', now() - interval '1 hour', sha256('snapshot-1'), 'READY_WITH_LOSSES', 'v1');
+INSERT INTO channel_data.listing_migration_check (tenant_id, channel_account_id, listing_id, checked_at, listing_snapshot_sha256, verdict, ruleset_version, findings)
+VALUES (:tA, 'a4000000-0000-0000-0000-000000000003', 'L1', now() - interval '1 hour', sha256('snapshot-1'), 'READY_WITH_LOSSES', 'v1', '[{"code": "C03", "severity": "LOSS", "loss": "BEST_OFFER"}]');
 -- Р-101: согласие даёт владелец от своего имени со вторым фактором сессии
 SELECT set_config('app.auth_mfa', 'on', true) \gset
 INSERT INTO tenant_data.migration_consent (tenant_id, migration_consent_id, channel_account_id, membership_id, user_id, mfa_verified_at, disclosure_version, disclosure_text_sha256, other_tools_declaration, typed_confirmation, expires_at)
@@ -634,8 +634,8 @@ SELECT :tA, 'ae000000-0000-0000-0000-000000000001', 'L1', lc.listing_migration_c
   FROM channel_data.listing_migration_check lc WHERE lc.tenant_id = :tA AND lc.listing_id = 'L1' ORDER BY lc.checked_at DESC LIMIT 1;
 SELECT pg_temp.expect_fail('migration with consent but no fresh re-check', $q$
   UPDATE tenant_data.offer_mapping SET ebay_migration_status = 'MIGRATION_STARTED' WHERE offer_mapping_id = 'ad000000-0000-0000-0000-000000000001' $q$, 'has no valid migration consent matching a fresh preflight check');
-INSERT INTO channel_data.listing_migration_check (tenant_id, channel_account_id, listing_id, checked_at, listing_snapshot_sha256, verdict, ruleset_version)
-VALUES (:tA, 'a4000000-0000-0000-0000-000000000003', 'L1', now() + interval '1 second', sha256('snapshot-1'), 'READY_WITH_LOSSES', 'v1');
+INSERT INTO channel_data.listing_migration_check (tenant_id, channel_account_id, listing_id, checked_at, listing_snapshot_sha256, verdict, ruleset_version, findings)
+VALUES (:tA, 'a4000000-0000-0000-0000-000000000003', 'L1', now() + interval '1 second', sha256('snapshot-1'), 'READY_WITH_LOSSES', 'v1', '[{"code": "C03", "severity": "LOSS", "loss": "BEST_OFFER"}]');
 SELECT pg_temp.ok('migration with consent and fresh identical check', $q$
   UPDATE tenant_data.offer_mapping SET ebay_migration_status = 'MIGRATION_STARTED' WHERE offer_mapping_id = 'ad000000-0000-0000-0000-000000000001' $q$);
 UPDATE tenant_data.offer_mapping SET ebay_migration_status = 'MIGRATED', status = 'ACTIVE' WHERE offer_mapping_id = 'ad000000-0000-0000-0000-000000000001';

@@ -107,6 +107,7 @@ interface ProofResult {
   scopesWithLostLatestPrice: number;
   strandedPending: number;
   outOfOrderRejections: number;
+  outOfOrderRejectionsNotRedelivered: number;
   workersThatConsumed: number;
   messagesPublished: number;
   snapshotsConsumed: number;
@@ -125,7 +126,7 @@ async function runProof(options: { keyed: boolean; killOne: boolean }): Promise<
   const stale = [TOPICS.rawCompetitorSnapshot, TOPICS.scopeWrite].filter((t) => existing.includes(t));
   if (stale.length) await kadmin.deleteTopics({ topics: stale, timeout: 30_000 });
   // Удаление топика в брокере асинхронно: создание до его окончания находит «существующий» топик, который затем исчезает
-  for (let i = 0; i < 60 && (await kadmin.listTopics()).some((t) => stale.includes(t)); i++) await sleep(500);
+  for (let i = 0; i < 60 && (await kadmin.listTopics()).some((t) => (stale as string[]).includes(t)); i++) await sleep(500);
   await kadmin.disconnect();
   await ensureTopics(kafka, [{ topic: TOPICS.rawCompetitorSnapshot, numPartitions: 12 }, { topic: TOPICS.scopeWrite, numPartitions: 12 }]);
   alertsByCode.clear();
@@ -208,12 +209,16 @@ async function runProof(options: { keyed: boolean; killOne: boolean }): Promise<
   let consumedFirstOutOfOrder = 0;
   let redeliveries = 0;
   const seen = new Map<string, Set<number>>();
+  const redelivered = new Set<string>();
   const maxSeen = new Map<string, number>();
   for (const r of byProduct) {
     const product = options.keyed ? r.message_key : productOf.get(r.message_key) ?? r.message_key;
     const set = seen.get(product) ?? new Set<number>();
     const seq = Number(r.product_seq);
-    if (set.has(seq)) redeliveries++;
+    if (set.has(seq)) {
+      redeliveries++;
+      redelivered.add(`${product}|${seq}`);
+    }
     else if (seq < (maxSeen.get(product) ?? 0)) consumedFirstOutOfOrder++;
     set.add(seq);
     seen.set(product, set);
@@ -236,9 +241,18 @@ async function runProof(options: { keyed: boolean; killOne: boolean }): Promise<
                        (SELECT h.amount_minor FROM tenant_data.channel_write_history h WHERE h.tenant_id = ss.tenant_id AND h.write_scope_id = ss.write_scope_id AND h.version = ss.latest_version_created)) AS amount
          FROM tenant_data.write_scope_sync_state ss WHERE ss.tenant_id = $1 AND ss.latest_version_created > 0`, [world.tenantId]);
     const { rows: [p] } = await tx.query(`SELECT count(*) AS n FROM tenant_data.channel_write WHERE tenant_id = $1 AND status = 'PENDING'`, [world.tenantId]);
-    const { rows: [ooo] } = await tx.query(`SELECT count(*) AS n FROM channel_data.rejected_competitor_snapshot WHERE tenant_id = $1 AND reason_code = 'OUT_OF_ORDER'`, [world.tenantId]);
+    const { rows: oooRows } = await tx.query(
+      `SELECT channel_product_ref, observed_at FROM channel_data.rejected_competitor_snapshot WHERE tenant_id = $1 AND reason_code = 'OUT_OF_ORDER'`, [world.tenantId]);
+    const ooo = { n: oooRows.length };
+    // Шаг 20: отклонение OUT_OF_ORDER допустимо только для повторной доставки уже обработанного снимка (at-least-once после
+    // перебалансировки); номер снимка восстанавливается из observed_at = начало прогона + номер секунд
+    const rejectedNotRedelivered = oooRows.filter((r) => {
+      const seq = Math.round((new Date(r.observed_at).getTime() - nowMs) / 1_000);
+      const product = `${world.channelAccountId}|de|${r.channel_product_ref}|new`;
+      return !redelivered.has(`${product}|${seq}`);
+    }).length;
     const { rows: [approved] } = await tx.query(`SELECT count(*) AS n FROM channel_data.price_decision WHERE tenant_id = $1 AND outcome = 'APPROVED'`, [world.tenantId]);
-    return { latest, pending: Number(p.n), outOfOrder: Number(ooo.n), approved: Number(approved.n) };
+    return { latest, pending: Number(p.n), outOfOrder: Number(ooo.n), rejectedNotRedelivered, approved: Number(approved.n) };
   });
   let lost = 0;
   for (const l of state.latest) if (lastCall.get(l.write_scope_id)?.amount !== Number(l.amount)) lost++;
@@ -246,7 +260,7 @@ async function runProof(options: { keyed: boolean; killOne: boolean }): Promise<
 
   return {
     consumedFirstOutOfOrder, redeliveries, adapterVersionViolations, scopesWithLostLatestPrice: lost, strandedPending: state.pending,
-    outOfOrderRejections: state.outOfOrder, workersThatConsumed: Number(w.n), adapterCalls: calls.length, decisionsApproved: state.approved,
+    outOfOrderRejections: state.outOfOrder, outOfOrderRejectionsNotRedelivered: state.rejectedNotRedelivered, workersThatConsumed: Number(w.n), adapterCalls: calls.length, decisionsApproved: state.approved,
     messagesPublished: messages.length, snapshotsConsumed: seen.size === 0 ? 0 : [...seen.values()].reduce((n, set) => n + set.size, 0), alerts: Object.fromEntries(alertsByCode),
   };
 }
@@ -264,7 +278,11 @@ test('Р-24, Р-64: three pricing path instances behind the broker, one killed m
   assert.equal(result.adapterVersionViolations, 0, 'the channel received an older version after a newer one');
   assert.equal(result.scopesWithLostLatestPrice, 0, 'the latest decided price did not reach the channel');
   assert.equal(result.strandedPending, 0);
-  assert.equal(result.outOfOrderRejections, 0);
+  // Шаг 20, первый настоящий прогон: 7 отклонений OUT_OF_ORDER при 8 повторных доставках после убийства экземпляра. Повторная
+  // доставка уже обработанного снимка отклоняется как устаревшая — это at-least-once, а не перестановка; перестановкой было бы
+  // отклонение снимка, который впервые пришёл после более нового
+  assert.equal(result.outOfOrderRejectionsNotRedelivered, 0, 'a snapshot rejected as out of order was not a redelivery');
+  assert.ok(result.outOfOrderRejections <= result.redeliveries, 'more out-of-order rejections than redeliveries');
 });
 
 test('control — publishing without the partition key, the same checker finds reordering', { skip, timeout: 400_000 }, async () => {

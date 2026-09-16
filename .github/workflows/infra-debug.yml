@@ -48,11 +48,27 @@ jobs:
           docker logs redpanda 2>&1 | tail -80
   clickhouse:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_HOST_AUTH_METHOD: trust }
+        ports: ['5432:5432']
+        options: --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
     env:
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: postgres
+      REPRACER_PG_URL: postgres://svc_app@127.0.0.1:5432/repracer_eu
+      REPRACER_PG_ADMIN_URL: postgres://postgres@127.0.0.1:5432/postgres
+      REPRACER_PG_TEMPLATE: repracer_template
       REPRACER_CH_URL: http://127.0.0.1:18123
       REPRACER_CH_USER: repracer_local_admin
       REPRACER_CH_PASSWORD: ci-synthetic-only
+      REPRACER_CH_INGEST_USER: repracer_ci_ingest
+      REPRACER_CH_INGEST_PASSWORD: ci-synthetic-ingest
+      REPRACER_CH_VERIFIER_USER: repracer_ci_verifier
+      REPRACER_CH_VERIFIER_PASSWORD: ci-synthetic-verifier
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -63,6 +79,45 @@ jobs:
             -e CLICKHOUSE_USER=repracer_local_admin -e CLICKHOUSE_PASSWORD=ci-synthetic-only -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 \
             clickhouse/clickhouse-server:26.8.4.11
           for i in $(seq 1 60); do curl -sf http://127.0.0.1:18123/ping && break; sleep 2; done
-          curl -s -H 'X-ClickHouse-User: repracer_local_admin' -H 'X-ClickHouse-Key: ci-synthetic-only' --data-binary 'SELECT version()' http://127.0.0.1:18123/
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
+      - run: npm ci
+      - run: scripts/db/prepare.sh repracer_eu
       - name: Apply DDL
         run: node infra/local/apply-clickhouse.mjs
+      - name: ClickHouse logins of the roles (ops, synthetic)
+        run: |
+          q() { curl -sS --fail-with-body -H "X-ClickHouse-User: $REPRACER_CH_USER" -H "X-ClickHouse-Key: $REPRACER_CH_PASSWORD" --data-binary "$1" "$REPRACER_CH_URL/"; }
+          q "CREATE USER IF NOT EXISTS $REPRACER_CH_INGEST_USER IDENTIFIED WITH sha256_password BY '$REPRACER_CH_INGEST_PASSWORD' DEFAULT ROLE repracer_ingest"
+          q "GRANT repracer_ingest TO $REPRACER_CH_INGEST_USER"
+          q "CREATE USER IF NOT EXISTS $REPRACER_CH_VERIFIER_USER IDENTIFIED WITH sha256_password BY '$REPRACER_CH_VERIFIER_PASSWORD' DEFAULT ROLE repracer_retention"
+          q "GRANT repracer_retention TO $REPRACER_CH_VERIFIER_USER"
+      - name: Export from PostgreSQL
+        working-directory: packages/pricing-store-pg
+        run: node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec test/clickhouse-export.pg.test.ts
+      - name: Compression measurement
+        env:
+          REPRACER_PG_ADMIN_URL: postgres://postgres@127.0.0.1:5432/repracer_eu
+        run: npm run bench -w @repracer/analytics-export -- --rows=1000000 --pg-rows=200000 --out=$GITHUB_WORKSPACE/compression.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: compression, path: compression.json, if-no-files-found: ignore }
+  ebay-spec:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Fetch eBay Sell Inventory API specification and documentation pages
+        run: |
+          mkdir -p ebay
+          UA='Mozilla/5.0 (X11; Linux x86_64) repracer-spec-snapshot'
+          f() { curl -sS -A "$UA" -D "ebay/$2.headers" -o "ebay/$2" -w "%{http_code} %{size_download} $1\n" --max-time 60 -L "$1" | tee -a ebay/FETCH.log; }
+          f https://developer.ebay.com/api-docs/master/sell/inventory/openapi/3/sell_inventory_v1_oas3.json sell_inventory_v1_oas3.json
+          f https://developer.ebay.com/api-docs/master/sell/account/openapi/3/sell_account_v1_oas3.json sell_account_v1_oas3.json
+          f https://developer.ebay.com/api-docs/master/sell/metadata/openapi/3/sell_metadata_v1_oas3.json sell_metadata_v1_oas3.json
+          f https://developer.ebay.com/api-docs/sell/inventory/overview.html inventory-overview.html
+          f https://developer.ebay.com/api-docs/sell/inventory/resources/listing/methods/bulkMigrateListing bulkMigrateListing.html
+          f https://developer.ebay.com/develop/get-started/api-call-limits api-call-limits.html
+          f https://developer.ebay.com/api-docs/static/rest-request-components.html rest-request-components.html
+          (cd ebay && sha256sum * > SHA256SUMS)
+          cat ebay/FETCH.log ebay/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with: { name: ebay-spec, path: ebay }

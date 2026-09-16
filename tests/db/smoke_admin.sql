@@ -305,3 +305,41 @@ SELECT pg_temp.expect_fail('halt sample observation recorded by a viewer in the 
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'ab000000-0000-0000-0000-000000000001', 'forged-ref', now(), 'ACCEPT') $q$,
   'a person does not record halt sample observations');
 ROLLBACK;
+
+-- ---------------------------------------------------------------- Шаг 20 (0074): Р-109 — элемент согласия eBay сверяется с проверкой
+BEGIN;
+-- Каждая проверка — на листинге, где остальные условия выполнены: без своей ветки стража элемент был бы принят [Р-104, Р-108]
+SELECT set_config('app.tenant_id', 'a0000000-0000-0000-0000-00000000000a', true), set_config('app.user_id', 'a1000000-0000-0000-0000-00000000000a', true),
+       set_config('app.auth_mfa', 'on', true) \gset
+INSERT INTO channel_data.listing_migration_check (tenant_id, listing_migration_check_id, channel_account_id, listing_id, checked_at, listing_snapshot_sha256, verdict, ruleset_version, findings)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'af200000-0000-4000-8000-000000000004', 'a4000000-0000-0000-0000-000000000003', 'L4', now(), sha256('snapshot-4'), 'INELIGIBLE', 'v1', '[{"code": "C01", "severity": "BLOCKER"}]'),
+       ('a0000000-0000-0000-0000-00000000000a', 'af200000-0000-4000-8000-000000000051', 'a4000000-0000-0000-0000-000000000003', 'L5', now() - interval '1 hour', sha256('snapshot-5'), 'READY', 'v1', '[]'),
+       ('a0000000-0000-0000-0000-00000000000a', 'af200000-0000-4000-8000-000000000052', 'a4000000-0000-0000-0000-000000000003', 'L5', now() - interval '10 minutes', sha256('snapshot-5'), 'READY', 'v1', '[]'),
+       ('a0000000-0000-0000-0000-00000000000a', 'af200000-0000-4000-8000-000000000006', 'a4000000-0000-0000-0000-000000000003', 'L6', now() - interval '25 hours', sha256('snapshot-6'), 'READY', 'v1', '[]'),
+       ('a0000000-0000-0000-0000-00000000000a', 'af200000-0000-4000-8000-000000000007', 'a4000000-0000-0000-0000-000000000003', 'L7', now(), sha256('snapshot-7'), 'READY_WITH_LOSSES', 'v1', '[{"code": "C03", "severity": "LOSS", "loss": "BEST_OFFER"}]');
+INSERT INTO tenant_data.migration_consent (tenant_id, migration_consent_id, channel_account_id, membership_id, user_id, mfa_verified_at, disclosure_version, disclosure_text_sha256, other_tools_declaration, typed_confirmation, expires_at)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'ae200000-0000-4000-8000-000000000001', 'a4000000-0000-0000-0000-000000000003', 'a2000000-0000-0000-0000-00000000000a', 'a1000000-0000-0000-0000-00000000000a', now(), 'd1', sha256('text'), 'NONE', 'I understand', now() + interval '3 days');
+SELECT pg_temp.expect_fail('consent to a listing whose preflight verdict is INELIGIBLE (Р-109)', $q$
+  INSERT INTO tenant_data.migration_consent_item (tenant_id, migration_consent_id, listing_id, listing_migration_check_id, listing_snapshot_sha256, verdict_at_consent, acknowledged_losses)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'ae200000-0000-4000-8000-000000000001', 'L4', 'af200000-0000-4000-8000-000000000004', sha256('snapshot-4'), 'READY', '{}') $q$,
+  'does not match the preflight verdict INELIGIBLE');
+SELECT pg_temp.expect_fail('consent to a superseded preflight check (Р-109)', $q$
+  INSERT INTO tenant_data.migration_consent_item (tenant_id, migration_consent_id, listing_id, listing_migration_check_id, listing_snapshot_sha256, verdict_at_consent, acknowledged_losses)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'ae200000-0000-4000-8000-000000000001', 'L5', 'af200000-0000-4000-8000-000000000051', sha256('snapshot-5'), 'READY', '{}') $q$,
+  'refers to a superseded preflight check');
+SELECT pg_temp.expect_fail('consent to a preflight check older than 24 hours (Р-109)', $q$
+  INSERT INTO tenant_data.migration_consent_item (tenant_id, migration_consent_id, listing_id, listing_migration_check_id, listing_snapshot_sha256, verdict_at_consent, acknowledged_losses)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'ae200000-0000-4000-8000-000000000001', 'L6', 'af200000-0000-4000-8000-000000000006', sha256('snapshot-6'), 'READY', '{}') $q$,
+  'is older than 24 hours at consent');
+SELECT pg_temp.expect_fail('consent acknowledging other losses than the preflight check found (Р-109)', $q$
+  INSERT INTO tenant_data.migration_consent_item (tenant_id, migration_consent_id, listing_id, listing_migration_check_id, listing_snapshot_sha256, verdict_at_consent, acknowledged_losses)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'ae200000-0000-4000-8000-000000000001', 'L7', 'af200000-0000-4000-8000-000000000007', sha256('snapshot-7'), 'READY_WITH_LOSSES', ARRAY['CHARITY']) $q$,
+  'do not match the losses');
+SELECT pg_temp.ok('consent to the latest fresh check with its verdict and all its losses (Р-109)', $q$
+  INSERT INTO tenant_data.migration_consent_item (tenant_id, migration_consent_id, listing_id, listing_migration_check_id, listing_snapshot_sha256, verdict_at_consent, acknowledged_losses)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'ae200000-0000-4000-8000-000000000001', 'L7', 'af200000-0000-4000-8000-000000000007', sha256('snapshot-7'), 'READY_WITH_LOSSES', ARRAY['BEST_OFFER']) $q$);
+SELECT pg_temp.expect_fail('preflight LOSS finding without the name of the loss (Р-109)', $q$
+  INSERT INTO channel_data.listing_migration_check (tenant_id, channel_account_id, listing_id, checked_at, listing_snapshot_sha256, verdict, ruleset_version, findings)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000003', 'L8', now(), sha256('snapshot-8'), 'READY_WITH_LOSSES', 'v1', '[{"code": "C03", "severity": "LOSS"}]') $q$,
+  'listing_migration_check_findings_shape');
+ROLLBACK;

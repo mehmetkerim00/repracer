@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0073_verify_schema_invariants_v16.sql';
+const VERIFY = 'migrations/0075_verify_schema_invariants_v17.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -537,6 +537,25 @@ export const STEP19_ROWS = [
       m('ALTER FUNCTION security.audit_admin_write() SECURITY INVOKER',
         smoke('an administrative change is not in the audit log (Р-97)', 'administrative change by a person is written to the audit log (Р-97)'),
         verify('security\\.audit_admin_write\\(\\): owned by repracer_audit_writer but not SECURITY DEFINER')),
+    ],
+  },
+];
+
+/** Защиты шага 20 — в каталоге при создании [Р-108] */
+export const STEP20_ROWS = [
+  {
+    row: 'Р-109', invariant: 'элемент согласия eBay — по вердикту, последней и свежей предполётной проверке, с поимённо принятыми потерями',
+    mutations: [
+      m(replaceInFunction('tenant_data.migration_consent_item_guard()', 'IF lc.verdict IS DISTINCT FROM NEW.verdict_at_consent THEN', 'IF false THEN'),
+        smoke('consent to a listing whose preflight verdict is INELIGIBLE (Р-109)')),
+      m(replaceInFunction('tenant_data.migration_consent_item_guard()', 'AND l.checked_at > lc.checked_at) THEN', 'AND false) THEN'),
+        smoke('consent to a superseded preflight check (Р-109)')),
+      m(replaceInFunction('tenant_data.migration_consent_item_guard()', "IF lc.checked_at < now() - interval '24 hours' THEN", 'IF false THEN'),
+        smoke('consent to a preflight check older than 24 hours (Р-109)')),
+      m(replaceInFunction('tenant_data.migration_consent_item_guard()', 'IF losses IS DISTINCT FROM (SELECT', 'IF false AND losses IS DISTINCT FROM (SELECT'),
+        smoke('consent acknowledging other losses than the preflight check found (Р-109)')),
+      m(dropConstraint('listing_migration_check_findings_shape', 'channel_data.listing_migration_check'),
+        smoke('preflight LOSS finding without the name of the loss (Р-109)')),
     ],
   },
 ];
