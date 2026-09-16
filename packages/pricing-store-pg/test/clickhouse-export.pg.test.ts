@@ -3,6 +3,7 @@ import { after, test } from 'node:test';
 import { ClickHouseHttp, exportDecisionDay } from '@repracer/analytics-export';
 import type { MemorySeedScope } from '@repracer/pricing-pipeline';
 import { createPool, PgPricingStore, seedPricingWorld } from '../src/index.ts';
+import type { PriceDecisionDraft, PriceIntentDraft } from '@repracer/pricing-model';
 import { approved, contextOf, explained } from './drafts.ts';
 
 /**
@@ -54,6 +55,18 @@ test('Р-20: a day of intents and decisions is exported to ClickHouse, verified 
     });
     assert.equal(r.status, 'COMMITTED', JSON.stringify(r));
   }
+  // Шаг 20: решение NO_OP — его выгрузка идёт через материализованное представление почасового агрегата (060, 070)
+  {
+    const ctx = await contextOf(store, w.tenantId, w.ids.dbId('ws-3'));
+    const base = approved(ctx, 1850);
+    const intent: PriceIntentDraft = { ...base.intent, intentClass: 'NO_OP', reason: { code: 'ALREADY_AT_TARGET', params: {} } };
+    const decision: PriceDecisionDraft = { ...base.decision, outcome: 'NO_CHANGE', decisionClass: 'NO_OP', finalMinor: null, reason: { code: 'NO_CHANGE', params: {} } };
+    const r = await store.commitEvaluation(w.tenantId, {
+      key: { channelAccountId: ctx.scope.channelAccountId, marketplace: ctx.scope.marketplace, channelProductRef: ctx.scope.channelProductRef, condition: ctx.scope.condition },
+      now: new Date().toISOString(), decisions: [explained({ context: ctx, intent, decision })],
+    });
+    assert.equal(r.status, 'COMMITTED', JSON.stringify(r));
+  }
 
   const ingest = new ClickHouseHttp({ url: CH_URL, user: INGEST.user!, password: INGEST.password! });
   const verifier = new ClickHouseHttp({ url: CH_URL, user: VERIFIER.user!, password: VERIFIER.password! });
@@ -66,6 +79,10 @@ test('Р-20: a day of intents and decisions is exported to ClickHouse, verified 
   assert.ok(intents.byTable.price_intent! >= 3 && decisions.byTable.price_decision! >= 3, `the day carries the committed decisions: ${JSON.stringify(first)}`);
   assert.equal(intents.verified, true, `intents verified by count in ClickHouse: ${JSON.stringify(intents)}`);
   assert.equal(decisions.verified, true, `decisions verified by count in ClickHouse: ${JSON.stringify(decisions)}`);
+  assert.ok(intents.byTable.price_intent_noop! >= 1, `the day carries a NO_OP intent: ${JSON.stringify(intents)}`);
+  const [hourly] = await verifier.rows<{ n: number }>(
+    `SELECT sum(intents) AS n FROM repracer_analytics.price_intent_noop_hourly WHERE tenant_id = '${w.tenantId}'`);
+  assert.equal(Number(hourly!.n), 1, 'the NO_OP intent of the tenant reached the hourly aggregate through the materialized view (Р-81)');
 
   const { rows: marks } = await exporter.query(
     `SELECT partition_name, verified_at IS NOT NULL AS verified FROM maintenance.partition_export WHERE target = 'CLICKHOUSE' AND partition_name = ANY ($1)`,
@@ -83,5 +100,8 @@ test('Р-20: a day of intents and decisions is exported to ClickHouse, verified 
   const second = await exportDecisionDay(exporter, ingest, verifier, range);
   assert.ok(second.every((p) => p.verified), JSON.stringify(second));
   assert.equal(await countOf(true), 3, 'a repeated export leaves one row per decision');
+  const [hourlyAfter] = await verifier.rows<{ n: number }>(
+    `SELECT sum(intents) AS n FROM repracer_analytics.price_intent_noop_hourly WHERE tenant_id = '${w.tenantId}'`);
+  assert.equal(Number(hourlyAfter!.n), 1, 'a repeated export does not count the NO_OP intent twice in the hourly aggregate');
   console.log(`CH_EXPORT_REPEAT raw rows of the tenant after the repeat: ${await countOf(false)} (3 — the part token matched; more — chunks changed by parallel tests, merged by FINAL)`);
 });

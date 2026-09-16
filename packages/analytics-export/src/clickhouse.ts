@@ -51,7 +51,11 @@ export class ClickHouseHttp {
       async_insert: 0,
       wait_end_of_query: 1,
     };
-    if (deduplicationToken) settings.insert_deduplication_token = deduplicationToken;
+    if (deduplicationToken) {
+      settings.insert_deduplication_token = deduplicationToken;
+      // Шаг 20: повтор той же части не должен второй раз попасть в агрегат через материализованное представление (060, 070)
+      settings.deduplicate_blocks_in_dependent_materialized_views = 1;
+    }
     const response = await fetch(this.endpoint(settings), {
       method: 'POST',
       headers: { 'X-ClickHouse-User': this.config.user, 'X-ClickHouse-Key': this.config.password },

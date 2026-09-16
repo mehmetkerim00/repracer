@@ -32,3 +32,13 @@ WHERE role_name = 'repracer_ingest' AND access_type NOT IN ('INSERT');
 SELECT name AS noop_hourly_without_reason, sorting_key
 FROM system.tables
 WHERE database = 'repracer_analytics' AND name = 'price_intent_noop_hourly' AND position(sorting_key, 'no_change_reason') = 0;
+
+-- 7. Шаг 20: материализованное представление выполняется правами вставляющего — роль записи без чтения не сможет вставить
+SELECT name AS mv_without_definer_security
+FROM system.tables
+WHERE database = 'repracer_analytics' AND engine = 'MaterializedView' AND positionCaseInsensitive(create_table_query, 'SQL SECURITY DEFINER') = 0;
+
+-- 8. Шаг 20: пользователь-определитель представлений может войти
+SELECT name AS mv_definer_can_log_in
+FROM system.users
+WHERE name = 'repracer_mv_definer' AND (length(host_ip) > 0 OR length(host_names) > 0 OR length(host_names_regexp) > 0 OR length(host_names_like) > 0);
