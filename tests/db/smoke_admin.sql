@@ -338,8 +338,57 @@ SELECT pg_temp.expect_fail('consent acknowledging other losses than the prefligh
 SELECT pg_temp.ok('consent to the latest fresh check with its verdict and all its losses (Р-109)', $q$
   INSERT INTO tenant_data.migration_consent_item (tenant_id, migration_consent_id, listing_id, listing_migration_check_id, listing_snapshot_sha256, verdict_at_consent, acknowledged_losses)
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'ae200000-0000-4000-8000-000000000001', 'L7', 'af200000-0000-4000-8000-000000000007', sha256('snapshot-7'), 'READY_WITH_LOSSES', ARRAY['BEST_OFFER']) $q$);
+-- Ревью шага 20: проверка из будущего, вердикт против находок, равные моменты
+SELECT pg_temp.expect_fail('preflight check dated in the future (Р-109, step 20 review)', $q$
+  INSERT INTO channel_data.listing_migration_check (tenant_id, channel_account_id, listing_id, checked_at, listing_snapshot_sha256, verdict, ruleset_version, findings)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000003', 'L9', now() + interval '1 year', sha256('snapshot-9'), 'READY', 'v1', '[]') $q$,
+  'is dated in the future');
+SELECT pg_temp.expect_fail('preflight verdict READY with a blocking finding (Р-109, step 20 review)', $q$
+  INSERT INTO channel_data.listing_migration_check (tenant_id, channel_account_id, listing_id, checked_at, listing_snapshot_sha256, verdict, ruleset_version, findings)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000003', 'L9', now(), sha256('snapshot-9'), 'READY', 'v1', '[{"code": "C01", "severity": "BLOCKER"}]') $q$,
+  'listing_migration_check_verdict_matches_findings');
+INSERT INTO channel_data.listing_migration_check (tenant_id, listing_migration_check_id, channel_account_id, listing_id, checked_at, listing_snapshot_sha256, verdict, ruleset_version, findings)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'af200000-0000-4000-8000-000000000101', 'a4000000-0000-0000-0000-000000000003', 'L10', now() - interval '5 minutes', sha256('snapshot-10'), 'READY', 'v1', '[]'),
+       ('a0000000-0000-0000-0000-00000000000a', 'af200000-0000-4000-8000-000000000102', 'a4000000-0000-0000-0000-000000000003', 'L10', now() - interval '5 minutes', sha256('snapshot-10'), 'INELIGIBLE', 'v1', '[{"code": "C01", "severity": "BLOCKER"}]');
+SELECT pg_temp.expect_fail('consent to one of two preflight checks recorded at the same moment (Р-109, step 20 review)', $q$
+  INSERT INTO tenant_data.migration_consent_item (tenant_id, migration_consent_id, listing_id, listing_migration_check_id, listing_snapshot_sha256, verdict_at_consent, acknowledged_losses)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'ae200000-0000-4000-8000-000000000001', 'L10', 'af200000-0000-4000-8000-000000000101', sha256('snapshot-10'), 'READY', '{}') $q$,
+  'refers to a superseded preflight check');
 SELECT pg_temp.expect_fail('preflight LOSS finding without the name of the loss (Р-109)', $q$
   INSERT INTO channel_data.listing_migration_check (tenant_id, channel_account_id, listing_id, checked_at, listing_snapshot_sha256, verdict, ruleset_version, findings)
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000003', 'L8', now(), sha256('snapshot-8'), 'READY_WITH_LOSSES', 'v1', '[{"code": "C03", "severity": "LOSS"}]') $q$,
   'listing_migration_check_findings_shape');
+ROLLBACK;
+
+-- ---------------------------------------------------------------- Шаг 20, ревью (INV-12): старт миграции сверяет последнюю проверку с согласием
+BEGIN;
+SELECT set_config('app.tenant_id', 'a0000000-0000-0000-0000-00000000000a', true), set_config('app.user_id', 'a1000000-0000-0000-0000-00000000000a', true),
+       set_config('app.auth_mfa', 'on', true) \gset
+-- Три листинга, согласие дано в этой транзакции по проверкам час назад; перепроверки после согласия — с тем же снимком
+INSERT INTO tenant_data.offer_mapping (tenant_id, offer_mapping_id, product_id, channel_account_id, channel, marketplace, channel_offer_key, external_sku, external_listing_id, ebay_listing_format, ebay_migration_status, status)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'ad200000-0000-4000-8000-000000000011', 'a5000000-0000-0000-0000-000000000001', 'a4000000-0000-0000-0000-000000000003', 'EBAY', 'EBAY_DE', 'L11/A-1', 'A-1', 'L11', 'FIXED_PRICE', 'REQUIRED', 'MIGRATION_REQUIRED'),
+       ('a0000000-0000-0000-0000-00000000000a', 'ad200000-0000-4000-8000-000000000012', 'a5000000-0000-0000-0000-000000000001', 'a4000000-0000-0000-0000-000000000003', 'EBAY', 'EBAY_DE', 'L12/A-1', 'A-1', 'L12', 'FIXED_PRICE', 'REQUIRED', 'MIGRATION_REQUIRED'),
+       ('a0000000-0000-0000-0000-00000000000a', 'ad200000-0000-4000-8000-000000000013', 'a5000000-0000-0000-0000-000000000001', 'a4000000-0000-0000-0000-000000000003', 'EBAY', 'EBAY_DE', 'L13/A-1', 'A-1', 'L13', 'FIXED_PRICE', 'REQUIRED', 'MIGRATION_REQUIRED');
+INSERT INTO channel_data.listing_migration_check (tenant_id, listing_migration_check_id, channel_account_id, listing_id, checked_at, listing_snapshot_sha256, verdict, ruleset_version, findings)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'af200000-0000-4000-8000-000000000111', 'a4000000-0000-0000-0000-000000000003', 'L11', now() - interval '1 hour', sha256('snapshot-11'), 'READY', 'v1', '[]'),
+       ('a0000000-0000-0000-0000-00000000000a', 'af200000-0000-4000-8000-000000000121', 'a4000000-0000-0000-0000-000000000003', 'L12', now() - interval '1 hour', sha256('snapshot-12'), 'READY_WITH_LOSSES', 'v1', '[{"code": "C03", "severity": "LOSS", "loss": "BEST_OFFER"}]'),
+       ('a0000000-0000-0000-0000-00000000000a', 'af200000-0000-4000-8000-000000000131', 'a4000000-0000-0000-0000-000000000003', 'L13', now() - interval '1 hour', sha256('snapshot-13'), 'READY', 'v1', '[]');
+INSERT INTO tenant_data.migration_consent (tenant_id, migration_consent_id, channel_account_id, membership_id, user_id, mfa_verified_at, disclosure_version, disclosure_text_sha256, other_tools_declaration, typed_confirmation, expires_at)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'ae200000-0000-4000-8000-000000000002', 'a4000000-0000-0000-0000-000000000003', 'a2000000-0000-0000-0000-00000000000a', 'a1000000-0000-0000-0000-00000000000a', now(), 'd1', sha256('text'), 'NONE', 'I understand', now() + interval '3 days');
+INSERT INTO tenant_data.migration_consent_item (tenant_id, migration_consent_id, listing_id, listing_migration_check_id, listing_snapshot_sha256, verdict_at_consent, acknowledged_losses)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'ae200000-0000-4000-8000-000000000002', 'L11', 'af200000-0000-4000-8000-000000000111', sha256('snapshot-11'), 'READY', '{}'),
+       ('a0000000-0000-0000-0000-00000000000a', 'ae200000-0000-4000-8000-000000000002', 'L12', 'af200000-0000-4000-8000-000000000121', sha256('snapshot-12'), 'READY_WITH_LOSSES', ARRAY['BEST_OFFER']),
+       ('a0000000-0000-0000-0000-00000000000a', 'ae200000-0000-4000-8000-000000000002', 'L13', 'af200000-0000-4000-8000-000000000131', sha256('snapshot-13'), 'READY', '{}');
+INSERT INTO channel_data.listing_migration_check (tenant_id, channel_account_id, listing_id, checked_at, listing_snapshot_sha256, verdict, ruleset_version, findings)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000003', 'L11', now(), sha256('snapshot-11'), 'INELIGIBLE', 'v1', '[{"code": "C09", "severity": "BLOCKER"}]'),
+       ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000003', 'L12', now(), sha256('snapshot-12'), 'READY_WITH_LOSSES', 'v1', '[{"code": "C03", "severity": "LOSS", "loss": "BEST_OFFER"}, {"code": "C05", "severity": "LOSS", "loss": "CHARITY"}]'),
+       ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000003', 'L13', now(), sha256('snapshot-13'), 'READY', 'v1', '[]');
+SELECT pg_temp.expect_fail('migration started after the fresh check became INELIGIBLE (INV-12, step 20 review)', $q$
+  UPDATE tenant_data.offer_mapping SET ebay_migration_status = 'MIGRATION_STARTED' WHERE offer_mapping_id = 'ad200000-0000-4000-8000-000000000011' $q$,
+  'has no valid migration consent matching a fresh preflight check');
+SELECT pg_temp.expect_fail('migration started with a loss the owner did not acknowledge (INV-12, Р-109, step 20 review)', $q$
+  UPDATE tenant_data.offer_mapping SET ebay_migration_status = 'MIGRATION_STARTED' WHERE offer_mapping_id = 'ad200000-0000-4000-8000-000000000012' $q$,
+  'has no valid migration consent matching a fresh preflight check');
+SELECT pg_temp.ok('migration started after a fresh check identical to the consent (INV-12)', $q$
+  UPDATE tenant_data.offer_mapping SET ebay_migration_status = 'MIGRATION_STARTED' WHERE offer_mapping_id = 'ad200000-0000-4000-8000-000000000013' $q$);
 ROLLBACK;

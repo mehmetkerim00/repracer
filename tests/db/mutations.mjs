@@ -547,7 +547,7 @@ export const STEP20_ROWS = [
     mutations: [
       m(replaceInFunction('tenant_data.migration_consent_item_guard()', 'IF lc.verdict IS NULL OR lc.verdict IS DISTINCT FROM NEW.verdict_at_consent THEN', 'IF false THEN'),
         smoke('consent to a listing whose preflight verdict is INELIGIBLE (Р-109)'), smoke('listing added to a consent without a preflight check (Р-101, Р-2)')),
-      m(replaceInFunction('tenant_data.migration_consent_item_guard()', 'AND l.checked_at > lc.checked_at) THEN', 'AND false) THEN'),
+      m(replaceInFunction('tenant_data.migration_consent_item_guard()', 'AND l.listing_migration_check_id <> NEW.listing_migration_check_id AND l.checked_at >= lc.checked_at) THEN', 'AND false) THEN'),
         smoke('consent to a superseded preflight check (Р-109)')),
       m(replaceInFunction('tenant_data.migration_consent_item_guard()', "IF lc.checked_at < now() - interval '24 hours' THEN", 'IF false THEN'),
         smoke('consent to a preflight check older than 24 hours (Р-109)')),
@@ -555,6 +555,18 @@ export const STEP20_ROWS = [
         smoke('consent acknowledging other losses than the preflight check found (Р-109)')),
       m(dropConstraint('listing_migration_check_findings_shape', 'channel_data.listing_migration_check'),
         smoke('preflight LOSS finding without the name of the loss (Р-109)')),
+      // Ревью шага 20
+      m(dropTrigger('a00_listing_migration_check_not_future', 'channel_data.listing_migration_check'), smoke('preflight check dated in the future (Р-109, step 20 review)')),
+      m(dropConstraint('listing_migration_check_verdict_matches_findings', 'channel_data.listing_migration_check'),
+        smoke('preflight verdict READY with a blocking finding (Р-109, step 20 review)')),
+      m(replaceInFunction('tenant_data.migration_consent_item_guard()', 'AND l.listing_migration_check_id <> NEW.listing_migration_check_id AND l.checked_at >= lc.checked_at) THEN',
+        'AND l.checked_at > lc.checked_at) THEN'),
+        smoke('consent to one of two preflight checks recorded at the same moment (Р-109, step 20 review)')),
+      m(replaceInFunction('tenant_data.offer_mapping_migration_guard()', 'OR latest.verdict IS DISTINCT FROM i.verdict_at_consent', ''),
+        smoke('migration started after the fresh check became INELIGIBLE (INV-12, step 20 review)')),
+      m(replaceInFunction('tenant_data.offer_mapping_migration_guard()', `OR channel_data.migration_check_losses(latest.findings)
+                           IS DISTINCT FROM (SELECT coalesce(array_agg(DISTINCT x ORDER BY x), '{}') FROM unnest(i.acknowledged_losses) x)`, ''),
+        smoke('migration started with a loss the owner did not acknowledge (INV-12, Р-109, step 20 review)')),
     ],
   },
 ];

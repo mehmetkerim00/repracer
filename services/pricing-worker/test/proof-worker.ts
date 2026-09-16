@@ -32,8 +32,19 @@ const adapter = {
     }
     return { batchId: batch.batchId, outcomes: batch.items.map((w) => ({ channelWriteId: w.channelWriteId, status: 'ACCEPTED', appliedImmediately: true })), attemptsMade: 1 };
   },
-  async readBack() {
-    return { observations: [], failures: [] };
+  // Шаг 20: обратное чтение канала-заглушки — по журналу вызовов этого прогона. Раньше заглушка отвечала «нет данных»: запись,
+  // которую захватил убитый экземпляр, после тайм-аута сверялась как UNKNOWN и навсегда держала единицу — последняя цена не доходила
+  // до канала (CI шага 20, 2 единицы). У настоящего канала обратное чтение есть; без записи в журнале — цена мира стенда (2000)
+  async readBack(_ctx: unknown, requests: readonly { writeScope: { writeScopeId: string }; fields: readonly string[] }[]) {
+    const observations = [];
+    for (const r of requests) {
+      const { rows } = await journal.query(
+        `SELECT amount_minor FROM proof.adapter_call WHERE run_id = $1 AND write_scope_id = $2 AND amount_minor IS NOT NULL ORDER BY seq DESC LIMIT 1`,
+        [runId, r.writeScope.writeScopeId]);
+      const amountMinor = rows.length > 0 ? Number(rows[0].amount_minor) : 2000;
+      observations.push({ identity: r.writeScope, field: 'PRICE', value: { field: 'PRICE', price: { amountMinor, currency: 'EUR', basis: 'GROSS' } }, observedAt: new Date().toISOString(), source: 'READBACK' });
+    }
+    return { observations, failures: [] };
   },
 } as unknown as ChannelAdapter;
 

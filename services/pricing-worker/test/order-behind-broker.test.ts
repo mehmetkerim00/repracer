@@ -178,7 +178,8 @@ async function runProof(options: { keyed: boolean; killOne: boolean }): Promise<
   await producer.disconnect();
 
   // Ждём затихания: все снимки обработаны, ждущих записей нет, канал давно не получал записей
-  const deadline = Date.now() + 180_000;
+  // Запись убитого экземпляра освобождается тайм-аутом полёта (120 с, DEFAULT_RETRY_POLICY) и сверкой — окно ожидания больше него
+  const deadline = Date.now() + 330_000;
   let last = -1;
   let stableRounds = 0;
   while (Date.now() < deadline) {
@@ -265,7 +266,7 @@ async function runProof(options: { keyed: boolean; killOne: boolean }): Promise<
   };
 }
 
-test('Р-24, Р-64: three pricing path instances behind the broker, one killed mid-run — order within every write scope holds', { skip, timeout: 400_000 }, async () => {
+test('Р-24, Р-64: three pricing path instances behind the broker, one killed mid-run — order within every write scope holds', { skip, timeout: 600_000 }, async () => {
   await prepareJournal();
   const result = await runProof({ keyed: true, killOne: true });
   console.log(`BROKER_ORDER_RESULT ${JSON.stringify(result)}`);
@@ -285,7 +286,7 @@ test('Р-24, Р-64: three pricing path instances behind the broker, one killed m
   assert.ok(result.outOfOrderRejections <= result.redeliveries, 'more out-of-order rejections than redeliveries');
 });
 
-test('control — publishing without the partition key, the same checker finds reordering', { skip, timeout: 400_000 }, async () => {
+test('control — publishing without the partition key, the same checker finds reordering', { skip, timeout: 600_000 }, async () => {
   await prepareJournal();
   const result = await runProof({ keyed: false, killOne: false });
   console.log(`BROKER_ORDER_CONTROL ${JSON.stringify(result)}`);

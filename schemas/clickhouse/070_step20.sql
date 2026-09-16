@@ -11,3 +11,7 @@ GRANT INSERT ON repracer_analytics.price_intent_noop_hourly TO repracer_mv_defin
 -- 020: у каждого, кто читает таблицу с политиками, политика задана явно
 CREATE ROW POLICY IF NOT EXISTS mv_definer_all ON repracer_analytics.price_intent_noop AS PERMISSIVE FOR SELECT USING 1 TO repracer_mv_definer;
 ALTER TABLE repracer_analytics.price_intent_noop_hourly_mv MODIFY SQL SECURITY DEFINER DEFINER = repracer_mv_definer;
+
+-- Шаг 20, CI: повтор выгрузки неизменного дня удваивал счётчики почасового агрегата — дедупликация части доходила до сырья NO_OP
+-- (окно 050), но не до таблицы агрегата: у нереплицируемой таблицы без окна дедупликации нет, и зависимая вставка шла второй раз
+ALTER TABLE repracer_analytics.price_intent_noop_hourly MODIFY SETTING non_replicated_deduplication_window = 10000;
