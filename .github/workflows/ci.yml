@@ -18,7 +18,7 @@ jobs:
           POSTGRES_HOST_AUTH_METHOD: trust
         ports: ['5432:5432']
         options: >-
-          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+          --shm-size=1g --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
     env:
       PGHOST: 127.0.0.1
       PGPORT: '5432'
@@ -27,6 +27,14 @@ jobs:
       REPRACER_PG_ADMIN_URL: postgres://postgres@127.0.0.1:5432/postgres
       REPRACER_PG_TEMPLATE: repracer_template
       REPRACER_KAFKA_BROKERS: 127.0.0.1:19092
+      # Шаг 20: ClickHouse — только синтетика CI; логины ролей создаёт шаг ниже (в работе — ops)
+      REPRACER_CH_URL: http://127.0.0.1:18123
+      REPRACER_CH_USER: repracer_local_admin
+      REPRACER_CH_PASSWORD: ci-synthetic-only
+      REPRACER_CH_INGEST_USER: repracer_ci_ingest
+      REPRACER_CH_INGEST_PASSWORD: ci-synthetic-ingest
+      REPRACER_CH_VERIFIER_USER: repracer_ci_verifier
+      REPRACER_CH_VERIFIER_PASSWORD: ci-synthetic-verifier
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -40,14 +48,75 @@ jobs:
             --kafka-addr PLAINTEXT://0.0.0.0:19092 --advertise-kafka-addr PLAINTEXT://127.0.0.1:19092
           for i in $(seq 1 60); do docker exec redpanda rpk cluster health 2>/dev/null | grep -q 'Healthy:.*true' && exit 0; sleep 2; done
           docker logs redpanda; exit 1
+      - name: ClickHouse (DDL schemas/clickhouse, выгрузка из PostgreSQL, Р-20) — версия как в infra/local/compose.yaml
+        run: |
+          docker run -d --name clickhouse -p 18123:8123 --ulimit nofile=262144:262144 \
+            -e CLICKHOUSE_USER=$REPRACER_CH_USER -e CLICKHOUSE_PASSWORD=$REPRACER_CH_PASSWORD -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 \
+            clickhouse/clickhouse-server:26.8.4.11
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:18123/ping && exit 0; sleep 2; done
+          docker logs clickhouse; exit 1
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
       - run: npm ci
       - name: Every test file is in the build (Р-89)
         run: node scripts/check-test-inclusion.mjs
       - name: Database — migrations, template, smoke tests of the schema
         run: scripts/db/prepare.sh repracer_eu
+      - name: Every new protection has a catalog row (Р-108)
+        run: node scripts/db/check-catalog-coverage.mjs
+      - name: ClickHouse DDL applied and verified (099_verify.sql), role logins
+        run: |
+          node infra/local/apply-clickhouse.mjs
+          q() { curl -sS --fail-with-body -H "X-ClickHouse-User: $REPRACER_CH_USER" -H "X-ClickHouse-Key: $REPRACER_CH_PASSWORD" --data-binary "$1" "$REPRACER_CH_URL/"; }
+          q "CREATE USER IF NOT EXISTS $REPRACER_CH_INGEST_USER IDENTIFIED WITH sha256_password BY '$REPRACER_CH_INGEST_PASSWORD' DEFAULT ROLE repracer_ingest"
+          q "GRANT repracer_ingest TO $REPRACER_CH_INGEST_USER"
+          q "CREATE USER IF NOT EXISTS $REPRACER_CH_VERIFIER_USER IDENTIFIED WITH sha256_password BY '$REPRACER_CH_VERIFIER_PASSWORD' DEFAULT ROLE repracer_retention"
+          q "GRANT repracer_retention TO $REPRACER_CH_VERIFIER_USER"
       - name: Mutation check of the schema (Р-95) — a guard removed must fail its own check
         run: node scripts/db/mutation-check.mjs --jobs 2
       - run: npm run typecheck
       - name: All tests, no skips
         run: node scripts/test-all.mjs
+
+  # Шаг 20: замер сжатия ClickHouse против оценки шага 4 (ADR-0004) — отдельное задание, итог — артефакт compression.json
+  clickhouse-compression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ['5432:5432']
+        options: >-
+          --shm-size=1g --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: postgres
+      REPRACER_PG_ADMIN_URL: postgres://postgres@127.0.0.1:5432/repracer_eu
+      REPRACER_CH_URL: http://127.0.0.1:18123
+      REPRACER_CH_USER: repracer_local_admin
+      REPRACER_CH_PASSWORD: ci-synthetic-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: ClickHouse
+        run: |
+          docker run -d --name clickhouse -p 18123:8123 --ulimit nofile=262144:262144 \
+            -e CLICKHOUSE_USER=$REPRACER_CH_USER -e CLICKHOUSE_PASSWORD=$REPRACER_CH_PASSWORD -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 \
+            clickhouse/clickhouse-server:26.8.4.11
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:18123/ping && exit 0; sleep 2; done
+          docker logs clickhouse; exit 1
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
+      - run: npm ci
+      - run: scripts/db/prepare.sh repracer_eu
+      - run: node infra/local/apply-clickhouse.mjs
+      - name: Compression measurement (1 000 000 synthetic rows per table)
+        run: npm run bench -w @repracer/analytics-export -- --rows=1000000 --pg-rows=200000 --out=$GITHUB_WORKSPACE/compression.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compression
+          path: compression.json
