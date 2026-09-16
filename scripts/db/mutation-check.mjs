@@ -104,14 +104,14 @@ async function nodeTest(file, db, tpl) {
     const after = r.out.slice((m.index ?? 0) + m[0].length, (m.index ?? 0) + 6000);
     const end = after.search(/^\s*(?:not )?ok \d+ - /m);
     const block = end >= 0 ? after.slice(0, end) : after;
-    return { name: m[1], why: tapFailure(block) };
+    return { name: m[1], why: tapFailure(block), error: tapField(block, 'error', true), actual: tapField(block, 'actual') };
   });
   const passed = [...r.out.matchAll(/^\s*ok \d+ - (.*)$/gm)].map((m) => m[1]);
   return { code: r.code, failed, passed, out: r.out };
 }
 
-/** Поле YAML блока TAP: однострочное значение или блок «|-» до следующего ключа того же отступа */
-function tapField(block, key) {
+/** Поле YAML блока TAP: однострочное значение или блок «|-» до следующего ключа того же отступа; lines — сохранить переводы строк */
+function tapField(block, key, keepLines = false) {
   const lines = block.split('\n');
   const i = lines.findIndex((l) => new RegExp(`^\\s*${key}:`).test(l));
   if (i < 0) return '';
@@ -123,6 +123,7 @@ function tapField(block, key) {
     if (lines[j].trim() !== '' && ind <= indent) break;
     rest.push(lines[j]);
   }
+  if (keepLines) return [first.replace(/^\|-?$/, ''), ...rest].map((l) => l.trim()).filter((l) => l !== '').join('\n').replace(/^'(.*)'$/s, '$1');
   return [first.replace(/^\|-?$/, ''), ...rest].join(' ').replace(/\s+/g, ' ').trim();
 }
 function tapFailure(block) {
@@ -133,6 +134,24 @@ function tapFailure(block) {
 }
 
 /** Проверки одной конфигурации базы: что провалилось из ожидаемого */
+/** Провал теста — провал СВОЕГО утверждения проверки с результатом «защиты нет» (не отказ по другой причине) */
+function nodeOwnFailure(e, failure) {
+  const [firstLine = '', ...restLines] = (failure.error ?? '').split('\n');
+  const labels = Array.isArray(e.label) ? e.label : [e.label];
+  for (const label of labels) {
+    if (e.unprotected === 'resolved') {
+      if (firstLine === `Missing expected rejection: ${label}`) return true;
+      continue;
+    }
+    const m = typeof label === 'string' ? (firstLine === label ? [firstLine] : null) : new RegExp(`^(?:${label.re})$`).exec(firstLine);
+    if (!m) continue;
+    // Метка с подстановкой объявляет результат группой выражения; иначе — поле actual, при его отсутствии — остаток текста провала
+    const evidence = m[1] !== undefined ? m[1] : failure.actual !== '' ? failure.actual.replace(/^'(.*)'$/, '$1') : restLines.join(' ').trim();
+    if (new RegExp(e.unprotected).test(evidence)) return true;
+  }
+  return false;
+}
+
 async function evaluate(expect, id, mutation) {
   const db = `mut_${id}`;
   const tpl = `mutt_${id}`;
@@ -168,8 +187,13 @@ async function evaluate(expect, id, mutation) {
       for (const e of expect.filter((x) => x.node === file)) {
         const hits = r.failed.filter((t) => t.name.includes(e.test));
         const known = [...r.failed.map((t) => t.name), ...r.passed].some((t) => t.includes(e.test));
-        // Причина сверяется только с текстом провала, не с названием теста: название повторяет формулировки утверждений
-        results.push({ e, failed: hits.length > 0, why: hits.map((t) => t.why).join(' ; '), detail: hits.length > 0 ? hits.map((t) => `${t.name} [${t.why}]`).join('; ') : known ? '' : `test not found (exit ${r.code})` });
+        // Шаг 19, ревью шага 19 (находка 1): сообщение утверждения попадает в поле error при ЛЮБОМ провале, в том числе при отказе
+        // по другой причине. Своя поимка — только провал утверждения с точной меткой, у которого фактический результат — «защиты нет»:
+        // для assert.rejects — «Missing expected rejection: <метка>» (отказа не было вовсе); для остальных — поле actual (а если его
+        // нет — остаток текста провала после метки) совпадает с объявленным шаблоном «без защиты»
+        const own = hits.filter((t) => nodeOwnFailure(e, t));
+        results.push({ e, failed: hits.length > 0, ownReason: own.length > 0, why: hits.map((t) => t.why).join(' ; '),
+          detail: hits.length > 0 ? hits.map((t) => `${t.name} [${t.why}]`).join('; ') : known ? '' : `test not found (exit ${r.code})` });
       }
     }
   } finally {
@@ -179,7 +203,9 @@ async function evaluate(expect, id, mutation) {
   return results;
 }
 
-const describeExpect = (e) => e.smoke !== undefined ? `smoke «${e.smoke}»` : e.verify ? `verify ${e.verify.replace('migrations/', '')}${e.reason ? ` /${e.reason}/` : ''}` : `${e.node.split('/').pop()} «${e.test}» /${e.reason}/`;
+const labelText = (l) => (Array.isArray(l) ? l : [l]).map((x) => typeof x === 'string' ? x : `/${x.re}/`).join(' | ');
+const describeExpect = (e) => e.smoke !== undefined ? `smoke «${e.smoke}»` : e.verify ? `verify ${e.verify.replace('migrations/', '')}${e.reason ? ` /${e.reason}/` : ''}`
+  : `${e.node.split('/').pop()} «${e.test}» [${labelText(e.label)}] без защиты: ${e.unprotected}`;
 const describeMutation = (m) => typeof m === 'string' ? m.replace(/\s+/g, ' ').slice(0, 110) : `${m.fn}: «${m.from.slice(0, 50)}…» → «${m.to.slice(0, 30)}…»`;
 const sameCheck = (a, b) => describeExpect(a) === describeExpect(b);
 
@@ -192,15 +218,17 @@ for (const r of rows) {
     throw new Error(`catalog row ${r.row}: every mutation needs apply and its own checks (Р-99)`);
   }
   for (const m of r.mutations) for (const e of m.own) {
-    if (e.node !== undefined && (!e.test || !e.reason)) throw new Error(`catalog row ${r.row}: a test check names the test and the reason (Р-99)`);
+    if (e.node !== undefined && (!e.test || !e.label || !e.unprotected)) {
+      throw new Error(`catalog row ${r.row}: a test check names the test, the exact assertion label and the unprotected outcome (Р-99, step 19 review)`);
+    }
     if (e.verify !== undefined && !e.reason) throw new Error(`catalog row ${r.row}: a schema check names the reason (Р-99)`);
   }
   r.expect = [];
   for (const m of r.mutations) for (const e of m.own) if (!r.expect.some((x) => sameCheck(x, e))) r.expect.push(e);
 }
-/** Своя проверка поймала мутацию: проверка упала и причина совпала (у смоук-проверки причину сверяет сам expect_fail) */
+/** Своя проверка поймала мутацию: проверка упала и причина совпала (смоук — сам expect_fail, тест — nodeOwnFailure, схема — текст отказа) */
 const ownCatch = (result, own) => result.failed && own.some((e) => sameCheck(e, result.e))
-  && (result.e.smoke !== undefined ? result.ownReason : new RegExp(result.e.reason).test(result.why ?? result.detail));
+  && (result.e.verify !== undefined ? new RegExp(result.e.reason).test(result.detail) : result.ownReason);
 
 // 1. Контроль без мутации: каждая ожидаемая проверка зелёная
 const allExpect = [];

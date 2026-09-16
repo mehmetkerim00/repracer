@@ -70,6 +70,16 @@ SELECT pg_temp.ok('the stock role completes a quantity write (Р-105)', $q$
 SELECT pg_temp.ok('the stock role creates a quantity write (Р-105)', $q$
   INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, quantity, version, origin, budget_scope_key, budget_day)
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'a9190000-0000-4000-8000-000000000001', 'a6000000-0000-0000-0000-000000000003', 'QUANTITY', 4, 3, 'STOCK_RECALC', 'L1', (now() AT TIME ZONE 'Europe/Berlin')::date) $q$);
+-- Ревью шага 19, находка 6: новая версия вытесняет ждущую — завершение вытесненной (история, удаление строки и отправок) проходит
+SELECT pg_temp.ok('the stock role supersedes a pending quantity write (Р-105)', $q$
+  INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, quantity, version, origin, budget_scope_key, budget_day)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a9190000-0000-4000-8000-000000000002', 'a6000000-0000-0000-0000-000000000003', 'QUANTITY', 3, 4, 'STOCK_RECALC', 'L1', (now() AT TIME ZONE 'Europe/Berlin')::date) $q$);
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM tenant_data.channel_write WHERE channel_write_id = 'a9190000-0000-4000-8000-000000000001')
+     OR NOT EXISTS (SELECT 1 FROM tenant_data.channel_write_history WHERE channel_write_id = 'a9190000-0000-4000-8000-000000000001' AND final_status = 'SUPERSEDED') THEN
+    RAISE EXCEPTION 'the superseded quantity write was not moved to the history (Р-105)'; END IF;
+  RAISE NOTICE 'PASS accept | the superseded quantity write is moved to the history (Р-105)';
+END $$;
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM tenant_data.channel_write WHERE field <> 'QUANTITY') OR EXISTS (SELECT 1 FROM tenant_data.write_scope WHERE field <> 'QUANTITY')
      OR NOT EXISTS (SELECT 1 FROM tenant_data.channel_write WHERE field = 'QUANTITY') THEN

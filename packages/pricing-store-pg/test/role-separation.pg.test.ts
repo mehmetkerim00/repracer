@@ -95,7 +95,8 @@ test('Р-90: the audit log is still written — by triggers, with the session us
   const events = await inTenant(admin, w.tenantId, async (tx) => (await tx.query(
     `SELECT action, actor_type, actor_user_id FROM audit.audit_event WHERE tenant_id = $1 AND entity_id = $2`,
     [w.tenantId, result.status === 'STOPPED' ? result.stop.stopId : null])).rows);
-  assert.deepEqual(events, [{ action: 'pricing.stop_created', actor_type: 'USER', actor_user_id: w.userId }]);
+  assert.deepEqual(events, [{ action: 'pricing.stop_created', actor_type: 'USER', actor_user_id: w.userId }],
+    'Р-76: the stop is written to the audit log by the trigger with the session user as author');
 });
 
 test('finding 13: only the authenticator role resolves external identities', async () => {

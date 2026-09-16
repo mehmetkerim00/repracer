@@ -22,7 +22,10 @@ const m = (apply, ...own) => ({ apply, own });
 const VERIFY = 'migrations/0073_verify_schema_invariants_v16.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
-const node = (file, test, reason) => ({ node: file, test, reason });
+// Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
+// выражения — фактический результат) и результат «без защиты»: 'resolved' — отказа не было вовсе, иначе — выражение над фактическим
+// результатом. Отказ по другой причине своей поимкой не считается
+const node = (file, test, label, unprotected) => ({ node: file, test, label, unprotected });
 const verify = (reason) => ({ verify: VERIFY, reason });
 
 export const R93_ROWS = [
@@ -65,7 +68,7 @@ export const R93_ROWS = [
   {
     row: '20, 21', invariant: 'OQ-98: отказ хранит параметры причины',
     mutations: [m(dropConstraint('price_decision_rejection_explained', 'channel_data.price_decision'), smoke('rejection without its reason parameters (OQ-98)'),
-      node(T('store.pg.test.ts'), 'OQ-93, OQ-94, OQ-98', 'OQ-98: a rejection without its reason parameters is refused'))],
+      node(T('store.pg.test.ts'), 'OQ-93, OQ-94, OQ-98', 'OQ-98: a rejection without its reason parameters is refused', 'resolved'))],
   },
   {
     row: '22', invariant: 'Р-64: завершение записи — с причиной; ждущая запись объявляется событием',
@@ -74,7 +77,7 @@ export const R93_ROWS = [
       m(dropConstraint('channel_write_history_end_explained', 'tenant_data.channel_write_history'),
         smoke('write discarded without a reason (Р-64)'), smoke('write history ended without a reason (Р-64)')),
       m(dropTrigger('zz_channel_write_announce_dispatch', 'tenant_data.channel_write'),
-        node(T('write-queue.pg.test.ts'), 'control — without the dispatcher', 'has no scope.write.v1 event')),
+        node(T('write-queue.pg.test.ts'), 'control — without the dispatcher', 'a PENDING write has no scope.write.v1 event: nobody would ever learn about it', '^[1-9][0-9]*$')),
     ],
   },
   {
@@ -82,7 +85,7 @@ export const R93_ROWS = [
     mutations: [
       m(dropTrigger('zz_fx_rate_immutable', 'platform.fx_rate'), smoke('ECB rate is immutable (Р-61)')),
       m(dropTrigger('aa_price_decision_fx_recorded', 'channel_data.price_decision'),
-        node(T('fx-day-boundary.pg.test.ts'), 'Р-61 in the database', 'Р-61: a decision on a converted cost without its exchange rate is refused')),
+        node(T('fx-day-boundary.pg.test.ts'), 'Р-61 in the database', 'Р-61: a decision on a converted cost without its exchange rate is refused', 'resolved')),
       m(dropConstraint('price_decision_fx_shape', 'channel_data.price_decision'), smoke('decision exchange rate without its fields (Р-61)')),
     ],
   },
@@ -93,7 +96,7 @@ export const R93_ROWS = [
       m(dropTrigger('aa_channel_write_budget_day_tz', 'tenant_data.channel_write'),
         smoke('budgeted write while the storefront day boundary is unconfirmed (Р-65)'), smoke('budget day is not the current storefront day (Р-65)')),
       m(dropTrigger('aa_price_daily_day_tz', 'tenant_data.price_daily'),
-        node(T('fx-day-boundary.pg.test.ts'), 'Р-65: a US storefront', 'Р-65: a price day of a US storefront is not closed in')),
+        node(T('fx-day-boundary.pg.test.ts'), 'Р-65: a US storefront', ['Р-65: a price day of a US storefront is not closed in Europe/Berlin', 'Р-65: a price day of a US storefront is not closed in America/Los_Angeles'], 'resolved')),
     ],
   },
   {
@@ -104,9 +107,9 @@ export const R93_ROWS = [
     row: '27', invariant: 'Р-69, Р-70: остановки человеком и системные',
     mutations: [
       m(dropConstraint('pricing_halt_system_only', 'channel_data.pricing_halt'),
-        node(T('step12.pg.test.ts'), 'Р-69: a system halt is only for broken channel data', 'Р-69: a person cannot create a system halt')),
+        node(T('step12.pg.test.ts'), 'Р-69: a system halt is only for broken channel data', 'Р-69: a person cannot create a system halt', 'resolved')),
       m(dropTrigger('aa_price_stop_role_guard', 'tenant_data.price_stop'),
-        node(T('step12.pg.test.ts'), 'Р-69, Р-70, OQ-125 in the database', 'OQ-129: a viewer does not stop pricing|OQ-125: an operator does not resume a tenant stop')),
+        node(T('step12.pg.test.ts'), 'Р-69, Р-70, OQ-125 in the database', ['OQ-129: a viewer does not stop pricing', 'OQ-125: an operator does not resume a tenant stop'], '^(STOPPED|RELEASED)$')),
       m(dropTrigger('ab_price_decision_stop_guard', 'channel_data.price_decision'), smoke('approval while the tenant is stopped by a person (Р-69)')),
       m(dropTrigger('bb_channel_write_stop_guard', 'tenant_data.channel_write'), smoke('dispatch while the tenant is stopped by a person (Р-69)')),
       m(dropTrigger('ca_pricing_halt_release_role_guard', 'channel_data.pricing_halt'), smoke('manual halt release without a second factor (finding 12, Р-88)')),
@@ -120,7 +123,7 @@ export const R93_ROWS = [
       m(dropTrigger('a0_price_decision_intent_columns', 'channel_data.price_decision'),
         smoke('decision intent columns are taken from the client, not from the intent (Р-80)', 'decision intent columns come from the intent, not from the client (Р-80)')),
       m(dropTrigger('a_price_decision_snapshot_ref_guard', 'channel_data.price_decision_snapshot_ref'),
-        node(T('step14.pg.test.ts'), 'finding 10, Р-80', 'finding 10: a snapshot reference of a NO_OP decision is refused')),
+        node(T('step14.pg.test.ts'), 'finding 10, Р-80', 'finding 10: a snapshot reference of a NO_OP decision is refused', '"command":"INSERT"')),
     ],
   },
   {
@@ -140,9 +143,9 @@ export const R93_ROWS = [
     row: '31, 37, 38', invariant: 'OQ-125, OQ-129, находка 4: матрица прав остановок, автор — пользователь сессии',
     mutations: [
       m(`CREATE OR REPLACE FUNCTION security.pricing_permission(p_role text, p_action text) RETURNS boolean LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$ SELECT true $$`,
-        node(T('step14.pg.test.ts'), 'finding 2', 'the matrix is not trivially all-true|×')),
+        node(T('step14.pg.test.ts'), 'finding 2', { re: '[A-Z_]+ × [A-Z_]+' }, '^true$')),
       m(replaceInFunction('tenant_data.price_stop_role_guard()', 'IF security.current_user_id() IS NULL OR u IS DISTINCT FROM security.current_user_id() THEN', 'IF false THEN'),
-        node(T('step14.pg.test.ts'), 'finding 4', 'finding 4: a stop is not written in the name of another membership')),
+        node(T('step14.pg.test.ts'), 'finding 4', 'finding 4: a stop is not written in the name of another membership', '^STOPPED$')),
     ],
   },
   {
@@ -153,7 +156,7 @@ export const R93_ROWS = [
     row: '34', invariant: 'Р-76: остановки и снятия — в журнале аудита',
     mutations: [
       m(dropTrigger('zb_price_stop_audit', 'tenant_data.price_stop'),
-        node(T('role-separation.pg.test.ts'), 'the audit log is still written', 'pricing.stop_created')),
+        node(T('role-separation.pg.test.ts'), 'the audit log is still written', 'Р-76: the stop is written to the audit log by the trigger with the session user as author', '\\+ \\[\\]')),
       m(dropTrigger('zb_pricing_halt_audit', 'channel_data.pricing_halt'),
         smoke('the system halt is not in the audit log', 'the system halt is written to the audit log by the trigger (Р-76)')),
       m(dropTrigger('zb_pricing_halt_review_audit', 'channel_data.pricing_halt_review'),
@@ -167,7 +170,7 @@ export const R93_ROWS = [
   {
     row: '41', invariant: 'Р-79: подтверждённый архив ядра — со справочниками',
     mutations: [m(dropConstraint('partition_export_core_archive_self_contained', 'maintenance.partition_export'),
-      node(T('step14.pg.test.ts'), 'Р-79', 'Р-79: a verified archive of the core without the explanation dictionary is refused'))],
+      node(T('step14.pg.test.ts'), 'Р-79', 'Р-79: a verified archive of the core without the explanation dictionary is refused', '"command":"INSERT"'))],
   },
   {
     row: '42', invariant: 'Р-83: пол с полом маржи перед каждой отправкой',
@@ -175,7 +178,7 @@ export const R93_ROWS = [
       "NEW.floor_at_dispatch_minor := tenant_data.assert_price_floor(NEW.tenant_id, NEW.write_scope_id, NEW.amount_minor, 'at dispatch');",
       'NEW.floor_at_dispatch_minor := (SELECT f.min_price_minor FROM tenant_data.effective_price_floor(NEW.tenant_id, NEW.write_scope_id) f);'),
     verify('below the recomputed margin floor was dispatched'),
-    node(T('write-recheck.pg.test.ts'), 'the unit cost rose between decision and dispatch', 'the write reached the channel'))],
+    node(T('write-recheck.pg.test.ts'), 'the unit cost rose between decision and dispatch', { re: 'cost: the write reached the channel: .*' }, '^false$'))],
   },
   {
     row: '43', invariant: 'Р-85, Р-91, находка 15: из вечного ядра не выводится значение канала',
@@ -193,9 +196,9 @@ export const R93_ROWS = [
     mutations: [
       m(dropTrigger('a_pricing_halt_review_guard', 'channel_data.pricing_halt_review'), smoke('automatic review recorded in a user session (finding 3)')),
       m(dropTrigger('zc_pricing_halt_review_released_in_tx', 'channel_data.pricing_halt_review'),
-        node(T('audit-guards.pg.test.ts'), 'finding 1', 'a release record without the release fails at commit')),
+        node(T('audit-guards.pg.test.ts'), 'finding 1', 'a release record without the release fails at commit', '^accepted$')),
       m(replaceInFunction('tenant_data.price_stop_role_guard()', 'AND NOT security.session_mfa() THEN', 'AND false THEN'),
-        node(T('audit-guards.pg.test.ts'), 'Р-88: releasing the tenant stop needs a second factor', 'Р-88: the tenant stop is not released without a second factor')),
+        node(T('audit-guards.pg.test.ts'), 'Р-88: releasing the tenant stop needs a second factor', 'Р-88: the tenant stop is not released without a second factor', '^RELEASED$')),
     ],
   },
   {
@@ -226,22 +229,25 @@ export const STEP17_ROWS = [
       m('GRANT EXECUTE ON FUNCTION security.invite_member(uuid, text, text, bytea, interval) TO repracer_app', smoke('path invites a member (Р-90)'),
         verify('security\\.invite_member.*SECURITY DEFINER function executable by the decision path')),
       m(`CREATE OR REPLACE FUNCTION tenant_data.lock_decision_products(p_tenant_id uuid, p_write_scope_ids uuid[]) RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$ BEGIN NULL; END $$`,
-        node(T('store.pg.test.ts'), 'Р-54: a concurrent bound change serialises', 'decision commit must wait for the bound change')),
+        node(T('store.pg.test.ts'), 'Р-54: a concurrent bound change serialises', 'decision commit must wait for the bound change', '^true$')),
     ],
   },
   {
     row: 'находка 2', invariant: 'автоматическое снятие — итог базы по выборке, не запись пути решения',
     mutations: [
-      m(replaceInFunction('channel_data.review_halt_by_sample(uuid,uuid,timestamptz)', 'IF failed > 0 THEN', 'IF false THEN'), node(AG, 'finding 3', 'SAMPLE_FAILED: one failed observation fails the review')),
-      m(replaceInFunction('channel_data.review_halt_by_sample(uuid,uuid,timestamptz)', 'IF accepted < required THEN', 'IF false THEN'), node(AG, 'finding 3', 'NO_SAMPLE: fewer accepted products than the sample requires')),
-      m(replaceInFunction('channel_data.review_halt_by_sample(uuid,uuid,timestamptz)', 'IF v_at < h.next_review_at THEN', 'IF false THEN'), node(AG, 'finding 3', 'NOT_DUE: the review window has not elapsed')),
+      m(replaceInFunction('channel_data.review_halt_by_sample(uuid,uuid,timestamptz)', 'IF failed > 0 THEN', 'IF false THEN'), node(AG, 'finding 3', 'SAMPLE_FAILED: one failed observation fails the review', '^RELEASED$')),
+      m(replaceInFunction('channel_data.review_halt_by_sample(uuid,uuid,timestamptz)', 'IF accepted < required THEN', 'IF false THEN'), node(AG, 'finding 3', 'NO_SAMPLE: fewer accepted products than the sample requires', '^RELEASED$')),
+      // Шаг 19 [Р-104]: ветка NOT_DUE — код ответа, не защита: до срока наблюдение, записанное базой после срока, существовать не может,
+      // и без ветки ответ — NO_SAMPLE. Окно держит фильтр по моменту записи — он и снимается
+      m(replaceInFunction('channel_data.review_halt_by_sample(uuid,uuid,timestamptz)', 'sm.recorded_at >= h.next_review_at AND ', ''),
+        node(AG, 'finding 3', 'NO_SAMPLE: an observation recorded before the review window elapsed does not count', '^RELEASED$')),
       m(replaceInFunction('channel_data.review_halt_by_sample(uuid,uuid,timestamptz)', 'v_at      timestamptz := least(p_at, now());', 'v_at      timestamptz := p_at;'),
-        node(AG, 'finding 3', 'NOT_DUE: the review window has not elapsed and a moment in the future does not shorten it')),
-      m(replaceInFunction('channel_data.review_halt_by_sample(uuid,uuid,timestamptz)', 'AND sm.observed_at <= v_at;', ';'), node(AG, 'finding 3', 'NO_SAMPLE: an observation after the review moment does not count')),
+        node(AG, 'finding 3', 'finding 3: the next review is scheduled from the database clock, not from a moment in the future', '^false$')),
+      m(replaceInFunction('channel_data.review_halt_by_sample(uuid,uuid,timestamptz)', 'AND sm.observed_at <= v_at;', ';'), node(AG, 'finding 3', 'NO_SAMPLE: an observation after the review moment does not count', '^RELEASED$')),
       m(replaceInFunction('channel_data.review_halt_by_sample(uuid,uuid,timestamptz)', 'AND om.channel_product_ref = sm.channel_product_ref))', '))'),
-        node(AG, 'finding 3', 'NO_SAMPLE: a stale observation and a product outside the storefront do not count')),
+        node(AG, 'finding 3', 'NO_SAMPLE: a stale observation and a product outside the storefront do not count', '^RELEASED$')),
       m(replaceInFunction('channel_data.review_halt_by_sample(uuid,uuid,timestamptz)', 'IF p_tenant_id IS DISTINCT FROM security.current_tenant_id() THEN', 'IF false THEN'),
-        node(AG, 'finding 3', 'the review of a halt runs only in the context of its own tenant')),
+        node(AG, 'finding 3', 'the review of a halt runs only in the context of its own tenant', '^accepted$')),
     ],
   },
   {
@@ -289,55 +295,55 @@ export const STEP17_ROWS = [
     row: 'Р-98', invariant: 'перепривязка входа — только приглашением владельца, прежний вход отозван',
     mutations: [
       m(replaceInFunction('security.accept_identity_invitation(bytea,text,text,text,boolean)', 'IF NOT inv.relink THEN', 'IF false THEN'),
-        node(ID, 'Р-98', 'a relink needs a relink invitation|an ordinary invitation does not relink')),
+        node(ID, 'Р-98', 'an ordinary invitation does not relink', 'resolved')),
       m(replaceInFunction('security.accept_identity_invitation(bytea,text,text,text,boolean)',
         'IF EXISTS (SELECT 1 FROM platform.external_identity_revocation rv WHERE rv.issuer = p_issuer AND rv.subject = p_subject) THEN', 'IF false THEN'),
-        node(ID, 'Р-98', 'was unlinked|the revoked sign-in accepts nothing')),
-      m(replaceInFunction('security.invite_relink(uuid,uuid,bytea,interval)', 'IF NOT security.session_mfa() THEN', 'IF false THEN'), node(ID, 'Р-98', 'a relink invitation without a second factor')),
+        node(ID, 'Р-98', 'the revoked sign-in accepts nothing', 'resolved')),
+      m(replaceInFunction('security.invite_relink(uuid,uuid,bytea,interval)', 'IF NOT security.session_mfa() THEN', 'IF false THEN'), node(ID, 'Р-98', 'Р-98: a relink invitation without a second factor', 'resolved')),
       m(replaceInFunction('security.invite_relink(uuid,uuid,bytea,interval)', "AND m.status = 'ACTIVE' AND m.role = 'OWNER') THEN", "AND m.status = 'ACTIVE') THEN"),
-        node(ID, 'Р-98', 'only an active owner relinks')),
+        node(ID, 'Р-98', 'Р-98: only an active owner relinks', 'resolved')),
       m(replaceInFunction('security.invite_relink(uuid,uuid,bytea,interval)',
         "IF NOT EXISTS (SELECT 1 FROM tenant_data.membership m WHERE m.tenant_id = p_tenant_id AND m.user_id = p_user_id AND m.status = 'ACTIVE') THEN", 'IF false THEN'),
-        node(ID, 'Р-98', 'a relink is issued only to a member of the tenant')),
-      m(dropTrigger('a_external_identity_one_active', 'platform.external_identity'), node(ID, 'step 17 finding 3', 'the second acceptance waits for the first|two active sign-ins of one provider')),
+        node(ID, 'Р-98', 'Р-98: a relink is issued only to a member of the tenant', 'resolved')),
+      m(dropTrigger('a_external_identity_one_active', 'platform.external_identity'), node(ID, 'step 17 finding 3', ['Р-98: the second acceptance waits for the first', { re: 'Р-98: two active sign-ins of one provider for one user: ([0-9a-f-]{36})' }], '^(true|[0-9a-f-]{36})$')),
       m(replaceInFunction('platform.external_identity_one_active()', "PERFORM pg_advisory_xact_lock(hashtextextended('platform.external_identity:' || NEW.user_id::text || ':' || NEW.issuer, 0));", ''),
-        node(ID, 'step 17 finding 3', 'the second acceptance waits for the first')),
+        node(ID, 'step 17 finding 3', 'Р-98: the second acceptance waits for the first', '^true$')),
       m(replaceInFunction('security.resolve_external_identity(text,text)',
         'AND NOT EXISTS (SELECT 1 FROM platform.external_identity_revocation rv WHERE rv.issuer = e.issuer AND rv.subject = e.subject)', ''),
-        node(ID, 'Р-98', 'the revoked sign-in resolves nobody')),
-      m(dropTrigger('zz_identity_relinked_audit', 'platform.identity_invitation'), node(ID, 'Р-98', 'the invitation and the relink are audited')),
-      m(dropTrigger('zz_identity_relink_invited_audit', 'platform.identity_invitation'), node(ID, 'Р-98', 'the invitation and the relink are audited')),
+        node(ID, 'Р-98', 'the revoked sign-in resolves nobody', 'userId')),
+      m(dropTrigger('zz_identity_relinked_audit', 'platform.identity_invitation'), node(ID, 'Р-98', 'Р-98: the invitation and the relink are audited', '^(?!.*identity\\.relinked\\b)')),
+      m(dropTrigger('zz_identity_relink_invited_audit', 'platform.identity_invitation'), node(ID, 'Р-98', 'Р-98: the invitation and the relink are audited', '^(?!.*identity\\.relink_invited)')),
     ],
   },
   {
     row: 'OQ-151', invariant: 'подрез закреплённой версии стратегии не начинает срок хранения',
     mutations: [
       m(replaceInFunction('channel_data.pricing_strategy_undercut_guard()', 'IF EXISTS (SELECT 1 FROM tenant_data.write_scope s', 'IF false AND EXISTS (SELECT 1 FROM tenant_data.write_scope s'),
-        node(UE, 'Р-91: the strategy version keeps its type', 'the undercut of a pinned version does not start expiring')),
+        node(UE, 'Р-91: the strategy version keeps its type', 'OQ-151: the undercut of a pinned version does not start expiring', '^accepted$')),
       m(dropTrigger('b_write_scope_pins_live_strategy_version', 'tenant_data.write_scope'),
-        node(UE, 'Р-91: the strategy version keeps its type', 'a scope is not pinned back')),
+        node(UE, 'Р-91: the strategy version keeps its type', 'OQ-151: a scope is not pinned back to a version whose undercut expires', '^accepted$')),
       m(dropTrigger('zb_write_scope_release_strategy_version', 'tenant_data.write_scope'),
-        node(UE, 'Р-91: the strategy version keeps its type', 'the released version starts its 18 months')),
+        node(UE, 'Р-91: the strategy version keeps its type', 'the released version starts its 18 months', '0: version: 1 superseded: false')),
       m(replaceInFunction('tenant_data.pricing_strategy_supersede_undercut()', "AND s.status <> 'RETIRED')", 'AND false)'),
-        node(UE, 'Р-91: the strategy version keeps its type', 'OQ-151: a new version is created while the old one is still pinned')),
+        node(UE, 'Р-91: the strategy version keeps its type', 'OQ-151: a new version is created while the old one is still pinned', 'still pinned by a write scope')),
     ],
   },
   {
     row: 'находка 6', invariant: 'слепок проверяется по видам и значениям параметров, а не только по именам ключей',
     mutations: [
       m(replaceInFunction('security.param_value_valid(jsonb,jsonb)', "RETURN t = 'number' AND v::text ~ '^-?[0-9]+$';", "RETURN t = 'number';"),
-        node(UE, 'finding 15', 'an amount that is not minor units')),
+        node(UE, 'finding 15', 'an amount that is not minor units', '^true$')),
       m(replaceInFunction('security.param_value_valid(jsonb,jsonb)', "RETURN t = 'string' AND s IN ('EUR', 'USD');", "RETURN t = 'string';"),
-        node(UE, 'finding 15', 'a currency that is not an ISO code|a currency outside EUR and USD')),
+        node(UE, 'finding 15', ['a currency that is not an ISO code', 'a currency outside EUR and USD'], '^true$')),
       m(replaceInFunction('security.param_value_valid(jsonb,jsonb)', "RETURN t = 'string' AND (NOT spec ? 'v' OR (spec -> 'v') ? s);", "RETURN t = 'string';"),
-        node(UE, 'finding 15', 'an enum value outside the registry')),
+        node(UE, 'finding 15', 'an enum value outside the registry', '^true$')),
       m(replaceInFunction('security.param_value_valid(jsonb,jsonb)', "RETURN t = 'number' AND v::text ~ '^-?[0-9]+$';", "RETURN t IN ('number', 'string') AND v::text ~ '^\"?-?[0-9]+\"?$';"),
-        node(UE, 'finding 15', 'an amount as a string')),
+        node(UE, 'finding 15', 'an amount as a string', '^true$')),
       // Формат r80.1 держит вид поля $.format (0070); отдельная проверка формата в теле функции удалена как дубль
       m(replaceInFunction('security.explanation_field_kinds()', '"$.format":{"k":"enum","v":["r80.1"]}', '"$.format":{"k":"code"}'),
-        node(UE, 'finding 15', 'finding 6: an explanation format shaped as a code other than r80.1')),
+        node(UE, 'finding 15', 'finding 6: an explanation format shaped as a code other than r80.1 is refused', '^true$')),
       m(replaceInFunction('security.explanation_node_declared(jsonb,text,boolean)', "OR (w.value #>> '{}') !~ '^[A-Za-z][A-Za-z0-9_]{0,63}$'", ''),
-        node(UE, 'finding 15', 'a withheld name that is not an identifier')),
+        node(UE, 'finding 15', 'a withheld name that is not an identifier', '^true$')),
     ],
   },
 ];
@@ -389,14 +395,14 @@ export const STEP18_ROWS = [
     row: 'находка 8 (шаг 17)', invariant: 'виды значений у каждого скалярного поля слепка',
     mutations: [
       m(replaceInFunction('security.explanation_node_declared(jsonb,text,boolean)', "ELSIF NOT security.param_value_valid(v, fields -> (path || '.' || k)) THEN", 'ELSIF false THEN'),
-        node(UE, 'finding 15', 'a free text in strategy.currentMinor')),
+        node(UE, 'finding 15', 'a free text in strategy.currentMinor', '^true$')),
       m(replaceInFunction('security.param_value_valid(jsonb,jsonb)', "RETURN t = 'string' AND s IN ('EUR', 'USD');", "RETURN t = 'string' AND s ~ '^[A-Z]{3}$';"),
-        node(UE, 'finding 15', 'a currency outside EUR and USD')),
-      m(replaceInFunction('security.param_value_valid(jsonb,jsonb)', 'PERFORM s::timestamptz;', 'NULL;'), node(UE, 'finding 15', 'an invalid moment in the price stop context')),
-      m(replaceInFunction('security.param_value_valid(jsonb,jsonb)', 'BETWEEN 0 AND 1000;', 'IS NOT NULL;'), node(UE, 'finding 15', 'a ratio outside its range')),
-      m(replaceInFunction('security.param_value_valid(jsonb,jsonb)', "RETURN t = 'number' AND v::text ~ '^[0-9]+$';", "RETURN t = 'number';"), node(UE, 'finding 15', 'a negative count')),
+        node(UE, 'finding 15', 'a currency outside EUR and USD', '^true$')),
+      m(replaceInFunction('security.param_value_valid(jsonb,jsonb)', 'PERFORM s::timestamptz;', 'NULL;'), node(UE, 'finding 15', 'an invalid moment in the price stop context', '^true$')),
+      m(replaceInFunction('security.param_value_valid(jsonb,jsonb)', 'BETWEEN 0 AND 1000;', 'IS NOT NULL;'), node(UE, 'finding 15', 'a ratio outside its range', '^true$')),
+      m(replaceInFunction('security.param_value_valid(jsonb,jsonb)', "RETURN t = 'number' AND v::text ~ '^[0-9]+$';", "RETURN t = 'number';"), node(UE, 'finding 15', 'a negative count', '^true$')),
       m(replaceInFunction('security.param_value_valid(jsonb,jsonb)', "RETURN t = 'string' AND s ~ '^[A-Za-z0-9_.:@-]{1,128}$';", "RETURN t = 'string';"),
-        node(UE, 'finding 15', 'a free text as an id')),
+        node(UE, 'finding 15', 'a free text as an id', '^true$')),
     ],
   },
   {
@@ -463,7 +469,7 @@ export const STEP19_ROWS = [
         smoke('manual price intent in the name of another member (Р-107)')),
       m(replaceInFunction('channel_data.price_intent_manual_guard()', "IF NOT security.pricing_permission(mem.role, 'ENABLE_REPRICING') THEN", 'IF false THEN'),
         smoke('manual price intent by a viewer (Р-107)')),
-      m(replaceInFunction('channel_data.price_intent_manual_guard()', "NOT (NEW.trigger_type = 'MANUAL' OR NEW.rule_code = 'MANUAL' OR NEW.created_by_membership_id IS NOT NULL)",
+      m(replaceInFunction('channel_data.price_intent_manual_guard()', "NOT (NEW.trigger_type = 'MANUAL' OR coalesce(NEW.rule_code, '') = 'MANUAL' OR NEW.created_by_membership_id IS NOT NULL)",
         "NOT (NEW.trigger_type = 'MANUAL' AND NEW.created_by_membership_id IS NULL)"),
         smoke('path creates a manual price intent of the owner (Р-107)')),
     ],
@@ -472,6 +478,8 @@ export const STEP19_ROWS = [
     row: 'находка 4 (шаг 18)', invariant: 'системную остановку ставит проверка входов пути решения, а не человек',
     mutations: [
       m(replaceInFunction('channel_data.pricing_halt_insert_guard()', 'IF security.admin_session() THEN', 'IF false THEN'), smoke('system halt created by a person (step 18 finding 4)')),
+      m(replaceInFunction('channel_data.pricing_halt_sample_insert_guard()', 'IF security.admin_session() THEN', 'IF false THEN'),
+        smoke('halt sample observation recorded by a viewer in the administrative service (step 19 review finding 3)')),
       m(`DROP TRIGGER a00_pricing_halt_insert_guard ON channel_data.pricing_halt;
          CREATE TRIGGER a00_pricing_halt_insert_guard BEFORE INSERT ON channel_data.pricing_halt FOR EACH ROW WHEN (false) EXECUTE FUNCTION channel_data.pricing_halt_insert_guard()`,
         smoke('system halt created by a person (step 18 finding 4)'), verify('pricing_halt: trigger a00_pricing_halt_insert_guard has a WHEN condition that is not in the list')),
@@ -481,7 +489,7 @@ export const STEP19_ROWS = [
     row: 'находка 6 (шаг 18)', invariant: 'одна действующая привязка входа — и при изоляции строже READ COMMITTED',
     mutations: [
       m(replaceInFunction('platform.external_identity_one_active()', "IF current_setting('transaction_isolation') <> 'read committed' THEN", 'IF false THEN'),
-        node(ID, 'step 18 finding 6', 'step 18 finding 6: a link in REPEATABLE READ is refused')),
+        node(ID, 'step 18 finding 6', 'step 18 finding 6: a link in REPEATABLE READ is refused', '^linked$')),
       m('ALTER FUNCTION platform.external_identity_one_active() SECURITY INVOKER', verify('platform\\.external_identity_one_active\\(\\): owned by repracer_resolver but not SECURITY DEFINER')),
     ],
   },
@@ -500,11 +508,11 @@ export const STEP19_ROWS = [
     row: 'находка 7 (шаг 18)', invariant: 'скаляр на месте узла слепка — отказ',
     mutations: [
       m(replaceInFunction('security.explanation_node_declared(jsonb,text,boolean)', "IF jsonb_typeof(node) NOT IN ('object', 'array') THEN", 'IF false THEN'),
-        node(UE, 'finding 15', 'step 18 finding 7: a scalar among the sanity checks is refused as a declared-keys violation')),
+        node(UE, 'finding 15', 'step 18 finding 7: a scalar among the sanity checks is refused as a declared-keys violation', '^error: cannot call jsonb_each')),
       // Сама находка: элементы массива проверялись только если это объекты
       m(replaceInFunction('security.explanation_node_declared(jsonb,text,boolean)', 'IF NOT security.explanation_node_declared(v, path || \'[]\', p_competitor_derived) THEN',
         "IF jsonb_typeof(v) = 'object' AND NOT security.explanation_node_declared(v, path || '[]', p_competitor_derived) THEN"),
-        node(UE, 'finding 15', 'step 18 finding 7: a scalar among the strategy steps is refused|step 18 finding 7: a scalar among the sanity checks is refused')),
+        node(UE, 'finding 15', ['step 18 finding 7: a scalar among the strategy steps is refused', 'step 18 finding 7: a scalar among the sanity checks is refused'], '^true$')),
     ],
   },
   {
@@ -519,6 +527,8 @@ export const STEP19_ROWS = [
         smoke('the stock role sees price writes or does not see quantity writes (Р-105)', 'the stock role sees only quantity writes and their write scopes (Р-105)'),
         verify('write_scope: policy stock_quantity of the stock role is not limited to the QUANTITY field')),
       m('GRANT UPDATE (pricing_mode) ON tenant_data.write_scope TO repracer_stock', verify('tenant_data\\.write_scope\\.pricing_mode: UPDATE of the stock role is not in its allow list')),
+      m("ALTER POLICY stock_quantity ON channel_data.write_submission USING (tenant_id = security.current_tenant_id())",
+        verify('write_submission: policy stock_quantity of the stock role is not limited to the QUANTITY field')),
     ],
   },
   {

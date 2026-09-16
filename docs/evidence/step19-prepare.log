@@ -282,7 +282,7 @@ psql:tests/db/smoke_app.sql:193: NOTICE:  PASS reject | approved price below flo
 (1 строка)
 
 psql:tests/db/smoke_app.sql:207: NOTICE:  PASS accept | CHANGED -> price_intent_core, NO_OP not kept in core (Р-27, Р-38)
-psql:tests/db/smoke_app.sql:210: NOTICE:  PASS reject | decision for a write scope that does not exist | channel_data.price_decision_d20260914: write_scope f19eb10f-f7c1-475f-aa68-f931e1be140d does not exist
+psql:tests/db/smoke_app.sql:210: NOTICE:  PASS reject | decision for a write scope that does not exist | channel_data.price_decision_d20260914: write_scope f4851fd0-161f-4505-8f77-c182d32c4e4e does not exist
  expect_fail 
 -------------
  
@@ -436,7 +436,7 @@ psql:tests/db/smoke_app.sql:328: NOTICE:  PASS reject | dispatch above lowered m
 
 psql:tests/db/smoke_app.sql:347: NOTICE:  PASS accept | competitor_derived: from intent rule_code, copied into the decision (Р-51)
 psql:tests/db/smoke_app.sql:356: NOTICE:  PASS accept | a halt schedules its review after the window (Р-52)
-psql:tests/db/smoke_app.sql:359: NOTICE:  PASS reject | competitor-derived approval while halted (Р-51) | competitor-derived pricing is halted by pricing_halt 1bd775d9-5cfc-4046-87e3-7385f4347771 for write_scope a600
+psql:tests/db/smoke_app.sql:359: NOTICE:  PASS reject | competitor-derived approval while halted (Р-51) | competitor-derived pricing is halted by pricing_halt 4d907d02-1b25-439a-be32-1a3fdd2dfa24 for write_scope a600
  expect_fail 
 -------------
  
@@ -448,7 +448,7 @@ psql:tests/db/smoke_app.sql:362: NOTICE:  PASS accept | halted rejection of a co
  
 (1 строка)
 
-psql:tests/db/smoke_app.sql:364: NOTICE:  PASS reject | dispatch of a competitor-derived write while halted (Р-51) | competitor-derived pricing is halted by pricing_halt 1bd775d9-5cfc-4046-87e3-7385f4347771 for write_scope a600
+psql:tests/db/smoke_app.sql:364: NOTICE:  PASS reject | dispatch of a competitor-derived write while halted (Р-51) | competitor-derived pricing is halted by pricing_halt 4d907d02-1b25-439a-be32-1a3fdd2dfa24 for write_scope a600
  expect_fail 
 -------------
  
@@ -868,13 +868,13 @@ psql:tests/db/smoke_admin.sql:68: NOTICE:  PASS reject | release twice | pricing
 (1 строка)
 
 psql:tests/db/smoke_admin.sql:74: NOTICE:  PASS accept | the audit event of the release is written by the trigger with the session user as author (Р-76)
-psql:tests/db/smoke_admin.sql:101: NOTICE:  PASS reject | approval while the tenant is stopped by a person (Р-69) | pricing is stopped by price_stop c020eea7-930f-4c34-869c-1aefa75c42fc for write_scope a6000000-0000-0000-0000-
+psql:tests/db/smoke_admin.sql:101: NOTICE:  PASS reject | approval while the tenant is stopped by a person (Р-69) | pricing is stopped by price_stop 2cfe347b-7dbc-4ab5-8592-6a0add7cf96b for write_scope a6000000-0000-0000-0000-
  expect_fail 
 -------------
  
 (1 строка)
 
-psql:tests/db/smoke_admin.sql:104: NOTICE:  PASS reject | dispatch while the tenant is stopped by a person (Р-69) | pricing is stopped by price_stop c020eea7-930f-4c34-869c-1aefa75c42fc for write_scope a6000000-0000-0000-0000-
+psql:tests/db/smoke_admin.sql:104: NOTICE:  PASS reject | dispatch while the tenant is stopped by a person (Р-69) | pricing is stopped by price_stop 2cfe347b-7dbc-4ab5-8592-6a0add7cf96b for write_scope a6000000-0000-0000-0000-
  expect_fail 
 -------------
  
@@ -893,7 +893,7 @@ psql:tests/db/smoke_admin.sql:112: NOTICE:  PASS reject | forge an audit event (
 (1 строка)
 
 psql:tests/db/smoke_admin.sql:115: NOTICE:  PASS accept | owner with a second factor invites a member (Р-88)
-psql:tests/db/smoke_admin.sql:117: NOTICE:  PASS reject | activate an invited membership without accepting the invitation (finding 3) | membership bcd49c1d-dd3a-43ca-9ff8-e7005b40ac0b becomes active only by accepting its invitation (finding 3)
+psql:tests/db/smoke_admin.sql:117: NOTICE:  PASS reject | activate an invited membership without accepting the invitation (finding 3) | membership 275972bc-576c-4ee7-98bd-38281b1a11f9 becomes active only by accepting its invitation (finding 3)
  expect_fail 
 -------------
  
@@ -1055,6 +1055,12 @@ psql:tests/db/smoke_admin.sql:292: NOTICE:  PASS reject | consent revoked by an 
 (1 строка)
 
 psql:tests/db/smoke_admin.sql:300: NOTICE:  PASS reject | system halt created by a person (step 18 finding 4) | a person does not create a system halt: it is set by the input checks of the decision path (Р-69, step 18 find
+ expect_fail 
+-------------
+ 
+(1 строка)
+
+psql:tests/db/smoke_admin.sql:306: NOTICE:  PASS reject | halt sample observation recorded by a viewer in the administrative service (step 19 review finding 3) | a person does not record halt sample observations: they are recorded by the sample check of the decision path;
  expect_fail 
 -------------
  
@@ -1409,14 +1415,21 @@ psql:tests/db/smoke_stock.sql:72: NOTICE:  PASS accept | the stock role creates 
  
 (1 строка)
 
-psql:tests/db/smoke_stock.sql:78: NOTICE:  PASS accept | the stock role sees only quantity writes and their write scopes (Р-105)
-psql:tests/db/smoke_stock.sql:84: NOTICE:  PASS reject | stock role writes price history of a channel write (Р-105) | new row violates row-level security policy for table "channel_write_history"
+psql:tests/db/smoke_stock.sql:76: NOTICE:  PASS accept | the stock role supersedes a pending quantity write (Р-105)
+ ok 
+----
+ 
+(1 строка)
+
+psql:tests/db/smoke_stock.sql:82: NOTICE:  PASS accept | the superseded quantity write is moved to the history (Р-105)
+psql:tests/db/smoke_stock.sql:88: NOTICE:  PASS accept | the stock role sees only quantity writes and their write scopes (Р-105)
+psql:tests/db/smoke_stock.sql:94: NOTICE:  PASS reject | stock role writes price history of a channel write (Р-105) | new row violates row-level security policy for table "channel_write_history"
  expect_fail 
 -------------
  
 (1 строка)
 
-psql:tests/db/smoke_stock.sql:91: NOTICE:  PASS reject | the stock role does not see the stock of another tenant (Р-102)
+psql:tests/db/smoke_stock.sql:101: NOTICE:  PASS reject | the stock role does not see the stock of another tenant (Р-102)
 psql:tests/db/smoke_retention.sql:32: NOTICE:  PASS reject | direct DELETE from append-only as scheduler | append-only table tenant_data.min_price: DELETE is forbidden
  expect_fail 
 -------------

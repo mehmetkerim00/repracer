@@ -113,10 +113,7 @@ test('finding 3, step 16 finding 2: an automatic release is computed by the data
   assert.match(await outcome(store.releaseHalt(w.tenantId, due, { kind: 'AUTO_SAMPLE', outcome: 'RELEASED', sampleSize: 3, failedCount: 0, details: {}, at: now() })),
     /computed by the database from the recorded sample/);
 
-  // Срок не наступил: чистая выборка не снимает остановку, и момент из будущего срок не сокращает
-  await store.recordHaltSample(w.tenantId, early, [accept('3621461')], now());
-  assert.equal(await store.reviewHaltBySample(w.tenantId, early, new Date(Date.now() + 86_400_000).toISOString()), 'NOT_DUE',
-    'NOT_DUE: the review window has not elapsed and a moment in the future does not shorten it');
+  // Срок не наступил — отдельный тест ниже: здесь у витрины at нет товаров, и выборка была бы неполной при любом сроке [Р-104]
 
   // Срок наступил: без наблюдений, с наблюдением до срока и с наблюдением чужого товара — выборки нет
   assert.equal(await store.reviewHaltBySample(w.tenantId, due, now()), 'NO_SAMPLE', 'NO_SAMPLE: nothing was observed');
@@ -165,6 +162,45 @@ test('Р-88: releasing the tenant stop needs a second factor; a storefront stop 
   assert.equal((await store.releaseStop(w.tenantId, tenantStop, release(false))).status, 'MFA_REQUIRED', 'Р-88: the tenant stop is not released without a second factor');
   assert.equal((await store.releaseStop(w.tenantId, tenantStop, release(true))).status, 'RELEASED');
   assert.equal((await store.releaseStop(w.tenantId, await stop('STOREFRONT'), release(false))).status, 'RELEASED');
+});
+
+test('finding 3: before the review window elapses a clean full sample does not release, and a moment in the future does not shorten the window', async () => {
+  // Р-104: единственный товар витрины принят — без проверки срока остановка была бы снята (RELEASED), а не отклонена неполной выборкой
+  const w = await world([{ marketplace: 'de', haltedAt: ago(10_000), reviewWindowSeconds: 3600 }]);
+  const store = new PgPricingStore(pool, { adminPool: admin });
+  const [h] = await inTenant(pool, w.tenantId, async (tx) => (await tx.query('SELECT pricing_halt_id FROM channel_data.pricing_halt WHERE tenant_id = $1', [w.tenantId])).rows);
+  await store.recordHaltSample(w.tenantId, h.pricing_halt_id, [{ channelProductRef: '3621461', observedAt: now(), verdict: 'ACCEPT', reasonCode: null }], now());
+  assert.equal(await store.reviewHaltBySample(w.tenantId, h.pricing_halt_id, now()), 'NOT_DUE', 'NOT_DUE: the review window has not elapsed');
+  assert.equal(await store.reviewHaltBySample(w.tenantId, h.pricing_halt_id, new Date(Date.now() + 86_400_000).toISOString()), 'NOT_DUE',
+    'NOT_DUE: the review window has not elapsed and a moment in the future does not shorten it');
+});
+
+test('finding 3: an observation recorded before the review window elapsed does not count, even if it claims a later moment', async () => {
+  // Р-104: окно проверки держит фильтр «наблюдение записано базой после срока проверки» — ветка NOT_DUE лишь код ответа. Сценарий, где
+  // без фильтра остановка была бы снята: наблюдение записано сейчас с моментом через секунду, срок проверки переносит владелец (со
+  // вторым фактором, находка 5 ревью шага 17) между моментом записи и заявленным моментом наблюдения; проверка — после обоих
+  const w = await world([{ marketplace: 'de', haltedAt: ago(10_000), reviewWindowSeconds: 3600 }]);
+  const store = new PgPricingStore(pool, { adminPool: admin });
+  const [h] = await inTenant(pool, w.tenantId, async (tx) => (await tx.query('SELECT pricing_halt_id FROM channel_data.pricing_halt WHERE tenant_id = $1', [w.tenantId])).rows);
+  const { rows: [clock] } = await pool.query(`SELECT now() + interval '1 second' AS observed, now() + interval '500 milliseconds' AS review`);
+  await store.recordHaltSample(w.tenantId, h.pricing_halt_id, [{ channelProductRef: '3621461', observedAt: new Date(clock.observed).toISOString(), verdict: 'ACCEPT', reasonCode: null }], now());
+  await new Promise((resolve) => setTimeout(resolve, 1_500));
+  await inTenant(admin, w.tenantId, (tx) => tx.query('UPDATE channel_data.pricing_halt SET next_review_at = $3 WHERE tenant_id = $1 AND pricing_halt_id = $2',
+    [w.tenantId, h.pricing_halt_id, clock.review]), w.ids.dbId(standUserOf('membership-owner')), { mfa: true });
+  assert.equal(await store.reviewHaltBySample(w.tenantId, h.pricing_halt_id, now()), 'NO_SAMPLE',
+    'NO_SAMPLE: an observation recorded before the review window elapsed does not count');
+});
+
+test('finding 3: a moment in the future does not push the review record or the next review', async () => {
+  // Р-104: least(p_at, now()) — без него неудачная проверка с моментом из будущего сдвигает следующую проверку на сутки вперёд
+  const w = await world([{ marketplace: 'de', haltedAt: ago(3_600_000), reviewWindowSeconds: 60 }]);
+  const store = new PgPricingStore(pool, { adminPool: admin });
+  const [h] = await inTenant(pool, w.tenantId, async (tx) => (await tx.query('SELECT pricing_halt_id FROM channel_data.pricing_halt WHERE tenant_id = $1', [w.tenantId])).rows);
+  await store.recordHaltSample(w.tenantId, h.pricing_halt_id, [{ channelProductRef: '3621461', observedAt: now(), verdict: 'READ_FAILED', reasonCode: 'CHANNEL_TIMEOUT' }], now());
+  assert.equal(await store.reviewHaltBySample(w.tenantId, h.pricing_halt_id, new Date(Date.now() + 86_400_000).toISOString()), 'SAMPLE_FAILED');
+  const [row] = await inTenant(pool, w.tenantId, async (tx) => (await tx.query(
+    `SELECT next_review_at <= now() + interval '5 minutes' AS within FROM channel_data.pricing_halt WHERE tenant_id = $1 AND pricing_halt_id = $2`, [w.tenantId, h.pricing_halt_id])).rows);
+  assert.equal(row.within, true, 'finding 3: the next review is scheduled from the database clock, not from a moment in the future');
 });
 
 test('finding 3: an automatic release needs as many accepted products as the sample requires', async () => {

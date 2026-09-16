@@ -353,7 +353,8 @@ BEGIN
   -- Р-105: запись в канал и её история видны и пишутся ролью остатков только для поля QUANTITY — политики без условия по полю нет
   FOR r IN SELECT pol.polrelid::regclass AS t, pol.polname, coalesce(pg_get_expr(pol.polqual, pol.polrelid), '') AS q, coalesce(pg_get_expr(pol.polwithcheck, pol.polrelid), '') AS w
              FROM pg_policy pol
-            WHERE pol.polrelid IN ('tenant_data.channel_write'::regclass, 'tenant_data.channel_write_history'::regclass, 'tenant_data.write_scope'::regclass)
+            WHERE pol.polrelid IN ('tenant_data.channel_write'::regclass, 'tenant_data.channel_write_history'::regclass, 'tenant_data.write_scope'::regclass,
+                                   'channel_data.write_submission'::regclass)
               AND (SELECT oid FROM pg_roles WHERE rolname = 'repracer_stock') = ANY (pol.polroles) LOOP
     IF r.q NOT LIKE '%field = ''QUANTITY''%' OR (r.w <> '' AND r.w NOT LIKE '%field = ''QUANTITY''%') THEN
       bad := bad || format('%s: policy %s of the stock role is not limited to the QUANTITY field (Р-105)', r.t, r.polname);

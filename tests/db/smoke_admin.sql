@@ -298,4 +298,10 @@ SELECT pg_temp.expect_fail('system halt created by a person (step 18 finding 4)'
   INSERT INTO channel_data.pricing_halt (tenant_id, channel_account_id, channel, marketplace, reason_code, halted_at)
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', NULL, 'CHANNEL_MASS_SHIFT', now()) $q$,
   'a person does not create a system halt');
+-- Ревью шага 19, находка 3: наблюдения выборки остановки не записывает человек — иначе наблюдатель снимал бы остановку через проверку базы
+SELECT set_config('app.user_id', 'a1000000-0000-0000-0000-0000000000a9', true) \gset
+SELECT pg_temp.expect_fail('halt sample observation recorded by a viewer in the administrative service (step 19 review finding 3)', $q$
+  INSERT INTO channel_data.pricing_halt_sample (tenant_id, pricing_halt_id, channel_product_ref, observed_at, verdict)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'ab000000-0000-0000-0000-000000000001', 'forged-ref', now(), 'ACCEPT') $q$,
+  'a person does not record halt sample observations');
 ROLLBACK;

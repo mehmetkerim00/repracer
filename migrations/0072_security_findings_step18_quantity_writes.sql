@@ -192,7 +192,7 @@ CREATE FUNCTION channel_data.price_intent_manual_guard() RETURNS trigger
 DECLARE
   mem record;
 BEGIN
-  IF security.superuser_session() OR NOT (NEW.trigger_type = 'MANUAL' OR NEW.rule_code = 'MANUAL' OR NEW.created_by_membership_id IS NOT NULL) THEN
+  IF security.superuser_session() OR NOT (NEW.trigger_type = 'MANUAL' OR coalesce(NEW.rule_code, '') = 'MANUAL' OR NEW.created_by_membership_id IS NOT NULL) THEN
     RETURN NEW;
   END IF;
   -- Пользователь сессии есть только у административного сервиса (Р-90): у пути решения current_user_id() пуст, и intent отклоняет
@@ -228,6 +228,21 @@ BEGIN
 END $$;
 CREATE TRIGGER a00_pricing_halt_insert_guard BEFORE INSERT ON channel_data.pricing_halt
   FOR EACH ROW EXECUTE FUNCTION channel_data.pricing_halt_insert_guard();
+
+-- Ревью шага 19, находка 3: наблюдения выборки остановки были объявлены «своим стражем» (OWN_GUARD), но стража не было — любой
+-- участник, включая наблюдателя, вставлял в административной сессии наблюдения ACCEPT, и проверка базы снимала остановку без права
+-- снятия и без второго фактора. Наблюдения записывает проверка выборки пути решения; человек снимает остановку вручную (Р-52)
+CREATE FUNCTION channel_data.pricing_halt_sample_insert_guard() RETURNS trigger
+  LANGUAGE plpgsql AS $$
+BEGIN
+  IF security.admin_session() THEN
+    RAISE EXCEPTION 'a person does not record halt sample observations: they are recorded by the sample check of the decision path; a person releases a halt manually (Р-52, step 19 review finding 3)'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER a00_pricing_halt_sample_insert_guard BEFORE INSERT ON channel_data.pricing_halt_sample
+  FOR EACH ROW EXECUTE FUNCTION channel_data.pricing_halt_sample_insert_guard();
 RESET ROLE;
 ALTER FUNCTION channel_data.price_intent_manual_guard() SECURITY DEFINER SET search_path = pg_catalog, pg_temp;
 ALTER FUNCTION channel_data.price_intent_manual_guard() OWNER TO repracer_audit_writer;
@@ -423,6 +438,9 @@ CREATE OR REPLACE FUNCTION security.stock_path_allowed_privileges()
     -- Р-105: запись остатка в канал — только поле QUANTITY (политика строк по виду поля); таблицы, которые читают и пишут триггеры записи
     ('tenant_data.channel_write', 'SELECT', NULL), ('tenant_data.channel_write', 'INSERT', NULL), ('tenant_data.channel_write', 'UPDATE', NULL),
     ('tenant_data.channel_write_history', 'SELECT', NULL), ('tenant_data.channel_write_history', 'INSERT', NULL),
+    -- Ревью шага 19, находка 6: завершение записи (в том числе вытеснение ждущей новой версией) переносит её в историю и удаляет
+    -- строку и её отправки триггером channel_write_complete правами вызывающего; удаление незавершённой отклоняет страж удаления
+    ('tenant_data.channel_write', 'DELETE', NULL), ('channel_data.write_submission', 'SELECT', NULL), ('channel_data.write_submission', 'DELETE', NULL),
     -- UPDATE (status): триггер записи блокирует единицу FOR SHARE, а это требует права UPDATE хотя бы на один столбец; сменить статус
     -- роль может только как путь решения — ACTIVE → BLOCKED (страж 0068), и только у единицы остатка (политика)
     ('tenant_data.write_scope', 'SELECT', NULL), ('tenant_data.write_scope', 'UPDATE', 'status'),
@@ -456,6 +474,9 @@ CREATE POLICY stock_quantity ON tenant_data.write_scope_sync_state TO repracer_s
          WHERE s.tenant_id = write_scope_sync_state.tenant_id AND s.write_scope_id = write_scope_sync_state.write_scope_id AND s.field = 'QUANTITY'))
   WITH CHECK (tenant_id = security.current_tenant_id() AND EXISTS (SELECT 1 FROM tenant_data.write_scope s
          WHERE s.tenant_id = write_scope_sync_state.tenant_id AND s.write_scope_id = write_scope_sync_state.write_scope_id AND s.field = 'QUANTITY'));
+CREATE POLICY stock_quantity ON channel_data.write_submission TO repracer_stock
+  USING (tenant_id = security.current_tenant_id() AND EXISTS (SELECT 1 FROM tenant_data.channel_write w
+         WHERE w.tenant_id = write_submission.tenant_id AND w.channel_write_id = write_submission.channel_write_id AND w.field = 'QUANTITY'));
 CREATE POLICY stock_tenant ON tenant_data.edit_budget TO repracer_stock USING (tenant_id = security.current_tenant_id()) WITH CHECK (tenant_id = security.current_tenant_id());
 CREATE POLICY stock_tenant ON tenant_data.outbox_event FOR INSERT TO repracer_stock WITH CHECK (tenant_id = security.current_tenant_id());
 CREATE POLICY stock_tenant ON tenant_data.channel_account FOR SELECT TO repracer_stock USING (tenant_id = security.current_tenant_id());
