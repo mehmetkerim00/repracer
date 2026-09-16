@@ -455,8 +455,7 @@ export const STEP19_ROWS = [
         smoke('listing added to a consent by another owner (Р-101)')),
       m(replaceInFunction('tenant_data.migration_consent_item_guard()', 'IF NOT security.session_mfa() THEN', 'IF false THEN'), smoke('listing added to a consent without a second factor (Р-101)')),
       m(replaceInFunction('tenant_data.migration_consent_item_guard()', 'IF c.given_at <> now() THEN', 'IF false THEN'), smoke('listing added to a consent given in an earlier transaction (Р-101)')),
-      m(replaceInFunction('tenant_data.migration_consent_item_guard()', 'IF NOT EXISTS (SELECT 1 FROM channel_data.listing_migration_check lc', 'IF false AND EXISTS (SELECT 1 FROM channel_data.listing_migration_check lc'),
-        smoke('listing added to a consent without a preflight check (Р-101, Р-2)')),
+      // Шаг 20 (0074): «нет предполётной проверки» и «вердикт не совпадает» — одно условие; мутация — в строке Р-109
       m(replaceInFunction('tenant_data.migration_consent_revocation_guard()', 'IF mem.membership_id IS NULL OR NEW.revoked_by_membership_id IS DISTINCT FROM mem.membership_id THEN', 'IF false THEN'),
         smoke('consent revoked in the name of another owner (Р-101)')),
       m(replaceInFunction('tenant_data.migration_consent_revocation_guard()', 'IF NOT security.session_mfa() THEN', 'IF false THEN'), smoke('consent revoked without a second factor (Р-101)')),
@@ -546,8 +545,8 @@ export const STEP20_ROWS = [
   {
     row: 'Р-109', invariant: 'элемент согласия eBay — по вердикту, последней и свежей предполётной проверке, с поимённо принятыми потерями',
     mutations: [
-      m(replaceInFunction('tenant_data.migration_consent_item_guard()', 'IF lc.verdict IS DISTINCT FROM NEW.verdict_at_consent THEN', 'IF false THEN'),
-        smoke('consent to a listing whose preflight verdict is INELIGIBLE (Р-109)')),
+      m(replaceInFunction('tenant_data.migration_consent_item_guard()', 'IF lc.verdict IS NULL OR lc.verdict IS DISTINCT FROM NEW.verdict_at_consent THEN', 'IF false THEN'),
+        smoke('consent to a listing whose preflight verdict is INELIGIBLE (Р-109)'), smoke('listing added to a consent without a preflight check (Р-101, Р-2)')),
       m(replaceInFunction('tenant_data.migration_consent_item_guard()', 'AND l.checked_at > lc.checked_at) THEN', 'AND false) THEN'),
         smoke('consent to a superseded preflight check (Р-109)')),
       m(replaceInFunction('tenant_data.migration_consent_item_guard()', "IF lc.checked_at < now() - interval '24 hours' THEN", 'IF false THEN'),

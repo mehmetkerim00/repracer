@@ -45,13 +45,12 @@ BEGIN
   SELECT l.verdict, l.checked_at, l.findings INTO lc FROM channel_data.listing_migration_check l
    WHERE l.tenant_id = NEW.tenant_id AND l.channel_account_id = c.channel_account_id AND l.listing_id = NEW.listing_id
      AND l.listing_migration_check_id = NEW.listing_migration_check_id AND l.listing_snapshot_sha256 = NEW.listing_snapshot_sha256;
-  IF lc.verdict IS NULL THEN
-    RAISE EXCEPTION 'migration consent item for listing % refers to no preflight check of this listing (Р-101, Р-2)', NEW.listing_id
-      USING ERRCODE = 'foreign_key_violation';
-  END IF;
-  -- Р-109: продавец соглашается с тем, что показала проверка, — вердикт согласия и вердикт проверки совпадают
-  IF lc.verdict IS DISTINCT FROM NEW.verdict_at_consent THEN
-    RAISE EXCEPTION 'migration consent verdict % for listing % does not match the preflight verdict % (Р-109)', NEW.verdict_at_consent, NEW.listing_id, lc.verdict
+  -- Р-109: продавец соглашается с тем, что показала проверка, — вердикт согласия и вердикт проверки совпадают. Отсутствие проверки —
+  -- то же условие (вердикт NULL отличается от любого): отдельная ветка была бы недостижима своей причиной [Р-104]
+  IF lc.verdict IS NULL OR lc.verdict IS DISTINCT FROM NEW.verdict_at_consent THEN
+    RAISE EXCEPTION '%', CASE WHEN lc.verdict IS NULL
+      THEN format('migration consent item for listing %s refers to no preflight check of this listing (Р-101, Р-2)', NEW.listing_id)
+      ELSE format('migration consent verdict %s for listing %s does not match the preflight verdict %s (Р-109)', NEW.verdict_at_consent, NEW.listing_id, lc.verdict) END
       USING ERRCODE = 'check_violation';
   END IF;
   -- Р-109: более поздняя проверка листинга отменяет показанную раньше
