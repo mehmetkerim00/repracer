@@ -12,7 +12,7 @@ jobs:
         image: postgres:16
         env: { POSTGRES_HOST_AUTH_METHOD: trust }
         ports: ['5432:5432']
-        options: --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+        options: --shm-size=1g --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
     env:
       PGHOST: 127.0.0.1
       PGPORT: '5432'
