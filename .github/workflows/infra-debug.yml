@@ -1,0 +1,68 @@
+# Временный разбор шага 20: брокер и ClickHouse отдельно от полной сборки. Данные синтетические.
+name: infra-debug
+on:
+  push:
+    branches: [step20-infra]
+jobs:
+  broker:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_HOST_AUTH_METHOD: trust }
+        ports: ['5432:5432']
+        options: --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: postgres
+      REPRACER_PG_URL: postgres://svc_app@127.0.0.1:5432/repracer_eu
+      REPRACER_PG_ADMIN_URL: postgres://postgres@127.0.0.1:5432/postgres
+      REPRACER_PG_TEMPLATE: repracer_template
+      REPRACER_KAFKA_BROKERS: 127.0.0.1:19092
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: npm }
+      - name: Redpanda
+        run: |
+          docker run -d --name redpanda -p 19092:19092 redpandadata/redpanda:v26.2.2 redpanda start \
+            --overprovisioned --smp 1 --memory 1G --reserve-memory 0M --node-id 0 --check=false \
+            --kafka-addr PLAINTEXT://0.0.0.0:19092 --advertise-kafka-addr PLAINTEXT://127.0.0.1:19092
+          for i in $(seq 1 60); do docker exec redpanda rpk cluster health 2>/dev/null | grep -q 'Healthy:.*true' && break; sleep 2; done
+          docker exec redpanda rpk cluster config get auto_create_topics_enabled || true
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
+      - run: npm ci
+      - run: scripts/db/prepare.sh repracer_eu
+      - name: Broker order test
+        run: npm test -w @repracer/pricing-worker
+      - name: Diagnostics
+        if: always()
+        run: |
+          docker exec redpanda rpk topic list || true
+          docker exec redpanda rpk topic describe raw.competitor-snapshot.v1 -p || true
+          docker exec redpanda rpk group list || true
+          docker exec redpanda rpk group describe repracer-pricing-path || true
+          docker exec redpanda rpk group describe repracer-write-dispatcher || true
+          docker logs redpanda 2>&1 | tail -80
+  clickhouse:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      REPRACER_CH_URL: http://127.0.0.1:18123
+      REPRACER_CH_USER: repracer_local_admin
+      REPRACER_CH_PASSWORD: ci-synthetic-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: npm }
+      - name: ClickHouse
+        run: |
+          docker run -d --name clickhouse -p 18123:8123 --ulimit nofile=262144:262144 \
+            -e CLICKHOUSE_USER=repracer_local_admin -e CLICKHOUSE_PASSWORD=ci-synthetic-only -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 \
+            clickhouse/clickhouse-server:26.8.4.11
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:18123/ping && break; sleep 2; done
+          curl -s -H 'X-ClickHouse-User: repracer_local_admin' -H 'X-ClickHouse-Key: ci-synthetic-only' --data-binary 'SELECT version()' http://127.0.0.1:18123/
+      - name: Apply DDL
+        run: node infra/local/apply-clickhouse.mjs
