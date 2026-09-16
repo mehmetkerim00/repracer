@@ -81,11 +81,13 @@ function worldRow(i: number): World {
 function decisionPair(i: number): { intent: PgRow; decision: PgRow } {
   const w = worldRow(i);
   const current = prices[w.scopeIndex]!;
-  const buybox = Math.max(1_100, current + Math.round((rand() - 0.5) * 120));
-  const target = buybox - 5;
-  prices[w.scopeIndex] = target;
   const floor = 1_000 + (w.scopeIndex % 400);
   const ceiling = 6_000 + (w.scopeIndex % 900);
+  // Шаг 20: случайное блуждание цены держится внутри границ — одобренное решение ниже пола отклоняет ограничение ClickHouse
+  // floor_respected (первый прогон замера в CI упал на нём: генератор до шага 20 ни разу не запускался)
+  const buybox = Math.min(ceiling - 10, Math.max(floor + 10, current + Math.round((rand() - 0.5) * 120)));
+  const target = buybox - 5;
+  prices[w.scopeIndex] = target;
   const rejected = rand() < 0.2;
   const withFx = rand() < 0.1;
   const intentId = uuid('intent', i);
