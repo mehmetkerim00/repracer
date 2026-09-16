@@ -1,0 +1,53 @@
+# CI [Р-84]: всё — на чистой PostgreSQL; пропущенный, отложенный или отменённый тест — красная сборка (scripts/test-all.mjs).
+# Р-89: файл *.test.ts, не входящий в скрипт сборки, — красная сборка до запуска тестов. Данные синтетические.
+# Р-95: мутационная проверка схемы — до прогона тестов: тесты работают с изолированными базами из шаблона и в конце его убирают.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: postgres
+      REPRACER_PG_URL: postgres://svc_app@127.0.0.1:5432/repracer_eu
+      REPRACER_PG_ADMIN_URL: postgres://postgres@127.0.0.1:5432/postgres
+      REPRACER_PG_TEMPLATE: repracer_template
+      REPRACER_KAFKA_BROKERS: 127.0.0.1:19092
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Redpanda (порядок записей за брокером, Р-24) — версия как в infra/local/compose.yaml
+        run: |
+          docker run -d --name redpanda -p 19092:19092 redpandadata/redpanda:v26.2.2 redpanda start \
+            --overprovisioned --smp 1 --memory 1G --reserve-memory 0M --node-id 0 --check=false \
+            --kafka-addr PLAINTEXT://0.0.0.0:19092 --advertise-kafka-addr PLAINTEXT://127.0.0.1:19092
+          for i in $(seq 1 60); do docker exec redpanda rpk cluster health 2>/dev/null | grep -q 'Healthy:.*true' && exit 0; sleep 2; done
+          docker logs redpanda; exit 1
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
+      - run: npm ci
+      - name: Every test file is in the build (Р-89)
+        run: node scripts/check-test-inclusion.mjs
+      - name: Database — migrations, template, smoke tests of the schema
+        run: scripts/db/prepare.sh repracer_eu
+      - name: Mutation check of the schema (Р-95) — a guard removed must fail its own check
+        run: node scripts/db/mutation-check.mjs --jobs 2
+      - run: npm run typecheck
+      - name: All tests, no skips
+        run: node scripts/test-all.mjs
