@@ -1,0 +1,4848 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "kaufland-sim/burst-rate-limit",
+  "channel": "KAUFLAND",
+  "apiVersion": "2.44.0",
+  "title": "Симулятор: 30 товаров меняют Buy Box в одну секунду — лимит запросов",
+  "description": "Конкурент одновременно снижает цену на 30 товаров; 30 уведомлений приходят в одну секунду, путь решения отправляет 30 PATCH. Бюджет адаптера — консервативный (25 в секунду, KFL_C01): часть записей откладывается и уходит обходом диспетчера. Вариант K-04: лимит считается на партнёра, другие продавцы партнёра уже расходуют 110 из 111 запросов в секунду — канал сам отвечает 429. Наблюдение: второе уведомление (мы выиграли Buy Box) с тем же моментом до секунды, что и первое, путь решения отклоняет как OUT_OF_ORDER — при debounce 0 (K-10) так же отклонилось бы и настоящее изменение рынка в ту же секунду.",
+  "tags": [
+    "simulator",
+    "pipeline"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "vendor/kaufland/seller-api-v2/2026-09-14/openapi.json#PATCH /units/{id_unit}",
+      "https://sellerapi.kaufland.com/?page=push-notifications#events",
+      "docs/channel-capabilities.md#7"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn-seller-0001",
+      "marketplaces": [
+        "de",
+        "at"
+      ]
+    },
+    "credentials": {
+      "seller": {
+        "clientKey": "syn-seller-client-key-0001",
+        "secretKey": "syn-seller-secret-key-0001"
+      }
+    },
+    "secrets": [
+      "wh_tok_synthetic_0007"
+    ],
+    "pricing": {
+      "scopes": [
+        {
+          "writeScopeId": "ws-price-de-7301",
+          "productId": "prod-7301",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7301",
+          "channelProductRef": "362007301",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7301"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7301"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-7302",
+          "productId": "prod-7302",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7302",
+          "channelProductRef": "362007302",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7302"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7302"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-7303",
+          "productId": "prod-7303",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7303",
+          "channelProductRef": "362007303",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7303"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7303"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-7304",
+          "productId": "prod-7304",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7304",
+          "channelProductRef": "362007304",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7304"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7304"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-7305",
+          "productId": "prod-7305",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7305",
+          "channelProductRef": "362007305",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7305"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7305"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-7306",
+          "productId": "prod-7306",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7306",
+          "channelProductRef": "362007306",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7306"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7306"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-7307",
+          "productId": "prod-7307",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7307",
+          "channelProductRef": "362007307",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7307"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7307"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-7308",
+          "productId": "prod-7308",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7308",
+          "channelProductRef": "362007308",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7308"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7308"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-7309",
+          "productId": "prod-7309",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7309",
+          "channelProductRef": "362007309",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7309"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7309"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-7310",
+          "productId": "prod-7310",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7310",
+          "channelProductRef": "362007310",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7310"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7310"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-7311",
+          "productId": "prod-7311",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7311",
+          "channelProductRef": "362007311",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7311"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7311"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-7312",
+          "productId": "prod-7312",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7312",
+          "channelProductRef": "362007312",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7312"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7312"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-7313",
+          "productId": "prod-7313",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7313",
+          "channelProductRef": "362007313",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7313"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7313"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-7314",
+          "productId": "prod-7314",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7314",
+          "channelProductRef": "362007314",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7314"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7314"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-7315",
+          "productId": "prod-7315",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7315",
+          "channelProductRef": "362007315",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7315"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7315"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-7316",
+          "productId": "prod-7316",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7316",
+          "channelProductRef": "362007316",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7316"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7316"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-7317",
+          "productId": "prod-7317",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7317",
+          "channelProductRef": "362007317",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7317"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7317"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-7318",
+          "productId": "prod-7318",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7318",
+          "channelProductRef": "362007318",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7318"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7318"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-7319",
+          "productId": "prod-7319",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7319",
+          "channelProductRef": "362007319",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7319"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7319"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-7320",
+          "productId": "prod-7320",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7320",
+          "channelProductRef": "362007320",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7320"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7320"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-7321",
+          "productId": "prod-7321",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7321",
+          "channelProductRef": "362007321",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7321"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7321"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-7322",
+          "productId": "prod-7322",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7322",
+          "channelProductRef": "362007322",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7322"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7322"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-7323",
+          "productId": "prod-7323",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7323",
+          "channelProductRef": "362007323",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7323"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7323"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-7324",
+          "productId": "prod-7324",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7324",
+          "channelProductRef": "362007324",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7324"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7324"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-7325",
+          "productId": "prod-7325",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7325",
+          "channelProductRef": "362007325",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7325"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7325"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-7326",
+          "productId": "prod-7326",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7326",
+          "channelProductRef": "362007326",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7326"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7326"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-7327",
+          "productId": "prod-7327",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7327",
+          "channelProductRef": "362007327",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7327"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7327"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-7328",
+          "productId": "prod-7328",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7328",
+          "channelProductRef": "362007328",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7328"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7328"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-7329",
+          "productId": "prod-7329",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7329",
+          "channelProductRef": "362007329",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7329"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7329"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-7330",
+          "productId": "prod-7330",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7330",
+          "channelProductRef": "362007330",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7330"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7330"
+          }
+        }
+      ],
+      "competitorDaily": {
+        "de|362007301|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362007302|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362007303|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362007304|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362007305|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362007306|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362007307|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362007308|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362007309|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362007310|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362007311|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362007312|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362007313|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362007314|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362007315|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362007316|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362007317|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362007318|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362007319|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362007320|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362007321|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362007322|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362007323|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362007324|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362007325|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362007326|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362007327|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362007328|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362007329|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "de|362007330|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ]
+      }
+    },
+    "channelModel": {
+      "seed": 4,
+      "webhookUrl": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0007",
+      "units": [
+        {
+          "idUnit": 7301,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7301",
+          "idProduct": 362007301,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        },
+        {
+          "idUnit": 7302,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7302",
+          "idProduct": 362007302,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        },
+        {
+          "idUnit": 7303,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7303",
+          "idProduct": 362007303,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        },
+        {
+          "idUnit": 7304,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7304",
+          "idProduct": 362007304,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        },
+        {
+          "idUnit": 7305,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7305",
+          "idProduct": 362007305,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        },
+        {
+          "idUnit": 7306,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7306",
+          "idProduct": 362007306,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        },
+        {
+          "idUnit": 7307,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7307",
+          "idProduct": 362007307,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        },
+        {
+          "idUnit": 7308,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7308",
+          "idProduct": 362007308,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        },
+        {
+          "idUnit": 7309,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7309",
+          "idProduct": 362007309,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        },
+        {
+          "idUnit": 7310,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7310",
+          "idProduct": 362007310,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        },
+        {
+          "idUnit": 7311,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7311",
+          "idProduct": 362007311,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        },
+        {
+          "idUnit": 7312,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7312",
+          "idProduct": 362007312,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        },
+        {
+          "idUnit": 7313,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7313",
+          "idProduct": 362007313,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        },
+        {
+          "idUnit": 7314,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7314",
+          "idProduct": 362007314,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        },
+        {
+          "idUnit": 7315,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7315",
+          "idProduct": 362007315,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        },
+        {
+          "idUnit": 7316,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7316",
+          "idProduct": 362007316,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        },
+        {
+          "idUnit": 7317,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7317",
+          "idProduct": 362007317,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        },
+        {
+          "idUnit": 7318,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7318",
+          "idProduct": 362007318,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        },
+        {
+          "idUnit": 7319,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7319",
+          "idProduct": 362007319,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        },
+        {
+          "idUnit": 7320,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7320",
+          "idProduct": 362007320,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        },
+        {
+          "idUnit": 7321,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7321",
+          "idProduct": 362007321,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        },
+        {
+          "idUnit": 7322,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7322",
+          "idProduct": 362007322,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        },
+        {
+          "idUnit": 7323,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7323",
+          "idProduct": 362007323,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        },
+        {
+          "idUnit": 7324,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7324",
+          "idProduct": 362007324,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        },
+        {
+          "idUnit": 7325,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7325",
+          "idProduct": 362007325,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        },
+        {
+          "idUnit": 7326,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7326",
+          "idProduct": 362007326,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        },
+        {
+          "idUnit": 7327,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7327",
+          "idProduct": 362007327,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        },
+        {
+          "idUnit": 7328,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7328",
+          "idProduct": 362007328,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        },
+        {
+          "idUnit": 7329,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7329",
+          "idProduct": 362007329,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        },
+        {
+          "idUnit": 7330,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7330",
+          "idProduct": 362007330,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        }
+      ],
+      "competitors": [
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007301,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 60000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007302,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 60000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007303,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 60000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007304,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 60000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007305,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 60000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007306,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 60000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007307,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 60000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007308,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 60000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007309,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 60000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007310,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 60000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007311,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 60000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007312,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 60000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007313,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 60000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007314,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 60000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007315,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 60000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007316,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 60000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007317,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 60000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007318,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 60000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007319,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 60000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007320,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 60000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007321,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 60000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007322,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 60000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007323,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 60000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007324,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 60000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007325,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 60000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007326,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 60000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007327,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 60000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007328,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 60000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007329,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 60000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007330,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 60000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        }
+      ],
+      "params": {
+        "buyBoxChanged": {
+          "delivered": true,
+          "debounceMs": 0,
+          "lossShare": 0
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "id": "thirty-minutes",
+      "kind": "channelRun",
+      "durationMs": 1800000,
+      "tickMs": 60000,
+      "expect": {
+        "deliveries": 60,
+        "verdicts": {
+          "ACCEPT": {
+            "$gte": 30
+          }
+        },
+        "decisions": {
+          "CHANGED": 30
+        }
+      }
+    }
+  ],
+  "exchanges": [],
+  "expect": {
+    "channel": {
+      "units": {
+        "$every": {
+          "listingPriceMinor": 1795,
+          "winsBuyBox": true
+        }
+      },
+      "stats": {
+        "rateLimited": 0
+      },
+      "violations": []
+    },
+    "pipeline": {
+      "writes": {
+        "$every": {
+          "amountMinor": 1795,
+          "status": "APPLIED"
+        }
+      }
+    }
+  },
+  "variants": [
+    {
+      "id": "k04-partner-limit-shared",
+      "question": "K-04",
+      "params": {
+        "rateLimitScope": "PARTNER",
+        "otherSellersLoadRps": 110
+      },
+      "finding": "При лимите на партнёра нагрузка других продавцов отнимает наш бюджет: канал отвечает 429, записи уходят повторами диспетчера. Через 30 минут все 30 цен в канале; задержка — минуты, а не секунды.",
+      "expect": {
+        "channel": {
+          "units": {
+            "$every": {
+              "listingPriceMinor": 1795
+            }
+          },
+          "stats": {
+            "rateLimited": {
+              "$gt": 0
+            }
+          },
+          "violations": []
+        },
+        "pipeline": {
+          "writes": {
+            "$every": {
+              "amountMinor": 1795,
+              "status": "APPLIED"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

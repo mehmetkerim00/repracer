@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
-import type { DecisionListItem, DecisionTrace, StopView } from '@repracer/console-model';
+import type { BoundsDiffView, DecisionListItem, DecisionTrace, PriceFeedView, StopView, StrategyListView, StrategyPreviewView } from '@repracer/console-model';
 import { buildStandWorlds, pgStandJoinMember, pgStandUsers, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_EMAILS, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { pgStoreFactory } from '@repracer/contract-tests/pg-store';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
@@ -104,4 +104,34 @@ test('Р-74 on PostgreSQL: a NO_OP decision has no explanation in the database a
     `SELECT count(*) FILTER (WHERE explanation IS NULL AND no_change_reason IS NOT NULL)::int AS reason_only, count(*)::int AS total
        FROM channel_data.price_decision WHERE intent_class = 'NO_OP'`)).rows);
   assert.ok(row.total > 0 && row.reason_only === row.total, JSON.stringify(row));
+});
+
+test('step 21 on PostgreSQL: preview and save of a strategy, difference screen and bounds edit go through the database roles; the feed reads the write history', async () => {
+  const owner = await login('OWNER');
+  const operator = await login('OPERATOR');
+  const url = (...parts: string[]) => `/api/worlds/${[WORLD, ...parts].map(encodeURIComponent).join('/')}`;
+  const post = (auth: { authorization: string; cookie: string }, path: string, body: unknown) => handle({ method: 'POST', url: path, body, ...auth });
+  const draft = { name: 'Synthetic PG undercut', params: { type: 'MATCH_BUYBOX', undercutMinor: 3, holdWhenWinning: false, atBound: 'CAP' }, deadbandMinor: 0 };
+  const preview = await post(owner, url('strategies', 'preview'), { draft, writeScopeIds: ['ws-price-de-4101'] });
+  assert.equal(preview.status, 200, JSON.stringify(preview.body));
+  const token = (preview.body as StrategyPreviewView).previewToken;
+  const saved = await post(owner, url('strategies'), { draft, writeScopeIds: ['ws-price-de-4101'], strategyId: null, previewToken: token, confirmed: true });
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  const list = (saved.body as { strategies: StrategyListView }).strategies;
+  assert.ok(list.strategies.some((x) => x.version === 1 && x.scopes.some((u) => u.writeScopeId === 'ws-price-de-4101')), JSON.stringify(list.strategies));
+
+  const request = { writeScopeIds: ['ws-price-de-4101'], max: { kind: 'SET', minor: 2600 } };
+  assert.equal((await post(operator, url('bounds', 'plan'), { request })).status, 403);
+  const plan = await post(owner, url('bounds', 'plan'), { request });
+  assert.equal(plan.status, 200, JSON.stringify(plan.body));
+  const diff = plan.body as BoundsDiffView;
+  assert.deepEqual([diff.rows[0]!.maxBefore, diff.rows[0]!.maxAfter], ['€25.00', '€26.00']);
+  const applied = await post(owner, url('bounds', 'apply'), { request, planToken: diff.planToken, confirmed: true });
+  assert.equal(applied.status, 200, JSON.stringify(applied.body));
+  const again = await post(owner, url('bounds', 'plan'), { request: { ...request, max: { kind: 'SET', minor: 2700 } } });
+  assert.equal((again.body as BoundsDiffView).rows[0]!.maxBefore, '€26.00', 'the database now holds the new version');
+
+  const feed = await handle({ method: 'GET', url: url('feed'), body: undefined, ...owner });
+  assert.equal(feed.status, 200);
+  assert.ok((feed.body as PriceFeedView).items.some((i) => i.to === '€17.75' && i.from === '€18.50'), JSON.stringify((feed.body as PriceFeedView).items));
 });

@@ -1,0 +1,327 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "kaufland-sim/polling-buybox-units",
+  "channel": "KAUFLAND",
+  "apiVersion": "2.44.0",
+  "title": "Симулятор: опрос GET /buybox без buy_box_changed и единицы цены (K-17)",
+  "description": "Р-45: без раннего доступа к buy_box_changed конкуренты читаются опросом GET /buybox каждые 5 минут [Р-47]. Спецификация описывает price как number «в валюте витрины»; адаптер читает основные единицы [KFL_C06]. Вариант K-17 = MINOR: канал отдаёт центы, и проверка входов должна остановить каждый снимок как ×100, не пропустив ни одной цены в канал.",
+  "tags": [
+    "simulator",
+    "pipeline"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "vendor/kaufland/seller-api-v2/2026-09-14/openapi.json#PATCH /units/{id_unit}",
+      "https://sellerapi.kaufland.com/?page=push-notifications#events",
+      "docs/channel-capabilities.md#7"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn-seller-0001",
+      "marketplaces": [
+        "de",
+        "at"
+      ]
+    },
+    "credentials": {
+      "seller": {
+        "clientKey": "syn-seller-client-key-0001",
+        "secretKey": "syn-seller-secret-key-0001"
+      }
+    },
+    "secrets": [
+      "wh_tok_synthetic_0007"
+    ],
+    "pricing": {
+      "scopes": [
+        {
+          "writeScopeId": "ws-price-de-7101",
+          "productId": "prod-7101",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7101",
+          "channelProductRef": "362007101",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7101"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7101"
+          }
+        }
+      ],
+      "competitorDaily": {
+        "de|362007101|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ]
+      },
+      "competitorState": {
+        "de|362007101|new": {
+          "observedAt": "2026-09-14T09:00:00.000Z",
+          "buyboxMinor": 1800,
+          "lowestMinor": 1800
+        }
+      }
+    },
+    "channelModel": {
+      "seed": 47,
+      "webhookUrl": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0007",
+      "units": [
+        {
+          "idUnit": 7101,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7101",
+          "idProduct": 362007101,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        }
+      ],
+      "competitors": [
+        {
+          "sellerRef": "Synthetic Repricer",
+          "storefront": "de",
+          "idProduct": 362007101,
+          "priceMinor": 1900,
+          "behaviour": {
+            "kind": "UNDERCUT_SELF",
+            "undercutMinor": 5,
+            "reactionMs": 300000,
+            "floorMinor": 1400,
+            "ceilingMinor": 2600
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007101,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 120000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        }
+      ],
+      "params": {
+        "buyBoxChanged": {
+          "delivered": false,
+          "debounceMs": 0,
+          "lossShare": 1
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "id": "two-hours-polling",
+      "kind": "channelRun",
+      "durationMs": 7200000,
+      "tickMs": 300000,
+      "poll": [
+        {
+          "marketplace": "de",
+          "channelProductRef": "362007101",
+          "condition": "new"
+        }
+      ],
+      "expect": {
+        "verdicts": {
+          "ACCEPT": 24
+        },
+        "decisions": {
+          "CHANGED": {
+            "$gt": 10
+          }
+        }
+      }
+    }
+  ],
+  "exchanges": [],
+  "expect": {
+    "noAlerts": true,
+    "channel": {
+      "stats": {
+        "requests": {
+          "GET /v2/buybox": 24
+        }
+      },
+      "violations": []
+    },
+    "pipeline": {
+      "rejectedSnapshots": [],
+      "writes": {
+        "$every": {
+          "amountMinor": {
+            "$gte": 1500
+          }
+        }
+      }
+    }
+  },
+  "variants": [
+    {
+      "id": "k17-buybox-in-cents",
+      "question": "K-17",
+      "params": {
+        "buyboxPriceUnits": "MINOR"
+      },
+      "finding": "Если GET /buybox отдаёт центы, каждый снимок отклоняется как ×100 (UNIT_SCALE_X100) с алертом, в канал не уходит ни одной цены. Защита работает, но репрайсинг опросом стоит полностью.",
+      "expect": {
+        "alerts": [
+          {
+            "code": "COMPETITOR_UNIT_SCALE_SUSPECT"
+          }
+        ],
+        "channel": {
+          "units": [
+            {
+              "listingPriceMinor": 1850
+            }
+          ],
+          "violations": []
+        },
+        "pipeline": {
+          "writes": [],
+          "rejectedSnapshots": {
+            "$every": {
+              "reasonCode": "UNIT_SCALE_X100"
+            }
+          }
+        }
+      },
+      "stepExpect": {
+        "two-hours-polling": {
+          "verdicts": {
+            "REJECT": 24
+          },
+          "decisions": {}
+        }
+      }
+    }
+  ]
+}

@@ -9,3 +9,7 @@ export { decisionList, decisionTrace, explanationOf, isDangerous, noChangeTitle,
 export { rejectedView, type RejectedItem, type RejectedKind, type RejectedView } from './rejected.ts';
 export { boundsView, costInScopeCurrency, effectiveFloor, priceBreakdown, type BoundsView, type EffectiveFloor, type MoneyLine, type PriceBreakdown } from './bounds.ts';
 export { planStop, stopView, type AuditCard, type HaltCard, type StopCard, type StopImpact, type StopPlan, type StopTarget, type StopView, type TargetCard } from './stop.ts';
+export { fingerprint, parseStrategyDraft, previewToken, strategiesView, strategyPreviewView, type DraftProblem, type PreviewRow, type StrategyDraft, type StrategyListView, type StrategyPreviewView } from './strategies.ts';
+export { boundsDiffView, boundsPlanToken, expandBoundsEdit, parseBoundsEditRequest, type BoundAdjust, type BoundsDiffView, type BoundsEditRequest, type BoundsRequestProblem, type DiffFlag, type DiffRow } from './bounds-edit.ts';
+export { priceFeed, type FeedItem, type PriceFeedView } from './price-feed.ts';
+export { dangerousReport, REPORT_PERIODS_DAYS, type DangerousItem, type DangerousReportView } from './dangerous-report.ts';

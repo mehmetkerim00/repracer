@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import type { SanityConfig } from '@repracer/input-sanity';
 import type { MemorySeed, SeedBound } from '@repracer/pricing-pipeline';
 import type { CostInputs, TriggerType } from '@repracer/pricing-model';
+import type { KauflandChannelModelSpec } from '../simulator/kaufland-channel.ts';
 
 /**
  * Формат сценария контрактного теста. Один файл — один сценарий: мир (аккаунт, ключи, часы, бюджет, данные цен),
@@ -43,6 +44,8 @@ export interface World {
   pii?: string[];
   /** Строки, которых не должно быть в журнале и алертах (токен адреса вебхука) */
   secrets?: string[];
+  /** Симулятор [Р-113]: канал с состоянием вместо обменов; exchanges сценария пусты */
+  channelModel?: KauflandChannelModelSpec;
 }
 
 export type PortMethod =
@@ -121,7 +124,18 @@ export interface PipelineDispatchDueStep { id: string; kind: 'pipelineDispatchDu
 export type PipelineStep = PipelineInboundStep | PipelinePollStep | PipelineRecomputeStep | PipelineEnableStep | PricingMutationStep
   | PipelineReviewHaltsStep | PipelineReleaseHaltStep | PipelineDispatchDueStep | PricingStopStep;
 
-export type Step = CallStep | InboundStep | ClockStep | PipelineStep;
+/** Симулятор: доставить уведомления модели канала, срок которых наступил, через путь решения */
+export interface ChannelDeliverStep { id: string; kind: 'channelDeliver'; expect?: unknown }
+/** Симулятор: заказ покупателя в канале (K-11) */
+export interface ChannelOrderStep { id: string; kind: 'channelOrder'; idOffer: string; quantity: number }
+
+/**
+ * Симулятор: прогон мира за период — каждые tickMs часы сдвигаются, уведомления модели идут через путь решения,
+ * при poll — опрос конкурентов, затем обход диспетчера записей [Р-64]. Итог — сводка, а не отчёты каждого снимка.
+ */
+export interface ChannelRunStep { id: string; kind: 'channelRun'; durationMs: number; tickMs: number; poll?: unknown[]; expect?: unknown }
+
+export type Step = CallStep | InboundStep | ClockStep | PipelineStep | ChannelDeliverStep | ChannelOrderStep | ChannelRunStep;
 
 export interface ScriptedResponse { status: number; headers?: Record<string, string>; body?: unknown }
 
@@ -158,11 +172,18 @@ export interface Scenario {
     allExchangesUsed?: boolean;
     /** Подмножество состояния хранилища пути решения после всех шагов */
     pipeline?: unknown;
+    /** Подмножество состояния модели канала (только с world.channelModel) */
+    channel?: unknown;
   };
+  /**
+   * Варианты ответов на открытые вопросы канала (только с world.channelModel): тот же сценарий при других параметрах модели.
+   * expect варианта заменяет ожидания сценария целиком, stepExpect — ожидания отдельных шагов.
+   */
+  variants?: Array<{ id: string; question: string; params: Record<string, unknown>; finding?: string; expect?: Scenario['expect']; stepExpect?: Record<string, unknown> }>;
 }
 
 const ID_RE = /^[a-z0-9]+(?:[-/][a-z0-9]+)*$/;
-const PIPELINE_KINDS = new Set(['pipelineInbound', 'pipelinePoll', 'pipelineRecompute', 'pipelineEnableRepricing', 'pricingMutation', 'pipelineReviewHalts', 'pipelineReleaseHalt', 'pricingStop']);
+const PIPELINE_KINDS = new Set(['channelDeliver', 'channelRun', 'pipelineInbound', 'pipelinePoll', 'pipelineRecompute', 'pipelineEnableRepricing', 'pricingMutation', 'pipelineReviewHalts', 'pipelineReleaseHalt', 'pricingStop']);
 
 export function validateScenario(s: Scenario): string[] {
   const problems: string[] = [];
@@ -184,6 +205,13 @@ export function validateScenario(s: Scenario): string[] {
     if (PIPELINE_KINDS.has(step.kind) && !s.world?.pricing) problems.push(`step ${step.id}: pipeline steps require world.pricing`);
   }
   if (s.expect?.pipeline !== undefined && !s.world?.pricing) problems.push('expect.pipeline requires world.pricing');
+  if (s.world?.channelModel && (s.exchanges ?? []).length > 0) problems.push('world.channelModel replaces exchanges: exchanges must be empty');
+  if (!s.world?.channelModel && (s.variants || s.expect?.channel !== undefined || (s.steps ?? []).some((st) => st.kind === 'channelDeliver' || st.kind === 'channelOrder' || st.kind === 'channelRun'))) {
+    problems.push('variants, expect.channel and channel steps require world.channelModel');
+  }
+  for (const c of s.world?.channelModel?.competitors ?? []) {
+    if (c.behaviour.kind === 'RANDOM_WALK' && !(c.behaviour.everyMs > 0)) problems.push(`competitor ${c.sellerRef}: RANDOM_WALK everyMs must be > 0`);
+  }
   const exchangeIds = new Set<string>();
   for (const ex of s.exchanges ?? []) {
     if (exchangeIds.has(ex.id)) problems.push(`duplicate exchange id ${ex.id}`);
@@ -192,6 +220,21 @@ export function validateScenario(s: Scenario): string[] {
     if (Boolean(ex.response) === Boolean(ex.fault)) problems.push(`exchange ${ex.id}: exactly one of response or fault`);
   }
   return problems;
+}
+
+/** Сценарий симулятора и его варианты: по одному прогону на набор параметров модели */
+export function expandVariants(s: Scenario): Array<{ variant: string; question: string | null; finding: string | null; scenario: Scenario }> {
+  const base = { variant: 'default', question: null, finding: null, scenario: s };
+  if (!s.world.channelModel || !s.variants) return [base];
+  return [base, ...s.variants.map((v) => {
+    const model = s.world.channelModel!;
+    const steps = s.steps.map((step) => (v.stepExpect && step.id in v.stepExpect ? { ...step, expect: v.stepExpect[step.id] } : step)) as Step[];
+    const scenario: Scenario = {
+      ...s, steps, world: { ...s.world, channelModel: { ...model, params: { ...model.params, ...v.params } } },
+      ...(v.expect ? { expect: v.expect } : {}),
+    };
+    return { variant: v.id, question: v.question, finding: v.finding ?? null, scenario };
+  })];
 }
 
 export function loadScenarios(dir: string): Array<{ file: string; scenario: Scenario }> {

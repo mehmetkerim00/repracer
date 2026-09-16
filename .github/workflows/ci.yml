@@ -35,6 +35,9 @@ jobs:
       REPRACER_CH_INGEST_PASSWORD: ci-synthetic-ingest
       REPRACER_CH_VERIFIER_USER: repracer_ci_verifier
       REPRACER_CH_VERIFIER_PASSWORD: ci-synthetic-verifier
+      # Шаг 21: шлюз аналитики — чтение истории одного тенанта для бэктеста (repracer_tenant_reader, политика строк 020)
+      REPRACER_CH_READER_USER: repracer_ci_reader
+      REPRACER_CH_READER_PASSWORD: ci-synthetic-reader
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -71,6 +74,8 @@ jobs:
           q "GRANT repracer_ingest TO $REPRACER_CH_INGEST_USER"
           q "CREATE USER IF NOT EXISTS $REPRACER_CH_VERIFIER_USER IDENTIFIED WITH sha256_password BY '$REPRACER_CH_VERIFIER_PASSWORD' DEFAULT ROLE repracer_retention"
           q "GRANT repracer_retention TO $REPRACER_CH_VERIFIER_USER"
+          q "CREATE USER IF NOT EXISTS $REPRACER_CH_READER_USER IDENTIFIED WITH sha256_password BY '$REPRACER_CH_READER_PASSWORD' DEFAULT ROLE repracer_tenant_reader"
+          q "GRANT repracer_tenant_reader TO $REPRACER_CH_READER_USER"
       - name: Mutation check of the schema (Р-95) — a guard removed must fail its own check
         run: node scripts/db/mutation-check.mjs --jobs 2
       - run: npm run typecheck

@@ -1,0 +1,384 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "kaufland-sim/quantity-shared-offer",
+  "channel": "KAUFLAND",
+  "apiVersion": "2.44.0",
+  "title": "Симулятор: остаток id_offer на двух витринах, заказ и запись без listing_price",
+  "description": "Р-35: остаток — аккаунт + id_offer, общий для unit на de и at. Запись amount идёт в unit-носитель, подтверждение сверяет все unit id_offer [KFL_C14]. Варианты: K-06 — распространение на вторую витрину через 10 минут; K-13 — канал требует listing_price в записи остатка; K-11 — канал не уменьшает amount при заказе.",
+  "tags": [
+    "simulator"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "vendor/kaufland/seller-api-v2/2026-09-14/openapi.json#PATCH /units/{id_unit}",
+      "https://sellerapi.kaufland.com/?page=push-notifications#events",
+      "docs/channel-capabilities.md#7"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn-seller-0001",
+      "marketplaces": [
+        "de",
+        "at"
+      ]
+    },
+    "credentials": {
+      "seller": {
+        "clientKey": "syn-seller-client-key-0001",
+        "secretKey": "syn-seller-secret-key-0001"
+      }
+    },
+    "secrets": [
+      "wh_tok_synthetic_0007"
+    ],
+    "channelModel": {
+      "seed": 35,
+      "webhookUrl": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0007",
+      "units": [
+        {
+          "idUnit": 7201,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7201",
+          "idProduct": 362007201,
+          "listingPriceMinor": 1500,
+          "amount": 4
+        },
+        {
+          "idUnit": 7202,
+          "storefront": "at",
+          "idOffer": "SYN-OFFER-7201",
+          "idProduct": 362007201,
+          "listingPriceMinor": 1550,
+          "amount": 4
+        }
+      ],
+      "competitors": []
+    }
+  },
+  "steps": [
+    {
+      "id": "write-9",
+      "kind": "call",
+      "method": "dispatch",
+      "args": [
+        {
+          "batchId": "kfl:de:sim-qty-1",
+          "operation": "PATCH /units/{id_unit}",
+          "budgetCharges": [],
+          "requestCount": 1,
+          "items": [
+            {
+              "channelWriteId": "cw-qty-1",
+              "writeScope": {
+                "writeScopeId": "ws-qty-SYN-OFFER-7201",
+                "field": "QUANTITY",
+                "scopeKey": "kaufland|acct-1|SYN-OFFER-7201",
+                "identity": {
+                  "marketplace": "de",
+                  "externalUnitId": "7201",
+                  "externalOfferId": "SYN-OFFER-7201"
+                }
+              },
+              "version": 1,
+              "idempotencyKey": "cw-qty-1:1",
+              "attemptNo": 1,
+              "value": {
+                "field": "QUANTITY",
+                "quantity": 9
+              }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "outcomes": [
+          {
+            "channelWriteId": "cw-qty-1",
+            "status": "ACCEPTED",
+            "appliedImmediately": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "confirm-now",
+      "kind": "call",
+      "method": "confirm",
+      "args": [
+        [
+          {
+            "channelWriteId": "cw-qty-1",
+            "writeScope": {
+              "writeScopeId": "ws-qty-SYN-OFFER-7201",
+              "field": "QUANTITY",
+              "scopeKey": "kaufland|acct-1|SYN-OFFER-7201",
+              "identity": {
+                "marketplace": "de",
+                "externalUnitId": "7201",
+                "externalOfferId": "SYN-OFFER-7201"
+              }
+            },
+            "expected": {
+              "field": "QUANTITY",
+              "quantity": 9
+            },
+            "dispatchedAt": {
+              "$clockIso": 0
+            }
+          }
+        ]
+      ],
+      "expect": [
+        {
+          "status": "APPLIED"
+        }
+      ]
+    },
+    {
+      "id": "ten-minutes",
+      "kind": "advanceClock",
+      "ms": 600000
+    },
+    {
+      "id": "confirm-later",
+      "kind": "call",
+      "method": "confirm",
+      "args": [
+        [
+          {
+            "channelWriteId": "cw-qty-1",
+            "writeScope": {
+              "writeScopeId": "ws-qty-SYN-OFFER-7201",
+              "field": "QUANTITY",
+              "scopeKey": "kaufland|acct-1|SYN-OFFER-7201",
+              "identity": {
+                "marketplace": "de",
+                "externalUnitId": "7201",
+                "externalOfferId": "SYN-OFFER-7201"
+              }
+            },
+            "expected": {
+              "field": "QUANTITY",
+              "quantity": 9
+            },
+            "dispatchedAt": {
+              "$clockIso": -600000
+            }
+          }
+        ]
+      ],
+      "expect": [
+        {
+          "status": "APPLIED"
+        }
+      ]
+    },
+    {
+      "id": "buyer-orders-2",
+      "kind": "channelOrder",
+      "idOffer": "SYN-OFFER-7201",
+      "quantity": 2
+    },
+    {
+      "id": "read-after-order",
+      "kind": "call",
+      "method": "readBack",
+      "args": [
+        [
+          {
+            "writeScope": {
+              "writeScopeId": "ws-qty-SYN-OFFER-7201",
+              "field": "QUANTITY",
+              "scopeKey": "kaufland|acct-1|SYN-OFFER-7201",
+              "identity": {
+                "marketplace": "de",
+                "externalUnitId": "7201",
+                "externalOfferId": "SYN-OFFER-7201"
+              }
+            },
+            "fields": [
+              "QUANTITY"
+            ]
+          }
+        ]
+      ],
+      "expect": {
+        "observations": [
+          {
+            "value": {
+              "quantity": 7
+            }
+          },
+          {
+            "value": {
+              "quantity": 7
+            }
+          }
+        ],
+        "failures": []
+      }
+    }
+  ],
+  "exchanges": [],
+  "expect": {
+    "noAlerts": true,
+    "noLogCodes": [
+      "KFL_C14_SHARED_QUANTITY_PROPAGATION"
+    ],
+    "channel": {
+      "units": [
+        {
+          "amount": 7
+        },
+        {
+          "amount": 7
+        }
+      ],
+      "violations": []
+    }
+  },
+  "variants": [
+    {
+      "id": "k06-propagation-10-min",
+      "question": "K-06",
+      "params": {
+        "quantityPropagationMs": 600000
+      },
+      "finding": "Пока at не догнал de, подтверждение остаётся PENDING и пишет KFL_C14; после окна распространения — APPLIED. Окно подтверждения 10 минут [KFL_C08] совпадает с задержкой впритык: при задержке больше окна запись стала бы NOT_APPLIED.",
+      "stepExpect": {
+        "confirm-now": [
+          {
+            "status": "PENDING"
+          }
+        ]
+      },
+      "expect": {
+        "noAlerts": true,
+        "logs": [
+          {
+            "code": "KFL_C14_SHARED_QUANTITY_PROPAGATION"
+          }
+        ],
+        "channel": {
+          "units": [
+            {
+              "amount": 7
+            },
+            {
+              "amount": 7
+            }
+          ],
+          "violations": []
+        }
+      }
+    },
+    {
+      "id": "k13-amount-requires-listing-price",
+      "question": "K-13",
+      "params": {
+        "quantityWriteRequiresListingPrice": true
+      },
+      "finding": "Если канал требует listing_price в записи остатка, запись отклоняется и требует человека [KFL_C03]: отправить остаток вместе с ценой значит провести цену мимо Price Gate. Остаток не синхронизируется.",
+      "stepExpect": {
+        "write-9": {
+          "outcomes": [
+            {
+              "status": "REJECTED",
+              "error": {
+                "code": "PRECONDITION_FAILED",
+                "class": "REQUIRES_HUMAN"
+              }
+            }
+          ]
+        },
+        "confirm-now": [
+          {
+            "status": "PENDING"
+          }
+        ],
+        "confirm-later": [
+          {
+            "status": "NOT_APPLIED"
+          }
+        ],
+        "read-after-order": {
+          "observations": [
+            {
+              "value": {
+                "quantity": 2
+              }
+            },
+            {
+              "value": {
+                "quantity": 2
+              }
+            }
+          ],
+          "failures": []
+        }
+      },
+      "expect": {
+        "logs": [
+          {
+            "code": "KFL_C03_QUANTITY_WITHOUT_LISTING_PRICE"
+          }
+        ],
+        "channel": {
+          "units": [
+            {
+              "amount": 2
+            },
+            {
+              "amount": 2
+            }
+          ],
+          "violations": []
+        }
+      }
+    },
+    {
+      "id": "k11-order-does-not-decrement",
+      "question": "K-11",
+      "params": {
+        "orderDecrementsAmount": false
+      },
+      "finding": "Если канал не уменьшает amount при заказе, опубликованный остаток после заказа завышен до следующей записи из пула: резервация [Р-25] должна уменьшить его сама.",
+      "stepExpect": {
+        "read-after-order": {
+          "observations": [
+            {
+              "value": {
+                "quantity": 9
+              }
+            },
+            {
+              "value": {
+                "quantity": 9
+              }
+            }
+          ],
+          "failures": []
+        }
+      },
+      "expect": {
+        "noAlerts": true,
+        "channel": {
+          "units": [
+            {
+              "amount": 9
+            },
+            {
+              "amount": 9
+            }
+          ],
+          "violations": []
+        }
+      }
+    }
+  ]
+}

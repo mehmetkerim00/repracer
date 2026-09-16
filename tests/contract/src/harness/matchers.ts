@@ -13,10 +13,12 @@
  *   {"$contains": [..]}       массив содержит элементы, подходящие под каждый образец
  *   {"$unordered": [..]}      массив той же длины в любом порядке
  *   {"$exact": ..} / {"$subset": ..}  сменить режим для поддерева
+ *   {"$gte": n} / {"$lte": n} / {"$gt": n}  число не меньше, не больше, больше (сводки симулятора, шаг 21)
+ *   {"$every": образец}       каждый элемент массива подходит под образец (в том числе пустой массив)
  */
 export type MatchMode = 'exact' | 'subset';
 
-const OPERATORS = new Set(['$any', '$absent', '$type', '$regex', '$isoInstant', '$contains', '$unordered', '$exact', '$subset']);
+const OPERATORS = new Set(['$any', '$absent', '$type', '$regex', '$isoInstant', '$contains', '$unordered', '$exact', '$subset', '$gte', '$lte', '$gt', '$every']);
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -55,6 +57,15 @@ export function match(actual: unknown, expected: unknown, mode: MatchMode, path 
       case '$isoInstant':
         return typeof actual === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(actual) && !Number.isNaN(Date.parse(actual))
           ? [] : [`${path}: expected ISO instant, got ${short(actual)}`];
+      case '$gte':
+        return typeof actual === 'number' && actual >= Number(arg) ? [] : [`${path}: expected ≥ ${String(arg)}, got ${short(actual)}`];
+      case '$lte':
+        return typeof actual === 'number' && actual <= Number(arg) ? [] : [`${path}: expected ≤ ${String(arg)}, got ${short(actual)}`];
+      case '$gt':
+        return typeof actual === 'number' && actual > Number(arg) ? [] : [`${path}: expected > ${String(arg)}, got ${short(actual)}`];
+      case '$every':
+        if (!Array.isArray(actual)) return [`${path}: $every needs an array, got ${typeOf(actual)}`];
+        return actual.flatMap((a, i) => match(a, arg, mode, `${path}[${i}]`));
       case '$exact':
         return match(actual, arg, 'exact', path);
       case '$subset':

@@ -6,7 +6,14 @@ import type { CompetitorQuery, FieldWrite, Instant, WriteOutcome } from '@reprac
 import type { CrossChannelReference, DailyRange } from '@repracer/input-sanity';
 import type { GuardrailSet } from '@repracer/price-gate';
 import type { AcceptedSnapshot, BoundResolution, CostInputs, HaltRef, PriceBounds, PriceIntentDraft, Reason, StopRef, StrategyDefinition } from '@repracer/pricing-model';
+import { randomUUID } from 'node:crypto';
 import type {
+  AdminActor,
+  BoundsEditInput,
+  BoundsEditResult,
+  BoundsEditRow,
+  StrategySaveInput,
+  StrategySaveResult,
   BoundsRead,
   CommittedDecision,
   ConsoleDecisionRow,
@@ -813,6 +820,108 @@ export class PgPricingStore implements PricingStore {
       [tenantId, writeScopeId, mode],
       // Р-97: без пользователя сессии база смену режима не принимает
     ), userId);
+  }
+
+  // --- правка границ и стратегий из консоли (шаг 21) --------------------------------
+  /**
+   * Новые версии границ уровня единицы записи одной транзакцией административной роли от имени человека [Р-97]. Роль участника
+   * проверяет база (security.require_person_for_admin_write, MANAGE_PRICING); действующие границы до и после — функции базы
+   * effective_min_price и effective_max_price. PREVIEW выполняет то же и откатывает транзакцию.
+   * Р-88: правка больше одной единицы требует второго фактора — проверяется здесь; база это правило не закрепляет (accepted-risks).
+   */
+  async editBounds(tenantId: string, edits: readonly BoundsEditInput[], actor: AdminActor, mode: 'PREVIEW' | 'APPLY'): Promise<BoundsEditResult> {
+    const ids = edits.map((e) => e.writeScopeId);
+    const duplicate = ids.find((id, i) => ids.indexOf(id) !== i);
+    if (duplicate) return { status: 'INVALID', writeScopeId: duplicate, cause: 'DUPLICATE_SCOPE' };
+    for (const e of edits) {
+      if (e.minMinor === undefined && e.maxMinor === undefined) return { status: 'INVALID', writeScopeId: e.writeScopeId, cause: 'NOTHING_TO_CHANGE' };
+      if ([e.minMinor, e.maxMinor].some((v) => v !== undefined && (!Number.isSafeInteger(v) || v <= 0))) return { status: 'INVALID', writeScopeId: e.writeScopeId, cause: 'AMOUNT_INVALID' };
+    }
+    if (mode === 'APPLY' && new Set(ids).size > 1 && !actor.mfa) return { status: 'MFA_REQUIRED' };
+    const effective = async (tx: Tx, writeScopeId: string) => {
+      const { rows: [r] } = await tx.query(
+        `SELECT tenant_data.effective_min_price($1, $2) AS min, tenant_data.effective_max_price($1, $2) AS max`, [tenantId, writeScopeId]);
+      return { minMinor: r?.min === null || r?.min === undefined ? null : Number(r.min), maxMinor: r?.max === null || r?.max === undefined ? null : Number(r.max) };
+    };
+    try {
+      return await inTenant(this.admin('editBounds'), tenantId, async (tx) => {
+        const { rows: scopes } = await tx.query(
+          `SELECT write_scope_id, currency FROM tenant_data.write_scope
+            WHERE tenant_id = $1 AND write_scope_id = ANY ($2::uuid[]) AND field = 'PRICE'
+            ORDER BY write_scope_id FOR NO KEY UPDATE`, [tenantId, ids]);
+        const rows: BoundsEditRow[] = [];
+        for (const e of edits) {
+          const scope = scopes.find((x) => x.write_scope_id === e.writeScopeId);
+          if (!scope) throw new RollbackWith<BoundsEditResult>({ status: 'INVALID', writeScopeId: e.writeScopeId, cause: 'SCOPE_NOT_FOUND' });
+          const before = await effective(tx, e.writeScopeId);
+          if (before.minMinor !== e.expected.minMinor || before.maxMinor !== e.expected.maxMinor) {
+            throw new RollbackWith<BoundsEditResult>({ status: 'CONFLICT', writeScopeId: e.writeScopeId, actual: before });
+          }
+          for (const [table, amount] of [['min_price', e.minMinor], ['max_price', e.maxMinor]] as const) {
+            if (amount === undefined) continue;
+            await tx.query(
+              `INSERT INTO tenant_data.${table} (tenant_id, scope_type, write_scope_id, currency, price_basis, amount_minor, is_active, version, created_by_membership_id)
+               SELECT s.tenant_id, 'WRITE_SCOPE', s.write_scope_id, s.currency, s.price_basis, $3, true,
+                      (SELECT coalesce(max(version), 0) + 1 FROM tenant_data.${table} b WHERE b.tenant_id = $1 AND b.scope_type = 'WRITE_SCOPE' AND b.write_scope_id = $2), $4
+                 FROM tenant_data.write_scope s WHERE s.tenant_id = $1 AND s.write_scope_id = $2`,
+              [tenantId, e.writeScopeId, amount, actor.membershipId]);
+          }
+          const after = await effective(tx, e.writeScopeId);
+          if (after.minMinor !== null && after.maxMinor !== null && after.minMinor > after.maxMinor) {
+            throw new RollbackWith<BoundsEditResult>({ status: 'INVALID', writeScopeId: e.writeScopeId, cause: 'MIN_ABOVE_MAX' });
+          }
+          rows.push({ writeScopeId: e.writeScopeId, currency: scope.currency, before, after });
+        }
+        if (mode === 'PREVIEW') throw new RollbackWith<BoundsEditResult>({ status: 'PREVIEWED', rows });
+        return { status: 'APPLIED', rows } satisfies BoundsEditResult;
+      }, actor.userId, { mfa: actor.mfa });
+    } catch (error) {
+      if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
+      throw error;
+    }
+  }
+
+  async saveStrategy(tenantId: string, input: StrategySaveInput, actor: AdminActor): Promise<StrategySaveResult> {
+    if (input.name.trim().length === 0) return { status: 'INVALID', cause: 'NAME_REQUIRED' };
+    try {
+      return await inTenant(this.admin('saveStrategy'), tenantId, async (tx) => {
+        let strategyId = input.strategyId;
+        let version = 1;
+        if (strategyId !== null) {
+          const { rows: [r] } = await tx.query(
+            `SELECT max(version) AS v FROM tenant_data.pricing_strategy WHERE tenant_id = $1 AND pricing_strategy_id = $2`, [tenantId, strategyId]);
+          if (r?.v === null || r?.v === undefined) throw new RollbackWith<StrategySaveResult>({ status: 'INVALID', cause: 'STRATEGY_NOT_FOUND' });
+          version = Number(r.v) + 1;
+        } else {
+          strategyId = randomUUID();
+        }
+        // Р-91: версия стратегии (вечная, архивируется с ядром) — без подреза; подрез — в таблице с 18-месячным сроком
+        const { undercutMinor, ...stored } = input.params as Record<string, unknown>;
+        await tx.query(
+          `INSERT INTO tenant_data.pricing_strategy (tenant_id, pricing_strategy_id, version, name, type, params, triggers, status, created_by_membership_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'ACTIVE', $8)`,
+          [tenantId, strategyId, version, input.name.trim(), input.params.type, JSON.stringify({ ...stored, deadbandMinor: input.deadbandMinor }),
+           ['COMPETITOR_CHANGE', 'COST_CHANGE', 'SCHEDULE'], actor.membershipId]);
+        if (undercutMinor !== undefined) {
+          await tx.query(`INSERT INTO channel_data.pricing_strategy_undercut (tenant_id, pricing_strategy_id, version, undercut_minor) VALUES ($1, $2, $3, $4)`,
+            [tenantId, strategyId, version, undercutMinor]);
+        }
+        if (input.assignTo.length > 0) {
+          const { rowCount } = await tx.query(
+            `UPDATE tenant_data.write_scope SET pricing_strategy_id = $2, pricing_strategy_version = $3
+              WHERE tenant_id = $1 AND write_scope_id = ANY ($4::uuid[]) AND field = 'PRICE'`,
+            [tenantId, strategyId, version, input.assignTo]);
+          if (rowCount !== new Set(input.assignTo).size) throw new RollbackWith<StrategySaveResult>({ status: 'INVALID', cause: 'SCOPE_NOT_FOUND' });
+        }
+        return {
+          status: 'SAVED', assigned: [...input.assignTo],
+          strategy: { strategyId, version, params: { ...input.params }, deadbandMinor: input.deadbandMinor },
+        } satisfies StrategySaveResult;
+      }, actor.userId, { mfa: actor.mfa });
+    } catch (error) {
+      if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
+      throw error;
+    }
   }
 
   // --- остановки ------------------------------------------------------------------

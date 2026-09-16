@@ -243,7 +243,61 @@ export interface DispatchRecorded {
   slotFreed: boolean;
   /** Единица свободна и в очереди ждёт запись другой оценки — отправку продолжает диспетчер [Р-64] */
   queuedWaiting: boolean;
+  /** Итог записи и блокировка единицы — для тех же алертов, что у диспетчера (шаг 21: путь решения их не поднимал) */
+  status: 'DISPATCHED' | 'ACCEPTED' | 'APPLIED' | 'NOT_APPLIED' | 'FAILED' | 'DISCARDED_STALE' | 'BUDGET_EXHAUSTED';
+  scopeBlocked: boolean;
+  reason: { code: string } | null;
 }
+
+/** Автор административного действия консоли: членство, пользователь сессии и второй фактор из токена поставщика [Р-78, Р-88] */
+export interface AdminActor {
+  membershipId: string;
+  userId: string;
+  mfa: boolean;
+}
+
+/**
+ * Шаг 21: правка границ единицы записи. Пишется уровень WRITE_SCOPE новой версией (append-only); действующая граница — как у
+ * базы: пол — наибольший из уровней товара и единицы, потолок — наименьший [Р-18, Р-43]. expected — действующие границы, которые
+ * человек видел на экране различий: если они изменились, правка не применяется (CONFLICT), экран строится заново.
+ */
+export interface BoundsEditInput {
+  writeScopeId: string;
+  minMinor?: number;
+  maxMinor?: number;
+  expected: { minMinor: number | null; maxMinor: number | null };
+}
+
+export interface BoundsEditRow {
+  writeScopeId: string;
+  currency: string;
+  before: { minMinor: number | null; maxMinor: number | null };
+  /** Действующие границы после правки — как их вычислит база */
+  after: { minMinor: number | null; maxMinor: number | null };
+}
+
+export type BoundsEditResult =
+  | { status: 'PREVIEWED' | 'APPLIED'; rows: BoundsEditRow[] }
+  | { status: 'FORBIDDEN' }
+  /** Р-88: применение правки границ больше одной единицы записи — только со вторым фактором; экран различий его не требует */
+  | { status: 'MFA_REQUIRED' }
+  | { status: 'CONFLICT'; writeScopeId: string; actual: { minMinor: number | null; maxMinor: number | null } }
+  | { status: 'INVALID'; writeScopeId: string; cause: 'SCOPE_NOT_FOUND' | 'AMOUNT_INVALID' | 'MIN_ABOVE_MAX' | 'NOTHING_TO_CHANGE' | 'DUPLICATE_SCOPE' };
+
+/** Шаг 21: новая версия стратегии и её назначение единицам записи — после превью */
+export interface StrategySaveInput {
+  /** null — новая стратегия */
+  strategyId: string | null;
+  name: string;
+  params: StrategyDefinition['params'];
+  deadbandMinor: number;
+  assignTo: string[];
+}
+
+export type StrategySaveResult =
+  | { status: 'SAVED'; strategy: StrategyDefinition; assigned: string[] }
+  | { status: 'FORBIDDEN' }
+  | { status: 'INVALID'; cause: 'STRATEGY_NOT_FOUND' | 'SCOPE_NOT_FOUND' | 'NAME_REQUIRED' };
 
 export interface PricingStore {
   loadEvaluationContext(tenantId: string, key: ProductKey, now: Instant, shift: ShiftWindow): Promise<EvaluationContext>;
@@ -261,6 +315,9 @@ export interface PricingStore {
   /** Включение режима ENGINE; реализация обязана отказать без обеих границ (как триггер 0030) */
   /** Р-97: смена режима — действие человека; userId — пользователь сессии административного сервиса */
   setPricingMode(tenantId: string, writeScopeId: string, mode: PriceScopeContext['pricingMode'], userId?: string): Promise<void>;
+  /** Шаг 21: PREVIEW — те же проверки и действующие границы после правки без сохранения; APPLY — всё или ничего */
+  editBounds(tenantId: string, edits: readonly BoundsEditInput[], actor: AdminActor, mode: 'PREVIEW' | 'APPLY'): Promise<BoundsEditResult>;
+  saveStrategy(tenantId: string, input: StrategySaveInput, actor: AdminActor): Promise<StrategySaveResult>;
 
   listDueHalts(tenantId: string, channelAccountId: string, now: Instant): Promise<HaltInfo[]>;
   getHalt(tenantId: string, haltId: string): Promise<HaltInfo | null>;

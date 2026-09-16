@@ -1,0 +1,670 @@
+{
+  "market": {
+    "seed": 38,
+    "marketplace": "de",
+    "currency": "EUR",
+    "from": "2025-03-17T00:00:00.000Z",
+    "to": "2026-09-17T00:00:00.000Z",
+    "everyMs": 7200000,
+    "products": [
+      {
+        "channelProductRef": "362008001",
+        "historicalSelfPriceMinor": 1990,
+        "marketPriceMinor": 1900
+      },
+      {
+        "channelProductRef": "362008002",
+        "historicalSelfPriceMinor": 2290,
+        "marketPriceMinor": 2200
+      },
+      {
+        "channelProductRef": "362008003",
+        "historicalSelfPriceMinor": 2590,
+        "marketPriceMinor": 2500
+      },
+      {
+        "channelProductRef": "362008004",
+        "historicalSelfPriceMinor": 2890,
+        "marketPriceMinor": 2800
+      }
+    ],
+    "dailyVolatilityBp": 150,
+    "promo": {
+      "everyDays": 14,
+      "days": 2,
+      "discountBp": 1500
+    },
+    "corruptShare": 0.0005
+  },
+  "everyMs": 7200000,
+  "results": [
+    {
+      "label": "MATCH_BUYBOX −5, hold when winning",
+      "report": {
+        "window": {
+          "from": "2025-03-17T00:00:00.000Z",
+          "to": "2026-09-17T00:00:00.000Z"
+        },
+        "snapshots": 26352,
+        "halts": 0,
+        "strategy": {
+          "perScope": [
+            {
+              "writeScopeId": "ws-bt-0",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 8543,
+              "avgMarginBp": 872,
+              "minMarginBp": 872,
+              "priceChanges": 1,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 3,
+              "finalPriceMinor": 1615,
+              "lowestWrittenMinor": 1615,
+              "estimatedUnits": 2251,
+              "estimatedProfitMinor": 265642
+            },
+            {
+              "writeScopeId": "ws-bt-1",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 3388,
+              "avgMarginBp": 896,
+              "minMarginBp": 872,
+              "priceChanges": 2,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 1,
+              "finalPriceMinor": 1870,
+              "lowestWrittenMinor": 1870,
+              "estimatedUnits": 893,
+              "estimatedProfitMinor": 135566
+            },
+            {
+              "writeScopeId": "ws-bt-2",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 3461,
+              "avgMarginBp": 882,
+              "minMarginBp": 872,
+              "priceChanges": 6,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 4,
+              "finalPriceMinor": 2125,
+              "lowestWrittenMinor": 2125,
+              "estimatedUnits": 912,
+              "estimatedProfitMinor": 148301
+            },
+            {
+              "writeScopeId": "ws-bt-3",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 4463,
+              "avgMarginBp": 883,
+              "minMarginBp": 872,
+              "priceChanges": 3,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 3,
+              "finalPriceMinor": 2380,
+              "lowestWrittenMinor": 2380,
+              "estimatedUnits": 1176,
+              "estimatedProfitMinor": 212232
+            }
+          ]
+        },
+        "baseline": {
+          "perScope": [
+            {
+              "writeScopeId": "ws-bt-0",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 0,
+              "avgMarginBp": 2323,
+              "minMarginBp": 2323,
+              "priceChanges": 0,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 0,
+              "finalPriceMinor": null,
+              "lowestWrittenMinor": null,
+              "estimatedUnits": 0,
+              "estimatedProfitMinor": 0
+            },
+            {
+              "writeScopeId": "ws-bt-1",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 0,
+              "avgMarginBp": 2284,
+              "minMarginBp": 2284,
+              "priceChanges": 0,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 0,
+              "finalPriceMinor": null,
+              "lowestWrittenMinor": null,
+              "estimatedUnits": 0,
+              "estimatedProfitMinor": 0
+            },
+            {
+              "writeScopeId": "ws-bt-2",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 1858,
+              "avgMarginBp": 2254,
+              "minMarginBp": 2254,
+              "priceChanges": 0,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 0,
+              "finalPriceMinor": null,
+              "lowestWrittenMinor": null,
+              "estimatedUnits": 490,
+              "estimatedProfitMinor": 240394
+            },
+            {
+              "writeScopeId": "ws-bt-3",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 1985,
+              "avgMarginBp": 2230,
+              "minMarginBp": 2230,
+              "priceChanges": 0,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 0,
+              "finalPriceMinor": null,
+              "lowestWrittenMinor": null,
+              "estimatedUnits": 523,
+              "estimatedProfitMinor": 283574
+            }
+          ]
+        },
+        "buyBoxRuleMismatchBp": 0,
+        "lies": [
+          "Конкуренты не отвечают на нашу цену: история записана при другой нашей цене, реакция репрайсеров конкурентов не моделируется.",
+          "Buy Box — упрощённое правило: минимальная цена с доставкой, при равенстве выигрывает конкурент. Площадки учитывают срок доставки, рейтинг, остаток; расхождение правила с записанным победителем — калибровка отчёта.",
+          "Спроса нет: маржа — на единицу при нашей цене, взвешенная по времени; «прибыль» — только при явном допущении числа продаж в час владения Buy Box.",
+          "Между снимками рынок считается неизменным; запись применяется мгновенно, без лимитов и задержек канала (их даёт симулятор, не бэктест).",
+          "Себестоимость, комиссия, НДС и границы — текущие на весь период: история себестоимости и границ в системе не хранится для бэктеста.",
+          "Проверка входов начинает период без 30-дневной истории цен (холодный старт) и копит её из тех же снимков."
+        ],
+        "elapsedMs": 49767
+      }
+    },
+    {
+      "label": "MATCH_BUYBOX −5, no hold",
+      "report": {
+        "window": {
+          "from": "2025-03-17T00:00:00.000Z",
+          "to": "2026-09-17T00:00:00.000Z"
+        },
+        "snapshots": 26352,
+        "halts": 0,
+        "strategy": {
+          "perScope": [
+            {
+              "writeScopeId": "ws-bt-0",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 8543,
+              "avgMarginBp": 2045,
+              "minMarginBp": 872,
+              "priceChanges": 112,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 3,
+              "finalPriceMinor": 1971,
+              "lowestWrittenMinor": 1615,
+              "estimatedUnits": 2251,
+              "estimatedProfitMinor": 836275
+            },
+            {
+              "writeScopeId": "ws-bt-1",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 3388,
+              "avgMarginBp": 1130,
+              "minMarginBp": 872,
+              "priceChanges": 189,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 1,
+              "finalPriceMinor": 2057,
+              "lowestWrittenMinor": 1870,
+              "estimatedUnits": 893,
+              "estimatedProfitMinor": 259910
+            },
+            {
+              "writeScopeId": "ws-bt-2",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 3461,
+              "avgMarginBp": 1254,
+              "minMarginBp": 872,
+              "priceChanges": 118,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 4,
+              "finalPriceMinor": 2218,
+              "lowestWrittenMinor": 2125,
+              "estimatedUnits": 912,
+              "estimatedProfitMinor": 381178
+            },
+            {
+              "writeScopeId": "ws-bt-3",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 4463,
+              "avgMarginBp": 1308,
+              "minMarginBp": 872,
+              "priceChanges": 183,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 3,
+              "finalPriceMinor": 2380,
+              "lowestWrittenMinor": 2380,
+              "estimatedUnits": 1176,
+              "estimatedProfitMinor": 509400
+            }
+          ]
+        },
+        "baseline": {
+          "perScope": [
+            {
+              "writeScopeId": "ws-bt-0",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 0,
+              "avgMarginBp": 2323,
+              "minMarginBp": 2323,
+              "priceChanges": 0,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 0,
+              "finalPriceMinor": null,
+              "lowestWrittenMinor": null,
+              "estimatedUnits": 0,
+              "estimatedProfitMinor": 0
+            },
+            {
+              "writeScopeId": "ws-bt-1",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 0,
+              "avgMarginBp": 2284,
+              "minMarginBp": 2284,
+              "priceChanges": 0,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 0,
+              "finalPriceMinor": null,
+              "lowestWrittenMinor": null,
+              "estimatedUnits": 0,
+              "estimatedProfitMinor": 0
+            },
+            {
+              "writeScopeId": "ws-bt-2",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 1858,
+              "avgMarginBp": 2254,
+              "minMarginBp": 2254,
+              "priceChanges": 0,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 0,
+              "finalPriceMinor": null,
+              "lowestWrittenMinor": null,
+              "estimatedUnits": 490,
+              "estimatedProfitMinor": 240394
+            },
+            {
+              "writeScopeId": "ws-bt-3",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 1985,
+              "avgMarginBp": 2230,
+              "minMarginBp": 2230,
+              "priceChanges": 0,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 0,
+              "finalPriceMinor": null,
+              "lowestWrittenMinor": null,
+              "estimatedUnits": 523,
+              "estimatedProfitMinor": 283574
+            }
+          ]
+        },
+        "buyBoxRuleMismatchBp": 0,
+        "lies": [
+          "Конкуренты не отвечают на нашу цену: история записана при другой нашей цене, реакция репрайсеров конкурентов не моделируется.",
+          "Buy Box — упрощённое правило: минимальная цена с доставкой, при равенстве выигрывает конкурент. Площадки учитывают срок доставки, рейтинг, остаток; расхождение правила с записанным победителем — калибровка отчёта.",
+          "Спроса нет: маржа — на единицу при нашей цене, взвешенная по времени; «прибыль» — только при явном допущении числа продаж в час владения Buy Box.",
+          "Между снимками рынок считается неизменным; запись применяется мгновенно, без лимитов и задержек канала (их даёт симулятор, не бэктест).",
+          "Себестоимость, комиссия, НДС и границы — текущие на весь период: история себестоимости и границ в системе не хранится для бэктеста.",
+          "Проверка входов начинает период без 30-дневной истории цен (холодный старт) и копит её из тех же снимков."
+        ],
+        "elapsedMs": 52051
+      }
+    },
+    {
+      "label": "BEAT_LOWEST −5 landed, HOLD at bound",
+      "report": {
+        "window": {
+          "from": "2025-03-17T00:00:00.000Z",
+          "to": "2026-09-17T00:00:00.000Z"
+        },
+        "snapshots": 26352,
+        "halts": 0,
+        "strategy": {
+          "perScope": [
+            {
+              "writeScopeId": "ws-bt-0",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 8543,
+              "avgMarginBp": 2245,
+              "minMarginBp": 1628,
+              "priceChanges": 35,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 3,
+              "finalPriceMinor": 1971,
+              "lowestWrittenMinor": 1791,
+              "estimatedUnits": 2251,
+              "estimatedProfitMinor": 836275
+            },
+            {
+              "writeScopeId": "ws-bt-1",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 3333,
+              "avgMarginBp": 1225,
+              "minMarginBp": 876,
+              "priceChanges": 169,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 1,
+              "finalPriceMinor": 2057,
+              "lowestWrittenMinor": 1871,
+              "estimatedUnits": 878,
+              "estimatedProfitMinor": 257938
+            },
+            {
+              "writeScopeId": "ws-bt-2",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 3461,
+              "avgMarginBp": 1343,
+              "minMarginBp": 882,
+              "priceChanges": 93,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 4,
+              "finalPriceMinor": 2218,
+              "lowestWrittenMinor": 2128,
+              "estimatedUnits": 912,
+              "estimatedProfitMinor": 381178
+            },
+            {
+              "writeScopeId": "ws-bt-3",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 4463,
+              "avgMarginBp": 1405,
+              "minMarginBp": 872,
+              "priceChanges": 151,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 3,
+              "finalPriceMinor": 2385,
+              "lowestWrittenMinor": 2380,
+              "estimatedUnits": 1176,
+              "estimatedProfitMinor": 509400
+            }
+          ]
+        },
+        "baseline": {
+          "perScope": [
+            {
+              "writeScopeId": "ws-bt-0",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 0,
+              "avgMarginBp": 2323,
+              "minMarginBp": 2323,
+              "priceChanges": 0,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 0,
+              "finalPriceMinor": null,
+              "lowestWrittenMinor": null,
+              "estimatedUnits": 0,
+              "estimatedProfitMinor": 0
+            },
+            {
+              "writeScopeId": "ws-bt-1",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 0,
+              "avgMarginBp": 2284,
+              "minMarginBp": 2284,
+              "priceChanges": 0,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 0,
+              "finalPriceMinor": null,
+              "lowestWrittenMinor": null,
+              "estimatedUnits": 0,
+              "estimatedProfitMinor": 0
+            },
+            {
+              "writeScopeId": "ws-bt-2",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 1858,
+              "avgMarginBp": 2254,
+              "minMarginBp": 2254,
+              "priceChanges": 0,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 0,
+              "finalPriceMinor": null,
+              "lowestWrittenMinor": null,
+              "estimatedUnits": 490,
+              "estimatedProfitMinor": 240394
+            },
+            {
+              "writeScopeId": "ws-bt-3",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 1985,
+              "avgMarginBp": 2230,
+              "minMarginBp": 2230,
+              "priceChanges": 0,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 0,
+              "finalPriceMinor": null,
+              "lowestWrittenMinor": null,
+              "estimatedUnits": 523,
+              "estimatedProfitMinor": 283574
+            }
+          ]
+        },
+        "buyBoxRuleMismatchBp": 0,
+        "lies": [
+          "Конкуренты не отвечают на нашу цену: история записана при другой нашей цене, реакция репрайсеров конкурентов не моделируется.",
+          "Buy Box — упрощённое правило: минимальная цена с доставкой, при равенстве выигрывает конкурент. Площадки учитывают срок доставки, рейтинг, остаток; расхождение правила с записанным победителем — калибровка отчёта.",
+          "Спроса нет: маржа — на единицу при нашей цене, взвешенная по времени; «прибыль» — только при явном допущении числа продаж в час владения Buy Box.",
+          "Между снимками рынок считается неизменным; запись применяется мгновенно, без лимитов и задержек канала (их даёт симулятор, не бэктест).",
+          "Себестоимость, комиссия, НДС и границы — текущие на весь период: история себестоимости и границ в системе не хранится для бэктеста.",
+          "Проверка входов начинает период без 30-дневной истории цен (холодный старт) и копит её из тех же снимков."
+        ],
+        "elapsedMs": 52779
+      }
+    },
+    {
+      "label": "TARGET_MARGIN 20 %",
+      "report": {
+        "window": {
+          "from": "2025-03-17T00:00:00.000Z",
+          "to": "2026-09-17T00:00:00.000Z"
+        },
+        "snapshots": 26352,
+        "halts": 0,
+        "strategy": {
+          "perScope": [
+            {
+              "writeScopeId": "ws-bt-0",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 8306,
+              "avgMarginBp": 2002,
+              "minMarginBp": 2002,
+              "priceChanges": 1,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 3,
+              "finalPriceMinor": 1893,
+              "lowestWrittenMinor": 1893,
+              "estimatedUnits": 2189,
+              "estimatedProfitMinor": 696038
+            },
+            {
+              "writeScopeId": "ws-bt-1",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 911,
+              "avgMarginBp": 2000,
+              "minMarginBp": 2000,
+              "priceChanges": 1,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 1,
+              "finalPriceMinor": 2191,
+              "lowestWrittenMinor": 2191,
+              "estimatedUnits": 240,
+              "estimatedProfitMinor": 88320
+            },
+            {
+              "writeScopeId": "ws-bt-2",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 2149,
+              "avgMarginBp": 2000,
+              "minMarginBp": 2000,
+              "priceChanges": 1,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 4,
+              "finalPriceMinor": 2490,
+              "lowestWrittenMinor": 2490,
+              "estimatedUnits": 566,
+              "estimatedProfitMinor": 236755
+            },
+            {
+              "writeScopeId": "ws-bt-3",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 2350,
+              "avgMarginBp": 2001,
+              "minMarginBp": 2001,
+              "priceChanges": 1,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 3,
+              "finalPriceMinor": 2789,
+              "lowestWrittenMinor": 2789,
+              "estimatedUnits": 619,
+              "estimatedProfitMinor": 290405
+            }
+          ]
+        },
+        "baseline": {
+          "perScope": [
+            {
+              "writeScopeId": "ws-bt-0",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 0,
+              "avgMarginBp": 2323,
+              "minMarginBp": 2323,
+              "priceChanges": 0,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 0,
+              "finalPriceMinor": null,
+              "lowestWrittenMinor": null,
+              "estimatedUnits": 0,
+              "estimatedProfitMinor": 0
+            },
+            {
+              "writeScopeId": "ws-bt-1",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 0,
+              "avgMarginBp": 2284,
+              "minMarginBp": 2284,
+              "priceChanges": 0,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 0,
+              "finalPriceMinor": null,
+              "lowestWrittenMinor": null,
+              "estimatedUnits": 0,
+              "estimatedProfitMinor": 0
+            },
+            {
+              "writeScopeId": "ws-bt-2",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 1858,
+              "avgMarginBp": 2254,
+              "minMarginBp": 2254,
+              "priceChanges": 0,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 0,
+              "finalPriceMinor": null,
+              "lowestWrittenMinor": null,
+              "estimatedUnits": 490,
+              "estimatedProfitMinor": 240394
+            },
+            {
+              "writeScopeId": "ws-bt-3",
+              "currency": "EUR",
+              "hours": 13176,
+              "buyBoxShareBp": 1985,
+              "avgMarginBp": 2230,
+              "minMarginBp": 2230,
+              "priceChanges": 0,
+              "gateRejected": 0,
+              "dangerousStopped": 0,
+              "sanityRejected": 0,
+              "finalPriceMinor": null,
+              "lowestWrittenMinor": null,
+              "estimatedUnits": 523,
+              "estimatedProfitMinor": 283574
+            }
+          ]
+        },
+        "buyBoxRuleMismatchBp": 0,
+        "lies": [
+          "Конкуренты не отвечают на нашу цену: история записана при другой нашей цене, реакция репрайсеров конкурентов не моделируется.",
+          "Buy Box — упрощённое правило: минимальная цена с доставкой, при равенстве выигрывает конкурент. Площадки учитывают срок доставки, рейтинг, остаток; расхождение правила с записанным победителем — калибровка отчёта.",
+          "Спроса нет: маржа — на единицу при нашей цене, взвешенная по времени; «прибыль» — только при явном допущении числа продаж в час владения Buy Box.",
+          "Между снимками рынок считается неизменным; запись применяется мгновенно, без лимитов и задержек канала (их даёт симулятор, не бэктест).",
+          "Себестоимость, комиссия, НДС и границы — текущие на весь период: история себестоимости и границ в системе не хранится для бэктеста.",
+          "Проверка входов начинает период без 30-дневной истории цен (холодный старт) и копит её из тех же снимков."
+        ],
+        "elapsedMs": 51953
+      }
+    }
+  ]
+}

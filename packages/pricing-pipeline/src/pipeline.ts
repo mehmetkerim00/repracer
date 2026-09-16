@@ -23,9 +23,10 @@ import {
   type PriceDecisionDraft,
   type PriceIntentDraft,
   type Reason,
+  type StrategyDefinition,
   type TriggerType,
 } from '@repracer/pricing-model';
-import { runStrategy } from '@repracer/strategy-engine';
+import { runStrategy, strategyAvailability } from '@repracer/strategy-engine';
 import { channelRefusal, type DispatchStep, type WriteDispatcher } from '@repracer/write-dispatcher';
 import type {
   HaltSampleObservation,
@@ -93,6 +94,20 @@ export interface SnapshotReport {
   divergenceCaseId?: string;
   engineInvocations: number;
   scopes: ScopeReport[];
+}
+
+/** Превью стратегии до сохранения (шаг 21): что предложила бы стратегия и что решил бы Gate, без фиксации */
+export interface StrategyPreview {
+  writeScopeId: string;
+  evaluatedAt: Instant;
+  snapshotObservedAt: Instant | null;
+  currentPriceMinor: number | null;
+  currency: string;
+  stages: StageRecord[];
+  intent?: PriceIntentDraft;
+  decision?: PriceDecisionDraft;
+  /** Даёт ли канал данные, которые нужны стратегии [Р-39] */
+  availability: ReturnType<typeof strategyAvailability>;
 }
 
 export interface HaltReviewReport {
@@ -261,6 +276,14 @@ export function createPricingPipeline(deps: PipelineDeps) {
 
   /** Единица освободилась, а в очереди ждёт запись другой оценки — отправку продолжает диспетчер [Р-64] */
   async function handOff(ctx: AdapterCallContext, writeScopeId: string, recorded: DispatchRecorded, report: ScopeReport): Promise<void> {
+    // Те же алерты, что у диспетчера (afterRecorded): до шага 21 отказ канала «нужен человек» на пути решения блокировал единицу молча —
+    // симулятор с лимитом правок (K-05) это показал
+    const details = { writeScopeId, channelWriteId: report.channelWriteId ?? '', reason: recorded.reason?.code ?? 'UNKNOWN' };
+    if (recorded.scopeBlocked) {
+      await alerts.raise({ ...alertBase(ctx), code: 'PRICE_WRITE_SCOPE_BLOCKED', severity: 'CRITICAL', details });
+    } else if (recorded.status === 'DISCARDED_STALE' || recorded.status === 'BUDGET_EXHAUSTED' || recorded.status === 'NOT_APPLIED') {
+      await alerts.raise({ ...alertBase(ctx), code: 'PRICE_WRITE_NOT_SENT', severity: 'CRITICAL', details: { ...details, status: recorded.status } });
+    }
     if (!deps.dispatcher || !recorded.queuedWaiting) return;
     const dispatched = await deps.dispatcher.dispatchScope(ctx.tenantId, writeScopeId);
     report.queue = [...(report.queue ?? []), ...dispatched.steps];
@@ -470,6 +493,30 @@ export function createPricingPipeline(deps: PipelineDeps) {
         else if (event.kind === 'RESOURCE_CHANGED' && event.competitorQuery) snapshots.push(...(await pollCompetitors(ctx, [event.competitorQuery])).snapshots);
       }
       return { inbound, snapshots };
+    },
+
+    /**
+     * Шаг 21: превью стратегии на реальной единице записи до сохранения. Стратегия и Gate — те же функции, что у оценки, на последнем
+     * принятом снимке товара и текущих границах, себестоимости, остановках; ничего не фиксируется, не пишется в канал, алертов нет.
+     * Момент оценки — время снимка (иначе снимок почти всегда старше допуска стратегии); границы и себестоимость — текущие.
+     */
+    async previewStrategy(ctx: AdapterCallContext, writeScopeId: string, strategy: StrategyDefinition): Promise<StrategyPreview | null> {
+      const loaded = await store.loadScopeContext(ctx.tenantId, writeScopeId, deps.now());
+      if (!loaded) return null;
+      const at = loaded.snapshot ? new Date(Date.parse(loaded.snapshot.observedAt) + 1_000).toISOString() : deps.now();
+      const context: ScopeEvaluationContext = { ...loaded.context, scope: { ...loaded.context.scope, pricingMode: 'ENGINE', strategy } };
+      const evaluation = evaluateScope(context, loaded.snapshot, { type: 'MANUAL' }, at, [], [], { snapshotRef: loaded.snapshotRef, sanity: loaded.snapshotRef?.sanity ?? null });
+      return {
+        writeScopeId,
+        evaluatedAt: at,
+        snapshotObservedAt: loaded.snapshot?.observedAt ?? null,
+        currentPriceMinor: loaded.context.scope.currentPriceMinor,
+        currency: loaded.context.scope.currency,
+        stages: evaluation.report.stages,
+        ...(evaluation.report.intent ? { intent: evaluation.report.intent } : {}),
+        ...(evaluation.report.decision ? { decision: evaluation.report.decision } : {}),
+        availability: strategyAvailability(strategy.params, adapter.descriptor.competitorSources ?? []),
+      };
     },
 
     /** Пересчёт единицы без нового снимка: изменилась себестоимость, расписание, ручной запуск */

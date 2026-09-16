@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
-import { ClickHouseHttp, exportDecisionDay } from '@repracer/analytics-export';
+import { ClickHouseHttp, competitorSnapshotRow, exportDecisionDay, readCompetitorHistory } from '@repracer/analytics-export';
 import type { MemorySeedScope } from '@repracer/pricing-pipeline';
 import { createPool, PgPricingStore, seedPricingWorld } from '../src/index.ts';
 import type { PriceDecisionDraft, PriceIntentDraft } from '@repracer/pricing-model';
@@ -18,8 +18,10 @@ const PG_URL = process.env.REPRACER_PG_URL;
 const CH_URL = process.env.REPRACER_CH_URL;
 const INGEST = { user: process.env.REPRACER_CH_INGEST_USER, password: process.env.REPRACER_CH_INGEST_PASSWORD };
 const VERIFIER = { user: process.env.REPRACER_CH_VERIFIER_USER, password: process.env.REPRACER_CH_VERIFIER_PASSWORD };
-if (!PG_URL || !CH_URL || !INGEST.user || !INGEST.password || !VERIFIER.user || !VERIFIER.password) {
-  throw new Error('REPRACER_PG_URL, REPRACER_CH_URL and the ClickHouse ingest and verifier logins are required: the test does not skip (Р-84)');
+// Шаг 21: логин шлюза аналитики (repracer_tenant_reader) — чтение истории конкурентов для бэктеста
+const READER = { user: process.env.REPRACER_CH_READER_USER, password: process.env.REPRACER_CH_READER_PASSWORD };
+if (!PG_URL || !CH_URL || !INGEST.user || !INGEST.password || !VERIFIER.user || !VERIFIER.password || !READER.user || !READER.password) {
+  throw new Error('REPRACER_PG_URL, REPRACER_CH_URL and the ClickHouse ingest, verifier and reader logins are required: the test does not skip (Р-84)');
 }
 
 const pool = createPool(PG_URL, { max: 4, applicationName: 'repracer-ch-export-test' });
@@ -111,4 +113,28 @@ test('Р-20: a day of intents and decisions is exported to ClickHouse, verified 
     console.log(`CH_EXPORT_NOOP_DAY_CHANGED between exports (parallel tests): hourly intents of the tenant ${hourlyAfter!.n}`);
   }
   console.log(`CH_EXPORT_REPEAT raw rows of the tenant after the repeat: ${await countOf(false)} (3 — the part token matched; more — chunks changed by parallel tests, merged by FINAL)`);
+});
+
+test('Р-38, Р-23: the backtest reads the competitor history of one tenant through the tenant reader role and its row policy', async () => {
+  const ingest = new ClickHouseHttp({ url: CH_URL, user: INGEST.user!, password: INGEST.password! });
+  const reader = new ClickHouseHttp({ url: CH_URL, user: READER.user!, password: READER.password! });
+  const now = new Date();
+  const tenants = ['10000000-0000-4000-8000-000000002101', '10000000-0000-4000-8000-000000002102'];
+  const account = '20000000-0000-4000-8000-000000002101';
+  const rows = tenants.flatMap((tenant, t) => [0, 1, 2].map((i) => competitorSnapshotRow(tenant, account, 'KAUFLAND', `30000000-0000-4000-8000-00000000${2100 + t * 10 + i}`, {
+    marketplace: 'de', channelProductRef: '362002101', condition: 'new', source: 'KAUFLAND_BUY_BOX_CHANGED', sourceEventId: `syn-${t}-${i}`,
+    observedAt: new Date(now.getTime() - (3 - i) * 3_600_000).toISOString(), completeness: { kind: 'TOP_N', n: 10 },
+    buybox: { price: { amountMinor: 1780 + t * 100 + i, currency: 'EUR', basis: 'GROSS' }, isSelf: false },
+    offers: [{ rank: 1, sellerRef: 'Synthetic Competitor', isSelf: false, price: { amountMinor: 1780 + t * 100 + i, currency: 'EUR', basis: 'GROSS' }, deliveryDays: { min: 1, max: 2 } }],
+  }, now.toISOString())));
+  await ingest.insert('repracer_analytics.competitor_snapshot', rows, `step21-history-${now.getTime()}`);
+
+  const window = { from: new Date(now.getTime() - 86_400_000).toISOString(), to: now.toISOString() };
+  const history = await readCompetitorHistory(reader, tenants[0]!, account, window, now.toISOString());
+  assert.deepEqual(history.map((h) => h.buybox?.price.amountMinor), [1780, 1781, 1782], 'three snapshots of the tenant, in time order');
+  // Политика строк: при SQL_tenant_id другого тенанта явный фильтр не помогает — строк нет
+  const foreign = await reader.rows<{ n: number }>(`SELECT count() AS n FROM repracer_analytics.competitor_snapshot WHERE tenant_id = '${tenants[1]}'`, { SQL_tenant_id: tenants[0]! });
+  assert.equal(Number(foreign[0]!.n), 0, 'the row policy hides the other tenant');
+  await assert.rejects(reader.rows('SELECT count() FROM repracer_analytics.competitor_snapshot'), /CANNOT_PARSE|Cannot parse|UUID/i, 'without SQL_tenant_id the reader gets nothing');
+  await assert.rejects(readCompetitorHistory(reader, tenants[0]!, account, { from: '2020-01-01T00:00:00.000Z', to: window.to }, now.toISOString()), /18 months/);
 });

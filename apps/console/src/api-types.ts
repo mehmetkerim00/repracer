@@ -1,4 +1,4 @@
-import type { HumanReason, Locale, MemberRole, StopTarget } from '@repracer/console-model';
+import type { BoundsEditRequest, HumanReason, Locale, MemberRole, StopTarget, StrategyListView } from '@repracer/console-model';
 
 /** Контракт сервера стенда и интерфейса: экраны получают готовые модели @repracer/console-model на языке сессии [Р-72] */
 
@@ -59,6 +59,32 @@ export interface EnableResult {
   enabled: boolean;
   problems: HumanReason[];
   warnings: HumanReason[];
+}
+
+/** Шаг 21: сохранение стратегии — только с токеном показанного превью */
+export interface StrategySaveRequest {
+  draft: unknown;
+  writeScopeIds: string[];
+  strategyId: string | null;
+  previewToken: string;
+  confirmed: boolean;
+}
+
+export interface StrategySaveResponse {
+  message: string;
+  strategies: StrategyListView;
+}
+
+/** Шаг 21: применение правки границ — с токеном экрана различий */
+export interface BoundsApplyRequest {
+  request: BoundsEditRequest;
+  planToken: string;
+  confirmed: boolean;
+}
+
+export interface BoundsApplyResult {
+  message: string;
+  rows: number;
 }
 
 export interface ApiErrorBody {

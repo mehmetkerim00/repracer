@@ -24,8 +24,19 @@ VALUES
    'ACCOUNT_INVENTORY_SKU', ARRAY['channel_account','external_sku'], 'external_listing_id',
    '{"limit": 250, "quantity_reserve": 50, "unaccounted_margin": 10}', 'SYNC', false, 'CHANNEL_INFO'),
   ('c0000000-0000-0000-0000-000000000005', 1, 'ACTIVE', now(), 'AMAZON', 'NA', 'AMAZON_LISTINGS_ITEMS', 'PRICE',
+   'ACCOUNT_REGION_MARKETPLACE_SKU', ARRAY['channel_account','region','marketplace','external_sku'], NULL, NULL, 'ASYNC', false, 'AMAZON_INFO'),
+  ('c0000000-0000-0000-0000-000000000006', 1, 'ACTIVE', now(), 'AMAZON', 'EU', 'AMAZON_LISTINGS_ITEMS', 'PRICE',
    'ACCOUNT_REGION_MARKETPLACE_SKU', ARRAY['channel_account','region','marketplace','external_sku'], NULL, NULL, 'ASYNC', false, 'AMAZON_INFO')
 ON CONFLICT DO NOTHING;
+-- Р-111 (шаг 21): поле собственного пола цены канала (Amazon minimum_seller_allowed_price) не заводится как возможность Amazon
+\ir smoke_helpers.sql
+SELECT pg_temp.expect_fail('Amazon capability for the channel repricer floor (Р-111)', $q$
+  INSERT INTO platform.channel_capability
+    (capability_id, version, status, valid_from, channel, region, api_mode, field, write_scope_kind,
+     write_scope_key_template, budget_scope_attribute, object_edit_limit, processing_mode, requires_side_effects_ack, observation_data_class)
+  VALUES ('c0000000-0000-0000-0000-0000000000f1', 1, 'ACTIVE', now(), 'AMAZON', 'EU', 'AMAZON_LISTINGS_ITEMS', 'CHANNEL_MIN_PRICE',
+     'ACCOUNT_REGION_MARKETPLACE_SKU', ARRAY['channel_account','region','marketplace','external_sku'], NULL, NULL, 'ASYNC', false, 'AMAZON_INFO') $q$,
+  'channel_capability_channel_min_price_only_kaufland');
 RESET ROLE;
 
 -- Р-65: одноразовый стенд считает границу суток EBAY_DE подтверждённой, чтобы проверить бюджет правок (Р-19).

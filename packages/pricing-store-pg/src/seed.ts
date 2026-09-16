@@ -454,7 +454,8 @@ export async function seedPricingWorld(_pool: PgPool, input: SeedWorldInput): Pr
         [tenantId, accountId, m.marketplace, m.productRef.slice(0, cut), m.productRef.slice(cut + 1).toUpperCase(), m.evaluatedAt, m.moveBp, m.sellerRef ?? null],
       );
     }
-  }, userId);
+  // Посев мира — действие владельца со вторым фактором: границы всех предложений одной транзакцией — массовая правка [Р-88, 0078]
+  }, userId, { mfa: true });
 
   // Системные остановки сценария — ролью пути решения: человек в административном сервисе системную остановку не ставит (0072, Р-69)
   for (const h of seed.halts ?? []) {

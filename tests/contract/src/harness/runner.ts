@@ -1,10 +1,11 @@
 import type { AdapterCallContext, AdapterDependencies, ChannelAdapter, InboundDelivery } from '@repracer/channel-port';
 import { signKauflandRequest } from '@repracer/kaufland-client';
-import { createPricingPipeline, InMemoryPricingStore, standUserOf, type MemorySeed, type PricingPipeline, type PricingStore, type SeedBound } from '@repracer/pricing-pipeline';
+import { createPricingPipeline, InMemoryPricingStore, standUserOf, type MemorySeed, type PricingPipeline, type PricingStore, type SeedBound, type SnapshotReport } from '@repracer/pricing-pipeline';
 import type { CostInputs } from '@repracer/pricing-model';
 import { createWriteDispatcher, type WriteDispatcher, type WriteQueueStore } from '@repracer/write-dispatcher';
 import { channelFetch, kauflandAuthChecker, ScriptedChannel, type ChannelBehaviour, type TraceEntry } from './channel.ts';
 import { match } from './matchers.ts';
+import { SimulatedKauflandChannel } from '../simulator/kaufland-channel.ts';
 import type { CallStep, InboundDeliverySpec, PipelineStep, Scenario, StepContext, World } from './scenario.ts';
 import { VirtualClock, worldDependencies, type Sink } from './world.ts';
 
@@ -49,6 +50,8 @@ export interface ScenarioHooks {
     results: Record<string, unknown>;
     sink: Sink;
     clock: VirtualClock;
+    /** Модель канала симулятора, если сценарий её задаёт */
+    simulator: SimulatedKauflandChannel | null;
   }): Promise<void>;
 }
 
@@ -232,7 +235,9 @@ export async function runScenario(
   const sink: Sink = { logs: [], alerts: [] };
   const violations: string[] = [];
   const trace: TraceEntry[] = [];
-  const channel = behaviour ?? new ScriptedChannel(scenario.exchanges, scenario.expect?.allExchangesUsed ?? true);
+  const channel = behaviour
+    ?? (world.channelModel ? new SimulatedKauflandChannel(world.channelModel, world.clock) : new ScriptedChannel(scenario.exchanges, scenario.expect?.allExchangesUsed ?? true));
+  const simulator = channel instanceof SimulatedKauflandChannel ? channel : null;
   const fetch = channelFetch(channel, kauflandAuthChecker(world, clock), clock, violations, trace);
   const deps = worldDependencies(world, clock, sink);
   const adapter = adapterUnderTest({ deps, world, clock, fetch });
@@ -259,6 +264,43 @@ export async function runScenario(
       const result = await adapter.handleInbound(buildDelivery(step.delivery, scenario, clock));
       results[step.id] = result;
       for (const m of match(result, resolvePlaceholders(step.expect, clock), 'subset', step.id)) failures.push(m);
+      continue;
+    }
+
+    if (step.kind === 'channelOrder') { simulator!.placeOrder(step.idOffer, step.quantity, clock.nowMs()); continue; }
+    if (step.kind === 'channelDeliver') {
+      const snapshots: unknown[] = [];
+      const deliveries = simulator!.drainDeliveries(clock.nowMs());
+      for (const d of deliveries) snapshots.push(...(await pipeline!.processInbound(buildDelivery(d, scenario, clock))).snapshots);
+      const result = { deliveries: deliveries.length, snapshots };
+      results[step.id] = result;
+      if (step.expect !== undefined) failures.push(...match(result, resolvePlaceholders(step.expect, clock), 'subset', step.id));
+      continue;
+    }
+
+    if (step.kind === 'channelRun') {
+      const summary = { ticks: 0, deliveries: 0, snapshots: 0, verdicts: {} as Record<string, number>, rejectReasons: {} as Record<string, number>,
+        decisions: {} as Record<string, number>, dispatched: 0 };
+      const count = (bag: Record<string, number>, key: string) => { bag[key] = (bag[key] ?? 0) + 1; };
+      const take = (reports: SnapshotReport[]) => {
+        for (const r of reports) {
+          summary.snapshots += 1;
+          count(summary.verdicts, r.verdict);
+          if (r.verdict !== 'ACCEPT' && r.reason) count(summary.rejectReasons, r.reason.code);
+          for (const sc of r.scopes) if (sc.decision) count(summary.decisions, sc.decision.decisionClass);
+        }
+      };
+      for (let elapsed = 0; elapsed < step.durationMs; elapsed += step.tickMs) {
+        clock.advance(step.tickMs);
+        summary.ticks += 1;
+        const deliveries = simulator!.drainDeliveries(clock.nowMs());
+        summary.deliveries += deliveries.length;
+        for (const d of deliveries) take((await pipeline!.processInbound(buildDelivery(d, scenario, clock))).snapshots);
+        if (step.poll) take((await pipeline!.pollCompetitors(callContext(undefined, step.id, scenario, clock), resolvePlaceholders(step.poll, clock) as never)).snapshots);
+        summary.dispatched += (await dispatcher!.sweep({ pendingMinAgeMs: 0 })).due;
+      }
+      results[step.id] = summary;
+      if (step.expect !== undefined) failures.push(...match(summary, resolvePlaceholders(step.expect, clock), 'subset', step.id));
       continue;
     }
 
@@ -311,6 +353,9 @@ export async function runScenario(
   if (expect.pipeline !== undefined && store) {
     failures.push(...match(pipelineState, resolvePlaceholders(expect.pipeline, clock), 'subset', 'pipeline'));
   }
+  if (expect.channel !== undefined && simulator) {
+    failures.push(...match(simulator.dump(), resolvePlaceholders(expect.channel, clock), 'subset', 'channel'));
+  }
 
   // Секреты и синтетические PII не должны утечь
   const everywhere = { results, logs: sink.logs, alerts: sink.alerts, pipeline: pipelineState };
@@ -320,7 +365,7 @@ export async function runScenario(
   for (const pii of world.pii ?? []) if (jsonIncludes(everywhere, pii)) failures.push(`leak: PII sentinel "${pii}" appears in results, logs or alerts`);
   for (const secret of world.secrets ?? []) if (jsonIncludes(observability, secret)) failures.push(`leak: secret sentinel "${secret}" appears in logs or alerts`);
 
-  await hooks.onFinish?.({ scenario, store, pipeline, dispatcher, results, sink, clock });
+  await hooks.onFinish?.({ scenario, store, pipeline, dispatcher, results, sink, clock, simulator });
   return { failures, trace, logs: sink.logs, alerts: sink.alerts, results };
   } finally {
     await store?.close();

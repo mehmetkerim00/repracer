@@ -150,6 +150,9 @@
 | Р-108 | Каталог мутаций задним числом не расширяется; каждая НОВАЯ защита — в каталоге при создании (проверка в CI) |
 | Р-109 | Элемент согласия eBay сверяется с вердиктом и свежестью предполётной проверки до первой строки кода миграции |
 | Р-110 | Линия безопасности закрыта; новые находки ревьюера вне шага — в принятые риски или открытые вопросы |
+| Р-111 | Amazon `minimum_seller_allowed_price` не пишется НИКОГДА (как Kaufland `minimum_price`, Р-12) — запрет, закреплён в БД |
+| Р-112 | Снимок спецификации — условие адаптера; адаптер eBay заблокирован до ключей разработчика |
+| Р-113 | Симулятор — на контрактном стенде шага 6: тот же формат сценариев, канал с состоянием вместо записанных ответов |
 
 ## Каналы
 
@@ -170,8 +173,10 @@
 - **Запись остатка меняет остаток SKU во всех маркетплейсах EU сразу** [Р-1], даже если мы работаем только с DE.
 - DPP: не-PII из SP-API — **≤ 18 месяцев**; логи — **≥ 12 месяцев**; PII не храним [Р-4].
 - AUP: не агрегировать данные разных продавцов; строгая изоляция тенантов; модели на данных SP-API не обучаем [Р-10].
+- **`minimum_seller_allowed_price` не пишем никогда** [Р-111] — вероятный включатель собственного ценообразования Amazon (A-05); запись отклоняет БД (0077).
 
 ### eBay
+- **Адаптер заблокирован до снимка спецификации** [Р-112]: документация отвечает 403, снимок требует ключей разработчика (E-01).
 - Низкие дефолтные лимиты до Application Growth Check; часть лимитов — на приложение, общая для всех тенантов.
 - **Миграция листинга необратима** (Revise/Relist/Verify перестают работать; потеря Best Offer, требований к
   покупателям, благотворительности, шаблона). Аукционы не мигрируются. Только после предполётной проверки и
@@ -221,7 +226,7 @@
 ## Правила работы в репозитории
 
 - Существенное решение → ADR в `docs/adr/NNNN-kebab-case.md`; решение владельца продукта → `docs/decisions.md`.
-- Новая таблица → миграция в `migrations/`: `tenant_id`, `security.register_table(...)`, строка в `maintenance.retention_policy`, `security.grant_retention(...)`; последняя проверка схемы (сейчас `0076`) должна проходить; правило проверки — поведение, не имена [Р-93], тест защиты проверяет причину отказа [Р-94], новая защита — строка в каталоге мутационной проверки при создании, иначе красная сборка [Р-95, Р-108]; тесты — `scripts/db/prepare.sh` и `node scripts/test-all.mjs`, пропуск теста и файл теста вне скрипта сборки — красная сборка [Р-84, Р-89]. Правила — [migrations/README.md](migrations/README.md).
+- Новая таблица → миграция в `migrations/`: `tenant_id`, `security.register_table(...)`, строка в `maintenance.retention_policy`, `security.grant_retention(...)`; последняя проверка схемы (сейчас `0079`) должна проходить; правило проверки — поведение, не имена [Р-93], тест защиты проверяет причину отказа [Р-94], новая защита — строка в каталоге мутационной проверки при создании, иначе красная сборка [Р-95, Р-108]; тесты — `scripts/db/prepare.sh` и `node scripts/test-all.mjs`, пропуск теста и файл теста вне скрипта сборки — красная сборка [Р-84, Р-89]. Правила — [migrations/README.md](migrations/README.md).
 - Индекс — только под конкретный запрос, с комментарием над индексом.
 - Таблица ClickHouse: `tenant_id` первым в ключе сортировки, TTL ≤ 18 мес, политика строк `tenant_isolation`; `099_verify.sql` должен возвращать 0 строк.
 - Никаких запросов к ClickHouse или архиву из пути решения о цене; никаких выгрузок, объединяющих тенантов.
@@ -242,7 +247,7 @@
 ## Карта документации
 
 - [README.md](README.md) — обзор
-- [docs/decisions.md](docs/decisions.md) — принятые решения Р-1…Р-110
+- [docs/decisions.md](docs/decisions.md) — принятые решения Р-1…Р-113
 - [docs/accepted-risks.md](docs/accepted-risks.md) — принятые риски после линии безопасности [Р-106]
 - [docs/domain-model.md](docs/domain-model.md) — доменная модель v0.15 и инварианты
 - [docs/data-retention.md](docs/data-retention.md) — три слоя, сроки, удаление, закрытие тенанта
@@ -250,7 +255,7 @@
 - [schemas/clickhouse/](schemas/clickhouse/) — DDL аналитического слоя
 - [packages/channel-port](packages/channel-port/) — порт `ChannelAdapter`; [packages/kaufland-client](packages/kaufland-client/) — клиент Kaufland; [packages/kaufland-adapter](packages/kaufland-adapter/) — адаптер Kaufland
 - [packages/pricing-model](packages/pricing-model/), [input-sanity](packages/input-sanity/), [strategy-engine](packages/strategy-engine/), [price-gate](packages/price-gate/), [pricing-pipeline](packages/pricing-pipeline/) — путь решения о цене
-- [tests/contract](tests/contract/) — стенд контрактных тестов record/replay (основа симулятора)
+- [tests/contract](tests/contract/) — стенд контрактных тестов record/replay, симулятор каналов (открытые вопросы — параметры модели) и бэктест на истории [Р-113, Р-38]
 - [apps/console](apps/console/) — консоль продавца на данных стенда [Р-67]; [packages/console-model](packages/console-model/) — модели экранов, словарь DE/EN, объяснимость причин, разбивка пола
 - [packages/pricing-store-pg](packages/pricing-store-pg/) — хранилище пути решения на PostgreSQL, тесты БД, нагрузочный замер ([docs/benchmarks/](docs/benchmarks/))
 - [packages/write-dispatcher](packages/write-dispatcher/) — диспетчер записей; [packages/broker](packages/broker/) — брокер и ретранслятор outbox; [services/pricing-worker](services/pricing-worker/) — путь решения за брокером

@@ -42,6 +42,12 @@ import {
   type WriteQueueStore,
 } from '@repracer/write-dispatcher';
 import type {
+  AdminActor,
+  BoundsEditInput,
+  BoundsEditResult,
+  BoundsEditRow,
+  StrategySaveInput,
+  StrategySaveResult,
   BoundsRead,
   CommittedDecision,
   ConsoleDecisionRow,
@@ -600,7 +606,10 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
 
   // --- WriteQueueStore [Р-64]: те же правила, что PgWriteQueueStore и триггеры channel_write -------------
   private inFlight(writeScopeId: string): WriteRow | undefined {
-    return this.writes.find((w) => w.writeScopeId === writeScopeId && w.status === 'DISPATCHED');
+    // Как write_scope_sync_state.in_flight_write_id (0051): принятая, но не применённая запись держит единицу до подтверждения [Р-64].
+    // До шага 21 здесь был только DISPATCHED — симулятор с задержкой применения (K-15) показал, что стенд отправлял следующие цены
+    // поверх неподтверждённой, а PostgreSQL их ждёт.
+    return this.writes.find((w) => w.writeScopeId === writeScopeId && (w.status === 'DISPATCHED' || w.status === 'ACCEPTED'));
   }
 
   private supersedeOlder(newer: WriteRow): void {
@@ -704,7 +713,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       const reconcileDue = flying.nextAttemptAt
         ? Date.parse(flying.nextAttemptAt) <= Date.parse(now)
         : Date.parse(since) + policy.inFlightTimeoutMs <= Date.parse(now);
-      return { kind: 'IN_FLIGHT', channelAccountId: row.channelAccountId, write: this.toFieldWrite(flying), status: 'DISPATCHED', since, reconcileDue };
+      return { kind: 'IN_FLIGHT', channelAccountId: row.channelAccountId, write: this.toFieldWrite(flying), status: flying.status as 'DISPATCHED' | 'ACCEPTED', since, reconcileDue };
     }
     const candidate = this.writes
       .filter((w) => w.writeScopeId === writeScopeId && (w.status === 'PENDING' || w.status === 'FAILED'))
@@ -828,7 +837,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     const due: DueScope[] = [];
     for (const row of this.scopes.values()) {
       const scopeWrites = this.writes.filter((w) => w.writeScopeId === row.writeScopeId);
-      const flying = scopeWrites.find((w) => w.status === 'DISPATCHED');
+      const flying = scopeWrites.find((w) => w.status === 'DISPATCHED' || w.status === 'ACCEPTED');
       const push = (dueKind: DueKind, dueSince: Instant) => due.push({ tenantId: this.tenantId, writeScopeId: row.writeScopeId, dueKind, dueSince });
       const pending = scopeWrites.filter((w) => w.status === 'PENDING' && Date.parse(w.createdAt) <= nowMs - options.pendingMinAgeMs);
       if (!flying && pending.length > 0) push('PENDING', pending.map((w) => w.createdAt).sort()[0]!);
@@ -859,6 +868,62 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     // Как CHECK write_scope_engine_has_strategy (0045): движок без стратегии не включается [Р-77]
     if (mode === 'ENGINE' && !row.strategy) throw new Error(`write scope ${writeScopeId} has no strategy; ENGINE cannot be enabled (Р-77)`);
     row.pricingMode = mode;
+  }
+
+  // --- PricingStore: правка границ и стратегий из консоли (шаг 21) ---------------
+  private adminMember(actor: AdminActor): ConsoleMemberRow | null {
+    const m = this.member(actor.membershipId);
+    // Как security.admin_write_action (0068): действие человека с его ролью; автор — пользователь сессии
+    return m && m.userId === actor.userId && can(m.role, 'MANAGE_PRICING') ? m : null;
+  }
+
+  async editBounds(_tenantId: string, edits: readonly BoundsEditInput[], actor: AdminActor, mode: 'PREVIEW' | 'APPLY'): Promise<BoundsEditResult> {
+    if (!this.adminMember(actor)) return { status: 'FORBIDDEN' };
+    const ids = edits.map((e) => e.writeScopeId);
+    const duplicate = ids.find((id, i) => ids.indexOf(id) !== i);
+    if (duplicate) return { status: 'INVALID', writeScopeId: duplicate, cause: 'DUPLICATE_SCOPE' };
+    // Р-88: массовая правка границ — больше одной единицы записи — только со вторым фактором
+    if (mode === 'APPLY' && new Set(ids).size > 1 && !actor.mfa) return { status: 'MFA_REQUIRED' };
+    const effective = (row: ScopeRow) => {
+      const b = this.boundsOf(row);
+      return { minMinor: b.min.status === 'RESOLVED' ? b.min.amountMinor : null, maxMinor: b.max.status === 'RESOLVED' ? b.max.amountMinor : null };
+    };
+    const rows: BoundsEditRow[] = [];
+    const planned: Array<{ row: ScopeRow; min: SeedBound | null | undefined; max: SeedBound | null | undefined }> = [];
+    for (const e of edits) {
+      const row = this.scopes.get(e.writeScopeId);
+      if (!row) return { status: 'INVALID', writeScopeId: e.writeScopeId, cause: 'SCOPE_NOT_FOUND' };
+      if (e.minMinor === undefined && e.maxMinor === undefined) return { status: 'INVALID', writeScopeId: e.writeScopeId, cause: 'NOTHING_TO_CHANGE' };
+      if ([e.minMinor, e.maxMinor].some((v) => v !== undefined && (!Number.isSafeInteger(v) || v <= 0))) return { status: 'INVALID', writeScopeId: e.writeScopeId, cause: 'AMOUNT_INVALID' };
+      const before = effective(row);
+      if (before.minMinor !== e.expected.minMinor || before.maxMinor !== e.expected.maxMinor) return { status: 'CONFLICT', writeScopeId: e.writeScopeId, actual: before };
+      const version = (b: SeedBound | null | undefined, kind: 'min' | 'max') => `${kind}-${row.writeScopeId}-v${Number((b?.id ?? '').match(/-v(\d+)$/)?.[1] ?? 1) + 1}`;
+      const min = e.minMinor === undefined ? row.minPrice : { amountMinor: e.minMinor, id: version(row.minPrice, 'min') };
+      const max = e.maxMinor === undefined ? row.maxPrice : { amountMinor: e.maxMinor, id: version(row.maxPrice, 'max') };
+      const after = effective({ ...row, minPrice: min ?? null, maxPrice: max ?? null });
+      // Как отложенная проверка write_scope_requires_min_price (0030): у включённой единицы пол не выше потолка
+      if (after.minMinor !== null && after.maxMinor !== null && after.minMinor > after.maxMinor) return { status: 'INVALID', writeScopeId: e.writeScopeId, cause: 'MIN_ABOVE_MAX' };
+      rows.push({ writeScopeId: row.writeScopeId, currency: row.currency, before, after });
+      planned.push({ row, min, max });
+    }
+    if (mode === 'APPLY') for (const p of planned) { p.row.minPrice = p.min ?? null; p.row.maxPrice = p.max ?? null; }
+    return { status: mode === 'APPLY' ? 'APPLIED' : 'PREVIEWED', rows };
+  }
+
+  async saveStrategy(_tenantId: string, input: StrategySaveInput, actor: AdminActor): Promise<StrategySaveResult> {
+    if (!this.adminMember(actor)) return { status: 'FORBIDDEN' };
+    if (input.name.trim().length === 0) return { status: 'INVALID', cause: 'NAME_REQUIRED' };
+    if (input.assignTo.some((id) => !this.scopes.has(id))) return { status: 'INVALID', cause: 'SCOPE_NOT_FOUND' };
+    const versions = [...this.strategyVersions.values()].filter((d) => d.strategyId === input.strategyId);
+    if (input.strategyId !== null && versions.length === 0) return { status: 'INVALID', cause: 'STRATEGY_NOT_FOUND' };
+    const strategy: StrategyDefinition = {
+      strategyId: input.strategyId ?? `strategy-${this.strategyVersions.size + 1}`,
+      version: versions.reduce((v, d) => Math.max(v, d.version), 0) + 1,
+      params: { ...input.params }, deadbandMinor: input.deadbandMinor,
+    };
+    this.rememberStrategy(strategy);
+    for (const id of input.assignTo) this.scope(id).strategy = strategy;
+    return { status: 'SAVED', strategy, assigned: [...input.assignTo] };
   }
 
   // --- PricingStore: системные остановки [Р-51, Р-52] ---------------------------

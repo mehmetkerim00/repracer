@@ -1,5 +1,11 @@
-export { createPricingPipeline, type HaltReviewReport, type PipelineDeps, type PricingPipeline, type ScopeReport, type SnapshotReport, type Stage, type StageRecord } from './pipeline.ts';
+export { createPricingPipeline, type HaltReviewReport, type PipelineDeps, type PricingPipeline, type ScopeReport, type SnapshotReport, type Stage, type StageRecord, type StrategyPreview } from './pipeline.ts';
 export type {
+  AdminActor,
+  BoundsEditInput,
+  BoundsEditResult,
+  BoundsEditRow,
+  StrategySaveInput,
+  StrategySaveResult,
   BoundsRead,
   ConsoleDecisionRow,
   ConsoleDivergenceRow,

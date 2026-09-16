@@ -1,0 +1,161 @@
+import { DANGEROUS_DEVIATION_BP, STRATEGY_TYPES, type StrategyParams } from '@repracer/pricing-model';
+import type { StrategyPreview } from '@repracer/pricing-pipeline';
+import { describe, type HumanReason } from './explain.ts';
+import type { Messages } from './i18n/index.ts';
+import { strategyLabel } from './products.ts';
+import { gap, scopeById, unitOf, type Gap, type StandWorld, type Tone, type UnitRef } from './world.ts';
+
+/**
+ * Экран стратегий (шаг 21): черновик стратегии проверяется на реальных единицах записи до сохранения — те же движок и Gate, что
+ * у оценки, на последнем принятом снимке товара. Сохранить можно только то, что показал экран: токен превью сверяет сервер.
+ */
+
+export interface StrategyDraft {
+  name: string;
+  params: StrategyParams;
+  deadbandMinor: number;
+}
+
+export type DraftProblem = { field: string; code: 'REQUIRED' | 'NOT_A_WHOLE_AMOUNT' | 'OUT_OF_RANGE' | 'UNKNOWN_TYPE' | 'UNSUPPORTED_TYPE' };
+
+const MAX_MINOR = 100_000_000;
+
+/** Разбор черновика из запроса: суммы — целые центы, маржа — базисные пункты; POSITION движком не считается */
+export function parseStrategyDraft(raw: unknown): { ok: true; draft: StrategyDraft } | { ok: false; problems: DraftProblem[] } {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const p = (r.params ?? {}) as Record<string, unknown>;
+  const problems: DraftProblem[] = [];
+  const minor = (field: string, value: unknown, min: number): number => {
+    if (value === undefined || value === null || value === '') { problems.push({ field, code: 'REQUIRED' }); return 0; }
+    if (!Number.isSafeInteger(value)) { problems.push({ field, code: 'NOT_A_WHOLE_AMOUNT' }); return 0; }
+    if ((value as number) < min || (value as number) > MAX_MINOR) problems.push({ field, code: 'OUT_OF_RANGE' });
+    return value as number;
+  };
+  const name = typeof r.name === 'string' ? r.name.trim() : '';
+  if (name.length === 0 || name.length > 80) problems.push({ field: 'name', code: name.length === 0 ? 'REQUIRED' : 'OUT_OF_RANGE' });
+  const deadbandMinor = minor('deadbandMinor', r.deadbandMinor ?? 0, 0);
+  const type = p.type;
+  let params: StrategyParams | null = null;
+  if (!(STRATEGY_TYPES as readonly unknown[]).includes(type)) problems.push({ field: 'type', code: 'UNKNOWN_TYPE' });
+  else if (type === 'FIXED') params = { type, priceMinor: minor('priceMinor', p.priceMinor, 1) };
+  else if (type === 'TARGET_MARGIN') {
+    const bp = minor('targetMarginBp', p.targetMarginBp, 0);
+    if (bp >= 10_000) problems.push({ field: 'targetMarginBp', code: 'OUT_OF_RANGE' });
+    params = { type, targetMarginBp: bp };
+  } else if (type === 'MATCH_BUYBOX') {
+    params = { type, undercutMinor: minor('undercutMinor', p.undercutMinor ?? 0, 0), holdWhenWinning: p.holdWhenWinning === true, atBound: p.atBound === 'HOLD' ? 'HOLD' : 'CAP' };
+  } else if (type === 'BEAT_LOWEST') {
+    params = {
+      type, undercutMinor: minor('undercutMinor', p.undercutMinor ?? 0, 0), scope: p.scope === 'MARKET' ? 'MARKET' : 'VISIBLE_TOP_N',
+      compareLanded: p.compareLanded === true, atBound: p.atBound === 'HOLD' ? 'HOLD' : 'CAP',
+    };
+  } else problems.push({ field: 'type', code: 'UNSUPPORTED_TYPE' });
+  return problems.length > 0 || !params ? { ok: false, problems } : { ok: true, draft: { name, params, deadbandMinor } };
+}
+
+export interface StrategyListView {
+  worldId: string;
+  strategies: Array<{ strategyId: string; version: number; label: string; detail: string; scopes: UnitRef[] }>;
+  scopes: Array<{ unit: UnitRef; strategy: string; mode: string }>;
+  canEdit: boolean;
+}
+
+export function strategiesView(world: StandWorld, m: Messages, canEdit: boolean): StrategyListView {
+  const inUse = new Map<string, { strategyId: string; version: number; params: StrategyParams; deadbandMinor: number; scopes: UnitRef[] }>();
+  for (const s of world.state.scopes) {
+    if (!s.strategy) continue;
+    const key = `${s.strategy.strategyId}@${s.strategy.version}`;
+    const entry = inUse.get(key) ?? { ...s.strategy, scopes: [] };
+    entry.scopes.push(unitOf(world, s, m));
+    inUse.set(key, entry);
+  }
+  return {
+    worldId: world.id,
+    strategies: [...inUse.values()].map((s) => {
+      const currency = world.state.scopes.find((x) => x.strategy?.strategyId === s.strategyId)?.currency ?? '';
+      const label = strategyLabel({ strategyId: s.strategyId, version: s.version, params: s.params, deadbandMinor: s.deadbandMinor }, currency, m);
+      return { strategyId: s.strategyId, version: s.version, label: label.label, detail: label.detail, scopes: s.scopes };
+    }),
+    scopes: world.state.scopes.map((s) => ({
+      unit: unitOf(world, s, m), mode: m.values[s.pricingMode],
+      strategy: strategyLabel(s.strategy, s.currency, m).label,
+    })),
+    canEdit,
+  };
+}
+
+export interface PreviewRow {
+  unit: UnitRef;
+  tone: Tone;
+  asOf: string;
+  current: string;
+  proposed: string | null;
+  final: string | null;
+  change: string | null;
+  outcome: string;
+  dangerous: boolean;
+  reason: HumanReason | null;
+  unavailable: string | null;
+}
+
+export interface StrategyPreviewView {
+  worldId: string;
+  draft: { title: string; detail: string };
+  rows: PreviewRow[];
+  summary: { changes: number; unchanged: number; rejected: number; dangerous: number; notEvaluated: number };
+  headline: string;
+  /** Сохранение принимается только с этим токеном: черновик и итог превью те же, что видел человек */
+  previewToken: string;
+  gaps: Gap[];
+}
+
+/** Отпечаток того, что видел человек (FNV-1a, две ветви): не секрет и не подпись — сервер пересчитывает его сам и сравнивает */
+export function fingerprint(value: unknown): string {
+  const text = JSON.stringify(value);
+  let a = 0x811c9dc5;
+  let b = 0x01000193 ^ text.length;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    a = Math.imul(a ^ c, 0x01000193) >>> 0;
+    b = Math.imul(b ^ c, 0x5bd1e995) >>> 0;
+  }
+  return a.toString(16).padStart(8, '0') + b.toString(16).padStart(8, '0');
+}
+
+export function previewToken(draft: StrategyDraft, previews: readonly StrategyPreview[]): string {
+  return fingerprint([draft, previews.map((p) => [p.writeScopeId, p.stages.map((s) => `${s.stage}:${s.outcome}`).join('>'), p.decision?.finalMinor ?? null, p.intent?.proposedMinor ?? null])]);
+}
+
+export function strategyPreviewView(world: StandWorld, draft: StrategyDraft, previews: readonly StrategyPreview[], m: Messages): StrategyPreviewView {
+  const t = m.ui.strategies;
+  const summary = { changes: 0, unchanged: 0, rejected: 0, dangerous: 0, notEvaluated: 0 };
+  const rows = previews.map((p): PreviewRow => {
+    const scope = scopeById(world, p.writeScopeId)!;
+    const money = (v: number | null | undefined) => m.money(v ?? null, p.currency);
+    const strategy = p.stages.find((s) => s.stage === 'STRATEGY');
+    const unavailable = p.availability.available ? null
+      : t.unavailable(Object.entries(p.availability.unmet).map(([source, codes]) => `${source}: ${codes.map((c) => m.values[c as keyof typeof m.values] ?? c).join(', ')}`).join('; '));
+    const d = p.decision;
+    const dangerous = d?.outcome === 'REJECTED' && d.boundDeviationBp !== null && d.boundDeviationBp > DANGEROUS_DEVIATION_BP;
+    let tone: Tone = 'unknown';
+    if (!d) summary.notEvaluated += 1;
+    else if (d.outcome === 'APPROVED') { summary.changes += 1; tone = 'progress'; }
+    else if (d.outcome === 'NO_CHANGE') { summary.unchanged += 1; tone = 'ok'; }
+    else { summary.rejected += 1; tone = dangerous ? 'stop' : 'warn'; }
+    if (dangerous) summary.dangerous += 1;
+    const reason = d ? describe(d.reason, m) : strategy?.reason ? describe(strategy.reason, m) : null;
+    return {
+      unit: unitOf(world, scope, m), tone, asOf: p.snapshotObservedAt ? t.asOfSnapshot(m.when(p.snapshotObservedAt)) : t.asOfNow(m.when(p.evaluatedAt)),
+      current: money(p.currentPriceMinor), proposed: p.intent ? money(p.intent.proposedMinor) : null,
+      final: d?.finalMinor !== undefined && d.finalMinor !== null ? money(d.finalMinor) : null,
+      change: d?.outcome === 'APPROVED' ? m.change(p.currentPriceMinor, d.finalMinor) : null,
+      outcome: d ? m.ui.outcomes[d.outcome] : t.notEvaluated, dangerous, reason, unavailable,
+    };
+  });
+  const label = strategyLabel({ strategyId: 'draft', version: 1, params: draft.params, deadbandMinor: draft.deadbandMinor }, previews[0]?.currency ?? '', m);
+  return {
+    worldId: world.id, draft: { title: `${draft.name} · ${label.label}`, detail: label.detail }, rows, summary,
+    headline: t.headline(summary), previewToken: previewToken(draft, previews),
+    gaps: [gap(m, 'PREVIEW_LAST_SNAPSHOT'), gap(m, 'PREVIEW_CURRENT_BOUNDS')],
+  };
+}

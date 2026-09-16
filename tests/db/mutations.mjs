@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0076_verify_schema_invariants_v17.sql';
+const VERIFY = 'migrations/0079_verify_schema_invariants_v18.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -567,6 +567,36 @@ export const STEP20_ROWS = [
       m(replaceInFunction('tenant_data.offer_mapping_migration_guard()', `OR channel_data.migration_check_losses(latest.findings)
                            IS DISTINCT FROM (SELECT coalesce(array_agg(DISTINCT x ORDER BY x), '{}') FROM unnest(i.acknowledged_losses) x)`, ''),
         smoke('migration started with a loss the owner did not acknowledge (INV-12, Р-109, step 20 review)')),
+    ],
+  },
+];
+
+export const STEP21_ROWS = [
+  {
+    row: 'Р-111', invariant: 'собственный пол цены канала (Kaufland minimum_price, Amazon minimum_seller_allowed_price) не пишется: поле — только у Kaufland и только в явном режиме Smart Pricing',
+    mutations: [
+      m(dropConstraint('channel_capability_channel_min_price_only_kaufland', 'platform.channel_capability'),
+        smoke('Amazon capability for the channel repricer floor (Р-111)')),
+      m(dropConstraint('write_scope_smart_pricing_only_kaufland', 'tenant_data.write_scope'),
+        smoke('Amazon write scope in Smart Pricing mode (Р-111)')),
+      m(replaceInFunction('tenant_data.channel_write_before_insert()', "IF s.field <> 'PRICE' OR s.pricing_mode <> 'KAUFLAND_SMART_PRICING' THEN", 'IF false THEN'),
+        smoke('CHANNEL_MIN_PRICE write in ENGINE mode (Р-12)')),
+    ],
+  },
+  {
+    row: 'Р-88/OQ-144', invariant: 'границы больше чем одного предложения одной транзакцией административного сервиса — только со вторым фактором; версия границы — время транзакции',
+    mutations: [
+      m(dropTrigger('zc_min_price_mass_edit_requires_mfa', 'tenant_data.min_price'), smoke('min_price of two offers in one transaction without a second factor (Р-88)')),
+      m(dropTrigger('zc_max_price_mass_edit_requires_mfa', 'tenant_data.max_price'), smoke('max_price of two offers in one transaction without a second factor (Р-88)')),
+      m(replaceInFunction('tenant_data.bounds_mass_edit_requires_mfa()', 'IF offers > 1 THEN', 'IF false THEN'),
+        smoke('min_price of two offers in one transaction without a second factor (Р-88)'), smoke('max_price of two offers in one transaction without a second factor (Р-88)')),
+      m(replaceInFunction('tenant_data.bounds_mass_edit_requires_mfa()', `WHERE b.tenant_id = NEW.tenant_id AND b.created_at = now() AND tenant_data.row_in_current_transaction(b.xmin)
+  ) edited;`, `WHERE false
+  ) edited;`), smoke('min_price of one offer and max_price of another in one transaction without a second factor (Р-88)')),
+      m(replaceInFunction('tenant_data.row_in_current_transaction(xid)', "= 'in progress'", "= 'committed'"),
+        smoke('min_price of two offers in one transaction without a second factor (Р-88)'), smoke('max_price of two offers in one transaction without a second factor (Р-88)')),
+      m(replaceInFunction('tenant_data.bounds_mass_edit_requires_mfa()', 'IF NEW.created_at IS DISTINCT FROM now() THEN', 'IF false THEN'),
+        smoke('backdated bound version from the administrative service (Р-88)')),
     ],
   },
 ];

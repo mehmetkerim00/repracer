@@ -150,6 +150,38 @@ SELECT pg_temp.expect_fail('deactivate the only min_price while ENGINE', $q$
   INSERT INTO tenant_data.min_price (tenant_id, scope_type, product_id, currency, price_basis, amount_minor, is_active, version, created_by_membership_id)
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'PRODUCT', 'a5000000-0000-0000-0000-000000000001', 'EUR', 'GROSS', 1000, false, 2, 'a2000000-0000-0000-0000-00000000000a') $q$, 'has pricing_mode ENGINE but no active min_price');
 SELECT pg_temp.expect_fail('the administrative service has no right to update min_price (append-only: smoke_append_only.sql)', $q$ UPDATE tenant_data.min_price SET amount_minor = 1 $q$, '^permission denied for table min_price$');
+-- Шаг 21 [Р-88, OQ-144, 0078]: границы больше чем одного предложения (товар a5 и единица записи a6 — разные предложения) одной транзакцией
+-- административного сервиса — только со вторым фактором; каждая проверка — одной командой (CTE), чтобы отказ давал свой триггер
+SELECT pg_temp.expect_fail('min_price of two offers in one transaction without a second factor (Р-88)', $q$
+  WITH p AS (INSERT INTO tenant_data.min_price (tenant_id, scope_type, product_id, currency, price_basis, amount_minor, version, created_by_membership_id)
+             VALUES ('a0000000-0000-0000-0000-00000000000a', 'PRODUCT', 'a5000000-0000-0000-0000-000000000001', 'EUR', 'GROSS', 1000, 2, 'a2000000-0000-0000-0000-00000000000a') RETURNING 1)
+  INSERT INTO tenant_data.min_price (tenant_id, scope_type, write_scope_id, currency, price_basis, amount_minor, version, created_by_membership_id)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'WRITE_SCOPE', 'a6000000-0000-0000-0000-000000000001', 'EUR', 'GROSS', 1000, 1, 'a2000000-0000-0000-0000-00000000000a') $q$,
+  'bounds of 2 offers changed in one transaction without a second factor');
+SELECT pg_temp.expect_fail('max_price of two offers in one transaction without a second factor (Р-88)', $q$
+  WITH p AS (INSERT INTO tenant_data.max_price (tenant_id, scope_type, product_id, currency, price_basis, amount_minor, version, created_by_membership_id)
+             VALUES ('a0000000-0000-0000-0000-00000000000a', 'PRODUCT', 'a5000000-0000-0000-0000-000000000001', 'EUR', 'GROSS', 5000, 3, 'a2000000-0000-0000-0000-00000000000a') RETURNING 1)
+  INSERT INTO tenant_data.max_price (tenant_id, scope_type, write_scope_id, currency, price_basis, amount_minor, version, created_by_membership_id)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'WRITE_SCOPE', 'a6000000-0000-0000-0000-000000000001', 'EUR', 'GROSS', 5000, 1, 'a2000000-0000-0000-0000-00000000000a') $q$,
+  'bounds of 2 offers changed in one transaction without a second factor');
+SELECT pg_temp.expect_fail('min_price of one offer and max_price of another in one transaction without a second factor (Р-88)', $q$
+  WITH p AS (INSERT INTO tenant_data.min_price (tenant_id, scope_type, write_scope_id, currency, price_basis, amount_minor, version, created_by_membership_id)
+             VALUES ('a0000000-0000-0000-0000-00000000000a', 'WRITE_SCOPE', 'a6000000-0000-0000-0000-000000000001', 'EUR', 'GROSS', 1000, 1, 'a2000000-0000-0000-0000-00000000000a') RETURNING 1)
+  INSERT INTO tenant_data.max_price (tenant_id, scope_type, product_id, currency, price_basis, amount_minor, version, created_by_membership_id)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'PRODUCT', 'a5000000-0000-0000-0000-000000000001', 'EUR', 'GROSS', 5000, 3, 'a2000000-0000-0000-0000-00000000000a') $q$,
+  'bounds of 2 offers changed in one transaction without a second factor');
+SELECT pg_temp.expect_fail('backdated bound version from the administrative service (Р-88)', $q$
+  INSERT INTO tenant_data.min_price (tenant_id, scope_type, product_id, currency, price_basis, amount_minor, version, created_by_membership_id, created_at)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'PRODUCT', 'a5000000-0000-0000-0000-000000000001', 'EUR', 'GROSS', 1000, 2, 'a2000000-0000-0000-0000-00000000000a', now() - interval '1 day') $q$,
+  'backdated versions are not accepted');
+SAVEPOINT bounds_mfa;
+SELECT set_config('app.auth_mfa', 'on', true) \gset
+SELECT pg_temp.ok('min_price and max_price of two offers with a second factor (Р-88)', $q$
+  WITH p AS (INSERT INTO tenant_data.min_price (tenant_id, scope_type, write_scope_id, currency, price_basis, amount_minor, version, created_by_membership_id)
+             VALUES ('a0000000-0000-0000-0000-00000000000a', 'WRITE_SCOPE', 'a6000000-0000-0000-0000-000000000001', 'EUR', 'GROSS', 1000, 1, 'a2000000-0000-0000-0000-00000000000a') RETURNING 1)
+  INSERT INTO tenant_data.max_price (tenant_id, scope_type, product_id, currency, price_basis, amount_minor, version, created_by_membership_id)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'PRODUCT', 'a5000000-0000-0000-0000-000000000001', 'EUR', 'GROSS', 5000, 3, 'a2000000-0000-0000-0000-00000000000a') $q$);
+ROLLBACK TO SAVEPOINT bounds_mfa;
 SELECT pg_temp.expect_fail('Smart Pricing without tenant opt-in (Р-12)', $q$
   UPDATE tenant_data.write_scope SET pricing_mode = 'KAUFLAND_SMART_PRICING' WHERE write_scope_id = 'a6000000-0000-0000-0000-000000000001' $q$, 'tenant has not opted in to Kaufland Smart Pricing');
 SELECT pg_temp.expect_fail('CHANNEL_MIN_PRICE write in ENGINE mode (Р-12)', $q$
@@ -557,6 +589,13 @@ SELECT pg_temp.expect_fail('Amazon EU quantity sync without side-effects ack (IN
   INSERT INTO tenant_data.write_scope (tenant_id, channel_account_id, channel, field, product_id, capability_id, capability_version, scope_kind, scope_key, requires_side_effects_ack, quantity_sync_enabled)
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000002', 'AMAZON', 'QUANTITY', 'a5000000-0000-0000-0000-000000000001',
           'c0000000-0000-0000-0000-000000000003', 1, 'ACCOUNT_REGION_SKU', '["EU", "A-1"]', true, true) $q$, 'write_scope_check6');
+-- Р-111 (шаг 21): тенант согласился на Smart Pricing Kaufland, у товара есть min_price — отказывает только ограничение канала
+SELECT pg_temp.expect_fail('Amazon write scope in Smart Pricing mode (Р-111)', $q$
+  INSERT INTO tenant_data.write_scope (tenant_id, channel_account_id, channel, field, product_id, capability_id, capability_version, scope_kind, scope_key,
+                                       currency, price_basis, tax_regime, pricing_mode)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000002', 'AMAZON', 'PRICE', 'a5000000-0000-0000-0000-000000000001',
+          'c0000000-0000-0000-0000-000000000006', 1, 'ACCOUNT_REGION_MARKETPLACE_SKU', '["EU", "A1PA6795UKMFR9", "A-1"]',
+          'EUR', 'GROSS', 'VAT_INCLUDED', 'KAUFLAND_SMART_PRICING') $q$, 'write_scope_smart_pricing_only_kaufland');
 COMMIT;
 
 BEGIN;

@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer, type ViteDevServer } from 'vite';
-import { messagesFor, type BoundsView, type DecisionListItem, type DecisionTrace, type Locale, type ProductListView, type RejectedView, type StopPlan, type StopView } from '@repracer/console-model';
+import { messagesFor, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
 import { buildStandWorlds, memoryStandDirectory, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
@@ -245,3 +245,70 @@ test('finding 6: the sign-in mode of the stand is explicit — a partial OIDC co
   assert.throws(() => resolveStandIdentityMode({ STAND_IDENTITY: 'oidc', OIDC_ISSUER: 'http://idp.example.test', OIDC_AUDIENCE: 'c', OIDC_JWKS_URL: 'http://idp.example.test/k' }), /https/);
 });
 
+
+test('step 21: a strategy is saved only with the token of the preview shown; bounds are applied only with the token of the difference screen and a second factor for several offers', async () => {
+  const id = 'kaufland/pipeline/happy-path';
+  const owner = await login('OWNER');
+  const viewer = await login('VIEWER');
+  const draft = { name: 'Synthetic undercut', params: { type: 'MATCH_BUYBOX', undercutMinor: 10, holdWhenWinning: false, atBound: 'CAP' }, deadbandMinor: 0 };
+  const list = await get<StrategyListView>(owner, api(id, 'strategies'));
+  assert.equal(list.canEdit, true);
+  assert.equal((await get<StrategyListView>(viewer, api(id, 'strategies'))).canEdit, false);
+  const bad = await call(owner, 'POST', api(id, 'strategies', 'preview'), { draft: { ...draft, deadbandMinor: 'x' }, writeScopeIds: ['ws-price-de-4101'] });
+  assert.deepEqual([bad.status, (bad.body as { error: { code: string; message: string } }).error.message], [400, 'Threshold, cents: whole number of cents or basis points']);
+  const preview = await call(viewer, 'POST', api(id, 'strategies', 'preview'), { draft, writeScopeIds: ['ws-price-de-4101'] });
+  assert.equal(preview.status, 200, 'a viewer may preview');
+  const view = preview.body as StrategyPreviewView;
+  assert.equal(view.rows.length, 1);
+  const save = (auth: Auth, previewToken: string, confirmed = true) => call(auth, 'POST', api(id, 'strategies'), { draft, writeScopeIds: ['ws-price-de-4101'], strategyId: null, previewToken, confirmed });
+  assert.equal((await save(viewer, view.previewToken)).status, 403);
+  assert.equal((await save(owner, view.previewToken, false)).status, 400);
+  assert.equal((await save(owner, 'not-the-preview')).status, 409);
+  const saved = await save(owner, view.previewToken);
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  assert.match((saved.body as { message: string }).message, /^Saved as version 1, assigned to 1 offer\.$/);
+  const html1 = await html('/src/screens/Strategies.tsx', 'PreviewTable', { view });
+  assert.ok(html1.includes('snapshot of '));
+
+  // Правка границ: экран различий → применение; без экрана и с устаревшим токеном — отказ
+  const request = { writeScopeIds: ['ws-price-de-4101'], min: { kind: 'SET', minor: 1600 } };
+  assert.equal((await call(viewer, 'POST', api(id, 'bounds', 'plan'), { request })).status, 403);
+  const plan = await call(owner, 'POST', api(id, 'bounds', 'plan'), { request });
+  assert.equal(plan.status, 200, JSON.stringify(plan.body));
+  const diff = plan.body as BoundsDiffView;
+  assert.deepEqual([diff.rows[0]!.minBefore, diff.rows[0]!.minAfter, diff.mfaRequired], ['€15.00', '€16.00', false]);
+  assert.equal((await call(owner, 'POST', api(id, 'bounds', 'apply'), { request, planToken: 'stale', confirmed: true })).status, 409);
+  const applied = await call(owner, 'POST', api(id, 'bounds', 'apply'), { request, planToken: diff.planToken, confirmed: true });
+  assert.deepEqual([applied.status, (applied.body as { message: string }).message], [200, 'Bounds of 1 offer changed.']);
+  assert.equal((await call(owner, 'POST', api(id, 'bounds', 'apply'), { request, planToken: diff.planToken, confirmed: true })).status, 409, 'the difference screen is stale after applying');
+  const diffHtml = await html('/src/screens/BoundsEdit.tsx', 'BoundsDiffTable', { view: diff }, 'de');
+  assert.ok(diffHtml.includes('€15.00') && diffHtml.includes('min vorher'), 'amounts come from the server in the session language, labels from the dictionary of the page');
+
+  const multi = 'kaufland/pipeline/fx-usd-floor-eur-cost';
+  const mass = { writeScopeIds: (await get<BoundsIndexItem[]>(owner, api(multi, 'bounds'))).map((i) => i.writeScopeId), min: { kind: 'PERCENT', bp: -500 } };
+  const massPlan = (await call(owner, 'POST', api(multi, 'bounds', 'plan'), { request: mass })).body as BoundsDiffView;
+  assert.equal(massPlan.mfaRequired, true);
+  // Токен имитатора по умолчанию несёт второй фактор (pwd + otp); вход только паролем — без него
+  const passwordOnly = { authorization: `Bearer ${issuer.token(account('OWNER').subject, { email: account('OWNER').email, amr: ['pwd'] })}`, cookie: 'repracer_locale=en' };
+  const noMfa = await call(passwordOnly, 'POST', api(multi, 'bounds', 'apply'), { request: mass, planToken: massPlan.planToken, confirmed: true });
+  assert.equal(noMfa.status, 403, JSON.stringify(noMfa.body));
+  assert.equal((noMfa.body as { error: { code: string } }).error.code, 'MFA_REQUIRED');
+  const withMfa = { authorization: `Bearer ${issuer.token(account('OWNER').subject, { email: account('OWNER').email, amr: ['pwd', 'otp'] })}`, cookie: 'repracer_locale=en' };
+  assert.equal((await call(withMfa, 'POST', api(multi, 'bounds', 'apply'), { request: mass, planToken: massPlan.planToken, confirmed: true })).status, 200);
+});
+
+test('step 21: the price feed and the report of dangerous changes stopped by the bounds (Р-73) are served and rendered in German and English', async () => {
+  const viewer = await login('VIEWER');
+  const feed = await get<PriceFeedView>(viewer, api('kaufland/pipeline/happy-path', 'feed'));
+  assert.ok(feed.items.length >= 1);
+  const report = await get<DangerousReportView>(viewer, `${api('kaufland/pipeline/above-max-price', 'dangerous')}?days=30`);
+  assert.equal(report.count, 1);
+  assert.equal((await call(viewer, 'GET', `${api('kaufland/pipeline/above-max-price', 'dangerous')}?days=5`)).status, 400);
+  for (const locale of ['de', 'en'] as const) {
+    const auth = await login('VIEWER', locale);
+    const r = await get<DangerousReportView>(auth, `${api('kaufland/pipeline/above-max-price', 'dangerous')}?days=7`);
+    const markup = await html('/src/screens/Dangerous.tsx', 'DangerousScreenView', { view: r }, locale);
+    assert.ok(markup.includes(r.headline));
+    assert.ok((await html('/src/screens/Feed.tsx', 'FeedScreenView', { view: await get<PriceFeedView>(auth, api('kaufland/pipeline/happy-path', 'feed')) }, locale)).includes(messagesFor(locale).ui.feed.pageTitle));
+  }
+});

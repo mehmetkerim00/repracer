@@ -2,6 +2,7 @@ import type { BoundsView, PriceBreakdown } from '@repracer/console-model';
 import type { BoundsIndexItem } from '../api-types.ts';
 import { useResource, worldPath } from '../api.ts';
 import { Gaps, href, Load, useMessages } from '../components.tsx';
+import { BoundsEditPanel } from './BoundsEdit.tsx';
 
 export function BreakdownTable({ breakdown, currency }: { breakdown: PriceBreakdown; currency: string }) {
   const m = useMessages();
@@ -86,7 +87,7 @@ export function BoundsScreen({ worldId, writeScopeId }: { worldId: string; write
 function BoundsIndex({ worldId }: { worldId: string }) {
   const m = useMessages();
   const [resource, retry] = useResource<BoundsIndexItem[]>(worldPath(worldId, 'bounds'), m.locale);
-  return <Load resource={resource} retry={retry}>{(items) => <BoundsIndexView worldId={worldId} items={items} />}</Load>;
+  return <Load resource={resource} retry={retry}>{(items) => <><BoundsIndexView worldId={worldId} items={items} /><BoundsEditPanel worldId={worldId} items={items} /></>}</Load>;
 }
 
 function BoundsDetail({ worldId, writeScopeId }: { worldId: string; writeScopeId: string }) {

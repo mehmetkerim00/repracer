@@ -1,0 +1,491 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "kaufland-sim/price-war-undercut",
+  "channel": "KAUFLAND",
+  "apiVersion": "2.44.0",
+  "title": "Симулятор: ценовая война с конкурентом-репрайсером до границы",
+  "description": "Модель канала с состоянием [Р-113]. Конкурент по расписанию снижает цену, мы встаём на 5 центов ниже победителя Buy Box, конкурент-репрайсер через 5 минут отвечает тем же. Шесть часов мира: цена не уходит ниже min_price 15.00, в канал не пишется minimum_price, каждая доставка уведомления проходит путь решения. Варианты — ответы на K-10, K-12, K-17, K-05, K-15.",
+  "tags": [
+    "simulator",
+    "pipeline"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "vendor/kaufland/seller-api-v2/2026-09-14/openapi.json#PATCH /units/{id_unit}",
+      "https://sellerapi.kaufland.com/?page=push-notifications#events",
+      "docs/channel-capabilities.md#7"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn-seller-0001",
+      "marketplaces": [
+        "de",
+        "at"
+      ]
+    },
+    "credentials": {
+      "seller": {
+        "clientKey": "syn-seller-client-key-0001",
+        "secretKey": "syn-seller-secret-key-0001"
+      }
+    },
+    "secrets": [
+      "wh_tok_synthetic_0007"
+    ],
+    "pricing": {
+      "scopes": [
+        {
+          "writeScopeId": "ws-price-de-7101",
+          "productId": "prod-7101",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7101",
+          "channelProductRef": "362007101",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7101"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7101"
+          }
+        }
+      ],
+      "competitorDaily": {
+        "de|362007101|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ]
+      },
+      "competitorState": {
+        "de|362007101|new": {
+          "observedAt": "2026-09-14T09:00:00.000Z",
+          "buyboxMinor": 1800,
+          "lowestMinor": 1800
+        }
+      }
+    },
+    "channelModel": {
+      "seed": 21,
+      "webhookUrl": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0007",
+      "units": [
+        {
+          "idUnit": 7101,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7101",
+          "idProduct": 362007101,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        }
+      ],
+      "competitors": [
+        {
+          "sellerRef": "Synthetic Repricer",
+          "storefront": "de",
+          "idProduct": 362007101,
+          "priceMinor": 1900,
+          "behaviour": {
+            "kind": "UNDERCUT_SELF",
+            "undercutMinor": 5,
+            "reactionMs": 300000,
+            "floorMinor": 1400,
+            "ceilingMinor": 2600
+          }
+        },
+        {
+          "sellerRef": "Synthetic Scheduled",
+          "storefront": "de",
+          "idProduct": 362007101,
+          "priceMinor": 1990,
+          "behaviour": {
+            "kind": "SCHEDULE",
+            "points": [
+              {
+                "atOffsetMs": 120000,
+                "priceMinor": 1800
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "six-hours",
+      "kind": "channelRun",
+      "durationMs": 21600000,
+      "tickMs": 60000,
+      "expect": {
+        "verdicts": {
+          "ACCEPT": {
+            "$gt": 20
+          }
+        },
+        "decisions": {
+          "CHANGED": {
+            "$gt": 20
+          }
+        }
+      }
+    }
+  ],
+  "exchanges": [],
+  "expect": {
+    "noAlerts": true,
+    "channel": {
+      "units": [
+        {
+          "idUnit": 7101,
+          "listingPriceMinor": 1500,
+          "winsBuyBox": false
+        }
+      ],
+      "violations": []
+    },
+    "pipeline": {
+      "writes": {
+        "$every": {
+          "amountMinor": {
+            "$gte": 1500
+          }
+        }
+      },
+      "halts": [],
+      "rejectedSnapshots": []
+    }
+  },
+  "variants": [
+    {
+      "id": "k10-debounce-and-loss",
+      "question": "K-10",
+      "params": {
+        "buyBoxChanged": {
+          "delivered": true,
+          "debounceMs": 300000,
+          "lossShare": 0.3
+        }
+      },
+      "finding": "Потерянное buy_box_changed не догоняется: опрос по ярусам [Р-47] в мире нет, догон Р-48 — только при потере подписки. Цена стоит на 17.85 при победителе 17.80 оставшиеся часы, алерта нет.",
+      "expect": {
+        "noAlerts": true,
+        "channel": {
+          "units": [
+            {
+              "listingPriceMinor": {
+                "$gte": 1700
+              },
+              "winsBuyBox": false
+            }
+          ],
+          "stats": {
+            "notificationsLost": {
+              "$gt": 0
+            }
+          },
+          "violations": []
+        },
+        "pipeline": {
+          "writes": {
+            "$every": {
+              "amountMinor": {
+                "$gte": 1500
+              }
+            }
+          }
+        }
+      },
+      "stepExpect": {
+        "six-hours": {
+          "decisions": {
+            "CHANGED": {
+              "$lte": 5
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "k12-net-listing-price",
+      "question": "K-12",
+      "params": {
+        "listingPriceBasis": "NET"
+      },
+      "finding": "Если listing_price — нетто, покупатель видит цену на 19 % выше записанной: Buy Box не выигрывается, конкурент-репрайсер уходит вверх, уведомлений больше нет. Ни проверка входов, ни сверка, ни DivergenceCase этого не видят — обратное чтение сравнивает listing_price с записанным, и они совпадают.",
+      "expect": {
+        "noAlerts": true,
+        "channel": {
+          "units": [
+            {
+              "listingPriceMinor": 1795,
+              "buyerPriceMinor": 2136,
+              "winsBuyBox": false
+            }
+          ],
+          "violations": []
+        },
+        "pipeline": {
+          "divergenceCases": [],
+          "writes": [
+            {
+              "amountMinor": 1795,
+              "status": "APPLIED"
+            }
+          ]
+        }
+      },
+      "stepExpect": {
+        "six-hours": {
+          "deliveries": 1
+        }
+      }
+    },
+    {
+      "id": "k05-edit-limit-stress",
+      "question": "K-05",
+      "params": {
+        "unitEditLimit": {
+          "maxEdits": 3,
+          "windowMs": 3600000
+        }
+      },
+      "finding": "Стресс-значение, не ответ поддержки. Отказ по лимиту правок блокирует единицу до человека (KFL_C11). До шага 21 путь решения блокировал её без алерта; теперь PRICE_WRITE_SCOPE_BLOCKED, как у диспетчера.",
+      "stepExpect": {
+        "six-hours": {
+          "decisions": {
+            "CHANGED": 4
+          }
+        }
+      },
+      "expect": {
+        "alerts": [
+          {
+            "code": "PRICE_WRITE_SCOPE_BLOCKED",
+            "count": 1
+          }
+        ],
+        "logs": [
+          {
+            "code": "KFL_C11_NO_EDIT_BUDGET"
+          }
+        ],
+        "channel": {
+          "stats": {
+            "editLimited": 1
+          },
+          "violations": []
+        },
+        "pipeline": {
+          "writes": {
+            "$contains": [
+              {
+                "status": "FAILED"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "k15-apply-delay-15-min",
+      "question": "K-15",
+      "params": {
+        "applyDelayMs": 900000
+      },
+      "finding": "Запись, принятая без применения, держит единицу до подтверждения [Р-64]; подтверждение — обратным чтением: больше 100 GET /units на 18 записей цены. До шага 21 стенд в памяти отпускал единицу сразу, в отличие от PostgreSQL.",
+      "expect": {
+        "noAlerts": true,
+        "channel": {
+          "stats": {
+            "requests": {
+              "GET /v2/units/{id}": {
+                "$gt": 100
+              }
+            }
+          },
+          "violations": []
+        },
+        "pipeline": {
+          "writes": {
+            "$every": {
+              "amountMinor": {
+                "$gte": 1500
+              }
+            }
+          }
+        }
+      },
+      "stepExpect": {
+        "six-hours": {
+          "decisions": {
+            "CHANGED": {
+              "$gt": 10
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "k14-write-timeouts",
+      "question": "K-14",
+      "params": {
+        "faults": {
+          "writeTimeoutShare": 0.2,
+          "timeoutAppliedShare": 0.5,
+          "bulkItemMissingShare": 0,
+          "bulkItemServerErrorShare": 0
+        }
+      },
+      "finding": "Тайм-аут записи — исход неизвестен, повтора нет [KFL_C02], сверка обратным чтением; итог тот же, что без сбоев.",
+      "expect": {
+        "noAlerts": true,
+        "logs": [
+          {
+            "code": "KFL_C02_NO_TRANSPORT_RETRY_FOR_WRITES"
+          }
+        ],
+        "channel": {
+          "units": [
+            {
+              "listingPriceMinor": 1500
+            }
+          ],
+          "stats": {
+            "timeouts": {
+              "$gt": 0
+            }
+          },
+          "violations": []
+        },
+        "pipeline": {
+          "writes": {
+            "$every": {
+              "amountMinor": {
+                "$gte": 1500
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

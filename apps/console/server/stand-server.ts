@@ -1,15 +1,19 @@
 import { createServer, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import {
-  boundsView, can, decisionList, decisionTrace, describe, LOCALES, messagesFor, planStop, productList, rejectedView, stopView,
-  type Locale, type StopTarget, type Viewer,
+  boundsDiffView, boundsView, can, dangerousReport, decisionList, decisionTrace, describe, expandBoundsEdit, LOCALES, messagesFor, parseBoundsEditRequest,
+  parseStrategyDraft, planStop, previewToken, priceFeed, productList, rejectedView, REPORT_PERIODS_DAYS, stopView, strategiesView, strategyPreviewView,
+  type Locale, type Messages, type StandWorld, type StopTarget, type StrategyDraft, type Viewer,
 } from '@repracer/console-model';
+import type { StrategyPreview } from '@repracer/pricing-pipeline';
 import {
   buildStandWorlds, memoryStandDirectory, pgStandJoinMember, pgStandUsers, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_EMAILS, STAND_ISSUER, type LiveWorld,
 } from '@repracer/contract-tests/stand';
 import { createAuthenticator, hasSecondFactor, remoteJwks, staticJwks, type Authenticator, type Principal } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
-import { NOTE_MAX, NOTE_MIN, type BoundsIndexItem, type EnableResult, type NoteRequest, type SessionView, type StopRequest, type WorldSummary } from '../src/api-types.ts';
+import {
+  NOTE_MAX, NOTE_MIN, type BoundsApplyResult, type BoundsIndexItem, type EnableResult, type NoteRequest, type SessionView, type StopRequest, type StrategySaveResponse, type WorldSummary,
+} from '../src/api-types.ts';
 
 /**
  * Сервер стенда для интерфейса [Р-67]. Только 127.0.0.1, данные синтетические.
@@ -68,6 +72,30 @@ function parseTarget(live: LiveWorld, raw: unknown): StopTarget | null {
     return { kind: 'STOREFRONT', channelAccountId: account.channelAccountId, marketplace: t.marketplace };
   }
   return null;
+}
+
+const MAX_PREVIEW_SCOPES = 200;
+
+/** Превью стратегии на выбранных единицах записи: каждая — стратегия и Gate на последнем принятом снимке, без фиксации */
+async function previewsFor(live: LiveWorld, world: StandWorld, draft: StrategyDraft, writeScopeIds: readonly string[]): Promise<StrategyPreview[] | null> {
+  const out: StrategyPreview[] = [];
+  for (const id of writeScopeIds) {
+    const scope = world.state.scopes.find((x) => x.writeScopeId === id);
+    if (!scope) return null;
+    const preview = await live.pipeline.previewStrategy(live.callContext(scope.channelAccountId), id, { strategyId: 'draft', version: 1, ...draft });
+    if (!preview) return null;
+    out.push(preview);
+  }
+  return out;
+}
+
+function scopeIds(raw: unknown): string[] | null {
+  return Array.isArray(raw) && raw.length > 0 && raw.length <= MAX_PREVIEW_SCOPES && raw.every((x) => typeof x === 'string') ? [...new Set(raw as string[])] : null;
+}
+
+function draftProblemsText(problems: ReadonlyArray<{ field: string; code: string }>, m: Messages): string {
+  const t = m.ui.strategies;
+  return problems.map((p) => `${(t.fields as Record<string, string>)[p.field] ?? (p.field === 'name' ? t.name : p.field === 'type' ? t.type : p.field)}: ${t.problems[p.code as keyof typeof t.problems]}`).join('; ');
 }
 
 export function createStandApi(worlds: readonly LiveWorld[], identity: StandIdentity) {
@@ -161,6 +189,14 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           return b ? ok(b) : fail(404, 'SCOPE_NOT_FOUND', s.notFound);
         }
         case 'stop': return ok(stopView(world, m));
+        // Шаг 21: стратегии, лента цен, отчёт об опасных изменениях [Р-73]
+        case 'strategies': return ok(strategiesView(world, m, can(viewer.role, 'MANAGE_PRICING')));
+        case 'feed': return ok(priceFeed(world, m, { ...(url.searchParams.get('writeScopeId') ? { writeScopeId: url.searchParams.get('writeScopeId')! } : {}) }));
+        case 'dangerous': {
+          const days = Number(url.searchParams.get('days') ?? 7);
+          if (!(REPORT_PERIODS_DAYS as readonly number[]).includes(days)) return fail(400, 'BAD_PERIOD', s.badRequest);
+          return ok(dangerousReport(world, days, m));
+        }
         default: return fail(404, 'NOT_FOUND', s.notFound);
       }
     }
@@ -223,6 +259,62 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       if (!mfa) return fail(403, 'MFA_REQUIRED', s.mfaRequired);
       const result = await live.pipeline.releaseHaltManually(ctx(halt.channelAccountId), halt.haltId, { membershipId: viewer.membershipId, userId: principal.userId, mfa }, text);
       return result.released ? ok({ message: s.released, stop: stopView(await live.view(viewer), m) }) : fail(404, 'NOT_ACTIVE', s.notActive);
+    }
+
+    // Шаг 21: превью стратегии на реальных единицах записи — без фиксации; права на просмотр достаточно
+    if (screen === 'strategies' && param === 'preview') {
+      const parsed = parseStrategyDraft(body.draft);
+      if (!parsed.ok) return fail(400, 'BAD_DRAFT', draftProblemsText(parsed.problems, m));
+      const ids = scopeIds(body.writeScopeIds);
+      const previews = ids ? await previewsFor(live, world, parsed.draft, ids) : null;
+      return previews ? ok(strategyPreviewView(world, parsed.draft, previews, m)) : fail(400, 'BAD_SCOPES', s.badRequest);
+    }
+
+    // Сохранение — только того превью, что видел человек: сервер пересчитывает превью и сравнивает токен
+    if (screen === 'strategies' && param === null) {
+      if (!can(viewer.role, 'MANAGE_PRICING')) return fail(403, 'FORBIDDEN', s.forbidden);
+      if (body.confirmed !== true) return fail(400, 'NOT_CONFIRMED', s.notConfirmed);
+      const parsed = parseStrategyDraft(body.draft);
+      if (!parsed.ok) return fail(400, 'BAD_DRAFT', draftProblemsText(parsed.problems, m));
+      const ids = scopeIds(body.writeScopeIds);
+      const previews = ids ? await previewsFor(live, world, parsed.draft, ids) : null;
+      if (!previews) return fail(400, 'BAD_SCOPES', s.badRequest);
+      if (typeof body.previewToken !== 'string' || body.previewToken !== previewToken(parsed.draft, previews)) return fail(409, 'PREVIEW_CHANGED', s.previewChanged);
+      const strategyId = typeof body.strategyId === 'string' ? body.strategyId : null;
+      const result = await live.store.saveStrategy(world.tenantId, { strategyId, name: parsed.draft.name, params: parsed.draft.params, deadbandMinor: parsed.draft.deadbandMinor, assignTo: ids! },
+        { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) });
+      if (result.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
+      if (result.status !== 'SAVED') return fail(400, result.cause, s.badRequest);
+      return ok({ message: m.ui.strategies.saved(result.strategy.version, result.assigned.length), strategies: strategiesView(await live.view(viewer), m, true) } satisfies StrategySaveResponse);
+    }
+
+    // Шаг 21: массовая правка границ — экран различий (база вычисляет итог в откатываемой транзакции), затем применение с токеном
+    if (screen === 'bounds' && (param === 'plan' || param === 'apply')) {
+      if (!can(viewer.role, 'MANAGE_PRICING')) return fail(403, 'FORBIDDEN', s.forbidden);
+      const request = parseBoundsEditRequest(body.request);
+      if (!request) return fail(400, 'BAD_REQUEST', s.badRequest);
+      const { edits, problems } = expandBoundsEdit(world, request);
+      if (problems.length > 0) {
+        const texts = m.ui.boundsEdit.problems;
+        return fail(400, 'BAD_EDIT', problems.map((p) => `${texts[p.code]}${p.writeScopeId ? ` (${p.writeScopeId}${p.bound ? `, ${p.bound}_price` : ''})` : ''}`).join('; '));
+      }
+      const mfa = hasSecondFactor(principal.amr);
+      const actor = { membershipId: viewer.membershipId, userId: principal.userId, mfa };
+      // Экран различий второго фактора не требует — он нужен для применения [Р-88]
+      const preview = await live.store.editBounds(world.tenantId, edits, actor, 'PREVIEW');
+      if (preview.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
+      if (preview.status === 'CONFLICT') return fail(409, 'BOUNDS_CONFLICT', s.boundsConflict);
+      if (preview.status !== 'PREVIEWED') return fail(400, preview.status === 'INVALID' ? preview.cause : preview.status, s.badRequest);
+      const diff = boundsDiffView(world, edits, preview.rows, m);
+      if (param === 'plan') return ok(diff);
+      if (body.confirmed !== true) return fail(400, 'NOT_CONFIRMED', s.notConfirmed);
+      if (typeof body.planToken !== 'string' || body.planToken !== diff.planToken) return fail(409, 'PLAN_CHANGED', s.planChanged);
+      const applied = await live.store.editBounds(world.tenantId, edits, actor, 'APPLY');
+      if (applied.status === 'MFA_REQUIRED') return fail(403, 'MFA_REQUIRED', s.mfaRequiredBounds);
+      if (applied.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
+      if (applied.status === 'CONFLICT') return fail(409, 'BOUNDS_CONFLICT', s.boundsConflict);
+      if (applied.status !== 'APPLIED') return fail(400, applied.status === 'INVALID' ? applied.cause : applied.status, s.badRequest);
+      return ok({ message: m.ui.boundsEdit.applied(applied.rows.length), rows: applied.rows.length } satisfies BoundsApplyResult);
     }
 
     // Шаг 12, G и Р-77: включение с предупреждениями по типу стратегии
