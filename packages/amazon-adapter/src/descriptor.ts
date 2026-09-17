@@ -20,7 +20,7 @@ export const AMAZON_RATE_LIMITS = {
   patchListingsItem: { pair: { ratePerSecond: 5, burst: 5 }, application: { ratePerSecond: 500 } },
   getListingsItem: { pair: { ratePerSecond: 5, burst: 5 }, application: { ratePerSecond: 100 } },
   searchListingsItems: { pair: { ratePerSecond: 5, burst: 5 }, application: { ratePerSecond: 100 } },
-  // Модель productPricing_2022-05-01 (Usage Plan): 0.033 rps, burst 1. Лимит уровня приложения не документирован — равен лимиту пары [AMZ_C11, A-13]
+  // Модель productPricing_2022-05-01 (Usage Plan): 0.033 rps, burst 1. Лимит уровня приложения не документирован — равен лимиту пары [AMZ_C11, A-15]
   getCompetitiveSummary: { pair: { ratePerSecond: 0.033, burst: 1 }, application: { ratePerSecond: 0.033, documented: false } },
 } as const;
 export type AmazonOperation = keyof typeof AMAZON_RATE_LIMITS;

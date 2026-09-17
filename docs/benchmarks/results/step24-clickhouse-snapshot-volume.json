@@ -1,0 +1,485 @@
+{
+  "format": "repracer.bench/clickhouse-compression/v1",
+  "clickhouse": "26.8.4.11",
+  "rowsPerTable": 1000000,
+  "pgRowsPerTable": 200000,
+  "tenants": 20,
+  "scopesPerTenant": 2500,
+  "days": 30,
+  "eurPerGbMonth": 0.12,
+  "results": [
+    {
+      "table": "competitor_snapshot_kaufland",
+      "rows": 1000000,
+      "clickhouse": {
+        "bytesOnDisk": 66244794,
+        "compressed": 66196177,
+        "uncompressed": 507869612,
+        "bytesPerRow": 66.2,
+        "compressionRatio": 7.7,
+        "topColumns": [
+          {
+            "column": "competitor_snapshot_id",
+            "compressed": 16065971,
+            "uncompressed": 16000000
+          },
+          {
+            "column": "offers.seller_ref",
+            "compressed": 10536319,
+            "uncompressed": 150925197
+          },
+          {
+            "column": "offers.amount_minor",
+            "compressed": 9925629,
+            "uncompressed": 44326680
+          },
+          {
+            "column": "source_event_id",
+            "compressed": 9037817,
+            "uncompressed": 24970880
+          },
+          {
+            "column": "received_at",
+            "compressed": 5618822,
+            "uncompressed": 8000000
+          },
+          {
+            "column": "ingested_at",
+            "compressed": 2499605,
+            "uncompressed": 8000000
+          }
+        ]
+      },
+      "postgres": null,
+      "pgToClickHouse": null,
+      "perClient18Months": null
+    },
+    {
+      "table": "competitor_snapshot_amazon",
+      "rows": 1000000,
+      "clickhouse": {
+        "bytesOnDisk": 96708222,
+        "compressed": 96660768,
+        "uncompressed": 830005338,
+        "bytesPerRow": 96.7,
+        "compressionRatio": 8.6,
+        "topColumns": [
+          {
+            "column": "source_event_id",
+            "compressed": 18162366,
+            "uncompressed": 41000000
+          },
+          {
+            "column": "offers.seller_ref",
+            "compressed": 17629016,
+            "uncompressed": 247177936
+          },
+          {
+            "column": "competitor_snapshot_id",
+            "compressed": 16065972,
+            "uncompressed": 16000000
+          },
+          {
+            "column": "offers.amount_minor",
+            "compressed": 14049934,
+            "uncompressed": 92064704
+          },
+          {
+            "column": "offers.shipping_minor",
+            "compressed": 6818391,
+            "uncompressed": 92064704
+          },
+          {
+            "column": "received_at",
+            "compressed": 5618630,
+            "uncompressed": 8000000
+          }
+        ]
+      },
+      "postgres": null,
+      "pgToClickHouse": null,
+      "perClient18Months": null
+    },
+    {
+      "table": "price_decision",
+      "rows": 1000000,
+      "clickhouse": {
+        "bytesOnDisk": 76676965,
+        "compressed": 76595494,
+        "uncompressed": 845409083,
+        "bytesPerRow": 76.7,
+        "compressionRatio": 11,
+        "topColumns": [
+          {
+            "column": "price_intent_id",
+            "compressed": 16065995,
+            "uncompressed": 16000000
+          },
+          {
+            "column": "price_decision_id",
+            "compressed": 16065995,
+            "uncompressed": 16000000
+          },
+          {
+            "column": "decided_at",
+            "compressed": 6023117,
+            "uncompressed": 8000000
+          },
+          {
+            "column": "intent_created_at",
+            "compressed": 6023008,
+            "uncompressed": 8000000
+          },
+          {
+            "column": "reason_params",
+            "compressed": 5420728,
+            "uncompressed": 61595308
+          },
+          {
+            "column": "checks",
+            "compressed": 3763360,
+            "uncompressed": 526484409
+          }
+        ]
+      },
+      "postgres": {
+        "rows": 200000,
+        "totalBytes": 384827392,
+        "heapBytes": 330694656,
+        "indexBytes": 54009856,
+        "toastBytes": 8192,
+        "bytesPerRow": 1924.1
+      },
+      "pgToClickHouse": 25.1,
+      "perClient18Months": {
+        "rows": 245000000,
+        "gb": 18.8,
+        "eurPerMonth": 2.25,
+        "step4EstimateGb": [
+          11,
+          22
+        ]
+      }
+    },
+    {
+      "table": "price_intent",
+      "rows": 1000000,
+      "clickhouse": {
+        "bytesOnDisk": 108698768,
+        "compressed": 108614026,
+        "uncompressed": 758823448,
+        "bytesPerRow": 108.7,
+        "compressionRatio": 7,
+        "topColumns": [
+          {
+            "column": "inputs",
+            "compressed": 31354619,
+            "uncompressed": 222000000
+          },
+          {
+            "column": "source_event_id",
+            "compressed": 18252863,
+            "uncompressed": 50000000
+          },
+          {
+            "column": "price_intent_id",
+            "compressed": 16065995,
+            "uncompressed": 16000000
+          },
+          {
+            "column": "rationale",
+            "compressed": 12903504,
+            "uncompressed": 267802484
+          },
+          {
+            "column": "expires_at",
+            "compressed": 6023461,
+            "uncompressed": 8000000
+          },
+          {
+            "column": "created_at",
+            "compressed": 6023008,
+            "uncompressed": 8000000
+          }
+        ]
+      },
+      "postgres": {
+        "rows": 200000,
+        "totalBytes": 245211136,
+        "heapBytes": 182050816,
+        "indexBytes": 63078400,
+        "toastBytes": 8192,
+        "bytesPerRow": 1226.1
+      },
+      "pgToClickHouse": 11.3,
+      "perClient18Months": {
+        "rows": 245000000,
+        "gb": 26.6,
+        "eurPerMonth": 3.2,
+        "step4EstimateGb": [
+          11,
+          22
+        ]
+      }
+    },
+    {
+      "table": "channel_write_completed",
+      "rows": 1000000,
+      "clickhouse": {
+        "bytesOnDisk": 86773859,
+        "compressed": 86675863,
+        "uncompressed": 216785783,
+        "bytesPerRow": 86.8,
+        "compressionRatio": 2.5,
+        "topColumns": [
+          {
+            "column": "price_decision_id",
+            "compressed": 16070478,
+            "uncompressed": 17000000
+          },
+          {
+            "column": "channel_write_id",
+            "compressed": 16065994,
+            "uncompressed": 16000000
+          },
+          {
+            "column": "trigger_received_at",
+            "compressed": 6027319,
+            "uncompressed": 9000000
+          },
+          {
+            "column": "created_at",
+            "compressed": 6023448,
+            "uncompressed": 8000000
+          },
+          {
+            "column": "finished_at",
+            "compressed": 6023315,
+            "uncompressed": 8000000
+          },
+          {
+            "column": "dispatched_at",
+            "compressed": 5833813,
+            "uncompressed": 9000000
+          }
+        ]
+      },
+      "postgres": {
+        "rows": 200000,
+        "totalBytes": 70467584,
+        "heapBytes": 49799168,
+        "indexBytes": 20619264,
+        "toastBytes": 8192,
+        "bytesPerRow": 352.3
+      },
+      "pgToClickHouse": 4.1,
+      "perClient18Months": {
+        "rows": 186000000,
+        "gb": 16.1,
+        "eurPerMonth": 1.94,
+        "step4EstimateGb": [
+          5,
+          11
+        ]
+      }
+    },
+    {
+      "table": "competitor_snapshot",
+      "rows": 1000000,
+      "clickhouse": {
+        "bytesOnDisk": 87936745,
+        "compressed": 87854568,
+        "uncompressed": 462613897,
+        "bytesPerRow": 87.9,
+        "compressionRatio": 5.3,
+        "topColumns": [
+          {
+            "column": "offers.amount_minor",
+            "compressed": 18755985,
+            "uncompressed": 44009528
+          },
+          {
+            "column": "competitor_snapshot_id",
+            "compressed": 16066021,
+            "uncompressed": 16000000
+          },
+          {
+            "column": "offers.seller_ref",
+            "compressed": 13574462,
+            "uncompressed": 118023820
+          },
+          {
+            "column": "received_at",
+            "compressed": 6023111,
+            "uncompressed": 8000000
+          },
+          {
+            "column": "offers.shipping_minor",
+            "compressed": 5200766,
+            "uncompressed": 44009528
+          },
+          {
+            "column": "observed_at",
+            "compressed": 4866368,
+            "uncompressed": 8000000
+          }
+        ]
+      },
+      "postgres": null,
+      "pgToClickHouse": null,
+      "perClient18Months": {
+        "rows": 106000000,
+        "gb": 9.3,
+        "eurPerMonth": 1.12,
+        "step4EstimateGb": [
+          8,
+          16
+        ]
+      }
+    },
+    {
+      "table": "channel_observation",
+      "rows": 1000000,
+      "clickhouse": {
+        "bytesOnDisk": 32596068,
+        "compressed": 32553592,
+        "uncompressed": 118027810,
+        "bytesPerRow": 32.6,
+        "compressionRatio": 3.6,
+        "topColumns": [
+          {
+            "column": "channel_observation_id",
+            "compressed": 16065990,
+            "uncompressed": 16000000
+          },
+          {
+            "column": "received_at",
+            "compressed": 6014203,
+            "uncompressed": 8000000
+          },
+          {
+            "column": "observed_at",
+            "compressed": 4549494,
+            "uncompressed": 8000000
+          },
+          {
+            "column": "ingested_at",
+            "compressed": 2498808,
+            "uncompressed": 8000000
+          },
+          {
+            "column": "write_scope_id",
+            "compressed": 1955847,
+            "uncompressed": 16000000
+          },
+          {
+            "column": "marketplace",
+            "compressed": 510891,
+            "uncompressed": 1003966
+          }
+        ]
+      },
+      "postgres": null,
+      "pgToClickHouse": null,
+      "perClient18Months": {
+        "rows": 255000000,
+        "gb": 8.3,
+        "eurPerMonth": 1,
+        "step4EstimateGb": [
+          6,
+          13
+        ]
+      }
+    }
+  ],
+  "snapshotVolume": [
+    {
+      "table": "competitor_snapshot_kaufland",
+      "bytesPerRow": 66.2,
+      "compressionRatio": 7.7,
+      "scenarios": [
+        {
+          "name": "спокойный",
+          "offers": 10000,
+          "hot": 0.01,
+          "warm": 0.1,
+          "notificationsPerOfferDay": 2,
+          "snapshotsPerYear": 45588500,
+          "gbPerYear": 3,
+          "gbAt18Months": 4.5,
+          "eurPerMonthAt18Months": 0.54
+        },
+        {
+          "name": "типичный (допущение)",
+          "offers": 10000,
+          "hot": 0.05,
+          "warm": 0.25,
+          "notificationsPerOfferDay": 6,
+          "snapshotsPerYear": 177755000,
+          "gbPerYear": 11.8,
+          "gbAt18Months": 17.7,
+          "eurPerMonthAt18Months": 2.12
+        },
+        {
+          "name": "волатильный",
+          "offers": 10000,
+          "hot": 0.15,
+          "warm": 0.4,
+          "notificationsPerOfferDay": 24,
+          "snapshotsPerYear": 518482500,
+          "gbPerYear": 34.3,
+          "gbAt18Months": 51.5,
+          "eurPerMonthAt18Months": 6.18
+        }
+      ]
+    },
+    {
+      "table": "competitor_snapshot_amazon",
+      "bytesPerRow": 96.7,
+      "compressionRatio": 8.6,
+      "scenarios": [
+        {
+          "name": "спокойный",
+          "offers": 10000,
+          "hot": 0.01,
+          "warm": 0.1,
+          "notificationsPerOfferDay": 2,
+          "snapshotsPerYear": 45588500,
+          "gbPerYear": 4.4,
+          "gbAt18Months": 6.6,
+          "eurPerMonthAt18Months": 0.79
+        },
+        {
+          "name": "типичный (допущение)",
+          "offers": 10000,
+          "hot": 0.05,
+          "warm": 0.25,
+          "notificationsPerOfferDay": 6,
+          "snapshotsPerYear": 177755000,
+          "gbPerYear": 17.2,
+          "gbAt18Months": 25.8,
+          "eurPerMonthAt18Months": 3.09
+        },
+        {
+          "name": "волатильный",
+          "offers": 10000,
+          "hot": 0.15,
+          "warm": 0.4,
+          "notificationsPerOfferDay": 24,
+          "snapshotsPerYear": 518482500,
+          "gbPerYear": 50.1,
+          "gbAt18Months": 75.2,
+          "eurPerMonthAt18Months": 9.02
+        }
+      ]
+    }
+  ],
+  "perClient18Months": {
+    "measuredTablesGb": 79.1,
+    "eurPerMonth": 9.49,
+    "notMeasured": [
+      "channel_write_response (оценка шага 4: 8–15 ГБ)",
+      "fee_actual (< 1 ГБ)"
+    ]
+  }
+}

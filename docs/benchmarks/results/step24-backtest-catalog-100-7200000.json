@@ -1,0 +1,18 @@
+{
+  "products": 100,
+  "everyMs": 7200000,
+  "window": {
+    "from": "2025-03-17T00:00:00.000Z",
+    "to": "2026-09-17T00:00:00.000Z"
+  },
+  "snapshots": 658800,
+  "elapsedMs": 29418,
+  "snapshotsPerSecond": 22394,
+  "peakRssMb": 191,
+  "halts": 0,
+  "sanityRejected": 328,
+  "priceChanges": 22385,
+  "gateRejected": 0,
+  "belowMinPrice": 0,
+  "node": "v22.22.3"
+}

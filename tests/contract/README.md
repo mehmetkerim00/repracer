@@ -339,6 +339,29 @@ BACKTEST_OUT=docs/benchmarks/results/step21-backtest-synthetic.json npm run benc
 
 `runScenario(..., hooks)` принимает `onFinish` — доступ к миру после шагов и до закрытия хранилища.
 
+## Сверка уведомлений опросом (шаг 24) [Р-121]
+
+Шаги сценария:
+
+- `pipelinePoll.reconcile` (`graceSeconds`) — опрос сверяется с последним принятым состоянием до обработки; итог — `reconciliation`
+  (`matched`, `diverged`, `noBaseline`, `notNewer`, `logged` — снимки только для сверки);
+- `pipelineReviewNotificationLoss` — вердикты проверок, срок которых наступил (`delayed`, `lossSuspected`);
+- `pipelineReconcileRotation` (`size`, `cycleSeconds`, `graceSeconds`) — сверка по кругу (Amazon);
+- `channelRun.reconcile` — сверка каждого опроса симулятора и вердикты каждый такт; итог такта — `reconciliation` и `loss`.
+
+Состояние хранилища (`expect.pipeline`): `lossChecks` (товар, что сравнивалось, прежнее и опрошенное значение, вердикт) и `snapshotLog`
+с доставкой (`PUSH`, `PUSH_FETCH`, `POLL`, `SAMPLE`) и вердиктом (`RECONCILIATION` — снимок только для сверки).
+
+Сценарии: `kaufland/pipeline-notification-loss-reconciliation`, `amazon/pipeline-notification-loss-rotation` (память и PostgreSQL),
+`amazon/competitive-summary-and-orders` (порт), `kaufland-sim/notification-loss-reconciliation` (модель канала, вариант без потерь —
+контроль ложных тревог). Замер на модели — `bench/notification-loss-probe.ts`, итог — docs/evidence/step24-notification-loss.md.
+
+## Бэктест на каталоге (шаг 24) [OQ-161]
+
+`bench/backtest-catalog.ts <товаров> <шаг снимка, мс> [out.json]` — стратегия следования за Buy Box на синтетическом каталоге за 18
+месяцев; история — поток (`syntheticSnapshots`), хранилище в памяти отбрасывает состояние старше 2 суток каждые 6 часов мира.
+Итоги — docs/benchmarks/step24-backtest-catalog.md.
+
 ## Добавить сценарий
 
 1. Скопировать ближайший файл из `fixtures/kaufland/`, поменять `id`, `title`, `description`, `tags`.
