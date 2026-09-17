@@ -223,6 +223,31 @@ INSERT INTO tenant_data.product_vat_rate (tenant_id, product_id, country, rate_b
 SELECT 'a0000000-0000-0000-0000-00000000000a', 'a5000000-0000-0000-0000-000000000001', 'AT', 1000, coalesce(max(version), 0) + 1, 'a2000000-0000-0000-0000-00000000000a'
   FROM tenant_data.product_vat_rate WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a' AND product_id = 'a5000000-0000-0000-0000-000000000001' AND country = 'AT';
 
+-- Шаг 25, A (0090) [Р-126]: состояние и журнал запусков планировщика
+INSERT INTO maintenance.scheduled_job (job_key, job_name, catch_up, interval_seconds, next_due_at, lease_owner, lease_until)
+VALUES ('smoke-job', 'smoke-job', 'LATEST', 60, now(), 'scheduler-a', now() + interval '1 hour');
+INSERT INTO maintenance.scheduled_job_run (job_key, job_name, slot_at, owner, started_at, finished_at, outcome, lag_seconds, items)
+VALUES ('smoke-job', 'smoke-job', now() - interval '10 seconds', 'scheduler-a', now() - interval '5 seconds', now(), 'SUCCEEDED', 5, 0);
+SELECT pg_temp.expect_fail('a scheduled job taken over while another scheduler holds its lease (Р-126)', $q$
+  UPDATE maintenance.scheduled_job SET lease_owner = 'scheduler-b', lease_until = now() + interval '1 hour' WHERE job_key = 'smoke-job' $q$, 'is leased by scheduler-a');
+SELECT pg_temp.expect_fail('a scheduled job key outside the job and account format (Р-126)', $q$
+  INSERT INTO maintenance.scheduled_job (job_key, job_name, catch_up, interval_seconds, next_due_at) VALUES ('Smoke Job; drop', 'x', 'LATEST', 60, now()) $q$, 'scheduled_job_key_format');
+SELECT pg_temp.expect_fail('a scheduled job with an unknown catch-up rule (Р-126)', $q$
+  INSERT INTO maintenance.scheduled_job (job_key, job_name, catch_up, interval_seconds, next_due_at) VALUES ('smoke-job-2', 'smoke-job-2', 'SOMETIMES', 60, now()) $q$, 'scheduled_job_catch_up_known');
+SELECT pg_temp.expect_fail('a scheduled job without a positive interval (Р-126)', $q$
+  INSERT INTO maintenance.scheduled_job (job_key, job_name, catch_up, interval_seconds, next_due_at) VALUES ('smoke-job-2', 'smoke-job-2', 'LATEST', 0, now()) $q$, 'scheduled_job_interval_positive');
+SELECT pg_temp.expect_fail('a scheduled job scoped to a tenant without an account (Р-126)', $q$
+  INSERT INTO maintenance.scheduled_job (job_key, job_name, catch_up, interval_seconds, next_due_at, scope_tenant_id) VALUES ('smoke-job-2', 'smoke-job-2', 'LATEST', 60, now(), gen_random_uuid()) $q$, 'scheduled_job_scope_pair');
+SELECT pg_temp.expect_fail('a scheduled job lease without its end (Р-126)', $q$
+  INSERT INTO maintenance.scheduled_job (job_key, job_name, catch_up, interval_seconds, next_due_at, lease_owner) VALUES ('smoke-job-2', 'smoke-job-2', 'LATEST', 60, now(), 'scheduler-a') $q$, 'scheduled_job_lease_pair');
+SELECT pg_temp.expect_fail('a scheduled job with an unknown last outcome (Р-126)', $q$
+  INSERT INTO maintenance.scheduled_job (job_key, job_name, catch_up, interval_seconds, next_due_at, last_outcome) VALUES ('smoke-job-2', 'smoke-job-2', 'LATEST', 60, now(), 'MAYBE') $q$, 'scheduled_job_outcome_known');
+SELECT pg_temp.expect_fail('a scheduler run with an unknown outcome (Р-126)', $q$
+  INSERT INTO maintenance.scheduled_job_run (job_key, job_name, slot_at, owner, started_at, finished_at, outcome, lag_seconds) VALUES ('smoke-job', 'smoke-job', now(), 'a', now(), now(), 'MAYBE', 0) $q$, 'scheduled_job_run_outcome_known');
+SELECT pg_temp.expect_fail('a scheduler run finished before it started (Р-126)', $q$
+  INSERT INTO maintenance.scheduled_job_run (job_key, job_name, slot_at, owner, started_at, finished_at, outcome, lag_seconds) VALUES ('smoke-job', 'smoke-job', now() - interval '1 hour', 'a', now(), now() - interval '1 minute', 'SUCCEEDED', 0) $q$, 'scheduled_job_run_order');
+SELECT pg_temp.expect_fail('truncate maintenance.scheduled_job_run', $q$ TRUNCATE maintenance.scheduled_job_run $q$, 'TRUNCATE of maintenance.scheduled_job_run is forbidden');
+
 -- Шаг 23 [Р-108]: TRUNCATE новой append-only таблицы отклоняет свой триггер
 SELECT pg_temp.expect_fail('truncate channel_data.offer_channel_pricing', $q$ TRUNCATE channel_data.offer_channel_pricing $q$, 'TRUNCATE of channel_data.offer_channel_pricing is forbidden');
 SELECT pg_temp.expect_fail('truncate tenant_data.discount_announcement', $q$ TRUNCATE tenant_data.discount_announcement $q$, 'TRUNCATE of tenant_data.discount_announcement is forbidden');

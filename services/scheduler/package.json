@@ -1,0 +1,26 @@
+{
+  "name": "@repracer/scheduler",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Periodic jobs process (Р-126): tiered competitor polling, notification loss review, Amazon reconciliation rotation, daily ClickHouse export, price day closing, offer discovery, partitions and retention — one lease per job, missed slots are not lost, lag alerts, run metrics.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@repracer/analytics-export": "0.1.0",
+    "@repracer/channel-port": "0.1.0",
+    "@repracer/pricing-pipeline": "0.1.0",
+    "@repracer/pricing-store-pg": "0.1.0",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@repracer/amazon-adapter": "0.1.0",
+    "@repracer/kaufland-adapter": "0.1.0",
+    "@types/pg": "8.23.1"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec test/*.test.ts"
+  }
+}

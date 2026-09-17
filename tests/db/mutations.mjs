@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0089_verify_schema_invariants_v21.sql';
+const VERIFY = 'migrations/0091_verify_schema_invariants_v22.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -605,6 +605,26 @@ export const STEP21_ROWS = [
 export const STEP22_ROWS = [];
 
 // Шаг 24
+export const STEP25_ROWS = [
+  {
+    row: 'Р-126', invariant: 'периодическую работу выполняет один планировщик — аренда; состояние и журнал запусков известной формы; журнал неизменяем',
+    mutations: [
+      m(dropTrigger('a_scheduled_job_lease_guard', 'maintenance.scheduled_job'), smoke('a scheduled job taken over while another scheduler holds its lease (Р-126)')),
+      m(replaceInFunction('maintenance.scheduled_job_lease_guard()', 'AND OLD.lease_until > now()', 'AND false'), smoke('a scheduled job taken over while another scheduler holds its lease (Р-126)')),
+      m(dropConstraint('scheduled_job_key_format', 'maintenance.scheduled_job'), smoke('a scheduled job key outside the job and account format (Р-126)')),
+      m(dropConstraint('scheduled_job_catch_up_known', 'maintenance.scheduled_job'), smoke('a scheduled job with an unknown catch-up rule (Р-126)')),
+      m(dropConstraint('scheduled_job_interval_positive', 'maintenance.scheduled_job'), smoke('a scheduled job without a positive interval (Р-126)')),
+      m(dropConstraint('scheduled_job_scope_pair', 'maintenance.scheduled_job'), smoke('a scheduled job scoped to a tenant without an account (Р-126)')),
+      m(dropConstraint('scheduled_job_lease_pair', 'maintenance.scheduled_job'), smoke('a scheduled job lease without its end (Р-126)')),
+      m(dropConstraint('scheduled_job_outcome_known', 'maintenance.scheduled_job'), smoke('a scheduled job with an unknown last outcome (Р-126)')),
+      m(dropConstraint('scheduled_job_run_outcome_known', 'maintenance.scheduled_job_run'), smoke('a scheduler run with an unknown outcome (Р-126)')),
+      m(dropConstraint('scheduled_job_run_order', 'maintenance.scheduled_job_run'), smoke('a scheduler run finished before it started (Р-126)')),
+      m(dropTrigger('zz_append_only', 'maintenance.scheduled_job_run'), smoke('append-only maintenance.scheduled_job_run')),
+      m(dropTrigger('zz_no_truncate', 'maintenance.scheduled_job_run'), smoke('truncate maintenance.scheduled_job_run')),
+    ],
+  },
+];
+
 export const STEP24_ROWS = [
   {
     row: 'OQ-172', invariant: 'остановка человеком держит и порог цены канала CHANNEL_MIN_PRICE — создание и отправку',

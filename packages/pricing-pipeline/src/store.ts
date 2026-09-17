@@ -243,6 +243,13 @@ export interface NotificationLossCheck {
   dueAt: Instant;
 }
 
+/** Р-47, Р-126: товар для ярусного опроса */
+export interface PollCandidate {
+  query: CompetitorQuery;
+  lastPolledAt: Instant | null;
+  changesLast30Days: number;
+}
+
 /** Р-121: вердикт проверки, вычисленный базой (review_notification_loss, 0088) */
 export interface NotificationLossVerdict {
   checkId: string;
@@ -501,8 +508,18 @@ export interface PricingStore {
   heldCompetitorState(tenantId: string, key: ProductKey): Promise<{ observedAt: Instant; buyboxMinor: number | null; lowestMinor: number | null } | null>;
   /** Р-121: вердикты проверок аккаунта, срок которых наступил к at; вычисляет база */
   reviewNotificationLoss(tenantId: string, channelAccountId: string, at: Instant): Promise<NotificationLossVerdict[]>;
-  /** Р-121: сверка по кругу — size товаров аккаунта, окно по номеру вызова cycle; все товары покрываются за ceil(n / size) вызовов подряд */
-  pickReconciliationSample(tenantId: string, channelAccountId: string, size: number, cycle: number): Promise<CompetitorQuery[]>;
+  /**
+   * Р-121: сверка по кругу — size товаров аккаунта, окно по номеру вызова cycle; все товары покрываются за ceil(n / size) вызовов подряд.
+   * total — число товаров круга (время полного круга, OQ-176)
+   */
+  pickReconciliationSample(tenantId: string, channelAccountId: string, size: number, cycle: number): Promise<{ queries: CompetitorQuery[]; total: number }>;
+  /**
+   * Р-47, Р-126 (шаг 25): товары аккаунта для ярусного опроса планировщика — время последнего опроса (не последнего состояния: его
+   * обновляют уведомления) и оценка волатильности: изменений цены конкурентов за 48 часов × 15 (движения хранятся 2 суток, Р-42)
+   */
+  listPollCandidates(tenantId: string, channelAccountId: string, now: Instant): Promise<PollCandidate[]>;
+  /** Р-126: опрос товаров выполнен — время последнего опроса */
+  markPolled(tenantId: string, channelAccountId: string, queries: readonly CompetitorQuery[], at: Instant): Promise<void>;
   omnibusCheck(tenantId: string, writeScopeId: string, startsAt: Instant): Promise<OmnibusPriorPrice>;
   /** Р-123: объявление скидки — только человек с правом MANAGE_PRICING; нарушение отклоняет база (0087) */
   announceDiscount(tenantId: string, input: DiscountAnnouncementInput, actor: AdminActor): Promise<DiscountAnnounceResult>;

@@ -191,6 +191,10 @@ async function runPipelineStep(
     case 'pipelinePoll':
       return { result: await pipeline.pollCompetitors(callContext(step.ctx, step.id, scenario, clock), resolvePlaceholders(step.queries, clock) as never,
         step.reconcile ? { reconcile: step.reconcile } : {}) };
+    case 'pipelinePollDue': {
+      const r = await pipeline.pollDueCompetitors(callContext(step.ctx, step.id, scenario, clock), { budgetRequestsPerSecond: step.budgetRequestsPerSecond, maxQueries: step.maxQueries });
+      return { result: { candidates: r.candidates, due: r.due, snapshots: r.snapshots.map((x) => ({ channelProductRef: x.channelProductRef, verdict: x.verdict })), failures: r.failures.length } };
+    }
     case 'pipelineReviewNotificationLoss':
       return { result: await pipeline.reviewNotificationLoss(callContext(step.ctx, step.id, scenario, clock)) };
     case 'pipelineReconcileRotation':

@@ -1,6 +1,6 @@
 import { EXPLANATION_RULESETS } from './dictionary.ts';
 import { rotation } from './reconciliation.ts';
-import type { HaltSampleObservation, HaltSampleReview, NotificationLossCheck, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation } from './store.ts';
+import type { HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation } from './store.ts';
 import { offerIdentityOf, type CompetitorQuery, type CompetitorSnapshot, type CompetitorSourceDescriptor, type FieldWrite, type Instant, type OfferIdentity, type PriceBasis, type PricingHealthObservation, type WriteOutcome } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange, SanityContext } from '@repracer/input-sanity';
 import { assertWriteWithinBounds, NO_GUARDRAILS, type GuardrailSet } from '@repracer/price-gate';
@@ -1425,13 +1425,34 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     return out;
   }
 
-  async pickReconciliationSample(_tenantId: string, channelAccountId: string, size: number, cycle: number): Promise<CompetitorQuery[]> {
+  /** Р-126: время последнего опроса товара (как channel_data.competitor_poll_state) */
+  readonly pollState = new Map<string, Instant>();
+
+  async listPollCandidates(_tenantId: string, channelAccountId: string, now: Instant): Promise<PollCandidate[]> {
+    const since = Date.parse(now) - 48 * 3_600_000;
+    const out = new Map<string, PollCandidate>();
+    for (const s of this.scopes.values()) {
+      if (s.channelAccountId !== channelAccountId || !s.channelProductRef) continue;
+      const query = { marketplace: s.marketplace, channelProductRef: s.channelProductRef, condition: s.condition };
+      const key = `${channelAccountId}|${productKey(query)}`;
+      if (out.has(key)) continue;
+      const moves = (this.movesByMarketplace.get(s.marketplace) ?? []).filter((m) => m.at >= since && m.move.productRef === s.channelProductRef && m.move.moveBp !== 0).length;
+      out.set(key, { query, lastPolledAt: this.pollState.get(key) ?? null, changesLast30Days: moves * 15 });
+    }
+    return [...out.values()];
+  }
+
+  async markPolled(_tenantId: string, channelAccountId: string, queries: readonly CompetitorQuery[], at: Instant): Promise<void> {
+    for (const q of queries) this.pollState.set(`${channelAccountId}|${productKey(q)}`, at);
+  }
+
+  async pickReconciliationSample(_tenantId: string, channelAccountId: string, size: number, cycle: number): Promise<{ queries: CompetitorQuery[]; total: number }> {
     const refs = new Map<string, CompetitorQuery>();
     for (const s of this.scopes.values()) {
       if (s.channelAccountId !== channelAccountId || !s.channelProductRef) continue;
       refs.set(productKey(s), { marketplace: s.marketplace, channelProductRef: s.channelProductRef, condition: s.condition });
     }
-    return rotation([...refs.values()], size, cycle);
+    return { queries: rotation([...refs.values()], size, cycle), total: refs.size };
   }
 
   async pickReviewSample(_tenantId: string, halt: HaltInfo, size: number): Promise<CompetitorQuery[]> {

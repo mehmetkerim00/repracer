@@ -35,6 +35,7 @@ import type {
   HaltRecord,
   NotificationLossCheck,
   NotificationLossVerdict,
+  PollCandidate,
   HaltReviewRecord, HaltSampleObservation, HaltSampleReview,
   PriceScopeContext,
   PricingStore,
@@ -1523,15 +1524,51 @@ export class PgPricingStore implements PricingStore {
     });
   }
 
-  async pickReconciliationSample(tenantId: string, channelAccountId: string, size: number, cycle: number): Promise<CompetitorQuery[]> {
+  async pickReconciliationSample(tenantId: string, channelAccountId: string, size: number, cycle: number): Promise<{ queries: CompetitorQuery[]; total: number }> {
     return this.tx(tenantId, async (tx) => {
       // Офферы аккаунта с товаром канала; порядок и окно — rotation, как в памяти
       const { rows } = await tx.query(
         `SELECT DISTINCT m.marketplace, m.channel_product_ref, m.condition FROM tenant_data.offer_mapping m
           WHERE m.tenant_id = $1 AND m.channel_account_id = $2 AND m.status <> 'ENDED' AND m.channel_product_ref IS NOT NULL`, [tenantId, channelAccountId]);
-      return rotation(rows.map((r) => ({ marketplace: r.marketplace, channelProductRef: r.channel_product_ref, condition: portCondition(r.condition) })), size, cycle);
+      const items = rows.map((r) => ({ marketplace: r.marketplace, channelProductRef: r.channel_product_ref, condition: portCondition(r.condition) }));
+      return { queries: rotation(items, size, cycle), total: items.length };
     });
   }
+
+  async listPollCandidates(tenantId: string, channelAccountId: string, now: Instant): Promise<PollCandidate[]> {
+    return this.tx(tenantId, async (tx) => {
+      const { rows } = await tx.query(
+        `SELECT p.marketplace, p.channel_product_ref, p.condition, ps.last_polled_at,
+                (SELECT count(*) FROM channel_data.competitor_move mv
+                  WHERE mv.tenant_id = $1 AND mv.channel_account_id = $2 AND mv.marketplace = p.marketplace AND mv.channel_product_ref = p.channel_product_ref
+                    AND mv.condition = p.condition AND mv.evaluated_at >= $3::timestamptz - interval '48 hours' AND mv.move_bp <> 0)::int AS moves
+           FROM (SELECT DISTINCT m.marketplace, m.channel_product_ref, m.condition FROM tenant_data.offer_mapping m
+                  WHERE m.tenant_id = $1 AND m.channel_account_id = $2 AND m.status <> 'ENDED' AND m.channel_product_ref IS NOT NULL) p
+           LEFT JOIN channel_data.competitor_poll_state ps
+             ON ps.tenant_id = $1 AND ps.channel_account_id = $2 AND ps.marketplace = p.marketplace AND ps.channel_product_ref = p.channel_product_ref
+            AND ps.condition = lower(p.condition)`, [tenantId, channelAccountId, now]);
+      return rows.map((r): PollCandidate => ({
+        query: { marketplace: r.marketplace, channelProductRef: r.channel_product_ref, condition: portCondition(r.condition) },
+        lastPolledAt: r.last_polled_at ? iso(r.last_polled_at) : null, changesLast30Days: Number(r.moves) * 15,
+      }));
+    });
+  }
+
+  async markPolled(tenantId: string, channelAccountId: string, queries: readonly CompetitorQuery[], at: Instant): Promise<void> {
+    if (queries.length === 0) return;
+    await this.tx(tenantId, async (tx) => {
+      await tx.query(
+        `INSERT INTO channel_data.competitor_poll_state AS ps (tenant_id, channel_account_id, channel, marketplace, channel_product_ref, condition, last_polled_at)
+         SELECT $1, a.channel_account_id, a.channel, q.marketplace, q.ref, q.condition, $4
+           FROM tenant_data.channel_account a
+           CROSS JOIN LATERAL jsonb_to_recordset($3::jsonb) AS q(marketplace text, ref text, condition text)
+          WHERE a.tenant_id = $1 AND a.channel_account_id = $2
+         ON CONFLICT (tenant_id, channel_account_id, marketplace, channel_product_ref, condition)
+         DO UPDATE SET last_polled_at = greatest(ps.last_polled_at, EXCLUDED.last_polled_at)`,
+        [tenantId, channelAccountId, JSON.stringify(queries.map((q) => ({ marketplace: q.marketplace, ref: q.channelProductRef, condition: q.condition }))), at]);
+    });
+  }
+
 
   async pickReviewSample(tenantId: string, halt: HaltInfo, size: number): Promise<CompetitorQuery[]> {
     return this.tx(tenantId, async (tx) => {

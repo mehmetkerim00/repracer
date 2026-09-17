@@ -54,6 +54,7 @@ export type {
   SnapshotOutcome,
   NotificationLossCheck,
   NotificationLossVerdict,
+  PollCandidate,
   ReconciliationCompared,
   SnapshotDelivery,
 } from './store.ts';

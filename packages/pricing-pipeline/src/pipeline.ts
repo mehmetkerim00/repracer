@@ -32,6 +32,7 @@ import {
 } from '@repracer/pricing-model';
 import { runStrategy, strategyAvailability } from '@repracer/strategy-engine';
 import { channelRefusal, type DispatchStep, type WriteDispatcher } from '@repracer/write-dispatcher';
+import { planPollingTiers } from './polling.ts';
 import { comparedValue, DEFAULT_LOSS_GRACE_SECONDS, reconcile, type HeldState } from './reconciliation.ts';
 import type {
   HaltSampleObservation,
@@ -640,13 +641,36 @@ export function createPricingPipeline(deps: PipelineDeps) {
       return { delayed: verdicts.length - lossSuspected.length, lossSuspected };
     },
 
+    /**
+     * Р-47, Р-126 (шаг 25): ярусный опрос планировщика. Ярус товара — по волатильности (planPollingTiers с бюджетом запросов аккаунта);
+     * опрашиваются товары, у которых с последнего опроса прошёл интервал яруса, не больше maxQueries за вызов, сначала давно не опрошенные.
+     * Время последнего опроса пишется только прочитанным товарам: отказ канала — товар опрашивается снова в следующем вызове
+     */
+    async pollDueCompetitors(ctx: AdapterCallContext, options: { budgetRequestsPerSecond: number; maxQueries: number; reconcile?: { graceSeconds?: number } }) {
+      const now = deps.now();
+      const candidates = await store.listPollCandidates(ctx.tenantId, ctx.channelAccountId, now);
+      const keyOf = (q: CompetitorQuery) => `${q.marketplace}|${q.channelProductRef}|${q.condition}`;
+      const plan = planPollingTiers(candidates.map((c) => ({ key: keyOf(c.query), changesLast30Days: c.changesLast30Days })), options.budgetRequestsPerSecond);
+      const interval = new Map(plan.assignments.map((a) => [a.key, a.intervalSeconds]));
+      const due = candidates
+        .filter((c) => c.lastPolledAt === null || Date.parse(now) - Date.parse(c.lastPolledAt) >= (interval.get(keyOf(c.query)) ?? 86_400) * 1000)
+        .sort((a, b) => (a.lastPolledAt === null ? 0 : Date.parse(a.lastPolledAt)) - (b.lastPolledAt === null ? 0 : Date.parse(b.lastPolledAt))
+          || (keyOf(a.query) < keyOf(b.query) ? -1 : keyOf(a.query) > keyOf(b.query) ? 1 : 0))
+        .slice(0, options.maxQueries);
+      if (due.length === 0) return { candidates: candidates.length, due: 0, snapshots: [], failures: [], plan: { coldTierExceedsBudget: plan.coldTierExceedsBudget, demoted: plan.demoted.length } };
+      const polled = await pollCompetitors(ctx, due.map((c) => c.query), options.reconcile ? { reconcile: options.reconcile } : {});
+      const failed = new Set(polled.failures.map((f) => keyOf(f.query)));
+      await store.markPolled(ctx.tenantId, ctx.channelAccountId, due.map((c) => c.query).filter((q) => !failed.has(keyOf(q))), now);
+      return { candidates: candidates.length, due: due.length, ...polled, plan: { coldTierExceedsBudget: plan.coldTierExceedsBudget, demoted: plan.demoted.length } };
+    },
+
     /** Р-121: сверка по кругу (Amazon — квота опроса не позволяет опрашивать все товары): очередное окно товаров аккаунта */
     async reconcileRotation(ctx: AdapterCallContext, options: { size: number; cycle: number; graceSeconds?: number }) {
       // Находка 9 ревью шага 24: окно — по номеру вызова, который ведёт вызывающий, а не по часам: пропуск вызовов не пропускает товары
-      const queries = await store.pickReconciliationSample(ctx.tenantId, ctx.channelAccountId, options.size, options.cycle);
-      if (queries.length === 0) return { snapshots: [], failures: [], reconciliation: emptyReconciliation(), queries: 0 };
+      const { queries, total } = await store.pickReconciliationSample(ctx.tenantId, ctx.channelAccountId, options.size, options.cycle);
+      if (queries.length === 0) return { snapshots: [], failures: [], reconciliation: emptyReconciliation(), queries: 0, total };
       const polled = await pollCompetitors(ctx, queries, { reconcile: { ...(options.graceSeconds ? { graceSeconds: options.graceSeconds } : {}) } });
-      return { ...polled, queries: queries.length };
+      return { ...polled, queries: queries.length, total };
     },
 
     /**

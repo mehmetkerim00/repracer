@@ -104,6 +104,8 @@ export interface ClockStep {
 export interface PipelineInboundStep { id: string; kind: 'pipelineInbound'; delivery: InboundDeliverySpec; expect?: unknown }
 /** Опрос конкурентов через адаптер и путь */
 export interface PipelinePollStep { id: string; kind: 'pipelinePoll'; queries: unknown[]; reconcile?: { graceSeconds?: number }; ctx?: StepContext; expect?: unknown }
+/** Р-47, Р-126: ярусный опрос планировщика — товары, чей ярус истёк */
+export interface PipelinePollDueStep { id: string; kind: 'pipelinePollDue'; budgetRequestsPerSecond: number; maxQueries: number; ctx?: StepContext; expect?: unknown }
 /** Р-121: вердикты проверок потери уведомлений, срок которых наступил */
 export interface PipelineReviewLossStep { id: string; kind: 'pipelineReviewNotificationLoss'; ctx?: StepContext; expect?: unknown }
 /** Р-121: сверка по кругу — очередное окно товаров аккаунта */
@@ -150,7 +152,7 @@ export interface PipelineDispatchDueStep { id: string; kind: 'pipelineDispatchDu
 
 export type PipelineStep = PipelineInboundStep | PipelinePollStep | PipelineRecomputeStep | PipelineEnableStep | PricingMutationStep
   | PipelineReviewHaltsStep | PipelineReleaseHaltStep | PipelineReleaseDistrustStep | PipelineDiscoverOffersStep | PipelineDispatchDueStep | PricingStopStep | ReceiverPollStep
-  | PipelineReviewLossStep | PipelineReconcileRotationStep;
+  | PipelineReviewLossStep | PipelineReconcileRotationStep | PipelinePollDueStep;
 
 /** Симулятор: доставить уведомления модели канала, срок которых наступил, через путь решения */
 export interface ChannelDeliverStep { id: string; kind: 'channelDeliver'; expect?: unknown }
@@ -216,7 +218,7 @@ export interface Scenario {
 }
 
 const ID_RE = /^[a-z0-9]+(?:[-/][a-z0-9]+)*$/;
-const PIPELINE_KINDS = new Set(['channelDeliver', 'channelRun', 'pipelineInbound', 'pipelinePoll', 'pipelineRecompute', 'pipelineEnableRepricing', 'pricingMutation', 'pipelineReviewHalts', 'pipelineReleaseHalt', 'pipelineReleaseDistrust', 'pipelineDiscoverOffers', 'pricingStop', 'receiverPoll', 'pipelineReviewNotificationLoss', 'pipelineReconcileRotation']);
+const PIPELINE_KINDS = new Set(['channelDeliver', 'channelRun', 'pipelineInbound', 'pipelinePoll', 'pipelineRecompute', 'pipelineEnableRepricing', 'pricingMutation', 'pipelineReviewHalts', 'pipelineReleaseHalt', 'pipelineReleaseDistrust', 'pipelineDiscoverOffers', 'pricingStop', 'receiverPoll', 'pipelineReviewNotificationLoss', 'pipelineReconcileRotation', 'pipelinePollDue']);
 
 export function validateScenario(s: Scenario): string[] {
   const problems: string[] = [];

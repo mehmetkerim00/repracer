@@ -12,6 +12,11 @@ export interface DailyExportReport {
   range: DayRange;
   exports: Array<PartitionExport & { skipped?: Record<string, number> }>;
   unverified: string[];
+  /**
+   * Шаг 25 [Р-126]: секции суток нет — её уже удалили принудительно (история потеряна) или не создали (секции создаются на 3 суток
+   * вперёд). Выгрузка остальных таблиц суток продолжается; планировщик поднимает алерт, а не повторяет сутки бесконечно
+   */
+  missing: string[];
 }
 
 /** Сутки UTC, закрытые к моменту now: вчера */
@@ -21,10 +26,18 @@ export function previousUtcDay(now: Date): DayRange {
 }
 
 export async function exportDay(pgExporter: pg.Pool, ingest: ClickHouseHttp, verifier: ClickHouseHttp, range: DayRange): Promise<DailyExportReport> {
-  const exports: DailyExportReport['exports'] = [
-    ...(await exportDecisionDay(pgExporter, ingest, verifier, range)),
-    await exportCompletedWritesDay(pgExporter, ingest, verifier, range),
-    await exportCompetitorSnapshotsDay(pgExporter, ingest, verifier, range),
-  ];
-  return { range, exports, unverified: exports.filter((e) => !e.verified).map((e) => e.partitionName) };
+  const exports: DailyExportReport['exports'] = [];
+  const missing: string[] = [];
+  const attempt = async (name: string, run: () => Promise<DailyExportReport['exports']>) => {
+    try {
+      exports.push(...(await run()));
+    } catch (error) {
+      if (!/^no partition of /.test(String((error as Error).message))) throw error;
+      missing.push(name);
+    }
+  };
+  await attempt('channel_data.price_intent/price_decision', () => exportDecisionDay(pgExporter, ingest, verifier, range));
+  await attempt('tenant_data.channel_write_history', async () => [await exportCompletedWritesDay(pgExporter, ingest, verifier, range)]);
+  await attempt('channel_data.competitor_snapshot_log', async () => [await exportCompetitorSnapshotsDay(pgExporter, ingest, verifier, range)]);
+  return { range, exports, unverified: exports.filter((e) => !e.verified).map((e) => e.partitionName), missing };
 }
