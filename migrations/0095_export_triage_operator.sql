@@ -30,6 +30,8 @@ REVOKE ALL ON platform.platform_operator FROM repracer_app;
 REVOKE INSERT, UPDATE, DELETE ON platform.platform_operator FROM repracer_admin;
 CREATE POLICY platform_operator_owner ON platform.platform_operator TO repracer_owner USING (true) WITH CHECK (true);
 CREATE POLICY platform_operator_triage ON platform.platform_operator FOR SELECT TO repracer_export_triage USING (true);
+-- Страж разбора читает учётные записи в схеме platform от имени роли разбора: нужна и видимость схемы
+GRANT USAGE ON SCHEMA platform TO repracer_export_triage;
 GRANT SELECT ON platform.platform_operator TO repracer_export_triage;
 
 CREATE TABLE maintenance.snapshot_export_skip_verification (
