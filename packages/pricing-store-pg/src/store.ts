@@ -5,6 +5,7 @@ import { DEFAULT_RETRY_POLICY } from '@repracer/write-dispatcher';
 import { offerIdentityOf, type CompetitorQuery, type FieldWrite, type Instant, type PricingHealthObservation, type WriteOutcome } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange } from '@repracer/input-sanity';
 import type { GuardrailSet } from '@repracer/price-gate';
+import type { OmnibusPriorPrice } from '@repracer/pricing-model';
 import type { AcceptedSnapshot, BoundResolution, CostInputs, DistrustRef, HaltRef, PriceBounds, PriceIntentDraft, Reason, StopRef, StrategyDefinition } from '@repracer/pricing-model';
 import { randomUUID } from 'node:crypto';
 import type {
@@ -37,7 +38,7 @@ import type {
   ProductKey,
   ScopeEvaluationContext,
   ShiftWindow,
-  SnapshotOutcome, ConsoleAuditRow, ConsoleDistrustRow, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation } from '@repracer/pricing-pipeline';
+  SnapshotOutcome, ConsoleAuditRow, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation } from '@repracer/pricing-pipeline';
 import { inTenant, RollbackWith, type PgPool, type Tx } from './db.ts';
 import { PgWriteQueueStore } from './write-queue.ts';
 
@@ -1008,6 +1009,99 @@ export class PgPricingStore implements PricingStore {
     const owned = /write_scope ([0-9a-f-]{36}) has channel-owned pricing/.exec(message);
     if (owned) return { status: 'INVALID', cause: 'CHANNEL_PRICING_ACTIVE', writeScopeId: owned[1]! };
     return null;
+  }
+
+  // --- Omnibus [Р-123] (шаг 24) --------------------------------------------------------
+  private static omnibusRow(r: Row): OmnibusPriorPrice {
+    const day = (v: unknown) => (v instanceof Date ? `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}` : v === null || v === undefined ? null : String(v));
+    return {
+      status: r.status, lowestMinor: r.lowest_minor === null ? null : Number(r.lowest_minor), windowFrom: day(r.window_from), windowTo: day(r.window_to),
+      timeZone: r.day_tz ?? null, historySince: r.history_since ? iso(r.history_since) : null,
+    };
+  }
+
+  async omnibusCheck(tenantId: string, writeScopeId: string, startsAt: Instant): Promise<OmnibusPriorPrice> {
+    return inTenant(this.admin('omnibusCheck'), tenantId, async (tx) => {
+      const { rows: [r] } = await tx.query('SELECT * FROM tenant_data.omnibus_lowest_prior_price($1, $2, $3)', [tenantId, writeScopeId, startsAt]);
+      return PgPricingStore.omnibusRow(r);
+    });
+  }
+
+  async announceDiscount(tenantId: string, input: DiscountAnnouncementInput, actor: AdminActor): Promise<DiscountAnnounceResult> {
+    try {
+      return await inTenant(this.admin('announceDiscount'), tenantId, async (tx) => {
+        const { rows: [r] } = await tx.query(
+          `INSERT INTO tenant_data.discount_announcement (tenant_id, write_scope_id, reference_price_minor, sale_price_minor, currency, starts_at, ends_at, created_by_membership_id, check_status)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'OK')
+           RETURNING discount_announcement_id, created_at, check_status, lowest_prior_minor, window_from, window_to, day_tz`,
+          [tenantId, input.writeScopeId, input.referencePriceMinor, input.salePriceMinor, input.currency, input.startsAt, input.endsAt, actor.membershipId]);
+        const { rows: [since] } = await tx.query('SELECT history_since FROM tenant_data.omnibus_lowest_prior_price($1, $2, $3)', [tenantId, input.writeScopeId, input.startsAt]);
+        return {
+          status: 'ANNOUNCED', announcement: {
+            ...input, announcementId: r.discount_announcement_id, createdAt: iso(r.created_at), createdByMembershipId: actor.membershipId,
+            check: PgPricingStore.omnibusRow({ status: r.check_status, lowest_minor: r.lowest_prior_minor, window_from: r.window_from, window_to: r.window_to, day_tz: r.day_tz, history_since: since?.history_since ?? null }),
+          },
+        } satisfies DiscountAnnounceResult;
+      }, actor.userId, { mfa: actor.mfa });
+    } catch (error) {
+      if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
+      const message = String((error as Error).message ?? '');
+      if (/is above the lowest price/.test(message)) return { status: 'VIOLATION', check: await this.omnibusCheck(tenantId, input.writeScopeId, input.startsAt) };
+      if (/is not the currency of price write_scope/.test(message)) return { status: 'INVALID', cause: 'CURRENCY_MISMATCH' };
+      if (/discount_announcement_prices/.test(message)) return { status: 'INVALID', cause: 'PRICES_INVALID' };
+      if (/discount_announcement_period/.test(message)) return { status: 'INVALID', cause: 'PERIOD_INVALID' };
+      if (/violates foreign key constraint/.test(message)) return { status: 'INVALID', cause: 'SCOPE_NOT_FOUND' };
+      throw error;
+    }
+  }
+
+  async discountAnnouncements(tenantId: string): Promise<DiscountAnnouncementRow[]> {
+    return inTenant(this.admin('discountAnnouncements'), tenantId, async (tx) => {
+      const { rows } = await tx.query(
+        `SELECT discount_announcement_id, write_scope_id, reference_price_minor, sale_price_minor, currency, starts_at, ends_at, created_at, created_by_membership_id,
+                check_status, lowest_prior_minor, window_from, window_to, day_tz
+           FROM tenant_data.discount_announcement WHERE tenant_id = $1 ORDER BY starts_at DESC, created_at DESC`, [tenantId]);
+      return rows.map((r): DiscountAnnouncementRow => ({
+        announcementId: r.discount_announcement_id, writeScopeId: r.write_scope_id, referencePriceMinor: Number(r.reference_price_minor), salePriceMinor: Number(r.sale_price_minor),
+        currency: r.currency, startsAt: iso(r.starts_at), endsAt: r.ends_at ? iso(r.ends_at) : null, createdAt: iso(r.created_at), createdByMembershipId: r.created_by_membership_id,
+        check: PgPricingStore.omnibusRow({ status: r.check_status, lowest_minor: r.lowest_prior_minor, window_from: r.window_from, window_to: r.window_to, day_tz: r.day_tz, history_since: null }),
+      }));
+    });
+  }
+
+  async priceEvidence(tenantId: string, range: { from: string; to: string; writeScopeIds?: string[] }): Promise<PriceEvidenceDay[]> {
+    return inTenant(this.admin('priceEvidence'), tenantId, async (tx) => {
+      const { rows } = await tx.query(
+        `WITH scopes AS (
+           SELECT s.write_scope_id, tenant_data.write_scope_time_zone(s.tenant_id, s.write_scope_id) AS tz, s.currency, s.price_basis
+             FROM tenant_data.write_scope s
+            WHERE s.tenant_id = $1 AND s.field = 'PRICE' AND ($4::uuid[] IS NULL OR s.write_scope_id = ANY ($4::uuid[]))),
+         closed AS (
+           SELECT d.write_scope_id, d.price_day AS day, d.day_tz AS tz, d.currency, d.price_basis, d.min_amount_minor AS min_minor, d.max_amount_minor AS max_minor,
+                  d.first_amount_minor AS first_minor, d.last_amount_minor AS last_minor, d.change_count AS changes, 'CLOSED' AS source, d.corrected, d.correction_reason
+             FROM tenant_data.price_daily_effective d JOIN scopes s ON s.write_scope_id = d.write_scope_id
+            WHERE d.tenant_id = $1 AND d.price_type IN ('REGULAR', 'SALE') AND d.price_day BETWEEN $2::date AND $3::date),
+         open AS (
+           SELECT h.write_scope_id, (h.accepted_at AT TIME ZONE s.tz)::date AS day, s.tz, h.currency, h.price_basis,
+                  min(h.amount_minor) AS min_minor, max(h.amount_minor) AS max_minor,
+                  (array_agg(h.amount_minor ORDER BY h.accepted_at, h.price_history_id))[1] AS first_minor,
+                  (array_agg(h.amount_minor ORDER BY h.accepted_at DESC, h.price_history_id DESC))[1] AS last_minor,
+                  count(*)::int AS changes, 'OPEN' AS source, false AS corrected, NULL::text AS correction_reason
+             FROM tenant_data.price_history h JOIN scopes s ON s.write_scope_id = h.write_scope_id AND s.tz IS NOT NULL
+            WHERE h.tenant_id = $1 AND h.price_type IN ('REGULAR', 'SALE')
+              AND NOT EXISTS (SELECT 1 FROM tenant_data.price_history c WHERE c.tenant_id = h.tenant_id AND c.corrects_price_history_id = h.price_history_id)
+              AND (h.accepted_at AT TIME ZONE s.tz)::date BETWEEN $2::date AND $3::date
+              AND NOT EXISTS (SELECT 1 FROM tenant_data.price_daily d WHERE d.tenant_id = h.tenant_id AND d.write_scope_id = h.write_scope_id
+                                AND d.price_type = h.price_type AND d.price_day = (h.accepted_at AT TIME ZONE s.tz)::date)
+            GROUP BY h.write_scope_id, (h.accepted_at AT TIME ZONE s.tz)::date, s.tz, h.currency, h.price_basis)
+         SELECT * FROM closed UNION ALL SELECT * FROM open ORDER BY write_scope_id, day`,
+        [tenantId, range.from, range.to, range.writeScopeIds ?? null]);
+      const day = (v: unknown) => (v instanceof Date ? `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}` : String(v));
+      return rows.map((r): PriceEvidenceDay => ({
+        writeScopeId: r.write_scope_id, day: day(r.day), timeZone: r.tz, currency: r.currency, basis: r.price_basis, minMinor: Number(r.min_minor), maxMinor: Number(r.max_minor),
+        firstMinor: Number(r.first_minor), lastMinor: Number(r.last_minor), changes: Number(r.changes), source: r.source, corrected: r.corrected, correctionReason: r.correction_reason,
+      }));
+    });
   }
 
   async assignStrategyVersion(tenantId: string, input: StrategyAssignInput, actor: AdminActor): Promise<StrategySaveResult> {

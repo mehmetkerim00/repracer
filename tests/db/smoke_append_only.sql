@@ -94,12 +94,40 @@ INSERT INTO tenant_data.price_daily_correction (tenant_id, write_scope_id, price
 SELECT tenant_id, write_scope_id, price_type, price_day, 1100, 1200, 1100, first_accepted_at, last_amount_minor, last_accepted_at, 2, min_floor_minor,
        'Synthetic correction for the append-only check (Р-103)', 'a2000000-0000-0000-0000-00000000000a'
   FROM tenant_data.price_daily WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a' AND price_day = current_date - 400;
+-- Шаг 24, C (0087) [Р-123]: объявление скидки проверяет Omnibus база. Цена единицы по суточной свёртке — 1200 (исправление выше),
+-- действует к началу окна: прежняя цена выше 1200 — нарушение, 1200 — принято со статусом OK
+SELECT pg_temp.expect_fail('discount announced with a prior price above the lowest price of 30 days (Omnibus, Р-123)', $q$
+  INSERT INTO tenant_data.discount_announcement (tenant_id, write_scope_id, reference_price_minor, sale_price_minor, currency, starts_at, created_by_membership_id, check_status)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', 1300, 1000, 'EUR', now(), 'a2000000-0000-0000-0000-00000000000a', 'OK') $q$,
+  'is above the lowest price 1200 of the 30 days');
+SELECT pg_temp.expect_fail('discount announced in a currency other than the currency of the offer (Р-71, Р-123)', $q$
+  INSERT INTO tenant_data.discount_announcement (tenant_id, write_scope_id, reference_price_minor, sale_price_minor, currency, starts_at, created_by_membership_id, check_status)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', 1200, 1000, 'USD', now(), 'a2000000-0000-0000-0000-00000000000a', 'OK') $q$,
+  'is not the currency of price write_scope');
+SELECT pg_temp.expect_fail('discount whose sale price is not below the prior price (Р-123)', $q$
+  INSERT INTO tenant_data.discount_announcement (tenant_id, write_scope_id, reference_price_minor, sale_price_minor, currency, starts_at, created_by_membership_id, check_status)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', 1200, 1200, 'EUR', now(), 'a2000000-0000-0000-0000-00000000000a', 'OK') $q$,
+  'discount_announcement_prices');
+SELECT pg_temp.expect_fail('discount ending before it starts (Р-123)', $q$
+  INSERT INTO tenant_data.discount_announcement (tenant_id, write_scope_id, reference_price_minor, sale_price_minor, currency, starts_at, ends_at, created_by_membership_id, check_status)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', 1200, 1000, 'EUR', now(), now() - interval '1 day', 'a2000000-0000-0000-0000-00000000000a', 'OK') $q$,
+  'discount_announcement_period');
+INSERT INTO tenant_data.discount_announcement (tenant_id, write_scope_id, reference_price_minor, sale_price_minor, currency, starts_at, created_by_membership_id, check_status, lowest_prior_minor)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', 1200, 1000, 'EUR', now(), 'a2000000-0000-0000-0000-00000000000a', 'TIME_ZONE_UNKNOWN', 99999);
+DO $$ BEGIN
+  IF (SELECT (check_status, lowest_prior_minor) FROM tenant_data.discount_announcement WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a' ORDER BY created_at DESC LIMIT 1)
+     IS DISTINCT FROM ('OK'::text, 1200::bigint) THEN
+    RAISE EXCEPTION 'the Omnibus check of a discount announcement is not computed by the database (Р-123)';
+  END IF;
+  RAISE NOTICE 'PASS accept | the Omnibus check of a discount announcement is computed by the database (Р-123)';
+END $$;
 INSERT INTO tenant_data.product_vat_rate (tenant_id, product_id, country, rate_bp, version, created_by_membership_id)
 SELECT 'a0000000-0000-0000-0000-00000000000a', 'a5000000-0000-0000-0000-000000000001', 'AT', 1000, coalesce(max(version), 0) + 1, 'a2000000-0000-0000-0000-00000000000a'
   FROM tenant_data.product_vat_rate WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a' AND product_id = 'a5000000-0000-0000-0000-000000000001' AND country = 'AT';
 
 -- Шаг 23 [Р-108]: TRUNCATE новой append-only таблицы отклоняет свой триггер
 SELECT pg_temp.expect_fail('truncate channel_data.offer_channel_pricing', $q$ TRUNCATE channel_data.offer_channel_pricing $q$, 'TRUNCATE of channel_data.offer_channel_pricing is forbidden');
+SELECT pg_temp.expect_fail('truncate tenant_data.discount_announcement', $q$ TRUNCATE tenant_data.discount_announcement $q$, 'TRUNCATE of tenant_data.discount_announcement is forbidden');
 SELECT pg_temp.expect_fail('truncate channel_data.competitor_snapshot_log', $q$ TRUNCATE channel_data.competitor_snapshot_log $q$, 'TRUNCATE of channel_data.competitor_snapshot_log is forbidden');
 SELECT pg_temp.expect_fail('truncate channel_data.inbound_notification', $q$ TRUNCATE channel_data.inbound_notification $q$, 'TRUNCATE of channel_data.inbound_notification is forbidden');
 SELECT pg_temp.expect_fail('pricing health threshold without its currency (Р-71)', $q$

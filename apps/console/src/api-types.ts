@@ -99,3 +99,16 @@ export interface ApiErrorBody {
 
 export const NOTE_MIN = 10;
 export const NOTE_MAX = 2000;
+
+/** Р-123 (шаг 24): ответ объявления скидки и выгрузка доказательной истории цен */
+export interface DiscountAnnounceResponse {
+  message: string;
+  compliance: import('@repracer/console-model').ComplianceView;
+}
+
+export interface PriceEvidenceResponse {
+  filename: string;
+  csv: string;
+  sha256: string;
+  days: number;
+}

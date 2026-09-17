@@ -1,5 +1,5 @@
 import { EXPLANATION_RULESETS } from './dictionary.ts';
-import type { HaltSampleObservation, HaltSampleReview, SnapshotOutcome, ConsoleAuditRow, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation } from './store.ts';
+import type { HaltSampleObservation, HaltSampleReview, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation } from './store.ts';
 import { offerIdentityOf, type CompetitorQuery, type CompetitorSnapshot, type CompetitorSourceDescriptor, type FieldWrite, type Instant, type OfferIdentity, type PriceBasis, type PricingHealthObservation, type WriteOutcome } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange, SanityContext } from '@repracer/input-sanity';
 import { assertWriteWithinBounds, NO_GUARDRAILS, type GuardrailSet } from '@repracer/price-gate';
@@ -9,6 +9,9 @@ import {
   can,
   convertMinor,
   isCompetitorDerived,
+  localDate,
+  omnibusLowestPriorPrice,
+  omnibusVerdict,
   priceBasisMismatch,
   resumeActionFor,
   sellerActionFor,
@@ -22,6 +25,7 @@ import {
   type DistrustRef,
   type HaltRef,
   type MemberRole,
+  type OmnibusPriorPrice,
   type PriceBounds,
   type PriceDecisionDraft,
   type PriceIntentDraft,
@@ -130,7 +134,7 @@ export interface MemorySeed {
   /** Аккаунты других каналов для единиц записи, которые не принадлежат аккаунту мира (посев в PostgreSQL) */
   accounts?: Array<{ channelAccountId: string; channel: 'KAUFLAND' | 'AMAZON' | 'EBAY'; region?: string; marketplaces: string[] }>;
   /** Валюта и база цены витрин без единиц записи; по умолчанию — витрины Kaufland de и at */
-  marketplaces?: Record<string, { currency: string; basis: PriceBasis }>;
+  marketplaces?: Record<string, { currency: string; basis: PriceBasis; timeZone?: string | null }>;
   /** Ключ — «витрина|товар|состояние» */
   competitorDaily?: Record<string, DailyRange[]>;
   competitorState?: Record<string, { observedAt: Instant; buyboxMinor: number | null; lowestMinor: number | null }>;
@@ -211,7 +215,9 @@ interface CompetitorRow {
   sanity: SanitySummary | null;
 }
 
-const KAUFLAND_STOREFRONTS: Record<string, { currency: string; basis: PriceBasis }> = { de: { currency: 'EUR', basis: 'GROSS' }, at: { currency: 'EUR', basis: 'GROSS' } };
+const KAUFLAND_STOREFRONTS: Record<string, { currency: string; basis: PriceBasis; timeZone?: string | null }> = {
+  de: { currency: 'EUR', basis: 'GROSS', timeZone: 'Europe/Berlin' }, at: { currency: 'EUR', basis: 'GROSS', timeZone: 'Europe/Vienna' },
+};
 const productKey = (k: { marketplace: string; channelProductRef: string; condition: string }) => `${k.marketplace}|${k.channelProductRef}|${k.condition}`;
 const COMPETITOR_STRATEGIES = new Set(['MATCH_BUYBOX', 'BEAT_LOWEST']);
 /** Ставки НДС по умолчанию витрин стенда (0033, 0075: amazon.de — Германия) */
@@ -237,7 +243,10 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   private readonly competitorState = new Map<string, CompetitorRow>();
   private readonly crossChannel: Record<string, CrossChannelReference[]>;
   private readonly fxRates: FxQuote[];
-  private readonly marketplaces: Record<string, { currency: string; basis: PriceBasis }>;
+  private readonly marketplaces: Record<string, { currency: string; basis: PriceBasis; timeZone?: string | null }>;
+  /** Р-123 (шаг 24): применённые цены — как tenant_data.price_history (суточной свёртки у двойника нет, сутки считаются из сырья) */
+  readonly priceHistory: Array<{ writeScopeId: string; acceptedAt: Instant; amountMinor: number; currency: string; basis: PriceBasis }> = [];
+  readonly discounts: DiscountAnnouncementRow[] = [];
   private readonly conflicts: Array<{ writeScopeId: string; bound: 'min' | 'max'; value: SeedBound }>;
   private readonly members: ConsoleMemberRow[];
   readonly moves: Array<{ marketplace: string; productRef: string; evaluatedAt: Instant; moveBp: number; verdict: string; sellerRef: string | null }> = [];
@@ -417,6 +426,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     for (const list of this.changes.values()) removeIf(list, () => true, (t) => t < at);
     const rejectedSnapshots = removeIf(this.rejectedSnapshots, () => true, (r) => Date.parse(r.receivedAt) < at);
     removeIf(this.snapshotLog, () => true, (r) => Date.parse(r.receivedAt) < at);
+    removeIf(this.priceHistory, () => true, (h) => Date.parse(h.acceptedAt) < at);
     return { intents, decisions, writes, moves, rejectedSnapshots };
   }
 
@@ -1125,6 +1135,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     const scope = this.scope(w.writeScopeId);
     scope.currentPriceMinor = w.amountMinor;
     scope.knownPricesMinor = [...new Set([w.amountMinor, ...scope.knownPricesMinor])].slice(0, 3);
+    this.priceHistory.push({ writeScopeId: scope.writeScopeId, acceptedAt: now, amountMinor: w.amountMinor, currency: scope.currency, basis: scope.basis });
     const changes = this.changes.get(scope.writeScopeId) ?? [];
     this.changes.set(scope.writeScopeId, changes);
     changes.push(Date.parse(now));
@@ -1181,6 +1192,58 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   }
 
   // --- PricingStore: правка границ и стратегий из консоли (шаг 21) ---------------
+  // --- Omnibus [Р-123] (шаг 24): как tenant_data.omnibus_lowest_prior_price и discount_announcement_guard (0087) -------------
+  private timeZoneOf(writeScopeId: string): string | null {
+    return this.marketplaces[this.scope(writeScopeId).marketplace]?.timeZone || null;
+  }
+
+  async omnibusCheck(_tenantId: string, writeScopeId: string, startsAt: Instant): Promise<OmnibusPriorPrice> {
+    return omnibusLowestPriorPrice(this.priceHistory.filter((h) => h.writeScopeId === writeScopeId), this.timeZoneOf(writeScopeId), startsAt);
+  }
+
+  async announceDiscount(_tenantId: string, input: DiscountAnnouncementInput, actor: AdminActor): Promise<DiscountAnnounceResult> {
+    if (!this.adminMember(actor)) return { status: 'FORBIDDEN' };
+    const row = this.scopes.get(input.writeScopeId);
+    if (!row) return { status: 'INVALID', cause: 'SCOPE_NOT_FOUND' };
+    if (row.currency !== input.currency) return { status: 'INVALID', cause: 'CURRENCY_MISMATCH' };
+    if (!(input.salePriceMinor > 0 && input.referencePriceMinor > input.salePriceMinor)) return { status: 'INVALID', cause: 'PRICES_INVALID' };
+    if (input.endsAt !== null && Date.parse(input.endsAt) <= Date.parse(input.startsAt)) return { status: 'INVALID', cause: 'PERIOD_INVALID' };
+    const check = await this.omnibusCheck('', input.writeScopeId, input.startsAt);
+    if (omnibusVerdict(check, input.referencePriceMinor) === 'VIOLATION') return { status: 'VIOLATION', check };
+    const announcement: DiscountAnnouncementRow = {
+      ...input, announcementId: this.id('discount'), createdAt: new Date().toISOString(), createdByMembershipId: actor.membershipId, check,
+    };
+    this.discounts.push(announcement);
+    return { status: 'ANNOUNCED', announcement };
+  }
+
+  async discountAnnouncements(_tenantId: string): Promise<DiscountAnnouncementRow[]> {
+    return [...this.discounts].sort((a, b) => Date.parse(b.startsAt) - Date.parse(a.startsAt)).map((d) => ({ ...d, check: { ...d.check } }));
+  }
+
+  async priceEvidence(_tenantId: string, range: { from: string; to: string; writeScopeIds?: string[] }): Promise<PriceEvidenceDay[]> {
+    const days = new Map<string, PriceEvidenceDay>();
+    for (const h of this.priceHistory) {
+      if (range.writeScopeIds && !range.writeScopeIds.includes(h.writeScopeId)) continue;
+      const tz = this.timeZoneOf(h.writeScopeId);
+      if (!tz) continue;
+      const day = localDate(h.acceptedAt, tz);
+      if (day < range.from || day > range.to) continue;
+      const key = `${h.writeScopeId}|${day}`;
+      const d = days.get(key);
+      if (!d) {
+        days.set(key, { writeScopeId: h.writeScopeId, day, timeZone: tz, currency: h.currency, basis: h.basis, minMinor: h.amountMinor, maxMinor: h.amountMinor, firstMinor: h.amountMinor,
+          lastMinor: h.amountMinor, changes: 1, source: 'OPEN', corrected: false, correctionReason: null });
+      } else {
+        d.minMinor = Math.min(d.minMinor, h.amountMinor);
+        d.maxMinor = Math.max(d.maxMinor, h.amountMinor);
+        d.lastMinor = h.amountMinor;
+        d.changes += 1;
+      }
+    }
+    return [...days.values()].sort((a, b) => a.writeScopeId.localeCompare(b.writeScopeId) || a.day.localeCompare(b.day));
+  }
+
   private adminMember(actor: AdminActor): ConsoleMemberRow | null {
     const m = this.member(actor.membershipId);
     // Как security.admin_write_action (0068): действие человека с его ролью; автор — пользователь сессии

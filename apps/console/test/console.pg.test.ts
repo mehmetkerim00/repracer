@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
-import type { BoundsDiffView, DecisionListItem, DecisionTrace, PriceFeedView, StopView, StrategyListView, StrategyPreviewView } from '@repracer/console-model';
+import type { BoundsDiffView, ComplianceView, DecisionListItem, DiscountCheckView, DecisionTrace, PriceFeedView, StopView, StrategyListView, StrategyPreviewView } from '@repracer/console-model';
 import { buildStandWorlds, pgStandJoinMember, pgStandUsers, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_EMAILS, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { pgStoreFactory } from '@repracer/contract-tests/pg-store';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
 import { PgIdentityDirectory } from '@repracer/identity/pg';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
 import { createPool, inTenant } from '@repracer/pricing-store-pg';
-import type { StandToken } from '../src/api-types.ts';
+import type { DiscountAnnounceResponse, PriceEvidenceResponse, StandToken } from '../src/api-types.ts';
 import { createStandApi } from '../server/stand-server.ts';
 
 /**
@@ -165,4 +165,34 @@ test('step 23 on PostgreSQL: the database refuses a strategy for an offer the ch
     ['pricing.distrust_created', 'SYSTEM', null, null],
     ['pricing.distrust_released', 'USER', STAND_ACCOUNTS.find((a) => a.role === 'OWNER')!.email, note],
   ]);
+});
+
+test('step 24, Р-123 on PostgreSQL: the check before announcing, the refusal of a violation and the evidence come from the database; the announcement is audited', async () => {
+  const owner = await login('OWNER');
+  const live = worlds.find((w) => w.id === WORLD)!;
+  const post = (path: string, body: unknown) => handle({ method: 'POST', url: path, body, ...owner });
+  const scope = (await handle({ method: 'GET', url: api('compliance'), body: undefined, ...owner })).body as ComplianceView;
+  const writeScopeId = scope.offers.find((o) => o.writeScopeId === 'ws-price-de-4101')!.writeScopeId;
+  const startsAt = new Date(Date.parse(live.clock.iso()) + 86_400_000).toISOString();
+  const prior = await live.store.omnibusCheck(live.tenantId, writeScopeId, startsAt);
+  assert.ok(prior.lowestMinor !== null && prior.timeZone === 'Europe/Berlin', JSON.stringify(prior));
+  const discount = { writeScopeId, referencePriceMinor: prior.lowestMinor! + 1, salePriceMinor: prior.lowestMinor! - 100, startsAt, endsAt: null };
+  const check = (await post(api('compliance', 'check'), discount)).body as DiscountCheckView;
+  assert.equal(check.verdict, 'VIOLATION');
+  const refused = await post(api('compliance', 'announce'), { ...discount, confirmed: true });
+  assert.deepEqual([refused.status, (refused.body as { error: { code: string } }).error.code], [400, 'OMNIBUS_VIOLATION'], JSON.stringify(refused.body));
+  const announced = await post(api('compliance', 'announce'), { ...discount, referencePriceMinor: prior.lowestMinor!, confirmed: true });
+  assert.equal(announced.status, 200, JSON.stringify(announced.body));
+  assert.equal((announced.body as DiscountAnnounceResponse).compliance.rows.length, 1);
+
+  const tenant = await inTenant(adminPool, live.identityTenantId, async (tx) => (await tx.query(
+    `SELECT count(*)::int AS n FROM audit.audit_event WHERE tenant_id = $1 AND action = 'admin_change.insert' AND entity_type = 'tenant_data.discount_announcement'`, [live.identityTenantId])).rows[0].n as number);
+  assert.equal(tenant, 1, 'the announcement is in the audit log');
+
+  const day = (iso: string) => iso.slice(0, 10);
+  const from = day(new Date(Date.parse(startsAt) - 40 * 86_400_000).toISOString());
+  const evidence = await handle({ method: 'GET', url: `${api('compliance', 'evidence')}?from=${from}&to=${day(startsAt)}&writeScopeId=${writeScopeId}`, body: undefined, ...owner });
+  assert.equal(evidence.status, 200, JSON.stringify(evidence.body));
+  const csv = (evidence.body as PriceEvidenceResponse).csv.trim().split('\n');
+  assert.ok(csv.length > 1 && csv.slice(1).every((l) => l.startsWith('KAUFLAND,de,') && l.includes(',Europe/Berlin,EUR,GROSS,')), csv.join('\n'));
 });

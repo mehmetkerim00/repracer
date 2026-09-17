@@ -4,12 +4,13 @@ import { fileURLToPath } from 'node:url';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer, type ViteDevServer } from 'vite';
-import { messagesFor, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
+import { messagesFor, type ComplianceView, type DiscountCheckView, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
 import { buildStandWorlds, memoryStandDirectory, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
-import type { BoundsIndexView, EnableResult, SessionView, StandToken, WorldSummary } from '../src/api-types.ts';
-import { createStandApi, resolveStandIdentityMode } from '../server/stand-server.ts';
+import type { BoundsIndexView, DiscountAnnounceResponse, EnableResult, PriceEvidenceResponse, SessionView, StandToken, WorldSummary } from '../src/api-types.ts';
+import { createHash } from 'node:crypto';
+import { createStandApi, EVIDENCE_MAX_DAYS, resolveStandIdentityMode } from '../server/stand-server.ts';
 
 /**
  * Интерфейс на мирах стенда (хранилище в памяти): вход через токен поставщика identity [Р-78] (на стенде — имитатор),
@@ -459,4 +460,61 @@ test('step 24, OQ-169/170: an existing strategy version is assigned without a ne
   const removed = await call(owner, 'POST', api(id, 'strategies', 'unassign'), { writeScopeIds: [target.unit.writeScopeId], confirmed: true });
   assert.equal(removed.status, 200, JSON.stringify(removed.body));
   assert.equal((removed.body as { strategies: StrategyListView }).strategies.scopes.find((x) => x.unit.writeScopeId === target.unit.writeScopeId)?.strategyId, null);
+});
+
+test('step 24, Р-123: a discount is checked before it is announced; a prior price above the 30-day lowest is refused; announced discounts are rechecked; the price evidence is a CSV with its checksum', async () => {
+  const owner = await login('OWNER');
+  const viewer = await login('VIEWER');
+  const id = 'kaufland/pipeline/happy-path';
+  const live = worlds.find((w) => w.id === id)!;
+  const view = await get<ComplianceView>(owner, api(id, 'compliance'));
+  assert.deepEqual([view.rows.length, view.canAnnounce, view.cannotCheck.length > 0], [0, true, true]);
+  const scope = view.offers[0]!;
+  const startsAt = new Date(Date.parse(live.clock.iso()) + 86_400_000).toISOString();
+  const prior = await live.store.omnibusCheck(live.tenantId, scope.writeScopeId, startsAt);
+  assert.ok(prior.lowestMinor !== null, 'the stand world has a price of ours before the discount');
+  const lowest = prior.lowestMinor!;
+  const discount = { writeScopeId: scope.writeScopeId, referencePriceMinor: lowest + 1, salePriceMinor: lowest - 100, startsAt, endsAt: null };
+
+  // Предупреждение до записи: просмотр вправе проверить, но не объявить
+  const warned = await call(viewer, 'POST', api(id, 'compliance', 'check'), discount);
+  assert.equal(warned.status, 200, JSON.stringify(warned.body));
+  const check = warned.body as DiscountCheckView;
+  assert.deepEqual([check.verdict, check.tone, check.canAnnounce], ['VIOLATION', 'stop', false]);
+  assert.match(check.headline, /^This discount breaks the rule: the stated prior price .+ is above the lowest price .+ of the last 30 days\.$/);
+  assert.equal((await call(viewer, 'POST', api(id, 'compliance', 'announce'), { ...discount, confirmed: true })).status, 403);
+  assert.equal((await call(owner, 'POST', api(id, 'compliance', 'announce'), discount)).status, 400, 'not confirmed');
+  const refused = await call(owner, 'POST', api(id, 'compliance', 'announce'), { ...discount, confirmed: true });
+  assert.deepEqual([refused.status, (refused.body as { error: { code: string } }).error.code], [400, 'OMNIBUS_VIOLATION']);
+  assert.equal((await call(owner, 'POST', api(id, 'compliance', 'check'), { ...discount, referencePriceMinor: 'x' })).status, 400);
+
+  // На наименьшей цене окна — объявляется; проверка хранится, отчёт проверяет заново
+  const fair = { ...discount, referencePriceMinor: lowest };
+  const okCheck = (await call(owner, 'POST', api(id, 'compliance', 'check'), fair)).body as DiscountCheckView;
+  assert.notEqual(okCheck.verdict, 'VIOLATION');
+  assert.equal(okCheck.canAnnounce, true);
+  const announced = await call(owner, 'POST', api(id, 'compliance', 'announce'), { ...fair, confirmed: true });
+  assert.equal(announced.status, 200, JSON.stringify(announced.body));
+  const report = (announced.body as DiscountAnnounceResponse).compliance;
+  assert.equal(report.rows.length, 1);
+  assert.equal(report.rows[0]!.atAnnouncement.verdict, okCheck.verdict);
+  assert.equal(report.rows[0]!.now.verdict, okCheck.verdict);
+  assert.equal(report.counts.VIOLATION, 0);
+
+  // Доказательная история: CSV с контрольной суммой; неверный период — 400
+  const day = (iso: string) => iso.slice(0, 10);
+  const from = day(new Date(Date.parse(live.clock.iso()) - 30 * 86_400_000).toISOString());
+  const to = day(startsAt);
+  const evidence = await get<PriceEvidenceResponse>(viewer, `${api(id, 'compliance', 'evidence')}?from=${from}&to=${to}&writeScopeId=${encodeURIComponent(scope.writeScopeId)}`);
+  assert.ok(evidence.days > 0, 'the evidence has storefront days');
+  assert.equal(evidence.csv.split('\n')[0], 'channel,marketplace,offer,day,time_zone,currency,price_basis,min_price,max_price,first_price,last_price,changes,source,corrected,correction_reason');
+  assert.equal(evidence.sha256, createHash('sha256').update(evidence.csv).digest('hex'));
+  assert.equal((await call(owner, 'GET', `${api(id, 'compliance', 'evidence')}?from=${to}&to=${from}`)).status, 400);
+  assert.equal((await call(owner, 'GET', `${api(id, 'compliance', 'evidence')}?from=2020-01-01&to=2026-01-01`)).status, 400, `longer than ${EVIDENCE_MAX_DAYS} days`);
+
+  // Экран на обоих языках
+  const en = await html('/src/screens/Compliance.tsx', 'ComplianceScreenView', { worldId: id, initial: report });
+  for (const text of ['Omnibus: prior price of a discount', 'Announced discounts', 'What this module cannot check', 'Download CSV']) assert.ok(en.includes(text), text);
+  const de = await html('/src/screens/Compliance.tsx', 'ComplianceScreenView', { worldId: id, initial: await get<ComplianceView>(await login('OWNER', 'de'), api(id, 'compliance')) }, 'de');
+  for (const text of ['Omnibus: vorheriger Preis eines Rabatts', 'Angekündigte Rabatte', 'Was dieses Modul nicht prüfen kann']) assert.ok(de.includes(text), text);
 });

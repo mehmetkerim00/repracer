@@ -38,6 +38,11 @@ export const memoryStoreFactory: PricingStoreFactory = async (seed, world) => {
   const competitorSources = channel === 'AMAZON' ? AMAZON_DESCRIPTOR.competitorSources : KAUFLAND_DESCRIPTOR.competitorSources;
   const store = new InMemoryPricingStore({
     ...seed, channel, region: world.account.region ?? null, competitorSources: [...(competitorSources ?? [])],
+    // Р-123 (шаг 24): часовой пояс витрины — из описания канала (пусто — пояс не установлен, Р-65)
+    marketplaces: Object.fromEntries([
+      ...[...KAUFLAND_DESCRIPTOR.marketplaces, ...AMAZON_DESCRIPTOR.marketplaces].map((mk) => [mk.code, { currency: mk.currency, basis: mk.priceBasis, timeZone: mk.timeZone || null }]),
+      ...Object.entries(seed.marketplaces ?? {}).map(([code, mk]) => [code, { ...mk, timeZone: mk.timeZone ?? ([...KAUFLAND_DESCRIPTOR.marketplaces, ...AMAZON_DESCRIPTOR.marketplaces].find((x) => x.code === code)?.timeZone || null) }]),
+    ]),
     // OQ-173: доступность стратегии — по каналу аккаунта каждой единицы записи
     competitorSourcesByChannel: { KAUFLAND: [...(KAUFLAND_DESCRIPTOR.competitorSources ?? [])], AMAZON: [...(AMAZON_DESCRIPTOR.competitorSources ?? [])] },
   }, { tenantId: world.tenantId });

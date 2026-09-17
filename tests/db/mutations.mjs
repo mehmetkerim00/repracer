@@ -624,6 +624,26 @@ export const STEP24_ROWS = [
     ],
   },
   {
+    row: 'Р-123', invariant: 'объявленная прежняя цена скидки не выше наименьшей цены оффера за 30 суток витрины; проверку вычисляет база; объявления не переписываются',
+    mutations: [
+      m(dropTrigger('a1_discount_announcement_guard', 'tenant_data.discount_announcement'),
+        smoke('discount announced with a prior price above the lowest price of 30 days (Omnibus, Р-123)'), smoke('discount announced in a currency other than the currency of the offer (Р-71, Р-123)'),
+        smoke('the Omnibus check of a discount announcement is not computed by the database (Р-123)', 'the Omnibus check of a discount announcement is computed by the database (Р-123)')),
+      m(replaceInFunction('tenant_data.discount_announcement_guard()', 'IF p.lowest_minor IS NOT NULL AND NEW.reference_price_minor > p.lowest_minor THEN', 'IF false THEN'),
+        smoke('discount announced with a prior price above the lowest price of 30 days (Omnibus, Р-123)')),
+      m(replaceInFunction('tenant_data.discount_announcement_guard()', 'IF scope IS NULL OR scope.currency IS DISTINCT FROM NEW.currency THEN', 'IF false THEN'),
+        smoke('discount announced in a currency other than the currency of the offer (Р-71, Р-123)')),
+      m(replaceInFunction('tenant_data.omnibus_lowest_prior_price(uuid,uuid,timestamp with time zone)', "AND d.price_day < wfrom", 'AND false'),
+        smoke('the Omnibus check of a discount announcement is not computed by the database (Р-123)', 'the Omnibus check of a discount announcement is computed by the database (Р-123)')),
+      m(dropConstraint('discount_announcement_prices', 'tenant_data.discount_announcement'), smoke('discount whose sale price is not below the prior price (Р-123)')),
+      m(dropConstraint('discount_announcement_period', 'tenant_data.discount_announcement'), smoke('discount ending before it starts (Р-123)')),
+      m(dropTrigger('zz_append_only', 'tenant_data.discount_announcement'), smoke('append-only tenant_data.discount_announcement')),
+      m(dropTrigger('zz_no_truncate', 'tenant_data.discount_announcement'), smoke('truncate tenant_data.discount_announcement')),
+      m(dropTrigger('a0_admin_write_person_insert', 'tenant_data.discount_announcement'), verify('tenant_data\\.discount_announcement: administrative INSERT without the person guard')),
+      m(dropTrigger('zz_admin_write_audit_insert', 'tenant_data.discount_announcement'), verify('tenant_data\\.discount_announcement: administrative INSERT is not written to the audit log')),
+    ],
+  },
+  {
     row: 'OQ-169', invariant: 'единице записи назначается только действующая версия стратегии',
     mutations: [
       m(replaceInFunction('tenant_data.write_scope_strategy_guard()', "AND status IS DISTINCT FROM 'ACTIVE' THEN", 'AND false THEN'),

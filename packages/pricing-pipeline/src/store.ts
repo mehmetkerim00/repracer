@@ -1,3 +1,4 @@
+import type { OmnibusPriorPrice } from '@repracer/pricing-model';
 import type { DecisionExplanation, DistrustRef, ExplanationIntentColumns, SanitySummary, FxFailureCause, FxQuote, HaltRef, HaltReasonCode, MemberRole, PriceIntentDraft as IntentDraft, StopRef, StopScope } from '@repracer/pricing-model';
 import type { ExplanationRuleset, StopScope as AuditStopScope } from '@repracer/pricing-model';
 import type { CompetitorQuery, CompetitorSnapshot, FieldWrite, Instant, Money, OfferIdentity, PriceBasis, PricingHealthObservation, WriteOutcome } from '@repracer/channel-port';
@@ -313,6 +314,49 @@ export interface StrategySaveInput {
   expected?: Array<{ writeScopeId: string; strategyId: string | null; version: number | null }>;
 }
 
+/** Р-123 (шаг 24): объявление скидки с прежней ценой и проверкой Omnibus на момент объявления */
+export interface DiscountAnnouncementInput {
+  writeScopeId: string;
+  referencePriceMinor: number;
+  salePriceMinor: number;
+  currency: string;
+  startsAt: Instant;
+  endsAt: Instant | null;
+}
+
+export interface DiscountAnnouncementRow extends DiscountAnnouncementInput {
+  announcementId: string;
+  createdAt: Instant;
+  createdByMembershipId: string;
+  /** Проверка на момент объявления — вычислена базой */
+  check: OmnibusPriorPrice;
+}
+
+export type DiscountAnnounceResult =
+  | { status: 'ANNOUNCED'; announcement: DiscountAnnouncementRow }
+  | { status: 'FORBIDDEN' }
+  /** Прежняя цена выше наименьшей цены окна — база отклонила */
+  | { status: 'VIOLATION'; check: OmnibusPriorPrice }
+  | { status: 'INVALID'; cause: 'SCOPE_NOT_FOUND' | 'CURRENCY_MISMATCH' | 'PRICES_INVALID' | 'PERIOD_INVALID' };
+
+/** Р-123: доказательная история цен — сутки витрины с наименьшей, наибольшей, первой и последней ценой, исправления отмечены */
+export interface PriceEvidenceDay {
+  writeScopeId: string;
+  day: string;
+  timeZone: string;
+  currency: string;
+  basis: PriceBasis;
+  minMinor: number;
+  maxMinor: number;
+  firstMinor: number;
+  lastMinor: number;
+  changes: number;
+  /** CLOSED — суточная свёртка (вечно, Р-21); OPEN — сутки не закрыты, из сырья цен */
+  source: 'CLOSED' | 'OPEN';
+  corrected: boolean;
+  correctionReason: string | null;
+}
+
 /** OQ-170 (шаг 24): кто, когда и в каком статусе создал версию стратегии */
 export interface ConsoleStrategyVersionRow {
   strategyId: string;
@@ -410,6 +454,13 @@ export interface PricingStore {
   /** Шаг 21: PREVIEW — те же проверки и действующие границы после правки без сохранения; APPLY — всё или ничего */
   editBounds(tenantId: string, edits: readonly BoundsEditInput[], actor: AdminActor, mode: 'PREVIEW' | 'APPLY'): Promise<BoundsEditResult>;
   saveStrategy(tenantId: string, input: StrategySaveInput, actor: AdminActor): Promise<StrategySaveResult>;
+  /** Р-123 (шаг 24): наименьшая цена за 30 суток витрины до начала скидки — предупреждение до объявления */
+  omnibusCheck(tenantId: string, writeScopeId: string, startsAt: Instant): Promise<OmnibusPriorPrice>;
+  /** Р-123: объявление скидки — только человек с правом MANAGE_PRICING; нарушение отклоняет база (0087) */
+  announceDiscount(tenantId: string, input: DiscountAnnouncementInput, actor: AdminActor): Promise<DiscountAnnounceResult>;
+  discountAnnouncements(tenantId: string): Promise<DiscountAnnouncementRow[]>;
+  /** Р-123: доказательная история цен за период (сутки витрины, границы включительно) */
+  priceEvidence(tenantId: string, range: { from: string; to: string; writeScopeIds?: string[] }): Promise<PriceEvidenceDay[]>;
   /** OQ-169: существующая версия — единицам записи, без новой версии; те же проверки базы, что при сохранении */
   assignStrategyVersion(tenantId: string, input: StrategyAssignInput, actor: AdminActor): Promise<StrategySaveResult>;
   unassignStrategy(tenantId: string, input: StrategyUnassignInput, actor: AdminActor): Promise<StrategyUnassignResult>;

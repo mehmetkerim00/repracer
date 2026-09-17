@@ -13,3 +13,4 @@ export { currentStrategies, fingerprint, parseStrategyDraft, previewToken, strat
 export { boundsDiffView, boundsPlanToken, expandBoundsEdit, parseAmountInput, parseBoundsEditRequest, parsePercentInput, type BoundAdjust, type BoundsDiffView, type BoundsEditRequest, type BoundsRequestProblem, type DiffFlag, type DiffRow } from './bounds-edit.ts';
 export { FEED_PAGE_MAX, FEED_PERIODS_DAYS, FEED_STATUS_GROUPS, parseFeedQuery, priceFeed, type FeedItem, type FeedQuery, type FeedStatusGroup, type PriceFeedView } from './price-feed.ts';
 export { dangerousReport, REPORT_PERIODS_DAYS, type DangerousItem, type DangerousReportView } from './dangerous-report.ts';
+export { complianceView, discountCheckView, priceEvidenceCsv, type ComplianceRow, type ComplianceView, type DiscountCheckView } from './compliance.ts';

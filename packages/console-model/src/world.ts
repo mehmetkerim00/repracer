@@ -52,6 +52,8 @@ export const GAP_CODES = [
   'DANGEROUS_REPORT_WINDOW', 'DANGEROUS_THRESHOLD', 'FLOOR_HOLD_TARGET_WINDOW',
   // Шаг 23: три вида остановки, ценообразование канала, стратегии и лента
   'DISTRUST_DETAILS', 'CHANNEL_PRICING_OFFERS_WITHOUT_SCOPE', 'PRICING_HEALTH_ISSUES', 'POSITION_STRATEGY',
+  // Шаг 24: Omnibus
+  'OMNIBUS_OUTSIDE_PRICES', 'OMNIBUS_TIME_ZONE_TO_VERIFY',
 ] as const;
 export type GapCode = (typeof GAP_CODES)[number];
 

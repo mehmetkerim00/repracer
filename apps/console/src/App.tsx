@@ -4,6 +4,7 @@ import type { SessionView, StandToken, WorldSummary } from './api-types.ts';
 import { requestJson, setAccessToken, useResource, type Resource } from './api.ts';
 import { Badge, ErrorBox, errorText, href, Load, MessagesContext, useMessages } from './components.tsx';
 import { BoundsScreen } from './screens/Bounds.tsx';
+import { ComplianceScreen } from './screens/Compliance.tsx';
 import { DangerousScreen } from './screens/Dangerous.tsx';
 import { FeedScreen } from './screens/Feed.tsx';
 import { StrategiesScreen } from './screens/Strategies.tsx';
@@ -24,7 +25,7 @@ export function parseHash(hash: string): Route {
   return { worldId: parts[1], screen: parts[2] ?? 'products', param: parts[3] ?? null };
 }
 
-const SCREENS = ['products', 'decisions', 'strategies', 'feed', 'rejected', 'dangerous', 'bounds', 'stop'] as const;
+const SCREENS = ['products', 'decisions', 'strategies', 'feed', 'rejected', 'dangerous', 'bounds', 'compliance', 'stop'] as const;
 
 /** Вход [Р-78]: у поставщика identity; на стенде — имитатор с синтетическими пользователями. Паролей у нас нет */
 export function LoginView({ simulator, error, busy, onSignIn }: {
@@ -98,6 +99,7 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
                 : route.screen === 'strategies' ? <StrategiesScreen worldId={world.id} />
                   : route.screen === 'feed' ? <FeedScreen worldId={world.id} />
                     : route.screen === 'dangerous' ? <DangerousScreen worldId={world.id} days={[1, 7, 30].includes(Number(route.param)) ? Number(route.param) : 7} />
+                      : route.screen === 'compliance' ? <ComplianceScreen worldId={world.id} />
                 : <p className="error">{m.ui.app.screenNotFound}</p>}
     </>
   );

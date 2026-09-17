@@ -1,11 +1,12 @@
+import { createHash } from 'node:crypto';
 import { createServer, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import {
-  boundsDiffView, boundsView, can, currentStrategies, dangerousReport, decisionList, decisionTrace, describe, expandBoundsEdit, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, scopeById, unitOf,
+  boundsDiffView, boundsView, can, complianceView, currentStrategies, discountCheckView, dangerousReport, decisionList, decisionTrace, describe, expandBoundsEdit, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, priceEvidenceCsv, scopeById, unitOf,
   parseStrategyDraft, planStop, previewToken, priceFeed, productList, rejectedView, REPORT_PERIODS_DAYS, stopView, strategiesView, strategyPreviewView,
   type Locale, type Messages, type StandWorld, type StopTarget, type StrategyDraft, type Viewer,
 } from '@repracer/console-model';
-import type { StrategyPreview } from '@repracer/pricing-pipeline';
+import type { DiscountAnnouncementInput, StrategyPreview } from '@repracer/pricing-pipeline';
 import {
   buildStandWorlds, memoryStandDirectory, pgStandJoinMember, pgStandUsers, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_EMAILS, STAND_ISSUER, type LiveWorld,
 } from '@repracer/contract-tests/stand';
@@ -96,6 +97,24 @@ function scopeIds(raw: unknown): string[] | null {
 function draftProblemsText(problems: ReadonlyArray<{ field: string; code: string }>, m: Messages): string {
   const t = m.ui.strategies;
   return problems.map((p) => `${(t.fields as Record<string, string>)[p.field] ?? (p.field === 'name' ? t.name : p.field === 'type' ? t.type : p.field)}: ${t.problems[p.code as keyof typeof t.problems]}`).join('; ');
+}
+
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** Р-123: выгрузка доказательной истории — не больше 18 месяцев за запрос */
+export const EVIDENCE_MAX_DAYS = 550;
+
+/** Р-123: объявление скидки из тела запроса; неверное — null (ответ 400) */
+function parseDiscount(world: StandWorld, raw: unknown): DiscountAnnouncementInput | null {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const scope = typeof r.writeScopeId === 'string' ? scopeById(world, r.writeScopeId) : undefined;
+  const amount = (v: unknown) => (typeof v === 'number' && Number.isSafeInteger(v) && v > 0 ? v : null);
+  const instant = (v: unknown) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? new Date(v).toISOString() : null);
+  const reference = amount(r.referencePriceMinor);
+  const sale = amount(r.salePriceMinor);
+  const startsAt = instant(r.startsAt);
+  const endsAt = r.endsAt === null || r.endsAt === undefined || r.endsAt === '' ? null : instant(r.endsAt);
+  if (!scope || reference === null || sale === null || startsAt === null || (r.endsAt && endsAt === null)) return null;
+  return { writeScopeId: scope.writeScopeId, referencePriceMinor: reference, salePriceMinor: sale, currency: scope.currency, startsAt, endsAt };
 }
 
 /** Шаг 23: устаревший экран различий — какой оффер и какие границы у него сейчас */
@@ -212,8 +231,50 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           if (!(REPORT_PERIODS_DAYS as readonly number[]).includes(days)) return fail(400, 'BAD_PERIOD', s.badRequest);
           return ok(dangerousReport(world, days, m));
         }
+        // Р-123: отчёт по объявленным скидкам — каждая проверяется заново по текущей истории цен (исправления свёртки, поздние цены)
+        case 'compliance': {
+          if (param === null) {
+            const announcements = await live.store.discountAnnouncements(world.tenantId);
+            const rechecks = new Map(await Promise.all(announcements.map(async (a) => [a.announcementId, await live.store.omnibusCheck(world.tenantId, a.writeScopeId, a.startsAt)] as const)));
+            return ok(complianceView(world, announcements, rechecks, m));
+          }
+          if (param === 'evidence') {
+            const from = url.searchParams.get('from') ?? '';
+            const to = url.searchParams.get('to') ?? '';
+            const ws = url.searchParams.get('writeScopeId');
+            if (!DAY_RE.test(from) || !DAY_RE.test(to) || from > to || (ws && !scopeById(world, ws))) return fail(400, 'BAD_EVIDENCE_QUERY', s.badRequest);
+            if ((Date.parse(to) - Date.parse(from)) / 86_400_000 + 1 > EVIDENCE_MAX_DAYS) return fail(400, 'EVIDENCE_TOO_LONG', s.evidenceTooLong(EVIDENCE_MAX_DAYS));
+            const days = await live.store.priceEvidence(world.tenantId, { from, to, ...(ws ? { writeScopeIds: [ws] } : {}) });
+            const csv = priceEvidenceCsv(world, days);
+            return ok({ filename: `price-evidence_${from}_${to}.csv`, csv, sha256: createHash('sha256').update(csv).digest('hex'), days: days.length });
+          }
+          return fail(404, 'NOT_FOUND', s.notFound);
+        }
         default: return fail(404, 'NOT_FOUND', s.notFound);
       }
+    }
+
+    // Р-123: предупреждение «эта скидка нарушит правило» до записи — только чтение, права на просмотр достаточно
+    if (screen === 'compliance' && param === 'check') {
+      const input = parseDiscount(world, body);
+      if (!input) return fail(400, 'BAD_DISCOUNT', s.badDiscount);
+      const check = await live.store.omnibusCheck(world.tenantId, input.writeScopeId, input.startsAt);
+      return ok(discountCheckView(world, input.writeScopeId, input.referencePriceMinor, check, m));
+    }
+
+    // Р-123: объявление скидки — база проверяет правило сама и хранит проверку; нарушение — отказ, не предупреждение
+    if (screen === 'compliance' && param === 'announce') {
+      if (!can(viewer.role, 'MANAGE_PRICING')) return fail(403, 'FORBIDDEN', s.forbidden);
+      if (body.confirmed !== true) return fail(400, 'NOT_CONFIRMED', s.notConfirmed);
+      const input = parseDiscount(world, body);
+      if (!input) return fail(400, 'BAD_DISCOUNT', s.badDiscount);
+      const result = await live.store.announceDiscount(world.tenantId, input, { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) });
+      if (result.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
+      if (result.status === 'VIOLATION') return fail(400, 'OMNIBUS_VIOLATION', discountCheckView(world, input.writeScopeId, input.referencePriceMinor, result.check, m)!.headline);
+      if (result.status === 'INVALID') return fail(400, result.cause, s.badDiscount);
+      const announcements = await live.store.discountAnnouncements(world.tenantId);
+      const rechecks = new Map(await Promise.all(announcements.map(async (a) => [a.announcementId, await live.store.omnibusCheck(world.tenantId, a.writeScopeId, a.startsAt)] as const)));
+      return ok({ message: m.ui.compliance.announced, compliance: complianceView(await live.view(viewer), announcements, rechecks, m) });
     }
     if (req.method !== 'POST') return fail(405, 'METHOD', s.method);
 
