@@ -644,7 +644,7 @@ export const STEP25_B_ROWS = [
     row: 'риск 28', invariant: 'цена, которую канал не применил, отмечается и не входит ни в суточную свёртку, ни в окно Omnibus',
     mutations: [
       m(dropTrigger('a_price_history_not_applied_guard', 'tenant_data.price_history_not_applied'), smoke('a price of an applied write marked as not applied (risk 28)')),
-      m(replaceInFunction('tenant_data.price_history_not_applied_guard()', "AND w.final_status = 'NOT_APPLIED'", ''), smoke('a price of an applied write marked as not applied (risk 28)')),
+      m(replaceInFunction('tenant_data.price_history_not_applied_guard()', "AND w.final_status = 'NOT_APPLIED'", ''), smoke('a price of a write the channel applied marked as not applied (risk 28)')),
       m(dropTrigger('b_price_history_mark_not_applied', 'tenant_data.channel_write_history'),
         smoke('a price write the channel did not apply is not marked (risk 28)', 'a price write the channel did not apply is marked (risk 28)')),
       m(replaceInFunction('tenant_data.omnibus_raw_prices(uuid,uuid,text,timestamp with time zone)', 'na.price_history_id = h.price_history_id)', 'na.price_history_id = h.price_history_id AND false)'),
