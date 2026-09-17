@@ -658,8 +658,7 @@ export const STEP24_ROWS = [
         smoke('a polled snapshot counts as a delivered notification (Р-121)', 'a polled snapshot does not count as a delivered notification (Р-121)')),
       m(replaceInFunction('channel_data.review_notification_loss(uuid,uuid,timestamp with time zone)', 'AND c.due_at <= v_at', ''),
         smoke('a loss check is decided before its due time (Р-121)', 'a loss check is not decided before its due time (Р-121)')),
-      m(replaceInFunction('channel_data.review_notification_loss(uuid,uuid,timestamp with time zone)', 'CASE WHEN p.competitor_snapshot_id IS NULL THEN', 'CASE WHEN true THEN'),
-        smoke('a notification delivered before the due time does not resolve a loss check (Р-121)', 'a notification delivered before the due time resolves a loss check as delayed (Р-121)')),
+      // Выбор вердикта в теле функции своей мутации не имеет: «потеря» при найденном уведомлении отклоняет notification_loss_verdict_evidence (Р-104)
       m('GRANT INSERT ON channel_data.notification_loss_verdict TO repracer_admin', verify('channel_data\\.notification_loss_verdict: administrative INSERT without the person guard')),
       m('GRANT INSERT ON channel_data.notification_loss_verdict TO repracer_app', smoke('path sets a notification loss verdict itself (Р-121)'), pathRight('channel_data.notification_loss_verdict', 'INSERT')),
       m(dropTrigger('zz_append_only', 'channel_data.notification_loss_check'), smoke('append-only channel_data.notification_loss_check')),
