@@ -11,8 +11,12 @@ import type { ReconciliationCompared } from './store.ts';
  * getCompetitiveSummary — наименьшие предложения без победителя Buy Box, AMZ_C11).
  */
 
-/** Срок уведомления после опроса по умолчанию. Задержка buy_box_changed (K-10) и ANY_OFFER_CHANGED (A-08) не документирована — консервативно */
+/**
+ * Срок уведомления после опроса по умолчанию — ДОПУЩЕНИЕ (OQ-175): задержка buy_box_changed (K-10) и ANY_OFFER_CHANGED (A-08) не
+ * документирована и не замерена. Debounce канала дольше срока даёт ложные подозрения (симулятор шага 24). Допущение называет алерт
+ */
 export const DEFAULT_LOSS_GRACE_SECONDS = 900;
+export const LOSS_GRACE_BASIS = 'ASSUMPTION (OQ-175): notification delay of the channel is not documented or measured';
 
 export interface HeldState { observedAt: Instant; buyboxMinor: number | null; lowestMinor: number | null }
 

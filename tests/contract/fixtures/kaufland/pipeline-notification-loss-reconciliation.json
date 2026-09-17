@@ -850,7 +850,10 @@
       {
         "code": "NOTIFICATION_LOSS_SUSPECTED",
         "severity": "CRITICAL",
-        "count": 1
+        "count": 1,
+        "details": {
+          "graceBasis": "ASSUMPTION (OQ-175): notification delay of the channel is not documented or measured"
+        }
       }
     ],
     "pipeline": {

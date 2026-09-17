@@ -78,3 +78,39 @@ test('without a demand assumption the backtest reports no profit', async () => {
   const margin = report.strategy.perScope[0]!.avgMarginBp!;
   assert.ok(margin >= 2000 && margin < 2010, `margin ${margin}`);
 });
+
+test('Р-125: the default backtest runs a sample of the products giving most revenue; the full catalog runs as a resumable background job with the same results', async () => {
+  const { MemoryCatalogJobStore, runCatalogJob, runSampleBacktest, selectBacktestSample, BATCH_LIE } = await import('./backtest/catalog.ts');
+  // Парето: 10 товаров, выручка 1000, 500, 200, 100×7 = 2400; пять первых — 79 %, шесть — 83 % (минимальная выборка — 2 товара)
+  const revenue = [1000, 500, 200, 100, 100, 100, 100, 100, 100, 100].map((r, i) => ({ writeScopeId: `ws-${i}`, channelProductRef: String(362009000 + i), revenueMinor: r }));
+  const eighty = selectBacktestSample(revenue, 'ORDER_LINES', { revenueShare: 0.8, maxProducts: 200, minProducts: 2 });
+  assert.deepEqual([eighty.writeScopeIds, eighty.revenueCoverageBp, eighty.cappedBeforeShare], [['ws-0', 'ws-1', 'ws-2', 'ws-3', 'ws-4', 'ws-5'], 8_333, false]);
+  const capped = selectBacktestSample(revenue, 'PRICE_ASSUMPTION', { revenueShare: 0.8, maxProducts: 2, minProducts: 1 });
+  assert.deepEqual([capped.writeScopeIds.length, capped.revenueCoverageBp, capped.cappedBeforeShare, capped.source], [2, 6_250, true, 'PRICE_ASSUMPTION']);
+
+  // Четыре товара рынка; выборка — два с наибольшей выручкой; полный каталог — партиями по 2, прерван после первой партии и продолжен
+  const products = [0, 1, 2, 3].map((i) => ({ channelProductRef: String(362008200 + i), historicalSelfPriceMinor: 1990 + i * 100, marketPriceMinor: 1900 + i * 100 }));
+  const market = { seed: 125, marketplace: 'de', currency: 'EUR', from: WINDOW.from, to: WINDOW.to, everyMs: 86_400_000, products, dailyVolatilityBp: 150, promo: { everyDays: 14, days: 2, discountBp: 1500 }, corruptShare: 0 };
+  const scopes = products.map((p, i): MemorySeedScope => ({
+    ...scope({ type: 'MATCH_BUYBOX', undercutMinor: 5, holdWhenWinning: false, atBound: 'CAP' }), writeScopeId: `ws-cat-${i}`, productId: `prod-cat-${i}`, externalUnitId: String(8200 + i),
+    channelProductRef: p.channelProductRef, currentPriceMinor: p.historicalSelfPriceMinor, minPrice: { amountMinor: Math.round(p.marketPriceMinor * 0.85), id: `min-cat-${i}` },
+    maxPrice: { amountMinor: Math.round(p.marketPriceMinor * 1.3), id: `max-cat-${i}` },
+  }));
+  const { syntheticSnapshots } = await import('./backtest/history.ts');
+  const input = { tenantId: TENANT, channelAccountId: ACCOUNT, scopes, history: (refs: ReadonlySet<string>) => syntheticSnapshots({ ...market, products: products.filter((x) => refs.has(x.channelProductRef)) }), window: WINDOW, now: NOW };
+  const sample = await runSampleBacktest(input, scopes.map((s, i) => ({ writeScopeId: s.writeScopeId, channelProductRef: s.channelProductRef, revenueMinor: (i + 1) * 1000 })), 'PRICE_ASSUMPTION',
+    { revenueShare: 0.6, maxProducts: 200, minProducts: 1 });
+  assert.deepEqual([sample.mode, sample.sample.writeScopeIds], ['SAMPLE', ['ws-cat-3', 'ws-cat-2']]);
+  assert.deepEqual(sample.report.strategy.perScope.map((m) => m.writeScopeId).sort(), ['ws-cat-2', 'ws-cat-3']);
+
+  const store = new MemoryCatalogJobStore();
+  const interrupted = await runCatalogJob('job-1', input, store, { batchProducts: 2, maxBatches: 1 });
+  assert.deepEqual([interrupted.completed, interrupted.batchesDone, interrupted.batchesTotal], [false, 1, 2]);
+  const resumed = await runCatalogJob('job-1', input, store, { batchProducts: 2 });
+  assert.deepEqual([resumed.completed, resumed.batchesDone], [true, 2]);
+  assert.ok(resumed.lies.includes(BATCH_LIE));
+  // Товары независимы (массового сдвига нет): полный каталог по партиям = выборке по тем же товарам
+  const strip = (m: { writeScopeId: string; buyBoxShareBp: number; avgMarginBp: number | null; priceChanges: number }) => [m.writeScopeId, m.buyBoxShareBp, m.avgMarginBp, m.priceChanges];
+  const fromJob = resumed.perScope.filter((m) => m.writeScopeId === 'ws-cat-2' || m.writeScopeId === 'ws-cat-3').map(strip).sort();
+  assert.deepEqual(fromJob, sample.report.strategy.perScope.map(strip).sort());
+});

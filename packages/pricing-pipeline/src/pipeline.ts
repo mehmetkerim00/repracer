@@ -33,7 +33,7 @@ import {
 import { runStrategy, strategyAvailability } from '@repracer/strategy-engine';
 import { channelRefusal, type DispatchStep, type WriteDispatcher } from '@repracer/write-dispatcher';
 import { planPollingTiers } from './polling.ts';
-import { comparedValue, DEFAULT_LOSS_GRACE_SECONDS, reconcile, type HeldState } from './reconciliation.ts';
+import { comparedValue, DEFAULT_LOSS_GRACE_SECONDS, LOSS_GRACE_BASIS, reconcile, type HeldState } from './reconciliation.ts';
 import type {
   HaltSampleObservation,
   InboundNotificationEntry,
@@ -636,6 +636,8 @@ export function createPricingPipeline(deps: PipelineDeps) {
         await emit(ctx, [{ kind: 'alert', code: 'NOTIFICATION_LOSS_SUSPECTED', severity: 'CRITICAL', details: {
           count: lossSuspected.length, marketplaces: [...new Set(lossSuspected.map((v) => v.marketplace))].sort().join(','),
           sample: lossSuspected.slice(0, 5).map((v) => v.channelProductRef).join(','), firstPolledAt: lossSuspected[0]!.pollObservedAt,
+          // OQ-175: срок уведомления — допущение; ложная тревога возможна, если канал задерживает уведомления дольше
+          graceBasis: LOSS_GRACE_BASIS,
         } }]);
       }
       return { delayed: verdicts.length - lossSuspected.length, lossSuspected };

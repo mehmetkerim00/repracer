@@ -72,4 +72,4 @@ export {
 } from './polling.ts';
 export { EXPLANATION_RULESETS } from './dictionary.ts';
 export type { ConsoleAuditRow } from './store.ts';
-export { comparedValue, DEFAULT_LOSS_GRACE_SECONDS, reconcile, rotation, snapshotDigest, type HeldState, type ReconciliationOutcome } from './reconciliation.ts';
+export { comparedValue, DEFAULT_LOSS_GRACE_SECONDS, LOSS_GRACE_BASIS, reconcile, rotation, snapshotDigest, type HeldState, type ReconciliationOutcome } from './reconciliation.ts';
