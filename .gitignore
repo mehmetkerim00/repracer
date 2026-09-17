@@ -49,9 +49,13 @@ __pycache__/
 venv/
 .pytest_cache/
 .mypy_cache/
-# vendor/ — только для зависимостей сборки других языков; снимки спецификаций каналов (vendor/kaufland) хранятся в репозитории.
+# vendor/ — только для зависимостей сборки других языков; снимки спецификаций каналов и страниц документации хранятся в репозитории.
+# vendor/amazon, vendor/aws и vendor/ebay были вне git с шага 22: тест шага 25 по снимку Amazon упал в CI (файлов нет).
 vendor/*
 !vendor/kaufland/
+!vendor/amazon/
+!vendor/aws/
+!vendor/ebay/
 
 # --- Infrastructure ---
 .terraform/
