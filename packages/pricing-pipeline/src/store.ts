@@ -223,6 +223,11 @@ export interface EvaluationCommit {
   now: Instant;
   snapshot?: SnapshotOutcome;
   decisions: DecisionToCommit[];
+  /**
+   * OQ-171 (шаг 24): уведомление канала, из которого снимок, — в журнал обработанных в той же транзакции. Уже записано — ничего не
+   * фиксируется, итог DUPLICATE_NOTIFICATION (повтор доставки, в том числе одновременной)
+   */
+  notification?: InboundNotificationEntry;
 }
 
 export interface CommittedDecision {
@@ -241,7 +246,9 @@ export type EvaluationCommitResult =
    * Ничего не записано: контекст решения изменился (BOUNDS_VERSION_CHANGED) или БД отклонила значение при записи
    * (BELOW_MIN_PRICE, ABOVE_MAX_PRICE, CHANNEL_HALTED). Оценка повторяется с новым контекстом.
    */
-  | { status: 'CONTEXT_CHANGED'; writeScopeId: string; reason: Reason };
+  | { status: 'CONTEXT_CHANGED'; writeScopeId: string; reason: Reason }
+  /** OQ-171: уведомление уже обработано — транзакция откатана */
+  | { status: 'DUPLICATE_NOTIFICATION' };
 
 /** Состояние единицы после итога записи — в той же транзакции */
 export interface DispatchRecorded {
@@ -301,12 +308,42 @@ export interface StrategySaveInput {
   expected?: Array<{ writeScopeId: string; strategyId: string | null; version: number | null }>;
 }
 
+/** OQ-170 (шаг 24): кто, когда и в каком статусе создал версию стратегии */
+export interface ConsoleStrategyVersionRow {
+  strategyId: string;
+  version: number;
+  name: string;
+  status: 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
+  createdAt: Instant | null;
+  createdByMembershipId: string | null;
+}
+
+/** OQ-169 (шаг 24): назначение существующей версии без новой — после превью её параметров */
+export interface StrategyAssignInput {
+  strategyId: string;
+  version: number;
+  assignTo: string[];
+  expected?: Array<{ writeScopeId: string; strategyId: string | null; version: number | null }>;
+}
+
+/** OQ-169: снять стратегию с единиц записи — только при выключенном репрайсинге (движку нужна стратегия, write_scope_engine_has_strategy) */
+export interface StrategyUnassignInput {
+  writeScopeIds: string[];
+  expected?: Array<{ writeScopeId: string; strategyId: string | null; version: number | null }>;
+}
+
+export type StrategyUnassignResult =
+  | { status: 'UNASSIGNED'; writeScopeIds: string[] }
+  | { status: 'FORBIDDEN' }
+  | { status: 'CONFLICT'; writeScopeId: string }
+  | { status: 'INVALID'; cause: 'SCOPE_NOT_FOUND' | 'REPRICING_ENABLED'; writeScopeId?: string };
+
 export type StrategySaveResult =
   | { status: 'SAVED'; strategy: StrategyDefinition; assigned: string[] }
   | { status: 'FORBIDDEN' }
   | { status: 'CONFLICT'; writeScopeId: string }
   /** STRATEGY_UNAVAILABLE — канал не даёт нужных данных конкурентов [Р-39]; CHANNEL_PRICING_ACTIVE — у оффера ценообразование канала [Р-120] */
-  | { status: 'INVALID'; cause: 'STRATEGY_NOT_FOUND' | 'SCOPE_NOT_FOUND' | 'NAME_REQUIRED' | 'STRATEGY_UNAVAILABLE' | 'CHANNEL_PRICING_ACTIVE'; writeScopeId?: string };
+  | { status: 'INVALID'; cause: 'STRATEGY_NOT_FOUND' | 'SCOPE_NOT_FOUND' | 'NAME_REQUIRED' | 'STRATEGY_UNAVAILABLE' | 'CHANNEL_PRICING_ACTIVE' | 'VERSION_NOT_ACTIVE'; writeScopeId?: string };
 
 /** Р-120: наблюдение собственного ценообразования канала у оффера */
 export interface OfferChannelPricingObservation {
@@ -368,10 +405,13 @@ export interface PricingStore {
   /** Шаг 21: PREVIEW — те же проверки и действующие границы после правки без сохранения; APPLY — всё или ничего */
   editBounds(tenantId: string, edits: readonly BoundsEditInput[], actor: AdminActor, mode: 'PREVIEW' | 'APPLY'): Promise<BoundsEditResult>;
   saveStrategy(tenantId: string, input: StrategySaveInput, actor: AdminActor): Promise<StrategySaveResult>;
+  /** OQ-169: существующая версия — единицам записи, без новой версии; те же проверки базы, что при сохранении */
+  assignStrategyVersion(tenantId: string, input: StrategyAssignInput, actor: AdminActor): Promise<StrategySaveResult>;
+  unassignStrategy(tenantId: string, input: StrategyUnassignInput, actor: AdminActor): Promise<StrategyUnassignResult>;
   /** Р-120: наблюдения при обнаружении офферов — до назначения стратегии; назначение по действующему наблюдению отклоняет БД (0082) */
   recordOfferChannelPricing(tenantId: string, channelAccountId: string, observations: readonly OfferChannelPricingObservation[]): Promise<number>;
   /** Шаг 23: PRICING_HEALTH — в решение не входит, состояние оффера для продавца */
-  recordPricingHealth(tenantId: string, channelAccountId: string, health: PricingHealthObservation): Promise<void>;
+  recordPricingHealth(tenantId: string, channelAccountId: string, health: PricingHealthObservation, notification?: InboundNotificationEntry): Promise<'RECORDED' | 'DUPLICATE_NOTIFICATION'>;
   /** Шаг 23: журнал обработанных уведомлений тенанта — повтор доставки из очереди не обрабатывается второй раз */
   wasNotificationProcessed(tenantId: string, channelAccountId: string, notificationId: string): Promise<boolean>;
   markNotificationProcessed(tenantId: string, entry: InboundNotificationEntry): Promise<void>;
@@ -551,8 +591,10 @@ export interface ConsoleState {
   members: ConsoleMemberRow[];
   /** Справочники слепка [Р-75]: версии стратегий, на которые ссылаются решения, наборы правил и профили Gate */
   strategies: StrategyDefinition[];
-  /** Шаг 23: имя стратегии, данное человеком при сохранении (последняя версия); стратегии посева имени не имеют */
-  strategyNames: Array<{ strategyId: string; name: string }>;
+  /**
+   * Шаг 23: имя стратегии; шаг 24 (OQ-170): автор, момент и статус каждой версии. Стратегии посева в памяти этих данных не имеют
+   */
+  strategyVersions: ConsoleStrategyVersionRow[];
   explanationRulesets: ExplanationRuleset[];
   audit: ConsoleAuditRow[];
 }

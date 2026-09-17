@@ -223,6 +223,11 @@ export interface InboundDelivery {
   headers: Readonly<Record<string, string>>;
   rawBody: string;
   receivedAt: Instant;
+  /**
+   * Уведомление очереди канала (шаг 24, OQ-171): идентификатор для журнала обработанных — путь решения записывает его в той же транзакции,
+   * что снимок и решения. Вебхуку без идентификатора уведомления не задаётся
+   */
+  notification?: { notificationId: string; notificationType: string; eventTime: Instant | null };
 }
 
 /**

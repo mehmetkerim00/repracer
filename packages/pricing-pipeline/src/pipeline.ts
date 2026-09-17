@@ -33,6 +33,7 @@ import { runStrategy, strategyAvailability } from '@repracer/strategy-engine';
 import { channelRefusal, type DispatchStep, type WriteDispatcher } from '@repracer/write-dispatcher';
 import type {
   HaltSampleObservation,
+  InboundNotificationEntry,
   CommittedDecision,
   DecisionToCommit,
   DispatchRecorded,
@@ -97,6 +98,8 @@ export interface SnapshotReport {
   divergenceCaseId?: string;
   engineInvocations: number;
   scopes: ScopeReport[];
+  /** OQ-171: уведомление записано в журнал в транзакции снимка или оказалось повтором (ничего не записано) */
+  notification?: 'RECORDED' | 'DUPLICATE';
 }
 
 /** Превью стратегии до сохранения (шаг 21): что предложила бы стратегия и что решил бы Gate, без фиксации */
@@ -319,7 +322,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
    */
   async function commitWithRetry<T extends { commit: EvaluationCommit; effects: Effect[]; reports: ScopeReport[] }>(
     ctx: AdapterCallContext, build: () => Promise<T>,
-  ): Promise<{ attempt: T; committed: CommittedDecision[]; rejectedSnapshotId: string | null; divergenceCaseId: string | null } | null> {
+  ): Promise<{ attempt: T; committed: CommittedDecision[]; rejectedSnapshotId: string | null; divergenceCaseId: string | null } | 'DUPLICATE_NOTIFICATION' | null> {
     for (let attempt = 1; ; attempt++) {
       const built = await build();
       let result;
@@ -330,6 +333,8 @@ export function createPricingPipeline(deps: PipelineDeps) {
         await emit(ctx, [{ kind: 'alert', code: 'PRICING_COMMIT_FAILED', severity: 'CRITICAL', details: { error: String((error as Error).message).slice(0, 300) } }]);
         return null;
       }
+      // OQ-171: уведомление уже обработано — транзакция откатана, ничего не записано
+      if (result.status === 'DUPLICATE_NOTIFICATION') return 'DUPLICATE_NOTIFICATION';
       if (result.status === 'COMMITTED') {
         if (attempt > 1) for (const r of built.reports) if (r.decision) r.boundsRetries = attempt - 1;
         return { attempt: built, committed: result.decisions, rejectedSnapshotId: result.rejectedSnapshotId, divergenceCaseId: result.divergenceCaseId };
@@ -350,6 +355,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
       let fallback = null;
       if (built.commit.snapshot) {
         const snapshotOnly = await store.commitEvaluation(ctx.tenantId, { ...built.commit, decisions: [] });
+        if (snapshotOnly.status === 'DUPLICATE_NOTIFICATION') return 'DUPLICATE_NOTIFICATION';
         if (snapshotOnly.status === 'COMMITTED') fallback = snapshotOnly;
       }
       await emit(ctx, [...built.effects.filter((e) => e.kind === 'log'), ...effects]);
@@ -357,7 +363,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
     }
   }
 
-  async function processSnapshot(ctx: AdapterCallContext, snapshot: CompetitorSnapshot): Promise<SnapshotReport> {
+  async function processSnapshot(ctx: AdapterCallContext, snapshot: CompetitorSnapshot, notification?: InboundNotificationEntry): Promise<SnapshotReport> {
     const key: ProductKey = {
       channelAccountId: ctx.channelAccountId, marketplace: snapshot.marketplace,
       channelProductRef: snapshot.channelProductRef, condition: snapshot.condition,
@@ -377,7 +383,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
       // Р-72: журнал — коды и параметры, без текста
       const effects: Effect[] = verdict.warnings.map((w) => ({ kind: 'log', level: 'WARN', code: `INPUT_SANITY_${w.code}`, message: w.code, details: { channelProductRef: snapshot.channelProductRef } }));
       const snapshotOutcome: SnapshotOutcome = { verdict: verdict.verdict, observedAt: snapshot.observedAt, move: verdict.move };
-      const commit: EvaluationCommit = { key, now, snapshot: snapshotOutcome, decisions: [] };
+      const commit: EvaluationCommit = { key, now, snapshot: snapshotOutcome, decisions: [], ...(notification ? { notification } : {}) };
       scopeReports = [];
 
       if (verdict.verdict !== 'ACCEPT') {
@@ -423,6 +429,13 @@ export function createPricingPipeline(deps: PipelineDeps) {
     });
 
     report.scopes = scopeReports;
+    if (outcome === 'DUPLICATE_NOTIFICATION') {
+      report.scopes = [];
+      report.notification = 'DUPLICATE';
+      await emit(ctx, [{ kind: 'log', level: 'INFO', code: 'NOTIFICATION_DUPLICATE', message: 'NOTIFICATION_DUPLICATE', details: { notificationId: notification?.notificationId ?? null } }]);
+      return report;
+    }
+    if (notification) report.notification = 'RECORDED';
     if (!outcome) return report;
     if (outcome.divergenceCaseId && report.verdict === 'ACCEPT') {
       report.divergenceCaseId = outcome.divergenceCaseId;
@@ -505,11 +518,28 @@ export function createPricingPipeline(deps: PipelineDeps) {
      * Уведомление: снимок с данными — сразу в путь; без данных — опрос ресурса [Р-46]; PRICING_HEALTH (шаг 23) — состояние оффера
      * для продавца и алерт, в решение о цене не входит
      */
-    async processInbound(delivery: InboundDelivery): Promise<{ inbound: InboundResult; snapshots: SnapshotReport[]; pricingHealth: number }> {
+    /**
+     * OQ-171 (шаг 24): уведомление очереди (delivery.notification) записывается в журнал обработанных в той же транзакции, что первый
+     * снимок или состояние PRICING_HEALTH. Повтор — notification DUPLICATE, ничего не записано. Если записать нечего (отказ адаптера,
+     * витрина не подключена), журнал пишется отдельно: решения и снимка, с которыми он должен быть атомарен, нет
+     */
+    async processInbound(delivery: InboundDelivery): Promise<{ inbound: InboundResult; snapshots: SnapshotReport[]; pricingHealth: number; notification: 'RECORDED' | 'DUPLICATE' | 'NONE' }> {
       const inbound = await adapter.handleInbound(delivery);
       const snapshots: SnapshotReport[] = [];
       let pricingHealth = 0;
-      if (inbound.kind !== 'EVENTS') return { inbound, snapshots, pricingHealth };
+      const entry: InboundNotificationEntry | undefined = delivery.notification
+        ? { channelAccountId: delivery.claimed.channelAccountId, ...delivery.notification, receivedAt: delivery.receivedAt }
+        : undefined;
+      let pending = entry;
+      let notification: 'RECORDED' | 'DUPLICATE' | 'NONE' = 'NONE';
+      const finish = async () => {
+        if (pending) {
+          await store.markNotificationProcessed(delivery.claimed.tenantId, pending);
+          notification = 'RECORDED';
+        }
+        return { inbound, snapshots, pricingHealth, notification };
+      };
+      if (inbound.kind !== 'EVENTS') return finish();
       const ctx: AdapterCallContext = {
         tenantId: delivery.claimed.tenantId,
         channelAccountId: delivery.claimed.channelAccountId,
@@ -517,15 +547,27 @@ export function createPricingPipeline(deps: PipelineDeps) {
         deadline: new Date(Date.parse(deps.now()) + 60_000).toISOString(),
       };
       for (const event of inbound.events) {
-        if (event.kind === 'COMPETITOR_SNAPSHOT') snapshots.push(await processSnapshot(ctx, event.snapshot));
-        else if (event.kind === 'RESOURCE_CHANGED' && event.competitorQuery) snapshots.push(...(await pollCompetitors(ctx, [event.competitorQuery])).snapshots);
+        if (event.kind === 'COMPETITOR_SNAPSHOT') {
+          const report = await processSnapshot(ctx, event.snapshot, pending);
+          if (report.notification === 'DUPLICATE') return { inbound, snapshots, pricingHealth, notification: 'DUPLICATE' as const };
+          if (report.notification === 'RECORDED') {
+            pending = undefined;
+            notification = 'RECORDED';
+          }
+          snapshots.push(report);
+        } else if (event.kind === 'RESOURCE_CHANGED' && event.competitorQuery) snapshots.push(...(await pollCompetitors(ctx, [event.competitorQuery])).snapshots);
         else if (event.kind === 'PRICING_HEALTH') {
-          await store.recordPricingHealth(ctx.tenantId, ctx.channelAccountId, event.health);
+          const recorded = await store.recordPricingHealth(ctx.tenantId, ctx.channelAccountId, event.health, pending);
+          if (recorded === 'DUPLICATE_NOTIFICATION') return { inbound, snapshots, pricingHealth, notification: 'DUPLICATE' as const };
+          if (pending) {
+            pending = undefined;
+            notification = 'RECORDED';
+          }
           await emit(ctx, [{ kind: 'alert', code: 'OFFER_PRICING_HEALTH', severity: 'WARNING', details: { marketplace: event.health.marketplace, issueType: event.health.issueType } }]);
           pricingHealth += 1;
         }
       }
-      return { inbound, snapshots, pricingHealth };
+      return finish();
     },
 
     /**
@@ -569,7 +611,8 @@ export function createPricingPipeline(deps: PipelineDeps) {
         const key = { channelAccountId: scope.channelAccountId, marketplace: scope.marketplace, channelProductRef: scope.channelProductRef, condition: scope.condition };
         return { commit: { key, now, decisions: evaluation.toCommit ? [evaluation.toCommit] : [] }, effects, reports: [report] };
       });
-      if (!outcome) return report;
+      // Пересчёт без уведомления: повтора уведомления здесь не бывает
+      if (!outcome || outcome === 'DUPLICATE_NOTIFICATION') return report;
       await emit(ctx, outcome.attempt.effects);
       for (const committed of outcome.committed) await dispatchCommitted(ctx, committed, report);
       return report;

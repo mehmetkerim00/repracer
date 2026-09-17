@@ -1,5 +1,5 @@
 import { EXPLANATION_RULESETS } from './dictionary.ts';
-import type { HaltSampleObservation, HaltSampleReview, ConsoleAuditRow, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation } from './store.ts';
+import type { HaltSampleObservation, HaltSampleReview, ConsoleAuditRow, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation } from './store.ts';
 import { offerIdentityOf, type CompetitorQuery, type CompetitorSourceDescriptor, type FieldWrite, type Instant, type OfferIdentity, type PriceBasis, type PricingHealthObservation, type WriteOutcome } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange, SanityContext } from '@repracer/input-sanity';
 import { assertWriteWithinBounds, NO_GUARDRAILS, type GuardrailSet } from '@repracer/price-gate';
@@ -122,6 +122,11 @@ export interface MemorySeed {
   region?: string | null;
   /** Источники конкурентов канала — как platform.competitor_source: доступность стратегии при сохранении [Р-39, OQ-166] */
   competitorSources?: CompetitorSourceDescriptor[];
+  /**
+   * OQ-173 (шаг 24): источники по каналам — для единиц записи аккаунтов других каналов (seed.accounts). Канал без описания — пустой
+   * список, как канал без строк platform.competitor_source: стратегии по данным конкурентов недоступны
+   */
+  competitorSourcesByChannel?: Partial<Record<'KAUFLAND' | 'AMAZON' | 'EBAY', CompetitorSourceDescriptor[]>>;
   /** Аккаунты других каналов для единиц записи, которые не принадлежат аккаунту мира (посев в PostgreSQL) */
   accounts?: Array<{ channelAccountId: string; channel: 'KAUFLAND' | 'AMAZON' | 'EBAY'; region?: string; marketplaces: string[] }>;
   /** Валюта и база цены витрин без единиц записи; по умолчанию — витрины Kaufland de и at */
@@ -218,6 +223,8 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   private readonly channel: 'KAUFLAND' | 'AMAZON';
   private readonly region: string | null;
   private readonly competitorSources: CompetitorSourceDescriptor[] | null;
+  private readonly competitorSourcesByChannel: Partial<Record<string, CompetitorSourceDescriptor[]>>;
+  private readonly accountChannels = new Map<string, string>();
   /** Р-120: как channel_data.offer_channel_pricing */
   readonly offerChannelPricing: ConsoleOfferChannelPricingRow[] = [];
   readonly pricingHealth: ConsolePricingHealthRow[] = [];
@@ -232,6 +239,17 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   private readonly conflicts: Array<{ writeScopeId: string; bound: 'min' | 'max'; value: SeedBound }>;
   private readonly members: ConsoleMemberRow[];
   readonly moves: Array<{ marketplace: string; productRef: string; evaluatedAt: Instant; moveBp: number; verdict: string; sellerRef: string | null }> = [];
+  /**
+   * Шаг 24 (OQ-161): движения витрины, упорядоченные по времени. Окно сдвига читает только движения внутри окна, а не всю историю:
+   * бэктест на 18 месяцев рос квадратично (77 % времени — полный обход moves при каждой оценке)
+   */
+  private readonly movesByMarketplace = new Map<string, Array<{ at: number; seq: number; move: InMemoryPricingStore['moves'][number] }>>();
+  private moveSeq = 0;
+  /**
+   * Окно сдвига витрины для одного момента оценки: последнее движение каждого товара в окне. Снимки одного момента (каталог в бэктесте)
+   * читают его из кеша; новое движение внутри окна обновляет кеш — тот же итог, что обход движений окна
+   */
+  private readonly windowCache = new Map<string, { nowMs: number; from: number; latest: Map<string, { at: number; seq: number; move: InMemoryPricingStore['moves'][number] }> }>();
   readonly halts: HaltRow[] = [];
   /** Остановки по недоверию каналу [Р-118] — как channel_data.channel_distrust */
   readonly distrusts: ConsoleDistrustRow[] = [];
@@ -242,13 +260,18 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   readonly audit: ConsoleAuditRow[] = [];
   /** Справочник версий стратегий для слепков [Р-75] — как tenant_data.pricing_strategy */
   private readonly strategyVersions = new Map<string, StrategyDefinition>();
-  private readonly strategyNames = new Map<string, string>();
+  /** OQ-170: версии, сохранённые через консоль, — имя, автор, момент; у стратегий посева этих данных нет */
+  private readonly strategyMeta = new Map<string, ConsoleStrategyVersionRow>();
   readonly rejectedSnapshots: Array<RejectedSnapshotRecord & { key: ProductKey; rejectedSnapshotId: string }> = [];
   readonly intents: Array<PriceIntentDraft & { intentId: string }> = [];
   readonly decisions: ConsoleDecisionRow[] = [];
   readonly writes: WriteRow[] = [];
+  /** Шаг 24 (OQ-161): индексы записей по единице и по идентификатору — записи только добавляются, не удаляются */
+  private readonly writesByScope = new Map<string, WriteRow[]>();
+  private readonly writesById = new Map<string, WriteRow>();
   readonly divergenceCases: Array<{ divergenceCaseId: string; writeScopeId: string; expectedMinor: number; observedMinor: number; cause: string; status: string }> = [];
-  private readonly changes: Array<{ writeScopeId: string; at: Instant }> = [];
+  /** Применённые изменения цены по единице записи, по времени — для лимита изменений за час */
+  private readonly changes = new Map<string, number[]>();
   private seq = 0;
 
   constructor(seed: MemorySeed, options: { tenantId?: string } = {}) {
@@ -256,6 +279,8 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     this.channel = seed.channel ?? 'KAUFLAND';
     this.region = this.channel === 'KAUFLAND' ? null : seed.region ?? null;
     this.competitorSources = seed.competitorSources ? [...seed.competitorSources] : null;
+    this.competitorSourcesByChannel = { ...(seed.competitorSourcesByChannel ?? {}) };
+    for (const a of seed.accounts ?? []) this.accountChannels.set(a.channelAccountId, a.channel);
     for (const s of seed.scopes) {
       this.scopes.set(s.writeScopeId, {
         ...s, status: s.status ?? 'ACTIVE', taxRegime: s.taxRegime ?? (s.basis === 'GROSS' ? 'VAT_INCLUDED' : 'SALES_TAX_EXCLUDED'),
@@ -270,7 +295,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     this.conflicts = [...(seed.commitConflicts ?? [])];
     this.members = (seed.members ?? DEFAULT_MEMBERS).map((m) => ({ ...m, userId: m.userId ?? standUserOf(m.membershipId), status: 'ACTIVE' }));
     for (const s of seed.scopes) if (s.strategy) this.rememberStrategy(s.strategy);
-    for (const m of seed.moves ?? []) this.moves.push({ ...m, verdict: 'ACCEPT', sellerRef: m.sellerRef ?? null });
+    for (const m of seed.moves ?? []) this.rememberMove({ ...m, verdict: 'ACCEPT', sellerRef: m.sellerRef ?? null });
     const accountId = seed.scopes[0]?.channelAccountId ?? '';
     for (const h of seed.halts ?? []) {
       const window = h.reviewWindowSeconds ?? 1800;
@@ -353,10 +378,81 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     return { stopId: s.stopId, scope: s.scope, channelAccountId: s.channelAccountId, marketplace: s.marketplace, stoppedAt: s.stoppedAt, stoppedByMembershipId: s.stoppedByMembershipId };
   }
 
+  /**
+   * Шаг 24 (OQ-161): удаление по сроку, как в PostgreSQL (intent 3 дня, решения 30 дней [Р-28], завершённые записи уходят в историю):
+   * строки старше момента cutoff, которые больше не участвуют в решении. Нужна бэктесту на 18 месяцев по каталогу — иначе хранилище в
+   * памяти держит все решения периода. Незавершённые записи, их решения и системные остановки не удаляются.
+   */
+  pruneBefore(cutoff: Instant): { intents: number; decisions: number; writes: number; moves: number; rejectedSnapshots: number } {
+    const at = Date.parse(cutoff);
+    const FINISHED = new Set(['APPLIED', 'SUPERSEDED', 'DISCARDED_STALE', 'BUDGET_EXHAUSTED', 'NOT_APPLIED']);
+    // Строки добавляются по времени: удаляется начало списка до первой строки не старше cutoff; из него остаются строки, которые ещё нужны
+    const removeIf = <T>(list: T[], drop: (x: T) => boolean, old: (x: T) => boolean): number => {
+      let end = 0;
+      while (end < list.length && old(list[end]!)) end++;
+      if (end === 0) return 0;
+      const kept = list.slice(0, end).filter((x) => !drop(x));
+      list.splice(0, end, ...kept);
+      return end - kept.length;
+    };
+    this.windowCache.clear();
+    const writes = removeIf(this.writes, (w) => FINISHED.has(w.status), (w) => Date.parse(w.createdAt) < at);
+    if (writes > 0) {
+      this.writesById.clear();
+      this.writesByScope.clear();
+      for (const w of this.writes) {
+        this.writesById.set(w.channelWriteId, w);
+        this.writesOf(w.writeScopeId).push(w);
+      }
+    }
+    const referenced = new Set(this.writes.map((w) => w.decisionId));
+    const decisions = removeIf(this.decisions, (d) => !referenced.has(d.decisionId), (d) => Date.parse(d.decidedAt) < at);
+    const intentOfDecision = new Set(this.decisions.map((d) => d.intentId));
+    // Меньше строк — дешевле: при удалении по сроку сравниваются только старые строки
+    const intents = removeIf(this.intents, (i) => !intentOfDecision.has(i.intentId), (i) => Date.parse(i.createdAt) < at);
+    const moves = removeIf(this.moves, () => true, (m) => Date.parse(m.evaluatedAt) < at);
+    for (const list of this.movesByMarketplace.values()) removeIf(list, () => true, (m) => m.at < at);
+    for (const list of this.changes.values()) removeIf(list, () => true, (t) => t < at);
+    const rejectedSnapshots = removeIf(this.rejectedSnapshots, () => true, (r) => Date.parse(r.receivedAt) < at);
+    return { intents, decisions, writes, moves, rejectedSnapshots };
+  }
+
+  /** Источники конкурентов канала аккаунта; null — описания каналов в посеве нет (проверка не выполняется, как до шага 23) */
+  private sourcesFor(channelAccountId: string): CompetitorSourceDescriptor[] | null {
+    const channel = this.accountChannels.get(channelAccountId) ?? this.channel;
+    const byChannel = this.competitorSourcesByChannel[channel];
+    if (byChannel) return byChannel;
+    if (channel === this.channel) return this.competitorSources;
+    return this.competitorSources || Object.keys(this.competitorSourcesByChannel).length > 0 ? [] : null;
+  }
+
+  private writesOf(writeScopeId: string): WriteRow[] {
+    let list = this.writesByScope.get(writeScopeId);
+    if (!list) {
+      list = [];
+      this.writesByScope.set(writeScopeId, list);
+    }
+    return list;
+  }
+
+  private scopesByProduct: Map<string, ScopeRow[]> | null = null;
+
+  /** Единицы записи товара аккаунта; единицы создаются только в конструкторе — индекс строится один раз */
+  private scopesOfProduct(channelAccountId: string, key: string): ScopeRow[] {
+    if (!this.scopesByProduct) {
+      this.scopesByProduct = new Map();
+      for (const s of this.scopes.values()) {
+        const k = `${s.channelAccountId}|${productKey(s)}`;
+        this.scopesByProduct.set(k, [...(this.scopesByProduct.get(k) ?? []), s]);
+      }
+    }
+    return this.scopesByProduct.get(`${channelAccountId}|${key}`) ?? [];
+  }
+
   private blocking(row: ScopeRow): { errorCode: string; since: Instant } | null {
     if (row.status === 'ACTIVE') return null;
     // Принятая запись, сверка которой остановлена (D1, Р-115), тоже несёт код: без него продавец не видит своего действия
-    const w = [...this.writes].reverse().find((x) => x.writeScopeId === row.writeScopeId && x.lastErrorCode && (x.status === 'FAILED' || x.status === 'ACCEPTED') && !x.nextAttemptAt);
+    const w = [...this.writesOf(row.writeScopeId)].reverse().find((x) => x.lastErrorCode && (x.status === 'FAILED' || x.status === 'ACCEPTED') && !x.nextAttemptAt);
     return w ? { errorCode: w.lastErrorCode!, since: w.dispatchedAt ?? w.createdAt } : null;
   }
 
@@ -423,13 +519,13 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       channelDistrust: (() => { const d = this.activeDistrust(row.channelAccountId, row.marketplace); return d ? InMemoryPricingStore.distrustRef(d) : null; })(),
       priceStop: stop ? InMemoryPricingStore.stopRef(stop) : null,
       blocking: this.blocking(row),
-      changesInLastHour: (row.changesLastHour ?? 0) + this.changes.filter((c) => c.writeScopeId === row.writeScopeId && Date.parse(c.at) >= since).length,
+      changesInLastHour: (row.changesLastHour ?? 0) + (this.changes.get(row.writeScopeId) ?? []).filter((at) => at >= since).length,
     };
   }
 
   // --- PricingStore: оценка ------------------------------------------------
   async loadEvaluationContext(_tenantId: string, key: ProductKey, now: Instant, shift: ShiftWindow): Promise<EvaluationContext> {
-    const rows = [...this.scopes.values()].filter((s) => s.channelAccountId === key.channelAccountId && productKey(s) === productKey(key));
+    const rows = this.scopesOfProduct(key.channelAccountId, productKey(key));
     const scopes = rows.map((r) => this.scopeEvaluationContext(r, now));
     const primary = scopes.find((s) => s.scope.pricingMode === 'ENGINE') ?? scopes[0] ?? null;
     const state = this.competitorState.get(productKey(key));
@@ -466,23 +562,56 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     return { context: this.scopeEvaluationContext(row, now), snapshot: state?.snapshot ?? null, snapshotRef };
   }
 
+  private rememberMove(m: InMemoryPricingStore['moves'][number]): void {
+    this.moves.push(m);
+    const list = this.movesByMarketplace.get(m.marketplace) ?? [];
+    this.movesByMarketplace.set(m.marketplace, list);
+    // Вставка с сохранением порядка по времени (при равенстве — последним, как «последний записанный побеждает» прежнего обхода)
+    const at = Date.parse(m.evaluatedAt);
+    const entry = { at, seq: this.moveSeq++, move: m };
+    let i = list.length;
+    while (i > 0 && list[i - 1]!.at > at) i--;
+    list.splice(i, 0, entry);
+    const cached = this.windowCache.get(m.marketplace);
+    if (cached && at >= cached.from && at <= cached.nowMs) {
+      const previous = cached.latest.get(m.productRef);
+      if (!previous || previous.at <= at) cached.latest.set(m.productRef, entry);
+    }
+  }
+
   /** Как PgPricingStore: последнее движение каждого товара за окно; в списке — только большие движения, число товаров — отдельно */
   private shiftWindow(marketplace: string, productRef: string, now: Instant, shift: ShiftWindow) {
     const nowMs = Date.parse(now);
     const from = nowMs - shift.windowSeconds * 1000;
-    const latest = new Map<string, InMemoryPricingStore['moves'][number]>();
-    for (const m of this.moves) {
-      const at = Date.parse(m.evaluatedAt);
-      if (m.marketplace !== marketplace || m.productRef === productRef || at < from || at > nowMs) continue;
-      const previous = latest.get(m.productRef);
-      if (!previous || Date.parse(previous.evaluatedAt) <= at) latest.set(m.productRef, m);
+    let cached = this.windowCache.get(marketplace);
+    if (!cached || cached.nowMs !== nowMs || cached.from !== from) {
+      const latest = new Map<string, { at: number; seq: number; move: InMemoryPricingStore['moves'][number] }>();
+      const list = this.movesByMarketplace.get(marketplace) ?? [];
+      // Первое движение позже момента оценки; обход назад до начала окна: первое встреченное движение товара — его последнее
+      let lo = 0;
+      let hi = list.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (list[mid]!.at <= nowMs) lo = mid + 1; else hi = mid;
+      }
+      for (let i = lo - 1; i >= 0 && list[i]!.at >= from; i--) {
+        const e = list[i]!;
+        if (!latest.has(e.move.productRef)) latest.set(e.move.productRef, e);
+      }
+      cached = { nowMs, from, latest };
+      this.windowCache.set(marketplace, cached);
     }
     const up = Math.round(shift.minFactor * 10_000);
     const down = Math.round(10_000 / shift.minFactor);
+    const big: Array<{ at: number; seq: number; move: InMemoryPricingStore['moves'][number] }> = [];
+    for (const e of cached.latest.values()) {
+      if (e.move.productRef !== productRef && (e.move.moveBp >= up || e.move.moveBp <= down)) big.push(e);
+    }
+    // Порядок — от нового к старому, как обход движений окна с конца
+    big.sort((a, b) => b.at - a.at || b.seq - a.seq);
     return {
-      recentMoves: [...latest.values()].filter((m) => m.moveBp >= up || m.moveBp <= down)
-        .map((m) => ({ productRef: m.productRef, evaluatedAt: m.evaluatedAt, moveBp: m.moveBp, sellerRef: m.sellerRef })),
-      windowProducts: latest.size,
+      recentMoves: big.map(({ move: m }) => ({ productRef: m.productRef, evaluatedAt: m.evaluatedAt, moveBp: m.moveBp, sellerRef: m.sellerRef })),
+      windowProducts: cached.latest.size - (cached.latest.has(productRef) ? 1 : 0),
     };
   }
 
@@ -507,6 +636,8 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   }
 
   async commitEvaluation(_tenantId: string, input: EvaluationCommit): Promise<EvaluationCommitResult> {
+    // Как PgPricingStore (OQ-171): уведомление уже в журнале — ничего не фиксируется
+    if (input.notification && this.inboundNotifications.has(`${this.channel}|${input.notification.notificationId}`)) return { status: 'DUPLICATE_NOTIFICATION' };
     // Имитация параллельного изменения границ между чтением и фиксацией
     for (const d of input.decisions) {
       const i = this.conflicts.findIndex((c) => c.writeScopeId === d.context.scope.writeScopeId);
@@ -556,7 +687,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     let divergenceCaseId: string | null = null;
     const s = input.snapshot;
     if (s) {
-      if (s.move) this.moves.push({ marketplace: input.key.marketplace, productRef: s.move.productRef, evaluatedAt: input.now, moveBp: s.move.moveBp, verdict: s.verdict, sellerRef: s.move.sellerRef });
+      if (s.move) this.rememberMove({ marketplace: input.key.marketplace, productRef: s.move.productRef, evaluatedAt: input.now, moveBp: s.move.moveBp, verdict: s.verdict, sellerRef: s.move.sellerRef });
       if (s.accepted) this.acceptSnapshot(input.key, s.accepted.snapshot, s.accepted.competitorSnapshotId, s.accepted.sanity);
       if (s.rejected) {
         rejectedSnapshotId = this.id('rej');
@@ -610,6 +741,8 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       // Как триггеры channel_write (0036): новая версия вытесняет ждущие с причиной; при записи в полёте новая ждёт её завершения
       this.supersedeOlder(write);
       this.writes.push(write);
+      this.writesById.set(write.channelWriteId, write);
+      this.writesOf(write.writeScopeId).push(write);
       if (this.inFlight(row.writeScopeId)) {
         committed.push({ writeScopeId: row.writeScopeId, intentId, decisionId, write: null, pendingWriteId: write.channelWriteId });
         continue;
@@ -617,6 +750,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       this.markDispatched(write, input.now);
       committed.push({ writeScopeId: row.writeScopeId, intentId, decisionId, pendingWriteId: null, write: this.toFieldWrite(write) });
     }
+    if (input.notification) this.inboundNotifications.set(`${this.channel}|${input.notification.notificationId}`, { ...input.notification });
     return { status: 'COMMITTED', rejectedSnapshotId, divergenceCaseId, decisions: committed };
   }
 
@@ -668,12 +802,12 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     // Как write_scope_sync_state.in_flight_write_id (0051): принятая, но не применённая запись держит единицу до подтверждения [Р-64].
     // До шага 21 здесь был только DISPATCHED — симулятор с задержкой применения (K-15) показал, что стенд отправлял следующие цены
     // поверх неподтверждённой, а PostgreSQL их ждёт.
-    return this.writes.find((w) => w.writeScopeId === writeScopeId && (w.status === 'DISPATCHED' || w.status === 'ACCEPTED'));
+    return this.writesOf(writeScopeId).find((w) => w.status === 'DISPATCHED' || w.status === 'ACCEPTED');
   }
 
   private supersedeOlder(newer: WriteRow): void {
-    for (const w of this.writes) {
-      if (w.writeScopeId !== newer.writeScopeId || w.version >= newer.version || !['PENDING', 'BLOCKED', 'FAILED'].includes(w.status)) continue;
+    for (const w of this.writesOf(newer.writeScopeId)) {
+      if (w.version >= newer.version || !['PENDING', 'BLOCKED', 'FAILED'].includes(w.status)) continue;
       w.status = w.status === 'FAILED' ? 'DISCARDED_STALE' : 'SUPERSEDED';
       w.endReason = 'WRITE_SUPERSEDED_BY_NEWER_VERSION';
       w.endParams = { newerVersion: newer.version, newerWriteId: newer.channelWriteId };
@@ -776,8 +910,8 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
         : Date.parse(since) + policy.inFlightTimeoutMs <= Date.parse(now);
       return { kind: 'IN_FLIGHT', channelAccountId: row.channelAccountId, write: this.toFieldWrite(flying), status: flying.status as 'DISPATCHED' | 'ACCEPTED', since, reconcileDue };
     }
-    const candidate = this.writes
-      .filter((w) => w.writeScopeId === writeScopeId && (w.status === 'PENDING' || w.status === 'FAILED'))
+    const candidate = this.writesOf(writeScopeId)
+      .filter((w) => w.status === 'PENDING' || w.status === 'FAILED')
       .sort((a, b) => b.version - a.version)[0];
     if (!candidate) return { kind: 'IDLE' };
     if (candidate.status === 'FAILED') {
@@ -806,7 +940,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   }
 
   async recordOutcome(_tenantId: string, write: FieldWrite, outcome: WriteOutcome, now: Instant, policy: RetryPolicy): Promise<RecordedOutcome> {
-    const w = this.writes.find((x) => x.channelWriteId === write.channelWriteId);
+    const w = this.writesById.get(write.channelWriteId);
     if (!w || w.status !== 'DISPATCHED') return this.recorded(write.writeScope.writeScopeId, (w?.status ?? 'APPLIED') as RecordedOutcome['status'], null, null, false);
     return this.apply(w, 'DISPATCHED', planOutcomeTransition(outcome, w.attemptCount, now, policy), now, 'PRE_WRITE_READ');
   }
@@ -825,11 +959,17 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     return observations.length;
   }
 
-  async recordPricingHealth(_tenantId: string, channelAccountId: string, health: PricingHealthObservation): Promise<void> {
+  async recordPricingHealth(_tenantId: string, channelAccountId: string, health: PricingHealthObservation, notification?: InboundNotificationEntry): Promise<'RECORDED' | 'DUPLICATE_NOTIFICATION'> {
+    if (notification) {
+      const key = `${this.channel}|${notification.notificationId}`;
+      if (this.inboundNotifications.has(key)) return 'DUPLICATE_NOTIFICATION';
+      this.inboundNotifications.set(key, { ...notification });
+    }
     this.pricingHealth.push({
       channelAccountId, marketplace: health.marketplace, channelProductRef: health.channelProductRef, condition: health.condition, issueType: health.issueType,
       occurredAt: health.occurredAt, competitivePriceThreshold: health.competitivePriceThreshold,
     });
+    return 'RECORDED';
   }
 
   async wasNotificationProcessed(_tenantId: string, _channelAccountId: string, notificationId: string): Promise<boolean> {
@@ -896,7 +1036,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   }
 
   async recordReconciliation(_tenantId: string, write: FieldWrite, result: Reconciliation, now: Instant, policy: RetryPolicy): Promise<RecordedOutcome> {
-    const w = this.writes.find((x) => x.channelWriteId === write.channelWriteId);
+    const w = this.writesById.get(write.channelWriteId);
     if (!w || (w.status !== 'DISPATCHED' && w.status !== 'ACCEPTED')) {
       return this.recorded(write.writeScope.writeScopeId, (w?.status ?? 'APPLIED') as RecordedOutcome['status'], null, null, false);
     }
@@ -981,12 +1121,14 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     const scope = this.scope(w.writeScopeId);
     scope.currentPriceMinor = w.amountMinor;
     scope.knownPricesMinor = [...new Set([w.amountMinor, ...scope.knownPricesMinor])].slice(0, 3);
-    this.changes.push({ writeScopeId: scope.writeScopeId, at: now });
+    const changes = this.changes.get(scope.writeScopeId) ?? [];
+    this.changes.set(scope.writeScopeId, changes);
+    changes.push(Date.parse(now));
   }
 
   private recorded(writeScopeId: string, status: RecordedOutcome['status'], nextAttemptAt: Instant | null, reason: Reason<string> | null, scopeBlocked: boolean): RecordedOutcome {
     const slotFreed = !this.inFlight(writeScopeId);
-    const queuedWaiting = slotFreed && this.writes.some((x) => x.writeScopeId === writeScopeId && x.status === 'PENDING');
+    const queuedWaiting = slotFreed && this.writesOf(writeScopeId).some((x) => x.status === 'PENDING');
     return { status, slotFreed, queuedWaiting, nextAttemptAt, reason, scopeBlocked };
   }
 
@@ -994,7 +1136,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     const nowMs = Date.parse(now);
     const due: DueScope[] = [];
     for (const row of this.scopes.values()) {
-      const scopeWrites = this.writes.filter((w) => w.writeScopeId === row.writeScopeId);
+      const scopeWrites = this.writesOf(row.writeScopeId);
       const flying = scopeWrites.find((w) => w.status === 'DISPATCHED' || w.status === 'ACCEPTED');
       const push = (dueKind: DueKind, dueSince: Instant) => due.push({ tenantId: this.tenantId, writeScopeId: row.writeScopeId, dueKind, dueSince });
       const pending = scopeWrites.filter((w) => w.status === 'PENDING' && Date.parse(w.createdAt) <= nowMs - options.pendingMinAgeMs);
@@ -1086,7 +1228,11 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     const versions = [...this.strategyVersions.values()].filter((d) => d.strategyId === input.strategyId);
     if (input.strategyId !== null && versions.length === 0) return { status: 'INVALID', cause: 'STRATEGY_NOT_FOUND' };
     // Как write_scope_strategy_guard (0082): стратегия доступна на канале [Р-39, OQ-166], у оффера нет ценообразования канала [Р-120]
-    if (this.competitorSources && !strategyAvailability(input.params, this.competitorSources).available) return { status: 'INVALID', cause: 'STRATEGY_UNAVAILABLE' };
+    // OQ-173: как write_scope_strategy_guard — по каналу каждой единицы записи, а не по каналу мира
+    for (const id of input.assignTo) {
+      const sources = this.sourcesFor(this.scope(id).channelAccountId);
+      if (sources && !strategyAvailability(input.params, sources).available) return { status: 'INVALID', cause: 'STRATEGY_UNAVAILABLE', writeScopeId: id };
+    }
     for (const id of input.assignTo) {
       if (this.channelPricingActive(this.scope(id))) return { status: 'INVALID', cause: 'CHANNEL_PRICING_ACTIVE', writeScopeId: id };
     }
@@ -1096,9 +1242,51 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       params: { ...input.params }, deadbandMinor: input.deadbandMinor,
     };
     this.rememberStrategy(strategy);
-    this.strategyNames.set(strategy.strategyId, input.name.trim());
+    this.strategyMeta.set(`${strategy.strategyId}@${strategy.version}`, {
+      strategyId: strategy.strategyId, version: strategy.version, name: input.name.trim(), status: 'ACTIVE', createdAt: new Date().toISOString(), createdByMembershipId: actor.membershipId,
+    });
     for (const id of input.assignTo) this.scope(id).strategy = strategy;
     return { status: 'SAVED', strategy, assigned: [...input.assignTo] };
+  }
+
+  private expectedConflict(expected: StrategyAssignInput['expected']): { status: 'CONFLICT'; writeScopeId: string } | { status: 'INVALID'; cause: 'SCOPE_NOT_FOUND' } | null {
+    for (const x of expected ?? []) {
+      const row = this.scopes.get(x.writeScopeId);
+      if (!row) return { status: 'INVALID', cause: 'SCOPE_NOT_FOUND' };
+      if ((row.strategy?.strategyId ?? null) !== x.strategyId || (row.strategy?.version ?? null) !== x.version) return { status: 'CONFLICT', writeScopeId: x.writeScopeId };
+    }
+    return null;
+  }
+
+  /** Как PgPricingStore.assignStrategyVersion (OQ-169): существующая действующая версия, те же проверки назначения */
+  async assignStrategyVersion(_tenantId: string, input: StrategyAssignInput, actor: AdminActor): Promise<StrategySaveResult> {
+    if (!this.adminMember(actor)) return { status: 'FORBIDDEN' };
+    if (input.assignTo.some((id) => !this.scopes.has(id))) return { status: 'INVALID', cause: 'SCOPE_NOT_FOUND' };
+    const conflict = this.expectedConflict(input.expected);
+    if (conflict) return conflict;
+    const strategy = this.strategyVersions.get(`${input.strategyId}@${input.version}`);
+    if (!strategy) return { status: 'INVALID', cause: 'STRATEGY_NOT_FOUND' };
+    const meta = this.strategyMeta.get(`${input.strategyId}@${input.version}`);
+    if (meta && meta.status !== 'ACTIVE') return { status: 'INVALID', cause: 'VERSION_NOT_ACTIVE' };
+    for (const id of input.assignTo) {
+      const sources = this.sourcesFor(this.scope(id).channelAccountId);
+      if (sources && !strategyAvailability(strategy.params, sources).available) return { status: 'INVALID', cause: 'STRATEGY_UNAVAILABLE', writeScopeId: id };
+      if (this.channelPricingActive(this.scope(id))) return { status: 'INVALID', cause: 'CHANNEL_PRICING_ACTIVE', writeScopeId: id };
+    }
+    for (const id of input.assignTo) this.scope(id).strategy = strategy;
+    return { status: 'SAVED', strategy, assigned: [...input.assignTo] };
+  }
+
+  /** Как PgPricingStore.unassignStrategy (OQ-169): только при выключенном репрайсинге */
+  async unassignStrategy(_tenantId: string, input: StrategyUnassignInput, actor: AdminActor): Promise<StrategyUnassignResult> {
+    if (!this.adminMember(actor)) return { status: 'FORBIDDEN' };
+    const conflict = this.expectedConflict(input.expected);
+    if (conflict) return conflict;
+    if (input.writeScopeIds.some((id) => !this.scopes.has(id))) return { status: 'INVALID', cause: 'SCOPE_NOT_FOUND' };
+    const engine = input.writeScopeIds.find((id) => this.scope(id).pricingMode === 'ENGINE');
+    if (engine) return { status: 'INVALID', cause: 'REPRICING_ENABLED', writeScopeId: engine };
+    for (const id of input.writeScopeIds) this.scope(id).strategy = null;
+    return { status: 'UNASSIGNED', writeScopeIds: [...input.writeScopeIds] };
   }
 
   // --- PricingStore: системные остановки [Р-51, Р-52] ---------------------------
@@ -1300,7 +1488,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       fxRates: [...this.fxRates],
       members: this.members.map((m) => ({ ...m })),
       strategies: [...this.strategyVersions.values()].map((d) => ({ ...d, params: { ...d.params } })),
-      strategyNames: [...this.strategyNames.entries()].map(([strategyId, name]) => ({ strategyId, name })),
+      strategyVersions: [...this.strategyMeta.values()].map((v) => ({ ...v })),
       explanationRulesets: [...EXPLANATION_RULESETS],
       audit: this.audit.map((a) => ({ ...a })),
     };

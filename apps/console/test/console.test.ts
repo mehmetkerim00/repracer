@@ -369,7 +369,7 @@ test('step 23, C/F: offers the channel prices itself are listed before a strateg
   assert.deepEqual(list.channelPricingOffers.map((o) => o.label), ['Amazon A1PA6795UKMFR9 · unit SYN-SKU-8502']);
   assert.deepEqual(list.scopes.filter((s) => !s.assignable).map((s) => s.unit.externalUnitId), ['SYN-SKU-8502']);
   assert.ok(list.strategies.length >= 1 && list.strategies.every((s) => s.draft.params.type === 'FIXED'));
-  assert.ok(list.gaps.some((g) => g.code === 'STRATEGY_ASSIGN_CREATES_VERSION'));
+  assert.ok(list.strategies.every((x) => x.versions.length >= 1), 'OQ-170: every strategy lists its versions');
 
   const ws = list.scopes.find((s) => s.unit.externalUnitId === 'SYN-SKU-8502')!.unit.writeScopeId;
   const draft = { name: 'Synthetic fixed', params: { type: 'FIXED', priceMinor: 2050 }, deadbandMinor: 0 };
@@ -411,4 +411,52 @@ test('step 23, F: bounds edit is offered only with the right; the feed filters a
   }
   const markup = await html('/src/screens/Feed.tsx', 'FeedScreenView', { view: one, onQuery: () => {} });
   for (const text of ['Status', 'last 7 days', 'Older →', `1–1 of ${all.page.total}`]) assert.ok(markup.includes(text), text);
+});
+
+test('step 24, OQ-169/170: an existing strategy version is assigned without a new version after its preview; a strategy is removed only with repricing off; versions show author and status', async () => {
+  const owner = await login('OWNER');
+  const viewer = await login('VIEWER');
+  const id = 'kaufland/pipeline/fx-usd-floor-eur-cost';
+  const list = await get<StrategyListView>(owner, api(id, 'strategies'));
+  const original = list.strategies.find((x) => x.assignable)!;
+  const target = list.scopes.find((x) => x.assignable && x.strategyId === original.strategyId)!;
+  assert.ok(original && target);
+
+  // OQ-170: новая версия, сохранённая человеком, показывает автора и статус
+  const draft = { name: 'Synthetic author check', params: { type: 'FIXED', priceMinor: 2100 }, deadbandMinor: 0 };
+  const p1 = (await call(owner, 'POST', api(id, 'strategies', 'preview'), { draft, writeScopeIds: [target.unit.writeScopeId] })).body as StrategyPreviewView;
+  const saved = await call(owner, 'POST', api(id, 'strategies'), { draft, writeScopeIds: [target.unit.writeScopeId], strategyId: null, previewToken: p1.previewToken, confirmed: true });
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  const afterSave = (saved.body as { strategies: StrategyListView }).strategies;
+  const created = afterSave.strategies.find((x) => x.name === 'Synthetic author check')!;
+  assert.deepEqual(created.versions.map((v) => [v.version, v.status, v.author]), [[1, 'active', 'Owner (you)']]);
+  const markup = await html('/src/screens/Strategies.tsx', 'StrategiesScreenView', { view: afterSave, worldId: id });
+  for (const text of ['Assign this version…', 'Versions: v1 · active · Owner (you)']) assert.ok(markup.includes(text), text);
+
+  // OQ-169: прежняя версия возвращается офферу без новой версии — после превью её параметров
+  const item = afterSave.strategies.find((x) => x.strategyId === original.strategyId)!;
+  const preview = (await call(owner, 'POST', api(id, 'strategies', 'preview'), { draft: item.draft, writeScopeIds: [target.unit.writeScopeId] })).body as StrategyPreviewView;
+  const body = { strategyId: item.strategyId, version: item.version, writeScopeIds: [target.unit.writeScopeId], previewToken: preview.previewToken, confirmed: true };
+  assert.equal((await call(viewer, 'POST', api(id, 'strategies', 'assign'), body)).status, 403);
+  assert.equal((await call(owner, 'POST', api(id, 'strategies', 'assign'), { ...body, previewToken: 'stale' })).status, 409);
+  const assigned = await call(owner, 'POST', api(id, 'strategies', 'assign'), body);
+  assert.equal(assigned.status, 200, JSON.stringify(assigned.body));
+  assert.match((assigned.body as { message: string }).message, new RegExp(`^Version ${item.version} assigned to 1 offer\\.$`));
+  const after = (assigned.body as { strategies: StrategyListView }).strategies;
+  const scopeAfter = after.scopes.find((x) => x.unit.writeScopeId === target.unit.writeScopeId)!;
+  assert.deepEqual([scopeAfter.strategyId, scopeAfter.version], [item.strategyId, item.version]);
+  assert.equal(after.strategies.find((x) => x.strategyId === item.strategyId)?.version, item.version, 'no new version was created');
+
+  // Снять стратегию при включённом репрайсинге нельзя; при выключенном — можно
+  const refused = await call(owner, 'POST', api(id, 'strategies', 'unassign'), { writeScopeIds: [target.unit.writeScopeId], confirmed: true });
+  assert.deepEqual([refused.status, (refused.body as { error: { code: string } }).error.code], [400, 'REPRICING_ENABLED'], JSON.stringify(refused.body));
+  // Продавец выключил репрайсинг оффера (подготовка мира: выключение — действие хранилища), затем стратегия снимается
+  const live = worlds.find((w) => w.id === id)!;
+  await live.store.setPricingMode(live.tenantId, target.unit.writeScopeId, 'OFF', account('OWNER').userAlias);
+  const offList = await get<StrategyListView>(owner, api(id, 'strategies'));
+  assert.equal(offList.scopes.find((x) => x.unit.writeScopeId === target.unit.writeScopeId)?.canUnassign, true);
+  assert.equal((await call(viewer, 'POST', api(id, 'strategies', 'unassign'), { writeScopeIds: [target.unit.writeScopeId], confirmed: true })).status, 403);
+  const removed = await call(owner, 'POST', api(id, 'strategies', 'unassign'), { writeScopeIds: [target.unit.writeScopeId], confirmed: true });
+  assert.equal(removed.status, 200, JSON.stringify(removed.body));
+  assert.equal((removed.body as { strategies: StrategyListView }).strategies.scopes.find((x) => x.unit.writeScopeId === target.unit.writeScopeId)?.strategyId, null);
 });

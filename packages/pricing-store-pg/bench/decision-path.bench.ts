@@ -348,7 +348,7 @@ async function storeCommit(store: PgPricingStore, world: BenchWorld): Promise<vo
   const s = pick(world.scopes);
   const changed = Math.random() < CHANGED_SHARE;
   const result = await store.commitEvaluation(world.tenantId, commitInput(world, s, changed, 1600 + Math.floor(Math.random() * 800), 2000));
-  if (result.status !== 'COMMITTED') throw new Error(`context changed: ${result.reason.code}`);
+  if (result.status !== 'COMMITTED') throw new Error(`not committed: ${result.status === 'CONTEXT_CHANGED' ? result.reason.code : result.status}`);
   const write = result.decisions[0]?.write;
   if (write) await store.recordDispatch(world.tenantId, write, { channelWriteId: write.channelWriteId, status: 'ACCEPTED', appliedImmediately: true }, new Date().toISOString());
 }

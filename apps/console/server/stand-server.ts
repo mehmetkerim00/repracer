@@ -335,6 +335,50 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       return ok({ message: m.ui.strategies.saved(result.strategy.version, result.assigned.length), strategies: strategiesView(await live.view(viewer), m, true) } satisfies StrategySaveResponse);
     }
 
+    // OQ-169 (шаг 24): существующая версия — выбранным офферам без новой версии; то же превью и тот же токен, что при сохранении
+    if (screen === 'strategies' && param === 'assign') {
+      if (!can(viewer.role, 'MANAGE_PRICING')) return fail(403, 'FORBIDDEN', s.forbidden);
+      if (body.confirmed !== true) return fail(400, 'NOT_CONFIRMED', s.notConfirmed);
+      const item = strategiesView(world, m, true).strategies.find((x) => x.strategyId === body.strategyId && x.version === body.version);
+      if (!item) return fail(404, 'STRATEGY_NOT_FOUND', s.notFound);
+      if (!item.assignable) return fail(400, 'VERSION_NOT_ACTIVE', s.versionNotActive);
+      const ids = scopeIds(body.writeScopeIds);
+      const previews = ids ? await previewsFor(live, world, item.draft, ids) : null;
+      if (!previews) return fail(400, 'BAD_SCOPES', s.badRequest);
+      if (typeof body.previewToken !== 'string' || body.previewToken !== previewToken(item.draft, previews, world)) return fail(409, 'PREVIEW_CHANGED', s.previewChanged);
+      if (previews.some((p) => !p.availability.available)) return fail(400, 'STRATEGY_UNAVAILABLE', s.strategyUnavailable);
+      const result = await live.store.assignStrategyVersion(world.tenantId, { strategyId: item.strategyId, version: item.version, assignTo: ids!, expected: currentStrategies(world, ids!) },
+        { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) });
+      if (result.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
+      if (result.status === 'CONFLICT') return fail(409, 'PREVIEW_CHANGED', s.previewChanged);
+      if (result.status === 'INVALID' && result.cause === 'STRATEGY_UNAVAILABLE') return fail(400, 'STRATEGY_UNAVAILABLE', s.strategyUnavailable);
+      if (result.status === 'INVALID' && result.cause === 'VERSION_NOT_ACTIVE') return fail(400, 'VERSION_NOT_ACTIVE', s.versionNotActive);
+      if (result.status === 'INVALID' && result.cause === 'CHANNEL_PRICING_ACTIVE') {
+        const scope = result.writeScopeId ? scopeById(world, result.writeScopeId) : undefined;
+        return fail(400, 'CHANNEL_PRICING_ACTIVE', s.channelPricingActive(scope ? unitOf(world, scope, m).label : m.ui.common.noValue));
+      }
+      if (result.status !== 'SAVED') return fail(400, result.cause, s.badRequest);
+      return ok({ message: m.ui.strategies.assigned(result.strategy.version, result.assigned.length), strategies: strategiesView(await live.view(viewer), m, true) } satisfies StrategySaveResponse);
+    }
+
+    // OQ-169: снять стратегию с офферов — только при выключенном репрайсинге
+    if (screen === 'strategies' && param === 'unassign') {
+      if (!can(viewer.role, 'MANAGE_PRICING')) return fail(403, 'FORBIDDEN', s.forbidden);
+      if (body.confirmed !== true) return fail(400, 'NOT_CONFIRMED', s.notConfirmed);
+      const ids = scopeIds(body.writeScopeIds);
+      if (!ids) return fail(400, 'BAD_SCOPES', s.badRequest);
+      const result = await live.store.unassignStrategy(world.tenantId, { writeScopeIds: ids, expected: currentStrategies(world, ids) },
+        { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) });
+      if (result.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
+      if (result.status === 'CONFLICT') return fail(409, 'PREVIEW_CHANGED', s.previewChanged);
+      if (result.status === 'INVALID' && result.cause === 'REPRICING_ENABLED') {
+        const scope = result.writeScopeId ? scopeById(world, result.writeScopeId) : undefined;
+        return fail(400, 'REPRICING_ENABLED', s.repricingEnabledUnassign(scope ? unitOf(world, scope, m).label : m.ui.common.noValue));
+      }
+      if (result.status !== 'UNASSIGNED') return fail(400, result.cause, s.badRequest);
+      return ok({ message: m.ui.strategies.unassigned, strategies: strategiesView(await live.view(viewer), m, true) } satisfies StrategySaveResponse);
+    }
+
     // Шаг 21: массовая правка границ — экран различий (база вычисляет итог в откатываемой транзакции), затем применение с токеном
     if (screen === 'bounds' && (param === 'plan' || param === 'apply')) {
       if (!can(viewer.role, 'MANAGE_PRICING')) return fail(403, 'FORBIDDEN', s.forbidden);

@@ -41,9 +41,14 @@ export interface NotificationLedger {
   markProcessed(route: SellerRoute, entry: { notificationId: string; notificationType: string; eventTime: string | null; receivedAt: string }): Promise<void>;
 }
 
-/** Доставка в путь решения: обычно pipeline.processInbound. Исключение — временный сбой, сообщение останется в очереди */
+/**
+ * Доставка в путь решения: обычно pipeline.processInbound. Исключение — временный сбой, сообщение останется в очереди.
+ * recordsLedger (OQ-171, шаг 24): приёмник сам журнал не пишет — путь решения записывает уведомление в транзакции снимка и отвечает
+ * DUPLICATE, если оно уже записано
+ */
 export interface NotificationSink {
-  deliver(route: SellerRoute, delivery: InboundDelivery, envelope: NotificationEnvelope): Promise<'ACCEPTED' | 'REJECTED'>;
+  readonly recordsLedger?: boolean;
+  deliver(route: SellerRoute, delivery: InboundDelivery, envelope: NotificationEnvelope): Promise<'ACCEPTED' | 'REJECTED' | 'DUPLICATE'>;
 }
 
 export interface ReceiverPolicy {
@@ -162,9 +167,16 @@ export function createNotificationReceiver(options: ReceiverOptions): Notificati
         const delivery: InboundDelivery = {
           claimed: { tenantId: route.tenantId as TenantId, channelAccountId: route.channelAccountId as ChannelAccountId },
           method: 'SQS', url: options.queueUrl, headers: { 'x-sqs-message-id': message.messageId }, rawBody: message.body, receivedAt,
+          notification: { notificationId: e.notificationId, notificationType: e.notificationType, eventTime: e.eventTime },
         };
         const result = await options.sink.deliver(route, delivery, e);
-        await options.ledger.markProcessed(route, { notificationId: e.notificationId, notificationType: e.notificationType, eventTime: e.eventTime, receivedAt });
+        if (!options.sink.recordsLedger) {
+          await options.ledger.markProcessed(route, { notificationId: e.notificationId, notificationType: e.notificationType, eventTime: e.eventTime, receivedAt });
+        }
+        if (result === 'DUPLICATE') {
+          duplicates += 1;
+          continue;
+        }
         if (result === 'ACCEPTED') delivered += 1; else rejected += 1;
         if (late) await alert('NOTIFICATION_LATE', 'WARNING', { notificationType: e.notificationType, ageSeconds: Math.round((options.now().getTime() - message.attributes.sentTimestampMs!) / 1000) }, route);
       }
@@ -255,10 +267,13 @@ export function storeLedger(store: {
  * Доставка в путь решения (pipeline.processInbound). Отказ адаптера (чужой SellerId, неразбираемый оффер) — REJECTED: сообщение удаляется,
  * алерт поднял адаптер. Исключение хранилища или сети — наружу: сообщение остаётся в очереди и придёт повторно.
  */
-export function pipelineSink(pipeline: { processInbound(delivery: InboundDelivery): Promise<{ inbound: { kind: string } }> }): NotificationSink {
+export function pipelineSink(pipeline: { processInbound(delivery: InboundDelivery): Promise<{ inbound: { kind: string }; notification: 'RECORDED' | 'DUPLICATE' | 'NONE' }> }): NotificationSink {
   return {
+    // OQ-171: журнал — в транзакции снимка пути решения; проверка журнала до доставки остаётся дешёвым фильтром повторов
+    recordsLedger: true,
     async deliver(_route, delivery) {
-      const { inbound } = await pipeline.processInbound(delivery);
+      const { inbound, notification } = await pipeline.processInbound(delivery);
+      if (notification === 'DUPLICATE') return 'DUPLICATE';
       return inbound.kind === 'REJECTED' ? 'REJECTED' : 'ACCEPTED';
     },
   };

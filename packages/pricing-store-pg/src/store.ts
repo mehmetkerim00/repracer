@@ -37,7 +37,7 @@ import type {
   ProductKey,
   ScopeEvaluationContext,
   ShiftWindow,
-  SnapshotOutcome, ConsoleAuditRow, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation } from '@repracer/pricing-pipeline';
+  SnapshotOutcome, ConsoleAuditRow, ConsoleDistrustRow, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation } from '@repracer/pricing-pipeline';
 import { inTenant, RollbackWith, type PgPool, type Tx } from './db.ts';
 import { PgWriteQueueStore } from './write-queue.ts';
 
@@ -561,6 +561,10 @@ export class PgPricingStore implements PricingStore {
     return this.tx<EvaluationCommitResult>(tenantId, async (tx) => {
       let current: DecisionToCommit | null = null;
       try {
+        // OQ-171: журнал уведомления — первым в транзакции решения; повтор (и одновременный) ждёт уникальности и откатывается
+        if (input.notification && !(await this.insertNotification(tx, tenantId, input.notification))) {
+          throw new RollbackWith<EvaluationCommitResult>({ status: 'DUPLICATE_NOTIFICATION' });
+        }
         if (writeScopeIds.length > 0) {
           // Решения по одной единице фиксируются по очереди (версия записи); FOR SHARE товара упорядочивает фиксацию
           // с изменением границ, которое берёт FOR UPDATE на товар в отложенной проверке [Р-54]. Права UPDATE на товар у пути
@@ -931,14 +935,26 @@ export class PgPricingStore implements PricingStore {
   }
 
   /** Шаг 23: состояние PRICING_HEALTH оффера (0083) — данные канала, 18 месяцев */
-  async recordPricingHealth(tenantId: string, channelAccountId: string, health: PricingHealthObservation): Promise<void> {
-    await this.tx(tenantId, async (tx) => {
+  /** OQ-171: запись журнала уведомлений в переданной транзакции; false — уведомление уже записано */
+  private async insertNotification(tx: Tx, tenantId: string, entry: InboundNotificationEntry): Promise<boolean> {
+    const { rowCount } = await tx.query(
+      `INSERT INTO channel_data.inbound_notification (tenant_id, channel_account_id, channel, notification_id, notification_type, event_time, received_at)
+       SELECT $1, a.channel_account_id, a.channel, $3, $4, $5, $6 FROM tenant_data.channel_account a WHERE a.tenant_id = $1 AND a.channel_account_id = $2
+       ON CONFLICT (tenant_id, channel, notification_id) DO NOTHING`,
+      [tenantId, entry.channelAccountId, entry.notificationId, entry.notificationType, entry.eventTime, entry.receivedAt]);
+    return (rowCount ?? 0) > 0;
+  }
+
+  async recordPricingHealth(tenantId: string, channelAccountId: string, health: PricingHealthObservation, notification?: InboundNotificationEntry): Promise<'RECORDED' | 'DUPLICATE_NOTIFICATION'> {
+    return this.tx(tenantId, async (tx) => {
+      if (notification && !(await this.insertNotification(tx, tenantId, notification))) return 'DUPLICATE_NOTIFICATION' as const;
       await tx.query(
         `INSERT INTO channel_data.offer_pricing_health (tenant_id, channel_account_id, channel, marketplace, channel_product_ref, condition, issue_type, event_time,
                                                         competitive_price_threshold_minor, currency, notification_id)
          SELECT $1, a.channel_account_id, a.channel, $3, $4, $5, $6, $7, $8, $9, $10 FROM tenant_data.channel_account a WHERE a.tenant_id = $1 AND a.channel_account_id = $2`,
         [tenantId, channelAccountId, health.marketplace, health.channelProductRef, health.condition, health.issueType, health.occurredAt,
           health.competitivePriceThreshold?.amountMinor ?? null, health.competitivePriceThreshold?.currency ?? null, health.sourceEventId]);
+      return 'RECORDED' as const;
     });
   }
 
@@ -953,33 +969,93 @@ export class PgPricingStore implements PricingStore {
   }
 
   async markNotificationProcessed(tenantId: string, entry: InboundNotificationEntry): Promise<void> {
-    await this.tx(tenantId, async (tx) => {
-      await tx.query(
-        `INSERT INTO channel_data.inbound_notification (tenant_id, channel_account_id, channel, notification_id, notification_type, event_time, received_at)
-         SELECT $1, a.channel_account_id, a.channel, $3, $4, $5, $6 FROM tenant_data.channel_account a WHERE a.tenant_id = $1 AND a.channel_account_id = $2
-         ON CONFLICT (tenant_id, channel, notification_id) DO NOTHING`,
-        [tenantId, entry.channelAccountId, entry.notificationId, entry.notificationType, entry.eventTime, entry.receivedAt]);
-    });
+    await this.tx(tenantId, async (tx) => { await this.insertNotification(tx, tenantId, entry); });
+  }
+
+  /** Находка 4 ревью шага 21: сохраняется то превью, что видел человек, — стратегии единиц с тех пор не менялись */
+  private static async assertExpected(tx: Tx, tenantId: string, expected: StrategySaveInput['expected']): Promise<Row[]> {
+    if (!expected) return [];
+    const { rows: current } = await tx.query(
+      `SELECT write_scope_id, pricing_strategy_id, pricing_strategy_version, pricing_mode FROM tenant_data.write_scope
+        WHERE tenant_id = $1 AND write_scope_id = ANY ($2::uuid[]) AND field = 'PRICE' ORDER BY write_scope_id FOR NO KEY UPDATE`,
+      [tenantId, expected.map((x) => x.writeScopeId)]);
+    for (const x of expected) {
+      const c = current.find((r) => r.write_scope_id === x.writeScopeId);
+      if (!c) throw new RollbackWith({ status: 'INVALID', cause: 'SCOPE_NOT_FOUND' });
+      if ((c.pricing_strategy_id ?? null) !== x.strategyId || (c.pricing_strategy_version === null ? null : Number(c.pricing_strategy_version)) !== x.version) {
+        throw new RollbackWith({ status: 'CONFLICT', writeScopeId: x.writeScopeId });
+      }
+    }
+    return current;
+  }
+
+  /** Отказы базы при назначении стратегии (0082, 0085) — в причины хранилища */
+  private static strategyRefusal(error: unknown): StrategySaveResult | null {
+    if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
+    const message = String((error as Error).message ?? '');
+    if (/is not available on channel/.test(message)) return { status: 'INVALID', cause: 'STRATEGY_UNAVAILABLE' };
+    if (/cannot be assigned \(OQ-169\)/.test(message)) return { status: 'INVALID', cause: 'VERSION_NOT_ACTIVE' };
+    const owned = /write_scope ([0-9a-f-]{36}) has channel-owned pricing/.exec(message);
+    if (owned) return { status: 'INVALID', cause: 'CHANNEL_PRICING_ACTIVE', writeScopeId: owned[1]! };
+    return null;
+  }
+
+  async assignStrategyVersion(tenantId: string, input: StrategyAssignInput, actor: AdminActor): Promise<StrategySaveResult> {
+    try {
+      return await inTenant(this.admin('assignStrategyVersion'), tenantId, async (tx) => {
+        await PgPricingStore.assertExpected(tx, tenantId, input.expected);
+        const { rows: [v] } = await tx.query(
+          `SELECT ps.version, ps.type, ps.params, u.undercut_minor FROM tenant_data.pricing_strategy ps
+             LEFT JOIN channel_data.pricing_strategy_undercut u ON u.tenant_id = ps.tenant_id AND u.pricing_strategy_id = ps.pricing_strategy_id AND u.version = ps.version
+            WHERE ps.tenant_id = $1 AND ps.pricing_strategy_id = $2 AND ps.version = $3`, [tenantId, input.strategyId, input.version]);
+        if (!v) throw new RollbackWith<StrategySaveResult>({ status: 'INVALID', cause: 'STRATEGY_NOT_FOUND' });
+        const { rowCount } = await tx.query(
+          `UPDATE tenant_data.write_scope SET pricing_strategy_id = $2, pricing_strategy_version = $3
+            WHERE tenant_id = $1 AND write_scope_id = ANY ($4::uuid[]) AND field = 'PRICE'`,
+          [tenantId, input.strategyId, input.version, input.assignTo]);
+        if (rowCount !== new Set(input.assignTo).size) throw new RollbackWith<StrategySaveResult>({ status: 'INVALID', cause: 'SCOPE_NOT_FOUND' });
+        const { deadbandMinor, ...params } = v.params as Record<string, unknown>;
+        return {
+          status: 'SAVED', assigned: [...input.assignTo],
+          strategy: {
+            strategyId: input.strategyId, version: input.version, deadbandMinor: Number(deadbandMinor ?? 0),
+            params: { ...params, type: v.type, ...(v.undercut_minor !== null ? { undercutMinor: Number(v.undercut_minor) } : {}) } as unknown as StrategyDefinition['params'],
+          },
+        } satisfies StrategySaveResult;
+      }, actor.userId, { mfa: actor.mfa });
+    } catch (error) {
+      const refusal = PgPricingStore.strategyRefusal(error);
+      if (refusal) return refusal;
+      throw error;
+    }
+  }
+
+  async unassignStrategy(tenantId: string, input: StrategyUnassignInput, actor: AdminActor): Promise<StrategyUnassignResult> {
+    try {
+      return await inTenant(this.admin('unassignStrategy'), tenantId, async (tx) => {
+        await PgPricingStore.assertExpected(tx, tenantId, input.expected);
+        const { rows } = await tx.query(
+          `SELECT write_scope_id, pricing_mode FROM tenant_data.write_scope
+            WHERE tenant_id = $1 AND write_scope_id = ANY ($2::uuid[]) AND field = 'PRICE' ORDER BY write_scope_id FOR NO KEY UPDATE`, [tenantId, input.writeScopeIds]);
+        if (rows.length !== new Set(input.writeScopeIds).size) throw new RollbackWith<StrategyUnassignResult>({ status: 'INVALID', cause: 'SCOPE_NOT_FOUND' });
+        const engine = rows.find((r) => r.pricing_mode === 'ENGINE');
+        if (engine) throw new RollbackWith<StrategyUnassignResult>({ status: 'INVALID', cause: 'REPRICING_ENABLED', writeScopeId: engine.write_scope_id });
+        await tx.query(
+          `UPDATE tenant_data.write_scope SET pricing_strategy_id = NULL, pricing_strategy_version = NULL
+            WHERE tenant_id = $1 AND write_scope_id = ANY ($2::uuid[]) AND field = 'PRICE'`, [tenantId, input.writeScopeIds]);
+        return { status: 'UNASSIGNED', writeScopeIds: [...input.writeScopeIds] } satisfies StrategyUnassignResult;
+      }, actor.userId, { mfa: actor.mfa });
+    } catch (error) {
+      if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
+      throw error;
+    }
   }
 
   async saveStrategy(tenantId: string, input: StrategySaveInput, actor: AdminActor): Promise<StrategySaveResult> {
     if (input.name.trim().length === 0) return { status: 'INVALID', cause: 'NAME_REQUIRED' };
     try {
       return await inTenant(this.admin('saveStrategy'), tenantId, async (tx) => {
-        // Находка 4 ревью шага 21: сохраняется то превью, что видел человек, — стратегии единиц с тех пор не менялись
-        if (input.expected) {
-          const { rows: current } = await tx.query(
-            `SELECT write_scope_id, pricing_strategy_id, pricing_strategy_version FROM tenant_data.write_scope
-              WHERE tenant_id = $1 AND write_scope_id = ANY ($2::uuid[]) AND field = 'PRICE' ORDER BY write_scope_id FOR NO KEY UPDATE`,
-            [tenantId, input.expected.map((x) => x.writeScopeId)]);
-          for (const x of input.expected) {
-            const c = current.find((r) => r.write_scope_id === x.writeScopeId);
-            if (!c) throw new RollbackWith<StrategySaveResult>({ status: 'INVALID', cause: 'SCOPE_NOT_FOUND' });
-            if ((c.pricing_strategy_id ?? null) !== x.strategyId || (c.pricing_strategy_version === null ? null : Number(c.pricing_strategy_version)) !== x.version) {
-              throw new RollbackWith<StrategySaveResult>({ status: 'CONFLICT', writeScopeId: x.writeScopeId });
-            }
-          }
-        }
+        await PgPricingStore.assertExpected(tx, tenantId, input.expected);
         let strategyId = input.strategyId;
         let version = 1;
         if (strategyId !== null) {
@@ -1014,12 +1090,9 @@ export class PgPricingStore implements PricingStore {
         } satisfies StrategySaveResult;
       }, actor.userId, { mfa: actor.mfa });
     } catch (error) {
-      if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
       // Р-39, OQ-166, Р-120: назначение стратегии отклонила база (write_scope_strategy_guard, 0082)
-      const message = String((error as Error).message ?? '');
-      if (/is not available on channel/.test(message)) return { status: 'INVALID', cause: 'STRATEGY_UNAVAILABLE' };
-      const owned = /write_scope ([0-9a-f-]{36}) has channel-owned pricing/.exec(message);
-      if (owned) return { status: 'INVALID', cause: 'CHANNEL_PRICING_ACTIVE', writeScopeId: owned[1]! };
+      const refusal = PgPricingStore.strategyRefusal(error);
+      if (refusal) return refusal;
       throw error;
     }
   }
@@ -1235,9 +1308,12 @@ export class PgPricingStore implements PricingStore {
           const { deadbandMinor, ...params } = r.params as Record<string, unknown>;
           return { strategyId: r.pricing_strategy_id, version: r.version, params: params as unknown as StrategyDefinition['params'], deadbandMinor: Number(deadbandMinor ?? 0) };
         });
-      const strategyNames = (await q(`SELECT DISTINCT ON (pricing_strategy_id) pricing_strategy_id, name FROM tenant_data.pricing_strategy
-                                       WHERE tenant_id = $1 AND name IS NOT NULL ORDER BY pricing_strategy_id, version DESC`))
-        .map((r) => ({ strategyId: r.pricing_strategy_id as string, name: r.name as string }));
+      const strategyVersions = (await q(`SELECT pricing_strategy_id, version, name, status, created_at, created_by_membership_id
+                                           FROM tenant_data.pricing_strategy WHERE tenant_id = $1 ORDER BY pricing_strategy_id, version`))
+        .map((r): ConsoleStrategyVersionRow => ({
+          strategyId: r.pricing_strategy_id, version: Number(r.version), name: r.name, status: r.status, createdAt: iso(r.created_at),
+          createdByMembershipId: r.created_by_membership_id,
+        }));
       const explanationRulesets = (await q(`SELECT ruleset_id, kind, definition FROM platform.explanation_ruleset ORDER BY ruleset_id`, []))
         .map((r) => ({ rulesetId: r.ruleset_id, kind: r.kind, definition: r.definition }) as DictionaryRuleset);
       // Остановки в журнале аудита [Р-76]: время действия — из события, роль — в момент действия
@@ -1252,7 +1328,7 @@ export class PgPricingStore implements PricingStore {
       return {
         tenantId, scopes, intents, decisions, writes, halts, haltReviews, distrusts, offerChannelPricing, pricingHealth, stops, rejectedSnapshots, divergenceCases,
         fxRates: fx.map((f) => ({ source: 'ECB', rateDate: f.rate_date, base: 'EUR', quote: f.quote_currency, rateMicros: Number(f.rate_micros), availableFrom: f.available_from })),
-        members, strategies, strategyNames, explanationRulesets, audit,
+        members, strategies, strategyVersions, explanationRulesets, audit,
       };
     });
   }

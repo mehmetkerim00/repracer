@@ -36,7 +36,11 @@ export type PricingStoreFactory = (seed: MemorySeed, world: World) => Promise<Pr
 export const memoryStoreFactory: PricingStoreFactory = async (seed, world) => {
   const channel = world.account.channel === 'AMAZON' ? 'AMAZON' : 'KAUFLAND';
   const competitorSources = channel === 'AMAZON' ? AMAZON_DESCRIPTOR.competitorSources : KAUFLAND_DESCRIPTOR.competitorSources;
-  const store = new InMemoryPricingStore({ ...seed, channel, region: world.account.region ?? null, competitorSources: [...(competitorSources ?? [])] }, { tenantId: world.tenantId });
+  const store = new InMemoryPricingStore({
+    ...seed, channel, region: world.account.region ?? null, competitorSources: [...(competitorSources ?? [])],
+    // OQ-173: доступность стратегии — по каналу аккаунта каждой единицы записи
+    competitorSourcesByChannel: { KAUFLAND: [...(KAUFLAND_DESCRIPTOR.competitorSources ?? [])], AMAZON: [...(AMAZON_DESCRIPTOR.competitorSources ?? [])] },
+  }, { tenantId: world.tenantId });
   return {
     store,
     queue: store,
@@ -139,7 +143,7 @@ async function runCall(step: CallStep, adapter: ChannelAdapter, scenario: Scenar
 }
 
 /** Приёмник уведомлений сценария: очередь и приёмник живут весь прогон (шаг 23) */
-const receivers = new WeakMap<PricingPipeline, { sqs: FakeSqs; receiver: NotificationReceiver; failSink: { n: number } }>();
+const receivers = new WeakMap<PricingPipeline, { sqs: FakeSqs; receiver: NotificationReceiver; failSink: { n: number }; parallel(n: number): NotificationReceiver[] }>();
 const STAND_QUEUE = 'https://sqs.eu-west-1.amazonaws.com/000000000000/repracer-syn-notifications';
 const STAND_APPLICATION = 'amzn1.sellerapps.app.syn0001';
 
@@ -150,22 +154,23 @@ function standReceiver(pipeline: PricingPipeline, store: PricingStoreUnderTest, 
   const sqs = new FakeSqs({ get nowMs() { return clock.nowMs(); } });
   const failSink = { n: 0 };
   const inner = pipelineSink(pipeline);
-  const receiver = createNotificationReceiver({
+  const make = (policy: { waitTimeSeconds: number; maxMessages?: number }) => createNotificationReceiver({
     sqs: createSqsClient({ queueUrl: STAND_QUEUE, credentials: async () => ({ accessKeyId: 'AKIASYNTHETIC0000001', secretAccessKey: 'syn-aws-secret-access-key-0001' }), fetch: sqs.fetch, now: () => new Date(clock.nowMs()) }),
     queueUrl: STAND_QUEUE, region: (world.account.region ?? 'EU') as 'EU' | 'NA' | 'FE', applicationId: STAND_APPLICATION,
     router: { resolve: async (region, sellerId) => (region === (world.account.region ?? 'EU') && sellerId === world.account.externalAccountId
       ? [{ tenantId: world.tenantId, channelAccountId: world.channelAccountId }] : []) },
     ledger: storeLedger(store.store),
-    sink: { async deliver(route, delivery, envelope) {
+    sink: { recordsLedger: true, async deliver(route, delivery, envelope) {
       if (failSink.n > 0) { failSink.n -= 1; throw new Error('synthetic store failure'); }
       return inner.deliver(route, delivery, envelope);
     } },
     alerts: { raise: async (a) => { sink.alerts.push(a as never); } },
     logger: { log: (entry) => { sink.logs.push(entry as never); } },
     now: () => new Date(clock.nowMs()),
-    policy: { waitTimeSeconds: 0 },
+    policy,
   });
-  const created = { sqs, receiver, failSink };
+  const receiver = make({ waitTimeSeconds: 0 });
+  const created = { sqs, receiver, failSink, parallel: (n: number) => Array.from({ length: n }, () => make({ waitTimeSeconds: 0, maxMessages: 1 })) };
   receivers.set(pipeline, created);
   return created;
 }
@@ -219,7 +224,11 @@ async function runPipelineStep(
       }
       r.failSink.n = step.failSink ?? 0;
       const polls = [];
-      for (let i = 0; i < (step.polls ?? 1); i += 1) polls.push(await r.receiver.pollOnce());
+      if (step.parallelReceivers) {
+        // По одному сообщению каждому приёмнику, одновременно; итоги — в порядке приёмников
+        polls.push(...await Promise.all(r.parallel(step.parallelReceivers).map((x) => x.pollOnce())));
+      }
+      for (let i = 0; i < (step.polls ?? (step.parallelReceivers ? 0 : 1)); i += 1) polls.push(await r.receiver.pollOnce());
       return { result: { polls, queued: r.sqs.messages.length } };
     }
     case 'pipelineDiscoverOffers':

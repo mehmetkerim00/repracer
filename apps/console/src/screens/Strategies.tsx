@@ -94,13 +94,13 @@ export function PreviewTable({ view }: { view: StrategyPreviewView }) {
 }
 
 /** Подтверждение сохранения: второе нажатие, отдельно от превью */
-export function SaveConfirm({ offers, busy, onConfirm, onCancel }: { offers: number; busy: boolean; onConfirm: () => void; onCancel: () => void }) {
+export function SaveConfirm({ offers, busy, onConfirm, onCancel, assign = false }: { offers: number; busy: boolean; onConfirm: () => void; onCancel: () => void; assign?: boolean }) {
   const m = useMessages();
   const t = m.ui.strategies;
   return (
     <div className="confirm" role="dialog" aria-modal="false" aria-labelledby="strategy-confirm-title">
       <h3 id="strategy-confirm-title">{t.confirmTitle(offers)}</h3>
-      <p>{t.confirmText}</p>
+      <p>{assign ? t.assignConfirmText : t.confirmText}</p>
       <div className="buttons">
         <button type="button" className="danger" disabled={busy} onClick={onConfirm}>{t.confirmSave}</button>
         <button type="button" disabled={busy} onClick={onCancel}>{t.cancel}</button>
@@ -114,6 +114,9 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
   const t = m.ui.strategies;
   const assignable = view.scopes.filter((s) => s.assignable).map((s) => s.unit.writeScopeId);
   const [form, setForm] = useState<DraftForm>(EMPTY_DRAFT);
+  /** OQ-169: назначается существующая версия — черновик не редактируется, превью и сохранение по её параметрам */
+  const [assigning, setAssigning] = useState<StrategyListItem | null>(null);
+  const [removing, setRemoving] = useState<StrategyListView['scopes'][number] | null>(null);
   const [selected, setSelected] = useState<string[]>(assignable);
   const [preview, setPreview] = useState<StrategyPreviewView | null>(initialPreview);
   const [confirming, setConfirming] = useState(false);
@@ -127,23 +130,39 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
   const run = async (notice: string | null = null) => {
     setBusy(true); setError(null); setMessage(notice);
     try {
-      setPreview(await requestJson<StrategyPreviewView>(worldPath(worldId, 'strategies', 'preview'), { method: 'POST', body: { draft: draftOf(form), writeScopeIds: selected }, locale: m.locale }));
+      const draft = assigning ? assigning.draft : draftOf(form);
+      setPreview(await requestJson<StrategyPreviewView>(worldPath(worldId, 'strategies', 'preview'), { method: 'POST', body: { draft, writeScopeIds: selected }, locale: m.locale }));
     } catch (e) { setError(errorText(e, m)); } finally { setBusy(false); }
   };
   const save = async () => {
     if (!preview) return;
     setBusy(true); setError(null);
     try {
-      const r = await requestJson<StrategySaveResponse>(worldPath(worldId, 'strategies'), {
-        method: 'POST', body: { draft: draftOf(form), writeScopeIds: selected, strategyId: form.strategyId, previewToken: preview.previewToken, confirmed: true }, locale: m.locale,
-      });
-      setMessage(r.message); setPreview(null); setConfirming(false); setBusy(false);
+      const r = assigning
+        ? await requestJson<StrategySaveResponse>(worldPath(worldId, 'strategies', 'assign'), {
+          method: 'POST', body: { strategyId: assigning.strategyId, version: assigning.version, writeScopeIds: selected, previewToken: preview.previewToken, confirmed: true }, locale: m.locale,
+        })
+        : await requestJson<StrategySaveResponse>(worldPath(worldId, 'strategies'), {
+          method: 'POST', body: { draft: draftOf(form), writeScopeIds: selected, strategyId: form.strategyId, previewToken: preview.previewToken, confirmed: true }, locale: m.locale,
+        });
+      setMessage(r.message); setPreview(null); setConfirming(false); setBusy(false); setAssigning(null);
     } catch (e) {
       setConfirming(false); setBusy(false);
       // Офферы изменились после превью: показать новое превью, а не ошибку без выхода
       if (e instanceof ApiError && e.failure.kind === 'SERVER' && e.failure.code === 'PREVIEW_CHANGED') return void run(t.rePreviewed);
       setError(errorText(e, m));
     }
+  };
+
+  const unassign = async () => {
+    if (!removing) return;
+    setBusy(true); setError(null);
+    try {
+      const r = await requestJson<StrategySaveResponse>(worldPath(worldId, 'strategies', 'unassign'), {
+        method: 'POST', body: { writeScopeIds: [removing.unit.writeScopeId], confirmed: true }, locale: m.locale,
+      });
+      setMessage(r.message); setRemoving(null);
+    } catch (e) { setError(errorText(e, m)); } finally { setBusy(false); }
   };
 
   return (
@@ -155,7 +174,9 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
           <li key={s.strategyId}>
             <strong>{s.name ?? t.unnamed}</strong> · {s.label} {t.versionShort(s.version)} <span className="small muted">{s.detail}</span>
             <div className="small">{s.scopes.length === 0 ? <span className="muted">{t.notUsed}</span> : s.scopes.map((u) => `${u.unit.label} (${t.versionShort(u.version)})`).join(', ')}</div>
-            {view.canEdit ? <button type="button" disabled={busy} onClick={() => { setForm(formOf(s)); changed(); setMessage(null); }}>{t.newVersion}</button> : null}
+            <div className="small muted">{t.versionsTitle}: {s.versions.map((v) => t.versionLine(v.version, v.status, v.author, v.createdAt)).join('; ')}</div>
+            {view.canEdit ? <button type="button" disabled={busy} onClick={() => { setAssigning(null); setForm(formOf(s)); changed(); setMessage(null); }}>{t.newVersion}</button> : null}
+            {s.assignable ? <button type="button" disabled={busy} onClick={() => { setAssigning(s); changed(); setMessage(null); }}>{t.assignVersion}</button> : null}
           </li>
         ))}
       </ul>
@@ -166,10 +187,11 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
         <ul className="index">{view.channelPricingOffers.map((o) => <li key={o.label}><Badge tone={o.tone}>{o.label}</Badge> <span className="small">{o.detail}</span></li>)}</ul>
       )}
 
-      <h3>{form.strategyId ? t.editing(form.name, form.baseVersion ?? 0) : t.draftTitle}</h3>
+      <h3>{assigning ? t.assigning(assigning.draft.name, assigning.version) : form.strategyId ? t.editing(form.name, form.baseVersion ?? 0) : t.draftTitle}</h3>
       {!view.canEdit ? <p className="notice">{t.noRight}</p> : null}
-      {form.strategyId ? <button type="button" disabled={busy} onClick={() => { setForm(EMPTY_DRAFT); changed(); }}>{t.newStrategy}</button> : null}
-      <div className="form">
+      {form.strategyId || assigning ? <button type="button" disabled={busy} onClick={() => { setAssigning(null); setForm(EMPTY_DRAFT); changed(); }}>{t.newStrategy}</button> : null}
+      {assigning ? <p className="small muted">{assigning.label} · {assigning.detail}</p> : null}
+      <div className="form" hidden={assigning !== null}>
         <label>{t.name} <input value={form.name} maxLength={80} onChange={(e) => set('name', e.target.value)} /></label>
         <label>{t.type} <select value={form.type} onChange={(e) => set('type', e.target.value as DraftForm['type'])}>
           {(Object.keys(t.types) as Array<keyof typeof t.types>).map((k) => <option key={k} value={k}>{t.types[k]}</option>)}
@@ -208,6 +230,7 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
               onChange={(e) => pick(e.target.checked ? [...selected, s.unit.writeScopeId] : selected.filter((x) => x !== s.unit.writeScopeId))} /> {s.unit.label}</label>
             <span className="small muted"> · {s.strategy} · {s.mode}</span>
             {s.channelPricing ? <div className="small"><Badge tone={s.channelPricing.tone}>{t.notAssignable}</Badge> {s.channelPricing.detail}</div> : null}
+            {s.canUnassign ? <button type="button" disabled={busy} onClick={() => { setRemoving(s); setMessage(null); }}>{t.unassign}</button> : null}
           </li>
         ))}
       </ul>
@@ -218,7 +241,17 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
           : null}
       </div>
       <p className="small muted">{t.saveHint}</p>
-      {confirming && preview ? <SaveConfirm offers={preview.rows.length} busy={busy} onConfirm={() => void save()} onCancel={() => setConfirming(false)} /> : null}
+      {confirming && preview ? <SaveConfirm offers={preview.rows.length} busy={busy} assign={assigning !== null} onConfirm={() => void save()} onCancel={() => setConfirming(false)} /> : null}
+      {removing ? (
+        <div className="confirm" role="dialog" aria-modal="false" aria-labelledby="strategy-remove-title">
+          <h3 id="strategy-remove-title">{t.unassignTitle(removing.unit.label)}</h3>
+          <p>{t.unassignText}</p>
+          <div className="buttons">
+            <button type="button" className="danger" disabled={busy} onClick={() => void unassign()}>{t.unassign}</button>
+            <button type="button" disabled={busy} onClick={() => setRemoving(null)}>{t.cancel}</button>
+          </div>
+        </div>
+      ) : null}
       {error ? <ErrorBox message={error} /> : null}
       {message ? <p className="notice" role="status">{message}</p> : null}
       {preview ? <PreviewTable view={preview} /> : null}

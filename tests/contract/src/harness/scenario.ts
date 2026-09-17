@@ -132,6 +132,8 @@ export interface ReceiverPollStep {
   id: string; kind: 'receiverPoll';
   send?: Array<{ body: unknown; copies?: number; ageMs?: number; corruptMd5?: boolean }>;
   polls?: number; failSink?: number; advanceMs?: number; expect?: unknown;
+  /** OQ-171 (шаг 24): столько приёмников одновременно получают по одному сообщению из одной очереди — повтор доставки параллельно */
+  parallelReceivers?: number;
 }
 
 /** Остановка человеком и её снятие [Р-69, Р-70]: права — по роли участника (DEFAULT_MEMBERS); снятие — по номеру остановки */

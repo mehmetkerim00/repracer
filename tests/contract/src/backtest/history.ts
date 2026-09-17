@@ -41,11 +41,18 @@ const DAY = 86_400_000;
 
 /** История: три конкурента на товар — блуждающий, акционный и статичный дорогой; наша историческая цена — в снимке как isSelf */
 export function syntheticHistory(market: SyntheticMarket): RecordedHistory {
+  return { market, snapshots: [...syntheticSnapshots(market)] };
+}
+
+/**
+ * Шаг 24 (OQ-161): та же история потоком, по времени — бэктест по каталогу за 18 месяцев не держит все снимки в памяти.
+ * При равном зерне генератор выдаёт те же снимки, что syntheticHistory.
+ */
+export function* syntheticSnapshots(market: SyntheticMarket): Generator<CompetitorSnapshot> {
   const rng = new SeededRandom(market.seed);
   const from = Date.parse(market.from);
   const to = Date.parse(market.to);
   const walkers = market.products.map((p) => p.marketPriceMinor);
-  const snapshots: CompetitorSnapshot[] = [];
   let lastStepDay = -1;
   for (let t = from; t < to; t += market.everyMs) {
     const day = Math.floor((t - from) / DAY);
@@ -57,7 +64,8 @@ export function syntheticHistory(market: SyntheticMarket): RecordedHistory {
         walkers[i] = Math.min(Math.round(p.marketPriceMinor * 1.35), Math.max(Math.round(p.marketPriceMinor * 0.65), moved));
       });
     }
-    market.products.forEach((p, i) => {
+    for (let i = 0; i < market.products.length; i++) {
+      const p = market.products[i]!;
       const promoPhase = (day + i * 3) % market.promo.everyDays;
       const promoPrice = promoPhase < market.promo.days
         ? Math.round(p.marketPriceMinor * (1 - market.promo.discountBp / 10_000)) : Math.round(p.marketPriceMinor * 1.04);
@@ -69,13 +77,12 @@ export function syntheticHistory(market: SyntheticMarket): RecordedHistory {
         { isSelf: false, sellerRef: 'Synthetic Premium', minor: Math.round(p.marketPriceMinor * 1.2) },
         { isSelf: true, sellerRef: 'self', minor: p.historicalSelfPriceMinor },
       ].sort((a, b) => a.minor - b.minor || Number(a.isSelf) - Number(b.isSelf));
-      snapshots.push({
+      yield {
         marketplace: market.marketplace, channelProductRef: p.channelProductRef, condition: 'new', source: 'KAUFLAND_BUY_BOX_CHANGED',
         sourceEventId: `syn-${p.channelProductRef}-${t}`, observedAt: new Date(t).toISOString(), completeness: { kind: 'TOP_N', n: 10 },
         buybox: { price: money(offers[0]!.minor), isSelf: offers[0]!.isSelf },
         offers: offers.map((o, rank) => ({ rank: rank + 1, sellerRef: o.sellerRef, isSelf: o.isSelf, price: money(o.minor), shipping: money(0), totalPrice: money(o.minor), deliveryDays: { min: 1, max: 3 } })),
-      });
-    });
+      };
+    }
   }
-  return { market, snapshots };
 }

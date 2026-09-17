@@ -604,6 +604,25 @@ export const STEP21_ROWS = [
 // Шаг 23: защиты строки «Р-116» шага 22 (0080) удалены миграцией 0082 — неверная база цены стала причиной остановки по недоверию каналу [Р-118]
 export const STEP22_ROWS = [];
 
+// Шаг 24
+export const STEP24_ROWS = [
+  {
+    row: 'OQ-172', invariant: 'остановка человеком держит и порог цены канала CHANNEL_MIN_PRICE — создание и отправку',
+    mutations: [
+      m(replaceInFunction('tenant_data.channel_write_stop_guard()', "IF NEW.field NOT IN ('PRICE', 'CHANNEL_MIN_PRICE')", "IF NEW.field NOT IN ('PRICE')"),
+        smoke('channel price floor write created while pricing is stopped by a person (Р-69, OQ-172)'),
+        smoke('dispatch of a channel price floor write while pricing is stopped by a person (Р-69, OQ-172)')),
+    ],
+  },
+  {
+    row: 'OQ-169', invariant: 'единице записи назначается только действующая версия стратегии',
+    mutations: [
+      m(replaceInFunction('tenant_data.write_scope_strategy_guard()', "AND status IS DISTINCT FROM 'ACTIVE' THEN", 'AND false THEN'),
+        smoke('a draft strategy version assigned to an offer (OQ-169)')),
+    ],
+  },
+];
+
 export const STEP23_ROWS = [
   {
     row: 'Р-118', invariant: 'остановка по недоверию каналу держит любую цену и порог цены канала, ставит её система, снимает только человек с правом, от своего имени, со вторым фактором',

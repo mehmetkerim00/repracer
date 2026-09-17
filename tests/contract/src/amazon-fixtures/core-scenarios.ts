@@ -170,6 +170,12 @@ export function buildCoreScenarios(): Array<{ file: string; scenario: Scenario }
       { id: 'retry-after-visibility-pause', kind: 'receiverPoll', advanceMs: 31_000, expect: { polls: outcomes(['0305', 'DELIVERED']), queued: 0 } },
       { id: 'late-and-older-than-accepted', kind: 'receiverPoll', send: [{ body: aoc('0306', -16 * 60_000, 1760), ageMs: 16 * 60_000 }],
         expect: { polls: [{ outcomes: [{ notificationId: 'syn-notification-0306', outcome: 'DELIVERED', late: true }] }], queued: 0 } },
+      // OQ-171 (шаг 24): два приёмника одновременно получают повтор одного уведомления — журнал в транзакции снимка пропускает одно
+      { id: 'parallel-duplicate-processed-once', kind: 'receiverPoll', parallelReceivers: 2, send: [{ body: aoc('0308', -500, 1740), copies: 2 }],
+        expect: { polls: { $unordered: [
+          { outcomes: [{ notificationId: 'syn-notification-0308', outcome: 'DELIVERED' }] },
+          { outcomes: [{ notificationId: 'syn-notification-0308', outcome: 'DUPLICATE' }] },
+        ] }, queued: 0 } },
       { id: 'corrupt-body-is-kept', kind: 'receiverPoll', send: [{ body: aoc('0307', -1_000, 1750), corruptMd5: true }], expect: { polls: [{ outcomes: [{ outcome: 'CORRUPT' }], deleted: 0 }], queued: 1 } },
     ] as Step[],
     [],
@@ -181,7 +187,7 @@ export function buildCoreScenarios(): Array<{ file: string; scenario: Scenario }
       ],
       pipeline: {
         pricingHealth: [{ marketplace: DE, channelProductRef: ASIN, issueType: 'BuyBoxDisqualification', thresholdMinor: 1799 }],
-        inboundNotifications: ['0301', '0303', '0302', '0305', '0306'].map((n) => ({ notificationId: `syn-notification-${n}` })),
+        inboundNotifications: ['0301', '0303', '0302', '0305', '0306', '0308'].map((n) => ({ notificationId: `syn-notification-${n}` })),
       },
     },
   );

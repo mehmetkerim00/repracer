@@ -657,6 +657,18 @@ SELECT pg_temp.expect_fail('channel floor below our min_price', $q$
 SELECT pg_temp.ok('CHANNEL_MIN_PRICE write in Smart Pricing mode', $q$
   INSERT INTO tenant_data.channel_write (tenant_id, write_scope_id, field, amount_minor, currency, price_basis, version, origin)
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', 'CHANNEL_MIN_PRICE', 1000, 'EUR', 'GROSS', 3, 'SMART_PRICING_FLOOR') $q$);
+-- OQ-172 (0085): остановка человеком держит и порог цены канала — создание и отправку; остановка откатывается
+SAVEPOINT oq172;
+INSERT INTO tenant_data.price_stop (tenant_id, scope_type, stopped_by_membership_id, stop_note)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'TENANT', 'a2000000-0000-0000-0000-00000000000a', 'smoke stop holding the channel floor');
+SELECT pg_temp.expect_fail('channel price floor write created while pricing is stopped by a person (Р-69, OQ-172)', $q$
+  INSERT INTO tenant_data.channel_write (tenant_id, write_scope_id, field, amount_minor, currency, price_basis, version, origin)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', 'CHANNEL_MIN_PRICE', 1000, 'EUR', 'GROSS', 4, 'SMART_PRICING_FLOOR') $q$,
+  'pricing is stopped by price_stop');
+SELECT pg_temp.expect_fail('dispatch of a channel price floor write while pricing is stopped by a person (Р-69, OQ-172)', $q$
+  UPDATE tenant_data.channel_write SET status = 'DISPATCHED', attempt_count = 1 WHERE field = 'CHANNEL_MIN_PRICE' AND status = 'PENDING' $q$,
+  'pricing is stopped by price_stop');
+ROLLBACK TO SAVEPOINT oq172;
 SELECT pg_temp.expect_fail('tenant opt-out while scopes in Smart Pricing', $q$
   UPDATE tenant_data.tenant SET kaufland_smart_pricing_opt_in_at = NULL, kaufland_smart_pricing_opt_in_by = NULL $q$, 'switch all write scopes out of KAUFLAND_SMART_PRICING before opting out');
 COMMIT;
@@ -731,6 +743,12 @@ VALUES (:tA, 'a4000000-0000-0000-0000-000000000002', 'AMAZON', 'A1PA6795UKMFR9',
 SELECT pg_temp.expect_fail('strategy assigned to an offer with the channel repricer active (Р-120)', $q$
   UPDATE tenant_data.write_scope SET pricing_strategy_id = 'ad230000-0000-4000-8000-000000000004', pricing_strategy_version = 1
    WHERE write_scope_id = 'ad230000-0000-4000-8000-000000000003' $q$, 'has channel-owned pricing');
+-- OQ-169 (0085): черновик версии стратегии не назначается
+INSERT INTO tenant_data.pricing_strategy (tenant_id, pricing_strategy_id, version, name, type, params, triggers, status, created_by_membership_id)
+VALUES (:tA, 'ad240000-0000-4000-8000-000000000001', 1, 'Draft fixed', 'FIXED', '{"priceMinor": 1500, "deadbandMinor": 0}', ARRAY['COST_CHANGE'], 'DRAFT', :mA);
+SELECT pg_temp.expect_fail('a draft strategy version assigned to an offer (OQ-169)', $q$
+  UPDATE tenant_data.write_scope SET pricing_strategy_id = 'ad240000-0000-4000-8000-000000000001', pricing_strategy_version = 1
+   WHERE write_scope_id = 'ad230000-0000-4000-8000-000000000005' $q$, 'is DRAFT and cannot be assigned');
 ROLLBACK;
 
 BEGIN;

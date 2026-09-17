@@ -65,6 +65,10 @@ export interface StrategyListItem {
   scopes: Array<{ unit: UnitRef; version: number }>;
   /** Черновик новой версии — параметры последней версии */
   draft: StrategyDraft;
+  /** OQ-170 (шаг 24): версии с автором, моментом и статусом — от новой к старой; у стратегий посева в памяти — только номер */
+  versions: Array<{ version: number; status: string; author: string; createdAt: string }>;
+  /** OQ-169: последнюю версию можно назначить выбранным офферам без новой версии — только действующую */
+  assignable: boolean;
 }
 
 export interface StrategyScopeItem {
@@ -74,6 +78,11 @@ export interface StrategyScopeItem {
   /** Р-120: у оффера действует собственное ценообразование канала — стратегию не назначит база */
   channelPricing: StatusCell | null;
   assignable: boolean;
+  /** Стратегия единицы — для назначения и снятия (OQ-169) */
+  strategyId: string | null;
+  version: number | null;
+  /** OQ-169: стратегию можно снять — она есть, репрайсинг выключен, у зрителя есть право */
+  canUnassign: boolean;
 }
 
 export interface StrategyListView {
@@ -95,11 +104,30 @@ export function strategiesView(world: StandWorld, m: Messages, canEdit: boolean)
   const strategies = [...latest.values()].map((d): StrategyListItem => {
     const using = world.state.scopes.filter((s) => s.strategy?.strategyId === d.strategyId);
     const label = strategyLabel(d, using[0]?.currency ?? world.state.scopes[0]?.currency ?? '', m);
-    const name = world.state.strategyNames.find((x) => x.strategyId === d.strategyId)?.name ?? null;
+    const versions = world.state.strategyVersions.filter((x) => x.strategyId === d.strategyId);
+    const name = versions.find((x) => x.version === d.version)?.name ?? versions.at(-1)?.name ?? null;
+    const member = (id: string | null) => {
+      if (!id) return m.ui.strategies.authorUnknown;
+      const role = world.state.members.find((x) => x.membershipId === id)?.role;
+      const label = role ? m.values[role] : m.ui.strategies.authorUnknown;
+      return id === world.viewer.membershipId ? m.ui.stop.you(label) : label;
+    };
+    const allVersions = [...new Set([...versions.map((x) => x.version), ...world.state.strategies.filter((x) => x.strategyId === d.strategyId).map((x) => x.version), d.version])]
+      .sort((a, b) => b - a)
+      .map((version) => {
+        const meta = versions.find((x) => x.version === version);
+        return {
+          version, status: meta ? m.ui.strategies.statuses[meta.status] : m.ui.strategies.statusUnknown,
+          author: meta ? member(meta.createdByMembershipId) : m.ui.strategies.authorUnknown, createdAt: meta?.createdAt ? m.when(meta.createdAt) : m.ui.common.noValue,
+        };
+      });
+    const latestMeta = versions.find((x) => x.version === d.version);
     return {
       strategyId: d.strategyId, version: d.version, name, label: label.label, detail: label.detail,
       scopes: using.map((s) => ({ unit: unitOf(world, s, m), version: s.strategy!.version })),
       draft: { name: name ?? label.label, params: { ...d.params }, deadbandMinor: d.deadbandMinor },
+      versions: allVersions,
+      assignable: canEdit && (latestMeta?.status ?? 'ACTIVE') === 'ACTIVE',
     };
   }).sort((a, b) => b.scopes.length - a.scopes.length || a.strategyId.localeCompare(b.strategyId));
   const scopes = world.state.scopes.map((s): StrategyScopeItem => {
@@ -107,6 +135,8 @@ export function strategiesView(world: StandWorld, m: Messages, canEdit: boolean)
     return {
       unit: unitOf(world, s, m), mode: m.values[s.pricingMode], strategy: strategyLabel(s.strategy, s.currency, m).label,
       channelPricing: notes[0] ?? null, assignable: notes.length === 0,
+      strategyId: s.strategy?.strategyId ?? null, version: s.strategy?.version ?? null,
+      canUnassign: canEdit && s.strategy !== null && s.pricingMode !== 'ENGINE',
     };
   });
   const channelPricingOffers = world.accounts.flatMap((a) => {
@@ -122,7 +152,7 @@ export function strategiesView(world: StandWorld, m: Messages, canEdit: boolean)
   return {
     worldId: world.id, strategies, scopes, channelPricingOffers, canEdit,
     gaps: [
-      gap(m, 'STRATEGY_ASSIGN_CREATES_VERSION'), gap(m, 'STRATEGY_AUTHOR'), gap(m, 'POSITION_STRATEGY'),
+      gap(m, 'POSITION_STRATEGY'),
       ...(channelPricingOffers.length > 0 ? [gap(m, 'CHANNEL_PRICING_OFFERS_WITHOUT_SCOPE')] : []),
     ],
   };

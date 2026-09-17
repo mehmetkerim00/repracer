@@ -1084,6 +1084,169 @@
       }
     },
     {
+      "id": "parallel-duplicate-processed-once",
+      "kind": "receiverPoll",
+      "parallelReceivers": 2,
+      "send": [
+        {
+          "body": {
+            "NotificationVersion": "1.0",
+            "NotificationType": "ANY_OFFER_CHANGED",
+            "PayloadVersion": "1.0",
+            "EventTime": {
+              "$clockIso": -500
+            },
+            "NotificationMetadata": {
+              "ApplicationId": "amzn1.sellerapps.app.syn0001",
+              "SubscriptionId": "syn-subscription-0001",
+              "PublishTime": {
+                "$clockIso": -500
+              },
+              "NotificationId": "syn-notification-0308"
+            },
+            "Payload": {
+              "AnyOfferChangedNotification": {
+                "SellerId": "A1SYNSELLER0001",
+                "OfferChangeTrigger": {
+                  "MarketplaceId": "A1PA6795UKMFR9",
+                  "ASIN": "B000008401",
+                  "ItemCondition": "new",
+                  "TimeOfOfferChange": {
+                    "$clockIso": -500
+                  },
+                  "OfferChangeType": "External"
+                },
+                "Summary": {
+                  "NumberOfOffers": [
+                    {
+                      "Condition": "new",
+                      "FulfillmentChannel": "Merchant",
+                      "OfferCount": 2
+                    }
+                  ],
+                  "LowestPrices": [],
+                  "BuyBoxPrices": [
+                    {
+                      "Condition": "new",
+                      "LandedPrice": {
+                        "Amount": 17.4,
+                        "CurrencyCode": "EUR"
+                      },
+                      "ListingPrice": {
+                        "Amount": 17.4,
+                        "CurrencyCode": "EUR"
+                      },
+                      "Shipping": {
+                        "Amount": 0,
+                        "CurrencyCode": "EUR"
+                      }
+                    }
+                  ],
+                  "TotalBuyBoxEligibleOffers": 2,
+                  "SalesRankings": [],
+                  "NumberOfBuyBoxEligibleOffers": []
+                },
+                "Offers": [
+                  {
+                    "SellerId": "A2SYNCOMP00001",
+                    "SubCondition": "new",
+                    "SellerFeedbackRating": {
+                      "FeedbackCount": 120,
+                      "SellerPositiveFeedbackRating": 98
+                    },
+                    "ShippingTime": {
+                      "MinimumHours": 24,
+                      "MaximumHours": 72,
+                      "AvailabilityType": "NOW"
+                    },
+                    "ListingPrice": {
+                      "Amount": 17.4,
+                      "CurrencyCode": "EUR"
+                    },
+                    "Shipping": {
+                      "Amount": 0,
+                      "CurrencyCode": "EUR"
+                    },
+                    "ShipsFrom": {
+                      "Country": "DE"
+                    },
+                    "IsFulfilledByAmazon": false,
+                    "IsBuyBoxWinner": true,
+                    "PrimeInformation": {
+                      "IsOfferPrime": false,
+                      "IsOfferNationalPrime": false
+                    },
+                    "IsExpeditedShippingAvailable": false,
+                    "IsFeaturedMerchant": true,
+                    "ShipsDomestically": true,
+                    "ShipsInternationally": false
+                  },
+                  {
+                    "SellerId": "A1SYNSELLER0001",
+                    "SubCondition": "new",
+                    "SellerFeedbackRating": {
+                      "FeedbackCount": 120,
+                      "SellerPositiveFeedbackRating": 98
+                    },
+                    "ShippingTime": {
+                      "MinimumHours": 24,
+                      "MaximumHours": 72,
+                      "AvailabilityType": "NOW"
+                    },
+                    "ListingPrice": {
+                      "Amount": 18.5,
+                      "CurrencyCode": "EUR"
+                    },
+                    "Shipping": {
+                      "Amount": 0,
+                      "CurrencyCode": "EUR"
+                    },
+                    "ShipsFrom": {
+                      "Country": "DE"
+                    },
+                    "IsFulfilledByAmazon": false,
+                    "IsBuyBoxWinner": false,
+                    "PrimeInformation": {
+                      "IsOfferPrime": false,
+                      "IsOfferNationalPrime": false
+                    },
+                    "IsExpeditedShippingAvailable": false,
+                    "IsFeaturedMerchant": true,
+                    "ShipsDomestically": true,
+                    "ShipsInternationally": false
+                  }
+                ]
+              }
+            }
+          },
+          "copies": 2
+        }
+      ],
+      "expect": {
+        "polls": {
+          "$unordered": [
+            {
+              "outcomes": [
+                {
+                  "notificationId": "syn-notification-0308",
+                  "outcome": "DELIVERED"
+                }
+              ]
+            },
+            {
+              "outcomes": [
+                {
+                  "notificationId": "syn-notification-0308",
+                  "outcome": "DUPLICATE"
+                }
+              ]
+            }
+          ]
+        },
+        "queued": 0
+      }
+    },
+    {
       "id": "corrupt-body-is-kept",
       "kind": "receiverPoll",
       "send": [
@@ -1282,6 +1445,9 @@
         },
         {
           "notificationId": "syn-notification-0306"
+        },
+        {
+          "notificationId": "syn-notification-0308"
         }
       ]
     }

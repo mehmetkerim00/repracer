@@ -14,7 +14,7 @@ import type {
   ReadBackResult,
 } from '@repracer/channel-port';
 import { assertBacktestWindow, type HistoryWindow } from '@repracer/analytics-export';
-import { createPricingPipeline, InMemoryPricingStore, type MemorySeedScope } from '@repracer/pricing-pipeline';
+import { createPricingPipeline, InMemoryPricingStore, type MemorySeedScope, type SnapshotReport } from '@repracer/pricing-pipeline';
 import { DANGEROUS_DEVIATION_BP, marginBpAtPrice, type CostInputs } from '@repracer/pricing-model';
 import { KAUFLAND_DESCRIPTOR } from '@repracer/kaufland-adapter';
 
@@ -42,7 +42,11 @@ export interface BacktestInput {
   channelAccountId: string;
   /** Единицы записи с текущими стратегией, границами и себестоимостью (cost обязателен — иначе маржу не посчитать) */
   scopes: MemorySeedScope[];
-  history: CompetitorSnapshot[];
+  /**
+   * Снимки истории. Массив сортируется; поток (генератор) обязан идти по времени — иначе ошибка (шаг 24: история каталога за 18 месяцев
+   * не держится в памяти целиком)
+   */
+  history: CompetitorSnapshot[] | Iterable<CompetitorSnapshot>;
   window: HistoryWindow;
   now: string;
   /** Допущение спроса: продаж в час, пока наше предложение выигрывает Buy Box. Без него прибыль не считается */
@@ -134,6 +138,8 @@ export function wins(recorded: CompetitorSnapshot, selfPriceMinor: number): bool
 class InstantChannel implements ChannelAdapter {
   readonly descriptor = KAUFLAND_DESCRIPTOR;
   readonly prices = new Map<string, number>();
+  /** Применённые записи цены по единице — «изменений» отчёта; канал бэктеста применяет каждую отправленную запись */
+  readonly applied = new Map<string, number>();
   readonly lowest = new Map<string, number>();
   readonly latest = new Map<string, CompetitorSnapshot>();
 
@@ -146,6 +152,7 @@ class InstantChannel implements ChannelAdapter {
       if (w.value.field !== 'PRICE') continue;
       const id = w.writeScope.writeScopeId;
       this.prices.set(id, w.value.price.amountMinor);
+      this.applied.set(id, (this.applied.get(id) ?? 0) + 1);
       this.lowest.set(id, Math.min(this.lowest.get(id) ?? Number.POSITIVE_INFINITY, w.value.price.amountMinor));
     }
     return { batchId: batch.batchId, outcomes: batch.items.map((w) => ({ channelWriteId: w.channelWriteId, status: 'ACCEPTED', appliedImmediately: true })), attemptsMade: 1 };
@@ -174,8 +181,16 @@ export async function runBacktest(input: BacktestInput): Promise<BacktestReport>
   assertBacktestWindow(input.window, input.now);
   const from = Date.parse(input.window.from);
   const to = Date.parse(input.window.to);
-  const history = input.history.filter((s) => Date.parse(s.observedAt) >= from && Date.parse(s.observedAt) < to)
-    .sort((a, b) => Date.parse(a.observedAt) - Date.parse(b.observedAt));
+  const history: Iterable<CompetitorSnapshot> = Array.isArray(input.history)
+    ? [...input.history].sort((a, b) => Date.parse(a.observedAt) - Date.parse(b.observedAt))
+    : input.history;
+  let snapshots = 0;
+  let previousAt = Number.NEGATIVE_INFINITY;
+  // Шаг 24 (OQ-161): удаление по сроку каждые 6 часов истории — хранилище держит последние 2 суток. Путь решения старые решения и intent
+  // не читает; окно сдвига — 15 минут, лимит изменений — час, история цен конкурентов для якоря хранится отдельно и не удаляется
+  const PRUNE_EVERY_MS = 6 * 3_600_000;
+  const KEEP_MS = 2 * 86_400_000;
+  let nextPrune = from + PRUNE_EVERY_MS;
 
   let nowMs = from;
   const store = new InMemoryPricingStore({ scopes: input.scopes }, { tenantId: input.tenantId });
@@ -193,7 +208,16 @@ export async function runBacktest(input: BacktestInput): Promise<BacktestReport>
   const strategyAcc = new Map(input.scopes.map((s) => [s.writeScopeId, emptyAcc()]));
   const baselineAcc = new Map(input.scopes.map((s) => [s.writeScopeId, emptyAcc()]));
   const last = new Map<string, { at: number; recorded: CompetitorSnapshot; prices: Map<string, number> }>();
-  const counts = new Map(input.scopes.map((s) => [s.writeScopeId, { sanityRejected: 0 }]));
+  const counts = new Map(input.scopes.map((s) => [s.writeScopeId, { sanityRejected: 0, gateRejected: 0, dangerousStopped: 0 }]));
+  // Итоги решений считаются по отчётам сразу: старые решения удаляются из хранилища по сроку
+  const countDecisions = (r: SnapshotReport) => {
+    for (const s of r.scopes) {
+      const c = counts.get(s.writeScopeId);
+      if (!c || s.decision?.decisionClass !== 'REJECTED_BY_GATE') continue;
+      c.gateRejected += 1;
+      if ((s.decision.boundDeviationBp ?? 0) > DANGEROUS_DEVIATION_BP) c.dangerousStopped += 1;
+    }
+  };
   let mismatches = 0;
   let calibrated = 0;
   let nextHaltReview = from + (input.haltReviewEveryMs ?? 3_600_000);
@@ -219,6 +243,10 @@ export async function runBacktest(input: BacktestInput): Promise<BacktestReport>
 
   for (const recorded of history) {
     const at = Date.parse(recorded.observedAt);
+    if (at < previousAt) throw new Error('backtest history stream must be ordered by observedAt');
+    previousAt = at;
+    if (at < from || at >= to) continue;
+    snapshots += 1;
     const key = productKey(recorded);
     const scopes = scopesByProduct.get(key) ?? [];
     const previous = last.get(key);
@@ -240,13 +268,18 @@ export async function runBacktest(input: BacktestInput): Promise<BacktestReport>
     // Снимок чуть позже момента наблюдения — как доставка уведомления
     nowMs = Math.max(nowMs, at + 1_000);
     while (nowMs >= nextHaltReview) {
-      await pipeline.reviewHalts(ctx(), 5);
+      for (const review of await pipeline.reviewHalts(ctx(), 5)) for (const r of review.snapshots) countDecisions(r);
       nextHaltReview += input.haltReviewEveryMs ?? 3_600_000;
+    }
+    if (nowMs >= nextPrune) {
+      store.pruneBefore(new Date(nowMs - KEEP_MS).toISOString());
+      nextPrune = nowMs + PRUNE_EVERY_MS;
     }
     const selfPrice = scopes[0] ? channel.prices.get(scopes[0].writeScopeId) ?? null : null;
     const cf = counterfactual(recorded, selfPrice);
     channel.latest.set(key, cf);
     const report = await pipeline.processSnapshot(ctx(), cf);
+    countDecisions(report);
     if (report.verdict !== 'ACCEPT') for (const scope of scopes) counts.get(scope.writeScopeId)!.sanityRejected += 1;
     // Отклонённый проверкой входов снимок (испорченная цена) не считается рынком интервала: остаётся предыдущий принятый
     const market = report.verdict === 'ACCEPT' || !previous ? recorded : previous.recorded;
@@ -263,7 +296,7 @@ export async function runBacktest(input: BacktestInput): Promise<BacktestReport>
 
   const dump = await store.dump();
   const metrics = (acc: Accumulator, scope: MemorySeedScope, strategy: boolean): ScopeMetrics => {
-    const decisions = dump.decisions.filter((d) => d.writeScopeId === scope.writeScopeId);
+    const c = counts.get(scope.writeScopeId)!;
     return {
       writeScopeId: scope.writeScopeId,
       currency: scope.currency,
@@ -271,10 +304,10 @@ export async function runBacktest(input: BacktestInput): Promise<BacktestReport>
       buyBoxShareBp: acc.ms > 0 ? Math.round((acc.winMs * 10_000) / acc.ms) : 0,
       avgMarginBp: acc.marginKnownMs > 0 ? Math.round(acc.marginMsBp / acc.marginKnownMs) : null,
       minMarginBp: acc.minMarginBp,
-      priceChanges: strategy ? dump.writes.filter((w) => w.writeScopeId === scope.writeScopeId && w.status === 'APPLIED').length : 0,
-      gateRejected: strategy ? decisions.filter((d) => d.decisionClass === 'REJECTED_BY_GATE').length : 0,
-      dangerousStopped: strategy ? decisions.filter((d) => d.decisionClass === 'REJECTED_BY_GATE' && (d.boundDeviationBp ?? 0) > DANGEROUS_DEVIATION_BP).length : 0,
-      sanityRejected: strategy ? counts.get(scope.writeScopeId)!.sanityRejected : 0,
+      priceChanges: strategy ? channel.applied.get(scope.writeScopeId) ?? 0 : 0,
+      gateRejected: strategy ? c.gateRejected : 0,
+      dangerousStopped: strategy ? c.dangerousStopped : 0,
+      sanityRejected: strategy ? c.sanityRejected : 0,
       finalPriceMinor: strategy ? channel.prices.get(scope.writeScopeId) ?? null : null,
       lowestWrittenMinor: strategy ? channel.lowest.get(scope.writeScopeId) ?? null : null,
       estimatedUnits: input.demand ? Math.round(acc.units) : null,
@@ -284,7 +317,7 @@ export async function runBacktest(input: BacktestInput): Promise<BacktestReport>
 
   return {
     window: input.window,
-    snapshots: history.length,
+    snapshots,
     halts: dump.halts.length,
     strategy: { perScope: input.scopes.map((s) => metrics(strategyAcc.get(s.writeScopeId)!, s, true)) },
     baseline: { perScope: input.scopes.map((s) => metrics(baselineAcc.get(s.writeScopeId)!, s, false)) },
