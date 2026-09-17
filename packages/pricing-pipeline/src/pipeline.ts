@@ -18,6 +18,7 @@ import { decide, GATE_PROFILE, repricingWarnings, validateRepricingEnablement } 
 import {
   buildExplanation,
   isCompetitorDerived,
+  sellerActionFor,
   summarizeSanity,
   type AcceptedSnapshot,
   type SanitySummary,
@@ -596,7 +597,19 @@ export function createPricingPipeline(deps: PipelineDeps) {
         await emit(ctx, [{ kind: 'log', level: 'WARN', code: 'REPRICING_WARNINGS_NOT_ACKNOWLEDGED', message: 'REPRICING_WARNINGS_NOT_ACKNOWLEDGED', details: { writeScopeId, warnings: codes(warnings) } }]);
         return { enabled: false, problems: [], warnings };
       }
-      await store.setPricingMode(ctx.tenantId, writeScopeId, 'ENGINE', options.userId);
+      try {
+        await store.setPricingMode(ctx.tenantId, writeScopeId, 'ENGINE', options.userId);
+      } catch (error) {
+        // Р-120 (ревью шага 23, находка 1): у предложения действует ценообразование канала — база и двойник отказывают; продавцу — действие
+        const code = /channel-owned pricing \((CHANNEL_REPRICER_ACTIVE|CHANNEL_BOUNDS_PRESENT)\)/.exec(String((error as Error).message))?.[1];
+        if (!code) throw error;
+        const problem: Reason = {
+          code: 'SCOPE_NOT_ACTIVE',
+          params: { status: scope.status, mode: scope.pricingMode, blockedByErrorCode: code, blockedSince: deps.now(), action: sellerActionFor(code) },
+        };
+        await emit(ctx, [{ kind: 'log', level: 'WARN', code: 'REPRICING_NOT_ENABLED', message: 'REPRICING_NOT_ENABLED', details: { writeScopeId, problems: problem.code, warnings: codes(warnings) } }]);
+        return { enabled: false, problems: [problem], warnings };
+      }
       return { enabled: true, problems: [], warnings };
     },
 

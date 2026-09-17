@@ -5,7 +5,6 @@ import { channelError } from './errors.ts';
 
 export const OPERATION_PATCH = 'patchListingsItem';
 
-/** SKU единицы записи: external_sku (очередь записей) или externalUnitId (путь решения переносит SKU туда, store.ts 345) */
 /** SKU — только `externalSku` идентичности (OQ-165: одно определение, `offerIdentityOf`); unit Kaufland сюда не подставляется */
 export function skuOf(write: { writeScope: { identity: { externalSku?: string } } }): string | null {
   const sku = write.writeScope.identity.externalSku;

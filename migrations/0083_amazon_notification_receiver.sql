@@ -25,12 +25,16 @@ GRANT SELECT (tenant_id, channel_account_id, channel, region, external_account_i
 CREATE POLICY inbound_router_resolve ON tenant_data.channel_account FOR SELECT TO repracer_inbound_router
   USING (channel = 'AMAZON' AND disconnected_at IS NULL);
 
-/** Аккаунты Amazon, подключившие продавца в регионе (активное подключение — одно на канал, регион и продавца, channel_account_external_uq) */
+/**
+ * Аккаунты Amazon, подключившие продавца в регионе (активное подключение — одно на канал, регион и продавца, channel_account_external_uq).
+ * Подключённость ограничивает только политика inbound_router_resolve: функция её не повторяет (Р-104, ревью шага 23, находка 9). Регион есть
+ * только у аккаунтов Amazon (CHECK channel_account: канал AMAZON ⇔ регион задан), поэтому совпадение региона уже означает Amazon
+ */
 CREATE FUNCTION security.resolve_amazon_seller(p_region text, p_seller_id text) RETURNS TABLE (tenant_id uuid, channel_account_id uuid)
   LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $fn$
   SELECT a.tenant_id, a.channel_account_id
     FROM tenant_data.channel_account a
-   WHERE a.channel = 'AMAZON' AND a.region = p_region AND a.external_account_id = p_seller_id AND a.disconnected_at IS NULL
+   WHERE a.region = p_region AND a.external_account_id = p_seller_id
 $fn$;
 ALTER FUNCTION security.resolve_amazon_seller(text, text) OWNER TO repracer_inbound_router;
 REVOKE EXECUTE ON FUNCTION security.resolve_amazon_seller(text, text) FROM PUBLIC;
@@ -76,6 +80,9 @@ CREATE TABLE channel_data.offer_pricing_health (
   -- summary.referencePrice.competitivePriceThreshold — цена канала; валюта — вместе с суммой
   competitive_price_threshold_minor  bigint,
   currency                           text,
+  -- Р-71, инвариант 7 (ревью шага 23, находка 10): сумма — только с валютой, валюта — код ISO, сумма не отрицательна
+  CONSTRAINT offer_pricing_health_threshold_money CHECK ((competitive_price_threshold_minor IS NULL) = (currency IS NULL)
+    AND (currency IS NULL OR currency ~ '^[A-Z]{3}$') AND (competitive_price_threshold_minor IS NULL OR competitive_price_threshold_minor >= 0)),
   notification_id                    text NOT NULL,
   recorded_at                        timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (tenant_id, offer_pricing_health_id),

@@ -661,6 +661,25 @@ SELECT pg_temp.expect_fail('tenant opt-out while scopes in Smart Pricing', $q$
   UPDATE tenant_data.tenant SET kaufland_smart_pricing_opt_in_at = NULL, kaufland_smart_pricing_opt_in_by = NULL $q$, 'switch all write scopes out of KAUFLAND_SMART_PRICING before opting out');
 COMMIT;
 
+-- Р-118, OQ-166 (ревью шага 23, находка 7): недоверие каналу держит и порог цены канала — создание и отправку CHANNEL_MIN_PRICE.
+-- Недоверие ставит путь решения — отдельной сессией роли пути решения, всё откатывается
+\c - svc_app
+\ir smoke_helpers.sql
+BEGIN;
+SELECT set_config('app.tenant_id', :tA, true) \gset
+INSERT INTO channel_data.channel_distrust (tenant_id, channel_account_id, channel, marketplace, reason_code, details)
+VALUES (:tA, 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'PRICE_BASIS_MISMATCH', '{"basisError": "TAX_ADDED"}');
+SELECT pg_temp.expect_fail('channel price floor write created while the channel is distrusted (Р-118, OQ-166)', $q$
+  INSERT INTO tenant_data.channel_write (tenant_id, write_scope_id, field, amount_minor, currency, price_basis, version, origin)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', 'CHANNEL_MIN_PRICE', 1000, 'EUR', 'GROSS', 4, 'SMART_PRICING_FLOOR') $q$,
+  'the channel is distrusted by channel_distrust');
+SELECT pg_temp.expect_fail('dispatch of a channel price floor write while the channel is distrusted (Р-118, OQ-166)', $q$
+  UPDATE tenant_data.channel_write SET status = 'DISPATCHED', attempt_count = 1 WHERE field = 'CHANNEL_MIN_PRICE' AND status = 'PENDING' $q$,
+  'the channel is distrusted by channel_distrust');
+ROLLBACK;
+\c - svc_admin
+\ir smoke_helpers.sql
+
 -- ---------------------------------------------------------------- Amazon side effects, stock
 BEGIN;
 SELECT set_config('app.tenant_id', :tA, true), set_config('app.user_id', :uA, true) \gset

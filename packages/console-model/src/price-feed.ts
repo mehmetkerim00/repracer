@@ -23,7 +23,7 @@ export interface FeedItem {
   decisionId: string | null;
 }
 
-export const FEED_STATUS_GROUPS = ['APPLIED', 'IN_FLIGHT', 'NOT_SENT'] as const;
+export const FEED_STATUS_GROUPS = ['APPLIED', 'IN_FLIGHT', 'NOT_SENT', 'SUPERSEDED'] as const;
 export type FeedStatusGroup = (typeof FEED_STATUS_GROUPS)[number];
 export const FEED_PERIODS_DAYS = [1, 7, 30] as const;
 /** Страница ленты — не больше 200 записей за запрос */
@@ -41,7 +41,7 @@ export interface FeedQuery {
 export interface PriceFeedView {
   worldId: string;
   items: FeedItem[];
-  counts: { applied: number; inFlight: number; notSent: number };
+  counts: { applied: number; inFlight: number; notSent: number; superseded: number };
   query: { writeScopeId: string | null; status: FeedStatusGroup | null; days: number | null; offset: number; limit: number };
   page: { from: number; to: number; total: number; text: string; hasPrevious: boolean; hasNext: boolean };
   /** Офферы для фильтра */
@@ -80,7 +80,8 @@ const STATUS_TONE: Readonly<Record<string, Tone>> = {
 };
 const IN_FLIGHT = new Set(['PENDING', 'DISPATCHED', 'ACCEPTED', 'BLOCKED']);
 const NOT_SENT = new Set(['FAILED', 'NOT_APPLIED', 'DISCARDED_STALE', 'BUDGET_EXHAUSTED']);
-const inGroup = (status: string, group: FeedStatusGroup) => (group === 'APPLIED' ? status === 'APPLIED' : group === 'IN_FLIGHT' ? IN_FLIGHT.has(status) : NOT_SENT.has(status));
+// Ревью шага 23, находка 17: каждая запись — ровно в одной группе, счётчики складываются в итог без фильтра
+const inGroup = (status: string, group: FeedStatusGroup) => (group === 'APPLIED' ? status === 'APPLIED' : group === 'IN_FLIGHT' ? IN_FLIGHT.has(status) : group === 'NOT_SENT' ? NOT_SENT.has(status) : status === 'SUPERSEDED');
 
 export function priceFeed(world: StandWorld, m: Messages, filter: FeedQuery = {}): PriceFeedView {
   const f = m.ui.feed;
@@ -117,6 +118,7 @@ export function priceFeed(world: StandWorld, m: Messages, filter: FeedQuery = {}
       applied: scoped.filter((w) => inGroup(w.status, 'APPLIED')).length,
       inFlight: scoped.filter((w) => inGroup(w.status, 'IN_FLIGHT')).length,
       notSent: scoped.filter((w) => inGroup(w.status, 'NOT_SENT')).length,
+      superseded: scoped.filter((w) => inGroup(w.status, 'SUPERSEDED')).length,
     },
     query: { writeScopeId: filter.writeScopeId ?? null, status: filter.status ?? null, days: filter.days ?? null, offset, limit },
     page: { from, to, total: writes.length, text: f.page(from, to, writes.length), hasPrevious: offset > 0, hasNext: to < writes.length },

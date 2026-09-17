@@ -83,7 +83,7 @@ test('step 21: the price feed shows the write with the price it started from and
   const happy = await live('kaufland/pipeline/happy-path').view(user('VIEWER'));
   const feed = priceFeed(happy, en);
   assert.deepEqual(feed.items.map((i) => [i.from, i.to, i.change, i.status, i.source]), [['€18.50', '€17.75', '−4.1%', 'Applied', 'Buy Box']]);
-  assert.deepEqual(feed.counts, { applied: 1, inFlight: 0, notSent: 0 });
+  assert.deepEqual(feed.counts, { applied: 1, inFlight: 0, notSent: 0, superseded: 0 });
 
   const above = await live('kaufland/pipeline/above-max-price').view(user('VIEWER'));
   const report = dangerousReport(above, 30, en);

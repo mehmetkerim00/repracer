@@ -216,7 +216,7 @@ export class PgWriteQueueStore implements WriteQueueStore {
       const current = await this.lockWrite(tx, tenantId, write);
       if (!current || current.status !== 'DISPATCHED') return this.unchanged(tx, tenantId, write, current);
       const transition = planOutcomeTransition(outcome, Number(current.attempt_count), now, policy);
-      return this.apply(tx, tenantId, write, 'DISPATCHED', transition, now);
+      return this.apply(tx, tenantId, write, 'DISPATCHED', transition, now, 'PRE_WRITE_READ');
     });
   }
 
@@ -226,7 +226,7 @@ export class PgWriteQueueStore implements WriteQueueStore {
       if (!current || (current.status !== 'DISPATCHED' && current.status !== 'ACCEPTED')) return this.unchanged(tx, tenantId, write, current);
       const since = iso(current.accepted_at ?? current.dispatched_at);
       const transition = planReconciliationTransition(current.status, result, Number(current.attempt_count), since, now, policy);
-      return this.apply(tx, tenantId, write, current.status, transition, now);
+      return this.apply(tx, tenantId, write, current.status, transition, now, 'READBACK');
     });
   }
 
@@ -300,7 +300,21 @@ export class PgWriteQueueStore implements WriteQueueStore {
     return { status, ...(await this.scopeState(tx, tenantId, write)), nextAttemptAt: null, reason: null, scopeBlocked: false };
   }
 
-  private async apply(tx: Tx, tenantId: string, write: FieldWrite, from: 'DISPATCHED' | 'ACCEPTED', t: OutcomeTransition, now: Instant): Promise<RecordedOutcome> {
+  /**
+   * Р-120 (ревью шага 23, находка 2): ценообразование канала, найденное чтением перед записью или обратным чтением, — наблюдение оффера,
+   * как при обнаружении: список консоли и страж назначения стратегии видят его сразу
+   */
+  private async observeChannelPricing(tx: Tx, tenantId: string, write: FieldWrite, errorCode: string, source: 'PRE_WRITE_READ' | 'READBACK', now: Instant): Promise<void> {
+    if (errorCode !== 'CHANNEL_REPRICER_ACTIVE' && errorCode !== 'CHANNEL_BOUNDS_PRESENT') return;
+    await tx.query(
+      `INSERT INTO channel_data.offer_channel_pricing (tenant_id, channel_account_id, channel, marketplace, external_sku, automated_pricing, channel_bounds, source, observed_at)
+       SELECT m.tenant_id, m.channel_account_id, a.channel, m.marketplace, m.external_sku, $3, $4, $5, $6
+         FROM tenant_data.offer_mapping m JOIN tenant_data.channel_account a ON a.tenant_id = m.tenant_id AND a.channel_account_id = m.channel_account_id
+        WHERE m.tenant_id = $1 AND m.price_write_scope_id = $2 AND m.external_sku IS NOT NULL`,
+      [tenantId, write.writeScope.writeScopeId, errorCode === 'CHANNEL_REPRICER_ACTIVE', errorCode === 'CHANNEL_BOUNDS_PRESENT', source, now]);
+  }
+
+  private async apply(tx: Tx, tenantId: string, write: FieldWrite, from: 'DISPATCHED' | 'ACCEPTED', t: OutcomeTransition, now: Instant, source: 'PRE_WRITE_READ' | 'READBACK'): Promise<RecordedOutcome> {
     const id = write.channelWriteId;
     const set = (sql: string, params: unknown[] = []) => tx.query(`UPDATE tenant_data.channel_write SET ${sql} WHERE tenant_id = $1 AND channel_write_id = $2`, [tenantId, id, ...params]);
     let status: RecordedOutcome['status'];
@@ -342,6 +356,7 @@ export class PgWriteQueueStore implements WriteQueueStore {
         await set(`status = 'FAILED', last_error_code = $3, next_attempt_at = NULL`, [t.errorCode]);
         await tx.query(`UPDATE tenant_data.write_scope SET status = 'BLOCKED' WHERE tenant_id = $1 AND write_scope_id = $2`,
           [tenantId, write.writeScope.writeScopeId]);
+        await this.observeChannelPricing(tx, tenantId, write, t.errorCode, source, now);
         status = 'FAILED';
         reason = t.reason;
         scopeBlocked = true;
@@ -352,6 +367,7 @@ export class PgWriteQueueStore implements WriteQueueStore {
         else await set(`last_error_code = $3, next_attempt_at = NULL`, [t.errorCode]);
         await tx.query(`UPDATE tenant_data.write_scope SET status = 'BLOCKED' WHERE tenant_id = $1 AND write_scope_id = $2`,
           [tenantId, write.writeScope.writeScopeId]);
+        await this.observeChannelPricing(tx, tenantId, write, t.errorCode, source, now);
         status = from === 'DISPATCHED' ? 'FAILED' : 'ACCEPTED';
         reason = t.reason;
         scopeBlocked = true;

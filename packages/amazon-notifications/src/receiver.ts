@@ -119,6 +119,9 @@ export function createNotificationReceiver(options: ReceiverOptions): Notificati
     // Тело искажено по дороге: не удаляем — придёт снова, после maxReceiveCount уйдёт в очередь недоставленных
     if (md5Hex(message.body) !== message.md5OfBody.toLowerCase()) {
       log('WARN', 'NOTIFICATION_BODY_CORRUPT', { messageId: message.messageId });
+      // Ревью шага 23, находка 4: на последней попытке — тот же CRITICAL, что у сбоя обработки, дальше очередь недоставленных
+      const count = message.attributes.approximateReceiveCount ?? 1;
+      if (count >= policy.maxReceiveCount) await alert('NOTIFICATION_GIVING_UP', 'CRITICAL', { messageId: message.messageId, receiveCount: count, corrupt: true });
       return { ...base, outcome: 'CORRUPT' };
     }
     if (!parsed.ok) {

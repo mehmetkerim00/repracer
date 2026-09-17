@@ -808,7 +808,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   async recordOutcome(_tenantId: string, write: FieldWrite, outcome: WriteOutcome, now: Instant, policy: RetryPolicy): Promise<RecordedOutcome> {
     const w = this.writes.find((x) => x.channelWriteId === write.channelWriteId);
     if (!w || w.status !== 'DISPATCHED') return this.recorded(write.writeScope.writeScopeId, (w?.status ?? 'APPLIED') as RecordedOutcome['status'], null, null, false);
-    return this.apply(w, 'DISPATCHED', planOutcomeTransition(outcome, w.attemptCount, now, policy), now);
+    return this.apply(w, 'DISPATCHED', planOutcomeTransition(outcome, w.attemptCount, now, policy), now, 'PRE_WRITE_READ');
   }
 
   /** Как channel_data.offer_channel_pricing_active (0082): последнее наблюдение оффера — правило или границы канала */
@@ -901,10 +901,20 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       return this.recorded(write.writeScope.writeScopeId, (w?.status ?? 'APPLIED') as RecordedOutcome['status'], null, null, false);
     }
     const since = w.acceptedAt ?? w.dispatchedAt ?? now;
-    return this.apply(w, w.status, planReconciliationTransition(w.status, result, w.attemptCount, since, now, policy), now);
+    return this.apply(w, w.status, planReconciliationTransition(w.status, result, w.attemptCount, since, now, policy), now, 'READBACK');
   }
 
-  private apply(w: WriteRow, from: 'DISPATCHED' | 'ACCEPTED', t: OutcomeTransition, now: Instant): RecordedOutcome {
+  /** Как PgWriteQueueStore.observeChannelPricing (ревью шага 23, находка 2): найденное ценообразование канала — наблюдение оффера [Р-120] */
+  private observeChannelPricing(w: WriteRow, errorCode: string, source: 'PRE_WRITE_READ' | 'READBACK', now: Instant): void {
+    if (errorCode !== 'CHANNEL_REPRICER_ACTIVE' && errorCode !== 'CHANNEL_BOUNDS_PRESENT') return;
+    const row = this.scope(w.writeScopeId);
+    this.offerChannelPricing.push({
+      channelAccountId: row.channelAccountId, marketplace: row.marketplace, externalSku: row.externalUnitId,
+      automatedPricing: errorCode === 'CHANNEL_REPRICER_ACTIVE', channelBounds: errorCode === 'CHANNEL_BOUNDS_PRESENT', source, observedAt: now,
+    });
+  }
+
+  private apply(w: WriteRow, from: 'DISPATCHED' | 'ACCEPTED', t: OutcomeTransition, now: Instant, source: 'PRE_WRITE_READ' | 'READBACK'): RecordedOutcome {
     let nextAttemptAt: Instant | null = null;
     let reason: Reason<string> | null = null;
     let scopeBlocked = false;
@@ -944,6 +954,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
         w.lastErrorCode = t.errorCode;
         w.nextAttemptAt = null;
         this.scope(w.writeScopeId).status = 'BLOCKED';
+        this.observeChannelPricing(w, t.errorCode, source, now);
         reason = t.reason;
         scopeBlocked = true;
         break;
@@ -953,6 +964,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
         w.lastErrorCode = t.errorCode;
         w.nextAttemptAt = null;
         this.scope(w.writeScopeId).status = 'BLOCKED';
+        this.observeChannelPricing(w, t.errorCode, source, now);
         reason = t.reason;
         scopeBlocked = true;
         break;
@@ -1013,6 +1025,12 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     if (mode === 'ENGINE') this.assertBounds(row);
     // Как CHECK write_scope_engine_has_strategy (0045): движок без стратегии не включается [Р-77]
     if (mode === 'ENGINE' && !row.strategy) throw new Error(`write scope ${writeScopeId} has no strategy; ENGINE cannot be enabled (Р-77)`);
+    // Как write_scope_strategy_guard (0082): включение ENGINE при ценообразовании канала — отказ; выключение — всегда [Р-120]
+    if (mode === 'ENGINE' && row.pricingMode !== 'ENGINE' && this.channelPricingActive(row)) {
+      const latest = this.offerChannelPricing.filter((o) => o.channelAccountId === row.channelAccountId && o.marketplace === row.marketplace && o.externalSku === row.externalUnitId)
+        .sort((a, b) => Date.parse(b.observedAt) - Date.parse(a.observedAt))[0]!;
+      throw new Error(`write_scope ${writeScopeId} has channel-owned pricing (${latest.automatedPricing ? 'CHANNEL_REPRICER_ACTIVE' : 'CHANNEL_BOUNDS_PRESENT'}): a strategy cannot be assigned (Р-120)`);
+    }
     row.pricingMode = mode;
   }
 

@@ -229,7 +229,7 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
           return report;
         case 'ENDED': {
           report.steps.push({ action: 'ENDED', channelWriteId: claim.channelWriteId, status: claim.status, reason: claim.reason });
-          const severity = claim.status === 'BLOCKED' || claim.reason.code === 'CHANNEL_HALTED' ? 'CRITICAL' : 'WARNING';
+          const severity = claim.status === 'BLOCKED' || claim.reason.code === 'CHANNEL_HALTED' || claim.reason.code === 'CHANNEL_DISTRUSTED' ? 'CRITICAL' : 'WARNING';
           await alert(tenantId, claim.status === 'BLOCKED' ? 'PRICE_WRITE_SCOPE_BLOCKED' : 'PRICE_WRITE_NOT_SENT', severity,
             { writeScopeId, channelWriteId: claim.channelWriteId, status: claim.status, reason: claim.reason.code });
           if (claim.status === 'BLOCKED') return report;

@@ -338,8 +338,8 @@
 | Случай | Что делает | Где проверено |
 |---|---|---|
 | Подлинность | Писать в очередь может только принципал SP-API (политика очереди — условие инфраструктуры). Код: `ApplicationId` = наше приложение, иначе удаление и CRITICAL `NOTIFICATION_FOREIGN_APPLICATION`; `SellerId` + регион → аккаунты функцией базы `security.resolve_amazon_seller` (0083), нет аккаунта — удаление и WARNING `NOTIFICATION_UNKNOWN_SELLER` без идентификатора продавца; адаптер повторно сверяет `SellerId` с аккаунтом [Р-31] | `receiver.test.ts`, `inbound.pg.test.ts`, сценарии `notification-unverifiable`, `notification-pricing-health` |
-| Искажённое тело | `MD5OfBody` не совпал — сообщение не удаляется, придёт снова; после `maxReceiveCount` — очередь недоставленных | `receiver.test.ts`, сценарий `notification-receiver` |
-| Дубль | Журнал обработанных `channel_data.inbound_notification` на тенанта (уникальность тенант + канал + `NotificationId`): повтор — `DUPLICATE`, в путь не идёт, из очереди удаляется. Сообщение удаляется только после записи в журнал: потерянное удаление даёт повтор, а не потерю | сценарий `notification-receiver` (в пачке и в следующей пачке), `inbound.pg.test.ts` |
+| Искажённое тело | `MD5OfBody` не совпал — сообщение не удаляется, придёт снова; на попытке `maxReceiveCount` — CRITICAL `NOTIFICATION_GIVING_UP`, дальше очередь недоставленных | `receiver.test.ts`, сценарий `notification-receiver` |
+| Дубль | Журнал обработанных `channel_data.inbound_notification` на тенанта (уникальность тенант + канал + `NotificationId`): повтор — `DUPLICATE`, в путь не идёт, из очереди удаляется. Сообщение удаляется только после записи в журнал: потерянное удаление даёт повтор, а не потерю. Проверка и запись журнала — отдельные транзакции: один процесс приёмника на очередь (риск 22) | сценарий `notification-receiver` (в пачке и в следующей пачке), `inbound.pg.test.ts` |
 | Порядок | Внутри пачки — по `EventTime`. Между пачками порядка нет: ядро применяет «новее — побеждает» по моменту снимка (старше принятого — `OUT_OF_ORDER`), состояние `PRICING_HEALTH` на экране — самое позднее по `EventTime` | сценарий `notification-receiver`, `inbound.pg.test.ts` |
 | Сбой обработки | Исключение хранилища — сообщение остаётся, пауза видимости растёт (30 с × 2^(n−1), не больше 900 с); на попытке `maxReceiveCount` (5, должно совпадать с политикой переадресации — проверить при подключении) — CRITICAL `NOTIFICATION_GIVING_UP`, дальше очередь недоставленных | `receiver.test.ts`, сценарий `notification-receiver` |
 | Потеря | Номеров последовательности нет — пропуск отдельного уведомления **не обнаружить** (принятый риск 21). Обнаруживается: тишина очереди дольше 30 минут — WARNING `NOTIFICATION_QUEUE_SILENT` один раз на период; доставка позже 15 минут после отправки — WARNING `NOTIFICATION_LATE`; ошибка очереди — пауза до 60 с без остановки цикла. Устаревшие данные стратегия не использует (свежесть, Р-39); догона опросом у Amazon нет [Р-119] | `receiver.test.ts`, сценарий `notification-receiver` |
@@ -350,7 +350,8 @@
 ### Чужое ценообразование при обнаружении оффера [Р-120]
 
 `pipeline.discoverOffers` читает офферы аккаунта `searchListingsItems` с `includedData=attributes`; правило Automate Pricing или границы
-канала записываются в `channel_data.offer_channel_pricing` (источник `DISCOVERY`) и дают WARNING `OFFERS_WITH_CHANNEL_PRICING`. Продавец
+канала записываются в `channel_data.offer_channel_pricing` (источник `DISCOVERY`) и дают WARNING `OFFERS_WITH_CHANNEL_PRICING`. Отказ
+чтения перед записью или обратного чтения по той же причине пишет наблюдение `PRE_WRITE_READ` / `READBACK`. Продавец
 видит список на экране стратегий до назначения; назначить стратегию офферу с действующим ценообразованием канала отказывает база
 (`write_scope_strategy_guard`, 0082). Частота обхода не выбрана (OQ-163).
 

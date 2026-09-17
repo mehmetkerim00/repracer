@@ -174,7 +174,8 @@ export function productList(world: StandWorld, m: Messages): ProductListView {
       nextCheck: { tone: 'unknown', label: m.ui.nextCheck.label, detail: m.ui.nextCheck.detail },
       latestDecisionId: decisions[0]?.decisionId ?? null,
       decisions: decisions.length,
-      canEnable: scope.pricingMode === 'OFF' && can(world.viewer.role, 'ENABLE_REPRICING'),
+      // Р-120 (ревью шага 23, находка 1): у предложения ценообразование канала — включение отклонит база, кнопки нет
+      canEnable: scope.pricingMode === 'OFF' && can(world.viewer.role, 'ENABLE_REPRICING') && !channelNotes(world, scope, m).some((n) => n.code !== 'PRICING_HEALTH'),
       channelNotes: channelNotes(world, scope, m),
     };
   });

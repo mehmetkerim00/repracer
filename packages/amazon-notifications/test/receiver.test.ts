@@ -100,6 +100,13 @@ test('a body corrupted in transit (MD5OfBody) is not deleted and comes back', as
   assert.deepEqual(r.outcomes.map((o) => o.outcome), ['CORRUPT']);
   assert.equal(w.sqs.messages.length, 1);
   assert.equal(w.delivered.length, 0);
+  assert.equal(w.alerts.length, 0, 'no alert before the last attempt');
+  // Ревью шага 23, находка 4: на попытке maxReceiveCount — CRITICAL, как у сбоя обработки; дальше очередь недоставленных
+  for (let attempt = 2; attempt <= 5; attempt++) {
+    w.clock.nowMs += 61_000;
+    await w.receiver.pollOnce();
+  }
+  assert.deepEqual(w.alerts.map((a) => [a.code, a.severity, a.details.corrupt]), [['NOTIFICATION_GIVING_UP', 'CRITICAL', true]]);
 });
 
 test('loss: a processing failure keeps the message with a growing pause; after maxReceiveCount the receiver gives up with a critical alert', async () => {

@@ -196,7 +196,9 @@ $fn$;
 GRANT EXECUTE ON FUNCTION channel_data.offer_channel_pricing_active(uuid, uuid) TO repracer_app;
 
 -- Р-39, OQ-166, Р-120: стратегия назначается единице записи, только если канал даёт нужные ей данные конкурентов и у предложения нет
--- действующего собственного ценообразования канала
+-- действующего собственного ценообразования канала. Проверка — при назначении или смене стратегии и при включении ENGINE; выключение
+-- и другие режимы со стратегией прежней не проверяются (ревью шага 23, находка 1: страж отклонял ENGINE → OFF). Единица, созданная
+-- до привязки предложения, проверяется стражем привязки (offer_mapping_channel_pricing_guard, находка 3)
 CREATE FUNCTION tenant_data.write_scope_strategy_guard() RETURNS trigger
   LANGUAGE plpgsql SET search_path = pg_catalog AS $fn$
 DECLARE
@@ -209,7 +211,7 @@ BEGIN
   END IF;
   IF TG_OP = 'UPDATE' AND NEW.pricing_strategy_id IS NOT DISTINCT FROM OLD.pricing_strategy_id
      AND NEW.pricing_strategy_version IS NOT DISTINCT FROM OLD.pricing_strategy_version
-     AND NEW.pricing_mode IS NOT DISTINCT FROM OLD.pricing_mode THEN
+     AND (NEW.pricing_mode IS NOT DISTINCT FROM OLD.pricing_mode OR NEW.pricing_mode <> 'ENGINE') THEN
     RETURN NEW;
   END IF;
   SELECT ps.params || jsonb_build_object('type', ps.type) INTO params FROM tenant_data.pricing_strategy ps
@@ -230,6 +232,34 @@ BEGIN
 END $fn$;
 CREATE TRIGGER a2_write_scope_strategy_guard BEFORE INSERT OR UPDATE OF pricing_strategy_id, pricing_strategy_version, pricing_mode ON tenant_data.write_scope
   FOR EACH ROW EXECUTE FUNCTION tenant_data.write_scope_strategy_guard();
+
+-- Р-120 (ревью шага 23, находка 3): предложение с действующим ценообразованием канала не привязывается к единице записи со стратегией
+-- в режиме ENGINE — иначе единица, созданная после обнаружения, обходила бы страж назначения
+CREATE FUNCTION tenant_data.offer_mapping_channel_pricing_guard() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = pg_catalog AS $fn$
+DECLARE
+  pricing text;
+BEGIN
+  IF NEW.price_write_scope_id IS NULL OR NEW.external_sku IS NULL
+     OR (TG_OP = 'UPDATE' AND NEW.price_write_scope_id IS NOT DISTINCT FROM OLD.price_write_scope_id AND NEW.external_sku IS NOT DISTINCT FROM OLD.external_sku) THEN
+    RETURN NEW;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM tenant_data.write_scope s WHERE s.tenant_id = NEW.tenant_id AND s.write_scope_id = NEW.price_write_scope_id
+                    AND s.pricing_mode = 'ENGINE' AND s.pricing_strategy_id IS NOT NULL) THEN
+    RETURN NEW;
+  END IF;
+  SELECT CASE WHEN x.automated_pricing THEN 'CHANNEL_REPRICER_ACTIVE' WHEN x.channel_bounds THEN 'CHANNEL_BOUNDS_PRESENT' END INTO pricing
+    FROM channel_data.offer_channel_pricing x
+   WHERE x.tenant_id = NEW.tenant_id AND x.channel_account_id = NEW.channel_account_id AND x.marketplace = NEW.marketplace AND x.external_sku = NEW.external_sku
+   ORDER BY x.observed_at DESC, x.recorded_at DESC LIMIT 1;
+  IF pricing IS NOT NULL THEN
+    RAISE EXCEPTION 'write_scope % has channel-owned pricing (%): a strategy cannot be assigned (Р-120)', NEW.price_write_scope_id, pricing
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END $fn$;
+CREATE TRIGGER a2_offer_mapping_channel_pricing_guard BEFORE INSERT OR UPDATE OF price_write_scope_id, external_sku ON tenant_data.offer_mapping
+  FOR EACH ROW EXECUTE FUNCTION tenant_data.offer_mapping_channel_pricing_guard();
 
 -- ---------------------------------------------------------------------------
 -- 4. Р-118: остановка по недоверию каналу
@@ -450,7 +480,8 @@ BEGIN
     RAISE EXCEPTION 'halt review for tenant % outside the tenant context', p_tenant_id USING ERRCODE = 'insufficient_privilege';
   END IF;
   SELECT ph.* INTO h FROM channel_data.pricing_halt ph
-   WHERE ph.tenant_id = p_tenant_id AND ph.pricing_halt_id = p_pricing_halt_id AND ph.released_at IS NULL AND ph.reason_code = 'CHANNEL_MASS_SHIFT'
+   -- Причина не фильтруется: системная остановка — только массовый сдвиг (pricing_halt_system_only), второй фильтр был дублем (Р-104, ревью шага 23)
+   WHERE ph.tenant_id = p_tenant_id AND ph.pricing_halt_id = p_pricing_halt_id AND ph.released_at IS NULL
    FOR UPDATE;
   IF h IS NULL THEN
     RETURN 'NOT_ACTIVE';

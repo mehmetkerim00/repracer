@@ -613,6 +613,8 @@ export const STEP23_ROWS = [
         smoke('dispatch of a fixed-price write while the channel is distrusted (Р-118)'), smoke('fixed-price write created while the channel is distrusted (Р-118)')),
       m(replaceInFunction('tenant_data.channel_write_distrust_guard()', "IF NEW.field NOT IN ('PRICE', 'CHANNEL_MIN_PRICE') OR (TG_OP = 'UPDATE'", "IF NEW.field NOT IN ('PRICE', 'CHANNEL_MIN_PRICE') OR TG_OP = 'INSERT' OR (TG_OP = 'UPDATE'"),
         smoke('fixed-price write created while the channel is distrusted (Р-118)')),
+      m(replaceInFunction('tenant_data.channel_write_distrust_guard()', "IF NEW.field NOT IN ('PRICE', 'CHANNEL_MIN_PRICE')", "IF NEW.field NOT IN ('PRICE')"),
+        smoke('channel price floor write created while the channel is distrusted (Р-118, OQ-166)'), smoke('dispatch of a channel price floor write while the channel is distrusted (Р-118, OQ-166)')),
       m(replaceInFunction('channel_data.channel_distrust_for(uuid,uuid)', 'AND d.released_at IS NULL', 'AND false'),
         smoke('fixed-price approval while the channel is distrusted (Р-118)'), smoke('dispatch of a fixed-price write while the channel is distrusted (Р-118)')),
       m(dropTrigger('a00_channel_distrust_insert_guard', 'channel_data.channel_distrust'), smoke('a person creates a channel distrust (Р-118)')),
@@ -645,6 +647,16 @@ export const STEP23_ROWS = [
       m(replaceInFunction('tenant_data.write_scope_strategy_guard()', 'IF pricing IS NOT NULL THEN', 'IF false THEN'), smoke('strategy assigned to an offer with the channel repricer active (Р-120)')),
       m(replaceInFunction('channel_data.strategy_unmet(text,jsonb)', "u := u || 'COMPLETENESS'::text;", 'NULL;'), smoke('strategy unavailable on the channel assigned to an offer (Р-39, OQ-166)')),
       m(dropConstraint('offer_channel_pricing_source_known', 'channel_data.offer_channel_pricing'), smoke('channel pricing observation from an unknown source (Р-120)')),
+      // Ревью шага 23, находки 1 и 3
+      m(replaceInFunction('tenant_data.write_scope_strategy_guard()', "OR NEW.pricing_mode <> 'ENGINE')", 'OR false)'),
+        node(T('channel-pricing-guard.pg.test.ts'), 'finding 1 [Р-120]', 'finding 1: switching repricing off is not refused by channel-owned pricing', 'channel-owned pricing')),
+      m(dropTrigger('a2_offer_mapping_channel_pricing_guard', 'tenant_data.offer_mapping'),
+        node(T('channel-pricing-guard.pg.test.ts'), 'finding 3 [Р-120]', 'finding 3: an offer with channel-owned pricing is mapped to a strategy write scope', 'resolved')),
+      m(replaceInFunction('tenant_data.offer_mapping_channel_pricing_guard()', 'IF pricing IS NOT NULL THEN', 'IF false THEN'),
+        node(T('channel-pricing-guard.pg.test.ts'), 'finding 3 [Р-120]', 'finding 3: an offer with channel-owned pricing is mapped to a strategy write scope', 'resolved')),
+      // Р-119: канал без выборки — только человек (ревью шага 23, находка 8)
+      m(replaceInFunction('channel_data.review_halt_by_sample(uuid,uuid,timestamp with time zone)', "RETURN 'MANUAL_ONLY';", 'NULL;'),
+        node('tests/contract/src/channel-reference.pg.test.ts', 'Р-119: a storefront halt on Amazon', 'Р-119: a clean sample does not release a halt on a channel without competitor polling', '^(?!MANUAL_ONLY$).+')),
       m(dropTrigger('zz_append_only', 'channel_data.offer_channel_pricing'), smoke('append-only channel_data.offer_channel_pricing')),
       m(dropTrigger('zz_no_truncate', 'channel_data.offer_channel_pricing'), smoke('truncate channel_data.offer_channel_pricing')),
     ],
@@ -652,6 +664,12 @@ export const STEP23_ROWS = [
   {
     row: 'Шаг 23 A (приёмник уведомлений)', invariant: 'журнал обработанных уведомлений и состояния PRICING_HEALTH не переписываются и не очищаются целиком',
     mutations: [
+      // Маршрут продавца: межтенантный поиск только функцией у роли приёмника, только подключённые аккаунты Amazon (ревью шага 23, находка 9)
+      m('ALTER POLICY inbound_router_resolve ON tenant_data.channel_account USING (true)',
+        node(T('inbound.pg.test.ts'), 'step 23: the receiver role routes', 'a disconnected account receives no notifications', '.+')),
+      m('GRANT EXECUTE ON FUNCTION security.resolve_amazon_seller(text, text) TO repracer_app',
+        node(T('inbound.pg.test.ts'), 'step 23: the receiver role routes', 'the decision path role may not search accounts across tenants', 'resolved')),
+      m(dropConstraint('offer_pricing_health_threshold_money', 'channel_data.offer_pricing_health'), smoke('pricing health threshold without its currency (Р-71)')),
       m(dropTrigger('zz_append_only', 'channel_data.inbound_notification'), smoke('append-only channel_data.inbound_notification')),
       m(dropTrigger('zz_no_truncate', 'channel_data.inbound_notification'), smoke('truncate channel_data.inbound_notification')),
       m(dropTrigger('zz_append_only', 'channel_data.offer_pricing_health'), smoke('append-only channel_data.offer_pricing_health')),

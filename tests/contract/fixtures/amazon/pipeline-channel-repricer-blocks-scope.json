@@ -496,6 +496,20 @@
           "amountMinor": 2100,
           "status": "ACCEPTED"
         }
+      ],
+      "offerChannelPricing": [
+        {
+          "externalSku": "SYN-SKU-8201",
+          "automatedPricing": true,
+          "channelBounds": false,
+          "source": "PRE_WRITE_READ"
+        },
+        {
+          "externalSku": "SYN-SKU-8202",
+          "automatedPricing": true,
+          "channelBounds": false,
+          "source": "READBACK"
+        }
       ]
     }
   }

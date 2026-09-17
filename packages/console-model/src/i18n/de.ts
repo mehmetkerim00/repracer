@@ -567,11 +567,11 @@ export const de: Messages = {
     feed: {
       pageTitle: 'Preisänderungen', empty: 'Keine Preisänderungen.',
       columns: { when: 'Wann', offer: 'Angebot', from: 'Von', to: 'Auf', change: 'Änderung', status: 'Status', source: 'Quelle', reason: 'Grund' },
-      counts: (c: { applied: number; inFlight: number; notSent: number }) => `Angewendet ${c.applied} · in Bearbeitung ${c.inFlight} · nicht gesendet ${c.notSent}`,
+      counts: (c: { applied: number; inFlight: number; notSent: number; superseded: number }) => `Angewendet ${c.applied} · in Bearbeitung ${c.inFlight} · nicht gesendet ${c.notSent} · ersetzt ${c.superseded}`,
       statuses: { PENDING: 'In der Warteschlange', DISPATCHED: 'Gesendet', ACCEPTED: 'Angenommen, nicht bestätigt', APPLIED: 'Angewendet', NOT_APPLIED: 'Nicht angewendet', FAILED: 'Fehlgeschlagen', BLOCKED: 'Blockiert', SUPERSEDED: 'Durch neueren Preis ersetzt', DISCARDED_STALE: 'Nicht gesendet', BUDGET_EXHAUSTED: 'Änderungsbudget aufgebraucht' },
       sourceManual: 'Manueller Preis', sourceUnknown: 'unbekannte Entscheidung', sourceRule: (code: string) => `Regel ${code}`,
       filters: { status: 'Status', offer: 'Angebot', period: 'Zeitraum', all: 'alle', apply: 'Anzeigen' },
-      statusGroups: { APPLIED: 'übernommen', IN_FLIGHT: 'in Arbeit', NOT_SENT: 'nicht gesendet' },
+      statusGroups: { APPLIED: 'übernommen', IN_FLIGHT: 'in Arbeit', NOT_SENT: 'nicht gesendet', SUPERSEDED: 'durch neueren Preis ersetzt' },
       periodDays: (days: number) => `letzte ${days} ${days === 1 ? 'Tag' : 'Tage'}`,
       page: (from: number, to: number, total: number) => (total === 0 ? 'Keine Einträge' : `${from}–${to} von ${total}`),
       previous: '← Neuere', next: 'Ältere →',

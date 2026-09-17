@@ -56,7 +56,8 @@ export async function handleInboundAmazon(options: AmazonAdapterOptions, deliver
   const ph = raw as PricingHealth;
   const type = aoc.NotificationType === 'ANY_OFFER_CHANGED' ? 'ANY_OFFER_CHANGED' : ph.notificationType === 'PRICING_HEALTH' ? 'PRICING_HEALTH' : null;
   const id = type === 'ANY_OFFER_CHANGED' ? aoc.NotificationMetadata?.NotificationId : ph.notificationMetadata?.notificationId;
-  if (!type || typeof id !== 'string' || !/^[A-Za-z0-9-]{1,128}$/.test(id)) {
+  // Тот же допустимый вид, что у приёмника очереди (envelope.ts): иначе приёмник запишет уведомление обработанным, а адаптер его отклонит
+  if (!type || typeof id !== 'string' || !/^[A-Za-z0-9._:-]{1,128}$/.test(id)) {
     return { kind: 'REJECTED', error: channelError('VALIDATION', 'BATCH', 'only ANY_OFFER_CHANGED or PRICING_HEALTH with a NotificationId is accepted'), responseStatus: 400 };
   }
   logConservative(options.deps.logger, ctx, 'AMZ_C08_NOTIFICATION_NOT_SIGNED', {});

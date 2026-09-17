@@ -565,11 +565,11 @@ export const en = {
     feed: {
       pageTitle: 'Price changes', empty: 'No price changes.',
       columns: { when: 'When', offer: 'Offer', from: 'From', to: 'To', change: 'Change', status: 'Status', source: 'Source', reason: 'Reason' },
-      counts: (c: { applied: number; inFlight: number; notSent: number }) => `Applied ${c.applied} · in progress ${c.inFlight} · not sent ${c.notSent}`,
+      counts: (c: { applied: number; inFlight: number; notSent: number; superseded: number }) => `Applied ${c.applied} · in progress ${c.inFlight} · not sent ${c.notSent} · replaced ${c.superseded}`,
       statuses: { PENDING: 'Queued', DISPATCHED: 'Sent', ACCEPTED: 'Accepted, not confirmed', APPLIED: 'Applied', NOT_APPLIED: 'Not applied', FAILED: 'Failed', BLOCKED: 'Blocked', SUPERSEDED: 'Replaced by a newer price', DISCARDED_STALE: 'Not sent', BUDGET_EXHAUSTED: 'Edit budget used up' },
       sourceManual: 'Manual price', sourceUnknown: 'unknown decision', sourceRule: (code: string) => `rule ${code}`,
       filters: { status: 'Status', offer: 'Offer', period: 'Period', all: 'all', apply: 'Show' },
-      statusGroups: { APPLIED: 'applied', IN_FLIGHT: 'in progress', NOT_SENT: 'not sent' },
+      statusGroups: { APPLIED: 'applied', IN_FLIGHT: 'in progress', NOT_SENT: 'not sent', SUPERSEDED: 'replaced by a newer price' },
       periodDays: (days: number) => `last ${days} ${days === 1 ? 'day' : 'days'}`,
       page: (from: number, to: number, total: number) => (total === 0 ? 'No entries' : `${from}–${to} of ${total}`),
       previous: '← Newer', next: 'Older →',

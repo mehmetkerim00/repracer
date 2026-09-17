@@ -112,6 +112,11 @@ export function buildCoreScenarios(): Array<{ file: string; scenario: Scenario }
           { outcome: 'APPROVED', finalMinor: 2100 }, { outcome: 'HELD', rejectionReason: 'SCOPE_NOT_ACTIVE', reasonParams: { status: 'BLOCKED', blockedByErrorCode: 'CHANNEL_REPRICER_ACTIVE', action: 'DISABLE_CHANNEL_REPRICER' } },
         ],
         writes: [{ amountMinor: 1999, status: 'FAILED' }, { amountMinor: 2100, status: 'ACCEPTED' }],
+        // Р-120 (ревью шага 23, находка 2): найденное при записи и сверке правило — наблюдение оффера, как при обнаружении
+        offerChannelPricing: [
+          { externalSku: sku(8201), automatedPricing: true, channelBounds: false, source: 'PRE_WRITE_READ' },
+          { externalSku: sku(8202), automatedPricing: true, channelBounds: false, source: 'READBACK' },
+        ],
       },
     },
   );

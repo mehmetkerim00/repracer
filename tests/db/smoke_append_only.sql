@@ -92,6 +92,9 @@ SELECT 'a0000000-0000-0000-0000-00000000000a', 'a5000000-0000-0000-0000-00000000
 -- Шаг 23 [Р-108]: TRUNCATE новой append-only таблицы отклоняет свой триггер
 SELECT pg_temp.expect_fail('truncate channel_data.offer_channel_pricing', $q$ TRUNCATE channel_data.offer_channel_pricing $q$, 'TRUNCATE of channel_data.offer_channel_pricing is forbidden');
 SELECT pg_temp.expect_fail('truncate channel_data.inbound_notification', $q$ TRUNCATE channel_data.inbound_notification $q$, 'TRUNCATE of channel_data.inbound_notification is forbidden');
+SELECT pg_temp.expect_fail('pricing health threshold without its currency (Р-71)', $q$
+  INSERT INTO channel_data.offer_pricing_health (tenant_id, channel_account_id, channel, marketplace, channel_product_ref, condition, issue_type, event_time, competitive_price_threshold_minor, currency, notification_id)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R103-1', 'new', 'BuyBoxDisqualification', now(), 1999, NULL, 'SYN-N-R71') $q$, 'offer_pricing_health_threshold_money');
 SELECT pg_temp.expect_fail('truncate channel_data.offer_pricing_health', $q$ TRUNCATE channel_data.offer_pricing_health $q$, 'TRUNCATE of channel_data.offer_pricing_health is forbidden');
 
 -- Находка 4 ревью шага 16, Р-93, Р-103: у каждой append-only таблицы есть строка, и изменение строки отклоняет именно триггер неизменяемости
