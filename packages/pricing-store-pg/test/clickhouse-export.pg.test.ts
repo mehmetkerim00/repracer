@@ -30,7 +30,13 @@ const pool = createPool(PG_URL, { max: 4, applicationName: 'repracer-ch-export-t
 const provisioning = createPool(PG_URL.replace('svc_app@', 'svc_provisioning@'), { max: 1, applicationName: 'repracer-ch-export-provisioning' });
 const admin = createPool(PG_URL.replace('svc_app@', 'svc_admin@'), { max: 2, applicationName: 'repracer-ch-export-admin' });
 // Учётные записи операторов платформы заводит владелец (0095): в тесте — суперпользователь стенда в той же базе
-const superuser = createPool(new URL(requireEnv('REPRACER_PG_ADMIN_URL')).origin + new URL(PG_URL).pathname, { max: 1, applicationName: 'repracer-ch-export-superuser' });
+const superuserUrl = (() => {
+  // База берётся из адреса пути решения, пользователь и хост — из адреса суперпользователя стенда: у схемы postgres: нет origin
+  const u = new URL(requireEnv('REPRACER_PG_ADMIN_URL'));
+  u.pathname = new URL(PG_URL).pathname;
+  return u.toString();
+})();
+const superuser = createPool(superuserUrl, { max: 1, applicationName: 'repracer-ch-export-superuser' });
 const exporter = createPool(PG_URL.replace('svc_app@', 'svc_exporter@'), { max: 2, applicationName: 'repracer-ch-export-exporter' });
 // Ревью шага 25, находка 9: пропуски разбирает отдельная роль — выгрузка не отмечает разобранными свои же пропуски
 const triage = createPool(PG_URL.replace('svc_app@', 'svc_export_triage@'), { max: 1, applicationName: 'repracer-ch-export-triage' });
