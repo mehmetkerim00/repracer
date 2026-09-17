@@ -94,6 +94,19 @@ DO $$ BEGIN
   END IF;
   RAISE NOTICE 'PASS accept | a notification delivered before the due time resolves a loss check as delayed (Р-121)';
 END $$;
+-- Совпадение товара и «новее прежнего состояния» — раньше проверки срока: без них падала бы она, а не своя проверка [Р-99]
+DO $$ BEGIN
+  IF (SELECT verdict FROM r121_verdicts WHERE channel_product_ref = 'R121-E') IS DISTINCT FROM 'LOSS_SUSPECTED' THEN
+    RAISE EXCEPTION 'a notification of another product resolves a loss check (Р-121)';
+  END IF;
+  RAISE NOTICE 'PASS accept | a notification of another product does not resolve a loss check (Р-121)';
+END $$;
+DO $$ BEGIN
+  IF (SELECT verdict FROM r121_verdicts WHERE channel_product_ref = 'R121-F') IS DISTINCT FROM 'LOSS_SUSPECTED' THEN
+    RAISE EXCEPTION 'a notification observed before the held state resolves a loss check (Р-121)';
+  END IF;
+  RAISE NOTICE 'PASS accept | a notification observed before the held state does not resolve a loss check (Р-121)';
+END $$;
 DO $$ BEGIN
   IF (SELECT verdict FROM r121_verdicts WHERE channel_product_ref = 'R121-B') IS DISTINCT FROM 'LOSS_SUSPECTED' THEN
     RAISE EXCEPTION 'a notification after the due time resolves a loss check (Р-121)';
@@ -111,18 +124,6 @@ DO $$ BEGIN
     RAISE EXCEPTION 'a loss check is decided before its due time (Р-121)';
   END IF;
   RAISE NOTICE 'PASS accept | a loss check is not decided before its due time (Р-121)';
-END $$;
-DO $$ BEGIN
-  IF (SELECT verdict FROM r121_verdicts WHERE channel_product_ref = 'R121-E') IS DISTINCT FROM 'LOSS_SUSPECTED' THEN
-    RAISE EXCEPTION 'a notification of another product resolves a loss check (Р-121)';
-  END IF;
-  RAISE NOTICE 'PASS accept | a notification of another product does not resolve a loss check (Р-121)';
-END $$;
-DO $$ BEGIN
-  IF (SELECT verdict FROM r121_verdicts WHERE channel_product_ref = 'R121-F') IS DISTINCT FROM 'LOSS_SUSPECTED' THEN
-    RAISE EXCEPTION 'a notification observed before the held state resolves a loss check (Р-121)';
-  END IF;
-  RAISE NOTICE 'PASS accept | a notification observed before the held state does not resolve a loss check (Р-121)';
 END $$;
 SELECT pg_temp.expect_fail('notification loss verdict delayed without the notification snapshot (Р-121)', $q$
   INSERT INTO channel_data.notification_loss_verdict (tenant_id, notification_loss_check_id, verdict, decided_at)
