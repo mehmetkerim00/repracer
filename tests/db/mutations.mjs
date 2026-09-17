@@ -633,7 +633,8 @@ export const STEP25_B_ROWS = [
         smoke('a price set outside repracer does not make the Omnibus check unverifiable (Р-124)', 'a price set outside repracer makes the Omnibus check unverifiable (Р-124)')),
       m(replaceInFunction('tenant_data.omnibus_lowest_prior_price(uuid,uuid,timestamp with time zone)', 'AND c.opened_at >= from_ts AND c.opened_at < p_starts_at', 'AND false'),
         smoke('a price set outside repracer does not make the Omnibus check unverifiable (Р-124)', 'a price set outside repracer makes the Omnibus check unverifiable (Р-124)')),
-      m(replaceInFunction('tenant_data.omnibus_lowest_prior_price(uuid,uuid,timestamp with time zone)', "(SELECT min(h.accepted_at) FROM tenant_data.price_history h", "(SELECT NULL::timestamptz FROM tenant_data.price_history h"),
+      // Начало видимой истории — самое раннее из подключения и первых цен; «самое позднее» отсчитывало бы глубину с подключения в смоук-мире
+      m(replaceInFunction('tenant_data.omnibus_lowest_prior_price(uuid,uuid,timestamp with time zone)', 'SELECT least(', 'SELECT greatest('),
         smoke('the history depth of an offer is not counted from its first known price (Р-124)', 'the history depth of an offer is counted from its first known price (Р-124)')),
     ],
   },
