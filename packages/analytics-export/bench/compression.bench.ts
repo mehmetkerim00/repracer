@@ -174,15 +174,17 @@ const series = new Map<string, ProductSeries>();
 function snapshotSeries(channel: 'KAUFLAND' | 'AMAZON', i: number): PgRow {
   const product = Math.floor(rand() * SNAPSHOT_PRODUCTS);
   const key = `${channel}|${product}`;
-  const base = 1_000 + (product % 9_000);
+  const basePrice = 1_000 + (product % 9_000);
   let s = series.get(key);
   if (!s) {
     const n = channel === 'AMAZON' ? 3 + Math.floor(rand() * 18) : 1 + Math.floor(rand() * 10);
     s = {
-      at: base * 1_000,
+      // Начало ряда — от базы замера (последние 30 суток), а не от эпохи: строки старше 18 месяцев удаляет TTL таблицы при OPTIMIZE FINAL
+      // (первый прогон CI шага 24 измерил 0 строк)
+      at: base + product * 1_000,
       offers: Array.from({ length: n }, (_, k) => ({
         seller: channel === 'AMAZON' ? `A${createHash('sha1').update(`s${(product * 31 + k * 7) % 40_000}`).digest('hex').slice(0, 13).toUpperCase()}` : `Synthetic Seller ${(product * 31 + k * 7) % 40_000}`,
-        minor: base + k * (10 + Math.floor(rand() * 60)), shipping: rand() < 0.7 ? 0 : 399 + Math.floor(rand() * 3) * 100,
+        minor: basePrice + k * (10 + Math.floor(rand() * 60)), shipping: rand() < 0.7 ? 0 : 399 + Math.floor(rand() * 3) * 100,
         minDays: 1 + Math.floor(rand() * 2), maxDays: 3 + Math.floor(rand() * 4), fba: rand() < 0.4,
       })),
     };
@@ -200,7 +202,7 @@ function snapshotSeries(channel: 'KAUFLAND' | 'AMAZON', i: number): PgRow {
   const money = (amountMinor: number) => ({ amountMinor, currency, basis });
   const selfIndex = product % offers.length;
   const tenant = uuid('tenant', product % TENANTS);
-  const observed = new Date(base * 60_000 + s.at);
+  const observed = new Date(s.at);
   return competitorSnapshotRow(tenant, uuid('account', channel, product % TENANTS), channel, uuid('snapshot', channel, i), {
     marketplace: channel === 'AMAZON' ? (currency === 'USD' ? 'ATVPDKIKX0DER' : 'A1PA6795UKMFR9') : product % 5 === 0 ? 'at' : 'de',
     channelProductRef: channel === 'AMAZON' ? `B0${String(product).padStart(8, '0')}` : String(362_000_000 + product), condition: 'new',
@@ -323,6 +325,8 @@ async function main() {
     const started = Date.now();
     await loadClickHouse(step.table, step.make, step.source);
     const measured = await measureClickHouse(step.table);
+    // Замер по неполной таблице не выдаётся за результат: TTL или отказ вставки — провал замера
+    if (measured.rows !== ROWS) throw new Error(`${step.table}: ${measured.rows} rows in ClickHouse after loading ${ROWS}`);
     seed = 0x9e3779b9;
     const postgres = step.pg ? await measurePostgres(step.pg.source, step.table, step.pg.make) : null;
     const adr = ADR_0004_ROWS[step.table];
