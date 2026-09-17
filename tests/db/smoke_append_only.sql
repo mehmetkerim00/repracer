@@ -219,7 +219,7 @@ DO $$ BEGIN
   END IF;
   RAISE NOTICE 'PASS accept | the prices of the discount day before its start are in the window (Р-123)';
 END $$;
--- Шаг 25 (0092, риск 28): цены, которые канал не применил (запись завершена NOT_APPLIED), отмечаются и в окно не входят — в сутках
+-- Шаг 25 (0091, риск 28): цены, которые канал не применил (запись завершена NOT_APPLIED), отмечаются и в окно не входят — в сутках
 -- начала скидки (9.00) и в незакрытых сутках окна (8.50)
 INSERT INTO tenant_data.price_history (tenant_id, accepted_at, write_scope_id, product_id, amount_minor, currency, price_basis, effective_min_price_minor, channel_write_id, write_version)
 VALUES ('a0000000-0000-0000-0000-00000000000a', greatest(date_trunc('day', now() AT TIME ZONE 'Europe/Berlin') AT TIME ZONE 'Europe/Berlin', now() - interval '2 seconds'),
@@ -288,7 +288,7 @@ SELECT pg_temp.expect_fail('a scheduler run finished before it started (Р-126)'
 SELECT pg_temp.expect_fail('truncate tenant_data.price_history_not_applied', $q$ TRUNCATE tenant_data.price_history_not_applied $q$, 'TRUNCATE of tenant_data.price_history_not_applied is forbidden');
 SELECT pg_temp.expect_fail('truncate maintenance.scheduled_job_run', $q$ TRUNCATE maintenance.scheduled_job_run $q$, 'TRUNCATE of maintenance.scheduled_job_run is forbidden');
 
--- Шаг 25, D (0094) [OQ-181]: пропущенный выгрузкой снимок разбирает человек; секция с неразобранным пропуском не отмечается проверенной
+-- Шаг 25, D (0092) [OQ-181]: пропущенный выгрузкой снимок разбирает человек; секция с неразобранным пропуском не отмечается проверенной
 INSERT INTO maintenance.snapshot_export_skip (subject_tenant_id, competitor_snapshot_id, partition_name, received_at, reason)
 VALUES ('a0000000-0000-0000-0000-00000000000a', 'a9181000-0000-4000-8000-000000000001', 'smoke_snapshot_partition', now(), 'CURRENCY_UNSUPPORTED'),
        ('a0000000-0000-0000-0000-00000000000a', 'a9181000-0000-4000-8000-000000000002', 'smoke_snapshot_partition', now(), 'SOURCE_UNKNOWN');

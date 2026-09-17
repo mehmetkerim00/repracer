@@ -362,6 +362,14 @@ BACKTEST_OUT=docs/benchmarks/results/step21-backtest-synthetic.json npm run benc
 месяцев; история — поток (`syntheticSnapshots`), хранилище в памяти отбрасывает состояние старше 2 суток каждые 6 часов мира.
 Итоги — docs/benchmarks/step24-backtest-catalog.md.
 
+## Шаг 25: ярусный опрос планировщика и выборка бэктеста
+
+- Шаг `pipelinePollDue` (`budgetRequestsPerSecond`, `maxQueries`): опрос товаров с истёкшим ярусом — по времени последнего опроса;
+  сценарий `kaufland/pipeline-tiered-poll-due` (память и PostgreSQL).
+- `src/backtest/catalog.ts` [Р-125]: `selectBacktestSample` и `runSampleBacktest` — выборка по умолчанию; `runCatalogJob` — полный каталог
+  партиями с контрольной точкой; история передаётся функцией от набора товаров. Замер — `bench/backtest-sample.ts`,
+  docs/benchmarks/step25-backtest-sample.md.
+
 ## Добавить сценарий
 
 1. Скопировать ближайший файл из `fixtures/kaufland/`, поменять `id`, `title`, `description`, `tags`.

@@ -1134,7 +1134,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
         w.status = 'NOT_APPLIED';
         w.nextAttemptAt = null;
         reason = t.reason;
-        // Как price_history_mark_not_applied (0092, риск 28)
+        // Как price_history_mark_not_applied (0091, риск 28)
         for (const h of this.priceHistory) if (h.channelWriteId === w.channelWriteId) h.notApplied = true;
         break;
     }
@@ -1208,7 +1208,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   }
 
   async omnibusCheck(_tenantId: string, writeScopeId: string, startsAt: Instant): Promise<OmnibusPriorPrice> {
-    // Как omnibus_lowest_prior_price (0092): цены, которые канал не применил, не учитываются; цены мимо нас — кейсы расхождения
+    // Как omnibus_lowest_prior_price (0091): цены, которые канал не применил, не учитываются; цены мимо нас — кейсы расхождения
     return omnibusLowestPriorPrice(this.priceHistory.filter((h) => h.writeScopeId === writeScopeId && !h.notApplied), this.timeZoneOf(writeScopeId), startsAt, new Date().toISOString(), {
       connectedAt: this.scopeConnectedAt.get(writeScopeId) ?? null,
       external: this.divergenceCases.filter((c) => c.writeScopeId === writeScopeId).map((c) => ({ at: c.openedAt, amountMinor: c.observedMinor })),

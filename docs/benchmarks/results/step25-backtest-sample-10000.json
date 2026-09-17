@@ -1,0 +1,17 @@
+{
+  "catalogProducts": 10000,
+  "sampledProducts": 200,
+  "revenueCoverageBp": 6006,
+  "cappedBeforeShare": true,
+  "everyMs": 1800000,
+  "window": {
+    "from": "2025-03-17T00:00:00.000Z",
+    "to": "2026-09-17T00:00:00.000Z"
+  },
+  "snapshots": 5270400,
+  "elapsedMs": 296503,
+  "snapshotsPerSecond": 17776,
+  "peakRssMb": 490,
+  "halts": 0,
+  "node": "v22.22.3"
+}

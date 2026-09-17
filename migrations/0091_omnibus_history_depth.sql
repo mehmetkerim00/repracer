@@ -1,4 +1,4 @@
--- 0092_omnibus_history_depth.sql
+-- 0091_omnibus_history_depth.sql
 -- Шаг 25, B и E.
 -- Р-124: комплаенс-модуль НЕ гарантирует соответствие — он проверяет по известной нам истории и показывает её глубину.
 --  1. omnibus_lowest_prior_price отдаёт, с какого момента видна история оффера (подключение единицы записи цены или первая известная цена),
@@ -383,7 +383,7 @@ AS $function$
     ('channel_data.notification_loss_check', 'SELECT', NULL), ('channel_data.notification_loss_check', 'INSERT', NULL),
     ('channel_data.notification_loss_verdict', 'SELECT', NULL),
     -- Шаг 25 (0090) [Р-121, Р-126]: время последнего опроса товара — ярусный опрос планировщика не зависит от времени уведомлений
-    -- Шаг 25 (0092, риск 28): отметка неприменённой цены — триггер завершения записи в транзакции пути решения и диспетчера
+    -- Шаг 25 (0091, риск 28): отметка неприменённой цены — триггер завершения записи в транзакции пути решения и диспетчера
     ('tenant_data.price_history_not_applied', 'INSERT', NULL),
     ('channel_data.competitor_poll_state', 'SELECT', NULL), ('channel_data.competitor_poll_state', 'INSERT', NULL), ('channel_data.competitor_poll_state', 'UPDATE', NULL),
     ('channel_data.pricing_halt_sample', 'SELECT', NULL),
