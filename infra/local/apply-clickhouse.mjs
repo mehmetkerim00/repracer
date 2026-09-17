@@ -26,7 +26,7 @@ async function run(sql) {
   return body;
 }
 
-for (const file of ['001_roles_and_profiles.sql', '010_tables.sql', '020_row_policies.sql', '030_step6.sql', '040_step7.sql', '050_step10.sql', '060_step14.sql', '070_step20.sql']) {
+for (const file of ['001_roles_and_profiles.sql', '010_tables.sql', '020_row_policies.sql', '030_step6.sql', '040_step7.sql', '050_step10.sql', '060_step14.sql', '070_step20.sql', '080_step23.sql']) {
   const list = statements(file);
   console.log(`== ${file} (${list.length} statements)`);
   for (const sql of list) await run(sql);
