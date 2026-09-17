@@ -250,7 +250,9 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   private readonly fxRates: FxQuote[];
   private readonly marketplaces: Record<string, { currency: string; basis: PriceBasis; timeZone?: string | null }>;
   /** Р-123 (шаг 24): применённые цены — как tenant_data.price_history (суточной свёртки у двойника нет, сутки считаются из сырья) */
-  readonly priceHistory: Array<{ writeScopeId: string; acceptedAt: Instant; amountMinor: number; currency: string; basis: PriceBasis }> = [];
+  readonly priceHistory: Array<{ writeScopeId: string; acceptedAt: Instant; amountMinor: number; currency: string; basis: PriceBasis; channelWriteId?: string; notApplied?: boolean }> = [];
+  /** Р-124: подключение единицы записи цены — как write_scope.created_at */
+  readonly scopeConnectedAt = new Map<string, Instant>();
   readonly discounts: DiscountAnnouncementRow[] = [];
   private readonly conflicts: Array<{ writeScopeId: string; bound: 'min' | 'max'; value: SeedBound }>;
   private readonly members: ConsoleMemberRow[];
@@ -285,7 +287,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   /** Шаг 24 (OQ-161): индексы записей по единице и по идентификатору — записи только добавляются, не удаляются */
   private readonly writesByScope = new Map<string, WriteRow[]>();
   private readonly writesById = new Map<string, WriteRow>();
-  readonly divergenceCases: Array<{ divergenceCaseId: string; writeScopeId: string; expectedMinor: number; observedMinor: number; cause: string; status: string }> = [];
+  readonly divergenceCases: Array<{ divergenceCaseId: string; writeScopeId: string; expectedMinor: number; observedMinor: number; cause: string; status: string; openedAt: Instant }> = [];
   /** Применённые изменения цены по единице записи, по времени — для лимита изменений за час */
   private readonly changes = new Map<string, number[]>();
   private seq = 0;
@@ -721,7 +723,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       }
       if (s.divergence && !this.divergenceCases.some((c) => c.writeScopeId === s.divergence!.writeScopeId && c.status === 'OPEN')) {
         divergenceCaseId = this.id('div');
-        this.divergenceCases.push({ divergenceCaseId, writeScopeId: s.divergence.writeScopeId, expectedMinor: s.divergence.expectedMinor, observedMinor: s.divergence.observedMinor, cause: 'EXTERNAL_CHANGE', status: 'OPEN' });
+        this.divergenceCases.push({ divergenceCaseId, writeScopeId: s.divergence.writeScopeId, expectedMinor: s.divergence.expectedMinor, observedMinor: s.divergence.observedMinor, cause: 'EXTERNAL_CHANGE', status: 'OPEN', openedAt: input.now });
       }
     }
 
@@ -1132,6 +1134,8 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
         w.status = 'NOT_APPLIED';
         w.nextAttemptAt = null;
         reason = t.reason;
+        // Как price_history_mark_not_applied (0092, риск 28)
+        for (const h of this.priceHistory) if (h.channelWriteId === w.channelWriteId) h.notApplied = true;
         break;
     }
     return this.recorded(w.writeScopeId, w.status as RecordedOutcome['status'], nextAttemptAt, reason, scopeBlocked);
@@ -1141,7 +1145,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     const scope = this.scope(w.writeScopeId);
     scope.currentPriceMinor = w.amountMinor;
     scope.knownPricesMinor = [...new Set([w.amountMinor, ...scope.knownPricesMinor])].slice(0, 3);
-    this.priceHistory.push({ writeScopeId: scope.writeScopeId, acceptedAt: now, amountMinor: w.amountMinor, currency: scope.currency, basis: scope.basis });
+    this.priceHistory.push({ writeScopeId: scope.writeScopeId, acceptedAt: now, amountMinor: w.amountMinor, currency: scope.currency, basis: scope.basis, channelWriteId: w.channelWriteId });
     const changes = this.changes.get(scope.writeScopeId) ?? [];
     this.changes.set(scope.writeScopeId, changes);
     changes.push(Date.parse(now));
@@ -1204,7 +1208,11 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   }
 
   async omnibusCheck(_tenantId: string, writeScopeId: string, startsAt: Instant): Promise<OmnibusPriorPrice> {
-    return omnibusLowestPriorPrice(this.priceHistory.filter((h) => h.writeScopeId === writeScopeId), this.timeZoneOf(writeScopeId), startsAt, new Date().toISOString());
+    // Как omnibus_lowest_prior_price (0092): цены, которые канал не применил, не учитываются; цены мимо нас — кейсы расхождения
+    return omnibusLowestPriorPrice(this.priceHistory.filter((h) => h.writeScopeId === writeScopeId && !h.notApplied), this.timeZoneOf(writeScopeId), startsAt, new Date().toISOString(), {
+      connectedAt: this.scopeConnectedAt.get(writeScopeId) ?? null,
+      external: this.divergenceCases.filter((c) => c.writeScopeId === writeScopeId).map((c) => ({ at: c.openedAt, amountMinor: c.observedMinor })),
+    });
   }
 
   async announceDiscount(_tenantId: string, input: DiscountAnnouncementInput, actor: AdminActor): Promise<DiscountAnnounceResult> {

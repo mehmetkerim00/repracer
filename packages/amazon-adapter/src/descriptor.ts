@@ -79,6 +79,8 @@ export const AMAZON_DESCRIPTOR: ChannelDescriptor = {
   capabilities: [],
   // Р-119: опроса конкурентов нет (getCompetitiveSummary 0.033 rps, AMZ_C07) — выборку для Р-52 взять неоткуда
   haltRelease: { kind: 'MANUAL_ONLY', basis: 'Р-119: no competitor polling on Amazon, a fresh independent sample cannot be taken' },
+  // Р-124: модели SP-API 2026-09-16 (vendor/amazon/sp-api-models) не описывают истории цен оффера — полнота с подключения
+  priceHistory: { kind: 'UNAVAILABLE', basis: 'SP-API models snapshot 2026-09-16 has no offer price history operation' },
   competitorSources: [
     {
       source: SOURCE_ANY_OFFER_CHANGED,

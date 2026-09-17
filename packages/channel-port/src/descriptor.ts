@@ -23,6 +23,12 @@ export interface ChannelDescriptor {
    * platform.channel_behaviour (0082).
    */
   haltRelease: { kind: 'SAMPLE' | 'MANUAL_ONLY'; basis: string };
+  /**
+   * Р-124 (шаг 25): отдаёт ли канал историю наших цен оффера. При подключении оффера история запрашивается у канала, если он её отдаёт
+   * (AVAILABLE, метод порта readPriceHistory); иначе полнота проверки Omnibus отсчитывается с даты подключения. Факт — из снимка
+   * спецификации с основанием
+   */
+  priceHistory: { kind: 'AVAILABLE' | 'UNAVAILABLE'; basis: string };
 }
 
 export interface CompetitorSourceDescriptor {

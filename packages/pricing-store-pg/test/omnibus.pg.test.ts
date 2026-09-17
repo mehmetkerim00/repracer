@@ -60,6 +60,7 @@ test('Р-123: the lowest price of 30 storefront days in the database equals the 
     return {
       status: r.status, lowestMinor: r.lowest_minor === null ? null : Number(r.lowest_minor), windowFrom: day(r.window_from), windowTo: day(r.window_to), timeZone: r.day_tz,
       historySince: r.history_since ? new Date(r.history_since).toISOString() : null,
+      historyDays: Number(r.history_days), externalChanges: Number(r.external_changes),
     };
   };
   // Сутки начала скидки до её начала — в окне (ревью шага 24, находка 14): 1700 в 00:30 по Берлину 15.09 раньше скидки в 10:00
@@ -117,4 +118,14 @@ test('Р-123: the lowest price of 30 storefront days in the database equals the 
     ['2026-09-05', 'OPEN', 1850, 1850, false],
     ['2026-09-15', 'OPEN', 1700, 1700, false],
   ], 'closed days from the daily roll-up with the correction marked, open days from raw prices by storefront day');
+  assert.deepEqual([row?.check.historyDays, row?.check.externalChanges], [expected.historyDays, 0], 'the announcement keeps the history depth of its check (Р-124)');
+
+  // Р-124 (шаг 25): цена, выставленная мимо нас и замеченная сверкой, — в окне и в базе, и в коде
+  const outsideAt = new Date(Date.now() - 2 * 86_400_000).toISOString();
+  await superuser.query(
+    `INSERT INTO channel_data.divergence_case (tenant_id, write_scope_id, field, expected_amount_minor, observed_amount_minor, cause, opened_at)
+     VALUES ($1, $2, 'PRICE', 1700, 1200, 'EXTERNAL_CHANGE', $3)`, [w.tenantId, ws, outsideAt]);
+  const withOutside = omnibusLowestPriorPrice(corrected, TZ, startsAt, new Date().toISOString(), { external: [{ at: outsideAt, amountMinor: 1200 }] });
+  assert.deepEqual(await database(startsAt), withOutside);
+  assert.deepEqual([withOutside.status, withOutside.lowestMinor, withOutside.externalChanges], ['EXTERNAL_CHANGES', 1200, 1]);
 });

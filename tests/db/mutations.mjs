@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0091_verify_schema_invariants_v22.sql';
+const VERIFY = 'migrations/0093_verify_schema_invariants_v22.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -621,6 +621,35 @@ export const STEP25_ROWS = [
       m(dropConstraint('scheduled_job_run_order', 'maintenance.scheduled_job_run'), smoke('a scheduler run finished before it started (Р-126)')),
       m(dropTrigger('zz_append_only', 'maintenance.scheduled_job_run'), smoke('append-only maintenance.scheduled_job_run')),
       m(dropTrigger('zz_no_truncate', 'maintenance.scheduled_job_run'), smoke('truncate maintenance.scheduled_job_run')),
+    ],
+  },
+];
+
+export const STEP25_B_ROWS = [
+  {
+    row: 'Р-124', invariant: 'проверка Omnibus показывает глубину видимой истории и цены, выставленные мимо нас; такие цены — в окне, проверка с ними не достоверна',
+    mutations: [
+      m(replaceInFunction('tenant_data.omnibus_lowest_prior_price(uuid,uuid,timestamp with time zone)', "WHEN external_n > 0 THEN 'EXTERNAL_CHANGES'", "WHEN false THEN 'EXTERNAL_CHANGES'"),
+        smoke('a price set outside repracer does not make the Omnibus check unverifiable (Р-124)', 'a price set outside repracer makes the Omnibus check unverifiable (Р-124)')),
+      m(replaceInFunction('tenant_data.omnibus_lowest_prior_price(uuid,uuid,timestamp with time zone)', 'AND c.opened_at >= from_ts AND c.opened_at < p_starts_at', 'AND false'),
+        smoke('a price set outside repracer does not make the Omnibus check unverifiable (Р-124)', 'a price set outside repracer makes the Omnibus check unverifiable (Р-124)')),
+      m(replaceInFunction('tenant_data.omnibus_lowest_prior_price(uuid,uuid,timestamp with time zone)', "(SELECT min(h.accepted_at) FROM tenant_data.price_history h", "(SELECT NULL::timestamptz FROM tenant_data.price_history h"),
+        smoke('the history depth of an offer is not counted from its first known price (Р-124)', 'the history depth of an offer is counted from its first known price (Р-124)')),
+    ],
+  },
+  {
+    row: 'риск 28', invariant: 'цена, которую канал не применил, отмечается и не входит ни в суточную свёртку, ни в окно Omnibus',
+    mutations: [
+      m(dropTrigger('b_price_history_mark_not_applied', 'tenant_data.channel_write_history'),
+        smoke('a price write the channel did not apply is not marked (risk 28)', 'a price write the channel did not apply is marked (risk 28)')),
+      m(replaceInFunction('tenant_data.omnibus_raw_prices(uuid,uuid,text,timestamp with time zone)', 'na.price_history_id = h.price_history_id)', 'na.price_history_id = h.price_history_id AND false)'),
+        smoke('a price the channel did not apply is in the Omnibus window (risk 28)', 'a price the channel did not apply is not in the Omnibus window (risk 28)')),
+      m(replaceInFunction('tenant_data.omnibus_lowest_prior_price(uuid,uuid,timestamp with time zone)', 'na.price_history_id = h.price_history_id)', 'na.price_history_id = h.price_history_id AND false)'),
+        smoke('a price the channel did not apply is in the Omnibus window (risk 28)', 'a price the channel did not apply is not in the Omnibus window (risk 28)')),
+      m(replaceInFunction('maintenance.close_price_days(timestamp with time zone,integer)', 'na.price_history_id = h.price_history_id)', 'na.price_history_id = h.price_history_id AND false)'),
+        node(T('omnibus-not-applied.pg.test.ts'), 'risk 28', 'risk 28: a price the channel did not apply is rolled up into the daily price', '^900$')),
+      m(dropTrigger('zz_append_only', 'tenant_data.price_history_not_applied'), smoke('append-only tenant_data.price_history_not_applied')),
+      m(dropTrigger('zz_no_truncate', 'tenant_data.price_history_not_applied'), smoke('truncate tenant_data.price_history_not_applied')),
     ],
   },
 ];

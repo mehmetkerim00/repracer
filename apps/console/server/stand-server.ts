@@ -118,6 +118,18 @@ function parseDiscount(world: StandWorld, raw: unknown): DiscountAnnouncementInp
   return { writeScopeId: scope.writeScopeId, referencePriceMinor: reference, salePriceMinor: sale, currency: scope.currency, startsAt, endsAt };
 }
 
+/**
+ * Р-123, Р-124: экран комплаенса — объявленные скидки с повторной проверкой по текущей истории и глубина видимой истории каждого оффера
+ * на сейчас
+ */
+async function compliance(live: LiveWorld, world: StandWorld, m: Messages) {
+  const announcements = await live.store.discountAnnouncements(world.tenantId);
+  const rechecks = new Map(await Promise.all(announcements.map(async (a) => [a.announcementId, await live.store.omnibusCheck(world.tenantId, a.writeScopeId, a.startsAt)] as const)));
+  const now = live.clock.iso();
+  const depth = new Map(await Promise.all(world.state.scopes.map(async (sc) => [sc.writeScopeId, await live.store.omnibusCheck(world.tenantId, sc.writeScopeId, now)] as const)));
+  return complianceView(world, announcements, rechecks, m, depth);
+}
+
 /** Шаг 23: устаревший экран различий — какой оффер и какие границы у него сейчас */
 function conflictText(world: StandWorld, conflict: { writeScopeId: string; actual: { minMinor: number | null; maxMinor: number | null } }, m: Messages): string {
   const scope = scopeById(world, conflict.writeScopeId);
@@ -235,9 +247,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         // Р-123: отчёт по объявленным скидкам — каждая проверяется заново по текущей истории цен (исправления свёртки, поздние цены)
         case 'compliance': {
           if (param === null) {
-            const announcements = await live.store.discountAnnouncements(world.tenantId);
-            const rechecks = new Map(await Promise.all(announcements.map(async (a) => [a.announcementId, await live.store.omnibusCheck(world.tenantId, a.writeScopeId, a.startsAt)] as const)));
-            return ok(complianceView(world, announcements, rechecks, m));
+            return ok(await compliance(live, world, m));
           }
           if (param === 'evidence') {
             const from = url.searchParams.get('from') ?? '';
@@ -276,9 +286,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       if (result.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
       if (result.status === 'VIOLATION') return fail(400, 'OMNIBUS_VIOLATION', discountCheckView(world, input.writeScopeId, input.referencePriceMinor, result.check, m)!.headline);
       if (result.status === 'INVALID') return fail(400, result.cause, s.badDiscount);
-      const announcements = await live.store.discountAnnouncements(world.tenantId);
-      const rechecks = new Map(await Promise.all(announcements.map(async (a) => [a.announcementId, await live.store.omnibusCheck(world.tenantId, a.writeScopeId, a.startsAt)] as const)));
-      return ok({ message: m.ui.compliance.announced, compliance: complianceView(await live.view(viewer), announcements, rechecks, m) });
+      return ok({ message: m.ui.compliance.announced, compliance: await compliance(live, await live.view(viewer), m) });
     }
     if (screen === 'stop' && param === 'plan') {
       const target = parseTarget(live, body.target);

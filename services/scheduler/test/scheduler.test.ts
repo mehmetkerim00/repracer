@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { readdirSync, readFileSync } from 'node:fs';
 import { AMAZON_DESCRIPTOR } from '@repracer/amazon-adapter';
 import { KAUFLAND_DESCRIPTOR } from '@repracer/kaufland-adapter';
 import { createScheduler, jobSource, LeaseLostError, MemorySchedulerState, nextSlotAfter, type JobDeps, type JobSpec } from '../src/index.ts';
@@ -119,4 +120,15 @@ test('Р-126: the job source gives each account only the jobs its channel suppor
   const withPush = await jobSource({ ...deps, reconcileEnabled: () => true }).jobs('2026-09-17T10:00:00.000Z');
   assert.ok(withPush.some((s) => s.name === 'notification-loss-review' && s.scope?.channelAccountId === '20000000-0000-4000-8000-000000000001'),
     'Kaufland reconciliation is switched on per account when early access to buy_box_changed is granted');
+});
+
+test('Р-124: neither channel snapshot has a price history operation — the descriptors say so and completeness counts from connection', () => {
+  const vendor = new URL('../../../vendor/', import.meta.url);
+  const kaufland = JSON.parse(readFileSync(new URL('kaufland/seller-api-v2/2026-09-14/openapi.json', vendor), 'utf8')) as { paths: Record<string, unknown> };
+  assert.deepEqual(Object.keys(kaufland.paths).filter((p) => /histor/i.test(p)), []);
+  const models = new URL('amazon/sp-api-models/2026-09-16/models/', vendor);
+  const amazonHistoryPaths = readdirSync(models, { recursive: true }).filter((f) => String(f).endsWith('.json'))
+    .flatMap((f) => Object.keys((JSON.parse(readFileSync(new URL(String(f), models), 'utf8')) as { paths?: Record<string, unknown> }).paths ?? {}).filter((p) => /histor/i.test(p)));
+  assert.deepEqual(amazonHistoryPaths, []);
+  assert.deepEqual([KAUFLAND_DESCRIPTOR.priceHistory.kind, AMAZON_DESCRIPTOR.priceHistory.kind], ['UNAVAILABLE', 'UNAVAILABLE']);
 });

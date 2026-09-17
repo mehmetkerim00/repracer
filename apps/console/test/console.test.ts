@@ -469,6 +469,10 @@ test('step 24, Р-123: a discount is checked before it is announced; a prior pri
   const live = worlds.find((w) => w.id === id)!;
   const view = await get<ComplianceView>(owner, api(id, 'compliance'));
   assert.deepEqual([view.rows.length, view.canAnnounce, view.cannotCheck.length > 0], [0, true, true]);
+  // Р-124 (шаг 25): модуль не гарантирует соответствие; у каждого оффера — глубина видимой истории
+  assert.match(view.notAGuarantee, /^This module does not guarantee compliance\./);
+  assert.equal(view.depth.length, view.offers.length);
+  for (const d of view.depth) assert.match(d.depth.seen, /^We see (\d+ days? of price history for this offer \(since .+\)|no price history for this offer)\.$/);
   const scope = view.offers[0]!;
   const startsAt = new Date(Date.parse(live.clock.iso()) + 86_400_000).toISOString();
   const prior = await live.store.omnibusCheck(live.tenantId, scope.writeScopeId, startsAt);
@@ -482,6 +486,10 @@ test('step 24, Р-123: a discount is checked before it is announced; a prior pri
   const check = warned.body as DiscountCheckView;
   assert.deepEqual([check.verdict, check.tone, check.canAnnounce], ['VIOLATION', 'stop', false]);
   assert.match(check.headline, /^This discount breaks the rule: the stated prior price .+ is above the lowest price .+ of the last 30 days\.$/);
+  assert.match(check.depth.seen, /^We see \d+ days? of price history for this offer \(since .+\)\.$/);
+  // Скидка завтра — окно не завершено: проверка неполная, с причиной
+  assert.deepEqual([check.depth.complete, check.depth.reliability], [false, 'The check is incomplete: the discount starts later, prices until then are not known yet.']);
+  assert.equal(check.depth.limit, 'Prices set in the channel back office or by another tool that our reconciliation did not notice are not visible.');
   assert.equal((await call(viewer, 'POST', api(id, 'compliance', 'announce'), { ...discount, confirmed: true })).status, 403);
   assert.equal((await call(owner, 'POST', api(id, 'compliance', 'announce'), discount)).status, 400, 'not confirmed');
   const refused = await call(owner, 'POST', api(id, 'compliance', 'announce'), { ...discount, confirmed: true });
@@ -521,7 +529,7 @@ test('step 24, Р-123: a discount is checked before it is announced; a prior pri
 
   // Экран на обоих языках
   const en = await html('/src/screens/Compliance.tsx', 'ComplianceScreenView', { worldId: id, initial: report });
-  for (const text of ['Omnibus: prior price of a discount', 'Announced discounts', 'What this module cannot check', 'Download CSV']) assert.ok(en.includes(text), text);
+  for (const text of ['Omnibus: prior price of a discount', 'Announced discounts', 'What this module cannot check', 'Download CSV', 'This module does not guarantee compliance', 'How much price history we see', 'We see ']) assert.ok(en.includes(text), text);
   const de = await html('/src/screens/Compliance.tsx', 'ComplianceScreenView', { worldId: id, initial: await get<ComplianceView>(await login('OWNER', 'de'), api(id, 'compliance')) }, 'de');
-  for (const text of ['Omnibus: vorheriger Preis eines Rabatts', 'Angekündigte Rabatte', 'Was dieses Modul nicht prüfen kann']) assert.ok(de.includes(text), text);
+  for (const text of ['Omnibus: vorheriger Preis eines Rabatts', 'Angekündigte Rabatte', 'Was dieses Modul nicht prüfen kann', 'Dieses Modul garantiert keine Rechtskonformität', 'Wir sehen ']) assert.ok(de.includes(text), text);
 });

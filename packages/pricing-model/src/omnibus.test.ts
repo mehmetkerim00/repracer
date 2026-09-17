@@ -13,7 +13,7 @@ test('Р-123: the window is the 30 storefront days before the discount day; a da
     { acceptedAt: '2026-08-20T09:00:00.000Z', amountMinor: 1890 },
   ];
   const prior = omnibusLowestPriorPrice(changes, tz, '2026-09-10T08:00:00.000Z', AS_OF);
-  assert.deepEqual(prior, { status: 'OK', lowestMinor: 1790, windowFrom: '2026-08-11', windowTo: '2026-09-09', timeZone: tz, historySince: '2026-07-01T10:00:00.000Z' },
+  assert.deepEqual(prior, { status: 'OK', lowestMinor: 1790, windowFrom: '2026-08-11', windowTo: '2026-09-09', timeZone: tz, historySince: '2026-07-01T10:00:00.000Z', historyDays: 70, externalChanges: 0 },
     '1790 was set before the window and was still in effect when it opened');
   assert.equal(omnibusVerdict(prior, 1990), 'VIOLATION');
   assert.equal(omnibusVerdict(prior, 1790), 'COMPLIANT');
@@ -43,6 +43,19 @@ test('review of step 24, findings 1 and 14: prices of the discount day before it
   assert.equal(omnibusLowestPriorPrice(changes, tz, '2026-09-09T21:00:00.000Z', AS_OF).lowestMinor, 1000);
   const future = omnibusLowestPriorPrice(changes, tz, '2026-09-20T10:00:00.000Z', '2026-09-15T10:00:00.000Z');
   assert.deepEqual([future.status, omnibusVerdict(future, 500), omnibusVerdict(future, 1000)], ['WINDOW_OPEN', 'UNVERIFIED', 'VIOLATION']);
+});
+
+test('Р-124: the check shows how deep the history we see is; a price set outside repracer is in the window and makes the check incomplete', () => {
+  const tz = 'Europe/Berlin';
+  const changes = [{ acceptedAt: '2026-07-01T10:00:00.000Z', amountMinor: 1990 }];
+  // Подключение раньше первой цены — история видна с подключения
+  const connected = omnibusLowestPriorPrice(changes, tz, '2026-09-10T08:00:00.000Z', AS_OF, { connectedAt: '2026-06-01T08:00:00.000Z' });
+  assert.deepEqual([connected.historySince, connected.historyDays, connected.status], ['2026-06-01T08:00:00.000Z', 101, 'OK']);
+  // Цена 17.00, выставленная в кабинете канала и замеченная сверкой, — в окне: наименьшая цена 17.00, прежняя цена 19.90 — нарушение
+  const outside = omnibusLowestPriorPrice(changes, tz, '2026-09-10T08:00:00.000Z', AS_OF, { external: [{ at: '2026-09-01T12:00:00.000Z', amountMinor: 1700 }] });
+  assert.deepEqual([outside.status, outside.lowestMinor, outside.externalChanges, omnibusVerdict(outside, 1990), omnibusVerdict(outside, 1700)], ['EXTERNAL_CHANGES', 1700, 1, 'VIOLATION', 'UNVERIFIED']);
+  // Изменение до окна в окно не входит
+  assert.equal(omnibusLowestPriorPrice(changes, tz, '2026-09-10T08:00:00.000Z', AS_OF, { external: [{ at: '2026-07-15T12:00:00.000Z', amountMinor: 1700 }] }).status, 'OK');
 });
 
 test('storefront days follow daylight saving time', () => {

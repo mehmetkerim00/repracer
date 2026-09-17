@@ -219,6 +219,45 @@ DO $$ BEGIN
   END IF;
   RAISE NOTICE 'PASS accept | the prices of the discount day before its start are in the window (Р-123)';
 END $$;
+-- Шаг 25 (0092, риск 28): цены, которые канал не применил (запись завершена NOT_APPLIED), отмечаются и в окно не входят — в сутках
+-- начала скидки (9.00) и в незакрытых сутках окна (8.50)
+INSERT INTO tenant_data.price_history (tenant_id, accepted_at, write_scope_id, product_id, amount_minor, currency, price_basis, effective_min_price_minor, channel_write_id, write_version)
+VALUES ('a0000000-0000-0000-0000-00000000000a', greatest(date_trunc('day', now() AT TIME ZONE 'Europe/Berlin') AT TIME ZONE 'Europe/Berlin', now() - interval '2 seconds'),
+        'a6000000-0000-0000-0000-000000000001', 'a5000000-0000-0000-0000-000000000001', 900, 'EUR', 'GROSS', 800, 'a9250000-0000-4000-8000-000000000001', 9251),
+       ('a0000000-0000-0000-0000-00000000000a', now() - interval '2 days', 'a6000000-0000-0000-0000-000000000001', 'a5000000-0000-0000-0000-000000000001', 850, 'EUR', 'GROSS', 800,
+        'a9250000-0000-4000-8000-000000000002', 9252);
+INSERT INTO tenant_data.channel_write_history (tenant_id, channel_write_id, finished_at, write_scope_id, field, amount_minor, currency, price_basis, version, origin, final_status, attempt_count, created_at)
+SELECT 'a0000000-0000-0000-0000-00000000000a', w, now(), 'a6000000-0000-0000-0000-000000000001', 'PRICE', a, 'EUR', 'GROSS', v, 'ENGINE', 'NOT_APPLIED', 1, now()
+  FROM (VALUES ('a9250000-0000-4000-8000-000000000001'::uuid, 900, 9251), ('a9250000-0000-4000-8000-000000000002'::uuid, 850, 9252)) AS x(w, a, v);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM tenant_data.price_history_not_applied WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a' AND channel_write_id IN ('a9250000-0000-4000-8000-000000000001', 'a9250000-0000-4000-8000-000000000002')) <> 2 THEN
+    RAISE EXCEPTION 'a price write the channel did not apply is not marked (risk 28)';
+  END IF;
+  RAISE NOTICE 'PASS accept | a price write the channel did not apply is marked (risk 28)';
+END $$;
+DO $$ BEGIN
+  IF (SELECT lowest_minor FROM tenant_data.omnibus_lowest_prior_price('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', now())) IN (850, 900) THEN
+    RAISE EXCEPTION 'a price the channel did not apply is in the Omnibus window (risk 28)';
+  END IF;
+  RAISE NOTICE 'PASS accept | a price the channel did not apply is not in the Omnibus window (risk 28)';
+END $$;
+-- Р-124: глубина истории — с первой известной цены (суточная свёртка 400 суток назад), не с подключения единицы записи в смоук-мире
+DO $$ BEGIN
+  IF (SELECT history_days FROM tenant_data.omnibus_lowest_prior_price('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', now())) < 400 THEN
+    RAISE EXCEPTION 'the history depth of an offer is not counted from its first known price (Р-124)';
+  END IF;
+  RAISE NOTICE 'PASS accept | the history depth of an offer is counted from its first known price (Р-124)';
+END $$;
+-- Р-124: цена, выставленная мимо нас и замеченная сверкой, входит в окно, проверка — не достоверна
+INSERT INTO channel_data.divergence_case (tenant_id, write_scope_id, field, expected_amount_minor, observed_amount_minor, cause, opened_at)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', 'PRICE', 1100, 800, 'EXTERNAL_CHANGE', now() - interval '1 second');
+DO $$ BEGIN
+  IF (SELECT (status, lowest_minor, external_changes) FROM tenant_data.omnibus_lowest_prior_price('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', now()))
+     IS DISTINCT FROM ('EXTERNAL_CHANGES'::text, 800::bigint, 1) THEN
+    RAISE EXCEPTION 'a price set outside repracer does not make the Omnibus check unverifiable (Р-124)';
+  END IF;
+  RAISE NOTICE 'PASS accept | a price set outside repracer makes the Omnibus check unverifiable (Р-124)';
+END $$;
 INSERT INTO tenant_data.product_vat_rate (tenant_id, product_id, country, rate_bp, version, created_by_membership_id)
 SELECT 'a0000000-0000-0000-0000-00000000000a', 'a5000000-0000-0000-0000-000000000001', 'AT', 1000, coalesce(max(version), 0) + 1, 'a2000000-0000-0000-0000-00000000000a'
   FROM tenant_data.product_vat_rate WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a' AND product_id = 'a5000000-0000-0000-0000-000000000001' AND country = 'AT';
@@ -246,6 +285,7 @@ SELECT pg_temp.expect_fail('a scheduler run with an unknown outcome (Р-126)', $
   INSERT INTO maintenance.scheduled_job_run (job_key, job_name, slot_at, owner, started_at, finished_at, outcome, lag_seconds) VALUES ('smoke-job', 'smoke-job', now(), 'a', now(), now(), 'MAYBE', 0) $q$, 'scheduled_job_run_outcome_known');
 SELECT pg_temp.expect_fail('a scheduler run finished before it started (Р-126)', $q$
   INSERT INTO maintenance.scheduled_job_run (job_key, job_name, slot_at, owner, started_at, finished_at, outcome, lag_seconds) VALUES ('smoke-job', 'smoke-job', now() - interval '1 hour', 'a', now(), now() - interval '1 minute', 'SUCCEEDED', 0) $q$, 'scheduled_job_run_order');
+SELECT pg_temp.expect_fail('truncate tenant_data.price_history_not_applied', $q$ TRUNCATE tenant_data.price_history_not_applied $q$, 'TRUNCATE of tenant_data.price_history_not_applied is forbidden');
 SELECT pg_temp.expect_fail('truncate maintenance.scheduled_job_run', $q$ TRUNCATE maintenance.scheduled_job_run $q$, 'TRUNCATE of maintenance.scheduled_job_run is forbidden');
 
 -- Шаг 23 [Р-108]: TRUNCATE новой append-only таблицы отклоняет свой триггер

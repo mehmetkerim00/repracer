@@ -1022,6 +1022,7 @@ export class PgPricingStore implements PricingStore {
     return {
       status: r.status, lowestMinor: r.lowest_minor === null ? null : Number(r.lowest_minor), windowFrom: day(r.window_from), windowTo: day(r.window_to),
       timeZone: r.day_tz ?? null, historySince: r.history_since ? iso(r.history_since) : null,
+      historyDays: r.history_days === null || r.history_days === undefined ? 0 : Number(r.history_days), externalChanges: r.external_changes === null || r.external_changes === undefined ? 0 : Number(r.external_changes),
     };
   }
 
@@ -1038,13 +1039,13 @@ export class PgPricingStore implements PricingStore {
         const { rows: [r] } = await tx.query(
           `INSERT INTO tenant_data.discount_announcement (tenant_id, write_scope_id, reference_price_minor, sale_price_minor, currency, starts_at, ends_at, created_by_membership_id, check_status)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'OK')
-           RETURNING discount_announcement_id, created_at, check_status, lowest_prior_minor, window_from, window_to, day_tz`,
+           RETURNING discount_announcement_id, created_at, check_status, lowest_prior_minor, window_from, window_to, day_tz, covered_since, history_days, external_changes`,
           [tenantId, input.writeScopeId, input.referencePriceMinor, input.salePriceMinor, input.currency, input.startsAt, input.endsAt, actor.membershipId]);
-        const { rows: [since] } = await tx.query('SELECT history_since FROM tenant_data.omnibus_lowest_prior_price($1, $2, $3)', [tenantId, input.writeScopeId, input.startsAt]);
+
         return {
           status: 'ANNOUNCED', announcement: {
             ...input, announcementId: r.discount_announcement_id, createdAt: iso(r.created_at), createdByMembershipId: actor.membershipId,
-            check: PgPricingStore.omnibusRow({ status: r.check_status, lowest_minor: r.lowest_prior_minor, window_from: r.window_from, window_to: r.window_to, day_tz: r.day_tz, history_since: since?.history_since ?? null }),
+            check: PgPricingStore.omnibusRow({ status: r.check_status, lowest_minor: r.lowest_prior_minor, window_from: r.window_from, window_to: r.window_to, day_tz: r.day_tz, history_since: r.covered_since, history_days: r.history_days, external_changes: r.external_changes }),
           },
         } satisfies DiscountAnnounceResult;
       }, actor.userId, { mfa: actor.mfa });
@@ -1065,12 +1066,12 @@ export class PgPricingStore implements PricingStore {
     return inTenant(this.admin('discountAnnouncements'), tenantId, async (tx) => {
       const { rows } = await tx.query(
         `SELECT discount_announcement_id, write_scope_id, reference_price_minor, sale_price_minor, currency, starts_at, ends_at, created_at, created_by_membership_id,
-                check_status, lowest_prior_minor, window_from, window_to, day_tz
+                check_status, lowest_prior_minor, window_from, window_to, day_tz, covered_since, history_days, external_changes
            FROM tenant_data.discount_announcement WHERE tenant_id = $1 ORDER BY starts_at DESC, created_at DESC`, [tenantId]);
       return rows.map((r): DiscountAnnouncementRow => ({
         announcementId: r.discount_announcement_id, writeScopeId: r.write_scope_id, referencePriceMinor: Number(r.reference_price_minor), salePriceMinor: Number(r.sale_price_minor),
         currency: r.currency, startsAt: iso(r.starts_at), endsAt: r.ends_at ? iso(r.ends_at) : null, createdAt: iso(r.created_at), createdByMembershipId: r.created_by_membership_id,
-        check: PgPricingStore.omnibusRow({ status: r.check_status, lowest_minor: r.lowest_prior_minor, window_from: r.window_from, window_to: r.window_to, day_tz: r.day_tz, history_since: null }),
+        check: PgPricingStore.omnibusRow({ status: r.check_status, lowest_minor: r.lowest_prior_minor, window_from: r.window_from, window_to: r.window_to, day_tz: r.day_tz, history_since: r.covered_since, history_days: r.history_days, external_changes: r.external_changes }),
       }));
     });
   }
