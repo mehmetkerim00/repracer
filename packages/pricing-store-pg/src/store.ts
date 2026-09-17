@@ -621,6 +621,7 @@ export class PgPricingStore implements PricingStore {
         [tenantId, s.log.competitorSnapshotId, s.log.receivedAt, s.log.snapshot.observedAt, key.channelAccountId, key.marketplace, key.channelProductRef,
           s.log.snapshot.condition, s.log.snapshot.source, s.log.snapshot.sourceEventId ?? null, s.verdict, JSON.stringify(s.log.snapshot), s.log.delivery]);
     }
+    if (s.lossCheck) await PgPricingStore.insertLossCheck(tx, tenantId, s.lossCheck);
     const snapshot = s.accepted?.snapshot ?? null;
     const competitors = snapshot ? snapshot.offers.filter((o) => !o.isSelf) : [];
     const lowestPrice = competitors.length ? Math.min(...competitors.map((o) => o.price.amountMinor)) : null;
@@ -1051,6 +1052,7 @@ export class PgPricingStore implements PricingStore {
       const message = String((error as Error).message ?? '');
       if (/is above the lowest price/.test(message)) return { status: 'VIOLATION', check: await this.omnibusCheck(tenantId, input.writeScopeId, input.startsAt) };
       if (/is not the currency of price write_scope/.test(message)) return { status: 'INVALID', cause: 'CURRENCY_MISMATCH' };
+      if (/before the current storefront day/.test(message)) return { status: 'INVALID', cause: 'STARTS_BEFORE_TODAY' };
       if (/discount_announcement_prices/.test(message)) return { status: 'INVALID', cause: 'PRICES_INVALID' };
       if (/discount_announcement_period/.test(message)) return { status: 'INVALID', cause: 'PERIOD_INVALID' };
       if (/violates foreign key constraint/.test(message)) return { status: 'INVALID', cause: 'SCOPE_NOT_FOUND' };
@@ -1474,7 +1476,18 @@ export class PgPricingStore implements PricingStore {
     });
   }
 
-  async logReconciliationSnapshot(tenantId: string, entry: { channelAccountId: string; competitorSnapshotId: string; snapshot: CompetitorSnapshot; receivedAt: Instant }): Promise<void> {
+  /** Р-121: проверка потери уведомления — в транзакции снимка (фиксация оценки или снимок только для сверки) */
+  private static async insertLossCheck(tx: Tx, tenantId: string, c: NotificationLossCheck): Promise<void> {
+    await tx.query(
+      `INSERT INTO channel_data.notification_loss_check (tenant_id, channel_account_id, channel, marketplace, channel_product_ref, condition, compared,
+                                                         held_observed_at, held_minor, poll_snapshot_id, poll_observed_at, poll_minor, currency, due_at)
+       SELECT $1, a.channel_account_id, a.channel, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+         FROM tenant_data.channel_account a WHERE a.tenant_id = $1 AND a.channel_account_id = $2`,
+      [tenantId, c.channelAccountId, c.marketplace, c.channelProductRef, c.condition, c.compared, c.heldObservedAt, c.heldMinor, c.pollSnapshotId,
+        c.pollObservedAt, c.pollMinor, c.currency, c.dueAt]);
+  }
+
+  async recordReconciliationSnapshot(tenantId: string, entry: { channelAccountId: string; competitorSnapshotId: string; snapshot: CompetitorSnapshot; receivedAt: Instant; lossCheck?: NotificationLossCheck }): Promise<void> {
     const { snapshot } = entry;
     await this.tx(tenantId, async (tx) => {
       await tx.query(
@@ -1484,18 +1497,19 @@ export class PgPricingStore implements PricingStore {
            FROM tenant_data.channel_account a WHERE a.tenant_id = $1 AND a.channel_account_id = $5`,
         [tenantId, entry.competitorSnapshotId, entry.receivedAt, snapshot.observedAt, entry.channelAccountId, snapshot.marketplace, snapshot.channelProductRef,
           snapshot.condition, snapshot.source, snapshot.sourceEventId ?? null, JSON.stringify(snapshot)]);
+      if (entry.lossCheck) await PgPricingStore.insertLossCheck(tx, tenantId, entry.lossCheck);
     });
   }
 
-  async recordNotificationLossCheck(tenantId: string, c: NotificationLossCheck): Promise<void> {
-    await this.tx(tenantId, async (tx) => {
-      await tx.query(
-        `INSERT INTO channel_data.notification_loss_check (tenant_id, channel_account_id, channel, marketplace, channel_product_ref, condition, compared,
-                                                           held_observed_at, held_minor, poll_snapshot_id, poll_observed_at, poll_minor, currency, due_at)
-         SELECT $1, a.channel_account_id, a.channel, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
-           FROM tenant_data.channel_account a WHERE a.tenant_id = $1 AND a.channel_account_id = $2`,
-        [tenantId, c.channelAccountId, c.marketplace, c.channelProductRef, c.condition, c.compared, c.heldObservedAt, c.heldMinor, c.pollSnapshotId,
-          c.pollObservedAt, c.pollMinor, c.currency, c.dueAt]);
+  async heldCompetitorState(tenantId: string, key: ProductKey): Promise<{ observedAt: Instant; buyboxMinor: number | null; lowestMinor: number | null } | null> {
+    return this.tx(tenantId, async (tx) => {
+      const { rows: [r] } = await tx.query(
+        `SELECT cs.observed_at, cs.buybox_amount_minor,
+                (SELECT min((o->'price'->>'amountMinor')::bigint) FROM jsonb_array_elements(cs.offers) o WHERE NOT coalesce((o->>'isSelf')::boolean, false)) AS lowest
+           FROM channel_data.competitor_state cs
+          WHERE cs.tenant_id = $1 AND cs.channel_account_id = $2 AND cs.marketplace = $3 AND cs.channel_product_ref = $4 AND cs.condition = $5`,
+        [tenantId, key.channelAccountId, key.marketplace, key.channelProductRef, dbCondition(key.condition)]);
+      return r ? { observedAt: iso(r.observed_at), buyboxMinor: r.buybox_amount_minor === null ? null : Number(r.buybox_amount_minor), lowestMinor: r.lowest === null ? null : Number(r.lowest) } : null;
     });
   }
 
@@ -1509,13 +1523,13 @@ export class PgPricingStore implements PricingStore {
     });
   }
 
-  async pickReconciliationSample(tenantId: string, channelAccountId: string, size: number, at: Instant, cycleSeconds: number): Promise<CompetitorQuery[]> {
+  async pickReconciliationSample(tenantId: string, channelAccountId: string, size: number, cycle: number): Promise<CompetitorQuery[]> {
     return this.tx(tenantId, async (tx) => {
       // Офферы аккаунта с товаром канала; порядок и окно — rotation, как в памяти
       const { rows } = await tx.query(
         `SELECT DISTINCT m.marketplace, m.channel_product_ref, m.condition FROM tenant_data.offer_mapping m
           WHERE m.tenant_id = $1 AND m.channel_account_id = $2 AND m.status <> 'ENDED' AND m.channel_product_ref IS NOT NULL`, [tenantId, channelAccountId]);
-      return rotation(rows.map((r) => ({ marketplace: r.marketplace, channelProductRef: r.channel_product_ref, condition: portCondition(r.condition) })), size, at, cycleSeconds);
+      return rotation(rows.map((r) => ({ marketplace: r.marketplace, channelProductRef: r.channel_product_ref, condition: portCondition(r.condition) })), size, cycle);
     });
   }
 

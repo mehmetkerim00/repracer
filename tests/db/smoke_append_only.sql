@@ -65,12 +65,15 @@ SELECT pg_temp.expect_fail('competitor snapshot log with an unknown delivery (Р
 INSERT INTO channel_data.competitor_snapshot_log (tenant_id, competitor_snapshot_id, received_at, observed_at, channel_account_id, channel, marketplace, channel_product_ref, condition, source, sanity_verdict, delivery, snapshot)
 VALUES ('a0000000-0000-0000-0000-00000000000a', 'a9121000-0000-4000-8000-00000000000a', now() - interval '90 minutes', now() - interval '95 minutes', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R121-A', 'new', 'KAUFLAND_BUY_BOX_CHANGED', 'ACCEPT', 'PUSH', '{}'),
        ('a0000000-0000-0000-0000-00000000000a', 'a9121000-0000-4000-8000-00000000000b', now() - interval '30 minutes', now() - interval '35 minutes', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R121-B', 'new', 'KAUFLAND_BUY_BOX_CHANGED', 'ACCEPT', 'PUSH', '{}'),
-       ('a0000000-0000-0000-0000-00000000000a', 'a9121000-0000-4000-8000-00000000000c', now() - interval '90 minutes', now() - interval '95 minutes', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R121-C', 'new', 'KAUFLAND_BUYBOX', 'ACCEPT', 'POLL', '{}');
+       ('a0000000-0000-0000-0000-00000000000a', 'a9121000-0000-4000-8000-00000000000c', now() - interval '90 minutes', now() - interval '95 minutes', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R121-C', 'new', 'KAUFLAND_BUYBOX', 'ACCEPT', 'POLL', '{}'),
+       -- E: до срока пришло уведомление другого товара; F: до срока пришло уведомление этого товара, но наблюдённое раньше прежнего состояния
+       ('a0000000-0000-0000-0000-00000000000a', 'a9121000-0000-4000-8000-00000000000e', now() - interval '90 minutes', now() - interval '95 minutes', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R121-X', 'new', 'KAUFLAND_BUY_BOX_CHANGED', 'ACCEPT', 'PUSH', '{}'),
+       ('a0000000-0000-0000-0000-00000000000a', 'a9121000-0000-4000-8000-00000000000f', now() - interval '90 minutes', now() - interval '4 hours', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R121-F', 'new', 'KAUFLAND_BUY_BOX_CHANGED', 'ACCEPT', 'PUSH', '{}');
 INSERT INTO channel_data.notification_loss_check (tenant_id, notification_loss_check_id, channel_account_id, channel, marketplace, channel_product_ref, condition, compared,
   held_observed_at, held_minor, poll_snapshot_id, poll_observed_at, poll_minor, currency, due_at)
 SELECT 'a0000000-0000-0000-0000-00000000000a', ('a9121100-0000-4000-8000-00000000000' || x.k)::uuid, 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R121-' || upper(x.k), 'new', 'BUYBOX',
        now() - interval '3 hours', 1500, gen_random_uuid(), now() - interval '2 hours', 1450, 'EUR', now() + x.due
-  FROM (VALUES ('a', interval '-1 hour'), ('b', interval '-1 hour'), ('c', interval '-1 hour'), ('d', interval '1 hour')) AS x(k, due);
+  FROM (VALUES ('a', interval '-1 hour'), ('b', interval '-1 hour'), ('c', interval '-1 hour'), ('d', interval '1 hour'), ('e', interval '-1 hour'), ('f', interval '-1 hour')) AS x(k, due);
 SELECT pg_temp.expect_fail('notification loss check without a divergence (Р-121)', $q$
   INSERT INTO channel_data.notification_loss_check (tenant_id, channel_account_id, channel, marketplace, channel_product_ref, condition, compared, held_observed_at, held_minor, poll_snapshot_id, poll_observed_at, poll_minor, currency, due_at)
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R121-X', 'new', 'BUYBOX', now() - interval '3 hours', 1500, gen_random_uuid(), now() - interval '2 hours', 1500, 'EUR', now()) $q$,
@@ -108,6 +111,18 @@ DO $$ BEGIN
     RAISE EXCEPTION 'a loss check is decided before its due time (Р-121)';
   END IF;
   RAISE NOTICE 'PASS accept | a loss check is not decided before its due time (Р-121)';
+END $$;
+DO $$ BEGIN
+  IF (SELECT verdict FROM r121_verdicts WHERE channel_product_ref = 'R121-E') IS DISTINCT FROM 'LOSS_SUSPECTED' THEN
+    RAISE EXCEPTION 'a notification of another product resolves a loss check (Р-121)';
+  END IF;
+  RAISE NOTICE 'PASS accept | a notification of another product does not resolve a loss check (Р-121)';
+END $$;
+DO $$ BEGIN
+  IF (SELECT verdict FROM r121_verdicts WHERE channel_product_ref = 'R121-F') IS DISTINCT FROM 'LOSS_SUSPECTED' THEN
+    RAISE EXCEPTION 'a notification observed before the held state resolves a loss check (Р-121)';
+  END IF;
+  RAISE NOTICE 'PASS accept | a notification observed before the held state does not resolve a loss check (Р-121)';
 END $$;
 SELECT pg_temp.expect_fail('notification loss verdict delayed without the notification snapshot (Р-121)', $q$
   INSERT INTO channel_data.notification_loss_verdict (tenant_id, notification_loss_check_id, verdict, decided_at)
@@ -172,6 +187,17 @@ SELECT pg_temp.expect_fail('discount ending before it starts (Р-123)', $q$
   INSERT INTO tenant_data.discount_announcement (tenant_id, write_scope_id, reference_price_minor, sale_price_minor, currency, starts_at, ends_at, created_by_membership_id, check_status)
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', 1200, 1000, 'EUR', now(), now() - interval '1 day', 'a2000000-0000-0000-0000-00000000000a', 'OK') $q$,
   'discount_announcement_period');
+SELECT pg_temp.expect_fail('discount announced to start before the current storefront day (Omnibus, Р-123)', $q$
+  INSERT INTO tenant_data.discount_announcement (tenant_id, write_scope_id, reference_price_minor, sale_price_minor, currency, starts_at, created_by_membership_id, check_status)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', 1200, 1000, 'EUR', now() - interval '2 days', 'a2000000-0000-0000-0000-00000000000a', 'OK') $q$,
+  'before the current storefront day');
+DO $$ BEGIN
+  IF (SELECT status FROM tenant_data.omnibus_lowest_prior_price('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', now() + interval '1 day'))
+     IS DISTINCT FROM 'WINDOW_OPEN' THEN
+    RAISE EXCEPTION 'a discount starting later is confirmed before its window closes (Р-123)';
+  END IF;
+  RAISE NOTICE 'PASS accept | a discount starting later is not confirmed before its window closes (Р-123)';
+END $$;
 INSERT INTO tenant_data.discount_announcement (tenant_id, write_scope_id, reference_price_minor, sale_price_minor, currency, starts_at, created_by_membership_id, check_status, lowest_prior_minor)
 VALUES ('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', 1200, 1000, 'EUR', now(), 'a2000000-0000-0000-0000-00000000000a', 'TIME_ZONE_UNKNOWN', 99999);
 DO $$ BEGIN
@@ -180,6 +206,17 @@ DO $$ BEGIN
     RAISE EXCEPTION 'the Omnibus check of a discount announcement is not computed by the database (Р-123)';
   END IF;
   RAISE NOTICE 'PASS accept | the Omnibus check of a discount announcement is computed by the database (Р-123)';
+END $$;
+-- Сутки начала скидки до её начала — в окне (ревью шага 24, находка 14): 11.00 сегодня раньше момента проверки
+INSERT INTO tenant_data.price_history (tenant_id, accepted_at, write_scope_id, product_id, amount_minor, currency, price_basis, effective_min_price_minor, channel_write_id, write_version)
+SELECT 'a0000000-0000-0000-0000-00000000000a', greatest(date_trunc('day', now() AT TIME ZONE 'Europe/Berlin') AT TIME ZONE 'Europe/Berlin', now() - interval '1 second'),
+       'a6000000-0000-0000-0000-000000000001', 'a5000000-0000-0000-0000-000000000001', 1100, 'EUR', 'GROSS', 1000, gen_random_uuid(), 9121;
+DO $$ BEGIN
+  IF (SELECT lowest_minor FROM tenant_data.omnibus_lowest_prior_price('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', now()))
+     IS DISTINCT FROM 1100::bigint THEN
+    RAISE EXCEPTION 'the prices of the discount day before its start are not in the window (Р-123)';
+  END IF;
+  RAISE NOTICE 'PASS accept | the prices of the discount day before its start are in the window (Р-123)';
 END $$;
 INSERT INTO tenant_data.product_vat_rate (tenant_id, product_id, country, rate_bp, version, created_by_membership_id)
 SELECT 'a0000000-0000-0000-0000-00000000000a', 'a5000000-0000-0000-0000-000000000001', 'AT', 1000, coalesce(max(version), 0) + 1, 'a2000000-0000-0000-0000-00000000000a'

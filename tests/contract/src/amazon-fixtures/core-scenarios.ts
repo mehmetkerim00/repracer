@@ -241,7 +241,7 @@ export function buildCoreScenarios(): Array<{ file: string; scenario: Scenario }
     ['pipeline', 'r-121', 'notification-loss'],
     lossScopes,
     [
-      { id: 'rotation-window', kind: 'pipelineReconcileRotation', size: 20, cycleSeconds: 3600, graceSeconds: 900,
+      { id: 'rotation-window', kind: 'pipelineReconcileRotation', size: 20, cycle: 0, graceSeconds: 900,
         expect: { queries: 3, failures: [], snapshots: [], reconciliation: { matched: 1, diverged: 2, noBaseline: 0, notNewer: 0, logged: 3 } } } as Step,
       { id: 'five-minutes', kind: 'advanceClock', ms: 300_000 },
       { id: 'late-any-offer-changed', kind: 'pipelineInbound', delivery: delivery(anyOfferChanged('syn-notification-0301', DE, refs[2]!, { $clockIso: -60_000 },

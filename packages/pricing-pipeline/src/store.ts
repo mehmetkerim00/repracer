@@ -214,6 +214,8 @@ export interface SnapshotOutcome {
    * что в ссылке решения на снимок
    */
   log?: { competitorSnapshotId: string; snapshot: CompetitorSnapshot; receivedAt: Instant; delivery: SnapshotDelivery };
+  /** Р-121: проверка потери уведомления по этому снимку опроса — в той же транзакции */
+  lossCheck?: NotificationLossCheck;
 }
 
 /**
@@ -372,7 +374,7 @@ export type DiscountAnnounceResult =
   | { status: 'FORBIDDEN' }
   /** Прежняя цена выше наименьшей цены окна — база отклонила */
   | { status: 'VIOLATION'; check: OmnibusPriorPrice }
-  | { status: 'INVALID'; cause: 'SCOPE_NOT_FOUND' | 'CURRENCY_MISMATCH' | 'PRICES_INVALID' | 'PERIOD_INVALID' };
+  | { status: 'INVALID'; cause: 'SCOPE_NOT_FOUND' | 'CURRENCY_MISMATCH' | 'PRICES_INVALID' | 'PERIOD_INVALID' | 'STARTS_BEFORE_TODAY' };
 
 /** Р-123: доказательная история цен — сутки витрины с наименьшей, наибольшей, первой и последней ценой, исправления отмечены */
 export interface PriceEvidenceDay {
@@ -490,14 +492,17 @@ export interface PricingStore {
   editBounds(tenantId: string, edits: readonly BoundsEditInput[], actor: AdminActor, mode: 'PREVIEW' | 'APPLY'): Promise<BoundsEditResult>;
   saveStrategy(tenantId: string, input: StrategySaveInput, actor: AdminActor): Promise<StrategySaveResult>;
   /** Р-123 (шаг 24): наименьшая цена за 30 суток витрины до начала скидки — предупреждение до объявления */
-  /** Р-121, Р-122: снимок источника только для сверки (роль RECONCILIATION) — в журнал снимков без проверки входов и решения */
-  logReconciliationSnapshot(tenantId: string, entry: { channelAccountId: string; competitorSnapshotId: string; snapshot: CompetitorSnapshot; receivedAt: Instant }): Promise<void>;
-  /** Р-121: проверка потери уведомления — только при расхождении (база отклоняет совпадение) */
-  recordNotificationLossCheck(tenantId: string, check: NotificationLossCheck): Promise<void>;
+  /**
+   * Р-121, Р-122: снимок источника только для сверки (роль RECONCILIATION) — в журнал снимков без проверки входов и решения; проверка
+   * потери (только при расхождении, совпадение отклоняет база) — в той же транзакции
+   */
+  recordReconciliationSnapshot(tenantId: string, entry: { channelAccountId: string; competitorSnapshotId: string; snapshot: CompetitorSnapshot; receivedAt: Instant; lossCheck?: NotificationLossCheck }): Promise<void>;
+  /** Р-121: последнее принятое состояние товара (competitor_state) — прежнее состояние сверки без чтения контекста решения */
+  heldCompetitorState(tenantId: string, key: ProductKey): Promise<{ observedAt: Instant; buyboxMinor: number | null; lowestMinor: number | null } | null>;
   /** Р-121: вердикты проверок аккаунта, срок которых наступил к at; вычисляет база */
   reviewNotificationLoss(tenantId: string, channelAccountId: string, at: Instant): Promise<NotificationLossVerdict[]>;
-  /** Р-121: сверка по кругу — size товаров аккаунта, сдвиг по номеру цикла (at / cycleSeconds); все товары покрываются за n / size циклов */
-  pickReconciliationSample(tenantId: string, channelAccountId: string, size: number, at: Instant, cycleSeconds: number): Promise<CompetitorQuery[]>;
+  /** Р-121: сверка по кругу — size товаров аккаунта, окно по номеру вызова cycle; все товары покрываются за ceil(n / size) вызовов подряд */
+  pickReconciliationSample(tenantId: string, channelAccountId: string, size: number, cycle: number): Promise<CompetitorQuery[]>;
   omnibusCheck(tenantId: string, writeScopeId: string, startsAt: Instant): Promise<OmnibusPriorPrice>;
   /** Р-123: объявление скидки — только человек с правом MANAGE_PRICING; нарушение отклоняет база (0087) */
   announceDiscount(tenantId: string, input: DiscountAnnouncementInput, actor: AdminActor): Promise<DiscountAnnounceResult>;

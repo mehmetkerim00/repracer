@@ -616,6 +616,7 @@ export const en = {
         INCOMPLETE_HISTORY: (since: string) => `Price history starts only at ${since}; the lowest price before that is unknown.`,
         NO_PRICE_HISTORY: (_since: string) => 'No price of ours for this offer before the discount starts.',
         TIME_ZONE_UNKNOWN: (_since: string) => 'The storefront time zone is not set: storefront days cannot be counted (Р-65).',
+        WINDOW_OPEN: (_since: string) => 'The discount starts later: prices until its start are not known yet — check again when it starts.',
       },
       window: (from: string, to: string, tz: string) => `Window ${from} – ${to} (${tz})`,
       windowUnknown: 'Window unknown',

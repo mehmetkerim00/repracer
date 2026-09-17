@@ -32,10 +32,11 @@ import {
 } from '@repracer/pricing-model';
 import { runStrategy, strategyAvailability } from '@repracer/strategy-engine';
 import { channelRefusal, type DispatchStep, type WriteDispatcher } from '@repracer/write-dispatcher';
-import { comparedValue, DEFAULT_LOSS_GRACE_SECONDS, reconcile } from './reconciliation.ts';
+import { comparedValue, DEFAULT_LOSS_GRACE_SECONDS, reconcile, type HeldState } from './reconciliation.ts';
 import type {
   HaltSampleObservation,
   InboundNotificationEntry,
+  NotificationLossCheck,
   NotificationLossVerdict,
   SnapshotDelivery,
   CommittedDecision,
@@ -104,6 +105,8 @@ export interface SnapshotReport {
   scopes: ScopeReport[];
   /** OQ-171: уведомление записано в журнал в транзакции снимка или оказалось повтором (ничего не записано) */
   notification?: 'RECORDED' | 'DUPLICATE';
+  /** Р-121: итог сверки снимка опроса */
+  reconciliation?: ReconciliationKind;
 }
 
 /** Превью стратегии до сохранения (шаг 21): что предложила бы стратегия и что решил бы Gate, без фиксации */
@@ -136,7 +139,12 @@ export interface PollOptions {
 }
 
 /** Р-121: итог сверки опроса */
-export interface ReconciliationReport { matched: number; diverged: number; noBaseline: number; notNewer: number; logged: number }
+export interface ReconciliationReport { matched: number; diverged: number; noBaseline: number; notNewer: number; uncovered: number; rejected: number; logged: number; failed: number }
+export type ReconciliationKind = 'MATCH' | 'DIVERGED' | 'NO_BASELINE' | 'NOT_NEWER' | 'UNCOVERED' | 'REJECTED';
+const RECONCILIATION_KEYS: Record<ReconciliationKind, keyof ReconciliationReport> = {
+  MATCH: 'matched', DIVERGED: 'diverged', NO_BASELINE: 'noBaseline', NOT_NEWER: 'notNewer', UNCOVERED: 'uncovered', REJECTED: 'rejected',
+};
+const emptyReconciliation = (): ReconciliationReport => ({ matched: 0, diverged: 0, noBaseline: 0, notNewer: 0, uncovered: 0, rejected: 0, logged: 0, failed: 0 });
 
 export interface PipelineDeps {
   store: PricingStore;
@@ -378,7 +386,40 @@ export function createPricingPipeline(deps: PipelineDeps) {
   /** Р-121: снимок источника PUSH или с записью уведомления — доставлен уведомлением; иначе — опрос */
   const sourcesOf = () => adapter.descriptor?.competitorSources ?? [];
 
-  async function processSnapshot(ctx: AdapterCallContext, snapshot: CompetitorSnapshot, notification?: InboundNotificationEntry, delivery?: SnapshotDelivery): Promise<SnapshotReport> {
+  /** Валюта витрины из описания канала — для проверки потери без чтения контекста решения */
+  const currencyOf = (marketplace: string) => adapter.descriptor?.marketplaces?.find((m) => m.code === marketplace)?.currency ?? null;
+
+  /**
+   * Р-121: проверка потери по снимку опроса. Сверяются только состояния, которые покрывает источник уведомлений канала: для состояния
+   * без уведомлений каждое изменение было бы «потерей» (ревью шага 24, находка 3). Идентификатор проверки — идентификатор снимка в журнале
+   * (находка 7)
+   */
+  function lossCheckFor(ctx: AdapterCallContext, snapshot: CompetitorSnapshot, held: HeldState | null, pollSnapshotId: string, now: Instant, graceSeconds: number):
+    { kind: ReconciliationKind; check?: NotificationLossCheck } {
+    const push = sourcesOf().find((c) => c.kind === 'PUSH' && c.conditions.includes(snapshot.condition));
+    if (!push) return { kind: 'UNCOVERED' };
+    const source = sourcesOf().find((c) => c.source === snapshot.source);
+    const compared = comparedValue(push, source);
+    const outcome = reconcile(held, snapshot, compared);
+    if (outcome.kind !== 'DIVERGED') return { kind: outcome.kind };
+    const currency = currencyOf(snapshot.marketplace) ?? snapshot.buybox?.price.currency ?? snapshot.offers[0]?.price.currency;
+    if (!currency) return { kind: 'UNCOVERED' };
+    const pollObservedAt = new Date(Date.parse(snapshot.observedAt)).toISOString();
+    return {
+      kind: 'DIVERGED',
+      check: {
+        channelAccountId: ctx.channelAccountId, marketplace: snapshot.marketplace, channelProductRef: snapshot.channelProductRef, condition: snapshot.condition,
+        compared, heldObservedAt: held!.observedAt, heldMinor: outcome.heldMinor, pollSnapshotId, pollObservedAt, pollMinor: outcome.pollMinor, currency,
+        dueAt: new Date(Math.max(Date.parse(now), Date.parse(pollObservedAt)) + graceSeconds * 1000).toISOString(),
+      },
+    };
+  }
+
+  const lossCheckOpened = (check: NotificationLossCheck): Effect => ({ kind: 'log', level: 'INFO', code: 'NOTIFICATION_LOSS_CHECK_OPENED', message: 'NOTIFICATION_LOSS_CHECK_OPENED',
+    details: { marketplace: check.marketplace, channelProductRef: check.channelProductRef, compared: check.compared } });
+
+  async function processSnapshot(ctx: AdapterCallContext, snapshot: CompetitorSnapshot, notification?: InboundNotificationEntry, delivery?: SnapshotDelivery,
+    reconcileWith?: { graceSeconds: number }): Promise<SnapshotReport> {
     const how: SnapshotDelivery = delivery ?? (notification || sourcesOf().some((c) => c.kind === 'PUSH' && c.source === snapshot.source) ? 'PUSH' : 'POLL');
     const key: ProductKey = {
       channelAccountId: ctx.channelAccountId, marketplace: snapshot.marketplace,
@@ -404,6 +445,16 @@ export function createPricingPipeline(deps: PipelineDeps) {
         verdict: verdict.verdict, observedAt: snapshot.observedAt, move: verdict.move,
         log: { competitorSnapshotId, snapshot, receivedAt: now, delivery: how },
       };
+      // Р-121: сверка — по прежнему состоянию из того же контекста, проверка — в той же транзакции, что снимок (Р-59, находка 4 ревью шага 24);
+      // испорченный снимок опроса потерей не свидетельствует
+      if (reconcileWith) {
+        const r = verdict.verdict === 'ACCEPT' ? lossCheckFor(ctx, snapshot, context.sanity.lastAccepted, competitorSnapshotId, now, reconcileWith.graceSeconds) : { kind: 'REJECTED' as const };
+        report.reconciliation = r.kind;
+        if (r.check) {
+          snapshotOutcome.lossCheck = r.check;
+          effects.push(lossCheckOpened(r.check));
+        }
+      }
       const commit: EvaluationCommit = { key, now, snapshot: snapshotOutcome, decisions: [], ...(notification ? { notification } : {}) };
       scopeReports = [];
 
@@ -456,8 +507,12 @@ export function createPricingPipeline(deps: PipelineDeps) {
       await emit(ctx, [{ kind: 'log', level: 'INFO', code: 'NOTIFICATION_DUPLICATE', message: 'NOTIFICATION_DUPLICATE', details: { notificationId: notification?.notificationId ?? null } }]);
       return report;
     }
+    if (!outcome) {
+      // Находка 8 ревью шага 24: фиксация не удалась — уведомление очереди не записано; исключение оставляет сообщение для повторной доставки
+      if (notification) throw new Error('PRICING_COMMIT_FAILED: the notification is not recorded and stays in the queue for redelivery');
+      return report;
+    }
     if (notification) report.notification = 'RECORDED';
-    if (!outcome) return report;
     if (outcome.divergenceCaseId && report.verdict === 'ACCEPT') {
       report.divergenceCaseId = outcome.divergenceCaseId;
       const d = outcome.attempt.commit.snapshot?.divergence;
@@ -480,41 +535,36 @@ export function createPricingPipeline(deps: PipelineDeps) {
   async function pollCompetitors(ctx: AdapterCallContext, queries: readonly CompetitorQuery[], options: PollOptions = {}) {
     const read = await adapter.readCompetitors(ctx, queries);
     const snapshots: SnapshotReport[] = [];
-    const reconciliation: ReconciliationReport = { matched: 0, diverged: 0, noBaseline: 0, notNewer: 0, logged: 0 };
+    const reconciliation = emptyReconciliation();
+    const graceSeconds = options.reconcile?.graceSeconds ?? DEFAULT_LOSS_GRACE_SECONDS;
+    const count = (kind: ReconciliationKind | undefined) => {
+      if (kind) reconciliation[RECONCILIATION_KEYS[kind]] += 1;
+    };
     for (const snapshot of read.snapshots) {
       const source = sourcesOf().find((c) => c.source === snapshot.source);
-      if (options.reconcile) await reconcileSnapshot(ctx, snapshot, source, options.reconcile.graceSeconds ?? DEFAULT_LOSS_GRACE_SECONDS, reconciliation);
       if (source?.role === 'RECONCILIATION') {
-        await store.logReconciliationSnapshot(ctx.tenantId, { channelAccountId: ctx.channelAccountId, competitorSnapshotId: randomUUID(), snapshot, receivedAt: deps.now() });
-        reconciliation.logged += 1;
+        // Снимок только для сверки: лёгкое чтение прежнего состояния и одна транзакция — журнал и проверка; сбой одного товара не обрывает пакет
+        try {
+          const now = deps.now();
+          const competitorSnapshotId = randomUUID();
+          const key: ProductKey = { channelAccountId: ctx.channelAccountId, marketplace: snapshot.marketplace, channelProductRef: snapshot.channelProductRef, condition: snapshot.condition };
+          const r = options.reconcile ? lossCheckFor(ctx, snapshot, await store.heldCompetitorState(ctx.tenantId, key), competitorSnapshotId, now, graceSeconds) : null;
+          await store.recordReconciliationSnapshot(ctx.tenantId, { channelAccountId: ctx.channelAccountId, competitorSnapshotId, snapshot, receivedAt: now, ...(r?.check ? { lossCheck: r.check } : {}) });
+          count(r?.kind);
+          reconciliation.logged += 1;
+          if (r?.check) await emit(ctx, [lossCheckOpened(r.check)]);
+        } catch (error) {
+          reconciliation.failed += 1;
+          await emit(ctx, [{ kind: 'log', level: 'WARN', code: 'RECONCILIATION_SNAPSHOT_FAILED', message: 'RECONCILIATION_SNAPSHOT_FAILED',
+            details: { marketplace: snapshot.marketplace, channelProductRef: snapshot.channelProductRef, error: String((error as Error).message).slice(0, 200) } }]);
+        }
         continue;
       }
-      snapshots.push(await processSnapshot(ctx, snapshot, undefined, options.delivery ?? 'POLL'));
+      const report = await processSnapshot(ctx, snapshot, undefined, options.delivery ?? 'POLL', options.reconcile ? { graceSeconds } : undefined);
+      count(report.reconciliation);
+      snapshots.push(report);
     }
     return { snapshots, failures: read.failures, ...(options.reconcile ? { reconciliation } : {}) };
-  }
-
-  async function reconcileSnapshot(ctx: AdapterCallContext, snapshot: CompetitorSnapshot, source: CompetitorSourceDescriptor | undefined, graceSeconds: number, report: ReconciliationReport) {
-    const now = deps.now();
-    const key: ProductKey = { channelAccountId: ctx.channelAccountId, marketplace: snapshot.marketplace, channelProductRef: snapshot.channelProductRef, condition: snapshot.condition };
-    const context = await store.loadEvaluationContext(ctx.tenantId, key, now, shift);
-    const push = sourcesOf().find((c) => c.kind === 'PUSH' && c.conditions.includes(snapshot.condition));
-    const compared = comparedValue(push, source);
-    const outcome = reconcile(context.sanity.lastAccepted, snapshot, compared);
-    if (outcome.kind === 'MATCH') report.matched += 1;
-    else if (outcome.kind === 'NO_BASELINE') report.noBaseline += 1;
-    else if (outcome.kind === 'NOT_NEWER') report.notNewer += 1;
-    else {
-      report.diverged += 1;
-      const pollObservedAt = new Date(Date.parse(snapshot.observedAt)).toISOString();
-      await store.recordNotificationLossCheck(ctx.tenantId, {
-        channelAccountId: ctx.channelAccountId, marketplace: snapshot.marketplace, channelProductRef: snapshot.channelProductRef, condition: snapshot.condition,
-        compared, heldObservedAt: context.sanity.lastAccepted!.observedAt, heldMinor: outcome.heldMinor, pollSnapshotId: randomUUID(), pollObservedAt,
-        pollMinor: outcome.pollMinor, currency: context.sanity.expectedCurrency, dueAt: new Date(Math.max(Date.parse(now), Date.parse(pollObservedAt)) + graceSeconds * 1000).toISOString(),
-      });
-      await emit(ctx, [{ kind: 'log', level: 'INFO', code: 'NOTIFICATION_LOSS_CHECK_OPENED', message: 'NOTIFICATION_LOSS_CHECK_OPENED',
-        details: { marketplace: snapshot.marketplace, channelProductRef: snapshot.channelProductRef, compared } }]);
-    }
   }
 
   /** Р-52: свежая независимая выборка; прошла проверки — остановка снимается с записью в журнал */
@@ -591,9 +641,10 @@ export function createPricingPipeline(deps: PipelineDeps) {
     },
 
     /** Р-121: сверка по кругу (Amazon — квота опроса не позволяет опрашивать все товары): очередное окно товаров аккаунта */
-    async reconcileRotation(ctx: AdapterCallContext, options: { size: number; cycleSeconds: number; graceSeconds?: number }) {
-      const queries = await store.pickReconciliationSample(ctx.tenantId, ctx.channelAccountId, options.size, deps.now(), options.cycleSeconds);
-      if (queries.length === 0) return { snapshots: [], failures: [], reconciliation: { matched: 0, diverged: 0, noBaseline: 0, notNewer: 0, logged: 0 }, queries: 0 };
+    async reconcileRotation(ctx: AdapterCallContext, options: { size: number; cycle: number; graceSeconds?: number }) {
+      // Находка 9 ревью шага 24: окно — по номеру вызова, который ведёт вызывающий, а не по часам: пропуск вызовов не пропускает товары
+      const queries = await store.pickReconciliationSample(ctx.tenantId, ctx.channelAccountId, options.size, options.cycle);
+      if (queries.length === 0) return { snapshots: [], failures: [], reconciliation: emptyReconciliation(), queries: 0 };
       const polled = await pollCompetitors(ctx, queries, { reconcile: { ...(options.graceSeconds ? { graceSeconds: options.graceSeconds } : {}) } });
       return { ...polled, queries: queries.length };
     },

@@ -38,6 +38,10 @@ CREATE TABLE channel_data.competitor_snapshot_log (
 COMMENT ON TABLE channel_data.competitor_snapshot_log IS
   'Шаг 24 [Р-122]: транзитный журнал полных снимков конкурентов для выгрузки в ClickHouse; суточные секции, удаление после подтверждённой выгрузки';
 
+-- Проверка потери уведомления (0088, review_notification_loss): снимки уведомлений товара аккаунта по времени получения (ревью шага 24, находка 6)
+CREATE INDEX competitor_snapshot_log_product_idx ON channel_data.competitor_snapshot_log
+  (tenant_id, channel_account_id, marketplace, channel_product_ref, condition, received_at);
+
 SELECT security.register_table('channel_data.competitor_snapshot_log', 'CHANNEL', 'append_only');
 SELECT security.grant_retention('channel_data.competitor_snapshot_log');
 SELECT security.grant_export('channel_data.competitor_snapshot_log');

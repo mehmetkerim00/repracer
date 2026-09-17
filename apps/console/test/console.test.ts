@@ -511,6 +511,13 @@ test('step 24, Р-123: a discount is checked before it is announced; a prior pri
   assert.equal(evidence.sha256, createHash('sha256').update(evidence.csv).digest('hex'));
   assert.equal((await call(owner, 'GET', `${api(id, 'compliance', 'evidence')}?from=${to}&to=${from}`)).status, 400);
   assert.equal((await call(owner, 'GET', `${api(id, 'compliance', 'evidence')}?from=2020-01-01&to=2026-01-01`)).status, 400, `longer than ${EVIDENCE_MAX_DAYS} days`);
+  // Находка 11 ревью шага 24: несуществующая дата — 400, а не ошибка базы; изменяющие маршруты — только POST
+  assert.equal((await call(owner, 'GET', `${api(id, 'compliance', 'evidence')}?from=2026-13-01&to=2026-13-02`)).status, 400);
+  assert.equal((await call(owner, 'GET', `${api(id, 'compliance', 'evidence')}?from=2026-02-30&to=2026-03-01`)).status, 400);
+  assert.equal((await call(owner, 'PUT' as 'POST', api(id, 'compliance', 'announce'), { ...fair, confirmed: true })).status, 405);
+  // Находка 1: объявление задним числом отклоняется
+  const past = await call(owner, 'POST', api(id, 'compliance', 'announce'), { ...fair, startsAt: new Date(Date.parse(live.clock.iso()) - 5 * 86_400_000).toISOString(), confirmed: true });
+  assert.deepEqual([past.status, (past.body as { error: { code: string } }).error.code], [400, 'STARTS_BEFORE_TODAY']);
 
   // Экран на обоих языках
   const en = await html('/src/screens/Compliance.tsx', 'ComplianceScreenView', { worldId: id, initial: report });

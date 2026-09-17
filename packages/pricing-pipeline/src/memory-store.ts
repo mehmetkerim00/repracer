@@ -11,6 +11,7 @@ import {
   convertMinor,
   isCompetitorDerived,
   localDate,
+  zonedDayStart,
   omnibusLowestPriorPrice,
   omnibusVerdict,
   priceBasisMismatch,
@@ -704,6 +705,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     let divergenceCaseId: string | null = null;
     const s = input.snapshot;
     if (s) {
+      if (s.lossCheck) this.recordNotificationLossCheck(s.lossCheck);
       if (s.log) this.snapshotLog.push({ competitorSnapshotId: s.log.competitorSnapshotId, receivedAt: s.log.receivedAt, verdict: s.verdict, delivery: s.log.delivery, key: input.key, snapshot: s.log.snapshot });
       if (s.move) this.rememberMove({ marketplace: input.key.marketplace, productRef: s.move.productRef, evaluatedAt: input.now, moveBp: s.move.moveBp, verdict: s.verdict, sellerRef: s.move.sellerRef });
       if (s.accepted) this.acceptSnapshot(input.key, s.accepted.snapshot, s.accepted.competitorSnapshotId, s.accepted.sanity);
@@ -1202,7 +1204,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   }
 
   async omnibusCheck(_tenantId: string, writeScopeId: string, startsAt: Instant): Promise<OmnibusPriorPrice> {
-    return omnibusLowestPriorPrice(this.priceHistory.filter((h) => h.writeScopeId === writeScopeId), this.timeZoneOf(writeScopeId), startsAt);
+    return omnibusLowestPriorPrice(this.priceHistory.filter((h) => h.writeScopeId === writeScopeId), this.timeZoneOf(writeScopeId), startsAt, new Date().toISOString());
   }
 
   async announceDiscount(_tenantId: string, input: DiscountAnnouncementInput, actor: AdminActor): Promise<DiscountAnnounceResult> {
@@ -1212,6 +1214,9 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     if (row.currency !== input.currency) return { status: 'INVALID', cause: 'CURRENCY_MISMATCH' };
     if (!(input.salePriceMinor > 0 && input.referencePriceMinor > input.salePriceMinor)) return { status: 'INVALID', cause: 'PRICES_INVALID' };
     if (input.endsAt !== null && Date.parse(input.endsAt) <= Date.parse(input.startsAt)) return { status: 'INVALID', cause: 'PERIOD_INVALID' };
+    // Как discount_announcement_guard: начало — не раньше текущих суток витрины (без пояса — суток UTC)
+    const tz = this.timeZoneOf(input.writeScopeId) ?? 'UTC';
+    if (Date.parse(input.startsAt) < zonedDayStart(localDate(Date.now(), tz), tz)) return { status: 'INVALID', cause: 'STARTS_BEFORE_TODAY' };
     const check = await this.omnibusCheck('', input.writeScopeId, input.startsAt);
     if (omnibusVerdict(check, input.referencePriceMinor) === 'VIOLATION') return { status: 'VIOLATION', check };
     const announcement: DiscountAnnouncementRow = {
@@ -1377,15 +1382,22 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     return h ? this.haltInfo(h) : null;
   }
 
-  async logReconciliationSnapshot(_tenantId: string, entry: { channelAccountId: string; competitorSnapshotId: string; snapshot: CompetitorSnapshot; receivedAt: Instant }): Promise<void> {
+  async recordReconciliationSnapshot(_tenantId: string, entry: { channelAccountId: string; competitorSnapshotId: string; snapshot: CompetitorSnapshot; receivedAt: Instant; lossCheck?: NotificationLossCheck }): Promise<void> {
     const { snapshot } = entry;
+    // Одна транзакция: проверка отклонена — журнал тоже не пишется
+    if (entry.lossCheck) this.recordNotificationLossCheck(entry.lossCheck);
     this.snapshotLog.push({
       competitorSnapshotId: entry.competitorSnapshotId, receivedAt: entry.receivedAt, verdict: 'RECONCILIATION', delivery: 'POLL', snapshot,
       key: { channelAccountId: entry.channelAccountId, marketplace: snapshot.marketplace, channelProductRef: snapshot.channelProductRef, condition: snapshot.condition },
     });
   }
 
-  async recordNotificationLossCheck(_tenantId: string, check: NotificationLossCheck): Promise<void> {
+  async heldCompetitorState(_tenantId: string, key: ProductKey): Promise<{ observedAt: Instant; buyboxMinor: number | null; lowestMinor: number | null } | null> {
+    const state = this.competitorState.get(productKey(key));
+    return state ? { observedAt: state.observedAt, buyboxMinor: state.buyboxMinor, lowestMinor: state.lowestMinor } : null;
+  }
+
+  private recordNotificationLossCheck(check: NotificationLossCheck): void {
     // Как ограничения notification_loss_check (0088)
     if (check.heldMinor === check.pollMinor) throw new Error('new row violates check constraint "notification_loss_check_diverged"');
     if (!(Date.parse(check.pollObservedAt) > Date.parse(check.heldObservedAt) && Date.parse(check.dueAt) > Date.parse(check.pollObservedAt))) {
@@ -1413,13 +1425,13 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     return out;
   }
 
-  async pickReconciliationSample(_tenantId: string, channelAccountId: string, size: number, at: Instant, cycleSeconds: number): Promise<CompetitorQuery[]> {
+  async pickReconciliationSample(_tenantId: string, channelAccountId: string, size: number, cycle: number): Promise<CompetitorQuery[]> {
     const refs = new Map<string, CompetitorQuery>();
     for (const s of this.scopes.values()) {
       if (s.channelAccountId !== channelAccountId || !s.channelProductRef) continue;
       refs.set(productKey(s), { marketplace: s.marketplace, channelProductRef: s.channelProductRef, condition: s.condition });
     }
-    return rotation([...refs.values()], size, at, cycleSeconds);
+    return rotation([...refs.values()], size, cycle);
   }
 
   async pickReviewSample(_tenantId: string, halt: HaltInfo, size: number): Promise<CompetitorQuery[]> {

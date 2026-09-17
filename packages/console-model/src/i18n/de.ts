@@ -618,6 +618,7 @@ export const de: Messages = {
         INCOMPLETE_HISTORY: (since: string) => `Die Preishistorie beginnt erst am ${since}; der niedrigste Preis davor ist unbekannt.`,
         NO_PRICE_HISTORY: (_since: string) => 'Vor Rabattbeginn gibt es keinen eigenen Preis für dieses Angebot.',
         TIME_ZONE_UNKNOWN: (_since: string) => 'Die Zeitzone der Storefront ist nicht festgelegt: Storefront-Tage können nicht gezählt werden (Р-65).',
+        WINDOW_OPEN: (_since: string) => 'Der Rabatt beginnt später: Die Preise bis zum Beginn sind noch nicht bekannt — bei Beginn erneut prüfen.',
       },
       window: (from: string, to: string, tz: string) => `Zeitraum ${from} – ${to} (${tz})`,
       windowUnknown: 'Zeitraum unbekannt',

@@ -196,7 +196,7 @@
       "id": "rotation-window",
       "kind": "pipelineReconcileRotation",
       "size": 20,
-      "cycleSeconds": 3600,
+      "cycle": 0,
       "graceSeconds": 900,
       "expect": {
         "queries": 3,

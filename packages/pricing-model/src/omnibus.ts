@@ -20,7 +20,9 @@ export type OmnibusStatus =
   /** Цен оффера нет вовсе */
   | 'NO_PRICE_HISTORY'
   /** Часовой пояс витрины не установлен [Р-65]: сутки окна не определить */
-  | 'TIME_ZONE_UNKNOWN';
+  | 'TIME_ZONE_UNKNOWN'
+  /** Скидка начинается позже момента проверки: цены до её начала ещё не известны (ревью шага 24, находка 1) */
+  | 'WINDOW_OPEN';
 
 export interface OmnibusPriorPrice {
   status: OmnibusStatus;
@@ -65,10 +67,10 @@ export function addDays(date: string, days: number): string {
 }
 
 /**
- * Наименьшая цена за 30 суток витрины до суток начала скидки. changes — применённые цены оффера (время применения каналом, сумма),
+ * Наименьшая цена за 30 суток витрины до суток начала скидки и в сутки начала до её начала; asOf — момент проверки. changes — применённые цены оффера (время применения каналом, сумма),
  * в любом порядке.
  */
-export function omnibusLowestPriorPrice(changes: ReadonlyArray<{ acceptedAt: Instant; amountMinor: number }>, timeZone: string | null, startsAt: Instant): OmnibusPriorPrice {
+export function omnibusLowestPriorPrice(changes: ReadonlyArray<{ acceptedAt: Instant; amountMinor: number }>, timeZone: string | null, startsAt: Instant, asOf: Instant): OmnibusPriorPrice {
   const sorted = [...changes].sort((a, b) => Date.parse(a.acceptedAt) - Date.parse(b.acceptedAt));
   const historySince = sorted[0]?.acceptedAt ?? null;
   if (!timeZone) return { status: 'TIME_ZONE_UNKNOWN', lowestMinor: null, windowFrom: null, windowTo: null, timeZone: null, historySince };
@@ -77,13 +79,15 @@ export function omnibusLowestPriorPrice(changes: ReadonlyArray<{ acceptedAt: Ins
   const windowTo = addDays(startDay, -1);
   const fromMs = zonedDayStart(windowFrom, timeZone);
   const toMs = zonedDayStart(startDay, timeZone);
-  if (sorted.length === 0) return { status: 'NO_PRICE_HISTORY', lowestMinor: null, windowFrom, windowTo, timeZone, historySince };
+  const open = Date.parse(startsAt) > Date.parse(asOf);
+  if (sorted.length === 0) return { status: open ? 'WINDOW_OPEN' : 'NO_PRICE_HISTORY', lowestMinor: null, windowFrom, windowTo, timeZone, historySince };
   const before = sorted.filter((c) => Date.parse(c.acceptedAt) < fromMs).at(-1);
-  const inside = sorted.filter((c) => Date.parse(c.acceptedAt) >= fromMs && Date.parse(c.acceptedAt) < toMs).map((c) => c.amountMinor);
+  // Сутки начала скидки — до её начала (ревью шага 24, находка 14)
+  const inside = sorted.filter((c) => Date.parse(c.acceptedAt) >= fromMs && Date.parse(c.acceptedAt) < Math.max(toMs, Date.parse(startsAt))).map((c) => c.amountMinor);
   const candidates = [...(before ? [before.amountMinor] : []), ...inside];
   const lowestMinor = candidates.length > 0 ? Math.min(...candidates) : null;
   // Ни цены к началу окна, ни цен в окне: история начинается в сутки скидки или позже
-  const status: OmnibusStatus = before ? 'OK' : lowestMinor === null ? 'NO_PRICE_HISTORY' : 'INCOMPLETE_HISTORY';
+  const status: OmnibusStatus = open ? 'WINDOW_OPEN' : before ? 'OK' : lowestMinor === null ? 'NO_PRICE_HISTORY' : 'INCOMPLETE_HISTORY';
   return { status, lowestMinor, windowFrom, windowTo, timeZone, historySince };
 }
 

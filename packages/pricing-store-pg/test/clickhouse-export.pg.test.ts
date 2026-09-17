@@ -173,7 +173,8 @@ test('Р-122, step 24: a day of the competitor snapshot log is exported to Click
   await assert.rejects(pool.query('SELECT count(*) FROM channel_data.competitor_snapshot_log'), /permission denied/, 'the decision path writes the log but does not read it (Р-22)');
 
   const first = await exportCompetitorSnapshotsDay(exporter, ingest, verifier, range);
-  assert.equal(first.verified, true, JSON.stringify(first));
+  // Ревью шага 24, находка 5: снимок, пропущенный выгрузкой (GBP), в ClickHouse не попал — сутки не проверены и по сроку не удалятся
+  assert.equal(first.verified, false, JSON.stringify(first));
   assert.ok(first.byTable.competitor_snapshot! >= 2);
   assert.ok((first.skipped.CURRENCY_UNSUPPORTED ?? 0) >= 1, JSON.stringify(first.skipped));
   const count = async () => Number((await verifier.rows<{ n: number }>(
@@ -182,9 +183,9 @@ test('Р-122, step 24: a day of the competitor snapshot log is exported to Click
   const verdicts = await verifier.rows<{ v: string; d: string }>(`SELECT sanity_verdict AS v, delivery AS d FROM repracer_analytics.competitor_snapshot FINAL WHERE tenant_id = '${w.tenantId}' ORDER BY received_at`);
   assert.deepEqual(verdicts.map((r) => [r.v, r.d]), [['ACCEPT', 'PUSH'], ['REJECT', 'POLL']], 'the rejected snapshot is history too, with its verdict and delivery (Р-121)');
   const second = await exportCompetitorSnapshotsDay(exporter, ingest, verifier, range);
-  assert.equal(second.verified, true);
+  assert.equal(second.verified, false, 'the skipped snapshot still blocks verification');
   assert.equal(await count(), 2, 'a repeated export does not duplicate rows');
   const { rows: [mark] } = await exporter.query(`SELECT verified_at FROM maintenance.partition_export WHERE parent_table = 'channel_data.competitor_snapshot_log' AND partition_name = $1 AND target = 'CLICKHOUSE'`, [first.partitionName]);
-  assert.ok(mark?.verified_at, 'the partition is marked verified — it may be dropped by retention');
+  assert.equal(mark?.verified_at ?? null, null, 'with a skipped snapshot the partition is not marked verified: retention keeps it until a person resolves the skip');
 });
 

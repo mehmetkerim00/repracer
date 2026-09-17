@@ -44,15 +44,15 @@ export function reconcile(held: HeldState | null, snapshot: CompetitorSnapshot, 
 }
 
 /**
- * Сверка по кругу без состояния: товары в постоянном порядке, окно из size со сдвигом на номер цикла. Все товары проходят за
- * ceil(n / size) циклов; одинаково в памяти и на PostgreSQL
+ * Сверка по кругу: товары в постоянном порядке, окно из size со сдвигом на номер вызова, который ведёт вызывающий (по часам окно
+ * зависело от частоты вызова и пропускало товары — ревью шага 24, находка 9). Все товары проходят за ceil(n / size) вызовов подряд;
+ * одинаково в памяти и на PostgreSQL
  */
-export function rotation(items: readonly CompetitorQuery[], size: number, at: Instant, cycleSeconds: number): CompetitorQuery[] {
+export function rotation(items: readonly CompetitorQuery[], size: number, cycle: number): CompetitorQuery[] {
   const sorted = [...items].sort((a, b) => cmp(a.marketplace, b.marketplace) || cmp(a.channelProductRef, b.channelProductRef) || cmp(a.condition, b.condition));
   const n = sorted.length;
   if (n === 0 || size <= 0) return [];
-  const cycle = Math.floor(Date.parse(at) / (cycleSeconds * 1000));
-  const start = (cycle * Math.min(size, n)) % n;
+  const start = ((Math.floor(cycle) % n) * Math.min(size, n)) % n;
   return Array.from({ length: Math.min(size, n) }, (_, i) => sorted[(start + i) % n]!);
 }
 

@@ -49,6 +49,8 @@ BEGIN
     RETURN QUERY SELECT 'TIME_ZONE_UNKNOWN'::text, NULL::bigint, NULL::date, NULL::date, NULL::text, since;
     RETURN;
   END IF;
+  -- Ревью шага 24, находка 14: цены суток начала скидки до её начала тоже в окне (цена 50 в 00:05 и 100 в 11:00 — прежняя цена
+  -- в 12:00 не может быть 100); сырьё этих суток — без отбора закрытых суток: сутки начала закрываются позже
   start_day := (p_starts_at AT TIME ZONE tz)::date;
   wfrom := start_day - 30;
   wto := start_day - 1;
@@ -63,16 +65,22 @@ BEGIN
      WHERE d.tenant_id = p_tenant_id AND d.write_scope_id = p_write_scope_id AND d.price_type IN ('REGULAR', 'SALE') AND d.price_day < wfrom
   ) x ORDER BY x.at DESC LIMIT 1;
 
-  -- Цены внутри окна: закрытые сутки — наименьшая цена суток, незакрытые — сырьё
+  -- Цены внутри окна: закрытые сутки — наименьшая цена суток, незакрытые — сырьё; сутки начала — сырьё до начала скидки
   SELECT min(y.v) INTO inside_m FROM (
     SELECT d.min_amount_minor AS v FROM tenant_data.price_daily_effective d
      WHERE d.tenant_id = p_tenant_id AND d.write_scope_id = p_write_scope_id AND d.price_type IN ('REGULAR', 'SALE') AND d.price_day BETWEEN wfrom AND wto
     UNION ALL
     SELECT r.amount_minor FROM tenant_data.omnibus_raw_prices(p_tenant_id, p_write_scope_id, tz, to_ts) r WHERE r.accepted_at >= from_ts AND r.accepted_at < to_ts
+    UNION ALL
+    SELECT h.amount_minor FROM tenant_data.price_history h
+     WHERE h.tenant_id = p_tenant_id AND h.write_scope_id = p_write_scope_id AND h.price_type IN ('REGULAR', 'SALE')
+       AND h.accepted_at >= to_ts AND h.accepted_at < p_starts_at
+       AND NOT EXISTS (SELECT 1 FROM tenant_data.price_history c WHERE c.tenant_id = h.tenant_id AND c.corrects_price_history_id = h.price_history_id)
   ) y;
 
+  -- Ревью шага 24, находка 1: скидка из будущего — цены до её начала ещё не известны: окно не завершено, «верно» не ставится
   RETURN QUERY SELECT
-    CASE WHEN before_m IS NOT NULL THEN 'OK' WHEN inside_m IS NULL THEN 'NO_PRICE_HISTORY' ELSE 'INCOMPLETE_HISTORY' END,
+    CASE WHEN p_starts_at > now() THEN 'WINDOW_OPEN' WHEN before_m IS NOT NULL THEN 'OK' WHEN inside_m IS NULL THEN 'NO_PRICE_HISTORY' ELSE 'INCOMPLETE_HISTORY' END,
     CASE WHEN before_m IS NULL THEN inside_m WHEN inside_m IS NULL THEN before_m ELSE least(before_m, inside_m) END,
     wfrom, wto, tz, since;
 END $fn$;
@@ -131,6 +139,12 @@ BEGIN
   IF scope IS NULL OR scope.currency IS DISTINCT FROM NEW.currency THEN
     RAISE EXCEPTION 'discount announcement currency % is not the currency of price write_scope % (Р-71)', NEW.currency, NEW.write_scope_id
       USING ERRCODE = 'check_violation';
+  END IF;
+  -- Ревью шага 24, находка 1: скидка задним числом сдвинула бы окно в прошлое, где цена была выше: начало — не раньше текущих суток витрины
+  -- (без пояса — суток UTC)
+  IF NEW.starts_at < (date_trunc('day', now() AT TIME ZONE coalesce(tenant_data.write_scope_time_zone(NEW.tenant_id, NEW.write_scope_id), 'UTC'))
+                      AT TIME ZONE coalesce(tenant_data.write_scope_time_zone(NEW.tenant_id, NEW.write_scope_id), 'UTC')) THEN
+    RAISE EXCEPTION 'discount starts at % before the current storefront day (Omnibus, Р-123)', NEW.starts_at USING ERRCODE = 'check_violation';
   END IF;
   SELECT * INTO p FROM tenant_data.omnibus_lowest_prior_price(NEW.tenant_id, NEW.write_scope_id, NEW.starts_at);
   NEW.check_status := p.status;

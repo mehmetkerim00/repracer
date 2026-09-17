@@ -112,3 +112,13 @@ test('step 23: the feed query is checked on the server — an unknown status, pe
   assert.deepEqual(q(''), {});
   for (const bad of ['status=ALL', 'days=5', 'limit=0', `limit=${FEED_PAGE_MAX + 1}`, 'offset=-1', 'offset=1e3']) assert.equal(q(bad), null, bad);
 });
+
+test('review of step 24, finding 12: the price evidence CSV neutralises spreadsheet formulas and quotes line breaks', async () => {
+  const { priceEvidenceCsv } = await import('./compliance.ts');
+  const world = { accounts: [], state: { scopes: [] } } as never;
+  const csv = priceEvidenceCsv(world, [{ writeScopeId: '=HYPERLINK("x")', day: '2026-09-17', timeZone: 'Europe/Berlin', currency: 'EUR', basis: 'GROSS', minMinor: 1000, maxMinor: 1000,
+    firstMinor: 1000, lastMinor: 1000, changes: 1, source: 'CLOSED', corrected: true, correctionReason: '+cmd\r|x' }]);
+  const line = csv.split('\n')[1]!;
+  assert.ok(line.includes(`"'=HYPERLINK(""x"")"`), line);
+  assert.ok(line.includes(`"'+cmd\r|x"`), line);
+});

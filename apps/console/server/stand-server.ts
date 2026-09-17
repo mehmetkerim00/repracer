@@ -99,7 +99,8 @@ function draftProblemsText(problems: ReadonlyArray<{ field: string; code: string
   return problems.map((p) => `${(t.fields as Record<string, string>)[p.field] ?? (p.field === 'name' ? t.name : p.field === 'type' ? t.type : p.field)}: ${t.problems[p.code as keyof typeof t.problems]}`).join('; ');
 }
 
-const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** Настоящая календарная дата YYYY-MM-DD: 2026-13-01 и 2026-02-30 — нет (находка 11 ревью шага 24) */
+const isDay = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`)) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
 /** Р-123: выгрузка доказательной истории — не больше 18 месяцев за запрос */
 export const EVIDENCE_MAX_DAYS = 550;
 
@@ -242,7 +243,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
             const from = url.searchParams.get('from') ?? '';
             const to = url.searchParams.get('to') ?? '';
             const ws = url.searchParams.get('writeScopeId');
-            if (!DAY_RE.test(from) || !DAY_RE.test(to) || from > to || (ws && !scopeById(world, ws))) return fail(400, 'BAD_EVIDENCE_QUERY', s.badRequest);
+            if (!isDay(from) || !isDay(to) || from > to || (ws && !scopeById(world, ws))) return fail(400, 'BAD_EVIDENCE_QUERY', s.badRequest);
             if ((Date.parse(to) - Date.parse(from)) / 86_400_000 + 1 > EVIDENCE_MAX_DAYS) return fail(400, 'EVIDENCE_TOO_LONG', s.evidenceTooLong(EVIDENCE_MAX_DAYS));
             const days = await live.store.priceEvidence(world.tenantId, { from, to, ...(ws ? { writeScopeIds: [ws] } : {}) });
             const csv = priceEvidenceCsv(world, days);
@@ -253,6 +254,9 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         default: return fail(404, 'NOT_FOUND', s.notFound);
       }
     }
+
+    // Находка 11 ревью шага 24: маршруты ниже — только POST
+    if (req.method !== 'POST') return fail(405, 'METHOD', s.method);
 
     // Р-123: предупреждение «эта скидка нарушит правило» до записи — только чтение, права на просмотр достаточно
     if (screen === 'compliance' && param === 'check') {
@@ -276,8 +280,6 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       const rechecks = new Map(await Promise.all(announcements.map(async (a) => [a.announcementId, await live.store.omnibusCheck(world.tenantId, a.writeScopeId, a.startsAt)] as const)));
       return ok({ message: m.ui.compliance.announced, compliance: complianceView(await live.view(viewer), announcements, rechecks, m) });
     }
-    if (req.method !== 'POST') return fail(405, 'METHOD', s.method);
-
     if (screen === 'stop' && param === 'plan') {
       const target = parseTarget(live, body.target);
       return target ? ok(planStop(world, target, m)) : fail(400, 'BAD_TARGET', s.badTarget);

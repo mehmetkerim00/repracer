@@ -107,7 +107,7 @@ export interface PipelinePollStep { id: string; kind: 'pipelinePoll'; queries: u
 /** Р-121: вердикты проверок потери уведомлений, срок которых наступил */
 export interface PipelineReviewLossStep { id: string; kind: 'pipelineReviewNotificationLoss'; ctx?: StepContext; expect?: unknown }
 /** Р-121: сверка по кругу — очередное окно товаров аккаунта */
-export interface PipelineReconcileRotationStep { id: string; kind: 'pipelineReconcileRotation'; size: number; cycleSeconds: number; graceSeconds?: number; ctx?: StepContext; expect?: unknown }
+export interface PipelineReconcileRotationStep { id: string; kind: 'pipelineReconcileRotation'; size: number; cycle: number; graceSeconds?: number; ctx?: StepContext; expect?: unknown }
 /** Пересчёт единицы без нового снимка */
 export interface PipelineRecomputeStep { id: string; kind: 'pipelineRecompute'; writeScopeId: string; trigger: { type: TriggerType; sourceEventId?: string }; ctx?: StepContext; expect?: unknown }
 /** Включение репрайсинга [Р-43] */

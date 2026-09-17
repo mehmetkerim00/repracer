@@ -93,7 +93,11 @@ export function complianceView(world: StandWorld, announcements: readonly Discou
 export function priceEvidenceCsv(world: StandWorld, days: readonly PriceEvidenceDay[]): string {
   const header = ['channel', 'marketplace', 'offer', 'day', 'time_zone', 'currency', 'price_basis', 'min_price', 'max_price', 'first_price', 'last_price', 'changes', 'source', 'corrected', 'correction_reason'];
   const decimal = (minor: number) => `${Math.trunc(minor / 100)}.${String(Math.abs(minor % 100)).padStart(2, '0')}`;
-  const quote = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+  // Находка 12 ревью шага 24: значение, начинающееся с = + - @ или табуляции, электронная таблица выполнит как формулу — префикс апострофом
+  const quote = (raw: string) => {
+    const v = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
+    return /[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+  };
   const lines = days.map((d) => {
     const scope = scopeById(world, d.writeScopeId);
     const channel = scope ? world.accounts.find((a) => a.channelAccountId === scope.channelAccountId)?.channel ?? '' : '';

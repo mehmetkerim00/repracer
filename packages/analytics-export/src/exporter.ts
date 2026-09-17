@@ -137,12 +137,14 @@ export const CLICKHOUSE_SNAPSHOT_SOURCES: readonly string[] = [
 /** Валюты ограничения currency_supported (050) */
 const CLICKHOUSE_CURRENCIES = new Set(['EUR', 'USD']);
 
+const SNAPSHOT_EXPORT_CHUNK = 2_000;
+
 export type SnapshotSkipReason = 'NO_PRICES' | 'CURRENCY_UNSUPPORTED' | 'SOURCE_UNKNOWN' | 'CHANNEL_UNSUPPORTED' | 'COMPLETENESS_INVALID';
 
 /**
  * Строка журнала снимков PostgreSQL (0086) → строка ClickHouse. Снимок, который ограничения ClickHouse отклонили бы (без цен, валюта вне
  * EUR/USD — например, отклонённый проверкой входов CURRENCY_MISMATCH, неизвестный источник), не выгружается: он пропускается с причиной,
- * а не срывает выгрузку суток. Пропуск виден в итоге экспорта и в maintenance.partition_export.
+ * а не срывает выгрузку суток. Пропуск виден в итоге экспорта; сутки с пропусками не отмечаются проверенными (ревью шага 24, находка 5).
  */
 export function snapshotLogRow(row: PgRow): { ok: true; row: CompetitorSnapshotRow } | { ok: false; reason: SnapshotSkipReason } {
   const channel = String(row.channel);
@@ -166,20 +168,33 @@ export function snapshotLogRow(row: PgRow): { ok: true; row: CompetitorSnapshotR
  * (FINAL) равно выгруженному; только после неё verified_at, и секция журнала удаляется по сроку (0086, requires_export CLICKHOUSE).
  */
 export async function exportCompetitorSnapshotsDay(pgExporter: pg.Pool, ingest: ClickHouseHttp, verifier: ClickHouseHttp, range: DayRange): Promise<PartitionExport & { skipped: Partial<Record<SnapshotSkipReason, number>> }> {
-  const { rows } = await pgExporter.query(
-    `SELECT * FROM channel_data.competitor_snapshot_log WHERE received_at >= $1::timestamptz AND received_at < $2::timestamptz`, [range.from, range.to]);
+  // Сутки читаются частями по ключу секции (находка 6 ревью шага 24): в памяти процесса — не больше части полных снимков
   const mapped: CompetitorSnapshotRow[] = [];
   const skipped: Partial<Record<SnapshotSkipReason, number>> = {};
-  for (const r of rows) {
-    const m = snapshotLogRow(r);
-    if (m.ok) mapped.push(m.row); else skipped[m.reason] = (skipped[m.reason] ?? 0) + 1;
+  const ids: string[] = [];
+  let after: { at: Date; id: string } | null = null;
+  for (;;) {
+    const { rows: part }: { rows: PgRow[] } = await pgExporter.query(
+      `SELECT * FROM channel_data.competitor_snapshot_log
+        WHERE received_at >= $1::timestamptz AND received_at < $2::timestamptz AND ($3::timestamptz IS NULL OR (received_at, competitor_snapshot_id) > ($3::timestamptz, $4::uuid))
+        ORDER BY received_at, competitor_snapshot_id LIMIT ${SNAPSHOT_EXPORT_CHUNK}`, [range.from, range.to, after?.at ?? null, after?.id ?? null]);
+    for (const r of part) {
+      ids.push(String(r.competitor_snapshot_id));
+      const m = snapshotLogRow(r);
+      if (m.ok) mapped.push(m.row); else skipped[m.reason] = (skipped[m.reason] ?? 0) + 1;
+    }
+    if (part.length < SNAPSHOT_EXPORT_CHUNK) break;
+    const last: PgRow = part.at(-1)!;
+    after = { at: last.received_at as Date, id: String(last.competitor_snapshot_id) };
   }
+  const rows = ids;
   await insertChunks(ingest, 'competitor_snapshot', mapped as unknown as PgRow[], 'competitor_snapshot_id', range.from);
-  const ids = mapped.map((r) => r.competitor_snapshot_id);
+  const exportedIds = mapped.map((r) => r.competitor_snapshot_id);
+  const skippedTotal = Object.values(skipped).reduce((a, n) => a + (n ?? 0), 0);
   // Та же выборка строк, что выгружена: по идентификаторам суток (у строк ClickHouse до шага 24 журнала не было)
   let verifiedCount = 0;
-  for (let i = 0; i < ids.length; i += 5_000) {
-    const chunk = ids.slice(i, i + 5_000).map((id) => `'${id.replace(/[^0-9a-f-]/g, '')}'`).join(',');
+  for (let i = 0; i < exportedIds.length; i += 5_000) {
+    const chunk = exportedIds.slice(i, i + 5_000).map((id) => `'${id.replace(/[^0-9a-f-]/g, '')}'`).join(',');
     verifiedCount += Number((await verifier.rows<{ n: number }>(
       `SELECT count() AS n FROM repracer_analytics.competitor_snapshot FINAL
         WHERE received_at >= parseDateTime64BestEffort('${range.from}', 3) AND received_at < parseDateTime64BestEffort('${range.to}', 3)
@@ -187,7 +202,8 @@ export async function exportCompetitorSnapshotsDay(pgExporter: pg.Pool, ingest: 
   }
   const result = {
     parentTable: 'channel_data.competitor_snapshot_log', partitionName: await dayPartitionName(pgExporter, 'channel_data.competitor_snapshot_log', range),
-    target: 'CLICKHOUSE', rows: rows.length, checksum: checksum(rows.map((r) => String(r.competitor_snapshot_id))), verified: verifiedCount === mapped.length,
+    // Пропущенный снимок в ClickHouse не попал: сутки не проверены, секция не удаляется по сроку, пока пропуск не разобран человеком
+    target: 'CLICKHOUSE', rows: rows.length, checksum: checksum(rows), verified: verifiedCount === mapped.length && skippedTotal === 0,
     byTable: { competitor_snapshot: mapped.length }, skipped,
   };
   await recordExport(pgExporter, result);

@@ -195,7 +195,7 @@ async function runPipelineStep(
       return { result: await pipeline.reviewNotificationLoss(callContext(step.ctx, step.id, scenario, clock)) };
     case 'pipelineReconcileRotation':
       return { result: await pipeline.reconcileRotation(callContext(step.ctx, step.id, scenario, clock),
-        { size: step.size, cycleSeconds: step.cycleSeconds, ...(step.graceSeconds ? { graceSeconds: step.graceSeconds } : {}) }) };
+        { size: step.size, cycle: step.cycle, ...(step.graceSeconds ? { graceSeconds: step.graceSeconds } : {}) }) };
     case 'pipelineRecompute':
       return { result: await pipeline.recompute(callContext(step.ctx, step.id, scenario, clock), step.writeScopeId, step.trigger) };
     case 'pipelineEnableRepricing':
@@ -365,7 +365,7 @@ export async function runScenario(
     if (step.kind === 'channelRun') {
       const summary = { ticks: 0, deliveries: 0, snapshots: 0, verdicts: {} as Record<string, number>, rejectReasons: {} as Record<string, number>,
         decisions: {} as Record<string, number>, dispatched: 0,
-        reconciliation: { matched: 0, diverged: 0, noBaseline: 0, notNewer: 0, logged: 0 }, loss: { delayed: 0, lossSuspected: 0 } };
+        reconciliation: { matched: 0, diverged: 0, noBaseline: 0, notNewer: 0, uncovered: 0, rejected: 0, logged: 0, failed: 0 }, loss: { delayed: 0, lossSuspected: 0 } };
       const count = (bag: Record<string, number>, key: string) => { bag[key] = (bag[key] ?? 0) + 1; };
       const take = (reports: SnapshotReport[]) => {
         for (const r of reports) {

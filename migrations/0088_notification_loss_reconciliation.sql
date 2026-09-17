@@ -116,9 +116,7 @@ AS $function$
 DECLARE
   v_at timestamptz := p_at;
 BEGIN
-  IF p_tenant_id IS DISTINCT FROM security.current_tenant_id() THEN
-    RAISE EXCEPTION 'notification loss review for tenant % outside the tenant context', p_tenant_id USING ERRCODE = 'insufficient_privilege';
-  END IF;
+  -- Тенант ограничивает политика строк роли проверки (halt_reviewer_tenant): отдельная проверка тенанта была бы дублем [Р-104]
   RETURN QUERY
   WITH due AS (
     SELECT c.* FROM channel_data.notification_loss_check c
@@ -132,9 +130,10 @@ BEGIN
       FROM due d
       LEFT JOIN LATERAL (
         SELECT l.competitor_snapshot_id, l.received_at FROM channel_data.competitor_snapshot_log l
-         WHERE l.tenant_id = d.tenant_id AND l.received_at > d.held_observed_at AND l.received_at <= d.due_at
-           AND l.channel_account_id = d.channel_account_id AND l.marketplace = d.marketplace
-           AND l.channel_product_ref = d.channel_product_ref AND l.condition = d.condition
+         WHERE l.tenant_id = d.tenant_id
+           -- Отбор секций и индекса: снимок, полученный до прежнего состояния, не новее его (условие по observed_at ниже)
+           AND l.received_at > d.held_observed_at AND l.received_at <= d.due_at
+           AND (l.channel_account_id, l.marketplace, l.channel_product_ref, l.condition) = (d.channel_account_id, d.marketplace, d.channel_product_ref, d.condition)
            AND l.delivery IN ('PUSH', 'PUSH_FETCH') AND l.observed_at > d.held_observed_at
          ORDER BY l.received_at LIMIT 1) p ON true
     ON CONFLICT ON CONSTRAINT notification_loss_verdict_pkey DO NOTHING

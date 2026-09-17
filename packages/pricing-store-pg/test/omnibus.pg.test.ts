@@ -62,16 +62,18 @@ test('Р-123: the lowest price of 30 storefront days in the database equals the 
       historySince: r.history_since ? new Date(r.history_since).toISOString() : null,
     };
   };
+  // Сутки начала скидки до её начала — в окне (ревью шага 24, находка 14): 1700 в 00:30 по Берлину 15.09 раньше скидки в 10:00
   const cases: Array<[string, string, number]> = [
-    ['2026-09-15T08:00:00.000Z', 'OK', 1790],
+    ['2026-09-15T08:00:00.000Z', 'OK', 1700],
     ['2026-09-12T08:00:00.000Z', 'OK', 1790],
     ['2026-08-05T08:00:00.000Z', 'INCOMPLETE_HISTORY', 1990],
     ['2026-09-25T08:00:00.000Z', 'OK', 1700],
   ];
   for (const [startsAt, status, lowest] of cases) {
-    const code = omnibusLowestPriorPrice(changes, TZ, startsAt);
+    const code = omnibusLowestPriorPrice(changes, TZ, startsAt, new Date().toISOString());
     assert.deepEqual(await database(startsAt), code, `database equals code for a discount starting ${startsAt}`);
-    assert.deepEqual([code.status, code.lowestMinor], [status, lowest], startsAt);
+    // Скидка позже часов базы — окно не завершено (находка 1)
+    assert.deepEqual([code.status, code.lowestMinor], [Date.parse(startsAt) > Date.now() ? 'WINDOW_OPEN' : status, lowest], startsAt);
   }
 
   // Исправление суточной свёртки (Р-29) — база берёт исправленную цену, код получает исправленное сырьё
@@ -82,25 +84,30 @@ test('Р-123: the lowest price of 30 storefront days in the database equals the 
             'Synthetic correction: the channel applied 16.90', $3
        FROM tenant_data.price_daily WHERE tenant_id = $1 AND write_scope_id = $2 AND price_day = '2026-08-10'`, [w.tenantId, ws, w.ownerMembershipId]);
   const corrected = changes.map((c) => (c.acceptedAt === '2026-08-10T09:00:00.000Z' ? { ...c, amountMinor: 1690 } : c));
-  assert.deepEqual(await database('2026-09-15T08:00:00.000Z'), omnibusLowestPriorPrice(corrected, TZ, '2026-09-15T08:00:00.000Z'));
-  assert.equal((await database('2026-09-15T08:00:00.000Z')).lowestMinor, 1690, 'the corrected daily price is the lowest');
+  assert.deepEqual(await database('2026-09-12T08:00:00.000Z'), omnibusLowestPriorPrice(corrected, TZ, '2026-09-12T08:00:00.000Z', new Date().toISOString()));
+  assert.equal((await database('2026-09-12T08:00:00.000Z')).lowestMinor, 1690, 'the corrected daily price is the lowest');
 
   // Хранилище консоли на PostgreSQL: проверка до записи, отказ базы при нарушении, объявление с сохранённой проверкой, доказательная история
   const store = new PgPricingStore(pool, { adminPool: admin });
   const owner = { membershipId: w.ownerMembershipId, userId: w.userId, mfa: false };
-  const startsAt = '2026-09-15T08:00:00.000Z';
+  // Скидка сейчас: окно — от сегодняшних суток; ожидание — правило в коде на той же истории
+  const startsAt = new Date(Date.now() - 1000).toISOString();
+  const expected = omnibusLowestPriorPrice(corrected, TZ, startsAt, new Date().toISOString());
+  const lowest = expected.lowestMinor!;
   assert.deepEqual(await store.omnibusCheck(w.tenantId, ws, startsAt), await database(startsAt));
-  const discount = { writeScopeId: ws, referencePriceMinor: 1690, salePriceMinor: 1490, currency: 'EUR', startsAt, endsAt: '2026-09-22T08:00:00.000Z' };
-  const violation = await store.announceDiscount(w.tenantId, { ...discount, referencePriceMinor: 1691 }, owner);
-  assert.deepEqual([violation.status, violation.status === 'VIOLATION' && violation.check.lowestMinor], ['VIOLATION', 1690], 'one cent above the lowest price is refused by the database');
+  const discount = { writeScopeId: ws, referencePriceMinor: lowest, salePriceMinor: lowest - 200, currency: 'EUR', startsAt, endsAt: new Date(Date.now() + 7 * 86_400_000).toISOString() };
+  const violation = await store.announceDiscount(w.tenantId, { ...discount, referencePriceMinor: lowest + 1 }, owner);
+  assert.deepEqual([violation.status, violation.status === 'VIOLATION' && violation.check.lowestMinor], ['VIOLATION', lowest], 'one cent above the lowest price is refused by the database');
+  // Находка 1 ревью шага 24: задним числом окно ушло бы в прошлое с более высокой ценой — отказ базы
+  assert.deepEqual(await store.announceDiscount(w.tenantId, { ...discount, startsAt: '2026-08-01T08:00:00.000Z', endsAt: null }, owner), { status: 'INVALID', cause: 'STARTS_BEFORE_TODAY' });
   assert.deepEqual(await store.announceDiscount(w.tenantId, { ...discount, currency: 'USD' }, owner), { status: 'INVALID', cause: 'CURRENCY_MISMATCH' });
-  assert.deepEqual(await store.announceDiscount(w.tenantId, { ...discount, salePriceMinor: 1690 }, owner), { status: 'INVALID', cause: 'PRICES_INVALID' });
+  assert.deepEqual(await store.announceDiscount(w.tenantId, { ...discount, salePriceMinor: lowest }, owner), { status: 'INVALID', cause: 'PRICES_INVALID' });
   assert.deepEqual(await store.announceDiscount(w.tenantId, { ...discount, endsAt: startsAt }, owner), { status: 'INVALID', cause: 'PERIOD_INVALID' });
   const announced = await store.announceDiscount(w.tenantId, discount, owner);
   assert.equal(announced.status, 'ANNOUNCED', JSON.stringify(announced));
   const [row] = await store.discountAnnouncements(w.tenantId);
   assert.deepEqual([row?.referencePriceMinor, row?.check.status, row?.check.lowestMinor, row?.check.windowFrom, row?.check.windowTo, row?.check.timeZone],
-    [1690, 'OK', 1690, '2026-08-16', '2026-09-14', TZ], 'the stored check is the one of the database at announcement');
+    [lowest, expected.status, lowest, expected.windowFrom, expected.windowTo, TZ], 'the stored check is the one of the database at announcement');
 
   const evidence = await store.priceEvidence(w.tenantId, { from: '2026-08-01', to: '2026-09-30', writeScopeIds: [ws] });
   assert.deepEqual(evidence.map((d) => [d.day, d.source, d.minMinor, d.lastMinor, d.corrected]), [
