@@ -20,11 +20,17 @@ export const AMAZON_RATE_LIMITS = {
   patchListingsItem: { pair: { ratePerSecond: 5, burst: 5 }, application: { ratePerSecond: 500 } },
   getListingsItem: { pair: { ratePerSecond: 5, burst: 5 }, application: { ratePerSecond: 100 } },
   searchListingsItems: { pair: { ratePerSecond: 5, burst: 5 }, application: { ratePerSecond: 100 } },
+  // Модель productPricing_2022-05-01 (Usage Plan): 0.033 rps, burst 1. Лимит уровня приложения не документирован — равен лимиту пары [AMZ_C11, A-13]
+  getCompetitiveSummary: { pair: { ratePerSecond: 0.033, burst: 1 }, application: { ratePerSecond: 0.033, documented: false } },
 } as const;
 export type AmazonOperation = keyof typeof AMAZON_RATE_LIMITS;
 
 export const LISTINGS_BASE_PATH = '/listings/2021-08-01/items';
 export const SOURCE_ANY_OFFER_CHANGED = 'AMAZON_ANY_OFFER_CHANGED';
+export const SOURCE_COMPETITIVE_SUMMARY = 'AMAZON_COMPETITIVE_SUMMARY';
+/** getCompetitiveSummary: до 20 запросов в пакете (CompetitiveSummaryRequestList.maxItems), lowestPricedOffers — до 20 предложений */
+export const COMPETITIVE_SUMMARY_BATCH_MAX = 20;
+export const COMPETITIVE_SUMMARY_PATH = '/batches/products/pricing/2022-05-01/items/competitiveSummary';
 /** Параметр pageSize searchListingsItems: максимум 20 (модель) */
 export const SEARCH_PAGE_MAX = 20;
 /** Модель: quantity — integer, minimum 0; верхний предел не задан — (проверить) */
@@ -67,7 +73,8 @@ export const AMAZON_DESCRIPTOR: ChannelDescriptor = {
   ],
   rateLimits: Object.entries(AMAZON_RATE_LIMITS).flatMap(([operation, r]) => [
     { owner: 'SELLER_APPLICATION_OPERATION' as const, operation, requestsPerSecond: r.pair.ratePerSecond, burst: r.pair.burst, source: 'DOCUMENTED' as const },
-    { owner: 'APPLICATION' as const, operation, requestsPerSecond: r.application.ratePerSecond, source: 'DOCUMENTED' as const },
+    { owner: 'APPLICATION' as const, operation, requestsPerSecond: r.application.ratePerSecond,
+      source: 'documented' in r.application && r.application.documented === false ? 'UNKNOWN' as const : 'DOCUMENTED' as const },
   ]),
   capabilities: [],
   // Р-119: опроса конкурентов нет (getCompetitiveSummary 0.033 rps, AMZ_C07) — выборку для Р-52 взять неоткуда
@@ -85,6 +92,20 @@ export const AMAZON_DESCRIPTOR: ChannelDescriptor = {
       typicalStalenessSeconds: null,
       availability: 'AVAILABLE',
       role: 'PRIMARY',
+    },
+    {
+      // Р-121: только сверка потерь ANY_OFFER_CHANGED по кругу — 0.033 rps не позволяют опрашивать все товары для решения (AMZ_C07, AMZ_C11)
+      source: SOURCE_COMPETITIVE_SUMMARY,
+      kind: 'PULL',
+      completeness: { kind: 'TOP_N', n: 20 },
+      conditions: ['new'],
+      // featuredBuyingOptions — сегменты по членству Prime и месту покупателя, единого победителя нет [AMZ_C11]
+      hasBuyboxWinner: false,
+      hasOwnRank: false,
+      hasShipping: true,
+      typicalStalenessSeconds: null,
+      availability: 'AVAILABLE',
+      role: 'RECONCILIATION',
     },
   ],
 };

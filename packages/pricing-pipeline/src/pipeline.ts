@@ -6,6 +6,7 @@ import type {
   ChannelAdapter,
   CompetitorQuery,
   CompetitorSnapshot,
+  CompetitorSourceDescriptor,
   FieldWrite,
   IdentifiedObservation,
   InboundDelivery,
@@ -31,9 +32,12 @@ import {
 } from '@repracer/pricing-model';
 import { runStrategy, strategyAvailability } from '@repracer/strategy-engine';
 import { channelRefusal, type DispatchStep, type WriteDispatcher } from '@repracer/write-dispatcher';
+import { comparedValue, DEFAULT_LOSS_GRACE_SECONDS, reconcile } from './reconciliation.ts';
 import type {
   HaltSampleObservation,
   InboundNotificationEntry,
+  NotificationLossVerdict,
+  SnapshotDelivery,
   CommittedDecision,
   DecisionToCommit,
   DispatchRecorded,
@@ -125,6 +129,14 @@ export interface HaltReviewReport {
   failures: Array<{ channelProductRef: string; reason: string }>;
   snapshots: SnapshotReport[];
 }
+
+export interface PollOptions {
+  delivery?: 'POLL' | 'PUSH_FETCH';
+  reconcile?: { graceSeconds?: number };
+}
+
+/** Р-121: итог сверки опроса */
+export interface ReconciliationReport { matched: number; diverged: number; noBaseline: number; notNewer: number; logged: number }
 
 export interface PipelineDeps {
   store: PricingStore;
@@ -363,7 +375,11 @@ export function createPricingPipeline(deps: PipelineDeps) {
     }
   }
 
-  async function processSnapshot(ctx: AdapterCallContext, snapshot: CompetitorSnapshot, notification?: InboundNotificationEntry): Promise<SnapshotReport> {
+  /** Р-121: снимок источника PUSH или с записью уведомления — доставлен уведомлением; иначе — опрос */
+  const sourcesOf = () => adapter.descriptor?.competitorSources ?? [];
+
+  async function processSnapshot(ctx: AdapterCallContext, snapshot: CompetitorSnapshot, notification?: InboundNotificationEntry, delivery?: SnapshotDelivery): Promise<SnapshotReport> {
+    const how: SnapshotDelivery = delivery ?? (notification || sourcesOf().some((c) => c.kind === 'PUSH' && c.source === snapshot.source) ? 'PUSH' : 'POLL');
     const key: ProductKey = {
       channelAccountId: ctx.channelAccountId, marketplace: snapshot.marketplace,
       channelProductRef: snapshot.channelProductRef, condition: snapshot.condition,
@@ -386,7 +402,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
       const competitorSnapshotId = randomUUID();
       const snapshotOutcome: SnapshotOutcome = {
         verdict: verdict.verdict, observedAt: snapshot.observedAt, move: verdict.move,
-        log: { competitorSnapshotId, snapshot, receivedAt: now },
+        log: { competitorSnapshotId, snapshot, receivedAt: now, delivery: how },
       };
       const commit: EvaluationCommit = { key, now, snapshot: snapshotOutcome, decisions: [], ...(notification ? { notification } : {}) };
       scopeReports = [];
@@ -455,11 +471,50 @@ export function createPricingPipeline(deps: PipelineDeps) {
     return report;
   }
 
-  async function pollCompetitors(ctx: AdapterCallContext, queries: readonly CompetitorQuery[]) {
+  /**
+   * Опрос конкурентов. PUSH_FETCH — чтение по уведомлению без данных [Р-46]. reconcile [Р-121] — опрос сверяется с последним принятым
+   * состоянием до его обработки: расхождение — проверка потери уведомления со сроком (вызывающий включает сверку, когда подписка на
+   * уведомления активна; без подписки каждое изменение рынка было бы «потерей»). Снимок источника только для сверки (роль RECONCILIATION)
+   * пишется в журнал снимков и в решение не идёт
+   */
+  async function pollCompetitors(ctx: AdapterCallContext, queries: readonly CompetitorQuery[], options: PollOptions = {}) {
     const read = await adapter.readCompetitors(ctx, queries);
     const snapshots: SnapshotReport[] = [];
-    for (const snapshot of read.snapshots) snapshots.push(await processSnapshot(ctx, snapshot));
-    return { snapshots, failures: read.failures };
+    const reconciliation: ReconciliationReport = { matched: 0, diverged: 0, noBaseline: 0, notNewer: 0, logged: 0 };
+    for (const snapshot of read.snapshots) {
+      const source = sourcesOf().find((c) => c.source === snapshot.source);
+      if (options.reconcile) await reconcileSnapshot(ctx, snapshot, source, options.reconcile.graceSeconds ?? DEFAULT_LOSS_GRACE_SECONDS, reconciliation);
+      if (source?.role === 'RECONCILIATION') {
+        await store.logReconciliationSnapshot(ctx.tenantId, { channelAccountId: ctx.channelAccountId, competitorSnapshotId: randomUUID(), snapshot, receivedAt: deps.now() });
+        reconciliation.logged += 1;
+        continue;
+      }
+      snapshots.push(await processSnapshot(ctx, snapshot, undefined, options.delivery ?? 'POLL'));
+    }
+    return { snapshots, failures: read.failures, ...(options.reconcile ? { reconciliation } : {}) };
+  }
+
+  async function reconcileSnapshot(ctx: AdapterCallContext, snapshot: CompetitorSnapshot, source: CompetitorSourceDescriptor | undefined, graceSeconds: number, report: ReconciliationReport) {
+    const now = deps.now();
+    const key: ProductKey = { channelAccountId: ctx.channelAccountId, marketplace: snapshot.marketplace, channelProductRef: snapshot.channelProductRef, condition: snapshot.condition };
+    const context = await store.loadEvaluationContext(ctx.tenantId, key, now, shift);
+    const push = sourcesOf().find((c) => c.kind === 'PUSH' && c.conditions.includes(snapshot.condition));
+    const compared = comparedValue(push, source);
+    const outcome = reconcile(context.sanity.lastAccepted, snapshot, compared);
+    if (outcome.kind === 'MATCH') report.matched += 1;
+    else if (outcome.kind === 'NO_BASELINE') report.noBaseline += 1;
+    else if (outcome.kind === 'NOT_NEWER') report.notNewer += 1;
+    else {
+      report.diverged += 1;
+      const pollObservedAt = new Date(Date.parse(snapshot.observedAt)).toISOString();
+      await store.recordNotificationLossCheck(ctx.tenantId, {
+        channelAccountId: ctx.channelAccountId, marketplace: snapshot.marketplace, channelProductRef: snapshot.channelProductRef, condition: snapshot.condition,
+        compared, heldObservedAt: context.sanity.lastAccepted!.observedAt, heldMinor: outcome.heldMinor, pollSnapshotId: randomUUID(), pollObservedAt,
+        pollMinor: outcome.pollMinor, currency: context.sanity.expectedCurrency, dueAt: new Date(Math.max(Date.parse(now), Date.parse(pollObservedAt)) + graceSeconds * 1000).toISOString(),
+      });
+      await emit(ctx, [{ kind: 'log', level: 'INFO', code: 'NOTIFICATION_LOSS_CHECK_OPENED', message: 'NOTIFICATION_LOSS_CHECK_OPENED',
+        details: { marketplace: snapshot.marketplace, channelProductRef: snapshot.channelProductRef, compared } }]);
+    }
   }
 
   /** Р-52: свежая независимая выборка; прошла проверки — остановка снимается с записью в журнал */
@@ -511,13 +566,37 @@ export function createPricingPipeline(deps: PipelineDeps) {
     ]);
     // Выборка прошла — те же снимки идут обычным путём
     const snapshots: SnapshotReport[] = [];
-    for (const snapshot of read.snapshots) snapshots.push(await processSnapshot(ctx, snapshot));
+    for (const snapshot of read.snapshots) snapshots.push(await processSnapshot(ctx, snapshot, undefined, 'SAMPLE'));
     return { haltId: halt.haltId, outcome: 'RELEASED', sampleSize: sampleSizeTaken, failedCount: 0, failures: [], snapshots };
   }
 
   return {
     processSnapshot,
     pollCompetitors,
+
+    /**
+     * Р-121: вердикты проверок потери уведомлений, срок которых наступил (вычисляет база). Подозрение на потерю — один CRITICAL-алерт на
+     * вызов с числом и первыми товарами: при полной потере подписки алерт не множится на каждый товар
+     */
+    async reviewNotificationLoss(ctx: AdapterCallContext): Promise<{ delayed: number; lossSuspected: NotificationLossVerdict[] }> {
+      const verdicts = await store.reviewNotificationLoss(ctx.tenantId, ctx.channelAccountId, deps.now());
+      const lossSuspected = verdicts.filter((v) => v.verdict === 'LOSS_SUSPECTED');
+      if (lossSuspected.length > 0) {
+        await emit(ctx, [{ kind: 'alert', code: 'NOTIFICATION_LOSS_SUSPECTED', severity: 'CRITICAL', details: {
+          count: lossSuspected.length, marketplaces: [...new Set(lossSuspected.map((v) => v.marketplace))].sort().join(','),
+          sample: lossSuspected.slice(0, 5).map((v) => v.channelProductRef).join(','), firstPolledAt: lossSuspected[0]!.pollObservedAt,
+        } }]);
+      }
+      return { delayed: verdicts.length - lossSuspected.length, lossSuspected };
+    },
+
+    /** Р-121: сверка по кругу (Amazon — квота опроса не позволяет опрашивать все товары): очередное окно товаров аккаунта */
+    async reconcileRotation(ctx: AdapterCallContext, options: { size: number; cycleSeconds: number; graceSeconds?: number }) {
+      const queries = await store.pickReconciliationSample(ctx.tenantId, ctx.channelAccountId, options.size, deps.now(), options.cycleSeconds);
+      if (queries.length === 0) return { snapshots: [], failures: [], reconciliation: { matched: 0, diverged: 0, noBaseline: 0, notNewer: 0, logged: 0 }, queries: 0 };
+      const polled = await pollCompetitors(ctx, queries, { reconcile: { ...(options.graceSeconds ? { graceSeconds: options.graceSeconds } : {}) } });
+      return { ...polled, queries: queries.length };
+    },
 
     /**
      * Уведомление: снимок с данными — сразу в путь; без данных — опрос ресурса [Р-46]; PRICING_HEALTH (шаг 23) — состояние оффера
@@ -560,7 +639,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
             notification = 'RECORDED';
           }
           snapshots.push(report);
-        } else if (event.kind === 'RESOURCE_CHANGED' && event.competitorQuery) snapshots.push(...(await pollCompetitors(ctx, [event.competitorQuery])).snapshots);
+        } else if (event.kind === 'RESOURCE_CHANGED' && event.competitorQuery) snapshots.push(...(await pollCompetitors(ctx, [event.competitorQuery], { delivery: 'PUSH_FETCH' })).snapshots);
         else if (event.kind === 'PRICING_HEALTH') {
           const recorded = await store.recordPricingHealth(ctx.tenantId, ctx.channelAccountId, event.health, pending);
           if (recorded === 'DUPLICATE_NOTIFICATION') return { inbound, snapshots, pricingHealth, notification: 'DUPLICATE' as const };

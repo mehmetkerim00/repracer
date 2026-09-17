@@ -1,4 +1,4 @@
-export { createPricingPipeline, type HaltReviewReport, type PipelineDeps, type PricingPipeline, type ScopeReport, type SnapshotReport, type Stage, type StageRecord, type StrategyPreview } from './pipeline.ts';
+export { createPricingPipeline, type HaltReviewReport, type PipelineDeps, type PollOptions, type ReconciliationReport, type PricingPipeline, type ScopeReport, type SnapshotReport, type Stage, type StageRecord, type StrategyPreview } from './pipeline.ts';
 export type {
   AdminActor,
   BoundsEditInput,
@@ -52,6 +52,10 @@ export type {
   ScopeEvaluationContext,
   ShiftWindow,
   SnapshotOutcome,
+  NotificationLossCheck,
+  NotificationLossVerdict,
+  ReconciliationCompared,
+  SnapshotDelivery,
 } from './store.ts';
 export { DEFAULT_MEMBERS, InMemoryPricingStore, standUserOf, type MemorySeed, type MemorySeedScope, type SeedBound } from './memory-store.ts';
 export {
@@ -67,3 +71,4 @@ export {
 } from './polling.ts';
 export { EXPLANATION_RULESETS } from './dictionary.ts';
 export type { ConsoleAuditRow } from './store.ts';
+export { comparedValue, DEFAULT_LOSS_GRACE_SECONDS, reconcile, rotation, snapshotDigest, type HeldState, type ReconciliationOutcome } from './reconciliation.ts';

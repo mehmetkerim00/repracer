@@ -25,7 +25,11 @@ CREATE TABLE channel_data.competitor_snapshot_log (
   source                  text NOT NULL,
   source_event_id         text,
   -- Вердикт проверки входов: история для бэктеста — все наблюдённые снимки, испорченные тоже [Р-38, Р-42]
-  sanity_verdict          text NOT NULL CONSTRAINT competitor_snapshot_log_verdict_known CHECK (sanity_verdict IN ('ACCEPT', 'REJECT', 'HALT_CHANNEL')),
+  -- RECONCILIATION — снимок источника только для сверки (роль RECONCILIATION, Р-36, Р-121): проверку входов и решение не проходит
+  sanity_verdict          text NOT NULL CONSTRAINT competitor_snapshot_log_verdict_known CHECK (sanity_verdict IN ('ACCEPT', 'REJECT', 'HALT_CHANNEL', 'RECONCILIATION')),
+  -- Р-121: как снимок пришёл — уведомление с данными (PUSH), чтение по уведомлению без данных (PUSH_FETCH), опрос по ярусу или сверка (POLL),
+  -- выборка проверки остановки (SAMPLE). Сверка опросом ищет здесь доставленное уведомление (0088)
+  delivery                text NOT NULL CONSTRAINT competitor_snapshot_log_delivery_known CHECK (delivery IN ('PUSH', 'PUSH_FETCH', 'POLL', 'SAMPLE')),
   -- Снимок порта целиком (CompetitorSnapshot): предложения, Buy Box, полнота, цена-подсказка канала
   snapshot                jsonb NOT NULL CONSTRAINT competitor_snapshot_log_snapshot_object CHECK (jsonb_typeof(snapshot) = 'object'),
   PRIMARY KEY (tenant_id, received_at, competitor_snapshot_id),

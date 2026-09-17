@@ -54,3 +54,25 @@ export interface ListingsItem {
 
 /** definitions.ItemSearchResults (часть) */
 export interface ItemSearchResults { numberOfResults: number; pagination?: { nextToken?: string }; items: ListingsItem[] }
+
+/**
+ * Product Pricing API v2022-05-01, getCompetitiveSummary — вручную по снимку моделей
+ * (vendor/amazon/sp-api-models/2026-09-16/models/product-pricing-api-model/productPricing_2022-05-01.json, SHA-256 в SHA256SUMS).
+ * Перенесены поля, которые использует сверка [Р-121]; суммы — MoneyType.amount (number в примере модели).
+ */
+export interface MoneyType { currencyCode?: string; amount?: number | string }
+export interface CompetitiveSummaryRequest {
+  asin: string; marketplaceId: string; includedData: Array<'featuredBuyingOptions' | 'referencePrices' | 'lowestPricedOffers' | 'similarItems'>;
+  lowestPricedOffersInputs?: Array<{ itemCondition: 'New' | 'Used' | 'Collectible' | 'Refurbished' | 'Club'; offerType: 'Consumer' }>;
+  method: 'GET'; uri: '/products/pricing/2022-05-01/items/competitiveSummary';
+}
+export interface CompetitiveSummaryBatchRequest { requests: CompetitiveSummaryRequest[] }
+/** definitions.Offer */
+export interface PricingOffer {
+  sellerId: string; condition?: string; subCondition?: string; fulfillmentType: 'AFN' | 'MFN'; listingPrice: MoneyType;
+  shippingOptions?: Array<{ shippingOptionType: 'DEFAULT'; price: MoneyType }>; primeDetails?: { eligibility: 'NATIONAL' | 'REGIONAL' | 'NONE' };
+}
+export interface LowestPricedOffer { lowestPricedOffersInput: { itemCondition: string; offerType: string }; offers: PricingOffer[] }
+export interface CompetitiveSummaryResponseBody { asin: string; marketplaceId: string; lowestPricedOffers?: LowestPricedOffer[]; errors?: SpApiError[] }
+export interface CompetitiveSummaryResponse { status: { statusCode?: number; reasonPhrase?: string }; body: CompetitiveSummaryResponseBody }
+export interface CompetitiveSummaryBatchResponse { responses: CompetitiveSummaryResponse[] }

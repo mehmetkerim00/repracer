@@ -276,7 +276,9 @@ BEGIN
        AND p.prosecdef AND has_function_privilege('repracer_app', p.oid, 'EXECUTE')
   LOOP
     IF r.f::text NOT IN ('security.resolve_channel_account(text,text,text)', 'tenant_data.lock_decision_products(uuid,uuid[])',
-                         'channel_data.review_halt_by_sample(uuid,uuid,timestamp with time zone)') THEN
+                         'channel_data.review_halt_by_sample(uuid,uuid,timestamp with time zone)',
+                         -- Шаг 24 [Р-121]: вердикт сверки опросом ставит база, путь решения только вызывает проверку
+                         'channel_data.review_notification_loss(uuid,uuid,timestamp with time zone)') THEN
       bad := bad || format('%s: SECURITY DEFINER function executable by the decision path is not in the allow list (Р-96)', r.f);
     END IF;
   END LOOP;

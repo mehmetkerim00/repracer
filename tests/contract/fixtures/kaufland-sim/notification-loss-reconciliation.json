@@ -1,0 +1,320 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "kaufland-sim/notification-loss-reconciliation",
+  "channel": "KAUFLAND",
+  "apiVersion": "2.44.0",
+  "title": "Симулятор: потери buy_box_changed обнаруживает только сверка опросом [Р-121]",
+  "description": "Шаг 24. Модель канала [Р-113]: конкурент со случайным блужданием цены, buy_box_changed с debounce 60 с и потерей 30 % уведомлений (K-10). Опрос GET /buybox каждые 5 минут сверяется с последним принятым состоянием, срок уведомления — 15 минут; вердикты потерь — каждый такт. Двенадцать часов мира: потерянные уведомления дают подозрения на потерю и CRITICAL-алерт. Вариант без потерь — контроль ложных тревог: ни одного подозрения, алертов нет. Прежнее состояние в мир не засевается: первый опрос — без сравнения (засеянное состояние, не совпадающее с моделью, было бы «потерей» — первая редакция сценария).",
+  "tags": [
+    "simulator",
+    "pipeline",
+    "r-121"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "vendor/kaufland/seller-api-v2/2026-09-14/openapi.json#PATCH /units/{id_unit}",
+      "https://sellerapi.kaufland.com/?page=push-notifications#events",
+      "docs/channel-capabilities.md#7"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn-seller-0001",
+      "marketplaces": [
+        "de",
+        "at"
+      ]
+    },
+    "credentials": {
+      "seller": {
+        "clientKey": "syn-seller-client-key-0001",
+        "secretKey": "syn-seller-secret-key-0001"
+      }
+    },
+    "secrets": [
+      "wh_tok_synthetic_0007"
+    ],
+    "pricing": {
+      "scopes": [
+        {
+          "writeScopeId": "ws-price-de-7101",
+          "productId": "prod-7101",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "7101",
+          "channelProductRef": "362007101",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-7101"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-7101"
+          }
+        }
+      ],
+      "competitorDaily": {
+        "de|362007101|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ]
+      }
+    },
+    "channelModel": {
+      "seed": 121,
+      "webhookUrl": "https://hooks.example.invalid/kaufland/wh_tok_synthetic_0007",
+      "units": [
+        {
+          "idUnit": 7101,
+          "storefront": "de",
+          "idOffer": "SYN-OFFER-7101",
+          "idProduct": 362007101,
+          "listingPriceMinor": 1850,
+          "amount": 5
+        }
+      ],
+      "competitors": [
+        {
+          "sellerRef": "Synthetic Walker",
+          "storefront": "de",
+          "idProduct": 362007101,
+          "priceMinor": 1900,
+          "behaviour": {
+            "kind": "RANDOM_WALK",
+            "everyMs": 600000,
+            "volatilityBp": 500,
+            "minMinor": 1600,
+            "maxMinor": 2300
+          }
+        }
+      ],
+      "params": {
+        "buyBoxChanged": {
+          "delivered": true,
+          "debounceMs": 60000,
+          "lossShare": 0.3
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "id": "twelve-hours",
+      "kind": "channelRun",
+      "durationMs": 43200000,
+      "tickMs": 300000,
+      "poll": [
+        {
+          "marketplace": "de",
+          "channelProductRef": "362007101",
+          "condition": "new"
+        }
+      ],
+      "reconcile": {
+        "graceSeconds": 900
+      },
+      "expect": {
+        "reconciliation": {
+          "noBaseline": 1,
+          "diverged": {
+            "$gt": 0
+          }
+        },
+        "loss": {
+          "lossSuspected": {
+            "$gt": 0
+          },
+          "delayed": {
+            "$gt": 0
+          }
+        }
+      }
+    }
+  ],
+  "exchanges": [],
+  "expect": {
+    "alerts": [
+      {
+        "code": "NOTIFICATION_LOSS_SUSPECTED",
+        "severity": "CRITICAL"
+      }
+    ],
+    "channel": {
+      "stats": {
+        "notificationsLost": {
+          "$gt": 0
+        }
+      },
+      "violations": []
+    },
+    "pipeline": {
+      "writes": {
+        "$every": {
+          "amountMinor": {
+            "$gte": 1500
+          }
+        }
+      }
+    }
+  },
+  "variants": [
+    {
+      "id": "k10-no-loss-control",
+      "question": "K-10",
+      "params": {
+        "buyBoxChanged": {
+          "delivered": true,
+          "debounceMs": 60000,
+          "lossShare": 0
+        }
+      },
+      "finding": "Без потерь сверка не даёт ни одного подозрения: расхождения опроса закрываются уведомлениями до срока (задержка). Ложная тревога возможна, если debounce канала дольше срока — срок задаётся по ответу на K-10.",
+      "expect": {
+        "noAlerts": true,
+        "channel": {
+          "stats": {
+            "notificationsLost": 0
+          },
+          "violations": []
+        },
+        "pipeline": {
+          "writes": {
+            "$every": {
+              "amountMinor": {
+                "$gte": 1500
+              }
+            }
+          }
+        }
+      },
+      "stepExpect": {
+        "twelve-hours": {
+          "loss": {
+            "lossSuspected": 0,
+            "delayed": {
+              "$gt": 0
+            }
+          }
+        }
+      }
+    }
+  ]
+}

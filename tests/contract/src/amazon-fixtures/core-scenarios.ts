@@ -1,7 +1,7 @@
 import type { MemorySeedScope } from '@repracer/pricing-pipeline';
 import type { Exchange, Scenario, Step } from '../harness/scenario.ts';
 import { SCENARIO_FORMAT } from '../harness/scenario.ts';
-import { amazonWorld, anyOfferChanged, DE, patchPriceExchange, preReadExchange, pricingHealthNotification, readBackExchange, searchListingsExchange, sku, tokenExchange } from './build.ts';
+import { amazonWorld, anyOfferChanged, competitiveSummaryExchange, DE, delivery, patchPriceExchange, preReadExchange, pricingHealthNotification, readBackExchange, searchListingsExchange, sku, tokenExchange } from './build.ts';
 
 /**
  * Сценарии ядра с адаптером Amazon (шаг 22): Р-115 — правило автоматического ценообразования канала блокирует единицу записи и
@@ -29,11 +29,12 @@ function fixedScope(unit: number, priceMinor: number, currentMinor: number): Mem
   };
 }
 
-function scenario(id: string, title: string, description: string, tags: string[], scopes: MemorySeedScope[], steps: Step[], exchanges: Exchange[], expect: Scenario['expect']): Scenario {
+function scenario(id: string, title: string, description: string, tags: string[], scopes: MemorySeedScope[], steps: Step[], exchanges: Exchange[], expect: Scenario['expect'],
+  extra: { sources?: string[]; pricing?: Record<string, unknown> } = {}): Scenario {
   return {
     format: SCENARIO_FORMAT, id, channel: 'AMAZON', apiVersion: 'listings-items-2021-08-01', title, description, tags,
-    provenance: { kind: 'SYNTHETIC_FROM_DOCS', sources: SOURCES },
-    world: amazonWorld({ pricing: { scopes, marketplaces: { [DE]: { currency: 'EUR', basis: 'GROSS' } } } } as never),
+    provenance: { kind: 'SYNTHETIC_FROM_DOCS', sources: extra.sources ?? SOURCES },
+    world: amazonWorld({ pricing: { scopes, marketplaces: { [DE]: { currency: 'EUR', basis: 'GROSS' } }, ...extra.pricing } } as never),
     steps, exchanges, expect,
   };
 }
@@ -230,7 +231,57 @@ export function buildCoreScenarios(): Array<{ file: string; scenario: Scenario }
     },
   );
 
+  // Р-121 (шаг 24): сверка Amazon по кругу — квота getCompetitiveSummary не позволяет опрашивать все товары
+  const refs = [8301, 8302, 8303].map((u) => `B0${String(u).padStart(8, '0')}`);
+  const lossScopes = [8301, 8302, 8303].map((u) => ({ ...fixedScope(u, 1999, 1850), pricingMode: 'OFF' as const }));
+  const rotation = scenario(
+    'amazon/pipeline/notification-loss-rotation',
+    'Р-121: сверка ANY_OFFER_CHANGED опросом по кругу — расхождение без уведомления до срока — подозрение на потерю с алертом',
+    'Шаг 24. У ANY_OFFER_CHANGED нет номеров последовательности, очередь SQS теряет без следа (риск 21). getCompetitiveSummary — 0.033 запроса в секунду, до 20 ASIN: сверка идёт по кругу, окно товаров аккаунта сдвигается каждый цикл [AMZ_C11]. Последнее принятое состояние трёх товаров — наименьшая цена конкурента 18.00. Опрос: B000008301 — 17.80, уведомления не будет; B000008302 — 18.00; B000008303 — 17.50, ANY_OFFER_CHANGED приходит через 5 минут. Снимки опроса — в журнал с вердиктом RECONCILIATION, в решение не идут. Через 16 минут база ставит «задержка» товару 3 и «подозрение на потерю» товару 1; один CRITICAL-алерт. Сверяется наименьшая цена конкурента: победителя Buy Box ответ не даёт.',
+    ['pipeline', 'r-121', 'notification-loss'],
+    lossScopes,
+    [
+      { id: 'rotation-window', kind: 'pipelineReconcileRotation', size: 20, cycleSeconds: 3600, graceSeconds: 900,
+        expect: { queries: 3, failures: [], snapshots: [], reconciliation: { matched: 1, diverged: 2, noBaseline: 0, notNewer: 0, logged: 3 } } } as Step,
+      { id: 'five-minutes', kind: 'advanceClock', ms: 300_000 },
+      { id: 'late-any-offer-changed', kind: 'pipelineInbound', delivery: delivery(anyOfferChanged('syn-notification-0301', DE, refs[2]!, { $clockIso: -60_000 },
+        [{ seller: 'Synthetic Competitor', minor: 1750, buyBoxWinner: true }, { seller: 'self', minor: 1850 }])),
+        expect: { snapshots: [{ channelProductRef: refs[2] }] } } as Step,
+      { id: 'review-before-due', kind: 'pipelineReviewNotificationLoss', expect: { delayed: 0, lossSuspected: [] } } as Step,
+      { id: 'eleven-minutes', kind: 'advanceClock', ms: 660_000 },
+      { id: 'review-after-due', kind: 'pipelineReviewNotificationLoss',
+        expect: { delayed: 1, lossSuspected: [{ verdict: 'LOSS_SUSPECTED', marketplace: DE, channelProductRef: refs[0], condition: 'new' }] } } as Step,
+    ],
+    [
+      tokenExchange(),
+      competitiveSummaryExchange('summary-rotation', [
+        { asin: refs[0]!, offers: [{ seller: 'A1SYNCOMPETITOR', minor: 1780 }, { seller: 'A1SYNSELLER0001', minor: 1850 }] },
+        { asin: refs[1]!, offers: [{ seller: 'A1SYNCOMPETITOR', minor: 1800 }, { seller: 'A1SYNSELLER0001', minor: 1850 }] },
+        { asin: refs[2]!, offers: [{ seller: 'A1SYNCOMPETITOR', minor: 1750 }, { seller: 'A1SYNSELLER0001', minor: 1850 }] },
+      ]),
+    ],
+    {
+      alerts: [{ code: 'NOTIFICATION_LOSS_SUSPECTED', severity: 'CRITICAL', count: 1 }],
+      pipeline: {
+        writes: [],
+        lossChecks: { $unordered: [
+          { channelProductRef: refs[0], compared: 'LOWEST_COMPETITOR', heldMinor: 1800, pollMinor: 1780, verdict: 'LOSS_SUSPECTED' },
+          { channelProductRef: refs[2], compared: 'LOWEST_COMPETITOR', heldMinor: 1800, pollMinor: 1750, verdict: 'DELAYED' },
+        ] },
+        snapshotLog: { $unordered: [
+          ...refs.map((r) => ({ channelProductRef: r, verdict: 'RECONCILIATION', delivery: 'POLL', source: 'AMAZON_COMPETITIVE_SUMMARY' })),
+          { channelProductRef: refs[2], delivery: 'PUSH', source: 'AMAZON_ANY_OFFER_CHANGED' },
+        ] },
+      },
+    },
+    {
+      sources: ['vendor/amazon/sp-api-models/2026-09-16/models/product-pricing-api-model/productPricing_2022-05-01.json', 'https://developer-docs.amazon/sp-api/docs/notification-type-values.md', 'docs/decisions.md#Р-121'],
+      pricing: { competitorState: Object.fromEntries(refs.map((r) => [`${DE}|${r}|new`, { observedAt: '2026-09-14T09:30:00.000Z', buyboxMinor: 1800, lowestMinor: 1800 }])) },
+    },
+  );
+
   return [
+    { file: 'pipeline-notification-loss-rotation.json', scenario: rotation },
     { file: 'pipeline-discovery-channel-pricing.json', scenario: discovery },
     { file: 'pipeline-console-channel-trust.json', scenario: consoleWorld },
     { file: 'pipeline-notification-receiver.json', scenario: receiver },

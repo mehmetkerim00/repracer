@@ -165,9 +165,9 @@ test('Р-122, step 24: a day of the competitor snapshot log is exported to Click
   await inTenant(pool, w.tenantId, async (tx) => {
     for (const [i, l] of logged.entries()) {
       await tx.query(
-        `INSERT INTO channel_data.competitor_snapshot_log (tenant_id, competitor_snapshot_id, received_at, observed_at, channel_account_id, channel, marketplace, channel_product_ref, condition, source, sanity_verdict, snapshot)
-         VALUES ($1, $2, $3, $4, $5, 'KAUFLAND', 'de', '362002400', 'new', 'KAUFLAND_BUY_BOX_CHANGED', $6, $7::jsonb)`,
-        [w.tenantId, l.id, new Date(dayStart.getTime() + 120_000 + i * 1000).toISOString(), l.s.observedAt, account, l.verdict, JSON.stringify(l.s)]);
+        `INSERT INTO channel_data.competitor_snapshot_log (tenant_id, competitor_snapshot_id, received_at, observed_at, channel_account_id, channel, marketplace, channel_product_ref, condition, source, sanity_verdict, delivery, snapshot)
+         VALUES ($1, $2, $3, $4, $5, 'KAUFLAND', 'de', '362002400', 'new', 'KAUFLAND_BUY_BOX_CHANGED', $6, $8, $7::jsonb)`,
+        [w.tenantId, l.id, new Date(dayStart.getTime() + 120_000 + i * 1000).toISOString(), l.s.observedAt, account, l.verdict, JSON.stringify(l.s), i === 1 ? 'POLL' : 'PUSH']);
     }
   });
   await assert.rejects(pool.query('SELECT count(*) FROM channel_data.competitor_snapshot_log'), /permission denied/, 'the decision path writes the log but does not read it (Р-22)');
@@ -179,8 +179,8 @@ test('Р-122, step 24: a day of the competitor snapshot log is exported to Click
   const count = async () => Number((await verifier.rows<{ n: number }>(
     `SELECT count() AS n FROM repracer_analytics.competitor_snapshot FINAL WHERE tenant_id = '${w.tenantId}'`))[0]!.n);
   assert.equal(await count(), 2, 'two snapshots of the tenant, the GBP one is skipped');
-  const verdicts = await verifier.rows<{ v: string }>(`SELECT sanity_verdict AS v FROM repracer_analytics.competitor_snapshot FINAL WHERE tenant_id = '${w.tenantId}' ORDER BY received_at`);
-  assert.deepEqual(verdicts.map((r) => r.v), ['ACCEPT', 'REJECT'], 'the rejected snapshot is history too, with its verdict');
+  const verdicts = await verifier.rows<{ v: string; d: string }>(`SELECT sanity_verdict AS v, delivery AS d FROM repracer_analytics.competitor_snapshot FINAL WHERE tenant_id = '${w.tenantId}' ORDER BY received_at`);
+  assert.deepEqual(verdicts.map((r) => [r.v, r.d]), [['ACCEPT', 'PUSH'], ['REJECT', 'POLL']], 'the rejected snapshot is history too, with its verdict and delivery (Р-121)');
   const second = await exportCompetitorSnapshotsDay(exporter, ingest, verifier, range);
   assert.equal(second.verified, true);
   assert.equal(await count(), 2, 'a repeated export does not duplicate rows');

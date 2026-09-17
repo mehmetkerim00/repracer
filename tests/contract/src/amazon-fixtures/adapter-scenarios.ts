@@ -1,6 +1,6 @@
 import type { Exchange, Scenario, Step } from '../harness/scenario.ts';
 import { SCENARIO_FORMAT } from '../harness/scenario.ts';
-import { accepted, amazonWorld, anyOfferChanged, DE, delivery, patchPriceExchange, preReadExchange, pricingHealthNotification, readBackExchange, SELLER, tokenExchange, US } from './build.ts';
+import { accepted, amazonWorld, anyOfferChanged, competitiveSummaryExchange, DE, delivery, patchPriceExchange, preReadExchange, pricingHealthNotification, readBackExchange, SELLER, tokenExchange, US } from './build.ts';
 
 /** Сценарии адаптера Amazon: обязательные сценарии Kaufland в смысле Amazon и асинхронное применение (шаг 22). Данные синтетические */
 
@@ -10,6 +10,8 @@ const SOURCES = [
   'https://developer-docs.amazon/sp-api/docs/listings-items-api-rate-limits.md',
   'https://developer-docs.amazon/sp-api/docs/building-listings-management-workflows-guide.md',
 ];
+/** Р-121: сверка опросом — модель Product Pricing API */
+const PRICING_SOURCES = [...SOURCES, 'vendor/amazon/sp-api-models/2026-09-16/models/product-pricing-api-model/productPricing_2022-05-01.json'];
 
 const SKU = 'SYN-SKU-7001';
 
@@ -32,9 +34,9 @@ function quantityWrite(id: string, version: number, quantity: number) {
 
 const batch = (batchId: string, items: unknown[]) => ({ batchId, operation: 'patchListingsItem', items, budgetCharges: [], requestCount: 2 });
 
-function scenario(id: string, title: string, description: string, tags: string[], steps: Step[], exchanges: Exchange[], expect: Scenario['expect'] = {}, world = amazonWorld()): Scenario {
+function scenario(id: string, title: string, description: string, tags: string[], steps: Step[], exchanges: Exchange[], expect: Scenario['expect'] = {}, world = amazonWorld(), sources = SOURCES): Scenario {
   return { format: SCENARIO_FORMAT, id, channel: 'AMAZON', apiVersion: 'listings-items-2021-08-01', title, description, tags,
-    provenance: { kind: 'SYNTHETIC_FROM_DOCS', sources: SOURCES }, world, steps, exchanges, expect };
+    provenance: { kind: 'SYNTHETIC_FROM_DOCS', sources }, world, steps, exchanges, expect };
 }
 
 const call = (id: string, method: string, args: unknown[], expect?: unknown, extra: Record<string, unknown> = {}) =>
@@ -237,14 +239,38 @@ export function buildAdapterScenarios(): Array<{ file: string; scenario: Scenari
       readBackExchange('readback', SKU, [{ priceMinor: 1850, quantity: 7 }])],
     { noAlerts: true, logs: [{ code: 'AMZ_C10_RATE_LIMIT_HEADER', count: 1, details: { operation: 'patchListingsItem', rate: 5 } }] }));
 
-  add('competitors-and-orders-unsupported.json', scenario('amazon/port/unsupported-reads',
-    'Опрос конкурентов и строки заказов у Amazon не выполняются — отказ, а не пустой ответ',
-    'getCompetitiveSummary — 0.033 запроса в секунду [AMZ_C07]: конкуренты только из уведомлений. Orders API нет в снимке, данные с PII [Р-4].',
-    ['port'],
+  add('competitive-summary-and-orders.json', scenario('amazon/port/competitive-summary',
+    'Р-121: getCompetitiveSummary — снимок только для сверки; строки заказов — отказ',
+    'Шаг 24. Сверка потерь ANY_OFFER_CHANGED [AMZ_C11]: пакет до 20 ASIN, lowestPricedOffers New/Consumer, снимок источника AMAZON_COMPETITIVE_SUMMARY без победителя Buy Box, своё предложение — по SellerId. Ошибка товара в пакете — отказ этого товара; состояние не new — UNSUPPORTED без запроса. Второй пакет сразу — RATE_LIMITED ограничителем (0.033 rps, burst 1), без обращения к Amazon. Orders API нет в снимке, данные с PII [Р-4].',
+    ['port', 'r-121'],
     [
-      call('competitors', 'readCompetitors', [[{ marketplace: DE, channelProductRef: 'B000007001', condition: 'new' }]], { snapshots: [], failures: [{ error: { code: 'UNSUPPORTED' } }] }),
+      call('competitors', 'readCompetitors', [[
+        { marketplace: DE, channelProductRef: 'B000007001', condition: 'new' }, { marketplace: DE, channelProductRef: 'B000007002', condition: 'used' },
+        { marketplace: DE, channelProductRef: 'B000007003', condition: 'new' },
+      ]], {
+        snapshots: [{ marketplace: DE, channelProductRef: 'B000007001', condition: 'new', source: 'AMAZON_COMPETITIVE_SUMMARY', observedAt: { $clockIso: 0 },
+          completeness: { kind: 'TOP_N', n: 2 },
+          offers: [
+            { isSelf: false, sellerRef: 'A1SYNCOMPETITOR', price: { amountMinor: 1779, currency: 'EUR', basis: 'GROSS' }, shipping: { amountMinor: 0 }, fulfillment: 'AFN' },
+            { isSelf: true, price: { amountMinor: 1850, currency: 'EUR', basis: 'GROSS' }, shipping: { amountMinor: 399 }, totalPrice: { amountMinor: 2249 }, fulfillment: 'MFN' },
+          ] }],
+        failures: [
+          { query: { channelProductRef: 'B000007002' }, error: { code: 'UNSUPPORTED' } },
+          { query: { channelProductRef: 'B000007003' }, error: { code: 'NOT_FOUND', scope: 'ITEM' } },
+        ],
+      }),
+      call('throttled', 'readCompetitors', [[{ marketplace: DE, channelProductRef: 'B000007001', condition: 'new' }]],
+        { snapshots: [], failures: [{ error: { code: 'RATE_LIMITED', retryAt: { $isoInstant: true } } }] }),
       call('orders', 'readOrderLines', [{ since: { $clockIso: -86_400_000 }, limit: 10 }], undefined, { expectThrows: { code: 'UNSUPPORTED' } }),
-    ], [], { noAlerts: true, logs: [{ code: 'AMZ_C07_COMPETITOR_PULL_UNAVAILABLE', count: 1 }] }));
+    ],
+    [
+      tokenExchange(),
+      competitiveSummaryExchange('summary-batch', [
+        { asin: 'B000007001', offers: [{ seller: 'A1SYNCOMPETITOR', minor: 1779, fba: true }, { seller: SELLER, minor: 1850, shippingMinor: 399 }] },
+        { asin: 'B000007003', status: 404 },
+      ]),
+    ],
+    { noAlerts: true, logs: [{ code: 'AMZ_C07_COMPETITOR_PULL_UNAVAILABLE', count: 2 }, { code: 'AMZ_C11_COMPETITIVE_SUMMARY_RECONCILIATION', count: 2 }, { code: 'AMZ_C01_TWO_LEVEL_BUDGET', count: 1 }] }, amazonWorld(), PRICING_SOURCES));
 
   add('tenant-mismatch.json', scenario('amazon/port/tenant-mismatch',
     'Р-31: тенант сообщения не владеет аккаунтом — отказ до обращения к Amazon',

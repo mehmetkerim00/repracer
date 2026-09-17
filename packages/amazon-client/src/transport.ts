@@ -64,7 +64,7 @@ export interface RequestInit {
 }
 
 export interface SpApiClient {
-  request<T>(method: 'GET' | 'PATCH' | 'PUT' | 'DELETE', path: string, init?: RequestInit): Promise<SpApiResult<T>>;
+  request<T>(method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE', path: string, init?: RequestInit): Promise<SpApiResult<T>>;
 }
 
 /** Кэш токенов LWA: ключ — хеш учётных данных, не сами секреты; срок — expires_in минус запас */
@@ -150,7 +150,7 @@ export function createSpApiClient(options: SpApiClientOptions): SpApiClient {
   }
 
   return {
-    async request<T>(method: 'GET' | 'PATCH' | 'PUT' | 'DELETE', path: string, init: RequestInit = {}): Promise<SpApiResult<T>> {
+    async request<T>(method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE', path: string, init: RequestInit = {}): Promise<SpApiResult<T>> {
       const url = `${endpoint}${path}${buildQuery(init.query)}`;
       const body = init.body === undefined ? undefined : JSON.stringify(init.body);
       const idempotent = init.idempotent ?? method === 'GET';

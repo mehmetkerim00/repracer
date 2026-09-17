@@ -1,5 +1,6 @@
 import { EXPLANATION_RULESETS } from './dictionary.ts';
-import type { HaltSampleObservation, HaltSampleReview, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation } from './store.ts';
+import { rotation } from './reconciliation.ts';
+import type { HaltSampleObservation, HaltSampleReview, NotificationLossCheck, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation } from './store.ts';
 import { offerIdentityOf, type CompetitorQuery, type CompetitorSnapshot, type CompetitorSourceDescriptor, type FieldWrite, type Instant, type OfferIdentity, type PriceBasis, type PricingHealthObservation, type WriteOutcome } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange, SanityContext } from '@repracer/input-sanity';
 import { assertWriteWithinBounds, NO_GUARDRAILS, type GuardrailSet } from '@repracer/price-gate';
@@ -235,7 +236,10 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   readonly offerChannelPricing: ConsoleOfferChannelPricingRow[] = [];
   readonly pricingHealth: ConsolePricingHealthRow[] = [];
   /** Р-122 (шаг 24): как channel_data.competitor_snapshot_log — полный снимок при любом вердикте, для выгрузки в ClickHouse */
-  readonly snapshotLog: Array<{ competitorSnapshotId: string; receivedAt: Instant; verdict: SnapshotOutcome['verdict']; key: ProductKey; snapshot: CompetitorSnapshot }> = [];
+  readonly snapshotLog: Array<{ competitorSnapshotId: string; receivedAt: Instant; verdict: SnapshotOutcome['verdict'] | 'RECONCILIATION'; delivery: SnapshotDelivery; key: ProductKey; snapshot: CompetitorSnapshot }> = [];
+  /** Р-121 (0088): проверки потери уведомлений и вердикты базы */
+  readonly lossChecks: Array<NotificationLossCheck & { checkId: string }> = [];
+  readonly lossVerdicts: Array<{ checkId: string; verdict: NotificationLossVerdict['verdict']; pushSnapshotId: string | null; decidedAt: Instant }> = [];
   /** Журнал обработанных уведомлений: как UNIQUE (tenant_id, channel, notification_id) в 0083 */
   readonly inboundNotifications = new Map<string, InboundNotificationEntry>();
   private readonly scopes = new Map<string, ScopeRow>();
@@ -700,7 +704,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     let divergenceCaseId: string | null = null;
     const s = input.snapshot;
     if (s) {
-      if (s.log) this.snapshotLog.push({ competitorSnapshotId: s.log.competitorSnapshotId, receivedAt: s.log.receivedAt, verdict: s.verdict, key: input.key, snapshot: s.log.snapshot });
+      if (s.log) this.snapshotLog.push({ competitorSnapshotId: s.log.competitorSnapshotId, receivedAt: s.log.receivedAt, verdict: s.verdict, delivery: s.log.delivery, key: input.key, snapshot: s.log.snapshot });
       if (s.move) this.rememberMove({ marketplace: input.key.marketplace, productRef: s.move.productRef, evaluatedAt: input.now, moveBp: s.move.moveBp, verdict: s.verdict, sellerRef: s.move.sellerRef });
       if (s.accepted) this.acceptSnapshot(input.key, s.accepted.snapshot, s.accepted.competitorSnapshotId, s.accepted.sanity);
       if (s.rejected) {
@@ -1373,6 +1377,51 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     return h ? this.haltInfo(h) : null;
   }
 
+  async logReconciliationSnapshot(_tenantId: string, entry: { channelAccountId: string; competitorSnapshotId: string; snapshot: CompetitorSnapshot; receivedAt: Instant }): Promise<void> {
+    const { snapshot } = entry;
+    this.snapshotLog.push({
+      competitorSnapshotId: entry.competitorSnapshotId, receivedAt: entry.receivedAt, verdict: 'RECONCILIATION', delivery: 'POLL', snapshot,
+      key: { channelAccountId: entry.channelAccountId, marketplace: snapshot.marketplace, channelProductRef: snapshot.channelProductRef, condition: snapshot.condition },
+    });
+  }
+
+  async recordNotificationLossCheck(_tenantId: string, check: NotificationLossCheck): Promise<void> {
+    // Как ограничения notification_loss_check (0088)
+    if (check.heldMinor === check.pollMinor) throw new Error('new row violates check constraint "notification_loss_check_diverged"');
+    if (!(Date.parse(check.pollObservedAt) > Date.parse(check.heldObservedAt) && Date.parse(check.dueAt) > Date.parse(check.pollObservedAt))) {
+      throw new Error('new row violates check constraint "notification_loss_check_order"');
+    }
+    this.lossChecks.push({ ...check, checkId: this.id('loss-check') });
+  }
+
+  async reviewNotificationLoss(_tenantId: string, channelAccountId: string, at: Instant): Promise<NotificationLossVerdict[]> {
+    // Как channel_data.review_notification_loss (0088)
+    const out: NotificationLossVerdict[] = [];
+    const atMs = Date.parse(at);
+    for (const c of [...this.lossChecks].sort((a, b) => Date.parse(a.pollObservedAt) - Date.parse(b.pollObservedAt) || a.channelProductRef.localeCompare(b.channelProductRef))) {
+      if (c.channelAccountId !== channelAccountId || Date.parse(c.dueAt) > atMs || this.lossVerdicts.some((v) => v.checkId === c.checkId)) continue;
+      const push = this.snapshotLog
+        .filter((l) => l.key.channelAccountId === c.channelAccountId && l.key.marketplace === c.marketplace && l.key.channelProductRef === c.channelProductRef
+          && l.key.condition === c.condition && (l.delivery === 'PUSH' || l.delivery === 'PUSH_FETCH')
+          && Date.parse(l.receivedAt) > Date.parse(c.heldObservedAt) && Date.parse(l.receivedAt) <= Date.parse(c.dueAt)
+          && Date.parse(l.snapshot.observedAt) > Date.parse(c.heldObservedAt))
+        .sort((a, b) => Date.parse(a.receivedAt) - Date.parse(b.receivedAt))[0];
+      const verdict = push ? 'DELAYED' : 'LOSS_SUSPECTED';
+      this.lossVerdicts.push({ checkId: c.checkId, verdict, pushSnapshotId: push?.competitorSnapshotId ?? null, decidedAt: at });
+      out.push({ checkId: c.checkId, verdict, marketplace: c.marketplace, channelProductRef: c.channelProductRef, condition: c.condition, pollObservedAt: c.pollObservedAt });
+    }
+    return out;
+  }
+
+  async pickReconciliationSample(_tenantId: string, channelAccountId: string, size: number, at: Instant, cycleSeconds: number): Promise<CompetitorQuery[]> {
+    const refs = new Map<string, CompetitorQuery>();
+    for (const s of this.scopes.values()) {
+      if (s.channelAccountId !== channelAccountId || !s.channelProductRef) continue;
+      refs.set(productKey(s), { marketplace: s.marketplace, channelProductRef: s.channelProductRef, condition: s.condition });
+    }
+    return rotation([...refs.values()], size, at, cycleSeconds);
+  }
+
   async pickReviewSample(_tenantId: string, halt: HaltInfo, size: number): Promise<CompetitorQuery[]> {
     const refs = new Map<string, CompetitorQuery>();
     for (const s of [...this.scopes.values()].sort((a, b) => a.channelProductRef.localeCompare(b.channelProductRef))) {
@@ -1572,7 +1621,11 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       offerChannelPricing: this.offerChannelPricing.map((o) => ({ marketplace: o.marketplace, externalSku: o.externalSku, automatedPricing: o.automatedPricing, channelBounds: o.channelBounds, source: o.source })),
       pricingHealth: this.pricingHealth.map((h) => ({ marketplace: h.marketplace, channelProductRef: h.channelProductRef, issueType: h.issueType, thresholdMinor: h.competitivePriceThreshold?.amountMinor ?? null })),
       inboundNotifications: [...this.inboundNotifications.values()].map((n) => ({ notificationId: n.notificationId, notificationType: n.notificationType })),
-      snapshotLog: this.snapshotLog.map((l) => ({ channelProductRef: l.key.channelProductRef, verdict: l.verdict, source: l.snapshot.source })),
+      snapshotLog: this.snapshotLog.map((l) => ({ channelProductRef: l.key.channelProductRef, verdict: l.verdict, source: l.snapshot.source, delivery: l.delivery })),
+      lossChecks: this.lossChecks.map((c) => ({
+        channelProductRef: c.channelProductRef, compared: c.compared, heldMinor: c.heldMinor, pollMinor: c.pollMinor,
+        verdict: this.lossVerdicts.find((v) => v.checkId === c.checkId)?.verdict ?? null,
+      })),
       stops: this.stops.map((s) => ({ stopId: s.stopId, scope: s.scope, marketplace: s.marketplace, releasedAt: s.releasedAt })),
       intents: this.intents.map((i) => ({ writeScopeId: i.writeScopeId, ruleCode: i.ruleCode, proposedMinor: i.proposedMinor })),
       decisions: this.decisions.map((d) => ({

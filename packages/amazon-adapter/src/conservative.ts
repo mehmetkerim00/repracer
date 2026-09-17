@@ -39,8 +39,13 @@ export const AMAZON_CONSERVATIVE_RULES = {
   },
   AMZ_C07_COMPETITOR_PULL_UNAVAILABLE: {
     question: null,
-    behaviour: 'Опрос конкурентов не выполняется: getCompetitiveSummary — 0.033 запроса в секунду, burst 1 (CLAUDE.md); конкуренты — только ANY_OFFER_CHANGED',
+    behaviour: 'Опрос конкурентов для решения не выполняется: getCompetitiveSummary — 0.033 запроса в секунду, burst 1 (CLAUDE.md); конкуренты решения — только ANY_OFFER_CHANGED, опрос — только сверка потерь [Р-121, AMZ_C11]',
     whenAnswered: '—',
+  },
+  AMZ_C11_COMPETITIVE_SUMMARY_RECONCILIATION: {
+    question: 'A-13',
+    behaviour: 'getCompetitiveSummary — только сверка потерь ANY_OFFER_CHANGED по кругу [Р-121]: пакет до 20 товаров, lowestPricedOffers New/Consumer; сверяется наименьшая цена конкурента; победитель Buy Box из featuredBuyingOptions не берётся (сегменты по Prime и месту покупателя); момент наблюдения — время ответа (в ответе его нет); только состояние new; лимит уровня приложения не документирован — равен лимиту пары',
+    whenAnswered: 'Если набор lowestPricedOffers совпадает с Offers уведомления, известны задержка уведомления и лимит приложения — сравнение, срок и темп сверки уточняются',
   },
   AMZ_C08_NOTIFICATION_NOT_SIGNED: {
     question: 'A-12',

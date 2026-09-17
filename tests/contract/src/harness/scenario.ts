@@ -103,7 +103,11 @@ export interface ClockStep {
 /** Уведомление целиком через путь: адаптер → снимок или опрос → проверка входов → стратегия → Gate → запись */
 export interface PipelineInboundStep { id: string; kind: 'pipelineInbound'; delivery: InboundDeliverySpec; expect?: unknown }
 /** Опрос конкурентов через адаптер и путь */
-export interface PipelinePollStep { id: string; kind: 'pipelinePoll'; queries: unknown[]; ctx?: StepContext; expect?: unknown }
+export interface PipelinePollStep { id: string; kind: 'pipelinePoll'; queries: unknown[]; reconcile?: { graceSeconds?: number }; ctx?: StepContext; expect?: unknown }
+/** Р-121: вердикты проверок потери уведомлений, срок которых наступил */
+export interface PipelineReviewLossStep { id: string; kind: 'pipelineReviewNotificationLoss'; ctx?: StepContext; expect?: unknown }
+/** Р-121: сверка по кругу — очередное окно товаров аккаунта */
+export interface PipelineReconcileRotationStep { id: string; kind: 'pipelineReconcileRotation'; size: number; cycleSeconds: number; graceSeconds?: number; ctx?: StepContext; expect?: unknown }
 /** Пересчёт единицы без нового снимка */
 export interface PipelineRecomputeStep { id: string; kind: 'pipelineRecompute'; writeScopeId: string; trigger: { type: TriggerType; sourceEventId?: string }; ctx?: StepContext; expect?: unknown }
 /** Включение репрайсинга [Р-43] */
@@ -145,7 +149,8 @@ export type PricingStopStep =
 export interface PipelineDispatchDueStep { id: string; kind: 'pipelineDispatchDue'; expect?: unknown }
 
 export type PipelineStep = PipelineInboundStep | PipelinePollStep | PipelineRecomputeStep | PipelineEnableStep | PricingMutationStep
-  | PipelineReviewHaltsStep | PipelineReleaseHaltStep | PipelineReleaseDistrustStep | PipelineDiscoverOffersStep | PipelineDispatchDueStep | PricingStopStep | ReceiverPollStep;
+  | PipelineReviewHaltsStep | PipelineReleaseHaltStep | PipelineReleaseDistrustStep | PipelineDiscoverOffersStep | PipelineDispatchDueStep | PricingStopStep | ReceiverPollStep
+  | PipelineReviewLossStep | PipelineReconcileRotationStep;
 
 /** Симулятор: доставить уведомления модели канала, срок которых наступил, через путь решения */
 export interface ChannelDeliverStep { id: string; kind: 'channelDeliver'; expect?: unknown }
@@ -156,7 +161,12 @@ export interface ChannelOrderStep { id: string; kind: 'channelOrder'; idOffer: s
  * Симулятор: прогон мира за период — каждые tickMs часы сдвигаются, уведомления модели идут через путь решения,
  * при poll — опрос конкурентов, затем обход диспетчера записей [Р-64]. Итог — сводка, а не отчёты каждого снимка.
  */
-export interface ChannelRunStep { id: string; kind: 'channelRun'; durationMs: number; tickMs: number; poll?: unknown[]; expect?: unknown }
+export interface ChannelRunStep {
+  id: string; kind: 'channelRun'; durationMs: number; tickMs: number; poll?: unknown[];
+  /** Р-121: опрос сверяется с уведомлениями, вердикты потерь — каждый такт */
+  reconcile?: { graceSeconds?: number };
+  expect?: unknown;
+}
 
 export type Step = CallStep | InboundStep | ClockStep | PipelineStep | ChannelDeliverStep | ChannelOrderStep | ChannelRunStep;
 
@@ -206,7 +216,7 @@ export interface Scenario {
 }
 
 const ID_RE = /^[a-z0-9]+(?:[-/][a-z0-9]+)*$/;
-const PIPELINE_KINDS = new Set(['channelDeliver', 'channelRun', 'pipelineInbound', 'pipelinePoll', 'pipelineRecompute', 'pipelineEnableRepricing', 'pricingMutation', 'pipelineReviewHalts', 'pipelineReleaseHalt', 'pipelineReleaseDistrust', 'pipelineDiscoverOffers', 'pricingStop', 'receiverPoll']);
+const PIPELINE_KINDS = new Set(['channelDeliver', 'channelRun', 'pipelineInbound', 'pipelinePoll', 'pipelineRecompute', 'pipelineEnableRepricing', 'pricingMutation', 'pipelineReviewHalts', 'pipelineReleaseHalt', 'pipelineReleaseDistrust', 'pipelineDiscoverOffers', 'pricingStop', 'receiverPoll', 'pipelineReviewNotificationLoss', 'pipelineReconcileRotation']);
 
 export function validateScenario(s: Scenario): string[] {
   const problems: string[] = [];
@@ -243,7 +253,7 @@ export function validateScenario(s: Scenario): string[] {
     if (exchangeIds.has(ex.id)) problems.push(`duplicate exchange id ${ex.id}`);
     exchangeIds.add(ex.id);
     const pathOk = s.channel === 'AMAZON'
-      ? /^\/(listings\/2021-08-01\/items\/|auth\/o2\/token$)/.test(ex.request?.path ?? '')
+      ? /^\/(listings\/2021-08-01\/items\/|auth\/o2\/token$|batches\/products\/pricing\/2022-05-01\/items\/competitiveSummary$)/.test(ex.request?.path ?? '')
       : Boolean(ex.request?.path?.startsWith('/v2/'));
     if (!pathOk) problems.push(`exchange ${ex.id}: request.path is not an ${s.channel} API path`);
     if (Boolean(ex.response) === Boolean(ex.fault)) problems.push(`exchange ${ex.id}: exactly one of response or fault`);

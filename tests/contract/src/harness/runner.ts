@@ -189,7 +189,13 @@ async function runPipelineStep(
     case 'pipelineInbound':
       return { result: await pipeline.processInbound(buildDelivery(step.delivery, scenario, clock)) };
     case 'pipelinePoll':
-      return { result: await pipeline.pollCompetitors(callContext(step.ctx, step.id, scenario, clock), resolvePlaceholders(step.queries, clock) as never) };
+      return { result: await pipeline.pollCompetitors(callContext(step.ctx, step.id, scenario, clock), resolvePlaceholders(step.queries, clock) as never,
+        step.reconcile ? { reconcile: step.reconcile } : {}) };
+    case 'pipelineReviewNotificationLoss':
+      return { result: await pipeline.reviewNotificationLoss(callContext(step.ctx, step.id, scenario, clock)) };
+    case 'pipelineReconcileRotation':
+      return { result: await pipeline.reconcileRotation(callContext(step.ctx, step.id, scenario, clock),
+        { size: step.size, cycleSeconds: step.cycleSeconds, ...(step.graceSeconds ? { graceSeconds: step.graceSeconds } : {}) }) };
     case 'pipelineRecompute':
       return { result: await pipeline.recompute(callContext(step.ctx, step.id, scenario, clock), step.writeScopeId, step.trigger) };
     case 'pipelineEnableRepricing':
@@ -358,7 +364,8 @@ export async function runScenario(
 
     if (step.kind === 'channelRun') {
       const summary = { ticks: 0, deliveries: 0, snapshots: 0, verdicts: {} as Record<string, number>, rejectReasons: {} as Record<string, number>,
-        decisions: {} as Record<string, number>, dispatched: 0 };
+        decisions: {} as Record<string, number>, dispatched: 0,
+        reconciliation: { matched: 0, diverged: 0, noBaseline: 0, notNewer: 0, logged: 0 }, loss: { delayed: 0, lossSuspected: 0 } };
       const count = (bag: Record<string, number>, key: string) => { bag[key] = (bag[key] ?? 0) + 1; };
       const take = (reports: SnapshotReport[]) => {
         for (const r of reports) {
@@ -374,7 +381,17 @@ export async function runScenario(
         const deliveries = simulator!.drainDeliveries(clock.nowMs());
         summary.deliveries += deliveries.length;
         for (const d of deliveries) take((await pipeline!.processInbound(buildDelivery(d, scenario, clock))).snapshots);
-        if (step.poll) take((await pipeline!.pollCompetitors(callContext(undefined, step.id, scenario, clock), resolvePlaceholders(step.poll, clock) as never)).snapshots);
+        if (step.poll) {
+          const polled = await pipeline!.pollCompetitors(callContext(undefined, step.id, scenario, clock), resolvePlaceholders(step.poll, clock) as never,
+            step.reconcile ? { reconcile: step.reconcile } : {});
+          take(polled.snapshots);
+          for (const [k, v] of Object.entries(polled.reconciliation ?? {})) summary.reconciliation[k as keyof typeof summary.reconciliation] += v;
+        }
+        if (step.reconcile) {
+          const review = await pipeline!.reviewNotificationLoss(callContext(undefined, step.id, scenario, clock));
+          summary.loss.delayed += review.delayed;
+          summary.loss.lossSuspected += review.lossSuspected.length;
+        }
         summary.dispatched += (await dispatcher!.sweep({ pendingMinAgeMs: 0 })).due;
       }
       results[step.id] = summary;

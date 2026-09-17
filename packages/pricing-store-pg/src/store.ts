@@ -2,7 +2,8 @@ import type { ExplanationRuleset as DictionaryRuleset } from '@repracer/pricing-
 import {
   floorCauseFromDatabase, convertMinor, type FxQuote } from '@repracer/pricing-model';
 import { DEFAULT_RETRY_POLICY } from '@repracer/write-dispatcher';
-import { offerIdentityOf, type CompetitorQuery, type FieldWrite, type Instant, type PricingHealthObservation, type WriteOutcome } from '@repracer/channel-port';
+import { rotation } from '@repracer/pricing-pipeline';
+import { offerIdentityOf, type CompetitorQuery, type CompetitorSnapshot, type FieldWrite, type Instant, type PricingHealthObservation, type WriteOutcome } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange } from '@repracer/input-sanity';
 import type { GuardrailSet } from '@repracer/price-gate';
 import type { OmnibusPriorPrice } from '@repracer/pricing-model';
@@ -32,6 +33,8 @@ import type {
   EvaluationContext,
   HaltInfo,
   HaltRecord,
+  NotificationLossCheck,
+  NotificationLossVerdict,
   HaltReviewRecord, HaltSampleObservation, HaltSampleReview,
   PriceScopeContext,
   PricingStore,
@@ -612,11 +615,11 @@ export class PgPricingStore implements PricingStore {
     if (s.log) {
       await tx.query(
         `INSERT INTO channel_data.competitor_snapshot_log (tenant_id, competitor_snapshot_id, received_at, observed_at, channel_account_id, channel, marketplace,
-                                                          channel_product_ref, condition, source, source_event_id, sanity_verdict, snapshot)
-         SELECT $1, $2, $3, $4, a.channel_account_id, a.channel, $6, $7, $8, $9, $10, $11, $12::jsonb
+                                                          channel_product_ref, condition, source, source_event_id, sanity_verdict, delivery, snapshot)
+         SELECT $1, $2, $3, $4, a.channel_account_id, a.channel, $6, $7, $8, $9, $10, $11, $13, $12::jsonb
            FROM tenant_data.channel_account a WHERE a.tenant_id = $1 AND a.channel_account_id = $5`,
         [tenantId, s.log.competitorSnapshotId, s.log.receivedAt, s.log.snapshot.observedAt, key.channelAccountId, key.marketplace, key.channelProductRef,
-          s.log.snapshot.condition, s.log.snapshot.source, s.log.snapshot.sourceEventId ?? null, s.verdict, JSON.stringify(s.log.snapshot)]);
+          s.log.snapshot.condition, s.log.snapshot.source, s.log.snapshot.sourceEventId ?? null, s.verdict, JSON.stringify(s.log.snapshot), s.log.delivery]);
     }
     const snapshot = s.accepted?.snapshot ?? null;
     const competitors = snapshot ? snapshot.offers.filter((o) => !o.isSelf) : [];
@@ -1471,6 +1474,51 @@ export class PgPricingStore implements PricingStore {
     });
   }
 
+  async logReconciliationSnapshot(tenantId: string, entry: { channelAccountId: string; competitorSnapshotId: string; snapshot: CompetitorSnapshot; receivedAt: Instant }): Promise<void> {
+    const { snapshot } = entry;
+    await this.tx(tenantId, async (tx) => {
+      await tx.query(
+        `INSERT INTO channel_data.competitor_snapshot_log (tenant_id, competitor_snapshot_id, received_at, observed_at, channel_account_id, channel, marketplace,
+                                                          channel_product_ref, condition, source, source_event_id, sanity_verdict, delivery, snapshot)
+         SELECT $1, $2, $3, $4, a.channel_account_id, a.channel, $6, $7, $8, $9, $10, 'RECONCILIATION', 'POLL', $11::jsonb
+           FROM tenant_data.channel_account a WHERE a.tenant_id = $1 AND a.channel_account_id = $5`,
+        [tenantId, entry.competitorSnapshotId, entry.receivedAt, snapshot.observedAt, entry.channelAccountId, snapshot.marketplace, snapshot.channelProductRef,
+          snapshot.condition, snapshot.source, snapshot.sourceEventId ?? null, JSON.stringify(snapshot)]);
+    });
+  }
+
+  async recordNotificationLossCheck(tenantId: string, c: NotificationLossCheck): Promise<void> {
+    await this.tx(tenantId, async (tx) => {
+      await tx.query(
+        `INSERT INTO channel_data.notification_loss_check (tenant_id, channel_account_id, channel, marketplace, channel_product_ref, condition, compared,
+                                                           held_observed_at, held_minor, poll_snapshot_id, poll_observed_at, poll_minor, currency, due_at)
+         SELECT $1, a.channel_account_id, a.channel, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+           FROM tenant_data.channel_account a WHERE a.tenant_id = $1 AND a.channel_account_id = $2`,
+        [tenantId, c.channelAccountId, c.marketplace, c.channelProductRef, c.condition, c.compared, c.heldObservedAt, c.heldMinor, c.pollSnapshotId,
+          c.pollObservedAt, c.pollMinor, c.currency, c.dueAt]);
+    });
+  }
+
+  async reviewNotificationLoss(tenantId: string, channelAccountId: string, at: Instant): Promise<NotificationLossVerdict[]> {
+    return this.tx(tenantId, async (tx) => {
+      const { rows } = await tx.query('SELECT * FROM channel_data.review_notification_loss($1, $2, $3)', [tenantId, channelAccountId, at]);
+      return rows.map((r): NotificationLossVerdict => ({
+        checkId: r.notification_loss_check_id, verdict: r.verdict, marketplace: r.marketplace, channelProductRef: r.channel_product_ref, condition: r.condition,
+        pollObservedAt: iso(r.poll_observed_at),
+      }));
+    });
+  }
+
+  async pickReconciliationSample(tenantId: string, channelAccountId: string, size: number, at: Instant, cycleSeconds: number): Promise<CompetitorQuery[]> {
+    return this.tx(tenantId, async (tx) => {
+      // Офферы аккаунта с товаром канала; порядок и окно — rotation, как в памяти
+      const { rows } = await tx.query(
+        `SELECT DISTINCT m.marketplace, m.channel_product_ref, m.condition FROM tenant_data.offer_mapping m
+          WHERE m.tenant_id = $1 AND m.channel_account_id = $2 AND m.status <> 'ENDED' AND m.channel_product_ref IS NOT NULL`, [tenantId, channelAccountId]);
+      return rotation(rows.map((r) => ({ marketplace: r.marketplace, channelProductRef: r.channel_product_ref, condition: portCondition(r.condition) })), size, at, cycleSeconds);
+    });
+  }
+
   async pickReviewSample(tenantId: string, halt: HaltInfo, size: number): Promise<CompetitorQuery[]> {
     return this.tx(tenantId, async (tx) => {
       const { rows } = await tx.query(
@@ -1571,7 +1619,10 @@ export class PgPricingStore implements PricingStore {
       const distrusts = await q(`SELECT channel_distrust_id, marketplace, reason_code, released_at FROM channel_data.channel_distrust WHERE tenant_id = $1 ORDER BY detected_at`);
       const ocp = await q(`SELECT marketplace, external_sku, automated_pricing, channel_bounds, source FROM channel_data.offer_channel_pricing WHERE tenant_id = $1 ORDER BY observed_at, external_sku`);
       const health = await q(`SELECT marketplace, channel_product_ref, issue_type, competitive_price_threshold_minor FROM channel_data.offer_pricing_health WHERE tenant_id = $1 ORDER BY recorded_at, event_time`);
-      const snapshotLog = await q(`SELECT channel_product_ref, sanity_verdict, source FROM channel_data.competitor_snapshot_log WHERE tenant_id = $1 ORDER BY received_at, observed_at, channel_product_ref`);
+      const snapshotLog = await q(`SELECT channel_product_ref, sanity_verdict, source, delivery FROM channel_data.competitor_snapshot_log WHERE tenant_id = $1 ORDER BY received_at, observed_at, channel_product_ref`);
+      const lossChecks = await q(`SELECT c.channel_product_ref, c.compared, c.held_minor, c.poll_minor, v.verdict FROM channel_data.notification_loss_check c
+                                    LEFT JOIN channel_data.notification_loss_verdict v ON v.tenant_id = c.tenant_id AND v.notification_loss_check_id = c.notification_loss_check_id
+                                   WHERE c.tenant_id = $1 ORDER BY c.poll_observed_at, c.channel_product_ref`);
       const inbound = await q(`SELECT notification_id, notification_type FROM channel_data.inbound_notification WHERE tenant_id = $1 ORDER BY processed_at, notification_id`);
       const cases = await q(`SELECT write_scope_id, expected_amount_minor, observed_amount_minor, cause, status FROM channel_data.divergence_case
                                WHERE tenant_id = $1 ORDER BY opened_at`);
@@ -1590,7 +1641,11 @@ export class PgPricingStore implements PricingStore {
         offerChannelPricing: ocp.map((o) => ({ marketplace: o.marketplace, externalSku: o.external_sku, automatedPricing: o.automated_pricing, channelBounds: o.channel_bounds, source: o.source })),
         pricingHealth: health.map((h) => ({ marketplace: h.marketplace, channelProductRef: h.channel_product_ref, issueType: h.issue_type, thresholdMinor: h.competitive_price_threshold_minor === null ? null : Number(h.competitive_price_threshold_minor) })),
         inboundNotifications: inbound.map((n) => ({ notificationId: n.notification_id, notificationType: n.notification_type })),
-        snapshotLog: snapshotLog.map((l) => ({ channelProductRef: l.channel_product_ref, verdict: l.sanity_verdict, source: l.source })),
+        snapshotLog: snapshotLog.map((l) => ({ channelProductRef: l.channel_product_ref, verdict: l.sanity_verdict, source: l.source, delivery: l.delivery })),
+        lossChecks: lossChecks.map((c) => ({
+          channelProductRef: c.channel_product_ref, compared: c.compared, heldMinor: c.held_minor === null ? null : Number(c.held_minor),
+          pollMinor: c.poll_minor === null ? null : Number(c.poll_minor), verdict: c.verdict ?? null,
+        })),
         intents: intents.map((i) => ({ writeScopeId: i.write_scope_id, ruleCode: i.rule_code, proposedMinor: i.proposed_amount_minor })),
         decisions: decisions.map((d) => ({ writeScopeId: d.write_scope_id, outcome: d.outcome, decisionClass: d.intent_class, rejectionReason: d.rejection_reason, finalMinor: d.final_amount_minor, reasonParams: d.reason_params, fx: d.fx, boundDeviationBp: d.bound_deviation_bp })),
         writes: writes.map((w) => ({ writeScopeId: w.write_scope_id, amountMinor: w.amount_minor, version: w.version, status: w.status, endReason: w.end_reason })),

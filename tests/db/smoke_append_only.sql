@@ -47,14 +47,74 @@ INSERT INTO channel_data.offer_pricing_health (tenant_id, channel_account_id, ch
   competitive_price_threshold_minor, currency, notification_id)
 VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R103-1', 'new', 'BuyBoxDisqualification', now(), 1999, 'EUR', 'SYN-N-R103-H');
 -- Шаг 24, A (0086) [Р-122]: журнал полных снимков конкурентов
-INSERT INTO channel_data.competitor_snapshot_log (tenant_id, competitor_snapshot_id, received_at, observed_at, channel_account_id, channel, marketplace, channel_product_ref, condition, source, sanity_verdict, snapshot)
-VALUES ('a0000000-0000-0000-0000-00000000000a', 'a9124000-0000-4000-8000-000000000001', now(), now(), 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R103-1', 'new', 'KAUFLAND_BUYBOX', 'ACCEPT', '{"offers": []}');
+INSERT INTO channel_data.competitor_snapshot_log (tenant_id, competitor_snapshot_id, received_at, observed_at, channel_account_id, channel, marketplace, channel_product_ref, condition, source, sanity_verdict, delivery, snapshot)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'a9124000-0000-4000-8000-000000000001', now(), now(), 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R103-1', 'new', 'KAUFLAND_BUYBOX', 'ACCEPT', 'POLL', '{"offers": []}');
 SELECT pg_temp.expect_fail('competitor snapshot log with an unknown sanity verdict (Р-122)', $q$
-  INSERT INTO channel_data.competitor_snapshot_log (tenant_id, competitor_snapshot_id, received_at, observed_at, channel_account_id, channel, marketplace, channel_product_ref, condition, source, sanity_verdict, snapshot)
-  VALUES ('a0000000-0000-0000-0000-00000000000a', gen_random_uuid(), now(), now(), 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R103-1', 'new', 'KAUFLAND_BUYBOX', 'MAYBE', '{}') $q$, 'competitor_snapshot_log_verdict_known');
+  INSERT INTO channel_data.competitor_snapshot_log (tenant_id, competitor_snapshot_id, received_at, observed_at, channel_account_id, channel, marketplace, channel_product_ref, condition, source, sanity_verdict, delivery, snapshot)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', gen_random_uuid(), now(), now(), 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R103-1', 'new', 'KAUFLAND_BUYBOX', 'MAYBE', 'POLL', '{}') $q$, 'competitor_snapshot_log_verdict_known');
 SELECT pg_temp.expect_fail('competitor snapshot log whose snapshot is not an object (Р-122)', $q$
-  INSERT INTO channel_data.competitor_snapshot_log (tenant_id, competitor_snapshot_id, received_at, observed_at, channel_account_id, channel, marketplace, channel_product_ref, condition, source, sanity_verdict, snapshot)
-  VALUES ('a0000000-0000-0000-0000-00000000000a', gen_random_uuid(), now(), now(), 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R103-1', 'new', 'KAUFLAND_BUYBOX', 'ACCEPT', '[]') $q$, 'competitor_snapshot_log_snapshot_object');
+  INSERT INTO channel_data.competitor_snapshot_log (tenant_id, competitor_snapshot_id, received_at, observed_at, channel_account_id, channel, marketplace, channel_product_ref, condition, source, sanity_verdict, delivery, snapshot)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', gen_random_uuid(), now(), now(), 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R103-1', 'new', 'KAUFLAND_BUYBOX', 'ACCEPT', 'POLL', '[]') $q$, 'competitor_snapshot_log_snapshot_object');
+SELECT pg_temp.expect_fail('competitor snapshot log with an unknown delivery (Р-121)', $q$
+  INSERT INTO channel_data.competitor_snapshot_log (tenant_id, competitor_snapshot_id, received_at, observed_at, channel_account_id, channel, marketplace, channel_product_ref, condition, source, sanity_verdict, delivery, snapshot)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', gen_random_uuid(), now(), now(), 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R103-1', 'new', 'KAUFLAND_BUYBOX', 'ACCEPT', 'EMAIL', '{}') $q$, 'competitor_snapshot_log_delivery_known');
+
+-- Шаг 24, D (0088) [Р-121]: сверка опросом. Прежнее состояние — 3 часа назад, опрос — 2 часа назад, срок — час назад.
+-- A: уведомление пришло до срока — задержка; B: уведомление после срока — потеря; C: до срока пришёл только опрос — потеря;
+-- D: срок ещё не наступил — вердикта нет
+INSERT INTO channel_data.competitor_snapshot_log (tenant_id, competitor_snapshot_id, received_at, observed_at, channel_account_id, channel, marketplace, channel_product_ref, condition, source, sanity_verdict, delivery, snapshot)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'a9121000-0000-4000-8000-00000000000a', now() - interval '90 minutes', now() - interval '95 minutes', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R121-A', 'new', 'KAUFLAND_BUY_BOX_CHANGED', 'ACCEPT', 'PUSH', '{}'),
+       ('a0000000-0000-0000-0000-00000000000a', 'a9121000-0000-4000-8000-00000000000b', now() - interval '30 minutes', now() - interval '35 minutes', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R121-B', 'new', 'KAUFLAND_BUY_BOX_CHANGED', 'ACCEPT', 'PUSH', '{}'),
+       ('a0000000-0000-0000-0000-00000000000a', 'a9121000-0000-4000-8000-00000000000c', now() - interval '90 minutes', now() - interval '95 minutes', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R121-C', 'new', 'KAUFLAND_BUYBOX', 'ACCEPT', 'POLL', '{}');
+INSERT INTO channel_data.notification_loss_check (tenant_id, notification_loss_check_id, channel_account_id, channel, marketplace, channel_product_ref, condition, compared,
+  held_observed_at, held_minor, poll_snapshot_id, poll_observed_at, poll_minor, currency, due_at)
+SELECT 'a0000000-0000-0000-0000-00000000000a', ('a9121100-0000-4000-8000-00000000000' || x.k)::uuid, 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R121-' || upper(x.k), 'new', 'BUYBOX',
+       now() - interval '3 hours', 1500, gen_random_uuid(), now() - interval '2 hours', 1450, 'EUR', now() + x.due
+  FROM (VALUES ('a', interval '-1 hour'), ('b', interval '-1 hour'), ('c', interval '-1 hour'), ('d', interval '1 hour')) AS x(k, due);
+SELECT pg_temp.expect_fail('notification loss check without a divergence (Р-121)', $q$
+  INSERT INTO channel_data.notification_loss_check (tenant_id, channel_account_id, channel, marketplace, channel_product_ref, condition, compared, held_observed_at, held_minor, poll_snapshot_id, poll_observed_at, poll_minor, currency, due_at)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R121-X', 'new', 'BUYBOX', now() - interval '3 hours', 1500, gen_random_uuid(), now() - interval '2 hours', 1500, 'EUR', now()) $q$,
+  'notification_loss_check_diverged');
+SELECT pg_temp.expect_fail('notification loss check due before the poll (Р-121)', $q$
+  INSERT INTO channel_data.notification_loss_check (tenant_id, channel_account_id, channel, marketplace, channel_product_ref, condition, compared, held_observed_at, held_minor, poll_snapshot_id, poll_observed_at, poll_minor, currency, due_at)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R121-X', 'new', 'BUYBOX', now() - interval '3 hours', 1500, gen_random_uuid(), now() - interval '2 hours', 1450, 'EUR', now() - interval '150 minutes') $q$,
+  'notification_loss_check_order');
+SELECT pg_temp.expect_fail('notification loss check comparing an unknown value (Р-121)', $q$
+  INSERT INTO channel_data.notification_loss_check (tenant_id, channel_account_id, channel, marketplace, channel_product_ref, condition, compared, held_observed_at, held_minor, poll_snapshot_id, poll_observed_at, poll_minor, currency, due_at)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R121-X', 'new', 'OFFER_COUNT', now() - interval '3 hours', 1500, gen_random_uuid(), now() - interval '2 hours', 1450, 'EUR', now()) $q$,
+  'notification_loss_check_compared_known');
+CREATE TEMP TABLE r121_verdicts ON COMMIT DROP AS
+  SELECT channel_product_ref, verdict FROM channel_data.review_notification_loss('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', now());
+DO $$ BEGIN
+  IF (SELECT verdict FROM r121_verdicts WHERE channel_product_ref = 'R121-A') IS DISTINCT FROM 'DELAYED' THEN
+    RAISE EXCEPTION 'a notification delivered before the due time does not resolve a loss check (Р-121)';
+  END IF;
+  RAISE NOTICE 'PASS accept | a notification delivered before the due time resolves a loss check as delayed (Р-121)';
+END $$;
+DO $$ BEGIN
+  IF (SELECT verdict FROM r121_verdicts WHERE channel_product_ref = 'R121-B') IS DISTINCT FROM 'LOSS_SUSPECTED' THEN
+    RAISE EXCEPTION 'a notification after the due time resolves a loss check (Р-121)';
+  END IF;
+  RAISE NOTICE 'PASS accept | a notification after the due time does not resolve a loss check (Р-121)';
+END $$;
+DO $$ BEGIN
+  IF (SELECT verdict FROM r121_verdicts WHERE channel_product_ref = 'R121-C') IS DISTINCT FROM 'LOSS_SUSPECTED' THEN
+    RAISE EXCEPTION 'a polled snapshot counts as a delivered notification (Р-121)';
+  END IF;
+  RAISE NOTICE 'PASS accept | a polled snapshot does not count as a delivered notification (Р-121)';
+END $$;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM r121_verdicts WHERE channel_product_ref = 'R121-D') THEN
+    RAISE EXCEPTION 'a loss check is decided before its due time (Р-121)';
+  END IF;
+  RAISE NOTICE 'PASS accept | a loss check is not decided before its due time (Р-121)';
+END $$;
+SELECT pg_temp.expect_fail('notification loss verdict delayed without the notification snapshot (Р-121)', $q$
+  INSERT INTO channel_data.notification_loss_verdict (tenant_id, notification_loss_check_id, verdict, decided_at)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a9121100-0000-4000-8000-00000000000d', 'DELAYED', now()) $q$, 'notification_loss_verdict_evidence');
+SELECT pg_temp.expect_fail('notification loss verdict of an unknown kind (Р-121)', $q$
+  INSERT INTO channel_data.notification_loss_verdict (tenant_id, notification_loss_check_id, verdict, decided_at)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a9121100-0000-4000-8000-00000000000d', 'IGNORED', now()) $q$, 'notification_loss_verdict_known');
 INSERT INTO channel_data.price_decision_snapshot_ref (tenant_id, price_decision_id, decided_at, write_scope_id, competitor_snapshot_id, source, observed_at)
 SELECT tenant_id, price_decision_id, decided_at, write_scope_id, 'a9103000-0000-4000-8000-000000000001', 'KAUFLAND_BUYBOX', decided_at
   FROM channel_data.price_decision WHERE price_decision_id = 'a8000000-0000-0000-0000-000000000001';
@@ -129,6 +189,10 @@ SELECT 'a0000000-0000-0000-0000-00000000000a', 'a5000000-0000-0000-0000-00000000
 SELECT pg_temp.expect_fail('truncate channel_data.offer_channel_pricing', $q$ TRUNCATE channel_data.offer_channel_pricing $q$, 'TRUNCATE of channel_data.offer_channel_pricing is forbidden');
 SELECT pg_temp.expect_fail('truncate tenant_data.discount_announcement', $q$ TRUNCATE tenant_data.discount_announcement $q$, 'TRUNCATE of tenant_data.discount_announcement is forbidden');
 SELECT pg_temp.expect_fail('truncate channel_data.competitor_snapshot_log', $q$ TRUNCATE channel_data.competitor_snapshot_log $q$, 'TRUNCATE of channel_data.competitor_snapshot_log is forbidden');
+-- Проверки потерь ссылаются вердикты: TRUNCATE одной таблицы отклоняет внешний ключ раньше триггера — усекаются обе, триггер вердиктов
+-- выключен внутри откатываемой проверки, чтобы отказ был именно триггером проверок
+SELECT pg_temp.expect_fail('truncate channel_data.notification_loss_check', $q$ ALTER TABLE channel_data.notification_loss_verdict DISABLE TRIGGER zz_no_truncate; TRUNCATE channel_data.notification_loss_check, channel_data.notification_loss_verdict $q$, 'TRUNCATE of channel_data.notification_loss_check is forbidden');
+SELECT pg_temp.expect_fail('truncate channel_data.notification_loss_verdict', $q$ TRUNCATE channel_data.notification_loss_verdict $q$, 'TRUNCATE of channel_data.notification_loss_verdict is forbidden');
 SELECT pg_temp.expect_fail('truncate channel_data.inbound_notification', $q$ TRUNCATE channel_data.inbound_notification $q$, 'TRUNCATE of channel_data.inbound_notification is forbidden');
 SELECT pg_temp.expect_fail('pricing health threshold without its currency (Р-71)', $q$
   INSERT INTO channel_data.offer_pricing_health (tenant_id, channel_account_id, channel, marketplace, channel_product_ref, condition, issue_type, event_time, competitive_price_threshold_minor, currency, notification_id)

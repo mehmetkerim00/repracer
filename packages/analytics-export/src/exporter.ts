@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type pg from 'pg';
 import type { ClickHouseHttp } from './clickhouse.ts';
 import { completedWriteRow, intentClassOf, priceDecisionRow, priceIntentNoopRow, priceIntentRow, type PgRow } from './rows.ts';
-import { competitorSnapshotRow, type CompetitorSnapshotRow } from './competitor-history.ts';
+import { competitorSnapshotRow, type CompetitorSnapshotRow, type SnapshotDeliveryKind, type SnapshotSanityVerdict } from './competitor-history.ts';
 import type { CompetitorSnapshot } from '@repracer/channel-port';
 
 /**
@@ -157,7 +157,7 @@ export function snapshotLogRow(row: PgRow): { ok: true; row: CompetitorSnapshotR
   return {
     ok: true,
     row: competitorSnapshotRow(String(row.tenant_id), String(row.channel_account_id), channel, String(row.competitor_snapshot_id), snapshot, iso(row.received_at),
-      row.sanity_verdict as 'ACCEPT' | 'REJECT' | 'HALT_CHANNEL'),
+      row.sanity_verdict as SnapshotSanityVerdict, row.delivery as SnapshotDeliveryKind),
   };
 }
 

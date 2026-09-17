@@ -213,7 +213,42 @@ export interface SnapshotOutcome {
    * Р-122 (шаг 24): снимок порта целиком — в журнал для выгрузки в ClickHouse при любом вердикте; идентификатор принятого снимка тот же,
    * что в ссылке решения на снимок
    */
-  log?: { competitorSnapshotId: string; snapshot: CompetitorSnapshot; receivedAt: Instant };
+  log?: { competitorSnapshotId: string; snapshot: CompetitorSnapshot; receivedAt: Instant; delivery: SnapshotDelivery };
+}
+
+/**
+ * Р-121 (шаг 24): как снимок пришёл. PUSH — уведомление с данными; PUSH_FETCH — чтение по уведомлению без данных [Р-46];
+ * POLL — опрос по ярусу или сверка; SAMPLE — выборка проверки остановки [Р-52]. Сверка опросом засчитывает доставку только PUSH и PUSH_FETCH
+ */
+export type SnapshotDelivery = 'PUSH' | 'PUSH_FETCH' | 'POLL' | 'SAMPLE';
+
+/** Р-121: что сверяется — то, о чём канал обязан уведомить (Kaufland — Buy Box, Amazon — наименьшая цена конкурента) */
+export type ReconciliationCompared = 'BUYBOX' | 'LOWEST_COMPETITOR';
+
+/** Р-121: опрос разошёлся с последним принятым состоянием товара — проверка, дошло ли уведомление до срока */
+export interface NotificationLossCheck {
+  channelAccountId: string;
+  marketplace: string;
+  channelProductRef: string;
+  condition: string;
+  compared: ReconciliationCompared;
+  heldObservedAt: Instant;
+  heldMinor: number | null;
+  pollSnapshotId: string;
+  pollObservedAt: Instant;
+  pollMinor: number | null;
+  currency: string;
+  dueAt: Instant;
+}
+
+/** Р-121: вердикт проверки, вычисленный базой (review_notification_loss, 0088) */
+export interface NotificationLossVerdict {
+  checkId: string;
+  verdict: 'DELAYED' | 'LOSS_SUSPECTED';
+  marketplace: string;
+  channelProductRef: string;
+  condition: string;
+  pollObservedAt: Instant;
 }
 
 export interface DecisionToCommit {
@@ -455,6 +490,14 @@ export interface PricingStore {
   editBounds(tenantId: string, edits: readonly BoundsEditInput[], actor: AdminActor, mode: 'PREVIEW' | 'APPLY'): Promise<BoundsEditResult>;
   saveStrategy(tenantId: string, input: StrategySaveInput, actor: AdminActor): Promise<StrategySaveResult>;
   /** Р-123 (шаг 24): наименьшая цена за 30 суток витрины до начала скидки — предупреждение до объявления */
+  /** Р-121, Р-122: снимок источника только для сверки (роль RECONCILIATION) — в журнал снимков без проверки входов и решения */
+  logReconciliationSnapshot(tenantId: string, entry: { channelAccountId: string; competitorSnapshotId: string; snapshot: CompetitorSnapshot; receivedAt: Instant }): Promise<void>;
+  /** Р-121: проверка потери уведомления — только при расхождении (база отклоняет совпадение) */
+  recordNotificationLossCheck(tenantId: string, check: NotificationLossCheck): Promise<void>;
+  /** Р-121: вердикты проверок аккаунта, срок которых наступил к at; вычисляет база */
+  reviewNotificationLoss(tenantId: string, channelAccountId: string, at: Instant): Promise<NotificationLossVerdict[]>;
+  /** Р-121: сверка по кругу — size товаров аккаунта, сдвиг по номеру цикла (at / cycleSeconds); все товары покрываются за n / size циклов */
+  pickReconciliationSample(tenantId: string, channelAccountId: string, size: number, at: Instant, cycleSeconds: number): Promise<CompetitorQuery[]>;
   omnibusCheck(tenantId: string, writeScopeId: string, startsAt: Instant): Promise<OmnibusPriorPrice>;
   /** Р-123: объявление скидки — только человек с правом MANAGE_PRICING; нарушение отклоняет база (0087) */
   announceDiscount(tenantId: string, input: DiscountAnnouncementInput, actor: AdminActor): Promise<DiscountAnnounceResult>;

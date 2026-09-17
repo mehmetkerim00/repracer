@@ -313,3 +313,25 @@ export function convertKauflandScenario(file: string, id: string, title: string)
   };
   return { steps: scenario.steps, exchanges, scenario, refs };
 }
+
+/** Р-121: getCompetitiveSummary (productPricing_2022-05-01) — пакет запросов; ответ по каждому товару со статусом */
+export function competitiveSummaryExchange(id: string, items: ReadonlyArray<{ asin: string; marketplace?: string; status?: number;
+  offers?: ReadonlyArray<{ seller: string; minor: number; shippingMinor?: number; fba?: boolean; currency?: string }> }>): Exchange {
+  return {
+    id, note: 'getCompetitiveSummary: lowestPricedOffers New/Consumer — сверка потерь ANY_OFFER_CHANGED [Р-121, AMZ_C11]',
+    request: { method: 'POST', path: '/batches/products/pricing/2022-05-01/items/competitiveSummary', body: { requests: items.map((i) => ({
+      asin: i.asin, marketplaceId: i.marketplace ?? DE, includedData: ['lowestPricedOffers'], lowestPricedOffersInputs: [{ itemCondition: 'New', offerType: 'Consumer' }],
+      method: 'GET', uri: '/products/pricing/2022-05-01/items/competitiveSummary',
+    })) } },
+    response: { status: 200, body: { responses: items.map((i) => (i.status && i.status !== 200
+      ? { status: { statusCode: i.status, reasonPhrase: 'Client Error' }, body: { asin: i.asin, marketplaceId: i.marketplace ?? DE, errors: [{ code: 'SYN_NOT_FOUND', message: 'Synthetic item error' }] } }
+      : { status: { statusCode: 200, reasonPhrase: 'Success' }, body: { asin: i.asin, marketplaceId: i.marketplace ?? DE, lowestPricedOffers: [{
+        lowestPricedOffersInput: { itemCondition: 'New', offerType: 'Consumer' },
+        offers: (i.offers ?? []).map((o) => ({
+          sellerId: o.seller, condition: 'New', subCondition: 'New', fulfillmentType: o.fba ? 'AFN' : 'MFN',
+          listingPrice: { amount: major(o.minor), currencyCode: o.currency ?? 'EUR' },
+          shippingOptions: [{ shippingOptionType: 'DEFAULT', price: { amount: major(o.shippingMinor ?? 0), currencyCode: o.currency ?? 'EUR' } }],
+        })),
+      }] } })) } },
+  };
+}

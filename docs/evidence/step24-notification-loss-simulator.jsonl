@@ -1,0 +1,6 @@
+{"lossShare":0,"debounceMs":60000,"pollEveryMs":300000,"hours":72,"seeds":5,"runs":5,"buyBoxChanges":46,"scheduled":23,"lost":0,"delivered":23,"polls":4320,"diverged":23,"delayed":23,"lossSuspected":0}
+{"lossShare":0.3,"debounceMs":60000,"pollEveryMs":300000,"hours":72,"seeds":5,"runs":5,"buyBoxChanges":56,"scheduled":28,"lost":11,"delivered":17,"polls":4320,"diverged":39,"delayed":23,"lossSuspected":16}
+{"lossShare":0.3,"debounceMs":60000,"pollEveryMs":900000,"hours":72,"seeds":5,"runs":5,"buyBoxChanges":52,"scheduled":33,"lost":13,"delivered":20,"polls":1440,"diverged":23,"delayed":12,"lossSuspected":11}
+{"lossShare":0,"debounceMs":300000,"pollEveryMs":300000,"hours":72,"seeds":5,"runs":5,"buyBoxChanges":46,"scheduled":23,"lost":0,"delivered":23,"polls":4320,"diverged":23,"delayed":23,"lossSuspected":0}
+{"lossShare":0,"debounceMs":1200000,"pollEveryMs":300000,"hours":72,"seeds":5,"runs":5,"buyBoxChanges":46,"scheduled":14,"lost":0,"delivered":14,"polls":4320,"diverged":41,"delayed":32,"lossSuspected":9}
+{"lossShare":1,"debounceMs":0,"pollEveryMs":300000,"hours":72,"seeds":5,"runs":5,"buyBoxChanges":46,"scheduled":0,"lost":0,"delivered":0,"polls":4320,"diverged":46,"delayed":0,"lossSuspected":46}

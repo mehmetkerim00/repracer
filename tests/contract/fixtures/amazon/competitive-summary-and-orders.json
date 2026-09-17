@@ -1,0 +1,342 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "amazon/port/competitive-summary",
+  "channel": "AMAZON",
+  "apiVersion": "listings-items-2021-08-01",
+  "title": "Р-121: getCompetitiveSummary — снимок только для сверки; строки заказов — отказ",
+  "description": "Шаг 24. Сверка потерь ANY_OFFER_CHANGED [AMZ_C11]: пакет до 20 ASIN, lowestPricedOffers New/Consumer, снимок источника AMAZON_COMPETITIVE_SUMMARY без победителя Buy Box, своё предложение — по SellerId. Ошибка товара в пакете — отказ этого товара; состояние не new — UNSUPPORTED без запроса. Второй пакет сразу — RATE_LIMITED ограничителем (0.033 rps, burst 1), без обращения к Amazon. Orders API нет в снимке, данные с PII [Р-4].",
+  "tags": [
+    "port",
+    "r-121"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "vendor/amazon/sp-api-models/2026-09-16/models/listings-items-api-model/listingsItems_2021-08-01.json",
+      "https://developer-docs.amazon/sp-api/docs/manage-purchasable-offer.md",
+      "https://developer-docs.amazon/sp-api/docs/listings-items-api-rate-limits.md",
+      "https://developer-docs.amazon/sp-api/docs/building-listings-management-workflows-guide.md",
+      "vendor/amazon/sp-api-models/2026-09-16/models/product-pricing-api-model/productPricing_2022-05-01.json"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "A1SYNSELLER0001",
+      "marketplaces": [
+        "A1PA6795UKMFR9"
+      ],
+      "channel": "AMAZON",
+      "region": "EU"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "Atzr|syn-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "amzn1.application-oa2-client.syn0001",
+        "clientSecret": "syn-lwa-client-secret-0001"
+      },
+      "accessToken": "Atza|syn-access-token-0001"
+    }
+  },
+  "steps": [
+    {
+      "id": "competitors",
+      "kind": "call",
+      "method": "readCompetitors",
+      "args": [
+        [
+          {
+            "marketplace": "A1PA6795UKMFR9",
+            "channelProductRef": "B000007001",
+            "condition": "new"
+          },
+          {
+            "marketplace": "A1PA6795UKMFR9",
+            "channelProductRef": "B000007002",
+            "condition": "used"
+          },
+          {
+            "marketplace": "A1PA6795UKMFR9",
+            "channelProductRef": "B000007003",
+            "condition": "new"
+          }
+        ]
+      ],
+      "expect": {
+        "snapshots": [
+          {
+            "marketplace": "A1PA6795UKMFR9",
+            "channelProductRef": "B000007001",
+            "condition": "new",
+            "source": "AMAZON_COMPETITIVE_SUMMARY",
+            "observedAt": {
+              "$clockIso": 0
+            },
+            "completeness": {
+              "kind": "TOP_N",
+              "n": 2
+            },
+            "offers": [
+              {
+                "isSelf": false,
+                "sellerRef": "A1SYNCOMPETITOR",
+                "price": {
+                  "amountMinor": 1779,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                },
+                "shipping": {
+                  "amountMinor": 0
+                },
+                "fulfillment": "AFN"
+              },
+              {
+                "isSelf": true,
+                "price": {
+                  "amountMinor": 1850,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                },
+                "shipping": {
+                  "amountMinor": 399
+                },
+                "totalPrice": {
+                  "amountMinor": 2249
+                },
+                "fulfillment": "MFN"
+              }
+            ]
+          }
+        ],
+        "failures": [
+          {
+            "query": {
+              "channelProductRef": "B000007002"
+            },
+            "error": {
+              "code": "UNSUPPORTED"
+            }
+          },
+          {
+            "query": {
+              "channelProductRef": "B000007003"
+            },
+            "error": {
+              "code": "NOT_FOUND",
+              "scope": "ITEM"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "throttled",
+      "kind": "call",
+      "method": "readCompetitors",
+      "args": [
+        [
+          {
+            "marketplace": "A1PA6795UKMFR9",
+            "channelProductRef": "B000007001",
+            "condition": "new"
+          }
+        ]
+      ],
+      "expect": {
+        "snapshots": [],
+        "failures": [
+          {
+            "error": {
+              "code": "RATE_LIMITED",
+              "retryAt": {
+                "$isoInstant": true
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "orders",
+      "kind": "call",
+      "method": "readOrderLines",
+      "args": [
+        {
+          "since": {
+            "$clockIso": -86400000
+          },
+          "limit": 10
+        }
+      ],
+      "expectThrows": {
+        "code": "UNSUPPORTED"
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "lwa-token",
+      "note": "Токен LWA по refresh_token (connecting-to-the-selling-partner-api); тело формы проверяет стенд",
+      "request": {
+        "method": "POST",
+        "path": "/auth/o2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "Atza|syn-access-token-0001",
+          "token_type": "bearer",
+          "expires_in": 3600,
+          "refresh_token": "Atzr|syn-refresh-token-0001"
+        }
+      }
+    },
+    {
+      "id": "summary-batch",
+      "note": "getCompetitiveSummary: lowestPricedOffers New/Consumer — сверка потерь ANY_OFFER_CHANGED [Р-121, AMZ_C11]",
+      "request": {
+        "method": "POST",
+        "path": "/batches/products/pricing/2022-05-01/items/competitiveSummary",
+        "body": {
+          "requests": [
+            {
+              "asin": "B000007001",
+              "marketplaceId": "A1PA6795UKMFR9",
+              "includedData": [
+                "lowestPricedOffers"
+              ],
+              "lowestPricedOffersInputs": [
+                {
+                  "itemCondition": "New",
+                  "offerType": "Consumer"
+                }
+              ],
+              "method": "GET",
+              "uri": "/products/pricing/2022-05-01/items/competitiveSummary"
+            },
+            {
+              "asin": "B000007003",
+              "marketplaceId": "A1PA6795UKMFR9",
+              "includedData": [
+                "lowestPricedOffers"
+              ],
+              "lowestPricedOffersInputs": [
+                {
+                  "itemCondition": "New",
+                  "offerType": "Consumer"
+                }
+              ],
+              "method": "GET",
+              "uri": "/products/pricing/2022-05-01/items/competitiveSummary"
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "responses": [
+            {
+              "status": {
+                "statusCode": 200,
+                "reasonPhrase": "Success"
+              },
+              "body": {
+                "asin": "B000007001",
+                "marketplaceId": "A1PA6795UKMFR9",
+                "lowestPricedOffers": [
+                  {
+                    "lowestPricedOffersInput": {
+                      "itemCondition": "New",
+                      "offerType": "Consumer"
+                    },
+                    "offers": [
+                      {
+                        "sellerId": "A1SYNCOMPETITOR",
+                        "condition": "New",
+                        "subCondition": "New",
+                        "fulfillmentType": "AFN",
+                        "listingPrice": {
+                          "amount": 17.79,
+                          "currencyCode": "EUR"
+                        },
+                        "shippingOptions": [
+                          {
+                            "shippingOptionType": "DEFAULT",
+                            "price": {
+                              "amount": 0,
+                              "currencyCode": "EUR"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "sellerId": "A1SYNSELLER0001",
+                        "condition": "New",
+                        "subCondition": "New",
+                        "fulfillmentType": "MFN",
+                        "listingPrice": {
+                          "amount": 18.5,
+                          "currencyCode": "EUR"
+                        },
+                        "shippingOptions": [
+                          {
+                            "shippingOptionType": "DEFAULT",
+                            "price": {
+                              "amount": 3.99,
+                              "currencyCode": "EUR"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "status": {
+                "statusCode": 404,
+                "reasonPhrase": "Client Error"
+              },
+              "body": {
+                "asin": "B000007003",
+                "marketplaceId": "A1PA6795UKMFR9",
+                "errors": [
+                  {
+                    "code": "SYN_NOT_FOUND",
+                    "message": "Synthetic item error"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "expect": {
+    "noAlerts": true,
+    "logs": [
+      {
+        "code": "AMZ_C07_COMPETITOR_PULL_UNAVAILABLE",
+        "count": 2
+      },
+      {
+        "code": "AMZ_C11_COMPETITIVE_SUMMARY_RECONCILIATION",
+        "count": 2
+      },
+      {
+        "code": "AMZ_C01_TWO_LEVEL_BUDGET",
+        "count": 1
+      }
+    ]
+  }
+}
