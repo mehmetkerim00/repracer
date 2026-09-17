@@ -171,6 +171,9 @@
 | Р-124 | Комплаенс-модуль не гарантирует соответствие: проверяет по известной истории и показывает её глубину; полнота — с подключения, если канал не отдаёт историю цен |
 | Р-125 | Бэктест по умолчанию — выборка товаров с основной выручкой; полный каталог — фоновое задание |
 | Р-126 | Периодические работы запускает отдельный процесс-планировщик; без него история снимков пропадает |
+| Р-127 | Работоспособность планировщика контролируется извне: отметка во внешнем сервисе, пропуск отметки — письмо владельцу |
+| Р-128 | Периодические механизмы проверяются прогоном в живом режиме: утверждается наблюдаемое поведение за период, а не вызовы функций |
+| Р-129 | Развёртывание планировщика — часть репозитория: один экземпляр, перезапуск, конфигурация, метрики |
 
 ## Каналы
 
@@ -247,7 +250,7 @@
 ## Правила работы в репозитории
 
 - Существенное решение → ADR в `docs/adr/NNNN-kebab-case.md`; решение владельца продукта → `docs/decisions.md`.
-- Новая таблица → миграция в `migrations/`: `tenant_id`, `security.register_table(...)`, строка в `maintenance.retention_policy`, `security.grant_retention(...)`; последняя проверка схемы (сейчас `0093`) должна проходить; правило проверки — поведение, не имена [Р-93], тест защиты проверяет причину отказа [Р-94], новая защита — строка в каталоге мутационной проверки при создании, иначе красная сборка [Р-95, Р-108]; тесты — `scripts/db/prepare.sh` и `node scripts/test-all.mjs`, пропуск теста и файл теста вне скрипта сборки — красная сборка [Р-84, Р-89]. Правила — [migrations/README.md](migrations/README.md).
+- Новая таблица → миграция в `migrations/`: `tenant_id`, `security.register_table(...)`, строка в `maintenance.retention_policy`, `security.grant_retention(...)`; последняя проверка схемы (сейчас `0097`) должна проходить; правило проверки — поведение, не имена [Р-93], тест защиты проверяет причину отказа [Р-94], новая защита — строка в каталоге мутационной проверки при создании, иначе красная сборка [Р-95, Р-108]; тесты — `scripts/db/prepare.sh` и `node scripts/test-all.mjs`, пропуск теста и файл теста вне скрипта сборки — красная сборка [Р-84, Р-89]. Правила — [migrations/README.md](migrations/README.md).
 - Индекс — только под конкретный запрос, с комментарием над индексом.
 - Таблица ClickHouse: `tenant_id` первым в ключе сортировки, TTL ≤ 18 мес, политика строк `tenant_isolation`; `099_verify.sql` должен возвращать 0 строк.
 - Никаких запросов к ClickHouse или архиву из пути решения о цене; никаких выгрузок, объединяющих тенантов.
@@ -268,7 +271,7 @@
 ## Карта документации
 
 - [README.md](README.md) — обзор
-- [docs/decisions.md](docs/decisions.md) — принятые решения Р-1…Р-126
+- [docs/decisions.md](docs/decisions.md) — принятые решения Р-1…Р-129
 - [docs/accepted-risks.md](docs/accepted-risks.md) — принятые риски после линии безопасности [Р-106]
 - [docs/domain-model.md](docs/domain-model.md) — доменная модель v0.15 и инварианты
 - [docs/data-retention.md](docs/data-retention.md) — три слоя, сроки, удаление, закрытие тенанта
@@ -284,8 +287,9 @@
 - [tests/db](tests/db/) — смоук-тесты схемы; [scripts](scripts/) — подготовка базы, запуск всех тестов без пропусков и проверка полноты сборки [Р-84, Р-89]; [docs/evidence](docs/evidence/) — логи доказательств
 - [packages/fx-rates](packages/fx-rates/) — курсы ЕЦБ; [packages/analytics-export](packages/analytics-export/) — выгрузка в ClickHouse, самодостаточный архив ядра [Р-79] и замер сжатия; [infra/local](infra/local/) — локальные Redpanda и ClickHouse
 - [docs/tenant-region-transfer.md](docs/tenant-region-transfer.md) — перенос тенанта между регионами
-- [vendor/kaufland/](vendor/kaufland/), [vendor/amazon/](vendor/amazon/) — снимки спецификаций каналов с контрольными суммами; [vendor/aws/](vendor/aws/) — страницы SQS и SigV4 приёмника уведомлений (адреса и SHA-256); [vendor/ebay/](vendor/ebay/) — почему снимка eBay нет
+- [vendor/kaufland/](vendor/kaufland/), [vendor/amazon/](vendor/amazon/) — снимки спецификаций каналов с контрольными суммами; [vendor/aws/](vendor/aws/) — страницы SQS и SigV4 приёмника уведомлений (адреса и SHA-256); [vendor/ebay/](vendor/ebay/) — почему снимка eBay нет; [vendor/healthchecks/](vendor/healthchecks/) — страницы внешнего сервиса контроля планировщика [Р-127]
 - [migrations/](migrations/) — DDL PostgreSQL
+- [deploy/scheduler/](deploy/scheduler/) — развёртывание процесса-планировщика [Р-129]: compose с закреплёнными версиями, конфигурация, секреты, метрики и проверка работоспособности
 - [docs/channel-capabilities.md](docs/channel-capabilities.md) — матрица возможностей каналов и план проверки
 - [docs/onboarding-ebay-migration.md](docs/onboarding-ebay-migration.md) — предполётная проверка и миграция eBay
 - [docs/adr/](docs/adr/) — архитектурные решения

@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0093_verify_schema_invariants_v22.sql';
+const VERIFY = 'migrations/0097_verify_schema_invariants_v23.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -837,4 +837,50 @@ export const R93_NOT_MUTATED = [
   { row: '1–11', why: 'свойства каталога остались в проверке схемы (0067)' },
   { row: '15', why: 'данные справочника НДС остались в проверке схемы (0067)' },
   { row: '36', why: 'правило проверяло отсутствие объектов входа' },
+];
+
+export const STEP26_ROWS = [
+  {
+    row: 'риск 31', invariant: 'уровень отставания работы планировщика хранится в базе: перезапуск и второй процесс алерт не повторяют',
+    mutations: [
+      m(dropConstraint('scheduled_job_lag_level_known', 'maintenance.scheduled_job'), smoke('a scheduled job with an unknown lag level (риск 31)')),
+    ],
+  },
+  {
+    row: 'OQ-182', invariant: 'разбор пропущенного снимка — от действующей учётной записи оператора платформы со вторым фактором; «выгружен после исправления» — только со сверкой ClickHouse',
+    mutations: [
+      m(dropTrigger('a_snapshot_export_skip_resolution_guard', 'maintenance.snapshot_export_skip_resolution'),
+        smoke('a skipped snapshot resolved without a platform operator account (OQ-182)')),
+      m(replaceInFunction('maintenance.snapshot_export_skip_resolution_guard()', 'o.operator_id = NEW.operator_id AND o.active', 'o.operator_id = NEW.operator_id'),
+        smoke('a skipped snapshot resolved by a retired operator account (OQ-182)')),
+      m(replaceInFunction('maintenance.snapshot_export_skip_resolution_guard()', 'IF NOT NEW.mfa THEN', 'IF false THEN'),
+        smoke('a skipped snapshot resolved without the second factor (OQ-182)')),
+      m(replaceInFunction('maintenance.partition_export_skip_guard()', "AND (r.resolution = 'LOSS_ACCEPTED'", 'AND (true'),
+        smoke('a partition verified on the operator word that the snapshot was exported after the fix (OQ-182)')),
+      m(dropConstraint('snapshot_export_skip_verification_rows', 'maintenance.snapshot_export_skip_verification'), smoke('a skip verification with no rows in ClickHouse (OQ-182)')),
+      m(dropConstraint('platform_operator_platform_tenant', 'platform.platform_operator'), smoke('a platform operator that belongs to a tenant (OQ-182)')),
+      m(dropConstraint('platform_operator_issuer_url', 'platform.platform_operator'), smoke('a platform operator without an identity provider (OQ-182)')),
+      m(dropConstraint('platform_operator_subject_present', 'platform.platform_operator'), smoke('a platform operator without a subject (OQ-182)')),
+      m(dropConstraint('platform_operator_name_present', 'platform.platform_operator'), smoke('a platform operator without a name (OQ-182)')),
+      m(dropTrigger('zz_append_only', 'maintenance.snapshot_export_skip_verification'), smoke('append-only maintenance.snapshot_export_skip_verification')),
+      m(dropTrigger('zz_no_truncate', 'maintenance.snapshot_export_skip_verification'), smoke('truncate maintenance.snapshot_export_skip_verification')),
+    ],
+  },
+  {
+    row: 'OQ-180', invariant: 'цена входит в окно Omnibus и в суточную свёртку по времени, когда канал её применил',
+    mutations: [
+      m(dropTrigger('a_price_history_applied_guard', 'tenant_data.price_history_applied'),
+        smoke('a price of a write the channel did not confirm marked with a time of application (OQ-180)')),
+      m(replaceInFunction('tenant_data.price_history_applied_guard()', "AND w.final_status = 'APPLIED'", ''),
+        smoke('a price of a write the channel did not confirm marked with a time of application (OQ-180)')),
+      m(dropTrigger('b_price_history_mark_applied', 'tenant_data.channel_write_history'),
+        smoke('the time the channel applied a price is not recorded for its price history (OQ-180)', 'the Omnibus window counts the price at the time the channel applied it (OQ-180)')),
+      m(replaceInFunction('tenant_data.omnibus_raw_prices(uuid,uuid,text,timestamp with time zone)', 'SELECT coalesce(ap.applied_at, h.accepted_at), h.amount_minor', 'SELECT h.accepted_at, h.amount_minor'),
+        smoke('the Omnibus window uses the time the price was accepted, not applied (OQ-180)', 'the Omnibus window counts the price at the time the channel applied it (OQ-180)')),
+      m(replaceInFunction('maintenance.close_price_days(timestamp with time zone,integer)', 'WHERE coalesce(ap.applied_at, h.accepted_at) >= day_start AND coalesce(ap.applied_at, h.accepted_at) < day_end', 'WHERE h.accepted_at >= day_start AND h.accepted_at < day_end'),
+        node(T('omnibus-applied-time.pg.test.ts'), 'OQ-180', 'OQ-180: a price applied after midnight is rolled up into the day it was accepted', '^1$')),
+      m(dropTrigger('zz_append_only', 'tenant_data.price_history_applied'), smoke('append-only tenant_data.price_history_applied')),
+      m(dropTrigger('zz_no_truncate', 'tenant_data.price_history_applied'), smoke('truncate tenant_data.price_history_applied')),
+    ],
+  },
 ];

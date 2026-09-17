@@ -12,6 +12,12 @@ export interface PollItem {
   key: string;
   /** Изменений принятой цены конкурентов за 30 дней (competitor_price_daily / competitor_move) */
   changesLast30Days: number;
+  /**
+   * Р-128 (шаг 26): наблюдений товара достаточно, чтобы судить о волатильности. Неизвестная волатильность — не «холодный» товар: новый
+   * товар без движений в холодном ярусе опрашивался раз в сутки и не мог набрать движений, чтобы подняться (проверка в живом режиме).
+   * По умолчанию — известна.
+   */
+  volatilityKnown?: boolean;
 }
 
 export interface TierConfig {
@@ -43,7 +49,9 @@ export function planPollingTiers(items: readonly PollItem[], budgetRequestsPerSe
   const tiers = new Map<string, PollTier>();
   for (const item of byVolatility) {
     const perDay = item.changesLast30Days / 30;
-    tiers.set(item.key, perDay >= cfg.hot.minChangesPerDay ? 'HOT' : perDay >= cfg.warm.minChangesPerDay ? 'WARM' : 'COLD');
+    const byChanges: PollTier = perDay >= cfg.hot.minChangesPerDay ? 'HOT' : perDay >= cfg.warm.minChangesPerDay ? 'WARM' : 'COLD';
+    // Проба: волатильность неизвестна — не реже тёплого яруса, пока наблюдения не охватят сутки; понижение по бюджету — как у тёплого
+    tiers.set(item.key, byChanges === 'COLD' && item.volatilityKnown === false ? 'WARM' : byChanges);
   }
   const rps = () => [...tiers.values()].reduce((sum, t) => sum + 1 / interval(t), 0);
   const demoted: PollingPlan['demoted'] = [];

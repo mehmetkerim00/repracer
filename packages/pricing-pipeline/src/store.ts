@@ -248,6 +248,8 @@ export interface PollCandidate {
   query: CompetitorQuery;
   lastPolledAt: Instant | null;
   changesLast30Days: number;
+  /** Р-128: самое старое наблюдение товара (движение, в том числе без изменения цены) за 48 ч старше суток */
+  volatilityKnown: boolean;
 }
 
 /** Р-121: вердикт проверки, вычисленный базой (review_notification_loss, 0088) */

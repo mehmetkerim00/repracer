@@ -152,7 +152,8 @@ export interface SanityContext {
   /** Якорь 4: принятые цены конкурентов по дням (channel_data.competitor_price_daily) */
   competitorDaily: DailyRange[];
   /** Последний принятый снимок этого товара — только для движения и ошибки единиц */
-  lastAccepted: { observedAt: Instant; buyboxMinor: number | null; lowestMinor: number | null } | null;
+  /** buyboxIsSelf — Buy Box последнего принятого снимка держало наше предложение (по умолчанию — нет) */
+  lastAccepted: { observedAt: Instant; buyboxMinor: number | null; lowestMinor: number | null; buyboxIsSelf?: boolean | null } | null;
   /** Вспомогательный якорь: наша действующая цена */
   ourPriceMinor: number | null;
   /** Цены, которые канал может сейчас показывать: действующая, недавно отправленные */
@@ -310,10 +311,11 @@ export function evaluateSnapshot(snapshot: CompetitorSnapshot, ctx: SanityContex
   if (lowestOffer) probes.push({ field: 'lowest', valueMinor: lowestOffer.price.amountMinor });
   if (snapshot.channelSuggestedPrice) probes.push({ field: 'suggested', valueMinor: snapshot.channelSuggestedPrice.amountMinor });
 
-  // Движение относительно последнего принятого снимка и продавец нового значения
-  const snapshotBuybox = snapshot.buybox?.price.amountMinor ?? null;
-  if (ctx.lastAccepted?.buyboxMinor && snapshotBuybox !== null) {
-    move = { productRef, moveBp: clampBp(snapshotBuybox / ctx.lastAccepted.buyboxMinor), sellerRef: rankOne?.sellerRef ?? null };
+  // Движение относительно последнего принятого снимка и продавец нового значения — только по ценам конкурентов. Р-128 (шаг 26): Buy Box
+  // с нашим предложением давал движение нашей цены — товар, где мы держим Buy Box, выглядел неподвижным при любых ценах конкурентов,
+  // уходил в холодный ярус опроса и терял Buy Box незамеченным до суток (проверка в живом режиме)
+  if (ctx.lastAccepted?.buyboxMinor && ctx.lastAccepted.buyboxIsSelf !== true && buybox !== null) {
+    move = { productRef, moveBp: clampBp(buybox / ctx.lastAccepted.buyboxMinor), sellerRef: rankOne?.sellerRef ?? null };
   } else if (ctx.lastAccepted?.lowestMinor && lowestOffer) {
     move = { productRef, moveBp: clampBp(lowestOffer.price.amountMinor / ctx.lastAccepted.lowestMinor), sellerRef: lowestOffer.sellerRef ?? null };
   }

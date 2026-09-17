@@ -206,9 +206,13 @@ export async function exportCompetitorSnapshotsDay(pgExporter: pg.Pool, ingest: 
        SELECT s.tenant, s.id, $2, s.at, s.reason FROM jsonb_to_recordset($1::jsonb) AS s(tenant uuid, id uuid, at timestamptz, reason text)
        ON CONFLICT (competitor_snapshot_id) DO NOTHING`, [JSON.stringify(skips.slice(i, i + 1_000)), partitionName]);
   }
+  // OQ-182 (шаг 26): «выгружен после исправления» подтверждается по ClickHouse до подсчёта неразобранных
+  await verifySnapshotExportSkips(pgExporter, verifier, { partitionName });
   const { rows: [open] } = await pgExporter.query(
     `SELECT count(*)::int AS n FROM maintenance.snapshot_export_skip s WHERE s.partition_name = $1
-        AND NOT EXISTS (SELECT 1 FROM maintenance.snapshot_export_skip_resolution r WHERE r.competitor_snapshot_id = s.competitor_snapshot_id)`, [partitionName]);
+        AND NOT EXISTS (SELECT 1 FROM maintenance.snapshot_export_skip_resolution r WHERE r.competitor_snapshot_id = s.competitor_snapshot_id
+                          AND (r.resolution = 'LOSS_ACCEPTED' OR EXISTS (SELECT 1 FROM maintenance.snapshot_export_skip_verification v
+                                                                          WHERE v.competitor_snapshot_id = s.competitor_snapshot_id)))`, [partitionName]);
   const unresolvedSkips = Number(open.n);
   // Та же выборка строк, что выгружена: по идентификаторам суток (у строк ClickHouse до шага 24 журнала не было)
   let verifiedCount = 0;
@@ -253,9 +257,41 @@ export async function listSnapshotExportSkips(pgExporter: pg.Pool, options: { un
   }));
 }
 
-/** Разбор пропуска человеком: потеря принята или снимок выгружен после исправления; имя оператора и заметка обязательны (база) */
-export async function resolveSnapshotExportSkip(pgExporter: pg.Pool, input: { competitorSnapshotId: string; resolution: 'LOSS_ACCEPTED' | 'EXPORTED_AFTER_FIX'; resolvedBy: string; note: string }): Promise<void> {
-  await pgExporter.query(
-    `INSERT INTO maintenance.snapshot_export_skip_resolution (competitor_snapshot_id, resolution, resolved_by, note) VALUES ($1, $2, $3, $4)`,
-    [input.competitorSnapshotId, input.resolution, input.resolvedBy, input.note]);
+/**
+ * Разбор пропуска человеком: потеря принята или снимок выгружен после исправления. Оператор — учётная запись платформы со вторым фактором
+ * (OQ-182, 0095), заметка обязательна; всё проверяет база. Пишет роль разбора (svc_export_triage), не роль выгрузки.
+ */
+export async function resolveSnapshotExportSkip(pgTriage: pg.Pool, input: {
+  competitorSnapshotId: string; resolution: 'LOSS_ACCEPTED' | 'EXPORTED_AFTER_FIX'; resolvedBy: string; note: string; operatorId: string; mfa: boolean;
+}): Promise<void> {
+  await pgTriage.query(
+    `INSERT INTO maintenance.snapshot_export_skip_resolution (competitor_snapshot_id, resolution, resolved_by, note, operator_id, mfa) VALUES ($1, $2, $3, $4, $5, $6)`,
+    [input.competitorSnapshotId, input.resolution, input.resolvedBy, input.note, input.operatorId, input.mfa]);
+}
+
+/**
+ * OQ-182 (шаг 26): «снимок выгружен после исправления» проверяется по ClickHouse, а не по слову оператора: пропуски с таким разбором и без
+ * подтверждения ищутся в аналитическом слое; найденные подтверждаются, ненайденные остаются неподтверждёнными — секция проверенной не станет.
+ * Возвращает число подтверждённых. Вызывается выгрузкой суток перед отметкой секции.
+ */
+export async function verifySnapshotExportSkips(pgExporter: pg.Pool, verifier: ClickHouseHttp, options: { partitionName?: string; limit?: number } = {}): Promise<number> {
+  const { rows } = await pgExporter.query(
+    `SELECT s.competitor_snapshot_id, s.subject_tenant_id FROM maintenance.snapshot_export_skip s
+       JOIN maintenance.snapshot_export_skip_resolution r ON r.competitor_snapshot_id = s.competitor_snapshot_id AND r.resolution = 'EXPORTED_AFTER_FIX'
+      WHERE ($1::text IS NULL OR s.partition_name = $1) AND NOT EXISTS (
+        SELECT 1 FROM maintenance.snapshot_export_skip_verification v WHERE v.competitor_snapshot_id = s.competitor_snapshot_id)
+      ORDER BY s.received_at LIMIT $2`, [options.partitionName ?? null, options.limit ?? 200]);
+  let verified = 0;
+  for (const row of rows) {
+    const found = await verifier.rows<{ n: string }>(
+      `SELECT count() AS n FROM repracer_analytics.competitor_snapshot FINAL
+        WHERE tenant_id = '${String(row.subject_tenant_id).replace(/[^0-9a-f-]/g, '')}' AND competitor_snapshot_id = '${String(row.competitor_snapshot_id).replace(/[^0-9a-f-]/g, '')}'`);
+    const n = Number(found[0]?.n ?? 0);
+    if (n <= 0) continue;
+    await pgExporter.query(
+      `INSERT INTO maintenance.snapshot_export_skip_verification (competitor_snapshot_id, rows_in_clickhouse) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      [row.competitor_snapshot_id, n]);
+    verified += 1;
+  }
+  return verified;
 }

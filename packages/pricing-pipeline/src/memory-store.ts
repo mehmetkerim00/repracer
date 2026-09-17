@@ -211,6 +211,7 @@ interface WriteRow {
 interface CompetitorRow {
   observedAt: Instant;
   buyboxMinor: number | null;
+  buyboxIsSelf?: boolean;
   lowestMinor: number | null;
   snapshot: AcceptedSnapshot | null;
   competitorSnapshotId: string | null;
@@ -561,7 +562,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       crossChannel: this.crossChannel[productKey(key)] ?? [],
       fxRates: this.fxRates,
       competitorDaily: this.competitorDaily.get(productKey(key)) ?? [],
-      lastAccepted: state ? { observedAt: state.observedAt, buyboxMinor: state.buyboxMinor, lowestMinor: state.lowestMinor } : null,
+      lastAccepted: state ? { observedAt: state.observedAt, buyboxMinor: state.buyboxMinor, lowestMinor: state.lowestMinor, buyboxIsSelf: state.buyboxIsSelf ?? false } : null,
       ourPriceMinor: primary?.scope.currentPriceMinor ?? null,
       ourKnownPricesMinor: primary?.scope.knownPricesMinor ?? [],
       channel: {
@@ -798,7 +799,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     const buybox = snapshot.buybox?.price.amountMinor ?? null;
     const competitors = snapshot.offers.filter((o) => !o.isSelf).map((o) => o.price.amountMinor);
     const lowest = competitors.length ? Math.min(...competitors) : null;
-    this.competitorState.set(k, { observedAt: snapshot.observedAt, buyboxMinor: buybox, lowestMinor: lowest, snapshot, competitorSnapshotId, sanity });
+    this.competitorState.set(k, { observedAt: snapshot.observedAt, buyboxMinor: buybox, buyboxIsSelf: snapshot.buybox?.isSelf ?? false, lowestMinor: lowest, snapshot, competitorSnapshotId, sanity });
     const day = snapshot.observedAt.slice(0, 10);
     // История — цены конкурентов: наш собственный Buy Box в якорь не попадает [Р-49]
     const competitorBuybox = snapshot.buybox && !snapshot.buybox.isSelf ? buybox : null;
@@ -1446,8 +1447,11 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       const query = { marketplace: s.marketplace, channelProductRef: s.channelProductRef, condition: s.condition };
       const key = `${channelAccountId}|${productKey(query)}`;
       if (out.has(key)) continue;
-      const moves = (this.movesByMarketplace.get(s.marketplace) ?? []).filter((m) => m.at >= since && m.move.productRef === `${s.channelProductRef}|${s.condition}` && m.move.moveBp !== 10_000).length;
-      out.set(key, { query, lastPolledAt: this.pollState.get(key) ?? null, changesLast30Days: moves * 15 });
+      const observed = (this.movesByMarketplace.get(s.marketplace) ?? []).filter((m) => m.at >= since && m.move.productRef === `${s.channelProductRef}|${s.condition}`);
+      const moves = observed.filter((m) => m.move.moveBp !== 10_000).length;
+      // Р-128: волатильность известна, если наблюдения товара охватывают сутки
+      const volatilityKnown = observed.some((m) => m.at <= Date.parse(now) - 24 * 3_600_000);
+      out.set(key, { query, lastPolledAt: this.pollState.get(key) ?? null, changesLast30Days: moves * 15, volatilityKnown });
     }
     return [...out.values()];
   }
@@ -1466,13 +1470,16 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   }
 
   async pickReviewSample(_tenantId: string, halt: HaltInfo, size: number): Promise<CompetitorQuery[]> {
-    const refs = new Map<string, CompetitorQuery>();
+    // Шаг 26: сначала товары с ценой из данных конкурентов, затем остальные товары витрины — как в PostgreSQL
+    const competitor = new Map<string, CompetitorQuery>();
+    const other = new Map<string, CompetitorQuery>();
     for (const s of [...this.scopes.values()].sort((a, b) => a.channelProductRef.localeCompare(b.channelProductRef))) {
       if (s.channelAccountId !== halt.channelAccountId || (halt.marketplace !== null && s.marketplace !== halt.marketplace)) continue;
-      if (s.pricingMode !== 'ENGINE' || !s.strategy || !COMPETITOR_STRATEGIES.has(s.strategy.params.type)) continue;
-      refs.set(productKey(s), { marketplace: s.marketplace, channelProductRef: s.channelProductRef, condition: s.condition });
+      const derived = s.pricingMode === 'ENGINE' && s.strategy !== null && COMPETITOR_STRATEGIES.has(s.strategy.params.type);
+      (derived ? competitor : other).set(productKey(s), { marketplace: s.marketplace, channelProductRef: s.channelProductRef, condition: s.condition });
     }
-    return [...refs.values()].slice(0, size);
+    for (const k of competitor.keys()) other.delete(k);
+    return [...competitor.values(), ...other.values()].slice(0, size);
   }
 
   private member(membershipId: string | undefined): ConsoleMemberRow | undefined {

@@ -95,7 +95,7 @@ export function resolvePlaceholders(value: unknown, clock: VirtualClock): unknow
   return value;
 }
 
-function buildDelivery(d: InboundDeliverySpec, scenario: Scenario, clock: VirtualClock): InboundDelivery {
+export function buildDelivery(d: InboundDeliverySpec, scenario: Pick<Scenario, 'world'>, clock: VirtualClock): InboundDelivery {
   const { world } = scenario;
   const rawBody = d.rawBody ?? (d.body === undefined ? '' : JSON.stringify(resolvePlaceholders(d.body, clock)));
   const headers: Record<string, string> = {};

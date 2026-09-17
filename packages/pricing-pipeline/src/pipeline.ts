@@ -661,7 +661,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
       const now = deps.now();
       const candidates = await store.listPollCandidates(ctx.tenantId, ctx.channelAccountId, now);
       const keyOf = (q: CompetitorQuery) => `${q.marketplace}|${q.channelProductRef}|${q.condition}`;
-      const plan = planPollingTiers(candidates.map((c) => ({ key: keyOf(c.query), changesLast30Days: c.changesLast30Days })), options.budgetRequestsPerSecond);
+      const plan = planPollingTiers(candidates.map((c) => ({ key: keyOf(c.query), changesLast30Days: c.changesLast30Days, volatilityKnown: c.volatilityKnown })), options.budgetRequestsPerSecond);
       const interval = new Map(plan.assignments.map((a) => [a.key, a.intervalSeconds]));
       const due = candidates
         .filter((c) => c.lastPolledAt === null || Date.parse(now) - Date.parse(c.lastPolledAt) >= (interval.get(keyOf(c.query)) ?? 86_400) * 1000)

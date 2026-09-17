@@ -18,7 +18,11 @@ export interface JobRegistration {
   intervalSeconds: number;
   /** Первый слот, если работы ещё нет в состоянии */
   firstDueAt: Instant;
+  /** Момент регистрации по часам планировщика: отставание новой работы не считается от слота до её появления (шаг 26) */
+  registeredAt: Instant;
 }
+
+export type LagLevel = 'OK' | 'WARNING' | 'CRITICAL';
 
 export interface JobState extends JobRegistration {
   nextDueAt: Instant;
@@ -31,6 +35,8 @@ export interface JobState extends JobRegistration {
   lastFinishedAt: Instant | null;
   lastOutcome: RunOutcome | null;
   lastError: string | null;
+  /** Риск 31 (шаг 26): уровень отставания, о котором уже сообщено, — в хранилище, общий для процессов и перезапусков */
+  lagLevel: LagLevel;
 }
 
 export interface RunRecord {
@@ -70,6 +76,11 @@ export interface SchedulerStateStore {
   renew(jobKey: string, owner: string, leaseSeconds: number): Promise<boolean>;
   /** Работы, которых нет среди действующих, без журнала запусков и без изменений olderThanDays суток, удаляются (отключённые аккаунты) */
   prune(activeJobKeys: readonly string[], olderThanDays: number): Promise<number>;
+  /**
+   * Смена уровня отставания, если он всё ещё from: true — сменил этот вызов (алерт поднимает он), false — уровень уже сменил другой
+   * процесс или перезапуск (алерт не повторяется)
+   */
+  setLagLevel(jobKey: string, from: LagLevel, to: LagLevel): Promise<boolean>;
 }
 
 export class LeaseLostError extends Error {
@@ -97,7 +108,7 @@ export class MemorySchedulerState implements SchedulerStateStore {
     }
     this.jobs.set(r.jobKey, {
       ...r, nextDueAt: r.firstDueAt, runsCompleted: 0, coalescedSlots: 0, consecutiveFailures: 0, leaseOwner: null, leaseUntil: null,
-      lastStartedAt: null, lastFinishedAt: null, lastOutcome: null, lastError: null,
+      lastStartedAt: null, lastFinishedAt: null, lastOutcome: null, lastError: null, lagLevel: 'OK',
     });
   }
 
@@ -144,6 +155,13 @@ export class MemorySchedulerState implements SchedulerStateStore {
     const wall = Date.parse(this.clock());
     if (!j || j.leaseOwner !== owner || Date.parse(j.leaseUntil!) <= wall) return false;
     j.leaseUntil = new Date(wall + leaseSeconds * 1000).toISOString();
+    return true;
+  }
+
+  async setLagLevel(jobKey: string, from: LagLevel, to: LagLevel): Promise<boolean> {
+    const j = this.jobs.get(jobKey);
+    if (!j || j.lagLevel !== from) return false;
+    j.lagLevel = to;
     return true;
   }
 

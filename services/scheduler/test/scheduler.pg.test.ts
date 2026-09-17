@@ -40,7 +40,7 @@ test('Р-126 on PostgreSQL: two scheduler processes run each missed daily slot e
 test('Р-126 on PostgreSQL: a valid lease cannot be taken over; an expired lease can; the old owner cannot record its result', async () => {
   const state = new PgSchedulerState(poolA);
   const name = key('pgtest-lease');
-  await state.ensure({ jobKey: name, jobName: name, scope: null, catchUp: 'LATEST', intervalSeconds: 60, firstDueAt: '2026-09-17T10:00:00.000Z' });
+  await state.ensure({ jobKey: name, jobName: name, scope: null, catchUp: 'LATEST', intervalSeconds: 60, firstDueAt: '2026-09-17T10:00:00.000Z', registeredAt: '2026-09-17T10:00:00.000Z' });
   const [one, two] = await Promise.all([state.claim(name, 'a', '2026-09-17T10:00:00.000Z', 1), state.claim(name, 'b', '2026-09-17T10:00:00.000Z', 1)]);
   assert.equal([one, two].filter(Boolean).length, 1, 'one of two concurrent claims wins');
   const winner = one ? 'a' : 'b';
@@ -72,4 +72,32 @@ test('review of step 25, finding 6 on PostgreSQL: a run longer than its lease re
   const second = await b.tick();
   await first;
   assert.deepEqual([runs, second.skippedLeased], [1, [name]], 'the lease of the running job is renewed past its 2 s');
+});
+
+test('Риск 31 (шаг 26): срок работы сравнивается с часами базы — часы процесса, ушедшие вперёд, работу раньше срока не запускают', async () => {
+  const state = new PgSchedulerState(poolA);
+  const name = key('pgtest-dbclock');
+  const dbNow = await state.databaseNow();
+  const realNow = new Date();
+  assert.ok(Math.abs(Date.parse(dbNow) - realNow.getTime()) < 60_000, 'часы базы — часы базы, а не строка процесса');
+  let runs = 0;
+  const job: JobSpec = {
+    name, scope: null, intervalSeconds: 3600, catchUp: 'LATEST', firstDueAt: () => new Date(Date.parse(dbNow) + 30 * 60_000).toISOString(),
+    lagWarningSeconds: 999_999, lagCriticalSeconds: 9_999_999, leaseSeconds: 60, run: async () => { runs++; return { items: 0 }; },
+  };
+  const scheduler = createScheduler({ state, source: { jobs: async () => [job] }, owner: 'db-clock', now: () => state.databaseNow(), alerts: sink });
+  // Часы процесса ушли на час вперёд: срок работы — через 30 минут по часам базы
+  const trueNow = Date.now;
+  Date.now = () => trueNow() + 3_600_000;
+  try {
+    await scheduler.tick();
+  } finally {
+    Date.now = trueNow;
+  }
+  assert.equal(runs, 0, 'работа не запущена раньше срока базы');
+  await poolA.query(`UPDATE maintenance.scheduled_job SET next_due_at = now() - interval '1 minute' WHERE job_key = $1`, [name]);
+  await scheduler.tick();
+  assert.equal(runs, 1, 'по часам базы срок наступил — работа выполнена');
+  const [row] = (await state.list()).filter((j) => j.jobKey === name);
+  assert.equal(row?.lagLevel, 'OK', 'уровень отставания хранится в базе');
 });

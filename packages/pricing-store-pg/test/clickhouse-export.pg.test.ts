@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { after, test } from 'node:test';
-import { ClickHouseHttp, competitorSnapshotRow, exportCompetitorSnapshotsDay, exportDecisionDay, listSnapshotExportSkips, readCompetitorHistory, resolveSnapshotExportSkip } from '@repracer/analytics-export';
+import { ClickHouseHttp, competitorSnapshotRow, exportCompetitorSnapshotsDay, exportDecisionDay, listSnapshotExportSkips, readCompetitorHistory, resolveSnapshotExportSkip, verifySnapshotExportSkips } from '@repracer/analytics-export';
 import type { MemorySeedScope } from '@repracer/pricing-pipeline';
 import { createPool, inTenant, PgPricingStore, seedPricingWorld } from '../src/index.ts';
 import type { PriceDecisionDraft, PriceIntentDraft } from '@repracer/pricing-model';
 import { approved, contextOf, explained } from './drafts.ts';
+import { requireEnv } from './isolated-db.ts';
 
 /**
  * Шаг 20 [Р-20]: выгрузка дневных секций PostgreSQL в ClickHouse на настоящем ClickHouse — впервые. Экспортёр PostgreSQL
@@ -27,6 +29,8 @@ if (!PG_URL || !CH_URL || !INGEST.user || !INGEST.password || !VERIFIER.user || 
 const pool = createPool(PG_URL, { max: 4, applicationName: 'repracer-ch-export-test' });
 const provisioning = createPool(PG_URL.replace('svc_app@', 'svc_provisioning@'), { max: 1, applicationName: 'repracer-ch-export-provisioning' });
 const admin = createPool(PG_URL.replace('svc_app@', 'svc_admin@'), { max: 2, applicationName: 'repracer-ch-export-admin' });
+// Учётные записи операторов платформы заводит владелец (0095): в тесте — суперпользователь стенда в той же базе
+const superuser = createPool(new URL(requireEnv('REPRACER_PG_ADMIN_URL')).origin + new URL(PG_URL).pathname, { max: 1, applicationName: 'repracer-ch-export-superuser' });
 const exporter = createPool(PG_URL.replace('svc_app@', 'svc_exporter@'), { max: 2, applicationName: 'repracer-ch-export-exporter' });
 // Ревью шага 25, находка 9: пропуски разбирает отдельная роль — выгрузка не отмечает разобранными свои же пропуски
 const triage = createPool(PG_URL.replace('svc_app@', 'svc_export_triage@'), { max: 1, applicationName: 'repracer-ch-export-triage' });
@@ -36,6 +40,7 @@ after(async () => {
   await admin.end();
   await exporter.end();
   await triage.end();
+  await superuser.end();
 });
 
 const ACCOUNT = '20000000-0000-4000-8000-000000000200';
@@ -190,19 +195,41 @@ test('Р-122, step 24: a day of the competitor snapshot log is exported to Click
   assert.equal(await count(), 2, 'a repeated export does not duplicate rows');
   const { rows: [mark] } = await exporter.query(`SELECT verified_at FROM maintenance.partition_export WHERE parent_table = 'channel_data.competitor_snapshot_log' AND partition_name = $1 AND target = 'CLICKHOUSE'`, [first.partitionName]);
   assert.equal(mark?.verified_at ?? null, null, 'with a skipped snapshot the partition is not marked verified: retention keeps it until a person resolves the skip');
-  // OQ-181 (шаг 25): пропуск записан; человек принимает потерю с заметкой — повторная выгрузка отмечает сутки проверенными
+  // OQ-181 (шаг 25), OQ-182 (шаг 26): пропуск записан; оператор платформы со вторым фактором принимает потерю с заметкой —
+  // повторная выгрузка отмечает сутки проверенными. Учётная запись оператора — платформенная (0095)
+  const operatorId = randomUUID();
+  // Учётную запись оператора платформы заводит владелец (0095): в тесте — суперпользователь стенда
+  await superuser.query(`INSERT INTO platform.platform_operator (operator_id, issuer, subject, display_name)
+    VALUES ($1, 'https://identity.example.invalid/repracer', $2, 'Synthetic Export Operator')`, [operatorId, `syn-op-${operatorId.slice(0, 8)}`]);
+  const by = { resolvedBy: 'ops-synthetic', operatorId, mfa: true };
   const skips = (await listSnapshotExportSkips(exporter, { unresolvedOnly: true })).filter((k) => k.subjectTenantId === w.tenantId);
   assert.deepEqual(skips.map((k) => [k.competitorSnapshotId, k.reason]), [[logged[2]!.id, 'CURRENCY_UNSUPPORTED']]);
-  await assert.rejects(resolveSnapshotExportSkip(exporter, { competitorSnapshotId: logged[2]!.id, resolution: 'LOSS_ACCEPTED', resolvedBy: 'ops-synthetic', note: 'Synthetic GBP snapshot: loss accepted' }),
+  await assert.rejects(resolveSnapshotExportSkip(exporter, { competitorSnapshotId: logged[2]!.id, resolution: 'LOSS_ACCEPTED', note: 'Synthetic GBP snapshot: loss accepted', ...by }),
     /permission denied/, 'the exporter cannot resolve its own skips');
-  await assert.rejects(resolveSnapshotExportSkip(triage, { competitorSnapshotId: logged[2]!.id, resolution: 'LOSS_ACCEPTED', resolvedBy: 'ops-synthetic', note: 'ok' }), /snapshot_export_skip_resolution_note/);
-  await resolveSnapshotExportSkip(triage, { competitorSnapshotId: logged[2]!.id, resolution: 'LOSS_ACCEPTED', resolvedBy: 'ops-synthetic', note: 'Synthetic GBP snapshot: loss accepted' });
+  await assert.rejects(resolveSnapshotExportSkip(triage, { competitorSnapshotId: logged[2]!.id, resolution: 'LOSS_ACCEPTED', note: 'ok', ...by }), /snapshot_export_skip_resolution_note/);
+  await assert.rejects(resolveSnapshotExportSkip(triage, { competitorSnapshotId: logged[2]!.id, resolution: 'LOSS_ACCEPTED', note: 'Synthetic GBP snapshot: loss accepted', ...by, mfa: false }),
+    /needs the second factor/, 'разбор без второго фактора оператора отклоняет база (OQ-182)');
+  await resolveSnapshotExportSkip(triage, { competitorSnapshotId: logged[2]!.id, resolution: 'LOSS_ACCEPTED', note: 'Synthetic GBP snapshot: loss accepted', ...by });
   // Другие тесты той же базы могли оставить неразобранные пропуски этих суток — разбираем и их, чтобы проверить отметку секции
   for (const k of (await listSnapshotExportSkips(triage, { unresolvedOnly: true })).filter((x) => x.partitionName === first.partitionName)) {
-    await resolveSnapshotExportSkip(triage, { competitorSnapshotId: k.competitorSnapshotId, resolution: 'LOSS_ACCEPTED', resolvedBy: 'ops-synthetic', note: 'Synthetic skip of another test' });
+    await resolveSnapshotExportSkip(triage, { competitorSnapshotId: k.competitorSnapshotId, resolution: 'LOSS_ACCEPTED', note: 'Synthetic skip of another test', ...by });
   }
   const third = await exportCompetitorSnapshotsDay(exporter, ingest, verifier, range);
   assert.equal(third.verified, true, JSON.stringify(third));
+  // OQ-182 (шаг 26): разбор «выгружен после исправления» засчитывается только после сверки с ClickHouse, а не по слову оператора
+  const partitionName = `oq182_synthetic_${randomUUID().slice(0, 8)}`;
+  const missing = randomUUID();
+  for (const [id, reason] of [[logged[0]!.id, 'CURRENCY_UNSUPPORTED'], [missing, 'SOURCE_UNKNOWN']] as const) {
+    await exporter.query(
+      `INSERT INTO maintenance.snapshot_export_skip (subject_tenant_id, competitor_snapshot_id, partition_name, received_at, reason) VALUES ($1, $2, $3, now(), $4)`,
+      [w.tenantId, id, partitionName, reason]);
+    await resolveSnapshotExportSkip(triage, { competitorSnapshotId: id, resolution: 'EXPORTED_AFTER_FIX', note: 'Synthetic: exported after the fix', ...by });
+  }
+  assert.equal(await verifySnapshotExportSkips(exporter, verifier, { partitionName }), 1, 'подтверждается только снимок, который есть в ClickHouse');
+  await assert.rejects(exporter.query(
+    `INSERT INTO maintenance.partition_export (parent_table, partition_name, target, exported_rows, verified_at) VALUES ('channel_data.competitor_snapshot_log', $1, 'CLICKHOUSE', 1, now())`, [partitionName]),
+    /without a resolution/, 'секция с неподтверждённым «выгружен после исправления» проверенной не становится (OQ-182)');
   assert.equal(await count(), 2, 'resolving does not export the skipped snapshot');
 });
+
 

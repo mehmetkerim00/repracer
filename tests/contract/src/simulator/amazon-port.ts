@@ -23,6 +23,7 @@ import type {
   ReadBackResult,
   WriteOutcome,
 } from '@repracer/channel-port';
+import { AMAZON_DESCRIPTOR } from '@repracer/amazon-adapter';
 import { DEFAULT_ERROR_CLASS, isNeverWritten } from '@repracer/channel-port';
 import { defaultAmazonParams, type AmazonModelParams } from './params.ts';
 import { SeededRandom } from './random.ts';
@@ -83,6 +84,8 @@ export const AMAZON_SIM_DESCRIPTOR: ChannelDescriptor = {
     { owner: 'APPLICATION', operation: 'patchListingsItem', requestsPerSecond: 500, source: 'DOCUMENTED' },
   ],
   capabilities: [],
+  // Р-128 (шаг 26): источники конкурентов — как у адаптера Amazon; без них планировщик не ставил сверку по кругу аккаунту модели
+  competitorSources: AMAZON_DESCRIPTOR.competitorSources,
 };
 
 export class SimulatedAmazonPort implements ChannelAdapter {
@@ -269,6 +272,20 @@ export class SimulatedAmazonPort implements ChannelAdapter {
     };
   }
 
+  /**
+   * Р-128 (шаг 26): getCompetitiveSummary — источник сверки AMAZON_COMPETITIVE_SUMMARY, как адаптер Amazon (listing.ts): без победителя
+   * Buy Box, полнота — число предложений, момент — время ответа. Модель отдавала снимок источника уведомлений ANY_OFFER_CHANGED:
+   * сверка по кругу сравнивала уведомление с уведомлением
+   */
+  private summaryOf(marketplace: string, asin: string, observedAt: number): CompetitorSnapshot {
+    const pushed = this.snapshotOf(marketplace, asin, observedAt);
+    const offers = pushed.offers.map((o) => ({ isSelf: o.isSelf, ...(o.isSelf ? {} : { sellerRef: o.sellerRef }), price: o.price, shipping: o.shipping, totalPrice: o.totalPrice })) as CompetitorSnapshot['offers'];
+    return {
+      marketplace, channelProductRef: asin, condition: 'new', source: 'AMAZON_COMPETITIVE_SUMMARY', observedAt: new Date(observedAt).toISOString(),
+      completeness: { kind: 'TOP_N', n: Math.max(1, offers.length) }, offers,
+    };
+  }
+
   /** ANY_OFFER_CHANGED с задержкой A-08: снимки, срок доставки которых наступил */
   drainSnapshots(): CompetitorSnapshot[] {
     const now = this.now();
@@ -281,17 +298,20 @@ export class SimulatedAmazonPort implements ChannelAdapter {
   async readCompetitors(ctx: AdapterCallContext, queries: readonly CompetitorQuery[]): Promise<CompetitorReadResult> {
     const denied = await this.verified(ctx);
     const result: CompetitorReadResult = { snapshots: [], failures: [] };
-    for (const q of queries) {
-      if (denied) { result.failures.push({ query: q, error: denied }); continue; }
+    // Р-128 (шаг 26): getCompetitiveSummary — пакет до 20 товаров одним вызовом, как адаптер Amazon (COMPETITIVE_SUMMARY_PATH): один
+    // жетон ограничителя на пакет. Модель брала жетон на каждый товар и отклоняла 19 из 20 — сверка по кругу в модели не работала
+    for (let i = 0; i < queries.length; i += 20) {
+      const batch = queries.slice(i, i + 20);
+      if (denied) { for (const q of batch) result.failures.push({ query: q, error: denied }); continue; }
       const now = this.now();
       this.stats.summaryCalls += 1;
       const taken = this.summary.take(now);
       if (!taken.ok) {
         this.stats.summaryRateLimited += 1;
-        result.failures.push({ query: q, error: error('RATE_LIMITED', 'getCompetitiveSummary 0.033 rps', { retryAt: new Date(taken.retryAtMs).toISOString() }) });
+        for (const q of batch) result.failures.push({ query: q, error: error('RATE_LIMITED', 'getCompetitiveSummary 0.033 rps', { retryAt: new Date(taken.retryAtMs).toISOString() }) });
         continue;
       }
-      result.snapshots.push(this.snapshotOf(q.marketplace, q.channelProductRef, now));
+      for (const q of batch) result.snapshots.push(this.summaryOf(q.marketplace, q.channelProductRef, now));
     }
     return result;
   }

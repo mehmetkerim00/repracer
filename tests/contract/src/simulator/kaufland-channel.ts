@@ -37,6 +37,8 @@ export interface SimUnitSpec {
   vatBp?: number;
   shippingMinor?: number;
   deliveryDays?: { min: number; max: number };
+  /** Продавец включил Smart Pricing в кабинете канала (Р-12): minimum_price unit в ответе GET /units */
+  minimumPriceMinor?: number;
 }
 
 export interface SimCompetitorSpec {
@@ -61,7 +63,7 @@ export interface KauflandChannelModelSpec {
   competitors: SimCompetitorSpec[];
 }
 
-interface UnitState extends Required<Omit<SimUnitSpec, 'deliveryDays'>> {
+interface UnitState extends Required<Omit<SimUnitSpec, 'deliveryDays' | 'minimumPriceMinor'>> {
   deliveryDays: { min: number; max: number };
   pending: { priceMinor: number; visibleAtMs: number } | null;
   pendingAmount: { amount: number; visibleAtMs: number } | null;
@@ -160,7 +162,7 @@ export class SimulatedKauflandChannel implements ChannelBehaviour {
     for (const u of spec.units) {
       this.units.set(`${u.storefront}|${u.idUnit}`, {
         ...u, condition: u.condition ?? 'new', isLive: u.isLive ?? true, vatBp: u.vatBp ?? 1900, shippingMinor: u.shippingMinor ?? 0,
-        deliveryDays: u.deliveryDays ?? { min: 1, max: 3 }, pending: null, pendingAmount: null, lastChangeMs: this.startMs, edits: [], minimumPriceMinor: null,
+        deliveryDays: u.deliveryDays ?? { min: 1, max: 3 }, pending: null, pendingAmount: null, lastChangeMs: this.startMs, edits: [], minimumPriceMinor: u.minimumPriceMinor ?? null,
       });
     }
     this.competitors = spec.competitors.map((c) => ({

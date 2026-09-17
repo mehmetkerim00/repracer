@@ -47,7 +47,8 @@ test('Р-126: a polling job stopped for an hour runs once and records the coales
   c.advance(3_600_000 + 5_000);
   await s.tick();
   const [j] = await state.list();
-  assert.deepEqual([runs, j!.runsCompleted, j!.coalescedSlots, j!.nextDueAt], [2, 2, 59, '2026-09-17T11:01:00.000Z']);
+  // Шаг 26: следующий запуск — не раньше интервала после начала этого (11:00:05 + 60 с), а не по сетке слотов
+  assert.deepEqual([runs, j!.runsCompleted, j!.coalescedSlots, j!.nextDueAt], [2, 2, 59, '2026-09-17T11:01:05.000Z']);
   assert.deepEqual(nextSlotAfter('2026-09-17T10:00:00.000Z', '2026-09-17T10:00:59.000Z', 60), { nextDueAt: '2026-09-17T10:01:00.000Z', coalesced: 0 });
 });
 
@@ -116,8 +117,8 @@ test('Р-126: the job source gives each account only the jobs its channel suppor
   assert.deepEqual(specs.filter((s) => !s.scope).map((s) => s.name).sort(), ['analytics-export-day', 'partitions', 'price-days-close', 'retention']);
   // Kaufland: buy_box_changed — ранний доступ, сверки нет по умолчанию; опрос и проверка остановки выборкой есть
   assert.deepEqual(byAccount('20000000-0000-4000-8000-000000000001'), ['competitor-poll/60', 'halt-review/300', 'offer-discovery/86400']);
-  // Amazon: опроса для решения нет [AMZ_C07], остановка снимается только человеком [Р-119]; сверка по кругу — 30 с × 2 аккаунта
-  assert.deepEqual(byAccount('20000000-0000-4000-8000-000000000002'), ['amazon-reconcile-rotation/60', 'notification-loss-review/300', 'offer-discovery/86400']);
+  // Amazon: опроса для решения нет [AMZ_C07], остановка снимается только человеком [Р-119]; сверка по кругу — 31 с × 2 аккаунта (0.033 rps = 30,3 с)
+  assert.deepEqual(byAccount('20000000-0000-4000-8000-000000000002'), ['amazon-reconcile-rotation/62', 'notification-loss-review/300', 'offer-discovery/86400']);
   const withPush = await jobSource({ ...deps, reconcileEnabled: () => true }).jobs('2026-09-17T10:00:00.000Z');
   assert.ok(withPush.some((s) => s.name === 'notification-loss-review' && s.scope?.channelAccountId === '20000000-0000-4000-8000-000000000001'),
     'Kaufland reconciliation is switched on per account when early access to buy_box_changed is granted');

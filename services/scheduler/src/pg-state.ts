@@ -17,7 +17,7 @@ function row(r: Record<string, unknown>): JobState {
     nextDueAt: iso(r.next_due_at)!, runsCompleted: Number(r.runs_completed), coalescedSlots: Number(r.coalesced_slots),
     consecutiveFailures: Number(r.consecutive_failures), leaseOwner: (r.lease_owner as string | null) ?? null, leaseUntil: iso(r.lease_until),
     lastStartedAt: iso(r.last_started_at), lastFinishedAt: iso(r.last_finished_at), lastOutcome: (r.last_outcome as JobState['lastOutcome']) ?? null,
-    lastError: (r.last_error as string | null) ?? null,
+    lastError: (r.last_error as string | null) ?? null, registeredAt: iso(r.registered_at)!, lagLevel: r.lag_level as JobState['lagLevel'],
   };
 }
 
@@ -30,11 +30,11 @@ export class PgSchedulerState implements SchedulerStateStore {
 
   async ensure(r: JobRegistration): Promise<void> {
     await this.pool.query(
-      `INSERT INTO maintenance.scheduled_job (job_key, job_name, scope_tenant_id, scope_account_id, catch_up, interval_seconds, next_due_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO maintenance.scheduled_job (job_key, job_name, scope_tenant_id, scope_account_id, catch_up, interval_seconds, next_due_at, registered_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        ON CONFLICT (job_key) DO UPDATE SET interval_seconds = EXCLUDED.interval_seconds
         WHERE maintenance.scheduled_job.interval_seconds IS DISTINCT FROM EXCLUDED.interval_seconds`,
-      [r.jobKey, r.jobName, r.scope?.tenantId ?? null, r.scope?.channelAccountId ?? null, r.catchUp, r.intervalSeconds, r.firstDueAt]);
+      [r.jobKey, r.jobName, r.scope?.tenantId ?? null, r.scope?.channelAccountId ?? null, r.catchUp, r.intervalSeconds, r.firstDueAt, r.registeredAt]);
   }
 
   async list(): Promise<JobState[]> {
@@ -85,6 +85,18 @@ export class PgSchedulerState implements SchedulerStateStore {
       `UPDATE maintenance.scheduled_job SET lease_until = now() + make_interval(secs => $3)
         WHERE job_key = $1 AND lease_owner = $2 AND lease_until > now()`, [jobKey, owner, leaseSeconds]);
     return rowCount === 1;
+  }
+
+  async setLagLevel(jobKey: string, from: JobState['lagLevel'], to: JobState['lagLevel']): Promise<boolean> {
+    // Сравнение со старым уровнем — в том же UPDATE: из двух процессов уровень меняет и алерт поднимает один
+    const { rowCount } = await this.pool.query(`UPDATE maintenance.scheduled_job SET lag_level = $3 WHERE job_key = $1 AND lag_level = $2`, [jobKey, from, to]);
+    return rowCount === 1;
+  }
+
+  /** Риск 31 (шаг 26): часы базы — срок работы сравнивается с ними, а не с часами процесса */
+  async databaseNow(): Promise<Instant> {
+    const { rows: [r] } = await this.pool.query('SELECT now() AS n');
+    return new Date(r.n).toISOString();
   }
 
   async prune(activeJobKeys: readonly string[], olderThanDays: number): Promise<number> {

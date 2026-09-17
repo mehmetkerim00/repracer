@@ -1,5 +1,5 @@
 import type { AlertSink, Instant } from '@repracer/channel-port';
-import { LeaseLostError, type CatchUp, type JobScope, type JobState, type RunRecord, type SchedulerStateStore } from './state.ts';
+import { LeaseLostError, type CatchUp, type JobScope, type JobState, type LagLevel, type RunRecord, type SchedulerStateStore } from './state.ts';
 
 /**
  * Р-126 (шаг 25): процесс-планировщик. Каждый такт:
@@ -8,8 +8,11 @@ import { LeaseLostError, type CatchUp, type JobScope, type JobState, type RunRec
  *     выполняет пропущенные слоты по очереди до maxSlotsPerTick за такт, LATEST — один запуск за все пропущенные;
  *  3. срок сдвигается только после успеха: провал оставляет тот же слот, он повторяется следующим тактом, после
  *     failureAlertAfter провалов подряд — CRITICAL-алерт;
- *  4. отставание каждой работы (сейчас − срок) сравнивается с её порогами — WARNING и CRITICAL, алерт при смене уровня;
+ *  4. отставание каждой работы (сейчас − срок, но не раньше регистрации работы) сравнивается с её порогами — WARNING и CRITICAL, алерт при
+ *     смене уровня; уровень хранится в хранилище — перезапуск и второй процесс алерт не повторяют (риск 31, шаг 26);
  *  5. каждый запуск — строка журнала: слот, начало, конец, итог, отставание, число обработанных объектов.
+ * Шаг 26 (проверка в живом режиме, Р-128): LATEST-работа не начинается раньше интервала после предыдущего начала — вызовы с лимитом канала
+ * (getCompetitiveSummary 0.033 rps) не сближаются тактами; такт сообщает ближайший срок, процесс просыпается к нему.
  */
 
 export interface JobRunContext {
@@ -45,7 +48,8 @@ export interface SchedulerOptions {
   state: SchedulerStateStore;
   source: JobSource;
   owner: string;
-  now: () => Instant;
+  /** Часы сроков. Процесс — часы базы (риск 31); тесты — виртуальные часы */
+  now: () => Instant | Promise<Instant>;
   alerts: AlertSink;
   maxSlotsPerTick?: number;
   failureAlertAfter?: number;
@@ -57,11 +61,29 @@ export interface TickReport {
   lagging: Array<{ jobKey: string; lagSeconds: number; level: 'WARNING' | 'CRITICAL' }>;
   skippedLeased: string[];
   lostLeases: string[];
+  /** Ближайший срок действующих работ после такта — когда процессу проснуться */
+  nextDueAt: Instant | null;
 }
 
 export const jobKeyOf = (name: string, scope: JobScope | null) => (scope ? `${name}:${scope.tenantId}:${scope.channelAccountId}` : name);
 
 /** Ближайший слот после момента для LATEST: срок + k интервалов > now; k − 1 — схлопнутые слоты */
+/**
+ * Срок с учётом повтора: провалившаяся работа сохраняет слот (пропуск не теряется), но повторяется не раньше min(интервал, 60 с) после
+ * провала. Без паузы процесс, который просыпается к ближайшему сроку, повторял провал каждую секунду — и вызов с лимитом канала тоже (шаг 26)
+ */
+export function dueOf(j: JobState): Instant {
+  if (j.lastOutcome !== 'FAILED' || !j.lastFinishedAt) return j.nextDueAt;
+  const retry = Date.parse(j.lastFinishedAt) + Math.min(j.intervalSeconds, 60) * 1000;
+  return retry > Date.parse(j.nextDueAt) ? new Date(retry).toISOString() : j.nextDueAt;
+}
+
+/** LATEST: следующий запуск — не раньше интервала после начала этого (такт позже слота сдвигает и следующий) */
+function spaced(next: { nextDueAt: Instant; coalesced: number }, startedAt: Instant, intervalSeconds: number) {
+  const earliest = Date.parse(startedAt) + intervalSeconds * 1000;
+  return Date.parse(next.nextDueAt) >= earliest ? next : { nextDueAt: new Date(earliest).toISOString(), coalesced: next.coalesced };
+}
+
 export function nextSlotAfter(slot: Instant, now: Instant, intervalSeconds: number): { nextDueAt: Instant; coalesced: number } {
   const step = intervalSeconds * 1000;
   const k = Math.max(1, Math.floor((Date.parse(now) - Date.parse(slot)) / step) + 1);
@@ -77,10 +99,10 @@ export function createScheduler(options: SchedulerOptions) {
   const { state, source, owner, alerts } = options;
   const maxSlots = options.maxSlotsPerTick ?? 24;
   const failureAlertAfter = options.failureAlertAfter ?? 3;
-  const lagLevel = new Map<string, 'OK' | 'WARNING' | 'CRITICAL'>();
+  const clock = async () => options.now();
 
   async function runOne(spec: JobSpec, claimed: JobState, now: Instant): Promise<{ run: RunRecord; succeeded: boolean }> {
-    const startedAt = options.now();
+    const startedAt = await clock();
     let outcome: RunRecord['outcome'] = 'SUCCEEDED';
     let items: number | null = null;
     let errorCode: string | null = null;
@@ -99,11 +121,11 @@ export function createScheduler(options: SchedulerOptions) {
     } finally {
       clearInterval(heartbeat);
     }
-    const finishedAt = options.now();
+    const finishedAt = await clock();
     const next = outcome === 'SUCCEEDED'
       ? spec.catchUp === 'EVERY_SLOT'
         ? { nextDueAt: new Date(Date.parse(claimed.nextDueAt) + spec.intervalSeconds * 1000).toISOString(), coalesced: 0 }
-        : nextSlotAfter(claimed.nextDueAt, now, spec.intervalSeconds)
+        : spaced(nextSlotAfter(claimed.nextDueAt, now, spec.intervalSeconds), startedAt, spec.intervalSeconds)
       : { nextDueAt: claimed.nextDueAt, coalesced: 0 };
     const run: RunRecord = {
       jobKey: claimed.jobKey, jobName: spec.name, slotAt: claimed.nextDueAt, owner, startedAt, finishedAt, outcome,
@@ -118,19 +140,21 @@ export function createScheduler(options: SchedulerOptions) {
 
   return {
     async tick(): Promise<TickReport> {
-      const now = options.now();
+      const now = await clock();
       const specs = await source.jobs(now);
       const byKey = new Map<string, JobSpec>();
       for (const spec of specs) {
         const jobKey = jobKeyOf(spec.name, spec.scope);
         byKey.set(jobKey, spec);
-        await state.ensure({ jobKey, jobName: spec.name, scope: spec.scope, catchUp: spec.catchUp, intervalSeconds: spec.intervalSeconds, firstDueAt: spec.firstDueAt(now) });
+        await state.ensure({ jobKey, jobName: spec.name, scope: spec.scope, catchUp: spec.catchUp, intervalSeconds: spec.intervalSeconds, firstDueAt: spec.firstDueAt(now), registeredAt: now });
       }
-      const report: TickReport = { now, runs: [], lagging: [], skippedLeased: [], lostLeases: [] };
+      const report: TickReport = { now, runs: [], lagging: [], skippedLeased: [], lostLeases: [], nextDueAt: null };
       await state.prune([...byKey.keys()], 100);
-      const due = (await state.list()).filter((j) => byKey.has(j.jobKey) && Date.parse(j.nextDueAt) <= Date.parse(now));
-      // Отставание до запусков: планировщик, простоявший дольше порога, сообщает об этом и после того, как догонит слоты
-      const lagBefore = new Map(due.map((j) => [j.jobKey, Math.max(0, (Date.parse(now) - Date.parse(j.nextDueAt)) / 1000)]));
+      const due = (await state.list()).filter((j) => byKey.has(j.jobKey) && Date.parse(dueOf(j)) <= Date.parse(now));
+      // Отставание до запусков: планировщик, простоявший дольше порога, сообщает об этом и после того, как догонит слоты. Отсчёт — не раньше
+      // регистрации работы: новая суточная работа со слотом в прошлом не «отстаёт» (проверка в живом режиме, шаг 26)
+      const lagOf = (j: JobState) => Math.max(0, (Date.parse(now) - Math.max(Date.parse(j.nextDueAt), Date.parse(j.registeredAt))) / 1000);
+      const lagBefore = new Map(due.map((j) => [j.jobKey, lagOf(j)]));
       for (const job of due) {
         const spec = byKey.get(job.jobKey)!;
         for (let slot = 0; slot < (spec.catchUp === 'EVERY_SLOT' ? maxSlots : 1); slot++) {
@@ -156,13 +180,15 @@ export function createScheduler(options: SchedulerOptions) {
       for (const job of await state.list()) {
         const spec = byKey.get(job.jobKey);
         if (!spec) continue;
-        const remaining = Math.max(0, (Date.parse(now) - Date.parse(job.nextDueAt)) / 1000);
+        if (report.nextDueAt === null || Date.parse(dueOf(job)) < Date.parse(report.nextDueAt)) report.nextDueAt = dueOf(job);
+        const remaining = lagOf(job);
         const lagSeconds = Math.max(remaining, lagBefore.get(job.jobKey) ?? 0);
-        const level = lagSeconds >= spec.lagCriticalSeconds ? 'CRITICAL' : lagSeconds >= spec.lagWarningSeconds ? 'WARNING' : 'OK';
+        const level: LagLevel = lagSeconds >= spec.lagCriticalSeconds ? 'CRITICAL' : lagSeconds >= spec.lagWarningSeconds ? 'WARNING' : 'OK';
         if (level !== 'OK') report.lagging.push({ jobKey: job.jobKey, lagSeconds, level });
-        const previous = lagLevel.get(job.jobKey) ?? 'OK';
-        if (level !== previous) {
-          lagLevel.set(job.jobKey, level);
+        // Уровень меняет и алерт поднимает один процесс: смена уровня — сравнением в хранилище (риск 31)
+        let current = job.lagLevel;
+        if (level !== current && await state.setLagLevel(job.jobKey, current, level)) {
+          current = level;
           if (level !== 'OK') {
             await alerts.raise({ code: 'SCHEDULER_JOB_LAGGING', severity: level, details: {
               job: job.jobKey, lagSeconds: Math.round(lagSeconds), nextDueAt: job.nextDueAt, lastOutcome: job.lastOutcome ?? 'NONE', caughtUp: remaining < spec.lagWarningSeconds,
@@ -170,7 +196,7 @@ export function createScheduler(options: SchedulerOptions) {
           }
         }
         // Догнавшая работа снова в норме: следующее отставание снова даст алерт
-        if (level !== 'OK' && remaining < spec.lagWarningSeconds) lagLevel.set(job.jobKey, 'OK');
+        if (current !== 'OK' && remaining < spec.lagWarningSeconds) await state.setLagLevel(job.jobKey, current, 'OK');
       }
       return report;
     },

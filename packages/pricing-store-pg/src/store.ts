@@ -250,7 +250,7 @@ SELECT
   (SELECT json_build_object('currency', mk.currency, 'basis', mk.price_basis)
      FROM tenant_data.channel_account a JOIN platform.marketplace mk ON mk.channel = a.channel AND mk.marketplace = $4
     WHERE a.tenant_id = $1 AND a.channel_account_id = $3) AS storefront,
-  (SELECT json_build_object('observedAt', cs.observed_at, 'buyboxMinor', cs.buybox_amount_minor,
+  (SELECT json_build_object('observedAt', cs.observed_at, 'buyboxMinor', cs.buybox_amount_minor, 'buyboxIsSelf', cs.buybox_is_self,
             'lowestMinor', (SELECT min((o->'price'->>'amountMinor')::bigint) FROM jsonb_array_elements(cs.offers) o
                              WHERE NOT coalesce((o->>'isSelf')::boolean, false)))
      FROM channel_data.competitor_state cs
@@ -532,7 +532,7 @@ export class PgPricingStore implements PricingStore {
           })),
           fxRates: toFxQuotes((r.scopes as Row[])[0]?.fx),
           competitorDaily: (r.daily as Row[]).map((d): DailyRange => ({ day: d.day, minMinor: Number(d.minMinor), maxMinor: Number(d.maxMinor) })),
-          lastAccepted: last ? { observedAt: iso(last.observedAt), buyboxMinor: last.buyboxMinor ?? null, lowestMinor: last.lowestMinor ?? null } : null,
+          lastAccepted: last ? { observedAt: iso(last.observedAt), buyboxMinor: last.buyboxMinor ?? null, lowestMinor: last.lowestMinor ?? null, buyboxIsSelf: last.buyboxIsSelf ?? null } : null,
           ourPriceMinor: primary?.scope.currentPriceMinor ?? null,
           ourKnownPricesMinor: primary?.scope.knownPricesMinor ?? [],
           channel: {
@@ -1542,7 +1542,12 @@ export class PgPricingStore implements PricingStore {
         `SELECT p.marketplace, p.channel_product_ref, p.condition, ps.last_polled_at,
                 (SELECT count(*) FROM channel_data.competitor_move mv
                   WHERE mv.tenant_id = $1 AND mv.channel_account_id = $2 AND mv.marketplace = p.marketplace AND mv.channel_product_ref = p.channel_product_ref
-                    AND mv.condition = p.condition AND mv.evaluated_at >= $3::timestamptz - interval '48 hours' AND mv.move_bp <> 10000)::int AS moves
+                    AND mv.condition = p.condition AND mv.evaluated_at >= $3::timestamptz - interval '48 hours' AND mv.move_bp <> 10000)::int AS moves,
+                -- Р-128: наблюдения товара за 48 ч охватывают сутки — волатильность известна, иначе проба не реже тёплого яруса
+                EXISTS (SELECT 1 FROM channel_data.competitor_move mv
+                  WHERE mv.tenant_id = $1 AND mv.channel_account_id = $2 AND mv.marketplace = p.marketplace AND mv.channel_product_ref = p.channel_product_ref
+                    AND mv.condition = p.condition AND mv.evaluated_at >= $3::timestamptz - interval '48 hours'
+                    AND mv.evaluated_at <= $3::timestamptz - interval '24 hours') AS volatility_known
            FROM (SELECT DISTINCT m.marketplace, m.channel_product_ref, m.condition FROM tenant_data.offer_mapping m
                   WHERE m.tenant_id = $1 AND m.channel_account_id = $2 AND m.status <> 'ENDED' AND m.channel_product_ref IS NOT NULL) p
            LEFT JOIN channel_data.competitor_poll_state ps
@@ -1550,7 +1555,7 @@ export class PgPricingStore implements PricingStore {
             AND ps.condition = lower(p.condition)`, [tenantId, channelAccountId, now]);
       return rows.map((r): PollCandidate => ({
         query: { marketplace: r.marketplace, channelProductRef: r.channel_product_ref, condition: portCondition(r.condition) },
-        lastPolledAt: r.last_polled_at ? iso(r.last_polled_at) : null, changesLast30Days: Number(r.moves) * 15,
+        lastPolledAt: r.last_polled_at ? iso(r.last_polled_at) : null, changesLast30Days: Number(r.moves) * 15, volatilityKnown: r.volatility_known === true,
       }));
     });
   }
@@ -1574,15 +1579,19 @@ export class PgPricingStore implements PricingStore {
   async pickReviewSample(tenantId: string, halt: HaltInfo, size: number): Promise<CompetitorQuery[]> {
     return this.tx(tenantId, async (tx) => {
       const { rows } = await tx.query(
-        `SELECT DISTINCT m.marketplace, m.channel_product_ref, m.condition
-           FROM tenant_data.offer_mapping m
-           JOIN tenant_data.write_scope s ON s.tenant_id = m.tenant_id AND s.write_scope_id = m.price_write_scope_id
-           JOIN tenant_data.pricing_strategy ps
-             ON ps.tenant_id = s.tenant_id AND ps.pricing_strategy_id = s.pricing_strategy_id AND ps.version = s.pricing_strategy_version
-          WHERE m.tenant_id = $1 AND m.channel_account_id = $2 AND ($3::text IS NULL OR m.marketplace = $3::text)
-            AND m.status <> 'ENDED' AND m.channel_product_ref IS NOT NULL
-            AND s.pricing_mode = 'ENGINE' AND ps.type = ANY ($4::text[])
-          ORDER BY m.channel_product_ref
+        // Шаг 26 (живой режим, Р-128): сначала товары с ценой из данных конкурентов, затем остальные товары витрины. Выборка проверяет
+        // данные канала, а не стратегии: витрина без таких стратегий не получала выборки, и остановка не снималась никогда
+        `SELECT marketplace, channel_product_ref, condition FROM (
+           SELECT DISTINCT ON (m.marketplace, m.channel_product_ref, m.condition) m.marketplace, m.channel_product_ref, m.condition,
+                  (s.pricing_mode = 'ENGINE' AND ps.type = ANY ($4::text[])) AS competitor_derived
+             FROM tenant_data.offer_mapping m
+             LEFT JOIN tenant_data.write_scope s ON s.tenant_id = m.tenant_id AND s.write_scope_id = m.price_write_scope_id
+             LEFT JOIN tenant_data.pricing_strategy ps
+               ON ps.tenant_id = s.tenant_id AND ps.pricing_strategy_id = s.pricing_strategy_id AND ps.version = s.pricing_strategy_version
+            WHERE m.tenant_id = $1 AND m.channel_account_id = $2 AND ($3::text IS NULL OR m.marketplace = $3::text)
+              AND m.status <> 'ENDED' AND m.channel_product_ref IS NOT NULL
+            ORDER BY m.marketplace, m.channel_product_ref, m.condition, competitor_derived DESC NULLS LAST) p
+          ORDER BY competitor_derived DESC NULLS LAST, channel_product_ref
           LIMIT $5`,
         [tenantId, halt.channelAccountId, halt.marketplace, COMPETITOR_RULES, size],
       );

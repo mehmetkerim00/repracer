@@ -1,0 +1,59 @@
+# Р-129 (шаг 26): развёртывание процесса-планировщика [Р-126] — часть репозитория, а не устная инструкция.
+#   docker compose -f deploy/scheduler/compose.yaml --env-file deploy/scheduler/scheduler.env up -d
+# Один экземпляр (одна работа — одна аренда в базе и без того, но второй процесс без нужды тратит вызовы каналов), перезапуск при
+# падении, конфигурация — переменными окружения и файлами секретов, метрики и проверка работоспособности — на порту метрик.
+# Версии образов закреплены; обновление — вместе с прогоном проверок (npm run test-all и живой режим).
+name: repracer-scheduler
+
+services:
+  scheduler:
+    image: node:22.22.3-bookworm-slim
+    # Тег образа закреплён; закрепление по digest (image: node@sha256:…) — при первом развёртывании в среде с доступом к реестру (проверить)
+    working_dir: /app
+    command: ["node", "--experimental-strip-types", "--disable-warning=ExperimentalWarning", "services/scheduler/src/main.ts"]
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      REPRACER_SCHEDULER_OWNER: ${REPRACER_SCHEDULER_OWNER:-scheduler-1}
+      REPRACER_SCHEDULER_TICK_MS: ${REPRACER_SCHEDULER_TICK_MS:-30000}
+      REPRACER_SCHEDULER_METRICS_PORT: "9464"
+      REPRACER_CHANNEL_SECRETS_DIR: /run/secrets/channels
+      REPRACER_CH_URL: ${REPRACER_CH_URL:?set REPRACER_CH_URL}
+      REPRACER_CH_INGEST_USER: ${REPRACER_CH_INGEST_USER:?set REPRACER_CH_INGEST_USER}
+      REPRACER_CH_VERIFIER_USER: ${REPRACER_CH_VERIFIER_USER:?set REPRACER_CH_VERIFIER_USER}
+      REPRACER_KAUFLAND_FALLBACK_EMAIL: ${REPRACER_KAUFLAND_FALLBACK_EMAIL:?set REPRACER_KAUFLAND_FALLBACK_EMAIL}
+      REPRACER_KAUFLAND_BUY_BOX_CHANGED_ACCESS: ${REPRACER_KAUFLAND_BUY_BOX_CHANGED_ACCESS:-NOT_GRANTED}
+      REPRACER_KAUFLAND_PARTNER_CREDENTIALS_REF: ${REPRACER_KAUFLAND_PARTNER_CREDENTIALS_REF:-}
+      REPRACER_AMAZON_APPLICATION_CREDENTIALS_REF: ${REPRACER_AMAZON_APPLICATION_CREDENTIALS_REF:?set REPRACER_AMAZON_APPLICATION_CREDENTIALS_REF}
+      # Секреты — файлами, не значениями: в переменных окружения их видят все процессы контейнера и docker inspect
+      REPRACER_SCHEDULER_PG_URL_FILE: /run/secrets/scheduler_pg_url
+      REPRACER_APP_PG_URL_FILE: /run/secrets/app_pg_url
+      REPRACER_EXPORTER_PG_URL_FILE: /run/secrets/exporter_pg_url
+      REPRACER_CH_INGEST_PASSWORD_FILE: /run/secrets/ch_ingest_password
+      REPRACER_CH_VERIFIER_PASSWORD_FILE: /run/secrets/ch_verifier_password
+      # Р-127: адрес отметки во внешнем сервисе содержит идентификатор проверки — тоже секрет
+      REPRACER_SCHEDULER_HEARTBEAT_URL_FILE: /run/secrets/heartbeat_url
+    volumes:
+      - ../..:/app:ro
+      - ${REPRACER_SECRETS_DIR:?set REPRACER_SECRETS_DIR}:/run/secrets:ro
+    # Один экземпляр: работу и так держит аренда в базе [Р-126], но второй процесс тратит вызовы каналов впустую
+    deploy:
+      replicas: 1
+    restart: unless-stopped
+    stop_grace_period: 60s
+    healthcheck:
+      # Такт старше 5 тактов (не меньше 5 минут) — контейнер нездоров и перезапускается; хост целиком видит только внешняя отметка (Р-127)
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9464/healthz').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    ports:
+      - "127.0.0.1:9464:9464"
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
