@@ -23,11 +23,55 @@ export interface FeedItem {
   decisionId: string | null;
 }
 
+export const FEED_STATUS_GROUPS = ['APPLIED', 'IN_FLIGHT', 'NOT_SENT'] as const;
+export type FeedStatusGroup = (typeof FEED_STATUS_GROUPS)[number];
+export const FEED_PERIODS_DAYS = [1, 7, 30] as const;
+/** Страница ленты — не больше 200 записей за запрос */
+export const FEED_PAGE_MAX = 200;
+
+/** Шаг 23: фильтры и страница ленты — на сервере, по всему окну ленты, а не по уже отданным записям */
+export interface FeedQuery {
+  writeScopeId?: string;
+  status?: FeedStatusGroup;
+  days?: (typeof FEED_PERIODS_DAYS)[number];
+  offset?: number;
+  limit?: number;
+}
+
 export interface PriceFeedView {
   worldId: string;
   items: FeedItem[];
   counts: { applied: number; inFlight: number; notSent: number };
+  query: { writeScopeId: string | null; status: FeedStatusGroup | null; days: number | null; offset: number; limit: number };
+  page: { from: number; to: number; total: number; text: string; hasPrevious: boolean; hasNext: boolean };
+  /** Офферы для фильтра */
+  offers: UnitRef[];
   gaps: Gap[];
+}
+
+/** Разбор параметров адреса; неверный параметр — null (ответ 400), а не молчаливое «все» */
+export function parseFeedQuery(params: URLSearchParams): FeedQuery | null {
+  const q: FeedQuery = {};
+  const ws = params.get('writeScopeId');
+  if (ws) q.writeScopeId = ws;
+  const status = params.get('status');
+  if (status) {
+    if (!(FEED_STATUS_GROUPS as readonly string[]).includes(status)) return null;
+    q.status = status as FeedStatusGroup;
+  }
+  const days = params.get('days');
+  if (days) {
+    if (!(FEED_PERIODS_DAYS as readonly number[]).includes(Number(days))) return null;
+    q.days = Number(days) as FeedQuery['days'] & number;
+  }
+  for (const key of ['offset', 'limit'] as const) {
+    const v = params.get(key);
+    if (v === null) continue;
+    if (!/^\d{1,6}$/.test(v)) return null;
+    q[key] = Number(v);
+  }
+  if (q.limit !== undefined && (q.limit < 1 || q.limit > FEED_PAGE_MAX)) return null;
+  return q;
 }
 
 const STATUS_TONE: Readonly<Record<string, Tone>> = {
@@ -35,12 +79,18 @@ const STATUS_TONE: Readonly<Record<string, Tone>> = {
   SUPERSEDED: 'off', DISCARDED_STALE: 'stop', BUDGET_EXHAUSTED: 'stop',
 };
 const IN_FLIGHT = new Set(['PENDING', 'DISPATCHED', 'ACCEPTED', 'BLOCKED']);
+const NOT_SENT = new Set(['FAILED', 'NOT_APPLIED', 'DISCARDED_STALE', 'BUDGET_EXHAUSTED']);
+const inGroup = (status: string, group: FeedStatusGroup) => (group === 'APPLIED' ? status === 'APPLIED' : group === 'IN_FLIGHT' ? IN_FLIGHT.has(status) : NOT_SENT.has(status));
 
-export function priceFeed(world: StandWorld, m: Messages, filter: { writeScopeId?: string; limit?: number } = {}): PriceFeedView {
+export function priceFeed(world: StandWorld, m: Messages, filter: FeedQuery = {}): PriceFeedView {
   const f = m.ui.feed;
-  const writes = world.state.writes.filter((w) => !filter.writeScopeId || w.writeScopeId === filter.writeScopeId)
-    .sort((a, b) => Date.parse(b.acceptedAt ?? b.dispatchedAt ?? b.createdAt) - Date.parse(a.acceptedAt ?? a.dispatchedAt ?? a.createdAt) || b.version - a.version);
-  const items = writes.slice(0, filter.limit ?? 200).map((w): FeedItem => {
+  const at = (w: (typeof world.state.writes)[number]) => Date.parse(w.acceptedAt ?? w.dispatchedAt ?? w.createdAt);
+  const since = filter.days ? Date.parse(world.now) - filter.days * 86_400_000 : null;
+  const scoped = world.state.writes.filter((w) => (!filter.writeScopeId || w.writeScopeId === filter.writeScopeId) && (since === null || at(w) >= since));
+  const writes = scoped.filter((w) => !filter.status || inGroup(w.status, filter.status)).sort((a, b) => at(b) - at(a) || b.version - a.version);
+  const limit = Math.min(filter.limit ?? 50, FEED_PAGE_MAX);
+  const offset = Math.min(filter.offset ?? 0, Math.max(0, writes.length - 1));
+  const items = writes.slice(offset, offset + limit).map((w): FeedItem => {
     const scope = scopeById(world, w.writeScopeId);
     const decision = w.decisionId ? world.state.decisions.find((d) => d.decisionId === w.decisionId) ?? null : null;
     const intent = decision ? world.state.intents.find((i) => i.intentId === decision.intentId) ?? null : null;
@@ -58,13 +108,19 @@ export function priceFeed(world: StandWorld, m: Messages, filter: { writeScopeId
       reason: ended ?? (decision ? describe(decision.reason, m) : null), decisionId: w.decisionId,
     };
   });
+  const from = writes.length === 0 ? 0 : offset + 1;
+  const to = offset + items.length;
   return {
     worldId: world.id, items,
+    // Счётчики — по офферу и периоду без фильтра статуса: сколько в каждой группе
     counts: {
-      applied: writes.filter((w) => w.status === 'APPLIED').length,
-      inFlight: writes.filter((w) => IN_FLIGHT.has(w.status)).length,
-      notSent: writes.filter((w) => ['FAILED', 'NOT_APPLIED', 'DISCARDED_STALE', 'BUDGET_EXHAUSTED'].includes(w.status)).length,
+      applied: scoped.filter((w) => inGroup(w.status, 'APPLIED')).length,
+      inFlight: scoped.filter((w) => inGroup(w.status, 'IN_FLIGHT')).length,
+      notSent: scoped.filter((w) => inGroup(w.status, 'NOT_SENT')).length,
     },
+    query: { writeScopeId: filter.writeScopeId ?? null, status: filter.status ?? null, days: filter.days ?? null, offset, limit },
+    page: { from, to, total: writes.length, text: f.page(from, to, writes.length), hasPrevious: offset > 0, hasNext: to < writes.length },
+    offers: world.state.scopes.map((s) => unitOf(world, s, m)),
     gaps: [gap(m, 'FEED_WINDOW'), gap(m, 'PRICE_HISTORY_NOT_READ')],
   };
 }

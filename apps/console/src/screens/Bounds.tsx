@@ -1,5 +1,5 @@
 import type { BoundsView, PriceBreakdown } from '@repracer/console-model';
-import type { BoundsIndexItem } from '../api-types.ts';
+import type { BoundsIndexItem, BoundsIndexView as BoundsIndexData } from '../api-types.ts';
 import { useResource, worldPath } from '../api.ts';
 import { Gaps, href, Load, useMessages } from '../components.tsx';
 import { BoundsEditPanel } from './BoundsEdit.tsx';
@@ -86,8 +86,8 @@ export function BoundsScreen({ worldId, writeScopeId }: { worldId: string; write
 
 function BoundsIndex({ worldId }: { worldId: string }) {
   const m = useMessages();
-  const [resource, retry] = useResource<BoundsIndexItem[]>(worldPath(worldId, 'bounds'), m.locale);
-  return <Load resource={resource} retry={retry}>{(items) => <><BoundsIndexView worldId={worldId} items={items} /><BoundsEditPanel worldId={worldId} items={items} /></>}</Load>;
+  const [resource, retry] = useResource<BoundsIndexData>(worldPath(worldId, 'bounds'), m.locale);
+  return <Load resource={resource} retry={retry}>{(view) => <><BoundsIndexView worldId={worldId} items={view.items} /><BoundsEditPanel worldId={worldId} items={view.items} canEdit={view.canEdit} /></>}</Load>;
 }
 
 function BoundsDetail({ worldId, writeScopeId }: { worldId: string; writeScopeId: string }) {

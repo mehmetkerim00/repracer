@@ -1235,6 +1235,9 @@ export class PgPricingStore implements PricingStore {
           const { deadbandMinor, ...params } = r.params as Record<string, unknown>;
           return { strategyId: r.pricing_strategy_id, version: r.version, params: params as unknown as StrategyDefinition['params'], deadbandMinor: Number(deadbandMinor ?? 0) };
         });
+      const strategyNames = (await q(`SELECT DISTINCT ON (pricing_strategy_id) pricing_strategy_id, name FROM tenant_data.pricing_strategy
+                                       WHERE tenant_id = $1 AND name IS NOT NULL ORDER BY pricing_strategy_id, version DESC`))
+        .map((r) => ({ strategyId: r.pricing_strategy_id as string, name: r.name as string }));
       const explanationRulesets = (await q(`SELECT ruleset_id, kind, definition FROM platform.explanation_ruleset ORDER BY ruleset_id`, []))
         .map((r) => ({ rulesetId: r.ruleset_id, kind: r.kind, definition: r.definition }) as DictionaryRuleset);
       // Остановки в журнале аудита [Р-76]: время действия — из события, роль — в момент действия
@@ -1249,7 +1252,7 @@ export class PgPricingStore implements PricingStore {
       return {
         tenantId, scopes, intents, decisions, writes, halts, haltReviews, distrusts, offerChannelPricing, pricingHealth, stops, rejectedSnapshots, divergenceCases,
         fxRates: fx.map((f) => ({ source: 'ECB', rateDate: f.rate_date, base: 'EUR', quote: f.quote_currency, rateMicros: Number(f.rate_micros), availableFrom: f.available_from })),
-        members, strategies, explanationRulesets, audit,
+        members, strategies, strategyNames, explanationRulesets, audit,
       };
     });
   }

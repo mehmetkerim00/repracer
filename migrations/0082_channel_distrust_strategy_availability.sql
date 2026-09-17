@@ -327,17 +327,36 @@ END $fn$;
 CREATE TRIGGER ca_channel_distrust_release_guard BEFORE UPDATE ON channel_data.channel_distrust
   FOR EACH ROW EXECUTE FUNCTION channel_data.channel_distrust_release_guard();
 
--- Аудит [Р-76]: создание — актор SYSTEM; снятие — страж и аудит административной записи (Р-97)
+-- Аудит [Р-76]: создание — актор SYSTEM; снятие — участник с ролью, областью и заметкой, как снятие остановки человеком (price_stop_audit).
+-- Административная запись дополнительно пишет admin_change.update (Р-97), но без роли и заметки — экран журнала остановок её не читает
+-- (находка шага 23: снятие в базе было видно только как изменение столбцов)
 CREATE FUNCTION channel_data.channel_distrust_audit() RETURNS trigger
   LANGUAGE plpgsql AS $fn$
+DECLARE
+  m record;
 BEGIN
-  INSERT INTO audit.audit_event (tenant_id, occurred_at, actor_type, action, entity_type, entity_id, changes)
-  VALUES (NEW.tenant_id, now(), 'SYSTEM', 'pricing.distrust_created', 'channel_distrust', NEW.channel_distrust_id,
-          jsonb_build_object('reasonCode', NEW.reason_code, 'scope', CASE WHEN NEW.marketplace IS NULL THEN 'CHANNEL_ACCOUNT' ELSE 'STOREFRONT' END,
-                             'channelAccountId', NEW.channel_account_id, 'marketplace', NEW.marketplace, 'at', NEW.detected_at));
+  IF TG_OP = 'INSERT' THEN
+    INSERT INTO audit.audit_event (tenant_id, occurred_at, actor_type, action, entity_type, entity_id, changes)
+    VALUES (NEW.tenant_id, now(), 'SYSTEM', 'pricing.distrust_created', 'channel_distrust', NEW.channel_distrust_id,
+            jsonb_build_object('reasonCode', NEW.reason_code, 'scope', CASE WHEN NEW.marketplace IS NULL THEN 'CHANNEL_ACCOUNT' ELSE 'STOREFRONT' END,
+                               'channelAccountId', NEW.channel_account_id, 'marketplace', NEW.marketplace, 'at', NEW.detected_at));
+    RETURN NULL;
+  END IF;
+  IF OLD.released_at IS NOT NULL OR NEW.released_at IS NULL THEN
+    RETURN NULL;
+  END IF;
+  SELECT mm.role, mm.user_id INTO m FROM tenant_data.membership mm WHERE mm.tenant_id = NEW.tenant_id AND mm.membership_id = NEW.released_by_membership_id;
+  IF m IS NULL THEN
+    RAISE EXCEPTION 'channel distrust %: author % is not a member; the audit event needs its author (Р-76)', NEW.channel_distrust_id, NEW.released_by_membership_id
+      USING ERRCODE = 'integrity_constraint_violation';
+  END IF;
+  INSERT INTO audit.audit_event (tenant_id, occurred_at, actor_type, actor_user_id, actor_membership_id, action, entity_type, entity_id, changes)
+  VALUES (NEW.tenant_id, now(), 'USER', m.user_id, NEW.released_by_membership_id, 'pricing.distrust_released', 'channel_distrust', NEW.channel_distrust_id,
+          jsonb_build_object('role', m.role, 'reasonCode', NEW.reason_code, 'scope', CASE WHEN NEW.marketplace IS NULL THEN 'CHANNEL_ACCOUNT' ELSE 'STOREFRONT' END,
+                             'channelAccountId', NEW.channel_account_id, 'marketplace', NEW.marketplace, 'note', NEW.release_note, 'at', NEW.released_at));
   RETURN NULL;
 END $fn$;
-CREATE TRIGGER zb_channel_distrust_audit AFTER INSERT ON channel_data.channel_distrust
+CREATE TRIGGER zb_channel_distrust_audit AFTER INSERT OR UPDATE OF released_at ON channel_data.channel_distrust
   FOR EACH ROW EXECUTE FUNCTION channel_data.channel_distrust_audit();
 
 -- Одобрение любой цены при недоверии каналу — отказ

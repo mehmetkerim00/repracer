@@ -38,6 +38,12 @@ export interface BoundsIndexItem {
   maxPrice: string;
 }
 
+/** Шаг 23: список границ и право правки по роли зрителя (MANAGE_PRICING) — кнопок без права экран не показывает */
+export interface BoundsIndexView {
+  items: BoundsIndexItem[];
+  canEdit: boolean;
+}
+
 export interface StopRequest {
   target: StopTarget;
   note: string;

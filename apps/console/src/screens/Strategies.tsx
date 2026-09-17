@@ -1,35 +1,62 @@
 import { useState } from 'react';
-import type { StrategyListView, StrategyPreviewView } from '@repracer/console-model';
+import { parseAmountInput, parsePercentInput, type StrategyDraft, type StrategyListItem, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
 import type { StrategySaveResponse } from '../api-types.ts';
-import { requestJson, useResource, worldPath } from '../api.ts';
+import { ApiError, requestJson, useResource, worldPath } from '../api.ts';
 import { Badge, ErrorBox, errorText, Gaps, Load, ReasonLine, useMessages } from '../components.tsx';
 
 /**
- * Экран стратегий (шаг 21): черновик → превью на выбранных офферах (движок и Gate на последнем принятом снимке, без фиксации) →
- * сохранение того же превью. Сервер пересчитывает превью и отказывает, если итог изменился.
+ * Экран стратегий (шаги 21, 23): черновик или новая версия существующей стратегии → превью на выбранных офферах (движок и Gate на
+ * последнем принятом снимке, без фиксации) → подтверждение → сохранение того же превью. Сервер пересчитывает превью и отказывает,
+ * если итог изменился; тогда экран сам строит превью заново. Офферы, которые канал бепреисывает сам [Р-120], не выбираются.
  */
 
 export interface DraftForm {
+  /** null — новая стратегия; иначе — новая версия этой стратегии */
+  strategyId: string | null;
+  baseVersion: number | null;
   name: string;
   type: 'FIXED' | 'TARGET_MARGIN' | 'MATCH_BUYBOX' | 'BEAT_LOWEST';
-  priceMinor: string;
-  targetMarginBp: string;
-  undercutMinor: string;
-  deadbandMinor: string;
+  /** Суммы — в основных единицах валюты («19,99»), маржа — в процентах («12,5») */
+  price: string;
+  targetMargin: string;
+  undercut: string;
+  deadband: string;
   holdWhenWinning: boolean;
   atBound: 'CAP' | 'HOLD';
   scope: 'VISIBLE_TOP_N' | 'MARKET';
   compareLanded: boolean;
 }
 
-const int = (v: string): number | string => (/^-?\d+$/.test(v.trim()) ? Number(v.trim()) : v);
+export const EMPTY_DRAFT: DraftForm = {
+  strategyId: null, baseVersion: null, name: '', type: 'MATCH_BUYBOX', price: '', targetMargin: '20', undercut: '0.05', deadband: '0',
+  holdWhenWinning: true, atBound: 'CAP', scope: 'VISIBLE_TOP_N', compareLanded: false,
+};
+
+const amountText = (minor: number | undefined) => (minor === undefined ? '' : (minor / 100).toFixed(2));
+const percentText = (bp: number | undefined) => (bp === undefined ? '' : String(bp / 100));
+/** Неразборчивый ввод уходит как есть — сервер назовёт поле и проблему */
+const minorOf = (text: string): number | string => parseAmountInput(text) ?? text;
+const bpOf = (text: string): number | string => parsePercentInput(text) ?? text;
+
+/** Черновик новой версии: параметры последней версии стратегии */
+export function formOf(item: StrategyListItem): DraftForm {
+  const p = item.draft.params as unknown as Record<string, unknown>;
+  const type = p.type as DraftForm['type'];
+  return {
+    ...EMPTY_DRAFT, strategyId: item.strategyId, baseVersion: item.version, name: item.draft.name, type,
+    price: amountText(p.priceMinor as number | undefined), targetMargin: percentText(p.targetMarginBp as number | undefined),
+    undercut: amountText(p.undercutMinor as number | undefined), deadband: amountText(item.draft.deadbandMinor),
+    holdWhenWinning: p.holdWhenWinning === true, atBound: p.atBound === 'HOLD' ? 'HOLD' : 'CAP', scope: p.scope === 'MARKET' ? 'MARKET' : 'VISIBLE_TOP_N',
+    compareLanded: p.compareLanded === true,
+  };
+}
 
 export function draftOf(f: DraftForm): unknown {
-  const params = f.type === 'FIXED' ? { type: f.type, priceMinor: int(f.priceMinor) }
-    : f.type === 'TARGET_MARGIN' ? { type: f.type, targetMarginBp: int(f.targetMarginBp) }
-      : f.type === 'MATCH_BUYBOX' ? { type: f.type, undercutMinor: int(f.undercutMinor), holdWhenWinning: f.holdWhenWinning, atBound: f.atBound }
-        : { type: f.type, undercutMinor: int(f.undercutMinor), scope: f.scope, compareLanded: f.compareLanded, atBound: f.atBound };
-  return { name: f.name, params, deadbandMinor: int(f.deadbandMinor) };
+  const params = f.type === 'FIXED' ? { type: f.type, priceMinor: minorOf(f.price) }
+    : f.type === 'TARGET_MARGIN' ? { type: f.type, targetMarginBp: bpOf(f.targetMargin) }
+      : f.type === 'MATCH_BUYBOX' ? { type: f.type, undercutMinor: minorOf(f.undercut), holdWhenWinning: f.holdWhenWinning, atBound: f.atBound }
+        : { type: f.type, undercutMinor: minorOf(f.undercut), scope: f.scope, compareLanded: f.compareLanded, atBound: f.atBound };
+  return { name: f.name, params, deadbandMinor: minorOf(f.deadband) } satisfies Record<keyof StrategyDraft, unknown>;
 }
 
 export function PreviewTable({ view }: { view: StrategyPreviewView }) {
@@ -41,6 +68,7 @@ export function PreviewTable({ view }: { view: StrategyPreviewView }) {
       <h3>{view.draft.title}</h3>
       <p className="muted small">{view.draft.detail}</p>
       <p className="headline">{view.headline}</p>
+      {view.saveBlocked ? <p className="notice" role="alert">{view.saveBlocked}</p> : null}
       <div className="table-wrap">
         <table>
           <thead><tr><th>{c.offer}</th><th>{c.asOf}</th><th>{c.current}</th><th>{c.proposed}</th><th>{c.final}</th><th>{c.change}</th><th>{c.outcome}</th><th>{c.reason}</th></tr></thead>
@@ -65,19 +93,39 @@ export function PreviewTable({ view }: { view: StrategyPreviewView }) {
   );
 }
 
-export function StrategiesScreenView({ view, worldId }: { view: StrategyListView; worldId: string }) {
+/** Подтверждение сохранения: второе нажатие, отдельно от превью */
+export function SaveConfirm({ offers, busy, onConfirm, onCancel }: { offers: number; busy: boolean; onConfirm: () => void; onCancel: () => void }) {
   const m = useMessages();
   const t = m.ui.strategies;
-  const [form, setForm] = useState<DraftForm>({ name: '', type: 'MATCH_BUYBOX', priceMinor: '', targetMarginBp: '2000', undercutMinor: '5', deadbandMinor: '0', holdWhenWinning: true, atBound: 'CAP', scope: 'VISIBLE_TOP_N', compareLanded: false });
-  const [selected, setSelected] = useState<string[]>(() => view.scopes.map((s) => s.unit.writeScopeId));
-  const [preview, setPreview] = useState<StrategyPreviewView | null>(null);
+  return (
+    <div className="confirm" role="dialog" aria-modal="false" aria-labelledby="strategy-confirm-title">
+      <h3 id="strategy-confirm-title">{t.confirmTitle(offers)}</h3>
+      <p>{t.confirmText}</p>
+      <div className="buttons">
+        <button type="button" className="danger" disabled={busy} onClick={onConfirm}>{t.confirmSave}</button>
+        <button type="button" disabled={busy} onClick={onCancel}>{t.cancel}</button>
+      </div>
+    </div>
+  );
+}
+
+export function StrategiesScreenView({ view, worldId, initialPreview = null }: { view: StrategyListView; worldId: string; initialPreview?: StrategyPreviewView | null }) {
+  const m = useMessages();
+  const t = m.ui.strategies;
+  const assignable = view.scopes.filter((s) => s.assignable).map((s) => s.unit.writeScopeId);
+  const [form, setForm] = useState<DraftForm>(EMPTY_DRAFT);
+  const [selected, setSelected] = useState<string[]>(assignable);
+  const [preview, setPreview] = useState<StrategyPreviewView | null>(initialPreview);
+  const [confirming, setConfirming] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const set = <K extends keyof DraftForm>(key: K, value: DraftForm[K]) => { setForm({ ...form, [key]: value }); setPreview(null); };
+  const changed = () => { setPreview(null); setConfirming(false); };
+  const set = <K extends keyof DraftForm>(key: K, value: DraftForm[K]) => { setForm({ ...form, [key]: value }); changed(); };
+  const pick = (ids: string[]) => { setSelected(ids); changed(); };
 
-  const run = async () => {
-    setBusy(true); setError(null); setMessage(null);
+  const run = async (notice: string | null = null) => {
+    setBusy(true); setError(null); setMessage(notice);
     try {
       setPreview(await requestJson<StrategyPreviewView>(worldPath(worldId, 'strategies', 'preview'), { method: 'POST', body: { draft: draftOf(form), writeScopeIds: selected }, locale: m.locale }));
     } catch (e) { setError(errorText(e, m)); } finally { setBusy(false); }
@@ -87,10 +135,15 @@ export function StrategiesScreenView({ view, worldId }: { view: StrategyListView
     setBusy(true); setError(null);
     try {
       const r = await requestJson<StrategySaveResponse>(worldPath(worldId, 'strategies'), {
-        method: 'POST', body: { draft: draftOf(form), writeScopeIds: selected, strategyId: null, previewToken: preview.previewToken, confirmed: true }, locale: m.locale,
+        method: 'POST', body: { draft: draftOf(form), writeScopeIds: selected, strategyId: form.strategyId, previewToken: preview.previewToken, confirmed: true }, locale: m.locale,
       });
-      setMessage(r.message); setPreview(null);
-    } catch (e) { setError(errorText(e, m)); } finally { setBusy(false); }
+      setMessage(r.message); setPreview(null); setConfirming(false); setBusy(false);
+    } catch (e) {
+      setConfirming(false); setBusy(false);
+      // Офферы изменились после превью: показать новое превью, а не ошибку без выхода
+      if (e instanceof ApiError && e.failure.kind === 'SERVER' && e.failure.code === 'PREVIEW_CHANGED') return void run(t.rePreviewed);
+      setError(errorText(e, m));
+    }
   };
 
   return (
@@ -98,20 +151,34 @@ export function StrategiesScreenView({ view, worldId }: { view: StrategyListView
       <h2>{t.pageTitle}</h2>
       <h3>{t.inUse}</h3>
       <ul className="index">
-        {view.strategies.map((s) => <li key={`${s.strategyId}@${s.version}`}><strong>{s.label}</strong> <span className="small muted">{s.detail}</span> · {s.scopes.map((u) => u.label).join(', ')}</li>)}
+        {view.strategies.map((s) => (
+          <li key={s.strategyId}>
+            <strong>{s.name ?? t.unnamed}</strong> · {s.label} {t.versionShort(s.version)} <span className="small muted">{s.detail}</span>
+            <div className="small">{s.scopes.length === 0 ? <span className="muted">{t.notUsed}</span> : s.scopes.map((u) => `${u.unit.label} (${t.versionShort(u.version)})`).join(', ')}</div>
+            {view.canEdit ? <button type="button" disabled={busy} onClick={() => { setForm(formOf(s)); changed(); setMessage(null); }}>{t.newVersion}</button> : null}
+          </li>
+        ))}
       </ul>
-      <h3>{t.draftTitle}</h3>
+
+      <h3>{t.channelPricingTitle}</h3>
+      <p className="muted small">{t.channelPricingIntro}</p>
+      {view.channelPricingOffers.length === 0 ? <p className="muted">{t.channelPricingNone}</p> : (
+        <ul className="index">{view.channelPricingOffers.map((o) => <li key={o.label}><Badge tone={o.tone}>{o.label}</Badge> <span className="small">{o.detail}</span></li>)}</ul>
+      )}
+
+      <h3>{form.strategyId ? t.editing(form.name, form.baseVersion ?? 0) : t.draftTitle}</h3>
       {!view.canEdit ? <p className="notice">{t.noRight}</p> : null}
+      {form.strategyId ? <button type="button" disabled={busy} onClick={() => { setForm(EMPTY_DRAFT); changed(); }}>{t.newStrategy}</button> : null}
       <div className="form">
         <label>{t.name} <input value={form.name} maxLength={80} onChange={(e) => set('name', e.target.value)} /></label>
         <label>{t.type} <select value={form.type} onChange={(e) => set('type', e.target.value as DraftForm['type'])}>
           {(Object.keys(t.types) as Array<keyof typeof t.types>).map((k) => <option key={k} value={k}>{t.types[k]}</option>)}
         </select></label>
-        {form.type === 'FIXED' ? <label>{t.fields.priceMinor} <input inputMode="numeric" value={form.priceMinor} onChange={(e) => set('priceMinor', e.target.value)} /></label> : null}
-        {form.type === 'TARGET_MARGIN' ? <label>{t.fields.targetMarginBp} <input inputMode="numeric" value={form.targetMarginBp} onChange={(e) => set('targetMarginBp', e.target.value)} /></label> : null}
+        {form.type === 'FIXED' ? <label>{t.fields.priceMinor} <input inputMode="decimal" value={form.price} onChange={(e) => set('price', e.target.value)} /></label> : null}
+        {form.type === 'TARGET_MARGIN' ? <label>{t.fields.targetMarginBp} <input inputMode="decimal" value={form.targetMargin} onChange={(e) => set('targetMargin', e.target.value)} /></label> : null}
         {form.type === 'MATCH_BUYBOX' || form.type === 'BEAT_LOWEST' ? (
           <>
-            <label>{t.fields.undercutMinor} <input inputMode="numeric" value={form.undercutMinor} onChange={(e) => set('undercutMinor', e.target.value)} /></label>
+            <label>{t.fields.undercutMinor} <input inputMode="decimal" value={form.undercut} onChange={(e) => set('undercut', e.target.value)} /></label>
             <label>{t.fields.atBound} <select value={form.atBound} onChange={(e) => set('atBound', e.target.value as DraftForm['atBound'])}>
               <option value="CAP">{t.atBound.CAP}</option><option value="HOLD">{t.atBound.HOLD}</option>
             </select></label>
@@ -126,26 +193,36 @@ export function StrategiesScreenView({ view, worldId }: { view: StrategyListView
             <label><input type="checkbox" checked={form.compareLanded} onChange={(e) => set('compareLanded', e.target.checked)} /> {t.fields.compareLanded}</label>
           </>
         ) : null}
-        <label>{t.fields.deadbandMinor} <input inputMode="numeric" value={form.deadbandMinor} onChange={(e) => set('deadbandMinor', e.target.value)} /></label>
+        <label>{t.fields.deadbandMinor} <input inputMode="decimal" value={form.deadband} onChange={(e) => set('deadband', e.target.value)} /></label>
       </div>
+
       <h4>{t.pick}</h4>
+      <div className="buttons">
+        <button type="button" disabled={busy} onClick={() => pick(assignable)}>{t.selectAll}</button>
+        <button type="button" disabled={busy} onClick={() => pick([])}>{t.selectNone}</button>
+      </div>
       <ul className="index">
         {view.scopes.map((s) => (
           <li key={s.unit.writeScopeId}>
-            <label><input type="checkbox" checked={selected.includes(s.unit.writeScopeId)}
-              onChange={(e) => { setSelected(e.target.checked ? [...selected, s.unit.writeScopeId] : selected.filter((x) => x !== s.unit.writeScopeId)); setPreview(null); }} /> {s.unit.label}</label>
+            <label><input type="checkbox" disabled={!s.assignable} checked={selected.includes(s.unit.writeScopeId)}
+              onChange={(e) => pick(e.target.checked ? [...selected, s.unit.writeScopeId] : selected.filter((x) => x !== s.unit.writeScopeId))} /> {s.unit.label}</label>
             <span className="small muted"> · {s.strategy} · {s.mode}</span>
+            {s.channelPricing ? <div className="small"><Badge tone={s.channelPricing.tone}>{t.notAssignable}</Badge> {s.channelPricing.detail}</div> : null}
           </li>
         ))}
       </ul>
       <div className="buttons">
         <button type="button" disabled={busy || selected.length === 0} onClick={() => void run()}>{t.preview}</button>
-        {view.canEdit ? <button type="button" className="danger" disabled={busy || !preview} onClick={() => void save()}>{t.save}</button> : null}
+        {view.canEdit
+          ? <button type="button" className="danger" disabled={busy || !preview || preview.saveBlocked !== null || confirming} onClick={() => setConfirming(true)}>{t.save}</button>
+          : null}
       </div>
       <p className="small muted">{t.saveHint}</p>
+      {confirming && preview ? <SaveConfirm offers={preview.rows.length} busy={busy} onConfirm={() => void save()} onCancel={() => setConfirming(false)} /> : null}
       {error ? <ErrorBox message={error} /> : null}
       {message ? <p className="notice" role="status">{message}</p> : null}
       {preview ? <PreviewTable view={preview} /> : null}
+      <Gaps gaps={view.gaps} />
     </section>
   );
 }

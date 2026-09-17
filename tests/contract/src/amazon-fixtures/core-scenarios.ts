@@ -181,8 +181,45 @@ export function buildCoreScenarios(): Array<{ file: string; scenario: Scenario }
     },
   );
 
+  // Шаг 23, B/C/F: мир консоли стенда — действующее недоверие каналу, оффер с Automate Pricing и состояние PRICING_HEALTH
+  const consoleWorld = scenario(
+    'amazon/pipeline/console-channel-trust',
+    'Консоль: недоверие каналу держит все цены, оффер с правилом канала виден до стратегии, оффер выбыл из Featured Offer',
+    'Мир стенда консоли (шаг 23). Первая фиксированная цена применена каналом с налогом сверху — недоверие каналу, все цены витрины удерживаются до снятия человеком [Р-118]; системной остановки нет и автоматического снятия у Amazon нет [Р-119]. Обнаружение офферов находит правило Automate Pricing у второго оффера [Р-120]. Уведомление PRICING_HEALTH первого оффера приходит через приёмник очереди.',
+    ['pipeline', 'console-stand', 'r118', 'r120'],
+    [fixedScope(8501, 1999, 1850), fixedScope(8502, 2100, 2000), fixedScope(8503, 2200, 2200)],
+    [
+      recompute('first-fixed-price-accepted', 8501, { decision: { outcome: 'APPROVED', finalMinor: 1999 } }),
+      { id: 'in-flight-window-passes', kind: 'advanceClock', ms: 121_000 },
+      { id: 'readback-shows-tax-added', kind: 'pipelineDispatchDue', expect: { due: 1 } } as Step,
+      recompute('third-offer-held-while-distrusted', 8503, { decision: { outcome: 'REJECTED', rejectionReason: 'CHANNEL_DISTRUSTED' } }),
+      { id: 'discover-account-offers', kind: 'pipelineDiscoverOffers', expect: { offers: 3, recorded: 3 } } as Step,
+      { id: 'pricing-health-arrives', kind: 'receiverPoll', send: [{ body: pricingHealthNotification('syn-notification-0501', DE, 'B000008501', { $clockIso: -5_000 }, 1949) }],
+        expect: { polls: [{ outcomes: [{ outcome: 'DELIVERED' }] }] } } as Step,
+    ],
+    [
+      tokenExchange(),
+      preReadExchange('pre-read-8501', sku(8501), [{ priceMinor: 1850 }]),
+      patchPriceExchange('patch-8501-1999', sku(8501), [{ minor: 1999 }]),
+      readBackExchange('readback-8501-net-treated', sku(8501), [{ priceMinor: 1999, purchaseMinor: 2379 }]),
+      searchListingsExchange('search-account-offers', [
+        { sku: sku(8501), offers: [{ priceMinor: 1999 }] },
+        { sku: sku(8502), offers: [{ priceMinor: 2000, rulePlan: true }] },
+        { sku: sku(8503), offers: [{ priceMinor: 2200 }] },
+      ]),
+    ],
+    {
+      pipeline: {
+        distrusts: [{ reasonCode: 'PRICE_BASIS_MISMATCH', released: false }],
+        offerChannelPricing: [{ externalSku: sku(8501), automatedPricing: false }, { externalSku: sku(8502), automatedPricing: true }, { externalSku: sku(8503), automatedPricing: false }],
+        pricingHealth: [{ channelProductRef: 'B000008501', thresholdMinor: 1949 }],
+      },
+    },
+  );
+
   return [
     { file: 'pipeline-discovery-channel-pricing.json', scenario: discovery },
+    { file: 'pipeline-console-channel-trust.json', scenario: consoleWorld },
     { file: 'pipeline-notification-receiver.json', scenario: receiver },
     { file: 'pipeline-price-basis-mismatch-halt.json', scenario: basis },
     { file: 'pipeline-channel-repricer-blocks-scope.json', scenario: repricer },

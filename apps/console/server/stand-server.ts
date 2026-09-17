@@ -1,7 +1,7 @@
 import { createServer, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import {
-  boundsDiffView, boundsView, can, currentStrategies, dangerousReport, decisionList, decisionTrace, describe, expandBoundsEdit, LOCALES, messagesFor, parseBoundsEditRequest,
+  boundsDiffView, boundsView, can, currentStrategies, dangerousReport, decisionList, decisionTrace, describe, expandBoundsEdit, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, scopeById, unitOf,
   parseStrategyDraft, planStop, previewToken, priceFeed, productList, rejectedView, REPORT_PERIODS_DAYS, stopView, strategiesView, strategyPreviewView,
   type Locale, type Messages, type StandWorld, type StopTarget, type StrategyDraft, type Viewer,
 } from '@repracer/console-model';
@@ -12,7 +12,7 @@ import {
 import { createAuthenticator, hasSecondFactor, remoteJwks, staticJwks, type Authenticator, type Principal } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
 import {
-  NOTE_MAX, NOTE_MIN, type BoundsApplyResult, type BoundsIndexItem, type EnableResult, type NoteRequest, type SessionView, type StopRequest, type StrategySaveResponse, type WorldSummary,
+  NOTE_MAX, NOTE_MIN, type BoundsApplyResult, type BoundsIndexItem, type BoundsIndexView, type EnableResult, type NoteRequest, type SessionView, type StopRequest, type StrategySaveResponse, type WorldSummary,
 } from '../src/api-types.ts';
 
 /**
@@ -96,6 +96,13 @@ function scopeIds(raw: unknown): string[] | null {
 function draftProblemsText(problems: ReadonlyArray<{ field: string; code: string }>, m: Messages): string {
   const t = m.ui.strategies;
   return problems.map((p) => `${(t.fields as Record<string, string>)[p.field] ?? (p.field === 'name' ? t.name : p.field === 'type' ? t.type : p.field)}: ${t.problems[p.code as keyof typeof t.problems]}`).join('; ');
+}
+
+/** Шаг 23: устаревший экран различий — какой оффер и какие границы у него сейчас */
+function conflictText(world: StandWorld, conflict: { writeScopeId: string; actual: { minMinor: number | null; maxMinor: number | null } }, m: Messages): string {
+  const scope = scopeById(world, conflict.writeScopeId);
+  if (!scope) return m.ui.server.boundsConflict;
+  return m.ui.server.boundsConflictAt(unitOf(world, scope, m).label, m.money(conflict.actual.minMinor, scope.currency), m.money(conflict.actual.maxMinor, scope.currency));
 }
 
 export function createStandApi(worlds: readonly LiveWorld[], identity: StandIdentity) {
@@ -183,7 +190,10 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         case 'rejected': return ok(rejectedView(world, m));
         case 'bounds': {
           if (param === null) {
-            return ok(productList(world, m).rows.map((r): BoundsIndexItem => ({ writeScopeId: r.unit.writeScopeId, label: r.unit.label, minPrice: r.minPrice, maxPrice: r.maxPrice })));
+            return ok({
+              items: productList(world, m).rows.map((r): BoundsIndexItem => ({ writeScopeId: r.unit.writeScopeId, label: r.unit.label, minPrice: r.minPrice, maxPrice: r.maxPrice })),
+              canEdit: can(viewer.role, 'MANAGE_PRICING'),
+            } satisfies BoundsIndexView);
           }
           const b = boundsView(world, param, m);
           return b ? ok(b) : fail(404, 'SCOPE_NOT_FOUND', s.notFound);
@@ -191,7 +201,12 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         case 'stop': return ok(stopView(world, m));
         // Шаг 21: стратегии, лента цен, отчёт об опасных изменениях [Р-73]
         case 'strategies': return ok(strategiesView(world, m, can(viewer.role, 'MANAGE_PRICING')));
-        case 'feed': return ok(priceFeed(world, m, { ...(url.searchParams.get('writeScopeId') ? { writeScopeId: url.searchParams.get('writeScopeId')! } : {}) }));
+        case 'feed': {
+          // Шаг 23: фильтры и страница — на сервере по всему окну ленты; неверный параметр — 400, а не молчаливое «все»
+          const query = parseFeedQuery(url.searchParams);
+          if (!query || (query.writeScopeId && !scopeById(world, query.writeScopeId))) return fail(400, 'BAD_FEED_QUERY', s.badRequest);
+          return ok(priceFeed(world, m, query));
+        }
         case 'dangerous': {
           const days = Number(url.searchParams.get('days') ?? 7);
           if (!(REPORT_PERIODS_DAYS as readonly number[]).includes(days)) return fail(400, 'BAD_PERIOD', s.badRequest);
@@ -261,6 +276,28 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       return result.released ? ok({ message: s.released, stop: stopView(await live.view(viewer), m) }) : fail(404, 'NOT_ACTIVE', s.notActive);
     }
 
+    // Р-118: снятие недоверия каналу — только человек с правом, от своего имени, со вторым фактором и заметкой; хранилище и БД проверяют то же
+    if (screen === 'distrusts' && param !== null && parts[5] === 'release') {
+      const distrust = world.state.distrusts.find((d) => d.distrustId === param && d.releasedAt === null);
+      if (!distrust) return fail(404, 'NOT_ACTIVE', s.notActive);
+      if (!can(viewer.role, 'RELEASE_CHANNEL_DISTRUST')) return fail(403, 'FORBIDDEN', s.forbidden);
+      const r = body as Partial<NoteRequest>;
+      if (r.confirmed !== true) return fail(400, 'NOT_CONFIRMED', s.notConfirmed);
+      const text = note(r.note);
+      if (!text) return fail(400, 'NOTE_REQUIRED', s.noteRequired(NOTE_MIN, NOTE_MAX));
+      const mfa = hasSecondFactor(principal.amr);
+      if (!mfa) return fail(403, 'MFA_REQUIRED', s.mfaRequiredDistrust);
+      try {
+        const result = await live.pipeline.releaseDistrust(ctx(distrust.channelAccountId), distrust.distrustId, { membershipId: viewer.membershipId, userId: principal.userId, mfa }, text);
+        return result.released ? ok({ message: s.distrustReleased, stop: stopView(await live.view(viewer), m) }) : fail(404, 'NOT_ACTIVE', s.notActive);
+      } catch (error) {
+        // Отказ хранилища или БД (роль, пользователь сессии, второй фактор): текст отказа наружу не отдаётся
+        const code = (error as { code?: string }).code;
+        if (code === '42501' || /may not|not the membership|permission/i.test(String((error as Error).message))) return fail(403, 'FORBIDDEN', s.forbidden);
+        throw error;
+      }
+    }
+
     // Шаг 21: превью стратегии на реальных единицах записи — без фиксации; права на просмотр достаточно
     if (screen === 'strategies' && param === 'preview') {
       const parsed = parseStrategyDraft(body.draft);
@@ -288,6 +325,12 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       }, { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) });
       if (result.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
       if (result.status === 'CONFLICT') return fail(409, 'PREVIEW_CHANGED', s.previewChanged);
+      // Шаг 23: отказ базы по доступности стратегии [Р-39, OQ-166] и по ценообразованию канала у оффера [Р-120] — с понятным текстом
+      if (result.status === 'INVALID' && result.cause === 'STRATEGY_UNAVAILABLE') return fail(400, 'STRATEGY_UNAVAILABLE', s.strategyUnavailable);
+      if (result.status === 'INVALID' && result.cause === 'CHANNEL_PRICING_ACTIVE') {
+        const scope = result.writeScopeId ? scopeById(world, result.writeScopeId) : undefined;
+        return fail(400, 'CHANNEL_PRICING_ACTIVE', s.channelPricingActive(scope ? unitOf(world, scope, m).label : m.ui.common.noValue));
+      }
       if (result.status !== 'SAVED') return fail(400, result.cause, s.badRequest);
       return ok({ message: m.ui.strategies.saved(result.strategy.version, result.assigned.length), strategies: strategiesView(await live.view(viewer), m, true) } satisfies StrategySaveResponse);
     }
@@ -307,7 +350,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       // Экран различий второго фактора не требует — он нужен для применения [Р-88]
       const preview = await live.store.editBounds(world.tenantId, edits, actor, 'PREVIEW');
       if (preview.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
-      if (preview.status === 'CONFLICT') return fail(409, 'BOUNDS_CONFLICT', s.boundsConflict);
+      if (preview.status === 'CONFLICT') return fail(409, 'BOUNDS_CONFLICT', conflictText(world, preview, m));
       if (preview.status !== 'PREVIEWED') return fail(400, preview.status === 'INVALID' ? preview.cause : preview.status, s.badRequest);
       const diff = boundsDiffView(world, edits, preview.rows, m);
       if (param === 'plan') return ok(diff);
@@ -316,7 +359,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       const applied = await live.store.editBounds(world.tenantId, edits, actor, 'APPLY');
       if (applied.status === 'MFA_REQUIRED') return fail(403, 'MFA_REQUIRED', s.mfaRequiredBounds);
       if (applied.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
-      if (applied.status === 'CONFLICT') return fail(409, 'BOUNDS_CONFLICT', s.boundsConflict);
+      if (applied.status === 'CONFLICT') return fail(409, 'BOUNDS_CONFLICT', conflictText(world, applied, m));
       if (applied.status !== 'APPLIED') return fail(400, applied.status === 'INVALID' ? applied.cause : applied.status, s.badRequest);
       return ok({ message: m.ui.boundsEdit.applied(applied.rows.length), rows: applied.rows.length } satisfies BoundsApplyResult);
     }

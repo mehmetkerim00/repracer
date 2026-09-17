@@ -8,7 +8,7 @@ import { messagesFor, type BoundsDiffView, type BoundsView, type DangerousReport
 import { buildStandWorlds, memoryStandDirectory, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
-import type { BoundsIndexItem, EnableResult, SessionView, StandToken, WorldSummary } from '../src/api-types.ts';
+import type { BoundsIndexView, EnableResult, SessionView, StandToken, WorldSummary } from '../src/api-types.ts';
 import { createStandApi, resolveStandIdentityMode } from '../server/stand-server.ts';
 
 /**
@@ -20,6 +20,8 @@ import { createStandApi, resolveStandIdentityMode } from '../server/stand-server
 const WORLDS = [
   'kaufland/pipeline/happy-path', 'kaufland/pipeline/above-max-price', 'kaufland/pipeline/fx-usd-floor-eur-cost', 'kaufland/pipeline/mass-shift-halt',
   'kaufland/pipeline/enable-margin-without-cost', 'kaufland/pipeline/kill-switch-tenant-stop',
+  // Шаг 23: мир Amazon — недоверие каналу, Automate Pricing, PRICING_HEALTH
+  'amazon/pipeline/console-channel-trust',
 ];
 const root = fileURLToPath(new URL('..', import.meta.url));
 const issuer = createTestIssuer({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE });
@@ -108,7 +110,9 @@ test('stand API serves every screen of every world in German and English and ref
       await get<ProductListView>(auth, api(w.id, 'products') + q);
       for (const d of await get<DecisionListItem[]>(auth, api(w.id, 'decisions') + q)) await get<DecisionTrace>(auth, api(w.id, 'decisions', d.decisionId) + q);
       await get<RejectedView>(auth, api(w.id, 'rejected') + q);
-      for (const b of await get<BoundsIndexItem[]>(auth, api(w.id, 'bounds') + q)) await get<BoundsView>(auth, api(w.id, 'bounds', b.writeScopeId) + q);
+      for (const b of (await get<BoundsIndexView>(auth, api(w.id, 'bounds') + q)).items) await get<BoundsView>(auth, api(w.id, 'bounds', b.writeScopeId) + q);
+      await get<StrategyListView>(auth, api(w.id, 'strategies') + q);
+      await get<PriceFeedView>(auth, api(w.id, 'feed') + q);
       await get<StopView>(auth, api(w.id, 'stop') + q);
     }
   }
@@ -138,7 +142,7 @@ test('screens render from the dictionary: sign-in, products with the effective f
   const rejected = await html('/src/screens/Rejected.tsx', 'RejectedScreenView', { view: await get<RejectedView>(auth, api('kaufland/pipeline/above-max-price', 'rejected')) });
   for (const text of ['Your bounds stopped 1 dangerous change', 'dangerous', '53.2%']) assert.ok(rejected.includes(text), text);
 
-  const usd = (await get<BoundsIndexItem[]>(auth, api('kaufland/pipeline/fx-usd-floor-eur-cost', 'bounds'))).find((b) => b.label.includes('ATVPDKIKX0DER'))!;
+  const usd = (await get<BoundsIndexView>(auth, api('kaufland/pipeline/fx-usd-floor-eur-cost', 'bounds'))).items.find((b) => b.label.includes('ATVPDKIKX0DER'))!;
   const bounds = await html('/src/screens/Bounds.tsx', 'BoundsScreenView', { view: await get<BoundsView>(auth, api('kaufland/pipeline/fx-usd-floor-eur-cost', 'bounds', usd.writeScopeId)) });
   for (const text of ['Effective floor', '$17.79', 'ECB rate', 'add up to the price to the cent']) assert.ok(bounds.includes(text), text);
 
@@ -255,7 +259,7 @@ test('step 21: a strategy is saved only with the token of the preview shown; bou
   assert.equal(list.canEdit, true);
   assert.equal((await get<StrategyListView>(viewer, api(id, 'strategies'))).canEdit, false);
   const bad = await call(owner, 'POST', api(id, 'strategies', 'preview'), { draft: { ...draft, deadbandMinor: 'x' }, writeScopeIds: ['ws-price-de-4101'] });
-  assert.deepEqual([bad.status, (bad.body as { error: { code: string; message: string } }).error.message], [400, 'Threshold, cents: whole number of cents or basis points']);
+  assert.deepEqual([bad.status, (bad.body as { error: { code: string; message: string } }).error.message], [400, 'Threshold: an amount like 19.99 or a percentage like 12.5']);
   const preview = await call(viewer, 'POST', api(id, 'strategies', 'preview'), { draft, writeScopeIds: ['ws-price-de-4101'] });
   assert.equal(preview.status, 200, 'a viewer may preview');
   const view = preview.body as StrategyPreviewView;
@@ -293,7 +297,7 @@ test('step 21: a strategy is saved only with the token of the preview shown; bou
   assert.ok(diffHtml.includes('€15.00') && diffHtml.includes('min vorher'), 'amounts come from the server in the session language, labels from the dictionary of the page');
 
   const multi = 'kaufland/pipeline/fx-usd-floor-eur-cost';
-  const mass = { writeScopeIds: (await get<BoundsIndexItem[]>(owner, api(multi, 'bounds'))).map((i) => i.writeScopeId), min: { kind: 'PERCENT', bp: -500 } };
+  const mass = { writeScopeIds: (await get<BoundsIndexView>(owner, api(multi, 'bounds'))).items.map((i) => i.writeScopeId), min: { kind: 'PERCENT', bp: -500 } };
   const massPlan = (await call(owner, 'POST', api(multi, 'bounds', 'plan'), { request: mass })).body as BoundsDiffView;
   assert.equal(massPlan.mfaRequired, true);
   // Токен имитатора по умолчанию несёт второй фактор (pwd + otp); вход только паролем — без него
@@ -319,4 +323,92 @@ test('step 21: the price feed and the report of dangerous changes stopped by the
     assert.ok(markup.includes(r.headline));
     assert.ok((await html('/src/screens/Feed.tsx', 'FeedScreenView', { view: await get<PriceFeedView>(auth, api('kaufland/pipeline/happy-path', 'feed')) }, locale)).includes(messagesFor(locale).ui.feed.pageTitle));
   }
+});
+
+test('step 23, B/C: the stop screen shows three kinds of stop; a channel distrust is released only by an owner or admin with a second factor and a note', async () => {
+  const id = 'amazon/pipeline/console-channel-trust';
+  const owner = await login('OWNER');
+  const operator = await login('OPERATOR');
+  const view = await get<StopView>(owner, api(id, 'stop'));
+  assert.deepEqual(view.kinds.map((k) => [k.kind, k.active]), [['HUMAN', 0], ['SYSTEM_HALT', 0], ['CHANNEL_DISTRUST', 1]]);
+  assert.equal(view.distrusts.active.length, 1);
+  assert.equal(view.permissions.canReleaseDistrust, true);
+  assert.equal((await get<StopView>(operator, api(id, 'stop'))).permissions.canReleaseDistrust, false, 'an operator may stop pricing but not trust the channel again');
+  const card = view.distrusts.active[0]!;
+  assert.match(card.holds, /all prices, including fixed and margin prices/);
+  const markup = await html('/src/screens/Stop.tsx', 'StopScreenView', { view, onReleaseDistrust: () => {} });
+  for (const text of ['Three kinds of stop', 'Channel distrust (Р-118)', 'Channel distrusted by the system', 'Trust again…', 'wrong price basis']) assert.ok(markup.includes(text), text);
+
+  const products = await get<ProductListView>(owner, api(id, 'products'));
+  const row = (sku: string) => products.rows.find((r) => r.unit.externalUnitId === sku)!;
+  assert.equal(row('SYN-SKU-8501').enabled.label, 'Held: channel distrusted');
+  assert.deepEqual(row('SYN-SKU-8502').channelNotes.map((n) => n.code), ['AUTOMATED_PRICING']);
+  assert.deepEqual(row('SYN-SKU-8501').channelNotes.map((n) => [n.code, n.label]), [['PRICING_HEALTH', 'Channel: BuyBoxDisqualification']]);
+  assert.match(row('SYN-SKU-8501').channelNotes[0]!.detail, /competitive price threshold of the channel €19\.49/);
+
+  const release = (auth: Auth, body: unknown) => call(auth, 'POST', api(id, 'distrusts', card.distrustId, 'release'), body);
+  const note = 'Price basis checked in the synthetic channel account';
+  assert.equal((await release(operator, { note, confirmed: true })).status, 403);
+  const passwordOnly = { authorization: `Bearer ${issuer.token(account('OWNER').subject, { email: account('OWNER').email, amr: ['pwd'] })}`, cookie: 'repracer_locale=en' };
+  const noMfa = await release(passwordOnly, { note, confirmed: true });
+  assert.deepEqual([noMfa.status, (noMfa.body as { error: { code: string } }).error.code], [403, 'MFA_REQUIRED']);
+  assert.equal((await release(owner, { note: 'short', confirmed: true })).status, 400);
+  assert.equal((await release(owner, { note, confirmed: false })).status, 400);
+  const released = await release(owner, { note, confirmed: true });
+  assert.equal(released.status, 200, JSON.stringify(released.body));
+  const after = (released.body as { stop: StopView }).stop;
+  assert.deepEqual([after.distrusts.active.length, after.distrusts.history.length, after.kinds[2]!.active], [0, 1, 0]);
+  assert.deepEqual(after.audit.slice(0, 1).map((a) => [a.action, a.actor, a.note]), [['Distrust of the channel released', 'Owner (you)', note]]);
+  assert.equal((await release(owner, { note, confirmed: true })).status, 404, 'released twice');
+});
+
+test('step 23, C/F: offers the channel prices itself are listed before a strategy; saving is blocked on screen and refused by the store', async () => {
+  const id = 'amazon/pipeline/console-channel-trust';
+  const owner = await login('OWNER');
+  const list = await get<StrategyListView>(owner, api(id, 'strategies'));
+  assert.deepEqual(list.channelPricingOffers.map((o) => o.label), ['Amazon A1PA6795UKMFR9 · unit SYN-SKU-8502']);
+  assert.deepEqual(list.scopes.filter((s) => !s.assignable).map((s) => s.unit.externalUnitId), ['SYN-SKU-8502']);
+  assert.ok(list.strategies.length >= 1 && list.strategies.every((s) => s.draft.params.type === 'FIXED'));
+  assert.ok(list.gaps.some((g) => g.code === 'STRATEGY_ASSIGN_CREATES_VERSION'));
+
+  const ws = list.scopes.find((s) => s.unit.externalUnitId === 'SYN-SKU-8502')!.unit.writeScopeId;
+  const draft = { name: 'Synthetic fixed', params: { type: 'FIXED', priceMinor: 2050 }, deadbandMinor: 0 };
+  const preview = (await call(owner, 'POST', api(id, 'strategies', 'preview'), { draft, writeScopeIds: [ws] })).body as StrategyPreviewView;
+  assert.match(preview.saveBlocked ?? '', /the channel prices these offers itself/);
+  const refused = await call(owner, 'POST', api(id, 'strategies'), { draft, writeScopeIds: [ws], strategyId: null, previewToken: preview.previewToken, confirmed: true });
+  assert.deepEqual([refused.status, (refused.body as { error: { code: string } }).error.code], [400, 'CHANNEL_PRICING_ACTIVE']);
+
+  const screen = await html('/src/screens/Strategies.tsx', 'StrategiesScreenView', { view: list, worldId: id, initialPreview: preview });
+  for (const text of ['Offers the channel prices itself', 'cannot be assigned', 'New version…', 'Select all', 'Cannot be saved: the channel prices these offers itself']) assert.ok(screen.includes(text), text);
+  assert.match(screen, /<button type="button" class="danger" disabled="">Save and assign…<\/button>/, 'the save button is disabled while the preview is blocked');
+  const deScreen = await html('/src/screens/Strategies.tsx', 'StrategiesScreenView', { view: await get<StrategyListView>(await login('OWNER', 'de'), api(id, 'strategies')), worldId: id }, 'de');
+  assert.ok(deScreen.includes('Angebote, die der Kanal selbst bepreist'));
+});
+
+test('step 23, F: bounds edit is offered only with the right; the feed filters and pages on the server', async () => {
+  const id = 'kaufland/pipeline/fx-usd-floor-eur-cost';
+  const owner = await login('OWNER');
+  const viewer = await login('VIEWER');
+  const index = await get<BoundsIndexView>(owner, api(id, 'bounds'));
+  assert.equal(index.canEdit, true);
+  const viewerIndex = await get<BoundsIndexView>(viewer, api(id, 'bounds'));
+  assert.equal(viewerIndex.canEdit, false);
+  const noRight = await html('/src/screens/BoundsEdit.tsx', 'BoundsEditPanel', { worldId: id, items: viewerIndex.items, canEdit: false });
+  assert.ok(noRight.includes('Your role may view bounds but not change them.') && !noRight.includes('Show the differences'));
+  const panel = await html('/src/screens/BoundsEdit.tsx', 'BoundsEditPanel', { worldId: id, items: index.items, canEdit: true });
+  for (const text of ['Select all', 'set to (amount)', 'change by (%)']) assert.ok(panel.includes(text), text);
+
+  const feedId = 'kaufland/pipeline/happy-path';
+  const all = await get<PriceFeedView>(viewer, api(feedId, 'feed'));
+  assert.ok(all.page.total >= 1);
+  const applied = await get<PriceFeedView>(viewer, `${api(feedId, 'feed')}?status=APPLIED`);
+  assert.ok(applied.items.every((i) => i.status === 'Applied'), JSON.stringify(applied.items.map((i) => i.status)));
+  assert.deepEqual(applied.counts, all.counts, 'counts are per group, not per status filter');
+  const one = await get<PriceFeedView>(viewer, `${api(feedId, 'feed')}?limit=1`);
+  assert.deepEqual([one.items.length, one.page.from, one.page.to, one.page.total, one.page.hasNext], [1, 1, 1, all.page.total, all.page.total > 1]);
+  for (const bad of ['status=ALL', 'days=5', 'limit=0', 'limit=201', 'offset=-1', 'writeScopeId=ws-unknown']) {
+    assert.equal((await call(viewer, 'GET', `${api(feedId, 'feed')}?${bad}`)).status, 400, bad);
+  }
+  const markup = await html('/src/screens/Feed.tsx', 'FeedScreenView', { view: one, onQuery: () => {} });
+  for (const text of ['Status', 'last 7 days', 'Older →', `1–1 of ${all.page.total}`]) assert.ok(markup.includes(text), text);
 });

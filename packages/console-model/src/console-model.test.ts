@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ALL_REASON_CODES, SANITY_NOTE_CODES } from '@repracer/pricing-model';
-import { describe, explainabilityCatalogue, LOCALES, messagesFor, REASON_LIMITS } from './index.ts';
+import { describe, explainabilityCatalogue, FEED_PAGE_MAX, LOCALES, messagesFor, parseAmountInput, parseFeedQuery, parsePercentInput, REASON_LIMITS } from './index.ts';
 
 /** Р-71, Р-72: словарь DE/EN полон, суммы — только с валютой, значения канала вне слепка помечаются */
 
@@ -97,4 +97,18 @@ test('Р-117: the report counts the floor holding a strategy, not Gate rejection
     intent(`r-${n}`, `2026-09-17T11:${String(n * 5).padStart(2, '0')}:00.000Z`, { code: 'ALREADY_AT_TARGET', params: {} }, [{ code: 'CAPPED_AT_MIN_PRICE', params: { targetMinor: 1195, minMinor: 1500, currency: 'EUR' } }], 1500)) } } as never;
   assert.equal(dangerousReport(repeated, 1, en).headline, 'The floor held the price 1 time in the last 1 day; without it you would have sold €3.05 cheaper');
   assert.equal(dangerousReport(world, 1, messagesFor('de')).headline, 'Die Untergrenze hat den Preis in den letzten 1 Tag 2-mal gehalten; ohne sie hätten Sie 7,55 € billiger verkauft');
+});
+
+test('step 23: a person enters amounts and percentages, not cents and basis points; anything else is refused, not guessed', () => {
+  assert.deepEqual(['19,99', '19.9', ' 20 ', '0.05'].map(parseAmountInput), [1999, 1990, 2000, 5]);
+  assert.deepEqual(['1.234,50', '19,999', '-5', 'x', ''].map(parseAmountInput), [null, null, null, null, null]);
+  assert.deepEqual(['-5', '2,5', '−12.25', '+3', '12.5'].map(parsePercentInput), [-500, 250, -1225, 300, 1250]);
+  assert.deepEqual(['*5', '5%', '1.234'].map(parsePercentInput), [null, null, null]);
+});
+
+test('step 23: the feed query is checked on the server — an unknown status, period or page size is a bad request, not “all”', () => {
+  const q = (s: string) => parseFeedQuery(new URLSearchParams(s));
+  assert.deepEqual(q('status=APPLIED&days=7&offset=50&limit=50'), { status: 'APPLIED', days: 7, offset: 50, limit: 50 });
+  assert.deepEqual(q(''), {});
+  for (const bad of ['status=ALL', 'days=5', 'limit=0', `limit=${FEED_PAGE_MAX + 1}`, 'offset=-1', 'offset=1e3']) assert.equal(q(bad), null, bad);
 });

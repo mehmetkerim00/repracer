@@ -1,9 +1,9 @@
-import { DANGEROUS_DEVIATION_BP, STRATEGY_TYPES, type StrategyParams } from '@repracer/pricing-model';
+import { DANGEROUS_DEVIATION_BP, STRATEGY_TYPES, type StrategyDefinition, type StrategyParams } from '@repracer/pricing-model';
 import type { StrategyPreview } from '@repracer/pricing-pipeline';
 import { describe, type HumanReason } from './explain.ts';
 import type { Messages } from './i18n/index.ts';
-import { strategyLabel } from './products.ts';
-import { gap, scopeById, unitOf, type Gap, type StandWorld, type Tone, type UnitRef } from './world.ts';
+import { channelNotes, strategyLabel } from './products.ts';
+import { gap, scopeById, unitOf, type Gap, type StandWorld, type StatusCell, type Tone, type UnitRef } from './world.ts';
 
 /**
  * Экран стратегий (шаг 21): черновик стратегии проверяется на реальных единицах записи до сохранения — те же движок и Gate, что
@@ -53,34 +53,78 @@ export function parseStrategyDraft(raw: unknown): { ok: true; draft: StrategyDra
   return problems.length > 0 || !params ? { ok: false, problems } : { ok: true, draft: { name, params, deadbandMinor } };
 }
 
+export interface StrategyListItem {
+  strategyId: string;
+  /** Последняя версия стратегии */
+  version: number;
+  /** Имя, данное человеком; у стратегий посева имени нет */
+  name: string | null;
+  label: string;
+  detail: string;
+  /** Офферы на любой версии этой стратегии: подпись оффера и версия */
+  scopes: Array<{ unit: UnitRef; version: number }>;
+  /** Черновик новой версии — параметры последней версии */
+  draft: StrategyDraft;
+}
+
+export interface StrategyScopeItem {
+  unit: UnitRef;
+  strategy: string;
+  mode: string;
+  /** Р-120: у оффера действует собственное ценообразование канала — стратегию не назначит база */
+  channelPricing: StatusCell | null;
+  assignable: boolean;
+}
+
 export interface StrategyListView {
   worldId: string;
-  strategies: Array<{ strategyId: string; version: number; label: string; detail: string; scopes: UnitRef[] }>;
-  scopes: Array<{ unit: UnitRef; strategy: string; mode: string }>;
+  strategies: StrategyListItem[];
+  scopes: StrategyScopeItem[];
+  /** Р-120: все офферы аккаунтов с правилом или границами канала, найденные при обнаружении, — до назначения стратегии */
+  channelPricingOffers: Array<{ label: string; detail: string; tone: Tone }>;
   canEdit: boolean;
+  gaps: Gap[];
 }
 
 export function strategiesView(world: StandWorld, m: Messages, canEdit: boolean): StrategyListView {
-  const inUse = new Map<string, { strategyId: string; version: number; params: StrategyParams; deadbandMinor: number; scopes: UnitRef[] }>();
-  for (const s of world.state.scopes) {
-    if (!s.strategy) continue;
-    const key = `${s.strategy.strategyId}@${s.strategy.version}`;
-    const entry = inUse.get(key) ?? { ...s.strategy, scopes: [] };
-    entry.scopes.push(unitOf(world, s, m));
-    inUse.set(key, entry);
+  const latest = new Map<string, StrategyDefinition>();
+  for (const d of [...world.state.strategies, ...world.state.scopes.flatMap((s) => (s.strategy ? [s.strategy] : []))]) {
+    const known = latest.get(d.strategyId);
+    if (!known || d.version > known.version) latest.set(d.strategyId, d);
   }
+  const strategies = [...latest.values()].map((d): StrategyListItem => {
+    const using = world.state.scopes.filter((s) => s.strategy?.strategyId === d.strategyId);
+    const label = strategyLabel(d, using[0]?.currency ?? world.state.scopes[0]?.currency ?? '', m);
+    const name = world.state.strategyNames.find((x) => x.strategyId === d.strategyId)?.name ?? null;
+    return {
+      strategyId: d.strategyId, version: d.version, name, label: label.label, detail: label.detail,
+      scopes: using.map((s) => ({ unit: unitOf(world, s, m), version: s.strategy!.version })),
+      draft: { name: name ?? label.label, params: { ...d.params }, deadbandMinor: d.deadbandMinor },
+    };
+  }).sort((a, b) => b.scopes.length - a.scopes.length || a.strategyId.localeCompare(b.strategyId));
+  const scopes = world.state.scopes.map((s): StrategyScopeItem => {
+    const notes = channelNotes(world, s, m).filter((n) => n.code !== 'PRICING_HEALTH');
+    return {
+      unit: unitOf(world, s, m), mode: m.values[s.pricingMode], strategy: strategyLabel(s.strategy, s.currency, m).label,
+      channelPricing: notes[0] ?? null, assignable: notes.length === 0,
+    };
+  });
+  const channelPricingOffers = world.accounts.flatMap((a) => {
+    const channel = m.values[a.channel as keyof typeof m.values] ?? a.channel;
+    const newest = new Map<string, (typeof world.state.offerChannelPricing)[number]>();
+    for (const o of world.state.offerChannelPricing.filter((x) => x.channelAccountId === a.channelAccountId)) newest.set(`${o.marketplace}|${o.externalSku}`, o);
+    return [...newest.values()].filter((o) => o.automatedPricing || o.channelBounds).map((o) => ({
+      label: m.ui.common.unitLabel(channel, o.marketplace, o.externalSku),
+      detail: o.automatedPricing ? m.ui.channelNotes.automatedPricingDetail(m.when(o.observedAt)) : m.ui.channelNotes.channelBoundsDetail(m.when(o.observedAt)),
+      tone: (o.automatedPricing ? 'stop' : 'warn') as Tone,
+    }));
+  });
   return {
-    worldId: world.id,
-    strategies: [...inUse.values()].map((s) => {
-      const currency = world.state.scopes.find((x) => x.strategy?.strategyId === s.strategyId)?.currency ?? '';
-      const label = strategyLabel({ strategyId: s.strategyId, version: s.version, params: s.params, deadbandMinor: s.deadbandMinor }, currency, m);
-      return { strategyId: s.strategyId, version: s.version, label: label.label, detail: label.detail, scopes: s.scopes };
-    }),
-    scopes: world.state.scopes.map((s) => ({
-      unit: unitOf(world, s, m), mode: m.values[s.pricingMode],
-      strategy: strategyLabel(s.strategy, s.currency, m).label,
-    })),
-    canEdit,
+    worldId: world.id, strategies, scopes, channelPricingOffers, canEdit,
+    gaps: [
+      gap(m, 'STRATEGY_ASSIGN_CREATES_VERSION'), gap(m, 'STRATEGY_AUTHOR'), gap(m, 'POSITION_STRATEGY'),
+      ...(channelPricingOffers.length > 0 ? [gap(m, 'CHANNEL_PRICING_OFFERS_WITHOUT_SCOPE')] : []),
+    ],
   };
 }
 
@@ -106,6 +150,8 @@ export interface StrategyPreviewView {
   headline: string;
   /** Сохранение принимается только с этим токеном: черновик и итог превью те же, что видел человек */
   previewToken: string;
+  /** Почему сохранить нельзя (канал не даёт данных стратегии [Р-39], у оффера ценообразование канала [Р-120]); null — можно */
+  saveBlocked: string | null;
   gaps: Gap[];
 }
 
@@ -162,8 +208,11 @@ export function strategyPreviewView(world: StandWorld, draft: StrategyDraft, pre
     };
   });
   const label = strategyLabel({ strategyId: 'draft', version: 1, params: draft.params, deadbandMinor: draft.deadbandMinor }, previews[0]?.currency ?? '', m);
+  const channelPriced = rows.filter((r) => { const scope = scopeById(world, r.unit.writeScopeId); return scope ? channelNotes(world, scope, m).some((n) => n.code !== 'PRICING_HEALTH') : false; });
+  const saveBlocked = rows.some((r) => r.unavailable !== null) ? t.blockedUnavailable
+    : channelPriced.length > 0 ? t.blockedChannelPricing(channelPriced.map((r) => r.unit.label).join(', ')) : null;
   return {
-    worldId: world.id, draft: { title: `${draft.name} · ${label.label}`, detail: label.detail }, rows, summary,
+    worldId: world.id, draft: { title: `${draft.name} · ${label.label}`, detail: label.detail }, rows, summary, saveBlocked,
     headline: t.headline(summary), previewToken: previewToken(draft, previews, world),
     gaps: [gap(m, 'PREVIEW_LAST_SNAPSHOT'), gap(m, 'PREVIEW_CURRENT_BOUNDS')],
   };

@@ -170,7 +170,7 @@ test('D, F: the product list shows the effective floor with min_price as its par
 test('Р-69, Р-70, OQ-125: the kill switch stops every price of the tenant; only the owner resumes a tenant stop', async () => {
   const w = live('kaufland/pipeline/happy-path');
   const viewer = await w.view(user('VIEWER'));
-  assert.deepEqual(stopView(viewer, en).permissions, { canStop: false, canResumeTenant: false, canResumeChannel: false, canReleaseHalt: false });
+  assert.deepEqual(stopView(viewer, en).permissions, { canStop: false, canResumeTenant: false, canResumeChannel: false, canReleaseHalt: false, canReleaseDistrust: false });
   assert.equal(productList(viewer, en).rows.some((r) => r.canEnable), false);
 
   const operatorWorld = await w.view(user('OPERATOR'));

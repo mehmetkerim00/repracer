@@ -30,6 +30,23 @@ function adjusted(current: number | null, adjust: BoundAdjust): number | null {
   return Math.floor((current * (10_000 + adjust.bp) + 5_000) / 10_000);
 }
 
+/**
+ * Шаг 23: ввод человека — сумма в основных единицах («19,99» / «19.99») и процент («-5», «2,5»), а не центы и базисные пункты.
+ * Разделитель — запятая или точка, не больше двух знаков после него; тысячные разделители не принимаются. null — не число.
+ */
+export function parseAmountInput(text: string): number | null {
+  const m = /^\s*(\d{1,9})(?:[.,](\d{1,2}))?\s*$/.exec(text);
+  if (!m) return null;
+  return Number(m[1]) * 100 + Number((m[2] ?? '').padEnd(2, '0'));
+}
+
+export function parsePercentInput(text: string): number | null {
+  const m = /^\s*([+\-−]?)(\d{1,4})(?:[.,](\d{1,2}))?\s*$/.exec(text);
+  if (!m) return null;
+  const bp = Number(m[2]) * 100 + Number((m[3] ?? '').padEnd(2, '0'));
+  return m[1] === '-' || m[1] === '−' ? -bp : bp;
+}
+
 export function parseBoundsEditRequest(raw: unknown): BoundsEditRequest | null {
   const r = (raw ?? {}) as Record<string, unknown>;
   const adjust = (v: unknown): BoundAdjust | undefined | null => {

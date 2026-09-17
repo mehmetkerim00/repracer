@@ -1,13 +1,16 @@
 import { can, type StopScope } from '@repracer/pricing-model';
 import type { Messages } from './i18n/index.ts';
+import type { ConsoleDistrustRow } from '@repracer/pricing-pipeline';
 import { channelOf, gap, type ConsoleHalt, type ConsoleScope, type ConsoleStop, type Gap, type StandWorld } from './world.ts';
 
 /**
- * Экран E: два разных действия [Р-69].
- *  - Остановка человеком (kill switch) — все изменения цен без исключений; тенант — самостоятельный объект [Р-70].
- *  - Системная остановка витрины по испорченным данным — только цены из данных конкурентов [Р-51]; снимается выборкой
- *    или вручную [Р-52].
- * Права — по роли зрителя: остановить — владелец и оператор; возобновить тенант — владелец.
+ * Экран E: три вида остановки, у каждого своя таблица, своя причина и свой путь снятия.
+ *  - Остановка человеком (kill switch, price_stop) — все изменения цен без исключений; тенант — самостоятельный объект [Р-69, Р-70].
+ *  - Системная остановка витрины по испорченным входным данным (pricing_halt) — только цены из данных конкурентов [Р-51]; снимается
+ *    свежей выборкой, если канал её даёт, или вручную [Р-52]; у Amazon выборки нет — только вручную [Р-119].
+ *  - Остановка по недоверию каналу (channel_distrust) — сломана трансляция цены в канал: все цены, включая фиксированные и маржинальные,
+ *    и порог цены канала; ставит система, снимает только человек с правом, от своего имени, со вторым фактором и заметкой [Р-118].
+ * Права — по роли зрителя: остановить — владелец и оператор; возобновить тенант — владелец; снять недоверие — владелец и администратор.
  */
 
 export type StopTarget =
@@ -44,6 +47,27 @@ export interface HaltCard {
   canRelease: boolean;
 }
 
+export interface DistrustCard {
+  distrustId: string;
+  scopeLabel: string;
+  reason: string;
+  since: string;
+  /** Что держит: все цены и порог цены канала */
+  holds: string;
+  released: string | null;
+  canRelease: boolean;
+}
+
+/** Три вида остановки рядом: что держит, кто ставит, кто и как снимает */
+export interface StopKindRow {
+  kind: 'HUMAN' | 'SYSTEM_HALT' | 'CHANNEL_DISTRUST';
+  title: string;
+  holds: string;
+  setBy: string;
+  release: string;
+  active: number;
+}
+
 export interface TargetCard {
   target: StopTarget;
   label: string;
@@ -64,12 +88,14 @@ export interface AuditCard {
 
 export interface StopView {
   worldId: string;
-  permissions: { canStop: boolean; canResumeTenant: boolean; canResumeChannel: boolean; canReleaseHalt: boolean };
+  permissions: { canStop: boolean; canResumeTenant: boolean; canResumeChannel: boolean; canReleaseHalt: boolean; canReleaseDistrust: boolean };
+  kinds: StopKindRow[];
   tenant: TargetCard;
   accounts: TargetCard[];
   storefronts: TargetCard[];
   stops: { active: StopCard[]; history: StopCard[] };
   halts: { active: HaltCard[]; history: HaltCard[] };
+  distrusts: { active: DistrustCard[]; history: DistrustCard[] };
   audit: AuditCard[];
   notStopped: string[];
   gaps: Gap[];
@@ -141,11 +167,23 @@ function haltCard(world: StandWorld, h: ConsoleHalt, m: Messages): HaltCard {
     haltId: h.haltId,
     scopeLabel: h.marketplace === null ? m.ui.stop.account(channel) : m.ui.stop.storefront(channel, h.marketplace),
     reason: m.values[h.reasonCode], since: m.when(h.haltedAt),
-    review: h.releasedAt ? '' : m.ui.stop.haltReview(m.when(h.nextReviewAt)),
+    review: h.releasedAt ? ''
+      : world.accounts.find((a) => a.channelAccountId === h.channelAccountId)?.haltRelease === 'MANUAL_ONLY' ? m.ui.stop.haltManualOnly(channel) : m.ui.stop.haltReview(m.when(h.nextReviewAt)),
     released: h.releasedAt
       ? h.releasedKind === 'AUTO' ? m.ui.stop.haltReleasedAuto(m.when(h.releasedAt)) : m.ui.stop.releasedBy(m.when(h.releasedAt), memberLabel(world, review?.membershipId ?? null, m), review?.note ?? '')
       : null,
     canRelease: h.releasedAt === null && can(world.viewer.role, 'RELEASE_CHANNEL_HALT'),
+  };
+}
+
+function distrustCard(world: StandWorld, d: ConsoleDistrustRow, m: Messages): DistrustCard {
+  const channel = m.values[channelOf(world, d.channelAccountId) as keyof typeof m.values] ?? channelOf(world, d.channelAccountId);
+  return {
+    distrustId: d.distrustId,
+    scopeLabel: d.marketplace === null ? m.ui.stop.account(channel) : m.ui.stop.storefront(channel, d.marketplace),
+    reason: m.values[d.reasonCode as keyof typeof m.values] ?? d.reasonCode, since: m.when(d.detectedAt), holds: m.ui.stop.distrustHolds,
+    released: d.releasedAt ? m.ui.stop.releasedBy(m.when(d.releasedAt), memberLabel(world, d.releasedByMembershipId, m), d.releaseNote ?? '') : null,
+    canRelease: d.releasedAt === null && can(world.viewer.role, 'RELEASE_CHANNEL_DISTRUST'),
   };
 }
 
@@ -164,8 +202,14 @@ export function stopView(world: StandWorld, m: Messages): StopView {
     worldId: world.id,
     permissions: {
       canStop: can(role, 'STOP_PRICING'), canResumeTenant: can(role, 'RESUME_TENANT_STOP'),
-      canResumeChannel: can(role, 'RESUME_CHANNEL_STOP'), canReleaseHalt: can(role, 'RELEASE_CHANNEL_HALT'),
+      canResumeChannel: can(role, 'RESUME_CHANNEL_STOP'), canReleaseHalt: can(role, 'RELEASE_CHANNEL_HALT'), canReleaseDistrust: can(role, 'RELEASE_CHANNEL_DISTRUST'),
     },
+    kinds: (['HUMAN', 'SYSTEM_HALT', 'CHANNEL_DISTRUST'] as const).map((kind): StopKindRow => ({
+      kind, ...m.ui.stop.kinds[kind],
+      active: kind === 'HUMAN' ? world.state.stops.filter((x) => x.releasedAt === null).length
+        : kind === 'SYSTEM_HALT' ? world.state.halts.filter((x) => x.releasedAt === null).length
+          : world.state.distrusts.filter((x) => x.releasedAt === null).length,
+    })),
     tenant: targetCard(world, { kind: 'TENANT' }, m),
     accounts: world.accounts.map((a) => targetCard(world, { kind: 'CHANNEL_ACCOUNT', channelAccountId: a.channelAccountId }, m)),
     storefronts: world.accounts.flatMap((a) => a.marketplaces.map((mk) => targetCard(world, { kind: 'STOREFRONT', channelAccountId: a.channelAccountId, marketplace: mk }, m))),
@@ -177,6 +221,10 @@ export function stopView(world: StandWorld, m: Messages): StopView {
       active: world.state.halts.filter((h) => h.releasedAt === null).map((h) => haltCard(world, h, m)),
       history: world.state.halts.filter((h) => h.releasedAt !== null).map((h) => haltCard(world, h, m)),
     },
+    distrusts: {
+      active: world.state.distrusts.filter((d) => d.releasedAt === null).map((d) => distrustCard(world, d, m)),
+      history: world.state.distrusts.filter((d) => d.releasedAt !== null).map((d) => distrustCard(world, d, m)),
+    },
     audit: [...world.state.audit].reverse().map((a): AuditCard => ({
       at: m.when(a.at),
       action: m.ui.stop.auditActions[a.action],
@@ -187,7 +235,7 @@ export function stopView(world: StandWorld, m: Messages): StopView {
       note: a.note,
     })),
     notStopped: m.ui.stop.notStopped,
-    gaps: [gap(m, 'MFA_AT_PROVIDER')],
+    gaps: [gap(m, 'MFA_AT_PROVIDER'), ...(world.state.distrusts.length > 0 ? [gap(m, 'DISTRUST_DETAILS')] : [])],
   };
 }
 

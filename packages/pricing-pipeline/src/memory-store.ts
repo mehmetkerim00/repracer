@@ -242,6 +242,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   readonly audit: ConsoleAuditRow[] = [];
   /** Справочник версий стратегий для слепков [Р-75] — как tenant_data.pricing_strategy */
   private readonly strategyVersions = new Map<string, StrategyDefinition>();
+  private readonly strategyNames = new Map<string, string>();
   readonly rejectedSnapshots: Array<RejectedSnapshotRecord & { key: ProductKey; rejectedSnapshotId: string }> = [];
   readonly intents: Array<PriceIntentDraft & { intentId: string }> = [];
   readonly decisions: ConsoleDecisionRow[] = [];
@@ -1077,6 +1078,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       params: { ...input.params }, deadbandMinor: input.deadbandMinor,
     };
     this.rememberStrategy(strategy);
+    this.strategyNames.set(strategy.strategyId, input.name.trim());
     for (const id of input.assignTo) this.scope(id).strategy = strategy;
     return { status: 'SAVED', strategy, assigned: [...input.assignTo] };
   }
@@ -1280,6 +1282,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       fxRates: [...this.fxRates],
       members: this.members.map((m) => ({ ...m })),
       strategies: [...this.strategyVersions.values()].map((d) => ({ ...d, params: { ...d.params } })),
+      strategyNames: [...this.strategyNames.entries()].map(([strategyId, name]) => ({ strategyId, name })),
       explanationRulesets: [...EXPLANATION_RULESETS],
       audit: this.audit.map((a) => ({ ...a })),
     };

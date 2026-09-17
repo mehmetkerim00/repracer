@@ -159,8 +159,17 @@ Node ≥ 22, TypeScript исполняется через `--experimental-strip-
 | `competitors-and-orders-unsupported.json` | Опрос конкурентов и заказы — отказ UNSUPPORTED, а не пустой ответ (AMZ_C07) | |
 | `tenant-mismatch.json` | Чужой тенант — отказ до обращения к Amazon [Р-31] | |
 | `pipeline-channel-repricer-blocks-scope.json` | Правило у оффера до записи и после неё (обратное чтение): единица BLOCKED сразу, HELD с действием продавца | ✅ чужой репрайсер в пути решения |
-| `pipeline-price-basis-mismatch-halt.json` | Цена покупателя = отправленная × 1,19: остановка витрины, фиксированная цена второго товара удерживается, снятие вручную [Р-116] | ✅ сверка базы цены |
-| `pipeline-*.json` (16) | Обязательные сценарии пути решения Kaufland в смысле Amazon; у `halt-auto-release` выборки нет — остановка остаётся (OQ-164) | ✅ как у Kaufland |
+| `pipeline-price-basis-mismatch-halt.json` | Цена покупателя = отправленная × 1,19: недоверие каналу [Р-118], фиксированная цена второго товара удерживается; оператор и владелец без второго фактора снять не могут, владелец снимает | ✅ сверка базы цены |
+| `pipeline-*.json` (16) | Обязательные сценарии пути решения Kaufland в смысле Amazon; у `halt-auto-release` выборки нет — ответ `MANUAL_ONLY` [Р-119] | ✅ как у Kaufland |
+| `notification-pricing-health.json` | Шаг 23: `PRICING_HEALTH` со строчными ключами — событие с порогом цены и без него; чужой `SellerId` — отказ | |
+| `pipeline-discovery-channel-pricing.json` | Шаг 23 [Р-120]: обнаружение офферов видит Automate Pricing и границы канала до назначения стратегии | ✅ ценообразование канала при обнаружении |
+| `pipeline-notification-receiver.json` | Шаг 23: приёмник очереди SQS целиком — дубль в пачке и в следующей пачке, нарушение порядка, `PRICING_HEALTH`, продавец без аккаунта, сбой хранилища и повтор после паузы, опоздание, искажённое тело | ✅ приёмник уведомлений |
+| `pipeline-console-channel-trust.json` | Мир стенда консоли (метка `console-stand`): действующее недоверие, оффер с Automate Pricing, `PRICING_HEALTH` | |
+
+Шаги шага 23: `pipelineDiscoverOffers` — обнаружение офферов пути решения; `pipelineReleaseDistrust` (`distrustIndex`, `membershipId`,
+`mfa`) — снятие недоверия; `receiverPoll` (`send[]` с `copies`, `ageMs`, `corruptMd5`; `polls`, `failSink`, `advanceMs`) — приёмник
+`@repracer/amazon-notifications` на очереди в памяти по протоколу AWS JSON с подписью SigV4, журнал — хранилище сценария (память или
+PostgreSQL), маршрут продавца — аккаунт мира (маршрут в базе — `packages/pricing-store-pg/test/inbound.pg.test.ts`).
 
 ## Путь решения о цене (шаг 7)
 
@@ -308,7 +317,7 @@ BACKTEST_OUT=docs/benchmarks/results/step21-backtest-synthetic.json npm run benc
 
 ## Миры стенда для интерфейса [Р-67, Р-68]
 
-`src/console/stand.ts` (`@repracer/contract-tests/stand`) прогоняет сценарии с `world.pricing` и оставляет мир живым. Хранилище по умолчанию — в памяти, `storeFactory: pgStoreFactory(...)` — PostgreSQL.
+`src/console/stand.ts` (`@repracer/contract-tests/stand`) прогоняет сценарии Kaufland с `world.pricing` и сценарии Amazon с меткой `console-stand` и оставляет мир живым; у аккаунта мира — способ снятия системной остановки канала [Р-119]. Хранилище по умолчанию — в памяти, `storeFactory: pgStoreFactory(...)` — PostgreSQL.
 
 - `view(viewer)` читает состояние только через порт `PricingStore.readConsoleState`: объяснения решений — из слепков [Р-68], отчёты прогона экранам не нужны.
 - `STAND_USERS` — членства стенда (`DEFAULT_MEMBERS`: владелец, администратор, оператор, менеджер цен, наблюдатель); от роли зависят действия [OQ-125, OQ-129].

@@ -13,6 +13,8 @@ export interface StandAccount {
   channelAccountId: string;
   channel: string;
   marketplaces: string[];
+  /** Р-119: системная остановка снимается свежей выборкой (SAMPLE) или только человеком (MANUAL_ONLY) — свойство канала */
+  haltRelease?: 'SAMPLE' | 'MANUAL_ONLY';
 }
 
 /** Кто смотрит: от его роли зависят действия [OQ-125] */
@@ -48,6 +50,8 @@ export const GAP_CODES = [
   // Шаг 21: экраны стратегий, правки границ, ленты цен и отчёта об опасных изменениях
   'PREVIEW_LAST_SNAPSHOT', 'PREVIEW_CURRENT_BOUNDS', 'BOUND_LEVELS', 'MASS_EDIT_MFA_PER_TRANSACTION', 'FEED_WINDOW', 'PRICE_HISTORY_NOT_READ',
   'DANGEROUS_REPORT_WINDOW', 'DANGEROUS_THRESHOLD', 'FLOOR_HOLD_TARGET_WINDOW',
+  // Шаг 23: три вида остановки, ценообразование канала, стратегии и лента
+  'DISTRUST_DETAILS', 'CHANNEL_PRICING_OFFERS_WITHOUT_SCOPE', 'PRICING_HEALTH_ISSUES', 'STRATEGY_ASSIGN_CREATES_VERSION', 'STRATEGY_AUTHOR', 'POSITION_STRATEGY',
 ] as const;
 export type GapCode = (typeof GAP_CODES)[number];
 

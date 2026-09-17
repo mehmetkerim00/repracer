@@ -1,12 +1,13 @@
 import { useState } from 'react';
-import type { HaltCard, StopCard, StopPlan, StopTarget, StopView, TargetCard } from '@repracer/console-model';
+import type { DistrustCard, HaltCard, StopCard, StopPlan, StopTarget, StopView, TargetCard } from '@repracer/console-model';
 import { NOTE_MIN } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
 import { Badge, ErrorBox, errorText, Gaps, Load, NoteConfirm, useMessages } from '../components.tsx';
 
 /**
- * Экран E — два разных действия [Р-69]: остановка человеком (все цены) и системная остановка витрины по испорченным данным
- * (только цены из данных конкурентов). Первое нажатие — последствия, второе — действие с заметкой. Кнопки — по роли [OQ-125].
+ * Экран E — три вида остановки, каждый своим разделом: остановка человеком (все цены) [Р-69], системная остановка витрины по
+ * испорченным входным данным (только цены из данных конкурентов) [Р-51, Р-119] и недоверие каналу (все цены и порог цены канала,
+ * снятие только человеком со вторым фактором) [Р-118]. Первое нажатие — последствия, второе — действие с заметкой. Кнопки — по роли [OQ-125].
  */
 
 function TargetCardView({ card, onStop }: { card: TargetCard; onStop?: (target: StopTarget) => void }) {
@@ -50,17 +51,49 @@ function HaltCardView({ halt, onRelease }: { halt: HaltCard; onRelease?: (halt: 
   );
 }
 
-export function StopScreenView({ view, onStop, onResume, onRelease }: {
+function DistrustCardView({ distrust, onRelease }: { distrust: DistrustCard; onRelease?: (distrust: DistrustCard) => void }) {
+  const m = useMessages();
+  return (
+    <div className={`card ${distrust.released ? '' : 'stopped'}`}>
+      <h3>{distrust.scopeLabel}</h3>
+      <p><Badge tone={distrust.released ? 'off' : 'stop'}>{distrust.reason}</Badge> {distrust.since}</p>
+      <p className="small">{distrust.holds}</p>
+      {distrust.released ? <p className="small muted">{distrust.released}</p> : null}
+      {distrust.canRelease && onRelease ? <button type="button" onClick={() => onRelease(distrust)}>{m.ui.stop.releaseDistrust}</button> : null}
+    </div>
+  );
+}
+
+export function StopScreenView({ view, onStop, onResume, onRelease, onReleaseDistrust }: {
   view: StopView;
   onStop?: (target: StopTarget) => void;
   onResume?: (stop: StopCard) => void;
   onRelease?: (halt: HaltCard) => void;
+  onReleaseDistrust?: (distrust: DistrustCard) => void;
 }) {
   const m = useMessages();
   const s = m.ui.stop;
+  const k = s.kindsColumns;
   return (
     <section>
       <h2>{s.pageTitle}</h2>
+
+      <section className="stop-kinds">
+        <h3>{s.kindsTitle}</h3>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>{k.kind}</th><th>{k.holds}</th><th>{k.setBy}</th><th>{k.release}</th><th>{k.active}</th></tr></thead>
+            <tbody>
+              {view.kinds.map((row) => (
+                <tr key={row.kind}>
+                  <td><strong>{row.title}</strong></td><td>{row.holds}</td><td>{row.setBy}</td><td>{row.release}</td>
+                  <td className="num">{row.active > 0 ? <Badge tone="stop">{row.active}</Badge> : row.active}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <section className="stop-human">
         <h3>{s.humanTitle}</h3>
@@ -98,6 +131,19 @@ export function StopScreenView({ view, onStop, onResume, onRelease }: {
           </>
         ) : null}
       </section>
+      <section className="stop-distrust">
+        <h3>{s.distrustTitle}</h3>
+        <p className="muted">{s.distrustIntro}</p>
+        <h4>{s.activeDistrusts}</h4>
+        {view.distrusts.active.length === 0 ? <p className="muted">{s.none}</p>
+          : <div className="cards">{view.distrusts.active.map((d) => <DistrustCardView key={d.distrustId} distrust={d} {...(onReleaseDistrust ? { onRelease: onReleaseDistrust } : {})} />)}</div>}
+        {view.distrusts.history.length > 0 ? (
+          <>
+            <h4>{s.distrustHistory}</h4>
+            <div className="cards">{view.distrusts.history.map((d) => <DistrustCardView key={d.distrustId} distrust={d} />)}</div>
+          </>
+        ) : null}
+      </section>
       <section className="stop-audit">
         <h3>{s.auditTitle}</h3>
         {view.audit.length === 0 ? <p className="muted">{s.auditEmpty}</p> : (
@@ -127,6 +173,7 @@ type Pending =
   | { kind: 'stop'; target: StopTarget; plan: StopPlan | null }
   | { kind: 'resume'; stop: StopCard }
   | { kind: 'release'; halt: HaltCard }
+  | { kind: 'distrust'; distrust: DistrustCard }
   | null;
 
 export function StopScreen({ worldId }: { worldId: string }) {
@@ -165,7 +212,9 @@ export function StopScreen({ worldId }: { worldId: string }) {
         ? await requestJson<{ message: string }>(worldPath(worldId, 'stop'), { method: 'POST', body: { ...body, target: pending.target }, locale: m.locale })
         : pending.kind === 'resume'
           ? await requestJson<{ message: string }>(worldPath(worldId, 'stops', pending.stop.stopId, 'resume'), { method: 'POST', body, locale: m.locale })
-          : await requestJson<{ message: string }>(worldPath(worldId, 'halts', pending.halt.haltId, 'release'), { method: 'POST', body, locale: m.locale });
+          : pending.kind === 'release'
+            ? await requestJson<{ message: string }>(worldPath(worldId, 'halts', pending.halt.haltId, 'release'), { method: 'POST', body, locale: m.locale })
+            : await requestJson<{ message: string }>(worldPath(worldId, 'distrusts', pending.distrust.distrustId, 'release'), { method: 'POST', body, locale: m.locale });
       reset();
       setMessage(result.message);
       retry();
@@ -190,6 +239,7 @@ export function StopScreen({ worldId }: { worldId: string }) {
       ) : null}
       {pending?.kind === 'resume' ? <NoteConfirm {...dialog} title={d.resumeTitle(pending.stop.scopeLabel)} text={d.resumeText} confirmLabel={d.confirmResume} /> : null}
       {pending?.kind === 'release' ? <NoteConfirm {...dialog} title={d.releaseTitle(pending.halt.scopeLabel)} text={d.releaseText} confirmLabel={d.confirmRelease} /> : null}
+      {pending?.kind === 'distrust' ? <NoteConfirm {...dialog} title={d.releaseDistrustTitle(pending.distrust.scopeLabel)} text={d.releaseDistrustText} confirmLabel={d.confirmReleaseDistrust} /> : null}
       <Load resource={resource} retry={retry}>
         {(view) => (
           <StopScreenView
@@ -197,6 +247,7 @@ export function StopScreen({ worldId }: { worldId: string }) {
             onStop={(t) => void askStop(t)}
             onResume={(stop) => { reset(); setMessage(null); setPending({ kind: 'resume', stop }); }}
             onRelease={(halt) => { reset(); setMessage(null); setPending({ kind: 'release', halt }); }}
+            onReleaseDistrust={(distrust) => { reset(); setMessage(null); setPending({ kind: 'distrust', distrust }); }}
           />
         )}
       </Load>

@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0099_verify_tmp.sql';
+const VERIFY = 'migrations/0084_verify_schema_invariants_v20.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -628,6 +628,8 @@ export const STEP23_ROWS = [
       m('GRANT UPDATE ON channel_data.channel_distrust TO repracer_admin', smoke('channel distrust reason changed (Р-118)')),
       m(dropTrigger('zb_channel_distrust_audit', 'channel_data.channel_distrust'),
         smoke('a channel distrust is created without an audit event (Р-76, Р-118)', 'a channel distrust is created with an audit event (Р-76, Р-118)')),
+      m(replaceInFunction('channel_data.channel_distrust_audit()', 'IF OLD.released_at IS NOT NULL OR NEW.released_at IS NULL THEN', 'IF true THEN'),
+        smoke('a channel distrust is released without an audit event with its author and note (Р-76, Р-118)', 'a channel distrust is released with an audit event with its author and note (Р-76, Р-118)')),
       m(dropTrigger('a0_admin_write_person_insert', 'channel_data.channel_distrust'), verify('channel_data\\.channel_distrust: administrative INSERT without the person guard')),
       m(dropTrigger('a0_admin_write_person_update', 'channel_data.channel_distrust'), verify('channel_data\\.channel_distrust: administrative UPDATE without the person guard')),
       m(dropTrigger('zz_admin_write_audit_insert', 'channel_data.channel_distrust'), verify('channel_data\\.channel_distrust: administrative INSERT is not written to the audit log')),

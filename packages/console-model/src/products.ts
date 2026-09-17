@@ -34,7 +34,12 @@ export interface ProductRow {
   decisions: number;
   /** Можно ли включить репрайсинг (режим OFF и роль с правом включения) */
   canEnable: boolean;
+  /** Шаг 23: что канал делает с оффером сам — правило автоматического ценообразования [Р-120], выбытие из Featured Offer (PRICING_HEALTH) */
+  channelNotes: ChannelNote[];
 }
+
+/** AUTOMATED_PRICING и CHANNEL_BOUNDS — стратегию не назначит база (0082, Р-120); PRICING_HEALTH — только предупреждение */
+export type ChannelNote = StatusCell & { code: 'AUTOMATED_PRICING' | 'CHANNEL_BOUNDS' | 'PRICING_HEALTH' };
 
 export interface ProductListView {
   worldId: string;
@@ -86,6 +91,8 @@ export function enabledCell(scope: ConsoleScope, m: Messages): StatusCell {
   if (scope.pricingMode === 'KAUFLAND_SMART_PRICING') return { tone: 'off', label: e.smart, detail: e.smartDetail };
   // Р-69: остановка человеком — все цены, включая фиксированные и маржинальные
   if (scope.priceStop) return { tone: 'stop', label: e.stopped, detail: e.stoppedDetail(m.values[scope.priceStop.scope], m.when(scope.priceStop.stoppedAt)) };
+  // Р-118: недоверие каналу — все цены, включая фиксированные и маржинальные, до снятия человеком
+  if (scope.channelDistrust) return { tone: 'stop', label: e.distrusted, detail: e.distrustedDetail(m.when(scope.channelDistrust.detectedAt)) };
   if (scope.status !== 'ACTIVE') return { tone: 'stop', label: e.inactive(m.values[scope.status]), detail: e.inactiveDetail };
   if (scope.channelHalt && scope.strategy && COMPETITOR_DERIVED_RULES.has(scope.strategy.params.type)) {
     return { tone: 'stop', label: e.halted, detail: e.haltedDetail(m.when(scope.channelHalt.haltedAt)) };
@@ -125,6 +132,24 @@ export function lastChangeCell(scope: ConsoleScope, writes: readonly ConsoleWrit
   };
 }
 
+/** Шаг 23: наблюдения канала по офферу — последнее наблюдение ценообразования канала и последнее состояние PRICING_HEALTH */
+export function channelNotes(world: StandWorld, scope: ConsoleScope, m: Messages): ChannelNote[] {
+  const n = m.ui.channelNotes;
+  const notes: ChannelNote[] = [];
+  const pricing = world.state.offerChannelPricing.find((o) => o.channelAccountId === scope.channelAccountId && o.marketplace === scope.marketplace && o.externalSku === scope.externalUnitId);
+  if (pricing?.automatedPricing) notes.push({ code: 'AUTOMATED_PRICING', tone: 'stop', label: n.automatedPricing, detail: n.automatedPricingDetail(m.when(pricing.observedAt)) });
+  if (pricing?.channelBounds) notes.push({ code: 'CHANNEL_BOUNDS', tone: 'warn', label: n.channelBounds, detail: n.channelBoundsDetail(m.when(pricing.observedAt)) });
+  const health = world.state.pricingHealth.find((h) => h.channelAccountId === scope.channelAccountId && h.marketplace === scope.marketplace
+    && h.channelProductRef === scope.channelProductRef && h.condition === scope.condition);
+  if (health) {
+    notes.push({
+      code: 'PRICING_HEALTH', tone: 'warn', label: n.pricingHealth(health.issueType),
+      detail: n.pricingHealthDetail(m.when(health.occurredAt), health.competitivePriceThreshold ? m.money(health.competitivePriceThreshold.amountMinor, health.competitivePriceThreshold.currency) : null),
+    });
+  }
+  return notes;
+}
+
 export function productList(world: StandWorld, m: Messages): ProductListView {
   const { state } = world;
   const p = m.ui.products;
@@ -150,6 +175,7 @@ export function productList(world: StandWorld, m: Messages): ProductListView {
       latestDecisionId: decisions[0]?.decisionId ?? null,
       decisions: decisions.length,
       canEnable: scope.pricingMode === 'OFF' && can(world.viewer.role, 'ENABLE_REPRICING'),
+      channelNotes: channelNotes(world, scope, m),
     };
   });
   return {
@@ -163,6 +189,6 @@ export function productList(world: StandWorld, m: Messages): ProductListView {
       off: rows.filter((r) => r.enabled.tone === 'off').length,
     },
     rows,
-    gaps: [gap(m, 'PRODUCT_TITLE'), gap(m, 'NEXT_CHECK'), gap(m, 'USER_TIME_ZONE')],
+    gaps: [gap(m, 'PRODUCT_TITLE'), gap(m, 'NEXT_CHECK'), gap(m, 'USER_TIME_ZONE'), ...(state.pricingHealth.length > 0 ? [gap(m, 'PRICING_HEALTH_ISSUES')] : [])],
   };
 }

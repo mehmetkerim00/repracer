@@ -1,16 +1,58 @@
-import type { PriceFeedView } from '@repracer/console-model';
+import { useState } from 'react';
+import { FEED_PERIODS_DAYS, FEED_STATUS_GROUPS, type FeedQuery, type PriceFeedView } from '@repracer/console-model';
 import { useResource, worldPath } from '../api.ts';
 import { Badge, Gaps, href, Load, ReasonLine, useMessages } from '../components.tsx';
 
-/** Лента изменений цен (шаг 21): запись в канал от решения до итога, новые сверху */
-export function FeedScreenView({ view }: { view: PriceFeedView }) {
+/**
+ * Лента изменений цен (шаги 21, 23): запись в канал от решения до итога, новые сверху. Фильтры по статусу, офферу и периоду и
+ * страницы считает сервер по всему окну ленты — экран не фильтрует уже отданную страницу.
+ */
+
+export function feedPath(worldId: string, q: FeedQuery): string {
+  const params = new URLSearchParams();
+  if (q.writeScopeId) params.set('writeScopeId', q.writeScopeId);
+  if (q.status) params.set('status', q.status);
+  if (q.days) params.set('days', String(q.days));
+  if (q.offset) params.set('offset', String(q.offset));
+  if (q.limit) params.set('limit', String(q.limit));
+  const query = params.toString();
+  return `${worldPath(worldId, 'feed')}${query ? `?${query}` : ''}`;
+}
+
+export function FeedScreenView({ view, onQuery }: { view: PriceFeedView; onQuery?: (q: FeedQuery) => void }) {
   const m = useMessages();
   const f = m.ui.feed;
   const c = f.columns;
+  const q = view.query;
+  const current: FeedQuery = {
+    ...(q.writeScopeId ? { writeScopeId: q.writeScopeId } : {}), ...(q.status ? { status: q.status } : {}),
+    ...(q.days ? { days: q.days as FeedQuery['days'] & number } : {}), limit: q.limit,
+  };
+  const change = (patch: Partial<FeedQuery>) => {
+    const next: FeedQuery = { ...current, ...patch, offset: 0 };
+    for (const key of Object.keys(patch) as Array<keyof FeedQuery>) if (patch[key] === undefined) delete next[key];
+    onQuery?.(next);
+  };
   return (
     <section>
       <h2>{f.pageTitle}</h2>
       <p className="muted">{f.counts(view.counts)}</p>
+      {onQuery ? (
+        <div className="form filters">
+          <label>{f.filters.status} <select value={q.status ?? ''} onChange={(e) => change({ status: (e.target.value || undefined) as FeedQuery['status'] })}>
+            <option value="">{f.filters.all}</option>
+            {FEED_STATUS_GROUPS.map((g) => <option key={g} value={g}>{f.statusGroups[g]}</option>)}
+          </select></label>
+          <label>{f.filters.offer} <select value={q.writeScopeId ?? ''} onChange={(e) => change({ writeScopeId: e.target.value || undefined })}>
+            <option value="">{f.filters.all}</option>
+            {view.offers.map((o) => <option key={o.writeScopeId} value={o.writeScopeId}>{o.label}</option>)}
+          </select></label>
+          <label>{f.filters.period} <select value={q.days ?? ''} onChange={(e) => change({ days: (e.target.value ? Number(e.target.value) : undefined) as FeedQuery['days'] })}>
+            <option value="">{f.filters.all}</option>
+            {FEED_PERIODS_DAYS.map((d) => <option key={d} value={d}>{f.periodDays(d)}</option>)}
+          </select></label>
+        </div>
+      ) : null}
       {view.items.length === 0 ? <p className="muted">{f.empty}</p> : (
         <div className="table-wrap">
           <table>
@@ -33,6 +75,15 @@ export function FeedScreenView({ view }: { view: PriceFeedView }) {
           </table>
         </div>
       )}
+      <div className="buttons">
+        <span className="small muted">{view.page.text}</span>
+        {onQuery ? (
+          <>
+            <button type="button" disabled={!view.page.hasPrevious} onClick={() => onQuery({ ...current, offset: Math.max(0, q.offset - q.limit) })}>{f.previous}</button>
+            <button type="button" disabled={!view.page.hasNext} onClick={() => onQuery({ ...current, offset: q.offset + q.limit })}>{f.next}</button>
+          </>
+        ) : null}
+      </div>
       <Gaps gaps={view.gaps} />
     </section>
   );
@@ -40,6 +91,7 @@ export function FeedScreenView({ view }: { view: PriceFeedView }) {
 
 export function FeedScreen({ worldId }: { worldId: string }) {
   const m = useMessages();
-  const [resource, retry] = useResource<PriceFeedView>(worldPath(worldId, 'feed'), m.locale);
-  return <Load resource={resource} retry={retry}>{(view) => <FeedScreenView view={view} />}</Load>;
+  const [query, setQuery] = useState<FeedQuery>({});
+  const [resource, retry] = useResource<PriceFeedView>(feedPath(worldId, query), m.locale);
+  return <Load resource={resource} retry={retry}>{(view) => <FeedScreenView view={view} onQuery={setQuery} />}</Load>;
 }

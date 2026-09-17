@@ -1,20 +1,26 @@
 import { useState } from 'react';
-import type { BoundAdjust, BoundsDiffView, BoundsEditRequest } from '@repracer/console-model';
+import { parseAmountInput, parsePercentInput, type BoundAdjust, type BoundsDiffView, type BoundsEditRequest } from '@repracer/console-model';
 import type { BoundsApplyResult, BoundsIndexItem } from '../api-types.ts';
 import { requestJson, worldPath } from '../api.ts';
 import { Badge, ErrorBox, errorText, Gaps, useMessages } from '../components.tsx';
 
 /**
- * Массовая правка границ (шаг 21): запрос → экран различий → применение с токеном этого экрана. Кнопки «применить» без экрана
- * различий нет; изменился запрос — экран сбрасывается.
+ * Массовая правка границ (шаги 21, 23): запрос → экран различий → применение с токеном этого экрана. Кнопки «применить» без экрана
+ * различий нет; изменился запрос — экран сбрасывается. Сумма вводится в основных единицах, изменение — в процентах; без права
+ * MANAGE_PRICING панели правки нет.
  */
 
 type AdjustForm = { mode: 'KEEP' | 'SET' | 'PERCENT'; value: string };
 
-function adjustOf(f: AdjustForm): BoundAdjust | undefined {
+/** undefined — без изменения; null — ввод не разобран */
+export function adjustOf(f: AdjustForm): BoundAdjust | undefined | null {
   if (f.mode === 'KEEP') return undefined;
-  const n = Number(f.value.trim());
-  return f.mode === 'SET' ? { kind: 'SET', minor: n } : { kind: 'PERCENT', bp: n };
+  if (f.mode === 'SET') {
+    const minor = parseAmountInput(f.value);
+    return minor === null ? null : { kind: 'SET', minor };
+  }
+  const bp = parsePercentInput(f.value);
+  return bp === null ? null : { kind: 'PERCENT', bp };
 }
 
 export function BoundsDiffTable({ view }: { view: BoundsDiffView }) {
@@ -48,7 +54,14 @@ export function BoundsDiffTable({ view }: { view: BoundsDiffView }) {
   );
 }
 
-export function BoundsEditPanel({ worldId, items }: { worldId: string; items: readonly BoundsIndexItem[] }) {
+export function BoundsEditPanel({ worldId, items, canEdit }: { worldId: string; items: readonly BoundsIndexItem[]; canEdit: boolean }) {
+  const m = useMessages();
+  const t = m.ui.boundsEdit;
+  if (!canEdit) return <section className="bounds-edit"><h3>{t.pageTitle}</h3><p className="notice">{t.noRight}</p></section>;
+  return <BoundsEditForm worldId={worldId} items={items} />;
+}
+
+function BoundsEditForm({ worldId, items }: { worldId: string; items: readonly BoundsIndexItem[] }) {
   const m = useMessages();
   const t = m.ui.boundsEdit;
   const [selected, setSelected] = useState<string[]>([]);
@@ -60,14 +73,18 @@ export function BoundsEditPanel({ worldId, items }: { worldId: string; items: re
   const [busy, setBusy] = useState(false);
   const reset = () => { setDiff(null); setMessage(null); };
 
-  const request = (): BoundsEditRequest => {
+  const request = (): BoundsEditRequest | string => {
     const a = adjustOf(min);
     const b = adjustOf(max);
+    if (a === null) return t.badInput(min.value);
+    if (b === null) return t.badInput(max.value);
     return { writeScopeIds: selected, ...(a ? { min: a } : {}), ...(b ? { max: b } : {}) };
   };
   const plan = async () => {
-    setBusy(true); setError(null); setMessage(null);
+    setError(null); setMessage(null);
     const r = request();
+    if (typeof r === 'string') return setError(r);
+    setBusy(true);
     try {
       setDiff({ view: await requestJson<BoundsDiffView>(worldPath(worldId, 'bounds', 'plan'), { method: 'POST', body: { request: r }, locale: m.locale }), request: r });
     } catch (e) { setError(errorText(e, m)); } finally { setBusy(false); }
@@ -85,7 +102,7 @@ export function BoundsEditPanel({ worldId, items }: { worldId: string; items: re
       <select value={value.mode} onChange={(e) => { onChange({ ...value, mode: e.target.value as AdjustForm['mode'] }); reset(); }}>
         <option value="KEEP">{t.keep}</option><option value="SET">{t.set}</option><option value="PERCENT">{t.percent}</option>
       </select>
-      {value.mode !== 'KEEP' ? <input inputMode="numeric" value={value.value} onChange={(e) => { onChange({ ...value, value: e.target.value }); reset(); }} /> : null}
+      {value.mode !== 'KEEP' ? <input inputMode="decimal" value={value.value} onChange={(e) => { onChange({ ...value, value: e.target.value }); reset(); }} /> : null}
     </label>
   );
 
@@ -93,6 +110,10 @@ export function BoundsEditPanel({ worldId, items }: { worldId: string; items: re
     <section className="bounds-edit">
       <h3>{t.pageTitle}</h3>
       <h4>{t.select}</h4>
+      <div className="buttons">
+        <button type="button" disabled={busy} onClick={() => { setSelected(items.map((i) => i.writeScopeId)); reset(); }}>{t.selectAll}</button>
+        <button type="button" disabled={busy} onClick={() => { setSelected([]); reset(); }}>{t.selectNone}</button>
+      </div>
       <ul className="index">
         {items.map((i) => (
           <li key={i.writeScopeId}><label><input type="checkbox" checked={selected.includes(i.writeScopeId)}

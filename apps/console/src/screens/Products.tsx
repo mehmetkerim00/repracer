@@ -18,7 +18,7 @@ export function ProductsView({ view, onEnable }: { view: ProductListView; onEnab
           <thead>
             <tr>
               <th>{c.unit}</th><th>{c.current}</th><th>{c.floor}</th><th>{c.ceiling}</th><th>{c.strategy}</th>
-              <th>{c.enabled}</th><th>{c.applying}</th><th>{c.lastChange}</th><th>{c.nextCheck}</th><th />
+              <th>{c.enabled}</th><th>{c.applying}</th><th>{c.lastChange}</th><th>{c.nextCheck}</th><th>{c.channel}</th><th />
             </tr>
           </thead>
           <tbody>
@@ -42,6 +42,7 @@ export function ProductsView({ view, onEnable }: { view: ProductListView; onEnab
                 <td><Cell cell={r.applying} /></td>
                 <td><Cell cell={r.lastChange} /></td>
                 <td><Cell cell={r.nextCheck} /></td>
+                <td>{r.channelNotes.length === 0 ? '–' : r.channelNotes.map((n) => <Cell key={n.code} cell={n} />)}</td>
                 <td className="actions">
                   {r.latestDecisionId
                     ? <a href={href(view.worldId, 'decisions', r.latestDecisionId)}>{p.why}</a>

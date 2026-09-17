@@ -517,6 +517,14 @@ SELECT pg_temp.expect_fail('channel distrust released with a note shorter than 1
 SELECT pg_temp.ok('channel distrust released by the owner with a second factor (Р-118)', $q$
   UPDATE channel_data.channel_distrust SET released_at = now(), released_by_membership_id = 'a2000000-0000-0000-0000-00000000000a', release_note = 'price basis fixed in the channel'
    WHERE channel_distrust_id = 'ad230000-0000-4000-8000-000000000001' $q$);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM audit.audit_event WHERE entity_type = 'channel_distrust' AND entity_id = 'ad230000-0000-4000-8000-000000000001'
+                    AND action = 'pricing.distrust_released' AND actor_type = 'USER' AND actor_membership_id = 'a2000000-0000-0000-0000-00000000000a'
+                    AND changes->>'note' = 'price basis fixed in the channel' AND changes->>'role' IS NOT NULL) THEN
+    RAISE EXCEPTION 'a channel distrust is released without an audit event with its author and note (Р-76, Р-118)';
+  END IF;
+  RAISE NOTICE 'PASS accept | a channel distrust is released with an audit event with its author and note (Р-76, Р-118)';
+END $$;
 SELECT pg_temp.expect_fail('channel distrust released twice (Р-118)', $q$
   UPDATE channel_data.channel_distrust SET release_note = 'released once more by someone'
    WHERE channel_distrust_id = 'ad230000-0000-4000-8000-000000000001' $q$, 'is already released');

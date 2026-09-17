@@ -5,7 +5,9 @@ import { MemoryIdentityDirectory } from '@repracer/identity';
 import { inviteMember, issueSignupInvitation, type PgIdentityDirectory } from '@repracer/identity/pg';
 import { inTenant, type PgPool } from '@repracer/pricing-store-pg';
 import { DEFAULT_MEMBERS, type PricingPipeline, type PricingStore } from '@repracer/pricing-pipeline';
-import { kauflandUnderTest } from '../adapters.ts';
+import { AMAZON_DESCRIPTOR } from '@repracer/amazon-adapter';
+import { KAUFLAND_DESCRIPTOR } from '@repracer/kaufland-adapter';
+import { amazonUnderTest, kauflandUnderTest } from '../adapters.ts';
 import { memoryStoreFactory, runScenario, type PricingStoreFactory } from '../harness/runner.ts';
 import { loadScenarios, type Scenario } from '../harness/scenario.ts';
 import type { VirtualClock } from '../harness/world.ts';
@@ -17,6 +19,11 @@ import type { VirtualClock } from '../harness/world.ts';
  */
 
 const FIXTURES = fileURLToPath(new URL('../../fixtures/kaufland/', import.meta.url));
+/** Шаг 23: миры Amazon стенда — только сценарии с меткой console-stand (недоверие каналу, Automate Pricing, PRICING_HEALTH) */
+const AMAZON_FIXTURES = fileURLToPath(new URL('../../fixtures/amazon/', import.meta.url));
+
+/** Р-119: как снимается системная остановка — свойство канала из описания адаптера */
+const haltReleaseOf = (channel: string) => (channel === 'AMAZON' ? AMAZON_DESCRIPTOR : KAUFLAND_DESCRIPTOR).haltRelease.kind;
 
 /** Членства стенда [OQ-125, OQ-129]: одинаковые во всех мирах — псевдоним членства и роль */
 export const STAND_USERS: readonly Viewer[] = DEFAULT_MEMBERS.map((m) => ({ ...m }));
@@ -77,9 +84,10 @@ export interface LiveWorld {
 
 function accountsOf(scenario: Scenario): StandAccount[] {
   const { world } = scenario;
-  const accounts: StandAccount[] = [{ channelAccountId: world.channelAccountId, channel: world.account.channel ?? 'KAUFLAND', marketplaces: [...world.account.marketplaces] }];
+  const channel = world.account.channel ?? 'KAUFLAND';
+  const accounts: StandAccount[] = [{ channelAccountId: world.channelAccountId, channel, marketplaces: [...world.account.marketplaces], haltRelease: haltReleaseOf(channel) }];
   for (const a of world.pricing?.accounts ?? []) {
-    if (!accounts.some((x) => x.channelAccountId === a.channelAccountId)) accounts.push({ channelAccountId: a.channelAccountId, channel: a.channel, marketplaces: [...a.marketplaces] });
+    if (!accounts.some((x) => x.channelAccountId === a.channelAccountId)) accounts.push({ channelAccountId: a.channelAccountId, channel: a.channel, marketplaces: [...a.marketplaces], haltRelease: haltReleaseOf(a.channel) });
   }
   return accounts;
 }
@@ -94,10 +102,14 @@ export interface StandOptions {
 export async function buildStandWorlds(options: StandOptions = {}): Promise<LiveWorld[]> {
   const { filter = () => true, storeFactory = memoryStoreFactory } = options;
   const worlds: LiveWorld[] = [];
-  for (const { scenario } of loadScenarios(FIXTURES)) {
+  const sources = [
+    ...loadScenarios(FIXTURES).map(({ scenario }) => ({ scenario, adapter: kauflandUnderTest })),
+    ...loadScenarios(AMAZON_FIXTURES).filter(({ scenario }) => scenario.tags.includes('console-stand')).map(({ scenario }) => ({ scenario, adapter: amazonUnderTest })),
+  ];
+  for (const { scenario, adapter } of sources) {
     if (!scenario.world.pricing || !filter(scenario)) continue;
     const holder: { captured: { store: PricingStore; pipeline: PricingPipeline; clock: VirtualClock; tenantId: string; identity: { tenantId: string; membershipAlias(id: string): string } } | null } = { captured: null };
-    const report = await runScenario(scenario, kauflandUnderTest, undefined, storeFactory, {
+    const report = await runScenario(scenario, adapter, undefined, storeFactory, {
       async onFinish({ store, pipeline, clock, scenario: rebased }) {
         const tenantId = rebased.world.tenantId;
         holder.captured = { store: store!.store, pipeline: pipeline!, clock, tenantId, identity: store!.identity ?? { tenantId, membershipAlias: (id) => id } };

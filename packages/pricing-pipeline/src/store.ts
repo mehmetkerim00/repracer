@@ -551,6 +551,8 @@ export interface ConsoleState {
   members: ConsoleMemberRow[];
   /** Справочники слепка [Р-75]: версии стратегий, на которые ссылаются решения, наборы правил и профили Gate */
   strategies: StrategyDefinition[];
+  /** Шаг 23: имя стратегии, данное человеком при сохранении (последняя версия); стратегии посева имени не имеют */
+  strategyNames: Array<{ strategyId: string; name: string }>;
   explanationRulesets: ExplanationRuleset[];
   audit: ConsoleAuditRow[];
 }

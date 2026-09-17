@@ -29,13 +29,15 @@ const authenticatorPool = createPool(PG_URL.replace('svc_app@', 'svc_authenticat
 const provisioningPool = createPool(PG_URL.replace('svc_app@', 'svc_provisioning@'), { max: 1 });
 let memberUsers: Record<string, string> = {};
 const WORLD = 'kaufland/pipeline/happy-path';
+/** Шаг 23: мир Amazon — недоверие каналу и Automate Pricing в базе */
+const TRUST_WORLD = 'amazon/pipeline/console-channel-trust';
 
 let handle: ReturnType<typeof createStandApi>;
 let worlds: LiveWorld[] = [];
 before(async () => {
   const directory = new PgIdentityDirectory(authenticatorPool as never);
   memberUsers = await pgStandUsers(directory, onboardingPool);
-  worlds = await buildStandWorlds({ filter: (s) => s.id === WORLD, storeFactory: pgStoreFactory(pool, scanPool!, fxPool!, { memberUsers, memberEmails: STAND_EMAILS, joinMember: pgStandJoinMember(adminPool, directory), adminPool, provisioningPool }) });
+  worlds = await buildStandWorlds({ filter: (s) => s.id === WORLD || s.id === TRUST_WORLD, storeFactory: pgStoreFactory(pool, scanPool!, fxPool!, { memberUsers, memberEmails: STAND_EMAILS, joinMember: pgStandJoinMember(adminPool, directory), adminPool, provisioningPool }) });
   const issuer = createTestIssuer({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE });
   handle = createStandApi(worlds, {
     authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory }),
@@ -118,7 +120,7 @@ test('step 21 on PostgreSQL: preview and save of a strategy, difference screen a
   const saved = await post(owner, url('strategies'), { draft, writeScopeIds: ['ws-price-de-4101'], strategyId: null, previewToken: token, confirmed: true });
   assert.equal(saved.status, 200, JSON.stringify(saved.body));
   const list = (saved.body as { strategies: StrategyListView }).strategies;
-  assert.ok(list.strategies.some((x) => x.version === 1 && x.scopes.some((u) => u.writeScopeId === 'ws-price-de-4101')), JSON.stringify(list.strategies));
+  assert.ok(list.strategies.some((x) => x.version === 1 && x.scopes.some((u) => u.unit.writeScopeId === 'ws-price-de-4101' && u.version === 1) && x.name === 'Synthetic PG undercut'), JSON.stringify(list.strategies));
 
   const request = { writeScopeIds: ['ws-price-de-4101'], max: { kind: 'SET', minor: 2600 } };
   assert.equal((await post(operator, url('bounds', 'plan'), { request })).status, 403);
@@ -134,4 +136,33 @@ test('step 21 on PostgreSQL: preview and save of a strategy, difference screen a
   const feed = await handle({ method: 'GET', url: url('feed'), body: undefined, ...owner });
   assert.equal(feed.status, 200);
   assert.ok((feed.body as PriceFeedView).items.some((i) => i.to === '€17.75' && i.from === '€18.50'), JSON.stringify((feed.body as PriceFeedView).items));
+});
+
+test('step 23 on PostgreSQL: the database refuses a strategy for an offer the channel prices itself; a channel distrust is released with a second factor and audited', async () => {
+  const owner = await login('OWNER');
+  const url = (...parts: string[]) => `/api/worlds/${[TRUST_WORLD, ...parts].map(encodeURIComponent).join('/')}`;
+  const list = (await handle({ method: 'GET', url: url('strategies'), body: undefined, ...owner })).body as StrategyListView;
+  assert.deepEqual(list.channelPricingOffers.map((o) => o.label), ['Amazon A1PA6795UKMFR9 · unit SYN-SKU-8502']);
+  const ws = list.scopes.find((x) => x.unit.externalUnitId === 'SYN-SKU-8502')!.unit.writeScopeId;
+  const draft = { name: 'Synthetic PG fixed', params: { type: 'FIXED', priceMinor: 2050 }, deadbandMinor: 0 };
+  const preview = (await handle({ method: 'POST', url: url('strategies', 'preview'), body: { draft, writeScopeIds: [ws] }, ...owner })).body as StrategyPreviewView;
+  const refused = await handle({ method: 'POST', url: url('strategies'), body: { draft, writeScopeIds: [ws], strategyId: null, previewToken: preview.previewToken, confirmed: true }, ...owner });
+  assert.deepEqual([refused.status, (refused.body as { error: { code: string } }).error.code], [400, 'CHANNEL_PRICING_ACTIVE'], JSON.stringify(refused.body));
+
+  const stop = (await handle({ method: 'GET', url: url('stop'), body: undefined, ...owner })).body as StopView;
+  assert.equal(stop.distrusts.active.length, 1);
+  const operator = await login('OPERATOR');
+  const note = 'Price basis checked in the synthetic channel account';
+  const byOperator = await handle({ method: 'POST', url: url('distrusts', stop.distrusts.active[0]!.distrustId, 'release'), body: { note, confirmed: true }, ...operator });
+  assert.equal(byOperator.status, 403);
+  const released = await handle({ method: 'POST', url: url('distrusts', stop.distrusts.active[0]!.distrustId, 'release'), body: { note, confirmed: true }, ...owner });
+  assert.equal(released.status, 200, JSON.stringify(released.body));
+  const trust = worlds.find((w) => w.id === TRUST_WORLD)!;
+  const rows = await inTenant(adminPool, trust.identityTenantId, async (tx) => (await tx.query(
+    `SELECT e.action, e.actor_type, u.email, e.changes->>'note' AS note FROM audit.audit_event e LEFT JOIN platform.app_user u ON u.user_id = e.actor_user_id
+      WHERE e.entity_type = 'channel_distrust' ORDER BY e.recorded_at`)).rows);
+  assert.deepEqual(rows.map((r) => [r.action, r.actor_type, r.email, r.note]), [
+    ['pricing.distrust_created', 'SYSTEM', null, null],
+    ['pricing.distrust_released', 'USER', STAND_ACCOUNTS.find((a) => a.role === 'OWNER')!.email, note],
+  ]);
 });
