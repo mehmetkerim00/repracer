@@ -55,6 +55,9 @@ export type OutcomeTransition =
   /** Итог так и не узнан: сверка прекращается, единица BLOCKED; запись остаётся в своём статусе (DISPATCHED → FAILED без срока) */
   | { to: 'UNRESOLVED'; errorCode: string; reason: WriteReason };
 
+/** Отказы сверки, которые означают чужое ценообразование у оффера [Р-114, Р-115] */
+const CHANNEL_PRICING_CODES: ReadonlySet<string> = new Set(['CHANNEL_REPRICER_ACTIVE', 'CHANNEL_BOUNDS_PRESENT']);
+
 const at = (now: Instant, ms: number): Instant => new Date(Date.parse(now) + ms).toISOString();
 
 export function backoffMs(policy: RetryPolicy, attemptNo: number): number {
@@ -119,9 +122,10 @@ export function planReconciliationTransition(
       return { to: 'NOT_APPLIED', reason: { code: 'WRITE_OUTCOME_RECONCILED', params: { result: 'NOT_APPLIED' } } };
     }
   }
-  // Р-115 (шаг 22): обратное чтение отказало ошибкой «нужен человек» (у оффера правило автоматического ценообразования канала или
-  // границы канала) — сверку не повторять час, единица блокируется сразу с кодом канала; принятая запись остаётся принятой
-  if (result.kind === 'UNKNOWN' && result.error?.class === 'REQUIRES_HUMAN') {
+  // Р-115 (шаг 22): обратное чтение показало правило автоматического ценообразования канала или границы канала — сверку не повторять
+  // час, единица блокируется сразу с кодом канала; принятая запись остаётся принятой. Прочие отказы «нужен человек» (например, отказ
+  // сервера токенов) сразу не блокируют: они не про оффер и могут пройти (ревью шага 22, находка 2)
+  if (result.kind === 'UNKNOWN' && result.error?.class === 'REQUIRES_HUMAN' && CHANNEL_PRICING_CODES.has(result.error.code)) {
     const code = result.error.code;
     return { to: 'UNRESOLVED', errorCode: code, reason: { code: 'WRITE_SCOPE_BLOCKED', params: { code, action: sellerActionFor(code) } } };
   }

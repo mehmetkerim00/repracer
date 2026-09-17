@@ -416,6 +416,11 @@ SELECT pg_temp.expect_fail('fixed-price approval while the storefront is halted 
 SELECT pg_temp.expect_fail('dispatch of a fixed-price write while halted for a wrong price basis (Р-116)', $q$
   UPDATE tenant_data.channel_write SET status = 'DISPATCHED', attempt_count = 1 WHERE channel_write_id = 'a9000000-0000-0000-0000-000000000005' $q$,
   'halted for a wrong price basis by pricing_halt');
+-- Ревью шага 22, находка 11: и создание записи цены, а не только её отправка
+SELECT pg_temp.expect_fail('fixed-price write created while halted for a wrong price basis (Р-116)', $q$
+  INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, amount_minor, currency, price_basis, version, origin, price_decision_id)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', gen_random_uuid(), 'a6000000-0000-0000-0000-000000000001', 'PRICE', 1320, 'EUR', 'GROSS', 5, 'PRICE_DECISION', 'a8000000-0000-0000-0000-000000000023') $q$,
+  'halted for a wrong price basis by pricing_halt');
 SELECT pg_temp.expect_fail('second active halt for a wrong price basis on the same storefront (Р-116)', $q$
   INSERT INTO channel_data.pricing_halt (tenant_id, channel_account_id, channel, marketplace, reason_code)
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'CHANNEL_PRICE_BASIS_MISMATCH') $q$, 'pricing_halt_active_uq');

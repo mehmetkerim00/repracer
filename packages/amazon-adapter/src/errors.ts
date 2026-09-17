@@ -21,6 +21,8 @@ export function classifyFailure(result: Extract<SpApiResult<unknown>, { ok: fals
   const extra = { ...(first?.code ? { channelCode: first.code } : {}), ...(typeof result.status === 'number' ? { httpStatus: result.status } : {}) };
   if (result.tokenFailure) {
     // Токен LWA не получен: к SP-API запрос не отправлялся. Отказ сервера токенов — отозванное согласие или ключи приложения
+    // 429 сервера токенов — перегрузка, а не отказ согласия (ревью шага 22, находка 2)
+    if (result.status === 429) return channelError('RATE_LIMITED', 'BATCH', 'LWA token endpoint throttled', extra);
     return typeof result.status === 'number' && result.status >= 400 && result.status < 500
       ? channelError('AUTH_INVALID', 'ACCOUNT', 'LWA refused the refresh token', extra)
       : channelError('CHANNEL_UNAVAILABLE', 'BATCH', 'LWA token endpoint unavailable', extra);

@@ -9,10 +9,12 @@ import { gap, scopeById, unitOf, type Gap, type StandWorld, type UnitRef } from 
  *
  * Главное число — Р-117 (шаг 22): сколько раз ПОЛ удержал цену, то есть стратегия хотела уйти ниже min_price или пола маржи и была
  * удержана — поставлена на пол (CAPPED_AT_MIN_PRICE) или оставлена без изменения (TARGET_OUTSIDE_BOUNDS_HOLD с целью ниже пола).
- * «Без него вы продали бы на X дешевле» — сумма (пол − цель стратегии) по валютам отдельно [Р-71]. Отклонения Gate в норме равны
+ * Удержание — эпизод подряд идущих оценок одной единицы, а не каждая оценка. «Без него вы продали бы на X дешевле» — сумма по
+ * эпизодам (удержанная цена − цель стратегии; удержанная цена — пол или текущая цена, оставленная без изменения) по валютам отдельно [Р-71]. Отклонения Gate в норме равны
  * нулю: стратегия не предлагает цену за границей, её держит сам движок, поэтому считать их главным числом — считать ноль.
  * Цель стратегии выведена из цены конкурента и в вечный слепок не попадает [Р-85]: она есть только в горячем intent (3 дня, Р-28);
- * удержание старше — в счёте, но без суммы (unknownAmount), экран это показывает.
+ * старше видны только удержания, сдвинувшие цену на пол (решение со слепком), — в счёте без суммы (unknownAmount); удержания без
+ * изменения цены старше 3 дней не видны вовсе — пробел экрана, а не ноль.
  *
  * Второй раздел — прежний отчёт [Р-73]: отклонения Gate с отклонением от границы больше 10 %. Между тенантами ничего не
  * суммируется; период ограничен горячим буфером решений (30 дней): старше — нет данных, а не ноль.
@@ -47,7 +49,7 @@ export interface FloorHoldItem {
 
 export interface FloorHoldsView {
   count: number;
-  /** По валютам: сумма (пол − цель) удержаний с известной целью */
+  /** По валютам: сумма (удержанная цена − цель) удержаний с известной целью */
   withoutFloor: Array<{ currency: string; amount: string; minor: number }>;
   /** Удержания без суммы: цель старше горячего буфера intent */
   unknownAmount: number;
@@ -87,7 +89,6 @@ function floorHolds(world: StandWorld, from: number, to: number, m: Messages): F
   const below = new Map<string, number>();
   const items: Array<FloorHoldItem & { sortAt: string }> = [];
   const seenIntents = new Set<string>();
-  // kept — цена, которую удержал пол: сам пол (поставлена на пол) или текущая цена (оставлена без изменения)
   const push = (at: string, writeScopeId: string, kind: 'CAPPED' | 'HELD', target: number | null, floor: number, kept: number, currency: string, reason: Parameters<typeof describe>[0], decisionId: string | null) => {
     const scope = scopeById(world, writeScopeId);
     if (target !== null) below.set(currency, (below.get(currency) ?? 0) + (kept - target));
@@ -96,23 +97,45 @@ function floorHolds(world: StandWorld, from: number, to: number, m: Messages): F
       below: target === null ? null : m.money(kept - target, currency), reason: describe(reason, m), decisionId,
     });
   };
-  // Горячие intent (3 дня): цель стратегии известна
+  // Горячие intent (3 дня): цель стратегии известна. Удержание — эпизод: подряд идущие оценки одной единицы, в которых пол держит
+  // цену, — одно удержание; сумма эпизода — наибольшая за эпизод (ревью шага 22, находка 4: цена на полу давала удержание на каждой
+  // оценке, и сумма росла с их числом)
+  const byScope = new Map<string, typeof world.state.intents>();
   for (const i of world.state.intents) {
     if (!inPeriod(i.createdAt, from, to)) continue;
-    const capped = i.explanation.find((x) => x.code === 'CAPPED_AT_MIN_PRICE');
-    const held = i.reason.code === 'TARGET_OUTSIDE_BOUNDS_HOLD' ? i.reason : null;
-    const hit = capped ?? held;
-    if (!hit) continue;
-    const target = Number(hit.params.targetMinor);
-    const floor = Number(hit.params.minMinor);
-    // Удержание у потолка — не работа пола
-    if (!Number.isSafeInteger(target) || !Number.isSafeInteger(floor) || target >= floor) continue;
-    seenIntents.add(i.intentId);
-    const decision = world.state.decisions.find((d) => d.intentId === i.intentId) ?? null;
-    const kept = capped ? floor : Math.max(floor, i.currentMinor ?? floor);
-    push(i.createdAt, i.writeScopeId, capped ? 'CAPPED' : 'HELD', target, floor, kept, i.currency, hit, decision?.decisionId ?? null);
+    byScope.set(i.writeScopeId, [...(byScope.get(i.writeScopeId) ?? []), i]);
   }
-  // Решения старше горячего intent (до 30 дней): удержание видно по шагу слепка, цели нет [Р-85]
+  for (const intents of byScope.values()) {
+    intents.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+    type Episode = { at: string; writeScopeId: string; kind: 'CAPPED' | 'HELD'; target: number; floor: number; kept: number; currency: string; reason: Parameters<typeof describe>[0]; decisionId: string | null };
+    let episode = null as Episode | null;
+    const close = () => {
+      const e = episode as Episode | null;
+      if (e) push(e.at, e.writeScopeId, e.kind, e.target, e.floor, e.kept, e.currency, e.reason, e.decisionId);
+      episode = null;
+    };
+    for (const i of intents) {
+      seenIntents.add(i.intentId);
+      const capped = i.explanation.find((x) => x.code === 'CAPPED_AT_MIN_PRICE');
+      const held = i.reason.code === 'TARGET_OUTSIDE_BOUNDS_HOLD' ? i.reason : null;
+      const hit = capped ?? held;
+      const target = Number(hit?.params.targetMinor);
+      const floor = Number(hit?.params.minMinor);
+      // Удержание у потолка — не работа пола
+      if (!hit || !Number.isSafeInteger(target) || !Number.isSafeInteger(floor) || target >= floor) { close(); continue; }
+      // kept — цена, которую удержал пол: сам пол (поставлена на пол) или текущая цена (оставлена без изменения)
+      const kept = capped ? floor : Math.max(floor, i.currentMinor ?? floor);
+      const decision = world.state.decisions.find((d) => d.intentId === i.intentId) ?? null;
+      if (!episode) {
+        episode = { at: i.createdAt, writeScopeId: i.writeScopeId, kind: capped ? 'CAPPED' : 'HELD', target, floor, kept, currency: i.currency, reason: hit, decisionId: decision?.decisionId ?? null };
+      } else if (kept - target > (episode as Episode).kept - (episode as Episode).target) {
+        episode = { ...(episode as Episode), target, floor, kept, reason: hit, kind: capped ? 'CAPPED' : 'HELD', decisionId: decision?.decisionId ?? (episode as Episode).decisionId };
+      }
+    }
+    close();
+  }
+  // Решения старше горячего intent (до 30 дней): видны только удержания, которые сдвинули цену на пол (CHANGED с шагом слепка),
+  // без цели [Р-85]. Удержания без изменения цены (NO_OP) решения не создают и после 3 дней не видны вовсе (ревью шага 22, находка 7)
   for (const d of world.state.decisions) {
     if (seenIntents.has(d.intentId) || !inPeriod(d.decidedAt, from, to)) continue;
     const step = explanationOf(world, d)?.value.strategy.steps?.find((x) => x.code === 'CAPPED_AT_MIN_PRICE');

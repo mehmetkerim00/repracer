@@ -790,6 +790,10 @@ export class PgPricingStore implements PricingStore {
   }
 
   // --- оценка: транзакция 3 ----------------------------------------------------
+  async checkPriceBasis(tenantId: string, write: FieldWrite, observedMinor: number, now: Instant) {
+    return this.writeQueue.checkPriceBasis(tenantId, write, observedMinor, now);
+  }
+
   async recordDispatch(tenantId: string, write: FieldWrite, outcome: WriteOutcome, now: Instant): Promise<DispatchRecorded> {
     // Те же правила, что у диспетчера [Р-64]: временная ошибка — повтор со сроком, неизвестный итог — сверка обратным чтением,
     // постоянная — завершение с причиной. Раньше отказ канала оставлял запись FAILED без продолжения.

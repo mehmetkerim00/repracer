@@ -44,6 +44,11 @@ test('E: two-level budget — the pair limit and the application limit, whicheve
   assert.ok(!other.ok && other.level === 'APPLICATION');
   const loaded = new TwoLevelBudget({ applicationLoadRps: () => 100 });
   assert.equal(loaded.tryAcquire('S1', 'getListingsItem', t).ok, false, 'no application capacity left');
+  // Ревью шага 22, находка 3: свободно 19 rps из 100 — запросы идут со скоростью свободной доли, а не стоят
+  const partly = new TwoLevelBudget({ applicationLoadRps: () => 81 });
+  let passed = 0;
+  for (let ms = 0; ms < 10_000; ms += 10) if (partly.tryAcquire(`S${ms % 7}`, 'getListingsItem', t + ms).ok) passed += 1;
+  assert.ok(passed >= 150 && passed <= 200, `about 19 per second pass: ${passed}`);
   const header = new TwoLevelBudget();
   header.observePairLimit('S1', 'patchListingsItem', 1);
   for (let i = 0; i < 5; i++) header.tryAcquire('S1', 'patchListingsItem', t);

@@ -65,4 +65,7 @@ test('Р-115: a read-back refusal that requires a person blocks the write scope 
     { to: 'UNRESOLVED', errorCode: 'CHANNEL_REPRICER_ACTIVE', reason: { code: 'WRITE_SCOPE_BLOCKED', params: { code: 'CHANNEL_REPRICER_ACTIVE', action: 'DISABLE_CHANNEL_REPRICER' } } });
   const transient = { ...error, class: 'TRANSIENT' as const, code: 'CHANNEL_UNAVAILABLE' as const };
   assert.equal(planReconciliationTransition('ACCEPTED', { kind: 'UNKNOWN', error: transient }, 1, '2026-09-14T10:04:59.000Z', now, DEFAULT_RETRY_POLICY).to, 'RECONCILE');
+  // Ревью шага 22, находка 2: отказ «нужен человек» не про оффер (сервер токенов) единицу сразу не блокирует
+  const auth = { ...error, code: 'AUTH_INVALID' as const, scope: 'ACCOUNT' as const };
+  assert.equal(planReconciliationTransition('ACCEPTED', { kind: 'UNKNOWN', error: auth }, 1, '2026-09-14T10:04:59.000Z', now, DEFAULT_RETRY_POLICY).to, 'RECONCILE');
 });

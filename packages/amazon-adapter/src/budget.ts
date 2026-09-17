@@ -41,7 +41,9 @@ export class TwoLevelBudget implements AmazonRequestBudget {
     const pair = this.bucket(`pair:${sellerId}:${operation}`, limits.pair.ratePerSecond, limits.pair.burst, nowMs);
     const appRate = Math.max(0, limits.application.ratePerSecond - this.otherLoad());
     // Запас приложения — доля burst, оставшаяся после расхода других продавцов: при полной нагрузке запаса нет
-    const appBurst = Math.floor(this.applicationBurst(operation) * (appRate / limits.application.ratePerSecond));
+    // Пока приложение не исчерпано, хотя бы один запрос проходит: иначе при свободной доле меньше 1/burst запросы не шли вовсе
+    // (ревью шага 22, находка 3)
+    const appBurst = appRate > 0 ? Math.max(1, Math.floor(this.applicationBurst(operation) * (appRate / limits.application.ratePerSecond))) : 0;
     const app = this.bucket(`application:${operation}`, appRate, appBurst, nowMs);
     app.rate = appRate;
     app.burst = appBurst;

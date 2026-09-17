@@ -312,6 +312,8 @@ export interface PricingStore {
    * FAILED со сроком повтора, постоянная — завершение с причиной, OUTCOME_UNKNOWN — запись в полёте до сверки.
    */
   recordDispatch(tenantId: string, write: FieldWrite, outcome: WriteOutcome, now: Instant): Promise<DispatchRecorded>;
+  /** Р-116: как WriteQueueStore.checkPriceBasis — для первой отправки пути решения (ревью шага 22, находка 1) */
+  checkPriceBasis(tenantId: string, write: FieldWrite, observedMinor: number, now: Instant): Promise<{ haltId: string; reason: { code: string; params: Record<string, unknown> } } | null>;
 
   getPriceScope(tenantId: string, writeScopeId: string): Promise<PriceScopeContext | null>;
   resolveBounds(tenantId: string, writeScopeId: string): Promise<BoundsRead>;

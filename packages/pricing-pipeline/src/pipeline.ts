@@ -6,6 +6,8 @@ import type {
   ChannelAdapter,
   CompetitorQuery,
   CompetitorSnapshot,
+  FieldWrite,
+  IdentifiedObservation,
   InboundDelivery,
   InboundResult,
   Instant,
@@ -269,9 +271,26 @@ export function createPricingPipeline(deps: PipelineDeps) {
           stage: 'DISPATCH', outcome: outcome.status,
           ...(outcome.status === 'ACCEPTED' ? {} : { reason: channelRefusal(outcome.error) as Reason }),
         });
-        await handOff(ctx, write.writeScope.writeScopeId, await store.recordDispatch(ctx.tenantId, write, outcome, deps.now()), report);
+        const recorded = await store.recordDispatch(ctx.tenantId, write, outcome, deps.now());
+        // Р-116 на первой отправке: синхронный канал применил запись сразу, сверки диспетчером не будет (ревью шага 22, находка 1)
+        if (outcome.status === 'ACCEPTED' && outcome.appliedImmediately) await checkBasis(ctx, write, outcome.observation, report);
+        await handOff(ctx, write.writeScope.writeScopeId, recorded, report);
       }
     }
+  }
+
+  /** Цена покупателя против отправленной; расхождение на ставку НДС — остановка витрины хранилищем [Р-116], как диспетчер */
+  async function checkBasis(ctx: AdapterCallContext, write: FieldWrite, observation: IdentifiedObservation | undefined, report: ScopeReport): Promise<void> {
+    if (write.value.field !== 'PRICE' || !observation) return;
+    const price = observation.effectivePrice ?? (observation.value.field === 'PRICE' ? observation.value.price : null);
+    if (!price || price.currency !== write.value.price.currency || price.amountMinor === write.value.price.amountMinor) return;
+    const halt = await store.checkPriceBasis(ctx.tenantId, write, price.amountMinor, deps.now());
+    if (!halt) return;
+    report.stages.push({ stage: 'DISPATCH', outcome: 'PRICE_BASIS_HALT', reason: halt.reason as Reason });
+    await alerts.raise({ ...alertBase(ctx), code: 'PRICING_PRICE_BASIS_MISMATCH', severity: 'CRITICAL', details: {
+      writeScopeId: write.writeScope.writeScopeId, channelWriteId: write.channelWriteId, haltId: halt.haltId,
+      basisError: String(halt.reason.params.basisError ?? ''), vatRateBp: Number(halt.reason.params.vatRateBp ?? 0),
+    } });
   }
 
   /** Единица освободилась, а в очереди ждёт запись другой оценки — отправку продолжает диспетчер [Р-64] */

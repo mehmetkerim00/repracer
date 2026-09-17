@@ -265,7 +265,9 @@ export class PgWriteQueueStore implements WriteQueueStore {
         `INSERT INTO channel_data.pricing_halt (tenant_id, channel_account_id, channel, marketplace, reason_code, details, halted_at)
          VALUES ($1, $2, $3, $4, 'CHANNEL_PRICE_BASIS_MISMATCH', $5, $6)
          ON CONFLICT (tenant_id, channel_account_id, (COALESCE(marketplace, '*')), reason_code) WHERE released_at IS NULL DO NOTHING`,
-        [tenantId, sc.channel_account_id, sc.channel, sc.marketplace, JSON.stringify(reason.params), now]);
+        // В остановке — только наши значения: цена покупателя из канала (класс CHANNEL) жила бы дольше 18 месяцев [Р-3] вместе с
+        // неснятой остановкой (ревью шага 22, находка 10); она есть в алерте-причине и не хранится
+        [tenantId, sc.channel_account_id, sc.channel, sc.marketplace, JSON.stringify({ ...reason.params, observedMinor: undefined }), now]);
       const { rows: [h] } = await tx.query(
         `SELECT pricing_halt_id FROM channel_data.pricing_halt
           WHERE tenant_id = $1 AND channel_account_id = $2 AND marketplace = $3 AND reason_code = 'CHANNEL_PRICE_BASIS_MISMATCH' AND released_at IS NULL`,
@@ -307,7 +309,8 @@ export class PgWriteQueueStore implements WriteQueueStore {
     let scopeBlocked = false;
     switch (t.to) {
       case 'ACCEPTED':
-        if (from === 'DISPATCHED') await set(`status = 'ACCEPTED', accepted_at = $3, next_attempt_at = NULL`, [now]);
+        // Код прежней временной ошибки не остаётся у принятой записи: иначе он попадёт в причину HELD (ревью шага 22, находка 13)
+        if (from === 'DISPATCHED') await set(`status = 'ACCEPTED', accepted_at = $3, next_attempt_at = NULL, last_error_code = NULL`, [now]);
         if (t.applied) await set(`status = 'APPLIED', applied_at = $3, finished_at = $3, next_attempt_at = NULL`, [now]);
         status = t.applied ? 'APPLIED' : 'ACCEPTED';
         reason = t.reason;

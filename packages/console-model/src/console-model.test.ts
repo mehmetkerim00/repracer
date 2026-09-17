@@ -74,6 +74,8 @@ test('Р-117: the report counts the floor holding a strategy, not Gate rejection
       intents: [
         // Поставлена на пол: цель 11.95, пол 15.00 — без пола на 3.05 дешевле
         intent('i-1', '2026-09-17T10:00:00.000Z', { code: 'BUYBOX_UNDERCUT', params: {} }, [{ code: 'BUYBOX_UNDERCUT', params: {} }, { code: 'CAPPED_AT_MIN_PRICE', params: { targetMinor: 1195, minMinor: 1500, currency: 'EUR' } }], 1850),
+        // Рынок ушёл вверх: пол не нужен — удержание закончилось
+        intent('i-1b', '2026-09-17T10:30:00.000Z', { code: 'BUYBOX_UNDERCUT', params: {} }, [{ code: 'BUYBOX_UNDERCUT', params: {} }], 1500),
         // Оставлена без изменения на 18.50: цель 14.00 ниже пола 15.00 — без пола на 4.50 дешевле
         intent('i-2', '2026-09-17T11:00:00.000Z', { code: 'TARGET_OUTSIDE_BOUNDS_HOLD', params: { targetMinor: 1400, minMinor: 1500, maxMinor: 2500, currency: 'EUR' } }, [], 1850),
         // Удержание потолком — не работа пола
@@ -88,6 +90,11 @@ test('Р-117: the report counts the floor holding a strategy, not Gate rejection
   assert.equal(day.headline, 'The floor held the price 2 times in the last 1 day; without it you would have sold €7.55 cheaper');
   assert.deepEqual(day.floorHolds.items.map((i) => [i.kind, i.target, i.floor, i.below]), [['HELD', '€14.00', '€15.00', '€4.50'], ['CAPPED', '€11.95', '€15.00', '€3.05']]);
   assert.equal(day.gateHeadline, 'Your bounds stopped 0 dangerous changes in the last 1 day');
-  assert.equal(dangerousReport(world, 7, en).floorHolds.count, 3);
+  // За 7 дней оценка 15.09 и 17.09 10:00 идут подряд без оценки вне пола — одно удержание; вместе с удержанием после 10:30 — два
+  assert.equal(dangerousReport(world, 7, en).floorHolds.count, 2);
+  // Ревью шага 22, находка 4: цена стоит на полу, стратегия оценивается 12 раз подряд — одно удержание, а не двенадцать
+  const repeated = { ...(world as { state: object }), state: { ...(world as { state: object }).state, intents: Array.from({ length: 12 }, (_, n) =>
+    intent(`r-${n}`, `2026-09-17T11:${String(n * 5).padStart(2, '0')}:00.000Z`, { code: 'ALREADY_AT_TARGET', params: {} }, [{ code: 'CAPPED_AT_MIN_PRICE', params: { targetMinor: 1195, minMinor: 1500, currency: 'EUR' } }], 1500)) } } as never;
+  assert.equal(dangerousReport(repeated, 1, en).headline, 'The floor held the price 1 time in the last 1 day; without it you would have sold €3.05 cheaper');
   assert.equal(dangerousReport(world, 1, messagesFor('de')).headline, 'Die Untergrenze hat den Preis in den letzten 1 Tag 2-mal gehalten; ohne sie hätten Sie 7,55 € billiger verkauft');
 });

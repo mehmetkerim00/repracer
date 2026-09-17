@@ -127,7 +127,8 @@ export function amazonRequestChecker(world: World, clock: VirtualClock, forbidde
       if (request.rawUrl.includes(s) || request.rawBody.includes(s) || Object.values(h).includes(s)) v.push(`${where}: secret leaked into the request`);
     }
     for (const attribute of forbiddenAttributes) {
-      if (request.rawBody.includes(`"${attribute}"`)) v.push(`${where}: body writes ${attribute}, which is never written (Р-114)`);
+      // Ключ значения или путь операции PATCH (`/attributes/<атрибут>`): ревью шага 22, находка 8
+      if (request.rawBody.includes(`"${attribute}"`) || request.rawBody.includes(`/attributes/${attribute}`)) v.push(`${where}: body writes ${attribute}, which is never written (Р-114)`);
     }
     return v;
   };

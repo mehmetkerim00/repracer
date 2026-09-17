@@ -608,7 +608,10 @@ export const STEP22_ROWS = [
       m(dropTrigger('ac_price_decision_basis_halt_guard', 'channel_data.price_decision'),
         smoke('fixed-price approval while the storefront is halted for a wrong price basis (Р-116)')),
       m(dropTrigger('bc_channel_write_basis_halt_guard', 'tenant_data.channel_write'),
-        smoke('dispatch of a fixed-price write while halted for a wrong price basis (Р-116)')),
+        smoke('dispatch of a fixed-price write while halted for a wrong price basis (Р-116)'), smoke('fixed-price write created while halted for a wrong price basis (Р-116)')),
+      // Ревью шага 22, находка 11: ветка создания записи — своя проверка
+      m(replaceInFunction('tenant_data.channel_write_basis_halt_guard()', "IF NEW.field <> 'PRICE' OR (TG_OP = 'UPDATE'", "IF NEW.field <> 'PRICE' OR TG_OP = 'INSERT' OR (TG_OP = 'UPDATE'"),
+        smoke('fixed-price write created while halted for a wrong price basis (Р-116)')),
       m(replaceInFunction('channel_data.price_basis_halt_for(uuid,uuid)', "AND h.reason_code = 'CHANNEL_PRICE_BASIS_MISMATCH'", "AND h.reason_code = 'NONE'"),
         smoke('fixed-price approval while the storefront is halted for a wrong price basis (Р-116)'),
         smoke('dispatch of a fixed-price write while halted for a wrong price basis (Р-116)')),

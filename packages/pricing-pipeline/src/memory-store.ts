@@ -202,6 +202,8 @@ interface CompetitorRow {
 const KAUFLAND_STOREFRONTS: Record<string, { currency: string; basis: PriceBasis }> = { de: { currency: 'EUR', basis: 'GROSS' }, at: { currency: 'EUR', basis: 'GROSS' } };
 const productKey = (k: { marketplace: string; channelProductRef: string; condition: string }) => `${k.marketplace}|${k.channelProductRef}|${k.condition}`;
 const COMPETITOR_STRATEGIES = new Set(['MATCH_BUYBOX', 'BEAT_LOWEST']);
+/** Ставки НДС по умолчанию витрин стенда (0033, 0075: amazon.de — Германия) */
+const DEFAULT_VAT_BP: Readonly<Record<string, number>> = { de: 1900, at: 2000, A1PA6795UKMFR9: 1900 };
 const NOTE_OK = (note: string | null | undefined) => typeof note === 'string' && note.trim().length >= 10 && note.length <= 2000;
 
 export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
@@ -765,7 +767,9 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     if (write.value.field !== 'PRICE') return null;
     const row = this.scopes.get(write.writeScope.writeScopeId);
     if (!row) return null;
-    const vatRateBp = row.taxRegime === 'VAT_INCLUDED' && row.cost?.tax.regime === 'VAT_INCLUDED' ? row.cost.tax.vatRateBp : null;
+    // Как tenant_data.effective_vat_rate_bp: ставка товара, иначе ставка страны витрины по умолчанию [Р-53] (ревью шага 22, находка 9)
+    const vatRateBp = row.taxRegime !== 'VAT_INCLUDED' ? null
+      : row.cost?.tax.regime === 'VAT_INCLUDED' ? row.cost.tax.vatRateBp : DEFAULT_VAT_BP[row.marketplace] ?? null;
     const sentMinor = write.value.price.amountMinor;
     const basisError = priceBasisMismatch(sentMinor, observedMinor, vatRateBp);
     if (!basisError) return null;
@@ -779,7 +783,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       const window = 1800;
       halt = {
         haltId, channelAccountId: row.channelAccountId, marketplace: row.marketplace, reasonCode: 'CHANNEL_PRICE_BASIS_MISMATCH', rejectedSnapshotId: null,
-        details: reason.params, haltedAt: now, reviewWindowSeconds: window, nextReviewAt: new Date(Date.parse(now) + window * 1000).toISOString(), releasedAt: null, releasedKind: null,
+        details: Object.fromEntries(Object.entries(reason.params).filter(([k]) => k !== 'observedMinor')), haltedAt: now, reviewWindowSeconds: window, nextReviewAt: new Date(Date.parse(now) + window * 1000).toISOString(), releasedAt: null, releasedKind: null,
       };
       this.halts.push(halt);
       this.auditHalt('pricing.halt_created', haltId, now, null, null);
@@ -804,6 +808,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       case 'ACCEPTED':
         w.acceptedAt = w.acceptedAt ?? now;
         w.nextAttemptAt = null;
+        if (from === 'DISPATCHED') w.lastErrorCode = null;
         w.status = t.applied ? 'APPLIED' : 'ACCEPTED';
         reason = t.reason;
         if (from === 'DISPATCHED') this.priceAccepted(w, now);
