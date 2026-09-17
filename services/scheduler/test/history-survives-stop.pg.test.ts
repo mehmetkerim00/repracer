@@ -110,7 +110,7 @@ test('Р-126: the scheduler stopped for a day loses no competitor snapshot histo
   const d6 = at(6).slice(0, 10);
   assert.ok(raised.some((a) => a.code === 'ANALYTICS_EXPORT_FAILED' && a.severity === 'CRITICAL' && String(a.details.failed).includes(`SNAPSHOTS@${d6}`)), 'failing export is alerted');
   const backlogCritical = raised.findIndex((a) => a.code === 'ANALYTICS_EXPORT_BACKLOG' && a.severity === 'CRITICAL');
-  const forceDropped = raised.findIndex((a) => a.code === 'ANALYTICS_PARTITION_FORCE_DROPPED' && String(a.details.partitions).includes(partitionOf(6)));
+  const forceDropped = raised.findIndex((a) => a.code === 'ANALYTICS_PARTITION_FORCE_DROPPED' && String(a.details.partitions).includes(`channel_data.competitor_snapshot_log@${d6}`));
   assert.ok(backlogCritical >= 0 && forceDropped > backlogCritical, `backlog is CRITICAL before the loss, the loss is alerted: ${JSON.stringify(raised.map((a) => [a.code, a.severity]))}`);
   assert.ok(!(await partitions()).includes(partitionOf(6)), 'after 14 days the unexported partition is force-dropped');
   clickHouseDown = false;

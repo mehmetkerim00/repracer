@@ -72,8 +72,9 @@ export function pgJobDeps(o: PgJobDepsOptions): JobDeps {
     },
     async forceDroppedSince(since: Instant) {
       const { rows } = await o.schedulerPool.query(
-        `SELECT object_name FROM maintenance.retention_run WHERE action = 'PARTITION_FORCE_DROPPED' AND executed_at >= $1::timestamptz ORDER BY executed_at`, [since]);
-      return rows.map((r) => String(r.object_name));
+        `SELECT table_name, cutoff FROM maintenance.retention_run WHERE action = 'PARTITION_FORCE_DROPPED' AND executed_at >= $1::timestamptz ORDER BY executed_at`, [since]);
+      // object_name — OID удалённой секции (0040): после удаления по нему имени не найти; в алерт — таблица и начало суток секции
+      return rows.map((r) => `${String(r.table_name)}@${r.cutoff ? new Date(r.cutoff).toISOString().slice(0, 10) : '?'}`);
     },
     maintenance: {
       async databaseNow() { return new Date((await o.schedulerPool.query('SELECT now() AS n')).rows[0].n).toISOString(); },
