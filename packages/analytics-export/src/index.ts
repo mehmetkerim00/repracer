@@ -1,5 +1,5 @@
 export { ClickHouseError, ClickHouseHttp, type ClickHouseConfig } from './clickhouse.ts';
-export { exportDay, previousUtcDay, type DailyExportReport } from './daily.ts';
+export { EXPORT_GROUP_OF, EXPORT_GROUPS, exportDay, previousUtcDay, type DailyExportReport, type ExportGroup } from './daily.ts';
 export { CLICKHOUSE_SNAPSHOT_SOURCES, dayPartitionName, exportCompetitorSnapshotsDay, exportCompletedWritesDay, exportDecisionDay, snapshotLogRow, listSnapshotExportSkips, resolveSnapshotExportSkip, type SnapshotExportSkip, type DayRange, type PartitionExport, type SnapshotSkipReason } from './exporter.ts';
 export { completedWriteRow, intentClassOf, priceDecisionRow, priceIntentNoopRow, priceIntentRow, type IntentClass, type PgRow } from './rows.ts';
 export { archiveKey, buildCoreArchiveBundle, CORE_ARCHIVE_FORMAT, coreExplanationRow, decodeBundle, encodeBundle, exportCoreArchive, MemoryArchiveSink, verifyCoreArchiveBundle, type ArchiveSink, type CoreArchiveBundle, type CoreArchiveExport } from './archive.ts';

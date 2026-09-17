@@ -46,10 +46,30 @@ test('Р-126 on PostgreSQL: a valid lease cannot be taken over; an expired lease
   const winner = one ? 'a' : 'b';
   await assert.rejects(poolB.query(`UPDATE maintenance.scheduled_job SET lease_owner = 'intruder', lease_until = now() + interval '1 hour' WHERE job_key = $1`, [name]),
     /is leased by/, 'the database refuses a takeover of a valid lease');
+  // Ревью шага 25, находка 6: освободить чужую действующую аренду, чтобы занять её вторым запросом, база тоже не даёт
+  await assert.rejects(poolB.query(`UPDATE maintenance.scheduled_job SET lease_owner = NULL, lease_until = NULL WHERE job_key = $1`, [name]),
+    /is released only by its owner/, 'the database refuses releasing a valid lease of another scheduler');
   await new Promise((r) => setTimeout(r, 1_100));
   assert.ok(await state.claim(name, 'c', '2026-09-17T10:00:00.000Z', 60), 'the lease of a crashed scheduler expires');
   const run = { jobKey: name, jobName: name, slotAt: '2026-09-17T10:00:00.000Z', owner: winner, startedAt: '2026-09-17T10:00:00.000Z', finishedAt: '2026-09-17T10:00:01.000Z',
     outcome: 'SUCCEEDED' as const, lagSeconds: 0, items: 0, errorCode: null };
   await assert.rejects(state.finish(name, winner, { outcome: 'SUCCEEDED', nextDueAt: '2026-09-17T10:01:00.000Z', coalesced: 0, error: null, run }), LeaseLostError);
   assert.equal((await state.runs(name)).length, 0, 'the lost lease wrote no run');
+});
+
+test('review of step 25, finding 6 on PostgreSQL: a run longer than its lease renews it — a second scheduler does not start the same job', async () => {
+  const name = key('pgtest-long');
+  let runs = 0;
+  const job: JobSpec = {
+    name, scope: null, intervalSeconds: 3600, catchUp: 'LATEST', firstDueAt: () => '2026-09-17T10:00:00.000Z', lagWarningSeconds: 999_999, lagCriticalSeconds: 9_999_999,
+    leaseSeconds: 2, run: async () => { runs++; await new Promise((r) => setTimeout(r, 3_600)); return { items: 0 }; },
+  };
+  const now = () => '2026-09-17T10:00:00.000Z';
+  const a = createScheduler({ state: new PgSchedulerState(poolA), source: { jobs: async () => [job] }, owner: 'a', now, alerts: sink });
+  const b = createScheduler({ state: new PgSchedulerState(poolB), source: { jobs: async () => [job] }, owner: 'b', now, alerts: sink });
+  const first = a.tick();
+  await new Promise((r) => setTimeout(r, 2_800));
+  const second = await b.tick();
+  await first;
+  assert.deepEqual([runs, second.skippedLeased], [1, [name]], 'the lease of the running job is renewed past its 2 s');
 });

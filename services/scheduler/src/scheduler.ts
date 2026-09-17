@@ -1,5 +1,5 @@
 import type { AlertSink, Instant } from '@repracer/channel-port';
-import type { CatchUp, JobScope, JobState, RunRecord, SchedulerStateStore } from './state.ts';
+import { LeaseLostError, type CatchUp, type JobScope, type JobState, type RunRecord, type SchedulerStateStore } from './state.ts';
 
 /**
  * Р-126 (шаг 25): процесс-планировщик. Каждый такт:
@@ -19,6 +19,8 @@ export interface JobRunContext {
   /** Число успешных запусков до этого — окно сверки по кругу [Р-121] */
   runIndex: number;
   scope: JobScope | null;
+  /** Момент начала запуска: сроки вызовов каналов считаются от него, а не от начала такта (ревью шага 25, находка 1) */
+  startedAt: Instant;
 }
 
 export interface JobSpec {
@@ -54,6 +56,7 @@ export interface TickReport {
   runs: RunRecord[];
   lagging: Array<{ jobKey: string; lagSeconds: number; level: 'WARNING' | 'CRITICAL' }>;
   skippedLeased: string[];
+  lostLeases: string[];
 }
 
 export const jobKeyOf = (name: string, scope: JobScope | null) => (scope ? `${name}:${scope.tenantId}:${scope.channelAccountId}` : name);
@@ -82,8 +85,10 @@ export function createScheduler(options: SchedulerOptions) {
     let items: number | null = null;
     let errorCode: string | null = null;
     let error: string | null = null;
+    // Долгий запуск продлевает аренду каждую треть её срока: второй процесс не начнёт ту же работу (ревью шага 25, находка 6)
+    const heartbeat = setInterval(() => { void state.renew(claimed.jobKey, owner, spec.leaseSeconds).catch(() => false); }, Math.max(200, (spec.leaseSeconds * 1000) / 3));
     try {
-      const r = await spec.run({ slotAt: claimed.nextDueAt, now, runIndex: claimed.runsCompleted, scope: spec.scope });
+      const r = await spec.run({ slotAt: claimed.nextDueAt, now, runIndex: claimed.runsCompleted, scope: spec.scope, startedAt });
       items = r.items;
       for (const a of r.alerts ?? []) await alerts.raise({ ...a, details: { job: claimed.jobKey, ...a.details } });
     } catch (e) {
@@ -91,6 +96,8 @@ export function createScheduler(options: SchedulerOptions) {
       errorCode = code(e);
       // Текст ошибки — без тела запросов и секретов: только первые 300 символов сообщения
       error = String((e as Error)?.message ?? e).slice(0, 300);
+    } finally {
+      clearInterval(heartbeat);
     }
     const finishedAt = options.now();
     const next = outcome === 'SUCCEEDED'
@@ -119,7 +126,8 @@ export function createScheduler(options: SchedulerOptions) {
         byKey.set(jobKey, spec);
         await state.ensure({ jobKey, jobName: spec.name, scope: spec.scope, catchUp: spec.catchUp, intervalSeconds: spec.intervalSeconds, firstDueAt: spec.firstDueAt(now) });
       }
-      const report: TickReport = { now, runs: [], lagging: [], skippedLeased: [] };
+      const report: TickReport = { now, runs: [], lagging: [], skippedLeased: [], lostLeases: [] };
+      await state.prune([...byKey.keys()], 100);
       const due = (await state.list()).filter((j) => byKey.has(j.jobKey) && Date.parse(j.nextDueAt) <= Date.parse(now));
       // Отставание до запусков: планировщик, простоявший дольше порога, сообщает об этом и после того, как догонит слоты
       const lagBefore = new Map(due.map((j) => [j.jobKey, Math.max(0, (Date.parse(now) - Date.parse(j.nextDueAt)) / 1000)]));
@@ -131,9 +139,17 @@ export function createScheduler(options: SchedulerOptions) {
             if (slot === 0) report.skippedLeased.push(job.jobKey);
             break;
           }
-          const { run, succeeded } = await runOne(spec, claimed, now);
-          report.runs.push(run);
-          if (!succeeded) break;
+          try {
+            const { run, succeeded } = await runOne(spec, claimed, now);
+            report.runs.push(run);
+            if (!succeeded) break;
+          } catch (error) {
+            // Аренду потеряли во время запуска: итог не записан, работа повторится у владельца аренды; остальные работы такта идут дальше
+            if (!(error instanceof LeaseLostError)) throw error;
+            report.lostLeases.push(job.jobKey);
+            await alerts.raise({ code: 'SCHEDULER_LEASE_LOST', severity: 'WARNING', details: { job: job.jobKey } });
+            break;
+          }
         }
       }
       // Отставание — после запусков: работа, догнавшая слоты в этом такте, не отстаёт

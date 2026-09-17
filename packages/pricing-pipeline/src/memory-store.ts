@@ -1437,6 +1437,8 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   readonly pollState = new Map<string, Instant>();
 
   async listPollCandidates(_tenantId: string, channelAccountId: string, now: Instant): Promise<PollCandidate[]> {
+    // Движение 10 000 б. п. — цена не изменилась: не волатильность (ревью шага 25, находка 2). Движение хранит товар как «ref|condition»:
+    // сравнение с одним ref не находило ни одного движения, и в памяти все товары были холодными (найдено шагом «остаётся холодным» фикстуры)
     const since = Date.parse(now) - 48 * 3_600_000;
     const out = new Map<string, PollCandidate>();
     for (const s of this.scopes.values()) {
@@ -1444,7 +1446,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       const query = { marketplace: s.marketplace, channelProductRef: s.channelProductRef, condition: s.condition };
       const key = `${channelAccountId}|${productKey(query)}`;
       if (out.has(key)) continue;
-      const moves = (this.movesByMarketplace.get(s.marketplace) ?? []).filter((m) => m.at >= since && m.move.productRef === s.channelProductRef && m.move.moveBp !== 0).length;
+      const moves = (this.movesByMarketplace.get(s.marketplace) ?? []).filter((m) => m.at >= since && m.move.productRef === `${s.channelProductRef}|${s.condition}` && m.move.moveBp !== 10_000).length;
       out.set(key, { query, lastPolledAt: this.pollState.get(key) ?? null, changesLast30Days: moves * 15 });
     }
     return [...out.values()];

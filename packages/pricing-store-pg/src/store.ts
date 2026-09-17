@@ -1542,7 +1542,7 @@ export class PgPricingStore implements PricingStore {
         `SELECT p.marketplace, p.channel_product_ref, p.condition, ps.last_polled_at,
                 (SELECT count(*) FROM channel_data.competitor_move mv
                   WHERE mv.tenant_id = $1 AND mv.channel_account_id = $2 AND mv.marketplace = p.marketplace AND mv.channel_product_ref = p.channel_product_ref
-                    AND mv.condition = p.condition AND mv.evaluated_at >= $3::timestamptz - interval '48 hours' AND mv.move_bp <> 0)::int AS moves
+                    AND mv.condition = p.condition AND mv.evaluated_at >= $3::timestamptz - interval '48 hours' AND mv.move_bp <> 10000)::int AS moves
            FROM (SELECT DISTINCT m.marketplace, m.channel_product_ref, m.condition FROM tenant_data.offer_mapping m
                   WHERE m.tenant_id = $1 AND m.channel_account_id = $2 AND m.status <> 'ENDED' AND m.channel_product_ref IS NOT NULL) p
            LEFT JOIN channel_data.competitor_poll_state ps

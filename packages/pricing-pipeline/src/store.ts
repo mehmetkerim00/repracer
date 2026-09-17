@@ -515,7 +515,8 @@ export interface PricingStore {
   pickReconciliationSample(tenantId: string, channelAccountId: string, size: number, cycle: number): Promise<{ queries: CompetitorQuery[]; total: number }>;
   /**
    * Р-47, Р-126 (шаг 25): товары аккаунта для ярусного опроса планировщика — время последнего опроса (не последнего состояния: его
-   * обновляют уведомления) и оценка волатильности: изменений цены конкурентов за 48 часов × 15 (движения хранятся 2 суток, Р-42)
+   * обновляют уведомления) и оценка волатильности: изменений цены конкурентов за 48 часов × 15 (движения хранятся 2 суток, Р-42); движение
+   * 10 000 б. п. (новая / прежняя = 1) — цена не изменилась и не считается (ревью шага 25, находка 2)
    */
   listPollCandidates(tenantId: string, channelAccountId: string, now: Instant): Promise<PollCandidate[]>;
   /** Р-126: опрос товаров выполнен — время последнего опроса */

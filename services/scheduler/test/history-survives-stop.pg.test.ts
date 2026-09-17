@@ -10,9 +10,10 @@ import { createScheduler, jobSource, PgSchedulerState, pgJobDeps, type JobDeps }
  * сроку глобально) и настоящий ClickHouse (CI). Время — виртуальное: функции удаления, секций и закрытия суток принимают момент.
  *  1. Сутки D0 — снимки; планировщик стоит всю D1, пока пишутся снимки D1; возвращается в D2 01:00 и выгружает сутки D0 и D1 по очереди.
  *  2. D5 01:00 — удаление по сроку убирает секции D0 и D1 из PostgreSQL: они выгружены и проверены — в ClickHouse все 6 снимков.
- *  3. Негативный контроль: ClickHouse недоступен 16 суток, планировщик работает — выгрузка D6 проваливается каждые сутки, алерты
- *     SCHEDULER_JOB_FAILING и отставание CRITICAL идут с первых суток, а через 14 суток после конца D6 секция удаляется принудительно:
- *     снимки D6 потеряны. Потеря — только при провале выгрузки 14 суток подряд, не при остановке планировщика.
+ *  3. Негативный контроль: ClickHouse недоступен 16 суток, планировщик работает — выгрузка D6 проваливается каждые сутки (повтор из
+ *     отставания), алерт ANALYTICS_EXPORT_FAILED — с первых суток, отставание ANALYTICS_EXPORT_BACKLOG CRITICAL — с 72 часов, а через 14 суток
+ *     после конца D6 секция удаляется принудительно с алертом ANALYTICS_PARTITION_FORCE_DROPPED: снимки D6 потеряны. Потеря — только при
+ *     провале выгрузки 14 суток подряд, не при остановке планировщика. Слот выгрузки при провале продвигается (ревью шага 25, находка 7).
  * Нужны REPRACER_PG_URL, REPRACER_PG_ADMIN_URL, REPRACER_CH_URL и логины ClickHouse [Р-84]. Данные синтетические.
  */
 const CH_URL = process.env.REPRACER_CH_URL;
@@ -50,9 +51,9 @@ test('Р-126: the scheduler stopped for a day loses no competitor snapshot histo
   const base = pgJobDeps({ schedulerPool: scheduler, exporterPool: exporter, ingest, verifier, descriptorOf: () => null, pipelineFor: () => { throw new Error('no account jobs'); } });
   const deps: JobDeps = {
     ...base, accounts: async () => [],
-    exportDay: async (range) => {
+    exportDay: async (range, groups) => {
       if (clickHouseDown) throw new Error('CLICKHOUSE_UNAVAILABLE: synthetic outage');
-      return exportDay(exporter, ingest, verifier, range);
+      return exportDay(exporter, ingest, verifier, range, groups);
     },
   };
   const s = createScheduler({ state: new PgSchedulerState(scheduler), source: jobSource(deps), owner: 'scheduler-1', now: () => now,
@@ -106,12 +107,15 @@ test('Р-126: the scheduler stopped for a day loses no competitor snapshot histo
     await s.tick();
   }
   const raised = alerts.slice(firstFailing);
-  assert.ok(raised.some((a) => a.code === 'SCHEDULER_JOB_FAILING' && a.details.job === 'analytics-export-day'), 'failing export is alerted');
-  assert.ok(raised.some((a) => a.code === 'SCHEDULER_JOB_LAGGING' && a.severity === 'CRITICAL' && a.details.job === 'analytics-export-day'), 'lag is CRITICAL before the loss');
+  const d6 = at(6).slice(0, 10);
+  assert.ok(raised.some((a) => a.code === 'ANALYTICS_EXPORT_FAILED' && a.severity === 'CRITICAL' && String(a.details.failed).includes(`SNAPSHOTS@${d6}`)), 'failing export is alerted');
+  const backlogCritical = raised.findIndex((a) => a.code === 'ANALYTICS_EXPORT_BACKLOG' && a.severity === 'CRITICAL');
+  const forceDropped = raised.findIndex((a) => a.code === 'ANALYTICS_PARTITION_FORCE_DROPPED' && String(a.details.partitions).includes(partitionOf(6)));
+  assert.ok(backlogCritical >= 0 && forceDropped > backlogCritical, `backlog is CRITICAL before the loss, the loss is alerted: ${JSON.stringify(raised.map((a) => [a.code, a.severity]))}`);
   assert.ok(!(await partitions()).includes(partitionOf(6)), 'after 14 days the unexported partition is force-dropped');
   clickHouseDown = false;
   now = at(23, 1);
   const recovered = await s.tick();
+  assert.deepEqual(recovered.runs.filter((r) => r.jobName === 'analytics-export-day').map((r) => r.outcome), ['SUCCEEDED'], 'the export slot was not held by the outage');
   assert.equal(await inClickHouse(6, 7), 0, 'the snapshots of D6 are lost: the only way history disappears');
-  assert.ok(alerts.some((a) => a.code === 'ANALYTICS_EXPORT_PARTITION_MISSING' && String(a.details.partitions).includes('competitor_snapshot_log')), JSON.stringify(recovered.runs.slice(0, 3)));
 });

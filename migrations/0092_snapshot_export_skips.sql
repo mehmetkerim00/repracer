@@ -4,9 +4,18 @@
 -- исправления. Секция журнала снимков с неразобранными пропусками не отмечается проверенной — база отклоняет verified_at, — и потому не
 -- удаляется по сроку, пока пропуск не разобран (принудительно — через 14 суток, с CRITICAL-отставанием выгрузки раньше).
 -- Снимок без цен (конкурентов нет) больше не пропускается: валюта и база цены — из справочника витрины (выгрузка читает platform.marketplace).
--- Человек — оператор платформы: учётной записи оператора в модели нет, имя и заметка — обязательные поля (OQ-182).
+-- Человек — оператор платформы: учётной записи оператора в модели нет, имя и заметка — обязательные поля (OQ-182). Разбор пишет отдельная
+-- роль repracer_export_triage, а не роль выгрузки, которая пишет пропуски (ревью шага 25, находка 9).
 
 BEGIN;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'repracer_export_triage') THEN
+    CREATE ROLE repracer_export_triage NOLOGIN NOBYPASSRLS;
+  END IF;
+END $$;
+GRANT USAGE ON SCHEMA maintenance TO repracer_export_triage;
 
 SET ROLE repracer_owner;
 
@@ -31,7 +40,9 @@ REVOKE ALL ON maintenance.snapshot_export_skip FROM repracer_app;
 REVOKE INSERT, UPDATE, DELETE ON maintenance.snapshot_export_skip FROM repracer_admin;
 CREATE POLICY snapshot_export_skip_owner ON maintenance.snapshot_export_skip TO repracer_owner USING (true) WITH CHECK (true);
 CREATE POLICY snapshot_export_skip_exporter ON maintenance.snapshot_export_skip TO repracer_exporter USING (true) WITH CHECK (true);
+CREATE POLICY snapshot_export_skip_triage ON maintenance.snapshot_export_skip FOR SELECT TO repracer_export_triage USING (true);
 GRANT SELECT, INSERT ON maintenance.snapshot_export_skip TO repracer_exporter;
+GRANT SELECT ON maintenance.snapshot_export_skip TO repracer_export_triage;
 SELECT security.grant_retention('maintenance.snapshot_export_skip');
 
 CREATE TABLE maintenance.snapshot_export_skip_resolution (
@@ -49,8 +60,11 @@ SELECT security.register_table('maintenance.snapshot_export_skip_resolution', 'S
 REVOKE ALL ON maintenance.snapshot_export_skip_resolution FROM repracer_app;
 REVOKE INSERT, UPDATE, DELETE ON maintenance.snapshot_export_skip_resolution FROM repracer_admin;
 CREATE POLICY snapshot_export_skip_resolution_owner ON maintenance.snapshot_export_skip_resolution TO repracer_owner USING (true) WITH CHECK (true);
-CREATE POLICY snapshot_export_skip_resolution_exporter ON maintenance.snapshot_export_skip_resolution TO repracer_exporter USING (true) WITH CHECK (true);
-GRANT SELECT, INSERT ON maintenance.snapshot_export_skip_resolution TO repracer_exporter;
+-- Выгрузка разбор только читает (отметка секции проверенной); пишет разбор роль оператора
+CREATE POLICY snapshot_export_skip_resolution_exporter ON maintenance.snapshot_export_skip_resolution FOR SELECT TO repracer_exporter USING (true);
+CREATE POLICY snapshot_export_skip_resolution_triage ON maintenance.snapshot_export_skip_resolution TO repracer_export_triage USING (true) WITH CHECK (true);
+GRANT SELECT ON maintenance.snapshot_export_skip_resolution TO repracer_exporter;
+GRANT SELECT, INSERT ON maintenance.snapshot_export_skip_resolution TO repracer_export_triage;
 SELECT security.grant_retention('maintenance.snapshot_export_skip_resolution');
 
 -- Пропуск и его разбор — служебная запись о снимке, который хранится 18 месяцев в ClickHouse: столько же
@@ -86,5 +100,50 @@ ALTER FUNCTION maintenance.partition_export_skip_guard() OWNER TO repracer_owner
 REVOKE ALL ON FUNCTION maintenance.partition_export_skip_guard() FROM PUBLIC;
 CREATE TRIGGER a_partition_export_skip_guard BEFORE INSERT OR UPDATE ON maintenance.partition_export
   FOR EACH ROW EXECUTE FUNCTION maintenance.partition_export_skip_guard();
+
+CREATE OR REPLACE FUNCTION maintenance.purge_tenant_channel_data(p_tenant_id uuid)
+ RETURNS bigint
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'pg_catalog', 'pg_temp'
+AS $function$
+DECLARE
+  t     text;
+  n     bigint;
+  total bigint := 0;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM tenant_data.tenant
+                  WHERE tenant_id = p_tenant_id AND kind = 'CUSTOMER' AND status IN ('OFFBOARDING', 'CLOSED')) THEN
+    RAISE EXCEPTION 'tenant % must be a CUSTOMER in OFFBOARDING or CLOSED', p_tenant_id;
+  END IF;
+  FOREACH t IN ARRAY ARRAY[
+    'channel_data.price_decision', 'channel_data.price_intent', 'channel_data.observed_channel_state',
+    'channel_data.observed_price_daily', 'channel_data.divergence_case', 'channel_data.competitor_state',
+    'channel_data.fee_estimate', 'channel_data.reservation', 'channel_data.sync_job',
+    'channel_data.listing_migration_check', 'channel_data.write_submission',
+    'channel_data.pricing_halt_review', 'channel_data.pricing_halt', 'channel_data.channel_distrust', 'channel_data.offer_channel_pricing', 'channel_data.inbound_notification', 'channel_data.offer_pricing_health', 'channel_data.notification_loss_verdict', 'channel_data.notification_loss_check', 'channel_data.competitor_poll_state', 'channel_data.competitor_snapshot_log', 'channel_data.competitor_move_latest', 'channel_data.competitor_move', 'channel_data.competitor_price_daily',
+    'channel_data.rejected_competitor_snapshot']
+  LOOP
+    EXECUTE format('DELETE FROM %s WHERE tenant_id = $1', t) USING p_tenant_id;
+    GET DIAGNOSTICS n = ROW_COUNT;
+    total := total + n;
+  END LOOP;
+
+  -- Шаг 25 (ревью, находка 10): пропуски выгрузки и их разбор хранят идентификаторы снимков тенанта
+  DELETE FROM maintenance.snapshot_export_skip_resolution r
+   USING maintenance.snapshot_export_skip s WHERE s.competitor_snapshot_id = r.competitor_snapshot_id AND s.subject_tenant_id = p_tenant_id;
+  GET DIAGNOSTICS n = ROW_COUNT;
+  total := total + n;
+  DELETE FROM maintenance.snapshot_export_skip WHERE subject_tenant_id = p_tenant_id;
+  GET DIAGNOSTICS n = ROW_COUNT;
+  total := total + n;
+
+  INSERT INTO maintenance.tenant_purge_status (subject_tenant_id, postgres_channel_purged_at)
+  VALUES (p_tenant_id, now())
+  ON CONFLICT (subject_tenant_id) DO UPDATE SET postgres_channel_purged_at = now();
+  INSERT INTO maintenance.retention_run (table_name, action, rows_affected, subject_tenant_id)
+  VALUES ('channel_data.*', 'TENANT_PURGED', total, p_tenant_id);
+  RETURN total;
+END $function$;
 
 COMMIT;

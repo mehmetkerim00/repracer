@@ -55,6 +55,25 @@ END $fn$;
 CREATE TRIGGER b_price_history_mark_not_applied AFTER INSERT ON tenant_data.channel_write_history
   FOR EACH ROW EXECUTE FUNCTION tenant_data.price_history_mark_not_applied();
 
+/**
+ * Ревью шага 25, находка 3: отметка скрывает цену из вечной свёртки и окна Omnibus — вставить её можно только для строки истории цен записи,
+ * которая действительно завершена NOT_APPLIED, с той же единицей записи и моментом
+ */
+CREATE FUNCTION tenant_data.price_history_not_applied_guard() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = pg_catalog AS $fn$
+BEGIN
+  IF NOT EXISTS (
+       SELECT 1 FROM tenant_data.channel_write_history w
+         JOIN tenant_data.price_history h ON h.tenant_id = w.tenant_id AND h.channel_write_id = w.channel_write_id
+        WHERE w.tenant_id = NEW.tenant_id AND w.channel_write_id = NEW.channel_write_id AND w.field = 'PRICE' AND w.final_status = 'NOT_APPLIED'
+          AND h.price_history_id = NEW.price_history_id AND h.write_scope_id = NEW.write_scope_id AND h.accepted_at = NEW.accepted_at) THEN
+    RAISE EXCEPTION 'price history % is not a price of a write the channel did not apply (risk 28)', NEW.price_history_id USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END $fn$;
+CREATE TRIGGER a_price_history_not_applied_guard BEFORE INSERT ON tenant_data.price_history_not_applied
+  FOR EACH ROW EXECUTE FUNCTION tenant_data.price_history_not_applied_guard();
+
 CREATE OR REPLACE FUNCTION tenant_data.omnibus_raw_prices(p_tenant_id uuid, p_write_scope_id uuid, p_tz text, p_before timestamp with time zone)
  RETURNS TABLE(accepted_at timestamp with time zone, amount_minor bigint)
  LANGUAGE sql
@@ -93,7 +112,8 @@ BEGIN
   SELECT least(
            (SELECT s.created_at FROM tenant_data.write_scope s WHERE s.tenant_id = p_tenant_id AND s.write_scope_id = p_write_scope_id),
            (SELECT min(h.accepted_at) FROM tenant_data.price_history h
-             WHERE h.tenant_id = p_tenant_id AND h.write_scope_id = p_write_scope_id AND h.price_type IN ('REGULAR', 'SALE')),
+             WHERE h.tenant_id = p_tenant_id AND h.write_scope_id = p_write_scope_id AND h.price_type IN ('REGULAR', 'SALE')
+               AND NOT EXISTS (SELECT 1 FROM tenant_data.price_history_not_applied na WHERE na.tenant_id = h.tenant_id AND na.price_history_id = h.price_history_id)),
            (SELECT min(d.first_accepted_at) FROM tenant_data.price_daily_effective d
              WHERE d.tenant_id = p_tenant_id AND d.write_scope_id = p_write_scope_id AND d.price_type IN ('REGULAR', 'SALE')))
     INTO since;
@@ -134,7 +154,7 @@ BEGIN
 
   -- Р-124: цена, выставленная мимо нас и замеченная сверкой (кейс расхождения Р-55), — тоже цена окна; проверка с ней не достоверна
   SELECT min(c.observed_amount_minor), count(*)::int INTO external_m, external_n FROM channel_data.divergence_case c
-   WHERE c.tenant_id = p_tenant_id AND c.write_scope_id = p_write_scope_id AND c.field = 'PRICE' AND c.observed_amount_minor IS NOT NULL
+   WHERE c.tenant_id = p_tenant_id AND c.write_scope_id = p_write_scope_id AND c.field = 'PRICE' AND c.cause = 'EXTERNAL_CHANGE' AND c.observed_amount_minor IS NOT NULL
      AND c.opened_at >= from_ts AND c.opened_at < p_starts_at;
 
   RETURN QUERY SELECT

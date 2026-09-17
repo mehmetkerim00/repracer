@@ -2,14 +2,14 @@
  * OQ-181 (шаг 25): разбор снимков, пропущенных выгрузкой в ClickHouse, оператором платформы.
  *   node --experimental-strip-types scripts/ops/snapshot-export-skips.mts list
  *   node --experimental-strip-types scripts/ops/snapshot-export-skips.mts resolve <competitor_snapshot_id> LOSS_ACCEPTED|EXPORTED_AFTER_FIX "<operator>" "<note>"
- * REPRACER_EXPORTER_PG_URL — роль svc_exporter. Выводятся только идентификаторы, причина и разбор — без содержимого снимков.
+ * REPRACER_TRIAGE_PG_URL — роль svc_export_triage (разбор — не роль выгрузки, ревью шага 25, находка 9). Выводятся только идентификаторы, причина и разбор — без содержимого снимков.
  * Следующая выгрузка суток (планировщик, работа analytics-export-day) отмечает секцию проверенной, когда разобраны все её пропуски.
  */
 import { listSnapshotExportSkips, resolveSnapshotExportSkip } from '@repracer/analytics-export';
 import { createPool } from '@repracer/pricing-store-pg';
 
-const url = process.env.REPRACER_EXPORTER_PG_URL;
-if (!url) throw new Error('REPRACER_EXPORTER_PG_URL is required');
+const url = process.env.REPRACER_TRIAGE_PG_URL;
+if (!url) throw new Error('REPRACER_TRIAGE_PG_URL is required');
 const pool = createPool(url, { max: 1, applicationName: 'repracer-ops-snapshot-skips' });
 try {
   const [command, id, resolution, operator, note] = process.argv.slice(2);

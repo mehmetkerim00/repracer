@@ -50,6 +50,10 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_exporter') THEN
     CREATE ROLE svc_exporter LOGIN IN ROLE repracer_exporter;
   END IF;
+  -- Шаг 25 [OQ-181]: разбор пропущенных выгрузкой снимков оператором
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_export_triage') THEN
+    CREATE ROLE svc_export_triage LOGIN IN ROLE repracer_export_triage;
+  END IF;
 END $$;
 
 SET ROLE repracer_owner;

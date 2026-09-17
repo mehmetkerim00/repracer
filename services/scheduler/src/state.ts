@@ -66,6 +66,10 @@ export interface SchedulerStateStore {
   /** Итог запуска и освобождение аренды; аренда потеряна (истекла и занята другим) — исключение LEASE_LOST, итог не пишется */
   finish(jobKey: string, owner: string, input: FinishInput): Promise<void>;
   runs(jobKey?: string): Promise<RunRecord[]>;
+  /** Продление действующей аренды владельцем во время долгого запуска; false — аренда потеряна (ревью шага 25, находка 6) */
+  renew(jobKey: string, owner: string, leaseSeconds: number): Promise<boolean>;
+  /** Работы, которых нет среди действующих, без журнала запусков и без изменений olderThanDays суток, удаляются (отключённые аккаунты) */
+  prune(activeJobKeys: readonly string[], olderThanDays: number): Promise<number>;
 }
 
 export class LeaseLostError extends Error {
@@ -133,5 +137,25 @@ export class MemorySchedulerState implements SchedulerStateStore {
 
   async runs(jobKey?: string): Promise<RunRecord[]> {
     return this.runLog.filter((r) => !jobKey || r.jobKey === jobKey);
+  }
+
+  async renew(jobKey: string, owner: string, leaseSeconds: number): Promise<boolean> {
+    const j = this.jobs.get(jobKey);
+    const wall = Date.parse(this.clock());
+    if (!j || j.leaseOwner !== owner || Date.parse(j.leaseUntil!) <= wall) return false;
+    j.leaseUntil = new Date(wall + leaseSeconds * 1000).toISOString();
+    return true;
+  }
+
+  async prune(activeJobKeys: readonly string[], olderThanDays: number): Promise<number> {
+    const active = new Set(activeJobKeys);
+    const before = Date.parse(this.clock()) - olderThanDays * 86_400_000;
+    let n = 0;
+    for (const [key, j] of this.jobs) {
+      if (active.has(key) || this.runLog.some((r) => r.jobKey === key) || Date.parse(j.lastFinishedAt ?? j.firstDueAt) > before) continue;
+      this.jobs.delete(key);
+      n++;
+    }
+    return n;
   }
 }

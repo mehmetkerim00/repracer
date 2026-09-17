@@ -229,6 +229,9 @@ VALUES ('a0000000-0000-0000-0000-00000000000a', greatest(date_trunc('day', now()
 INSERT INTO tenant_data.channel_write_history (tenant_id, channel_write_id, finished_at, write_scope_id, field, amount_minor, currency, price_basis, version, origin, final_status, attempt_count, created_at)
 SELECT 'a0000000-0000-0000-0000-00000000000a', w, now(), 'a6000000-0000-0000-0000-000000000001', 'PRICE', a, 'EUR', 'GROSS', v, 'ENGINE', 'NOT_APPLIED', 1, now()
   FROM (VALUES ('a9250000-0000-4000-8000-000000000001'::uuid, 900, 9251), ('a9250000-0000-4000-8000-000000000002'::uuid, 850, 9252)) AS x(w, a, v);
+SELECT pg_temp.expect_fail('a price of an applied write marked as not applied (risk 28)', $q$
+  INSERT INTO tenant_data.price_history_not_applied (tenant_id, price_history_id, channel_write_id, write_scope_id, accepted_at)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', gen_random_uuid(), gen_random_uuid(), 'a6000000-0000-0000-0000-000000000001', now()) $q$, 'is not a price of a write the channel did not apply');
 DO $$ BEGIN
   IF (SELECT count(*) FROM tenant_data.price_history_not_applied WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a' AND channel_write_id IN ('a9250000-0000-4000-8000-000000000001', 'a9250000-0000-4000-8000-000000000002')) <> 2 THEN
     RAISE EXCEPTION 'a price write the channel did not apply is not marked (risk 28)';
@@ -271,6 +274,8 @@ SELECT pg_temp.expect_fail('a scheduled job taken over while another scheduler h
   UPDATE maintenance.scheduled_job SET lease_owner = 'scheduler-b', lease_until = now() + interval '1 hour' WHERE job_key = 'smoke-job' $q$, 'is leased by scheduler-a');
 SELECT pg_temp.expect_fail('a scheduled job key outside the job and account format (Р-126)', $q$
   INSERT INTO maintenance.scheduled_job (job_key, job_name, catch_up, interval_seconds, next_due_at) VALUES ('Smoke Job; drop', 'x', 'LATEST', 60, now()) $q$, 'scheduled_job_key_format');
+SELECT pg_temp.expect_fail('an active scheduled job lease released by another scheduler (Р-126)', $q$
+  UPDATE maintenance.scheduled_job SET lease_owner = NULL, lease_until = NULL WHERE job_key = 'smoke-job' $q$, 'is released only by its owner');
 SELECT pg_temp.expect_fail('a scheduled job with an unknown catch-up rule (Р-126)', $q$
   INSERT INTO maintenance.scheduled_job (job_key, job_name, catch_up, interval_seconds, next_due_at) VALUES ('smoke-job-2', 'smoke-job-2', 'SOMETIMES', 60, now()) $q$, 'scheduled_job_catch_up_known');
 SELECT pg_temp.expect_fail('a scheduled job without a positive interval (Р-126)', $q$

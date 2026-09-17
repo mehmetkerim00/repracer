@@ -4,7 +4,7 @@
   "channel": "KAUFLAND",
   "apiVersion": "2.44.0",
   "title": "Р-47, Р-126: ярусный опрос планировщика — опрашиваются только товары, чей ярус истёк, по времени последнего опроса",
-  "description": "Шаг 25. Три товара без движений конкурентов — холодный ярус, раз в 24 часа. Первый вызов опрашивает все три (опроса ещё не было), второй сразу после — ни одного, хотя уведомление обновило состояние товара 3 (ярус считается от опроса, а не от последнего состояния). Через 25 часов — снова все три; максимум запросов за вызов 2 — сначала давно не опрошенные, третий остаётся на следующий вызов.",
+  "description": "Шаг 25. Три товара без движений конкурентов — холодный ярус, раз в 24 часа. Первый вызов опрашивает все три (опроса ещё не было), второй сразу после — ни одного, хотя уведомление обновило состояние товара 3 (ярус считается от опроса, а не от последнего состояния). Через 25 часов — снова все три; максимум запросов за вызов 2 — сначала давно не опрошенные, третий остаётся на следующий вызов. Ещё через 2 часа — два из трёх: у товаров 1 и 3 первый опрос сдвинул цену конкурента относительно состояния (17,80 и 17,50 против 18,00) — одно движение за 48 часов, тёплый ярус (раз в час); товар 2 без сдвига (коэффициент 1,0 = 10 000 б. п.) остаётся холодным. Ревью шага 25, находка 2: условие «движения» было move_bp <> 0 и делало горячим каждый опрошенный товар; этот шаг нашёл и второй дефект — хранилище в памяти не находило ни одного движения (сравнивало «ref|condition» с ref), и все товары в памяти были холодными.",
   "tags": [
     "pipeline",
     "r-47",
@@ -515,6 +515,30 @@
           }
         ]
       }
+    },
+    {
+      "id": "two-hours-later",
+      "kind": "advanceClock",
+      "ms": 7200000
+    },
+    {
+      "id": "warm-due-cold-not",
+      "kind": "pipelinePollDue",
+      "budgetRequestsPerSecond": 10,
+      "maxQueries": 10,
+      "expect": {
+        "candidates": 3,
+        "due": 2,
+        "failures": 0,
+        "snapshots": [
+          {
+            "channelProductRef": "362121001"
+          },
+          {
+            "channelProductRef": "362121003"
+          }
+        ]
+      }
     }
   ],
   "exchanges": [
@@ -760,6 +784,102 @@
     },
     {
       "id": "buybox-362121003-next-call",
+      "request": {
+        "method": "GET",
+        "path": "/v2/buybox",
+        "query": {
+          "id_product": "362121003",
+          "storefront": "de",
+          "condition": "new",
+          "limit": "10"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": {
+            "id_product": 362121003,
+            "condition": "new",
+            "storefront": "de",
+            "num_units": 2,
+            "units": [
+              {
+                "buybox_rank": 1,
+                "seller": "Synthetic Competitor",
+                "price": 17.5,
+                "delivery_time_min": 1,
+                "delivery_time_max": 2,
+                "shipping_rate": 0,
+                "fulfillment_type": "fulfilled_by_merchant",
+                "condition": "new"
+              },
+              {
+                "buybox_rank": 2,
+                "seller": "Synthetic Seller",
+                "price": 18.5,
+                "delivery_time_min": 1,
+                "delivery_time_max": 2,
+                "shipping_rate": 0,
+                "fulfillment_type": "fulfilled_by_merchant",
+                "condition": "new",
+                "id_unit": 4303,
+                "id_offer": "SYN-OFFER-4303"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "buybox-362121001-two-hours-later",
+      "request": {
+        "method": "GET",
+        "path": "/v2/buybox",
+        "query": {
+          "id_product": "362121001",
+          "storefront": "de",
+          "condition": "new",
+          "limit": "10"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": {
+            "id_product": 362121001,
+            "condition": "new",
+            "storefront": "de",
+            "num_units": 2,
+            "units": [
+              {
+                "buybox_rank": 1,
+                "seller": "Synthetic Competitor",
+                "price": 17.8,
+                "delivery_time_min": 1,
+                "delivery_time_max": 2,
+                "shipping_rate": 0,
+                "fulfillment_type": "fulfilled_by_merchant",
+                "condition": "new"
+              },
+              {
+                "buybox_rank": 2,
+                "seller": "Synthetic Seller",
+                "price": 18.5,
+                "delivery_time_min": 1,
+                "delivery_time_max": 2,
+                "shipping_rate": 0,
+                "fulfillment_type": "fulfilled_by_merchant",
+                "condition": "new",
+                "id_unit": 4301,
+                "id_offer": "SYN-OFFER-4301"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "buybox-362121003-two-hours-later",
       "request": {
         "method": "GET",
         "path": "/v2/buybox",

@@ -55,6 +55,8 @@ export class PgSchedulerState implements SchedulerStateStore {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
+      // Освобождение действующей аренды — только владельцем (scheduled_job_lease_guard)
+      await client.query(`SELECT set_config('repracer.scheduler_owner', $1, true)`, [owner]);
       const ok = input.outcome === 'SUCCEEDED';
       const { rowCount } = await client.query(
         `UPDATE maintenance.scheduled_job
@@ -76,6 +78,21 @@ export class PgSchedulerState implements SchedulerStateStore {
     } finally {
       client.release();
     }
+  }
+
+  async renew(jobKey: string, owner: string, leaseSeconds: number): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
+      `UPDATE maintenance.scheduled_job SET lease_until = now() + make_interval(secs => $3)
+        WHERE job_key = $1 AND lease_owner = $2 AND lease_until > now()`, [jobKey, owner, leaseSeconds]);
+    return rowCount === 1;
+  }
+
+  async prune(activeJobKeys: readonly string[], olderThanDays: number): Promise<number> {
+    const { rowCount } = await this.pool.query(
+      `DELETE FROM maintenance.scheduled_job j
+        WHERE NOT (j.job_key = ANY ($1::text[])) AND j.lease_owner IS NULL AND j.updated_at < now() - make_interval(days => $2)
+          AND NOT EXISTS (SELECT 1 FROM maintenance.scheduled_job_run r WHERE r.job_key = j.job_key)`, [activeJobKeys, olderThanDays]);
+    return rowCount ?? 0;
   }
 
   async runs(jobKey?: string): Promise<RunRecord[]> {

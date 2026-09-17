@@ -537,6 +537,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
     const read = await adapter.readCompetitors(ctx, queries);
     const snapshots: SnapshotReport[] = [];
     const reconciliation = emptyReconciliation();
+    const processingFailed: CompetitorQuery[] = [];
     const graceSeconds = options.reconcile?.graceSeconds ?? DEFAULT_LOSS_GRACE_SECONDS;
     const count = (kind: ReconciliationKind | undefined) => {
       if (kind) reconciliation[RECONCILIATION_KEYS[kind]] += 1;
@@ -561,11 +562,19 @@ export function createPricingPipeline(deps: PipelineDeps) {
         }
         continue;
       }
-      const report = await processSnapshot(ctx, snapshot, undefined, options.delivery ?? 'POLL', options.reconcile ? { graceSeconds } : undefined);
-      count(report.reconciliation);
-      snapshots.push(report);
+      // Ревью шага 25, находка 8: сбой обработки одного товара не обрывает пакет опроса
+      try {
+        const report = await processSnapshot(ctx, snapshot, undefined, options.delivery ?? 'POLL', options.reconcile ? { graceSeconds } : undefined);
+        count(report.reconciliation);
+        snapshots.push(report);
+      } catch (error) {
+        if (options.delivery === 'PUSH_FETCH') throw error;
+        processingFailed.push({ marketplace: snapshot.marketplace, channelProductRef: snapshot.channelProductRef, condition: snapshot.condition });
+        await emit(ctx, [{ kind: 'log', level: 'WARN', code: 'COMPETITOR_SNAPSHOT_PROCESSING_FAILED', message: 'COMPETITOR_SNAPSHOT_PROCESSING_FAILED',
+          details: { marketplace: snapshot.marketplace, channelProductRef: snapshot.channelProductRef, error: String((error as Error).message).slice(0, 200) } }]);
+      }
     }
-    return { snapshots, failures: read.failures, ...(options.reconcile ? { reconciliation } : {}) };
+    return { snapshots, failures: read.failures, processingFailed, ...(options.reconcile ? { reconciliation } : {}) };
   }
 
   /** Р-52: свежая независимая выборка; прошла проверки — остановка снимается с записью в журнал */
@@ -659,11 +668,12 @@ export function createPricingPipeline(deps: PipelineDeps) {
         .sort((a, b) => (a.lastPolledAt === null ? 0 : Date.parse(a.lastPolledAt)) - (b.lastPolledAt === null ? 0 : Date.parse(b.lastPolledAt))
           || (keyOf(a.query) < keyOf(b.query) ? -1 : keyOf(a.query) > keyOf(b.query) ? 1 : 0))
         .slice(0, options.maxQueries);
-      if (due.length === 0) return { candidates: candidates.length, due: 0, snapshots: [], failures: [], plan: { coldTierExceedsBudget: plan.coldTierExceedsBudget, demoted: plan.demoted.length } };
+      if (due.length === 0) return { candidates: candidates.length, due: 0, snapshots: [], failures: [], processingFailed: 0, plan: { coldTierExceedsBudget: plan.coldTierExceedsBudget, demoted: plan.demoted.length } };
       const polled = await pollCompetitors(ctx, due.map((c) => c.query), options.reconcile ? { reconcile: options.reconcile } : {});
+      // Отказ канала — товар повторяется следующим вызовом; сбой обработки — отмечается опрошенным: постоянный сбой не опрашивает пакет каждую минуту
       const failed = new Set(polled.failures.map((f) => keyOf(f.query)));
       await store.markPolled(ctx.tenantId, ctx.channelAccountId, due.map((c) => c.query).filter((q) => !failed.has(keyOf(q))), now);
-      return { candidates: candidates.length, due: due.length, ...polled, plan: { coldTierExceedsBudget: plan.coldTierExceedsBudget, demoted: plan.demoted.length } };
+      return { candidates: candidates.length, due: due.length, ...polled, processingFailed: polled.processingFailed.length, plan: { coldTierExceedsBudget: plan.coldTierExceedsBudget, demoted: plan.demoted.length } };
     },
 
     /** Р-121: сверка по кругу (Amazon — квота опроса не позволяет опрашивать все товары): очередное окно товаров аккаунта */

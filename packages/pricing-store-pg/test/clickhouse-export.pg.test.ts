@@ -28,11 +28,14 @@ const pool = createPool(PG_URL, { max: 4, applicationName: 'repracer-ch-export-t
 const provisioning = createPool(PG_URL.replace('svc_app@', 'svc_provisioning@'), { max: 1, applicationName: 'repracer-ch-export-provisioning' });
 const admin = createPool(PG_URL.replace('svc_app@', 'svc_admin@'), { max: 2, applicationName: 'repracer-ch-export-admin' });
 const exporter = createPool(PG_URL.replace('svc_app@', 'svc_exporter@'), { max: 2, applicationName: 'repracer-ch-export-exporter' });
+// Ревью шага 25, находка 9: пропуски разбирает отдельная роль — выгрузка не отмечает разобранными свои же пропуски
+const triage = createPool(PG_URL.replace('svc_app@', 'svc_export_triage@'), { max: 1, applicationName: 'repracer-ch-export-triage' });
 after(async () => {
   await pool.end();
   await provisioning.end();
   await admin.end();
   await exporter.end();
+  await triage.end();
 });
 
 const ACCOUNT = '20000000-0000-4000-8000-000000000200';
@@ -190,11 +193,13 @@ test('Р-122, step 24: a day of the competitor snapshot log is exported to Click
   // OQ-181 (шаг 25): пропуск записан; человек принимает потерю с заметкой — повторная выгрузка отмечает сутки проверенными
   const skips = (await listSnapshotExportSkips(exporter, { unresolvedOnly: true })).filter((k) => k.subjectTenantId === w.tenantId);
   assert.deepEqual(skips.map((k) => [k.competitorSnapshotId, k.reason]), [[logged[2]!.id, 'CURRENCY_UNSUPPORTED']]);
-  await assert.rejects(resolveSnapshotExportSkip(exporter, { competitorSnapshotId: logged[2]!.id, resolution: 'LOSS_ACCEPTED', resolvedBy: 'ops-synthetic', note: 'ok' }), /snapshot_export_skip_resolution_note/);
-  await resolveSnapshotExportSkip(exporter, { competitorSnapshotId: logged[2]!.id, resolution: 'LOSS_ACCEPTED', resolvedBy: 'ops-synthetic', note: 'Synthetic GBP snapshot: loss accepted' });
+  await assert.rejects(resolveSnapshotExportSkip(exporter, { competitorSnapshotId: logged[2]!.id, resolution: 'LOSS_ACCEPTED', resolvedBy: 'ops-synthetic', note: 'Synthetic GBP snapshot: loss accepted' }),
+    /permission denied/, 'the exporter cannot resolve its own skips');
+  await assert.rejects(resolveSnapshotExportSkip(triage, { competitorSnapshotId: logged[2]!.id, resolution: 'LOSS_ACCEPTED', resolvedBy: 'ops-synthetic', note: 'ok' }), /snapshot_export_skip_resolution_note/);
+  await resolveSnapshotExportSkip(triage, { competitorSnapshotId: logged[2]!.id, resolution: 'LOSS_ACCEPTED', resolvedBy: 'ops-synthetic', note: 'Synthetic GBP snapshot: loss accepted' });
   // Другие тесты той же базы могли оставить неразобранные пропуски этих суток — разбираем и их, чтобы проверить отметку секции
-  for (const k of (await listSnapshotExportSkips(exporter, { unresolvedOnly: true })).filter((x) => x.partitionName === first.partitionName)) {
-    await resolveSnapshotExportSkip(exporter, { competitorSnapshotId: k.competitorSnapshotId, resolution: 'LOSS_ACCEPTED', resolvedBy: 'ops-synthetic', note: 'Synthetic skip of another test' });
+  for (const k of (await listSnapshotExportSkips(triage, { unresolvedOnly: true })).filter((x) => x.partitionName === first.partitionName)) {
+    await resolveSnapshotExportSkip(triage, { competitorSnapshotId: k.competitorSnapshotId, resolution: 'LOSS_ACCEPTED', resolvedBy: 'ops-synthetic', note: 'Synthetic skip of another test' });
   }
   const third = await exportCompetitorSnapshotsDay(exporter, ingest, verifier, range);
   assert.equal(third.verified, true, JSON.stringify(third));

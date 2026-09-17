@@ -1,7 +1,9 @@
-import type { DailyExportReport, DayRange } from '@repracer/analytics-export';
+import type { DailyExportReport, DayRange, ExportGroup } from '@repracer/analytics-export';
 import type { AdapterCallContext, ChannelAccountId, ChannelDescriptor, Instant, TenantId } from '@repracer/channel-port';
 import { DEFAULT_LOSS_GRACE_SECONDS, type PricingPipeline } from '@repracer/pricing-pipeline';
 import type { JobSource, JobSpec } from './scheduler.ts';
+
+type JobAlert = { code: string; severity: 'WARNING' | 'CRITICAL'; details: Record<string, string | number | boolean | null> };
 
 /**
  * Р-126 (шаг 25): работы планировщика. Работа по аккаунту появляется, только если канал её даёт (описание канала): ярусный опрос —
@@ -44,14 +46,21 @@ export interface JobDeps {
   accounts(): Promise<SchedulerAccount[]>;
   descriptorOf(channel: string): ChannelDescriptor | null;
   pipelineFor(account: SchedulerAccount): PricingPipeline;
-  exportDay(range: DayRange): Promise<DailyExportReport>;
-  /** Сутки с невыгруженными или непроверенными секциями за lookbackDays до now */
-  unverifiedDays(now: Instant, lookbackDays: number): Promise<DayRange[]>;
+  exportDay(range: DayRange, groups?: readonly ExportGroup[]): Promise<DailyExportReport>;
+  /**
+   * Ревью шага 25, находки 4, 5, 7: закрытые сутки за lookbackDays, секция которых не выгружена, не проверена или изменилась после проверки
+   * (опоздавшие строки), — по группам таблиц; повторяется только группа, а не все таблицы суток
+   */
+  exportBacklog(now: Instant, lookbackDays: number): Promise<Array<{ group: ExportGroup; range: DayRange; reason: 'NOT_EXPORTED' | 'UNVERIFIED' | 'ROWS_CHANGED' }>>;
+  /** Секции, удалённые принудительно без выгрузки с момента since (журнал удаления по сроку) */
+  forceDroppedSince(since: Instant): Promise<string[]>;
   maintenance: {
     closePriceDays(now: Instant): Promise<number>;
     ensurePartitions(now: Instant): Promise<void>;
     dropExpiredPartitions(now: Instant): Promise<number>;
     deleteExpiredRows(now: Instant): Promise<number>;
+    /** Часы базы: журнал удаления по сроку пишет момент базы, а не планировщика */
+    databaseNow(): Promise<Instant>;
   };
   /** Сверка уведомлений опросом включена для аккаунта [Р-121]; по умолчанию — если источник уведомлений канала доступен */
   reconcileEnabled?(account: SchedulerAccount, descriptor: ChannelDescriptor): boolean;
@@ -67,13 +76,14 @@ export const JOB_CATALOG: JobCatalogEntry[] = [
   { name: 'amazon-reconcile-rotation', scope: 'ACCOUNT', when: '30 с × число аккаунтов Amazon', missed: 'LATEST: окно круга — по числу успешных запусков, пропуск не пропускает товары, круг сдвигается на время простоя' },
   { name: 'halt-review', scope: 'ACCOUNT', when: 'каждые 5 мин (каналы с выборкой)', missed: 'LATEST: остановка снимается позже' },
   { name: 'offer-discovery', scope: 'ACCOUNT', when: 'раз в сутки', missed: 'LATEST: чужое ценообразование нового оффера обнаружится при записи или следующем обходе' },
-  { name: 'analytics-export-day', scope: 'GLOBAL', when: 'сутки UTC, в 00:30 следующих суток', missed: 'EVERY_SLOT: каждые пропущенные сутки выгружаются по очереди; секции журнала не удаляются без проверенной выгрузки; принудительное удаление через 14 суток — CRITICAL-отставание раньше (3 суток)' },
+  { name: 'analytics-export-day', scope: 'GLOBAL', when: 'сутки UTC, в 00:30 следующих суток', missed: 'EVERY_SLOT: каждые пропущенные сутки выгружаются по очереди; провалившиеся, непроверенные и изменившиеся после проверки сутки повторяются каждым запуском из отставания (13 суток); секции журнала не удаляются без проверенной выгрузки; отставание CRITICAL — с 72 часов, принудительное удаление через 14 суток — CRITICAL ANALYTICS_PARTITION_FORCE_DROPPED' },
   { name: 'price-days-close', scope: 'GLOBAL', when: 'каждый час', missed: 'LATEST: функция закрывает все незакрытые сутки по очереди; сырьё цен не удаляется, пока сутки не закрыты' },
   { name: 'partitions', scope: 'GLOBAL', when: 'каждый час', missed: 'LATEST: секции созданы на 3 суток вперёд; простой дольше — отказ записи снимков и цен (CRITICAL через 2 суток)' },
   { name: 'retention', scope: 'GLOBAL', when: 'каждый час', missed: 'LATEST: удаление по сроку откладывается, данные хранятся дольше — PostgreSQL растёт' },
 ];
 
 const hours = (h: number) => h * 3600;
+const failuresShareAlert = 0.2;
 const alignedDay = (now: Instant, offsetSeconds: number): Instant => {
   const t = Date.parse(now);
   const day = Math.floor(t / 86_400_000) * 86_400_000 + offsetSeconds * 1000;
@@ -83,9 +93,12 @@ const alignedDay = (now: Instant, offsetSeconds: number): Instant => {
 export function jobSource(deps: JobDeps): JobSource {
   const cfg = { ...DEFAULT_JOB_CONFIG, ...deps.config };
   const reconcileEnabled = deps.reconcileEnabled ?? ((_a, d) => (d.competitorSources ?? []).some((s) => s.kind === 'PUSH' && s.availability === 'AVAILABLE'));
-  const ctxOf = (a: SchedulerAccount, now: Instant, job: string): AdapterCallContext => ({
-    tenantId: a.tenantId as TenantId, channelAccountId: a.channelAccountId as ChannelAccountId, correlationId: `scheduler:${job}:${now}`, deadline: new Date(Date.parse(now) + 50_000).toISOString(),
+  // Срок вызова — от начала запуска работы, не такта: работы такта идут по очереди (ревью шага 25, находка 1)
+  const ctxOf = (a: SchedulerAccount, startedAt: Instant, job: string, seconds: number): AdapterCallContext => ({
+    tenantId: a.tenantId as TenantId, channelAccountId: a.channelAccountId as ChannelAccountId, correlationId: `scheduler:${job}:${startedAt}`,
+    deadline: new Date(Date.parse(startedAt) + seconds * 1000).toISOString(),
   });
+  const pollSeconds = Math.ceil(cfg.pollMaxQueries / Math.max(0.1, cfg.pollBudgetRps)) + 60;
 
   return {
     async jobs(now) {
@@ -96,23 +109,47 @@ export function jobSource(deps: JobDeps): JobSource {
       specs.push({
         name: 'analytics-export-day', scope: null, intervalSeconds: 86_400, catchUp: 'EVERY_SLOT', firstDueAt: (n) => alignedDay(n, cfg.exportOffsetSeconds),
         lagWarningSeconds: hours(6), lagCriticalSeconds: hours(72), leaseSeconds: hours(2),
+        /**
+         * Сутки слота — все группы; отставшие сутки (не выгружены, не проверены, изменились после проверки) — только их группы. Провал одних
+         * суток не держит слот: остальные сутки выгружаются, провалившиеся повторяются следующим запуском из отставания (ревью шага 25, находка 7).
+         * Отставание старше 72 часов — CRITICAL: принудительное удаление через 14 суток
+         */
         async run({ slotAt }) {
           const to = Date.parse(slotAt) - cfg.exportOffsetSeconds * 1000;
-          const days = new Map<string, DayRange>([[new Date(to).toISOString(), { from: new Date(to - 86_400_000).toISOString(), to: new Date(to).toISOString() }]]);
-          for (const d of await deps.unverifiedDays(slotAt, cfg.exportLookbackDays)) if (Date.parse(d.to) <= to) days.set(d.to, d);
+          const slotRange = { from: new Date(to - 86_400_000).toISOString(), to: new Date(to).toISOString() };
+          const work = new Map<string, { range: DayRange; groups: Set<ExportGroup>; slot: boolean }>([[slotRange.from, { range: slotRange, groups: new Set(['DECISIONS', 'WRITES', 'SNAPSHOTS']), slot: true }]]);
+          for (const b of await deps.exportBacklog(slotAt, cfg.exportLookbackDays)) {
+            if (Date.parse(b.range.to) > to) continue;
+            const w = work.get(b.range.from) ?? { range: b.range, groups: new Set<ExportGroup>(), slot: false };
+            w.groups.add(b.group);
+            work.set(b.range.from, w);
+          }
           let items = 0;
           const unverified: string[] = [];
           const missing: string[] = [];
-          for (const range of [...days.values()].sort((a, b) => a.from.localeCompare(b.from))) {
-            const r = await deps.exportDay(range);
-            items += r.exports.reduce((n, e) => n + e.rows, 0);
-            unverified.push(...r.unverified);
-            missing.push(...r.missing.map((m) => `${m}@${range.from.slice(0, 10)}`));
+          const failed: string[] = [];
+          for (const w of [...work.values()].sort((a, b) => a.range.from.localeCompare(b.range.from))) {
+            for (const group of w.groups) {
+              try {
+                const r = await deps.exportDay(w.range, [group]);
+                items += r.exports.reduce((n, e) => n + e.rows, 0);
+                unverified.push(...r.unverified);
+                // Секции нет: для суток слота — удалена или не создана; у отставших суток секция была найдена списком отставания
+                missing.push(...r.missing.map((m) => `${m}@${w.range.from.slice(0, 10)}`));
+              } catch (error) {
+                failed.push(`${group}@${w.range.from.slice(0, 10)}: ${String((error as Error).message).slice(0, 80)}`);
+              }
+            }
           }
-          const alerts = [
+          const backlog = await deps.exportBacklog(new Date(to + cfg.exportOffsetSeconds * 1000).toISOString(), cfg.exportLookbackDays);
+          const oldest = backlog.reduce<number | null>((m, b) => (m === null || Date.parse(b.range.to) < m ? Date.parse(b.range.to) : m), null);
+          const backlogHours = oldest === null ? 0 : (Date.parse(slotAt) - oldest) / 3_600_000;
+          const alerts: JobAlert[] = [
+            ...(failed.length ? [{ code: 'ANALYTICS_EXPORT_FAILED', severity: 'CRITICAL' as const, details: { failed: failed.slice(0, 5).join(' | '), count: failed.length } }] : []),
             ...(unverified.length ? [{ code: 'ANALYTICS_EXPORT_UNVERIFIED', severity: 'CRITICAL' as const, details: { partitions: unverified.slice(0, 10).join(','), count: unverified.length } }] : []),
-            // Секции суток нет: удалена принудительно без выгрузки или не создана — если в сутках были данные, история потеряна
             ...(missing.length ? [{ code: 'ANALYTICS_EXPORT_PARTITION_MISSING', severity: 'CRITICAL' as const, details: { partitions: missing.slice(0, 10).join(','), count: missing.length } }] : []),
+            ...(backlog.length ? [{ code: 'ANALYTICS_EXPORT_BACKLOG', severity: backlogHours >= 72 ? 'CRITICAL' as const : 'WARNING' as const,
+              details: { days: new Set(backlog.map((b) => b.range.from)).size, oldestHours: Math.round(backlogHours) } }] : []),
           ];
           return { items, ...(alerts.length ? { alerts } : {}) };
         },
@@ -130,7 +167,13 @@ export function jobSource(deps: JobDeps): JobSource {
       specs.push({
         name: 'retention', scope: null, intervalSeconds: cfg.maintenanceEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,
         lagWarningSeconds: hours(6), lagCriticalSeconds: hours(168), leaseSeconds: 1800,
-        async run({ now: n }) { return { items: (await deps.maintenance.dropExpiredPartitions(n)) + (await deps.maintenance.deleteExpiredRows(n)) }; },
+        async run({ now: n }) {
+          const mark = await deps.maintenance.databaseNow();
+          const items = (await deps.maintenance.dropExpiredPartitions(n)) + (await deps.maintenance.deleteExpiredRows(n));
+          // Ревью шага 25, находка 5: принудительное удаление невыгруженной секции — потеря истории, алерт
+          const dropped = await deps.forceDroppedSince(mark);
+          return { items, ...(dropped.length ? { alerts: [{ code: 'ANALYTICS_PARTITION_FORCE_DROPPED', severity: 'CRITICAL' as const, details: { partitions: dropped.slice(0, 10).join(','), count: dropped.length } }] } : {}) };
+        },
       });
 
       // Работы по аккаунтам
@@ -146,13 +189,17 @@ export function jobSource(deps: JobDeps): JobSource {
           specs.push({
             name: 'competitor-poll', scope, intervalSeconds: cfg.pollEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,
             lagWarningSeconds: 600, lagCriticalSeconds: hours(1), leaseSeconds: 300,
-            async run({ now: n }) {
-              const r = await pipeline().pollDueCompetitors(ctxOf(a, n, 'competitor-poll'),
+            async run({ startedAt }) {
+              const r = await pipeline().pollDueCompetitors(ctxOf(a, startedAt, 'competitor-poll', pollSeconds),
                 { budgetRequestsPerSecond: cfg.pollBudgetRps, maxQueries: cfg.pollMaxQueries, ...(reconcile ? { reconcile: { graceSeconds: cfg.lossGraceSeconds } } : {}) });
-              return {
-                items: r.due,
-                ...(r.plan.coldTierExceedsBudget ? { alerts: [{ code: 'COMPETITOR_POLL_BUDGET_EXCEEDED', severity: 'WARNING' as const, details: { candidates: r.candidates, demoted: r.plan.demoted } }] } : {}),
-              };
+              // Ревью шага 25, находка 1: отказы канала и сбои обработки не прячутся за успешным запуском
+              const failed = r.failures.length + r.processingFailed;
+              const alerts: JobAlert[] = [
+                ...(r.plan.coldTierExceedsBudget ? [{ code: 'COMPETITOR_POLL_BUDGET_EXCEEDED', severity: 'WARNING' as const, details: { candidates: r.candidates, demoted: r.plan.demoted } }] : []),
+                ...(r.due > 0 && failed / r.due > failuresShareAlert ? [{ code: 'COMPETITOR_POLL_FAILURES', severity: 'WARNING' as const, details: {
+                  due: r.due, channelFailures: r.failures.length, processingFailures: r.processingFailed, firstError: r.failures[0]?.error.code ?? 'PROCESSING' } }] : []),
+              ];
+              return { items: r.due - failed, ...(alerts.length ? { alerts } : {}) };
             },
           });
         }
@@ -160,8 +207,8 @@ export function jobSource(deps: JobDeps): JobSource {
           specs.push({
             name: 'notification-loss-review', scope, intervalSeconds: cfg.lossReviewEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,
             lagWarningSeconds: 1800, lagCriticalSeconds: hours(3), leaseSeconds: 300,
-            async run({ now: n }) {
-              const r = await pipeline().reviewNotificationLoss(ctxOf(a, n, 'notification-loss-review'));
+            async run({ startedAt }) {
+              const r = await pipeline().reviewNotificationLoss(ctxOf(a, startedAt, 'notification-loss-review', 50));
               return { items: r.delayed + r.lossSuspected.length };
             },
           });
@@ -172,8 +219,8 @@ export function jobSource(deps: JobDeps): JobSource {
           specs.push({
             name: 'amazon-reconcile-rotation', scope, intervalSeconds: interval, catchUp: 'LATEST', firstDueAt: immediately,
             lagWarningSeconds: interval * 10, lagCriticalSeconds: Math.max(hours(3), interval * 60), leaseSeconds: 120,
-            async run({ now: n, runIndex }) {
-              const r = await pipeline().reconcileRotation(ctxOf(a, n, 'amazon-reconcile-rotation'), { size: cfg.amazonBatch, cycle: runIndex, graceSeconds: cfg.lossGraceSeconds });
+            async run({ startedAt, runIndex }) {
+              const r = await pipeline().reconcileRotation(ctxOf(a, startedAt, 'amazon-reconcile-rotation', 50), { size: cfg.amazonBatch, cycle: runIndex, graceSeconds: cfg.lossGraceSeconds });
               const circleHours = (Math.ceil(r.total / cfg.amazonBatch) * interval) / 3600;
               return {
                 items: r.queries,
@@ -186,14 +233,14 @@ export function jobSource(deps: JobDeps): JobSource {
           specs.push({
             name: 'halt-review', scope, intervalSeconds: cfg.haltReviewEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,
             lagWarningSeconds: 1800, lagCriticalSeconds: hours(6), leaseSeconds: 300,
-            async run({ now: n }) { return { items: (await pipeline().reviewHalts(ctxOf(a, n, 'halt-review'))).length }; },
+            async run({ startedAt }) { return { items: (await pipeline().reviewHalts(ctxOf(a, startedAt, 'halt-review', 120))).length }; },
           });
         }
         specs.push({
           name: 'offer-discovery', scope, intervalSeconds: cfg.discoveryEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,
           lagWarningSeconds: hours(36), lagCriticalSeconds: hours(72), leaseSeconds: 1800,
-          async run({ now: n }) {
-            const r = await pipeline().discoverOffers(ctxOf(a, n, 'offer-discovery'));
+          async run({ startedAt }) {
+            const r = await pipeline().discoverOffers(ctxOf(a, startedAt, 'offer-discovery', 1500));
             return { items: r.offers };
           },
         });

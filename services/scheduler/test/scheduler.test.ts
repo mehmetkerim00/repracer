@@ -107,8 +107,9 @@ test('Р-126: the job source gives each account only the jobs its channel suppor
     descriptorOf: (ch) => (ch === 'KAUFLAND' ? KAUFLAND_DESCRIPTOR : ch === 'AMAZON' ? AMAZON_DESCRIPTOR : null),
     pipelineFor: () => { throw new Error('not called'); },
     exportDay: async (range) => ({ range, exports: [], unverified: [], missing: [] }),
-    unverifiedDays: async () => [],
-    maintenance: { closePriceDays: noop, ensurePartitions: async () => undefined, dropExpiredPartitions: noop, deleteExpiredRows: noop },
+    exportBacklog: async () => [],
+    forceDroppedSince: async () => [],
+    maintenance: { closePriceDays: noop, ensurePartitions: async () => undefined, dropExpiredPartitions: noop, deleteExpiredRows: noop, databaseNow: async () => '2026-09-17T10:00:00.000Z' },
   };
   const specs = await jobSource(deps).jobs('2026-09-17T10:00:00.000Z');
   const byAccount = (id: string) => specs.filter((s) => s.scope?.channelAccountId === id).map((s) => `${s.name}/${s.intervalSeconds}`).sort();
@@ -131,4 +132,58 @@ test('Р-124: neither channel snapshot has a price history operation — the des
     .flatMap((f) => Object.keys((JSON.parse(readFileSync(new URL(String(f), models), 'utf8')) as { paths?: Record<string, unknown> }).paths ?? {}).filter((p) => /histor/i.test(p)));
   assert.deepEqual(amazonHistoryPaths, []);
   assert.deepEqual([KAUFLAND_DESCRIPTOR.priceHistory.kind, AMAZON_DESCRIPTOR.priceHistory.kind], ['UNAVAILABLE', 'UNAVAILABLE']);
+});
+
+test('review of step 25, findings 1 and 7: call deadlines count from the job start; channel failures raise an alert; one failed export day does not hold the slot', async () => {
+  const noop = async () => 0;
+  const seen: Array<{ deadline: string }> = [];
+  const exported: string[] = [];
+  const deps: JobDeps = {
+    accounts: async () => [{ tenantId: '10000000-0000-4000-8000-000000000001', channelAccountId: '20000000-0000-4000-8000-000000000001', channel: 'KAUFLAND' }],
+    descriptorOf: (ch) => (ch === 'KAUFLAND' ? KAUFLAND_DESCRIPTOR : null),
+    pipelineFor: () => ({
+      pollDueCompetitors: async (ctx: { deadline: string }) => {
+        seen.push({ deadline: ctx.deadline });
+        return { candidates: 10, due: 10, snapshots: [], failures: Array.from({ length: 3 }, () => ({ query: {}, error: { code: 'TIMEOUT' } })), processingFailed: 0, plan: { coldTierExceedsBudget: false, demoted: 0 } };
+      },
+      reviewHalts: async () => [], discoverOffers: async () => ({ offers: 0, recorded: 0, withChannelPricing: [] }),
+    }) as never,
+    exportDay: async (range, groups) => {
+      if (range.from.startsWith('2026-09-15')) throw new Error('CLICKHOUSE_CONSTRAINT: synthetic permanent failure');
+      exported.push(`${range.from.slice(0, 10)}:${(groups ?? []).join('+')}`);
+      return { range, exports: [], unverified: [], missing: [] };
+    },
+    exportBacklog: async () => [{ group: 'WRITES', range: { from: '2026-09-15T00:00:00.000Z', to: '2026-09-16T00:00:00.000Z' }, reason: 'NOT_EXPORTED' },
+      { group: 'SNAPSHOTS', range: { from: '2026-09-14T00:00:00.000Z', to: '2026-09-15T00:00:00.000Z' }, reason: 'ROWS_CHANGED' }],
+    forceDroppedSince: async () => [],
+    maintenance: { closePriceDays: noop, ensurePartitions: async () => undefined, dropExpiredPartitions: noop, deleteExpiredRows: noop, databaseNow: async () => '2026-09-17T00:40:00.000Z' },
+  };
+  const c = clock('2026-09-17T00:40:00.000Z');
+  const state = new MemorySchedulerState(c.now);
+  const alerts = sink();
+  const s = createScheduler({ state, source: jobSource(deps), owner: 'a', now: () => { const t = c.now(); c.advance(5_000); return t; }, alerts });
+  await s.tick();
+  const poll = (await state.runs()).find((r) => r.jobName === 'competitor-poll')!;
+  // Срок вызова — начало запуска + 600 товаров / 10 rps + 60 с, а не начало такта + 50 с
+  assert.equal(seen[0]!.deadline, new Date(Date.parse(poll.startedAt) + 120_000).toISOString());
+  assert.equal(poll.items, 7);
+  assert.ok(alerts.alerts.some((a) => a.code === 'COMPETITOR_POLL_FAILURES' && a.details?.channelFailures === 3));
+  // Сутки 15.09 проваливаются постоянно — сутки слота (16.09) и отстающая группа снимков 14.09 выгружены, слот продвинут, алерт о провале
+  assert.deepEqual(exported.sort(), ['2026-09-14:SNAPSHOTS', '2026-09-16:DECISIONS', '2026-09-16:SNAPSHOTS', '2026-09-16:WRITES']);
+  const exportJob = (await state.list()).find((j) => j.jobName === 'analytics-export-day')!;
+  assert.deepEqual([exportJob.lastOutcome, exportJob.nextDueAt], ['SUCCEEDED', '2026-09-18T00:30:00.000Z']);
+  assert.ok(alerts.alerts.some((a) => a.code === 'ANALYTICS_EXPORT_FAILED' && String(a.details?.failed).startsWith('WRITES@2026-09-15')));
+  assert.ok(alerts.alerts.some((a) => a.code === 'ANALYTICS_EXPORT_BACKLOG'));
+});
+
+test('review of step 25, finding 6: a lease lost during a run does not stop the other jobs of the tick', async () => {
+  const c = clock('2026-09-17T10:00:00.000Z');
+  const state = new MemorySchedulerState(c.now);
+  const ran: string[] = [];
+  const stolen = spec({ name: 'stolen', run: async () => { state.jobs.get('stolen')!.leaseOwner = 'other'; ran.push('stolen'); return { items: 0 }; } });
+  const next = spec({ name: 'next', run: async () => { ran.push('next'); return { items: 0 }; } });
+  const alerts = sink();
+  const report = await createScheduler({ state, source: { jobs: async () => [stolen, next] }, owner: 'a', now: c.now, alerts }).tick();
+  assert.deepEqual([ran, report.lostLeases], [['stolen', 'next'], ['stolen']]);
+  assert.ok(alerts.alerts.some((a) => a.code === 'SCHEDULER_LEASE_LOST'));
 });

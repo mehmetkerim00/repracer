@@ -25,7 +25,15 @@ export function previousUtcDay(now: Date): DayRange {
   return { from: new Date(to - 86_400_000).toISOString(), to: new Date(to).toISOString() };
 }
 
-export async function exportDay(pgExporter: pg.Pool, ingest: ClickHouseHttp, verifier: ClickHouseHttp, range: DayRange): Promise<DailyExportReport> {
+/** Группа выгрузки суток: intent и решения выгружаются вместе (решение ссылается на intent) */
+export type ExportGroup = 'DECISIONS' | 'WRITES' | 'SNAPSHOTS';
+export const EXPORT_GROUPS: readonly ExportGroup[] = ['DECISIONS', 'WRITES', 'SNAPSHOTS'];
+/** Родительская таблица секций → группа выгрузки */
+export const EXPORT_GROUP_OF: Readonly<Record<string, ExportGroup>> = {
+  'channel_data.price_intent': 'DECISIONS', 'channel_data.price_decision': 'DECISIONS', 'tenant_data.channel_write_history': 'WRITES', 'channel_data.competitor_snapshot_log': 'SNAPSHOTS',
+};
+
+export async function exportDay(pgExporter: pg.Pool, ingest: ClickHouseHttp, verifier: ClickHouseHttp, range: DayRange, groups: readonly ExportGroup[] = EXPORT_GROUPS): Promise<DailyExportReport> {
   const exports: DailyExportReport['exports'] = [];
   const missing: string[] = [];
   const attempt = async (name: string, run: () => Promise<DailyExportReport['exports']>) => {
@@ -36,8 +44,8 @@ export async function exportDay(pgExporter: pg.Pool, ingest: ClickHouseHttp, ver
       missing.push(name);
     }
   };
-  await attempt('channel_data.price_intent/price_decision', () => exportDecisionDay(pgExporter, ingest, verifier, range));
-  await attempt('tenant_data.channel_write_history', async () => [await exportCompletedWritesDay(pgExporter, ingest, verifier, range)]);
-  await attempt('channel_data.competitor_snapshot_log', async () => [await exportCompetitorSnapshotsDay(pgExporter, ingest, verifier, range)]);
+  if (groups.includes('DECISIONS')) await attempt('channel_data.price_intent/price_decision', () => exportDecisionDay(pgExporter, ingest, verifier, range));
+  if (groups.includes('WRITES')) await attempt('tenant_data.channel_write_history', async () => [await exportCompletedWritesDay(pgExporter, ingest, verifier, range)]);
+  if (groups.includes('SNAPSHOTS')) await attempt('channel_data.competitor_snapshot_log', async () => [await exportCompetitorSnapshotsDay(pgExporter, ingest, verifier, range)]);
   return { range, exports, unverified: exports.filter((e) => !e.verified).map((e) => e.partitionName), missing };
 }

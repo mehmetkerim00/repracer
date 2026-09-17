@@ -46,7 +46,8 @@ SELECT security.register_table('maintenance.scheduled_job', 'SYSTEM', 'mutable',
 REVOKE ALL ON maintenance.scheduled_job FROM repracer_app;
 CREATE POLICY scheduled_job_owner ON maintenance.scheduled_job TO repracer_owner USING (true) WITH CHECK (true);
 CREATE POLICY scheduled_job_scheduler ON maintenance.scheduled_job TO repracer_retention USING (true) WITH CHECK (true);
-GRANT SELECT, INSERT, UPDATE ON maintenance.scheduled_job TO repracer_retention;
+-- DELETE — работы отключённых аккаунтов, у которых не осталось журнала запусков (ревью шага 25, находка 10)
+GRANT SELECT, INSERT, UPDATE, DELETE ON maintenance.scheduled_job TO repracer_retention;
 -- Административный сервис работами не управляет: состояние пишет только планировщик
 REVOKE INSERT, UPDATE, DELETE ON maintenance.scheduled_job FROM repracer_admin;
 
@@ -104,12 +105,20 @@ VALUES ('channel_data.competitor_poll_state', 'DELETE_ROWS', 'last_polled_at', '
 
 RESET ROLE;
 
-/** Р-126: одна аренда работы — занять работу, аренда которой не истекла, другой владелец не может */
+/**
+ * Р-126: одна аренда работы — занять работу, аренда которой не истекла, другой владелец не может; освободить действующую аренду может только
+ * её владелец (планировщик заявляет себя в транзакции итога — repracer.scheduler_owner). Это согласование процессов планировщика, а не
+ * защита от роли планировщика: заявить чужое имя роль может (ревью шага 25, находка 6)
+ */
 CREATE FUNCTION maintenance.scheduled_job_lease_guard() RETURNS trigger
   LANGUAGE plpgsql SET search_path = pg_catalog AS $fn$
 BEGIN
   IF OLD.lease_owner IS NOT NULL AND OLD.lease_until > now() AND NEW.lease_owner IS NOT NULL AND NEW.lease_owner IS DISTINCT FROM OLD.lease_owner THEN
     RAISE EXCEPTION 'scheduled job % is leased by % until % (Р-126)', OLD.job_key, OLD.lease_owner, OLD.lease_until USING ERRCODE = 'lock_not_available';
+  END IF;
+  IF OLD.lease_owner IS NOT NULL AND OLD.lease_until > now() AND NEW.lease_owner IS NULL
+     AND current_setting('repracer.scheduler_owner', true) IS DISTINCT FROM OLD.lease_owner THEN
+    RAISE EXCEPTION 'scheduled job % lease of % is released only by its owner (Р-126)', OLD.job_key, OLD.lease_owner USING ERRCODE = 'lock_not_available';
   END IF;
   NEW.updated_at := now();
   RETURN NEW;
