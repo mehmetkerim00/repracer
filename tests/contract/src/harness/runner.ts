@@ -1,11 +1,15 @@
 import type { AdapterCallContext, AdapterDependencies, ChannelAdapter, InboundDelivery } from '@repracer/channel-port';
 import { signKauflandRequest } from '@repracer/kaufland-client';
+import { AMAZON_DESCRIPTOR } from '@repracer/amazon-adapter';
+import { KAUFLAND_DESCRIPTOR } from '@repracer/kaufland-adapter';
 import { createPricingPipeline, InMemoryPricingStore, standUserOf, type MemorySeed, type PricingPipeline, type PricingStore, type SeedBound, type SnapshotReport } from '@repracer/pricing-pipeline';
 import type { CostInputs } from '@repracer/pricing-model';
 import { createWriteDispatcher, type WriteDispatcher, type WriteQueueStore } from '@repracer/write-dispatcher';
 import { amazonRequestChecker, channelFetch, kauflandAuthChecker, ScriptedChannel, type ChannelBehaviour, type TraceEntry } from './channel.ts';
 import { neverWrittenAttributes } from '@repracer/channel-port';
 import { match } from './matchers.ts';
+import { createNotificationReceiver, createSqsClient, pipelineSink, storeLedger, type NotificationReceiver } from '@repracer/amazon-notifications';
+import { FakeSqs } from '@repracer/amazon-notifications/testing';
 import { SimulatedKauflandChannel } from '../simulator/kaufland-channel.ts';
 import type { CallStep, InboundDeliverySpec, PipelineStep, Scenario, StepContext, World } from './scenario.ts';
 import { VirtualClock, worldDependencies, type Sink } from './world.ts';
@@ -30,7 +34,9 @@ export interface PricingStoreUnderTest {
 export type PricingStoreFactory = (seed: MemorySeed, world: World) => Promise<PricingStoreUnderTest>;
 
 export const memoryStoreFactory: PricingStoreFactory = async (seed, world) => {
-  const store = new InMemoryPricingStore({ ...seed, channel: world.account.channel === 'AMAZON' ? 'AMAZON' : 'KAUFLAND', region: world.account.region ?? null }, { tenantId: world.tenantId });
+  const channel = world.account.channel === 'AMAZON' ? 'AMAZON' : 'KAUFLAND';
+  const competitorSources = channel === 'AMAZON' ? AMAZON_DESCRIPTOR.competitorSources : KAUFLAND_DESCRIPTOR.competitorSources;
+  const store = new InMemoryPricingStore({ ...seed, channel, region: world.account.region ?? null, competitorSources: [...(competitorSources ?? [])] }, { tenantId: world.tenantId });
   return {
     store,
     queue: store,
@@ -132,8 +138,40 @@ async function runCall(step: CallStep, adapter: ChannelAdapter, scenario: Scenar
   }
 }
 
+/** Приёмник уведомлений сценария: очередь и приёмник живут весь прогон (шаг 23) */
+const receivers = new WeakMap<PricingPipeline, { sqs: FakeSqs; receiver: NotificationReceiver; failSink: { n: number } }>();
+const STAND_QUEUE = 'https://sqs.eu-west-1.amazonaws.com/000000000000/repracer-syn-notifications';
+const STAND_APPLICATION = 'amzn1.sellerapps.app.syn0001';
+
+function standReceiver(pipeline: PricingPipeline, store: PricingStoreUnderTest, scenario: Scenario, clock: VirtualClock, sink: Sink) {
+  const existing = receivers.get(pipeline);
+  if (existing) return existing;
+  const { world } = scenario;
+  const sqs = new FakeSqs({ get nowMs() { return clock.nowMs(); } });
+  const failSink = { n: 0 };
+  const inner = pipelineSink(pipeline);
+  const receiver = createNotificationReceiver({
+    sqs: createSqsClient({ queueUrl: STAND_QUEUE, credentials: async () => ({ accessKeyId: 'AKIASYNTHETIC0000001', secretAccessKey: 'syn-aws-secret-access-key-0001' }), fetch: sqs.fetch, now: () => new Date(clock.nowMs()) }),
+    queueUrl: STAND_QUEUE, region: (world.account.region ?? 'EU') as 'EU' | 'NA' | 'FE', applicationId: STAND_APPLICATION,
+    router: { resolve: async (region, sellerId) => (region === (world.account.region ?? 'EU') && sellerId === world.account.externalAccountId
+      ? [{ tenantId: world.tenantId, channelAccountId: world.channelAccountId }] : []) },
+    ledger: storeLedger(store.store),
+    sink: { async deliver(route, delivery, envelope) {
+      if (failSink.n > 0) { failSink.n -= 1; throw new Error('synthetic store failure'); }
+      return inner.deliver(route, delivery, envelope);
+    } },
+    alerts: { raise: async (a) => { sink.alerts.push(a as never); } },
+    logger: { log: (entry) => { sink.logs.push(entry as never); } },
+    now: () => new Date(clock.nowMs()),
+    policy: { waitTimeSeconds: 0 },
+  });
+  const created = { sqs, receiver, failSink };
+  receivers.set(pipeline, created);
+  return created;
+}
+
 async function runPipelineStep(
-  step: PipelineStep, pipeline: PricingPipeline, store: PricingStoreUnderTest, dispatcher: WriteDispatcher, scenario: Scenario, clock: VirtualClock,
+  step: PipelineStep, pipeline: PricingPipeline, store: PricingStoreUnderTest, dispatcher: WriteDispatcher, scenario: Scenario, clock: VirtualClock, sink: Sink,
 ): Promise<{ result?: unknown; failure?: string }> {
   switch (step.kind) {
     case 'pipelineDispatchDue':
@@ -172,6 +210,20 @@ async function runPipelineStep(
       if (!halt) return { failure: `${step.id}: no halt #${step.haltIndex}` };
       return { result: await pipeline.releaseHaltManually(callContext(step.ctx, step.id, scenario, clock), halt.haltId, { membershipId: step.membershipId, userId: standUserOf(step.membershipId), mfa: true }, step.note) };
     }
+    case 'receiverPoll': {
+      const r = standReceiver(pipeline, store, scenario, clock, sink);
+      if (step.advanceMs) clock.advance(step.advanceMs);
+      for (const m of step.send ?? []) {
+        const body = JSON.stringify(resolvePlaceholders(m.body, clock));
+        for (let i = 0; i < (m.copies ?? 1); i += 1) r.sqs.send(body, { sentMs: clock.nowMs() - (m.ageMs ?? 0), ...(m.corruptMd5 ? { corruptMd5: true } : {}) });
+      }
+      r.failSink.n = step.failSink ?? 0;
+      const polls = [];
+      for (let i = 0; i < (step.polls ?? 1); i += 1) polls.push(await r.receiver.pollOnce());
+      return { result: { polls, queued: r.sqs.messages.length } };
+    }
+    case 'pipelineDiscoverOffers':
+      return { result: await pipeline.discoverOffers(callContext(step.ctx, step.id, scenario, clock), { ...(step.pageLimit ? { pageLimit: step.pageLimit } : {}) }) };
     case 'pipelineReleaseDistrust': {
       const dump = (await store.dump()) as { distrusts?: Array<{ distrustId: string }> };
       const distrust = dump.distrusts?.[step.distrustIndex];
@@ -317,7 +369,7 @@ export async function runScenario(
     }
 
     if (step.kind !== 'call') {
-      const { result, failure } = await runPipelineStep(step, pipeline!, store!, dispatcher!, scenario, clock);
+      const { result, failure } = await runPipelineStep(step, pipeline!, store!, dispatcher!, scenario, clock, sink);
       if (failure) { failures.push(failure); continue; }
       results[step.id] = result;
       const expected = 'expect' in step ? step.expect : undefined;

@@ -1,7 +1,7 @@
 import type { MemorySeedScope } from '@repracer/pricing-pipeline';
 import type { Exchange, Scenario, Step } from '../harness/scenario.ts';
 import { SCENARIO_FORMAT } from '../harness/scenario.ts';
-import { amazonWorld, DE, patchPriceExchange, preReadExchange, readBackExchange, sku, tokenExchange } from './build.ts';
+import { amazonWorld, anyOfferChanged, DE, patchPriceExchange, preReadExchange, pricingHealthNotification, readBackExchange, searchListingsExchange, sku, tokenExchange } from './build.ts';
 
 /**
  * Сценарии ядра с адаптером Amazon (шаг 22): Р-115 — правило автоматического ценообразования канала блокирует единицу записи и
@@ -116,7 +116,74 @@ export function buildCoreScenarios(): Array<{ file: string; scenario: Scenario }
     },
   );
 
+  const discovery = scenario(
+    'amazon/pipeline/discovery-channel-pricing',
+    'Р-120: при обнаружении офферов видно правило автоматического ценообразования и границы канала — до назначения стратегии',
+    'Путь решения читает офферы аккаунта searchListingsItems с атрибутами. У первого оффера — привязка automated_pricing_merchandising_rule_plan (Automate Pricing), у второго — minimum/maximum_seller_allowed_price, третий чистый. Наблюдения записываются для всех трёх; продавец получает предупреждение о двух офферах, а назначить им стратегию не даст база (write_scope_strategy_guard, 0082). Раньше правило обнаруживалось только при первой записи цены [Р-115].',
+    ['pipeline', 'r120', 'mandatory:discovery-channel-pricing'],
+    [fixedScope(8301, 1999, 1850), fixedScope(8302, 2100, 2000), fixedScope(8303, 2200, 2100)],
+    [{ id: 'discover-account-offers', kind: 'pipelineDiscoverOffers', expect: { offers: 3, recorded: 3, withChannelPricing: [
+      { marketplace: DE, externalSku: sku(8301), automatedPricing: true, channelBounds: false },
+      { marketplace: DE, externalSku: sku(8302), automatedPricing: false, channelBounds: true },
+    ] } } as Step],
+    [
+      tokenExchange(),
+      searchListingsExchange('search-account-offers', [
+        { sku: sku(8301), offers: [{ priceMinor: 1850, rulePlan: true }] },
+        { sku: sku(8302), offers: [{ priceMinor: 2000, bounds: true }] },
+        { sku: sku(8303), offers: [{ priceMinor: 2100 }] },
+      ]),
+    ],
+    {
+      alerts: [{ code: 'OFFERS_WITH_CHANNEL_PRICING', severity: 'WARNING', count: 1, details: { offers: 2 } }],
+      pipeline: { offerChannelPricing: [
+        { externalSku: sku(8301), automatedPricing: true, channelBounds: false, source: 'DISCOVERY' },
+        { externalSku: sku(8302), automatedPricing: false, channelBounds: true, source: 'DISCOVERY' },
+        { externalSku: sku(8303), automatedPricing: false, channelBounds: false, source: 'DISCOVERY' },
+      ] },
+    },
+  );
+
+  // Шаг 23, A: приёмник уведомлений из очереди SQS целиком — очередь в памяти по протоколу AWS JSON, подпись SigV4, адаптер, путь решения
+  const ASIN = 'B000008401';
+  const aoc = (n: string, atMs: number, minor: number, seller?: string) =>
+    anyOfferChanged(`syn-notification-${n}`, DE, ASIN, { $clockIso: atMs }, [{ seller: 'Synthetic Competitor', minor, buyBoxWinner: true }, { seller: 'self', minor: 1850 }], seller);
+  const outcomes = (...list: Array<[string, string]>) => [{ outcomes: list.map(([n, outcome]) => ({ notificationId: `syn-notification-${n}`, outcome })) }];
+  const receiver = scenario(
+    'amazon/pipeline/notification-receiver',
+    'Шаг 23: приёмник уведомлений — дубль, нарушение порядка, PRICING_HEALTH, чужой продавец, сбой хранилища, опоздание, искажённое тело',
+    'Стандартная очередь SQS не гарантирует порядок и доставляет повторно (set-up-notifications-with-amazon-sqs). Пачка обрабатывается по EventTime; повтор NotificationId — DUPLICATE по журналу хранилища, в путь не идёт, из очереди удаляется; PRICING_HEALTH — состояние оффера и алерт; продавец без аккаунта — UNKNOWN_SELLER с алертом; сбой хранилища — сообщение остаётся, повтор после паузы видимости; опоздавшее уведомление — алерт NOTIFICATION_LATE, а старый снимок ядро не применяет поверх нового; искажённое тело (MD5) не удаляется — придёт снова и уйдёт в очередь недоставленных.',
+    ['pipeline', 'receiver', 'mandatory:notification-receiver'],
+    [fixedScope(8401, 1850, 1850)],
+    [
+      { id: 'batch-out-of-order-with-duplicate', kind: 'receiverPoll', send: [
+        { body: aoc('0302', -5_000, 1780) }, { body: aoc('0301', -30_000, 1790), copies: 2 }, { body: pricingHealthNotification('syn-notification-0303', DE, ASIN, { $clockIso: -10_000 }, 1799) },
+      ], expect: { polls: outcomes(['0301', 'DELIVERED'], ['0301', 'DUPLICATE'], ['0303', 'DELIVERED'], ['0302', 'DELIVERED']), queued: 0 } },
+      { id: 'redelivery-after-a-lost-delete', kind: 'receiverPoll', send: [{ body: aoc('0302', -5_000, 1780) }], expect: { polls: outcomes(['0302', 'DUPLICATE']), queued: 0 } },
+      { id: 'seller-without-account', kind: 'receiverPoll', send: [{ body: aoc('0304', -1_000, 1700, 'A9SYNOTHERSELLER') }], expect: { polls: outcomes(['0304', 'UNKNOWN_SELLER']), queued: 0 } },
+      { id: 'store-fails-message-stays', kind: 'receiverPoll', failSink: 1, send: [{ body: aoc('0305', -2_000, 1770) }], expect: { polls: outcomes(['0305', 'RETRY']), queued: 1 } },
+      { id: 'retry-after-visibility-pause', kind: 'receiverPoll', advanceMs: 31_000, expect: { polls: outcomes(['0305', 'DELIVERED']), queued: 0 } },
+      { id: 'late-and-older-than-accepted', kind: 'receiverPoll', send: [{ body: aoc('0306', -16 * 60_000, 1760), ageMs: 16 * 60_000 }],
+        expect: { polls: [{ outcomes: [{ notificationId: 'syn-notification-0306', outcome: 'DELIVERED', late: true }] }], queued: 0 } },
+      { id: 'corrupt-body-is-kept', kind: 'receiverPoll', send: [{ body: aoc('0307', -1_000, 1750), corruptMd5: true }], expect: { polls: [{ outcomes: [{ outcome: 'CORRUPT' }], deleted: 0 }], queued: 1 } },
+    ] as Step[],
+    [],
+    {
+      alerts: [
+        { code: 'OFFER_PRICING_HEALTH', severity: 'WARNING', count: 1, details: { issueType: 'BuyBoxDisqualification' } },
+        { code: 'NOTIFICATION_UNKNOWN_SELLER', severity: 'WARNING', count: 1 },
+        { code: 'NOTIFICATION_LATE', severity: 'WARNING', count: 1 },
+      ],
+      pipeline: {
+        pricingHealth: [{ marketplace: DE, channelProductRef: ASIN, issueType: 'BuyBoxDisqualification', thresholdMinor: 1799 }],
+        inboundNotifications: ['0301', '0303', '0302', '0305', '0306'].map((n) => ({ notificationId: `syn-notification-${n}` })),
+      },
+    },
+  );
+
   return [
+    { file: 'pipeline-discovery-channel-pricing.json', scenario: discovery },
+    { file: 'pipeline-notification-receiver.json', scenario: receiver },
     { file: 'pipeline-price-basis-mismatch-halt.json', scenario: basis },
     { file: 'pipeline-channel-repricer-blocks-scope.json', scenario: repricer },
   ];

@@ -6,6 +6,7 @@
   "type": "module",
   "dependencies": {
     "@repracer/amazon-adapter": "0.1.0",
+    "@repracer/amazon-notifications": "0.1.0",
     "@repracer/analytics-export": "0.1.0",
     "@repracer/channel-port": "0.1.0",
     "@repracer/input-sanity": "0.1.0",

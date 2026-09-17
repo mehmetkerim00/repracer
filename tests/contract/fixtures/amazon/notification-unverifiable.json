@@ -4,7 +4,7 @@
   "channel": "AMAZON",
   "apiVersion": "listings-items-2021-08-01",
   "title": "Уведомление без подписи: чужой SellerId, не JSON, не тот тип, витрина не подключена",
-  "description": "Аналог webhook-bad-signature. Уведомления SP-API приходят из очереди без подписи [AMZ_C08]: проверяется совпадение SellerId с аккаунтом из сообщения [Р-31] — несовпадение — отказ TENANT_MISMATCH и алерт CRITICAL; не JSON и не ANY_OFFER_CHANGED — 400; витрина не подключена — принято без событий.",
+  "description": "Аналог webhook-bad-signature. Уведомления SP-API приходят из очереди без подписи [AMZ_C08]: проверяется совпадение SellerId с аккаунтом из сообщения [Р-31] — несовпадение — отказ TENANT_MISMATCH и алерт CRITICAL; не JSON, другой тип и PRICING_HEALTH не в своём написании ключей — 400; витрина не подключена — принято без событий.",
   "tags": [
     "mandatory:webhook-bad-signature",
     "inbound"
@@ -212,9 +212,28 @@
         "url": "https://sqs.eu-west-1.amazonaws.com.invalid/000000000000/repracer-syn-notifications",
         "headers": {},
         "body": {
-          "NotificationType": "PRICING_HEALTH",
+          "NotificationType": "LISTINGS_ITEM_ISSUES_CHANGE",
           "NotificationMetadata": {
             "NotificationId": "syn-notification-0102"
+          }
+        }
+      },
+      "expect": {
+        "kind": "REJECTED",
+        "responseStatus": 400
+      }
+    },
+    {
+      "id": "pricing-health-with-pascal-keys",
+      "kind": "inbound",
+      "delivery": {
+        "method": "POST",
+        "url": "https://sqs.eu-west-1.amazonaws.com.invalid/000000000000/repracer-syn-notifications",
+        "headers": {},
+        "body": {
+          "NotificationType": "PRICING_HEALTH",
+          "NotificationMetadata": {
+            "NotificationId": "syn-notification-0104"
           }
         }
       },

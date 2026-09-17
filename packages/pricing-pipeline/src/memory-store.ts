@@ -1,8 +1,9 @@
 import { EXPLANATION_RULESETS } from './dictionary.ts';
-import type { HaltSampleObservation, HaltSampleReview, ConsoleAuditRow, ConsoleDistrustRow } from './store.ts';
-import { offerIdentityOf, type CompetitorQuery, type FieldWrite, type Instant, type OfferIdentity, type PriceBasis, type WriteOutcome } from '@repracer/channel-port';
+import type { HaltSampleObservation, HaltSampleReview, ConsoleAuditRow, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation } from './store.ts';
+import { offerIdentityOf, type CompetitorQuery, type CompetitorSourceDescriptor, type FieldWrite, type Instant, type OfferIdentity, type PriceBasis, type PricingHealthObservation, type WriteOutcome } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange, SanityContext } from '@repracer/input-sanity';
 import { assertWriteWithinBounds, NO_GUARDRAILS, type GuardrailSet } from '@repracer/price-gate';
+import { strategyAvailability } from '@repracer/strategy-engine';
 import {
   BOUND_CAUSES,
   can,
@@ -119,6 +120,8 @@ export interface MemorySeed {
   /** Канал и регион аккаунта мира: из них строится идентичность записи (OQ-165); по умолчанию Kaufland без региона */
   channel?: 'KAUFLAND' | 'AMAZON';
   region?: string | null;
+  /** Источники конкурентов канала — как platform.competitor_source: доступность стратегии при сохранении [Р-39, OQ-166] */
+  competitorSources?: CompetitorSourceDescriptor[];
   /** Аккаунты других каналов для единиц записи, которые не принадлежат аккаунту мира (посев в PostgreSQL) */
   accounts?: Array<{ channelAccountId: string; channel: 'KAUFLAND' | 'AMAZON' | 'EBAY'; region?: string; marketplaces: string[] }>;
   /** Валюта и база цены витрин без единиц записи; по умолчанию — витрины Kaufland de и at */
@@ -214,6 +217,12 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   private readonly tenantId: string;
   private readonly channel: 'KAUFLAND' | 'AMAZON';
   private readonly region: string | null;
+  private readonly competitorSources: CompetitorSourceDescriptor[] | null;
+  /** Р-120: как channel_data.offer_channel_pricing */
+  readonly offerChannelPricing: ConsoleOfferChannelPricingRow[] = [];
+  readonly pricingHealth: ConsolePricingHealthRow[] = [];
+  /** Журнал обработанных уведомлений: как UNIQUE (tenant_id, channel, notification_id) в 0083 */
+  readonly inboundNotifications = new Map<string, InboundNotificationEntry>();
   private readonly scopes = new Map<string, ScopeRow>();
   private readonly competitorDaily = new Map<string, DailyRange[]>();
   private readonly competitorState = new Map<string, CompetitorRow>();
@@ -245,6 +254,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     this.tenantId = options.tenantId ?? 'memory-tenant';
     this.channel = seed.channel ?? 'KAUFLAND';
     this.region = this.channel === 'KAUFLAND' ? null : seed.region ?? null;
+    this.competitorSources = seed.competitorSources ? [...seed.competitorSources] : null;
     for (const s of seed.scopes) {
       this.scopes.set(s.writeScopeId, {
         ...s, status: s.status ?? 'ACTIVE', taxRegime: s.taxRegime ?? (s.basis === 'GROSS' ? 'VAT_INCLUDED' : 'SALES_TAX_EXCLUDED'),
@@ -800,6 +810,36 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     return this.apply(w, 'DISPATCHED', planOutcomeTransition(outcome, w.attemptCount, now, policy), now);
   }
 
+  /** Как channel_data.offer_channel_pricing_active (0082): последнее наблюдение оффера — правило или границы канала */
+  private channelPricingActive(row: ScopeRow): boolean {
+    if (this.channel === 'KAUFLAND') return false;
+    const latest = this.offerChannelPricing
+      .filter((o) => o.channelAccountId === row.channelAccountId && o.marketplace === row.marketplace && o.externalSku === row.externalUnitId)
+      .sort((a, b) => Date.parse(b.observedAt) - Date.parse(a.observedAt))[0];
+    return latest !== undefined && (latest.automatedPricing || latest.channelBounds);
+  }
+
+  async recordOfferChannelPricing(_tenantId: string, channelAccountId: string, observations: readonly OfferChannelPricingObservation[]): Promise<number> {
+    for (const o of observations) this.offerChannelPricing.push({ ...o, channelAccountId });
+    return observations.length;
+  }
+
+  async recordPricingHealth(_tenantId: string, channelAccountId: string, health: PricingHealthObservation): Promise<void> {
+    this.pricingHealth.push({
+      channelAccountId, marketplace: health.marketplace, channelProductRef: health.channelProductRef, condition: health.condition, issueType: health.issueType,
+      occurredAt: health.occurredAt, competitivePriceThreshold: health.competitivePriceThreshold,
+    });
+  }
+
+  async wasNotificationProcessed(_tenantId: string, _channelAccountId: string, notificationId: string): Promise<boolean> {
+    return this.inboundNotifications.has(`${this.channel}|${notificationId}`);
+  }
+
+  async markNotificationProcessed(_tenantId: string, entry: InboundNotificationEntry): Promise<void> {
+    const key = `${this.channel}|${entry.notificationId}`;
+    if (!this.inboundNotifications.has(key)) this.inboundNotifications.set(key, { ...entry });
+  }
+
   /** Как PgWriteQueueStore.checkPriceBasis: ставка — товара или страны витрины; недоверие каналу — одно на витрину и причину [Р-118] */
   async checkPriceBasis(_tenantId: string, write: FieldWrite, observedMinor: number, now: Instant): Promise<PriceBasisDistrust | null> {
     if (write.value.field !== 'PRICE') return null;
@@ -1026,6 +1066,11 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     }
     const versions = [...this.strategyVersions.values()].filter((d) => d.strategyId === input.strategyId);
     if (input.strategyId !== null && versions.length === 0) return { status: 'INVALID', cause: 'STRATEGY_NOT_FOUND' };
+    // Как write_scope_strategy_guard (0082): стратегия доступна на канале [Р-39, OQ-166], у оффера нет ценообразования канала [Р-120]
+    if (this.competitorSources && !strategyAvailability(input.params, this.competitorSources).available) return { status: 'INVALID', cause: 'STRATEGY_UNAVAILABLE' };
+    for (const id of input.assignTo) {
+      if (this.channelPricingActive(this.scope(id))) return { status: 'INVALID', cause: 'CHANNEL_PRICING_ACTIVE', writeScopeId: id };
+    }
     const strategy: StrategyDefinition = {
       strategyId: input.strategyId ?? `strategy-${this.strategyVersions.size + 1}`,
       version: versions.reduce((v, d) => Math.max(v, d.version), 0) + 1,
@@ -1225,6 +1270,10 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       })),
       haltReviews: this.haltReviews.map((r) => ({ ...r })),
       distrusts: this.distrusts.map((d) => ({ ...d, details: { ...d.details } })),
+      offerChannelPricing: [...new Map([...this.offerChannelPricing].sort((a, b) => Date.parse(a.observedAt) - Date.parse(b.observedAt))
+        .map((o) => [`${o.channelAccountId}|${o.marketplace}|${o.externalSku}`, { ...o }])).values()],
+      pricingHealth: [...new Map([...this.pricingHealth].sort((a, b) => Date.parse(a.occurredAt) - Date.parse(b.occurredAt))
+        .map((h) => [`${h.channelAccountId}|${h.marketplace}|${h.channelProductRef}|${h.condition}`, { ...h }])).values()],
       stops: this.stops.map((s) => ({ ...s })),
       rejectedSnapshots: this.rejectedSnapshots.map((r) => ({ ...r })),
       divergenceCases: this.divergenceCases.map((c) => ({ ...c })),
@@ -1244,6 +1293,9 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       halts: this.halts.map((h) => ({ haltId: h.haltId, channelAccountId: h.channelAccountId, marketplace: h.marketplace, reasonCode: h.reasonCode, releasedAt: h.releasedAt, releasedKind: h.releasedKind, nextReviewAt: h.nextReviewAt })),
       haltReviews: this.haltReviews.map((r) => ({ kind: r.kind, outcome: r.outcome, sampleSize: r.sampleSize, failedCount: r.failedCount })),
       distrusts: this.distrusts.map((d) => ({ distrustId: d.distrustId, marketplace: d.marketplace, reasonCode: d.reasonCode, releasedAt: d.releasedAt, released: d.releasedAt !== null })),
+      offerChannelPricing: this.offerChannelPricing.map((o) => ({ marketplace: o.marketplace, externalSku: o.externalSku, automatedPricing: o.automatedPricing, channelBounds: o.channelBounds, source: o.source })),
+      pricingHealth: this.pricingHealth.map((h) => ({ marketplace: h.marketplace, channelProductRef: h.channelProductRef, issueType: h.issueType, thresholdMinor: h.competitivePriceThreshold?.amountMinor ?? null })),
+      inboundNotifications: [...this.inboundNotifications.values()].map((n) => ({ notificationId: n.notificationId, notificationType: n.notificationType })),
       stops: this.stops.map((s) => ({ stopId: s.stopId, scope: s.scope, marketplace: s.marketplace, releasedAt: s.releasedAt })),
       intents: this.intents.map((i) => ({ writeScopeId: i.writeScopeId, ruleCode: i.ruleCode, proposedMinor: i.proposedMinor })),
       decisions: this.decisions.map((d) => ({

@@ -3,7 +3,7 @@ import type { ItemSearchResults } from '@repracer/amazon-client';
 import { logConservative } from './conservative.ts';
 import { AMAZON_MARKETPLACES, SEARCH_PAGE_MAX } from './descriptor.ts';
 import { ChannelCallError, channelError, classifyFailure } from './errors.ts';
-import { merchantQuantity, purchasePrice } from './mapping.ts';
+import { channelOwnedPricing, merchantQuantity, purchasePrice } from './mapping.ts';
 import { acquire, deadlinePassed, nowMs, observeRateLimit, openSession, type AmazonAdapterOptions } from './session.ts';
 
 /** Офферы аккаунта: searchListingsItems по витринам региона аккаунта, курсор — pageToken ответа */
@@ -18,7 +18,8 @@ export async function discoverOffersAmazon(options: AmazonAdapterOptions, ctx: A
   const budget = acquire(options, ctx, session, 'searchListingsItems');
   if (budget) throw new ChannelCallError(budget);
   const result = await session.client.request<ItemSearchResults>('GET', `/listings/2021-08-01/items/${encodeURIComponent(session.sellerId)}`, {
-    query: { marketplaceIds: marketplaces, includedData: ['summaries', 'offers', 'fulfillmentAvailability'], pageSize: Math.max(1, Math.min(page.limit, SEARCH_PAGE_MAX)),
+    // Р-120: attributes — чтобы продавец видел правило автоматического ценообразования до назначения стратегии
+    query: { marketplaceIds: marketplaces, includedData: ['summaries', 'attributes', 'offers', 'fulfillmentAvailability'], pageSize: Math.max(1, Math.min(page.limit, SEARCH_PAGE_MAX)),
       ...(page.cursor ? { pageToken: page.cursor } : {}) },
   });
   if (!result.ok) throw new ChannelCallError(classifyFailure(result, 'BATCH', nowMs(options)));
@@ -28,12 +29,14 @@ export async function discoverOffersAmazon(options: AmazonAdapterOptions, ctx: A
     const quantity = merchantQuantity(item);
     for (const s of item.summaries ?? []) {
       const price = purchasePrice(item, s.marketplaceId);
+      const owned = channelOwnedPricing(item, s.marketplaceId);
       items.push({
         identity: { region: session.region, marketplace: s.marketplaceId, externalSku: item.sku, ...(s.asin ? { channelProductRef: s.asin } : {}) },
         gtins: [], condition: (s as { conditionType?: string }).conditionType?.split('_')[0] ?? 'new',
         fulfillment: quantity === null ? 'CHANNEL' : 'MERCHANT',
         ...(price ? { currentPrice: price } : {}), ...(quantity !== null ? { currentQuantity: quantity } : {}),
         ...(s.status ? { isLive: s.status.includes('BUYABLE') } : {}),
+        channelPricing: { automatedPricing: owned.repricer, channelBounds: owned.bounds },
       });
     }
   }

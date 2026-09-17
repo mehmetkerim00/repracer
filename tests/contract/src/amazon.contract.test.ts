@@ -20,7 +20,7 @@ const MANDATORY = [
   'pipeline-x100-high', 'pipeline-x100-low', 'pipeline-mass-shift', 'pipeline-above-max', 'pipeline-max-missing', 'pipeline-bound-unresolvable',
   'pipeline-oq90-trap', 'pipeline-cold-start', 'pipeline-halt-auto-release', 'pipeline-halt-manual-release', 'pipeline-bounds-version',
   'pipeline-tax-regimes', 'pipeline-write-queue', 'pipeline-write-superseded', 'pipeline-fx-usd-floor', 'pipeline-fx-ean-anchor',
-  'async-apply', 'accepted-not-applied', 'channel-repricer', 'channel-repricer-pipeline', 'price-basis-readback',
+  'async-apply', 'accepted-not-applied', 'channel-repricer', 'channel-repricer-pipeline', 'price-basis-readback', 'discovery-channel-pricing', 'notification-receiver',
 ];
 
 /** Правила, недостижимые на витринах Release 1.0, — с причиной */

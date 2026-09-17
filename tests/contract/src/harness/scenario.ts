@@ -117,8 +117,22 @@ export type PricingMutationStep =
 export interface PipelineReviewHaltsStep { id: string; kind: 'pipelineReviewHalts'; sampleSize: number; ctx?: StepContext; expect?: unknown }
 /** Р-52: ручное снятие остановки по её номеру в состоянии хранилища */
 export interface PipelineReleaseHaltStep { id: string; kind: 'pipelineReleaseHalt'; haltIndex: number; membershipId: string; note: string; ctx?: StepContext; expect?: unknown }
+/** Р-120: обнаружение офферов пути решения — наблюдение собственного ценообразования канала */
+export interface PipelineDiscoverOffersStep { id: string; kind: 'pipelineDiscoverOffers'; pageLimit?: number; ctx?: StepContext; expect?: unknown }
 /** Р-118: снятие недоверия каналу человеком (второй фактор — у пользователя стенда, если mfa не false) */
 export interface PipelineReleaseDistrustStep { id: string; kind: 'pipelineReleaseDistrust'; distrustIndex: number; membershipId: string; note: string; mfa?: boolean; ctx?: StepContext; expect?: unknown }
+
+/**
+ * Шаг 23: приёмник уведомлений Amazon на очереди SQS в памяти (протокол AWS JSON, подпись SigV4) → адаптер → путь решения.
+ * send — положить сообщения (copies — повтор доставки, ageMs — сообщение отправлено раньше, corruptMd5 — тело искажено); затем poll раз
+ * получить пачку; failSink — столько доставок подряд падают исключением хранилища; advanceMs — сдвиг часов перед получением.
+ * Маршрут продавца — аккаунт мира (маршрут в базе проверяет packages/pricing-store-pg/test/inbound.pg.test.ts); журнал — хранилище пути.
+ */
+export interface ReceiverPollStep {
+  id: string; kind: 'receiverPoll';
+  send?: Array<{ body: unknown; copies?: number; ageMs?: number; corruptMd5?: boolean }>;
+  polls?: number; failSink?: number; advanceMs?: number; expect?: unknown;
+}
 
 /** Остановка человеком и её снятие [Р-69, Р-70]: права — по роли участника (DEFAULT_MEMBERS); снятие — по номеру остановки */
 export type PricingStopStep =
@@ -129,7 +143,7 @@ export type PricingStopStep =
 export interface PipelineDispatchDueStep { id: string; kind: 'pipelineDispatchDue'; expect?: unknown }
 
 export type PipelineStep = PipelineInboundStep | PipelinePollStep | PipelineRecomputeStep | PipelineEnableStep | PricingMutationStep
-  | PipelineReviewHaltsStep | PipelineReleaseHaltStep | PipelineReleaseDistrustStep | PipelineDispatchDueStep | PricingStopStep;
+  | PipelineReviewHaltsStep | PipelineReleaseHaltStep | PipelineReleaseDistrustStep | PipelineDiscoverOffersStep | PipelineDispatchDueStep | PricingStopStep | ReceiverPollStep;
 
 /** Симулятор: доставить уведомления модели канала, срок которых наступил, через путь решения */
 export interface ChannelDeliverStep { id: string; kind: 'channelDeliver'; expect?: unknown }
@@ -190,7 +204,7 @@ export interface Scenario {
 }
 
 const ID_RE = /^[a-z0-9]+(?:[-/][a-z0-9]+)*$/;
-const PIPELINE_KINDS = new Set(['channelDeliver', 'channelRun', 'pipelineInbound', 'pipelinePoll', 'pipelineRecompute', 'pipelineEnableRepricing', 'pricingMutation', 'pipelineReviewHalts', 'pipelineReleaseHalt', 'pipelineReleaseDistrust', 'pricingStop']);
+const PIPELINE_KINDS = new Set(['channelDeliver', 'channelRun', 'pipelineInbound', 'pipelinePoll', 'pipelineRecompute', 'pipelineEnableRepricing', 'pricingMutation', 'pipelineReviewHalts', 'pipelineReleaseHalt', 'pipelineReleaseDistrust', 'pipelineDiscoverOffers', 'pricingStop', 'receiverPoll']);
 
 export function validateScenario(s: Scenario): string[] {
   const problems: string[] = [];

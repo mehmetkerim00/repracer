@@ -427,6 +427,12 @@ SELECT pg_temp.expect_fail('second active distrust of the same storefront and re
 SELECT pg_temp.expect_fail('buyer price read from the channel kept in a distrust (Р-3, Р-118)', $q$
   INSERT INTO channel_data.channel_distrust (tenant_id, channel_account_id, channel, marketplace, reason_code, details)
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'at', 'PRICE_BASIS_MISMATCH', '{"observedMinor": 2379}') $q$, 'channel_distrust_details_check');
+SELECT pg_temp.expect_fail('channel distrust with an unknown reason (Р-118)', $q$
+  INSERT INTO channel_data.channel_distrust (tenant_id, channel_account_id, channel, marketplace, reason_code)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'at', 'SOMETHING_ELSE') $q$, 'channel_distrust_reason_known');
+SELECT pg_temp.expect_fail('channel pricing observation from an unknown source (Р-120)', $q$
+  INSERT INTO channel_data.offer_channel_pricing (tenant_id, channel_account_id, channel, marketplace, external_sku, automated_pricing, channel_bounds, source, observed_at)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'SYN-SRC', true, false, 'GUESS', now()) $q$, 'offer_channel_pricing_source_known');
 SELECT pg_temp.expect_fail('decision path releases a channel distrust (Р-118)', $q$
   UPDATE channel_data.channel_distrust SET released_at = now(), released_by_membership_id = 'a2000000-0000-0000-0000-00000000000a', release_note = 'the path releases itself'
    WHERE reason_code = 'PRICE_BASIS_MISMATCH' $q$, 'permission denied for table channel_distrust');
@@ -449,6 +455,12 @@ VALUES (:tA, 'ab000000-0000-0000-0000-000000000001', 'a4000000-0000-0000-0000-00
 -- Р-118: недоверие каналу витрины at для проверок снятия ниже
 INSERT INTO channel_data.channel_distrust (tenant_id, channel_distrust_id, channel_account_id, channel, marketplace, reason_code, details)
 VALUES (:tA, 'ad230000-0000-4000-8000-000000000001', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'at', 'PRICE_BASIS_MISMATCH', '{"basisError": "TAX_ADDED"}');
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM audit.audit_event WHERE entity_type = 'channel_distrust' AND entity_id = 'ad230000-0000-4000-8000-000000000001' AND action = 'pricing.distrust_created' AND actor_type = 'SYSTEM') THEN
+    RAISE EXCEPTION 'a channel distrust is created without an audit event (Р-76, Р-118)';
+  END IF;
+  RAISE NOTICE 'PASS accept | a channel distrust is created with an audit event (Р-76, Р-118)';
+END $$;
 COMMIT;
 \c - svc_admin
 \ir smoke_helpers.sql
@@ -497,6 +509,11 @@ SELECT set_config('app.user_id', :uA, true) \gset
 SELECT pg_temp.expect_fail('channel distrust released in the name of another member (Р-118)', $q$
   UPDATE channel_data.channel_distrust SET released_at = now(), released_by_membership_id = 'a2000000-0000-0000-0000-0000000000a9', release_note = 'price basis fixed in the channel'
    WHERE channel_distrust_id = 'ad230000-0000-4000-8000-000000000001' $q$, 'is not the membership of the session user');
+SELECT pg_temp.expect_fail('channel distrust reason changed (Р-118)', $q$
+  UPDATE channel_data.channel_distrust SET reason_code = 'PRICE_BASIS_MISMATCH', details = '{}' WHERE channel_distrust_id = 'ad230000-0000-4000-8000-000000000001' $q$, 'permission denied for table channel_distrust');
+SELECT pg_temp.expect_fail('channel distrust released with a note shorter than 10 characters (Р-118)', $q$
+  UPDATE channel_data.channel_distrust SET released_at = now(), released_by_membership_id = 'a2000000-0000-0000-0000-00000000000a', release_note = 'fixed'
+   WHERE channel_distrust_id = 'ad230000-0000-4000-8000-000000000001' $q$, 'channel_distrust_release_by_person');
 SELECT pg_temp.ok('channel distrust released by the owner with a second factor (Р-118)', $q$
   UPDATE channel_data.channel_distrust SET released_at = now(), released_by_membership_id = 'a2000000-0000-0000-0000-00000000000a', release_note = 'price basis fixed in the channel'
    WHERE channel_distrust_id = 'ad230000-0000-4000-8000-000000000001' $q$);
@@ -662,10 +679,19 @@ SELECT set_config('app.tenant_id', :tA, true), set_config('app.user_id', :uA, tr
 INSERT INTO tenant_data.pricing_strategy (tenant_id, pricing_strategy_id, version, name, type, params, triggers, status, created_by_membership_id)
 VALUES (:tA, 'ad230000-0000-4000-8000-000000000002', 1, 'Lowest on the whole market', 'BEAT_LOWEST', '{"scope": "MARKET", "compareLanded": false, "atBound": "CAP", "deadbandMinor": 0}', ARRAY['COMPETITOR_CHANGE'], 'ACTIVE', :mA),
        (:tA, 'ad230000-0000-4000-8000-000000000004', 1, 'Fixed for Amazon', 'FIXED', '{"priceMinor": 1500, "deadbandMinor": 0}', ARRAY['COST_CHANGE'], 'ACTIVE', :mA);
+INSERT INTO channel_data.pricing_strategy_undercut (tenant_id, pricing_strategy_id, version, undercut_minor)
+VALUES (:tA, 'ad230000-0000-4000-8000-000000000002', 1, 1);
+-- Отдельная единица Kaufland в режиме OFF: у a6…01 к этому месту включён Smart Pricing, стратегию ей не назначить по другой причине
+INSERT INTO tenant_data.write_scope (tenant_id, write_scope_id, channel_account_id, channel, field, product_id, capability_id, capability_version, scope_kind, scope_key,
+                                     currency, price_basis, tax_regime, pricing_mode)
+VALUES (:tA, 'ad230000-0000-4000-8000-000000000005', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'PRICE', 'a5000000-0000-0000-0000-000000000001',
+        'c0000000-0000-0000-0000-000000000001', 1, 'ACCOUNT_STOREFRONT_UNIT',
+        tenant_data.derive_scope_key('{"marketplace":"de","external_unit_id":"U-R39"}', ARRAY['channel_account','marketplace','external_unit_id']),
+        'EUR', 'GROSS', 'VAT_INCLUDED', 'OFF');
 -- Kaufland даёт только первые предложения Buy Box (TOP_N), не весь рынок: «ниже всех на рынке» недоступна [Р-39]
 SELECT pg_temp.expect_fail('strategy unavailable on the channel assigned to an offer (Р-39, OQ-166)', $q$
   UPDATE tenant_data.write_scope SET pricing_strategy_id = 'ad230000-0000-4000-8000-000000000002', pricing_strategy_version = 1
-   WHERE write_scope_id = 'a6000000-0000-0000-0000-000000000001' $q$, 'is not available on channel KAUFLAND');
+   WHERE write_scope_id = 'ad230000-0000-4000-8000-000000000005' $q$, 'is not available on channel KAUFLAND');
 INSERT INTO tenant_data.write_scope (tenant_id, write_scope_id, channel_account_id, channel, field, product_id, capability_id, capability_version, scope_kind, scope_key,
                                      currency, price_basis, tax_regime, pricing_mode)
 VALUES (:tA, 'ad230000-0000-4000-8000-000000000003', 'a4000000-0000-0000-0000-000000000002', 'AMAZON', 'PRICE', 'a5000000-0000-0000-0000-000000000001',

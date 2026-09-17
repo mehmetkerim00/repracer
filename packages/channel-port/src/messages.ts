@@ -193,6 +193,11 @@ export interface DiscoveredOffer {
   currentPrice?: Money;
   currentQuantity?: number;
   isLive?: boolean;
+  /**
+   * Р-120: собственное ценообразование канала у оффера, прочитанное при обнаружении. automatedPricing — привязка к правилу
+   * автоматического ценообразования (Amazon), channelBounds — границы цены на стороне канала. Нет поля — канал этого не сообщает.
+   */
+  channelPricing?: { automatedPricing: boolean; channelBounds: boolean };
 }
 
 export interface OrderLine {
@@ -220,8 +225,24 @@ export interface InboundDelivery {
   receivedAt: Instant;
 }
 
+/**
+ * Шаг 23: состояние цены оффера по оценке канала (Amazon PRICING_HEALTH — оффер не может быть Featured Offer из-за неконкурентной цены).
+ * Данные канала ≤ 18 мес [Р-3]; в решение о цене не входит — предупреждение продавцу. Перечень issueType канал не публикует.
+ */
+export interface PricingHealthObservation {
+  marketplace: string;
+  channelProductRef: string;
+  condition: string;
+  issueType: string;
+  occurredAt: Instant;
+  /** Порог конкурентной цены канала (summary.referencePrice.competitivePriceThreshold); нет в уведомлении — null */
+  competitivePriceThreshold: Money | null;
+  sourceEventId: string;
+}
+
 export type InboundEvent =
   | { kind: 'OBSERVATION'; observation: IdentifiedObservation }
+  | { kind: 'PRICING_HEALTH'; health: PricingHealthObservation }
   | { kind: 'COMPETITOR_SNAPSHOT'; snapshot: CompetitorSnapshot }
   | { kind: 'ORDER_LINE'; orderLine: OrderLine }
   | { kind: 'OFFER_REMOVED'; identity: OfferIdentity; occurredAt: Instant }

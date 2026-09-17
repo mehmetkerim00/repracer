@@ -1,0 +1,435 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "amazon/pipeline/discovery-channel-pricing",
+  "channel": "AMAZON",
+  "apiVersion": "listings-items-2021-08-01",
+  "title": "Р-120: при обнаружении офферов видно правило автоматического ценообразования и границы канала — до назначения стратегии",
+  "description": "Путь решения читает офферы аккаунта searchListingsItems с атрибутами. У первого оффера — привязка automated_pricing_merchandising_rule_plan (Automate Pricing), у второго — minimum/maximum_seller_allowed_price, третий чистый. Наблюдения записываются для всех трёх; продавец получает предупреждение о двух офферах, а назначить им стратегию не даст база (write_scope_strategy_guard, 0082). Раньше правило обнаруживалось только при первой записи цены [Р-115].",
+  "tags": [
+    "pipeline",
+    "r120",
+    "mandatory:discovery-channel-pricing"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "vendor/amazon/sp-api-models/2026-09-16/models/listings-items-api-model/listingsItems_2021-08-01.json",
+      "https://developer-docs.amazon/sp-api/docs/manage-purchasable-offer.md",
+      "docs/decisions.md#Р-115",
+      "docs/decisions.md#Р-116"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "A1SYNSELLER0001",
+      "marketplaces": [
+        "A1PA6795UKMFR9"
+      ],
+      "channel": "AMAZON",
+      "region": "EU"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "Atzr|syn-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "amzn1.application-oa2-client.syn0001",
+        "clientSecret": "syn-lwa-client-secret-0001"
+      },
+      "accessToken": "Atza|syn-access-token-0001"
+    },
+    "pricing": {
+      "scopes": [
+        {
+          "writeScopeId": "ws-price-de-8301",
+          "productId": "prod-8301",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "A1PA6795UKMFR9",
+          "externalUnitId": "SYN-SKU-8301",
+          "channelProductRef": "B000008301",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-fixed-1999",
+            "version": 1,
+            "params": {
+              "type": "FIXED",
+              "priceMinor": 1999
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1000,
+            "id": "min-8301"
+          },
+          "maxPrice": {
+            "amountMinor": 5000,
+            "id": "max-8301"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-8301",
+            "unitCostMinor": 500,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-8302",
+          "productId": "prod-8302",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "A1PA6795UKMFR9",
+          "externalUnitId": "SYN-SKU-8302",
+          "channelProductRef": "B000008302",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-fixed-2100",
+            "version": 1,
+            "params": {
+              "type": "FIXED",
+              "priceMinor": 2100
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 2000,
+          "minPrice": {
+            "amountMinor": 1000,
+            "id": "min-8302"
+          },
+          "maxPrice": {
+            "amountMinor": 5000,
+            "id": "max-8302"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-8302",
+            "unitCostMinor": 500,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-8303",
+          "productId": "prod-8303",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "A1PA6795UKMFR9",
+          "externalUnitId": "SYN-SKU-8303",
+          "channelProductRef": "B000008303",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-fixed-2200",
+            "version": 1,
+            "params": {
+              "type": "FIXED",
+              "priceMinor": 2200
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 2100,
+          "minPrice": {
+            "amountMinor": 1000,
+            "id": "min-8303"
+          },
+          "maxPrice": {
+            "amountMinor": 5000,
+            "id": "max-8303"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-8303",
+            "unitCostMinor": 500,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
+          }
+        }
+      ],
+      "marketplaces": {
+        "A1PA6795UKMFR9": {
+          "currency": "EUR",
+          "basis": "GROSS"
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "id": "discover-account-offers",
+      "kind": "pipelineDiscoverOffers",
+      "expect": {
+        "offers": 3,
+        "recorded": 3,
+        "withChannelPricing": [
+          {
+            "marketplace": "A1PA6795UKMFR9",
+            "externalSku": "SYN-SKU-8301",
+            "automatedPricing": true,
+            "channelBounds": false
+          },
+          {
+            "marketplace": "A1PA6795UKMFR9",
+            "externalSku": "SYN-SKU-8302",
+            "automatedPricing": false,
+            "channelBounds": true
+          }
+        ]
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "lwa-token",
+      "note": "Токен LWA по refresh_token (connecting-to-the-selling-partner-api); тело формы проверяет стенд",
+      "request": {
+        "method": "POST",
+        "path": "/auth/o2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "Atza|syn-access-token-0001",
+          "token_type": "bearer",
+          "expires_in": 3600,
+          "refresh_token": "Atzr|syn-refresh-token-0001"
+        }
+      }
+    },
+    {
+      "id": "search-account-offers",
+      "note": "searchListingsItems с attributes: привязка к правилу ценообразования и границы канала видны до назначения стратегии [Р-120]",
+      "request": {
+        "method": "GET",
+        "path": "/listings/2021-08-01/items/A1SYNSELLER0001",
+        "query": {
+          "marketplaceIds": "A1PA6795UKMFR9",
+          "includedData": "summaries,attributes,offers,fulfillmentAvailability",
+          "pageSize": "20"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "numberOfResults": 3,
+          "pagination": {},
+          "items": [
+            {
+              "sku": "SYN-SKU-8301",
+              "summaries": [
+                {
+                  "marketplaceId": "A1PA6795UKMFR9",
+                  "asin": "B000008301",
+                  "productType": "SYNTHETIC_PRODUCT_TYPE",
+                  "status": [
+                    "BUYABLE",
+                    "DISCOVERABLE"
+                  ]
+                }
+              ],
+              "attributes": {
+                "purchasable_offer": [
+                  {
+                    "marketplace_id": "A1PA6795UKMFR9",
+                    "currency": "EUR",
+                    "audience": "ALL",
+                    "our_price": [
+                      {
+                        "schedule": [
+                          {
+                            "value_with_tax": 18.5
+                          }
+                        ]
+                      }
+                    ],
+                    "automated_pricing_merchandising_rule_plan": [
+                      {
+                        "rule_id": "syn-automated-pricing-rule-0001"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "issues": [],
+              "offers": [
+                {
+                  "marketplaceId": "A1PA6795UKMFR9",
+                  "offerType": "B2C",
+                  "price": {
+                    "currencyCode": "EUR",
+                    "amount": "18.5"
+                  }
+                }
+              ],
+              "fulfillmentAvailability": []
+            },
+            {
+              "sku": "SYN-SKU-8302",
+              "summaries": [
+                {
+                  "marketplaceId": "A1PA6795UKMFR9",
+                  "asin": "B000008302",
+                  "productType": "SYNTHETIC_PRODUCT_TYPE",
+                  "status": [
+                    "BUYABLE",
+                    "DISCOVERABLE"
+                  ]
+                }
+              ],
+              "attributes": {
+                "purchasable_offer": [
+                  {
+                    "marketplace_id": "A1PA6795UKMFR9",
+                    "currency": "EUR",
+                    "audience": "ALL",
+                    "our_price": [
+                      {
+                        "schedule": [
+                          {
+                            "value_with_tax": 20
+                          }
+                        ]
+                      }
+                    ],
+                    "minimum_seller_allowed_price": [
+                      {
+                        "schedule": [
+                          {
+                            "value_with_tax": 3
+                          }
+                        ]
+                      }
+                    ],
+                    "maximum_seller_allowed_price": [
+                      {
+                        "schedule": [
+                          {
+                            "value_with_tax": 50
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              "issues": [],
+              "offers": [
+                {
+                  "marketplaceId": "A1PA6795UKMFR9",
+                  "offerType": "B2C",
+                  "price": {
+                    "currencyCode": "EUR",
+                    "amount": "20"
+                  }
+                }
+              ],
+              "fulfillmentAvailability": []
+            },
+            {
+              "sku": "SYN-SKU-8303",
+              "summaries": [
+                {
+                  "marketplaceId": "A1PA6795UKMFR9",
+                  "asin": "B000008303",
+                  "productType": "SYNTHETIC_PRODUCT_TYPE",
+                  "status": [
+                    "BUYABLE",
+                    "DISCOVERABLE"
+                  ]
+                }
+              ],
+              "attributes": {
+                "purchasable_offer": [
+                  {
+                    "marketplace_id": "A1PA6795UKMFR9",
+                    "currency": "EUR",
+                    "audience": "ALL",
+                    "our_price": [
+                      {
+                        "schedule": [
+                          {
+                            "value_with_tax": 21
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              "issues": [],
+              "offers": [
+                {
+                  "marketplaceId": "A1PA6795UKMFR9",
+                  "offerType": "B2C",
+                  "price": {
+                    "currencyCode": "EUR",
+                    "amount": "21"
+                  }
+                }
+              ],
+              "fulfillmentAvailability": []
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "expect": {
+    "alerts": [
+      {
+        "code": "OFFERS_WITH_CHANNEL_PRICING",
+        "severity": "WARNING",
+        "count": 1,
+        "details": {
+          "offers": 2
+        }
+      }
+    ],
+    "pipeline": {
+      "offerChannelPricing": [
+        {
+          "externalSku": "SYN-SKU-8301",
+          "automatedPricing": true,
+          "channelBounds": false,
+          "source": "DISCOVERY"
+        },
+        {
+          "externalSku": "SYN-SKU-8302",
+          "automatedPricing": false,
+          "channelBounds": true,
+          "source": "DISCOVERY"
+        },
+        {
+          "externalSku": "SYN-SKU-8303",
+          "automatedPricing": false,
+          "channelBounds": false,
+          "source": "DISCOVERY"
+        }
+      ]
+    }
+  }
+}

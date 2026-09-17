@@ -1,6 +1,6 @@
 import type { DecisionExplanation, DistrustRef, ExplanationIntentColumns, SanitySummary, FxFailureCause, FxQuote, HaltRef, HaltReasonCode, MemberRole, PriceIntentDraft as IntentDraft, StopRef, StopScope } from '@repracer/pricing-model';
 import type { ExplanationRuleset, StopScope as AuditStopScope } from '@repracer/pricing-model';
-import type { CompetitorQuery, FieldWrite, Instant, OfferIdentity, PriceBasis, WriteOutcome } from '@repracer/channel-port';
+import type { CompetitorQuery, FieldWrite, Instant, Money, OfferIdentity, PriceBasis, PricingHealthObservation, WriteOutcome } from '@repracer/channel-port';
 import type { MoveRecord, SanityContext } from '@repracer/input-sanity';
 import type { GuardrailSet } from '@repracer/price-gate';
 import type {
@@ -305,7 +305,42 @@ export type StrategySaveResult =
   | { status: 'SAVED'; strategy: StrategyDefinition; assigned: string[] }
   | { status: 'FORBIDDEN' }
   | { status: 'CONFLICT'; writeScopeId: string }
-  | { status: 'INVALID'; cause: 'STRATEGY_NOT_FOUND' | 'SCOPE_NOT_FOUND' | 'NAME_REQUIRED' };
+  /** STRATEGY_UNAVAILABLE — канал не даёт нужных данных конкурентов [Р-39]; CHANNEL_PRICING_ACTIVE — у оффера ценообразование канала [Р-120] */
+  | { status: 'INVALID'; cause: 'STRATEGY_NOT_FOUND' | 'SCOPE_NOT_FOUND' | 'NAME_REQUIRED' | 'STRATEGY_UNAVAILABLE' | 'CHANNEL_PRICING_ACTIVE'; writeScopeId?: string };
+
+/** Р-120: наблюдение собственного ценообразования канала у оффера */
+export interface OfferChannelPricingObservation {
+  marketplace: string;
+  externalSku: string;
+  automatedPricing: boolean;
+  channelBounds: boolean;
+  source: 'DISCOVERY' | 'PRE_WRITE_READ' | 'READBACK';
+  observedAt: Instant;
+}
+
+export interface ConsoleOfferChannelPricingRow extends OfferChannelPricingObservation {
+  channelAccountId: string;
+}
+
+/** Шаг 23: последнее состояние PRICING_HEALTH оффера для экрана товаров (данные канала, 18 мес) */
+export interface ConsolePricingHealthRow {
+  channelAccountId: string;
+  marketplace: string;
+  channelProductRef: string;
+  condition: string;
+  issueType: string;
+  occurredAt: Instant;
+  competitivePriceThreshold: Money | null;
+}
+
+/** Шаг 23: запись журнала обработанных уведомлений (дедупликация по идентификатору уведомления канала) */
+export interface InboundNotificationEntry {
+  channelAccountId: string;
+  notificationId: string;
+  notificationType: string;
+  eventTime: Instant | null;
+  receivedAt: Instant;
+}
 
 export interface PricingStore {
   loadEvaluationContext(tenantId: string, key: ProductKey, now: Instant, shift: ShiftWindow): Promise<EvaluationContext>;
@@ -333,6 +368,13 @@ export interface PricingStore {
   /** Шаг 21: PREVIEW — те же проверки и действующие границы после правки без сохранения; APPLY — всё или ничего */
   editBounds(tenantId: string, edits: readonly BoundsEditInput[], actor: AdminActor, mode: 'PREVIEW' | 'APPLY'): Promise<BoundsEditResult>;
   saveStrategy(tenantId: string, input: StrategySaveInput, actor: AdminActor): Promise<StrategySaveResult>;
+  /** Р-120: наблюдения при обнаружении офферов — до назначения стратегии; назначение по действующему наблюдению отклоняет БД (0082) */
+  recordOfferChannelPricing(tenantId: string, channelAccountId: string, observations: readonly OfferChannelPricingObservation[]): Promise<number>;
+  /** Шаг 23: PRICING_HEALTH — в решение не входит, состояние оффера для продавца */
+  recordPricingHealth(tenantId: string, channelAccountId: string, health: PricingHealthObservation): Promise<void>;
+  /** Шаг 23: журнал обработанных уведомлений тенанта — повтор доставки из очереди не обрабатывается второй раз */
+  wasNotificationProcessed(tenantId: string, channelAccountId: string, notificationId: string): Promise<boolean>;
+  markNotificationProcessed(tenantId: string, entry: InboundNotificationEntry): Promise<void>;
 
   listDueHalts(tenantId: string, channelAccountId: string, now: Instant): Promise<HaltInfo[]>;
   getHalt(tenantId: string, haltId: string): Promise<HaltInfo | null>;
@@ -498,6 +540,10 @@ export interface ConsoleState {
   halts: ConsoleHaltRow[];
   haltReviews: ConsoleHaltReviewRow[];
   distrusts: ConsoleDistrustRow[];
+  /** Р-120: последнее наблюдение собственного ценообразования канала по каждому офферу */
+  offerChannelPricing: ConsoleOfferChannelPricingRow[];
+  /** Шаг 23: последнее уведомление PRICING_HEALTH по каждому офферу */
+  pricingHealth: ConsolePricingHealthRow[];
   stops: ConsoleStopRow[];
   rejectedSnapshots: ConsoleRejectedSnapshotRow[];
   divergenceCases: ConsoleDivergenceRow[];

@@ -40,6 +40,12 @@ VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-0000000
 -- Р-120 (0082): наблюдение собственного ценообразования канала
 INSERT INTO channel_data.offer_channel_pricing (tenant_id, channel_account_id, channel, marketplace, external_sku, automated_pricing, channel_bounds, source, observed_at)
 VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R103-SKU', false, false, 'DISCOVERY', now());
+-- Шаг 23, A (0083): журнал обработанных уведомлений и состояние PRICING_HEALTH
+INSERT INTO channel_data.inbound_notification (tenant_id, channel_account_id, channel, notification_id, notification_type, event_time, received_at)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'SYN-N-R103', 'ANY_OFFER_CHANGED', now(), now());
+INSERT INTO channel_data.offer_pricing_health (tenant_id, channel_account_id, channel, marketplace, channel_product_ref, condition, issue_type, event_time,
+  competitive_price_threshold_minor, currency, notification_id)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R103-1', 'new', 'BuyBoxDisqualification', now(), 1999, 'EUR', 'SYN-N-R103-H');
 INSERT INTO channel_data.price_decision_snapshot_ref (tenant_id, price_decision_id, decided_at, write_scope_id, competitor_snapshot_id, source, observed_at)
 SELECT tenant_id, price_decision_id, decided_at, write_scope_id, 'a9103000-0000-4000-8000-000000000001', 'KAUFLAND_BUYBOX', decided_at
   FROM channel_data.price_decision WHERE price_decision_id = 'a8000000-0000-0000-0000-000000000001';
@@ -82,6 +88,11 @@ SELECT tenant_id, write_scope_id, price_type, price_day, 1100, 1200, 1100, first
 INSERT INTO tenant_data.product_vat_rate (tenant_id, product_id, country, rate_bp, version, created_by_membership_id)
 SELECT 'a0000000-0000-0000-0000-00000000000a', 'a5000000-0000-0000-0000-000000000001', 'AT', 1000, coalesce(max(version), 0) + 1, 'a2000000-0000-0000-0000-00000000000a'
   FROM tenant_data.product_vat_rate WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a' AND product_id = 'a5000000-0000-0000-0000-000000000001' AND country = 'AT';
+
+-- Шаг 23 [Р-108]: TRUNCATE новой append-only таблицы отклоняет свой триггер
+SELECT pg_temp.expect_fail('truncate channel_data.offer_channel_pricing', $q$ TRUNCATE channel_data.offer_channel_pricing $q$, 'TRUNCATE of channel_data.offer_channel_pricing is forbidden');
+SELECT pg_temp.expect_fail('truncate channel_data.inbound_notification', $q$ TRUNCATE channel_data.inbound_notification $q$, 'TRUNCATE of channel_data.inbound_notification is forbidden');
+SELECT pg_temp.expect_fail('truncate channel_data.offer_pricing_health', $q$ TRUNCATE channel_data.offer_pricing_health $q$, 'TRUNCATE of channel_data.offer_pricing_health is forbidden');
 
 -- Находка 4 ревью шага 16, Р-93, Р-103: у каждой append-only таблицы есть строка, и изменение строки отклоняет именно триггер неизменяемости
 DO $$

@@ -25,6 +25,7 @@ const KAUFLAND = fileURLToPath(new URL('../../fixtures/kaufland/', import.meta.u
 const SOURCES = [
   'vendor/amazon/sp-api-models/2026-09-16/models/listings-items-api-model/listingsItems_2021-08-01.json',
   'vendor/amazon/sp-api-models/2026-09-16/schemas/notifications/AnyOfferChangedNotification.json',
+  'vendor/amazon/sp-api-models/2026-09-16/schemas/notifications/PricingHealthNotification.json',
   'https://developer-docs.amazon/sp-api/docs/manage-purchasable-offer.md',
   'https://developer-docs.amazon/sp-api/docs/connecting-to-the-selling-partner-api.md',
   'https://developer-docs.amazon/sp-api/docs/listings-items-api-rate-limits.md',
@@ -105,6 +106,23 @@ export function preReadExchange(id: string, skuValue: string, offers: readonly O
   };
 }
 
+/** Р-120: страница searchListingsItems с атрибутами — обнаружение офферов и их собственного ценообразования в канале */
+export function searchListingsExchange(id: string, items: ReadonlyArray<{ sku: string; offers: readonly OfferState[] }>, pageSize = 20): Exchange {
+  const marketplaces = [...new Set(items.flatMap((i) => i.offers.map((o) => o.marketplace ?? DE)))];
+  return {
+    id, note: 'searchListingsItems с attributes: привязка к правилу ценообразования и границы канала видны до назначения стратегии [Р-120]',
+    request: { method: 'GET', path: `/listings/2021-08-01/items/${SELLER}`, query: { marketplaceIds: marketplaces.join(','), includedData: 'summaries,attributes,offers,fulfillmentAvailability', pageSize: String(pageSize) } },
+    response: { status: 200, body: {
+      numberOfResults: items.length, pagination: {},
+      items: items.map((i) => ({
+        sku: i.sku, summaries: summaries(i.sku, i.offers), attributes: attributes(i.offers), issues: [],
+        offers: i.offers.map((o) => ({ marketplaceId: o.marketplace ?? DE, offerType: 'B2C', price: { currencyCode: o.currency ?? 'EUR', amount: String(major(o.purchaseMinor ?? o.priceMinor)) } })),
+        fulfillmentAvailability: [],
+      })),
+    } },
+  };
+}
+
 export function readBackExchange(id: string, skuValue: string, offers: readonly OfferState[]): Exchange {
   return {
     id,
@@ -160,6 +178,24 @@ export function anyOfferChanged(notificationId: string, marketplace: string, asi
         IsExpeditedShippingAvailable: false, IsFeaturedMerchant: true, ShipsDomestically: true, ShipsInternationally: false,
       })),
     } },
+  };
+}
+
+/** PRICING_HEALTH по схеме schemas/notifications/PricingHealthNotification.json снимка: ключи со строчной буквы; значения синтетические */
+export function pricingHealthNotification(notificationId: string, marketplace: string, asinValue: string, time: unknown, thresholdMinor: number | null, sellerId = SELLER): Record<string, unknown> {
+  const money = (minor: number) => ({ amount: major(minor), currencyCode: 'EUR' });
+  return {
+    notificationVersion: '1.0', notificationType: 'PRICING_HEALTH', payloadVersion: '1.0', eventTime: time,
+    notificationMetadata: { applicationId: 'amzn1.sellerapps.app.syn0001', subscriptionId: 'syn-subscription-0002', publishTime: time, notificationId },
+    payload: {
+      issueType: 'BuyBoxDisqualification', sellerId,
+      offerChangeTrigger: { marketplaceId: marketplace, asin: asinValue, itemCondition: 'new', timeOfOfferChange: time },
+      merchantOffer: { condition: 'new', fulfillmentType: 'MFN', listingPrice: money(1850), shipping: money(0), landedPrice: money(1850) },
+      summary: {
+        numberOfOffers: [{ condition: 'new', fulfillmentType: 'MFN', offerCount: 3 }], buyBoxEligibleOffers: [{ condition: 'new', fulfillmentType: 'MFN', offerCount: 2 }],
+        referencePrice: thresholdMinor === null ? {} : { competitivePriceThreshold: money(thresholdMinor) },
+      },
+    },
   };
 }
 

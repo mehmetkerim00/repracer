@@ -1,6 +1,6 @@
 import type { Exchange, Scenario, Step } from '../harness/scenario.ts';
 import { SCENARIO_FORMAT } from '../harness/scenario.ts';
-import { accepted, amazonWorld, anyOfferChanged, DE, delivery, patchPriceExchange, preReadExchange, readBackExchange, SELLER, tokenExchange, US } from './build.ts';
+import { accepted, amazonWorld, anyOfferChanged, DE, delivery, patchPriceExchange, preReadExchange, pricingHealthNotification, readBackExchange, SELLER, tokenExchange, US } from './build.ts';
 
 /** Сценарии адаптера Amazon: обязательные сценарии Kaufland в смысле Amazon и асинхронное применение (шаг 22). Данные синтетические */
 
@@ -108,14 +108,30 @@ export function buildAdapterScenarios(): Array<{ file: string; scenario: Scenari
       { id: 'next', kind: 'inbound', delivery: aoc('syn-notification-0002', 1770), expect: { kind: 'EVENTS', deliveryId: 'amazon:syn-notification-0002' } },
     ], [], { noAlerts: true, logs: [{ code: 'AMZ_C08_NOTIFICATION_NOT_SIGNED', count: 3 }] }));
 
+  add('notification-pricing-health.json', scenario('amazon/notification/pricing-health',
+    'PRICING_HEALTH: оффер выбыл из Featured Offer — состояние оффера с порогом конкурентной цены; чужой SellerId — отказ',
+    'Шаг 23. Схема PricingHealthNotification.json снимка: ключи со строчной буквы. Событие PRICING_HEALTH несёт витрину, ASIN, состояние, issueType и порог summary.referencePrice.competitivePriceThreshold; порога нет — null. SellerId сверяется с аккаунтом так же, как у ANY_OFFER_CHANGED [Р-31].',
+    ['inbound', 'pricing-health'],
+    [
+      { id: 'with-threshold', kind: 'inbound', delivery: delivery(pricingHealthNotification('syn-notification-0201', DE, 'B000007001', { $clockIso: -5_000 }, 1799)),
+        expect: { kind: 'EVENTS', deliveryId: 'amazon:syn-notification-0201', events: [{ kind: 'PRICING_HEALTH', health: {
+          marketplace: DE, channelProductRef: 'B000007001', condition: 'new', issueType: 'BuyBoxDisqualification', sourceEventId: 'syn-notification-0201',
+          competitivePriceThreshold: { amountMinor: 1799, currency: 'EUR', basis: 'GROSS' } } }] } },
+      { id: 'without-threshold', kind: 'inbound', delivery: delivery(pricingHealthNotification('syn-notification-0202', DE, 'B000007001', { $clockIso: -4_000 }, null)),
+        expect: { kind: 'EVENTS', events: [{ kind: 'PRICING_HEALTH', health: { competitivePriceThreshold: null } }] } },
+      { id: 'foreign-seller', kind: 'inbound', delivery: delivery(pricingHealthNotification('syn-notification-0203', DE, 'B000007001', { $clockIso: -3_000 }, 1799, 'A9SYNOTHERSELLER')),
+        expect: { kind: 'REJECTED', error: { code: 'TENANT_MISMATCH' } } },
+    ], [], { alerts: [{ code: 'AMAZON_NOTIFICATION_SELLER_MISMATCH', severity: 'CRITICAL', count: 1 }], logs: [{ code: 'AMZ_C08_NOTIFICATION_NOT_SIGNED', count: 3 }] }));
+
   add('notification-unverifiable.json', scenario('amazon/notification/unverifiable',
     'Уведомление без подписи: чужой SellerId, не JSON, не тот тип, витрина не подключена',
-    'Аналог webhook-bad-signature. Уведомления SP-API приходят из очереди без подписи [AMZ_C08]: проверяется совпадение SellerId с аккаунтом из сообщения [Р-31] — несовпадение — отказ TENANT_MISMATCH и алерт CRITICAL; не JSON и не ANY_OFFER_CHANGED — 400; витрина не подключена — принято без событий.',
+    'Аналог webhook-bad-signature. Уведомления SP-API приходят из очереди без подписи [AMZ_C08]: проверяется совпадение SellerId с аккаунтом из сообщения [Р-31] — несовпадение — отказ TENANT_MISMATCH и алерт CRITICAL; не JSON, другой тип и PRICING_HEALTH не в своём написании ключей — 400; витрина не подключена — принято без событий.',
     ['mandatory:webhook-bad-signature', 'inbound'],
     [
       { id: 'foreign-seller', kind: 'inbound', delivery: aoc('syn-notification-0101', 1780, 'A9SYNOTHERSELLER'), expect: { kind: 'REJECTED', error: { code: 'TENANT_MISMATCH', class: 'REQUIRES_HUMAN' } } },
       { id: 'not-json', kind: 'inbound', delivery: { method: 'POST', url: 'https://sqs.invalid/q', rawBody: 'not json' }, expect: { kind: 'REJECTED', responseStatus: 400, error: { code: 'VALIDATION' } } },
-      { id: 'other-type', kind: 'inbound', delivery: delivery({ NotificationType: 'PRICING_HEALTH', NotificationMetadata: { NotificationId: 'syn-notification-0102' } }), expect: { kind: 'REJECTED', responseStatus: 400 } },
+      { id: 'other-type', kind: 'inbound', delivery: delivery({ NotificationType: 'LISTINGS_ITEM_ISSUES_CHANGE', NotificationMetadata: { NotificationId: 'syn-notification-0102' } }), expect: { kind: 'REJECTED', responseStatus: 400 } },
+      { id: 'pricing-health-with-pascal-keys', kind: 'inbound', delivery: delivery({ NotificationType: 'PRICING_HEALTH', NotificationMetadata: { NotificationId: 'syn-notification-0104' } }), expect: { kind: 'REJECTED', responseStatus: 400 } },
       { id: 'store-not-enabled', kind: 'inbound', delivery: delivery(anyOfferChanged('syn-notification-0103', US, 'B000007001', { $clockIso: -5_000 }, [{ seller: 'Synthetic Competitor', minor: 1780, buyBoxWinner: true, currency: 'USD' }])),
         expect: { kind: 'EVENTS', deliveryId: 'amazon:syn-notification-0103', events: [] } },
     ], [], { alerts: [{ code: 'AMAZON_NOTIFICATION_SELLER_MISMATCH', severity: 'CRITICAL', count: 1 }], logs: [{ code: 'AMZ_INBOUND_MARKETPLACE_NOT_ENABLED', count: 1 }] }));

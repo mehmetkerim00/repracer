@@ -1,0 +1,18 @@
+{
+  "name": "@repracer/amazon-notifications",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Receiver of Amazon SP-API notifications from an Amazon SQS standard queue: AWS Signature Version 4, SQS JSON protocol, authenticity, deduplication, ordering and loss handling. No network dependency beyond fetch.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "dependencies": {
+    "@repracer/channel-port": "0.1.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test test/*.test.ts"
+  }
+}

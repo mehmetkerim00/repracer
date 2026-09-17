@@ -35,6 +35,10 @@ BEGIN
     CREATE ROLE svc_provisioning LOGIN IN ROLE repracer_provisioning;
   END IF;
   -- Р-102: синхронизация остатка — только остатки и резервации, без цен и без аудита
+  -- Шаг 23: приёмник уведомлений Amazon — маршрут продавца (repracer_inbound) и запись в транзакции тенанта (repracer_app)
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_inbound') THEN
+    CREATE ROLE svc_inbound LOGIN IN ROLE repracer_app, repracer_inbound;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_stock') THEN
     CREATE ROLE svc_stock LOGIN IN ROLE repracer_stock;
   END IF;

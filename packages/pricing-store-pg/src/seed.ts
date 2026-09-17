@@ -81,6 +81,8 @@ export interface SeedWorldInput {
   fixtureChannelAccountId: string;
   /** Канал и регион аккаунта мира; по умолчанию Kaufland без региона. Amazon — сценарии адаптера Amazon на PostgreSQL (шаг 22) */
   fixtureChannel?: 'KAUFLAND' | 'AMAZON';
+  /** Идентификатор аккаунта у канала (у Amazon — SellerId); по умолчанию синтетический по метке тенанта */
+  fixtureExternalAccountId?: string;
   fixtureRegion?: string | null;
   marketplaces: string[];
   clock: Instant;
@@ -376,7 +378,7 @@ export async function seedPricingWorld(_pool: PgPool, input: SeedWorldInput): Pr
     await tx.query(
       `INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, region, external_account_id, marketplaces, credentials_ref, connected_by_membership_id)
        VALUES ($1, $2, $3, $4, $5, $6, 'secret-ref:synthetic', $7)`,
-      [tenantId, accountId, fixtureChannel, fixtureRegion, `syn-${tag}`, input.marketplaces, membershipId],
+      [tenantId, accountId, fixtureChannel, fixtureRegion, input.fixtureExternalAccountId ?? `syn-${tag}`, input.marketplaces, membershipId],
     );
     for (const a of seed.accounts ?? []) await connectAccountRow(tx, a, `syn-${a.channel.toLowerCase()}-${tag}`);
     for (const s of seed.scopes) await seedScope(tx, s);

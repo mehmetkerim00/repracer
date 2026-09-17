@@ -15,6 +15,7 @@
     "sources": [
       "vendor/amazon/sp-api-models/2026-09-16/models/listings-items-api-model/listingsItems_2021-08-01.json",
       "vendor/amazon/sp-api-models/2026-09-16/schemas/notifications/AnyOfferChangedNotification.json",
+      "vendor/amazon/sp-api-models/2026-09-16/schemas/notifications/PricingHealthNotification.json",
       "https://developer-docs.amazon/sp-api/docs/manage-purchasable-offer.md",
       "https://developer-docs.amazon/sp-api/docs/connecting-to-the-selling-partner-api.md",
       "https://developer-docs.amazon/sp-api/docs/listings-items-api-rate-limits.md",

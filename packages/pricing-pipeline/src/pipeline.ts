@@ -500,11 +500,15 @@ export function createPricingPipeline(deps: PipelineDeps) {
     processSnapshot,
     pollCompetitors,
 
-    /** Уведомление: снимок с данными — сразу в путь; без данных — опрос ресурса [Р-46] */
-    async processInbound(delivery: InboundDelivery): Promise<{ inbound: InboundResult; snapshots: SnapshotReport[] }> {
+    /**
+     * Уведомление: снимок с данными — сразу в путь; без данных — опрос ресурса [Р-46]; PRICING_HEALTH (шаг 23) — состояние оффера
+     * для продавца и алерт, в решение о цене не входит
+     */
+    async processInbound(delivery: InboundDelivery): Promise<{ inbound: InboundResult; snapshots: SnapshotReport[]; pricingHealth: number }> {
       const inbound = await adapter.handleInbound(delivery);
       const snapshots: SnapshotReport[] = [];
-      if (inbound.kind !== 'EVENTS') return { inbound, snapshots };
+      let pricingHealth = 0;
+      if (inbound.kind !== 'EVENTS') return { inbound, snapshots, pricingHealth };
       const ctx: AdapterCallContext = {
         tenantId: delivery.claimed.tenantId,
         channelAccountId: delivery.claimed.channelAccountId,
@@ -514,8 +518,13 @@ export function createPricingPipeline(deps: PipelineDeps) {
       for (const event of inbound.events) {
         if (event.kind === 'COMPETITOR_SNAPSHOT') snapshots.push(await processSnapshot(ctx, event.snapshot));
         else if (event.kind === 'RESOURCE_CHANGED' && event.competitorQuery) snapshots.push(...(await pollCompetitors(ctx, [event.competitorQuery])).snapshots);
+        else if (event.kind === 'PRICING_HEALTH') {
+          await store.recordPricingHealth(ctx.tenantId, ctx.channelAccountId, event.health);
+          await emit(ctx, [{ kind: 'alert', code: 'OFFER_PRICING_HEALTH', severity: 'WARNING', details: { marketplace: event.health.marketplace, issueType: event.health.issueType } }]);
+          pricingHealth += 1;
+        }
       }
-      return { inbound, snapshots };
+      return { inbound, snapshots, pricingHealth };
     },
 
     /**
@@ -623,6 +632,37 @@ export function createPricingPipeline(deps: PipelineDeps) {
       }
       for (const halt of due) reports.push(await reviewHalt(ctx, halt, sampleSize));
       return reports;
+    },
+
+    /**
+     * Р-120: обнаружение офферов аккаунта и наблюдение собственного ценообразования канала — до того, как продавец назначит стратегию.
+     * Страницы — пока канал отдаёт курсор (не больше maxPages); наблюдения записываются хранилищем, назначение стратегии оферу с
+     * действующим правилом отклоняет база (0082). Возвращает офферы с ценообразованием канала для экрана консоли.
+     */
+    async discoverOffers(ctx: AdapterCallContext, options: { pageLimit?: number; maxPages?: number } = {}): Promise<{
+      offers: number; recorded: number; withChannelPricing: Array<{ marketplace: string; externalSku: string; automatedPricing: boolean; channelBounds: boolean }>;
+    }> {
+      let cursor: string | undefined;
+      let offers = 0;
+      let recorded = 0;
+      const withChannelPricing: Array<{ marketplace: string; externalSku: string; automatedPricing: boolean; channelBounds: boolean }> = [];
+      for (let page = 0; page < (options.maxPages ?? 50); page++) {
+        const result = await adapter.discoverOffers(ctx, { limit: options.pageLimit ?? 20, ...(cursor ? { cursor } : {}) });
+        offers += result.items.length;
+        const observations = result.items.flatMap((o) => (o.channelPricing && o.identity.externalSku && o.identity.marketplace
+          ? [{ marketplace: o.identity.marketplace, externalSku: o.identity.externalSku, ...o.channelPricing, source: 'DISCOVERY' as const, observedAt: deps.now() }]
+          : []));
+        recorded += await store.recordOfferChannelPricing(ctx.tenantId, ctx.channelAccountId, observations);
+        for (const o of observations) {
+          if (o.automatedPricing || o.channelBounds) withChannelPricing.push({ marketplace: o.marketplace, externalSku: o.externalSku, automatedPricing: o.automatedPricing, channelBounds: o.channelBounds });
+        }
+        if (!result.nextCursor) break;
+        cursor = result.nextCursor;
+      }
+      if (withChannelPricing.length > 0) {
+        await emit(ctx, [{ kind: 'alert', code: 'OFFERS_WITH_CHANNEL_PRICING', severity: 'WARNING', details: { offers: withChannelPricing.length } }]);
+      }
+      return { offers, recorded, withChannelPricing };
     },
 
     /** Р-118: снятие остановки по недоверию каналу — только человек; права, второй фактор и заметку проверяют хранилище и БД */

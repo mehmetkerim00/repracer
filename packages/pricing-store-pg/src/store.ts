@@ -2,7 +2,7 @@ import type { ExplanationRuleset as DictionaryRuleset } from '@repracer/pricing-
 import {
   floorCauseFromDatabase, convertMinor, type FxQuote } from '@repracer/pricing-model';
 import { DEFAULT_RETRY_POLICY } from '@repracer/write-dispatcher';
-import { offerIdentityOf, type CompetitorQuery, type FieldWrite, type Instant, type WriteOutcome } from '@repracer/channel-port';
+import { offerIdentityOf, type CompetitorQuery, type FieldWrite, type Instant, type PricingHealthObservation, type WriteOutcome } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange } from '@repracer/input-sanity';
 import type { GuardrailSet } from '@repracer/price-gate';
 import type { AcceptedSnapshot, BoundResolution, CostInputs, DistrustRef, HaltRef, PriceBounds, PriceIntentDraft, Reason, StopRef, StrategyDefinition } from '@repracer/pricing-model';
@@ -37,7 +37,7 @@ import type {
   ProductKey,
   ScopeEvaluationContext,
   ShiftWindow,
-  SnapshotOutcome, ConsoleAuditRow, ConsoleDistrustRow } from '@repracer/pricing-pipeline';
+  SnapshotOutcome, ConsoleAuditRow, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation } from '@repracer/pricing-pipeline';
 import { inTenant, RollbackWith, type PgPool, type Tx } from './db.ts';
 import { PgWriteQueueStore } from './write-queue.ts';
 
@@ -913,6 +913,55 @@ export class PgPricingStore implements PricingStore {
     }
   }
 
+  /** Р-120: наблюдения собственного ценообразования канала — путь обнаружения офферов, одна вставка */
+  async recordOfferChannelPricing(tenantId: string, channelAccountId: string, observations: readonly OfferChannelPricingObservation[]): Promise<number> {
+    if (observations.length === 0) return 0;
+    return this.tx(tenantId, async (tx) => {
+      const { rowCount } = await tx.query(
+        `INSERT INTO channel_data.offer_channel_pricing (tenant_id, channel_account_id, channel, marketplace, external_sku, automated_pricing, channel_bounds, source, observed_at)
+         SELECT $1, a.channel_account_id, a.channel, o.marketplace, o.external_sku, o.automated_pricing, o.channel_bounds, o.source, o.observed_at
+           FROM tenant_data.channel_account a
+           CROSS JOIN jsonb_to_recordset($3::jsonb) AS o(marketplace text, external_sku text, automated_pricing boolean, channel_bounds boolean, source text, observed_at timestamptz)
+          WHERE a.tenant_id = $1 AND a.channel_account_id = $2`,
+        [tenantId, channelAccountId, JSON.stringify(observations.map((o) => ({
+          marketplace: o.marketplace, external_sku: o.externalSku, automated_pricing: o.automatedPricing, channel_bounds: o.channelBounds, source: o.source, observed_at: o.observedAt,
+        })))]);
+      return rowCount ?? 0;
+    });
+  }
+
+  /** Шаг 23: состояние PRICING_HEALTH оффера (0083) — данные канала, 18 месяцев */
+  async recordPricingHealth(tenantId: string, channelAccountId: string, health: PricingHealthObservation): Promise<void> {
+    await this.tx(tenantId, async (tx) => {
+      await tx.query(
+        `INSERT INTO channel_data.offer_pricing_health (tenant_id, channel_account_id, channel, marketplace, channel_product_ref, condition, issue_type, event_time,
+                                                        competitive_price_threshold_minor, currency, notification_id)
+         SELECT $1, a.channel_account_id, a.channel, $3, $4, $5, $6, $7, $8, $9, $10 FROM tenant_data.channel_account a WHERE a.tenant_id = $1 AND a.channel_account_id = $2`,
+        [tenantId, channelAccountId, health.marketplace, health.channelProductRef, health.condition, health.issueType, health.occurredAt,
+          health.competitivePriceThreshold?.amountMinor ?? null, health.competitivePriceThreshold?.currency ?? null, health.sourceEventId]);
+    });
+  }
+
+  /** Шаг 23: журнал обработанных уведомлений (0083) — уникальность по тенанту, каналу аккаунта и идентификатору уведомления */
+  async wasNotificationProcessed(tenantId: string, channelAccountId: string, notificationId: string): Promise<boolean> {
+    return this.tx(tenantId, async (tx) => {
+      const { rows } = await tx.query(
+        `SELECT 1 FROM channel_data.inbound_notification n JOIN tenant_data.channel_account a ON a.tenant_id = n.tenant_id AND a.channel = n.channel
+          WHERE n.tenant_id = $1 AND a.channel_account_id = $2 AND n.notification_id = $3`, [tenantId, channelAccountId, notificationId]);
+      return rows.length > 0;
+    });
+  }
+
+  async markNotificationProcessed(tenantId: string, entry: InboundNotificationEntry): Promise<void> {
+    await this.tx(tenantId, async (tx) => {
+      await tx.query(
+        `INSERT INTO channel_data.inbound_notification (tenant_id, channel_account_id, channel, notification_id, notification_type, event_time, received_at)
+         SELECT $1, a.channel_account_id, a.channel, $3, $4, $5, $6 FROM tenant_data.channel_account a WHERE a.tenant_id = $1 AND a.channel_account_id = $2
+         ON CONFLICT (tenant_id, channel, notification_id) DO NOTHING`,
+        [tenantId, entry.channelAccountId, entry.notificationId, entry.notificationType, entry.eventTime, entry.receivedAt]);
+    });
+  }
+
   async saveStrategy(tenantId: string, input: StrategySaveInput, actor: AdminActor): Promise<StrategySaveResult> {
     if (input.name.trim().length === 0) return { status: 'INVALID', cause: 'NAME_REQUIRED' };
     try {
@@ -966,6 +1015,11 @@ export class PgPricingStore implements PricingStore {
       }, actor.userId, { mfa: actor.mfa });
     } catch (error) {
       if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
+      // Р-39, OQ-166, Р-120: назначение стратегии отклонила база (write_scope_strategy_guard, 0082)
+      const message = String((error as Error).message ?? '');
+      if (/is not available on channel/.test(message)) return { status: 'INVALID', cause: 'STRATEGY_UNAVAILABLE' };
+      const owned = /write_scope ([0-9a-f-]{36}) has channel-owned pricing/.exec(message);
+      if (owned) return { status: 'INVALID', cause: 'CHANNEL_PRICING_ACTIVE', writeScopeId: owned[1]! };
       throw error;
     }
   }
@@ -1127,6 +1181,27 @@ export class PgPricingStore implements PricingStore {
           haltId: r.pricing_halt_id, kind: r.kind, outcome: r.outcome, sampleSize: r.sample_size, failedCount: r.failed_count, details: r.details,
           ...(r.membership_id ? { membershipId: r.membership_id } : {}), ...(r.note ? { note: r.note } : {}), at: r.reviewed_at,
         }));
+      const offerChannelPricing = (await q(`SELECT DISTINCT ON (channel_account_id, marketplace, external_sku)
+                                                   channel_account_id, marketplace, external_sku, automated_pricing, channel_bounds, source, observed_at
+                                              FROM channel_data.offer_channel_pricing WHERE tenant_id = $1
+                                             ORDER BY channel_account_id, marketplace, external_sku, observed_at DESC, recorded_at DESC`))
+        .map((r): ConsoleOfferChannelPricingRow => ({
+          channelAccountId: r.channel_account_id, marketplace: r.marketplace, externalSku: r.external_sku, automatedPricing: r.automated_pricing,
+          channelBounds: r.channel_bounds, source: r.source, observedAt: iso(r.observed_at),
+        }));
+      const pricingHealth = (await q(`SELECT DISTINCT ON (h.channel_account_id, h.marketplace, h.channel_product_ref, h.condition)
+                                             h.channel_account_id, h.marketplace, h.channel_product_ref, h.condition, h.issue_type, h.event_time,
+                                             h.competitive_price_threshold_minor, h.currency, m.price_basis
+                                        FROM channel_data.offer_pricing_health h
+                                        LEFT JOIN platform.marketplace m ON m.channel = h.channel AND m.marketplace = h.marketplace
+                                       WHERE h.tenant_id = $1
+                                       ORDER BY h.channel_account_id, h.marketplace, h.channel_product_ref, h.condition, h.event_time DESC, h.recorded_at DESC`))
+        .map((r): ConsolePricingHealthRow => ({
+          channelAccountId: r.channel_account_id, marketplace: r.marketplace, channelProductRef: r.channel_product_ref, condition: r.condition, issueType: r.issue_type,
+          occurredAt: iso(r.event_time),
+          competitivePriceThreshold: r.competitive_price_threshold_minor !== null && r.currency && r.price_basis
+            ? { amountMinor: Number(r.competitive_price_threshold_minor), currency: r.currency, basis: r.price_basis } : null,
+        }));
       const distrusts = (await q(`SELECT channel_distrust_id, channel_account_id, marketplace, reason_code, details, detected_at, released_at, released_by_membership_id, release_note
                                     FROM channel_data.channel_distrust WHERE tenant_id = $1 ORDER BY detected_at`))
         .map((r): ConsoleDistrustRow => ({
@@ -1172,7 +1247,7 @@ export class PgPricingStore implements PricingStore {
           marketplace: r.changes.marketplace ?? null, note: r.changes.note ?? null,
         }));
       return {
-        tenantId, scopes, intents, decisions, writes, halts, haltReviews, distrusts, stops, rejectedSnapshots, divergenceCases,
+        tenantId, scopes, intents, decisions, writes, halts, haltReviews, distrusts, offerChannelPricing, pricingHealth, stops, rejectedSnapshots, divergenceCases,
         fxRates: fx.map((f) => ({ source: 'ECB', rateDate: f.rate_date, base: 'EUR', quote: f.quote_currency, rateMicros: Number(f.rate_micros), availableFrom: f.available_from })),
         members, strategies, explanationRulesets, audit,
       };
@@ -1311,6 +1386,9 @@ export class PgPricingStore implements PricingStore {
                               ORDER BY created_at, version`);
       const stops = await q(`SELECT price_stop_id, scope_type, marketplace, released_at FROM tenant_data.price_stop WHERE tenant_id = $1 ORDER BY stopped_at`);
       const distrusts = await q(`SELECT channel_distrust_id, marketplace, reason_code, released_at FROM channel_data.channel_distrust WHERE tenant_id = $1 ORDER BY detected_at`);
+      const ocp = await q(`SELECT marketplace, external_sku, automated_pricing, channel_bounds, source FROM channel_data.offer_channel_pricing WHERE tenant_id = $1 ORDER BY observed_at, external_sku`);
+      const health = await q(`SELECT marketplace, channel_product_ref, issue_type, competitive_price_threshold_minor FROM channel_data.offer_pricing_health WHERE tenant_id = $1 ORDER BY recorded_at, event_time`);
+      const inbound = await q(`SELECT notification_id, notification_type FROM channel_data.inbound_notification WHERE tenant_id = $1 ORDER BY processed_at, notification_id`);
       const cases = await q(`SELECT write_scope_id, expected_amount_minor, observed_amount_minor, cause, status FROM channel_data.divergence_case
                                WHERE tenant_id = $1 ORDER BY opened_at`);
       const states = await q(`SELECT marketplace, channel_product_ref, condition, observed_at, buybox_amount_minor, offers, currency, suggested_price_minor
@@ -1325,6 +1403,9 @@ export class PgPricingStore implements PricingStore {
         haltReviews: reviews.map((r) => ({ kind: r.kind, outcome: r.outcome, sampleSize: r.sample_size, failedCount: r.failed_count })),
         stops: stops.map((r) => ({ stopId: r.price_stop_id, scope: r.scope_type, marketplace: r.marketplace, releasedAt: r.released_at })),
         distrusts: distrusts.map((d) => ({ distrustId: d.channel_distrust_id, marketplace: d.marketplace, reasonCode: d.reason_code, releasedAt: d.released_at, released: d.released_at !== null })),
+        offerChannelPricing: ocp.map((o) => ({ marketplace: o.marketplace, externalSku: o.external_sku, automatedPricing: o.automated_pricing, channelBounds: o.channel_bounds, source: o.source })),
+        pricingHealth: health.map((h) => ({ marketplace: h.marketplace, channelProductRef: h.channel_product_ref, issueType: h.issue_type, thresholdMinor: h.competitive_price_threshold_minor === null ? null : Number(h.competitive_price_threshold_minor) })),
+        inboundNotifications: inbound.map((n) => ({ notificationId: n.notification_id, notificationType: n.notification_type })),
         intents: intents.map((i) => ({ writeScopeId: i.write_scope_id, ruleCode: i.rule_code, proposedMinor: i.proposed_amount_minor })),
         decisions: decisions.map((d) => ({ writeScopeId: d.write_scope_id, outcome: d.outcome, decisionClass: d.intent_class, rejectionReason: d.rejection_reason, finalMinor: d.final_amount_minor, reasonParams: d.reason_params, fx: d.fx, boundDeviationBp: d.bound_deviation_bp })),
         writes: writes.map((w) => ({ writeScopeId: w.write_scope_id, amountMinor: w.amount_minor, version: w.version, status: w.status, endReason: w.end_reason })),

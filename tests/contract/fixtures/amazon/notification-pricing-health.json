@@ -1,0 +1,320 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "amazon/notification/pricing-health",
+  "channel": "AMAZON",
+  "apiVersion": "listings-items-2021-08-01",
+  "title": "PRICING_HEALTH: оффер выбыл из Featured Offer — состояние оффера с порогом конкурентной цены; чужой SellerId — отказ",
+  "description": "Шаг 23. Схема PricingHealthNotification.json снимка: ключи со строчной буквы. Событие PRICING_HEALTH несёт витрину, ASIN, состояние, issueType и порог summary.referencePrice.competitivePriceThreshold; порога нет — null. SellerId сверяется с аккаунтом так же, как у ANY_OFFER_CHANGED [Р-31].",
+  "tags": [
+    "inbound",
+    "pricing-health"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "vendor/amazon/sp-api-models/2026-09-16/models/listings-items-api-model/listingsItems_2021-08-01.json",
+      "https://developer-docs.amazon/sp-api/docs/manage-purchasable-offer.md",
+      "https://developer-docs.amazon/sp-api/docs/listings-items-api-rate-limits.md",
+      "https://developer-docs.amazon/sp-api/docs/building-listings-management-workflows-guide.md"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "A1SYNSELLER0001",
+      "marketplaces": [
+        "A1PA6795UKMFR9"
+      ],
+      "channel": "AMAZON",
+      "region": "EU"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "Atzr|syn-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "amzn1.application-oa2-client.syn0001",
+        "clientSecret": "syn-lwa-client-secret-0001"
+      },
+      "accessToken": "Atza|syn-access-token-0001"
+    }
+  },
+  "steps": [
+    {
+      "id": "with-threshold",
+      "kind": "inbound",
+      "delivery": {
+        "method": "POST",
+        "url": "https://sqs.eu-west-1.amazonaws.com.invalid/000000000000/repracer-syn-notifications",
+        "headers": {},
+        "body": {
+          "notificationVersion": "1.0",
+          "notificationType": "PRICING_HEALTH",
+          "payloadVersion": "1.0",
+          "eventTime": {
+            "$clockIso": -5000
+          },
+          "notificationMetadata": {
+            "applicationId": "amzn1.sellerapps.app.syn0001",
+            "subscriptionId": "syn-subscription-0002",
+            "publishTime": {
+              "$clockIso": -5000
+            },
+            "notificationId": "syn-notification-0201"
+          },
+          "payload": {
+            "issueType": "BuyBoxDisqualification",
+            "sellerId": "A1SYNSELLER0001",
+            "offerChangeTrigger": {
+              "marketplaceId": "A1PA6795UKMFR9",
+              "asin": "B000007001",
+              "itemCondition": "new",
+              "timeOfOfferChange": {
+                "$clockIso": -5000
+              }
+            },
+            "merchantOffer": {
+              "condition": "new",
+              "fulfillmentType": "MFN",
+              "listingPrice": {
+                "amount": 18.5,
+                "currencyCode": "EUR"
+              },
+              "shipping": {
+                "amount": 0,
+                "currencyCode": "EUR"
+              },
+              "landedPrice": {
+                "amount": 18.5,
+                "currencyCode": "EUR"
+              }
+            },
+            "summary": {
+              "numberOfOffers": [
+                {
+                  "condition": "new",
+                  "fulfillmentType": "MFN",
+                  "offerCount": 3
+                }
+              ],
+              "buyBoxEligibleOffers": [
+                {
+                  "condition": "new",
+                  "fulfillmentType": "MFN",
+                  "offerCount": 2
+                }
+              ],
+              "referencePrice": {
+                "competitivePriceThreshold": {
+                  "amount": 17.99,
+                  "currencyCode": "EUR"
+                }
+              }
+            }
+          }
+        }
+      },
+      "expect": {
+        "kind": "EVENTS",
+        "deliveryId": "amazon:syn-notification-0201",
+        "events": [
+          {
+            "kind": "PRICING_HEALTH",
+            "health": {
+              "marketplace": "A1PA6795UKMFR9",
+              "channelProductRef": "B000007001",
+              "condition": "new",
+              "issueType": "BuyBoxDisqualification",
+              "sourceEventId": "syn-notification-0201",
+              "competitivePriceThreshold": {
+                "amountMinor": 1799,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "without-threshold",
+      "kind": "inbound",
+      "delivery": {
+        "method": "POST",
+        "url": "https://sqs.eu-west-1.amazonaws.com.invalid/000000000000/repracer-syn-notifications",
+        "headers": {},
+        "body": {
+          "notificationVersion": "1.0",
+          "notificationType": "PRICING_HEALTH",
+          "payloadVersion": "1.0",
+          "eventTime": {
+            "$clockIso": -4000
+          },
+          "notificationMetadata": {
+            "applicationId": "amzn1.sellerapps.app.syn0001",
+            "subscriptionId": "syn-subscription-0002",
+            "publishTime": {
+              "$clockIso": -4000
+            },
+            "notificationId": "syn-notification-0202"
+          },
+          "payload": {
+            "issueType": "BuyBoxDisqualification",
+            "sellerId": "A1SYNSELLER0001",
+            "offerChangeTrigger": {
+              "marketplaceId": "A1PA6795UKMFR9",
+              "asin": "B000007001",
+              "itemCondition": "new",
+              "timeOfOfferChange": {
+                "$clockIso": -4000
+              }
+            },
+            "merchantOffer": {
+              "condition": "new",
+              "fulfillmentType": "MFN",
+              "listingPrice": {
+                "amount": 18.5,
+                "currencyCode": "EUR"
+              },
+              "shipping": {
+                "amount": 0,
+                "currencyCode": "EUR"
+              },
+              "landedPrice": {
+                "amount": 18.5,
+                "currencyCode": "EUR"
+              }
+            },
+            "summary": {
+              "numberOfOffers": [
+                {
+                  "condition": "new",
+                  "fulfillmentType": "MFN",
+                  "offerCount": 3
+                }
+              ],
+              "buyBoxEligibleOffers": [
+                {
+                  "condition": "new",
+                  "fulfillmentType": "MFN",
+                  "offerCount": 2
+                }
+              ],
+              "referencePrice": {}
+            }
+          }
+        }
+      },
+      "expect": {
+        "kind": "EVENTS",
+        "events": [
+          {
+            "kind": "PRICING_HEALTH",
+            "health": {
+              "competitivePriceThreshold": null
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "foreign-seller",
+      "kind": "inbound",
+      "delivery": {
+        "method": "POST",
+        "url": "https://sqs.eu-west-1.amazonaws.com.invalid/000000000000/repracer-syn-notifications",
+        "headers": {},
+        "body": {
+          "notificationVersion": "1.0",
+          "notificationType": "PRICING_HEALTH",
+          "payloadVersion": "1.0",
+          "eventTime": {
+            "$clockIso": -3000
+          },
+          "notificationMetadata": {
+            "applicationId": "amzn1.sellerapps.app.syn0001",
+            "subscriptionId": "syn-subscription-0002",
+            "publishTime": {
+              "$clockIso": -3000
+            },
+            "notificationId": "syn-notification-0203"
+          },
+          "payload": {
+            "issueType": "BuyBoxDisqualification",
+            "sellerId": "A9SYNOTHERSELLER",
+            "offerChangeTrigger": {
+              "marketplaceId": "A1PA6795UKMFR9",
+              "asin": "B000007001",
+              "itemCondition": "new",
+              "timeOfOfferChange": {
+                "$clockIso": -3000
+              }
+            },
+            "merchantOffer": {
+              "condition": "new",
+              "fulfillmentType": "MFN",
+              "listingPrice": {
+                "amount": 18.5,
+                "currencyCode": "EUR"
+              },
+              "shipping": {
+                "amount": 0,
+                "currencyCode": "EUR"
+              },
+              "landedPrice": {
+                "amount": 18.5,
+                "currencyCode": "EUR"
+              }
+            },
+            "summary": {
+              "numberOfOffers": [
+                {
+                  "condition": "new",
+                  "fulfillmentType": "MFN",
+                  "offerCount": 3
+                }
+              ],
+              "buyBoxEligibleOffers": [
+                {
+                  "condition": "new",
+                  "fulfillmentType": "MFN",
+                  "offerCount": 2
+                }
+              ],
+              "referencePrice": {
+                "competitivePriceThreshold": {
+                  "amount": 17.99,
+                  "currencyCode": "EUR"
+                }
+              }
+            }
+          }
+        }
+      },
+      "expect": {
+        "kind": "REJECTED",
+        "error": {
+          "code": "TENANT_MISMATCH"
+        }
+      }
+    }
+  ],
+  "exchanges": [],
+  "expect": {
+    "alerts": [
+      {
+        "code": "AMAZON_NOTIFICATION_SELLER_MISMATCH",
+        "severity": "CRITICAL",
+        "count": 1
+      }
+    ],
+    "logs": [
+      {
+        "code": "AMZ_C08_NOTIFICATION_NOT_SIGNED",
+        "count": 3
+      }
+    ]
+  }
+}

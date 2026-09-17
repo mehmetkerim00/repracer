@@ -43,11 +43,13 @@ CREATE UNIQUE INDEX pricing_halt_active_uq ON channel_data.pricing_halt (tenant_
 -- ---------------------------------------------------------------------------
 SET ROLE repracer_owner;
 
+-- Справочники без CHECK на значения: строки загружает только миграция, их совпадение с описанием адаптеров (ChannelDescriptor) проверяет
+-- channel-reference.pg.test.ts — ограничение значений было бы дублем без собственной проверки [Р-104, Р-108]
 CREATE TABLE platform.channel_behaviour (
-  tenant_id    uuid NOT NULL DEFAULT security.platform_tenant_id() CHECK (tenant_id = security.platform_tenant_id()),
-  channel      text NOT NULL CHECK (channel IN ('AMAZON', 'EBAY', 'KAUFLAND', 'OTTO')),
+  tenant_id    uuid NOT NULL DEFAULT security.platform_tenant_id(),
+  channel      text NOT NULL,
   -- Р-52, Р-119: SAMPLE — снимается свежей выборкой опросом; MANUAL_ONLY — канал не даёт опроса, только человек
-  halt_release text NOT NULL CHECK (halt_release IN ('SAMPLE', 'MANUAL_ONLY')),
+  halt_release text NOT NULL,
   basis        text NOT NULL,
   PRIMARY KEY (tenant_id, channel)
 );
@@ -65,19 +67,19 @@ INSERT INTO platform.channel_behaviour (channel, halt_release, basis) VALUES
   ('AMAZON', 'MANUAL_ONLY', 'Р-119: no competitor polling on Amazon, a fresh independent sample cannot be taken');
 
 CREATE TABLE platform.competitor_source (
-  tenant_id                 uuid NOT NULL DEFAULT security.platform_tenant_id() CHECK (tenant_id = security.platform_tenant_id()),
-  channel                   text NOT NULL CHECK (channel IN ('AMAZON', 'EBAY', 'KAUFLAND', 'OTTO')),
+  tenant_id                 uuid NOT NULL DEFAULT security.platform_tenant_id(),
+  channel                   text NOT NULL,
   source                    text NOT NULL,
-  kind                      text NOT NULL CHECK (kind IN ('PUSH', 'PULL', 'REPORT')),
-  completeness_kind         text NOT NULL CHECK (completeness_kind IN ('TOP_N', 'CHEAPEST_ONLY', 'FULL')),
-  completeness_n            int CHECK ((completeness_kind = 'TOP_N') = (completeness_n IS NOT NULL) AND (completeness_n IS NULL OR completeness_n >= 1)),
+  kind                      text NOT NULL,
+  completeness_kind         text NOT NULL,
+  completeness_n            int,
   conditions                text[] NOT NULL,
   has_buybox_winner         boolean NOT NULL,
   has_own_rank              boolean NOT NULL,
   has_shipping              boolean NOT NULL,
-  typical_staleness_seconds int CHECK (typical_staleness_seconds >= 0),
-  availability              text NOT NULL CHECK (availability IN ('AVAILABLE', 'EARLY_ACCESS', 'UNAVAILABLE')),
-  role                      text NOT NULL CHECK (role IN ('PRIMARY', 'RECONCILIATION')),
+  typical_staleness_seconds int,
+  availability              text NOT NULL,
+  role                      text NOT NULL,
   PRIMARY KEY (tenant_id, channel, source)
 );
 SELECT security.register_table('platform.competitor_source', 'PLATFORM', 'reference', 'none');
@@ -154,18 +156,19 @@ CREATE TABLE channel_data.offer_channel_pricing (
   tenant_id                   uuid NOT NULL,
   offer_channel_pricing_id    uuid NOT NULL DEFAULT gen_random_uuid(),
   channel_account_id          uuid NOT NULL,
-  channel                     text NOT NULL CHECK (channel IN ('AMAZON', 'EBAY', 'KAUFLAND', 'OTTO')),
+  channel                     text NOT NULL,
   marketplace                 text NOT NULL,
-  external_sku                text NOT NULL CHECK (length(external_sku) BETWEEN 1 AND 200),
+  external_sku                text NOT NULL,
   -- Привязка к правилу автоматического ценообразования канала (Amazon automated_pricing_merchandising_rule_plan) [Р-115]
   automated_pricing           boolean NOT NULL,
   -- Границы цены на стороне канала (Amazon minimum/maximum_seller_allowed_price) [Р-114]
   channel_bounds              boolean NOT NULL,
-  source                      text NOT NULL CHECK (source IN ('DISCOVERY', 'PRE_WRITE_READ', 'READBACK')),
+  source                      text NOT NULL CONSTRAINT offer_channel_pricing_source_known CHECK (source IN ('DISCOVERY', 'PRE_WRITE_READ', 'READBACK')),
   observed_at                 timestamptz NOT NULL,
   recorded_at                 timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (tenant_id, offer_channel_pricing_id),
-  FOREIGN KEY (tenant_id, channel_account_id) REFERENCES tenant_data.channel_account (tenant_id, channel_account_id)
+  -- Канал наблюдения — канал аккаунта (составной ключ, как у pricing_halt)
+  FOREIGN KEY (tenant_id, channel_account_id, channel) REFERENCES tenant_data.channel_account (tenant_id, channel_account_id, channel)
 );
 COMMENT ON TABLE channel_data.offer_channel_pricing IS
   'Р-120: наблюдение собственного ценообразования канала у предложения (данные канала, 18 месяцев); действующее — последнее по observed_at';
@@ -235,7 +238,7 @@ CREATE TABLE channel_data.channel_distrust (
   tenant_id                 uuid NOT NULL,
   channel_distrust_id       uuid NOT NULL DEFAULT gen_random_uuid(),
   channel_account_id        uuid NOT NULL,
-  channel                   text NOT NULL CHECK (channel IN ('AMAZON', 'EBAY', 'KAUFLAND', 'OTTO')),
+  channel                   text NOT NULL,
   marketplace               text,
   reason_code               text NOT NULL CONSTRAINT channel_distrust_reason_known CHECK (reason_code IN ('PRICE_BASIS_MISMATCH')),
   -- Только наши значения (отправленная цена, ставка, направление): цена, прочитанная из канала, не хранится [Р-3]
@@ -243,11 +246,14 @@ CREATE TABLE channel_data.channel_distrust (
   detected_at               timestamptz NOT NULL DEFAULT now(),
   released_at               timestamptz,
   released_by_membership_id uuid,
-  release_note              text CHECK (length(release_note) BETWEEN 10 AND 2000),
+  release_note              text,
   PRIMARY KEY (tenant_id, channel_distrust_id),
-  FOREIGN KEY (tenant_id, channel_account_id) REFERENCES tenant_data.channel_account (tenant_id, channel_account_id),
+  FOREIGN KEY (tenant_id, channel_account_id, channel) REFERENCES tenant_data.channel_account (tenant_id, channel_account_id, channel),
+  FOREIGN KEY (tenant_id, released_by_membership_id) REFERENCES tenant_data.membership (tenant_id, membership_id),
+  -- Снятие — целиком: момент, участник и заметка 10…2000 символов вместе [Р-118]
   CONSTRAINT channel_distrust_release_by_person CHECK ((released_at IS NULL) = (released_by_membership_id IS NULL)
                                                         AND (released_at IS NULL) = (release_note IS NULL)
+                                                        AND (release_note IS NULL OR length(release_note) BETWEEN 10 AND 2000)
                                                         AND (released_at IS NULL OR released_at >= detected_at))
 );
 COMMENT ON TABLE channel_data.channel_distrust IS
@@ -317,8 +323,7 @@ BEGIN
   END IF;
   RETURN NEW;
 END $fn$;
-CREATE TRIGGER a_channel_distrust_restrict_update BEFORE UPDATE ON channel_data.channel_distrust
-  FOR EACH ROW EXECUTE FUNCTION security.restrict_update('released_at', 'released_by_membership_id', 'release_note');
+-- Изменяемые столбцы ограничивают права по столбцам (снятие — только released_*): отдельный триггер был бы дублем [Р-104]
 CREATE TRIGGER ca_channel_distrust_release_guard BEFORE UPDATE ON channel_data.channel_distrust
   FOR EACH ROW EXECUTE FUNCTION channel_data.channel_distrust_release_guard();
 
