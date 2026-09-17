@@ -10,6 +10,7 @@ import type { TickReport } from './scheduler.ts';
 export class SchedulerMetrics {
   private readonly startedAtMs: number;
   private lastSuccessMs: number | null = null;
+  private lastIterationMs: number | null = null;
   private readonly ticks = { ok: 0, failed: 0 };
   private readonly runs = new Map<string, number>();
   private readonly items = new Map<string, number>();
@@ -21,6 +22,11 @@ export class SchedulerMetrics {
   constructor(now: () => number = Date.now) {
     this.now = now;
     this.startedAtMs = now();
+  }
+
+  /** Итерация цикла началась: работы такта могут идти часами, и это не смерть процесса (ревью шага 26, находка 5) */
+  iterationStarted(): void {
+    this.lastIterationMs = this.now();
   }
 
   tick(ok: boolean, report: TickReport | null): void {
@@ -40,8 +46,9 @@ export class SchedulerMetrics {
     this.heartbeatFailures += 1;
   }
 
+  /** Цикл жив: последняя итерация началась не позже staleAfterMs назад. Идут ли работы вовремя — отдельные метрики и отставание */
   healthy(staleAfterMs: number): boolean {
-    return this.now() - (this.lastSuccessMs ?? this.startedAtMs) <= staleAfterMs;
+    return this.now() - (this.lastIterationMs ?? this.startedAtMs) <= staleAfterMs;
   }
 
   render(): string {
@@ -54,6 +61,8 @@ export class SchedulerMetrics {
     metric('repracer_scheduler_ticks_total', 'counter', 'Scheduler ticks by outcome', [['{outcome="ok"}', this.ticks.ok], ['{outcome="failed"}', this.ticks.failed]]);
     metric('repracer_scheduler_last_successful_tick_timestamp_seconds', 'gauge', 'Unix time of the last successful tick',
       [['', this.lastSuccessMs === null ? 0 : Math.floor(this.lastSuccessMs / 1000)]]);
+    metric('repracer_scheduler_last_iteration_start_timestamp_seconds', 'gauge', 'Unix time the last loop iteration started',
+      [['', this.lastIterationMs === null ? 0 : Math.floor(this.lastIterationMs / 1000)]]);
     metric('repracer_scheduler_job_runs_total', 'counter', 'Job runs by job name and outcome',
       [...this.runs].map(([k, v]) => { const [job, outcome] = k.split('|'); return [`{job="${esc(job!)}",outcome="${esc(outcome!)}"}`, v] as [string, number]; }));
     metric('repracer_scheduler_job_items_total', 'counter', 'Objects processed by job name', [...this.items].map(([job, v]) => [`{job="${esc(job)}"}`, v] as [string, number]));

@@ -125,6 +125,12 @@ BEGIN
           AND r.table_name <> 'tenant_data.edit_budget'::regclass THEN
       bad := bad || format('%s: tenant data deleted by time without export', r.table_name);
     END IF;
+    -- Шаг 26 (ревью, находка 3): таблица данных тенанта, которую удаляет только закрытие тенанта, обязана быть названа в purge_tenant_data —
+    -- иначе строки тенанта остаются в базе навсегда, а политика хранения об этом молчит
+    IF r.storage_class = 'TENANT' AND r.method = 'TENANT_CLOSURE_ONLY'
+       AND position(r.table_name::text IN pg_get_functiondef('maintenance.purge_tenant_data(uuid,boolean)'::regprocedure)) = 0 THEN
+      bad := bad || format('%s: tenant closure does not delete the table (purge_tenant_data)', r.table_name);
+    END IF;
   END LOOP;
 
   -- 5. Партиционированные таблицы управляются политикой DROP_PARTITION, и наоборот

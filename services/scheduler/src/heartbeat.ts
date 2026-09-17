@@ -11,6 +11,8 @@ export interface HeartbeatOptions {
   url: string;
   fetch?: typeof fetch;
   minIntervalMs?: number;
+  /** Наименьший промежуток между любыми отметками: сервис не записывает больше 5 отметок в минуту [док] */
+  minGapMs?: number;
   timeoutMs?: number;
   clockMs?: () => number;
 }
@@ -21,17 +23,25 @@ export interface Heartbeat {
 }
 
 export function createHeartbeat(options: HeartbeatOptions): Heartbeat {
-  const url = new URL(options.url);
+  // Адрес — секрет (в нём идентификатор проверки): ошибка разбора не должна его показывать (ревью шага 26, находка 13.9)
+  let url: URL;
+  try {
+    url = new URL(options.url);
+  } catch {
+    throw new Error('HEARTBEAT_URL_INVALID: the external heartbeat address is not a URL');
+  }
   if (url.protocol !== 'https:') throw new Error('HEARTBEAT_URL_NOT_HTTPS: the external heartbeat address must be https');
   const doFetch = options.fetch ?? fetch;
   const minInterval = options.minIntervalMs ?? 60_000;
+  // 5 отметок в минуту — предел сервиса [док]; между любыми отметками держим 12 с, иначе «мигающий» планировщик теряет отметки о сбое
+  const minGap = options.minGapMs ?? 12_000;
   const now = options.clockMs ?? Date.now;
   let lastSent: { at: number; ok: boolean } | null = null;
   return {
     async beat(tickOk) {
       const at = now();
-      // Смена состояния (сбой после успеха и наоборот) — сразу; повтор того же — не чаще minIntervalMs
-      if (lastSent && lastSent.ok === tickOk && at - lastSent.at < minInterval) return 'THROTTLED';
+      // Смена состояния (сбой после успеха и наоборот) — сразу, но не чаще minGap; повтор того же — не чаще minIntervalMs
+      if (lastSent && at - lastSent.at < (lastSent.ok === tickOk ? minInterval : minGap)) return 'THROTTLED';
       const target = tickOk ? url.toString() : `${url.toString().replace(/\/$/, '')}/fail`;
       const response = await doFetch(target, { method: 'GET', signal: AbortSignal.timeout(options.timeoutMs ?? 10_000) });
       // Ответ 200 не подтверждает запись отметки (документация: «not found», «rate limited» — тоже 200); не-200 — сбой отметки

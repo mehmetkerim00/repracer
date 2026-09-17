@@ -316,6 +316,10 @@ export function evaluateSnapshot(snapshot: CompetitorSnapshot, ctx: SanityContex
   // уходил в холодный ярус опроса и терял Buy Box незамеченным до суток (проверка в живом режиме)
   if (ctx.lastAccepted?.buyboxMinor && ctx.lastAccepted.buyboxIsSelf !== true && buybox !== null) {
     move = { productRef, moveBp: clampBp(buybox / ctx.lastAccepted.buyboxMinor), sellerRef: rankOne?.sellerRef ?? null };
+  } else if (ctx.lastAccepted && competitors.length === 0) {
+    // Ревью шага 26, находка 7: у товара без конкурентов (мы единственный продавец) сравнивать нечего — это наблюдение «цена не двигалась»,
+    // а не отсутствие наблюдения: иначе товар вечно остаётся в пробе яруса, а окно массового сдвига [Р-50] теряет его из знаменателя
+    move = { productRef, moveBp: 10_000, sellerRef: null };
   } else if (ctx.lastAccepted?.lowestMinor && lowestOffer) {
     move = { productRef, moveBp: clampBp(lowestOffer.price.amountMinor / ctx.lastAccepted.lowestMinor), sellerRef: lowestOffer.sellerRef ?? null };
   }

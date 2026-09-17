@@ -226,9 +226,9 @@ export function jobSource(deps: JobDeps): JobSource {
             lagWarningSeconds: interval * 10, lagCriticalSeconds: Math.max(hours(3), interval * 60), leaseSeconds: 120,
             async run({ startedAt, runIndex }) {
               const r = await pipeline().reconcileRotation(ctxOf(a, startedAt, 'amazon-reconcile-rotation', 50), { size: cfg.amazonBatch, cycle: runIndex, graceSeconds: cfg.lossGraceSeconds });
-              // Шаг 26 (живой режим, Р-128): окно, которое канал не отдал целиком, — провал запуска: номер окна не сдвигается, окно повторяется.
-              // Иначе отклонённое окно пропускалось в каждом круге — половина товаров не сверялась ни разу
-              if (r.queries > 0 && r.failures.length >= r.queries) throw new Error(`${r.failures[0]?.error.code ?? 'CHANNEL_FAILED'}: reconciliation window ${runIndex} not read`);
+              // Шаг 26 (живой режим, Р-128): окно, которое канал отдал не целиком, — провал запуска: номер окна не сдвигается, окно
+              // повторяется. Иначе отклонённые товары пропускались в каждом круге и не сверялись ни разу (ревью шага 26, находка 9а)
+              if (r.failures.length > 0) throw new Error(`${r.failures[0]?.error.code ?? 'CHANNEL_FAILED'}: reconciliation window ${runIndex} read ${r.queries - r.failures.length} of ${r.queries}`);
               const circleHours = (Math.ceil(r.total / cfg.amazonBatch) * interval) / 3600;
               return {
                 items: r.queries,

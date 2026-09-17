@@ -1539,23 +1539,22 @@ export class PgPricingStore implements PricingStore {
   async listPollCandidates(tenantId: string, channelAccountId: string, now: Instant): Promise<PollCandidate[]> {
     return this.tx(tenantId, async (tx) => {
       const { rows } = await tx.query(
-        `SELECT p.marketplace, p.channel_product_ref, p.condition, ps.last_polled_at,
-                (SELECT count(*) FROM channel_data.competitor_move mv
-                  WHERE mv.tenant_id = $1 AND mv.channel_account_id = $2 AND mv.marketplace = p.marketplace AND mv.channel_product_ref = p.channel_product_ref
-                    AND mv.condition = p.condition AND mv.evaluated_at >= $3::timestamptz - interval '48 hours' AND mv.move_bp <> 10000)::int AS moves,
-                -- Р-128: наблюдения товара за 48 ч охватывают сутки — волатильность известна, иначе проба не реже тёплого яруса
-                EXISTS (SELECT 1 FROM channel_data.competitor_move mv
-                  WHERE mv.tenant_id = $1 AND mv.channel_account_id = $2 AND mv.marketplace = p.marketplace AND mv.channel_product_ref = p.channel_product_ref
-                    AND mv.condition = p.condition AND mv.evaluated_at >= $3::timestamptz - interval '48 hours'
-                    AND mv.evaluated_at <= $3::timestamptz - interval '24 hours') AS volatility_known
+        // Движения и охват наблюдений — одним проходом по окну 48 часов (Р-128: волатильность известна, если наблюдения старше суток)
+        `SELECT p.marketplace, p.channel_product_ref, p.condition, ps.last_polled_at, w.moves, coalesce(w.volatility_known, false) AS volatility_known
            FROM (SELECT DISTINCT m.marketplace, m.channel_product_ref, m.condition FROM tenant_data.offer_mapping m
                   WHERE m.tenant_id = $1 AND m.channel_account_id = $2 AND m.status <> 'ENDED' AND m.channel_product_ref IS NOT NULL) p
            LEFT JOIN channel_data.competitor_poll_state ps
              ON ps.tenant_id = $1 AND ps.channel_account_id = $2 AND ps.marketplace = p.marketplace AND ps.channel_product_ref = p.channel_product_ref
-            AND ps.condition = lower(p.condition)`, [tenantId, channelAccountId, now]);
+            AND ps.condition = lower(p.condition)
+           LEFT JOIN LATERAL (
+             SELECT count(*) FILTER (WHERE mv.move_bp <> 10000)::int AS moves,
+                    bool_or(mv.evaluated_at <= $3::timestamptz - interval '24 hours') AS volatility_known
+               FROM channel_data.competitor_move mv
+              WHERE mv.tenant_id = $1 AND mv.channel_account_id = $2 AND mv.marketplace = p.marketplace AND mv.channel_product_ref = p.channel_product_ref
+                AND mv.condition = p.condition AND mv.evaluated_at >= $3::timestamptz - interval '48 hours') w ON true`, [tenantId, channelAccountId, now]);
       return rows.map((r): PollCandidate => ({
         query: { marketplace: r.marketplace, channelProductRef: r.channel_product_ref, condition: portCondition(r.condition) },
-        lastPolledAt: r.last_polled_at ? iso(r.last_polled_at) : null, changesLast30Days: Number(r.moves) * 15, volatilityKnown: r.volatility_known === true,
+        lastPolledAt: r.last_polled_at ? iso(r.last_polled_at) : null, changesLast30Days: Number(r.moves ?? 0) * 15, volatilityKnown: r.volatility_known === true,
       }));
     });
   }

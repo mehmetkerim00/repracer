@@ -49,3 +49,20 @@ test('step 24: the snapshot volume model of the compression benchmark polls with
   const n = (v: string) => Number(v.replace(/_/g, ''));
   assert.deepEqual([n(m[1]!), n(m[2]!), n(m[3]!)], [DEFAULT_TIERS.hot.intervalSeconds, DEFAULT_TIERS.warm.intervalSeconds, DEFAULT_TIERS.cold.intervalSeconds]);
 });
+
+test('Р-128: волатильность неизвестна — проба не реже тёплого яруса; известная неподвижность оставляет товар холодным', () => {
+  const plan = planPollingTiers([
+    { key: 'new-quiet', changesLast30Days: 0, volatilityKnown: false },
+    { key: 'known-quiet', changesLast30Days: 0, volatilityKnown: true },
+    { key: 'default-quiet', changesLast30Days: 0 },
+    { key: 'new-busy', changesLast30Days: 300, volatilityKnown: false },
+  ], 1);
+  const tier = (key: string) => plan.assignments.find((a) => a.key === key)!.tier;
+  assert.equal(tier('new-quiet'), 'WARM', 'новый товар без наблюдений опрашивается не реже тёплого яруса');
+  assert.equal(tier('known-quiet'), 'COLD', 'наблюдаемый неподвижный товар остаётся холодным');
+  assert.equal(tier('default-quiet'), 'COLD', 'по умолчанию волатильность считается известной');
+  assert.equal(tier('new-busy'), 'HOT', 'проба не понижает товар, который уже виден как волатильный');
+  // Бюджет: проба понижается так же, как тёплый ярус
+  const tight = planPollingTiers([...Array.from({ length: 100 }, (_, i) => ({ key: `probe-${i}`, changesLast30Days: 0, volatilityKnown: false }))], 0.002);
+  assert.ok(tight.demoted.length > 0 && tight.assignments.some((a) => a.tier === 'COLD'), 'при нехватке бюджета проба понижается до холодного яруса');
+});

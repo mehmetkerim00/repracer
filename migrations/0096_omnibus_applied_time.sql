@@ -10,6 +10,10 @@ BEGIN;
 
 SET ROLE repracer_owner;
 
+-- Путь решения читает журнал закрытых суток: отметка времени применения не ставится цене уже закрытых суток (ревью шага 26, находка 4)
+GRANT USAGE ON SCHEMA maintenance TO repracer_app;
+GRANT SELECT ON maintenance.price_day_close TO repracer_app;
+
 CREATE TABLE tenant_data.price_history_applied (
   tenant_id         uuid NOT NULL,
   price_history_id  uuid NOT NULL,
@@ -33,7 +37,12 @@ INSERT INTO maintenance.retention_policy (table_name, method, bound) VALUES ('te
 
 RESET ROLE;
 
-/** OQ-180: запись цены завершена APPLIED с наблюдённым временем применения — строки её истории получают это время */
+/**
+ * OQ-180: запись цены завершена APPLIED с наблюдённым временем применения — строки её истории получают это время.
+ * Ревью шага 26, находка 4: если сутки принятия цены уже закрыты в вечную свёртку [Р-21, Р-29], время применения не ставится — иначе та же
+ * цена попала бы в свёртку второй раз, уже в сутках применения. Такая цена остаётся в сутках, где её уже учли (риск 34).
+ * Журнал закрытых суток читает и путь решения: право SELECT на maintenance.price_day_close — в списке разрешённого [Р-96].
+ */
 CREATE FUNCTION tenant_data.price_history_mark_applied() RETURNS trigger
   LANGUAGE plpgsql SET search_path = pg_catalog AS $fn$
 BEGIN
@@ -41,11 +50,15 @@ BEGIN
     INSERT INTO tenant_data.price_history_applied (tenant_id, price_history_id, channel_write_id, write_scope_id, accepted_at, applied_at)
     SELECT h.tenant_id, h.price_history_id, h.channel_write_id, h.write_scope_id, h.accepted_at, greatest(NEW.applied_at, h.accepted_at)
       FROM tenant_data.price_history h
+      JOIN LATERAL (SELECT tenant_data.write_scope_time_zone(h.tenant_id, h.write_scope_id) AS tz) z ON true
      WHERE h.tenant_id = NEW.tenant_id AND h.channel_write_id = NEW.channel_write_id
+       AND NOT EXISTS (SELECT 1 FROM maintenance.price_day_close c
+                        WHERE z.tz IS NOT NULL AND c.day_tz = z.tz AND c.price_day = (h.accepted_at AT TIME ZONE z.tz)::date)
     ON CONFLICT DO NOTHING;
   END IF;
   RETURN NULL;
 END $fn$;
+
 CREATE TRIGGER b_price_history_mark_applied AFTER INSERT ON tenant_data.channel_write_history
   FOR EACH ROW EXECUTE FUNCTION tenant_data.price_history_mark_applied();
 
@@ -64,6 +77,8 @@ BEGIN
           AND h.price_history_id = NEW.price_history_id AND h.write_scope_id = NEW.write_scope_id AND h.accepted_at = NEW.accepted_at) THEN
     RAISE EXCEPTION 'price history % is not a price of a write the channel applied at this time (OQ-180)', NEW.price_history_id USING ERRCODE = 'check_violation';
   END IF;
+  -- Правило «сутки принятия уже закрыты — время применения не ставится» живёт в триггере отметки (price_history_mark_applied): здесь оно
+  -- было бы дублем, который некому поймать [Р-104], и ломало бы законную запись журнала (страж падает внутри AFTER-триггера)
   RETURN NEW;
 END $fn$;
 CREATE TRIGGER a_price_history_applied_guard BEFORE INSERT ON tenant_data.price_history_applied
@@ -80,6 +95,8 @@ AS $function$
    LEFT JOIN tenant_data.price_history_applied ap ON ap.tenant_id = h.tenant_id AND ap.price_history_id = h.price_history_id
    WHERE h.tenant_id = p_tenant_id AND h.write_scope_id = p_write_scope_id AND h.price_type IN ('REGULAR', 'SALE')
      AND coalesce(ap.applied_at, h.accepted_at) < p_before
+     -- Отсечение секций price_history (партиции по accepted_at): применение не раньше принятия, поэтому условие безопасно (ревью шага 26, находка 10)
+     AND h.accepted_at < p_before
      AND NOT EXISTS (SELECT 1 FROM tenant_data.price_history c WHERE c.tenant_id = h.tenant_id AND c.corrects_price_history_id = h.price_history_id)
      AND NOT EXISTS (SELECT 1 FROM tenant_data.price_history_not_applied na WHERE na.tenant_id = h.tenant_id AND na.price_history_id = h.price_history_id)
      AND NOT EXISTS (SELECT 1 FROM tenant_data.price_daily d
@@ -104,13 +121,16 @@ DECLARE
   tz_closed   int;
   closed      int := 0;
 BEGIN
-  SELECT min(coalesce(a.applied_at, h.accepted_at)) INTO first_raw FROM tenant_data.price_history h
-    LEFT JOIN tenant_data.price_history_applied a ON a.tenant_id = h.tenant_id AND a.price_history_id = h.price_history_id;
   -- Витрины без известного пояса пропускаются: их сутки нельзя закрыть (Р-65)
   FOR tz IN SELECT DISTINCT time_zone FROM platform.marketplace WHERE time_zone IS NOT NULL ORDER BY 1 LOOP
     local_today := (p_now AT TIME ZONE tz)::date;
     SELECT max(price_day) + 1 INTO next_day FROM maintenance.price_day_close WHERE day_tz = tz;
     IF next_day IS NULL THEN
+      -- Первые сутки витрины: обход всей истории — только когда закрытых суток ещё нет (ревью шага 26, находка 10)
+      IF first_raw IS NULL THEN
+        SELECT min(coalesce(a.applied_at, h.accepted_at)) INTO first_raw FROM tenant_data.price_history h
+          LEFT JOIN tenant_data.price_history_applied a ON a.tenant_id = h.tenant_id AND a.price_history_id = h.price_history_id;
+      END IF;
       next_day := (first_raw AT TIME ZONE tz)::date;
     END IF;
     CONTINUE WHEN next_day IS NULL;
@@ -134,6 +154,8 @@ BEGIN
         FROM tenant_data.price_history h
         LEFT JOIN tenant_data.price_history_applied ap ON ap.tenant_id = h.tenant_id AND ap.price_history_id = h.price_history_id
        WHERE coalesce(ap.applied_at, h.accepted_at) >= day_start AND coalesce(ap.applied_at, h.accepted_at) < day_end
+         -- Отсечение секций: применение не раньше принятия (ревью шага 26, находка 10)
+         AND h.accepted_at < day_end
          AND tenant_data.write_scope_time_zone(h.tenant_id, h.write_scope_id) = tz
          AND NOT EXISTS (SELECT 1 FROM tenant_data.price_history c
                           WHERE c.tenant_id = h.tenant_id AND c.corrects_price_history_id = h.price_history_id)
@@ -292,12 +314,99 @@ AS $function$
     -- Шаг 25 (0090) [Р-121, Р-126]: время последнего опроса товара — ярусный опрос планировщика не зависит от времени уведомлений
     -- Шаг 25 (0091, риск 28): отметка неприменённой цены — триггер завершения записи в транзакции пути решения и диспетчера
     ('tenant_data.price_history_not_applied', 'INSERT', NULL),
-    -- OQ-180 (шаг 26): время применения цены каналом пишет путь решения при завершении записи
-    ('tenant_data.price_history_applied', 'INSERT', NULL),
+    -- OQ-180 (шаг 26): время применения цены каналом пишет путь решения при завершении записи; закрытые сутки он читает
+    ('tenant_data.price_history_applied', 'INSERT', NULL), ('maintenance.price_day_close', 'SELECT', NULL),
     ('channel_data.competitor_poll_state', 'SELECT', NULL), ('channel_data.competitor_poll_state', 'INSERT', NULL), ('channel_data.competitor_poll_state', 'UPDATE', NULL),
     ('channel_data.pricing_halt_sample', 'SELECT', NULL),
     ('channel_data.pricing_halt_sample', 'INSERT', 'tenant_id'), ('channel_data.pricing_halt_sample', 'INSERT', 'pricing_halt_id'), ('channel_data.pricing_halt_sample', 'INSERT', 'channel_product_ref'), ('channel_data.pricing_halt_sample', 'INSERT', 'observed_at'), ('channel_data.pricing_halt_sample', 'INSERT', 'verdict'), ('channel_data.pricing_halt_sample', 'INSERT', 'reason_code')
   ) AS a(t, p, c)
 $function$;
+
+/**
+ * Закрытие тенанта удаляет и отметки времени применения: ревью шага 26, находка 3 — таблица данных тенанта, объявленная
+ * TENANT_CLOSURE_ONLY, но не перечисленная в purge_tenant_data, остаётся в базе навсегда
+ */
+CREATE OR REPLACE FUNCTION maintenance.purge_tenant_data(p_tenant_id uuid, p_delete_price_history boolean DEFAULT false)
+ RETURNS bigint
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'pg_catalog', 'pg_temp'
+AS $function$
+DECLARE
+  t         text;
+  n         bigint;
+  total     bigint := 0;
+  closed_ts timestamptz;
+BEGIN
+  SELECT closed_at INTO closed_ts FROM tenant_data.tenant
+   WHERE tenant_id = p_tenant_id AND kind = 'CUSTOMER' AND status = 'CLOSED';
+  IF closed_ts IS NULL THEN
+    RAISE EXCEPTION 'tenant % must be a CLOSED CUSTOMER', p_tenant_id;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM maintenance.tenant_purge_status
+                  WHERE subject_tenant_id = p_tenant_id AND postgres_channel_purged_at IS NOT NULL) THEN
+    RAISE EXCEPTION 'purge channel data first (maintenance.purge_tenant_channel_data)';
+  END IF;
+  IF NOT p_delete_price_history
+     AND (EXISTS (SELECT 1 FROM tenant_data.price_daily WHERE tenant_id = p_tenant_id)
+          OR EXISTS (SELECT 1 FROM tenant_data.price_history WHERE tenant_id = p_tenant_id)
+          OR EXISTS (SELECT 1 FROM tenant_data.discount_announcement WHERE tenant_id = p_tenant_id)
+          OR EXISTS (SELECT 1 FROM tenant_data.price_intent_core WHERE tenant_id = p_tenant_id)) THEN
+    RAISE EXCEPTION 'tenant % has price evidence; deletion requires explicit confirmation (OQ-22)', p_tenant_id;
+  END IF;
+
+  INSERT INTO legal.migration_consent_record
+    (tenant_id, migration_consent_id, channel_account_id, channel_external_account_id, consenting_user_id,
+     consenting_role, mfa_verified_at, disclosure_version, disclosure_text_sha256, other_tools_declaration,
+     other_tools_list, typed_confirmation, given_at, expires_at, revoked_at, items, tenant_closed_at)
+  SELECT c.tenant_id, c.migration_consent_id, c.channel_account_id, ca.external_account_id, c.user_id,
+         m.role, c.mfa_verified_at, c.disclosure_version, c.disclosure_text_sha256, c.other_tools_declaration,
+         c.other_tools_list, c.typed_confirmation, c.given_at, c.expires_at, r.revoked_at,
+         coalesce((SELECT jsonb_agg(jsonb_build_object(
+                     'listing_id', i.listing_id,
+                     'listing_snapshot_sha256', encode(i.listing_snapshot_sha256, 'hex'),
+                     'verdict_at_consent', i.verdict_at_consent,
+                     'acknowledged_losses', to_jsonb(i.acknowledged_losses)))
+                     FROM tenant_data.migration_consent_item i
+                    WHERE i.tenant_id = c.tenant_id AND i.migration_consent_id = c.migration_consent_id), '[]'::jsonb),
+         closed_ts
+    FROM tenant_data.migration_consent c
+    JOIN tenant_data.channel_account ca ON ca.tenant_id = c.tenant_id AND ca.channel_account_id = c.channel_account_id
+    JOIN tenant_data.membership m ON m.tenant_id = c.tenant_id AND m.membership_id = c.membership_id
+    LEFT JOIN tenant_data.migration_consent_revocation r
+      ON r.tenant_id = c.tenant_id AND r.migration_consent_id = c.migration_consent_id
+   WHERE c.tenant_id = p_tenant_id
+  ON CONFLICT (tenant_id, migration_consent_id) DO NOTHING;
+
+  FOREACH t IN ARRAY ARRAY[
+    'tenant_data.outbox_event', 'tenant_data.price_history_not_applied', 'tenant_data.price_history_applied', 'tenant_data.price_history', 'tenant_data.price_daily_correction',
+    'tenant_data.price_daily', 'tenant_data.price_intent_core',
+    'tenant_data.channel_write_history', 'tenant_data.channel_write', 'tenant_data.edit_budget',
+    'tenant_data.migration_consent_revocation', 'tenant_data.migration_consent_item', 'tenant_data.migration_consent',
+    'tenant_data.stock_movement', 'tenant_data.stock_allocation', 'tenant_data.stock_pool',
+    'tenant_data.inbound_api_key', 'tenant_data.stock_source',
+    -- Остановки цен человеком: тоже данные тенанта, удалялись только вместе с базой (найдено правилом проверки схемы шага 26)
+    'tenant_data.price_stop',
+    'tenant_data.min_price', 'tenant_data.max_price', 'tenant_data.product_vat_rate', 'tenant_data.guardrail', 'tenant_data.divergence_policy',
+    'tenant_data.cost_profile',
+    'tenant_data.discount_announcement', 'tenant_data.offer_mapping', 'tenant_data.write_scope_sync_state', 'tenant_data.write_scope',
+    'tenant_data.pricing_strategy', 'tenant_data.channel_capability_override', 'tenant_data.channel_account',
+    'tenant_data.bundle_component', 'tenant_data.product', 'tenant_data.membership']
+  LOOP
+    EXECUTE format('DELETE FROM %s WHERE tenant_id = $1', t) USING p_tenant_id;
+    GET DIAGNOSTICS n = ROW_COUNT;
+    total := total + n;
+  END LOOP;
+
+  UPDATE tenant_data.tenant SET name = 'closed tenant' WHERE tenant_id = p_tenant_id;
+  UPDATE maintenance.tenant_purge_status
+     SET postgres_tenant_purged_at = now(),
+         legal_hold_until = CASE WHEN EXISTS (SELECT 1 FROM legal.migration_consent_record WHERE tenant_id = p_tenant_id)
+                                 THEN (closed_ts + interval '3 years')::date END
+   WHERE subject_tenant_id = p_tenant_id;
+  INSERT INTO maintenance.retention_run (table_name, action, rows_affected, subject_tenant_id)
+  VALUES ('tenant_data.*', 'TENANT_PURGED', total, p_tenant_id);
+  RETURN total;
+END $function$;
 
 COMMIT;

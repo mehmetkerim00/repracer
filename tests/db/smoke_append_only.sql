@@ -254,9 +254,11 @@ DO $$ BEGIN
   END IF;
   RAISE NOTICE 'PASS accept | a price the channel did not apply is not in the Omnibus window (risk 28)';
 END $$;
--- Р-124: глубина истории — с первой известной цены (суточная свёртка 400 суток назад), не с подключения единицы записи в смоук-мире
+-- Р-124: глубина истории — с первой известной цены (суточная свёртка 400 суток назад), не с подключения единицы записи в смоук-мире.
+-- Порог — не 400: свёртка засеяна на 10:00 по Берлину суток `current_date - 400`, и до 10:00 по Берлину глубина равна 399 (смоук зависел
+-- от времени суток прогона и падал в окне после полуночи сервера базы)
 DO $$ BEGIN
-  IF (SELECT history_days FROM tenant_data.omnibus_lowest_prior_price('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', now())) < 400 THEN
+  IF (SELECT history_days FROM tenant_data.omnibus_lowest_prior_price('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', now())) < 399 THEN
     RAISE EXCEPTION 'the history depth of an offer is not counted from its first known price (Р-124)';
   END IF;
   RAISE NOTICE 'PASS accept | the history depth of an offer is counted from its first known price (Р-124)';
@@ -320,14 +322,40 @@ BEGIN
   SELECT r.accepted_at INTO raw_at FROM tenant_data.omnibus_raw_prices('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', 'Europe/Berlin', now()) r
    WHERE r.amount_minor = 1400;
   IF raw_at IS DISTINCT FROM applied_at THEN
-    RAISE EXCEPTION 'the Omnibus window uses the time the price was accepted, not applied (OQ-180): % <> %', raw_at, applied_at;
+    RAISE NOTICE 'raw %, applied %', raw_at, applied_at;
+    RAISE EXCEPTION 'the Omnibus window uses the time the price was accepted, not applied (OQ-180)';
   END IF;
   RAISE NOTICE 'PASS accept | the Omnibus window counts the price at the time the channel applied it (OQ-180)';
 END $$;
+-- Запись с временем применения, но незавершённая применением: отметку времени ставить нельзя (итог записи, а не наличие времени)
+INSERT INTO tenant_data.price_history (tenant_id, accepted_at, write_scope_id, product_id, amount_minor, currency, price_basis, effective_min_price_minor, channel_write_id, write_version)
+VALUES ('a0000000-0000-0000-0000-00000000000a', now() - interval '6 days', 'a6000000-0000-0000-0000-000000000001', 'a5000000-0000-0000-0000-000000000001', 1450, 'EUR', 'GROSS', 800,
+        'a9260000-0000-4000-8000-000000000002', 9262);
+INSERT INTO tenant_data.channel_write_history (tenant_id, channel_write_id, finished_at, write_scope_id, field, amount_minor, currency, price_basis, version, origin, final_status, attempt_count, created_at, applied_at)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'a9260000-0000-4000-8000-000000000002', now(), 'a6000000-0000-0000-0000-000000000001', 'PRICE', 1450, 'EUR', 'GROSS', 9262, 'ENGINE', 'NOT_APPLIED', 1, now(), now() - interval '5 days 20 hours');
+SELECT pg_temp.expect_fail('a price of a write the channel reported a time for but did not apply marked with a time of application (OQ-180)', $q$
+  INSERT INTO tenant_data.price_history_applied (tenant_id, price_history_id, channel_write_id, write_scope_id, accepted_at, applied_at)
+  SELECT h.tenant_id, h.price_history_id, h.channel_write_id, h.write_scope_id, h.accepted_at, w.applied_at
+    FROM tenant_data.price_history h JOIN tenant_data.channel_write_history w ON w.tenant_id = h.tenant_id AND w.channel_write_id = h.channel_write_id
+   WHERE h.tenant_id = 'a0000000-0000-0000-0000-00000000000a' AND h.channel_write_id = 'a9260000-0000-4000-8000-000000000002' $q$, 'is not a price of a write the channel applied at this time');
 SELECT pg_temp.expect_fail('a price of a write the channel did not confirm marked with a time of application (OQ-180)', $q$
   INSERT INTO tenant_data.price_history_applied (tenant_id, price_history_id, channel_write_id, write_scope_id, accepted_at, applied_at)
   SELECT h.tenant_id, h.price_history_id, h.channel_write_id, h.write_scope_id, h.accepted_at, h.accepted_at + interval '1 hour' FROM tenant_data.price_history h
    WHERE h.tenant_id = 'a0000000-0000-0000-0000-00000000000a' AND h.channel_write_id = 'a9250000-0000-4000-8000-000000000003' $q$, 'is not a price of a write the channel applied at this time');
+-- Ревью шага 26, находка 4: сутки принятия уже закрыты в вечную свёртку — время применения не ставится, иначе цена попала бы в свёртку дважды
+INSERT INTO maintenance.price_day_close (price_day, day_tz, rows_inserted)
+VALUES (((now() - interval '3 days') AT TIME ZONE 'Europe/Berlin')::date, 'Europe/Berlin', 0);
+INSERT INTO tenant_data.price_history (tenant_id, accepted_at, write_scope_id, product_id, amount_minor, currency, price_basis, effective_min_price_minor, channel_write_id, write_version)
+VALUES ('a0000000-0000-0000-0000-00000000000a', now() - interval '3 days', 'a6000000-0000-0000-0000-000000000001', 'a5000000-0000-0000-0000-000000000001', 1550, 'EUR', 'GROSS', 800,
+        'a9260000-0000-4000-8000-000000000003', 9263);
+INSERT INTO tenant_data.channel_write_history (tenant_id, channel_write_id, finished_at, write_scope_id, field, amount_minor, currency, price_basis, version, origin, final_status, attempt_count, created_at, applied_at)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'a9260000-0000-4000-8000-000000000003', now(), 'a6000000-0000-0000-0000-000000000001', 'PRICE', 1550, 'EUR', 'GROSS', 9263, 'ENGINE', 'APPLIED', 1, now(), now() - interval '2 days 20 hours');
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM tenant_data.price_history_applied p WHERE p.tenant_id = 'a0000000-0000-0000-0000-00000000000a' AND p.channel_write_id = 'a9260000-0000-4000-8000-000000000003') THEN
+    RAISE EXCEPTION 'a price of a day already closed is moved to the day the channel applied it (OQ-180)';
+  END IF;
+  RAISE NOTICE 'PASS accept | a price of a day already closed keeps the day it was rolled up into (OQ-180)';
+END $$;
 SELECT pg_temp.expect_fail('truncate tenant_data.price_history_applied', $q$ TRUNCATE tenant_data.price_history_applied $q$, 'TRUNCATE of tenant_data.price_history_applied is forbidden');
 -- Шаг 26, D (0094) [риск 31]: уровень отставания работы — в базе, значения известны
 SELECT pg_temp.expect_fail('a scheduled job with an unknown lag level (риск 31)', $q$
@@ -390,6 +418,9 @@ DO $$ BEGIN
   VALUES ('channel_data.competitor_snapshot_log', 'smoke_snapshot_partition', 'CLICKHOUSE', 5, now());
   RAISE NOTICE 'PASS accept | a partition is verified once the exported-after-fix skip is confirmed in ClickHouse (OQ-182)';
 END $$;
+SELECT pg_temp.expect_fail('a skip verification that belongs to a tenant (OQ-182)', $q$
+  INSERT INTO maintenance.snapshot_export_skip_verification (tenant_id, competitor_snapshot_id, rows_in_clickhouse)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a9181000-0000-4000-8000-000000000001', 1) $q$, 'snapshot_export_skip_verification_platform_tenant');
 SELECT pg_temp.expect_fail('a skip verification with no rows in ClickHouse (OQ-182)', $q$
   INSERT INTO maintenance.snapshot_export_skip_verification (competitor_snapshot_id, rows_in_clickhouse)
   VALUES ('a9181000-0000-4000-8000-000000000001', 0) $q$, 'snapshot_export_skip_verification_rows');

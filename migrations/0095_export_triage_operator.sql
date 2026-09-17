@@ -33,7 +33,8 @@ CREATE POLICY platform_operator_triage ON platform.platform_operator FOR SELECT 
 GRANT SELECT ON platform.platform_operator TO repracer_export_triage;
 
 CREATE TABLE maintenance.snapshot_export_skip_verification (
-  tenant_id               uuid NOT NULL DEFAULT security.platform_tenant_id(),
+  tenant_id               uuid NOT NULL DEFAULT security.platform_tenant_id()
+                            CONSTRAINT snapshot_export_skip_verification_platform_tenant CHECK (tenant_id = security.platform_tenant_id()),
   -- Закрытие тенанта удаляет пропуски его снимков (0092) — подтверждения уходят вместе с ними
   competitor_snapshot_id  uuid NOT NULL PRIMARY KEY REFERENCES maintenance.snapshot_export_skip (competitor_snapshot_id) ON DELETE CASCADE,
   rows_in_clickhouse      integer NOT NULL CONSTRAINT snapshot_export_skip_verification_rows CHECK (rows_in_clickhouse > 0),
@@ -55,7 +56,8 @@ INSERT INTO maintenance.retention_policy (table_name, method, anchor_column, ret
 VALUES ('maintenance.snapshot_export_skip_verification', 'DELETE_ROWS', 'verified_at', '18 months', '0 days', 68);
 
 ALTER TABLE maintenance.snapshot_export_skip_resolution
-  ADD COLUMN operator_id uuid REFERENCES platform.platform_operator (operator_id),
+  -- Внешнего ключа на учётную запись нет: то же самое и строже проверяет страж (действующая запись), а дубль защиты некому поймать [Р-104]
+  ADD COLUMN operator_id uuid,
   ADD COLUMN mfa boolean NOT NULL DEFAULT false;
 
 RESET ROLE;

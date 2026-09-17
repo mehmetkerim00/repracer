@@ -84,7 +84,7 @@ test('Р-129: метрики и проверка работоспособнос�
   assert.match(await (await fetch(`http://127.0.0.1:${port}/metrics`)).text(), /repracer_scheduler_ticks_total/);
 });
 
-test('Р-127: отметка во внешнем сервисе — не чаще раза в минуту, смена состояния сразу, провал отметки — исключение', async () => {
+test('Р-127: отметка во внешнем сервисе — не чаще раза в минуту, смена состояния почти сразу, но не чаще 5 в минуту; провал отметки — исключение', async () => {
   let ms = 0;
   const calls: string[] = [];
   const beat = createHeartbeat({
@@ -96,7 +96,10 @@ test('Р-127: отметка во внешнем сервисе — не чащ�
   assert.equal(await beat.beat(true), 'THROTTLED', 'сервис не записывает больше 5 отметок в минуту — лишние не шлём');
   assert.equal(await beat.beat(false), 'SENT', 'провал такта отмечается сразу');
   ms += 1_000;
-  assert.equal(await beat.beat(true), 'SENT', 'возврат к норме — сразу');
+  // Ревью шага 26, находка 11: «мигающий» планировщик не должен выбирать лимит сервиса (5 отметок в минуту) сменами состояния
+  assert.equal(await beat.beat(true), 'THROTTLED', 'смена состояния чаще 12 с не шлётся: лимит сервиса');
+  ms += 12_000;
+  assert.equal(await beat.beat(true), 'SENT', 'возврат к норме — следующей отметкой');
   assert.deepEqual(calls, [
     'https://hc-ping.com/00000000-0000-4000-8000-000000000000',
     'https://hc-ping.com/00000000-0000-4000-8000-000000000000/fail',
@@ -164,4 +167,24 @@ test('Р-127: пока процесс работает, отметки идут;
   for (let i = 0; i < 20; i++) { ms += 30_000; monitor.evaluate(ms); }
   assert.equal(monitor.emails.length, 1, 'внешний сервис прислал письмо владельцу');
   assert.ok(monitor.emails[0]!.atMs - stoppedAtMs <= 210_000, 'письмо — в пределах периода и допуска (2 + 1 минута)');
+});
+
+test('Риск 31: точка входа процесса берёт сроки из часов базы, а не из часов процесса', async () => {
+  const { dueClockOf, tickIsHealthy } = await import('../src/main.ts');
+  const calls: string[] = [];
+  const clock = dueClockOf({ databaseNow: async () => { calls.push('database'); return '2026-09-18T00:00:00.000Z'; } } as never);
+  const trueNow = Date.now;
+  Date.now = () => Date.parse('2030-01-01T00:00:00.000Z');
+  try {
+    assert.equal(await clock(), '2026-09-18T00:00:00.000Z', 'срок берётся у базы, часы процесса не используются');
+  } finally {
+    Date.now = trueNow;
+  }
+  assert.deepEqual(calls, ['database']);
+  // Ревью шага 26, находка 12: такт, в котором провалились ВСЕ работы, здоровым не считается
+  const run = (outcome: string) => ({ outcome });
+  assert.equal(tickIsHealthy(true, { runs: [run('SUCCEEDED'), run('FAILED')] }), true);
+  assert.equal(tickIsHealthy(true, { runs: [run('FAILED'), run('FAILED')] }), false, 'все работы провалились — процесс не здоров');
+  assert.equal(tickIsHealthy(true, { runs: [] }), true, 'такт без работ — норма');
+  assert.equal(tickIsHealthy(false, null), false, 'такт не завершился — не здоров');
 });

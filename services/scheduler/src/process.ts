@@ -29,6 +29,11 @@ export interface RunSchedulerOptions {
   shouldStop?: () => boolean;
   /** Каждый такт, успешный или нет: отметка работоспособности наружу (Р-127) */
   onTick?: (result: { ok: boolean; at: number; report: TickReport | null }) => Promise<void> | void;
+  /**
+   * Начало итерации цикла — до выполнения работ. Цикл жив и тогда, когда такт идёт долго (выгрузка суток берёт аренду на 2 часа):
+   * проверка работоспособности и отметка наружу считают живость по нему, а не по завершению такта (ревью шага 26, находка 5)
+   */
+  onIterationStart?: () => void;
 }
 
 export function runScheduler(scheduler: Scheduler, options: RunSchedulerOptions): RunningScheduler {
@@ -37,6 +42,7 @@ export function runScheduler(scheduler: Scheduler, options: RunSchedulerOptions)
   const loop = (async () => {
     while (!stopped && !options.shouldStop?.()) {
       let ok = true;
+      options.onIterationStart?.();
       const clockMs = options.clockMs ?? Date.now;
       const tickStarted = clockMs();
       let sleepMs = options.tickMs;

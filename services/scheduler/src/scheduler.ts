@@ -132,7 +132,9 @@ export function createScheduler(options: SchedulerOptions) {
       lagSeconds: Math.max(0, (Date.parse(startedAt) - Date.parse(claimed.nextDueAt)) / 1000), items, errorCode,
     };
     await state.finish(claimed.jobKey, owner, { outcome, nextDueAt: next.nextDueAt, coalesced: next.coalesced, error, run });
-    if (outcome === 'FAILED' && claimed.consecutiveFailures + 1 >= failureAlertAfter) {
+    // Алерт — один раз на серию провалов, а не на каждый последующий: иначе постоянный отказ канала даёт CRITICAL каждую минуту
+    // (ревью шага 26, находка 9б)
+    if (outcome === 'FAILED' && claimed.consecutiveFailures + 1 === failureAlertAfter) {
       await alerts.raise({ code: 'SCHEDULER_JOB_FAILING', severity: 'CRITICAL', details: { job: claimed.jobKey, failures: claimed.consecutiveFailures + 1, error: errorCode ?? 'JOB_FAILED' } });
     }
     return { run, succeeded: outcome === 'SUCCEEDED' };
@@ -180,7 +182,10 @@ export function createScheduler(options: SchedulerOptions) {
       for (const job of await state.list()) {
         const spec = byKey.get(job.jobKey);
         if (!spec) continue;
-        if (report.nextDueAt === null || Date.parse(dueOf(job)) < Date.parse(report.nextDueAt)) report.nextDueAt = dueOf(job);
+        // Работу, аренду которой держит другой процесс, будить незачем: её срок в прошлом дал бы такт каждую секунду (находка 13.8)
+        const leasedElsewhere = job.leaseOwner !== null && job.leaseOwner !== owner && job.leaseUntil !== null && Date.parse(job.leaseUntil) > Date.parse(now);
+        const due = leasedElsewhere ? job.leaseUntil! : dueOf(job);
+        if (report.nextDueAt === null || Date.parse(due) < Date.parse(report.nextDueAt)) report.nextDueAt = due;
         const remaining = lagOf(job);
         const lagSeconds = Math.max(remaining, lagBefore.get(job.jobKey) ?? 0);
         const level: LagLevel = lagSeconds >= spec.lagCriticalSeconds ? 'CRITICAL' : lagSeconds >= spec.lagWarningSeconds ? 'WARNING' : 'OK';
