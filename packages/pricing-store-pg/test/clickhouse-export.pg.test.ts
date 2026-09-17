@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
-import { ClickHouseHttp, competitorSnapshotRow, exportDecisionDay, readCompetitorHistory } from '@repracer/analytics-export';
+import { ClickHouseHttp, competitorSnapshotRow, exportCompetitorSnapshotsDay, exportDecisionDay, readCompetitorHistory } from '@repracer/analytics-export';
 import type { MemorySeedScope } from '@repracer/pricing-pipeline';
-import { createPool, PgPricingStore, seedPricingWorld } from '../src/index.ts';
+import { createPool, inTenant, PgPricingStore, seedPricingWorld } from '../src/index.ts';
 import type { PriceDecisionDraft, PriceIntentDraft } from '@repracer/pricing-model';
 import { approved, contextOf, explained } from './drafts.ts';
 
@@ -138,3 +138,53 @@ test('Р-38, Р-23: the backtest reads the competitor history of one tenant thro
   await assert.rejects(reader.rows('SELECT count() FROM repracer_analytics.competitor_snapshot'), /CANNOT_PARSE|Cannot parse|UUID/i, 'without SQL_tenant_id the reader gets nothing');
   await assert.rejects(readCompetitorHistory(reader, tenants[0]!, account, { from: '2020-01-01T00:00:00.000Z', to: window.to }, now.toISOString()), /18 months/);
 });
+
+test('Р-122, step 24: a day of the competitor snapshot log is exported to ClickHouse with its sanity verdict, verified by count; a row ClickHouse would refuse is skipped with a reason; a repeated export does not duplicate rows', async () => {
+  const ingest = new ClickHouseHttp({ url: CH_URL, user: INGEST.user!, password: INGEST.password! });
+  const verifier = new ClickHouseHttp({ url: CH_URL, user: VERIFIER.user!, password: VERIFIER.password! });
+  const w = await seedPricingWorld(pool, {
+    provisioningPool: provisioning, adminPool: admin, fixtureTenantId: '10000000-0000-4000-8000-000000002400', fixtureChannelAccountId: '20000000-0000-4000-8000-000000002400',
+    marketplaces: ['de'], clock: new Date().toISOString(), seed: { scopes: [] },
+  });
+  const account = w.ids.dbId('20000000-0000-4000-8000-000000002400');
+  const now = new Date();
+  const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const range = { from: dayStart.toISOString(), to: new Date(dayStart.getTime() + 86_400_000).toISOString() };
+  const money = (amountMinor: number, currency = 'EUR') => ({ amountMinor, currency, basis: 'GROSS' });
+  const snapshot = (minor: number, currency: string) => ({
+    marketplace: 'de', channelProductRef: '362002400', condition: 'new', source: 'KAUFLAND_BUY_BOX_CHANGED', observedAt: new Date(dayStart.getTime() + 60_000).toISOString(),
+    completeness: { kind: 'TOP_N', n: 10 }, buybox: { price: money(minor, currency), isSelf: false },
+    offers: [{ rank: 1, sellerRef: 'Synthetic Competitor', isSelf: false, price: money(minor, currency), deliveryDays: { min: 1, max: 2 } }],
+  });
+  const logged = [
+    { id: crypto.randomUUID(), s: snapshot(1780, 'EUR'), verdict: 'ACCEPT' },
+    { id: crypto.randomUUID(), s: snapshot(17, 'EUR'), verdict: 'REJECT' },
+    { id: crypto.randomUUID(), s: snapshot(1780, 'GBP'), verdict: 'REJECT' },
+  ];
+  // Путь решения пишет журнал в транзакции снимка (0086); здесь — та же роль и тот же оператор вставки
+  await inTenant(pool, w.tenantId, async (tx) => {
+    for (const [i, l] of logged.entries()) {
+      await tx.query(
+        `INSERT INTO channel_data.competitor_snapshot_log (tenant_id, competitor_snapshot_id, received_at, observed_at, channel_account_id, channel, marketplace, channel_product_ref, condition, source, sanity_verdict, snapshot)
+         VALUES ($1, $2, $3, $4, $5, 'KAUFLAND', 'de', '362002400', 'new', 'KAUFLAND_BUY_BOX_CHANGED', $6, $7::jsonb)`,
+        [w.tenantId, l.id, new Date(dayStart.getTime() + 120_000 + i * 1000).toISOString(), l.s.observedAt, account, l.verdict, JSON.stringify(l.s)]);
+    }
+  });
+  await assert.rejects(pool.query('SELECT count(*) FROM channel_data.competitor_snapshot_log'), /permission denied/, 'the decision path writes the log but does not read it (Р-22)');
+
+  const first = await exportCompetitorSnapshotsDay(exporter, ingest, verifier, range);
+  assert.equal(first.verified, true, JSON.stringify(first));
+  assert.ok(first.byTable.competitor_snapshot! >= 2);
+  assert.ok((first.skipped.CURRENCY_UNSUPPORTED ?? 0) >= 1, JSON.stringify(first.skipped));
+  const count = async () => Number((await verifier.rows<{ n: number }>(
+    `SELECT count() AS n FROM repracer_analytics.competitor_snapshot FINAL WHERE tenant_id = '${w.tenantId}'`))[0]!.n);
+  assert.equal(await count(), 2, 'two snapshots of the tenant, the GBP one is skipped');
+  const verdicts = await verifier.rows<{ v: string }>(`SELECT sanity_verdict AS v FROM repracer_analytics.competitor_snapshot FINAL WHERE tenant_id = '${w.tenantId}' ORDER BY received_at`);
+  assert.deepEqual(verdicts.map((r) => r.v), ['ACCEPT', 'REJECT'], 'the rejected snapshot is history too, with its verdict');
+  const second = await exportCompetitorSnapshotsDay(exporter, ingest, verifier, range);
+  assert.equal(second.verified, true);
+  assert.equal(await count(), 2, 'a repeated export does not duplicate rows');
+  const { rows: [mark] } = await exporter.query(`SELECT verified_at FROM maintenance.partition_export WHERE parent_table = 'channel_data.competitor_snapshot_log' AND partition_name = $1 AND target = 'CLICKHOUSE'`, [first.partitionName]);
+  assert.ok(mark?.verified_at, 'the partition is marked verified — it may be dropped by retention');
+});
+

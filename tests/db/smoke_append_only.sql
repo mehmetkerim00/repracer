@@ -46,6 +46,15 @@ VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-0000000
 INSERT INTO channel_data.offer_pricing_health (tenant_id, channel_account_id, channel, marketplace, channel_product_ref, condition, issue_type, event_time,
   competitive_price_threshold_minor, currency, notification_id)
 VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R103-1', 'new', 'BuyBoxDisqualification', now(), 1999, 'EUR', 'SYN-N-R103-H');
+-- Шаг 24, A (0086) [Р-122]: журнал полных снимков конкурентов
+INSERT INTO channel_data.competitor_snapshot_log (tenant_id, competitor_snapshot_id, received_at, observed_at, channel_account_id, channel, marketplace, channel_product_ref, condition, source, sanity_verdict, snapshot)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'a9124000-0000-4000-8000-000000000001', now(), now(), 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R103-1', 'new', 'KAUFLAND_BUYBOX', 'ACCEPT', '{"offers": []}');
+SELECT pg_temp.expect_fail('competitor snapshot log with an unknown sanity verdict (Р-122)', $q$
+  INSERT INTO channel_data.competitor_snapshot_log (tenant_id, competitor_snapshot_id, received_at, observed_at, channel_account_id, channel, marketplace, channel_product_ref, condition, source, sanity_verdict, snapshot)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', gen_random_uuid(), now(), now(), 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R103-1', 'new', 'KAUFLAND_BUYBOX', 'MAYBE', '{}') $q$, 'competitor_snapshot_log_verdict_known');
+SELECT pg_temp.expect_fail('competitor snapshot log whose snapshot is not an object (Р-122)', $q$
+  INSERT INTO channel_data.competitor_snapshot_log (tenant_id, competitor_snapshot_id, received_at, observed_at, channel_account_id, channel, marketplace, channel_product_ref, condition, source, sanity_verdict, snapshot)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', gen_random_uuid(), now(), now(), 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R103-1', 'new', 'KAUFLAND_BUYBOX', 'ACCEPT', '[]') $q$, 'competitor_snapshot_log_snapshot_object');
 INSERT INTO channel_data.price_decision_snapshot_ref (tenant_id, price_decision_id, decided_at, write_scope_id, competitor_snapshot_id, source, observed_at)
 SELECT tenant_id, price_decision_id, decided_at, write_scope_id, 'a9103000-0000-4000-8000-000000000001', 'KAUFLAND_BUYBOX', decided_at
   FROM channel_data.price_decision WHERE price_decision_id = 'a8000000-0000-0000-0000-000000000001';
@@ -91,6 +100,7 @@ SELECT 'a0000000-0000-0000-0000-00000000000a', 'a5000000-0000-0000-0000-00000000
 
 -- Шаг 23 [Р-108]: TRUNCATE новой append-only таблицы отклоняет свой триггер
 SELECT pg_temp.expect_fail('truncate channel_data.offer_channel_pricing', $q$ TRUNCATE channel_data.offer_channel_pricing $q$, 'TRUNCATE of channel_data.offer_channel_pricing is forbidden');
+SELECT pg_temp.expect_fail('truncate channel_data.competitor_snapshot_log', $q$ TRUNCATE channel_data.competitor_snapshot_log $q$, 'TRUNCATE of channel_data.competitor_snapshot_log is forbidden');
 SELECT pg_temp.expect_fail('truncate channel_data.inbound_notification', $q$ TRUNCATE channel_data.inbound_notification $q$, 'TRUNCATE of channel_data.inbound_notification is forbidden');
 SELECT pg_temp.expect_fail('pricing health threshold without its currency (Р-71)', $q$
   INSERT INTO channel_data.offer_pricing_health (tenant_id, channel_account_id, channel, marketplace, channel_product_ref, condition, issue_type, event_time, competitive_price_threshold_minor, currency, notification_id)

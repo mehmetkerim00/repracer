@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0084_verify_schema_invariants_v20.sql';
+const VERIFY = 'migrations/0099_verify_tmp.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -612,6 +612,15 @@ export const STEP24_ROWS = [
       m(replaceInFunction('tenant_data.channel_write_stop_guard()', "IF NEW.field NOT IN ('PRICE', 'CHANNEL_MIN_PRICE')", "IF NEW.field NOT IN ('PRICE')"),
         smoke('channel price floor write created while pricing is stopped by a person (Р-69, OQ-172)'),
         smoke('dispatch of a channel price floor write while pricing is stopped by a person (Р-69, OQ-172)')),
+    ],
+  },
+  {
+    row: 'Р-122', invariant: 'журнал полных снимков конкурентов не переписывается и не очищается целиком; вердикт и форма снимка известны',
+    mutations: [
+      m(dropTrigger('zz_append_only', 'channel_data.competitor_snapshot_log'), smoke('append-only channel_data.competitor_snapshot_log')),
+      m(dropTrigger('zz_no_truncate', 'channel_data.competitor_snapshot_log'), smoke('truncate channel_data.competitor_snapshot_log')),
+      m(dropConstraint('competitor_snapshot_log_verdict_known', 'channel_data.competitor_snapshot_log'), smoke('competitor snapshot log with an unknown sanity verdict (Р-122)')),
+      m(dropConstraint('competitor_snapshot_log_snapshot_object', 'channel_data.competitor_snapshot_log'), smoke('competitor snapshot log whose snapshot is not an object (Р-122)')),
     ],
   },
   {

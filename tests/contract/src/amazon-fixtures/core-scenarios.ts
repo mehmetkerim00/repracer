@@ -188,6 +188,8 @@ export function buildCoreScenarios(): Array<{ file: string; scenario: Scenario }
       pipeline: {
         pricingHealth: [{ marketplace: DE, channelProductRef: ASIN, issueType: 'BuyBoxDisqualification', thresholdMinor: 1799 }],
         inboundNotifications: ['0301', '0303', '0302', '0305', '0306', '0308'].map((n) => ({ notificationId: `syn-notification-${n}` })),
+        // Р-122 (шаг 24): журнал снимков — при любом вердикте; повтор уведомления в журнал не попадает
+        snapshotLog: { $unordered: ['ACCEPT', 'ACCEPT', 'ACCEPT', 'REJECT', 'ACCEPT'].map((verdict) => ({ channelProductRef: ASIN, verdict, source: 'AMAZON_ANY_OFFER_CHANGED' })) },
       },
     },
   );

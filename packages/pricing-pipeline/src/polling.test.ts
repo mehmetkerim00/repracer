@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { DEFAULT_TIERS } from './polling.ts';
 import { planPollingTiers, planSubscriptionCatchUp } from './index.ts';
 
 test('tiers follow volatility and fit the budget by demoting the least volatile first', () => {
@@ -38,4 +39,13 @@ test('catch-up after a lost subscription restores subscriptions, then stock, the
   assert.deepEqual(tasks.map((t) => t.kind), ['ENSURE_SUBSCRIPTIONS', 'READ_ORDER_LINES', 'READBACK_UNIT', 'POLL_COMPETITORS', 'POLL_COMPETITORS', 'RECONCILE_REPORT']);
   assert.ok(tasks[1]?.kind === 'READ_ORDER_LINES' && tasks[1].since === '2026-09-13T23:45:00.000Z');
   assert.ok(tasks[3]?.kind === 'POLL_COMPETITORS' && tasks[3].tier === 'HOT');
+});
+
+test('step 24: the snapshot volume model of the compression benchmark polls with the same tier intervals as DEFAULT_TIERS', async () => {
+  const { readFileSync } = await import('node:fs');
+  const bench = readFileSync(new URL('../../analytics-export/bench/compression.bench.ts', import.meta.url), 'utf8');
+  const m = /BENCH_TIER_INTERVALS_SECONDS = \{ hot: ([\d_]+), warm: ([\d_]+), cold: ([\d_]+) \}/.exec(bench);
+  assert.ok(m, 'the benchmark declares its tier intervals');
+  const n = (v: string) => Number(v.replace(/_/g, ''));
+  assert.deepEqual([n(m[1]!), n(m[2]!), n(m[3]!)], [DEFAULT_TIERS.hot.intervalSeconds, DEFAULT_TIERS.warm.intervalSeconds, DEFAULT_TIERS.cold.intervalSeconds]);
 });

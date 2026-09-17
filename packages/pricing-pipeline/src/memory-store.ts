@@ -1,6 +1,6 @@
 import { EXPLANATION_RULESETS } from './dictionary.ts';
-import type { HaltSampleObservation, HaltSampleReview, ConsoleAuditRow, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation } from './store.ts';
-import { offerIdentityOf, type CompetitorQuery, type CompetitorSourceDescriptor, type FieldWrite, type Instant, type OfferIdentity, type PriceBasis, type PricingHealthObservation, type WriteOutcome } from '@repracer/channel-port';
+import type { HaltSampleObservation, HaltSampleReview, SnapshotOutcome, ConsoleAuditRow, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation } from './store.ts';
+import { offerIdentityOf, type CompetitorQuery, type CompetitorSnapshot, type CompetitorSourceDescriptor, type FieldWrite, type Instant, type OfferIdentity, type PriceBasis, type PricingHealthObservation, type WriteOutcome } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange, SanityContext } from '@repracer/input-sanity';
 import { assertWriteWithinBounds, NO_GUARDRAILS, type GuardrailSet } from '@repracer/price-gate';
 import { strategyAvailability } from '@repracer/strategy-engine';
@@ -228,6 +228,8 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   /** Р-120: как channel_data.offer_channel_pricing */
   readonly offerChannelPricing: ConsoleOfferChannelPricingRow[] = [];
   readonly pricingHealth: ConsolePricingHealthRow[] = [];
+  /** Р-122 (шаг 24): как channel_data.competitor_snapshot_log — полный снимок при любом вердикте, для выгрузки в ClickHouse */
+  readonly snapshotLog: Array<{ competitorSnapshotId: string; receivedAt: Instant; verdict: SnapshotOutcome['verdict']; key: ProductKey; snapshot: CompetitorSnapshot }> = [];
   /** Журнал обработанных уведомлений: как UNIQUE (tenant_id, channel, notification_id) в 0083 */
   readonly inboundNotifications = new Map<string, InboundNotificationEntry>();
   private readonly scopes = new Map<string, ScopeRow>();
@@ -414,6 +416,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     for (const list of this.movesByMarketplace.values()) removeIf(list, () => true, (m) => m.at < at);
     for (const list of this.changes.values()) removeIf(list, () => true, (t) => t < at);
     const rejectedSnapshots = removeIf(this.rejectedSnapshots, () => true, (r) => Date.parse(r.receivedAt) < at);
+    removeIf(this.snapshotLog, () => true, (r) => Date.parse(r.receivedAt) < at);
     return { intents, decisions, writes, moves, rejectedSnapshots };
   }
 
@@ -687,6 +690,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     let divergenceCaseId: string | null = null;
     const s = input.snapshot;
     if (s) {
+      if (s.log) this.snapshotLog.push({ competitorSnapshotId: s.log.competitorSnapshotId, receivedAt: s.log.receivedAt, verdict: s.verdict, key: input.key, snapshot: s.log.snapshot });
       if (s.move) this.rememberMove({ marketplace: input.key.marketplace, productRef: s.move.productRef, evaluatedAt: input.now, moveBp: s.move.moveBp, verdict: s.verdict, sellerRef: s.move.sellerRef });
       if (s.accepted) this.acceptSnapshot(input.key, s.accepted.snapshot, s.accepted.competitorSnapshotId, s.accepted.sanity);
       if (s.rejected) {
@@ -1505,6 +1509,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       offerChannelPricing: this.offerChannelPricing.map((o) => ({ marketplace: o.marketplace, externalSku: o.externalSku, automatedPricing: o.automatedPricing, channelBounds: o.channelBounds, source: o.source })),
       pricingHealth: this.pricingHealth.map((h) => ({ marketplace: h.marketplace, channelProductRef: h.channelProductRef, issueType: h.issueType, thresholdMinor: h.competitivePriceThreshold?.amountMinor ?? null })),
       inboundNotifications: [...this.inboundNotifications.values()].map((n) => ({ notificationId: n.notificationId, notificationType: n.notificationType })),
+      snapshotLog: this.snapshotLog.map((l) => ({ channelProductRef: l.key.channelProductRef, verdict: l.verdict, source: l.snapshot.source })),
       stops: this.stops.map((s) => ({ stopId: s.stopId, scope: s.scope, marketplace: s.marketplace, releasedAt: s.releasedAt })),
       intents: this.intents.map((i) => ({ writeScopeId: i.writeScopeId, ruleCode: i.ruleCode, proposedMinor: i.proposedMinor })),
       decisions: this.decisions.map((d) => ({

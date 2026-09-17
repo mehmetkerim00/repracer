@@ -382,7 +382,12 @@ export function createPricingPipeline(deps: PipelineDeps) {
       };
       // Р-72: журнал — коды и параметры, без текста
       const effects: Effect[] = verdict.warnings.map((w) => ({ kind: 'log', level: 'WARN', code: `INPUT_SANITY_${w.code}`, message: w.code, details: { channelProductRef: snapshot.channelProductRef } }));
-      const snapshotOutcome: SnapshotOutcome = { verdict: verdict.verdict, observedAt: snapshot.observedAt, move: verdict.move };
+      // Р-122: идентификатор снимка — один на запись в журнал и ссылку решения на снимок
+      const competitorSnapshotId = randomUUID();
+      const snapshotOutcome: SnapshotOutcome = {
+        verdict: verdict.verdict, observedAt: snapshot.observedAt, move: verdict.move,
+        log: { competitorSnapshotId, snapshot, receivedAt: now },
+      };
       const commit: EvaluationCommit = { key, now, snapshot: snapshotOutcome, decisions: [], ...(notification ? { notification } : {}) };
       scopeReports = [];
 
@@ -410,7 +415,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
 
       const primary = context.scopes.find((s) => s.scope.pricingMode === 'ENGINE') ?? context.scopes[0] ?? null;
       const sanity = summarizeSanity(verdict, SANITY_RULESET);
-      const snapshotRef: SnapshotRef = { competitorSnapshotId: randomUUID(), source: snapshot.source, observedAt: snapshot.observedAt };
+      const snapshotRef: SnapshotRef = { competitorSnapshotId, source: snapshot.source, observedAt: snapshot.observedAt };
       snapshotOutcome.accepted = { snapshot: verdict.snapshot, gtin: primary?.scope.gtin ?? null, competitorSnapshotId: snapshotRef.competitorSnapshotId, sanity };
       if (verdict.divergence && primary) {
         snapshotOutcome.divergence = {

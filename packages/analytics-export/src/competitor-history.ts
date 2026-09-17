@@ -45,6 +45,8 @@ export interface CompetitorSnapshotRow {
   price_basis: string;
   source: string;
   source_event_id: string | null;
+  /** Шаг 24 (090): вердикт проверки входов — ACCEPT, REJECT, HALT_CHANNEL */
+  sanity_verdict: string;
   completeness: string;
   completeness_n: number | null;
   buybox_amount_minor: number | null;
@@ -66,9 +68,10 @@ export interface CompetitorSnapshotRow {
   data_class: string;
 }
 
-/** Снимок → строка ClickHouse. Писателя competitor_snapshot в системе пока нет (шаг 21): функция служит тесту и будущему потребителю */
+/** Снимок → строка ClickHouse. Писатель — exportCompetitorSnapshotsDay (шаг 24) из журнала пути решения */
 export function competitorSnapshotRow(
   tenantId: string, channelAccountId: string, channel: 'KAUFLAND' | 'AMAZON', snapshotId: string, snapshot: CompetitorSnapshot, receivedAt: string,
+  sanityVerdict: 'ACCEPT' | 'REJECT' | 'HALT_CHANNEL' = 'ACCEPT',
 ): CompetitorSnapshotRow {
   const currency = snapshot.buybox?.price.currency ?? snapshot.offers[0]?.price.currency;
   const basis = snapshot.buybox?.price.basis ?? snapshot.offers[0]?.price.basis;
@@ -82,7 +85,7 @@ export function competitorSnapshotRow(
   return {
     tenant_id: tenantId, competitor_snapshot_id: snapshotId, received_at: receivedAt, observed_at: snapshot.observedAt,
     channel_account_id: channelAccountId, channel, marketplace: snapshot.marketplace, channel_product_ref: snapshot.channelProductRef,
-    condition: snapshot.condition, currency, price_basis: basis, source: snapshot.source, source_event_id: snapshot.sourceEventId ?? null,
+    condition: snapshot.condition, currency, price_basis: basis, source: snapshot.source, source_event_id: snapshot.sourceEventId ?? null, sanity_verdict: sanityVerdict,
     completeness: snapshot.completeness.kind, completeness_n: snapshot.completeness.kind === 'TOP_N' ? snapshot.completeness.n : null,
     buybox_amount_minor: snapshot.buybox?.price.amountMinor ?? null, buybox_shipping_minor: winner?.shipping?.amountMinor ?? null, buybox_is_self: snapshot.buybox?.isSelf ?? null,
     channel_suggested_amount_minor: snapshot.channelSuggestedPrice?.amountMinor ?? null,

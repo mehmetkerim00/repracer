@@ -1,6 +1,6 @@
 import type { DecisionExplanation, DistrustRef, ExplanationIntentColumns, SanitySummary, FxFailureCause, FxQuote, HaltRef, HaltReasonCode, MemberRole, PriceIntentDraft as IntentDraft, StopRef, StopScope } from '@repracer/pricing-model';
 import type { ExplanationRuleset, StopScope as AuditStopScope } from '@repracer/pricing-model';
-import type { CompetitorQuery, FieldWrite, Instant, Money, OfferIdentity, PriceBasis, PricingHealthObservation, WriteOutcome } from '@repracer/channel-port';
+import type { CompetitorQuery, CompetitorSnapshot, FieldWrite, Instant, Money, OfferIdentity, PriceBasis, PricingHealthObservation, WriteOutcome } from '@repracer/channel-port';
 import type { MoveRecord, SanityContext } from '@repracer/input-sanity';
 import type { GuardrailSet } from '@repracer/price-gate';
 import type {
@@ -208,6 +208,11 @@ export interface SnapshotOutcome {
   halt?: HaltRecord;
   /** Р-55: правка продавца в кабинете канала — кейс расхождения */
   divergence?: { writeScopeId: string; expectedMinor: number; observedMinor: number; observedAt: Instant };
+  /**
+   * Р-122 (шаг 24): снимок порта целиком — в журнал для выгрузки в ClickHouse при любом вердикте; идентификатор принятого снимка тот же,
+   * что в ссылке решения на снимок
+   */
+  log?: { competitorSnapshotId: string; snapshot: CompetitorSnapshot; receivedAt: Instant };
 }
 
 export interface DecisionToCommit {

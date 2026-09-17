@@ -607,6 +607,16 @@ export class PgPricingStore implements PricingStore {
 
   private async writeSnapshot(tx: Tx, tenantId: string, key: ProductKey, s: SnapshotOutcome, now: Instant): Promise<{ rejectedSnapshotId: string | null; divergenceCaseId: string | null }> {
     const condition = dbCondition(key.condition);
+    // Р-122 (0086): полный снимок — в журнал для выгрузки в ClickHouse, в той же транзакции, при любом вердикте
+    if (s.log) {
+      await tx.query(
+        `INSERT INTO channel_data.competitor_snapshot_log (tenant_id, competitor_snapshot_id, received_at, observed_at, channel_account_id, channel, marketplace,
+                                                          channel_product_ref, condition, source, source_event_id, sanity_verdict, snapshot)
+         SELECT $1, $2, $3, $4, a.channel_account_id, a.channel, $6, $7, $8, $9, $10, $11, $12::jsonb
+           FROM tenant_data.channel_account a WHERE a.tenant_id = $1 AND a.channel_account_id = $5`,
+        [tenantId, s.log.competitorSnapshotId, s.log.receivedAt, s.log.snapshot.observedAt, key.channelAccountId, key.marketplace, key.channelProductRef,
+          s.log.snapshot.condition, s.log.snapshot.source, s.log.snapshot.sourceEventId ?? null, s.verdict, JSON.stringify(s.log.snapshot)]);
+    }
     const snapshot = s.accepted?.snapshot ?? null;
     const competitors = snapshot ? snapshot.offers.filter((o) => !o.isSelf) : [];
     const lowestPrice = competitors.length ? Math.min(...competitors.map((o) => o.price.amountMinor)) : null;
@@ -1467,6 +1477,7 @@ export class PgPricingStore implements PricingStore {
       const distrusts = await q(`SELECT channel_distrust_id, marketplace, reason_code, released_at FROM channel_data.channel_distrust WHERE tenant_id = $1 ORDER BY detected_at`);
       const ocp = await q(`SELECT marketplace, external_sku, automated_pricing, channel_bounds, source FROM channel_data.offer_channel_pricing WHERE tenant_id = $1 ORDER BY observed_at, external_sku`);
       const health = await q(`SELECT marketplace, channel_product_ref, issue_type, competitive_price_threshold_minor FROM channel_data.offer_pricing_health WHERE tenant_id = $1 ORDER BY recorded_at, event_time`);
+      const snapshotLog = await q(`SELECT channel_product_ref, sanity_verdict, source FROM channel_data.competitor_snapshot_log WHERE tenant_id = $1 ORDER BY received_at, observed_at, channel_product_ref`);
       const inbound = await q(`SELECT notification_id, notification_type FROM channel_data.inbound_notification WHERE tenant_id = $1 ORDER BY processed_at, notification_id`);
       const cases = await q(`SELECT write_scope_id, expected_amount_minor, observed_amount_minor, cause, status FROM channel_data.divergence_case
                                WHERE tenant_id = $1 ORDER BY opened_at`);
@@ -1485,6 +1496,7 @@ export class PgPricingStore implements PricingStore {
         offerChannelPricing: ocp.map((o) => ({ marketplace: o.marketplace, externalSku: o.external_sku, automatedPricing: o.automated_pricing, channelBounds: o.channel_bounds, source: o.source })),
         pricingHealth: health.map((h) => ({ marketplace: h.marketplace, channelProductRef: h.channel_product_ref, issueType: h.issue_type, thresholdMinor: h.competitive_price_threshold_minor === null ? null : Number(h.competitive_price_threshold_minor) })),
         inboundNotifications: inbound.map((n) => ({ notificationId: n.notification_id, notificationType: n.notification_type })),
+        snapshotLog: snapshotLog.map((l) => ({ channelProductRef: l.channel_product_ref, verdict: l.sanity_verdict, source: l.source })),
         intents: intents.map((i) => ({ writeScopeId: i.write_scope_id, ruleCode: i.rule_code, proposedMinor: i.proposed_amount_minor })),
         decisions: decisions.map((d) => ({ writeScopeId: d.write_scope_id, outcome: d.outcome, decisionClass: d.intent_class, rejectionReason: d.rejection_reason, finalMinor: d.final_amount_minor, reasonParams: d.reason_params, fx: d.fx, boundDeviationBp: d.bound_deviation_bp })),
         writes: writes.map((w) => ({ writeScopeId: w.write_scope_id, amountMinor: w.amount_minor, version: w.version, status: w.status, endReason: w.end_reason })),

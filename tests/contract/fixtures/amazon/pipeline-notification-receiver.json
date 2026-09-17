@@ -1449,7 +1449,36 @@
         {
           "notificationId": "syn-notification-0308"
         }
-      ]
+      ],
+      "snapshotLog": {
+        "$unordered": [
+          {
+            "channelProductRef": "B000008401",
+            "verdict": "ACCEPT",
+            "source": "AMAZON_ANY_OFFER_CHANGED"
+          },
+          {
+            "channelProductRef": "B000008401",
+            "verdict": "ACCEPT",
+            "source": "AMAZON_ANY_OFFER_CHANGED"
+          },
+          {
+            "channelProductRef": "B000008401",
+            "verdict": "ACCEPT",
+            "source": "AMAZON_ANY_OFFER_CHANGED"
+          },
+          {
+            "channelProductRef": "B000008401",
+            "verdict": "REJECT",
+            "source": "AMAZON_ANY_OFFER_CHANGED"
+          },
+          {
+            "channelProductRef": "B000008401",
+            "verdict": "ACCEPT",
+            "source": "AMAZON_ANY_OFFER_CHANGED"
+          }
+        ]
+      }
     }
   }
 }

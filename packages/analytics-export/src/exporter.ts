@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import type pg from 'pg';
 import type { ClickHouseHttp } from './clickhouse.ts';
 import { completedWriteRow, intentClassOf, priceDecisionRow, priceIntentNoopRow, priceIntentRow, type PgRow } from './rows.ts';
+import { competitorSnapshotRow, type CompetitorSnapshotRow } from './competitor-history.ts';
+import type { CompetitorSnapshot } from '@repracer/channel-port';
 
 /**
  * Экспорт дневных секций PostgreSQL в ClickHouse [Р-20]. Роль PostgreSQL — repracer_exporter (чтение транзитных таблиц
@@ -127,3 +129,68 @@ export async function exportCompletedWritesDay(pgExporter: pg.Pool, ingest: Clic
   await recordExport(pgExporter, result);
   return result;
 }
+
+/** Источники снимков, которые принимает ограничение source_known таблицы competitor_snapshot (030) */
+export const CLICKHOUSE_SNAPSHOT_SOURCES: readonly string[] = [
+  'AMAZON_ANY_OFFER_CHANGED', 'AMAZON_COMPETITIVE_SUMMARY', 'KAUFLAND_BUY_BOX_CHANGED', 'KAUFLAND_BUYBOX', 'KAUFLAND_COMPETITORS_COMPARER',
+];
+/** Валюты ограничения currency_supported (050) */
+const CLICKHOUSE_CURRENCIES = new Set(['EUR', 'USD']);
+
+export type SnapshotSkipReason = 'NO_PRICES' | 'CURRENCY_UNSUPPORTED' | 'SOURCE_UNKNOWN' | 'CHANNEL_UNSUPPORTED' | 'COMPLETENESS_INVALID';
+
+/**
+ * Строка журнала снимков PostgreSQL (0086) → строка ClickHouse. Снимок, который ограничения ClickHouse отклонили бы (без цен, валюта вне
+ * EUR/USD — например, отклонённый проверкой входов CURRENCY_MISMATCH, неизвестный источник), не выгружается: он пропускается с причиной,
+ * а не срывает выгрузку суток. Пропуск виден в итоге экспорта и в maintenance.partition_export.
+ */
+export function snapshotLogRow(row: PgRow): { ok: true; row: CompetitorSnapshotRow } | { ok: false; reason: SnapshotSkipReason } {
+  const channel = String(row.channel);
+  if (channel !== 'KAUFLAND' && channel !== 'AMAZON') return { ok: false, reason: 'CHANNEL_UNSUPPORTED' };
+  const snapshot = row.snapshot as CompetitorSnapshot;
+  if (!CLICKHOUSE_SNAPSHOT_SOURCES.includes(snapshot.source)) return { ok: false, reason: 'SOURCE_UNKNOWN' };
+  if (snapshot.completeness?.kind === 'TOP_N' && !(snapshot.completeness.n > 0)) return { ok: false, reason: 'COMPLETENESS_INVALID' };
+  const currency = snapshot.buybox?.price.currency ?? snapshot.offers?.[0]?.price.currency;
+  if (!currency || !(snapshot.buybox?.price.basis ?? snapshot.offers?.[0]?.price.basis)) return { ok: false, reason: 'NO_PRICES' };
+  if (!CLICKHOUSE_CURRENCIES.has(currency)) return { ok: false, reason: 'CURRENCY_UNSUPPORTED' };
+  const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : String(v));
+  return {
+    ok: true,
+    row: competitorSnapshotRow(String(row.tenant_id), String(row.channel_account_id), channel, String(row.competitor_snapshot_id), snapshot, iso(row.received_at),
+      row.sanity_verdict as 'ACCEPT' | 'REJECT' | 'HALT_CHANNEL'),
+  };
+}
+
+/**
+ * Р-122 (шаг 24): сутки журнала снимков конкурентов → repracer_analytics.competitor_snapshot. Проверка — число строк суток в ClickHouse
+ * (FINAL) равно выгруженному; только после неё verified_at, и секция журнала удаляется по сроку (0086, requires_export CLICKHOUSE).
+ */
+export async function exportCompetitorSnapshotsDay(pgExporter: pg.Pool, ingest: ClickHouseHttp, verifier: ClickHouseHttp, range: DayRange): Promise<PartitionExport & { skipped: Partial<Record<SnapshotSkipReason, number>> }> {
+  const { rows } = await pgExporter.query(
+    `SELECT * FROM channel_data.competitor_snapshot_log WHERE received_at >= $1::timestamptz AND received_at < $2::timestamptz`, [range.from, range.to]);
+  const mapped: CompetitorSnapshotRow[] = [];
+  const skipped: Partial<Record<SnapshotSkipReason, number>> = {};
+  for (const r of rows) {
+    const m = snapshotLogRow(r);
+    if (m.ok) mapped.push(m.row); else skipped[m.reason] = (skipped[m.reason] ?? 0) + 1;
+  }
+  await insertChunks(ingest, 'competitor_snapshot', mapped as unknown as PgRow[], 'competitor_snapshot_id', range.from);
+  const ids = mapped.map((r) => r.competitor_snapshot_id);
+  // Та же выборка строк, что выгружена: по идентификаторам суток (у строк ClickHouse до шага 24 журнала не было)
+  let verifiedCount = 0;
+  for (let i = 0; i < ids.length; i += 5_000) {
+    const chunk = ids.slice(i, i + 5_000).map((id) => `'${id.replace(/[^0-9a-f-]/g, '')}'`).join(',');
+    verifiedCount += Number((await verifier.rows<{ n: number }>(
+      `SELECT count() AS n FROM repracer_analytics.competitor_snapshot FINAL
+        WHERE received_at >= parseDateTime64BestEffort('${range.from}', 3) AND received_at < parseDateTime64BestEffort('${range.to}', 3)
+          AND competitor_snapshot_id IN (${chunk})`))[0]?.n ?? 0);
+  }
+  const result = {
+    parentTable: 'channel_data.competitor_snapshot_log', partitionName: await dayPartitionName(pgExporter, 'channel_data.competitor_snapshot_log', range),
+    target: 'CLICKHOUSE', rows: rows.length, checksum: checksum(rows.map((r) => String(r.competitor_snapshot_id))), verified: verifiedCount === mapped.length,
+    byTable: { competitor_snapshot: mapped.length }, skipped,
+  };
+  await recordExport(pgExporter, result);
+  return result;
+}
+

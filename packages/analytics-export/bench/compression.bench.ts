@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import pg from 'pg';
-import { ClickHouseHttp, completedWriteRow, priceDecisionRow, priceIntentRow, type PgRow } from '../src/index.ts';
+import { ClickHouseHttp, competitorSnapshotRow, completedWriteRow, priceDecisionRow, priceIntentRow, type PgRow } from '../src/index.ts';
 
 /**
  * Замер сжатия аналитического слоя (шаг 10, пункт C) против оценки шага 4 (ADR-0004: «5–15-кратное сжатие» без замера).
@@ -161,6 +161,79 @@ function competitorSnapshot(i: number): PgRow {
   };
 }
 
+/**
+ * Шаг 24 [Р-122]: снимки конкурентов в форме, которую пишет писатель (competitorSnapshotRow из снимка порта), — ряды во времени по
+ * товару: между соседними снимками одного товара меняется одно-два предложения, как у настоящего рынка (у генератора шага 20 каждый
+ * снимок был случайным). Kaufland — ответ Buy Box с 1–10 предложениями (число предложений /buybox документация не ограничивает —
+ * допущение); Amazon — ANY_OFFER_CHANGED с первыми 20 предложениями (notification-type-values, «top 20 offers»), продавцы по 14 символов.
+ */
+const SNAPSHOT_PRODUCTS = 20_000;
+interface ProductSeries { at: number; offers: Array<{ seller: string; minor: number; shipping: number; minDays: number; maxDays: number; fba: boolean }>; }
+const series = new Map<string, ProductSeries>();
+
+function snapshotSeries(channel: 'KAUFLAND' | 'AMAZON', i: number): PgRow {
+  const product = Math.floor(rand() * SNAPSHOT_PRODUCTS);
+  const key = `${channel}|${product}`;
+  const base = 1_000 + (product % 9_000);
+  let s = series.get(key);
+  if (!s) {
+    const n = channel === 'AMAZON' ? 3 + Math.floor(rand() * 18) : 1 + Math.floor(rand() * 10);
+    s = {
+      at: base * 1_000,
+      offers: Array.from({ length: n }, (_, k) => ({
+        seller: channel === 'AMAZON' ? `A${createHash('sha1').update(`s${(product * 31 + k * 7) % 40_000}`).digest('hex').slice(0, 13).toUpperCase()}` : `Synthetic Seller ${(product * 31 + k * 7) % 40_000}`,
+        minor: base + k * (10 + Math.floor(rand() * 60)), shipping: rand() < 0.7 ? 0 : 399 + Math.floor(rand() * 3) * 100,
+        minDays: 1 + Math.floor(rand() * 2), maxDays: 3 + Math.floor(rand() * 4), fba: rand() < 0.4,
+      })),
+    };
+    series.set(key, s);
+  }
+  // Следующий снимок товара: через 2–120 минут, одно-два предложения меняют цену на ±1–3 %
+  s.at += (2 + Math.floor(rand() * 118)) * 60_000;
+  for (let c = 0; c < 1 + Math.floor(rand() * 2); c++) {
+    const o = s.offers[Math.floor(rand() * s.offers.length)]!;
+    o.minor = Math.max(100, Math.round(o.minor * (1 + ((rand() - 0.5) * 6) / 100)));
+  }
+  const offers = [...s.offers].sort((a, b) => a.minor + a.shipping - (b.minor + b.shipping));
+  const currency = channel === 'AMAZON' && product % 4 === 0 ? 'USD' : 'EUR';
+  const basis = currency === 'USD' ? 'NET' as const : 'GROSS' as const;
+  const money = (amountMinor: number) => ({ amountMinor, currency, basis });
+  const selfIndex = product % offers.length;
+  const tenant = uuid('tenant', product % TENANTS);
+  const observed = new Date(base * 60_000 + s.at);
+  return competitorSnapshotRow(tenant, uuid('account', channel, product % TENANTS), channel, uuid('snapshot', channel, i), {
+    marketplace: channel === 'AMAZON' ? (currency === 'USD' ? 'ATVPDKIKX0DER' : 'A1PA6795UKMFR9') : product % 5 === 0 ? 'at' : 'de',
+    channelProductRef: channel === 'AMAZON' ? `B0${String(product).padStart(8, '0')}` : String(362_000_000 + product), condition: 'new',
+    source: channel === 'AMAZON' ? 'AMAZON_ANY_OFFER_CHANGED' : rand() < 0.5 ? 'KAUFLAND_BUYBOX' : 'KAUFLAND_BUY_BOX_CHANGED',
+    ...(channel === 'AMAZON' || rand() < 0.5 ? { sourceEventId: createHash('md5').update(`${channel}${i}`).digest('hex') } : {}),
+    observedAt: observed.toISOString(), completeness: { kind: 'TOP_N', n: channel === 'AMAZON' ? 20 : 10 },
+    buybox: { price: money(offers[0]!.minor), isSelf: selfIndex === 0 },
+    offers: offers.map((o, k) => ({
+      rank: k + 1, isSelf: k === selfIndex, ...(k === selfIndex ? {} : { sellerRef: o.seller }), price: money(o.minor), shipping: money(o.shipping),
+      totalPrice: money(o.minor + o.shipping), condition: 'new', fulfillment: o.fba ? 'AFN' : 'MFN', deliveryDays: { min: o.minDays, max: o.maxDays },
+    })),
+  }, new Date(observed.getTime() + 1_500 + Math.floor(rand() * 3_000)).toISOString(), rand() < 0.002 ? 'REJECT' : 'ACCEPT') as unknown as PgRow;
+}
+
+/**
+ * Модель объёма снимков на клиента в год (допущения, не замер). Каталог — 10 000 предложений на витрину (OQ-01: оценки объёма опираются
+ * на 10 000 SKU). Снимки в сутки на предложение: опрос по ярусам Р-47 (DEFAULT_TIERS: горячий раз в 120 с, тёплый — в час, холодный — в
+ * сутки) плюс уведомления об изменениях. Доли ярусов и число уведомлений не измерены — три варианта.
+ */
+/** Интервалы опроса ярусов — как DEFAULT_TIERS (packages/pricing-pipeline/src/polling.ts); равенство проверяет tests/contract (volume-tiers) */
+export const BENCH_TIER_INTERVALS_SECONDS = { hot: 120, warm: 3600, cold: 86_400 } as const;
+const DEFAULT_TIERS = { hot: { intervalSeconds: BENCH_TIER_INTERVALS_SECONDS.hot }, warm: { intervalSeconds: BENCH_TIER_INTERVALS_SECONDS.warm }, cold: { intervalSeconds: BENCH_TIER_INTERVALS_SECONDS.cold } };
+const VOLUME_SCENARIOS = [
+  { name: 'спокойный', offers: 10_000, hot: 0.01, warm: 0.1, notificationsPerOfferDay: 2 },
+  { name: 'типичный (допущение)', offers: 10_000, hot: 0.05, warm: 0.25, notificationsPerOfferDay: 6 },
+  { name: 'волатильный', offers: 10_000, hot: 0.15, warm: 0.4, notificationsPerOfferDay: 24 },
+];
+function snapshotsPerYear(v: (typeof VOLUME_SCENARIOS)[number]): number {
+  const perDay = (s: number) => 86_400 / s;
+  const polls = v.offers * (v.hot * perDay(DEFAULT_TIERS.hot.intervalSeconds) + v.warm * perDay(DEFAULT_TIERS.warm.intervalSeconds) + (1 - v.hot - v.warm) * perDay(DEFAULT_TIERS.cold.intervalSeconds));
+  return Math.round((polls + v.offers * v.notificationsPerOfferDay) * 365);
+}
+
 function observation(i: number): PgRow {
   const w = worldRow(i);
   return {
@@ -182,9 +255,9 @@ interface TableResult {
   perClient18Months: { rows: number; gb: number; eurPerMonth: number; step4EstimateGb: [number, number] } | null;
 }
 
-async function loadClickHouse(table: string, make: (i: number) => PgRow): Promise<void> {
+async function loadClickHouse(table: string, make: (i: number) => PgRow, source = table): Promise<void> {
   await ch.query(`DROP TABLE IF EXISTS repracer_bench.${table} SYNC`);
-  await ch.query(`CREATE TABLE repracer_bench.${table} AS repracer_analytics.${table}`);
+  await ch.query(`CREATE TABLE repracer_bench.${table} AS repracer_analytics.${source}`);
   for (let i = 0; i < ROWS; i += CHUNK) {
     const rows = Array.from({ length: Math.min(CHUNK, ROWS - i) }, (_, k) => make(i + k));
     await ch.insert(`repracer_bench.${table}`, rows);
@@ -233,7 +306,10 @@ async function main() {
   const version = (await ch.query('SELECT version()')).trim();
   await ch.query('CREATE DATABASE IF NOT EXISTS repracer_bench');
   const pairs = (i: number) => decisionPair(i);
-  const plan: Array<{ table: string; make: (i: number) => PgRow; pg?: { source: string; make: (i: number) => PgRow } }> = [
+  const only = args.only ? new Set(args.only.split(',')) : null;
+  const plan: Array<{ table: string; source?: string; make: (i: number) => PgRow; pg?: { source: string; make: (i: number) => PgRow } }> = [
+    { table: 'competitor_snapshot_kaufland', source: 'competitor_snapshot', make: (i) => snapshotSeries('KAUFLAND', i) },
+    { table: 'competitor_snapshot_amazon', source: 'competitor_snapshot', make: (i) => snapshotSeries('AMAZON', i) },
     { table: 'price_decision', make: (i) => priceDecisionRow(pairs(i).decision), pg: { source: 'channel_data.price_decision', make: (i) => pairs(i).decision } },
     { table: 'price_intent', make: (i) => { const p = pairs(i); return priceIntentRow(p.intent, p.decision.intent_class); }, pg: { source: 'channel_data.price_intent', make: (i) => pairs(i).intent } },
     { table: 'channel_write_completed', make: (i) => completedWriteRow(completedWrite(i)), pg: { source: 'tenant_data.channel_write_history', make: completedWrite } },
@@ -241,10 +317,11 @@ async function main() {
     { table: 'channel_observation', make: observation },
   ];
   const results: TableResult[] = [];
-  for (const step of plan) {
+  for (const step of plan.filter((p) => !only || only.has(p.table))) {
     seed = 0x9e3779b9;
+    series.clear();
     const started = Date.now();
-    await loadClickHouse(step.table, step.make);
+    await loadClickHouse(step.table, step.make, step.source);
     const measured = await measureClickHouse(step.table);
     seed = 0x9e3779b9;
     const postgres = step.pg ? await measurePostgres(step.pg.source, step.table, step.pg.make) : null;
@@ -259,10 +336,20 @@ async function main() {
     results.push(result);
     console.log(`${step.table.padEnd(26)} CH ${String(result.clickhouse.bytesPerRow).padStart(7)} B/row (×${result.clickhouse.compressionRatio})  PG ${String(postgres?.bytesPerRow ?? '-').padStart(7)} B/row  PG/CH ×${result.pgToClickHouse ?? '-'}  18 мес ${result.perClient18Months?.gb ?? '-'} ГБ (оценка ${adr?.estimateGb.join('–') ?? '-'})  ${Math.round((Date.now() - started) / 1000)} с`);
   }
+  // Шаг 24 [Р-122]: объём снимков на клиента в год по измеренному размеру строки и модели снимков (допущения — VOLUME_SCENARIOS)
+  const snapshotVolume = results.filter((r) => r.table.startsWith('competitor_snapshot_')).map((r) => ({
+    table: r.table, bytesPerRow: r.clickhouse.bytesPerRow, compressionRatio: r.clickhouse.compressionRatio,
+    scenarios: VOLUME_SCENARIOS.map((v) => {
+      const rows = snapshotsPerYear(v);
+      const gb = (rows * r.clickhouse.bytesPerRow) / 1e9;
+      return { ...v, snapshotsPerYear: rows, gbPerYear: Math.round(gb * 10) / 10, gbAt18Months: Math.round(gb * 1.5 * 10) / 10, eurPerMonthAt18Months: Math.round(gb * 1.5 * EUR_PER_GB_MONTH * 100) / 100 };
+    }),
+  }));
+  for (const v of snapshotVolume) console.log(`${v.table}: ${v.scenarios.map((s) => `${s.name} ${s.snapshotsPerYear} снимков/год → ${s.gbPerYear} ГБ/год`).join('; ')}`);
   const totalGb = results.reduce((a, r) => a + (r.perClient18Months?.gb ?? 0), 0);
   const output = {
     format: 'repracer.bench/clickhouse-compression/v1', clickhouse: version, rowsPerTable: ROWS, pgRowsPerTable: PG_ROWS, tenants: TENANTS, scopesPerTenant: SCOPES_PER_TENANT, days: DAYS,
-    eurPerGbMonth: EUR_PER_GB_MONTH, results,
+    eurPerGbMonth: EUR_PER_GB_MONTH, results, snapshotVolume,
     perClient18Months: { measuredTablesGb: Math.round(totalGb * 10) / 10, eurPerMonth: Math.round(totalGb * EUR_PER_GB_MONTH * 100) / 100, notMeasured: ['channel_write_response (оценка шага 4: 8–15 ГБ)', 'fee_actual (< 1 ГБ)'] },
   };
   console.log(JSON.stringify(output.perClient18Months));
