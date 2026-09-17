@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0093_verify_schema_invariants_v22.sql';
+const VERIFY = 'migrations/0095_verify_schema_invariants_v22.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -650,6 +650,24 @@ export const STEP25_B_ROWS = [
         node(T('omnibus-not-applied.pg.test.ts'), 'risk 28', 'risk 28: a price the channel did not apply is rolled up into the daily price', '^900$')),
       m(dropTrigger('zz_append_only', 'tenant_data.price_history_not_applied'), smoke('append-only tenant_data.price_history_not_applied')),
       m(dropTrigger('zz_no_truncate', 'tenant_data.price_history_not_applied'), smoke('truncate tenant_data.price_history_not_applied')),
+    ],
+  },
+];
+
+export const STEP25_D_ROWS = [
+  {
+    row: 'OQ-181', invariant: 'пропущенный выгрузкой снимок записан и разобран человеком с именем и заметкой; секция с неразобранным пропуском не отмечается проверенной',
+    mutations: [
+      m(dropTrigger('a_partition_export_skip_guard', 'maintenance.partition_export'), smoke('a partition with an unresolved skipped snapshot marked as verified (OQ-181)')),
+      m(replaceInFunction('maintenance.partition_export_skip_guard()', 'IF open_skips > 0 THEN', 'IF false THEN'), smoke('a partition with an unresolved skipped snapshot marked as verified (OQ-181)')),
+      m(dropConstraint('snapshot_export_skip_reason_known', 'maintenance.snapshot_export_skip'), smoke('a skipped snapshot with an unknown reason (OQ-181)')),
+      m(dropConstraint('snapshot_export_skip_resolution_known', 'maintenance.snapshot_export_skip_resolution'), smoke('a skipped snapshot resolution of an unknown kind (OQ-181)')),
+      m(dropConstraint('snapshot_export_skip_resolution_operator', 'maintenance.snapshot_export_skip_resolution'), smoke('a skipped snapshot resolved without the operator (OQ-181)')),
+      m(dropConstraint('snapshot_export_skip_resolution_note', 'maintenance.snapshot_export_skip_resolution'), smoke('a skipped snapshot resolved without a note (OQ-181)')),
+      m(dropTrigger('zz_append_only', 'maintenance.snapshot_export_skip'), smoke('append-only maintenance.snapshot_export_skip')),
+      m(dropTrigger('zz_no_truncate', 'maintenance.snapshot_export_skip'), smoke('truncate maintenance.snapshot_export_skip')),
+      m(dropTrigger('zz_append_only', 'maintenance.snapshot_export_skip_resolution'), smoke('append-only maintenance.snapshot_export_skip_resolution')),
+      m(dropTrigger('zz_no_truncate', 'maintenance.snapshot_export_skip_resolution'), smoke('truncate maintenance.snapshot_export_skip_resolution')),
     ],
   },
 ];

@@ -77,9 +77,11 @@ export type SnapshotDeliveryKind = 'UNKNOWN' | 'PUSH' | 'PUSH_FETCH' | 'POLL' | 
 export function competitorSnapshotRow(
   tenantId: string, channelAccountId: string, channel: 'KAUFLAND' | 'AMAZON', snapshotId: string, snapshot: CompetitorSnapshot, receivedAt: string,
   sanityVerdict: SnapshotSanityVerdict = 'ACCEPT', delivery: SnapshotDeliveryKind = 'UNKNOWN',
+  /** OQ-181 (шаг 25): валюта и база цены витрины — для снимка без цен («конкурентов нет»), валюта не домысливается [Р-71] */
+  storefront?: { currency: string; basis: string },
 ): CompetitorSnapshotRow {
-  const currency = snapshot.buybox?.price.currency ?? snapshot.offers[0]?.price.currency;
-  const basis = snapshot.buybox?.price.basis ?? snapshot.offers[0]?.price.basis;
+  const currency = snapshot.buybox?.price.currency ?? snapshot.offers[0]?.price.currency ?? storefront?.currency;
+  const basis = snapshot.buybox?.price.basis ?? snapshot.offers[0]?.price.basis ?? storefront?.basis;
   // Валюта строки не подставляется по умолчанию (у столбца DEFAULT 'EUR', 050): пустой снимок без валюты не пишется [Р-71]
   if (!currency || !basis) throw new Error('competitor snapshot without prices has no currency: not written');
   const o = snapshot.offers;

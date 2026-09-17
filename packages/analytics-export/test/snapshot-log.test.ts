@@ -27,6 +27,9 @@ test('step 24: a logged snapshot keeps its sanity verdict in ClickHouse; rows Cl
   const rec = snapshotLogRow(logRow(snapshot({ source: 'AMAZON_COMPETITIVE_SUMMARY', buybox: undefined }), { channel: 'AMAZON', sanity_verdict: 'RECONCILIATION', delivery: 'POLL' }));
   assert.deepEqual(rec.ok && [rec.row.sanity_verdict, rec.row.delivery, rec.row.buybox_amount_minor], ['RECONCILIATION', 'POLL', null]);
   assert.deepEqual(snapshotLogRow(logRow(snapshot({ buybox: undefined, offers: [] }))), { ok: false, reason: 'NO_PRICES' });
+  // OQ-181 (шаг 25): снимок «конкурентов нет» — с валютой витрины, а не пропуск
+  const empty = snapshotLogRow(logRow(snapshot({ buybox: undefined, offers: [] })), { currency: 'EUR', basis: 'GROSS' });
+  assert.deepEqual(empty.ok && [empty.row.currency, empty.row.price_basis, empty.row['offers.amount_minor'], empty.row.buybox_amount_minor], ['EUR', 'GROSS', [], null]);
   assert.deepEqual(snapshotLogRow(logRow(snapshot({ buybox: { price: money(1780, 'GBP'), isSelf: false } }))), { ok: false, reason: 'CURRENCY_UNSUPPORTED' });
   assert.deepEqual(snapshotLogRow(logRow(snapshot({ source: 'SYN_UNKNOWN' }))), { ok: false, reason: 'SOURCE_UNKNOWN' });
   assert.deepEqual(snapshotLogRow(logRow(snapshot(), { channel: 'EBAY' })), { ok: false, reason: 'CHANNEL_UNSUPPORTED' });

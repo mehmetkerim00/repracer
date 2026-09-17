@@ -146,20 +146,21 @@ export type SnapshotSkipReason = 'NO_PRICES' | 'CURRENCY_UNSUPPORTED' | 'SOURCE_
  * EUR/USD — например, отклонённый проверкой входов CURRENCY_MISMATCH, неизвестный источник), не выгружается: он пропускается с причиной,
  * а не срывает выгрузку суток. Пропуск виден в итоге экспорта; сутки с пропусками не отмечаются проверенными (ревью шага 24, находка 5).
  */
-export function snapshotLogRow(row: PgRow): { ok: true; row: CompetitorSnapshotRow } | { ok: false; reason: SnapshotSkipReason } {
+export function snapshotLogRow(row: PgRow, storefront?: { currency: string; basis: string }): { ok: true; row: CompetitorSnapshotRow } | { ok: false; reason: SnapshotSkipReason } {
   const channel = String(row.channel);
   if (channel !== 'KAUFLAND' && channel !== 'AMAZON') return { ok: false, reason: 'CHANNEL_UNSUPPORTED' };
   const snapshot = row.snapshot as CompetitorSnapshot;
   if (!CLICKHOUSE_SNAPSHOT_SOURCES.includes(snapshot.source)) return { ok: false, reason: 'SOURCE_UNKNOWN' };
   if (snapshot.completeness?.kind === 'TOP_N' && !(snapshot.completeness.n > 0)) return { ok: false, reason: 'COMPLETENESS_INVALID' };
-  const currency = snapshot.buybox?.price.currency ?? snapshot.offers?.[0]?.price.currency;
-  if (!currency || !(snapshot.buybox?.price.basis ?? snapshot.offers?.[0]?.price.basis)) return { ok: false, reason: 'NO_PRICES' };
+  // OQ-181 (шаг 25): снимок без цен — наблюдение «конкурентов нет», нужное бэктесту: валюта и база цены — из справочника витрины
+  const currency = snapshot.buybox?.price.currency ?? snapshot.offers?.[0]?.price.currency ?? storefront?.currency;
+  if (!currency || !(snapshot.buybox?.price.basis ?? snapshot.offers?.[0]?.price.basis ?? storefront?.basis)) return { ok: false, reason: 'NO_PRICES' };
   if (!CLICKHOUSE_CURRENCIES.has(currency)) return { ok: false, reason: 'CURRENCY_UNSUPPORTED' };
   const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : String(v));
   return {
     ok: true,
     row: competitorSnapshotRow(String(row.tenant_id), String(row.channel_account_id), channel, String(row.competitor_snapshot_id), snapshot, iso(row.received_at),
-      row.sanity_verdict as SnapshotSanityVerdict, row.delivery as SnapshotDeliveryKind),
+      row.sanity_verdict as SnapshotSanityVerdict, row.delivery as SnapshotDeliveryKind, storefront),
   };
 }
 
@@ -172,6 +173,9 @@ export async function exportCompetitorSnapshotsDay(pgExporter: pg.Pool, ingest: 
   const mapped: CompetitorSnapshotRow[] = [];
   const skipped: Partial<Record<SnapshotSkipReason, number>> = {};
   const ids: string[] = [];
+  const skips: Array<{ tenant: string; id: string; at: unknown; reason: SnapshotSkipReason }> = [];
+  const { rows: storefronts } = await pgExporter.query('SELECT channel, marketplace, currency, price_basis FROM platform.marketplace');
+  const storefrontOf = new Map(storefronts.map((m) => [`${m.channel}|${m.marketplace}`, { currency: String(m.currency), basis: String(m.price_basis) }]));
   let after: { at: Date; id: string } | null = null;
   for (;;) {
     const { rows: part }: { rows: PgRow[] } = await pgExporter.query(
@@ -180,8 +184,12 @@ export async function exportCompetitorSnapshotsDay(pgExporter: pg.Pool, ingest: 
         ORDER BY received_at, competitor_snapshot_id LIMIT ${SNAPSHOT_EXPORT_CHUNK}`, [range.from, range.to, after?.at ?? null, after?.id ?? null]);
     for (const r of part) {
       ids.push(String(r.competitor_snapshot_id));
-      const m = snapshotLogRow(r);
-      if (m.ok) mapped.push(m.row); else skipped[m.reason] = (skipped[m.reason] ?? 0) + 1;
+      const m = snapshotLogRow(r, storefrontOf.get(`${r.channel}|${r.marketplace}`));
+      if (m.ok) mapped.push(m.row);
+      else {
+        skipped[m.reason] = (skipped[m.reason] ?? 0) + 1;
+        skips.push({ tenant: String(r.tenant_id), id: String(r.competitor_snapshot_id), at: r.received_at, reason: m.reason });
+      }
     }
     if (part.length < SNAPSHOT_EXPORT_CHUNK) break;
     const last: PgRow = part.at(-1)!;
@@ -190,7 +198,18 @@ export async function exportCompetitorSnapshotsDay(pgExporter: pg.Pool, ingest: 
   const rows = ids;
   await insertChunks(ingest, 'competitor_snapshot', mapped as unknown as PgRow[], 'competitor_snapshot_id', range.from);
   const exportedIds = mapped.map((r) => r.competitor_snapshot_id);
-  const skippedTotal = Object.values(skipped).reduce((a, n) => a + (n ?? 0), 0);
+  const partitionName = await dayPartitionName(pgExporter, 'channel_data.competitor_snapshot_log', range);
+  // OQ-181: каждый пропуск — запись для разбора человеком; сутки проверены, только если все пропуски разобраны (база отклоняет иное)
+  for (let i = 0; i < skips.length; i += 1_000) {
+    await pgExporter.query(
+      `INSERT INTO maintenance.snapshot_export_skip (subject_tenant_id, competitor_snapshot_id, partition_name, received_at, reason)
+       SELECT s.tenant, s.id, $2, s.at, s.reason FROM jsonb_to_recordset($1::jsonb) AS s(tenant uuid, id uuid, at timestamptz, reason text)
+       ON CONFLICT (competitor_snapshot_id) DO NOTHING`, [JSON.stringify(skips.slice(i, i + 1_000)), partitionName]);
+  }
+  const { rows: [open] } = await pgExporter.query(
+    `SELECT count(*)::int AS n FROM maintenance.snapshot_export_skip s WHERE s.partition_name = $1
+        AND NOT EXISTS (SELECT 1 FROM maintenance.snapshot_export_skip_resolution r WHERE r.competitor_snapshot_id = s.competitor_snapshot_id)`, [partitionName]);
+  const unresolvedSkips = Number(open.n);
   // Та же выборка строк, что выгружена: по идентификаторам суток (у строк ClickHouse до шага 24 журнала не было)
   let verifiedCount = 0;
   for (let i = 0; i < exportedIds.length; i += 5_000) {
@@ -201,12 +220,42 @@ export async function exportCompetitorSnapshotsDay(pgExporter: pg.Pool, ingest: 
           AND competitor_snapshot_id IN (${chunk})`))[0]?.n ?? 0);
   }
   const result = {
-    parentTable: 'channel_data.competitor_snapshot_log', partitionName: await dayPartitionName(pgExporter, 'channel_data.competitor_snapshot_log', range),
-    // Пропущенный снимок в ClickHouse не попал: сутки не проверены, секция не удаляется по сроку, пока пропуск не разобран человеком
-    target: 'CLICKHOUSE', rows: rows.length, checksum: checksum(rows), verified: verifiedCount === mapped.length && skippedTotal === 0,
+    parentTable: 'channel_data.competitor_snapshot_log', partitionName,
+    // Неразобранный пропуск: сутки не проверены, секция не удаляется по сроку, пока человек не разберёт пропуск (OQ-181)
+    target: 'CLICKHOUSE', rows: rows.length, checksum: checksum(rows), verified: verifiedCount === mapped.length && unresolvedSkips === 0,
     byTable: { competitor_snapshot: mapped.length }, skipped,
   };
   await recordExport(pgExporter, result);
   return result;
 }
 
+
+/** OQ-181 (шаг 25): пропущенные выгрузкой снимки — для разбора человеком; неразобранные первыми */
+export interface SnapshotExportSkip {
+  competitorSnapshotId: string;
+  subjectTenantId: string;
+  partitionName: string;
+  receivedAt: string;
+  reason: SnapshotSkipReason;
+  resolution: { resolution: 'LOSS_ACCEPTED' | 'EXPORTED_AFTER_FIX'; resolvedBy: string; note: string; resolvedAt: string } | null;
+}
+
+export async function listSnapshotExportSkips(pgExporter: pg.Pool, options: { unresolvedOnly?: boolean; limit?: number } = {}): Promise<SnapshotExportSkip[]> {
+  const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : String(v));
+  const { rows } = await pgExporter.query(
+    `SELECT s.competitor_snapshot_id, s.subject_tenant_id, s.partition_name, s.received_at, s.reason, r.resolution, r.resolved_by, r.note, r.resolved_at
+       FROM maintenance.snapshot_export_skip s LEFT JOIN maintenance.snapshot_export_skip_resolution r ON r.competitor_snapshot_id = s.competitor_snapshot_id
+      WHERE NOT $1::boolean OR r.competitor_snapshot_id IS NULL
+      ORDER BY (r.competitor_snapshot_id IS NULL) DESC, s.received_at LIMIT $2`, [options.unresolvedOnly ?? false, options.limit ?? 500]);
+  return rows.map((r) => ({
+    competitorSnapshotId: r.competitor_snapshot_id, subjectTenantId: r.subject_tenant_id, partitionName: r.partition_name, receivedAt: iso(r.received_at), reason: r.reason,
+    resolution: r.resolution ? { resolution: r.resolution, resolvedBy: r.resolved_by, note: r.note, resolvedAt: iso(r.resolved_at) } : null,
+  }));
+}
+
+/** Разбор пропуска человеком: потеря принята или снимок выгружен после исправления; имя оператора и заметка обязательны (база) */
+export async function resolveSnapshotExportSkip(pgExporter: pg.Pool, input: { competitorSnapshotId: string; resolution: 'LOSS_ACCEPTED' | 'EXPORTED_AFTER_FIX'; resolvedBy: string; note: string }): Promise<void> {
+  await pgExporter.query(
+    `INSERT INTO maintenance.snapshot_export_skip_resolution (competitor_snapshot_id, resolution, resolved_by, note) VALUES ($1, $2, $3, $4)`,
+    [input.competitorSnapshotId, input.resolution, input.resolvedBy, input.note]);
+}

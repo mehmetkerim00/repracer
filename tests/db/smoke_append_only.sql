@@ -288,6 +288,30 @@ SELECT pg_temp.expect_fail('a scheduler run finished before it started (Р-126)'
 SELECT pg_temp.expect_fail('truncate tenant_data.price_history_not_applied', $q$ TRUNCATE tenant_data.price_history_not_applied $q$, 'TRUNCATE of tenant_data.price_history_not_applied is forbidden');
 SELECT pg_temp.expect_fail('truncate maintenance.scheduled_job_run', $q$ TRUNCATE maintenance.scheduled_job_run $q$, 'TRUNCATE of maintenance.scheduled_job_run is forbidden');
 
+-- Шаг 25, D (0094) [OQ-181]: пропущенный выгрузкой снимок разбирает человек; секция с неразобранным пропуском не отмечается проверенной
+INSERT INTO maintenance.snapshot_export_skip (subject_tenant_id, competitor_snapshot_id, partition_name, received_at, reason)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'a9181000-0000-4000-8000-000000000001', 'smoke_snapshot_partition', now(), 'CURRENCY_UNSUPPORTED'),
+       ('a0000000-0000-0000-0000-00000000000a', 'a9181000-0000-4000-8000-000000000002', 'smoke_snapshot_partition', now(), 'SOURCE_UNKNOWN');
+INSERT INTO maintenance.snapshot_export_skip_resolution (competitor_snapshot_id, resolution, resolved_by, note)
+VALUES ('a9181000-0000-4000-8000-000000000001', 'LOSS_ACCEPTED', 'smoke-operator', 'Synthetic GBP snapshot, loss accepted');
+SELECT pg_temp.expect_fail('a partition with an unresolved skipped snapshot marked as verified (OQ-181)', $q$
+  INSERT INTO maintenance.partition_export (parent_table, partition_name, target, exported_rows, verified_at)
+  VALUES ('channel_data.competitor_snapshot_log', 'smoke_snapshot_partition', 'CLICKHOUSE', 5, now()) $q$, 'without a resolution');
+SELECT pg_temp.expect_fail('a skipped snapshot with an unknown reason (OQ-181)', $q$
+  INSERT INTO maintenance.snapshot_export_skip (subject_tenant_id, competitor_snapshot_id, partition_name, received_at, reason)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', gen_random_uuid(), 'smoke_snapshot_partition', now(), 'FORGOT') $q$, 'snapshot_export_skip_reason_known');
+SELECT pg_temp.expect_fail('a skipped snapshot resolution of an unknown kind (OQ-181)', $q$
+  INSERT INTO maintenance.snapshot_export_skip_resolution (competitor_snapshot_id, resolution, resolved_by, note)
+  VALUES ('a9181000-0000-4000-8000-000000000002', 'IGNORED', 'smoke-operator', 'Synthetic resolution note') $q$, 'snapshot_export_skip_resolution_known');
+SELECT pg_temp.expect_fail('a skipped snapshot resolved without the operator (OQ-181)', $q$
+  INSERT INTO maintenance.snapshot_export_skip_resolution (competitor_snapshot_id, resolution, resolved_by, note)
+  VALUES ('a9181000-0000-4000-8000-000000000002', 'LOSS_ACCEPTED', ' ', 'Synthetic resolution note') $q$, 'snapshot_export_skip_resolution_operator');
+SELECT pg_temp.expect_fail('a skipped snapshot resolved without a note (OQ-181)', $q$
+  INSERT INTO maintenance.snapshot_export_skip_resolution (competitor_snapshot_id, resolution, resolved_by, note)
+  VALUES ('a9181000-0000-4000-8000-000000000002', 'LOSS_ACCEPTED', 'smoke-operator', 'ok') $q$, 'snapshot_export_skip_resolution_note');
+SELECT pg_temp.expect_fail('truncate maintenance.snapshot_export_skip', $q$ ALTER TABLE maintenance.snapshot_export_skip_resolution DISABLE TRIGGER zz_no_truncate; TRUNCATE maintenance.snapshot_export_skip, maintenance.snapshot_export_skip_resolution $q$, 'TRUNCATE of maintenance.snapshot_export_skip is forbidden');
+SELECT pg_temp.expect_fail('truncate maintenance.snapshot_export_skip_resolution', $q$ TRUNCATE maintenance.snapshot_export_skip_resolution $q$, 'TRUNCATE of maintenance.snapshot_export_skip_resolution is forbidden');
+
 -- Шаг 23 [Р-108]: TRUNCATE новой append-only таблицы отклоняет свой триггер
 SELECT pg_temp.expect_fail('truncate channel_data.offer_channel_pricing', $q$ TRUNCATE channel_data.offer_channel_pricing $q$, 'TRUNCATE of channel_data.offer_channel_pricing is forbidden');
 SELECT pg_temp.expect_fail('truncate tenant_data.discount_announcement', $q$ TRUNCATE tenant_data.discount_announcement $q$, 'TRUNCATE of tenant_data.discount_announcement is forbidden');

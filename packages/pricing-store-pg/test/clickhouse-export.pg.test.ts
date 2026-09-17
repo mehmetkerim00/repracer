@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
-import { ClickHouseHttp, competitorSnapshotRow, exportCompetitorSnapshotsDay, exportDecisionDay, readCompetitorHistory } from '@repracer/analytics-export';
+import { ClickHouseHttp, competitorSnapshotRow, exportCompetitorSnapshotsDay, exportDecisionDay, listSnapshotExportSkips, readCompetitorHistory, resolveSnapshotExportSkip } from '@repracer/analytics-export';
 import type { MemorySeedScope } from '@repracer/pricing-pipeline';
 import { createPool, inTenant, PgPricingStore, seedPricingWorld } from '../src/index.ts';
 import type { PriceDecisionDraft, PriceIntentDraft } from '@repracer/pricing-model';
@@ -187,5 +187,17 @@ test('Р-122, step 24: a day of the competitor snapshot log is exported to Click
   assert.equal(await count(), 2, 'a repeated export does not duplicate rows');
   const { rows: [mark] } = await exporter.query(`SELECT verified_at FROM maintenance.partition_export WHERE parent_table = 'channel_data.competitor_snapshot_log' AND partition_name = $1 AND target = 'CLICKHOUSE'`, [first.partitionName]);
   assert.equal(mark?.verified_at ?? null, null, 'with a skipped snapshot the partition is not marked verified: retention keeps it until a person resolves the skip');
+  // OQ-181 (шаг 25): пропуск записан; человек принимает потерю с заметкой — повторная выгрузка отмечает сутки проверенными
+  const skips = (await listSnapshotExportSkips(exporter, { unresolvedOnly: true })).filter((k) => k.subjectTenantId === w.tenantId);
+  assert.deepEqual(skips.map((k) => [k.competitorSnapshotId, k.reason]), [[logged[2]!.id, 'CURRENCY_UNSUPPORTED']]);
+  await assert.rejects(resolveSnapshotExportSkip(exporter, { competitorSnapshotId: logged[2]!.id, resolution: 'LOSS_ACCEPTED', resolvedBy: 'ops-synthetic', note: 'ok' }), /snapshot_export_skip_resolution_note/);
+  await resolveSnapshotExportSkip(exporter, { competitorSnapshotId: logged[2]!.id, resolution: 'LOSS_ACCEPTED', resolvedBy: 'ops-synthetic', note: 'Synthetic GBP snapshot: loss accepted' });
+  // Другие тесты той же базы могли оставить неразобранные пропуски этих суток — разбираем и их, чтобы проверить отметку секции
+  for (const k of (await listSnapshotExportSkips(exporter, { unresolvedOnly: true })).filter((x) => x.partitionName === first.partitionName)) {
+    await resolveSnapshotExportSkip(exporter, { competitorSnapshotId: k.competitorSnapshotId, resolution: 'LOSS_ACCEPTED', resolvedBy: 'ops-synthetic', note: 'Synthetic skip of another test' });
+  }
+  const third = await exportCompetitorSnapshotsDay(exporter, ingest, verifier, range);
+  assert.equal(third.verified, true, JSON.stringify(third));
+  assert.equal(await count(), 2, 'resolving does not export the skipped snapshot');
 });
 
