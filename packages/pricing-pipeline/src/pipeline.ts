@@ -114,7 +114,8 @@ export interface StrategyPreview {
 
 export interface HaltReviewReport {
   haltId: string;
-  outcome: 'RELEASED' | 'SAMPLE_FAILED' | 'NO_SAMPLE';
+  /** MANUAL_ONLY — канал не даёт выборки, остановку снимает только человек [Р-119] */
+  outcome: 'RELEASED' | 'SAMPLE_FAILED' | 'NO_SAMPLE' | 'MANUAL_ONLY';
   sampleSize: number;
   failedCount: number;
   failures: Array<{ channelProductRef: string; reason: string }>;
@@ -202,7 +203,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
       intent,
       scope: {
         writeScopeId: scope.writeScopeId, currency: scope.currency, basis: scope.basis, pricingMode: scope.pricingMode, status: scope.status,
-        channelHalt: sc.channelHalt, priceStop: sc.priceStop, blocking: sc.blocking,
+        channelHalt: sc.channelHalt, channelDistrust: sc.channelDistrust, priceStop: sc.priceStop, blocking: sc.blocking,
       },
       bounds,
       guardrails: sc.guardrails,
@@ -225,7 +226,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
       const built = buildExplanation({
         snapshot: usesSnapshot ? { source: source.snapshotRef!.source } : null,
         sanity: usesSnapshot ? source.sanity : null,
-        intent, decision, minMarginBp: sc.guardrails.minMarginBp, channelHalt: sc.channelHalt, priceStop: sc.priceStop,
+        intent, decision, minMarginBp: sc.guardrails.minMarginBp, channelHalt: sc.channelHalt, channelDistrust: sc.channelDistrust, priceStop: sc.priceStop,
       }, GATE_PROFILE);
       decision.explanation = built.explanation;
       decision.gateProfile = built.gateProfile;
@@ -284,12 +285,12 @@ export function createPricingPipeline(deps: PipelineDeps) {
     if (write.value.field !== 'PRICE' || !observation) return;
     const price = observation.effectivePrice ?? (observation.value.field === 'PRICE' ? observation.value.price : null);
     if (!price || price.currency !== write.value.price.currency || price.amountMinor === write.value.price.amountMinor) return;
-    const halt = await store.checkPriceBasis(ctx.tenantId, write, price.amountMinor, deps.now());
-    if (!halt) return;
-    report.stages.push({ stage: 'DISPATCH', outcome: 'PRICE_BASIS_HALT', reason: halt.reason as Reason });
-    await alerts.raise({ ...alertBase(ctx), code: 'PRICING_PRICE_BASIS_MISMATCH', severity: 'CRITICAL', details: {
-      writeScopeId: write.writeScope.writeScopeId, channelWriteId: write.channelWriteId, haltId: halt.haltId,
-      basisError: String(halt.reason.params.basisError ?? ''), vatRateBp: Number(halt.reason.params.vatRateBp ?? 0),
+    const distrust = await store.checkPriceBasis(ctx.tenantId, write, price.amountMinor, deps.now());
+    if (!distrust) return;
+    report.stages.push({ stage: 'DISPATCH', outcome: 'CHANNEL_DISTRUSTED', reason: distrust.reason as Reason });
+    await alerts.raise({ ...alertBase(ctx), code: 'PRICING_CHANNEL_DISTRUSTED', severity: 'CRITICAL', details: {
+      writeScopeId: write.writeScope.writeScopeId, channelWriteId: write.channelWriteId, distrustId: distrust.distrustId, distrustReason: 'PRICE_BASIS_MISMATCH',
+      basisError: String(distrust.reason.params.basisError ?? ''), vatRateBp: Number(distrust.reason.params.vatRateBp ?? 0),
     } });
   }
 
@@ -611,8 +612,28 @@ export function createPricingPipeline(deps: PipelineDeps) {
     async reviewHalts(ctx: AdapterCallContext, sampleSize = 5): Promise<HaltReviewReport[]> {
       const due = await store.listDueHalts(ctx.tenantId, ctx.channelAccountId, deps.now());
       const reports: HaltReviewReport[] = [];
+      // Р-119: у канала нет опроса конкурентов — выборку для Р-52 взять неоткуда. Это свойство канала: чтение не пробуется, провал
+      // выборки не записывается, остановка ждёт человека (база возвращает MANUAL_ONLY и сама, 0082)
+      if (adapter.descriptor.haltRelease.kind === 'MANUAL_ONLY') {
+        for (const halt of due) {
+          await emit(ctx, [{ kind: 'log', level: 'INFO', code: 'HALT_RELEASE_MANUAL_ONLY', message: 'HALT_RELEASE_MANUAL_ONLY', details: { haltId: halt.haltId, channel: adapter.descriptor.channel } }]);
+          reports.push({ haltId: halt.haltId, outcome: 'MANUAL_ONLY', sampleSize: 0, failedCount: 0, failures: [], snapshots: [] });
+        }
+        return reports;
+      }
       for (const halt of due) reports.push(await reviewHalt(ctx, halt, sampleSize));
       return reports;
+    },
+
+    /** Р-118: снятие остановки по недоверию каналу — только человек; права, второй фактор и заметку проверяют хранилище и БД */
+    async releaseDistrust(ctx: AdapterCallContext, distrustId: string, actor: { membershipId: string; userId: string; mfa: boolean }, note: string): Promise<{ released: boolean }> {
+      const result = await store.releaseDistrust(ctx.tenantId, distrustId, { ...actor, note, at: deps.now() });
+      if (result !== 'RELEASED') return { released: false };
+      await emit(ctx, [
+        { kind: 'log', level: 'INFO', code: 'DISTRUST_RELEASED', message: 'DISTRUST_RELEASED', details: { distrustId, membershipId: actor.membershipId } },
+        { kind: 'alert', code: 'PRICING_CHANNEL_TRUST_RESTORED', severity: 'WARNING', details: { distrustId } },
+      ]);
+      return { released: true };
     },
 
     /** Р-52: ручное снятие — без ограничения числа попыток, с обязательной заметкой */

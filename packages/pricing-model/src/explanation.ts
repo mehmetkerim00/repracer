@@ -1,5 +1,5 @@
 import type { FxApplied } from './fx.ts';
-import type { HaltRef, StopRef } from './policy.ts';
+import type { DistrustRef, HaltRef, StopRef } from './policy.ts';
 import { CHANNEL_PARAM_KEYS, COMPETITOR_RULE_DERIVED_KEYS, paramSchema, SANITY_RULES } from './reasons.ts';
 import { isCompetitorDerived, type GateOutcome, type IntentClass, type PriceDecisionDraft, type PriceIntentDraft, type Reason, type SanityCheckRecord, type StrategyDefinition, type TriggerType } from './types.ts';
 
@@ -51,9 +51,13 @@ export const EXPLANATION_FIELD_KINDS: Readonly<Record<string, FieldKind>> = {
   '$.gate.fx.convertedAmountMinor': { k: 'money' },
   '$.gate.fx.rounding': { k: 'enum', v: ['UP', 'NEAREST'] },
   '$.context.channelHalt.haltId': { k: 'uuid' },
-  '$.context.channelHalt.reasonCode': { k: 'enum', v: ['CHANNEL_MASS_SHIFT', 'CHANNEL_PRICE_BASIS_MISMATCH'] },
+  '$.context.channelHalt.reasonCode': { k: 'enum', v: ['CHANNEL_MASS_SHIFT'] },
   '$.context.channelHalt.marketplace': { k: 'id', n: true },
   '$.context.channelHalt.haltedAt': { k: 'instant' },
+  '$.context.channelDistrust.distrustId': { k: 'uuid' },
+  '$.context.channelDistrust.reasonCode': { k: 'enum', v: ['PRICE_BASIS_MISMATCH'] },
+  '$.context.channelDistrust.marketplace': { k: 'id', n: true },
+  '$.context.channelDistrust.detectedAt': { k: 'instant' },
   '$.context.priceStop.stopId': { k: 'uuid' },
   '$.context.priceStop.scope': { k: 'enum', v: ['TENANT', 'CHANNEL_ACCOUNT', 'STOREFRONT'] },
   '$.context.priceStop.channelAccountId': { k: 'uuid', n: true },
@@ -140,7 +144,7 @@ export interface DecisionExplanation {
     minMarginBp?: number;
     fx?: FxApplied;
   };
-  context?: { channelHalt?: HaltRef; priceStop?: StopRef };
+  context?: { channelHalt?: HaltRef; channelDistrust?: DistrustRef; priceStop?: StopRef };
 }
 
 /** Столбцы решения и ядра, из которых разворачивается слепок [Р-80]; в памяти — те же значения черновиков */
@@ -213,7 +217,7 @@ export interface ExpandedExplanation {
     currency: string;
     fx: FxApplied | null;
   };
-  context: { channelHalt: HaltRef | null; priceStop: StopRef | null };
+  context: { channelHalt: HaltRef | null; channelDistrust: DistrustRef | null; priceStop: StopRef | null };
 }
 
 /** Чего не нашлось в справочниках: экран называет пробел, а не показывает пустоту */
@@ -278,6 +282,7 @@ export interface ExplanationInput {
   decision: PriceDecisionDraft;
   minMarginBp: number | null;
   channelHalt: HaltRef | null;
+  channelDistrust: DistrustRef | null;
   priceStop: StopRef | null;
 }
 
@@ -305,6 +310,7 @@ export function buildExplanation(input: ExplanationInput, gate: GateProfile): { 
   const chainPart = tail && same(tail, reason) ? (chain.length > 1 ? { steps: chain.slice(0, -1) } : {}) : { chain };
   const context = {
     ...(input.channelHalt ? { channelHalt: input.channelHalt } : {}),
+    ...(input.channelDistrust ? { channelDistrust: input.channelDistrust } : {}),
     ...(input.priceStop ? { priceStop: input.priceStop } : {}),
   };
   const gatePart = {
@@ -449,7 +455,7 @@ export function expandExplanation(e: DecisionExplanation, row: ExplanationRow, d
         floorMinor: row.floorMinor, ceilingMinor: row.ceilingMinor, minMarginBp: e.gate?.minMarginBp ?? null,
         boundDeviationBp: row.boundDeviationBp, currency: row.currency, fx: e.gate?.fx ?? null,
       },
-      context: { channelHalt: e.context?.channelHalt ?? null, priceStop: e.context?.priceStop ?? null },
+      context: { channelHalt: e.context?.channelHalt ?? null, channelDistrust: e.context?.channelDistrust ?? null, priceStop: e.context?.priceStop ?? null },
     },
     gaps,
   };

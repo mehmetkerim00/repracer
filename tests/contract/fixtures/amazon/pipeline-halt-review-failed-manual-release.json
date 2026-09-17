@@ -3,8 +3,8 @@
   "id": "amazon/pipeline/halt-manual-release",
   "channel": "AMAZON",
   "apiVersion": "listings-items-2021-08-01",
-  "title": "Выборка не состоялась — ручное снятие с заметкой",
-  "description": "Преобразован из kaufland/pipeline-halt-review-failed-manual-release.json: Окно проверки истекло, но в свежей выборке один из двух товаров снова пришёл в центах вместо евро (×100): запись SAMPLE_FAILED в журнале, следующая проверка через окно, цены из данных конкурентов по-прежнему заблокированы. Владелец разобрался и снимает остановку вручную — число попыток не ограничено, заметка обязательна [Р-52]. Повторная проверка находит, что проверять нечего. Amazon: выборка не состоится ни для одного товара (опроса нет, AMZ_C07) — обе строки выборки провалены; ручное снятие работает так же.",
+  "title": "Р-119: выборки нет — остановку витрины снимает человек с заметкой",
+  "description": "Преобразован из kaufland/pipeline-halt-review-failed-manual-release.json: Окно проверки истекло, но в свежей выборке один из двух товаров снова пришёл в центах вместо евро (×100): запись SAMPLE_FAILED в журнале, следующая проверка через окно, цены из данных конкурентов по-прежнему заблокированы. Владелец разобрался и снимает остановку вручную — число попыток не ограничено, заметка обязательна [Р-52]. Повторная проверка находит, что проверять нечего. Amazon [Р-119]: проверка остановок выборку не пробует — канал снимает остановку только вручную; ручное снятие работает так же.",
   "tags": [
     "mandatory:pipeline-halt-manual-release",
     "pipeline",
@@ -351,20 +351,11 @@
       "sampleSize": 5,
       "expect": [
         {
-          "outcome": "SAMPLE_FAILED",
-          "sampleSize": 2,
-          "failedCount": 2,
+          "outcome": "MANUAL_ONLY",
+          "sampleSize": 0,
+          "failedCount": 0,
           "snapshots": [],
-          "failures": [
-            {
-              "channelProductRef": "B062000001",
-              "reason": "UNSUPPORTED"
-            },
-            {
-              "channelProductRef": "B062000002",
-              "reason": "UNSUPPORTED"
-            }
-          ]
+          "failures": []
         }
       ]
     },
@@ -403,8 +394,12 @@
     ],
     "logs": [
       {
-        "code": "HALT_REVIEW_FAILED",
+        "code": "HALT_RELEASE_MANUAL_ONLY",
         "count": 1
+      },
+      {
+        "code": "HALT_REVIEW_FAILED",
+        "count": 0
       },
       {
         "code": "HALT_MANUALLY_RELEASED",
@@ -418,12 +413,6 @@
         }
       ],
       "haltReviews": [
-        {
-          "kind": "AUTO_SAMPLE",
-          "outcome": "SAMPLE_FAILED",
-          "sampleSize": 2,
-          "failedCount": 2
-        },
         {
           "kind": "MANUAL_RELEASE",
           "outcome": "RELEASED"

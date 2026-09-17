@@ -10,6 +10,7 @@ export type {
   ConsoleDecisionRow,
   ConsoleDivergenceRow,
   ConsoleHaltReviewRow,
+  ConsoleDistrustRow,
   ConsoleHaltRow,
   ConsoleIntentRow,
   ConsoleMemberRow,

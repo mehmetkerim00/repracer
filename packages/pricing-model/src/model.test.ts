@@ -84,7 +84,7 @@ test('Р-74, Р-75, Р-80: the explanation references dictionaries, repeats no r
       { rule: 'INTERNAL_ANCHOR', outcome: 'SKIPPED', detail: { code: 'TOO_FEW_COMPETITOR_OFFERS', params: { offers: 1, minOffers: 3 } } },
     ],
   }, sanityRuleset);
-  const input = { snapshot: { source: 'KAUFLAND_BUYBOX' }, sanity, intent, decision, minMarginBp: null, channelHalt: null, priceStop: null };
+  const input = { snapshot: { source: 'KAUFLAND_BUYBOX' }, sanity, intent, decision, minMarginBp: null, channelHalt: null, channelDistrust: null, priceStop: null };
   const built = buildExplanation(input, gate);
   const explanation = built.explanation;
   assert.deepEqual([built.gateProfile, built.sanityRuleset], ['g74.1', 'r49.1']);

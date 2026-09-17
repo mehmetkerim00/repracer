@@ -30,7 +30,7 @@ export interface PricingStoreUnderTest {
 export type PricingStoreFactory = (seed: MemorySeed, world: World) => Promise<PricingStoreUnderTest>;
 
 export const memoryStoreFactory: PricingStoreFactory = async (seed, world) => {
-  const store = new InMemoryPricingStore(seed, { tenantId: world.tenantId });
+  const store = new InMemoryPricingStore({ ...seed, channel: world.account.channel === 'AMAZON' ? 'AMAZON' : 'KAUFLAND', region: world.account.region ?? null }, { tenantId: world.tenantId });
   return {
     store,
     queue: store,
@@ -171,6 +171,16 @@ async function runPipelineStep(
       const halt = dump.halts?.[step.haltIndex];
       if (!halt) return { failure: `${step.id}: no halt #${step.haltIndex}` };
       return { result: await pipeline.releaseHaltManually(callContext(step.ctx, step.id, scenario, clock), halt.haltId, { membershipId: step.membershipId, userId: standUserOf(step.membershipId), mfa: true }, step.note) };
+    }
+    case 'pipelineReleaseDistrust': {
+      const dump = (await store.dump()) as { distrusts?: Array<{ distrustId: string }> };
+      const distrust = dump.distrusts?.[step.distrustIndex];
+      if (!distrust) return { failure: `${step.id}: no distrust #${step.distrustIndex}` };
+      try {
+        return { result: await pipeline.releaseDistrust(callContext(step.ctx, step.id, scenario, clock), distrust.distrustId, { membershipId: step.membershipId, userId: standUserOf(step.membershipId), mfa: step.mfa !== false }, step.note) };
+      } catch (error) {
+        return { result: { refused: String((error as Error).message).replace(/[0-9a-f-]{36}/g, '<id>') } };
+      }
     }
     case 'pricingMutation': {
       try {

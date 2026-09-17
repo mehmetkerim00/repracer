@@ -80,6 +80,8 @@ export const KAUFLAND_DESCRIPTOR: ChannelDescriptor = {
   ],
   rateLimits: [{ owner: 'SELLER', requestsPerSecond: KAUFLAND_LIMITS.documentedRequestsPerSecond, source: 'DOCUMENTED' }],
   capabilities: ['PUSH_SUBSCRIPTIONS', 'COMPETITOR_PULL', 'ASYNC_REPORTS'],
+  // Р-52: выборка — опрос GET /buybox
+  haltRelease: { kind: 'SAMPLE', basis: 'Р-52: fresh sample by polling GET /buybox' },
   competitorSources: [
     {
       // Ранний доступ у аккаунт-менеджера; до получения Р-36 не активна (Р-45)

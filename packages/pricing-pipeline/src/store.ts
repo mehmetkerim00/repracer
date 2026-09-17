@@ -1,6 +1,6 @@
-import type { DecisionExplanation, ExplanationIntentColumns, SanitySummary, FxFailureCause, FxQuote, HaltRef, HaltReasonCode, MemberRole, PriceIntentDraft as IntentDraft, StopRef, StopScope } from '@repracer/pricing-model';
+import type { DecisionExplanation, DistrustRef, ExplanationIntentColumns, SanitySummary, FxFailureCause, FxQuote, HaltRef, HaltReasonCode, MemberRole, PriceIntentDraft as IntentDraft, StopRef, StopScope } from '@repracer/pricing-model';
 import type { ExplanationRuleset, StopScope as AuditStopScope } from '@repracer/pricing-model';
-import type { CompetitorQuery, FieldWrite, Instant, PriceBasis, WriteOutcome } from '@repracer/channel-port';
+import type { CompetitorQuery, FieldWrite, Instant, OfferIdentity, PriceBasis, WriteOutcome } from '@repracer/channel-port';
 import type { MoveRecord, SanityContext } from '@repracer/input-sanity';
 import type { GuardrailSet } from '@repracer/price-gate';
 import type {
@@ -37,7 +37,10 @@ export interface PriceScopeContext {
   productId: string;
   channelAccountId: string;
   marketplace: string;
+  /** Подпись предложения для экранов: unit Kaufland или SKU; ключ записи в канал — только identity */
   externalUnitId: string;
+  /** Идентичность записи в канал — `offerIdentityOf` из предложения (OQ-165, шаг 23) */
+  identity: OfferIdentity;
   channelProductRef: string;
   condition: string;
   scopeKey: string;
@@ -84,6 +87,8 @@ export interface ScopeEvaluationContext {
   guardrails: GuardrailSet;
   /** Системная остановка витрины: только цены из данных конкурентов [Р-51] */
   channelHalt: HaltRef | null;
+  /** Остановка по недоверию каналу: все цены, снимает только человек [Р-118] */
+  channelDistrust: DistrustRef | null;
   /** Остановка человеком: тенант, аккаунт или витрина, все цены [Р-69, Р-70] */
   priceStop: StopRef | null;
   /** Почему единица не активна: ошибка канала, требующая человека */
@@ -176,7 +181,7 @@ export interface HaltSampleObservation {
   reasonCode: string | null;
 }
 
-export type HaltSampleReview = 'RELEASED' | 'SAMPLE_FAILED' | 'NO_SAMPLE' | 'NOT_DUE' | 'NOT_ACTIVE';
+export type HaltSampleReview = 'RELEASED' | 'SAMPLE_FAILED' | 'NO_SAMPLE' | 'NOT_DUE' | 'NOT_ACTIVE' | 'MANUAL_ONLY';
 
 export interface HaltReviewRecord {
   kind: 'AUTO_SAMPLE' | 'MANUAL_RELEASE';
@@ -313,7 +318,12 @@ export interface PricingStore {
    */
   recordDispatch(tenantId: string, write: FieldWrite, outcome: WriteOutcome, now: Instant): Promise<DispatchRecorded>;
   /** Р-116: как WriteQueueStore.checkPriceBasis — для первой отправки пути решения (ревью шага 22, находка 1) */
-  checkPriceBasis(tenantId: string, write: FieldWrite, observedMinor: number, now: Instant): Promise<{ haltId: string; reason: { code: string; params: Record<string, unknown> } } | null>;
+  checkPriceBasis(tenantId: string, write: FieldWrite, observedMinor: number, now: Instant): Promise<{ distrustId: string; reason: { code: string; params: Record<string, unknown> } } | null>;
+  /**
+   * Р-118: снятие остановки по недоверию каналу — только человек с правом RELEASE_CHANNEL_DISTRUST, от своего имени, со вторым фактором
+   * и заметкой; БД дублирует проверки (0082). RELEASED или NOT_ACTIVE (уже снята или не существует).
+   */
+  releaseDistrust(tenantId: string, distrustId: string, release: { membershipId: string; userId: string; mfa: boolean; note: string; at: Instant }): Promise<'RELEASED' | 'NOT_ACTIVE'>;
 
   getPriceScope(tenantId: string, writeScopeId: string): Promise<PriceScopeContext | null>;
   resolveBounds(tenantId: string, writeScopeId: string): Promise<BoundsRead>;
@@ -372,6 +382,7 @@ export interface ConsoleScopeRow {
   cost: CostInputs | null;
   minMarginBp: number | null;
   channelHalt: HaltRef | null;
+  channelDistrust: DistrustRef | null;
   priceStop: StopRef | null;
 }
 
@@ -387,12 +398,12 @@ export interface ConsoleDecisionRow extends PriceDecisionDraft, ExplanationInten
 export interface ConsoleAuditRow {
   /** Время действия (остановки, снятия) */
   at: Instant;
-  action: 'pricing.stop_created' | 'pricing.stop_released' | 'pricing.halt_created' | 'pricing.halt_released';
+  action: 'pricing.stop_created' | 'pricing.stop_released' | 'pricing.halt_created' | 'pricing.halt_released' | 'pricing.distrust_created' | 'pricing.distrust_released';
   actorType: 'USER' | 'SYSTEM';
   membershipId: string | null;
   /** Роль участника в момент действия */
   role: MemberRole | null;
-  entityType: 'price_stop' | 'pricing_halt';
+  entityType: 'price_stop' | 'pricing_halt' | 'channel_distrust';
   entityId: string;
   scope: AuditStopScope | null;
   channelAccountId: string | null;
@@ -437,6 +448,15 @@ export interface ConsoleHaltRow {
   releasedKind: 'AUTO' | 'MANUAL' | null;
 }
 
+/** Остановка по недоверию каналу [Р-118] */
+export interface ConsoleDistrustRow extends DistrustRef {
+  channelAccountId: string;
+  details: Reason['params'];
+  releasedAt: Instant | null;
+  releasedByMembershipId: string | null;
+  releaseNote: string | null;
+}
+
 export interface ConsoleHaltReviewRow extends HaltReviewRecord {
   haltId: string;
 }
@@ -477,6 +497,7 @@ export interface ConsoleState {
   writes: ConsoleWriteRow[];
   halts: ConsoleHaltRow[];
   haltReviews: ConsoleHaltReviewRow[];
+  distrusts: ConsoleDistrustRow[];
   stops: ConsoleStopRow[];
   rejectedSnapshots: ConsoleRejectedSnapshotRow[];
   divergenceCases: ConsoleDivergenceRow[];

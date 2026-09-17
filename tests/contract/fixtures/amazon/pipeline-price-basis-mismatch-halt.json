@@ -3,12 +3,13 @@
   "id": "amazon/pipeline/price-basis-mismatch-halt",
   "channel": "AMAZON",
   "apiVersion": "listings-items-2021-08-01",
-  "title": "Р-116: применённая цена больше отправленной ровно на НДС — остановка витрины, фиксированная цена удерживается, снятие вручную",
-  "description": "Фиксированная цена 19.99 уходит в amazon.de и принята асинхронно. Обратное чтение после окна: our_price 19.99 как отправлено, но цена покупки в offers — 23.79, то есть 19.99 × 1.19. Канал считает нашу сумму нетто [A-02]: каждая следующая цена будет выше на ту же долю, это тихий отказ на выходе. Диспетчер ставит системную остановку витрины CHANNEL_PRICE_BASIS_MISMATCH и CRITICAL-алерт. В отличие от остановки по массовому сдвигу [Р-51], удерживается и фиксированная цена второго товара; выборкой остановка не снимается, человек снимает её с заметкой и вторым фактором — после этого цена второго товара уходит.",
+  "title": "Р-116, Р-118: применённая цена больше отправленной ровно на НДС — недоверие каналу, фиксированная цена удерживается, снятие только человеком",
+  "description": "Фиксированная цена 19.99 уходит в amazon.de и принята асинхронно. Обратное чтение после окна: our_price 19.99 как отправлено, но цена покупки в offers — 23.79, то есть 19.99 × 1.19. Канал считает нашу сумму нетто [A-02]: каждая следующая цена будет выше на ту же долю — сломана трансляция цены в канал. Диспетчер ставит ОСТАНОВКУ ПО НЕДОВЕРИЮ КАНАЛУ [Р-118] и CRITICAL-алерт. Это не остановка витрины Р-51: удерживается и фиксированная цена второго товара; проверка остановок её не касается. Снять её не может ни оператор, ни владелец без второго фактора; владелец со вторым фактором и заметкой снимает — после этого цена второго товара уходит.",
   "tags": [
     "pipeline",
     "dispatcher",
     "r116",
+    "r118",
     "mandatory:price-basis-readback"
   ],
   "provenance": {
@@ -171,7 +172,7 @@
                 "recorded": "APPLIED"
               },
               {
-                "action": "PRICE_BASIS_HALT"
+                "action": "CHANNEL_DISTRUSTED"
               },
               {
                 "action": "IDLE"
@@ -191,20 +192,49 @@
       "expect": {
         "decision": {
           "outcome": "REJECTED",
-          "rejectionReason": "CHANNEL_HALTED"
+          "rejectionReason": "CHANNEL_DISTRUSTED"
         }
       }
     },
     {
-      "id": "no-sample-review-for-basis-halt",
+      "id": "halt-review-does-not-touch-distrust",
       "kind": "pipelineReviewHalts",
       "sampleSize": 5,
       "expect": []
     },
     {
+      "id": "operator-cannot-release",
+      "kind": "pipelineReleaseDistrust",
+      "distrustIndex": 0,
+      "membershipId": "membership-operator",
+      "note": "Operator tries to release the distrust"
+    },
+    {
+      "id": "owner-without-second-factor-cannot-release",
+      "kind": "pipelineReleaseDistrust",
+      "distrustIndex": 0,
+      "membershipId": "membership-owner",
+      "mfa": false,
+      "note": "Owner without a second factor"
+    },
+    {
+      "id": "still-held-after-refused-releases",
+      "kind": "pipelineRecompute",
+      "writeScopeId": "ws-price-de-8102",
+      "trigger": {
+        "type": "COST_CHANGE"
+      },
+      "expect": {
+        "decision": {
+          "outcome": "REJECTED",
+          "rejectionReason": "CHANNEL_DISTRUSTED"
+        }
+      }
+    },
+    {
       "id": "owner-releases-after-fixing-price-settings",
-      "kind": "pipelineReleaseHalt",
-      "haltIndex": 0,
+      "kind": "pipelineReleaseDistrust",
+      "distrustIndex": 0,
       "membershipId": "membership-owner",
       "note": "Preisbasis im Kanalkonto geprüft und korrigiert",
       "expect": {
@@ -493,16 +523,22 @@
   "expect": {
     "alerts": [
       {
-        "code": "PRICING_PRICE_BASIS_MISMATCH",
+        "code": "PRICING_CHANNEL_DISTRUSTED",
         "severity": "CRITICAL",
+        "count": 1
+      },
+      {
+        "code": "PRICING_CHANNEL_TRUST_RESTORED",
+        "severity": "WARNING",
         "count": 1
       }
     ],
     "pipeline": {
-      "halts": [
+      "halts": [],
+      "distrusts": [
         {
-          "reasonCode": "CHANNEL_PRICE_BASIS_MISMATCH",
-          "releasedKind": "MANUAL"
+          "reasonCode": "PRICE_BASIS_MISMATCH",
+          "released": true
         }
       ],
       "decisions": [
@@ -512,7 +548,11 @@
         },
         {
           "outcome": "REJECTED",
-          "rejectionReason": "CHANNEL_HALTED"
+          "rejectionReason": "CHANNEL_DISTRUSTED"
+        },
+        {
+          "outcome": "REJECTED",
+          "rejectionReason": "CHANNEL_DISTRUSTED"
         },
         {
           "outcome": "APPROVED",

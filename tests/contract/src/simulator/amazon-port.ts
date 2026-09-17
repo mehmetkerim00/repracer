@@ -73,6 +73,7 @@ export const AMAZON_SIM_DESCRIPTOR: ChannelDescriptor = {
   apiMode: 'AMAZON_LISTINGS_ITEMS',
   region: 'EU',
   apiVersion: 'listings-items-2021-08-01 (simulated)',
+  haltRelease: { kind: 'MANUAL_ONLY', basis: 'Р-119: no competitor polling on Amazon' },
   // Граница суток amazon.de не подтверждена (A-03, Р-65): значение нужно типу, бюджетов правок модель не ведёт
   marketplaces: [{ code: AMAZON_DE, currency: 'EUR', priceBasis: 'GROSS', timeZone: 'Europe/Berlin' }],
   fields: [],

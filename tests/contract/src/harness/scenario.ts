@@ -117,6 +117,8 @@ export type PricingMutationStep =
 export interface PipelineReviewHaltsStep { id: string; kind: 'pipelineReviewHalts'; sampleSize: number; ctx?: StepContext; expect?: unknown }
 /** Р-52: ручное снятие остановки по её номеру в состоянии хранилища */
 export interface PipelineReleaseHaltStep { id: string; kind: 'pipelineReleaseHalt'; haltIndex: number; membershipId: string; note: string; ctx?: StepContext; expect?: unknown }
+/** Р-118: снятие недоверия каналу человеком (второй фактор — у пользователя стенда, если mfa не false) */
+export interface PipelineReleaseDistrustStep { id: string; kind: 'pipelineReleaseDistrust'; distrustIndex: number; membershipId: string; note: string; mfa?: boolean; ctx?: StepContext; expect?: unknown }
 
 /** Остановка человеком и её снятие [Р-69, Р-70]: права — по роли участника (DEFAULT_MEMBERS); снятие — по номеру остановки */
 export type PricingStopStep =
@@ -127,7 +129,7 @@ export type PricingStopStep =
 export interface PipelineDispatchDueStep { id: string; kind: 'pipelineDispatchDue'; expect?: unknown }
 
 export type PipelineStep = PipelineInboundStep | PipelinePollStep | PipelineRecomputeStep | PipelineEnableStep | PricingMutationStep
-  | PipelineReviewHaltsStep | PipelineReleaseHaltStep | PipelineDispatchDueStep | PricingStopStep;
+  | PipelineReviewHaltsStep | PipelineReleaseHaltStep | PipelineReleaseDistrustStep | PipelineDispatchDueStep | PricingStopStep;
 
 /** Симулятор: доставить уведомления модели канала, срок которых наступил, через путь решения */
 export interface ChannelDeliverStep { id: string; kind: 'channelDeliver'; expect?: unknown }
@@ -188,7 +190,7 @@ export interface Scenario {
 }
 
 const ID_RE = /^[a-z0-9]+(?:[-/][a-z0-9]+)*$/;
-const PIPELINE_KINDS = new Set(['channelDeliver', 'channelRun', 'pipelineInbound', 'pipelinePoll', 'pipelineRecompute', 'pipelineEnableRepricing', 'pricingMutation', 'pipelineReviewHalts', 'pipelineReleaseHalt', 'pricingStop']);
+const PIPELINE_KINDS = new Set(['channelDeliver', 'channelRun', 'pipelineInbound', 'pipelinePoll', 'pipelineRecompute', 'pipelineEnableRepricing', 'pricingMutation', 'pipelineReviewHalts', 'pipelineReleaseHalt', 'pipelineReleaseDistrust', 'pricingStop']);
 
 export function validateScenario(s: Scenario): string[] {
   const problems: string[] = [];

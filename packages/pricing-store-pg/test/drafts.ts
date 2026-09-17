@@ -58,7 +58,7 @@ export function explained(
       : null;
     const built = buildExplanation({
       snapshot: snapshotRef ? { source: snapshotRef.source } : null, sanity,
-      intent, decision, minMarginBp: context.guardrails.minMarginBp, channelHalt: context.channelHalt, priceStop: context.priceStop,
+      intent, decision, minMarginBp: context.guardrails.minMarginBp, channelHalt: context.channelHalt, channelDistrust: context.channelDistrust, priceStop: context.priceStop,
     }, GATE_PROFILE);
     decision.explanation = built.explanation;
     decision.gateProfile = built.gateProfile;

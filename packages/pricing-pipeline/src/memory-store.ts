@@ -1,6 +1,6 @@
 import { EXPLANATION_RULESETS } from './dictionary.ts';
-import type { HaltSampleObservation, HaltSampleReview, ConsoleAuditRow } from './store.ts';
-import type { CompetitorQuery, FieldWrite, Instant, OfferIdentity, PriceBasis, WriteOutcome } from '@repracer/channel-port';
+import type { HaltSampleObservation, HaltSampleReview, ConsoleAuditRow, ConsoleDistrustRow } from './store.ts';
+import { offerIdentityOf, type CompetitorQuery, type FieldWrite, type Instant, type OfferIdentity, type PriceBasis, type WriteOutcome } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange, SanityContext } from '@repracer/input-sanity';
 import { assertWriteWithinBounds, NO_GUARDRAILS, type GuardrailSet } from '@repracer/price-gate';
 import {
@@ -18,6 +18,7 @@ import {
   type CostInputs,
   type SanitySummary,
   type FxQuote,
+  type DistrustRef,
   type HaltRef,
   type MemberRole,
   type PriceBounds,
@@ -37,7 +38,7 @@ import {
   type DueKind,
   type DueScope,
   type OutcomeTransition,
-  type PriceBasisHalt,
+  type PriceBasisDistrust,
   type RecordedOutcome,
   type Reconciliation,
   type RetryPolicy,
@@ -115,6 +116,9 @@ export interface MemorySeedScope {
 
 export interface MemorySeed {
   scopes: MemorySeedScope[];
+  /** Канал и регион аккаунта мира: из них строится идентичность записи (OQ-165); по умолчанию Kaufland без региона */
+  channel?: 'KAUFLAND' | 'AMAZON';
+  region?: string | null;
   /** Аккаунты других каналов для единиц записи, которые не принадлежат аккаунту мира (посев в PostgreSQL) */
   accounts?: Array<{ channelAccountId: string; channel: 'KAUFLAND' | 'AMAZON' | 'EBAY'; region?: string; marketplaces: string[] }>;
   /** Валюта и база цены витрин без единиц записи; по умолчанию — витрины Kaufland de и at */
@@ -208,6 +212,8 @@ const NOTE_OK = (note: string | null | undefined) => typeof note === 'string' &&
 
 export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   private readonly tenantId: string;
+  private readonly channel: 'KAUFLAND' | 'AMAZON';
+  private readonly region: string | null;
   private readonly scopes = new Map<string, ScopeRow>();
   private readonly competitorDaily = new Map<string, DailyRange[]>();
   private readonly competitorState = new Map<string, CompetitorRow>();
@@ -218,6 +224,8 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   private readonly members: ConsoleMemberRow[];
   readonly moves: Array<{ marketplace: string; productRef: string; evaluatedAt: Instant; moveBp: number; verdict: string; sellerRef: string | null }> = [];
   readonly halts: HaltRow[] = [];
+  /** Остановки по недоверию каналу [Р-118] — как channel_data.channel_distrust */
+  readonly distrusts: ConsoleDistrustRow[] = [];
   private readonly haltSamples: Array<HaltSampleObservation & { haltId: string; recordedAt: Instant }> = [];
   readonly haltReviews: Array<HaltReviewRecord & { haltId: string }> = [];
   readonly stops: ConsoleStopRow[] = [];
@@ -235,6 +243,8 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
 
   constructor(seed: MemorySeed, options: { tenantId?: string } = {}) {
     this.tenantId = options.tenantId ?? 'memory-tenant';
+    this.channel = seed.channel ?? 'KAUFLAND';
+    this.region = this.channel === 'KAUFLAND' ? null : seed.region ?? null;
     for (const s of seed.scopes) {
       this.scopes.set(s.writeScopeId, {
         ...s, status: s.status ?? 'ACTIVE', taxRegime: s.taxRegime ?? (s.basis === 'GROSS' ? 'VAT_INCLUDED' : 'SALES_TAX_EXCLUDED'),
@@ -272,6 +282,14 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     }
   }
 
+  /** Как offer_mapping в PostgreSQL: у Kaufland ключ — unit, у Amazon — регион и SKU (OQ-165) */
+  private identityOf(row: ScopeRow) {
+    return offerIdentityOf({
+      channel: this.channel, field: 'PRICE', region: this.region, marketplace: row.marketplace,
+      externalUnitId: this.channel === 'KAUFLAND' ? row.externalUnitId : null, externalSku: this.channel === 'KAUFLAND' ? null : row.externalUnitId,
+    });
+  }
+
   private id(prefix: string): string {
     this.seq += 1;
     return `${prefix}-${String(this.seq).padStart(4, '0')}`;
@@ -281,21 +299,33 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     return {
       writeScopeId: row.writeScopeId, productId: row.productId, channelAccountId: row.channelAccountId, marketplace: row.marketplace,
       externalUnitId: row.externalUnitId, channelProductRef: row.channelProductRef, condition: row.condition,
-      scopeKey: `kaufland|${row.channelAccountId}|${row.marketplace}|${row.externalUnitId}`, gtin: row.gtin ?? null,
+      identity: this.identityOf(row),
+      scopeKey: `${this.channel.toLowerCase()}|${row.channelAccountId}|${this.region ? `${this.region}|` : ''}${row.marketplace}|${row.externalUnitId}`, gtin: row.gtin ?? null,
       currency: row.currency, basis: row.basis, taxRegime: row.taxRegime, pricingMode: row.pricingMode, status: row.status, strategy: row.strategy,
       currentPriceMinor: row.currentPriceMinor, knownPricesMinor: [...row.knownPricesMinor],
     };
   }
 
-  /** Как HALT_WHERE хранилища PostgreSQL: остановка по базе цены [Р-116] видна первой — она блокирует все цены */
   private activeHalt(channelAccountId: string, marketplace: string): HaltRow | undefined {
-    const active = this.halts.filter((h) => h.releasedAt === null && h.channelAccountId === channelAccountId && (h.marketplace === null || h.marketplace === marketplace));
-    return active.find((h) => h.reasonCode === 'CHANNEL_PRICE_BASIS_MISMATCH') ?? active[0];
+    return this.halts.find((h) => h.releasedAt === null && h.channelAccountId === channelAccountId && (h.marketplace === null || h.marketplace === marketplace));
   }
 
-  /** Остановка блокирует цену: из данных конкурентов — любая [Р-51], любая цена — остановка по базе цены [Р-116] (как триггеры 0080) */
+  /** Системная остановка витрины блокирует только цены из данных конкурентов [Р-51] */
   private static haltBlocks(halt: HaltRow | undefined, competitorDerived: boolean): halt is HaltRow {
-    return halt !== undefined && (competitorDerived || halt.reasonCode === 'CHANNEL_PRICE_BASIS_MISMATCH');
+    return halt !== undefined && competitorDerived;
+  }
+
+  /** Остановка по недоверию каналу [Р-118] — как channel_data.channel_distrust_for (0082): все цены */
+  private activeDistrust(channelAccountId: string, marketplace: string): ConsoleDistrustRow | undefined {
+    return this.distrusts.find((d) => d.releasedAt === null && d.channelAccountId === channelAccountId && (d.marketplace === null || d.marketplace === marketplace));
+  }
+
+  private static distrustRef(d: ConsoleDistrustRow): DistrustRef {
+    return { distrustId: d.distrustId, reasonCode: d.reasonCode, marketplace: d.marketplace, detectedAt: d.detectedAt };
+  }
+
+  private static distrustReason(d: ConsoleDistrustRow, stage: 'DISPATCH' | 'DATABASE'): Reason {
+    return { code: 'CHANNEL_DISTRUSTED', params: { stage, distrustId: d.distrustId, detectedAt: d.detectedAt, distrustReason: d.reasonCode, marketplace: d.marketplace } };
   }
 
   /** Остановка тенанта действует на любой аккаунт, в том числе подключённый после неё [Р-70] */
@@ -357,7 +387,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
 
   private contextVersion(row: ScopeRow): string {
     const v = (b: SeedBound | null | undefined) => (b ? `${b.id}:${b.amountMinor}:${b.isActive !== false}` : '-');
-    return `${v(row.minPrice)}|${v(row.maxPrice)}|halt:${this.activeHalt(row.channelAccountId, row.marketplace)?.haltId ?? '-'}|stop:${this.activeStop(row.channelAccountId, row.marketplace)?.stopId ?? '-'}`;
+    return `${v(row.minPrice)}|${v(row.maxPrice)}|halt:${this.activeHalt(row.channelAccountId, row.marketplace)?.haltId ?? '-'}|distrust:${this.activeDistrust(row.channelAccountId, row.marketplace)?.distrustId ?? '-'}|stop:${this.activeStop(row.channelAccountId, row.marketplace)?.stopId ?? '-'}`;
   }
 
   private scopeEvaluationContext(row: ScopeRow, now: Instant): ScopeEvaluationContext {
@@ -379,6 +409,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       costMissingCause: !row.cost ? 'COST_PROFILE_MISSING' : converted && !converted.ok ? converted.cause : null,
       guardrails: { ...NO_GUARDRAILS, ...row.guardrails },
       channelHalt: halt ? InMemoryPricingStore.haltRef(halt) : null,
+      channelDistrust: (() => { const d = this.activeDistrust(row.channelAccountId, row.marketplace); return d ? InMemoryPricingStore.distrustRef(d) : null; })(),
       priceStop: stop ? InMemoryPricingStore.stopRef(stop) : null,
       blocking: this.blocking(row),
       changesInLastHour: (row.changesLastHour ?? 0) + this.changes.filter((c) => c.writeScopeId === row.writeScopeId && Date.parse(c.at) >= since).length,
@@ -453,6 +484,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     if (!same(read.bounds.min, now.min)) changed.push('MIN_PRICE');
     if (!same(read.bounds.max, now.max)) changed.push('MAX_PRICE');
     if ((read.channelHalt?.haltId ?? null) !== (this.activeHalt(row.channelAccountId, row.marketplace)?.haltId ?? null)) changed.push('CHANNEL_HALT');
+    if ((read.channelDistrust?.distrustId ?? null) !== (this.activeDistrust(row.channelAccountId, row.marketplace)?.distrustId ?? null)) changed.push('CHANNEL_DISTRUST');
     if ((read.priceStop?.stopId ?? null) !== (this.activeStop(row.channelAccountId, row.marketplace)?.stopId ?? null)) changed.push('PRICING_STOP');
     return {
       code: 'BOUNDS_VERSION_CHANGED',
@@ -497,6 +529,10 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
         const stop = this.activeStop(row.channelAccountId, row.marketplace);
         if (stop) {
           return { status: 'CONTEXT_CHANGED', writeScopeId: row.writeScopeId, reason: InMemoryPricingStore.stopReason(stop, 'DATABASE') };
+        }
+        const distrust = this.activeDistrust(row.channelAccountId, row.marketplace);
+        if (distrust) {
+          return { status: 'CONTEXT_CHANGED', writeScopeId: row.writeScopeId, reason: InMemoryPricingStore.distrustReason(distrust, 'DATABASE') };
         }
         const halt = this.activeHalt(row.channelAccountId, row.marketplace);
         if (InMemoryPricingStore.haltBlocks(halt, isCompetitorDerived(d.intent.ruleCode))) {
@@ -557,7 +593,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       const write: WriteRow = {
         channelWriteId: this.id('cw'), writeScopeId: row.writeScopeId, amountMinor: d.decision.finalMinor, currency: scope.currency, basis: scope.basis,
         version: row.priceVersion, decisionId, competitorDerived: isCompetitorDerived(d.intent.ruleCode), scopeKey: scope.scopeKey,
-        identity: { marketplace: scope.marketplace, externalUnitId: scope.externalUnitId }, status: 'PENDING', attemptCount: 0, createdAt: input.now,
+        identity: scope.identity, status: 'PENDING', attemptCount: 0, createdAt: input.now,
         dispatchedAt: null, acceptedAt: null, nextAttemptAt: null, lastErrorCode: null, endReason: null, endParams: {}, supersededByWriteId: null,
       };
       // Как триггеры channel_write (0036): новая версия вытесняет ждущие с причиной; при записи в полёте новая ждёт её завершения
@@ -711,6 +747,8 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     if (ceiling === null || w.amountMinor > ceiling) {
       return { status: 'DISCARDED_STALE', reason: { code: 'WRITE_BLOCKED_BY_BOUND_RECHECK', params: { amountMinor: w.amountMinor, floorMinor: floor, ceilingMinor: ceiling, violated: 'CEILING', currency: w.currency } } };
     }
+    const distrust = this.activeDistrust(row.channelAccountId, row.marketplace);
+    if (distrust) return { status: 'DISCARDED_STALE', reason: InMemoryPricingStore.distrustReason(distrust, 'DISPATCH') };
     const halt = this.activeHalt(row.channelAccountId, row.marketplace);
     if (InMemoryPricingStore.haltBlocks(halt, w.competitorDerived)) return { status: 'DISCARDED_STALE', reason: InMemoryPricingStore.haltReason(halt, 'DISPATCH') };
     return null;
@@ -762,8 +800,8 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     return this.apply(w, 'DISPATCHED', planOutcomeTransition(outcome, w.attemptCount, now, policy), now);
   }
 
-  /** Как PgWriteQueueStore.checkPriceBasis: ставка — из себестоимости единицы (режим НДС), остановка — одна на причину */
-  async checkPriceBasis(_tenantId: string, write: FieldWrite, observedMinor: number, now: Instant): Promise<PriceBasisHalt | null> {
+  /** Как PgWriteQueueStore.checkPriceBasis: ставка — товара или страны витрины; недоверие каналу — одно на витрину и причину [Р-118] */
+  async checkPriceBasis(_tenantId: string, write: FieldWrite, observedMinor: number, now: Instant): Promise<PriceBasisDistrust | null> {
     if (write.value.field !== 'PRICE') return null;
     const row = this.scopes.get(write.writeScope.writeScopeId);
     if (!row) return null;
@@ -777,18 +815,43 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       code: 'CHANNEL_PRICE_BASIS_MISMATCH',
       params: { basisError, vatRateBp: vatRateBp!, sentMinor, observedMinor, currency: write.value.price.currency, writeScopeId: row.writeScopeId, marketplace: row.marketplace },
     };
-    let halt = this.halts.find((h) => h.releasedAt === null && h.channelAccountId === row.channelAccountId && h.marketplace === row.marketplace && h.reasonCode === 'CHANNEL_PRICE_BASIS_MISMATCH');
-    if (!halt) {
-      const haltId = this.id('halt');
-      const window = 1800;
-      halt = {
-        haltId, channelAccountId: row.channelAccountId, marketplace: row.marketplace, reasonCode: 'CHANNEL_PRICE_BASIS_MISMATCH', rejectedSnapshotId: null,
-        details: Object.fromEntries(Object.entries(reason.params).filter(([k]) => k !== 'observedMinor')), haltedAt: now, reviewWindowSeconds: window, nextReviewAt: new Date(Date.parse(now) + window * 1000).toISOString(), releasedAt: null, releasedKind: null,
+    let d = this.distrusts.find((x) => x.releasedAt === null && x.channelAccountId === row.channelAccountId && x.marketplace === row.marketplace && x.reasonCode === 'PRICE_BASIS_MISMATCH');
+    if (!d) {
+      d = {
+        distrustId: this.id('distrust'), channelAccountId: row.channelAccountId, marketplace: row.marketplace, reasonCode: 'PRICE_BASIS_MISMATCH', detectedAt: now,
+        // В остановке только наши значения: цена покупателя из канала не хранится (ревью шага 22, находка 10)
+        details: Object.fromEntries(Object.entries(reason.params).filter(([k]) => k !== 'observedMinor')),
+        releasedAt: null, releasedByMembershipId: null, releaseNote: null,
       };
-      this.halts.push(halt);
-      this.auditHalt('pricing.halt_created', haltId, now, null, null);
+      this.distrusts.push(d);
+      this.auditDistrust('pricing.distrust_created', d, null);
     }
-    return { haltId: halt.haltId, reason };
+    return { distrustId: d.distrustId, reason };
+  }
+
+  /** Как channel_distrust_release_guard (0082): право RELEASE_CHANNEL_DISTRUST, пользователь сессии, второй фактор, заметка */
+  async releaseDistrust(_tenantId: string, distrustId: string, release: { membershipId: string; userId: string; mfa: boolean; note: string; at: Instant }): Promise<'RELEASED' | 'NOT_ACTIVE'> {
+    const d = this.distrusts.find((x) => x.distrustId === distrustId);
+    if (!d || d.releasedAt !== null) return 'NOT_ACTIVE';
+    const m = this.member(release.membershipId);
+    if (!m || !can(m.role, 'RELEASE_CHANNEL_DISTRUST')) throw new Error(`membership ${release.membershipId} may not release a channel distrust (Р-118)`);
+    if (m.userId !== release.userId) throw new Error(`membership ${release.membershipId} is not the membership of the session user`);
+    if (!release.mfa) throw new Error(`releasing channel distrust ${distrustId} requires a second factor (Р-118, Р-88)`);
+    if (!NOTE_OK(release.note)) throw new Error('releasing a channel distrust requires a note of 10 to 2000 characters');
+    d.releasedAt = release.at;
+    d.releasedByMembershipId = m.membershipId;
+    d.releaseNote = release.note;
+    this.auditDistrust('pricing.distrust_released', d, m);
+    return 'RELEASED';
+  }
+
+  /** Как channel_distrust_audit (0082): создание — актор SYSTEM, снятие — участник с ролью и заметкой [Р-76] */
+  private auditDistrust(action: 'pricing.distrust_created' | 'pricing.distrust_released', d: ConsoleDistrustRow, m: ConsoleMemberRow | null): void {
+    this.audit.push({
+      at: action === 'pricing.distrust_created' ? d.detectedAt : d.releasedAt!, action, actorType: m ? 'USER' : 'SYSTEM', membershipId: m?.membershipId ?? null, role: m?.role ?? null,
+      entityType: 'channel_distrust', entityId: d.distrustId, scope: d.marketplace === null ? 'CHANNEL_ACCOUNT' : 'STOREFRONT', channelAccountId: d.channelAccountId,
+      marketplace: d.marketplace, note: m ? d.releaseNote : null,
+    });
   }
 
   async recordReconciliation(_tenantId: string, write: FieldWrite, result: Reconciliation, now: Instant, policy: RetryPolicy): Promise<RecordedOutcome> {
@@ -1035,6 +1098,8 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   async reviewHaltBySample(_tenantId: string, haltId: string, now: Instant): Promise<HaltSampleReview> {
     const h = this.halts.find((x) => x.haltId === haltId && x.releasedAt === null && x.reasonCode === 'CHANNEL_MASS_SHIFT');
     if (!h) return 'NOT_ACTIVE';
+    // Как review_halt_by_sample (0082) и platform.channel_behaviour: на Amazon выборки нет — только ручное снятие [Р-119]
+    if (this.channel === 'AMAZON') return 'MANUAL_ONLY';
     if (Date.parse(now) < Date.parse(h.nextReviewAt)) return 'NOT_DUE';
     const eligible = new Set<string>();
     for (const s of this.scopes.values()) {
@@ -1143,6 +1208,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
           pricingMode: s.pricingMode, status: s.status, strategy: s.strategy, currentPriceMinor: s.currentPriceMinor, bounds: this.boundsOf(s),
           cost: s.cost ?? null, minMarginBp: s.guardrails?.minMarginBp ?? null,
           channelHalt: halt ? InMemoryPricingStore.haltRef(halt) : null, priceStop: stop ? InMemoryPricingStore.stopRef(stop) : null,
+          channelDistrust: (() => { const d = this.activeDistrust(s.channelAccountId, s.marketplace); return d ? InMemoryPricingStore.distrustRef(d) : null; })(),
         };
       }),
       intents: this.intents.map((i) => ({ ...i })),
@@ -1158,6 +1224,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
         nextReviewAt: h.nextReviewAt, releasedAt: h.releasedAt, releasedKind: h.releasedKind,
       })),
       haltReviews: this.haltReviews.map((r) => ({ ...r })),
+      distrusts: this.distrusts.map((d) => ({ ...d, details: { ...d.details } })),
       stops: this.stops.map((s) => ({ ...s })),
       rejectedSnapshots: this.rejectedSnapshots.map((r) => ({ ...r })),
       divergenceCases: this.divergenceCases.map((c) => ({ ...c })),
@@ -1176,6 +1243,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       rejectedSnapshots: this.rejectedSnapshots.map((r) => ({ verdict: r.verdict, reasonCode: r.reasonCode, alarmClass: r.alarmClass, key: { channelProductRef: r.key.channelProductRef, marketplace: r.key.marketplace } })),
       halts: this.halts.map((h) => ({ haltId: h.haltId, channelAccountId: h.channelAccountId, marketplace: h.marketplace, reasonCode: h.reasonCode, releasedAt: h.releasedAt, releasedKind: h.releasedKind, nextReviewAt: h.nextReviewAt })),
       haltReviews: this.haltReviews.map((r) => ({ kind: r.kind, outcome: r.outcome, sampleSize: r.sampleSize, failedCount: r.failedCount })),
+      distrusts: this.distrusts.map((d) => ({ distrustId: d.distrustId, marketplace: d.marketplace, reasonCode: d.reasonCode, releasedAt: d.releasedAt, released: d.releasedAt !== null })),
       stops: this.stops.map((s) => ({ stopId: s.stopId, scope: s.scope, marketplace: s.marketplace, releasedAt: s.releasedAt })),
       intents: this.intents.map((i) => ({ writeScopeId: i.writeScopeId, ruleCode: i.ruleCode, proposedMinor: i.proposedMinor })),
       decisions: this.decisions.map((d) => ({

@@ -1,4 +1,4 @@
-import type { FieldWrite, Instant, OfferIdentity, PriceBasis, WriteOutcome, WriteValue } from '@repracer/channel-port';
+import { offerIdentityOf, type FieldWrite, type Instant, type OfferIdentity, type PriceBasis, type WriteOutcome, type WriteValue } from '@repracer/channel-port';
 import { floorCauseFromDatabase, priceBasisMismatch, sellerActionFor } from '@repracer/pricing-model';
 import {
   planOutcomeTransition,
@@ -6,7 +6,7 @@ import {
   type ClaimResult,
   type DueScope,
   type OutcomeTransition,
-  type PriceBasisHalt,
+  type PriceBasisDistrust,
   type RecordedOutcome,
   type Reconciliation,
   type RetryPolicy,
@@ -29,7 +29,7 @@ const iso = (v: unknown): Instant => (v instanceof Date ? v.toISOString() : Stri
 const WRITE_ROW = `
 SELECT w.channel_write_id, w.write_scope_id, w.field, w.amount_minor, w.currency, w.price_basis, w.quantity, w.version,
        w.idempotency_key, w.status, w.attempt_count, w.next_attempt_at, w.dispatched_at, w.accepted_at, w.budget_scope_key, w.budget_day,
-       s.scope_key, s.channel_account_id,
+       s.scope_key, s.channel_account_id, s.channel,
        m.marketplace, m.region, m.external_sku, m.external_offer_id, m.external_listing_id, m.external_unit_id
   FROM tenant_data.channel_write w
   JOIN tenant_data.write_scope s ON s.tenant_id = w.tenant_id AND s.write_scope_id = w.write_scope_id
@@ -42,13 +42,11 @@ SELECT w.channel_write_id, w.write_scope_id, w.field, w.amount_minor, w.currency
  WHERE w.tenant_id = $1`;
 
 function toWrite(r: Row): FieldWrite {
-  const identity: OfferIdentity = {};
-  if (r.region) identity.region = r.region;
-  if (r.marketplace) identity.marketplace = r.marketplace;
-  if (r.external_sku) identity.externalSku = r.external_sku;
-  if (r.field === 'QUANTITY' && r.external_offer_id) identity.externalOfferId = r.external_offer_id;
-  if (r.external_listing_id) identity.externalListingId = r.external_listing_id;
-  if (r.external_unit_id) identity.externalUnitId = r.external_unit_id;
+  // OQ-165: то же определение, что у пути решения
+  const identity: OfferIdentity = offerIdentityOf({
+    channel: r.channel, field: r.field, region: r.region, marketplace: r.marketplace, externalSku: r.external_sku,
+    externalOfferId: r.external_offer_id, externalListingId: r.external_listing_id, externalUnitId: r.external_unit_id,
+  });
   const money = { amountMinor: Number(r.amount_minor), currency: r.currency as string, basis: r.price_basis as PriceBasis };
   const value: WriteValue = r.field === 'QUANTITY' ? { field: 'QUANTITY', quantity: Number(r.quantity) }
     : r.field === 'PRICE' ? { field: 'PRICE', price: money }
@@ -106,6 +104,9 @@ function dispatchRefusal(error: unknown, write: Row): { status: 'DISCARDED_STALE
   // Р-69: остановка человеком — никакая цена не уходит
   m = /price_stop ([0-9a-f-]{36})/.exec(message);
   if (m) return { status: 'DISCARDED_STALE', reason: { code: 'PRICING_STOPPED', params: { stopId: m[1]!, stage: 'DISPATCH' } } };
+  // Р-118: недоверие каналу — никакая цена не уходит
+  m = /channel_distrust ([0-9a-f-]{36})/.exec(message);
+  if (m) return { status: 'DISCARDED_STALE', reason: { code: 'CHANNEL_DISTRUSTED', params: { stage: 'DISPATCH', distrustId: m[1]! } } };
   m = /pricing_halt ([0-9a-f-]{36})/.exec(message);
   if (m) return { status: 'DISCARDED_STALE', reason: { code: 'CHANNEL_HALTED', params: { stage: 'DISPATCH', haltId: m[1]! } } };
   m = /pricing_mode changed to (\w+)/.exec(message);
@@ -238,7 +239,7 @@ export class PgWriteQueueStore implements WriteQueueStore {
     return rows.map((r) => ({ tenantId: r.tenant_id, writeScopeId: r.write_scope_id, dueKind: r.due_kind, dueSince: iso(r.due_since) }));
   }
 
-  async checkPriceBasis(tenantId: string, write: FieldWrite, observedMinor: number, now: Instant): Promise<PriceBasisHalt | null> {
+  async checkPriceBasis(tenantId: string, write: FieldWrite, observedMinor: number, now: Instant): Promise<PriceBasisDistrust | null> {
     if (write.value.field !== 'PRICE') return null;
     const sentMinor = write.value.price.amountMinor;
     const currency = write.value.price.currency;
@@ -260,19 +261,18 @@ export class PgWriteQueueStore implements WriteQueueStore {
         code: 'CHANNEL_PRICE_BASIS_MISMATCH',
         params: { basisError, vatRateBp: vatRateBp!, sentMinor, observedMinor, currency, writeScopeId: write.writeScope.writeScopeId, marketplace: sc.marketplace },
       };
-      // Р-116: остановка витрины — все цены, снимает только человек (0080); повтор той же причины не создаёт вторую остановку
+      // Р-116, Р-118: недоверие каналу — все цены, снимает только человек (0082); повтор той же причины не создаёт второе.
+      // В остановке только наши значения: цена покупателя из канала (класс CHANNEL) не хранится [Р-3]
       await tx.query(
-        `INSERT INTO channel_data.pricing_halt (tenant_id, channel_account_id, channel, marketplace, reason_code, details, halted_at)
-         VALUES ($1, $2, $3, $4, 'CHANNEL_PRICE_BASIS_MISMATCH', $5, $6)
+        `INSERT INTO channel_data.channel_distrust (tenant_id, channel_account_id, channel, marketplace, reason_code, details, detected_at)
+         VALUES ($1, $2, $3, $4, 'PRICE_BASIS_MISMATCH', $5, $6)
          ON CONFLICT (tenant_id, channel_account_id, (COALESCE(marketplace, '*')), reason_code) WHERE released_at IS NULL DO NOTHING`,
-        // В остановке — только наши значения: цена покупателя из канала (класс CHANNEL) жила бы дольше 18 месяцев [Р-3] вместе с
-        // неснятой остановкой (ревью шага 22, находка 10); она есть в алерте-причине и не хранится
         [tenantId, sc.channel_account_id, sc.channel, sc.marketplace, JSON.stringify({ ...reason.params, observedMinor: undefined }), now]);
-      const { rows: [h] } = await tx.query(
-        `SELECT pricing_halt_id FROM channel_data.pricing_halt
-          WHERE tenant_id = $1 AND channel_account_id = $2 AND marketplace = $3 AND reason_code = 'CHANNEL_PRICE_BASIS_MISMATCH' AND released_at IS NULL`,
+      const { rows: [d] } = await tx.query(
+        `SELECT channel_distrust_id FROM channel_data.channel_distrust
+          WHERE tenant_id = $1 AND channel_account_id = $2 AND marketplace = $3 AND reason_code = 'PRICE_BASIS_MISMATCH' AND released_at IS NULL`,
         [tenantId, sc.channel_account_id, sc.marketplace]);
-      return h ? { haltId: h.pricing_halt_id, reason } : null;
+      return d ? { distrustId: d.channel_distrust_id, reason } : null;
     });
   }
 

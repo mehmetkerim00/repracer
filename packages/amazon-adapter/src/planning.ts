@@ -6,8 +6,9 @@ import { channelError } from './errors.ts';
 export const OPERATION_PATCH = 'patchListingsItem';
 
 /** SKU единицы записи: external_sku (очередь записей) или externalUnitId (путь решения переносит SKU туда, store.ts 345) */
-export function skuOf(write: { writeScope: { identity: { externalSku?: string; externalUnitId?: string } } }): string | null {
-  const sku = write.writeScope.identity.externalSku ?? write.writeScope.identity.externalUnitId;
+/** SKU — только `externalSku` идентичности (OQ-165: одно определение, `offerIdentityOf`); unit Kaufland сюда не подставляется */
+export function skuOf(write: { writeScope: { identity: { externalSku?: string } } }): string | null {
+  const sku = write.writeScope.identity.externalSku;
   return sku && sku.length <= 40 ? sku : null;
 }
 

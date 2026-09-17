@@ -37,6 +37,9 @@ SELECT set_config('app.tenant_id', 'a0000000-0000-0000-0000-00000000000a', true)
 
 INSERT INTO channel_data.competitor_move (tenant_id, channel_account_id, marketplace, channel_product_ref, condition, observed_at, move_bp, verdict)
 VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'de', 'R103-1', 'new', now(), 150, 'ACCEPT');
+-- Р-120 (0082): наблюдение собственного ценообразования канала
+INSERT INTO channel_data.offer_channel_pricing (tenant_id, channel_account_id, channel, marketplace, external_sku, automated_pricing, channel_bounds, source, observed_at)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R103-SKU', false, false, 'DISCOVERY', now());
 INSERT INTO channel_data.price_decision_snapshot_ref (tenant_id, price_decision_id, decided_at, write_scope_id, competitor_snapshot_id, source, observed_at)
 SELECT tenant_id, price_decision_id, decided_at, write_scope_id, 'a9103000-0000-4000-8000-000000000001', 'KAUFLAND_BUYBOX', decided_at
   FROM channel_data.price_decision WHERE price_decision_id = 'a8000000-0000-0000-0000-000000000001';

@@ -2,10 +2,10 @@ import type { ExplanationRuleset as DictionaryRuleset } from '@repracer/pricing-
 import {
   floorCauseFromDatabase, convertMinor, type FxQuote } from '@repracer/pricing-model';
 import { DEFAULT_RETRY_POLICY } from '@repracer/write-dispatcher';
-import type { CompetitorQuery, FieldWrite, Instant, WriteOutcome } from '@repracer/channel-port';
+import { offerIdentityOf, type CompetitorQuery, type FieldWrite, type Instant, type WriteOutcome } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange } from '@repracer/input-sanity';
 import type { GuardrailSet } from '@repracer/price-gate';
-import type { AcceptedSnapshot, BoundResolution, CostInputs, HaltRef, PriceBounds, PriceIntentDraft, Reason, StopRef, StrategyDefinition } from '@repracer/pricing-model';
+import type { AcceptedSnapshot, BoundResolution, CostInputs, DistrustRef, HaltRef, PriceBounds, PriceIntentDraft, Reason, StopRef, StrategyDefinition } from '@repracer/pricing-model';
 import { randomUUID } from 'node:crypto';
 import type {
   AdminActor,
@@ -37,7 +37,7 @@ import type {
   ProductKey,
   ScopeEvaluationContext,
   ShiftWindow,
-  SnapshotOutcome, ConsoleAuditRow } from '@repracer/pricing-pipeline';
+  SnapshotOutcome, ConsoleAuditRow, ConsoleDistrustRow } from '@repracer/pricing-pipeline';
 import { inTenant, RollbackWith, type PgPool, type Tx } from './db.ts';
 import { PgWriteQueueStore } from './write-queue.ts';
 
@@ -76,7 +76,7 @@ const COMPETITOR_RULES = ['MATCH_BUYBOX', 'BEAT_LOWEST', 'POSITION'];
  * Р-91: подрез стратегии — из channel_data.pricing_strategy_undercut (18 месяцев после замены версии), не из вечной версии стратегии
  */
 const SCOPE_COLUMNS = `
-  s.write_scope_id, s.product_id, s.channel_account_id, s.channel, m.marketplace, m.external_unit_id, m.external_sku, m.channel_product_ref, m.condition,
+  s.write_scope_id, s.product_id, s.channel_account_id, s.channel, m.marketplace, m.region, m.external_unit_id, m.external_sku, m.external_listing_id, m.channel_product_ref, m.condition,
   s.scope_key, p.gtin, s.currency, s.price_basis, s.tax_regime, s.pricing_mode, s.status, s.pricing_strategy_id, s.pricing_strategy_version, s.created_at,
   CASE WHEN ud.undercut_minor IS NULL THEN ps.params ELSE ps.params || jsonb_build_object('undercutMinor', ud.undercut_minor) END AS strategy_params,
   ss.latest_version_accepted, ss.last_sent_amount_minor`;
@@ -115,11 +115,19 @@ const HALT_WHERE = `
     FROM channel_data.pricing_halt h
    WHERE h.tenant_id = $1 AND h.channel_account_id = sc.channel_account_id AND h.released_at IS NULL
      AND (h.marketplace IS NULL OR h.marketplace = sc.marketplace)
-   -- Р-116: остановка по базе цены блокирует все цены — при двух действующих остановках решение видит её первой
-   ORDER BY (h.reason_code = 'CHANNEL_PRICE_BASIS_MISMATCH') DESC, h.halted_at
    LIMIT 1`;
 const ACTIVE_HALT = `SELECT h.pricing_halt_id ${HALT_WHERE}`;
 const ACTIVE_HALT_JSON = `SELECT json_build_object('haltId', h.pricing_halt_id, 'reasonCode', h.reason_code, 'marketplace', h.marketplace, 'haltedAt', h.halted_at) ${HALT_WHERE}`;
+
+/** Остановка по недоверию каналу [Р-118]: все цены; как channel_data.channel_distrust_for (0082) */
+const DISTRUST_WHERE = `
+    FROM channel_data.channel_distrust d
+   WHERE d.tenant_id = $1 AND d.channel_account_id = sc.channel_account_id AND d.released_at IS NULL
+     AND (d.marketplace IS NULL OR d.marketplace = sc.marketplace)
+   ORDER BY d.detected_at
+   LIMIT 1`;
+const ACTIVE_DISTRUST = `SELECT d.channel_distrust_id ${DISTRUST_WHERE}`;
+const ACTIVE_DISTRUST_JSON = `SELECT json_build_object('distrustId', d.channel_distrust_id, 'reasonCode', d.reason_code, 'marketplace', d.marketplace, 'detectedAt', d.detected_at) ${DISTRUST_WHERE}`;
 
 /** Остановка человеком [Р-69, Р-70]: тенант — на любой аккаунт; аккаунт; витрина */
 const STOP_WHERE = `
@@ -154,6 +162,7 @@ const SCOPE_JSON = `json_build_object(
                  AND h.accepted_at >= $2::timestamptz - interval '1 hour' AND h.accepted_at <= $2::timestamptz),
   'bounds', (${BOUNDS_ROWS}),
   'halt', (${ACTIVE_HALT_JSON}),
+  'distrust', (${ACTIVE_DISTRUST_JSON}),
   'stop', (${ACTIVE_STOP_JSON}),
   -- Почему единица не активна: последняя ошибка канала, требующая человека
   'blocking', (SELECT json_build_object('errorCode', w.last_error_code, 'since', coalesce(w.dispatched_at, w.created_at))
@@ -271,7 +280,7 @@ SELECT (SELECT ${SCOPE_JSON} FROM sc) AS scope,
          WHERE cs.tenant_id = $1) AS state`;
 
 const VERSION_SQL = `
-SELECT sc.write_scope_id, sc.currency, sc.price_basis, (${BOUNDS_ROWS}) AS bounds, (${ACTIVE_HALT}) AS halt_id, (${ACTIVE_STOP}) AS stop_id
+SELECT sc.write_scope_id, sc.currency, sc.price_basis, (${BOUNDS_ROWS}) AS bounds, (${ACTIVE_HALT}) AS halt_id, (${ACTIVE_DISTRUST}) AS distrust_id, (${ACTIVE_STOP}) AS stop_id
   FROM (SELECT s.write_scope_id, s.product_id, s.currency, s.price_basis, s.channel_account_id, m.marketplace
           FROM tenant_data.write_scope s
           JOIN tenant_data.offer_mapping m ON m.tenant_id = s.tenant_id AND m.price_write_scope_id = s.write_scope_id AND m.status <> 'ENDED'
@@ -304,8 +313,8 @@ function toBounds(rows: Row[], currency: string, basis: 'GROSS' | 'NET'): PriceB
   return { currency, basis, min: resolve('min'), max: resolve('max') };
 }
 
-function contextVersion(bounds: Row[], haltId: string | null, stopId: string | null): string {
-  return `${bounds.map((r) => `${r.bound}:${r.level}:${r.id}`).sort().join('|')}|halt:${haltId ?? '-'}|stop:${stopId ?? '-'}`;
+function contextVersion(bounds: Row[], haltId: string | null, distrustId: string | null, stopId: string | null): string {
+  return `${bounds.map((r) => `${r.bound}:${r.level}:${r.id}`).sort().join('|')}|halt:${haltId ?? '-'}|distrust:${distrustId ?? '-'}|stop:${stopId ?? '-'}`;
 }
 
 /** Что изменилось в контексте решения между чтением и фиксацией — параметры BOUNDS_VERSION_CHANGED [Р-54] */
@@ -317,6 +326,7 @@ function contextChange(read: ScopeEvaluationContext, now: Row | undefined): Reas
   if (!fresh || amount(fresh.min) !== amount(read.bounds.min) || fresh.min.status !== read.bounds.min.status) changed.push('MIN_PRICE');
   if (!fresh || amount(fresh.max) !== amount(read.bounds.max) || fresh.max.status !== read.bounds.max.status) changed.push('MAX_PRICE');
   if ((now?.halt_id ?? null) !== (read.channelHalt?.haltId ?? null)) changed.push('CHANNEL_HALT');
+  if ((now?.distrust_id ?? null) !== (read.channelDistrust?.distrustId ?? null)) changed.push('CHANNEL_DISTRUST');
   if ((now?.stop_id ?? null) !== (read.priceStop?.stopId ?? null)) changed.push('PRICING_STOP');
   return {
     code: 'BOUNDS_VERSION_CHANGED',
@@ -345,6 +355,10 @@ function toScopeContext(j: Row, now: Instant): ScopeEvaluationContext {
     channelAccountId: r.channel_account_id,
     marketplace: r.marketplace,
     externalUnitId: r.external_unit_id ?? r.external_sku ?? '',
+    identity: offerIdentityOf({
+      channel: r.channel, field: 'PRICE', region: r.region, marketplace: r.marketplace, externalSku: r.external_sku,
+      externalListingId: r.external_listing_id, externalUnitId: r.external_unit_id,
+    }),
     channelProductRef: r.channel_product_ref ?? '',
     condition: portCondition(r.condition),
     scopeKey: r.scope_key,
@@ -389,19 +403,23 @@ function toScopeContext(j: Row, now: Instant): ScopeEvaluationContext {
   const stop = j.stop as Row | null;
   const blocking = j.blocking as Row | null;
   const channelHalt: HaltRef | null = halt ? { haltId: halt.haltId, reasonCode: halt.reasonCode, marketplace: halt.marketplace ?? null, haltedAt: iso(halt.haltedAt) } : null;
+  const distrust = j.distrust as Row | null;
+  const channelDistrust: DistrustRef | null = distrust
+    ? { distrustId: distrust.distrustId, reasonCode: distrust.reasonCode, marketplace: distrust.marketplace ?? null, detectedAt: iso(distrust.detectedAt) } : null;
   const priceStop: StopRef | null = stop
     ? { stopId: stop.stopId, scope: stop.scope, channelAccountId: stop.channelAccountId ?? null, marketplace: stop.marketplace ?? null, stoppedAt: iso(stop.stoppedAt), stoppedByMembershipId: stop.stoppedBy }
     : null;
   return {
     scope,
     bounds: toBounds(bounds, scope.currency, scope.basis),
-    contextVersion: contextVersion(bounds, channelHalt?.haltId ?? null, priceStop?.stopId ?? null),
+    contextVersion: contextVersion(bounds, channelHalt?.haltId ?? null, channelDistrust?.distrustId ?? null, priceStop?.stopId ?? null),
     cost,
     unitCostMinor: converted?.ok ? converted.amountMinor : null,
     costUnavailableCause: converted && !converted.ok ? converted.cause : null,
     costMissingCause: !c ? 'COST_PROFILE_MISSING' : converted && !converted.ok ? converted.cause : !cost ? 'FEE_ESTIMATE_MISSING' : null,
     guardrails,
     channelHalt,
+    channelDistrust,
     priceStop,
     blocking: blocking ? { errorCode: blocking.errorCode, since: iso(blocking.since) } : null,
     changesInLastHour: Number(j.changes ?? 0),
@@ -453,6 +471,8 @@ function dbReason(error: unknown, amountMinor: number | null, currency: string):
   if (message.includes('above effective max_price')) return { code: 'ABOVE_MAX_PRICE', params: { proposedMinor: amountMinor, maxMinor: bound('max_price'), source: 'DATABASE', currency } };
   const stopId = uuid('price_stop');
   if (stopId) return { code: 'PRICING_STOPPED', params: { stopId, stage: 'DATABASE' } };
+  const distrustId = uuid('channel_distrust');
+  if (distrustId) return { code: 'CHANNEL_DISTRUSTED', params: { stage: 'DATABASE', distrustId } };
   const haltId = uuid('pricing_halt');
   if (haltId) return { code: 'CHANNEL_HALTED', params: { stage: 'DATABASE', haltId } };
   return null;
@@ -558,7 +578,7 @@ export class PgPricingStore implements PricingStore {
           for (const d of input.decisions) {
             const id = d.context.scope.writeScopeId;
             const r = byScope.get(id);
-            if (!r || contextVersion(r.bounds, r.halt_id, r.stop_id) !== d.context.contextVersion) {
+            if (!r || contextVersion(r.bounds, r.halt_id, r.distrust_id, r.stop_id) !== d.context.contextVersion) {
               throw new RollbackWith<EvaluationCommitResult>({ status: 'CONTEXT_CHANGED', writeScopeId: id, reason: contextChange(d.context, r) });
             }
           }
@@ -692,7 +712,7 @@ export class PgPricingStore implements PricingStore {
     await tx.query(
       `INSERT INTO channel_data.pricing_halt (tenant_id, channel_account_id, channel, marketplace, reason_code, rejected_snapshot_id, details, halted_at)
        SELECT $1, $2, a.channel, $3, $4, $5, $6, $7 FROM tenant_data.channel_account a WHERE a.tenant_id = $1 AND a.channel_account_id = $2
-       ON CONFLICT (tenant_id, channel_account_id, (COALESCE(marketplace, '*')), reason_code) WHERE released_at IS NULL DO NOTHING`,
+       ON CONFLICT (tenant_id, channel_account_id, (COALESCE(marketplace, '*'))) WHERE released_at IS NULL DO NOTHING`,
       [tenantId, halt.channelAccountId, halt.marketplace, halt.reasonCode, rejectedSnapshotId, JSON.stringify(halt.details ?? {}), halt.haltedAt],
     );
   }
@@ -779,7 +799,7 @@ export class PgPricingStore implements PricingStore {
           writeScopeId: scope.writeScopeId as FieldWrite['writeScope']['writeScopeId'],
           field: 'PRICE',
           scopeKey: scope.scopeKey,
-          identity: { marketplace: scope.marketplace, externalUnitId: scope.externalUnitId },
+          identity: scope.identity,
         },
         version: writeRow!.version,
         idempotencyKey: writeRow!.idempotency_key,
@@ -811,7 +831,7 @@ export class PgPricingStore implements PricingStore {
       const { rows } = await tx.query(PRICE_BOUNDS_SQL, [tenantId, writeScopeId]);
       const r = rows[0];
       const bounds = (r?.bounds ?? []) as Row[];
-      return { bounds: toBounds(bounds, r?.currency ?? '', r?.price_basis ?? 'GROSS'), version: contextVersion(bounds, null, null) };
+      return { bounds: toBounds(bounds, r?.currency ?? '', r?.price_basis ?? 'GROSS'), version: contextVersion(bounds, null, null, null) };
     });
   }
 
@@ -1045,7 +1065,7 @@ export class PgPricingStore implements PricingStore {
                 tax: row.tax_regime === 'SALES_TAX_EXCLUDED' ? { regime: 'SALES_TAX_EXCLUDED' } : { regime: 'VAT_INCLUDED', vatRateBp: j.vatRateBp ?? null },
               }
             : null,
-          minMarginBp: ctx.guardrails.minMarginBp, channelHalt: ctx.channelHalt, priceStop: ctx.priceStop,
+          minMarginBp: ctx.guardrails.minMarginBp, channelHalt: ctx.channelHalt, channelDistrust: ctx.channelDistrust, priceStop: ctx.priceStop,
         };
       });
       const intents = (await q(`SELECT price_intent_id, created_at, write_scope_id, pricing_strategy_id, pricing_strategy_version, trigger_type, source_event_id,
@@ -1107,6 +1127,12 @@ export class PgPricingStore implements PricingStore {
           haltId: r.pricing_halt_id, kind: r.kind, outcome: r.outcome, sampleSize: r.sample_size, failedCount: r.failed_count, details: r.details,
           ...(r.membership_id ? { membershipId: r.membership_id } : {}), ...(r.note ? { note: r.note } : {}), at: r.reviewed_at,
         }));
+      const distrusts = (await q(`SELECT channel_distrust_id, channel_account_id, marketplace, reason_code, details, detected_at, released_at, released_by_membership_id, release_note
+                                    FROM channel_data.channel_distrust WHERE tenant_id = $1 ORDER BY detected_at`))
+        .map((r): ConsoleDistrustRow => ({
+          distrustId: r.channel_distrust_id, channelAccountId: r.channel_account_id, marketplace: r.marketplace, reasonCode: r.reason_code, details: r.details,
+          detectedAt: iso(r.detected_at), releasedAt: r.released_at ? iso(r.released_at) : null, releasedByMembershipId: r.released_by_membership_id, releaseNote: r.release_note,
+        }));
       const stops = (await q(`SELECT ${PgPricingStore.STOP_COLUMNS} FROM tenant_data.price_stop WHERE tenant_id = $1 ORDER BY stopped_at`)).map(PgPricingStore.stopRow);
       const rejectedSnapshots = (await q(`SELECT rejected_snapshot_id, channel_account_id, marketplace, channel_product_ref, condition, source, source_event_id,
                                                  observed_at, received_at, verdict, reason_code, alarm_class, details, ruleset_version
@@ -1146,7 +1172,7 @@ export class PgPricingStore implements PricingStore {
           marketplace: r.changes.marketplace ?? null, note: r.changes.note ?? null,
         }));
       return {
-        tenantId, scopes, intents, decisions, writes, halts, haltReviews, stops, rejectedSnapshots, divergenceCases,
+        tenantId, scopes, intents, decisions, writes, halts, haltReviews, distrusts, stops, rejectedSnapshots, divergenceCases,
         fxRates: fx.map((f) => ({ source: 'ECB', rateDate: f.rate_date, base: 'EUR', quote: f.quote_currency, rateMicros: Number(f.rate_micros), availableFrom: f.available_from })),
         members, strategies, explanationRulesets, audit,
       };
@@ -1216,6 +1242,17 @@ export class PgPricingStore implements PricingStore {
     );
   }
 
+  /** Р-118: снятие недоверия каналу — в сессии пользователя административного сервиса со вторым фактором; права и заметку сверяет база (0082) */
+  async releaseDistrust(tenantId: string, distrustId: string, release: { membershipId: string; userId: string; mfa: boolean; note: string; at: Instant }): Promise<'RELEASED' | 'NOT_ACTIVE'> {
+    return inTenant(this.admin('releaseDistrust'), tenantId, async (tx) => {
+      const { rowCount } = await tx.query(
+        `UPDATE channel_data.channel_distrust SET released_at = $3, released_by_membership_id = $4, release_note = $5
+          WHERE tenant_id = $1 AND channel_distrust_id = $2 AND released_at IS NULL`,
+        [tenantId, distrustId, release.at, release.membershipId, release.note]);
+      return rowCount === 1 ? 'RELEASED' as const : 'NOT_ACTIVE' as const;
+    }, release.userId, { mfa: release.mfa });
+  }
+
   async releaseHalt(tenantId: string, haltId: string, review: HaltReviewRecord): Promise<void> {
     // Р-52, находки 4, 12, Р-90: ручное снятие — в сессии пользователя административного сервиса со вторым фактором.
     // Автоматическое снятие путь решения не пишет: его вычисляет база по выборке (reviewHaltBySample, 0063)
@@ -1273,6 +1310,7 @@ export class PgPricingStore implements PricingStore {
                               SELECT write_scope_id, amount_minor, version, final_status, end_reason, created_at FROM tenant_data.channel_write_history WHERE tenant_id = $1 AND field = 'PRICE'
                               ORDER BY created_at, version`);
       const stops = await q(`SELECT price_stop_id, scope_type, marketplace, released_at FROM tenant_data.price_stop WHERE tenant_id = $1 ORDER BY stopped_at`);
+      const distrusts = await q(`SELECT channel_distrust_id, marketplace, reason_code, released_at FROM channel_data.channel_distrust WHERE tenant_id = $1 ORDER BY detected_at`);
       const cases = await q(`SELECT write_scope_id, expected_amount_minor, observed_amount_minor, cause, status FROM channel_data.divergence_case
                                WHERE tenant_id = $1 ORDER BY opened_at`);
       const states = await q(`SELECT marketplace, channel_product_ref, condition, observed_at, buybox_amount_minor, offers, currency, suggested_price_minor
@@ -1286,6 +1324,7 @@ export class PgPricingStore implements PricingStore {
         halts: halts.map((h) => ({ haltId: h.pricing_halt_id, channelAccountId: h.channel_account_id, marketplace: h.marketplace, reasonCode: h.reason_code, releasedAt: h.released_at, releasedKind: h.released_kind, nextReviewAt: h.next_review_at })),
         haltReviews: reviews.map((r) => ({ kind: r.kind, outcome: r.outcome, sampleSize: r.sample_size, failedCount: r.failed_count })),
         stops: stops.map((r) => ({ stopId: r.price_stop_id, scope: r.scope_type, marketplace: r.marketplace, releasedAt: r.released_at })),
+        distrusts: distrusts.map((d) => ({ distrustId: d.channel_distrust_id, marketplace: d.marketplace, reasonCode: d.reason_code, releasedAt: d.released_at, released: d.released_at !== null })),
         intents: intents.map((i) => ({ writeScopeId: i.write_scope_id, ruleCode: i.rule_code, proposedMinor: i.proposed_amount_minor })),
         decisions: decisions.map((d) => ({ writeScopeId: d.write_scope_id, outcome: d.outcome, decisionClass: d.intent_class, rejectionReason: d.rejection_reason, finalMinor: d.final_amount_minor, reasonParams: d.reason_params, fx: d.fx, boundDeviationBp: d.bound_deviation_bp })),
         writes: writes.map((w) => ({ writeScopeId: w.write_scope_id, amountMinor: w.amount_minor, version: w.version, status: w.status, endReason: w.end_reason })),

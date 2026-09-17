@@ -16,7 +16,7 @@ const scope = (n: number, priceMinor: number) => ({
   currentPriceMinor: 1850, minPrice: { amountMinor: 1000, id: `min-${n}` }, maxPrice: { amountMinor: 5000, id: `max-${n}` },
 });
 
-test('finding 1 of the step 22 review: a synchronous first dispatch whose buyer price differs by the VAT rate halts the storefront on the decision path', async () => {
+test('finding 1 of the step 22 review: a synchronous first dispatch whose buyer price differs by the VAT rate distrusts the channel on the decision path (Р-118)', async () => {
   const store = new InMemoryPricingStore({ scopes: [scope(1, 1999), scope(2, 2100)] });
   const sent: string[] = [];
   const adapter = {
@@ -40,12 +40,13 @@ test('finding 1 of the step 22 review: a synchronous first dispatch whose buyer 
   const ctx = { tenantId: 'memory-tenant', channelAccountId: 'acc-1', correlationId: 't', deadline: '2026-09-17T10:01:00.000Z' } as AdapterCallContext;
 
   const first = await pipeline.recompute(ctx, 'ws-1', { type: 'COST_CHANGE' });
-  assert.ok(first.stages.some((s) => s.outcome === 'PRICE_BASIS_HALT'), JSON.stringify(first.stages));
-  assert.deepEqual(store.halts.map((h) => [h.reasonCode, h.marketplace]), [['CHANNEL_PRICE_BASIS_MISMATCH', 'de']]);
-  assert.equal('observedMinor' in store.halts[0]!.details, false, 'finding 10: the buyer price read from the channel is not kept in the halt');
-  assert.ok(alerts.includes('PRICING_PRICE_BASIS_MISMATCH'));
+  assert.ok(first.stages.some((s) => s.outcome === 'CHANNEL_DISTRUSTED'), JSON.stringify(first.stages));
+  assert.deepEqual(store.halts, [], 'Р-118: not a storefront halt of Р-51');
+  assert.deepEqual(store.distrusts.map((d) => [d.reasonCode, d.marketplace]), [['PRICE_BASIS_MISMATCH', 'de']]);
+  assert.equal('observedMinor' in store.distrusts[0]!.details, false, 'finding 10: the buyer price read from the channel is not kept in the distrust');
+  assert.ok(alerts.includes('PRICING_CHANNEL_DISTRUSTED'));
   // Фиксированная цена второго товара витрины удерживается, в канал не уходит
   const second = await pipeline.recompute(ctx, 'ws-2', { type: 'COST_CHANGE' });
-  assert.equal(second.decision?.rejectionReason, 'CHANNEL_HALTED');
+  assert.equal(second.decision?.rejectionReason, 'CHANNEL_DISTRUSTED');
   assert.deepEqual(sent, ['ws-1']);
 });

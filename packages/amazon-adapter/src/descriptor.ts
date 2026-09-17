@@ -70,12 +70,14 @@ export const AMAZON_DESCRIPTOR: ChannelDescriptor = {
     { owner: 'APPLICATION' as const, operation, requestsPerSecond: r.application.ratePerSecond, source: 'DOCUMENTED' as const },
   ]),
   capabilities: [],
+  // Р-119: опроса конкурентов нет (getCompetitiveSummary 0.033 rps, AMZ_C07) — выборку для Р-52 взять неоткуда
+  haltRelease: { kind: 'MANUAL_ONLY', basis: 'Р-119: no competitor polling on Amazon, a fresh independent sample cannot be taken' },
   competitorSources: [
     {
       source: SOURCE_ANY_OFFER_CHANGED,
       kind: 'PUSH',
-      // Число предложений в уведомлении схемой не ограничено: полнота — TOP_N по фактическому числу (проверить, A-08)
-      completeness: { kind: 'TOP_N', n: 1 },
+      // «Any of the top 20 offers» — страница notification-type-values (ANY_OFFER_CHANGED); схема maxItems не задаёт
+      completeness: { kind: 'TOP_N', n: 20 },
       conditions: ['new', 'used', 'collectible', 'refurbished', 'club'],
       hasBuyboxWinner: true,
       hasOwnRank: false,

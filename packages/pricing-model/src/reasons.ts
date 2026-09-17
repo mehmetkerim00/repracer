@@ -137,6 +137,8 @@ export const GATE_REASON_CODES = [
   'CHANNEL_HALTED',
   // шаг 12: остановка человеком — все цены без исключений [Р-69]
   'PRICING_STOPPED',
+  // шаг 23: остановка по недоверию каналу — все цены, снимает только человек [Р-118]
+  'CHANNEL_DISTRUSTED',
   'INTERNAL_BOUND_VIOLATION',
 ] as const;
 export type GateReasonCode = (typeof GATE_REASON_CODES)[number];
@@ -188,6 +190,7 @@ export const WRITE_END_REASON_CODES = [
   'WRITE_BLOCKED_BY_BOUND_RECHECK',
   'CHANNEL_HALTED',
   'PRICING_STOPPED',
+  'CHANNEL_DISTRUSTED',
   'WRITE_PRICING_MODE_CHANGED',
   'WRITE_EDIT_BUDGET_EXHAUSTED',
   'WRITE_BUDGET_DAY_UNCONFIRMED',
@@ -244,9 +247,15 @@ export const SNAPSHOT_FIELDS = ['BUYBOX_PRICE', 'SUGGESTED_PRICE', 'OFFER_PRICE'
 export const PRICE_BASES = ['GROSS', 'NET'] as const;
 export const SNAPSHOT_INCONSISTENCIES = ['OFFER_TOTAL_NOT_PRICE_PLUS_SHIPPING', 'MORE_OFFERS_THAN_TOP_N', 'BUYBOX_NOT_RANK_ONE_PRICE'] as const;
 export const HALT_STAGES = ['INPUT', 'GATE', 'DISPATCH', 'DATABASE'] as const;
-/** Причины системной остановки витрины — совпадают с CHECK channel_data.pricing_halt.reason_code (0042, 0080) */
-export const HALT_REASONS = ['CHANNEL_MASS_SHIFT', 'CHANNEL_PRICE_BASIS_MISMATCH'] as const;
+/** Причины системной остановки витрины по входным данным [Р-51] — совпадают с CHECK channel_data.pricing_halt.reason_code (0042, 0082) */
+export const HALT_REASONS = ['CHANNEL_MASS_SHIFT'] as const;
 export type HaltReasonCode = (typeof HALT_REASONS)[number];
+/**
+ * Р-118 (шаг 23): причины остановки по недоверию каналу — сломана трансляция цены в канал, а не входные данные. Совпадают с CHECK
+ * channel_data.channel_distrust.reason_code (0082). Держит все цены, снимается только человеком.
+ */
+export const DISTRUST_REASONS = ['PRICE_BASIS_MISMATCH'] as const;
+export type DistrustReasonCode = (typeof DISTRUST_REASONS)[number];
 /** Р-116: налог добавлен к отправленной цене (канал считал её нетто) или вычтен (канал считал её брутто) */
 export const BASIS_MISMATCH_DIRECTIONS = ['TAX_ADDED', 'TAX_REMOVED'] as const;
 export const SHIFT_DIRECTIONS = ['UP', 'DOWN'] as const;
@@ -295,7 +304,7 @@ export const WRITE_ERROR_CODES = [
   'OUTCOME_UNRESOLVED',
 ] as const;
 export const ERROR_CLASSES = ['TRANSIENT', 'PERMANENT', 'REQUIRES_HUMAN'] as const;
-export const CONTEXT_CHANGES = ['MIN_PRICE', 'MAX_PRICE', 'CHANNEL_HALT', 'PRICING_STOP'] as const;
+export const CONTEXT_CHANGES = ['MIN_PRICE', 'MAX_PRICE', 'CHANNEL_HALT', 'CHANNEL_DISTRUST', 'PRICING_STOP'] as const;
 export const RECONCILE_RESULTS = ['APPLIED', 'NOT_APPLIED'] as const;
 export const SELLER_ACTIONS = ['RECONNECT_ACCOUNT', 'CHECK_ACCOUNT_STATUS', 'CHECK_LISTING', 'REVIEW_CHANNEL_POLICY', 'CONTACT_CHANNEL_SUPPORT', 'REVIEW_OFFER_STATUS', 'DISABLE_CHANNEL_REPRICER', 'REMOVE_CHANNEL_BOUNDS'] as const;
 export const MARGIN_COST_CAUSES = ['COST_PROFILE_MISSING', 'FEE_ESTIMATE_MISSING', 'VAT_RATE_MISSING', 'FX_RATE_UNAVAILABLE', 'FX_RATE_STALE', 'UNSUPPORTED_CURRENCY', 'INVALID_INPUT'] as const;
@@ -327,6 +336,10 @@ export const REASON_PARAMS: Readonly<Record<AnyReasonCode, ParamSchema>> = {
     marketplace: id('TENANT', ON), ruleCode: oneOf(RULE_CODES, 'TENANT', O),
   },
   CHANNEL_MASS_SHIFT: shiftParams,
+  CHANNEL_DISTRUSTED: {
+    stage: oneOf(HALT_STAGES, 'TENANT'), distrustId: id('TENANT', O), detectedAt: instant('TENANT', O), distrustReason: oneOf(DISTRUST_REASONS, 'TENANT', O),
+    marketplace: id('TENANT', ON),
+  },
   UNIT_SCALE_X100: { ...probe, valueMinor: money('CHANNEL'), referenceMinor: money('CHANNEL'), anchor: oneOf(SCALE_ANCHORS, 'TENANT'), currency: currency() },
   UNIT_SCALE_X0_01: { ...probe, valueMinor: money('CHANNEL'), referenceMinor: money('CHANNEL'), anchor: oneOf(SCALE_ANCHORS, 'TENANT'), currency: currency() },
   PRICE_BELOW_COST_ANCHOR: { ...probe, valueMinor: money('CHANNEL'), costMinor: money('TENANT'), limit: ratio('CONFIG'), currency: currency() },

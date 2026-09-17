@@ -1,4 +1,4 @@
-import type { HaltReasonCode } from './reasons.ts';
+import type { DistrustReasonCode, HaltReasonCode } from './reasons.ts';
 /**
  * Правила продукта, общие для ядра, интерфейса и БД (БД дублирует их ограничениями и триггерами 0042).
  */
@@ -31,6 +31,18 @@ export interface HaltRef {
   haltedAt: string;
 }
 
+/**
+ * Остановка по недоверию каналу [Р-118]: сломана трансляция цены в канал (например, неверная база цены, Р-116). Третий вид остановки —
+ * не расширение системной остановки Р-51 и не kill switch Р-69: держит все цены, включая фиксированные, ставит её система,
+ * снимает только человек со вторым фактором.
+ */
+export interface DistrustRef {
+  distrustId: string;
+  reasonCode: DistrustReasonCode;
+  marketplace: string | null;
+  detectedAt: string;
+}
+
 export function stopCovers(stop: Pick<StopRef, 'scope' | 'channelAccountId' | 'marketplace'>, channelAccountId: string, marketplace: string): boolean {
   if (stop.scope === 'TENANT') return true;
   if (stop.channelAccountId !== channelAccountId) return false;
@@ -44,7 +56,7 @@ export function stopCovers(stop: Pick<StopRef, 'scope' | 'channelAccountId' | 'm
 export const MEMBER_ROLES = ['OWNER', 'ADMIN', 'OPERATOR', 'PRICING_MANAGER', 'INVENTORY_MANAGER', 'VIEWER'] as const;
 export type MemberRole = (typeof MEMBER_ROLES)[number];
 
-export type PricingAction = 'VIEW_PRICING' | 'STOP_PRICING' | 'RESUME_TENANT_STOP' | 'RESUME_CHANNEL_STOP' | 'RELEASE_CHANNEL_HALT' | 'ENABLE_REPRICING'
+export type PricingAction = 'VIEW_PRICING' | 'STOP_PRICING' | 'RESUME_TENANT_STOP' | 'RESUME_CHANNEL_STOP' | 'RELEASE_CHANNEL_HALT' | 'RELEASE_CHANNEL_DISTRUST' | 'ENABLE_REPRICING'
   | 'MANAGE_PRICING' | 'MANAGE_CATALOG' | 'MANAGE_TENANT' | 'GIVE_MIGRATION_CONSENT';
 
 /**
@@ -59,6 +71,8 @@ export const PRICING_PERMISSIONS: Readonly<Record<PricingAction, readonly Member
   RESUME_TENANT_STOP: ['OWNER', 'ADMIN'],
   RESUME_CHANNEL_STOP: ['OWNER', 'ADMIN', 'OPERATOR', 'PRICING_MANAGER'],
   RELEASE_CHANNEL_HALT: ['OWNER', 'ADMIN', 'OPERATOR', 'PRICING_MANAGER'],
+  // Р-118: канал искажает наши цены — снять недоверие могут те, кто отвечает за тенант целиком (как возобновление тенанта)
+  RELEASE_CHANNEL_DISTRUST: ['OWNER', 'ADMIN'],
   ENABLE_REPRICING: ['OWNER', 'ADMIN', 'OPERATOR', 'PRICING_MANAGER'],
   // Шаг 18 [Р-100]: административная запись проверяет роль, а не только членство (security.admin_write_action, 0068)
   MANAGE_PRICING: ['OWNER', 'ADMIN', 'PRICING_MANAGER'],
@@ -68,7 +82,7 @@ export const PRICING_PERMISSIONS: Readonly<Record<PricingAction, readonly Member
   GIVE_MIGRATION_CONSENT: ['OWNER'],
 };
 
-export const PRICING_ACTIONS: readonly PricingAction[] = ['VIEW_PRICING', 'STOP_PRICING', 'RESUME_TENANT_STOP', 'RESUME_CHANNEL_STOP', 'RELEASE_CHANNEL_HALT', 'ENABLE_REPRICING',
+export const PRICING_ACTIONS: readonly PricingAction[] = ['VIEW_PRICING', 'STOP_PRICING', 'RESUME_TENANT_STOP', 'RESUME_CHANNEL_STOP', 'RELEASE_CHANNEL_HALT', 'RELEASE_CHANNEL_DISTRUST', 'ENABLE_REPRICING',
   'MANAGE_PRICING', 'MANAGE_CATALOG', 'MANAGE_TENANT', 'GIVE_MIGRATION_CONSENT'];
 
 export function can(role: MemberRole, action: PricingAction): boolean {

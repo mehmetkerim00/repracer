@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0081_verify_schema_invariants_v19.sql';
+const VERIFY = 'migrations/0099_verify_tmp.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -601,22 +601,38 @@ export const STEP21_ROWS = [
   },
 ];
 
-export const STEP22_ROWS = [
+// Шаг 23: защиты строки «Р-116» шага 22 (0080) удалены миграцией 0082 — неверная база цены стала причиной остановки по недоверию каналу [Р-118]
+export const STEP22_ROWS = [];
+
+export const STEP23_ROWS = [
   {
-    row: 'Р-116', invariant: 'остановка витрины по неверной базе цены блокирует любую цену и снимается только человеком',
+    row: 'Р-118', invariant: 'остановка по недоверию каналу держит любую цену и порог цены канала, ставит её система, снимает только человек с правом, от своего имени, со вторым фактором',
     mutations: [
-      m(dropTrigger('ac_price_decision_basis_halt_guard', 'channel_data.price_decision'),
-        smoke('fixed-price approval while the storefront is halted for a wrong price basis (Р-116)')),
-      m(dropTrigger('bc_channel_write_basis_halt_guard', 'tenant_data.channel_write'),
-        smoke('dispatch of a fixed-price write while halted for a wrong price basis (Р-116)'), smoke('fixed-price write created while halted for a wrong price basis (Р-116)')),
-      // Ревью шага 22, находка 11: ветка создания записи — своя проверка
-      m(replaceInFunction('tenant_data.channel_write_basis_halt_guard()', "IF NEW.field <> 'PRICE' OR (TG_OP = 'UPDATE'", "IF NEW.field <> 'PRICE' OR TG_OP = 'INSERT' OR (TG_OP = 'UPDATE'"),
-        smoke('fixed-price write created while halted for a wrong price basis (Р-116)')),
-      m(replaceInFunction('channel_data.price_basis_halt_for(uuid,uuid)', "AND h.reason_code = 'CHANNEL_PRICE_BASIS_MISMATCH'", "AND h.reason_code = 'NONE'"),
-        smoke('fixed-price approval while the storefront is halted for a wrong price basis (Р-116)'),
-        smoke('dispatch of a fixed-price write while halted for a wrong price basis (Р-116)')),
-      m(replaceInFunction('channel_data.review_halt_by_sample(uuid,uuid,timestamptz)', "AND ph.reason_code = 'CHANNEL_MASS_SHIFT'", ''),
-        smoke('a sample review reaches a halt for a wrong price basis (Р-116)', 'a sample review does not reach a halt for a wrong price basis (Р-116)')),
+      m(dropTrigger('ac_price_decision_distrust_guard', 'channel_data.price_decision'), smoke('fixed-price approval while the channel is distrusted (Р-118)')),
+      m(dropTrigger('bc_channel_write_distrust_guard', 'tenant_data.channel_write'),
+        smoke('dispatch of a fixed-price write while the channel is distrusted (Р-118)'), smoke('fixed-price write created while the channel is distrusted (Р-118)')),
+      m(replaceInFunction('tenant_data.channel_write_distrust_guard()', "IF NEW.field NOT IN ('PRICE', 'CHANNEL_MIN_PRICE') OR (TG_OP = 'UPDATE'", "IF NEW.field NOT IN ('PRICE', 'CHANNEL_MIN_PRICE') OR TG_OP = 'INSERT' OR (TG_OP = 'UPDATE'"),
+        smoke('fixed-price write created while the channel is distrusted (Р-118)')),
+      m(replaceInFunction('channel_data.channel_distrust_for(uuid,uuid)', 'AND d.released_at IS NULL', 'AND false'),
+        smoke('fixed-price approval while the channel is distrusted (Р-118)'), smoke('dispatch of a fixed-price write while the channel is distrusted (Р-118)')),
+      m(dropTrigger('a00_channel_distrust_insert_guard', 'channel_data.channel_distrust'), smoke('a person creates a channel distrust (Р-118)')),
+      m(dropTrigger('ca_channel_distrust_release_guard', 'channel_data.channel_distrust'),
+        smoke('channel distrust released without a second factor (Р-118)'), smoke('channel distrust released in the name of another member (Р-118)'), smoke('channel distrust released twice (Р-118)')),
+      m(replaceInFunction('channel_data.channel_distrust_release_guard()', 'IF security.current_user_id() IS NULL OR u IS DISTINCT FROM security.current_user_id() THEN', 'IF false THEN'),
+        smoke('channel distrust released in the name of another member (Р-118)')),
+      m(replaceInFunction('channel_data.channel_distrust_release_guard()', 'IF NOT security.session_mfa() THEN', 'IF false THEN'), smoke('channel distrust released without a second factor (Р-118)')),
+      m(replaceInFunction('channel_data.channel_distrust_release_guard()', 'IF OLD.released_at IS NOT NULL THEN', 'IF false THEN'), smoke('channel distrust released twice (Р-118)')),
+      m(dropConstraint('channel_distrust_details_check', 'channel_data.channel_distrust'), smoke('buyer price read from the channel kept in a distrust (Р-3, Р-118)')),
+    ],
+  },
+  {
+    row: 'Р-39/OQ-166, Р-120', invariant: 'стратегия назначается, только если канал даёт нужные ей данные конкурентов и у предложения нет собственного ценообразования канала',
+    mutations: [
+      m(dropTrigger('a2_write_scope_strategy_guard', 'tenant_data.write_scope'),
+        smoke('strategy unavailable on the channel assigned to an offer (Р-39, OQ-166)'), smoke('strategy assigned to an offer with the channel repricer active (Р-120)')),
+      m(replaceInFunction('tenant_data.write_scope_strategy_guard()', "IF unmet <> '{}'::jsonb THEN", 'IF false THEN'), smoke('strategy unavailable on the channel assigned to an offer (Р-39, OQ-166)')),
+      m(replaceInFunction('tenant_data.write_scope_strategy_guard()', 'IF pricing IS NOT NULL THEN', 'IF false THEN'), smoke('strategy assigned to an offer with the channel repricer active (Р-120)')),
+      m(replaceInFunction('channel_data.strategy_unmet(text,jsonb)', "u := u || 'COMPLETENESS'::text;", 'NULL;'), smoke('strategy unavailable on the channel assigned to an offer (Р-39, OQ-166)')),
     ],
   },
 ];

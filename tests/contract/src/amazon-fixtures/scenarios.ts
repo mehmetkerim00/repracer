@@ -29,25 +29,25 @@ export const PIPELINE_CONVERSIONS: ReadonlyArray<{ file: string; kaufland: strin
   { file: 'pipeline-cold-start-cost-anchor.json', kaufland: 'pipeline-cold-start-cost-anchor.json', id: 'amazon/pipeline/cold-start-cost-anchor', title: 'Холодный старт: якорь — себестоимость', patch: acceptedNotYetApplied(0) },
   {
     file: 'pipeline-halt-auto-release.json', kaufland: 'pipeline-halt-auto-release.json', id: 'amazon/pipeline/halt-auto-release',
-    title: 'Автоматическое снятие остановки витрины по свежей выборке: у Amazon выборки нет — остановка остаётся',
+    title: 'Р-119: автоматическое снятие остановки витрины по выборке на Amazon неприменимо — свойство канала',
     patch: (s) => {
-      s.description = 'Преобразован из kaufland/pipeline-halt-auto-release.json. Р-52 снимает остановку по свежей независимой выборке, а выборка — это опрос конкурентов. У Amazon опроса нет: getCompetitiveSummary — 0.033 запроса в секунду [AMZ_C07], порт отвечает UNSUPPORTED. Выборка не состоялась, остановка продлена; снять её можно только вручную. Это находка шага 22, а не свойство сценария Kaufland.';
+      s.description = 'Преобразован из kaufland/pipeline-halt-auto-release.json. Р-52 снимает остановку по свежей независимой выборке, а выборка — это опрос конкурентов. У Amazon опроса нет: getCompetitiveSummary — 0.033 запроса в секунду [AMZ_C07]. Р-119: это свойство канала (ChannelDescriptor.haltRelease = MANUAL_ONLY, platform.channel_behaviour), а не пробел — проверка остановок не пробует читать конкурентов и не пишет провал выборки; остановку снимает только человек.';
       s.exchanges = [];
-      stepExpect(s, 'review-due-halt', [{ outcome: 'SAMPLE_FAILED', sampleSize: 2, failedCount: 2, snapshots: [],
-        failures: [{ channelProductRef: asin('362000001'), reason: 'UNSUPPORTED' }, { channelProductRef: asin('362000002'), reason: 'UNSUPPORTED' }] }]);
-      s.expect = { noAlerts: true, logs: [{ code: 'HALT_REVIEW_FAILED', count: 1 }, { code: 'AMZ_C07_COMPETITOR_PULL_UNAVAILABLE' }],
-        pipeline: { halts: [{ reasonCode: 'CHANNEL_MASS_SHIFT', releasedKind: null }], haltReviews: [{ kind: 'AUTO_SAMPLE', outcome: 'SAMPLE_FAILED', sampleSize: 2, failedCount: 2 }], writes: [] } };
+      s.tags = [...s.tags, 'r119'];
+      stepExpect(s, 'review-due-halt', [{ outcome: 'MANUAL_ONLY', sampleSize: 0, failedCount: 0, snapshots: [], failures: [] }]);
+      s.expect = { noAlerts: true, logs: [{ code: 'HALT_RELEASE_MANUAL_ONLY', count: 1 }, { code: 'HALT_REVIEW_FAILED', count: 0 }],
+        pipeline: { halts: [{ reasonCode: 'CHANNEL_MASS_SHIFT', releasedKind: null }], haltReviews: [], writes: [] } };
     },
   },
   {
     file: 'pipeline-halt-review-failed-manual-release.json', kaufland: 'pipeline-halt-review-failed-manual-release.json', id: 'amazon/pipeline/halt-manual-release',
-    title: 'Выборка не состоялась — ручное снятие с заметкой',
+    title: 'Р-119: выборки нет — остановку витрины снимает человек с заметкой',
     patch: (s) => {
-      s.description += ' Amazon: выборка не состоится ни для одного товара (опроса нет, AMZ_C07) — обе строки выборки провалены; ручное снятие работает так же.';
-      stepExpect(s, 'review-due-halt', [{ outcome: 'SAMPLE_FAILED', sampleSize: 2, failedCount: 2, snapshots: [],
-        failures: [{ channelProductRef: asin('362000001'), reason: 'UNSUPPORTED' }, { channelProductRef: asin('362000002'), reason: 'UNSUPPORTED' }] }]);
-      const reviews = (s.expect!.pipeline as PipelineExpect).haltReviews as Array<{ failedCount?: number }>;
-      reviews[0]!.failedCount = 2;
+      s.description += ' Amazon [Р-119]: проверка остановок выборку не пробует — канал снимает остановку только вручную; ручное снятие работает так же.';
+      stepExpect(s, 'review-due-halt', [{ outcome: 'MANUAL_ONLY', sampleSize: 0, failedCount: 0, snapshots: [], failures: [] }]);
+      const expect = s.expect as { logs: Array<{ code: string; count?: number }>; pipeline: PipelineExpect };
+      expect.logs = [{ code: 'HALT_RELEASE_MANUAL_ONLY', count: 1 }, { code: 'HALT_REVIEW_FAILED', count: 0 }, { code: 'HALT_MANUALLY_RELEASED', count: 1 }];
+      expect.pipeline.haltReviews = [{ kind: 'MANUAL_RELEASE', outcome: 'RELEASED' }];
       s.exchanges = [];
     },
   },

@@ -145,11 +145,14 @@ test('third check before the write uses fresh bounds', () => {
   assert.ok(!gone.ok && gone.reason.code === 'BOUND_UNRESOLVABLE');
 });
 
-test('Р-116: a storefront halt for a wrong price basis blocks a fixed and a margin price too; a mass-shift halt does not', () => {
+test('Р-118: distrust of the channel holds a fixed, a margin and a manual price; a mass-shift halt does not', () => {
   const scope = gate(1790).scope;
-  const halt = (reasonCode: 'CHANNEL_MASS_SHIFT' | 'CHANNEL_PRICE_BASIS_MISMATCH') => ({ haltId: 'h-2', reasonCode, marketplace: 'de', haltedAt: '2026-09-14T09:00:00.000Z' });
-  for (const ruleCode of ['FIXED', 'TARGET_MARGIN', 'MANUAL']) {
-    assert.equal(decide(gate(1790, { scope: { ...scope, channelHalt: halt('CHANNEL_PRICE_BASIS_MISMATCH') }, intent: intent(1790, { ruleCode }) })).rejectionReason, 'CHANNEL_HALTED', ruleCode);
-    assert.equal(decide(gate(1790, { scope: { ...scope, channelHalt: halt('CHANNEL_MASS_SHIFT') }, intent: intent(1790, { ruleCode }) })).outcome, 'APPROVED', ruleCode);
+  const distrust = { distrustId: 'd-1', reasonCode: 'PRICE_BASIS_MISMATCH' as const, marketplace: 'de', detectedAt: '2026-09-14T09:00:00.000Z' };
+  const halt = { haltId: 'h-2', reasonCode: 'CHANNEL_MASS_SHIFT' as const, marketplace: 'de', haltedAt: '2026-09-14T09:00:00.000Z' };
+  for (const ruleCode of ['FIXED', 'TARGET_MARGIN', 'MANUAL', 'MATCH_BUYBOX']) {
+    const d = decide(gate(1790, { scope: { ...scope, channelDistrust: distrust }, intent: intent(1790, { ruleCode }) }));
+    assert.equal(d.rejectionReason, 'CHANNEL_DISTRUSTED', ruleCode);
+    assert.equal(d.reason.params.distrustReason, 'PRICE_BASIS_MISMATCH');
+    if (ruleCode !== 'MATCH_BUYBOX') assert.equal(decide(gate(1790, { scope: { ...scope, channelHalt: halt }, intent: intent(1790, { ruleCode }) })).outcome, 'APPROVED', ruleCode);
   }
 });

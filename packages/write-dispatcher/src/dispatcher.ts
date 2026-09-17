@@ -50,9 +50,9 @@ export interface RecordedOutcome {
   scopeBlocked: boolean;
 }
 
-/** Р-116: остановка витрины по неверной базе цены, поставленная хранилищем */
-export interface PriceBasisHalt {
-  haltId: string;
+/** Р-116, Р-118: остановка по недоверию каналу из-за неверной базы цены, поставленная хранилищем */
+export interface PriceBasisDistrust {
+  distrustId: string;
   reason: WriteReason;
 }
 
@@ -64,10 +64,10 @@ export interface WriteQueueStore {
   dueScopes(now: Instant, options: { pendingMinAgeMs: number; inFlightTimeoutMs: number; limit: number }): Promise<DueScope[]>;
   /**
    * Р-116: канал показал цену, отличную от отправленной. Хранилище берёт ставку НДС товара и налоговый режим единицы; если разница
-   * равна ставке — ставит системную остановку витрины CHANNEL_PRICE_BASIS_MISMATCH (все цены, только ручное снятие) и возвращает её.
+   * равна ставке — ставит остановку по недоверию каналу PRICE_BASIS_MISMATCH [Р-118] (все цены, только ручное снятие) и возвращает её.
    * Действующая остановка той же причины не дублируется: возвращается она же. null — не признак базы цены.
    */
-  checkPriceBasis(tenantId: string, write: FieldWrite, observedMinor: number, now: Instant): Promise<PriceBasisHalt | null>;
+  checkPriceBasis(tenantId: string, write: FieldWrite, observedMinor: number, now: Instant): Promise<PriceBasisDistrust | null>;
 }
 
 export type DispatchStep =
@@ -76,8 +76,8 @@ export type DispatchStep =
   | { action: 'ENDED'; channelWriteId: string; status: string; reason: WriteReason }
   | { action: 'WAITING'; channelWriteId: string; status: 'DISPATCHED' | 'ACCEPTED' }
   | { action: 'RETRY_LATER'; channelWriteId: string; at: Instant }
-  /** Р-116: применённая цена отличается от отправленной на ставку налога — витрина остановлена */
-  | { action: 'PRICE_BASIS_HALT'; channelWriteId: string; haltId: string }
+  /** Р-116, Р-118: применённая цена отличается от отправленной на ставку налога — недоверие каналу */
+  | { action: 'CHANNEL_DISTRUSTED'; channelWriteId: string; distrustId: string }
   /** Единица не обработана: ошибка хранилища или неизвестный отказ базы — алерт, остальной обход продолжается (находка 7 шага 15) */
   | { action: 'ERROR'; errorCode: string }
   | { action: 'IDLE' };
@@ -180,13 +180,13 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
   async function checkBasis(tenantId: string, write: FieldWrite, observation: IdentifiedObservation | undefined, report: ScopeDispatchReport): Promise<void> {
     const observed = observedPriceMinor(write, observation);
     if (observed === null || write.value.field !== 'PRICE' || observed === write.value.price.amountMinor) return;
-    const halt = await deps.store.checkPriceBasis(tenantId, write, observed, deps.now());
-    if (!halt) return;
-    report.steps.push({ action: 'PRICE_BASIS_HALT', channelWriteId: write.channelWriteId, haltId: halt.haltId });
+    const distrust = await deps.store.checkPriceBasis(tenantId, write, observed, deps.now());
+    if (!distrust) return;
+    report.steps.push({ action: 'CHANNEL_DISTRUSTED', channelWriteId: write.channelWriteId, distrustId: distrust.distrustId });
     // В алерт — коды и ставка, без сумм: применённая цена — данные канала
-    await alert(tenantId, 'PRICING_PRICE_BASIS_MISMATCH', 'CRITICAL', {
-      writeScopeId: write.writeScope.writeScopeId, channelWriteId: write.channelWriteId, haltId: halt.haltId,
-      basisError: String(halt.reason.params.basisError ?? ''), vatRateBp: Number(halt.reason.params.vatRateBp ?? 0),
+    await alert(tenantId, 'PRICING_CHANNEL_DISTRUSTED', 'CRITICAL', {
+      writeScopeId: write.writeScope.writeScopeId, channelWriteId: write.channelWriteId, distrustId: distrust.distrustId, distrustReason: 'PRICE_BASIS_MISMATCH',
+      basisError: String(distrust.reason.params.basisError ?? ''), vatRateBp: Number(distrust.reason.params.vatRateBp ?? 0),
     });
   }
 

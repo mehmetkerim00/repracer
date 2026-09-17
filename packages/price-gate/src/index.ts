@@ -5,6 +5,7 @@ import {
   sellerActionFor,
   storefrontPriceForMarginBp,
   isCompetitorDerived,
+  type DistrustRef,
   type HaltRef,
   type StopRef,
   type StrategyDefinition,
@@ -54,6 +55,8 @@ export interface GateInput {
     status: 'ACTIVE' | 'HELD' | 'CONTESTED' | 'BLOCKED' | 'RETIRED';
     /** Системная остановка витрины: только цены из данных конкурентов [Р-51] */
     channelHalt: HaltRef | null;
+    /** Остановка по недоверию каналу: все цены, снимает только человек [Р-118] */
+    channelDistrust?: DistrustRef | null;
     /** Остановка человеком на тенант, аккаунт или витрину: все цены [Р-69, Р-70] */
     priceStop: StopRef | null;
     /** Почему единица не активна: ошибка канала, требующая человека, и с какого момента */
@@ -180,9 +183,15 @@ export function decide(input: GateInput): PriceDecisionDraft {
   if (scope.status !== 'ACTIVE') return fail('SCOPE', 'SCOPE_NOT_ACTIVE', inactive(), 'HELD');
   ok('SCOPE');
 
-  // 2. Системная остановка канала блокирует только цены, выведенные из данных конкурентов [Р-42, Р-51]; остановка по неверной базе
-  // цены [Р-116] — любую цену: канал применяет каждую нашу сумму с той же ошибкой, фиксированную и маржинальную тоже
-  if (scope.channelHalt && (isCompetitorDerived(intent.ruleCode) || scope.channelHalt.reasonCode === 'CHANNEL_PRICE_BASIS_MISMATCH')) {
+  // 2. Недоверие каналу [Р-118]: сломана трансляция цены в канал — любая цена, фиксированная и маржинальная тоже, пройдёт тем же путём
+  if (scope.channelDistrust) {
+    const d = scope.channelDistrust;
+    return fail('CHANNEL_DISTRUST', 'CHANNEL_DISTRUSTED', { stage: 'GATE', distrustId: d.distrustId, detectedAt: d.detectedAt, distrustReason: d.reasonCode, marketplace: d.marketplace });
+  }
+  ok('CHANNEL_DISTRUST');
+
+  // 3. Системная остановка канала блокирует только цены, выведенные из данных конкурентов [Р-42, Р-51]
+  if (scope.channelHalt && isCompetitorDerived(intent.ruleCode)) {
     const h = scope.channelHalt;
     return fail('CHANNEL_HALT', 'CHANNEL_HALTED', { stage: 'GATE', haltId: h.haltId, haltedAt: h.haltedAt, haltReason: h.reasonCode, marketplace: h.marketplace, ruleCode: intent.ruleCode });
   }
@@ -334,12 +343,23 @@ export function validateRepricingEnablement(bounds: PriceBounds, currency: strin
  * непрошедшей, поэтому слепок хранит только её. Изменение порядка — новая версия профиля и строка в
  * `platform.explanation_ruleset` (совпадение с БД и с порядком `decide` проверяют тесты).
  */
-export const GATE_PROFILE: GateProfile = {
+/** Профиль до шага 23 — неизменяемый справочник решений, принятых по нему [Р-75]; новые решения его не используют */
+export const GATE_PROFILE_G74: GateProfile = {
   rulesetId: 'g74.1',
   kind: 'GATE',
   definition: {
     CHANGED: ['PRICE_STOP', 'SCOPE', 'CHANNEL_HALT', 'INTENT', 'BOUNDS_RESOLVED', 'MARGIN_FLOOR', 'LOWER_BOUND', 'UPPER_BOUND', 'STEP', 'RATE', 'FINAL_RECHECK'],
     NO_OP: ['PRICE_STOP', 'SCOPE', 'CHANNEL_HALT', 'INTENT', 'BOUNDS_RESOLVED', 'MARGIN_FLOOR', 'CURRENT_WITHIN_BOUNDS'],
+  },
+};
+
+export const GATE_PROFILE: GateProfile = {
+  // Шаг 23 [Р-118]: проверка недоверия каналу — новая версия профиля; g74.1 остаётся для решений, принятых до неё
+  rulesetId: 'g118.1',
+  kind: 'GATE',
+  definition: {
+    CHANGED: ['PRICE_STOP', 'SCOPE', 'CHANNEL_DISTRUST', 'CHANNEL_HALT', 'INTENT', 'BOUNDS_RESOLVED', 'MARGIN_FLOOR', 'LOWER_BOUND', 'UPPER_BOUND', 'STEP', 'RATE', 'FINAL_RECHECK'],
+    NO_OP: ['PRICE_STOP', 'SCOPE', 'CHANNEL_DISTRUST', 'CHANNEL_HALT', 'INTENT', 'BOUNDS_RESOLVED', 'MARGIN_FLOOR', 'CURRENT_WITHIN_BOUNDS'],
   },
 };
 

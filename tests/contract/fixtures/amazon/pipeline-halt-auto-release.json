@@ -3,12 +3,13 @@
   "id": "amazon/pipeline/halt-auto-release",
   "channel": "AMAZON",
   "apiVersion": "listings-items-2021-08-01",
-  "title": "Автоматическое снятие остановки витрины по свежей выборке: у Amazon выборки нет — остановка остаётся",
-  "description": "Преобразован из kaufland/pipeline-halt-auto-release.json. Р-52 снимает остановку по свежей независимой выборке, а выборка — это опрос конкурентов. У Amazon опроса нет: getCompetitiveSummary — 0.033 запроса в секунду [AMZ_C07], порт отвечает UNSUPPORTED. Выборка не состоялась, остановка продлена; снять её можно только вручную. Это находка шага 22, а не свойство сценария Kaufland.",
+  "title": "Р-119: автоматическое снятие остановки витрины по выборке на Amazon неприменимо — свойство канала",
+  "description": "Преобразован из kaufland/pipeline-halt-auto-release.json. Р-52 снимает остановку по свежей независимой выборке, а выборка — это опрос конкурентов. У Amazon опроса нет: getCompetitiveSummary — 0.033 запроса в секунду [AMZ_C07]. Р-119: это свойство канала (ChannelDescriptor.haltRelease = MANUAL_ONLY, platform.channel_behaviour), а не пробел — проверка остановок не пробует читать конкурентов и не пишет провал выборки; остановку снимает только человек.",
   "tags": [
     "mandatory:pipeline-halt-auto-release",
     "pipeline",
-    "r-52"
+    "r-52",
+    "r119"
   ],
   "provenance": {
     "kind": "SYNTHETIC_FROM_DOCS",
@@ -351,20 +352,11 @@
       "sampleSize": 5,
       "expect": [
         {
-          "outcome": "SAMPLE_FAILED",
-          "sampleSize": 2,
-          "failedCount": 2,
+          "outcome": "MANUAL_ONLY",
+          "sampleSize": 0,
+          "failedCount": 0,
           "snapshots": [],
-          "failures": [
-            {
-              "channelProductRef": "B062000001",
-              "reason": "UNSUPPORTED"
-            },
-            {
-              "channelProductRef": "B062000002",
-              "reason": "UNSUPPORTED"
-            }
-          ]
+          "failures": []
         }
       ]
     }
@@ -374,11 +366,12 @@
     "noAlerts": true,
     "logs": [
       {
-        "code": "HALT_REVIEW_FAILED",
+        "code": "HALT_RELEASE_MANUAL_ONLY",
         "count": 1
       },
       {
-        "code": "AMZ_C07_COMPETITOR_PULL_UNAVAILABLE"
+        "code": "HALT_REVIEW_FAILED",
+        "count": 0
       }
     ],
     "pipeline": {
@@ -388,14 +381,7 @@
           "releasedKind": null
         }
       ],
-      "haltReviews": [
-        {
-          "kind": "AUTO_SAMPLE",
-          "outcome": "SAMPLE_FAILED",
-          "sampleSize": 2,
-          "failedCount": 2
-        }
-      ],
+      "haltReviews": [],
       "writes": []
     }
   }

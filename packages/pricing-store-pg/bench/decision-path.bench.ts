@@ -323,12 +323,12 @@ function commitInput(world: BenchWorld, s: BenchScope, changed: boolean, amount:
   const now = new Date().toISOString();
   const context: ScopeEvaluationContext = {
     scope: {
-      writeScopeId: s.writeScopeId, productId: s.productId, channelAccountId: world.accountId, marketplace: s.marketplace, externalUnitId: s.unit,
+      writeScopeId: s.writeScopeId, productId: s.productId, channelAccountId: world.accountId, marketplace: s.marketplace, externalUnitId: s.unit, identity: { marketplace: s.marketplace, externalUnitId: s.unit },
       channelProductRef: s.ref, condition: 'new', scopeKey: s.scopeKey, gtin: null, currency: 'EUR', basis: 'GROSS', taxRegime: 'VAT_INCLUDED',
       pricingMode: 'ENGINE', status: 'ACTIVE', strategy: null, currentPriceMinor: current, knownPricesMinor: [current],
     },
     bounds: { currency: 'EUR', basis: 'GROSS', min: { status: 'RESOLVED', amountMinor: 1500, sourceIds: s.minIds }, max: { status: 'RESOLVED', amountMinor: 2500, sourceIds: s.maxIds } },
-    contextVersion: s.version, cost: null, unitCostMinor: 1000, guardrails: NO_GUARDRAILS, channelHalt: null, priceStop: null, blocking: null, changesInLastHour: 0,
+    contextVersion: s.version, cost: null, unitCostMinor: 1000, guardrails: NO_GUARDRAILS, channelHalt: null, channelDistrust: null, priceStop: null, blocking: null, changesInLastHour: 0,
   };
   const intent: PriceIntentDraft = {
     writeScopeId: s.writeScopeId, strategyId: world.strategyId, strategyVersion: 1, trigger: { type: 'COMPETITOR_CHANGE' }, ruleCode: 'MATCH_BUYBOX',

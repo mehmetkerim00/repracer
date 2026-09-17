@@ -43,18 +43,21 @@ const recompute = (id: string, unit: number, expect: unknown): Step => ({ id, ki
 export function buildCoreScenarios(): Array<{ file: string; scenario: Scenario }> {
   const basis = scenario(
     'amazon/pipeline/price-basis-mismatch-halt',
-    'Р-116: применённая цена больше отправленной ровно на НДС — остановка витрины, фиксированная цена удерживается, снятие вручную',
-    'Фиксированная цена 19.99 уходит в amazon.de и принята асинхронно. Обратное чтение после окна: our_price 19.99 как отправлено, но цена покупки в offers — 23.79, то есть 19.99 × 1.19. Канал считает нашу сумму нетто [A-02]: каждая следующая цена будет выше на ту же долю, это тихий отказ на выходе. Диспетчер ставит системную остановку витрины CHANNEL_PRICE_BASIS_MISMATCH и CRITICAL-алерт. В отличие от остановки по массовому сдвигу [Р-51], удерживается и фиксированная цена второго товара; выборкой остановка не снимается, человек снимает её с заметкой и вторым фактором — после этого цена второго товара уходит.',
-    ['pipeline', 'dispatcher', 'r116', 'mandatory:price-basis-readback'],
+    'Р-116, Р-118: применённая цена больше отправленной ровно на НДС — недоверие каналу, фиксированная цена удерживается, снятие только человеком',
+    'Фиксированная цена 19.99 уходит в amazon.de и принята асинхронно. Обратное чтение после окна: our_price 19.99 как отправлено, но цена покупки в offers — 23.79, то есть 19.99 × 1.19. Канал считает нашу сумму нетто [A-02]: каждая следующая цена будет выше на ту же долю — сломана трансляция цены в канал. Диспетчер ставит ОСТАНОВКУ ПО НЕДОВЕРИЮ КАНАЛУ [Р-118] и CRITICAL-алерт. Это не остановка витрины Р-51: удерживается и фиксированная цена второго товара; проверка остановок её не касается. Снять её не может ни оператор, ни владелец без второго фактора; владелец со вторым фактором и заметкой снимает — после этого цена второго товара уходит.',
+    ['pipeline', 'dispatcher', 'r116', 'r118', 'mandatory:price-basis-readback'],
     [fixedScope(8101, 1999, 1850), fixedScope(8102, 2100, 2000)],
     [
       recompute('first-fixed-price-accepted', 8101, { decision: { outcome: 'APPROVED', finalMinor: 1999 } }),
       { id: 'in-flight-window-passes', kind: 'advanceClock', ms: 121_000 },
       { id: 'readback-shows-tax-added', kind: 'pipelineDispatchDue', expect: { due: 1, reports: [{ writeScopeId: 'ws-price-de-8101', steps: [
-        { action: 'RECONCILED', version: 1, result: 'APPLIED', recorded: 'APPLIED' }, { action: 'PRICE_BASIS_HALT' }, { action: 'IDLE' }] }] } } as Step,
-      recompute('second-fixed-price-held', 8102, { decision: { outcome: 'REJECTED', rejectionReason: 'CHANNEL_HALTED' } }),
-      { id: 'no-sample-review-for-basis-halt', kind: 'pipelineReviewHalts', sampleSize: 5, expect: [] } as Step,
-      { id: 'owner-releases-after-fixing-price-settings', kind: 'pipelineReleaseHalt', haltIndex: 0, membershipId: 'membership-owner', note: 'Preisbasis im Kanalkonto geprüft und korrigiert', expect: { released: true } } as Step,
+        { action: 'RECONCILED', version: 1, result: 'APPLIED', recorded: 'APPLIED' }, { action: 'CHANNEL_DISTRUSTED' }, { action: 'IDLE' }] }] } } as Step,
+      recompute('second-fixed-price-held', 8102, { decision: { outcome: 'REJECTED', rejectionReason: 'CHANNEL_DISTRUSTED' } }),
+      { id: 'halt-review-does-not-touch-distrust', kind: 'pipelineReviewHalts', sampleSize: 5, expect: [] } as Step,
+      { id: 'operator-cannot-release', kind: 'pipelineReleaseDistrust', distrustIndex: 0, membershipId: 'membership-operator', note: 'Operator tries to release the distrust' } as Step,
+      { id: 'owner-without-second-factor-cannot-release', kind: 'pipelineReleaseDistrust', distrustIndex: 0, membershipId: 'membership-owner', mfa: false, note: 'Owner without a second factor' } as Step,
+      recompute('still-held-after-refused-releases', 8102, { decision: { outcome: 'REJECTED', rejectionReason: 'CHANNEL_DISTRUSTED' } }),
+      { id: 'owner-releases-after-fixing-price-settings', kind: 'pipelineReleaseDistrust', distrustIndex: 0, membershipId: 'membership-owner', note: 'Preisbasis im Kanalkonto geprüft und korrigiert', expect: { released: true } } as Step,
       recompute('second-fixed-price-after-release', 8102, { decision: { outcome: 'APPROVED', finalMinor: 2100 } }),
     ],
     [
@@ -66,10 +69,14 @@ export function buildCoreScenarios(): Array<{ file: string; scenario: Scenario }
       patchPriceExchange('patch-8102-2100', sku(8102), [{ minor: 2100 }]),
     ],
     {
-      alerts: [{ code: 'PRICING_PRICE_BASIS_MISMATCH', severity: 'CRITICAL', count: 1 }],
+      alerts: [{ code: 'PRICING_CHANNEL_DISTRUSTED', severity: 'CRITICAL', count: 1 }, { code: 'PRICING_CHANNEL_TRUST_RESTORED', severity: 'WARNING', count: 1 }],
       pipeline: {
-        halts: [{ reasonCode: 'CHANNEL_PRICE_BASIS_MISMATCH', releasedKind: 'MANUAL' }],
-        decisions: [{ outcome: 'APPROVED', finalMinor: 1999 }, { outcome: 'REJECTED', rejectionReason: 'CHANNEL_HALTED' }, { outcome: 'APPROVED', finalMinor: 2100 }],
+        halts: [],
+        distrusts: [{ reasonCode: 'PRICE_BASIS_MISMATCH', released: true }],
+        decisions: [
+          { outcome: 'APPROVED', finalMinor: 1999 }, { outcome: 'REJECTED', rejectionReason: 'CHANNEL_DISTRUSTED' }, { outcome: 'REJECTED', rejectionReason: 'CHANNEL_DISTRUSTED' },
+          { outcome: 'APPROVED', finalMinor: 2100 },
+        ],
         writes: [{ amountMinor: 1999, status: 'APPLIED' }, { amountMinor: 2100, status: 'ACCEPTED' }],
       },
     },

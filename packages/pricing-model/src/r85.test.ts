@@ -47,7 +47,7 @@ function recoverable(stored: unknown, channelValues: number[], published: number
 }
 
 function eternal(intent: PriceIntentDraft, decision: PriceDecisionDraft) {
-  const built = buildExplanation({ snapshot: { source: 'KAUFLAND_BUYBOX' }, sanity: null, intent, decision, minMarginBp: null, channelHalt: null, priceStop: null }, gate);
+  const built = buildExplanation({ snapshot: { source: 'KAUFLAND_BUYBOX' }, sanity: null, intent, decision, minMarginBp: null, channelHalt: null, channelDistrust: null, priceStop: null }, gate);
   return eternalCoreOf(intent, decision, built);
 }
 
@@ -102,7 +102,7 @@ function rejected(ruleCode: 'MATCH_BUYBOX' | 'BEAT_LOWEST', proposed: number, re
     outcome: 'REJECTED', decisionClass: 'REJECTED_BY_GATE', finalMinor: null, rejectionReason: detail.code as PriceDecisionDraft['rejectionReason'], boundDeviationBp: deviation,
     reason: detail, checks,
   });
-  const built = buildExplanation({ snapshot: { source: 'KAUFLAND_BUYBOX' }, sanity: null, intent, decision, minMarginBp: null, channelHalt: null, priceStop: null }, gateWithStep);
+  const built = buildExplanation({ snapshot: { source: 'KAUFLAND_BUYBOX' }, sanity: null, intent, decision, minMarginBp: null, channelHalt: null, channelDistrust: null, priceStop: null }, gateWithStep);
   return eternalCoreOf(intent, decision, built);
 }
 

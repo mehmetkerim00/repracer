@@ -406,37 +406,30 @@ INSERT INTO channel_data.price_decision (tenant_id, price_decision_id, intent_cr
 VALUES (:tA, 'a8000000-0000-0000-0000-000000000023', '2026-09-14 10:34+00', 'a7000000-0000-0000-0000-000000000023', 'a6000000-0000-0000-0000-000000000001', 'APPROVED', 1320, NULL, 'EUR', 'GROSS', 1000, ARRAY[gen_random_uuid()], 5000, ARRAY[gen_random_uuid()], '{"smoke": true}', '{"format":"r80.1","sanity":{"anchorsUsed":[],"checks":[]},"strategy":{"reason":{"code":"FIXED_PRICE"}}}', 'r49.1', 'g74.1');
 INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, amount_minor, currency, price_basis, version, origin, price_decision_id)
 VALUES (:tA, 'a9000000-0000-0000-0000-000000000005', 'a6000000-0000-0000-0000-000000000001', 'PRICE', 1320, 'EUR', 'GROSS', 4, 'PRICE_DECISION', 'a8000000-0000-0000-0000-000000000023');
-SELECT pg_temp.ok('a halt for a wrong price basis coexists with a mass-shift halt of the storefront (Р-116)', $q$
-  INSERT INTO channel_data.pricing_halt (tenant_id, channel_account_id, channel, marketplace, reason_code, details)
-  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'CHANNEL_PRICE_BASIS_MISMATCH', '{"basisError": "TAX_ADDED"}') $q$);
-SELECT pg_temp.expect_fail('fixed-price approval while the storefront is halted for a wrong price basis (Р-116)', $q$
+-- Р-118 (0082): остановку по недоверию каналу ставит путь решения (или диспетчер); она сосуществует с остановкой витрины по массовому сдвигу
+SELECT pg_temp.ok('a channel distrust is set by the decision path next to a mass-shift halt (Р-118)', $q$
+  INSERT INTO channel_data.channel_distrust (tenant_id, channel_account_id, channel, marketplace, reason_code, details)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'PRICE_BASIS_MISMATCH', '{"basisError": "TAX_ADDED", "vatRateBp": 1900}') $q$);
+SELECT pg_temp.expect_fail('fixed-price approval while the channel is distrusted (Р-118)', $q$
   INSERT INTO channel_data.price_decision (tenant_id, price_decision_id, intent_created_at, price_intent_id, write_scope_id, outcome, final_amount_minor, rejection_reason, currency, price_basis, effective_floor_minor, min_price_ids, effective_ceiling_minor, max_price_ids, reason_params, explanation, sanity_ruleset, gate_profile)
-  VALUES ('a0000000-0000-0000-0000-00000000000a', gen_random_uuid(), '2026-09-14 10:35+00', 'a7000000-0000-0000-0000-000000000024', 'a6000000-0000-0000-0000-000000000001', 'APPROVED', 1330, NULL, 'EUR', 'GROSS', 1000, ARRAY[gen_random_uuid()], 5000, ARRAY[gen_random_uuid()], '{"smoke": true}', '{"format":"r80.1","sanity":{"anchorsUsed":[],"checks":[]},"strategy":{"reason":{"code":"FIXED_PRICE"}}}', 'r49.1', 'g74.1') $q$,
-  'halted for a wrong price basis by pricing_halt');
-SELECT pg_temp.expect_fail('dispatch of a fixed-price write while halted for a wrong price basis (Р-116)', $q$
+  VALUES ('a0000000-0000-0000-0000-00000000000a', gen_random_uuid(), '2026-09-14 10:35+00', 'a7000000-0000-0000-0000-000000000024', 'a6000000-0000-0000-0000-000000000001', 'APPROVED', 1330, NULL, 'EUR', 'GROSS', 1000, ARRAY[gen_random_uuid()], 5000, ARRAY[gen_random_uuid()], '{"smoke": true}', '{"format":"r80.1","sanity":{"anchorsUsed":[],"checks":[]},"strategy":{"reason":{"code":"FIXED_PRICE"}}}', 'r49.1', 'g118.1') $q$,
+  'the channel is distrusted by channel_distrust');
+SELECT pg_temp.expect_fail('dispatch of a fixed-price write while the channel is distrusted (Р-118)', $q$
   UPDATE tenant_data.channel_write SET status = 'DISPATCHED', attempt_count = 1 WHERE channel_write_id = 'a9000000-0000-0000-0000-000000000005' $q$,
-  'halted for a wrong price basis by pricing_halt');
--- Ревью шага 22, находка 11: и создание записи цены, а не только её отправка
-SELECT pg_temp.expect_fail('fixed-price write created while halted for a wrong price basis (Р-116)', $q$
+  'the channel is distrusted by channel_distrust');
+SELECT pg_temp.expect_fail('fixed-price write created while the channel is distrusted (Р-118)', $q$
   INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, amount_minor, currency, price_basis, version, origin, price_decision_id)
   VALUES ('a0000000-0000-0000-0000-00000000000a', gen_random_uuid(), 'a6000000-0000-0000-0000-000000000001', 'PRICE', 1320, 'EUR', 'GROSS', 5, 'PRICE_DECISION', 'a8000000-0000-0000-0000-000000000023') $q$,
-  'halted for a wrong price basis by pricing_halt');
-SELECT pg_temp.expect_fail('second active halt for a wrong price basis on the same storefront (Р-116)', $q$
-  INSERT INTO channel_data.pricing_halt (tenant_id, channel_account_id, channel, marketplace, reason_code)
-  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'CHANNEL_PRICE_BASIS_MISMATCH') $q$, 'pricing_halt_active_uq');
--- Р-116: выборка конкурентов не снимает остановку по базе цены — её снимает только человек
-DO $$
-DECLARE
-  h uuid;
-  r text;
-BEGIN
-  SELECT pricing_halt_id INTO h FROM channel_data.pricing_halt WHERE reason_code = 'CHANNEL_PRICE_BASIS_MISMATCH' AND released_at IS NULL;
-  r := channel_data.review_halt_by_sample('a0000000-0000-0000-0000-00000000000a', h, now());
-  IF r IS DISTINCT FROM 'NOT_ACTIVE' THEN
-    RAISE EXCEPTION 'a sample review reaches a halt for a wrong price basis (Р-116)';
-  END IF;
-  RAISE NOTICE 'PASS accept | a sample review does not reach a halt for a wrong price basis (Р-116) | %', r;
-END $$;
+  'the channel is distrusted by channel_distrust');
+SELECT pg_temp.expect_fail('second active distrust of the same storefront and reason (Р-118)', $q$
+  INSERT INTO channel_data.channel_distrust (tenant_id, channel_account_id, channel, marketplace, reason_code)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'PRICE_BASIS_MISMATCH') $q$, 'channel_distrust_active_uq');
+SELECT pg_temp.expect_fail('buyer price read from the channel kept in a distrust (Р-3, Р-118)', $q$
+  INSERT INTO channel_data.channel_distrust (tenant_id, channel_account_id, channel, marketplace, reason_code, details)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'at', 'PRICE_BASIS_MISMATCH', '{"observedMinor": 2379}') $q$, 'channel_distrust_details_check');
+SELECT pg_temp.expect_fail('decision path releases a channel distrust (Р-118)', $q$
+  UPDATE channel_data.channel_distrust SET released_at = now(), released_by_membership_id = 'a2000000-0000-0000-0000-00000000000a', release_note = 'the path releases itself'
+   WHERE reason_code = 'PRICE_BASIS_MISMATCH' $q$, 'permission denied for table channel_distrust');
 -- Р-107, находка 3 ревью шага 18: путь решения не создаёт «ручную цену владельца» — единица записи здесь в режиме ENGINE, и без стража
 -- intent был бы принят
 SELECT pg_temp.expect_fail('path creates a manual price intent of the owner (Р-107)', $q$
@@ -453,6 +446,9 @@ SELECT set_config('app.tenant_id', :tA, true) \gset
 INSERT INTO channel_data.pricing_halt (tenant_id, pricing_halt_id, channel_account_id, channel, marketplace, reason_code, details)
 VALUES (:tA, 'ab000000-0000-0000-0000-000000000001', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'CHANNEL_MASS_SHIFT', '{"sameDirection": 20}'),
        (:tA, 'ab180000-0000-4000-8000-000000000001', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'at', 'CHANNEL_MASS_SHIFT', '{"sameDirection": 20}');
+-- Р-118: недоверие каналу витрины at для проверок снятия ниже
+INSERT INTO channel_data.channel_distrust (tenant_id, channel_distrust_id, channel_account_id, channel, marketplace, reason_code, details)
+VALUES (:tA, 'ad230000-0000-4000-8000-000000000001', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'at', 'PRICE_BASIS_MISMATCH', '{"basisError": "TAX_ADDED"}');
 COMMIT;
 \c - svc_admin
 \ir smoke_helpers.sql
@@ -486,6 +482,28 @@ SELECT pg_temp.ok('manual price write created while halted (Р-51)', $q$
 SELECT pg_temp.ok('manual price write dispatched while halted (Р-51)', $q$
   UPDATE tenant_data.channel_write SET status = 'DISPATCHED', attempt_count = 1 WHERE channel_write_id = 'a9000000-0000-0000-0000-000000000004' $q$);
 -- «release without kind and person» удалена (Р-94): её отклоняла проверка журнала Р-52, это та же проверка, что ниже
+-- Р-118: недоверие каналу создаёт только система, снимает человек с правом, от своего имени, со вторым фактором
+SELECT pg_temp.expect_fail('a person creates a channel distrust (Р-118)', $q$
+  INSERT INTO channel_data.channel_distrust (tenant_id, channel_account_id, channel, marketplace, reason_code)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', NULL, 'PRICE_BASIS_MISMATCH') $q$, 'a person does not create a channel distrust');
+SELECT pg_temp.expect_fail('channel distrust released without a second factor (Р-118)', $q$
+  UPDATE channel_data.channel_distrust SET released_at = now(), released_by_membership_id = 'a2000000-0000-0000-0000-00000000000a', release_note = 'price basis fixed in the channel'
+   WHERE channel_distrust_id = 'ad230000-0000-4000-8000-000000000001' $q$, 'requires a second factor');
+SELECT set_config('app.user_id', 'a1000000-0000-0000-0000-0000000000a9', true), set_config('app.auth_mfa', 'on', true) \gset
+SELECT pg_temp.expect_fail('channel distrust released by a viewer (Р-118)', $q$
+  UPDATE channel_data.channel_distrust SET released_at = now(), released_by_membership_id = 'a2000000-0000-0000-0000-0000000000a9', release_note = 'price basis fixed in the channel'
+   WHERE channel_distrust_id = 'ad230000-0000-4000-8000-000000000001' $q$, 'role VIEWER may not RELEASE_CHANNEL_DISTRUST');
+SELECT set_config('app.user_id', :uA, true) \gset
+SELECT pg_temp.expect_fail('channel distrust released in the name of another member (Р-118)', $q$
+  UPDATE channel_data.channel_distrust SET released_at = now(), released_by_membership_id = 'a2000000-0000-0000-0000-0000000000a9', release_note = 'price basis fixed in the channel'
+   WHERE channel_distrust_id = 'ad230000-0000-4000-8000-000000000001' $q$, 'is not the membership of the session user');
+SELECT pg_temp.ok('channel distrust released by the owner with a second factor (Р-118)', $q$
+  UPDATE channel_data.channel_distrust SET released_at = now(), released_by_membership_id = 'a2000000-0000-0000-0000-00000000000a', release_note = 'price basis fixed in the channel'
+   WHERE channel_distrust_id = 'ad230000-0000-4000-8000-000000000001' $q$);
+SELECT pg_temp.expect_fail('channel distrust released twice (Р-118)', $q$
+  UPDATE channel_data.channel_distrust SET release_note = 'released once more by someone'
+   WHERE channel_distrust_id = 'ad230000-0000-4000-8000-000000000001' $q$, 'is already released');
+SELECT set_config('app.auth_mfa', 'off', true) \gset
 SELECT pg_temp.expect_fail('change halt reason', $q$
   UPDATE channel_data.pricing_halt SET reason_code = 'MANUAL' WHERE pricing_halt_id = 'ab000000-0000-0000-0000-000000000001' $q$, 'channel_data.pricing_halt: only columns');
 -- Р-104: со вторым фактором и автором-участником — единственная причина отказа остаётся журнал проверки
@@ -637,6 +655,30 @@ SELECT pg_temp.expect_fail('Amazon write scope in Smart Pricing mode (Р-111)', 
           'c0000000-0000-0000-0000-000000000006', 1, 'ACCOUNT_REGION_MARKETPLACE_SKU', '["EU", "A1PA6795UKMFR9", "A-1"]',
           'EUR', 'GROSS', 'VAT_INCLUDED', 'KAUFLAND_SMART_PRICING') $q$, 'write_scope_smart_pricing_only_kaufland');
 COMMIT;
+
+-- ---------------------------------------------------------------- Р-39, OQ-166, Р-120 (0082): назначение стратегии проверяет база
+BEGIN;
+SELECT set_config('app.tenant_id', :tA, true), set_config('app.user_id', :uA, true) \gset
+INSERT INTO tenant_data.pricing_strategy (tenant_id, pricing_strategy_id, version, name, type, params, triggers, status, created_by_membership_id)
+VALUES (:tA, 'ad230000-0000-4000-8000-000000000002', 1, 'Lowest on the whole market', 'BEAT_LOWEST', '{"scope": "MARKET", "compareLanded": false, "atBound": "CAP", "deadbandMinor": 0}', ARRAY['COMPETITOR_CHANGE'], 'ACTIVE', :mA),
+       (:tA, 'ad230000-0000-4000-8000-000000000004', 1, 'Fixed for Amazon', 'FIXED', '{"priceMinor": 1500, "deadbandMinor": 0}', ARRAY['COST_CHANGE'], 'ACTIVE', :mA);
+-- Kaufland даёт только первые предложения Buy Box (TOP_N), не весь рынок: «ниже всех на рынке» недоступна [Р-39]
+SELECT pg_temp.expect_fail('strategy unavailable on the channel assigned to an offer (Р-39, OQ-166)', $q$
+  UPDATE tenant_data.write_scope SET pricing_strategy_id = 'ad230000-0000-4000-8000-000000000002', pricing_strategy_version = 1
+   WHERE write_scope_id = 'a6000000-0000-0000-0000-000000000001' $q$, 'is not available on channel KAUFLAND');
+INSERT INTO tenant_data.write_scope (tenant_id, write_scope_id, channel_account_id, channel, field, product_id, capability_id, capability_version, scope_kind, scope_key,
+                                     currency, price_basis, tax_regime, pricing_mode)
+VALUES (:tA, 'ad230000-0000-4000-8000-000000000003', 'a4000000-0000-0000-0000-000000000002', 'AMAZON', 'PRICE', 'a5000000-0000-0000-0000-000000000001',
+        'c0000000-0000-0000-0000-000000000006', 1, 'ACCOUNT_REGION_MARKETPLACE_SKU', tenant_data.derive_scope_key('{"region": "EU", "marketplace": "A1PA6795UKMFR9", "external_sku": "SYN-R120"}'::jsonb, ARRAY['channel_account', 'region', 'marketplace', 'external_sku']),
+        'EUR', 'GROSS', 'VAT_INCLUDED', 'OFF');
+INSERT INTO tenant_data.offer_mapping (tenant_id, product_id, channel_account_id, channel, region, marketplace, channel_offer_key, external_sku, status, price_write_scope_id)
+VALUES (:tA, 'a5000000-0000-0000-0000-000000000001', 'a4000000-0000-0000-0000-000000000002', 'AMAZON', 'EU', 'A1PA6795UKMFR9', 'SYN-R120@de', 'SYN-R120', 'ACTIVE', 'ad230000-0000-4000-8000-000000000003');
+INSERT INTO channel_data.offer_channel_pricing (tenant_id, channel_account_id, channel, marketplace, external_sku, automated_pricing, channel_bounds, source, observed_at)
+VALUES (:tA, 'a4000000-0000-0000-0000-000000000002', 'AMAZON', 'A1PA6795UKMFR9', 'SYN-R120', true, false, 'DISCOVERY', now());
+SELECT pg_temp.expect_fail('strategy assigned to an offer with the channel repricer active (Р-120)', $q$
+  UPDATE tenant_data.write_scope SET pricing_strategy_id = 'ad230000-0000-4000-8000-000000000004', pricing_strategy_version = 1
+   WHERE write_scope_id = 'ad230000-0000-4000-8000-000000000003' $q$, 'has channel-owned pricing');
+ROLLBACK;
 
 BEGIN;
 SELECT set_config('app.tenant_id', :tA, true), set_config('app.user_id', :uA, true) \gset

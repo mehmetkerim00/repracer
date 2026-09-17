@@ -17,6 +17,12 @@ export interface ChannelDescriptor {
   capabilities: OptionalCapability[];
   /** Источники данных о конкурентах и их полнота [Р-39, ADR-0007] */
   competitorSources?: CompetitorSourceDescriptor[];
+  /**
+   * Как снимается системная остановка витрины по массовому сдвигу [Р-52, Р-119]. SAMPLE — автоматически по свежей выборке опросом
+   * конкурентов; MANUAL_ONLY — только человеком: канал не даёт опроса, выборку взять неоткуда. Свойство канала, а не пробел; совпадает с
+   * platform.channel_behaviour (0082).
+   */
+  haltRelease: { kind: 'SAMPLE' | 'MANUAL_ONLY'; basis: string };
 }
 
 export interface CompetitorSourceDescriptor {

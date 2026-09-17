@@ -138,7 +138,7 @@ test('Р-68, Р-59: a competitor-derived evaluation stores the explanation, its 
   assert.deepEqual(row.explanation.snapshot, { source: 'KAUFLAND_BUYBOX' });
   assert.ok(row.sanity_ruleset === 'r49.1' && row.explanation.sanity.anchorsUsed.includes('COST'), JSON.stringify(row.explanation.sanity));
   // Р-80: версия стратегии, профиль и итог Gate — столбцы решения, в слепке их нет
-  assert.deepEqual([row.pricing_strategy_version, row.gate_profile, row.outcome, row.explanation.gate?.outcome, row.explanation.strategy.version], [1, 'g74.1', 'APPROVED', undefined, undefined]);
+  assert.deepEqual([row.pricing_strategy_version, row.gate_profile, row.outcome, row.explanation.gate?.outcome, row.explanation.strategy.version], [1, 'g118.1', 'APPROVED', undefined, undefined]);
   assert.deepEqual(row.core_explanation, row.explanation, 'the core keeps the same explanation forever');
   assert.equal(row.source, 'KAUFLAND_BUYBOX');
   assert.ok(row.competitor_snapshot_id);
