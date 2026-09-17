@@ -1,0 +1,368 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "amazon/pipeline/above-max-price",
+  "channel": "AMAZON",
+  "apiVersion": "listings-items-2021-08-01",
+  "title": "Цена выше max_price: Gate отклоняет",
+  "description": "Преобразован из kaufland/pipeline-above-max-price.json: Стратегия целевой маржи 20% (комиссия 15%, НДС 19%): при себестоимости 10.00 цена 19.15 одобрена и отправлена. Себестоимость выросла до 20.00 — для той же маржи нужна 38.30 при max_price 25.00. Стратегия маржи не округляет цель до границы, конфликт доходит до Gate: REJECTED с причиной ABOVE_MAX_PRICE, класс REJECTED_BY_GATE — так же, как отклонение по нижней границе [Р-44]; предупреждение продавцу, в канал ничего не уходит. Amazon: patchListingsItem отвечает ACCEPTED, применение подтверждает обратное чтение — запись в конце сценария ACCEPTED, а не APPLIED.",
+  "tags": [
+    "mandatory:pipeline-above-max",
+    "pipeline",
+    "price-gate"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "vendor/amazon/sp-api-models/2026-09-16/models/listings-items-api-model/listingsItems_2021-08-01.json",
+      "vendor/amazon/sp-api-models/2026-09-16/schemas/notifications/AnyOfferChangedNotification.json",
+      "https://developer-docs.amazon/sp-api/docs/manage-purchasable-offer.md",
+      "https://developer-docs.amazon/sp-api/docs/connecting-to-the-selling-partner-api.md",
+      "https://developer-docs.amazon/sp-api/docs/listings-items-api-rate-limits.md",
+      "tests/contract/fixtures/kaufland/pipeline-above-max-price.json"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "A1SYNSELLER0001",
+      "marketplaces": [
+        "A1PA6795UKMFR9"
+      ],
+      "channel": "AMAZON",
+      "region": "EU"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "Atzr|syn-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "amzn1.application-oa2-client.syn0001",
+        "clientSecret": "syn-lwa-client-secret-0001"
+      },
+      "accessToken": "Atza|syn-access-token-0001"
+    },
+    "pricing": {
+      "scopes": [
+        {
+          "writeScopeId": "ws-price-de-4101",
+          "productId": "prod-4101",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "A1PA6795UKMFR9",
+          "externalUnitId": "SYN-SKU-4101",
+          "channelProductRef": "B062000001",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-margin",
+            "version": 1,
+            "params": {
+              "type": "TARGET_MARGIN",
+              "targetMarginBp": 2000
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-4101"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-4101"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-4101-v1",
+            "unitCostMinor": 1000,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
+          }
+        }
+      ],
+      "marketplaces": {
+        "A1PA6795UKMFR9": {
+          "currency": "EUR",
+          "basis": "GROSS"
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "id": "cost-recompute-approved",
+      "kind": "pipelineRecompute",
+      "writeScopeId": "ws-price-de-4101",
+      "trigger": {
+        "type": "COST_CHANGE"
+      },
+      "expect": {
+        "stages": [
+          {
+            "stage": "STRATEGY",
+            "outcome": "CHANGED",
+            "reason": {
+              "code": "MARGIN_TARGET",
+              "params": {
+                "targetMinor": 1915
+              }
+            }
+          },
+          {
+            "stage": "GATE",
+            "outcome": "APPROVED"
+          },
+          {
+            "stage": "WRITE_RECHECK",
+            "outcome": "PASS"
+          },
+          {
+            "stage": "DISPATCH_PLAN",
+            "outcome": "PLANNED"
+          },
+          {
+            "stage": "DISPATCH",
+            "outcome": "ACCEPTED"
+          }
+        ],
+        "decision": {
+          "outcome": "APPROVED",
+          "finalMinor": 1915
+        }
+      }
+    },
+    {
+      "id": "cost-doubles",
+      "kind": "pricingMutation",
+      "op": "setCost",
+      "writeScopeId": "ws-price-de-4101",
+      "value": {
+        "currency": "EUR",
+        "costProfileId": "cp-4101-v2",
+        "unitCostMinor": 2000,
+        "fixedFeeMinor": 0,
+        "feeRateBp": 1500,
+        "tax": {
+          "regime": "VAT_INCLUDED",
+          "vatRateBp": 1900
+        }
+      }
+    },
+    {
+      "id": "cost-recompute-above-max",
+      "kind": "pipelineRecompute",
+      "writeScopeId": "ws-price-de-4101",
+      "trigger": {
+        "type": "COST_CHANGE"
+      },
+      "expect": {
+        "stages": [
+          {
+            "stage": "STRATEGY",
+            "outcome": "CHANGED",
+            "reason": {
+              "code": "MARGIN_TARGET",
+              "params": {
+                "targetMinor": 3830
+              }
+            }
+          },
+          {
+            "stage": "GATE",
+            "outcome": "REJECTED",
+            "reason": {
+              "code": "ABOVE_MAX_PRICE",
+              "params": {
+                "proposedMinor": 3830,
+                "maxMinor": 2500
+              }
+            }
+          }
+        ],
+        "intent": {
+          "intentClass": "CHANGED",
+          "proposedMinor": 3830
+        },
+        "decision": {
+          "outcome": "REJECTED",
+          "decisionClass": "REJECTED_BY_GATE",
+          "rejectionReason": "ABOVE_MAX_PRICE",
+          "finalMinor": null,
+          "effectiveFloorMinor": 1500,
+          "effectiveCeilingMinor": 2500,
+          "maxPriceIds": [
+            "max-4101"
+          ],
+          "checks": {
+            "$contains": [
+              {
+                "check": "UPPER_BOUND",
+                "passed": false
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "lwa-token",
+      "note": "Токен LWA по refresh_token (connecting-to-the-selling-partner-api); тело формы проверяет стенд",
+      "request": {
+        "method": "POST",
+        "path": "/auth/o2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "Atza|syn-access-token-0001",
+          "token_type": "bearer",
+          "expires_in": 3600,
+          "refresh_token": "Atzr|syn-refresh-token-0001"
+        }
+      }
+    },
+    {
+      "id": "patch-4101-1915-read",
+      "note": "Чтение оффера перед записью: тип товара и собственное ценообразование канала [AMZ_C03, AMZ_C09]",
+      "request": {
+        "method": "GET",
+        "path": "/listings/2021-08-01/items/A1SYNSELLER0001/SYN-SKU-4101",
+        "query": {
+          "marketplaceIds": "A1PA6795UKMFR9",
+          "includedData": "summaries,attributes"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "sku": "SYN-SKU-4101",
+          "summaries": [
+            {
+              "marketplaceId": "A1PA6795UKMFR9",
+              "asin": "B000004101",
+              "productType": "SYNTHETIC_PRODUCT_TYPE",
+              "status": [
+                "BUYABLE",
+                "DISCOVERABLE"
+              ]
+            }
+          ],
+          "attributes": {
+            "purchasable_offer": [
+              {
+                "marketplace_id": "A1PA6795UKMFR9",
+                "currency": "EUR",
+                "audience": "ALL",
+                "our_price": [
+                  {
+                    "schedule": [
+                      {
+                        "value_with_tax": 18.5
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "patch-4101-1915-patch",
+      "request": {
+        "method": "PATCH",
+        "path": "/listings/2021-08-01/items/A1SYNSELLER0001/SYN-SKU-4101",
+        "query": {
+          "marketplaceIds": "A1PA6795UKMFR9",
+          "includedData": "issues"
+        },
+        "body": {
+          "productType": "SYNTHETIC_PRODUCT_TYPE",
+          "patches": [
+            {
+              "op": "merge",
+              "path": "/attributes/purchasable_offer",
+              "value": [
+                {
+                  "marketplace_id": "A1PA6795UKMFR9",
+                  "currency": "EUR",
+                  "audience": "ALL",
+                  "our_price": [
+                    {
+                      "schedule": [
+                        {
+                          "value_with_tax": 19.15
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "sku": "SYN-SKU-4101",
+          "status": "ACCEPTED",
+          "submissionId": "syn-submission-SYN-SKU-4101",
+          "issues": []
+        }
+      }
+    }
+  ],
+  "expect": {
+    "alerts": [
+      {
+        "code": "PRICE_REJECTED_BY_BOUND",
+        "severity": "WARNING",
+        "count": 1,
+        "details": {
+          "reason": "ABOVE_MAX_PRICE"
+        }
+      }
+    ],
+    "pipeline": {
+      "scopes": [
+        {
+          "currentPriceMinor": 1915
+        }
+      ],
+      "writes": [
+        {
+          "amountMinor": 1915,
+          "status": "ACCEPTED"
+        }
+      ],
+      "decisions": [
+        {
+          "outcome": "APPROVED"
+        },
+        {
+          "outcome": "REJECTED",
+          "rejectionReason": "ABOVE_MAX_PRICE",
+          "decisionClass": "REJECTED_BY_GATE",
+          "reasonParams": {
+            "proposedMinor": 3830,
+            "maxMinor": 2500
+          }
+        }
+      ]
+    }
+  }
+}

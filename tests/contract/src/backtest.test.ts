@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { MemorySeedScope } from '@repracer/pricing-pipeline';
-import { counterfactual, LIES, runBacktest } from './backtest/backtest.ts';
+import { counterfactual, LIES, runBacktest, wins } from './backtest/backtest.ts';
 import { syntheticHistory } from './backtest/history.ts';
 
 /** Бэктест на записанной истории [Р-38]: окно, контрфактический снимок, метрики. Данные синтетические. */
@@ -36,6 +36,17 @@ test('the counterfactual snapshot keeps the competitors, replaces our price and 
   const cheaper = counterfactual(recorded, lowestCompetitor - 1);
   assert.equal(cheaper.buybox?.isSelf, true);
   assert.equal(cheaper.offers[0]?.price.amountMinor, lowestCompetitor - 1);
+});
+
+test('finding 2 of the step 21 review: the Buy Box metric compares our price with our shipping against competitor totals, like the counterfactual', () => {
+  const recorded = history.snapshots[0]!;
+  const lowestTotal = Math.min(...recorded.offers.filter((o) => !o.isSelf).map((o) => o.totalPrice?.amountMinor ?? o.price.amountMinor));
+  const self = recorded.offers.find((o) => o.isSelf)!;
+  const shipped = { ...recorded, offers: recorded.offers.map((o) => (o.isSelf ? { ...o, shipping: { ...self.price, amountMinor: 300 } } : o)) };
+  // Цена на 1 цент ниже лучшего конкурента, но с нашей доставкой 3.00 — проигрыш, как в контрфактическом снимке
+  assert.equal(wins(shipped, lowestTotal - 1), false, 'our shipping counts');
+  assert.equal(wins(shipped, lowestTotal - 1), counterfactual(shipped, lowestTotal - 1).buybox?.isSelf, 'the metric agrees with the counterfactual Buy Box');
+  assert.equal(wins(shipped, lowestTotal - 301), true);
 });
 
 test('18 months of synthetic history: undercutting wins the Buy Box more often at a lower margin, never below min_price; corrupted snapshots are rejected', async () => {

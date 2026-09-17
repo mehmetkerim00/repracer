@@ -278,7 +278,10 @@ export function createPricingPipeline(deps: PipelineDeps) {
   async function handOff(ctx: AdapterCallContext, writeScopeId: string, recorded: DispatchRecorded, report: ScopeReport): Promise<void> {
     // Те же алерты, что у диспетчера (afterRecorded): до шага 21 отказ канала «нужен человек» на пути решения блокировал единицу молча —
     // симулятор с лимитом правок (K-05) это показал
-    const details = { writeScopeId, channelWriteId: report.channelWriteId ?? '', reason: recorded.reason?.code ?? 'UNKNOWN' };
+    const blockedCode = (recorded.reason as { params?: Record<string, unknown> } | null)?.params?.code;
+    const details = { writeScopeId, channelWriteId: report.channelWriteId ?? '', reason: recorded.reason?.code ?? 'UNKNOWN',
+      // Р-115: продавец видит, что именно у оффера в канале, а не только «заблокировано»
+      ...(typeof blockedCode === 'string' ? { code: blockedCode } : {}) };
     if (recorded.scopeBlocked) {
       await alerts.raise({ ...alertBase(ctx), code: 'PRICE_WRITE_SCOPE_BLOCKED', severity: 'CRITICAL', details });
     } else if (recorded.status === 'DISCARDED_STALE' || recorded.status === 'BUDGET_EXHAUSTED' || recorded.status === 'NOT_APPLIED') {

@@ -173,6 +173,8 @@ export const DISPATCH_REASON_CODES = [
   'WRITE_OUTCOME_RECONCILED',
   'WRITE_SCOPE_BLOCKED',
   'WRITE_BUDGET_DAY_UNCONFIRMED',
+  // Р-116 (шаг 22): обратное чтение показало цену, отличающуюся от отправленной ровно на ставку налога, — остановка витрины
+  'CHANNEL_PRICE_BASIS_MISMATCH',
 ] as const;
 export type DispatchReasonCode = (typeof DISPATCH_REASON_CODES)[number];
 
@@ -242,7 +244,11 @@ export const SNAPSHOT_FIELDS = ['BUYBOX_PRICE', 'SUGGESTED_PRICE', 'OFFER_PRICE'
 export const PRICE_BASES = ['GROSS', 'NET'] as const;
 export const SNAPSHOT_INCONSISTENCIES = ['OFFER_TOTAL_NOT_PRICE_PLUS_SHIPPING', 'MORE_OFFERS_THAN_TOP_N', 'BUYBOX_NOT_RANK_ONE_PRICE'] as const;
 export const HALT_STAGES = ['INPUT', 'GATE', 'DISPATCH', 'DATABASE'] as const;
-export const HALT_REASONS = ['CHANNEL_MASS_SHIFT'] as const;
+/** Причины системной остановки витрины — совпадают с CHECK channel_data.pricing_halt.reason_code (0042, 0080) */
+export const HALT_REASONS = ['CHANNEL_MASS_SHIFT', 'CHANNEL_PRICE_BASIS_MISMATCH'] as const;
+export type HaltReasonCode = (typeof HALT_REASONS)[number];
+/** Р-116: налог добавлен к отправленной цене (канал считал её нетто) или вычтен (канал считал её брутто) */
+export const BASIS_MISMATCH_DIRECTIONS = ['TAX_ADDED', 'TAX_REMOVED'] as const;
 export const SHIFT_DIRECTIONS = ['UP', 'DOWN'] as const;
 export const SCALE_ANCHORS = ['COST', 'CROSS_CHANNEL', 'HISTORY', 'LAST_ACCEPTED'] as const;
 export const CHANNELS = ['KAUFLAND', 'AMAZON', 'EBAY', 'OTTO'] as const;
@@ -283,7 +289,7 @@ export const RECHECK_VIOLATIONS = ['FLOOR', 'CEILING', 'FLOOR_UNRESOLVABLE'] as 
 export const WRITE_ERROR_CODES = [
   'RATE_LIMITED', 'CHANNEL_UNAVAILABLE', 'TIMEOUT', 'NETWORK', 'AUTH_INVALID', 'AUTH_EXPIRED', 'ACCOUNT_INACTIVE', 'FORBIDDEN', 'VALIDATION',
   'NOT_FOUND', 'DUPLICATE_ACTION', 'STALE_VERSION', 'ACTION_NOT_ALLOWED', 'PRECONDITION_FAILED', 'EDIT_BUDGET_EXHAUSTED', 'OFFER_NOT_LIVE',
-  'POLICY_VIOLATION', 'TENANT_MISMATCH', 'SIGNATURE_INVALID', 'UNSUPPORTED', 'UNKNOWN',
+  'POLICY_VIOLATION', 'TENANT_MISMATCH', 'SIGNATURE_INVALID', 'UNSUPPORTED', 'UNKNOWN', 'CHANNEL_REPRICER_ACTIVE', 'CHANNEL_BOUNDS_PRESENT',
   'MAX_ATTEMPTS', 'NOT_APPLIED', 'SCOPE_HELD', 'SCOPE_CONTESTED', 'SCOPE_BLOCKED', 'SCOPE_RETIRED',
   // Итог записи не узнать обратным чтением дольше предела: единица блокируется до разбора человеком (D1)
   'OUTCOME_UNRESOLVED',
@@ -291,7 +297,7 @@ export const WRITE_ERROR_CODES = [
 export const ERROR_CLASSES = ['TRANSIENT', 'PERMANENT', 'REQUIRES_HUMAN'] as const;
 export const CONTEXT_CHANGES = ['MIN_PRICE', 'MAX_PRICE', 'CHANNEL_HALT', 'PRICING_STOP'] as const;
 export const RECONCILE_RESULTS = ['APPLIED', 'NOT_APPLIED'] as const;
-export const SELLER_ACTIONS = ['RECONNECT_ACCOUNT', 'CHECK_ACCOUNT_STATUS', 'CHECK_LISTING', 'REVIEW_CHANNEL_POLICY', 'CONTACT_CHANNEL_SUPPORT', 'REVIEW_OFFER_STATUS'] as const;
+export const SELLER_ACTIONS = ['RECONNECT_ACCOUNT', 'CHECK_ACCOUNT_STATUS', 'CHECK_LISTING', 'REVIEW_CHANNEL_POLICY', 'CONTACT_CHANNEL_SUPPORT', 'REVIEW_OFFER_STATUS', 'DISABLE_CHANNEL_REPRICER', 'REMOVE_CHANNEL_BOUNDS'] as const;
 export const MARGIN_COST_CAUSES = ['COST_PROFILE_MISSING', 'FEE_ESTIMATE_MISSING', 'VAT_RATE_MISSING', 'FX_RATE_UNAVAILABLE', 'FX_RATE_STALE', 'UNSUPPORTED_CURRENCY', 'INVALID_INPUT'] as const;
 export const BUDGET_SOURCES = ['CHANNEL', 'DATABASE'] as const;
 /** Кому нужна себестоимость [Р-77]: стратегии целевой маржи и ограничению минимальной маржи — перечисляются явно */
@@ -442,6 +448,11 @@ export const REASON_PARAMS: Readonly<Record<AnyReasonCode, ParamSchema>> = {
   WRITE_SCOPE_BLOCKED: { code: oneOf(WRITE_ERROR_CODES, 'TENANT'), action: oneOf(SELLER_ACTIONS, 'TENANT') },
   // Находка 7 шага 15 [Р-65]: повтор записи с бюджетом правок, когда граница суток витрины перестала быть подтверждённой
   WRITE_BUDGET_DAY_UNCONFIRMED: { marketplace: id('TENANT') },
+  // Р-116: отправленная цена — наша, применённая — прочитана из канала
+  CHANNEL_PRICE_BASIS_MISMATCH: {
+    basisError: oneOf(BASIS_MISMATCH_DIRECTIONS, 'TENANT'), vatRateBp: bp('TENANT'), sentMinor: money('TENANT'), observedMinor: money('CHANNEL'),
+    currency: currency(), writeScopeId: id('TENANT'), marketplace: id('TENANT'),
+  },
 };
 
 export const SANITY_NOTE_PARAMS: Readonly<Record<SanityNoteCode, ParamSchema>> = {
@@ -549,6 +560,9 @@ export function sellerActionFor(errorCode: string): (typeof SELLER_ACTIONS)[numb
     case 'OFFER_NOT_LIVE': case 'NOT_FOUND': case 'PRECONDITION_FAILED': return 'CHECK_LISTING';
     case 'POLICY_VIOLATION': case 'FORBIDDEN': return 'REVIEW_CHANNEL_POLICY';
     case 'SCOPE_HELD': case 'SCOPE_CONTESTED': case 'SCOPE_BLOCKED': case 'SCOPE_RETIRED': return 'REVIEW_OFFER_STATUS';
+    // Р-115, Р-114: правило автоматического ценообразования или границы цены заданы в кабинете канала — снять их может только продавец
+    case 'CHANNEL_REPRICER_ACTIVE': return 'DISABLE_CHANNEL_REPRICER';
+    case 'CHANNEL_BOUNDS_PRESENT': return 'REMOVE_CHANNEL_BOUNDS';
     default: return 'CONTACT_CHANNEL_SUPPORT';
   }
 }

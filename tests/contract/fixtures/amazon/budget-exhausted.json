@@ -1,0 +1,790 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "amazon/budget/pair-level-exhausted",
+  "channel": "AMAZON",
+  "apiVersion": "listings-items-2021-08-01",
+  "title": "Бюджет пары аккаунт–приложение: шестая отправка в ту же секунду не уходит",
+  "description": "Страница лимитов: getListingsItem и patchListingsItem — 5 запросов в секунду на пару, burst 5. Пять отправок (чтение и запись) в одну виртуальную секунду проходят; шестая не отправляется: RATE_LIMITED с retryAt, журнал AMZ_C01 с уровнем PAIR.",
+  "tags": [
+    "mandatory:budget-exhausted",
+    "budget"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "vendor/amazon/sp-api-models/2026-09-16/models/listings-items-api-model/listingsItems_2021-08-01.json",
+      "https://developer-docs.amazon/sp-api/docs/manage-purchasable-offer.md",
+      "https://developer-docs.amazon/sp-api/docs/listings-items-api-rate-limits.md",
+      "https://developer-docs.amazon/sp-api/docs/building-listings-management-workflows-guide.md"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "A1SYNSELLER0001",
+      "marketplaces": [
+        "A1PA6795UKMFR9"
+      ],
+      "channel": "AMAZON",
+      "region": "EU"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "Atzr|syn-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "amzn1.application-oa2-client.syn0001",
+        "clientSecret": "syn-lwa-client-secret-0001"
+      },
+      "accessToken": "Atza|syn-access-token-0001"
+    }
+  },
+  "steps": [
+    {
+      "id": "dispatch-1",
+      "kind": "call",
+      "method": "dispatch",
+      "args": [
+        {
+          "batchId": "amz:b1",
+          "operation": "patchListingsItem",
+          "items": [
+            {
+              "channelWriteId": "cw-1",
+              "version": 1,
+              "idempotencyKey": "cw-1:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-amz-price-A1PA6795UKMFR9-7001",
+                "field": "PRICE",
+                "scopeKey": "amazon|acct-1|EU|A1PA6795UKMFR9|SYN-SKU-7001",
+                "identity": {
+                  "region": "EU",
+                  "marketplace": "A1PA6795UKMFR9",
+                  "externalSku": "SYN-SKU-7001"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1800,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            }
+          ],
+          "budgetCharges": [],
+          "requestCount": 2
+        }
+      ]
+    },
+    {
+      "id": "dispatch-2",
+      "kind": "call",
+      "method": "dispatch",
+      "args": [
+        {
+          "batchId": "amz:b2",
+          "operation": "patchListingsItem",
+          "items": [
+            {
+              "channelWriteId": "cw-2",
+              "version": 2,
+              "idempotencyKey": "cw-2:2",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-amz-price-A1PA6795UKMFR9-7001",
+                "field": "PRICE",
+                "scopeKey": "amazon|acct-1|EU|A1PA6795UKMFR9|SYN-SKU-7001",
+                "identity": {
+                  "region": "EU",
+                  "marketplace": "A1PA6795UKMFR9",
+                  "externalSku": "SYN-SKU-7001"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1801,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            }
+          ],
+          "budgetCharges": [],
+          "requestCount": 2
+        }
+      ]
+    },
+    {
+      "id": "dispatch-3",
+      "kind": "call",
+      "method": "dispatch",
+      "args": [
+        {
+          "batchId": "amz:b3",
+          "operation": "patchListingsItem",
+          "items": [
+            {
+              "channelWriteId": "cw-3",
+              "version": 3,
+              "idempotencyKey": "cw-3:3",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-amz-price-A1PA6795UKMFR9-7001",
+                "field": "PRICE",
+                "scopeKey": "amazon|acct-1|EU|A1PA6795UKMFR9|SYN-SKU-7001",
+                "identity": {
+                  "region": "EU",
+                  "marketplace": "A1PA6795UKMFR9",
+                  "externalSku": "SYN-SKU-7001"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1802,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            }
+          ],
+          "budgetCharges": [],
+          "requestCount": 2
+        }
+      ]
+    },
+    {
+      "id": "dispatch-4",
+      "kind": "call",
+      "method": "dispatch",
+      "args": [
+        {
+          "batchId": "amz:b4",
+          "operation": "patchListingsItem",
+          "items": [
+            {
+              "channelWriteId": "cw-4",
+              "version": 4,
+              "idempotencyKey": "cw-4:4",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-amz-price-A1PA6795UKMFR9-7001",
+                "field": "PRICE",
+                "scopeKey": "amazon|acct-1|EU|A1PA6795UKMFR9|SYN-SKU-7001",
+                "identity": {
+                  "region": "EU",
+                  "marketplace": "A1PA6795UKMFR9",
+                  "externalSku": "SYN-SKU-7001"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1803,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            }
+          ],
+          "budgetCharges": [],
+          "requestCount": 2
+        }
+      ]
+    },
+    {
+      "id": "dispatch-5",
+      "kind": "call",
+      "method": "dispatch",
+      "args": [
+        {
+          "batchId": "amz:b5",
+          "operation": "patchListingsItem",
+          "items": [
+            {
+              "channelWriteId": "cw-5",
+              "version": 5,
+              "idempotencyKey": "cw-5:5",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-amz-price-A1PA6795UKMFR9-7001",
+                "field": "PRICE",
+                "scopeKey": "amazon|acct-1|EU|A1PA6795UKMFR9|SYN-SKU-7001",
+                "identity": {
+                  "region": "EU",
+                  "marketplace": "A1PA6795UKMFR9",
+                  "externalSku": "SYN-SKU-7001"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1804,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            }
+          ],
+          "budgetCharges": [],
+          "requestCount": 2
+        }
+      ]
+    },
+    {
+      "id": "dispatch-6",
+      "kind": "call",
+      "method": "dispatch",
+      "args": [
+        {
+          "batchId": "amz:b6",
+          "operation": "patchListingsItem",
+          "items": [
+            {
+              "channelWriteId": "cw-6",
+              "version": 6,
+              "idempotencyKey": "cw-6:6",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-amz-price-A1PA6795UKMFR9-7001",
+                "field": "PRICE",
+                "scopeKey": "amazon|acct-1|EU|A1PA6795UKMFR9|SYN-SKU-7001",
+                "identity": {
+                  "region": "EU",
+                  "marketplace": "A1PA6795UKMFR9",
+                  "externalSku": "SYN-SKU-7001"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1805,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            }
+          ],
+          "budgetCharges": [],
+          "requestCount": 2
+        }
+      ],
+      "expect": {
+        "outcomes": [
+          {
+            "channelWriteId": "cw-6",
+            "status": "REJECTED",
+            "error": {
+              "code": "RATE_LIMITED",
+              "retryAt": {
+                "$isoInstant": true
+              }
+            }
+          }
+        ],
+        "attemptsMade": 0
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "lwa-token",
+      "note": "Токен LWA по refresh_token (connecting-to-the-selling-partner-api); тело формы проверяет стенд",
+      "request": {
+        "method": "POST",
+        "path": "/auth/o2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "Atza|syn-access-token-0001",
+          "token_type": "bearer",
+          "expires_in": 3600,
+          "refresh_token": "Atzr|syn-refresh-token-0001"
+        }
+      }
+    },
+    {
+      "id": "read-1",
+      "note": "Чтение оффера перед записью: тип товара и собственное ценообразование канала [AMZ_C03, AMZ_C09]",
+      "request": {
+        "method": "GET",
+        "path": "/listings/2021-08-01/items/A1SYNSELLER0001/SYN-SKU-7001",
+        "query": {
+          "marketplaceIds": "A1PA6795UKMFR9",
+          "includedData": "summaries,attributes"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "sku": "SYN-SKU-7001",
+          "summaries": [
+            {
+              "marketplaceId": "A1PA6795UKMFR9",
+              "asin": "B000007001",
+              "productType": "SYNTHETIC_PRODUCT_TYPE",
+              "status": [
+                "BUYABLE",
+                "DISCOVERABLE"
+              ]
+            }
+          ],
+          "attributes": {
+            "purchasable_offer": [
+              {
+                "marketplace_id": "A1PA6795UKMFR9",
+                "currency": "EUR",
+                "audience": "ALL",
+                "our_price": [
+                  {
+                    "schedule": [
+                      {
+                        "value_with_tax": 18.5
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "patch-1",
+      "request": {
+        "method": "PATCH",
+        "path": "/listings/2021-08-01/items/A1SYNSELLER0001/SYN-SKU-7001",
+        "query": {
+          "marketplaceIds": "A1PA6795UKMFR9",
+          "includedData": "issues"
+        },
+        "body": {
+          "productType": "SYNTHETIC_PRODUCT_TYPE",
+          "patches": [
+            {
+              "op": "merge",
+              "path": "/attributes/purchasable_offer",
+              "value": [
+                {
+                  "marketplace_id": "A1PA6795UKMFR9",
+                  "currency": "EUR",
+                  "audience": "ALL",
+                  "our_price": [
+                    {
+                      "schedule": [
+                        {
+                          "value_with_tax": 18
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "sku": "SYN-SKU-7001",
+          "status": "ACCEPTED",
+          "submissionId": "syn-submission-SYN-SKU-7001",
+          "issues": []
+        }
+      }
+    },
+    {
+      "id": "read-2",
+      "note": "Чтение оффера перед записью: тип товара и собственное ценообразование канала [AMZ_C03, AMZ_C09]",
+      "request": {
+        "method": "GET",
+        "path": "/listings/2021-08-01/items/A1SYNSELLER0001/SYN-SKU-7001",
+        "query": {
+          "marketplaceIds": "A1PA6795UKMFR9",
+          "includedData": "summaries,attributes"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "sku": "SYN-SKU-7001",
+          "summaries": [
+            {
+              "marketplaceId": "A1PA6795UKMFR9",
+              "asin": "B000007001",
+              "productType": "SYNTHETIC_PRODUCT_TYPE",
+              "status": [
+                "BUYABLE",
+                "DISCOVERABLE"
+              ]
+            }
+          ],
+          "attributes": {
+            "purchasable_offer": [
+              {
+                "marketplace_id": "A1PA6795UKMFR9",
+                "currency": "EUR",
+                "audience": "ALL",
+                "our_price": [
+                  {
+                    "schedule": [
+                      {
+                        "value_with_tax": 18.5
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "patch-2",
+      "request": {
+        "method": "PATCH",
+        "path": "/listings/2021-08-01/items/A1SYNSELLER0001/SYN-SKU-7001",
+        "query": {
+          "marketplaceIds": "A1PA6795UKMFR9",
+          "includedData": "issues"
+        },
+        "body": {
+          "productType": "SYNTHETIC_PRODUCT_TYPE",
+          "patches": [
+            {
+              "op": "merge",
+              "path": "/attributes/purchasable_offer",
+              "value": [
+                {
+                  "marketplace_id": "A1PA6795UKMFR9",
+                  "currency": "EUR",
+                  "audience": "ALL",
+                  "our_price": [
+                    {
+                      "schedule": [
+                        {
+                          "value_with_tax": 18.01
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "sku": "SYN-SKU-7001",
+          "status": "ACCEPTED",
+          "submissionId": "syn-submission-SYN-SKU-7001",
+          "issues": []
+        }
+      }
+    },
+    {
+      "id": "read-3",
+      "note": "Чтение оффера перед записью: тип товара и собственное ценообразование канала [AMZ_C03, AMZ_C09]",
+      "request": {
+        "method": "GET",
+        "path": "/listings/2021-08-01/items/A1SYNSELLER0001/SYN-SKU-7001",
+        "query": {
+          "marketplaceIds": "A1PA6795UKMFR9",
+          "includedData": "summaries,attributes"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "sku": "SYN-SKU-7001",
+          "summaries": [
+            {
+              "marketplaceId": "A1PA6795UKMFR9",
+              "asin": "B000007001",
+              "productType": "SYNTHETIC_PRODUCT_TYPE",
+              "status": [
+                "BUYABLE",
+                "DISCOVERABLE"
+              ]
+            }
+          ],
+          "attributes": {
+            "purchasable_offer": [
+              {
+                "marketplace_id": "A1PA6795UKMFR9",
+                "currency": "EUR",
+                "audience": "ALL",
+                "our_price": [
+                  {
+                    "schedule": [
+                      {
+                        "value_with_tax": 18.5
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "patch-3",
+      "request": {
+        "method": "PATCH",
+        "path": "/listings/2021-08-01/items/A1SYNSELLER0001/SYN-SKU-7001",
+        "query": {
+          "marketplaceIds": "A1PA6795UKMFR9",
+          "includedData": "issues"
+        },
+        "body": {
+          "productType": "SYNTHETIC_PRODUCT_TYPE",
+          "patches": [
+            {
+              "op": "merge",
+              "path": "/attributes/purchasable_offer",
+              "value": [
+                {
+                  "marketplace_id": "A1PA6795UKMFR9",
+                  "currency": "EUR",
+                  "audience": "ALL",
+                  "our_price": [
+                    {
+                      "schedule": [
+                        {
+                          "value_with_tax": 18.02
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "sku": "SYN-SKU-7001",
+          "status": "ACCEPTED",
+          "submissionId": "syn-submission-SYN-SKU-7001",
+          "issues": []
+        }
+      }
+    },
+    {
+      "id": "read-4",
+      "note": "Чтение оффера перед записью: тип товара и собственное ценообразование канала [AMZ_C03, AMZ_C09]",
+      "request": {
+        "method": "GET",
+        "path": "/listings/2021-08-01/items/A1SYNSELLER0001/SYN-SKU-7001",
+        "query": {
+          "marketplaceIds": "A1PA6795UKMFR9",
+          "includedData": "summaries,attributes"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "sku": "SYN-SKU-7001",
+          "summaries": [
+            {
+              "marketplaceId": "A1PA6795UKMFR9",
+              "asin": "B000007001",
+              "productType": "SYNTHETIC_PRODUCT_TYPE",
+              "status": [
+                "BUYABLE",
+                "DISCOVERABLE"
+              ]
+            }
+          ],
+          "attributes": {
+            "purchasable_offer": [
+              {
+                "marketplace_id": "A1PA6795UKMFR9",
+                "currency": "EUR",
+                "audience": "ALL",
+                "our_price": [
+                  {
+                    "schedule": [
+                      {
+                        "value_with_tax": 18.5
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "patch-4",
+      "request": {
+        "method": "PATCH",
+        "path": "/listings/2021-08-01/items/A1SYNSELLER0001/SYN-SKU-7001",
+        "query": {
+          "marketplaceIds": "A1PA6795UKMFR9",
+          "includedData": "issues"
+        },
+        "body": {
+          "productType": "SYNTHETIC_PRODUCT_TYPE",
+          "patches": [
+            {
+              "op": "merge",
+              "path": "/attributes/purchasable_offer",
+              "value": [
+                {
+                  "marketplace_id": "A1PA6795UKMFR9",
+                  "currency": "EUR",
+                  "audience": "ALL",
+                  "our_price": [
+                    {
+                      "schedule": [
+                        {
+                          "value_with_tax": 18.03
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "sku": "SYN-SKU-7001",
+          "status": "ACCEPTED",
+          "submissionId": "syn-submission-SYN-SKU-7001",
+          "issues": []
+        }
+      }
+    },
+    {
+      "id": "read-5",
+      "note": "Чтение оффера перед записью: тип товара и собственное ценообразование канала [AMZ_C03, AMZ_C09]",
+      "request": {
+        "method": "GET",
+        "path": "/listings/2021-08-01/items/A1SYNSELLER0001/SYN-SKU-7001",
+        "query": {
+          "marketplaceIds": "A1PA6795UKMFR9",
+          "includedData": "summaries,attributes"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "sku": "SYN-SKU-7001",
+          "summaries": [
+            {
+              "marketplaceId": "A1PA6795UKMFR9",
+              "asin": "B000007001",
+              "productType": "SYNTHETIC_PRODUCT_TYPE",
+              "status": [
+                "BUYABLE",
+                "DISCOVERABLE"
+              ]
+            }
+          ],
+          "attributes": {
+            "purchasable_offer": [
+              {
+                "marketplace_id": "A1PA6795UKMFR9",
+                "currency": "EUR",
+                "audience": "ALL",
+                "our_price": [
+                  {
+                    "schedule": [
+                      {
+                        "value_with_tax": 18.5
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "patch-5",
+      "request": {
+        "method": "PATCH",
+        "path": "/listings/2021-08-01/items/A1SYNSELLER0001/SYN-SKU-7001",
+        "query": {
+          "marketplaceIds": "A1PA6795UKMFR9",
+          "includedData": "issues"
+        },
+        "body": {
+          "productType": "SYNTHETIC_PRODUCT_TYPE",
+          "patches": [
+            {
+              "op": "merge",
+              "path": "/attributes/purchasable_offer",
+              "value": [
+                {
+                  "marketplace_id": "A1PA6795UKMFR9",
+                  "currency": "EUR",
+                  "audience": "ALL",
+                  "our_price": [
+                    {
+                      "schedule": [
+                        {
+                          "value_with_tax": 18.04
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "sku": "SYN-SKU-7001",
+          "status": "ACCEPTED",
+          "submissionId": "syn-submission-SYN-SKU-7001",
+          "issues": []
+        }
+      }
+    }
+  ],
+  "expect": {
+    "noAlerts": true,
+    "logs": [
+      {
+        "code": "AMZ_C01_TWO_LEVEL_BUDGET",
+        "count": 1,
+        "details": {
+          "level": "PAIR",
+          "operation": "getListingsItem"
+        }
+      }
+    ]
+  }
+}

@@ -42,6 +42,8 @@ export interface Sink {
 
 export const SELLER_CREDENTIALS_REF = 'cred:seller';
 export const PARTNER_CREDENTIALS_REF = 'cred:partner';
+/** Ключи приложения LWA (Amazon) — платформенные */
+export const APPLICATION_CREDENTIALS_REF = 'cred:application';
 
 /** Зависимости ядра, собранные из мира сценария. Каталог аккаунтов проверяет тенант так же, как ядро [Р-31]. */
 export function worldDependencies(world: World, clock: VirtualClock, sink: Sink): AdapterDependencies {
@@ -57,6 +59,7 @@ export function worldDependencies(world: World, clock: VirtualClock, sink: Sink)
             tenantId,
             channelAccountId,
             channel: (world.account.channel ?? 'KAUFLAND') as 'KAUFLAND',
+            ...(world.account.region ? { region: world.account.region } : {}),
             externalAccountId: world.account.externalAccountId,
             marketplaces: [...world.account.marketplaces],
             credentialsRef: SELLER_CREDENTIALS_REF,
@@ -68,6 +71,7 @@ export function worldDependencies(world: World, clock: VirtualClock, sink: Sink)
       async get(ref: string) {
         if (ref === SELLER_CREDENTIALS_REF) return { ...world.credentials.seller };
         if (ref === PARTNER_CREDENTIALS_REF && world.credentials.partner) return { ...world.credentials.partner };
+        if (ref === APPLICATION_CREDENTIALS_REF && world.credentials.application) return { ...world.credentials.application };
         return {};
       },
     },

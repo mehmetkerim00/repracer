@@ -48,6 +48,11 @@ test('step 21: bounds edit — role checked by the database, preview rolls back,
   assert.deepEqual(await bounds('ws-1'), [1500, 2500], 'the preview leaves no new version');
 
   const mass = [{ writeScopeId: ws(1), minMinor: 1600, expected }, { writeScopeId: ws(2), maxMinor: 2400, expected }];
+  // Находка 1 ревью шага 21: экран различий массовой правки строится без второго фактора — 0078 проверяет только применение
+  const massPreview = await store.editBounds(w.tenantId, mass, actor('membership-pricing-manager'), 'PREVIEW');
+  assert.equal(massPreview.status, 'PREVIEWED', `finding 1: a mass preview without a second factor is built: ${JSON.stringify(massPreview)}`);
+  assert.deepEqual(massPreview.status === 'PREVIEWED' && massPreview.rows.map((r) => [r.after.minMinor, r.after.maxMinor]), [[1600, 2500], [1500, 2400]]);
+  assert.deepEqual([await bounds('ws-1'), await bounds('ws-2')], [[1500, 2500], [1500, 2500]], 'the mass preview leaves no new version');
   assert.deepEqual(await store.editBounds(w.tenantId, mass, actor('membership-pricing-manager'), 'APPLY'), { status: 'MFA_REQUIRED' });
   assert.deepEqual(await store.editBounds(w.tenantId, [{ writeScopeId: ws(1), minMinor: 2600, expected }], actor('membership-pricing-manager'), 'APPLY'),
     { status: 'INVALID', writeScopeId: ws(1), cause: 'MIN_ABOVE_MAX' });
@@ -74,4 +79,9 @@ test('step 21: a saved strategy version keeps the undercut out of the eternal ve
   const next = await store.saveStrategy(w.tenantId, { ...input, strategyId: saved.strategy.strategyId, assignTo: [ws(1), ws(2)] }, actor('membership-owner'));
   assert.equal(next.status === 'SAVED' && next.strategy.version, 2);
   assert.deepEqual(await store.saveStrategy(w.tenantId, { ...input, assignTo: ['00000000-0000-4000-8000-000000000999'] }, actor('membership-owner')), { status: 'INVALID', cause: 'SCOPE_NOT_FOUND' });
+  // Находка 4 ревью шага 21: превью показало версию 1 на ws-1, с тех пор сохранена версия 2 — сохранение не заменяет её молча
+  const stale = await store.saveStrategy(w.tenantId, { ...input, assignTo: [ws(1)], expected: [{ writeScopeId: ws(1), strategyId: saved.strategy.strategyId, version: 1 }] }, actor('membership-owner'));
+  assert.deepEqual(stale, { status: 'CONFLICT', writeScopeId: ws(1) }, 'finding 4: a save over a strategy changed after the preview conflicts');
+  const fresh = await store.saveStrategy(w.tenantId, { ...input, assignTo: [ws(1)], expected: [{ writeScopeId: ws(1), strategyId: saved.strategy.strategyId, version: 2 }] }, actor('membership-owner'));
+  assert.equal(fresh.status, 'SAVED');
 });

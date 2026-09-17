@@ -1,0 +1,509 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "amazon/notification/duplicate",
+  "channel": "AMAZON",
+  "apiVersion": "listings-items-2021-08-01",
+  "title": "Повтор уведомления ANY_OFFER_CHANGED: тот же NotificationId — тот же deliveryId",
+  "description": "Адаптер без состояния: повторная доставка даёт тот же deliveryId и sourceEventId, дедупликацию делает ядро. Новое уведомление — новый идентификатор.",
+  "tags": [
+    "mandatory:webhook-duplicate",
+    "inbound"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "vendor/amazon/sp-api-models/2026-09-16/models/listings-items-api-model/listingsItems_2021-08-01.json",
+      "https://developer-docs.amazon/sp-api/docs/manage-purchasable-offer.md",
+      "https://developer-docs.amazon/sp-api/docs/listings-items-api-rate-limits.md",
+      "https://developer-docs.amazon/sp-api/docs/building-listings-management-workflows-guide.md"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "A1SYNSELLER0001",
+      "marketplaces": [
+        "A1PA6795UKMFR9"
+      ],
+      "channel": "AMAZON",
+      "region": "EU"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "Atzr|syn-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "amzn1.application-oa2-client.syn0001",
+        "clientSecret": "syn-lwa-client-secret-0001"
+      },
+      "accessToken": "Atza|syn-access-token-0001"
+    }
+  },
+  "steps": [
+    {
+      "id": "first",
+      "kind": "inbound",
+      "delivery": {
+        "method": "POST",
+        "url": "https://sqs.eu-west-1.amazonaws.com.invalid/000000000000/repracer-syn-notifications",
+        "headers": {},
+        "body": {
+          "NotificationVersion": "1.0",
+          "NotificationType": "ANY_OFFER_CHANGED",
+          "PayloadVersion": "1.0",
+          "EventTime": {
+            "$clockIso": -5000
+          },
+          "NotificationMetadata": {
+            "ApplicationId": "amzn1.sellerapps.app.syn0001",
+            "SubscriptionId": "syn-subscription-0001",
+            "PublishTime": {
+              "$clockIso": -5000
+            },
+            "NotificationId": "syn-notification-0001"
+          },
+          "Payload": {
+            "AnyOfferChangedNotification": {
+              "SellerId": "A1SYNSELLER0001",
+              "OfferChangeTrigger": {
+                "MarketplaceId": "A1PA6795UKMFR9",
+                "ASIN": "B000007001",
+                "ItemCondition": "new",
+                "TimeOfOfferChange": {
+                  "$clockIso": -5000
+                },
+                "OfferChangeType": "External"
+              },
+              "Summary": {
+                "NumberOfOffers": [
+                  {
+                    "Condition": "new",
+                    "FulfillmentChannel": "Merchant",
+                    "OfferCount": 2
+                  }
+                ],
+                "LowestPrices": [],
+                "BuyBoxPrices": [
+                  {
+                    "Condition": "new",
+                    "LandedPrice": {
+                      "Amount": 17.8,
+                      "CurrencyCode": "EUR"
+                    },
+                    "ListingPrice": {
+                      "Amount": 17.8,
+                      "CurrencyCode": "EUR"
+                    },
+                    "Shipping": {
+                      "Amount": 0,
+                      "CurrencyCode": "EUR"
+                    }
+                  }
+                ],
+                "TotalBuyBoxEligibleOffers": 2,
+                "SalesRankings": [],
+                "NumberOfBuyBoxEligibleOffers": []
+              },
+              "Offers": [
+                {
+                  "SellerId": "A2SYNCOMP00001",
+                  "SubCondition": "new",
+                  "SellerFeedbackRating": {
+                    "FeedbackCount": 120,
+                    "SellerPositiveFeedbackRating": 98
+                  },
+                  "ShippingTime": {
+                    "MinimumHours": 24,
+                    "MaximumHours": 72,
+                    "AvailabilityType": "NOW"
+                  },
+                  "ListingPrice": {
+                    "Amount": 17.8,
+                    "CurrencyCode": "EUR"
+                  },
+                  "Shipping": {
+                    "Amount": 0,
+                    "CurrencyCode": "EUR"
+                  },
+                  "ShipsFrom": {
+                    "Country": "DE"
+                  },
+                  "IsFulfilledByAmazon": false,
+                  "IsBuyBoxWinner": true,
+                  "PrimeInformation": {
+                    "IsOfferPrime": false,
+                    "IsOfferNationalPrime": false
+                  },
+                  "IsExpeditedShippingAvailable": false,
+                  "IsFeaturedMerchant": true,
+                  "ShipsDomestically": true,
+                  "ShipsInternationally": false
+                },
+                {
+                  "SellerId": "A1SYNSELLER0001",
+                  "SubCondition": "new",
+                  "SellerFeedbackRating": {
+                    "FeedbackCount": 120,
+                    "SellerPositiveFeedbackRating": 98
+                  },
+                  "ShippingTime": {
+                    "MinimumHours": 24,
+                    "MaximumHours": 72,
+                    "AvailabilityType": "NOW"
+                  },
+                  "ListingPrice": {
+                    "Amount": 18.5,
+                    "CurrencyCode": "EUR"
+                  },
+                  "Shipping": {
+                    "Amount": 0,
+                    "CurrencyCode": "EUR"
+                  },
+                  "ShipsFrom": {
+                    "Country": "DE"
+                  },
+                  "IsFulfilledByAmazon": false,
+                  "IsBuyBoxWinner": false,
+                  "PrimeInformation": {
+                    "IsOfferPrime": false,
+                    "IsOfferNationalPrime": false
+                  },
+                  "IsExpeditedShippingAvailable": false,
+                  "IsFeaturedMerchant": true,
+                  "ShipsDomestically": true,
+                  "ShipsInternationally": false
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expect": {
+        "kind": "EVENTS",
+        "deliveryId": "amazon:syn-notification-0001",
+        "events": [
+          {
+            "kind": "COMPETITOR_SNAPSHOT",
+            "snapshot": {
+              "marketplace": "A1PA6795UKMFR9",
+              "channelProductRef": "B000007001",
+              "source": "AMAZON_ANY_OFFER_CHANGED",
+              "sourceEventId": "syn-notification-0001",
+              "buybox": {
+                "price": {
+                  "amountMinor": 1780,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                },
+                "isSelf": false
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "one-second",
+      "kind": "advanceClock",
+      "ms": 1000
+    },
+    {
+      "id": "repeat",
+      "kind": "inbound",
+      "delivery": {
+        "method": "POST",
+        "url": "https://sqs.eu-west-1.amazonaws.com.invalid/000000000000/repracer-syn-notifications",
+        "headers": {},
+        "body": {
+          "NotificationVersion": "1.0",
+          "NotificationType": "ANY_OFFER_CHANGED",
+          "PayloadVersion": "1.0",
+          "EventTime": {
+            "$clockIso": -5000
+          },
+          "NotificationMetadata": {
+            "ApplicationId": "amzn1.sellerapps.app.syn0001",
+            "SubscriptionId": "syn-subscription-0001",
+            "PublishTime": {
+              "$clockIso": -5000
+            },
+            "NotificationId": "syn-notification-0001"
+          },
+          "Payload": {
+            "AnyOfferChangedNotification": {
+              "SellerId": "A1SYNSELLER0001",
+              "OfferChangeTrigger": {
+                "MarketplaceId": "A1PA6795UKMFR9",
+                "ASIN": "B000007001",
+                "ItemCondition": "new",
+                "TimeOfOfferChange": {
+                  "$clockIso": -5000
+                },
+                "OfferChangeType": "External"
+              },
+              "Summary": {
+                "NumberOfOffers": [
+                  {
+                    "Condition": "new",
+                    "FulfillmentChannel": "Merchant",
+                    "OfferCount": 2
+                  }
+                ],
+                "LowestPrices": [],
+                "BuyBoxPrices": [
+                  {
+                    "Condition": "new",
+                    "LandedPrice": {
+                      "Amount": 17.8,
+                      "CurrencyCode": "EUR"
+                    },
+                    "ListingPrice": {
+                      "Amount": 17.8,
+                      "CurrencyCode": "EUR"
+                    },
+                    "Shipping": {
+                      "Amount": 0,
+                      "CurrencyCode": "EUR"
+                    }
+                  }
+                ],
+                "TotalBuyBoxEligibleOffers": 2,
+                "SalesRankings": [],
+                "NumberOfBuyBoxEligibleOffers": []
+              },
+              "Offers": [
+                {
+                  "SellerId": "A2SYNCOMP00001",
+                  "SubCondition": "new",
+                  "SellerFeedbackRating": {
+                    "FeedbackCount": 120,
+                    "SellerPositiveFeedbackRating": 98
+                  },
+                  "ShippingTime": {
+                    "MinimumHours": 24,
+                    "MaximumHours": 72,
+                    "AvailabilityType": "NOW"
+                  },
+                  "ListingPrice": {
+                    "Amount": 17.8,
+                    "CurrencyCode": "EUR"
+                  },
+                  "Shipping": {
+                    "Amount": 0,
+                    "CurrencyCode": "EUR"
+                  },
+                  "ShipsFrom": {
+                    "Country": "DE"
+                  },
+                  "IsFulfilledByAmazon": false,
+                  "IsBuyBoxWinner": true,
+                  "PrimeInformation": {
+                    "IsOfferPrime": false,
+                    "IsOfferNationalPrime": false
+                  },
+                  "IsExpeditedShippingAvailable": false,
+                  "IsFeaturedMerchant": true,
+                  "ShipsDomestically": true,
+                  "ShipsInternationally": false
+                },
+                {
+                  "SellerId": "A1SYNSELLER0001",
+                  "SubCondition": "new",
+                  "SellerFeedbackRating": {
+                    "FeedbackCount": 120,
+                    "SellerPositiveFeedbackRating": 98
+                  },
+                  "ShippingTime": {
+                    "MinimumHours": 24,
+                    "MaximumHours": 72,
+                    "AvailabilityType": "NOW"
+                  },
+                  "ListingPrice": {
+                    "Amount": 18.5,
+                    "CurrencyCode": "EUR"
+                  },
+                  "Shipping": {
+                    "Amount": 0,
+                    "CurrencyCode": "EUR"
+                  },
+                  "ShipsFrom": {
+                    "Country": "DE"
+                  },
+                  "IsFulfilledByAmazon": false,
+                  "IsBuyBoxWinner": false,
+                  "PrimeInformation": {
+                    "IsOfferPrime": false,
+                    "IsOfferNationalPrime": false
+                  },
+                  "IsExpeditedShippingAvailable": false,
+                  "IsFeaturedMerchant": true,
+                  "ShipsDomestically": true,
+                  "ShipsInternationally": false
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expect": {
+        "kind": "EVENTS",
+        "deliveryId": "amazon:syn-notification-0001"
+      }
+    },
+    {
+      "id": "next",
+      "kind": "inbound",
+      "delivery": {
+        "method": "POST",
+        "url": "https://sqs.eu-west-1.amazonaws.com.invalid/000000000000/repracer-syn-notifications",
+        "headers": {},
+        "body": {
+          "NotificationVersion": "1.0",
+          "NotificationType": "ANY_OFFER_CHANGED",
+          "PayloadVersion": "1.0",
+          "EventTime": {
+            "$clockIso": -5000
+          },
+          "NotificationMetadata": {
+            "ApplicationId": "amzn1.sellerapps.app.syn0001",
+            "SubscriptionId": "syn-subscription-0001",
+            "PublishTime": {
+              "$clockIso": -5000
+            },
+            "NotificationId": "syn-notification-0002"
+          },
+          "Payload": {
+            "AnyOfferChangedNotification": {
+              "SellerId": "A1SYNSELLER0001",
+              "OfferChangeTrigger": {
+                "MarketplaceId": "A1PA6795UKMFR9",
+                "ASIN": "B000007001",
+                "ItemCondition": "new",
+                "TimeOfOfferChange": {
+                  "$clockIso": -5000
+                },
+                "OfferChangeType": "External"
+              },
+              "Summary": {
+                "NumberOfOffers": [
+                  {
+                    "Condition": "new",
+                    "FulfillmentChannel": "Merchant",
+                    "OfferCount": 2
+                  }
+                ],
+                "LowestPrices": [],
+                "BuyBoxPrices": [
+                  {
+                    "Condition": "new",
+                    "LandedPrice": {
+                      "Amount": 17.7,
+                      "CurrencyCode": "EUR"
+                    },
+                    "ListingPrice": {
+                      "Amount": 17.7,
+                      "CurrencyCode": "EUR"
+                    },
+                    "Shipping": {
+                      "Amount": 0,
+                      "CurrencyCode": "EUR"
+                    }
+                  }
+                ],
+                "TotalBuyBoxEligibleOffers": 2,
+                "SalesRankings": [],
+                "NumberOfBuyBoxEligibleOffers": []
+              },
+              "Offers": [
+                {
+                  "SellerId": "A2SYNCOMP00001",
+                  "SubCondition": "new",
+                  "SellerFeedbackRating": {
+                    "FeedbackCount": 120,
+                    "SellerPositiveFeedbackRating": 98
+                  },
+                  "ShippingTime": {
+                    "MinimumHours": 24,
+                    "MaximumHours": 72,
+                    "AvailabilityType": "NOW"
+                  },
+                  "ListingPrice": {
+                    "Amount": 17.7,
+                    "CurrencyCode": "EUR"
+                  },
+                  "Shipping": {
+                    "Amount": 0,
+                    "CurrencyCode": "EUR"
+                  },
+                  "ShipsFrom": {
+                    "Country": "DE"
+                  },
+                  "IsFulfilledByAmazon": false,
+                  "IsBuyBoxWinner": true,
+                  "PrimeInformation": {
+                    "IsOfferPrime": false,
+                    "IsOfferNationalPrime": false
+                  },
+                  "IsExpeditedShippingAvailable": false,
+                  "IsFeaturedMerchant": true,
+                  "ShipsDomestically": true,
+                  "ShipsInternationally": false
+                },
+                {
+                  "SellerId": "A1SYNSELLER0001",
+                  "SubCondition": "new",
+                  "SellerFeedbackRating": {
+                    "FeedbackCount": 120,
+                    "SellerPositiveFeedbackRating": 98
+                  },
+                  "ShippingTime": {
+                    "MinimumHours": 24,
+                    "MaximumHours": 72,
+                    "AvailabilityType": "NOW"
+                  },
+                  "ListingPrice": {
+                    "Amount": 18.5,
+                    "CurrencyCode": "EUR"
+                  },
+                  "Shipping": {
+                    "Amount": 0,
+                    "CurrencyCode": "EUR"
+                  },
+                  "ShipsFrom": {
+                    "Country": "DE"
+                  },
+                  "IsFulfilledByAmazon": false,
+                  "IsBuyBoxWinner": false,
+                  "PrimeInformation": {
+                    "IsOfferPrime": false,
+                    "IsOfferNationalPrime": false
+                  },
+                  "IsExpeditedShippingAvailable": false,
+                  "IsFeaturedMerchant": true,
+                  "ShipsDomestically": true,
+                  "ShipsInternationally": false
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expect": {
+        "kind": "EVENTS",
+        "deliveryId": "amazon:syn-notification-0002"
+      }
+    }
+  ],
+  "exchanges": [],
+  "expect": {
+    "noAlerts": true,
+    "logs": [
+      {
+        "code": "AMZ_C08_NOTIFICATION_NOT_SIGNED",
+        "count": 3
+      }
+    ]
+  }
+}

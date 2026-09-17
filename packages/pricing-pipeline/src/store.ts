@@ -1,4 +1,4 @@
-import type { DecisionExplanation, ExplanationIntentColumns, SanitySummary, FxFailureCause, FxQuote, HaltRef, MemberRole, PriceIntentDraft as IntentDraft, StopRef, StopScope } from '@repracer/pricing-model';
+import type { DecisionExplanation, ExplanationIntentColumns, SanitySummary, FxFailureCause, FxQuote, HaltRef, HaltReasonCode, MemberRole, PriceIntentDraft as IntentDraft, StopRef, StopScope } from '@repracer/pricing-model';
 import type { ExplanationRuleset, StopScope as AuditStopScope } from '@repracer/pricing-model';
 import type { CompetitorQuery, FieldWrite, Instant, PriceBasis, WriteOutcome } from '@repracer/channel-port';
 import type { MoveRecord, SanityContext } from '@repracer/input-sanity';
@@ -125,7 +125,7 @@ export interface RejectedSnapshotRecord {
 export interface HaltRecord {
   channelAccountId: string;
   marketplace: string | null;
-  reasonCode: 'CHANNEL_MASS_SHIFT';
+  reasonCode: HaltReasonCode;
   details: Reason['params'];
   haltedAt: Instant;
 }
@@ -246,7 +246,7 @@ export interface DispatchRecorded {
   /** Итог записи и блокировка единицы — для тех же алертов, что у диспетчера (шаг 21: путь решения их не поднимал) */
   status: 'DISPATCHED' | 'ACCEPTED' | 'APPLIED' | 'NOT_APPLIED' | 'FAILED' | 'DISCARDED_STALE' | 'BUDGET_EXHAUSTED';
   scopeBlocked: boolean;
-  reason: { code: string } | null;
+  reason: { code: string; params?: Record<string, unknown> } | null;
 }
 
 /** Автор административного действия консоли: членство, пользователь сессии и второй фактор из токена поставщика [Р-78, Р-88] */
@@ -292,11 +292,14 @@ export interface StrategySaveInput {
   params: StrategyDefinition['params'];
   deadbandMinor: number;
   assignTo: string[];
+  /** Стратегии единиц, которые видел человек на экране превью; изменились — CONFLICT (находка 4 ревью шага 21) */
+  expected?: Array<{ writeScopeId: string; strategyId: string | null; version: number | null }>;
 }
 
 export type StrategySaveResult =
   | { status: 'SAVED'; strategy: StrategyDefinition; assigned: string[] }
   | { status: 'FORBIDDEN' }
+  | { status: 'CONFLICT'; writeScopeId: string }
   | { status: 'INVALID'; cause: 'STRATEGY_NOT_FOUND' | 'SCOPE_NOT_FOUND' | 'NAME_REQUIRED' };
 
 export interface PricingStore {
@@ -424,7 +427,7 @@ export interface ConsoleHaltRow {
   haltId: string;
   channelAccountId: string;
   marketplace: string | null;
-  reasonCode: 'CHANNEL_MASS_SHIFT';
+  reasonCode: HaltReasonCode;
   details: Reason['params'];
   haltedAt: Instant;
   nextReviewAt: Instant;

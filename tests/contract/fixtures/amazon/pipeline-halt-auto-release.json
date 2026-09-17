@@ -1,0 +1,402 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "amazon/pipeline/halt-auto-release",
+  "channel": "AMAZON",
+  "apiVersion": "listings-items-2021-08-01",
+  "title": "Автоматическое снятие остановки витрины по свежей выборке: у Amazon выборки нет — остановка остаётся",
+  "description": "Преобразован из kaufland/pipeline-halt-auto-release.json. Р-52 снимает остановку по свежей независимой выборке, а выборка — это опрос конкурентов. У Amazon опроса нет: getCompetitiveSummary — 0.033 запроса в секунду [AMZ_C07], порт отвечает UNSUPPORTED. Выборка не состоялась, остановка продлена; снять её можно только вручную. Это находка шага 22, а не свойство сценария Kaufland.",
+  "tags": [
+    "mandatory:pipeline-halt-auto-release",
+    "pipeline",
+    "r-52"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "vendor/amazon/sp-api-models/2026-09-16/models/listings-items-api-model/listingsItems_2021-08-01.json",
+      "vendor/amazon/sp-api-models/2026-09-16/schemas/notifications/AnyOfferChangedNotification.json",
+      "https://developer-docs.amazon/sp-api/docs/manage-purchasable-offer.md",
+      "https://developer-docs.amazon/sp-api/docs/connecting-to-the-selling-partner-api.md",
+      "https://developer-docs.amazon/sp-api/docs/listings-items-api-rate-limits.md",
+      "tests/contract/fixtures/kaufland/pipeline-halt-auto-release.json"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "A1SYNSELLER0001",
+      "marketplaces": [
+        "A1PA6795UKMFR9"
+      ],
+      "channel": "AMAZON",
+      "region": "EU"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "Atzr|syn-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "amzn1.application-oa2-client.syn0001",
+        "clientSecret": "syn-lwa-client-secret-0001"
+      },
+      "accessToken": "Atza|syn-access-token-0001"
+    },
+    "pricing": {
+      "scopes": [
+        {
+          "writeScopeId": "ws-price-de-4101",
+          "productId": "prod-4101",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "A1PA6795UKMFR9",
+          "externalUnitId": "SYN-SKU-4101",
+          "channelProductRef": "B062000001",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-4101"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-4101"
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-4102",
+          "productId": "prod-4102",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "A1PA6795UKMFR9",
+          "externalUnitId": "SYN-SKU-4102",
+          "channelProductRef": "B062000002",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 2450,
+          "minPrice": {
+            "amountMinor": 2000,
+            "id": "min-4102"
+          },
+          "maxPrice": {
+            "amountMinor": 3500,
+            "id": "max-4102"
+          }
+        }
+      ],
+      "competitorDaily": {
+        "A1PA6795UKMFR9|B062000001|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ],
+        "A1PA6795UKMFR9|B062000002|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 2300,
+            "maxMinor": 2550
+          }
+        ]
+      },
+      "competitorState": {
+        "A1PA6795UKMFR9|B062000001|new": {
+          "observedAt": "2026-09-14T09:00:00.000Z",
+          "buyboxMinor": 1795,
+          "lowestMinor": 1795
+        },
+        "A1PA6795UKMFR9|B062000002|new": {
+          "observedAt": "2026-09-14T09:00:00.000Z",
+          "buyboxMinor": 2400,
+          "lowestMinor": 2400
+        }
+      },
+      "halts": [
+        {
+          "marketplace": "A1PA6795UKMFR9",
+          "haltedAt": "2026-09-14T09:20:00.000Z",
+          "reasonCode": "CHANNEL_MASS_SHIFT",
+          "reviewWindowSeconds": 1800
+        }
+      ],
+      "marketplaces": {
+        "A1PA6795UKMFR9": {
+          "currency": "EUR",
+          "basis": "GROSS"
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "id": "review-due-halt",
+      "kind": "pipelineReviewHalts",
+      "sampleSize": 5,
+      "expect": [
+        {
+          "outcome": "SAMPLE_FAILED",
+          "sampleSize": 2,
+          "failedCount": 2,
+          "snapshots": [],
+          "failures": [
+            {
+              "channelProductRef": "B062000001",
+              "reason": "UNSUPPORTED"
+            },
+            {
+              "channelProductRef": "B062000002",
+              "reason": "UNSUPPORTED"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "exchanges": [],
+  "expect": {
+    "noAlerts": true,
+    "logs": [
+      {
+        "code": "HALT_REVIEW_FAILED",
+        "count": 1
+      },
+      {
+        "code": "AMZ_C07_COMPETITOR_PULL_UNAVAILABLE"
+      }
+    ],
+    "pipeline": {
+      "halts": [
+        {
+          "reasonCode": "CHANNEL_MASS_SHIFT",
+          "releasedKind": null
+        }
+      ],
+      "haltReviews": [
+        {
+          "kind": "AUTO_SAMPLE",
+          "outcome": "SAMPLE_FAILED",
+          "sampleSize": 2,
+          "failedCount": 2
+        }
+      ],
+      "writes": []
+    }
+  }
+}

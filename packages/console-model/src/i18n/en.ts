@@ -32,6 +32,7 @@ const titles: Record<AnyReasonCode, string> = {
   MARGIN_WITHOUT_COST: 'Margin without cost', STRATEGY_MISSING: 'No strategy', WRITE_SUPERSEDED_BY_NEWER_VERSION: 'Replaced by a newer price', WRITE_RETRIES_EXHAUSTED: 'Retries exhausted',
   WRITE_PRICING_MODE_CHANGED: 'Pricing mode changed', WRITE_EDIT_BUDGET_EXHAUSTED: 'Edit budget used up', WRITE_QUEUED_BEHIND_IN_FLIGHT: 'Queued behind previous write',
   WRITE_RETRY_SCHEDULED: 'Retry scheduled', WRITE_OUTCOME_RECONCILED: 'Outcome reconciled', WRITE_SCOPE_BLOCKED: 'Offer blocked', WRITE_BUDGET_DAY_UNCONFIRMED: 'Storefront day not confirmed',
+  CHANNEL_PRICE_BASIS_MISMATCH: 'Wrong price basis — storefront halted',
 };
 
 const deviation = (f: Fmt) => opt(f, 'deviationBp', () => ` by ${f.bp('deviationBp')}`);
@@ -145,6 +146,7 @@ const reasons: Record<AnyReasonCode, Template> = {
   WRITE_PRICING_MODE_CHANGED: (f) => `Not sent: the pricing mode changed to ${f.value('mode')}.`,
   WRITE_EDIT_BUDGET_EXHAUSTED: (f) => `Not sent: the daily edit budget is used up${f.has('used') && f.has('limit') ? ` (${f.count('used')} of ${f.count('limit')})` : ''}${opt(f, 'budgetDay', () => ` for ${f.date('budgetDay')}`)}${opt(f, 'timeZone', () => ` (${f.raw('timeZone')})`)}${opt(f, 'resetsAt', () => `; it renews at ${f.when('resetsAt')}`)}.`,
   WRITE_BUDGET_DAY_UNCONFIRMED: (f) => `Not sent: the retry needs the edit budget of the current day, but the day boundary of storefront ${f.raw('marketplace')} is not confirmed. The write ended; a new price decision is possible once the storefront time zone is confirmed.`,
+  CHANNEL_PRICE_BASIS_MISMATCH: (f) => `All prices on storefront ${f.raw('marketplace')} halted: we sent ${f.money('sentMinor')}, buyers see ${f.money('observedMinor')} — exactly the VAT rate ${f.bp('vatRateBp')} ${f.value('basisError')}. The channel uses a different price basis than ours; every further price would be wrong by the same share. Check the price settings of the channel account and release the halt manually.`,
   WRITE_QUEUED_BEHIND_IN_FLIGHT: () => 'Queued: the channel has not answered the previous write yet; the dispatcher sends this one next.',
   WRITE_RETRY_SCHEDULED: (f) => `Temporary channel error (${f.value('code')}); attempt ${f.count('attempt')} after ${f.when('at')}.`,
   WRITE_OUTCOME_RECONCILED: (f) => `The outcome was unknown; reading back showed the price was ${f.value('result')}.`,
@@ -174,6 +176,7 @@ const values: Record<ValueKey, string> = {
   OFFER_TOTAL_NOT_PRICE_PLUS_SHIPPING: 'offer total differs from price plus shipping', MORE_OFFERS_THAN_TOP_N: 'more offers than promised', BUYBOX_NOT_RANK_ONE_PRICE: 'Buy Box differs from rank 1',
   INPUT: 'input check', GATE: 'Price Gate', DISPATCH: 'dispatch', DATABASE: 'database',
   CHANNEL_MASS_SHIFT: 'mass price shift', UP: 'up', DOWN: 'down',
+  CHANNEL_PRICE_BASIS_MISMATCH: 'wrong price basis', TAX_ADDED: 'added on top', TAX_REMOVED: 'taken out',
   COST: 'unit cost', INTERNAL: 'other offers in the snapshot', CROSS_CHANNEL: 'the same EAN on another channel', HISTORY: 'price history', LAST_ACCEPTED: 'the last accepted snapshot',
   KAUFLAND: 'Kaufland', AMAZON: 'Amazon', EBAY: 'eBay', OTTO: 'Otto', UNKNOWN_CHANNEL: 'unknown channel',
   FX_RATE_UNAVAILABLE: 'no ECB rate', FX_RATE_STALE: 'the ECB rate is outdated', UNSUPPORTED_CURRENCY: 'the currency is not supported', INVALID_INPUT: 'the cost data is invalid',
@@ -197,6 +200,8 @@ const values: Record<ValueKey, string> = {
   OUTCOME_UNRESOLVED: 'outcome of the write could not be read back', RATE_LIMITED: 'rate limit of the channel', CHANNEL_UNAVAILABLE: 'channel unavailable', TIMEOUT: 'channel timeout', NETWORK: 'network error',
   AUTH_INVALID: 'invalid credentials', AUTH_EXPIRED: 'expired credentials', ACCOUNT_INACTIVE: 'inactive channel account', FORBIDDEN: 'action forbidden by the channel',
   VALIDATION: 'value refused by the channel', NOT_FOUND: 'offer not found in the channel', DUPLICATE_ACTION: 'duplicate action', STALE_VERSION: 'outdated write version',
+  CHANNEL_REPRICER_ACTIVE: 'the channel\'s own automated pricing is active for this offer', CHANNEL_BOUNDS_PRESENT: 'the offer has price bounds set in the channel',
+  DISABLE_CHANNEL_REPRICER: 'Remove the automated pricing rule from the offer in the channel (our engine does not work while it is set)', REMOVE_CHANNEL_BOUNDS: 'Remove the minimum and maximum price set in the channel: our bounds must be the only ones',
   ACTION_NOT_ALLOWED: 'action not allowed by the channel', PRECONDITION_FAILED: 'channel precondition not met', EDIT_BUDGET_EXHAUSTED: 'edit budget used up',
   OFFER_NOT_LIVE: 'offer not live', POLICY_VIOLATION: 'channel policy violation', TENANT_MISMATCH: 'account belongs to another tenant', SIGNATURE_INVALID: 'invalid signature',
   UNSUPPORTED: 'not supported by the channel', UNKNOWN: 'unknown error', MAX_ATTEMPTS: 'maximum attempts', NOT_APPLIED: 'not applied',
@@ -241,10 +246,11 @@ const gaps: Record<GapCode, { what: string; why: string }> = {
   PREVIEW_LAST_SNAPSHOT: { what: 'Market history in the preview', why: 'The preview uses the last accepted competitor snapshot of each product and evaluates at its time; earlier snapshots are channel data in the analytics store and are not read here. How the draft would have behaved over time — backtest.' },
   PREVIEW_CURRENT_BOUNDS: { what: 'Bounds and cost at the time of the snapshot', why: 'Bounds, cost, stops and halts in the preview are the current ones, not those at the snapshot time.' },
   BOUND_LEVELS: { what: 'Bound levels', why: 'The console shows effective bounds only. An edit writes the offer level; the product level can keep the effective bound unchanged — the difference screen therefore shows the result computed by the database.' },
-  MASS_EDIT_MFA_NOT_IN_DATABASE: { what: 'Second factor for mass edits in the database', why: 'Р-88: an edit of more than one offer requires a second factor. The console and the store check it; the database does not enforce it yet (accepted risk).' },
+  MASS_EDIT_MFA_PER_TRANSACTION: { what: 'Second factor for mass edits: within one transaction', why: 'Р-88: applying an edit of more than one offer requires a second factor. The console, the store and the database (0078) check it; the database sees one transaction, so the same edit split into separate transactions by the administrative service is not caught (accepted risk 17).' },
   FEED_WINDOW: { what: 'Older price changes', why: 'The feed is built from channel writes and decisions: finished writes are kept in PostgreSQL until they are exported (at least one day), decisions for 30 days (Р-28).' },
   PRICE_HISTORY_NOT_READ: { what: 'Price history of the channel', why: 'Applied prices are kept for 90 days and daily forever for Omnibus (Р-21), but the console does not read them yet.' },
   DANGEROUS_REPORT_WINDOW: { what: 'Dangerous changes older than 30 days', why: 'Decisions are kept in PostgreSQL for 30 days (Р-28); the analytics copy has no bound deviation, so a longer report would be incomplete, not zero.' },
+  FLOOR_HOLD_TARGET_WINDOW: { what: 'How much cheaper, older than 3 days', why: 'Р-117, Р-85: the strategy target comes from a competitor price and is kept only in the hot intent for 3 days. An older floor hold is counted, but its amount is unknown — not zero.' },
   DANGEROUS_THRESHOLD: { what: 'Why “dangerous”', why: 'Р-73: a change rejected by the Price Gate that is more than 10 % beyond the violated bound. Smaller rejections are “corrected”.' },
 };
 
@@ -335,6 +341,7 @@ export const en = {
       badRequest: 'The request is not valid.',
       planChanged: 'The data changed since the difference screen was shown. Review the differences again.',
       previewChanged: 'The preview changed since it was shown. Run the preview again before saving.',
+      strategyUnavailable: 'This strategy cannot be assigned: the channel does not deliver the competitor data it needs (Р-39).',
       mfaRequiredBounds: 'Changing bounds of more than one offer requires a sign-in with a second factor (Р-88).',
       boundsConflict: 'The bounds of an offer changed meanwhile. Review the differences again.',
     },
@@ -526,7 +533,13 @@ export const en = {
       sourceManual: 'Manual price', sourceUnknown: 'unknown decision', sourceRule: (code: string) => `rule ${code}`,
     },
     dangerous: {
-      pageTitle: 'Dangerous changes stopped',
+      pageTitle: 'What your bounds prevented',
+      floorHeadline: (n: number, days: number, amounts: string[], unknown: number) => n === 0
+        ? `The floor did not have to hold a price in the last ${days} ${days === 1 ? 'day' : 'days'}`
+        : `The floor held the price ${n} ${n === 1 ? 'time' : 'times'} in the last ${days} ${days === 1 ? 'day' : 'days'}${amounts.length ? `; without it you would have sold ${amounts.join(' + ')} cheaper` : ''}${unknown ? ` (amount unknown for ${unknown})` : ''}`,
+      floorTitle: 'Floor holds', floorKinds: { CAPPED: 'set to the floor', HELD: 'kept unchanged' },
+      floorColumns: { when: 'When', offer: 'Offer', kind: 'Held how', target: 'Strategy wanted', floor: 'Floor', below: 'Cheaper by', reason: 'Reason' },
+      gateTitle: 'Rejected by the Price Gate (normally none)',
       headline: (n: number, days: number) => `Your bounds stopped ${n} dangerous ${n === 1 ? 'change' : 'changes'} in the last ${days} ${days === 1 ? 'day' : 'days'}`,
       period: (days: number) => `${days} ${days === 1 ? 'day' : 'days'}`,
       prevented: 'Distance to the bound, in total', worst: 'Furthest beyond a bound', byUnit: 'By offer', byBound: 'By bound', none: 'None in this period.',

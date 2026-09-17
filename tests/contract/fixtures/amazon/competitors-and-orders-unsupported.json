@@ -1,0 +1,95 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "amazon/port/unsupported-reads",
+  "channel": "AMAZON",
+  "apiVersion": "listings-items-2021-08-01",
+  "title": "Опрос конкурентов и строки заказов у Amazon не выполняются — отказ, а не пустой ответ",
+  "description": "getCompetitiveSummary — 0.033 запроса в секунду [AMZ_C07]: конкуренты только из уведомлений. Orders API нет в снимке, данные с PII [Р-4].",
+  "tags": [
+    "port"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "vendor/amazon/sp-api-models/2026-09-16/models/listings-items-api-model/listingsItems_2021-08-01.json",
+      "https://developer-docs.amazon/sp-api/docs/manage-purchasable-offer.md",
+      "https://developer-docs.amazon/sp-api/docs/listings-items-api-rate-limits.md",
+      "https://developer-docs.amazon/sp-api/docs/building-listings-management-workflows-guide.md"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "A1SYNSELLER0001",
+      "marketplaces": [
+        "A1PA6795UKMFR9"
+      ],
+      "channel": "AMAZON",
+      "region": "EU"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "Atzr|syn-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "amzn1.application-oa2-client.syn0001",
+        "clientSecret": "syn-lwa-client-secret-0001"
+      },
+      "accessToken": "Atza|syn-access-token-0001"
+    }
+  },
+  "steps": [
+    {
+      "id": "competitors",
+      "kind": "call",
+      "method": "readCompetitors",
+      "args": [
+        [
+          {
+            "marketplace": "A1PA6795UKMFR9",
+            "channelProductRef": "B000007001",
+            "condition": "new"
+          }
+        ]
+      ],
+      "expect": {
+        "snapshots": [],
+        "failures": [
+          {
+            "error": {
+              "code": "UNSUPPORTED"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "orders",
+      "kind": "call",
+      "method": "readOrderLines",
+      "args": [
+        {
+          "since": {
+            "$clockIso": -86400000
+          },
+          "limit": 10
+        }
+      ],
+      "expectThrows": {
+        "code": "UNSUPPORTED"
+      }
+    }
+  ],
+  "exchanges": [],
+  "expect": {
+    "noAlerts": true,
+    "logs": [
+      {
+        "code": "AMZ_C07_COMPETITOR_PULL_UNAVAILABLE",
+        "count": 1
+      }
+    ]
+  }
+}

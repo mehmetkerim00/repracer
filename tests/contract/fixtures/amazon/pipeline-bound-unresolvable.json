@@ -1,0 +1,405 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "amazon/pipeline/bound-unresolvable",
+  "channel": "AMAZON",
+  "apiVersion": "listings-items-2021-08-01",
+  "title": "Граница не вычисляется: оценка не выполняется, алерт",
+  "description": "Преобразован из kaufland/pipeline-bound-unresolvable.json: У предложения ограничение минимальной маржи 15%, а профиля себестоимости нет. Ставка НДС после Р-53 известна всегда (объявлена на товаре или ставка страны), поэтому невычислимой граница становится из-за себестоимости. Стратегия MATCH_BUYBOX предлагает 17.75, но пол маржи вычислить нельзя: Gate отклоняет с BOUND_UNRESOLVABLE и CRITICAL-алертом, не подставляя ни min_price, ни прошлый пол. Запись не создаётся — обменов с каналом нет.",
+  "tags": [
+    "mandatory:pipeline-bound-unresolvable",
+    "pipeline",
+    "price-gate"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "vendor/amazon/sp-api-models/2026-09-16/models/listings-items-api-model/listingsItems_2021-08-01.json",
+      "vendor/amazon/sp-api-models/2026-09-16/schemas/notifications/AnyOfferChangedNotification.json",
+      "https://developer-docs.amazon/sp-api/docs/manage-purchasable-offer.md",
+      "https://developer-docs.amazon/sp-api/docs/connecting-to-the-selling-partner-api.md",
+      "https://developer-docs.amazon/sp-api/docs/listings-items-api-rate-limits.md",
+      "tests/contract/fixtures/kaufland/pipeline-bound-unresolvable.json"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "A1SYNSELLER0001",
+      "marketplaces": [
+        "A1PA6795UKMFR9"
+      ],
+      "channel": "AMAZON",
+      "region": "EU"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "Atzr|syn-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "amzn1.application-oa2-client.syn0001",
+        "clientSecret": "syn-lwa-client-secret-0001"
+      },
+      "accessToken": "Atza|syn-access-token-0001"
+    },
+    "pricing": {
+      "scopes": [
+        {
+          "writeScopeId": "ws-price-de-4101",
+          "productId": "prod-4101",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "A1PA6795UKMFR9",
+          "externalUnitId": "SYN-SKU-4101",
+          "channelProductRef": "B062000001",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-4101"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-4101"
+          },
+          "guardrails": {
+            "guardrailIds": [
+              "g-margin-4101"
+            ],
+            "minMarginBp": 1500
+          }
+        }
+      ],
+      "competitorDaily": {
+        "A1PA6795UKMFR9|B062000001|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ]
+      },
+      "competitorState": {
+        "A1PA6795UKMFR9|B062000001|new": {
+          "observedAt": "2026-09-14T09:00:00.000Z",
+          "buyboxMinor": 1795,
+          "lowestMinor": 1795
+        }
+      },
+      "marketplaces": {
+        "A1PA6795UKMFR9": {
+          "currency": "EUR",
+          "basis": "GROSS"
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "id": "buybox-lost-margin-unknown",
+      "kind": "pipelineInbound",
+      "delivery": {
+        "method": "POST",
+        "url": "https://sqs.eu-west-1.amazonaws.com.invalid/000000000000/repracer-syn-notifications",
+        "headers": {},
+        "body": {
+          "NotificationVersion": "1.0",
+          "NotificationType": "ANY_OFFER_CHANGED",
+          "PayloadVersion": "1.0",
+          "EventTime": "2026-09-14T09:59:30Z",
+          "NotificationMetadata": {
+            "ApplicationId": "amzn1.sellerapps.app.syn0001",
+            "SubscriptionId": "syn-subscription-0001",
+            "PublishTime": "2026-09-14T09:59:30Z",
+            "NotificationId": "syn-a0000000000000000000000000000001"
+          },
+          "Payload": {
+            "AnyOfferChangedNotification": {
+              "SellerId": "A1SYNSELLER0001",
+              "OfferChangeTrigger": {
+                "MarketplaceId": "A1PA6795UKMFR9",
+                "ASIN": "B062000001",
+                "ItemCondition": "new",
+                "TimeOfOfferChange": "2026-09-14T09:59:30Z",
+                "OfferChangeType": "External"
+              },
+              "Summary": {
+                "NumberOfOffers": [
+                  {
+                    "Condition": "new",
+                    "FulfillmentChannel": "Merchant",
+                    "OfferCount": 2
+                  }
+                ],
+                "LowestPrices": [],
+                "BuyBoxPrices": [
+                  {
+                    "Condition": "new",
+                    "LandedPrice": {
+                      "Amount": 17.8,
+                      "CurrencyCode": "EUR"
+                    },
+                    "ListingPrice": {
+                      "Amount": 17.8,
+                      "CurrencyCode": "EUR"
+                    },
+                    "Shipping": {
+                      "Amount": 0,
+                      "CurrencyCode": "EUR"
+                    }
+                  }
+                ],
+                "TotalBuyBoxEligibleOffers": 2,
+                "SalesRankings": [],
+                "NumberOfBuyBoxEligibleOffers": []
+              },
+              "Offers": [
+                {
+                  "SellerId": "A2SYNCOMP00001",
+                  "SubCondition": "new",
+                  "SellerFeedbackRating": {
+                    "FeedbackCount": 120,
+                    "SellerPositiveFeedbackRating": 98
+                  },
+                  "ShippingTime": {
+                    "MinimumHours": 24,
+                    "MaximumHours": 48,
+                    "AvailabilityType": "NOW"
+                  },
+                  "ListingPrice": {
+                    "Amount": 17.8,
+                    "CurrencyCode": "EUR"
+                  },
+                  "Shipping": {
+                    "Amount": 0,
+                    "CurrencyCode": "EUR"
+                  },
+                  "ShipsFrom": {
+                    "Country": "DE"
+                  },
+                  "IsFulfilledByAmazon": false,
+                  "IsBuyBoxWinner": true,
+                  "PrimeInformation": {
+                    "IsOfferPrime": false,
+                    "IsOfferNationalPrime": false
+                  },
+                  "IsExpeditedShippingAvailable": false,
+                  "IsFeaturedMerchant": true,
+                  "ShipsDomestically": true,
+                  "ShipsInternationally": false
+                },
+                {
+                  "SellerId": "A1SYNSELLER0001",
+                  "SubCondition": "new",
+                  "SellerFeedbackRating": {
+                    "FeedbackCount": 120,
+                    "SellerPositiveFeedbackRating": 98
+                  },
+                  "ShippingTime": {
+                    "MinimumHours": 24,
+                    "MaximumHours": 72,
+                    "AvailabilityType": "NOW"
+                  },
+                  "ListingPrice": {
+                    "Amount": 18.5,
+                    "CurrencyCode": "EUR"
+                  },
+                  "Shipping": {
+                    "Amount": 0,
+                    "CurrencyCode": "EUR"
+                  },
+                  "ShipsFrom": {
+                    "Country": "DE"
+                  },
+                  "IsFulfilledByAmazon": false,
+                  "IsBuyBoxWinner": false,
+                  "PrimeInformation": {
+                    "IsOfferPrime": false,
+                    "IsOfferNationalPrime": false
+                  },
+                  "IsExpeditedShippingAvailable": false,
+                  "IsFeaturedMerchant": true,
+                  "ShipsDomestically": true,
+                  "ShipsInternationally": false
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expect": {
+        "snapshots": [
+          {
+            "verdict": "ACCEPT",
+            "engineInvocations": 1,
+            "scopes": [
+              {
+                "stages": [
+                  {
+                    "stage": "SANITY",
+                    "outcome": "ACCEPT"
+                  },
+                  {
+                    "stage": "STRATEGY",
+                    "outcome": "CHANGED"
+                  },
+                  {
+                    "stage": "GATE",
+                    "outcome": "REJECTED",
+                    "reason": {
+                      "code": "BOUND_UNRESOLVABLE",
+                      "params": {
+                        "bound": "margin_floor",
+                        "cause": "COST_PROFILE_MISSING"
+                      }
+                    }
+                  }
+                ],
+                "decision": {
+                  "rejectionReason": "BOUND_UNRESOLVABLE",
+                  "decisionClass": "REJECTED_BY_GATE",
+                  "finalMinor": null,
+                  "alert": {
+                    "code": "PRICING_BOUND_UNRESOLVABLE",
+                    "severity": "CRITICAL"
+                  },
+                  "guardrailIds": [
+                    "g-margin-4101"
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "exchanges": [],
+  "expect": {
+    "alerts": [
+      {
+        "code": "PRICING_BOUND_UNRESOLVABLE",
+        "severity": "CRITICAL",
+        "count": 1
+      }
+    ],
+    "pipeline": {
+      "decisions": [
+        {
+          "outcome": "REJECTED",
+          "rejectionReason": "BOUND_UNRESOLVABLE"
+        }
+      ],
+      "writes": []
+    }
+  }
+}

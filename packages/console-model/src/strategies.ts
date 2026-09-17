@@ -122,8 +122,17 @@ export function fingerprint(value: unknown): string {
   return a.toString(16).padStart(8, '0') + b.toString(16).padStart(8, '0');
 }
 
-export function previewToken(draft: StrategyDraft, previews: readonly StrategyPreview[]): string {
-  return fingerprint([draft, previews.map((p) => [p.writeScopeId, p.stages.map((s) => `${s.stage}:${s.outcome}`).join('>'), p.decision?.finalMinor ?? null, p.intent?.proposedMinor ?? null])]);
+/** Текущая стратегия единиц превью — то, что сохранение заменит (находка 4 ревью шага 21) */
+export function currentStrategies(world: StandWorld, writeScopeIds: readonly string[]): Array<{ writeScopeId: string; strategyId: string | null; version: number | null }> {
+  return writeScopeIds.map((id) => {
+    const s = scopeById(world, id)?.strategy ?? null;
+    return { writeScopeId: id, strategyId: s?.strategyId ?? null, version: s?.version ?? null };
+  });
+}
+
+export function previewToken(draft: StrategyDraft, previews: readonly StrategyPreview[], world: StandWorld): string {
+  return fingerprint([draft, currentStrategies(world, previews.map((p) => p.writeScopeId)),
+    previews.map((p) => [p.writeScopeId, p.availability.available, p.stages.map((s) => `${s.stage}:${s.outcome}`).join('>'), p.decision?.finalMinor ?? null, p.intent?.proposedMinor ?? null])]);
 }
 
 export function strategyPreviewView(world: StandWorld, draft: StrategyDraft, previews: readonly StrategyPreview[], m: Messages): StrategyPreviewView {
@@ -155,7 +164,7 @@ export function strategyPreviewView(world: StandWorld, draft: StrategyDraft, pre
   const label = strategyLabel({ strategyId: 'draft', version: 1, params: draft.params, deadbandMinor: draft.deadbandMinor }, previews[0]?.currency ?? '', m);
   return {
     worldId: world.id, draft: { title: `${draft.name} · ${label.label}`, detail: label.detail }, rows, summary,
-    headline: t.headline(summary), previewToken: previewToken(draft, previews),
+    headline: t.headline(summary), previewToken: previewToken(draft, previews, world),
     gaps: [gap(m, 'PREVIEW_LAST_SNAPSHOT'), gap(m, 'PREVIEW_CURRENT_BOUNDS')],
   };
 }

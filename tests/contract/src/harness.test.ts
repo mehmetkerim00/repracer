@@ -37,13 +37,13 @@ test('scenario validation refuses unreviewed recordings', () => {
   assert.match(validateScenario(scenario).join(), /not been reviewed/);
 });
 
-function request(overrides: Partial<ObservedRequest> = {}, secretKey = WORLD.credentials.seller.secretKey): ObservedRequest {
+function request(overrides: Partial<ObservedRequest> = {}, secretKey = WORLD.credentials.seller.secretKey ?? ''): ObservedRequest {
   const rawUrl = 'https://sellerapi.kaufland.com/v2/units/1?storefront=de';
   const ts = Math.floor(Date.parse(WORLD.clock) / 1000);
   return {
     method: 'GET', rawUrl, path: '/v2/units/1', query: { storefront: 'de' }, rawBody: '', body: undefined,
     headers: {
-      'shop-client-key': WORLD.credentials.seller.clientKey,
+      'shop-client-key': WORLD.credentials.seller.clientKey ?? '',
       'shop-timestamp': String(ts),
       'shop-signature': signKauflandRequest({ method: 'GET', uri: rawUrl, body: '', timestamp: ts, secretKey }),
       'user-agent': 'test',
@@ -120,4 +120,21 @@ test('recorder redaction removes buyer PII and remaps ids consistently', () => {
   assert.equal(exchanges[0]!.request.path, `/v2/order-units/${body.data.id_order_unit}`);
   assert.equal(body.data.price, 1100);
   assert.equal(provenance.kind === 'RECORDED_REDACTED' && provenance.reviewedBy, null);
+});
+
+test('step 22: the Amazon request checker flags a never-written attribute in a body, a foreign token, a stale date and a secret in the URL', async () => {
+  const { amazonRequestChecker } = await import('./harness/channel.ts');
+  const world: World = { ...WORLD, account: { ...WORLD.account, channel: 'AMAZON', region: 'EU' },
+    credentials: { seller: { refreshToken: 'Atzr|syn-refresh' }, application: { clientId: 'syn-client', clientSecret: 'syn-client-secret' }, accessToken: 'Atza|syn-access' } };
+  const clock = new VirtualClock('2026-09-14T10:00:00.000Z');
+  const check = amazonRequestChecker(world, clock, ['minimum_seller_allowed_price', 'automated_pricing_merchandising_rule_plan']);
+  const ok = { method: 'PATCH', rawUrl: 'https://sellingpartnerapi-eu.amazon.com/listings/2021-08-01/items/S/K', path: '/listings/2021-08-01/items/S/K', query: {},
+    rawBody: '{"patches":[]}', body: {}, headers: { 'x-amz-access-token': 'Atza|syn-access', 'x-amz-date': '20260914T100000Z', 'user-agent': 'ua' } };
+  assert.deepEqual(check(ok), []);
+  assert.match(check({ ...ok, rawBody: '{"minimum_seller_allowed_price":[]}' }).join(), /never written \(Р-114\)/);
+  assert.match(check({ ...ok, rawBody: '{"automated_pricing_merchandising_rule_plan":[]}' }).join(), /never written/);
+  assert.match(check({ ...ok, headers: { ...ok.headers, 'x-amz-access-token': 'Atza|other' } }).join(), /not the token issued by LWA/);
+  assert.match(check({ ...ok, headers: { ...ok.headers, 'x-amz-date': '20260914T095959Z' } }).join(), /virtual clock/);
+  assert.match(check({ ...ok, rawUrl: `${ok.rawUrl}?x=syn-client-secret` }).join(), /secret leaked/);
+  assert.match(check({ ...ok, path: '/auth/o2/token', method: 'POST', rawBody: 'grant_type=refresh_token&refresh_token=wrong&client_id=syn-client&client_secret=syn-client-secret' }).join(), /not the seller refresh token/);
 });

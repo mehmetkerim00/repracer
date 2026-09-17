@@ -1,0 +1,500 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "amazon/pipeline/oq90-own-price-trap",
+  "channel": "AMAZON",
+  "apiVersion": "listings-items-2021-08-01",
+  "title": "Наша цена — не якорь проверки входов",
+  "description": "Преобразован из kaufland/pipeline-oq90-own-price-trap.json: При подключении у предложения стоит заглушка 999.99; рынок — 17.80, история цен конкурентов за 20 дней — 17.00–19.50. С якорем на нашей цене (правило шага 7) снимок отклонялся бы как расхождение ×56, и система не смогла бы исправить собственную цену: замкнутый круг OQ-90. По Р-49 наша цена — вспомогательный якорь: предупреждение OWN_PRICE_DEVIATION, снимок принят по истории конкурентов, стратегия предлагает 17.75 в границах 15.00–25.00, запись уходит в канал. Amazon: patchListingsItem отвечает ACCEPTED, применение подтверждает обратное чтение — запись в конце сценария ACCEPTED, а не APPLIED.",
+  "tags": [
+    "mandatory:pipeline-oq90-trap",
+    "pipeline",
+    "input-sanity",
+    "oq-90",
+    "r-49"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "vendor/amazon/sp-api-models/2026-09-16/models/listings-items-api-model/listingsItems_2021-08-01.json",
+      "vendor/amazon/sp-api-models/2026-09-16/schemas/notifications/AnyOfferChangedNotification.json",
+      "https://developer-docs.amazon/sp-api/docs/manage-purchasable-offer.md",
+      "https://developer-docs.amazon/sp-api/docs/connecting-to-the-selling-partner-api.md",
+      "https://developer-docs.amazon/sp-api/docs/listings-items-api-rate-limits.md",
+      "tests/contract/fixtures/kaufland/pipeline-oq90-own-price-trap.json"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "A1SYNSELLER0001",
+      "marketplaces": [
+        "A1PA6795UKMFR9"
+      ],
+      "channel": "AMAZON",
+      "region": "EU"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "Atzr|syn-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "amzn1.application-oa2-client.syn0001",
+        "clientSecret": "syn-lwa-client-secret-0001"
+      },
+      "accessToken": "Atza|syn-access-token-0001"
+    },
+    "pricing": {
+      "scopes": [
+        {
+          "writeScopeId": "ws-price-de-4101",
+          "productId": "prod-4101",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "A1PA6795UKMFR9",
+          "externalUnitId": "SYN-SKU-4101",
+          "channelProductRef": "B062000001",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-buybox",
+            "version": 1,
+            "params": {
+              "type": "MATCH_BUYBOX",
+              "undercutMinor": 5,
+              "holdWhenWinning": true,
+              "atBound": "CAP"
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 99999,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-4101"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-4101"
+          }
+        }
+      ],
+      "competitorDaily": {
+        "A1PA6795UKMFR9|B062000001|new": [
+          {
+            "day": "2026-09-13",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-12",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-11",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-10",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-09",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-08",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-07",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-06",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-05",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-04",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-03",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-02",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-09-01",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-31",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-30",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-29",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-28",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-27",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-26",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          },
+          {
+            "day": "2026-08-25",
+            "minMinor": 1700,
+            "maxMinor": 1950
+          }
+        ]
+      },
+      "competitorState": {
+        "A1PA6795UKMFR9|B062000001|new": {
+          "observedAt": "2026-09-14T09:00:00.000Z",
+          "buyboxMinor": 1795,
+          "lowestMinor": 1795
+        }
+      },
+      "marketplaces": {
+        "A1PA6795UKMFR9": {
+          "currency": "EUR",
+          "basis": "GROSS"
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "id": "placeholder-price-lost-buybox",
+      "kind": "pipelineInbound",
+      "delivery": {
+        "method": "POST",
+        "url": "https://sqs.eu-west-1.amazonaws.com.invalid/000000000000/repracer-syn-notifications",
+        "headers": {},
+        "body": {
+          "NotificationVersion": "1.0",
+          "NotificationType": "ANY_OFFER_CHANGED",
+          "PayloadVersion": "1.0",
+          "EventTime": "2026-09-14T09:59:30Z",
+          "NotificationMetadata": {
+            "ApplicationId": "amzn1.sellerapps.app.syn0001",
+            "SubscriptionId": "syn-subscription-0001",
+            "PublishTime": "2026-09-14T09:59:30Z",
+            "NotificationId": "syn-a0000000000000000000000000000010"
+          },
+          "Payload": {
+            "AnyOfferChangedNotification": {
+              "SellerId": "A1SYNSELLER0001",
+              "OfferChangeTrigger": {
+                "MarketplaceId": "A1PA6795UKMFR9",
+                "ASIN": "B062000001",
+                "ItemCondition": "new",
+                "TimeOfOfferChange": "2026-09-14T09:59:30Z",
+                "OfferChangeType": "External"
+              },
+              "Summary": {
+                "NumberOfOffers": [
+                  {
+                    "Condition": "new",
+                    "FulfillmentChannel": "Merchant",
+                    "OfferCount": 2
+                  }
+                ],
+                "LowestPrices": [],
+                "BuyBoxPrices": [
+                  {
+                    "Condition": "new",
+                    "LandedPrice": {
+                      "Amount": 17.8,
+                      "CurrencyCode": "EUR"
+                    },
+                    "ListingPrice": {
+                      "Amount": 17.8,
+                      "CurrencyCode": "EUR"
+                    },
+                    "Shipping": {
+                      "Amount": 0,
+                      "CurrencyCode": "EUR"
+                    }
+                  }
+                ],
+                "TotalBuyBoxEligibleOffers": 2,
+                "SalesRankings": [],
+                "NumberOfBuyBoxEligibleOffers": []
+              },
+              "Offers": [
+                {
+                  "SellerId": "A2SYNCOMP00001",
+                  "SubCondition": "new",
+                  "SellerFeedbackRating": {
+                    "FeedbackCount": 120,
+                    "SellerPositiveFeedbackRating": 98
+                  },
+                  "ShippingTime": {
+                    "MinimumHours": 24,
+                    "MaximumHours": 48,
+                    "AvailabilityType": "NOW"
+                  },
+                  "ListingPrice": {
+                    "Amount": 17.8,
+                    "CurrencyCode": "EUR"
+                  },
+                  "Shipping": {
+                    "Amount": 0,
+                    "CurrencyCode": "EUR"
+                  },
+                  "ShipsFrom": {
+                    "Country": "DE"
+                  },
+                  "IsFulfilledByAmazon": false,
+                  "IsBuyBoxWinner": true,
+                  "PrimeInformation": {
+                    "IsOfferPrime": false,
+                    "IsOfferNationalPrime": false
+                  },
+                  "IsExpeditedShippingAvailable": false,
+                  "IsFeaturedMerchant": true,
+                  "ShipsDomestically": true,
+                  "ShipsInternationally": false
+                },
+                {
+                  "SellerId": "A1SYNSELLER0001",
+                  "SubCondition": "new",
+                  "SellerFeedbackRating": {
+                    "FeedbackCount": 120,
+                    "SellerPositiveFeedbackRating": 98
+                  },
+                  "ShippingTime": {
+                    "MinimumHours": 24,
+                    "MaximumHours": 72,
+                    "AvailabilityType": "NOW"
+                  },
+                  "ListingPrice": {
+                    "Amount": 999.99,
+                    "CurrencyCode": "EUR"
+                  },
+                  "Shipping": {
+                    "Amount": 0,
+                    "CurrencyCode": "EUR"
+                  },
+                  "ShipsFrom": {
+                    "Country": "DE"
+                  },
+                  "IsFulfilledByAmazon": false,
+                  "IsBuyBoxWinner": false,
+                  "PrimeInformation": {
+                    "IsOfferPrime": false,
+                    "IsOfferNationalPrime": false
+                  },
+                  "IsExpeditedShippingAvailable": false,
+                  "IsFeaturedMerchant": true,
+                  "ShipsDomestically": true,
+                  "ShipsInternationally": false
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expect": {
+        "snapshots": [
+          {
+            "verdict": "ACCEPT",
+            "anchorsUsed": [
+              "HISTORY"
+            ],
+            "engineInvocations": 1,
+            "warnings": [
+              {
+                "code": "OWN_PRICE_DEVIATION",
+                "params": {
+                  "ourPriceMinor": 99999
+                }
+              }
+            ],
+            "scopes": [
+              {
+                "decision": {
+                  "outcome": "APPROVED",
+                  "finalMinor": 1775
+                },
+                "dispatch": {
+                  "status": "ACCEPTED"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "lwa-token",
+      "note": "Токен LWA по refresh_token (connecting-to-the-selling-partner-api); тело формы проверяет стенд",
+      "request": {
+        "method": "POST",
+        "path": "/auth/o2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "Atza|syn-access-token-0001",
+          "token_type": "bearer",
+          "expires_in": 3600,
+          "refresh_token": "Atzr|syn-refresh-token-0001"
+        }
+      }
+    },
+    {
+      "id": "patch-4101-1775-read",
+      "note": "Чтение оффера перед записью: тип товара и собственное ценообразование канала [AMZ_C03, AMZ_C09]",
+      "request": {
+        "method": "GET",
+        "path": "/listings/2021-08-01/items/A1SYNSELLER0001/SYN-SKU-4101",
+        "query": {
+          "marketplaceIds": "A1PA6795UKMFR9",
+          "includedData": "summaries,attributes"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "sku": "SYN-SKU-4101",
+          "summaries": [
+            {
+              "marketplaceId": "A1PA6795UKMFR9",
+              "asin": "B000004101",
+              "productType": "SYNTHETIC_PRODUCT_TYPE",
+              "status": [
+                "BUYABLE",
+                "DISCOVERABLE"
+              ]
+            }
+          ],
+          "attributes": {
+            "purchasable_offer": [
+              {
+                "marketplace_id": "A1PA6795UKMFR9",
+                "currency": "EUR",
+                "audience": "ALL",
+                "our_price": [
+                  {
+                    "schedule": [
+                      {
+                        "value_with_tax": 999.99
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "patch-4101-1775-patch",
+      "request": {
+        "method": "PATCH",
+        "path": "/listings/2021-08-01/items/A1SYNSELLER0001/SYN-SKU-4101",
+        "query": {
+          "marketplaceIds": "A1PA6795UKMFR9",
+          "includedData": "issues"
+        },
+        "body": {
+          "productType": "SYNTHETIC_PRODUCT_TYPE",
+          "patches": [
+            {
+              "op": "merge",
+              "path": "/attributes/purchasable_offer",
+              "value": [
+                {
+                  "marketplace_id": "A1PA6795UKMFR9",
+                  "currency": "EUR",
+                  "audience": "ALL",
+                  "our_price": [
+                    {
+                      "schedule": [
+                        {
+                          "value_with_tax": 17.75
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "sku": "SYN-SKU-4101",
+          "status": "ACCEPTED",
+          "submissionId": "syn-submission-SYN-SKU-4101",
+          "issues": []
+        }
+      }
+    }
+  ],
+  "expect": {
+    "noAlerts": true,
+    "logs": [
+      {
+        "code": "INPUT_SANITY_OWN_PRICE_DEVIATION",
+        "count": 1
+      }
+    ],
+    "pipeline": {
+      "rejectedSnapshots": [],
+      "writes": [
+        {
+          "writeScopeId": "ws-price-de-4101",
+          "amountMinor": 1775,
+          "status": "ACCEPTED"
+        }
+      ]
+    }
+  }
+}

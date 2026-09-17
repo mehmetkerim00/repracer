@@ -29,15 +29,20 @@ export interface World {
   clock: string;
   tenantId: string;
   channelAccountId: string;
-  account: { externalAccountId: string; marketplaces: string[]; channel?: string };
+  /** region — регион SP-API аккаунта Amazon (EU, NA) */
+  account: { externalAccountId: string; marketplaces: string[]; channel?: string; region?: string };
   /** Синтетические ключи; seller обязателен, partner — если partner = true */
-  credentials: { seller: { clientKey: string; secretKey: string }; partner?: { clientKey: string; secretKey: string } };
+  /**
+   * Синтетические ключи. Kaufland: seller {clientKey, secretKey}, partner. Amazon: seller {refreshToken} (согласие продавца LWA),
+   * application {clientId, clientSecret} (ключи приложения), accessToken — токен, который выдаёт обмен LWA сценария.
+   */
+  credentials: { seller: Record<string, string>; partner?: Record<string, string>; application?: Record<string, string>; accessToken?: string };
   partner?: boolean;
   /** Ответ каталога аккаунтов для любого вызова: по умолчанию проверка тенанта и аккаунта мира */
   directory?: 'CHECK' | 'NOT_FOUND' | 'DISCONNECTED';
   budget?: { seller: BucketSpec; partner?: BucketSpec };
   client?: { timeoutMs?: number; maxAttempts?: number };
-  adapter?: { confirmationWindowMs?: number; webhookMaxAgeMs?: number; buyBoxChangedAccess?: 'GRANTED' | 'NOT_GRANTED' };
+  adapter?: { confirmationWindowMs?: number; webhookMaxAgeMs?: number; buyBoxChangedAccess?: 'GRANTED' | 'NOT_GRANTED'; amazonApplicationLoadRps?: number };
   /** Данные пути решения о цене (хранилище в памяти); без них шаги pipeline* недоступны */
   pricing?: MemorySeed & { sanity?: Partial<SanityConfig> };
   /** Строки, которых не должно быть нигде в выходах, журнале и алертах (синтетические PII) */
@@ -154,7 +159,7 @@ export interface AlertExpectation { code: string; count?: number; [key: string]:
 export interface Scenario {
   format: typeof SCENARIO_FORMAT;
   id: string;
-  channel: 'KAUFLAND';
+  channel: 'KAUFLAND' | 'AMAZON';
   apiVersion: string;
   title: string;
   description: string;
@@ -198,6 +203,9 @@ export function validateScenario(s: Scenario): string[] {
   }
   if (!s.world?.credentials?.seller) problems.push('world.credentials.seller is required');
   if (s.world?.partner && !s.world.credentials.partner) problems.push('world.partner requires credentials.partner');
+  if (s.channel === 'AMAZON' && (!s.world?.credentials?.application || !s.world.credentials.accessToken || !s.world.account.region)) {
+    problems.push('an Amazon world needs credentials.application, credentials.accessToken and account.region');
+  }
   const stepIds = new Set<string>();
   for (const step of s.steps ?? []) {
     if (stepIds.has(step.id)) problems.push(`duplicate step id ${step.id}`);
@@ -216,7 +224,10 @@ export function validateScenario(s: Scenario): string[] {
   for (const ex of s.exchanges ?? []) {
     if (exchangeIds.has(ex.id)) problems.push(`duplicate exchange id ${ex.id}`);
     exchangeIds.add(ex.id);
-    if (!ex.request?.path?.startsWith('/v2/')) problems.push(`exchange ${ex.id}: request.path must start with /v2/`);
+    const pathOk = s.channel === 'AMAZON'
+      ? /^\/(listings\/2021-08-01\/items\/|auth\/o2\/token$)/.test(ex.request?.path ?? '')
+      : Boolean(ex.request?.path?.startsWith('/v2/'));
+    if (!pathOk) problems.push(`exchange ${ex.id}: request.path is not an ${s.channel} API path`);
     if (Boolean(ex.response) === Boolean(ex.fault)) problems.push(`exchange ${ex.id}: exactly one of response or fault`);
   }
   return problems;

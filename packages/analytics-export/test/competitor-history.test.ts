@@ -26,6 +26,9 @@ test('a competitor snapshot survives the ClickHouse row round trip; a snapshot w
   };
   const row = competitorSnapshotRow('10000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000001', 'KAUFLAND', '30000000-0000-4000-8000-000000000001', snapshot, NOW);
   assert.equal(row.data_class, 'CHANNEL_INFO');
+  // Находка 2 ревью шага 21: доставка Buy Box пишется из предложения-победителя, а не null
+  const shipped = { ...snapshot, offers: snapshot.offers.map((o) => (o.rank === 1 ? { ...o, shipping: { ...o.shipping!, amountMinor: 450 }, totalPrice: { ...o.totalPrice!, amountMinor: 2230 } } : o)) };
+  assert.equal(competitorSnapshotRow('t', 'a', 'KAUFLAND', 's', shipped, NOW).buybox_shipping_minor, 450);
   // Строка хранит состояние у каждого предложения (offers.condition): без явного значения — состояние снимка
   assert.deepEqual(competitorSnapshotFromRow({ ...row, observed_at: '2026-09-14 10:00:00.000' }), { ...snapshot, offers: snapshot.offers.map((o) => ({ ...o, condition: 'new' })) });
   assert.throws(() => competitorSnapshotRow('t', 'a', 'KAUFLAND', 's', { ...snapshot, buybox: undefined, offers: [] } as unknown as CompetitorSnapshot, NOW), /no currency/);

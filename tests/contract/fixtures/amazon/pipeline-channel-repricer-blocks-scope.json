@@ -1,0 +1,502 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "amazon/pipeline/channel-repricer-blocks-scope",
+  "channel": "AMAZON",
+  "apiVersion": "listings-items-2021-08-01",
+  "title": "Р-115: правило автоматического ценообразования Amazon у оффера — единица записи блокируется, продавец получает действие",
+  "description": "Первый товар: чтение перед записью показывает привязку automated_pricing_merchandising_rule_plan — PATCH не отправляется, запись отклонена CHANNEL_REPRICER_ACTIVE (REQUIRES_HUMAN), единица BLOCKED, CRITICAL-алерт с кодом и действием «выключить репрайсер канала». Второй товар: запись принята, а правило привязано в кабинете позже — изменения правил асинхронны, поэтому обратное чтение getListingsItem видит его уже после записи: сверка не повторяется час, единица блокируется сразу, принятая запись остаётся принятой.",
+  "tags": [
+    "pipeline",
+    "dispatcher",
+    "r115",
+    "mandatory:channel-repricer-pipeline"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "vendor/amazon/sp-api-models/2026-09-16/models/listings-items-api-model/listingsItems_2021-08-01.json",
+      "https://developer-docs.amazon/sp-api/docs/manage-purchasable-offer.md",
+      "docs/decisions.md#Р-115",
+      "docs/decisions.md#Р-116"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "A1SYNSELLER0001",
+      "marketplaces": [
+        "A1PA6795UKMFR9"
+      ],
+      "channel": "AMAZON",
+      "region": "EU"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "Atzr|syn-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "amzn1.application-oa2-client.syn0001",
+        "clientSecret": "syn-lwa-client-secret-0001"
+      },
+      "accessToken": "Atza|syn-access-token-0001"
+    },
+    "pricing": {
+      "scopes": [
+        {
+          "writeScopeId": "ws-price-de-8201",
+          "productId": "prod-8201",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "A1PA6795UKMFR9",
+          "externalUnitId": "SYN-SKU-8201",
+          "channelProductRef": "B000008201",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-fixed-1999",
+            "version": 1,
+            "params": {
+              "type": "FIXED",
+              "priceMinor": 1999
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1000,
+            "id": "min-8201"
+          },
+          "maxPrice": {
+            "amountMinor": 5000,
+            "id": "max-8201"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-8201",
+            "unitCostMinor": 500,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
+          }
+        },
+        {
+          "writeScopeId": "ws-price-de-8202",
+          "productId": "prod-8202",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "A1PA6795UKMFR9",
+          "externalUnitId": "SYN-SKU-8202",
+          "channelProductRef": "B000008202",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-fixed-2100",
+            "version": 1,
+            "params": {
+              "type": "FIXED",
+              "priceMinor": 2100
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 2000,
+          "minPrice": {
+            "amountMinor": 1000,
+            "id": "min-8202"
+          },
+          "maxPrice": {
+            "amountMinor": 5000,
+            "id": "max-8202"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-8202",
+            "unitCostMinor": 500,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
+          }
+        }
+      ],
+      "marketplaces": {
+        "A1PA6795UKMFR9": {
+          "currency": "EUR",
+          "basis": "GROSS"
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "id": "repricer-rule-before-write",
+      "kind": "pipelineRecompute",
+      "writeScopeId": "ws-price-de-8201",
+      "trigger": {
+        "type": "COST_CHANGE"
+      },
+      "expect": {
+        "decision": {
+          "outcome": "APPROVED",
+          "finalMinor": 1999
+        }
+      }
+    },
+    {
+      "id": "scope-blocked-next-decision-held",
+      "kind": "pipelineRecompute",
+      "writeScopeId": "ws-price-de-8201",
+      "trigger": {
+        "type": "COST_CHANGE"
+      },
+      "expect": {
+        "decision": {
+          "outcome": "HELD",
+          "rejectionReason": "SCOPE_NOT_ACTIVE"
+        }
+      }
+    },
+    {
+      "id": "second-accepted",
+      "kind": "pipelineRecompute",
+      "writeScopeId": "ws-price-de-8202",
+      "trigger": {
+        "type": "COST_CHANGE"
+      },
+      "expect": {
+        "decision": {
+          "outcome": "APPROVED",
+          "finalMinor": 2100
+        }
+      }
+    },
+    {
+      "id": "in-flight-window-passes",
+      "kind": "advanceClock",
+      "ms": 121000
+    },
+    {
+      "id": "readback-sees-rule-after-write",
+      "kind": "pipelineDispatchDue",
+      "expect": {
+        "due": 1,
+        "reports": [
+          {
+            "writeScopeId": "ws-price-de-8202",
+            "steps": [
+              {
+                "action": "RECONCILED",
+                "version": 1,
+                "result": "UNKNOWN",
+                "recorded": "ACCEPTED"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "second-scope-blocked-next-decision-held",
+      "kind": "pipelineRecompute",
+      "writeScopeId": "ws-price-de-8202",
+      "trigger": {
+        "type": "COST_CHANGE"
+      },
+      "expect": {
+        "decision": {
+          "outcome": "HELD",
+          "rejectionReason": "SCOPE_NOT_ACTIVE"
+        }
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "lwa-token",
+      "note": "Токен LWA по refresh_token (connecting-to-the-selling-partner-api); тело формы проверяет стенд",
+      "request": {
+        "method": "POST",
+        "path": "/auth/o2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "Atza|syn-access-token-0001",
+          "token_type": "bearer",
+          "expires_in": 3600,
+          "refresh_token": "Atzr|syn-refresh-token-0001"
+        }
+      }
+    },
+    {
+      "id": "pre-read-8201-rule",
+      "note": "Чтение оффера перед записью: тип товара и собственное ценообразование канала [AMZ_C03, AMZ_C09]",
+      "request": {
+        "method": "GET",
+        "path": "/listings/2021-08-01/items/A1SYNSELLER0001/SYN-SKU-8201",
+        "query": {
+          "marketplaceIds": "A1PA6795UKMFR9",
+          "includedData": "summaries,attributes"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "sku": "SYN-SKU-8201",
+          "summaries": [
+            {
+              "marketplaceId": "A1PA6795UKMFR9",
+              "asin": "B000008201",
+              "productType": "SYNTHETIC_PRODUCT_TYPE",
+              "status": [
+                "BUYABLE",
+                "DISCOVERABLE"
+              ]
+            }
+          ],
+          "attributes": {
+            "purchasable_offer": [
+              {
+                "marketplace_id": "A1PA6795UKMFR9",
+                "currency": "EUR",
+                "audience": "ALL",
+                "our_price": [
+                  {
+                    "schedule": [
+                      {
+                        "value_with_tax": 18.5
+                      }
+                    ]
+                  }
+                ],
+                "automated_pricing_merchandising_rule_plan": [
+                  {
+                    "rule_id": "syn-automated-pricing-rule-0001"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "pre-read-8202",
+      "note": "Чтение оффера перед записью: тип товара и собственное ценообразование канала [AMZ_C03, AMZ_C09]",
+      "request": {
+        "method": "GET",
+        "path": "/listings/2021-08-01/items/A1SYNSELLER0001/SYN-SKU-8202",
+        "query": {
+          "marketplaceIds": "A1PA6795UKMFR9",
+          "includedData": "summaries,attributes"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "sku": "SYN-SKU-8202",
+          "summaries": [
+            {
+              "marketplaceId": "A1PA6795UKMFR9",
+              "asin": "B000008202",
+              "productType": "SYNTHETIC_PRODUCT_TYPE",
+              "status": [
+                "BUYABLE",
+                "DISCOVERABLE"
+              ]
+            }
+          ],
+          "attributes": {
+            "purchasable_offer": [
+              {
+                "marketplace_id": "A1PA6795UKMFR9",
+                "currency": "EUR",
+                "audience": "ALL",
+                "our_price": [
+                  {
+                    "schedule": [
+                      {
+                        "value_with_tax": 20
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "patch-8202-2100",
+      "request": {
+        "method": "PATCH",
+        "path": "/listings/2021-08-01/items/A1SYNSELLER0001/SYN-SKU-8202",
+        "query": {
+          "marketplaceIds": "A1PA6795UKMFR9",
+          "includedData": "issues"
+        },
+        "body": {
+          "productType": "SYNTHETIC_PRODUCT_TYPE",
+          "patches": [
+            {
+              "op": "merge",
+              "path": "/attributes/purchasable_offer",
+              "value": [
+                {
+                  "marketplace_id": "A1PA6795UKMFR9",
+                  "currency": "EUR",
+                  "audience": "ALL",
+                  "our_price": [
+                    {
+                      "schedule": [
+                        {
+                          "value_with_tax": 21
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "sku": "SYN-SKU-8202",
+          "status": "ACCEPTED",
+          "submissionId": "syn-submission-SYN-SKU-8202",
+          "issues": []
+        }
+      }
+    },
+    {
+      "id": "readback-8202-rule",
+      "request": {
+        "method": "GET",
+        "path": "/listings/2021-08-01/items/A1SYNSELLER0001/SYN-SKU-8202",
+        "query": {
+          "marketplaceIds": "A1PA6795UKMFR9",
+          "includedData": "summaries,attributes,offers,fulfillmentAvailability,issues"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "sku": "SYN-SKU-8202",
+          "summaries": [
+            {
+              "marketplaceId": "A1PA6795UKMFR9",
+              "asin": "B000008202",
+              "productType": "SYNTHETIC_PRODUCT_TYPE",
+              "status": [
+                "BUYABLE",
+                "DISCOVERABLE"
+              ]
+            }
+          ],
+          "attributes": {
+            "purchasable_offer": [
+              {
+                "marketplace_id": "A1PA6795UKMFR9",
+                "currency": "EUR",
+                "audience": "ALL",
+                "our_price": [
+                  {
+                    "schedule": [
+                      {
+                        "value_with_tax": 21
+                      }
+                    ]
+                  }
+                ],
+                "automated_pricing_merchandising_rule_plan": [
+                  {
+                    "rule_id": "syn-automated-pricing-rule-0001"
+                  }
+                ]
+              }
+            ]
+          },
+          "issues": [],
+          "offers": [
+            {
+              "marketplaceId": "A1PA6795UKMFR9",
+              "offerType": "B2C",
+              "price": {
+                "currencyCode": "EUR",
+                "amount": "21"
+              }
+            }
+          ],
+          "fulfillmentAvailability": []
+        }
+      }
+    }
+  ],
+  "expect": {
+    "alerts": [
+      {
+        "code": "PRICE_WRITE_SCOPE_BLOCKED",
+        "severity": "CRITICAL",
+        "count": 2,
+        "details": {
+          "code": "CHANNEL_REPRICER_ACTIVE"
+        }
+      }
+    ],
+    "pipeline": {
+      "decisions": [
+        {
+          "outcome": "APPROVED",
+          "finalMinor": 1999
+        },
+        {
+          "outcome": "HELD",
+          "rejectionReason": "SCOPE_NOT_ACTIVE",
+          "reasonParams": {
+            "status": "BLOCKED",
+            "blockedByErrorCode": "CHANNEL_REPRICER_ACTIVE",
+            "action": "DISABLE_CHANNEL_REPRICER"
+          }
+        },
+        {
+          "outcome": "APPROVED",
+          "finalMinor": 2100
+        },
+        {
+          "outcome": "HELD",
+          "rejectionReason": "SCOPE_NOT_ACTIVE",
+          "reasonParams": {
+            "status": "BLOCKED",
+            "blockedByErrorCode": "CHANNEL_REPRICER_ACTIVE",
+            "action": "DISABLE_CHANNEL_REPRICER"
+          }
+        }
+      ],
+      "writes": [
+        {
+          "amountMinor": 1999,
+          "status": "FAILED"
+        },
+        {
+          "amountMinor": 2100,
+          "status": "ACCEPTED"
+        }
+      ]
+    }
+  }
+}

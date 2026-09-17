@@ -30,6 +30,10 @@ export type ChannelErrorCode =
   | 'TENANT_MISMATCH'
   | 'SIGNATURE_INVALID'
   | 'UNSUPPORTED'
+  /** Р-115: у оффера в канале включено собственное автоматическое ценообразование (Amazon automated_pricing_merchandising_rule_plan) */
+  | 'CHANNEL_REPRICER_ACTIVE'
+  /** Р-114: у оффера в канале есть собственные границы цены (Amazon minimum/maximum_seller_allowed_price) — наши границы должны быть единственными */
+  | 'CHANNEL_BOUNDS_PRESENT'
   | 'UNKNOWN';
 
 /** На что распространяется ошибка: один элемент, весь пакет или весь аккаунт (например, отозванные ключи) */
@@ -76,4 +80,6 @@ export const DEFAULT_ERROR_CLASS: Readonly<Record<ChannelErrorCode, ErrorClass>>
   POLICY_VIOLATION: 'REQUIRES_HUMAN',
   TENANT_MISMATCH: 'REQUIRES_HUMAN',
   SIGNATURE_INVALID: 'REQUIRES_HUMAN',
+  CHANNEL_REPRICER_ACTIVE: 'REQUIRES_HUMAN',
+  CHANNEL_BOUNDS_PRESENT: 'REQUIRES_HUMAN',
 };

@@ -8,6 +8,7 @@ import {
   can,
   convertMinor,
   isCompetitorDerived,
+  priceBasisMismatch,
   resumeActionFor,
   sellerActionFor,
   stopCovers,
@@ -36,6 +37,7 @@ import {
   type DueKind,
   type DueScope,
   type OutcomeTransition,
+  type PriceBasisHalt,
   type RecordedOutcome,
   type Reconciliation,
   type RetryPolicy,
@@ -283,8 +285,15 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     };
   }
 
+  /** Как HALT_WHERE хранилища PostgreSQL: остановка по базе цены [Р-116] видна первой — она блокирует все цены */
   private activeHalt(channelAccountId: string, marketplace: string): HaltRow | undefined {
-    return this.halts.find((h) => h.releasedAt === null && h.channelAccountId === channelAccountId && (h.marketplace === null || h.marketplace === marketplace));
+    const active = this.halts.filter((h) => h.releasedAt === null && h.channelAccountId === channelAccountId && (h.marketplace === null || h.marketplace === marketplace));
+    return active.find((h) => h.reasonCode === 'CHANNEL_PRICE_BASIS_MISMATCH') ?? active[0];
+  }
+
+  /** Остановка блокирует цену: из данных конкурентов — любая [Р-51], любая цена — остановка по базе цены [Р-116] (как триггеры 0080) */
+  private static haltBlocks(halt: HaltRow | undefined, competitorDerived: boolean): halt is HaltRow {
+    return halt !== undefined && (competitorDerived || halt.reasonCode === 'CHANNEL_PRICE_BASIS_MISMATCH');
   }
 
   /** Остановка тенанта действует на любой аккаунт, в том числе подключённый после неё [Р-70] */
@@ -303,7 +312,8 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
 
   private blocking(row: ScopeRow): { errorCode: string; since: Instant } | null {
     if (row.status === 'ACTIVE') return null;
-    const w = [...this.writes].reverse().find((x) => x.writeScopeId === row.writeScopeId && x.lastErrorCode && x.status === 'FAILED' && !x.nextAttemptAt);
+    // Принятая запись, сверка которой остановлена (D1, Р-115), тоже несёт код: без него продавец не видит своего действия
+    const w = [...this.writes].reverse().find((x) => x.writeScopeId === row.writeScopeId && x.lastErrorCode && (x.status === 'FAILED' || x.status === 'ACCEPTED') && !x.nextAttemptAt);
     return w ? { errorCode: w.lastErrorCode!, since: w.dispatchedAt ?? w.createdAt } : null;
   }
 
@@ -487,7 +497,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
           return { status: 'CONTEXT_CHANGED', writeScopeId: row.writeScopeId, reason: InMemoryPricingStore.stopReason(stop, 'DATABASE') };
         }
         const halt = this.activeHalt(row.channelAccountId, row.marketplace);
-        if (isCompetitorDerived(d.intent.ruleCode) && halt) {
+        if (InMemoryPricingStore.haltBlocks(halt, isCompetitorDerived(d.intent.ruleCode))) {
           return { status: 'CONTEXT_CHANGED', writeScopeId: row.writeScopeId, reason: InMemoryPricingStore.haltReason(halt, 'DATABASE', d.intent.ruleCode) };
         }
       }
@@ -503,7 +513,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
         rejectedSnapshotId = this.id('rej');
         this.rejectedSnapshots.push({ ...s.rejected, key: input.key, rejectedSnapshotId });
       }
-      if (s.halt && !this.halts.some((h) => h.releasedAt === null && h.channelAccountId === s.halt!.channelAccountId && h.marketplace === s.halt!.marketplace)) {
+      if (s.halt && !this.halts.some((h) => h.releasedAt === null && h.channelAccountId === s.halt!.channelAccountId && h.marketplace === s.halt!.marketplace && h.reasonCode === s.halt!.reasonCode)) {
         const window = 1800;
         const haltId = this.id('halt');
         this.halts.push({ ...s.halt, haltId, rejectedSnapshotId, reviewWindowSeconds: window, nextReviewAt: new Date(Date.parse(s.halt.haltedAt) + window * 1000).toISOString(), releasedAt: null, releasedKind: null });
@@ -700,7 +710,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       return { status: 'DISCARDED_STALE', reason: { code: 'WRITE_BLOCKED_BY_BOUND_RECHECK', params: { amountMinor: w.amountMinor, floorMinor: floor, ceilingMinor: ceiling, violated: 'CEILING', currency: w.currency } } };
     }
     const halt = this.activeHalt(row.channelAccountId, row.marketplace);
-    if (w.competitorDerived && halt) return { status: 'DISCARDED_STALE', reason: InMemoryPricingStore.haltReason(halt, 'DISPATCH') };
+    if (InMemoryPricingStore.haltBlocks(halt, w.competitorDerived)) return { status: 'DISCARDED_STALE', reason: InMemoryPricingStore.haltReason(halt, 'DISPATCH') };
     return null;
   }
 
@@ -748,6 +758,33 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     const w = this.writes.find((x) => x.channelWriteId === write.channelWriteId);
     if (!w || w.status !== 'DISPATCHED') return this.recorded(write.writeScope.writeScopeId, (w?.status ?? 'APPLIED') as RecordedOutcome['status'], null, null, false);
     return this.apply(w, 'DISPATCHED', planOutcomeTransition(outcome, w.attemptCount, now, policy), now);
+  }
+
+  /** Как PgWriteQueueStore.checkPriceBasis: ставка — из себестоимости единицы (режим НДС), остановка — одна на причину */
+  async checkPriceBasis(_tenantId: string, write: FieldWrite, observedMinor: number, now: Instant): Promise<PriceBasisHalt | null> {
+    if (write.value.field !== 'PRICE') return null;
+    const row = this.scopes.get(write.writeScope.writeScopeId);
+    if (!row) return null;
+    const vatRateBp = row.taxRegime === 'VAT_INCLUDED' && row.cost?.tax.regime === 'VAT_INCLUDED' ? row.cost.tax.vatRateBp : null;
+    const sentMinor = write.value.price.amountMinor;
+    const basisError = priceBasisMismatch(sentMinor, observedMinor, vatRateBp);
+    if (!basisError) return null;
+    const reason: Reason = {
+      code: 'CHANNEL_PRICE_BASIS_MISMATCH',
+      params: { basisError, vatRateBp: vatRateBp!, sentMinor, observedMinor, currency: write.value.price.currency, writeScopeId: row.writeScopeId, marketplace: row.marketplace },
+    };
+    let halt = this.halts.find((h) => h.releasedAt === null && h.channelAccountId === row.channelAccountId && h.marketplace === row.marketplace && h.reasonCode === 'CHANNEL_PRICE_BASIS_MISMATCH');
+    if (!halt) {
+      const haltId = this.id('halt');
+      const window = 1800;
+      halt = {
+        haltId, channelAccountId: row.channelAccountId, marketplace: row.marketplace, reasonCode: 'CHANNEL_PRICE_BASIS_MISMATCH', rejectedSnapshotId: null,
+        details: reason.params, haltedAt: now, reviewWindowSeconds: window, nextReviewAt: new Date(Date.parse(now) + window * 1000).toISOString(), releasedAt: null, releasedKind: null,
+      };
+      this.halts.push(halt);
+      this.auditHalt('pricing.halt_created', haltId, now, null, null);
+    }
+    return { haltId: halt.haltId, reason };
   }
 
   async recordReconciliation(_tenantId: string, write: FieldWrite, result: Reconciliation, now: Instant, policy: RetryPolicy): Promise<RecordedOutcome> {
@@ -914,6 +951,11 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     if (!this.adminMember(actor)) return { status: 'FORBIDDEN' };
     if (input.name.trim().length === 0) return { status: 'INVALID', cause: 'NAME_REQUIRED' };
     if (input.assignTo.some((id) => !this.scopes.has(id))) return { status: 'INVALID', cause: 'SCOPE_NOT_FOUND' };
+    for (const x of input.expected ?? []) {
+      const row = this.scopes.get(x.writeScopeId);
+      if (!row) return { status: 'INVALID', cause: 'SCOPE_NOT_FOUND' };
+      if ((row.strategy?.strategyId ?? null) !== x.strategyId || (row.strategy?.version ?? null) !== x.version) return { status: 'CONFLICT', writeScopeId: x.writeScopeId };
+    }
     const versions = [...this.strategyVersions.values()].filter((d) => d.strategyId === input.strategyId);
     if (input.strategyId !== null && versions.length === 0) return { status: 'INVALID', cause: 'STRATEGY_NOT_FOUND' };
     const strategy: StrategyDefinition = {
@@ -933,7 +975,8 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
 
   async listDueHalts(_tenantId: string, channelAccountId: string, now: Instant): Promise<HaltInfo[]> {
     return this.halts
-      .filter((h) => h.releasedAt === null && h.channelAccountId === channelAccountId && Date.parse(h.nextReviewAt) <= Date.parse(now))
+      // Как PgPricingStore.listDueHalts: выборкой проверяется только остановка по массовому сдвигу [Р-52]; по базе цены — только человек [Р-116]
+      .filter((h) => h.releasedAt === null && h.channelAccountId === channelAccountId && h.reasonCode === 'CHANNEL_MASS_SHIFT' && Date.parse(h.nextReviewAt) <= Date.parse(now))
       .map((h) => this.haltInfo(h));
   }
 

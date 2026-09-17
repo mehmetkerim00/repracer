@@ -79,6 +79,9 @@ export interface SeedWorldInput {
   adminPool: PgPool;
   fixtureTenantId: string;
   fixtureChannelAccountId: string;
+  /** Канал и регион аккаунта мира; по умолчанию Kaufland без региона. Amazon — сценарии адаптера Amazon на PostgreSQL (шаг 22) */
+  fixtureChannel?: 'KAUFLAND' | 'AMAZON';
+  fixtureRegion?: string | null;
   marketplaces: string[];
   clock: Instant;
   seed: MemorySeed;
@@ -196,7 +199,11 @@ export async function seedPricingWorld(_pool: PgPool, input: SeedWorldInput): Pr
   const tag = tenantId.slice(0, 8);
   const scopes = new Map<string, ScopeInfo>();
 
-  const accounts = new Map<string, { id: string; channel: string; region: string | null }>([[input.fixtureChannelAccountId, { id: accountId, channel: 'KAUFLAND', region: null }]]);
+  const fixtureChannel = input.fixtureChannel ?? 'KAUFLAND';
+  const fixtureRegion = fixtureChannel === 'KAUFLAND' ? null : input.fixtureRegion ?? null;
+  // Источник конкурентов проекций посева — по каналу аккаунта мира (CHECK competitor_state: источник принадлежит каналу)
+  const fixtureSource = fixtureChannel === 'AMAZON' ? 'AMAZON_ANY_OFFER_CHANGED' : 'KAUFLAND_BUYBOX';
+  const accounts = new Map<string, { id: string; channel: string; region: string | null }>([[input.fixtureChannelAccountId, { id: accountId, channel: fixtureChannel, region: fixtureRegion }]]);
   /** Подключение аккаунта канала: при посеве и позже, в существующий тенант (Р-70: подключение при действующей остановке) */
   const connectAccountRow = async (tx: Tx, a: SeedAccount, externalAccountId: string): Promise<void> => {
     const id: string = randomUUID();
@@ -246,7 +253,8 @@ export async function seedPricingWorld(_pool: PgPool, input: SeedWorldInput): Pr
     const ebay = account.channel === 'EBAY';
     const identity = {
       region: account.region, marketplace: s.marketplace,
-      external_unit_id: kaufland ? s.externalUnitId : null, external_sku: kaufland ? null : `syn-sku-${s.externalUnitId}`,
+      // Amazon: SKU сценария — тот, что видит адаптер в запросах (фикстуры стенда); у прочих каналов — синтетический
+      external_unit_id: kaufland ? s.externalUnitId : null, external_sku: kaufland ? null : account.channel === 'AMAZON' ? s.externalUnitId : `syn-sku-${s.externalUnitId}`,
       // eBay: бюджет правок — на листинг [Р-19]; листинг стенда — синтетический, уже на Inventory API (миграции нет, Р-2)
       external_listing_id: ebay ? `syn-listing-${s.externalUnitId}` : null,
     };
@@ -366,9 +374,9 @@ export async function seedPricingWorld(_pool: PgPool, input: SeedWorldInput): Pr
 
   await inTenant(input.adminPool, tenantId, async (tx) => {
     await tx.query(
-      `INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, external_account_id, marketplaces, credentials_ref, connected_by_membership_id)
-       VALUES ($1, $2, 'KAUFLAND', $3, $4, 'secret-ref:synthetic', $5)`,
-      [tenantId, accountId, `syn-${tag}`, input.marketplaces, membershipId],
+      `INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, region, external_account_id, marketplaces, credentials_ref, connected_by_membership_id)
+       VALUES ($1, $2, $3, $4, $5, $6, 'secret-ref:synthetic', $7)`,
+      [tenantId, accountId, fixtureChannel, fixtureRegion, `syn-${tag}`, input.marketplaces, membershipId],
     );
     for (const a of seed.accounts ?? []) await connectAccountRow(tx, a, `syn-${a.channel.toLowerCase()}-${tag}`);
     for (const s of seed.scopes) await seedScope(tx, s);
@@ -381,16 +389,16 @@ export async function seedPricingWorld(_pool: PgPool, input: SeedWorldInput): Pr
 
     for (const [key, st] of Object.entries(seed.competitorState ?? {})) {
       const k = splitKey(key);
-      const { rows: [mk] } = await tx.query(`SELECT currency, price_basis FROM platform.marketplace WHERE channel = 'KAUFLAND' AND marketplace = $1`, [k.marketplace]);
+      const { rows: [mk] } = await tx.query(`SELECT currency, price_basis FROM platform.marketplace WHERE channel = $2 AND marketplace = $1`, [k.marketplace, fixtureChannel]);
       if (!mk) throw new Error(`competitorState seed: storefront ${k.marketplace} is not in platform.marketplace`);
       const offers = st.lowestMinor !== null ? [{ isSelf: false, price: { amountMinor: st.lowestMinor, currency: mk.currency, basis: mk.price_basis } }] : [];
       await tx.query(
         `INSERT INTO channel_data.competitor_state
            (tenant_id, channel_account_id, channel, marketplace, channel_product_ref, condition, source, competitor_snapshot_id,
             observed_at, received_at, buybox_amount_minor, buybox_is_self, lowest_landed_minor, offer_count, offers, completeness, gtin, currency, price_basis)
-         VALUES ($1, $2, 'KAUFLAND', $3, $4, $5, 'KAUFLAND_BUYBOX', gen_random_uuid(), $6, $6, $7, false, $8, $9, $10, 'FULL', $11, $12, $13)`,
+         VALUES ($1, $2, $14, $3, $4, $5, $15, gen_random_uuid(), $6, $6, $7, false, $8, $9, $10, 'FULL', $11, $12, $13)`,
         [tenantId, accountId, k.marketplace, k.ref, k.condition.toUpperCase(), st.observedAt, st.buyboxMinor, st.lowestMinor, offers.length,
-         JSON.stringify(offers), gtinOf(k.marketplace, k.ref, k.condition), mk.currency, mk.price_basis],
+         JSON.stringify(offers), gtinOf(k.marketplace, k.ref, k.condition), mk.currency, mk.price_basis, fixtureChannel, fixtureSource],
       );
     }
     for (const [key, days] of Object.entries(seed.competitorDaily ?? {})) {
@@ -400,8 +408,8 @@ export async function seedPricingWorld(_pool: PgPool, input: SeedWorldInput): Pr
           `INSERT INTO channel_data.competitor_price_daily
              (tenant_id, channel_account_id, channel, marketplace, channel_product_ref, condition, price_day,
               buybox_min_minor, buybox_max_minor, buybox_last_minor, samples, updated_at)
-           VALUES ($1, $2, 'KAUFLAND', $3, $4, $5, $6, $7, $8, $8, 1, $9)`,
-          [tenantId, accountId, k.marketplace, k.ref, k.condition.toUpperCase(), d.day, d.minMinor, d.maxMinor, clock],
+           VALUES ($1, $2, $10, $3, $4, $5, $6, $7, $8, $8, 1, $9)`,
+          [tenantId, accountId, k.marketplace, k.ref, k.condition.toUpperCase(), d.day, d.minMinor, d.maxMinor, clock, fixtureChannel],
         );
       }
     }
@@ -461,8 +469,8 @@ export async function seedPricingWorld(_pool: PgPool, input: SeedWorldInput): Pr
   for (const h of seed.halts ?? []) {
     await inTenant(_pool, tenantId, (tx) => tx.query(
       `INSERT INTO channel_data.pricing_halt (tenant_id, channel_account_id, channel, marketplace, reason_code, halted_at, review_window)
-       VALUES ($1, $2, 'KAUFLAND', $3, 'CHANNEL_MASS_SHIFT', $4, make_interval(secs => $5))`,
-      [tenantId, accountId, h.marketplace, h.haltedAt, h.reviewWindowSeconds ?? 1800],
+       VALUES ($1, $2, $6, $3, 'CHANNEL_MASS_SHIFT', $4, make_interval(secs => $5))`,
+      [tenantId, accountId, h.marketplace, h.haltedAt, h.reviewWindowSeconds ?? 1800, fixtureChannel],
     ));
   }
 

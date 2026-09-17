@@ -1,7 +1,7 @@
 import { createServer, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import {
-  boundsDiffView, boundsView, can, dangerousReport, decisionList, decisionTrace, describe, expandBoundsEdit, LOCALES, messagesFor, parseBoundsEditRequest,
+  boundsDiffView, boundsView, can, currentStrategies, dangerousReport, decisionList, decisionTrace, describe, expandBoundsEdit, LOCALES, messagesFor, parseBoundsEditRequest,
   parseStrategyDraft, planStop, previewToken, priceFeed, productList, rejectedView, REPORT_PERIODS_DAYS, stopView, strategiesView, strategyPreviewView,
   type Locale, type Messages, type StandWorld, type StopTarget, type StrategyDraft, type Viewer,
 } from '@repracer/console-model';
@@ -279,11 +279,15 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       const ids = scopeIds(body.writeScopeIds);
       const previews = ids ? await previewsFor(live, world, parsed.draft, ids) : null;
       if (!previews) return fail(400, 'BAD_SCOPES', s.badRequest);
-      if (typeof body.previewToken !== 'string' || body.previewToken !== previewToken(parsed.draft, previews)) return fail(409, 'PREVIEW_CHANGED', s.previewChanged);
+      if (typeof body.previewToken !== 'string' || body.previewToken !== previewToken(parsed.draft, previews, world)) return fail(409, 'PREVIEW_CHANGED', s.previewChanged);
+      // Находка 3 ревью шага 21 [Р-39]: стратегия, для которой канал не даёт нужных данных конкурентов, не назначается
+      if (previews.some((p) => !p.availability.available)) return fail(400, 'STRATEGY_UNAVAILABLE', s.strategyUnavailable);
       const strategyId = typeof body.strategyId === 'string' ? body.strategyId : null;
-      const result = await live.store.saveStrategy(world.tenantId, { strategyId, name: parsed.draft.name, params: parsed.draft.params, deadbandMinor: parsed.draft.deadbandMinor, assignTo: ids! },
-        { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) });
+      const result = await live.store.saveStrategy(world.tenantId, {
+        strategyId, name: parsed.draft.name, params: parsed.draft.params, deadbandMinor: parsed.draft.deadbandMinor, assignTo: ids!, expected: currentStrategies(world, ids!),
+      }, { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) });
       if (result.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
+      if (result.status === 'CONFLICT') return fail(409, 'PREVIEW_CHANGED', s.previewChanged);
       if (result.status !== 'SAVED') return fail(400, result.cause, s.badRequest);
       return ok({ message: m.ui.strategies.saved(result.strategy.version, result.assigned.length), strategies: strategiesView(await live.view(viewer), m, true) } satisfies StrategySaveResponse);
     }

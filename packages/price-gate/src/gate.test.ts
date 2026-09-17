@@ -144,3 +144,12 @@ test('third check before the write uses fresh bounds', () => {
   const gone = assertWriteWithinBounds(1790, bounds(1000, null), 'EUR', 'GROSS');
   assert.ok(!gone.ok && gone.reason.code === 'BOUND_UNRESOLVABLE');
 });
+
+test('Р-116: a storefront halt for a wrong price basis blocks a fixed and a margin price too; a mass-shift halt does not', () => {
+  const scope = gate(1790).scope;
+  const halt = (reasonCode: 'CHANNEL_MASS_SHIFT' | 'CHANNEL_PRICE_BASIS_MISMATCH') => ({ haltId: 'h-2', reasonCode, marketplace: 'de', haltedAt: '2026-09-14T09:00:00.000Z' });
+  for (const ruleCode of ['FIXED', 'TARGET_MARGIN', 'MANUAL']) {
+    assert.equal(decide(gate(1790, { scope: { ...scope, channelHalt: halt('CHANNEL_PRICE_BASIS_MISMATCH') }, intent: intent(1790, { ruleCode }) })).rejectionReason, 'CHANNEL_HALTED', ruleCode);
+    assert.equal(decide(gate(1790, { scope: { ...scope, channelHalt: halt('CHANNEL_MASS_SHIFT') }, intent: intent(1790, { ruleCode }) })).outcome, 'APPROVED', ruleCode);
+  }
+});

@@ -1,3 +1,4 @@
+import type { HaltReasonCode } from './reasons.ts';
 /**
  * Правила продукта, общие для ядра, интерфейса и БД (БД дублирует их ограничениями и триггерами 0042).
  */
@@ -25,7 +26,7 @@ export interface StopRef {
 /** Системная остановка канала [Р-42, Р-51] */
 export interface HaltRef {
   haltId: string;
-  reasonCode: 'CHANNEL_MASS_SHIFT';
+  reasonCode: HaltReasonCode;
   marketplace: string | null;
   haltedAt: string;
 }

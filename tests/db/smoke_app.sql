@@ -397,6 +397,41 @@ SELECT pg_temp.expect_fail('dispatch of a competitor-derived write while halted 
 SELECT pg_temp.expect_fail('second active halt for the same storefront', $q$
   INSERT INTO channel_data.pricing_halt (tenant_id, channel_account_id, channel, marketplace, reason_code)
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'CHANNEL_MASS_SHIFT') $q$, 'pricing_halt_active_uq');
+-- Р-116 (0080): остановка витрины по неверной базе цены блокирует ЛЮБУЮ цену — фиксированная цена здесь одобрена и записана до неё,
+-- при действующей остановке по массовому сдвигу; без стражей 0080 одобрение и отправка прошли бы (competitor_derived = false)
+INSERT INTO channel_data.price_intent (tenant_id, price_intent_id, created_at, write_scope_id, pricing_strategy_id, pricing_strategy_version, trigger_type, proposed_amount_minor, currency, price_basis, expires_at, rule_code)
+VALUES (:tA, 'a7000000-0000-0000-0000-000000000023', '2026-09-14 10:34+00', 'a6000000-0000-0000-0000-000000000001', 'a9000000-0000-0000-0000-000000000001', 1, 'COMPETITOR_CHANGE', 1320, 'EUR', 'GROSS', '2026-09-14 11:00+00', 'FIXED'),
+       (:tA, 'a7000000-0000-0000-0000-000000000024', '2026-09-14 10:35+00', 'a6000000-0000-0000-0000-000000000001', 'a9000000-0000-0000-0000-000000000001', 1, 'COMPETITOR_CHANGE', 1330, 'EUR', 'GROSS', '2026-09-14 11:00+00', 'FIXED');
+INSERT INTO channel_data.price_decision (tenant_id, price_decision_id, intent_created_at, price_intent_id, write_scope_id, outcome, final_amount_minor, rejection_reason, currency, price_basis, effective_floor_minor, min_price_ids, effective_ceiling_minor, max_price_ids, reason_params, explanation, sanity_ruleset, gate_profile)
+VALUES (:tA, 'a8000000-0000-0000-0000-000000000023', '2026-09-14 10:34+00', 'a7000000-0000-0000-0000-000000000023', 'a6000000-0000-0000-0000-000000000001', 'APPROVED', 1320, NULL, 'EUR', 'GROSS', 1000, ARRAY[gen_random_uuid()], 5000, ARRAY[gen_random_uuid()], '{"smoke": true}', '{"format":"r80.1","sanity":{"anchorsUsed":[],"checks":[]},"strategy":{"reason":{"code":"FIXED_PRICE"}}}', 'r49.1', 'g74.1');
+INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, amount_minor, currency, price_basis, version, origin, price_decision_id)
+VALUES (:tA, 'a9000000-0000-0000-0000-000000000005', 'a6000000-0000-0000-0000-000000000001', 'PRICE', 1320, 'EUR', 'GROSS', 4, 'PRICE_DECISION', 'a8000000-0000-0000-0000-000000000023');
+SELECT pg_temp.ok('a halt for a wrong price basis coexists with a mass-shift halt of the storefront (Р-116)', $q$
+  INSERT INTO channel_data.pricing_halt (tenant_id, channel_account_id, channel, marketplace, reason_code, details)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'CHANNEL_PRICE_BASIS_MISMATCH', '{"basisError": "TAX_ADDED"}') $q$);
+SELECT pg_temp.expect_fail('fixed-price approval while the storefront is halted for a wrong price basis (Р-116)', $q$
+  INSERT INTO channel_data.price_decision (tenant_id, price_decision_id, intent_created_at, price_intent_id, write_scope_id, outcome, final_amount_minor, rejection_reason, currency, price_basis, effective_floor_minor, min_price_ids, effective_ceiling_minor, max_price_ids, reason_params, explanation, sanity_ruleset, gate_profile)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', gen_random_uuid(), '2026-09-14 10:35+00', 'a7000000-0000-0000-0000-000000000024', 'a6000000-0000-0000-0000-000000000001', 'APPROVED', 1330, NULL, 'EUR', 'GROSS', 1000, ARRAY[gen_random_uuid()], 5000, ARRAY[gen_random_uuid()], '{"smoke": true}', '{"format":"r80.1","sanity":{"anchorsUsed":[],"checks":[]},"strategy":{"reason":{"code":"FIXED_PRICE"}}}', 'r49.1', 'g74.1') $q$,
+  'halted for a wrong price basis by pricing_halt');
+SELECT pg_temp.expect_fail('dispatch of a fixed-price write while halted for a wrong price basis (Р-116)', $q$
+  UPDATE tenant_data.channel_write SET status = 'DISPATCHED', attempt_count = 1 WHERE channel_write_id = 'a9000000-0000-0000-0000-000000000005' $q$,
+  'halted for a wrong price basis by pricing_halt');
+SELECT pg_temp.expect_fail('second active halt for a wrong price basis on the same storefront (Р-116)', $q$
+  INSERT INTO channel_data.pricing_halt (tenant_id, channel_account_id, channel, marketplace, reason_code)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'CHANNEL_PRICE_BASIS_MISMATCH') $q$, 'pricing_halt_active_uq');
+-- Р-116: выборка конкурентов не снимает остановку по базе цены — её снимает только человек
+DO $$
+DECLARE
+  h uuid;
+  r text;
+BEGIN
+  SELECT pricing_halt_id INTO h FROM channel_data.pricing_halt WHERE reason_code = 'CHANNEL_PRICE_BASIS_MISMATCH' AND released_at IS NULL;
+  r := channel_data.review_halt_by_sample('a0000000-0000-0000-0000-00000000000a', h, now());
+  IF r IS DISTINCT FROM 'NOT_ACTIVE' THEN
+    RAISE EXCEPTION 'a sample review reaches a halt for a wrong price basis (Р-116)';
+  END IF;
+  RAISE NOTICE 'PASS accept | a sample review does not reach a halt for a wrong price basis (Р-116) | %', r;
+END $$;
 -- Р-107, находка 3 ревью шага 18: путь решения не создаёт «ручную цену владельца» — единица записи здесь в режиме ENGINE, и без стража
 -- intent был бы принят
 SELECT pg_temp.expect_fail('path creates a manual price intent of the owner (Р-107)', $q$

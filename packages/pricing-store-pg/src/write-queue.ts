@@ -1,11 +1,12 @@
 import type { FieldWrite, Instant, OfferIdentity, PriceBasis, WriteOutcome, WriteValue } from '@repracer/channel-port';
-import { floorCauseFromDatabase, sellerActionFor } from '@repracer/pricing-model';
+import { floorCauseFromDatabase, priceBasisMismatch, sellerActionFor } from '@repracer/pricing-model';
 import {
   planOutcomeTransition,
   planReconciliationTransition,
   type ClaimResult,
   type DueScope,
   type OutcomeTransition,
+  type PriceBasisHalt,
   type RecordedOutcome,
   type Reconciliation,
   type RetryPolicy,
@@ -235,6 +236,42 @@ export class PgWriteQueueStore implements WriteQueueStore {
          FROM maintenance.due_write_scopes($1::timestamptz, make_interval(secs => $2::float8 / 1000), make_interval(secs => $3::float8 / 1000), $4::int)`,
       [now, options.pendingMinAgeMs, options.inFlightTimeoutMs, options.limit]);
     return rows.map((r) => ({ tenantId: r.tenant_id, writeScopeId: r.write_scope_id, dueKind: r.due_kind, dueSince: iso(r.due_since) }));
+  }
+
+  async checkPriceBasis(tenantId: string, write: FieldWrite, observedMinor: number, now: Instant): Promise<PriceBasisHalt | null> {
+    if (write.value.field !== 'PRICE') return null;
+    const sentMinor = write.value.price.amountMinor;
+    const currency = write.value.price.currency;
+    return inTenant(this.pool, tenantId, async (tx) => {
+      // Ставка — та же, что у пола маржи: товара и страны витрины, только в режиме НДС [Р-53, Р-58]
+      const { rows: [sc] } = await tx.query(
+        `SELECT s.channel_account_id, s.channel, m.marketplace,
+                CASE WHEN s.tax_regime = 'VAT_INCLUDED' THEN tenant_data.effective_vat_rate_bp($1, s.product_id,
+                  (SELECT mk.country FROM platform.marketplace mk WHERE mk.channel = s.channel AND mk.marketplace = m.marketplace)) END AS vat_rate_bp
+           FROM tenant_data.write_scope s
+           JOIN tenant_data.offer_mapping m ON m.tenant_id = s.tenant_id AND m.price_write_scope_id = s.write_scope_id
+          WHERE s.tenant_id = $1 AND s.write_scope_id = $2
+          ORDER BY m.created_at LIMIT 1`, [tenantId, write.writeScope.writeScopeId]);
+      if (!sc) return null;
+      const vatRateBp = sc.vat_rate_bp === null ? null : Number(sc.vat_rate_bp);
+      const basisError = priceBasisMismatch(sentMinor, observedMinor, vatRateBp);
+      if (!basisError) return null;
+      const reason: WriteReason = {
+        code: 'CHANNEL_PRICE_BASIS_MISMATCH',
+        params: { basisError, vatRateBp: vatRateBp!, sentMinor, observedMinor, currency, writeScopeId: write.writeScope.writeScopeId, marketplace: sc.marketplace },
+      };
+      // Р-116: остановка витрины — все цены, снимает только человек (0080); повтор той же причины не создаёт вторую остановку
+      await tx.query(
+        `INSERT INTO channel_data.pricing_halt (tenant_id, channel_account_id, channel, marketplace, reason_code, details, halted_at)
+         VALUES ($1, $2, $3, $4, 'CHANNEL_PRICE_BASIS_MISMATCH', $5, $6)
+         ON CONFLICT (tenant_id, channel_account_id, (COALESCE(marketplace, '*')), reason_code) WHERE released_at IS NULL DO NOTHING`,
+        [tenantId, sc.channel_account_id, sc.channel, sc.marketplace, JSON.stringify(reason.params), now]);
+      const { rows: [h] } = await tx.query(
+        `SELECT pricing_halt_id FROM channel_data.pricing_halt
+          WHERE tenant_id = $1 AND channel_account_id = $2 AND marketplace = $3 AND reason_code = 'CHANNEL_PRICE_BASIS_MISMATCH' AND released_at IS NULL`,
+        [tenantId, sc.channel_account_id, sc.marketplace]);
+      return h ? { haltId: h.pricing_halt_id, reason } : null;
+    });
   }
 
   private async lockWrite(tx: Tx, tenantId: string, write: FieldWrite): Promise<Row | null> {

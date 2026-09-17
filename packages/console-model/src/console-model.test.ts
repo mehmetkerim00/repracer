@@ -59,3 +59,35 @@ test('unknown codes and optional parameters: problems only where the registry is
   const optional = describe({ code: 'SCOPE_NOT_ACTIVE', params: { status: 'HELD', mode: 'ENGINE', blockedByErrorCode: null, blockedSince: null, action: null } }, en);
   assert.deepEqual([optional.text, optional.problems], ['Held: the offer is held with pricing mode automatic.', []]);
 });
+
+test('Р-117: the report counts the floor holding a strategy, not Gate rejections; the amount is the distance from the kept price to the strategy target', async () => {
+  const { dangerousReport } = await import('./index.ts');
+  const scope = { writeScopeId: 'ws-1', productId: 'p-1', channelAccountId: 'acc-1', marketplace: 'de', externalUnitId: '4101', channelProductRef: '3621', condition: 'new', gtin: null, currency: 'EUR' };
+  const intent = (intentId: string, createdAt: string, reason: { code: string; params: Record<string, unknown> }, explanation: unknown[], currentMinor: number) => ({
+    intentId, writeScopeId: 'ws-1', createdAt, currency: 'EUR', currentMinor, reason, explanation,
+  });
+  const world = {
+    id: 'w', title: 'w', description: '', tenantId: 't', now: '2026-09-17T12:00:00.000Z', viewer: {},
+    accounts: [{ channelAccountId: 'acc-1', channel: 'KAUFLAND', marketplaces: ['de'] }],
+    state: {
+      scopes: [scope], decisions: [], strategies: [], explanationRulesets: [],
+      intents: [
+        // Поставлена на пол: цель 11.95, пол 15.00 — без пола на 3.05 дешевле
+        intent('i-1', '2026-09-17T10:00:00.000Z', { code: 'BUYBOX_UNDERCUT', params: {} }, [{ code: 'BUYBOX_UNDERCUT', params: {} }, { code: 'CAPPED_AT_MIN_PRICE', params: { targetMinor: 1195, minMinor: 1500, currency: 'EUR' } }], 1850),
+        // Оставлена без изменения на 18.50: цель 14.00 ниже пола 15.00 — без пола на 4.50 дешевле
+        intent('i-2', '2026-09-17T11:00:00.000Z', { code: 'TARGET_OUTSIDE_BOUNDS_HOLD', params: { targetMinor: 1400, minMinor: 1500, maxMinor: 2500, currency: 'EUR' } }, [], 1850),
+        // Удержание потолком — не работа пола
+        intent('i-3', '2026-09-17T11:30:00.000Z', { code: 'TARGET_OUTSIDE_BOUNDS_HOLD', params: { targetMinor: 2600, minMinor: 1500, maxMinor: 2500, currency: 'EUR' } }, [], 1850),
+        // Вне периода одного дня
+        intent('i-4', '2026-09-15T11:00:00.000Z', { code: 'BUYBOX_UNDERCUT', params: {} }, [{ code: 'CAPPED_AT_MIN_PRICE', params: { targetMinor: 1000, minMinor: 1500, currency: 'EUR' } }], 1850),
+      ],
+    },
+  } as never;
+  const en = messagesFor('en');
+  const day = dangerousReport(world, 1, en);
+  assert.equal(day.headline, 'The floor held the price 2 times in the last 1 day; without it you would have sold €7.55 cheaper');
+  assert.deepEqual(day.floorHolds.items.map((i) => [i.kind, i.target, i.floor, i.below]), [['HELD', '€14.00', '€15.00', '€4.50'], ['CAPPED', '€11.95', '€15.00', '€3.05']]);
+  assert.equal(day.gateHeadline, 'Your bounds stopped 0 dangerous changes in the last 1 day');
+  assert.equal(dangerousReport(world, 7, en).floorHolds.count, 3);
+  assert.equal(dangerousReport(world, 1, messagesFor('de')).headline, 'Die Untergrenze hat den Preis in den letzten 1 Tag 2-mal gehalten; ohne sie hätten Sie 7,55 € billiger verkauft');
+});

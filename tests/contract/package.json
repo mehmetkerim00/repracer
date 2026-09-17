@@ -5,6 +5,7 @@
   "description": "Contract test stand: channel adapters replayed against recorded/synthetic channel exchanges, no network. Base for the channel simulator.",
   "type": "module",
   "dependencies": {
+    "@repracer/amazon-adapter": "0.1.0",
     "@repracer/analytics-export": "0.1.0",
     "@repracer/channel-port": "0.1.0",
     "@repracer/input-sanity": "0.1.0",
@@ -18,9 +19,10 @@
     "@repracer/identity": "0.1.0"
   },
   "scripts": {
-    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec src/harness.test.ts src/kaufland.contract.test.ts src/simulator.test.ts src/simulator-amazon.test.ts src/backtest.test.ts src/kaufland.pipeline.pg.test.ts src/console.test.ts src/console-step21.test.ts src/console.pg.test.ts",
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec src/harness.test.ts src/kaufland.contract.test.ts src/amazon.contract.test.ts src/simulator.test.ts src/simulator-amazon.test.ts src/backtest.test.ts src/kaufland.pipeline.pg.test.ts src/amazon.pipeline.pg.test.ts src/console.test.ts src/console-step21.test.ts src/console.pg.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "bench:backtest": "node --experimental-strip-types --disable-warning=ExperimentalWarning bench/backtest-synthetic.ts"
+    "bench:backtest": "node --experimental-strip-types --disable-warning=ExperimentalWarning bench/backtest-synthetic.ts",
+    "fixtures:amazon": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/amazon-fixtures/write.ts"
   },
   "exports": {
     "./stand": "./src/console/stand.ts",

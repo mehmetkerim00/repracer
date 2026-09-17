@@ -33,6 +33,7 @@ const titles: Record<AnyReasonCode, string> = {
   MARGIN_WITHOUT_COST: 'Marge ohne Einstandskosten', STRATEGY_MISSING: 'Keine Strategie', WRITE_SUPERSEDED_BY_NEWER_VERSION: 'Durch neueren Preis ersetzt', WRITE_RETRIES_EXHAUSTED: 'Wiederholungen ausgeschöpft',
   WRITE_PRICING_MODE_CHANGED: 'Preismodus geändert', WRITE_EDIT_BUDGET_EXHAUSTED: 'Änderungsbudget aufgebraucht', WRITE_QUEUED_BEHIND_IN_FLIGHT: 'Wartet auf vorherige Übertragung',
   WRITE_RETRY_SCHEDULED: 'Wiederholung geplant', WRITE_OUTCOME_RECONCILED: 'Ergebnis abgeglichen', WRITE_SCOPE_BLOCKED: 'Angebot blockiert', WRITE_BUDGET_DAY_UNCONFIRMED: 'Tagesgrenze der Storefront unbestätigt',
+  CHANNEL_PRICE_BASIS_MISMATCH: 'Falsche Preisbasis — Storefront angehalten',
 };
 
 const deviation = (f: Fmt) => opt(f, 'deviationBp', () => ` um ${f.bp('deviationBp')}`);
@@ -146,6 +147,7 @@ const reasons: Record<AnyReasonCode, Template> = {
   WRITE_PRICING_MODE_CHANGED: (f) => `Nicht gesendet: der Preismodus wurde auf ${f.value('mode')} geändert.`,
   WRITE_EDIT_BUDGET_EXHAUSTED: (f) => `Nicht gesendet: das tägliche Änderungsbudget ist aufgebraucht${f.has('used') && f.has('limit') ? ` (${f.count('used')} von ${f.count('limit')})` : ''}${opt(f, 'budgetDay', () => ` für ${f.date('budgetDay')}`)}${opt(f, 'timeZone', () => ` (${f.raw('timeZone')})`)}${opt(f, 'resetsAt', () => `; es erneuert sich ${f.when('resetsAt')}`)}.`,
   WRITE_BUDGET_DAY_UNCONFIRMED: (f) => `Nicht gesendet: die Wiederholung braucht das Änderungsbudget des aktuellen Tages, aber die Tagesgrenze der Storefront ${f.raw('marketplace')} ist nicht bestätigt. Die Übertragung wurde beendet; eine neue Preisentscheidung ist möglich, sobald die Zeitzone der Storefront bestätigt ist.`,
+  CHANNEL_PRICE_BASIS_MISMATCH: (f) => `Alle Preise der Storefront ${f.raw('marketplace')} angehalten: gesendet ${f.money('sentMinor')}, Käufer sehen ${f.money('observedMinor')} — genau der Umsatzsteuersatz ${f.bp('vatRateBp')} ${f.value('basisError')}. Der Kanal verwendet eine andere Preisbasis als wir; jeder weitere Preis wäre um denselben Anteil falsch. Prüfen Sie die Preiseinstellungen des Kanalkontos und heben Sie den Halt manuell auf.`,
   WRITE_QUEUED_BEHIND_IN_FLIGHT: () => 'In der Warteschlange: der Kanal hat die vorherige Übertragung noch nicht beantwortet; diese wird als Nächstes gesendet.',
   WRITE_RETRY_SCHEDULED: (f) => `Vorübergehender Kanalfehler (${f.value('code')}); Versuch ${f.count('attempt')} nach ${f.when('at')}.`,
   WRITE_OUTCOME_RECONCILED: (f) => `Das Ergebnis war unbekannt; das Zurücklesen zeigt: der Preis wurde ${f.value('result')}.`,
@@ -175,6 +177,7 @@ const values: Record<ValueKey, string> = {
   OFFER_TOTAL_NOT_PRICE_PLUS_SHIPPING: 'Gesamtpreis ungleich Preis plus Versand', MORE_OFFERS_THAN_TOP_N: 'mehr Angebote als zugesagt', BUYBOX_NOT_RANK_ONE_PRICE: 'Buy Box ungleich Rang 1',
   INPUT: 'Eingangsprüfung', GATE: 'Price Gate', DISPATCH: 'Versand', DATABASE: 'Datenbank',
   CHANNEL_MASS_SHIFT: 'massenhafte Preisverschiebung', UP: 'nach oben', DOWN: 'nach unten',
+  CHANNEL_PRICE_BASIS_MISMATCH: 'falsche Preisbasis', TAX_ADDED: 'aufgeschlagen', TAX_REMOVED: 'abgezogen',
   COST: 'Einstandskosten', INTERNAL: 'andere Angebote im Snapshot', CROSS_CHANNEL: 'dieselbe EAN auf anderem Kanal', HISTORY: 'Preishistorie', LAST_ACCEPTED: 'der zuletzt angenommene Snapshot',
   KAUFLAND: 'Kaufland', AMAZON: 'Amazon', EBAY: 'eBay', OTTO: 'Otto', UNKNOWN_CHANNEL: 'unbekannter Kanal',
   FX_RATE_UNAVAILABLE: 'kein EZB-Kurs', FX_RATE_STALE: 'der EZB-Kurs ist veraltet', UNSUPPORTED_CURRENCY: 'die Währung wird nicht unterstützt', INVALID_INPUT: 'die Kostendaten sind ungültig',
@@ -198,6 +201,8 @@ const values: Record<ValueKey, string> = {
   OUTCOME_UNRESOLVED: 'Ergebnis der Schreibung nicht rücklesbar', RATE_LIMITED: 'Ratenlimit des Kanals', CHANNEL_UNAVAILABLE: 'Kanal nicht erreichbar', TIMEOUT: 'Zeitüberschreitung des Kanals', NETWORK: 'Netzwerkfehler',
   AUTH_INVALID: 'ungültige Zugangsdaten', AUTH_EXPIRED: 'abgelaufene Zugangsdaten', ACCOUNT_INACTIVE: 'inaktives Kanalkonto', FORBIDDEN: 'vom Kanal verboten',
   VALIDATION: 'Wert vom Kanal abgelehnt', NOT_FOUND: 'Angebot im Kanal nicht gefunden', DUPLICATE_ACTION: 'doppelte Aktion', STALE_VERSION: 'veraltete Version',
+  CHANNEL_REPRICER_ACTIVE: 'die automatische Preisgestaltung des Kanals ist für dieses Angebot aktiv', CHANNEL_BOUNDS_PRESENT: 'für das Angebot sind im Kanal Preisgrenzen gesetzt',
+  DISABLE_CHANNEL_REPRICER: 'Die Regel für automatische Preisgestaltung im Kanal vom Angebot entfernen (unsere Engine arbeitet nicht, solange sie gesetzt ist)', REMOVE_CHANNEL_BOUNDS: 'Den im Kanal gesetzten Mindest- und Höchstpreis entfernen: unsere Grenzen müssen die einzigen sein',
   ACTION_NOT_ALLOWED: 'Aktion vom Kanal nicht erlaubt', PRECONDITION_FAILED: 'Vorbedingung des Kanals nicht erfüllt', EDIT_BUDGET_EXHAUSTED: 'Änderungsbudget aufgebraucht',
   OFFER_NOT_LIVE: 'Angebot nicht online', POLICY_VIOLATION: 'Verstoß gegen Kanalrichtlinie', TENANT_MISMATCH: 'Konto gehört zu anderem Mandanten', SIGNATURE_INVALID: 'ungültige Signatur',
   UNSUPPORTED: 'vom Kanal nicht unterstützt', UNKNOWN: 'unbekannter Fehler', MAX_ATTEMPTS: 'maximale Versuche', NOT_APPLIED: 'nicht übernommen',
@@ -242,10 +247,11 @@ const gaps: Record<GapCode, { what: string; why: string }> = {
   PREVIEW_LAST_SNAPSHOT: { what: 'Marktverlauf in der Vorschau', why: 'Die Vorschau nutzt den letzten angenommenen Wettbewerber-Snapshot jedes Produkts und rechnet zu dessen Zeitpunkt; frühere Snapshots sind Kanaldaten im Analysespeicher und werden hier nicht gelesen. Wie sich der Entwurf über die Zeit verhalten hätte, zeigt der Backtest.' },
   PREVIEW_CURRENT_BOUNDS: { what: 'Grenzen und Kosten zum Zeitpunkt des Snapshots', why: 'Grenzen, Kosten, Stopps und Anhaltungen in der Vorschau sind die aktuellen, nicht die zum Zeitpunkt des Snapshots.' },
   BOUND_LEVELS: { what: 'Ebenen der Grenzen', why: 'Die Konsole zeigt nur die wirksamen Grenzen. Eine Änderung schreibt die Angebotsebene; die Produktebene kann die wirksame Grenze unverändert lassen — deshalb zeigt der Vergleich das von der Datenbank berechnete Ergebnis.' },
-  MASS_EDIT_MFA_NOT_IN_DATABASE: { what: 'Zweiter Faktor für Massenänderungen in der Datenbank', why: 'Р-88: die Änderung von mehr als einem Angebot erfordert einen zweiten Faktor. Konsole und Speicher prüfen das; die Datenbank erzwingt es noch nicht (akzeptiertes Risiko).' },
+  MASS_EDIT_MFA_PER_TRANSACTION: { what: 'Zweiter Faktor für Massenänderungen: innerhalb einer Transaktion', why: 'Р-88: das Anwenden einer Änderung von mehr als einem Angebot erfordert einen zweiten Faktor. Konsole, Speicher und Datenbank (0078) prüfen das; die Datenbank sieht eine Transaktion, dieselbe Änderung, vom Verwaltungsdienst auf getrennte Transaktionen verteilt, wird nicht erkannt (akzeptiertes Risiko 17).' },
   FEED_WINDOW: { what: 'Ältere Preisänderungen', why: 'Der Verlauf entsteht aus Kanal-Schreibvorgängen und Entscheidungen: abgeschlossene Schreibvorgänge bleiben in PostgreSQL bis zum Export (mindestens einen Tag), Entscheidungen 30 Tage (Р-28).' },
   PRICE_HISTORY_NOT_READ: { what: 'Preisverlauf des Kanals', why: 'Angewendete Preise werden 90 Tage und täglich dauerhaft für Omnibus gespeichert (Р-21), die Konsole liest sie aber noch nicht.' },
   DANGEROUS_REPORT_WINDOW: { what: 'Gefährliche Änderungen älter als 30 Tage', why: 'Entscheidungen bleiben 30 Tage in PostgreSQL (Р-28); die Analysekopie enthält keine Abweichung von der Grenze, ein längerer Bericht wäre unvollständig, nicht null.' },
+  FLOOR_HOLD_TARGET_WINDOW: { what: 'Wie viel billiger, älter als 3 Tage', why: 'Р-117, Р-85: das Ziel der Strategie stammt aus einem Wettbewerberpreis und wird nur 3 Tage im aktuellen Intent gespeichert. Ein älteres Halten durch die Untergrenze wird gezählt, sein Betrag ist unbekannt — nicht null.' },
   DANGEROUS_THRESHOLD: { what: 'Warum „gefährlich“', why: 'Р-73: eine vom Price Gate abgelehnte Änderung, die mehr als 10 % jenseits der verletzten Grenze liegt. Kleinere Ablehnungen gelten als „korrigiert“.' },
 };
 
@@ -336,6 +342,7 @@ export const de: Messages = {
       badRequest: 'Die Anfrage ist ungültig.',
       planChanged: 'Die Daten haben sich seit der Anzeige der Unterschiede geändert. Bitte die Unterschiede erneut prüfen.',
       previewChanged: 'Die Vorschau hat sich seit der Anzeige geändert. Bitte vor dem Speichern erneut ausführen.',
+      strategyUnavailable: 'Diese Strategie kann nicht zugewiesen werden: der Kanal liefert die benötigten Wettbewerbsdaten nicht (Р-39).',
       mfaRequiredBounds: 'Das Ändern der Grenzen von mehr als einem Angebot erfordert eine Anmeldung mit zweitem Faktor (Р-88).',
       boundsConflict: 'Die Grenzen eines Angebots wurden inzwischen geändert. Bitte die Unterschiede erneut prüfen.',
     },
@@ -527,7 +534,13 @@ export const de: Messages = {
       sourceManual: 'Manueller Preis', sourceUnknown: 'unbekannte Entscheidung', sourceRule: (code: string) => `Regel ${code}`,
     },
     dangerous: {
-      pageTitle: 'Gestoppte gefährliche Änderungen',
+      pageTitle: 'Was Ihre Grenzen verhindert haben',
+      floorHeadline: (n: number, days: number, amounts: string[], unknown: number) => n === 0
+        ? `Die Untergrenze musste in den letzten ${days} ${days === 1 ? 'Tag' : 'Tagen'} keinen Preis halten`
+        : `Die Untergrenze hat den Preis in den letzten ${days} ${days === 1 ? 'Tag' : 'Tagen'} ${n}-mal gehalten${amounts.length ? `; ohne sie hätten Sie ${amounts.join(' + ')} billiger verkauft` : ''}${unknown ? ` (Betrag bei ${unknown} unbekannt)` : ''}`,
+      floorTitle: 'Gehalten durch die Untergrenze', floorKinds: { CAPPED: 'auf die Untergrenze gesetzt', HELD: 'unverändert gelassen' },
+      floorColumns: { when: 'Wann', offer: 'Angebot', kind: 'Wie gehalten', target: 'Strategie wollte', floor: 'Untergrenze', below: 'Billiger um', reason: 'Grund' },
+      gateTitle: 'Vom Price Gate abgelehnt (normalerweise keine)',
       headline: (n: number, days: number) => `Ihre Grenzen haben in den letzten ${days} ${days === 1 ? 'Tag' : 'Tagen'} ${n} gefährliche ${n === 1 ? 'Änderung' : 'Änderungen'} gestoppt`,
       period: (days: number) => `${days} ${days === 1 ? 'Tag' : 'Tage'}`,
       prevented: 'Abstand zur Grenze, insgesamt', worst: 'Am weitesten jenseits einer Grenze', byUnit: 'Nach Angebot', byBound: 'Nach Grenze', none: 'Keine in diesem Zeitraum.',

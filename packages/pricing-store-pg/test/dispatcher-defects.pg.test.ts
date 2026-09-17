@@ -55,6 +55,7 @@ function harness(w: SeededPricingWorld, clock: () => string) {
   } as unknown as ChannelAdapter;
   const dispatcher = createWriteDispatcher({
     store: { claimNext: queue.claimNext.bind(queue), recordOutcome: queue.recordOutcome.bind(queue), recordReconciliation: queue.recordReconciliation.bind(queue),
+      checkPriceBasis: queue.checkPriceBasis.bind(queue),
       dueScopes: async (at, o) => (await queue.dueScopes(at, o)).filter((d) => d.tenantId === w.tenantId) },
     adapterFor: () => adapter, alerts: { raise: async (a) => { alerts.push(a); } }, now: clock,
   });

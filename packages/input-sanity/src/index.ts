@@ -1,5 +1,5 @@
 import type { CompetitorSnapshot, Instant, Money, PriceBasis } from '@repracer/channel-port';
-import { SANITY_RULES as RULESET_RULES, type SanityRuleset } from '@repracer/pricing-model';
+import { SANITY_RULES as RULESET_RULES, type HaltReasonCode, type SanityRuleset } from '@repracer/pricing-model';
 import {
   markAcceptedBySanity,
   SANITY_ALARM_CLASS,
@@ -159,7 +159,7 @@ export interface SanityContext {
   ourKnownPricesMinor: number[];
   channel: {
     /** Действующая системная остановка витрины [Р-51] */
-    halt: { haltId: string; haltedAt: Instant; reasonCode: 'CHANNEL_MASS_SHIFT'; marketplace: string | null } | null;
+    halt: { haltId: string; haltedAt: Instant; reasonCode: HaltReasonCode; marketplace: string | null } | null;
     /** Оценённые движения других товаров того же тенанта, аккаунта и витрины */
     recentMoves: Array<{ productRef: string; evaluatedAt: Instant; moveBp: number; sellerRef: string | null }>;
     /**

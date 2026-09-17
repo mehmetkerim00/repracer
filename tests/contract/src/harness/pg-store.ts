@@ -22,6 +22,7 @@ export function pgStoreFactory(
     const seeded = await seedPricingWorld(pool, {
       fixtureTenantId: world.tenantId,
       fixtureChannelAccountId: world.channelAccountId,
+      ...(world.account.channel === 'AMAZON' ? { fixtureChannel: 'AMAZON' as const, fixtureRegion: world.account.region ?? null } : {}),
       marketplaces: world.account.marketplaces,
       clock: world.clock,
       seed,
@@ -49,6 +50,7 @@ export function pgStoreFactory(
       claimNext: writeQueue.claimNext.bind(writeQueue),
       recordOutcome: writeQueue.recordOutcome.bind(writeQueue),
       recordReconciliation: writeQueue.recordReconciliation.bind(writeQueue),
+      checkPriceBasis: writeQueue.checkPriceBasis.bind(writeQueue),
       dueScopes: async (at, options) => (await writeQueue.dueScopes(at, options)).filter((d) => d.tenantId === seeded.tenantId),
     }, seeded.ids);
     const order = seed.scopes.map((s) => s.writeScopeId);

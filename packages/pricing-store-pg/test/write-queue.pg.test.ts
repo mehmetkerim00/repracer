@@ -168,6 +168,7 @@ export async function runQueueWorkload(options: {
       claimNext: queue.claimNext.bind(queue),
       recordOutcome: queue.recordOutcome.bind(queue),
       recordReconciliation: queue.recordReconciliation.bind(queue),
+      checkPriceBasis: queue.checkPriceBasis.bind(queue),
       dueScopes: async (at, o) => (await queue.dueScopes(at, o)).filter((d) => d.tenantId === tenantId),
     },
     adapterFor: () => recordingAdapter(channel, dispatcherCounter),

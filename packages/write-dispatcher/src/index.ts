@@ -9,6 +9,7 @@ export {
   type SweepOptions,
   type WriteDispatcher,
   type WriteDispatcherDeps,
+  type PriceBasisHalt,
   type WriteQueueStore,
 } from './dispatcher.ts';
 export {

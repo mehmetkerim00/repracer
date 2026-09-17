@@ -77,13 +77,13 @@ export function kauflandAuthChecker(world: World, clock: VirtualClock): (request
     const ts = Math.floor(clock.nowMs() / 1000);
     if (h['shop-client-key'] !== seller.clientKey) v.push(`${where}: Shop-Client-Key is not the seller key`);
     if (h['shop-timestamp'] !== String(ts)) v.push(`${where}: Shop-Timestamp ${h['shop-timestamp']} != virtual clock ${ts}`);
-    const expectSeller = signKauflandRequest({ method: request.method, uri: request.rawUrl, body: request.rawBody, timestamp: ts, secretKey: seller.secretKey });
+    const expectSeller = signKauflandRequest({ method: request.method, uri: request.rawUrl, body: request.rawBody, timestamp: ts, secretKey: seller.secretKey ?? "" });
     if (h['shop-signature'] !== expectSeller) v.push(`${where}: Shop-Signature does not verify with the seller secret`);
     if (!h['user-agent']) v.push(`${where}: User-Agent header is missing`);
     const partner = world.credentials.partner;
     if (world.partner && partner) {
       if (h['shop-partner-client-key'] !== partner.clientKey) v.push(`${where}: Shop-Partner-Client-Key is not the partner key`);
-      const expectPartner = signKauflandRequest({ method: request.method, uri: request.rawUrl, body: request.rawBody, timestamp: ts, secretKey: partner.secretKey });
+      const expectPartner = signKauflandRequest({ method: request.method, uri: request.rawUrl, body: request.rawBody, timestamp: ts, secretKey: partner.secretKey ?? "" });
       if (h['shop-partner-signature'] !== expectPartner) v.push(`${where}: Shop-Partner-Signature does not verify with the partner secret`);
     } else if (h['shop-partner-client-key'] || h['shop-partner-signature']) {
       v.push(`${where}: partner headers sent without partner configuration`);
@@ -92,6 +92,42 @@ export function kauflandAuthChecker(world: World, clock: VirtualClock): (request
       if (secret && (request.rawUrl.includes(secret) || request.rawBody.includes(secret) || Object.values(h).includes(secret))) {
         v.push(`${where}: secret key leaked into the request`);
       }
+    }
+    return v;
+  };
+}
+
+/**
+ * Проверка запросов Amazon на каждом обмене: токен LWA — только в заголовке x-amz-access-token и только выданный обменом сценария;
+ * x-amz-date — время виртуальных часов; user-agent обязателен; ключи приложения и refresh token — только в теле запроса токена LWA;
+ * атрибуты, которые не пишутся никогда (Р-114), не появляются ни в одном теле запроса.
+ */
+export function amazonRequestChecker(world: World, clock: VirtualClock, forbiddenAttributes: readonly string[]): (request: ObservedRequest) => string[] {
+  return (request) => {
+    const v: string[] = [];
+    const where = `${request.method} ${request.path}`;
+    const secrets = [world.credentials.seller.refreshToken, world.credentials.application?.clientSecret].filter((x): x is string => Boolean(x));
+    if (request.path === '/auth/o2/token') {
+      const form = new URLSearchParams(request.rawBody);
+      if (request.method !== 'POST') v.push(`${where}: LWA token request must be POST`);
+      if (form.get('grant_type') !== 'refresh_token') v.push(`${where}: grant_type must be refresh_token`);
+      if (form.get('refresh_token') !== world.credentials.seller.refreshToken) v.push(`${where}: refresh_token is not the seller refresh token`);
+      if (form.get('client_id') !== world.credentials.application?.clientId || form.get('client_secret') !== world.credentials.application?.clientSecret) {
+        v.push(`${where}: client credentials are not the application keys`);
+      }
+      for (const s of secrets) if (request.rawUrl.includes(s)) v.push(`${where}: secret in the URL`);
+      return v;
+    }
+    const h = request.headers;
+    if (h['x-amz-access-token'] !== world.credentials.accessToken) v.push(`${where}: x-amz-access-token is not the token issued by LWA`);
+    const expectedDate = new Date(clock.nowMs()).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+    if (h['x-amz-date'] !== expectedDate) v.push(`${where}: x-amz-date ${h['x-amz-date']} != virtual clock ${expectedDate}`);
+    if (!h['user-agent']) v.push(`${where}: user-agent header is missing`);
+    for (const s of secrets) {
+      if (request.rawUrl.includes(s) || request.rawBody.includes(s) || Object.values(h).includes(s)) v.push(`${where}: secret leaked into the request`);
+    }
+    for (const attribute of forbiddenAttributes) {
+      if (request.rawBody.includes(`"${attribute}"`)) v.push(`${where}: body writes ${attribute}, which is never written (Р-114)`);
     }
     return v;
   };

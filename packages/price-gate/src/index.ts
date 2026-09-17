@@ -180,8 +180,9 @@ export function decide(input: GateInput): PriceDecisionDraft {
   if (scope.status !== 'ACTIVE') return fail('SCOPE', 'SCOPE_NOT_ACTIVE', inactive(), 'HELD');
   ok('SCOPE');
 
-  // 2. Системная остановка канала блокирует только цены, выведенные из данных конкурентов [Р-42, Р-51]
-  if (scope.channelHalt && isCompetitorDerived(intent.ruleCode)) {
+  // 2. Системная остановка канала блокирует только цены, выведенные из данных конкурентов [Р-42, Р-51]; остановка по неверной базе
+  // цены [Р-116] — любую цену: канал применяет каждую нашу сумму с той же ошибкой, фиксированную и маржинальную тоже
+  if (scope.channelHalt && (isCompetitorDerived(intent.ruleCode) || scope.channelHalt.reasonCode === 'CHANNEL_PRICE_BASIS_MISMATCH')) {
     const h = scope.channelHalt;
     return fail('CHANNEL_HALT', 'CHANNEL_HALTED', { stage: 'GATE', haltId: h.haltId, haltedAt: h.haltedAt, haltReason: h.reasonCode, marketplace: h.marketplace, ruleCode: intent.ruleCode });
   }

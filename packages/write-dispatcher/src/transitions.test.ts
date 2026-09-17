@@ -56,3 +56,13 @@ test('D1: an outcome that stays unknown past the limit stops the reconciliation 
   // Известный итог после предела остаётся обычным: применено — принято
   assert.equal(planReconciliationTransition('DISPATCHED', { kind: 'APPLIED' }, 1, since, NOW, DEFAULT_RETRY_POLICY).to, 'ACCEPTED');
 });
+
+test('Р-115: a read-back refusal that requires a person blocks the write scope at once with the channel code, the accepted write stays accepted', async () => {
+  const { planReconciliationTransition, DEFAULT_RETRY_POLICY } = await import('./transitions.ts');
+  const now = '2026-09-14T10:05:00.000Z';
+  const error = { class: 'REQUIRES_HUMAN' as const, code: 'CHANNEL_REPRICER_ACTIVE' as const, scope: 'ITEM' as const, message: 'rule', raiseAlert: true };
+  assert.deepEqual(planReconciliationTransition('ACCEPTED', { kind: 'UNKNOWN', error }, 1, '2026-09-14T10:04:59.000Z', now, DEFAULT_RETRY_POLICY),
+    { to: 'UNRESOLVED', errorCode: 'CHANNEL_REPRICER_ACTIVE', reason: { code: 'WRITE_SCOPE_BLOCKED', params: { code: 'CHANNEL_REPRICER_ACTIVE', action: 'DISABLE_CHANNEL_REPRICER' } } });
+  const transient = { ...error, class: 'TRANSIENT' as const, code: 'CHANNEL_UNAVAILABLE' as const };
+  assert.equal(planReconciliationTransition('ACCEPTED', { kind: 'UNKNOWN', error: transient }, 1, '2026-09-14T10:04:59.000Z', now, DEFAULT_RETRY_POLICY).to, 'RECONCILE');
+});

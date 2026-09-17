@@ -75,12 +75,16 @@ export function competitorSnapshotRow(
   // Валюта строки не подставляется по умолчанию (у столбца DEFAULT 'EUR', 050): пустой снимок без валюты не пишется [Р-71]
   if (!currency || !basis) throw new Error('competitor snapshot without prices has no currency: not written');
   const o = snapshot.offers;
+  // Находка 2 ревью шага 21: доставка Buy Box — у предложения-победителя (первый ранг или та же цена и сторона); снимок её отдельно не несёт
+  const winner = snapshot.buybox
+    ? o.find((x) => x.rank === 1 && x.isSelf === snapshot.buybox!.isSelf) ?? o.find((x) => x.isSelf === snapshot.buybox!.isSelf && x.price.amountMinor === snapshot.buybox!.price.amountMinor)
+    : undefined;
   return {
     tenant_id: tenantId, competitor_snapshot_id: snapshotId, received_at: receivedAt, observed_at: snapshot.observedAt,
     channel_account_id: channelAccountId, channel, marketplace: snapshot.marketplace, channel_product_ref: snapshot.channelProductRef,
     condition: snapshot.condition, currency, price_basis: basis, source: snapshot.source, source_event_id: snapshot.sourceEventId ?? null,
     completeness: snapshot.completeness.kind, completeness_n: snapshot.completeness.kind === 'TOP_N' ? snapshot.completeness.n : null,
-    buybox_amount_minor: snapshot.buybox?.price.amountMinor ?? null, buybox_shipping_minor: null, buybox_is_self: snapshot.buybox?.isSelf ?? null,
+    buybox_amount_minor: snapshot.buybox?.price.amountMinor ?? null, buybox_shipping_minor: winner?.shipping?.amountMinor ?? null, buybox_is_self: snapshot.buybox?.isSelf ?? null,
     channel_suggested_amount_minor: snapshot.channelSuggestedPrice?.amountMinor ?? null,
     'offers.seller_ref': o.map((x) => x.sellerRef ?? ''), 'offers.amount_minor': o.map((x) => x.price.amountMinor),
     'offers.shipping_minor': o.map((x) => x.shipping?.amountMinor ?? 0), 'offers.condition': o.map((x) => x.condition ?? snapshot.condition),

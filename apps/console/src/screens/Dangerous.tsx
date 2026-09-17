@@ -4,7 +4,7 @@ import { Badge, Gaps, href, Load, ReasonLine, useMessages } from '../components.
 
 const PERIODS = [1, 7, 30] as const;
 
-/** Отчёт «границы остановили N опасных изменений» [Р-73] за период */
+/** Отчёт о работе границ за период: удержания полом [Р-117] и отклонения Gate больше 10 % [Р-73] */
 export function DangerousScreenView({ view }: { view: DangerousReportView }) {
   const m = useMessages();
   const d = m.ui.dangerous;
@@ -18,6 +18,30 @@ export function DangerousScreenView({ view }: { view: DangerousReportView }) {
       <p className="headline">{view.headline}</p>
       <p className="muted small">{view.from} – {view.to}</p>
       {view.truncated ? <p className="notice">{d.truncated}</p> : null}
+      <h3>{d.floorTitle}</h3>
+      {view.floorHolds.count === 0 ? <p className="muted">{d.none}</p> : (
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>{d.floorColumns.when}</th><th>{d.floorColumns.offer}</th><th>{d.floorColumns.kind}</th><th>{d.floorColumns.target}</th><th>{d.floorColumns.floor}</th><th>{d.floorColumns.below}</th><th>{d.floorColumns.reason}</th><th /></tr></thead>
+            <tbody>
+              {view.floorHolds.items.map((i, n) => (
+                <tr key={`${i.decisionId ?? 'hold'}-${n}`}>
+                  <td className="nowrap">{i.at}</td>
+                  <td>{i.unit?.label ?? m.ui.common.noValue}</td>
+                  <td>{d.floorKinds[i.kind]}</td>
+                  <td className="num">{i.target ?? m.ui.common.noValue}</td>
+                  <td className="num">{i.floor}</td>
+                  <td className="num">{i.below ?? m.ui.common.noValue}</td>
+                  <td><ReasonLine reason={i.reason} /></td>
+                  <td>{i.decisionId ? <a href={href(view.worldId, 'decisions', i.decisionId)}>{m.ui.rejected.path}</a> : null}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <h3>{d.gateTitle}</h3>
+      <p className="muted">{view.gateHeadline}</p>
       {view.count === 0 ? <p className="muted">{d.none}</p> : (
         <>
           <div className="cards">

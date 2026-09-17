@@ -136,6 +136,6 @@ export function boundsDiffView(world: StandWorld, edits: readonly BoundsEditInpu
   };
   return {
     worldId: world.id, headline: t.headline(summary), rows: out, summary, mfaRequired: out.length > 1,
-    planToken: boundsPlanToken(edits, rows), gaps: [gap(m, 'BOUND_LEVELS'), gap(m, 'MASS_EDIT_MFA_NOT_IN_DATABASE')],
+    planToken: boundsPlanToken(edits, rows), gaps: [gap(m, 'BOUND_LEVELS'), gap(m, 'MASS_EDIT_MFA_PER_TRANSACTION')],
   };
 }

@@ -1,0 +1,18 @@
+{
+  "name": "@repracer/amazon-client",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Thin Amazon Selling Partner API transport: LWA access token, required headers, timeout, retries for idempotent reads. Types hand-written from the model snapshot (Swagger 2.0 is not supported by openapi-typescript). No domain logic.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "amazonSpec": {
+    "path": "vendor/amazon/sp-api-models/2026-09-16/models/listings-items-api-model/listingsItems_2021-08-01.json",
+    "snapshot": "vendor/amazon/sp-api-models/2026-09-16/SHA256SUMS"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test test/*.test.ts"
+  }
+}

@@ -3,7 +3,8 @@ import { signKauflandRequest } from '@repracer/kaufland-client';
 import { createPricingPipeline, InMemoryPricingStore, standUserOf, type MemorySeed, type PricingPipeline, type PricingStore, type SeedBound, type SnapshotReport } from '@repracer/pricing-pipeline';
 import type { CostInputs } from '@repracer/pricing-model';
 import { createWriteDispatcher, type WriteDispatcher, type WriteQueueStore } from '@repracer/write-dispatcher';
-import { channelFetch, kauflandAuthChecker, ScriptedChannel, type ChannelBehaviour, type TraceEntry } from './channel.ts';
+import { amazonRequestChecker, channelFetch, kauflandAuthChecker, ScriptedChannel, type ChannelBehaviour, type TraceEntry } from './channel.ts';
+import { neverWrittenAttributes } from '@repracer/channel-port';
 import { match } from './matchers.ts';
 import { SimulatedKauflandChannel } from '../simulator/kaufland-channel.ts';
 import type { CallStep, InboundDeliverySpec, PipelineStep, Scenario, StepContext, World } from './scenario.ts';
@@ -89,7 +90,7 @@ function buildDelivery(d: InboundDeliverySpec, scenario: Scenario, clock: Virtua
     headers[name] = String(resolvePlaceholders(raw, clock));
   }
   if (signWith !== undefined) {
-    const secretKey = signWith === 'seller' ? world.credentials.seller.secretKey
+    const secretKey = signWith === 'seller' ? world.credentials.seller.secretKey ?? ''
       : signWith === 'partner' ? world.credentials.partner?.secretKey ?? ''
       : String((signWith as { secretKey?: string }).secretKey ?? '');
     const tsHeader = Object.entries(headers).find(([k]) => k.toLowerCase() === 'shop-timestamp')?.[1] ?? '0';
@@ -238,7 +239,8 @@ export async function runScenario(
   const channel = behaviour
     ?? (world.channelModel ? new SimulatedKauflandChannel(world.channelModel, world.clock) : new ScriptedChannel(scenario.exchanges, scenario.expect?.allExchangesUsed ?? true));
   const simulator = channel instanceof SimulatedKauflandChannel ? channel : null;
-  const fetch = channelFetch(channel, kauflandAuthChecker(world, clock), clock, violations, trace);
+  const checker = scenario.channel === 'AMAZON' ? amazonRequestChecker(world, clock, neverWrittenAttributes('AMAZON')) : kauflandAuthChecker(world, clock);
+  const fetch = channelFetch(channel, checker, clock, violations, trace);
   const deps = worldDependencies(world, clock, sink);
   const adapter = adapterUnderTest({ deps, world, clock, fetch });
   const failures: string[] = [];
@@ -360,7 +362,7 @@ export async function runScenario(
   // Секреты и синтетические PII не должны утечь
   const everywhere = { results, logs: sink.logs, alerts: sink.alerts, pipeline: pipelineState };
   const observability = { logs: sink.logs, alerts: sink.alerts };
-  const creds = [world.credentials.seller.secretKey, world.credentials.seller.clientKey, world.credentials.partner?.secretKey, world.credentials.partner?.clientKey];
+  const creds = [...Object.values(world.credentials.seller), ...Object.values(world.credentials.partner ?? {}), ...Object.values(world.credentials.application ?? {}), world.credentials.accessToken];
   for (const secret of creds) if (secret && jsonIncludes(everywhere, secret)) failures.push('leak: channel credentials appear in results, logs or alerts');
   for (const pii of world.pii ?? []) if (jsonIncludes(everywhere, pii)) failures.push(`leak: PII sentinel "${pii}" appears in results, logs or alerts`);
   for (const secret of world.secrets ?? []) if (jsonIncludes(observability, secret)) failures.push(`leak: secret sentinel "${secret}" appears in logs or alerts`);

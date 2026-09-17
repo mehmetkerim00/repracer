@@ -87,10 +87,12 @@ test('step 21: the price feed shows the write with the price it started from and
 
   const above = await live('kaufland/pipeline/above-max-price').view(user('VIEWER'));
   const report = dangerousReport(above, 30, en);
-  assert.equal(report.headline, 'Your bounds stopped 1 dangerous change in the last 30 days');
+  // Р-117 (шаг 22): главное число — удержания полом; отклонения Gate — второй раздел
+  assert.equal(report.headline, 'The floor did not have to hold a price in the last 30 days');
+  assert.equal(report.gateHeadline, 'Your bounds stopped 1 dangerous change in the last 30 days');
   assert.deepEqual(report.prevented, [{ currency: 'EUR', minor: 1330, amount: '€13.30' }]);
   assert.equal(report.worst?.deviation, '53.2%');
   assert.equal(report.truncated, false);
   assert.equal(dangerousReport(above, 90, en).truncated, true);
-  assert.equal(dangerousReport(above, 30, messagesFor('de')).headline, 'Ihre Grenzen haben in den letzten 30 Tagen 1 gefährliche Änderung gestoppt');
+  assert.equal(dangerousReport(above, 30, messagesFor('de')).gateHeadline, 'Ihre Grenzen haben in den letzten 30 Tagen 1 gefährliche Änderung gestoppt');
 });

@@ -70,3 +70,4 @@ export {
 export function reason<C extends string>(code: C, params: Readonly<Record<string, string | number | boolean | null>> = {}) {
   return { code, params };
 }
+export { BASIS_MISMATCH_TOLERANCE_MINOR, priceBasisMismatch, type BasisMismatchDirection } from './price-basis.ts';

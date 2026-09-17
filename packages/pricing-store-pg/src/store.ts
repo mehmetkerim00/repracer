@@ -115,6 +115,8 @@ const HALT_WHERE = `
     FROM channel_data.pricing_halt h
    WHERE h.tenant_id = $1 AND h.channel_account_id = sc.channel_account_id AND h.released_at IS NULL
      AND (h.marketplace IS NULL OR h.marketplace = sc.marketplace)
+   -- Р-116: остановка по базе цены блокирует все цены — при двух действующих остановках решение видит её первой
+   ORDER BY (h.reason_code = 'CHANNEL_PRICE_BASIS_MISMATCH') DESC, h.halted_at
    LIMIT 1`;
 const ACTIVE_HALT = `SELECT h.pricing_halt_id ${HALT_WHERE}`;
 const ACTIVE_HALT_JSON = `SELECT json_build_object('haltId', h.pricing_halt_id, 'reasonCode', h.reason_code, 'marketplace', h.marketplace, 'haltedAt', h.halted_at) ${HALT_WHERE}`;
@@ -157,7 +159,7 @@ const SCOPE_JSON = `json_build_object(
   'blocking', (SELECT json_build_object('errorCode', w.last_error_code, 'since', coalesce(w.dispatched_at, w.created_at))
                  FROM tenant_data.channel_write w
                 WHERE w.tenant_id = $1 AND w.write_scope_id = sc.write_scope_id AND w.field = 'PRICE' AND sc.status <> 'ACTIVE'
-                  AND w.status IN ('FAILED', 'BLOCKED') AND w.next_attempt_at IS NULL AND w.last_error_code IS NOT NULL
+                  AND w.status IN ('FAILED', 'BLOCKED', 'ACCEPTED') AND w.next_attempt_at IS NULL AND w.last_error_code IS NOT NULL
                 ORDER BY w.version DESC LIMIT 1),
   'cost', (SELECT json_build_object(
               'costProfileId', cp.cost_profile_id, 'currency', cp.currency,
@@ -690,7 +692,7 @@ export class PgPricingStore implements PricingStore {
     await tx.query(
       `INSERT INTO channel_data.pricing_halt (tenant_id, channel_account_id, channel, marketplace, reason_code, rejected_snapshot_id, details, halted_at)
        SELECT $1, $2, a.channel, $3, $4, $5, $6, $7 FROM tenant_data.channel_account a WHERE a.tenant_id = $1 AND a.channel_account_id = $2
-       ON CONFLICT (tenant_id, channel_account_id, (COALESCE(marketplace, '*'))) WHERE released_at IS NULL DO NOTHING`,
+       ON CONFLICT (tenant_id, channel_account_id, (COALESCE(marketplace, '*')), reason_code) WHERE released_at IS NULL DO NOTHING`,
       [tenantId, halt.channelAccountId, halt.marketplace, halt.reasonCode, rejectedSnapshotId, JSON.stringify(halt.details ?? {}), halt.haltedAt],
     );
   }
@@ -827,7 +829,9 @@ export class PgPricingStore implements PricingStore {
    * Новые версии границ уровня единицы записи одной транзакцией административной роли от имени человека [Р-97]. Роль участника
    * проверяет база (security.require_person_for_admin_write, MANAGE_PRICING); действующие границы до и после — функции базы
    * effective_min_price и effective_max_price. PREVIEW выполняет то же и откатывает транзакцию.
-   * Р-88: правка больше одной единицы требует второго фактора — проверяется здесь; база это правило не закрепляет (accepted-risks).
+   * Р-88: применение правки больше одной единицы требует второго фактора — проверяется здесь и базой (0078, в пределах одной транзакции;
+   * правка, разбитая на транзакции административным сервисом, — принятый риск 17). Экран различий откатывает вставки каждого
+   * предложения в своей точке сохранения и второго фактора не требует (находка 1 ревью шага 21).
    */
   async editBounds(tenantId: string, edits: readonly BoundsEditInput[], actor: AdminActor, mode: 'PREVIEW' | 'APPLY'): Promise<BoundsEditResult> {
     const ids = edits.map((e) => e.writeScopeId);
@@ -857,6 +861,9 @@ export class PgPricingStore implements PricingStore {
           if (before.minMinor !== e.expected.minMinor || before.maxMinor !== e.expected.maxMinor) {
             throw new RollbackWith<BoundsEditResult>({ status: 'CONFLICT', writeScopeId: e.writeScopeId, actual: before });
           }
+          // Находка 1 ревью шага 21: экран различий второго фактора не требует — версии каждого предложения вставляются и откатываются
+          // в своей точке сохранения, поэтому страж массовой правки (0078) видит одно предложение за раз
+          if (mode === 'PREVIEW') await tx.query('SAVEPOINT bounds_preview');
           for (const [table, amount] of [['min_price', e.minMinor], ['max_price', e.maxMinor]] as const) {
             if (amount === undefined) continue;
             await tx.query(
@@ -870,6 +877,7 @@ export class PgPricingStore implements PricingStore {
           if (after.minMinor !== null && after.maxMinor !== null && after.minMinor > after.maxMinor) {
             throw new RollbackWith<BoundsEditResult>({ status: 'INVALID', writeScopeId: e.writeScopeId, cause: 'MIN_ABOVE_MAX' });
           }
+          if (mode === 'PREVIEW') await tx.query('ROLLBACK TO SAVEPOINT bounds_preview');
           rows.push({ writeScopeId: e.writeScopeId, currency: scope.currency, before, after });
         }
         if (mode === 'PREVIEW') throw new RollbackWith<BoundsEditResult>({ status: 'PREVIEWED', rows });
@@ -885,6 +893,20 @@ export class PgPricingStore implements PricingStore {
     if (input.name.trim().length === 0) return { status: 'INVALID', cause: 'NAME_REQUIRED' };
     try {
       return await inTenant(this.admin('saveStrategy'), tenantId, async (tx) => {
+        // Находка 4 ревью шага 21: сохраняется то превью, что видел человек, — стратегии единиц с тех пор не менялись
+        if (input.expected) {
+          const { rows: current } = await tx.query(
+            `SELECT write_scope_id, pricing_strategy_id, pricing_strategy_version FROM tenant_data.write_scope
+              WHERE tenant_id = $1 AND write_scope_id = ANY ($2::uuid[]) AND field = 'PRICE' ORDER BY write_scope_id FOR NO KEY UPDATE`,
+            [tenantId, input.expected.map((x) => x.writeScopeId)]);
+          for (const x of input.expected) {
+            const c = current.find((r) => r.write_scope_id === x.writeScopeId);
+            if (!c) throw new RollbackWith<StrategySaveResult>({ status: 'INVALID', cause: 'SCOPE_NOT_FOUND' });
+            if ((c.pricing_strategy_id ?? null) !== x.strategyId || (c.pricing_strategy_version === null ? null : Number(c.pricing_strategy_version)) !== x.version) {
+              throw new RollbackWith<StrategySaveResult>({ status: 'CONFLICT', writeScopeId: x.writeScopeId });
+            }
+          }
+        }
         let strategyId = input.strategyId;
         let version = 1;
         if (strategyId !== null) {

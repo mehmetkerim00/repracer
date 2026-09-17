@@ -120,9 +120,14 @@ export function counterfactual(recorded: CompetitorSnapshot, selfPriceMinor: num
   return { ...rest, ...(ranked[0] ? { buybox: { price: ranked[0].price, isSelf: ranked[0].isSelf } } : {}), offers: ranked };
 }
 
-function wins(recorded: CompetitorSnapshot, selfPriceMinor: number): boolean {
+/**
+ * Упрощённое правило Buy Box — то же, что counterfactual: сравниваются цены с доставкой, при равенстве выигрывает конкурент.
+ * Находка 2 ревью шага 21: наша цена сравнивалась без нашей доставки, а цены конкурентов — с доставкой.
+ */
+export function wins(recorded: CompetitorSnapshot, selfPriceMinor: number): boolean {
   const best = Math.min(...recorded.offers.filter((o) => !o.isSelf).map((o) => o.totalPrice?.amountMinor ?? o.price.amountMinor));
-  return selfPriceMinor < best;
+  const selfShipping = recorded.offers.find((o) => o.isSelf)?.shipping?.amountMinor ?? 0;
+  return selfPriceMinor + selfShipping < best;
 }
 
 /** Канал бэктеста: запись применяется сразу; конкуренты для проверки остановок — последний контрфактический снимок */

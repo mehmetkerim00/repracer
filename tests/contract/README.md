@@ -124,6 +124,44 @@ Node ≥ 22, TypeScript исполняется через `--experimental-strip-
 | `pipeline-max-price-missing.json` | Нет `max_price`: репрайсинг не включается, стратегия не вызывается | ✅ нет max_price |
 | `pipeline-bound-unresolvable.json` | Пол маржи без профиля себестоимости (ставка НДС после Р-53 известна всегда): `BOUND_UNRESOLVABLE`, CRITICAL, записи нет | ✅ граница не вычисляется |
 
+## Сценарии Amazon (шаг 22)
+
+Фикстуры — `fixtures/amazon/`, синтетические по снимку SP-API и страницам документации (`vendor/amazon/sp-api-models/2026-09-16/SOURCE.md`).
+Их не пишут руками: генератор `src/amazon-fixtures/` (`npm run fixtures:amazon`), а тест требует, чтобы файлы совпадали с генератором.
+16 сценариев пути решения преобразованы из сценариев Kaufland (`convertKauflandScenario`):
+- уведомление `buy_box_changed` превращается в `ANY_OFFER_CHANGED`;
+- PATCH `/units` — в чтение оффера и PATCH `purchasable_offer`;
+- ожидания дополнены асинхронной записью.
+
+Проверки раннера для Amazon:
+- обмен LWA — поля формы;
+- `x-amz-access-token` и `x-amz-date` по виртуальным часам, `user-agent`;
+- ни одного секрета в URL, теле и заголовках;
+- **ни одного атрибута из `neverWrittenAttributes('AMAZON')` в теле запроса** [Р-114].
+
+Сценарии пути решения Amazon идут и на PostgreSQL (`src/amazon.pipeline.pg.test.ts`).
+
+| Файл | Что проверяет | Обязательный |
+|---|---|---|
+| `dispatch-submission-issues.json` | Отправка INVALID и ACCEPTED с ошибкой — отказ по отправке (у Amazon нет пакета 207) | ✅ аналог частичного успеха |
+| `dispatch-429.json` | 429 на записи: транспорт повторяет; после исчерпания — `RATE_LIMITED` | ✅ 429 |
+| `dispatch-timeout-unknown-outcome.json` | Тайм-аут PATCH → `OUTCOME_UNKNOWN` без повтора (AMZ_C02) → обратное чтение | ✅ тайм-аут |
+| `notification-duplicate.json` | Тот же `NotificationId` — тот же `deliveryId` | ✅ дубль уведомления |
+| `notification-unverifiable.json` | Подписи нет (AMZ_C08): чужой `SellerId` — отказ и CRITICAL, не JSON, не тот тип, витрина не подключена | ✅ аналог плохой подписи |
+| `plan-stale-version.json` | Старая версия не планируется; `CHANNEL_MIN_PRICE` — UNSUPPORTED; витрина другого региона — отказ | ✅ устаревшая версия |
+| `budget-exhausted.json` | Шестая отправка пары в ту же секунду не уходит (уровень PAIR) | ✅ исчерпанный бюджет |
+| `budget-application-level.json` | Другие продавцы приложения исчерпали общий лимит (уровень APPLICATION) | |
+| `async-apply.json` | Принято → через 20 с старая цена (`PENDING`) → через 5 мин применено | ✅ асинхронное применение |
+| `accepted-not-applied.json` | Через 31 мин цена прежняя — `NOT_APPLIED` (AMZ_C05) | ✅ принято, но не применено |
+| `channel-repricer-detected.json` | Правило ценообразования у оффера — PATCH не отправляется, `CHANNEL_REPRICER_ACTIVE` [Р-115] | ✅ чужой репрайсер |
+| `channel-bounds-present.json` | Границы цены в Amazon — `CHANNEL_BOUNDS_PRESENT` [Р-114] | |
+| `quantity-region.json` | Остаток — одно значение на SKU в регионе; заголовок `x-amzn-RateLimit-Limit` (AMZ_C10) | |
+| `competitors-and-orders-unsupported.json` | Опрос конкурентов и заказы — отказ UNSUPPORTED, а не пустой ответ (AMZ_C07) | |
+| `tenant-mismatch.json` | Чужой тенант — отказ до обращения к Amazon [Р-31] | |
+| `pipeline-channel-repricer-blocks-scope.json` | Правило у оффера до записи и после неё (обратное чтение): единица BLOCKED сразу, HELD с действием продавца | ✅ чужой репрайсер в пути решения |
+| `pipeline-price-basis-mismatch-halt.json` | Цена покупателя = отправленная × 1,19: остановка витрины, фиксированная цена второго товара удерживается, снятие вручную [Р-116] | ✅ сверка базы цены |
+| `pipeline-*.json` (16) | Обязательные сценарии пути решения Kaufland в смысле Amazon; у `halt-auto-release` выборки нет — остановка остаётся (OQ-164) | ✅ как у Kaufland |
+
 ## Путь решения о цене (шаг 7)
 
 Если в `world` есть раздел `pricing` (данные хранилища в памяти: единицы записи, границы, себестоимость, история, окно движений,

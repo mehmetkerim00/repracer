@@ -267,6 +267,14 @@ test('step 21: a strategy is saved only with the token of the preview shown; bou
   const saved = await save(owner, view.previewToken);
   assert.equal(saved.status, 200, JSON.stringify(saved.body));
   assert.match((saved.body as { message: string }).message, /^Saved as version 1, assigned to 1 offer\.$/);
+  // Находка 4 ревью шага 21: то же превью после сохранения устарело — стратегия единицы уже другая
+  assert.equal((await save(owner, view.previewToken)).status, 409, 'finding 4: a preview older than the strategy of the offer is not saved');
+  // Находка 3 ревью шага 21 [Р-39]: Kaufland не даёт полного списка предложений — «ниже всех на рынке» не назначается
+  const market = { name: 'Synthetic market lowest', params: { type: 'BEAT_LOWEST', undercutMinor: 1, scope: 'MARKET', compareLanded: false, atBound: 'CAP' }, deadbandMinor: 0 };
+  const marketPreview = (await call(owner, 'POST', api(id, 'strategies', 'preview'), { draft: market, writeScopeIds: ['ws-price-de-4101'] })).body as StrategyPreviewView;
+  assert.ok(marketPreview.rows[0]!.unavailable, 'the preview shows the strategy as unavailable');
+  const refused = await call(owner, 'POST', api(id, 'strategies'), { draft: market, writeScopeIds: ['ws-price-de-4101'], strategyId: null, previewToken: marketPreview.previewToken, confirmed: true });
+  assert.deepEqual([refused.status, (refused.body as { error: { code: string } }).error.code], [400, 'STRATEGY_UNAVAILABLE'], 'finding 3: an unavailable strategy is not saved');
   const html1 = await html('/src/screens/Strategies.tsx', 'PreviewTable', { view });
   assert.ok(html1.includes('snapshot of '));
 

@@ -1,6 +1,7 @@
+import { createAmazonAdapter, TwoLevelBudget } from '@repracer/amazon-adapter';
 import { conservativeBudget, createKauflandAdapter, TokenBucketBudget } from '@repracer/kaufland-adapter';
 import type { AdapterUnderTest } from './harness/runner.ts';
-import { PARTNER_CREDENTIALS_REF } from './harness/world.ts';
+import { APPLICATION_CREDENTIALS_REF, PARTNER_CREDENTIALS_REF } from './harness/world.ts';
 
 export const KAUFLAND_BASE_URL = 'https://sellerapi.kaufland.com/v2';
 export const CONTRACT_USER_AGENT = 'repracer-contract-tests/0.1';
@@ -27,3 +28,16 @@ export const kauflandUnderTest: AdapterUnderTest = ({ deps, world, clock, fetch 
     ...(world.adapter?.buyBoxChangedAccess ? { buyBoxChangedAccess: world.adapter.buyBoxChangedAccess } : {}),
   });
 };
+
+/** Адаптер Amazon в мире сценария: сеть — через стенд, время и паузы — виртуальные; бюджет — на двух уровнях */
+export const amazonUnderTest: AdapterUnderTest = ({ deps, world, clock, fetch }) => createAmazonAdapter({
+  deps,
+  userAgent: 'repracer-contract-tests/0.1 (Language=TypeScript; Platform=Node)',
+  applicationCredentialsRef: APPLICATION_CREDENTIALS_REF,
+  fetch,
+  sleep: clock.sleep,
+  timeoutMs: world.client?.timeoutMs ?? 40,
+  readRetry: { maxAttempts: world.client?.maxAttempts ?? 3, baseDelayMs: 500, maxDelayMs: 20_000 },
+  budget: new TwoLevelBudget({ applicationLoadRps: () => world.adapter?.amazonApplicationLoadRps ?? 0 }),
+  ...(world.adapter?.confirmationWindowMs !== undefined ? { confirmationWindowMs: world.adapter.confirmationWindowMs } : {}),
+});

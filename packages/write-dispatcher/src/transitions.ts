@@ -53,7 +53,7 @@ export type OutcomeTransition =
   /** Асинхронный канал так и не применил принятую запись */
   | { to: 'NOT_APPLIED'; reason: WriteReason }
   /** Итог так и не узнан: сверка прекращается, единица BLOCKED; запись остаётся в своём статусе (DISPATCHED → FAILED без срока) */
-  | { to: 'UNRESOLVED'; errorCode: 'OUTCOME_UNRESOLVED'; reason: WriteReason };
+  | { to: 'UNRESOLVED'; errorCode: string; reason: WriteReason };
 
 const at = (now: Instant, ms: number): Instant => new Date(Date.parse(now) + ms).toISOString();
 
@@ -118,6 +118,12 @@ export function planReconciliationTransition(
     if (Date.parse(now) - Date.parse(inFlightSince) > policy.confirmationTimeoutMs) {
       return { to: 'NOT_APPLIED', reason: { code: 'WRITE_OUTCOME_RECONCILED', params: { result: 'NOT_APPLIED' } } };
     }
+  }
+  // Р-115 (шаг 22): обратное чтение отказало ошибкой «нужен человек» (у оффера правило автоматического ценообразования канала или
+  // границы канала) — сверку не повторять час, единица блокируется сразу с кодом канала; принятая запись остаётся принятой
+  if (result.kind === 'UNKNOWN' && result.error?.class === 'REQUIRES_HUMAN') {
+    const code = result.error.code;
+    return { to: 'UNRESOLVED', errorCode: code, reason: { code: 'WRITE_SCOPE_BLOCKED', params: { code, action: sellerActionFor(code) } } };
   }
   // D1: неизвестный итог не сверяется бесконечно и молча — после предела единица блокируется, человек разбирает
   if (result.kind === 'UNKNOWN' && Date.parse(now) - Date.parse(inFlightSince) > policy.unresolvedOutcomeLimitMs) {

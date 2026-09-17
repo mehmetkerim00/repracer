@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0079_verify_schema_invariants_v18.sql';
+const VERIFY = 'migrations/0081_verify_schema_invariants_v19.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -597,6 +597,23 @@ export const STEP21_ROWS = [
         smoke('min_price of two offers in one transaction without a second factor (Р-88)'), smoke('max_price of two offers in one transaction without a second factor (Р-88)')),
       m(replaceInFunction('tenant_data.bounds_mass_edit_requires_mfa()', 'IF NEW.created_at IS DISTINCT FROM now() THEN', 'IF false THEN'),
         smoke('backdated bound version from the administrative service (Р-88)')),
+    ],
+  },
+];
+
+export const STEP22_ROWS = [
+  {
+    row: 'Р-116', invariant: 'остановка витрины по неверной базе цены блокирует любую цену и снимается только человеком',
+    mutations: [
+      m(dropTrigger('ac_price_decision_basis_halt_guard', 'channel_data.price_decision'),
+        smoke('fixed-price approval while the storefront is halted for a wrong price basis (Р-116)')),
+      m(dropTrigger('bc_channel_write_basis_halt_guard', 'tenant_data.channel_write'),
+        smoke('dispatch of a fixed-price write while halted for a wrong price basis (Р-116)')),
+      m(replaceInFunction('channel_data.price_basis_halt_for(uuid,uuid)', "AND h.reason_code = 'CHANNEL_PRICE_BASIS_MISMATCH'", "AND h.reason_code = 'NONE'"),
+        smoke('fixed-price approval while the storefront is halted for a wrong price basis (Р-116)'),
+        smoke('dispatch of a fixed-price write while halted for a wrong price basis (Р-116)')),
+      m(replaceInFunction('channel_data.review_halt_by_sample(uuid,uuid,timestamptz)', "AND ph.reason_code = 'CHANNEL_MASS_SHIFT'", ''),
+        smoke('a sample review reaches a halt for a wrong price basis (Р-116)', 'a sample review does not reach a halt for a wrong price basis (Р-116)')),
     ],
   },
 ];

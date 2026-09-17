@@ -51,7 +51,7 @@ export const EXPLANATION_FIELD_KINDS: Readonly<Record<string, FieldKind>> = {
   '$.gate.fx.convertedAmountMinor': { k: 'money' },
   '$.gate.fx.rounding': { k: 'enum', v: ['UP', 'NEAREST'] },
   '$.context.channelHalt.haltId': { k: 'uuid' },
-  '$.context.channelHalt.reasonCode': { k: 'enum', v: ['CHANNEL_MASS_SHIFT'] },
+  '$.context.channelHalt.reasonCode': { k: 'enum', v: ['CHANNEL_MASS_SHIFT', 'CHANNEL_PRICE_BASIS_MISMATCH'] },
   '$.context.channelHalt.marketplace': { k: 'id', n: true },
   '$.context.channelHalt.haltedAt': { k: 'instant' },
   '$.context.priceStop.stopId': { k: 'uuid' },

@@ -26,6 +26,9 @@ test('a scope whose claim throws does not stop the sweep: other scopes are proce
     async recordOutcome() {
       throw new Error('not reached');
     },
+    async checkPriceBasis() {
+      throw new Error('not reached');
+    },
     async recordReconciliation() {
       throw new Error('not reached');
     },

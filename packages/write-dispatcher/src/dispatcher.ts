@@ -1,4 +1,4 @@
-import type { AdapterCallContext, AlertSink, ChannelAdapter, FieldWrite, Instant, WriteOutcome } from '@repracer/channel-port';
+import type { AdapterCallContext, AlertSink, ChannelAdapter, FieldWrite, IdentifiedObservation, Instant, WriteOutcome } from '@repracer/channel-port';
 import {
   coreError,
   DEFAULT_RETRY_POLICY,
@@ -50,12 +50,24 @@ export interface RecordedOutcome {
   scopeBlocked: boolean;
 }
 
+/** Р-116: остановка витрины по неверной базе цены, поставленная хранилищем */
+export interface PriceBasisHalt {
+  haltId: string;
+  reason: WriteReason;
+}
+
 export interface WriteQueueStore {
   claimNext(tenantId: string, writeScopeId: string, now: Instant, policy: RetryPolicy): Promise<ClaimResult>;
   recordOutcome(tenantId: string, write: FieldWrite, outcome: WriteOutcome, now: Instant, policy: RetryPolicy): Promise<RecordedOutcome>;
   recordReconciliation(tenantId: string, write: FieldWrite, result: Reconciliation, now: Instant, policy: RetryPolicy): Promise<RecordedOutcome>;
   /** Что пора отправить, повторить или сверить — по всем тенантам, только идентификаторы */
   dueScopes(now: Instant, options: { pendingMinAgeMs: number; inFlightTimeoutMs: number; limit: number }): Promise<DueScope[]>;
+  /**
+   * Р-116: канал показал цену, отличную от отправленной. Хранилище берёт ставку НДС товара и налоговый режим единицы; если разница
+   * равна ставке — ставит системную остановку витрины CHANNEL_PRICE_BASIS_MISMATCH (все цены, только ручное снятие) и возвращает её.
+   * Действующая остановка той же причины не дублируется: возвращается она же. null — не признак базы цены.
+   */
+  checkPriceBasis(tenantId: string, write: FieldWrite, observedMinor: number, now: Instant): Promise<PriceBasisHalt | null>;
 }
 
 export type DispatchStep =
@@ -64,6 +76,8 @@ export type DispatchStep =
   | { action: 'ENDED'; channelWriteId: string; status: string; reason: WriteReason }
   | { action: 'WAITING'; channelWriteId: string; status: 'DISPATCHED' | 'ACCEPTED' }
   | { action: 'RETRY_LATER'; channelWriteId: string; at: Instant }
+  /** Р-116: применённая цена отличается от отправленной на ставку налога — витрина остановлена */
+  | { action: 'PRICE_BASIS_HALT'; channelWriteId: string; haltId: string }
   /** Единица не обработана: ошибка хранилища или неизвестный отказ базы — алерт, остальной обход продолжается (находка 7 шага 15) */
   | { action: 'ERROR'; errorCode: string }
   | { action: 'IDLE' };
@@ -152,26 +166,51 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
     }
   }
 
-  async function readBack(tenantId: string, channelAccountId: string, write: FieldWrite): Promise<Reconciliation> {
+  /** Цена, которую видит покупатель: применённая каналом, если он её сообщает, иначе прочитанное значение поля */
+  function observedPriceMinor(write: FieldWrite, observation: IdentifiedObservation | undefined): number | null {
+    if (write.value.field !== 'PRICE' || !observation) return null;
+    const price = observation.effectivePrice ?? (observation.value.field === 'PRICE' ? observation.value.price : null);
+    return price && price.currency === write.value.price.currency ? price.amountMinor : null;
+  }
+
+  /**
+   * Р-116: обратное чтение сравнивает применённую цену с отправленной. Расхождение на ставку налога — остановка витрины; прочие
+   * расхождения — предмет сверки и DivergenceCase, не этой проверки.
+   */
+  async function checkBasis(tenantId: string, write: FieldWrite, observation: IdentifiedObservation | undefined, report: ScopeDispatchReport): Promise<void> {
+    const observed = observedPriceMinor(write, observation);
+    if (observed === null || write.value.field !== 'PRICE' || observed === write.value.price.amountMinor) return;
+    const halt = await deps.store.checkPriceBasis(tenantId, write, observed, deps.now());
+    if (!halt) return;
+    report.steps.push({ action: 'PRICE_BASIS_HALT', channelWriteId: write.channelWriteId, haltId: halt.haltId });
+    // В алерт — коды и ставка, без сумм: применённая цена — данные канала
+    await alert(tenantId, 'PRICING_PRICE_BASIS_MISMATCH', 'CRITICAL', {
+      writeScopeId: write.writeScope.writeScopeId, channelWriteId: write.channelWriteId, haltId: halt.haltId,
+      basisError: String(halt.reason.params.basisError ?? ''), vatRateBp: Number(halt.reason.params.vatRateBp ?? 0),
+    });
+  }
+
+  async function readBack(tenantId: string, channelAccountId: string, write: FieldWrite): Promise<{ result: Reconciliation; observation?: IdentifiedObservation }> {
     const ctx = callContext(tenantId, channelAccountId, `reconcile:${write.channelWriteId}:${write.attemptNo}`);
     try {
       const adapter = await deps.adapterFor(tenantId, channelAccountId);
       const result = await adapter.readBack(ctx, [{ writeScope: write.writeScope, fields: [write.value.field] }]);
       const failure = result.failures.find((f) => f.writeScopeId === write.writeScope.writeScopeId);
-      if (failure) return { kind: 'UNKNOWN', error: failure.error };
+      if (failure) return { result: { kind: 'UNKNOWN', error: failure.error } };
       const observation = result.observations.find((o) => o.field === write.value.field);
-      if (!observation) return { kind: 'UNKNOWN', error: null };
-      if (sameWriteValue(observation.value, write.value)) return { kind: 'APPLIED' };
+      if (!observation) return { result: { kind: 'UNKNOWN', error: null } };
+      if (sameWriteValue(observation.value, write.value)) return { result: { kind: 'APPLIED' }, observation };
       const observedMinor = observation.value.field === 'PRICE' ? observation.value.price.amountMinor : null;
-      return { kind: 'NOT_APPLIED', observedMinor };
+      return { result: { kind: 'NOT_APPLIED', observedMinor }, observation };
     } catch {
-      return { kind: 'UNKNOWN', error: null };
+      return { result: { kind: 'UNKNOWN', error: null } };
     }
   }
 
   async function afterRecorded(tenantId: string, write: FieldWrite, recorded: RecordedOutcome): Promise<void> {
     const details = { writeScopeId: write.writeScope.writeScopeId, channelWriteId: write.channelWriteId, version: write.version };
-    if (recorded.scopeBlocked) await alert(tenantId, 'PRICE_WRITE_SCOPE_BLOCKED', 'CRITICAL', { ...details, reason: recorded.reason?.code ?? 'UNKNOWN' });
+    const blockedCode = recorded.reason?.params?.code;
+    if (recorded.scopeBlocked) await alert(tenantId, 'PRICE_WRITE_SCOPE_BLOCKED', 'CRITICAL', { ...details, reason: recorded.reason?.code ?? 'UNKNOWN', ...(typeof blockedCode === 'string' ? { code: blockedCode } : {}) });
     else if (recorded.status === 'DISCARDED_STALE' || recorded.status === 'BUDGET_EXHAUSTED' || recorded.status === 'NOT_APPLIED') {
       await alert(tenantId, 'PRICE_WRITE_NOT_SENT', 'CRITICAL', { ...details, status: recorded.status, reason: recorded.reason?.code ?? 'UNKNOWN' });
     }
@@ -201,10 +240,11 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
             report.steps.push({ action: 'WAITING', channelWriteId: claim.write.channelWriteId, status: claim.status });
             return report;
           }
-          const result = await readBack(tenantId, claim.channelAccountId, claim.write);
+          const { result, observation } = await readBack(tenantId, claim.channelAccountId, claim.write);
           const recorded = await deps.store.recordReconciliation(tenantId, claim.write, result, deps.now(), policy);
           report.steps.push({ action: 'RECONCILED', channelWriteId: claim.write.channelWriteId, version: claim.write.version, result: result.kind, recorded: recorded.status });
           await afterRecorded(tenantId, claim.write, recorded);
+          if (result.kind === 'APPLIED') await checkBasis(tenantId, claim.write, observation, report);
           if (!recorded.slotFreed) return report;
           continue;
         }
@@ -216,6 +256,7 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
             outcome: outcome.status, recorded: recorded.status, reason: recorded.reason,
           });
           await afterRecorded(tenantId, claim.write, recorded);
+          if (outcome.status === 'ACCEPTED' && outcome.appliedImmediately) await checkBasis(tenantId, claim.write, outcome.observation, report);
           if (!recorded.slotFreed) return report;
           continue;
         }
