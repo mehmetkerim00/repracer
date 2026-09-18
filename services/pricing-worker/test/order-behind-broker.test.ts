@@ -96,6 +96,8 @@ function scopes(): MemorySeedScope[] {
       writeScopeId: `ws-${n}`, productId: `prod-${n}`, channelAccountId: ACCOUNT, marketplace: 'de', externalUnitId: String(n), channelProductRef: `36209${n}`,
       condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'ENGINE', strategy: BUYBOX, currentPriceMinor: 2000,
       minPrice: { amountMinor: 1000, id: `min-${n}` }, maxPrice: { amountMinor: 3000, id: `max-${n}` },
+      // Р-131 (шаг 27): движок без объявленной себестоимости база не включает; проверка — о порядке записей, не о себестоимости
+      cost: { currency: 'EUR', costProfileId: `cp-${n}`, unitCostMinor: 300, fixedFeeMinor: 0, feeRateBp: 1000, tax: { regime: 'VAT_INCLUDED' as const, vatRateBp: 1900 } },
     };
   });
 }
