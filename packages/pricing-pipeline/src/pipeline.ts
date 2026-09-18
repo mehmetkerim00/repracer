@@ -797,7 +797,9 @@ export function createPricingPipeline(deps: PipelineDeps) {
       const loaded = await store.loadScopeContext(ctx.tenantId, writeScopeId, deps.now());
       if (!loaded) return { enabled: false, problems: [{ code: 'NO_SCOPE_FOR_PRODUCT', params: { writeScopeId } }], warnings: [] };
       const { scope, bounds } = loaded.context;
-      const problems = validateRepricingEnablement(bounds, scope.currency, scope.basis, scope.strategy);
+      // Р-131 (шаг 27): себестоимость — условие включения, а не предупреждение; то же правило проверяет база (0098)
+      const problems = validateRepricingEnablement(bounds, scope.currency, scope.basis, scope.strategy,
+        { declared: loaded.context.cost !== null, cause: loaded.context.costMissingCause ?? null });
       // Р-77: предупреждение решается по типу стратегии единицы записи; без стратегии включение отказывает (STRATEGY_MISSING)
       const warnings = scope.strategy
         ? repricingWarnings({ strategy: scope.strategy, minMarginBp: loaded.context.guardrails.minMarginBp, cost: loaded.context.cost, costMissingCause: loaded.context.costMissingCause ?? null })

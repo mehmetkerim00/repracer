@@ -25,6 +25,7 @@ const titles: Record<AnyReasonCode, string> = {
   APPROVED: 'Approved', NO_CHANGE: 'No change', BELOW_MIN_PRICE: 'Below min_price', BELOW_MARGIN_FLOOR: 'Below minimum margin', ABOVE_MAX_PRICE: 'Above max_price',
   BOUND_UNRESOLVABLE: 'Bound cannot be computed', STEP_LIMIT: 'Step too large', CHANGE_RATE_LIMIT: 'Changes too frequent', INTENT_EXPIRED: 'Proposal expired',
   INTENT_INVALID: 'Internal proposal error', SCOPE_NOT_ACTIVE: 'Offer not active', PRICING_STOPPED: 'Pricing stopped by a person', INTERNAL_BOUND_VIOLATION: 'Internal bound error',
+  COST_REQUIRED: 'cost missing',
   MIN_PRICE_MISSING: 'min_price missing', MAX_PRICE_MISSING: 'max_price missing', BOUNDS_INVERTED: 'min_price above max_price', BOUND_CURRENCY_MISMATCH: 'Bound in another currency',
   SCOPE_NOT_ENGINE: 'Repricing off', NO_SCOPE_FOR_PRODUCT: 'Product not repriced', WRITE_BLOCKED_BY_BOUND_RECHECK: 'Stopped by bound recheck',
   WRITE_NOT_ACCEPTED_BY_CHANNEL: 'Refused by the channel', BOUNDS_VERSION_CHANGED: 'Bounds changed during decision', DIVERGENCE_CASE_OPENED: 'Channel divergence',
@@ -121,6 +122,8 @@ const reasons: Record<AnyReasonCode, Template> = {
   },
   INTERNAL_BOUND_VIOLATION: (f) => `Rejected: internal error — ${f.value('check')} found ${f.money('amountMinor')} outside ${f.money('floorMinor')}–${f.money('ceilingMinor')}; an alert was raised.`,
 
+  // Р-131 (step 27): the requirement is shown when the seller tries to enable the strategy, not as silently missing decisions
+  COST_REQUIRED: (f) => `Repricing not enabled: without the declared unit cost there is nothing to check competitor prices against${opt(f, 'cause', () => ` — ${f.value('cause')}`)}; enter the product cost.`,
   MIN_PRICE_MISSING: () => 'Repricing not enabled: min_price is not set.',
   MAX_PRICE_MISSING: () => 'Repricing not enabled: max_price is not set.',
   BOUNDS_INVERTED: (f) => `Repricing not enabled: min_price ${f.money('minMinor')} is above max_price ${f.money('maxMinor')}.`,

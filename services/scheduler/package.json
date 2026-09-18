@@ -14,7 +14,8 @@
     "@repracer/pricing-store-pg": "0.1.0",
     "pg": "8.23.0",
     "@repracer/amazon-adapter": "0.1.0",
-    "@repracer/kaufland-adapter": "0.1.0"
+    "@repracer/kaufland-adapter": "0.1.0",
+    "@repracer/service-runtime": "0.1.0"
   },
   "devDependencies": {
     "@types/pg": "8.23.1"

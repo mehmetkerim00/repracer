@@ -79,6 +79,7 @@ export function pgJobDeps(o: PgJobDepsOptions): JobDeps {
     maintenance: {
       async databaseNow() { return new Date((await o.schedulerPool.query('SELECT now() AS n')).rows[0].n).toISOString(); },
       async closePriceDays(now) { return Number((await o.schedulerPool.query('SELECT maintenance.close_price_days($1) AS n', [now])).rows[0].n); },
+      async correctClosedPriceDays(now) { return Number((await o.schedulerPool.query('SELECT maintenance.correct_closed_price_days($1) AS n', [now])).rows[0].n); },
       async ensurePartitions(now) { await o.schedulerPool.query('SELECT maintenance.ensure_partitions($1)', [now]); },
       dropExpiredPartitions: (now) => loop(async () => Number((await o.schedulerPool.query('SELECT maintenance.drop_expired_partitions($1) AS n', [now])).rows[0].n)),
       deleteExpiredRows: (now) => loop(async () => Number((await o.schedulerPool.query('SELECT maintenance.delete_expired_rows($1) AS n', [now])).rows[0].n)),

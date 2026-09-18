@@ -1,4 +1,4 @@
-import type { AdapterCallContext, AdapterDependencies, CompetitorQuery } from '@repracer/channel-port';
+import type { AdapterCallContext, AdapterDependencies, CompetitorQuery, InboundDelivery } from '@repracer/channel-port';
 import { createPricingPipeline, type MemorySeed, type MemorySeedScope, type PricingPipeline } from '@repracer/pricing-pipeline';
 import { PgPricingStore, PgWriteQueueStore, seedPricingWorld, translateStore, type PgPool, type SeededPricingWorld } from '@repracer/pricing-store-pg';
 import { createWriteDispatcher, type WriteQueueStore } from '@repracer/write-dispatcher';
@@ -23,6 +23,8 @@ export interface AmazonLiveWorld {
   comparedAt: Map<string, number[]>;
   betweenTicks(): Promise<void>;
   pipelineForDbIds(): PricingPipeline;
+  /** Приёмник уведомлений зовёт путь решения с идентификаторами базы в claimed */
+  receiverPipeline(): { processInbound(delivery: InboundDelivery): Promise<{ inbound: { kind: string }; notification: 'RECORDED' | 'DUPLICATE' | 'NONE' }> };
 }
 
 export async function amazonLiveWorld(input: {
@@ -103,5 +105,8 @@ export async function amazonLiveWorld(input: {
       events.stamp();
     },
     pipelineForDbIds: () => dbIdPipeline(pipeline, seeded),
+    receiverPipeline: () => ({
+      processInbound: (delivery: InboundDelivery) => pipeline.processInbound({ ...delivery, claimed: seeded.ids.fromDb(delivery.claimed) }),
+    }),
   };
 }

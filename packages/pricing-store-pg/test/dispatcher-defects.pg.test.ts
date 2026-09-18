@@ -4,7 +4,7 @@ import type { AlertSink, ChannelAdapter, FieldWrite } from '@repracer/channel-po
 import type { MemorySeedScope } from '@repracer/pricing-pipeline';
 import { createWriteDispatcher, DEFAULT_RETRY_POLICY } from '@repracer/write-dispatcher';
 import { createPool, inTenant, PgPricingStore, PgWriteQueueStore, seedPricingWorld, type SeededPricingWorld } from '../src/index.ts';
-import { approved, commit, contextOf } from './drafts.ts';
+import { approved, commit, contextOf, engineCost } from './drafts.ts';
 import { requireEnv } from './isolated-db.ts';
 
 /**
@@ -33,7 +33,7 @@ const later = (ms: number) => () => new Date(Date.now() + ms).toISOString();
 function scope(n: number): MemorySeedScope {
   return {
     writeScopeId: `ws-${n}`, productId: `prod-${n}`, channelAccountId: ACCOUNT, marketplace: 'de', externalUnitId: String(15000 + n), channelProductRef: `36215${n}`,
-    condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'ENGINE', strategy: { strategyId: 'st', version: 1, params: { type: 'FIXED', priceMinor: 1900 }, deadbandMinor: 0 },
+    condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'ENGINE', cost: engineCost(), strategy: { strategyId: 'st', version: 1, params: { type: 'FIXED', priceMinor: 1900 }, deadbandMinor: 0 },
     currentPriceMinor: 1850, minPrice: { amountMinor: 1500, id: `min-${n}` }, maxPrice: { amountMinor: 2500, id: `max-${n}` },
   };
 }

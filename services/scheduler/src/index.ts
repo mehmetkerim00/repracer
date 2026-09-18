@@ -1,4 +1,4 @@
-export { createScheduler, jobKeyOf, nextSlotAfter, type JobRunContext, type JobSource, type JobSpec, type Scheduler, type SchedulerOptions, type TickReport } from './scheduler.ts';
+export { createScheduler, retryDelaySeconds, RETRY_BACKOFF_CAP_SECONDS, jobKeyOf, nextSlotAfter, type JobRunContext, type JobSource, type JobSpec, type Scheduler, type SchedulerOptions, type TickReport } from './scheduler.ts';
 export { LeaseLostError, MemorySchedulerState, type CatchUp, type JobRegistration, type JobScope, type JobState, type RunRecord, type SchedulerStateStore } from './state.ts';
 export { PgSchedulerState } from './pg-state.ts';
 export { DEFAULT_JOB_CONFIG, JOB_CATALOG, jobSource, type JobCatalogEntry, type JobConfig, type JobDeps, type SchedulerAccount } from './jobs.ts';

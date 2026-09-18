@@ -29,7 +29,8 @@ const scheduleAt = (hours: number[], price: (k: number) => number, shiftMinutes 
 const kaufland1: LiveProduct[] = [
   ...[1, 2, 3].map((i) => ({ cls: 'HOT' as const, idProduct: 362260100 + i, marketplace: 'de', behaviour: walk(5), pastMovesEveryMinutes: 10 })),
   // Тёплые — с движком цены: записи уходят в канал, история цен закрывается в сутки [Р-21]
-  ...[1, 2, 3].map((i) => ({ cls: 'WARM' as const, idProduct: 362260200 + i, marketplace: 'de', pastMovesEveryMinutes: 8 * 60, pricingMode: 'ENGINE' as const,
+  // Р-131 (шаг 27): движок без объявленной себестоимости база не включает — у тёплых товаров она объявлена
+  ...[1, 2, 3].map((i) => ({ cls: 'WARM' as const, idProduct: 362260200 + i, marketplace: 'de', pastMovesEveryMinutes: 8 * 60, pricingMode: 'ENGINE' as const, costMinor: 1000,
     behaviour: scheduleAt([2, 10, 18], (k) => 1800 + (k + 1) * 10 * i, i) })),
   ...[1, 2, 3].map((i) => ({ cls: 'STATIC' as const, idProduct: 362260300 + i, marketplace: 'de', behaviour: { kind: 'STATIC' as const }, pastMovesEveryMinutes: 24 * 60, pastMoveBp: 10_000,
     // Продавец включил Smart Pricing в кабинете у одного товара [Р-12, Р-41]

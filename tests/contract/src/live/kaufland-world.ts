@@ -55,6 +55,8 @@ export interface KauflandLiveWorld {
   betweenTicks(): Promise<void>;
   /** Путь решения, вызываемый планировщиком с идентификаторами базы */
   pipelineForDbIds(): PricingPipeline;
+  /** Отправка ждущих записей единицы — как делает путь решения за брокером, по идентификаторам базы */
+  dispatchScope(tenantId: string, writeScopeId: string): Promise<void>;
 }
 
 function scopeOf(p: LiveProduct, account: string): MemorySeedScope {
@@ -72,6 +74,8 @@ export async function kauflandLiveWorld(input: {
   tag: number; clock: VirtualClock; products: LiveProduct[]; seed: number; appPool: PgPool; adminPool: PgPool; provisioningPool: PgPool; dispatcherPool: PgPool;
   /** Доступ к buy_box_changed [Р-45] и модель доставки; без него уведомлений нет */
   buyBoxChanged?: { lossShare: number; debounceMs: number };
+  /** Параметры модели канала: сбои записи (K-14), задержка применения (K-15) и прочее */
+  params?: KauflandChannelModelSpec['params'];
 }): Promise<KauflandLiveWorld> {
   const tenantFixture = `10000000-0000-4000-8000-00000000${String(input.tag).padStart(4, '0')}`;
   const accountFixture = `20000000-0000-4000-8000-00000000${String(input.tag).padStart(4, '0')}`;
@@ -102,7 +106,7 @@ export async function kauflandLiveWorld(input: {
     })),
     competitors: input.products.map((p) => ({ sellerRef: `Synthetic Competitor ${p.idProduct}`, storefront: p.marketplace, idProduct: p.idProduct, priceMinor: p.competitorStartMinor ?? 1800, behaviour: p.behaviour })),
     // Р-45: buy_box_changed — ранний доступ; без доступа уведомлений нет, конкуренты — только опрос. Доступ — явный параметр мира
-    params: { buyBoxChanged: input.buyBoxChanged ? { delivered: true, debounceMs: input.buyBoxChanged.debounceMs, lossShare: input.buyBoxChanged.lossShare } : { delivered: false, debounceMs: 0, lossShare: 1 } },
+    params: { ...input.params, buyBoxChanged: input.buyBoxChanged ? { delivered: true, debounceMs: input.buyBoxChanged.debounceMs, lossShare: input.buyBoxChanged.lossShare } : { delivered: false, debounceMs: 0, lossShare: 1 } },
   };
   const world: World = {
     clock: startIso, tenantId: tenantFixture, channelAccountId: accountFixture,
@@ -148,6 +152,7 @@ export async function kauflandLiveWorld(input: {
     dueScopes: async (at, options) => (await writeQueue.dueScopes(at, options)).filter((d) => d.tenantId === seeded.tenantId),
   }, seeded.ids);
   const dispatcher: WriteDispatcher = createWriteDispatcher({ store: queue, adapterFor: () => adapter, alerts: deps.alerts, now: () => clock.iso() });
+  // Путь решения отправляет свою запись сам и передаёт диспетчеру следующую, ждущую за ней [Р-64]
   const pipeline = createPricingPipeline({ store, adapter, alerts: deps.alerts, logger: deps.logger, now: () => clock.iso(), dispatcher });
   const events = stamped(sink, clock);
   return {
@@ -156,9 +161,13 @@ export async function kauflandLiveWorld(input: {
       // Трасса запросов проверке не нужна и за сутки растёт до сотен тысяч строк
       trace.length = 0;
       for (const d of simulator.drainDeliveries(clock.nowMs())) await pipeline.processInbound(buildDelivery(d, { world }, clock) as InboundDelivery);
+      // Обход-страховка диспетчера: ждущая запись не остаётся незамеченной, даже если событие потерялось [Р-64]
       await dispatcher.sweep({ pendingMinAgeMs: 0 });
       events.stamp();
     },
     pipelineForDbIds: () => dbIdPipeline(pipeline, seeded),
+    async dispatchScope(tenantId, writeScopeId) {
+      await dispatcher.dispatchScope(seeded.ids.fromDb(tenantId), seeded.ids.fromDb(writeScopeId));
+    },
   };
 }

@@ -4,7 +4,7 @@ import type { AlertSink, ChannelAdapter, FieldWrite } from '@repracer/channel-po
 import type { MemorySeedScope } from '@repracer/pricing-pipeline';
 import { createWriteDispatcher, DEFAULT_RETRY_POLICY } from '@repracer/write-dispatcher';
 import { inTenant, PgPricingStore, PgWriteQueueStore, seedPricingWorld, type PgPool, type SeededPricingWorld } from '../src/index.ts';
-import { approved, commit, contextOf } from './drafts.ts';
+import { approved, commit, contextOf, engineCost } from './drafts.ts';
 import { createIsolatedDatabase, type IsolatedDatabase } from './isolated-db.ts';
 
 /**
@@ -22,7 +22,7 @@ const later = (ms: number) => () => new Date(Date.now() + ms).toISOString();
 
 const ebayScope: MemorySeedScope = {
   writeScopeId: 'ws-ebay', productId: 'prod-ebay', channelAccountId: EBAY_ACCOUNT, marketplace: 'EBAY_DE', externalUnitId: '16001', channelProductRef: '362160',
-  condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'ENGINE', strategy: { strategyId: 'st', version: 1, params: { type: 'FIXED', priceMinor: 1900 }, deadbandMinor: 0 },
+  condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'ENGINE', cost: engineCost(), strategy: { strategyId: 'st', version: 1, params: { type: 'FIXED', priceMinor: 1900 }, deadbandMinor: 0 },
   currentPriceMinor: 1850, minPrice: { amountMinor: 1500, id: 'min-ebay' }, maxPrice: { amountMinor: 2500, id: 'max-ebay' },
 };
 

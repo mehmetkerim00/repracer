@@ -55,7 +55,7 @@ before(async () => {
       scopes: [
         scope(1), // себестоимость
         scope(2, { cost: eurCost(1000, 700) }), // ставка НДС: 7 % → пол 13,50 €
-        scope(3, { cost: null, guardrails: {} }), // min_price
+        scope(3, { guardrails: {} }), // min_price (ограничения маржи нет; себестоимость объявлена — без неё ENGINE не включается, Р-131)
         // курс: USD, налог с продаж, себестоимость 10,00 € по 1,10 → 11,00 $ → пол 13,75 $; по 1,20 → 15,00 $
         scope(4, {
           channelAccountId: US_ACCOUNT, marketplace: 'ATVPDKIKX0DER', currency: 'USD', basis: 'NET', taxRegime: 'SALES_TAX_EXCLUDED',

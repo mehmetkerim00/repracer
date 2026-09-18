@@ -1,0 +1,23 @@
+{
+  "name": "@repracer/notification-receiver",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Amazon notification receiver process (step 23, OQ-190): SQS long polling with SigV4, deduplication by NotificationId, delivery into the pricing path, silence and late-delivery alerts.",
+  "type": "module",
+  "exports": { ".": "./src/main.ts" },
+  "dependencies": {
+    "@repracer/amazon-adapter": "0.1.0",
+    "@repracer/amazon-notifications": "0.1.0",
+    "@repracer/channel-port": "0.1.0",
+    "@repracer/pricing-pipeline": "0.1.0",
+    "@repracer/pricing-store-pg": "0.1.0",
+    "@repracer/service-runtime": "0.1.0",
+    "pg": "8.23.0"
+  },
+  "devDependencies": { "@types/pg": "8.23.1" },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec test/*.test.ts",
+    "start": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/main.ts"
+  }
+}

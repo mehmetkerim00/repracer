@@ -69,12 +69,20 @@ export const jobKeyOf = (name: string, scope: JobScope | null) => (scope ? `${na
 
 /** Ближайший слот после момента для LATEST: срок + k интервалов > now; k − 1 — схлопнутые слоты */
 /**
- * Срок с учётом повтора: провалившаяся работа сохраняет слот (пропуск не теряется), но повторяется не раньше min(интервал, 60 с) после
- * провала. Без паузы процесс, который просыпается к ближайшему сроку, повторял провал каждую секунду — и вызов с лимитом канала тоже (шаг 26)
+ * Р-132 (шаг 27): провалившаяся работа сохраняет слот (пропуск не теряется), но повторяется с растущей паузой, а не каждый такт.
+ * Пауза — период самой работы, удвоенный на каждый следующий провал подряд, но не дольше суток: канал, который лежит, не получает
+ * запрос каждую минуту, а работа с коротким периодом не ждёт дольше, чем нужно.
  */
+export const RETRY_BACKOFF_CAP_SECONDS = 86_400;
+
+export function retryDelaySeconds(intervalSeconds: number, consecutiveFailures: number): number {
+  const doublings = Math.max(0, Math.min(consecutiveFailures - 1, 20));
+  return Math.min(intervalSeconds * 2 ** doublings, RETRY_BACKOFF_CAP_SECONDS);
+}
+
 export function dueOf(j: JobState): Instant {
   if (j.lastOutcome !== 'FAILED' || !j.lastFinishedAt) return j.nextDueAt;
-  const retry = Date.parse(j.lastFinishedAt) + Math.min(j.intervalSeconds, 60) * 1000;
+  const retry = Date.parse(j.lastFinishedAt) + retryDelaySeconds(j.intervalSeconds, j.consecutiveFailures) * 1000;
   return retry > Date.parse(j.nextDueAt) ? new Date(retry).toISOString() : j.nextDueAt;
 }
 

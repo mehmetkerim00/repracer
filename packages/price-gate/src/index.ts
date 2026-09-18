@@ -317,8 +317,19 @@ export function assertWriteWithinBounds(amountMinor: number, bounds: PriceBounds
 // Включение репрайсинга [Р-43]: оба абсолютных предела обязательны
 // ---------------------------------------------------------------------------
 
-export function validateRepricingEnablement(bounds: PriceBounds, currency: string, basis: PriceBasis, strategy: StrategyDefinition | null): Reason<PipelineReasonCode>[] {
+export function validateRepricingEnablement(
+  bounds: PriceBounds, currency: string, basis: PriceBasis, strategy: StrategyDefinition | null,
+  // Р-131: аргумент обязателен — умолчание «себестоимость объявлена» молча открывало бы проверку забывшему его вызывающему
+  // (ревью шага 27, находка 9)
+  cost: { declared: boolean; cause: string | null },
+): Reason<PipelineReasonCode>[] {
   const problems: Reason<PipelineReasonCode>[] = [];
+  /**
+   * Р-131 (шаг 27): без себестоимости репрайсинг не включается. У товара без себестоимости, истории и того же EAN на другом канале нет ни
+   * одного якоря проверки входов [Р-49, OQ-186]: ошибка в сто раз пройдёт незамеченной именно там, где у продавца нет ощущения нормальной
+   * цены. Себестоимость и так обязательна для пола маржи.
+   */
+  if (!cost.declared) problems.push({ code: 'COST_REQUIRED', params: cost.cause ? { cause: cost.cause } : {} });
   // Р-77: движок без стратегии не включается — и тип стратегии известен там, где решается о предупреждениях
   if (!strategy) problems.push({ code: 'STRATEGY_MISSING', params: {} });
   const scopeSide = { scopeCurrency: currency, scopeBasis: basis };

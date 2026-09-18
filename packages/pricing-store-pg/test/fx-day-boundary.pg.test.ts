@@ -5,7 +5,7 @@ import { evaluateSnapshot } from '@repracer/input-sanity';
 import type { MemorySeedScope, ScopeEvaluationContext } from '@repracer/pricing-pipeline';
 import type { PriceDecisionDraft, PriceIntentDraft } from '@repracer/pricing-model';
 import { createPool, inTenant, PgPricingStore, seedPricingWorld } from '../src/index.ts';
-import { explained } from './drafts.ts';
+import { engineCost, explained } from './drafts.ts';
 
 /**
  * Р-61, Р-62, Р-63 на PostgreSQL: курс ЕЦБ в решении обязателен, если себестоимость в другой валюте; без курса (или с
@@ -102,7 +102,7 @@ test('Р-63 on PostgreSQL: with only a stale ECB rate the same-EAN anchor declin
   const rate = { source: 'ECB' as const, rateDate: iso(nowMs - 24 * HOUR).slice(0, 10), base: 'EUR' as const, quote: 'USD', rateMicros: 1_155_100, availableFrom: iso(nowMs - 20 * HOUR) };
   const de: MemorySeedScope = {
     writeScopeId: 'ws-de-8201', productId: 'prod-8201', channelAccountId: KAUFLAND, marketplace: 'de', externalUnitId: '8201', channelProductRef: '362008201',
-    condition: 'new', gtin: '2000000082016', currency: 'EUR', basis: 'GROSS', pricingMode: 'ENGINE', strategy: BUYBOX, currentPriceMinor: 1850,
+    condition: 'new', gtin: '2000000082016', currency: 'EUR', basis: 'GROSS', pricingMode: 'ENGINE', cost: engineCost(), strategy: BUYBOX, currentPriceMinor: 1850,
     minPrice: { amountMinor: 1500, id: 'min-8201' }, maxPrice: { amountMinor: 2500, id: 'max-8201' },
   };
   const world = await seedPricingWorld(pool!, { provisioningPool: provisioning!, adminPool: admin!,

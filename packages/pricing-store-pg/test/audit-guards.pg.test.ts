@@ -3,6 +3,7 @@ import { after, test } from 'node:test';
 import { standUserOf, type MemorySeedScope } from '@repracer/pricing-pipeline';
 import { createPool, inTenant, PgPricingStore, seedPricingWorld } from '../src/index.ts';
 import { requireEnv } from './isolated-db.ts';
+import { engineCost } from './drafts.ts';
 
 /**
  * Находки 1–3 ревью шага 14 и Р-88 — поведение базы, каждый отказ рядом с разрешённым случаем:
@@ -28,7 +29,7 @@ const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
 
 const scope: MemorySeedScope = {
   writeScopeId: 'ws-1', productId: 'prod-1', channelAccountId: ACCOUNT, marketplace: 'de', externalUnitId: '14601', channelProductRef: '3621461',
-  condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'ENGINE', strategy: { strategyId: 'st', version: 1, params: { type: 'FIXED', priceMinor: 2000 }, deadbandMinor: 0 },
+  condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'ENGINE', cost: engineCost(), strategy: { strategyId: 'st', version: 1, params: { type: 'FIXED', priceMinor: 2000 }, deadbandMinor: 0 },
   currentPriceMinor: 1850, minPrice: { amountMinor: 1500, id: 'min-1' }, maxPrice: { amountMinor: 2500, id: 'max-1' },
 };
 

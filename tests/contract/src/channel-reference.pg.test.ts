@@ -69,6 +69,8 @@ test('Р-119: a storefront halt on Amazon is not released by a sample in the dat
         condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'ENGINE',
         strategy: { strategyId: 'st-119', version: 1, params: { type: 'MATCH_BUYBOX', undercutMinor: 5, holdWhenWinning: true, atBound: 'CAP' }, deadbandMinor: 0 },
         currentPriceMinor: 1850, minPrice: { amountMinor: 1500, id: 'min-119' }, maxPrice: { amountMinor: 2500, id: 'max-119' },
+        // Р-131 (шаг 27): движок без объявленной себестоимости база не включает; сценарий не о себестоимости — профиль синтетический
+        cost: { currency: 'EUR', costProfileId: 'cp-119', unitCostMinor: 400, fixedFeeMinor: 0, feeRateBp: 1000, tax: { regime: 'VAT_INCLUDED', vatRateBp: 1900 } },
       }],
       halts: [{ marketplace: 'A1PA6795UKMFR9', haltedAt: new Date(Date.now() - 3_600_000).toISOString(), reviewWindowSeconds: 60 }],
     },

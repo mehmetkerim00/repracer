@@ -4,7 +4,7 @@ import type { CompetitorSnapshot } from '@repracer/channel-port';
 import type { EvaluationCommitResult, MemorySeedScope, ScopeEvaluationContext } from '@repracer/pricing-pipeline';
 import { markAcceptedBySanity, type PriceDecisionDraft, type PriceIntentDraft } from '@repracer/pricing-model';
 import { createPool, inTenant, PgPricingStore, seedPricingWorld, type SeededPricingWorld } from '../src/index.ts';
-import { approved, commit, contextOf, explained } from './drafts.ts';
+import { approved, commit, contextOf, engineCost, explained } from './drafts.ts';
 
 /**
  * Проверки, которые хранилище в памяти доказать не может: изоляция тенантов через RLS, триггеры границ и остановки
@@ -34,7 +34,7 @@ const now = () => new Date().toISOString();
 function scopeSeed(n: number, strategy: MemorySeedScope['strategy']): MemorySeedScope {
   return {
     writeScopeId: `ws-${n}`, productId: `prod-${n}`, channelAccountId: ACCOUNT, marketplace: 'de', externalUnitId: String(n),
-    channelProductRef: `3629${n}`, condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'ENGINE', strategy,
+    channelProductRef: `3629${n}`, condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'ENGINE', cost: engineCost(), strategy,
     currentPriceMinor: 1850, minPrice: { amountMinor: 1500, id: `min-${n}` }, maxPrice: { amountMinor: 2500, id: `max-${n}` },
   };
 }

@@ -5,7 +5,7 @@ import type { MemorySeedScope, ScopeEvaluationContext } from '@repracer/pricing-
 import type { PriceDecisionDraft, PriceIntentDraft } from '@repracer/pricing-model';
 import { createWriteDispatcher, type ScopeDispatchReport } from '@repracer/write-dispatcher';
 import { createPool, inTenant, PgPricingStore, PgWriteQueueStore, seedPricingWorld } from '../src/index.ts';
-import { explained } from './drafts.ts';
+import { engineCost, explained } from './drafts.ts';
 
 /**
  * Р-64: очередь записей цены за записью в полёте. Несколько решений по одной единице подряд, канал отвечает с задержкой —
@@ -40,7 +40,7 @@ const jitter = (min: number, max: number) => min + Math.floor(Math.random() * (m
 function scopeSeed(n: number): MemorySeedScope {
   return {
     writeScopeId: `ws-${n}`, productId: `prod-${n}`, channelAccountId: ACCOUNT, marketplace: 'de', externalUnitId: String(n),
-    channelProductRef: `3640${n}`, condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'ENGINE', strategy: FIXED,
+    channelProductRef: `3640${n}`, condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'ENGINE', cost: engineCost(), strategy: FIXED,
     currentPriceMinor: 1850, minPrice: { amountMinor: 1500, id: `min-${n}` }, maxPrice: { amountMinor: 2500, id: `max-${n}` },
   };
 }

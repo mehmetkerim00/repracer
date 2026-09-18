@@ -26,6 +26,7 @@ const titles: Record<AnyReasonCode, string> = {
   APPROVED: 'Freigegeben', NO_CHANGE: 'Keine Änderung', BELOW_MIN_PRICE: 'Unter min_price', BELOW_MARGIN_FLOOR: 'Unter Mindestmarge', ABOVE_MAX_PRICE: 'Über max_price',
   BOUND_UNRESOLVABLE: 'Grenze nicht berechenbar', STEP_LIMIT: 'Schritt zu groß', CHANGE_RATE_LIMIT: 'Zu häufige Änderungen', INTENT_EXPIRED: 'Vorschlag abgelaufen',
   INTENT_INVALID: 'Interner Fehler im Vorschlag', SCOPE_NOT_ACTIVE: 'Angebot nicht aktiv', PRICING_STOPPED: 'Preisänderungen von einer Person gestoppt', INTERNAL_BOUND_VIOLATION: 'Interner Grenzfehler',
+  COST_REQUIRED: 'Selbstkosten fehlen',
   MIN_PRICE_MISSING: 'min_price fehlt', MAX_PRICE_MISSING: 'max_price fehlt', BOUNDS_INVERTED: 'min_price über max_price', BOUND_CURRENCY_MISMATCH: 'Grenze in anderer Währung',
   SCOPE_NOT_ENGINE: 'Repricing aus', NO_SCOPE_FOR_PRODUCT: 'Produkt wird nicht bepreist', WRITE_BLOCKED_BY_BOUND_RECHECK: 'Durch Grenzprüfung gestoppt',
   WRITE_NOT_ACCEPTED_BY_CHANNEL: 'Vom Kanal abgelehnt', BOUNDS_VERSION_CHANGED: 'Grenzen während der Entscheidung geändert', DIVERGENCE_CASE_OPENED: 'Abweichung im Kanal',
@@ -122,6 +123,8 @@ const reasons: Record<AnyReasonCode, Template> = {
   },
   INTERNAL_BOUND_VIOLATION: (f) => `Abgelehnt: interner Fehler — ${f.value('check')} hat ${f.money('amountMinor')} außerhalb von ${f.money('floorMinor')}–${f.money('ceilingMinor')} gefunden; ein Alarm wurde ausgelöst.`,
 
+  // Р-131 (шаг 27): требование видно при попытке включить стратегию, а не как молчаливое отсутствие оценок
+  COST_REQUIRED: (f) => `Repricing nicht aktiviert: ohne hinterlegte Selbstkosten prüfen wir Wettbewerberpreise gegen nichts${opt(f, 'cause', () => ` — ${f.value('cause')}`)}; tragen Sie die Selbstkosten des Produkts ein.`,
   MIN_PRICE_MISSING: () => 'Repricing nicht aktiviert: min_price ist nicht gesetzt.',
   MAX_PRICE_MISSING: () => 'Repricing nicht aktiviert: max_price ist nicht gesetzt.',
   BOUNDS_INVERTED: (f) => `Repricing nicht aktiviert: min_price ${f.money('minMinor')} liegt über max_price ${f.money('maxMinor')}.`,

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { SANITY_RULESET } from '@repracer/input-sanity';
 import { GATE_PROFILE } from '@repracer/price-gate';
-import { boundDeviationBp, buildExplanation, summarizeSanity, type PriceDecisionDraft, type PriceIntentDraft, type Reason } from '@repracer/pricing-model';
+import { boundDeviationBp, buildExplanation, summarizeSanity, type CostInputs, type PriceDecisionDraft, type PriceIntentDraft, type Reason } from '@repracer/pricing-model';
 import type { DecisionToCommit, EvaluationCommitResult, ScopeEvaluationContext, SnapshotRef } from '@repracer/pricing-pipeline';
 import type { PgPricingStore } from '../src/index.ts';
 
@@ -98,4 +98,15 @@ export function commit(store: PgPricingStore, tenantId: string, ...decisions: Re
   return store.commitEvaluation(tenantId, {
     key: { channelAccountId: s.channelAccountId, marketplace: s.marketplace, channelProductRef: s.channelProductRef, condition: s.condition }, now: now(), decisions: decisions.map((d) => explained(d)),
   });
+}
+
+/**
+ * Р-131 (шаг 27): без объявленной себестоимости база не переводит единицу записи в ENGINE. Синтетические миры тестов, которые не о
+ * себестоимости, объявляют её этим профилем: себестоимость заведомо низкая, поэтому пол маржи не поднимается выше min_price сценария.
+ */
+export function engineCost(currency: 'EUR' | 'USD' = 'EUR'): CostInputs {
+  return {
+    currency, costProfileId: `cp-synthetic-engine-${currency.toLowerCase()}`, unitCostMinor: 100, fixedFeeMinor: 0, feeRateBp: 1000,
+    tax: currency === 'USD' ? { regime: 'SALES_TAX_EXCLUDED' } : { regime: 'VAT_INCLUDED', vatRateBp: 1900 },
+  };
 }

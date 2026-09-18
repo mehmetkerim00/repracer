@@ -145,6 +145,8 @@ export type GateReasonCode = (typeof GATE_REASON_CODES)[number];
 
 export const PIPELINE_REASON_CODES = [
   'MIN_PRICE_MISSING',
+  // Р-131 (шаг 27): без себестоимости репрайсинг не включается — у нового товара нет ни одного якоря проверки входов [Р-49]
+  'COST_REQUIRED',
   'MAX_PRICE_MISSING',
   'BOUNDS_INVERTED',
   'BOUND_CURRENCY_MISMATCH',
@@ -417,6 +419,8 @@ export const REASON_PARAMS: Readonly<Record<AnyReasonCode, ParamSchema>> = {
   INTERNAL_BOUND_VIOLATION: { check: oneOf(BOUND_CHECKS, 'TENANT'), amountMinor: money('TENANT', N), floorMinor: money('TENANT'), ceilingMinor: money('TENANT'), currency: currency() },
 
   MIN_PRICE_MISSING: {},
+  // Причина — тот же список, что у пола маржи: себестоимость не объявлена или объявлена, но не переводится в валюту единицы записи [Р-61]
+  COST_REQUIRED: { cause: oneOf(MARGIN_COST_CAUSES, 'TENANT', O) },
   MAX_PRICE_MISSING: {},
   BOUNDS_INVERTED: { minMinor: money('TENANT'), maxMinor: money('TENANT'), currency: currency() },
   BOUND_CURRENCY_MISMATCH: {

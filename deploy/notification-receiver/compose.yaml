@@ -1,0 +1,55 @@
+# OQ-190 (шаг 27): развёртывание приёмника уведомлений Amazon (шаг 23). Живой очереди и подписки нет (OQ-167) — развёртывание готово
+# заранее и проверено живым прогоном на модели очереди.
+#   docker compose -f deploy/notification-receiver/compose.yaml --env-file deploy/notification-receiver/receiver.env up -d
+# Одна очередь — один экземпляр: SQS стандартная, повторная доставка и перестановки — норма, но два процесса на одной очереди удваивают
+# работу пути решения без пользы (дубли отсекает журнал, а вызовы канала — нет).
+name: repracer-notification-receiver
+
+services:
+  receiver:
+    image: node:22.22.3-bookworm-slim
+    # Тег образа закреплён; закрепление по digest (image: node@sha256:…) — при первом развёртывании в среде с доступом к реестру (проверить)
+    working_dir: /app
+    command: ["node", "--experimental-strip-types", "--disable-warning=ExperimentalWarning", "services/notification-receiver/src/main.ts"]
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      REPRACER_RECEIVER_ID: ${REPRACER_RECEIVER_ID:-receiver-1}
+      REPRACER_RECEIVER_METRICS_PORT: "9466"
+      REPRACER_AMAZON_REGION: ${REPRACER_AMAZON_REGION:?set REPRACER_AMAZON_REGION}
+      REPRACER_AMAZON_APPLICATION_ID: ${REPRACER_AMAZON_APPLICATION_ID:?set REPRACER_AMAZON_APPLICATION_ID}
+      REPRACER_AMAZON_APPLICATION_CREDENTIALS_REF: ${REPRACER_AMAZON_APPLICATION_CREDENTIALS_REF:?set REPRACER_AMAZON_APPLICATION_CREDENTIALS_REF}
+      REPRACER_CHANNEL_SECRETS_DIR: /run/secrets/channels
+      REPRACER_RECEIVER_SILENCE_MS: ${REPRACER_RECEIVER_SILENCE_MS:-}
+      # Секреты — файлами: адрес очереди содержит номер аккаунта AWS, ключи — тем более
+      REPRACER_APP_PG_URL_FILE: /run/secrets/app_pg_url
+      REPRACER_INBOUND_PG_URL_FILE: /run/secrets/inbound_pg_url
+      REPRACER_SQS_QUEUE_URL_FILE: /run/secrets/sqs_queue_url
+      REPRACER_AWS_ACCESS_KEY_ID_FILE: /run/secrets/aws_access_key_id
+      REPRACER_AWS_SECRET_ACCESS_KEY_FILE: /run/secrets/aws_secret_access_key
+      # Временные учётные данные (AssumeRole) — файл обновляет развёртывание; без него читаются постоянные ключи
+      REPRACER_AWS_SESSION_TOKEN_FILE: /run/secrets/aws_session_token
+    volumes:
+      - ../..:/app:ro
+      - ${REPRACER_SECRETS_DIR:?set REPRACER_SECRETS_DIR}:/run/secrets:ro
+    deploy:
+      replicas: 1
+    restart: unless-stopped
+    # Долгий опрос — 20 с: даём кругу закончиться, чтобы принятое уведомление успело дойти до пути решения и быть удалённым из очереди
+    stop_grace_period: 45s
+    healthcheck:
+      # Круг опроса не начинался дольше трёх минут — контейнер нездоров (пустая очередь при этом здорова: long polling 20 с)
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9466/healthz').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    ports:
+      - "127.0.0.1:9466:9466"
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"

@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { AMAZON_DESCRIPTOR } from '@repracer/amazon-adapter';
 import { KAUFLAND_DESCRIPTOR } from '@repracer/kaufland-adapter';
-import { createScheduler, jobSource, LeaseLostError, MemorySchedulerState, nextSlotAfter, type JobDeps, type JobSpec } from '../src/index.ts';
+import { createScheduler, jobSource, LeaseLostError, MemorySchedulerState, nextSlotAfter, type JobDeps, type JobSpec , retryDelaySeconds, RETRY_BACKOFF_CAP_SECONDS } from '../src/index.ts';
 
 /** Р-126 (шаг 25): планировщик на состоянии в памяти и виртуальных часах. Данные синтетические */
 
@@ -78,7 +78,7 @@ test('Р-126: one scheduler per job — a second process does not run a leased j
     run: { jobKey: 'job', jobName: 'job', slotAt: c.now(), owner: 'crashed', startedAt: c.now(), finishedAt: c.now(), outcome: 'SUCCEEDED', lagSeconds: 0, items: 0, errorCode: null } }), LeaseLostError);
 });
 
-test('Р-126: a failed run keeps its slot, is retried on the next tick and raises a CRITICAL alert after three failures in a row', async () => {
+test('Р-126, Р-132: a failed run keeps its slot, is retried after the backoff and raises a CRITICAL alert after three failures in a row', async () => {
   const c = clock('2026-09-17T00:40:00.000Z');
   const state = new MemorySchedulerState(c.now);
   let fail = true;
@@ -87,14 +87,16 @@ test('Р-126: a failed run keeps its slot, is retried on the next tick and raise
   const job = spec({ name: 'daily', intervalSeconds: 86_400, catchUp: 'EVERY_SLOT', firstDueAt: () => '2026-09-17T00:30:00.000Z', lagWarningSeconds: 99_999, lagCriticalSeconds: 999_999,
     run: async ({ slotAt }) => { if (fail) throw new Error('CLICKHOUSE_UNAVAILABLE: synthetic'); done.push(slotAt); return { items: 1 }; } });
   const s = createScheduler({ state, source: { jobs: async () => [job] }, owner: 'a', now: c.now, alerts });
-  for (let i = 0; i < 3; i++) { await s.tick(); c.advance(60_000); }
+  // Р-132 (шаг 27): повтор — не раньше периода работы (сутки), поэтому между попытками идут сутки, а не минута
+  for (let i = 0; i < 3; i++) { await s.tick(); c.advance(86_400_000 + 60_000); }
   const [j] = await state.list();
   assert.deepEqual([j!.nextDueAt, j!.consecutiveFailures, j!.lastError], ['2026-09-17T00:30:00.000Z', 3, 'CLICKHOUSE_UNAVAILABLE: synthetic']);
-  assert.deepEqual(alerts.alerts.map((a) => [a.code, a.details?.error]), [['SCHEDULER_JOB_FAILING', 'CLICKHOUSE_UNAVAILABLE']]);
+  // Отставание за трое суток ожидаемо: проверяется алерт о провалах
+  assert.deepEqual(alerts.alerts.filter((a) => a.code === 'SCHEDULER_JOB_FAILING').map((a) => [a.code, a.details?.error]), [['SCHEDULER_JOB_FAILING', 'CLICKHOUSE_UNAVAILABLE']]);
   assert.deepEqual((await state.runs()).map((r) => [r.outcome, r.errorCode]), [['FAILED', 'CLICKHOUSE_UNAVAILABLE'], ['FAILED', 'CLICKHOUSE_UNAVAILABLE'], ['FAILED', 'CLICKHOUSE_UNAVAILABLE']]);
   fail = false;
   await s.tick();
-  assert.deepEqual(done, ['2026-09-17T00:30:00.000Z'], 'the failed slot is not skipped');
+  assert.equal(done[0], '2026-09-17T00:30:00.000Z', 'the failed slot is not skipped');
 });
 
 test('Р-126: the job source gives each account only the jobs its channel supports; Amazon accounts share the getCompetitiveSummary pace', async () => {
@@ -110,7 +112,7 @@ test('Р-126: the job source gives each account only the jobs its channel suppor
     exportDay: async (range) => ({ range, exports: [], unverified: [], missing: [] }),
     exportBacklog: async () => [],
     forceDroppedSince: async () => [],
-    maintenance: { closePriceDays: noop, ensurePartitions: async () => undefined, dropExpiredPartitions: noop, deleteExpiredRows: noop, databaseNow: async () => '2026-09-17T10:00:00.000Z' },
+    maintenance: { closePriceDays: noop, correctClosedPriceDays: noop, ensurePartitions: async () => undefined, dropExpiredPartitions: noop, deleteExpiredRows: noop, databaseNow: async () => '2026-09-17T10:00:00.000Z' },
   };
   const specs = await jobSource(deps).jobs('2026-09-17T10:00:00.000Z');
   const byAccount = (id: string) => specs.filter((s) => s.scope?.channelAccountId === id).map((s) => `${s.name}/${s.intervalSeconds}`).sort();
@@ -157,7 +159,7 @@ test('review of step 25, findings 1 and 7: call deadlines count from the job sta
     exportBacklog: async () => [{ group: 'WRITES', range: { from: '2026-09-15T00:00:00.000Z', to: '2026-09-16T00:00:00.000Z' }, reason: 'NOT_EXPORTED' },
       { group: 'SNAPSHOTS', range: { from: '2026-09-14T00:00:00.000Z', to: '2026-09-15T00:00:00.000Z' }, reason: 'ROWS_CHANGED' }],
     forceDroppedSince: async () => [],
-    maintenance: { closePriceDays: noop, ensurePartitions: async () => undefined, dropExpiredPartitions: noop, deleteExpiredRows: noop, databaseNow: async () => '2026-09-17T00:40:00.000Z' },
+    maintenance: { closePriceDays: noop, correctClosedPriceDays: noop, ensurePartitions: async () => undefined, dropExpiredPartitions: noop, deleteExpiredRows: noop, databaseNow: async () => '2026-09-17T00:40:00.000Z' },
   };
   const c = clock('2026-09-17T00:40:00.000Z');
   const state = new MemorySchedulerState(c.now);
@@ -187,4 +189,30 @@ test('review of step 25, finding 6: a lease lost during a run does not stop the 
   const report = await createScheduler({ state, source: { jobs: async () => [stolen, next] }, owner: 'a', now: c.now, alerts }).tick();
   assert.deepEqual([ran, report.lostLeases], [['stolen', 'next'], ['stolen']]);
   assert.ok(alerts.alerts.some((a) => a.code === 'SCHEDULER_LEASE_LOST'));
+});
+
+test('Р-132 (шаг 27): провалившаяся работа повторяется с растущей паузой, не короче своего периода', async () => {
+  // Пауза: период, затем удвоение на каждый следующий провал подряд, не дольше суток
+  assert.deepEqual([1, 2, 3, 4].map((f) => retryDelaySeconds(60, f)), [60, 120, 240, 480]);
+  assert.equal(retryDelaySeconds(86_400, 1), 86_400, 'суточная работа повторяется не раньше следующих суток');
+  assert.equal(retryDelaySeconds(3_600, 10), RETRY_BACKOFF_CAP_SECONDS, 'пауза не растёт дольше суток');
+  const c = clock('2026-09-18T10:00:00.000Z');
+  const state = new MemorySchedulerState(c.now);
+  let attempts = 0;
+  const failing = spec({ name: 'failing', intervalSeconds: 60, run: async () => { attempts++; throw new Error('CHANNEL_DOWN: synthetic'); } });
+  const s = createScheduler({ state, source: { jobs: async () => [failing] }, owner: 'a', now: c.now, alerts: sink() });
+  await s.tick();
+  assert.equal(attempts, 1);
+  // Такт через 30 секунд: пауза после первого провала — период работы (60 с), повтора нет
+  c.advance(30_000);
+  await s.tick();
+  assert.equal(attempts, 1, 'провалившаяся работа не повторяется каждым тактом');
+  c.advance(31_000);
+  await s.tick();
+  assert.equal(attempts, 2, 'повтор — после паузы в период работы');
+  // Второй провал подряд удваивает паузу: через 70 секунд ещё рано
+  c.advance(70_000);
+  const report = await s.tick();
+  assert.equal(attempts, 2, 'после второго провала пауза 120 с');
+  assert.equal(report.nextDueAt, '2026-09-18T10:03:01.000Z', 'процесс просыпается к концу паузы, а не раньше');
 });

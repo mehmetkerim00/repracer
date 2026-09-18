@@ -59,6 +59,8 @@ export interface JobDeps {
   forceDroppedSince(since: Instant): Promise<string[]>;
   maintenance: {
     closePriceDays(now: Instant): Promise<number>;
+    /** Р-29, OQ-192: пересчёт закрытых суток после опоздавшего подтверждения применения */
+    correctClosedPriceDays(now: Instant): Promise<number>;
     ensurePartitions(now: Instant): Promise<void>;
     dropExpiredPartitions(now: Instant): Promise<number>;
     deleteExpiredRows(now: Instant): Promise<number>;
@@ -160,7 +162,13 @@ export function jobSource(deps: JobDeps): JobSource {
       specs.push({
         name: 'price-days-close', scope: null, intervalSeconds: cfg.maintenanceEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,
         lagWarningSeconds: hours(3), lagCriticalSeconds: hours(24), leaseSeconds: 1800,
-        async run({ now: n }) { return { items: await deps.maintenance.closePriceDays(n) }; },
+        async run({ now: n }) {
+          const days = await deps.maintenance.closePriceDays(n);
+          // Шаг 27, D [Р-29, риск 34, OQ-192]: подтверждение применения приходит позже закрытия суток — закрытые сутки пересчитываются
+          // строкой-поправкой той же работой, сразу после закрытия
+          const corrections = await deps.maintenance.correctClosedPriceDays(n);
+          return { items: days + corrections };
+        },
       });
       specs.push({
         name: 'partitions', scope: null, intervalSeconds: cfg.maintenanceEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,

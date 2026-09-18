@@ -69,6 +69,17 @@
           "maxPrice": {
             "amountMinor": 2500,
             "id": "max-7301"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-7301",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         },
         {
@@ -101,6 +112,17 @@
           "maxPrice": {
             "amountMinor": 2500,
             "id": "max-7302"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-7302",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         },
         {
@@ -133,6 +155,17 @@
           "maxPrice": {
             "amountMinor": 2500,
             "id": "max-7303"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-7303",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         },
         {
@@ -165,6 +198,17 @@
           "maxPrice": {
             "amountMinor": 2500,
             "id": "max-7304"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-7304",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         },
         {
@@ -197,6 +241,17 @@
           "maxPrice": {
             "amountMinor": 2500,
             "id": "max-7305"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-7305",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         },
         {
@@ -229,6 +284,17 @@
           "maxPrice": {
             "amountMinor": 2500,
             "id": "max-7306"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-7306",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         },
         {
@@ -261,6 +327,17 @@
           "maxPrice": {
             "amountMinor": 2500,
             "id": "max-7307"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-7307",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         },
         {
@@ -293,6 +370,17 @@
           "maxPrice": {
             "amountMinor": 2500,
             "id": "max-7308"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-7308",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         },
         {
@@ -325,6 +413,17 @@
           "maxPrice": {
             "amountMinor": 2500,
             "id": "max-7309"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-7309",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         },
         {
@@ -357,6 +456,17 @@
           "maxPrice": {
             "amountMinor": 2500,
             "id": "max-7310"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-7310",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         },
         {
@@ -389,6 +499,17 @@
           "maxPrice": {
             "amountMinor": 2500,
             "id": "max-7311"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-7311",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         },
         {
@@ -421,6 +542,17 @@
           "maxPrice": {
             "amountMinor": 2500,
             "id": "max-7312"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-7312",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         },
         {
@@ -453,6 +585,17 @@
           "maxPrice": {
             "amountMinor": 2500,
             "id": "max-7313"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-7313",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         },
         {
@@ -485,6 +628,17 @@
           "maxPrice": {
             "amountMinor": 2500,
             "id": "max-7314"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-7314",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         },
         {
@@ -517,6 +671,17 @@
           "maxPrice": {
             "amountMinor": 2500,
             "id": "max-7315"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-7315",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         },
         {
@@ -549,6 +714,17 @@
           "maxPrice": {
             "amountMinor": 2500,
             "id": "max-7316"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-7316",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         },
         {
@@ -581,6 +757,17 @@
           "maxPrice": {
             "amountMinor": 2500,
             "id": "max-7317"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-7317",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         },
         {
@@ -613,6 +800,17 @@
           "maxPrice": {
             "amountMinor": 2500,
             "id": "max-7318"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-7318",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         },
         {
@@ -645,6 +843,17 @@
           "maxPrice": {
             "amountMinor": 2500,
             "id": "max-7319"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-7319",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         },
         {
@@ -677,6 +886,17 @@
           "maxPrice": {
             "amountMinor": 2500,
             "id": "max-7320"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-7320",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         },
         {
@@ -709,6 +929,17 @@
           "maxPrice": {
             "amountMinor": 2500,
             "id": "max-7321"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-7321",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         },
         {
@@ -741,6 +972,17 @@
           "maxPrice": {
             "amountMinor": 2500,
             "id": "max-7322"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-7322",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         },
         {
@@ -773,6 +1015,17 @@
           "maxPrice": {
             "amountMinor": 2500,
             "id": "max-7323"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-7323",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         },
         {
@@ -805,6 +1058,17 @@
           "maxPrice": {
             "amountMinor": 2500,
             "id": "max-7324"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-7324",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         },
         {
@@ -837,6 +1101,17 @@
           "maxPrice": {
             "amountMinor": 2500,
             "id": "max-7325"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-7325",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         },
         {
@@ -869,6 +1144,17 @@
           "maxPrice": {
             "amountMinor": 2500,
             "id": "max-7326"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-7326",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         },
         {
@@ -901,6 +1187,17 @@
           "maxPrice": {
             "amountMinor": 2500,
             "id": "max-7327"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-7327",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         },
         {
@@ -933,6 +1230,17 @@
           "maxPrice": {
             "amountMinor": 2500,
             "id": "max-7328"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-7328",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         },
         {
@@ -965,6 +1273,17 @@
           "maxPrice": {
             "amountMinor": 2500,
             "id": "max-7329"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-7329",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         },
         {
@@ -997,6 +1316,17 @@
           "maxPrice": {
             "amountMinor": 2500,
             "id": "max-7330"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-7330",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         }
       ],

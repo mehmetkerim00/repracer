@@ -72,7 +72,18 @@
             "amountMinor": 9500,
             "id": "max-4601"
           },
-          "gtin": "2000000046011"
+          "gtin": "2000000046011",
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-4601",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
+          }
         },
         {
           "writeScopeId": "ws-price-de-4602",
@@ -105,7 +116,18 @@
             "amountMinor": 9500,
             "id": "max-4602"
           },
-          "gtin": "2000000046028"
+          "gtin": "2000000046028",
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-4602",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
+          }
         }
       ],
       "accounts": [
@@ -287,6 +309,7 @@
           {
             "verdict": "ACCEPT",
             "anchorsUsed": [
+              "COST",
               "CROSS_CHANNEL"
             ],
             "warnings": []

@@ -3,7 +3,7 @@ import { after, before, test } from 'node:test';
 import { EXPLANATION_FIELD_KINDS, REASON_PARAMS, SANITY_NOTE_PARAMS, type PriceIntentDraft } from '@repracer/pricing-model';
 import type { MemorySeedScope } from '@repracer/pricing-pipeline';
 import { createPool, inTenant, PgPricingStore, seedPricingWorld, type SeededPricingWorld } from '../src/index.ts';
-import { approved, contextOf, explained } from './drafts.ts';
+import { approved, contextOf, engineCost, explained } from './drafts.ts';
 import { requireEnv } from './isolated-db.ts';
 
 /**
@@ -29,7 +29,7 @@ const BUYBOX = { strategyId: 'st-buybox', version: 1, params: { type: 'MATCH_BUY
 const now = () => new Date().toISOString();
 const scope: MemorySeedScope = {
   writeScopeId: 'ws-1', productId: 'prod-1', channelAccountId: ACCOUNT, marketplace: 'de', externalUnitId: '9101', channelProductRef: '362910',
-  condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'ENGINE', strategy: BUYBOX,
+  condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'ENGINE', cost: engineCost(), strategy: BUYBOX,
   currentPriceMinor: 1850, minPrice: { amountMinor: 1500, id: 'min-1' }, maxPrice: { amountMinor: 2500, id: 'max-1' },
 };
 

@@ -5,7 +5,7 @@ import { ClickHouseHttp, competitorSnapshotRow, exportCompetitorSnapshotsDay, ex
 import type { MemorySeedScope } from '@repracer/pricing-pipeline';
 import { createPool, inTenant, PgPricingStore, seedPricingWorld } from '../src/index.ts';
 import type { PriceDecisionDraft, PriceIntentDraft } from '@repracer/pricing-model';
-import { approved, contextOf, explained } from './drafts.ts';
+import { approved, contextOf, engineCost, explained } from './drafts.ts';
 import { requireEnv } from './isolated-db.ts';
 
 /**
@@ -53,7 +53,7 @@ const ACCOUNT = '20000000-0000-4000-8000-000000000200';
 const FIXED = { strategyId: 'st-fixed', version: 1, params: { type: 'FIXED', priceMinor: 2000 }, deadbandMinor: 0 } as const;
 const scope = (n: number): MemorySeedScope => ({
   writeScopeId: `ws-${n}`, productId: `prod-${n}`, channelAccountId: ACCOUNT, marketplace: 'de', externalUnitId: String(2000 + n),
-  channelProductRef: `36220${n}`, condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'ENGINE', strategy: FIXED,
+  channelProductRef: `36220${n}`, condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'ENGINE', cost: engineCost(), strategy: FIXED,
   currentPriceMinor: 1850, minPrice: { amountMinor: 1500, id: `min-${n}` }, maxPrice: { amountMinor: 2500, id: `max-${n}` },
 });
 

@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { after, test } from 'node:test';
 import { standUserOf, type MemorySeedScope } from '@repracer/pricing-pipeline';
 import { createPool, inTenant, PgPricingStore, seedPricingWorld } from '../src/index.ts';
+import { engineCost } from './drafts.ts';
 
 /**
  * Ревью шага 23, находки 1 и 3 [Р-120]: ценообразование канала у предложения не мешает выключить репрайсинг, но не даёт включить его
@@ -19,7 +20,7 @@ const DE = 'A1PA6795UKMFR9';
 const ACCOUNT = '20000000-0000-4000-8000-000000000239';
 const scope = (sku: string): MemorySeedScope => ({
   writeScopeId: `ws-${sku}`, productId: `prod-${sku}`, channelAccountId: ACCOUNT, marketplace: DE, externalUnitId: sku, channelProductRef: 'B000023901',
-  condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'ENGINE',
+  condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'ENGINE', cost: engineCost(),
   strategy: { strategyId: 'st-fixed', version: 1, params: { type: 'FIXED', priceMinor: 2000 }, deadbandMinor: 0 },
   currentPriceMinor: 1850, minPrice: { amountMinor: 1500, id: `min-${sku}` }, maxPrice: { amountMinor: 2500, id: `max-${sku}` },
 });
@@ -73,6 +74,11 @@ test('finding 3 [Р-120]: an offer the channel prices itself is not mapped to a 
          VALUES ($1, 'WRITE_SCOPE', $2, $3, $4, $5, true, 1, $6)`,
         [w.tenantId, scopeRow.write_scope_id, scopeRow.currency, scopeRow.price_basis, amount, w.ownerMembershipId]);
     }
+    // Р-131 (шаг 27): без объявленной себестоимости движок не включается — проверка не о ней, поэтому себестоимость объявлена
+    await tx.query(
+      `INSERT INTO tenant_data.cost_profile (tenant_id, product_id, version, valid_from, currency, purchase_cost_minor, source, created_by_membership_id)
+       VALUES ($1, $2, 1, now() - interval '1 day', $3, 100, 'MANUAL', $4)`,
+      [w.tenantId, created.product_id, scopeRow.currency, w.ownerMembershipId]);
     await tx.query(`UPDATE tenant_data.write_scope SET pricing_mode = 'ENGINE' WHERE tenant_id = $1 AND write_scope_id = $2`, [w.tenantId, scopeRow.write_scope_id]);
     await tx.query(
       `INSERT INTO tenant_data.offer_mapping (tenant_id, product_id, channel_account_id, channel, region, marketplace, channel_offer_key, external_sku, channel_product_ref, condition, status, price_write_scope_id)

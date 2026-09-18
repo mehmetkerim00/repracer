@@ -208,16 +208,21 @@ test('Р-52: a system halt is released by an operator with a note; a viewer may 
   assert.deepEqual([view.audit[0]!.action, view.audit[0]!.actor], ['Storefront halt released', 'Operator (you)']);
 });
 
-test('G, Р-77: enabling a margin price without cost warns with the strategy type and who needs the cost', async () => {
+test('Р-131, G: without the declared cost the screen shows a requirement, not a warning that can be waved away', async () => {
   const id = 'kaufland/pipeline/enable-margin-without-cost';
   const operator = await login('OPERATOR', 'de');
-  const scope = (await get<ProductListView>(operator, api(id, 'products'))).rows[0]!;
+  // 4702 — предложение сценария, которому себестоимость так и не объявили
+  const scope = (await get<ProductListView>(operator, api(id, 'products'))).rows.find((r) => r.unit.writeScopeId.endsWith('4702'))!;
   const first = (await call(operator, 'POST', api(id, 'scopes', scope.unit.writeScopeId, 'enable'), { acknowledgeWarnings: false })).body as EnableResult;
-  assert.deepEqual([first.enabled, first.problems, first.warnings.map((w) => [w.code, w.problems])], [false, [], [['MARGIN_WITHOUT_COST', []]]]);
+  assert.deepEqual([first.enabled, first.problems.map((p) => p.code), first.warnings.map((w) => [w.code, w.problems])],
+    [false, ['COST_REQUIRED'], [['MARGIN_WITHOUT_COST', []]]]);
   assert.equal(first.warnings[0]!.text, 'Hinweis: die Strategie Zielmarge und die Mindestmarge 15 % brauchen die Einstandskosten, aber die Einstandskosten sind nicht gesetzt. Bis dahin würde jeder Preis abgelehnt.');
   const dialog = await html('/src/screens/Products.tsx', 'EnableResultView', { unit: scope.unit.label, result: first, busy: false, error: null, onAcknowledge: () => {}, onClose: () => {} }, 'de');
-  for (const text of ['Vor dem Aktivieren:', 'Trotzdem aktivieren']) assert.ok(dialog.includes(text), text);
-  assert.equal(((await call(operator, 'POST', api(id, 'scopes', scope.unit.writeScopeId, 'enable'), { acknowledgeWarnings: true })).body as EnableResult).enabled, true);
+  assert.ok(dialog.includes(first.problems[0]!.text), first.problems[0]!.text);
+  // Р-131: подтверждения нет — кнопки «всё равно включить» на экране с препятствием не существует
+  assert.equal(dialog.includes('Trotzdem aktivieren'), false, dialog);
+  const acknowledged = (await call(operator, 'POST', api(id, 'scopes', scope.unit.writeScopeId, 'enable'), { acknowledgeWarnings: true })).body as EnableResult;
+  assert.deepEqual([acknowledged.enabled, acknowledged.problems.map((p) => p.code)], [false, ['COST_REQUIRED']], 'acknowledging a warning does not declare a cost');
   const viewer = await login('VIEWER');
   assert.equal((await call(viewer, 'POST', api(id, 'scopes', scope.unit.writeScopeId, 'enable'), { acknowledgeWarnings: true })).status, 403);
 });

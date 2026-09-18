@@ -32,7 +32,8 @@ export interface WorkerOptions {
   /** svc_relay: чтение outbox всех тенантов; без адреса ретранслятор в этом экземпляре не запускается */
   relayPgUrl?: string;
   kafkaBrokers: string[];
-  adapterFor(tenantId: string, channelAccountId: string): ChannelAdapter;
+  /** Канал аккаунта известен не всегда сразу: точка входа читает его из каталога аккаунтов [Р-31], поэтому допускается обещание */
+  adapterFor(tenantId: string, channelAccountId: string): ChannelAdapter | Promise<ChannelAdapter>;
   alerts: AlertSink;
   logger: AdapterLogger;
   partitionsConcurrently?: number;
@@ -41,6 +42,8 @@ export interface WorkerOptions {
   consumerGroupSuffix?: string;
   /** Наблюдение за потреблением — для стенда порядка; в работе не используется */
   onConsumed?: (message: ReceivedMessage, workerId: string) => Promise<void>;
+  /** Обход-страховка прошёл: точка входа считает по нему живость процесса (ревью шага 27, находка 3) */
+  onSweep?: (result: unknown) => Promise<void>;
 }
 
 export interface RunningWorker {
@@ -59,11 +62,11 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
     now: () => new Date().toISOString(),
   });
   const pipelines = new Map<string, ReturnType<typeof createPricingPipeline>>();
-  const pipelineFor = (tenantId: string, accountId: string) => {
+  const pipelineFor = async (tenantId: string, accountId: string) => {
     const key = `${tenantId}:${accountId}`;
     let p = pipelines.get(key);
     if (!p) {
-      p = createPricingPipeline({ store, adapter: options.adapterFor(tenantId, accountId), alerts: options.alerts, logger: options.logger, now: () => new Date().toISOString(), dispatcher });
+      p = createPricingPipeline({ store, adapter: await options.adapterFor(tenantId, accountId), alerts: options.alerts, logger: options.logger, now: () => new Date().toISOString(), dispatcher });
       pipelines.set(key, p);
     }
     return p;
@@ -93,7 +96,7 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
         correlationId: envelope.correlationId,
         deadline: new Date(Date.now() + 60_000).toISOString(),
       };
-      await pipelineFor(envelope.tenantId, envelope.channelAccountId).processSnapshot(ctx, envelope.snapshot);
+      await (await pipelineFor(envelope.tenantId, envelope.channelAccountId)).processSnapshot(ctx, envelope.snapshot);
     },
   }));
 
@@ -119,10 +122,22 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
   const sweepEvery = options.sweepIntervalMs ?? 5_000;
   background.push((async () => {
     while (!abort.signal.aborted) {
-      await new Promise((r) => setTimeout(r, sweepEvery));
+      // Сон прерывается остановкой: иначе stop() ждёт целый обход и упирается в льготный срок развёртывания (ревью шага 27, находка 17)
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(done, sweepEvery);
+        function done() {
+          clearTimeout(timer);
+          abort.signal.removeEventListener('abort', done);
+          resolve();
+        }
+        abort.signal.addEventListener('abort', done, { once: true });
+      });
       if (abort.signal.aborted) break;
-      await dispatcher.sweep({ pendingMinAgeMs: sweepEvery }).catch((error) =>
-        options.alerts.raise({ code: 'WRITE_DISPATCH_SWEEP_FAILED', severity: 'CRITICAL', details: { error: String((error as Error)?.message ?? error).slice(0, 200) } }));
+      // Обход прошёл — процесс жив; провал обхода живостью не считается (ревью шага 27, находка 3)
+      await dispatcher.sweep({ pendingMinAgeMs: sweepEvery })
+        .then(async (swept) => { await options.onSweep?.(swept); })
+        .catch((error) =>
+          options.alerts.raise({ code: 'WRITE_DISPATCH_SWEEP_FAILED', severity: 'CRITICAL', details: { error: String((error as Error)?.message ?? error).slice(0, 200) } }));
     }
   })());
 

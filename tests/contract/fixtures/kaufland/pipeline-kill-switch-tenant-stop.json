@@ -69,6 +69,17 @@
           "maxPrice": {
             "amountMinor": 5000,
             "id": "max-4601"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-4601",
+            "unitCostMinor": 300,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
           }
         }
       ]

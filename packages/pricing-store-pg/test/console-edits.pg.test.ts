@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
 import { standUserOf, type MemorySeedScope } from '@repracer/pricing-pipeline';
 import { createPool, PgPricingStore, seedPricingWorld } from '../src/index.ts';
+import { engineCost } from './drafts.ts';
 
 /**
  * Шаг 21 в базе: массовая правка границ после экрана различий и сохранение стратегии после превью. Роль участника проверяет база
@@ -18,7 +19,7 @@ after(async () => { await pool.end(); await provisioning.end(); await admin.end(
 const ACCOUNT = '20000000-0000-4000-8000-000000000021';
 const scope = (n: number): MemorySeedScope => ({
   writeScopeId: `ws-${n}`, productId: `prod-${n}`, channelAccountId: ACCOUNT, marketplace: 'de', externalUnitId: String(2100 + n), channelProductRef: `36221${n}`,
-  condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'ENGINE',
+  condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'ENGINE', cost: engineCost(),
   strategy: { strategyId: 'st-fixed', version: 1, params: { type: 'FIXED', priceMinor: 2000 }, deadbandMinor: 0 },
   currentPriceMinor: 1850, minPrice: { amountMinor: 1500, id: `min-${n}` }, maxPrice: { amountMinor: 2500, id: `max-${n}` },
 });

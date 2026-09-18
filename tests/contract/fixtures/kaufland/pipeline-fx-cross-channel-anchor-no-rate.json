@@ -72,7 +72,18 @@
             "amountMinor": 9500,
             "id": "max-4701"
           },
-          "gtin": "2000000047018"
+          "gtin": "2000000047018",
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-4701",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
+          }
         }
       ],
       "accounts": [
@@ -339,6 +350,7 @@
           {
             "verdict": "ACCEPT",
             "anchorsUsed": [
+              "COST",
               "HISTORY"
             ],
             "warnings": [

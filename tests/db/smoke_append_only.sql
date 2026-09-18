@@ -342,20 +342,133 @@ SELECT pg_temp.expect_fail('a price of a write the channel did not confirm marke
   INSERT INTO tenant_data.price_history_applied (tenant_id, price_history_id, channel_write_id, write_scope_id, accepted_at, applied_at)
   SELECT h.tenant_id, h.price_history_id, h.channel_write_id, h.write_scope_id, h.accepted_at, h.accepted_at + interval '1 hour' FROM tenant_data.price_history h
    WHERE h.tenant_id = 'a0000000-0000-0000-0000-00000000000a' AND h.channel_write_id = 'a9250000-0000-4000-8000-000000000003' $q$, 'is not a price of a write the channel applied at this time');
--- Ревью шага 26, находка 4: сутки принятия уже закрыты в вечную свёртку — время применения не ставится, иначе цена попала бы в свёртку дважды
-INSERT INTO maintenance.price_day_close (price_day, day_tz, rows_inserted)
-VALUES (((now() - interval '3 days') AT TIME ZONE 'Europe/Berlin')::date, 'Europe/Berlin', 0);
+-- Шаг 27, D [Р-29, риск 34, OQ-192]: подтверждение применения пришло после закрытия суток — отметка ставится, а закрытые сутки
+-- пересчитываются строкой-поправкой. Сутки принятия остаются в свёртке неизменными, их итог даёт представление.
+-- Сутки закрыты раньше, чем пришло подтверждение (в жизни — на сутки раньше; в проверке время закрытия задано явно)
+INSERT INTO maintenance.price_day_close (price_day, day_tz, rows_inserted, closed_at)
+VALUES (((now() - interval '3 days') AT TIME ZONE 'Europe/Berlin')::date, 'Europe/Berlin', 1, now() - interval '2 days'),
+       (((now() - interval '2 days') AT TIME ZONE 'Europe/Berlin')::date, 'Europe/Berlin', 0, now() - interval '1 day');
 INSERT INTO tenant_data.price_history (tenant_id, accepted_at, write_scope_id, product_id, amount_minor, currency, price_basis, effective_min_price_minor, channel_write_id, write_version)
 VALUES ('a0000000-0000-0000-0000-00000000000a', now() - interval '3 days', 'a6000000-0000-0000-0000-000000000001', 'a5000000-0000-0000-0000-000000000001', 1550, 'EUR', 'GROSS', 800,
         'a9260000-0000-4000-8000-000000000003', 9263);
+-- Свёртка суток принятия, как её закрыл планировщик до подтверждения
+INSERT INTO tenant_data.price_daily (tenant_id, write_scope_id, price_type, price_day, day_tz, currency, price_basis, min_amount_minor, max_amount_minor,
+                                     first_amount_minor, first_accepted_at, last_amount_minor, last_accepted_at, change_count, min_floor_minor)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', 'REGULAR', ((now() - interval '3 days') AT TIME ZONE 'Europe/Berlin')::date,
+        'Europe/Berlin', 'EUR', 'GROSS', 1550, 1550, 1550, now() - interval '3 days', 1550, now() - interval '3 days', 1, 800);
 INSERT INTO tenant_data.channel_write_history (tenant_id, channel_write_id, finished_at, write_scope_id, field, amount_minor, currency, price_basis, version, origin, final_status, attempt_count, created_at, applied_at)
-VALUES ('a0000000-0000-0000-0000-00000000000a', 'a9260000-0000-4000-8000-000000000003', now(), 'a6000000-0000-0000-0000-000000000001', 'PRICE', 1550, 'EUR', 'GROSS', 9263, 'ENGINE', 'APPLIED', 1, now(), now() - interval '2 days 20 hours');
-DO $$ BEGIN
-  IF EXISTS (SELECT 1 FROM tenant_data.price_history_applied p WHERE p.tenant_id = 'a0000000-0000-0000-0000-00000000000a' AND p.channel_write_id = 'a9260000-0000-4000-8000-000000000003') THEN
-    RAISE EXCEPTION 'a price of a day already closed is moved to the day the channel applied it (OQ-180)';
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'a9260000-0000-4000-8000-000000000003', now(), 'a6000000-0000-0000-0000-000000000001', 'PRICE', 1550, 'EUR', 'GROSS', 9263, 'ENGINE', 'APPLIED', 1, now(), now() - interval '2 days');
+-- Вторая цена тех же суток — витринная (SALE): она в этих сутках одна, поэтому после переноса сутки остаются БЕЗ цен
+INSERT INTO tenant_data.price_history (tenant_id, accepted_at, write_scope_id, product_id, amount_minor, currency, price_basis, effective_min_price_minor, channel_write_id, write_version, price_type)
+VALUES ('a0000000-0000-0000-0000-00000000000a', now() - interval '3 days', 'a6000000-0000-0000-0000-000000000001', 'a5000000-0000-0000-0000-000000000001', 1700, 'EUR', 'GROSS', 800,
+        'a9260000-0000-4000-8000-000000000004', 9264, 'SALE');
+INSERT INTO tenant_data.price_daily (tenant_id, write_scope_id, price_type, price_day, day_tz, currency, price_basis, min_amount_minor, max_amount_minor,
+                                     first_amount_minor, first_accepted_at, last_amount_minor, last_accepted_at, change_count, min_floor_minor)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', 'SALE', ((now() - interval '3 days') AT TIME ZONE 'Europe/Berlin')::date,
+        'Europe/Berlin', 'EUR', 'GROSS', 1700, 1700, 1700, now() - interval '3 days', 1700, now() - interval '3 days', 1, 800);
+INSERT INTO tenant_data.channel_write_history (tenant_id, channel_write_id, finished_at, write_scope_id, field, amount_minor, currency, price_basis, version, origin, final_status, attempt_count, created_at, applied_at)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'a9260000-0000-4000-8000-000000000004', now(), 'a6000000-0000-0000-0000-000000000001', 'PRICE', 1700, 'EUR', 'GROSS', 9264, 'ENGINE', 'APPLIED', 1, now(), now() - interval '2 days');
+DO $$
+DECLARE
+  accepted_day date := ((now() - interval '3 days') AT TIME ZONE 'Europe/Berlin')::date;
+  applied_day  date := ((now() - interval '2 days') AT TIME ZONE 'Europe/Berlin')::date;
+  n            int;
+  again        int;
+  acc          record;
+  app          record;
+  sale_acc     record;
+  sale_app     record;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM tenant_data.price_history_applied p
+                  WHERE p.tenant_id = 'a0000000-0000-0000-0000-00000000000a' AND p.channel_write_id = 'a9260000-0000-4000-8000-000000000003') THEN
+    RAISE EXCEPTION 'a late confirmation is recorded even when the day is already closed (OQ-192)';
   END IF;
-  RAISE NOTICE 'PASS accept | a price of a day already closed keeps the day it was rolled up into (OQ-180)';
+  n := maintenance.correct_closed_price_days();
+  again := maintenance.correct_closed_price_days();
+  SELECT * INTO acc FROM tenant_data.price_daily_effective e
+   WHERE e.tenant_id = 'a0000000-0000-0000-0000-00000000000a' AND e.write_scope_id = 'a6000000-0000-0000-0000-000000000001'
+     AND e.price_type = 'REGULAR' AND e.price_day = accepted_day;
+  SELECT * INTO app FROM tenant_data.price_daily_effective e
+   WHERE e.tenant_id = 'a0000000-0000-0000-0000-00000000000a' AND e.write_scope_id = 'a6000000-0000-0000-0000-000000000001'
+     AND e.price_type = 'REGULAR' AND e.price_day = applied_day;
+  SELECT * INTO sale_acc FROM tenant_data.price_daily_effective e
+   WHERE e.tenant_id = 'a0000000-0000-0000-0000-00000000000a' AND e.write_scope_id = 'a6000000-0000-0000-0000-000000000001'
+     AND e.price_type = 'SALE' AND e.price_day = accepted_day;
+  SELECT * INTO sale_app FROM tenant_data.price_daily_effective e
+   WHERE e.tenant_id = 'a0000000-0000-0000-0000-00000000000a' AND e.write_scope_id = 'a6000000-0000-0000-0000-000000000001'
+     AND e.price_type = 'SALE' AND e.price_day = applied_day;
+  -- Сутки принятия пересчитаны без ушедшей цены: в них осталась другая цена тех же суток (1200), а не 1550
+  IF acc IS NULL OR acc.corrected_by IS DISTINCT FROM 'SYSTEM' OR acc.min_amount_minor IS DISTINCT FROM 1200 OR acc.change_count IS DISTINCT FROM 1 THEN
+    RAISE NOTICE 'acceptance day: by %, min %', acc.corrected_by, acc.min_amount_minor;
+    RAISE EXCEPTION 'the closed day of acceptance is recomputed without the price that moved (Р-29, OQ-192)';
+  END IF;
+  -- Сутки применения получили строку с перенесённой ценой
+  IF app IS NULL OR app.change_count IS DISTINCT FROM 1 OR app.min_amount_minor IS DISTINCT FROM 1550 THEN
+    RAISE NOTICE 'application day: count %, min %', app.change_count, app.min_amount_minor;
+    RAISE EXCEPTION 'the price is counted in the day the channel applied it (OQ-192)';
+  END IF;
+  -- Витринная цена была в сутках одна: сутки остались без цен, суммы пустые
+  IF sale_acc IS NULL OR sale_acc.corrected_by IS DISTINCT FROM 'SYSTEM' OR sale_acc.change_count IS DISTINCT FROM 0 OR sale_acc.min_amount_minor IS NOT NULL THEN
+    RAISE NOTICE 'sale acceptance day: by %, count %, min %', sale_acc.corrected_by, sale_acc.change_count, sale_acc.min_amount_minor;
+    RAISE EXCEPTION 'a day whose only price moved becomes an empty day (Р-29, OQ-192)';
+  END IF;
+  IF sale_app IS NULL OR sale_app.min_amount_minor IS DISTINCT FROM 1700 THEN
+    RAISE NOTICE 'sale application day: min %', sale_app.min_amount_minor;
+    RAISE EXCEPTION 'the sale price is counted in the day it was applied (OQ-192)';
+  END IF;
+  -- Свёртка неизменяема [Р-29]: строка суток принятия осталась прежней, поправка — отдельная строка
+  IF (SELECT d.min_amount_minor FROM tenant_data.price_daily d
+       WHERE d.tenant_id = 'a0000000-0000-0000-0000-00000000000a' AND d.write_scope_id = 'a6000000-0000-0000-0000-000000000001'
+         AND d.price_type = 'REGULAR' AND d.price_day = accepted_day) <> 1550 THEN
+    RAISE EXCEPTION 'the rollup row itself is immutable (Р-29)';
+  END IF;
+  IF again <> 0 THEN
+    RAISE NOTICE 'repeated recomputation wrote % corrections', again;
+    RAISE EXCEPTION 'a repeated recomputation writes nothing (OQ-192)';
+  END IF;
+  -- Поправка человека — последнее слово [Р-29]: пересчёт её не трогает и вторую поправку тех же суток не ставит
+  INSERT INTO tenant_data.price_daily_correction (tenant_id, write_scope_id, price_type, price_day, min_amount_minor, max_amount_minor,
+    first_amount_minor, first_accepted_at, last_amount_minor, last_accepted_at, change_count, min_floor_minor, reason, created_by_membership_id)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', 'SALE', applied_day, 1800, 1800, 1800,
+          now() - interval '2 days', 1800, now() - interval '2 days', 1, 800,
+          'Synthetic human correction of the sale day (Р-29)', 'a2000000-0000-0000-0000-00000000000a');
+  again := maintenance.correct_closed_price_days();
+  SELECT * INTO sale_app FROM tenant_data.price_daily_effective e
+   WHERE e.tenant_id = 'a0000000-0000-0000-0000-00000000000a' AND e.write_scope_id = 'a6000000-0000-0000-0000-000000000001'
+     AND e.price_type = 'SALE' AND e.price_day = applied_day;
+  IF again <> 0 OR sale_app.corrected_by IS DISTINCT FROM 'HUMAN' OR sale_app.min_amount_minor IS DISTINCT FROM 1800 THEN
+    RAISE NOTICE 'after a human correction: wrote %, by %, min %', again, sale_app.corrected_by, sale_app.min_amount_minor;
+    RAISE EXCEPTION 'the recomputation does not touch a day a person corrected (Р-29, OQ-192)';
+  END IF;
+  RAISE NOTICE 'corrections: %', n;
+  RAISE NOTICE 'PASS accept | a late confirmation moves the price by a correction row, not by changing the rollup (Р-29, OQ-192)';
 END $$;
+SELECT pg_temp.expect_fail('a system correction with an unknown reason (OQ-192)', $q$
+  INSERT INTO tenant_data.price_daily_system_correction (tenant_id, write_scope_id, price_type, price_day, change_count, reason)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', 'SALE',
+          ((now() - interval '2 days') AT TIME ZONE 'Europe/Berlin')::date, 0, 'BECAUSE_WE_SAID_SO') $q$,
+  'price_daily_system_correction_reason_check');
+SELECT pg_temp.expect_fail('a system correction whose lowest price is above its highest (OQ-192)', $q$
+  INSERT INTO tenant_data.price_daily_system_correction (tenant_id, write_scope_id, price_type, price_day, min_amount_minor, max_amount_minor,
+    first_amount_minor, first_accepted_at, last_amount_minor, last_accepted_at, change_count, min_floor_minor, reason)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', 'SALE',
+          ((now() - interval '2 days') AT TIME ZONE 'Europe/Berlin')::date, 1900, 1700, 1900, now() - interval '2 days', 1700, now() - interval '2 days', 1, 800,
+          'LATE_APPLIED_CONFIRMATION') $q$,
+  'price_daily_system_correction_bounds');
+SELECT pg_temp.expect_fail('truncate tenant_data.price_daily_system_correction', $q$ TRUNCATE tenant_data.price_daily_system_correction $q$,
+  'TRUNCATE of tenant_data.price_daily_system_correction is forbidden');
+SELECT pg_temp.expect_fail('append-only tenant_data.price_daily_system_correction', $q$
+  UPDATE tenant_data.price_daily_system_correction SET reason = 'LATE_APPLIED_CONFIRMATION' $q$, 'UPDATE is forbidden');
+SELECT pg_temp.expect_fail('a system correction that does not continue the chain of the day (Р-29)', $q$
+  INSERT INTO tenant_data.price_daily_system_correction (tenant_id, write_scope_id, price_type, price_day, change_count, reason)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', 'REGULAR',
+          ((now() - interval '3 days') AT TIME ZONE 'Europe/Berlin')::date, 0, 'LATE_APPLIED_CONFIRMATION') $q$,
+  'system correction must supersede the current correction');
+SELECT pg_temp.expect_fail('a system correction of a day with prices but without the amounts (Р-29)', $q$
+  INSERT INTO tenant_data.price_daily_system_correction (tenant_id, write_scope_id, price_type, price_day, change_count, reason)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', 'REGULAR',
+          ((now() - interval '2 days') AT TIME ZONE 'Europe/Berlin')::date, 2, 'LATE_APPLIED_CONFIRMATION') $q$,
+  'price_daily_system_correction_shape');
 SELECT pg_temp.expect_fail('truncate tenant_data.price_history_applied', $q$ TRUNCATE tenant_data.price_history_applied $q$, 'TRUNCATE of tenant_data.price_history_applied is forbidden');
 -- Шаг 26, D (0094) [риск 31]: уровень отставания работы — в базе, значения известны
 SELECT pg_temp.expect_fail('a scheduled job with an unknown lag level (риск 31)', $q$

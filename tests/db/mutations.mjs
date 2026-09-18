@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0097_verify_schema_invariants_v23.sql';
+const VERIFY = 'migrations/0102_verify_schema_invariants_v24.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -880,14 +880,63 @@ export const STEP26_ROWS = [
         smoke('the Omnibus window uses the time the price was accepted, not applied (OQ-180)', 'the Omnibus window counts the price at the time the channel applied it (OQ-180)')),
       m(replaceInFunction('maintenance.close_price_days(timestamp with time zone,integer)', 'WHERE coalesce(ap.applied_at, h.accepted_at) >= day_start AND coalesce(ap.applied_at, h.accepted_at) < day_end', 'WHERE h.accepted_at >= day_start AND h.accepted_at < day_end'),
         node(T('omnibus-applied-time.pg.test.ts'), 'OQ-180', 'OQ-180: a price applied after midnight is rolled up into the day it was accepted', '^0$')),
-      // Ревью шага 26, находка 4: цена закрытых суток в другие сутки не уезжает — ни триггером, ни вставкой мимо него
-      m(replaceInFunction('tenant_data.price_history_mark_applied()', 'WHERE z.tz IS NOT NULL AND c.day_tz = z.tz', 'WHERE false'),
-        smoke('a price of a day already closed is moved to the day the channel applied it (OQ-180)', 'a price of a day already closed keeps the day it was rolled up into (OQ-180)')),
+      // Шаг 27, D [OQ-192]: правило «цена закрытых суток остаётся в них» заменено поправкой — мутации в строке OQ-192
       // Закрытие тенанта удаляет отметки времени применения: таблица названа в purge_tenant_data (правило проверки схемы)
       m(replaceInFunction('maintenance.purge_tenant_data(uuid,boolean)', "'tenant_data.price_history_applied', ", ''),
         verify('tenant_data\\.price_history_applied: tenant closure does not delete the table')),
       m(dropTrigger('zz_append_only', 'tenant_data.price_history_applied'), smoke('append-only tenant_data.price_history_applied')),
       m(dropTrigger('zz_no_truncate', 'tenant_data.price_history_applied'), smoke('truncate tenant_data.price_history_applied')),
+    ],
+  },
+];
+
+export const STEP27_ROWS = [
+  {
+    row: 'Р-131', invariant: 'единица записи переходит в ENGINE только с объявленной себестоимостью товара',
+    mutations: [
+      m(dropTrigger('zw_write_scope_cost_required_guard', 'tenant_data.write_scope'), smoke('ENGINE without the declared unit cost (Р-131)')),
+      m(replaceInFunction('tenant_data.write_scope_cost_required_guard()', "IF NEW.pricing_mode = 'ENGINE'", 'IF false'),
+        smoke('ENGINE without the declared unit cost (Р-131)')),
+      m(replaceInFunction('tenant_data.write_scope_has_cost(uuid,uuid,timestamp with time zone)', 'SELECT EXISTS (', 'SELECT true OR EXISTS ('),
+        smoke('ENGINE without the declared unit cost (Р-131)')),
+    ],
+  },
+  {
+    row: 'OQ-192', invariant: 'подтверждение применения после закрытия суток переносит цену строкой-поправкой [Р-29]: свёртка не меняется, повтор пересчёта ничего не пишет',
+    mutations: [
+      m(replaceInFunction('maintenance.correct_closed_price_days(timestamp with time zone)', 'AND c.closed_at < m.recorded_at', 'AND false'),
+        smoke('the closed day of acceptance is recomputed without the price that moved (Р-29, OQ-192)',
+          'a late confirmation moves the price by a correction row, not by changing the rollup (Р-29, OQ-192)')),
+      m(replaceInFunction('maintenance.correct_closed_price_days(timestamp with time zone)', "CONTINUE WHEN eff.corrected_by = 'HUMAN';", ''),
+        smoke('the recomputation does not touch a day a person corrected (Р-29, OQ-192)',
+          'a late confirmation moves the price by a correction row, not by changing the rollup (Р-29, OQ-192)')),
+      m(replaceInFunction('maintenance.price_day_rollup(uuid,uuid,text,date,text)', 'coalesce(ap.applied_at, h.accepted_at) >= (p_day::timestamp AT TIME ZONE p_tz)', 'h.accepted_at >= (p_day::timestamp AT TIME ZONE p_tz)'),
+        smoke('the price is counted in the day the channel applied it (OQ-192)',
+          'a late confirmation moves the price by a correction row, not by changing the rollup (Р-29, OQ-192)')),
+      m(dropTrigger('a_price_daily_system_correction_chain', 'tenant_data.price_daily_system_correction'),
+        smoke('a system correction that does not continue the chain of the day (Р-29)')),
+      m(dropConstraint('price_daily_system_correction_shape', 'tenant_data.price_daily_system_correction'),
+        smoke('a system correction of a day with prices but without the amounts (Р-29)')),
+      m(dropConstraint('price_daily_system_correction_bounds', 'tenant_data.price_daily_system_correction'),
+        smoke('a system correction whose lowest price is above its highest (OQ-192)')),
+      m(dropConstraint('price_daily_system_correction_reason_check', 'tenant_data.price_daily_system_correction'),
+        smoke('a system correction with an unknown reason (OQ-192)')),
+      m(dropTrigger('zz_append_only', 'tenant_data.price_daily_system_correction'), smoke('append-only tenant_data.price_daily_system_correction')),
+      m(dropTrigger('zz_no_truncate', 'tenant_data.price_daily_system_correction'), smoke('truncate tenant_data.price_daily_system_correction')),
+      // Закрытие тенанта удаляет поправки: таблица названа в очистке (правило проверки схемы шага 27, задача F)
+      m(replaceInFunction('maintenance.purge_tenant_data(uuid,boolean)', ", 'tenant_data.price_daily_system_correction'", ''),
+        verify('tenant_data\\.price_daily_system_correction: tenant closure does not delete the table')),
+    ],
+  },
+  {
+    row: 'шаг 27, F', invariant: 'закрытие тенанта удаляет и таблицы данных канала, которые раньше ждали срока',
+    mutations: [
+      m(replaceInFunction('maintenance.purge_tenant_channel_data(uuid)', "'channel_data.pricing_halt_sample', ", ''),
+        verify('channel_data\\.pricing_halt_sample: tenant closure does not delete the table')),
+      m(replaceInFunction('maintenance.purge_tenant_channel_data(uuid)', "'channel_data.price_decision_snapshot_ref', ", ''),
+        verify('channel_data\\.price_decision_snapshot_ref: tenant closure does not delete the table')),
+      m(replaceInFunction('maintenance.purge_tenant_channel_data(uuid)', "'channel_data.pricing_strategy_undercut',", ''),
+        verify('channel_data\\.pricing_strategy_undercut: tenant closure does not delete the table')),
     ],
   },
 ];

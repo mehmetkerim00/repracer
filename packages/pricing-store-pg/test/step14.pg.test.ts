@@ -4,7 +4,7 @@ import { exportCoreArchive, MemoryArchiveSink, archiveKey, decodeBundle } from '
 import { can, MEMBER_ROLES, PRICING_ACTIONS, type PriceDecisionDraft, type PriceIntentDraft } from '@repracer/pricing-model';
 import { EXPLANATION_RULESETS, standUserOf, type MemorySeedScope } from '@repracer/pricing-pipeline';
 import { createPool, inTenant, PgPricingStore, seedPricingWorld, type SeededPricingWorld } from '../src/index.ts';
-import { approved, contextOf, explained } from './drafts.ts';
+import { approved, contextOf, engineCost, explained } from './drafts.ts';
 
 /**
  * Шаг 14 в базе — поведение, а не имена в каталоге (ретроспективное ревью, C1):
@@ -39,7 +39,7 @@ const now = () => new Date().toISOString();
 function scopeSeed(n: number): MemorySeedScope {
   return {
     writeScopeId: `ws-${n}`, productId: `prod-${n}`, channelAccountId: ACCOUNT, marketplace: 'de', externalUnitId: String(1400 + n),
-    channelProductRef: `36214${n}`, condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'ENGINE', strategy: FIXED,
+    channelProductRef: `36214${n}`, condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'ENGINE', cost: engineCost(), strategy: FIXED,
     currentPriceMinor: 1850, minPrice: { amountMinor: 1500, id: `min-${n}` }, maxPrice: { amountMinor: 2500, id: `max-${n}` },
   };
 }

@@ -107,13 +107,30 @@ test('halted channel, expired intent and inactive scope are refused', () => {
   assert.deepEqual(decide(gate(1790, { scope: { ...scope, status: 'HELD' } })).outcome, 'HELD');
 });
 
+const DECLARED = { declared: true, cause: null };
+
 test('repricing cannot be enabled without both bounds (Р-43)', () => {
-  assert.deepEqual(validateRepricingEnablement(bounds(1000, null), 'EUR', 'GROSS', STRATEGY).map((r) => r.code), ['MAX_PRICE_MISSING']);
-  assert.deepEqual(validateRepricingEnablement(bounds(null, null), 'EUR', 'GROSS', STRATEGY).map((r) => r.code), ['MIN_PRICE_MISSING', 'MAX_PRICE_MISSING']);
-  assert.deepEqual(validateRepricingEnablement(bounds(3000, 1000), 'EUR', 'GROSS', STRATEGY).map((r) => r.code), ['BOUNDS_INVERTED']);
-  assert.deepEqual(validateRepricingEnablement(bounds(1000, 3000), 'EUR', 'GROSS', STRATEGY), []);
+  assert.deepEqual(validateRepricingEnablement(bounds(1000, null), 'EUR', 'GROSS', STRATEGY, DECLARED).map((r) => r.code), ['MAX_PRICE_MISSING']);
+  assert.deepEqual(validateRepricingEnablement(bounds(null, null), 'EUR', 'GROSS', STRATEGY, DECLARED).map((r) => r.code), ['MIN_PRICE_MISSING', 'MAX_PRICE_MISSING']);
+  assert.deepEqual(validateRepricingEnablement(bounds(3000, 1000), 'EUR', 'GROSS', STRATEGY, DECLARED).map((r) => r.code), ['BOUNDS_INVERTED']);
+  assert.deepEqual(validateRepricingEnablement(bounds(1000, 3000), 'EUR', 'GROSS', STRATEGY, DECLARED), []);
   // Р-77: без стратегии движок не включается
-  assert.deepEqual(validateRepricingEnablement(bounds(1000, 3000), 'EUR', 'GROSS', null).map((r) => r.code), ['STRATEGY_MISSING']);
+  assert.deepEqual(validateRepricingEnablement(bounds(1000, 3000), 'EUR', 'GROSS', null, DECLARED).map((r) => r.code), ['STRATEGY_MISSING']);
+});
+
+test('Р-131: без объявленной себестоимости включение не проходит — с причиной, по которой её нет', () => {
+  // Себестоимости нет вовсе: причина названа, границы и стратегия при этом в порядке
+  assert.deepEqual(validateRepricingEnablement(bounds(1000, 3000), 'EUR', 'GROSS', STRATEGY, { declared: false, cause: 'COST_PROFILE_MISSING' }),
+    [{ code: 'COST_REQUIRED', params: { cause: 'COST_PROFILE_MISSING' } }]);
+  // Себестоимость объявлена, но не переводится в валюту единицы записи [Р-61]: то же препятствие с другой причиной
+  assert.deepEqual(validateRepricingEnablement(bounds(1000, 3000), 'EUR', 'GROSS', STRATEGY, { declared: false, cause: 'FX_RATE_UNAVAILABLE' }).map((r) => r.params.cause),
+    ['FX_RATE_UNAVAILABLE']);
+  // Причина неизвестна — препятствие остаётся, параметров нет: причину не выдумываем
+  assert.deepEqual(validateRepricingEnablement(bounds(1000, 3000), 'EUR', 'GROSS', STRATEGY, { declared: false, cause: null }),
+    [{ code: 'COST_REQUIRED', params: {} }]);
+  // Препятствия не мешают друг другу: без себестоимости, границ и стратегии продавец видит все три
+  assert.deepEqual(validateRepricingEnablement(bounds(null, null), 'EUR', 'GROSS', null, { declared: false, cause: 'COST_PROFILE_MISSING' }).map((r) => r.code),
+    ['COST_REQUIRED', 'STRATEGY_MISSING', 'MIN_PRICE_MISSING', 'MAX_PRICE_MISSING']);
 });
 
 const STRATEGY = { strategyId: 'st-fixed', version: 1, params: { type: 'FIXED' as const, priceMinor: 1790 }, deadbandMinor: 0 };

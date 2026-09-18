@@ -3,12 +3,13 @@
   "id": "kaufland/pipeline/enable-margin-without-cost",
   "channel": "KAUFLAND",
   "apiVersion": "2.44.0",
-  "title": "Включение маржинальной стратегии без себестоимости: предупреждение до включения",
-  "description": "Шаг 12, G, и Р-77: у предложения стратегия целевой маржи и минимальная маржа 15 %, но себестоимость не задана. Включение не проходит молча и не превращается в отказы Gate потом: pipeline возвращает предупреждение MARGIN_WITHOUT_COST с типом стратегии и явным списком, кому нужна себестоимость (стратегии и минимальной марже), режим остаётся OFF. Стратегия хранится на выключенном предложении и в памяти, и в PostgreSQL — тип известен без косвенного вывода. Повторное включение с подтверждением предупреждений включает репрайсинг.",
+  "title": "Включение репрайсинга без себестоимости: база не включает [Р-131]",
+  "description": "Шаг 27, Р-131 (заменяет поведение шага 12, G): у предложения стратегия целевой маржи и минимальная маржа 15 %, но себестоимость не задана. Включение не проходит и подтверждением предупреждения не обходится: pipeline возвращает препятствие COST_REQUIRED с причиной отсутствия себестоимости, режим остаётся OFF. Рядом остаётся предупреждение MARGIN_WITHOUT_COST — продавец видит и требование, и кому именно нужна себестоимость. Стратегия хранится на выключенном предложении и в памяти, и в PostgreSQL — тип известен без косвенного вывода. Продавец объявляет себестоимость — и то же включение проходит, предупреждения больше нет. То же правило проверяет база (0098): переход в ENGINE без себестоимости отклоняется. Второе предложение сценария (4702) себестоимость так и не получает: на нём экран консоли показывает требование, а не предупреждение с обходом.",
   "tags": [
     "pipeline",
     "price-gate",
-    "step-12-g"
+    "step-12-g",
+    "step-27-r131"
   ],
   "provenance": {
     "kind": "SYNTHETIC_FROM_DOCS",
@@ -73,18 +74,61 @@
             ],
             "minMarginBp": 1500
           }
+        },
+        {
+          "writeScopeId": "ws-price-de-4702",
+          "productId": "prod-4702",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "4702",
+          "channelProductRef": "362004702",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "OFF",
+          "strategy": {
+            "strategyId": "st-margin-2500",
+            "version": 1,
+            "params": {
+              "type": "TARGET_MARGIN",
+              "targetMarginBp": 2500
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1600,
+          "minPrice": {
+            "amountMinor": 1000,
+            "id": "min-4702"
+          },
+          "maxPrice": {
+            "amountMinor": 5000,
+            "id": "max-4702"
+          },
+          "guardrails": {
+            "guardrailIds": [
+              "g-margin-de-4702"
+            ],
+            "minMarginBp": 1500
+          }
         }
       ]
     }
   },
   "steps": [
     {
-      "id": "enable-warns",
+      "id": "enable-refused-without-cost",
       "kind": "pipelineEnableRepricing",
       "writeScopeId": "ws-price-de-4701",
       "expect": {
         "enabled": false,
-        "problems": [],
+        "problems": [
+          {
+            "code": "COST_REQUIRED",
+            "params": {
+              "cause": "COST_PROFILE_MISSING"
+            }
+          }
+        ],
         "warnings": [
           {
             "code": "MARGIN_WITHOUT_COST",
@@ -99,12 +143,20 @@
       }
     },
     {
-      "id": "enable-acknowledged",
+      "id": "acknowledging-the-warning-does-not-help",
       "kind": "pipelineEnableRepricing",
       "writeScopeId": "ws-price-de-4701",
+      "acknowledgeWarnings": true,
       "expect": {
-        "enabled": true,
-        "problems": [],
+        "enabled": false,
+        "problems": [
+          {
+            "code": "COST_REQUIRED",
+            "params": {
+              "cause": "COST_PROFILE_MISSING"
+            }
+          }
+        ],
         "warnings": [
           {
             "code": "MARGIN_WITHOUT_COST",
@@ -116,16 +168,42 @@
             }
           }
         ]
-      },
-      "acknowledgeWarnings": true
+      }
+    },
+    {
+      "id": "cost-declared",
+      "kind": "pricingMutation",
+      "op": "setCost",
+      "writeScopeId": "ws-price-de-4701",
+      "value": {
+        "currency": "EUR",
+        "costProfileId": "cp-4701",
+        "unitCostMinor": 800,
+        "fixedFeeMinor": 0,
+        "feeRateBp": 1500,
+        "tax": {
+          "regime": "VAT_INCLUDED",
+          "vatRateBp": 1900
+        }
+      }
+    },
+    {
+      "id": "enable-with-cost",
+      "kind": "pipelineEnableRepricing",
+      "writeScopeId": "ws-price-de-4701",
+      "expect": {
+        "enabled": true,
+        "problems": [],
+        "warnings": []
+      }
     }
   ],
   "exchanges": [],
   "expect": {
     "logs": [
       {
-        "code": "REPRICING_WARNINGS_NOT_ACKNOWLEDGED",
-        "count": 1
+        "code": "REPRICING_NOT_ENABLED",
+        "count": 2
       }
     ],
     "noAlerts": true,
@@ -133,6 +211,9 @@
       "scopes": [
         {
           "pricingMode": "ENGINE"
+        },
+        {
+          "pricingMode": "OFF"
         }
       ],
       "decisions": [],

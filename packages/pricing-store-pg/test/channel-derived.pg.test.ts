@@ -4,7 +4,7 @@ import { after, test } from 'node:test';
 import { CHANNEL_DERIVED_PARAM_KEYS, COMPETITOR_RULE_DERIVED_KEYS, type CostInputs, type PriceDecisionDraft, type PriceIntentDraft } from '@repracer/pricing-model';
 import type { MemorySeedScope } from '@repracer/pricing-pipeline';
 import { createPool, inTenant, PgPricingStore, seedPricingWorld } from '../src/index.ts';
-import { approved, contextOf, explained } from './drafts.ts';
+import { approved, contextOf, engineCost, explained } from './drafts.ts';
 import { requireEnv } from './isolated-db.ts';
 
 /**
@@ -29,7 +29,8 @@ const now = () => new Date().toISOString();
 function scope(n: number): MemorySeedScope {
   return {
     writeScopeId: `ws-${n}`, productId: `prod-${n}`, channelAccountId: ACCOUNT, marketplace: 'de', externalUnitId: String(8500 + n),
-    channelProductRef: `36285${n}`, condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'ENGINE', strategy: BUYBOX,
+    // Р-131 (шаг 27): движок без объявленной себестоимости база не включает; проверка не о себестоимости — профиль синтетический
+    channelProductRef: `36285${n}`, condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'ENGINE', cost: engineCost(), strategy: BUYBOX,
     currentPriceMinor: 1850, minPrice: { amountMinor: 1800, id: `min-${n}` }, maxPrice: { amountMinor: 2500, id: `max-${n}` },
   };
 }

@@ -21,7 +21,7 @@
 | [docs/adr/](docs/adr/) | Architecture Decision Records |
 | [docs/open-questions.md](docs/open-questions.md) | Открытые вопросы |
 | [vendor/kaufland/](vendor/kaufland/) | Снимки спецификации Kaufland Seller API с датой и SHA-256 |
-| [services/](services/) | Развёртываемые сервисы: [pricing-worker](services/pricing-worker/) — путь решения за брокером |
+| [services/](services/) | Развёртываемые сервисы: [pricing-worker](services/pricing-worker/) — путь решения за брокером (диспетчер записей, ретранслятор outbox), [scheduler](services/scheduler/) — периодические работы, [notification-receiver](services/notification-receiver/) — приёмник уведомлений Amazon; развёртывания — [deploy/](deploy/) |
 | [packages/channel-port](packages/channel-port/) | Порт `ChannelAdapter` — контракт всех адаптеров каналов (TypeScript, только типы) |
 | [packages/kaufland-client](packages/kaufland-client/) | Клиент Kaufland: сгенерированные типы + подпись и повторы |
 | [packages/kaufland-adapter](packages/kaufland-adapter/) | Адаптер Kaufland: пакеты, 207, подтверждение, конкуренты, вебхуки; консервативные правила KFL_C01…C18 |

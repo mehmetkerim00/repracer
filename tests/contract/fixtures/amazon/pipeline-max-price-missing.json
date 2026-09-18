@@ -73,7 +73,18 @@
             "amountMinor": 1500,
             "id": "min-4101"
           },
-          "maxPrice": null
+          "maxPrice": null,
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ws-price-de-4101",
+            "unitCostMinor": 450,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
+          }
         }
       ],
       "competitorDaily": {

@@ -115,6 +115,10 @@ SELECT pg_temp.ok('offer attached to derived scope', $q$
 -- Р-94: у проверок границ стратегия задана — иначе отказ даёт ограничение «движок без стратегии» (Р-77), а не граница
 INSERT INTO tenant_data.pricing_strategy (tenant_id, pricing_strategy_id, version, name, type, params, triggers, status, created_by_membership_id)
 VALUES (:tA, 'a9000000-0000-0000-0000-000000000001', 1, 'smoke fixed', 'FIXED', '{"type":"FIXED","priceMinor":1000,"deadbandMinor":0}', ARRAY['SCHEDULE'], 'ACTIVE', :mA);
+-- Р-94, Р-131 (шаг 27): у тех же проверок объявлена и себестоимость — иначе отказ даёт страж себестоимости, а не проверяемая защита.
+-- Сама Р-131 проверяется ниже на отдельном товаре, у которого себестоимости нет
+INSERT INTO tenant_data.cost_profile (tenant_id, product_id, version, valid_from, currency, purchase_cost_minor, source)
+VALUES (:tA, 'a5000000-0000-0000-0000-000000000001', 1, now() - interval '1 day', 'EUR', 900, 'MANUAL');
 SELECT pg_temp.expect_fail('ENGINE without min_price (Р-5)', $q$
   UPDATE tenant_data.write_scope SET pricing_mode = 'ENGINE', pricing_strategy_id = 'a9000000-0000-0000-0000-000000000001', pricing_strategy_version = 1 WHERE write_scope_id = 'a6000000-0000-0000-0000-000000000001' $q$, 'has pricing_mode ENGINE but no active min_price');
 SELECT pg_temp.expect_fail('tenant-level min_price (Р-18)', $q$
@@ -140,8 +144,28 @@ SELECT pg_temp.expect_fail('ENGINE without a strategy (Р-77)', $q$
   UPDATE tenant_data.write_scope SET pricing_mode = 'ENGINE' WHERE write_scope_id = 'a6000000-0000-0000-0000-000000000001' $q$, 'write_scope_engine_has_strategy');
 SELECT pg_temp.ok('strategy kept while OFF (Р-77)', $q$
   UPDATE tenant_data.write_scope SET pricing_strategy_id = 'a9000000-0000-0000-0000-000000000001', pricing_strategy_version = 1 WHERE write_scope_id = 'a6000000-0000-0000-0000-000000000001' $q$);
-SELECT pg_temp.ok('ENGINE with product min_price, max_price and a strategy', $q$
+SELECT pg_temp.ok('ENGINE with product min_price, max_price, a strategy and the declared cost', $q$
   UPDATE tenant_data.write_scope SET pricing_mode = 'ENGINE' WHERE write_scope_id = 'a6000000-0000-0000-0000-000000000001' $q$);
+COMMIT;
+
+BEGIN;
+SELECT set_config('app.tenant_id', :tA, true), set_config('app.user_id', :uA, true) \gset
+-- Р-131 (шаг 27): второй товар — с границами и стратегией, но без себестоимости: движок ему база не включает.
+-- Границы этого товара — отдельной транзакцией: правка границ двух предложений сразу требует второго фактора [Р-88]
+INSERT INTO tenant_data.product (tenant_id, product_id, sku, kind) VALUES (:tA, 'a5000000-0000-0000-0000-000000000009', 'A-9', 'SIMPLE');
+INSERT INTO tenant_data.write_scope (tenant_id, write_scope_id, channel_account_id, channel, field, product_id, capability_id, capability_version,
+  scope_kind, scope_key, currency, price_basis, tax_regime, pricing_mode)
+VALUES (:tA, 'a6000000-0000-0000-0000-000000000009', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'PRICE',
+  'a5000000-0000-0000-0000-000000000009', 'c0000000-0000-0000-0000-000000000001', 1, 'ACCOUNT_STOREFRONT_UNIT',
+  tenant_data.derive_scope_key('{"marketplace":"de","external_unit_id":"U9"}', ARRAY['channel_account','marketplace','external_unit_id']),
+  'EUR', 'GROSS', 'VAT_INCLUDED', 'OFF');
+INSERT INTO tenant_data.min_price (tenant_id, scope_type, product_id, currency, price_basis, amount_minor, version, created_by_membership_id)
+VALUES (:tA, 'PRODUCT', 'a5000000-0000-0000-0000-000000000009', 'EUR', 'GROSS', 1000, 1, :mA);
+INSERT INTO tenant_data.max_price (tenant_id, scope_type, product_id, currency, price_basis, amount_minor, version, created_by_membership_id)
+VALUES (:tA, 'PRODUCT', 'a5000000-0000-0000-0000-000000000009', 'EUR', 'GROSS', 5000, 1, :mA);
+SELECT pg_temp.expect_fail('ENGINE without the declared unit cost (Р-131)', $q$
+  UPDATE tenant_data.write_scope SET pricing_mode = 'ENGINE', pricing_strategy_id = 'a9000000-0000-0000-0000-000000000001', pricing_strategy_version = 1
+   WHERE write_scope_id = 'a6000000-0000-0000-0000-000000000009' $q$, 'repricing needs the declared unit cost of the product');
 COMMIT;
 
 BEGIN;

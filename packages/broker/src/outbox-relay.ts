@@ -94,13 +94,21 @@ export class OutboxRelay {
     return { fetched: events.length, plan };
   }
 
+  /**
+   * Один активный ретранслятор на регион [Р-34]: блокировка берётся на соединении и держится, пока оно живо. Публичный метод —
+   * чтобы проверка в живом режиме шла тем же путём, что и цикл (Р-130)
+   */
+  async tryLock(client: pg.PoolClient): Promise<boolean> {
+    const { rows } = await client.query(`SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS locked`, [LOCK_KEY]);
+    return rows[0].locked === true;
+  }
+
   /** Цикл: удерживает advisory lock на своём соединении; без блокировки ждёт, пока активный ретранслятор не освободит её */
   async run(signal: AbortSignal): Promise<void> {
     const client = await this.options.pool.connect();
     try {
       while (!signal.aborted) {
-        const { rows } = await client.query(`SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS locked`, [LOCK_KEY]);
-        if (rows[0].locked) break;
+        if (await this.tryLock(client)) break;
         await new Promise((r) => setTimeout(r, 1000));
       }
       while (!signal.aborted) {
