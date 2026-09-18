@@ -10,7 +10,9 @@ on:
 jobs:
   test:
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    # Шаг 28: 40 минут перестало хватать — мутационная проверка выросла до 342 мутаций (28 минут), тесты — до 509 (9 минут),
+    # и задание отменялось по лимиту на запуске развёртываний
+    timeout-minutes: 75
     services:
       postgres:
         image: postgres:16
@@ -77,7 +79,8 @@ jobs:
           q "CREATE USER IF NOT EXISTS $REPRACER_CH_READER_USER IDENTIFIED WITH sha256_password BY '$REPRACER_CH_READER_PASSWORD' DEFAULT ROLE repracer_tenant_reader"
           q "GRANT repracer_tenant_reader TO $REPRACER_CH_READER_USER"
       - name: Mutation check of the schema (Р-95) — a guard removed must fail its own check
-        run: node scripts/db/mutation-check.mjs --jobs 2
+        # Раннер CI — четыре ядра: три параллельные копии базы проходят каталог заметно быстрее двух
+        run: node scripts/db/mutation-check.mjs --jobs 3
       - run: npm run typecheck
       - name: All tests, no skips
         run: node scripts/test-all.mjs
