@@ -965,8 +965,8 @@ export const STEP28_ROWS = [
       m(dropTrigger('zz_append_only', 'tenant_data.cost_import'), smoke('append-only tenant_data.cost_import')),
       // Страж TRUNCATE у пакета наблюдаем только без внешнего ключа строк импорта: с ключом база всегда очищает обе таблицы, и
       // отказ даёт страж строк себестоимости — чужая защита [Р-99]. Мутация снимает обе связанные вещи, иначе её видит только сосед
-      m(`ALTER TABLE tenant_data.cost_profile DROP CONSTRAINT cost_profile_import_batch_fk;
-         DROP TRIGGER zz_no_truncate ON tenant_data.cost_import`, smoke('truncate tenant_data.cost_import')),
+      m(`${dropConstraint('cost_profile_import_batch_fk', 'tenant_data.cost_profile')}; ${dropTrigger('zz_no_truncate', 'tenant_data.cost_import')}`,
+        smoke('truncate tenant_data.cost_import')),
       // Закрытие тенанта удаляет пакеты импорта: таблица названа в очистке (правило проверки схемы шага 27, задача F)
       m(replaceInFunction('maintenance.purge_tenant_data(uuid,boolean)', ", 'tenant_data.cost_import'", ''),
         verify('tenant_data\\.cost_import: tenant closure does not delete the table')),
