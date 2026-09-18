@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { parseAmountInput, parsePercentInput, type StrategyDraft, type StrategyListItem, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
+import { LIST_PAGE_DEFAULT, parseAmountInput, parsePercentInput, type ListQuery, type StrategyDraft, type StrategyListItem, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
 import type { StrategySaveResponse } from '../api-types.ts';
 import { ApiError, requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, ErrorBox, errorText, Gaps, Load, ReasonLine, useMessages } from '../components.tsx';
+import { Badge, ErrorBox, errorText, Gaps, Load, Pager, ReasonLine, useMessages } from '../components.tsx';
 
 /**
  * Экран стратегий (шаги 21, 23): черновик или новая версия существующей стратегии → превью на выбранных офферах (движок и Gate на
@@ -123,15 +123,26 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /**
+   * Р-136 (ревью шага 29, находка 3): выбор относится к ПОКАЗАННОЙ странице. Он сбрасывается при листании — иначе продавец,
+   * ушедший на третью страницу, сохранял бы стратегию предложениям первой. Весь каталог выбирается отдельным флагом, и его
+   * раскрывает сервер: перечислить 10 000 идентификаторов в теле запроса нельзя.
+   */
+  const [wholeCatalog, setWholeCatalog] = useState(false);
+  const pageKey = `${view.page.from}:${view.page.to}`;
+  const [shownPage, setShownPage] = useState(pageKey);
+  if (shownPage !== pageKey) { setShownPage(pageKey); setSelected(assignable); setWholeCatalog(false); setPreview(null); }
+
   const changed = () => { setPreview(null); setConfirming(false); };
   const set = <K extends keyof DraftForm>(key: K, value: DraftForm[K]) => { setForm({ ...form, [key]: value }); changed(); };
-  const pick = (ids: string[]) => { setSelected(ids); changed(); };
+  const pick = (ids: string[]) => { setSelected(ids); setWholeCatalog(false); changed(); };
+  const scopeSelection = () => (wholeCatalog ? { all: true } : { writeScopeIds: selected });
 
   const run = async (notice: string | null = null) => {
     setBusy(true); setError(null); setMessage(notice);
     try {
       const draft = assigning ? assigning.draft : draftOf(form);
-      setPreview(await requestJson<StrategyPreviewView>(worldPath(worldId, 'strategies', 'preview'), { method: 'POST', body: { draft, writeScopeIds: selected }, locale: m.locale }));
+      setPreview(await requestJson<StrategyPreviewView>(worldPath(worldId, 'strategies', 'preview'), { method: 'POST', body: { draft, ...scopeSelection() }, locale: m.locale }));
     } catch (e) { setError(errorText(e, m)); } finally { setBusy(false); }
   };
   const save = async () => {
@@ -140,10 +151,10 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
     try {
       const r = assigning
         ? await requestJson<StrategySaveResponse>(worldPath(worldId, 'strategies', 'assign'), {
-          method: 'POST', body: { strategyId: assigning.strategyId, version: assigning.version, writeScopeIds: selected, previewToken: preview.previewToken, confirmed: true }, locale: m.locale,
+          method: 'POST', body: { strategyId: assigning.strategyId, version: assigning.version, ...scopeSelection(), previewToken: preview.previewToken, confirmed: true }, locale: m.locale,
         })
         : await requestJson<StrategySaveResponse>(worldPath(worldId, 'strategies'), {
-          method: 'POST', body: { draft: draftOf(form), writeScopeIds: selected, strategyId: form.strategyId, previewToken: preview.previewToken, confirmed: true }, locale: m.locale,
+          method: 'POST', body: { draft: draftOf(form), ...scopeSelection(), strategyId: form.strategyId, previewToken: preview.previewToken, confirmed: true }, locale: m.locale,
         });
       setMessage(r.message); setPreview(null); setConfirming(false); setBusy(false); setAssigning(null);
     } catch (e) {
@@ -173,7 +184,11 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
         {view.strategies.map((s) => (
           <li key={s.strategyId}>
             <strong>{s.name ?? t.unnamed}</strong> · {s.label} {t.versionShort(s.version)} <span className="small muted">{s.detail}</span>
-            <div className="small">{s.scopes.length === 0 ? <span className="muted">{t.notUsed}</span> : s.scopes.map((u) => `${u.unit.label} (${t.versionShort(u.version)})`).join(', ')}</div>
+            {/* Р-136: показаны примеры, а сколько всего — числом: у стратегии каталога предложений могут быть тысячи */}
+            <div className="small">{s.scopeCount === 0 ? <span className="muted">{t.notUsed}</span> : (
+              <>{s.scopes.map((u) => `${u.unit.label} (${t.versionShort(u.version)})`).join(', ')}
+                {s.scopeCount > s.scopes.length ? <span className="muted"> {t.usedBy(s.scopeCount)}</span> : null}</>
+            )}</div>
             <div className="small muted">{t.versionsTitle}: {s.versions.map((v) => t.versionLine(v.version, v.status, v.author, v.createdAt)).join('; ')}</div>
             {view.canEdit ? <button type="button" disabled={busy} onClick={() => { setAssigning(null); setForm(formOf(s)); changed(); setMessage(null); }}>{t.newVersion}</button> : null}
             {s.assignable ? <button type="button" disabled={busy} onClick={() => { setAssigning(s); changed(); setMessage(null); }}>{t.assignVersion}</button> : null}
@@ -223,6 +238,10 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
         <button type="button" disabled={busy} onClick={() => pick(assignable)}>{t.selectAll}</button>
         <button type="button" disabled={busy} onClick={() => pick([])}>{t.selectNone}</button>
       </div>
+      <label className="whole-catalog">
+        <input type="checkbox" checked={wholeCatalog} disabled={busy}
+          onChange={(e) => { setWholeCatalog(e.target.checked); setSelected([]); changed(); }} /> {t.selectAllCatalog(view.page.total)}
+      </label>
       <ul className="index">
         {view.scopes.map((s) => (
           <li key={s.unit.writeScopeId}>
@@ -235,7 +254,7 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
         ))}
       </ul>
       <div className="buttons">
-        <button type="button" disabled={busy || selected.length === 0} onClick={() => void run()}>{t.preview}</button>
+        <button type="button" disabled={busy || (selected.length === 0 && !wholeCatalog)} onClick={() => void run()}>{t.preview}</button>
         {view.canEdit
           ? <button type="button" className="danger" disabled={busy || !preview || preview.saveBlocked !== null || confirming} onClick={() => setConfirming(true)}>{t.save}</button>
           : null}
@@ -262,6 +281,11 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
 
 export function StrategiesScreen({ worldId }: { worldId: string }) {
   const m = useMessages();
-  const [resource, retry] = useResource<StrategyListView>(worldPath(worldId, 'strategies'), m.locale);
-  return <Load resource={resource} retry={retry}>{(view) => <StrategiesScreenView view={view} worldId={worldId} />}</Load>;
+  const [query, setQuery] = useState<ListQuery>({ offset: 0, limit: LIST_PAGE_DEFAULT });
+  const [resource, retry] = useResource<StrategyListView>(`${worldPath(worldId, 'strategies')}?offset=${query.offset}&limit=${query.limit}`, m.locale);
+  return (
+    <Load resource={resource} retry={retry}>
+      {(view) => <><StrategiesScreenView view={view} worldId={worldId} /><Pager page={view.page} query={query} onQuery={setQuery} /></>}
+    </Load>
+  );
 }

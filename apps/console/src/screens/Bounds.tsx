@@ -1,7 +1,8 @@
-import type { BoundsView, PriceBreakdown } from '@repracer/console-model';
+import { useState } from 'react';
+import { LIST_PAGE_DEFAULT, type BoundsView, type ListQuery, type PriceBreakdown } from '@repracer/console-model';
 import type { BoundsIndexItem, BoundsIndexView as BoundsIndexData } from '../api-types.ts';
 import { useResource, worldPath } from '../api.ts';
-import { Gaps, href, Load, useMessages } from '../components.tsx';
+import { Gaps, href, Load, Pager, useMessages } from '../components.tsx';
 import { BoundsEditPanel } from './BoundsEdit.tsx';
 
 export function BreakdownTable({ breakdown, currency }: { breakdown: PriceBreakdown; currency: string }) {
@@ -56,6 +57,15 @@ export function BoundsScreenView({ view }: { view: BoundsView }) {
         </ul>
       )}
 
+      {view.feeEstimates.length > 0 ? (
+        <ul className="fee-estimates">
+          {/* Р-138: число продавца и тарифная таблица — рядом; помечено то, по которому считается пол */}
+          {view.feeEstimates.map((f) => (
+            <li key={f.source} className={f.used ? 'used' : 'muted'}>{f.text}{f.used ? ` — ${b.feeUsed}` : ''}</li>
+          ))}
+        </ul>
+      ) : null}
+
       {view.floorBreakdown ? <BreakdownTable breakdown={view.floorBreakdown} currency={view.currency} /> : null}
       {view.currentBreakdown ? <BreakdownTable breakdown={view.currentBreakdown} currency={view.currency} /> : null}
 
@@ -86,8 +96,20 @@ export function BoundsScreen({ worldId, writeScopeId }: { worldId: string; write
 
 function BoundsIndex({ worldId }: { worldId: string }) {
   const m = useMessages();
-  const [resource, retry] = useResource<BoundsIndexData>(worldPath(worldId, 'bounds'), m.locale);
-  return <Load resource={resource} retry={retry}>{(view) => <><BoundsIndexView worldId={worldId} items={view.items} /><BoundsEditPanel worldId={worldId} items={view.items} canEdit={view.canEdit} /></>}</Load>;
+  // Р-136: страница списка; массовая правка применяется к показанной странице — выбор продавца всегда виден на экране
+  const [query, setQuery] = useState<ListQuery>({ offset: 0, limit: LIST_PAGE_DEFAULT });
+  const [resource, retry] = useResource<BoundsIndexData>(`${worldPath(worldId, 'bounds')}?offset=${query.offset}&limit=${query.limit}`, m.locale);
+  return (
+    <Load resource={resource} retry={retry}>
+      {(view) => (
+        <>
+          <BoundsIndexView worldId={worldId} items={view.items} />
+          <Pager page={view.page} query={query} onQuery={setQuery} />
+          <BoundsEditPanel worldId={worldId} items={view.items} total={view.page.total} canEdit={view.canEdit} />
+        </>
+      )}
+    </Load>
+  );
 }
 
 function BoundsDetail({ worldId, writeScopeId }: { worldId: string; writeScopeId: string }) {

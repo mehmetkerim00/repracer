@@ -1,4 +1,4 @@
-import type { BoundsEditRequest, HumanReason, Locale, MemberRole, StopTarget, StrategyListView } from '@repracer/console-model';
+import type { BoundsEditRequest, HumanReason, Locale, MemberRole, PageInfo, StopTarget, StrategyListView } from '@repracer/console-model';
 
 /** Контракт сервера стенда и интерфейса: экраны получают готовые модели @repracer/console-model на языке сессии [Р-72] */
 
@@ -41,6 +41,8 @@ export interface BoundsIndexItem {
 /** Шаг 23: список границ и право правки по роли зрителя (MANAGE_PRICING) — кнопок без права экран не показывает */
 export interface BoundsIndexView {
   items: BoundsIndexItem[];
+  /** Р-136: страница списка — каталог целевого клиента в один ответ не помещается */
+  page: PageInfo;
   canEdit: boolean;
 }
 

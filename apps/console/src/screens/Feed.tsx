@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { FEED_PERIODS_DAYS, FEED_STATUS_GROUPS, type FeedQuery, type PriceFeedView } from '@repracer/console-model';
 import { useResource, worldPath } from '../api.ts';
-import { Badge, Gaps, href, Load, ReasonLine, useMessages } from '../components.tsx';
+import { OfferPicker, Badge, Gaps, href, Load, ReasonLine, useMessages } from '../components.tsx';
 
 /**
  * Лента изменений цен (шаги 21, 23): запись в канал от решения до итога, новые сверху. Фильтры по статусу, офферу и периоду и
@@ -43,10 +43,9 @@ export function FeedScreenView({ view, onQuery }: { view: PriceFeedView; onQuery
             <option value="">{f.filters.all}</option>
             {FEED_STATUS_GROUPS.map((g) => <option key={g} value={g}>{f.statusGroups[g]}</option>)}
           </select></label>
-          <label>{f.filters.offer} <select value={q.writeScopeId ?? ''} onChange={(e) => change({ writeScopeId: e.target.value || undefined })}>
-            <option value="">{f.filters.all}</option>
-            {view.offers.map((o) => <option key={o.writeScopeId} value={o.writeScopeId}>{o.label}</option>)}
-          </select></label>
+          {/* Р-136 (ревью шага 29, находка 4): предложение выбирается поиском — список показывает первые несколько сотен из каталога */}
+          <label>{f.filters.offer} <OfferPicker worldId={view.worldId} value={q.writeScopeId ?? ''} allowEmpty emptyLabel={f.filters.all}
+            onChange={(writeScopeId) => change({ writeScopeId: writeScopeId || undefined })} /></label>
           <label>{f.filters.period} <select value={q.days ?? ''} onChange={(e) => change({ days: (e.target.value ? Number(e.target.value) : undefined) as FeedQuery['days'] })}>
             <option value="">{f.filters.all}</option>
             {FEED_PERIODS_DAYS.map((d) => <option key={d} value={d}>{f.periodDays(d)}</option>)}

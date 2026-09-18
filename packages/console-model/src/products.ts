@@ -1,6 +1,7 @@
 import { can, COMPETITOR_DERIVED_RULES, type BoundResolution, type StrategyDefinition } from '@repracer/pricing-model';
 import { effectiveFloor } from './bounds.ts';
 import type { Messages } from './i18n/index.ts';
+import { listQuery, pageOf, type ListQuery, type PageInfo } from './page.ts';
 import { gap, unitOf, type ConsoleScope, type ConsoleWrite, type Gap, type StandWorld, type StatusCell, type UnitRef } from './world.ts';
 
 /** Экран A: товары с явными статусами; действующий пол — главный, min_price — его составляющая (шаг 12, F) */
@@ -46,6 +47,8 @@ export interface ProductListView {
   now: string;
   totals: { total: number; enabled: number; applying: number; stopped: number; off: number };
   rows: ProductRow[];
+  /** Р-136: страница показанных строк — каталог целевого клиента целиком в ответ не помещается */
+  page: PageInfo;
   gaps: Gap[];
 }
 
@@ -150,11 +153,19 @@ export function channelNotes(world: StandWorld, scope: ConsoleScope, m: Messages
   return notes;
 }
 
-export function productList(world: StandWorld, m: Messages): ProductListView {
+export function productList(world: StandWorld, m: Messages, query?: ListQuery): ProductListView {
   const { state } = world;
   const p = m.ui.products;
-  const rows = state.scopes.map((scope): ProductRow => {
-    const decisions = state.decisions.filter((d) => d.writeScopeId === scope.writeScopeId).sort((a, b) => Date.parse(b.decidedAt) - Date.parse(a.decidedAt));
+  // Р-136: строится только показанная страница; решения группируются один раз — перебор всех решений на каждый оффер был квадратичным
+  const { items: shown, page } = pageOf(state.scopes, listQuery(query), m);
+  const byScope = new Map<string, typeof state.decisions[number][]>();
+  for (const d of state.decisions) byScope.set(d.writeScopeId, [...(byScope.get(d.writeScopeId) ?? []), d]);
+  // «Применяется сейчас» считается по записям в полёте: они есть у немногих офферов, и это дешевле перебора каталога
+  const scopesWithWrites = new Set(state.writes.map((w) => w.writeScopeId));
+  const shownApplying = state.scopes.filter((sc) => scopesWithWrites.has(sc.writeScopeId))
+    .filter((sc) => ['progress', 'warn'].includes(applyingCell(sc, state.writes, m).tone)).length;
+  const rows = shown.map((scope): ProductRow => {
+    const decisions = (byScope.get(scope.writeScopeId) ?? []).sort((a, b) => Date.parse(b.decidedAt) - Date.parse(a.decidedAt));
     const floor = effectiveFloor(scope, world);
     const money = (v: number | null) => m.money(v, scope.currency);
     const parts = floor.minMinor === null ? p.floorNoMin
@@ -182,14 +193,16 @@ export function productList(world: StandWorld, m: Messages): ProductListView {
   return {
     worldId: world.id,
     now: m.when(world.now),
+    // Итоги — по ВСЕМУ каталогу, а не по показанной странице: «включено 3 из 10 000» продавец читает как состояние дел
     totals: {
-      total: rows.length,
-      enabled: rows.filter((r) => r.enabled.tone === 'ok').length,
-      applying: rows.filter((r) => r.applying.tone === 'progress' || r.applying.tone === 'warn').length,
-      stopped: rows.filter((r) => r.enabled.tone === 'stop').length,
-      off: rows.filter((r) => r.enabled.tone === 'off').length,
+      total: state.scopes.length,
+      enabled: state.scopes.filter((sc) => enabledCell(sc, m).tone === 'ok').length,
+      applying: shownApplying,
+      stopped: state.scopes.filter((sc) => enabledCell(sc, m).tone === 'stop').length,
+      off: state.scopes.filter((sc) => enabledCell(sc, m).tone === 'off').length,
     },
     rows,
+    page,
     gaps: [gap(m, 'PRODUCT_TITLE'), gap(m, 'NEXT_CHECK'), gap(m, 'USER_TIME_ZONE'), ...(state.pricingHealth.length > 0 ? [gap(m, 'PRICING_HEALTH_ISSUES')] : [])],
   };
 }

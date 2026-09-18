@@ -37,6 +37,11 @@ export interface BoundsView {
   marginFloor: { minMarginBp: string | null; amount: string | null; minor: number | null; unavailable: string | null };
   effectiveFloor: { amount: string; minor: number | null; source: string };
   cost: { lines: MoneyLine[]; fx: string | null; unavailable: string | null };
+  /**
+   * Р-138 (шаг 29): оценки комиссии с источниками. Когда число продавца и тарифная таблица расходятся, показываются ОБА, и
+   * названо, по какому считается пол (по большему — заниженная комиссия опускала бы пол).
+   */
+  feeEstimates: Array<{ source: string; text: string; used: boolean }>;
   floorBreakdown: PriceBreakdown | null;
   currentBreakdown: PriceBreakdown | null;
   calculatorCheck: string[];
@@ -146,6 +151,8 @@ export function boundsView(world: StandWorld, writeScopeId: string, m: Messages)
     maxPrice: { amount: boundText(scope.bounds.max, c, m), minor: scope.bounds.max.status === 'RESOLVED' ? scope.bounds.max.amountMinor : null, source: source(scope.bounds.max) },
     marginFloor,
     effectiveFloor: { amount: money(floor.minor), minor: floor.minor, source: floorSource },
+    // Р-138: оценка продавца и тарифная таблица показываются рядом; помечена та, по которой считается пол
+    feeEstimates: feeEstimatesView(scope, m),
     cost: {
       lines: cost
         ? [
@@ -162,4 +169,29 @@ export function boundsView(world: StandWorld, writeScopeId: string, m: Messages)
     calculatorCheck: b.calculatorSteps(scope.taxRegime === 'VAT_INCLUDED'),
     gaps: [gap(m, 'COST_COMPONENTS'), gap(m, 'FEE_TARIFF')],
   };
+}
+
+/**
+ * Р-138: действующие оценки комиссии с источниками — по какой считается пол, видно на экране. «Дороже» — это не «больше ставка»:
+ * «0 % плюс 5 €» дороже «10 %» на цене ниже 50 € (ревью шага 29, находка 8). Поэтому считается пол по каждой оценке той же
+ * формулой, что у базы, и помечается оценка с наибольшим полом. Неполные оценки база не берёт — их и экран не помечает.
+ */
+function feeEstimatesView(scope: ConsoleScope, m: Messages): Array<{ source: string; text: string; used: boolean }> {
+  const estimates = scope.feeEstimates ?? [];
+  if (estimates.length === 0) return [];
+  const cost = scope.cost;
+  const minMarginBp = scope.minMarginBp;
+  const floorOf = (f: { feeRateBp: number | null; fixedFeeMinor: number | null }): number | null => {
+    if (!cost || minMarginBp === null || f.feeRateBp === null || f.fixedFeeMinor === null) return null;
+    const priced = storefrontPriceForMarginBp({ ...cost, feeRateBp: f.feeRateBp, fixedFeeMinor: f.fixedFeeMinor }, minMarginBp);
+    return priced.ok ? priced.priceMinor : null;
+  };
+  const complete = estimates.filter((f) => floorOf(f) !== null);
+  const strongest = complete.length === 0 ? null : [...complete].sort((a, b) => floorOf(b)! - floorOf(a)!)[0]!;
+  return estimates.map((f) => ({
+    source: f.source,
+    text: m.ui.bounds.feeEstimate(m.values[f.source as keyof typeof m.values] ?? f.source, f.feeRateBp === null ? m.ui.common.noValue : m.percentBp(f.feeRateBp),
+      f.fixedFeeMinor === null ? m.ui.common.noValue : m.money(f.fixedFeeMinor, scope.currency), f.scheduleVersion),
+    used: f === strongest,
+  }));
 }

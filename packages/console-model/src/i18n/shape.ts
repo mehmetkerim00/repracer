@@ -18,7 +18,9 @@ export type ValueKey =
   | (typeof SNAPSHOT_FIELDS)[number] | (typeof SNAPSHOT_INCONSISTENCIES)[number] | (typeof STOP_SCOPES)[number] | (typeof STOP_STAGES)[number]
   | (typeof STRATEGY_PARAM_NAMES)[number] | (typeof STRATEGY_TYPES)[number] | (typeof UNMET_REQUIREMENTS)[number] | (typeof WRITE_ERROR_CODES)[number]
   | (typeof LOWEST_SCOPES)[number] | (typeof MARGIN_REQUIREMENTS)[number] | (typeof BASIS_MISMATCH_DIRECTIONS)[number] | (typeof DISTRUST_REASONS)[number]
-  | 'INTERNAL' | 'VAT_INCLUDED' | 'SALES_TAX_EXCLUDED' | 'VAT_RATE_MISSING' | 'UNKNOWN_CHANNEL' | 'OTTO';
+  | 'INTERNAL' | 'VAT_INCLUDED' | 'SALES_TAX_EXCLUDED' | 'VAT_RATE_MISSING' | 'UNKNOWN_CHANNEL' | 'OTTO'
+  // Р-138 (шаг 29): источники оценки комиссии — продавец видит, чьё это число
+  | 'SELLER_DECLARED' | 'FEE_SCHEDULE' | 'CHANNEL_API' | 'CALIBRATED';
 
 export interface NumberFormat {
   money(minor: number | null | undefined, currency: string | null | undefined): string;

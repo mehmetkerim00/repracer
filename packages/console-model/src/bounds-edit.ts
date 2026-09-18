@@ -14,6 +14,8 @@ import { gap, scopeById, unitOf, type Gap, type StandWorld, type Tone, type Unit
 export type BoundAdjust = { kind: 'SET'; minor: number } | { kind: 'PERCENT'; bp: number };
 
 export interface BoundsEditRequest {
+  /** Весь каталог: раскрывается сервером [Р-136] */
+  all?: boolean;
   writeScopeIds: string[];
   min?: BoundAdjust;
   max?: BoundAdjust;
@@ -21,7 +23,12 @@ export interface BoundsEditRequest {
 
 export type BoundsRequestProblem = { code: 'NO_SCOPES' | 'NOTHING_TO_CHANGE' | 'UNKNOWN_SCOPE' | 'BAD_AMOUNT' | 'BOUND_NOT_SET'; writeScopeId?: string; bound?: 'min' | 'max' };
 
-const MAX_SCOPES = 500;
+/**
+ * Р-136 (шаг 29): за один раз правятся границы всего каталога целевого клиента. Было 500 — живой прогон через консоль показал, что
+ * продавцу с 10 000 предложений консоль отвечала «запрос неверен», не называя ни предела, ни того, что делать. Число — предел
+ * продукта: столько же строк принимает импорт себестоимости (`row_count <= 200000`), и оно измерено живым прогоном.
+ */
+export const MAX_SCOPES = 200_000;
 
 /** Процент — от действующей границы, округление до цента половиной вверх */
 function adjusted(current: number | null, adjust: BoundAdjust): number | null {
@@ -58,18 +65,29 @@ export function parseBoundsEditRequest(raw: unknown): BoundsEditRequest | null {
   };
   const min = adjust(r.min);
   const max = adjust(r.max);
-  if (min === null || max === null || !Array.isArray(r.writeScopeIds) || !r.writeScopeIds.every((x) => typeof x === 'string') || r.writeScopeIds.length > MAX_SCOPES) return null;
+  if (min === null || max === null) return null;
+  /**
+   * Р-136 (шаг 29, ревью, находка 1 и 2): «все предложения» — это ВЫБОР, а не список из десяти тысяч идентификаторов. Список
+   * каталога весит 381 КБ и не проходит предел тела запроса (413), а экран со страницами может показать только страницу — до
+   * этого «выбрать всё» означало «выбрать показанные 50». Раскрывает выбор сервер, по состоянию мира.
+   */
+  if (r.all === true) return { all: true, writeScopeIds: [], ...(min ? { min } : {}), ...(max ? { max } : {}) };
+  if (!Array.isArray(r.writeScopeIds) || !r.writeScopeIds.every((x) => typeof x === 'string') || r.writeScopeIds.length > MAX_SCOPES) return null;
   return { writeScopeIds: [...new Set(r.writeScopeIds as string[])], ...(min ? { min } : {}), ...(max ? { max } : {}) };
 }
 
 /** Запрос → правки с ожидаемыми действующими границами (то, что человек видит сейчас) */
 export function expandBoundsEdit(world: StandWorld, request: BoundsEditRequest): { edits: BoundsEditInput[]; problems: BoundsRequestProblem[] } {
   const problems: BoundsRequestProblem[] = [];
-  if (request.writeScopeIds.length === 0) problems.push({ code: 'NO_SCOPES' });
+  // «Все предложения» раскрывается здесь: продавец выбрал каталог, а не перечислил его
+  const ids = request.all ? world.state.scopes.map((s) => s.writeScopeId) : request.writeScopeIds;
+  if (ids.length === 0) problems.push({ code: 'NO_SCOPES' });
   if (!request.min && !request.max) problems.push({ code: 'NOTHING_TO_CHANGE' });
+  // Поиск предложения — по отображению: перебор состояния на каждый идентификатор был квадратичным (ревью шага 29, находка 11)
+  const byId = new Map(world.state.scopes.map((s) => [s.writeScopeId, s]));
   const edits: BoundsEditInput[] = [];
-  for (const id of request.writeScopeIds) {
-    const scope = scopeById(world, id);
+  for (const id of ids) {
+    const scope = byId.get(id);
     if (!scope) { problems.push({ code: 'UNKNOWN_SCOPE', writeScopeId: id }); continue; }
     const current = {
       minMinor: scope.bounds.min.status === 'RESOLVED' ? scope.bounds.min.amountMinor : null,
@@ -104,10 +122,19 @@ export interface DiffRow {
   flags: Array<{ code: DiffFlag; text: string }>;
 }
 
+/**
+ * Сколько строк различий показывать: как у импорта себестоимости [Р-134] — первые строки и итоги. Живой прогон через консоль
+ * показал 4,2 МБ ответа на каталог целевого клиента: столько строк никто не читает, а браузер их разбирает секунды [Р-136].
+ */
+export const DIFF_ROWS_SHOWN = 50;
+
 export interface BoundsDiffView {
   worldId: string;
   headline: string;
+  /** Показанные строки: первые DIFF_ROWS_SHOWN; сколько их всего — в summary.scopes */
   rows: DiffRow[];
+  /** Строки с пометками показываются первыми: продавцу важно именно опасное */
+  shown: { rows: number; of: number };
   summary: { scopes: number; flagged: number; pricesOutside: number };
   mfaRequired: boolean;
   /** Применение принимается только с этим токеном: правки и различия — те, что видел человек */
@@ -124,8 +151,10 @@ const bigChange = (before: number | null, after: number | null) =>
 
 export function boundsDiffView(world: StandWorld, edits: readonly BoundsEditInput[], rows: readonly BoundsEditRow[], m: Messages): BoundsDiffView {
   const t = m.ui.boundsEdit;
+  // Предложение ищется по отображению: перебор состояния на каждую строку был квадратичным (ревью шага 29, находка 11)
+  const byId = new Map(world.state.scopes.map((s) => [s.writeScopeId, s]));
   const out = rows.map((r): DiffRow => {
-    const scope = scopeById(world, r.writeScopeId)!;
+    const scope = byId.get(r.writeScopeId)!;
     const money = (v: number | null) => m.money(v, r.currency);
     const flags: DiffRow['flags'] = [];
     const price = scope.currentPriceMinor;
@@ -146,13 +175,16 @@ export function boundsDiffView(world: StandWorld, edits: readonly BoundsEditInpu
       currentPrice: money(price), flags,
     };
   });
+  // Сначала — строки с пометками: если показать можно не всё, показывается то, что важно
+  const ordered = [...out].sort((a, b) => b.flags.length - a.flags.length);
   const summary = {
     scopes: out.length,
     flagged: out.filter((r) => r.flags.length > 0).length,
     pricesOutside: out.filter((r) => r.flags.some((f) => f.code === 'PRICE_BELOW_NEW_FLOOR' || f.code === 'PRICE_ABOVE_NEW_CEILING')).length,
   };
   return {
-    worldId: world.id, headline: t.headline(summary), rows: out, summary, mfaRequired: out.length > 1,
+    worldId: world.id, headline: t.headline(summary), rows: ordered.slice(0, DIFF_ROWS_SHOWN),
+    shown: { rows: Math.min(ordered.length, DIFF_ROWS_SHOWN), of: out.length }, summary, mfaRequired: out.length > 1,
     planToken: boundsPlanToken(edits, rows), gaps: [gap(m, 'BOUND_LEVELS'), gap(m, 'MASS_EDIT_MFA_PER_TRANSACTION')],
   };
 }

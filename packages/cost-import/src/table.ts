@@ -6,12 +6,84 @@ import { inflateRawSync } from 'node:zlib';
  * текст. Формулы, стили, даты как числа и прочее богатство таблицы нас не интересуют — значение ячейки берётся так, как его видел
  * продавец (кэш значения формулы, общая строка, число).
  */
+/** Кодировки, которые встречаются в выгрузках продавцов: UTF-8 (в том числе с BOM), UTF-16 из Excel и немецкая Windows-1252 */
+export const TABLE_ENCODINGS = ['UTF-8', 'UTF-16LE', 'UTF-16BE', 'WINDOWS-1252'] as const;
+export type TableEncoding = (typeof TABLE_ENCODINGS)[number];
+
+export interface EncodingGuess {
+  encoding: TableEncoding;
+  /** Уверены ли: BOM и правильный UTF-8 — да; «байты не UTF-8, значит, наверное, Windows-1252» — нет [OQ-200] */
+  confident: boolean;
+  /** Почему так решили — это показывается продавцу рядом с разделителем */
+  reason: 'BOM' | 'VALID_UTF8' | 'ASCII_ONLY' | 'NUL_BYTES' | 'NOT_UTF8';
+}
+
+/**
+ * OQ-200 (шаг 29): кодировка определяется по BOM и по содержимому, а не предполагается. Немецкие выгрузки часто приходят в
+ * Windows-1252, и «€» в суммах разбирался как неверная строка — весь файл оказывался «не числом». Где уверенности нет,
+ * продавца СПРАШИВАЮТ: экран показывает, как файл прочитан, и даёт выбрать кодировку.
+ */
+export function detectEncoding(content: Buffer): EncodingGuess {
+  if (content.length >= 3 && content[0] === 0xef && content[1] === 0xbb && content[2] === 0xbf) return { encoding: 'UTF-8', confident: true, reason: 'BOM' };
+  if (content.length >= 2 && content[0] === 0xff && content[1] === 0xfe) return { encoding: 'UTF-16LE', confident: true, reason: 'BOM' };
+  if (content.length >= 2 && content[0] === 0xfe && content[1] === 0xff) return { encoding: 'UTF-16BE', confident: true, reason: 'BOM' };
+  // UTF-16 без BOM узнаётся по нулевым байтам через один: «Unicode text» из Excel пишется именно так
+  const head = content.subarray(0, Math.min(content.length, 4096));
+  const evenNul = head.filter((_, i) => i % 2 === 0 && head[i] === 0).length;
+  const oddNul = head.filter((_, i) => i % 2 === 1 && head[i] === 0).length;
+  if (head.length >= 16 && oddNul > head.length / 4 && evenNul === 0) return { encoding: 'UTF-16LE', confident: true, reason: 'NUL_BYTES' };
+  if (head.length >= 16 && evenNul > head.length / 4 && oddNul === 0) return { encoding: 'UTF-16BE', confident: true, reason: 'NUL_BYTES' };
+  if (content.every((b) => b < 0x80)) return { encoding: 'UTF-8', confident: true, reason: 'ASCII_ONLY' };
+  return isValidUtf8(content)
+    ? { encoding: 'UTF-8', confident: true, reason: 'VALID_UTF8' }
+    // Байты не складываются в UTF-8: скорее всего Windows-1252 (немецкий Excel), но это догадка — её видно на экране
+    : { encoding: 'WINDOWS-1252', confident: false, reason: 'NOT_UTF8' };
+}
+
+/** Проверка строгая: любая неверная последовательность — это не UTF-8, а не «символ замены» */
+function isValidUtf8(content: Buffer): boolean {
+  for (let i = 0; i < content.length;) {
+    const b = content[i]!;
+    const length = b < 0x80 ? 1 : b >= 0xc2 && b <= 0xdf ? 2 : b >= 0xe0 && b <= 0xef ? 3 : b >= 0xf0 && b <= 0xf4 ? 4 : 0;
+    if (length === 0 || i + length > content.length) return false;
+    for (let k = 1; k < length; k += 1) {
+      const c = content[i + k]!;
+      if (c < 0x80 || c > 0xbf) return false;
+    }
+    i += length;
+  }
+  return true;
+}
+
+/** Байты 0x80–0x9F Windows-1252 отличаются от ISO-8859-1 — среди них «€», а он стоит в колонке сумм */
+const CP1252_HIGH = ['\u20ac', '\u0081', '\u201a', '\u0192', '\u201e', '\u2026', '\u2020', '\u2021', '\u02c6', '\u2030', '\u0160', '\u2039', '\u0152',
+  '\u008d', '\u017d', '\u008f', '\u0090', '\u2018', '\u2019', '\u201c', '\u201d', '\u2022', '\u2013', '\u2014', '\u02dc', '\u2122', '\u0161',
+  '\u203a', '\u0153', '\u009d', '\u017e', '\u0178'];
+
+export function decodeTable(content: Buffer, encoding: TableEncoding): string {
+  if (encoding === 'UTF-16LE') return content.toString('utf16le').replace(/^\ufeff/, '');
+  if (encoding === 'UTF-16BE') {
+    const swapped = Buffer.from(content);
+    for (let i = 0; i + 1 < swapped.length; i += 2) { const t = swapped[i]!; swapped[i] = swapped[i + 1]!; swapped[i + 1] = t; }
+    return swapped.toString('utf16le').replace(/^\ufeff/, '');
+  }
+  if (encoding === 'WINDOWS-1252') {
+    let out = '';
+    for (const b of content) out += b >= 0x80 && b <= 0x9f ? CP1252_HIGH[b - 0x80]! : String.fromCharCode(b);
+    return out;
+  }
+  return content.toString('utf8').replace(/^\ufeff/, '');
+}
+
 export interface Sheet {
   /** Строки в порядке файла; короткие строки дополняются пустыми ячейками до ширины самой длинной */
   rows: string[][];
   /** Как файл был прочитан: продавцу важно знать, что мы поняли разделитель и кодировку так же, как он */
   format: 'CSV' | 'XLSX';
   delimiter?: ',' | ';' | '\t';
+  /** Как прочитаны байты файла [OQ-200]: у XLSX кодировка внутри книги, у CSV — определена или выбрана продавцом */
+  encoding?: TableEncoding;
+  encodingConfident?: boolean;
   /**
    * Номер строки В ФАЙЛЕ для каждой строки `rows` (с единицы). Ревью шага 28, находка 13: пустые строки выбрасываются, а значение
    * внутри кавычек может занимать несколько физических строк — без этого списка номер в отчёте о несопоставленном не совпадал бы с
@@ -281,10 +353,17 @@ function firstSheetPath(files: Map<string, Buffer>): string {
   return any;
 }
 
-/** Выгрузка продавца: формат определяется по содержимому, а не по имени файла */
-export function readTable(content: Buffer): Sheet {
+/** Выгрузка продавца: формат определяется по содержимому, а не по имени файла; кодировка — тоже, но её можно задать [OQ-200] */
+export function readTable(content: Buffer, encoding?: TableEncoding): Sheet {
   if (content.length >= 4 && content.readUInt32LE(0) === 0x04034b50) return parseXlsx(content);
-  const text = content.toString('utf8');
-  if (text.includes(' ')) throw new TableReadError('UNSUPPORTED_FORMAT', 'the file is neither a spreadsheet nor a text table');
-  return parseCsv(text);
+  const guess = encoding ? { encoding, confident: true } : detectEncoding(content);
+  const text = decodeTable(content, guess.encoding);
+  // Не таблица: неразбираемые байты в выбранной кодировке либо управляющие символы (это двоичный файл, а не текст)
+  const control = /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(text);
+  if (text.includes('\uFFFD') || control) {
+    throw new TableReadError('UNSUPPORTED_FORMAT', encoding
+      ? `the file does not read as ${encoding}: choose another encoding`
+      : 'the file is neither a spreadsheet nor a text table');
+  }
+  return { ...parseCsv(text), encoding: guess.encoding, encodingConfident: guess.confident };
 }

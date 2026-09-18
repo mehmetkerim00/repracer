@@ -461,9 +461,9 @@ test('step 23, F: bounds edit is offered only with the right; the feed filters a
   assert.equal(index.canEdit, true);
   const viewerIndex = await get<BoundsIndexView>(viewer, api(id, 'bounds'));
   assert.equal(viewerIndex.canEdit, false);
-  const noRight = await html('/src/screens/BoundsEdit.tsx', 'BoundsEditPanel', { worldId: id, items: viewerIndex.items, canEdit: false });
+  const noRight = await html('/src/screens/BoundsEdit.tsx', 'BoundsEditPanel', { worldId: id, items: viewerIndex.items, total: viewerIndex.page.total, canEdit: false });
   assert.ok(noRight.includes('Your role may view bounds but not change them.') && !noRight.includes('Show the differences'));
-  const panel = await html('/src/screens/BoundsEdit.tsx', 'BoundsEditPanel', { worldId: id, items: index.items, canEdit: true });
+  const panel = await html('/src/screens/BoundsEdit.tsx', 'BoundsEditPanel', { worldId: id, items: index.items, total: index.page.total, canEdit: true });
   for (const text of ['Select all', 'set to (amount)', 'change by (%)']) assert.ok(panel.includes(text), text);
 
   const feedId = 'kaufland/pipeline/happy-path';
@@ -583,7 +583,15 @@ test('step 24, Р-123: a discount is checked before it is announced; a prior pri
   const evidence = await get<PriceEvidenceResponse>(viewer, `${api(id, 'compliance', 'evidence')}?from=${from}&to=${to}&writeScopeId=${encodeURIComponent(scope.writeScopeId)}`);
   assert.ok(evidence.days > 0, 'the evidence has storefront days');
   assert.equal(evidence.csv.split('\n')[0], 'channel,marketplace,offer,day,time_zone,currency,price_basis,min_price,max_price,first_price,last_price,changes,source,corrected,correction_reason');
+  // Ревью тавтологий (шаг 29): «сумма равна сумме того же тела» верно всегда. Значение имеет, что сумма СЧИТАЕТСЯ ПО СОДЕРЖИМОМУ:
+  // другой период — другая выгрузка и другая сумма; тот же запрос — та же сумма
   assert.equal(evidence.sha256, createHash('sha256').update(evidence.csv).digest('hex'));
+  const again = await get<PriceEvidenceResponse>(owner, `${api(id, 'compliance', 'evidence')}?from=${from}&to=${to}`);
+  assert.equal(again.sha256, evidence.sha256, 'тот же период — та же сумма');
+  // Период без истории: выгрузка другая (только заголовок) — значит сумма считается по содержимому, а не по запросу
+  const empty = await get<PriceEvidenceResponse>(owner, `${api(id, 'compliance', 'evidence')}?from=2019-01-01&to=2019-01-31`);
+  assert.equal(empty.days, 0, 'в этом периоде истории нет');
+  assert.notEqual(empty.sha256, evidence.sha256, 'другая выгрузка — другая сумма');
   assert.equal((await call(owner, 'GET', `${api(id, 'compliance', 'evidence')}?from=${to}&to=${from}`)).status, 400);
   assert.equal((await call(owner, 'GET', `${api(id, 'compliance', 'evidence')}?from=2020-01-01&to=2026-01-01`)).status, 400, `longer than ${EVIDENCE_MAX_DAYS} days`);
   // Находка 11 ревью шага 24: несуществующая дата — 400, а не ошибка базы; изменяющие маршруты — только POST

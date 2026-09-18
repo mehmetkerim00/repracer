@@ -2,6 +2,7 @@ import { DANGEROUS_DEVIATION_BP, STRATEGY_TYPES, type StrategyDefinition, type S
 import type { StrategyPreview } from '@repracer/pricing-pipeline';
 import { describe, type HumanReason } from './explain.ts';
 import type { Messages } from './i18n/index.ts';
+import { listQuery, pageOf, type ListQuery, type PageInfo } from './page.ts';
 import { channelNotes, strategyLabel } from './products.ts';
 import { gap, scopeById, unitOf, type Gap, type StandWorld, type StatusCell, type Tone, type UnitRef } from './world.ts';
 
@@ -53,6 +54,9 @@ export function parseStrategyDraft(raw: unknown): { ok: true; draft: StrategyDra
   return problems.length > 0 || !params ? { ok: false, problems } : { ok: true, draft: { name, params, deadbandMinor } };
 }
 
+/** Сколько предложений показать у стратегии в списке: остальное — числом */
+export const STRATEGY_SCOPE_EXAMPLES = 10;
+
 export interface StrategyListItem {
   strategyId: string;
   /** Последняя версия стратегии */
@@ -62,7 +66,10 @@ export interface StrategyListItem {
   label: string;
   detail: string;
   /** Офферы на любой версии этой стратегии: подпись оффера и версия */
+  /** Примеры предложений, где стратегия назначена (не весь список: его может быть десять тысяч) */
   scopes: Array<{ unit: UnitRef; version: number }>;
+  /** Сколько предложений пользуются стратегией всего */
+  scopeCount: number;
   /** Черновик новой версии — параметры последней версии */
   draft: StrategyDraft;
   /** OQ-170 (шаг 24): версии с автором, моментом и статусом — от новой к старой; у стратегий посева в памяти — только номер */
@@ -89,13 +96,15 @@ export interface StrategyListView {
   worldId: string;
   strategies: StrategyListItem[];
   scopes: StrategyScopeItem[];
+  /** Р-136: страница предложений — каталог целевого клиента в один ответ не помещается */
+  page: PageInfo;
   /** Р-120: все офферы аккаунтов с правилом или границами канала, найденные при обнаружении, — до назначения стратегии */
   channelPricingOffers: Array<{ label: string; detail: string; tone: Tone }>;
   canEdit: boolean;
   gaps: Gap[];
 }
 
-export function strategiesView(world: StandWorld, m: Messages, canEdit: boolean): StrategyListView {
+export function strategiesView(world: StandWorld, m: Messages, canEdit: boolean, query?: ListQuery): StrategyListView {
   const latest = new Map<string, StrategyDefinition>();
   for (const d of [...world.state.strategies, ...world.state.scopes.flatMap((s) => (s.strategy ? [s.strategy] : []))]) {
     const known = latest.get(d.strategyId);
@@ -124,13 +133,16 @@ export function strategiesView(world: StandWorld, m: Messages, canEdit: boolean)
     const latestMeta = versions.find((x) => x.version === d.version);
     return {
       strategyId: d.strategyId, version: d.version, name, label: label.label, detail: label.detail,
-      scopes: using.map((s) => ({ unit: unitOf(world, s, m), version: s.strategy!.version })),
+      scopes: using.slice(0, STRATEGY_SCOPE_EXAMPLES).map((s) => ({ unit: unitOf(world, s, m), version: s.strategy!.version })),
+      scopeCount: using.length,
       draft: { name: name ?? label.label, params: { ...d.params }, deadbandMinor: d.deadbandMinor },
       versions: allVersions,
       assignable: canEdit && (latestMeta?.status ?? 'ACTIVE') === 'ACTIVE',
     };
-  }).sort((a, b) => b.scopes.length - a.scopes.length || a.strategyId.localeCompare(b.strategyId));
-  const scopes = world.state.scopes.map((s): StrategyScopeItem => {
+  }).sort((a, b) => b.scopeCount - a.scopeCount || a.strategyId.localeCompare(b.strategyId));
+  // Р-136: список предложений — страницей; ответ экрана на каталоге целевого клиента был 3,7 МБ
+  const { items: shownScopes, page } = pageOf(world.state.scopes, listQuery(query), m);
+  const scopes = shownScopes.map((s): StrategyScopeItem => {
     const notes = channelNotes(world, s, m).filter((n) => n.code !== 'PRICING_HEALTH');
     return {
       unit: unitOf(world, s, m), mode: m.values[s.pricingMode], strategy: strategyLabel(s.strategy, s.currency, m).label,
@@ -150,7 +162,7 @@ export function strategiesView(world: StandWorld, m: Messages, canEdit: boolean)
     }));
   });
   return {
-    worldId: world.id, strategies, scopes, channelPricingOffers, canEdit,
+    worldId: world.id, strategies, scopes, page, channelPricingOffers, canEdit,
     gaps: [
       gap(m, 'POSITION_STRATEGY'),
       ...(channelPricingOffers.length > 0 ? [gap(m, 'CHANNEL_PRICING_OFFERS_WITHOUT_SCOPE')] : []),
@@ -182,6 +194,11 @@ export interface StrategyPreviewView {
   previewToken: string;
   /** Почему сохранить нельзя (канал не даёт данных стратегии [Р-39], у оффера ценообразование канала [Р-120]); null — можно */
   saveBlocked: string | null;
+  /**
+   * Р-136 (шаг 29): у предпросмотра своя цена — решение считается по каждому предложению. На каталоге целевого клиента он идёт по
+   * ВЫБОРКЕ, а назначается стратегия на все выбранные: об этом сказано на экране, а не подразумевается [Р-125].
+   */
+  sample: { shown: number; total: number; text: string | null };
   gaps: Gap[];
 }
 
@@ -211,7 +228,7 @@ export function previewToken(draft: StrategyDraft, previews: readonly StrategyPr
     previews.map((p) => [p.writeScopeId, p.availability.available, p.stages.map((s) => `${s.stage}:${s.outcome}`).join('>'), p.decision?.finalMinor ?? null, p.intent?.proposedMinor ?? null])]);
 }
 
-export function strategyPreviewView(world: StandWorld, draft: StrategyDraft, previews: readonly StrategyPreview[], m: Messages): StrategyPreviewView {
+export function strategyPreviewView(world: StandWorld, draft: StrategyDraft, previews: readonly StrategyPreview[], m: Messages, total = previews.length): StrategyPreviewView {
   const t = m.ui.strategies;
   const summary = { changes: 0, unchanged: 0, rejected: 0, dangerous: 0, notEvaluated: 0 };
   const rows = previews.map((p): PreviewRow => {
@@ -243,6 +260,7 @@ export function strategyPreviewView(world: StandWorld, draft: StrategyDraft, pre
     : channelPriced.length > 0 ? t.blockedChannelPricing(channelPriced.map((r) => r.unit.label).join(', ')) : null;
   return {
     worldId: world.id, draft: { title: `${draft.name} · ${label.label}`, detail: label.detail }, rows, summary, saveBlocked,
+    sample: { shown: previews.length, total, text: total > previews.length ? t.sample(previews.length, total) : null },
     headline: t.headline(summary), previewToken: previewToken(draft, previews, world),
     gaps: [gap(m, 'PREVIEW_LAST_SNAPSHOT'), gap(m, 'PREVIEW_CURRENT_BOUNDS')],
   };

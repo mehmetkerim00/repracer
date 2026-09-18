@@ -161,8 +161,9 @@ test('Ревью шага 28, находки 5 и 14: повторный имп�
         WHERE s.tenant_id = $1 AND s.write_scope_id = $2 AND s.field = 'PRICE'`,
       [world.tenantId, scopeId, world.ownerMembershipId]);
     await tx.query(
-      `INSERT INTO channel_data.fee_estimate (tenant_id, write_scope_id, source, fee_model, fee_schedule_version, computed_at, valid_until)
-       VALUES ($1, $2, 'FEE_SCHEDULE', '{"feeRateBp": 1500, "fixedFeeMinor": 99}'::jsonb, 'kaufland-2026-01', now(), now() + interval '30 days')`,
+      // Прежний импорт этого же продавца: процент он объявлял, фиксированную часть — нет
+      `INSERT INTO channel_data.fee_estimate (tenant_id, write_scope_id, source, fee_model, computed_at, valid_until)
+       VALUES ($1, $2, 'SELLER_DECLARED', '{"feeRateBp": 1500, "fixedFeeMinor": 99}'::jsonb, now(), now() + interval '30 days')`,
       [world.tenantId, scopeId]);
   }, world.userId, { mfa: true });
   // Новая выгрузка: закупочная цена и ТОЛЬКО фиксированная часть комиссии
@@ -172,11 +173,81 @@ test('Ревью шага 28, находки 5 и 14: повторный имп�
   assert.equal(applied.status, 'APPLIED', JSON.stringify(applied));
   const [row] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
     `SELECT c.purchase_cost_minor, c.inbound_logistics_minor, c.packaging_minor, c.source,
-            (SELECT fe.fee_model FROM channel_data.fee_estimate fe WHERE fe.tenant_id = c.tenant_id AND fe.write_scope_id = $2) AS fee
+            (SELECT fe.fee_model FROM channel_data.fee_estimate fe
+              WHERE fe.tenant_id = c.tenant_id AND fe.write_scope_id = $2 AND fe.source = 'SELLER_DECLARED') AS fee
        FROM tenant_data.cost_profile c
        JOIN tenant_data.write_scope s ON s.tenant_id = c.tenant_id AND s.product_id = c.product_id AND s.write_scope_id = $2 AND s.field = 'PRICE'
       WHERE c.tenant_id = $1 ORDER BY c.version DESC LIMIT 1`, [world.tenantId, scopeId])).rows);
   assert.deepEqual([Number(row.purchase_cost_minor), Number(row.inbound_logistics_minor), Number(row.packaging_minor), row.source],
     [555, 120, 30, 'IMPORT'], 'импорт меняет закупочную цену и переносит остальные составляющие прежней версии');
   assert.deepEqual(row.fee, { feeRateBp: 1500, fixedFeeMinor: 150 }, 'фиксированная часть из файла заменила прежнюю, процент остался');
+});
+
+test('Р-138 (шаг 29): комиссия продавца — свой источник; пол считается по большей оценке комиссии, а не по самой свежей', async () => {
+  const scopeId = world.ids.dbId('ws-7');
+  // Тарифная таблица репозитория: 15 % — её ведут разработчики [Р-32]
+  await inTenant(admin, world.tenantId, async (tx) => {
+    await tx.query(
+      `INSERT INTO channel_data.fee_estimate (tenant_id, write_scope_id, source, fee_model, fee_schedule_version, computed_at, valid_until)
+       VALUES ($1, $2, 'FEE_SCHEDULE', '{"feeRateBp": 1500, "fixedFeeMinor": 0}'::jsonb, 'kaufland-2026-01', now(), now() + interval '30 days')`,
+      [world.tenantId, scopeId]);
+  }, world.userId, { mfa: true });
+  // Продавец объявил в своей выгрузке 5 %: заниженная комиссия опустила бы пол маржи
+  const applied = await store.importCosts(world.tenantId,
+    { ...batchOf([{ writeScopeId: scopeId, unitCostMinor: 1000, currency: 'EUR', feeRateBp: 500, fixedFeeMinor: 0 }], 'fp-fee'), skippedRows: 0 },
+    actor(true), 'APPLY');
+  assert.equal(applied.status, 'APPLIED', JSON.stringify(applied));
+  const rows = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
+    `SELECT source, fee_model ->> 'feeRateBp' AS rate, fee_schedule_version FROM channel_data.fee_estimate
+      WHERE tenant_id = $1 AND write_scope_id = $2 ORDER BY source`, [world.tenantId, scopeId])).rows);
+  assert.deepEqual(rows.map((r) => [r.source, r.rate, r.fee_schedule_version]),
+    [['FEE_SCHEDULE', '1500', 'kaufland-2026-01'], ['SELLER_DECLARED', '500', null]],
+    'обе оценки живут рядом: число продавца не выдаёт себя за тариф [Р-138]');
+  // Пол маржи: база берёт БОЛЬШУЮ комиссию (15 %), иначе продавец уходит ниже себестоимости
+  await inTenant(admin, world.tenantId, async (tx) => {
+    await tx.query(
+      `INSERT INTO tenant_data.guardrail (tenant_id, scope_type, write_scope_id, min_margin_bp, version, created_by_membership_id)
+       VALUES ($1, 'WRITE_SCOPE', $2, 1000, 1, $3)`, [world.tenantId, scopeId, world.ownerMembershipId]);
+  }, world.userId, { mfa: true });
+  const marginFloor = async () => {
+    const [row] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
+      `SELECT margin_floor_minor, cause FROM tenant_data.effective_price_floor($1, $2)`, [world.tenantId, scopeId])).rows);
+    assert.equal(row.cause, null, JSON.stringify(row));
+    return Number(row.margin_floor_minor);
+  };
+  const withBoth = await marginFloor();
+  // Убираем тарифную оценку: остаётся только объявленная продавцом заниженная комиссия
+  await inTenant(admin, world.tenantId, async (tx) => {
+    await tx.query(
+      `UPDATE channel_data.fee_estimate SET computed_at = now() - interval '2 days', valid_until = now() - interval '1 day'
+        WHERE tenant_id = $1 AND write_scope_id = $2 AND source = 'FEE_SCHEDULE'`, [world.tenantId, scopeId]);
+  }, world.userId, { mfa: true });
+  const sellerOnly = await marginFloor();
+  console.log(JSON.stringify({ floorWithBothEstimates: withBoth, floorBySellerOnly: sellerOnly }));
+  assert.ok(withBoth > sellerOnly, 'пол считается по большей комиссии, а не по объявленной продавцом');
+
+  /**
+   * Ревью шага 29, находка 8: «больше» — это не «больше ставка». Оценка «0 % плюс 5 €» дороже оценки «10 % без фиксированной
+   * части» на любой цене ниже 50 €, а по ставке она младше. Пол обязан считаться по каждой оценке и браться наибольший.
+   */
+  await inTenant(admin, world.tenantId, async (tx) => {
+    await tx.query(
+      `UPDATE channel_data.fee_estimate SET fee_model = '{"feeRateBp": 1000, "fixedFeeMinor": 0}'::jsonb,
+              computed_at = now(), valid_until = now() + interval '30 days'
+        WHERE tenant_id = $1 AND write_scope_id = $2 AND source = 'SELLER_DECLARED'`, [world.tenantId, scopeId]);
+    await tx.query(
+      `INSERT INTO channel_data.fee_estimate (tenant_id, write_scope_id, source, fee_model, computed_at, valid_until)
+       VALUES ($1, $2, 'CHANNEL_API', '{"feeRateBp": 0, "fixedFeeMinor": 500}'::jsonb, now(), now() + interval '30 days')
+       ON CONFLICT (tenant_id, write_scope_id, source) DO UPDATE SET fee_model = EXCLUDED.fee_model,
+             computed_at = EXCLUDED.computed_at, valid_until = EXCLUDED.valid_until`, [world.tenantId, scopeId]);
+  }, world.userId, { mfa: true });
+  const withFixedFee = await marginFloor();
+  await inTenant(admin, world.tenantId, async (tx) => {
+    await tx.query(
+      `UPDATE channel_data.fee_estimate SET computed_at = now() - interval '2 days', valid_until = now() - interval '1 day'
+        WHERE tenant_id = $1 AND write_scope_id = $2 AND source = 'CHANNEL_API'`, [world.tenantId, scopeId]);
+  }, world.userId, { mfa: true });
+  const rateOnly = await marginFloor();
+  console.log(JSON.stringify({ floorWithFixedFeeEstimate: withFixedFee, floorByRateOnly: rateOnly }));
+  assert.ok(withFixedFee > rateOnly, 'дороже — не значит «больше ставка»: пол посчитан по оценке с фиксированной частью');
 });

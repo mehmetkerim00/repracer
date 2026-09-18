@@ -1,11 +1,13 @@
 import { useState } from 'react';
-import type { ProductListView, ProductRow } from '@repracer/console-model';
+import { LIST_PAGE_DEFAULT, type ListQuery, type ProductListView, type ProductRow } from '@repracer/console-model';
 import type { EnableResult } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, Cell, ErrorBox, errorText, Gaps, href, Load, ReasonLine, useMessages } from '../components.tsx';
+import { Badge, Cell, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, useMessages } from '../components.tsx';
 
 /** Экран A: действующий пол — главная цифра, min_price — его составляющая (шаг 12, F) */
-export function ProductsView({ view, onEnable }: { view: ProductListView; onEnable?: (row: ProductRow) => void }) {
+export function ProductsView({ view, onEnable, query, onQuery }: {
+  view: ProductListView; onEnable?: (row: ProductRow) => void; query?: ListQuery; onQuery?: (q: ListQuery) => void;
+}) {
   const m = useMessages();
   const p = m.ui.products;
   const c = p.columns;
@@ -55,6 +57,7 @@ export function ProductsView({ view, onEnable }: { view: ProductListView; onEnab
           </tbody>
         </table>
       </div>
+      {query && onQuery ? <Pager page={view.page} query={query} onQuery={onQuery} /> : null}
       <Gaps gaps={view.gaps} />
     </section>
   );
@@ -95,7 +98,9 @@ export function EnableResultView(props: { unit: string; result: EnableResult | n
 
 export function ProductsScreen({ worldId }: { worldId: string }) {
   const m = useMessages();
-  const [resource, retry] = useResource<ProductListView>(worldPath(worldId, 'products'), m.locale);
+  // Р-136: экран просит страницу; переключение страницы — новый запрос, как у ленты цен
+  const [query, setQuery] = useState<ListQuery>({ offset: 0, limit: LIST_PAGE_DEFAULT });
+  const [resource, retry] = useResource<ProductListView>(`${worldPath(worldId, 'products')}?offset=${query.offset}&limit=${query.limit}`, m.locale);
   const [row, setRow] = useState<ProductRow | null>(null);
   const [result, setResult] = useState<EnableResult | null>(null);
   const [busy, setBusy] = useState(false);
@@ -120,7 +125,7 @@ export function ProductsScreen({ worldId }: { worldId: string }) {
     <>
       {row ? <EnableResultView unit={row.unit.label} result={result} busy={busy} error={error} onAcknowledge={() => void enable(row, true)} onClose={close} /> : null}
       <Load resource={resource} retry={retry}>
-        {(view) => <ProductsView view={view} onEnable={(r) => { setRow(r); setResult(null); void enable(r, false); }} />}
+        {(view) => <ProductsView view={view} query={query} onQuery={setQuery} onEnable={(r) => { setRow(r); setResult(null); void enable(r, false); }} />}
       </Load>
     </>
   );

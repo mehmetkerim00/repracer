@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import { messagesFor, type Gap, type HumanReason, type Messages, type StatusCell } from '@repracer/console-model';
-import { ApiError, REQUEST_TIMEOUT_MS, type Resource } from './api.ts';
+import { messagesFor, type Gap, type HumanReason, type ListQuery, type Messages, type PageInfo, type StatusCell, type UnitRef } from '@repracer/console-model';
+import { ApiError, REQUEST_TIMEOUT_MS, requestJson, worldPath, type Resource } from './api.ts';
 
 /** Словарь интерфейса текущего языка [Р-72]: все подписи экранов — отсюда */
 export const MessagesContext = createContext<Messages>(messagesFor('de'));
@@ -123,5 +123,57 @@ export function NoteConfirm(props: {
         <button type="button" onClick={props.onCancel} disabled={props.busy}>{m.ui.app.dialog.cancel}</button>
       </div>
     </div>
+  );
+}
+
+/**
+ * Р-136 (шаг 29): переключатель страниц списка. Экраны продавца отдают страницу, а не каталог: на 10 000 предложений список
+ * товаров весил 10,2 МБ в одном ответе, а экран комплаенса считался 24,8 секунды.
+ */
+export function Pager({ page, query, onQuery }: { page: PageInfo; query: ListQuery; onQuery: (q: ListQuery) => void }) {
+  const m = useMessages();
+  const f = m.ui.feed;
+  return (
+    <div className="buttons">
+      <span className="small muted">{page.text}</span>
+      <button type="button" disabled={!page.hasPrevious} onClick={() => onQuery({ ...query, offset: Math.max(0, query.offset - query.limit) })}>{f.previous}</button>
+      <button type="button" disabled={!page.hasNext} onClick={() => onQuery({ ...query, offset: query.offset + query.limit })}>{f.next}</button>
+    </div>
+  );
+}
+
+/**
+ * Р-136 (ревью шага 29, находка 4): выбор предложения с поиском. Выпадающий список показывает первые несколько сотен, и без
+ * поиска предложения за их пределами были недостижимы — а доказательство Omnibus [Р-123] и объявление скидки нужны по
+ * КОНКРЕТНОМУ предложению.
+ */
+export function OfferPicker({ worldId, value, onChange, allowEmpty = false, emptyLabel = '' }: {
+  worldId: string; value: string; onChange: (writeScopeId: string) => void; allowEmpty?: boolean; emptyLabel?: string;
+}) {
+  const m = useMessages();
+  const [query, setQuery] = useState('');
+  const [found, setFound] = useState<{ items: UnitRef[]; total: number; shown: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    const cancel = new AbortController();
+    const id = setTimeout(() => {
+      requestJson<{ items: UnitRef[]; total: number; shown: number }>(`${worldPath(worldId, 'offers')}?q=${encodeURIComponent(query)}`,
+        { signal: cancel.signal, locale: m.locale })
+        .then((r) => { setFound(r); setError(null); }, (e: unknown) => { if (!cancel.signal.aborted) setError(errorText(e, m)); });
+    }, 200);
+    return () => { clearTimeout(id); cancel.abort(); };
+  }, [worldId, query, m.locale]);
+  const o = m.ui.offerPicker;
+  return (
+    <span className="offer-picker">
+      <input type="search" value={query} placeholder={o.search} onChange={(e) => setQuery(e.target.value)} />
+      <select value={value} onChange={(e) => onChange(e.target.value)}>
+        {allowEmpty ? <option value="">{emptyLabel}</option> : null}
+        {(found?.items ?? []).map((u) => <option key={u.writeScopeId} value={u.writeScopeId}>{u.label}</option>)}
+      </select>
+      {error ? <span className="small warn">{error}</span> : found && found.total > found.shown
+        ? <span className="small muted">{o.narrow(found.shown, found.total)}</span>
+        : found ? <span className="small muted">{o.found(found.total)}</span> : null}
+    </span>
   );
 }

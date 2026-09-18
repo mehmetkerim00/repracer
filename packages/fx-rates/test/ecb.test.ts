@@ -35,10 +35,16 @@ after(async () => {
 });
 
 test('Р-61: the day rate loads once, reloading the same rate changes nothing, a different rate for the same day is refused', {}, async () => {
-  const day = '2019-01-02';
+  // День прогона: курс дня неизменяем [Р-61], поэтому повторный прогон на той же базе не должен упираться в чужую строку.
+  // Берётся редкий день прошлого века, свой у каждого прогона — так «первая загрузка» действительно первая
+  const day = new Date(Date.UTC(1900, 0, 1) + Number(process.hrtime.bigint() % 36_524n) * 86_400_000).toISOString().slice(0, 10);
   const xml = XML.replace("<Cube time='2026-09-14'>", `<Cube time='${day}'>`);
   const first = await loadEcbDailyRates(pool!, xml, 'test fixture');
-  assert.ok(first.inserted.includes('USD') || first.unchanged.includes('USD'));
+  // Ревью тавтологий (шаг 29): «вставлено ИЛИ не изменилось» верно и тогда, когда загрузчик не вставил ничего
+  assert.deepEqual(first.inserted, ['USD'], 'первая загрузка в пустую базу вставляет курс');
+  const [stored] = (await pool!.query(
+    `SELECT (rate * 1000000)::bigint AS micros FROM platform.fx_rate WHERE source = 'ECB' AND quote_currency = 'USD' AND rate_date = $1`, [day])).rows;
+  assert.equal(String(stored.micros), '1155100', 'курс дня сохранён тем же числом, что в фикстуре');
   const second = await loadEcbDailyRates(pool!, xml, 'test fixture');
   assert.deepEqual(second.inserted, []);
   await assert.rejects(loadEcbDailyRates(pool!, xml.replace("rate='1.1551'", "rate='1.2000'"), 'test fixture'), /differs from the loaded one/);

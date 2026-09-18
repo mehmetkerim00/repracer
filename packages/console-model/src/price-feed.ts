@@ -1,4 +1,5 @@
 import type { Messages } from './i18n/index.ts';
+import { OFFER_CHOICES } from './compliance.ts';
 import { strategyLabel } from './products.ts';
 import { describe, type HumanReason } from './explain.ts';
 import { explanationOf } from './trace.ts';
@@ -44,8 +45,9 @@ export interface PriceFeedView {
   counts: { applied: number; inFlight: number; notSent: number; superseded: number };
   query: { writeScopeId: string | null; status: FeedStatusGroup | null; days: number | null; offset: number; limit: number };
   page: { from: number; to: number; total: number; text: string; hasPrevious: boolean; hasNext: boolean };
-  /** Офферы для фильтра */
+  /** Офферы для фильтра: первые OFFER_CHOICES [Р-136] */
   offers: UnitRef[];
+  offersTotal: number;
   gaps: Gap[];
 }
 
@@ -122,7 +124,9 @@ export function priceFeed(world: StandWorld, m: Messages, filter: FeedQuery = {}
     },
     query: { writeScopeId: filter.writeScopeId ?? null, status: filter.status ?? null, days: filter.days ?? null, offset, limit },
     page: { from, to, total: writes.length, text: f.page(from, to, writes.length), hasPrevious: offset > 0, hasNext: to < writes.length },
-    offers: world.state.scopes.map((s) => unitOf(world, s, m)),
+    // Р-136: фильтр по офферу показывает первые N — на каталоге целевого клиента список фильтра сам весил мегабайты
+    offers: world.state.scopes.slice(0, OFFER_CHOICES).map((s) => unitOf(world, s, m)),
+    offersTotal: world.state.scopes.length,
     gaps: [gap(m, 'FEED_WINDOW'), gap(m, 'PRICE_HISTORY_NOT_READ')],
   };
 }

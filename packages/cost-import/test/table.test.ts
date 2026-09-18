@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { deflateRawSync } from 'node:zlib';
 import { test } from 'node:test';
-import { columnIndex, detectDelimiter, parseCsv, parseXlsx, readTable, TableReadError } from '../src/index.ts';
+import { columnIndex, detectDelimiter, detectEncoding, parseCsv, parseXlsx, readTable, TableReadError } from '../src/index.ts';
 
 /** Р-134 (шаг 28): выгрузка продавца читается так, как он её видел. Данные синтетические. */
 
@@ -126,3 +126,24 @@ function zip(entries: Array<[string, string]>, deflate: boolean, options: { decl
   end.writeUInt32LE(offset, 16);
   return Buffer.concat([...locals, centralBuffer, end]);
 }
+
+test('OQ-200 (шаг 29): кодировка определяется по BOM и по содержимому; где уверенности нет, это видно', () => {
+  const german = 'Artikelnummer;Einstandspreis;Währung\nA-1;10,50 €;EUR\n';
+  // Немецкая выгрузка Excel в Windows-1252: «€» и «ä» — байты 0x80 и 0xE4
+  const cp1252 = Buffer.from([...german].map((ch) => ({ 'ä': 0xe4, '€': 0x80 }[ch] ?? ch.charCodeAt(0))));
+  const guess = detectEncoding(cp1252);
+  assert.deepEqual([guess.encoding, guess.confident, guess.reason], ['WINDOWS-1252', false, 'NOT_UTF8'], 'догадка названа догадкой [OQ-200]');
+  const sheet = readTable(cp1252);
+  assert.deepEqual(sheet.rows[0], ['Artikelnummer', 'Einstandspreis', 'Währung'], 'заголовок с умляутом прочитан');
+  assert.equal(sheet.rows[1]![1], '10,50 €', 'сумма с евро прочитана, а не превратилась в «не число»');
+  assert.equal(sheet.encodingConfident, false);
+  // BOM UTF-8 и UTF-16 из Excel: уверенность есть, BOM в первую ячейку не попадает
+  const utf8Bom = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(german, 'utf8')]);
+  assert.deepEqual([detectEncoding(utf8Bom).encoding, detectEncoding(utf8Bom).confident], ['UTF-8', true]);
+  assert.equal(readTable(utf8Bom).rows[0]![0], 'Artikelnummer');
+  const utf16 = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(german, 'utf16le')]);
+  assert.deepEqual([detectEncoding(utf16).encoding, detectEncoding(utf16).confident], ['UTF-16LE', true]);
+  assert.deepEqual(readTable(utf16).rows[0], ['Artikelnummer', 'Einstandspreis', 'Währung']);
+  // Выбор продавца сильнее догадки: тот же файл, прочитанный как UTF-8, не читается — и это сказано, а не заменено на вопросики
+  assert.throws(() => readTable(cp1252, 'UTF-8'), (e: unknown) => e instanceof TableReadError && /UTF-8/.test(e.message));
+});

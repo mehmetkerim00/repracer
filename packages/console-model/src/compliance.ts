@@ -1,6 +1,7 @@
 import { can, omnibusVerdict, OMNIBUS_WINDOW_DAYS, type OmnibusPriorPrice, type OmnibusVerdict } from '@repracer/pricing-model';
 import type { DiscountAnnouncementRow, PriceEvidenceDay } from '@repracer/pricing-pipeline';
 import type { Messages } from './i18n/index.ts';
+import { listQuery, pageOf, type ListQuery, type PageInfo } from './page.ts';
 import { gap, scopeById, unitOf, type Gap, type StandWorld, type Tone, type UnitRef } from './world.ts';
 
 /**
@@ -87,15 +88,21 @@ export interface ComplianceRow {
 /** Р-124: глубина истории по каждому офферу — на экране до объявления скидки */
 export interface OfferDepthRow { unit: UnitRef; depth: HistoryDepthView }
 
+/** Сколько предложений показывать в выборе: больше — это уже поиск, а не список */
+export const OFFER_CHOICES = 200;
+
 export interface ComplianceView {
   worldId: string;
   headline: string;
   counts: Record<OmnibusVerdict, number>;
   rows: ComplianceRow[];
   offers: UnitRef[];
+  /** Сколько предложений всего: выбор показывает первые, а продавец должен знать, что их больше [Р-136] */
+  offersTotal: number;
   canAnnounce: boolean;
-  /** Р-124: глубина видимой истории по каждому офферу к сегодняшнему дню */
+  /** Р-124: глубина видимой истории по каждому офферу к сегодняшнему дню — на показанной странице [Р-136] */
   depth: OfferDepthRow[];
+  page: PageInfo;
   /** Р-124: модуль не гарантирует соответствие — первой строкой экрана */
   notAGuarantee: string;
   /** Что модуль проверить не может — на экране, а не в документации */
@@ -105,7 +112,7 @@ export interface ComplianceView {
 
 /** rechecks — проверка каждого объявления по текущей истории цен (хранилище, omnibusCheck) */
 export function complianceView(world: StandWorld, announcements: readonly DiscountAnnouncementRow[], rechecks: ReadonlyMap<string, OmnibusPriorPrice>, m: Messages,
-  depthToday: ReadonlyMap<string, OmnibusPriorPrice> = new Map()): ComplianceView {
+  depthToday: ReadonlyMap<string, OmnibusPriorPrice> = new Map(), query?: ListQuery): ComplianceView {
   const c = m.ui.compliance;
   const counts: Record<OmnibusVerdict, number> = { COMPLIANT: 0, VIOLATION: 0, UNVERIFIED: 0 };
   const rows = announcements.map((a): ComplianceRow => {
@@ -125,9 +132,15 @@ export function complianceView(world: StandWorld, announcements: readonly Discou
     };
   });
   return {
-    worldId: world.id, headline: c.headline(counts), counts, rows, offers: world.state.scopes.map((s) => unitOf(world, s, m)),
+    // Р-136: выбор оффера для объявления скидки — не весь каталог: столько браузер не покажет и человек не пролистает
+    worldId: world.id, headline: c.headline(counts), counts, rows,
+    offers: world.state.scopes.slice(0, OFFER_CHOICES).map((s) => unitOf(world, s, m)),
+    offersTotal: world.state.scopes.length,
     canAnnounce: can(world.viewer.role, 'MANAGE_PRICING'), cannotCheck: c.cannotCheck, notAGuarantee: c.depth.notAGuarantee,
-    depth: world.state.scopes.flatMap((s) => { const d = depthToday.get(s.writeScopeId); return d ? [{ unit: unitOf(world, s, m), depth: historyDepthView(d, m) }] : []; }),
+    // Р-136: глубина истории — только у показанных предложений; страница та же, что у списка товаров
+    depth: pageOf(world.state.scopes, listQuery(query), m).items
+      .flatMap((s) => { const d = depthToday.get(s.writeScopeId); return d ? [{ unit: unitOf(world, s, m), depth: historyDepthView(d, m) }] : []; }),
+    page: pageOf(world.state.scopes, listQuery(query), m).page,
     gaps: [gap(m, 'OMNIBUS_OUTSIDE_PRICES'), gap(m, 'OMNIBUS_TIME_ZONE_TO_VERIFY')],
   };
 }

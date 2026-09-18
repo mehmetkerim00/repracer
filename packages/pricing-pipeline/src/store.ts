@@ -621,6 +621,11 @@ export interface ConsoleScopeRow {
   /** Себестоимость и комиссии в валюте возникновения (перевод — при показе, как в решении) */
   cost: CostInputs | null;
   minMarginBp: number | null;
+  /**
+   * Р-138 (шаг 29): все действующие оценки комиссии с источниками. Оценка продавца (`SELLER_DECLARED`) и тарифная таблица
+   * репозитория (`FEE_SCHEDULE`) не смешиваются: при расхождении продавец видит оба числа, а пол считается по большему [Р-83].
+   */
+  feeEstimates?: Array<{ source: string; feeRateBp: number | null; fixedFeeMinor: number | null; scheduleVersion: string | null }>;
   channelHalt: HaltRef | null;
   channelDistrust: DistrustRef | null;
   priceStop: StopRef | null;

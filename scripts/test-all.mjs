@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { findUnincludedTests } from './check-test-inclusion.mjs';
+import { filesForScope, INFRASTRUCTURE_TESTS } from './test-scopes.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const inclusion = findUnincludedTests(root);
@@ -31,6 +32,45 @@ const ledgerEnv = {
   NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import ${pathToFileURL(join(root, 'scripts', 'test-ledger.mjs')).href}`.trim(),
 };
 
+/**
+ * Р-137: область прогона. `fast` — всё, кроме тестов, которым нужна инфраструктура сверх PostgreSQL (каталог test-scopes.mjs);
+ * `full` (по умолчанию) — всё. Файлы запускаются по рабочим пространствам теми же флагами, что и `npm test` каждого из них:
+ * так область выбирается по файлу, а не по пакету, и ни один тест не «пропускается» молча [Р-84].
+ */
+const scope = (process.argv.find((a) => a.startsWith('--scope='))?.slice('--scope='.length) ?? 'full');
+if (scope !== 'fast' && scope !== 'full') {
+  console.error(`BUILD RED: неизвестная область прогона «${scope}» (fast или full)`);
+  process.exit(1);
+}
+const selected = filesForScope(inclusion.included, scope);
+const deferred = inclusion.included.filter((f) => !selected.includes(f));
+console.log(`TEST SCOPE ${JSON.stringify({ scope, files: selected.length, deferred: deferred.length })}`);
+for (const t of INFRASTRUCTURE_TESTS) {
+  if (deferred.includes(t.file)) console.log(`   отложен до полного прогона (${t.needs}): ${t.file} — ${t.why}`);
+}
+
+/** Рабочее пространство файла: ближайший вверх package.json */
+function workspaceOf(file) {
+  let dir = dirname(join(root, file));
+  while (dir !== root && !existsSync(join(dir, 'package.json'))) dir = dirname(dir);
+  return dir;
+}
+
+function runNode(cwd, files) {
+  return new Promise((resolve) => {
+    const args = ['--experimental-strip-types', '--disable-warning=ExperimentalWarning', '--test', '--test-reporter=spec', ...files];
+    const child = spawn(process.execPath, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], env: ledgerEnv });
+    let output = '';
+    for (const stream of [child.stdout, child.stderr]) {
+      stream.on('data', (chunk) => {
+        output += chunk;
+        process.stdout.write(chunk);
+      });
+    }
+    child.on('close', (code) => resolve({ code, output }));
+  });
+}
+
 function run(args) {
   return new Promise((resolve) => {
     const child = spawn('npm', args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: ledgerEnv });
@@ -45,10 +85,16 @@ function run(args) {
   });
 }
 
-const runs = [
-  { name: 'workspaces', ...(await run(['test', '--workspaces', '--if-present'])) },
-  { name: 'repository scripts', ...(await run(['run', 'test:repo'])) },
-];
+const byWorkspace = new Map();
+for (const file of selected) {
+  const cwd = workspaceOf(file);
+  byWorkspace.set(cwd, [...(byWorkspace.get(cwd) ?? []), relative(cwd, join(root, file)).split(sep).join('/')]);
+}
+const runs = [];
+for (const [cwd, files] of [...byWorkspace].sort((a, b) => a[0].localeCompare(b[0]))) {
+  runs.push({ name: `workspace ${relative(root, cwd).split(sep).join('/') || '.'}`, ...(await runNode(cwd, files.sort())) });
+}
+runs.push({ name: 'repository scripts', ...(await run(['run', 'test:repo'])) });
 
 const totals = { tests: 0, pass: 0, fail: 0, skipped: 0, todo: 0, cancelled: 0 };
 let summaries = 0;
@@ -69,10 +115,10 @@ if (totals.tests === 0) problems.push('no tests ran');
 // Р-89: каждый включённый в сборку файл действительно выполнился (скрипт мог назвать файл, но отфильтровать его или не дойти до него)
 const executed = new Set(existsSync(ledger) ? readFileSync(ledger, 'utf8').split('\n').filter(Boolean).map((f) => relative(root, f).split(sep).join('/')) : []);
 rmSync(ledgerDir, { recursive: true, force: true });
-const notExecuted = inclusion.included.filter((f) => !executed.has(f));
+const notExecuted = selected.filter((f) => !executed.has(f));
 for (const f of notExecuted) console.error(`INCLUDED BUT NOT EXECUTED: ${f}`);
 if (notExecuted.length > 0) problems.push(`${notExecuted.length} included test files did not run`);
-console.log(`TEST FILES ${JSON.stringify({ included: inclusion.included.length, executed: executed.size, notExecuted: notExecuted.length })}`);
+console.log(`TEST FILES ${JSON.stringify({ included: inclusion.included.length, selected: selected.length, executed: executed.size, notExecuted: notExecuted.length })}`);
 for (const k of ['fail', 'skipped', 'todo', 'cancelled']) if (totals[k] > 0) problems.push(`${totals[k]} ${k}`);
 console.log(`\nTEST TOTALS ${JSON.stringify({ suites: summaries, ...totals })}`);
 if (problems.length > 0) {

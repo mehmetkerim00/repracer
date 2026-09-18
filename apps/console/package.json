@@ -17,7 +17,7 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec test/console.test.ts test/console.pg.test.ts"
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec test/console.test.ts test/console.pg.test.ts test/console-live.pg.test.ts"
   },
   "devDependencies": {
     "@types/react": "19.3.0",

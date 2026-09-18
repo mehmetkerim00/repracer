@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0105_verify_schema_invariants_v25.sql';
+const VERIFY = 'migrations/0107_verify_schema_invariants_v26.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -1013,6 +1013,25 @@ export const STEP28_ROWS = [
         "SELECT 'MIN:' || b.min_price_id::text FROM tenant_data.min_price b"),
         smoke('onboarding of offer 3 in the window is accepted without a second factor (Р-135)'),
         smoke('cost and both bounds of a fifth offer in the window are accepted without a second factor (Р-135)')),
+    ],
+  },
+  {
+    row: 'Р-138', invariant: 'комиссия от продавца — свой источник оценки и не смешивается с тарифной таблицей репозитория; пол считается по большей оценке',
+    mutations: [
+      m(dropConstraint('fee_estimate_source_check', 'channel_data.fee_estimate'), smoke('a fee estimate of an unknown source (Р-138)')),
+      m(dropConstraint('fee_estimate_seller_declared_has_no_schedule_version', 'channel_data.fee_estimate'),
+        smoke('a seller-declared fee carrying a schedule version (Р-138)')),
+      m(dropConstraint('fee_estimate_schedule_version_iff', 'channel_data.fee_estimate'),
+        smoke('a fee schedule estimate without its version (Р-32)')),
+      // Пол считается по САМОЙ ДОРОГОЙ оценке: если брать последнюю из перебора, заниженная комиссия опускает пол [Р-83]
+      m(replaceInFunction('tenant_data.effective_price_floor(uuid,uuid,timestamptz)',
+        'margin_floor_minor := greatest(coalesce(margin_floor_minor, 0), candidate);',
+        'margin_floor_minor := candidate;'),
+        node(T('cost-import.pg.test.ts'), 'Р-138',
+          ['пол считается по большей комиссии, а не по объявленной продавцом', 'дороже — не значит «больше ставка»: пол посчитан по оценке с фиксированной частью'], 'false')),
+      // Задача D шага 29: гардрейл шире предложения попадает в окно массовой правки
+      m(replaceInFunction('tenant_data.mass_change_window_requires_mfa()', 'IF wide THEN', 'IF false THEN'),
+        smoke('a manual edit right after a tenant-wide guardrail change (Р-135)')),
     ],
   },
   {

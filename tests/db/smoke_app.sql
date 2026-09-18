@@ -337,6 +337,22 @@ SELECT pg_temp.expect_fail('a tenant-wide guardrail without a second factor (Р-
   INSERT INTO tenant_data.guardrail (tenant_id, scope_type, min_margin_bp, version, created_by_membership_id)
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'TENANT', 0, 1, 'a2000000-0000-0000-0000-00000000000a') $q$,
   'covers every offer');
+-- Шаг 29, C [Р-138]: комиссия от продавца — свой источник, и версии тарифа у неё не бывает
+SELECT pg_temp.expect_fail('a fee estimate of an unknown source (Р-138)', $q$
+  INSERT INTO channel_data.fee_estimate (tenant_id, write_scope_id, source, fee_model, computed_at, valid_until)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', 'SELLER_GUESS',
+          '{"feeRateBp": 1500, "fixedFeeMinor": 0}'::jsonb, now(), now() + interval '30 days') $q$,
+  'fee_estimate_source_check');
+SELECT pg_temp.expect_fail('a seller-declared fee carrying a schedule version (Р-138)', $q$
+  INSERT INTO channel_data.fee_estimate (tenant_id, write_scope_id, source, fee_model, fee_schedule_version, computed_at, valid_until)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', 'SELLER_DECLARED',
+          '{"feeRateBp": 1500, "fixedFeeMinor": 0}'::jsonb, 'kaufland-2026-01', now(), now() + interval '30 days') $q$,
+  'fee_estimate_seller_declared_has_no_schedule_version');
+SELECT pg_temp.expect_fail('a fee schedule estimate without its version (Р-32)', $q$
+  INSERT INTO channel_data.fee_estimate (tenant_id, write_scope_id, source, fee_model, computed_at, valid_until)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', 'FEE_SCHEDULE',
+          '{"feeRateBp": 1500, "fixedFeeMinor": 0}'::jsonb, now(), now() + interval '30 days') $q$,
+  'fee_estimate_schedule_version_iff');
 COMMIT;
 
 -- Ревью шага 28, находка 9: окно считает ПРЕДЛОЖЕНИЯ, а не строки. Продавец заводит офферы по одному, каждому — себестоимость и обе
@@ -495,6 +511,23 @@ SELECT pg_temp.expect_fail('max_price of a sixth offer within ten minutes withou
   VALUES ('b0000000-0000-0000-0000-00000000000b', 'PRODUCT', 'b3000000-0000-0000-0000-000000000022', 'EUR', 'GROSS', 9000, 2,
           'b2000000-0000-0000-0000-00000000000b') $q$,
   'a mass change requires it');
+COMMIT;
+
+-- Задача D шага 29 [Р-135]: гардрейл уровня тенанта меняет пол маржи у ВСЕХ предложений, поэтому он попадает в окно: после него
+-- ручная правка без второго фактора не проходит, пока окно не истечёт
+BEGIN;
+SELECT set_config('app.tenant_id', :tB, true), set_config('app.user_id', :uB, true), set_config('app.auth_mfa', 'on', true) \gset
+INSERT INTO tenant_data.guardrail (tenant_id, scope_type, min_margin_bp, version, created_by_membership_id)
+VALUES (:tB, 'TENANT', 500, 1, :mB);
+COMMIT;
+
+BEGIN;
+SELECT set_config('app.tenant_id', :tB, true), set_config('app.user_id', :uB, true) \gset
+SELECT pg_temp.expect_fail('a manual edit right after a tenant-wide guardrail change (Р-135)', $q$
+  INSERT INTO tenant_data.cost_profile (tenant_id, product_id, version, valid_from, currency, purchase_cost_minor, source, created_by_membership_id)
+  VALUES ('b0000000-0000-0000-0000-00000000000b', 'b3000000-0000-0000-0000-000000000012', 2, now(), 'EUR', 210, 'MANUAL',
+          'b2000000-0000-0000-0000-00000000000b') $q$,
+  'a guardrail of every offer was changed within ten minutes');
 COMMIT;
 
 BEGIN;

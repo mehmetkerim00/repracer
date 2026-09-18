@@ -54,20 +54,21 @@ export function BoundsDiffTable({ view }: { view: BoundsDiffView }) {
   );
 }
 
-export function BoundsEditPanel({ worldId, items, canEdit }: { worldId: string; items: readonly BoundsIndexItem[]; canEdit: boolean }) {
+export function BoundsEditPanel({ worldId, items, total, canEdit }: { worldId: string; items: readonly BoundsIndexItem[]; total: number; canEdit: boolean }) {
   const m = useMessages();
   const t = m.ui.boundsEdit;
   if (!canEdit) return <section className="bounds-edit"><h3>{t.pageTitle}</h3><p className="notice">{t.noRight}</p></section>;
-  return <BoundsEditForm worldId={worldId} items={items} />;
+  return <BoundsEditForm worldId={worldId} items={items} total={total} />;
 }
 
-function BoundsEditForm({ worldId, items }: { worldId: string; items: readonly BoundsIndexItem[] }) {
+function BoundsEditForm({ worldId, items, total }: { worldId: string; items: readonly BoundsIndexItem[]; total: number }) {
   const m = useMessages();
   const t = m.ui.boundsEdit;
   const [selected, setSelected] = useState<string[]>([]);
   const [min, setMin] = useState<AdjustForm>({ mode: 'KEEP', value: '' });
   const [max, setMax] = useState<AdjustForm>({ mode: 'KEEP', value: '' });
   const [diff, setDiff] = useState<{ view: BoundsDiffView; request: BoundsEditRequest } | null>(null);
+  const [wholeCatalog, setWholeCatalog] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -78,7 +79,8 @@ function BoundsEditForm({ worldId, items }: { worldId: string; items: readonly B
     const b = adjustOf(max);
     if (a === null) return t.badInput(min.value);
     if (b === null) return t.badInput(max.value);
-    return { writeScopeIds: selected, ...(a ? { min: a } : {}), ...(b ? { max: b } : {}) };
+    // Р-136: «весь каталог» — это выбор, а не перечисление; список из 10 000 идентификаторов не проходит предел тела запроса
+    return { ...(wholeCatalog ? { all: true, writeScopeIds: [] } : { writeScopeIds: selected }), ...(a ? { min: a } : {}), ...(b ? { max: b } : {}) };
   };
   const plan = async () => {
     setError(null); setMessage(null);
@@ -111,9 +113,14 @@ function BoundsEditForm({ worldId, items }: { worldId: string; items: readonly B
       <h3>{t.pageTitle}</h3>
       <h4>{t.select}</h4>
       <div className="buttons">
-        <button type="button" disabled={busy} onClick={() => { setSelected(items.map((i) => i.writeScopeId)); reset(); }}>{t.selectAll}</button>
-        <button type="button" disabled={busy} onClick={() => { setSelected([]); reset(); }}>{t.selectNone}</button>
+        <button type="button" disabled={busy} onClick={() => { setWholeCatalog(false); setSelected(items.map((i) => i.writeScopeId)); reset(); }}>{t.selectPage(items.length)}</button>
+        <button type="button" disabled={busy} onClick={() => { setWholeCatalog(false); setSelected([]); reset(); }}>{t.selectNone}</button>
       </div>
+      {/* Р-136: выбрать весь каталог, а не показанную страницу — раскрывает выбор сервер */}
+      <label className="whole-catalog">
+        <input type="checkbox" checked={wholeCatalog} disabled={busy}
+          onChange={(e) => { setWholeCatalog(e.target.checked); setSelected([]); reset(); }} /> {t.selectAllCatalog(total)}
+      </label>
       <ul className="index">
         {items.map((i) => (
           <li key={i.writeScopeId}><label><input type="checkbox" checked={selected.includes(i.writeScopeId)}
@@ -124,9 +131,10 @@ function BoundsEditForm({ worldId, items }: { worldId: string; items: readonly B
       <div className="form">{adjust(t.minPrice, min, setMin)}{adjust(t.maxPrice, max, setMax)}</div>
       <div className="buttons">
         {diff === null
-          ? <button type="button" disabled={busy || selected.length === 0} onClick={() => void plan()}>{t.plan}</button>
+          ? <button type="button" disabled={busy || (selected.length === 0 && !wholeCatalog)} onClick={() => void plan()}>{t.plan}</button>
           : <><button type="button" className="danger" disabled={busy} onClick={() => void apply()}>{t.apply}</button><button type="button" disabled={busy} onClick={reset}>{t.back}</button></>}
       </div>
+      {diff ? <p className="small muted">{t.shownRows(diff.view.shown.rows, diff.view.shown.of)}</p> : null}
       {error ? <ErrorBox message={error} /> : null}
       {message ? <p className="notice" role="status">{message}</p> : null}
       {diff ? <BoundsDiffTable view={diff.view} /> : null}

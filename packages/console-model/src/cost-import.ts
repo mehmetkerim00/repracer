@@ -1,4 +1,4 @@
-import { IMPORT_FIELDS, type ColumnMapping, type ColumnSuggestion, type ImportField, type ImportPreview, type ImportProblem,
+import { IMPORT_FIELDS, TABLE_ENCODINGS, type ColumnMapping, type ColumnSuggestion, type ImportField, type ImportPreview, type ImportProblem,
   type ImportTargetOffer, type PreviewRow, type Sheet } from '@repracer/cost-import';
 import type { Messages } from './i18n/index.ts';
 import { gap, scopeById, unitOf, type Gap, type StandWorld, type Tone, type UnitRef } from './world.ts';
@@ -30,8 +30,10 @@ export interface ImportSkippedGroupView {
 export interface CostImportView {
   worldId: string;
   headline: string;
-  /** Как прочитан файл: формат и разделитель — продавец должен узнать свою выгрузку */
-  source: { name: string; format: string; delimiter: string | null };
+  /** Как прочитан файл: формат, разделитель и кодировка — продавец должен узнать свою выгрузку [OQ-200] */
+  source: { name: string; format: string; delimiter: string | null; encoding: string | null; encodingConfident: boolean };
+  /** Кодировки на выбор: когда уверенности нет, продавца спрашивают, а не угадывают за него */
+  encodings: string[];
   columns: Array<{ field: string; column: string; reason: string }>;
   /**
    * Ревью шага 28, находка 8: подсказка не применяется молча — сопоставление можно ИСПРАВИТЬ. Экран получает колонки файла (как
@@ -80,7 +82,11 @@ export function costImportView(
   return {
     worldId: world.id,
     headline: t.headline(summary),
-    source: { name: source.name, format: preview.format, delimiter: preview.delimiter ?? null },
+    source: {
+      name: source.name, format: preview.format, delimiter: preview.delimiter ?? null,
+      encoding: source.sheet.encoding ?? null, encodingConfident: source.sheet.encodingConfident !== false,
+    },
+    encodings: [...TABLE_ENCODINGS],
     columns: suggestions.map((s) => ({ field: t.fields[s.field], column: columnName(s.columnIndex), reason: t.reasons[s.reason] })),
     fileColumns: fileColumnsOf(source.sheet),
     fields: IMPORT_FIELDS.map((f) => ({ field: f.field, label: t.fields[f.field], required: f.required, columnIndex: source.mapping[f.field] ?? null })),

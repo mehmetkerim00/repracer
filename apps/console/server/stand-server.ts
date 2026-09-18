@@ -2,11 +2,11 @@ import { createHash } from 'node:crypto';
 import { createServer, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import {
-  boundsDiffView, boundsView, can, complianceView, costImportView, currentStrategies, discountCheckView, dangerousReport, decisionList, decisionTrace, describe, expandBoundsEdit, importTargets, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, priceEvidenceCsv, scopeById, unitOf,
+  boundsDiffView, boundsView, can, complianceView, costImportView, currentStrategies, listQuery, MAX_SCOPES, OFFER_CHOICES, pageOf, parseListQuery, type ListQuery, discountCheckView, dangerousReport, decisionList, decisionTrace, describe, expandBoundsEdit, importTargets, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, priceEvidenceCsv, scopeById, unitOf,
   parseStrategyDraft, planStop, previewToken, priceFeed, productList, rejectedView, REPORT_PERIODS_DAYS, stopView, strategiesView, strategyPreviewView,
   type Locale, type Messages, type StandWorld, type StopTarget, type StrategyDraft, type Viewer,
 } from '@repracer/console-model';
-import { buildPreview, readTable, suggestMapping } from '@repracer/cost-import';
+import { buildPreview, readTable, suggestMapping, TABLE_ENCODINGS } from '@repracer/cost-import';
 import type { DiscountAnnouncementInput, StrategyPreview } from '@repracer/pricing-pipeline';
 import {
   buildStandWorlds, memoryStandDirectory, pgStandJoinMember, pgStandUsers, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_EMAILS, STAND_ISSUER, type LiveWorld,
@@ -76,7 +76,11 @@ function parseTarget(live: LiveWorld, raw: unknown): StopTarget | null {
   return null;
 }
 
-const MAX_PREVIEW_SCOPES = 200;
+/**
+ * Р-136: предпросмотр стратегии считает предложения по одному через путь решения, поэтому у него свой предел — он честно назван
+ * продавцу, а не прячется за «запрос неверен». Назначение уже сохранённой версии предела не имеет: это запись в базу пакетом.
+ */
+const MAX_PREVIEW_SCOPES = 500;
 
 /** Превью стратегии на выбранных единицах записи: каждая — стратегия и Gate на последнем принятом снимке, без фиксации */
 async function previewsFor(live: LiveWorld, world: StandWorld, draft: StrategyDraft, writeScopeIds: readonly string[]): Promise<StrategyPreview[] | null> {
@@ -91,8 +95,24 @@ async function previewsFor(live: LiveWorld, world: StandWorld, draft: StrategyDr
   return out;
 }
 
-function scopeIds(raw: unknown): string[] | null {
-  return Array.isArray(raw) && raw.length > 0 && raw.length <= MAX_PREVIEW_SCOPES && raw.every((x) => typeof x === 'string') ? [...new Set(raw as string[])] : null;
+/**
+ * Предложения запроса: список идентификаторов ИЛИ «все» [Р-136]. Список каталога — 381 КБ, он не проходит предел тела запроса
+ * (413, ревью шага 29, находка 1), а экран со страницами может перечислить только страницу. «Все» раскрывает сервер.
+ */
+function scopeIds(raw: unknown, world: StandWorld, all: unknown): string[] | null {
+  if (all === true) return world.state.scopes.map((s) => s.writeScopeId);
+  return Array.isArray(raw) && raw.length > 0 && raw.length <= MAX_SCOPES && raw.every((x) => typeof x === 'string') ? [...new Set(raw as string[])] : null;
+}
+
+/**
+ * Р-136, Р-125 (шаг 29): предпросмотр стратегии считает решение по каждому предложению, поэтому на каталоге целевого клиента он
+ * идёт по ВЫБОРКЕ — равномерной и повторяемой (каждое k-е предложение выбранного набора). Назначается стратегия на ВСЕ выбранные:
+ * каждое предложение при записи проверяет база (0082), а не экран.
+ */
+function previewSample(ids: readonly string[]): string[] {
+  if (ids.length <= MAX_PREVIEW_SCOPES) return [...ids];
+  const step = ids.length / MAX_PREVIEW_SCOPES;
+  return Array.from({ length: MAX_PREVIEW_SCOPES }, (_, i) => ids[Math.floor(i * step)]!);
 }
 
 function draftProblemsText(problems: ReadonlyArray<{ field: string; code: string }>, m: Messages): string {
@@ -104,6 +124,12 @@ function draftProblemsText(problems: ReadonlyArray<{ field: string; code: string
 const isDay = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`)) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
 /** Р-123: выгрузка доказательной истории — не больше 18 месяцев за запрос */
 export const EVIDENCE_MAX_DAYS = 550;
+/**
+ * Р-136 (шаг 29): сколько строк отдаёт доказательная выгрузка за раз. Живой прогон через консоль: 30 суток по каталогу целевого
+ * клиента — 300 000 строк, 28 МБ в одном ответе и 9,8 секунды. Доказательство Omnibus нужно по ПРЕДЛОЖЕНИЮ (спор всегда о
+ * конкретной скидке), поэтому предел назван прямо, а экран подсказывает выбрать предложение или более узкий период.
+ */
+export const EVIDENCE_MAX_ROWS = 100_000;
 
 /** Р-123: объявление скидки из тела запроса; неверное — null (ответ 400) */
 function parseDiscount(world: StandWorld, raw: unknown): DiscountAnnouncementInput | null {
@@ -123,12 +149,17 @@ function parseDiscount(world: StandWorld, raw: unknown): DiscountAnnouncementInp
  * Р-123, Р-124: экран комплаенса — объявленные скидки с повторной проверкой по текущей истории и глубина видимой истории каждого оффера
  * на сейчас
  */
-async function compliance(live: LiveWorld, world: StandWorld, m: Messages) {
+async function compliance(live: LiveWorld, world: StandWorld, m: Messages, query?: ListQuery) {
   const announcements = await live.store.discountAnnouncements(world.tenantId);
   const rechecks = new Map(await Promise.all(announcements.map(async (a) => [a.announcementId, await live.store.omnibusCheck(world.tenantId, a.writeScopeId, a.startsAt)] as const)));
   const now = live.clock.iso();
-  const depth = new Map(await Promise.all(world.state.scopes.map(async (sc) => [sc.writeScopeId, await live.store.omnibusCheck(world.tenantId, sc.writeScopeId, now)] as const)));
-  return complianceView(world, announcements, rechecks, m, depth);
+  /**
+   * Р-136: глубина истории считается только у ПОКАЗАННЫХ предложений. На каталоге целевого клиента этот экран спрашивал базу
+   * десять тысяч раз подряд: 24,8 секунды и 8,7 МБ ответа (живой прогон через консоль, шаг 29).
+   */
+  const { items: shown } = pageOf(world.state.scopes, listQuery(query), m);
+  const depth = new Map(await Promise.all(shown.map(async (sc) => [sc.writeScopeId, await live.store.omnibusCheck(world.tenantId, sc.writeScopeId, now)] as const)));
+  return complianceView(world, announcements, rechecks, m, depth, listQuery(query));
 }
 
 /** Шаг 23: устаревший экран различий — какой оффер и какие границы у него сейчас */
@@ -214,7 +245,10 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
 
     if (req.method === 'GET') {
       switch (screen) {
-        case 'products': return ok(productList(world, m));
+        case 'products': {
+          const query = parseListQuery(url.searchParams);
+          return query ? ok(productList(world, m, query)) : fail(400, 'BAD_PAGE', s.badRequest);
+        }
         case 'decisions': {
           if (param === null) return ok(decisionList(world, m));
           const trace = decisionTrace(world, param, m);
@@ -223,8 +257,13 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         case 'rejected': return ok(rejectedView(world, m));
         case 'bounds': {
           if (param === null) {
+            // Р-136: страница, а не весь каталог; список границ — тот же порядок, что у списка товаров
+            const query = parseListQuery(url.searchParams);
+            if (!query) return fail(400, 'BAD_PAGE', s.badRequest);
+            const list = productList(world, m, query);
             return ok({
-              items: productList(world, m).rows.map((r): BoundsIndexItem => ({ writeScopeId: r.unit.writeScopeId, label: r.unit.label, minPrice: r.minPrice, maxPrice: r.maxPrice })),
+              items: list.rows.map((r): BoundsIndexItem => ({ writeScopeId: r.unit.writeScopeId, label: r.unit.label, minPrice: r.minPrice, maxPrice: r.maxPrice })),
+              page: list.page,
               canEdit: can(viewer.role, 'MANAGE_PRICING'),
             } satisfies BoundsIndexView);
           }
@@ -232,8 +271,25 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           return b ? ok(b) : fail(404, 'SCOPE_NOT_FOUND', s.notFound);
         }
         case 'stop': return ok(stopView(world, m));
+        /**
+         * Р-136 (ревью шага 29, находка 4): поиск предложения. Выпадающий список показывает первые OFFER_CHOICES, и без поиска
+         * предложения 201…10 000 были недостижимы: по ним нельзя было ни объявить скидку, ни выгрузить доказательство [Р-123].
+         */
+        case 'offers': {
+          const q = (url.searchParams.get('q') ?? '').trim().toLowerCase();
+          if (q.length > 100) return fail(400, 'BAD_QUERY', s.badRequest);
+          const matches = world.state.scopes.filter((sc) => {
+            if (q === '') return true;
+            const unit = unitOf(world, sc, m);
+            return [unit.label, sc.externalUnitId, sc.channelProductRef, sc.gtin ?? ''].some((v) => String(v).toLowerCase().includes(q));
+          });
+          return ok({ items: matches.slice(0, OFFER_CHOICES).map((sc) => unitOf(world, sc, m)), total: matches.length, shown: Math.min(matches.length, OFFER_CHOICES) });
+        }
         // Шаг 21: стратегии, лента цен, отчёт об опасных изменениях [Р-73]
-        case 'strategies': return ok(strategiesView(world, m, can(viewer.role, 'MANAGE_PRICING')));
+        case 'strategies': {
+          const query = parseListQuery(url.searchParams);
+          return query ? ok(strategiesView(world, m, can(viewer.role, 'MANAGE_PRICING'), query)) : fail(400, 'BAD_PAGE', s.badRequest);
+        }
         case 'feed': {
           // Шаг 23: фильтры и страница — на сервере по всему окну ленты; неверный параметр — 400, а не молчаливое «все»
           const query = parseFeedQuery(url.searchParams);
@@ -248,7 +304,8 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         // Р-123: отчёт по объявленным скидкам — каждая проверяется заново по текущей истории цен (исправления свёртки, поздние цены)
         case 'compliance': {
           if (param === null) {
-            return ok(await compliance(live, world, m));
+            const query = parseListQuery(url.searchParams);
+            return query ? ok(await compliance(live, world, m, query)) : fail(400, 'BAD_PAGE', s.badRequest);
           }
           if (param === 'evidence') {
             const from = url.searchParams.get('from') ?? '';
@@ -257,6 +314,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
             if (!isDay(from) || !isDay(to) || from > to || (ws && !scopeById(world, ws))) return fail(400, 'BAD_EVIDENCE_QUERY', s.badRequest);
             if ((Date.parse(to) - Date.parse(from)) / 86_400_000 + 1 > EVIDENCE_MAX_DAYS) return fail(400, 'EVIDENCE_TOO_LONG', s.evidenceTooLong(EVIDENCE_MAX_DAYS));
             const days = await live.store.priceEvidence(world.tenantId, { from, to, ...(ws ? { writeScopeIds: [ws] } : {}) });
+            if (days.length > EVIDENCE_MAX_ROWS) return fail(400, 'EVIDENCE_TOO_LARGE', s.evidenceTooLarge(days.length, EVIDENCE_MAX_ROWS));
             const csv = priceEvidenceCsv(world, days);
             return ok({ filename: `price-evidence_${from}_${to}.csv`, csv, sha256: createHash('sha256').update(csv).digest('hex'), days: days.length });
           }
@@ -374,9 +432,10 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     if (screen === 'strategies' && param === 'preview') {
       const parsed = parseStrategyDraft(body.draft);
       if (!parsed.ok) return fail(400, 'BAD_DRAFT', draftProblemsText(parsed.problems, m));
-      const ids = scopeIds(body.writeScopeIds);
-      const previews = ids ? await previewsFor(live, world, parsed.draft, ids) : null;
-      return previews ? ok(strategyPreviewView(world, parsed.draft, previews, m)) : fail(400, 'BAD_SCOPES', s.badRequest);
+      const ids = scopeIds(body.writeScopeIds, world, body.all);
+      if (!ids) return fail(400, 'BAD_SCOPES', s.tooManyScopes(Array.isArray(body.writeScopeIds) ? body.writeScopeIds.length : 0, MAX_SCOPES));
+      const previews = await previewsFor(live, world, parsed.draft, previewSample(ids));
+      return previews ? ok(strategyPreviewView(world, parsed.draft, previews, m, ids.length)) : fail(400, 'BAD_SCOPES', s.badRequest);
     }
 
     // Сохранение — только того превью, что видел человек: сервер пересчитывает превью и сравнивает токен
@@ -385,8 +444,8 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       if (body.confirmed !== true) return fail(400, 'NOT_CONFIRMED', s.notConfirmed);
       const parsed = parseStrategyDraft(body.draft);
       if (!parsed.ok) return fail(400, 'BAD_DRAFT', draftProblemsText(parsed.problems, m));
-      const ids = scopeIds(body.writeScopeIds);
-      const previews = ids ? await previewsFor(live, world, parsed.draft, ids) : null;
+      const ids = scopeIds(body.writeScopeIds, world, body.all);
+      const previews = ids ? await previewsFor(live, world, parsed.draft, previewSample(ids)) : null;
       if (!previews) return fail(400, 'BAD_SCOPES', s.badRequest);
       if (typeof body.previewToken !== 'string' || body.previewToken !== previewToken(parsed.draft, previews, world)) return fail(409, 'PREVIEW_CHANGED', s.previewChanged);
       // Находка 3 ревью шага 21 [Р-39]: стратегия, для которой канал не даёт нужных данных конкурентов, не назначается
@@ -414,8 +473,8 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       const item = strategiesView(world, m, true).strategies.find((x) => x.strategyId === body.strategyId && x.version === body.version);
       if (!item) return fail(404, 'STRATEGY_NOT_FOUND', s.notFound);
       if (!item.assignable) return fail(400, 'VERSION_NOT_ACTIVE', s.versionNotActive);
-      const ids = scopeIds(body.writeScopeIds);
-      const previews = ids ? await previewsFor(live, world, item.draft, ids) : null;
+      const ids = scopeIds(body.writeScopeIds, world, body.all);
+      const previews = ids ? await previewsFor(live, world, item.draft, previewSample(ids)) : null;
       if (!previews) return fail(400, 'BAD_SCOPES', s.badRequest);
       if (typeof body.previewToken !== 'string' || body.previewToken !== previewToken(item.draft, previews, world)) return fail(409, 'PREVIEW_CHANGED', s.previewChanged);
       if (previews.some((p) => !p.availability.available)) return fail(400, 'STRATEGY_UNAVAILABLE', s.strategyUnavailable);
@@ -437,7 +496,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     if (screen === 'strategies' && param === 'unassign') {
       if (!can(viewer.role, 'MANAGE_PRICING')) return fail(403, 'FORBIDDEN', s.forbidden);
       if (body.confirmed !== true) return fail(400, 'NOT_CONFIRMED', s.notConfirmed);
-      const ids = scopeIds(body.writeScopeIds);
+      const ids = scopeIds(body.writeScopeIds, world, body.all);
       if (!ids) return fail(400, 'BAD_SCOPES', s.badRequest);
       const result = await live.store.unassignStrategy(world.tenantId, { writeScopeIds: ids, expected: currentStrategies(world, ids) },
         { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) });
@@ -455,11 +514,17 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     if (screen === 'bounds' && (param === 'plan' || param === 'apply')) {
       if (!can(viewer.role, 'MANAGE_PRICING')) return fail(403, 'FORBIDDEN', s.forbidden);
       const request = parseBoundsEditRequest(body.request);
-      if (!request) return fail(400, 'BAD_REQUEST', s.badRequest);
+      if (!request) {
+        const asked = Array.isArray((body.request as { writeScopeIds?: unknown[] })?.writeScopeIds) ? ((body.request as { writeScopeIds: unknown[] }).writeScopeIds).length : 0;
+        return asked > MAX_SCOPES ? fail(400, 'TOO_MANY_SCOPES', s.tooManyScopes(asked, MAX_SCOPES)) : fail(400, 'BAD_REQUEST', s.badRequest);
+      }
       const { edits, problems } = expandBoundsEdit(world, request);
       if (problems.length > 0) {
         const texts = m.ui.boundsEdit.problems;
-        return fail(400, 'BAD_EDIT', problems.map((p) => `${texts[p.code]}${p.writeScopeId ? ` (${p.writeScopeId}${p.bound ? `, ${p.bound}_price` : ''})` : ''}`).join('; '));
+        // Первые несколько причин и число остальных: на каталоге склейка всех проблем давала мегабайтный ответ (находка 12)
+        const shown = problems.slice(0, 10).map((p) => `${texts[p.code]}${p.writeScopeId ? ` (${p.writeScopeId}${p.bound ? `, ${p.bound}_price` : ''})` : ''}`);
+        const rest = problems.length - shown.length;
+        return fail(400, 'BAD_EDIT', rest > 0 ? `${shown.join('; ')} ${s.andMoreProblems(rest)}` : shown.join('; '));
       }
       const mfa = hasSecondFactor(principal.amr);
       const actor = { membershipId: viewer.membershipId, userId: principal.userId, mfa };
@@ -492,7 +557,9 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       // Файл приходит в base64: и таблица XLSX (двоичная), и CSV в любой кодировке проходят одним путём
       let sheet;
       try {
-        sheet = readTable(Buffer.from(content, 'base64'));
+        // OQ-200: продавец может задать кодировку, если наша догадка не подошла — её показывает экран
+        const chosen = TABLE_ENCODINGS.find((e) => e === body.encoding);
+        sheet = readTable(Buffer.from(content, 'base64'), chosen);
       } catch (error) {
         return fail(400, (error as { code?: string }).code ?? 'UNSUPPORTED_FORMAT', String((error as Error).message).slice(0, 200));
       }
@@ -582,6 +649,50 @@ function send(res: ServerResponse, r: ApiResponse): void {
   res.end(JSON.stringify(r.body));
 }
 
+/**
+ * HTTP-слой стенда: предел тела запроса, разбор JSON и перехват ошибок. Р-136 (шаг 29, ревью, находка 1): он вынесен из точки
+ * входа именно затем, чтобы живой прогон шёл ЧЕРЕЗ НЕГО. Прогон, зовущий `createStandApi` напрямую, не видит ни предела тела, ни
+ * битого JSON — а это ровно тот класс дефекта, ради которого принято Р-136 (на шаге 28 импорт не проходил из-за предела в 64 КиБ).
+ */
+export function createStandServer(handle: ReturnType<typeof createStandApi>, locale: Locale = 'de') {
+  const fallback = messagesFor(locale).ui.server;
+  return createServer(async (req, res) => {
+    let size = 0;
+    const chunks: Buffer[] = [];
+    const limit = bodyLimitFor(req.url ?? '');
+    for await (const chunk of req) {
+      size += (chunk as Buffer).length;
+      if (size > limit) {
+        /**
+         * Отказ до конца загрузки. Соединение закрывается ПОСЛЕ того, как ответ ушёл: если оборвать сокет сразу, клиент видит
+         * «сеть отвалилась» вместо понятного 413 — и продавец не узнает, что именно не так (ревью шага 29, находка 1).
+         */
+        res.setHeader('connection', 'close');
+        send(res, { status: 413, body: { error: { code: 'TOO_LARGE', message: fallback.tooLarge } } });
+        // Остаток тела дочитывается и выбрасывается, иначе клиент видит обрыв вместо ответа; поток без конца — обрываем
+        let drained = 0;
+        req.on('data', (chunk: Buffer) => { drained += chunk.length; if (drained > limit) req.destroy(); });
+        req.resume();
+        return;
+      }
+      chunks.push(chunk as Buffer);
+    }
+    let body: unknown;
+    try {
+      body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : undefined;
+    } catch {
+      return send(res, { status: 400, body: { error: { code: 'BAD_JSON', message: fallback.badJson } } });
+    }
+    try {
+      send(res, await handle({ method: req.method ?? 'GET', url: req.url ?? '/', body, authorization: req.headers.authorization, cookie: req.headers.cookie }));
+    } catch (error) {
+      // Ни тело запроса, ни токен в журнал не пишутся — только метод, путь и сообщение ошибки
+      console.error('stand request failed', req.method, new URL(req.url ?? '/', 'http://stand').pathname, error instanceof Error ? error.message : error);
+      send(res, { status: 500, body: { error: { code: 'STAND_ERROR', message: fallback.standError } } });
+    }
+  });
+}
+
 async function main(): Promise<void> {
   const port = Number(process.env.STAND_PORT ?? 4318);
   let handle: ReturnType<typeof createStandApi>;
@@ -615,30 +726,7 @@ async function main(): Promise<void> {
     const worlds = await buildStandWorlds();
     handle = createStandApi(worlds, { authenticator: createAuthenticator({ ...verify, directory: memoryStandDirectory(worlds) }), ...(simulator ? { simulator } : {}) });
   }
-  const fallback = messagesFor('de').ui.server;
-  const server = createServer(async (req, res) => {
-    let size = 0;
-    const chunks: Buffer[] = [];
-    const limit = bodyLimitFor(req.url ?? '');
-    for await (const chunk of req) {
-      size += (chunk as Buffer).length;
-      if (size > limit) return send(res, { status: 413, body: { error: { code: 'TOO_LARGE', message: fallback.tooLarge } } });
-      chunks.push(chunk as Buffer);
-    }
-    let body: unknown;
-    try {
-      body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : undefined;
-    } catch {
-      return send(res, { status: 400, body: { error: { code: 'BAD_JSON', message: fallback.badJson } } });
-    }
-    try {
-      send(res, await handle({ method: req.method ?? 'GET', url: req.url ?? '/', body, authorization: req.headers.authorization, cookie: req.headers.cookie }));
-    } catch (error) {
-      // Ни тело запроса, ни токен в журнал не пишутся — только метод, путь и сообщение ошибки
-      console.error('stand request failed', req.method, new URL(req.url ?? '/', 'http://stand').pathname, error instanceof Error ? error.message : error);
-      send(res, { status: 500, body: { error: { code: 'STAND_ERROR', message: fallback.standError } } });
-    }
-  });
+  const server = createStandServer(handle);
   server.listen(port, '127.0.0.1', () => console.log(`stand on http://127.0.0.1:${port}/api/session (${process.env.REPRACER_PG_URL ? 'PostgreSQL' : 'memory'})`));
 }
 

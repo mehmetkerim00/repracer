@@ -42,7 +42,11 @@ test('step 21: a strategy draft is previewed on a real offer through the engine 
   assert.equal(row!.current, '€17.75');
   assert.ok(row!.asOf.startsWith('snapshot of '), row!.asOf);
   assert.ok(['Approved', 'No change'].includes(row!.outcome), row!.outcome);
+  // Ревью тавтологий (шаг 29): равенство токена самому себе верно всегда. Значение имеет, что токен МЕНЯЕТСЯ вместе с черновиком —
+  // иначе сохранение приняло бы не то превью, что видел человек
   assert.equal(view.previewToken, strategyPreviewView(before, parsed.draft, [preview], en).previewToken, 'the token is deterministic');
+  const otherDraft = { ...parsed.draft, params: { ...parsed.draft.params, priceMinor: 1999 } } as typeof parsed.draft;
+  assert.notEqual(strategyPreviewView(before, otherDraft, [preview], en).previewToken, view.previewToken, 'another draft — another token');
   const after = await w.view(user('PRICING_MANAGER'));
   assert.equal(after.state.decisions.length, before.state.decisions.length, 'the preview commits no decision');
   assert.equal(after.state.writes.length, before.state.writes.length, 'the preview sends nothing');

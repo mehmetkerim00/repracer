@@ -58,10 +58,17 @@ interface Live {
 let live: Live;
 
 before(async () => {
-  // Виртуальные сутки заканчиваются «сейчас»: часы базы (now() в значениях по умолчанию и проверках) всегда позже виртуальных,
-  // иначе строки с моментом из будущего отклоняют проверки вроде pricing_halt_sample (observed_at <= recorded_at + 5 минут)
+  /**
+   * Виртуальные сутки заканчиваются раньше «сейчас»: часы базы (now() в значениях по умолчанию и проверках) всегда позже
+   * виртуальных, иначе строки с моментом из будущего отклоняют проверки вроде pricing_halt_sample (observed_at <= recorded_at
+   * + 5 минут).
+   *
+   * Отступ в два часа — из-за закрытия суток: база даёт час после полуночи витрины (`p_now < day_end + interval '1 hour'`), и
+   * прогон, заканчивавшийся «сейчас», в интервале с 00:00 до 01:00 по Берлину не закрывал ни одних суток. Тест краснел час в
+   * сутки — каждую ночь в CI (шаг 29).
+   */
   const hours = Number(process.env.LIVE_HOURS ?? 24);
-  const startMs = Math.floor((Date.now() - hours * HOUR) / 60_000) * 60_000;
+  const startMs = Math.floor((Date.now() - (hours + 2) * HOUR) / 60_000) * 60_000;
   const clock = new VirtualClock(new Date(startMs).toISOString());
   const pools = { appPool: db.pool('svc_app', 4), adminPool: db.pool('svc_admin', 2), provisioningPool: db.pool('svc_provisioning', 1), dispatcherPool: db.pool('svc_dispatcher', 2) };
   const k1 = await kauflandLiveWorld({ tag: 2601, clock, products: kaufland1, seed: 2601, ...pools });

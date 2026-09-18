@@ -23,13 +23,25 @@ function base64Of(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-export function CostImportPreview({ view, onMapping }: { view: CostImportView; onMapping?: (field: string, index: number | null) => void }) {
+export function CostImportPreview({ view, onMapping, onEncoding }: {
+  view: CostImportView; onMapping?: (field: string, index: number | null) => void; onEncoding?: (encoding: string) => void;
+}) {
   const m = useMessages();
   const t = m.ui.costImport;
   return (
     <section className={`import-preview ${view.tone}`}>
       <p className="headline">{view.headline}</p>
       <p className="source">{t.sourceRead(view.source.format, view.source.delimiter)} · {view.source.name}</p>
+      {view.source.encoding ? (
+        <p className={`source ${view.source.encodingConfident ? '' : 'warn'}`}>
+          {t.encodingRead(view.source.encoding, view.source.encodingConfident)}
+          {onEncoding ? (
+            <select value={view.source.encoding} onChange={(e) => onEncoding(e.currentTarget.value)}>
+              {view.encodings.map((e) => <option key={e} value={e}>{e}</option>)}
+            </select>
+          ) : null}
+        </p>
+      ) : null}
       {view.blocked ? <p className="notice warn">{view.blocked}</p> : null}
       {view.columns.length > 0 ? (
         <>
@@ -115,38 +127,46 @@ function CostImportForm({ worldId }: { worldId: string }) {
   const [view, setView] = useState<CostImportView | null>(null);
   // Ревью шага 28, находка 8: выбор продавца сильнее подсказки — он уходит на сервер и предпросмотр строится заново
   const [mapping, setMapping] = useState<Record<string, number | null> | null>(null);
+  // OQ-200: кодировку выбирает продавец, если наша догадка не подошла — предпросмотр строится заново
+  const [encoding, setEncoding] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const choose = async (input: HTMLInputElement) => {
     const picked = input.files?.[0];
-    setError(null); setMessage(null); setView(null); setMapping(null);
+    setError(null); setMessage(null); setView(null); setMapping(null); setEncoding(null);
     if (!picked) return setFile(null);
     const buffer = await picked.arrayBuffer();
     // Файл уходит на сервер как есть: формат определяется по содержимому, а не по расширению
     setFile({ name: picked.name, content: base64Of(new Uint8Array(buffer)) });
   };
-  const plan = async (override?: Record<string, number | null>) => {
+  const plan = async (override?: { mapping?: Record<string, number | null> | null; encoding?: string | null }) => {
     if (!file) return;
     setBusy(true); setError(null); setMessage(null);
-    const chosen = override ?? mapping;
+    const chosenMapping = override?.mapping === undefined ? mapping : override.mapping;
+    const chosenEncoding = override?.encoding === undefined ? encoding : override.encoding;
     try {
       setView(await requestJson<CostImportView>(worldPath(worldId, 'cost-import', 'plan'),
-        { method: 'POST', body: { ...file, ...(chosen ? { mapping: chosen } : {}) }, locale: m.locale }));
+        { method: 'POST', body: { ...file, ...(chosenMapping ? { mapping: chosenMapping } : {}), ...(chosenEncoding ? { encoding: chosenEncoding } : {}) }, locale: m.locale }));
     } catch (e) { setError(errorText(e, m)); } finally { setBusy(false); }
   };
   const changeMapping = (field: string, index: number | null) => {
     const next = { ...(mapping ?? {}), [field]: index };
     setMapping(next);
-    void plan(next);
+    void plan({ mapping: next });
+  };
+  const changeEncoding = (chosen: string) => {
+    // Смена кодировки меняет и текст заголовков, поэтому сопоставление колонок предлагается заново
+    setEncoding(chosen); setMapping(null);
+    void plan({ encoding: chosen, mapping: null });
   };
   const apply = async () => {
     if (!file || !view) return;
     setBusy(true); setError(null);
     try {
       const r = await requestJson<CostImportApplied>(worldPath(worldId, 'cost-import', 'apply'),
-        { method: 'POST', body: { ...file, ...(mapping ? { mapping } : {}), fingerprint: view.fingerprint, confirmed: true }, locale: m.locale });
+        { method: 'POST', body: { ...file, ...(mapping ? { mapping } : {}), ...(encoding ? { encoding } : {}), fingerprint: view.fingerprint, confirmed: true }, locale: m.locale });
       setMessage(r.message); setView(null); setFile(null); setMapping(null);
     } catch (e) { setError(errorText(e, m)); } finally { setBusy(false); }
   };
@@ -167,7 +187,7 @@ function CostImportForm({ worldId }: { worldId: string }) {
           : null}
         {view ? <button type="button" onClick={() => { setView(null); setFile(null); setMapping(null); }} disabled={busy}>{t.back}</button> : null}
       </div>
-      {view ? <CostImportPreview view={view} onMapping={changeMapping} /> : null}
+      {view ? <CostImportPreview view={view} onMapping={changeMapping} onEncoding={changeEncoding} /> : null}
     </section>
   );
 }

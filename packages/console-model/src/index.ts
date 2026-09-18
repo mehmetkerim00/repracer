@@ -10,7 +10,9 @@ export { rejectedView, type RejectedItem, type RejectedKind, type RejectedView }
 export { boundsView, costInScopeCurrency, effectiveFloor, priceBreakdown, type BoundsView, type EffectiveFloor, type MoneyLine, type PriceBreakdown } from './bounds.ts';
 export { planStop, stopView, type AuditCard, type DistrustCard, type HaltCard, type StopKindRow, type StopCard, type StopImpact, type StopPlan, type StopTarget, type StopView, type TargetCard } from './stop.ts';
 export { currentStrategies, fingerprint, parseStrategyDraft, previewToken, strategiesView, strategyPreviewView, type DraftProblem, type PreviewRow, type StrategyDraft, type StrategyListItem, type StrategyListView, type StrategyScopeItem, type StrategyPreviewView } from './strategies.ts';
-export { boundsDiffView, boundsPlanToken, expandBoundsEdit, parseAmountInput, parseBoundsEditRequest, parsePercentInput, type BoundAdjust, type BoundsDiffView, type BoundsEditRequest, type BoundsRequestProblem, type DiffFlag, type DiffRow } from './bounds-edit.ts';
+export { boundsDiffView, boundsPlanToken, DIFF_ROWS_SHOWN, expandBoundsEdit, MAX_SCOPES, parseAmountInput, parseBoundsEditRequest, parsePercentInput, type BoundAdjust, type BoundsDiffView, type BoundsEditRequest, type BoundsRequestProblem, type DiffFlag, type DiffRow } from './bounds-edit.ts';
+export { OFFER_CHOICES } from './compliance.ts';
+export { LIST_PAGE_DEFAULT, LIST_PAGE_MAX, listQuery, pageOf, parseListQuery, type ListQuery, type PageInfo } from './page.ts';
 export { FEED_PAGE_MAX, FEED_PERIODS_DAYS, FEED_STATUS_GROUPS, parseFeedQuery, priceFeed, type FeedItem, type FeedQuery, type FeedStatusGroup, type PriceFeedView } from './price-feed.ts';
 export { dangerousReport, REPORT_PERIODS_DAYS, type DangerousItem, type DangerousReportView } from './dangerous-report.ts';
 export { complianceView, discountCheckView, historyDepthView, priceEvidenceCsv, type ComplianceRow, type ComplianceView, type DiscountCheckView, type HistoryDepthView, type OfferDepthRow } from './compliance.ts';

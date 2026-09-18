@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import type { ComplianceView, DiscountCheckView, HistoryDepthView } from '@repracer/console-model';
+import { LIST_PAGE_DEFAULT, type ComplianceView, type DiscountCheckView, type HistoryDepthView, type ListQuery } from '@repracer/console-model';
 import { requestJson, useResource, worldPath } from '../api.ts';
 import type { DiscountAnnounceResponse, PriceEvidenceResponse } from '../api-types.ts';
-import { Badge, errorText, Gaps, Load, useMessages } from '../components.tsx';
+import { Badge, errorText, Gaps, Load, OfferPicker, Pager, useMessages } from '../components.tsx';
 
 /** Сумма из поля ввода в минимальных единицах: «19,99» и «19.99»; неверное — null */
 function minorOf(text: string): number | null {
@@ -66,7 +66,7 @@ export function ComplianceScreenView({ worldId, initial }: { worldId: string; in
     } catch (e) { setError(errorText(e, m)); } finally { setBusy(false); }
   };
 
-  const offers = view.offers.map((o) => <option key={o.writeScopeId} value={o.writeScopeId}>{o.label}</option>);
+  // Р-136 (ревью шага 29, находка 4): предложение выбирается поиском — их десять тысяч, список показывает первые
   return (
     <section>
       <h2>{c.pageTitle}</h2>
@@ -77,7 +77,7 @@ export function ComplianceScreenView({ worldId, initial }: { worldId: string; in
 
       <h3>{c.checkTitle}</h3>
       <div className="form">
-        <label>{c.fields.offer} <select value={form.writeScopeId} onChange={(e) => edit({ writeScopeId: e.target.value })}>{offers}</select></label>
+        <label>{c.fields.offer} <OfferPicker worldId={worldId} value={form.writeScopeId} onChange={(writeScopeId) => edit({ writeScopeId })} /></label>
         <label>{c.fields.reference} <input inputMode="decimal" value={form.reference} onChange={(e) => edit({ reference: e.target.value })} /></label>
         <label>{c.fields.sale} <input inputMode="decimal" value={form.sale} onChange={(e) => edit({ sale: e.target.value })} /></label>
         <label>{c.fields.startsAt} <input type="datetime-local" value={form.startsAt} onChange={(e) => edit({ startsAt: e.target.value })} /></label>
@@ -142,11 +142,14 @@ export function ComplianceScreenView({ worldId, initial }: { worldId: string; in
       )}
 
       <h3>{c.evidenceTitle}</h3>
+      {/* Р-136: доказательство выгружается по предложению; каталог целиком не отдаётся — об этом сказано до нажатия */}
+      <p className="muted small">{c.evidenceByOffer(view.offersTotal)}</p>
       <p className="muted small">{c.evidenceHint}</p>
       <div className="form">
         <label>{c.evidenceFrom} <input type="date" value={evidence.from} onChange={(e) => setEvidence({ ...evidence, from: e.target.value })} /></label>
         <label>{c.evidenceTo} <input type="date" value={evidence.to} onChange={(e) => setEvidence({ ...evidence, to: e.target.value })} /></label>
-        <label>{c.fields.offer} <select value={evidence.writeScopeId} onChange={(e) => setEvidence({ ...evidence, writeScopeId: e.target.value })}><option value="">{c.evidenceAll}</option>{offers}</select></label>
+        <label>{c.fields.offer} <OfferPicker worldId={worldId} value={evidence.writeScopeId} allowEmpty emptyLabel={c.evidenceAll}
+          onChange={(writeScopeId) => setEvidence({ ...evidence, writeScopeId })} /></label>
         <button type="button" disabled={busy || !evidence.from || !evidence.to} onClick={loadEvidence}>{c.download}</button>
       </div>
       {download ? (
@@ -164,6 +167,17 @@ export function ComplianceScreenView({ worldId, initial }: { worldId: string; in
 
 export function ComplianceScreen({ worldId }: { worldId: string }) {
   const m = useMessages();
-  const [resource, retry] = useResource<ComplianceView>(worldPath(worldId, 'compliance'), m.locale);
-  return <Load resource={resource} retry={retry}>{(view) => <ComplianceScreenView key={view.worldId} worldId={worldId} initial={view} />}</Load>;
+  // Р-136: глубина истории считается только у показанных предложений — раньше экран спрашивал базу по разу на каждое
+  const [query, setQuery] = useState<ListQuery>({ offset: 0, limit: LIST_PAGE_DEFAULT });
+  const [resource, retry] = useResource<ComplianceView>(`${worldPath(worldId, 'compliance')}?offset=${query.offset}&limit=${query.limit}`, m.locale);
+  return (
+    <Load resource={resource} retry={retry}>
+      {(view) => (
+        <>
+          <ComplianceScreenView key={`${view.worldId}:${query.offset}`} worldId={worldId} initial={view} />
+          <Pager page={view.page} query={query} onQuery={setQuery} />
+        </>
+      )}
+    </Load>
+  );
 }

@@ -20,8 +20,12 @@ test('risk 28: a price the channel did not apply is marked and not rolled up int
       minPrice: { amountMinor: 500, id: 'min-2528' }, maxPrice: { amountMinor: 3000, id: 'max-2528' } }] },
   });
   const ws = w.ids.dbId('ws-2528');
-  // Вчера по Берлину, 10:00 и 12:00: 15.00 применена, 9.00 — нет
-  const yesterday = new Date(Date.now() - 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' });
+  /**
+   * Позавчера по Берлину, 10:00 и 12:00: 15.00 применена, 9.00 — нет. Именно позавчера, а не вчера: закрытие суток даёт час
+   * после полуночи витрины (`p_now < day_end + interval '1 hour'`), и тест на «вчера» краснел час в сутки — с 00:00 до 01:00
+   * по Берлину, то есть в CI каждую ночь (шаг 29, ревью тавтологий).
+   */
+  const yesterday = new Date(Date.now() - 2 * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' });
   const at = (h: number) => `(DATE '${yesterday}' + time '${String(h).padStart(2, '0')}:00')::timestamp AT TIME ZONE 'Europe/Berlin'`;
   await db.superuser(
     `INSERT INTO tenant_data.price_history (tenant_id, accepted_at, write_scope_id, product_id, amount_minor, currency, price_basis, effective_min_price_minor, channel_write_id, write_version)
