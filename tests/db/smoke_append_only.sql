@@ -455,6 +455,12 @@ SELECT pg_temp.expect_fail('a system correction whose lowest price is above its 
           ((now() - interval '2 days') AT TIME ZONE 'Europe/Berlin')::date, 1900, 1700, 1900, now() - interval '2 days', 1700, now() - interval '2 days', 1, 800,
           'LATE_APPLIED_CONFIRMATION') $q$,
   'price_daily_system_correction_bounds');
+-- Шаг 28 [Р-134]: пакет импорта не переписывается и не очищается целиком
+SELECT pg_temp.expect_fail('append-only tenant_data.cost_import', $q$
+  UPDATE tenant_data.cost_import SET source_name = 'other.csv' $q$, 'UPDATE is forbidden');
+-- TRUNCATE пакетов вместе со строками себестоимости: без CASCADE база отказывает внешним ключом, поэтому проверяется именно страж
+SELECT pg_temp.expect_fail('truncate tenant_data.cost_import', $q$ TRUNCATE tenant_data.cost_import CASCADE $q$,
+  'TRUNCATE of tenant_data.cost_import is forbidden');
 SELECT pg_temp.expect_fail('truncate tenant_data.price_daily_system_correction', $q$ TRUNCATE tenant_data.price_daily_system_correction $q$,
   'TRUNCATE of tenant_data.price_daily_system_correction is forbidden');
 SELECT pg_temp.expect_fail('append-only tenant_data.price_daily_system_correction', $q$
@@ -470,6 +476,10 @@ SELECT pg_temp.expect_fail('a system correction of a day with prices but without
           ((now() - interval '2 days') AT TIME ZONE 'Europe/Berlin')::date, 2, 'LATE_APPLIED_CONFIRMATION') $q$,
   'price_daily_system_correction_shape');
 SELECT pg_temp.expect_fail('truncate tenant_data.price_history_applied', $q$ TRUNCATE tenant_data.price_history_applied $q$, 'TRUNCATE of tenant_data.price_history_applied is forbidden');
+-- Шаг 28 [Р-133]: вид повтора работы известен базе
+SELECT pg_temp.expect_fail('a scheduled job with an unknown retry kind (Р-133)', $q$
+  INSERT INTO maintenance.scheduled_job (job_key, job_name, catch_up, interval_seconds, next_due_at, retry_kind)
+  VALUES ('smoke-job-4', 'smoke-job-4', 'LATEST', 60, now(), 'SOMETIMES') $q$, 'scheduled_job_retry_kind_known');
 -- Шаг 26, D (0094) [риск 31]: уровень отставания работы — в базе, значения известны
 SELECT pg_temp.expect_fail('a scheduled job with an unknown lag level (риск 31)', $q$
   INSERT INTO maintenance.scheduled_job (job_key, job_name, catch_up, interval_seconds, next_due_at, lag_level) VALUES ('smoke-job-3', 'smoke-job-3', 'LATEST', 60, now(), 'MAYBE') $q$, 'scheduled_job_lag_level_known');

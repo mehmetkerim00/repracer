@@ -23,6 +23,8 @@ services:
       REPRACER_AMAZON_APPLICATION_CREDENTIALS_REF: ${REPRACER_AMAZON_APPLICATION_CREDENTIALS_REF:?set REPRACER_AMAZON_APPLICATION_CREDENTIALS_REF}
       REPRACER_CHANNEL_SECRETS_DIR: /run/secrets/channels
       REPRACER_RECEIVER_SILENCE_MS: ${REPRACER_RECEIVER_SILENCE_MS:-}
+      # OQ-194 (шаг 28): адрес отметки во внешнем сервисе [Р-127] — секрет (в нём идентификатор проверки)
+      REPRACER_RECEIVER_HEARTBEAT_URL_FILE: /run/secrets/receiver_heartbeat_url
       # Секреты — файлами: адрес очереди содержит номер аккаунта AWS, ключи — тем более
       REPRACER_APP_PG_URL_FILE: /run/secrets/app_pg_url
       REPRACER_INBOUND_PG_URL_FILE: /run/secrets/inbound_pg_url

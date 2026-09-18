@@ -17,11 +17,24 @@ export interface WorkerConfig {
   /** Обход-страховка: ждущая запись не остаётся незамеченной, даже если событие потерялось [Р-64] */
   sweepIntervalMs: number;
   partitionsConcurrently: number;
+  /**
+   * OQ-194 (шаг 28): адрес отметки во внешнем сервисе [Р-127]. Без него процесс не стартует, кроме явного
+   * `REPRACER_WORKER_HEARTBEAT=off`: молчание процесса, который никто не проверяет, снаружи не видно.
+   */
+  heartbeatUrl: string | null;
   metricsPort: number;
   channelSecretsDir: string;
   userAgent: string;
   kaufland: { subscriptionFallbackEmail: string; partnerCredentialsRef: string | null; buyBoxChangedAccess: 'GRANTED' | 'NOT_GRANTED' };
   amazon: { applicationCredentialsRef: string };
+}
+
+/** Отметка обязательна, если её явно не выключили: процесс без внешнего контроля о своей смерти не сообщает [Р-127, OQ-194] */
+function heartbeat(env: Env, read?: (path: string) => string): string | null {
+  if (env.REPRACER_WORKER_HEARTBEAT === 'off') return null;
+  const url = requiredValue(secretFromEnv(env, 'REPRACER_WORKER_HEARTBEAT_URL', read), 'REPRACER_WORKER_HEARTBEAT_URL (or REPRACER_WORKER_HEARTBEAT=off)');
+  if (!url.startsWith('https://')) throw new ConfigError('CONFIG_INVALID: REPRACER_WORKER_HEARTBEAT_URL must be https');
+  return url;
 }
 
 export function loadWorkerConfig(env: Env = process.env, read?: (path: string) => string): WorkerConfig {
@@ -38,6 +51,7 @@ export function loadWorkerConfig(env: Env = process.env, read?: (path: string) =
     kafkaBrokers: brokers,
     sweepIntervalMs: intFromEnv(env, 'REPRACER_WORKER_SWEEP_MS', 60_000, 1_000, 600_000),
     partitionsConcurrently: intFromEnv(env, 'REPRACER_WORKER_PARTITIONS', 4, 1, 64),
+    heartbeatUrl: heartbeat(env, read),
     metricsPort: intFromEnv(env, 'REPRACER_WORKER_METRICS_PORT', 9465, 1, 65_535),
     channelSecretsDir: requiredValue(env.REPRACER_CHANNEL_SECRETS_DIR, 'REPRACER_CHANNEL_SECRETS_DIR'),
     userAgent: env.REPRACER_USER_AGENT || 'repracer-worker/0.1 (Language=TypeScript; Platform=Node)',

@@ -2,10 +2,11 @@ import { createHash } from 'node:crypto';
 import { createServer, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import {
-  boundsDiffView, boundsView, can, complianceView, currentStrategies, discountCheckView, dangerousReport, decisionList, decisionTrace, describe, expandBoundsEdit, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, priceEvidenceCsv, scopeById, unitOf,
+  boundsDiffView, boundsView, can, complianceView, costImportView, currentStrategies, discountCheckView, dangerousReport, decisionList, decisionTrace, describe, expandBoundsEdit, importTargets, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, priceEvidenceCsv, scopeById, unitOf,
   parseStrategyDraft, planStop, previewToken, priceFeed, productList, rejectedView, REPORT_PERIODS_DAYS, stopView, strategiesView, strategyPreviewView,
   type Locale, type Messages, type StandWorld, type StopTarget, type StrategyDraft, type Viewer,
 } from '@repracer/console-model';
+import { buildPreview, readTable, suggestMapping } from '@repracer/cost-import';
 import type { DiscountAnnouncementInput, StrategyPreview } from '@repracer/pricing-pipeline';
 import {
   buildStandWorlds, memoryStandDirectory, pgStandJoinMember, pgStandUsers, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_EMAILS, STAND_ISSUER, type LiveWorld,
@@ -479,6 +480,54 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       return ok({ message: m.ui.boundsEdit.applied(applied.rows.length), rows: applied.rows.length } satisfies BoundsApplyResult);
     }
 
+    /**
+     * Шаг 28 [Р-134, Р-135]: массовый импорт себестоимости — предпросмотр (файл читается и сопоставляется, ничего не пишется),
+     * затем применение целиком, с отпечатком показанного набора и вторым фактором.
+     */
+    if (screen === 'cost-import' && (param === 'plan' || param === 'apply')) {
+      if (!can(viewer.role, 'MANAGE_PRICING')) return fail(403, 'FORBIDDEN', m.ui.costImport.noRight);
+      const name = typeof body.fileName === 'string' && body.fileName.trim() !== '' ? body.fileName.trim().slice(0, 200) : 'import';
+      const content = typeof body.content === 'string' ? body.content : null;
+      if (content === null) return fail(400, 'BAD_REQUEST', s.badRequest);
+      // Файл приходит в base64: и таблица XLSX (двоичная), и CSV в любой кодировке проходят одним путём
+      let sheet;
+      try {
+        sheet = readTable(Buffer.from(content, 'base64'));
+      } catch (error) {
+        return fail(400, (error as { code?: string }).code ?? 'UNSUPPORTED_FORMAT', String((error as Error).message).slice(0, 200));
+      }
+      const suggested = suggestMapping(sheet);
+      // Продавец мог поправить сопоставление колонок: его выбор сильнее подсказки
+      const chosen = body.mapping && typeof body.mapping === 'object' ? (body.mapping as Record<string, unknown>) : {};
+      const mapping = { ...suggested.mapping };
+      for (const [field, index] of Object.entries(chosen)) {
+        // null — «этой колонки в файле нет»: продавец снимает подсказку так же явно, как ставит свою
+        if (index === null) delete mapping[field as keyof typeof mapping];
+        else if (typeof index === 'number' && Number.isSafeInteger(index) && index >= 0) mapping[field as keyof typeof mapping] = index;
+      }
+      const offers = importTargets(world, m);
+      const preview = buildPreview({ sheet, mapping, offers });
+      const view = costImportView(world, preview, { name, sheet, mapping }, suggested.suggestions, m);
+      if (param === 'plan') return ok(view);
+      if (body.confirmed !== true) return fail(400, 'NOT_CONFIRMED', s.notConfirmed);
+      if (typeof body.fingerprint !== 'string' || body.fingerprint !== preview.fingerprint) return fail(409, 'PLAN_CHANGED', s.planChanged);
+      if (preview.apply.length === 0) return fail(400, 'NO_ROWS', view.blocked ?? m.ui.costImport.headline(preview.totals));
+      const actor = { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) };
+      const batch = {
+        sourceName: name, sourceFormat: sheet.format, fingerprint: preview.fingerprint, skippedRows: preview.totals.skipped,
+        rows: preview.apply.map((r) => ({
+          writeScopeId: r.writeScopeId!, unitCostMinor: r.unitCostMinor!, currency: r.currency!,
+          ...(r.fixedFeeMinor === undefined ? {} : { fixedFeeMinor: r.fixedFeeMinor }),
+          ...(r.feeRateBp === undefined ? {} : { feeRateBp: r.feeRateBp }),
+        })),
+      };
+      const applied = await live.store.importCosts(world.tenantId, batch, actor, 'APPLY');
+      if (applied.status === 'MFA_REQUIRED') return fail(403, 'MFA_REQUIRED', m.ui.costImport.mfa);
+      if (applied.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', m.ui.costImport.noRight);
+      if (applied.status !== 'APPLIED') return fail(400, applied.status === 'INVALID' ? applied.cause : applied.status, s.badRequest);
+      return ok({ message: m.ui.costImport.applied(applied.rows, applied.offers), rows: applied.rows, offers: applied.offers });
+    }
+
     // Шаг 12, G и Р-77: включение с предупреждениями по типу стратегии
     if (screen === 'scopes' && param !== null && parts[5] === 'enable') {
       const scope = world.state.scopes.find((x) => x.writeScopeId === param);
@@ -518,6 +567,13 @@ export function resolveStandIdentityMode(env: Readonly<Record<string, string | u
 }
 
 const MAX_BODY_BYTES = 64 * 1024;
+/**
+ * Ревью шага 28, находка 6: массовый импорт — это файл продавца, и 64 КиБ хватало примерно на 2 180 строк при объявленном пределе
+ * базы в 200 000 (`row_count <= 200000`). Выгрузка живого прогона (10 000 строк) — 229 КБ, в base64 — 305 КБ. Предел пути импорта
+ * взят от предела базы: 200 000 строк типичной выгрузки — это ~24 МБ, в base64 — ~32 МБ.
+ */
+const MAX_IMPORT_BODY_BYTES = 48 * 1024 * 1024;
+const bodyLimitFor = (url: string) => (url.includes('/cost-import/') ? MAX_IMPORT_BODY_BYTES : MAX_BODY_BYTES);
 
 function send(res: ServerResponse, r: ApiResponse): void {
   res.writeHead(r.status, {
@@ -563,9 +619,10 @@ async function main(): Promise<void> {
   const server = createServer(async (req, res) => {
     let size = 0;
     const chunks: Buffer[] = [];
+    const limit = bodyLimitFor(req.url ?? '');
     for await (const chunk of req) {
       size += (chunk as Buffer).length;
-      if (size > MAX_BODY_BYTES) return send(res, { status: 413, body: { error: { code: 'TOO_LARGE', message: fallback.tooLarge } } });
+      if (size > limit) return send(res, { status: 413, body: { error: { code: 'TOO_LARGE', message: fallback.tooLarge } } });
       chunks.push(chunk as Buffer);
     }
     let body: unknown;

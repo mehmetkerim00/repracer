@@ -15,7 +15,7 @@ function row(r: Record<string, unknown>): JobState {
     scope: r.scope_tenant_id ? { tenantId: String(r.scope_tenant_id), channelAccountId: String(r.scope_account_id) } : null,
     catchUp: r.catch_up as JobState['catchUp'], intervalSeconds: Number(r.interval_seconds), firstDueAt: iso(r.created_at)!,
     nextDueAt: iso(r.next_due_at)!, runsCompleted: Number(r.runs_completed), coalescedSlots: Number(r.coalesced_slots),
-    consecutiveFailures: Number(r.consecutive_failures), leaseOwner: (r.lease_owner as string | null) ?? null, leaseUntil: iso(r.lease_until),
+    consecutiveFailures: Number(r.consecutive_failures), retryKind: (r.retry_kind as JobState['retryKind']) ?? 'CHANNEL', leaseOwner: (r.lease_owner as string | null) ?? null, leaseUntil: iso(r.lease_until),
     lastStartedAt: iso(r.last_started_at), lastFinishedAt: iso(r.last_finished_at), lastOutcome: (r.last_outcome as JobState['lastOutcome']) ?? null,
     lastError: (r.last_error as string | null) ?? null, registeredAt: iso(r.registered_at)!, lagLevel: r.lag_level as JobState['lagLevel'],
   };
@@ -30,11 +30,12 @@ export class PgSchedulerState implements SchedulerStateStore {
 
   async ensure(r: JobRegistration): Promise<void> {
     await this.pool.query(
-      `INSERT INTO maintenance.scheduled_job (job_key, job_name, scope_tenant_id, scope_account_id, catch_up, interval_seconds, next_due_at, registered_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       ON CONFLICT (job_key) DO UPDATE SET interval_seconds = EXCLUDED.interval_seconds
-        WHERE maintenance.scheduled_job.interval_seconds IS DISTINCT FROM EXCLUDED.interval_seconds`,
-      [r.jobKey, r.jobName, r.scope?.tenantId ?? null, r.scope?.channelAccountId ?? null, r.catchUp, r.intervalSeconds, r.firstDueAt, r.registeredAt]);
+      `INSERT INTO maintenance.scheduled_job (job_key, job_name, scope_tenant_id, scope_account_id, catch_up, interval_seconds, next_due_at, registered_at, retry_kind)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       ON CONFLICT (job_key) DO UPDATE SET interval_seconds = EXCLUDED.interval_seconds, retry_kind = EXCLUDED.retry_kind
+        WHERE maintenance.scheduled_job.interval_seconds IS DISTINCT FROM EXCLUDED.interval_seconds
+           OR maintenance.scheduled_job.retry_kind IS DISTINCT FROM EXCLUDED.retry_kind`,
+      [r.jobKey, r.jobName, r.scope?.tenantId ?? null, r.scope?.channelAccountId ?? null, r.catchUp, r.intervalSeconds, r.firstDueAt, r.registeredAt, r.retryKind]);
   }
 
   async list(): Promise<JobState[]> {

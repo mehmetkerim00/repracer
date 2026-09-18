@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0102_verify_schema_invariants_v24.sql';
+const VERIFY = 'migrations/0105_verify_schema_invariants_v25.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -937,6 +937,88 @@ export const STEP27_ROWS = [
         verify('channel_data\\.price_decision_snapshot_ref: tenant closure does not delete the table')),
       m(replaceInFunction('maintenance.purge_tenant_channel_data(uuid)', "'channel_data.pricing_strategy_undercut',", ''),
         verify('channel_data\\.pricing_strategy_undercut: tenant closure does not delete the table')),
+    ],
+  },
+];
+
+export const STEP28_ROWS = [
+  {
+    row: 'Р-134', invariant: 'массовый импорт себестоимости применяется целиком: строки живут только в транзакции своего пакета, пакет приносит ровно объявленное число строк, значения пакета не выдумываются',
+    mutations: [
+      m(dropTrigger('zd_cost_profile_import_guard', 'tenant_data.cost_profile'),
+        smoke('a cost import row that belongs to a batch of another transaction (Р-134)')),
+      m(replaceInFunction('tenant_data.cost_profile_import_guard()', 'IF batch_xmin IS NULL OR NOT tenant_data.row_in_current_transaction(batch_xmin) THEN', 'IF false THEN'),
+        smoke('a cost import row that belongs to a batch of another transaction (Р-134)')),
+      m(dropTrigger('ze_cost_import_all_or_nothing', 'tenant_data.cost_import'),
+        smoke('a cost import that brings fewer rows than it declared (Р-134)')),
+      m(replaceInFunction('tenant_data.cost_import_all_or_nothing()', 'IF brought <> NEW.row_count THEN', 'IF false THEN'),
+        smoke('a cost import that brings fewer rows than it declared (Р-134)')),
+      m(dropConstraint('cost_profile_import_source', 'tenant_data.cost_profile'), smoke('a cost row of source IMPORT without a batch (Р-134)')),
+      m(dropConstraint('cost_import_source_format_check', 'tenant_data.cost_import'), smoke('a cost import of an unknown file format (Р-134)')),
+      m(dropConstraint('cost_import_source_name_check', 'tenant_data.cost_import'), smoke('a cost import without a file name (Р-134)')),
+      m(dropConstraint('cost_import_row_count_check', 'tenant_data.cost_import'), smoke('a cost import of no rows (Р-134)')),
+      m(dropConstraint('cost_import_fingerprint_check', 'tenant_data.cost_import'), smoke('a cost import without the fingerprint of the preview (Р-134)')),
+      m(dropConstraint('cost_import_skipped_rows_check', 'tenant_data.cost_import'), smoke('a cost import with a negative number of skipped rows (Р-134)')),
+      m(dropTrigger('a0_admin_write_person_insert', 'tenant_data.cost_import'),
+        verify('tenant_data\\.cost_import: administrative INSERT without the person guard')),
+      m(dropTrigger('zz_admin_write_audit_insert', 'tenant_data.cost_import'), verify('tenant_data\\.cost_import: administrative INSERT is not written to the audit log')),
+      m(dropTrigger('zz_append_only', 'tenant_data.cost_import'), smoke('append-only tenant_data.cost_import')),
+      // Страж TRUNCATE у пакета наблюдаем только без внешнего ключа строк импорта: с ключом база всегда очищает обе таблицы, и
+      // отказ даёт страж строк себестоимости — чужая защита [Р-99]. Мутация снимает обе связанные вещи, иначе её видит только сосед
+      m(`ALTER TABLE tenant_data.cost_profile DROP CONSTRAINT cost_profile_import_batch_fk;
+         DROP TRIGGER zz_no_truncate ON tenant_data.cost_import`, smoke('truncate tenant_data.cost_import')),
+      // Закрытие тенанта удаляет пакеты импорта: таблица названа в очистке (правило проверки схемы шага 27, задача F)
+      m(replaceInFunction('maintenance.purge_tenant_data(uuid,boolean)', ", 'tenant_data.cost_import'", ''),
+        verify('tenant_data\\.cost_import: tenant closure does not delete the table')),
+    ],
+  },
+  {
+    row: 'Р-135', invariant: 'массовое изменение цен требует второго фактора, и разбиение на отдельные транзакции его не обходит (риск 17)',
+    mutations: [
+      m(dropTrigger('zc_cost_import_requires_mfa', 'tenant_data.cost_import'), smoke('a cost import without a second factor (Р-135)')),
+      // Этот страж не должен мешать законному импорту: без раннего выхода по второму фактору он отказывал бы всем
+      m(replaceInFunction('tenant_data.cost_import_requires_mfa()', 'IF security.session_mfa() THEN RETURN NULL; END IF;', ''),
+        smoke('a cost import batch and its row in one transaction are accepted (Р-134)')),
+      m(dropTrigger('zf_cost_profile_mass_window_requires_mfa', 'tenant_data.cost_profile'),
+        smoke('prices of more than five offers changed within ten minutes without a second factor (Р-135)')),
+      m(replaceInFunction('tenant_data.mass_change_window_requires_mfa()', 'IF offers > 5 THEN', 'IF false THEN'),
+        smoke('prices of more than five offers changed within ten minutes without a second factor (Р-135)')),
+      // Окно длиной в ноль внутри одной транзакции незаметно: у всех её строк время транзакции. Видно его на правках, разложенных
+      // по транзакциям, — там строки прежних транзакций перестают считаться
+      m(replaceInFunction('tenant_data.mass_change_window_requires_mfa()', "window_start timestamptz := now() - interval '10 minutes';", 'window_start timestamptz := now();'),
+        smoke('min_price of a sixth offer within ten minutes without a second factor (Р-135)')),
+      // Признак второго фактора ставит база: без него окно считало бы и законные массовые правки
+      m(dropTrigger('a_cost_profile_created_with_mfa', 'tenant_data.cost_profile'),
+        smoke('a manual cost edit after a second-factor mass change is still accepted (Р-135)')),
+      m(dropTrigger('a_min_price_created_with_mfa', 'tenant_data.min_price'),
+        smoke('a manual min_price edit after a second-factor mass change is still accepted (Р-135)')),
+      m(dropTrigger('a_max_price_created_with_mfa', 'tenant_data.max_price'),
+        smoke('a manual max_price edit after a second-factor mass change is still accepted (Р-135)')),
+      m(dropTrigger('zf_min_price_mass_window_requires_mfa', 'tenant_data.min_price'),
+        smoke('min_price of a sixth offer within ten minutes without a second factor (Р-135)')),
+      m(dropTrigger('zf_max_price_mass_window_requires_mfa', 'tenant_data.max_price'),
+        smoke('max_price of a sixth offer within ten minutes without a second factor (Р-135)')),
+      // Ревью шага 28, находка 1: без времени транзакции у версии себестоимости окно обходится датой задним числом
+      m(dropTrigger('a1_cost_profile_transaction_time', 'tenant_data.cost_profile'),
+        smoke('a backdated cost version from the administrative service (Р-135)')),
+      m(replaceInFunction('tenant_data.cost_version_is_transaction_time()', 'IF NEW.created_at IS DISTINCT FROM now() THEN', 'IF false THEN'),
+        smoke('a backdated cost version from the administrative service (Р-135)')),
+      // Ревью шага 28, находка 2: гардрейл тенанта и аккаунта — изменение массовее любого импорта
+      m(dropTrigger('zg_guardrail_wide_scope_requires_mfa', 'tenant_data.guardrail'),
+        smoke('a tenant-wide guardrail without a second factor (Р-135)')),
+      m(replaceInFunction('tenant_data.wide_guardrail_requires_mfa()', "IF NEW.scope_type IN ('TENANT', 'CHANNEL_ACCOUNT') THEN", 'IF false THEN'),
+        smoke('a tenant-wide guardrail without a second factor (Р-135)')),
+      // Ревью шага 28, находка 9: окно считает предложения; если считать строки, честная ручная правка упрётся в порог
+      m(replaceInFunction('tenant_data.mass_change_window_requires_mfa()', "SELECT 'PRODUCT:' || coalesce(b.product_id, w.product_id)::text FROM tenant_data.min_price b",
+        "SELECT 'MIN:' || b.min_price_id::text FROM tenant_data.min_price b"),
+        smoke('onboarding of offer 3 in the window is accepted without a second factor (Р-135)'),
+        smoke('cost and both bounds of a fifth offer in the window are accepted without a second factor (Р-135)')),
+    ],
+  },
+  {
+    row: 'Р-133', invariant: 'вид повтора работы хранится в базе: у внутренних работ пауза растёт от минуты, у работ канала — от периода работы',
+    mutations: [
+      m(dropConstraint('scheduled_job_retry_kind_known', 'maintenance.scheduled_job'), smoke('a scheduled job with an unknown retry kind (Р-133)')),
     ],
   },
 ];

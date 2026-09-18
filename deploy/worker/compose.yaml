@@ -26,6 +26,8 @@ services:
       REPRACER_KAUFLAND_BUY_BOX_CHANGED_ACCESS: ${REPRACER_KAUFLAND_BUY_BOX_CHANGED_ACCESS:-NOT_GRANTED}
       REPRACER_KAUFLAND_PARTNER_CREDENTIALS_REF: ${REPRACER_KAUFLAND_PARTNER_CREDENTIALS_REF:-}
       REPRACER_AMAZON_APPLICATION_CREDENTIALS_REF: ${REPRACER_AMAZON_APPLICATION_CREDENTIALS_REF:?set REPRACER_AMAZON_APPLICATION_CREDENTIALS_REF}
+      # OQ-194 (шаг 28): адрес отметки во внешнем сервисе [Р-127] — секрет (в нём идентификатор проверки)
+      REPRACER_WORKER_HEARTBEAT_URL_FILE: /run/secrets/worker_heartbeat_url
       # Секреты — файлами: в переменных окружения их видят все процессы контейнера и docker inspect
       REPRACER_APP_PG_URL_FILE: /run/secrets/app_pg_url
       REPRACER_DISPATCHER_PG_URL_FILE: /run/secrets/dispatcher_pg_url

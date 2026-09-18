@@ -22,7 +22,7 @@ test('Р-126 on PostgreSQL: two scheduler processes run each missed daily slot e
   const seen: string[] = [];
   let now = '2026-09-17T00:40:00.000Z';
   const job: JobSpec = {
-    name, scope: null, intervalSeconds: 86_400, catchUp: 'EVERY_SLOT', firstDueAt: () => '2026-09-14T00:30:00.000Z', lagWarningSeconds: 999_999, lagCriticalSeconds: 9_999_999,
+    name, scope: null, retryKind: 'INTERNAL', intervalSeconds: 86_400, catchUp: 'EVERY_SLOT', firstDueAt: () => '2026-09-14T00:30:00.000Z', lagWarningSeconds: 999_999, lagCriticalSeconds: 9_999_999,
     leaseSeconds: 60, run: async ({ slotAt }) => { seen.push(slotAt); await new Promise((r) => setTimeout(r, 20)); return { items: 1 }; },
   };
   const a = createScheduler({ state: new PgSchedulerState(poolA), source: { jobs: async () => [job] }, owner: 'a', now: () => now, alerts: sink });
@@ -40,7 +40,7 @@ test('Р-126 on PostgreSQL: two scheduler processes run each missed daily slot e
 test('Р-126 on PostgreSQL: a valid lease cannot be taken over; an expired lease can; the old owner cannot record its result', async () => {
   const state = new PgSchedulerState(poolA);
   const name = key('pgtest-lease');
-  await state.ensure({ jobKey: name, jobName: name, scope: null, catchUp: 'LATEST', intervalSeconds: 60, firstDueAt: '2026-09-17T10:00:00.000Z', registeredAt: '2026-09-17T10:00:00.000Z' });
+  await state.ensure({ jobKey: name, jobName: name, scope: null, catchUp: 'LATEST', retryKind: 'INTERNAL', intervalSeconds: 60, firstDueAt: '2026-09-17T10:00:00.000Z', registeredAt: '2026-09-17T10:00:00.000Z' });
   const [one, two] = await Promise.all([state.claim(name, 'a', '2026-09-17T10:00:00.000Z', 1), state.claim(name, 'b', '2026-09-17T10:00:00.000Z', 1)]);
   assert.equal([one, two].filter(Boolean).length, 1, 'one of two concurrent claims wins');
   const winner = one ? 'a' : 'b';
@@ -61,7 +61,7 @@ test('review of step 25, finding 6 on PostgreSQL: a run longer than its lease re
   const name = key('pgtest-long');
   let runs = 0;
   const job: JobSpec = {
-    name, scope: null, intervalSeconds: 3600, catchUp: 'LATEST', firstDueAt: () => '2026-09-17T10:00:00.000Z', lagWarningSeconds: 999_999, lagCriticalSeconds: 9_999_999,
+    name, scope: null, retryKind: 'INTERNAL', intervalSeconds: 3600, catchUp: 'LATEST', firstDueAt: () => '2026-09-17T10:00:00.000Z', lagWarningSeconds: 999_999, lagCriticalSeconds: 9_999_999,
     leaseSeconds: 2, run: async () => { runs++; await new Promise((r) => setTimeout(r, 3_600)); return { items: 0 }; },
   };
   const now = () => '2026-09-17T10:00:00.000Z';
@@ -82,7 +82,7 @@ test('Риск 31 (шаг 26): срок работы сравнивается с
   assert.ok(Math.abs(Date.parse(dbNow) - realNow.getTime()) < 60_000, 'часы базы — часы базы, а не строка процесса');
   let runs = 0;
   const job: JobSpec = {
-    name, scope: null, intervalSeconds: 3600, catchUp: 'LATEST', firstDueAt: () => new Date(Date.parse(dbNow) + 30 * 60_000).toISOString(),
+    name, scope: null, retryKind: 'INTERNAL', intervalSeconds: 3600, catchUp: 'LATEST', firstDueAt: () => new Date(Date.parse(dbNow) + 30 * 60_000).toISOString(),
     lagWarningSeconds: 999_999, lagCriticalSeconds: 9_999_999, leaseSeconds: 60, run: async () => { runs++; return { items: 0 }; },
   };
   const scheduler = createScheduler({ state, source: { jobs: async () => [job] }, owner: 'db-clock', now: () => state.databaseNow(), alerts: sink });

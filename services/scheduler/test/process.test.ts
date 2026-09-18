@@ -10,7 +10,9 @@ import type { TickReport } from '../src/scheduler.ts';
  * Р-127, Р-129 (шаг 26): конфигурация, метрики, проверка работоспособности и отметка во внешнем сервисе. Данные синтетические;
  * внешний сервис — модель «dead man's switch» по его документации (vendor/healthchecks/2026-09-17/SOURCE.md).
  */
+// Шаг 28, E: секреты приходят файлами; окружение теста — режим стенда, где значения переменных ещё принимаются
 const ENV = {
+  REPRACER_MODE: 'stand',
   REPRACER_SCHEDULER_PG_URL: 'postgres://svc_scheduler@db/repracer_eu',
   REPRACER_APP_PG_URL: 'postgres://svc_app@db/repracer_eu',
   REPRACER_EXPORTER_PG_URL: 'postgres://svc_exporter@db/repracer_eu',
@@ -36,6 +38,9 @@ test('Р-129: конфигурация процесса — секреты из 
   // Нечитаемый файл секрета: в ошибке — имя переменной, не путь и не содержимое
   const thrown = (() => { try { loadConfig({ ...ENV, REPRACER_CH_INGEST_PASSWORD: undefined, REPRACER_CH_INGEST_PASSWORD_FILE: '/run/secrets/absent' }, () => { throw new Error('ENOENT: /run/secrets/absent'); }); return null; } catch (e) { return e as Error; } })();
   assert.equal(thrown?.message, 'CONFIG_SECRET_UNREADABLE: REPRACER_CH_INGEST_PASSWORD_FILE');
+  // Шаг 28, E: вне режима стенда секрет значением переменной окружения не принимается — в работе он приходит только файлом
+  const { REPRACER_MODE: _stand, ...production } = ENV;
+  assert.throws(() => loadConfig(production), /CONFIG_SECRET_IN_ENV: REPRACER_SCHEDULER_HEARTBEAT_URL/);
 });
 
 test('Р-129: учётные данные канала — файл на ссылку; подстановка пути отклоняется, содержимое не попадает в ошибку', async () => {

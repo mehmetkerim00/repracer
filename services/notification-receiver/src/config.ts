@@ -17,6 +17,11 @@ export interface ReceiverConfig {
   /** amzn1.sellerapps.app.… нашего приложения: чужое уведомление — CRITICAL */
   applicationId: string;
   aws: { accessKeyId: string; secretAccessKey: string; sessionToken: string | null };
+  /**
+   * OQ-194 (шаг 28): адрес отметки во внешнем сервисе [Р-127]. Без него процесс не стартует, кроме явного
+   * `REPRACER_RECEIVER_HEARTBEAT=off`: молчание процесса, который никто не проверяет, снаружи не видно.
+   */
+  heartbeatUrl: string | null;
   metricsPort: number;
   channelSecretsDir: string;
   userAgent: string;
@@ -26,6 +31,14 @@ export interface ReceiverConfig {
 }
 
 const REGIONS = new Set(['EU', 'NA', 'FE']);
+
+/** Отметка обязательна, если её явно не выключили: процесс без внешнего контроля о своей смерти не сообщает [Р-127, OQ-194] */
+function heartbeat(env: Env, read?: (path: string) => string): string | null {
+  if (env.REPRACER_RECEIVER_HEARTBEAT === 'off') return null;
+  const url = requiredValue(secretFromEnv(env, 'REPRACER_RECEIVER_HEARTBEAT_URL', read), 'REPRACER_RECEIVER_HEARTBEAT_URL (or REPRACER_RECEIVER_HEARTBEAT=off)');
+  if (!url.startsWith('https://')) throw new ConfigError('CONFIG_INVALID: REPRACER_RECEIVER_HEARTBEAT_URL must be https');
+  return url;
+}
 
 export function loadReceiverConfig(env: Env = process.env, read?: (path: string) => string): ReceiverConfig {
   const region = env.REPRACER_AMAZON_REGION ?? '';
@@ -45,6 +58,7 @@ export function loadReceiverConfig(env: Env = process.env, read?: (path: string)
       secretAccessKey: requiredValue(secretFromEnv(env, 'REPRACER_AWS_SECRET_ACCESS_KEY', read), 'REPRACER_AWS_SECRET_ACCESS_KEY'),
       sessionToken: secretFromEnv(env, 'REPRACER_AWS_SESSION_TOKEN', read),
     },
+    heartbeatUrl: heartbeat(env, read),
     metricsPort: intFromEnv(env, 'REPRACER_RECEIVER_METRICS_PORT', 9466, 1, 65_535),
     channelSecretsDir: requiredValue(env.REPRACER_CHANNEL_SECRETS_DIR, 'REPRACER_CHANNEL_SECRETS_DIR'),
     userAgent: env.REPRACER_USER_AGENT || 'repracer-notification-receiver/0.1 (Language=TypeScript; Platform=Node)',

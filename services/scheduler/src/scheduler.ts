@@ -1,5 +1,5 @@
 import type { AlertSink, Instant } from '@repracer/channel-port';
-import { LeaseLostError, type CatchUp, type JobScope, type JobState, type LagLevel, type RunRecord, type SchedulerStateStore } from './state.ts';
+import { LeaseLostError, type CatchUp, type JobScope, type JobState, type LagLevel, type RetryKind, type RunRecord, type SchedulerStateStore } from './state.ts';
 
 /**
  * Р-126 (шаг 25): процесс-планировщик. Каждый такт:
@@ -31,6 +31,8 @@ export interface JobSpec {
   scope: JobScope | null;
   intervalSeconds: number;
   catchUp: CatchUp;
+  /** Р-133: куда работа ходит — в канал с лимитами (CHANNEL) или только в наши хранилища (INTERNAL); от этого зависит пауза повтора */
+  retryKind: RetryKind;
   /** Первый слот новой работы */
   firstDueAt(now: Instant): Instant;
   /** Отставание, после которого — WARNING и CRITICAL, секунды */
@@ -69,20 +71,25 @@ export const jobKeyOf = (name: string, scope: JobScope | null) => (scope ? `${na
 
 /** Ближайший слот после момента для LATEST: срок + k интервалов > now; k − 1 — схлопнутые слоты */
 /**
- * Р-132 (шаг 27): провалившаяся работа сохраняет слот (пропуск не теряется), но повторяется с растущей паузой, а не каждый такт.
- * Пауза — период самой работы, удвоенный на каждый следующий провал подряд, но не дольше суток: канал, который лежит, не получает
- * запрос каждую минуту, а работа с коротким периодом не ждёт дольше, чем нужно.
+ * Р-132 (шаг 27) и Р-133 (шаг 28): провалившаяся работа сохраняет слот (пропуск не теряется), но повторяется с растущей паузой, а не
+ * каждый такт. Насколько растущей — зависит от того, куда работа ходит:
+ *   CHANNEL — в канал с лимитами: пауза не короче периода самой работы, потолок — сутки. Лежащий канал не получает запрос в минуту;
+ *   INTERNAL — только в наши хранилища: пауза от минуты до часа. Иначе отказ аналитического слоя на четверть часа стоил бы суток
+ *   истории снимков, потому что повтор суточной работы ушёл бы на следующие сутки (живой прогон шага 27, OQ-193).
  */
 export const RETRY_BACKOFF_CAP_SECONDS = 86_400;
+export const INTERNAL_RETRY_BASE_SECONDS = 60;
+export const INTERNAL_RETRY_CAP_SECONDS = 3_600;
 
-export function retryDelaySeconds(intervalSeconds: number, consecutiveFailures: number): number {
+export function retryDelaySeconds(intervalSeconds: number, consecutiveFailures: number, retryKind: RetryKind = 'CHANNEL'): number {
   const doublings = Math.max(0, Math.min(consecutiveFailures - 1, 20));
+  if (retryKind === 'INTERNAL') return Math.min(INTERNAL_RETRY_BASE_SECONDS * 2 ** doublings, INTERNAL_RETRY_CAP_SECONDS);
   return Math.min(intervalSeconds * 2 ** doublings, RETRY_BACKOFF_CAP_SECONDS);
 }
 
 export function dueOf(j: JobState): Instant {
   if (j.lastOutcome !== 'FAILED' || !j.lastFinishedAt) return j.nextDueAt;
-  const retry = Date.parse(j.lastFinishedAt) + retryDelaySeconds(j.intervalSeconds, j.consecutiveFailures) * 1000;
+  const retry = Date.parse(j.lastFinishedAt) + retryDelaySeconds(j.intervalSeconds, j.consecutiveFailures, j.retryKind) * 1000;
   return retry > Date.parse(j.nextDueAt) ? new Date(retry).toISOString() : j.nextDueAt;
 }
 
@@ -156,7 +163,7 @@ export function createScheduler(options: SchedulerOptions) {
       for (const spec of specs) {
         const jobKey = jobKeyOf(spec.name, spec.scope);
         byKey.set(jobKey, spec);
-        await state.ensure({ jobKey, jobName: spec.name, scope: spec.scope, catchUp: spec.catchUp, intervalSeconds: spec.intervalSeconds, firstDueAt: spec.firstDueAt(now), registeredAt: now });
+        await state.ensure({ jobKey, jobName: spec.name, scope: spec.scope, catchUp: spec.catchUp, retryKind: spec.retryKind, intervalSeconds: spec.intervalSeconds, firstDueAt: spec.firstDueAt(now), registeredAt: now });
       }
       const report: TickReport = { now, runs: [], lagging: [], skippedLeased: [], lostLeases: [], nextDueAt: null };
       await state.prune([...byKey.keys()], 100);

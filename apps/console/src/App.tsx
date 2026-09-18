@@ -9,6 +9,7 @@ import { DangerousScreen } from './screens/Dangerous.tsx';
 import { FeedScreen } from './screens/Feed.tsx';
 import { StrategiesScreen } from './screens/Strategies.tsx';
 import { DecisionsScreen, TraceScreen } from './screens/Decisions.tsx';
+import { CostImportScreen } from './screens/CostImport.tsx';
 import { ProductsScreen } from './screens/Products.tsx';
 import { RejectedScreen } from './screens/Rejected.tsx';
 import { StopScreen } from './screens/Stop.tsx';
@@ -25,7 +26,7 @@ export function parseHash(hash: string): Route {
   return { worldId: parts[1], screen: parts[2] ?? 'products', param: parts[3] ?? null };
 }
 
-const SCREENS = ['products', 'decisions', 'strategies', 'feed', 'rejected', 'dangerous', 'bounds', 'compliance', 'stop'] as const;
+const SCREENS = ['products', 'decisions', 'strategies', 'feed', 'rejected', 'dangerous', 'bounds', 'cost-import', 'compliance', 'stop'] as const;
 
 /** Вход [Р-78]: у поставщика identity; на стенде — имитатор с синтетическими пользователями. Паролей у нас нет */
 export function LoginView({ simulator, error, busy, onSignIn }: {
@@ -95,6 +96,7 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
         : route.screen === 'decisions' ? (route.param ? <TraceScreen worldId={world.id} decisionId={route.param} /> : <DecisionsScreen worldId={world.id} />)
           : route.screen === 'rejected' ? <RejectedScreen worldId={world.id} />
             : route.screen === 'bounds' ? <BoundsScreen worldId={world.id} writeScopeId={route.param} />
+              : route.screen === 'cost-import' ? <CostImportScreen worldId={world.id} />
               : route.screen === 'stop' ? <StopScreen worldId={world.id} />
                 : route.screen === 'strategies' ? <StrategiesScreen worldId={world.id} />
                   : route.screen === 'feed' ? <FeedScreen worldId={world.id} />

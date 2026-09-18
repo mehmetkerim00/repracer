@@ -81,6 +81,9 @@ jobs:
       - run: npm run typecheck
       - name: All tests, no skips
         run: node scripts/test-all.mjs
+      # Шаг 28, D: развёртывания поднимаются по-настоящему — три процесса стартуют и отвечают на /healthz (deploy/ci/README.md)
+      - name: Deployments start (шаг 28, D)
+        run: PG_HOST=host.docker.internal scripts/deploy-smoke.sh
 
   # Шаг 20: замер сжатия ClickHouse против оценки шага 4 (ADR-0004) — отдельное задание, итог — артефакт compression.json
   clickhouse-compression:

@@ -348,6 +348,38 @@ export type BoundsEditResult =
   | { status: 'CONFLICT'; writeScopeId: string; actual: { minMinor: number | null; maxMinor: number | null } }
   | { status: 'INVALID'; writeScopeId: string; cause: 'SCOPE_NOT_FOUND' | 'AMOUNT_INVALID' | 'MIN_ABOVE_MAX' | 'NOTHING_TO_CHANGE' | 'DUPLICATE_SCOPE' };
 
+/**
+ * Р-134 (шаг 28): массовый импорт себестоимости. Строка импорта — это себестоимость одного оффера: в базе она хранится профилем
+ * товара в области оффера (товар + аккаунт + витрина), как и ручная правка.
+ */
+export interface CostImportRowInput {
+  writeScopeId: string;
+  unitCostMinor: number;
+  currency: string;
+  /** Фиксированная комиссия канала и комиссия от цены — оценка комиссии оффера [Р-32]; без них остаётся прежняя */
+  fixedFeeMinor?: number;
+  feeRateBp?: number;
+}
+
+export interface CostImportBatch {
+  /** Имя файла продавца — чтобы он узнал свой импорт в списке */
+  sourceName: string;
+  sourceFormat: 'CSV' | 'XLSX';
+  /** Отпечаток предпросмотра: применяется ровно показанное [Р-134] */
+  fingerprint: string;
+  /** Сколько строк файла применены НЕ будут (показаны продавцу отдельно) */
+  skippedRows: number;
+  rows: readonly CostImportRowInput[];
+}
+
+export type CostImportResult =
+  | { status: 'PREVIEWED'; rows: number; offers: number }
+  | { status: 'APPLIED'; importId: string; rows: number; offers: number }
+  | { status: 'FORBIDDEN' }
+  /** Р-135: импорт применяется только со вторым фактором; предпросмотр его не требует */
+  | { status: 'MFA_REQUIRED' }
+  | { status: 'INVALID'; cause: 'NO_ROWS' | 'DUPLICATE_SCOPE' | 'AMOUNT_INVALID' | 'SCOPE_NOT_FOUND' | 'CURRENCY_MISMATCH'; writeScopeId?: string };
+
 /** Шаг 21: новая версия стратегии и её назначение единицам записи — после превью */
 export interface StrategySaveInput {
   /** null — новая стратегия */
@@ -499,6 +531,8 @@ export interface PricingStore {
   setPricingMode(tenantId: string, writeScopeId: string, mode: PriceScopeContext['pricingMode'], userId?: string): Promise<void>;
   /** Шаг 21: PREVIEW — те же проверки и действующие границы после правки без сохранения; APPLY — всё или ничего */
   editBounds(tenantId: string, edits: readonly BoundsEditInput[], actor: AdminActor, mode: 'PREVIEW' | 'APPLY'): Promise<BoundsEditResult>;
+  /** Р-134, Р-135: массовый импорт себестоимости — предпросмотр без записи, применение целиком и со вторым фактором */
+  importCosts(tenantId: string, batch: CostImportBatch, actor: AdminActor, mode: 'PREVIEW' | 'APPLY'): Promise<CostImportResult>;
   saveStrategy(tenantId: string, input: StrategySaveInput, actor: AdminActor): Promise<StrategySaveResult>;
   /** Р-123 (шаг 24): наименьшая цена за 30 суток витрины до начала скидки — предупреждение до объявления */
   /**

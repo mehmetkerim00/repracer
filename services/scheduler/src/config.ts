@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { hostname } from 'node:os';
+import { ConfigError, intFromEnv, requiredValue, secretFromEnv } from '@repracer/service-runtime';
 
 /**
  * Р-129 (шаг 26): конфигурация процесса планировщика — из переменных окружения; секреты (адреса баз с паролями, пароли ClickHouse, адрес
@@ -27,34 +28,14 @@ export interface SchedulerConfig {
   amazon: { applicationCredentialsRef: string };
 }
 
-export class ConfigError extends Error {}
+export { ConfigError };
 
 type Env = Readonly<Record<string, string | undefined>>;
 
-function secret(env: Env, name: string, read: (path: string) => string): string | null {
-  const file = env[`${name}_FILE`];
-  if (file) {
-    try {
-      return read(file).trim();
-    } catch {
-      throw new ConfigError(`CONFIG_SECRET_UNREADABLE: ${name}_FILE`);
-    }
-  }
-  return env[name] ?? null;
-}
-
-function required(value: string | null | undefined, name: string): string {
-  if (!value) throw new ConfigError(`CONFIG_MISSING: ${name}`);
-  return value;
-}
-
-function int(env: Env, name: string, fallback: number, min: number, max: number): number {
-  const raw = env[name];
-  if (raw === undefined || raw === '') return fallback;
-  const n = Number(raw);
-  if (!Number.isInteger(n) || n < min || n > max) throw new ConfigError(`CONFIG_INVALID: ${name} must be an integer in [${min}, ${max}]`);
-  return n;
-}
+// Шаг 28: разбор конфигурации — общий для всех процессов (@repracer/service-runtime): секрет только из файла, кроме режима стенда
+const secret = (env: Env, name: string, read: (path: string) => string) => secretFromEnv(env, name, read);
+const required = requiredValue;
+const int = intFromEnv;
 
 export function loadConfig(env: Env = process.env, read: (path: string) => string = (p) => readFileSync(p, 'utf8')): SchedulerConfig {
   const heartbeatOff = env.REPRACER_SCHEDULER_HEARTBEAT === 'off';

@@ -171,7 +171,10 @@ async function evaluate(expect, id, mutation) {
       // поймала другая защита (ревью шага 18, находка 8)
       const lines = s.out.split('\n');
       for (const e of smokeChecks) {
+        // Шаг 28: проверка разрешённого действия (pg_temp.ok) падает своей причиной — «законное действие отклонено». У неё нет
+        // ожидаемой причины отказа: сам факт отказа и есть поимка снятой защиты, которая ломает работу продавца
         const didNot = lines.find((l) => l.includes(`CHECK FAILED: ${e.smoke} | EXPECTED FAILURE DID NOT HAPPEN`) || l.endsWith(`EXPECTED FAILURE DID NOT HAPPEN: ${e.smoke}`)
+          || l.includes(`CHECK FAILED: ${e.smoke} | ACCEPTED ACTION WAS REFUSED`)
           || /ERROR:\s+(.*)$/.exec(l)?.[1] === e.smoke);
         const other = lines.find((l) => l.includes(`CHECK FAILED: ${e.smoke} | EXPECTED FAILURE HAD ANOTHER REASON`) || l.includes(`CHECK FAILED: ${e.smoke} | EXPECTED FAILURE HAS NO DECLARED REASON`)
           || l.endsWith(`: ${e.smoke}`) && /EXPECTED FAILURE HAD ANOTHER REASON/.test(l));
@@ -209,8 +212,8 @@ const describeExpect = (e) => e.smoke !== undefined ? `smoke «${e.smoke}»` : e
 const describeMutation = (m) => typeof m === 'string' ? m.replace(/\s+/g, ' ').slice(0, 110) : `${m.fn}: «${m.from.slice(0, 50)}…» → «${m.to.slice(0, 30)}…»`;
 const sameCheck = (a, b) => describeExpect(a) === describeExpect(b);
 
-const { R93_ROWS, STEP17_ROWS = [], STEP18_ROWS = [], STEP19_ROWS = [], STEP20_ROWS = [], STEP21_ROWS = [], STEP22_ROWS = [], STEP23_ROWS = [], STEP24_ROWS = [], STEP25_ROWS = [], STEP25_B_ROWS = [], STEP25_D_ROWS = [], STEP26_ROWS = [], STEP27_ROWS = [], R93_NOT_MUTATED = [] } = await import(pathToFileURL(catalogPath).href);
-const rows = [...R93_ROWS, ...(process.argv.includes('--r93-only') ? [] : [...STEP17_ROWS, ...STEP18_ROWS, ...STEP19_ROWS, ...STEP20_ROWS, ...STEP21_ROWS, ...STEP22_ROWS, ...STEP23_ROWS, ...STEP24_ROWS, ...STEP25_ROWS, ...STEP25_B_ROWS, ...STEP25_D_ROWS, ...STEP26_ROWS, ...STEP27_ROWS])].filter((r) => !only || only.includes(r.row));
+const { R93_ROWS, STEP17_ROWS = [], STEP18_ROWS = [], STEP19_ROWS = [], STEP20_ROWS = [], STEP21_ROWS = [], STEP22_ROWS = [], STEP23_ROWS = [], STEP24_ROWS = [], STEP25_ROWS = [], STEP25_B_ROWS = [], STEP25_D_ROWS = [], STEP26_ROWS = [], STEP27_ROWS = [], STEP28_ROWS = [], R93_NOT_MUTATED = [] } = await import(pathToFileURL(catalogPath).href);
+const rows = [...R93_ROWS, ...(process.argv.includes('--r93-only') ? [] : [...STEP17_ROWS, ...STEP18_ROWS, ...STEP19_ROWS, ...STEP20_ROWS, ...STEP21_ROWS, ...STEP22_ROWS, ...STEP23_ROWS, ...STEP24_ROWS, ...STEP25_ROWS, ...STEP25_B_ROWS, ...STEP25_D_ROWS, ...STEP26_ROWS, ...STEP27_ROWS, ...STEP28_ROWS])].filter((r) => !only || only.includes(r.row));
 
 // Р-99: у каждой мутации — свои проверки; у проверки теста и проверки схемы — обязательная причина (тест и проверка схемы падают по многим причинам)
 for (const r of rows) {

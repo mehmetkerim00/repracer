@@ -3,7 +3,7 @@ import { createNotificationReceiver, createSqsClient, pipelineSink, storeLedger,
 import type { AdapterDependencies } from '@repracer/channel-port';
 import { createPricingPipeline } from '@repracer/pricing-pipeline';
 import { createPool, PgPricingStore, PgSellerRouter, type PgPool } from '@repracer/pricing-store-pg';
-import { credentialsFromFiles, jsonSink, pgAccountDirectory, ProcessHealth, serveHealth } from '@repracer/service-runtime';
+import { createHeartbeat, credentialsFromFiles, jsonSink, pgAccountDirectory, ProcessHealth, serveHealth } from '@repracer/service-runtime';
 import { loadReceiverConfig, type ReceiverConfig } from './config.ts';
 
 /**
@@ -74,10 +74,26 @@ export async function startReceiverProcess(config: ReceiverConfig = loadReceiver
   });
   health.alive();
   // Круг опроса длится не дольше ожидания очереди (20 с) плюс обработка: три минуты без круга — процесс нездоров
-  const server = await serveHealth(health, { port: config.metricsPort, prefix: 'repracer_receiver', staleAfterMs: 180_000 });
+  const staleAfterMs = 180_000;
+  const server = await serveHealth(health, { port: config.metricsPort, prefix: 'repracer_receiver', staleAfterMs });
+  // OQ-194 (шаг 28): молчание процесса видно снаружи — отметка во внешнем сервисе [Р-127], а не только `/healthz` внутри хоста
+  const heartbeat = config.heartbeatUrl ? createHeartbeat({ url: config.heartbeatUrl }) : null;
+  const beat = async () => {
+    if (!heartbeat) return;
+    try {
+      await heartbeat.beat(health.healthy(staleAfterMs));
+    } catch (error) {
+      health.count('heartbeat_failed');
+      sink.logger.log({ level: 'WARN', code: 'RECEIVER_HEARTBEAT_FAILED', message: 'RECEIVER_HEARTBEAT_FAILED', details: { error: String((error as Error).message).slice(0, 120) } });
+    }
+  };
+  await beat();
+  const heartbeatTimer = setInterval(() => { void beat(); }, 60_000);
+  heartbeatTimer.unref();
   return {
     receiver, health,
     async stop() {
+      clearInterval(heartbeatTimer);
       abort.abort();
       await loop;
       await server.close();

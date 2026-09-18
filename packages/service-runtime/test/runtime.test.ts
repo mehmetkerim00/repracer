@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ConfigError, credentialsFromFiles, intFromEnv, jsonSink, ProcessHealth, requiredValue, secretFromEnv, serveHealth } from '../src/index.ts';
+import { ConfigError, credentialsFromFiles, intFromEnv, jsonSink, ProcessHealth, requiredValue, secretFromEnv, secretMode, serveHealth } from '../src/index.ts';
 
 /** Общий слой процессов (OQ-190): проверяется поведение, на которое опираются развёртывания — секреты файлами, живость и метрики. */
 
@@ -12,7 +12,13 @@ test('OQ-190: a secret is read from a file, the value never appears in the error
     return v;
   };
   assert.equal(secretFromEnv({ REPRACER_APP_PG_URL_FILE: '/run/secrets/app_pg_url' }, 'REPRACER_APP_PG_URL', read), 'postgres://svc_app:s3cr3t@db/repracer');
-  assert.equal(secretFromEnv({ REPRACER_APP_PG_URL: 'postgres://plain' }, 'REPRACER_APP_PG_URL', read), 'postgres://plain');
+  // Шаг 28, E: значение переменной окружения — только в режиме стенда; в работе секрет приходит файлом
+  assert.throws(() => secretFromEnv({ REPRACER_APP_PG_URL: 'postgres://plain' }, 'REPRACER_APP_PG_URL', read),
+    (error: unknown) => error instanceof ConfigError && /CONFIG_SECRET_IN_ENV: REPRACER_APP_PG_URL/.test((error as Error).message)
+      && !/postgres:\/\/plain/.test((error as Error).message));
+  assert.equal(secretFromEnv({ REPRACER_MODE: 'stand', REPRACER_APP_PG_URL: 'postgres://plain' }, 'REPRACER_APP_PG_URL', read), 'postgres://plain');
+  assert.equal(secretMode({}), 'FILE_ONLY');
+  assert.equal(secretMode({ REPRACER_MODE: 'stand' }), 'STAND');
   assert.equal(secretFromEnv({}, 'REPRACER_APP_PG_URL', read), null);
   try {
     secretFromEnv({ REPRACER_APP_PG_URL_FILE: '/run/secrets/missing' }, 'REPRACER_APP_PG_URL', read);

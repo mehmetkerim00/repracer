@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer, type ViteDevServer } from 'vite';
-import { messagesFor, type ComplianceView, type DiscountCheckView, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
+import { messagesFor, type ComplianceView, type CostImportView, type DiscountCheckView, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
 import { buildStandWorlds, memoryStandDirectory, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
@@ -225,6 +225,68 @@ test('Р-131, G: without the declared cost the screen shows a requirement, not a
   assert.deepEqual([acknowledged.enabled, acknowledged.problems.map((p) => p.code)], [false, ['COST_REQUIRED']], 'acknowledging a warning does not declare a cost');
   const viewer = await login('VIEWER');
   assert.equal((await call(viewer, 'POST', api(id, 'scopes', scope.unit.writeScopeId, 'enable'), { acknowledgeWarnings: true })).status, 403);
+});
+
+test('Р-134, Р-135 (шаг 28): импорт себестоимости — предпросмотр до применения, несопоставленное перечислено, применение со вторым фактором', async () => {
+  const id = 'kaufland/pipeline/happy-path';
+  const owner = await login('OWNER', 'de');
+  const viewer = await login('VIEWER');
+  const products = await get<ProductListView>(owner, api(id, 'products'));
+  const unit = products.rows[0]!.unit.externalUnitId;
+  // Выгрузка продавца: разделитель «;», запятая в числе, одна строка про несуществующий оффер и одна без себестоимости
+  const csv = [
+    'Artikelnummer;Einstandspreis;Währung;Provision %',
+    `${unit};10,50;EUR;15`,
+    'A-DOES-NOT-EXIST;7,00;EUR;15',
+    `${unit};;EUR;15`,   // тот же оффер, но без себестоимости: строка не применяется и названа отдельно
+  ].join('\n');
+  const file = { fileName: 'kosten.csv', content: Buffer.from(csv, 'utf8').toString('base64') };
+  assert.equal((await call(viewer, 'POST', api(id, 'cost-import', 'plan'), file)).status, 403, 'у зрителя импорта нет');
+  const planned = await call(owner, 'POST', api(id, 'cost-import', 'plan'), file);
+  assert.equal(planned.status, 200, JSON.stringify(planned.body));
+  const view = planned.body as CostImportView;
+  // Продавец видит: как прочитан файл, какие колонки узнаны, что применится и что нет — с причиной
+  assert.deepEqual([view.source.format, view.source.delimiter], ['CSV', ';']);
+  assert.equal(view.summary.apply, 1);
+  assert.ok(view.skipped.some((g) => g.problem === 'OFFER_NOT_FOUND' && g.examples.some((e) => e.offerKey === 'A-DOES-NOT-EXIST')));
+  assert.ok(view.skipped.some((g) => g.problem === 'COST_MISSING'));
+  // Ревью шага 28, находка 15: «больше либо равно нулю» — не проверка. Значение имеет число офферов, которые после импорта
+  // репрайсинг включить не смогут [Р-131], и то, что продавец видит его на экране
+  assert.equal(view.stillWithoutCost, products.rows.length - view.summary.offersCovered,
+    'без себестоимости остаются все офферы списка, кроме тех, чьи строки применятся [Р-131]');
+  assert.equal(view.mfaRequired, true);
+  // Ревью шага 28, находка 6: массовый импорт — это файл продавца, а не несколько строк. Раньше тело запроса было ограничено
+  // 64 КиБ, и выгрузка больше ~2 000 строк не доходила до сервера вовсе
+  const bigCsv = ['Artikelnummer;Einstandspreis;Währung;Provision %',
+    ...Array.from({ length: 4000 }, (_, i) => `A-SYNTH-${i};10,50;EUR;15`)].join('\n');
+  assert.ok(Buffer.from(bigCsv, 'utf8').toString('base64').length > 64 * 1024, 'файл заведомо больше прежнего предела тела запроса');
+  const big = await call(owner, 'POST', api(id, 'cost-import', 'plan'),
+    { fileName: 'gross.csv', content: Buffer.from(bigCsv, 'utf8').toString('base64') });
+  assert.equal(big.status, 200, 'выгрузка в сотни килобайт доходит до сервера');
+  assert.equal((big.body as CostImportView).summary.skipped, 4000, 'все её строки разобраны и перечислены с причиной');
+
+  // Ревью шага 28, находка 8: подсказку можно исправить — выбор продавца сильнее, и предпросмотр строится заново
+  const wrongColumn = await call(owner, 'POST', api(id, 'cost-import', 'plan'), { ...file, mapping: { unitCostMinor: 2 } });
+  assert.equal(wrongColumn.status, 200);
+  const wrongView = wrongColumn.body as CostImportView;
+  assert.equal(wrongView.summary.apply, 0, 'колонка валюты вместо себестоимости — применять нечего');
+  assert.equal(wrongView.fields.find((f) => f.field === 'unitCostMinor')?.columnIndex, 2, 'экран показывает выбор продавца');
+  assert.deepEqual(view.fileColumns.map((c) => c.name), ['A', 'B', 'C', 'D'], 'колонки файла названы так же, как в таблице продавца');
+  const preview = await html('/src/screens/CostImport.tsx', 'CostImportPreview', { view }, 'de');
+  // На экране: заголовок списка непримененных строк, правило «целиком или никак» и требование второго фактора
+  for (const text of ['Zeilen, die nicht angewendet werden', 'vollständig angewendet', 'zweitem Faktor']) assert.ok(preview.includes(text), text);
+  // Применение: подтверждение обязательно, отпечаток — тоже, второй фактор — тоже
+  const apply = (auth: Auth, body: Record<string, unknown>) => call(auth, 'POST', api(id, 'cost-import', 'apply'), { ...file, ...body });
+  assert.equal((await apply(owner, { fingerprint: view.fingerprint })).status, 400, 'без подтверждения не применяется');
+  assert.equal((await apply(owner, { fingerprint: 'stale', confirmed: true })).status, 409, 'устаревший предпросмотр не применяется');
+  // Вход только паролем: второго фактора нет — импорт не применяется [Р-135]
+  const passwordOnly = { authorization: `Bearer ${issuer.token(account('OWNER').subject, { email: account('OWNER').email, amr: ['pwd'] })}`, cookie: 'repracer_locale=de' };
+  const withoutMfa = await apply(passwordOnly, { fingerprint: view.fingerprint, confirmed: true });
+  assert.deepEqual([withoutMfa.status, (withoutMfa.body as { error: { code: string } }).error.code], [403, 'MFA_REQUIRED']);
+  const strong = owner;
+  const applied = await apply(strong, { fingerprint: view.fingerprint, confirmed: true });
+  assert.equal(applied.status, 200, JSON.stringify(applied.body));
+  assert.match((applied.body as { message: string }).message, /Selbstkosten von 1 Angebot importiert \(1 Zeilen\)\./);
 });
 
 test('no endless spinner: a request that gets no answer ends with an error the screen can show', async () => {

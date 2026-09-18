@@ -9,7 +9,8 @@
     "@repracer/contract-tests": "0.1.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "@repracer/identity": "0.1.0"
+    "@repracer/identity": "0.1.0",
+    "@repracer/cost-import": "0.1.0"
   },
   "scripts": {
     "stand": "node --experimental-strip-types --disable-warning=ExperimentalWarning server/stand-server.ts",

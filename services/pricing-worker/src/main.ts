@@ -2,7 +2,7 @@ import { createAmazonAdapter, TwoLevelBudget } from '@repracer/amazon-adapter';
 import type { AdapterDependencies, ChannelAccountId, ChannelAdapter, TenantId } from '@repracer/channel-port';
 import { conservativeBudget, createKauflandAdapter } from '@repracer/kaufland-adapter';
 import { createPool, type PgPool } from '@repracer/pricing-store-pg';
-import { credentialsFromFiles, jsonSink, pgAccountDirectory, ProcessHealth, serveHealth } from '@repracer/service-runtime';
+import { createHeartbeat, credentialsFromFiles, jsonSink, pgAccountDirectory, ProcessHealth, serveHealth } from '@repracer/service-runtime';
 import { loadWorkerConfig, type WorkerConfig } from './config.ts';
 import { startWorker, type RunningWorker } from './worker.ts';
 
@@ -92,10 +92,29 @@ export async function startWorkerProcess(config: WorkerConfig = loadWorkerConfig
   });
   health.alive();
   // Порог несвежести — три обхода: обход-страховка идёт всегда, даже когда сообщений нет
-  const server = await serveHealth(health, { port: config.metricsPort, prefix: 'repracer_worker', staleAfterMs: Math.max(3 * config.sweepIntervalMs, 120_000) });
+  const staleAfterMs = Math.max(3 * config.sweepIntervalMs, 120_000);
+  const server = await serveHealth(health, { port: config.metricsPort, prefix: 'repracer_worker', staleAfterMs });
+  /**
+   * OQ-194 (шаг 28): отметка во внешнем сервисе [Р-127]. `/healthz` виден только внутри хоста — остановленный контейнер и мёртвый хост
+   * о себе не сообщают; отметка сообщает молчанием. Состояние отметки — та же живость, что у `/healthz`: прошедший обход или сообщение.
+   */
+  const heartbeat = config.heartbeatUrl ? createHeartbeat({ url: config.heartbeatUrl }) : null;
+  const beat = async () => {
+    if (!heartbeat) return;
+    try {
+      await heartbeat.beat(health.healthy(staleAfterMs));
+    } catch (error) {
+      health.count('heartbeat_failed');
+      sink.logger.log({ level: 'WARN', code: 'WORKER_HEARTBEAT_FAILED', message: 'WORKER_HEARTBEAT_FAILED', details: { error: String((error as Error).message).slice(0, 120) } });
+    }
+  };
+  await beat();
+  const heartbeatTimer = setInterval(() => { void beat(); }, Math.max(30_000, Math.min(config.sweepIntervalMs, 60_000)));
+  heartbeatTimer.unref();
   return {
     running, health,
     async stop() {
+      clearInterval(heartbeatTimer);
       await running.stop();
       await server.close();
       await appPool.end();

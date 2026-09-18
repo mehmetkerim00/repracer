@@ -29,9 +29,20 @@ BEGIN
 END $$;
 
 CREATE FUNCTION pg_temp.ok(label text, q text) RETURNS void LANGUAGE plpgsql AS $$
+-- Р-95 (шаг 28): как и у expect_fail, при repracer.smoke_collect = on отказ разрешённого действия не останавливает прогон, а
+-- пишется предупреждением CHECK FAILED. Иначе снятая защита, ломающая законное действие, обрывала бы файл, и раннер считал бы
+-- все проверки ниже «не достигнутыми», то есть зелёными.
 BEGIN
-  EXECUTE q;
-  SET CONSTRAINTS ALL IMMEDIATE;
+  BEGIN
+    EXECUTE q;
+    SET CONSTRAINTS ALL IMMEDIATE;
+  EXCEPTION WHEN others THEN
+    IF current_setting('repracer.smoke_collect', true) = 'on' THEN
+      RAISE WARNING 'CHECK FAILED: % | ACCEPTED ACTION WAS REFUSED (% %)', label, SQLSTATE, left(SQLERRM, 160);
+      RETURN;
+    END IF;
+    RAISE;
+  END;
   RAISE NOTICE 'PASS accept | %', label;
 END $$;
 

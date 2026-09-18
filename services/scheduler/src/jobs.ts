@@ -112,7 +112,7 @@ export function jobSource(deps: JobDeps): JobSource {
 
       // Глобальные работы
       specs.push({
-        name: 'analytics-export-day', scope: null, intervalSeconds: 86_400, catchUp: 'EVERY_SLOT', firstDueAt: (n) => alignedDay(n, cfg.exportOffsetSeconds),
+        name: 'analytics-export-day', scope: null, retryKind: 'INTERNAL', intervalSeconds: 86_400, catchUp: 'EVERY_SLOT', firstDueAt: (n) => alignedDay(n, cfg.exportOffsetSeconds),
         lagWarningSeconds: hours(6), lagCriticalSeconds: hours(72), leaseSeconds: hours(2),
         /**
          * Сутки слота — все группы; отставшие сутки (не выгружены, не проверены, изменились после проверки) — только их группы. Провал одних
@@ -160,7 +160,7 @@ export function jobSource(deps: JobDeps): JobSource {
         },
       });
       specs.push({
-        name: 'price-days-close', scope: null, intervalSeconds: cfg.maintenanceEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,
+        name: 'price-days-close', scope: null, retryKind: 'INTERNAL', intervalSeconds: cfg.maintenanceEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,
         lagWarningSeconds: hours(3), lagCriticalSeconds: hours(24), leaseSeconds: 1800,
         async run({ now: n }) {
           const days = await deps.maintenance.closePriceDays(n);
@@ -171,12 +171,12 @@ export function jobSource(deps: JobDeps): JobSource {
         },
       });
       specs.push({
-        name: 'partitions', scope: null, intervalSeconds: cfg.maintenanceEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,
+        name: 'partitions', scope: null, retryKind: 'INTERNAL', intervalSeconds: cfg.maintenanceEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,
         lagWarningSeconds: hours(6), lagCriticalSeconds: hours(48), leaseSeconds: 600,
         async run({ now: n }) { await deps.maintenance.ensurePartitions(n); return { items: 0 }; },
       });
       specs.push({
-        name: 'retention', scope: null, intervalSeconds: cfg.maintenanceEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,
+        name: 'retention', scope: null, retryKind: 'INTERNAL', intervalSeconds: cfg.maintenanceEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,
         lagWarningSeconds: hours(6), lagCriticalSeconds: hours(168), leaseSeconds: 1800,
         async run({ now: n }) {
           const mark = await deps.maintenance.databaseNow();
@@ -198,7 +198,7 @@ export function jobSource(deps: JobDeps): JobSource {
         const reconcile = reconcileEnabled(a, d);
         if ((d.competitorSources ?? []).some((s) => s.kind === 'PULL' && s.role === 'PRIMARY' && s.availability === 'AVAILABLE')) {
           specs.push({
-            name: 'competitor-poll', scope, intervalSeconds: cfg.pollEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,
+            name: 'competitor-poll', scope, retryKind: 'CHANNEL', intervalSeconds: cfg.pollEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,
             lagWarningSeconds: 600, lagCriticalSeconds: hours(1), leaseSeconds: 300,
             async run({ startedAt }) {
               const r = await pipeline().pollDueCompetitors(ctxOf(a, startedAt, 'competitor-poll', pollSeconds),
@@ -216,7 +216,9 @@ export function jobSource(deps: JobDeps): JobSource {
         }
         if (reconcile) {
           specs.push({
-            name: 'notification-loss-review', scope, intervalSeconds: cfg.lossReviewEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,
+            // Р-133 (ревью шага 28, находка 20): сверка потерь читает принятое состояние и ставит вердикт в базе (0088), в канал не
+            // ходит — значит лимитов канала у неё нет и повтор у неё внутренний
+            name: 'notification-loss-review', scope, retryKind: 'INTERNAL', intervalSeconds: cfg.lossReviewEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,
             lagWarningSeconds: 1800, lagCriticalSeconds: hours(3), leaseSeconds: 300,
             async run({ startedAt }) {
               const r = await pipeline().reviewNotificationLoss(ctxOf(a, startedAt, 'notification-loss-review', 50));
@@ -230,7 +232,7 @@ export function jobSource(deps: JobDeps): JobSource {
           const interval = Math.ceil(cfg.amazonCallSeconds * rotationAccounts.length);
           const offsetMs = rotationAccounts.indexOf(a) * cfg.amazonCallSeconds * 1000;
           specs.push({
-            name: 'amazon-reconcile-rotation', scope, intervalSeconds: interval, catchUp: 'LATEST', firstDueAt: (n) => new Date(Date.parse(n) + offsetMs).toISOString(),
+            name: 'amazon-reconcile-rotation', scope, retryKind: 'CHANNEL', intervalSeconds: interval, catchUp: 'LATEST', firstDueAt: (n) => new Date(Date.parse(n) + offsetMs).toISOString(),
             lagWarningSeconds: interval * 10, lagCriticalSeconds: Math.max(hours(3), interval * 60), leaseSeconds: 120,
             async run({ startedAt, runIndex }) {
               const r = await pipeline().reconcileRotation(ctxOf(a, startedAt, 'amazon-reconcile-rotation', 50), { size: cfg.amazonBatch, cycle: runIndex, graceSeconds: cfg.lossGraceSeconds });
@@ -247,13 +249,13 @@ export function jobSource(deps: JobDeps): JobSource {
         }
         if (d.haltRelease.kind === 'SAMPLE') {
           specs.push({
-            name: 'halt-review', scope, intervalSeconds: cfg.haltReviewEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,
+            name: 'halt-review', scope, retryKind: 'CHANNEL', intervalSeconds: cfg.haltReviewEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,
             lagWarningSeconds: 1800, lagCriticalSeconds: hours(6), leaseSeconds: 300,
             async run({ startedAt }) { return { items: (await pipeline().reviewHalts(ctxOf(a, startedAt, 'halt-review', 120))).length }; },
           });
         }
         specs.push({
-          name: 'offer-discovery', scope, intervalSeconds: cfg.discoveryEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,
+          name: 'offer-discovery', scope, retryKind: 'CHANNEL', intervalSeconds: cfg.discoveryEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,
           lagWarningSeconds: hours(36), lagCriticalSeconds: hours(72), leaseSeconds: 1800,
           async run({ startedAt }) {
             const r = await pipeline().discoverOffers(ctxOf(a, startedAt, 'offer-discovery', 1500));

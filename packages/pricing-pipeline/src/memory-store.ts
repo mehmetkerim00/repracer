@@ -1,6 +1,6 @@
 import { EXPLANATION_RULESETS } from './dictionary.ts';
 import { rotation } from './reconciliation.ts';
-import type { HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation } from './store.ts';
+import type { HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, CostImportBatch, CostImportResult } from './store.ts';
 import { offerIdentityOf, type CompetitorQuery, type CompetitorSnapshot, type CompetitorSourceDescriptor, type FieldWrite, type Instant, type OfferIdentity, type PriceBasis, type PricingHealthObservation, type WriteOutcome } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange, SanityContext } from '@repracer/input-sanity';
 import { assertWriteWithinBounds, NO_GUARDRAILS, type GuardrailSet } from '@repracer/price-gate';
@@ -1299,6 +1299,45 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     }
     if (mode === 'APPLY') for (const p of planned) { p.row.minPrice = p.min ?? null; p.row.maxPrice = p.max ?? null; }
     return { status: mode === 'APPLY' ? 'APPLIED' : 'PREVIEWED', rows };
+  }
+
+  /**
+   * Р-134, Р-135 (шаг 28): массовый импорт себестоимости в памяти ведёт себя как база: предпросмотр ничего не меняет, применение
+   * требует второго фактора и применяется целиком — ни одной строки, если хоть одна не годится.
+   */
+  async importCosts(_tenantId: string, batch: CostImportBatch, actor: AdminActor, mode: 'PREVIEW' | 'APPLY'): Promise<CostImportResult> {
+    if (!this.adminMember(actor)) return { status: 'FORBIDDEN' };
+    if (batch.rows.length === 0) return { status: 'INVALID', cause: 'NO_ROWS' };
+    const ids = batch.rows.map((r) => r.writeScopeId);
+    const duplicate = ids.find((id, i) => ids.indexOf(id) !== i);
+    if (duplicate) return { status: 'INVALID', cause: 'DUPLICATE_SCOPE', writeScopeId: duplicate };
+    const planned: Array<{ row: ScopeRow; cost: CostInputs }> = [];
+    for (const r of batch.rows) {
+      const row = this.scopes.get(r.writeScopeId);
+      if (!row) return { status: 'INVALID', cause: 'SCOPE_NOT_FOUND', writeScopeId: r.writeScopeId };
+      if (!Number.isSafeInteger(r.unitCostMinor) || r.unitCostMinor < 0) return { status: 'INVALID', cause: 'AMOUNT_INVALID', writeScopeId: r.writeScopeId };
+      if (r.fixedFeeMinor !== undefined && (!Number.isSafeInteger(r.fixedFeeMinor) || r.fixedFeeMinor < 0)) return { status: 'INVALID', cause: 'AMOUNT_INVALID', writeScopeId: r.writeScopeId };
+      if (r.feeRateBp !== undefined && (!Number.isSafeInteger(r.feeRateBp) || r.feeRateBp < 0 || r.feeRateBp >= 10_000)) {
+        return { status: 'INVALID', cause: 'AMOUNT_INVALID', writeScopeId: r.writeScopeId };
+      }
+      if (row.currency !== r.currency) return { status: 'INVALID', cause: 'CURRENCY_MISMATCH', writeScopeId: r.writeScopeId };
+      planned.push({
+        row,
+        cost: {
+          currency: r.currency, costProfileId: `cp-import-${row.writeScopeId}-${(row.cost?.costProfileId ?? '').length}`,
+          unitCostMinor: r.unitCostMinor,
+          fixedFeeMinor: r.fixedFeeMinor ?? row.cost?.fixedFeeMinor ?? 0,
+          feeRateBp: r.feeRateBp ?? row.cost?.feeRateBp ?? 0,
+          tax: row.cost?.tax ?? (row.taxRegime === 'SALES_TAX_EXCLUDED' ? { regime: 'SALES_TAX_EXCLUDED' } : { regime: 'VAT_INCLUDED', vatRateBp: null }),
+        },
+      });
+    }
+    const offers = new Set(ids).size;
+    // Р-135: второй фактор проверяется после разбора — продавец видит содержательную причину отказа, а не «нет второго фактора» на мусорный файл
+    if (mode === 'APPLY' && !actor.mfa) return { status: 'MFA_REQUIRED' };
+    if (mode === 'PREVIEW') return { status: 'PREVIEWED', rows: batch.rows.length, offers };
+    for (const p of planned) p.row.cost = p.cost;
+    return { status: 'APPLIED', importId: `import-${batch.fingerprint}`, rows: batch.rows.length, offers };
   }
 
   async saveStrategy(_tenantId: string, input: StrategySaveInput, actor: AdminActor): Promise<StrategySaveResult> {

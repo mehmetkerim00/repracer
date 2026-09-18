@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { AMAZON_DESCRIPTOR } from '@repracer/amazon-adapter';
 import { KAUFLAND_DESCRIPTOR } from '@repracer/kaufland-adapter';
-import { createScheduler, jobSource, LeaseLostError, MemorySchedulerState, nextSlotAfter, type JobDeps, type JobSpec , retryDelaySeconds, RETRY_BACKOFF_CAP_SECONDS } from '../src/index.ts';
+import { createScheduler, INTERNAL_RETRY_BASE_SECONDS, INTERNAL_RETRY_CAP_SECONDS, JOB_CATALOG, jobSource, LeaseLostError, MemorySchedulerState, nextSlotAfter, type JobDeps, type JobSpec , retryDelaySeconds, RETRY_BACKOFF_CAP_SECONDS } from '../src/index.ts';
 
 /** Р-126 (шаг 25): планировщик на состоянии в памяти и виртуальных часах. Данные синтетические */
 
@@ -16,7 +16,7 @@ const sink = () => {
   return { alerts, raise: async (a: { code: string; severity: string; details?: Record<string, unknown> }) => { alerts.push(a); } };
 };
 const spec = (over: Partial<JobSpec> & Pick<JobSpec, 'run'>): JobSpec => ({
-  name: 'job', scope: null, intervalSeconds: 60, catchUp: 'LATEST', firstDueAt: (n) => n, lagWarningSeconds: 600, lagCriticalSeconds: 3600, leaseSeconds: 60, ...over,
+  name: 'job', scope: null, retryKind: 'CHANNEL', intervalSeconds: 60, catchUp: 'LATEST', firstDueAt: (n) => n, lagWarningSeconds: 600, lagCriticalSeconds: 3600, leaseSeconds: 60, ...over,
 });
 
 test('Р-126: a daily job stopped for three days runs every missed day in order when the scheduler returns', async () => {
@@ -99,9 +99,10 @@ test('Р-126, Р-132: a failed run keeps its slot, is retried after the backoff 
   assert.equal(done[0], '2026-09-17T00:30:00.000Z', 'the failed slot is not skipped');
 });
 
-test('Р-126: the job source gives each account only the jobs its channel supports; Amazon accounts share the getCompetitiveSummary pace', async () => {
+/** Синтетические аккаунты двух каналов: у источника работ спрашивают и состав работ, и их разметку [Р-126, Р-133] */
+function jobDeps(): JobDeps {
   const noop = async () => 0;
-  const deps: JobDeps = {
+  return {
     accounts: async () => [
       { tenantId: '10000000-0000-4000-8000-000000000001', channelAccountId: '20000000-0000-4000-8000-000000000001', channel: 'KAUFLAND' },
       { tenantId: '10000000-0000-4000-8000-000000000002', channelAccountId: '20000000-0000-4000-8000-000000000002', channel: 'AMAZON' },
@@ -114,6 +115,10 @@ test('Р-126: the job source gives each account only the jobs its channel suppor
     forceDroppedSince: async () => [],
     maintenance: { closePriceDays: noop, correctClosedPriceDays: noop, ensurePartitions: async () => undefined, dropExpiredPartitions: noop, deleteExpiredRows: noop, databaseNow: async () => '2026-09-17T10:00:00.000Z' },
   };
+}
+
+test('Р-126: the job source gives each account only the jobs its channel supports; Amazon accounts share the getCompetitiveSummary pace', async () => {
+  const deps = jobDeps();
   const specs = await jobSource(deps).jobs('2026-09-17T10:00:00.000Z');
   const byAccount = (id: string) => specs.filter((s) => s.scope?.channelAccountId === id).map((s) => `${s.name}/${s.intervalSeconds}`).sort();
   assert.deepEqual(specs.filter((s) => !s.scope).map((s) => s.name).sort(), ['analytics-export-day', 'partitions', 'price-days-close', 'retention']);
@@ -215,4 +220,28 @@ test('Р-132 (шаг 27): провалившаяся работа повторя
   const report = await s.tick();
   assert.equal(attempts, 2, 'после второго провала пауза 120 с');
   assert.equal(report.nextDueAt, '2026-09-18T10:03:01.000Z', 'процесс просыпается к концу паузы, а не раньше');
+});
+
+test('Р-133 (шаг 28): внутренняя работа повторяется через минуту, а не через свой период — растущая пауза от минуты до часа', async () => {
+  // Суточная выгрузка в ClickHouse после отказа слоя повторяется через минуту, затем 2, 4, 8… минут, но не дольше часа
+  assert.deepEqual([1, 2, 3, 4].map((f) => retryDelaySeconds(86_400, f, 'INTERNAL')), [60, 120, 240, 480]);
+  assert.equal(retryDelaySeconds(86_400, 10, 'INTERNAL'), INTERNAL_RETRY_CAP_SECONDS, 'пауза внутренней работы не растёт дольше часа');
+  assert.equal(INTERNAL_RETRY_BASE_SECONDS, 60);
+  // Отказ слоя на четверть часа: внутренняя работа успевает попробовать несколько раз, а работа канала ждёт сутки
+  const attemptsWithin = (seconds: number, kind: 'CHANNEL' | 'INTERNAL') => {
+    let elapsed = 0;
+    let attempts = 0;
+    while (elapsed <= seconds) { attempts += 1; elapsed += retryDelaySeconds(86_400, attempts, kind); }
+    return attempts;
+  };
+  assert.equal(attemptsWithin(900, 'INTERNAL'), 5, 'за 15 минут отказа — пять попыток (1 + 2 + 4 + 8 минут паузы)');
+  assert.equal(attemptsWithin(900, 'CHANNEL'), 1, 'у работы канала попытка одна: следующая — через сутки');
+  // Ревью шага 28, находка 15: «в каталоге есть четыре имени» — проверка ни о чём. Значение имеет РАЗМЕТКА каждой работы, которую
+  // отдаёт источник работ: в канал ходят только те, у кого CHANNEL
+  const specs = await jobSource({ ...jobDeps(), reconcileEnabled: () => true }).jobs('2026-09-17T10:00:00.000Z');
+  const kinds = new Map(specs.map((spec) => [spec.name, spec.retryKind]));
+  assert.deepEqual([...kinds.keys()].sort(), [...JOB_CATALOG.map((j) => j.name)].sort(), 'у каждой работы каталога есть спецификация');
+  const internal = [...kinds.entries()].filter(([, kind]) => kind === 'INTERNAL').map(([name]) => name).sort();
+  assert.deepEqual(internal, ['analytics-export-day', 'notification-loss-review', 'partitions', 'price-days-close', 'retention'],
+    'внутренние — те, что ходят только в наши хранилища; остальные обращаются к каналу [Р-133]');
 });

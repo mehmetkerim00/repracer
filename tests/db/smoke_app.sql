@@ -34,9 +34,20 @@ BEGIN
 END $$;
 
 CREATE FUNCTION pg_temp.ok(label text, q text) RETURNS void LANGUAGE plpgsql AS $$
+-- Р-95 (шаг 28): как и у expect_fail, при repracer.smoke_collect = on отказ разрешённого действия не останавливает прогон, а
+-- пишется предупреждением CHECK FAILED. Иначе снятая защита, ломающая законное действие, обрывала бы файл, и раннер считал бы
+-- все проверки ниже «не достигнутыми», то есть зелёными.
 BEGIN
-  EXECUTE q;
-  SET CONSTRAINTS ALL IMMEDIATE;
+  BEGIN
+    EXECUTE q;
+    SET CONSTRAINTS ALL IMMEDIATE;
+  EXCEPTION WHEN others THEN
+    IF current_setting('repracer.smoke_collect', true) = 'on' THEN
+      RAISE WARNING 'CHECK FAILED: % | ACCEPTED ACTION WAS REFUSED (% %)', label, SQLSTATE, left(SQLERRM, 160);
+      RETURN;
+    END IF;
+    RAISE;
+  END;
   RAISE NOTICE 'PASS accept | %', label;
 END $$;
 
@@ -166,6 +177,324 @@ VALUES (:tA, 'PRODUCT', 'a5000000-0000-0000-0000-000000000009', 'EUR', 'GROSS', 
 SELECT pg_temp.expect_fail('ENGINE without the declared unit cost (Р-131)', $q$
   UPDATE tenant_data.write_scope SET pricing_mode = 'ENGINE', pricing_strategy_id = 'a9000000-0000-0000-0000-000000000001', pricing_strategy_version = 1
    WHERE write_scope_id = 'a6000000-0000-0000-0000-000000000009' $q$, 'repricing needs the declared unit cost of the product');
+COMMIT;
+
+-- Шаг 28 [Р-134, Р-135]: массовый импорт себестоимости — пакет со вторым фактором, строки только внутри его транзакции, целиком
+BEGIN;
+SELECT set_config('app.tenant_id', :tA, true), set_config('app.user_id', :uA, true) \gset
+-- Пакет приносит свою строку тем же запросом: иначе отказ дало бы отложенное правило «принесено ровно объявленное», то есть чужая
+-- защита [Р-99], и снятый страж второго фактора остался бы незамеченным
+SELECT pg_temp.expect_fail('a cost import without a second factor (Р-135)', $q$
+  WITH b AS (
+    INSERT INTO tenant_data.cost_import (tenant_id, created_by_membership_id, source_name, source_format, row_count, fingerprint)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'a2000000-0000-0000-0000-00000000000a', 'kosten.csv', 'CSV', 1, 'fp-smoke')
+    RETURNING tenant_id, cost_import_id)
+  INSERT INTO tenant_data.cost_profile (tenant_id, product_id, channel_account_id, marketplace, version, valid_from, currency,
+                                        purchase_cost_minor, source, created_by_membership_id, cost_import_id)
+  SELECT b.tenant_id, 'a5000000-0000-0000-0000-000000000009', 'a4000000-0000-0000-0000-000000000001', 'de',
+         (SELECT coalesce(max(c.version), 0) + 1 FROM tenant_data.cost_profile c
+           WHERE c.tenant_id = b.tenant_id AND c.product_id = 'a5000000-0000-0000-0000-000000000009'
+             AND c.channel_account_id = 'a4000000-0000-0000-0000-000000000001' AND c.marketplace = 'de'),
+         now(), 'EUR', 490, 'IMPORT', 'a2000000-0000-0000-0000-00000000000a', b.cost_import_id
+    FROM b $q$,
+  'a cost import needs a second factor');
+COMMIT;
+
+BEGIN;
+SELECT set_config('app.tenant_id', :tA, true), set_config('app.user_id', :uA, true), set_config('app.auth_mfa', 'on', true) \gset
+-- Пакет и его строка — одна транзакция: так импорт применяется целиком и его нельзя раздробить (риск 17). Это законное действие, и
+-- оно проверяется как проверка, а не как посев: снятая защита, отказывающая настоящему импорту, должна быть видна по имени.
+SELECT pg_temp.ok('a cost import batch and its row in one transaction are accepted (Р-134)', $q$
+DO $seed$
+BEGIN
+  INSERT INTO tenant_data.cost_import (tenant_id, cost_import_id, created_by_membership_id, source_name, source_format, row_count, fingerprint, skipped_rows)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a9280000-0000-4000-8000-000000000001', 'a2000000-0000-0000-0000-00000000000a',
+          'kosten.csv', 'CSV', 1, 'fp-smoke-1', 4);
+  INSERT INTO tenant_data.cost_profile (tenant_id, product_id, channel_account_id, marketplace, version, valid_from, currency,
+                                        purchase_cost_minor, source, created_by_membership_id, cost_import_id)
+  SELECT 'a0000000-0000-0000-0000-00000000000a', 'a5000000-0000-0000-0000-000000000009', 'a4000000-0000-0000-0000-000000000001', 'de',
+         coalesce(max(version), 0) + 1, now(), 'EUR', 450, 'IMPORT', 'a2000000-0000-0000-0000-00000000000a', 'a9280000-0000-4000-8000-000000000001'
+    FROM tenant_data.cost_profile
+   WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a' AND product_id = 'a5000000-0000-0000-0000-000000000009'
+     AND channel_account_id = 'a4000000-0000-0000-0000-000000000001' AND marketplace = 'de';
+END $seed$
+$q$);
+COMMIT;
+
+BEGIN;
+SELECT set_config('app.tenant_id', :tA, true), set_config('app.user_id', :uA, true), set_config('app.auth_mfa', 'on', true) \gset
+SELECT pg_temp.expect_fail('a cost import row that belongs to a batch of another transaction (Р-134)', $q$
+  INSERT INTO tenant_data.cost_profile (tenant_id, product_id, channel_account_id, marketplace, version, valid_from, currency,
+                                        purchase_cost_minor, source, created_by_membership_id, cost_import_id)
+  SELECT 'a0000000-0000-0000-0000-00000000000a', 'a5000000-0000-0000-0000-000000000009', 'a4000000-0000-0000-0000-000000000001', 'de',
+         coalesce(max(version), 0) + 1, now(), 'EUR', 460, 'IMPORT', 'a2000000-0000-0000-0000-00000000000a', 'a9280000-0000-4000-8000-000000000001'
+    FROM tenant_data.cost_profile
+   WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a' AND product_id = 'a5000000-0000-0000-0000-000000000009'
+     AND channel_account_id = 'a4000000-0000-0000-0000-000000000001' AND marketplace = 'de' $q$,
+  'a cost import row belongs to a batch of another transaction');
+SELECT pg_temp.expect_fail('a cost import that brings fewer rows than it declared (Р-134)', $q$
+  INSERT INTO tenant_data.cost_import (tenant_id, created_by_membership_id, source_name, source_format, row_count, fingerprint)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a2000000-0000-0000-0000-00000000000a', 'partial.csv', 'CSV', 2, 'fp-smoke-2') $q$,
+  'a cost import applies in full');
+SELECT pg_temp.expect_fail('a cost row of source IMPORT without a batch (Р-134)', $q$
+  INSERT INTO tenant_data.cost_profile (tenant_id, product_id, version, valid_from, currency, purchase_cost_minor, source, created_by_membership_id)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a5000000-0000-0000-0000-000000000009', 1, now(), 'EUR', 470, 'IMPORT', 'a2000000-0000-0000-0000-00000000000a') $q$,
+  'cost_profile_import_source');
+-- Значения пакета: имя файла, формат, число строк и отпечаток предпросмотра — не выдумываются. Пакет приносит свою строку в том же
+-- запросе: иначе отказ давало бы отложенное правило «принесено ровно объявленное», то есть чужая защита [Р-99]
+SELECT pg_temp.expect_fail('a cost import of an unknown file format (Р-134)', $q$
+  WITH b AS (
+    INSERT INTO tenant_data.cost_import (tenant_id, created_by_membership_id, source_name, source_format, row_count, fingerprint)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'a2000000-0000-0000-0000-00000000000a', 'kosten.pdf', 'PDF', 1, 'fp-x') RETURNING tenant_id, cost_import_id)
+  INSERT INTO tenant_data.cost_profile (tenant_id, product_id, channel_account_id, marketplace, version, valid_from, currency,
+                                        purchase_cost_minor, source, created_by_membership_id, cost_import_id)
+  SELECT b.tenant_id, 'a5000000-0000-0000-0000-000000000009', 'a4000000-0000-0000-0000-000000000001', 'de',
+         (SELECT coalesce(max(c.version), 0) + 1 FROM tenant_data.cost_profile c
+           WHERE c.tenant_id = b.tenant_id AND c.product_id = 'a5000000-0000-0000-0000-000000000009'
+             AND c.channel_account_id = 'a4000000-0000-0000-0000-000000000001' AND c.marketplace = 'de'),
+         now(), 'EUR', 480, 'IMPORT', 'a2000000-0000-0000-0000-00000000000a', b.cost_import_id
+    FROM b $q$,
+  'cost_import_source_format_check');
+SELECT pg_temp.expect_fail('a cost import without a file name (Р-134)', $q$
+  WITH b AS (
+    INSERT INTO tenant_data.cost_import (tenant_id, created_by_membership_id, source_name, source_format, row_count, fingerprint)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'a2000000-0000-0000-0000-00000000000a', '', 'CSV', 1, 'fp-x') RETURNING tenant_id, cost_import_id)
+  INSERT INTO tenant_data.cost_profile (tenant_id, product_id, channel_account_id, marketplace, version, valid_from, currency,
+                                        purchase_cost_minor, source, created_by_membership_id, cost_import_id)
+  SELECT b.tenant_id, 'a5000000-0000-0000-0000-000000000009', 'a4000000-0000-0000-0000-000000000001', 'de',
+         (SELECT coalesce(max(c.version), 0) + 1 FROM tenant_data.cost_profile c
+           WHERE c.tenant_id = b.tenant_id AND c.product_id = 'a5000000-0000-0000-0000-000000000009'
+             AND c.channel_account_id = 'a4000000-0000-0000-0000-000000000001' AND c.marketplace = 'de'),
+         now(), 'EUR', 480, 'IMPORT', 'a2000000-0000-0000-0000-00000000000a', b.cost_import_id
+    FROM b $q$,
+  'cost_import_source_name_check');
+SELECT pg_temp.expect_fail('a cost import of no rows (Р-134)', $q$
+  INSERT INTO tenant_data.cost_import (tenant_id, created_by_membership_id, source_name, source_format, row_count, fingerprint)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a2000000-0000-0000-0000-00000000000a', 'kosten.csv', 'CSV', 0, 'fp-x') $q$,
+  'cost_import_row_count_check');
+SELECT pg_temp.expect_fail('a cost import without the fingerprint of the preview (Р-134)', $q$
+  WITH b AS (
+    INSERT INTO tenant_data.cost_import (tenant_id, created_by_membership_id, source_name, source_format, row_count, fingerprint)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'a2000000-0000-0000-0000-00000000000a', 'kosten.csv', 'CSV', 1, '') RETURNING tenant_id, cost_import_id)
+  INSERT INTO tenant_data.cost_profile (tenant_id, product_id, channel_account_id, marketplace, version, valid_from, currency,
+                                        purchase_cost_minor, source, created_by_membership_id, cost_import_id)
+  SELECT b.tenant_id, 'a5000000-0000-0000-0000-000000000009', 'a4000000-0000-0000-0000-000000000001', 'de',
+         (SELECT coalesce(max(c.version), 0) + 1 FROM tenant_data.cost_profile c
+           WHERE c.tenant_id = b.tenant_id AND c.product_id = 'a5000000-0000-0000-0000-000000000009'
+             AND c.channel_account_id = 'a4000000-0000-0000-0000-000000000001' AND c.marketplace = 'de'),
+         now(), 'EUR', 480, 'IMPORT', 'a2000000-0000-0000-0000-00000000000a', b.cost_import_id
+    FROM b $q$,
+  'cost_import_fingerprint_check');
+SELECT pg_temp.expect_fail('a cost import with a negative number of skipped rows (Р-134)', $q$
+  WITH b AS (
+    INSERT INTO tenant_data.cost_import (tenant_id, created_by_membership_id, source_name, source_format, row_count, fingerprint, skipped_rows)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'a2000000-0000-0000-0000-00000000000a', 'kosten.csv', 'CSV', 1, 'fp-x', -1) RETURNING tenant_id, cost_import_id)
+  INSERT INTO tenant_data.cost_profile (tenant_id, product_id, channel_account_id, marketplace, version, valid_from, currency,
+                                        purchase_cost_minor, source, created_by_membership_id, cost_import_id)
+  SELECT b.tenant_id, 'a5000000-0000-0000-0000-000000000009', 'a4000000-0000-0000-0000-000000000001', 'de',
+         (SELECT coalesce(max(c.version), 0) + 1 FROM tenant_data.cost_profile c
+           WHERE c.tenant_id = b.tenant_id AND c.product_id = 'a5000000-0000-0000-0000-000000000009'
+             AND c.channel_account_id = 'a4000000-0000-0000-0000-000000000001' AND c.marketplace = 'de'),
+         now(), 'EUR', 480, 'IMPORT', 'a2000000-0000-0000-0000-00000000000a', b.cost_import_id
+    FROM b $q$,
+  'cost_import_skipped_rows_check');
+SELECT pg_temp.expect_fail('a cost import written without a person (Р-97)', $q$
+  SELECT set_config('app.user_id', '', true);
+  WITH b AS (
+    INSERT INTO tenant_data.cost_import (tenant_id, created_by_membership_id, source_name, source_format, row_count, fingerprint)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'a2000000-0000-0000-0000-00000000000a', 'kosten.csv', 'CSV', 1, 'fp-person') RETURNING tenant_id, cost_import_id)
+  INSERT INTO tenant_data.cost_profile (tenant_id, product_id, channel_account_id, marketplace, version, valid_from, currency,
+                                        purchase_cost_minor, source, created_by_membership_id, cost_import_id)
+  SELECT b.tenant_id, 'a5000000-0000-0000-0000-000000000009', 'a4000000-0000-0000-0000-000000000001', 'de',
+         (SELECT coalesce(max(c.version), 0) + 1 FROM tenant_data.cost_profile c
+           WHERE c.tenant_id = b.tenant_id AND c.product_id = 'a5000000-0000-0000-0000-000000000009'
+             AND c.channel_account_id = 'a4000000-0000-0000-0000-000000000001' AND c.marketplace = 'de'),
+         now(), 'EUR', 480, 'IMPORT', 'a2000000-0000-0000-0000-00000000000a', b.cost_import_id
+    FROM b $q$,
+  'administrative change of tenant_data.cost_import without a person');
+COMMIT;
+
+BEGIN;
+SELECT set_config('app.tenant_id', :tA, true), set_config('app.user_id', :uA, true) \gset
+-- Шесть товаров онбординга: на них проверяется окно массовой правки [Р-135]
+INSERT INTO tenant_data.product (tenant_id, product_id, sku, kind)
+SELECT :tA, ('a5000000-0000-0000-0000-00000000001' || n)::uuid, 'A-1' || n, 'SIMPLE' FROM generate_series(1, 6) AS n;
+-- Р-135, риск 17: массовая правка себестоимости без второго фактора — больше пяти предложений за десять минут, пусть и по одной строке
+SELECT pg_temp.expect_fail('prices of more than five offers changed within ten minutes without a second factor (Р-135)', $q$
+  INSERT INTO tenant_data.cost_profile (tenant_id, product_id, version, valid_from, currency, purchase_cost_minor, source, created_by_membership_id)
+  SELECT 'a0000000-0000-0000-0000-00000000000a', ('a5000000-0000-0000-0000-00000000001' || n)::uuid, 1, now(), 'EUR', 100 + n, 'MANUAL',
+         'a2000000-0000-0000-0000-00000000000a'
+    FROM generate_series(1, 6) AS n $q$,
+  'a mass change requires it');
+-- Ревью шага 28, находка 1: окно смотрит на время версии, поэтому время версии — время транзакции, а не то, что прислал вызывающий
+SELECT pg_temp.expect_fail('a backdated cost version from the administrative service (Р-135)', $q$
+  INSERT INTO tenant_data.cost_profile (tenant_id, product_id, version, valid_from, currency, purchase_cost_minor, source, created_by_membership_id, created_at)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a5000000-0000-0000-0000-000000000011', 1, now(), 'EUR', 101, 'MANUAL',
+          'a2000000-0000-0000-0000-00000000000a', now() - interval '11 minutes') $q$,
+  'a cost version is created at the transaction time');
+-- Ревью шага 28, находка 2: гардрейл тенанта меняет пол маржи у всех предложений — это массовое изменение [Р-135]
+SELECT pg_temp.expect_fail('a tenant-wide guardrail without a second factor (Р-135)', $q$
+  INSERT INTO tenant_data.guardrail (tenant_id, scope_type, min_margin_bp, version, created_by_membership_id)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'TENANT', 0, 1, 'a2000000-0000-0000-0000-00000000000a') $q$,
+  'covers every offer');
+COMMIT;
+
+-- Ревью шага 28, находка 9: окно считает ПРЕДЛОЖЕНИЯ, а не строки. Продавец заводит офферы по одному, каждому — себестоимость и обе
+-- границы (три строки в трёх транзакциях подряд). Пять таких офферов — пять ключей окна, а не пятнадцать, и второй фактор для этого
+-- не нужен. Проверка идёт в тенанте B: у тенанта A окно уже занято проверками выше.
+BEGIN;
+SELECT set_config('app.tenant_id', :tB, true), set_config('app.user_id', :uB, true) \gset
+INSERT INTO tenant_data.product (tenant_id, product_id, sku, kind)
+SELECT :tB, ('b3000000-0000-0000-0000-00000000001' || n)::uuid, 'B-1' || n, 'SIMPLE' FROM generate_series(1, 5) AS n;
+COMMIT;
+
+BEGIN;
+SELECT set_config('app.tenant_id', :tB, true), set_config('app.user_id', :uB, true) \gset
+SELECT pg_temp.ok('onboarding of offer 1 in the window is accepted without a second factor (Р-135)', $q$
+DO $onb1$
+BEGIN
+  INSERT INTO tenant_data.cost_profile (tenant_id, product_id, version, valid_from, currency, purchase_cost_minor, source, created_by_membership_id)
+  VALUES ('b0000000-0000-0000-0000-00000000000b', 'b3000000-0000-0000-0000-000000000011', 1, now(), 'EUR', 201, 'MANUAL',
+          'b2000000-0000-0000-0000-00000000000b');
+  INSERT INTO tenant_data.min_price (tenant_id, scope_type, product_id, currency, price_basis, amount_minor, version, created_by_membership_id)
+  VALUES ('b0000000-0000-0000-0000-00000000000b', 'PRODUCT', 'b3000000-0000-0000-0000-000000000011', 'EUR', 'GROSS', 1000, 1,
+          'b2000000-0000-0000-0000-00000000000b');
+  INSERT INTO tenant_data.max_price (tenant_id, scope_type, product_id, currency, price_basis, amount_minor, version, created_by_membership_id)
+  VALUES ('b0000000-0000-0000-0000-00000000000b', 'PRODUCT', 'b3000000-0000-0000-0000-000000000011', 'EUR', 'GROSS', 9000, 1,
+          'b2000000-0000-0000-0000-00000000000b');
+END $onb1$
+$q$);
+COMMIT;
+
+BEGIN;
+SELECT set_config('app.tenant_id', :tB, true), set_config('app.user_id', :uB, true) \gset
+SELECT pg_temp.ok('onboarding of offer 2 in the window is accepted without a second factor (Р-135)', $q$
+DO $onb2$
+BEGIN
+  INSERT INTO tenant_data.cost_profile (tenant_id, product_id, version, valid_from, currency, purchase_cost_minor, source, created_by_membership_id)
+  VALUES ('b0000000-0000-0000-0000-00000000000b', 'b3000000-0000-0000-0000-000000000012', 1, now(), 'EUR', 202, 'MANUAL',
+          'b2000000-0000-0000-0000-00000000000b');
+  INSERT INTO tenant_data.min_price (tenant_id, scope_type, product_id, currency, price_basis, amount_minor, version, created_by_membership_id)
+  VALUES ('b0000000-0000-0000-0000-00000000000b', 'PRODUCT', 'b3000000-0000-0000-0000-000000000012', 'EUR', 'GROSS', 1000, 1,
+          'b2000000-0000-0000-0000-00000000000b');
+  INSERT INTO tenant_data.max_price (tenant_id, scope_type, product_id, currency, price_basis, amount_minor, version, created_by_membership_id)
+  VALUES ('b0000000-0000-0000-0000-00000000000b', 'PRODUCT', 'b3000000-0000-0000-0000-000000000012', 'EUR', 'GROSS', 9000, 1,
+          'b2000000-0000-0000-0000-00000000000b');
+END $onb2$
+$q$);
+COMMIT;
+
+BEGIN;
+SELECT set_config('app.tenant_id', :tB, true), set_config('app.user_id', :uB, true) \gset
+SELECT pg_temp.ok('onboarding of offer 3 in the window is accepted without a second factor (Р-135)', $q$
+DO $onb3$
+BEGIN
+  INSERT INTO tenant_data.cost_profile (tenant_id, product_id, version, valid_from, currency, purchase_cost_minor, source, created_by_membership_id)
+  VALUES ('b0000000-0000-0000-0000-00000000000b', 'b3000000-0000-0000-0000-000000000013', 1, now(), 'EUR', 203, 'MANUAL',
+          'b2000000-0000-0000-0000-00000000000b');
+  INSERT INTO tenant_data.min_price (tenant_id, scope_type, product_id, currency, price_basis, amount_minor, version, created_by_membership_id)
+  VALUES ('b0000000-0000-0000-0000-00000000000b', 'PRODUCT', 'b3000000-0000-0000-0000-000000000013', 'EUR', 'GROSS', 1000, 1,
+          'b2000000-0000-0000-0000-00000000000b');
+  INSERT INTO tenant_data.max_price (tenant_id, scope_type, product_id, currency, price_basis, amount_minor, version, created_by_membership_id)
+  VALUES ('b0000000-0000-0000-0000-00000000000b', 'PRODUCT', 'b3000000-0000-0000-0000-000000000013', 'EUR', 'GROSS', 9000, 1,
+          'b2000000-0000-0000-0000-00000000000b');
+END $onb3$
+$q$);
+COMMIT;
+
+BEGIN;
+SELECT set_config('app.tenant_id', :tB, true), set_config('app.user_id', :uB, true) \gset
+SELECT pg_temp.ok('onboarding of offer 4 in the window is accepted without a second factor (Р-135)', $q$
+DO $onb4$
+BEGIN
+  INSERT INTO tenant_data.cost_profile (tenant_id, product_id, version, valid_from, currency, purchase_cost_minor, source, created_by_membership_id)
+  VALUES ('b0000000-0000-0000-0000-00000000000b', 'b3000000-0000-0000-0000-000000000014', 1, now(), 'EUR', 204, 'MANUAL',
+          'b2000000-0000-0000-0000-00000000000b');
+  INSERT INTO tenant_data.min_price (tenant_id, scope_type, product_id, currency, price_basis, amount_minor, version, created_by_membership_id)
+  VALUES ('b0000000-0000-0000-0000-00000000000b', 'PRODUCT', 'b3000000-0000-0000-0000-000000000014', 'EUR', 'GROSS', 1000, 1,
+          'b2000000-0000-0000-0000-00000000000b');
+  INSERT INTO tenant_data.max_price (tenant_id, scope_type, product_id, currency, price_basis, amount_minor, version, created_by_membership_id)
+  VALUES ('b0000000-0000-0000-0000-00000000000b', 'PRODUCT', 'b3000000-0000-0000-0000-000000000014', 'EUR', 'GROSS', 9000, 1,
+          'b2000000-0000-0000-0000-00000000000b');
+END $onb4$
+$q$);
+COMMIT;
+
+BEGIN;
+SELECT set_config('app.tenant_id', :tB, true), set_config('app.user_id', :uB, true) \gset
+SELECT pg_temp.ok('cost and both bounds of a fifth offer in the window are accepted without a second factor (Р-135)', $q$
+DO $fifth$
+BEGIN
+  INSERT INTO tenant_data.cost_profile (tenant_id, product_id, version, valid_from, currency, purchase_cost_minor, source, created_by_membership_id)
+  VALUES ('b0000000-0000-0000-0000-00000000000b', 'b3000000-0000-0000-0000-000000000015', 1, now(), 'EUR', 205, 'MANUAL',
+          'b2000000-0000-0000-0000-00000000000b');
+  INSERT INTO tenant_data.min_price (tenant_id, scope_type, product_id, currency, price_basis, amount_minor, version, created_by_membership_id)
+  VALUES ('b0000000-0000-0000-0000-00000000000b', 'PRODUCT', 'b3000000-0000-0000-0000-000000000015', 'EUR', 'GROSS', 1000, 1,
+          'b2000000-0000-0000-0000-00000000000b');
+  INSERT INTO tenant_data.max_price (tenant_id, scope_type, product_id, currency, price_basis, amount_minor, version, created_by_membership_id)
+  VALUES ('b0000000-0000-0000-0000-00000000000b', 'PRODUCT', 'b3000000-0000-0000-0000-000000000015', 'EUR', 'GROSS', 9000, 1,
+          'b2000000-0000-0000-0000-00000000000b');
+END $fifth$
+$q$);
+COMMIT;
+
+-- Ещё шесть товаров тенанта B — на них проверяется, что правки СО вторым фактором окно не считает [Р-135]
+BEGIN;
+SELECT set_config('app.tenant_id', :tB, true), set_config('app.user_id', :uB, true) \gset
+INSERT INTO tenant_data.product (tenant_id, product_id, sku, kind)
+SELECT :tB, ('b3000000-0000-0000-0000-00000000002' || n)::uuid, 'B-2' || n, 'SIMPLE' FROM generate_series(1, 6) AS n;
+COMMIT;
+
+-- Массовая правка со вторым фактором: шесть предложений сразу — законно, и окно эти строки не считает
+BEGIN;
+SELECT set_config('app.tenant_id', :tB, true), set_config('app.user_id', :uB, true), set_config('app.auth_mfa', 'on', true) \gset
+INSERT INTO tenant_data.cost_profile (tenant_id, product_id, version, valid_from, currency, purchase_cost_minor, source, created_by_membership_id)
+SELECT :tB, ('b3000000-0000-0000-0000-00000000002' || n)::uuid, 1, now(), 'EUR', 300 + n, 'MANUAL', :mB FROM generate_series(1, 6) AS n;
+INSERT INTO tenant_data.min_price (tenant_id, scope_type, product_id, currency, price_basis, amount_minor, version, created_by_membership_id)
+SELECT :tB, 'PRODUCT', ('b3000000-0000-0000-0000-00000000002' || n)::uuid, 'EUR', 'GROSS', 1000, 1, :mB FROM generate_series(1, 6) AS n;
+INSERT INTO tenant_data.max_price (tenant_id, scope_type, product_id, currency, price_basis, amount_minor, version, created_by_membership_id)
+SELECT :tB, 'PRODUCT', ('b3000000-0000-0000-0000-00000000002' || n)::uuid, 'EUR', 'GROSS', 9000, 1, :mB FROM generate_series(1, 6) AS n;
+COMMIT;
+
+-- Признак `created_with_mfa` ставит база: правка руками ПОСЛЕ законной массовой правки со вторым фактором проходит. Правится
+-- предложение, уже попавшее в окно, поэтому число ключей окна не растёт
+BEGIN;
+SELECT set_config('app.tenant_id', :tB, true), set_config('app.user_id', :uB, true) \gset
+SELECT pg_temp.ok('a manual cost edit after a second-factor mass change is still accepted (Р-135)', $q$
+  INSERT INTO tenant_data.cost_profile (tenant_id, product_id, version, valid_from, currency, purchase_cost_minor, source, created_by_membership_id)
+  VALUES ('b0000000-0000-0000-0000-00000000000b', 'b3000000-0000-0000-0000-000000000011', 2, now(), 'EUR', 301, 'MANUAL',
+          'b2000000-0000-0000-0000-00000000000b') $q$);
+COMMIT;
+
+BEGIN;
+SELECT set_config('app.tenant_id', :tB, true), set_config('app.user_id', :uB, true) \gset
+SELECT pg_temp.ok('a manual min_price edit after a second-factor mass change is still accepted (Р-135)', $q$
+  INSERT INTO tenant_data.min_price (tenant_id, scope_type, product_id, currency, price_basis, amount_minor, version, created_by_membership_id)
+  VALUES ('b0000000-0000-0000-0000-00000000000b', 'PRODUCT', 'b3000000-0000-0000-0000-000000000011', 'EUR', 'GROSS', 1100, 2,
+          'b2000000-0000-0000-0000-00000000000b') $q$);
+COMMIT;
+
+BEGIN;
+SELECT set_config('app.tenant_id', :tB, true), set_config('app.user_id', :uB, true) \gset
+SELECT pg_temp.ok('a manual max_price edit after a second-factor mass change is still accepted (Р-135)', $q$
+  INSERT INTO tenant_data.max_price (tenant_id, scope_type, product_id, currency, price_basis, amount_minor, version, created_by_membership_id)
+  VALUES ('b0000000-0000-0000-0000-00000000000b', 'PRODUCT', 'b3000000-0000-0000-0000-000000000011', 'EUR', 'GROSS', 8800, 2,
+          'b2000000-0000-0000-0000-00000000000b') $q$);
+COMMIT;
+
+-- Окно считает и границы, не только себестоимость: шестое предложение за десять минут без второго фактора отклоняется
+BEGIN;
+SELECT set_config('app.tenant_id', :tB, true), set_config('app.user_id', :uB, true) \gset
+SELECT pg_temp.expect_fail('min_price of a sixth offer within ten minutes without a second factor (Р-135)', $q$
+  INSERT INTO tenant_data.min_price (tenant_id, scope_type, product_id, currency, price_basis, amount_minor, version, created_by_membership_id)
+  VALUES ('b0000000-0000-0000-0000-00000000000b', 'PRODUCT', 'b3000000-0000-0000-0000-000000000021', 'EUR', 'GROSS', 1000, 2,
+          'b2000000-0000-0000-0000-00000000000b') $q$,
+  'a mass change requires it');
+SELECT pg_temp.expect_fail('max_price of a sixth offer within ten minutes without a second factor (Р-135)', $q$
+  INSERT INTO tenant_data.max_price (tenant_id, scope_type, product_id, currency, price_basis, amount_minor, version, created_by_membership_id)
+  VALUES ('b0000000-0000-0000-0000-00000000000b', 'PRODUCT', 'b3000000-0000-0000-0000-000000000022', 'EUR', 'GROSS', 9000, 2,
+          'b2000000-0000-0000-0000-00000000000b') $q$,
+  'a mass change requires it');
 COMMIT;
 
 BEGIN;

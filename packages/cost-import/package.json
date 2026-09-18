@@ -1,0 +1,15 @@
+{
+  "name": "@repracer/cost-import",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bulk cost import (Р-134): reads seller exports (CSV, XLSX), suggests a column mapping, builds a preview with unmatched rows listed separately, and yields an all-or-nothing batch to apply.",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "@repracer/pricing-model": "0.1.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec test/*.test.ts"
+  }
+}

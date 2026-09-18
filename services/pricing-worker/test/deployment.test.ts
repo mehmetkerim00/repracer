@@ -20,11 +20,13 @@ const ENV = {
   REPRACER_CHANNEL_SECRETS_DIR: '/run/secrets/channels',
   REPRACER_KAUFLAND_FALLBACK_EMAIL: 'ops@example.invalid',
   REPRACER_AMAZON_APPLICATION_CREDENTIALS_REF: 'secret-ref:amazon-application',
+  REPRACER_WORKER_HEARTBEAT_URL_FILE: '/run/secrets/worker_heartbeat_url',
 } as const;
 const FILES: Record<string, string> = {
   '/run/secrets/app_pg_url': 'postgres://svc_app@db/repracer',
   '/run/secrets/dispatcher_pg_url': 'postgres://svc_dispatcher@db/repracer',
   '/run/secrets/relay_pg_url': 'postgres://svc_relay@db/repracer',
+  '/run/secrets/worker_heartbeat_url': 'https://hc.example.invalid/ping/00000000-0000-4000-8000-000000000001',
 };
 const read = (p: string) => {
   const v = FILES[p];
@@ -42,6 +44,16 @@ test('OQ-190: the worker configuration reads secrets from files; the relay addre
   assert.throws(() => loadWorkerConfig({ ...ENV, REPRACER_KAFKA_BROKERS: '' }, read), /CONFIG_MISSING: REPRACER_KAFKA_BROKERS/);
   assert.throws(() => loadWorkerConfig({ ...ENV, REPRACER_APP_PG_URL_FILE: '/run/secrets/nope' }, read), /CONFIG_SECRET_UNREADABLE/);
   assert.throws(() => loadWorkerConfig({ ...ENV, REPRACER_WORKER_SWEEP_MS: 'soon' }, read), ConfigError);
+  // Шаг 28, E: секрет значением переменной окружения не принимается — только файлом, кроме режима стенда
+  const { REPRACER_APP_PG_URL_FILE: _file, ...withoutFile } = ENV;
+  assert.throws(() => loadWorkerConfig({ ...withoutFile, REPRACER_APP_PG_URL: 'postgres://svc_app@db/repracer' }, read),
+    /CONFIG_SECRET_IN_ENV: REPRACER_APP_PG_URL/);
+  assert.equal(loadWorkerConfig({ ...withoutFile, REPRACER_MODE: 'stand', REPRACER_APP_PG_URL: 'postgres://stand' }, read).pgUrl, 'postgres://stand');
+  // OQ-194: без адреса отметки процесс не стартует, пока её явно не выключили
+  const { REPRACER_WORKER_HEARTBEAT_URL_FILE: _hb, ...withoutHeartbeat } = ENV;
+  assert.throws(() => loadWorkerConfig(withoutHeartbeat, read), /CONFIG_MISSING: REPRACER_WORKER_HEARTBEAT_URL/);
+  assert.equal(loadWorkerConfig({ ...withoutHeartbeat, REPRACER_WORKER_HEARTBEAT: 'off' }, read).heartbeatUrl, null);
+  assert.throws(() => loadWorkerConfig({ ...ENV, REPRACER_WORKER_HEARTBEAT_URL_FILE: '/run/secrets/app_pg_url' }, read), /must be https/);
   const { REPRACER_KAUFLAND_FALLBACK_EMAIL: _omitted, ...withoutEmail } = ENV;
   assert.throws(() => loadWorkerConfig(withoutEmail, read), /CONFIG_MISSING: REPRACER_KAUFLAND_FALLBACK_EMAIL/);
 });
@@ -80,6 +92,7 @@ test('OQ-190: the deployment starts the entry point of this service and mounts t
   assert.match(compose, /services\/pricing-worker\/src\/main\.ts/);
   assert.match(compose, /\/run\/secrets:ro/);
   assert.match(compose, /REPRACER_APP_PG_URL_FILE/);
+  assert.match(compose, /REPRACER_WORKER_HEARTBEAT_URL_FILE/);
   assert.match(compose, /restart: unless-stopped/);
   // Секреты — файлами: значения адресов баз в переменных окружения развёртывание не передаёт
   assert.equal(/^\s+REPRACER_APP_PG_URL:/m.test(compose), false);

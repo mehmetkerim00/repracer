@@ -18,6 +18,8 @@ import type {
   StrategySaveResult,
   BoundsRead,
   CommittedDecision,
+  CostImportBatch,
+  CostImportResult,
   ConsoleDecisionRow,
   ConsoleScopeRow,
   ConsoleState,
@@ -483,6 +485,15 @@ function dbReason(error: unknown, amountMinor: number | null, currency: string):
   return null;
 }
 
+/**
+ * Ревью шага 28, находка 10: стражи второго фактора отказывают тем же SQLSTATE, что и права роли (42501). Продавцу, у которого право
+ * есть, «у вашей роли нет права» — неправда: ему нужно войти со вторым фактором. Отличаем по причине отказа, которую страж называет.
+ */
+function secondFactorRefused(error: unknown): boolean {
+  const e = error as { code?: string; message?: string };
+  return e.code === '42501' && /second factor/i.test(e.message ?? '');
+}
+
 export class PgPricingStore implements PricingStore {
   private readonly pool: PgPool;
   private readonly adminPool: PgPool | null;
@@ -928,7 +939,102 @@ export class PgPricingStore implements PricingStore {
         return { status: 'APPLIED', rows } satisfies BoundsEditResult;
       }, actor.userId, { mfa: actor.mfa });
     } catch (error) {
+      if (secondFactorRefused(error)) return { status: 'MFA_REQUIRED' };
       if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
+      throw error;
+    }
+  }
+
+  /**
+   * Р-134, Р-135 (шаг 28): массовый импорт себестоимости. Предпросмотр только читает: он проверяет, что офферы на месте и валюта их,
+   * и ничего не пишет. Применение — одна транзакция: пакет `cost_import` и все его строки; база отказывает, если строк пришло не
+   * столько, сколько пакет объявил (частичного применения нет), и если у сессии нет второго фактора.
+   */
+  async importCosts(tenantId: string, batch: CostImportBatch, actor: AdminActor, mode: 'PREVIEW' | 'APPLY'): Promise<CostImportResult> {
+    if (batch.rows.length === 0) return { status: 'INVALID', cause: 'NO_ROWS' };
+    const ids = batch.rows.map((r) => r.writeScopeId);
+    const duplicate = ids.find((id, i) => ids.indexOf(id) !== i);
+    if (duplicate) return { status: 'INVALID', cause: 'DUPLICATE_SCOPE', writeScopeId: duplicate };
+    for (const r of batch.rows) {
+      const amounts = [r.unitCostMinor, r.fixedFeeMinor ?? 0];
+      if (amounts.some((v) => !Number.isSafeInteger(v) || v < 0)) return { status: 'INVALID', cause: 'AMOUNT_INVALID', writeScopeId: r.writeScopeId };
+      if (r.feeRateBp !== undefined && (!Number.isSafeInteger(r.feeRateBp) || r.feeRateBp < 0 || r.feeRateBp >= 10_000)) {
+        return { status: 'INVALID', cause: 'AMOUNT_INVALID', writeScopeId: r.writeScopeId };
+      }
+    }
+    if (mode === 'APPLY' && !actor.mfa) return { status: 'MFA_REQUIRED' };
+    try {
+      return await inTenant(this.admin('importCosts'), tenantId, async (tx) => {
+        // Область себестоимости — та же, что у пола маржи (0051): товар оффера, его аккаунт и витрина из привязки
+        const { rows: scopes } = await tx.query(
+          `SELECT s.write_scope_id, s.product_id, s.channel_account_id, s.currency,
+                  (SELECT om.marketplace FROM tenant_data.offer_mapping om
+                    WHERE om.tenant_id = s.tenant_id AND om.price_write_scope_id = s.write_scope_id
+                    ORDER BY om.created_at LIMIT 1) AS marketplace
+             FROM tenant_data.write_scope s
+            WHERE s.tenant_id = $1 AND s.write_scope_id = ANY ($2::uuid[]) AND s.field = 'PRICE'
+            ORDER BY s.write_scope_id FOR NO KEY UPDATE`, [tenantId, ids]);
+        for (const r of batch.rows) {
+          const scope = scopes.find((x) => x.write_scope_id === r.writeScopeId);
+          if (!scope) throw new RollbackWith<CostImportResult>({ status: 'INVALID', cause: 'SCOPE_NOT_FOUND', writeScopeId: r.writeScopeId });
+          if (scope.currency !== r.currency) throw new RollbackWith<CostImportResult>({ status: 'INVALID', cause: 'CURRENCY_MISMATCH', writeScopeId: r.writeScopeId });
+        }
+        const offers = new Set(batch.rows.map((r) => r.writeScopeId)).size;
+        if (mode === 'PREVIEW') throw new RollbackWith<CostImportResult>({ status: 'PREVIEWED', rows: batch.rows.length, offers });
+        const { rows: [created] } = await tx.query(
+          `INSERT INTO tenant_data.cost_import (tenant_id, created_by_membership_id, source_name, source_format, row_count, fingerprint, skipped_rows)
+           VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING cost_import_id`,
+          [tenantId, actor.membershipId, batch.sourceName, batch.sourceFormat, batch.rows.length, batch.fingerprint, batch.skippedRows]);
+        const importId = String(created.cost_import_id);
+        for (const r of batch.rows) {
+          const scope = scopes.find((x) => x.write_scope_id === r.writeScopeId)!;
+          await tx.query(
+            /**
+             * Ревью шага 28, находка 14: в файле продавца есть только закупочная цена, но у версии себестоимости пять других
+             * составляющих (логистика, упаковка, обработка, отгрузка, прочее). Новая версия переносит их из прежней: иначе
+             * повторный импорт обнулял бы заведённое руками и молча поднимал маржу.
+             */
+            `INSERT INTO tenant_data.cost_profile (tenant_id, product_id, channel_account_id, marketplace, version, valid_from, currency,
+                                                   purchase_cost_minor, inbound_logistics_minor, packaging_minor, handling_minor,
+                                                   outbound_shipping_minor, other_fixed_minor, source, created_by_membership_id, cost_import_id)
+             SELECT $1, $2, $3, $4,
+                    coalesce(max(c.version), 0) + 1, now(), $5, $6,
+                    coalesce((array_agg(c.inbound_logistics_minor ORDER BY c.version DESC))[1], 0),
+                    coalesce((array_agg(c.packaging_minor ORDER BY c.version DESC))[1], 0),
+                    coalesce((array_agg(c.handling_minor ORDER BY c.version DESC))[1], 0),
+                    coalesce((array_agg(c.outbound_shipping_minor ORDER BY c.version DESC))[1], 0),
+                    coalesce((array_agg(c.other_fixed_minor ORDER BY c.version DESC))[1], 0),
+                    'IMPORT', $7, $8
+               FROM tenant_data.cost_profile c
+              WHERE c.tenant_id = $1 AND c.product_id = $2 AND c.channel_account_id IS NOT DISTINCT FROM $3
+                AND c.marketplace IS NOT DISTINCT FROM $4`,
+            [tenantId, scope.product_id, scope.channel_account_id, scope.marketplace, r.currency, r.unitCostMinor, actor.membershipId, importId]);
+          /**
+           * Комиссия канала — оценка оффера [Р-32]: в файле её может не быть, и тогда прежняя оценка остаётся. Ревью шага 28,
+           * находка 5: колонки в файле может быть ОДНА, и вторую составляющую тогда нельзя обнулять — она сливается с прежней.
+           * Если ни одной составляющей нет ни в файле, ни в базе, пол маржи остаётся неcчитаемым (`FEE_ESTIMATE_MISSING`,
+           * 0051) — это прежнее fail-closed поведение, а не заниженный пол. Версия называет пакет импорта: число набрано
+           * продавцом в таблице, а не взято из тарифа в репозитории (OQ-197).
+           */
+          if (r.fixedFeeMinor !== undefined || r.feeRateBp !== undefined) {
+            await tx.query(
+              `INSERT INTO channel_data.fee_estimate (tenant_id, write_scope_id, source, fee_model, fee_schedule_version, computed_at, valid_until)
+               VALUES ($1, $2, 'FEE_SCHEDULE',
+                       jsonb_strip_nulls(jsonb_build_object('feeRateBp', $3::int, 'fixedFeeMinor', $4::bigint)),
+                       $5, now(), now() + interval '90 days')
+               ON CONFLICT (tenant_id, write_scope_id, source) DO UPDATE
+                 SET fee_model = channel_data.fee_estimate.fee_model || EXCLUDED.fee_model,
+                     fee_schedule_version = EXCLUDED.fee_schedule_version,
+                     computed_at = EXCLUDED.computed_at, valid_until = EXCLUDED.valid_until`,
+              [tenantId, r.writeScopeId, r.feeRateBp ?? null, r.fixedFeeMinor ?? null, `seller-import:${importId}`]);
+          }
+        }
+        return { status: 'APPLIED', importId, rows: batch.rows.length, offers } satisfies CostImportResult;
+      }, actor.userId, { mfa: actor.mfa });
+    } catch (error) {
+      if (secondFactorRefused(error)) return { status: 'MFA_REQUIRED' };
+      const code = (error as { code?: string }).code;
+      if (code === '42501') return { status: 'FORBIDDEN' };
       throw error;
     }
   }

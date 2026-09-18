@@ -10,11 +10,15 @@ export type RunOutcome = 'SUCCEEDED' | 'FAILED';
 
 export interface JobScope { tenantId: string; channelAccountId: string }
 
+/** Р-133 (шаг 28): CHANNEL — работа ходит в канал с лимитами; INTERNAL — только в наши хранилища */
+export type RetryKind = 'CHANNEL' | 'INTERNAL';
+
 export interface JobRegistration {
   jobKey: string;
   jobName: string;
   scope: JobScope | null;
   catchUp: CatchUp;
+  retryKind: RetryKind;
   intervalSeconds: number;
   /** Первый слот, если работы ещё нет в состоянии */
   firstDueAt: Instant;
