@@ -39,11 +39,12 @@ common_env=(
   "REPRACER_KAUFLAND_FALLBACK_EMAIL=ops@example.invalid"
 )
 
-# Отметка во внешнем сервисе выключена явно: аккаунта сервиса нет (OQ-188), и молча её пропускать нельзя [Р-127]
+# Отметка во внешнем сервисе выключена явно — в надстройках CI (OQ-188, OQ-198). Здесь её задавать бесполезно: в контейнер попадает
+# только то, что названо в `environment` самого развёртывания, и первый прогон задачи D этим и упал (CI 35370892895)
 declare -a stacks=(
-  "scheduler|deploy/scheduler/compose.yaml|deploy/ci/scheduler.override.yaml|9464|REPRACER_SCHEDULER_HEARTBEAT=off REPRACER_CH_URL=$CH_URL REPRACER_CH_INGEST_USER=repracer_ci_ingest REPRACER_CH_VERIFIER_USER=repracer_ci_verifier"
-  "worker|deploy/worker/compose.yaml|deploy/ci/worker.override.yaml|9465|REPRACER_WORKER_HEARTBEAT=off REPRACER_KAFKA_BROKERS=$KAFKA"
-  "receiver|deploy/notification-receiver/compose.yaml|deploy/ci/receiver.override.yaml|9466|REPRACER_RECEIVER_HEARTBEAT=off REPRACER_AMAZON_REGION=EU REPRACER_AMAZON_APPLICATION_ID=amzn1.sellerapps.app.00000000-0000-0000-0000-000000000000"
+  "scheduler|deploy/scheduler/compose.yaml|deploy/ci/scheduler.override.yaml|9464|REPRACER_CH_URL=$CH_URL REPRACER_CH_INGEST_USER=repracer_ci_ingest REPRACER_CH_VERIFIER_USER=repracer_ci_verifier"
+  "worker|deploy/worker/compose.yaml|deploy/ci/worker.override.yaml|9465|REPRACER_KAFKA_BROKERS=$KAFKA"
+  "receiver|deploy/notification-receiver/compose.yaml|deploy/ci/receiver.override.yaml|9466|REPRACER_AMAZON_REGION=EU REPRACER_AMAZON_APPLICATION_ID=amzn1.sellerapps.app.00000000-0000-0000-0000-000000000000"
 )
 
 started=()

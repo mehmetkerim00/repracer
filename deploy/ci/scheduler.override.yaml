@@ -4,3 +4,7 @@ services:
   scheduler:
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Отметка во внешнем сервисе выключена ЯВНО: аккаунта сервиса нет (OQ-188, OQ-198). Переменная задаётся здесь, а не в окружении
+    # запускающего: `docker compose` передаёт в контейнер только то, что названо в `environment` самого развёртывания [Р-127].
+    environment:
+      REPRACER_SCHEDULER_HEARTBEAT: "off"
