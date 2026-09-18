@@ -267,8 +267,11 @@ test('Р-136: экспорт доказательной истории цен з
 });
 
 test('Р-136: ни одна операция консоли не выходит за пределы живого экрана', () => {
-  const slow = measured.filter((x) => x.seconds > SCREEN_LIMIT_SECONDS);
-  const heavy = measured.filter((x) => x.bytes > RESPONSE_LIMIT_BYTES);
+  // Пределы — про ЗАПРОСЫ продавца. Посев данных прогона (status 0) в них не входит: это подготовка, а не экран
+  const requests = measured.filter((x) => x.status > 0);
+  assert.ok(requests.length >= 20, `замерены все операции продавца: ${requests.length}`);
+  const slow = requests.filter((x) => x.seconds > SCREEN_LIMIT_SECONDS);
+  const heavy = requests.filter((x) => x.bytes > RESPONSE_LIMIT_BYTES);
   assert.deepEqual(slow.map((x) => `${x.operation}: ${x.seconds} с`), [], 'экран отвечает за разумное время');
   assert.deepEqual(heavy.map((x) => `${x.operation}: ${Math.round(x.bytes / 1024)} КБ`), [], 'ответ экрана помещается в браузер');
 });
