@@ -31,7 +31,15 @@ printf 'ci-synthetic-verifier' > "$SECRETS/ch_verifier_password"
 printf 'https://sqs.eu-west-1.amazonaws.com/000000000000/repracer-ci' > "$SECRETS/sqs_queue_url"
 printf 'AKIASYNTHETIC0000001' > "$SECRETS/aws_access_key_id"
 printf 'syn-aws-secret-access-key-0001' > "$SECRETS/aws_secret_access_key"
+printf 'syn-aws-session-token-0001' > "$SECRETS/aws_session_token"
 printf '{"clientKey":"syn-client","secretKey":"syn-secret"}' > "$SECRETS/channels/secret-ref_amazon-application"
+# Процессы работают от uid 1000, а каталог mktemp принадлежит пользователю сборки с правами 0700: без этого файлы секретов
+# контейнеру не видны (CONFIG_SECRET_UNREADABLE, прогон 35380553447). В работе каталог принадлежит служебному пользователю и
+# открывать его так не нужно — это послабление ТОЛЬКО для синтетических секретов проверки
+chmod -R a+rX "$SECRETS"
+
+# Конфигурации разбираются до поднятия контейнеров: так расхождение видно по имени переменной, а не по падению процесса в журнале
+node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/deploy-config-check.mjs "$SECRETS"
 
 common_env=(
   "REPRACER_SECRETS_DIR=$SECRETS"
