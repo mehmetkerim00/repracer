@@ -124,7 +124,7 @@ jobs:
         # Раннер CI — четыре ядра: три параллельные копии базы проходят каталог заметно быстрее двух
         run: node scripts/db/mutation-check.mjs --jobs 3
       - run: npm run typecheck
-      - name: All tests, no skips (Р-137: полная область — с брокером и ClickHouse)
+      - name: 'All tests, no skips (Р-137: полная область — с брокером и ClickHouse)'
         run: node scripts/test-all.mjs --scope=full
       # Шаг 28, D: развёртывания поднимаются по-настоящему — три процесса стартуют и отвечают на /healthz (deploy/ci/README.md)
       - name: Deployments start (шаг 28, D)
