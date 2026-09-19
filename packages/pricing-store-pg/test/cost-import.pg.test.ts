@@ -333,3 +333,20 @@ test('Р-139, Р-88: задание границ, созданное без вт
   assert.equal(one.status, 'APPLIED', JSON.stringify(one));
   await store.finishBulkJob(world.tenantId, claimed!.jobId, 'review-bounds', { status: 'SUCCEEDED', result: {} });
 });
+
+/**
+ * Р-143 (шаг 31): записи задания, которому второй фактор НУЖЕН и предъявлен при создании, считаются подтверждёнными. Столбец
+ * `created_with_mfa` введён шагом 28 ровно затем, чтобы окно массовой правки [Р-135] считало только НЕподтверждённые правки.
+ * Пока задание работало «без второго фактора в сессии», все его версии ложились как неподтверждённые — и окно считало своими
+ * ровно то, что человек только что подтвердил.
+ */
+test('Р-143: себестоимость, записанная заданием импорта, помечена как подтверждённая вторым фактором', async () => {
+  const job = await runningJob('COST_IMPORT', true, 'review-marked');
+  const applied = await store.importCosts(world.tenantId, batchOf(rowsFor([2], 660), 'fp-marked'), jobActor(job.jobId), 'APPLY');
+  assert.equal(applied.status, 'APPLIED', JSON.stringify(applied));
+  const [row] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
+    `SELECT created_with_mfa FROM tenant_data.cost_profile
+      WHERE tenant_id = $1 AND purchase_cost_minor = 660 ORDER BY created_at DESC LIMIT 1`, [world.tenantId])).rows);
+  assert.equal(row.created_with_mfa, true, 'запись задания подтверждена вторым фактором, который человек предъявил при его создании');
+  await store.finishBulkJob(world.tenantId, job.jobId, 'review-marked', { status: 'SUCCEEDED', result: {} });
+});

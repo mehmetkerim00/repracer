@@ -622,7 +622,10 @@ export const de: Messages = {
       createdPreview: 'Die Strategie wird für alle ausgewählten Angebote vorab gerechnet. Das Ergebnis erscheint hier.',
       createdEvidence: 'Der Preisnachweis wird im Hintergrund erstellt. Sie können die Seite verlassen.',
       download: 'Datei herunterladen', checksum: (sha: string) => `Prüfsumme SHA-256: ${sha}`,
-      notFound: 'Diesen Vorgang gibt es nicht.', noFile: 'Zu diesem Vorgang gehört keine Datei.',
+      notFound: 'Diesen Vorgang gibt es nicht.',
+      cancel: 'Abbrechen', cancelled: 'Abgebrochen, bevor er begonnen hat.',
+      notWaiting: 'Der Vorgang läuft bereits oder ist beendet: er wird vollständig oder gar nicht angewendet und nicht auf halbem Weg abgebrochen.',
+      queueFull: 'Zu viele Massenvorgänge warten. Warten Sie, bis sie fertig sind, oder brechen Sie einen ab.', noFile: 'Zu diesem Vorgang gehört keine Datei.',
       attempts: (n: number) => (n > 1 ? `Versuche: ${n}` : ''),
       errors: {
         PLAN_CHANGED: 'die Daten haben sich seit der Vorschau geändert', COLUMNS_MISSING: 'in der Datei fehlen Spalten',

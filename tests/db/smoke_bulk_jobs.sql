@@ -16,6 +16,7 @@
 \set j1 '''bf000000-0000-4000-8000-000000000001'''
 \set j2 '''bf000000-0000-4000-8000-000000000002'''
 \set j3 '''bf000000-0000-4000-8000-000000000003'''
+\set j4 '''bf000000-0000-4000-8000-000000000004'''
 
 -- Настройки сессии, а не транзакции: файл не обёрнут в одну транзакцию — фикстуры заданий нужны второй роли
 SELECT set_config('app.tenant_id', :tA, false), set_config('app.user_id', :owner, false) \gset
@@ -98,6 +99,38 @@ INSERT INTO tenant_data.bulk_job (tenant_id, bulk_job_id, kind, params, created_
 VALUES (:tA, :j3, 'PRICE_EVIDENCE', '{}'::jsonb, :ownerM, 'SUCCEEDED', 'DONE', now(), '{}'::jsonb);
 DO $$ BEGIN RAISE NOTICE 'PASS accept | bulk job fixtures for the worker role (Р-139)'; END $$;
 
+-- --------------------------------------------------------------- OQ-207 (шаг 31): отмена и предел очереди
+INSERT INTO tenant_data.bulk_job (tenant_id, bulk_job_id, kind, params, created_by_membership_id)
+VALUES (:tA, :j4, 'PRICE_EVIDENCE', '{}'::jsonb, :ownerM);
+SELECT pg_temp.ok('a waiting bulk job is cancelled by a person (OQ-207)', format($q$
+  UPDATE tenant_data.bulk_job SET status = 'CANCELLED', finished_at = now() WHERE tenant_id = %L AND bulk_job_id = %L $q$, :tA, :j4));
+SELECT pg_temp.expect_fail('a cancelled bulk job is started again (Р-139)', format($q$
+  UPDATE tenant_data.bulk_job SET status = 'RUNNING', finished_at = NULL WHERE tenant_id = %L AND bulk_job_id = %L $q$, :tA, :j4),
+  'its outcome is not rewritten');
+-- Отмена — административная запись человека: без пользователя сессии её не будет, и она попадает в аудит [Р-97]
+SELECT pg_temp.ok('cancelling a bulk job is written to the audit log (Р-97)', $q$
+  DO $x$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM audit.audit_event
+                    WHERE entity_type = 'tenant_data.bulk_job' AND entity_id = 'bf000000-0000-4000-8000-000000000004'
+                      AND action LIKE '%update%') THEN
+      RAISE EXCEPTION 'cancelling a bulk job is not in the audit log';
+    END IF;
+  END $x$ $q$);
+
+-- Предел очереди: двадцать первое ждущее задание тенант не принимает [OQ-207]
+DO $$
+DECLARE
+  i int;
+BEGIN
+  FOR i IN 1..18 LOOP
+    INSERT INTO tenant_data.bulk_job (tenant_id, kind, params, created_by_membership_id)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'PRICE_EVIDENCE', '{}'::jsonb, 'a2000000-0000-0000-0000-00000000000a');
+  END LOOP;
+END $$;
+SELECT pg_temp.expect_fail('a tenant queues more bulk jobs than the limit (OQ-207)', format($q$
+  INSERT INTO tenant_data.bulk_job (tenant_id, kind, params, created_by_membership_id)
+  VALUES (%L, 'PRICE_EVIDENCE', '{}'::jsonb, %L) $q$, :tA, :ownerM), 'bulk jobs waiting');
+
 \c - svc_bulk_worker
 \i tests/db/smoke_helpers.sql
 \set tA '''a0000000-0000-0000-0000-00000000000a'''
@@ -121,6 +154,14 @@ SELECT pg_temp.expect_fail('another process releases a live lease of a bulk job 
 
 -- --------------------------------------------------------------- итог задания не переписывается
 SELECT set_config('app.bulk_lease_owner', 'worker-one', false) \gset
+/**
+ * Идущее применение не отменяется [Р-134, OQ-207]: оно целиком или никак, и «отмена» на полпути означала бы ровно то же, что
+ * падение процесса. Проверяется на задании, которое ИДЁТ: у завершённого это отклонила бы соседняя защита [Р-99].
+ */
+SELECT pg_temp.expect_fail('a running bulk job is cancelled halfway (Р-134, OQ-207)', $q$
+  UPDATE tenant_data.bulk_job SET status = 'CANCELLED', finished_at = now()
+   WHERE bulk_job_id = 'bf000000-0000-4000-8000-000000000001' $q$, 'not waiting');
+
 SELECT pg_temp.expect_fail('a finished bulk job is started again (Р-139)', $q$
   UPDATE tenant_data.bulk_job SET status = 'RUNNING', finished_at = NULL
    WHERE bulk_job_id = 'bf000000-0000-4000-8000-000000000003' $q$, 'is not rewritten');

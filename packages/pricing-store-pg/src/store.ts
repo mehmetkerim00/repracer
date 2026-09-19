@@ -1160,6 +1160,8 @@ export class PgPricingStore implements PricingStore {
       }, actor.userId, { mfa: actor.mfa, ...(actor.bulkJobId ? { bulkJobId: actor.bulkJobId } : {}) });
     } catch (error) {
       if (secondFactorRefused(error)) return { status: 'MFA_REQUIRED' };
+      // P0003 — предел очереди тенанта (0111): это не ошибка, а состояние, и продавцу о нём говорят словами
+      if ((error as { code?: string }).code === 'P0003') return { status: 'QUEUE_FULL' };
       if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
       throw error;
     }
@@ -1263,6 +1265,22 @@ export class PgPricingStore implements PricingStore {
       return r === undefined ? null
         : { fileName: r.file_name, contentType: r.content_type, content: r.content, sha256: r.sha256, rows: Number(r.rows_count) };
     });
+  }
+
+  /** OQ-207: отмена ожидающего задания — действие человека, поэтому административной ролью и от его имени [Р-97] */
+  async cancelBulkJob(tenantId: string, jobId: string, actor: AdminActor): Promise<'CANCELLED' | 'NOT_WAITING' | 'FORBIDDEN'> {
+    try {
+      return await inTenant(this.admin('cancelBulkJob'), tenantId, async (tx) => {
+        const { rowCount } = await tx.query(
+          `UPDATE tenant_data.bulk_job SET status = 'CANCELLED', finished_at = now()
+            WHERE tenant_id = $1 AND bulk_job_id = $2 AND status = 'PENDING'`, [tenantId, jobId]);
+        // Ноль строк — задание уже взято в работу или завершено: отменять нечего, и это не ошибка, а состояние
+        return (rowCount ?? 0) > 0 ? 'CANCELLED' : 'NOT_WAITING';
+      }, actor.userId, { mfa: actor.mfa });
+    } catch (error) {
+      if ((error as { code?: string }).code === '42501') return 'FORBIDDEN';
+      throw error;
+    }
   }
 
   /** Р-120: наблюдения собственного ценообразования канала — путь обнаружения офферов, одна вставка */

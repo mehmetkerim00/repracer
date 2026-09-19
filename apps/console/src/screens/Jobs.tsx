@@ -51,6 +51,11 @@ export function JobProgress({ worldId, jobId, onFinished }: { worldId: string; j
         <progress value={job.done} max={job.total ?? job.done} aria-label={job.headline}>{Math.round(job.progress * 100)}%</progress>
       )}
       <p className="small muted">{job.effect}</p>
+      {/* OQ-207: отменить можно только то, что ещё ждёт очереди — идущее применение целиком или никак [Р-134] */}
+      {job.cancellable ? (
+        <button type="button" onClick={() => void requestJson<BulkJobView>(`${worldPath(worldId, 'jobs', jobId)}/cancel`, { method: 'POST', locale: m.locale })
+          .then(setJob).catch((e: unknown) => setError(errorText(e, m)))}>{t.cancel}</button>
+      ) : null}
       {job.attempts > 1 ? <p className="small muted">{t.attempts(job.attempts)}</p> : null}
       {job.artifact ? (
         <p>

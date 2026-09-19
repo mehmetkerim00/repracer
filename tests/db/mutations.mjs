@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0111_verify_schema_invariants_v28.sql';
+const VERIFY = 'migrations/0112_verify_schema_invariants_v28.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -1098,12 +1098,32 @@ export const STEP30_ROWS = [
       m(dropConstraint('bulk_job_artifact_sha256_check', 'tenant_data.bulk_job_artifact'), smoke('artifact with a checksum that is not a SHA-256')),
       m(dropConstraint('bulk_job_artifact_rows_count_check', 'tenant_data.bulk_job_artifact'), smoke('artifact with a negative row count')),
       /**
+       * OQ-207 (шаг 31): отмена и предел очереди. Отмена — административная запись ЧЕЛОВЕКА: у неё автор и строка аудита, как
+       * у создания задания; очередь тенанта одна, и без предела один участник задерживает массовые операции всех остальных.
+       */
+      m(dropTrigger('a0_admin_write_person_update', 'tenant_data.bulk_job'),
+        verify('tenant_data\\.bulk_job: administrative UPDATE without the person guard')),
+      m(dropTrigger('zz_admin_write_audit_update', 'tenant_data.bulk_job'),
+        smoke('cancelling a bulk job is written to the audit log (Р-97)'),
+        verify('tenant_data\\.bulk_job: administrative UPDATE is not written to the audit log')),
+      m(dropTrigger('zd_bulk_job_queue_limit', 'tenant_data.bulk_job'), smoke('a tenant queues more bulk jobs than the limit (OQ-207)')),
+      // Отмена — только у ждущего задания: применение целиком или никак, и на полпути его не отменяют [Р-134]
+      m(replaceInFunction('tenant_data.bulk_job_status_forward_only()', "IF NEW.status = 'CANCELLED' AND OLD.status <> 'PENDING' THEN", 'IF false THEN'),
+        smoke('a running bulk job is cancelled halfway (Р-134, OQ-207)')),
+      /**
        * Сам механизм «второй фактор предъявлен при создании задания» [Р-139]. Снимаем по одному условию: вид задания, живая
        * аренда, состояние «выполняется» и признак второго фактора при создании. Без каждого из них массовое изменение цен
        * открывается тем, чем открываться не должно, — и это ловит свой тест.
        */
       m(replaceInFunction('security.second_factor_present(text[])', 'AND j.kind = ANY (p_kinds)', 'AND true'),
         node(T('cost-import.pg.test.ts'), 'задание НЕ ТОГО вида', 'задание выгрузки не открывает импорт себестоимости', '^APPLIED$')),
+      /**
+       * Р-143 (шаг 31): записи задания, которому второй фактор предъявлен при создании, помечаются подтверждёнными. Иначе
+       * окно массовой правки [Р-135] считает своими ровно те правки, которые человек только что подтвердил.
+       */
+      m(replaceInFunction('tenant_data.mark_created_with_mfa()', "security.second_factor_present(ARRAY['COST_IMPORT', 'BOUNDS_EDIT'])", 'security.session_mfa()'),
+        node(T('cost-import.pg.test.ts'), 'помечена как подтверждённая вторым фактором',
+          'запись задания подтверждена вторым фактором, который человек предъявил при его создании', '^false$')),
       m(replaceInFunction('security.second_factor_present(text[])', 'AND j.created_with_mfa', 'AND true'),
         node(T('cost-import.pg.test.ts'), 'не открывает массовую правку',
           'массовая правка под заданием без второго фактора не проходит', '^APPLIED$')),

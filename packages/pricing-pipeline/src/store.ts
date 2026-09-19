@@ -550,6 +550,11 @@ export interface PricingStore {
   bulkJob(tenantId: string, jobId: string): Promise<BulkJobRow | null>;
   saveBulkJobArtifact(tenantId: string, jobId: string, artifact: BulkJobArtifact): Promise<void>;
   bulkJobArtifact(tenantId: string, jobId: string): Promise<BulkJobArtifact | null>;
+  /**
+   * OQ-207: отменить ОЖИДАЮЩЕЕ задание. Идущее применение не отменяется: оно целиком или никак [Р-134], и «отмена» на полпути
+   * означала бы то же, что падение процесса. Отмена — действие человека: у неё автор и строка аудита [Р-97].
+   */
+  cancelBulkJob(tenantId: string, jobId: string, actor: AdminActor): Promise<'CANCELLED' | 'NOT_WAITING' | 'FORBIDDEN'>;
   saveStrategy(tenantId: string, input: StrategySaveInput, actor: AdminActor): Promise<StrategySaveResult>;
   /** Р-123 (шаг 24): наименьшая цена за 30 суток витрины до начала скидки — предупреждение до объявления */
   /**
@@ -635,8 +640,11 @@ export type BulkJobKind = 'COST_IMPORT' | 'BOUNDS_EDIT' | 'BOUNDS_PLAN' | 'STRAT
  * ровно поэтому они не открывают окно для операций, которым он нужен, и их записи не считаются подтверждёнными. Список один
  * на всю систему — чтобы «ничего не меняет» и «не требует второго фактора» не разошлись по разным местам.
  */
+/** OQ-207: сколько заданий тенант держит в очереди. То же число закреплено в базе (0111) — здесь оно для модели и экрана */
+export const BULK_JOB_QUEUE_LIMIT = 20;
+
 export const READ_ONLY_JOB_KINDS: readonly BulkJobKind[] = ['BOUNDS_PLAN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT'];
-export type BulkJobStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'INTERRUPTED';
+export type BulkJobStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'INTERRUPTED' | 'CANCELLED';
 export type BulkJobPhase = 'PREPARING' | 'APPLYING' | 'PRODUCING' | 'DONE';
 
 export interface BulkJobInput {
@@ -646,9 +654,10 @@ export interface BulkJobInput {
   totalItems?: number;
 }
 
+/** OQ-207: очередь тенанта имеет предел — иначе один участник задерживает массовые операции всех остальных */
 export type BulkJobCreated =
   | { status: 'CREATED'; jobId: string; createdAt: string }
-  | { status: 'MFA_REQUIRED' | 'FORBIDDEN' };
+  | { status: 'MFA_REQUIRED' | 'FORBIDDEN' | 'QUEUE_FULL' };
 
 export interface BulkJobRow {
   jobId: string;

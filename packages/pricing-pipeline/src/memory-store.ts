@@ -1,7 +1,7 @@
 import { EXPLANATION_RULESETS } from './dictionary.ts';
 import { rotation } from './reconciliation.ts';
 import type { HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow } from './store.ts';
-import { READ_ONLY_JOB_KINDS } from './store.ts';
+import { BULK_JOB_QUEUE_LIMIT, READ_ONLY_JOB_KINDS } from './store.ts';
 import { offerIdentityOf, type CompetitorQuery, type CompetitorSnapshot, type CompetitorSourceDescriptor, type FieldWrite, type Instant, type OfferIdentity, type PriceBasis, type PricingHealthObservation, type WriteOutcome } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange, SanityContext } from '@repracer/input-sanity';
 import { assertWriteWithinBounds, NO_GUARDRAILS, type GuardrailSet } from '@repracer/price-gate';
@@ -1335,6 +1335,10 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     if (!member || member.userId !== actor.userId) return { status: 'FORBIDDEN' };
     // Второй фактор при создании обязателен только у импорта: он массовый всегда [Р-134, находка 4 ревью шага 30]
     if (input.kind === 'COST_IMPORT' && !actor.mfa) return { status: 'MFA_REQUIRED' };
+    // OQ-207: предел очереди тенанта — тот же, что в базе (0111). Модель обязана повторять базу, иначе стенд слабее её
+    if (this.bulkJobs.filter((j) => j.status === 'PENDING' || j.status === 'RUNNING' || j.status === 'INTERRUPTED').length >= BULK_JOB_QUEUE_LIMIT) {
+      return { status: 'QUEUE_FULL' };
+    }
     const createdAt = new Date().toISOString();
     const job: BulkJobRow = {
       jobId: `job-${this.bulkJobs.length + 1}-${Date.now().toString(36)}`, kind: input.kind, status: 'PENDING', params: input.params, phase: 'PREPARING',
@@ -1389,6 +1393,16 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     job.leaseOwner = null;
     job.leaseUntil = null;
     return true;
+  }
+
+  async cancelBulkJob(_tenantId: string, jobId: string, actor: AdminActor): Promise<'CANCELLED' | 'NOT_WAITING' | 'FORBIDDEN'> {
+    const member = this.member(actor.membershipId);
+    if (!member || member.userId !== actor.userId) return 'FORBIDDEN';
+    const job = this.bulkJobs.find((j) => j.jobId === jobId);
+    if (!job || job.status !== 'PENDING') return 'NOT_WAITING';
+    job.status = 'CANCELLED';
+    job.finishedAt = new Date().toISOString();
+    return 'CANCELLED';
   }
 
   async listBulkJobs(_tenantId: string, limit = 20): Promise<BulkJobRow[]> {

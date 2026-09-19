@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer, type ViteDevServer } from 'vite';
-import { messagesFor, type ComplianceView, type CostImportView, type DiscountCheckView, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
+import { messagesFor, type BulkJobView, type ComplianceView, type CostImportView, type DiscountCheckView, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
 import { buildStandWorlds, memoryStandDirectory, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
@@ -719,4 +719,42 @@ test('Р-142: ни один экран консоли не ведёт ссылк
     }
   }
   assert.deepEqual(offenders, [], 'ссылка на API в консоли: браузер пойдёт по ней без токена и получит 401, а не файл');
+});
+
+/**
+ * OQ-207 (ревью шага 30, находка 12), шаг 31: ошибочно запущенная массовая операция останавливалась только ожиданием, а
+ * очередь тенанта ничем не ограничивалась — один участник мог задержать всех остальных. Проверяется то, что видит продавец:
+ * ждущее задание отменяется, идущее — нет, и очередь имеет названный предел.
+ */
+test('OQ-207: ждущее задание отменяется, идущее — нет, очередь тенанта ограничена', async () => {
+  const id = 'kaufland/pipeline/happy-path';
+  const owner = await login('OWNER');
+  const live = liveOf(id);
+  const start = async () => {
+    const created = await call(owner, 'POST', api(id, 'compliance', 'evidence'), { from: '2026-01-01', to: '2026-01-31' });
+    assert.equal(created.status, 200, JSON.stringify(created.body));
+    return (created.body as JobCreatedResponse).jobId;
+  };
+  const waiting = await start();
+  const cancelled = await call(owner, 'POST', api(id, 'jobs', waiting, 'cancel'));
+  assert.equal(cancelled.status, 200, JSON.stringify(cancelled.body));
+  assert.deepEqual([(cancelled.body as BulkJobView).status, (cancelled.body as BulkJobView).effect],
+    ['CANCELLED', messagesFor('en').ui.jobs.effectNothing], 'отменённое задание ничего не изменило и об этом сказано');
+  assert.equal((await call(owner, 'POST', api(id, 'jobs', waiting, 'cancel'))).status, 409, 'отменить дважды нельзя');
+
+  // Завершённое задание не отменяется: применение целиком или никак, отменять на полпути нечего
+  const done = await finishJob(id, await call(owner, 'POST', api(id, 'compliance', 'evidence'), { from: '2026-01-01', to: '2026-01-31' }));
+  assert.equal(done.status, 'SUCCEEDED');
+  assert.equal(done.cancellable, false, 'у завершённого задания кнопки отмены нет');
+  assert.equal((await call(owner, 'POST', api(id, 'jobs', done.jobId, 'cancel'))).status, 409);
+
+  // Очередь тенанта ограничена: двадцать первое ждущее задание не принимается, и продавцу сказано, что делать
+  const queued: string[] = [];
+  for (let i = 0; i < 20; i++) queued.push(await start());
+  const overflow = await call(owner, 'POST', api(id, 'compliance', 'evidence'), { from: '2026-01-01', to: '2026-01-31' });
+  assert.equal(overflow.status, 409, `очередь тенанта ограничена: ${JSON.stringify(overflow.body)}`);
+  // Место освобождается отменой — ровно то, ради чего она и нужна
+  assert.equal((await call(owner, 'POST', api(id, 'jobs', queued[0]!, 'cancel'))).status, 200);
+  assert.equal((await call(owner, 'POST', api(id, 'compliance', 'evidence'), { from: '2026-01-01', to: '2026-01-31' })).status, 200);
+  await runPendingJobs(live);
 });

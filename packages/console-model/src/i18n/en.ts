@@ -615,7 +615,10 @@ export const en = {
       createdPreview: 'The strategy is being computed for every selected offer. The result appears here.',
       createdEvidence: 'The price evidence is being built in the background. You can leave this page.',
       download: 'Download the file', checksum: (sha: string) => `SHA-256 checksum: ${sha}`,
-      notFound: 'There is no such operation.', noFile: 'This operation has no file.',
+      notFound: 'There is no such operation.',
+      cancel: 'Cancel', cancelled: 'Cancelled before it started.',
+      notWaiting: 'The operation is already running or finished: it is applied in full or not at all and is not cancelled halfway.',
+      queueFull: 'Too many bulk operations are waiting. Wait for them to finish or cancel one.', noFile: 'This operation has no file.',
       attempts: (n: number) => (n > 1 ? `Attempts: ${n}` : ''),
       errors: {
         PLAN_CHANGED: 'the data changed after the preview', COLUMNS_MISSING: 'the file is missing columns',

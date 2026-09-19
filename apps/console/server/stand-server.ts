@@ -233,6 +233,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       const created = await live.store.createBulkJob(world.tenantId, { kind, params: { ...params, locale }, ...(totalItems === null ? {} : { totalItems }) },
         { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) });
       if (created.status === 'MFA_REQUIRED') return fail(403, 'MFA_REQUIRED', kind === 'COST_IMPORT' ? m.ui.costImport.mfa : s.mfaRequiredBounds);
+      if (created.status === 'QUEUE_FULL') return fail(409, 'QUEUE_FULL', m.ui.jobs.queueFull);
       if (created.status !== 'CREATED') return fail(403, 'FORBIDDEN', s.forbidden);
       const job = await live.store.bulkJob(world.tenantId, created.jobId);
       return ok({ jobId: created.jobId, message, ...(job ? { job: bulkJobView(job, m) } : {}) });
@@ -355,6 +356,18 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       if (!query || (query.writeScopeId && !scopeById(world, query.writeScopeId))) return fail(400, 'BAD_FEED_QUERY', s.badRequest);
       return createJob('PRICE_FEED_EXPORT', { query: asStrings }, priceFeed(world, m, { ...query, offset: 0, limit: 1 }).page.total,
         m.ui.jobs.createdFeedExport);
+    }
+
+    /**
+     * OQ-207: отмена ожидающего задания. Идущее применение не отменяется — оно целиком или никак [Р-134]; на экране кнопка
+     * есть ровно у того задания, которое ещё ждёт своей очереди.
+     */
+    if (screen === 'jobs' && param !== null && parts[5] === 'cancel') {
+      const outcome = await live.store.cancelBulkJob(world.tenantId, param, { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) });
+      if (outcome === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
+      if (outcome === 'NOT_WAITING') return fail(409, 'NOT_WAITING', m.ui.jobs.notWaiting);
+      const job = await live.store.bulkJob(world.tenantId, param);
+      return job ? ok(bulkJobView(job, m)) : fail(404, 'JOB_NOT_FOUND', m.ui.jobs.notFound);
     }
 
     // Р-123: предупреждение «эта скидка нарушит правило» до записи — только чтение, права на просмотр достаточно

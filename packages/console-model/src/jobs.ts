@@ -24,6 +24,8 @@ export interface BulkJobView {
   effect: string;
   /** Идёт ли ещё: экран сам решает, обновляться ли дальше */
   active: boolean;
+  /** Ждёт своей очереди — то есть его ещё можно отменить [OQ-207] */
+  cancellable: boolean;
   error: string | null;
   /** Файл, подготовленный заданием, — если он есть [OQ-202] */
   artifact: { fileName: string; rows: number; sha256: string } | null;
@@ -86,6 +88,7 @@ export function bulkJobView(job: BulkJobRow, m: Messages, artifact: { fileName: 
   const headline = job.status === 'SUCCEEDED' ? outcomeText(job, m)
     : job.status === 'FAILED' ? t.failed(errorTextOf(job, m))
     : job.status === 'PENDING' ? t.queued
+    : job.status === 'CANCELLED' ? t.cancelled
     : job.status === 'INTERRUPTED' ? t.interrupted
     : job.phase === 'APPLYING' ? t.applying(done, total)
     : job.phase === 'PRODUCING' ? t.producing(done, total)
@@ -96,12 +99,13 @@ export function bulkJobView(job: BulkJobRow, m: Messages, artifact: { fileName: 
    */
   const effect = job.status === 'SUCCEEDED' ? t.effectApplied
     : job.status === 'FAILED' ? t.effectNothing
+    : job.status === 'CANCELLED' ? t.effectNothing
     : job.status === 'INTERRUPTED' ? t.effectInterrupted
     : t.effectPending;
   return {
     jobId: job.jobId, kind: job.kind, status: job.status, title, headline,
     progress: total === null || total === 0 ? null : Math.min(1, done / total),
-    done, total, effect, active: ACTIVE.has(job.status),
+    done, total, effect, active: ACTIVE.has(job.status), cancellable: job.status === 'PENDING',
     error: job.status === 'FAILED' ? errorTextOf(job, m) : null,
     artifact, result: job.status === 'SUCCEEDED' ? job.result : null,
     startedAt: job.startedAt, finishedAt: job.finishedAt, attempts: job.attempts,
