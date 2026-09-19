@@ -594,7 +594,8 @@ export const STEP21_ROWS = [
       m(dropTrigger('zc_max_price_mass_edit_requires_mfa', 'tenant_data.max_price'), smoke('max_price of two offers in one transaction without a second factor (Р-88)')),
       m(replaceInFunction('tenant_data.bounds_mass_edit_requires_mfa()', 'IF offers > 1 THEN', 'IF false THEN'),
         smoke('min_price of two offers in one transaction without a second factor (Р-88)'), smoke('max_price of two offers in one transaction without a second factor (Р-88)')),
-      m(replaceInFunction('tenant_data.bounds_mass_edit_requires_mfa()', `WHERE b.tenant_id = NEW.tenant_id AND b.created_at = now() AND tenant_data.row_in_current_transaction(b.xmin)
+      // Шаг 31: страж считает один раз на оператор, и тенант берётся из таблицы переходов, а не из строки
+      m(replaceInFunction('tenant_data.bounds_mass_edit_requires_mfa()', `WHERE b.tenant_id = tenant AND b.created_at = now() AND tenant_data.row_in_current_transaction(b.xmin)
   ) edited;`, `WHERE false
   ) edited;`), smoke('min_price of one offer and max_price of another in one transaction without a second factor (Р-88)')),
       m(replaceInFunction('tenant_data.row_in_current_transaction(xid)', "= 'in progress'", "= 'committed'"),
