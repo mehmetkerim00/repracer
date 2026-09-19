@@ -1,10 +1,13 @@
 # CI [Р-84, Р-137]: всё — на чистой PostgreSQL; пропущенный, отложенный или отменённый тест — красная сборка (scripts/test-all.mjs).
 # Р-89: файл *.test.ts, не входящий в скрипт сборки, — красная сборка до запуска тестов. Данные синтетические.
 #
-# Р-137 (шаг 29): два задания, параллельные.
-#   fast — на каждый коммит: типы, юнит-тесты и всё, чему хватает PostgreSQL. Столько ждать разбора опечатки не жалко.
-#   full — при слиянии в main и по запросу (workflow_dispatch): сверх быстрого ещё мутационная проверка схемы [Р-95], брокер,
-#          ClickHouse и запуск развёртываний. Именно он отменялся по лимиту на шаге 28, когда всё было одним заданием.
+# Р-137 (шаг 29), задача E шага 30: три задания, параллельные.
+#   fast   — на каждый коммит: типы, юнит-тесты и всё, чему хватает PostgreSQL. Столько ждать разбора опечатки не жалко.
+#   guards — на каждый коммит: мутационная проверка КРИТИЧНЫХ защит [Р-95, OQ-203] — обе границы и пол маржи (Price Gate),
+#            проверка входов, диспетчер записей, роли подключения и второй фактор массового изменения. Отдельным заданием, а не
+#            внутри быстрого: она идёт около десяти минут, и быстрый прогон перестал бы быть быстрым.
+#   full   — при слиянии в main и по запросу (workflow_dispatch): сверх быстрого ещё ВСЯ мутационная проверка схемы, брокер,
+#            ClickHouse и запуск развёртываний. Именно он отменялся по лимиту на шаге 28, когда всё было одним заданием.
 # Что откладывается до полного прогона — названо поимённо в scripts/test-scopes.mjs, а не решается по имени файла.
 name: ci
 
@@ -49,8 +52,37 @@ jobs:
       - run: npm run typecheck
       - name: Tests without infrastructure beyond PostgreSQL (Р-137)
         run: node scripts/test-all.mjs --scope=fast
-      # Задача E шага 30 [OQ-203]: быстрый прогон не должен пропускать регрессию в защитах, которыми держится цена
-      - name: "Mutation check of the critical guards (Р-95, step 30 task E)"
+
+  # Задача E шага 30 [OQ-203]: быстрый прогон не должен пропускать регрессию в защитах, которыми держится цена
+  guards:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ['5432:5432']
+        options: >-
+          --shm-size=1g --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: postgres
+      REPRACER_PG_URL: postgres://svc_app@127.0.0.1:5432/repracer_eu
+      REPRACER_PG_ADMIN_URL: postgres://postgres@127.0.0.1:5432/postgres
+      REPRACER_PG_TEMPLATE: repracer_template
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
+      - run: npm ci
+      - name: Database — migrations, template, smoke tests of the schema
+        run: scripts/db/prepare.sh repracer_eu
+      - name: "Mutation check of the critical guards (Р-95, OQ-203)"
         run: node scripts/db/mutation-check.mjs --critical --jobs 3
 
   full:
