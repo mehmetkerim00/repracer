@@ -1,7 +1,7 @@
 import { createServer, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import {
-  boundsDiffView, boundsView, bulkJobsView, bulkJobView, can, channelNotes, complianceView, fingerprint, costImportView, currentStrategies, listQuery, MAX_SCOPES, OFFER_CHOICES, pageOf, parseListQuery, type ListQuery, discountCheckView, dangerousReport, decisionList, decisionTrace, describe, expandBoundsEdit, importTargets, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, scopeById, unitOf,
+  boundsDiffView, boundsView, bulkJobsView, bulkJobView, can, canCancelBulkJob, channelNotes, complianceView, fingerprint, costImportView, currentStrategies, listQuery, MAX_SCOPES, OFFER_CHOICES, pageOf, parseListQuery, type ListQuery, discountCheckView, dangerousReport, decisionList, decisionTrace, describe, expandBoundsEdit, importTargets, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, scopeById, unitOf,
   parseStrategyDraft, planStop, priceFeed, productList, rejectedView, REPORT_PERIODS_DAYS, stopView, strategiesView,
   type Locale, type Messages, type StandWorld, type StopTarget, type Viewer,
 } from '@repracer/console-model';
@@ -300,8 +300,13 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           return ok(priceFeed(world, m, query));
         }
         case 'dangerous': {
-          const days = Number(url.searchParams.get('days') ?? 7);
-          if (!(REPORT_PERIODS_DAYS as readonly number[]).includes(days)) return fail(400, 'BAD_PERIOD', s.badRequest);
+          /**
+           * Находка 14 ревью шага 29: строка запроса не превращается в число вручную — `Number` принимает `0x10`, `1e3` и
+           * пробелы по краям. Период сверяется со списком допустимых КАК СТРОКА, и разбора числа здесь нет вовсе.
+           */
+          const raw = url.searchParams.get('days') ?? String(REPORT_PERIODS_DAYS[1]);
+          const days = REPORT_PERIODS_DAYS.find((d) => String(d) === raw);
+          if (days === undefined) return fail(400, 'BAD_PERIOD', s.badRequest);
           return ok(dangerousReport(world, days, m));
         }
         // Р-123: отчёт по объявленным скидкам — каждая проверяется заново по текущей истории цен (исправления свёртки, поздние цены)
@@ -375,13 +380,14 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
      */
     if (screen === 'jobs' && param !== null && parts[5] === 'cancel') {
       /**
-       * Отменяет СВОЁ задание любой участник, ЧУЖОЕ — только тот, кто вправе менять цены (находка 3 ревью шага 31). Иначе
-       * оператор отменял бы подтверждённый вторым фактором импорт владельца, и тот видел бы «отменено, в базе ничего не
-       * изменено», не понимая, кто это сделал.
+       * Отменяет СВОЁ задание любой участник, ЧУЖОЕ — тот, кто имеет право на САМУ ЭТУ ОПЕРАЦИЮ (находка 3 ревью шага 31,
+       * задача D шага 32). Иначе оператор отменял бы подтверждённый вторым фактором импорт владельца, и тот видел бы
+       * «отменено, в базе ничего не изменено», не понимая, кто это сделал. Какое право у какого вида — `CANCEL_ACTION`.
        */
       const target = await live.store.bulkJob(world.tenantId, param);
       if (!target) return fail(404, 'JOB_NOT_FOUND', m.ui.jobs.notFound);
-      if (target.createdByMembershipId !== viewer.membershipId && !can(viewer.role, 'MANAGE_PRICING')) return fail(403, 'FORBIDDEN', s.forbidden);
+      const ownJob = target.createdByMembershipId === viewer.membershipId;
+      if (!canCancelBulkJob(viewer.role, target.kind, ownJob)) return fail(403, 'FORBIDDEN', s.forbidden);
       const outcome = await live.store.cancelBulkJob(world.tenantId, param, { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) });
       if (outcome === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
       if (outcome === 'NOT_WAITING') return fail(409, 'NOT_WAITING', m.ui.jobs.notWaiting);

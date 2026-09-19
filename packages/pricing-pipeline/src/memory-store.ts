@@ -1420,7 +1420,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     return job ? { ...job } : null;
   }
 
-  async saveBulkJobArtifact(_tenantId: string, jobId: string, artifact: BulkJobArtifact): Promise<void> {
+  async saveBulkJobArtifact(_tenantId: string, jobId: string, artifact: BulkJobArtifact, leaseOwner: string): Promise<void> {
     this.bulkArtifacts.set(jobId, { ...artifact });
   }
 

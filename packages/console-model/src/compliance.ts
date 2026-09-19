@@ -145,20 +145,19 @@ export function complianceView(world: StandWorld, announcements: readonly Discou
   };
 }
 
-/** Р-123: доказательная история цен — CSV с суммами в основных единицах; контрольную сумму считает сервер */
-export function priceEvidenceCsv(world: StandWorld, days: readonly PriceEvidenceDay[]): string {
-  const header = ['channel', 'marketplace', 'offer', 'day', 'time_zone', 'currency', 'price_basis', 'min_price', 'max_price', 'first_price', 'last_price', 'changes', 'source', 'corrected', 'correction_reason'];
+export const PRICE_EVIDENCE_HEADER = ['channel', 'marketplace', 'offer', 'day', 'time_zone', 'currency', 'price_basis', 'min_price', 'max_price', 'first_price', 'last_price', 'changes', 'source', 'corrected', 'correction_reason'];
+
+/**
+ * Р-123: доказательная история цен — строки с суммами в основных единицах. Файл из них собирает исполнитель заданий, он же
+ * экранирует значения и считает контрольную сумму [Р-145]: до шага 32 здесь лежала СВОЯ копия экранирования CSV, и правка
+ * находки 12 ревью шага 24 жила в ней отдельно от такой же правки в выгрузке ленты.
+ */
+export function priceEvidenceRows(world: StandWorld, days: readonly PriceEvidenceDay[]): string[][] {
   const decimal = (minor: number) => `${Math.trunc(minor / 100)}.${String(Math.abs(minor % 100)).padStart(2, '0')}`;
-  // Находка 12 ревью шага 24: значение, начинающееся с = + - @ или табуляции, электронная таблица выполнит как формулу — префикс апострофом
-  const quote = (raw: string) => {
-    const v = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
-    return /[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
-  };
-  const lines = days.map((d) => {
+  return days.map((d) => {
     const scope = scopeById(world, d.writeScopeId);
     const channel = scope ? world.accounts.find((a) => a.channelAccountId === scope.channelAccountId)?.channel ?? '' : '';
     return [channel, scope?.marketplace ?? '', scope?.externalUnitId ?? d.writeScopeId, d.day, d.timeZone, d.currency, d.basis, decimal(d.minMinor), decimal(d.maxMinor),
-      decimal(d.firstMinor), decimal(d.lastMinor), String(d.changes), d.source, d.corrected ? 'yes' : 'no', d.correctionReason ?? ''].map(quote).join(',');
+      decimal(d.firstMinor), decimal(d.lastMinor), String(d.changes), d.source, d.corrected ? 'yes' : 'no', d.correctionReason ?? ''];
   });
-  return `${[header.join(','), ...lines].join('\n')}\n`;
 }

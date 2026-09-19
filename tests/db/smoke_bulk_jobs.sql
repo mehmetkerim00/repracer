@@ -17,6 +17,7 @@
 \set j2 '''bf000000-0000-4000-8000-000000000002'''
 \set j3 '''bf000000-0000-4000-8000-000000000003'''
 \set j4 '''bf000000-0000-4000-8000-000000000004'''
+\set j5 '''bf000000-0000-4000-8000-000000000005'''
 
 -- Настройки сессии, а не транзакции: файл не обёрнут в одну транзакцию — фикстуры заданий нужны второй роли
 SELECT set_config('app.tenant_id', :tA, false), set_config('app.user_id', :owner, false) \gset
@@ -97,6 +98,9 @@ SELECT pg_temp.expect_fail('bulk job failed without a reason', format($q$
 -- Фикстуры для роли исполнителя: одно задание с ЧУЖОЙ живой арендой, одно завершённое, одно ожидающее
 INSERT INTO tenant_data.bulk_job (tenant_id, bulk_job_id, kind, params, created_by_membership_id, status, phase, finished_at, result)
 VALUES (:tA, :j3, 'PRICE_EVIDENCE', '{}'::jsonb, :ownerM, 'SUCCEEDED', 'DONE', now(), '{}'::jsonb);
+-- Шаг 32 [Р-145]: идущее задание вида, который файлов НЕ делает, — на нём проверяется третий страж файла
+INSERT INTO tenant_data.bulk_job (tenant_id, bulk_job_id, kind, params, created_by_membership_id, status, lease_owner, lease_until, started_at)
+VALUES (:tA, :j5, 'BOUNDS_EDIT', '{}'::jsonb, :ownerM, 'RUNNING', 'worker-one', now() + interval '30 minutes', now());
 DO $$ BEGIN RAISE NOTICE 'PASS accept | bulk job fixtures for the worker role (Р-139)'; END $$;
 
 -- --------------------------------------------------------------- OQ-207 (шаг 31): отмена и предел очереди
@@ -125,8 +129,8 @@ DO $$
 DECLARE
   i int;
 BEGIN
-  -- У владельца уже два ждущих задания (j1 и j2): добираем до его предела в пять
-  FOR i IN 1..3 LOOP
+  -- У владельца уже три незавершённых задания (ждущие j1 и j2, идущее j5): добираем до его предела в пять
+  FOR i IN 1..2 LOOP
     INSERT INTO tenant_data.bulk_job (tenant_id, kind, params, created_by_membership_id)
     VALUES ('a0000000-0000-0000-0000-00000000000a', 'PRICE_EVIDENCE', '{}'::jsonb, 'a2000000-0000-0000-0000-00000000000a');
   END LOOP;
@@ -180,22 +184,55 @@ SELECT pg_temp.expect_fail('a pending bulk job jumps straight to succeeded (Р-1
    WHERE bulk_job_id = 'bf000000-0000-4000-8000-000000000002' $q$, 'goes from PENDING to RUNNING');
 
 -- --------------------------------------------------------------- файл задания: имя, вид, контрольная сумма, число строк
+--
+-- Шаг 32 [Р-145]: контрольная сумма теперь СЧИТАЕТСЯ по содержимому, поэтому у проверок, целящих в другие защиты, она должна
+-- быть верной — иначе страж суммы перехватит чужую проверку и та зазеленеет не своей причиной [Р-99].
 SELECT pg_temp.expect_fail('artifact with an empty file name', $q$
   INSERT INTO tenant_data.bulk_job_artifact (tenant_id, bulk_job_id, file_name, content_type, content, sha256, rows_count)
-  VALUES ('a0000000-0000-0000-0000-00000000000a', 'bf000000-0000-4000-8000-000000000001', '', 'text/csv', 'a', repeat('0', 64), 1) $q$,
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'bf000000-0000-4000-8000-000000000001', '', 'text/csv', 'a',
+          encode(sha256(convert_to('a', 'UTF8')), 'hex'), 1) $q$,
   'bulk_job_artifact_file_name_check');
 SELECT pg_temp.expect_fail('artifact of a kind the console cannot show', $q$
   INSERT INTO tenant_data.bulk_job_artifact (tenant_id, bulk_job_id, file_name, content_type, content, sha256, rows_count)
-  VALUES ('a0000000-0000-0000-0000-00000000000a', 'bf000000-0000-4000-8000-000000000001', 'x.bin', 'application/octet-stream', 'a', repeat('0', 64), 1) $q$,
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'bf000000-0000-4000-8000-000000000001', 'x.bin', 'application/octet-stream', 'a',
+          encode(sha256(convert_to('a', 'UTF8')), 'hex'), 1) $q$,
   'bulk_job_artifact_content_type_check');
-SELECT pg_temp.expect_fail('artifact with a checksum that is not a SHA-256', $q$
-  INSERT INTO tenant_data.bulk_job_artifact (tenant_id, bulk_job_id, file_name, content_type, content, sha256, rows_count)
-  VALUES ('a0000000-0000-0000-0000-00000000000a', 'bf000000-0000-4000-8000-000000000001', 'x.csv', 'text/csv', 'a', 'not-a-checksum', 1) $q$,
-  'bulk_job_artifact_sha256_check');
 SELECT pg_temp.expect_fail('artifact with a negative row count', $q$
   INSERT INTO tenant_data.bulk_job_artifact (tenant_id, bulk_job_id, file_name, content_type, content, sha256, rows_count)
-  VALUES ('a0000000-0000-0000-0000-00000000000a', 'bf000000-0000-4000-8000-000000000001', 'x.csv', 'text/csv', 'a', repeat('0', 64), -1) $q$,
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'bf000000-0000-4000-8000-000000000001', 'x.csv', 'text/csv', 'a',
+          encode(sha256(convert_to('a', 'UTF8')), 'hex'), -1) $q$,
   'bulk_job_artifact_rows_count_check');
+
+-- --------------------------------------------------------------- Р-145: выгрузка идёт одним путём, и база это проверяет
+--
+-- Контрольная сумма, объявленная тем же кодом, который собрал файл, подтверждает только саму себя. Файл, собранный мимо
+-- единственного пути, с ней не сойдётся — и база его не примет.
+SELECT pg_temp.expect_fail('a file whose checksum does not match its content (Р-145)', $q$
+  INSERT INTO tenant_data.bulk_job_artifact (tenant_id, bulk_job_id, file_name, content_type, content, sha256, rows_count)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'bf000000-0000-4000-8000-000000000001', 'x.csv', 'text/csv', 'at,b',
+          encode(sha256(convert_to('a', 'UTF8')), 'hex'), 1) $q$,
+  'does not match its content');
+
+-- Файл кладётся только к СВОЕМУ идущему заданию: процесс, потерявший аренду, не дописывает его заданию, которое уже взял другой
+SELECT set_config('app.bulk_lease_owner', 'worker-two', false) \gset
+SELECT pg_temp.expect_fail('a file written to a job this process does not lease (Р-145)', $q$
+  INSERT INTO tenant_data.bulk_job_artifact (tenant_id, bulk_job_id, file_name, content_type, content, sha256, rows_count)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'bf000000-0000-4000-8000-000000000001', 'x.csv', 'text/csv', 'a',
+          encode(sha256(convert_to('a', 'UTF8')), 'hex'), 1) $q$,
+  'holds its live lease');
+SELECT set_config('app.bulk_lease_owner', 'worker-one', false) \gset
+
+-- Файл бывает только у вида задания, который файлы и делает: список один и назван в базе
+SELECT pg_temp.expect_fail('a file attached to a job kind that gives the seller no file (Р-145)', $q$
+  INSERT INTO tenant_data.bulk_job_artifact (tenant_id, bulk_job_id, file_name, content_type, content, sha256, rows_count)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'bf000000-0000-4000-8000-000000000005', 'x.csv', 'text/csv', 'a',
+          encode(sha256(convert_to('a', 'UTF8')), 'hex'), 1) $q$,
+  'does not give the seller a file');
+-- А своему виду — кладётся: страж запрещает не всё подряд
+SELECT pg_temp.ok('a file of a file-producing job is accepted (Р-145)', $q$
+  INSERT INTO tenant_data.bulk_job_artifact (tenant_id, bulk_job_id, file_name, content_type, content, sha256, rows_count)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'bf000000-0000-4000-8000-000000000001', 'evidence.csv', 'text/csv', 'a,b',
+          encode(sha256(convert_to('a,b', 'UTF8')), 'hex'), 1) $q$);
 
 -- Исполнитель не создаёт заданий и не меняет того, что решил человек [Р-90]
 SELECT pg_temp.expect_fail('the worker role creates a bulk job (Р-90)', $q$

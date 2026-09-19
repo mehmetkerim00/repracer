@@ -1,8 +1,8 @@
 import { buildPreview, readTable, suggestMapping, type ColumnMapping, type TableEncoding } from '@repracer/cost-import';
 import {
   boundsDiffView, costImportView, currentStrategies, expandBoundsEdit, importTargets, messagesFor, parseBoundsEditRequest,
-  parseStrategyDraft, priceEvidenceCsv, strategyPreviewView, STRATEGY_PREVIEW_ROWS_SHOWN, LOCALES,
-  costImportReportCsv, csvOf, parseFeedQuery, PRICE_FEED_CSV_HEADER, priceFeedFileName, priceFeedRows, priceFeedRowsOf,
+  parseStrategyDraft, PRICE_EVIDENCE_HEADER, priceEvidenceRows, strategyPreviewView, STRATEGY_PREVIEW_ROWS_SHOWN, LOCALES,
+  COST_IMPORT_REPORT_HEADER, costImportReportRows, parseFeedQuery, PRICE_FEED_CSV_HEADER, priceFeedFileName, priceFeedRows, priceFeedRowsOf,
   type ConsoleScope, type Locale, type StandWorld,
 } from '@repracer/console-model';
 import type { StrategyDefinition } from '@repracer/pricing-model';
@@ -10,7 +10,7 @@ import type { StrategyDefinition } from '@repracer/pricing-model';
 /** Стратегия предложения на момент предпросмотра — как её ждёт хранилище */
 type StrategyExpectation = { writeScopeId: string; strategyId: string | null; version: number | null };
 import type { BoundsEditInput, BulkJobRow, StrategyPreview } from '@repracer/pricing-pipeline';
-import { sha256, type BulkJobContext, type BulkJobHandlers, type BulkJobWork } from './index.ts';
+import type { BulkJobContext, BulkJobHandlers, BulkJobWork } from './index.ts';
 import type { BulkJobPhase } from '@repracer/pricing-pipeline';
 
 /**
@@ -33,24 +33,6 @@ export interface BulkJobWorldOptions {
 }
 
 const PROGRESS_STEP = 500;
-
-/**
- * Шаг 31: файл собирается ЧАСТЯМИ. Сборка 27 мегабайт строки в одном куске занимает десятки секунд процессорного времени, и
- * всё это время задание не может продлить аренду — его подбирает другой процесс, и выгрузка не заканчивается никогда.
- * Между частями зовётся `progress`, который отдаёт поток; заголовок остаётся только у первой части.
- */
-const CSV_CHUNK_ROWS = 20_000;
-async function buildCsvInChunks<T>(items: readonly T[], render: (chunk: readonly T[]) => string,
-  progress: (done: number, phase?: BulkJobPhase) => Promise<void>, total: number): Promise<string> {
-  if (items.length === 0) return render(items);
-  let csv = '';
-  for (let i = 0; i < items.length; i += CSV_CHUNK_ROWS) {
-    const part = render(items.slice(i, i + CSV_CHUNK_ROWS));
-    csv += i === 0 ? part : part.slice(part.indexOf('\n') + 1);
-    await progress(Math.min(Math.round(((i + CSV_CHUNK_ROWS) / items.length) * total), total), 'PRODUCING');
-  }
-  return csv;
-}
 
 /**
  * Язык задания — тот, на котором его создал человек [Р-72]. Задание работает без запроса, и взять язык ему больше неоткуда:
@@ -82,7 +64,7 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
       const view = costImportView(world, preview, { name: p.fileName, sheet, mapping }, suggested.suggestions, m);
       return {
         total: preview.apply.length + preview.skipped.length,
-        async run(progress) {
+        async run(progress, produce) {
           // Ход разбора: продавец видит, что файл читается, а не что «ничего не происходит»
           for (let done = 0; done < preview.apply.length; done += PROGRESS_STEP) await progress(Math.min(done, preview.apply.length));
           if (p.fingerprint !== undefined && p.fingerprint !== preview.fingerprint) throw Object.assign(new Error('plan changed'), { cause: 'PLAN_CHANGED' });
@@ -93,12 +75,10 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
            * писать его ПОСЛЕ значило расширить окно между «в базе уже применено» и «задание об этом знает»: процесс, убитый в
            * этом окне, оставлял бы применённую себестоимость при задании, которое говорит «в базе ничего не изменено».
            */
-          const report = preview.skipped.length > 0 ? costImportReportCsv(preview, m) : null;
-          if (report !== null) {
-            await ctx.store.saveBulkJobArtifact(ctx.tenantId, ctx.jobId, {
-              // Расширение исходной выгрузки отбрасывается: иначе отчёт по `report.csv` звался бы `import-report_report.csv.csv`
-              fileName: `import-report_${p.fileName.replace(/\.[^.]*$/, '').replace(/[^\w\-]/g, '_') || 'file'}.csv`, contentType: 'text/csv',
-              content: report, sha256: sha256(report), rows: preview.skipped.length,
+          if (preview.skipped.length > 0) {
+            await produce({
+              fileName: `import-report_${p.fileName}`,
+              header: COST_IMPORT_REPORT_HEADER, rows: costImportReportRows(preview, m),
             });
           }
           await progress(preview.apply.length, 'APPLYING');
@@ -114,7 +94,7 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
           /**
            * Р-142 (шаг 31): отчёт об импорте — ФАЙЛ, а не пять примеров на экране. На выгрузке в 10 000 строк с 1430
            * несопоставленными продавец по экрану не поймёт, какие строки чинить; с файлом он правит свою выгрузку и ввозит
-           * снова. Файл пишется после применения — вместе с тем, что применилось.
+           * снова.
            */
           return {
             rows: applied.rows, offers: applied.offers, skipped: preview.totals.skipped,
@@ -285,16 +265,11 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
       const total = priceFeedRows(world, m, query);
       return {
         total,
-        async run(progress) {
+        async run(progress, produce) {
           await progress(0, 'PRODUCING');
-          // Строки собираются ОДНИМ проходом, файл — частями с отдачей цикла событий: иначе аренда истечёт посреди сборки
+          // Строки собираются ОДНИМ проходом; файл из них делает исполнитель [Р-145]
           const rows = priceFeedRowsOf(world, m, query);
-          const csv = await buildCsvInChunks(rows, (chunk) => csvOf(PRICE_FEED_CSV_HEADER, chunk), progress, total);
-          const digest = sha256(csv);
-          await ctx.store.saveBulkJobArtifact(ctx.tenantId, ctx.jobId, {
-            fileName: priceFeedFileName(world, m, query), contentType: 'text/csv', content: csv, sha256: digest, rows: rows.length,
-          });
-          return { rows: rows.length, bytes: Buffer.byteLength(csv, 'utf8'), sha256: digest };
+          return { ...await produce({ fileName: priceFeedFileName(world, m, query), header: PRICE_FEED_CSV_HEADER, rows }) };
         },
       };
     },
@@ -309,23 +284,16 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
       const world = await options.world(ctx);
       return {
         total: world.state.scopes.length,
-        async run(progress) {
+        async run(progress, produce) {
           await progress(0, 'PRODUCING');
           const days = await ctx.store.priceEvidence(ctx.tenantId, {
             from: p.from, to: p.to, ...(p.writeScopeId ? { writeScopeIds: [p.writeScopeId] } : {}),
           });
-          /**
-           * Файл собирается частями: между ними поток отдаётся, иначе продление аренды не успевает сработать (шаг 31). Ход
-           * считается в ТЕХ ЖЕ единицах, что объявлен объём задания, — в предложениях: «300000 из 10000» не читается никак.
-           */
-          const scopes = world.state.scopes.length;
-          const csv = await buildCsvInChunks(days, (chunk) => priceEvidenceCsv(world, chunk), progress, scopes);
-          // Сумма считается ОДИН раз: на 27 мегабайтах два счёта — это две секунды процессора на ровном месте
-          const digest = sha256(csv);
-          await ctx.store.saveBulkJobArtifact(ctx.tenantId, ctx.jobId, {
-            fileName: `price-evidence_${p.from}_${p.to}.csv`, contentType: 'text/csv', content: csv, sha256: digest, rows: days.length,
-          });
-          return { rows: days.length, bytes: Buffer.byteLength(csv, 'utf8'), sha256: digest };
+          // Ход считается в ТЕХ ЖЕ единицах, что объявлен объём задания, — в предложениях: «300000 из 10000» не читается никак
+          return { ...await produce({
+            fileName: `price-evidence_${p.from}_${p.to}.csv`,
+            header: PRICE_EVIDENCE_HEADER, rows: priceEvidenceRows(world, days),
+          }) };
         },
       };
     },

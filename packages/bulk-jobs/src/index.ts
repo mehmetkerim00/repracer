@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { csvOf } from '@repracer/console-model';
 import type { BulkJobKind, BulkJobPhase, BulkJobRow, PricingStore } from '@repracer/pricing-pipeline';
 
 /**
@@ -12,11 +13,34 @@ import type { BulkJobKind, BulkJobPhase, BulkJobRow, PricingStore } from '@repra
  * 4. **Задание принадлежит тенанту**: исполнитель работает по одному тенанту за раз и читает только его очередь (RLS).
  */
 
+/**
+ * Р-145 (шаг 32): ФАЙЛ ОБЪЯВЛЯЕТСЯ, а не собирается. Обработчик отдаёт имя, заголовок и строки; байты из них делает
+ * исполнитель — он же экранирует значения, режет файл на части, отдаёт цикл событий, считает контрольную сумму и кладёт
+ * файл в базу.
+ *
+ * Причина в том, что было до: три обработчика собирали файл каждый по-своему, и второй сделал это хуже первого — выгрузка
+ * ленты собирала его целиком и квадратично, отчёт об импорте — целиком и синхронно, а доказательство несло собственную
+ * копию экранирования CSV, в которой правка находки 12 ревью шага 24 жила отдельно. Пока сборка была доступна обработчику,
+ * каждый новый вид выгрузки был новым шансом повторить уже исправленную ошибку.
+ */
+export interface BulkJobFile {
+  /** Имя файла для продавца; исполнитель приводит его к безопасному виду сам */
+  fileName: string;
+  header: readonly string[];
+  rows: readonly (readonly string[])[];
+}
+
+/** Что исполнитель сделал с объявленным файлом: числа для итога задания */
+export interface BulkJobFileResult { rows: number; bytes: number; sha256: string }
+
+/** Выдать файл. Другого способа получить файл у обработчика нет: хранилище выгрузки ему не видно [Р-145] */
+export type ProduceBulkJobFile = (file: BulkJobFile) => Promise<BulkJobFileResult>;
+
 export interface BulkJobWork {
   /** Сколько единиц предстоит обработать — чтобы ход был числом, а не «идёт» */
   total: number;
   /** Сама работа: одна транзакция хранилища. `progress` пишется отдельным соединением */
-  run(progress: (done: number, phase?: BulkJobPhase) => Promise<void>): Promise<Record<string, unknown>>;
+  run(progress: (done: number, phase?: BulkJobPhase) => Promise<void>, produce: ProduceBulkJobFile): Promise<Record<string, unknown>>;
 }
 
 /** Что задание умеет делать: вид → подготовка работы по параметрам, сохранённым при создании */
@@ -24,9 +48,16 @@ export type BulkJobHandlers = {
   [K in BulkJobKind]?: (job: BulkJobRow, ctx: BulkJobContext) => Promise<BulkJobWork>;
 };
 
+/**
+ * Хранилище, каким его видит обработчик: без сохранения файла [Р-145]. Это не договорённость, а ТИП — обработчик, решивший
+ * положить файл сам, не собирается. Правило «выгрузка идёт одним путём» проверяет то же самое по тексту, для случая, когда
+ * тип обойдут приведением.
+ */
+export type BulkJobStore = Omit<PricingStore, 'saveBulkJobArtifact'>;
+
 export interface BulkJobContext {
   tenantId: string;
-  store: PricingStore;
+  store: BulkJobStore;
   /** Задание называет себя базе: стражи массового изменения принимают второй фактор, предъявленный при его создании */
   jobId: string;
   /** Участник, создавший задание: его именем пишутся версии цен [Р-97] */
@@ -112,7 +143,26 @@ export async function runNextBulkJob(options: BulkJobRunnerOptions): Promise<{ j
       const kept = await store.updateBulkJobProgress(tenantId, job.jobId, owner, { ...(phase ? { phase } : {}), done, total: work.total, leaseSeconds });
       if (kept === false) leaseLost = true;
     };
-    const result = await work.run(progress);
+    /**
+     * Единственный путь выгрузки [Р-145]. Здесь и только здесь строки становятся файлом: части по CSV_CHUNK_ROWS строк с
+     * отдачей цикла событий между ними (иначе сборка 27 МБ занимает поток целиком и продление аренды не успевает сработать —
+     * шаг 31), одно вычисление контрольной суммы, одно приведение имени файла к безопасному виду, одна запись в базу.
+     */
+    const produce: ProduceBulkJobFile = async (file) => {
+      let content = '';
+      if (file.rows.length === 0) content = csvOf(file.header, file.rows);
+      for (let i = 0; i < file.rows.length; i += CSV_CHUNK_ROWS) {
+        const part = csvOf(file.header, file.rows.slice(i, i + CSV_CHUNK_ROWS));
+        content += i === 0 ? part : part.slice(part.indexOf('\n') + 1);
+        await progress(Math.min(Math.round(((i + CSV_CHUNK_ROWS) / file.rows.length) * work.total), work.total), 'PRODUCING');
+      }
+      const digest = sha256(content);
+      await store.saveBulkJobArtifact(tenantId, job.jobId, {
+        fileName: safeFileName(file.fileName), contentType: 'text/csv', content, sha256: digest, rows: file.rows.length,
+      }, owner);
+      return { rows: file.rows.length, bytes: Buffer.byteLength(content, 'utf8'), sha256: digest };
+    };
+    const result = await work.run(progress, produce);
     const finished = await store.finishBulkJob(tenantId, job.jobId, owner, { status: 'SUCCEEDED', result });
     /**
      * Итог не записался — значит аренду отобрали, пока шла работа (находка 3 ревью шага 30). Молчать нельзя: процесс СДЕЛАЛ
@@ -146,3 +196,20 @@ function errorCodeOf(error: unknown): string {
 
 /** Контрольная сумма файла задания: продавец сверяет её с файлом, который скачал [Р-123] */
 export const sha256 = (content: string): string => createHash('sha256').update(content).digest('hex');
+
+/**
+ * Шаг 31: файл собирается ЧАСТЯМИ. Сборка 27 мегабайт строки одним куском занимает десятки секунд процессорного времени, и
+ * всё это время задание не может продлить аренду — его подбирает другой процесс, и выгрузка не заканчивается никогда.
+ */
+const CSV_CHUNK_ROWS = 20_000;
+
+/**
+ * Имя файла приводится к безопасному виду ОДИН раз и здесь [Р-145]: до шага 32 каждый обработчик делал это сам, и отчёт об
+ * импорте звался `import-report_report.csv.csv` — расширение исходной выгрузки удваивалось.
+ */
+function safeFileName(raw: string): string {
+  const dot = raw.lastIndexOf('.');
+  const name = (dot > 0 ? raw.slice(0, dot) : raw).replace(/[^\w\-]/g, '_').slice(0, 150) || 'file';
+  const ext = (dot > 0 ? raw.slice(dot + 1) : 'csv').replace(/[^\w]/g, '').slice(0, 10) || 'csv';
+  return `${name}.${ext}`;
+}

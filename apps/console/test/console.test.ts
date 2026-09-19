@@ -733,6 +733,149 @@ test('Р-142: ни один экран консоли не ведёт ссылк
 });
 
 /**
+ * Р-145 (шаг 32): выгрузка файла имеет ОДИН путь. Строки превращает в файл, режет его на части, считает контрольную сумму,
+ * приводит имя к безопасному виду и кладёт в базу только исполнитель заданий (`packages/bulk-jobs/src/index.ts`).
+ *
+ * Правило нужно потому, что обратное уже случилось: шаг 31 починил сборку файла для доказательства Omnibus — и в том же шаге
+ * новый обработчик выгрузки ленты собрал файл заново, синхронно и квадратично (находка 1 ревью шага 31). Когда два
+ * обработчика решают одну задачу по-своему, второй решает её хуже. Тип это уже запрещает — хранилище выгрузки обработчику не
+ * видно, — а правило ловит обход типа приведением и сборку файла где угодно ещё.
+ */
+test('Р-145: файл собирается ровно в одном месте — обработчик отдаёт строки, а не байты', async () => {
+  const { readdirSync, readFileSync, statSync } = await import('node:fs');
+  /** Единственное место, которому это можно: исполнитель заданий. Всё остальное — нарушители */
+  const THE_ONE_PATH = 'packages/bulk-jobs/src/index.ts';
+  /**
+   * Что запрещено: положить файл задания в базу, превратить строки в CSV и посчитать контрольную сумму файла. Вместе это и
+   * есть «собрать выгрузку»; порознь любое из трёх означает, что рядом растёт второй путь.
+   */
+  const BUILDS_A_FILE = /\.\s*saveBulkJobArtifact\s*\(|(?<!function\s)\bcsvOf\s*\(/;
+  // У правила должны быть зубы [Р-94]: оно обязано находить ровно тот код, который шаг 32 из обработчиков и убрал
+  for (const bad of [
+    `await ctx.store.saveBulkJobArtifact(ctx.tenantId, ctx.jobId, { fileName, content: csv });`,
+    `const csv = await buildCsvInChunks(rows, (chunk) => csvOf(PRICE_FEED_CSV_HEADER, chunk), progress, total);`,
+  ]) assert.match(bad, BUILDS_A_FILE, `правило обязано ловить: ${bad.slice(0, 60)}`);
+  /**
+   * Чего правило ловить не должно: ОБЪЯВИТЬ выгрузку — не значит собрать файл. Хранилище обязано уметь класть файл, а
+   * отрисовщик — существовать; запрещено ЗВАТЬ их мимо единственного пути.
+   */
+  for (const fine of [
+    `return { ...await produce({ fileName, header: PRICE_FEED_CSV_HEADER, rows }) };`,
+    `export function priceFeedRowsOf(world: StandWorld, m: Messages, query: FeedQuery): string[][] {`,
+    `export function csvOf(header: readonly string[], rows: readonly (readonly string[])[]): string {`,
+    `async saveBulkJobArtifact(tenantId: string, jobId: string, artifact: BulkJobArtifact): Promise<void> {`,
+  ]) assert.doesNotMatch(fine, BUILDS_A_FILE, `правило не должно ловить: ${fine.slice(0, 60)}`);
+
+  const root = new URL('../../../', import.meta.url);
+  const sources: string[] = [];
+  const walk = (rel: string) => {
+    for (const name of readdirSync(new URL(rel, root))) {
+      if (name === 'node_modules' || name === '.git' || name === 'dist') continue;
+      const child = `${rel}${name}`;
+      if (statSync(new URL(child, root)).isDirectory()) walk(`${child}/`);
+      // Тесты собирают файл, чтобы проверить его содержимое, — это чтение проверяемого, а не второй путь выгрузки
+      else if (/\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name)) sources.push(child);
+    }
+  };
+  for (const dir of ['packages/', 'apps/', 'services/']) walk(dir);
+  assert.ok(sources.length > 100, `правило обязано смотреть на весь код, а не на пустой список: ${sources.length}`);
+
+  const offenders = sources.filter((f) => f !== THE_ONE_PATH && BUILDS_A_FILE.test(readFileSync(new URL(f, root), 'utf8')));
+  assert.deepEqual(offenders, [], 'второй путь сборки файла: он разойдётся с первым, и исправление одного не дойдёт до другого [Р-145]');
+  // И сам единственный путь существует: правило, которому нечего охранять, зеленеет на пустом месте
+  assert.match(readFileSync(new URL(THE_ONE_PATH, root), 'utf8'), BUILDS_A_FILE, 'единственный путь выгрузки на месте');
+});
+
+/**
+ * Р-146 (шаг 32): правила, выросшие из находок ревью шагов 29–31. Находку закрывает не только исправление — иначе следующий
+ * экран и следующий обработчик повторят её, и поймает это опять ревьюер, то есть случайно.
+ */
+test('Р-146: сервер консоли не превращает строку запроса в число сам (находка 14 ревью шага 29)', async () => {
+  const { readFileSync } = await import('node:fs');
+  /**
+   * `Number('0x10')` — это 16, `Number('1e3')` — 1000, `Number(' 5 ')` — 5. Разбор числа из запроса живёт в одном месте
+   * (`parseListQuery`, строгая `/^\d{1,9}$/`), а не в каждом обработчике.
+   */
+  const PARSES_A_NUMBER = /(?:Number|parseInt|parseFloat)\s*\(\s*(?:url\.)?searchParams/;
+  for (const bad of [
+    `const days = Number(url.searchParams.get('days') ?? 7);`,
+    `const n = parseInt(searchParams.get('limit')!, 10);`,
+  ]) assert.match(bad, PARSES_A_NUMBER, `правило обязано ловить: ${bad.slice(0, 50)}`);
+  for (const fine of [
+    `const days = REPORT_PERIODS_DAYS.find((d) => String(d) === raw);`,
+    `const query = parseListQuery(url.searchParams);`,
+  ]) assert.doesNotMatch(fine, PARSES_A_NUMBER, `правило не должно ловить: ${fine.slice(0, 50)}`);
+
+  const server = readFileSync(new URL('../server/stand-server.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(server, PARSES_A_NUMBER, 'обработчик разбирает число из строки запроса сам: `0x10` и `1e3` пройдут');
+});
+
+/**
+ * Находка 11 ревью шага 30: «прервано» решалось часами КОНСОЛИ — задание объявлялось брошенным по времени машины, которая
+ * его показывает, а не по времени базы, которая держит аренду. Модели экранов вообще не должны знать, «который час».
+ */
+test('Р-146: модели экранов не читают часы машины (находка 11 ревью шага 30)', async () => {
+  const { readdirSync, readFileSync } = await import('node:fs');
+  const READS_THE_CLOCK = /Date\s*\.\s*now\s*\(\s*\)|new\s+Date\s*\(\s*\)/;
+  for (const bad of ['const interrupted = Date.now() > leaseUntil;', 'const today = new Date();']) {
+    assert.match(bad, READS_THE_CLOCK, `правило обязано ловить: ${bad}`);
+  }
+  for (const fine of ['const today = new Date(job.finishedAt);', 'if (job.leaseExpired) return "INTERRUPTED";']) {
+    assert.doesNotMatch(fine, READS_THE_CLOCK, `правило не должно ловить: ${fine}`);
+  }
+  const dir = new URL('../../../packages/console-model/src/', import.meta.url);
+  const offenders = readdirSync(dir).filter((f) => /\.ts$/.test(f) && !/\.test\.ts$/.test(f))
+    .filter((f) => READS_THE_CLOCK.test(readFileSync(new URL(f, dir), 'utf8')));
+  assert.deepEqual(offenders, [], 'модель экрана читает часы машины: состояние задания станет зависеть от часов браузера');
+});
+
+/**
+ * Р-147 (шаг 32): итог задания не едет в СПИСКЕ заданий. У плана правки каталога в итоге лежат 10 000 правок — около
+ * мегабайта; двадцать таких заданий в списке дают десятки мегабайт при пределе экрана 8 МБ, а экран истории опрашивает
+ * список раз в секунду (находка 4 ревью шага 31).
+ *
+ * Проверяется поведением: списку дают задание с большим итогом и смотрят, что от итога в ответе не осталось ничего.
+ */
+test('Р-147: список заданий не несёт их итогов', async () => {
+  const { bulkJobsView, messagesFor } = await import('@repracer/console-model');
+  const secret = 'ROWS-THAT-MUST-NOT-TRAVEL';
+  const job = {
+    jobId: '11111111-1111-1111-1111-111111111111', kind: 'BOUNDS_PLAN', status: 'SUCCEEDED',
+    doneItems: 10_000, totalItems: 10_000, phase: 'PRODUCING', attempts: 1,
+    createdAt: '2026-09-19T10:00:00.000Z', startedAt: '2026-09-19T10:00:01.000Z', finishedAt: '2026-09-19T10:00:09.000Z',
+    createdByMembershipId: 'm', createdByUserId: 'u', createdWithMfa: false, leaseExpired: false, errorCode: null,
+    params: {}, result: { view: { headline: 'x' }, edits: Array.from({ length: 10_000 }, () => secret) },
+  } as never;
+  const list = JSON.stringify(bulkJobsView([job], messagesFor('de'), new Map()));
+  assert.ok(!list.includes(secret), 'итог задания уехал в список: на каталоге это десятки мегабайт раз в секунду');
+  assert.ok(list.includes('SUCCEEDED') && list.includes('10000'), `состояние и ход в списке остаются: ${list.slice(0, 160)}`);
+});
+
+/**
+ * Задача D шага 32: чужое задание отменяет тот, кто имеет право на САМУ ЭТУ ОПЕРАЦИЮ. До шага 32 право было одно на все виды
+ * — «менять цены»: наблюдатель не мог отменить даже чужую выгрузку, которая ничего не меняет, а различие между «отменить
+ * подтверждённый вторым фактором импорт» и «отменить чей-то отчёт» не выражалось вовсе.
+ */
+test('Р-143, задача D: право на отмену чужого задания — право на его вид операции', async () => {
+  const { canCancelBulkJob, CANCEL_ACTION } = await import('@repracer/console-model');
+  const KINDS = ['COST_IMPORT', 'BOUNDS_EDIT', 'BOUNDS_PLAN', 'STRATEGY_ASSIGN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT'] as const;
+  // Вид задания без решения о праве существовать не может: перечисление полное [Р-146]
+  assert.deepEqual(Object.keys(CANCEL_ACTION).sort(), [...KINDS].sort(), 'у каждого вида задания названо право на его отмену');
+
+  // СВОЁ задание отменяет любой участник — в том числе тот, кому эта операция недоступна
+  for (const kind of KINDS) assert.equal(canCancelBulkJob('VIEWER', kind, true), true, `своё задание ${kind}`);
+
+  /**
+   * Чужое: меняющее цены задание наблюдатель не отменяет, а чужую выгрузку — отменяет. Второе и есть разница, появившаяся на
+   * шаге 32: прежнее общее право «менять цены» запрещало бы и её.
+   */
+  assert.equal(canCancelBulkJob('VIEWER', 'COST_IMPORT', false), false, 'чужой импорт себестоимости наблюдателю не отменить');
+  assert.equal(canCancelBulkJob('OPERATOR', 'BOUNDS_EDIT', false), false, 'чужую массовую правку границ оператору не отменить');
+  assert.equal(canCancelBulkJob('VIEWER', 'PRICE_EVIDENCE', false), true, 'чужая выгрузка ничего не меняет — её отменяет любой участник');
+  assert.equal(canCancelBulkJob('PRICING_MANAGER', 'COST_IMPORT', false), true, 'у менеджера цен право на эту операцию есть');
+});
+
+/**
  * OQ-207 (ревью шага 30, находка 12), шаг 31: ошибочно запущенная массовая операция останавливалась только ожиданием, а
  * очередь тенанта ничем не ограничивалась — один участник мог задержать всех остальных. Проверяется то, что видит продавец:
  * ждущее задание отменяется, идущее — нет, и очередь имеет названный предел.
@@ -774,8 +917,13 @@ test('OQ-207: ждущее задание отменяется, идущее —
   // Место освобождается отменой — ровно то, ради чего она и нужна
   assert.equal((await call(owner, 'POST', api(id, 'jobs', queued[0]!, 'cancel'))).status, 200);
   assert.equal((await call(owner, 'POST', api(id, 'compliance', 'evidence'), { from: '2026-01-01', to: '2026-01-31' })).status, 200);
-  // Чужое задание отменяет только тот, кто вправе менять цены: зритель — нет [находка 3 ревью шага 31]
+  /**
+   * Чужое задание отменяет тот, у кого есть право на ЭТУ операцию (задача D шага 32). Выгрузка доказательства ничего не
+   * меняет, её право — просмотр, и чужую выгрузку отменяет любой участник; на импорте себестоимости тот же зритель получил бы
+   * отказ. Обе стороны перечислены в проверке «право на отмену — право на вид операции» выше по файлу.
+   */
   const byViewer = await call(viewer, 'POST', api(id, 'jobs', queued[1]!, 'cancel'));
-  assert.deepEqual([byViewer.status, (byViewer.body as { error: { code: string } }).error.code], [403, 'FORBIDDEN']);
+  assert.equal(byViewer.status, 200, `чужая выгрузка ничего не меняет: ${JSON.stringify(byViewer.body)}`);
+  assert.equal((byViewer.body as BulkJobView).status, 'CANCELLED');
   await runPendingJobs(live);
 });

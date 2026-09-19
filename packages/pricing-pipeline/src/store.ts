@@ -550,7 +550,11 @@ export interface PricingStore {
   /** Готовые файлы названных заданий — без содержимого: список заданий показывает, к какому из них можно вернуться */
   bulkJobArtifactSummaries(tenantId: string, jobIds: readonly string[]): Promise<Map<string, { fileName: string; rows: number; sha256: string }>>;
   bulkJob(tenantId: string, jobId: string): Promise<BulkJobRow | null>;
-  saveBulkJobArtifact(tenantId: string, jobId: string, artifact: BulkJobArtifact): Promise<void>;
+  /**
+   * Р-145 (шаг 32): файл кладётся ПОД АРЕНДОЙ. Процесс называет базе свою аренду, и база отказывает, если задание уже взял
+   * другой: иначе потерявший аренду процесс дописывает файл чужому заданию, и оно об этом не знает.
+   */
+  saveBulkJobArtifact(tenantId: string, jobId: string, artifact: BulkJobArtifact, leaseOwner: string): Promise<void>;
   bulkJobArtifact(tenantId: string, jobId: string): Promise<BulkJobArtifact | null>;
   /**
    * OQ-207: отменить ОЖИДАЮЩЕЕ задание. Идущее применение не отменяется: оно целиком или никак [Р-134], и «отмена» на полпути

@@ -1096,7 +1096,7 @@ export const STEP30_ROWS = [
       // Файл задания [OQ-202]: продавец сверяет контрольную сумму с тем, что скачал
       m(dropConstraint('bulk_job_artifact_file_name_check', 'tenant_data.bulk_job_artifact'), smoke('artifact with an empty file name')),
       m(dropConstraint('bulk_job_artifact_content_type_check', 'tenant_data.bulk_job_artifact'), smoke('artifact of a kind the console cannot show')),
-      m(dropConstraint('bulk_job_artifact_sha256_check', 'tenant_data.bulk_job_artifact'), smoke('artifact with a checksum that is not a SHA-256')),
+      // Шаг 32 [Р-104]: проверка формата суммы удалена как дубль — страж Р-145 требует не «похоже на сумму», а «эта сумма этого файла»
       m(dropConstraint('bulk_job_artifact_rows_count_check', 'tenant_data.bulk_job_artifact'), smoke('artifact with a negative row count')),
       /**
        * OQ-207 (шаг 31): отмена и предел очереди. Отмена — административная запись ЧЕЛОВЕКА: у неё автор и строка аудита, как
@@ -1149,6 +1149,42 @@ export const STEP30_ROWS = [
         "IF security.second_factor_present(ARRAY['PRICE_EVIDENCE']) THEN RETURN NULL; END IF;"),
         node(T('cost-import.pg.test.ts'), 'не открывает гардрейл уровня тенанта',
           'гардрейл всего тенанта требует второго фактора человека', '^accepted$')),
+    ],
+  },
+
+];
+
+/**
+ * Шаг 32 [Р-145]: выгрузка идёт ОДНИМ путём, и база это проверяет. До шага 32 у таблицы файлов задания не было ни одной
+ * защиты: файл клался любому заданию, с любой контрольной суммой, любому виду задания. Каждый страж снимается своей мутацией.
+ */
+export const STEP32_ROWS = [
+  {
+    row: 'Р-145', critical: true,
+    invariant: 'файл задания собирается одним путём: контрольную сумму считает база, файл кладётся к своему идущему заданию и только у вида, который файлы делает',
+    mutations: [
+      // Сумма, объявленная тем же кодом, который собрал файл, подтверждает только себя: база считает её сама
+      m(dropTrigger('a_bulk_job_artifact_digest_matches', 'tenant_data.bulk_job_artifact'),
+        smoke('a file whose checksum does not match its content (Р-145)')),
+      // Файл кладётся к СВОЕМУ идущему заданию: процесс, потерявший аренду, не дописывает чужое
+      m(replaceInFunction('tenant_data.bulk_job_artifact_own_job()',
+        "IF j.status <> 'RUNNING' OR j.lease_until <= now()\n     OR j.lease_owner IS DISTINCT FROM nullif(current_setting('app.bulk_lease_owner', true), '') THEN",
+        'IF false THEN'),
+        smoke('a file written to a job this process does not lease (Р-145)')),
+      // Файл бывает только у вида задания, который файлы и делает
+      m(replaceInFunction('tenant_data.bulk_job_artifact_own_job()',
+        'IF j.kind NOT IN (SELECT k FROM security.file_producing_job_kinds() AS k) THEN', 'IF false THEN'),
+        smoke('a file attached to a job kind that gives the seller no file (Р-145)')),
+      // Сам список видов, отдающих файл: добавить в него вид, который файлов не делает, — снять страж для него
+      m(replaceInFunction('security.file_producing_job_kinds()', "ARRAY['COST_IMPORT', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT']",
+        "ARRAY['COST_IMPORT', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT', 'BOUNDS_EDIT']"),
+        smoke('a file attached to a job kind that gives the seller no file (Р-145)')),
+      /**
+       * Правило 14д: список называет вид, которого нет. Опечатка молча выводит вид из-под правила, и ни один тест её не
+       * заметит — каждый смотрит на свой вид. Ловит это только проверка схемы.
+       */
+      m(replaceInFunction('security.file_producing_job_kinds()', "'PRICE_FEED_EXPORT'", "'PRICE_FEED_EXPORTS'"),
+        verify('names a bulk job kind that does not exist: PRICE_FEED_EXPORTS')),
     ],
   },
 ];

@@ -1250,7 +1250,7 @@ export class PgPricingStore implements PricingStore {
   }
 
   /** Файл, подготовленный заданием: доказательная история цен [OQ-202] */
-  async saveBulkJobArtifact(tenantId: string, jobId: string, artifact: BulkJobArtifact): Promise<void> {
+  async saveBulkJobArtifact(tenantId: string, jobId: string, artifact: BulkJobArtifact, leaseOwner: string): Promise<void> {
     await inTenant(this.bulkWorker('saveBulkJobArtifact'), tenantId, async (tx) => {
       await tx.query(
         /**
@@ -1263,7 +1263,7 @@ export class PgPricingStore implements PricingStore {
             SET file_name = excluded.file_name, content_type = excluded.content_type, content = excluded.content,
                 sha256 = excluded.sha256, rows_count = excluded.rows_count, created_at = now()`,
         [tenantId, jobId, artifact.fileName, artifact.contentType, artifact.content, artifact.sha256, artifact.rows]);
-    });
+    }, undefined, { leaseOwner });
   }
 
   async bulkJobArtifact(tenantId: string, jobId: string): Promise<BulkJobArtifact | null> {

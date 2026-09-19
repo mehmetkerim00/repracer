@@ -21,19 +21,19 @@ const quote = (raw: string): string => {
 const csv = (header: readonly string[], rows: readonly (readonly string[])[]): string =>
   `${[header.join(','), ...rows.map((r) => r.map(quote).join(','))].join('\n')}\n`;
 
+export const COST_IMPORT_REPORT_HEADER = ['line', 'offer_key', 'raw_value', 'problem', 'problem_text'];
+
 /**
  * Отчёт об импорте себестоимости [Р-134]: КАЖДАЯ строка, которая не применилась, с её причиной. Экран показывает по пять
  * примеров на причину — на выгрузке в 10 000 строк с 1430 несопоставленными (замер шага 28) продавец по экрану не поймёт,
  * какие именно строки чинить. Причина названа на языке продавца, номер строки — как в его файле.
  */
-export function costImportReportCsv(preview: ImportPreview, m: Messages): string {
+export function costImportReportRows(preview: ImportPreview, m: Messages): string[][] {
   const t = m.ui.costImport;
-  const header = ['line', 'offer_key', 'raw_value', 'problem', 'problem_text'];
-  const rows: string[][] = preview.skipped.map((r) => [
+  return preview.skipped.map((r) => [
     String(r.line), r.offerKey, r.raw ?? '', r.problem ?? '',
     (r.problem ? t.problems[r.problem as keyof typeof t.problems] : undefined) ?? r.problem ?? '',
   ]);
-  return csv(header, rows);
 }
 
 /**
@@ -64,15 +64,13 @@ export function priceFeedRowsOf(world: StandWorld, m: Messages, query: FeedQuery
 export const PRICE_FEED_CSV_HEADER = ['at', 'channel', 'marketplace', 'offer', 'price_from', 'price_to', 'change', 'status', 'source', 'reason', 'decision_id'];
 
 /**
- * Выгрузка ленты цен [Р-136]: что мы отправляли каналу за период и что с этим стало. Экран отдаёт страницу не больше 200
- * записей — за 30 суток по каталогу их сотни тысяч, и по страницам их не читают. Строки — те же, что на экране, в том же
- * порядке: файл не должен расходиться с тем, что продавец видел.
+ * Р-145 (шаг 32): ЕДИНСТВЕННОЕ место, где строки превращаются в файл. Звать его вправе только исполнитель заданий — то есть
+ * один путь выгрузки на всю систему (`apps/console/test/console.test.ts`, правило «выгрузка идёт одним путём»).
+ *
+ * Своей сборки файла больше нет ни у одного обработчика: до шага 32 их было три, и они разошлись — выгрузка ленты собирала
+ * файл целиком и квадратично, отчёт об импорте — целиком и синхронно, доказательство несло собственную копию экранирования
+ * CSV. Обработчик теперь отдаёт СТРОКИ и не может собрать из них байты.
  */
-export function priceFeedCsv(world: StandWorld, m: Messages, query: FeedQuery): string {
-  return csv(PRICE_FEED_CSV_HEADER, priceFeedRowsOf(world, m, query));
-}
-
-/** Готовые строки в CSV — для сборки файла частями, с отдачей цикла событий между ними */
 export function csvOf(header: readonly string[], rows: readonly (readonly string[])[]): string {
   return csv(header, rows);
 }

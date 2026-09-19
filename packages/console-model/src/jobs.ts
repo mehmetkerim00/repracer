@@ -1,5 +1,30 @@
+import { can, type MemberRole, type PricingAction } from '@repracer/pricing-model';
 import type { BulkJobKind, BulkJobRow, BulkJobStatus } from '@repracer/pricing-pipeline';
 import type { Messages } from './i18n/index.ts';
+
+/**
+ * Шаг 32, задача D: ЧУЖОЕ задание отменяет тот, кто имеет право на САМУ ЭТУ ОПЕРАЦИЮ, а не тот, у кого есть одно общее право
+ * на цены. Это Р-143 с другой стороны: право относится к виду операции — и отмена массового импорта, подтверждённого вторым
+ * фактором, не должна стоить столько же, сколько отмена чужой выгрузки, которая ничего не меняет.
+ *
+ * Перечисление полное по типу: новый вид задания не соберётся, пока не сказано, чьё это право. Это и есть правило [Р-146] —
+ * забыть решить нельзя, можно только решить неверно.
+ */
+export const CANCEL_ACTION: Readonly<Record<BulkJobKind, PricingAction>> = {
+  COST_IMPORT: 'MANAGE_PRICING',
+  BOUNDS_EDIT: 'MANAGE_PRICING',
+  STRATEGY_ASSIGN: 'MANAGE_PRICING',
+  // Ничего не меняющие виды [Р-143]: их операция — просмотр, и право на отмену чужой такой работы — тоже просмотр
+  BOUNDS_PLAN: 'VIEW_PRICING',
+  STRATEGY_PREVIEW: 'VIEW_PRICING',
+  PRICE_EVIDENCE: 'VIEW_PRICING',
+  PRICE_FEED_EXPORT: 'VIEW_PRICING',
+};
+
+/** СВОЁ задание отменяет любой участник; чужое — по праву на его вид операции */
+export function canCancelBulkJob(role: MemberRole, kind: BulkJobKind, own: boolean): boolean {
+  return own || can(role, CANCEL_ACTION[kind]);
+}
 
 /**
  * Р-139 (шаг 30): экран массовой операции. Продавец нажал «применить» — и дальше смотрит на ХОД, а не на крутящийся индикатор
