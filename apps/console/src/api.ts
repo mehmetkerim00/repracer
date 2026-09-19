@@ -31,6 +31,16 @@ export function setAccessToken(token: string | null): void {
   accessToken = token;
 }
 
+/**
+ * База адресов API. В браузере она пустая: страница ходит к своему же источнику. Задаёт её только стенд, когда консольный
+ * КЛИЕНТ работает вне браузера — в живом прогоне [Р-142]: прогон обязан ходить тем же кодом, которым ходит страница, иначе он
+ * выдаёт себе заголовки, которых браузер не шлёт.
+ */
+let apiOrigin = '';
+export function setApiOrigin(origin: string): void {
+  apiOrigin = origin;
+}
+
 export type Resource<T> =
   | { state: 'loading'; startedAt: number }
   | { state: 'ready'; data: T }
@@ -47,7 +57,7 @@ export async function requestJson<T>(path: string, init: { method?: 'GET' | 'POS
   const forward = () => controller.abort();
   outer?.addEventListener('abort', forward, { once: true });
   try {
-    const response = await fetch(withLocale(path, init.locale), {
+    const response = await fetch(`${apiOrigin}${withLocale(path, init.locale)}`, {
       method: init.method ?? 'GET',
       credentials: 'same-origin',
       headers: {
@@ -95,15 +105,6 @@ export function useResource<T>(path: string, locale: Locale): [Resource<T>, () =
   return [resource, retry];
 }
 
-/**
- * База адресов API. В браузере она пустая: страница ходит к своему же источнику. Задаёт её только стенд, когда консольный
- * КЛИЕНТ работает вне браузера — в живом прогоне [Р-142]: прогон обязан ходить тем же кодом, которым ходит страница, иначе он
- * выдаёт себе заголовки, которых браузер не шлёт.
- */
-let apiOrigin = '';
-export function setApiOrigin(origin: string): void {
-  apiOrigin = origin;
-}
 
 export interface FetchedFile {
   fileName: string;
