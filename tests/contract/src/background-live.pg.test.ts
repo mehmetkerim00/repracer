@@ -76,7 +76,13 @@ before(async () => {
   const ch = await startFakeClickHouse();
   fakeClickHouse = ch;
   // Прогон кончается «сейчас» и захватывает границу суток UTC: выгрузка суток идёт в 00:30
-  const endMs = Math.floor(Date.now() / 60_000) * 60_000;
+  /**
+   * Окно трёх виртуальных часов не пересекает полночь UTC: секции журнала снимков — по суткам UTC, и при переходе через полночь
+   * текущие сутки становились «завершёнными», а выгрузка уносила в аналитический слой снимки самого прогона (1779 строк вместо
+   * трёх посеянных). Тест краснел в зависимости от часа запуска — в CI это каждый прогон после полуночи UTC (шаг 29).
+   */
+  let endMs = Math.floor(Date.now() / HOUR) * HOUR;
+  while (new Date(endMs).getUTCHours() < 3) endMs -= HOUR;
   const startMs = endMs - 3 * HOUR;
   const clock = new VirtualClock(new Date(startMs).toISOString());
   const pools = { appPool: db.pool('svc_app', 6), adminPool: db.pool('svc_admin', 2), provisioningPool: db.pool('svc_provisioning', 1), dispatcherPool: db.pool('svc_dispatcher', 2) };
