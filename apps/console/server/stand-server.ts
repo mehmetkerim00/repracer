@@ -44,7 +44,12 @@ export interface ApiResponse {
 export interface StandIdentity {
   authenticator: Authenticator;
   /** Имитатор поставщика — только стенд: выдаёт токен синтетического пользователя по роли */
-  simulator?: { token(account: (typeof STAND_ACCOUNTS)[number]): string; expiresInSeconds: number };
+  /**
+   * Имитатор поставщика — только стенд: выдаёт токен синтетического пользователя по роли. Второй фактор — ПАРАМЕТР [OQ-209]:
+   * пока имитатор выдавал всем `amr: ['pwd','otp']`, ни один живой прогон не отличал операцию, требующую второго фактора, от
+   * не требующей, и регрессия «перестало просить» была невидима.
+   */
+  simulator?: { token(account: (typeof STAND_ACCOUNTS)[number], options?: { secondFactor?: boolean }): string; expiresInSeconds: number };
 }
 
 export const LOCALE_COOKIE = 'repracer_locale';
@@ -177,7 +182,9 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       if (req.method !== 'POST') return fail(405, 'METHOD', s.method);
       const account = STAND_ACCOUNTS.find((a) => a.role === body.role);
       if (!account) return fail(400, 'UNKNOWN_ACCOUNT', s.unknownAccount);
-      return ok({ accessToken: identity.simulator.token(account), tokenType: 'Bearer', expiresIn: identity.simulator.expiresInSeconds });
+      // Вход без второго фактора — как у продавца, вошедшего одним паролем: так проверяется, что его действительно просят
+      const secondFactor = body.secondFactor !== false;
+      return ok({ accessToken: identity.simulator.token(account, { secondFactor }), tokenType: 'Bearer', expiresIn: identity.simulator.expiresInSeconds });
     }
 
     if (!principal) return fail(401, 'UNAUTHENTICATED', s.unauthenticated);
@@ -792,7 +799,13 @@ async function main(): Promise<void> {
   const mode = resolveStandIdentityMode(process.env);
   const external = mode.kind === 'oidc' ? { issuer: mode.issuer, audience: mode.audience, jwks: remoteJwks(mode.jwksUrl) } : null;
   const issuer = external ? null : createTestIssuer({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE });
-  const simulator = issuer ? { token: (a: (typeof STAND_ACCOUNTS)[number]) => issuer.token(a.subject, { email: a.email }), expiresInSeconds: 900 } : undefined;
+  const simulator = issuer
+    ? {
+      token: (a: (typeof STAND_ACCOUNTS)[number], options?: { secondFactor?: boolean }) =>
+        issuer.token(a.subject, { email: a.email, amr: options?.secondFactor === false ? ['pwd'] : ['pwd', 'otp'] }),
+      expiresInSeconds: 900,
+    }
+    : undefined;
   const verify = external ?? { issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer!.jwks) };
   if (process.env.REPRACER_PG_URL) {
     const { createPool } = await import('@repracer/pricing-store-pg');

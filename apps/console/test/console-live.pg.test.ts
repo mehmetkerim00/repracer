@@ -58,6 +58,8 @@ let handle: ReturnType<typeof createStandApi>;
 let server: Server;
 let origin: string;
 let owner: { authorization: string; cookie: string };
+/** Вход одним паролем — второго фактора у сессии нет [OQ-209] */
+let passwordOnly: { authorization: string; cookie: string };
 const measured: Array<{ operation: string; seconds: number; bytes: number; status: number; note: string }> = [];
 
 /**
@@ -65,6 +67,17 @@ const measured: Array<{ operation: string; seconds: number; bytes: number; statu
  * скачивая по `download`, заголовок `Authorization` НЕ ШЛЁТ: токен поставщика живёт только в памяти страницы [Р-78]. Прогон,
  * который шлёт заголовок сам, этого не видит — так шаг 30 и объявил OQ-202 закрытым, хотя скачать файл было нельзя.
  */
+/** Запрос от имени продавца, вошедшего одним паролем [OQ-209] */
+async function callAsPasswordOnly(method: 'GET' | 'POST', url: string, body?: unknown): Promise<{ status: number; text: string }> {
+  const payload = body === undefined ? undefined : JSON.stringify(body);
+  const r = await fetch(`${origin}${url}`, {
+    method,
+    headers: { authorization: passwordOnly.authorization, cookie: passwordOnly.cookie, ...(payload ? { 'content-type': 'application/json' } : {}) },
+    ...(payload === undefined ? {} : { body: payload }),
+  });
+  return { status: r.status, text: await r.text() };
+}
+
 async function browserNavigate(url: string): Promise<{ status: number; text: string }> {
   const r = await fetch(`${origin}${url}`, { headers: { cookie: owner.cookie }, redirect: 'manual' });
   return { status: r.status, text: await r.text() };
@@ -203,7 +216,11 @@ before(async () => {
   const issuer = createTestIssuer({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE });
   handle = createStandApi([live], {
     authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory }),
-    simulator: { token: () => issuer.token('live-owner', { email: 'owner@example.invalid' }), expiresInSeconds: 900 },
+    // OQ-209 (шаг 31): второй фактор — параметр входа, иначе прогон не отличает операцию, которая его требует, от остальных
+    simulator: {
+      token: (_a, options) => issuer.token('live-owner', { email: 'owner@example.invalid', amr: options?.secondFactor === false ? ['pwd'] : ['pwd', 'otp'] }),
+      expiresInSeconds: 900,
+    },
   });
   server = createStandServer(handle);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -212,6 +229,10 @@ before(async () => {
   const token = await call('POST', '/api/stand-issuer/token?locale=de', { role: 'OWNER' });
   assert.equal(token.status, 200, token.text);
   owner = { authorization: `Bearer ${(JSON.parse(token.text) as StandToken).accessToken}`, cookie: 'repracer_locale=de' };
+  // Тот же продавец, вошедший ОДНИМ ПАРОЛЕМ: им проверяется, что второй фактор действительно спрашивают [OQ-209]
+  const weak = await call('POST', '/api/stand-issuer/token?locale=de', { role: 'OWNER', secondFactor: false });
+  assert.equal(weak.status, 200, weak.text);
+  passwordOnly = { authorization: `Bearer ${(JSON.parse(weak.text) as StandToken).accessToken}`, cookie: 'repracer_locale=de' };
   // Консольный клиент работает вне браузера: ему нужен адрес стенда и тот же токен, что лежит в памяти страницы [Р-142]
   setApiOrigin(origin);
   setAccessToken((JSON.parse(token.text) as StandToken).accessToken);
@@ -303,6 +324,24 @@ test('Р-136: массовая правка границ всего катало
   const appliedAll = await runBulkOperation('bounds/apply (весь каталог, 10 000)', api('bounds', 'apply'),
     { planJobId: wholePlan.jobId, planToken: whole.planToken, confirmed: true });
   assert.deepEqual([appliedAll.total, appliedAll.done], [OFFERS, OFFERS], 'ход задания назван числом предложений каталога');
+  /**
+   * Р-144, OQ-209 (шаг 31): тот же продавец, вошедший ОДНИМ ПАРОЛЕМ. Массовую правку ему не дают, правку ОДНОГО предложения —
+   * дают: рутинная операция не наследует требования массовой. Без входа без второго фактора прогон этой разницы не видел.
+   */
+  const massByWeak = await callAsPasswordOnly('POST', api('bounds', 'apply'),
+    { planJobId: wholePlan.jobId, planToken: whole.planToken, confirmed: true });
+  assert.equal(massByWeak.status, 403, `массовая правка без второго фактора: ${massByWeak.text.slice(0, 200)}`);
+  assert.match(massByWeak.text, /MFA_REQUIRED/);
+  const onePlan = await callAsPasswordOnly('POST', api('bounds', 'plan'), request(ids.slice(0, 1)));
+  assert.equal(onePlan.status, 200, onePlan.text.slice(0, 200));
+  const oneJob = await pollJob(JSON.parse(onePlan.text).jobId as string, (j) => j.status === 'SUCCEEDED' || j.status === 'FAILED');
+  assert.equal(oneJob.status, 'SUCCEEDED', oneJob.error ?? '');
+  const oneApply = await callAsPasswordOnly('POST', api('bounds', 'apply'),
+    { planJobId: oneJob.jobId, planToken: (oneJob.result as { view: BoundsDiffView }).view.planToken, confirmed: true });
+  assert.equal(oneApply.status, 200, `правка одного предложения второго фактора не требует: ${oneApply.text.slice(0, 200)}`);
+  const oneDone = await pollJob(JSON.parse(oneApply.text).jobId as string, (j) => j.status === 'SUCCEEDED' || j.status === 'FAILED');
+  assert.equal(oneDone.status, 'SUCCEEDED', oneDone.error ?? '');
+
   // Сколько стоит одна порция — это цена правки частями, если продавец выбрал не весь каталог
   const batchPlan = await runBulkOperation('bounds/plan (порция, 500)', api('bounds', 'plan'), request(ids.slice(0, 500)));
   await runBulkOperation('bounds/apply (порция, 500)', api('bounds', 'apply'),
