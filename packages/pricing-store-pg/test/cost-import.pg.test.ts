@@ -267,8 +267,11 @@ async function runningJob(kind: 'COST_IMPORT' | 'PRICE_EVIDENCE', mfa: boolean, 
 }
 
 test('Р-139: задание НЕ ТОГО вида не открывает массовое изменение цен', async () => {
-  // Выгрузка доказательства второго фактора не требует — иначе достаточно было бы создать её и импортировать под её именем
-  const evidence = await runningJob('PRICE_EVIDENCE', false, 'review-kind');
+  /**
+   * Выгрузка доказательства создана человеком, у которого второй фактор в сессии БЫЛ, — так чаще всего и бывает. Значит
+   * остановить импорт под её именем может только сверка ВИДА задания, и проверяется здесь именно она.
+   */
+  const evidence = await runningJob('PRICE_EVIDENCE', true, 'review-kind');
   const applied = await store.importCosts(world.tenantId, batchOf(rowsFor([6], 610), 'fp-job-kind'), jobActor(evidence.jobId), 'APPLY');
   assert.equal(applied.status, 'MFA_REQUIRED', 'задание выгрузки не открывает импорт себестоимости');
   await store.finishBulkJob(world.tenantId, evidence.jobId, 'review-kind', { status: 'SUCCEEDED', result: {} });
@@ -296,7 +299,8 @@ test('Р-139: завершённое задание массовое измен�
  * выгрузка доказательства, которой второй фактор не нужен вовсе, открывала изменение пола маржи всего каталога.
  */
 test('Р-139, Р-135: выполняющееся задание выгрузки не открывает гардрейл уровня тенанта', async () => {
-  const evidence = await runningJob('PRICE_EVIDENCE', false, 'review-guardrail');
+  // Второй фактор при создании был: остановить изменение гардрейла может только то, что задание не названо среди его видов
+  const evidence = await runningJob('PRICE_EVIDENCE', true, 'review-guardrail');
   const refused = await inTenant(admin, world.tenantId, async (tx) => {
     try {
       await tx.query(
@@ -309,4 +313,23 @@ test('Р-139, Р-135: выполняющееся задание выгрузки
   }, world.userId, { mfa: false, bulkJobId: evidence.jobId });
   assert.match(refused, /covers every offer: changing it requires a second factor/, 'гардрейл всего тенанта требует второго фактора человека');
   await store.finishBulkJob(world.tenantId, evidence.jobId, 'review-guardrail', { status: 'SUCCEEDED', result: {} });
+});
+
+/**
+ * Признак «создано со вторым фактором» у задания — несущее условие, а не украшение (находка 4 ревью шага 30). Задание правки
+ * границ создаётся и БЕЗ второго фактора: правка одного предложения его не требует. Такое задание не должно открывать правку
+ * ДВУХ предложений — иначе второй фактор обходился бы созданием безобидного задания.
+ */
+test('Р-139, Р-88: задание границ, созданное без второго фактора, не открывает массовую правку', async () => {
+  const created = await store.createBulkJob(world.tenantId, { kind: 'BOUNDS_EDIT', params: {} }, actor(false));
+  assert.equal(created.status, 'CREATED', 'задание правки границ создаётся и без второго фактора');
+  const claimed = await store.claimBulkJob(world.tenantId, 'review-bounds', 60);
+  assert.equal(claimed?.kind, 'BOUNDS_EDIT');
+  const edits = [4, 5].map((n) => ({ writeScopeId: world.ids.dbId(`ws-${n}`), minMinor: 1100, expected: { minMinor: 1000, maxMinor: 5000 } }));
+  const applied = await store.editBounds(world.tenantId, edits, { ...actor(false), bulkJobId: claimed!.jobId }, 'APPLY');
+  assert.equal(applied.status, 'MFA_REQUIRED', 'массовая правка под заданием без второго фактора не проходит');
+  // Одно предложение тем же заданием — проходит: столько второго фактора и не требовало
+  const one = await store.editBounds(world.tenantId, [edits[0]!], { ...actor(false), bulkJobId: claimed!.jobId }, 'APPLY');
+  assert.equal(one.status, 'APPLIED', JSON.stringify(one));
+  await store.finishBulkJob(world.tenantId, claimed!.jobId, 'review-bounds', { status: 'SUCCEEDED', result: {} });
 });

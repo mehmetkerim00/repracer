@@ -1045,6 +1045,9 @@ export const STEP28_ROWS = [
       m(dropConstraint('scheduled_job_retry_kind_known', 'maintenance.scheduled_job'), smoke('a scheduled job with an unknown retry kind (Р-133)')),
     ],
   },
+];
+
+export const STEP30_ROWS = [
   {
     row: 'Р-139', critical: true, invariant: 'массовая операция — фоновое задание: создаёт человек со вторым фактором и правом, ведёт роль исполнителя, итог не переписывается',
     mutations: [
@@ -1095,6 +1098,9 @@ export const STEP28_ROWS = [
        */
       m(replaceInFunction('security.second_factor_present(text[])', 'AND j.kind = ANY (p_kinds)', 'AND true'),
         node(T('cost-import.pg.test.ts'), 'задание НЕ ТОГО вида', 'задание выгрузки не открывает импорт себестоимости', '^APPLIED$')),
+      m(replaceInFunction('security.second_factor_present(text[])', 'AND j.created_with_mfa', 'AND true'),
+        node(T('cost-import.pg.test.ts'), 'не открывает массовую правку',
+          'массовая правка под заданием без второго фактора не проходит', '^APPLIED$')),
       m(replaceInFunction('security.second_factor_present(text[])', "AND j.status = 'RUNNING' AND j.lease_until > now()", 'AND true'),
         node(T('cost-import.pg.test.ts'), 'завершённое задание', 'завершённое задание не открывает массовое изменение', '^APPLIED$')),
       // Страж широкого гардрейла требует второго фактора ЧЕЛОВЕКА: задание пол маржи всего тенанта не меняет [Р-139]
