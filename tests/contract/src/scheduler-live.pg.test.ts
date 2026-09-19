@@ -68,7 +68,15 @@ before(async () => {
    * сутки — каждую ночь в CI (шаг 29).
    */
   const hours = Number(process.env.LIVE_HOURS ?? 24);
-  const startMs = Math.floor((Date.now() - (hours + 2) * HOUR) / 60_000) * 60_000;
+  /**
+   * Окно суток заканчивается в 02:00 по Берлину — ближайшие прошедшие. Тогда прошлые местные сутки всегда уже закрываемы:
+   * закрытию база даёт час после полуночи витрины, а 02:00 > 01:00. Раньше окно висело относительно «сейчас», и тест краснел
+   * ночью — в CI (UTC) это каждый прогон после полуночи по Берлину (шаг 29). Длина окна прежняя: числа опросов от неё зависят.
+   */
+  const berlinHour = (ms: number) => Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Berlin', hour: '2-digit', hour12: false }).format(new Date(ms)));
+  let endMs = Math.floor(Date.now() / HOUR) * HOUR;
+  while (berlinHour(endMs) !== 2) endMs -= HOUR;
+  const startMs = endMs - hours * HOUR;
   const clock = new VirtualClock(new Date(startMs).toISOString());
   const pools = { appPool: db.pool('svc_app', 4), adminPool: db.pool('svc_admin', 2), provisioningPool: db.pool('svc_provisioning', 1), dispatcherPool: db.pool('svc_dispatcher', 2) };
   const k1 = await kauflandLiveWorld({ tag: 2601, clock, products: kaufland1, seed: 2601, ...pools });
@@ -92,7 +100,7 @@ before(async () => {
   const alerts: Live['alerts'] = [];
   const scheduler = createScheduler({ state: new PgSchedulerState(schedulerPool), source: jobSource(deps), owner: 'live-1', now: () => clock.iso(),
     alerts: { raise: async (a) => { alerts.push({ ...(a as unknown as Live["alerts"][number]), atMs: clock.nowMs() }); } } });
-  const endMs = startMs + hours * HOUR;
+  // Конец окна задан якорем выше; виртуальные часы идут от startMs до endMs
   const started = Date.now();
   const sleeps: number[] = [];
   const running = runScheduler(scheduler, {
