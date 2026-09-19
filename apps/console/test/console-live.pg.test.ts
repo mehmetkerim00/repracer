@@ -466,6 +466,8 @@ test('Р-142: отчёт об импорте и выгрузка ленты це
   assert.equal(reportByLink.status, 401, 'отчёт об импорте по ссылке без заголовка не отдаётся');
   const report = await consoleDownload('cost-import (скачивание отчёта клиентом консоли)', api('jobs', `${importJob.jobId}/artifact`));
   assert.equal(report.contentType, 'text/csv');
+  // Имя файла продавец видит в своих «Загрузках»: расширение исходной выгрузки не должно удваиваться (`report.csv.csv`)
+  assert.equal(report.fileName, 'import-report_report.csv', `имя файла отчёта: ${report.fileName}`);
   const reportLines = report.text.trim().split('\n');
   assert.equal(reportLines[0], 'line,offer_key,raw_value,problem,problem_text');
   assert.equal(reportLines.length, planned.summary.skipped + 1, 'строк в файле столько же, сколько названо на ЭКРАНЕ предпросмотра');

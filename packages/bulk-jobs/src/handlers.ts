@@ -96,7 +96,8 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
           const report = preview.skipped.length > 0 ? costImportReportCsv(preview, m) : null;
           if (report !== null) {
             await ctx.store.saveBulkJobArtifact(ctx.tenantId, ctx.jobId, {
-              fileName: `import-report_${p.fileName.replace(/[^\w.\-]/g, '_')}.csv`, contentType: 'text/csv',
+              // Расширение исходной выгрузки отбрасывается: иначе отчёт по `report.csv` звался бы `import-report_report.csv.csv`
+              fileName: `import-report_${p.fileName.replace(/\.[^.]*$/, '').replace(/[^\w\-]/g, '_') || 'file'}.csv`, contentType: 'text/csv',
               content: report, sha256: sha256(report), rows: preview.skipped.length,
             });
           }
