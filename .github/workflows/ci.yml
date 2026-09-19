@@ -49,6 +49,9 @@ jobs:
       - run: npm run typecheck
       - name: Tests without infrastructure beyond PostgreSQL (Р-137)
         run: node scripts/test-all.mjs --scope=fast
+      # Задача E шага 30 [OQ-203]: быстрый прогон не должен пропускать регрессию в защитах, которыми держится цена
+      - name: "Mutation check of the critical guards (Р-95, step 30 task E)"
+        run: node scripts/db/mutation-check.mjs --critical --jobs 3
 
   full:
     # Р-137: полный прогон — при слиянии в main и по запросу; на ветке шага его запускает владелец перед слиянием

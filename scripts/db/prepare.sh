@@ -26,6 +26,8 @@ PGUSER=svc_admin "${PSQL[@]}" -d "$DB" -f tests/db/smoke_app.sql
 PGUSER=svc_admin "${PSQL[@]}" -d "$DB" -f tests/db/smoke_admin.sql
 # Р-96: путь решения может только вычислить и записать цену — остальное отклоняется отсутствием права
 PGUSER=svc_app "${PSQL[@]}" -d "$DB" -f tests/db/smoke_path.sql
+# Р-139 (шаг 30): защиты фоновых заданий — создание человеком административной ролью, ведение ролью исполнителя
+PGUSER=svc_admin "${PSQL[@]}" -d "$DB" -f tests/db/smoke_bulk_jobs.sql
 "${PSQL[@]}" -d "$DB" -f tests/db/smoke_r65.sql
 # Р-103: у каждой append-only таблицы есть строка, изменение отклоняет триггер неизменяемости (откатываемая транзакция)
 "${PSQL[@]}" -d "$DB" -f tests/db/smoke_append_only.sql

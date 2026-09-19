@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0107_verify_schema_invariants_v26.sql';
+const VERIFY = 'migrations/0109_verify_schema_invariants_v27.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -28,23 +28,27 @@ const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke
 const node = (file, test, label, unprotected) => ({ node: file, test, label, unprotected });
 const verify = (reason) => ({ verify: VERIFY, reason });
 
+// Шаг 30, задача E [OQ-203]: `critical: true` — строки, которые идут в БЫСТРОМ прогоне CI. Мутационная проверка целиком занимает
+// около получаса и потому живёт в полном прогоне; но быстрый не должен пропускать регрессию в защитах, которыми держится цена.
+// Критичными объявлены четыре области: обе границы и пол маржи (Price Gate), проверка входов, диспетчер записей и роли подключения
+// вместе со вторым фактором массового изменения. Всё остальное ловится полным прогоном при слиянии в main.
 export const R93_ROWS = [
   {
-    row: '12', invariant: 'Р-43, Р-44: потолок при создании и отправке записи',
+    row: '12', critical: true, invariant: 'Р-43, Р-44: потолок при создании и отправке записи',
     mutations: [
       m(dropTrigger('ba_channel_write_ceiling_insert', 'tenant_data.channel_write'), smoke('write created above lowered max_price (Р-44, check 2)')),
       m(dropTrigger('ba_channel_write_ceiling_dispatch', 'tenant_data.channel_write'), smoke('dispatch above lowered max_price (Р-44, check 3)')),
     ],
   },
   {
-    row: '13', invariant: 'Р-44: без округления до границы, причина отказа обязательна',
+    row: '13', critical: true, invariant: 'Р-44: без округления до границы, причина отказа обязательна',
     mutations: [
       m(dropConstraint('price_decision_no_bound_clamp', 'channel_data.price_decision'), smoke('clamp to floor instead of rejection (Р-44)')),
       m(dropConstraint('price_decision_rejection_reason_iff', 'channel_data.price_decision'), smoke('REJECTED without a reason')),
     ],
   },
   {
-    row: '14', invariant: 'Р-43: потолок не в guardrail',
+    row: '14', critical: true, invariant: 'Р-43: потолок не в guardrail',
     mutations: [m(dropConstraint('guardrail_ceiling_moved_to_max_price', 'tenant_data.guardrail'), smoke('guardrail carrying a ceiling (moved to max_price, Р-43)'))],
   },
   {
@@ -52,7 +56,7 @@ export const R93_ROWS = [
     mutations: [m(dropTrigger('c_pricing_halt_release_journal', 'channel_data.pricing_halt'), smoke('manual release without a journal record (Р-52)'))],
   },
   {
-    row: '17', invariant: 'Р-51: признак цены по конкурентам копируется в решение',
+    row: '17', critical: true, invariant: 'Р-51: признак цены по конкурентам копируется в решение',
     mutations: [m(dropTrigger('aa_price_decision_copy_derivation', 'channel_data.price_decision'),
       smoke('competitor_derived is not derived from rule_code', 'competitor_derived: from intent rule_code, copied into the decision (Р-51)'))],
   },
@@ -71,7 +75,7 @@ export const R93_ROWS = [
       node(T('store.pg.test.ts'), 'OQ-93, OQ-94, OQ-98', 'OQ-98: a rejection without its reason parameters is refused', 'resolved'))],
   },
   {
-    row: '22', invariant: 'Р-64: завершение записи — с причиной; ждущая запись объявляется событием',
+    row: '22', critical: true, invariant: 'Р-64: завершение записи — с причиной; ждущая запись объявляется событием',
     mutations: [
       // Шаг 19 [Р-104]: channel_write_end_explained удалено (0072) — его отказ давало ограничение истории записей
       m(dropConstraint('channel_write_history_end_explained', 'tenant_data.channel_write_history'),
@@ -173,7 +177,7 @@ export const R93_ROWS = [
       node(T('step14.pg.test.ts'), 'Р-79', 'Р-79: a verified archive of the core without the explanation dictionary is refused', '"command":"INSERT"'))],
   },
   {
-    row: '42', invariant: 'Р-83: пол с полом маржи перед каждой отправкой',
+    row: '42', critical: true, invariant: 'Р-83: пол с полом маржи перед каждой отправкой',
     mutations: [m(replaceInFunction('tenant_data.channel_write_before_update()',
       "NEW.floor_at_dispatch_minor := tenant_data.assert_price_floor(NEW.tenant_id, NEW.write_scope_id, NEW.amount_minor, 'at dispatch');",
       'NEW.floor_at_dispatch_minor := (SELECT f.min_price_minor FROM tenant_data.effective_price_floor(NEW.tenant_id, NEW.write_scope_id) f);'),
@@ -216,7 +220,7 @@ const pathRight = (table, privilege) => verify(`${table.replace('.', '\\.')}: ${
 /** Защиты шага 17 и строки, пропущенные в каталоге шага 17 (находка 7 ревью шага 17) */
 export const STEP17_ROWS = [
   {
-    row: 'Р-96', invariant: 'путь решения — только вычисление и запись цены',
+    row: 'Р-96', critical: true, invariant: 'путь решения — только вычисление и запись цены',
     mutations: [
       m('GRANT INSERT ON tenant_data.migration_consent TO repracer_app', smoke('path creates an eBay migration consent (Р-96, Р-2)'), pathRight('tenant_data.migration_consent', 'INSERT')),
       m('GRANT UPDATE ON tenant_data.tenant TO repracer_app', smoke('path opts the tenant into Kaufland Smart Pricing (Р-96, Р-12, Р-41)'), pathRight('tenant_data.tenant', 'UPDATE')),
@@ -262,7 +266,7 @@ export const STEP17_ROWS = [
     ],
   },
   {
-    row: 'Р-97', invariant: 'административная запись — только по действию человека и вся в аудите',
+    row: 'Р-97', critical: true, invariant: 'административная запись — только по действию человека и вся в аудите',
     mutations: [
       m(dropTrigger('a0_admin_write_person_insert', 'tenant_data.product'), smoke('administrative change without a person (Р-97)'),
         verify('tenant_data\\.product: administrative INSERT without the person guard')),
@@ -361,7 +365,7 @@ export const STEP18_ROWS = [
     ],
   },
   {
-    row: 'Р-100', invariant: 'административная запись проверяет роль и административные столбцы',
+    row: 'Р-100', critical: true, invariant: 'административная запись проверяет роль и административные столбцы',
     mutations: [
       m(replaceInFunction('security.require_person_for_admin_write()', "IF action <> 'OWN_GUARD' AND r IS NOT NULL AND NOT security.pricing_permission(r, action) THEN", 'IF false THEN'),
         smoke('an operator lowers min_price (Р-100)'), smoke('eBay consent by an admin in their own name (Р-101)'), smoke('write scope status changed by a viewer (step 18 finding 1)'),
@@ -406,7 +410,7 @@ export const STEP18_ROWS = [
     ],
   },
   {
-    row: 'Р-102', invariant: 'роль остатков — только остатки и резервации',
+    row: 'Р-102', critical: true, invariant: 'роль остатков — только остатки и резервации',
     mutations: [
       m('GRANT SELECT ON tenant_data.min_price TO repracer_stock', smoke('stock role reads prices (Р-102)'), verify('tenant_data\\.min_price: SELECT of the stock role does not match its allow list')),
       m('GRANT UPDATE ON tenant_data.write_scope TO repracer_stock', verify('tenant_data\\.write_scope: UPDATE of the stock role does not match its allow list')),
@@ -474,7 +478,7 @@ export const STEP19_ROWS = [
     ],
   },
   {
-    row: 'находка 4 (шаг 18)', invariant: 'системную остановку ставит проверка входов пути решения, а не человек',
+    row: 'находка 4 (шаг 18)', critical: true, invariant: 'системную остановку ставит проверка входов пути решения, а не человек',
     mutations: [
       m(replaceInFunction('channel_data.pricing_halt_insert_guard()', 'IF security.admin_session() THEN', 'IF false THEN'), smoke('system halt created by a person (step 18 finding 4)')),
       m(replaceInFunction('channel_data.pricing_halt_sample_insert_guard()', 'IF security.admin_session() THEN', 'IF false THEN'),
@@ -515,7 +519,7 @@ export const STEP19_ROWS = [
     ],
   },
   {
-    row: 'Р-105', invariant: 'роль остатков пишет в канал только поле QUANTITY',
+    row: 'Р-105', critical: true, invariant: 'роль остатков пишет в канал только поле QUANTITY',
     mutations: [
       m("ALTER POLICY stock_quantity ON tenant_data.channel_write_history USING (tenant_id = security.current_tenant_id()) WITH CHECK (tenant_id = security.current_tenant_id())",
         smoke('stock role writes price history of a channel write (Р-105)'), verify('channel_write_history: policy stock_quantity of the stock role is not limited to the QUANTITY field')),
@@ -973,7 +977,7 @@ export const STEP28_ROWS = [
     ],
   },
   {
-    row: 'Р-135', invariant: 'массовое изменение цен требует второго фактора, и разбиение на отдельные транзакции его не обходит (риск 17)',
+    row: 'Р-135', critical: true, invariant: 'массовое изменение цен требует второго фактора, и разбиение на отдельные транзакции его не обходит (риск 17)',
     mutations: [
       m(dropTrigger('zc_cost_import_requires_mfa', 'tenant_data.cost_import'), smoke('a cost import without a second factor (Р-135)')),
       // Этот страж не должен мешать законному импорту: без раннего выхода по второму фактору он отказывал бы всем
@@ -1038,6 +1042,44 @@ export const STEP28_ROWS = [
     row: 'Р-133', invariant: 'вид повтора работы хранится в базе: у внутренних работ пауза растёт от минуты, у работ канала — от периода работы',
     mutations: [
       m(dropConstraint('scheduled_job_retry_kind_known', 'maintenance.scheduled_job'), smoke('a scheduled job with an unknown retry kind (Р-133)')),
+    ],
+  },
+  {
+    row: 'Р-139', critical: true, invariant: 'массовая операция — фоновое задание: создаёт человек со вторым фактором и правом, ведёт роль исполнителя, итог не переписывается',
+    mutations: [
+      // Создание задания — административная запись человека: автор и аудит [Р-97]
+      m(dropTrigger('a0_admin_write_person_insert', 'tenant_data.bulk_job'), smoke('bulk job created without a person in the session (Р-97)')),
+      m(dropTrigger('zz_admin_write_audit_insert', 'tenant_data.bulk_job'),
+        smoke('creating a bulk job is written to the audit log (Р-97)')),
+      // Р-135: второй фактор предъявляется при создании задания, меняющего цены; ставит признак база, а не вызывающий [Р-90]
+      m(dropTrigger('zb_bulk_job_requires_mfa', 'tenant_data.bulk_job'), smoke('cost import job created without a second factor (Р-135, Р-139)')),
+      m(dropTrigger('a_bulk_job_created_with_mfa', 'tenant_data.bulk_job'),
+        smoke('the database sets the second factor of a bulk job, not the caller (Р-90)')),
+      // Р-100: право — по тому, что задание делает; выгрузка доказательства доступна и зрителю
+      m(dropTrigger('zc_bulk_job_requires_right', 'tenant_data.bulk_job'), smoke('cost import job created by a viewer with a second factor (Р-100, Р-139)')),
+      // Аренда: чужую живую аренду не перехватить и не отпустить — иначе задание применилось бы дважды
+      m(dropTrigger('a_bulk_job_lease_guard', 'tenant_data.bulk_job'),
+        smoke('another process takes a live lease of a bulk job (Р-139)'),
+        smoke('another process releases a live lease of a bulk job (Р-139)')),
+      // Итог задания неизменяем, и задание не прыгает через состояния
+      m(dropTrigger('b_bulk_job_status_forward_only', 'tenant_data.bulk_job'),
+        smoke('a finished bulk job is started again (Р-139)'),
+        smoke('a pending bulk job jumps straight to succeeded (Р-139)')),
+      // Виды значений строки задания: экран хода читает их как данность
+      m(dropConstraint('bulk_job_kind_known', 'tenant_data.bulk_job'), smoke('bulk job of an unknown kind')),
+      m(dropConstraint('bulk_job_status_known', 'tenant_data.bulk_job'), smoke('bulk job in an unknown status')),
+      m(dropConstraint('bulk_job_phase_known', 'tenant_data.bulk_job'), smoke('bulk job in an unknown phase')),
+      m(dropConstraint('bulk_job_total_non_negative', 'tenant_data.bulk_job'), smoke('bulk job with a negative total')),
+      m(dropConstraint('bulk_job_done_non_negative', 'tenant_data.bulk_job'), smoke('bulk job with a negative progress')),
+      m(dropConstraint('bulk_job_attempts_non_negative', 'tenant_data.bulk_job'), smoke('bulk job with a negative attempt count')),
+      m(dropConstraint('bulk_job_lease_pair', 'tenant_data.bulk_job'), smoke('bulk job leased by nobody until a moment')),
+      m(dropConstraint('bulk_job_finished_has_outcome', 'tenant_data.bulk_job'), smoke('bulk job finished without a moment of finishing')),
+      m(dropConstraint('bulk_job_failed_has_reason', 'tenant_data.bulk_job'), smoke('bulk job failed without a reason')),
+      // Файл задания [OQ-202]: продавец сверяет контрольную сумму с тем, что скачал
+      m(dropConstraint('bulk_job_artifact_file_name_check', 'tenant_data.bulk_job_artifact'), smoke('artifact with an empty file name')),
+      m(dropConstraint('bulk_job_artifact_content_type_check', 'tenant_data.bulk_job_artifact'), smoke('artifact of a kind the console cannot show')),
+      m(dropConstraint('bulk_job_artifact_sha256_check', 'tenant_data.bulk_job_artifact'), smoke('artifact with a checksum that is not a SHA-256')),
+      m(dropConstraint('bulk_job_artifact_rows_count_check', 'tenant_data.bulk_job_artifact'), smoke('artifact with a negative row count')),
     ],
   },
 ];

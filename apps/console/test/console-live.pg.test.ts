@@ -45,7 +45,7 @@ const SCREEN_LIMIT_SECONDS = 10;
  */
 const APPLY_LIMIT_SECONDS = 120;
 /** Операции, у которых предел другой: продавец ждёт их сознательно, видя ход */
-const BULK_APPLY = /\(задание целиком\)$|^bounds\/plan \(весь каталог/;
+const BULK_APPLY = /\(задание целиком\)$|^bounds\/plan \(весь каталог|^cost-import\/plan \(200 000/;
 /** Скачивание готового файла [OQ-202] — не экран: его не разбирает браузер и не показывает страница */
 const FILE_DOWNLOAD = /скачивание файла/;
 
@@ -340,8 +340,15 @@ test('Р-136: экспорт доказательной истории цен з
   });
   const [count] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query('SELECT count(*)::int AS n FROM tenant_data.price_daily')).rows);
   measured.push({ operation: 'посев истории цен (30 суток × каталог)', seconds: Math.round(Number(process.hrtime.bigint() - seeded) / 1e6) / 1000, bytes: 0, status: 0, note: `${count.n} суток цен` });
-  const to = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
-  const from = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
+  /**
+   * Границы периода берутся у БАЗЫ, а не у Node [Р-128]. Сутки сеются её `now()::date`, и при часовом поясе сервера, отличном от
+   * UTC, дата Node расходится с датой базы часть суток — прогон краснел бы вечером и зеленел утром. Скрытого входа «время
+   * суток» в проверке быть не должно (находка шага 29 — три таких прогона).
+   */
+  const [days] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
+    `SELECT (now() - interval '30 days')::date::text AS from_day, (now() - interval '1 day')::date::text AS to_day`)).rows);
+  const to = days.to_day as string;
+  const from = days.from_day as string;
   /**
    * OQ-202 (шаг 30): каталог целиком за 30 суток — 300 000 строк. Шаг 29 отвечал на это отказом, потому что 28 МБ в ответе
    * экрана бесполезны. Задание готовит файл в базе, и отказ больше не нужен: продавец скачивает готовое.
@@ -358,6 +365,28 @@ test('Р-136: экспорт доказательной истории цен з
   const single = await runBulkOperation('compliance/evidence (30 суток, одно предложение)', api('compliance', 'evidence'),
     { from, to, writeScopeId: oneOffer });
   assert.equal(single.artifact!.rows, 30, 'в выгрузке 30 суток истории одного предложения');
+});
+
+/**
+ * OQ-199 (шаг 30, задача G): объявленный предел импорта — 200 000 строк (`row_count <= 200000`, 0103), и до сих пор он был
+ * ЧИСЛОМ БЕЗ ЗАМЕРА. Измеряется то, что растёт с числом строк ФАЙЛА: чтение, сопоставление колонок и поиск предложения по
+ * ключу. Применение растёт с числом СОПОСТАВЛЕННЫХ строк, а их не может быть больше каталога — оно измерено отдельно.
+ */
+test('OQ-199: предел импорта в 200 000 строк — замер разбора и сопоставления', async () => {
+  const ROWS = 200_000;
+  // Первые 10 000 строк ложатся на каталог, остальные 190 000 — нет: так видно цену поиска ключа, которого в каталоге нет
+  const lines = ['Artikelnummer;Einstandspreis;Währung',
+    ...Array.from({ length: ROWS }, (_, i) => `SKU-${i + 1};${9 + (i % 40)},${String(i % 100).padStart(2, '0')};EUR`)];
+  const content = Buffer.from(lines.join('\r\n'), 'utf8').toString('base64');
+  const plan = await measure<CostImportView>('cost-import/plan (200 000 строк, предел базы)', 'POST', api('cost-import', 'plan'),
+    { fileName: 'limit.csv', content }, `файл ${Math.round(Buffer.byteLength(content) / 1024 / 1024)} МБ в base64`);
+  assert.equal(plan.status, 200, JSON.stringify(plan.body).slice(0, 300));
+  assert.equal(plan.body.summary.apply, OFFERS, 'применятся только сопоставленные с каталогом');
+  assert.equal(plan.body.summary.apply + plan.body.summary.skipped, ROWS, 'разобраны все строки файла: несопоставленные названы, а не потеряны');
+  // Предел объявлен базой и должен быть достижим: если разбор 200 000 строк не укладывается в предел работы, число выдумано
+  const measuredPlan = measured.find((x) => x.operation.startsWith('cost-import/plan (200 000'))!;
+  assert.ok(measuredPlan.seconds < APPLY_LIMIT_SECONDS,
+    `разбор 200 000 строк: ${measuredPlan.seconds} с при пределе работы ${APPLY_LIMIT_SECONDS} с`);
 });
 
 /**
