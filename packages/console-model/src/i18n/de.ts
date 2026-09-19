@@ -295,7 +295,7 @@ export const de: Messages = {
       worlds: 'Welten des Stands',
       worldsHint: 'Jede Welt ist ein Standszenario mit synthetischen Daten. Kein Kanal ist verbunden.',
       backToWorlds: '← Welten',
-      screens: { products: 'Produkte', decisions: 'Warum dieser Preis', rejected: 'Gestoppte Änderungen', bounds: 'Grenzen', 'cost-import': 'Selbstkosten-Import', stop: 'Preise stoppen', strategies: 'Strategien', feed: 'Preisänderungen', dangerous: 'Gefährliche Änderungen', compliance: 'Omnibus' },
+      screens: { products: 'Produkte', decisions: 'Warum dieser Preis', rejected: 'Gestoppte Änderungen', bounds: 'Grenzen', 'cost-import': 'Selbstkosten-Import', stop: 'Preise stoppen', strategies: 'Strategien', feed: 'Preisänderungen', dangerous: 'Gefährliche Änderungen', compliance: 'Omnibus', jobs: 'Massenvorgänge' },
       loading: (seconds: number) => `Standdaten werden geladen. Ohne Antwort innerhalb von ${seconds} s wird ein Fehler angezeigt.`,
       timeout: (seconds: number) => `Der Stand hat nicht innerhalb von ${seconds} s geantwortet. Läuft er? npm run stand -w @repracer/console`,
       unavailable: (detail: string) => `Der Stand ist nicht erreichbar: ${detail}`,

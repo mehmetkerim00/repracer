@@ -318,7 +318,11 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
          * приходит из хранилища под его `tenant_id`, чужой идентификатор не находится.
          */
         case 'jobs': {
-          if (param === null) return ok(bulkJobsView(await live.store.listBulkJobs(world.tenantId), m));
+          if (param === null) {
+            // Список заданий называет готовые файлы: по ним продавец возвращается к заданию, с экрана которого ушёл
+            const jobs = await live.store.listBulkJobs(world.tenantId);
+            return ok(bulkJobsView(jobs, m, await live.store.bulkJobArtifactSummaries(world.tenantId, jobs.map((j) => j.jobId))));
+          }
           const job = await live.store.bulkJob(world.tenantId, param);
           if (!job) return fail(404, 'JOB_NOT_FOUND', m.ui.jobs.notFound);
           if (parts[5] === 'artifact') {
@@ -370,6 +374,14 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
      * есть ровно у того задания, которое ещё ждёт своей очереди.
      */
     if (screen === 'jobs' && param !== null && parts[5] === 'cancel') {
+      /**
+       * Отменяет СВОЁ задание любой участник, ЧУЖОЕ — только тот, кто вправе менять цены (находка 3 ревью шага 31). Иначе
+       * оператор отменял бы подтверждённый вторым фактором импорт владельца, и тот видел бы «отменено, в базе ничего не
+       * изменено», не понимая, кто это сделал.
+       */
+      const target = await live.store.bulkJob(world.tenantId, param);
+      if (!target) return fail(404, 'JOB_NOT_FOUND', m.ui.jobs.notFound);
+      if (target.createdByMembershipId !== viewer.membershipId && !can(viewer.role, 'MANAGE_PRICING')) return fail(403, 'FORBIDDEN', s.forbidden);
       const outcome = await live.store.cancelBulkJob(world.tenantId, param, { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) });
       if (outcome === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
       if (outcome === 'NOT_WAITING') return fail(409, 'NOT_WAITING', m.ui.jobs.notWaiting);
@@ -608,6 +620,12 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       if (!plan || plan.kind !== 'BOUNDS_PLAN' || plan.status !== 'SUCCEEDED' || planResult.planToken !== body.planToken) {
         return fail(409, 'PLAN_CHANGED', s.planChanged);
       }
+      /**
+       * Применяет тот, кто СМОТРЕЛ (находка 5 ревью шага 31). Обещание «применяется ровно то, что видел человек» держится
+       * токеном экрана; но токен лежит в задании того же тенанта, и без этой проверки другой участник применил бы правку
+       * каталога, ни разу не открыв экран различий.
+       */
+      if (plan.createdByMembershipId !== viewer.membershipId) return fail(409, 'PLAN_CHANGED', s.planChanged);
       const asked = planResult.offers ?? 0;
       /**
        * Р-88, Р-135, Р-144: правка границ БОЛЬШЕ ЧЕМ ОДНОГО предложения — со вторым фактором, правка одного — без него.

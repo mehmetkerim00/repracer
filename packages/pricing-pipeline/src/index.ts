@@ -85,4 +85,4 @@ export {
 export { EXPLANATION_RULESETS } from './dictionary.ts';
 export type { ConsoleAuditRow } from './store.ts';
 export { comparedValue, DEFAULT_LOSS_GRACE_SECONDS, LOSS_GRACE_BASIS, reconcile, rotation, snapshotDigest, type HeldState, type ReconciliationOutcome } from './reconciliation.ts';
-export { BULK_JOB_QUEUE_LIMIT, READ_ONLY_JOB_KINDS } from './store.ts';
+export { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, READ_ONLY_JOB_KINDS } from './store.ts';

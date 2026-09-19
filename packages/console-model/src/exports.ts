@@ -1,6 +1,6 @@
 import type { ImportPreview } from '@repracer/cost-import';
 import type { Messages } from './i18n/index.ts';
-import { priceFeed } from './price-feed.ts';
+import { FEED_PAGE_MAX, priceFeed } from './price-feed.ts';
 import type { FeedQuery } from './price-feed.ts';
 import { scopeById, unitOf, type StandWorld } from './world.ts';
 
@@ -41,13 +41,16 @@ export function costImportReportCsv(preview: ImportPreview, m: Messages): string
  * записей — за 30 суток по каталогу их сотни тысяч, и по страницам их не читают. Строки — те же, что на экране, в том же
  * порядке: файл не должен расходиться с тем, что продавец видел.
  */
-export function priceFeedCsv(world: StandWorld, m: Messages, query: FeedQuery): string {
+export function priceFeedRowsOf(world: StandWorld, m: Messages, query: FeedQuery): string[][] {
   const total = priceFeed(world, m, { ...query, offset: 0, limit: 1 }).page.total;
-  const header = ['at', 'channel', 'marketplace', 'offer', 'price_from', 'price_to', 'change', 'status', 'source', 'reason', 'decision_id'];
   const rows: string[][] = [];
-  // Лента отдаётся страницами и здесь: `priceFeed` ограничивает страницу сверху, и просить у него весь период разом нельзя
-  for (let offset = 0; offset < total; offset += 200) {
-    for (const i of priceFeed(world, m, { ...query, offset, limit: 200 }).items) {
+  /**
+   * Лента отдаётся страницами и здесь — но страницы берутся ОДНИМ проходом, а не пересчётом ленты на каждую. `priceFeed`
+   * фильтрует и сортирует всю ленту при каждом вызове: спрашивать у него тысячу страниц значит отсортировать ленту тысячу раз
+   * (находка 1 ревью шага 31).
+   */
+  for (let offset = 0; offset < total; offset += FEED_PAGE_MAX) {
+    for (const i of priceFeed(world, m, { ...query, offset, limit: FEED_PAGE_MAX }).items) {
       rows.push([
         i.at, i.unit?.channel ?? '', i.unit?.marketplace ?? '', i.unit?.externalUnitId ?? '',
         i.from ?? '', i.to, i.change ?? '', i.status, i.source,
@@ -55,6 +58,22 @@ export function priceFeedCsv(world: StandWorld, m: Messages, query: FeedQuery): 
       ]);
     }
   }
+  return rows;
+}
+
+export const PRICE_FEED_CSV_HEADER = ['at', 'channel', 'marketplace', 'offer', 'price_from', 'price_to', 'change', 'status', 'source', 'reason', 'decision_id'];
+
+/**
+ * Выгрузка ленты цен [Р-136]: что мы отправляли каналу за период и что с этим стало. Экран отдаёт страницу не больше 200
+ * записей — за 30 суток по каталогу их сотни тысяч, и по страницам их не читают. Строки — те же, что на экране, в том же
+ * порядке: файл не должен расходиться с тем, что продавец видел.
+ */
+export function priceFeedCsv(world: StandWorld, m: Messages, query: FeedQuery): string {
+  return csv(PRICE_FEED_CSV_HEADER, priceFeedRowsOf(world, m, query));
+}
+
+/** Готовые строки в CSV — для сборки файла частями, с отдачей цикла событий между ними */
+export function csvOf(header: readonly string[], rows: readonly (readonly string[])[]): string {
   return csv(header, rows);
 }
 

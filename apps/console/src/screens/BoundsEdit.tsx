@@ -119,7 +119,8 @@ function BoundsEditForm({ worldId, items, total }: { worldId: string; items: rea
     setBusy(true); setError(null);
     try {
       const r = await requestJson<JobCreatedResponse>(worldPath(worldId, 'bounds', 'apply'), { method: 'POST', body: { planJobId, planToken: diff.view.planToken, confirmed: true }, locale: m.locale });
-      setMessage(r.message); setJobId(r.jobId); setDiff(null);
+      // Задание экрана различий тоже забывается: иначе после применения различия вернутся и позовут применить ещё раз
+      setMessage(r.message); setJobId(r.jobId); setDiff(null); setPlanJobId(null);
     } catch (e) { setError(errorText(e, m)); } finally { setBusy(false); }
   };
   const adjust = (label: string, value: AdjustForm, onChange: (v: AdjustForm) => void) => (

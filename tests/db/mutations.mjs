@@ -1106,7 +1106,7 @@ export const STEP30_ROWS = [
       m(dropTrigger('zz_admin_write_audit_update', 'tenant_data.bulk_job'),
         smoke('cancelling a bulk job is written to the audit log (Р-97)'),
         verify('tenant_data\\.bulk_job: administrative UPDATE is not written to the audit log')),
-      m(dropTrigger('zd_bulk_job_queue_limit', 'tenant_data.bulk_job'), smoke('a tenant queues more bulk jobs than the limit (OQ-207)')),
+      m(dropTrigger('zd_bulk_job_queue_limit', 'tenant_data.bulk_job'), smoke('a member queues more bulk jobs than their own limit (OQ-207)')),
       // Отмена — только у ждущего задания: применение целиком или никак, и на полпути его не отменяют [Р-134]
       m(replaceInFunction('tenant_data.bulk_job_status_forward_only()', "IF NEW.status = 'CANCELLED' AND OLD.status <> 'PENDING' THEN", 'IF false THEN'),
         smoke('a running bulk job is cancelled halfway (Р-134, OQ-207)')),
@@ -1133,6 +1133,14 @@ export const STEP30_ROWS = [
        * Р-143 (шаг 31), OQ-210: вид задания, которому второй фактор не нужен, не может стоять в списке стража. Ровно эта
        * ошибка и была на шаге 30 у стража широкого гардрейла, и нашла её тогда мутационная проверка, а не правило схемы.
        */
+      /**
+       * Сам список видов, которым второй фактор не нужен (находка 9 ревью шага 31). Добавить в него вид, который МЕНЯЕТ цены,
+       * значит снять право `MANAGE_PRICING` при создании такого задания — первый рубеж, — и правило 14г этого не увидит: оно
+       * смотрит на аргументы стражей, а не на сам список.
+       */
+      m(replaceInFunction('security.read_only_job_kinds()', "ARRAY['BOUNDS_PLAN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT']",
+        "ARRAY['BOUNDS_PLAN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT', 'COST_IMPORT']"),
+        smoke('cost import job created by a viewer with a second factor (Р-100, Р-139)')),
       m(replaceInFunction('tenant_data.cost_import_requires_mfa()', "ARRAY['COST_IMPORT']", "ARRAY['COST_IMPORT', 'PRICE_EVIDENCE']"),
         verify('a bulk job kind that needs no second factor \\(PRICE_EVIDENCE\\) opens an operation that needs one')),
       // Страж широкого гардрейла требует второго фактора ЧЕЛОВЕКА: задание пол маржи всего тенанта не меняет [Р-139]

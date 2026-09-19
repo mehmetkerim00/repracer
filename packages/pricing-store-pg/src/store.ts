@@ -1001,6 +1001,16 @@ export class PgPricingStore implements PricingStore {
          * записи, ни стража, ни аудита — и предпросмотр перестал зависеть от того, есть ли у сессии второй фактор.
          */
         if (mode === 'PREVIEW') {
+          /**
+           * Право на экран различий проверяется ЯВНО (шаг 31). Раньше его проверял отказ базы на вставку версии границы: пока
+           * предпросмотр писал и откатывал, зритель упирался в право на запись. Предпросмотр перестал писать — и вместе с
+           * записью исчезла бы проверка, если бы её не назвали здесь. Роль читается из членства, как и у всякого действия [Р-90].
+           */
+          const { rows: [permission] } = await tx.query(
+            `SELECT security.pricing_permission(m.role, 'MANAGE_PRICING') AS allowed FROM tenant_data.membership m
+              WHERE m.tenant_id = $1 AND m.membership_id = $2 AND m.user_id = $3 AND m.status = 'ACTIVE'`,
+            [tenantId, actor.membershipId, actor.userId]);
+          if (permission?.allowed !== true) throw new RollbackWith<BoundsEditResult>({ status: 'FORBIDDEN' });
           const { rows: computed } = await tx.query(
             `SELECT e.id AS write_scope_id,
                     tenant_data.effective_min_price_with($1, e.id, e.min) AS min,
@@ -1264,6 +1274,17 @@ export class PgPricingStore implements PricingStore {
       const r = rows[0];
       return r === undefined ? null
         : { fileName: r.file_name, contentType: r.content_type, content: r.content, sha256: r.sha256, rows: Number(r.rows_count) };
+    });
+  }
+
+  /** Готовые файлы списка заданий — только имена и размеры: содержимое в списке не нужно и весит десятки мегабайт */
+  async bulkJobArtifactSummaries(tenantId: string, jobIds: readonly string[]): Promise<Map<string, { fileName: string; rows: number; sha256: string }>> {
+    if (jobIds.length === 0) return new Map();
+    return inTenant(this.admin('bulkJobArtifactSummaries'), tenantId, async (tx) => {
+      const { rows } = await tx.query(
+        `SELECT bulk_job_id, file_name, rows_count, sha256 FROM tenant_data.bulk_job_artifact
+          WHERE tenant_id = $1 AND bulk_job_id = ANY ($2::uuid[])`, [tenantId, jobIds]);
+      return new Map(rows.map((r) => [String(r.bulk_job_id), { fileName: r.file_name as string, rows: Number(r.rows_count), sha256: r.sha256 as string }]));
     });
   }
 

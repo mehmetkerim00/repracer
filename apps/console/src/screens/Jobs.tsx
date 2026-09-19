@@ -109,6 +109,15 @@ export function JobHistory({ worldId }: { worldId: string }) {
             <li key={j.jobId}>
               <strong>{j.title}</strong> — {j.headline}
               <div className="small muted">{j.effect}{j.finishedAt ? ` · ${m.when(j.finishedAt)}` : ''}</div>
+              {/* Р-142: к готовому файлу продавец возвращается отсюда — он не привязан к экрану, с которого ушёл */}
+              {j.artifact ? (
+                <button type="button" onClick={() => void downloadFile(`${worldPath(worldId, 'jobs', j.jobId)}/artifact`, j.artifact!.fileName, m.locale)
+                  .catch((e: unknown) => setError(errorText(e, m)))}>{t.download}</button>
+              ) : null}
+              {j.cancellable ? (
+                <button type="button" onClick={() => void requestJson(`${worldPath(worldId, 'jobs', j.jobId, 'cancel')}`, { method: 'POST', locale: m.locale })
+                  .then(() => setView(null)).catch((e: unknown) => setError(errorText(e, m)))}>{t.cancel}</button>
+              ) : null}
             </li>
           ))}
         </ul>

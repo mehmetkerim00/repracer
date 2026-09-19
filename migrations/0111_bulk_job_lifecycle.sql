@@ -1,4 +1,4 @@
--- 0111: жизнь фонового задания — отмена, предел очереди, срок хранения [Р-139; OQ-207, OQ-208 шага 30]
+-- 0111_bulk_job_lifecycle.sql: жизнь фонового задания — отмена, предел очереди, срок хранения [Р-139; OQ-207, OQ-208 шага 30]
 --
 -- Ревью шага 30 нашло три вещи, до которых шаг не дошёл. Ошибочно запущенная правка всего каталога останавливалась только
 -- ожиданием. Участник с правом ТОЛЬКО СМОТРЕТЬ мог поставить в очередь сколько угодно предпросмотров по 10 000 предложений —
@@ -49,9 +49,20 @@ CREATE FUNCTION tenant_data.bulk_job_queue_limit() RETURNS trigger
   LANGUAGE plpgsql SET search_path = pg_catalog AS $fn$
 DECLARE
   waiting int;
+  mine    int;
 BEGIN
-  SELECT count(*) INTO waiting FROM tenant_data.bulk_job j
+  SELECT count(*) FILTER (WHERE true), count(*) FILTER (WHERE j.created_by_membership_id = NEW.created_by_membership_id)
+    INTO waiting, mine
+    FROM tenant_data.bulk_job j
    WHERE j.tenant_id = NEW.tenant_id AND j.status IN ('PENDING', 'RUNNING', 'INTERRUPTED');
+  /**
+   * Предел у КАЖДОГО участника свой, и он меньше общего (находка 14 ревью шага 31). Иначе участник с правом только смотреть
+   * занимает всю очередь тенанта выгрузками доказательства — и владелец получает отказ на импорт себестоимости.
+   */
+  IF mine > 5 THEN
+    RAISE EXCEPTION 'member % already has % bulk jobs waiting: finish or cancel them before starting more (Р-139)', NEW.created_by_membership_id, mine - 1
+      USING ERRCODE = 'too_many_rows';
+  END IF;
   IF waiting > 20 THEN
     RAISE EXCEPTION 'tenant % already has % bulk jobs waiting: finish or cancel them before starting more (Р-139)', NEW.tenant_id, waiting - 1
       USING ERRCODE = 'too_many_rows';

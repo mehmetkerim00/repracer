@@ -547,6 +547,8 @@ export interface PricingStore {
   /** Итог задания; false — итог НЕ записан, потому что аренда уже не наша */
   finishBulkJob(tenantId: string, jobId: string, owner: string, outcome: BulkJobOutcome): Promise<boolean>;
   listBulkJobs(tenantId: string, limit?: number): Promise<BulkJobRow[]>;
+  /** Готовые файлы названных заданий — без содержимого: список заданий показывает, к какому из них можно вернуться */
+  bulkJobArtifactSummaries(tenantId: string, jobIds: readonly string[]): Promise<Map<string, { fileName: string; rows: number; sha256: string }>>;
   bulkJob(tenantId: string, jobId: string): Promise<BulkJobRow | null>;
   saveBulkJobArtifact(tenantId: string, jobId: string, artifact: BulkJobArtifact): Promise<void>;
   bulkJobArtifact(tenantId: string, jobId: string): Promise<BulkJobArtifact | null>;
@@ -642,6 +644,8 @@ export type BulkJobKind = 'COST_IMPORT' | 'BOUNDS_EDIT' | 'BOUNDS_PLAN' | 'STRAT
  */
 /** OQ-207: сколько заданий тенант держит в очереди. То же число закреплено в базе (0111) — здесь оно для модели и экрана */
 export const BULK_JOB_QUEUE_LIMIT = 20;
+/** Сколько заданий держит в очереди ОДИН участник: меньше общего предела, чтобы один не занимал очередь тенанта */
+export const BULK_JOB_MEMBER_QUEUE_LIMIT = 5;
 
 export const READ_ONLY_JOB_KINDS: readonly BulkJobKind[] = ['BOUNDS_PLAN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT'];
 export type BulkJobStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'INTERRUPTED' | 'CANCELLED';

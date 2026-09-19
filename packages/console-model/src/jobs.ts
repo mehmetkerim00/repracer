@@ -29,8 +29,12 @@ export interface BulkJobView {
   error: string | null;
   /** Файл, подготовленный заданием, — если он есть [OQ-202] */
   artifact: { fileName: string; rows: number; sha256: string } | null;
-  /** Итог задания как данные — например, посчитанный предпросмотр стратегии [OQ-201]; у незавершённого его нет */
-  result: unknown;
+  /**
+   * То из итога задания, что читает ЭКРАН: посчитанный предпросмотр стратегии или экран различий границ. Остальное остаётся в
+   * базе: у плана правки каталога в итоге лежат 10 000 правок (около мегабайта), и отдавать их экрану — а тем более СПИСКУ
+   * заданий — значит вернуть ответ, который браузер разбирает секундами (находка 4 ревью шага 31).
+   */
+  result: { view: unknown } | null;
   startedAt: string | null;
   finishedAt: string | null;
   attempts: number;
@@ -40,6 +44,13 @@ export interface BulkJobsView {
   items: BulkJobView[];
   /** Идущие задания: экран истории подсвечивает их и обновляется, пока они есть */
   active: number;
+}
+
+/** Из итога задания экрану отдаётся только то, что он показывает: сам экран предпросмотра или различий */
+function screenResult(job: BulkJobRow): { view: unknown } | null {
+  if (job.status !== 'SUCCEEDED') return null;
+  const result = job.result as { view?: unknown } | null;
+  return result?.view === undefined ? null : { view: result.view };
 }
 
 const ACTIVE: ReadonlySet<BulkJobStatus> = new Set<BulkJobStatus>(['PENDING', 'RUNNING', 'INTERRUPTED']);
@@ -107,13 +118,18 @@ export function bulkJobView(job: BulkJobRow, m: Messages, artifact: { fileName: 
     progress: total === null || total === 0 ? null : Math.min(1, done / total),
     done, total, effect, active: ACTIVE.has(job.status), cancellable: job.status === 'PENDING',
     error: job.status === 'FAILED' ? errorTextOf(job, m) : null,
-    artifact, result: job.status === 'SUCCEEDED' ? job.result : null,
+    artifact, result: screenResult(job),
     startedAt: job.startedAt, finishedAt: job.finishedAt, attempts: job.attempts,
   };
 }
 
-/** История заданий тенанта: только его собственные — список приходит из хранилища под его `tenant_id` [Р-16] */
-export function bulkJobsView(jobs: readonly BulkJobRow[], m: Messages): BulkJobsView {
-  const items = jobs.map((j) => bulkJobView(j, m));
+/**
+ * История заданий тенанта: только его собственные — список приходит из хранилища под его `tenant_id` [Р-16]. Итог заданий в
+ * список НЕ входит вовсе: двадцать предпросмотров каталога дали бы ответ в десятки мегабайт (находка 4 ревью шага 31).
+ * Готовый файл назван — по нему продавец и возвращается к заданию, с которого ушёл.
+ */
+export function bulkJobsView(jobs: readonly BulkJobRow[], m: Messages,
+  artifacts: ReadonlyMap<string, { fileName: string; rows: number; sha256: string }> = new Map()): BulkJobsView {
+  const items = jobs.map((j) => ({ ...bulkJobView(j, m, artifacts.get(j.jobId) ?? null), result: null }));
   return { items, active: items.filter((i) => i.active).length };
 }

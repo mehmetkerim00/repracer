@@ -48,7 +48,7 @@ const APPLY_LIMIT_SECONDS = 120;
 /** Операции, у которых предел другой: продавец ждёт их сознательно, видя ход */
 const BULK_APPLY = /\(задание целиком\)$/;
 /** Скачивание готового файла [OQ-202] — не экран: его не разбирает браузер и не показывает страница */
-const FILE_DOWNLOAD = /скачивание файла/;
+const FILE_DOWNLOAD = /скачивание/;
 
 let db: IsolatedDatabase;
 let pool: PgPool;
@@ -468,10 +468,15 @@ test('Р-142: отчёт об импорте и выгрузка ленты це
   assert.equal(report.contentType, 'text/csv');
   const reportLines = report.text.trim().split('\n');
   assert.equal(reportLines[0], 'line,offer_key,raw_value,problem,problem_text');
-  assert.equal(reportLines.length, rows / 2 + 1, 'строк в файле столько же, сколько названо на экране');
+  assert.equal(reportLines.length, planned.summary.skipped + 1, 'строк в файле столько же, сколько названо на ЭКРАНЕ предпросмотра');
   assert.ok(reportLines[1]!.includes('OFFER_NOT_FOUND'), `причина названа у каждой строки: ${reportLines[1]}`);
 
-  // --- Выгрузка ленты цен: весь период файлом, экран отдаёт страницу не больше 200 записей
+  /**
+   * Выгрузка ленты цен: здесь измеряется ПУТЬ — нажатие, работа задания и скачивание тем же клиентом, что у страницы. Строк в
+   * ленте этого мира нет и быть не может: цена пишется только по одобренному решению, а канал в живом прогоне консоли не
+   * трогается [Р-136]. Поэтому СОДЕРЖИМОЕ файла проверяется там, где записи есть, — на мирах стенда
+   * (`console.pg.test.ts`), и утверждение «в файле столько же, сколько на экране» стоит именно там (находка 2 ревью шага 31).
+   */
   const feed = await measure<{ page: { total: number } }>('feed (лента, первая страница)', 'GET', api('feed'));
   assert.equal(feed.status, 200, JSON.stringify(feed.body).slice(0, 200));
   const feedJob = await runBulkOperation('feed/export (вся лента файлом)', api('feed', 'export'), { query: {} });

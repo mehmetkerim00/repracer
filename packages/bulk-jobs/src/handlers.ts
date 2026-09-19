@@ -2,7 +2,7 @@ import { buildPreview, readTable, suggestMapping, type ColumnMapping, type Table
 import {
   boundsDiffView, costImportView, currentStrategies, expandBoundsEdit, importTargets, messagesFor, parseBoundsEditRequest,
   parseStrategyDraft, priceEvidenceCsv, strategyPreviewView, STRATEGY_PREVIEW_ROWS_SHOWN, LOCALES,
-  costImportReportCsv, parseFeedQuery, priceFeedCsv, priceFeedFileName, priceFeedRows,
+  costImportReportCsv, csvOf, parseFeedQuery, PRICE_FEED_CSV_HEADER, priceFeedFileName, priceFeedRows, priceFeedRowsOf,
   type ConsoleScope, type Locale, type StandWorld,
 } from '@repracer/console-model';
 import type { StrategyDefinition } from '@repracer/pricing-model';
@@ -47,7 +47,7 @@ async function buildCsvInChunks<T>(items: readonly T[], render: (chunk: readonly
   for (let i = 0; i < items.length; i += CSV_CHUNK_ROWS) {
     const part = render(items.slice(i, i + CSV_CHUNK_ROWS));
     csv += i === 0 ? part : part.slice(part.indexOf('\n') + 1);
-    await progress(Math.min(i + CSV_CHUNK_ROWS, total), 'PRODUCING');
+    await progress(Math.min(Math.round(((i + CSV_CHUNK_ROWS) / items.length) * total), total), 'PRODUCING');
   }
   return csv;
 }
@@ -88,6 +88,18 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
           if (p.fingerprint !== undefined && p.fingerprint !== preview.fingerprint) throw Object.assign(new Error('plan changed'), { cause: 'PLAN_CHANGED' });
           if (preview.blocked) throw Object.assign(new Error('blocked'), { cause: 'COLUMNS_MISSING' });
           if (preview.apply.length === 0) throw Object.assign(new Error('no rows'), { cause: 'NO_ROWS' });
+          /**
+           * Отчёт об импорте пишется ДО применения (находка 13 ревью шага 31). Он описывает предпросмотр и известен заранее, а
+           * писать его ПОСЛЕ значило расширить окно между «в базе уже применено» и «задание об этом знает»: процесс, убитый в
+           * этом окне, оставлял бы применённую себестоимость при задании, которое говорит «в базе ничего не изменено».
+           */
+          const report = preview.skipped.length > 0 ? costImportReportCsv(preview, m) : null;
+          if (report !== null) {
+            await ctx.store.saveBulkJobArtifact(ctx.tenantId, ctx.jobId, {
+              fileName: `import-report_${p.fileName.replace(/[^\w.\-]/g, '_')}.csv`, contentType: 'text/csv',
+              content: report, sha256: sha256(report), rows: preview.skipped.length,
+            });
+          }
           await progress(preview.apply.length, 'APPLYING');
           const applied = await ctx.store.importCosts(ctx.tenantId, {
             sourceName: p.fileName, sourceFormat: sheet.format, fingerprint: preview.fingerprint, skippedRows: preview.totals.skipped,
@@ -103,13 +115,6 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
            * несопоставленными продавец по экрану не поймёт, какие строки чинить; с файлом он правит свою выгрузку и ввозит
            * снова. Файл пишется после применения — вместе с тем, что применилось.
            */
-          const report = preview.skipped.length > 0 ? costImportReportCsv(preview, m) : null;
-          if (report !== null) {
-            await ctx.store.saveBulkJobArtifact(ctx.tenantId, ctx.jobId, {
-              fileName: `import-report_${p.fileName.replace(/[^\w.\-]/g, '_')}.csv`, contentType: 'text/csv',
-              content: report, sha256: sha256(report), rows: preview.skipped.length,
-            });
-          }
           return {
             rows: applied.rows, offers: applied.offers, skipped: preview.totals.skipped,
             offersMissing: preview.totals.offersMissing, headline: view.headline,
@@ -281,12 +286,14 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
         total,
         async run(progress) {
           await progress(0, 'PRODUCING');
-          const csv = priceFeedCsv(world, m, query);
-          await progress(total, 'PRODUCING');
+          // Строки собираются ОДНИМ проходом, файл — частями с отдачей цикла событий: иначе аренда истечёт посреди сборки
+          const rows = priceFeedRowsOf(world, m, query);
+          const csv = await buildCsvInChunks(rows, (chunk) => csvOf(PRICE_FEED_CSV_HEADER, chunk), progress, total);
+          const digest = sha256(csv);
           await ctx.store.saveBulkJobArtifact(ctx.tenantId, ctx.jobId, {
-            fileName: priceFeedFileName(world, m, query), contentType: 'text/csv', content: csv, sha256: sha256(csv), rows: total,
+            fileName: priceFeedFileName(world, m, query), contentType: 'text/csv', content: csv, sha256: digest, rows: rows.length,
           });
-          return { rows: total, bytes: Buffer.byteLength(csv, 'utf8'), sha256: sha256(csv) };
+          return { rows: rows.length, bytes: Buffer.byteLength(csv, 'utf8'), sha256: digest };
         },
       };
     },
@@ -306,12 +313,18 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
           const days = await ctx.store.priceEvidence(ctx.tenantId, {
             from: p.from, to: p.to, ...(p.writeScopeId ? { writeScopeIds: [p.writeScopeId] } : {}),
           });
-          // Файл собирается частями: между ними поток отдаётся, иначе продление аренды не успевает сработать (шаг 31)
-          const csv = await buildCsvInChunks(days, (chunk) => priceEvidenceCsv(world, chunk), progress, days.length);
+          /**
+           * Файл собирается частями: между ними поток отдаётся, иначе продление аренды не успевает сработать (шаг 31). Ход
+           * считается в ТЕХ ЖЕ единицах, что объявлен объём задания, — в предложениях: «300000 из 10000» не читается никак.
+           */
+          const scopes = world.state.scopes.length;
+          const csv = await buildCsvInChunks(days, (chunk) => priceEvidenceCsv(world, chunk), progress, scopes);
+          // Сумма считается ОДИН раз: на 27 мегабайтах два счёта — это две секунды процессора на ровном месте
+          const digest = sha256(csv);
           await ctx.store.saveBulkJobArtifact(ctx.tenantId, ctx.jobId, {
-            fileName: `price-evidence_${p.from}_${p.to}.csv`, contentType: 'text/csv', content: csv, sha256: sha256(csv), rows: days.length,
+            fileName: `price-evidence_${p.from}_${p.to}.csv`, contentType: 'text/csv', content: csv, sha256: digest, rows: days.length,
           });
-          return { rows: days.length, bytes: Buffer.byteLength(csv, 'utf8'), sha256: sha256(csv) };
+          return { rows: days.length, bytes: Buffer.byteLength(csv, 'utf8'), sha256: digest };
         },
       };
     },

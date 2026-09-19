@@ -293,7 +293,7 @@ export const en = {
       worlds: 'Stand worlds',
       worldsHint: 'Each world is a stand scenario on synthetic data. No channel is connected.',
       backToWorlds: '← Worlds',
-      screens: { products: 'Products', decisions: 'Why this price', rejected: 'Stopped changes', bounds: 'Bounds', 'cost-import': 'Cost import', stop: 'Stop pricing', strategies: 'Strategies', feed: 'Price changes', dangerous: 'Dangerous changes', compliance: 'Omnibus' },
+      screens: { products: 'Products', decisions: 'Why this price', rejected: 'Stopped changes', bounds: 'Bounds', 'cost-import': 'Cost import', stop: 'Stop pricing', strategies: 'Strategies', feed: 'Price changes', dangerous: 'Dangerous changes', compliance: 'Omnibus', jobs: 'Bulk operations' },
       loading: (seconds: number) => `Loading stand data. If there is no answer within ${seconds} s, an error is shown.`,
       timeout: (seconds: number) => `The stand did not answer within ${seconds} s. Is it running? npm run stand -w @repracer/console`,
       unavailable: (detail: string) => `The stand is unavailable: ${detail}`,

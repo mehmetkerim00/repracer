@@ -117,19 +117,29 @@ SELECT pg_temp.ok('cancelling a bulk job is written to the audit log (Р-97)', $
     END IF;
   END $x$ $q$);
 
--- Предел очереди: двадцать первое ждущее задание тенант не принимает [OQ-207]
+/**
+ * Предел очереди — у каждого участника свой и меньше общего [OQ-207, находка 14 ревью шага 31]: иначе один занимает очередь
+ * тенанта, и остальные получают отказ на свою работу.
+ */
 DO $$
 DECLARE
   i int;
 BEGIN
-  FOR i IN 1..18 LOOP
+  -- У владельца уже два ждущих задания (j1 и j2): добираем до его предела в пять
+  FOR i IN 1..3 LOOP
     INSERT INTO tenant_data.bulk_job (tenant_id, kind, params, created_by_membership_id)
     VALUES ('a0000000-0000-0000-0000-00000000000a', 'PRICE_EVIDENCE', '{}'::jsonb, 'a2000000-0000-0000-0000-00000000000a');
   END LOOP;
 END $$;
-SELECT pg_temp.expect_fail('a tenant queues more bulk jobs than the limit (OQ-207)', format($q$
+SELECT pg_temp.expect_fail('a member queues more bulk jobs than their own limit (OQ-207)', format($q$
   INSERT INTO tenant_data.bulk_job (tenant_id, kind, params, created_by_membership_id)
-  VALUES (%L, 'PRICE_EVIDENCE', '{}'::jsonb, %L) $q$, :tA, :ownerM), 'bulk jobs waiting');
+  VALUES (%L, 'PRICE_EVIDENCE', '{}'::jsonb, %L) $q$, :tA, :ownerM), 'member .* already has');
+-- Очередь тенанта при этом свободна: другой участник своё задание ставит
+SELECT set_config('app.user_id', :viewer, false) \gset
+SELECT pg_temp.ok('another member is not blocked by the queue of the first (OQ-207)', format($q$
+  INSERT INTO tenant_data.bulk_job (tenant_id, kind, params, created_by_membership_id)
+  VALUES (%L, 'PRICE_EVIDENCE', '{}'::jsonb, %L) $q$, :tA, :viewerM));
+SELECT set_config('app.user_id', :owner, false) \gset
 
 \c - svc_bulk_worker
 \i tests/db/smoke_helpers.sql

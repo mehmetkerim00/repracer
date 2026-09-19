@@ -704,19 +704,30 @@ test('Р-142: ни один экран консоли не ведёт ссылк
   const { readdirSync, readFileSync } = await import('node:fs');
   const dir = new URL('../src/screens/', import.meta.url);
   const files = ['../src/App.tsx', '../src/components.tsx', ...readdirSync(dir).map((f) => `../src/screens/${f}`)];
-  // Ссылка или встроенный ресурс, указывающий на /api/ — прямо или через worldPath, который всегда даёт /api/…
-  const linksToApi = (line: string) => /(?:href|src|action)\s*=\s*\{?[^}\n]*(?:'\/api\/|"\/api\/|`\/api\/|worldPath\()/.test(line);
+  /**
+   * Что именно запрещено: отдать браузеру адрес API так, чтобы он пошёл туда САМ, — ссылкой, ресурсом, новой вкладкой или
+   * сменой адреса страницы. Во всех этих случаях заголовка `Authorization` не будет. Правило смотрит на текст экрана целиком,
+   * а не построчно: атрибут JSX переносится на следующую строку так же легко, как остаётся на одной (находка 10 ревью шага 31).
+   */
+  const NAVIGATION = /(?:href|src|action)\s*=|window\.open\s*\(|location\s*\.\s*(?:href|assign|replace)\s*[=(]/g;
+  const API_TARGET = /^[^;\n]{0,200}?(?:'\/api\/|"\/api\/|`\/api\/|worldPath\s*\()/;
+  const linksToApi = (text: string) => [...text.matchAll(NAVIGATION)].some((hit) => API_TARGET.test(text.slice(hit.index + hit[0].length)));
   // У правила должны быть зубы: то, что оно ищет, оно обязано находить — иначе оно зеленеет на чём угодно [Р-94]
-  assert.equal(linksToApi(`<a href={\`${'$'}{worldPath(worldId, 'jobs', jobId)}/artifact\`} download>x</a>`), true,
-    'правило ловит ту самую ссылку, из-за которой доказательство Omnibus нельзя было скачать');
-  assert.equal(linksToApi(`<a href={href(world.id, 'products')}>{w.title}</a>`), false, 'внутренние переходы экрана — не адреса API');
+  for (const bad of [
+    `<a href={\`${'$'}{worldPath(worldId, 'jobs', jobId)}/artifact\`} download>x</a>`,
+    `window.open(worldPath(worldId, 'jobs', jobId) + '/artifact')`,
+    `location.href = '/api/worlds/x/jobs';`,
+    `<a\n  href={worldPath(worldId, 'jobs')}\n>x</a>`,
+  ]) assert.equal(linksToApi(bad), true, `правило обязано ловить: ${bad.slice(0, 60)}`);
+  for (const fine of [
+    `<a href={href(world.id, 'products')}>{w.title}</a>`,
+    `void downloadFile(\`${'$'}{worldPath(worldId, 'jobs', jobId)}/artifact\`, name, m.locale)`,
+  ]) assert.equal(linksToApi(fine), false, `правило не должно ловить: ${fine.slice(0, 60)}`);
 
   const offenders: string[] = [];
   for (const file of files) {
     const text = readFileSync(new URL(file, import.meta.url), 'utf8');
-    for (const [i, line] of text.split('\n').entries()) {
-      if (linksToApi(line)) offenders.push(`${file.split('/').pop()}:${i + 1}: ${line.trim().slice(0, 120)}`);
-    }
+    if (linksToApi(text)) offenders.push(file.split('/').pop()!);
   }
   assert.deepEqual(offenders, [], 'ссылка на API в консоли: браузер пойдёт по ней без токена и получит 401, а не файл');
 });
@@ -748,13 +759,23 @@ test('OQ-207: ждущее задание отменяется, идущее —
   assert.equal(done.cancellable, false, 'у завершённого задания кнопки отмены нет');
   assert.equal((await call(owner, 'POST', api(id, 'jobs', done.jobId, 'cancel'))).status, 409);
 
-  // Очередь тенанта ограничена: двадцать первое ждущее задание не принимается, и продавцу сказано, что делать
+  /**
+   * У КАЖДОГО участника свой предел очереди, и он меньше общего: иначе участник с правом только смотреть занимает очередь
+   * тенанта выгрузками, и владелец получает отказ на импорт себестоимости (находка 14 ревью шага 31).
+   */
   const queued: string[] = [];
-  for (let i = 0; i < 20; i++) queued.push(await start());
+  for (let i = 0; i < 5; i++) queued.push(await start());
   const overflow = await call(owner, 'POST', api(id, 'compliance', 'evidence'), { from: '2026-01-01', to: '2026-01-31' });
-  assert.equal(overflow.status, 409, `очередь тенанта ограничена: ${JSON.stringify(overflow.body)}`);
+  assert.equal(overflow.status, 409, `очередь участника ограничена: ${JSON.stringify(overflow.body)}`);
+  // Другой участник в это же время ставит СВОЁ задание: очередь тенанта им не занята
+  const viewer = await login('VIEWER');
+  assert.equal((await call(viewer, 'POST', api(id, 'compliance', 'evidence'), { from: '2026-01-01', to: '2026-01-31' })).status, 200,
+    'предел одного участника не закрывает очередь остальным');
   // Место освобождается отменой — ровно то, ради чего она и нужна
   assert.equal((await call(owner, 'POST', api(id, 'jobs', queued[0]!, 'cancel'))).status, 200);
   assert.equal((await call(owner, 'POST', api(id, 'compliance', 'evidence'), { from: '2026-01-01', to: '2026-01-31' })).status, 200);
+  // Чужое задание отменяет только тот, кто вправе менять цены: зритель — нет [находка 3 ревью шага 31]
+  const byViewer = await call(viewer, 'POST', api(id, 'jobs', queued[1]!, 'cancel'));
+  assert.deepEqual([byViewer.status, (byViewer.body as { error: { code: string } }).error.code], [403, 'FORBIDDEN']);
   await runPendingJobs(live);
 });

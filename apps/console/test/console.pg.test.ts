@@ -217,3 +217,27 @@ test('step 24, Р-123 on PostgreSQL: the check before announcing, the refusal of
   const csv = (file.file as { content: string }).content.trim().split('\n');
   assert.ok(csv.length > 1 && csv.slice(1).every((l: string) => l.startsWith('KAUFLAND,de,') && l.includes(',Europe/Berlin,EUR,GROSS,')), csv.join('\n'));
 });
+
+/**
+ * Р-142 (шаг 31): содержимое выгрузки ленты цен проверяется там, где записи в канал ЕСТЬ, — на мире стенда, прогнанном
+ * сценарием. В живом прогоне консоли их нет и быть не может (цена пишется только по одобренному решению), поэтому утверждение
+ * «в файле столько же, сколько на экране» стоит здесь, а не там (находка 2 ревью шага 31).
+ */
+test('Р-142: выгрузка ленты цен — файл со всеми записями окна, а не страница экрана', async () => {
+  const owner = await login('OWNER');
+  const url = (...parts: string[]) => `/api/worlds/${[WORLD, ...parts].map(encodeURIComponent).join('/')}`;
+  const feed = (await handle({ method: 'GET', url: url('feed'), body: undefined, ...owner })).body as PriceFeedView;
+  assert.ok(feed.page.total > 0, `в ленте мира стенда есть записи: ${feed.page.total}`);
+
+  const job = await finishJob(await handle({ method: 'POST', url: url('feed', 'export'), body: { query: {} }, ...owner }));
+  assert.equal(job.status, 'SUCCEEDED', job.error ?? '');
+  assert.equal(job.artifact!.rows, feed.page.total, 'в файле столько записей, сколько лента насчитала по всему окну');
+
+  const file = await handle({ method: 'GET', url: url('jobs', job.jobId, 'artifact'), body: undefined, ...owner });
+  assert.equal(file.status, 200, JSON.stringify(file.body));
+  const lines = (file.file as { content: string }).content.trim().split('\n');
+  assert.equal(lines[0], 'at,channel,marketplace,offer,price_from,price_to,change,status,source,reason,decision_id');
+  assert.equal(lines.length, feed.page.total + 1, 'строк в файле столько же, сколько записей в ленте, плюс заголовок');
+  // Файл — это то же, что на экране: первая запись ленты узнаётся в первой строке файла
+  assert.ok(lines[1]!.includes(feed.items[0]!.to), `первая строка файла — первая запись ленты: ${lines[1]}`);
+});
