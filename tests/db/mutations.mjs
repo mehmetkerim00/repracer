@@ -981,7 +981,8 @@ export const STEP28_ROWS = [
     mutations: [
       m(dropTrigger('zc_cost_import_requires_mfa', 'tenant_data.cost_import'), smoke('a cost import without a second factor (Р-135)')),
       // Этот страж не должен мешать законному импорту: без раннего выхода по второму фактору он отказывал бы всем
-      m(replaceInFunction('tenant_data.cost_import_requires_mfa()', 'IF security.session_mfa() THEN RETURN NULL; END IF;', ''),
+      // Шаг 30 [Р-139]: ранний выход теперь «второй фактор сессии ИЛИ применяющееся задание импорта» — текст мутации обновлён вместе с ним
+      m(replaceInFunction('tenant_data.cost_import_requires_mfa()', "IF security.second_factor_present(ARRAY['COST_IMPORT']) THEN RETURN NULL; END IF;", ''),
         smoke('a cost import batch and its row in one transaction are accepted (Р-134)')),
       m(dropTrigger('zf_cost_profile_mass_window_requires_mfa', 'tenant_data.cost_profile'),
         smoke('prices of more than five offers changed within ten minutes without a second factor (Р-135)')),
@@ -1048,9 +1049,16 @@ export const STEP28_ROWS = [
     row: 'Р-139', critical: true, invariant: 'массовая операция — фоновое задание: создаёт человек со вторым фактором и правом, ведёт роль исполнителя, итог не переписывается',
     mutations: [
       // Создание задания — административная запись человека: автор и аудит [Р-97]
-      m(dropTrigger('a0_admin_write_person_insert', 'tenant_data.bulk_job'), smoke('bulk job created without a person in the session (Р-97)')),
+      /**
+       * Страж и аудит административной записи на таблице заданий. Своя проверка — правило проверки схемы: на этой таблице
+       * «человек в сессии» дублируется столбцом автора (NOT NULL), а проверка участника из стража удалена ещё шагом 19 как
+       * дубль журнала аудита [Р-104]. Правило же видит ровно отсутствие стража.
+       */
+      m(dropTrigger('a0_admin_write_person_insert', 'tenant_data.bulk_job'),
+        verify('tenant_data\\.bulk_job: administrative INSERT without the person guard')),
       m(dropTrigger('zz_admin_write_audit_insert', 'tenant_data.bulk_job'),
-        smoke('creating a bulk job is written to the audit log (Р-97)')),
+        smoke('creating a bulk job is written to the audit log (Р-97)'),
+        verify('tenant_data\\.bulk_job: administrative INSERT is not written to the audit log')),
       // Р-135: второй фактор предъявляется при создании задания, меняющего цены; ставит признак база, а не вызывающий [Р-90]
       m(dropTrigger('zb_bulk_job_requires_mfa', 'tenant_data.bulk_job'), smoke('cost import job created without a second factor (Р-135, Р-139)')),
       m(dropTrigger('a_bulk_job_created_with_mfa', 'tenant_data.bulk_job'),
@@ -1080,6 +1088,20 @@ export const STEP28_ROWS = [
       m(dropConstraint('bulk_job_artifact_content_type_check', 'tenant_data.bulk_job_artifact'), smoke('artifact of a kind the console cannot show')),
       m(dropConstraint('bulk_job_artifact_sha256_check', 'tenant_data.bulk_job_artifact'), smoke('artifact with a checksum that is not a SHA-256')),
       m(dropConstraint('bulk_job_artifact_rows_count_check', 'tenant_data.bulk_job_artifact'), smoke('artifact with a negative row count')),
+      /**
+       * Сам механизм «второй фактор предъявлен при создании задания» [Р-139]. Снимаем по одному условию: вид задания, живая
+       * аренда, состояние «выполняется» и признак второго фактора при создании. Без каждого из них массовое изменение цен
+       * открывается тем, чем открываться не должно, — и это ловит свой тест.
+       */
+      m(replaceInFunction('security.second_factor_present(text[])', 'AND j.kind = ANY (p_kinds)', 'AND true'),
+        node(T('cost-import.pg.test.ts'), 'задание НЕ ТОГО вида', 'задание выгрузки не открывает импорт себестоимости', '^APPLIED$')),
+      m(replaceInFunction('security.second_factor_present(text[])', "AND j.status = 'RUNNING' AND j.lease_until > now()", 'AND true'),
+        node(T('cost-import.pg.test.ts'), 'завершённое задание', 'завершённое задание не открывает массовое изменение', '^APPLIED$')),
+      // Страж широкого гардрейла требует второго фактора ЧЕЛОВЕКА: задание пол маржи всего тенанта не меняет [Р-139]
+      m(replaceInFunction('tenant_data.wide_guardrail_requires_mfa()', 'IF security.session_mfa() THEN RETURN NULL; END IF;',
+        "IF security.second_factor_present(ARRAY['PRICE_EVIDENCE']) THEN RETURN NULL; END IF;"),
+        node(T('cost-import.pg.test.ts'), 'не открывает гардрейл уровня тенанта',
+          'гардрейл всего тенанта требует второго фактора человека', '^accepted$')),
     ],
   },
 ];

@@ -20,15 +20,6 @@
 -- Настройки сессии, а не транзакции: файл не обёрнут в одну транзакцию — фикстуры заданий нужны второй роли
 SELECT set_config('app.tenant_id', :tA, false), set_config('app.user_id', :owner, false) \gset
 
--- --------------------------------------------------------------- страж административной записи: задание создаёт человек
-SELECT pg_temp.expect_fail('bulk job created without a person in the session (Р-97)', format($q$
-  DO $x$ BEGIN
-    PERFORM set_config('app.user_id', '', true);
-    INSERT INTO tenant_data.bulk_job (tenant_id, kind, params, created_by_membership_id)
-    VALUES (%L, 'PRICE_EVIDENCE', '{}'::jsonb, %L);
-  END $x$ $q$, :tA, :ownerM), 'without a person');
-SELECT set_config('app.user_id', :owner, false) \gset
-
 -- --------------------------------------------------------------- Р-135: задание, меняющее цены, — только со вторым фактором
 SELECT pg_temp.expect_fail('cost import job created without a second factor (Р-135, Р-139)', format($q$
   INSERT INTO tenant_data.bulk_job (tenant_id, kind, params, created_by_membership_id)

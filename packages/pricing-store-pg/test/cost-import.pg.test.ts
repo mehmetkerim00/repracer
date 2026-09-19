@@ -39,7 +39,7 @@ before(async () => {
     provisioningPool: db.pool('svc_provisioning', 1), adminPool: admin, fixtureTenantId: TENANT, fixtureChannelAccountId: ACCOUNT,
     marketplaces: ['de'], clock: new Date().toISOString(), seed: { scopes: [1, 2, 3, 4, 5, 6, 7, 8].map(scope) },
   });
-  store = new PgPricingStore(pool, { adminPool: admin });
+  store = new PgPricingStore(pool, { adminPool: admin, bulkWorkerPool: db.pool('svc_bulk_worker', 2) });
 });
 
 after(async () => {
@@ -250,4 +250,63 @@ test('Р-138 (шаг 29): комиссия продавца — свой ист�
   const rateOnly = await marginFloor();
   console.log(JSON.stringify({ floorWithFixedFeeEstimate: withFixedFee, floorByRateOnly: rateOnly }));
   assert.ok(withFixedFee > rateOnly, 'дороже — не значит «больше ставка»: пол посчитан по оценке с фиксированной частью');
+});
+
+/**
+ * Р-139 (шаг 30): второй фактор предъявляет человек при СОЗДАНИИ задания, а применяет его процесс. Проверяется, что этот путь
+ * не стал дырой. У каждого условия — СВОЙ тест [Р-99]: иначе первое упавшее утверждение прячет остальные, и мутационная
+ * проверка не может сказать, какая именно часть защиты исчезла.
+ */
+const jobActor = (jobId: string) => ({ membershipId: world.ownerMembershipId, userId: world.userId, mfa: false, bulkJobId: jobId });
+async function runningJob(kind: 'COST_IMPORT' | 'PRICE_EVIDENCE', mfa: boolean, owner: string) {
+  const created = await store.createBulkJob(world.tenantId, { kind, params: {} }, actor(mfa));
+  assert.equal(created.status, 'CREATED', JSON.stringify(created));
+  const claimed = await store.claimBulkJob(world.tenantId, owner, 60);
+  assert.equal(claimed?.kind, kind, 'задание взято в работу');
+  return claimed!;
+}
+
+test('Р-139: задание НЕ ТОГО вида не открывает массовое изменение цен', async () => {
+  // Выгрузка доказательства второго фактора не требует — иначе достаточно было бы создать её и импортировать под её именем
+  const evidence = await runningJob('PRICE_EVIDENCE', false, 'review-kind');
+  const applied = await store.importCosts(world.tenantId, batchOf(rowsFor([6], 610), 'fp-job-kind'), jobActor(evidence.jobId), 'APPLY');
+  assert.equal(applied.status, 'MFA_REQUIRED', 'задание выгрузки не открывает импорт себестоимости');
+  await store.finishBulkJob(world.tenantId, evidence.jobId, 'review-kind', { status: 'SUCCEEDED', result: {} });
+});
+
+test('Р-139, Р-135: задание того вида создаётся только со вторым фактором и открывает изменение, только пока выполняется', async () => {
+  const noMfa = await store.createBulkJob(world.tenantId, { kind: 'COST_IMPORT', params: {} }, actor(false));
+  assert.equal(noMfa.status, 'MFA_REQUIRED', 'задание, меняющее цены, без второго фактора не создаётся');
+  const job = await runningJob('COST_IMPORT', true, 'review-live');
+  const applied = await store.importCosts(world.tenantId, batchOf(rowsFor([7], 620), 'fp-job-ok'), jobActor(job.jobId), 'APPLY');
+  assert.equal(applied.status, 'APPLIED', JSON.stringify(applied));
+  await store.finishBulkJob(world.tenantId, job.jobId, 'review-live', { status: 'SUCCEEDED', result: {} });
+});
+
+test('Р-139: завершённое задание массовое изменение больше не открывает', async () => {
+  const job = await runningJob('COST_IMPORT', true, 'review-finished');
+  await store.finishBulkJob(world.tenantId, job.jobId, 'review-finished', { status: 'SUCCEEDED', result: {} });
+  const applied = await store.importCosts(world.tenantId, batchOf(rowsFor([8], 630), 'fp-job-finished'), jobActor(job.jobId), 'APPLY');
+  assert.equal(applied.status, 'MFA_REQUIRED', 'завершённое задание не открывает массовое изменение');
+});
+
+/**
+ * Гардрейл шире одного предложения меняет пол маржи у ВСЕХ предложений тенанта [Р-135]. Ни одно фоновое задание его не меняет,
+ * поэтому здесь нужен второй фактор ЧЕЛОВЕКА. Первая редакция шага 30 звала страж без указания вида задания — и выполняющаяся
+ * выгрузка доказательства, которой второй фактор не нужен вовсе, открывала изменение пола маржи всего каталога.
+ */
+test('Р-139, Р-135: выполняющееся задание выгрузки не открывает гардрейл уровня тенанта', async () => {
+  const evidence = await runningJob('PRICE_EVIDENCE', false, 'review-guardrail');
+  const refused = await inTenant(admin, world.tenantId, async (tx) => {
+    try {
+      await tx.query(
+        `INSERT INTO tenant_data.guardrail (tenant_id, scope_type, min_margin_bp, version, created_by_membership_id)
+         VALUES ($1, 'TENANT', 1500, 1, $2)`, [world.tenantId, world.ownerMembershipId]);
+      return 'accepted';
+    } catch (error) {
+      return String((error as Error).message);
+    }
+  }, world.userId, { mfa: false, bulkJobId: evidence.jobId });
+  assert.match(refused, /covers every offer: changing it requires a second factor/, 'гардрейл всего тенанта требует второго фактора человека');
+  await store.finishBulkJob(world.tenantId, evidence.jobId, 'review-guardrail', { status: 'SUCCEEDED', result: {} });
 });

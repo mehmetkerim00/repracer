@@ -210,7 +210,7 @@ ALTER FUNCTION tenant_data.bulk_job_status_forward_only() OWNER TO repracer_owne
  * Задание называет себя в `app.bulk_job_id`; проверяется, что оно того же тенанта, создано со вторым фактором, выполняется с
  * живой арендой и его вид совпадает с тем, что пишется. Задание импорта не открывает правку границ.
  */
-CREATE FUNCTION security.second_factor_present(p_kinds text[] DEFAULT NULL) RETURNS boolean
+CREATE FUNCTION security.second_factor_present(p_kinds text[]) RETURNS boolean
   LANGUAGE plpgsql STABLE SET search_path = pg_catalog AS $fn$
 DECLARE
   job_id uuid;
@@ -224,10 +224,18 @@ BEGIN
     RETURN false;
   END;
   IF job_id IS NULL THEN RETURN false; END IF;
+  /**
+   * Вид задания обязателен. Раньше у аргумента было значение по умолчанию NULL — «любое задание», — и страж широкого гардрейла
+   * звал функцию без вида: выполняющееся задание ВЫГРУЗКИ ДОКАЗАТЕЛЬСТВА, которому второй фактор не нужен вовсе, открывало
+   * изменение пола маржи у всех предложений тенанта. Нашла мутационная проверка [Р-95].
+   *
+   * Признак `created_with_mfa` здесь не проверяется: задание вида, меняющего цены, без второго фактора не существует — это
+   * отдельная защита `zb_bulk_job_requires_mfa` со своей строкой каталога. Дубль защиты не оставляется [Р-104].
+   */
   SELECT true INTO ok FROM tenant_data.bulk_job j
    WHERE j.tenant_id = security.current_tenant_id() AND j.bulk_job_id = job_id
-     AND j.created_with_mfa AND j.status = 'RUNNING' AND j.lease_until > now()
-     AND (p_kinds IS NULL OR j.kind = ANY (p_kinds));
+     AND j.status = 'RUNNING' AND j.lease_until > now()
+     AND j.kind = ANY (p_kinds);
   RETURN coalesce(ok, false);
 END $fn$;
 /**
@@ -321,7 +329,8 @@ CREATE OR REPLACE FUNCTION tenant_data.wide_guardrail_requires_mfa() RETURNS tri
   LANGUAGE plpgsql SET search_path = pg_catalog AS $fn$
 BEGIN
   IF NOT security.admin_session() THEN RETURN NULL; END IF;
-  IF security.second_factor_present() THEN RETURN NULL; END IF;
+  -- Гардрейл не меняет ни одно фоновое задание: здесь нужен второй фактор ЧЕЛОВЕКА, а не задания [Р-139]
+  IF security.session_mfa() THEN RETURN NULL; END IF;
   IF NEW.scope_type IN ('TENANT', 'CHANNEL_ACCOUNT') THEN
     RAISE EXCEPTION 'a guardrail of scope % covers every offer: changing it requires a second factor (Р-135)', NEW.scope_type
       USING ERRCODE = 'insufficient_privilege';
