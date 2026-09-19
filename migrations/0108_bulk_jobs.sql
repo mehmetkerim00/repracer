@@ -8,8 +8,9 @@
 --
 -- Второй фактор [Р-135]. Задание создаёт человек — и предъявляет второй фактор при СОЗДАНИИ. Применяет его фоновый процесс, у
 -- которого сессии человека нет. Поэтому стражи массового изменения принимают второй фактор «сейчас в сессии ИЛИ при создании
--- задания, которое сейчас применяется»: `security.second_factor_present(kinds)`. Вид задания сверяется с тем, что пишется, —
--- задание импорта не открывает правку границ.
+-- задания, которое сейчас применяется»: `security.second_factor_present(kinds)`. Вид задания сверяется с тем, что пишется: у
+-- пакета импорта это только `COST_IMPORT`, у версий цены и себестоимости — `COST_IMPORT` и `BOUNDS_EDIT` (обе операции их
+-- пишут), у гардрейла — ни одно задание, там нужен второй фактор человека.
 
 BEGIN;
 
@@ -99,14 +100,19 @@ CREATE TRIGGER a_bulk_job_created_with_mfa BEFORE INSERT ON tenant_data.bulk_job
 ALTER FUNCTION tenant_data.bulk_job_created_with_mfa() OWNER TO repracer_owner;
 
 /**
- * Р-135, Р-139: задание, которое МЕНЯЕТ цены, создаётся только со вторым фактором. Выгрузка доказательства (`PRICE_EVIDENCE`)
- * ничего не меняет — ей второй фактор не нужен.
+ * Р-135, Р-139: задание ИМПОРТА себестоимости создаётся только со вторым фактором — импорт массовый всегда, это его смысл
+ * [Р-134]. У правки границ и назначения стратегии объём заранее неизвестен: правка ОДНОГО предложения второго фактора не
+ * требовала и до шага 30 не должна требовать и после (находка 4 ревью шага 30). Сколько предложений затронуто, видит только
+ * запись — и там же, в `bounds_mass_edit_requires_mfa` и `mass_change_window_requires_mfa`, второй фактор и требуется.
+ *
+ * Этим признак `created_with_mfa` у задания становится НЕСУЩИМ: задание границ без второго фактора существует, и
+ * `security.second_factor_present` обязана его отличать.
  */
 CREATE FUNCTION tenant_data.bulk_job_requires_mfa() RETURNS trigger
   LANGUAGE plpgsql SET search_path = pg_catalog AS $fn$
 BEGIN
-  IF NEW.kind NOT IN ('PRICE_EVIDENCE', 'STRATEGY_PREVIEW') AND NOT NEW.created_with_mfa THEN
-    RAISE EXCEPTION 'a bulk job of kind % changes prices: creating it needs a second factor (Р-135, Р-139)', NEW.kind
+  IF NEW.kind = 'COST_IMPORT' AND NOT NEW.created_with_mfa THEN
+    RAISE EXCEPTION 'a bulk job of kind % changes prices in bulk: creating it needs a second factor (Р-135, Р-139)', NEW.kind
       USING ERRCODE = 'insufficient_privilege';
   END IF;
   RETURN NULL;
@@ -225,16 +231,15 @@ BEGIN
   END;
   IF job_id IS NULL THEN RETURN false; END IF;
   /**
-   * Вид задания обязателен. Раньше у аргумента было значение по умолчанию NULL — «любое задание», — и страж широкого гардрейла
-   * звал функцию без вида: выполняющееся задание ВЫГРУЗКИ ДОКАЗАТЕЛЬСТВА, которому второй фактор не нужен вовсе, открывало
-   * изменение пола маржи у всех предложений тенанта. Нашла мутационная проверка [Р-95].
-   *
-   * Признак `created_with_mfa` здесь не проверяется: задание вида, меняющего цены, без второго фактора не существует — это
-   * отдельная защита `zb_bulk_job_requires_mfa` со своей строкой каталога. Дубль защиты не оставляется [Р-104].
+   * Три условия, и каждое несущее. Вид задания обязателен: у аргумента было значение по умолчанию NULL — «любое задание», — и
+   * страж широкого гардрейла звал функцию без вида, так что выполняющаяся ВЫГРУЗКА ДОКАЗАТЕЛЬСТВА открывала изменение пола
+   * маржи у всех предложений тенанта (нашла мутационная проверка). Живая аренда: завершённое задание ничего не открывает.
+   * Второй фактор при создании: задание правки границ создаётся и БЕЗ него — для одного предложения он и не нужен, — и такое
+   * задание не должно открывать массовую правку.
    */
   SELECT true INTO ok FROM tenant_data.bulk_job j
    WHERE j.tenant_id = security.current_tenant_id() AND j.bulk_job_id = job_id
-     AND j.status = 'RUNNING' AND j.lease_until > now()
+     AND j.created_with_mfa AND j.status = 'RUNNING' AND j.lease_until > now()
      AND j.kind = ANY (p_kinds);
   RETURN coalesce(ok, false);
 END $fn$;
@@ -245,6 +250,20 @@ END $fn$;
  */
 ALTER FUNCTION security.second_factor_present(text[]) OWNER TO repracer_owner;
 GRANT EXECUTE ON FUNCTION security.second_factor_present(text[]) TO repracer_app, repracer_admin;
+
+/**
+ * Находка 6 ревью шага 30. Столбец `created_with_mfa` у версий цены и себестоимости введён шагом 28 ровно затем, чтобы окно
+ * массовой правки [Р-135] считало только изменения БЕЗ второго фактора. Пока задание работало «без второго фактора в сессии»,
+ * все 10 000 версий, подтверждённых человеком при создании задания, ложились как неподтверждённые — и окно считало их своими.
+ * Признак ставит база и теперь по тому же правилу, по которому пропускает запись: второй фактор сессии ИЛИ задание.
+ */
+CREATE OR REPLACE FUNCTION tenant_data.mark_created_with_mfa() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = pg_catalog AS $fn$
+BEGIN
+  NEW.created_with_mfa := security.second_factor_present(ARRAY['COST_IMPORT', 'BOUNDS_EDIT']);
+  RETURN NEW;
+END $fn$;
+ALTER FUNCTION tenant_data.mark_created_with_mfa() OWNER TO repracer_owner;
 
 -- Стражи массового изменения принимают второй фактор задания: вид задания сверяется с тем, что пишется
 CREATE OR REPLACE FUNCTION tenant_data.cost_import_requires_mfa() RETURNS trigger
@@ -368,7 +387,8 @@ GRANT SELECT ON tenant_data.bulk_job_artifact TO repracer_admin;
 GRANT SELECT ON tenant_data.bulk_job TO repracer_bulk_worker;
 GRANT UPDATE (status, phase, total_items, done_items, result, error_code, attempts, lease_owner, lease_until, started_at, finished_at)
   ON tenant_data.bulk_job TO repracer_bulk_worker;
-GRANT SELECT, INSERT ON tenant_data.bulk_job_artifact TO repracer_bulk_worker;
+-- UPDATE — ради повтора задания: своя попытка перезаписывает свой же файл, чужих файлов роль не видит (политика тенанта)
+GRANT SELECT, INSERT, UPDATE ON tenant_data.bulk_job_artifact TO repracer_bulk_worker;
 CREATE POLICY bulk_worker_tenant ON tenant_data.bulk_job FOR ALL TO repracer_bulk_worker
   USING (tenant_id = security.current_tenant_id()) WITH CHECK (tenant_id = security.current_tenant_id());
 CREATE POLICY bulk_worker_artifact ON tenant_data.bulk_job_artifact FOR ALL TO repracer_bulk_worker
@@ -379,6 +399,28 @@ CREATE TRIGGER a0_admin_write_person_insert BEFORE INSERT ON tenant_data.bulk_jo
   FOR EACH ROW EXECUTE FUNCTION security.require_person_for_admin_write();
 CREATE TRIGGER zz_admin_write_audit_insert AFTER INSERT ON tenant_data.bulk_job
   FOR EACH ROW EXECUTE FUNCTION security.audit_admin_write();
+
+/**
+ * Список разрешённого роли исполнителя [Р-96, Р-102 по образцу; находка 16 ревью шага 30]. Без него лишний GRANT этой роли —
+ * например, SELECT на `min_price` — не поймало бы ничто: права держались бы только текстом миграции. Правило проверки схемы
+ * сверяет права в ОБЕ стороны, как у пути решения и у роли остатков.
+ */
+CREATE FUNCTION security.bulk_worker_allowed_privileges() RETURNS TABLE (table_name text, privilege text, column_name text)
+  LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $function$
+  SELECT t, p, c FROM (VALUES
+    ('tenant_data.bulk_job', 'SELECT', NULL),
+    -- Ровно то, чем ведут задание: состояние, ход, аренда и итог. `params` и `kind` решил человек — их роль не меняет
+    ('tenant_data.bulk_job', 'UPDATE', 'status'), ('tenant_data.bulk_job', 'UPDATE', 'phase'),
+    ('tenant_data.bulk_job', 'UPDATE', 'total_items'), ('tenant_data.bulk_job', 'UPDATE', 'done_items'),
+    ('tenant_data.bulk_job', 'UPDATE', 'result'), ('tenant_data.bulk_job', 'UPDATE', 'error_code'),
+    ('tenant_data.bulk_job', 'UPDATE', 'attempts'), ('tenant_data.bulk_job', 'UPDATE', 'lease_owner'),
+    ('tenant_data.bulk_job', 'UPDATE', 'lease_until'), ('tenant_data.bulk_job', 'UPDATE', 'started_at'),
+    ('tenant_data.bulk_job', 'UPDATE', 'finished_at'),
+    ('tenant_data.bulk_job_artifact', 'SELECT', NULL), ('tenant_data.bulk_job_artifact', 'INSERT', NULL),
+    ('tenant_data.bulk_job_artifact', 'UPDATE', NULL)
+  ) AS t(t, p, c)
+$function$;
+ALTER FUNCTION security.bulk_worker_allowed_privileges() OWNER TO repracer_owner;
 
 /**
  * Закрытие тенанта удаляет и его задания [Р-16, docs/data-retention.md]: правило проверки схемы требует, чтобы каждая таблица

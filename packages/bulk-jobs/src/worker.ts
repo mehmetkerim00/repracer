@@ -40,7 +40,7 @@ export interface BulkWorkerOptions extends BulkJobRunnerOptions {
   idleMs?: number;
   /** Остановка цикла: процесс завершается между заданиями, а не посреди применения */
   stopped?: () => boolean;
-  onFinished?(outcome: { jobId: string; kind: string; status: 'SUCCEEDED' | 'FAILED' }): void;
+  onFinished?(outcome: { jobId: string; kind: string; status: 'SUCCEEDED' | 'FAILED' | 'LEASE_LOST' }): void;
   sleep?(ms: number): Promise<void>;
 }
 

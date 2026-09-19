@@ -570,6 +570,12 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         return asked > MAX_SCOPES ? fail(400, 'TOO_MANY_SCOPES', s.tooManyScopes(asked, MAX_SCOPES)) : fail(400, 'BAD_REQUEST', s.badRequest);
       }
       const asked = request.all === true ? world.state.scopes.length : request.writeScopeIds.length;
+      /**
+       * Р-88, Р-135: правка границ БОЛЬШЕ ЧЕМ ОДНОГО предложения — со вторым фактором, правка одного — без него (находка 4
+       * ревью шага 30). Объём виден здесь, поэтому здесь и проверяется: сказать об этом до создания задания честнее, чем
+       * отказом задания через минуту. Последнее слово всё равно за базой — `bounds_mass_edit_requires_mfa`.
+       */
+      if (asked > 1 && !hasSecondFactor(principal.amr)) return fail(403, 'MFA_REQUIRED', s.mfaRequiredBounds);
       return createJob('BOUNDS_EDIT', { request: body.request, planToken: body.planToken }, asked, m.ui.jobs.createdBounds);
     }
 
@@ -604,7 +610,23 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
      * Шаг 28 [Р-134, Р-135]: массовый импорт себестоимости — предпросмотр (файл читается и сопоставляется, ничего не пишется),
      * затем применение целиком, с отпечатком показанного набора и вторым фактором.
      */
-    if (screen === 'cost-import' && (param === 'plan' || param === 'apply')) {
+    /**
+     * Р-139 (находка 10 ревью шага 30): применение создаёт задание и БОЛЬШЕ НИЧЕГО. Читать файл и строить предпросмотр здесь
+     * незачем: задание читает его заново и само сверяет отпечаток с тем, который видел человек. Пока разбор оставался в
+     * запросе, «дешёвое нажатие» на файле в 200 000 строк стоило ровно столько же, сколько предпросмотр.
+     */
+    if (screen === 'cost-import' && param === 'apply') {
+      if (!can(viewer.role, 'MANAGE_PRICING')) return fail(403, 'FORBIDDEN', m.ui.costImport.noRight);
+      if (body.confirmed !== true) return fail(400, 'NOT_CONFIRMED', s.notConfirmed);
+      if (typeof body.content !== 'string' || typeof body.fingerprint !== 'string') return fail(400, 'BAD_REQUEST', s.badRequest);
+      const name = typeof body.fileName === 'string' && body.fileName.trim() !== '' ? body.fileName.trim().slice(0, 200) : 'import';
+      return createJob('COST_IMPORT', {
+        fileName: name, content: body.content, fingerprint: body.fingerprint, ...(body.mapping ? { mapping: body.mapping } : {}),
+        ...(body.encoding ? { encoding: body.encoding } : {}),
+      }, null, m.ui.jobs.createdCostImport);
+    }
+
+    if (screen === 'cost-import' && param === 'plan') {
       if (!can(viewer.role, 'MANAGE_PRICING')) return fail(403, 'FORBIDDEN', m.ui.costImport.noRight);
       const name = typeof body.fileName === 'string' && body.fileName.trim() !== '' ? body.fileName.trim().slice(0, 200) : 'import';
       const content = typeof body.content === 'string' ? body.content : null;
@@ -629,18 +651,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       }
       const offers = importTargets(world, m);
       const preview = buildPreview({ sheet, mapping, offers });
-      const view = costImportView(world, preview, { name, sheet, mapping }, suggested.suggestions, m);
-      if (param === 'plan') return ok(view);
-      if (body.confirmed !== true) return fail(400, 'NOT_CONFIRMED', s.notConfirmed);
-      if (typeof body.fingerprint !== 'string' || body.fingerprint !== preview.fingerprint) return fail(409, 'PLAN_CHANGED', s.planChanged);
-      if (preview.apply.length === 0) return fail(400, 'NO_ROWS', view.blocked ?? m.ui.costImport.headline(preview.totals));
-      /**
-       * Р-139: применение — фоновое задание. Файл кладётся в параметры задания как есть: задание читает его ЗАНОВО и сверяет
-       * отпечаток с тем, который видел человек, — иначе применилось бы не то, что было на экране.
-       */
-      return createJob('COST_IMPORT', {
-        fileName: name, content, fingerprint: preview.fingerprint, mapping, ...(body.encoding ? { encoding: body.encoding } : {}),
-      }, preview.apply.length, m.ui.jobs.createdCostImport);
+      return ok(costImportView(world, preview, { name, sheet, mapping }, suggested.suggestions, m));
     }
 
     // Шаг 12, G и Р-77: включение с предупреждениями по типу стратегии

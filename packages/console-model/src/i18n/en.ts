@@ -592,7 +592,7 @@ export const en = {
       producing: (done: number, total: number | null) => (total === null ? 'Building the file…' : `Building the file: ${done} of ${total}`),
       interrupted: 'The operation was interrupted and starts again.',
       failed: (reason: string) => `Not carried out: ${reason}`,
-      errorUnknown: 'reason not recorded',
+      errorUnknown: (code: string) => `unexpected error (code ${code}) — please give support this code`,
       doneCostImport: (rows: number, offers: number, skipped: number) =>
         `Done: unit costs imported for ${offers} ${offers === 1 ? 'offer' : 'offers'} (${rows} rows, ${skipped} unmatched).`,
       doneBounds: (offers: number, changed: number) => `Done: bounds checked for ${offers} ${offers === 1 ? 'offer' : 'offers'}, ${changed} changed.`,
@@ -617,6 +617,7 @@ export const en = {
         BAD_SCOPES: 'no offers selected', CONFLICT: 'the bounds changed in the meantime',
         MFA_REQUIRED: 'the second factor is missing', FORBIDDEN: 'the role may not do this', JOB_FAILED: 'unexpected error',
         UNKNOWN_JOB_KIND: 'the background process does not know this operation',
+        TOO_MANY_ATTEMPTS: 'the operation failed repeatedly and is not retried any further',
       },
     },
     costImport: {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { messagesFor } from './i18n/index.ts';
-import { LIST_PAGE_DEFAULT, LIST_PAGE_MAX, pageOf, parseListQuery } from './page.ts';
+import { LIST_PAGE_DEFAULT, LIST_PAGE_MAX, pageOf, parseListQuery, selectionAfterPaging } from './page.ts';
 
 /** Р-136 (шаг 29): страницы списков. Каталог целевого клиента в один ответ не помещается — экран отдаёт страницу. */
 
@@ -36,4 +36,12 @@ test('Р-136: страница за концом списка показывае
   // Последняя страница неполного списка: 10 000 строк по 300 — остаток 100
   const tail = pageOf(items, { offset: 9_900, limit: 300 }, m);
   assert.deepEqual([tail.items.length, tail.page.from, tail.page.to], [100, 9901, 10_000]);
+});
+
+test('Р-140: листание сбрасывает выбор отдельных строк, а неизменная страница его сохраняет', () => {
+  const chosen = ['ws-1', 'ws-7'];
+  assert.deepEqual(selectionAfterPaging(chosen, '1:50', '1:50'), chosen, 'на той же странице выбор остаётся');
+  assert.deepEqual(selectionAfterPaging(chosen, '1:50', '51:100'), [], 'на другой странице выбранного не остаётся');
+  // Выбор нельзя «донести» до применения незаметно: пустой ответ — это и есть обещание Р-140
+  assert.deepEqual(selectionAfterPaging([], '1:50', '51:100'), []);
 });

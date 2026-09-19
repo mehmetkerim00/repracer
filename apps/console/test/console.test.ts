@@ -302,7 +302,13 @@ test('Р-134, Р-135 (шаг 28): импорт себестоимости — п
   // Применение: подтверждение обязательно, отпечаток — тоже, второй фактор — тоже
   const apply = (auth: Auth, body: Record<string, unknown>) => call(auth, 'POST', api(id, 'cost-import', 'apply'), { ...file, ...body });
   assert.equal((await apply(owner, { fingerprint: view.fingerprint })).status, 400, 'без подтверждения не применяется');
-  assert.equal((await apply(owner, { fingerprint: 'stale', confirmed: true })).status, 409, 'устаревший предпросмотр не применяется');
+  /**
+   * Р-139 (находка 10 ревью шага 30): отпечаток сверяет ЗАДАНИЕ, а не запрос. Разобрать файл, чтобы его посчитать, стоит
+   * столько же, сколько предпросмотр, — держать это в нажатии значило бы не перенести работу в фон, а только переименовать её.
+   */
+  const stale = await finishJob(id, await apply(owner, { fingerprint: 'stale', confirmed: true }));
+  assert.deepEqual([stale.status, stale.error], ['FAILED', messagesFor('de').ui.jobs.errors.PLAN_CHANGED],
+    'устаревший предпросмотр не применяется, и продавец читает почему');
   // Вход только паролем: второго фактора нет — импорт не применяется [Р-135]
   const passwordOnly = { authorization: `Bearer ${issuer.token(account('OWNER').subject, { email: account('OWNER').email, amr: ['pwd'] })}`, cookie: 'repracer_locale=de' };
   const withoutMfa = await apply(passwordOnly, { fingerprint: view.fingerprint, confirmed: true });

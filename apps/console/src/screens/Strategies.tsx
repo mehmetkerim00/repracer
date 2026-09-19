@@ -135,7 +135,10 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
   const [wholeCatalog, setWholeCatalog] = useState(false);
   const pageKey = `${view.page.from}:${view.page.to}`;
   const [shownPage, setShownPage] = useState(pageKey);
-  if (shownPage !== pageKey) { setShownPage(pageKey); setSelected(assignable); setWholeCatalog(false); setPreview(null); setPreviewJobId(null); }
+  if (shownPage !== pageKey) {
+    // Р-140: выбор прежней страницы не переносится; предложения НОВОЙ страницы — умолчание, и число выбранных сказано рядом
+    setShownPage(pageKey); setSelected(assignable); setWholeCatalog(false); setPreview(null); setPreviewJobId(null);
+  }
 
   const changed = () => { setPreview(null); setPreviewJobId(null); setConfirming(false); };
   const set = <K extends keyof DraftForm>(key: K, value: DraftForm[K]) => { setForm({ ...form, [key]: value }); changed(); };

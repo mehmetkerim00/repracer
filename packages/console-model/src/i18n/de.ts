@@ -599,7 +599,7 @@ export const de: Messages = {
       producing: (done: number, total: number | null) => (total === null ? 'Datei wird erstellt…' : `Datei wird erstellt: ${done} von ${total}`),
       interrupted: 'Der Vorgang wurde unterbrochen und beginnt von vorn.',
       failed: (reason: string) => `Nicht ausgeführt: ${reason}`,
-      errorUnknown: 'Grund nicht erfasst',
+      errorUnknown: (code: string) => `unerwarteter Fehler (Code ${code}) — bitte den Support mit diesem Code ansprechen`,
       doneCostImport: (rows: number, offers: number, skipped: number) =>
         `Fertig: Selbstkosten von ${offers} ${offers === 1 ? 'Angebot' : 'Angeboten'} importiert (${rows} Zeilen, ${skipped} nicht zugeordnet).`,
       doneBounds: (offers: number, changed: number) => `Fertig: Grenzen von ${offers} ${offers === 1 ? 'Angebot' : 'Angeboten'} geprüft, ${changed} geändert.`,
@@ -624,6 +624,7 @@ export const de: Messages = {
         BAD_SCOPES: 'keine Angebote ausgewählt', CONFLICT: 'die Grenzen haben sich inzwischen geändert',
         MFA_REQUIRED: 'der zweite Faktor fehlt', FORBIDDEN: 'die Rolle darf das nicht', JOB_FAILED: 'unerwarteter Fehler',
         UNKNOWN_JOB_KIND: 'diesen Vorgang kennt der Hintergrundprozess nicht',
+        TOO_MANY_ATTEMPTS: 'der Vorgang ist mehrfach gescheitert und wird nicht weiter versucht',
       },
     },
     costImport: {

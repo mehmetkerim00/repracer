@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { BulkJobView, BulkJobsView } from '@repracer/console-model';
-import { requestJson, worldPath } from '../api.ts';
+import { downloadFile, requestJson, worldPath } from '../api.ts';
 import { ErrorBox, errorText, useMessages } from '../components.tsx';
 
 /**
@@ -54,7 +54,9 @@ export function JobProgress({ worldId, jobId, onFinished }: { worldId: string; j
       {job.attempts > 1 ? <p className="small muted">{t.attempts(job.attempts)}</p> : null}
       {job.artifact ? (
         <p>
-          <a href={`${worldPath(worldId, 'jobs', jobId)}/artifact?locale=${m.locale}`} download={job.artifact.fileName}>{t.download}</a>{' '}
+          {/* Файл запрашивается с токеном и отдаётся браузеру объектом: по обычной ссылке заголовок авторизации не уходит */}
+          <button type="button" onClick={() => void downloadFile(`${worldPath(worldId, 'jobs', jobId)}/artifact`, job.artifact!.fileName, m.locale)
+            .catch((e: unknown) => setError(errorText(e, m)))}>{t.download}</button>{' '}
           <span className="small muted">{t.checksum(job.artifact.sha256)}</span>
         </p>
       ) : null}

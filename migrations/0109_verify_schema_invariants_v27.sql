@@ -368,6 +368,42 @@ BEGIN
     END IF;
   END LOOP;
 
+  -- 14в. Р-90, Р-139 (шаг 30): роль фонового исполнителя — ровно свой список разрешённого, в обе стороны
+  FOR r IN
+    SELECT c.oid::regclass AS t, a.attname, p.privilege
+      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+      -- Права по столбцам бывают только у этих четырёх: DELETE и TRUNCATE — права таблицы, они проверяются вторым проходом
+      CROSS JOIN unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'REFERENCES']) AS p(privilege)
+     WHERE n.nspname IN ('security', 'platform', 'tenant_data', 'channel_data', 'audit', 'maintenance', 'legal')
+       AND c.relkind IN ('r', 'p') AND NOT c.relispartition
+  LOOP
+    IF has_column_privilege('repracer_bulk_worker', r.t, r.attname, r.privilege)
+       AND NOT EXISTS (SELECT 1 FROM security.bulk_worker_allowed_privileges() al
+                        WHERE al.table_name::regclass = r.t AND al.privilege = r.privilege
+                          AND (al.column_name IS NULL OR al.column_name = r.attname)) THEN
+      bad := bad || format('%s.%s: %s of the bulk worker role is not in its allow list (Р-90, Р-139)', r.t, r.attname, r.privilege);
+    END IF;
+  END LOOP;
+  -- Права таблицы целиком: у роли исполнителя не должно быть ни DELETE, ни TRUNCATE нигде
+  FOR r IN
+    SELECT c.oid::regclass AS t, p.privilege
+      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      CROSS JOIN unnest(ARRAY['DELETE', 'TRUNCATE']) AS p(privilege)
+     WHERE n.nspname IN ('security', 'platform', 'tenant_data', 'channel_data', 'audit', 'maintenance', 'legal')
+       AND c.relkind IN ('r', 'p') AND NOT c.relispartition
+  LOOP
+    IF has_table_privilege('repracer_bulk_worker', r.t, r.privilege) THEN
+      bad := bad || format('%s: %s of the bulk worker role is not in its allow list (Р-90, Р-139)', r.t, r.privilege);
+    END IF;
+  END LOOP;
+  FOR r IN SELECT * FROM security.bulk_worker_allowed_privileges() LOOP
+    IF NOT (CASE WHEN r.column_name IS NULL THEN has_table_privilege('repracer_bulk_worker', r.table_name::regclass, r.privilege)
+                 ELSE has_column_privilege('repracer_bulk_worker', r.table_name::regclass, r.column_name, r.privilege) END) THEN
+      bad := bad || format('%s: %s of the bulk worker role is declared but not granted (Р-90, Р-139)', r.table_name, r.privilege);
+    END IF;
+  END LOOP;
+
   -- 14b. Р-102: роль остатков — ровно свой список разрешённого, без цен, без аудита, не член других ролей
   FOR r IN
     SELECT c.oid::regclass AS t, p.privilege

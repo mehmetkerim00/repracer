@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { parseAmountInput, parsePercentInput, type BoundAdjust, type BoundsDiffView, type BoundsEditRequest } from '@repracer/console-model';
+import { parseAmountInput, parsePercentInput, selectionAfterPaging, type BoundAdjust, type BoundsDiffView, type BoundsEditRequest } from '@repracer/console-model';
 import type { BoundsIndexItem, JobCreatedResponse } from '../api-types.ts';
 import { requestJson, worldPath } from '../api.ts';
 import { Badge, ErrorBox, errorText, Gaps, useMessages } from '../components.tsx';
@@ -82,7 +82,7 @@ function BoundsEditForm({ worldId, items, total }: { worldId: string; items: rea
    */
   const pageKey = items.map((i) => i.writeScopeId).join(',');
   const [shownPage, setShownPage] = useState(pageKey);
-  if (shownPage !== pageKey) { setShownPage(pageKey); setSelected([]); setWholeCatalog(false); reset(); }
+  if (shownPage !== pageKey) { setShownPage(pageKey); setSelected(selectionAfterPaging(selected, shownPage, pageKey)); setWholeCatalog(false); reset(); }
 
   const request = (): BoundsEditRequest | string => {
     const a = adjustOf(min);

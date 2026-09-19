@@ -50,7 +50,12 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
       const p = job.params as { fileName: string; content: string; mapping?: ColumnMapping; encoding?: TableEncoding; fingerprint?: string };
       const sheet = readTable(Buffer.from(p.content, 'base64'), p.encoding);
       const suggested = suggestMapping(sheet);
-      const mapping = { ...suggested.mapping, ...(p.mapping ?? {}) };
+      // Выбор продавца сильнее подсказки, а null — «этой колонки в файле нет»: подсказка снимается так же явно, как ставится
+      const mapping = { ...suggested.mapping };
+      for (const [field, index] of Object.entries((p.mapping ?? {}) as Record<string, unknown>)) {
+        if (index === null) delete mapping[field as keyof typeof mapping];
+        else if (typeof index === 'number' && Number.isSafeInteger(index) && index >= 0) mapping[field as keyof typeof mapping] = index;
+      }
       const world = await options.world(ctx);
       const offers = importTargets(world, m);
       const preview = buildPreview({ sheet, mapping, offers });
@@ -122,17 +127,18 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
      */
     async STRATEGY_ASSIGN(job: BulkJobRow, ctx: BulkJobContext): Promise<BulkJobWork> {
       const m = messagesFor(localeOf(job));
-      const p = job.params as { draft?: unknown; writeScopeIds?: string[]; all?: boolean; strategyId?: string | null; version?: number; previewJobId?: string };
-      const world = await options.world(ctx);
-      const ids = p.all === true ? world.state.scopes.map((s) => s.writeScopeId) : (p.writeScopeIds ?? []);
-      if (ids.length === 0) throw Object.assign(new Error('no scopes'), { cause: 'BAD_SCOPES' });
+      const p = job.params as { draft?: unknown; strategyId?: string | null; version?: number; previewJobId?: string };
       /**
-       * Стратегии, которые человек видел в предпросмотре. Не «действующие сейчас»: тогда проверка сравнивала бы базу с самой
-       * собой и не поймала бы ничего [Р-99]. Изменились со времени предпросмотра — хранилище отвечает CONFLICT.
+       * Предложения и их стратегии берутся ИЗ ПРЕДПРОСМОТРА, а не раскрываются заново. «Весь каталог», раскрытый в момент
+       * работы задания, включил бы предложение, появившееся уже после предпросмотра: человек его не видел и не проверял
+       * (находка 9 ревью шага 30). Заодно это и есть `expected` — стратегии на момент предпросмотра: сравнивать базу с самой
+       * собой бессмысленно [Р-99], и хранилище отвечает CONFLICT, если за это время их поменял кто-то другой.
        */
       const preview = p.previewJobId ? await ctx.store.bulkJob(ctx.tenantId, p.previewJobId) : null;
       const expected = (preview?.result as { expected?: StrategyExpectation[] } | null)?.expected;
       if (!expected) throw Object.assign(new Error('no preview'), { cause: 'PREVIEW_CHANGED' });
+      const ids = expected.map((e) => e.writeScopeId);
+      if (ids.length === 0) throw Object.assign(new Error('no scopes'), { cause: 'BAD_SCOPES' });
       const actor = { membershipId: ctx.membershipId, userId: ctx.userId, mfa: false, bulkJobId: ctx.jobId };
       const parsed = p.version === undefined ? parseStrategyDraft(p.draft) : null;
       if (parsed && !parsed.ok) throw Object.assign(new Error('bad draft'), { cause: 'BAD_DRAFT' });

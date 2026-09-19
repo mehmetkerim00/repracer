@@ -512,10 +512,12 @@ function secondFactorRefused(error: unknown): boolean {
 }
 
 const BULK_JOB_COLUMNS = `bulk_job_id, kind, status, params, phase, total_items, done_items, result, error_code, attempts,
+  (lease_until IS NOT NULL AND lease_until <= now()) AS lease_expired,
   created_with_mfa, created_by_membership_id, created_by_user_id, created_at, started_at, finished_at, lease_owner, lease_until`;
 
 /** Те же столбцы с именем таблицы: в запросе взятия задания рядом стоит CTE со своим `bulk_job_id` */
-const BULK_JOB_COLUMNS_OF_J = BULK_JOB_COLUMNS.split(',').map((c) => `j.${c.trim()}`).join(', ');
+const BULK_JOB_COLUMNS_OF_J = BULK_JOB_COLUMNS.replace(/\blease_until IS NOT NULL AND lease_until\b/, 'j.lease_until IS NOT NULL AND j.lease_until')
+  .split(/,(?![^(]*\))/).map((c) => (c.includes('(') ? c.trim() : `j.${c.trim()}`)).join(', ');
 
 function toBulkJob(r: Row): BulkJobRow {
   return {
@@ -527,6 +529,7 @@ function toBulkJob(r: Row): BulkJobRow {
     createdAt: String(r.created_at), startedAt: r.started_at === null ? null : String(r.started_at),
     finishedAt: r.finished_at === null ? null : String(r.finished_at),
     leaseOwner: r.lease_owner ?? null, leaseUntil: r.lease_until === null ? null : String(r.lease_until),
+    leaseExpired: r.lease_expired === true,
   };
 }
 
@@ -1178,33 +1181,37 @@ export class PgPricingStore implements PricingStore {
   }
 
   /** Ход задания: пишется ОТДЕЛЬНОЙ транзакцией, поэтому переживает откат самой работы и виден продавцу во время применения */
-  async updateBulkJobProgress(tenantId: string, jobId: string, owner: string, progress: BulkJobProgress): Promise<void> {
-    await inTenant(this.bulkWorker('updateBulkJobProgress'), tenantId, async (tx) => {
-      await tx.query(
+  async updateBulkJobProgress(tenantId: string, jobId: string, owner: string, progress: BulkJobProgress): Promise<boolean> {
+    return inTenant(this.bulkWorker('updateBulkJobProgress'), tenantId, async (tx) => {
+      const { rowCount } = await tx.query(
         `UPDATE tenant_data.bulk_job
             SET phase = coalesce($4, phase), done_items = coalesce($5, done_items), total_items = coalesce($6, total_items),
                 lease_until = now() + make_interval(secs => $7::int)
           WHERE tenant_id = $1 AND bulk_job_id = $2 AND lease_owner = $3 AND status = 'RUNNING'`,
         [tenantId, jobId, owner, progress.phase ?? null, progress.done ?? null, progress.total ?? null, progress.leaseSeconds ?? 60]);
+      // Ноль строк — аренда уже не наша: задание взял другой процесс или оно завершено [находка 3 ревью шага 30]
+      return (rowCount ?? 0) > 0;
     }, undefined, { leaseOwner: owner });
   }
 
   /** Итог задания: успех с результатом, отказ с причиной или возврат в очередь (процесс упал посреди применения) */
-  async finishBulkJob(tenantId: string, jobId: string, owner: string, outcome: BulkJobOutcome): Promise<void> {
-    await inTenant(this.bulkWorker('finishBulkJob'), tenantId, async (tx) => {
+  async finishBulkJob(tenantId: string, jobId: string, owner: string, outcome: BulkJobOutcome): Promise<boolean> {
+    return inTenant(this.bulkWorker('finishBulkJob'), tenantId, async (tx) => {
       if (outcome.status === 'INTERRUPTED') {
-        await tx.query(
+        const { rowCount } = await tx.query(
           `UPDATE tenant_data.bulk_job SET status = 'INTERRUPTED', lease_owner = NULL, lease_until = NULL, phase = NULL
             WHERE tenant_id = $1 AND bulk_job_id = $2 AND lease_owner = $3`, [tenantId, jobId, owner]);
-        return;
+        return (rowCount ?? 0) > 0;
       }
-      await tx.query(
+      const { rowCount } = await tx.query(
         `UPDATE tenant_data.bulk_job
             SET status = $4, result = $5::jsonb, error_code = $6, phase = 'DONE', finished_at = now(),
                 lease_owner = NULL, lease_until = NULL
           WHERE tenant_id = $1 AND bulk_job_id = $2 AND lease_owner = $3`,
         [tenantId, jobId, owner, outcome.status, outcome.result === undefined ? null : JSON.stringify(outcome.result),
           outcome.status === 'FAILED' ? outcome.errorCode : null]);
+      // Ноль строк — итог не записан: аренду отобрали, пока шла работа. Вызывающий обязан об этом узнать
+      return (rowCount ?? 0) > 0;
     }, undefined, { leaseOwner: owner });
   }
 
@@ -1229,8 +1236,15 @@ export class PgPricingStore implements PricingStore {
   async saveBulkJobArtifact(tenantId: string, jobId: string, artifact: BulkJobArtifact): Promise<void> {
     await inTenant(this.bulkWorker('saveBulkJobArtifact'), tenantId, async (tx) => {
       await tx.query(
+        /**
+         * Повтор задания перезаписывает свой файл (находка 7 ревью шага 30): процесс, убитый ПОСЛЕ записи файла и ДО записи
+         * итога, оставлял строку, о которую следующая попытка разбивалась первичным ключом, — и продавец читал «23505».
+         */
         `INSERT INTO tenant_data.bulk_job_artifact (tenant_id, bulk_job_id, file_name, content_type, content, sha256, rows_count)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (tenant_id, bulk_job_id) DO UPDATE
+            SET file_name = excluded.file_name, content_type = excluded.content_type, content = excluded.content,
+                sha256 = excluded.sha256, rows_count = excluded.rows_count, created_at = now()`,
         [tenantId, jobId, artifact.fileName, artifact.contentType, artifact.content, artifact.sha256, artifact.rows]);
     });
   }

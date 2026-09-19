@@ -42,6 +42,16 @@ export interface BulkJobsView {
 
 const ACTIVE: ReadonlySet<BulkJobStatus> = new Set<BulkJobStatus>(['PENDING', 'RUNNING', 'INTERRUPTED']);
 
+/**
+ * Причина отказа глазами продавца. Неизвестный код — это код БАЗЫ (SQLSTATE) или обработчика: «23505» продавцу ничего не
+ * говорит (находка 18 ревью шага 30). Показывается понятная строка, а сам код остаётся в ней для поддержки.
+ */
+const errorTextOf = (job: BulkJobRow, m: Messages): string => {
+  const t = m.ui.jobs;
+  const code = job.errorCode ?? '';
+  return t.errors[code as keyof typeof t.errors] ?? t.errorUnknown(code);
+};
+
 /** Итог задания глазами продавца: числа берутся из результата, который записал обработчик */
 function outcomeText(job: BulkJobRow, m: Messages): string {
   const t = m.ui.jobs;
@@ -61,18 +71,18 @@ function outcomeText(job: BulkJobRow, m: Messages): string {
  * не только на состояние, но и на срок аренды — иначе продавец видел бы «применяется» до тех пор, пока задание не подберёт
  * другой процесс, и не понял бы, почему счётчик стоит.
  *
- * Время здесь настоящее: срок аренды база пишет своим `now()`. Значение передаётся явно, чтобы у проверки не было скрытого входа.
+ * Истекла ли аренда, решает ХРАНИЛИЩЕ по часам базы (`leaseExpired`): у экрана свои часы, и их расхождение с базой показывало
+ * бы идущее применение как прерванное или наоборот (находка 11 ревью шага 30).
  */
-export function bulkJobView(job: BulkJobRow, m: Messages, artifact: { fileName: string; rows: number; sha256: string } | null = null,
-  nowMs: number = Date.now()): BulkJobView {
+export function bulkJobView(job: BulkJobRow, m: Messages, artifact: { fileName: string; rows: number; sha256: string } | null = null): BulkJobView {
   const t = m.ui.jobs;
   const total = job.totalItems;
   const done = job.doneItems;
   const title = t.kinds[job.kind];
-  const abandoned = job.status === 'RUNNING' && job.leaseUntil !== null && Date.parse(job.leaseUntil) <= nowMs;
+  const abandoned = job.status === 'RUNNING' && job.leaseExpired;
   if (abandoned) job = { ...job, status: 'INTERRUPTED' };
   const headline = job.status === 'SUCCEEDED' ? outcomeText(job, m)
-    : job.status === 'FAILED' ? t.failed(t.errors[job.errorCode as keyof typeof t.errors] ?? job.errorCode ?? t.errorUnknown)
+    : job.status === 'FAILED' ? t.failed(errorTextOf(job, m))
     : job.status === 'PENDING' ? t.queued
     : job.status === 'INTERRUPTED' ? t.interrupted
     : job.phase === 'APPLYING' ? t.applying(done, total)
@@ -90,7 +100,7 @@ export function bulkJobView(job: BulkJobRow, m: Messages, artifact: { fileName: 
     jobId: job.jobId, kind: job.kind, status: job.status, title, headline,
     progress: total === null || total === 0 ? null : Math.min(1, done / total),
     done, total, effect, active: ACTIVE.has(job.status),
-    error: job.status === 'FAILED' ? (t.errors[job.errorCode as keyof typeof t.errors] ?? job.errorCode ?? t.errorUnknown) : null,
+    error: job.status === 'FAILED' ? errorTextOf(job, m) : null,
     artifact, result: job.status === 'SUCCEEDED' ? job.result : null,
     startedAt: job.startedAt, finishedAt: job.finishedAt, attempts: job.attempts,
   };

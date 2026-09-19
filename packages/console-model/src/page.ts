@@ -58,3 +58,12 @@ export function pageOf<T>(items: readonly T[], query: ListQuery, m: Messages): {
     },
   };
 }
+
+/**
+ * Р-140 (шаг 30): что остаётся выбранным при листании. Ответ — ничего: выбранные строки другой страницы продавцу не видны, а
+ * применяются к ним. Вынесено отдельной функцией не ради красоты: пока это была ветка внутри компонента, её нельзя было
+ * проверить ничем, кроме наличия ФРАЗЫ о сбросе на экране (находка 13 ревью шага 30).
+ */
+export function selectionAfterPaging(selected: readonly string[], shownPageKey: string, pageKey: string): string[] {
+  return shownPageKey === pageKey ? [...selected] : [];
+}

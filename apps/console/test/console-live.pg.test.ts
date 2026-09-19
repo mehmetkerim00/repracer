@@ -45,7 +45,7 @@ const SCREEN_LIMIT_SECONDS = 10;
  */
 const APPLY_LIMIT_SECONDS = 120;
 /** Операции, у которых предел другой: продавец ждёт их сознательно, видя ход */
-const BULK_APPLY = /\(задание целиком\)$|^bounds\/plan \(весь каталог|^cost-import\/plan \(200 000/;
+const BULK_APPLY = /\(задание целиком\)$|^bounds\/plan \(весь каталог/;
 /** Скачивание готового файла [OQ-202] — не экран: его не разбирает браузер и не показывает страница */
 const FILE_DOWNLOAD = /скачивание файла/;
 
@@ -383,10 +383,14 @@ test('OQ-199: предел импорта в 200 000 строк — замер �
   assert.equal(plan.status, 200, JSON.stringify(plan.body).slice(0, 300));
   assert.equal(plan.body.summary.apply, OFFERS, 'применятся только сопоставленные с каталогом');
   assert.equal(plan.body.summary.apply + plan.body.summary.skipped, ROWS, 'разобраны все строки файла: несопоставленные названы, а не потеряны');
-  // Предел объявлен базой и должен быть достижим: если разбор 200 000 строк не укладывается в предел работы, число выдумано
+  /**
+   * Предел объявлен базой и должен быть достижим. Мерится он пределом ЭКРАНА, а не работы: предпросмотр — обычный запрос
+   * продавца, он ждёт ответа. Выводить его из-под предела экрана значило бы прятать цену объявленного предела (находка 10
+   * ревью шага 30).
+   */
   const measuredPlan = measured.find((x) => x.operation.startsWith('cost-import/plan (200 000'))!;
-  assert.ok(measuredPlan.seconds < APPLY_LIMIT_SECONDS,
-    `разбор 200 000 строк: ${measuredPlan.seconds} с при пределе работы ${APPLY_LIMIT_SECONDS} с`);
+  assert.ok(measuredPlan.seconds < SCREEN_LIMIT_SECONDS,
+    `разбор 200 000 строк: ${measuredPlan.seconds} с при пределе экрана ${SCREEN_LIMIT_SECONDS} с`);
 });
 
 /**
@@ -418,6 +422,23 @@ test('Р-139: процесс убит на половине применения
   // Ждём, пока задание дойдёт до применения, и убиваем процесс ровно там
   const applying = await pollJob(jobId, (j) => j.status === 'RUNNING' && j.headline.includes('Wird angewendet'));
   assert.equal(applying.effect, 'In der Datenbank ist noch nichts geändert: der Vorgang wird vollständig oder gar nicht angewendet.');
+  /**
+   * Убийство должно прийтись на ОТКРЫТУЮ транзакцию применения, иначе «в базе ничего» верно и тогда, когда она ещё не
+   * начиналась, — утверждение слабее заявленного поведения [Р-94, находка 14 ревью шага 30]. Спрашиваем у самой базы, идёт ли
+   * прямо сейчас транзакция роли исполнителя по этому тенанту.
+   */
+  const applyingInDb = async () => {
+    const [row] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
+      `SELECT count(*)::int AS n FROM pg_stat_activity
+        WHERE application_name = 'repracer-bulk-svc_admin' AND state = 'idle in transaction' OR
+              application_name = 'repracer-bulk-svc_admin' AND state = 'active'`)).rows);
+    return row.n as number;
+  };
+  const deadline = Date.now() + 30_000;
+  while (await applyingInDb() === 0) {
+    if (Date.now() > deadline) throw new Error('транзакция применения не началась — убивать нечего');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
   const victim = workers[workers.length - 1]!;
   victim.kill('SIGKILL');
   await new Promise<void>((resolve) => victim.once('exit', () => resolve()));

@@ -542,8 +542,10 @@ export interface PricingStore {
   /** Р-139 (шаг 30): массовые операции — фоновые задания с видимым ходом */
   createBulkJob(tenantId: string, input: BulkJobInput, actor: AdminActor): Promise<BulkJobCreated>;
   claimBulkJob(tenantId: string, owner: string, leaseSeconds: number): Promise<BulkJobRow | null>;
-  updateBulkJobProgress(tenantId: string, jobId: string, owner: string, progress: BulkJobProgress): Promise<void>;
-  finishBulkJob(tenantId: string, jobId: string, owner: string, outcome: BulkJobOutcome): Promise<void>;
+  /** Ход задания; false — аренда уже не наша: строку изменил другой процесс [находка 3 ревью шага 30] */
+  updateBulkJobProgress(tenantId: string, jobId: string, owner: string, progress: BulkJobProgress): Promise<boolean>;
+  /** Итог задания; false — итог НЕ записан, потому что аренда уже не наша */
+  finishBulkJob(tenantId: string, jobId: string, owner: string, outcome: BulkJobOutcome): Promise<boolean>;
   listBulkJobs(tenantId: string, limit?: number): Promise<BulkJobRow[]>;
   bulkJob(tenantId: string, jobId: string): Promise<BulkJobRow | null>;
   saveBulkJobArtifact(tenantId: string, jobId: string, artifact: BulkJobArtifact): Promise<void>;
@@ -661,6 +663,11 @@ export interface BulkJobRow {
   finishedAt: string | null;
   leaseOwner: string | null;
   leaseUntil: string | null;
+  /**
+   * Аренда истекла — то есть процесс, взявший задание, до него больше не дотянулся. Считает ХРАНИЛИЩЕ по часам базы, а не
+   * экран по своим: расхождение часов консоли и базы показывало бы идущее применение как прерванное (находка 11 ревью шага 30).
+   */
+  leaseExpired: boolean;
 }
 
 export interface BulkJobProgress {

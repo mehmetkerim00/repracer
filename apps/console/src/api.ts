@@ -95,4 +95,29 @@ export function useResource<T>(path: string, locale: Locale): [Resource<T>, () =
   return [resource, retry];
 }
 
+/**
+ * Скачивание файла, подготовленного заданием [OQ-202, находка 1 ревью шага 30]. Через `<a href download>` это не работает:
+ * токен поставщика живёт только в памяти страницы и уходит ЗАГОЛОВКОМ, а браузер по ссылке его не шлёт — продавец получал бы
+ * 401 вместо CSV. Поэтому файл запрашивается тем же путём, что и всё остальное, и отдаётся браузеру как объект в памяти.
+ */
+export async function downloadFile(path: string, fileName: string, locale?: Locale): Promise<void> {
+  const response = await fetch(withLocale(path, locale), {
+    credentials: 'same-origin',
+    headers: { ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}) },
+  });
+  if (!response.ok) throw new ApiError({ kind: 'BAD_RESPONSE', status: response.status });
+  const url = URL.createObjectURL(await response.blob());
+  try {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  } finally {
+    // Объект держит файл целиком в памяти вкладки: выгрузка каталога — 27 МБ, и отпустить его надо сразу
+    URL.revokeObjectURL(url);
+  }
+}
+
 export const worldPath = (worldId: string, ...parts: string[]) => `/api/worlds/${[worldId, ...parts].map(encodeURIComponent).join('/')}`;
