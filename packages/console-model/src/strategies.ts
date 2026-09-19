@@ -199,12 +199,23 @@ export interface StrategyPreviewView {
    * ВЫБОРКЕ, а назначается стратегия на все выбранные: об этом сказано на экране, а не подразумевается [Р-125].
    */
   sample: { shown: number; total: number; text: string | null };
+  /** Показано строк из скольких посчитанных [OQ-201]: итоги и запрет сохранения — по всем, на экране — первые */
+  shown: { rows: number; of: number };
   gaps: Gap[];
 }
 
-/** Отпечаток того, что видел человек (FNV-1a, две ветви): не секрет и не подпись — сервер пересчитывает его сам и сравнивает */
+/**
+ * Отпечаток того, что видел человек (FNV-1a, две ветви): не секрет и не подпись — сервер пересчитывает его сам и сравнивает.
+ *
+ * Порядок ключей объекта на отпечаток не влияет [шаг 30]. Это не украшение: параметры и итоги заданий лежат в jsonb, а он
+ * хранит ключи в своём порядке. Отпечаток, чувствительный к порядку, у всего, что прошло через базу, не совпадал бы никогда —
+ * и сохранение отказывало бы «предпросмотр изменился», хотя не изменилось ничего.
+ */
 export function fingerprint(value: unknown): string {
-  const text = JSON.stringify(value);
+  const text = JSON.stringify(value, (_key, v) => (
+    v && typeof v === 'object' && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)))
+      : v));
   let a = 0x811c9dc5;
   let b = 0x01000193 ^ text.length;
   for (let i = 0; i < text.length; i++) {
@@ -228,7 +239,14 @@ export function previewToken(draft: StrategyDraft, previews: readonly StrategyPr
     previews.map((p) => [p.writeScopeId, p.availability.available, p.stages.map((s) => `${s.stage}:${s.outcome}`).join('>'), p.decision?.finalMinor ?? null, p.intent?.proposedMinor ?? null])]);
 }
 
-export function strategyPreviewView(world: StandWorld, draft: StrategyDraft, previews: readonly StrategyPreview[], m: Messages, total = previews.length): StrategyPreviewView {
+/**
+ * Сколько строк предпросмотра показывать [OQ-201, шаг 30]: как у экрана различий границ. Считается решение по КАЖДОМУ
+ * предложению каталога — но 10 000 строк в ответе никто не читает, а браузер их разбирает секундами. Итоги при этом по всем.
+ */
+export const STRATEGY_PREVIEW_ROWS_SHOWN = 50;
+
+export function strategyPreviewView(world: StandWorld, draft: StrategyDraft, previews: readonly StrategyPreview[], m: Messages,
+  total = previews.length, shownRows = previews.length): StrategyPreviewView {
   const t = m.ui.strategies;
   const summary = { changes: 0, unchanged: 0, rejected: 0, dangerous: 0, notEvaluated: 0 };
   const rows = previews.map((p): PreviewRow => {
@@ -256,10 +274,12 @@ export function strategyPreviewView(world: StandWorld, draft: StrategyDraft, pre
   });
   const label = strategyLabel({ strategyId: 'draft', version: 1, params: draft.params, deadbandMinor: draft.deadbandMinor }, previews[0]?.currency ?? '', m);
   const channelPriced = rows.filter((r) => { const scope = scopeById(world, r.unit.writeScopeId); return scope ? channelNotes(world, scope, m).some((n) => n.code !== 'PRICING_HEALTH') : false; });
+  // Запрет сохранения считается по ВСЕМ предложениям, а не по показанным: иначе он зависел бы от длины страницы
   const saveBlocked = rows.some((r) => r.unavailable !== null) ? t.blockedUnavailable
-    : channelPriced.length > 0 ? t.blockedChannelPricing(channelPriced.map((r) => r.unit.label).join(', ')) : null;
+    : channelPriced.length > 0 ? t.blockedChannelPricing(channelPriced.slice(0, 5).map((r) => r.unit.label).join(', ')) : null;
   return {
-    worldId: world.id, draft: { title: `${draft.name} · ${label.label}`, detail: label.detail }, rows, summary, saveBlocked,
+    worldId: world.id, draft: { title: `${draft.name} · ${label.label}`, detail: label.detail }, rows: rows.slice(0, shownRows), summary, saveBlocked,
+    shown: { rows: Math.min(rows.length, shownRows), of: rows.length },
     sample: { shown: previews.length, total, text: total > previews.length ? t.sample(previews.length, total) : null },
     headline: t.headline(summary), previewToken: previewToken(draft, previews, world),
     gaps: [gap(m, 'PREVIEW_LAST_SNAPSHOT'), gap(m, 'PREVIEW_CURRENT_BOUNDS')],

@@ -126,11 +126,12 @@ test('step 21 on PostgreSQL: preview and save of a strategy, difference screen a
   const url = (...parts: string[]) => `/api/worlds/${[WORLD, ...parts].map(encodeURIComponent).join('/')}`;
   const post = (auth: { authorization: string; cookie: string }, path: string, body: unknown) => handle({ method: 'POST', url: path, body, ...auth });
   const draft = { name: 'Synthetic PG undercut', params: { type: 'MATCH_BUYBOX', undercutMinor: 3, holdWhenWinning: false, atBound: 'CAP' }, deadbandMinor: 0 };
-  const preview = await post(owner, url('strategies', 'preview'), { draft, writeScopeIds: ['ws-price-de-4101'] });
-  assert.equal(preview.status, 200, JSON.stringify(preview.body));
-  const token = (preview.body as StrategyPreviewView).previewToken;
+  // OQ-201 (шаг 30): предпросмотр — тоже задание, и считает он ВСЕ выбранные предложения, а не выборку
+  const previewJob = await finishJob(await post(owner, url('strategies', 'preview'), { draft, writeScopeIds: ['ws-price-de-4101'] }));
+  assert.equal(previewJob.status, 'SUCCEEDED', previewJob.error ?? '');
+  const token = (previewJob.result as { view: StrategyPreviewView }).view.previewToken;
   // Р-139 (шаг 30): сохранение с назначением — фоновое задание; на PostgreSQL оно предъявляет базе себя, а не второй фактор сессии
-  const savedJob = await finishJob(await post(owner, url('strategies'), { draft, writeScopeIds: ['ws-price-de-4101'], strategyId: null, previewToken: token, confirmed: true }));
+  const savedJob = await finishJob(await post(owner, url('strategies'), { draft, writeScopeIds: ['ws-price-de-4101'], strategyId: null, previewJobId: previewJob.jobId, previewToken: token, confirmed: true }));
   assert.equal(savedJob.status, 'SUCCEEDED', savedJob.error ?? '');
   const list = (await handle({ method: 'GET', url: url('strategies'), body: undefined, ...owner })).body as StrategyListView;
   assert.ok(list.strategies.some((x) => x.version === 1 && x.scopes.some((u) => u.unit.writeScopeId === 'ws-price-de-4101' && u.version === 1) && x.name === 'Synthetic PG undercut'), JSON.stringify(list.strategies));
@@ -158,8 +159,10 @@ test('step 23 on PostgreSQL: the database refuses a strategy for an offer the ch
   assert.deepEqual(list.channelPricingOffers.map((o) => o.label), ['Amazon A1PA6795UKMFR9 · unit SYN-SKU-8502']);
   const ws = list.scopes.find((x) => x.unit.externalUnitId === 'SYN-SKU-8502')!.unit.writeScopeId;
   const draft = { name: 'Synthetic PG fixed', params: { type: 'FIXED', priceMinor: 2050 }, deadbandMinor: 0 };
-  const preview = (await handle({ method: 'POST', url: url('strategies', 'preview'), body: { draft, writeScopeIds: [ws] }, ...owner })).body as StrategyPreviewView;
-  const refused = await handle({ method: 'POST', url: url('strategies'), body: { draft, writeScopeIds: [ws], strategyId: null, previewToken: preview.previewToken, confirmed: true }, ...owner });
+  const trustWorld = worlds.find((w) => w.id === TRUST_WORLD)!;
+  const previewJob = await finishJob(await handle({ method: 'POST', url: url('strategies', 'preview'), body: { draft, writeScopeIds: [ws] }, ...owner }), trustWorld);
+  const preview = (previewJob.result as { view: StrategyPreviewView }).view;
+  const refused = await handle({ method: 'POST', url: url('strategies'), body: { draft, writeScopeIds: [ws], strategyId: null, previewJobId: previewJob.jobId, previewToken: preview.previewToken, confirmed: true }, ...owner });
   assert.deepEqual([refused.status, (refused.body as { error: { code: string } }).error.code], [400, 'CHANNEL_PRICING_ACTIVE'], JSON.stringify(refused.body));
 
   const stop = (await handle({ method: 'GET', url: url('stop'), body: undefined, ...owner })).body as StopView;
@@ -170,7 +173,7 @@ test('step 23 on PostgreSQL: the database refuses a strategy for an offer the ch
   assert.equal(byOperator.status, 403);
   const released = await handle({ method: 'POST', url: url('distrusts', stop.distrusts.active[0]!.distrustId, 'release'), body: { note, confirmed: true }, ...owner });
   assert.equal(released.status, 200, JSON.stringify(released.body));
-  const trust = worlds.find((w) => w.id === TRUST_WORLD)!;
+  const trust = trustWorld;
   const rows = await inTenant(adminPool, trust.identityTenantId, async (tx) => (await tx.query(
     `SELECT e.action, e.actor_type, u.email, e.changes->>'note' AS note FROM audit.audit_event e LEFT JOIN platform.app_user u ON u.user_id = e.actor_user_id
       WHERE e.entity_type = 'channel_distrust' ORDER BY e.recorded_at`)).rows);

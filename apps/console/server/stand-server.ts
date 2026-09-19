@@ -1,12 +1,12 @@
 import { createServer, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import {
-  boundsDiffView, boundsView, bulkJobsView, bulkJobView, can, channelNotes, complianceView, costImportView, currentStrategies, listQuery, MAX_SCOPES, OFFER_CHOICES, pageOf, parseListQuery, type ListQuery, discountCheckView, dangerousReport, decisionList, decisionTrace, describe, expandBoundsEdit, importTargets, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, scopeById, unitOf,
-  parseStrategyDraft, planStop, previewToken, priceFeed, productList, rejectedView, REPORT_PERIODS_DAYS, stopView, strategiesView, strategyPreviewView,
-  type Locale, type Messages, type StandWorld, type StopTarget, type StrategyDraft, type Viewer,
+  boundsDiffView, boundsView, bulkJobsView, bulkJobView, can, channelNotes, complianceView, fingerprint, costImportView, currentStrategies, listQuery, MAX_SCOPES, OFFER_CHOICES, pageOf, parseListQuery, type ListQuery, discountCheckView, dangerousReport, decisionList, decisionTrace, describe, expandBoundsEdit, importTargets, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, scopeById, unitOf,
+  parseStrategyDraft, planStop, priceFeed, productList, rejectedView, REPORT_PERIODS_DAYS, stopView, strategiesView,
+  type Locale, type Messages, type StandWorld, type StopTarget, type Viewer,
 } from '@repracer/console-model';
 import { buildPreview, readTable, suggestMapping, TABLE_ENCODINGS } from '@repracer/cost-import';
-import type { BulkJobInput, DiscountAnnouncementInput, StrategyPreview } from '@repracer/pricing-pipeline';
+import type { BulkJobInput, DiscountAnnouncementInput } from '@repracer/pricing-pipeline';
 import {
   buildStandWorlds, memoryStandDirectory, pgStandJoinMember, pgStandUsers, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_EMAILS, STAND_ISSUER, type LiveWorld,
 } from '@repracer/contract-tests/stand';
@@ -78,42 +78,12 @@ function parseTarget(live: LiveWorld, raw: unknown): StopTarget | null {
 }
 
 /**
- * Р-136: предпросмотр стратегии считает предложения по одному через путь решения, поэтому у него свой предел — он честно назван
- * продавцу, а не прячется за «запрос неверен». Назначение уже сохранённой версии предела не имеет: это запись в базу пакетом.
- */
-const MAX_PREVIEW_SCOPES = 500;
-
-/** Превью стратегии на выбранных единицах записи: каждая — стратегия и Gate на последнем принятом снимке, без фиксации */
-async function previewsFor(live: LiveWorld, world: StandWorld, draft: StrategyDraft, writeScopeIds: readonly string[]): Promise<StrategyPreview[] | null> {
-  const out: StrategyPreview[] = [];
-  for (const id of writeScopeIds) {
-    const scope = world.state.scopes.find((x) => x.writeScopeId === id);
-    if (!scope) return null;
-    const preview = await live.pipeline.previewStrategy(live.callContext(scope.channelAccountId), id, { strategyId: 'draft', version: 1, ...draft });
-    if (!preview) return null;
-    out.push(preview);
-  }
-  return out;
-}
-
-/**
  * Предложения запроса: список идентификаторов ИЛИ «все» [Р-136]. Список каталога — 381 КБ, он не проходит предел тела запроса
  * (413, ревью шага 29, находка 1), а экран со страницами может перечислить только страницу. «Все» раскрывает сервер.
  */
 function scopeIds(raw: unknown, world: StandWorld, all: unknown): string[] | null {
   if (all === true) return world.state.scopes.map((s) => s.writeScopeId);
   return Array.isArray(raw) && raw.length > 0 && raw.length <= MAX_SCOPES && raw.every((x) => typeof x === 'string') ? [...new Set(raw as string[])] : null;
-}
-
-/**
- * Р-136, Р-125 (шаг 29): предпросмотр стратегии считает решение по каждому предложению, поэтому на каталоге целевого клиента он
- * идёт по ВЫБОРКЕ — равномерной и повторяемой (каждое k-е предложение выбранного набора). Назначается стратегия на ВСЕ выбранные:
- * каждое предложение при записи проверяет база (0082), а не экран.
- */
-function previewSample(ids: readonly string[]): string[] {
-  if (ids.length <= MAX_PREVIEW_SCOPES) return [...ids];
-  const step = ids.length / MAX_PREVIEW_SCOPES;
-  return Array.from({ length: MAX_PREVIEW_SCOPES }, (_, i) => ids[Math.floor(i * step)]!);
 }
 
 function draftProblemsText(problems: ReadonlyArray<{ field: string; code: string }>, m: Messages): string {
@@ -259,7 +229,8 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
      * задание. Второй фактор предъявляется здесь, человеком; фоновый процесс предъявит базе само задание.
      */
     const createJob = async (kind: BulkJobInput['kind'], params: Record<string, unknown>, totalItems: number | null, message: string): Promise<ApiResponse> => {
-      const created = await live.store.createBulkJob(world.tenantId, { kind, params, ...(totalItems === null ? {} : { totalItems }) },
+      // Язык — тот, на котором человек создал задание [Р-72]: тексты его итога пишет процесс, у которого запроса уже нет
+      const created = await live.store.createBulkJob(world.tenantId, { kind, params: { ...params, locale }, ...(totalItems === null ? {} : { totalItems }) },
         { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) });
       if (created.status === 'MFA_REQUIRED') return fail(403, 'MFA_REQUIRED', kind === 'COST_IMPORT' ? m.ui.costImport.mfa : s.mfaRequiredBounds);
       if (created.status !== 'CREATED') return fail(403, 'FORBIDDEN', s.forbidden);
@@ -474,15 +445,63 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       }
     }
 
-    // Шаг 21: превью стратегии на реальных единицах записи — без фиксации; права на просмотр достаточно
+    /**
+     * Шаг 21, OQ-201: превью стратегии на реальных единицах записи — без фиксации; права на просмотр достаточно. Шаг 30 сделал
+     * его ЗАДАНИЕМ: решение считается по каждому предложению каталога, а не по выборке 500 из 10 000. Выборка была ценой
+     * синхронного ответа, а не свойством продукта, — и вместе с ответом она исчезла.
+     */
     if (screen === 'strategies' && param === 'preview') {
       const parsed = parseStrategyDraft(body.draft);
       if (!parsed.ok) return fail(400, 'BAD_DRAFT', draftProblemsText(parsed.problems, m));
       const ids = scopeIds(body.writeScopeIds, world, body.all);
       if (!ids) return fail(400, 'BAD_SCOPES', s.tooManyScopes(Array.isArray(body.writeScopeIds) ? body.writeScopeIds.length : 0, MAX_SCOPES));
-      const previews = await previewsFor(live, world, parsed.draft, previewSample(ids));
-      return previews ? ok(strategyPreviewView(world, parsed.draft, previews, m, ids.length)) : fail(400, 'BAD_SCOPES', s.badRequest);
+      return createJob('STRATEGY_PREVIEW', { draft: body.draft, ...(body.all === true ? { all: true } : { writeScopeIds: ids }) },
+        ids.length, m.ui.jobs.createdPreview);
     }
+
+    /**
+     * Предпросмотр, который видел человек, — это ЗАДАНИЕ этого тенанта, лежащее в базе. Сохранение сверяется с ним, а не с
+     * заново посчитанным превью: пересчёт по каталогу стоил бы столько же, сколько сам предпросмотр, и мог бы разойтись с
+     * показанным по причинам, к человеку отношения не имеющим.
+     */
+    const confirmedPreview = async (draft: unknown): Promise<{ ok: true; offers: number } | { ok: false; response: ApiResponse }> => {
+      const jobId = typeof body.previewJobId === 'string' ? body.previewJobId : null;
+      if (!jobId || typeof body.previewToken !== 'string') return { ok: false, response: fail(409, 'PREVIEW_CHANGED', s.previewChanged) };
+      const job = jobId ? await live.store.bulkJob(world.tenantId, jobId) : null;
+      if (!job || job.kind !== 'STRATEGY_PREVIEW' || job.status !== 'SUCCEEDED') return { ok: false, response: fail(409, 'PREVIEW_CHANGED', s.previewChanged) };
+      const result = (job.result ?? {}) as { previewToken?: string; offers?: number; view?: { saveBlocked: string | null }; expected?: unknown };
+      if (result.previewToken !== body.previewToken) return { ok: false, response: fail(409, 'PREVIEW_CHANGED', s.previewChanged) };
+      /**
+       * Черновик и выбор предложений — те же: иначе сохранялось бы не то, что было посчитано. Сравниваются РАЗОБРАННЫЕ
+       * черновики, а не тела запросов: параметры задания лежат в jsonb, а он переставляет ключи объекта — отпечаток
+       * пришедшего и вернувшегося не совпал бы никогда, и сохранить не удалось бы вовсе.
+       */
+      const params = job.params as { draft?: unknown; writeScopeIds?: string[]; all?: boolean };
+      const asked = parseStrategyDraft(draft);
+      const computed = parseStrategyDraft(params.draft);
+      // Выбор сравнивается НЕРАСКРЫТЫМ: «весь каталог» — это флаг, и раскрытый список сравнивался бы с пустым (живой прогон)
+      const chosen = body.all === true ? [] : (Array.isArray(body.writeScopeIds) ? [...new Set(body.writeScopeIds as string[])] : []);
+      if (!asked.ok || !computed.ok
+        || fingerprint([computed.draft, params.all === true, params.writeScopeIds ?? []])
+           !== fingerprint([asked.draft, body.all === true, chosen])) {
+        return { ok: false, response: fail(409, 'PREVIEW_CHANGED', s.previewChanged) };
+      }
+      // Р-120: чужое ценообразование канала названо своей причиной, а не общим «сохранить нельзя»
+      const priced = channelPriced(scopeIds(body.writeScopeIds, world, body.all) ?? []);
+      if (priced) return { ok: false, response: fail(400, 'CHANNEL_PRICING_ACTIVE', s.channelPricingActive(priced)) };
+      // Находка 3 ревью шага 21 [Р-39]: стратегия, для которой канал не даёт нужных данных конкурентов, не назначается
+      if (result.view?.saveBlocked) return { ok: false, response: fail(400, 'STRATEGY_UNAVAILABLE', result.view.saveBlocked) };
+      /**
+       * Находка 4 ревью шага 21: предпросмотр старше стратегии предложения не сохраняется. Сравниваются стратегии на момент
+       * предпросмотра и сейчас — в памяти, по уже прочитанному миру: заново считать предпросмотр по каталогу ради этого
+       * незачем. Последнее слово всё равно за хранилищем: тот же набор уходит в задание как `expected` (CONFLICT).
+       */
+      const ids = scopeIds(body.writeScopeIds, world, body.all) ?? [];
+      if (fingerprint(result.expected ?? null) !== fingerprint(currentStrategies(world, ids))) {
+        return { ok: false, response: fail(409, 'PREVIEW_CHANGED', s.previewChanged) };
+      }
+      return { ok: true, offers: result.offers ?? 0 };
+    };
 
     // Сохранение — только того превью, что видел человек: сервер пересчитывает превью и сравнивает токен
     if (screen === 'strategies' && param === null) {
@@ -491,20 +510,16 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       const parsed = parseStrategyDraft(body.draft);
       if (!parsed.ok) return fail(400, 'BAD_DRAFT', draftProblemsText(parsed.problems, m));
       const ids = scopeIds(body.writeScopeIds, world, body.all);
-      const previews = ids ? await previewsFor(live, world, parsed.draft, previewSample(ids)) : null;
-      if (!previews) return fail(400, 'BAD_SCOPES', s.badRequest);
-      if (typeof body.previewToken !== 'string' || body.previewToken !== previewToken(parsed.draft, previews, world)) return fail(409, 'PREVIEW_CHANGED', s.previewChanged);
-      // Находка 3 ревью шага 21 [Р-39]: стратегия, для которой канал не даёт нужных данных конкурентов, не назначается
-      if (previews.some((p) => !p.availability.available)) return fail(400, 'STRATEGY_UNAVAILABLE', s.strategyUnavailable);
+      if (!ids) return fail(400, 'BAD_SCOPES', s.badRequest);
+      const confirmed = await confirmedPreview(body.draft);
+      if (!confirmed.ok) return confirmed.response;
       /**
        * Р-139: назначение — фоновое задание. Предпросмотр и его токен остаются здесь: это то, что видел человек, и проверять
        * его надо до создания задания. Растёт с каталогом только запись — она и ушла в задание.
        */
-      const priced = channelPriced(ids!);
-      if (priced) return fail(400, 'CHANNEL_PRICING_ACTIVE', s.channelPricingActive(priced));
       const strategyId = typeof body.strategyId === 'string' ? body.strategyId : null;
-      return createJob('STRATEGY_ASSIGN', { draft: body.draft, ...(body.all === true ? { all: true } : { writeScopeIds: ids }), strategyId },
-        ids!.length, m.ui.jobs.createdStrategy);
+      return createJob('STRATEGY_ASSIGN', { draft: body.draft, ...(body.all === true ? { all: true } : { writeScopeIds: ids }), strategyId, previewJobId: body.previewJobId },
+        ids.length, m.ui.jobs.createdStrategy);
     }
 
     // OQ-169 (шаг 24): существующая версия — выбранным офферам без новой версии; то же превью и тот же токен, что при сохранении
@@ -515,15 +530,12 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       if (!item) return fail(404, 'STRATEGY_NOT_FOUND', s.notFound);
       if (!item.assignable) return fail(400, 'VERSION_NOT_ACTIVE', s.versionNotActive);
       const ids = scopeIds(body.writeScopeIds, world, body.all);
-      const previews = ids ? await previewsFor(live, world, item.draft, previewSample(ids)) : null;
-      if (!previews) return fail(400, 'BAD_SCOPES', s.badRequest);
-      if (typeof body.previewToken !== 'string' || body.previewToken !== previewToken(item.draft, previews, world)) return fail(409, 'PREVIEW_CHANGED', s.previewChanged);
-      if (previews.some((p) => !p.availability.available)) return fail(400, 'STRATEGY_UNAVAILABLE', s.strategyUnavailable);
-      const priced = channelPriced(ids!);
-      if (priced) return fail(400, 'CHANNEL_PRICING_ACTIVE', s.channelPricingActive(priced));
+      if (!ids) return fail(400, 'BAD_SCOPES', s.badRequest);
+      const confirmed = await confirmedPreview(body.draft ?? item.draft);
+      if (!confirmed.ok) return confirmed.response;
       // Р-139: назначение существующей версии — то же фоновое задание: для продавца это одна операция над каталогом
-      return createJob('STRATEGY_ASSIGN', { strategyId: item.strategyId, version: item.version, ...(body.all === true ? { all: true } : { writeScopeIds: ids }) },
-        ids!.length, m.ui.jobs.createdStrategy);
+      return createJob('STRATEGY_ASSIGN', { strategyId: item.strategyId, version: item.version, ...(body.all === true ? { all: true } : { writeScopeIds: ids }), previewJobId: body.previewJobId },
+        ids.length, m.ui.jobs.createdStrategy);
     }
 
     // OQ-169: снять стратегию с офферов — только при выключенном репрайсинге

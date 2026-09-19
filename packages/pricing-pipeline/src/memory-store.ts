@@ -1317,9 +1317,10 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
      * Право — по тому, что задание ДЕЛАЕТ. Выгрузка доказательной истории [Р-123] ничего не меняет и нужна тому, кто отвечает
      * за спор о скидке: её создаёт и зритель. Задания, меняющие цены, — только участник с правом и со вторым фактором [Р-135].
      */
-    const member = input.kind === 'PRICE_EVIDENCE' ? this.member(actor.membershipId) : this.adminMember(actor);
+    const readOnly = input.kind === 'PRICE_EVIDENCE' || input.kind === 'STRATEGY_PREVIEW';
+    const member = readOnly ? this.member(actor.membershipId) : this.adminMember(actor);
     if (!member || member.userId !== actor.userId) return { status: 'FORBIDDEN' };
-    if (input.kind !== 'PRICE_EVIDENCE' && !actor.mfa) return { status: 'MFA_REQUIRED' };
+    if (!readOnly && !actor.mfa) return { status: 'MFA_REQUIRED' };
     const createdAt = new Date().toISOString();
     const job: BulkJobRow = {
       jobId: `job-${this.bulkJobs.length + 1}-${Date.now().toString(36)}`, kind: input.kind, status: 'PENDING', params: input.params, phase: 'PREPARING',

@@ -20,7 +20,7 @@ CREATE TABLE tenant_data.bulk_job (
   bulk_job_id              uuid NOT NULL DEFAULT gen_random_uuid(),
   -- Что делает задание: четыре массовые операции продавца [Р-139]
   kind                     text NOT NULL CONSTRAINT bulk_job_kind_known
-                             CHECK (kind IN ('COST_IMPORT', 'BOUNDS_EDIT', 'STRATEGY_ASSIGN', 'PRICE_EVIDENCE')),
+                             CHECK (kind IN ('COST_IMPORT', 'BOUNDS_EDIT', 'STRATEGY_ASSIGN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE')),
   status                   text NOT NULL DEFAULT 'PENDING' CONSTRAINT bulk_job_status_known
                              CHECK (status IN ('PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'INTERRUPTED')),
   /** Что именно делать: файл импорта, правка границ, черновик стратегии, период выгрузки — ровно то, что видел человек */
@@ -105,7 +105,7 @@ ALTER FUNCTION tenant_data.bulk_job_created_with_mfa() OWNER TO repracer_owner;
 CREATE FUNCTION tenant_data.bulk_job_requires_mfa() RETURNS trigger
   LANGUAGE plpgsql SET search_path = pg_catalog AS $fn$
 BEGIN
-  IF NEW.kind <> 'PRICE_EVIDENCE' AND NOT NEW.created_with_mfa THEN
+  IF NEW.kind NOT IN ('PRICE_EVIDENCE', 'STRATEGY_PREVIEW') AND NOT NEW.created_with_mfa THEN
     RAISE EXCEPTION 'a bulk job of kind % changes prices: creating it needs a second factor (Р-135, Р-139)', NEW.kind
       USING ERRCODE = 'insufficient_privilege';
   END IF;
@@ -126,7 +126,7 @@ CREATE FUNCTION tenant_data.bulk_job_requires_right() RETURNS trigger
 DECLARE
   member_role text;
 BEGIN
-  IF NOT security.admin_session() OR NEW.kind = 'PRICE_EVIDENCE' THEN RETURN NULL; END IF;
+  IF NOT security.admin_session() OR NEW.kind IN ('PRICE_EVIDENCE', 'STRATEGY_PREVIEW') THEN RETURN NULL; END IF;
   SELECT m.role INTO member_role FROM tenant_data.membership m
    WHERE m.tenant_id = NEW.tenant_id AND m.user_id = security.current_user_id() AND m.status = 'ACTIVE';
   IF member_role IS NULL OR NOT security.pricing_permission(member_role, 'MANAGE_PRICING') THEN

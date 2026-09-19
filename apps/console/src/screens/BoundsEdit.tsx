@@ -76,6 +76,13 @@ function BoundsEditForm({ worldId, items, total }: { worldId: string; items: rea
   const [jobId, setJobId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const reset = () => { setDiff(null); setMessage(null); setJobId(null); };
+  /**
+   * Р-140 (шаг 30): выбор отдельных строк НЕ переживает листание и смену фильтра. Он их и не пережил бы осмысленно: выбранные
+   * строки другой страницы продавцу не видны, а применяются. Страница сменилась — выбор сброшен, и это сказано на экране.
+   */
+  const pageKey = items.map((i) => i.writeScopeId).join(',');
+  const [shownPage, setShownPage] = useState(pageKey);
+  if (shownPage !== pageKey) { setShownPage(pageKey); setSelected([]); setWholeCatalog(false); reset(); }
 
   const request = (): BoundsEditRequest | string => {
     const a = adjustOf(min);
@@ -115,15 +122,19 @@ function BoundsEditForm({ worldId, items, total }: { worldId: string; items: rea
     <section className="bounds-edit">
       <h3>{t.pageTitle}</h3>
       <h4>{t.select}</h4>
-      <div className="buttons">
-        <button type="button" disabled={busy} onClick={() => { setWholeCatalog(false); setSelected(items.map((i) => i.writeScopeId)); reset(); }}>{t.selectPage(items.length)}</button>
-        <button type="button" disabled={busy} onClick={() => { setWholeCatalog(false); setSelected([]); reset(); }}>{t.selectNone}</button>
-      </div>
-      {/* Р-136: выбрать весь каталог, а не показанную страницу — раскрывает выбор сервер */}
+      {/* Р-136, Р-140: «всё» — это весь каталог, а не показанная страница; раскрывает выбор сервер */}
       <label className="whole-catalog">
         <input type="checkbox" checked={wholeCatalog} disabled={busy}
           onChange={(e) => { setWholeCatalog(e.target.checked); setSelected([]); reset(); }} /> {t.selectAllCatalog(total)}
       </label>
+      <div className="buttons">
+        <button type="button" disabled={busy || wholeCatalog} onClick={() => { setSelected(items.map((i) => i.writeScopeId)); reset(); }}>{t.selectPage(items.length)}</button>
+        <button type="button" disabled={busy || wholeCatalog} onClick={() => { setSelected([]); reset(); }}>{t.selectNone}</button>
+      </div>
+      <p className="notice" role="status">
+        {wholeCatalog ? t.selectionWhole(total) : selected.length === 0 ? t.selectionNone : t.selectionCount(selected.length, total)}
+      </p>
+      <p className="small muted">{t.selectionReset}</p>
       <ul className="index">
         {items.map((i) => (
           <li key={i.writeScopeId}><label><input type="checkbox" checked={selected.includes(i.writeScopeId)}

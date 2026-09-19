@@ -14,7 +14,9 @@
     "@repracer/bulk-jobs": "0.1.0",
     "@repracer/pricing-store-pg": "0.1.0",
     "@repracer/pricing-pipeline": "0.1.0",
-    "@repracer/channel-port": "0.1.0"
+    "@repracer/channel-port": "0.1.0",
+    "@repracer/amazon-adapter": "0.1.0",
+    "@repracer/kaufland-adapter": "0.1.0"
   },
   "scripts": {
     "stand": "node --experimental-strip-types --disable-warning=ExperimentalWarning server/stand-server.ts",

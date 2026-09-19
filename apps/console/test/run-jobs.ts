@@ -12,7 +12,11 @@ import type { LiveWorld } from '@repracer/contract-tests/stand';
  * зовётся из теста, чтобы шаг задания был точкой, между которой можно смотреть на базу.
  */
 export function handlersFor(live: LiveWorld) {
-  return bulkJobHandlers({ world: async (ctx) => live.view({ membershipId: ctx.membershipId, role: 'PRICING_MANAGER' }) });
+  return bulkJobHandlers({
+    world: async (ctx) => live.view({ membershipId: ctx.membershipId, role: 'PRICING_MANAGER' }),
+    // OQ-201: решение по предложению считает путь решения — канал при этом не опрашивается
+    previewStrategy: (_ctx, scope, strategy) => live.pipeline.previewStrategy(live.callContext(scope.channelAccountId), scope.writeScopeId, strategy),
+  });
 }
 
 /** Выполнить все ожидающие задания тенанта; возвращает их число */

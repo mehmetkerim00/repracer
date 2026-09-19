@@ -55,6 +55,19 @@ const finishJob = (worldId: string, response: { status: number; body: unknown },
   return runJob(liveOf(worldId), (response.body as JobCreatedResponse).jobId, locale);
 };
 
+/**
+ * OQ-201 (шаг 30): предпросмотр стратегии — тоже задание: решение считается по каждому выбранному предложению. Экран берёт
+ * готовый ответ из итога задания, а сохранение сверяется с ЭТИМ заданием — поэтому тест держит и то, и другое.
+ */
+async function previewOf(auth: Auth, worldId: string, body: Record<string, unknown>): Promise<{ jobId: string; view: StrategyPreviewView }> {
+  const created = await call(auth, 'POST', api(worldId, 'strategies', 'preview'), body);
+  assert.equal(created.status, 200, JSON.stringify(created.body));
+  const jobId = (created.body as JobCreatedResponse).jobId;
+  const job = await runJob(liveOf(worldId), jobId, 'en');
+  assert.equal(job.status, 'SUCCEEDED', job.error ?? job.headline);
+  return { jobId, view: (job.result as { view: StrategyPreviewView }).view };
+}
+
 /** Запрос браузера: токен поставщика в заголовке и язык в cookie (сессии у сервера нет) */
 interface Auth { authorization: string; cookie: string }
 
@@ -349,14 +362,15 @@ test('step 21: a strategy is saved only with the token of the preview shown; bou
   assert.equal((await get<StrategyListView>(viewer, api(id, 'strategies'))).canEdit, false);
   const bad = await call(owner, 'POST', api(id, 'strategies', 'preview'), { draft: { ...draft, deadbandMinor: 'x' }, writeScopeIds: ['ws-price-de-4101'] });
   assert.deepEqual([bad.status, (bad.body as { error: { code: string; message: string } }).error.message], [400, 'Threshold: an amount like 19.99 or a percentage like 12.5']);
-  const preview = await call(viewer, 'POST', api(id, 'strategies', 'preview'), { draft, writeScopeIds: ['ws-price-de-4101'] });
-  assert.equal(preview.status, 200, 'a viewer may preview');
-  const view = preview.body as StrategyPreviewView;
-  assert.equal(view.rows.length, 1);
-  const save = (auth: Auth, previewToken: string, confirmed = true) => call(auth, 'POST', api(id, 'strategies'), { draft, writeScopeIds: ['ws-price-de-4101'], strategyId: null, previewToken, confirmed });
+  const { jobId: previewJobId, view } = await previewOf(viewer, id, { draft, writeScopeIds: ['ws-price-de-4101'] });
+  assert.equal(view.rows.length, 1, 'зритель вправе посчитать предпросмотр');
+  assert.deepEqual([view.shown.rows, view.shown.of, view.sample.text], [1, 1, null], 'OQ-201: посчитано всё выбранное, а не выборка');
+  const save = (auth: Auth, previewToken: string, confirmed = true, jobId: string | null = previewJobId) =>
+    call(auth, 'POST', api(id, 'strategies'), { draft, writeScopeIds: ['ws-price-de-4101'], strategyId: null, previewJobId: jobId, previewToken, confirmed });
   assert.equal((await save(viewer, view.previewToken)).status, 403);
   assert.equal((await save(owner, view.previewToken, false)).status, 400);
   assert.equal((await save(owner, 'not-the-preview')).status, 409);
+  assert.equal((await save(owner, view.previewToken, true, null)).status, 409, 'без предпросмотра сохранения нет');
   // Р-139 (шаг 30): сохранение с назначением — фоновое задание; токен предпросмотра сверяет сервер ДО его создания
   const saved = await finishJob(id, await save(owner, view.previewToken), 'en');
   assert.deepEqual([saved.status, saved.headline], ['SUCCEEDED', 'Done: version 1 assigned to 1 offer.']);
@@ -364,9 +378,9 @@ test('step 21: a strategy is saved only with the token of the preview shown; bou
   assert.equal((await save(owner, view.previewToken)).status, 409, 'finding 4: a preview older than the strategy of the offer is not saved');
   // Находка 3 ревью шага 21 [Р-39]: Kaufland не даёт полного списка предложений — «ниже всех на рынке» не назначается
   const market = { name: 'Synthetic market lowest', params: { type: 'BEAT_LOWEST', undercutMinor: 1, scope: 'MARKET', compareLanded: false, atBound: 'CAP' }, deadbandMinor: 0 };
-  const marketPreview = (await call(owner, 'POST', api(id, 'strategies', 'preview'), { draft: market, writeScopeIds: ['ws-price-de-4101'] })).body as StrategyPreviewView;
-  assert.ok(marketPreview.rows[0]!.unavailable, 'the preview shows the strategy as unavailable');
-  const refused = await call(owner, 'POST', api(id, 'strategies'), { draft: market, writeScopeIds: ['ws-price-de-4101'], strategyId: null, previewToken: marketPreview.previewToken, confirmed: true });
+  const marketPreview = await previewOf(owner, id, { draft: market, writeScopeIds: ['ws-price-de-4101'] });
+  assert.ok(marketPreview.view.rows[0]!.unavailable, 'the preview shows the strategy as unavailable');
+  const refused = await call(owner, 'POST', api(id, 'strategies'), { draft: market, writeScopeIds: ['ws-price-de-4101'], strategyId: null, previewJobId: marketPreview.jobId, previewToken: marketPreview.view.previewToken, confirmed: true });
   assert.deepEqual([refused.status, (refused.body as { error: { code: string } }).error.code], [400, 'STRATEGY_UNAVAILABLE'], 'finding 3: an unavailable strategy is not saved');
   const html1 = await html('/src/screens/Strategies.tsx', 'PreviewTable', { view });
   assert.ok(html1.includes('snapshot of '));
@@ -470,13 +484,13 @@ test('step 23, C/F: offers the channel prices itself are listed before a strateg
 
   const ws = list.scopes.find((s) => s.unit.externalUnitId === 'SYN-SKU-8502')!.unit.writeScopeId;
   const draft = { name: 'Synthetic fixed', params: { type: 'FIXED', priceMinor: 2050 }, deadbandMinor: 0 };
-  const preview = (await call(owner, 'POST', api(id, 'strategies', 'preview'), { draft, writeScopeIds: [ws] })).body as StrategyPreviewView;
-  assert.match(preview.saveBlocked ?? '', /the channel prices these offers itself/);
-  const refused = await call(owner, 'POST', api(id, 'strategies'), { draft, writeScopeIds: [ws], strategyId: null, previewToken: preview.previewToken, confirmed: true });
+  const preview = await previewOf(owner, id, { draft, writeScopeIds: [ws] });
+  assert.match(preview.view.saveBlocked ?? '', /the channel prices these offers itself/);
+  const refused = await call(owner, 'POST', api(id, 'strategies'), { draft, writeScopeIds: [ws], strategyId: null, previewJobId: preview.jobId, previewToken: preview.view.previewToken, confirmed: true });
   assert.deepEqual([refused.status, (refused.body as { error: { code: string } }).error.code], [400, 'CHANNEL_PRICING_ACTIVE']);
 
-  const screen = await html('/src/screens/Strategies.tsx', 'StrategiesScreenView', { view: list, worldId: id, initialPreview: preview });
-  for (const text of ['Offers the channel prices itself', 'cannot be assigned', 'New version…', 'Select all', 'Cannot be saved: the channel prices these offers itself']) assert.ok(screen.includes(text), text);
+  const screen = await html('/src/screens/Strategies.tsx', 'StrategiesScreenView', { view: list, worldId: id, initialPreview: preview.view });
+  for (const text of ['Offers the channel prices itself', 'cannot be assigned', 'New version…', 'Cannot be saved: the channel prices these offers itself']) assert.ok(screen.includes(text), text);
   assert.match(screen, /<button type="button" class="danger" disabled="">Save and assign…<\/button>/, 'the save button is disabled while the preview is blocked');
   const deScreen = await html('/src/screens/Strategies.tsx', 'StrategiesScreenView', { view: await get<StrategyListView>(await login('OWNER', 'de'), api(id, 'strategies')), worldId: id }, 'de');
   assert.ok(deScreen.includes('Angebote, die der Kanal selbst bepreist'));
@@ -493,7 +507,16 @@ test('step 23, F: bounds edit is offered only with the right; the feed filters a
   const noRight = await html('/src/screens/BoundsEdit.tsx', 'BoundsEditPanel', { worldId: id, items: viewerIndex.items, total: viewerIndex.page.total, canEdit: false });
   assert.ok(noRight.includes('Your role may view bounds but not change them.') && !noRight.includes('Show the differences'));
   const panel = await html('/src/screens/BoundsEdit.tsx', 'BoundsEditPanel', { worldId: id, items: index.items, total: index.page.total, canEdit: true });
-  for (const text of ['Select all', 'set to (amount)', 'change by (%)']) assert.ok(panel.includes(text), text);
+  for (const text of ['set to (amount)', 'change by (%)']) assert.ok(panel.includes(text), text);
+  /**
+   * Р-140 (шаг 30): «всё» — это весь каталог, а не показанная страница; выбор названного числа виден всегда, а листание его
+   * сбрасывает. Проверяется то, что читает продавец: страница названа страницей, каталог — каталогом, и оба числа настоящие.
+   */
+  assert.ok(panel.includes(`All ${index.page.total} offers of the catalogue — including those on other pages`), 'каталог назван каталогом');
+  assert.ok(panel.includes(`Select the ${index.items.length} on this page`), 'страница названа страницей, с её числом');
+  assert.ok(panel.includes('Nothing selected'), 'ничего не выбрано — сказано прямо, а не пустотой');
+  assert.ok(panel.includes('Paging or changing the filter clears the selection of individual rows.'), 'сброс выбора при листании назван до того, как он случится');
+  assert.ok(!/>Select all</.test(panel), 'кнопки «выбрать всё», означающей страницу, на экране больше нет');
 
   const feedId = 'kaufland/pipeline/happy-path';
   const all = await get<PriceFeedView>(viewer, api(feedId, 'feed'));
@@ -521,9 +544,9 @@ test('step 24, OQ-169/170: an existing strategy version is assigned without a ne
 
   // OQ-170: новая версия, сохранённая человеком, показывает автора и статус
   const draft = { name: 'Synthetic author check', params: { type: 'FIXED', priceMinor: 2100 }, deadbandMinor: 0 };
-  const p1 = (await call(owner, 'POST', api(id, 'strategies', 'preview'), { draft, writeScopeIds: [target.unit.writeScopeId] })).body as StrategyPreviewView;
+  const p1 = await previewOf(owner, id, { draft, writeScopeIds: [target.unit.writeScopeId] });
   // Р-139 (шаг 30): сохранение и назначение идут заданием, поэтому список стратегий читается заново после его работы
-  const savedJob = await finishJob(id, await call(owner, 'POST', api(id, 'strategies'), { draft, writeScopeIds: [target.unit.writeScopeId], strategyId: null, previewToken: p1.previewToken, confirmed: true }), 'en');
+  const savedJob = await finishJob(id, await call(owner, 'POST', api(id, 'strategies'), { draft, writeScopeIds: [target.unit.writeScopeId], strategyId: null, previewJobId: p1.jobId, previewToken: p1.view.previewToken, confirmed: true }), 'en');
   assert.equal(savedJob.status, 'SUCCEEDED', savedJob.error ?? '');
   const afterSave = await get<StrategyListView>(owner, api(id, 'strategies'));
   const created = afterSave.strategies.find((x) => x.name === 'Synthetic author check')!;
@@ -533,8 +556,8 @@ test('step 24, OQ-169/170: an existing strategy version is assigned without a ne
 
   // OQ-169: прежняя версия возвращается офферу без новой версии — после превью её параметров
   const item = afterSave.strategies.find((x) => x.strategyId === original.strategyId)!;
-  const preview = (await call(owner, 'POST', api(id, 'strategies', 'preview'), { draft: item.draft, writeScopeIds: [target.unit.writeScopeId] })).body as StrategyPreviewView;
-  const body = { strategyId: item.strategyId, version: item.version, writeScopeIds: [target.unit.writeScopeId], previewToken: preview.previewToken, confirmed: true };
+  const preview = await previewOf(owner, id, { draft: item.draft, writeScopeIds: [target.unit.writeScopeId] });
+  const body = { strategyId: item.strategyId, version: item.version, writeScopeIds: [target.unit.writeScopeId], previewJobId: preview.jobId, previewToken: preview.view.previewToken, confirmed: true };
   assert.equal((await call(viewer, 'POST', api(id, 'strategies', 'assign'), body)).status, 403);
   assert.equal((await call(owner, 'POST', api(id, 'strategies', 'assign'), { ...body, previewToken: 'stale' })).status, 409);
   const assigned = await finishJob(id, await call(owner, 'POST', api(id, 'strategies', 'assign'), body), 'en');

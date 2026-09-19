@@ -27,6 +27,8 @@ export interface BulkJobView {
   error: string | null;
   /** Файл, подготовленный заданием, — если он есть [OQ-202] */
   artifact: { fileName: string; rows: number; sha256: string } | null;
+  /** Итог задания как данные — например, посчитанный предпросмотр стратегии [OQ-201]; у незавершённого его нет */
+  result: unknown;
   startedAt: string | null;
   finishedAt: string | null;
   attempts: number;
@@ -49,6 +51,7 @@ function outcomeText(job: BulkJobRow, m: Messages): string {
     case 'COST_IMPORT': return t.doneCostImport(n(r.rows), n(r.offers), n(r.skipped));
     case 'BOUNDS_EDIT': return t.doneBounds(n(r.offers), n(r.changed));
     case 'STRATEGY_ASSIGN': return t.doneStrategy(n(r.offers), n(r.version));
+    case 'STRATEGY_PREVIEW': return t.donePreview(n(r.offers));
     case 'PRICE_EVIDENCE': return t.doneEvidence(n(r.rows), n(r.bytes));
   }
 }
@@ -88,7 +91,8 @@ export function bulkJobView(job: BulkJobRow, m: Messages, artifact: { fileName: 
     progress: total === null || total === 0 ? null : Math.min(1, done / total),
     done, total, effect, active: ACTIVE.has(job.status),
     error: job.status === 'FAILED' ? (t.errors[job.errorCode as keyof typeof t.errors] ?? job.errorCode ?? t.errorUnknown) : null,
-    artifact, startedAt: job.startedAt, finishedAt: job.finishedAt, attempts: job.attempts,
+    artifact, result: job.status === 'SUCCEEDED' ? job.result : null,
+    startedAt: job.startedAt, finishedAt: job.finishedAt, attempts: job.attempts,
   };
 }
 

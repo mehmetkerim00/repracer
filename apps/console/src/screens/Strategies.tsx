@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { LIST_PAGE_DEFAULT, parseAmountInput, parsePercentInput, type ListQuery, type StrategyDraft, type StrategyListItem, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
 import type { JobCreatedResponse, StrategySaveResponse } from '../api-types.ts';
+import type { BulkJobView } from '@repracer/console-model';
 import { JobProgress } from './Jobs.tsx';
 import { ApiError, requestJson, useResource, worldPath } from '../api.ts';
 import { Badge, ErrorBox, errorText, Gaps, Load, Pager, ReasonLine, useMessages } from '../components.tsx';
@@ -120,6 +121,7 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
   const [removing, setRemoving] = useState<StrategyListView['scopes'][number] | null>(null);
   const [selected, setSelected] = useState<string[]>(assignable);
   const [preview, setPreview] = useState<StrategyPreviewView | null>(initialPreview);
+  const [previewJobId, setPreviewJobId] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
@@ -133,19 +135,29 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
   const [wholeCatalog, setWholeCatalog] = useState(false);
   const pageKey = `${view.page.from}:${view.page.to}`;
   const [shownPage, setShownPage] = useState(pageKey);
-  if (shownPage !== pageKey) { setShownPage(pageKey); setSelected(assignable); setWholeCatalog(false); setPreview(null); }
+  if (shownPage !== pageKey) { setShownPage(pageKey); setSelected(assignable); setWholeCatalog(false); setPreview(null); setPreviewJobId(null); }
 
-  const changed = () => { setPreview(null); setConfirming(false); };
+  const changed = () => { setPreview(null); setPreviewJobId(null); setConfirming(false); };
   const set = <K extends keyof DraftForm>(key: K, value: DraftForm[K]) => { setForm({ ...form, [key]: value }); changed(); };
   const pick = (ids: string[]) => { setSelected(ids); setWholeCatalog(false); changed(); };
   const scopeSelection = () => (wholeCatalog ? { all: true } : { writeScopeIds: selected });
 
+  /**
+   * OQ-201 (шаг 30): предпросмотр — фоновое задание по ВСЕМ выбранным предложениям, а не по выборке 500. Экран показывает его
+   * ход и берёт готовый ответ из итога задания; идентификатор задания нужен и для сохранения — сервер сверяется именно с ним.
+   */
   const run = async (notice: string | null = null) => {
-    setBusy(true); setError(null); setMessage(notice);
+    setBusy(true); setError(null); setMessage(notice); setPreview(null);
     try {
       const draft = assigning ? assigning.draft : draftOf(form);
-      setPreview(await requestJson<StrategyPreviewView>(worldPath(worldId, 'strategies', 'preview'), { method: 'POST', body: { draft, ...scopeSelection() }, locale: m.locale }));
+      const created = await requestJson<JobCreatedResponse>(worldPath(worldId, 'strategies', 'preview'), { method: 'POST', body: { draft, ...scopeSelection() }, locale: m.locale });
+      setPreviewJobId(created.jobId);
     } catch (e) { setError(errorText(e, m)); } finally { setBusy(false); }
+  };
+  const previewReady = (job: BulkJobView) => {
+    const result = job.result as { view?: StrategyPreviewView } | null;
+    if (job.status === 'SUCCEEDED' && result?.view) setPreview(result.view);
+    else if (job.status === 'FAILED') setError(job.error);
   };
   const save = async () => {
     if (!preview) return;
@@ -154,12 +166,12 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
       // Р-139: назначение на каталог идёт фоновым заданием; предпросмотр уже сверен сервером с тем, что видел человек
       const r = assigning
         ? await requestJson<JobCreatedResponse>(worldPath(worldId, 'strategies', 'assign'), {
-          method: 'POST', body: { strategyId: assigning.strategyId, version: assigning.version, ...scopeSelection(), previewToken: preview.previewToken, confirmed: true }, locale: m.locale,
+          method: 'POST', body: { strategyId: assigning.strategyId, version: assigning.version, ...scopeSelection(), previewJobId, previewToken: preview.previewToken, confirmed: true }, locale: m.locale,
         })
         : await requestJson<JobCreatedResponse>(worldPath(worldId, 'strategies'), {
-          method: 'POST', body: { draft: draftOf(form), ...scopeSelection(), strategyId: form.strategyId, previewToken: preview.previewToken, confirmed: true }, locale: m.locale,
+          method: 'POST', body: { draft: draftOf(form), ...scopeSelection(), strategyId: form.strategyId, previewJobId, previewToken: preview.previewToken, confirmed: true }, locale: m.locale,
         });
-      setMessage(r.message); setJobId(r.jobId); setPreview(null); setConfirming(false); setBusy(false); setAssigning(null);
+      setMessage(r.message); setJobId(r.jobId); setPreview(null); setPreviewJobId(null); setConfirming(false); setBusy(false); setAssigning(null);
     } catch (e) {
       setConfirming(false); setBusy(false);
       // Офферы изменились после превью: показать новое превью, а не ошибку без выхода
@@ -237,14 +249,20 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
       </div>
 
       <h4>{t.pick}</h4>
-      <div className="buttons">
-        <button type="button" disabled={busy} onClick={() => pick(assignable)}>{t.selectAll}</button>
-        <button type="button" disabled={busy} onClick={() => pick([])}>{t.selectNone}</button>
-      </div>
+      {/* Р-140 (шаг 30): «всё» — это весь каталог, а не показанная страница; страница выбирается отдельной кнопкой, и так и названа */}
       <label className="whole-catalog">
         <input type="checkbox" checked={wholeCatalog} disabled={busy}
           onChange={(e) => { setWholeCatalog(e.target.checked); setSelected([]); changed(); }} /> {t.selectAllCatalog(view.page.total)}
       </label>
+      <div className="buttons">
+        <button type="button" disabled={busy || wholeCatalog} onClick={() => pick(assignable)}>{t.selectPage(assignable.length)}</button>
+        <button type="button" disabled={busy || wholeCatalog} onClick={() => pick([])}>{t.selectNone}</button>
+      </div>
+      {/* Сколько выбрано — числом и всегда: без него «выбрано» читается как «то, что я вижу на этой странице» */}
+      <p className="notice" role="status">
+        {wholeCatalog ? t.selectionWhole(view.page.total) : selected.length === 0 ? t.selectionNone : t.selectionCount(selected.length, view.page.total)}
+      </p>
+      <p className="small muted">{t.selectionReset}</p>
       <ul className="index">
         {view.scopes.map((s) => (
           <li key={s.unit.writeScopeId}>
@@ -276,6 +294,7 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
       ) : null}
       {error ? <ErrorBox message={error} /> : null}
       {message ? <p className="notice" role="status">{message}</p> : null}
+      {previewJobId ? <JobProgress worldId={worldId} jobId={previewJobId} onFinished={previewReady} /> : null}
       {jobId ? <JobProgress worldId={worldId} jobId={jobId} /> : null}
       {preview ? <PreviewTable view={preview} /> : null}
       <Gaps gaps={view.gaps} />

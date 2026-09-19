@@ -289,20 +289,23 @@ test('Р-136: стратегия — предпросмотр, включени�
   const draft = { name: 'Каталог целевого клиента', params: { type: 'FIXED', priceMinor: 1500 } };
   const listed = await measure('strategies/preview (каталог списком идентификаторов)', 'POST', api('strategies', 'preview'), { draft, writeScopeIds: scopeIds });
   assert.equal(listed.status, 413, 'перечисление каталога в теле запроса не проходит — стратегия выбирается флагом «все»');
-  const whole = await measure<StrategyPreviewView>('strategies/preview (весь каталог, 10 000)', 'POST', api('strategies', 'preview'), { draft, all: true });
-  assert.equal(whole.status, 200, `стратегия на весь каталог отвергнута: ${JSON.stringify(whole.body).slice(0, 200)}`);
-  // Р-136, Р-125: предпросмотр — по выборке, и это сказано на экране; назначается стратегия на все выбранные предложения
-  assert.equal(whole.body.rows.length, 500, 'предпросмотр считает выборку, а не весь каталог');
-  assert.deepEqual([whole.body.sample.shown, whole.body.sample.total], [500, OFFERS]);
-  assert.match(whole.body.sample.text ?? '', /500 von 10000/);
+  /**
+   * OQ-201 (шаг 30): предпросмотр идёт по ВСЕМУ каталогу, а не по выборке 500 из 10 000. Выборка была ценой синхронного
+   * ответа: решение считается по каждому предложению, и в один ответ это не помещалось. Теперь это задание.
+   */
+  const wholeJob = await runBulkOperation('strategies/preview (весь каталог, 10 000)', api('strategies', 'preview'), { draft, all: true });
+  const whole = (wholeJob.result as { view: StrategyPreviewView }).view;
+  assert.deepEqual([whole.sample.shown, whole.sample.total, whole.sample.text], [OFFERS, OFFERS, null], 'посчитан весь каталог, а не выборка');
+  assert.deepEqual([whole.shown.rows, whole.shown.of], [50, OFFERS], 'на экран идут первые строки, итоги — по всем');
+  assert.equal(whole.summary.changes + whole.summary.unchanged + whole.summary.rejected + whole.summary.notEvaluated, OFFERS,
+    'итоги предпросмотра сходятся по всему каталогу');
   const assignedAll = await runBulkOperation('strategies (назначение на весь каталог, 10 000)', api('strategies'),
-    { draft, all: true, previewToken: whole.body.previewToken, confirmed: true });
+    { draft, all: true, previewJobId: wholeJob.jobId, previewToken: whole.previewToken, confirmed: true });
   assert.match(assignedAll.headline, new RegExp(`${OFFERS} Angeboten`), 'стратегия назначена всем предложениям каталога');
 
   // Цена работы по частям: предпросмотр и назначение на порцию — то, что делает продавец, выбравший часть каталога
   const batchIds = scopeIds.slice(0, 200);
-  const batch = await measure<StrategyPreviewView>('strategies/preview (порция, 200)', 'POST', api('strategies', 'preview'), { draft, writeScopeIds: batchIds });
-  assert.equal(batch.status, 200, JSON.stringify(batch.body).slice(0, 300));
+  await runBulkOperation('strategies/preview (порция, 200)', api('strategies', 'preview'), { draft, writeScopeIds: batchIds });
   const unassigned = await measure('strategies/unassign (снятие, 200)', 'POST', api('strategies', 'unassign'), { writeScopeIds: batchIds, confirmed: true });
   assert.equal(unassigned.status, 200, JSON.stringify(unassigned.body).slice(0, 300));
 });

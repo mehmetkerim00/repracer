@@ -622,7 +622,11 @@ export interface PricingStore {
  * прокси, и продавец видит ошибку при том, что изменения прошли. Задание создаётся, показывает ход, переживает перезагрузку
  * страницы, применяется целиком или никак [Р-134] и возобновляется после падения процесса.
  */
-export type BulkJobKind = 'COST_IMPORT' | 'BOUNDS_EDIT' | 'STRATEGY_ASSIGN' | 'PRICE_EVIDENCE';
+/**
+ * Что делает задание. `STRATEGY_PREVIEW` ничего не меняет [OQ-201]: он считает решение по КАЖДОМУ предложению каталога, и
+ * потому это работа, а не запрос, — предпросмотр по выборке был ценой синхронного ответа, а не свойством продукта.
+ */
+export type BulkJobKind = 'COST_IMPORT' | 'BOUNDS_EDIT' | 'STRATEGY_ASSIGN' | 'STRATEGY_PREVIEW' | 'PRICE_EVIDENCE';
 export type BulkJobStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'INTERRUPTED';
 export type BulkJobPhase = 'PREPARING' | 'APPLYING' | 'PRODUCING' | 'DONE';
 
