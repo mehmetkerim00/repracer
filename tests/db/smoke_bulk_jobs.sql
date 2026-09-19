@@ -111,6 +111,27 @@ SELECT pg_temp.ok('a waiting bulk job is cancelled by a person (OQ-207)', format
 SELECT pg_temp.expect_fail('a cancelled bulk job is started again (Р-139)', format($q$
   UPDATE tenant_data.bulk_job SET status = 'RUNNING', finished_at = NULL WHERE tenant_id = %L AND bulk_job_id = %L $q$, :tA, :j4),
   'its outcome is not rewritten');
+
+-- Задача D шага 32 [Р-143]: чужое задание отменяет тот, у кого есть право на ЕГО вид операции
+INSERT INTO tenant_data.bulk_job (tenant_id, bulk_job_id, kind, params, created_by_membership_id)
+VALUES (:tA, 'bf000000-0000-4000-8000-000000000006', 'PRICE_EVIDENCE', '{}'::jsonb, :ownerM);
+INSERT INTO tenant_data.bulk_job (tenant_id, bulk_job_id, kind, params, created_by_membership_id)
+VALUES (:tA, 'bf000000-0000-4000-8000-000000000007', 'BOUNDS_PLAN', '{}'::jsonb, :ownerM);
+SELECT set_config('app.user_id', :viewer, false) \gset
+SELECT pg_temp.expect_fail('a member cancels the bounds diff job of another member without the right to it (Р-143)', format($q$
+  UPDATE tenant_data.bulk_job SET status = 'CANCELLED', finished_at = now()
+   WHERE tenant_id = %L AND bulk_job_id = 'bf000000-0000-4000-8000-000000000007' $q$, :tA),
+  'needs the right to that operation');
+-- А чужую ВЫГРУЗКУ отменяет: она ничего не начинает, и её операция — просмотр
+SELECT pg_temp.ok('a member cancels the export of another member (Р-143)', format($q$
+  UPDATE tenant_data.bulk_job SET status = 'CANCELLED', finished_at = now()
+   WHERE tenant_id = %L AND bulk_job_id = 'bf000000-0000-4000-8000-000000000006' $q$, :tA));
+SELECT set_config('app.user_id', :owner, false) \gset
+-- Своё задание владелец отменяет сам: иначе оно осталось бы занимать его очередь
+SELECT pg_temp.ok('the author cancels their own bounds diff job (Р-143)', format($q$
+  UPDATE tenant_data.bulk_job SET status = 'CANCELLED', finished_at = now()
+   WHERE tenant_id = %L AND bulk_job_id = 'bf000000-0000-4000-8000-000000000007' $q$, :tA));
+
 -- Отмена — административная запись человека: без пользователя сессии её не будет, и она попадает в аудит [Р-97]
 SELECT pg_temp.ok('cancelling a bulk job is written to the audit log (Р-97)', $q$
   DO $x$ BEGIN

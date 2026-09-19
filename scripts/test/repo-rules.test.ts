@@ -19,16 +19,28 @@ const read = (rel: string) => readFileSync(new URL(rel, root), 'utf8');
  */
 test('Р-146: миграция называет в заголовке свой собственный номер (находка 15 ревью шага 31)', () => {
   const numberOf = (text: string) => /^--\s*(\d{4})_/.exec(text.split('\n')[0] ?? '')?.[1] ?? null;
-  // Зубы [Р-94]: правило обязано отличать верный заголовок от неверного
+  // Зубы [Р-94]: правило обязано отличать верный заголовок от неверного и от его отсутствия
   assert.equal(numberOf('-- 0110_mass_change_guards.sql: стражи'), '0110');
-  assert.equal(numberOf('-- Шаг 32: у файла задания появляются стражи'), null, 'заголовок без номера правилом не считается');
+  assert.equal(numberOf('-- Шаг 32: у файла задания появляются стражи'), null);
+
+  /**
+   * Отсутствие номера — тоже нарушение (находка 6 ревью шага 32): первая редакция правила такие файлы ПРОПУСКАЛА, и его
+   * собственная новая миграция номера не называла. Старые миграции без номера перечислены поимённо — список закрытый, и
+   * новая миграция в него попасть не может.
+   */
+  const WITHOUT_NUMBER_BEFORE_STEP_32 = new Set(readdirSync(new URL('migrations/', root))
+    .filter((f) => /^\d{4}_.*\.sql$/.test(f) && Number(f.slice(0, 4)) < 113 && numberOf(read(`migrations/${f}`)) === null));
+  assert.ok(WITHOUT_NUMBER_BEFORE_STEP_32.size > 0 && WITHOUT_NUMBER_BEFORE_STEP_32.size < 30,
+    `старых миграций без номера в заголовке: ${WITHOUT_NUMBER_BEFORE_STEP_32.size}`);
 
   const wrong: string[] = [];
   for (const file of readdirSync(new URL('migrations/', root)).filter((f) => /^\d{4}_.*\.sql$/.test(f))) {
     const declared = numberOf(read(`migrations/${file}`));
-    if (declared !== null && declared !== file.slice(0, 4)) wrong.push(`${file} называет себя ${declared}`);
+    if (declared === null) {
+      if (!WITHOUT_NUMBER_BEFORE_STEP_32.has(file)) wrong.push(`${file} не называет своего номера`);
+    } else if (declared !== file.slice(0, 4)) wrong.push(`${file} называет себя ${declared}`);
   }
-  assert.deepEqual(wrong, [], 'миграция называет чужой номер: по заголовку её потом не найти');
+  assert.deepEqual(wrong, [], 'миграция называет чужой номер или не называет своего: по заголовку её потом не найти');
 });
 
 /**
@@ -96,4 +108,23 @@ test('Р-146: флаг, нужный пакету для тестов, есть 
   };
   for (const dir of ['packages/', 'apps/', 'services/', 'tests/']) walk(dir);
   assert.deepEqual(missing, [], 'пакет просит флаг, которого раннер сборки не передаёт: у себя пакет зелёный, в CI — другое');
+});
+
+/**
+ * Р-145 (шаг 32), находка 9 ревью шага 32: список видов, отдающих файл, живёт в ДВУХ местах — в базе (0113) и в коде
+ * (`FILE_PRODUCING_JOB_KINDS`). Разойтись они могут молча: вид, забытый в базе, упадёт в проде отказом `insufficient_privilege`
+ * уже после того, как задание отработало, и продавец увидит непонятный код.
+ */
+test('Р-145: список видов, отдающих файл, одинаков в базе и в коде (находка 9 ревью шага 32)', () => {
+  const kindsIn = (text: string, marker: RegExp) => {
+    const body = marker.exec(text)?.[1] ?? '';
+    return [...body.matchAll(/'([A-Z_]+)'/g)].map((h) => h[1]!).sort();
+  };
+  const inDb = kindsIn(read('migrations/0113_bulk_job_artifact_guards.sql'),
+    /file_producing_job_kinds\(\)[\s\S]*?unnest\(ARRAY\[([^\]]*)\]/);
+  const inCode = kindsIn(read('packages/pricing-pipeline/src/store.ts'),
+    /FILE_PRODUCING_JOB_KINDS[^=]*=\s*\[([^\]]*)\]/);
+  // Зубы: правило обязано что-то прочитать, а не сравнить два пустых списка
+  assert.ok(inDb.length === 3 && inCode.length === 3, `списки прочитаны: база ${inDb}, код ${inCode}`);
+  assert.deepEqual(inCode, inDb, 'список видов с файлом разошёлся между базой и кодом: база откажет уже после работы задания');
 });

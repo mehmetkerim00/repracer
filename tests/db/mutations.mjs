@@ -1187,4 +1187,15 @@ export const STEP32_ROWS = [
         verify('names a bulk job kind that does not exist: PRICE_FEED_EXPORTS')),
     ],
   },
+  {
+    row: 'Р-143 (шаг 32, D)',
+    invariant: 'чужое задание отменяет тот, у кого есть право на ЕГО вид операции; своё — любой участник',
+    mutations: [
+      m(dropTrigger('ze_bulk_job_cancel_requires_right', 'tenant_data.bulk_job'),
+        smoke('a member cancels the bounds diff job of another member without the right to it (Р-143)')),
+      // Сам разбор видов: объявить экран различий «только просмотром» значит отдать чужую начатую правку любому участнику
+      m(replaceInFunction('security.bulk_job_cancel_action(text)', "p_kind IN ('PRICE_EVIDENCE', 'PRICE_FEED_EXPORT')", 'true'),
+        smoke('a member cancels the bounds diff job of another member without the right to it (Р-143)')),
+    ],
+  },
 ];

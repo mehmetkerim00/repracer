@@ -405,19 +405,34 @@ BEGIN
    * доказательства перестаёт быть видом без второго фактора, а её файл перестаёт приниматься. Ни один тест этого не
    * заметит, потому что каждый из них смотрит на свой вид.
    */
+  CREATE TEMP TABLE probe_bulk_job_kind (LIKE tenant_data.bulk_job INCLUDING CONSTRAINTS INCLUDING DEFAULTS) ON COMMIT DROP;
   FOR r IN
     SELECT k AS kind, 'security.read_only_job_kinds' AS list FROM security.read_only_job_kinds() AS k
     UNION ALL
     SELECT k, 'security.file_producing_job_kinds' FROM security.file_producing_job_kinds() AS k
   LOOP
-    -- Вид существует, если его принимает сама таблица заданий: проверяется поведением, а не сверкой текста CHECK [Р-93]
-    IF NOT EXISTS (
-      SELECT 1 FROM pg_constraint c
-       WHERE c.conrelid = 'tenant_data.bulk_job'::regclass AND c.conname = 'bulk_job_kind_known'
-         AND pg_get_constraintdef(c.oid) LIKE '%''' || r.kind || '''%'
-    ) THEN
-      bad := bad || format('%s names a bulk job kind that does not exist: %s (Р-145)', r.list, r.kind);
-    END IF;
+    /**
+     * Вид существует, если его ПРИНИМАЕТ сама таблица заданий. Первая редакция шага 32 сверяла текст определения CHECK —
+     * то есть ровно то, что Р-93 запрещает (находка 5 ревью шага 32); заодно подстановка шла в шаблон LIKE, где `_` —
+     * подстановочный знак, и опечатка «буква заменена подчёркиванием» правилом не ловилась.
+     *
+     * Теперь вид проверяется вставкой в откатываемой точке сохранения: что бы ни стояло в CHECK и откуда бы ни бралось
+     * ограничение, правило спрашивает базу о поведении.
+     */
+    BEGIN
+      /**
+       * Проба идёт по КОПИИ таблицы, взятой вместе с её проверками значений (`INCLUDING CONSTRAINTS`): у копии нет ни
+       * триггеров, ни внешних ключей, ни политик строк — значит отказ может прийти только от проверки вида. Вставка в саму
+       * таблицу заданий не годится: её перехватывает первый же триггер, и правило молча зеленеет на чём угодно.
+       */
+      INSERT INTO probe_bulk_job_kind (tenant_id, kind, params, created_by_membership_id, created_by_user_id)
+      VALUES ('f1450000-0000-4000-8000-000000000001', r.kind, '{}'::jsonb,
+              'f1450000-0000-4000-8000-000000000002', 'f1450000-0000-4000-8000-000000000003');
+      DELETE FROM probe_bulk_job_kind;
+    EXCEPTION
+      WHEN check_violation THEN
+        bad := bad || format('%s names a bulk job kind that does not exist: %s (Р-145)', r.list, r.kind);
+    END;
   END LOOP;
 
   -- 14в. Р-90, Р-139 (шаг 30): роль фонового исполнителя — ровно свой список разрешённого, в обе стороны

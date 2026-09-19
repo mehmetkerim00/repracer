@@ -14,9 +14,14 @@ export const CANCEL_ACTION: Readonly<Record<BulkJobKind, PricingAction>> = {
   COST_IMPORT: 'MANAGE_PRICING',
   BOUNDS_EDIT: 'MANAGE_PRICING',
   STRATEGY_ASSIGN: 'MANAGE_PRICING',
-  // Ничего не меняющие виды [Р-143]: их операция — просмотр, и право на отмену чужой такой работы — тоже просмотр
-  BOUNDS_PLAN: 'VIEW_PRICING',
-  STRATEGY_PREVIEW: 'VIEW_PRICING',
+  /**
+   * Экран различий и предпросмотр стратегии САМИ ничего не меняют, но они — первая половина правки цен: применение
+   * ссылается на задание экрана различий и без него не проходит. Отменить чужой экран различий значит сорвать чужую правку
+   * каталога, поэтому право здесь — право на ту операцию, ради которой задание и создано (находка 4 ревью шага 32).
+   */
+  BOUNDS_PLAN: 'MANAGE_PRICING',
+  STRATEGY_PREVIEW: 'MANAGE_PRICING',
+  // А выгрузка не начинает собой ничего: отменить чужую может любой участник — его операция и есть просмотр
   PRICE_EVIDENCE: 'VIEW_PRICING',
   PRICE_FEED_EXPORT: 'VIEW_PRICING',
 };

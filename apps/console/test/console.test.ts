@@ -777,7 +777,8 @@ test('Р-145: файл собирается ровно в одном месте 
       else if (/\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name)) sources.push(child);
     }
   };
-  for (const dir of ['packages/', 'apps/', 'services/']) walk(dir);
+  // Находка 8 ревью шага 32: правило обещало «весь код», а смотрело три каталога из шести
+  for (const dir of ['packages/', 'apps/', 'services/', 'tests/', 'scripts/', 'deploy/']) walk(dir);
   assert.ok(sources.length > 100, `правило обязано смотреть на весь код, а не на пустой список: ${sources.length}`);
 
   const offenders = sources.filter((f) => f !== THE_ONE_PATH && BUILDS_A_FILE.test(readFileSync(new URL(f, root), 'utf8')));
@@ -837,18 +838,26 @@ test('Р-146: модели экранов не читают часы машин�
  * Проверяется поведением: списку дают задание с большим итогом и смотрят, что от итога в ответе не осталось ничего.
  */
 test('Р-147: список заданий не несёт их итогов', async () => {
-  const { bulkJobsView, messagesFor } = await import('@repracer/console-model');
+  const { bulkJobsView, bulkJobView, messagesFor } = await import('@repracer/console-model');
   const secret = 'ROWS-THAT-MUST-NOT-TRAVEL';
   const job = {
     jobId: '11111111-1111-1111-1111-111111111111', kind: 'BOUNDS_PLAN', status: 'SUCCEEDED',
     doneItems: 10_000, totalItems: 10_000, phase: 'PRODUCING', attempts: 1,
     createdAt: '2026-09-19T10:00:00.000Z', startedAt: '2026-09-19T10:00:01.000Z', finishedAt: '2026-09-19T10:00:09.000Z',
     createdByMembershipId: 'm', createdByUserId: 'u', createdWithMfa: false, leaseExpired: false, errorCode: null,
-    params: {}, result: { view: { headline: 'x' }, edits: Array.from({ length: 10_000 }, () => secret) },
+    /**
+     * Канарейка лежит именно в `result.view` — в том, что экран ОДНОГО задания показывает (находка 2 ревью шага 32).
+     * Положить её рядом с `view` значило бы проверять `screenResult`, который отбрасывает всё лишнее и без списка: тест
+     * зеленел бы и после снятия защиты, то есть не существовал бы [Р-94].
+     */
+    params: {}, result: { view: { headline: 'x', edits: Array.from({ length: 10_000 }, () => secret) } },
   } as never;
-  const list = JSON.stringify(bulkJobsView([job], messagesFor('de'), new Map()));
+  const m = messagesFor('de');
+  const list = JSON.stringify(bulkJobsView([job], m, new Map()));
   assert.ok(!list.includes(secret), 'итог задания уехал в список: на каталоге это десятки мегабайт раз в секунду');
   assert.ok(list.includes('SUCCEEDED') && list.includes('10000'), `состояние и ход в списке остаются: ${list.slice(0, 160)}`);
+  // И тот же итог доступен по ОДНОМУ заданию: список его не несёт, но и не прячет — он запрашивается отдельно [Р-147]
+  assert.ok(JSON.stringify(bulkJobView(job, m)).includes(secret), 'экран одного задания свой итог показывает');
 });
 
 /**
@@ -873,6 +882,13 @@ test('Р-143, задача D: право на отмену чужого зада
   assert.equal(canCancelBulkJob('OPERATOR', 'BOUNDS_EDIT', false), false, 'чужую массовую правку границ оператору не отменить');
   assert.equal(canCancelBulkJob('VIEWER', 'PRICE_EVIDENCE', false), true, 'чужая выгрузка ничего не меняет — её отменяет любой участник');
   assert.equal(canCancelBulkJob('PRICING_MANAGER', 'COST_IMPORT', false), true, 'у менеджера цен право на эту операцию есть');
+  /**
+   * Экран различий и предпросмотр — первая половина правки цен: применение ссылается на них и без них не проходит. Отменить
+   * чужой экран различий значит сорвать чужую правку каталога, поэтому они НЕ идут по праву просмотра (находка 4 ревью
+   * шага 32) — и потому список прав на отмену не совпадает со списком «ничего не меняющих» видов.
+   */
+  assert.equal(canCancelBulkJob('VIEWER', 'BOUNDS_PLAN', false), false, 'чужой экран различий зритель не отменяет: это начатая правка цен');
+  assert.equal(canCancelBulkJob('VIEWER', 'STRATEGY_PREVIEW', false), false, 'чужой предпросмотр стратегии — тоже начатая операция с ценами');
 });
 
 /**

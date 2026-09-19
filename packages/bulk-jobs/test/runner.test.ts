@@ -117,3 +117,49 @@ test('аренда продлевается, пока идёт работа: п�
   const beats = log.progress.filter((p) => p.done === undefined && p.leaseSeconds === 1);
   assert.ok(beats.length >= 1, `аренда продлевалась во время работы: ${JSON.stringify(log.progress)}`);
 });
+
+/**
+ * Р-145 (шаг 32): имя и содержимое файла делает ИСПОЛНИТЕЛЬ, и расширение он ставит по виду содержимого, а не по имени,
+ * которое дал обработчик. Дважды подряд ошиблись именно здесь: сначала отчёт по `report.csv` звался `report.csv.csv`, потом
+ * отчёт по выгрузке `kosten.xlsx` стал бы `kosten.xlsx` с CSV внутри (находка 1 ревью шага 32). Утверждения на имя файла не
+ * было ни одного — поэтому обе ошибки и доживали до замера.
+ */
+test('Р-145: файл собирает исполнитель — имя по виду содержимого, сумма по содержимому, строки экранированы', async () => {
+  const saved: Array<{ fileName: string; content: string; sha256: string; rows: number; owner: string }> = [];
+  const log: Recorded = { progress: [], outcome: null, claims: 0 };
+  const store = {
+    ...fakeStore(jobRow({ kind: 'PRICE_FEED_EXPORT' }), log),
+    async saveBulkJobArtifact(_t: string, _j: string, a: { fileName: string; content: string; sha256: string; rows: number }, owner: string) {
+      saved.push({ ...a, owner });
+    },
+  } as unknown as PricingStore;
+
+  const handlers: BulkJobHandlers = {
+    async PRICE_FEED_EXPORT() {
+      return {
+        total: 2,
+        async run(_progress, produce) {
+          return { ...await produce({
+            // Обработчик даёт имя ИСХОДНОЙ выгрузки продавца — с чужим расширением и небезопасными символами
+            fileName: 'import-report_kosten 2026.xlsx',
+            header: ['a', 'b'],
+            rows: [['=SUM(1)', 'x,y'], ['2', '3']],
+          }) };
+        },
+      };
+    },
+  };
+  const done = await run(store, handlers);
+
+  assert.equal(done?.status, 'SUCCEEDED');
+  assert.equal(saved.length, 1);
+  const file = saved[0]!;
+  assert.equal(file.fileName, 'import-report_kosten_2026.csv', 'расширение — по виду содержимого, а не по имени от обработчика');
+  assert.equal(file.owner, 'worker-one', 'файл кладётся под АРЕНДОЙ: база иначе откажет [Р-145]');
+  const { createHash } = await import('node:crypto');
+  assert.equal(file.sha256, createHash('sha256').update(file.content).digest('hex'), 'сумма считается по тому, что записано');
+  // Нейтрализация формул электронной таблицы — часть единственного пути, а не забота обработчика
+  assert.match(file.content, /'=SUM\(1\)/, `формула нейтрализована: ${file.content}`);
+  assert.match(file.content, /"x,y"/, `запятая внутри значения закавычена: ${file.content}`);
+  assert.equal(log.outcome?.status === 'SUCCEEDED' && (log.outcome.result as { rows: number }).rows, 2);
+});

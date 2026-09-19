@@ -652,6 +652,13 @@ export const BULK_JOB_QUEUE_LIMIT = 20;
 export const BULK_JOB_MEMBER_QUEUE_LIMIT = 5;
 
 export const READ_ONLY_JOB_KINDS: readonly BulkJobKind[] = ['BOUNDS_PLAN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT'];
+
+/**
+ * Р-145 (шаг 32): виды заданий, которые отдают продавцу ФАЙЛ. Повторяет `security.file_producing_job_kinds()` (0113) — список
+ * один, база последнее слово. COST_IMPORT здесь потому, что отчёт о несопоставленных строках — такой же файл продавца, хотя
+ * само задание меняет базу; значит со списком «ничего не меняющих» видов этот список не совпадает и совпадать не должен.
+ */
+export const FILE_PRODUCING_JOB_KINDS: readonly BulkJobKind[] = ['COST_IMPORT', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT'];
 export type BulkJobStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'INTERRUPTED' | 'CANCELLED';
 export type BulkJobPhase = 'PREPARING' | 'APPLYING' | 'PRODUCING' | 'DONE';
 

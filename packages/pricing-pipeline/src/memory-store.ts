@@ -1,7 +1,8 @@
+import { createHash } from 'node:crypto';
 import { EXPLANATION_RULESETS } from './dictionary.ts';
 import { rotation } from './reconciliation.ts';
 import type { HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow } from './store.ts';
-import { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, READ_ONLY_JOB_KINDS } from './store.ts';
+import { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, FILE_PRODUCING_JOB_KINDS, READ_ONLY_JOB_KINDS } from './store.ts';
 import { offerIdentityOf, type CompetitorQuery, type CompetitorSnapshot, type CompetitorSourceDescriptor, type FieldWrite, type Instant, type OfferIdentity, type PriceBasis, type PricingHealthObservation, type WriteOutcome } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange, SanityContext } from '@repracer/input-sanity';
 import { assertWriteWithinBounds, NO_GUARDRAILS, type GuardrailSet } from '@repracer/price-gate';
@@ -1420,7 +1421,22 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     return job ? { ...job } : null;
   }
 
+  /**
+   * Р-145 (шаг 32): хранилище в памяти ПОВТОРЯЕТ стражи базы (0113), а не игнорирует их. Иначе регрессию «исполнитель
+   * перестал называть аренду» видно только на PostgreSQL — а ровно это и случилось: первая редакция шага 32 забыла передать
+   * аренду, и в памяти всё было зелено (находка 10 ревью шага 32).
+   */
   async saveBulkJobArtifact(_tenantId: string, jobId: string, artifact: BulkJobArtifact, leaseOwner: string): Promise<void> {
+    const job = this.bulkJobs.find((j) => j.jobId === jobId);
+    if (!job || job.status !== 'RUNNING' || job.leaseOwner !== leaseOwner) {
+      throw Object.assign(new Error('the file is written only by the process that holds the live lease (Р-145)'), { cause: 'LEASE_LOST' });
+    }
+    if (!FILE_PRODUCING_JOB_KINDS.includes(job.kind)) {
+      throw Object.assign(new Error(`a bulk job of kind ${job.kind} gives the seller no file (Р-145)`), { cause: 'NO_FILE_FOR_KIND' });
+    }
+    if (artifact.sha256 !== createHash('sha256').update(artifact.content).digest('hex')) {
+      throw Object.assign(new Error('the checksum of the file does not match its content (Р-145)'), { cause: 'BAD_CHECKSUM' });
+    }
     this.bulkArtifacts.set(jobId, { ...artifact });
   }
 

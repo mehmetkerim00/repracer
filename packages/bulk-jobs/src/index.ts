@@ -158,7 +158,7 @@ export async function runNextBulkJob(options: BulkJobRunnerOptions): Promise<{ j
       }
       const digest = sha256(content);
       await store.saveBulkJobArtifact(tenantId, job.jobId, {
-        fileName: safeFileName(file.fileName), contentType: 'text/csv', content, sha256: digest, rows: file.rows.length,
+        fileName: safeFileName(file.fileName, 'text/csv'), contentType: 'text/csv', content, sha256: digest, rows: file.rows.length,
       }, owner);
       return { rows: file.rows.length, bytes: Buffer.byteLength(content, 'utf8'), sha256: digest };
     };
@@ -204,12 +204,16 @@ export const sha256 = (content: string): string => createHash('sha256').update(c
 const CSV_CHUNK_ROWS = 20_000;
 
 /**
- * Имя файла приводится к безопасному виду ОДИН раз и здесь [Р-145]: до шага 32 каждый обработчик делал это сам, и отчёт об
- * импорте звался `import-report_report.csv.csv` — расширение исходной выгрузки удваивалось.
+ * Имя файла приводится к безопасному виду ОДИН раз и здесь [Р-145].
+ *
+ * Расширение ставится по ВИДУ СОДЕРЖИМОГО, а не по имени, которое дал обработчик. Два раза подряд ошиблись именно здесь:
+ * сначала отчёт об импорте звался `import-report_report.csv.csv` (расширение удваивалось), потом — первая редакция шага 32 —
+ * отчёт по выгрузке `kosten.xlsx` стал бы `import-report_kosten.xlsx` с CSV внутри (находка 1 ревью шага 32). Имя, которое
+ * дал обработчик, — это подпись для продавца; чем файл является, знает только тот, кто его собрал.
  */
-function safeFileName(raw: string): string {
+const EXTENSION_OF: Readonly<Record<'text/csv', string>> = { 'text/csv': 'csv' };
+function safeFileName(raw: string, contentType: 'text/csv'): string {
   const dot = raw.lastIndexOf('.');
   const name = (dot > 0 ? raw.slice(0, dot) : raw).replace(/[^\w\-]/g, '_').slice(0, 150) || 'file';
-  const ext = (dot > 0 ? raw.slice(dot + 1) : 'csv').replace(/[^\w]/g, '').slice(0, 10) || 'csv';
-  return `${name}.${ext}`;
+  return `${name}.${EXTENSION_OF[contentType]}`;
 }
