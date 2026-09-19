@@ -2,6 +2,8 @@ import { useState } from 'react';
 import type { CostImportView } from '@repracer/console-model';
 import type { BoundsIndexView } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
+import type { JobCreatedResponse } from '../api-types.ts';
+import { JobProgress } from './Jobs.tsx';
 import { ErrorBox, errorText, Load, useMessages } from '../components.tsx';
 
 /**
@@ -10,7 +12,6 @@ import { ErrorBox, errorText, Load, useMessages } from '../components.tsx';
  * со вторым фактором [Р-135]: отдельной кнопки «применить, что получилось» нет.
  */
 
-export interface CostImportApplied { message: string; rows: number; offers: number }
 
 /**
  * Ревью шага 28, находка 7: `btoa(String.fromCharCode(...bytes))` раскладывает весь файл в аргументы вызова, и браузер на файле в
@@ -131,6 +132,7 @@ function CostImportForm({ worldId }: { worldId: string }) {
   const [encoding, setEncoding] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const choose = async (input: HTMLInputElement) => {
@@ -165,9 +167,10 @@ function CostImportForm({ worldId }: { worldId: string }) {
     if (!file || !view) return;
     setBusy(true); setError(null);
     try {
-      const r = await requestJson<CostImportApplied>(worldPath(worldId, 'cost-import', 'apply'),
+      // Р-139: применение идёт фоновым заданием — дальше продавец смотрит на ход, а файл в браузере больше не нужен
+      const r = await requestJson<JobCreatedResponse>(worldPath(worldId, 'cost-import', 'apply'),
         { method: 'POST', body: { ...file, ...(mapping ? { mapping } : {}), ...(encoding ? { encoding } : {}), fingerprint: view.fingerprint, confirmed: true }, locale: m.locale });
-      setMessage(r.message); setView(null); setFile(null); setMapping(null);
+      setMessage(r.message); setJobId(r.jobId); setView(null); setFile(null); setMapping(null);
     } catch (e) { setError(errorText(e, m)); } finally { setBusy(false); }
   };
 
@@ -176,6 +179,7 @@ function CostImportForm({ worldId }: { worldId: string }) {
       <h3>{t.pageTitle}</h3>
       {error ? <ErrorBox message={error} /> : null}
       {message ? <p className="notice" role="status">{message}</p> : null}
+      {jobId ? <JobProgress worldId={worldId} jobId={jobId} /> : null}
       <label>
         {t.file}
         <input type="file" accept=".csv,.xlsx,text/csv" onChange={(e) => void choose(e.currentTarget)} disabled={busy} />

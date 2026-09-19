@@ -1,6 +1,6 @@
 import { EXPLANATION_RULESETS } from './dictionary.ts';
 import { rotation } from './reconciliation.ts';
-import type { HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, CostImportBatch, CostImportResult } from './store.ts';
+import type { HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobOutcome, BulkJobProgress, BulkJobRow } from './store.ts';
 import { offerIdentityOf, type CompetitorQuery, type CompetitorSnapshot, type CompetitorSourceDescriptor, type FieldWrite, type Instant, type OfferIdentity, type PriceBasis, type PricingHealthObservation, type WriteOutcome } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange, SanityContext } from '@repracer/input-sanity';
 import { assertWriteWithinBounds, NO_GUARDRAILS, type GuardrailSet } from '@repracer/price-gate';
@@ -1274,7 +1274,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     const duplicate = ids.find((id, i) => ids.indexOf(id) !== i);
     if (duplicate) return { status: 'INVALID', writeScopeId: duplicate, cause: 'DUPLICATE_SCOPE' };
     // Р-88: массовая правка границ — больше одной единицы записи — только со вторым фактором
-    if (mode === 'APPLY' && new Set(ids).size > 1 && !actor.mfa) return { status: 'MFA_REQUIRED' };
+    if (mode === 'APPLY' && new Set(ids).size > 1 && !actor.mfa && !actor.bulkJobId) return { status: 'MFA_REQUIRED' };
     const effective = (row: ScopeRow) => {
       const b = this.boundsOf(row);
       return { minMinor: b.min.status === 'RESOLVED' ? b.min.amountMinor : null, maxMinor: b.max.status === 'RESOLVED' ? b.max.amountMinor : null };
@@ -1305,6 +1305,92 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
    * Р-134, Р-135 (шаг 28): массовый импорт себестоимости в памяти ведёт себя как база: предпросмотр ничего не меняет, применение
    * требует второго фактора и применяется целиком — ни одной строки, если хоть одна не годится.
    */
+  /**
+   * Р-139 (шаг 30): фоновые задания в памяти — для стенда. Аренда, ход и итог ведут себя как в базе: задание берётся одним
+   * исполнителем, ход виден во время работы, а прерванное задание возвращается в очередь.
+   */
+  private readonly bulkJobs: BulkJobRow[] = [];
+  private readonly bulkArtifacts = new Map<string, BulkJobArtifact>();
+
+  async createBulkJob(_tenantId: string, input: BulkJobInput, actor: AdminActor): Promise<BulkJobCreated> {
+    /**
+     * Право — по тому, что задание ДЕЛАЕТ. Выгрузка доказательной истории [Р-123] ничего не меняет и нужна тому, кто отвечает
+     * за спор о скидке: её создаёт и зритель. Задания, меняющие цены, — только участник с правом и со вторым фактором [Р-135].
+     */
+    const member = input.kind === 'PRICE_EVIDENCE' ? this.member(actor.membershipId) : this.adminMember(actor);
+    if (!member || member.userId !== actor.userId) return { status: 'FORBIDDEN' };
+    if (input.kind !== 'PRICE_EVIDENCE' && !actor.mfa) return { status: 'MFA_REQUIRED' };
+    const createdAt = new Date().toISOString();
+    const job: BulkJobRow = {
+      jobId: `job-${this.bulkJobs.length + 1}-${Date.now().toString(36)}`, kind: input.kind, status: 'PENDING', params: input.params, phase: 'PREPARING',
+      totalItems: input.totalItems ?? null, doneItems: 0, result: null, errorCode: null, attempts: 0,
+      createdWithMfa: actor.mfa === true, createdByMembershipId: actor.membershipId, createdByUserId: actor.userId, createdAt,
+      startedAt: null, finishedAt: null, leaseOwner: null, leaseUntil: null,
+    };
+    this.bulkJobs.push(job);
+    return { status: 'CREATED', jobId: job.jobId, createdAt };
+  }
+
+  async claimBulkJob(_tenantId: string, owner: string, leaseSeconds: number): Promise<BulkJobRow | null> {
+    const now = Date.now();
+    const job = this.bulkJobs.find((j) => j.status === 'PENDING' || j.status === 'INTERRUPTED'
+      || (j.status === 'RUNNING' && j.leaseUntil !== null && Date.parse(j.leaseUntil) <= now));
+    if (!job) return null;
+    job.status = 'RUNNING';
+    job.leaseOwner = owner;
+    job.leaseUntil = new Date(now + leaseSeconds * 1000).toISOString();
+    job.startedAt = job.startedAt ?? new Date().toISOString();
+    job.attempts += 1;
+    job.phase = 'PREPARING';
+    job.doneItems = 0;
+    return { ...job };
+  }
+
+  async updateBulkJobProgress(_tenantId: string, jobId: string, owner: string, progress: BulkJobProgress): Promise<void> {
+    const job = this.bulkJobs.find((j) => j.jobId === jobId && j.leaseOwner === owner && j.status === 'RUNNING');
+    if (!job) return;
+    if (progress.phase !== undefined) job.phase = progress.phase;
+    if (progress.done !== undefined) job.doneItems = progress.done;
+    if (progress.total !== undefined) job.totalItems = progress.total;
+    job.leaseUntil = new Date(Date.now() + (progress.leaseSeconds ?? 60) * 1000).toISOString();
+  }
+
+  async finishBulkJob(_tenantId: string, jobId: string, owner: string, outcome: BulkJobOutcome): Promise<void> {
+    const job = this.bulkJobs.find((j) => j.jobId === jobId && j.leaseOwner === owner);
+    if (!job) return;
+    if (outcome.status === 'INTERRUPTED') {
+      job.status = 'INTERRUPTED';
+      job.leaseOwner = null;
+      job.leaseUntil = null;
+      job.phase = null;
+      return;
+    }
+    job.status = outcome.status;
+    job.result = outcome.result ?? null;
+    job.errorCode = outcome.status === 'FAILED' ? outcome.errorCode : null;
+    job.phase = 'DONE';
+    job.finishedAt = new Date().toISOString();
+    job.leaseOwner = null;
+    job.leaseUntil = null;
+  }
+
+  async listBulkJobs(_tenantId: string, limit = 20): Promise<BulkJobRow[]> {
+    return [...this.bulkJobs].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).slice(0, limit).map((j) => ({ ...j }));
+  }
+
+  async bulkJob(_tenantId: string, jobId: string): Promise<BulkJobRow | null> {
+    const job = this.bulkJobs.find((j) => j.jobId === jobId);
+    return job ? { ...job } : null;
+  }
+
+  async saveBulkJobArtifact(_tenantId: string, jobId: string, artifact: BulkJobArtifact): Promise<void> {
+    this.bulkArtifacts.set(jobId, { ...artifact });
+  }
+
+  async bulkJobArtifact(_tenantId: string, jobId: string): Promise<BulkJobArtifact | null> {
+    return this.bulkArtifacts.get(jobId) ?? null;
+  }
+
   async importCosts(_tenantId: string, batch: CostImportBatch, actor: AdminActor, mode: 'PREVIEW' | 'APPLY'): Promise<CostImportResult> {
     if (!this.adminMember(actor)) return { status: 'FORBIDDEN' };
     if (batch.rows.length === 0) return { status: 'INVALID', cause: 'NO_ROWS' };
@@ -1334,7 +1420,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     }
     const offers = new Set(ids).size;
     // Р-135: второй фактор проверяется после разбора — продавец видит содержательную причину отказа, а не «нет второго фактора» на мусорный файл
-    if (mode === 'APPLY' && !actor.mfa) return { status: 'MFA_REQUIRED' };
+    if (mode === 'APPLY' && !actor.mfa && !actor.bulkJobId) return { status: 'MFA_REQUIRED' };
     if (mode === 'PREVIEW') return { status: 'PREVIEWED', rows: batch.rows.length, offers };
     for (const p of planned) p.row.cost = p.cost;
     return { status: 'APPLIED', importId: `import-${batch.fingerprint}`, rows: batch.rows.length, offers };

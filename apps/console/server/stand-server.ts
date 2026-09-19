@@ -1,20 +1,19 @@
-import { createHash } from 'node:crypto';
 import { createServer, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import {
-  boundsDiffView, boundsView, can, complianceView, costImportView, currentStrategies, listQuery, MAX_SCOPES, OFFER_CHOICES, pageOf, parseListQuery, type ListQuery, discountCheckView, dangerousReport, decisionList, decisionTrace, describe, expandBoundsEdit, importTargets, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, priceEvidenceCsv, scopeById, unitOf,
+  boundsDiffView, boundsView, bulkJobsView, bulkJobView, can, channelNotes, complianceView, costImportView, currentStrategies, listQuery, MAX_SCOPES, OFFER_CHOICES, pageOf, parseListQuery, type ListQuery, discountCheckView, dangerousReport, decisionList, decisionTrace, describe, expandBoundsEdit, importTargets, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, scopeById, unitOf,
   parseStrategyDraft, planStop, previewToken, priceFeed, productList, rejectedView, REPORT_PERIODS_DAYS, stopView, strategiesView, strategyPreviewView,
   type Locale, type Messages, type StandWorld, type StopTarget, type StrategyDraft, type Viewer,
 } from '@repracer/console-model';
 import { buildPreview, readTable, suggestMapping, TABLE_ENCODINGS } from '@repracer/cost-import';
-import type { DiscountAnnouncementInput, StrategyPreview } from '@repracer/pricing-pipeline';
+import type { BulkJobInput, DiscountAnnouncementInput, StrategyPreview } from '@repracer/pricing-pipeline';
 import {
   buildStandWorlds, memoryStandDirectory, pgStandJoinMember, pgStandUsers, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_EMAILS, STAND_ISSUER, type LiveWorld,
 } from '@repracer/contract-tests/stand';
 import { createAuthenticator, hasSecondFactor, remoteJwks, staticJwks, type Authenticator, type Principal } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
 import {
-  NOTE_MAX, NOTE_MIN, type BoundsApplyResult, type BoundsIndexItem, type BoundsIndexView, type EnableResult, type NoteRequest, type SessionView, type StopRequest, type StrategySaveResponse, type WorldSummary,
+  NOTE_MAX, NOTE_MIN, type BoundsIndexItem, type BoundsIndexView, type EnableResult, type NoteRequest, type SessionView, type StopRequest, type StrategySaveResponse, type WorldSummary,
 } from '../src/api-types.ts';
 
 /**
@@ -38,6 +37,8 @@ export interface ApiResponse {
   status: number;
   body: unknown;
   setCookies?: string[];
+  /** Файл задания [OQ-202]: он не JSON — выгрузка в 28 МБ внутри JSON была бы тем же синхронным ответом, только длиннее */
+  file?: { contentType: string; content: string; fileName: string };
 }
 
 export interface StandIdentity {
@@ -125,11 +126,10 @@ const isDay = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date
 /** Р-123: выгрузка доказательной истории — не больше 18 месяцев за запрос */
 export const EVIDENCE_MAX_DAYS = 550;
 /**
- * Р-136 (шаг 29): сколько строк отдаёт доказательная выгрузка за раз. Живой прогон через консоль: 30 суток по каталогу целевого
- * клиента — 300 000 строк, 28 МБ в одном ответе и 9,8 секунды. Доказательство Omnibus нужно по ПРЕДЛОЖЕНИЮ (спор всегда о
- * конкретной скидке), поэтому предел назван прямо, а экран подсказывает выбрать предложение или более узкий период.
+ * Шаг 30 [OQ-202]: предела строк у выгрузки больше НЕТ. Шаг 29 ввёл его (100 000), потому что 300 000 строк — это 28 МБ в одном
+ * ответе экрана и десять секунд ожидания. Задание готовит файл в базе, и предел исчез вместе со своей причиной: ждать нечего,
+ * продавец скачивает готовое. Предел ПЕРИОДА остался — он не про объём ответа, а про смысл доказательства (≤ 18 месяцев).
  */
-export const EVIDENCE_MAX_ROWS = 100_000;
 
 /** Р-123: объявление скидки из тела запроса; неверное — null (ответ 400) */
 function parseDiscount(world: StandWorld, raw: unknown): DiscountAnnouncementInput | null {
@@ -243,6 +243,30 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     const param = parts[4] ?? null;
     const ctx = (channelAccountId?: string | null) => live.callContext(channelAccountId ?? live.accounts[0]!.channelAccountId);
 
+    /**
+     * Р-120: предложение, которое канал оценивает сам, стратегию не получает. Проверка осталась в запросе, а не ушла в задание:
+     * продавцу это надо сказать сразу, а не через отказ задания. Последнее слово всё равно за базой (0082).
+     */
+    const channelPriced = (ids: readonly string[]) => {
+      for (const id of ids) {
+        const scope = scopeById(world, id);
+        if (scope && channelNotes(world, scope, m).some((n) => n.code !== 'PRICING_HEALTH')) return unitOf(world, scope, m).label;
+      }
+      return null;
+    };
+    /**
+     * Р-139: массовая операция — создание ЗАДАНИЯ. Запрос обязан быть дешёвым: всё, что растёт с размером каталога, делает
+     * задание. Второй фактор предъявляется здесь, человеком; фоновый процесс предъявит базе само задание.
+     */
+    const createJob = async (kind: BulkJobInput['kind'], params: Record<string, unknown>, totalItems: number | null, message: string): Promise<ApiResponse> => {
+      const created = await live.store.createBulkJob(world.tenantId, { kind, params, ...(totalItems === null ? {} : { totalItems }) },
+        { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) });
+      if (created.status === 'MFA_REQUIRED') return fail(403, 'MFA_REQUIRED', kind === 'COST_IMPORT' ? m.ui.costImport.mfa : s.mfaRequiredBounds);
+      if (created.status !== 'CREATED') return fail(403, 'FORBIDDEN', s.forbidden);
+      const job = await live.store.bulkJob(world.tenantId, created.jobId);
+      return ok({ jobId: created.jobId, message, ...(job ? { job: bulkJobView(job, m) } : {}) });
+    };
+
     if (req.method === 'GET') {
       switch (screen) {
         case 'products': {
@@ -307,18 +331,25 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
             const query = parseListQuery(url.searchParams);
             return query ? ok(await compliance(live, world, m, query)) : fail(400, 'BAD_PAGE', s.badRequest);
           }
-          if (param === 'evidence') {
-            const from = url.searchParams.get('from') ?? '';
-            const to = url.searchParams.get('to') ?? '';
-            const ws = url.searchParams.get('writeScopeId');
-            if (!isDay(from) || !isDay(to) || from > to || (ws && !scopeById(world, ws))) return fail(400, 'BAD_EVIDENCE_QUERY', s.badRequest);
-            if ((Date.parse(to) - Date.parse(from)) / 86_400_000 + 1 > EVIDENCE_MAX_DAYS) return fail(400, 'EVIDENCE_TOO_LONG', s.evidenceTooLong(EVIDENCE_MAX_DAYS));
-            const days = await live.store.priceEvidence(world.tenantId, { from, to, ...(ws ? { writeScopeIds: [ws] } : {}) });
-            if (days.length > EVIDENCE_MAX_ROWS) return fail(400, 'EVIDENCE_TOO_LARGE', s.evidenceTooLarge(days.length, EVIDENCE_MAX_ROWS));
-            const csv = priceEvidenceCsv(world, days);
-            return ok({ filename: `price-evidence_${from}_${to}.csv`, csv, sha256: createHash('sha256').update(csv).digest('hex'), days: days.length });
-          }
           return fail(404, 'NOT_FOUND', s.notFound);
+        }
+        /**
+         * Р-139: ход и история массовых операций. Состояние задания в базе, поэтому перезагрузка страницы ничего не теряет:
+         * экран собирается тем же запросом и через секунду, и через час. Задания — только своего тенанта [Р-16]: список
+         * приходит из хранилища под его `tenant_id`, чужой идентификатор не находится.
+         */
+        case 'jobs': {
+          if (param === null) return ok(bulkJobsView(await live.store.listBulkJobs(world.tenantId), m));
+          const job = await live.store.bulkJob(world.tenantId, param);
+          if (!job) return fail(404, 'JOB_NOT_FOUND', m.ui.jobs.notFound);
+          if (parts[5] === 'artifact') {
+            const file = await live.store.bulkJobArtifact(world.tenantId, param);
+            if (!file) return fail(404, 'NO_FILE', m.ui.jobs.noFile);
+            return { status: 200, body: null, file: { contentType: file.contentType, content: file.content, fileName: file.fileName } };
+          }
+          if (parts.length > 5) return fail(404, 'NOT_FOUND', s.notFound);
+          const file = job.status === 'SUCCEEDED' ? await live.store.bulkJobArtifact(world.tenantId, param) : null;
+          return ok(bulkJobView(job, m, file ? { fileName: file.fileName, rows: file.rows, sha256: file.sha256 } : null));
         }
         default: return fail(404, 'NOT_FOUND', s.notFound);
       }
@@ -326,6 +357,21 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
 
     // Находка 11 ревью шага 24: маршруты ниже — только POST
     if (req.method !== 'POST') return fail(405, 'METHOD', s.method);
+
+    /**
+     * Р-123, Р-139, OQ-202: выгрузка доказательной истории — фоновое задание. Предел в 100 000 строк, введённый шагом 29, снят
+     * вместе с причиной: ответ экрана в 28 МБ был отказом, а файл, подготовленный заданием, продавец просто скачивает. Второго
+     * фактора выгрузка не требует — она ничего не меняет.
+     */
+    if (screen === 'compliance' && param === 'evidence') {
+      const from = typeof body.from === 'string' ? body.from : '';
+      const to = typeof body.to === 'string' ? body.to : '';
+      const ws = typeof body.writeScopeId === 'string' && body.writeScopeId !== '' ? body.writeScopeId : null;
+      if (!isDay(from) || !isDay(to) || from > to || (ws && !scopeById(world, ws))) return fail(400, 'BAD_EVIDENCE_QUERY', s.badRequest);
+      if ((Date.parse(to) - Date.parse(from)) / 86_400_000 + 1 > EVIDENCE_MAX_DAYS) return fail(400, 'EVIDENCE_TOO_LONG', s.evidenceTooLong(EVIDENCE_MAX_DAYS));
+      return createJob('PRICE_EVIDENCE', { from, to, ...(ws ? { writeScopeId: ws } : {}) },
+        ws ? 1 : world.state.scopes.length, m.ui.jobs.createdEvidence);
+    }
 
     // Р-123: предупреждение «эта скидка нарушит правило» до записи — только чтение, права на просмотр достаточно
     if (screen === 'compliance' && param === 'check') {
@@ -450,20 +496,15 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       if (typeof body.previewToken !== 'string' || body.previewToken !== previewToken(parsed.draft, previews, world)) return fail(409, 'PREVIEW_CHANGED', s.previewChanged);
       // Находка 3 ревью шага 21 [Р-39]: стратегия, для которой канал не даёт нужных данных конкурентов, не назначается
       if (previews.some((p) => !p.availability.available)) return fail(400, 'STRATEGY_UNAVAILABLE', s.strategyUnavailable);
+      /**
+       * Р-139: назначение — фоновое задание. Предпросмотр и его токен остаются здесь: это то, что видел человек, и проверять
+       * его надо до создания задания. Растёт с каталогом только запись — она и ушла в задание.
+       */
+      const priced = channelPriced(ids!);
+      if (priced) return fail(400, 'CHANNEL_PRICING_ACTIVE', s.channelPricingActive(priced));
       const strategyId = typeof body.strategyId === 'string' ? body.strategyId : null;
-      const result = await live.store.saveStrategy(world.tenantId, {
-        strategyId, name: parsed.draft.name, params: parsed.draft.params, deadbandMinor: parsed.draft.deadbandMinor, assignTo: ids!, expected: currentStrategies(world, ids!),
-      }, { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) });
-      if (result.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
-      if (result.status === 'CONFLICT') return fail(409, 'PREVIEW_CHANGED', s.previewChanged);
-      // Шаг 23: отказ базы по доступности стратегии [Р-39, OQ-166] и по ценообразованию канала у оффера [Р-120] — с понятным текстом
-      if (result.status === 'INVALID' && result.cause === 'STRATEGY_UNAVAILABLE') return fail(400, 'STRATEGY_UNAVAILABLE', s.strategyUnavailable);
-      if (result.status === 'INVALID' && result.cause === 'CHANNEL_PRICING_ACTIVE') {
-        const scope = result.writeScopeId ? scopeById(world, result.writeScopeId) : undefined;
-        return fail(400, 'CHANNEL_PRICING_ACTIVE', s.channelPricingActive(scope ? unitOf(world, scope, m).label : m.ui.common.noValue));
-      }
-      if (result.status !== 'SAVED') return fail(400, result.cause, s.badRequest);
-      return ok({ message: m.ui.strategies.saved(result.strategy.version, result.assigned.length), strategies: strategiesView(await live.view(viewer), m, true) } satisfies StrategySaveResponse);
+      return createJob('STRATEGY_ASSIGN', { draft: body.draft, ...(body.all === true ? { all: true } : { writeScopeIds: ids }), strategyId },
+        ids!.length, m.ui.jobs.createdStrategy);
     }
 
     // OQ-169 (шаг 24): существующая версия — выбранным офферам без новой версии; то же превью и тот же токен, что при сохранении
@@ -478,18 +519,11 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       if (!previews) return fail(400, 'BAD_SCOPES', s.badRequest);
       if (typeof body.previewToken !== 'string' || body.previewToken !== previewToken(item.draft, previews, world)) return fail(409, 'PREVIEW_CHANGED', s.previewChanged);
       if (previews.some((p) => !p.availability.available)) return fail(400, 'STRATEGY_UNAVAILABLE', s.strategyUnavailable);
-      const result = await live.store.assignStrategyVersion(world.tenantId, { strategyId: item.strategyId, version: item.version, assignTo: ids!, expected: currentStrategies(world, ids!) },
-        { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) });
-      if (result.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
-      if (result.status === 'CONFLICT') return fail(409, 'PREVIEW_CHANGED', s.previewChanged);
-      if (result.status === 'INVALID' && result.cause === 'STRATEGY_UNAVAILABLE') return fail(400, 'STRATEGY_UNAVAILABLE', s.strategyUnavailable);
-      if (result.status === 'INVALID' && result.cause === 'VERSION_NOT_ACTIVE') return fail(400, 'VERSION_NOT_ACTIVE', s.versionNotActive);
-      if (result.status === 'INVALID' && result.cause === 'CHANNEL_PRICING_ACTIVE') {
-        const scope = result.writeScopeId ? scopeById(world, result.writeScopeId) : undefined;
-        return fail(400, 'CHANNEL_PRICING_ACTIVE', s.channelPricingActive(scope ? unitOf(world, scope, m).label : m.ui.common.noValue));
-      }
-      if (result.status !== 'SAVED') return fail(400, result.cause, s.badRequest);
-      return ok({ message: m.ui.strategies.assigned(result.strategy.version, result.assigned.length), strategies: strategiesView(await live.view(viewer), m, true) } satisfies StrategySaveResponse);
+      const priced = channelPriced(ids!);
+      if (priced) return fail(400, 'CHANNEL_PRICING_ACTIVE', s.channelPricingActive(priced));
+      // Р-139: назначение существующей версии — то же фоновое задание: для продавца это одна операция над каталогом
+      return createJob('STRATEGY_ASSIGN', { strategyId: item.strategyId, version: item.version, ...(body.all === true ? { all: true } : { writeScopeIds: ids }) },
+        ids!.length, m.ui.jobs.createdStrategy);
     }
 
     // OQ-169: снять стратегию с офферов — только при выключенном репрайсинге
@@ -510,8 +544,25 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       return ok({ message: m.ui.strategies.unassigned, strategies: strategiesView(await live.view(viewer), m, true) } satisfies StrategySaveResponse);
     }
 
-    // Шаг 21: массовая правка границ — экран различий (база вычисляет итог в откатываемой транзакции), затем применение с токеном
-    if (screen === 'bounds' && (param === 'plan' || param === 'apply')) {
+    /**
+     * Р-139 (шаг 30): применение правки границ — фоновое задание. Запрос только создаёт его: и пересчёт различий, и сама
+     * запись растут с размером каталога, поэтому оба остались внутри задания, а не в ожидании ответа.
+     */
+    if (screen === 'bounds' && param === 'apply') {
+      if (!can(viewer.role, 'MANAGE_PRICING')) return fail(403, 'FORBIDDEN', s.forbidden);
+      if (body.confirmed !== true) return fail(400, 'NOT_CONFIRMED', s.notConfirmed);
+      if (typeof body.planToken !== 'string') return fail(409, 'PLAN_CHANGED', s.planChanged);
+      const request = parseBoundsEditRequest(body.request);
+      if (!request) {
+        const asked = Array.isArray((body.request as { writeScopeIds?: unknown[] })?.writeScopeIds) ? ((body.request as { writeScopeIds: unknown[] }).writeScopeIds).length : 0;
+        return asked > MAX_SCOPES ? fail(400, 'TOO_MANY_SCOPES', s.tooManyScopes(asked, MAX_SCOPES)) : fail(400, 'BAD_REQUEST', s.badRequest);
+      }
+      const asked = request.all === true ? world.state.scopes.length : request.writeScopeIds.length;
+      return createJob('BOUNDS_EDIT', { request: body.request, planToken: body.planToken }, asked, m.ui.jobs.createdBounds);
+    }
+
+    // Шаг 21: экран различий массовой правки границ — база вычисляет итог в откатываемой транзакции; применяет его задание
+    if (screen === 'bounds' && param === 'plan') {
       if (!can(viewer.role, 'MANAGE_PRICING')) return fail(403, 'FORBIDDEN', s.forbidden);
       const request = parseBoundsEditRequest(body.request);
       if (!request) {
@@ -534,15 +585,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       if (preview.status === 'CONFLICT') return fail(409, 'BOUNDS_CONFLICT', conflictText(world, preview, m));
       if (preview.status !== 'PREVIEWED') return fail(400, preview.status === 'INVALID' ? preview.cause : preview.status, s.badRequest);
       const diff = boundsDiffView(world, edits, preview.rows, m);
-      if (param === 'plan') return ok(diff);
-      if (body.confirmed !== true) return fail(400, 'NOT_CONFIRMED', s.notConfirmed);
-      if (typeof body.planToken !== 'string' || body.planToken !== diff.planToken) return fail(409, 'PLAN_CHANGED', s.planChanged);
-      const applied = await live.store.editBounds(world.tenantId, edits, actor, 'APPLY');
-      if (applied.status === 'MFA_REQUIRED') return fail(403, 'MFA_REQUIRED', s.mfaRequiredBounds);
-      if (applied.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
-      if (applied.status === 'CONFLICT') return fail(409, 'BOUNDS_CONFLICT', conflictText(world, applied, m));
-      if (applied.status !== 'APPLIED') return fail(400, applied.status === 'INVALID' ? applied.cause : applied.status, s.badRequest);
-      return ok({ message: m.ui.boundsEdit.applied(applied.rows.length), rows: applied.rows.length } satisfies BoundsApplyResult);
+      return ok(diff);
     }
 
     /**
@@ -579,20 +622,13 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       if (body.confirmed !== true) return fail(400, 'NOT_CONFIRMED', s.notConfirmed);
       if (typeof body.fingerprint !== 'string' || body.fingerprint !== preview.fingerprint) return fail(409, 'PLAN_CHANGED', s.planChanged);
       if (preview.apply.length === 0) return fail(400, 'NO_ROWS', view.blocked ?? m.ui.costImport.headline(preview.totals));
-      const actor = { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) };
-      const batch = {
-        sourceName: name, sourceFormat: sheet.format, fingerprint: preview.fingerprint, skippedRows: preview.totals.skipped,
-        rows: preview.apply.map((r) => ({
-          writeScopeId: r.writeScopeId!, unitCostMinor: r.unitCostMinor!, currency: r.currency!,
-          ...(r.fixedFeeMinor === undefined ? {} : { fixedFeeMinor: r.fixedFeeMinor }),
-          ...(r.feeRateBp === undefined ? {} : { feeRateBp: r.feeRateBp }),
-        })),
-      };
-      const applied = await live.store.importCosts(world.tenantId, batch, actor, 'APPLY');
-      if (applied.status === 'MFA_REQUIRED') return fail(403, 'MFA_REQUIRED', m.ui.costImport.mfa);
-      if (applied.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', m.ui.costImport.noRight);
-      if (applied.status !== 'APPLIED') return fail(400, applied.status === 'INVALID' ? applied.cause : applied.status, s.badRequest);
-      return ok({ message: m.ui.costImport.applied(applied.rows, applied.offers), rows: applied.rows, offers: applied.offers });
+      /**
+       * Р-139: применение — фоновое задание. Файл кладётся в параметры задания как есть: задание читает его ЗАНОВО и сверяет
+       * отпечаток с тем, который видел человек, — иначе применилось бы не то, что было на экране.
+       */
+      return createJob('COST_IMPORT', {
+        fileName: name, content, fingerprint: preview.fingerprint, mapping, ...(body.encoding ? { encoding: body.encoding } : {}),
+      }, preview.apply.length, m.ui.jobs.createdCostImport);
     }
 
     // Шаг 12, G и Р-77: включение с предупреждениями по типу стратегии
@@ -643,6 +679,14 @@ const MAX_IMPORT_BODY_BYTES = 48 * 1024 * 1024;
 const bodyLimitFor = (url: string) => (url.includes('/cost-import/') ? MAX_IMPORT_BODY_BYTES : MAX_BODY_BYTES);
 
 function send(res: ServerResponse, r: ApiResponse): void {
+  if (r.file) {
+    res.writeHead(r.status, {
+      'content-type': `${r.file.contentType}; charset=utf-8`, 'cache-control': 'no-store',
+      'content-disposition': `attachment; filename="${r.file.fileName.replace(/[^\w.\-]/g, '_')}"`,
+    });
+    res.end(r.file.content);
+    return;
+  }
   res.writeHead(r.status, {
     'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...(r.setCookies ? { 'set-cookie': r.setCookies } : {}),
   });

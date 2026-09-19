@@ -42,6 +42,11 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_stock') THEN
     CREATE ROLE svc_stock LOGIN IN ROLE repracer_stock;
   END IF;
+  -- Р-139 (шаг 30): фоновый исполнитель массовых операций — аренда, ход и итог задания; САМУ работу он делает ролью
+  -- административного сервиса от имени человека, создавшего задание
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_bulk_worker') THEN
+    CREATE ROLE svc_bulk_worker LOGIN IN ROLE repracer_bulk_worker;
+  END IF;
   -- Р-90: вход — сопоставление внешнего пользователя с членствами и приём приглашения
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_authenticator') THEN
     CREATE ROLE svc_authenticator LOGIN IN ROLE repracer_authenticator;

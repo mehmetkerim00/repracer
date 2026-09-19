@@ -7,8 +7,9 @@ import { createAuthenticator, staticJwks } from '@repracer/identity';
 import { PgIdentityDirectory } from '@repracer/identity/pg';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
 import { createPool, inTenant } from '@repracer/pricing-store-pg';
-import type { DiscountAnnounceResponse, PriceEvidenceResponse, StandToken } from '../src/api-types.ts';
+import type { DiscountAnnounceResponse, JobCreatedResponse, StandToken } from '../src/api-types.ts';
 import { createStandApi } from '../server/stand-server.ts';
+import { runJob } from './run-jobs.ts';
 
 /**
  * Интерфейс на PostgreSQL: сопоставление внешнего пользователя — platform.external_identity [Р-78], роли — из
@@ -25,10 +26,20 @@ const fxPool = createPool(PG_URL.replace('svc_app@', 'svc_fx_loader@'), { max: 1
 const onboardingPool = createPool(PG_URL.replace('svc_app@', 'svc_onboarding@'), { max: 1 });
 // Р-90: консоль — административный сервис (остановки, роли); вход — роль входа; тенанты стенда — роль создания тенанта
 const adminPool = createPool(PG_URL.replace('svc_app@', 'svc_admin@'), { max: 4 });
+// Р-139 (шаг 30): ход задания ведёт роль исполнителя, а не административная — иначе каждый тик был бы строкой аудита
+const bulkWorkerPool = createPool(PG_URL.replace('svc_app@', 'svc_bulk_worker@'), { max: 2 });
 const authenticatorPool = createPool(PG_URL.replace('svc_app@', 'svc_authenticator@'), { max: 2 });
 const provisioningPool = createPool(PG_URL.replace('svc_app@', 'svc_provisioning@'), { max: 1 });
 let memberUsers: Record<string, string> = {};
 const WORLD = 'kaufland/pipeline/happy-path';
+/**
+ * Р-139 (шаг 30): массовая операция отвечает заданием. Здесь оно выполняется тем же обработчиком, что и в фоновом процессе, —
+ * на настоящей базе: именно так проверяется, что стражи массового изменения принимают второй фактор, предъявленный при СОЗДАНИИ.
+ */
+const finishJob = async (response: { status: number; body: unknown }, world?: LiveWorld) => {
+  assert.equal(response.status, 200, JSON.stringify(response.body));
+  return runJob(world ?? worlds.find((w) => w.id === WORLD)!, (response.body as JobCreatedResponse).jobId, 'en');
+};
 /** Шаг 23: мир Amazon — недоверие каналу и Automate Pricing в базе */
 const TRUST_WORLD = 'amazon/pipeline/console-channel-trust';
 
@@ -37,7 +48,7 @@ let worlds: LiveWorld[] = [];
 before(async () => {
   const directory = new PgIdentityDirectory(authenticatorPool as never);
   memberUsers = await pgStandUsers(directory, onboardingPool);
-  worlds = await buildStandWorlds({ filter: (s) => s.id === WORLD || s.id === TRUST_WORLD, storeFactory: pgStoreFactory(pool, scanPool!, fxPool!, { memberUsers, memberEmails: STAND_EMAILS, joinMember: pgStandJoinMember(adminPool, directory), adminPool, provisioningPool }) });
+  worlds = await buildStandWorlds({ filter: (s) => s.id === WORLD || s.id === TRUST_WORLD, storeFactory: pgStoreFactory(pool, scanPool!, fxPool!, { memberUsers, memberEmails: STAND_EMAILS, joinMember: pgStandJoinMember(adminPool, directory), adminPool, provisioningPool, bulkWorkerPool }) });
   const issuer = createTestIssuer({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE });
   handle = createStandApi(worlds, {
     authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory }),
@@ -52,6 +63,7 @@ after(async () => {
   await adminPool.end();
   await authenticatorPool.end();
   await provisioningPool.end();
+  await bulkWorkerPool.end();
 });
 
 /** Токен имитатора поставщика в заголовке и язык в cookie */
@@ -117,9 +129,10 @@ test('step 21 on PostgreSQL: preview and save of a strategy, difference screen a
   const preview = await post(owner, url('strategies', 'preview'), { draft, writeScopeIds: ['ws-price-de-4101'] });
   assert.equal(preview.status, 200, JSON.stringify(preview.body));
   const token = (preview.body as StrategyPreviewView).previewToken;
-  const saved = await post(owner, url('strategies'), { draft, writeScopeIds: ['ws-price-de-4101'], strategyId: null, previewToken: token, confirmed: true });
-  assert.equal(saved.status, 200, JSON.stringify(saved.body));
-  const list = (saved.body as { strategies: StrategyListView }).strategies;
+  // Р-139 (шаг 30): сохранение с назначением — фоновое задание; на PostgreSQL оно предъявляет базе себя, а не второй фактор сессии
+  const savedJob = await finishJob(await post(owner, url('strategies'), { draft, writeScopeIds: ['ws-price-de-4101'], strategyId: null, previewToken: token, confirmed: true }));
+  assert.equal(savedJob.status, 'SUCCEEDED', savedJob.error ?? '');
+  const list = (await handle({ method: 'GET', url: url('strategies'), body: undefined, ...owner })).body as StrategyListView;
   assert.ok(list.strategies.some((x) => x.version === 1 && x.scopes.some((u) => u.unit.writeScopeId === 'ws-price-de-4101' && u.version === 1) && x.name === 'Synthetic PG undercut'), JSON.stringify(list.strategies));
 
   const request = { writeScopeIds: ['ws-price-de-4101'], max: { kind: 'SET', minor: 2600 } };
@@ -128,8 +141,8 @@ test('step 21 on PostgreSQL: preview and save of a strategy, difference screen a
   assert.equal(plan.status, 200, JSON.stringify(plan.body));
   const diff = plan.body as BoundsDiffView;
   assert.deepEqual([diff.rows[0]!.maxBefore, diff.rows[0]!.maxAfter], ['€25.00', '€26.00']);
-  const applied = await post(owner, url('bounds', 'apply'), { request, planToken: diff.planToken, confirmed: true });
-  assert.equal(applied.status, 200, JSON.stringify(applied.body));
+  const applied = await finishJob(await post(owner, url('bounds', 'apply'), { request, planToken: diff.planToken, confirmed: true }));
+  assert.equal(applied.status, 'SUCCEEDED', applied.error ?? '');
   const again = await post(owner, url('bounds', 'plan'), { request: { ...request, max: { kind: 'SET', minor: 2700 } } });
   assert.equal((again.body as BoundsDiffView).rows[0]!.maxBefore, '€26.00', 'the database now holds the new version');
 
@@ -191,8 +204,11 @@ test('step 24, Р-123 on PostgreSQL: the check before announcing, the refusal of
 
   const day = (iso: string) => iso.slice(0, 10);
   const from = day(new Date(Date.parse(startsAt) - 40 * 86_400_000).toISOString());
-  const evidence = await handle({ method: 'GET', url: `${api('compliance', 'evidence')}?from=${from}&to=${day(startsAt)}&writeScopeId=${writeScopeId}`, body: undefined, ...owner });
-  assert.equal(evidence.status, 200, JSON.stringify(evidence.body));
-  const csv = (evidence.body as PriceEvidenceResponse).csv.trim().split('\n');
-  assert.ok(csv.length > 1 && csv.slice(1).every((l) => l.startsWith('KAUFLAND,de,') && l.includes(',Europe/Berlin,EUR,GROSS,')), csv.join('\n'));
+  // OQ-202 (шаг 30): файл готовит фоновое задание и кладёт в базу; экран его скачивает, а не получает в ответе
+  const evidenceJob = await finishJob(await post(api('compliance', 'evidence'), { from, to: day(startsAt), writeScopeId }), live);
+  assert.equal(evidenceJob.status, 'SUCCEEDED', evidenceJob.error ?? '');
+  const file = await handle({ method: 'GET', url: api('jobs', evidenceJob.jobId, 'artifact'), body: undefined, ...owner });
+  assert.equal(file.status, 200, JSON.stringify(file.body));
+  const csv = (file.file as { content: string }).content.trim().split('\n');
+  assert.ok(csv.length > 1 && csv.slice(1).every((l: string) => l.startsWith('KAUFLAND,de,') && l.includes(',Europe/Berlin,EUR,GROSS,')), csv.join('\n'));
 });

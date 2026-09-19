@@ -2,7 +2,9 @@ import type { ExplanationRuleset as DictionaryRuleset } from '@repracer/pricing-
 import {
   floorCauseFromDatabase, convertMinor, type FxQuote } from '@repracer/pricing-model';
 import { DEFAULT_RETRY_POLICY } from '@repracer/write-dispatcher';
-import { rotation } from '@repracer/pricing-pipeline';
+import {
+  rotation, type BulkJobArtifact, type BulkJobCreated, type BulkJobInput, type BulkJobOutcome, type BulkJobProgress, type BulkJobRow,
+} from '@repracer/pricing-pipeline';
 import { offerIdentityOf, type CompetitorQuery, type CompetitorSnapshot, type FieldWrite, type Instant, type PricingHealthObservation, type WriteOutcome } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange } from '@repracer/input-sanity';
 import type { GuardrailSet } from '@repracer/price-gate';
@@ -65,6 +67,12 @@ export interface PgPricingStoreOptions {
    * Без него эти действия недоступны: путь решения работает ролью repracer_app, у которой прав на них нет.
    */
   adminPool?: PgPool;
+  /**
+   * Р-90, Р-139: пул фонового исполнителя массовых операций (роль repracer_bulk_worker) — аренда, ход и итог задания. Отдельная
+   * роль, потому что это записи МАШИНЫ: ход меняется раз в секунду, и человека за ним нет. Создаёт задание административная
+   * роль — от имени человека и в аудите.
+   */
+  bulkWorkerPool?: PgPool;
   /**
    * Только для замера шага 9: окно сдвига из журнала движений (DISTINCT ON по competitor_move, как в шаге 8)
    * вместо проекции competitor_move_latest [OQ-93]. В работе — projection.
@@ -503,15 +511,36 @@ function secondFactorRefused(error: unknown): boolean {
   return e.code === '42501' && /second factor/i.test(e.message ?? '');
 }
 
+const BULK_JOB_COLUMNS = `bulk_job_id, kind, status, params, phase, total_items, done_items, result, error_code, attempts,
+  created_with_mfa, created_by_membership_id, created_by_user_id, created_at, started_at, finished_at, lease_owner, lease_until`;
+
+/** Те же столбцы с именем таблицы: в запросе взятия задания рядом стоит CTE со своим `bulk_job_id` */
+const BULK_JOB_COLUMNS_OF_J = BULK_JOB_COLUMNS.split(',').map((c) => `j.${c.trim()}`).join(', ');
+
+function toBulkJob(r: Row): BulkJobRow {
+  return {
+    jobId: String(r.bulk_job_id), kind: r.kind, status: r.status, params: r.params, phase: r.phase ?? null,
+    totalItems: r.total_items === null ? null : Number(r.total_items), doneItems: Number(r.done_items),
+    result: r.result ?? null, errorCode: r.error_code ?? null, attempts: Number(r.attempts),
+    createdWithMfa: r.created_with_mfa === true, createdByMembershipId: String(r.created_by_membership_id),
+    createdByUserId: String(r.created_by_user_id),
+    createdAt: String(r.created_at), startedAt: r.started_at === null ? null : String(r.started_at),
+    finishedAt: r.finished_at === null ? null : String(r.finished_at),
+    leaseOwner: r.lease_owner ?? null, leaseUntil: r.lease_until === null ? null : String(r.lease_until),
+  };
+}
+
 export class PgPricingStore implements PricingStore {
   private readonly pool: PgPool;
   private readonly adminPool: PgPool | null;
+  private readonly bulkWorkerPool: PgPool | null;
   private readonly contextQuery: string;
   private readonly writeQueue: PgWriteQueueStore;
 
   constructor(pool: PgPool, options: PgPricingStoreOptions = {}) {
     this.pool = pool;
     this.adminPool = options.adminPool ?? null;
+    this.bulkWorkerPool = options.bulkWorkerPool ?? null;
     this.writeQueue = new PgWriteQueueStore(pool);
     this.contextQuery = contextSql(options.shiftWindowSource === 'move_log' ? WINDOW_MOVE_LOG : WINDOW_PROJECTION);
   }
@@ -523,6 +552,11 @@ export class PgPricingStore implements PricingStore {
   private admin(action: string): PgPool {
     if (!this.adminPool) throw new Error(`${action} needs the administrative database role (Р-90): construct PgPricingStore with adminPool`);
     return this.adminPool;
+  }
+
+  private bulkWorker(action: string): PgPool {
+    if (!this.bulkWorkerPool) throw new Error(`${action} needs the bulk worker database role (Р-139): construct PgPricingStore with bulkWorkerPool`);
+    return this.bulkWorkerPool;
   }
 
   // --- оценка: транзакция 1 ----------------------------------------------------
@@ -905,7 +939,7 @@ export class PgPricingStore implements PricingStore {
       if (e.minMinor === undefined && e.maxMinor === undefined) return { status: 'INVALID', writeScopeId: e.writeScopeId, cause: 'NOTHING_TO_CHANGE' };
       if ([e.minMinor, e.maxMinor].some((v) => v !== undefined && (!Number.isSafeInteger(v) || v <= 0))) return { status: 'INVALID', writeScopeId: e.writeScopeId, cause: 'AMOUNT_INVALID' };
     }
-    if (mode === 'APPLY' && new Set(ids).size > 1 && !actor.mfa) return { status: 'MFA_REQUIRED' };
+    if (mode === 'APPLY' && new Set(ids).size > 1 && !actor.mfa && !actor.bulkJobId) return { status: 'MFA_REQUIRED' };
     const effective = async (tx: Tx, writeScopeId: string) => {
       const { rows: [r] } = await tx.query(
         `SELECT tenant_data.effective_min_price($1, $2) AS min, tenant_data.effective_max_price($1, $2) AS max`, [tenantId, writeScopeId]);
@@ -990,7 +1024,7 @@ export class PgPricingStore implements PricingStore {
         }
         if (mode === 'PREVIEW') throw new RollbackWith<BoundsEditResult>({ status: 'PREVIEWED', rows });
         return { status: 'APPLIED', rows } satisfies BoundsEditResult;
-      }, actor.userId, { mfa: actor.mfa });
+      }, actor.userId, { mfa: actor.mfa, ...(actor.bulkJobId ? { bulkJobId: actor.bulkJobId } : {}) });
     } catch (error) {
       if (secondFactorRefused(error)) return { status: 'MFA_REQUIRED' };
       if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
@@ -1015,7 +1049,7 @@ export class PgPricingStore implements PricingStore {
         return { status: 'INVALID', cause: 'AMOUNT_INVALID', writeScopeId: r.writeScopeId };
       }
     }
-    if (mode === 'APPLY' && !actor.mfa) return { status: 'MFA_REQUIRED' };
+    if (mode === 'APPLY' && !actor.mfa && !actor.bulkJobId) return { status: 'MFA_REQUIRED' };
     try {
       return await inTenant(this.admin('importCosts'), tenantId, async (tx) => {
         // Область себестоимости — та же, что у пола маржи (0051): товар оффера, его аккаунт и витрина из привязки
@@ -1094,13 +1128,122 @@ export class PgPricingStore implements PricingStore {
               withFee.map((r) => r.feeRateBp ?? null), withFee.map((r) => r.fixedFeeMinor ?? null)]);
         }
         return { status: 'APPLIED', importId, rows: batch.rows.length, offers } satisfies CostImportResult;
-      }, actor.userId, { mfa: actor.mfa });
+      }, actor.userId, { mfa: actor.mfa, ...(actor.bulkJobId ? { bulkJobId: actor.bulkJobId } : {}) });
     } catch (error) {
       if (secondFactorRefused(error)) return { status: 'MFA_REQUIRED' };
       const code = (error as { code?: string }).code;
       if (code === '42501') return { status: 'FORBIDDEN' };
       throw error;
     }
+  }
+
+  /**
+   * Р-139 (шаг 30): массовая операция продавца — фоновое задание. Создаёт его человек и предъявляет второй фактор [Р-135];
+   * применяет фоновый процесс, называя базе задание (`app.bulk_job_id`), — иначе стражи массового изменения его не пропустят.
+   */
+  async createBulkJob(tenantId: string, input: BulkJobInput, actor: AdminActor): Promise<BulkJobCreated> {
+    try {
+      return await inTenant(this.admin('createBulkJob'), tenantId, async (tx) => {
+        const { rows: [row] } = await tx.query(
+          `INSERT INTO tenant_data.bulk_job (tenant_id, kind, params, total_items, phase, created_by_membership_id)
+           VALUES ($1, $2, $3::jsonb, $4, 'PREPARING', $5) RETURNING bulk_job_id, created_at`,
+          [tenantId, input.kind, JSON.stringify(input.params), input.totalItems ?? null, actor.membershipId]);
+        return { status: 'CREATED', jobId: String(row.bulk_job_id), createdAt: String(row.created_at) } satisfies BulkJobCreated;
+      }, actor.userId, { mfa: actor.mfa, ...(actor.bulkJobId ? { bulkJobId: actor.bulkJobId } : {}) });
+    } catch (error) {
+      if (secondFactorRefused(error)) return { status: 'MFA_REQUIRED' };
+      if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
+      throw error;
+    }
+  }
+
+  /**
+   * Взять задание в работу: самое давнее ожидающее или прерванное, а также то, чья аренда истекла (процесс упал). Аренда — как у
+   * периодических работ [Р-126]: перехват чужой живой аренды база отклоняет.
+   */
+  async claimBulkJob(tenantId: string, owner: string, leaseSeconds: number): Promise<BulkJobRow | null> {
+    return inTenant(this.bulkWorker('claimBulkJob'), tenantId, async (tx) => {
+      const { rows } = await tx.query(
+        `WITH next AS (
+           SELECT bulk_job_id FROM tenant_data.bulk_job
+            WHERE tenant_id = $1 AND (status IN ('PENDING', 'INTERRUPTED') OR (status = 'RUNNING' AND lease_until <= now()))
+            ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED)
+         UPDATE tenant_data.bulk_job j
+            SET status = 'RUNNING', lease_owner = $2, lease_until = now() + make_interval(secs => $3::int),
+                started_at = coalesce(j.started_at, now()), attempts = j.attempts + 1, phase = 'PREPARING', done_items = 0
+           FROM next WHERE j.tenant_id = $1 AND j.bulk_job_id = next.bulk_job_id
+        RETURNING ${BULK_JOB_COLUMNS_OF_J}`, [tenantId, owner, leaseSeconds]);
+      return rows.length === 0 ? null : toBulkJob(rows[0]!);
+    }, undefined, { leaseOwner: owner });
+  }
+
+  /** Ход задания: пишется ОТДЕЛЬНОЙ транзакцией, поэтому переживает откат самой работы и виден продавцу во время применения */
+  async updateBulkJobProgress(tenantId: string, jobId: string, owner: string, progress: BulkJobProgress): Promise<void> {
+    await inTenant(this.bulkWorker('updateBulkJobProgress'), tenantId, async (tx) => {
+      await tx.query(
+        `UPDATE tenant_data.bulk_job
+            SET phase = coalesce($4, phase), done_items = coalesce($5, done_items), total_items = coalesce($6, total_items),
+                lease_until = now() + make_interval(secs => $7::int)
+          WHERE tenant_id = $1 AND bulk_job_id = $2 AND lease_owner = $3 AND status = 'RUNNING'`,
+        [tenantId, jobId, owner, progress.phase ?? null, progress.done ?? null, progress.total ?? null, progress.leaseSeconds ?? 60]);
+    }, undefined, { leaseOwner: owner });
+  }
+
+  /** Итог задания: успех с результатом, отказ с причиной или возврат в очередь (процесс упал посреди применения) */
+  async finishBulkJob(tenantId: string, jobId: string, owner: string, outcome: BulkJobOutcome): Promise<void> {
+    await inTenant(this.bulkWorker('finishBulkJob'), tenantId, async (tx) => {
+      if (outcome.status === 'INTERRUPTED') {
+        await tx.query(
+          `UPDATE tenant_data.bulk_job SET status = 'INTERRUPTED', lease_owner = NULL, lease_until = NULL, phase = NULL
+            WHERE tenant_id = $1 AND bulk_job_id = $2 AND lease_owner = $3`, [tenantId, jobId, owner]);
+        return;
+      }
+      await tx.query(
+        `UPDATE tenant_data.bulk_job
+            SET status = $4, result = $5::jsonb, error_code = $6, phase = 'DONE', finished_at = now(),
+                lease_owner = NULL, lease_until = NULL
+          WHERE tenant_id = $1 AND bulk_job_id = $2 AND lease_owner = $3`,
+        [tenantId, jobId, owner, outcome.status, outcome.result === undefined ? null : JSON.stringify(outcome.result),
+          outcome.status === 'FAILED' ? outcome.errorCode : null]);
+    }, undefined, { leaseOwner: owner });
+  }
+
+  /** Задания тенанта: история для экрана — только свои [Р-16] */
+  async listBulkJobs(tenantId: string, limit = 20): Promise<BulkJobRow[]> {
+    return inTenant(this.admin('listBulkJobs'), tenantId, async (tx) => {
+      const { rows } = await tx.query(
+        `SELECT ${BULK_JOB_COLUMNS} FROM tenant_data.bulk_job WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT $2`, [tenantId, limit]);
+      return rows.map(toBulkJob);
+    });
+  }
+
+  async bulkJob(tenantId: string, jobId: string): Promise<BulkJobRow | null> {
+    return inTenant(this.admin('bulkJob'), tenantId, async (tx) => {
+      const { rows } = await tx.query(
+        `SELECT ${BULK_JOB_COLUMNS} FROM tenant_data.bulk_job WHERE tenant_id = $1 AND bulk_job_id = $2`, [tenantId, jobId]);
+      return rows.length === 0 ? null : toBulkJob(rows[0]!);
+    });
+  }
+
+  /** Файл, подготовленный заданием: доказательная история цен [OQ-202] */
+  async saveBulkJobArtifact(tenantId: string, jobId: string, artifact: BulkJobArtifact): Promise<void> {
+    await inTenant(this.bulkWorker('saveBulkJobArtifact'), tenantId, async (tx) => {
+      await tx.query(
+        `INSERT INTO tenant_data.bulk_job_artifact (tenant_id, bulk_job_id, file_name, content_type, content, sha256, rows_count)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [tenantId, jobId, artifact.fileName, artifact.contentType, artifact.content, artifact.sha256, artifact.rows]);
+    });
+  }
+
+  async bulkJobArtifact(tenantId: string, jobId: string): Promise<BulkJobArtifact | null> {
+    return inTenant(this.admin('bulkJobArtifact'), tenantId, async (tx) => {
+      const { rows } = await tx.query(
+        `SELECT file_name, content_type, content, sha256, rows_count FROM tenant_data.bulk_job_artifact
+          WHERE tenant_id = $1 AND bulk_job_id = $2`, [tenantId, jobId]);
+      const r = rows[0];
+      return r === undefined ? null
+        : { fileName: r.file_name, contentType: r.content_type, content: r.content, sha256: r.sha256, rows: Number(r.rows_count) };
+    });
   }
 
   /** Р-120: наблюдения собственного ценообразования канала — путь обнаружения офферов, одна вставка */
@@ -1218,7 +1361,7 @@ export class PgPricingStore implements PricingStore {
             check: PgPricingStore.omnibusRow({ status: r.check_status, lowest_minor: r.lowest_prior_minor, window_from: r.window_from, window_to: r.window_to, day_tz: r.day_tz, history_since: r.covered_since, history_days: r.history_days, external_changes: r.external_changes }),
           },
         } satisfies DiscountAnnounceResult;
-      }, actor.userId, { mfa: actor.mfa });
+      }, actor.userId, { mfa: actor.mfa, ...(actor.bulkJobId ? { bulkJobId: actor.bulkJobId } : {}) });
     } catch (error) {
       if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
       const message = String((error as Error).message ?? '');
@@ -1303,7 +1446,7 @@ export class PgPricingStore implements PricingStore {
             params: { ...params, type: v.type, ...(v.undercut_minor !== null ? { undercutMinor: Number(v.undercut_minor) } : {}) } as unknown as StrategyDefinition['params'],
           },
         } satisfies StrategySaveResult;
-      }, actor.userId, { mfa: actor.mfa });
+      }, actor.userId, { mfa: actor.mfa, ...(actor.bulkJobId ? { bulkJobId: actor.bulkJobId } : {}) });
     } catch (error) {
       const refusal = PgPricingStore.strategyRefusal(error);
       if (refusal) return refusal;
@@ -1325,7 +1468,7 @@ export class PgPricingStore implements PricingStore {
           `UPDATE tenant_data.write_scope SET pricing_strategy_id = NULL, pricing_strategy_version = NULL
             WHERE tenant_id = $1 AND write_scope_id = ANY ($2::uuid[]) AND field = 'PRICE'`, [tenantId, input.writeScopeIds]);
         return { status: 'UNASSIGNED', writeScopeIds: [...input.writeScopeIds] } satisfies StrategyUnassignResult;
-      }, actor.userId, { mfa: actor.mfa });
+      }, actor.userId, { mfa: actor.mfa, ...(actor.bulkJobId ? { bulkJobId: actor.bulkJobId } : {}) });
     } catch (error) {
       if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
       throw error;
@@ -1369,7 +1512,7 @@ export class PgPricingStore implements PricingStore {
           status: 'SAVED', assigned: [...input.assignTo],
           strategy: { strategyId, version, params: { ...input.params }, deadbandMinor: input.deadbandMinor },
         } satisfies StrategySaveResult;
-      }, actor.userId, { mfa: actor.mfa });
+      }, actor.userId, { mfa: actor.mfa, ...(actor.bulkJobId ? { bulkJobId: actor.bulkJobId } : {}) });
     } catch (error) {
       // Р-39, OQ-166, Р-120: назначение стратегии отклонила база (write_scope_strategy_guard, 0082)
       const refusal = PgPricingStore.strategyRefusal(error);

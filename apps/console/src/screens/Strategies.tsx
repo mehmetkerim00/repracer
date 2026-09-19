@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { LIST_PAGE_DEFAULT, parseAmountInput, parsePercentInput, type ListQuery, type StrategyDraft, type StrategyListItem, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
-import type { StrategySaveResponse } from '../api-types.ts';
+import type { JobCreatedResponse, StrategySaveResponse } from '../api-types.ts';
+import { JobProgress } from './Jobs.tsx';
 import { ApiError, requestJson, useResource, worldPath } from '../api.ts';
 import { Badge, ErrorBox, errorText, Gaps, Load, Pager, ReasonLine, useMessages } from '../components.tsx';
 
@@ -121,6 +122,7 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
   const [preview, setPreview] = useState<StrategyPreviewView | null>(initialPreview);
   const [confirming, setConfirming] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   /**
@@ -149,14 +151,15 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
     if (!preview) return;
     setBusy(true); setError(null);
     try {
+      // Р-139: назначение на каталог идёт фоновым заданием; предпросмотр уже сверен сервером с тем, что видел человек
       const r = assigning
-        ? await requestJson<StrategySaveResponse>(worldPath(worldId, 'strategies', 'assign'), {
+        ? await requestJson<JobCreatedResponse>(worldPath(worldId, 'strategies', 'assign'), {
           method: 'POST', body: { strategyId: assigning.strategyId, version: assigning.version, ...scopeSelection(), previewToken: preview.previewToken, confirmed: true }, locale: m.locale,
         })
-        : await requestJson<StrategySaveResponse>(worldPath(worldId, 'strategies'), {
+        : await requestJson<JobCreatedResponse>(worldPath(worldId, 'strategies'), {
           method: 'POST', body: { draft: draftOf(form), ...scopeSelection(), strategyId: form.strategyId, previewToken: preview.previewToken, confirmed: true }, locale: m.locale,
         });
-      setMessage(r.message); setPreview(null); setConfirming(false); setBusy(false); setAssigning(null);
+      setMessage(r.message); setJobId(r.jobId); setPreview(null); setConfirming(false); setBusy(false); setAssigning(null);
     } catch (e) {
       setConfirming(false); setBusy(false);
       // Офферы изменились после превью: показать новое превью, а не ошибку без выхода
@@ -273,6 +276,7 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
       ) : null}
       {error ? <ErrorBox message={error} /> : null}
       {message ? <p className="notice" role="status">{message}</p> : null}
+      {jobId ? <JobProgress worldId={worldId} jobId={jobId} /> : null}
       {preview ? <PreviewTable view={preview} /> : null}
       <Gaps gaps={view.gaps} />
     </section>

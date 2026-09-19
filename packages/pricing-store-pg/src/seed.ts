@@ -24,6 +24,21 @@ export class IdMap {
     this.fromDbIds.set(dbId, fixtureId);
   }
 
+  /**
+   * Пары «псевдоним сценария → идентификатор базы». Нужны тогда, когда мир стенда переживает границу процесса: фоновый
+   * исполнитель массовых операций [Р-139] — ОТДЕЛЬНЫЙ процесс, и без карты он читал бы состояние в UUID, а параметры задания
+   * записаны в псевдонимах. В работе перевода нет вовсе: псевдонимы — свойство стенда.
+   */
+  entries(): Array<[string, string]> {
+    return [...this.toDbIds.entries()];
+  }
+
+  static of(entries: ReadonlyArray<readonly [string, string]>): IdMap {
+    const map = new IdMap();
+    for (const [fixtureId, dbId] of entries) map.alias(fixtureId, dbId);
+    return map;
+  }
+
   dbId(fixtureId: string): string {
     const id = this.toDbIds.get(fixtureId);
     if (!id) throw new Error(`unknown fixture id ${fixtureId}`);

@@ -8,9 +8,10 @@ import { messagesFor, type ComplianceView, type CostImportView, type DiscountChe
 import { buildStandWorlds, memoryStandDirectory, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
-import type { BoundsIndexView, DiscountAnnounceResponse, EnableResult, PriceEvidenceResponse, SessionView, StandToken, WorldSummary } from '../src/api-types.ts';
+import type { BoundsIndexView, DiscountAnnounceResponse, EnableResult, JobCreatedResponse, SessionView, StandToken, WorldSummary } from '../src/api-types.ts';
 import { createHash } from 'node:crypto';
 import { createStandApi, EVIDENCE_MAX_DAYS, resolveStandIdentityMode } from '../server/stand-server.ts';
+import { runJob, runPendingJobs } from './run-jobs.ts';
 
 /**
  * Интерфейс на мирах стенда (хранилище в памяти): вход через токен поставщика identity [Р-78] (на стенде — имитатор),
@@ -43,6 +44,16 @@ after(async () => {
 });
 
 const account = (role: string) => STAND_ACCOUNTS.find((a) => a.role === role)!;
+
+/**
+ * Р-139 (шаг 30): массовая операция отвечает ЗАДАНИЕМ, а не итогом. Тест выполняет его тем же обработчиком, которым занят
+ * фоновый процесс, и смотрит на итог глазами экрана хода.
+ */
+const liveOf = (worldId: string) => worlds.find((w) => w.id === worldId)!;
+const finishJob = (worldId: string, response: { status: number; body: unknown }, locale: 'de' | 'en' = 'de') => {
+  assert.equal(response.status, 200, JSON.stringify(response.body));
+  return runJob(liveOf(worldId), (response.body as JobCreatedResponse).jobId, locale);
+};
 
 /** Запрос браузера: токен поставщика в заголовке и язык в cookie (сессии у сервера нет) */
 interface Auth { authorization: string; cookie: string }
@@ -284,9 +295,19 @@ test('Р-134, Р-135 (шаг 28): импорт себестоимости — п
   const withoutMfa = await apply(passwordOnly, { fingerprint: view.fingerprint, confirmed: true });
   assert.deepEqual([withoutMfa.status, (withoutMfa.body as { error: { code: string } }).error.code], [403, 'MFA_REQUIRED']);
   const strong = owner;
-  const applied = await apply(strong, { fingerprint: view.fingerprint, confirmed: true });
-  assert.equal(applied.status, 200, JSON.stringify(applied.body));
-  assert.match((applied.body as { message: string }).message, /Selbstkosten von 1 Angebot importiert \(1 Zeilen\)\./);
+  /**
+   * Р-139 (шаг 30): применение — фоновое задание. Ответ несёт идентификатор задания, а не итог; до работы исполнителя в базе
+   * ничего не изменено. Это и проверяется: сначала состояние задания «ничего не изменено», потом — итог.
+   */
+  const created = await apply(strong, { fingerprint: view.fingerprint, confirmed: true });
+  assert.equal(created.status, 200, JSON.stringify(created.body));
+  const pending = (created.body as JobCreatedResponse).job!;
+  assert.deepEqual([pending.status, pending.effect], ['PENDING', messagesFor('de').ui.jobs.effectPending],
+    'до работы исполнителя задание ждёт, и экран говорит, что в базе ничего не изменено');
+  const done = await finishJob(id, created);
+  assert.equal(done.status, 'SUCCEEDED', done.error ?? '');
+  assert.match(done.headline, /Selbstkosten von 1 Angebot importiert \(1 Zeilen/);
+  assert.equal(done.effect, messagesFor('de').ui.jobs.effectApplied);
 });
 
 test('no endless spinner: a request that gets no answer ends with an error the screen can show', async () => {
@@ -336,9 +357,9 @@ test('step 21: a strategy is saved only with the token of the preview shown; bou
   assert.equal((await save(viewer, view.previewToken)).status, 403);
   assert.equal((await save(owner, view.previewToken, false)).status, 400);
   assert.equal((await save(owner, 'not-the-preview')).status, 409);
-  const saved = await save(owner, view.previewToken);
-  assert.equal(saved.status, 200, JSON.stringify(saved.body));
-  assert.match((saved.body as { message: string }).message, /^Saved as version 1, assigned to 1 offer\.$/);
+  // Р-139 (шаг 30): сохранение с назначением — фоновое задание; токен предпросмотра сверяет сервер ДО его создания
+  const saved = await finishJob(id, await save(owner, view.previewToken), 'en');
+  assert.deepEqual([saved.status, saved.headline], ['SUCCEEDED', 'Done: version 1 assigned to 1 offer.']);
   // Находка 4 ревью шага 21: то же превью после сохранения устарело — стратегия единицы уже другая
   assert.equal((await save(owner, view.previewToken)).status, 409, 'finding 4: a preview older than the strategy of the offer is not saved');
   // Находка 3 ревью шага 21 [Р-39]: Kaufland не даёт полного списка предложений — «ниже всех на рынке» не назначается
@@ -357,10 +378,16 @@ test('step 21: a strategy is saved only with the token of the preview shown; bou
   assert.equal(plan.status, 200, JSON.stringify(plan.body));
   const diff = plan.body as BoundsDiffView;
   assert.deepEqual([diff.rows[0]!.minBefore, diff.rows[0]!.minAfter, diff.mfaRequired], ['€15.00', '€16.00', false]);
-  assert.equal((await call(owner, 'POST', api(id, 'bounds', 'apply'), { request, planToken: 'stale', confirmed: true })).status, 409);
-  const applied = await call(owner, 'POST', api(id, 'bounds', 'apply'), { request, planToken: diff.planToken, confirmed: true });
-  assert.deepEqual([applied.status, (applied.body as { message: string }).message], [200, 'Bounds of 1 offer changed.']);
-  assert.equal((await call(owner, 'POST', api(id, 'bounds', 'apply'), { request, planToken: diff.planToken, confirmed: true })).status, 409, 'the difference screen is stale after applying');
+  /**
+   * Шаг 30 [Р-139]: применение — задание, и устаревший экран различий ловит ОНО, а не запрос: пересчёт различий по каталогу
+   * растёт с его размером, поэтому он ушёл в задание вместе с записью.
+   */
+  const stale = await finishJob(id, await call(owner, 'POST', api(id, 'bounds', 'apply'), { request, planToken: 'stale', confirmed: true }));
+  assert.deepEqual([stale.status, stale.error], ['FAILED', messagesFor('de').ui.jobs.errors.PLAN_CHANGED]);
+  const applied = await finishJob(id, await call(owner, 'POST', api(id, 'bounds', 'apply'), { request, planToken: diff.planToken, confirmed: true }), 'en');
+  assert.deepEqual([applied.status, applied.headline], ['SUCCEEDED', 'Done: bounds checked for 1 offer, 1 changed.']);
+  const afterApply = await finishJob(id, await call(owner, 'POST', api(id, 'bounds', 'apply'), { request, planToken: diff.planToken, confirmed: true }));
+  assert.equal(afterApply.status, 'FAILED', 'the difference screen is stale after applying');
   const diffHtml = await html('/src/screens/BoundsEdit.tsx', 'BoundsDiffTable', { view: diff }, 'de');
   assert.ok(diffHtml.includes('€15.00') && diffHtml.includes('min vorher'), 'amounts come from the server in the session language, labels from the dictionary of the page');
 
@@ -374,7 +401,9 @@ test('step 21: a strategy is saved only with the token of the preview shown; bou
   assert.equal(noMfa.status, 403, JSON.stringify(noMfa.body));
   assert.equal((noMfa.body as { error: { code: string } }).error.code, 'MFA_REQUIRED');
   const withMfa = { authorization: `Bearer ${issuer.token(account('OWNER').subject, { email: account('OWNER').email, amr: ['pwd', 'otp'] })}`, cookie: 'repracer_locale=en' };
-  assert.equal((await call(withMfa, 'POST', api(multi, 'bounds', 'apply'), { request: mass, planToken: massPlan.planToken, confirmed: true })).status, 200);
+  const massJob = await finishJob(multi, await call(withMfa, 'POST', api(multi, 'bounds', 'apply'), { request: mass, planToken: massPlan.planToken, confirmed: true }), 'en');
+  // Р-135, Р-139: второй фактор предъявлен при СОЗДАНИИ задания — стражи массового изменения принимают его у применяющего процесса
+  assert.equal(massJob.status, 'SUCCEEDED', massJob.error ?? '');
 });
 
 test('step 21: the price feed and the report of dangerous changes stopped by the bounds (Р-73) are served and rendered in German and English', async () => {
@@ -493,9 +522,10 @@ test('step 24, OQ-169/170: an existing strategy version is assigned without a ne
   // OQ-170: новая версия, сохранённая человеком, показывает автора и статус
   const draft = { name: 'Synthetic author check', params: { type: 'FIXED', priceMinor: 2100 }, deadbandMinor: 0 };
   const p1 = (await call(owner, 'POST', api(id, 'strategies', 'preview'), { draft, writeScopeIds: [target.unit.writeScopeId] })).body as StrategyPreviewView;
-  const saved = await call(owner, 'POST', api(id, 'strategies'), { draft, writeScopeIds: [target.unit.writeScopeId], strategyId: null, previewToken: p1.previewToken, confirmed: true });
-  assert.equal(saved.status, 200, JSON.stringify(saved.body));
-  const afterSave = (saved.body as { strategies: StrategyListView }).strategies;
+  // Р-139 (шаг 30): сохранение и назначение идут заданием, поэтому список стратегий читается заново после его работы
+  const savedJob = await finishJob(id, await call(owner, 'POST', api(id, 'strategies'), { draft, writeScopeIds: [target.unit.writeScopeId], strategyId: null, previewToken: p1.previewToken, confirmed: true }), 'en');
+  assert.equal(savedJob.status, 'SUCCEEDED', savedJob.error ?? '');
+  const afterSave = await get<StrategyListView>(owner, api(id, 'strategies'));
   const created = afterSave.strategies.find((x) => x.name === 'Synthetic author check')!;
   assert.deepEqual(created.versions.map((v) => [v.version, v.status, v.author]), [[1, 'active', 'Owner (you)']]);
   const markup = await html('/src/screens/Strategies.tsx', 'StrategiesScreenView', { view: afterSave, worldId: id });
@@ -507,10 +537,9 @@ test('step 24, OQ-169/170: an existing strategy version is assigned without a ne
   const body = { strategyId: item.strategyId, version: item.version, writeScopeIds: [target.unit.writeScopeId], previewToken: preview.previewToken, confirmed: true };
   assert.equal((await call(viewer, 'POST', api(id, 'strategies', 'assign'), body)).status, 403);
   assert.equal((await call(owner, 'POST', api(id, 'strategies', 'assign'), { ...body, previewToken: 'stale' })).status, 409);
-  const assigned = await call(owner, 'POST', api(id, 'strategies', 'assign'), body);
-  assert.equal(assigned.status, 200, JSON.stringify(assigned.body));
-  assert.match((assigned.body as { message: string }).message, new RegExp(`^Version ${item.version} assigned to 1 offer\\.$`));
-  const after = (assigned.body as { strategies: StrategyListView }).strategies;
+  const assigned = await finishJob(id, await call(owner, 'POST', api(id, 'strategies', 'assign'), body), 'en');
+  assert.deepEqual([assigned.status, assigned.headline], ['SUCCEEDED', `Done: version ${item.version} assigned to 1 offer.`]);
+  const after = await get<StrategyListView>(owner, api(id, 'strategies'));
   const scopeAfter = after.scopes.find((x) => x.unit.writeScopeId === target.unit.writeScopeId)!;
   assert.deepEqual([scopeAfter.strategyId, scopeAfter.version], [item.strategyId, item.version]);
   assert.equal(after.strategies.find((x) => x.strategyId === item.strategyId)?.version, item.version, 'no new version was created');
@@ -580,23 +609,32 @@ test('step 24, Р-123: a discount is checked before it is announced; a prior pri
   const day = (iso: string) => iso.slice(0, 10);
   const from = day(new Date(Date.parse(live.clock.iso()) - 30 * 86_400_000).toISOString());
   const to = day(startsAt);
-  const evidence = await get<PriceEvidenceResponse>(viewer, `${api(id, 'compliance', 'evidence')}?from=${from}&to=${to}&writeScopeId=${encodeURIComponent(scope.writeScopeId)}`);
-  assert.ok(evidence.days > 0, 'the evidence has storefront days');
-  assert.equal(evidence.csv.split('\n')[0], 'channel,marketplace,offer,day,time_zone,currency,price_basis,min_price,max_price,first_price,last_price,changes,source,corrected,correction_reason');
+  /**
+   * OQ-202, Р-139 (шаг 30): выгрузка — фоновое задание. Файл лежит в базе и скачивается отдельным запросом; в ответе экрана его
+   * нет вовсе. Предела строк больше нет: каталог целиком выгружается тем же заданием.
+   */
+  const evidenceJob = (auth: Auth, body: Record<string, unknown>) => call(auth, 'POST', api(id, 'compliance', 'evidence'), body);
+  const evidence = await finishJob(id, await evidenceJob(viewer, { from, to, writeScopeId: scope.writeScopeId }), 'en');
+  assert.equal(evidence.status, 'SUCCEEDED', evidence.error ?? '');
+  assert.ok(evidence.artifact!.rows > 0, 'the evidence has storefront days');
+  const file = await call(viewer, 'GET', api(id, 'jobs', evidence.jobId, 'artifact'));
+  assert.equal(file.status, 200);
+  const csv = (file.file as { content: string }).content;
+  assert.equal(csv.split('\n')[0], 'channel,marketplace,offer,day,time_zone,currency,price_basis,min_price,max_price,first_price,last_price,changes,source,corrected,correction_reason');
   // Ревью тавтологий (шаг 29): «сумма равна сумме того же тела» верно всегда. Значение имеет, что сумма СЧИТАЕТСЯ ПО СОДЕРЖИМОМУ:
   // другой период — другая выгрузка и другая сумма; тот же запрос — та же сумма
-  assert.equal(evidence.sha256, createHash('sha256').update(evidence.csv).digest('hex'));
-  const again = await get<PriceEvidenceResponse>(owner, `${api(id, 'compliance', 'evidence')}?from=${from}&to=${to}`);
-  assert.equal(again.sha256, evidence.sha256, 'тот же период — та же сумма');
+  assert.equal(evidence.artifact!.sha256, createHash('sha256').update(csv).digest('hex'));
+  const again = await finishJob(id, await evidenceJob(owner, { from, to }), 'en');
+  assert.equal(again.artifact!.sha256, evidence.artifact!.sha256, 'тот же период — та же сумма');
   // Период без истории: выгрузка другая (только заголовок) — значит сумма считается по содержимому, а не по запросу
-  const empty = await get<PriceEvidenceResponse>(owner, `${api(id, 'compliance', 'evidence')}?from=2019-01-01&to=2019-01-31`);
-  assert.equal(empty.days, 0, 'в этом периоде истории нет');
-  assert.notEqual(empty.sha256, evidence.sha256, 'другая выгрузка — другая сумма');
-  assert.equal((await call(owner, 'GET', `${api(id, 'compliance', 'evidence')}?from=${to}&to=${from}`)).status, 400);
-  assert.equal((await call(owner, 'GET', `${api(id, 'compliance', 'evidence')}?from=2020-01-01&to=2026-01-01`)).status, 400, `longer than ${EVIDENCE_MAX_DAYS} days`);
+  const empty = await finishJob(id, await evidenceJob(owner, { from: '2019-01-01', to: '2019-01-31' }), 'en');
+  assert.equal(empty.artifact!.rows, 0, 'в этом периоде истории нет');
+  assert.notEqual(empty.artifact!.sha256, evidence.artifact!.sha256, 'другая выгрузка — другая сумма');
+  assert.equal((await evidenceJob(owner, { from: to, to: from })).status, 400);
+  assert.equal((await evidenceJob(owner, { from: '2020-01-01', to: '2026-01-01' })).status, 400, `longer than ${EVIDENCE_MAX_DAYS} days`);
   // Находка 11 ревью шага 24: несуществующая дата — 400, а не ошибка базы; изменяющие маршруты — только POST
-  assert.equal((await call(owner, 'GET', `${api(id, 'compliance', 'evidence')}?from=2026-13-01&to=2026-13-02`)).status, 400);
-  assert.equal((await call(owner, 'GET', `${api(id, 'compliance', 'evidence')}?from=2026-02-30&to=2026-03-01`)).status, 400);
+  assert.equal((await evidenceJob(owner, { from: '2026-13-01', to: '2026-13-02' })).status, 400);
+  assert.equal((await evidenceJob(owner, { from: '2026-02-30', to: '2026-03-01' })).status, 400);
   assert.equal((await call(owner, 'PUT' as 'POST', api(id, 'compliance', 'announce'), { ...fair, confirmed: true })).status, 405);
   // Находка 1: объявление задним числом отклоняется
   const past = await call(owner, 'POST', api(id, 'compliance', 'announce'), { ...fair, startsAt: new Date(Date.parse(live.clock.iso()) - 5 * 86_400_000).toISOString(), confirmed: true });

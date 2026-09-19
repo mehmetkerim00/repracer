@@ -1,0 +1,23 @@
+{
+  "name": "@repracer/bulk-jobs",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bulk seller operations as background jobs (Р-139): a job is created with a second factor, reports progress, applies all-or-nothing and resumes after a process crash.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./handlers": "./src/handlers.ts",
+    "./worker": "./src/worker.ts"
+  },
+  "dependencies": {
+    "@repracer/console-model": "0.1.0",
+    "@repracer/cost-import": "0.1.0",
+    "@repracer/pricing-model": "0.1.0",
+    "@repracer/pricing-pipeline": "0.1.0",
+    "@repracer/channel-port": "0.1.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec test/*.test.ts"
+  }
+}

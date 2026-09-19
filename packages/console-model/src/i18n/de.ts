@@ -577,6 +577,47 @@ export const de: Messages = {
       unassignText: 'Das Angebot behält seinen aktuellen Preis; bei ausgeschaltetem Repricing wird nichts berechnet. Die Version selbst bleibt.',
       unassigned: 'Strategie entfernt.',
     },
+    /**
+     * Р-139 (шаг 30): экран фонового задания. Слова подобраны так, чтобы продавец, вернувшийся через час или перезагрузивший
+     * страницу, понял три вещи: что делается, сколько осталось и что сейчас в базе.
+     */
+    jobs: {
+      pageTitle: 'Massenvorgänge', historyTitle: 'Bisherige Vorgänge', none: 'Noch keine Massenvorgänge.',
+      kinds: {
+        COST_IMPORT: 'Selbstkosten importieren', BOUNDS_EDIT: 'Grenzen ändern',
+        STRATEGY_ASSIGN: 'Strategie zuweisen', PRICE_EVIDENCE: 'Preisnachweis ausgeben',
+      },
+      queued: 'In der Warteschlange — der Vorgang beginnt gleich.',
+      preparing: (done: number, total: number | null) => (total === null ? 'Wird vorbereitet…' : `Wird vorbereitet: ${done} von ${total}`),
+      applying: (done: number, total: number | null) => (total === null ? 'Wird angewendet…' : `Wird angewendet: ${done} von ${total}`),
+      producing: (done: number, total: number | null) => (total === null ? 'Datei wird erstellt…' : `Datei wird erstellt: ${done} von ${total}`),
+      interrupted: 'Der Vorgang wurde unterbrochen und beginnt von vorn.',
+      failed: (reason: string) => `Nicht ausgeführt: ${reason}`,
+      errorUnknown: 'Grund nicht erfasst',
+      doneCostImport: (rows: number, offers: number, skipped: number) =>
+        `Fertig: Selbstkosten von ${offers} ${offers === 1 ? 'Angebot' : 'Angeboten'} importiert (${rows} Zeilen, ${skipped} nicht zugeordnet).`,
+      doneBounds: (offers: number, changed: number) => `Fertig: Grenzen von ${offers} ${offers === 1 ? 'Angebot' : 'Angeboten'} geprüft, ${changed} geändert.`,
+      doneStrategy: (offers: number, version: number) => `Fertig: Version ${version} ${offers} ${offers === 1 ? 'Angebot' : 'Angeboten'} zugewiesen.`,
+      doneEvidence: (rows: number, bytes: number) => `Fertig: ${rows} Zeilen, ${Math.round(bytes / 1024)} KB — die Datei steht zum Download bereit.`,
+      effectPending: 'In der Datenbank ist noch nichts geändert: der Vorgang wird vollständig oder gar nicht angewendet.',
+      effectApplied: 'Die Änderungen stehen vollständig in der Datenbank.',
+      effectNothing: 'In der Datenbank ist nichts geändert.',
+      effectInterrupted: 'Der Prozess ist mitten im Anwenden ausgefallen. In der Datenbank ist nichts geändert — der Vorgang beginnt von vorn.',
+      createdCostImport: 'Der Import läuft im Hintergrund. Sie können die Seite verlassen.',
+      createdBounds: 'Die Grenzen werden im Hintergrund geändert. Sie können die Seite verlassen.',
+      createdStrategy: 'Die Strategie wird im Hintergrund zugewiesen. Sie können die Seite verlassen.',
+      createdEvidence: 'Der Preisnachweis wird im Hintergrund erstellt. Sie können die Seite verlassen.',
+      download: 'Datei herunterladen', checksum: (sha: string) => `Prüfsumme SHA-256: ${sha}`,
+      notFound: 'Diesen Vorgang gibt es nicht.', noFile: 'Zu diesem Vorgang gehört keine Datei.',
+      attempts: (n: number) => (n > 1 ? `Versuche: ${n}` : ''),
+      errors: {
+        PLAN_CHANGED: 'die Daten haben sich seit der Vorschau geändert', COLUMNS_MISSING: 'in der Datei fehlen Spalten',
+        NO_ROWS: 'keine anwendbaren Zeilen', BAD_REQUEST: 'die Anfrage ist unvollständig', BAD_DRAFT: 'der Strategieentwurf ist unvollständig',
+        BAD_SCOPES: 'keine Angebote ausgewählt', CONFLICT: 'die Grenzen haben sich inzwischen geändert',
+        MFA_REQUIRED: 'der zweite Faktor fehlt', FORBIDDEN: 'die Rolle darf das nicht', JOB_FAILED: 'unerwarteter Fehler',
+        UNKNOWN_JOB_KIND: 'diesen Vorgang kennt der Hintergrundprozess nicht',
+      },
+    },
     costImport: {
       pageTitle: 'Selbstkosten importieren', file: 'Ausgabedatei (CSV oder XLSX)', plan: 'Vorschau zeigen', apply: 'Anwenden…', back: 'Andere Datei wählen',
       sourceRead: (format: string, delimiter: string | null) => `Gelesen als ${format}${delimiter ? ` mit dem Trennzeichen „${delimiter === '\t' ? 'Tabulator' : delimiter}“` : ''}`,

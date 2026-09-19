@@ -90,9 +90,14 @@ export interface BoundsApplyRequest {
   confirmed: boolean;
 }
 
-export interface BoundsApplyResult {
+/**
+ * Р-139 (шаг 30): ответ на массовую операцию — созданное ЗАДАНИЕ, а не итог работы. Итог продавец видит на экране хода: он
+ * переживает перезагрузку страницы и падение процесса, чего ответ синхронного запроса не переживал.
+ */
+export interface JobCreatedResponse {
+  jobId: string;
   message: string;
-  rows: number;
+  job?: import('@repracer/console-model').BulkJobView;
 }
 
 export interface ApiErrorBody {
@@ -108,9 +113,4 @@ export interface DiscountAnnounceResponse {
   compliance: import('@repracer/console-model').ComplianceView;
 }
 
-export interface PriceEvidenceResponse {
-  filename: string;
-  csv: string;
-  sha256: string;
-  days: number;
-}
+

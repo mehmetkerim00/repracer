@@ -17,3 +17,4 @@ export { FEED_PAGE_MAX, FEED_PERIODS_DAYS, FEED_STATUS_GROUPS, parseFeedQuery, p
 export { dangerousReport, REPORT_PERIODS_DAYS, type DangerousItem, type DangerousReportView } from './dangerous-report.ts';
 export { complianceView, discountCheckView, historyDepthView, priceEvidenceCsv, type ComplianceRow, type ComplianceView, type DiscountCheckView, type HistoryDepthView, type OfferDepthRow } from './compliance.ts';
 export { columnName, costImportView, importTargets, PREVIEW_ROWS_SHOWN, SKIPPED_EXAMPLES, type CostImportView, type ImportPreviewRowView, type ImportSkippedGroupView } from './cost-import.ts';
+export { bulkJobsView, bulkJobView, type BulkJobView, type BulkJobsView } from './jobs.ts';

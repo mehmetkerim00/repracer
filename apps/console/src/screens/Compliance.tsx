@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { LIST_PAGE_DEFAULT, type ComplianceView, type DiscountCheckView, type HistoryDepthView, type ListQuery } from '@repracer/console-model';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import type { DiscountAnnounceResponse, PriceEvidenceResponse } from '../api-types.ts';
+import type { DiscountAnnounceResponse, JobCreatedResponse } from '../api-types.ts';
 import { Badge, errorText, Gaps, Load, OfferPicker, Pager, useMessages } from '../components.tsx';
+import { JobProgress } from './Jobs.tsx';
 
 /** Сумма из поля ввода в минимальных единицах: «19,99» и «19.99»; неверное — null */
 function minorOf(text: string): number | null {
@@ -35,7 +36,8 @@ export function ComplianceScreenView({ worldId, initial }: { worldId: string; in
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [evidence, setEvidence] = useState({ from: '', to: '', writeScopeId: '' });
-  const [download, setDownload] = useState<PriceEvidenceResponse | null>(null);
+  /** OQ-202: файл готовит фоновое задание — экран показывает его ход и ссылку на готовое [Р-139] */
+  const [evidenceJobId, setEvidenceJobId] = useState<string | null>(null);
 
   const edit = (patch: Partial<typeof form>) => { setForm({ ...form, ...patch }); setCheck(null); setConfirming(false); setMessage(null); };
   const body = () => ({
@@ -59,10 +61,14 @@ export function ComplianceScreenView({ worldId, initial }: { worldId: string; in
   };
 
   const loadEvidence = async () => {
-    setBusy(true); setError(null); setDownload(null);
+    setBusy(true); setError(null); setEvidenceJobId(null);
     try {
-      const q = new URLSearchParams({ from: evidence.from, to: evidence.to, ...(evidence.writeScopeId ? { writeScopeId: evidence.writeScopeId } : {}) });
-      setDownload(await requestJson<PriceEvidenceResponse>(`${worldPath(worldId, 'compliance', 'evidence')}?${q}`, { locale: m.locale }));
+      const r = await requestJson<JobCreatedResponse>(worldPath(worldId, 'compliance', 'evidence'), {
+        method: 'POST',
+        body: { from: evidence.from, to: evidence.to, ...(evidence.writeScopeId ? { writeScopeId: evidence.writeScopeId } : {}) },
+        locale: m.locale,
+      });
+      setMessage(r.message); setEvidenceJobId(r.jobId);
     } catch (e) { setError(errorText(e, m)); } finally { setBusy(false); }
   };
 
@@ -142,7 +148,7 @@ export function ComplianceScreenView({ worldId, initial }: { worldId: string; in
       )}
 
       <h3>{c.evidenceTitle}</h3>
-      {/* Р-136: доказательство выгружается по предложению; каталог целиком не отдаётся — об этом сказано до нажатия */}
+      {/* OQ-202 (шаг 30): каталог целиком выгружается тоже — файл готовит задание, а не ответ экрана */}
       <p className="muted small">{c.evidenceByOffer(view.offersTotal)}</p>
       <p className="muted small">{c.evidenceHint}</p>
       <div className="form">
@@ -152,11 +158,7 @@ export function ComplianceScreenView({ worldId, initial }: { worldId: string; in
           onChange={(writeScopeId) => setEvidence({ ...evidence, writeScopeId })} /></label>
         <button type="button" disabled={busy || !evidence.from || !evidence.to} onClick={loadEvidence}>{c.download}</button>
       </div>
-      {download ? (
-        <p className="small">
-          <a href={`data:text/csv;charset=utf-8,${encodeURIComponent(download.csv)}`} download={download.filename}>{download.filename}</a> · SHA-256 <code>{download.sha256}</code>
-        </p>
-      ) : null}
+      {evidenceJobId ? <JobProgress worldId={worldId} jobId={evidenceJobId} /> : null}
 
       <h3>{c.cannotCheckTitle}</h3>
       <ul className="small">{view.cannotCheck.map((t) => <li key={t}>{t}</li>)}</ul>

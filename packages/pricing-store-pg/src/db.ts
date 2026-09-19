@@ -10,6 +10,7 @@ export type PgPool = pg.Pool;
 export type Tx = pg.PoolClient;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const LEASE_OWNER_RE = /^[A-Za-z0-9_.:-]{1,64}$/;
 
 const INT8 = 20;
 const INT8_ARRAY = 1016;
@@ -63,16 +64,22 @@ export class RollbackWith<T> {
  * Транзакция в контексте тенанта. BEGIN и set_config — одним обращением к серверу;
  * в текст запроса подставляются только проверенные UUID.
  */
-export async function inTenant<T>(pool: PgPool, tenantId: string, fn: (tx: Tx) => Promise<T>, userId?: string, options: { mfa?: boolean } = {}): Promise<T> {
+export async function inTenant<T>(pool: PgPool, tenantId: string, fn: (tx: Tx) => Promise<T>, userId?: string,
+  options: { mfa?: boolean; bulkJobId?: string; leaseOwner?: string } = {}): Promise<T> {
   if (!UUID_RE.test(tenantId) || (userId !== undefined && !UUID_RE.test(userId))) {
     throw new Error('tenant and user ids must be UUIDs');
   }
+  // Р-139: применяющее задание называет себя базе — стражи массового изменения принимают второй фактор, предъявленный при его
+  // создании (`security.second_factor_present`). Идентификатор проверяется здесь же: в запрос он идёт подстановкой
+  if (options.bulkJobId !== undefined && !UUID_RE.test(options.bulkJobId)) throw new Error('bulk job id must be a UUID');
+  // Р-139: имя процесса, держащего аренду задания. Оно идёт в запрос подстановкой, поэтому состав символов проверяется здесь
+  if (options.leaseOwner !== undefined && !LEASE_OWNER_RE.test(options.leaseOwner)) throw new Error('bulk lease owner must be 1..64 of [A-Za-z0-9_.:-]');
   const client = await pool.connect();
   let open = false;
   try {
     await client.query(
       // Р-88: второй фактор сессии — из токена поставщика (amr); БД требует его для снятия остановки тенанта и смены ролей
-      `BEGIN; SELECT set_config('app.tenant_id', '${tenantId}', true)${userId ? `, set_config('app.user_id', '${userId}', true)` : ''}${options.mfa ? `, set_config('app.auth_mfa', 'on', true)` : ''}`,
+      `BEGIN; SELECT set_config('app.tenant_id', '${tenantId}', true)${userId ? `, set_config('app.user_id', '${userId}', true)` : ''}${options.mfa ? `, set_config('app.auth_mfa', 'on', true)` : ''}${options.bulkJobId ? `, set_config('app.bulk_job_id', '${options.bulkJobId}', true)` : ''}${options.leaseOwner ? `, set_config('app.bulk_lease_owner', '${options.leaseOwner}', true)` : ''}`,
     );
     open = true;
     let result: T;

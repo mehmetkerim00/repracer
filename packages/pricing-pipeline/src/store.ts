@@ -318,6 +318,12 @@ export interface AdminActor {
   membershipId: string;
   userId: string;
   mfa: boolean;
+  /**
+   * Р-139 (шаг 30): действие выполняет фоновое задание этого тенанта. Второй фактор предъявлен при СОЗДАНИИ задания, поэтому
+   * `mfa` здесь false: задание работает без человека у экрана. Стражи массового изменения принимают такое задание
+   * (`security.second_factor_present`), а не признак, который процесс объявил бы сам за себя [Р-135].
+   */
+  bulkJobId?: string;
 }
 
 /**
@@ -533,6 +539,15 @@ export interface PricingStore {
   editBounds(tenantId: string, edits: readonly BoundsEditInput[], actor: AdminActor, mode: 'PREVIEW' | 'APPLY'): Promise<BoundsEditResult>;
   /** Р-134, Р-135: массовый импорт себестоимости — предпросмотр без записи, применение целиком и со вторым фактором */
   importCosts(tenantId: string, batch: CostImportBatch, actor: AdminActor, mode: 'PREVIEW' | 'APPLY'): Promise<CostImportResult>;
+  /** Р-139 (шаг 30): массовые операции — фоновые задания с видимым ходом */
+  createBulkJob(tenantId: string, input: BulkJobInput, actor: AdminActor): Promise<BulkJobCreated>;
+  claimBulkJob(tenantId: string, owner: string, leaseSeconds: number): Promise<BulkJobRow | null>;
+  updateBulkJobProgress(tenantId: string, jobId: string, owner: string, progress: BulkJobProgress): Promise<void>;
+  finishBulkJob(tenantId: string, jobId: string, owner: string, outcome: BulkJobOutcome): Promise<void>;
+  listBulkJobs(tenantId: string, limit?: number): Promise<BulkJobRow[]>;
+  bulkJob(tenantId: string, jobId: string): Promise<BulkJobRow | null>;
+  saveBulkJobArtifact(tenantId: string, jobId: string, artifact: BulkJobArtifact): Promise<void>;
+  bulkJobArtifact(tenantId: string, jobId: string): Promise<BulkJobArtifact | null>;
   saveStrategy(tenantId: string, input: StrategySaveInput, actor: AdminActor): Promise<StrategySaveResult>;
   /** Р-123 (шаг 24): наименьшая цена за 30 суток витрины до начала скидки — предупреждение до объявления */
   /**
@@ -600,6 +615,70 @@ export interface PricingStore {
 // ---------------------------------------------------------------------------
 // Состояние для консоли: одинаково в памяти и на PostgreSQL
 // ---------------------------------------------------------------------------
+
+
+/**
+ * Р-139 (шаг 30): массовые операции продавца — фоновые задания. Синхронный запрос на 10 000 предложений упирается в таймаут
+ * прокси, и продавец видит ошибку при том, что изменения прошли. Задание создаётся, показывает ход, переживает перезагрузку
+ * страницы, применяется целиком или никак [Р-134] и возобновляется после падения процесса.
+ */
+export type BulkJobKind = 'COST_IMPORT' | 'BOUNDS_EDIT' | 'STRATEGY_ASSIGN' | 'PRICE_EVIDENCE';
+export type BulkJobStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'INTERRUPTED';
+export type BulkJobPhase = 'PREPARING' | 'APPLYING' | 'PRODUCING' | 'DONE';
+
+export interface BulkJobInput {
+  kind: BulkJobKind;
+  /** Что именно делать: ровно то, что человек видел на экране предпросмотра */
+  params: Record<string, unknown>;
+  totalItems?: number;
+}
+
+export type BulkJobCreated =
+  | { status: 'CREATED'; jobId: string; createdAt: string }
+  | { status: 'MFA_REQUIRED' | 'FORBIDDEN' };
+
+export interface BulkJobRow {
+  jobId: string;
+  kind: BulkJobKind;
+  status: BulkJobStatus;
+  params: Record<string, unknown>;
+  phase: BulkJobPhase | null;
+  totalItems: number | null;
+  doneItems: number;
+  result: Record<string, unknown> | null;
+  errorCode: string | null;
+  attempts: number;
+  createdWithMfa: boolean;
+  createdByMembershipId: string;
+  /** Человек, создавший задание: его именем фоновый процесс пишет версии цен [Р-97] */
+  createdByUserId: string;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  leaseOwner: string | null;
+  leaseUntil: string | null;
+}
+
+export interface BulkJobProgress {
+  phase?: BulkJobPhase;
+  done?: number;
+  total?: number;
+  leaseSeconds?: number;
+}
+
+export type BulkJobOutcome =
+  | { status: 'SUCCEEDED'; result: Record<string, unknown> }
+  | { status: 'FAILED'; errorCode: string; result?: Record<string, unknown> }
+  /** Процесс упал посреди применения: задание возвращается в очередь, а транзакция откатилась целиком [Р-134] */
+  | { status: 'INTERRUPTED' };
+
+export interface BulkJobArtifact {
+  fileName: string;
+  contentType: 'text/csv';
+  content: string;
+  sha256: string;
+  rows: number;
+}
 
 export interface ConsoleScopeRow {
   writeScopeId: string;

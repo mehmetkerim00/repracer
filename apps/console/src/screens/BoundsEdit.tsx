@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { parseAmountInput, parsePercentInput, type BoundAdjust, type BoundsDiffView, type BoundsEditRequest } from '@repracer/console-model';
-import type { BoundsApplyResult, BoundsIndexItem } from '../api-types.ts';
+import type { BoundsIndexItem, JobCreatedResponse } from '../api-types.ts';
 import { requestJson, worldPath } from '../api.ts';
 import { Badge, ErrorBox, errorText, Gaps, useMessages } from '../components.tsx';
+import { JobProgress } from './Jobs.tsx';
 
 /**
  * Массовая правка границ (шаги 21, 23): запрос → экран различий → применение с токеном этого экрана. Кнопки «применить» без экрана
@@ -71,8 +72,10 @@ function BoundsEditForm({ worldId, items, total }: { worldId: string; items: rea
   const [wholeCatalog, setWholeCatalog] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  /** Р-139: применение идёт фоновым заданием — экран показывает его ход, а не ждёт ответа */
+  const [jobId, setJobId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const reset = () => { setDiff(null); setMessage(null); };
+  const reset = () => { setDiff(null); setMessage(null); setJobId(null); };
 
   const request = (): BoundsEditRequest | string => {
     const a = adjustOf(min);
@@ -95,8 +98,8 @@ function BoundsEditForm({ worldId, items, total }: { worldId: string; items: rea
     if (!diff) return;
     setBusy(true); setError(null);
     try {
-      const r = await requestJson<BoundsApplyResult>(worldPath(worldId, 'bounds', 'apply'), { method: 'POST', body: { request: diff.request, planToken: diff.view.planToken, confirmed: true }, locale: m.locale });
-      setMessage(r.message); setDiff(null);
+      const r = await requestJson<JobCreatedResponse>(worldPath(worldId, 'bounds', 'apply'), { method: 'POST', body: { request: diff.request, planToken: diff.view.planToken, confirmed: true }, locale: m.locale });
+      setMessage(r.message); setJobId(r.jobId); setDiff(null);
     } catch (e) { setError(errorText(e, m)); } finally { setBusy(false); }
   };
   const adjust = (label: string, value: AdjustForm, onChange: (v: AdjustForm) => void) => (
@@ -137,6 +140,7 @@ function BoundsEditForm({ worldId, items, total }: { worldId: string; items: rea
       {diff ? <p className="small muted">{t.shownRows(diff.view.shown.rows, diff.view.shown.of)}</p> : null}
       {error ? <ErrorBox message={error} /> : null}
       {message ? <p className="notice" role="status">{message}</p> : null}
+      {jobId ? <JobProgress worldId={worldId} jobId={jobId} /> : null}
       {diff ? <BoundsDiffTable view={diff.view} /> : null}
     </section>
   );

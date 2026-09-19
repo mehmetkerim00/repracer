@@ -15,6 +15,8 @@ export function pgStoreFactory(
   pool: PgPool, scanPool: PgPool, fxLoaderPool: PgPool,
   options: {
     memberUsers?: Readonly<Record<string, string>>; memberEmails?: Readonly<Record<string, string>>; adminPool: PgPool; provisioningPool: PgPool;
+    /** Р-139: роль фонового исполнителя массовых операций — аренда и ход задания */
+    bulkWorkerPool?: PgPool;
     joinMember?: (input: { tenantId: string; ownerUserId: string; membershipAlias: string; role: string; email: string }) => Promise<{ userId: string; membershipId: string }>;
   },
 ): PricingStoreFactory {
@@ -33,7 +35,7 @@ export function pgStoreFactory(
       ...(options.memberEmails ? { memberEmails: options.memberEmails } : {}),
       ...(options.joinMember ? { joinMember: options.joinMember } : {}),
     });
-    const inner = new PgPricingStore(pool, { adminPool: options.adminPool });
+    const inner = new PgPricingStore(pool, { adminPool: options.adminPool, ...(options.bulkWorkerPool ? { bulkWorkerPool: options.bulkWorkerPool } : {}) });
     const conflicts = [...(seed.commitConflicts ?? [])];
     const store = translateStore(inner, seeded.ids, {
       // Р-54: параллельное изменение границы между чтением и фиксацией — отдельной транзакцией, как второй пользователь
