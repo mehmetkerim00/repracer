@@ -60,8 +60,10 @@ function outcomeText(job: BulkJobRow, m: Messages): string {
   switch (job.kind) {
     case 'COST_IMPORT': return t.doneCostImport(n(r.rows), n(r.offers), n(r.skipped));
     case 'BOUNDS_EDIT': return t.doneBounds(n(r.offers), n(r.changed));
+    case 'BOUNDS_PLAN': return t.donePlan(n(r.offers));
     case 'STRATEGY_ASSIGN': return t.doneStrategy(n(r.offers), n(r.version));
     case 'STRATEGY_PREVIEW': return t.donePreview(n(r.offers));
+    case 'PRICE_FEED_EXPORT': return t.doneFeedExport(n(r.rows), n(r.bytes));
     case 'PRICE_EVIDENCE': return t.doneEvidence(n(r.rows), n(r.bytes));
   }
 }

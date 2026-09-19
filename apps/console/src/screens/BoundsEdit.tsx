@@ -3,6 +3,7 @@ import { parseAmountInput, parsePercentInput, selectionAfterPaging, type BoundAd
 import type { BoundsIndexItem, JobCreatedResponse } from '../api-types.ts';
 import { requestJson, worldPath } from '../api.ts';
 import { Badge, ErrorBox, errorText, Gaps, useMessages } from '../components.tsx';
+import type { BulkJobView } from '@repracer/console-model';
 import { JobProgress } from './Jobs.tsx';
 
 /**
@@ -74,8 +75,9 @@ function BoundsEditForm({ worldId, items, total }: { worldId: string; items: rea
   const [message, setMessage] = useState<string | null>(null);
   /** Р-139: применение идёт фоновым заданием — экран показывает его ход, а не ждёт ответа */
   const [jobId, setJobId] = useState<string | null>(null);
+  const [planJobId, setPlanJobId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const reset = () => { setDiff(null); setMessage(null); setJobId(null); };
+  const reset = () => { setDiff(null); setMessage(null); setJobId(null); setPlanJobId(null); };
   /**
    * Р-140 (шаг 30): выбор отдельных строк НЕ переживает листание и смену фильтра. Он их и не пережил бы осмысленно: выбранные
    * строки другой страницы продавцу не видны, а применяются. Страница сменилась — выбор сброшен, и это сказано на экране.
@@ -92,20 +94,31 @@ function BoundsEditForm({ worldId, items, total }: { worldId: string; items: rea
     // Р-136: «весь каталог» — это выбор, а не перечисление; список из 10 000 идентификаторов не проходит предел тела запроса
     return { ...(wholeCatalog ? { all: true, writeScopeIds: [] } : { writeScopeIds: selected }), ...(a ? { min: a } : {}), ...(b ? { max: b } : {}) };
   };
+  /**
+   * Задача D шага 31: экран различий считает фоновое задание — по всему каталогу, а не по странице. Экран берёт готовый ответ
+   * из итога задания, и он же ссылается на это задание при применении: применяется ровно посчитанное, без второго расчёта.
+   */
   const plan = async () => {
-    setError(null); setMessage(null);
+    setError(null); setMessage(null); setDiff(null);
     const r = request();
     if (typeof r === 'string') return setError(r);
     setBusy(true);
     try {
-      setDiff({ view: await requestJson<BoundsDiffView>(worldPath(worldId, 'bounds', 'plan'), { method: 'POST', body: { request: r }, locale: m.locale }), request: r });
+      const created = await requestJson<JobCreatedResponse>(worldPath(worldId, 'bounds', 'plan'), { method: 'POST', body: { request: r }, locale: m.locale });
+      setPlanJobId(created.jobId);
     } catch (e) { setError(errorText(e, m)); } finally { setBusy(false); }
+  };
+  const planReady = (job: BulkJobView) => {
+    const result = job.result as { view?: BoundsDiffView } | null;
+    const r = request();
+    if (job.status === 'SUCCEEDED' && result?.view && typeof r !== 'string') setDiff({ view: result.view, request: r });
+    else if (job.status === 'FAILED') setError(job.error);
   };
   const apply = async () => {
     if (!diff) return;
     setBusy(true); setError(null);
     try {
-      const r = await requestJson<JobCreatedResponse>(worldPath(worldId, 'bounds', 'apply'), { method: 'POST', body: { request: diff.request, planToken: diff.view.planToken, confirmed: true }, locale: m.locale });
+      const r = await requestJson<JobCreatedResponse>(worldPath(worldId, 'bounds', 'apply'), { method: 'POST', body: { planJobId, planToken: diff.view.planToken, confirmed: true }, locale: m.locale });
       setMessage(r.message); setJobId(r.jobId); setDiff(null);
     } catch (e) { setError(errorText(e, m)); } finally { setBusy(false); }
   };
@@ -151,6 +164,7 @@ function BoundsEditForm({ worldId, items, total }: { worldId: string; items: rea
       {diff ? <p className="small muted">{t.shownRows(diff.view.shown.rows, diff.view.shown.of)}</p> : null}
       {error ? <ErrorBox message={error} /> : null}
       {message ? <p className="notice" role="status">{message}</p> : null}
+      {planJobId && !diff ? <JobProgress worldId={worldId} jobId={planJobId} onFinished={planReady} /> : null}
       {jobId ? <JobProgress worldId={worldId} jobId={jobId} /> : null}
       {diff ? <BoundsDiffTable view={diff.view} /> : null}
     </section>

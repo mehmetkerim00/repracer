@@ -2,14 +2,16 @@ import { buildPreview, readTable, suggestMapping, type ColumnMapping, type Table
 import {
   boundsDiffView, costImportView, currentStrategies, expandBoundsEdit, importTargets, messagesFor, parseBoundsEditRequest,
   parseStrategyDraft, priceEvidenceCsv, strategyPreviewView, STRATEGY_PREVIEW_ROWS_SHOWN, LOCALES,
+  costImportReportCsv, parseFeedQuery, priceFeedCsv, priceFeedFileName, priceFeedRows,
   type ConsoleScope, type Locale, type StandWorld,
 } from '@repracer/console-model';
 import type { StrategyDefinition } from '@repracer/pricing-model';
 
 /** Стратегия предложения на момент предпросмотра — как её ждёт хранилище */
 type StrategyExpectation = { writeScopeId: string; strategyId: string | null; version: number | null };
-import type { BulkJobRow, StrategyPreview } from '@repracer/pricing-pipeline';
+import type { BoundsEditInput, BulkJobRow, StrategyPreview } from '@repracer/pricing-pipeline';
 import { sha256, type BulkJobContext, type BulkJobHandlers, type BulkJobWork } from './index.ts';
+import type { BulkJobPhase } from '@repracer/pricing-pipeline';
 
 /**
  * Р-139 (шаг 30): что делает фоновое задание каждого вида. Работа повторяет ровно тот путь, который раньше шёл синхронным
@@ -31,6 +33,24 @@ export interface BulkJobWorldOptions {
 }
 
 const PROGRESS_STEP = 500;
+
+/**
+ * Шаг 31: файл собирается ЧАСТЯМИ. Сборка 27 мегабайт строки в одном куске занимает десятки секунд процессорного времени, и
+ * всё это время задание не может продлить аренду — его подбирает другой процесс, и выгрузка не заканчивается никогда.
+ * Между частями зовётся `progress`, который отдаёт поток; заголовок остаётся только у первой части.
+ */
+const CSV_CHUNK_ROWS = 20_000;
+async function buildCsvInChunks<T>(items: readonly T[], render: (chunk: readonly T[]) => string,
+  progress: (done: number, phase?: BulkJobPhase) => Promise<void>, total: number): Promise<string> {
+  if (items.length === 0) return render(items);
+  let csv = '';
+  for (let i = 0; i < items.length; i += CSV_CHUNK_ROWS) {
+    const part = render(items.slice(i, i + CSV_CHUNK_ROWS));
+    csv += i === 0 ? part : part.slice(part.indexOf('\n') + 1);
+    await progress(Math.min(i + CSV_CHUNK_ROWS, total), 'PRODUCING');
+  }
+  return csv;
+}
 
 /**
  * Язык задания — тот, на котором его создал человек [Р-72]. Задание работает без запроса, и взять язык ему больше неоткуда:
@@ -78,6 +98,18 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
             })),
           }, { membershipId: ctx.membershipId, userId: ctx.userId, mfa: false, bulkJobId: ctx.jobId }, 'APPLY');
           if (applied.status !== 'APPLIED') throw Object.assign(new Error(applied.status), { cause: applied.status === 'INVALID' ? applied.cause : applied.status });
+          /**
+           * Р-142 (шаг 31): отчёт об импорте — ФАЙЛ, а не пять примеров на экране. На выгрузке в 10 000 строк с 1430
+           * несопоставленными продавец по экрану не поймёт, какие строки чинить; с файлом он правит свою выгрузку и ввозит
+           * снова. Файл пишется после применения — вместе с тем, что применилось.
+           */
+          const report = preview.skipped.length > 0 ? costImportReportCsv(preview, m) : null;
+          if (report !== null) {
+            await ctx.store.saveBulkJobArtifact(ctx.tenantId, ctx.jobId, {
+              fileName: `import-report_${p.fileName.replace(/[^\w.\-]/g, '_')}.csv`, contentType: 'text/csv',
+              content: report, sha256: sha256(report), rows: preview.skipped.length,
+            });
+          }
           return {
             rows: applied.rows, offers: applied.offers, skipped: preview.totals.skipped,
             offersMissing: preview.totals.offersMissing, headline: view.headline,
@@ -92,10 +124,47 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
      * пересчёт различий по каталогу (10 000 предложений) остался бы в синхронном запросе — ровно то, от чего уходит Р-139.
      */
     async BOUNDS_EDIT(job: BulkJobRow, ctx: BulkJobContext): Promise<BulkJobWork> {
+      const p = job.params as { planJobId?: string; planToken?: string };
+      /**
+       * Задача D шага 31: правка берёт ГОТОВЫЙ набор из задания экрана различий, а не считает его заново. Прежде задание
+       * повторяло весь расчёт (`editBounds` в режиме предпросмотра по всему каталогу) только ради сверки токена — работа по
+       * каталогу делалась дважды, 44 секунды вместо двадцати.
+       *
+       * Обещание «применяется ровно то, что было на экране» от этого не слабеет, а УСИЛИВАЕТСЯ: применяются те самые правки,
+       * которые экран показал, вместе с границами, которые человек видел (`expected` у каждой). Изменилось что-то между
+       * показом и применением — хранилище отвечает CONFLICT по этим самым `expected`, а не по пересчитанным.
+       */
+      const plan = p.planJobId ? await ctx.store.bulkJob(ctx.tenantId, p.planJobId) : null;
+      const stored = (plan?.result as { edits?: BoundsEditInput[]; planToken?: string } | null) ?? null;
+      if (plan === null || plan.kind !== 'BOUNDS_PLAN' || plan.status !== 'SUCCEEDED' || !stored?.edits) {
+        throw Object.assign(new Error('no plan'), { cause: 'PLAN_CHANGED' });
+      }
+      if (p.planToken !== undefined && stored.planToken !== p.planToken) throw Object.assign(new Error('plan changed'), { cause: 'PLAN_CHANGED' });
+      const edits = stored.edits;
+      if (edits.length === 0) throw Object.assign(new Error('no scopes'), { cause: 'BAD_EDIT' });
+      const actor = { membershipId: ctx.membershipId, userId: ctx.userId, mfa: false, bulkJobId: ctx.jobId };
+      return {
+        total: edits.length,
+        async run(progress) {
+          await progress(edits.length, 'APPLYING');
+          const applied = await ctx.store.editBounds(ctx.tenantId, edits, actor, 'APPLY');
+          if (applied.status !== 'APPLIED') {
+            throw Object.assign(new Error(applied.status), { cause: applied.status === 'INVALID' ? applied.cause : applied.status });
+          }
+          return { offers: applied.rows.length, changed: applied.rows.filter((r) => r.before.minMinor !== r.after.minMinor || r.before.maxMinor !== r.after.maxMinor).length };
+        },
+      };
+    },
+
+    /**
+     * Экран различий массовой правки границ. Он тоже задание [Р-139]: расчёт идёт по всему каталогу, а не по странице, и
+     * держать его в запросе значило бы ждать ответа секунды. Итог задания — и то, что человек читает (первые строки и числа),
+     * и то, что потом применяется: набор правок с границами, которые он видел.
+     */
+    async BOUNDS_PLAN(job: BulkJobRow, ctx: BulkJobContext): Promise<BulkJobWork> {
       const m = messagesFor(localeOf(job));
-      const p = job.params as { request: unknown; planToken?: string };
       const world = await options.world(ctx);
-      const request = parseBoundsEditRequest(p.request);
+      const request = parseBoundsEditRequest((job.params as { request: unknown }).request);
       if (!request) throw Object.assign(new Error('bad request'), { cause: 'BAD_REQUEST' });
       const { edits, problems } = expandBoundsEdit(world, request);
       if (problems.length > 0) throw Object.assign(new Error('bad edit'), { cause: 'BAD_EDIT' });
@@ -103,19 +172,15 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
       return {
         total: edits.length,
         async run(progress) {
-          await progress(0, 'PREPARING');
+          await progress(0, 'PRODUCING');
           const preview = await ctx.store.editBounds(ctx.tenantId, edits, actor, 'PREVIEW');
           if (preview.status !== 'PREVIEWED') throw Object.assign(new Error(preview.status), { cause: preview.status === 'INVALID' ? preview.cause : preview.status });
-          // Применяется ровно то, что видел человек: набор изменился — задание отказывает, а не применяет другое
-          if (p.planToken !== undefined && boundsDiffView(world, edits, preview.rows, m).planToken !== p.planToken) {
-            throw Object.assign(new Error('plan changed'), { cause: 'PLAN_CHANGED' });
-          }
-          await progress(edits.length, 'APPLYING');
-          const applied = await ctx.store.editBounds(ctx.tenantId, edits, actor, 'APPLY');
-          if (applied.status !== 'APPLIED') {
-            throw Object.assign(new Error(applied.status), { cause: applied.status === 'INVALID' ? applied.cause : applied.status });
-          }
-          return { offers: applied.rows.length, changed: applied.rows.filter((r) => r.before.minMinor !== r.after.minMinor || r.before.maxMinor !== r.after.maxMinor).length };
+          await progress(edits.length, 'PRODUCING');
+          const view = boundsDiffView(world, edits, preview.rows, m);
+          return {
+            view: view as unknown as Record<string, unknown>, planToken: view.planToken,
+            edits: edits as unknown as Record<string, unknown>, offers: edits.length,
+          };
         },
       };
     },
@@ -201,6 +266,32 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
       };
     },
     /**
+     * Р-142 (шаг 31): выгрузка ленты цен. Экран отдаёт страницу не больше 200 записей — за 30 суток по каталогу их сотни
+     * тысяч, и по страницам их никто не читает. Фильтр берётся тот же, что был на экране: файл не должен расходиться с
+     * показанным.
+     */
+    async PRICE_FEED_EXPORT(job: BulkJobRow, ctx: BulkJobContext): Promise<BulkJobWork> {
+      const m = messagesFor(localeOf(job));
+      const raw = (job.params as { query?: Record<string, string> }).query ?? {};
+      const query = parseFeedQuery(new URLSearchParams(raw));
+      if (!query) throw Object.assign(new Error('bad query'), { cause: 'BAD_REQUEST' });
+      const world = await options.world(ctx);
+      const total = priceFeedRows(world, m, query);
+      return {
+        total,
+        async run(progress) {
+          await progress(0, 'PRODUCING');
+          const csv = priceFeedCsv(world, m, query);
+          await progress(total, 'PRODUCING');
+          await ctx.store.saveBulkJobArtifact(ctx.tenantId, ctx.jobId, {
+            fileName: priceFeedFileName(world, m, query), contentType: 'text/csv', content: csv, sha256: sha256(csv), rows: total,
+          });
+          return { rows: total, bytes: Buffer.byteLength(csv, 'utf8'), sha256: sha256(csv) };
+        },
+      };
+    },
+
+    /**
      * Доказательная история цен [Р-123, OQ-202]: файл готовится заданием и лежит в базе, а не едет в ответе экрана. Предел в
      * 100 000 строк, введённый шагом 29, больше не нужен — ждать нечего, продавец скачивает готовое.
      */
@@ -215,8 +306,8 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
           const days = await ctx.store.priceEvidence(ctx.tenantId, {
             from: p.from, to: p.to, ...(p.writeScopeId ? { writeScopeIds: [p.writeScopeId] } : {}),
           });
-          await progress(world.state.scopes.length, 'PRODUCING');
-          const csv = priceEvidenceCsv(world, days);
+          // Файл собирается частями: между ними поток отдаётся, иначе продление аренды не успевает сработать (шаг 31)
+          const csv = await buildCsvInChunks(days, (chunk) => priceEvidenceCsv(world, chunk), progress, days.length);
           await ctx.store.saveBulkJobArtifact(ctx.tenantId, ctx.jobId, {
             fileName: `price-evidence_${p.from}_${p.to}.csv`, contentType: 'text/csv', content: csv, sha256: sha256(csv), rows: days.length,
           });

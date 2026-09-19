@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0109_verify_schema_invariants_v27.sql';
+const VERIFY = 'migrations/0111_verify_schema_invariants_v28.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -599,8 +599,14 @@ export const STEP21_ROWS = [
   ) edited;`), smoke('min_price of one offer and max_price of another in one transaction without a second factor (Р-88)')),
       m(replaceInFunction('tenant_data.row_in_current_transaction(xid)', "= 'in progress'", "= 'committed'"),
         smoke('min_price of two offers in one transaction without a second factor (Р-88)'), smoke('max_price of two offers in one transaction without a second factor (Р-88)')),
-      m(replaceInFunction('tenant_data.bounds_mass_edit_requires_mfa()', 'IF NEW.created_at IS DISTINCT FROM now() THEN', 'IF false THEN'),
+      /**
+       * Шаг 31 (задача D): проверка «время версии — время транзакции» стала своим строковым триггером, а подсчёт окна ушёл на
+       * уровень оператора. Защита та же и ловится тем же утверждением; снимается теперь два раза — по разу на таблицу границ.
+       */
+      m(dropTrigger('za_min_price_created_now', 'tenant_data.min_price'),
         smoke('backdated bound version from the administrative service (Р-88)')),
+      m(dropTrigger('za_max_price_created_now', 'tenant_data.max_price'),
+        smoke('backdated max_price version from the administrative service (Р-88)')),
     ],
   },
 ];
@@ -1103,6 +1109,12 @@ export const STEP30_ROWS = [
           'массовая правка под заданием без второго фактора не проходит', '^APPLIED$')),
       m(replaceInFunction('security.second_factor_present(text[])', "AND j.status = 'RUNNING' AND j.lease_until > now()", 'AND true'),
         node(T('cost-import.pg.test.ts'), 'завершённое задание', 'завершённое задание не открывает массовое изменение', '^APPLIED$')),
+      /**
+       * Р-143 (шаг 31), OQ-210: вид задания, которому второй фактор не нужен, не может стоять в списке стража. Ровно эта
+       * ошибка и была на шаге 30 у стража широкого гардрейла, и нашла её тогда мутационная проверка, а не правило схемы.
+       */
+      m(replaceInFunction('tenant_data.cost_import_requires_mfa()', "ARRAY['COST_IMPORT']", "ARRAY['COST_IMPORT', 'PRICE_EVIDENCE']"),
+        verify('a bulk job kind that needs no second factor \\(PRICE_EVIDENCE\\) opens an operation that needs one')),
       // Страж широкого гардрейла требует второго фактора ЧЕЛОВЕКА: задание пол маржи всего тенанта не меняет [Р-139]
       m(replaceInFunction('tenant_data.wide_guardrail_requires_mfa()', 'IF security.session_mfa() THEN RETURN NULL; END IF;',
         "IF security.second_factor_present(ARRAY['PRICE_EVIDENCE']) THEN RETURN NULL; END IF;"),

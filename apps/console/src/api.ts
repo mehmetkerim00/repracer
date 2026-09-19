@@ -96,17 +96,48 @@ export function useResource<T>(path: string, locale: Locale): [Resource<T>, () =
 }
 
 /**
- * Скачивание файла, подготовленного заданием [OQ-202, находка 1 ревью шага 30]. Через `<a href download>` это не работает:
- * токен поставщика живёт только в памяти страницы и уходит ЗАГОЛОВКОМ, а браузер по ссылке его не шлёт — продавец получал бы
- * 401 вместо CSV. Поэтому файл запрашивается тем же путём, что и всё остальное, и отдаётся браузеру как объект в памяти.
+ * База адресов API. В браузере она пустая: страница ходит к своему же источнику. Задаёт её только стенд, когда консольный
+ * КЛИЕНТ работает вне браузера — в живом прогоне [Р-142]: прогон обязан ходить тем же кодом, которым ходит страница, иначе он
+ * выдаёт себе заголовки, которых браузер не шлёт.
  */
-export async function downloadFile(path: string, fileName: string, locale?: Locale): Promise<void> {
-  const response = await fetch(withLocale(path, locale), {
+let apiOrigin = '';
+export function setApiOrigin(origin: string): void {
+  apiOrigin = origin;
+}
+
+export interface FetchedFile {
+  fileName: string;
+  contentType: string;
+  bytes: Uint8Array;
+}
+
+/**
+ * Р-142, OQ-202 (находка 1 ревью шага 30): файл, подготовленный заданием, забирается ЗАПРОСОМ С ТОКЕНОМ, а не ссылкой. Через
+ * `<a href download>` это не работает: токен поставщика живёт только в памяти страницы и уходит ЗАГОЛОВКОМ, а браузер по
+ * ссылке его не шлёт — продавец получал бы 401 вместо CSV.
+ *
+ * Сам перенос байтов вынесен из работы с окном: живой прогон зовёт ИМЕННО ЭТУ функцию, поэтому не может послать заголовок,
+ * которого не послала бы страница.
+ */
+export async function fetchFile(path: string, locale?: Locale): Promise<FetchedFile> {
+  const response = await fetch(`${apiOrigin}${withLocale(path, locale)}`, {
     credentials: 'same-origin',
     headers: { ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}) },
   });
   if (!response.ok) throw new ApiError({ kind: 'BAD_RESPONSE', status: response.status });
-  const url = URL.createObjectURL(await response.blob());
+  const disposition = response.headers.get('content-disposition') ?? '';
+  const named = /filename="([^"]+)"/.exec(disposition);
+  return {
+    fileName: named?.[1] ?? 'download',
+    contentType: (response.headers.get('content-type') ?? 'application/octet-stream').split(';')[0]!.trim(),
+    bytes: new Uint8Array(await response.arrayBuffer()),
+  };
+}
+
+/** Отдать скачанный файл окну браузера. Переноса байтов здесь нет — он в fetchFile, и проверяется отдельно */
+export async function downloadFile(path: string, fileName: string, locale?: Locale): Promise<void> {
+  const file = await fetchFile(path, locale);
+  const url = URL.createObjectURL(new Blob([file.bytes as BlobPart], { type: file.contentType }));
   try {
     const link = document.createElement('a');
     link.href = url;

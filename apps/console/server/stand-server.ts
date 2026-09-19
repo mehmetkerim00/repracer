@@ -344,6 +344,19 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         ws ? 1 : world.state.scopes.length, m.ui.jobs.createdEvidence);
     }
 
+    /**
+     * Р-142 (шаг 31): выгрузка ленты цен файлом. Фильтр — тот же, что на экране, и приходит он тем же разбором: файл обязан
+     * совпадать с тем, что продавец видел. Второго фактора не требует — ничего не меняет.
+     */
+    if (screen === 'feed' && param === 'export') {
+      const raw = (body.query ?? {}) as Record<string, unknown>;
+      const asStrings = Object.fromEntries(Object.entries(raw).filter(([, v]) => typeof v === 'string' || typeof v === 'number').map(([k, v]) => [k, String(v)]));
+      const query = parseFeedQuery(new URLSearchParams(asStrings));
+      if (!query || (query.writeScopeId && !scopeById(world, query.writeScopeId))) return fail(400, 'BAD_FEED_QUERY', s.badRequest);
+      return createJob('PRICE_FEED_EXPORT', { query: asStrings }, priceFeed(world, m, { ...query, offset: 0, limit: 1 }).page.total,
+        m.ui.jobs.createdFeedExport);
+    }
+
     // Р-123: предупреждение «эта скидка нарушит правило» до записи — только чтение, права на просмотр достаточно
     if (screen === 'compliance' && param === 'check') {
       const input = parseDiscount(world, body);
@@ -563,23 +576,32 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     if (screen === 'bounds' && param === 'apply') {
       if (!can(viewer.role, 'MANAGE_PRICING')) return fail(403, 'FORBIDDEN', s.forbidden);
       if (body.confirmed !== true) return fail(400, 'NOT_CONFIRMED', s.notConfirmed);
-      if (typeof body.planToken !== 'string') return fail(409, 'PLAN_CHANGED', s.planChanged);
-      const request = parseBoundsEditRequest(body.request);
-      if (!request) {
-        const asked = Array.isArray((body.request as { writeScopeIds?: unknown[] })?.writeScopeIds) ? ((body.request as { writeScopeIds: unknown[] }).writeScopeIds).length : 0;
-        return asked > MAX_SCOPES ? fail(400, 'TOO_MANY_SCOPES', s.tooManyScopes(asked, MAX_SCOPES)) : fail(400, 'BAD_REQUEST', s.badRequest);
-      }
-      const asked = request.all === true ? world.state.scopes.length : request.writeScopeIds.length;
       /**
-       * Р-88, Р-135: правка границ БОЛЬШЕ ЧЕМ ОДНОГО предложения — со вторым фактором, правка одного — без него (находка 4
-       * ревью шага 30). Объём виден здесь, поэтому здесь и проверяется: сказать об этом до создания задания честнее, чем
-       * отказом задания через минуту. Последнее слово всё равно за базой — `bounds_mass_edit_requires_mfa`.
+       * Задача D шага 31: применение ссылается на ЗАДАНИЕ экрана различий, а не пересылает запрос заново. Набор правок уже
+       * посчитан — применять его второй раз посчитанным значило бы делать работу по каталогу дважды (44 секунды вместо
+       * двадцати), и при этом применять НЕ ТО, что показано, а пересчитанное.
+       */
+      const planJobId = typeof body.planJobId === 'string' ? body.planJobId : null;
+      if (!planJobId || typeof body.planToken !== 'string') return fail(409, 'PLAN_CHANGED', s.planChanged);
+      const plan = await live.store.bulkJob(world.tenantId, planJobId);
+      const planResult = (plan?.result ?? {}) as { planToken?: string; offers?: number };
+      if (!plan || plan.kind !== 'BOUNDS_PLAN' || plan.status !== 'SUCCEEDED' || planResult.planToken !== body.planToken) {
+        return fail(409, 'PLAN_CHANGED', s.planChanged);
+      }
+      const asked = planResult.offers ?? 0;
+      /**
+       * Р-88, Р-135, Р-144: правка границ БОЛЬШЕ ЧЕМ ОДНОГО предложения — со вторым фактором, правка одного — без него.
+       * Объём виден здесь, из посчитанного экрана различий, поэтому здесь и проверяется: сказать об этом до создания задания
+       * честнее, чем отказом задания через минуту. Последнее слово всё равно за базой — `bounds_mass_edit_requires_mfa`.
        */
       if (asked > 1 && !hasSecondFactor(principal.amr)) return fail(403, 'MFA_REQUIRED', s.mfaRequiredBounds);
-      return createJob('BOUNDS_EDIT', { request: body.request, planToken: body.planToken }, asked, m.ui.jobs.createdBounds);
+      return createJob('BOUNDS_EDIT', { planJobId, planToken: body.planToken }, asked, m.ui.jobs.createdBounds);
     }
 
-    // Шаг 21: экран различий массовой правки границ — база вычисляет итог в откатываемой транзакции; применяет его задание
+    /**
+     * Шаг 21, задача D шага 31: экран различий массовой правки — тоже ЗАДАНИЕ. База вычисляет итог в откатываемой транзакции
+     * по всему каталогу; держать это в запросе значило бы ждать ответа секунды, а потом повторять ту же работу при применении.
+     */
     if (screen === 'bounds' && param === 'plan') {
       if (!can(viewer.role, 'MANAGE_PRICING')) return fail(403, 'FORBIDDEN', s.forbidden);
       const request = parseBoundsEditRequest(body.request);
@@ -587,7 +609,8 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         const asked = Array.isArray((body.request as { writeScopeIds?: unknown[] })?.writeScopeIds) ? ((body.request as { writeScopeIds: unknown[] }).writeScopeIds).length : 0;
         return asked > MAX_SCOPES ? fail(400, 'TOO_MANY_SCOPES', s.tooManyScopes(asked, MAX_SCOPES)) : fail(400, 'BAD_REQUEST', s.badRequest);
       }
-      const { edits, problems } = expandBoundsEdit(world, request);
+      // Разбор запроса дёшев и остаётся в запросе: продавец узнаёт о неверной правке сразу, а не отказом задания
+      const { problems } = expandBoundsEdit(world, request);
       if (problems.length > 0) {
         const texts = m.ui.boundsEdit.problems;
         // Первые несколько причин и число остальных: на каталоге склейка всех проблем давала мегабайтный ответ (находка 12)
@@ -595,21 +618,10 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         const rest = problems.length - shown.length;
         return fail(400, 'BAD_EDIT', rest > 0 ? `${shown.join('; ')} ${s.andMoreProblems(rest)}` : shown.join('; '));
       }
-      const mfa = hasSecondFactor(principal.amr);
-      const actor = { membershipId: viewer.membershipId, userId: principal.userId, mfa };
-      // Экран различий второго фактора не требует — он нужен для применения [Р-88]
-      const preview = await live.store.editBounds(world.tenantId, edits, actor, 'PREVIEW');
-      if (preview.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
-      if (preview.status === 'CONFLICT') return fail(409, 'BOUNDS_CONFLICT', conflictText(world, preview, m));
-      if (preview.status !== 'PREVIEWED') return fail(400, preview.status === 'INVALID' ? preview.cause : preview.status, s.badRequest);
-      const diff = boundsDiffView(world, edits, preview.rows, m);
-      return ok(diff);
+      const asked = request.all === true ? world.state.scopes.length : request.writeScopeIds.length;
+      return createJob('BOUNDS_PLAN', { request: body.request }, asked, m.ui.jobs.createdPlan);
     }
 
-    /**
-     * Шаг 28 [Р-134, Р-135]: массовый импорт себестоимости — предпросмотр (файл читается и сопоставляется, ничего не пишется),
-     * затем применение целиком, с отпечатком показанного набора и вторым фактором.
-     */
     /**
      * Р-139 (находка 10 ревью шага 30): применение создаёт задание и БОЛЬШЕ НИЧЕГО. Читать файл и строить предпросмотр здесь
      * незачем: задание читает его заново и само сверяет отпечаток с тем, который видел человек. Пока разбор оставался в

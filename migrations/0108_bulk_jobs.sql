@@ -21,7 +21,8 @@ CREATE TABLE tenant_data.bulk_job (
   bulk_job_id              uuid NOT NULL DEFAULT gen_random_uuid(),
   -- Что делает задание: четыре массовые операции продавца [Р-139]
   kind                     text NOT NULL CONSTRAINT bulk_job_kind_known
-                             CHECK (kind IN ('COST_IMPORT', 'BOUNDS_EDIT', 'STRATEGY_ASSIGN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE')),
+                             CHECK (kind IN ('COST_IMPORT', 'BOUNDS_EDIT', 'BOUNDS_PLAN', 'STRATEGY_ASSIGN', 'STRATEGY_PREVIEW',
+                                            'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT')),
   status                   text NOT NULL DEFAULT 'PENDING' CONSTRAINT bulk_job_status_known
                              CHECK (status IN ('PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'INTERRUPTED')),
   /** Что именно делать: файл импорта, правка границ, черновик стратегии, период выгрузки — ровно то, что видел человек */
@@ -100,6 +101,18 @@ CREATE TRIGGER a_bulk_job_created_with_mfa BEFORE INSERT ON tenant_data.bulk_job
 ALTER FUNCTION tenant_data.bulk_job_created_with_mfa() OWNER TO repracer_owner;
 
 /**
+ * Р-143 (шаг 31): виды заданий, которые НИЧЕГО НЕ МЕНЯЮТ. Им второй фактор не нужен, и создаёт их любой участник тенанта; но
+ * ровно поэтому они не открывают окно для операций, которым он нужен. Список назван ОДИН РАЗ и в базе: пока он был переписан
+ * в каждом страже, «ничего не меняет» и «не требует второго фактора» могли разойтись молча.
+ */
+CREATE FUNCTION security.read_only_job_kinds() RETURNS SETOF text
+  LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $fn$
+  SELECT unnest(ARRAY['BOUNDS_PLAN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT'])
+$fn$;
+ALTER FUNCTION security.read_only_job_kinds() OWNER TO repracer_owner;
+GRANT EXECUTE ON FUNCTION security.read_only_job_kinds() TO repracer_app, repracer_admin;
+
+/**
  * Р-135, Р-139: задание ИМПОРТА себестоимости создаётся только со вторым фактором — импорт массовый всегда, это его смысл
  * [Р-134]. У правки границ и назначения стратегии объём заранее неизвестен: правка ОДНОГО предложения второго фактора не
  * требовала и до шага 30 не должна требовать и после (находка 4 ревью шага 30). Сколько предложений затронуто, видит только
@@ -132,7 +145,7 @@ CREATE FUNCTION tenant_data.bulk_job_requires_right() RETURNS trigger
 DECLARE
   member_role text;
 BEGIN
-  IF NOT security.admin_session() OR NEW.kind IN ('PRICE_EVIDENCE', 'STRATEGY_PREVIEW') THEN RETURN NULL; END IF;
+  IF NOT security.admin_session() OR NEW.kind IN (SELECT k FROM security.read_only_job_kinds() AS k) THEN RETURN NULL; END IF;
   SELECT m.role INTO member_role FROM tenant_data.membership m
    WHERE m.tenant_id = NEW.tenant_id AND m.user_id = security.current_user_id() AND m.status = 'ACTIVE';
   IF member_role IS NULL OR NOT security.pricing_permission(member_role, 'MANAGE_PRICING') THEN

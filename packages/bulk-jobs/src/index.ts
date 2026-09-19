@@ -98,7 +98,15 @@ export async function runNextBulkJob(options: BulkJobRunnerOptions): Promise<{ j
     let lastAt = 0;
     const everyMs = (options.progressEverySeconds ?? 1) * 1000;
     const progress = async (done: number, phase?: BulkJobPhase) => {
-      // Ход пишется не чаще, чем раз в progressEverySeconds: иначе на 10 000 строк это 10 000 запросов
+      /**
+       * Шаг 31: сообщение о ходе ОТДАЁТ ЦИКЛ СОБЫТИЙ. Сборка файла — работа процессора в одном потоке: пока она идёт, таймер
+       * продления аренды сработать не может, аренда истекает, задание подбирает другой процесс — и так по кругу. Так и вышло с
+       * выгрузкой доказательства: 27 МБ строки собирались дольше аренды, и задание не заканчивалось никогда.
+       *
+       * Поэтому обработчик, занятый счётом, обязан звать `progress`, а `progress` — отпускать поток. Запись хода при этом
+       * по-прежнему не чаще, чем раз в progressEverySeconds.
+       */
+      await new Promise((resolve) => setImmediate(resolve));
       if (now() - lastAt < everyMs && done !== work.total) return;
       lastAt = now();
       const kept = await store.updateBulkJobProgress(tenantId, job.jobId, owner, { ...(phase ? { phase } : {}), done, total: work.total, leaseSeconds });

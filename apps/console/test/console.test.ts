@@ -394,36 +394,52 @@ test('step 21: a strategy is saved only with the token of the preview shown; bou
   // Правка границ: экран различий → применение; без экрана и с устаревшим токеном — отказ
   const request = { writeScopeIds: ['ws-price-de-4101'], min: { kind: 'SET', minor: 1600 } };
   assert.equal((await call(viewer, 'POST', api(id, 'bounds', 'plan'), { request })).status, 403);
-  const plan = await call(owner, 'POST', api(id, 'bounds', 'plan'), { request });
-  assert.equal(plan.status, 200, JSON.stringify(plan.body));
-  const diff = plan.body as BoundsDiffView;
-  assert.deepEqual([diff.rows[0]!.minBefore, diff.rows[0]!.minAfter, diff.mfaRequired], ['€15.00', '€16.00', false]);
   /**
-   * Шаг 30 [Р-139]: применение — задание, и устаревший экран различий ловит ОНО, а не запрос: пересчёт различий по каталогу
-   * растёт с его размером, поэтому он ушёл в задание вместе с записью.
+   * Задача D шага 31: экран различий — тоже задание, и применение ССЫЛАЕТСЯ на него, а не пересылает запрос. Применяется ровно
+   * то, что посчитано и показано, и считается это один раз, а не дважды.
    */
-  const stale = await finishJob(id, await call(owner, 'POST', api(id, 'bounds', 'apply'), { request, planToken: 'stale', confirmed: true }));
-  assert.deepEqual([stale.status, stale.error], ['FAILED', messagesFor('de').ui.jobs.errors.PLAN_CHANGED]);
-  const applied = await finishJob(id, await call(owner, 'POST', api(id, 'bounds', 'apply'), { request, planToken: diff.planToken, confirmed: true }), 'en');
+  const planJob = await finishJob(id, await call(owner, 'POST', api(id, 'bounds', 'plan'), { request }));
+  assert.equal(planJob.status, 'SUCCEEDED', planJob.error ?? '');
+  const diff = (planJob.result as { view: BoundsDiffView }).view;
+  assert.deepEqual([diff.rows[0]!.minBefore, diff.rows[0]!.minAfter, diff.mfaRequired], ['€15.00', '€16.00', false]);
+  const applyBody = (over: Record<string, unknown> = {}) => ({ planJobId: planJob.jobId, planToken: diff.planToken, confirmed: true, ...over });
+  assert.equal((await call(owner, 'POST', api(id, 'bounds', 'apply'), applyBody({ planToken: 'stale' }))).status, 409,
+    'устаревший токен экрана различий ловит запрос: сверка с посчитанным заданием дёшева');
+  assert.equal((await call(owner, 'POST', api(id, 'bounds', 'apply'), applyBody({ planJobId: null }))).status, 409, 'без экрана различий применения нет');
+  const applied = await finishJob(id, await call(owner, 'POST', api(id, 'bounds', 'apply'), applyBody()), 'en');
   assert.deepEqual([applied.status, applied.headline], ['SUCCEEDED', 'Done: bounds checked for 1 offer, 1 changed.']);
-  const afterApply = await finishJob(id, await call(owner, 'POST', api(id, 'bounds', 'apply'), { request, planToken: diff.planToken, confirmed: true }));
+  // Тот же экран различий после применения устарел: границы предложения уже другие, и хранилище отвечает CONFLICT
+  const afterApply = await finishJob(id, await call(owner, 'POST', api(id, 'bounds', 'apply'), applyBody()));
   assert.equal(afterApply.status, 'FAILED', 'the difference screen is stale after applying');
   const diffHtml = await html('/src/screens/BoundsEdit.tsx', 'BoundsDiffTable', { view: diff }, 'de');
   assert.ok(diffHtml.includes('€15.00') && diffHtml.includes('min vorher'), 'amounts come from the server in the session language, labels from the dictionary of the page');
 
   const multi = 'kaufland/pipeline/fx-usd-floor-eur-cost';
   const mass = { writeScopeIds: (await get<BoundsIndexView>(owner, api(multi, 'bounds'))).items.map((i) => i.writeScopeId), min: { kind: 'PERCENT', bp: -500 } };
-  const massPlan = (await call(owner, 'POST', api(multi, 'bounds', 'plan'), { request: mass })).body as BoundsDiffView;
+  const massPlanJob = await finishJob(multi, await call(owner, 'POST', api(multi, 'bounds', 'plan'), { request: mass }));
+  const massPlan = (massPlanJob.result as { view: BoundsDiffView }).view;
   assert.equal(massPlan.mfaRequired, true);
+  const massBody = { planJobId: massPlanJob.jobId, planToken: massPlan.planToken, confirmed: true };
   // Токен имитатора по умолчанию несёт второй фактор (pwd + otp); вход только паролем — без него
   const passwordOnly = { authorization: `Bearer ${issuer.token(account('OWNER').subject, { email: account('OWNER').email, amr: ['pwd'] })}`, cookie: 'repracer_locale=en' };
-  const noMfa = await call(passwordOnly, 'POST', api(multi, 'bounds', 'apply'), { request: mass, planToken: massPlan.planToken, confirmed: true });
+  const noMfa = await call(passwordOnly, 'POST', api(multi, 'bounds', 'apply'), massBody);
   assert.equal(noMfa.status, 403, JSON.stringify(noMfa.body));
   assert.equal((noMfa.body as { error: { code: string } }).error.code, 'MFA_REQUIRED');
   const withMfa = { authorization: `Bearer ${issuer.token(account('OWNER').subject, { email: account('OWNER').email, amr: ['pwd', 'otp'] })}`, cookie: 'repracer_locale=en' };
-  const massJob = await finishJob(multi, await call(withMfa, 'POST', api(multi, 'bounds', 'apply'), { request: mass, planToken: massPlan.planToken, confirmed: true }), 'en');
+  const massJob = await finishJob(multi, await call(withMfa, 'POST', api(multi, 'bounds', 'apply'), massBody), 'en');
   // Р-135, Р-139: второй фактор предъявлен при СОЗДАНИИ задания — стражи массового изменения принимают его у применяющего процесса
   assert.equal(massJob.status, 'SUCCEEDED', massJob.error ?? '');
+
+  /**
+   * Р-144 (шаг 31): рутинная операция не наследует требования массовой. Тот же вход без второго фактора правит ОДНО
+   * предложение — и это проходит: второго фактора эта правка не требовала и до фоновых заданий.
+   */
+  const onePlan = await finishJob(multi, await call(passwordOnly, 'POST', api(multi, 'bounds', 'plan'),
+    { request: { writeScopeIds: [mass.writeScopeIds[0]], min: { kind: 'PERCENT', bp: -100 } } }), 'en');
+  const oneApply = await call(passwordOnly, 'POST', api(multi, 'bounds', 'apply'),
+    { planJobId: onePlan.jobId, planToken: (onePlan.result as { view: BoundsDiffView }).view.planToken, confirmed: true });
+  assert.equal(oneApply.status, 200, `правка одного предложения второго фактора не требует: ${JSON.stringify(oneApply.body)}`);
+  assert.equal((await finishJob(multi, oneApply, 'en')).status, 'SUCCEEDED');
 });
 
 test('step 21: the price feed and the report of dangerous changes stopped by the bounds (Р-73) are served and rendered in German and English', async () => {
@@ -674,4 +690,33 @@ test('step 24, Р-123: a discount is checked before it is announced; a prior pri
   for (const text of ['Omnibus: prior price of a discount', 'Announced discounts', 'What this module cannot check', 'Download CSV', 'This module does not guarantee compliance', 'How much price history we see', 'We see ']) assert.ok(en.includes(text), text);
   const de = await html('/src/screens/Compliance.tsx', 'ComplianceScreenView', { worldId: id, initial: await get<ComplianceView>(await login('OWNER', 'de'), api(id, 'compliance')) }, 'de');
   for (const text of ['Omnibus: vorheriger Preis eines Rabatts', 'Angekündigte Rabatte', 'Was dieses Modul nicht prüfen kann', 'Dieses Modul garantiert keine Rechtskonformität', 'Wir sehen ']) assert.ok(de.includes(text), text);
+});
+
+/**
+ * Р-142 (шаг 31): ссылка в консоли НЕ МОЖЕТ вести на адрес API. Браузер по ссылке не шлёт заголовок `Authorization`, а токен
+ * поставщика живёт только в памяти страницы [Р-78] — продавец получит 401 вместо файла. Ровно это и случилось с доказательством
+ * Omnibus на шаге 30: OQ-202 объявили закрытым, а скачать было нельзя.
+ *
+ * Проверка структурная и потому дешёвая: она смотрит на ИСХОДНЫЙ ТЕКСТ экранов, а не на поведение одной кнопки, — и поймает
+ * следующую такую ссылку до того, как её увидит продавец.
+ */
+test('Р-142: ни один экран консоли не ведёт ссылкой на адрес API — браузер по ссылке токен не шлёт', async () => {
+  const { readdirSync, readFileSync } = await import('node:fs');
+  const dir = new URL('../src/screens/', import.meta.url);
+  const files = ['../src/App.tsx', '../src/components.tsx', ...readdirSync(dir).map((f) => `../src/screens/${f}`)];
+  // Ссылка или встроенный ресурс, указывающий на /api/ — прямо или через worldPath, который всегда даёт /api/…
+  const linksToApi = (line: string) => /(?:href|src|action)\s*=\s*\{?[^}\n]*(?:'\/api\/|"\/api\/|`\/api\/|worldPath\()/.test(line);
+  // У правила должны быть зубы: то, что оно ищет, оно обязано находить — иначе оно зеленеет на чём угодно [Р-94]
+  assert.equal(linksToApi(`<a href={\`${'$'}{worldPath(worldId, 'jobs', jobId)}/artifact\`} download>x</a>`), true,
+    'правило ловит ту самую ссылку, из-за которой доказательство Omnibus нельзя было скачать');
+  assert.equal(linksToApi(`<a href={href(world.id, 'products')}>{w.title}</a>`), false, 'внутренние переходы экрана — не адреса API');
+
+  const offenders: string[] = [];
+  for (const file of files) {
+    const text = readFileSync(new URL(file, import.meta.url), 'utf8');
+    for (const [i, line] of text.split('\n').entries()) {
+      if (linksToApi(line)) offenders.push(`${file.split('/').pop()}:${i + 1}: ${line.trim().slice(0, 120)}`);
+    }
+  }
+  assert.deepEqual(offenders, [], 'ссылка на API в консоли: браузер пойдёт по ней без токена и получит 401, а не файл');
 });

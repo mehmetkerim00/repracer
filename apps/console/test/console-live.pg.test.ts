@@ -18,6 +18,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { BulkWorkerConfig } from '../server/bulk-worker.ts';
+import { fetchFile, setAccessToken, setApiOrigin } from '../src/api.ts';
 
 /**
  * Р-136 (шаг 29): живой прогон ВСЕХ операций продавца ЧЕРЕЗ КОНСОЛЬ на объёме целевого клиента — 10 000 офферов. Не вызов
@@ -45,7 +46,7 @@ const SCREEN_LIMIT_SECONDS = 10;
  */
 const APPLY_LIMIT_SECONDS = 120;
 /** Операции, у которых предел другой: продавец ждёт их сознательно, видя ход */
-const BULK_APPLY = /\(задание целиком\)$|^bounds\/plan \(весь каталог/;
+const BULK_APPLY = /\(задание целиком\)$/;
 /** Скачивание готового файла [OQ-202] — не экран: его не разбирает браузер и не показывает страница */
 const FILE_DOWNLOAD = /скачивание файла/;
 
@@ -58,6 +59,28 @@ let server: Server;
 let origin: string;
 let owner: { authorization: string; cookie: string };
 const measured: Array<{ operation: string; seconds: number; bytes: number; status: number; note: string }> = [];
+
+/**
+ * Р-142 (шаг 31): ПЕРЕХОД ПО ССЫЛКЕ — не то же, что запрос страницы. Браузер, открывая адрес по ссылке, в новой вкладке или
+ * скачивая по `download`, заголовок `Authorization` НЕ ШЛЁТ: токен поставщика живёт только в памяти страницы [Р-78]. Прогон,
+ * который шлёт заголовок сам, этого не видит — так шаг 30 и объявил OQ-202 закрытым, хотя скачать файл было нельзя.
+ */
+async function browserNavigate(url: string): Promise<{ status: number; text: string }> {
+  const r = await fetch(`${origin}${url}`, { headers: { cookie: owner.cookie }, redirect: 'manual' });
+  return { status: r.status, text: await r.text() };
+}
+
+/**
+ * Скачивание файла ТЕМ ЖЕ кодом, которым его берёт страница (`apps/console/src/api.ts`). Прогон не собирает запрос сам и
+ * потому не может послать заголовок, которого страница не послала бы, — это и есть Р-142.
+ */
+async function consoleDownload(operation: string, path: string): Promise<{ fileName: string; contentType: string; bytes: number; text: string }> {
+  const started = process.hrtime.bigint();
+  const file = await fetchFile(path, 'de');
+  const seconds = Math.round(Number(process.hrtime.bigint() - started) / 1e6) / 1000;
+  measured.push({ operation, seconds, bytes: file.bytes.byteLength, status: 200, note: file.fileName });
+  return { fileName: file.fileName, contentType: file.contentType, bytes: file.bytes.byteLength, text: Buffer.from(file.bytes).toString('utf8') };
+}
 
 /**
  * Р-139 (шаг 30): фоновый исполнитель — НАСТОЯЩИЙ отдельный процесс. Не поток теста: сценарий «процесс убит посреди
@@ -189,6 +212,9 @@ before(async () => {
   const token = await call('POST', '/api/stand-issuer/token?locale=de', { role: 'OWNER' });
   assert.equal(token.status, 200, token.text);
   owner = { authorization: `Bearer ${(JSON.parse(token.text) as StandToken).accessToken}`, cookie: 'repracer_locale=de' };
+  // Консольный клиент работает вне браузера: ему нужен адрес стенда и тот же токен, что лежит в памяти страницы [Р-142]
+  setApiOrigin(origin);
+  setAccessToken((JSON.parse(token.text) as StandToken).accessToken);
 
   /**
    * Настройки фонового процесса: база и описание мира. Карта псевдонимов здесь не нужна и её тут НЕТ: этот мир говорит теми же
@@ -268,20 +294,22 @@ test('Р-136: массовая правка границ всего катало
   const all = { request: { all: true, min: { kind: 'PERCENT', bp: 500 } } };
   const listed = await measure('bounds/plan (каталог списком идентификаторов)', 'POST', api('bounds', 'plan'), request(ids));
   assert.equal(listed.status, 413, 'перечислять каталог в теле запроса нельзя — и это видно продавцу как отказ, а не как успех');
-  const whole = await measure<BoundsDiffView>('bounds/plan (весь каталог, 10 000)', 'POST', api('bounds', 'plan'), all);
-  // Сколько стоит одна разрешённая порция — это и есть цена правки каталога по частям
-  assert.equal(whole.status, 200, `правка всего каталога отвергнута: ${JSON.stringify(whole.body).slice(0, 200)}`);
+  /**
+   * Задача D шага 31: экран различий по каталогу — задание, и применение ССЫЛАЕТСЯ на него. Прежде задание применения считало
+   * весь набор заново только ради сверки токена: работа по каталогу делалась дважды, 44 секунды вместо двадцати.
+   */
+  const wholePlan = await runBulkOperation('bounds/plan (весь каталог, 10 000)', api('bounds', 'plan'), all);
+  const whole = (wholePlan.result as { view: BoundsDiffView }).view;
   const appliedAll = await runBulkOperation('bounds/apply (весь каталог, 10 000)', api('bounds', 'apply'),
-    { ...all, planToken: whole.body.planToken, confirmed: true });
+    { planJobId: wholePlan.jobId, planToken: whole.planToken, confirmed: true });
   assert.deepEqual([appliedAll.total, appliedAll.done], [OFFERS, OFFERS], 'ход задания назван числом предложений каталога');
   // Сколько стоит одна порция — это цена правки частями, если продавец выбрал не весь каталог
-  const batch = await measure<BoundsDiffView>('bounds/plan (порция, 500)', 'POST', api('bounds', 'plan'), request(ids.slice(0, 500)));
-  assert.equal(batch.status, 200, JSON.stringify(batch.body).slice(0, 300));
+  const batchPlan = await runBulkOperation('bounds/plan (порция, 500)', api('bounds', 'plan'), request(ids.slice(0, 500)));
   await runBulkOperation('bounds/apply (порция, 500)', api('bounds', 'apply'),
-    { ...request(ids.slice(0, 500)), planToken: batch.body.planToken, confirmed: true });
+    { planJobId: batchPlan.jobId, planToken: (batchPlan.result as { view: BoundsDiffView }).view.planToken, confirmed: true });
   // Экран различий показывает первые строки и итог по всем — иначе ответ на каталог был 4,2 МБ
-  assert.equal(whole.body.rows.length, DIFF_ROWS_SHOWN);
-  assert.deepEqual([whole.body.shown.rows, whole.body.shown.of, whole.body.summary.scopes], [DIFF_ROWS_SHOWN, OFFERS, OFFERS]);
+  assert.equal(whole.rows.length, DIFF_ROWS_SHOWN);
+  assert.deepEqual([whole.shown.rows, whole.shown.of, whole.summary.scopes], [DIFF_ROWS_SHOWN, OFFERS, OFFERS]);
 });
 
 test('Р-136: стратегия — предпросмотр, включение на каталог и снятие', async () => {
@@ -356,8 +384,16 @@ test('Р-136: экспорт доказательной истории цен з
   const whole = await runBulkOperation('compliance/evidence (30 суток, весь каталог)', api('compliance', 'evidence'),
     { from, to }, `${count.n} суток цен в базе`);
   assert.equal(whole.artifact!.rows, 300_000, 'выгружены все сутки всех предложений каталога');
-  const download = await measure('compliance/evidence (скачивание файла)', 'GET', api('jobs', `${whole.jobId}/artifact`));
-  assert.equal(download.status, 200);
+  /**
+   * Р-142 (шаг 31): файл забирается ТЕМ ЖЕ кодом, которым его берёт страница, и проверяется, что переход по ссылке на тот же
+   * адрес БЕЗ заголовка не отдаёт файл. Два утверждения, а не одно: первое — что продавец файл получает, второе — что файл не
+   * лежит открыто по адресу, на который может уйти ссылка.
+   */
+  const byLink = await browserNavigate(api('jobs', `${whole.jobId}/artifact`));
+  assert.equal(byLink.status, 401, 'переход по ссылке без заголовка файл не отдаёт — и не отдаёт его никому постороннему');
+  const download = await consoleDownload('compliance/evidence (скачивание файла клиентом консоли)', api('jobs', `${whole.jobId}/artifact`));
+  assert.equal(download.contentType, 'text/csv');
+  assert.match(download.fileName, /^price-evidence_/, 'имя файла приходит от сервера, а не придумано экраном');
   // Файл — это файл, а не JSON: он не проходит через разбор экрана и не обязан помещаться в предел ответа экрана
   assert.ok(download.bytes > RESPONSE_LIMIT_BYTES, `файл доказательства на каталог: ${Math.round(download.bytes / 1024 / 1024)} МБ`);
   // Доказательство по одному предложению — так им и пользуются в споре
@@ -365,6 +401,48 @@ test('Р-136: экспорт доказательной истории цен з
   const single = await runBulkOperation('compliance/evidence (30 суток, одно предложение)', api('compliance', 'evidence'),
     { from, to, writeScopeId: oneOffer });
   assert.equal(single.artifact!.rows, 30, 'в выгрузке 30 суток истории одного предложения');
+});
+
+/**
+ * Р-142 (шаг 31), задача A: ВСЁ, что продавец уносит файлом, проверяется одним и тем же способом — тем кодом, которым файл
+ * берёт страница, и с проверкой, что по ссылке без заголовка файл не отдаётся. Шаг 30 проверил так одно доказательство
+ * Omnibus; двух других файлов не существовало вовсе — экран показывал выдержку, и это и есть находка.
+ */
+test('Р-142: отчёт об импорте и выгрузка ленты цен — файлы, и берутся они как в браузере', async () => {
+  // --- Отчёт об импорте: КАЖДАЯ несопоставленная строка с причиной, а не пять примеров на экране
+  const rows = 2_000;
+  const lines = ['Artikelnummer;Einstandspreis;Währung',
+    // Половина строк ложится на каталог, половина — нет: именно их продавцу и надо чинить в своей выгрузке
+    ...Array.from({ length: rows }, (_, i) => (i % 2 === 0 ? `SKU-${i + 1};12,50;EUR` : `NICHT-IM-KATALOG-${i};12,50;EUR`))];
+  const file = { fileName: 'report.csv', content: Buffer.from(lines.join('\r\n'), 'utf8').toString('base64') };
+  const plan = await call('POST', api('cost-import', 'plan'), file);
+  assert.equal(plan.status, 200, plan.text.slice(0, 200));
+  const planned = JSON.parse(plan.text) as CostImportView;
+  const importJob = await runBulkOperation('cost-import/apply (отчёт об импорте)', api('cost-import', 'apply'),
+    { ...file, fingerprint: planned.fingerprint, confirmed: true });
+  assert.ok(importJob.artifact, 'у импорта с несопоставленными строками есть файл отчёта');
+  assert.equal(importJob.artifact!.rows, rows / 2, 'в отчёте КАЖДАЯ несопоставленная строка, а не примеры');
+
+  const reportByLink = await browserNavigate(api('jobs', `${importJob.jobId}/artifact`));
+  assert.equal(reportByLink.status, 401, 'отчёт об импорте по ссылке без заголовка не отдаётся');
+  const report = await consoleDownload('cost-import (скачивание отчёта клиентом консоли)', api('jobs', `${importJob.jobId}/artifact`));
+  assert.equal(report.contentType, 'text/csv');
+  const reportLines = report.text.trim().split('\n');
+  assert.equal(reportLines[0], 'line,offer_key,raw_value,problem,problem_text');
+  assert.equal(reportLines.length, rows / 2 + 1, 'строк в файле столько же, сколько названо на экране');
+  assert.ok(reportLines[1]!.includes('OFFER_NOT_FOUND'), `причина названа у каждой строки: ${reportLines[1]}`);
+
+  // --- Выгрузка ленты цен: весь период файлом, экран отдаёт страницу не больше 200 записей
+  const feed = await measure<{ page: { total: number } }>('feed (лента, первая страница)', 'GET', api('feed'));
+  assert.equal(feed.status, 200, JSON.stringify(feed.body).slice(0, 200));
+  const feedJob = await runBulkOperation('feed/export (вся лента файлом)', api('feed', 'export'), { query: {} });
+  assert.equal(feedJob.artifact!.rows, feed.body.page.total, 'в файле столько записей, сколько лента насчитала по всему окну');
+
+  const feedByLink = await browserNavigate(api('jobs', `${feedJob.jobId}/artifact`));
+  assert.equal(feedByLink.status, 401, 'выгрузка ленты по ссылке без заголовка не отдаётся');
+  const feedFile = await consoleDownload('feed/export (скачивание клиентом консоли)', api('jobs', `${feedJob.jobId}/artifact`));
+  assert.equal(feedFile.text.trim().split('\n')[0], 'at,channel,marketplace,offer,price_from,price_to,change,status,source,reason,decision_id');
+  assert.match(feedFile.fileName, /^price-feed_/, 'имя файла говорит о периоде и предложении');
 });
 
 /**

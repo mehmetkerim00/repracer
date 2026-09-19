@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { FEED_PERIODS_DAYS, FEED_STATUS_GROUPS, type FeedQuery, type PriceFeedView } from '@repracer/console-model';
-import { useResource, worldPath } from '../api.ts';
-import { OfferPicker, Badge, Gaps, href, Load, ReasonLine, useMessages } from '../components.tsx';
+import { requestJson, useResource, worldPath } from '../api.ts';
+import type { JobCreatedResponse } from '../api-types.ts';
+import { JobProgress } from './Jobs.tsx';
+import { OfferPicker, Badge, ErrorBox, errorText, Gaps, href, Load, ReasonLine, useMessages } from '../components.tsx';
 
 /**
  * Лента изменений цен (шаги 21, 23): запись в канал от решения до итога, новые сверху. Фильтры по статусу, офферу и периоду и
@@ -28,6 +30,24 @@ export function FeedScreenView({ view, onQuery }: { view: PriceFeedView; onQuery
     ...(q.writeScopeId ? { writeScopeId: q.writeScopeId } : {}), ...(q.status ? { status: q.status } : {}),
     ...(q.days ? { days: q.days as FeedQuery['days'] & number } : {}), limit: q.limit,
   };
+  /**
+   * Р-142 (шаг 31): всю ленту за период продавец уносит ФАЙЛОМ — экран отдаёт страницу не больше 200 записей, а за 30 суток
+   * по каталогу их сотни тысяч. Готовит файл фоновое задание [Р-139] по тому же фильтру, что сейчас на экране.
+   */
+  const [exportJobId, setExportJobId] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const exportFeed = async () => {
+    setExportError(null);
+    try {
+      const created = await requestJson<JobCreatedResponse>(`${worldPath(view.worldId, 'feed', 'export')}`, {
+        method: 'POST',
+        body: { query: { ...(q.writeScopeId ? { writeScopeId: q.writeScopeId } : {}), ...(q.status ? { status: q.status } : {}), ...(q.days ? { days: String(q.days) } : {}) } },
+        locale: m.locale,
+      });
+      setExportJobId(created.jobId);
+    } catch (e) { setExportError(errorText(e, m)); }
+  };
+
   const change = (patch: Partial<FeedQuery>) => {
     const next: FeedQuery = { ...current, ...patch, offset: 0 };
     for (const key of Object.keys(patch) as Array<keyof FeedQuery>) if (patch[key] === undefined) delete next[key];
@@ -52,6 +72,13 @@ export function FeedScreenView({ view, onQuery }: { view: PriceFeedView; onQuery
           </select></label>
         </div>
       ) : null}
+      {onQuery ? (
+        <div className="buttons">
+          <button type="button" onClick={() => void exportFeed()}>{f.exportAll(view.page.total)}</button>
+        </div>
+      ) : null}
+      {exportError ? <ErrorBox message={exportError} /> : null}
+      {exportJobId ? <JobProgress worldId={view.worldId} jobId={exportJobId} /> : null}
       {view.items.length === 0 ? <p className="muted">{f.empty}</p> : (
         <div className="table-wrap">
           <table>

@@ -992,15 +992,34 @@ export class PgPricingStore implements PricingStore {
           }
         }
         /**
-         * Р-136 (шаг 29): правка вставляется ПАКЕТОМ — по два запроса на обе границы вместо четырёх запросов на предложение.
-         * Живой прогон через консоль: 500 предложений стоили 2,2 секунды, то есть каталог целевого клиента — три четверти минуты.
+         * Р-136 (шаг 29), задача D шага 31: экран различий НИЧЕГО НЕ ВСТАВЛЯЕТ. Прежде он вставлял версии границ и откатывал
+         * их — а без второго фактора ещё и по одной, в своей точке сохранения, потому что страж массовой правки больше одной
+         * в транзакции не пропускает: на каталоге это 10 000 точек сохранения и 72 секунды.
          *
-         * Поштучный путь остаётся для сессии БЕЗ второго фактора: страж массовой правки (0078) считает предложения в транзакции,
-         * и без второго фактора больше одного он не пропустит. Такой продавец и применить массовую правку не может — ему нужен
-         * только экран различий, поэтому версии вставляются и откатываются по одной, в своей точке сохранения.
+         * Действующая граница — максимум активных полов и минимум активных потолков; подставить предлагаемое значение вместо
+         * уровня единицы записи можно прямо в запросе (`effective_*_price_with`). Один запрос на весь каталог, ни одной
+         * записи, ни стража, ни аудита — и предпросмотр перестал зависеть от того, есть ли у сессии второй фактор.
          */
-        if (actor.mfa) {
-          if (mode === 'PREVIEW') await tx.query('SAVEPOINT bounds_preview');
+        if (mode === 'PREVIEW') {
+          const { rows: computed } = await tx.query(
+            `SELECT e.id AS write_scope_id,
+                    tenant_data.effective_min_price_with($1, e.id, e.min) AS min,
+                    tenant_data.effective_max_price_with($1, e.id, e.max) AS max
+               FROM unnest($2::uuid[], $3::bigint[], $4::bigint[]) AS e(id, min, max)`,
+            [tenantId, ids, edits.map((e) => e.minMinor ?? null), edits.map((e) => e.maxMinor ?? null)]);
+          const afterById = new Map(computed.map((r) => [r.write_scope_id as string, {
+            minMinor: r.min === null ? null : Number(r.min), maxMinor: r.max === null ? null : Number(r.max),
+          }]));
+          for (const e of edits) {
+            const a = afterById.get(e.writeScopeId)!;
+            if (a.minMinor !== null && a.maxMinor !== null && a.minMinor > a.maxMinor) {
+              throw new RollbackWith<BoundsEditResult>({ status: 'INVALID', writeScopeId: e.writeScopeId, cause: 'MIN_ABOVE_MAX' });
+            }
+            rows.push({ writeScopeId: e.writeScopeId, currency: byScope.get(e.writeScopeId)!.currency, before: before.get(e.writeScopeId)!, after: a });
+          }
+          // Откатывать нечего: предпросмотр только читал. Транзакция закрывается как обычно, без точек сохранения
+          return { status: 'PREVIEWED', rows } satisfies BoundsEditResult;
+        } else {
           await insertBounds(tx, 'min_price', edits);
           await insertBounds(tx, 'max_price', edits);
           const after = await effectiveAll(tx, ids);
@@ -1011,21 +1030,7 @@ export class PgPricingStore implements PricingStore {
             }
             rows.push({ writeScopeId: e.writeScopeId, currency: byScope.get(e.writeScopeId)!.currency, before: before.get(e.writeScopeId)!, after: a });
           }
-          if (mode === 'PREVIEW') await tx.query('ROLLBACK TO SAVEPOINT bounds_preview');
-        } else {
-          for (const e of edits) {
-            if (mode === 'PREVIEW') await tx.query('SAVEPOINT bounds_preview');
-            await insertBounds(tx, 'min_price', [e]);
-            await insertBounds(tx, 'max_price', [e]);
-            const after = await effective(tx, e.writeScopeId);
-            if (after.minMinor !== null && after.maxMinor !== null && after.minMinor > after.maxMinor) {
-              throw new RollbackWith<BoundsEditResult>({ status: 'INVALID', writeScopeId: e.writeScopeId, cause: 'MIN_ABOVE_MAX' });
-            }
-            if (mode === 'PREVIEW') await tx.query('ROLLBACK TO SAVEPOINT bounds_preview');
-            rows.push({ writeScopeId: e.writeScopeId, currency: byScope.get(e.writeScopeId)!.currency, before: before.get(e.writeScopeId)!, after });
-          }
         }
-        if (mode === 'PREVIEW') throw new RollbackWith<BoundsEditResult>({ status: 'PREVIEWED', rows });
         return { status: 'APPLIED', rows } satisfies BoundsEditResult;
       }, actor.userId, { mfa: actor.mfa, ...(actor.bulkJobId ? { bulkJobId: actor.bulkJobId } : {}) });
     } catch (error) {

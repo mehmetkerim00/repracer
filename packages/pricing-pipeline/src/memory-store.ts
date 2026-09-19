@@ -1,6 +1,7 @@
 import { EXPLANATION_RULESETS } from './dictionary.ts';
 import { rotation } from './reconciliation.ts';
 import type { HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow } from './store.ts';
+import { READ_ONLY_JOB_KINDS } from './store.ts';
 import { offerIdentityOf, type CompetitorQuery, type CompetitorSnapshot, type CompetitorSourceDescriptor, type FieldWrite, type Instant, type OfferIdentity, type PriceBasis, type PricingHealthObservation, type WriteOutcome } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange, SanityContext } from '@repracer/input-sanity';
 import { assertWriteWithinBounds, NO_GUARDRAILS, type GuardrailSet } from '@repracer/price-gate';
@@ -1329,7 +1330,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
      * Право — по тому, что задание ДЕЛАЕТ. Выгрузка доказательной истории [Р-123] ничего не меняет и нужна тому, кто отвечает
      * за спор о скидке: её создаёт и зритель. Задания, меняющие цены, — только участник с правом и со вторым фактором [Р-135].
      */
-    const readOnly = input.kind === 'PRICE_EVIDENCE' || input.kind === 'STRATEGY_PREVIEW';
+    const readOnly = READ_ONLY_JOB_KINDS.includes(input.kind);
     const member = readOnly ? this.member(actor.membershipId) : this.adminMember(actor);
     if (!member || member.userId !== actor.userId) return { status: 'FORBIDDEN' };
     // Второй фактор при создании обязателен только у импорта: он массовый всегда [Р-134, находка 4 ревью шага 30]

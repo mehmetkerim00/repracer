@@ -556,9 +556,14 @@ SELECT pg_temp.expect_fail('min_price of one offer and max_price of another in o
   INSERT INTO tenant_data.max_price (tenant_id, scope_type, product_id, currency, price_basis, amount_minor, version, created_by_membership_id)
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'PRODUCT', 'a5000000-0000-0000-0000-000000000001', 'EUR', 'GROSS', 5000, 3, 'a2000000-0000-0000-0000-00000000000a') $q$,
   'bounds of 2 offers changed in one transaction without a second factor');
+-- Шаг 31 (задача D): у каждой таблицы границ свой страж «время версии — время транзакции»; проверяются оба [Р-99]
 SELECT pg_temp.expect_fail('backdated bound version from the administrative service (Р-88)', $q$
   INSERT INTO tenant_data.min_price (tenant_id, scope_type, product_id, currency, price_basis, amount_minor, version, created_by_membership_id, created_at)
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'PRODUCT', 'a5000000-0000-0000-0000-000000000001', 'EUR', 'GROSS', 1000, 2, 'a2000000-0000-0000-0000-00000000000a', now() - interval '1 day') $q$,
+  'backdated versions are not accepted');
+SELECT pg_temp.expect_fail('backdated max_price version from the administrative service (Р-88)', $q$
+  INSERT INTO tenant_data.max_price (tenant_id, scope_type, product_id, currency, price_basis, amount_minor, version, created_by_membership_id, created_at)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'PRODUCT', 'a5000000-0000-0000-0000-000000000001', 'EUR', 'GROSS', 6000, 3, 'a2000000-0000-0000-0000-00000000000a', now() - interval '1 day') $q$,
   'backdated versions are not accepted');
 SAVEPOINT bounds_mfa;
 SELECT set_config('app.auth_mfa', 'on', true) \gset

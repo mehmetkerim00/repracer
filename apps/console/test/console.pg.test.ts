@@ -38,7 +38,9 @@ const WORLD = 'kaufland/pipeline/happy-path';
  */
 const finishJob = async (response: { status: number; body: unknown }, world?: LiveWorld) => {
   assert.equal(response.status, 200, JSON.stringify(response.body));
-  return runJob(world ?? worlds.find((w) => w.id === WORLD)!, (response.body as JobCreatedResponse).jobId, 'en');
+  const done = await runJob(world ?? worlds.find((w) => w.id === WORLD)!, (response.body as JobCreatedResponse).jobId, 'en');
+  assert.notEqual(done.status, 'FAILED', `задание ${done.kind} не выполнено: ${done.error ?? ''}`);
+  return done;
 };
 /** Шаг 23: мир Amazon — недоверие каналу и Automate Pricing в базе */
 const TRUST_WORLD = 'amazon/pipeline/console-channel-trust';
@@ -138,14 +140,14 @@ test('step 21 on PostgreSQL: preview and save of a strategy, difference screen a
 
   const request = { writeScopeIds: ['ws-price-de-4101'], max: { kind: 'SET', minor: 2600 } };
   assert.equal((await post(operator, url('bounds', 'plan'), { request })).status, 403);
-  const plan = await post(owner, url('bounds', 'plan'), { request });
-  assert.equal(plan.status, 200, JSON.stringify(plan.body));
-  const diff = plan.body as BoundsDiffView;
+  // Задача D шага 31: экран различий — задание, применение ссылается на него, и считается набор один раз
+  const planJob = await finishJob(await post(owner, url('bounds', 'plan'), { request }));
+  const diff = (planJob.result as { view: BoundsDiffView }).view;
   assert.deepEqual([diff.rows[0]!.maxBefore, diff.rows[0]!.maxAfter], ['€25.00', '€26.00']);
-  const applied = await finishJob(await post(owner, url('bounds', 'apply'), { request, planToken: diff.planToken, confirmed: true }));
+  const applied = await finishJob(await post(owner, url('bounds', 'apply'), { planJobId: planJob.jobId, planToken: diff.planToken, confirmed: true }));
   assert.equal(applied.status, 'SUCCEEDED', applied.error ?? '');
-  const again = await post(owner, url('bounds', 'plan'), { request: { ...request, max: { kind: 'SET', minor: 2700 } } });
-  assert.equal((again.body as BoundsDiffView).rows[0]!.maxBefore, '€26.00', 'the database now holds the new version');
+  const again = await finishJob(await post(owner, url('bounds', 'plan'), { request: { ...request, max: { kind: 'SET', minor: 2700 } } }));
+  assert.equal((again.result as { view: BoundsDiffView }).view.rows[0]!.maxBefore, '€26.00', 'the database now holds the new version');
 
   const feed = await handle({ method: 'GET', url: url('feed'), body: undefined, ...owner });
   assert.equal(feed.status, 200);

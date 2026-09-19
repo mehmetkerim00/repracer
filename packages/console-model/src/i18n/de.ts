@@ -590,8 +590,9 @@ export const de: Messages = {
     jobs: {
       pageTitle: 'Massenvorgänge', historyTitle: 'Bisherige Vorgänge', none: 'Noch keine Massenvorgänge.',
       kinds: {
-        COST_IMPORT: 'Selbstkosten importieren', BOUNDS_EDIT: 'Grenzen ändern',
+        COST_IMPORT: 'Selbstkosten importieren', BOUNDS_EDIT: 'Grenzen ändern', BOUNDS_PLAN: 'Unterschiede der Grenzen rechnen',
         STRATEGY_ASSIGN: 'Strategie zuweisen', STRATEGY_PREVIEW: 'Strategie vorab rechnen', PRICE_EVIDENCE: 'Preisnachweis ausgeben',
+        PRICE_FEED_EXPORT: 'Preisverlauf ausgeben',
       },
       queued: 'In der Warteschlange — der Vorgang beginnt gleich.',
       preparing: (done: number, total: number | null) => (total === null ? 'Wird vorbereitet…' : `Wird vorbereitet: ${done} von ${total}`),
@@ -602,8 +603,13 @@ export const de: Messages = {
       errorUnknown: (code: string) => `unerwarteter Fehler (Code ${code}) — bitte den Support mit diesem Code ansprechen`,
       doneCostImport: (rows: number, offers: number, skipped: number) =>
         `Fertig: Selbstkosten von ${offers} ${offers === 1 ? 'Angebot' : 'Angeboten'} importiert (${rows} Zeilen, ${skipped} nicht zugeordnet).`,
+      donePlan: (offers: number) => `Fertig: Unterschiede für ${offers} ${offers === 1 ? 'Angebot' : 'Angebote'} gerechnet — das Ergebnis steht unten.`,
+      createdPlan: 'Die Unterschiede werden im Hintergrund gerechnet. Das Ergebnis erscheint hier.',
       doneBounds: (offers: number, changed: number) => `Fertig: Grenzen von ${offers} ${offers === 1 ? 'Angebot' : 'Angeboten'} geprüft, ${changed} geändert.`,
       doneStrategy: (offers: number, version: number) => `Fertig: Version ${version} ${offers} ${offers === 1 ? 'Angebot' : 'Angeboten'} zugewiesen.`,
+      doneFeedExport: (rows: number, bytes: number) => `Fertig: ${rows} Einträge, ${Math.round(bytes / 1024)} KB — die Datei steht zum Download bereit.`,
+      createdFeedExport: 'Der Preisverlauf wird im Hintergrund ausgegeben. Sie können die Seite verlassen.',
+      reportReady: (rows: number) => `Nicht angewendete Zeilen: ${rows} — die vollständige Liste steht als Datei bereit.`,
       donePreview: (offers: number) => `Fertig: für ${offers} ${offers === 1 ? 'Angebot' : 'Angebote'} vorab gerechnet — das Ergebnis steht unten.`,
       doneEvidence: (rows: number, bytes: number) => `Fertig: ${rows} Zeilen, ${Math.round(bytes / 1024)} KB — die Datei steht zum Download bereit.`,
       effectPending: 'In der Datenbank ist noch nichts geändert: der Vorgang wird vollständig oder gar nicht angewendet.',
@@ -691,6 +697,8 @@ export const de: Messages = {
     },
     feed: {
       pageTitle: 'Preisänderungen', empty: 'Keine Preisänderungen.',
+      // Р-142 (шаг 31): весь период уносится файлом — на экране страница не больше 200 записей
+      exportAll: (n: number) => `Alle ${n} Einträge als Datei`,
       columns: { when: 'Wann', offer: 'Angebot', from: 'Von', to: 'Auf', change: 'Änderung', status: 'Status', source: 'Quelle', reason: 'Grund' },
       counts: (c: { applied: number; inFlight: number; notSent: number; superseded: number }) => `Angewendet ${c.applied} · in Bearbeitung ${c.inFlight} · nicht gesendet ${c.notSent} · ersetzt ${c.superseded}`,
       statuses: { PENDING: 'In der Warteschlange', DISPATCHED: 'Gesendet', ACCEPTED: 'Angenommen, nicht bestätigt', APPLIED: 'Angewendet', NOT_APPLIED: 'Nicht angewendet', FAILED: 'Fehlgeschlagen', BLOCKED: 'Blockiert', SUPERSEDED: 'Durch neueren Preis ersetzt', DISCARDED_STALE: 'Nicht gesendet', BUDGET_EXHAUSTED: 'Änderungsbudget aufgebraucht' },

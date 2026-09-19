@@ -583,8 +583,9 @@ export const en = {
     jobs: {
       pageTitle: 'Bulk operations', historyTitle: 'Past operations', none: 'No bulk operations yet.',
       kinds: {
-        COST_IMPORT: 'Import unit costs', BOUNDS_EDIT: 'Change bounds',
+        COST_IMPORT: 'Import unit costs', BOUNDS_EDIT: 'Change bounds', BOUNDS_PLAN: 'Compute the bounds differences',
         STRATEGY_ASSIGN: 'Assign strategy', STRATEGY_PREVIEW: 'Preview strategy', PRICE_EVIDENCE: 'Export price evidence',
+        PRICE_FEED_EXPORT: 'Export the price feed',
       },
       queued: 'Queued — the operation starts shortly.',
       preparing: (done: number, total: number | null) => (total === null ? 'Preparing…' : `Preparing: ${done} of ${total}`),
@@ -595,8 +596,13 @@ export const en = {
       errorUnknown: (code: string) => `unexpected error (code ${code}) — please give support this code`,
       doneCostImport: (rows: number, offers: number, skipped: number) =>
         `Done: unit costs imported for ${offers} ${offers === 1 ? 'offer' : 'offers'} (${rows} rows, ${skipped} unmatched).`,
+      donePlan: (offers: number) => `Done: differences computed for ${offers} ${offers === 1 ? 'offer' : 'offers'} — the result is below.`,
+      createdPlan: 'The differences are being computed in the background. The result appears here.',
       doneBounds: (offers: number, changed: number) => `Done: bounds checked for ${offers} ${offers === 1 ? 'offer' : 'offers'}, ${changed} changed.`,
       doneStrategy: (offers: number, version: number) => `Done: version ${version} assigned to ${offers} ${offers === 1 ? 'offer' : 'offers'}.`,
+      doneFeedExport: (rows: number, bytes: number) => `Done: ${rows} entries, ${Math.round(bytes / 1024)} KB — the file is ready to download.`,
+      createdFeedExport: 'The price feed is being exported in the background. You can leave this page.',
+      reportReady: (rows: number) => `Rows not applied: ${rows} — the full list is ready as a file.`,
       donePreview: (offers: number) => `Done: computed for ${offers} ${offers === 1 ? 'offer' : 'offers'} — the result is below.`,
       doneEvidence: (rows: number, bytes: number) => `Done: ${rows} rows, ${Math.round(bytes / 1024)} KB — the file is ready to download.`,
       effectPending: 'Nothing has changed in the database yet: the operation is applied in full or not at all.',
@@ -684,6 +690,7 @@ export const en = {
     },
     feed: {
       pageTitle: 'Price changes', empty: 'No price changes.',
+      exportAll: (n: number) => `All ${n} entries as a file`,
       columns: { when: 'When', offer: 'Offer', from: 'From', to: 'To', change: 'Change', status: 'Status', source: 'Source', reason: 'Reason' },
       counts: (c: { applied: number; inFlight: number; notSent: number; superseded: number }) => `Applied ${c.applied} · in progress ${c.inFlight} · not sent ${c.notSent} · replaced ${c.superseded}`,
       statuses: { PENDING: 'Queued', DISPATCHED: 'Sent', ACCEPTED: 'Accepted, not confirmed', APPLIED: 'Applied', NOT_APPLIED: 'Not applied', FAILED: 'Failed', BLOCKED: 'Blocked', SUPERSEDED: 'Replaced by a newer price', DISCARDED_STALE: 'Not sent', BUDGET_EXHAUSTED: 'Edit budget used up' },

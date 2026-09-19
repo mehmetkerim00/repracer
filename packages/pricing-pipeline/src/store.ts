@@ -628,7 +628,14 @@ export interface PricingStore {
  * Что делает задание. `STRATEGY_PREVIEW` ничего не меняет [OQ-201]: он считает решение по КАЖДОМУ предложению каталога, и
  * потому это работа, а не запрос, — предпросмотр по выборке был ценой синхронного ответа, а не свойством продукта.
  */
-export type BulkJobKind = 'COST_IMPORT' | 'BOUNDS_EDIT' | 'STRATEGY_ASSIGN' | 'STRATEGY_PREVIEW' | 'PRICE_EVIDENCE';
+export type BulkJobKind = 'COST_IMPORT' | 'BOUNDS_EDIT' | 'BOUNDS_PLAN' | 'STRATEGY_ASSIGN' | 'STRATEGY_PREVIEW' | 'PRICE_EVIDENCE' | 'PRICE_FEED_EXPORT';
+
+/**
+ * Р-143 (шаг 31): виды заданий, которые НИЧЕГО НЕ МЕНЯЮТ. Им второй фактор не нужен, и создать их может любой участник; но
+ * ровно поэтому они не открывают окно для операций, которым он нужен, и их записи не считаются подтверждёнными. Список один
+ * на всю систему — чтобы «ничего не меняет» и «не требует второго фактора» не разошлись по разным местам.
+ */
+export const READ_ONLY_JOB_KINDS: readonly BulkJobKind[] = ['BOUNDS_PLAN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT'];
 export type BulkJobStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'INTERRUPTED';
 export type BulkJobPhase = 'PREPARING' | 'APPLYING' | 'PRODUCING' | 'DONE';
 
