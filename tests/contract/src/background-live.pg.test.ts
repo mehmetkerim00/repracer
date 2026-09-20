@@ -1,6 +1,25 @@
-import assert from 'node:assert/strict';
+import strictAssert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { after, before, test } from 'node:test';
+
+/**
+ * OQ-204 (шаг 33): мета-проверка «у каждого механизма есть утверждение» считала ЗАРЕГИСТРИРОВАННОЕ ИМЯ, а не выполненное
+ * утверждение: пустой блок `observes(...)` проходил её так же, как проверяющий. Теперь считаются настоящие вызовы
+ * утверждений внутри блока — механизм, который ничего не проверил, называется поимённо.
+ */
+let currentMechanism: string | null = null;
+const assertionsOf = new Map<string, number>();
+const assert: typeof strictAssert = new Proxy(strictAssert, {
+  get(target, key, receiver) {
+    const value = Reflect.get(target, key, receiver) as unknown;
+    if (typeof value !== 'function') return value;
+    return (...args: unknown[]) => {
+      if (currentMechanism !== null) assertionsOf.set(currentMechanism, (assertionsOf.get(currentMechanism) ?? 0) + 1);
+      return (value as (...a: unknown[]) => unknown).apply(target, args);
+    };
+  },
+}) as typeof strictAssert;
+
 import { ClickHouseHttp } from '@repracer/analytics-export';
 import { OutboxRelay, TOPICS, type KeyedMessage } from '@repracer/broker';
 import { createNotificationReceiver, createSqsClient, pipelineSink, storeLedger, type NotificationReceiver } from '@repracer/amazon-notifications';
@@ -261,10 +280,11 @@ before(async () => {
 });
 
 /** Р-130: каждый фоновый механизм утверждается наблюдаемым за период */
-const asserted = new Set<string>();
 const observes = (mechanism: string, name: string, body: () => Promise<void> | void) => {
-  asserted.add(mechanism);
-  test(`${mechanism} — ${name}`, body);
+  test(`${mechanism} — ${name}`, async () => {
+    currentMechanism = mechanism;
+    try { await body(); } finally { currentMechanism = null; }
+  });
 };
 
 observes('write-dispatcher', 'Р-64: ждущая запись объявляется событием и доходит до канала; при сбоях канала ни одна не застревает', async () => {
@@ -360,6 +380,10 @@ observes('retention', 'секция снимков удаляется по ср�
   assert.ok(dropped.n <= verified.n, `удалено секций не больше, чем проверено выгрузкой: ${dropped.n} из ${verified.n}`);
 });
 
-test('Р-130: каждый проверяемый фоновый механизм утверждается', () => {
-  assert.deepEqual(['write-dispatcher', 'outbox-relay', 'notification-receiver', 'analytics-export', 'retention'].filter((m) => !asserted.has(m)), []);
+test('Р-130: каждый проверяемый фоновый механизм утверждается — и утверждение ВЫПОЛНЯЕТСЯ', () => {
+  const MECHANISMS = ['write-dispatcher', 'outbox-relay', 'notification-receiver', 'analytics-export', 'retention'];
+  const silent = MECHANISMS.filter((m) => (assertionsOf.get(m) ?? 0) === 0);
+  assert.deepEqual(silent, [], 'механизм назван, но ни одного утверждения о нём не выполнилось [OQ-204]');
+  assert.ok([...assertionsOf.values()].reduce((a, b) => a + b, 0) > MECHANISMS.length,
+    `утверждений больше, чем механизмов: ${JSON.stringify([...assertionsOf])}`);
 });

@@ -32,7 +32,18 @@ test('the counterfactual snapshot keeps the competitors, replaces our price and 
   const lowestCompetitor = Math.min(...recorded.offers.filter((o) => !o.isSelf).map((o) => o.price.amountMinor));
   const tie = counterfactual(recorded, lowestCompetitor);
   assert.equal(tie.buybox?.isSelf, false);
-  assert.deepEqual(tie.offers.filter((o) => !o.isSelf), recorded.offers.filter((o) => !o.isSelf).map((o) => ({ ...o, rank: tie.offers.find((x) => x.sellerRef === o.sellerRef)!.rank })));
+  /**
+   * OQ-204: ожидаемые ранги брались ИЗ ФАКТИЧЕСКОГО результата — утверждение сводилось к «результат равен себе». Ранги
+   * считаются заново, по объявленному правилу: дешевле — выше, при равенстве выигрывает конкурент.
+   */
+  const competitorsBefore = recorded.offers.filter((o) => !o.isSelf);
+  const competitorsAfter = tie.offers.filter((o) => !o.isSelf);
+  const expectedRanks = [...tie.offers].sort((a, b) => a.price.amountMinor - b.price.amountMinor || Number(a.isSelf) - Number(b.isSelf))
+    .map((o, i) => [o.sellerRef, i + 1] as const);
+  assert.deepEqual(tie.offers.map((o) => [o.sellerRef, o.rank]).sort(), [...expectedRanks].sort(),
+    'ранги пересчитаны по правилу, а не взяты из результата');
+  assert.deepEqual(competitorsAfter.map((o) => ({ ...o, rank: 0 })), competitorsBefore.map((o) => ({ ...o, rank: 0 })),
+    'предложения конкурентов не изменились: подменяется только наша цена');
   const cheaper = counterfactual(recorded, lowestCompetitor - 1);
   assert.equal(cheaper.buybox?.isSelf, true);
   assert.equal(cheaper.offers[0]?.price.amountMinor, lowestCompetitor - 1);
@@ -67,7 +78,15 @@ test('18 months of synthetic history: undercutting wins the Buy Box more often a
   assert.ok(s!.estimatedProfitMinor !== null && b!.estimatedProfitMinor !== null);
   // Калибровка правила Buy Box на синтетике тривиальна: генератор выбирает победителя тем же правилом
   assert.equal(report.buyBoxRuleMismatchBp, 0);
-  assert.ok(LIES.length >= 6);
+  /**
+   * OQ-204: утверждалась ДЛИНА списка допущений — он проходил проверку и с шестью пустыми строками. Теперь утверждается,
+   * что бэктест называет каждое допущение, от которого зависит доверие к его числам, и что отчёт несёт их читателю.
+   */
+  for (const topic of [/конкурент/i, /buy box/i, /спрос/i, /снимк/i, /себестоимост/i, /истори/i]) {
+    assert.ok(LIES.some((l) => topic.test(l)), `в списке допущений названо ${topic}: ${JSON.stringify(LIES)}`);
+  }
+  assert.ok(LIES.every((l) => l.length > 40), 'допущение объяснено, а не названо словом');
+  assert.deepEqual(report.lies, LIES, 'отчёт бэктеста несёт список допущений читателю, а не прячет его');
 });
 
 test('without a demand assumption the backtest reports no profit', async () => {

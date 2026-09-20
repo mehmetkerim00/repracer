@@ -1,5 +1,23 @@
-import assert from 'node:assert/strict';
+import strictAssert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
+
+/**
+ * OQ-204 (шаг 33): мета-проверка «каждая работа проверена» считала ЗАРЕГИСТРИРОВАННОЕ ИМЯ, а не выполненное утверждение:
+ * пустой блок `observes(...)` проходил её так же, как проверяющий. Теперь считаются настоящие вызовы утверждений.
+ */
+let currentJob: string | null = null;
+const assertionsOf = new Map<string, number>();
+const assert: typeof strictAssert = new Proxy(strictAssert, {
+  get(target, key, receiver) {
+    const value = Reflect.get(target, key, receiver) as unknown;
+    if (typeof value !== 'function') return value;
+    return (...args: unknown[]) => {
+      if (currentJob !== null) assertionsOf.set(currentJob, (assertionsOf.get(currentJob) ?? 0) + 1);
+      return (value as (...a: unknown[]) => unknown).apply(target, args);
+    };
+  },
+}) as typeof strictAssert;
+
 import { createPool, type PgPool } from '@repracer/pricing-store-pg';
 import { createScheduler, JOB_CATALOG, jobSource, PgSchedulerState, pgJobDeps, runScheduler, type JobDeps } from '@repracer/scheduler';
 import { createIsolatedDatabase, requireEnv } from '../../../packages/pricing-store-pg/test/isolated-db.ts';
@@ -131,14 +149,24 @@ before(async () => {
 });
 
 /** Каждая работа планировщика утверждается в живом режиме: новая работа без утверждения — красная сборка (Р-128) */
-const asserted = new Set<string>();
 const observes = (job: string, name: string, body: () => Promise<void> | void) => {
-  asserted.add(job);
-  test(`${job} — ${name}`, body);
+  test(`${job} — ${name}`, async () => {
+    currentJob = job;
+    try { await body(); } finally { currentJob = null; }
+  });
 };
 
 const hoursOf = (ms: number) => Math.round(((ms - live.startMs) / HOUR) * 100) / 100;
-const jobOf = (name: string) => live.jobs.find((j) => j.job_name === name) ?? { job_name: name, runs: 0, failed: 0, items: 0, max_lag: 0 };
+/**
+ * OQ-204 (шаг 33): заглушка `{runs: 0, failed: 0}` делала утверждение «провалов не было» ИСТИННЫМ для работы, которая за
+ * сутки ни разу не запускалась, — то есть ровно для того случая, ради которого живой прогон и заведён. Теперь отсутствие
+ * работы в журнале запусков — это провал с названным именем, а не молчаливый ноль.
+ */
+const jobOf = (name: string) => {
+  const row = live.jobs.find((j) => j.job_name === name);
+  strictAssert.ok(row, `работа ${name} за сутки не запускалась ни разу: в журнале запусков её нет`);
+  return row;
+};
 
 observes('competitor-poll', 'Р-47: ярус товара виден в числе опросов за сутки; товар без движения цены не выпадает', () => {
   const gaps = (idProduct: number) => {
@@ -222,6 +250,9 @@ observes('analytics-export-day', 'провал выгрузки сообщает
   assert.ok(job.runs >= 1 && job.failed === 0, `слот выгрузки продвигается при провале суток: ${JSON.stringify(job)}`);
 });
 
-test('Р-128: каждая работа планировщика проверена в живом режиме', () => {
-  assert.deepEqual(JOB_CATALOG.map((j) => j.name).filter((n) => !asserted.has(n)), [], 'работа без утверждения о наблюдаемом поведении за сутки');
+test('Р-128: каждая работа планировщика проверена в живом режиме — и утверждение ВЫПОЛНЯЕТСЯ', () => {
+  const silent = JOB_CATALOG.map((j) => j.name).filter((n) => (assertionsOf.get(n) ?? 0) === 0);
+  assert.deepEqual(silent, [], 'работа названа, но ни одного утверждения о её наблюдаемом поведении не выполнилось [OQ-204]');
+  assert.ok([...assertionsOf.values()].reduce((a, b) => a + b, 0) > JOB_CATALOG.length,
+    `утверждений больше, чем работ: ${JSON.stringify([...assertionsOf])}`);
 });

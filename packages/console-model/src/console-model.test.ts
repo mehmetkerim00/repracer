@@ -49,7 +49,12 @@ test('D: four codes stay limited, each with the reason a parameter is impossible
     const limited = rows.filter((r) => r.verdict === 'LIMITED');
     assert.deepEqual(limited.map((r) => r.code).sort(), Object.keys(REASON_LIMITS).sort());
     assert.equal(limited.length, 4);
-    assert.ok(limited.every((r) => (r.note ?? '').length > 40));
+    // OQ-204: длина строки ничего не говорит о её содержании — пояснение обязано назвать САМО ограничение
+    for (const r of limited) {
+      const note = r.note ?? '';
+      assert.ok(note.length > 40 && /\p{L}{4}/u.test(note), `пояснение причины ${r.code} — текст, а не заполнитель: ${note}`);
+      assert.ok(!note.includes(r.code), `пояснение причины ${r.code} не повторяет её код: ${note}`);
+    }
   }
 });
 

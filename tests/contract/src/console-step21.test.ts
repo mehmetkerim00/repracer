@@ -41,7 +41,13 @@ test('step 21: a strategy draft is previewed on a real offer through the engine 
   // Последний принятый снимок мира — мы выигрываем Buy Box по 17.75; итог решает Gate в границах 15.00–25.00
   assert.equal(row!.current, '€17.75');
   assert.ok(row!.asOf.startsWith('snapshot of '), row!.asOf);
-  assert.ok(['Approved', 'No change'].includes(row!.outcome), row!.outcome);
+  /**
+   * OQ-204: прежде принимались ОБА исхода («Approved» и «No change») — то есть утверждение не различало работающий движок
+   * и неработающий. Исход здесь определён: наша цена 17.75, дешевле нас никого, ближайший конкурент — 17.80; удержание
+   * выигранного выключено, поэтому стратегия подрезает ориентир на 10 центов до 17.70, и Gate пропускает — 15.00–25.00.
+   */
+  assert.equal(row!.outcome, 'Approved', `итог предпросмотра: ${JSON.stringify(row)}`);
+  assert.equal(row!.proposed, '€17.70', `подрез ориентира на 10 центов: ${JSON.stringify(row)}`);
   // Ревью тавтологий (шаг 29): равенство токена самому себе верно всегда. Значение имеет, что токен МЕНЯЕТСЯ вместе с черновиком —
   // иначе сохранение приняло бы не то превью, что видел человек
   assert.equal(view.previewToken, strategyPreviewView(before, parsed.draft, [preview], en).previewToken, 'the token is deterministic');

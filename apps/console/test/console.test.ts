@@ -128,7 +128,8 @@ test('stand API serves every screen of every world in German and English and ref
   const auth = await login('VIEWER');
   const list = await get<WorldSummary[]>(auth, '/api/worlds');
   assert.deepEqual(list.map((w) => w.id).sort(), [...WORLDS].sort());
-  assert.ok(list.every((w) => w.role === 'Viewer'));
+  // OQ-204: `every` истинно на пустом списке — сперва утверждается, что списку есть что проверять
+  assert.ok(list.length > 0 && list.every((w) => w.role === 'Viewer'), `миры зрителя: ${JSON.stringify(list.map((w) => w.role))}`);
   for (const locale of ['de', 'en'] as const) {
     for (const w of list) {
       const q = `?locale=${locale}`;
@@ -193,7 +194,9 @@ test('Р-69, Р-76, OQ-129: a viewer cannot stop; an operator stops; the operato
   assert.equal((await call(operator, 'POST', api(id, 'stop'), { target, note: 'short', confirmed: true })).status, 400);
   assert.equal((await call(operator, 'POST', api(id, 'stop'), { target, note: 'Synthetic kill switch', confirmed: true })).status, 200);
   assert.equal((await call(operator, 'POST', api(id, 'stop'), { target, note: 'Synthetic kill switch', confirmed: true })).status, 409);
-  assert.ok((await get<ProductListView>(operator, api(id, 'products'))).rows.every((r) => r.enabled.label === 'Stopped'));
+  const stoppedRows = (await get<ProductListView>(operator, api(id, 'products'))).rows;
+  assert.ok(stoppedRows.length > 0 && stoppedRows.every((r) => r.enabled.label === 'Stopped'),
+    `после остановки все строки остановлены: ${JSON.stringify(stoppedRows.map((r) => r.enabled.label))}`);
 
   const stopId = (await get<StopView>(operator, api(id, 'stop'))).stops.active[0]!.stopId;
   assert.equal((await call(operator, 'POST', api(id, 'stops', stopId, 'resume'), { note: 'Operator tries to resume', confirmed: true })).status, 403);
@@ -502,7 +505,7 @@ test('step 23, C/F: offers the channel prices itself are listed before a strateg
   assert.deepEqual(list.channelPricingOffers.map((o) => o.label), ['Amazon A1PA6795UKMFR9 · unit SYN-SKU-8502']);
   assert.deepEqual(list.scopes.filter((s) => !s.assignable).map((s) => s.unit.externalUnitId), ['SYN-SKU-8502']);
   assert.ok(list.strategies.length >= 1 && list.strategies.every((s) => s.draft.params.type === 'FIXED'));
-  assert.ok(list.strategies.every((x) => x.versions.length >= 1), 'OQ-170: every strategy lists its versions');
+  assert.ok(list.strategies.length > 0 && list.strategies.every((x) => x.versions.length >= 1), 'OQ-170: every strategy lists its versions');
 
   const ws = list.scopes.find((s) => s.unit.externalUnitId === 'SYN-SKU-8502')!.unit.writeScopeId;
   const draft = { name: 'Synthetic fixed', params: { type: 'FIXED', priceMinor: 2050 }, deadbandMinor: 0 };
@@ -544,7 +547,7 @@ test('step 23, F: bounds edit is offered only with the right; the feed filters a
   const all = await get<PriceFeedView>(viewer, api(feedId, 'feed'));
   assert.ok(all.page.total >= 1);
   const applied = await get<PriceFeedView>(viewer, `${api(feedId, 'feed')}?status=APPLIED`);
-  assert.ok(applied.items.every((i) => i.status === 'Applied'), JSON.stringify(applied.items.map((i) => i.status)));
+  assert.ok(applied.items.length > 0 && applied.items.every((i) => i.status === 'Applied'), JSON.stringify(applied.items.map((i) => i.status)));
   assert.deepEqual(applied.counts, all.counts, 'counts are per group, not per status filter');
   const one = await get<PriceFeedView>(viewer, `${api(feedId, 'feed')}?limit=1`);
   assert.deepEqual([one.items.length, one.page.from, one.page.to, one.page.total, one.page.hasNext], [1, 1, 1, all.page.total, all.page.total > 1]);
