@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
 import { loadConfig, ConfigError } from '../src/config.ts';
-import { createHeartbeat } from '../src/heartbeat.ts';
+import { createHeartbeat } from '@repracer/service-runtime';
 import { SchedulerMetrics, serveMetrics } from '../src/metrics.ts';
 import { credentialsFromFiles, jsonSink } from '../src/runtime.ts';
 import type { TickReport } from '../src/scheduler.ts';

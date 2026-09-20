@@ -13,11 +13,11 @@
 test at test/budget-retry-dispatch.pg.test.ts:54:1
 ✖ finding 7: a budgeted retry refused because the storefront day boundary became unconfirmed ends with a reason and an alert; the sweep survives and does not repeat it (589.099541ms)
   error: retry of a budgeted write: the day boundary of storefront EBAY_DE is not confirmed (Р-65)
-      at /Users/kerim/Desktop/repracer/node_modules/pg/lib/client.js:694:17
+      at <repo>/node_modules/pg/lib/client.js:694:17
       at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
-      at async file:///Users/kerim/Desktop/repracer/packages/pricing-store-pg/src/write-queue.ts:174:39
-      at async inTenant (file:///Users/kerim/Desktop/repracer/packages/pricing-store-pg/src/db.ts:80:16)
-      at async runScope (file:///Users/kerim/Desktop/repracer/packages/write-dispatcher/src/dispatcher.ts:178:21) {
+      at async <repo>/packages/pricing-store-pg/src/write-queue.ts:174:39
+      at async inTenant (<repo>/packages/pricing-store-pg/src/db.ts:80:16)
+      at async runScope (<repo>/packages/write-dispatcher/src/dispatcher.ts:178:21) {
     length: 236,
     severity: 'ERROR',
     code: '23514',

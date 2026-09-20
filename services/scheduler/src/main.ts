@@ -5,7 +5,7 @@ import { conservativeBudget, createKauflandAdapter } from '@repracer/kaufland-ad
 import { createPricingPipeline } from '@repracer/pricing-pipeline';
 import { createPool, PgPricingStore, type PgPool } from '@repracer/pricing-store-pg';
 import { loadConfig, type SchedulerConfig } from './config.ts';
-import { createHeartbeat } from './heartbeat.ts';
+import { createHeartbeat } from '@repracer/service-runtime';
 import { jobSource, type SchedulerAccount } from './jobs.ts';
 import { SchedulerMetrics, serveMetrics } from './metrics.ts';
 import { pgJobDeps } from './pg-deps.ts';

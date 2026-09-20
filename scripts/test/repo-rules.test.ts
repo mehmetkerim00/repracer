@@ -128,3 +128,83 @@ test('Р-145: список видов, отдающих файл, одинако
   assert.ok(inDb.length === 3 && inCode.length === 3, `списки прочитаны: база ${inDb}, код ${inCode}`);
   assert.deepEqual(inCode, inDb, 'список видов с файлом разошёлся между базой и кодом: база откажет уже после работы задания');
 });
+
+/**
+ * Р-148 (шаг 33): репозиторий ПУБЛИЧНЫЙ, и логи доказательств в нём не несут путей файловой системы машины разработчика,
+ * имён пользователей и внутренних адресов.
+ *
+ * Логи доказательств попадают в репозиторий как есть — их для того и хранят, чтобы отчёт можно было проверить. Но вывод
+ * тестов полон стек-трейсов, а стек-трейс несёт абсолютный путь: до шага 33 в шести логах был виден домашний каталог
+ * разработчика и рабочий каталог сессии. Само по себе это не секрет, но это шум, который никому не нужен, и он копится:
+ * следующий лог принесёт его снова.
+ */
+test('Р-148: доказательства не несут путей машины разработчика и внутренних адресов', async () => {
+  const { readdirSync, readFileSync, statSync } = await import('node:fs');
+  /**
+   * Что запрещено: домашний каталог человека, рабочий каталог сессии и адрес из частной сети. Путь раннера сборки
+   * (`/home/runner/...`) разрешён намеренно: он одинаков у всех, ничего не раскрывает и приходит из публичных логов CI.
+   */
+  const LEAKS_A_PATH = /\/Users\/[^\s'")\]]+|\/home\/(?!runner\b)[a-z][^\s'")\]]*|[A-Z]:\\+Users\\+|\/private\/tmp\/claude-|\b(?:10\.\d{1,3}|192\.168|172\.(?:1[6-9]|2\d|3[01]))\.\d{1,3}\.\d{1,3}\b/;
+  // Зубы [Р-94]: правило обязано ловить ровно то, что шаг 33 из логов и вычистил
+  for (const bad of [
+    'at /Users/kerim/Desktop/repracer/node_modules/pg/lib/client.js:694:17',
+    "location: '/private/tmp/claude-501/-Users-kerim-Desktop-repracer/f1e3c879/scratchpad/snap18e/packages'",
+    'at /home/kerim/projects/repracer/index.ts:1:1',
+    'connecting to 10.0.3.17:5432',
+    'C:\\Users\\kerim\\repracer',
+  ]) assert.match(bad, LEAKS_A_PATH, `правило обязано ловить: ${bad.slice(0, 60)}`);
+  /** Чего ловить не должно: путь внутри репозитория, путь раннера сборки и локальная петля */
+  for (const fine of [
+    'at <repo>/packages/pricing-store-pg/src/db.ts:80:16',
+    'at file:///home/runner/work/repracer/repracer/services/pricing-worker/test/order.test.ts:240:10',
+    'REPRACER_PG_URL: postgres://svc_app@127.0.0.1:5432/repracer_eu',
+    'подключение к localhost:4318',
+  ]) assert.doesNotMatch(fine, LEAKS_A_PATH, `правило не должно ловить: ${fine.slice(0, 60)}`);
+
+  const root = new URL('../../', import.meta.url);
+  const offenders: string[] = [];
+  const walk = (rel: string) => {
+    for (const name of readdirSync(new URL(rel, root))) {
+      const child = `${rel}${name}`;
+      if (statSync(new URL(child, root)).isDirectory()) { walk(`${child}/`); continue; }
+      if (!/\.(md|log|txt|json)$/.test(name)) continue;
+      // Сам разбор истории называет найденные пути как находку — иначе о них нельзя написать
+      if (child === 'docs/evidence/step33-history-audit.md') continue;
+      for (const line of readFileSync(new URL(child, root), 'utf8').split('\n')) {
+        if (LEAKS_A_PATH.test(line)) { offenders.push(`${child}: ${line.trim().slice(0, 70)}`); break; }
+      }
+    }
+  };
+  walk('docs/');
+  assert.deepEqual(offenders, [], 'доказательство несёт путь машины разработчика: репозиторий публичный [Р-148]');
+});
+
+/**
+ * OQ-183, OQ-194, задача E шага 33: внешний контроль покрывает ВСЕ разворачиваемые процессы, а не только планировщик.
+ *
+ * Р-127 говорит: работоспособность процесса контролируется извне, потому что изнутри остановленный процесс о себе не
+ * сообщает. Но само по себе это свойство держалось перечислением: три процесса по очереди научили отмечаться, и ничто не
+ * мешало четвёртому появиться молчащим. Правило проверяет то, что должно быть верно и для процесса, которого ещё нет.
+ */
+test('Р-127: каждый разворачиваемый процесс отмечается во внешнем сервисе (OQ-183)', async () => {
+  const { readdirSync, readFileSync, existsSync } = await import('node:fs');
+  const root = new URL('../../', import.meta.url);
+  const services = readdirSync(new URL('services/', root))
+    .filter((name) => existsSync(new URL(`services/${name}/src/main.ts`, root)));
+  assert.ok(services.length >= 3, `процессы найдены: ${services.join(', ')}`);
+
+  const silent: string[] = [];
+  for (const name of services) {
+    const main = readFileSync(new URL(`services/${name}/src/main.ts`, root), 'utf8');
+    const config = readFileSync(new URL(`services/${name}/src/config.ts`, root), 'utf8');
+    // Процесс обязан СТАВИТЬ отметку и обязан уметь объяснить её отсутствие: выключение — только явное
+    const beats = /createHeartbeat\s*\(/.test(main) && /heartbeat\.beat\s*\(/.test(main);
+    const optOutIsExplicit = /HEARTBEAT\s*===\s*'off'/.test(config);
+    if (!beats || !optOutIsExplicit) silent.push(`${name}: отметка ${beats ? 'есть' : 'НЕ СТАВИТСЯ'}, явное выключение ${optOutIsExplicit ? 'есть' : 'ОТСУТСТВУЕТ'}`);
+  }
+  assert.deepEqual(silent, [], 'разворачиваемый процесс без внешней отметки: его остановку никто не заметит [Р-127]');
+
+  // Отметка у всех одна и та же: второй реализации нет [Р-145]
+  const own = services.filter((n) => existsSync(new URL(`services/${n}/src/heartbeat.ts`, root)));
+  assert.deepEqual(own, [], 'у процесса своя реализация отметки — она разойдётся с общей');
+});
