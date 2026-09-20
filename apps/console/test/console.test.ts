@@ -969,6 +969,8 @@ test('OQ-196: окно массовой правки объясняется пр
   // Текст окна называет ИМЕННО окно: сколько предложений и за какое время
   assert.match(window!, /ten minutes/, window!);
   assert.match(window!, /five offers/, window!);
+  // Текст верен и для импорта себестоимости: окно считает не только границы, но и себестоимость
+  assert.ok(!/bounds|Grenzen/.test(window!), `текст окна не сужает его до границ: ${window!}`);
   // И это не заглушка «неизвестный код»: такой текст назвал бы сам код
   assert.ok(!window!.includes('MFA_REQUIRED_WINDOW'), window!);
 });

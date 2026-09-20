@@ -280,6 +280,9 @@ before(async () => {
 });
 
 /** Р-130: каждый фоновый механизм утверждается наблюдаемым за период */
+/** Фоновые механизмы, которые живой прогон обязан наблюдать [Р-130]. Новый механизм называется ЗДЕСЬ, а не в проверке */
+const OBSERVED_MECHANISMS = ['write-dispatcher', 'outbox-relay', 'notification-receiver', 'analytics-export', 'retention'] as const;
+
 const observes = (mechanism: string, name: string, body: () => Promise<void> | void) => {
   test(`${mechanism} — ${name}`, async () => {
     currentMechanism = mechanism;
@@ -380,10 +383,14 @@ observes('retention', 'секция снимков удаляется по ср�
   assert.ok(dropped.n <= verified.n, `удалено секций не больше, чем проверено выгрузкой: ${dropped.n} из ${verified.n}`);
 });
 
-test('Р-130: каждый проверяемый фоновый механизм утверждается — и утверждение ВЫПОЛНЯЕТСЯ', () => {
-  const MECHANISMS = ['write-dispatcher', 'outbox-relay', 'notification-receiver', 'analytics-export', 'retention'];
-  const silent = MECHANISMS.filter((m) => (assertionsOf.get(m) ?? 0) === 0);
+test('Р-130: у каждого фонового механизма ВЫПОЛНЯЕТСЯ хотя бы одно утверждение', () => {
+  /**
+   * Список механизмов — не литерал внутри самой проверки (находка 6 ревью шага 33): он объявлен рядом с прогоном и
+   * называет то, что прогон обязан наблюдать. Механизм, забытый в `observes`, остаётся здесь — и проверка его назовёт.
+   *
+   * Чего эта проверка НЕ делает (находка 5 того же ревью): счётчик считает ВЫЗОВ утверждения, а не его исход, поэтому
+   * тавтологию она не отличит от настоящей проверки. Она закрывает ровно одну дыру — блок без единого утверждения.
+   */
+  const silent = OBSERVED_MECHANISMS.filter((m) => (assertionsOf.get(m) ?? 0) === 0);
   assert.deepEqual(silent, [], 'механизм назван, но ни одного утверждения о нём не выполнилось [OQ-204]');
-  assert.ok([...assertionsOf.values()].reduce((a, b) => a + b, 0) > MECHANISMS.length,
-    `утверждений больше, чем механизмов: ${JSON.stringify([...assertionsOf])}`);
 });

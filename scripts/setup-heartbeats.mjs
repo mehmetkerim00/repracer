@@ -8,6 +8,9 @@
  * Печатается только идентификатор проверки — сам адрес отметки и есть секрет (кто его знает, тот может отметиться за
  * процесс, и молчание останется незамеченным).
  *
+ * Факты об API взяты из снимка страницы документации (`vendor/healthchecks/2026-09-17/SOURCE.md`, раздел Management API),
+ * как требует правило репозитория: `unique: ['slug']` — документированный «upsert», 201 при создании, 200 при обновлении.
+ *
  * Использование:
  *   HC_API_KEY=<ключ проекта> node scripts/setup-heartbeats.mjs           # завести проверки и записать секреты
  *   HC_API_KEY=<ключ проекта> node scripts/setup-heartbeats.mjs --dry-run # показать, что будет сделано
@@ -45,20 +48,30 @@ async function api(path, init = {}) {
 }
 
 const created = [];
-for (const check of CHECKS) {
-  if (dryRun) { console.log(`создал бы проверку ${check.slug} (период ${TIMEOUT_SECONDS} с, допуск ${GRACE_SECONDS} с)`); continue; }
-  /** `unique: ['slug']` делает скрипт повторяемым: второй запуск не плодит проверки, а находит заведённые */
-  const body = { name: check.name, slug: check.slug, desc: check.desc, timeout: TIMEOUT_SECONDS, grace: GRACE_SECONDS, unique: ['slug'] };
-  const result = await api('/checks/', { method: 'POST', body: JSON.stringify(body) });
-  created.push({ ...check, pingUrl: result.ping_url });
-  console.log(`проверка ${check.slug}: готова`);
+try {
+  for (const check of CHECKS) {
+    if (dryRun) { console.log(`создал бы проверку ${check.slug} (период ${TIMEOUT_SECONDS} с, допуск ${GRACE_SECONDS} с)`); continue; }
+    /** `unique: ['slug']` делает скрипт повторяемым: второй запуск не плодит проверки, а обновляет заведённую (код 200) */
+    const body = { name: check.name, slug: check.slug, desc: check.desc, timeout: TIMEOUT_SECONDS, grace: GRACE_SECONDS, unique: ['slug'] };
+    const result = await api('/checks/', { method: 'POST', body: JSON.stringify(body) });
+    created.push({ ...check, pingUrl: result.ping_url });
+    console.log(`проверка ${check.slug}: готова`);
+  }
+} catch (error) {
+  // Частичный итог называется вслух: иначе часть проверок заведена, а часть секретов не записана, и это незаметно
+  console.error(`не удалось завести проверки: ${(error instanceof Error ? error.message : String(error)).slice(0, 300)}`);
+  console.error(`заведено до отказа: ${created.map((c) => c.slug).join(', ') || 'ни одной'}; секреты НЕ записаны`);
+  process.exit(1);
 }
 
 if (dryRun) process.exit(0);
 
 for (const { secret, pingUrl, slug } of created) {
-  // Адрес отметки — секрет: он печатается ТОЛЬКО в секрет репозитория, не в вывод и не в файл
-  execFileSync('gh', ['secret', 'set', secret, '--body', pingUrl], { stdio: ['ignore', 'ignore', 'inherit'] });
+  /**
+   * Адрес отметки идёт в `gh` ЧЕРЕЗ stdin, а не аргументом: аргументы процесса видны в `ps` любому местному пользователю
+   * (находка 9 ревью шага 33). В вывод и в файлы он не попадает вовсе — кто знает адрес, тот отметится за процесс.
+   */
+  execFileSync('gh', ['secret', 'set', secret], { input: pingUrl, stdio: ['pipe', 'ignore', 'inherit'] });
   console.log(`секрет ${secret} записан (проверка ${slug})`);
 }
 

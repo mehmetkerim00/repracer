@@ -521,7 +521,13 @@ function secondFactorRefused(error: unknown): boolean {
  */
 function windowRefused(error: unknown): boolean {
   const e = error as { code?: string; message?: string };
-  return e.code === '42501' && /within ten minutes/i.test(e.message ?? '');
+  /**
+   * Опознаётся ИМЕННО окно пяти правок. Текстом «within ten minutes» отказывают ДВА стража 0110, и второй — широкий
+   * гардрейл («a guardrail of every offer was changed…»): он про изменение пола маржи у всего тенанта, а не про пять
+   * предложений (находка 1 ревью шага 33). Сказать продавцу про пять предложений там, где он менял гардрейл, — это тот
+   * самый дефект, ради которого OQ-196 и правился, просто в новой форме.
+   */
+  return e.code === '42501' && /offers changed within ten minutes/i.test(e.message ?? '');
 }
 
 const BULK_JOB_COLUMNS = `bulk_job_id, kind, status, params, phase, total_items, done_items, result, error_code, attempts,

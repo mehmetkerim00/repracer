@@ -141,6 +141,25 @@ test('Р-135, риск 17: массовая правка, разбитая на 
   const refused = outcomes.filter((o) => /mass change requires it/.test(o));
   assert.ok(refused.length > 0, `окно отказывает массовой правке по одной строке за транзакцию: ${JSON.stringify(outcomes.slice(0, 8))}`);
   assert.equal(outcomes.slice(0, 2).every((o) => o === 'APPLIED'), true, 'правка одного-двух предложений руками проходит без второго фактора');
+
+  /**
+   * OQ-196 (шаг 33): окно и массовая правка — РАЗНЫЕ отказы, и хранилище обязано их различать, иначе продавцу советуют не
+   * то, что с ним случилось (находка 2 ревью шага 33). Проверяется на настоящем отказе базы.
+   *
+   * Случай продавца ровно такой: правка ОДНОГО предложения второго фактора не требует [Р-144], поэтому запрос доходит до
+   * базы — и упирается в окно, уже открытое предыдущими правками. Импорт себестоимости сюда не годится: он отказывает
+   * раньше базы, не дойдя до стража.
+   */
+  // Предложение, которого в окне ещё НЕТ: правка уже учтённого счёт различных предложений не увеличивает
+  const one = world.ids.dbId(`ws-${outcomes.findIndex((o) => o !== 'APPLIED') + 1}`);
+  const now = (await store.resolveBounds(world.tenantId, one)).bounds;
+  const current = {
+    minMinor: now.min.status === 'RESOLVED' ? now.min.amountMinor : null,
+    maxMinor: now.max.status === 'RESOLVED' ? now.max.amountMinor : null,
+  };
+  const inWindow = await store.editBounds(world.tenantId, [{ writeScopeId: one, minMinor: (current.minMinor ?? 1000) - 1, expected: current }], actor(false), 'APPLY');
+  assert.deepEqual(inWindow, { status: 'MFA_REQUIRED', window: true },
+    `правка ОДНОГО предложения внутри открытого окна отличима от массовой правки: ${JSON.stringify(inWindow)}`);
 });
 
 test('Ревью шага 28, находки 5 и 14: повторный импорт не обнуляет ни прочие составляющие себестоимости, ни вторую часть комиссии', async () => {

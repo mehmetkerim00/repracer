@@ -1,6 +1,6 @@
 # Шаг 26: внешний контроль планировщика [Р-127]
 
-Дата: 2026-09-18. Код — [services/scheduler/src/heartbeat.ts](../../services/scheduler/src/heartbeat.ts), проверка —
+Дата: 2026-09-18. Код — [packages/service-runtime/src/heartbeat.ts](../../packages/service-runtime/src/heartbeat.ts), проверка —
 [services/scheduler/test/process.test.ts](../../services/scheduler/test/process.test.ts). Данные синтетические.
 
 ## Зачем

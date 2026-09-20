@@ -144,7 +144,7 @@ test('Р-148: доказательства не несут путей машин
    * Что запрещено: домашний каталог человека, рабочий каталог сессии и адрес из частной сети. Путь раннера сборки
    * (`/home/runner/...`) разрешён намеренно: он одинаков у всех, ничего не раскрывает и приходит из публичных логов CI.
    */
-  const LEAKS_A_PATH = /\/Users\/[^\s'")\]]+|\/home\/(?!runner\b)[a-z][^\s'")\]]*|[A-Z]:\\+Users\\+|\/private\/tmp\/claude-|\b(?:10\.\d{1,3}|192\.168|172\.(?:1[6-9]|2\d|3[01]))\.\d{1,3}\.\d{1,3}\b/;
+  const LEAKS_A_PATH = /\/Users\/[^\s'")\]]+|\/home\/(?!runner\b)[a-z][^\s'")\]]*|[A-Za-z]:\\+[Uu]sers\\+|(?:\/private)?\/tmp\/claude-|\/var\/folders\/[\w+/-]{6,}|(?<![\w/])~\/[\w.-]+\/|\b(?:10\.\d{1,3}|192\.168|172\.(?:1[6-9]|2\d|3[01]))\.\d{1,3}\.\d{1,3}\b/;
   // Зубы [Р-94]: правило обязано ловить ровно то, что шаг 33 из логов и вычистил
   for (const bad of [
     'at /Users/kerim/Desktop/repracer/node_modules/pg/lib/client.js:694:17',
@@ -152,6 +152,8 @@ test('Р-148: доказательства не несут путей машин
     'at /home/kerim/projects/repracer/index.ts:1:1',
     'connecting to 10.0.3.17:5432',
     'C:\\Users\\kerim\\repracer',
+    'cwd: /var/folders/x1/9sd8f7s3/T/repracer-run',
+    'смотри ~/repracer/docs/evidence',
   ]) assert.match(bad, LEAKS_A_PATH, `правило обязано ловить: ${bad.slice(0, 60)}`);
   /** Чего ловить не должно: путь внутри репозитория, путь раннера сборки и локальная петля */
   for (const fine of [
@@ -167,7 +169,7 @@ test('Р-148: доказательства не несут путей машин
     for (const name of readdirSync(new URL(rel, root))) {
       const child = `${rel}${name}`;
       if (statSync(new URL(child, root)).isDirectory()) { walk(`${child}/`); continue; }
-      if (!/\.(md|log|txt|json)$/.test(name)) continue;
+      if (!/\.(md|log|txt|json|jsonl|ya?ml|sh|mjs|sql)$/.test(name)) continue;
       // Сам разбор истории называет найденные пути как находку — иначе о них нельзя написать
       if (child === 'docs/evidence/step33-history-audit.md') continue;
       for (const line of readFileSync(new URL(child, root), 'utf8').split('\n')) {
@@ -175,7 +177,16 @@ test('Р-148: доказательства не несут путей машин
       }
     }
   };
-  walk('docs/');
+  /**
+   * Смотрится ВЕСЬ репозиторий, а не только `docs/` (находка 8 ревью шага 33): первая редакция обещала «доказательства», а
+   * путь машины так же легко попадает в README, в пример конфигурации или в скрипт.
+   */
+  for (const dir of ['docs/', 'deploy/', 'scripts/', 'tests/', 'infra/']) walk(dir);
+  for (const file of ['README.md', 'CLAUDE.md', 'NOTICE.md']) {
+    for (const line of readFileSync(new URL(file, root), 'utf8').split('\n')) {
+      if (LEAKS_A_PATH.test(line)) { offenders.push(`${file}: ${line.trim().slice(0, 70)}`); break; }
+    }
+  }
   assert.deepEqual(offenders, [], 'доказательство несёт путь машины разработчика: репозиторий публичный [Р-148]');
 });
 
@@ -189,22 +200,72 @@ test('Р-148: доказательства не несут путей машин
 test('Р-127: каждый разворачиваемый процесс отмечается во внешнем сервисе (OQ-183)', async () => {
   const { readdirSync, readFileSync, existsSync } = await import('node:fs');
   const root = new URL('../../', import.meta.url);
-  const services = readdirSync(new URL('services/', root))
-    .filter((name) => existsSync(new URL(`services/${name}/src/main.ts`, root)));
-  assert.ok(services.length >= 3, `процессы найдены: ${services.join(', ')}`);
+
+  /**
+   * «Разворачиваемый» определяется РАЗВЁРТЫВАНИЕМ, а не каталогом `services/` (находка 7 ревью шага 33): первая редакция
+   * правила обещала «каждый процесс», а смотрела на `services/*`, и процесс, разворачиваемый иначе, мимо неё прошёл бы.
+   * Точку входа называет сам compose развёртывания — оттуда она и берётся.
+   */
+  const entryPoints: Array<{ deployment: string; main: string }> = [];
+  for (const name of readdirSync(new URL('deploy/', root))) {
+    // `deploy/ci` — надстройки, которыми сборка поднимает остальные развёртывания, а не процесс
+    if (name === 'ci' || !existsSync(new URL(`deploy/${name}/compose.yaml`, root))) continue;
+    const compose = readFileSync(new URL(`deploy/${name}/compose.yaml`, root), 'utf8');
+    const main = /"(services\/[\w-]+\/src\/main\.ts)"/.exec(compose)?.[1];
+    assert.ok(main, `развёртывание ${name} называет свою точку входа в compose`);
+    entryPoints.push({ deployment: name, main: main! });
+  }
+  assert.ok(entryPoints.length >= 3, `развёртывания найдены: ${entryPoints.map((e) => e.deployment).join(', ')}`);
 
   const silent: string[] = [];
-  for (const name of services) {
-    const main = readFileSync(new URL(`services/${name}/src/main.ts`, root), 'utf8');
-    const config = readFileSync(new URL(`services/${name}/src/config.ts`, root), 'utf8');
+  for (const { deployment, main } of entryPoints) {
+    const dir = main.slice(0, main.lastIndexOf('/src/'));
+    const source = readFileSync(new URL(main, root), 'utf8');
+    const configPath = `${dir}/src/config.ts`;
+    const config = existsSync(new URL(configPath, root)) ? readFileSync(new URL(configPath, root), 'utf8') : '';
     // Процесс обязан СТАВИТЬ отметку и обязан уметь объяснить её отсутствие: выключение — только явное
-    const beats = /createHeartbeat\s*\(/.test(main) && /heartbeat\.beat\s*\(/.test(main);
+    const beats = /createHeartbeat\s*\(/.test(source) && /heartbeat\.beat\s*\(/.test(source);
     const optOutIsExplicit = /HEARTBEAT\s*===\s*'off'/.test(config);
-    if (!beats || !optOutIsExplicit) silent.push(`${name}: отметка ${beats ? 'есть' : 'НЕ СТАВИТСЯ'}, явное выключение ${optOutIsExplicit ? 'есть' : 'ОТСУТСТВУЕТ'}`);
+    if (!beats || !optOutIsExplicit) {
+      silent.push(`${deployment} (${main}): отметка ${beats ? 'есть' : 'НЕ СТАВИТСЯ'}, явное выключение ${optOutIsExplicit ? 'есть' : 'ОТСУТСТВУЕТ'}`);
+    }
+    // Отметка у всех одна и та же: вторая реализация разойдётся с общей [Р-145]
+    assert.ok(!existsSync(new URL(`${dir}/src/heartbeat.ts`, root)), `${deployment}: своя реализация отметки`);
   }
   assert.deepEqual(silent, [], 'разворачиваемый процесс без внешней отметки: его остановку никто не заметит [Р-127]');
+});
 
-  // Отметка у всех одна и та же: второй реализации нет [Р-145]
-  const own = services.filter((n) => existsSync(new URL(`services/${n}/src/heartbeat.ts`, root)));
-  assert.deepEqual(own, [], 'у процесса своя реализация отметки — она разойдётся с общей');
+/**
+ * Р-146, находка 10 ревью шага 33: правило «ссылки разрешаются» проверяло только номера открытых вопросов, а файловые
+ * ссылки — нет. На том же шаге удалили файл, и три документа стали вести в никуда: реализацию отметки искали бы по
+ * ссылке, которой больше нет. Документация, ведущая в 404, хуже её отсутствия — она отнимает время молча.
+ */
+test('Р-146: ссылка из документации ведёт на существующий файл (находка 10 ревью шага 33)', async () => {
+  const { readdirSync, readFileSync, existsSync, statSync } = await import('node:fs');
+  const root = new URL('../../', import.meta.url);
+  const LINK = /\]\(([^)#\s]+)(?:#[^)\s]*)?\)/g;
+
+  const files: string[] = [];
+  const walk = (rel: string) => {
+    for (const name of readdirSync(new URL(rel, root))) {
+      const child = `${rel}${name}`;
+      if (statSync(new URL(child, root)).isDirectory()) walk(`${child}/`);
+      else if (name.endsWith('.md')) files.push(child);
+    }
+  };
+  walk('docs/');
+  for (const name of ['README.md', 'CLAUDE.md', 'NOTICE.md']) files.push(name);
+  assert.ok(files.length > 50, `документов найдено: ${files.length}`);
+
+  const broken: string[] = [];
+  for (const file of files) {
+    const dir = file.slice(0, file.lastIndexOf('/') + 1);
+    for (const [, target] of readFileSync(new URL(file, root), 'utf8').matchAll(LINK)) {
+      // Внешние адреса и якоря внутри страницы — не наше дело: проверяются ссылки на файлы репозитория
+      if (/^(https?:|mailto:)/.test(target!) || target!.startsWith('<')) continue;
+      const resolved = new URL(target!, new URL(dir, root));
+      if (!existsSync(resolved)) broken.push(`${file} → ${target}`);
+    }
+  }
+  assert.deepEqual(broken, [], 'ссылка из документации ведёт на несуществующий файл');
 });

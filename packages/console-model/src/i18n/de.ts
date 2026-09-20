@@ -631,7 +631,7 @@ export const de: Messages = {
         PLAN_CHANGED: 'die Daten haben sich seit der Vorschau geändert', COLUMNS_MISSING: 'in der Datei fehlen Spalten',
         NO_ROWS: 'keine anwendbaren Zeilen', BAD_REQUEST: 'die Anfrage ist unvollständig', BAD_DRAFT: 'der Strategieentwurf ist unvollständig',
         BAD_SCOPES: 'keine Angebote ausgewählt', CONFLICT: 'die Grenzen haben sich inzwischen geändert',
-        MFA_REQUIRED: 'der zweite Faktor fehlt', MFA_REQUIRED_WINDOW: 'in den letzten zehn Minuten wurden Grenzen von mehr als fünf Angeboten geändert: zum Fortfahren mit zweitem Faktor anmelden', FORBIDDEN: 'die Rolle darf das nicht', JOB_FAILED: 'unerwarteter Fehler',
+        MFA_REQUIRED: 'der zweite Faktor fehlt', MFA_REQUIRED_WINDOW: 'in den letzten zehn Minuten wurden mehr als fünf Angebote geändert: zum Fortfahren mit zweitem Faktor anmelden', FORBIDDEN: 'die Rolle darf das nicht', JOB_FAILED: 'unerwarteter Fehler',
         UNKNOWN_JOB_KIND: 'diesen Vorgang kennt der Hintergrundprozess nicht',
         TOO_MANY_ATTEMPTS: 'der Vorgang ist mehrfach gescheitert und wird nicht weiter versucht',
       },
