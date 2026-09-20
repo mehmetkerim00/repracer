@@ -946,3 +946,29 @@ test('OQ-207: ждущее задание отменяется, идущее —
   assert.equal((byViewer.body as BulkJobView).status, 'CANCELLED');
   await runPendingJobs(live);
 });
+
+/**
+ * OQ-196 (шаг 33): за отказом «нужен второй фактор» стоят два разных правила, и продавцу важно, какое сработало.
+ *
+ * Массовая правка — «больше одного предложения одной транзакцией». Окно [Р-135] — «правок больше пяти за десять минут»,
+ * и оно срабатывает на правке ОДНОГО предложения тоже. До шага 33 оба отказа приходили одним кодом, и продавец,
+ * поправивший шестое предложение подряд, читал совет про операцию, которой не делал: делить ему было нечего.
+ */
+test('OQ-196: окно массовой правки объясняется продавцу своим текстом, а не текстом массовой правки', async () => {
+  const { bulkJobView, messagesFor } = await import('@repracer/console-model');
+  const failed = (errorCode: string) => bulkJobView({
+    jobId: '22222222-2222-4222-8222-222222222222', kind: 'BOUNDS_EDIT', status: 'FAILED', errorCode,
+    doneItems: 0, totalItems: 1, phase: 'APPLYING', attempts: 1, result: null, params: {},
+    createdAt: '2026-09-20T10:00:00.000Z', startedAt: '2026-09-20T10:00:01.000Z', finishedAt: '2026-09-20T10:00:02.000Z',
+    createdByMembershipId: 'm', createdByUserId: 'u', createdWithMfa: false, leaseExpired: false,
+  } as never, messagesFor('en')).error;
+
+  const window = failed('MFA_REQUIRED_WINDOW');
+  const mass = failed('MFA_REQUIRED');
+  assert.notEqual(window, mass, 'у окна свой текст: иначе продавцу советуют не то, что с ним случилось');
+  // Текст окна называет ИМЕННО окно: сколько предложений и за какое время
+  assert.match(window!, /ten minutes/, window!);
+  assert.match(window!, /five offers/, window!);
+  // И это не заглушка «неизвестный код»: такой текст назвал бы сам код
+  assert.ok(!window!.includes('MFA_REQUIRED_WINDOW'), window!);
+});

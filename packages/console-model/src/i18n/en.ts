@@ -624,7 +624,7 @@ export const en = {
         PLAN_CHANGED: 'the data changed after the preview', COLUMNS_MISSING: 'the file is missing columns',
         NO_ROWS: 'no rows to apply', BAD_REQUEST: 'the request is incomplete', BAD_DRAFT: 'the strategy draft is incomplete',
         BAD_SCOPES: 'no offers selected', CONFLICT: 'the bounds changed in the meantime',
-        MFA_REQUIRED: 'the second factor is missing', FORBIDDEN: 'the role may not do this', JOB_FAILED: 'unexpected error',
+        MFA_REQUIRED: 'the second factor is missing', MFA_REQUIRED_WINDOW: 'bounds of more than five offers were changed in the last ten minutes: sign in with a second factor to continue', FORBIDDEN: 'the role may not do this', JOB_FAILED: 'unexpected error',
         UNKNOWN_JOB_KIND: 'the background process does not know this operation',
         TOO_MANY_ATTEMPTS: 'the operation failed repeatedly and is not retried any further',
       },

@@ -511,6 +511,19 @@ function secondFactorRefused(error: unknown): boolean {
   return e.code === '42501' && /second factor/i.test(e.message ?? '');
 }
 
+/**
+ * OQ-196 (шаг 33): за отказом «нужен второй фактор» стоят ДВА РАЗНЫХ правила, и продавцу важно знать, какое сработало.
+ *
+ * Первое — массовая правка: больше одного предложения одной транзакцией. Второе — окно [Р-135]: правок больше пяти за
+ * десять минут, даже если каждая была по одному предложению. До шага 33 оба отказа приходили на экран одним кодом, и
+ * продавец, честно поправивший ШЕСТОЕ предложение подряд, читал «правка больше чем одного предложения требует второго
+ * фактора» — про операцию, которой он не делал. Совет из этого текста невыполним: делить нечего.
+ */
+function windowRefused(error: unknown): boolean {
+  const e = error as { code?: string; message?: string };
+  return e.code === '42501' && /within ten minutes/i.test(e.message ?? '');
+}
+
 const BULK_JOB_COLUMNS = `bulk_job_id, kind, status, params, phase, total_items, done_items, result, error_code, attempts,
   (lease_until IS NOT NULL AND lease_until <= now()) AS lease_expired,
   created_with_mfa, created_by_membership_id, created_by_user_id, created_at, started_at, finished_at, lease_owner, lease_until`;
@@ -1044,6 +1057,7 @@ export class PgPricingStore implements PricingStore {
         return { status: 'APPLIED', rows } satisfies BoundsEditResult;
       }, actor.userId, { mfa: actor.mfa, ...(actor.bulkJobId ? { bulkJobId: actor.bulkJobId } : {}) });
     } catch (error) {
+      if (windowRefused(error)) return { status: 'MFA_REQUIRED', window: true };
       if (secondFactorRefused(error)) return { status: 'MFA_REQUIRED' };
       if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
       throw error;
@@ -1148,6 +1162,7 @@ export class PgPricingStore implements PricingStore {
         return { status: 'APPLIED', importId, rows: batch.rows.length, offers } satisfies CostImportResult;
       }, actor.userId, { mfa: actor.mfa, ...(actor.bulkJobId ? { bulkJobId: actor.bulkJobId } : {}) });
     } catch (error) {
+      if (windowRefused(error)) return { status: 'MFA_REQUIRED', window: true };
       if (secondFactorRefused(error)) return { status: 'MFA_REQUIRED' };
       const code = (error as { code?: string }).code;
       if (code === '42501') return { status: 'FORBIDDEN' };

@@ -90,7 +90,15 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
               ...(r.feeRateBp === undefined ? {} : { feeRateBp: r.feeRateBp }),
             })),
           }, { membershipId: ctx.membershipId, userId: ctx.userId, mfa: false, bulkJobId: ctx.jobId }, 'APPLY');
-          if (applied.status !== 'APPLIED') throw Object.assign(new Error(applied.status), { cause: applied.status === 'INVALID' ? applied.cause : applied.status });
+          /**
+           * OQ-196 (шаг 33): окно массовой правки [Р-135] и массовая правка — РАЗНЫЕ отказы, и продавцу нужен разный совет.
+           * Окно срабатывает и на правке ОДНОГО предложения, если за последние десять минут их было больше пяти.
+           */
+          if (applied.status !== 'APPLIED') {
+            const cause = applied.status === 'INVALID' ? applied.cause
+              : applied.status === 'MFA_REQUIRED' && applied.window === true ? 'MFA_REQUIRED_WINDOW' : applied.status;
+            throw Object.assign(new Error(applied.status), { cause });
+          }
           /**
            * Р-142 (шаг 31): отчёт об импорте — ФАЙЛ, а не пять примеров на экране. На выгрузке в 10 000 строк с 1430
            * несопоставленными продавец по экрану не поймёт, какие строки чинить; с файлом он правит свою выгрузку и ввозит
@@ -135,7 +143,9 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
           await progress(edits.length, 'APPLYING');
           const applied = await ctx.store.editBounds(ctx.tenantId, edits, actor, 'APPLY');
           if (applied.status !== 'APPLIED') {
-            throw Object.assign(new Error(applied.status), { cause: applied.status === 'INVALID' ? applied.cause : applied.status });
+            const cause = applied.status === 'INVALID' ? applied.cause
+              : applied.status === 'MFA_REQUIRED' && applied.window === true ? 'MFA_REQUIRED_WINDOW' : applied.status;
+            throw Object.assign(new Error(applied.status), { cause });
           }
           return { offers: applied.rows.length, changed: applied.rows.filter((r) => r.before.minMinor !== r.after.minMinor || r.before.maxMinor !== r.after.maxMinor).length };
         },

@@ -350,7 +350,11 @@ export type BoundsEditResult =
   | { status: 'PREVIEWED' | 'APPLIED'; rows: BoundsEditRow[] }
   | { status: 'FORBIDDEN' }
   /** Р-88: применение правки границ больше одной единицы записи — только со вторым фактором; экран различий его не требует */
-  | { status: 'MFA_REQUIRED' }
+  /**
+   * OQ-196 (шаг 33): `window` отличает окно [Р-135] («правок больше пяти за десять минут») от массовой правки («больше
+   * одного предложения одной транзакцией»). Продавцу это разные события, и совет у них разный.
+   */
+  | { status: 'MFA_REQUIRED'; window?: boolean }
   | { status: 'CONFLICT'; writeScopeId: string; actual: { minMinor: number | null; maxMinor: number | null } }
   | { status: 'INVALID'; writeScopeId: string; cause: 'SCOPE_NOT_FOUND' | 'AMOUNT_INVALID' | 'MIN_ABOVE_MAX' | 'NOTHING_TO_CHANGE' | 'DUPLICATE_SCOPE' };
 
@@ -383,7 +387,7 @@ export type CostImportResult =
   | { status: 'APPLIED'; importId: string; rows: number; offers: number }
   | { status: 'FORBIDDEN' }
   /** Р-135: импорт применяется только со вторым фактором; предпросмотр его не требует */
-  | { status: 'MFA_REQUIRED' }
+  | { status: 'MFA_REQUIRED'; window?: boolean }
   | { status: 'INVALID'; cause: 'NO_ROWS' | 'DUPLICATE_SCOPE' | 'AMOUNT_INVALID' | 'SCOPE_NOT_FOUND' | 'CURRENCY_MISMATCH'; writeScopeId?: string };
 
 /** Шаг 21: новая версия стратегии и её назначение единицам записи — после превью */
