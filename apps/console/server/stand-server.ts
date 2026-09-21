@@ -910,6 +910,38 @@ async function main(): Promise<void> {
         joinMember: pgStandJoinMember(adminPool, directory),
       }),
     });
+    /**
+     * Р-151 (шаг 34): демо-тенант для показа продавцу — `REPRACER_DEMO=on`. Тот же мир, что в живом прогоне онбординга, но
+     * уже настроенный (себестоимость, границы, стратегия, движок включён), и время в нём ИДЁТ: одна виртуальная минута в
+     * секунду, планировщик опрашивает симулятор, решения и записи цен появляются на глазах. Демо живёт в настоящем и
+     * будущем, а не в прошлом: данные, внесённые продавцом через консоль, действуют с настоящего момента.
+     */
+    if (process.env.REPRACER_DEMO === 'on') {
+      const { demoWorld, DEMO_OFFERS } = await import('@repracer/contract-tests/live');
+      const { PgPricingStore } = await import('@repracer/pricing-store-pg');
+      const demo = await demoWorld({
+        tag: 3400, startIso: new Date().toISOString(), bare: false, appPool: pool, adminPool, provisioningPool: role('svc_provisioning', 1),
+        dispatcherPool: role('svc_dispatcher', 2), schedulerPool: role('svc_scheduler', 3), exporterPool: role('svc_exporter', 2),
+        memberUsers, memberEmails: STAND_EMAILS, joinMember: pgStandJoinMember(adminPool, directory),
+        sleep: (virtualMs) => new Promise((resolve) => setTimeout(resolve, virtualMs / 60)),
+      });
+      const seeded = demo.live.seeded;
+      const store = new PgPricingStore(pool, { adminPool, bulkWorkerPool: role('svc_bulk_worker', 2) });
+      const accounts = [{ channelAccountId: seeded.channelAccountId, channel: 'KAUFLAND', marketplaces: ['de'], haltRelease: 'SAMPLE' as const }];
+      const nowIso = () => demo.clock.iso();
+      worlds.push({
+        id: 'demo/kaufland', title: 'Demo · Kaufland (Simulator)', description: `${DEMO_OFFERS} Angebote, je drei Wettbewerber: Drift, Unterbieter, Preiswellen`,
+        tenantId: seeded.tenantId, accounts, identityTenantId: seeded.tenantId, membershipAlias: (id) => id, failures: [], demo: true,
+        store: store as never, pipeline: demo.live.pipelineForDbIds() as never, clock: { iso: nowIso, nowMs: () => demo.clock.nowMs() } as never,
+        callContext: (channelAccountId) => ({ tenantId: seeded.tenantId as never, channelAccountId: channelAccountId as never, correlationId: 'stand-demo', deadline: nowIso() }),
+        view: async (viewer) => ({
+          id: 'demo/kaufland', title: 'Demo · Kaufland (Simulator)', description: `${DEMO_OFFERS} Angebote`, tenantId: seeded.tenantId, now: nowIso(),
+          accounts, viewer: { ...viewer }, state: await store.readConsoleState(seeded.tenantId, nowIso() as never),
+        }) as never,
+      });
+      // Время демо идёт, пока жив стенд; остановка стенда останавливает и мир
+      void demo.advance(24 * 365).catch((error: unknown) => console.error('demo world stopped', error instanceof Error ? error.message : error));
+    }
     handle = createStandApi(worlds, { authenticator: createAuthenticator({ ...verify, directory }), ...(simulator ? { simulator } : {}) });
   } else {
     const worlds = await buildStandWorlds();

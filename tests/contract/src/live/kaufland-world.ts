@@ -92,6 +92,11 @@ export async function kauflandLiveWorld(input: {
   params?: KauflandChannelModelSpec['params'];
   /** Р-151: тенант — демо; помечается в базе */
   demo?: boolean;
+  /** Существующие пользователи, их адреса и приём приглашений — как у посева стенда: существующий человек входит в тенант
+   *  владельцем только своим адресом, остальными ролями — приглашением (находка 5 ревью шага 16) */
+  memberUsers?: Readonly<Record<string, string>>;
+  memberEmails?: Readonly<Record<string, string>>;
+  joinMember?: Parameters<typeof seedPricingWorld>[1]['joinMember'];
   /** Р-150: аккаунты других каналов, у которых нет доступа, — с перечнем того, чего не хватает */
   awaitingAccounts?: NonNullable<MemorySeed['accounts']>;
 }): Promise<KauflandLiveWorld> {
@@ -144,6 +149,8 @@ export async function kauflandLiveWorld(input: {
   const seeded = await seedPricingWorld(input.appPool, {
     fixtureTenantId: tenantFixture, fixtureChannelAccountId: accountFixture, marketplaces, clock: startIso, seed: pricing,
     provisioningPool: input.provisioningPool, adminPool: input.adminPool, ...(input.demo ? { demo: true } : {}),
+    ...(input.memberUsers ? { memberUsers: input.memberUsers } : {}), ...(input.memberEmails ? { memberEmails: input.memberEmails } : {}),
+    ...(input.joinMember ? { joinMember: input.joinMember } : {}),
   });
   const simulator = new SimulatedKauflandChannel(channelModel, startIso);
   const buyboxCalls = new Map<number, number[]>();

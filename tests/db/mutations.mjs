@@ -286,11 +286,11 @@ export const STEP17_ROWS = [
     row: 'находка 5', invariant: 'создание тенанта не присоединяет существующего пользователя мимо приглашения',
     mutations: [
       // Шаг 19 [Р-104]: роль и адрес проверяются у уже входившего пользователя (smoke_setup.sql) — отказ «никогда не входил» их не маскирует
-      m(replaceInFunction('security.provision_tenant(uuid,text,text,jsonb)', "IF m ->> 'role' IS DISTINCT FROM 'OWNER' THEN", 'IF false THEN'),
+      m(replaceInFunction('security.provision_tenant(uuid,text,text,jsonb,boolean)', "IF m ->> 'role' IS DISTINCT FROM 'OWNER' THEN", 'IF false THEN'),
         smoke('existing user attached as a member without an invitation (step 16 finding 5)')),
-      m(replaceInFunction('security.provision_tenant(uuid,text,text,jsonb)', "IF lower(trim(m ->> 'email')) IS DISTINCT FROM existing.email THEN", 'IF false THEN'),
+      m(replaceInFunction('security.provision_tenant(uuid,text,text,jsonb,boolean)', "IF lower(trim(m ->> 'email')) IS DISTINCT FROM existing.email THEN", 'IF false THEN'),
         smoke('existing user provisioned as owner under another email (step 16 finding 5)')),
-      m(replaceInFunction('security.provision_tenant(uuid,text,text,jsonb)', 'IF NOT EXISTS (SELECT 1 FROM platform.external_identity e WHERE e.user_id = existing.user_id',
+      m(replaceInFunction('security.provision_tenant(uuid,text,text,jsonb,boolean)', 'IF NOT EXISTS (SELECT 1 FROM platform.external_identity e WHERE e.user_id = existing.user_id',
         'IF false AND NOT EXISTS (SELECT 1 FROM platform.external_identity e WHERE e.user_id = existing.user_id'),
         smoke('existing user who never signed in provisioned as owner (step 16 finding 5)')),
     ],

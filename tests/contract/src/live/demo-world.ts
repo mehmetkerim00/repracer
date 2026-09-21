@@ -72,10 +72,16 @@ export async function demoWorld(input: {
   appPool: PgPool; adminPool: PgPool; provisioningPool: PgPool; dispatcherPool: PgPool; schedulerPool: PgPool; exporterPool: PgPool;
   /** Как быстро идёт виртуальное время между тактами: по умолчанию мгновенно (живой прогон); стенд задаёт настоящую паузу */
   sleep?: (virtualMs: number) => Promise<void>;
+  /** Существующие пользователи стенда (псевдоним членства → user_id): владелец демо — тот же человек, что входит на стенд */
+  memberUsers?: Readonly<Record<string, string>>;
+  memberEmails?: Readonly<Record<string, string>>;
+  joinMember?: Parameters<typeof kauflandLiveWorld>[0]['joinMember'];
 }): Promise<DemoWorld> {
   const clock = new VirtualClock(input.startIso);
   const live = await kauflandLiveWorld({
     tag: input.tag, clock, products: demoProducts({ bare: input.bare }), seed: input.seed ?? input.tag, demo: true,
+    ...(input.memberUsers ? { memberUsers: input.memberUsers } : {}), ...(input.memberEmails ? { memberEmails: input.memberEmails } : {}),
+    ...(input.joinMember ? { joinMember: input.joinMember } : {}),
     appPool: input.appPool, adminPool: input.adminPool, provisioningPool: input.provisioningPool, dispatcherPool: input.dispatcherPool,
     // Р-150: рядом с рабочим Kaufland — Amazon без доступа, с перечнем того, чего не хватает
     awaitingAccounts: [{ channelAccountId: `acc-amazon-awaiting-${input.tag}`, channel: 'AMAZON', region: 'EU', marketplaces: ['de'],
