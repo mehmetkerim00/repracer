@@ -565,6 +565,21 @@ export interface PricingStore {
    * означала бы то же, что падение процесса. Отмена — действие человека: у неё автор и строка аудита [Р-97].
    */
   cancelBulkJob(tenantId: string, jobId: string, actor: AdminActor): Promise<'CANCELLED' | 'NOT_WAITING' | 'FORBIDDEN'>;
+
+  // --- онбординг [Р-149] ------------------------------------------------------------------------------------------------
+  /** Где продавец остановился и до какого набора сузил путь; null — путь не начат */
+  onboardingProgress(tenantId: string): Promise<OnboardingProgressRow | null>;
+  /** Запись человека: последний шаг и сужение набора [Р-131 — пропустить себестоимость нельзя, можно сузить] */
+  saveOnboardingProgress(tenantId: string, input: OnboardingProgressInput, actor: AdminActor): Promise<'SAVED' | 'FORBIDDEN'>;
+  /** Состояние каждого шага, ВЫВЕДЕННОЕ из данных, а не из галочек: шаг завершён, потому что состояние проверяемо */
+  onboardingStatus(tenantId: string): Promise<OnboardingStepStatus[]>;
+  /** Аккаунты канала тенанта с честным состоянием доступа [Р-150] */
+  channelAccounts(tenantId: string): Promise<ChannelAccountRow[]>;
+  /**
+   * Предложения, у которых себестоимость ГОТОВА К ВКЛЮЧЕНИЮ: объявлена [Р-131] и есть полная оценка комиссии
+   * (`write_scope_cost_ready`) — то же, чего требует путь решения при включении. Сужение набора [Р-149] считается отсюда, а не по полю экрана: экран и база расходились.
+   */
+  scopesWithCost(tenantId: string): Promise<string[]>;
   saveStrategy(tenantId: string, input: StrategySaveInput, actor: AdminActor): Promise<StrategySaveResult>;
   /** Р-123 (шаг 24): наименьшая цена за 30 суток витрины до начала скидки — предупреждение до объявления */
   /**
@@ -643,7 +658,9 @@ export interface PricingStore {
  * Что делает задание. `STRATEGY_PREVIEW` ничего не меняет [OQ-201]: он считает решение по КАЖДОМУ предложению каталога, и
  * потому это работа, а не запрос, — предпросмотр по выборке был ценой синхронного ответа, а не свойством продукта.
  */
-export type BulkJobKind = 'COST_IMPORT' | 'BOUNDS_EDIT' | 'BOUNDS_PLAN' | 'STRATEGY_ASSIGN' | 'STRATEGY_PREVIEW' | 'PRICE_EVIDENCE' | 'PRICE_FEED_EXPORT';
+export type BulkJobKind = 'COST_IMPORT' | 'BOUNDS_EDIT' | 'BOUNDS_PLAN' | 'STRATEGY_ASSIGN' | 'STRATEGY_PREVIEW' | 'PRICE_EVIDENCE' | 'PRICE_FEED_EXPORT'
+  /** Шаг 34 [Р-149]: включение движка у набора предложений — последний шаг пути; право своё, ENABLE_REPRICING */
+  | 'REPRICING_ENABLE';
 
 /**
  * Р-143 (шаг 31): виды заданий, которые НИЧЕГО НЕ МЕНЯЮТ. Им второй фактор не нужен, и создать их может любой участник; но
@@ -885,4 +902,47 @@ export interface ConsoleState {
   strategyVersions: ConsoleStrategyVersionRow[];
   explanationRulesets: ExplanationRuleset[];
   audit: ConsoleAuditRow[];
+}
+
+// --- онбординг [Р-149], канал без доступов [Р-150] --------------------------------------------------------------------
+
+export type OnboardingStep = 'TENANT' | 'CHANNEL' | 'COSTS' | 'BOUNDS' | 'STRATEGY' | 'ENABLE';
+export const ONBOARDING_STEPS: readonly OnboardingStep[] = ['TENANT', 'CHANNEL', 'COSTS', 'BOUNDS', 'STRATEGY', 'ENABLE'];
+
+export interface OnboardingProgressRow {
+  /** null — весь каталог; иначе — предложения, до которых путь сужен */
+  scopeWriteScopeIds: string[] | null;
+  lastStep: OnboardingStep | 'DONE';
+  startedAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+}
+
+export interface OnboardingProgressInput {
+  lastStep: OnboardingStep | 'DONE';
+  /** undefined — не менять; null — снять сужение */
+  scopeWriteScopeIds?: string[] | null;
+}
+
+export interface OnboardingStepStatus {
+  step: OnboardingStep;
+  doneCount: number;
+  totalCount: number;
+  done: boolean;
+  /** Только у шага CHANNEL: хотя бы один аккаунт ждёт доступа [Р-150] */
+  awaiting: boolean;
+}
+
+/** Чего не хватает каналу, чтобы заработать [Р-150]; коды — security.channel_access_blockers() */
+export type ChannelAccessBlocker = 'PARTNER_REGISTRATION' | 'DEVELOPER_KEYS' | 'NOTIFICATION_QUEUE' | 'SELLER_AUTHORIZATION';
+export const CHANNEL_ACCESS_BLOCKERS: readonly ChannelAccessBlocker[] = ['PARTNER_REGISTRATION', 'DEVELOPER_KEYS', 'NOTIFICATION_QUEUE', 'SELLER_AUTHORIZATION'];
+export type ChannelAuthStatus = 'ACTIVE' | 'REAUTH_REQUIRED' | 'REVOKED' | 'DISCONNECTED' | 'AWAITING_ACCESS';
+
+export interface ChannelAccountRow {
+  channelAccountId: string;
+  channel: string;
+  displayName: string | null;
+  marketplaces: string[];
+  authStatus: ChannelAuthStatus;
+  accessBlockers: ChannelAccessBlocker[];
 }

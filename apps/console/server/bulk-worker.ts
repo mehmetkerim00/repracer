@@ -71,6 +71,16 @@ export async function runConfiguredWorker(config: BulkWorkerConfig, stopped: () 
     const pipelines = new Map(world.descriptor.accounts.map((a) => [a.channelAccountId, previewPipelineFor(store, a.channel, now)]));
     const handlers = bulkJobHandlers({
       world: bulkWorldReader(store, world.descriptor, now),
+      // Шаг 34 [Р-149]: включение движка — тем же путём решения, что предпросмотр: канал не опрашивается
+      enableRepricing: async (ctx, scope) => {
+        const pipeline = pipelines.get(scope.channelAccountId);
+        if (!pipeline) throw new Error(`аккаунт ${scope.channelAccountId} не описан в настройках исполнителя`);
+        const result = await pipeline.enableRepricing({
+          tenantId: world.descriptor.tenantId as never, channelAccountId: scope.channelAccountId as never,
+          correlationId: `bulk-enable:${scope.writeScopeId}`, deadline: now(),
+        }, scope.writeScopeId, { userId: ctx.userId });
+        return { enabled: result.enabled, problems: result.problems.map((x) => ({ code: x.code })) };
+      },
       previewStrategy: async (_ctx, scope, strategy) => {
         const pipeline = pipelines.get(scope.channelAccountId);
         if (!pipeline) throw new Error(`аккаунт ${scope.channelAccountId} не описан в настройках исполнителя`);

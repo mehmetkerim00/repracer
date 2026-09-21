@@ -33,6 +33,8 @@ export interface StandWorld {
   accounts: StandAccount[];
   viewer: Viewer;
   state: ConsoleState;
+  /** Р-151: мир на симуляторе — данные синтетические, путь настоящий; помечается везде, где показываются деньги */
+  demo?: boolean;
 }
 
 export type ConsoleScope = ConsoleScopeRow;

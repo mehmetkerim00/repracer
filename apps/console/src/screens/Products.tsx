@@ -5,7 +5,7 @@ import { requestJson, useResource, worldPath } from '../api.ts';
 import { Badge, Cell, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, useMessages } from '../components.tsx';
 
 /** Экран A: действующий пол — главная цифра, min_price — его составляющая (шаг 12, F) */
-export function ProductsView({ view, onEnable, query, onQuery }: {
+export function ProductsView({ worldId, view, onEnable, query, onQuery }: { worldId: string; 
   view: ProductListView; onEnable?: (row: ProductRow) => void; query?: ListQuery; onQuery?: (q: ListQuery) => void;
 }) {
   const m = useMessages();
@@ -15,6 +15,8 @@ export function ProductsView({ view, onEnable, query, onQuery }: {
     <section>
       <h2>{p.title}</h2>
       <p className="muted">{p.totals(view.totals)} {p.clock(view.now)}</p>
+      {/* Задача D шага 34: новый тенант без данных видит, ПОЧЕМУ пусто и куда идти, а не пустую таблицу */}
+      {view.rows.length === 0 ? <p className="notice">{m.ui.onboarding.empty.products} <a href={href(worldId, 'onboarding')}>{m.ui.onboarding.empty.startHere}</a></p> : null}
       <div className="table-wrap">
         <table>
           <thead>
@@ -125,7 +127,7 @@ export function ProductsScreen({ worldId }: { worldId: string }) {
     <>
       {row ? <EnableResultView unit={row.unit.label} result={result} busy={busy} error={error} onAcknowledge={() => void enable(row, true)} onClose={close} /> : null}
       <Load resource={resource} retry={retry}>
-        {(view) => <ProductsView view={view} query={query} onQuery={setQuery} onEnable={(r) => { setRow(r); setResult(null); void enable(r, false); }} />}
+        {(view) => <ProductsView worldId={worldId} view={view} query={query} onQuery={setQuery} onEnable={(r) => { setRow(r); setResult(null); void enable(r, false); }} />}
       </Load>
     </>
   );

@@ -6,6 +6,7 @@ import { Badge, ErrorBox, errorText, href, Load, MessagesContext, useMessages } 
 import { BoundsScreen } from './screens/Bounds.tsx';
 import { ComplianceScreen } from './screens/Compliance.tsx';
 import { JobHistory } from './screens/Jobs.tsx';
+import { OnboardingScreen } from './screens/Onboarding.tsx';
 import { DangerousScreen } from './screens/Dangerous.tsx';
 import { FeedScreen } from './screens/Feed.tsx';
 import { StrategiesScreen } from './screens/Strategies.tsx';
@@ -32,7 +33,8 @@ export function parseHash(hash: string): Route {
  * экрана, с которого задание запустили: продавец уходил на другую страницу — и файл, лежащий в базе, становился недостижим
  * (находка 8 ревью шага 31).
  */
-const SCREENS = ['products', 'decisions', 'strategies', 'feed', 'rejected', 'dangerous', 'bounds', 'cost-import', 'compliance', 'jobs', 'stop'] as const;
+/** Р-149 (шаг 34): путь онбординга — первый экран: с него продавец начинает и к нему возвращается, пока путь не пройден */
+const SCREENS = ['onboarding', 'products', 'decisions', 'strategies', 'feed', 'rejected', 'dangerous', 'bounds', 'cost-import', 'compliance', 'jobs', 'stop'] as const;
 
 /** Вход [Р-78]: у поставщика identity; на стенде — имитатор с синтетическими пользователями. Паролей у нас нет */
 export function LoginView({ simulator, error, busy, onSignIn }: {
@@ -73,6 +75,8 @@ export function WorldList({ worlds }: { worlds: readonly WorldSummary[] }) {
             <h3><a href={href(w.id, 'products')}>{w.title}</a></h3>
             <p className="small muted">{w.description}</p>
             <p className="small">
+              {w.demo ? <><Badge tone="warn">{m.ui.app.demoBadge}</Badge> · </> : null}
+              {w.awaitingAccess > 0 ? <><Badge tone="warn">{m.ui.onboarding.channels.status.AWAITING_ACCESS}: {w.awaitingAccess}</Badge> · </> : null}
               {w.role} · {m.ui.app.counts(w.scopes, w.decisions, w.rejected)}
               {w.activeStops > 0 ? <> · <Badge tone="stop">{m.ui.app.activeStops(w.activeStops)}</Badge></> : null}
               {w.activeHalts > 0 ? <> · <Badge tone="warn">{m.ui.app.activeHalts(w.activeHalts)}</Badge></> : null}
@@ -91,6 +95,8 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
   if (!world) return <p className="error">{m.ui.app.worldNotFound(route.worldId)} <a href="#/">{m.ui.app.backToWorlds}</a></p>;
   return (
     <>
+      {/* Р-151: демо помечается на КАЖДОМ экране мира — деньги показываются на большинстве из них */}
+      {world.demo ? <p className="notice demo-banner" role="note"><Badge tone="warn">{m.ui.app.demoBadge}</Badge> {m.ui.app.demoBanner}</p> : null}
       <nav className="tabs">
         <a href="#/">{m.ui.app.backToWorlds}</a>
         <strong>{world.title}</strong>
@@ -98,7 +104,8 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
           <a key={key} href={href(world.id, key)} className={route.screen === key ? 'active' : ''}>{m.ui.app.screens[key]}</a>
         ))}
       </nav>
-      {route.screen === 'products' ? <ProductsScreen worldId={world.id} />
+      {route.screen === 'onboarding' ? <OnboardingScreen worldId={world.id} />
+        : route.screen === 'products' ? <ProductsScreen worldId={world.id} />
         : route.screen === 'decisions' ? (route.param ? <TraceScreen worldId={world.id} decisionId={route.param} /> : <DecisionsScreen worldId={world.id} />)
           : route.screen === 'rejected' ? <RejectedScreen worldId={world.id} />
             : route.screen === 'bounds' ? <BoundsScreen worldId={world.id} writeScopeId={route.param} />

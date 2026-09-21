@@ -198,6 +198,8 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
     <section>
       <h2>{t.pageTitle}</h2>
       <h3>{t.inUse}</h3>
+      {/* Задача D шага 34: новый тенант без стратегий и офферов видит объяснение, а не пустой список */}
+      {view.strategies.length === 0 ? <p className="notice">{m.ui.onboarding.empty.strategies}</p> : null}
       <ul className="index">
         {view.strategies.map((s) => (
           <li key={s.strategyId}>

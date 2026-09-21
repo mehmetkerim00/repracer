@@ -14,6 +14,8 @@ export const CANCEL_ACTION: Readonly<Record<BulkJobKind, PricingAction>> = {
   COST_IMPORT: 'MANAGE_PRICING',
   BOUNDS_EDIT: 'MANAGE_PRICING',
   STRATEGY_ASSIGN: 'MANAGE_PRICING',
+  // Включение движка — своё право [Р-143]: оператор включает, но цены не правит
+  REPRICING_ENABLE: 'ENABLE_REPRICING',
   /**
    * Экран различий и предпросмотр стратегии САМИ ничего не меняют, но они — первая половина правки цен: применение
    * ссылается на задание экрана различий и без него не проходит. Отменить чужой экран различий значит сорвать чужую правку
@@ -108,6 +110,7 @@ function outcomeText(job: BulkJobRow, m: Messages): string {
     case 'STRATEGY_PREVIEW': return t.donePreview(n(r.offers));
     case 'PRICE_FEED_EXPORT': return t.doneFeedExport(n(r.rows), n(r.bytes));
     case 'PRICE_EVIDENCE': return t.doneEvidence(n(r.rows), n(r.bytes));
+    case 'REPRICING_ENABLE': return t.doneEnable(n(r.enabled), n(r.already), n(r.skipped));
   }
 }
 

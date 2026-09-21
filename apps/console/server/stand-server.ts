@@ -1,7 +1,7 @@
 import { createServer, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import {
-  boundsDiffView, boundsView, bulkJobsView, bulkJobView, can, canCancelBulkJob, channelNotes, complianceView, fingerprint, costImportView, currentStrategies, listQuery, MAX_SCOPES, OFFER_CHOICES, pageOf, parseListQuery, type ListQuery, discountCheckView, dangerousReport, decisionList, decisionTrace, describe, expandBoundsEdit, importTargets, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, scopeById, unitOf,
+  boundsDiffView, boundsView, bulkJobsView, bulkJobView, can, canCancelBulkJob, channelNotes, onboardingView, complianceView, fingerprint, costImportView, currentStrategies, listQuery, MAX_SCOPES, OFFER_CHOICES, pageOf, parseListQuery, type ListQuery, discountCheckView, dangerousReport, decisionListView, decisionTrace, describe, expandBoundsEdit, importTargets, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, scopeById, unitOf,
   parseStrategyDraft, planStop, priceFeed, productList, rejectedView, REPORT_PERIODS_DAYS, stopView, strategiesView,
   type Locale, type Messages, type StandWorld, type StopTarget, type Viewer,
 } from '@repracer/console-model';
@@ -208,6 +208,9 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           id: w.id, title: w.title, description: w.description, failures: live.failures, scopes: w.state.scopes.length, decisions: w.state.decisions.length,
           rejected: rejectedView(w, m).items.length, activeStops: w.state.stops.filter((x) => x.releasedAt === null).length,
           activeHalts: w.state.halts.filter((h) => h.releasedAt === null).length, role: m.values[viewer.role],
+          // Р-151: демо помечается уже в списке миров; Р-150: сколько каналов ждёт доступа — видно до входа в мир
+          demo: live.demo === true,
+          awaitingAccess: (await live.store.channelAccounts(live.tenantId)).filter((a) => a.authStatus === 'AWAITING_ACCESS').length,
         };
       })));
     }
@@ -216,9 +219,16 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     const viewer = live ? viewerIn(live) : null;
     if (!live || !viewer) return fail(404, 'WORLD_NOT_FOUND', s.notFound);
     const world = await live.view(viewer);
+    // Р-151: признак демо приходит от мира, а не от состояния хранилища, — и стоит на каждом ответе экрана
+    world.demo = live.demo === true;
     const screen = parts[3];
     const param = parts[4] ?? null;
-    const ctx = (channelAccountId?: string | null) => live.callContext(channelAccountId ?? live.accounts[0]!.channelAccountId);
+    /**
+     * Задача D шага 34: у тенанта без единого канала первого аккаунта нет. Раньше здесь стояло `live.accounts[0]!` — на пустом
+     * тенанте это 500 вместо честного ответа «канал не подключён».
+     */
+    const noChannel = (): never => { throw Object.assign(new Error('no channel account'), { cause: 'NO_CHANNEL' }); };
+    const ctx = (channelAccountId?: string | null) => live.callContext(channelAccountId ?? live.accounts[0]?.channelAccountId ?? noChannel());
 
     /**
      * Р-120: предложение, которое канал оценивает сам, стратегию не получает. Проверка осталась в запросе, а не ушла в задание:
@@ -248,12 +258,23 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
 
     if (req.method === 'GET') {
       switch (screen) {
+        // Р-149: путь онбординга — состояние шагов выведено из данных хранилищем, экран ничего не считает сам
+        case 'onboarding': {
+          const [progress, status, accounts] = await Promise.all([
+            live.store.onboardingProgress(world.tenantId), live.store.onboardingStatus(world.tenantId), live.store.channelAccounts(world.tenantId),
+          ]);
+          return ok(onboardingView(world, progress, status, accounts, m));
+        }
         case 'products': {
           const query = parseListQuery(url.searchParams);
           return query ? ok(productList(world, m, query)) : fail(400, 'BAD_PAGE', s.badRequest);
         }
         case 'decisions': {
-          if (param === null) return ok(decisionList(world, m));
+          if (param === null) {
+            // Шаг 34: список решений — страницей, как остальные списки [Р-136]: на демо это 13 500 строк за три часа
+            const query = parseListQuery(url.searchParams);
+            return query ? ok(decisionListView(world, query, m)) : fail(400, 'BAD_PAGE', s.badRequest);
+          }
           const trace = decisionTrace(world, param, m);
           return trace ? ok(trace) : fail(404, 'DECISION_NOT_FOUND', s.notFound);
         }
@@ -378,6 +399,43 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
      * OQ-207: отмена ожидающего задания. Идущее применение не отменяется — оно целиком или никак [Р-134]; на экране кнопка
      * есть ровно у того задания, которое ещё ждёт своей очереди.
      */
+    /**
+     * Р-149: единственное, что путь пишет сам, — сужение набора [Р-131] и отметка шага. Всё остальное делают экраны шагов.
+     * Право — как у правки цен: путь ведёт тот, кто вправе править цены.
+     */
+    if (screen === 'onboarding' && param !== null) {
+      if (!can(viewer.role, 'MANAGE_PRICING')) return fail(403, 'FORBIDDEN', m.ui.onboarding.noRight);
+      const actor = { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) };
+      if (param === 'narrow') {
+        // Сузить можно только до предложений с себестоимостью — иного смысла у сужения нет [Р-131]; снять сужение — тоже здесь
+        // Правда одна — база: тот же признак, по которому она пускает движок [Р-131], а не поле экрана
+        const ids = body.widen === true ? null : await live.store.scopesWithCost(world.tenantId);
+        if (ids !== null && ids.length === 0) return fail(400, 'NOTHING_TO_NARROW_TO', m.ui.onboarding.stepHints.COSTS);
+        const saved = await live.store.saveOnboardingProgress(world.tenantId, { lastStep: 'COSTS', scopeWriteScopeIds: ids }, actor);
+        if (saved === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
+        return ok({ narrowedTo: ids === null ? null : ids.length });
+      }
+      if (param === 'step') {
+        const step = String(body.step ?? '');
+        if (!['TENANT', 'CHANNEL', 'COSTS', 'BOUNDS', 'STRATEGY', 'ENABLE', 'DONE'].includes(step)) return fail(400, 'BAD_STEP', s.badRequest);
+        const saved = await live.store.saveOnboardingProgress(world.tenantId, { lastStep: step as never }, actor);
+        if (saved === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
+        return ok({ step });
+      }
+      if (param === 'enable') {
+        // Последний шаг — включение движка у набора: массовая операция, значит задание [Р-139]; право у вида своё [Р-143]
+        if (!can(viewer.role, 'ENABLE_REPRICING')) return fail(403, 'FORBIDDEN', s.forbidden);
+        const progress = await live.store.onboardingProgress(world.tenantId);
+        const chosen = progress?.scopeWriteScopeIds ?? null;
+        const targets = world.state.scopes.filter((x) => x.pricingMode !== 'ENGINE' && (chosen === null || chosen.includes(x.writeScopeId)));
+        if (targets.length === 0) return fail(409, 'NOTHING_TO_ENABLE', m.ui.onboarding.completed);
+        await live.store.saveOnboardingProgress(world.tenantId, { lastStep: 'ENABLE' }, actor);
+        return createJob('REPRICING_ENABLE', chosen === null ? { all: true } : { writeScopeIds: targets.map((x) => x.writeScopeId) }, targets.length,
+          m.ui.onboarding.enable(targets.length));
+      }
+      return fail(404, 'NOT_FOUND', s.notFound);
+    }
+
     if (screen === 'jobs' && param !== null && parts[5] === 'cancel') {
       /**
        * Отменяет СВОЁ задание любой участник, ЧУЖОЕ — тот, кто имеет право на САМУ ЭТУ ОПЕРАЦИЮ (находка 3 ревью шага 31,
@@ -809,6 +867,8 @@ export function createStandServer(handle: ReturnType<typeof createStandApi>, loc
     try {
       send(res, await handle({ method: req.method ?? 'GET', url: req.url ?? '/', body, authorization: req.headers.authorization, cookie: req.headers.cookie }));
     } catch (error) {
+      // Задача D шага 34: тенант без единого канала — не поломка стенда, а честное состояние [Р-150]
+      if ((error as { cause?: unknown }).cause === 'NO_CHANNEL') return send(res, { status: 409, body: { error: { code: 'NO_CHANNEL', message: fallback.noChannel } } });
       // Ни тело запроса, ни токен в журнал не пишутся — только метод, путь и сообщение ошибки
       console.error('stand request failed', req.method, new URL(req.url ?? '/', 'http://stand').pathname, error instanceof Error ? error.message : error);
       send(res, { status: 500, body: { error: { code: 'STAND_ERROR', message: fallback.standError } } });

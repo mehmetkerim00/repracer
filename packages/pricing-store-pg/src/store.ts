@@ -46,7 +46,7 @@ import type {
   ProductKey,
   ScopeEvaluationContext,
   ShiftWindow,
-  SnapshotOutcome, ConsoleAuditRow, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation } from '@repracer/pricing-pipeline';
+  SnapshotOutcome, ConsoleAuditRow, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow} from '@repracer/pricing-pipeline';
 import { inTenant, RollbackWith, type PgPool, type Tx } from './db.ts';
 import { PgWriteQueueStore } from './write-queue.ts';
 
@@ -1285,6 +1285,77 @@ export class PgPricingStore implements PricingStore {
                 sha256 = excluded.sha256, rows_count = excluded.rows_count, created_at = now()`,
         [tenantId, jobId, artifact.fileName, artifact.contentType, artifact.content, artifact.sha256, artifact.rows]);
     }, undefined, { leaseOwner });
+  }
+
+  // --- онбординг [Р-149], канал без доступов [Р-150] ---------------------------------------------------------------
+
+  async onboardingProgress(tenantId: string): Promise<OnboardingProgressRow | null> {
+    return inTenant(this.admin('onboardingProgress'), tenantId, async (tx) => {
+      const { rows } = await tx.query(
+        `SELECT scope_write_scope_ids, last_step, started_at, updated_at, completed_at FROM tenant_data.onboarding_progress WHERE tenant_id = $1`, [tenantId]);
+      const r = rows[0];
+      return r === undefined ? null : {
+        scopeWriteScopeIds: (r.scope_write_scope_ids as string[] | null) ?? null, lastStep: r.last_step as OnboardingProgressRow['lastStep'],
+        startedAt: String(r.started_at), updatedAt: String(r.updated_at), completedAt: r.completed_at === null ? null : String(r.completed_at),
+      };
+    });
+  }
+
+  async saveOnboardingProgress(tenantId: string, input: OnboardingProgressInput, actor: AdminActor): Promise<'SAVED' | 'FORBIDDEN'> {
+    try {
+      await inTenant(this.admin('saveOnboardingProgress'), tenantId, async (tx) => {
+        /**
+         * Одна строка на тенанта: первая запись начинает путь, следующие двигают его. Сужение [Р-131] — отдельное намерение:
+         * `undefined` его не трогает, `null` снимает, список — сужает.
+         */
+        await tx.query(
+          `INSERT INTO tenant_data.onboarding_progress (tenant_id, last_step, scope_write_scope_ids, updated_by_membership_id, completed_at)
+           VALUES ($1, $2, $3, $4, CASE WHEN $2 = 'DONE' THEN now() END)
+           ON CONFLICT (tenant_id) DO UPDATE
+             SET last_step = excluded.last_step,
+                 scope_write_scope_ids = CASE WHEN $5 THEN tenant_data.onboarding_progress.scope_write_scope_ids ELSE excluded.scope_write_scope_ids END,
+                 updated_at = now(), updated_by_membership_id = excluded.updated_by_membership_id,
+                 completed_at = CASE WHEN excluded.last_step = 'DONE' THEN coalesce(tenant_data.onboarding_progress.completed_at, now()) END`,
+          [tenantId, input.lastStep, input.scopeWriteScopeIds ?? null, actor.membershipId, input.scopeWriteScopeIds === undefined]);
+      }, actor.userId, { mfa: actor.mfa });
+      return 'SAVED';
+    } catch (error) {
+      if ((error as { code?: string }).code === '42501') return 'FORBIDDEN';
+      throw error;
+    }
+  }
+
+  async onboardingStatus(tenantId: string): Promise<OnboardingStepStatus[]> {
+    return inTenant(this.admin('onboardingStatus'), tenantId, async (tx) => {
+      const { rows } = await tx.query(`SELECT step, done_count, total_count, done, awaiting FROM tenant_data.onboarding_status($1)`, [tenantId]);
+      return rows.map((r) => ({
+        step: r.step as OnboardingStepStatus['step'], doneCount: Number(r.done_count), totalCount: Number(r.total_count),
+        done: r.done === true, awaiting: r.awaiting === true,
+      }));
+    });
+  }
+
+  async scopesWithCost(tenantId: string): Promise<string[]> {
+    return inTenant(this.admin('scopesWithCost'), tenantId, async (tx) => {
+      const { rows } = await tx.query(
+        `SELECT s.write_scope_id FROM tenant_data.write_scope s
+          WHERE s.tenant_id = $1 AND s.field = 'PRICE' AND s.status <> 'RETIRED' AND tenant_data.write_scope_cost_ready($1, s.write_scope_id, now())
+          ORDER BY s.write_scope_id`, [tenantId]);
+      return rows.map((r) => r.write_scope_id as string);
+    });
+  }
+
+  async channelAccounts(tenantId: string): Promise<ChannelAccountRow[]> {
+    return inTenant(this.admin('channelAccounts'), tenantId, async (tx) => {
+      const { rows } = await tx.query(
+        `SELECT channel_account_id, channel, display_name, marketplaces, auth_status, access_blockers
+           FROM tenant_data.channel_account WHERE tenant_id = $1 AND disconnected_at IS NULL ORDER BY connected_at, channel_account_id`, [tenantId]);
+      return rows.map((r) => ({
+        channelAccountId: r.channel_account_id as string, channel: r.channel as string, displayName: (r.display_name as string | null) ?? null,
+        marketplaces: r.marketplaces as string[], authStatus: r.auth_status as ChannelAccountRow['authStatus'],
+        accessBlockers: (r.access_blockers as ChannelAccountRow['accessBlockers']) ?? [],
+      }));
+    });
   }
 
   async bulkJobArtifact(tenantId: string, jobId: string): Promise<BulkJobArtifact | null> {

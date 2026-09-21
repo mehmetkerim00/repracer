@@ -30,6 +30,11 @@ export interface BulkJobWorldOptions {
    * канала, а задание — нет. Канал при этом НЕ опрашивается: считается по последнему принятому снимку.
    */
   previewStrategy?(ctx: BulkJobContext, scope: ConsoleScope, strategy: StrategyDefinition): Promise<StrategyPreview | null>;
+  /**
+   * Шаг 34 [Р-149]: включение движка у одного предложения — тем же путём, что кнопка на экране товаров. Канал при этом не
+   * опрашивается: проверяются себестоимость [Р-131], границы и стратегия по данным базы.
+   */
+  enableRepricing?(ctx: BulkJobContext, scope: ConsoleScope): Promise<{ enabled: boolean; problems: Array<{ code: string }> }>;
 }
 
 const PROGRESS_STEP = 500;
@@ -261,6 +266,46 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
         },
       };
     },
+    /**
+     * Шаг 34 [Р-149]: последний шаг пути — включить движок у НАБОРА предложений. По одному это делает `scopes/:id/enable`;
+     * набор — массовая операция, а массовые операции — задания [Р-139]. Предложение, которое включить нельзя (нет
+     * себестоимости, границ, стратегии), не роняет задание: оно называется в итоге поимённо с причиной, остальные включаются.
+     * Это не «целиком или никак» — включение обратимо и по одному, и продавцу важнее знать, ЧТО не включилось.
+     */
+    async REPRICING_ENABLE(job: BulkJobRow, ctx: BulkJobContext): Promise<BulkJobWork> {
+      const p = job.params as { writeScopeIds?: string[]; all?: boolean };
+      const world = await options.world(ctx);
+      const chosen = p.all === true ? world.state.scopes : world.state.scopes.filter((s) => (p.writeScopeIds ?? []).includes(s.writeScopeId));
+      if (!options.enableRepricing) throw Object.assign(new Error('no enabler'), { cause: 'NOT_SUPPORTED' });
+      const enable = options.enableRepricing;
+      return {
+        total: chosen.length,
+        async run(progress) {
+          const skipped: Array<{ writeScopeId: string; problems: string[] }> = [];
+          let enabled = 0;
+          let already = 0;
+          for (const [i, scope] of chosen.entries()) {
+            if (scope.pricingMode === 'ENGINE') { already += 1; }
+            else {
+              const result = await enable(ctx, scope);
+              if (result.enabled) enabled += 1;
+              else skipped.push({ writeScopeId: scope.writeScopeId, problems: result.problems.map((x) => x.code) });
+            }
+            if (i % PROGRESS_STEP === 0) await progress(i, 'APPLYING');
+          }
+          await progress(chosen.length, 'APPLYING');
+          /**
+           * Итог, который увидит продавец [Р-147: экрану отдаётся только `view`]. Без него задание говорило «не включено,
+           * смотрите список» — а списка не было: первый живой прогон онбординга отказал всем 150 предложениям, и узнать
+           * причину с экрана было нельзя. Причины сгруппированы по коду, поимённо — первые пятьдесят.
+           */
+          const byCode: Record<string, number> = {};
+          for (const s of skipped) for (const code of s.problems) byCode[code] = (byCode[code] ?? 0) + 1;
+          return { enabled, already, skipped: skipped.length, view: { enabled, already, skipped: skipped.length, byCode, examples: skipped.slice(0, 50) } };
+        },
+      };
+    },
+
     /**
      * Р-142 (шаг 31): выгрузка ленты цен. Экран отдаёт страницу не больше 200 записей — за 30 суток по каталогу их сотни
      * тысяч, и по страницам их никто не читает. Фильтр берётся тот же, что был на экране: файл не должен расходиться с

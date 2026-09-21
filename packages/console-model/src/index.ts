@@ -5,7 +5,7 @@ export type { Fmt, Locale, Template } from './i18n/types.ts';
 /** Права по роли [OQ-125] — те же, что проверяют хранилище и БД */
 export { can, type MemberRole, type PricingAction } from '@repracer/pricing-model';
 export { boundText, channelNotes, productList, strategyLabel, type ChannelNote, type FloorCell, type ProductListView, type ProductRow, type StrategyLabel } from './products.ts';
-export { decisionList, decisionTrace, explanationOf, isDangerous, noChangeTitle, type DecisionListItem, type DecisionTrace, type ItemOutcome, type StepStatus, type TraceItem, type TraceStep, type TraceStepKey } from './trace.ts';
+export { decisionList, decisionListView, type DecisionListView, decisionTrace, explanationOf, isDangerous, noChangeTitle, type DecisionListItem, type DecisionTrace, type ItemOutcome, type StepStatus, type TraceItem, type TraceStep, type TraceStepKey } from './trace.ts';
 export { rejectedView, type RejectedItem, type RejectedKind, type RejectedView } from './rejected.ts';
 export { boundsView, costInScopeCurrency, effectiveFloor, priceBreakdown, type BoundsView, type EffectiveFloor, type MoneyLine, type PriceBreakdown } from './bounds.ts';
 export { planStop, stopView, type AuditCard, type DistrustCard, type HaltCard, type StopKindRow, type StopCard, type StopImpact, type StopPlan, type StopTarget, type StopView, type TargetCard } from './stop.ts';
@@ -19,3 +19,4 @@ export { complianceView, discountCheckView, historyDepthView, PRICE_EVIDENCE_HEA
 export { columnName, costImportView, importTargets, PREVIEW_ROWS_SHOWN, SKIPPED_EXAMPLES, type CostImportView, type ImportPreviewRowView, type ImportSkippedGroupView } from './cost-import.ts';
 export { bulkJobsView, bulkJobView, canCancelBulkJob, CANCEL_ACTION, type BulkJobView, type BulkJobsView } from './jobs.ts';
 export { COST_IMPORT_REPORT_HEADER, costImportReportRows, csvOf, PRICE_FEED_CSV_HEADER, priceFeedFileName, priceFeedRows, priceFeedRowsOf } from './exports.ts';
+export { onboardingView, type OnboardingView, type OnboardingStepView, type ChannelAccountView } from './onboarding.ts';

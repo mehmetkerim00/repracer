@@ -1,6 +1,7 @@
-import type { DecisionListItem, DecisionTrace, StepStatus } from '@repracer/console-model';
+import { useState } from 'react';
+import { LIST_PAGE_DEFAULT, type DecisionListItem, type DecisionListView, type DecisionTrace, type ListQuery, type StepStatus } from '@repracer/console-model';
 import { useResource, worldPath } from '../api.ts';
-import { Badge, Gaps, href, Load, ReasonLine, useMessages } from '../components.tsx';
+import { Badge, Gaps, href, Load, Pager, ReasonLine, useMessages } from '../components.tsx';
 
 const STATUS_TONE: Readonly<Record<StepStatus, string>> = { OK: 'ok', STOP: 'stop', WARN: 'warn', SKIPPED: 'off', UNKNOWN: 'unknown' };
 
@@ -72,8 +73,13 @@ export function TraceView({ trace }: { trace: DecisionTrace }) {
 
 export function DecisionsScreen({ worldId }: { worldId: string }) {
   const m = useMessages();
-  const [resource, retry] = useResource<DecisionListItem[]>(worldPath(worldId, 'decisions'), m.locale);
-  return <Load resource={resource} retry={retry}>{(items) => <DecisionsView worldId={worldId} items={items} />}</Load>;
+  const [query, setQuery] = useState<ListQuery>({ offset: 0, limit: LIST_PAGE_DEFAULT });
+  const [resource, retry] = useResource<DecisionListView>(`${worldPath(worldId, 'decisions')}?offset=${query.offset}&limit=${query.limit}`, m.locale);
+  return (
+    <Load resource={resource} retry={retry}>
+      {(view) => (<><DecisionsView worldId={worldId} items={view.items} /><Pager page={view.page} query={query} onQuery={setQuery} /></>)}
+    </Load>
+  );
 }
 
 export function TraceScreen({ worldId, decisionId }: { worldId: string; decisionId: string }) {

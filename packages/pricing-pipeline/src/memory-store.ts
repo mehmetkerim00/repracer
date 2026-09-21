@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { EXPLANATION_RULESETS } from './dictionary.ts';
 import { rotation } from './reconciliation.ts';
-import type { HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow } from './store.ts';
+import type { HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow} from './store.ts';
 import { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, FILE_PRODUCING_JOB_KINDS, READ_ONLY_JOB_KINDS } from './store.ts';
 import { offerIdentityOf, type CompetitorQuery, type CompetitorSnapshot, type CompetitorSourceDescriptor, type FieldWrite, type Instant, type OfferIdentity, type PriceBasis, type PricingHealthObservation, type WriteOutcome } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange, SanityContext } from '@repracer/input-sanity';
@@ -136,7 +136,11 @@ export interface MemorySeed {
    */
   competitorSourcesByChannel?: Partial<Record<'KAUFLAND' | 'AMAZON' | 'EBAY', CompetitorSourceDescriptor[]>>;
   /** Аккаунты других каналов для единиц записи, которые не принадлежат аккаунту мира (посев в PostgreSQL) */
-  accounts?: Array<{ channelAccountId: string; channel: 'KAUFLAND' | 'AMAZON' | 'EBAY'; region?: string; marketplaces: string[] }>;
+  accounts?: Array<{
+    channelAccountId: string; channel: 'KAUFLAND' | 'AMAZON' | 'EBAY'; region?: string; marketplaces: string[];
+    /** Р-150: аккаунт заведён, доступа нет — честное состояние с перечнем того, чего не хватает */
+    awaitingAccess?: Array<'PARTNER_REGISTRATION' | 'DEVELOPER_KEYS' | 'NOTIFICATION_QUEUE' | 'SELLER_AUTHORIZATION'>;
+  }>;
   /** Валюта и база цены витрин без единиц записи; по умолчанию — витрины Kaufland de и at */
   marketplaces?: Record<string, { currency: string; basis: PriceBasis; timeZone?: string | null }>;
   /** Ключ — «витрина|товар|состояние» */
@@ -302,6 +306,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     this.competitorSources = seed.competitorSources ? [...seed.competitorSources] : null;
     this.competitorSourcesByChannel = { ...(seed.competitorSourcesByChannel ?? {}) };
     for (const a of seed.accounts ?? []) this.accountChannels.set(a.channelAccountId, a.channel);
+    this.seedAccounts = seed.accounts ?? [];
     for (const s of seed.scopes) {
       this.scopes.set(s.writeScopeId, {
         ...s, status: s.status ?? 'ACTIVE', taxRegime: s.taxRegime ?? (s.basis === 'GROSS' ? 'VAT_INCLUDED' : 'SALES_TAX_EXCLUDED'),
@@ -1438,6 +1443,82 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       throw Object.assign(new Error('the checksum of the file does not match its content (Р-145)'), { cause: 'BAD_CHECKSUM' });
     }
     this.bulkArtifacts.set(jobId, { ...artifact });
+  }
+
+  // --- онбординг [Р-149], канал без доступов [Р-150] ---------------------------------------------------------------
+  private onboarding: OnboardingProgressRow | null = null;
+  /** Аккаунты посева с состоянием доступа [Р-150] */
+  private seedAccounts: NonNullable<MemorySeed['accounts']> = [];
+
+  async onboardingProgress(_tenantId: string): Promise<OnboardingProgressRow | null> {
+    return this.onboarding ? { ...this.onboarding } : null;
+  }
+
+  async saveOnboardingProgress(_tenantId: string, input: OnboardingProgressInput, actor: AdminActor): Promise<'SAVED' | 'FORBIDDEN'> {
+    if (!this.adminMember(actor)) return 'FORBIDDEN';
+    if (input.scopeWriteScopeIds !== undefined && input.scopeWriteScopeIds !== null && input.scopeWriteScopeIds.length === 0) {
+      throw Object.assign(new Error('the onboarding set is narrowed to nothing (Р-131, Р-149)'), { code: '23514' });
+    }
+    const now = new Date().toISOString();
+    const prev = this.onboarding;
+    this.onboarding = {
+      scopeWriteScopeIds: input.scopeWriteScopeIds === undefined ? (prev?.scopeWriteScopeIds ?? null) : input.scopeWriteScopeIds,
+      lastStep: input.lastStep, startedAt: prev?.startedAt ?? now, updatedAt: now,
+      completedAt: input.lastStep === 'DONE' ? (prev?.completedAt ?? now) : null,
+    };
+    return 'SAVED';
+  }
+
+  /** То же правило, что у базы: шаг завершён, потому что состояние проверяемо, — считается по тем же данным, что включение */
+  async onboardingStatus(tenantId: string): Promise<OnboardingStepStatus[]> {
+    const chosen = this.onboarding?.scopeWriteScopeIds ?? null;
+    const rows = [...this.scopes.values()].filter((s) => s.status !== 'RETIRED' && (chosen === null || chosen.includes(s.writeScopeId)));
+    const now = new Date().toISOString() as Instant;
+    let costs = 0; let bounds = 0; let strategies = 0; let engines = 0;
+    for (const s of rows) {
+      const loaded = await this.loadScopeContext(tenantId, s.writeScopeId, now);
+      if (loaded?.context.cost) costs += 1;
+      if (loaded && loaded.context.bounds.min.status === 'RESOLVED' && loaded.context.bounds.max.status === 'RESOLVED') bounds += 1;
+      if (s.strategy !== null) strategies += 1;
+      if (s.pricingMode === 'ENGINE') engines += 1;
+    }
+    const accounts = this.channelAccountRows();
+    const active = accounts.filter((a) => a.authStatus === 'ACTIVE').length;
+    const awaiting = accounts.filter((a) => a.authStatus === 'AWAITING_ACCESS').length;
+    const total = rows.length;
+    const step = (name: OnboardingStepStatus['step'], done: number, all: number, isDone: boolean, aw = false): OnboardingStepStatus =>
+      ({ step: name, doneCount: done, totalCount: all, done: isDone, awaiting: aw });
+    return [
+      step('TENANT', 1, 1, true),
+      step('CHANNEL', active, active + awaiting, active > 0, awaiting > 0),
+      step('COSTS', costs, total, total > 0 && costs === total),
+      step('BOUNDS', bounds, total, total > 0 && bounds === total),
+      step('STRATEGY', strategies, total, total > 0 && strategies === total),
+      step('ENABLE', engines, total, total > 0 && engines === total),
+    ];
+  }
+
+  private channelAccountRows(): ChannelAccountRow[] {
+    return this.seedAccounts.map((a) => ({
+      channelAccountId: a.channelAccountId, channel: a.channel, displayName: null, marketplaces: a.marketplaces,
+      authStatus: a.awaitingAccess && a.awaitingAccess.length > 0 ? 'AWAITING_ACCESS' : 'ACTIVE',
+      accessBlockers: a.awaitingAccess ?? [],
+    }));
+  }
+
+  async scopesWithCost(tenantId: string): Promise<string[]> {
+    const now = new Date().toISOString() as Instant;
+    const ids: string[] = [];
+    for (const s of this.scopes.values()) {
+      if (s.status === 'RETIRED') continue;
+      const loaded = await this.loadScopeContext(tenantId, s.writeScopeId, now);
+      if (loaded?.context.cost) ids.push(s.writeScopeId);
+    }
+    return ids.sort();
+  }
+
+  async channelAccounts(_tenantId: string): Promise<ChannelAccountRow[]> {
+    return this.channelAccountRows();
   }
 
   async bulkJobArtifact(_tenantId: string, jobId: string): Promise<BulkJobArtifact | null> {

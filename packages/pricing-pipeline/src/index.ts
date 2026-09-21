@@ -86,3 +86,6 @@ export { EXPLANATION_RULESETS } from './dictionary.ts';
 export type { ConsoleAuditRow } from './store.ts';
 export { comparedValue, DEFAULT_LOSS_GRACE_SECONDS, LOSS_GRACE_BASIS, reconcile, rotation, snapshotDigest, type HeldState, type ReconciliationOutcome } from './reconciliation.ts';
 export { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, READ_ONLY_JOB_KINDS } from './store.ts';
+// Шаг 34 [Р-149, Р-150]: онбординг и честное состояние канала
+export type { OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, OnboardingStep, ChannelAccountRow, ChannelAccessBlocker, ChannelAuthStatus } from './store.ts';
+export { ONBOARDING_STEPS, CHANNEL_ACCESS_BLOCKERS } from './store.ts';

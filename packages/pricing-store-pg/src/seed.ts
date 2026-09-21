@@ -102,6 +102,8 @@ export interface SeedWorldInput {
   marketplaces: string[];
   clock: Instant;
   seed: MemorySeed;
+  /** Р-151: тенант на симуляторе — помечается в базе, чтобы консоль показывала «демо» везде, где деньги */
+  demo?: boolean;
   /** Существующие пользователи для членств сценария (псевдоним членства → user_id): один вход во все миры стенда [OQ-128, Р-9] */
   memberUsers?: Readonly<Record<string, string>>;
   /**
@@ -226,10 +228,14 @@ export async function seedPricingWorld(_pool: PgPool, input: SeedWorldInput): Pr
     const id: string = randomUUID();
     ids.alias(a.channelAccountId, id);
     accounts.set(a.channelAccountId, { id, channel: a.channel, region: a.region ?? null });
+    // Р-150: аккаунт без доступа — без ключей, в состоянии «ожидает» и с перечнем того, чего ждёт
+    const awaiting = a.awaitingAccess && a.awaitingAccess.length > 0 ? a.awaitingAccess : null;
     await tx.query(
-      `INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, region, external_account_id, marketplaces, credentials_ref, connected_by_membership_id)
-       VALUES ($1, $2, $3, $4, $5, $6, 'secret-ref:synthetic', $7)`,
-      [tenantId, id, a.channel, a.region ?? null, externalAccountId, a.marketplaces, membershipId],
+      `INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, region, external_account_id, marketplaces, credentials_ref,
+                                                auth_status, access_blockers, connected_by_membership_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [tenantId, id, a.channel, a.region ?? null, externalAccountId, a.marketplaces, awaiting ? null : 'secret-ref:synthetic',
+        awaiting ? 'AWAITING_ACCESS' : 'ACTIVE', awaiting ?? [], membershipId],
     );
   };
   const capabilities = new Map<string, Row>();
@@ -380,8 +386,8 @@ export async function seedPricingWorld(_pool: PgPool, input: SeedWorldInput): Pr
     ids.alias(m.userId ?? standUserOf(m.membershipId), otherUser);
     memberUsers.set(m.membershipId, otherUser);
   }
-  await input.provisioningPool.query('SELECT security.provision_tenant($1, $2, $3, $4::jsonb)',
-    [tenantId, `Synthetic tenant ${tag}`, 'EU', JSON.stringify(provisioned)]);
+  await input.provisioningPool.query('SELECT security.provision_tenant($1, $2, $3, $4::jsonb, $5)',
+    [tenantId, `Synthetic tenant ${tag}`, 'EU', JSON.stringify(provisioned), input.demo === true]);
   for (const m of invited) {
     const joined = await input.joinMember!({ tenantId, ownerUserId: userId, membershipAlias: m.membershipId, role: m.role, email: m.email });
     ids.alias(m.membershipId, joined.membershipId);

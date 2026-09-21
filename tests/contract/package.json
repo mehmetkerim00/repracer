@@ -32,6 +32,7 @@
     "./stand": "./src/console/stand.ts",
     "./pg-store": "./src/harness/pg-store.ts",
     "./simulator": "./src/simulator/index.ts",
-    "./backtest": "./src/backtest/index.ts"
+    "./backtest": "./src/backtest/index.ts",
+    "./live": "./src/live/index.ts"
   }
 }

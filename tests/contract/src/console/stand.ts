@@ -75,6 +75,8 @@ export interface LiveWorld {
   membershipAlias(identityMembershipId: string): string;
   /** Расхождения прогона с ожиданиями сценария: мир показывается, но с пометкой */
   failures: string[];
+  /** Р-151: мир на симуляторе канала — помечается как демо везде, где показываются деньги */
+  demo?: boolean;
   store: PricingStore;
   pipeline: PricingPipeline;
   clock: VirtualClock;

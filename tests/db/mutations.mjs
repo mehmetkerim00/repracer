@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0114_verify_schema_invariants_v29.sql';
+const VERIFY = 'migrations/0116_verify_schema_invariants_v30.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -1196,6 +1196,60 @@ export const STEP32_ROWS = [
       // Сам разбор видов: объявить экран различий «только просмотром» значит отдать чужую начатую правку любому участнику
       m(replaceInFunction('security.bulk_job_cancel_action(text)', "p_kind IN ('PRICE_EVIDENCE', 'PRICE_FEED_EXPORT')", 'true'),
         smoke('a member cancels the bounds diff job of another member without the right to it (Р-143)')),
+    ],
+  },
+];
+
+/**
+ * Шаг 34 [Р-149, Р-150, Р-151]: онбординг, канал без доступов, демо-тенант. Каждая новая защита — своя строка при создании
+ * [Р-108], и каждая ловится своей проверкой [Р-99].
+ */
+export const STEP34_ROWS = [
+  {
+    row: 'Р-150',
+    invariant: 'канал без доступов — честное состояние: ждущий доступа аккаунт называет, чего ждёт, кодами из списка; активный без ключей невозможен',
+    mutations: [
+      m(dropConstraint('channel_account_awaiting_names_blockers', 'tenant_data.channel_account'),
+        smoke('a channel account awaiting access without naming what it waits for (Р-150)'),
+        smoke('an active channel account that names access blockers (Р-150)')),
+      m(dropTrigger('a_channel_account_blockers_known', 'tenant_data.channel_account'),
+        smoke('a channel account names an access blocker that does not exist (Р-150)')),
+      m(dropConstraint('channel_account_credentials_unless_no_access', 'tenant_data.channel_account'),
+        smoke('an active channel account without credentials (Р-150)')),
+    ],
+  },
+  {
+    row: 'Р-151',
+    invariant: 'демо — только у клиентского тенанта; платформенный тенант демо быть не может',
+    mutations: [
+      m(dropConstraint('tenant_demo_is_customer', 'tenant_data.tenant'), smoke('the platform tenant is marked as a demo (Р-151)')),
+    ],
+  },
+  {
+    row: 'Р-149',
+    invariant: 'путь онбординга: один на тенанта, сужение не бывает пустым, завершение несёт время; запись — человеком и в аудит; включение движка набора — задание со СВОИМ правом',
+    mutations: [
+      m(dropConstraint('onboarding_progress_tenant_id_key', 'tenant_data.onboarding_progress'), smoke('a second onboarding path for the same tenant (Р-149)')),
+      m(dropConstraint('onboarding_step_known', 'tenant_data.onboarding_progress'), smoke('onboarding progress at a step that does not exist (Р-149)')),
+      m(dropConstraint('onboarding_narrowed_set_not_empty', 'tenant_data.onboarding_progress'), smoke('the onboarding set is narrowed to nothing (Р-131, Р-149)')),
+      m(dropConstraint('onboarding_done_has_completion', 'tenant_data.onboarding_progress'), smoke('the onboarding is marked done without a completion time (Р-149)')),
+      m(dropTrigger('a0_admin_write_person', 'tenant_data.onboarding_progress'),
+        verify('tenant_data\\.onboarding_progress: administrative INSERT without the person guard')),
+      m(dropTrigger('zz_admin_write_audit', 'tenant_data.onboarding_progress'),
+        smoke('starting the onboarding is written to the audit log (Р-97)'),
+        verify('tenant_data\\.onboarding_progress: administrative INSERT is not written to the audit log')),
+      // Право по виду [Р-143]: включение движка — ENABLE_REPRICING; объявить его «как у всех» значит пустить зрителя
+      m(replaceInFunction('tenant_data.bulk_job_requires_right()', "needed := CASE WHEN NEW.kind = 'REPRICING_ENABLE' THEN 'ENABLE_REPRICING' ELSE 'MANAGE_PRICING' END;",
+        "needed := 'VIEW_PRICING';"),
+        smoke('a viewer creates a repricing enablement job (Р-143)')),
+      m(replaceInFunction('security.bulk_job_cancel_action(text)', "WHEN p_kind = 'REPRICING_ENABLE' THEN 'ENABLE_REPRICING'", "WHEN false THEN 'ENABLE_REPRICING'"),
+        smoke('the cancel right of a repricing enablement job is the enablement right (Р-143)')),
+      /**
+       * Правило 14е: у каждого вида задания, который принимает таблица, есть право на отмену, известное матрице. Вид, для
+       * которого функция отдаёт неизвестное действие, — это вид без решения о праве.
+       */
+      m(replaceInFunction('security.bulk_job_cancel_action(text)', "WHEN p_kind = 'REPRICING_ENABLE' THEN 'ENABLE_REPRICING'", "WHEN p_kind = 'REPRICING_ENABLE' THEN 'NO_SUCH_RIGHT'"),
+        verify('bulk job kind REPRICING_ENABLE has no cancel right known to the permission matrix')),
     ],
   },
 ];

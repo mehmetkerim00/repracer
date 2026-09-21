@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer, type ViteDevServer } from 'vite';
-import { messagesFor, type BulkJobView, type ComplianceView, type CostImportView, type DiscountCheckView, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
+import { messagesFor, type DecisionListView, type BulkJobView, type ComplianceView, type CostImportView, type DiscountCheckView, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
 import { buildStandWorlds, memoryStandDirectory, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
@@ -134,7 +134,7 @@ test('stand API serves every screen of every world in German and English and ref
     for (const w of list) {
       const q = `?locale=${locale}`;
       await get<ProductListView>(auth, api(w.id, 'products') + q);
-      for (const d of await get<DecisionListItem[]>(auth, api(w.id, 'decisions') + q)) await get<DecisionTrace>(auth, api(w.id, 'decisions', d.decisionId) + q);
+      for (const d of (await get<DecisionListView>(auth, api(w.id, 'decisions') + q)).items) await get<DecisionTrace>(auth, api(w.id, 'decisions', d.decisionId) + q);
       await get<RejectedView>(auth, api(w.id, 'rejected') + q);
       for (const b of (await get<BoundsIndexView>(auth, api(w.id, 'bounds') + q)).items) await get<BoundsView>(auth, api(w.id, 'bounds', b.writeScopeId) + q);
       await get<StrategyListView>(auth, api(w.id, 'strategies') + q);
@@ -153,7 +153,7 @@ test('screens render from the dictionary: sign-in, products with the effective f
   const products = await html('/src/screens/Products.tsx', 'ProductsView', { view: await get<ProductListView>(auth, api(id, 'products')) });
   for (const text of ['Effective floor', 'Next check', 'No data', 'Kaufland de · unit 4101', '€17.75', 'Why this price']) assert.ok(products.includes(text), text);
 
-  const decisions = await get<DecisionListItem[]>(auth, api(id, 'decisions'));
+  const decisions = (await get<DecisionListView>(auth, api(id, 'decisions'))).items;
   const approved = decisions.find((d) => d.outcome === 'Approved')!;
   const trace = await html('/src/screens/Decisions.tsx', 'TraceView', { trace: await get<DecisionTrace>(auth, api(id, 'decisions', approved.decisionId)) });
   for (const text of ['Why this price', 'Competitor snapshot', 'Input check', 'Plausibility anchors', 'Strategy', 'Price Gate', 'Write to the channel', 'Channel confirmation']) {
@@ -870,7 +870,7 @@ test('Р-147: список заданий не несёт их итогов', as
  */
 test('Р-143, задача D: право на отмену чужого задания — право на его вид операции', async () => {
   const { canCancelBulkJob, CANCEL_ACTION } = await import('@repracer/console-model');
-  const KINDS = ['COST_IMPORT', 'BOUNDS_EDIT', 'BOUNDS_PLAN', 'STRATEGY_ASSIGN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT'] as const;
+  const KINDS = ['COST_IMPORT', 'BOUNDS_EDIT', 'BOUNDS_PLAN', 'STRATEGY_ASSIGN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT', 'REPRICING_ENABLE'] as const;
   // Вид задания без решения о праве существовать не может: перечисление полное [Р-146]
   assert.deepEqual(Object.keys(CANCEL_ACTION).sort(), [...KINDS].sort(), 'у каждого вида задания названо право на его отмену');
 
@@ -892,6 +892,9 @@ test('Р-143, задача D: право на отмену чужого зада
    */
   assert.equal(canCancelBulkJob('VIEWER', 'BOUNDS_PLAN', false), false, 'чужой экран различий зритель не отменяет: это начатая правка цен');
   assert.equal(canCancelBulkJob('VIEWER', 'STRATEGY_PREVIEW', false), false, 'чужой предпросмотр стратегии — тоже начатая операция с ценами');
+  // Шаг 34: включение движка — своё право; оператор включает, значит и чужое включение отменяет, а цены при этом не правит
+  assert.equal(canCancelBulkJob('OPERATOR', 'REPRICING_ENABLE', false), true, 'оператор вправе включать — вправе и отменить чужое включение');
+  assert.equal(canCancelBulkJob('VIEWER', 'REPRICING_ENABLE', false), false, 'зритель включать не вправе — и отменять чужое включение тоже');
 });
 
 /**

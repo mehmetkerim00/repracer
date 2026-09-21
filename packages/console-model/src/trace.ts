@@ -2,6 +2,7 @@ import type { ExpandedExplanation, ExpandedReason, ExplanationGap, Reason, Strat
 import { classifyBoundIntervention, expandExplanation, explanationRowOf } from '@repracer/pricing-model';
 import { describe, type HumanReason } from './explain.ts';
 import type { Messages } from './i18n/index.ts';
+import { pageOf, type ListQuery, type PageInfo } from './page.ts';
 import { strategyLabel } from './products.ts';
 import { gap, scopeById, unitOf, uniqueGaps, type ConsoleDecision, type ConsoleWrite, type Gap, type StandWorld, type Tone, type UnitRef } from './world.ts';
 
@@ -276,8 +277,28 @@ function channelStep(world: StandWorld, d: ConsoleDecision, writes: readonly Con
   }
 }
 
+export interface DecisionListView {
+  items: DecisionListItem[];
+  page: PageInfo;
+}
+
+/**
+ * Шаг 34 [Р-136, Р-151]: список решений отдаётся СТРАНИЦЕЙ. Демо-тенант показал, чего не видел ни один наполненный мир:
+ * 150 включённых предложений дают 13 500 решений за три часа — 5,8 МБ одним ответом, а за сутки вышло бы за предел экрана
+ * (8 МБ) в разы. Строки страницы собираются только для показанного: объяснение и текст причины — самое дорогое здесь.
+ */
+export function decisionListView(world: StandWorld, query: ListQuery, m: Messages): DecisionListView {
+  const sorted = [...world.state.decisions].sort((a, b) => Date.parse(b.decidedAt) - Date.parse(a.decidedAt) || b.decisionId.localeCompare(a.decisionId));
+  const { items, page } = pageOf(sorted, query, m);
+  return { items: decisionItems(world, items, m), page };
+}
+
 export function decisionList(world: StandWorld, m: Messages): DecisionListItem[] {
-  return [...world.state.decisions].sort((a, b) => Date.parse(b.decidedAt) - Date.parse(a.decidedAt) || b.decisionId.localeCompare(a.decisionId)).map((d) => {
+  return decisionItems(world, [...world.state.decisions].sort((a, b) => Date.parse(b.decidedAt) - Date.parse(a.decidedAt) || b.decisionId.localeCompare(a.decisionId)), m);
+}
+
+function decisionItems(world: StandWorld, decisions: readonly ConsoleDecision[], m: Messages): DecisionListItem[] {
+  return decisions.map((d) => {
     const scope = scopeById(world, d.writeScopeId);
     const e = explanationOf(world, d)?.value ?? null;
     const reason = d.outcome === 'NO_CHANGE' && e ? e.strategy.reason : e?.gate.reason ?? d.reason;

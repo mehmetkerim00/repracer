@@ -81,6 +81,8 @@ export function BoundsIndexView({ worldId, items }: { worldId: string; items: re
   return (
     <section>
       <h2>{m.ui.bounds.indexTitle}</h2>
+      {/* Задача D шага 34: пустой тенант видит, почему пусто и куда идти */}
+      {items.length === 0 ? <p className="notice">{m.ui.onboarding.empty.bounds} <a href={href(worldId, 'onboarding')}>{m.ui.onboarding.empty.startHere}</a></p> : null}
       <ul className="index">
         {items.map((i) => (
           <li key={i.writeScopeId}><a href={href(worldId, 'bounds', i.writeScopeId)}>{i.label}</a> <span className="muted small">{i.minPrice} – {i.maxPrice}</span></li>

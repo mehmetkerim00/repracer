@@ -38,7 +38,7 @@ SELECT set_config('app.auth_mfa', 'on', false) \gset
 SELECT set_config('app.user_id', :viewer, false) \gset
 SELECT pg_temp.expect_fail('cost import job created by a viewer with a second factor (Р-100, Р-139)', format($q$
   INSERT INTO tenant_data.bulk_job (tenant_id, kind, params, created_by_membership_id)
-  VALUES (%L, 'COST_IMPORT', '{}'::jsonb, %L) $q$, :tA, :viewerM), 'may not manage pricing');
+  VALUES (%L, 'COST_IMPORT', '{}'::jsonb, %L) $q$, :tA, :viewerM), 'does not have it');
 SELECT set_config('app.user_id', :owner, false) \gset
 
 -- --------------------------------------------------------------- признак второго фактора ставит база, а не вызывающий [Р-90]

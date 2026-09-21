@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
-import type { BoundsDiffView, ComplianceView, DecisionListItem, DiscountCheckView, DecisionTrace, PriceFeedView, StopView, StrategyListView, StrategyPreviewView } from '@repracer/console-model';
+import type { BoundsDiffView, ComplianceView, DecisionListView, DiscountCheckView, DecisionTrace, PriceFeedView, StopView, StrategyListView, StrategyPreviewView } from '@repracer/console-model';
 import { buildStandWorlds, pgStandJoinMember, pgStandUsers, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_EMAILS, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { pgStoreFactory } from '@repracer/contract-tests/pg-store';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
@@ -112,7 +112,7 @@ test('Р-78, Р-76, finding 4 on PostgreSQL: the stop and the resume are audited
 
 test('Р-74 on PostgreSQL: a NO_OP decision has no explanation in the database and the trace names the gap', async () => {
   const owner = await login('OWNER');
-  const decisions = (await handle({ method: 'GET', url: api('decisions'), body: undefined, ...owner })).body as DecisionListItem[];
+  const decisions = ((await handle({ method: 'GET', url: api('decisions'), body: undefined, ...owner })).body as DecisionListView).items;
   const noChange = decisions.find((d) => d.outcome === 'No change')!;
   const trace = (await handle({ method: 'GET', url: api('decisions', noChange.decisionId), body: undefined, ...owner })).body as DecisionTrace;
   assert.ok(trace.gaps.some((g) => g.code === 'NO_OP_NOT_EXPLAINED'));

@@ -34,6 +34,13 @@ export interface LiveProduct {
   costMinor?: number;
   /** Продавец включил Smart Pricing в кабинете канала [Р-12] */
   channelMinimumPriceMinor?: number;
+  /**
+   * Шаг 34 [Р-149, Р-151]: «голое» предложение — как оно приходит с канала до онбординга: без границ, себестоимости и
+   * стратегии, движок выключен. Путь онбординга сам даёт ему всё это.
+   */
+  bare?: boolean;
+  /** Шаг 34 [Р-151]: конкурентов у товара может быть несколько — демо ставит трёх с разным поведением */
+  moreCompetitors?: Array<{ sellerRef: string; behaviour: CompetitorBehaviour; startMinor: number }>;
 }
 
 export interface KauflandLiveWorld {
@@ -61,6 +68,13 @@ export interface KauflandLiveWorld {
 
 function scopeOf(p: LiveProduct, account: string): MemorySeedScope {
   const id = String(p.idProduct);
+  if (p.bare) {
+    return {
+      writeScopeId: `ws-${p.marketplace}-${id}`, productId: `prod-${p.marketplace}-${id}`, channelAccountId: account, marketplace: p.marketplace,
+      externalUnitId: id.slice(-6), channelProductRef: id, condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'OFF', strategy: null,
+      currentPriceMinor: 1850, minPrice: null, maxPrice: null,
+    } as MemorySeedScope;
+  }
   return {
     writeScopeId: `ws-${p.marketplace}-${id}`, productId: `prod-${p.marketplace}-${id}`, channelAccountId: account, marketplace: p.marketplace,
     externalUnitId: id.slice(-6), channelProductRef: id, condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: p.pricingMode ?? 'OFF',
@@ -76,6 +90,10 @@ export async function kauflandLiveWorld(input: {
   buyBoxChanged?: { lossShare: number; debounceMs: number };
   /** Параметры модели канала: сбои записи (K-14), задержка применения (K-15) и прочее */
   params?: KauflandChannelModelSpec['params'];
+  /** Р-151: тенант — демо; помечается в базе */
+  demo?: boolean;
+  /** Р-150: аккаунты других каналов, у которых нет доступа, — с перечнем того, чего не хватает */
+  awaitingAccounts?: NonNullable<MemorySeed['accounts']>;
 }): Promise<KauflandLiveWorld> {
   const tenantFixture = `10000000-0000-4000-8000-00000000${String(input.tag).padStart(4, '0')}`;
   const accountFixture = `20000000-0000-4000-8000-00000000${String(input.tag).padStart(4, '0')}`;
@@ -84,7 +102,10 @@ export async function kauflandLiveWorld(input: {
   const startIso = clock.iso();
   const start = clock.nowMs();
   const day = (offsetDays: number) => new Date(start + offsetDays * 86_400_000).toISOString().slice(0, 10);
-  const pricing: MemorySeed = { scopes: input.products.map((p) => scopeOf(p, accountFixture)), competitorDaily: {}, competitorState: {}, moves: [] };
+  const pricing: MemorySeed = {
+    scopes: input.products.map((p) => scopeOf(p, accountFixture)), competitorDaily: {}, competitorState: {}, moves: [],
+    ...(input.awaitingAccounts && input.awaitingAccounts.length > 0 ? { accounts: input.awaitingAccounts } : {}),
+  };
   for (const p of input.products) {
     if (p.cls.startsWith('NEW_')) continue;
     const key = `${p.marketplace}|${p.idProduct}|new`;
@@ -104,7 +125,10 @@ export async function kauflandLiveWorld(input: {
       idUnit: Number(String(p.idProduct).slice(-6)), storefront: p.marketplace, idOffer: `SYN-OFFER-${p.idProduct}`, idProduct: p.idProduct, listingPriceMinor: 1850, amount: 5,
       ...(p.channelMinimumPriceMinor ? { minimumPriceMinor: p.channelMinimumPriceMinor } : {}),
     })),
-    competitors: input.products.map((p) => ({ sellerRef: `Synthetic Competitor ${p.idProduct}`, storefront: p.marketplace, idProduct: p.idProduct, priceMinor: p.competitorStartMinor ?? 1800, behaviour: p.behaviour })),
+    competitors: input.products.flatMap((p) => [{ sellerRef: `Synthetic Competitor ${p.idProduct}`, storefront: p.marketplace, idProduct: p.idProduct, priceMinor: p.competitorStartMinor ?? 1800, behaviour: p.behaviour },
+      // Шаг 34: дополнительные конкуренты товара — у демо их три с разным поведением [Р-151]
+      ...(p.moreCompetitors ?? []).map((c) => ({ sellerRef: c.sellerRef, storefront: p.marketplace, idProduct: p.idProduct, priceMinor: c.startMinor, behaviour: c.behaviour })),
+    ]),
     // Р-45: buy_box_changed — ранний доступ; без доступа уведомлений нет, конкуренты — только опрос. Доступ — явный параметр мира
     params: { ...input.params, buyBoxChanged: input.buyBoxChanged ? { delivered: true, debounceMs: input.buyBoxChanged.debounceMs, lossShare: input.buyBoxChanged.lossShare } : { delivered: false, debounceMs: 0, lossShare: 1 } },
   };
@@ -119,7 +143,7 @@ export async function kauflandLiveWorld(input: {
   };
   const seeded = await seedPricingWorld(input.appPool, {
     fixtureTenantId: tenantFixture, fixtureChannelAccountId: accountFixture, marketplaces, clock: startIso, seed: pricing,
-    provisioningPool: input.provisioningPool, adminPool: input.adminPool,
+    provisioningPool: input.provisioningPool, adminPool: input.adminPool, ...(input.demo ? { demo: true } : {}),
   });
   const simulator = new SimulatedKauflandChannel(channelModel, startIso);
   const buyboxCalls = new Map<number, number[]>();
