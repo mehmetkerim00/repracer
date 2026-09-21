@@ -472,7 +472,8 @@ BEGIN
   END LOOP;
   -- Положительный контроль: правило, не нашедшее ни одного вида, ничего не проверило (ревью шага 34, находка 1)
   IF accepted_kinds = 0 THEN
-    bad := bad || 'rule 14е found no bulk job kind accepted by the table: the rule checks nothing (Р-93)';
+    -- array_append, а не `||`: строковый литерал справа от `||` PostgreSQL читает как массив и падает «malformed array literal»
+    bad := array_append(bad, 'rule 14е found no bulk job kind accepted by the table: the rule checks nothing (Р-93)');
   END IF;
 
   -- 14в. Р-90, Р-139 (шаг 30): роль фонового исполнителя — ровно свой список разрешённого, в обе стороны

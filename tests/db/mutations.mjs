@@ -1084,7 +1084,13 @@ export const STEP30_ROWS = [
         smoke('a finished bulk job is started again (Р-139)'),
         smoke('a pending bulk job jumps straight to succeeded (Р-139)')),
       // Виды значений строки задания: экран хода читает их как данность
-      m(dropConstraint('bulk_job_kind_known', 'tenant_data.bulk_job'), smoke('bulk job of an unknown kind')),
+      /**
+       * Шаг 34: неизвестный вид задания отклоняют теперь ДВЕ защиты — эта проверка значений и страж создания, у которого
+       * больше нет ветки «иначе» (виду без права достаётся право, которого нет ни у кого). Смоук «unknown kind» без проверки
+       * значений по-прежнему получает отказ, но чужой, — своей поимкой он быть перестал [Р-99]. Собственная роль проверки —
+       * быть ПЕРЕЧНЕМ видов для правил схемы: без неё правило 14е не находит ни одного вида и обязано сказать это.
+       */
+      m(dropConstraint('bulk_job_kind_known', 'tenant_data.bulk_job'), verify('rule 14е found no bulk job kind accepted by the table: the rule checks nothing')),
       m(dropConstraint('bulk_job_status_known', 'tenant_data.bulk_job'), smoke('bulk job in an unknown status')),
       m(dropConstraint('bulk_job_phase_known', 'tenant_data.bulk_job'), smoke('bulk job in an unknown phase')),
       m(dropConstraint('bulk_job_total_non_negative', 'tenant_data.bulk_job'), smoke('bulk job with a negative total')),
@@ -1255,8 +1261,7 @@ export const STEP34_ROWS = [
          ALTER TABLE tenant_data.bulk_job ADD CONSTRAINT bulk_job_kind_known CHECK (kind IN ('COST_IMPORT', 'BOUNDS_EDIT', 'BOUNDS_PLAN',
            'STRATEGY_ASSIGN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT', 'REPRICING_ENABLE', 'KIND_WITHOUT_A_RIGHT'))`,
         verify('bulk job kind KIND_WITHOUT_A_RIGHT has no cancel right known to the permission matrix')),
-      // Положительный контроль правила: без проверки видов у таблицы оно не находит ни одного и обязано сказать это
-      m(dropConstraint('bulk_job_kind_known', 'tenant_data.bulk_job'), verify('rule 14е found no bulk job kind accepted by the table')),
+      // Положительный контроль правила («проверки видов нет — правило говорит это») — своя проверка строки Р-139: мутация та же
     ],
   },
 ];
