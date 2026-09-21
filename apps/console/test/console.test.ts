@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer, type ViteDevServer } from 'vite';
-import { messagesFor, type DecisionListView, type BulkJobView, type ComplianceView, type CostImportView, type DiscountCheckView, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
+import { describe, messagesFor, type EnableResultView, type OnboardingView, type DecisionListView, type BulkJobView, type ComplianceView, type CostImportView, type DiscountCheckView, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
 import { buildStandWorlds, memoryStandDirectory, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
@@ -134,6 +134,14 @@ test('stand API serves every screen of every world in German and English and ref
     for (const w of list) {
       const q = `?locale=${locale}`;
       await get<ProductListView>(auth, api(w.id, 'products') + q);
+      /**
+       * Экран пути — первая вкладка консоли, и на стенде в памяти он врал (ревью шага 34, находка 8): у мира, который работает и
+       * принимает решения, стоял «канал не подключён» — хранилище в памяти не видело собственный аккаунт мира.
+       */
+      const path = await get<OnboardingView>(auth, api(w.id, 'onboarding') + q);
+      assert.ok(path.channels.some((c) => c.status === 'ACTIVE'), `${w.id}: у работающего мира есть подключённый канал`);
+      assert.notEqual(path.resumeAt, 'CHANNEL', `${w.id}: путь не останавливается на подключении канала`);
+      assert.equal(path.demo, false, `${w.id}: мир сценария — не демо`);
       for (const d of (await get<DecisionListView>(auth, api(w.id, 'decisions') + q)).items) await get<DecisionTrace>(auth, api(w.id, 'decisions', d.decisionId) + q);
       await get<RejectedView>(auth, api(w.id, 'rejected') + q);
       for (const b of (await get<BoundsIndexView>(auth, api(w.id, 'bounds') + q)).items) await get<BoundsView>(auth, api(w.id, 'bounds', b.writeScopeId) + q);
@@ -145,6 +153,38 @@ test('stand API serves every screen of every world in German and English and ref
   assert.equal((await call(auth, 'GET', api('no-such-world', 'products'))).status, 404);
   const missing = await call(auth, 'GET', `${api(WORLDS[0]!, 'decisions', 'decision-9999')}?locale=de`);
   assert.deepEqual([missing.status, (missing.body as { error: { message: string } }).error.message], [404, 'Nicht gefunden.']);
+});
+
+test('Р-149, задача D: экран пути, итог включения и пустые состояния отрисовываются из словаря на обоих языках', async () => {
+  const auth = await login('OWNER');
+  const id = 'kaufland/pipeline/happy-path';
+  for (const locale of ['de', 'en'] as const) {
+    const m = messagesFor(locale);
+    const view = await get<OnboardingView>(auth, `${api(id, 'onboarding')}?locale=${locale}`);
+    const path = await html('/src/screens/Onboarding.tsx', 'OnboardingScreenView', { view, worldId: id, busy: false, onNarrow: () => {}, onEnable: () => {} }, locale);
+    for (const step of view.steps) assert.ok(path.includes(step.title), `${locale}: шаг «${step.title}» на экране`);
+    assert.ok(path.includes(view.resumeText), `${locale}: место продолжения названо`);
+
+    // Итог включения с отказами: предложение названо, причина словами, остаток — числом (ревью шага 34, находка 3)
+    const result: EnableResultView = {
+      enabled: 3, already: 1, skipped: 60, byCode: [{ code: 'COST_REQUIRED', title: m.titles.COST_REQUIRED, count: 60 }],
+      examples: [{ writeScopeId: 'ws-1', label: 'Kaufland de · unit 4101', reasons: [describe({ code: 'COST_REQUIRED', params: {} }, m).text] }],
+    };
+    const shown = await html('/src/screens/Onboarding.tsx', 'EnableResult', { result }, locale);
+    for (const text of ['Kaufland de · unit 4101', m.titles.COST_REQUIRED, m.ui.onboarding.result.skipped(60), m.ui.onboarding.result.more(59)]) {
+      assert.ok(shown.includes(text.replace(/&/g, '&amp;')), `${locale}: «${text}» в итоге включения`);
+    }
+
+    // Пустые состояния: таблица без строк объясняет себя и ведёт на путь, а не молчит
+    const products = await get<ProductListView>(auth, `${api(id, 'products')}?locale=${locale}`);
+    const emptyProducts = await html('/src/screens/Products.tsx', 'ProductsView', { view: { ...products, rows: [], page: { ...products.page, total: 0 } } }, locale);
+    const strategies = await get<StrategyListView>(auth, `${api(id, 'strategies')}?locale=${locale}`);
+    const emptyStrategies = await html('/src/screens/Strategies.tsx', 'StrategiesScreenView', { view: { ...strategies, strategies: [], scopes: [] }, worldId: id }, locale);
+    for (const [screen, markup, text] of [['products', emptyProducts, m.ui.onboarding.empty.products], ['strategies', emptyStrategies, m.ui.onboarding.empty.strategies]] as const) {
+      assert.ok(markup.includes(text), `${locale}: пустой экран ${screen} объясняет пустоту`);
+      assert.ok(markup.includes(m.ui.onboarding.empty.startHere) && markup.includes('onboarding'), `${locale}: пустой экран ${screen} ведёт на путь`);
+    }
+  }
 });
 
 test('screens render from the dictionary: sign-in, products with the effective floor, why this price with a NO_OP gap, rejected, bounds, stop with the audit log', async () => {

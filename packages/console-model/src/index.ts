@@ -19,4 +19,4 @@ export { complianceView, discountCheckView, historyDepthView, PRICE_EVIDENCE_HEA
 export { columnName, costImportView, importTargets, PREVIEW_ROWS_SHOWN, SKIPPED_EXAMPLES, type CostImportView, type ImportPreviewRowView, type ImportSkippedGroupView } from './cost-import.ts';
 export { bulkJobsView, bulkJobView, canCancelBulkJob, CANCEL_ACTION, type BulkJobView, type BulkJobsView } from './jobs.ts';
 export { COST_IMPORT_REPORT_HEADER, costImportReportRows, csvOf, PRICE_FEED_CSV_HEADER, priceFeedFileName, priceFeedRows, priceFeedRowsOf } from './exports.ts';
-export { onboardingView, type OnboardingView, type OnboardingStepView, type ChannelAccountView } from './onboarding.ts';
+export { onboardingView, type OnboardingView, type OnboardingStepView, type ChannelAccountView, type EnableResultView } from './onboarding.ts';

@@ -22,8 +22,11 @@ import { KAUFLAND_DESCRIPTOR } from '@repracer/kaufland-adapter';
 
 export interface BulkWorkerWorldConfig {
   descriptor: BulkWorldDescriptor;
-  /** Момент, на который исполнитель читает состояние мира: у миров стенда часы виртуальные */
-  now: Instant;
+  /**
+   * Момент, на который исполнитель читает состояние мира: у миров стенда часы виртуальные и стоят. `WALL_CLOCK` — настоящее
+   * время: так живёт демо-тенант [Р-151], у которого данные, внесённые через консоль, действуют с настоящего момента.
+   */
+  now: Instant | 'WALL_CLOCK';
   /** Пары «псевдоним → UUID»; пусто — идентификаторы мира и базы совпадают (так будет в работе) */
   idAliases?: Array<[string, string]>;
 }
@@ -66,7 +69,7 @@ export async function runConfiguredWorker(config: BulkWorkerConfig, stopped: () 
   const owner = config.owner ?? `bulk-worker-${process.pid}`;
   await Promise.all(config.worlds.map(async (world) => {
     const store = storeFor(config.pgUrl, world);
-    const now = () => world.now;
+    const now = (): Instant => (world.now === 'WALL_CLOCK' ? new Date().toISOString() as Instant : world.now);
     // Свой путь решения на канал: доступность стратегии — свойство канала, и один пайплайн на все каналы дал бы чужой ответ
     const pipelines = new Map(world.descriptor.accounts.map((a) => [a.channelAccountId, previewPipelineFor(store, a.channel, now)]));
     const handlers = bulkJobHandlers({
@@ -79,7 +82,12 @@ export async function runConfiguredWorker(config: BulkWorkerConfig, stopped: () 
           tenantId: world.descriptor.tenantId as never, channelAccountId: scope.channelAccountId as never,
           correlationId: `bulk-enable:${scope.writeScopeId}`, deadline: now(),
         }, scope.writeScopeId, { userId: ctx.userId });
-        return { enabled: result.enabled, problems: result.problems.map((x) => ({ code: x.code })) };
+        /**
+         * Массовое включение предупреждений не подтверждает: подтвердить их может только человек, глядя на само предложение.
+         * Но отказ по предупреждению не должен остаться без причины (ревью шага 34, находка 13) — она и называется итогу.
+         */
+        const reasons = result.problems.length > 0 ? result.problems : result.warnings;
+        return { enabled: result.enabled, problems: reasons.map((x) => ({ code: x.code, params: x.params as Record<string, unknown> })) };
       },
       previewStrategy: async (_ctx, scope, strategy) => {
         const pipeline = pipelines.get(scope.channelAccountId);

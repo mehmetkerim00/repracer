@@ -26,14 +26,27 @@ export interface OnboardingStepView {
   goTo: { screen: string; label: string } | null;
 }
 
+/**
+ * Итог задания включения, как его видит экран [Р-147: наружу идёт только `view`]. Отказанные предложения названы
+ * ПОИМЁННО и с причиной словами — «не включено 50, смотрите список» без списка продавцу ничего не говорит.
+ */
+export interface EnableResultView {
+  enabled: number;
+  already: number;
+  skipped: number;
+  byCode: Array<{ code: string; title: string; count: number }>;
+  /** Первые пятьдесят отказанных: название предложения и причины словами словаря */
+  examples: Array<{ writeScopeId: string; label: string; reasons: string[] }>;
+}
+
 export interface ChannelAccountView {
   channelAccountId: string;
   channel: string;
   label: string;
   status: ChannelAccountRow['authStatus'];
   statusText: string;
-  /** Р-150: чего не хватает, чтобы канал заработал, — перечнем, а не ошибкой и не пустотой */
-  blockers: string[];
+  /** Р-150: чего не хватает, чтобы канал заработал, — перечнем, а не ошибкой и не пустотой. Код — для проверки, текст — продавцу */
+  blockers: Array<{ code: ChannelAccountRow['accessBlockers'][number]; text: string }>;
   awaitingHint: string | null;
 }
 
@@ -48,7 +61,10 @@ export interface OnboardingView {
   channels: ChannelAccountView[];
   /** Сужение набора [Р-131]: предложено, когда себестоимость есть не у всех */
   narrowing: { offered: boolean; withCost: number; total: number; narrowedTo: number | null; hint: string } | null;
+  /** Сужать набор вправе тот, кто правит цены */
   canLead: boolean;
+  /** Включать движок — своё право [Р-143]: оператор включает, хотя цен не правит */
+  canEnable: boolean;
   /** Сколько предложений набора включит последний шаг */
   enableCount: number;
 }
@@ -77,14 +93,14 @@ export function onboardingView(world: StandWorld, progress: OnboardingProgressRo
   const channels: ChannelAccountView[] = accounts.map((a) => ({
     channelAccountId: a.channelAccountId, channel: a.channel, label: a.displayName ?? `${a.channel} · ${a.marketplaces.join(', ')}`,
     status: a.authStatus, statusText: t.channels.status[a.authStatus],
-    blockers: a.accessBlockers.map((b) => t.channels.blockers[b]),
+    blockers: a.accessBlockers.map((code) => ({ code, text: t.channels.blockers[code] })),
     awaitingHint: a.authStatus === 'AWAITING_ACCESS' ? t.channels.awaitingHint : null,
   }));
   const enable = byStep.get('ENABLE');
   return {
     worldId: world.id, demo: world.demo === true, intro: world.demo === true ? `${t.demoIntro} ${t.intro}` : t.intro, steps, resumeAt,
     resumeText: resumeAt === 'DONE' ? t.completed : t.resumeAt(t.steps[resumeAt]),
-    channels, narrowing, canLead: can(world.viewer.role, 'MANAGE_PRICING'),
+    channels, narrowing, canLead: can(world.viewer.role, 'MANAGE_PRICING'), canEnable: can(world.viewer.role, 'ENABLE_REPRICING'),
     enableCount: enable ? enable.totalCount - enable.doneCount : 0,
   };
 }

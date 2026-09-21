@@ -575,6 +575,8 @@ export interface PricingStore {
   onboardingStatus(tenantId: string): Promise<OnboardingStepStatus[]>;
   /** Аккаунты канала тенанта с честным состоянием доступа [Р-150] */
   channelAccounts(tenantId: string): Promise<ChannelAccountRow[]>;
+  /** Р-151: демо ли тенант — по базе. Нужен там, где состояние консоли целиком не читается: исполнителю, когда он метит файл */
+  tenantIsDemo(tenantId: string): Promise<boolean>;
   /**
    * Предложения, у которых себестоимость ГОТОВА К ВКЛЮЧЕНИЮ: объявлена [Р-131] и есть полная оценка комиссии
    * (`write_scope_cost_ready`) — то же, чего требует путь решения при включении. Сужение набора [Р-149] считается отсюда, а не по полю экрана: экран и база расходились.
@@ -878,6 +880,8 @@ export interface ConsoleMemberRow {
 
 export interface ConsoleState {
   tenantId: string;
+  /** Р-151: тенант на симуляторе. Признак — из БАЗЫ (`tenant.demo`), а не из настройки стенда: метку нельзя забыть поставить */
+  demo: boolean;
   scopes: ConsoleScopeRow[];
   intents: ConsoleIntentRow[];
   decisions: ConsoleDecisionRow[];
@@ -912,16 +916,17 @@ export const ONBOARDING_STEPS: readonly OnboardingStep[] = ['TENANT', 'CHANNEL',
 export interface OnboardingProgressRow {
   /** null — весь каталог; иначе — предложения, до которых путь сужен */
   scopeWriteScopeIds: string[] | null;
-  lastStep: OnboardingStep | 'DONE';
   startedAt: string;
   updatedAt: string;
-  completedAt: string | null;
 }
 
+/**
+ * Хранится только сужение набора. Отметки «последний шаг» нет намеренно (ревью шага 34, находка 6): место остановки —
+ * первый незавершённый шаг выведенного состояния, а хранимая галочка расходилась бы с данными.
+ */
 export interface OnboardingProgressInput {
-  lastStep: OnboardingStep | 'DONE';
-  /** undefined — не менять; null — снять сужение */
-  scopeWriteScopeIds?: string[] | null;
+  /** null — снять сужение */
+  scopeWriteScopeIds: string[] | null;
 }
 
 export interface OnboardingStepStatus {

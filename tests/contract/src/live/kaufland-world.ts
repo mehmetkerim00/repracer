@@ -131,7 +131,7 @@ export async function kauflandLiveWorld(input: {
       ...(p.channelMinimumPriceMinor ? { minimumPriceMinor: p.channelMinimumPriceMinor } : {}),
     })),
     competitors: input.products.flatMap((p) => [{ sellerRef: `Synthetic Competitor ${p.idProduct}`, storefront: p.marketplace, idProduct: p.idProduct, priceMinor: p.competitorStartMinor ?? 1800, behaviour: p.behaviour },
-      // Шаг 34: дополнительные конкуренты товара — у демо их три с разным поведением [Р-151]
+      // Шаг 34: дополнительные конкуренты товара — у демо с ними выходит три с разным поведением [Р-151]
       ...(p.moreCompetitors ?? []).map((c) => ({ sellerRef: c.sellerRef, storefront: p.marketplace, idProduct: p.idProduct, priceMinor: c.startMinor, behaviour: c.behaviour })),
     ]),
     // Р-45: buy_box_changed — ранний доступ; без доступа уведомлений нет, конкуренты — только опрос. Доступ — явный параметр мира

@@ -4,7 +4,7 @@ import type { JobCreatedResponse, StrategySaveResponse } from '../api-types.ts';
 import type { BulkJobView } from '@repracer/console-model';
 import { JobProgress } from './Jobs.tsx';
 import { ApiError, requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, ErrorBox, errorText, Gaps, Load, Pager, ReasonLine, useMessages } from '../components.tsx';
+import { Badge, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, useMessages } from '../components.tsx';
 
 /**
  * Экран стратегий (шаги 21, 23): черновик или новая версия существующей стратегии → превью на выбранных офферах (движок и Gate на
@@ -199,7 +199,7 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
       <h2>{t.pageTitle}</h2>
       <h3>{t.inUse}</h3>
       {/* Задача D шага 34: новый тенант без стратегий и офферов видит объяснение, а не пустой список */}
-      {view.strategies.length === 0 ? <p className="notice">{m.ui.onboarding.empty.strategies}</p> : null}
+      {view.strategies.length === 0 ? <p className="notice">{m.ui.onboarding.empty.strategies} <a href={href(view.worldId, 'onboarding')}>{m.ui.onboarding.empty.startHere}</a></p> : null}
       <ul className="index">
         {view.strategies.map((s) => (
           <li key={s.strategyId}>

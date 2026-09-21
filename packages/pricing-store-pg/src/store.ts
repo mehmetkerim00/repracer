@@ -1292,11 +1292,11 @@ export class PgPricingStore implements PricingStore {
   async onboardingProgress(tenantId: string): Promise<OnboardingProgressRow | null> {
     return inTenant(this.admin('onboardingProgress'), tenantId, async (tx) => {
       const { rows } = await tx.query(
-        `SELECT scope_write_scope_ids, last_step, started_at, updated_at, completed_at FROM tenant_data.onboarding_progress WHERE tenant_id = $1`, [tenantId]);
+        `SELECT scope_write_scope_ids, started_at, updated_at FROM tenant_data.onboarding_progress WHERE tenant_id = $1`, [tenantId]);
       const r = rows[0];
       return r === undefined ? null : {
-        scopeWriteScopeIds: (r.scope_write_scope_ids as string[] | null) ?? null, lastStep: r.last_step as OnboardingProgressRow['lastStep'],
-        startedAt: String(r.started_at), updatedAt: String(r.updated_at), completedAt: r.completed_at === null ? null : String(r.completed_at),
+        scopeWriteScopeIds: (r.scope_write_scope_ids as string[] | null) ?? null,
+        startedAt: String(r.started_at), updatedAt: String(r.updated_at),
       };
     });
   }
@@ -1304,25 +1304,27 @@ export class PgPricingStore implements PricingStore {
   async saveOnboardingProgress(tenantId: string, input: OnboardingProgressInput, actor: AdminActor): Promise<'SAVED' | 'FORBIDDEN'> {
     try {
       await inTenant(this.admin('saveOnboardingProgress'), tenantId, async (tx) => {
-        /**
-         * Одна строка на тенанта: первая запись начинает путь, следующие двигают его. Сужение [Р-131] — отдельное намерение:
-         * `undefined` его не трогает, `null` снимает, список — сужает.
-         */
+        // Одна строка на тенанта; хранится только сужение набора [Р-131]: список сужает, `null` снимает
         await tx.query(
-          `INSERT INTO tenant_data.onboarding_progress (tenant_id, last_step, scope_write_scope_ids, updated_by_membership_id, completed_at)
-           VALUES ($1, $2, $3, $4, CASE WHEN $2 = 'DONE' THEN now() END)
+          `INSERT INTO tenant_data.onboarding_progress (tenant_id, scope_write_scope_ids, updated_by_membership_id)
+           VALUES ($1, $2, $3)
            ON CONFLICT (tenant_id) DO UPDATE
-             SET last_step = excluded.last_step,
-                 scope_write_scope_ids = CASE WHEN $5 THEN tenant_data.onboarding_progress.scope_write_scope_ids ELSE excluded.scope_write_scope_ids END,
-                 updated_at = now(), updated_by_membership_id = excluded.updated_by_membership_id,
-                 completed_at = CASE WHEN excluded.last_step = 'DONE' THEN coalesce(tenant_data.onboarding_progress.completed_at, now()) END`,
-          [tenantId, input.lastStep, input.scopeWriteScopeIds ?? null, actor.membershipId, input.scopeWriteScopeIds === undefined]);
+             SET scope_write_scope_ids = excluded.scope_write_scope_ids,
+                 updated_at = now(), updated_by_membership_id = excluded.updated_by_membership_id`,
+          [tenantId, input.scopeWriteScopeIds, actor.membershipId]);
       }, actor.userId, { mfa: actor.mfa });
       return 'SAVED';
     } catch (error) {
       if ((error as { code?: string }).code === '42501') return 'FORBIDDEN';
       throw error;
     }
+  }
+
+  async tenantIsDemo(tenantId: string): Promise<boolean> {
+    return inTenant(this.admin('tenantIsDemo'), tenantId, async (tx) => {
+      const { rows } = await tx.query(`SELECT demo FROM tenant_data.tenant WHERE tenant_id = $1`, [tenantId]);
+      return rows[0]?.demo === true;
+    });
   }
 
   async onboardingStatus(tenantId: string): Promise<OnboardingStepStatus[]> {
@@ -1902,8 +1904,9 @@ export class PgPricingStore implements PricingStore {
           entityType: r.entity_type, entityId: r.entity_id, scope: r.changes.scope ?? null, channelAccountId: r.changes.channelAccountId ?? null,
           marketplace: r.changes.marketplace ?? null, note: r.changes.note ?? null,
         }));
+      const [tenantRow] = await q(`SELECT demo FROM tenant_data.tenant WHERE tenant_id = $1`);
       return {
-        tenantId, scopes, intents, decisions, writes, halts, haltReviews, distrusts, offerChannelPricing, pricingHealth, stops, rejectedSnapshots, divergenceCases,
+        tenantId, demo: tenantRow?.demo === true, scopes, intents, decisions, writes, halts, haltReviews, distrusts, offerChannelPricing, pricingHealth, stops, rejectedSnapshots, divergenceCases,
         fxRates: fx.map((f) => ({ source: 'ECB', rateDate: f.rate_date, base: 'EUR', quote: f.quote_currency, rateMicros: Number(f.rate_micros), availableFrom: f.available_from })),
         members, strategies, strategyVersions, explanationRulesets, audit,
       };

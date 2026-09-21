@@ -8,9 +8,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { JobCreatedResponse, StandToken, WorldSummary } from '../src/api-types.ts';
-import type { BoundsDiffView, BulkJobView, CostImportView, OnboardingView, StrategyPreviewView } from '@repracer/console-model';
+import type { BoundsDiffView, BulkJobView, CostImportView, EnableResultView, OnboardingView, StrategyPreviewView } from '@repracer/console-model';
+import { DEMO_FILE_PREFIX, DEMO_ROW_MARK } from '@repracer/bulk-jobs';
 import { STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
-import { demoWorld, DEMO_OFFERS, type DemoWorld } from '@repracer/contract-tests/live';
+import { demoWorld, DEMO_COMPETITORS_PER_OFFER, DEMO_OFFERS, type DemoWorld } from '@repracer/contract-tests/live';
 import { createAuthenticator, MemoryIdentityDirectory, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
 import { seedPricingWorld, PgPricingStore, type PgPool } from '@repracer/pricing-store-pg';
@@ -45,6 +46,10 @@ let origin: string;
 let owner: { authorization: string; cookie: string };
 let passwordOnly: { authorization: string; cookie: string };
 let emptyOwner: { authorization: string; cookie: string };
+/** Оператор включает движок, но цен не правит; зритель не делает ни того ни другого [Р-143] */
+let operator: { authorization: string; cookie: string };
+let viewerOnly: { authorization: string; cookie: string };
+let observer: PgPool;
 const workers: ChildProcess[] = [];
 let workerConfigPath = '';
 const measured: Array<{ operation: string; seconds: number; bytes: number; status: number; note: string }> = [];
@@ -111,12 +116,16 @@ before(async () => {
   const adminPool: PgPool = db.pool('svc_admin', 4);
   const provisioningPool = db.pool('svc_provisioning', 1);
   /**
-   * Виртуальные часы демо стартуют с настоящего «сейчас». Первая редакция стартовала на четыре часа раньше — и включение
-   * отказало всем 150 предложениям: себестоимость, ввезённая через консоль, действует с НАСТОЯЩЕГО момента импорта, а путь
-   * решения смотрел на мир «четыре часа назад», где её ещё нет [Р-131]. Демо, в которое продавец вносит данные руками,
-   * не может жить в прошлом.
+   * Виртуальные часы демо НЕ МОГУТ быть в прошлом. Первая редакция стартовала на четыре часа раньше — и включение отказало
+   * всем 150 предложениям: себестоимость, ввезённая через консоль, действует с НАСТОЯЩЕГО момента импорта (часы базы), а
+   * путь решения смотрел на мир «четыре часа назад», где её ещё нет [Р-131].
+   *
+   * Старт — 09:00 UTC ЗАВТРАШНИХ суток, а не «сейчас»: иначе у прогона был бы скрытый вход — время суток. Два виртуальных
+   * часа от «сейчас» в 22:30 пересекают границу суток (закрытие суток, секции по суткам UTC) — тот самый класс дефекта,
+   * из-за которого три живых прогона шага 29 краснели час в сутки (ревью шага 34, находка 13).
    */
-  const startIso = new Date().toISOString();
+  const tomorrow = new Date(Date.now() + 24 * 3_600_000);
+  const startIso = new Date(Date.UTC(tomorrow.getUTCFullYear(), tomorrow.getUTCMonth(), tomorrow.getUTCDate(), 9, 0, 0)).toISOString();
   demo = await demoWorld({
     tag: 3401, startIso, bare: true, appPool, adminPool, provisioningPool, dispatcherPool: db.pool('svc_dispatcher', 2),
     schedulerPool: db.pool('svc_scheduler', 3), exporterPool: db.pool('svc_exporter', 2),
@@ -127,7 +136,7 @@ before(async () => {
   const demoAccounts = [{ channelAccountId: seeded.channelAccountId, channel: 'KAUFLAND', marketplaces: ['de'], haltRelease: 'SAMPLE' as const }];
   const demoLive: LiveWorld = {
     id: DEMO_WORLD, title: 'Демо: Kaufland на симуляторе', description: `${DEMO_OFFERS} предложений, три конкурента у каждого`, tenantId: seeded.tenantId,
-    accounts: demoAccounts, identityTenantId: seeded.tenantId, membershipAlias: (id) => id, failures: [], demo: true,
+    accounts: demoAccounts, identityTenantId: seeded.tenantId, membershipAlias: (id) => id, failures: [],
     store: store as never, pipeline: demo.live.pipelineForDbIds() as never, clock: { iso: nowIso, nowMs: () => demo.clock.nowMs() } as never,
     callContext: (channelAccountId) => ({ tenantId: seeded.tenantId as never, channelAccountId: channelAccountId as never, correlationId: 'onboarding-live', deadline: nowIso() }),
     view: async (viewer) => ({
@@ -163,6 +172,21 @@ before(async () => {
   directory.link({ issuer: STAND_ISSUER, subject: 'empty-owner' }, empty.userId);
   directory.addMembership(empty.userId, { tenantId: empty.tenantId, membershipId: empty.ownerMembershipId, role: 'OWNER' });
   const issuer = createTestIssuer({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE });
+  // Наблюдатель — суперпользователь в отдельной базе прогона: только чтение, как в живом прогоне планировщика
+  const observerUrl = new URL(process.env.REPRACER_PG_ADMIN_URL!); observerUrl.pathname = `/${db.name}`;
+  const { createPool } = await import('@repracer/pricing-store-pg');
+  observer = createPool(observerUrl.toString(), { max: 1, applicationName: 'repracer-onboarding-observer' });
+  // Остальные участники демо-тенанта заведены посевом: оператор и зритель входят своими токенами
+  const members = await observer.query(`SELECT role, user_id, membership_id FROM tenant_data.membership WHERE tenant_id = $1 AND role IN ('OPERATOR', 'VIEWER')`, [seeded.tenantId]);
+  const authOf = (role: string, subject: string) => {
+    const row = members.rows.find((r) => r.role === role);
+    assert.ok(row, `в демо-тенанте есть участник с ролью ${role}`);
+    directory.link({ issuer: STAND_ISSUER, subject }, row.user_id as string);
+    directory.addMembership(row.user_id as string, { tenantId: seeded.tenantId, membershipId: row.membership_id as string, role: role as never });
+    return { authorization: `Bearer ${issuer.token(subject, { email: `${subject}@example.invalid`, amr: ['pwd', 'otp'] })}`, cookie: 'repracer_locale=de' };
+  };
+  operator = authOf('OPERATOR', 'demo-operator');
+  viewerOnly = authOf('VIEWER', 'demo-viewer');
   emptyOwner = { authorization: `Bearer ${issuer.token('empty-owner', { email: 'new-seller@example.invalid', amr: ['pwd', 'otp'] })}`, cookie: 'repracer_locale=de' };
   const handle = createStandApi([demoLive, emptyLive], {
     authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory }),
@@ -182,7 +206,7 @@ before(async () => {
 
   const config: BulkWorkerConfig = {
     pgUrl: db.url('svc_app'), leaseSeconds: LEASE_SECONDS, progressEverySeconds: 1, idleMs: 100,
-    worlds: [{ descriptor: { id: DEMO_WORLD, title: 'Демо', description: '', tenantId: seeded.tenantId, accounts: demoAccounts }, now: new Date(Date.parse(startIso) + 30 * 60_000).toISOString() as never }],
+    worlds: [{ descriptor: { id: DEMO_WORLD, title: 'Демо', description: '', tenantId: seeded.tenantId, accounts: demoAccounts }, now: 'WALL_CLOCK' }],
   };
   workerConfigPath = join(mkdtempSync(join(tmpdir(), 'repracer-onboarding-')), 'worker.json');
   writeFileSync(workerConfigPath, JSON.stringify(config), 'utf8');
@@ -193,6 +217,7 @@ after(async () => {
   console.log(JSON.stringify({ offers: DEMO_OFFERS, withCost: WITH_COST, operations: measured }, null, 1));
   for (const child of workers) child.kill('SIGKILL');
   server?.close();
+  await observer?.end();
   await db?.drop();
 });
 
@@ -205,12 +230,28 @@ test('задача D: новый тенант без данных — кажды
     const r = await measure<unknown>(`пустой тенант: ${screen}`, 'GET', api(EMPTY_WORLD, screen), undefined, '', emptyOwner);
     assert.equal(r.status, 200, `${screen}: ${JSON.stringify(r.body).slice(0, 200)}`);
   }
+  /**
+   * 200 — ещё не «пустое состояние» (ревью шага 34, находка 11б): экран обязан отдать ПУСТОЙ СПИСОК С ИТОГОМ НОЛЬ, по которому
+   * интерфейс показывает объяснение, а не таблицу без строк. Сами объяснения отрисовываются в `console.test.ts`.
+   */
+  const emptyList = async <T>(screen: string) => (await measure<T>(`пустой тенант: ${screen} (содержимое)`, 'GET', api(EMPTY_WORLD, screen), undefined, '', emptyOwner)).body;
+  const products = await emptyList<{ rows: unknown[]; page: { total: number } }>('products');
+  assert.deepEqual([products.rows, products.page.total], [[], 0], 'товары: пустая страница с итогом ноль');
+  const boundsIndex = await emptyList<{ items: unknown[] }>('bounds');
+  assert.deepEqual(boundsIndex.items, [], 'границы: пустой список');
+  const strategies = await emptyList<{ strategies: unknown[]; scopes: unknown[] }>('strategies');
+  assert.deepEqual([strategies.strategies, strategies.scopes], [[], []], 'стратегии: ни стратегий, ни предложений');
+  const decisionsEmpty = await emptyList<{ items: unknown[]; page: { total: number } }>('decisions');
+  assert.deepEqual([decisionsEmpty.items, decisionsEmpty.page.total], [[], 0], 'решения: пустая страница с итогом ноль');
+  const jobsEmpty = await emptyList<{ items: unknown[] }>('jobs');
+  assert.deepEqual(jobsEmpty.items, [], 'задания: пустой список');
   // Р-150: канал без доступа — честное состояние с перечнем, а не ошибка и не пустота
   const view = await onboarding(EMPTY_WORLD);
   const amazon = view.channels.find((c) => c.channel === 'AMAZON');
   assert.ok(amazon && amazon.status === 'AWAITING_ACCESS', `канал без доступа показан: ${JSON.stringify(view.channels)}`);
-  assert.equal(amazon.blockers.length, 2, 'перечень того, чего не хватает, — из двух пунктов');
-  assert.ok(amazon.blockers.some((b) => b.includes('OQ-167')), `перечень называет открытый вопрос: ${amazon.blockers}`);
+  // Перечень — КОДАМИ из базы, а не текстом словаря (ревью шага 34, находка 11в); продавцу — слова без внутренних номеров
+  assert.deepEqual(amazon.blockers.map((b) => b.code).sort(), ['NOTIFICATION_QUEUE', 'SELLER_AUTHORIZATION'], 'перечень того, чего не хватает');
+  assert.ok(amazon.blockers.every((b) => b.text.length > 0 && !/OQ-\d+/.test(b.text)), `текст продавцу без внутренних номеров вопросов: ${JSON.stringify(amazon.blockers)}`);
   assert.ok(view.steps.find((s) => s.step === 'CHANNEL')!.awaiting, 'шаг канала говорит «ожидает доступа»');
   assert.equal(view.steps.find((s) => s.step === 'COSTS')!.totalCount, 0, 'предложений для импорта нет — и это сказано числом');
   // Операция, которой нужен канал, — не 500, а названный отказ
@@ -251,6 +292,42 @@ test('Р-149, Р-151: онбординг целиком на демо-тенан
   const costs = view.steps.find((s) => s.step === 'COSTS')!;
   assert.deepEqual([costs.done, costs.doneCount, costs.totalCount], [false, WITH_COST, DEMO_OFFERS], 'себестоимость есть у 150 из 200 — шаг не пройден');
   assert.ok(view.narrowing?.offered, 'экран предлагает сузить набор до предложений с себестоимостью');
+
+  /**
+   * Права двух действий пути — разные [Р-143] (ревью шага 34, находки 2 и 11д): сужает тот, кто правит цены, включает тот,
+   * кто вправе включать движок. Оператор — ровно между ними, и проверяется в обе стороны настоящим входом.
+   */
+  const refusedNarrow = await call('POST', api(DEMO_WORLD, 'onboarding', 'narrow'), {}, operator);
+  assert.equal(refusedNarrow.status, 403, `оператор не сужает набор — это право того, кто правит цены: ${refusedNarrow.text.slice(0, 120)}`);
+  for (const action of ['narrow', 'enable']) {
+    const refused = await call('POST', api(DEMO_WORLD, 'onboarding', action), {}, viewerOnly);
+    assert.equal(refused.status, 403, `зритель не делает «${action}»: ${refused.text.slice(0, 120)}`);
+  }
+  const operatorView = JSON.parse((await call('GET', api(DEMO_WORLD, 'onboarding'), undefined, operator)).text) as OnboardingView;
+  assert.deepEqual([operatorView.canLead, operatorView.canEnable], [false, true], 'экран оператора: сужать нельзя, включать можно');
+
+  /**
+   * Включение ДО того, как путь пройден, — оператором. Это единственный случай, где видно, что продавец узнаёт об отказах
+   * (ревью шага 34, находка 3): границ и стратегии нет ни у кого, себестоимости — у 50. Задание не падает, а называет
+   * отказанные предложения поимённо и словами.
+   */
+  const earlyCreated = await call('POST', api(DEMO_WORLD, 'onboarding', 'enable'), {}, operator);
+  assert.equal(earlyCreated.status, 200, `оператор создаёт задание включения: ${earlyCreated.text.slice(0, 200)}`);
+  const early = await pollJob(DEMO_WORLD, (JSON.parse(earlyCreated.text) as JobCreatedResponse).jobId);
+  assert.equal(early.status, 'SUCCEEDED', early.error ?? early.headline);
+  const earlyView = (early.result as { view: EnableResultView }).view;
+  assert.deepEqual([earlyView.enabled, earlyView.skipped], [0, DEMO_OFFERS], 'без границ и стратегии не включается ни одно предложение');
+  const count = (code: string) => earlyView.byCode.find((c) => c.code === code)?.count ?? 0;
+  assert.deepEqual([count('COST_REQUIRED'), count('MIN_PRICE_MISSING'), count('STRATEGY_MISSING')], [DEMO_OFFERS - WITH_COST, DEMO_OFFERS, DEMO_OFFERS],
+    `причины отказа сосчитаны по коду: ${JSON.stringify(earlyView.byCode)}`);
+  assert.ok(earlyView.byCode.every((c) => c.title.length > 0 && c.title !== c.code), `у каждой причины есть название из словаря: ${JSON.stringify(earlyView.byCode)}`);
+  assert.equal(earlyView.examples.length, 50, 'поимённо — первые пятьдесят');
+  for (const e of earlyView.examples) {
+    assert.match(e.label, /Kaufland/, `предложение названо так же, как в списке товаров, а не идентификатором: ${e.label}`);
+    assert.ok(e.reasons.length > 0 && e.reasons.every((r) => r.length > 20 && !/^[A-Z_]+$/.test(r)), `причины — словами: ${JSON.stringify(e.reasons)}`);
+  }
+  const stillOff = (await onboarding()).steps.find((s) => s.step === 'ENABLE')!;
+  assert.equal(stillOff.doneCount, 0, 'отказанное включение ничего не включило');
   const narrowed = await measure<{ narrowedTo: number }>('onboarding/narrow', 'POST', api(DEMO_WORLD, 'onboarding', 'narrow'), { toOffersWithCost: true });
   assert.deepEqual([narrowed.status, narrowed.body.narrowedTo], [200, WITH_COST]);
   view = await onboarding();
@@ -284,16 +361,22 @@ test('Р-149, Р-151: онбординг целиком на демо-тенан
 
   // Шаг 6: включение — задание со своим правом [Р-143]; ни одно предложение набора не отказано
   const enableJob = await runJob('onboarding/enable (набор 150)', DEMO_WORLD, api(DEMO_WORLD, 'onboarding', 'enable'), {});
-  const enableView = (enableJob.result as { view: { enabled: number; skipped: number; byCode: Record<string, number> } }).view;
+  const enableView = (enableJob.result as { view: EnableResultView }).view;
   assert.deepEqual([enableView.enabled, enableView.skipped], [WITH_COST, 0], `включены все; отказы по причинам: ${JSON.stringify(enableView.byCode)}`);
   view = await onboarding();
   const enable = view.steps.find((s) => s.step === 'ENABLE')!;
   assert.deepEqual([enable.done, enable.doneCount], [true, WITH_COST], `включены все предложения набора: ${JSON.stringify(enable)}`);
   assert.equal(view.resumeAt, 'DONE', `путь пройден: ${view.resumeText}`);
-  assert.equal((await call('POST', api(DEMO_WORLD, 'onboarding', 'step'), { step: 'DONE' })).status, 200);
-  // Прогресс — в базе: новый запрос экрана возвращает то же место, а не начинает путь заново
+  // Отметки «путь пройден» нет и быть не должно: маршрут, ставивший галочку, удалён (ревью шага 34, находка 6)
+  assert.equal((await call('POST', api(DEMO_WORLD, 'onboarding', 'step'), { step: 'DONE' })).status, 404, 'галочку «готово» поставить нельзя');
   view = await onboarding();
   assert.deepEqual(view.steps.map((s) => s.done), [true, true, true, true, true, true], 'все шаги выведены из данных как завершённые');
+  // Хранится ровно одно — сужение набора, и оно в БАЗЕ: строка прогресса читается наблюдателем, а не тем же кодом консоли
+  const stored = await observer.query(`SELECT cardinality(scope_write_scope_ids) AS n, updated_by_membership_id FROM tenant_data.onboarding_progress WHERE tenant_id = $1`, [demo.live.seeded.tenantId]);
+  assert.deepEqual(stored.rows.map((r) => [Number(r.n), r.updated_by_membership_id]), [[WITH_COST, demo.live.seeded.ownerMembershipId]], 'сужение записано в базе от имени владельца');
+  // Признак демо — тоже из базы: столбец, а не настройка стенда (ревью шага 34, находка 4)
+  const flag = await observer.query(`SELECT demo FROM tenant_data.tenant WHERE tenant_id = $1`, [demo.live.seeded.tenantId]);
+  assert.equal(flag.rows[0]?.demo, true, 'тенант помечен демо в базе');
 
   // Р-136: ни один экран не вышел за предел
   for (const op of measured) {
@@ -313,21 +396,39 @@ test('Р-151: два виртуальных часа демо — первые �
   const items = list.body.items;
   // Список — страница [Р-136]: первая редакция отдавала все 13 500 решений одним ответом в 5,8 МБ
   assert.ok(list.body.page.total > items.length, `решений больше, чем на странице: ${list.body.page.total} против ${items.length}`);
-  // Наблюдатель — суперпользователь стенда в отдельной базе: только чтение, как в живом прогоне планировщика
-  const observerUrl = new URL(process.env.REPRACER_PG_ADMIN_URL!); observerUrl.pathname = `/${db.name}`;
-  const { createPool } = await import('@repracer/pricing-store-pg');
-  const observer = createPool(observerUrl.toString(), { max: 1, applicationName: 'repracer-onboarding-observer' });
+  /**
+   * Числа доказательства УТВЕРЖДАЮТСЯ, а не печатаются (ревью шага 34, находка 10): первая редакция заворачивала запросы
+   * наблюдателя в `catch` и подставляла текст ошибки вместо строки. Пороги — нижние границы с запасом в несколько раз от
+   * замера (9000 решений, 756 применённых записей), чтобы не краснеть от случайного блуждания цен.
+   */
   const runs = await observer.query(
     `SELECT job_name, count(*)::int AS runs, count(*) FILTER (WHERE outcome = 'FAILED')::int AS failed, coalesce(sum(items), 0)::int AS items
-       FROM maintenance.scheduled_job_run GROUP BY 1 ORDER BY 1`).catch((e: Error) => ({ rows: [{ err: e.message }] }));
-  const decided = await observer.query(`SELECT count(*)::int AS n FROM channel_data.price_decision`).catch((e: Error) => ({ rows: [{ n: e.message }] }));
-  const writeReasons = await observer.query(
-    `SELECT final_status, end_reason, last_error_code, end_params::text AS params, count(*)::int AS n
-       FROM tenant_data.channel_write_history GROUP BY 1, 2, 3, 4 ORDER BY n DESC LIMIT 6`).catch((e: Error) => ({ rows: [{ err: e.message }] }));
-  console.log(JSON.stringify({ writeReasons: writeReasons.rows }));
-  await observer.end();
-  console.log(JSON.stringify({ virtualHours: 2, jobRuns: runs.rows, channelRequests: [...demo.live.requests], decisionsInDb: decided.rows[0], decisionsOnScreen: list.body.page.total, events: demo.live.events.slice(0, 10) }, null, 1));
+       FROM maintenance.scheduled_job_run GROUP BY 1 ORDER BY 1`);
+  const decided = await observer.query(`SELECT count(*)::int AS n FROM channel_data.price_decision WHERE tenant_id = $1`, [demo.live.seeded.tenantId]);
+  const written = await observer.query(
+    `SELECT final_status, count(*)::int AS n FROM tenant_data.channel_write_history WHERE tenant_id = $1 GROUP BY 1 ORDER BY 1`, [demo.live.seeded.tenantId]);
+  console.log(JSON.stringify({ virtualHours: 2, jobRuns: runs.rows, channelRequests: [...demo.live.requests], decisionsInDb: decided.rows[0], writes: written.rows, decisionsOnScreen: list.body.page.total }, null, 1));
   assert.ok(items.length > 0, 'за два виртуальных часа движок принял хотя бы одно решение');
+  assert.ok(Number(decided.rows[0]!.n) >= 2000, `решений за два часа на 150 предложениях: ${decided.rows[0]!.n}`);
+  assert.equal(list.body.page.total, Number(decided.rows[0]!.n), 'экран считает те же решения, что лежат в базе');
+  // «Применено» — это подтверждение канала обратным чтением, а не отправленный запрос
+  const applied = Number(written.rows.find((r) => r.final_status === 'APPLIED')?.n ?? 0);
+  assert.ok(applied >= 100, `записей цены, подтверждённых каналом: ${JSON.stringify(written.rows)}`);
+  // Планировщик отработал без провалов — кроме выгрузки суток: ClickHouse в демо нет, и это названо в самом мире
+  const polled = runs.rows.find((r) => r.job_name === 'competitor-poll');
+  assert.ok(polled && Number(polled.runs) >= 100, `опрос конкурентов шёл: ${JSON.stringify(polled)}`);
+  const failures = await observer.query(`SELECT job_name, error_code, count(*)::int AS n FROM maintenance.scheduled_job_run WHERE outcome = 'FAILED' GROUP BY 1, 2 ORDER BY 1`);
+  /**
+   * Допущены ДВА провала, оба поимённо и с кодом. Выгрузка суток — ClickHouse в демо нет. Обход предложений — находка этого
+   * же прогона (OQ-216): в первый такт опрос конкурентов забирает клиентский бюджет адаптера (25 запросов в секунду, K-04), и
+   * обход получает RATE_LIMITED вместо ожидания до `retryAt`. До числа провалов это утверждение раньше не доходило вовсе —
+   * запрос был завёрнут в `catch`, и провал печатался, а не проверялся.
+   */
+  const KNOWN = new Set(['analytics-export-day|CLICKHOUSE_NOT_IN_DEMO', 'offer-discovery|RATE_LIMITED']);
+  assert.deepEqual(failures.rows.filter((r) => !KNOWN.has(`${r.job_name}|${r.error_code}`)), [], `провалы работ планировщика: ${JSON.stringify(failures.rows)}`);
+  // Р-151: у предложения РОВНО три конкурента — считается по самому симулятору, а не по описанию сценария
+  const rivals = demo.live.simulator.offersOf('de|340100001|new').filter((o) => !o.self);
+  assert.equal(rivals.length, DEMO_COMPETITORS_PER_OFFER, `конкуренты предложения: ${rivals.map((o) => o.sellerRef).join(', ')}`);
 
   // Путь настоящий до конца: решения доходят до канала записью цены, а не остаются в базе
   const writes = [...demo.live.requests].filter(([route]) => /^(PATCH|POST) \/v2\/units/.test(route)).reduce((n, [, count]) => n + count, 0);
@@ -363,4 +464,19 @@ test('Р-151: два виртуальных часа демо — первые �
     assert.ok(!trace.body.gaps.some((g) => g.code === 'EXPLANATION_DICTIONARY_MISSING'), 'объяснение ссылается на существующий справочник');
   }
   assert.ok(explained > 0, 'хотя бы одно решение принято по данным конкурентов и объяснено всеми пятью шагами');
+
+  /**
+   * Р-151: «помечен везде, где показываются деньги» — включая ФАЙЛЫ (ревью шага 34, находка 4). Выгрузка живёт дольше экрана:
+   * её пересылают и переименовывают, поэтому метка стоит и в имени, и в каждой строке.
+   */
+  const exported = await runJob('feed/export (демо)', DEMO_WORLD, api(DEMO_WORLD, 'feed', 'export'), {});
+  assert.ok(exported.artifact, 'у выгрузки есть файл');
+  assert.ok(exported.artifact.fileName.startsWith(DEMO_FILE_PREFIX), `имя файла демо-тенанта помечено: ${exported.artifact.fileName}`);
+  const fileResponse = await call('GET', api(DEMO_WORLD, 'jobs', `${exported.jobId}/artifact`));
+  assert.equal(fileResponse.status, 200, fileResponse.text.slice(0, 200));
+  const lines = fileResponse.text.replace(/^\uFEFF/, '').split(/\r?\n/).filter((l) => l.length > 0);
+  assert.ok(lines.length > 1, `в ленте демо есть записи цен: ${lines.length - 1}`);
+  assert.match(lines[0]!, /demo"?$/, `заголовок несёт колонку метки: ${lines[0]}`);
+  const unmarked = lines.slice(1).filter((l) => !l.includes(DEMO_ROW_MARK));
+  assert.deepEqual(unmarked.slice(0, 3), [], `каждая строка файла помечена как демо; без метки: ${unmarked.length}`);
 });

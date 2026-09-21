@@ -78,6 +78,7 @@ DO $$
 DECLARE
   r    record;
   ro_kind text;
+  accepted_kinds int := 0;
   bad text[] := '{}';
   -- поведенческие проверки
   verdict text;
@@ -448,13 +449,16 @@ BEGIN
   FOR r IN
     SELECT DISTINCT km[1] AS kind
       FROM pg_constraint c, regexp_matches(pg_get_constraintdef(c.oid), '''([A-Z_]+)''', 'g') AS km
-     WHERE c.conrelid = 'tenant_data.bulk_job'::regclass AND c.conname = 'bulk_job_kind_known'
+     -- Любая проверка значений столбца `kind`, а не ограничение с известным именем: переименование не должно ослеплять правило
+     WHERE c.conrelid = 'tenant_data.bulk_job'::regclass AND c.contype = 'c'
+       AND (SELECT a.attnum FROM pg_attribute a WHERE a.attrelid = c.conrelid AND a.attname = 'kind') = ANY (c.conkey)
   LOOP
     BEGIN
       INSERT INTO probe_bulk_job_kind (tenant_id, kind, params, created_by_membership_id, created_by_user_id)
       VALUES ('f1450000-0000-4000-8000-000000000001', r.kind, '{}'::jsonb,
               'f1450000-0000-4000-8000-000000000002', 'f1450000-0000-4000-8000-000000000003');
       DELETE FROM probe_bulk_job_kind;
+      accepted_kinds := accepted_kinds + 1;
       -- Вид принимается таблицей: у него обязано быть право на отмену, известное матрице
       IF NOT EXISTS (SELECT 1 FROM unnest(ARRAY['OWNER', 'ADMIN', 'OPERATOR', 'PRICING_MANAGER', 'INVENTORY_MANAGER', 'VIEWER']) role
                       WHERE security.pricing_permission(role, security.bulk_job_cancel_action(r.kind))) THEN
@@ -466,6 +470,10 @@ BEGIN
         NULL;
     END;
   END LOOP;
+  -- Положительный контроль: правило, не нашедшее ни одного вида, ничего не проверило (ревью шага 34, находка 1)
+  IF accepted_kinds = 0 THEN
+    bad := bad || 'rule 14е found no bulk job kind accepted by the table: the rule checks nothing (Р-93)';
+  END IF;
 
   -- 14в. Р-90, Р-139 (шаг 30): роль фонового исполнителя — ровно свой список разрешённого, в обе стороны
   FOR r IN

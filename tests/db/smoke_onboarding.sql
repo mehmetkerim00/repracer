@@ -10,6 +10,8 @@
 \set ownerM '''a2000000-0000-0000-0000-00000000000a'''
 \set viewer '''a1000000-0000-0000-0000-0000000000a9'''
 \set viewerM '''a2000000-0000-0000-0000-0000000000a9'''
+\set operator '''a1000000-0000-0000-0000-0000000000a0'''
+\set operatorM '''a2000000-0000-0000-0000-0000000000a0'''
 
 SELECT set_config('app.tenant_id', :tA, false), set_config('app.user_id', :owner, false), set_config('app.auth_mfa', 'on', false) \gset
 
@@ -41,8 +43,8 @@ SELECT pg_temp.expect_fail('an active channel account without credentials (Р-15
 
 -- --------------------------------------------------------------- Р-149: прогресс онбординга — административная запись человека
 SELECT pg_temp.ok('onboarding progress is started by the owner (Р-149)', format($q$
-  INSERT INTO tenant_data.onboarding_progress (tenant_id, last_step, updated_by_membership_id)
-  VALUES (%L, 'CHANNEL', %L) $q$, :tA, :ownerM));
+  INSERT INTO tenant_data.onboarding_progress (tenant_id, updated_by_membership_id)
+  VALUES (%L, %L) $q$, :tA, :ownerM));
 SELECT pg_temp.ok('starting the onboarding is written to the audit log (Р-97)', format($q$
   DO $x$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM audit.audit_event WHERE entity_type = 'tenant_data.onboarding_progress' AND tenant_id = %L) THEN
@@ -51,19 +53,12 @@ SELECT pg_temp.ok('starting the onboarding is written to the audit log (Р-97)',
   END $x$ $q$, :tA));
 -- Путь у тенанта один
 SELECT pg_temp.expect_fail('a second onboarding path for the same tenant (Р-149)', format($q$
-  INSERT INTO tenant_data.onboarding_progress (tenant_id, last_step, updated_by_membership_id)
-  VALUES (%L, 'COSTS', %L) $q$, :tA, :ownerM), 'onboarding_progress_tenant_id_key');
--- Шаг пути — только из списка: «где остановился» должно быть местом пути, а не произвольной строкой
-SELECT pg_temp.expect_fail('onboarding progress at a step that does not exist (Р-149)', format($q$
-  UPDATE tenant_data.onboarding_progress SET last_step = 'SOMEWHERE' WHERE tenant_id = %L $q$, :tA), 'onboarding_step_known');
+  INSERT INTO tenant_data.onboarding_progress (tenant_id, updated_by_membership_id)
+  VALUES (%L, %L) $q$, :tA, :ownerM), 'onboarding_progress_tenant_id_key');
 -- Сужение до пустого набора — не сужение
 SELECT pg_temp.expect_fail('the onboarding set is narrowed to nothing (Р-131, Р-149)', format($q$
   UPDATE tenant_data.onboarding_progress SET scope_write_scope_ids = '{}' WHERE tenant_id = %L $q$, :tA),
   'onboarding_narrowed_set_not_empty');
--- Завершение без времени завершения — противоречие
-SELECT pg_temp.expect_fail('the onboarding is marked done without a completion time (Р-149)', format($q$
-  UPDATE tenant_data.onboarding_progress SET last_step = 'DONE' WHERE tenant_id = %L $q$, :tA),
-  'onboarding_done_has_completion');
 -- Состояние пути ВЫВОДИТСЯ из данных: шаг канала видит ждущий аккаунт как «ожидает», а не как «сделано»
 SELECT pg_temp.ok('the onboarding status derives the channel step from real accounts (Р-149, Р-150)', format($q$
   DO $x$
@@ -91,17 +86,34 @@ SELECT pg_temp.ok('the owner frees a slot by cancelling their own waiting job (O
 SELECT pg_temp.ok('the owner creates a repricing enablement job (Р-149)', format($q$
   INSERT INTO tenant_data.bulk_job (tenant_id, bulk_job_id, kind, params, created_by_membership_id)
   VALUES (%L, 'bf340000-0000-4000-8000-000000000001', 'REPRICING_ENABLE', '{}'::jsonb, %L) $q$, :tA, :ownerM));
--- Отменить чужое включение может тот, у кого есть право включать, — а не только тот, кто правит цены
-SELECT pg_temp.ok('the cancel right of a repricing enablement job is the enablement right (Р-143)', $q$
-  DO $x$ BEGIN
-    IF security.bulk_job_cancel_action('REPRICING_ENABLE') <> 'ENABLE_REPRICING' THEN
-      RAISE EXCEPTION 'cancelling an enablement job asks for %', security.bulk_job_cancel_action('REPRICING_ENABLE');
-    END IF;
-  END $x$ $q$);
+/**
+ * Своё право — поведением, а не сравнением констант (ревью шага 34, находки 2 и 11а): ОПЕРАТОР включает движок, но цен
+ * не правит. Он создаёт включение, ему отказано в правке границ, он отменяет ЧУЖОЕ включение; зритель — нет.
+ */
+SELECT set_config('app.user_id', :operator, false) \gset
+SELECT pg_temp.ok('an operator creates a repricing enablement job (Р-143, Р-149)', format($q$
+  INSERT INTO tenant_data.bulk_job (tenant_id, bulk_job_id, kind, params, created_by_membership_id)
+  VALUES (%L, 'bf340000-0000-4000-8000-000000000002', 'REPRICING_ENABLE', '{}'::jsonb, %L) $q$, :tA, :operatorM));
+SELECT pg_temp.expect_fail('an operator creates a bounds edit job (Р-143)', format($q$
+  INSERT INTO tenant_data.bulk_job (tenant_id, kind, params, created_by_membership_id)
+  VALUES (%L, 'BOUNDS_EDIT', '{}'::jsonb, %L) $q$, :tA, :operatorM), 'needs the right MANAGE_PRICING');
+SELECT pg_temp.ok('an operator cancels the enablement job of another member (Р-143)', format($q$
+  UPDATE tenant_data.bulk_job SET status = 'CANCELLED', finished_at = now()
+   WHERE tenant_id = %L AND bulk_job_id = 'bf340000-0000-4000-8000-000000000001' $q$, :tA));
+SELECT set_config('app.user_id', :viewer, false) \gset
+SELECT pg_temp.expect_fail('a viewer cancels the enablement job of another member (Р-143)', format($q$
+  UPDATE tenant_data.bulk_job SET status = 'CANCELLED', finished_at = now()
+   WHERE tenant_id = %L AND bulk_job_id = 'bf340000-0000-4000-8000-000000000002' $q$, :tA),
+  'needs the right to that operation');
+SELECT set_config('app.user_id', :owner, false) \gset
 
 -- --------------------------------------------------------------- Р-151: демо — только у клиентского тенанта
 -- Строка платформенного тенанта под RLS администратору не видна, и UPDATE бил бы в пустоту: проверяется ролью без RLS
 \c - postgres
 \i tests/db/smoke_helpers.sql
+-- Признак задаётся при создании: сменить его нельзя ни в одну сторону (ревью шага 34, находка 5)
+SELECT pg_temp.expect_fail('a customer tenant is turned into a demo after creation (Р-151)', format($q$
+  UPDATE tenant_data.tenant SET demo = true WHERE tenant_id = %L $q$, :tA), 'cannot change its demo flag');
+-- Платформенный тенант демо быть не может: он один, создан не демо, и признак не меняется
 SELECT pg_temp.expect_fail('the platform tenant is marked as a demo (Р-151)', $q$
-  UPDATE tenant_data.tenant SET demo = true WHERE kind = 'PLATFORM' $q$, 'tenant_demo_is_customer');
+  UPDATE tenant_data.tenant SET demo = true WHERE kind = 'PLATFORM' $q$, 'cannot change its demo flag');

@@ -23,7 +23,16 @@ import { kauflandLiveWorld, type KauflandLiveWorld, type LiveProduct } from './k
 export const DEMO_OFFERS = 200;
 const HOUR = 3_600_000;
 
-/** Три конкурента на предложение: дрейф, война, расписание. Начальные цены вокруг 18,50 € — как у наших предложений */
+/** Конкурентов у предложения РОВНО три [Р-151]: дрейф, война, расписание. Начальные цены вокруг 18,50 € — как у наших */
+export const DEMO_COMPETITORS_PER_OFFER = 3;
+
+/** Первый конкурент мира — тот, которого `kauflandLiveWorld` заводит у каждого товара: в демо он дрейфует */
+export const DEMO_DRIFT: CompetitorBehaviour = { kind: 'RANDOM_WALK', everyMs: 20 * 60_000, volatilityBp: 120, minMinor: 1500, maxMinor: 2400 } as CompetitorBehaviour;
+
+/**
+ * Остальные два. Первая редакция возвращала отсюда всех троих, а мир добавлял к ним своего неподвижного — конкурентов
+ * выходило четыре при заявленных трёх (ревью шага 34, находка 12).
+ */
 export function demoCompetitors(idProduct: number): NonNullable<LiveProduct['moreCompetitors']> {
   const base = 1850 + (idProduct % 7) * 10;
   // Волна каждые два часа: на сороковой минуте цена падает на 8 %, через полчаса возвращается — первая видна уже в первый час
@@ -32,8 +41,6 @@ export function demoCompetitors(idProduct: number): NonNullable<LiveProduct['mor
     { atOffsetMs: i * 2 * HOUR + 70 * 60_000, priceMinor: base + 20 },
   ]).flat();
   return [
-    { sellerRef: `Demo Drift ${idProduct}`, startMinor: base + 30,
-      behaviour: { kind: 'RANDOM_WALK', everyMs: 20 * 60_000, volatilityBp: 120, minMinor: 1500, maxMinor: 2400 } as CompetitorBehaviour },
     { sellerRef: `Demo War ${idProduct}`, startMinor: base + 10,
       behaviour: { kind: 'UNDERCUT_SELF', undercutMinor: 5, reactionMs: 15 * 60_000, floorMinor: Math.round(base * 0.85), ceilingMinor: base + 200 } as CompetitorBehaviour },
     { sellerRef: `Demo Wave ${idProduct}`, startMinor: base + 20,
@@ -52,12 +59,21 @@ export function demoProducts(options: { bare: boolean }): LiveProduct[] {
     const idProduct = 340_100_001 + i;
     return {
       cls: i % 5 === 0 ? 'HOT' : 'WARM', idProduct, marketplace: 'de',
-      behaviour: { kind: 'STATIC' } as CompetitorBehaviour, competitorStartMinor: 1850 + (i % 7) * 10,
+      behaviour: DEMO_DRIFT, competitorStartMinor: 1850 + (i % 7) * 10 + 30,
       pastMovesEveryMinutes: i % 5 === 0 ? 30 : 180,
       ...(options.bare ? { bare: true } : { pricingMode: 'ENGINE' as const, costMinor: 1000 + (i % 9) * 25 }),
       moreCompetitors: demoCompetitors(idProduct),
     };
   });
+}
+
+/** Часы, которые не двигают — они идут сами: `advance` ничего не делает, пауза ждёт по-настоящему */
+class WallClock extends VirtualClock {
+  constructor() { super(new Date().toISOString()); }
+  override nowMs(): number { return Date.now(); }
+  override iso(offsetMs = 0): string { return new Date(Date.now() + offsetMs).toISOString(); }
+  override advance(): void { /* настоящее время идёт само */ }
+  override sleep = (ms: number): Promise<void> => new Promise((resolve) => { setTimeout(resolve, ms); });
 }
 
 export interface DemoWorld {
@@ -70,14 +86,18 @@ export interface DemoWorld {
 export async function demoWorld(input: {
   tag: number; startIso: string; bare: boolean; seed?: number;
   appPool: PgPool; adminPool: PgPool; provisioningPool: PgPool; dispatcherPool: PgPool; schedulerPool: PgPool; exporterPool: PgPool;
-  /** Как быстро идёт виртуальное время между тактами: по умолчанию мгновенно (живой прогон); стенд задаёт настоящую паузу */
-  sleep?: (virtualMs: number) => Promise<void>;
+  /**
+   * Часы мира — НАСТОЯЩИЕ (стенд для показа продавцу). Живой прогон идёт на виртуальных и проживает два часа за минуты; стенд
+   * так не может: консоль пишет по часам базы, и мир, отставший от них, считает только что внесённую себестоимость ещё не
+   * действующей, а убежавший вперёд расходится с базой во всём, что она считает по `now()` (ревью шага 34, находка 9).
+   */
+  wallClock?: boolean;
   /** Существующие пользователи стенда (псевдоним членства → user_id): владелец демо — тот же человек, что входит на стенд */
   memberUsers?: Readonly<Record<string, string>>;
   memberEmails?: Readonly<Record<string, string>>;
   joinMember?: Parameters<typeof kauflandLiveWorld>[0]['joinMember'];
 }): Promise<DemoWorld> {
-  const clock = new VirtualClock(input.startIso);
+  const clock = input.wallClock ? new WallClock() : new VirtualClock(input.startIso);
   const live = await kauflandLiveWorld({
     tag: input.tag, clock, products: demoProducts({ bare: input.bare }), seed: input.seed ?? input.tag, demo: true,
     ...(input.memberUsers ? { memberUsers: input.memberUsers } : {}), ...(input.memberEmails ? { memberEmails: input.memberEmails } : {}),
@@ -114,7 +134,7 @@ export async function demoWorld(input: {
       });
       const running = runScheduler(scheduler, {
         tickMs: 30_000, clockMs: () => clock.nowMs(), logger: { log: () => {} },
-        sleep: async (ms) => { if (input.sleep) await input.sleep(ms); clock.advance(ms); await live.betweenTicks(); },
+        sleep: async (ms) => { await clock.sleep(ms); await live.betweenTicks(); },
         shouldStop: () => clock.nowMs() >= endMs,
       });
       await running.finished;

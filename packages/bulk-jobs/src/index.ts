@@ -30,6 +30,10 @@ export interface BulkJobFile {
   rows: readonly (readonly string[])[];
 }
 
+/** Р-151: метка файла демо-тенанта — в имени и в каждой строке */
+export const DEMO_FILE_PREFIX = 'DEMO_';
+export const DEMO_ROW_MARK = 'DEMO: synthetic data, not a real channel';
+
 /** Что исполнитель сделал с объявленным файлом: числа для итога задания */
 export interface BulkJobFileResult { rows: number; bytes: number; sha256: string }
 
@@ -148,7 +152,17 @@ export async function runNextBulkJob(options: BulkJobRunnerOptions): Promise<{ j
      * отдачей цикла событий между ними (иначе сборка 27 МБ занимает поток целиком и продление аренды не успевает сработать —
      * шаг 31), одно вычисление контрольной суммы, одно приведение имени файла к безопасному виду, одна запись в базу.
      */
-    const produce: ProduceBulkJobFile = async (file) => {
+    /**
+     * Р-151: файл демо-тенанта помечен ВЕЗДЕ — в имени и в каждой строке: выгрузка с деньгами живёт дольше экрана, её
+     * пересылают и переименовывают, и доказательство Omnibus от синтетического тенанта не должно сойти за настоящее (ревью
+     * шага 34, находка 4). Метка ставится здесь, потому что здесь единственный путь выгрузки [Р-145]: обработчик её забыть
+     * не может. Признак — из базы.
+     */
+    const demo = await store.tenantIsDemo(tenantId);
+    const produce: ProduceBulkJobFile = async (declared) => {
+      const file: BulkJobFile = demo
+        ? { fileName: `${DEMO_FILE_PREFIX}${declared.fileName}`, header: [...declared.header, 'demo'], rows: declared.rows.map((r) => [...r, DEMO_ROW_MARK]) }
+        : declared;
       let content = '';
       if (file.rows.length === 0) content = csvOf(file.header, file.rows);
       for (let i = 0; i < file.rows.length; i += CSV_CHUNK_ROWS) {

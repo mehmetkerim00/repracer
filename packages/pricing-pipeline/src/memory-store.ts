@@ -135,6 +135,8 @@ export interface MemorySeed {
    * список, как канал без строк platform.competitor_source: стратегии по данным конкурентов недоступны
    */
   competitorSourcesByChannel?: Partial<Record<'KAUFLAND' | 'AMAZON' | 'EBAY', CompetitorSourceDescriptor[]>>;
+  /** Р-151: тенант мира — демо (в PostgreSQL — `tenant.demo`) */
+  demo?: boolean;
   /** Аккаунты других каналов для единиц записи, которые не принадлежат аккаунту мира (посев в PostgreSQL) */
   accounts?: Array<{
     channelAccountId: string; channel: 'KAUFLAND' | 'AMAZON' | 'EBAY'; region?: string; marketplaces: string[];
@@ -307,6 +309,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     this.competitorSourcesByChannel = { ...(seed.competitorSourcesByChannel ?? {}) };
     for (const a of seed.accounts ?? []) this.accountChannels.set(a.channelAccountId, a.channel);
     this.seedAccounts = seed.accounts ?? [];
+    this.demo = seed.demo === true;
     for (const s of seed.scopes) {
       this.scopes.set(s.writeScopeId, {
         ...s, status: s.status ?? 'ACTIVE', taxRegime: s.taxRegime ?? (s.basis === 'GROSS' ? 'VAT_INCLUDED' : 'SALES_TAX_EXCLUDED'),
@@ -1447,6 +1450,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
 
   // --- онбординг [Р-149], канал без доступов [Р-150] ---------------------------------------------------------------
   private onboarding: OnboardingProgressRow | null = null;
+  private demo = false;
   /** Аккаунты посева с состоянием доступа [Р-150] */
   private seedAccounts: NonNullable<MemorySeed['accounts']> = [];
 
@@ -1456,15 +1460,13 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
 
   async saveOnboardingProgress(_tenantId: string, input: OnboardingProgressInput, actor: AdminActor): Promise<'SAVED' | 'FORBIDDEN'> {
     if (!this.adminMember(actor)) return 'FORBIDDEN';
-    if (input.scopeWriteScopeIds !== undefined && input.scopeWriteScopeIds !== null && input.scopeWriteScopeIds.length === 0) {
+    if (input.scopeWriteScopeIds !== null && input.scopeWriteScopeIds.length === 0) {
       throw Object.assign(new Error('the onboarding set is narrowed to nothing (Р-131, Р-149)'), { code: '23514' });
     }
     const now = new Date().toISOString();
     const prev = this.onboarding;
     this.onboarding = {
-      scopeWriteScopeIds: input.scopeWriteScopeIds === undefined ? (prev?.scopeWriteScopeIds ?? null) : input.scopeWriteScopeIds,
-      lastStep: input.lastStep, startedAt: prev?.startedAt ?? now, updatedAt: now,
-      completedAt: input.lastStep === 'DONE' ? (prev?.completedAt ?? now) : null,
+      scopeWriteScopeIds: input.scopeWriteScopeIds, startedAt: prev?.startedAt ?? now, updatedAt: now,
     };
     return 'SAVED';
   }
@@ -1498,12 +1500,28 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     ];
   }
 
+  /**
+   * Аккаунты мира. Посев называет только аккаунты ДРУГИХ каналов; аккаунт самого мира в нём не описан — он виден по
+   * единицам записи. Первая редакция его забывала, и стенд в памяти говорил «канал не подключён» о мире, который работает
+   * (ревью шага 34, находка 8).
+   */
   private channelAccountRows(): ChannelAccountRow[] {
-    return this.seedAccounts.map((a) => ({
+    const seeded = new Set(this.seedAccounts.map((a) => a.channelAccountId));
+    const own = new Map<string, Set<string>>();
+    for (const s of this.scopes.values()) {
+      if (seeded.has(s.channelAccountId)) continue;
+      const marketplaces = own.get(s.channelAccountId) ?? new Set<string>();
+      marketplaces.add(s.marketplace);
+      own.set(s.channelAccountId, marketplaces);
+    }
+    const ownRows: ChannelAccountRow[] = [...own].map(([channelAccountId, marketplaces]) => ({
+      channelAccountId, channel: this.channel, displayName: null, marketplaces: [...marketplaces].sort(), authStatus: 'ACTIVE', accessBlockers: [],
+    }));
+    return [...ownRows, ...this.seedAccounts.map((a): ChannelAccountRow => ({
       channelAccountId: a.channelAccountId, channel: a.channel, displayName: null, marketplaces: a.marketplaces,
       authStatus: a.awaitingAccess && a.awaitingAccess.length > 0 ? 'AWAITING_ACCESS' : 'ACTIVE',
       accessBlockers: a.awaitingAccess ?? [],
-    }));
+    }))];
   }
 
   async scopesWithCost(tenantId: string): Promise<string[]> {
@@ -1515,6 +1533,10 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       if (loaded?.context.cost) ids.push(s.writeScopeId);
     }
     return ids.sort();
+  }
+
+  async tenantIsDemo(_tenantId: string): Promise<boolean> {
+    return this.demo;
   }
 
   async channelAccounts(_tenantId: string): Promise<ChannelAccountRow[]> {
@@ -1877,6 +1899,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   async readConsoleState(_tenantId: string, _now: Instant): Promise<ConsoleState> {
     return {
       tenantId: this.tenantId,
+      demo: this.demo,
       scopes: [...this.scopes.values()].map((s) => {
         const halt = this.activeHalt(s.channelAccountId, s.marketplace);
         const stop = this.activeStop(s.channelAccountId, s.marketplace);

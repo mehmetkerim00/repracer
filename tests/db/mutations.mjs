@@ -1220,36 +1220,43 @@ export const STEP34_ROWS = [
   },
   {
     row: 'Р-151',
-    invariant: 'демо — только у клиентского тенанта; платформенный тенант демо быть не может',
+    invariant: 'признак демо задаётся при создании и не меняется — этим же платформенный тенант демо быть не может',
     mutations: [
-      m(dropConstraint('tenant_demo_is_customer', 'tenant_data.tenant'), smoke('the platform tenant is marked as a demo (Р-151)')),
+      m(dropTrigger('a_tenant_demo_is_immutable', 'tenant_data.tenant'),
+        smoke('a customer tenant is turned into a demo after creation (Р-151)'), smoke('the platform tenant is marked as a demo (Р-151)')),
     ],
   },
   {
     row: 'Р-149',
-    invariant: 'путь онбординга: один на тенанта, сужение не бывает пустым, завершение несёт время; запись — человеком и в аудит; включение движка набора — задание со СВОИМ правом',
+    invariant: 'путь онбординга: один на тенанта, сужение не бывает пустым; запись — человеком и в аудит; включение движка набора — задание со СВОИМ правом',
     mutations: [
       m(dropConstraint('onboarding_progress_tenant_id_key', 'tenant_data.onboarding_progress'), smoke('a second onboarding path for the same tenant (Р-149)')),
-      m(dropConstraint('onboarding_step_known', 'tenant_data.onboarding_progress'), smoke('onboarding progress at a step that does not exist (Р-149)')),
       m(dropConstraint('onboarding_narrowed_set_not_empty', 'tenant_data.onboarding_progress'), smoke('the onboarding set is narrowed to nothing (Р-131, Р-149)')),
-      m(dropConstraint('onboarding_done_has_completion', 'tenant_data.onboarding_progress'), smoke('the onboarding is marked done without a completion time (Р-149)')),
       m(dropTrigger('a0_admin_write_person', 'tenant_data.onboarding_progress'),
         verify('tenant_data\\.onboarding_progress: administrative INSERT without the person guard')),
       m(dropTrigger('zz_admin_write_audit', 'tenant_data.onboarding_progress'),
         smoke('starting the onboarding is written to the audit log (Р-97)'),
         verify('tenant_data\\.onboarding_progress: administrative INSERT is not written to the audit log')),
-      // Право по виду [Р-143]: включение движка — ENABLE_REPRICING; объявить его «как у всех» значит пустить зрителя
-      m(replaceInFunction('tenant_data.bulk_job_requires_right()', "needed := CASE WHEN NEW.kind = 'REPRICING_ENABLE' THEN 'ENABLE_REPRICING' ELSE 'MANAGE_PRICING' END;",
+      // Право по виду [Р-143]: одно на создание и на отмену. Снять его у стража создания — значит пустить зрителя
+      m(replaceInFunction('tenant_data.bulk_job_requires_right()', "needed := coalesce(security.bulk_job_cancel_action(NEW.kind), 'NO_DECLARED_RIGHT');",
         "needed := 'VIEW_PRICING';"),
         smoke('a viewer creates a repricing enablement job (Р-143)')),
-      m(replaceInFunction('security.bulk_job_cancel_action(text)', "WHEN p_kind = 'REPRICING_ENABLE' THEN 'ENABLE_REPRICING'", "WHEN false THEN 'ENABLE_REPRICING'"),
-        smoke('the cancel right of a repricing enablement job is the enablement right (Р-143)')),
+      // Объявить включение «как всё остальное» — значит отнять его у оператора: он включает движок, но цен не правит
+      m(replaceInFunction('security.bulk_job_cancel_action(text)', "WHEN p_kind = 'REPRICING_ENABLE' THEN 'ENABLE_REPRICING'", "WHEN p_kind = 'REPRICING_ENABLE' THEN 'MANAGE_PRICING'"),
+        smoke('an operator creates a repricing enablement job (Р-143, Р-149)')),
       /**
        * Правило 14е: у каждого вида задания, который принимает таблица, есть право на отмену, известное матрице. Вид, для
        * которого функция отдаёт неизвестное действие, — это вид без решения о праве.
        */
       m(replaceInFunction('security.bulk_job_cancel_action(text)', "WHEN p_kind = 'REPRICING_ENABLE' THEN 'ENABLE_REPRICING'", "WHEN p_kind = 'REPRICING_ENABLE' THEN 'NO_SUCH_RIGHT'"),
         verify('bulk job kind REPRICING_ENABLE has no cancel right known to the permission matrix')),
+      // Тот самый случай, ради которого правило написано (ревью шага 34, находка 1): вид ДОБАВИЛИ, а о праве забыли
+      m(`ALTER TABLE tenant_data.bulk_job DROP CONSTRAINT bulk_job_kind_known;
+         ALTER TABLE tenant_data.bulk_job ADD CONSTRAINT bulk_job_kind_known CHECK (kind IN ('COST_IMPORT', 'BOUNDS_EDIT', 'BOUNDS_PLAN',
+           'STRATEGY_ASSIGN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT', 'REPRICING_ENABLE', 'KIND_WITHOUT_A_RIGHT'))`,
+        verify('bulk job kind KIND_WITHOUT_A_RIGHT has no cancel right known to the permission matrix')),
+      // Положительный контроль правила: без проверки видов у таблицы оно не находит ни одного и обязано сказать это
+      m(dropConstraint('bulk_job_kind_known', 'tenant_data.bulk_job'), verify('rule 14е found no bulk job kind accepted by the table')),
     ],
   },
 ];

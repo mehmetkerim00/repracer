@@ -14,9 +14,27 @@ SET ROLE repracer_owner;
 
 -- ---------------------------------------------------------------- Р-151: признак демо
 ALTER TABLE tenant_data.tenant ADD COLUMN demo boolean NOT NULL DEFAULT false;
--- Демо бывает только у клиентского тенанта: платформенный тенант демо быть не может
-ALTER TABLE tenant_data.tenant ADD CONSTRAINT tenant_demo_is_customer CHECK (NOT demo OR kind = 'CUSTOMER');
 COMMENT ON COLUMN tenant_data.tenant.demo IS 'Шаг 34 [Р-151]: тенант на симуляторе канала; данные синтетические, путь настоящий; помечается везде, где показываются деньги';
+
+/**
+ * Признак задаётся при создании и не меняется (ревью шага 34, находка 5): демо, ставшее «клиентом», показывало бы
+ * синтетические деньги без метки, а клиент, ставший «демо», — настоящие деньги под меткой «не настоящие».
+ *
+ * Этот же страж держит и «платформенный тенант демо быть не может». Отдельная проверка значений для этого была и удалена
+ * как дубль [Р-104]: платформенный тенант один (`tenant_check` привязывает вид к идентификатору), создан не демо, а
+ * признак не меняется — проверку значений нечем было провалить, мутация её снятия не ловилась ничем.
+ */
+CREATE FUNCTION tenant_data.tenant_demo_is_immutable() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = pg_catalog AS $fn$
+BEGIN
+  IF NEW.demo IS DISTINCT FROM OLD.demo THEN
+    RAISE EXCEPTION 'tenant % cannot change its demo flag: it is set when the tenant is created (Р-151)', OLD.tenant_id
+      USING ERRCODE = 'integrity_constraint_violation';
+  END IF;
+  RETURN NEW;
+END $fn$;
+CREATE TRIGGER a_tenant_demo_is_immutable BEFORE UPDATE OF demo ON tenant_data.tenant
+  FOR EACH ROW EXECUTE FUNCTION tenant_data.tenant_demo_is_immutable();
 
 -- provision_tenant принадлежит repracer_resolver: переопределяется ниже, вне SET ROLE (как в 0058 и 0066)
 
@@ -65,8 +83,12 @@ ALTER FUNCTION tenant_data.channel_account_blockers_known() OWNER TO repracer_ow
 
 -- ---------------------------------------------------------------- Р-149: прогресс онбординга
 /**
- * Хранится ТОЛЬКО то, чего нельзя вывести из данных: набор предложений, до которого продавец сузил путь [Р-131 — пропустить
- * себестоимость нельзя, можно сузить], и последний шаг, на котором он был. Всё остальное — «есть ли себестоимость, границы,
+ * Хранится ТОЛЬКО то, чего нельзя вывести из данных: набор предложений, до которого продавец сузил путь. Отметки
+ * «последний шаг» здесь НЕТ намеренно (ревью шага 34, находка 6): первая редакция её хранила, никто её не читал, а
+ * `DONE` принимался в любой момент — та самая галочка, от которой путь отказался. Место остановки — первый
+ * незавершённый шаг `onboarding_status`.
+ * Итак, хранится набор предложений, до которого продавец сузил путь [Р-131 — пропустить
+ * себестоимость нельзя, можно сузить]. Всё остальное — «есть ли себестоимость, границы,
  * стратегия, включён ли движок» — ВЫВОДИТСЯ из настоящих таблиц функцией `tenant_data.onboarding_status`: шаг завершён,
  * потому что состояние проверяемо, а не потому, что кто-то поставил галочку.
  */
@@ -76,13 +98,9 @@ CREATE TABLE tenant_data.onboarding_progress (
   onboarding_id             uuid NOT NULL DEFAULT gen_random_uuid(),
   /** NULL — весь каталог; иначе — предложения, до которых путь сужен */
   scope_write_scope_ids     uuid[],
-  last_step                 text NOT NULL CONSTRAINT onboarding_step_known
-                            CHECK (last_step IN ('TENANT', 'CHANNEL', 'COSTS', 'BOUNDS', 'STRATEGY', 'ENABLE', 'DONE')),
   started_at                timestamptz NOT NULL DEFAULT now(),
   updated_at                timestamptz NOT NULL DEFAULT now(),
   updated_by_membership_id  uuid NOT NULL,
-  completed_at              timestamptz,
-  CONSTRAINT onboarding_done_has_completion CHECK ((last_step = 'DONE') = (completed_at IS NOT NULL)),
   -- Сужение до пустого набора — не сужение, а отказ от пути [Р-131]
   CONSTRAINT onboarding_narrowed_set_not_empty CHECK (scope_write_scope_ids IS NULL OR cardinality(scope_write_scope_ids) > 0),
   FOREIGN KEY (tenant_id, updated_by_membership_id) REFERENCES tenant_data.membership (tenant_id, membership_id),
@@ -107,7 +125,32 @@ GRANT SELECT, INSERT, UPDATE ON tenant_data.onboarding_progress TO repracer_admi
  */
 CREATE FUNCTION tenant_data.write_scope_cost_ready(p_tenant_id uuid, p_write_scope_id uuid, p_at timestamptz) RETURNS boolean
   LANGUAGE sql STABLE SECURITY INVOKER SET search_path = pg_catalog AS $fn$
-  SELECT tenant_data.write_scope_has_cost(p_tenant_id, p_write_scope_id, p_at)
+  /**
+   * Три условия, и все три — те, по которым отказывает включение (ревью шага 34, находка 7):
+   *   себестоимость объявлена [Р-131]; она в валюте единицы записи ИЛИ переводится по курсу ЕЦБ не старше 6 дней
+   *   [Р-61] — то же правило, что в пересчёте пола (0051); есть полная действующая оценка комиссии.
+   * Равносильность с включением утверждает тест хранилища на всех четырёх случаях — иначе это третья копия критерия.
+   */
+  SELECT EXISTS (
+    SELECT 1
+      FROM tenant_data.write_scope s
+      LEFT JOIN LATERAL (SELECT om.marketplace FROM tenant_data.offer_mapping om
+                          WHERE om.tenant_id = s.tenant_id AND om.price_write_scope_id = s.write_scope_id
+                          ORDER BY om.created_at LIMIT 1) m ON true
+      JOIN LATERAL (SELECT cp.currency FROM tenant_data.cost_profile cp
+                     WHERE cp.tenant_id = s.tenant_id AND cp.product_id = s.product_id
+                       AND (cp.channel_account_id IS NULL OR (cp.channel_account_id = s.channel_account_id AND cp.marketplace = m.marketplace))
+                       AND cp.valid_from <= p_at
+                     ORDER BY (cp.channel_account_id IS NOT NULL) DESC, cp.valid_from DESC, cp.version DESC LIMIT 1) c ON true
+     WHERE s.tenant_id = p_tenant_id AND s.write_scope_id = p_write_scope_id
+       AND (c.currency = s.currency
+            OR (c.currency IN ('EUR', 'USD') AND s.currency IN ('EUR', 'USD')
+                AND EXISTS (SELECT 1 FROM platform.fx_rate x
+                             WHERE x.source = 'ECB' AND x.base_currency = 'EUR'
+                               AND x.quote_currency = CASE WHEN c.currency = 'EUR' THEN s.currency ELSE c.currency END
+                               AND x.available_from <= p_at AND x.rate > 0
+                               AND x.rate_date <= (p_at AT TIME ZONE 'UTC')::date
+                               AND (p_at AT TIME ZONE 'UTC')::date - x.rate_date <= 6))))
      AND EXISTS (SELECT 1 FROM channel_data.fee_estimate fe
                   WHERE fe.tenant_id = p_tenant_id AND fe.write_scope_id = p_write_scope_id AND fe.valid_until > p_at
                     AND jsonb_typeof(fe.fee_model -> 'feeRateBp') = 'number' AND jsonb_typeof(fe.fee_model -> 'fixedFeeMinor') = 'number')
@@ -178,8 +221,12 @@ DECLARE
   needed text;
 BEGIN
   IF NOT security.admin_session() OR NEW.kind IN (SELECT k FROM security.read_only_job_kinds() AS k) THEN RETURN NULL; END IF;
-  -- Право — по виду операции [Р-143]: включение движка — ENABLE_REPRICING, всё, что правит цены, — MANAGE_PRICING
-  needed := CASE WHEN NEW.kind = 'REPRICING_ENABLE' THEN 'ENABLE_REPRICING' ELSE 'MANAGE_PRICING' END;
+  /**
+   * Право — по виду операции [Р-143], и оно ОДНО на создание и на отмену: кто вправе начать, тот вправе и остановить.
+   * Ветки «иначе» нет намеренно (ревью шага 34, находка 1): виду без назначенного права достаётся право, которого нет
+   * ни у одной роли, — такой вид не создаётся вовсе.
+   */
+  needed := coalesce(security.bulk_job_cancel_action(NEW.kind), 'NO_DECLARED_RIGHT');
   SELECT m.role INTO member_role FROM tenant_data.membership m
    WHERE m.tenant_id = NEW.tenant_id AND m.user_id = security.current_user_id() AND m.status = 'ACTIVE';
   IF member_role IS NULL OR NOT security.pricing_permission(member_role, needed) THEN
@@ -191,9 +238,11 @@ END $fn$;
 
 CREATE OR REPLACE FUNCTION security.bulk_job_cancel_action(p_kind text) RETURNS text
   LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $fn$
+  -- Без ветки «иначе»: новый вид без решения о праве получает NULL, и его не пропускают ни страж создания, ни правило 14е
   SELECT CASE WHEN p_kind IN ('PRICE_EVIDENCE', 'PRICE_FEED_EXPORT') THEN 'VIEW_PRICING'
               WHEN p_kind = 'REPRICING_ENABLE' THEN 'ENABLE_REPRICING'
-              ELSE 'MANAGE_PRICING' END
+              WHEN p_kind IN ('COST_IMPORT', 'BOUNDS_EDIT', 'BOUNDS_PLAN', 'STRATEGY_ASSIGN', 'STRATEGY_PREVIEW') THEN 'MANAGE_PRICING'
+         END
 $fn$;
 
 RESET ROLE;

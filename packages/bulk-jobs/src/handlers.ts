@@ -3,7 +3,7 @@ import {
   boundsDiffView, costImportView, currentStrategies, expandBoundsEdit, importTargets, messagesFor, parseBoundsEditRequest,
   parseStrategyDraft, PRICE_EVIDENCE_HEADER, priceEvidenceRows, strategyPreviewView, STRATEGY_PREVIEW_ROWS_SHOWN, LOCALES,
   COST_IMPORT_REPORT_HEADER, costImportReportRows, parseFeedQuery, PRICE_FEED_CSV_HEADER, priceFeedFileName, priceFeedRows, priceFeedRowsOf,
-  type ConsoleScope, type Locale, type StandWorld,
+  describe, unitOf, type ConsoleScope, type EnableResultView, type Locale, type StandWorld,
 } from '@repracer/console-model';
 import type { StrategyDefinition } from '@repracer/pricing-model';
 
@@ -34,7 +34,7 @@ export interface BulkJobWorldOptions {
    * Шаг 34 [Р-149]: включение движка у одного предложения — тем же путём, что кнопка на экране товаров. Канал при этом не
    * опрашивается: проверяются себестоимость [Р-131], границы и стратегия по данным базы.
    */
-  enableRepricing?(ctx: BulkJobContext, scope: ConsoleScope): Promise<{ enabled: boolean; problems: Array<{ code: string }> }>;
+  enableRepricing?(ctx: BulkJobContext, scope: ConsoleScope): Promise<{ enabled: boolean; problems: Array<{ code: string; params?: Record<string, unknown> }> }>;
 }
 
 const PROGRESS_STEP = 500;
@@ -281,7 +281,8 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
       return {
         total: chosen.length,
         async run(progress) {
-          const skipped: Array<{ writeScopeId: string; problems: string[] }> = [];
+          const m = messagesFor(localeOf(job));
+          const skipped: Array<{ writeScopeId: string; label: string; problems: string[]; reasons: string[] }> = [];
           let enabled = 0;
           let already = 0;
           for (const [i, scope] of chosen.entries()) {
@@ -289,7 +290,11 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
             else {
               const result = await enable(ctx, scope);
               if (result.enabled) enabled += 1;
-              else skipped.push({ writeScopeId: scope.writeScopeId, problems: result.problems.map((x) => x.code) });
+              else skipped.push({
+                writeScopeId: scope.writeScopeId, label: unitOf(world, scope, m).label, problems: result.problems.map((x) => x.code),
+                // Причина — словами словаря [Р-72], на языке, на котором человек создал задание
+                reasons: result.problems.map((x) => describe({ code: x.code, params: (x.params ?? {}) as never }, m).text),
+              });
             }
             if (i % PROGRESS_STEP === 0) await progress(i, 'APPLYING');
           }
@@ -297,11 +302,18 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
           /**
            * Итог, который увидит продавец [Р-147: экрану отдаётся только `view`]. Без него задание говорило «не включено,
            * смотрите список» — а списка не было: первый живой прогон онбординга отказал всем 150 предложениям, и узнать
-           * причину с экрана было нельзя. Причины сгруппированы по коду, поимённо — первые пятьдесят.
+           * причину с экрана было нельзя. Причины сгруппированы по коду, поимённо — первые пятьдесят: с НАЗВАНИЕМ предложения
+           * и причиной словами, а не идентификатором и кодом (ревью шага 34, находка 3).
            */
           const byCode: Record<string, number> = {};
           for (const s of skipped) for (const code of s.problems) byCode[code] = (byCode[code] ?? 0) + 1;
-          return { enabled, already, skipped: skipped.length, view: { enabled, already, skipped: skipped.length, byCode, examples: skipped.slice(0, 50) } };
+          const view: EnableResultView = {
+            enabled, already, skipped: skipped.length,
+            byCode: Object.entries(byCode).map(([code, count]) => ({ code, title: (m.titles as Record<string, string | undefined>)[code] ?? code, count }))
+              .sort((a, b) => b.count - a.count),
+            examples: skipped.slice(0, 50).map((s) => ({ writeScopeId: s.writeScopeId, label: s.label, reasons: s.reasons })),
+          };
+          return { enabled, already, skipped: skipped.length, view };
         },
       };
     },

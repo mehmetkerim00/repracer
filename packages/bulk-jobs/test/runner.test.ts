@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { BulkJobOutcome, BulkJobProgress, BulkJobRow, PricingStore } from '@repracer/pricing-pipeline';
-import { runNextBulkJob, type BulkJobHandlers } from '../src/index.ts';
+import { DEMO_FILE_PREFIX, DEMO_ROW_MARK, runNextBulkJob, type BulkJobHandlers } from '../src/index.ts';
 
 /**
  * Р-139 (шаг 30): исполнитель фоновых заданий. Проверяется его собственное поведение — что он делает с заданием и что пишет в
@@ -17,8 +17,10 @@ interface Recorded {
   claims: number;
 }
 
-function fakeStore(job: BulkJobRow | null, log: Recorded): PricingStore {
+function fakeStore(job: BulkJobRow | null, log: Recorded, demo = false): PricingStore {
   return {
+    // Р-151: демо ли тенант, исполнитель спрашивает у базы — от этого зависит метка файла
+    async tenantIsDemo() { return demo; },
     async claimBulkJob() {
       log.claims += 1;
       return log.claims === 1 ? job : null;
@@ -162,4 +164,37 @@ test('Р-145: файл собирает исполнитель — имя по �
   assert.match(file.content, /'=SUM\(1\)/, `формула нейтрализована: ${file.content}`);
   assert.match(file.content, /"x,y"/, `запятая внутри значения закавычена: ${file.content}`);
   assert.equal(log.outcome?.status === 'SUCCEEDED' && (log.outcome.result as { rows: number }).rows, 2);
+});
+
+/**
+ * Р-151 (шаг 34; ревью шага, находка 4): файл демо-тенанта помечен в имени И в каждой строке — выгрузку пересылают и
+ * переименовывают, и доказательство от синтетического тенанта не должно сойти за настоящее. Метку ставит исполнитель, а не
+ * обработчик: обработчик ниже о демо не знает вовсе. У обычного тенанта тот же обработчик даёт файл без единой пометки.
+ */
+test('Р-151: файл демо-тенанта помечен в имени и в каждой строке; у обычного тенанта — ни одной пометки', async () => {
+  const handlers: BulkJobHandlers = {
+    async PRICE_FEED_EXPORT() {
+      return { total: 2, async run(_progress, produce) { return { ...await produce({ fileName: 'price-feed.csv', header: ['a', 'b'], rows: [['1', '2'], ['3', '4']] }) }; } };
+    },
+  };
+  const fileOf = async (demo: boolean) => {
+    const saved: Array<{ fileName: string; content: string }> = [];
+    const store = {
+      ...fakeStore(jobRow({ kind: 'PRICE_FEED_EXPORT' }), { progress: [], outcome: null, claims: 0 }, demo),
+      async saveBulkJobArtifact(_t: string, _j: string, a: { fileName: string; content: string }) { saved.push({ ...a }); },
+    } as unknown as PricingStore;
+    assert.equal((await run(store, handlers))?.status, 'SUCCEEDED');
+    return saved[0]!;
+  };
+
+  const marked = await fileOf(true);
+  assert.equal(marked.fileName, `${DEMO_FILE_PREFIX}price-feed.csv`);
+  const lines = marked.content.replace(/^\uFEFF/, '').split(/\r?\n/).filter((l) => l.length > 0);
+  assert.equal(lines.length, 3, marked.content);
+  assert.match(lines[0]!, /demo"?$/, `заголовок несёт колонку метки: ${lines[0]}`);
+  assert.deepEqual(lines.slice(1).map((l) => l.includes(DEMO_ROW_MARK)), [true, true], 'помечена каждая строка');
+
+  const plain = await fileOf(false);
+  assert.equal(plain.fileName, 'price-feed.csv');
+  assert.ok(!plain.content.includes(DEMO_ROW_MARK) && !/demo/i.test(plain.content), `у обычного тенанта пометок нет: ${plain.content}`);
 });

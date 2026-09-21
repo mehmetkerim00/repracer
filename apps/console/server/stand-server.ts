@@ -209,7 +209,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           rejected: rejectedView(w, m).items.length, activeStops: w.state.stops.filter((x) => x.releasedAt === null).length,
           activeHalts: w.state.halts.filter((h) => h.releasedAt === null).length, role: m.values[viewer.role],
           // Р-151: демо помечается уже в списке миров; Р-150: сколько каналов ждёт доступа — видно до входа в мир
-          demo: live.demo === true,
+          demo: w.state.demo,
           awaitingAccess: (await live.store.channelAccounts(live.tenantId)).filter((a) => a.authStatus === 'AWAITING_ACCESS').length,
         };
       })));
@@ -219,8 +219,12 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     const viewer = live ? viewerIn(live) : null;
     if (!live || !viewer) return fail(404, 'WORLD_NOT_FOUND', s.notFound);
     const world = await live.view(viewer);
-    // Р-151: признак демо приходит от мира, а не от состояния хранилища, — и стоит на каждом ответе экрана
-    world.demo = live.demo === true;
+    /**
+     * Р-151: признак демо — из БАЗЫ (`tenant.demo` в состоянии консоли), а не из настройки стенда. Первая редакция брала его
+     * из поля, выставленного руками, и столбец базы не читал никто: забытая настройка сняла бы метку молча (ревью шага 34,
+     * находка 4).
+     */
+    world.demo = world.state.demo;
     const screen = parts[3];
     const param = parts[4] ?? null;
     /**
@@ -400,36 +404,30 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
      * есть ровно у того задания, которое ещё ждёт своей очереди.
      */
     /**
-     * Р-149: единственное, что путь пишет сам, — сужение набора [Р-131] и отметка шага. Всё остальное делают экраны шагов.
-     * Право — как у правки цен: путь ведёт тот, кто вправе править цены.
+     * Р-149: единственное, что путь ХРАНИТ, — сужение набора [Р-131]; место остановки выводится из данных. Права у двух
+     * действий разные [Р-143] (ревью шага 34, находка 2): сужает тот, кто правит цены, а включает тот, кто вправе включать
+     * движок, — оператор включает, хотя цен не правит. Первая редакция закрывала оба одним правом, и «своё право
+     * включения» было недостижимо через консоль.
      */
     if (screen === 'onboarding' && param !== null) {
-      if (!can(viewer.role, 'MANAGE_PRICING')) return fail(403, 'FORBIDDEN', m.ui.onboarding.noRight);
       const actor = { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) };
       if (param === 'narrow') {
-        // Сузить можно только до предложений с себестоимостью — иного смысла у сужения нет [Р-131]; снять сужение — тоже здесь
-        // Правда одна — база: тот же признак, по которому она пускает движок [Р-131], а не поле экрана
+        if (!can(viewer.role, 'MANAGE_PRICING')) return fail(403, 'FORBIDDEN', m.ui.onboarding.noRight);
+        // Сузить можно только до предложений с готовой себестоимостью — иного смысла у сужения нет [Р-131]; снять — тоже здесь.
+        // Правда одна — база: тот же признак, по которому считается шаг, а не поле экрана
         const ids = body.widen === true ? null : await live.store.scopesWithCost(world.tenantId);
         if (ids !== null && ids.length === 0) return fail(400, 'NOTHING_TO_NARROW_TO', m.ui.onboarding.stepHints.COSTS);
-        const saved = await live.store.saveOnboardingProgress(world.tenantId, { lastStep: 'COSTS', scopeWriteScopeIds: ids }, actor);
+        const saved = await live.store.saveOnboardingProgress(world.tenantId, { scopeWriteScopeIds: ids }, actor);
         if (saved === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
         return ok({ narrowedTo: ids === null ? null : ids.length });
       }
-      if (param === 'step') {
-        const step = String(body.step ?? '');
-        if (!['TENANT', 'CHANNEL', 'COSTS', 'BOUNDS', 'STRATEGY', 'ENABLE', 'DONE'].includes(step)) return fail(400, 'BAD_STEP', s.badRequest);
-        const saved = await live.store.saveOnboardingProgress(world.tenantId, { lastStep: step as never }, actor);
-        if (saved === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
-        return ok({ step });
-      }
       if (param === 'enable') {
         // Последний шаг — включение движка у набора: массовая операция, значит задание [Р-139]; право у вида своё [Р-143]
-        if (!can(viewer.role, 'ENABLE_REPRICING')) return fail(403, 'FORBIDDEN', s.forbidden);
+        if (!can(viewer.role, 'ENABLE_REPRICING')) return fail(403, 'FORBIDDEN', m.ui.onboarding.noRightEnable);
         const progress = await live.store.onboardingProgress(world.tenantId);
         const chosen = progress?.scopeWriteScopeIds ?? null;
         const targets = world.state.scopes.filter((x) => x.pricingMode !== 'ENGINE' && (chosen === null || chosen.includes(x.writeScopeId)));
         if (targets.length === 0) return fail(409, 'NOTHING_TO_ENABLE', m.ui.onboarding.completed);
-        await live.store.saveOnboardingProgress(world.tenantId, { lastStep: 'ENABLE' }, actor);
         return createJob('REPRICING_ENABLE', chosen === null ? { all: true } : { writeScopeIds: targets.map((x) => x.writeScopeId) }, targets.length,
           m.ui.onboarding.enable(targets.length));
       }
@@ -912,38 +910,56 @@ async function main(): Promise<void> {
     });
     /**
      * Р-151 (шаг 34): демо-тенант для показа продавцу — `REPRACER_DEMO=on`. Тот же мир, что в живом прогоне онбординга, но
-     * уже настроенный (себестоимость, границы, стратегия, движок включён), и время в нём ИДЁТ: одна виртуальная минута в
-     * секунду, планировщик опрашивает симулятор, решения и записи цен появляются на глазах. Демо живёт в настоящем и
-     * будущем, а не в прошлом: данные, внесённые продавцом через консоль, действуют с настоящего момента.
+     * уже настроенный (себестоимость, границы, стратегия, движок включён), и время в нём ИДЁТ — НАСТОЯЩЕЕ, секунда в секунду.
+     *
+     * Ускорять его нельзя (ревью шага 34, находка 9): у базы часы свои, и всё, что она считает по `now()` — действие
+     * себестоимости, сроки хранения, закрытие суток, — разошлось бы с путём решения, убежавшим вперёд. Поэтому демо живёт в
+     * настоящем: такт планировщика — 30 секунд, волна цен — раз в два часа. Рост данных — OQ-214.
      */
     if (process.env.REPRACER_DEMO === 'on') {
-      const { demoWorld, DEMO_OFFERS } = await import('@repracer/contract-tests/live');
+      const { demoWorld, DEMO_OFFERS, DEMO_COMPETITORS_PER_OFFER } = await import('@repracer/contract-tests/live');
       const { PgPricingStore } = await import('@repracer/pricing-store-pg');
+      const { runConfiguredWorker } = await import('./bulk-worker.ts');
       const demo = await demoWorld({
         tag: 3400, startIso: new Date().toISOString(), bare: false, appPool: pool, adminPool, provisioningPool: role('svc_provisioning', 1),
         dispatcherPool: role('svc_dispatcher', 2), schedulerPool: role('svc_scheduler', 3), exporterPool: role('svc_exporter', 2),
         memberUsers, memberEmails: STAND_EMAILS, joinMember: pgStandJoinMember(adminPool, directory),
-        sleep: (virtualMs) => new Promise((resolve) => setTimeout(resolve, virtualMs / 60)),
+        wallClock: true,
       });
       const seeded = demo.live.seeded;
       const store = new PgPricingStore(pool, { adminPool, bulkWorkerPool: role('svc_bulk_worker', 2) });
       const accounts = [{ channelAccountId: seeded.channelAccountId, channel: 'KAUFLAND', marketplaces: ['de'], haltRelease: 'SAMPLE' as const }];
       const nowIso = () => demo.clock.iso();
+      const descriptor = {
+        id: 'demo/kaufland', title: 'Demo · Kaufland (Simulator)', tenantId: seeded.tenantId, accounts,
+        description: `${DEMO_OFFERS} Angebote, je ${DEMO_COMPETITORS_PER_OFFER} Wettbewerber: Drift, Unterbieter, Preiswellen`,
+      };
       worlds.push({
-        id: 'demo/kaufland', title: 'Demo · Kaufland (Simulator)', description: `${DEMO_OFFERS} Angebote, je drei Wettbewerber: Drift, Unterbieter, Preiswellen`,
-        tenantId: seeded.tenantId, accounts, identityTenantId: seeded.tenantId, membershipAlias: (id) => id, failures: [], demo: true,
+        id: descriptor.id, title: descriptor.title, description: descriptor.description,
+        tenantId: seeded.tenantId, accounts, identityTenantId: seeded.tenantId, membershipAlias: (id) => id, failures: [],
         store: store as never, pipeline: demo.live.pipelineForDbIds() as never, clock: { iso: nowIso, nowMs: () => demo.clock.nowMs() } as never,
         callContext: (channelAccountId) => ({ tenantId: seeded.tenantId as never, channelAccountId: channelAccountId as never, correlationId: 'stand-demo', deadline: nowIso() }),
         view: async (viewer) => ({
-          id: 'demo/kaufland', title: 'Demo · Kaufland (Simulator)', description: `${DEMO_OFFERS} Angebote`, tenantId: seeded.tenantId, now: nowIso(),
-          accounts, viewer: { ...viewer }, state: await store.readConsoleState(seeded.tenantId, nowIso() as never),
+          ...descriptor, now: nowIso(), viewer: { ...viewer }, state: await store.readConsoleState(seeded.tenantId, nowIso() as never),
         }) as never,
       });
-      // Время демо идёт, пока жив стенд; остановка стенда останавливает и мир
-      void demo.advance(24 * 365).catch((error: unknown) => console.error('demo world stopped', error instanceof Error ? error.message : error));
+      /**
+       * Массовые операции демо выполняет исполнитель — иначе импорт, границы, стратегия и включение остались бы «в очереди»
+       * навсегда, и показать продавцу путь онбординга было бы нельзя. Тенант демо заводится при старте, поэтому настройки
+       * исполнителя собираются здесь же, а не читаются из файла.
+       */
+      void runConfiguredWorker({ pgUrl: url, idleMs: 500, worlds: [{ descriptor, now: 'WALL_CLOCK' }] })
+        .catch((error: unknown) => console.error('demo bulk worker stopped:', error instanceof Error ? error.message : error));
+      // Время демо идёт, пока жив стенд. Конец прогона — тоже событие: молча остановившееся время выглядело бы как поломка цен
+      void demo.advance(24 * 365)
+        .then(() => console.error('demo world reached the end of its run: prices no longer move — restart the stand'))
+        .catch((error: unknown) => console.error('demo world stopped:', error instanceof Error ? error.message : error));
+      console.log(`demo tenant ready: ${DEMO_OFFERS} offers, ${DEMO_COMPETITORS_PER_OFFER} competitors each`);
     }
     handle = createStandApi(worlds, { authenticator: createAuthenticator({ ...verify, directory }), ...(simulator ? { simulator } : {}) });
   } else {
+    // Стенд не включает ничего молча и ничего молча не пропускает: демо живёт только на PostgreSQL (ревью шага 34, находка 9)
+    if (process.env.REPRACER_DEMO === 'on') throw new Error('REPRACER_DEMO=on needs PostgreSQL: set REPRACER_PG_URL (the demo tenant runs the real decision path)');
     const worlds = await buildStandWorlds();
     handle = createStandApi(worlds, { authenticator: createAuthenticator({ ...verify, directory: memoryStandDirectory(worlds) }), ...(simulator ? { simulator } : {}) });
   }
