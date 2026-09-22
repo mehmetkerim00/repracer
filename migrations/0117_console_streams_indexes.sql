@@ -23,6 +23,12 @@ CREATE INDEX price_decision_intervention_idx ON channel_data.price_decision (ten
 -- interventions: намерения окна читаются ВСЕ (граница эпизода удержания — оконной функцией по соседям), наружу идут только
 -- намерения на границе; окно — первичный ключ (tenant_id, created_at, …), отдельный индекс не нужен. Буфер намерений — 3 дня
 
+-- listPollCandidates (планировщик, опрос конкурентов по ярусам): движения ОДНОГО товара за 48 часов. Без этого индекса
+-- запрос проходил таблицу движений целиком на каждый товар — 200 товаров × 68 000 строк, 2,9 с на запуск раз в минуту на
+-- демо-тенанте к десятому часу суток (найдено прогоном суток шага 35). Индекс окна витрины (0009) отбирает почти всё
+CREATE INDEX competitor_move_product_window_idx ON channel_data.competitor_move
+  (tenant_id, channel_account_id, marketplace, channel_product_ref, condition, evaluated_at DESC);
+
 -- feedPage: лента цен — страница по моменту записи (применена → отправлена → создана), в целом и по единице
 CREATE INDEX channel_write_history_feed_idx ON tenant_data.channel_write_history
   (tenant_id, (coalesce(accepted_at, dispatched_at, created_at)) DESC, version DESC) WHERE field = 'PRICE';
