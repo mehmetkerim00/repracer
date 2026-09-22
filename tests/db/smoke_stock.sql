@@ -85,6 +85,18 @@ SELECT pg_temp.ok('the stock role creates a quantity write (Р-105)', $q$
 SELECT pg_temp.ok('the stock role supersedes a pending quantity write (Р-105)', $q$
   INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, quantity, version, origin, budget_scope_key, budget_day)
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'a9190000-0000-4000-8000-000000000002', 'a6000000-0000-0000-0000-000000000003', 'QUANTITY', 3, 4, 'STOCK_RECALC', 'L1', (now() AT TIME ZONE 'Europe/Berlin')::date) $q$);
+/**
+ * Шаг 35: ШЕСТАЯ запись остатка в сессии. Проверка «цена равна решению» стояла одним выражением с `field = 'PRICE'`; с шестого
+ * исполнения PL/pgSQL брал общий план, где подзапрос по price_decision оставался, и роль остатков получала отказ права.
+ * Здесь версии 5…10 идут одной сессией — вместе с версиями 3 и 4 выше это восемь исполнений триггера.
+ */
+SELECT pg_temp.ok('the stock role creates the sixth quantity write of a session (Р-105, шаг 35)', $q$
+  DO $x$ DECLARE v int; BEGIN
+    FOR v IN 5..10 LOOP
+      INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, quantity, version, origin, budget_scope_key, budget_day)
+      VALUES ('a0000000-0000-0000-0000-00000000000a', ('a9190000-0000-4000-8000-0000000000' || lpad(v::text, 2, '0'))::uuid, 'a6000000-0000-0000-0000-000000000003', 'QUANTITY', v, v, 'STOCK_RECALC', 'L1', (now() AT TIME ZONE 'Europe/Berlin')::date);
+    END LOOP;
+  END $x$ $q$);
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM tenant_data.channel_write WHERE channel_write_id = 'a9190000-0000-4000-8000-000000000001')
      OR NOT EXISTS (SELECT 1 FROM tenant_data.channel_write_history WHERE channel_write_id = 'a9190000-0000-4000-8000-000000000001' AND final_status = 'SUPERSEDED') THEN

@@ -3,3 +3,4 @@ export { PgPricingStore, PRICE_BOUNDS_SQL } from './store.ts';
 export { PgSellerRouter } from './inbound.ts';
 export { PgWriteQueueStore, type PgWriteQueueStoreOptions } from './write-queue.ts';
 export { IdMap, OWNER_MEMBERSHIP_ALIAS, seedPricingWorld, translateStore, type SeededPricingWorld, type SeedWorldInput } from './seed.ts';
+export { PgStockStore, type PgStockStoreOptions } from './stock.ts';

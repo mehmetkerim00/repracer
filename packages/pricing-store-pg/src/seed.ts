@@ -295,11 +295,11 @@ export async function seedPricingWorld(_pool: PgPool, input: SeedWorldInput): Pr
     await tx.query(
       `INSERT INTO tenant_data.offer_mapping
          (tenant_id, product_id, channel_account_id, channel, region, marketplace, channel_offer_key, external_unit_id, external_sku, channel_product_ref, condition, status, price_write_scope_id,
-          external_listing_id, ebay_listing_format, ebay_migration_status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'ACTIVE', $12, $13, $14, $15)`,
+          external_listing_id, ebay_listing_format, ebay_migration_status, external_offer_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'ACTIVE', $12, $13, $14, $15, $16)`,
       [tenantId, productId, account.id, account.channel, account.region, s.marketplace, `offer:${s.externalUnitId}`, identity.external_unit_id, identity.external_sku,
        s.channelProductRef, s.condition.toUpperCase(), info.writeScopeId,
-       identity.external_listing_id, ebay ? 'FIXED_PRICE' : null, ebay ? 'NOT_REQUIRED' : null],
+       identity.external_listing_id, ebay ? 'FIXED_PRICE' : null, ebay ? 'NOT_REQUIRED' : null, s.externalOfferId ?? null],
     );
 
     let strategyId: string | null = null;

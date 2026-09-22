@@ -108,6 +108,8 @@ export interface MemorySeedScope {
   channelAccountId: string;
   marketplace: string;
   externalUnitId: string;
+  /** Шаг 35: id_offer у Kaufland — ключ единицы записи ОСТАТКА, общий для витрин [Р-35]; без него остаток не синхронизируется (0027) */
+  externalOfferId?: string;
   channelProductRef: string;
   condition: string;
   gtin?: string | null;

@@ -73,6 +73,21 @@ VALUES
   ('c0000000-0000-0000-0000-000000000005', 1, 'ACTIVE', now(), 'AMAZON', 'NA', 'AMAZON_LISTINGS_ITEMS', 'PRICE',
    'ACCOUNT_REGION_MARKETPLACE_SKU', ARRAY['channel_account','region','marketplace','external_sku'], NULL, NULL, 'ASYNC', false, 'AMAZON_INFO')
 ON CONFLICT DO NOTHING;
+-- Шаг 35 [Р-152, Р-153]: единицы записи ОСТАТКА. Kaufland — аккаунт + id_offer, общий для витрин [Р-35] (шаблон закреплён 0027);
+-- Amazon — аккаунт + регион + SKU: одно значение на весь регион [Р-1], включение требует подтверждения побочного эффекта
+-- человеком (INV-11). Строки синтетические — как и ценовые выше; в работе справочник грузит развёртывание (OQ-55)
+INSERT INTO platform.channel_capability
+  (capability_id, version, status, valid_from, channel, region, api_mode, field, write_scope_kind,
+   write_scope_key_template, budget_scope_attribute, object_edit_limit, processing_mode,
+   requires_side_effects_ack, side_effects, channel_decrements_on_order, observation_data_class)
+VALUES
+  ('c0000000-0000-0000-0000-000000000011', 1, 'ACTIVE', now(), 'KAUFLAND', NULL, 'KAUFLAND_SELLER_API_V2', 'QUANTITY',
+   'ACCOUNT_OFFER', ARRAY['channel_account','external_offer_id'], NULL, NULL, 'SYNC', false,
+   'unit с одинаковым id_offer на разных витринах имеют общие количество и склад [Р-35]', NULL, 'CHANNEL_INFO'),
+  ('c0000000-0000-0000-0000-000000000015', 1, 'ACTIVE', now(), 'AMAZON', 'NA', 'AMAZON_LISTINGS_ITEMS', 'QUANTITY',
+   'ACCOUNT_REGION_SKU', ARRAY['channel_account','region','external_sku'], NULL, NULL, 'ASYNC', true,
+   'остаток MFN — одно значение на SKU во всех маркетплейсах региона [Р-1]', true, 'AMAZON_INFO')
+ON CONFLICT DO NOTHING;
 RESET ROLE;
 
 -- Смоук-мир (tests/db) и сценарии стенда живут в фиксированной дате: секции суточных таблиц под неё создаются явно,
