@@ -191,12 +191,20 @@ test('Р-154, Р-136: после суток каждый экран отвеча
 
 test('Р-151, Р-153 (задача D): демо показывает остатки — заказы симулятора уменьшают доступное, изменение расходится по каналу', async () => {
   await signIn();
+  /**
+   * Одно завершающее чтение заказов БЕЗ движения часов: планировщик остановился на границе суток, и заказы последних
+   * минут ждали следующего такта, которого в прогоне уже нет (в двух прогонах — 358 резерваций на 360 заказов). Часы
+   * стоят, значит новых заказов не появится, и равенство ниже — утверждение о конвейере, а не о том, где остановились.
+   */
+  const tail = await demo.live.syncOrdersForDbIds(
+    { tenantId: demo.live.seeded.tenantId as never, channelAccountId: demo.live.seeded.channelAccountId as never, correlationId: 'demo-day-tail', deadline: demo.clock.iso() as never },
+    new Date(demo.clock.nowMs() - 3 * 3_600_000).toISOString());
   const stats = demo.live.simulator.stats;
   assert.ok(stats.ordersPlaced >= 300 && stats.ordersShipped >= 200, `спрос за сутки: заказов ${stats.ordersPlaced}, отгружено ${stats.ordersShipped}, отменено ${stats.ordersCancelled}`);
   const [r] = (await observer.query(
     `SELECT count(*)::int AS reservations, count(*) FILTER (WHERE status = 'CONSUMED')::int AS consumed, count(*) FILTER (WHERE status IN ('CREATED', 'CONFIRMED_BY_SOURCE'))::int AS open
        FROM channel_data.reservation WHERE tenant_id = $1`, [demo.live.seeded.tenantId])).rows;
-  assert.equal(Number(r.reservations), stats.ordersPlaced, 'каждый заказ канала — резервация');
+  assert.equal(Number(r.reservations), stats.ordersPlaced, `каждый заказ канала — резервация (завершающее чтение добрало ${tail.created})`);
   const stock = await get<StockView>('stock (демо, после суток)', `${api('stock')}?limit=200`);
   assert.equal(stock.status, 200);
   assert.ok(stock.body.demo, 'экран остатков помечен как демо — здесь показываются штуки, не деньги, но путь тот же');
