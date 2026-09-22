@@ -5,7 +5,7 @@ export type { Fmt, Locale, Template } from './i18n/types.ts';
 /** Права по роли [OQ-125] — те же, что проверяют хранилище и БД */
 export { can, type MemberRole, type PricingAction } from '@repracer/pricing-model';
 export { boundText, channelNotes, productList, strategyLabel, type ChannelNote, type FloorCell, type ProductListView, type ProductRow, type StrategyLabel } from './products.ts';
-export { decisionList, decisionListView, type DecisionListView, decisionTrace, explanationOf, isDangerous, noChangeTitle, type DecisionListItem, type DecisionTrace, type ItemOutcome, type StepStatus, type TraceItem, type TraceStep, type TraceStepKey } from './trace.ts';
+export { decisionItems, decisionListView, type DecisionListView, decisionTrace, explanationOf, isDangerous, noChangeTitle, type DecisionListItem, type DecisionTrace, type ItemOutcome, type StepStatus, type TraceItem, type TraceStep, type TraceStepKey } from './trace.ts';
 export { rejectedView, type RejectedItem, type RejectedKind, type RejectedView } from './rejected.ts';
 export { boundsView, costInScopeCurrency, effectiveFloor, priceBreakdown, type BoundsView, type EffectiveFloor, type MoneyLine, type PriceBreakdown } from './bounds.ts';
 export { planStop, stopView, type AuditCard, type DistrustCard, type HaltCard, type StopKindRow, type StopCard, type StopImpact, type StopPlan, type StopTarget, type StopView, type TargetCard } from './stop.ts';
@@ -13,10 +13,14 @@ export { currentStrategies, fingerprint, parseStrategyDraft, previewToken, STRAT
 export { boundsDiffView, boundsPlanToken, DIFF_ROWS_SHOWN, expandBoundsEdit, MAX_SCOPES, parseAmountInput, parseBoundsEditRequest, parsePercentInput, type BoundAdjust, type BoundsDiffView, type BoundsEditRequest, type BoundsRequestProblem, type DiffFlag, type DiffRow } from './bounds-edit.ts';
 export { OFFER_CHOICES } from './compliance.ts';
 export { LIST_PAGE_DEFAULT, LIST_PAGE_MAX, listQuery, pageOf, parseListQuery, selectionAfterPaging, type ListQuery, type PageInfo } from './page.ts';
-export { FEED_PAGE_MAX, FEED_PERIODS_DAYS, FEED_STATUS_GROUPS, parseFeedQuery, priceFeed, type FeedItem, type FeedQuery, type FeedStatusGroup, type PriceFeedView } from './price-feed.ts';
+export { FEED_PAGE_MAX, FEED_PERIODS_DAYS, FEED_STATUS_GROUPS, parseFeedQuery, priceFeed, feedPageQuery, feedItemOf, type FeedItem, type FeedQuery, type FeedStatusGroup, type PriceFeedView } from './price-feed.ts';
 export { dangerousReport, REPORT_PERIODS_DAYS, type DangerousItem, type DangerousReportView } from './dangerous-report.ts';
 export { complianceView, discountCheckView, historyDepthView, PRICE_EVIDENCE_HEADER, priceEvidenceRows, type ComplianceRow, type ComplianceView, type DiscountCheckView, type HistoryDepthView, type OfferDepthRow } from './compliance.ts';
 export { columnName, costImportView, importTargets, PREVIEW_ROWS_SHOWN, SKIPPED_EXAMPLES, type CostImportView, type ImportPreviewRowView, type ImportSkippedGroupView } from './cost-import.ts';
 export { bulkJobsView, bulkJobView, canCancelBulkJob, CANCEL_ACTION, type BulkJobView, type BulkJobsView } from './jobs.ts';
-export { COST_IMPORT_REPORT_HEADER, costImportReportRows, csvOf, PRICE_FEED_CSV_HEADER, priceFeedFileName, priceFeedRows, priceFeedRowsOf } from './exports.ts';
+export { COST_IMPORT_REPORT_HEADER, costImportReportRows, csvOf, PRICE_FEED_CSV_HEADER, priceFeedFileName, priceFeedRowsOf } from './exports.ts';
 export { onboardingView, type OnboardingView, type OnboardingStepView, type ChannelAccountView, type EnableResultView } from './onboarding.ts';
+export { pageInfo, clampOffset } from './page.ts';
+export { productPage } from './products.ts';
+/** Р-154: окно отчёта об отклонённых — семь суток; счётчики и строки — по вмешательствам окна, не по буферу */
+export { REJECTED_WINDOW_DAYS } from './rejected.ts';

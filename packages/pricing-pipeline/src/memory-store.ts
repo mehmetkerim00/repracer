@@ -3,6 +3,9 @@ import { EXPLANATION_RULESETS } from './dictionary.ts';
 import { rotation } from './reconciliation.ts';
 import type { HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow} from './store.ts';
 import { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, FILE_PRODUCING_JOB_KINDS, READ_ONLY_JOB_KINDS } from './store.ts';
+import { feedGroupOf, type ConsoleScopeRow, type ConsoleWriteRow, type ConsoleIntentRow, type DecisionPage, type DecisionPageQuery, type DecisionDetail, type ScopeDecisionStats, type InterventionSlice, type FeedPage, type FeedPageItem, type FeedPageQuery, type FeedStatusGroup, type WorldCounters } from './store.ts';
+/** Записи в полёте: одна на единицу, показываются в состоянии консоли; завершённые — только в ленте [Р-154] */
+const IN_FLIGHT_WRITE = new Set(['PENDING', 'DISPATCHED', 'ACCEPTED', 'FAILED', 'BLOCKED']);
 import { offerIdentityOf, type CompetitorQuery, type CompetitorSnapshot, type CompetitorSourceDescriptor, type FieldWrite, type Instant, type OfferIdentity, type PriceBasis, type PricingHealthObservation, type WriteOutcome } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange, SanityContext } from '@repracer/input-sanity';
 import { assertWriteWithinBounds, NO_GUARDRAILS, type GuardrailSet } from '@repracer/price-gate';
@@ -1910,16 +1913,11 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
           cost: s.cost ?? null, minMarginBp: s.guardrails?.minMarginBp ?? null,
           channelHalt: halt ? InMemoryPricingStore.haltRef(halt) : null, priceStop: stop ? InMemoryPricingStore.stopRef(stop) : null,
           channelDistrust: (() => { const d = this.activeDistrust(s.channelAccountId, s.marketplace); return d ? InMemoryPricingStore.distrustRef(d) : null; })(),
+          lastApplied: this.lastAppliedOf(s.writeScopeId),
         };
       }),
-      intents: this.intents.map((i) => ({ ...i })),
-      decisions: this.decisions.map((d) => ({ ...d })),
-      writes: this.writes.map((w) => ({
-        channelWriteId: w.channelWriteId, writeScopeId: w.writeScopeId, decisionId: w.decisionId, amountMinor: w.amountMinor, currency: w.currency, basis: w.basis,
-        version: w.version, status: w.status, attemptCount: w.attemptCount, competitorDerived: w.competitorDerived, createdAt: w.createdAt, dispatchedAt: w.dispatchedAt,
-        acceptedAt: w.acceptedAt, nextAttemptAt: w.nextAttemptAt, lastErrorCode: w.lastErrorCode, endReason: w.endReason, endParams: { ...w.endParams },
-        supersededByWriteId: w.supersededByWriteId,
-      })),
+      // Р-154: только записи в полёте; завершённые — в ленте страницами
+      writes: this.writes.filter((w) => IN_FLIGHT_WRITE.has(w.status)).map((w) => this.consoleWrite(w)),
       halts: this.halts.map((h) => ({
         haltId: h.haltId, channelAccountId: h.channelAccountId, marketplace: h.marketplace, reasonCode: h.reasonCode, details: h.details, haltedAt: h.haltedAt,
         nextReviewAt: h.nextReviewAt, releasedAt: h.releasedAt, releasedKind: h.releasedKind,
@@ -1931,14 +1929,106 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       pricingHealth: [...new Map([...this.pricingHealth].sort((a, b) => Date.parse(a.occurredAt) - Date.parse(b.occurredAt))
         .map((h) => [`${h.channelAccountId}|${h.marketplace}|${h.channelProductRef}|${h.condition}`, { ...h }])).values()],
       stops: this.stops.map((s) => ({ ...s })),
-      rejectedSnapshots: this.rejectedSnapshots.map((r) => ({ ...r })),
       divergenceCases: this.divergenceCases.map((c) => ({ ...c })),
       fxRates: [...this.fxRates],
       members: this.members.map((m) => ({ ...m })),
       strategies: [...this.strategyVersions.values()].map((d) => ({ ...d, params: { ...d.params } })),
       strategyVersions: [...this.strategyMeta.values()].map((v) => ({ ...v })),
       explanationRulesets: [...EXPLANATION_RULESETS],
-      audit: this.audit.map((a) => ({ ...a })),
+    };
+  }
+
+  // --- Р-154 (шаг 35): потоки — страницами, окнами, агрегатами; в памяти — те же правила, что у базы ------------------
+
+  private consoleWrite(w: WriteRow): ConsoleWriteRow {
+    return {
+      channelWriteId: w.channelWriteId, writeScopeId: w.writeScopeId, decisionId: w.decisionId, amountMinor: w.amountMinor, currency: w.currency, basis: w.basis,
+      version: w.version, status: w.status, attemptCount: w.attemptCount, competitorDerived: w.competitorDerived, createdAt: w.createdAt, dispatchedAt: w.dispatchedAt,
+      acceptedAt: w.acceptedAt, nextAttemptAt: w.nextAttemptAt, lastErrorCode: w.lastErrorCode, endReason: w.endReason, endParams: { ...w.endParams },
+      supersededByWriteId: w.supersededByWriteId,
+    };
+  }
+
+  private lastAppliedOf(writeScopeId: string): ConsoleScopeRow['lastApplied'] {
+    const w = this.writes.filter((x) => x.writeScopeId === writeScopeId && x.status === 'APPLIED' && x.acceptedAt)
+      .sort((a, b) => Date.parse(b.acceptedAt!) - Date.parse(a.acceptedAt!))[0];
+    return w ? { amountMinor: w.amountMinor, acceptedAt: w.acceptedAt! } : null;
+  }
+
+  private static newestFirst = (a: { decidedAt: string; decisionId: string }, b: { decidedAt: string; decisionId: string }) =>
+    Date.parse(b.decidedAt) - Date.parse(a.decidedAt) || b.decisionId.localeCompare(a.decisionId);
+
+  async decisionPage(_tenantId: string, query: DecisionPageQuery): Promise<DecisionPage> {
+    const all = this.decisions.filter((d) => !query.writeScopeId || d.writeScopeId === query.writeScopeId).sort(InMemoryPricingStore.newestFirst);
+    return { items: all.slice(query.offset, query.offset + query.limit).map((d) => ({ ...d })), total: all.length };
+  }
+
+  async decisionDetail(_tenantId: string, decisionId: string): Promise<DecisionDetail | null> {
+    const decision = this.decisions.find((d) => d.decisionId === decisionId);
+    if (!decision) return null;
+    return {
+      decision: { ...decision },
+      intent: this.intents.find((i) => i.intentId === decision.intentId) ?? null,
+      writes: this.writes.filter((w) => w.decisionId === decisionId).sort((a, b) => a.version - b.version).map((w) => this.consoleWrite(w)),
+    };
+  }
+
+  async scopeDecisionStats(_tenantId: string, writeScopeIds: readonly string[]): Promise<ScopeDecisionStats[]> {
+    return writeScopeIds.map((writeScopeId) => {
+      const own = this.decisions.filter((d) => d.writeScopeId === writeScopeId).sort(InMemoryPricingStore.newestFirst);
+      return { writeScopeId, latestDecisionId: own[0]?.decisionId ?? null, latestDecidedAt: own[0]?.decidedAt ?? null, decisions: own.length };
+    });
+  }
+
+  async interventions(_tenantId: string, from: Instant, to: Instant): Promise<InterventionSlice> {
+    const within = (at: string) => Date.parse(at) > Date.parse(from) && Date.parse(at) <= Date.parse(to);
+    const capped = (i: ConsoleIntentRow) => i.reason.code === 'TARGET_OUTSIDE_BOUNDS_HOLD'
+      || i.explanation.some((x) => x.code === 'CAPPED_AT_MIN_PRICE' || x.code === 'CAPPED_AT_MAX_PRICE');
+    // Граница эпизода — по ВСЕМ намерениям единицы в порядке времени, как оконная функция базы
+    const previousCapped = new Map<string, boolean>();
+    const intents: InterventionSlice['intents'] = [];
+    for (const i of [...this.intents].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))) {
+      const isCapped = capped(i);
+      if (within(i.createdAt) && isCapped) intents.push({ ...i, episodeStart: !(previousCapped.get(i.writeScopeId) ?? false) });
+      previousCapped.set(i.writeScopeId, isCapped);
+    }
+    return {
+      from, to,
+      decisions: this.decisions.filter((d) => d.outcome !== 'NO_CHANGE' && within(d.decidedAt)).sort(InMemoryPricingStore.newestFirst).map((d) => ({ ...d })),
+      intents,
+      endedWrites: this.writes.filter((w) => within(w.createdAt) && (w.endReason === 'WRITE_BLOCKED_BY_BOUND_RECHECK' || w.endReason === 'PRICING_STOPPED'))
+        .map((w) => this.consoleWrite(w)),
+      rejectedSnapshots: this.rejectedSnapshots.filter((r) => within(r.receivedAt)).map((r) => ({ ...r })),
+    };
+  }
+
+  async feedPage(_tenantId: string, now: Instant, query: FeedPageQuery): Promise<FeedPage> {
+    const at = (w: WriteRow) => Date.parse(w.acceptedAt ?? w.dispatchedAt ?? w.createdAt);
+    const since = query.sinceDays ? Date.parse(now) - query.sinceDays * 86_400_000 : null;
+    const scoped = this.writes.filter((w) => (!query.writeScopeId || w.writeScopeId === query.writeScopeId) && (since === null || at(w) >= since));
+    const counts: Record<FeedStatusGroup, number> = { APPLIED: 0, IN_FLIGHT: 0, NOT_SENT: 0, SUPERSEDED: 0 };
+    for (const w of scoped) counts[feedGroupOf(w.status)] += 1;
+    const rows = scoped.filter((w) => !query.status || feedGroupOf(w.status) === query.status).sort((a, b) => at(b) - at(a) || b.version - a.version);
+    const items = rows.slice(query.offset, query.offset + query.limit).map((w): FeedPageItem => {
+      const decision = w.decisionId ? this.decisions.find((d) => d.decisionId === w.decisionId) ?? null : null;
+      const intent = decision ? this.intents.find((i) => i.intentId === decision.intentId) ?? null : null;
+      return { write: this.consoleWrite(w), decision: decision ? { ...decision } : null, intentCurrentMinor: intent?.currentMinor ?? null };
+    });
+    return { items, total: rows.length, counts };
+  }
+
+  async auditRecent(_tenantId: string, limit: number): Promise<ConsoleAuditRow[]> {
+    return [...this.audit].reverse().slice(0, limit).map((a) => ({ ...a }));
+  }
+
+  async worldCounters(_tenantId: string, now: Instant): Promise<WorldCounters> {
+    const t = Date.parse(now);
+    return {
+      scopes: this.scopes.size, demo: this.demo,
+      decisionsLastDay: this.decisions.filter((d) => Date.parse(d.decidedAt) > t - 86_400_000).length,
+      interventionsLastWeek: this.decisions.filter((d) => d.outcome !== 'NO_CHANGE' && Date.parse(d.decidedAt) > t - 7 * 86_400_000).length,
+      activeStops: this.stops.filter((s) => s.releasedAt === null).length,
+      activeHalts: this.halts.filter((h) => h.releasedAt === null).length,
     };
   }
 

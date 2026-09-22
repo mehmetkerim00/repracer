@@ -43,6 +43,21 @@ export function parseListQuery(params: URLSearchParams): ListQuery | null {
 
 export const listQuery = (query: ListQuery | undefined): ListQuery => query ?? { offset: 0, limit: LIST_PAGE_DEFAULT };
 
+/**
+ * Р-154: страница, которую отдала база (итог — агрегатом, строки — LIMIT/OFFSET). Смещение за концом подтягивается к последней
+ * странице теми же правилами, что `pageOf`, — поэтому запрос к базе делается с уже подтянутым смещением (`clampOffset`).
+ */
+export function pageInfo(query: ListQuery, total: number, m: Messages): PageInfo {
+  const from = clampOffset(query, total);
+  const to = Math.min(from + query.limit, total);
+  return { from: total === 0 ? 0 : from + 1, to, total, text: m.ui.feed.page(total === 0 ? 0 : from + 1, to, total), hasPrevious: from > 0, hasNext: to < total };
+}
+
+export function clampOffset(query: ListQuery, total: number): number {
+  const lastStart = total === 0 ? 0 : Math.floor((total - 1) / query.limit) * query.limit;
+  return Math.min(query.offset, lastStart);
+}
+
 /** Страница списка и то, что о ней сказать продавцу: «21–40 из 10 000» */
 export function pageOf<T>(items: readonly T[], query: ListQuery, m: Messages): { items: T[]; page: PageInfo } {
   // Страница за концом списка: показывается последняя, а не «10001–10000 из 10000» с кнопкой «назад» (ревью шага 29, находка 13)

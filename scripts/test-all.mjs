@@ -38,15 +38,15 @@ const ledgerEnv = {
  * так область выбирается по файлу, а не по пакету, и ни один тест не «пропускается» молча [Р-84].
  */
 const scope = (process.argv.find((a) => a.startsWith('--scope='))?.slice('--scope='.length) ?? 'full');
-if (scope !== 'fast' && scope !== 'full') {
-  console.error(`BUILD RED: неизвестная область прогона «${scope}» (fast или full)`);
+if (scope !== 'fast' && scope !== 'full' && scope !== 'long') {
+  console.error(`BUILD RED: неизвестная область прогона «${scope}» (fast, full или long)`);
   process.exit(1);
 }
 const selected = filesForScope(inclusion.included, scope);
 const deferred = inclusion.included.filter((f) => !selected.includes(f));
 console.log(`TEST SCOPE ${JSON.stringify({ scope, files: selected.length, deferred: deferred.length })}`);
 for (const t of INFRASTRUCTURE_TESTS) {
-  if (deferred.includes(t.file)) console.log(`   отложен до полного прогона (${t.needs}): ${t.file} — ${t.why}`);
+  if (deferred.includes(t.file)) console.log(`   ${t.needs === 'TIME' ? 'идёт своим заданием CI (long)' : 'отложен до полного прогона'} (${t.needs}): ${t.file} — ${t.why}`);
 }
 
 /** Рабочее пространство файла: ближайший вверх package.json */

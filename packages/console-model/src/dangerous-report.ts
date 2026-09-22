@@ -1,4 +1,5 @@
 import { DANGEROUS_DEVIATION_BP } from '@repracer/pricing-model';
+import type { InterventionSlice } from '@repracer/pricing-pipeline';
 import type { Messages } from './i18n/index.ts';
 import { explanationOf, isDangerous } from './trace.ts';
 import { describe, type HumanReason } from './explain.ts';
@@ -85,7 +86,7 @@ function boundOf(code: string, params: Record<string, unknown>): number | null {
 
 const inPeriod = (at: string, from: number, to: number) => Date.parse(at) > from && Date.parse(at) <= to;
 
-function floorHolds(world: StandWorld, from: number, to: number, m: Messages): FloorHoldsView {
+function floorHolds(world: StandWorld, slice: InterventionSlice, from: number, to: number, m: Messages): FloorHoldsView {
   const below = new Map<string, number>();
   const items: Array<FloorHoldItem & { sortAt: string }> = [];
   const seenIntents = new Set<string>();
@@ -100,8 +101,9 @@ function floorHolds(world: StandWorld, from: number, to: number, m: Messages): F
   // Горячие intent (3 дня): цель стратегии известна. Удержание — эпизод: подряд идущие оценки одной единицы, в которых пол держит
   // цену, — одно удержание; сумма эпизода — наибольшая за эпизод (ревью шага 22, находка 4: цена на полу давала удержание на каждой
   // оценке, и сумма росла с их числом)
-  const byScope = new Map<string, typeof world.state.intents>();
-  for (const i of world.state.intents) {
+  const byScope = new Map<string, InterventionSlice['intents']>();
+  const decisionsByIntent = new Map(slice.decisions.map((d) => [d.intentId, d]));
+  for (const i of slice.intents) {
     if (!inPeriod(i.createdAt, from, to)) continue;
     byScope.set(i.writeScopeId, [...(byScope.get(i.writeScopeId) ?? []), i]);
   }
@@ -116,6 +118,8 @@ function floorHolds(world: StandWorld, from: number, to: number, m: Messages): F
     };
     for (const i of intents) {
       seenIntents.add(i.intentId);
+      // Р-154: оценка без удержания между двумя удержаниями в срез не входит, но закрывает эпизод — это говорит флаг из базы
+      if (i.episodeStart) close();
       const capped = i.explanation.find((x) => x.code === 'CAPPED_AT_MIN_PRICE');
       const held = i.reason.code === 'TARGET_OUTSIDE_BOUNDS_HOLD' ? i.reason : null;
       const hit = capped ?? held;
@@ -125,7 +129,7 @@ function floorHolds(world: StandWorld, from: number, to: number, m: Messages): F
       if (!hit || !Number.isSafeInteger(target) || !Number.isSafeInteger(floor) || target >= floor) { close(); continue; }
       // kept — цена, которую удержал пол: сам пол (поставлена на пол) или текущая цена (оставлена без изменения)
       const kept = capped ? floor : Math.max(floor, i.currentMinor ?? floor);
-      const decision = world.state.decisions.find((d) => d.intentId === i.intentId) ?? null;
+      const decision = decisionsByIntent.get(i.intentId) ?? null;
       if (!episode) {
         episode = { at: i.createdAt, writeScopeId: i.writeScopeId, kind: capped ? 'CAPPED' : 'HELD', target, floor, kept, currency: i.currency, reason: hit, decisionId: decision?.decisionId ?? null };
       } else if (kept - target > (episode as Episode).kept - (episode as Episode).target) {
@@ -136,7 +140,7 @@ function floorHolds(world: StandWorld, from: number, to: number, m: Messages): F
   }
   // Решения старше горячего intent (до 30 дней): видны только удержания, которые сдвинули цену на пол (CHANGED с шагом слепка),
   // без цели [Р-85]. Удержания без изменения цены (NO_OP) решения не создают и после 3 дней не видны вовсе (ревью шага 22, находка 7)
-  for (const d of world.state.decisions) {
+  for (const d of slice.decisions) {
     if (seenIntents.has(d.intentId) || !inPeriod(d.decidedAt, from, to)) continue;
     const step = explanationOf(world, d)?.value.strategy.steps?.find((x) => x.code === 'CAPPED_AT_MIN_PRICE');
     if (!step || !Number.isSafeInteger(step.params.minMinor)) continue;
@@ -151,12 +155,13 @@ function floorHolds(world: StandWorld, from: number, to: number, m: Messages): F
   };
 }
 
-export function dangerousReport(world: StandWorld, days: number, m: Messages): DangerousReportView {
+/** Р-154: отчёт строится по срезу вмешательств окна — «без изменения» в него не попадают ещё в базе */
+export function dangerousReport(world: StandWorld, slice: InterventionSlice, days: number, m: Messages): DangerousReportView {
   const r = m.ui.dangerous;
   const to = Date.parse(world.now);
   const from = to - days * 86_400_000;
-  const floor = floorHolds(world, from, to, m);
-  const decisions = world.state.decisions
+  const floor = floorHolds(world, slice, from, to, m);
+  const decisions = slice.decisions
     .filter((d) => isDangerous(d) && Date.parse(d.decidedAt) > from && Date.parse(d.decidedAt) <= to)
     .sort((a, b) => (b.boundDeviationBp ?? 0) - (a.boundDeviationBp ?? 0) || Date.parse(b.decidedAt) - Date.parse(a.decidedAt));
   const prevented = new Map<string, number>();

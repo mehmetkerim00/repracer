@@ -165,6 +165,40 @@ jobs:
       - name: Deployments start (шаг 28, D)
         run: PG_HOST=host.docker.internal scripts/deploy-smoke.sh
 
+  # Шаг 35 [Р-154]: демо-стенд живёт виртуальные СУТКИ, затем все экраны обходятся как браузер в пределе 10 с / 8 МБ.
+  # Своё задание рядом с полным: сутки на 200 предложениях — около получаса, и внутри полного прогона они вывели бы его за предел
+  demo-day:
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ['5432:5432']
+        options: >-
+          --shm-size=1g --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: postgres
+      REPRACER_PG_URL: postgres://svc_app@127.0.0.1:5432/repracer_eu
+      REPRACER_PG_ADMIN_URL: postgres://postgres@127.0.0.1:5432/postgres
+      REPRACER_PG_TEMPLATE: repracer_template
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
+      - run: npm ci
+      - name: Database — migrations, template
+        run: scripts/db/prepare.sh repracer_eu
+      - name: A virtual day of the demo stand, then every screen within its limit (Р-154, OQ-214)
+        run: node scripts/test-all.mjs --scope=long
+
   # Шаг 20: замер сжатия ClickHouse против оценки шага 4 (ADR-0004) — отдельное задание, итог — артефакт compression.json
   clickhouse-compression:
     runs-on: ubuntu-24.04

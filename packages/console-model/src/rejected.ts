@@ -1,4 +1,5 @@
 import { classifyBoundIntervention, type BoundIntervention } from '@repracer/pricing-model';
+import type { InterventionSlice } from '@repracer/pricing-pipeline';
 import { describe, type HumanReason } from './explain.ts';
 import type { Messages } from './i18n/index.ts';
 import { explanationOf } from './trace.ts';
@@ -39,19 +40,27 @@ export interface RejectedView {
 const BOUND_REJECTIONS = new Set(['BELOW_MIN_PRICE', 'BELOW_MARGIN_FLOOR', 'ABOVE_MAX_PRICE']);
 const LIMITERS = new Set(['STEP_LIMIT', 'CHANGE_RATE_LIMIT']);
 
-export function rejectedView(world: StandWorld, m: Messages): RejectedView {
+/** Окно отчёта: неделя. Раньше отчёт шёл по всему буферу решений (30 дней) — и по всем «без изменения» ради их отсева */
+export const REJECTED_WINDOW_DAYS = 7;
+
+/**
+ * Р-154: отчёт строится по СРЕЗУ ВМЕШАТЕЛЬСТВ окна (`interventions`): решения не «без изменения», намерения с целью на
+ * границе, записи, остановленные перепроверкой, отклонённые снимки. Девять из десяти решений сюда не попадают ещё в базе.
+ */
+export function rejectedView(world: StandWorld, slice: InterventionSlice, m: Messages): RejectedView {
   const { state } = world;
   const r = m.ui.rejected;
   const rows: Array<RejectedItem & { sortAt: string }> = [];
 
-  for (const d of state.decisions) {
+  const hotIntents = new Map(slice.intents.map((i) => [i.intentId, i]));
+  for (const d of slice.decisions) {
     const scope = scopeById(world, d.writeScopeId);
     const unit = scope ? unitOf(world, scope, m) : null;
     const money = (v: number | null | undefined) => m.money(v ?? null, d.currency);
     const e = explanationOf(world, d)?.value ?? null;
     // Цель стратегии поставлена на границу — скорректировано границей [Р-73]. Цель выводит цену конкурента и в слепке не хранится
     // [Р-85]: берётся из горячего intent (3 дня, данные канала); intent уже удалён — цели нет, экран это показывает
-    const hot = state.intents.find((i) => i.intentId === d.intentId) ?? null;
+    const hot = hotIntents.get(d.intentId) ?? null;
     for (const step of e?.strategy.steps ?? []) {
       if (step.code !== 'CAPPED_AT_MIN_PRICE' && step.code !== 'CAPPED_AT_MAX_PRICE') continue;
       const hotTarget = hot?.explanation.find((x) => x.code === step.code)?.params.targetMinor;
@@ -85,18 +94,17 @@ export function rejectedView(world: StandWorld, m: Messages): RejectedView {
     });
   }
 
-  for (const w of state.writes) {
-    if (w.endReason !== 'WRITE_BLOCKED_BY_BOUND_RECHECK' && w.endReason !== 'PRICING_STOPPED') continue;
+  for (const w of slice.endedWrites) {
     const scope = scopeById(world, w.writeScopeId);
     rows.push({
       kind: w.endReason === 'PRICING_STOPPED' ? 'STOP' : 'WRITE_RECHECK', tone: 'stop', at: m.when(w.createdAt), sortAt: w.createdAt,
       unit: scope ? unitOf(world, scope, m) : null, productRef: null, proposed: m.money(w.amountMinor, w.currency),
       current: scope ? m.money(scope.currentPriceMinor, scope.currency) : null, change: scope ? m.change(scope.currentPriceMinor, w.amountMinor) : null,
-      limit: null, deviation: null, intervention: null, reason: describe({ code: w.endReason, params: w.endParams }, m), decisionId: w.decisionId,
+      limit: null, deviation: null, intervention: null, reason: describe({ code: w.endReason!, params: w.endParams }, m), decisionId: w.decisionId,
     });
   }
 
-  for (const s of state.rejectedSnapshots) {
+  for (const s of slice.rejectedSnapshots) {
     const scope = state.scopes.find((x) => x.marketplace === s.key.marketplace && x.channelProductRef === s.key.channelProductRef && x.condition === s.key.condition);
     rows.push({
       kind: s.verdict === 'HALT_CHANNEL' ? 'HALT' : 'INPUT', tone: 'stop', at: m.when(s.receivedAt), sortAt: s.receivedAt,

@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { before, test } from 'node:test';
 import {
-  boundsDiffView, dangerousReport, expandBoundsEdit, LOCALES, messagesFor, parseStrategyDraft, priceFeed, strategiesView, strategyPreviewView, type Viewer,
+  boundsDiffView, expandBoundsEdit, LOCALES, messagesFor, parseStrategyDraft, strategiesView, strategyPreviewView, type Viewer,
 } from '@repracer/console-model';
+import { dangerousOf, decisionsTotal, feedOf, feedTotal } from './console/streams.ts';
 import { standUserOf } from '@repracer/pricing-pipeline';
 import { buildStandWorlds, STAND_USERS, type LiveWorld } from './console/stand.ts';
 
@@ -23,7 +24,7 @@ test('step 21: strategies, price feed and the dangerous-changes report render in
     const world = await w.view(user('OWNER'));
     for (const locale of LOCALES) {
       const m = messagesFor(locale);
-      const json = JSON.stringify({ s: strategiesView(world, m, true), f: priceFeed(world, m), d: [1, 7, 30].map((days) => dangerousReport(world, days, m)) });
+      const json = JSON.stringify({ s: strategiesView(world, m, true), f: await feedOf(w.store, world, m), d: await Promise.all([1, 7, 30].map((days) => dangerousOf(w.store, world, days, m))) });
       for (const bad of ['undefined', 'NaN', '[object Object]', 'Infinity']) assert.ok(!json.includes(bad), `${w.id} ${locale}: "${bad}"`);
     }
   }
@@ -32,6 +33,8 @@ test('step 21: strategies, price feed and the dangerous-changes report render in
 test('step 21: a strategy draft is previewed on a real offer through the engine and the Gate without committing anything', async () => {
   const w = live('kaufland/pipeline/happy-path');
   const before = await w.view(user('PRICING_MANAGER'));
+  // Числа берутся ДО предпросмотра: сравнение двух чтений одного хранилища после него было бы тавтологией
+  const [decisionsBefore, writesBefore] = [await decisionsTotal(w.store, before), await feedTotal(w.store, before)];
   const parsed = parseStrategyDraft({ name: 'Undercut ten', params: { type: 'MATCH_BUYBOX', undercutMinor: 10, holdWhenWinning: false, atBound: 'CAP' }, deadbandMinor: 0 });
   assert.ok(parsed.ok);
   const preview = await w.pipeline.previewStrategy(w.callContext(before.accounts[0]!.channelAccountId), 'ws-price-de-4101', { strategyId: 'draft', version: 1, ...parsed.draft });
@@ -54,8 +57,8 @@ test('step 21: a strategy draft is previewed on a real offer through the engine 
   const otherDraft = { ...parsed.draft, params: { ...parsed.draft.params, priceMinor: 1999 } } as typeof parsed.draft;
   assert.notEqual(strategyPreviewView(before, otherDraft, [preview], en).previewToken, view.previewToken, 'another draft — another token');
   const after = await w.view(user('PRICING_MANAGER'));
-  assert.equal(after.state.decisions.length, before.state.decisions.length, 'the preview commits no decision');
-  assert.equal(after.state.writes.length, before.state.writes.length, 'the preview sends nothing');
+  assert.equal(await decisionsTotal(w.store, after), decisionsBefore, 'the preview commits no decision');
+  assert.equal(await feedTotal(w.store, after), writesBefore, 'the preview sends nothing');
 
   const bad = parseStrategyDraft({ name: '', params: { type: 'POSITION' }, deadbandMinor: 1.5 });
   assert.deepEqual(bad.ok ? [] : bad.problems.map((p) => `${p.field}:${p.code}`).sort(), ['deadbandMinor:NOT_A_WHOLE_AMOUNT', 'name:REQUIRED', 'type:UNKNOWN_TYPE']);
@@ -90,19 +93,21 @@ test('step 21: a bounds edit shows the differences first; applying needs the rig
 });
 
 test('step 21: the price feed shows the write with the price it started from and its source; the report counts dangerous changes by period (Р-73)', async () => {
-  const happy = await live('kaufland/pipeline/happy-path').view(user('VIEWER'));
-  const feed = priceFeed(happy, en);
+  const happyWorld = live('kaufland/pipeline/happy-path');
+  const happy = await happyWorld.view(user('VIEWER'));
+  const feed = await feedOf(happyWorld.store, happy, en);
   assert.deepEqual(feed.items.map((i) => [i.from, i.to, i.change, i.status, i.source]), [['€18.50', '€17.75', '−4.1%', 'Applied', 'Buy Box']]);
   assert.deepEqual(feed.counts, { applied: 1, inFlight: 0, notSent: 0, superseded: 0 });
 
-  const above = await live('kaufland/pipeline/above-max-price').view(user('VIEWER'));
-  const report = dangerousReport(above, 30, en);
+  const aboveWorld = live('kaufland/pipeline/above-max-price');
+  const above = await aboveWorld.view(user('VIEWER'));
+  const report = await dangerousOf(aboveWorld.store, above, 30, en);
   // Р-117 (шаг 22): главное число — удержания полом; отклонения Gate — второй раздел
   assert.equal(report.headline, 'The floor did not have to hold a price in the last 30 days');
   assert.equal(report.gateHeadline, 'Your bounds stopped 1 dangerous change in the last 30 days');
   assert.deepEqual(report.prevented, [{ currency: 'EUR', minor: 1330, amount: '€13.30' }]);
   assert.equal(report.worst?.deviation, '53.2%');
   assert.equal(report.truncated, false);
-  assert.equal(dangerousReport(above, 90, en).truncated, true);
-  assert.equal(dangerousReport(above, 30, messagesFor('de')).gateHeadline, 'Ihre Grenzen haben in den letzten 30 Tagen 1 gefährliche Änderung gestoppt');
+  assert.equal((await dangerousOf(aboveWorld.store, above, 90, en)).truncated, true);
+  assert.equal((await dangerousOf(aboveWorld.store, above, 30, messagesFor('de'))).gateHeadline, 'Ihre Grenzen haben in den letzten 30 Tagen 1 gefährliche Änderung gestoppt');
 });

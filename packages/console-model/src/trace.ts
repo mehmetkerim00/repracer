@@ -1,8 +1,9 @@
+import type { DecisionDetail, DecisionPage } from '@repracer/pricing-pipeline';
 import type { ExpandedExplanation, ExpandedReason, ExplanationGap, Reason, StrategyDefinition, StrategyParams } from '@repracer/pricing-model';
 import { classifyBoundIntervention, expandExplanation, explanationRowOf } from '@repracer/pricing-model';
 import { describe, type HumanReason } from './explain.ts';
 import type { Messages } from './i18n/index.ts';
-import { pageOf, type ListQuery, type PageInfo } from './page.ts';
+import { pageInfo, type ListQuery, type PageInfo } from './page.ts';
 import { strategyLabel } from './products.ts';
 import { gap, scopeById, unitOf, uniqueGaps, type ConsoleDecision, type ConsoleWrite, type Gap, type StandWorld, type Tone, type UnitRef } from './world.ts';
 
@@ -98,9 +99,9 @@ export function isDangerous(d: ConsoleDecision): boolean {
   return d.rejectionReason !== null && BOUND_STOPS.has(d.rejectionReason) && d.boundDeviationBp !== null && classifyBoundIntervention(d.boundDeviationBp) === 'DANGEROUS';
 }
 
-export function decisionTrace(world: StandWorld, decisionId: string, m: Messages): DecisionTrace | null {
-  const d = world.state.decisions.find((x) => x.decisionId === decisionId);
-  if (!d) return null;
+/** Р-154: решение приходит одним запросом по идентификатору — с горячим намерением и записями по нему, а не поиском по всем */
+export function decisionTrace(world: StandWorld, detail: DecisionDetail, m: Messages): DecisionTrace {
+  const d = detail.decision;
   const t = m.ui.trace;
   const scope = scopeById(world, d.writeScopeId);
   const currency = d.currency;
@@ -224,7 +225,7 @@ export function decisionTrace(world: StandWorld, decisionId: string, m: Messages
   }
 
   // 6–7. Запись и подтверждение канала
-  const writes = world.state.writes.filter((w) => w.decisionId === d.decisionId).sort((a, b) => a.version - b.version);
+  const writes = [...detail.writes].sort((a, b) => a.version - b.version);
   steps.push(writeStep(d, writes, m));
   steps.push(channelStep(world, d, writes, m));
 
@@ -287,17 +288,12 @@ export interface DecisionListView {
  * 150 включённых предложений дают 13 500 решений за три часа — 5,8 МБ одним ответом, а за сутки вышло бы за предел экрана
  * (8 МБ) в разы. Строки страницы собираются только для показанного: объяснение и текст причины — самое дорогое здесь.
  */
-export function decisionListView(world: StandWorld, query: ListQuery, m: Messages): DecisionListView {
-  const sorted = [...world.state.decisions].sort((a, b) => Date.parse(b.decidedAt) - Date.parse(a.decidedAt) || b.decisionId.localeCompare(a.decisionId));
-  const { items, page } = pageOf(sorted, query, m);
-  return { items: decisionItems(world, items, m), page };
+export function decisionListView(world: StandWorld, page: DecisionPage, query: ListQuery, m: Messages): DecisionListView {
+  // Р-154: страницу и итог отдаёт база; здесь — только строки показанного
+  return { items: decisionItems(world, page.items, m), page: pageInfo(query, page.total, m) };
 }
 
-export function decisionList(world: StandWorld, m: Messages): DecisionListItem[] {
-  return decisionItems(world, [...world.state.decisions].sort((a, b) => Date.parse(b.decidedAt) - Date.parse(a.decidedAt) || b.decisionId.localeCompare(a.decisionId)), m);
-}
-
-function decisionItems(world: StandWorld, decisions: readonly ConsoleDecision[], m: Messages): DecisionListItem[] {
+export function decisionItems(world: StandWorld, decisions: readonly ConsoleDecision[], m: Messages): DecisionListItem[] {
   return decisions.map((d) => {
     const scope = scopeById(world, d.writeScopeId);
     const e = explanationOf(world, d)?.value ?? null;

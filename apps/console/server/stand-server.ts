@@ -4,6 +4,7 @@ import {
   boundsDiffView, boundsView, bulkJobsView, bulkJobView, can, canCancelBulkJob, channelNotes, onboardingView, complianceView, fingerprint, costImportView, currentStrategies, listQuery, MAX_SCOPES, OFFER_CHOICES, pageOf, parseListQuery, type ListQuery, discountCheckView, dangerousReport, decisionListView, decisionTrace, describe, expandBoundsEdit, importTargets, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, scopeById, unitOf,
   parseStrategyDraft, planStop, priceFeed, productList, rejectedView, REPORT_PERIODS_DAYS, stopView, strategiesView,
   type Locale, type Messages, type StandWorld, type StopTarget, type Viewer,
+  productPage, clampOffset, feedPageQuery, REJECTED_WINDOW_DAYS,
 } from '@repracer/console-model';
 import { buildPreview, readTable, suggestMapping, TABLE_ENCODINGS } from '@repracer/cost-import';
 import type { BulkJobInput, DiscountAnnouncementInput } from '@repracer/pricing-pipeline';
@@ -100,6 +101,8 @@ function draftProblemsText(problems: ReadonlyArray<{ field: string; code: string
 const isDay = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`)) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
 /** Р-123: выгрузка доказательной истории — не больше 18 месяцев за запрос */
 export const EVIDENCE_MAX_DAYS = 550;
+/** Р-154: экран остановок показывает последние события аудита, а не весь журнал тенанта */
+const AUDIT_RECENT = 200;
 /**
  * Шаг 30 [OQ-202]: предела строк у выгрузки больше НЕТ. Шаг 29 ввёл его (100 000), потому что 300 000 строк — это 28 МБ в одном
  * ответе экрана и десять секунд ожидания. Задание готовит файл в базе, и предел исчез вместе со своей причиной: ждать нечего,
@@ -202,15 +205,15 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         const viewer = viewerIn(live);
         return viewer ? [{ live, viewer }] : [];
       });
+      // Р-154: список миров — счётчики агрегатом, без чтения состояния ни одного мира
       return ok(await Promise.all(visible.map(async ({ live, viewer }): Promise<WorldSummary> => {
-        const w = await live.view(viewer);
+        const [c, accounts] = await Promise.all([live.store.worldCounters(live.tenantId, live.clock.iso() as never), live.store.channelAccounts(live.tenantId)]);
         return {
-          id: w.id, title: w.title, description: w.description, failures: live.failures, scopes: w.state.scopes.length, decisions: w.state.decisions.length,
-          rejected: rejectedView(w, m).items.length, activeStops: w.state.stops.filter((x) => x.releasedAt === null).length,
-          activeHalts: w.state.halts.filter((h) => h.releasedAt === null).length, role: m.values[viewer.role],
+          id: live.id, title: live.title, description: live.description, failures: live.failures, scopes: c.scopes, decisions: c.decisionsLastDay,
+          rejected: c.interventionsLastWeek, activeStops: c.activeStops, activeHalts: c.activeHalts, role: m.values[viewer.role],
           // Р-151: демо помечается уже в списке миров; Р-150: сколько каналов ждёт доступа — видно до входа в мир
-          demo: w.state.demo,
-          awaitingAccess: (await live.store.channelAccounts(live.tenantId)).filter((a) => a.authStatus === 'AWAITING_ACCESS').length,
+          demo: c.demo,
+          awaitingAccess: accounts.filter((a) => a.authStatus === 'AWAITING_ACCESS').length,
         };
       })));
     }
@@ -277,18 +280,32 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       switch (screen) {
         case 'products': {
           const query = parseListQuery(url.searchParams);
-          return query ? ok(productList(world, m, query)) : fail(400, 'BAD_PAGE', s.badRequest);
+          if (!query) return fail(400, 'BAD_PAGE', s.badRequest);
+          // Р-154: статистика решений — только для показанных строк, по индексу единицы
+          const { shown } = productPage(world, m, query);
+          return ok(productList(world, m, query, await live.store.scopeDecisionStats(world.tenantId, shown.map((x) => x.writeScopeId))));
         }
         case 'decisions': {
           if (param === null) {
-            // Шаг 34: список решений — страницей, как остальные списки [Р-136]: на демо это 13 500 строк за три часа
+            // Р-154: страницу и итог отдаёт база; смещение за концом подтягивается к последней странице теми же правилами
             const query = parseListQuery(url.searchParams);
-            return query ? ok(decisionListView(world, query, m)) : fail(400, 'BAD_PAGE', s.badRequest);
+            if (!query) return fail(400, 'BAD_PAGE', s.badRequest);
+            const scopeFilter = url.searchParams.get('writeScopeId');
+            if (scopeFilter && !scopeById(world, scopeFilter)) return fail(400, 'BAD_PAGE', s.badRequest);
+            const probe = await live.store.decisionPage(world.tenantId, { offset: 0, limit: 1, ...(scopeFilter ? { writeScopeId: scopeFilter } : {}) });
+            const clamped = { ...query, offset: clampOffset(query, probe.total) };
+            const page = await live.store.decisionPage(world.tenantId, { ...clamped, ...(scopeFilter ? { writeScopeId: scopeFilter } : {}) });
+            return ok(decisionListView(world, page, clamped, m));
           }
-          const trace = decisionTrace(world, param, m);
-          return trace ? ok(trace) : fail(404, 'DECISION_NOT_FOUND', s.notFound);
+          const detail = await live.store.decisionDetail(world.tenantId, param);
+          return detail ? ok(decisionTrace(world, detail, m)) : fail(404, 'DECISION_NOT_FOUND', s.notFound);
         }
-        case 'rejected': return ok(rejectedView(world, m));
+        case 'rejected': {
+          // Р-154: отчёт — по вмешательствам окна (неделя), «без изменения» до экрана не доходят
+          const to = world.now;
+          const from = new Date(Date.parse(to) - REJECTED_WINDOW_DAYS * 86_400_000).toISOString();
+          return ok(rejectedView(world, await live.store.interventions(world.tenantId, from as never, to as never), m));
+        }
         case 'bounds': {
           if (param === null) {
             // Р-136: страница, а не весь каталог; список границ — тот же порядок, что у списка товаров
@@ -304,7 +321,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           const b = boundsView(world, param, m);
           return b ? ok(b) : fail(404, 'SCOPE_NOT_FOUND', s.notFound);
         }
-        case 'stop': return ok(stopView(world, m));
+        case 'stop': return ok(stopView(world, await live.store.auditRecent(world.tenantId, AUDIT_RECENT), m));
         /**
          * Р-136 (ревью шага 29, находка 4): поиск предложения. Выпадающий список показывает первые OFFER_CHOICES, и без поиска
          * предложения 201…10 000 были недостижимы: по ним нельзя было ни объявить скидку, ни выгрузить доказательство [Р-123].
@@ -328,7 +345,10 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           // Шаг 23: фильтры и страница — на сервере по всему окну ленты; неверный параметр — 400, а не молчаливое «все»
           const query = parseFeedQuery(url.searchParams);
           if (!query || (query.writeScopeId && !scopeById(world, query.writeScopeId))) return fail(400, 'BAD_FEED_QUERY', s.badRequest);
-          return ok(priceFeed(world, m, query));
+          // Р-154: страницу, итог и счётчики групп отдаёт база; смещение за концом — к последней строке, как раньше
+          const probe = await live.store.feedPage(world.tenantId, world.now as never, feedPageQuery({ ...query, offset: 0, limit: 1 }));
+          const pageQuery = feedPageQuery(query, probe.total);
+          return ok(priceFeed(world, m, query, await live.store.feedPage(world.tenantId, world.now as never, pageQuery), pageQuery));
         }
         case 'dangerous': {
           /**
@@ -338,7 +358,8 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           const raw = url.searchParams.get('days') ?? String(REPORT_PERIODS_DAYS[1]);
           const days = REPORT_PERIODS_DAYS.find((d) => String(d) === raw);
           if (days === undefined) return fail(400, 'BAD_PERIOD', s.badRequest);
-          return ok(dangerousReport(world, days, m));
+          const from = new Date(Date.parse(world.now) - days * 86_400_000).toISOString();
+          return ok(dangerousReport(world, await live.store.interventions(world.tenantId, from as never, world.now as never), days, m));
         }
         // Р-123: отчёт по объявленным скидкам — каждая проверяется заново по текущей истории цен (исправления свёртки, поздние цены)
         case 'compliance': {
@@ -401,8 +422,8 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       const asStrings = Object.fromEntries(Object.entries(raw).filter(([, v]) => typeof v === 'string' || typeof v === 'number').map(([k, v]) => [k, String(v)]));
       const query = parseFeedQuery(new URLSearchParams(asStrings));
       if (!query || (query.writeScopeId && !scopeById(world, query.writeScopeId))) return fail(400, 'BAD_FEED_QUERY', s.badRequest);
-      return createJob('PRICE_FEED_EXPORT', { query: asStrings }, priceFeed(world, m, { ...query, offset: 0, limit: 1 }).page.total,
-        m.ui.jobs.createdFeedExport);
+      const total = (await live.store.feedPage(world.tenantId, world.now as never, feedPageQuery({ ...query, offset: 0, limit: 1 }))).total;
+      return createJob('PRICE_FEED_EXPORT', { query: asStrings }, total, m.ui.jobs.createdFeedExport);
     }
 
     /**
@@ -499,7 +520,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       });
       if (result.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
       if (result.status === 'ALREADY_ACTIVE') return fail(409, 'ALREADY_STOPPED', s.alreadyStopped);
-      return ok({ message: s.stopped(plan.impact.text), stop: stopView(await live.view(viewer), m) });
+      return ok({ message: s.stopped(plan.impact.text), stop: stopView(await live.view(viewer), await live.store.auditRecent(world.tenantId, AUDIT_RECENT), m) });
     }
 
     if (screen === 'stops' && param !== null && parts[5] === 'resume') {
@@ -517,7 +538,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       if (result.status === 'MFA_REQUIRED') return fail(403, 'MFA_REQUIRED', s.mfaRequired);
       if (result.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
       if (result.status !== 'RELEASED') return fail(404, 'NOT_ACTIVE', s.notActive);
-      return ok({ message: s.resumed, stop: stopView(await live.view(viewer), m) });
+      return ok({ message: s.resumed, stop: stopView(await live.view(viewer), await live.store.auditRecent(world.tenantId, AUDIT_RECENT), m) });
     }
 
     // Системная остановка витрины [Р-51, Р-52]: ручное снятие — с заметкой
@@ -533,7 +554,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       const mfa = hasSecondFactor(principal.amr);
       if (!mfa) return fail(403, 'MFA_REQUIRED', s.mfaRequired);
       const result = await live.pipeline.releaseHaltManually(ctx(halt.channelAccountId), halt.haltId, { membershipId: viewer.membershipId, userId: principal.userId, mfa }, text);
-      return result.released ? ok({ message: s.released, stop: stopView(await live.view(viewer), m) }) : fail(404, 'NOT_ACTIVE', s.notActive);
+      return result.released ? ok({ message: s.released, stop: stopView(await live.view(viewer), await live.store.auditRecent(world.tenantId, AUDIT_RECENT), m) }) : fail(404, 'NOT_ACTIVE', s.notActive);
     }
 
     // Р-118: снятие недоверия каналу — только человек с правом, от своего имени, со вторым фактором и заметкой; хранилище и БД проверяют то же
@@ -549,7 +570,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       if (!mfa) return fail(403, 'MFA_REQUIRED', s.mfaRequiredDistrust);
       try {
         const result = await live.pipeline.releaseDistrust(ctx(distrust.channelAccountId), distrust.distrustId, { membershipId: viewer.membershipId, userId: principal.userId, mfa }, text);
-        return result.released ? ok({ message: s.distrustReleased, stop: stopView(await live.view(viewer), m) }) : fail(404, 'NOT_ACTIVE', s.notActive);
+        return result.released ? ok({ message: s.distrustReleased, stop: stopView(await live.view(viewer), await live.store.auditRecent(world.tenantId, AUDIT_RECENT), m) }) : fail(404, 'NOT_ACTIVE', s.notActive);
       } catch (error) {
         // Отказ хранилища или БД (роль, пользователь сессии, второй фактор): текст отказа наружу не отдаётся
         const code = (error as { code?: string }).code;

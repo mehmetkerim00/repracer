@@ -3,6 +3,7 @@ import { effectiveFloor } from './bounds.ts';
 import type { Messages } from './i18n/index.ts';
 import { listQuery, pageOf, type ListQuery, type PageInfo } from './page.ts';
 import { gap, unitOf, type ConsoleScope, type ConsoleWrite, type Gap, type StandWorld, type StatusCell, type UnitRef } from './world.ts';
+import type { ScopeDecisionStats } from '@repracer/pricing-pipeline';
 
 /** Экран A: товары с явными статусами; действующий пол — главный, min_price — его составляющая (шаг 12, F) */
 
@@ -32,7 +33,8 @@ export interface ProductRow {
   lastChange: StatusCell;
   nextCheck: StatusCell;
   latestDecisionId: string | null;
-  decisions: number;
+  /** Решений в горячем буфере; null — статистика не запрашивалась (экран, которому она не нужна) */
+  decisions: number | null;
   /** Можно ли включить репрайсинг (режим OFF и роль с правом включения) */
   canEnable: boolean;
   /** Шаг 23: что канал делает с оффером сам — правило автоматического ценообразования [Р-120], выбытие из Featured Offer (PRICING_HEALTH) */
@@ -153,19 +155,28 @@ export function channelNotes(world: StandWorld, scope: ConsoleScope, m: Messages
   return notes;
 }
 
-export function productList(world: StandWorld, m: Messages, query?: ListQuery): ProductListView {
+/** Показанная страница каталога — те же правила, что у списка: по ней запрашивается статистика решений [Р-154] */
+export function productPage(world: StandWorld, m: Messages, query?: ListQuery): { shown: ConsoleScope[]; page: PageInfo } {
+  const { items: shown, page } = pageOf(world.state.scopes, listQuery(query), m);
+  return { shown, page };
+}
+
+/**
+ * Р-154: статистика решений — только для ПОКАЗАННЫХ строк, запросом по индексу единицы; каталог целиком её не несёт.
+ * Экрану без неё (границы) передавать нечего — тогда столбец решений честно пуст, а не «0».
+ */
+export function productList(world: StandWorld, m: Messages, query?: ListQuery, stats?: readonly ScopeDecisionStats[]): ProductListView {
   const { state } = world;
   const p = m.ui.products;
-  // Р-136: строится только показанная страница; решения группируются один раз — перебор всех решений на каждый оффер был квадратичным
-  const { items: shown, page } = pageOf(state.scopes, listQuery(query), m);
-  const byScope = new Map<string, typeof state.decisions[number][]>();
-  for (const d of state.decisions) byScope.set(d.writeScopeId, [...(byScope.get(d.writeScopeId) ?? []), d]);
+  // Р-136: строится только показанная страница
+  const { shown, page } = productPage(world, m, query);
+  const statsById = new Map((stats ?? []).map((s) => [s.writeScopeId, s]));
   // «Применяется сейчас» считается по записям в полёте: они есть у немногих офферов, и это дешевле перебора каталога
   const scopesWithWrites = new Set(state.writes.map((w) => w.writeScopeId));
   const shownApplying = state.scopes.filter((sc) => scopesWithWrites.has(sc.writeScopeId))
     .filter((sc) => ['progress', 'warn'].includes(applyingCell(sc, state.writes, m).tone)).length;
   const rows = shown.map((scope): ProductRow => {
-    const decisions = (byScope.get(scope.writeScopeId) ?? []).sort((a, b) => Date.parse(b.decidedAt) - Date.parse(a.decidedAt));
+    const stat = statsById.get(scope.writeScopeId) ?? null;
     const floor = effectiveFloor(scope, world);
     const money = (v: number | null) => m.money(v, scope.currency);
     const parts = floor.minMinor === null ? p.floorNoMin
@@ -183,8 +194,8 @@ export function productList(world: StandWorld, m: Messages, query?: ListQuery): 
       applying: applyingCell(scope, state.writes, m),
       lastChange: lastChangeCell(scope, state.writes, m),
       nextCheck: { tone: 'unknown', label: m.ui.nextCheck.label, detail: m.ui.nextCheck.detail },
-      latestDecisionId: decisions[0]?.decisionId ?? null,
-      decisions: decisions.length,
+      latestDecisionId: stat?.latestDecisionId ?? null,
+      decisions: stat ? stat.decisions : null,
       // Р-120 (ревью шага 23, находка 1): у предложения ценообразование канала — включение отклонит база, кнопки нет
       canEnable: scope.pricingMode === 'OFF' && can(world.viewer.role, 'ENABLE_REPRICING') && !channelNotes(world, scope, m).some((n) => n.code !== 'PRICING_HEALTH'),
       channelNotes: channelNotes(world, scope, m),

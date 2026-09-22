@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { before, test } from 'node:test';
 import {
-  boundsView, decisionList, decisionTrace, LOCALES, messagesFor, planStop, productList, rejectedView, stopView,
+  boundsView, LOCALES, messagesFor, planStop, productList,
   type HumanReason, type Messages, type StandWorld, type Viewer,
 } from '@repracer/console-model';
+import { decisionsOf, rejectedOf, stopOf, traceOf } from './console/streams.ts';
 import { buildStandWorlds, STAND_USERS, type LiveWorld } from './console/stand.ts';
 import { standUserOf } from '@repracer/pricing-pipeline';
 
@@ -27,14 +28,16 @@ const live = (id: string): LiveWorld => {
   return w;
 };
 
-function allViews(world: StandWorld, m: Messages) {
+// Р-154: потоки экранов — от хранилища (страницей, окном, агрегатом), как у сервера стенда
+async function allViews(w: LiveWorld, world: StandWorld, m: Messages) {
+  const decisions = await decisionsOf(w.store, world, m);
   return {
     products: productList(world, m),
-    decisions: decisionList(world, m),
-    traces: world.state.decisions.map((d) => decisionTrace(world, d.decisionId, m)),
-    rejected: rejectedView(world, m),
+    decisions,
+    traces: await Promise.all(decisions.map((d) => traceOf(w.store, world, d.decisionId, m))),
+    rejected: await rejectedOf(w.store, world, m),
     bounds: world.state.scopes.map((s) => boundsView(world, s.writeScopeId, m)),
-    stop: stopView(world, m),
+    stop: await stopOf(w.store, world, m),
   };
 }
 
@@ -55,7 +58,7 @@ test('Р-67, Р-72: every pricing world renders all screens in German and Englis
     const world = await w.view(user('OWNER'));
     for (const locale of LOCALES) {
       const m = messagesFor(locale);
-      const views = allViews(world, m);
+      const views = await allViews(w, world, m);
       assert.equal(views.products.rows.length, world.state.scopes.length);
       assert.ok(views.traces.every((t) => t !== null), `${w.id}: every decision has a trace`);
       assert.ok(views.bounds.every((b) => b !== null));
@@ -71,8 +74,8 @@ test('Р-68, Р-74: decisions that change or reject a price carry an explanation
   let explained = 0;
   for (const w of worlds) {
     const world = await w.view(user('OWNER'));
-    for (const d of world.state.decisions) {
-      const trace = decisionTrace(world, d.decisionId, en)!;
+    for (const d of (await w.store.decisionPage(world.tenantId, { offset: 0, limit: 200 })).items) {
+      const trace = (await traceOf(w.store, world, d.decisionId, en))!;
       if (d.decisionClass === 'NO_OP') {
         noOps += 1;
         assert.equal(d.explanation ?? null, null, `${w.id}: a NO_OP decision keeps no explanation (Р-74)`);
@@ -96,7 +99,7 @@ test('Р-71, Р-72: every reason the stand shows is fully explained in both lang
   for (const w of worlds) {
     const world = await w.view(user('OWNER'));
     for (const locale of LOCALES) {
-      for (const r of reasonsIn(allViews(world, messagesFor(locale)))) {
+      for (const r of reasonsIn(await allViews(w, world, messagesFor(locale)))) {
         codes.add(r.code);
         if (r.problems.length > 0) problems.push(`${w.id} ${locale} ${r.code}: ${r.problems.join('; ')} :: ${r.text}`);
       }
@@ -108,13 +111,15 @@ test('Р-71, Р-72: every reason the stand shows is fully explained in both lang
 });
 
 test('B: the happy path decision shows the whole way from snapshot to channel confirmation, in both languages', async () => {
-  const world = await live('kaufland/pipeline/happy-path').view(user('OWNER'));
-  const approved = world.state.decisions.find((d) => d.outcome === 'APPROVED')!;
-  const trace = decisionTrace(world, approved.decisionId, en)!;
+  const w = live('kaufland/pipeline/happy-path');
+  const world = await w.view(user('OWNER'));
+  const decisions = (await w.store.decisionPage(world.tenantId, { offset: 0, limit: 200 })).items;
+  const approved = decisions.find((d) => d.outcome === 'APPROVED')!;
+  const trace = (await traceOf(w.store, world, approved.decisionId, en))!;
   assert.deepEqual(trace.steps.map((s) => s.key), ['SNAPSHOT', 'SANITY', 'ANCHORS', 'STRATEGY', 'GATE', 'WRITE', 'CHANNEL']);
   assert.deepEqual(trace.steps.map((s) => s.status), ['OK', 'OK', 'OK', 'OK', 'OK', 'OK', 'OK']);
   assert.equal(trace.headline, 'The price €17.75 was set and applied by the channel');
-  assert.equal(decisionTrace(world, approved.decisionId, de)!.headline, 'Der Preis 17,75 € wurde gesetzt und vom Kanal übernommen');
+  assert.equal((await traceOf(w.store, world, approved.decisionId, de))!.headline, 'Der Preis 17,75 € wurde gesetzt und vom Kanal übernommen');
   const gate = trace.steps.find((s) => s.key === 'GATE')!;
   assert.equal(gate.summary, 'Price €17.75 approved within €15.00–€25.00.');
   assert.ok(['LOWER_BOUND', 'UPPER_BOUND'].every((c) => gate.items.some((i) => i.outcome === 'PASS' && i.label === en.ui.gateChecks[c as 'LOWER_BOUND'])));
@@ -126,33 +131,37 @@ test('B: the happy path decision shows the whole way from snapshot to channel co
   assert.ok(trace.gaps.some((g) => g.code === 'CONFIRMATION_SOURCE'));
   const anchors = trace.steps.find((s) => s.key === 'ANCHORS')!;
   assert.ok(anchors.items.some((i) => i.outcome === 'PASS'), 'at least one anchor was used');
-  const noChange = world.state.decisions.find((d) => d.outcome === 'NO_CHANGE')!;
-  assert.match(decisionTrace(world, noChange.decisionId, en)!.headline, /^The price stayed: /);
+  const noChange = decisions.find((d) => d.outcome === 'NO_CHANGE')!;
+  assert.match((await traceOf(w.store, world, noChange.decisionId, en))!.headline, /^The price stayed: /);
 });
 
 test('Р-73, C: a Gate rejection more than 10 % beyond the bound is dangerous; the screen counts it with the limit and the deviation', async () => {
-  const world = await live('kaufland/pipeline/above-max-price').view(user('OWNER'));
-  const view = rejectedView(world, en);
+  const w = live('kaufland/pipeline/above-max-price');
+  const world = await w.view(user('OWNER'));
+  const view = await rejectedOf(w.store, world, en);
   const item = view.items.find((i) => i.kind === 'GATE')!;
   assert.deepEqual([item.proposed, item.limit, item.intervention], ['€38.30', 'max_price €25.00', 'DANGEROUS']);
   assert.equal(view.summary.dangerous, 1);
   assert.match(view.headline, /^Your bounds stopped 1 dangerous change and corrected \d+$/);
   assert.equal(item.deviation, '53.2%');
-  assert.equal(rejectedView(world, de).items.find((i) => i.kind === 'GATE')!.deviation, '53,2 %');
-  const shift = rejectedView(await live('kaufland/pipeline/mass-shift-halt').view(user('OWNER')), en);
+  assert.equal((await rejectedOf(w.store, world, de)).items.find((i) => i.kind === 'GATE')!.deviation, '53,2 %');
+  const shiftWorld = live('kaufland/pipeline/mass-shift-halt');
+  const shift = await rejectedOf(shiftWorld.store, await shiftWorld.view(user('OWNER')), en);
   assert.ok(shift.items.some((i) => i.kind === 'HALT' && i.reason.code === 'CHANNEL_MASS_SHIFT'));
   assert.equal(shift.summary.dangerous, 0, 'a channel halt is not a bound intervention');
 });
 
 test('D, F: the product list shows the effective floor with min_price as its part; the floor is broken down to the cent and matches the Gate', async () => {
-  const world = await live('kaufland/pipeline/fx-usd-floor-eur-cost').view(user('OWNER'));
+  const w = live('kaufland/pipeline/fx-usd-floor-eur-cost');
+  const world = await w.view(user('OWNER'));
+  const decisions = (await w.store.decisionPage(world.tenantId, { offset: 0, limit: 200 })).items;
   const rows = productList(world, en).rows;
   const deRow = rows.find((r) => r.unit.writeScopeId === 'ws-price-de-4501')!;
   assert.deepEqual([deRow.floor.amount, deRow.floor.parts, deRow.minPrice], ['€19.15', '= minimum margin 20% → €19.15; min_price €10.00', '€10.00']);
   assert.equal(productList(world, de).rows.find((r) => r.unit.writeScopeId === 'ws-price-de-4501')!.floor.amount, '19,15 €');
   for (const scope of world.state.scopes) {
     const view = boundsView(world, scope.writeScopeId, en)!;
-    const rejected = world.state.decisions.find((d) => d.writeScopeId === scope.writeScopeId && d.rejectionReason === 'BELOW_MARGIN_FLOOR')!;
+    const rejected = decisions.find((d) => d.writeScopeId === scope.writeScopeId && d.rejectionReason === 'BELOW_MARGIN_FLOOR')!;
     assert.equal(view.effectiveFloor.minor, rejected.reason.params.floorMinor, 'the screen floor is the Gate floor');
     assert.equal(rows.find((r) => r.unit.writeScopeId === scope.writeScopeId)!.floor.minor, view.effectiveFloor.minor);
     const b = view.floorBreakdown!;
@@ -170,7 +179,7 @@ test('D, F: the product list shows the effective floor with min_price as its par
 test('Р-69, Р-70, OQ-125: the kill switch stops every price of the tenant; only the owner resumes a tenant stop', async () => {
   const w = live('kaufland/pipeline/happy-path');
   const viewer = await w.view(user('VIEWER'));
-  assert.deepEqual(stopView(viewer, en).permissions, { canStop: false, canResumeTenant: false, canResumeChannel: false, canReleaseHalt: false, canReleaseDistrust: false });
+  assert.deepEqual((await stopOf(w.store, viewer, en)).permissions, { canStop: false, canResumeTenant: false, canResumeChannel: false, canReleaseHalt: false, canReleaseDistrust: false });
   assert.equal(productList(viewer, en).rows.some((r) => r.canEnable), false);
 
   const operatorWorld = await w.view(user('OPERATOR'));
@@ -186,7 +195,7 @@ test('Р-69, Р-70, OQ-125: the kill switch stops every price of the tenant; onl
 
   const after = await w.view(user('OPERATOR'));
   assert.ok(productList(after, en).rows.every((r) => r.enabled.label === 'Stopped'), 'all prices, not only competitor-derived ones');
-  const view = stopView(after, en);
+  const view = await stopOf(w.store, after, en);
   assert.equal(view.tenant.coveredBy?.by, 'Operator (you)');
   assert.ok(view.storefronts.every((s) => s.coveredBy?.scope === 'TENANT' && !s.canStop), 'a tenant stop covers every storefront');
   assert.equal(view.stops.active[0]!.canResume, false, 'an operator may not resume a tenant stop');
@@ -195,26 +204,28 @@ test('Р-69, Р-70, OQ-125: the kill switch stops every price of the tenant; onl
   assert.equal((await w.pipeline.resumePricing(ctx, stopId, { membershipId: user('OPERATOR').membershipId, userId: standUserOf(user('OPERATOR').membershipId), mfa: true, note: 'Operator tries to resume', at: w.clock.iso() })).status, 'FORBIDDEN');
 
   const owner = await w.view(user('OWNER'));
-  assert.equal(stopView(owner, de).stops.active[0]!.canResume, true);
+  assert.equal((await stopOf(w.store, owner, de)).stops.active[0]!.canResume, true);
   assert.equal((await w.pipeline.resumePricing(ctx, stopId, { membershipId: user('OWNER').membershipId, userId: standUserOf(user('OWNER').membershipId), mfa: true, note: 'Kill switch checked, resuming', at: w.clock.iso() })).status, 'RELEASED');
-  const resumed = stopView(await w.view(user('OWNER')), en);
+  const resumed = await stopOf(w.store, await w.view(user('OWNER')), en);
   assert.equal(resumed.stops.active.length, 0);
   assert.match(resumed.stops.history[0]!.released!, /by Owner \(you\): “Kill switch checked, resuming”$/);
 });
 
 test('Р-69: the kill-switch world holds a fixed price with PRICING_STOPPED; a system halt is shown separately and never blocks fixed prices', async () => {
-  const world = await live('kaufland/pipeline/kill-switch-tenant-stop').view(user('OWNER'));
-  const held = world.state.decisions.find((d) => d.rejectionReason === 'PRICING_STOPPED')!;
-  const trace = decisionTrace(world, held.decisionId, en)!;
+  const w = live('kaufland/pipeline/kill-switch-tenant-stop');
+  const world = await w.view(user('OWNER'));
+  const held = (await w.store.decisionPage(world.tenantId, { offset: 0, limit: 200 })).items.find((d) => d.rejectionReason === 'PRICING_STOPPED')!;
+  const trace = (await traceOf(w.store, world, held.decisionId, en))!;
   const gate = trace.steps.find((s) => s.key === 'GATE')!;
   assert.equal(gate.status, 'WARN');
   assert.ok(gate.items.some((i) => i.label === en.ui.gateChecks.PRICE_STOP && i.outcome === 'FAIL'));
   assert.ok(gate.items.some((i) => i.label === en.ui.trace.priceStop && i.value?.startsWith('the whole account group since ')));
   assert.equal(trace.steps[0]!.status, 'SKIPPED', 'a fixed price uses no competitor snapshot');
-  assert.ok(rejectedView(world, en).items.some((i) => i.kind === 'STOP' && i.reason.code === 'PRICING_STOPPED'));
+  assert.ok((await rejectedOf(w.store, world, en)).items.some((i) => i.kind === 'STOP' && i.reason.code === 'PRICING_STOPPED'));
 
-  const halted = await live('kaufland/pipeline/mass-shift-halt').view(user('OPERATOR'));
-  const view = stopView(halted, en);
+  const haltedWorld = live('kaufland/pipeline/mass-shift-halt');
+  const halted = await haltedWorld.view(user('OPERATOR'));
+  const view = await stopOf(haltedWorld.store, halted, en);
   assert.ok(view.halts.active.length + view.halts.history.length > 0);
   assert.equal(view.stops.active.length, 0, 'a system halt is not a human stop');
 });

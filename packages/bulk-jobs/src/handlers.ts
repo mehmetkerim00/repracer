@@ -2,7 +2,7 @@ import { buildPreview, readTable, suggestMapping, type ColumnMapping, type Table
 import {
   boundsDiffView, costImportView, currentStrategies, expandBoundsEdit, importTargets, messagesFor, parseBoundsEditRequest,
   parseStrategyDraft, PRICE_EVIDENCE_HEADER, priceEvidenceRows, strategyPreviewView, STRATEGY_PREVIEW_ROWS_SHOWN, LOCALES,
-  COST_IMPORT_REPORT_HEADER, costImportReportRows, parseFeedQuery, PRICE_FEED_CSV_HEADER, priceFeedFileName, priceFeedRows, priceFeedRowsOf,
+  COST_IMPORT_REPORT_HEADER, costImportReportRows, parseFeedQuery, PRICE_FEED_CSV_HEADER, priceFeedFileName, priceFeedRowsOf, feedPageQuery, FEED_PAGE_MAX,
   describe, unitOf, type ConsoleScope, type EnableResultView, type Locale, type StandWorld,
 } from '@repracer/console-model';
 import type { StrategyDefinition } from '@repracer/pricing-model';
@@ -329,13 +329,23 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
       const query = parseFeedQuery(new URLSearchParams(raw));
       if (!query) throw Object.assign(new Error('bad query'), { cause: 'BAD_REQUEST' });
       const world = await options.world(ctx);
-      const total = priceFeedRows(world, m, query);
+      const now = world.now as never;
+      const total = (await ctx.store.feedPage(ctx.tenantId, now, feedPageQuery({ ...query, offset: 0, limit: 1 }))).total;
       return {
         total,
         async run(progress, produce) {
           await progress(0, 'PRODUCING');
-          // Строки собираются ОДНИМ проходом; файл из них делает исполнитель [Р-145]
-          const rows = priceFeedRowsOf(world, m, query);
+          /**
+           * Р-154: страницы ленты берутся у базы по очереди — ни одна из них не держит всю ленту в памяти; строки из страницы
+           * собирает модель экрана, файл из них делает исполнитель [Р-145]. Итог зафиксирован в момент старта: записи,
+           * пришедшие во время выгрузки, в файл не попадают, и число строк совпадает с объявленным.
+           */
+          const rows: string[][] = [];
+          for (let offset = 0; offset < total; offset += FEED_PAGE_MAX) {
+            const page = await ctx.store.feedPage(ctx.tenantId, now, feedPageQuery({ ...query, offset, limit: Math.min(FEED_PAGE_MAX, total - offset) }));
+            rows.push(...priceFeedRowsOf(world, m, page.items));
+            await progress(rows.length, 'PRODUCING');
+          }
           return { ...await produce({ fileName: priceFeedFileName(world, m, query), header: PRICE_FEED_CSV_HEADER, rows }) };
         },
       };

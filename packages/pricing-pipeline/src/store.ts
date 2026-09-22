@@ -644,6 +644,15 @@ export interface PricingStore {
   releaseStop(tenantId: string, stopId: string, release: StopRelease): Promise<StopResult>;
   /** Состояние для экранов консоли [Р-67, Р-68]: объяснения — из слепков решений, а не из отчётов прогона */
   readConsoleState(tenantId: string, now: Instant): Promise<ConsoleState>;
+  // --- Р-154 (шаг 35): потоки — страницами, окнами, агрегатами -----------------------------------------------------
+  decisionPage(tenantId: string, query: DecisionPageQuery): Promise<DecisionPage>;
+  decisionDetail(tenantId: string, decisionId: string): Promise<DecisionDetail | null>;
+  scopeDecisionStats(tenantId: string, writeScopeIds: readonly string[]): Promise<ScopeDecisionStats[]>;
+  interventions(tenantId: string, from: Instant, to: Instant): Promise<InterventionSlice>;
+  feedPage(tenantId: string, now: Instant, query: FeedPageQuery): Promise<FeedPage>;
+  /** Последние события аудита остановок [Р-76], свежие первыми */
+  auditRecent(tenantId: string, limit: number): Promise<ConsoleAuditRow[]>;
+  worldCounters(tenantId: string, now: Instant): Promise<WorldCounters>;
 }
 
 // ---------------------------------------------------------------------------
@@ -773,6 +782,11 @@ export interface ConsoleScopeRow {
   channelHalt: HaltRef | null;
   channelDistrust: DistrustRef | null;
   priceStop: StopRef | null;
+  /**
+   * Р-154 (шаг 35): последняя ПРИМЕНЁННАЯ цена единицы — из истории цен (индекс по единице и времени), а не из перебора
+   * всех записей тенанта. Принятая, но не применённая запись — в `writes` (в полёте).
+   */
+  lastApplied: { amountMinor: number; acceptedAt: Instant } | null;
 }
 
 export interface ConsoleDecisionRow extends PriceDecisionDraft, ExplanationIntentColumns {
@@ -878,13 +892,17 @@ export interface ConsoleMemberRow {
   status: 'INVITED' | 'ACTIVE' | 'REVOKED';
 }
 
+/**
+ * Р-154 (шаг 35): состояние консоли ОГРАНИЧЕНО КАТАЛОГОМ. Здесь нет решений, намерений, истории записей, отклонённых снимков и
+ * аудита — потоков, растущих со временем: демо на 200 предложениях даёт сто тысяч решений в сутки, и экран, читавший их
+ * ради шести счётчиков, переставал отвечать за часы. Потоки читаются узкими методами хранилища: страницей, окном, агрегатом.
+ * `writes` — только записи В ПОЛЁТЕ (одна на единицу), завершённые — в ленте.
+ */
 export interface ConsoleState {
   tenantId: string;
   /** Р-151: тенант на симуляторе. Признак — из БАЗЫ (`tenant.demo`), а не из настройки стенда: метку нельзя забыть поставить */
   demo: boolean;
   scopes: ConsoleScopeRow[];
-  intents: ConsoleIntentRow[];
-  decisions: ConsoleDecisionRow[];
   writes: ConsoleWriteRow[];
   halts: ConsoleHaltRow[];
   haltReviews: ConsoleHaltReviewRow[];
@@ -894,7 +912,6 @@ export interface ConsoleState {
   /** Шаг 23: последнее уведомление PRICING_HEALTH по каждому офферу */
   pricingHealth: ConsolePricingHealthRow[];
   stops: ConsoleStopRow[];
-  rejectedSnapshots: ConsoleRejectedSnapshotRow[];
   divergenceCases: ConsoleDivergenceRow[];
   fxRates: FxQuote[];
   members: ConsoleMemberRow[];
@@ -905,7 +922,99 @@ export interface ConsoleState {
    */
   strategyVersions: ConsoleStrategyVersionRow[];
   explanationRulesets: ExplanationRuleset[];
-  audit: ConsoleAuditRow[];
+}
+
+// --- Р-154: потоки консоли — страницами, окнами и агрегатами ---------------------------------------------------------
+
+export interface DecisionPageQuery {
+  offset: number;
+  limit: number;
+  writeScopeId?: string;
+}
+
+export interface DecisionPage {
+  /** Свежие первыми */
+  items: ConsoleDecisionRow[];
+  /** Всего по запросу — считает база */
+  total: number;
+}
+
+/** Одно решение с тем, что к нему относится: горячее намерение (3 дня) и записи в канал по нему */
+export interface DecisionDetail {
+  decision: ConsoleDecisionRow;
+  intent: ConsoleIntentRow | null;
+  writes: ConsoleWriteRow[];
+}
+
+/** Решения показанных единиц: последнее и сколько всего в горячем буфере — только для строк страницы, не для каталога */
+export interface ScopeDecisionStats {
+  writeScopeId: string;
+  latestDecisionId: string | null;
+  latestDecidedAt: Instant | null;
+  decisions: number;
+}
+
+/**
+ * Вмешательства за окно: всё, что НЕ «без изменения». Решений без изменения — девять из десяти, и они не нужны ни отчёту об
+ * отклонённых, ни отчёту об опасных изменениях; окно — свойство отчёта, а не буфера.
+ */
+export interface InterventionSlice {
+  from: Instant;
+  to: Instant;
+  /** Решения с исходом, отличным от NO_CHANGE, — со слепком объяснения */
+  decisions: ConsoleDecisionRow[];
+  /**
+   * Горячие намерения окна, у которых цель упёрлась в границу (CAPPED_AT_*) или удержана (TARGET_OUTSIDE_BOUNDS_HOLD).
+   * `episodeStart` — предыдущее намерение той же единицы (любое, не только из среза) не было на границе: с него
+   * начинается новый эпизод удержания. Считается там, где видны ВСЕ намерения, — в базе оконной функцией; иначе два
+   * удержания, разделённые оценкой без удержания, слиплись бы в одно (ревью шага 22, находка 4).
+   */
+  intents: Array<ConsoleIntentRow & { episodeStart: boolean }>;
+  /** Записи, завершённые перепроверкой границ или остановкой человеком */
+  endedWrites: ConsoleWriteRow[];
+  rejectedSnapshots: ConsoleRejectedSnapshotRow[];
+}
+
+export type FeedStatusGroup = 'APPLIED' | 'IN_FLIGHT' | 'NOT_SENT' | 'SUPERSEDED';
+export const FEED_IN_FLIGHT_STATUSES: readonly string[] = ['PENDING', 'DISPATCHED', 'ACCEPTED', 'BLOCKED'];
+export const FEED_NOT_SENT_STATUSES: readonly string[] = ['FAILED', 'NOT_APPLIED', 'DISCARDED_STALE', 'BUDGET_EXHAUSTED'];
+export function feedGroupOf(status: string): FeedStatusGroup {
+  return status === 'APPLIED' ? 'APPLIED' : FEED_IN_FLIGHT_STATUSES.includes(status) ? 'IN_FLIGHT' : FEED_NOT_SENT_STATUSES.includes(status) ? 'NOT_SENT' : 'SUPERSEDED';
+}
+
+export interface FeedPageQuery {
+  writeScopeId?: string;
+  status?: FeedStatusGroup;
+  /** Окно от `now` назад; без него — вся лента */
+  sinceDays?: number;
+  offset: number;
+  limit: number;
+}
+
+export interface FeedPageItem {
+  write: ConsoleWriteRow;
+  decision: ConsoleDecisionRow | null;
+  /** «Было» из горячего намерения (3 дня), если оно ещё есть */
+  intentCurrentMinor: number | null;
+}
+
+export interface FeedPage {
+  items: FeedPageItem[];
+  total: number;
+  /** По офферу и окну без фильтра статуса: сколько в каждой группе — считает база */
+  counts: Record<FeedStatusGroup, number>;
+}
+
+/** Счётчики списка миров — агрегатом, без чтения состояния */
+export interface WorldCounters {
+  scopes: number;
+  /** Решений за последние сутки */
+  decisionsLastDay: number;
+  /** Вмешательств (решений не «без изменения») за последние семь суток */
+  interventionsLastWeek: number;
+  activeStops: number;
+  activeHalts: number;
+  demo: boolean;
 }
 
 // --- онбординг [Р-149], канал без доступов [Р-150] --------------------------------------------------------------------

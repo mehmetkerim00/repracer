@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
-import { decisionTrace, messagesFor, type TraceStepKey } from '@repracer/console-model';
+import { messagesFor, type TraceStepKey } from '@repracer/console-model';
+import { traceOf } from './console/streams.ts';
 import { createPool } from '@repracer/pricing-store-pg';
 import { buildStandWorlds, STAND_USERS, type LiveWorld } from './console/stand.ts';
 import { pgStoreFactory } from './harness/pg-store.ts';
@@ -50,9 +51,9 @@ test('A, Р-68: on PostgreSQL every competitor-derived decision shows all five s
   for (const w of pgWorlds) {
     assert.deepEqual(w.failures, [], `${w.id}: the scenario must pass on PostgreSQL`);
     const world = await w.view(owner);
-    for (const d of world.state.decisions) {
+    for (const d of (await w.store.decisionPage(world.tenantId, { offset: 0, limit: 200 })).items) {
       decisions += 1;
-      const trace = decisionTrace(world, d.decisionId, en)!;
+      const trace = (await traceOf(w.store, world, d.decisionId, en))!;
       if (d.decisionClass === 'NO_OP') {
         assert.ok(d.noChangeReason && !d.explanation, `${w.id}: a NO_OP decision keeps only its reason code on PostgreSQL (Р-74)`);
         continue;
@@ -78,12 +79,14 @@ test('A, Р-68: on PostgreSQL every competitor-derived decision shows all five s
 test('A: the trace on PostgreSQL equals the trace on the memory store, step by step', { skip }, async () => {
   const shape = async (w: LiveWorld) => {
     const world = await w.view(owner);
-    return [...world.state.decisions]
-      .sort((a, b) => a.writeScopeId.localeCompare(b.writeScopeId) || Date.parse(a.decidedAt) - Date.parse(b.decidedAt))
-      .map((d) => {
-        const trace = decisionTrace(world, d.decisionId, en)!;
-        return { scope: d.writeScopeId, outcome: d.outcome, steps: trace.steps.filter((s) => FIVE.includes(s.key)).map((s) => `${s.key}:${s.status}:${s.items.length}`) };
-      });
+    // Р-154: страница и одно решение — от хранилища; сравниваются и порядок страницы, и трасса каждого решения
+    const items = (await w.store.decisionPage(world.tenantId, { offset: 0, limit: 200 })).items
+      // Решения одного такта делят момент; идентификаторы в базе и в памяти разные — порядок внутри момента задаёт исход
+      .sort((a, b) => a.writeScopeId.localeCompare(b.writeScopeId) || Date.parse(a.decidedAt) - Date.parse(b.decidedAt) || a.outcome.localeCompare(b.outcome));
+    return Promise.all(items.map(async (d) => {
+      const trace = (await traceOf(w.store, world, d.decisionId, en))!;
+      return { scope: d.writeScopeId, outcome: d.outcome, steps: trace.steps.filter((s) => FIVE.includes(s.key)).map((s) => `${s.key}:${s.status}:${s.items.length}`) };
+    }));
   };
   for (const pg of pgWorlds) {
     const memory = memoryWorlds.find((m) => m.id === pg.id)!;

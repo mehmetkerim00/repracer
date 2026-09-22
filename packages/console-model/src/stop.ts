@@ -1,6 +1,6 @@
 import { can, type StopScope } from '@repracer/pricing-model';
 import type { Messages } from './i18n/index.ts';
-import type { ConsoleDistrustRow } from '@repracer/pricing-pipeline';
+import type { ConsoleAuditRow, ConsoleDistrustRow } from '@repracer/pricing-pipeline';
 import { channelOf, gap, type ConsoleHalt, type ConsoleScope, type ConsoleStop, type Gap, type StandWorld } from './world.ts';
 
 /**
@@ -196,7 +196,8 @@ function targetCard(world: StandWorld, target: StopTarget, m: Messages): TargetC
   };
 }
 
-export function stopView(world: StandWorld, m: Messages): StopView {
+/** Р-154: аудит — последние события (свежие первыми) отдельным запросом, а не весь журнал тенанта в состоянии */
+export function stopView(world: StandWorld, audit: readonly ConsoleAuditRow[], m: Messages): StopView {
   const role = world.viewer.role;
   return {
     worldId: world.id,
@@ -225,7 +226,7 @@ export function stopView(world: StandWorld, m: Messages): StopView {
       active: world.state.distrusts.filter((d) => d.releasedAt === null).map((d) => distrustCard(world, d, m)),
       history: world.state.distrusts.filter((d) => d.releasedAt !== null).map((d) => distrustCard(world, d, m)),
     },
-    audit: [...world.state.audit].reverse().map((a): AuditCard => ({
+    audit: audit.map((a): AuditCard => ({
       at: m.when(a.at),
       action: m.ui.stop.auditActions[a.action],
       actor: a.actorType === 'SYSTEM' || !a.role ? m.ui.stop.system

@@ -46,7 +46,8 @@ import type {
   ProductKey,
   ScopeEvaluationContext,
   ShiftWindow,
-  SnapshotOutcome, ConsoleAuditRow, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow} from '@repracer/pricing-pipeline';
+  SnapshotOutcome, ConsoleAuditRow, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow} from '@repracer/pricing-pipeline';
+import { FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES } from '@repracer/pricing-pipeline';
 import { inTenant, RollbackWith, type PgPool, type Tx } from './db.ts';
 import { PgWriteQueueStore } from './write-queue.ts';
 
@@ -161,6 +162,76 @@ const ACTIVE_STOP_JSON = `SELECT json_build_object('stopId', st.price_stop_id, '
  * Подзапросы по price_history ограничены тенантом и временем константами: секции месяц × hash отсекаются
  * при планировании (в шаге 8 условие соединения по tenant_id давало 24 мс планирования на 0,4 мс исполнения).
  */
+/**
+ * Р-154 (шаг 35): потоки консоли — решения, намерения, записи, отклонённые снимки, аудит — читаются НЕ целиком, а страницей,
+ * окном или агрегатом. Столбцы и отображения строк общие для всех запросов, чтобы страница и окно не разошлись по форме.
+ */
+const INTENT_COLUMNS = `price_intent_id, created_at, write_scope_id, pricing_strategy_id, pricing_strategy_version, trigger_type, source_event_id,
+  proposed_amount_minor, currency, price_basis, inputs, rationale, expires_at, rule_code, reference_amount_minor`;
+const DECISION_COLUMNS = `d.*, ref.competitor_snapshot_id, ref.source AS ref_source, ref.observed_at AS ref_observed_at`;
+const DECISION_FROM = `FROM channel_data.price_decision d
+  LEFT JOIN channel_data.price_decision_snapshot_ref ref ON ref.tenant_id = d.tenant_id AND ref.price_decision_id = d.price_decision_id`;
+const WRITE_HOT_COLUMNS = `w.channel_write_id, w.write_scope_id, w.price_decision_id, w.amount_minor, w.currency, w.price_basis, w.version, w.status,
+  w.attempt_count, w.created_at, w.dispatched_at, w.accepted_at, w.next_attempt_at, w.last_error_code, w.end_reason, w.end_params,
+  w.superseded_by_write_id, coalesce(d.competitor_derived, false) AS competitor_derived`;
+const WRITE_HISTORY_COLUMNS = `h.channel_write_id, h.write_scope_id, h.price_decision_id, h.amount_minor, h.currency, h.price_basis, h.version, h.final_status AS status,
+  h.attempt_count, h.created_at, h.dispatched_at, h.accepted_at, NULL::timestamptz AS next_attempt_at, h.last_error_code, h.end_reason, h.end_params,
+  h.superseded_by_write_id, coalesce(d.competitor_derived, false) AS competitor_derived`;
+/** Момент записи для ленты: применена → отправлена → создана; по нему же построен индекс истории (0117) */
+const WRITE_AT = (alias: string) => `coalesce(${alias}.accepted_at, ${alias}.dispatched_at, ${alias}.created_at)`;
+
+function intentRow(r: Row): ConsoleIntentRow {
+  return {
+    intentId: r.price_intent_id, writeScopeId: r.write_scope_id, strategyId: r.pricing_strategy_id, strategyVersion: r.pricing_strategy_version,
+    trigger: { type: r.trigger_type, ...(r.source_event_id ? { sourceEventId: r.source_event_id } : {}) }, ruleCode: r.rule_code,
+    intentClass: r.rationale.intentClass, proposedMinor: r.proposed_amount_minor, currentMinor: r.rationale.currentMinor ?? null,
+    referenceMinor: r.reference_amount_minor, currency: r.currency, basis: r.price_basis, reason: r.rationale.reason, explanation: r.rationale.explanation ?? [],
+    inputs: r.inputs, createdAt: iso(r.created_at), expiresAt: iso(r.expires_at),
+  } as PriceIntentDraft & { intentId: string };
+}
+
+function decisionRow(r: Row): ConsoleDecisionRow {
+  return {
+    decisionId: r.price_decision_id, intentId: r.price_intent_id, writeScopeId: r.write_scope_id, outcome: r.outcome,
+    decisionClass: r.intent_class === 'NO_OP' ? 'NO_OP' : r.intent_class, finalMinor: r.final_amount_minor, currency: r.currency, basis: r.price_basis,
+    effectiveFloorMinor: r.effective_floor_minor, effectiveCeilingMinor: r.effective_ceiling_minor, minPriceIds: r.min_price_ids, maxPriceIds: r.max_price_ids,
+    guardrailIds: r.guardrail_ids, rejectionReason: r.rejection_reason,
+    reason: { code: r.rejection_reason ?? (r.outcome === 'APPROVED' ? 'APPROVED' : 'NO_CHANGE'), params: r.reason_params },
+    checks: r.checks, alert: null, decidedAt: iso(r.decided_at), fx: r.fx, boundDeviationBp: r.bound_deviation_bp ?? null, explanation: r.explanation,
+    noChangeReason: r.no_change_reason ?? null, gateProfile: r.gate_profile ?? null, sanityRuleset: r.sanity_ruleset ?? null,
+    strategyId: r.pricing_strategy_id ?? null, strategyVersion: r.pricing_strategy_version ?? null, ruleCode: r.rule_code, trigger: r.trigger_type,
+    proposedMinor: r.proposed_amount_minor,
+    snapshotRef: r.competitor_snapshot_id ? { competitorSnapshotId: r.competitor_snapshot_id, source: r.ref_source, observedAt: iso(r.ref_observed_at) } : null,
+  };
+}
+
+function writeRow(r: Row): ConsoleWriteRow {
+  return {
+    channelWriteId: r.channel_write_id, writeScopeId: r.write_scope_id, decisionId: r.price_decision_id, amountMinor: r.amount_minor, currency: r.currency,
+    basis: r.price_basis, version: r.version, status: r.status, attemptCount: r.attempt_count, competitorDerived: r.competitor_derived, createdAt: iso(r.created_at),
+    dispatchedAt: r.dispatched_at ? iso(r.dispatched_at) : null, acceptedAt: r.accepted_at ? iso(r.accepted_at) : null,
+    nextAttemptAt: r.next_attempt_at ? iso(r.next_attempt_at) : null, lastErrorCode: r.last_error_code, endReason: r.end_reason,
+    endParams: r.end_params ?? {}, supersededByWriteId: r.superseded_by_write_id,
+  };
+}
+
+function rejectedSnapshotRow(r: Row): ConsoleRejectedSnapshotRow {
+  return {
+    rejectedSnapshotId: r.rejected_snapshot_id,
+    key: { channelAccountId: r.channel_account_id, marketplace: r.marketplace, channelProductRef: r.channel_product_ref, condition: portCondition(r.condition) },
+    source: r.source, ...(r.source_event_id ? { sourceEventId: r.source_event_id } : {}), observedAt: iso(r.observed_at), receivedAt: iso(r.received_at),
+    verdict: r.verdict, reasonCode: r.reason_code, alarmClass: r.alarm_class, details: r.details, ruleset: r.ruleset_version,
+  };
+}
+
+function auditRow(r: Row): ConsoleAuditRow {
+  return {
+    at: new Date(r.changes.at).toISOString(), action: r.action, actorType: r.actor_type, membershipId: r.actor_membership_id, role: r.changes.role ?? null,
+    entityType: r.entity_type, entityId: r.entity_id, scope: r.changes.scope ?? null, channelAccountId: r.changes.channelAccountId ?? null,
+    marketplace: r.changes.marketplace ?? null, note: r.changes.note ?? null,
+  };
+}
+
 const SCOPE_JSON = `json_build_object(
   'row', row_to_json(sc),
   'observed', (SELECT o.observed_amount_minor FROM channel_data.observed_channel_state o
@@ -172,6 +243,10 @@ const SCOPE_JSON = `json_build_object(
   'inFlight', ARRAY(SELECT w.amount_minor FROM tenant_data.channel_write w
                      WHERE w.tenant_id = $1 AND w.write_scope_id = sc.write_scope_id AND w.field = 'PRICE'
                        AND w.status IN ('DISPATCHED', 'ACCEPTED', 'FAILED')),
+  -- Р-154: последняя применённая цена — по индексу единицы и времени, а не перебором всех записей тенанта
+  'lastApplied', (SELECT json_build_object('amountMinor', h.amount_minor, 'acceptedAt', h.accepted_at) FROM tenant_data.price_history h
+                   WHERE h.tenant_id = $1 AND h.write_scope_id = sc.write_scope_id AND h.corrects_price_history_id IS NULL
+                   ORDER BY h.accepted_at DESC, h.price_history_id DESC LIMIT 1),
   'changes', (SELECT count(*) FROM tenant_data.price_history h
                WHERE h.tenant_id = $1 AND h.write_scope_id = sc.write_scope_id AND h.corrects_price_history_id IS NULL
                  AND h.accepted_at >= $2::timestamptz - interval '1 hour' AND h.accepted_at <= $2::timestamptz),
@@ -1769,58 +1844,16 @@ export class PgPricingStore implements PricingStore {
               }
             : null,
           minMarginBp: ctx.guardrails.minMarginBp, channelHalt: ctx.channelHalt, channelDistrust: ctx.channelDistrust, priceStop: ctx.priceStop,
+          lastApplied: j.lastApplied ? { amountMinor: Number((j.lastApplied as Row).amountMinor), acceptedAt: iso((j.lastApplied as Row).acceptedAt as string) } : null,
           // Р-138: все действующие оценки комиссии с источниками — расхождение продавец должен видеть, а не угадывать
           feeEstimates: ((c?.feeEstimates ?? []) as Array<{ source: string; feeRateBp: number | null; fixedFeeMinor: number | null; scheduleVersion: string | null }>)
             .map((f) => ({ source: f.source, feeRateBp: f.feeRateBp ?? null, fixedFeeMinor: f.fixedFeeMinor ?? null, scheduleVersion: f.scheduleVersion ?? null })),
         };
       });
-      const intents = (await q(`SELECT price_intent_id, created_at, write_scope_id, pricing_strategy_id, pricing_strategy_version, trigger_type, source_event_id,
-                                       proposed_amount_minor, currency, price_basis, inputs, rationale, expires_at, rule_code, reference_amount_minor
-                                  FROM channel_data.price_intent WHERE tenant_id = $1 ORDER BY created_at, xmin::text::bigint`))
-        .map((r) => ({
-          intentId: r.price_intent_id, writeScopeId: r.write_scope_id, strategyId: r.pricing_strategy_id, strategyVersion: r.pricing_strategy_version,
-          trigger: { type: r.trigger_type, ...(r.source_event_id ? { sourceEventId: r.source_event_id } : {}) }, ruleCode: r.rule_code,
-          intentClass: r.rationale.intentClass, proposedMinor: r.proposed_amount_minor, currentMinor: r.rationale.currentMinor ?? null,
-          referenceMinor: r.reference_amount_minor, currency: r.currency, basis: r.price_basis, reason: r.rationale.reason, explanation: r.rationale.explanation ?? [],
-          inputs: r.inputs, createdAt: r.created_at, expiresAt: r.expires_at,
-        } as PriceIntentDraft & { intentId: string }));
-      const decisions = (await q(`SELECT d.*, ref.competitor_snapshot_id, ref.source AS ref_source, ref.observed_at AS ref_observed_at
-                                    FROM channel_data.price_decision d
-                                    LEFT JOIN channel_data.price_decision_snapshot_ref ref ON ref.tenant_id = d.tenant_id AND ref.price_decision_id = d.price_decision_id
-                                   WHERE d.tenant_id = $1 ORDER BY d.decided_at, d.xmin::text::bigint`))
-        .map((r): ConsoleDecisionRow => ({
-          decisionId: r.price_decision_id, intentId: r.price_intent_id, writeScopeId: r.write_scope_id, outcome: r.outcome,
-          decisionClass: r.intent_class === 'NO_OP' ? 'NO_OP' : r.intent_class, finalMinor: r.final_amount_minor, currency: r.currency, basis: r.price_basis,
-          effectiveFloorMinor: r.effective_floor_minor, effectiveCeilingMinor: r.effective_ceiling_minor, minPriceIds: r.min_price_ids, maxPriceIds: r.max_price_ids,
-          guardrailIds: r.guardrail_ids, rejectionReason: r.rejection_reason,
-          reason: { code: r.rejection_reason ?? (r.outcome === 'APPROVED' ? 'APPROVED' : 'NO_CHANGE'), params: r.reason_params },
-          checks: r.checks, alert: null, decidedAt: r.decided_at, fx: r.fx, boundDeviationBp: r.bound_deviation_bp ?? null, explanation: r.explanation,
-          noChangeReason: r.no_change_reason ?? null, gateProfile: r.gate_profile ?? null, sanityRuleset: r.sanity_ruleset ?? null,
-          strategyId: r.pricing_strategy_id ?? null, strategyVersion: r.pricing_strategy_version ?? null, ruleCode: r.rule_code, trigger: r.trigger_type,
-          proposedMinor: r.proposed_amount_minor,
-          snapshotRef: r.competitor_snapshot_id ? { competitorSnapshotId: r.competitor_snapshot_id, source: r.ref_source, observedAt: r.ref_observed_at } : null,
-        }));
-      const writes = (await q(`SELECT w.channel_write_id, w.write_scope_id, w.price_decision_id, w.amount_minor, w.currency, w.price_basis, w.version, w.status,
-                                      w.attempt_count, w.created_at, w.dispatched_at, w.accepted_at, w.next_attempt_at, w.last_error_code, w.end_reason, w.end_params,
-                                      w.superseded_by_write_id, coalesce(d.competitor_derived, false) AS competitor_derived
-                                 FROM tenant_data.channel_write w
+      // Р-154: только записи в полёте — одна на единицу; завершённые читаются лентой страницами
+      const writes = (await q(`SELECT ${WRITE_HOT_COLUMNS} FROM tenant_data.channel_write w
                                  LEFT JOIN channel_data.price_decision d ON d.tenant_id = w.tenant_id AND d.price_decision_id = w.price_decision_id
-                                WHERE w.tenant_id = $1 AND w.field = 'PRICE'
-                               UNION ALL
-                               -- Завершённые записи переносятся в историю (0018)
-                               SELECT h.channel_write_id, h.write_scope_id, h.price_decision_id, h.amount_minor, h.currency, h.price_basis, h.version, h.final_status,
-                                      h.attempt_count, h.created_at, h.dispatched_at, h.accepted_at, NULL, h.last_error_code, h.end_reason, h.end_params,
-                                      h.superseded_by_write_id, coalesce(d.competitor_derived, false)
-                                 FROM tenant_data.channel_write_history h
-                                 LEFT JOIN channel_data.price_decision d ON d.tenant_id = h.tenant_id AND d.price_decision_id = h.price_decision_id
-                                WHERE h.tenant_id = $1 AND h.field = 'PRICE'
-                                ORDER BY 10, 7`))
-        .map((r) => ({
-          channelWriteId: r.channel_write_id, writeScopeId: r.write_scope_id, decisionId: r.price_decision_id, amountMinor: r.amount_minor, currency: r.currency,
-          basis: r.price_basis, version: r.version, status: r.status, attemptCount: r.attempt_count, competitorDerived: r.competitor_derived, createdAt: r.created_at,
-          dispatchedAt: r.dispatched_at, acceptedAt: r.accepted_at, nextAttemptAt: r.next_attempt_at, lastErrorCode: r.last_error_code, endReason: r.end_reason,
-          endParams: r.end_params ?? {}, supersededByWriteId: r.superseded_by_write_id,
-        }));
+                                WHERE w.tenant_id = $1 AND w.field = 'PRICE' ORDER BY w.created_at, w.version`)).map(writeRow);
       const halts = (await q(`SELECT pricing_halt_id, channel_account_id, marketplace, reason_code, details, halted_at, next_review_at, released_at, released_kind
                                 FROM channel_data.pricing_halt WHERE tenant_id = $1 ORDER BY halted_at`))
         .map((r) => ({
@@ -1861,15 +1894,6 @@ export class PgPricingStore implements PricingStore {
           detectedAt: iso(r.detected_at), releasedAt: r.released_at ? iso(r.released_at) : null, releasedByMembershipId: r.released_by_membership_id, releaseNote: r.release_note,
         }));
       const stops = (await q(`SELECT ${PgPricingStore.STOP_COLUMNS} FROM tenant_data.price_stop WHERE tenant_id = $1 ORDER BY stopped_at`)).map(PgPricingStore.stopRow);
-      const rejectedSnapshots = (await q(`SELECT rejected_snapshot_id, channel_account_id, marketplace, channel_product_ref, condition, source, source_event_id,
-                                                 observed_at, received_at, verdict, reason_code, alarm_class, details, ruleset_version
-                                            FROM channel_data.rejected_competitor_snapshot WHERE tenant_id = $1 ORDER BY received_at`))
-        .map((r) => ({
-          rejectedSnapshotId: r.rejected_snapshot_id,
-          key: { channelAccountId: r.channel_account_id, marketplace: r.marketplace, channelProductRef: r.channel_product_ref, condition: portCondition(r.condition) },
-          source: r.source, ...(r.source_event_id ? { sourceEventId: r.source_event_id } : {}), observedAt: r.observed_at, receivedAt: r.received_at,
-          verdict: r.verdict, reasonCode: r.reason_code, alarmClass: r.alarm_class, details: r.details, ruleset: r.ruleset_version,
-        }));
       const divergenceCases = (await q(`SELECT divergence_case_id, write_scope_id, expected_amount_minor, observed_amount_minor, cause, status
                                           FROM channel_data.divergence_case WHERE tenant_id = $1 AND field = 'PRICE' ORDER BY opened_at`))
         .map((r) => ({
@@ -1895,21 +1919,167 @@ export class PgPricingStore implements PricingStore {
         }));
       const explanationRulesets = (await q(`SELECT ruleset_id, kind, definition FROM platform.explanation_ruleset ORDER BY ruleset_id`, []))
         .map((r) => ({ rulesetId: r.ruleset_id, kind: r.kind, definition: r.definition }) as DictionaryRuleset);
-      // Остановки в журнале аудита [Р-76]: время действия — из события, роль — в момент действия
-      const audit = (await q(`SELECT action, actor_type, actor_membership_id, entity_type, entity_id, changes FROM audit.audit_event
-                                WHERE tenant_id = $1 AND entity_type IN ('price_stop', 'pricing_halt')
-                                ORDER BY changes ->> 'at', recorded_at, audit_event_id`))
-        .map((r): ConsoleAuditRow => ({
-          at: new Date(r.changes.at).toISOString(), action: r.action, actorType: r.actor_type, membershipId: r.actor_membership_id, role: r.changes.role ?? null,
-          entityType: r.entity_type, entityId: r.entity_id, scope: r.changes.scope ?? null, channelAccountId: r.changes.channelAccountId ?? null,
-          marketplace: r.changes.marketplace ?? null, note: r.changes.note ?? null,
-        }));
       const [tenantRow] = await q(`SELECT demo FROM tenant_data.tenant WHERE tenant_id = $1`);
       return {
-        tenantId, demo: tenantRow?.demo === true, scopes, intents, decisions, writes, halts, haltReviews, distrusts, offerChannelPricing, pricingHealth, stops, rejectedSnapshots, divergenceCases,
+        tenantId, demo: tenantRow?.demo === true, scopes, writes, halts, haltReviews, distrusts, offerChannelPricing, pricingHealth, stops, divergenceCases,
         fxRates: fx.map((f) => ({ source: 'ECB', rateDate: f.rate_date, base: 'EUR', quote: f.quote_currency, rateMicros: Number(f.rate_micros), availableFrom: f.available_from })),
-        members, strategies, strategyVersions, explanationRulesets, audit,
+        members, strategies, strategyVersions, explanationRulesets,
       };
+    });
+  }
+
+  // --- Р-154 (шаг 35): потоки — страницами, окнами, агрегатами -------------------------------------------------------
+
+  async decisionPage(tenantId: string, query: DecisionPageQuery): Promise<DecisionPage> {
+    return inTenant(this.admin('decisionPage'), tenantId, async (tx) => {
+      const where = `d.tenant_id = $1${query.writeScopeId ? ' AND d.write_scope_id = $4' : ''}`;
+      const params: unknown[] = [tenantId, query.limit, query.offset, ...(query.writeScopeId ? [query.writeScopeId] : [])];
+      // Индексы 0117: (tenant_id, decided_at DESC) и (tenant_id, write_scope_id, decided_at DESC)
+      const [{ rows }, { rows: [count] }] = await Promise.all([
+        tx.query(`SELECT ${DECISION_COLUMNS} ${DECISION_FROM} WHERE ${where} ORDER BY d.decided_at DESC, d.price_decision_id DESC LIMIT $2 OFFSET $3`, params),
+        tx.query(`SELECT count(*)::int AS n FROM channel_data.price_decision d WHERE ${where}`, [tenantId, ...(query.writeScopeId ? [null, null, query.writeScopeId] : [])]),
+      ]);
+      return { items: rows.map(decisionRow), total: Number(count!.n) };
+    });
+  }
+
+  async decisionDetail(tenantId: string, decisionId: string): Promise<DecisionDetail | null> {
+    return inTenant(this.admin('decisionDetail'), tenantId, async (tx) => {
+      const { rows: [d] } = await tx.query(`SELECT ${DECISION_COLUMNS} ${DECISION_FROM} WHERE d.tenant_id = $1 AND d.price_decision_id = $2`, [tenantId, decisionId]);
+      if (!d) return null;
+      const [{ rows: [i] }, { rows: writes }] = await Promise.all([
+        tx.query(`SELECT ${INTENT_COLUMNS} FROM channel_data.price_intent WHERE tenant_id = $1 AND write_scope_id = $2 AND price_intent_id = $3`,
+          [tenantId, d.write_scope_id, d.price_intent_id]),
+        tx.query(`SELECT * FROM (
+                    SELECT ${WRITE_HOT_COLUMNS} FROM tenant_data.channel_write w LEFT JOIN channel_data.price_decision d ON d.tenant_id = w.tenant_id AND d.price_decision_id = w.price_decision_id
+                     WHERE w.tenant_id = $1 AND w.price_decision_id = $2
+                    UNION ALL
+                    SELECT ${WRITE_HISTORY_COLUMNS} FROM tenant_data.channel_write_history h LEFT JOIN channel_data.price_decision d ON d.tenant_id = h.tenant_id AND d.price_decision_id = h.price_decision_id
+                     WHERE h.tenant_id = $1 AND h.price_decision_id = $2) u ORDER BY version`, [tenantId, decisionId]),
+      ]);
+      return { decision: decisionRow(d), intent: i ? intentRow(i) : null, writes: writes.map(writeRow) };
+    });
+  }
+
+  async scopeDecisionStats(tenantId: string, writeScopeIds: readonly string[]): Promise<ScopeDecisionStats[]> {
+    if (writeScopeIds.length === 0) return [];
+    return inTenant(this.admin('scopeDecisionStats'), tenantId, async (tx) => {
+      // Только для показанных строк: на каталог целиком этот счёт стоил бы обхода всех решений тенанта [Р-154]
+      const { rows } = await tx.query(
+        `SELECT s.id AS write_scope_id,
+                (SELECT d.price_decision_id FROM channel_data.price_decision d WHERE d.tenant_id = $1 AND d.write_scope_id = s.id ORDER BY d.decided_at DESC, d.price_decision_id DESC LIMIT 1) AS latest_id,
+                (SELECT d.decided_at FROM channel_data.price_decision d WHERE d.tenant_id = $1 AND d.write_scope_id = s.id ORDER BY d.decided_at DESC, d.price_decision_id DESC LIMIT 1) AS latest_at,
+                (SELECT count(*) FROM channel_data.price_decision d WHERE d.tenant_id = $1 AND d.write_scope_id = s.id)::int AS n
+           FROM unnest($2::uuid[]) AS s(id)`, [tenantId, [...writeScopeIds]]);
+      return rows.map((r) => ({ writeScopeId: r.write_scope_id, latestDecisionId: r.latest_id ?? null, latestDecidedAt: r.latest_at ? iso(r.latest_at) : null, decisions: Number(r.n) }));
+    });
+  }
+
+  async interventions(tenantId: string, from: Instant, to: Instant): Promise<InterventionSlice> {
+    return inTenant(this.admin('interventions'), tenantId, async (tx) => {
+      const params = [tenantId, from, to];
+      // Частичные индексы 0117 отсекают «без изменения» и обычные намерения ещё в индексе — обходятся только вмешательства
+      const [decisions, intents, ended, rejected] = await Promise.all([
+        tx.query(`SELECT ${DECISION_COLUMNS} ${DECISION_FROM}
+                   WHERE d.tenant_id = $1 AND d.outcome <> 'NO_CHANGE' AND d.decided_at > $2::timestamptz AND d.decided_at <= $3::timestamptz
+                   ORDER BY d.decided_at DESC, d.price_decision_id DESC`, params),
+        /**
+         * Граница эпизода удержания — по ВСЕМ намерениям единицы окна (оконная функция), наружу идут только намерения на
+         * границе. Полный обход намерений окна здесь неизбежен: он и есть определение эпизода; но наружу не уходит
+         * девять десятых строк, а окно — три дня горячего буфера.
+         */
+        tx.query(`SELECT * FROM (
+                    SELECT ${INTENT_COLUMNS},
+                           (rationale -> 'reason' ->> 'code' = 'TARGET_OUTSIDE_BOUNDS_HOLD'
+                            OR rationale -> 'explanation' @> '[{"code": "CAPPED_AT_MIN_PRICE"}]'::jsonb
+                            OR rationale -> 'explanation' @> '[{"code": "CAPPED_AT_MAX_PRICE"}]'::jsonb) AS capped,
+                           coalesce(lag(rationale -> 'reason' ->> 'code' = 'TARGET_OUTSIDE_BOUNDS_HOLD'
+                            OR rationale -> 'explanation' @> '[{"code": "CAPPED_AT_MIN_PRICE"}]'::jsonb
+                            OR rationale -> 'explanation' @> '[{"code": "CAPPED_AT_MAX_PRICE"}]'::jsonb)
+                              OVER (PARTITION BY write_scope_id ORDER BY created_at, price_intent_id), false) AS prev_capped
+                      FROM channel_data.price_intent
+                     WHERE tenant_id = $1 AND created_at > $2::timestamptz AND created_at <= $3::timestamptz) t
+                   WHERE capped ORDER BY created_at`, params),
+        tx.query(`SELECT ${WRITE_HISTORY_COLUMNS} FROM tenant_data.channel_write_history h
+                   LEFT JOIN channel_data.price_decision d ON d.tenant_id = h.tenant_id AND d.price_decision_id = h.price_decision_id
+                   WHERE h.tenant_id = $1 AND h.field = 'PRICE' AND h.end_reason IN ('WRITE_BLOCKED_BY_BOUND_RECHECK', 'PRICING_STOPPED')
+                     AND h.created_at > $2::timestamptz AND h.created_at <= $3::timestamptz`, params),
+        tx.query(`SELECT rejected_snapshot_id, channel_account_id, marketplace, channel_product_ref, condition, source, source_event_id,
+                         observed_at, received_at, verdict, reason_code, alarm_class, details, ruleset_version
+                    FROM channel_data.rejected_competitor_snapshot
+                   WHERE tenant_id = $1 AND received_at > $2::timestamptz AND received_at <= $3::timestamptz ORDER BY received_at`, params),
+      ]);
+      return { from, to, decisions: decisions.rows.map(decisionRow), intents: intents.rows.map((r) => ({ ...intentRow(r), episodeStart: r.prev_capped !== true })), endedWrites: ended.rows.map(writeRow), rejectedSnapshots: rejected.rows.map(rejectedSnapshotRow) };
+    });
+  }
+
+  async feedPage(tenantId: string, now: Instant, query: FeedPageQuery): Promise<FeedPage> {
+    return inTenant(this.admin('feedPage'), tenantId, async (tx) => {
+      const groupSql = `CASE WHEN u.status = 'APPLIED' THEN 'APPLIED'
+                             WHEN u.status IN (${FEED_IN_FLIGHT_STATUSES.map((x) => `'${x}'`).join(', ')}) THEN 'IN_FLIGHT'
+                             WHEN u.status IN (${FEED_NOT_SENT_STATUSES.map((x) => `'${x}'`).join(', ')}) THEN 'NOT_SENT' ELSE 'SUPERSEDED' END`;
+      const since = query.sinceDays ? new Date(Date.parse(now) - query.sinceDays * 86_400_000).toISOString() : null;
+      const scoped = `WITH u AS (
+          SELECT ${WRITE_HOT_COLUMNS}, ${WRITE_AT('w')} AS at FROM tenant_data.channel_write w
+            LEFT JOIN channel_data.price_decision d ON d.tenant_id = w.tenant_id AND d.price_decision_id = w.price_decision_id
+           WHERE w.tenant_id = $1 AND w.field = 'PRICE' AND ($2::uuid IS NULL OR w.write_scope_id = $2) AND ($3::timestamptz IS NULL OR ${WRITE_AT('w')} >= $3)
+          UNION ALL
+          SELECT ${WRITE_HISTORY_COLUMNS}, ${WRITE_AT('h')} FROM tenant_data.channel_write_history h
+            LEFT JOIN channel_data.price_decision d ON d.tenant_id = h.tenant_id AND d.price_decision_id = h.price_decision_id
+           WHERE h.tenant_id = $1 AND h.field = 'PRICE' AND ($2::uuid IS NULL OR h.write_scope_id = $2) AND ($3::timestamptz IS NULL OR ${WRITE_AT('h')} >= $3))`;
+      const base: unknown[] = [tenantId, query.writeScopeId ?? null, since];
+      const [{ rows: counts }, { rows }] = await Promise.all([
+        tx.query(`${scoped} SELECT ${groupSql} AS g, count(*)::int AS n FROM u GROUP BY 1`, base),
+        tx.query(`${scoped} SELECT u.* FROM u WHERE ($4::text IS NULL OR ${groupSql} = $4) ORDER BY u.at DESC, u.version DESC LIMIT $5 OFFSET $6`,
+          [...base, query.status ?? null, query.limit, query.offset]),
+      ]);
+      const groups: Record<FeedStatusGroup, number> = { APPLIED: 0, IN_FLIGHT: 0, NOT_SENT: 0, SUPERSEDED: 0 };
+      for (const c of counts) groups[c.g as FeedStatusGroup] = Number(c.n);
+      const total = query.status ? groups[query.status] : Object.values(groups).reduce((a, b) => a + b, 0);
+      // Решение и горячее намерение — только для строк страницы
+      const decisionIds = [...new Set(rows.map((r) => r.price_decision_id).filter((x): x is string => typeof x === 'string'))];
+      const decisions = new Map<string, ConsoleDecisionRow>();
+      const currentByIntent = new Map<string, number | null>();
+      if (decisionIds.length > 0) {
+        const { rows: ds } = await tx.query(`SELECT ${DECISION_COLUMNS} ${DECISION_FROM} WHERE d.tenant_id = $1 AND d.price_decision_id = ANY($2::uuid[])`, [tenantId, decisionIds]);
+        for (const d of ds) decisions.set(d.price_decision_id, decisionRow(d));
+        const { rows: is } = await tx.query(
+          `SELECT i.price_intent_id, i.rationale -> 'currentMinor' AS current FROM channel_data.price_intent i
+             JOIN channel_data.price_decision d ON d.tenant_id = i.tenant_id AND d.write_scope_id = i.write_scope_id AND d.price_intent_id = i.price_intent_id
+            WHERE i.tenant_id = $1 AND d.price_decision_id = ANY($2::uuid[])`, [tenantId, decisionIds]);
+        for (const i of is) currentByIntent.set(i.price_intent_id, i.current === null || i.current === undefined ? null : Number(i.current));
+      }
+      return {
+        items: rows.map((r): FeedPageItem => {
+          const decision = r.price_decision_id ? decisions.get(r.price_decision_id) ?? null : null;
+          return { write: writeRow(r), decision, intentCurrentMinor: decision ? currentByIntent.get(decision.intentId) ?? null : null };
+        }),
+        total, counts: groups,
+      };
+    });
+  }
+
+  async auditRecent(tenantId: string, limit: number): Promise<ConsoleAuditRow[]> {
+    return inTenant(this.admin('auditRecent'), tenantId, async (tx) => {
+      // Остановки в журнале аудита [Р-76]: время действия — из события, роль — в момент действия; свежие первыми, не весь журнал
+      const { rows } = await tx.query(`SELECT action, actor_type, actor_membership_id, entity_type, entity_id, changes FROM audit.audit_event
+                                          WHERE tenant_id = $1 AND entity_type IN ('price_stop', 'pricing_halt')
+                                          ORDER BY changes ->> 'at' DESC, recorded_at DESC, audit_event_id DESC LIMIT $2`, [tenantId, limit]);
+      return rows.map(auditRow);
+    });
+  }
+
+  async worldCounters(tenantId: string, now: Instant): Promise<WorldCounters> {
+    return inTenant(this.admin('worldCounters'), tenantId, async (tx) => {
+      const { rows: [r] } = await tx.query(
+        `SELECT (SELECT count(*) FROM tenant_data.write_scope s WHERE s.tenant_id = $1 AND s.field = 'PRICE' AND s.status <> 'RETIRED')::int AS scopes,
+                (SELECT count(*) FROM channel_data.price_decision d WHERE d.tenant_id = $1 AND d.decided_at > $2::timestamptz - interval '1 day')::int AS decisions_day,
+                (SELECT count(*) FROM channel_data.price_decision d WHERE d.tenant_id = $1 AND d.outcome <> 'NO_CHANGE' AND d.decided_at > $2::timestamptz - interval '7 days')::int AS interventions_week,
+                (SELECT count(*) FROM tenant_data.price_stop p WHERE p.tenant_id = $1 AND p.released_at IS NULL)::int AS stops,
+                (SELECT count(*) FROM channel_data.pricing_halt h WHERE h.tenant_id = $1 AND h.released_at IS NULL)::int AS halts,
+                (SELECT demo FROM tenant_data.tenant t WHERE t.tenant_id = $1) AS demo`, [tenantId, now]);
+      return { scopes: Number(r!.scopes), decisionsLastDay: Number(r!.decisions_day), interventionsLastWeek: Number(r!.interventions_week),
+        activeStops: Number(r!.stops), activeHalts: Number(r!.halts), demo: r!.demo === true };
     });
   }
 

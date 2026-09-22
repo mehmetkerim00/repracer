@@ -1,3 +1,4 @@
+import type { FeedPage, FeedPageItem, FeedPageQuery } from '@repracer/pricing-pipeline';
 import type { Messages } from './i18n/index.ts';
 import { OFFER_CHOICES } from './compliance.ts';
 import { strategyLabel } from './products.ts';
@@ -80,50 +81,52 @@ const STATUS_TONE: Readonly<Record<string, Tone>> = {
   APPLIED: 'ok', ACCEPTED: 'progress', DISPATCHED: 'progress', PENDING: 'progress', BLOCKED: 'warn', FAILED: 'stop', NOT_APPLIED: 'stop',
   SUPERSEDED: 'off', DISCARDED_STALE: 'stop', BUDGET_EXHAUSTED: 'stop',
 };
-const IN_FLIGHT = new Set(['PENDING', 'DISPATCHED', 'ACCEPTED', 'BLOCKED']);
-const NOT_SENT = new Set(['FAILED', 'NOT_APPLIED', 'DISCARDED_STALE', 'BUDGET_EXHAUSTED']);
-// Ревью шага 23, находка 17: каждая запись — ровно в одной группе, счётчики складываются в итог без фильтра
-const inGroup = (status: string, group: FeedStatusGroup) => (group === 'APPLIED' ? status === 'APPLIED' : group === 'IN_FLIGHT' ? IN_FLIGHT.has(status) : group === 'NOT_SENT' ? NOT_SENT.has(status) : status === 'SUPERSEDED');
+// Группы статусов — одно определение на базу и память: `feedGroupOf` из порта хранилища [Р-154]
 
-export function priceFeed(world: StandWorld, m: Messages, filter: FeedQuery = {}): PriceFeedView {
-  const f = m.ui.feed;
-  const at = (w: (typeof world.state.writes)[number]) => Date.parse(w.acceptedAt ?? w.dispatchedAt ?? w.createdAt);
-  const since = filter.days ? Date.parse(world.now) - filter.days * 86_400_000 : null;
-  const scoped = world.state.writes.filter((w) => (!filter.writeScopeId || w.writeScopeId === filter.writeScopeId) && (since === null || at(w) >= since));
-  const writes = scoped.filter((w) => !filter.status || inGroup(w.status, filter.status)).sort((a, b) => at(b) - at(a) || b.version - a.version);
+/** Запрос ленты — в форму запроса хранилища; смещение за концом подтягивается к последней странице [Р-154] */
+export function feedPageQuery(filter: FeedQuery, total?: number): FeedPageQuery {
   const limit = Math.min(filter.limit ?? 50, FEED_PAGE_MAX);
-  const offset = Math.min(filter.offset ?? 0, Math.max(0, writes.length - 1));
-  const items = writes.slice(offset, offset + limit).map((w): FeedItem => {
-    const scope = scopeById(world, w.writeScopeId);
-    const decision = w.decisionId ? world.state.decisions.find((d) => d.decisionId === w.decisionId) ?? null : null;
-    const intent = decision ? world.state.intents.find((i) => i.intentId === decision.intentId) ?? null : null;
-    // «Было»: горячий intent (3 дня) или слепок объяснения решения [Р-68]; у NO_OP слепка нет, но NO_OP не пишет в канал
-    const from = intent?.currentMinor ?? (decision ? explanationOf(world, decision)?.value.strategy.currentMinor ?? null : null);
-    const strategy = decision?.strategyId ? world.state.strategies.find((s) => s.strategyId === decision.strategyId && s.version === decision.strategyVersion) ?? null : null;
-    const source = !decision ? f.sourceUnknown
-      : decision.ruleCode === 'MANUAL' ? f.sourceManual
-        : strategy ? strategyLabel(strategy, w.currency, m).label : f.sourceRule(decision.ruleCode);
-    const ended = w.endReason ? describe({ code: w.endReason, params: w.endParams }, m) : null;
-    return {
-      at: m.when(w.acceptedAt ?? w.dispatchedAt ?? w.createdAt), unit: scope ? unitOf(world, scope, m) : null,
-      from: from === null ? null : m.money(from, w.currency), to: m.money(w.amountMinor, w.currency), change: m.change(from, w.amountMinor),
-      status: f.statuses[w.status as keyof typeof f.statuses] ?? w.status, tone: STATUS_TONE[w.status] ?? 'unknown', source,
-      reason: ended ?? (decision ? describe(decision.reason, m) : null), decisionId: w.decisionId,
-    };
-  });
-  const from = writes.length === 0 ? 0 : offset + 1;
-  const to = offset + items.length;
+  const raw = filter.offset ?? 0;
+  const offset = total === undefined ? raw : Math.min(raw, Math.max(0, total - 1));
+  return { offset, limit, ...(filter.writeScopeId ? { writeScopeId: filter.writeScopeId } : {}), ...(filter.status ? { status: filter.status } : {}),
+    ...(filter.days ? { sinceDays: filter.days } : {}) };
+}
+
+/** Одна строка ленты из записи и того, что база нашла к ней: решение и «было» из горячего намерения */
+export function feedItemOf(world: StandWorld, m: Messages, item: FeedPageItem): FeedItem {
+  const f = m.ui.feed;
+  const { write: w, decision } = item;
+  const scope = scopeById(world, w.writeScopeId);
+  // «Было»: горячий intent (3 дня) или слепок объяснения решения [Р-68]; у NO_OP слепка нет, но NO_OP не пишет в канал
+  const from = item.intentCurrentMinor ?? (decision ? explanationOf(world, decision)?.value.strategy.currentMinor ?? null : null);
+  const strategy = decision?.strategyId ? world.state.strategies.find((s) => s.strategyId === decision.strategyId && s.version === decision.strategyVersion) ?? null : null;
+  const source = !decision ? f.sourceUnknown
+    : decision.ruleCode === 'MANUAL' ? f.sourceManual
+      : strategy ? strategyLabel(strategy, w.currency, m).label : f.sourceRule(decision.ruleCode);
+  const ended = w.endReason ? describe({ code: w.endReason, params: w.endParams }, m) : null;
+  return {
+    at: m.when(w.acceptedAt ?? w.dispatchedAt ?? w.createdAt), unit: scope ? unitOf(world, scope, m) : null,
+    from: from === null ? null : m.money(from, w.currency), to: m.money(w.amountMinor, w.currency), change: m.change(from, w.amountMinor),
+    status: f.statuses[w.status as keyof typeof f.statuses] ?? w.status, tone: STATUS_TONE[w.status] ?? 'unknown', source,
+    reason: ended ?? (decision ? describe(decision.reason, m) : null), decisionId: w.decisionId,
+  };
+}
+
+/**
+ * Р-154: страницу, итог и счётчики групп отдаёт база (`feedPage`); здесь — только строки показанного. До шага 35 лента
+ * фильтровала и сортировала все записи тенанта в памяти на каждый запрос.
+ */
+export function priceFeed(world: StandWorld, m: Messages, filter: FeedQuery, page: FeedPage, query: FeedPageQuery): PriceFeedView {
+  const f = m.ui.feed;
+  const items = page.items.map((i) => feedItemOf(world, m, i));
+  const from = page.total === 0 ? 0 : query.offset + 1;
+  const to = query.offset + items.length;
   return {
     worldId: world.id, items,
     // Счётчики — по офферу и периоду без фильтра статуса: сколько в каждой группе
-    counts: {
-      applied: scoped.filter((w) => inGroup(w.status, 'APPLIED')).length,
-      inFlight: scoped.filter((w) => inGroup(w.status, 'IN_FLIGHT')).length,
-      notSent: scoped.filter((w) => inGroup(w.status, 'NOT_SENT')).length,
-      superseded: scoped.filter((w) => inGroup(w.status, 'SUPERSEDED')).length,
-    },
-    query: { writeScopeId: filter.writeScopeId ?? null, status: filter.status ?? null, days: filter.days ?? null, offset, limit },
-    page: { from, to, total: writes.length, text: f.page(from, to, writes.length), hasPrevious: offset > 0, hasNext: to < writes.length },
+    counts: { applied: page.counts.APPLIED, inFlight: page.counts.IN_FLIGHT, notSent: page.counts.NOT_SENT, superseded: page.counts.SUPERSEDED },
+    query: { writeScopeId: filter.writeScopeId ?? null, status: filter.status ?? null, days: filter.days ?? null, offset: query.offset, limit: query.limit },
+    page: { from, to, total: page.total, text: f.page(from, to, page.total), hasPrevious: query.offset > 0, hasNext: to < page.total },
     // Р-136: фильтр по офферу показывает первые N — на каталоге целевого клиента список фильтра сам весил мегабайты
     offers: world.state.scopes.slice(0, OFFER_CHOICES).map((s) => unitOf(world, s, m)),
     offersTotal: world.state.scopes.length,
