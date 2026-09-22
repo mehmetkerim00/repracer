@@ -6,6 +6,7 @@ import type { StandToken, WorldSummary } from '../src/api-types.ts';
 import { STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { demoWorld, DEMO_OFFERS, DEMO_ON_HAND, type DemoWorld } from '@repracer/contract-tests/live';
 import type { StockDivergencesView, StockView } from '@repracer/console-model';
+import { INTERVENTION_SLICE_LIMIT } from '@repracer/pricing-pipeline';
 import { createAuthenticator, MemoryIdentityDirectory, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
 import { PgPricingStore, PgStockStore, type PgPool } from '@repracer/pricing-store-pg';
@@ -159,6 +160,16 @@ test('Р-154, Р-136: после суток каждый экран отвеча
     assert.ok(r.seconds <= SCREEN_LIMIT_SECONDS, `${name}: ${r.seconds} с при пределе ${SCREEN_LIMIT_SECONDS}`);
     assert.ok(r.bytes <= SCREEN_LIMIT_BYTES, `${name}: ${r.bytes} байт при пределе ${SCREEN_LIMIT_BYTES}`);
   }
+  /**
+   * Находка 9 ревью шага 35: данных в мире ровно сутки, и замер «30 суток» сам по себе ничего не доказывает. Держит отчёт не
+   * окно, а предел среза: если вмешательств за окно больше предела, отчёт обязан это сказать (`truncated` и пробел), и
+   * замер выше — это замер на ПОЛНОМ срезе. Число вмешательств берётся из базы наблюдателем, а не из ответа экрана.
+   */
+  const [iv] = (await observer.query(`SELECT count(*)::int AS n FROM channel_data.price_decision WHERE tenant_id = $1 AND outcome <> 'NO_CHANGE'`, [demo.live.seeded.tenantId])).rows;
+  const month = results['dangerous (30 суток)'] as { truncated: boolean };
+  // Срез обрезают и решения, и намерения, поэтому утверждается следствие в одну сторону: решений больше предела — отчёт неполон
+  if (Number(iv.n) > INTERVENTION_SLICE_LIMIT) assert.equal(month.truncated, true, `вмешательств ${iv.n} при пределе среза ${INTERVENTION_SLICE_LIMIT}: отчёт обязан сказать, что он неполон`);
+  console.log(JSON.stringify({ interventions: Number(iv.n), sliceLimit: INTERVENTION_SLICE_LIMIT, monthTruncated: month.truncated }));
   // Страницы — настоящие: итог со всех суток, показано не больше страницы, страница за концом подтянута к последней
   const first = results['decisions (первая страница)'] as { items: unknown[]; page: { total: number; to: number } };
   const last = results['decisions (страница за концом списка)'] as { items: unknown[]; page: { total: number; to: number; hasNext: boolean } };
