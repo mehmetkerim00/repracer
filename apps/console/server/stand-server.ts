@@ -514,11 +514,11 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         const maxQuantity = body.maxQuantity === undefined || body.maxQuantity === null || body.maxQuantity === '' ? null : int(body.maxQuantity, 0);
         if (bufferUnits === null || minQuantityToList === null || maxQuantity === null && body.maxQuantity !== undefined && body.maxQuantity !== null && body.maxQuantity !== '') return fail(400, 'BAD_ALLOCATION', s.badRequest);
         if (maxQuantity !== null && maxQuantity < 1) return fail(400, 'BAD_ALLOCATION', s.badRequest);
-        const enabled = await live.stock.enableStockSync(world.tenantId, account.channelAccountId, { bufferUnits, maxQuantity, minQuantityToList, acknowledgeSideEffects: body.acknowledgeSideEffects === true }, actor);
-        if (enabled.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
-        if (enabled.status === 'NO_OFFERS') return fail(409, 'NO_OFFERS', m.ui.stock.enable.noOffers);
-        const propagated = live.stockPipeline ? await live.stockPipeline.propagate(world.tenantId, null) : await live.stock.recalculate(world.tenantId, null, world.now as never).then((r) => ({ writes: r.writes.length, unchanged: r.unchanged }));
-        return ok({ ...enabled, writes: propagated.writes, message: m.ui.stock.enable.done({ ...enabled, writes: propagated.writes }) });
+        // Р-139: включение — задание; сколько предложений оно затронет, известно заранее — это размер шага пути
+        const status = (await live.store.onboardingStatus(world.tenantId)).find((x) => x.step === 'STOCK_SYNC');
+        if (!status || status.totalCount === 0) return fail(409, 'NO_OFFERS', m.ui.stock.enable.noOffers);
+        return createJob('STOCK_SYNC_ENABLE', { channelAccountId: account.channelAccountId, bufferUnits, maxQuantity, minQuantityToList, acknowledgeSideEffects: body.acknowledgeSideEffects === true },
+          status.totalCount, m.ui.stock.importFile.enableCreated);
       }
       return fail(404, 'NOT_FOUND', s.notFound);
     }
@@ -934,7 +934,8 @@ const MAX_BODY_BYTES = 64 * 1024;
  * взят от предела базы: 200 000 строк типичной выгрузки — это ~24 МБ, в base64 — ~32 МБ.
  */
 const MAX_IMPORT_BODY_BYTES = 48 * 1024 * 1024;
-const bodyLimitFor = (url: string) => (url.includes('/cost-import/') ? MAX_IMPORT_BODY_BYTES : MAX_BODY_BYTES);
+// Файлы продавца: себестоимость и остатки (шаг 35) — их предел выше, чем у обычного запроса экрана
+const bodyLimitFor = (url: string) => (url.includes('/cost-import/') || url.includes('/stock/import') ? MAX_IMPORT_BODY_BYTES : MAX_BODY_BYTES);
 
 function send(res: ServerResponse, r: ApiResponse): void {
   if (r.file) {

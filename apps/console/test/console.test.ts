@@ -915,7 +915,7 @@ test('Р-147: список заданий не несёт их итогов', as
  */
 test('Р-143, задача D: право на отмену чужого задания — право на его вид операции', async () => {
   const { canCancelBulkJob, CANCEL_ACTION } = await import('@repracer/console-model');
-  const KINDS = ['COST_IMPORT', 'BOUNDS_EDIT', 'BOUNDS_PLAN', 'STRATEGY_ASSIGN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT', 'REPRICING_ENABLE', 'STOCK_IMPORT'] as const;
+  const KINDS = ['COST_IMPORT', 'BOUNDS_EDIT', 'BOUNDS_PLAN', 'STRATEGY_ASSIGN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT', 'REPRICING_ENABLE', 'STOCK_IMPORT', 'STOCK_SYNC_ENABLE'] as const;
   // Вид задания без решения о праве существовать не может: перечисление полное [Р-146]
   assert.deepEqual(Object.keys(CANCEL_ACTION).sort(), [...KINDS].sort(), 'у каждого вида задания названо право на его отмену');
 

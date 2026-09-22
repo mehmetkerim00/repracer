@@ -528,6 +528,7 @@ export const en = {
         choose: 'Choose file',
         submit: 'Import stock',
         created: 'The stock file is being applied in the background. You can leave this page.',
+        enableCreated: 'Synchronisation is being enabled in the background: channel units are created and the first quantities computed. You can leave this page.',
         result: (r: { matched: number; changed: number; unmatched: number; writes: number }) => `Rows matched: ${r.matched}; products changed: ${r.changed}; rows not matched: ${r.unmatched}; channel writes created: ${r.writes}.`,
         unmatched: { UNKNOWN_SKU: 'article number unknown', BAD_QUANTITY: 'quantity is not a whole non-negative number', DUPLICATE_SKU: 'article number listed twice', EMPTY_SKU: 'empty article number' },
       },
@@ -718,7 +719,7 @@ export const en = {
     jobs: {
       pageTitle: 'Bulk operations', historyTitle: 'Past operations', none: 'No bulk operations yet.',
       kinds: {
-        COST_IMPORT: 'Import unit costs', REPRICING_ENABLE: 'Enable repricing', STOCK_IMPORT: 'Import stock', BOUNDS_EDIT: 'Change bounds', BOUNDS_PLAN: 'Compute the bounds differences',
+        COST_IMPORT: 'Import unit costs', REPRICING_ENABLE: 'Enable repricing', STOCK_IMPORT: 'Import stock', STOCK_SYNC_ENABLE: 'Enable stock synchronisation', BOUNDS_EDIT: 'Change bounds', BOUNDS_PLAN: 'Compute the bounds differences',
         STRATEGY_ASSIGN: 'Assign strategy', STRATEGY_PREVIEW: 'Preview strategy', PRICE_EVIDENCE: 'Export price evidence',
         PRICE_FEED_EXPORT: 'Export the price feed',
       },

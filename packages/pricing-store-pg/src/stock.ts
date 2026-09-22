@@ -394,11 +394,21 @@ export class PgStockStore implements StockStore {
 
   async stockDivergences(tenantId: string, limit: number): Promise<StockDivergenceRow[]> {
     return inTenant(this.options.adminPool, tenantId, async (tx) => {
-      // Расхождение: последняя отправленная версия завершена НЕ применением — по водяным знакам, затем подробности строки
+      /**
+       * Расхождение: последняя отправленная версия завершена НЕ применением, и повтора нет. Сначала — кандидаты по водяным
+       * знакам (одна таблица), подробности — только по ним: на каталоге целевого клиента подробности по всем 10 000 единицам
+       * стоили 5,7 с при пустом результате [Р-154]
+       */
+      const { rows: candidates } = await tx.query(
+        `SELECT ss.write_scope_id FROM tenant_data.write_scope_sync_state ss
+           JOIN tenant_data.write_scope s ON s.tenant_id = ss.tenant_id AND s.write_scope_id = ss.write_scope_id AND s.field = 'QUANTITY' AND s.status <> 'RETIRED'
+          WHERE ss.tenant_id = $1 AND ss.latest_version_dispatched > 0 AND ss.latest_version_applied < ss.latest_version_dispatched
+            AND NOT EXISTS (SELECT 1 FROM tenant_data.channel_write w WHERE w.tenant_id = ss.tenant_id AND w.write_scope_id = ss.write_scope_id)
+          ORDER BY ss.updated_at DESC LIMIT $2`, [tenantId, limit]);
+      if (candidates.length === 0) return [];
       const { rows } = await tx.query(
-        PgStockStore.CHANNEL_ROWS_SQL.replace('__TARGETS__', `${PgStockStore.TARGETS_SQL} AND ss.latest_version_dispatched > 0 AND ss.latest_version_applied < ss.latest_version_dispatched
-             AND NOT EXISTS (SELECT 1 FROM tenant_data.channel_write w WHERE w.tenant_id = s.tenant_id AND w.write_scope_id = s.write_scope_id)`)
-        + ` ORDER BY lw.at DESC LIMIT $2`, [tenantId, limit]);
+        PgStockStore.CHANNEL_ROWS_SQL.replace('__TARGETS__', `${PgStockStore.TARGETS_SQL} AND s.write_scope_id = ANY($2::uuid[])`) + ` ORDER BY lw.at DESC`,
+        [tenantId, candidates.map((c) => c.write_scope_id)]);
       const { rows: skus } = await tx.query(`SELECT product_id, sku FROM tenant_data.product WHERE tenant_id = $1 AND product_id = ANY($2::uuid[])`, [tenantId, rows.map((r) => r.product_id)]);
       const skuOf = new Map(skus.map((s) => [s.product_id, s.sku as string]));
       return rows.map((r) => {

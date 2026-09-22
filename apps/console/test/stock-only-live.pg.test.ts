@@ -167,10 +167,13 @@ test('Р-152: путь «только остатки» — от выбора п�
   let stockScreen = (await step<StockView>('экран остатков', 'GET', api('stock'))).body;
   assert.ok(stockScreen.traps.some((t) => t.channel === 'KAUFLAND' && /id_offer/.test(t.text)), 'ловушка Kaufland названа до записи');
   assert.deepEqual([stockScreen.summary.products, stockScreen.summary.withStock, stockScreen.summary.synced], [DEMO_OFFERS, DEMO_OFFERS, 0]);
-  const enabled = await step<{ scopes: number; created: number; writes: number }>('включение синхронизации', 'POST', api('stock', 'enable'),
+  const enableJob = await step<JobCreatedResponse>('включение синхронизации (задание)', 'POST', api('stock', 'enable'),
     { channelAccountId: demo.live.seeded.channelAccountId, bufferUnits: 2, maxQuantity: null, minQuantityToList: 0 });
-  assert.equal(enabled.status, 200, JSON.stringify(enabled.body).slice(0, 300));
-  assert.deepEqual([enabled.body.scopes, enabled.body.created, enabled.body.writes], [DEMO_OFFERS, DEMO_OFFERS, DEMO_OFFERS]);
+  assert.equal(enableJob.status, 200, JSON.stringify(enableJob.body).slice(0, 300));
+  const enabledJob = await pollJob(enableJob.body.jobId);
+  assert.equal(enabledJob.status, 'SUCCEEDED', enabledJob.error ?? enabledJob.headline);
+  const enabled = (enabledJob.result as { view: { scopes: number; created: number; writes: number } }).view;
+  assert.deepEqual([enabled.scopes, enabled.created, enabled.writes], [DEMO_OFFERS, DEMO_OFFERS, DEMO_OFFERS]);
   const syncEnabledAt = Date.now();
   view = (await step<OnboardingView>('экран пути', 'GET', api('onboarding'))).body;
   assert.equal(view.resumeAt, 'DONE', `путь остатков пройден: ${view.resumeText}`);

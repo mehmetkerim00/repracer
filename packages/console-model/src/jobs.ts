@@ -18,6 +18,7 @@ export const CANCEL_ACTION: Readonly<Record<BulkJobKind, PricingAction>> = {
   REPRICING_ENABLE: 'ENABLE_REPRICING',
   // Шаг 35 [Р-152]: остатки ведёт тот, кто ведёт каталог
   STOCK_IMPORT: 'MANAGE_CATALOG',
+  STOCK_SYNC_ENABLE: 'MANAGE_CATALOG',
   /**
    * Экран различий и предпросмотр стратегии САМИ ничего не меняют, но они — первая половина правки цен: применение
    * ссылается на задание экрана различий и без него не проходит. Отменить чужой экран различий значит сорвать чужую правку
@@ -114,6 +115,7 @@ function outcomeText(job: BulkJobRow, m: Messages): string {
     case 'PRICE_EVIDENCE': return t.doneEvidence(n(r.rows), n(r.bytes));
     case 'REPRICING_ENABLE': return t.doneEnable(n(r.enabled), n(r.already), n(r.skipped));
     case 'STOCK_IMPORT': return m.ui.stock.importFile.result({ matched: n(r.matched), changed: n(r.changed), unmatched: n(r.unmatched), writes: n(r.writes) });
+    case 'STOCK_SYNC_ENABLE': return m.ui.stock.enable.done({ scopes: n(r.scopes), created: n(r.created), awaitingAck: n(r.awaitingAck), writes: n(r.writes) });
   }
 }
 

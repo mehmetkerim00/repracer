@@ -309,6 +309,29 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
       };
     },
 
+    /**
+     * Шаг 35 [Р-139, Р-152]: включение синхронизации остатка — буфер аккаунта, единицы записи для всех предложений, первые
+     * записи. На каталоге целевого клиента это 33 с одним запросом — массовая операция, значит задание.
+     */
+    async STOCK_SYNC_ENABLE(job: BulkJobRow, ctx: BulkJobContext): Promise<BulkJobWork> {
+      const p = job.params as { channelAccountId: string; bufferUnits: number; maxQuantity: number | null; minQuantityToList: number; acknowledgeSideEffects: boolean };
+      if (!options.stock) throw Object.assign(new Error('no stock store'), { cause: 'NOT_SUPPORTED' });
+      const stock = options.stock;
+      return {
+        total: Number(job.totalItems ?? 0),
+        async run(progress) {
+          await progress(0, 'APPLYING');
+          const enabled = await stock.enableStockSync(ctx.tenantId, p.channelAccountId, { bufferUnits: p.bufferUnits, maxQuantity: p.maxQuantity, minQuantityToList: p.minQuantityToList, acknowledgeSideEffects: p.acknowledgeSideEffects === true },
+            { membershipId: ctx.membershipId, userId: ctx.userId, mfa: job.createdWithMfa });
+          if (enabled.status !== 'ENABLED') throw Object.assign(new Error(enabled.status), { cause: enabled.status });
+          await progress(enabled.scopes, 'APPLYING');
+          const recalculated = await stock.recalculate(ctx.tenantId, null, new Date().toISOString() as never);
+          const view = { scopes: enabled.scopes, created: enabled.created, awaitingAck: enabled.awaitingAck, writes: recalculated.writes.length };
+          return { ...view, view };
+        },
+      };
+    },
+
     async REPRICING_ENABLE(job: BulkJobRow, ctx: BulkJobContext): Promise<BulkJobWork> {
       const p = job.params as { writeScopeIds?: string[]; all?: boolean };
       const world = await options.world(ctx);

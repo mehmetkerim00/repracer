@@ -530,6 +530,7 @@ export const de: Messages = {
         choose: 'Datei wählen',
         submit: 'Bestand importieren',
         created: 'Die Bestandsdatei wird im Hintergrund übernommen. Sie können die Seite verlassen.',
+        enableCreated: 'Der Abgleich wird im Hintergrund eingeschaltet: Kanaleinheiten werden angelegt und die ersten Mengen berechnet. Sie können die Seite verlassen.',
         result: (r: { matched: number; changed: number; unmatched: number; writes: number }) => `Zeilen zugeordnet: ${r.matched}; Produkte geändert: ${r.changed}; Zeilen nicht zugeordnet: ${r.unmatched}; Schreibvorgänge an Kanäle erzeugt: ${r.writes}.`,
         unmatched: { UNKNOWN_SKU: 'Artikelnummer unbekannt', BAD_QUANTITY: 'Menge ist keine ganze, nicht negative Zahl', DUPLICATE_SKU: 'Artikelnummer doppelt', EMPTY_SKU: 'leere Artikelnummer' },
       },
@@ -725,7 +726,7 @@ export const de: Messages = {
     jobs: {
       pageTitle: 'Massenvorgänge', historyTitle: 'Bisherige Vorgänge', none: 'Noch keine Massenvorgänge.',
       kinds: {
-        COST_IMPORT: 'Selbstkosten importieren', REPRICING_ENABLE: 'Repricing einschalten', STOCK_IMPORT: 'Bestand importieren', BOUNDS_EDIT: 'Grenzen ändern', BOUNDS_PLAN: 'Unterschiede der Grenzen rechnen',
+        COST_IMPORT: 'Selbstkosten importieren', REPRICING_ENABLE: 'Repricing einschalten', STOCK_IMPORT: 'Bestand importieren', STOCK_SYNC_ENABLE: 'Bestandsabgleich einschalten', BOUNDS_EDIT: 'Grenzen ändern', BOUNDS_PLAN: 'Unterschiede der Grenzen rechnen',
         STRATEGY_ASSIGN: 'Strategie zuweisen', STRATEGY_PREVIEW: 'Strategie vorab rechnen', PRICE_EVIDENCE: 'Preisnachweis ausgeben',
         PRICE_FEED_EXPORT: 'Preisverlauf ausgeben',
       },

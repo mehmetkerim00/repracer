@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
+import type { StockView } from '@repracer/console-model';
 import type { BoundsIndexView, JobCreatedResponse, StandToken } from '../src/api-types.ts';
 import { DIFF_ROWS_SHOWN, LIST_PAGE_DEFAULT, type BoundsDiffView, type BulkJobView, type CostImportView, type ProductListView, type StopPlan, type StopView, type StrategyPreviewView } from '@repracer/console-model';
 import { STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
@@ -146,7 +147,7 @@ async function runBulkOperation(operation: string, url: string, body: unknown, n
 
 function scope(n: number): MemorySeedScope {
   return {
-    writeScopeId: `ws-${n}`, productId: `prod-${n}`, channelAccountId: ACCOUNT, marketplace: 'de', externalUnitId: `SKU-${n}`,
+    writeScopeId: `ws-${n}`, productId: `prod-${n}`, channelAccountId: ACCOUNT, marketplace: 'de', externalUnitId: `SKU-${n}`, externalOfferId: `OFFER-${n}`,
     channelProductRef: `3729${String(n).padStart(6, '0')}`, condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'OFF', strategy: null,
     currentPriceMinor: 1900, minPrice: { amountMinor: 1000, id: `min-${n}` }, maxPrice: { amountMinor: 9000, id: `max-${n}` },
   };
@@ -583,6 +584,38 @@ test('Р-139: процесс убит на половине применения
   assert.equal(finished.attempts >= 2, true, `задание бралось заново: попыток ${finished.attempts}`);
   assert.equal(finished.effect, 'Die Änderungen stehen vollständig in der Datenbank.');
   assert.equal(await costsWithMarker(), OFFERS, 'после возобновления применён ВЕСЬ каталог, а не остаток');
+});
+
+/**
+ * Р-153 (шаг 35): экраны остатков на каталоге целевого клиента. Файл остатков на 10 000 строк — заданием; включение
+ * синхронизации создаёт 10 000 единиц записи остатка и 10 000 записей в канал одним нажатием; экран остатков и список
+ * расхождений отвечают страницей и агрегатом. Канал в этом прогоне не трогается: записи остаются ждущими, и экран так и говорит.
+ */
+test('Р-153: остатки на 10 000 предложений — файл, включение синхронизации, экран и расхождения', async () => {
+  const path = await measure<{ path: string }>('onboarding/path (остатки + репрайсинг)', 'POST', api('onboarding', 'path'), { path: 'STOCK_AND_PRICING' });
+  assert.equal(path.status, 200, JSON.stringify(path.body));
+  const source = await measure<{ stockSourceId: string; apiKey: string | null }>('stock/sources (внутренний пул)', 'POST', api('stock', 'sources'), { mode: 'INTERNAL_POOL', name: 'Zentrallager' });
+  assert.equal(source.status, 200, JSON.stringify(source.body));
+  const lines = ['Artikelnummer;Bestand', ...Array.from({ length: OFFERS }, (_, i) => `SKU-${i + 1};${(i * 7) % 50}`)];
+  const content = Buffer.from(lines.join('\r\n'), 'utf8').toString('base64');
+  const imported = await runBulkOperation('stock/import (10 000 строк)', api('stock', 'import'), { fileName: 'bestand.csv', content, stockSourceId: source.body.stockSourceId }, `файл ${Math.round(Buffer.byteLength(content) / 1024)} КБ в base64`);
+  const importView = (imported.result as { view: { matched: number; changed: number; unmatched: number } }).view;
+  // Товаров с нулевым остатком движение не создаёт: строка «0» у пустого пула ничего не меняет
+  assert.deepEqual([importView.matched, importView.unmatched], [OFFERS, 0], JSON.stringify(importView));
+  assert.equal(importView.changed, lines.length - 1 - Array.from({ length: OFFERS }, (_, i) => (i * 7) % 50).filter((q) => q === 0).length);
+  const enabledJob = await runBulkOperation('stock/enable (10 000 единиц)', api('stock', 'enable'), { channelAccountId: world.channelAccountId, bufferUnits: 1, maxQuantity: null, minQuantityToList: 0 });
+  const enabled = (enabledJob.result as { view: { scopes: number; created: number; writes: number } }).view;
+  assert.deepEqual([enabled.scopes, enabled.created, enabled.writes], [OFFERS, OFFERS, OFFERS]);
+  const stock = await measure<StockView>('stock (первая страница)', 'GET', api('stock'));
+  assert.equal(stock.status, 200);
+  assert.deepEqual([stock.body.summary.products, stock.body.summary.synced, stock.body.summary.pendingWrites, stock.body.rows.length], [OFFERS, OFFERS, OFFERS, 50]);
+  assert.ok(stock.body.rows.every((r) => r.channels.length === 1 && r.channels[0]!.syncEnabled && r.channels[0]!.published === Math.max(0, r.available - 1)), 'у каждой строки — единица канала с посчитанным количеством');
+  const last = await measure<StockView>('stock (последняя страница)', 'GET', api('stock', undefined, '?offset=9950&limit=50'));
+  assert.equal(last.body.rows.length, 50);
+  const divergences = await measure<{ items: unknown[] }>('stock/divergences', 'GET', api('stock', 'divergences'));
+  assert.deepEqual(divergences.body.items, [], 'записи ждут отправки — расхождений ещё нет');
+  const onboarding = await measure<{ steps: Array<{ step: string; done: boolean }> }>('onboarding (после остатков)', 'GET', api('onboarding'));
+  assert.deepEqual(onboarding.body.steps.filter((x) => x.step.startsWith('STOCK')).map((x) => x.done), [true, true], 'оба шага остатков выведены из данных как сделанные');
 });
 
 test('Р-136: ни одна операция консоли не выходит за пределы живого экрана', () => {

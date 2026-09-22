@@ -75,11 +75,12 @@ CREATE OR REPLACE FUNCTION tenant_data.onboarding_status(p_tenant_id uuid)
 $fn$;
 ALTER FUNCTION tenant_data.onboarding_status(uuid) OWNER TO repracer_owner;
 
--- ---------------------------------------------------------------- импорт остатков — задание со своим правом [Р-143]
+-- ---------------------------------------------------------------- импорт остатков и включение синхронизации — задания [Р-139] со своим правом [Р-143]
+-- Включение на каталог целевого клиента — 10 000 единиц записи и 10 000 записей в канал: 33 с одним запросом, поэтому задание
 ALTER TABLE tenant_data.bulk_job DROP CONSTRAINT bulk_job_kind_known;
 ALTER TABLE tenant_data.bulk_job ADD CONSTRAINT bulk_job_kind_known
   CHECK (kind IN ('COST_IMPORT', 'BOUNDS_EDIT', 'BOUNDS_PLAN', 'STRATEGY_ASSIGN', 'STRATEGY_PREVIEW',
-                  'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT', 'REPRICING_ENABLE', 'STOCK_IMPORT'));
+                  'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT', 'REPRICING_ENABLE', 'STOCK_IMPORT', 'STOCK_SYNC_ENABLE'));
 
 CREATE OR REPLACE FUNCTION security.bulk_job_cancel_action(p_kind text) RETURNS text
   LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $fn$
@@ -88,7 +89,7 @@ CREATE OR REPLACE FUNCTION security.bulk_job_cancel_action(p_kind text) RETURNS 
               WHEN p_kind = 'REPRICING_ENABLE' THEN 'ENABLE_REPRICING'
               WHEN p_kind IN ('COST_IMPORT', 'BOUNDS_EDIT', 'BOUNDS_PLAN', 'STRATEGY_ASSIGN', 'STRATEGY_PREVIEW') THEN 'MANAGE_PRICING'
               -- Шаг 35 [Р-152]: остатки ведёт тот, кто ведёт каталог, — менеджеру остатков цены не нужны
-              WHEN p_kind = 'STOCK_IMPORT' THEN 'MANAGE_CATALOG'
+              WHEN p_kind IN ('STOCK_IMPORT', 'STOCK_SYNC_ENABLE') THEN 'MANAGE_CATALOG'
          END
 $fn$;
 

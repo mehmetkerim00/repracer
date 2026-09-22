@@ -49,9 +49,10 @@ export function StockScreen({ worldId }: { worldId: string }) {
   const importFile = () => { if (file) void post<{ jobId: string; job?: BulkJobView; message: string }>('import', { ...file, fileName: file.name, stockSourceId: sourceId })
     .then((r) => { setError(null); setMessage(r.message); if (r.job) setJob(r.job); })
     .catch((e: unknown) => setError(errorText(e, m))); };
-  const enable = (channelAccountId: string) => void post<{ message: string }>('enable', {
+  // Р-139: включение — задание; ход виден, итог приходит с заданием
+  const enable = (channelAccountId: string) => void post<{ jobId: string; job?: BulkJobView; message: string }>('enable', {
     channelAccountId, bufferUnits: Number(buffer), maxQuantity: maxQuantity === '' ? null : Number(maxQuantity), minQuantityToList: Number(minToList), acknowledgeSideEffects: ack,
-  }).then((r) => { setError(null); setMessage(r.message); refresh(); }).catch((e: unknown) => setError(errorText(e, m)));
+  }).then((r) => { setError(null); setMessage(r.message); if (r.job) setJob(r.job); }).catch((e: unknown) => setError(errorText(e, m)));
 
   return (
     <Load resource={view} retry={retry}>
@@ -85,7 +86,7 @@ export function StockScreen({ worldId }: { worldId: string }) {
                 <div key={t.channelAccountId} className="notice">
                   <p><Badge tone="warn">{m.ui.stock.traps.title}</Badge> {t.text}</p>
                   {t.requiresAck ? <label><input type="checkbox" checked={ack} onChange={(e) => setAck(e.currentTarget.checked)} /> {m.ui.stock.enable.acknowledge}</label> : null}
-                  <button type="button" onClick={() => enable(t.channelAccountId)} disabled={t.requiresAck && !ack}>{m.ui.stock.enable.submit}</button>
+                  <button type="button" onClick={() => enable(t.channelAccountId)} disabled={(t.requiresAck && !ack) || job !== null}>{m.ui.stock.enable.submit}</button>
                 </div>
               ))}
             </section>
