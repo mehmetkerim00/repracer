@@ -246,6 +246,12 @@ test('задача D: новый тенант без данных — кажды
   assert.deepEqual([decisionsEmpty.items, decisionsEmpty.page.total], [[], 0], 'решения: пустая страница с итогом ноль');
   const jobsEmpty = await emptyList<{ items: unknown[] }>('jobs');
   assert.deepEqual(jobsEmpty.items, [], 'задания: пустой список');
+  // Р-152: путь не выбран — экран показывает выбор из двух, а не шаги цен
+  const unchosen = await onboarding(EMPTY_WORLD);
+  assert.deepEqual([unchosen.path, unchosen.steps.map((x) => x.step)], [null, ['TENANT', 'CHANNEL']], 'без выбора пути — только тенант и канал');
+  // Выбор пути «остатки + репрайсинг»: дальше проверяются шаги цен пустого тенанта
+  const chosen = await call('POST', api(EMPTY_WORLD, 'onboarding', 'path'), { path: 'STOCK_AND_PRICING' }, emptyOwner);
+  assert.equal(chosen.status, 200, chosen.text);
   // Р-150: канал без доступа — честное состояние с перечнем, а не ошибка и не пустота
   const view = await onboarding(EMPTY_WORLD);
   const amazon = view.channels.find((c) => c.channel === 'AMAZON');
@@ -266,11 +272,25 @@ test('Р-149, Р-151: онбординг целиком на демо-тенан
   const summary = (JSON.parse(worlds.text) as WorldSummary[]).find((w) => w.id === DEMO_WORLD)!;
   assert.deepEqual([summary.demo, summary.scopes, summary.awaitingAccess], [true, DEMO_OFFERS, 1], 'демо помечено в списке миров, каталог 200, один канал ждёт доступа');
 
-  // Шаг 1–2: тенант есть, Kaufland подключён (симулятор), Amazon ждёт доступа — путь начинается с себестоимости
+  // Р-152: первым делом продавец выбирает путь; здесь — «остатки + репрайсинг»
+  const pathChoice = await call('POST', api(DEMO_WORLD, 'onboarding', 'path'), { path: 'STOCK_AND_PRICING' });
+  assert.equal(pathChoice.status, 200, pathChoice.text);
+  // Шаг 1–2: тенант есть, Kaufland подключён (симулятор), Amazon ждёт доступа. Р-152: репрайсинг включается ВТОРЫМ шагом —
+  // на пути «остатки + репрайсинг» сперва остатки, и только потом себестоимость
   let view = await onboarding();
   assert.equal(view.demo, true, 'экран пути помечен как демо');
-  assert.equal(view.resumeAt, 'COSTS', `путь начинается с себестоимости: ${view.resumeText}`);
-  assert.deepEqual(view.steps.filter((s) => s.done).map((s) => s.step), ['TENANT', 'CHANNEL']);
+  assert.deepEqual(view.steps.map((s) => s.step), ['TENANT', 'CHANNEL', 'STOCK_SOURCE', 'STOCK_SYNC', 'COSTS', 'BOUNDS', 'STRATEGY', 'ENABLE']);
+  assert.equal(view.resumeAt, 'STOCK_SOURCE', `путь начинается с остатка: ${view.resumeText}`);
+  // Остатки — через консоль, как продавец: источник-файл, файл на весь каталог, синхронизация с буфером 1
+  const source = await measure<{ stockSourceId: string }>('stock/sources', 'POST', api(DEMO_WORLD, 'stock', 'sources'), { mode: 'INTERNAL_POOL', name: 'Demo-Lager' });
+  assert.equal(source.status, 200, JSON.stringify(source.body));
+  const stockCsv = ['Artikelnummer;Bestand', ...Array.from({ length: DEMO_OFFERS }, (_, i) => `${String(340_100_001 + i).slice(-6)};12`)].join('\r\n');
+  await runJob('stock/import', DEMO_WORLD, api(DEMO_WORLD, 'stock', 'import'), { fileName: 'bestand.csv', content: Buffer.from(stockCsv, 'utf8').toString('base64'), stockSourceId: source.body.stockSourceId });
+  // Идентификатор аккаунта МИРА, как у экрана остатков (находка 1 доказательства пути остатков)
+  await runJob('stock/enable', DEMO_WORLD, api(DEMO_WORLD, 'stock', 'enable'), { channelAccountId: demo.live.seeded.channelAccountId, bufferUnits: 1, maxQuantity: null, minQuantityToList: 0 });
+  view = await onboarding();
+  assert.equal(view.resumeAt, 'COSTS', `остатки готовы — дальше себестоимость: ${view.resumeText}`);
+  assert.deepEqual(view.steps.filter((s) => s.done).map((s) => s.step), ['TENANT', 'CHANNEL', 'STOCK_SOURCE', 'STOCK_SYNC']);
   assert.equal(view.steps.find((s) => s.step === 'COSTS')!.totalCount, DEMO_OFFERS);
 
   // Шаг 3: импорт себестоимости — у 150 из 200. Пропустить шаг нельзя [Р-131]: остаётся сузить набор
@@ -371,7 +391,8 @@ test('Р-149, Р-151: онбординг целиком на демо-тенан
   // Отметки «путь пройден» нет и быть не должно: маршрут, ставивший галочку, удалён (ревью шага 34, находка 6)
   assert.equal((await call('POST', api(DEMO_WORLD, 'onboarding', 'step'), { step: 'DONE' })).status, 404, 'галочку «готово» поставить нельзя');
   view = await onboarding();
-  assert.deepEqual(view.steps.map((s) => s.done), [true, true, true, true, true, true], 'все шаги выведены из данных как завершённые');
+  assert.deepEqual(view.steps.map((s) => [s.step, s.done]), ['TENANT', 'CHANNEL', 'STOCK_SOURCE', 'STOCK_SYNC', 'COSTS', 'BOUNDS', 'STRATEGY', 'ENABLE'].map((x) => [x, true]),
+    'все восемь шагов пути «остатки + репрайсинг» выведены из данных как завершённые');
   // Хранится ровно одно — сужение набора, и оно в БАЗЕ: строка прогресса читается наблюдателем, а не тем же кодом консоли
   const stored = await observer.query(`SELECT cardinality(scope_write_scope_ids) AS n, updated_by_membership_id FROM tenant_data.onboarding_progress WHERE tenant_id = $1`, [demo.live.seeded.tenantId]);
   assert.deepEqual(stored.rows.map((r) => [Number(r.n), r.updated_by_membership_id]), [[WITH_COST, demo.live.seeded.ownerMembershipId]], 'сужение записано в базе от имени владельца');
