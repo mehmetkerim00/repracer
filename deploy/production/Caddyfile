@@ -1,0 +1,15 @@
+# Р-158: TLS и сертификат — забота прокси. Приложение слушает только сеть compose и о сертификатах не знает.
+{
+	email {$REPRACER_ACME_EMAIL}
+}
+
+{$REPRACER_DOMAIN} {
+	encode zstd gzip
+	# Журнал без тел запросов и без заголовков авторизации: токены продавца в логи не попадают
+	log {
+		output stdout
+		format json
+	}
+	# Пока консоль не разворачивается (OQ-221), прокси отвечает честно: сертификат и домен уже настоящие
+	respond "repracer: die Verkäuferkonsole ist in diesem Profil noch nicht ausgerollt (OQ-221)" 503
+}

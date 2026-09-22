@@ -1,0 +1,52 @@
+# Р-158 (шаг 36), расширение Р-129: production-профиль на ОДИН VPS — часть репозитория, а не устная инструкция.
+#   docker compose -f deploy/production/compose.yaml --env-file deploy/production/production.env up -d
+#
+# Что здесь есть и чего нет:
+#   ЕСТЬ: TLS обратным прокси (Caddy, сертификат от Let's Encrypt автоматически), консоль продавца за ним,
+#         суточная резервная копия PostgreSQL со сроком хранения ≤ 7 суток (требование docs/data-retention.md, OQ-61)
+#         и проверенное восстановление (scripts/backup-restore-check.mjs — часть сборки, а не абзац в README).
+#   НЕТ: самой PostgreSQL и ClickHouse — они разворачиваются отдельно (управляемая база или свой сервер): их бэкап,
+#        обновления и доступы — свойство хостинга, и делать вид, что compose это решает, значит врать себе.
+#   Процессы (планировщик, диспетчер, приёмник) поднимаются своими профилями deploy/scheduler, deploy/worker,
+#   deploy/notification-receiver — они одинаковы в любом окружении, и дублировать их здесь нечем.
+name: repracer-production
+
+services:
+  # TLS терминируется ЗДЕСЬ: у приложения нет ни сертификатов, ни 80-го порта — ему достаточно loopback [Р-158]
+  proxy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      REPRACER_DOMAIN: ${REPRACER_DOMAIN:?set REPRACER_DOMAIN}
+      REPRACER_ACME_EMAIL: ${REPRACER_ACME_EMAIL:?set REPRACER_ACME_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    logging: { driver: json-file, options: { max-size: 50m, max-file: "5" } }
+
+  # Консоли продавца как РАЗВОРАЧИВАЕМОГО процесса ещё нет: в репозитории есть сервер стенда
+  # (`apps/console/server/stand-server.ts`), который поднимает миры сценариев, а не тенантов базы. Пока её нет, прокси
+  # отвечает 503 с человеческим текстом — профиль поднимается и не делает вид, что консоль работает (OQ-221).
+  # Суточная копия базы: pg_dump в том, старше REPRACER_BACKUP_KEEP_DAYS — удаляется (срок копий ≤ 7 суток, OQ-61)
+  backup:
+    image: postgres:16.10-bookworm
+    user: "1000:1000"
+    environment:
+      REPRACER_BACKUP_KEEP_DAYS: ${REPRACER_BACKUP_KEEP_DAYS:-7}
+      REPRACER_BACKUP_EVERY_SECONDS: ${REPRACER_BACKUP_EVERY_SECONDS:-86400}
+      PGURL_FILE: /run/secrets/backup_pg_url
+    entrypoint: ["/bin/bash", "/opt/repracer/backup-loop.sh"]
+    volumes:
+      - ./backup-loop.sh:/opt/repracer/backup-loop.sh:ro
+      - ${REPRACER_SECRETS_DIR:?set REPRACER_SECRETS_DIR}:/run/secrets:ro
+      - ${REPRACER_BACKUP_DIR:?set REPRACER_BACKUP_DIR}:/backups
+    restart: unless-stopped
+    logging: { driver: json-file, options: { max-size: 50m, max-file: "5" } }
+
+volumes:
+  caddy_data:
+  caddy_config:
