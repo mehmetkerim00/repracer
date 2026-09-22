@@ -184,7 +184,8 @@ export async function kauflandLiveWorld(input: {
   }, seeded.ids);
   const dispatcher: WriteDispatcher = createWriteDispatcher({ store: queue, adapterFor: () => adapter, alerts: deps.alerts, now: () => clock.iso() });
   // Путь решения отправляет свою запись сам и передаёт диспетчеру следующую, ждущую за ней [Р-64]
-  const pipeline = createPricingPipeline({ store, adapter, alerts: deps.alerts, logger: deps.logger, now: () => clock.iso(), dispatcher });
+  // OQ-216: пауза пути решения двигает ВИРТУАЛЬНЫЕ часы — по ним же считает бюджет адаптера
+  const pipeline = createPricingPipeline({ store, adapter, alerts: deps.alerts, logger: deps.logger, now: () => clock.iso(), sleep: clock.sleep, dispatcher });
   const events = stamped(sink, clock);
   return {
     channel: 'KAUFLAND', clock, world, seeded, adapter, simulator, pipeline, products: input.products, events: events.list, violations, buyboxCalls, requests,

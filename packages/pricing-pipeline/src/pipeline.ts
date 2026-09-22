@@ -153,6 +153,12 @@ export interface PipelineDeps {
   alerts: AlertSink;
   logger: AdapterLogger;
   now: () => Instant;
+  /**
+   * OQ-216 (шаг 35): пауза до `retryAt`, когда канал или клиентский бюджет адаптера просят подождать. По умолчанию —
+   * настоящая; мир на виртуальных часах передаёт свою, двигающую время (иначе бюджет, считающий по этим часам, не
+   * восполнится никогда).
+   */
+  sleep?: (ms: number) => Promise<void>;
   sanityConfig?: Partial<SanityConfig>;
   /** Сколько раз повторять оценку при смене контекста решения */
   maxBoundsRetries?: number;
@@ -176,7 +182,33 @@ interface ScopeEvaluation {
   invoked: number;
 }
 
+/** Ошибка вызова канала, как её бросают адаптеры: класс общий по форме, а не по модулю (у Kaufland и Amazon он свой) */
+function channelErrorOf(error: unknown): { code: string; retryAt?: string } | null {
+  const e = (error as { error?: { code?: unknown; retryAt?: unknown } } | null)?.error;
+  return e && typeof e.code === 'string' ? { code: e.code, ...(typeof e.retryAt === 'string' ? { retryAt: e.retryAt } : {}) } : null;
+}
+
 export function createPricingPipeline(deps: PipelineDeps) {
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }));
+  /**
+   * OQ-216 (шаг 35): «подождите до retryAt» — не провал. Первая редакция обхода предложений роняла всю работу, когда опрос
+   * конкурентов в том же такте забирал клиентский бюджет адаптера (25 запросов в секунду, K-04), и повтор по Р-132 шёл не
+   * раньше чем через сутки: чужой репрайсер нового оффера [Р-120] замечался на сутки позже. Ждём ровно до `retryAt` и
+   * только внутри срока вызова: за сроком — та же ошибка наружу, как и любая другая.
+   */
+  const waitingForBudget = async <T>(ctx: AdapterCallContext, call: () => Promise<T>): Promise<T> => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await call();
+      } catch (error) {
+        const e = channelErrorOf(error);
+        if (!e || e.code !== 'RATE_LIMITED' || !e.retryAt || attempt >= 10) throw error;
+        const waitMs = Date.parse(e.retryAt) - Date.parse(deps.now());
+        if (Date.parse(e.retryAt) > Date.parse(ctx.deadline)) throw error;
+        await sleep(Math.max(1, waitMs));
+      }
+    }
+  };
   const { store, adapter, alerts, logger } = deps;
   const massShift = { ...DEFAULT_SANITY_CONFIG.massShift, ...deps.sanityConfig?.massShift };
   const shift = { windowSeconds: massShift.windowSeconds, minFactor: massShift.minFactor };
@@ -876,7 +908,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
       let recorded = 0;
       const withChannelPricing: Array<{ marketplace: string; externalSku: string; automatedPricing: boolean; channelBounds: boolean }> = [];
       for (let page = 0; page < (options.maxPages ?? 50); page++) {
-        const result = await adapter.discoverOffers(ctx, { limit: options.pageLimit ?? 20, ...(cursor ? { cursor } : {}) });
+        const result = await waitingForBudget(ctx, () => adapter.discoverOffers(ctx, { limit: options.pageLimit ?? 20, ...(cursor ? { cursor } : {}) }));
         offers += result.items.length;
         const observations = result.items.flatMap((o) => (o.channelPricing && o.identity.externalSku && o.identity.marketplace
           ? [{ marketplace: o.identity.marketplace, externalSku: o.identity.externalSku, ...o.channelPricing, source: 'DISCOVERY' as const, observedAt: deps.now() }]

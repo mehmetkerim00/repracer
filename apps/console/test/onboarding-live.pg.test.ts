@@ -417,14 +417,16 @@ test('Р-151: два виртуальных часа демо — первые �
   // Планировщик отработал без провалов — кроме выгрузки суток: ClickHouse в демо нет, и это названо в самом мире
   const polled = runs.rows.find((r) => r.job_name === 'competitor-poll');
   assert.ok(polled && Number(polled.runs) >= 100, `опрос конкурентов шёл: ${JSON.stringify(polled)}`);
+  // OQ-216: обход предложений состоялся и ДОШЁЛ до конца — все 200 предложений, а не ноль после отказа бюджета
+  const discovery = runs.rows.find((r) => r.job_name === 'offer-discovery');
+  assert.ok(discovery && Number(discovery.failed) === 0 && Number(discovery.items) >= DEMO_OFFERS, `обход предложений: ${JSON.stringify(discovery)}`);
   const failures = await observer.query(`SELECT job_name, error_code, count(*)::int AS n FROM maintenance.scheduled_job_run WHERE outcome = 'FAILED' GROUP BY 1, 2 ORDER BY 1`);
   /**
-   * Допущены ДВА провала, оба поимённо и с кодом. Выгрузка суток — ClickHouse в демо нет. Обход предложений — находка этого
-   * же прогона (OQ-216): в первый такт опрос конкурентов забирает клиентский бюджет адаптера (25 запросов в секунду, K-04), и
-   * обход получает RATE_LIMITED вместо ожидания до `retryAt`. До числа провалов это утверждение раньше не доходило вовсе —
-   * запрос был завёрнут в `catch`, и провал печатался, а не проверялся.
+   * Допущен ОДИН провал, поимённо и с кодом: выгрузка суток — ClickHouse в демо нет. Обход предложений проваливался здесь
+   * на шаге 34 (OQ-216: опрос конкурентов забирал клиентский бюджет адаптера, и обход получал RATE_LIMITED вместо ожидания);
+   * с шага 35 путь решения ждёт до `retryAt`, и провала быть не должно — это и утверждается.
    */
-  const KNOWN = new Set(['analytics-export-day|CLICKHOUSE_NOT_IN_DEMO', 'offer-discovery|RATE_LIMITED']);
+  const KNOWN = new Set(['analytics-export-day|CLICKHOUSE_NOT_IN_DEMO']);
   assert.deepEqual(failures.rows.filter((r) => !KNOWN.has(`${r.job_name}|${r.error_code}`)), [], `провалы работ планировщика: ${JSON.stringify(failures.rows)}`);
   // Р-151: у предложения РОВНО три конкурента — считается по самому симулятору, а не по описанию сценария
   const rivals = demo.live.simulator.offersOf('de|340100001|new').filter((o) => !o.self);
