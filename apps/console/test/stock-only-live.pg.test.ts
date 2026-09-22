@@ -43,6 +43,12 @@ const journey: Array<{ step: string; method: string; url: string; seconds: numbe
 let journeyStart = 0;
 /** Ключ Inbound API, выданный вторым тестом: третий шлёт им остаток единицы, которой в канале уже нет */
 let inboundKey = '';
+/**
+ * Хранилище остатков мира. Заказ канала приходит НЕ от продавца: его приносит работа `order-lines` планировщика тем же
+ * вызовом `recordOrderLines` (packages/stock-sync/src/pipeline.ts). Здесь им подставляется заказ, которого модель канала
+ * сама не создаёт (мир этого прогона — пустой, без спроса); всё, что делает продавец и его склад, идёт по HTTP.
+ */
+let stockStore: PgStockStore;
 
 const api = (screen: string, param?: string) => `/api/worlds/${encodeURIComponent(WORLD)}/${screen}${param ? `/${param}` : ''}`;
 
@@ -87,6 +93,7 @@ before(async () => {
   const seeded = demo.live.seeded;
   const store = new PgPricingStore(appPool, { adminPool, bulkWorkerPool: db.pool('svc_bulk_worker', 2) });
   const stock = new PgStockStore({ adminPool, stockPool: db.pool('svc_stock', 2) });
+  stockStore = stock;
   // Записи остатка отправляет диспетчер мира — тот же, что отправляет цены [Р-64]
   const stockPipeline = createStockPipeline({ store: stock, now: () => demo.clock.iso() as never, sleep: demo.clock.sleep, dispatchScope: (t, ws) => demo.live.dispatchScope(t, ws) });
   const nowIso = () => demo.clock.iso();
@@ -284,4 +291,67 @@ test('Р-153: канал перестал принимать запись — р
   // Расхождение показано именно потому, что повтора нет: пока запись в полёте, продавцу показывают ход, а не расхождение
   const [inFlight] = (await observer.query(`SELECT count(*)::int AS n FROM tenant_data.channel_write WHERE field = 'QUANTITY'`)).rows;
   assert.equal(Number(inFlight.n), 0, 'неприменённая запись завершена, повтора в полёте нет — иначе это был бы ход, а не расхождение');
+});
+
+test('Р-157: склад подтверждает заказ по Inbound API — резервация закрывается сразу, а не ждёт суток TTL', async () => {
+  /**
+   * Шаг 36 [Р-157], OQ-217: резервацию Inbound API подтверждать было НЕКОМУ, и единственным выходом был срок в 24 часа —
+   * товар уже уехал, а доступный остаток занижен сутки. Теперь склад продавца шлёт «заказ учтён» тем же ключом, что и
+   * остаток. Проверяется по HTTP, как ходит склад: свой ключ, свой ответ; ошибки — названные, а не 500.
+   *
+   * Заказ канала здесь подставлен вызовом хранилища — так его приносит работа `order-lines` планировщика: модель Kaufland
+   * в этом прогоне спроса не создаёт (мир пустой, `bare`), а маршрута «создай заказ» в консоли нет и быть не должно.
+   */
+  const productSku = 'syn-prod-de-340100001';
+  const [offer] = (await observer.query(
+    `SELECT om.external_offer_id, om.marketplace FROM tenant_data.offer_mapping om
+       JOIN tenant_data.product p ON p.tenant_id = om.tenant_id AND p.product_id = om.product_id WHERE p.sku = $1`, [productSku])).rows;
+  assert.ok(offer?.external_offer_id, `у товара ${productSku} есть предложение канала`);
+  const orderRef = 'SYN-ORDER-R157';
+  const orderLine = (status: 'OPEN' | 'SHIPPED') => ({
+    externalOrderRef: orderRef, externalOrderLineRef: 'SYN-ORDER-R157-1', identity: { marketplace: offer.marketplace as string, externalOfferId: offer.external_offer_id as string },
+    quantity: 3, orderedAt: demo.clock.iso(), status,
+  });
+  const recorded = await stockStore.recordOrderLines(demo.live.seeded.tenantId, demo.live.seeded.channelAccountId, [orderLine('OPEN')], demo.clock.iso());
+  assert.deepEqual([recorded.created, recorded.consumed, recorded.awaitingConfirmation], [1, 0, 0]);
+  // Пул источника (30 штук) больше внутреннего (10) — резервация создана в нём и подтверждения ждёт от НЕГО
+  const [reserved] = (await observer.query(`SELECT status, source_mode FROM channel_data.reservation WHERE channel_order_ref = $1`, [orderRef])).rows;
+  assert.deepEqual([reserved.status, reserved.source_mode], ['CREATED', 'INBOUND_API']);
+  // Продавец видит это на своём экране: 40 в пулах, 3 держит заказ, доступно 37
+  const beforeRow = (await step<StockView>('экран остатков с заказом', 'GET', `${api('stock')}?limit=200`)).body.rows.find((r) => r.sku === productSku)!;
+  assert.deepEqual([beforeRow.onHand, beforeRow.reserved, beforeRow.available], [40, 3, 37]);
+
+  // 1. Чужой ключ — 401 и названный код, без подробностей о том, чей заказ существует
+  const bad = await call('POST', '/inbound/v1/orders', { orders: [{ externalOrderRef: orderRef }] },
+    { authorization: 'Bearer rpk_000000000000.0000000000000000000000000000000000000000000000000000', cookie: '' });
+  assert.equal(bad.status, 401, bad.text);
+  assert.equal((JSON.parse(bad.text) as { error: { code: string } }).error.code, 'UNAUTHORIZED');
+  assert.equal((await observer.query(`SELECT status FROM channel_data.reservation WHERE channel_order_ref = $1`, [orderRef])).rows[0].status, 'CREATED',
+    'отказ в доступе ничего не подтвердил');
+  // 2. Пустой список — 400 с причиной, а не молчаливое «ноль подтверждено» и не 500
+  const empty = await call('POST', '/inbound/v1/orders', { orders: [] }, { authorization: `Bearer ${inboundKey}`, cookie: '' });
+  assert.equal(empty.status, 400, empty.text);
+  assert.equal((JSON.parse(empty.text) as { error: { code: string } }).error.code, 'BAD_ROWS');
+  // 3. Заказ без номера — тот же названный отказ: пустая строка не считается номером заказа
+  const blank = await call('POST', '/inbound/v1/orders', { orders: [{ externalOrderRef: '  ' }] }, { authorization: `Bearer ${inboundKey}`, cookie: '' });
+  assert.equal(blank.status, 400, blank.text);
+
+  // 4. Настоящий заказ своим ключом: подтверждён ровно один, неизвестный назван отдельно — склад видит, что расходится
+  const confirmed = await call('POST', '/inbound/v1/orders', { orders: [{ externalOrderRef: orderRef }, { externalOrderRef: 'SYN-ORDER-NIE-GESEHEN' }] },
+    { authorization: `Bearer ${inboundKey}`, cookie: '' });
+  assert.equal(confirmed.status, 200, confirmed.text);
+  assert.deepEqual(JSON.parse(confirmed.text), { confirmed: 1, alreadyConfirmed: [], unknownOrders: ['SYN-ORDER-NIE-GESEHEN'] });
+  const [after] = (await observer.query(
+    `SELECT status, confirmed_at IS NOT NULL AS confirmed, confirmed_external_order_ref FROM channel_data.reservation WHERE channel_order_ref = $1`, [orderRef])).rows;
+  assert.deepEqual([after.status, after.confirmed, after.confirmed_external_order_ref], ['CONFIRMED_BY_SOURCE', true, orderRef],
+    'подтверждение записано в резервацию с номером СВОЕГО заказа');
+  // 5. Повтор безвреден: склад, пославший подтверждение дважды, получает «уже подтверждён», а не ошибку
+  const again = await call('POST', '/inbound/v1/orders', { orders: [{ externalOrderRef: orderRef }] }, { authorization: `Bearer ${inboundKey}`, cookie: '' });
+  assert.deepEqual(JSON.parse(again.text), { confirmed: 0, alreadyConfirmed: [orderRef], unknownOrders: [] });
+
+  // 6. И только теперь отгрузка закрывает резервацию: доступное возвращается продавцу — 40 − 0 = 40, не через сутки
+  const shipped = await stockStore.recordOrderLines(demo.live.seeded.tenantId, demo.live.seeded.channelAccountId, [orderLine('SHIPPED')], demo.clock.iso());
+  assert.deepEqual([shipped.consumed, shipped.awaitingConfirmation], [1, 0]);
+  const afterRow = (await step<StockView>('экран остатков после отгрузки', 'GET', `${api('stock')}?limit=200`)).body.rows.find((r) => r.sku === productSku)!;
+  assert.deepEqual([afterRow.onHand, afterRow.reserved, afterRow.available], [40, 0, 40]);
 });

@@ -87,7 +87,22 @@ export interface OrderLinesOutcome {
   released: number;
   /** Строки, чей оффер нам неизвестен: резервации нет, остаток не трогается */
   unknownOffers: number;
+  /**
+   * Р-157 (шаг 36): отгрузка по резервации, которую источник ещё не подтвердил. Списать пул нельзя [Р-25] — подтверждает
+   * источник, — но и молчать нельзя: до шага 36 такая строка просто пропадала (остаток ревью шага 35, находка 13)
+   */
+  awaitingConfirmation: number;
   productIds: string[];
+}
+
+/** Р-157: источник Inbound API сообщает «заказ учтён»; резервации этого заказа переходят в CONFIRMED_BY_SOURCE */
+export interface ConfirmOrdersOutcome {
+  /** Сколько резерваций подтверждено этим вызовом */
+  confirmed: number;
+  /** Заказы, чьи резервации уже были подтверждены раньше: повтор вызова безвреден */
+  alreadyConfirmed: string[];
+  /** Заказы, резерваций которых у этого источника нет вовсе */
+  unknownOrders: string[];
 }
 
 export interface StockChannelRow {
@@ -161,6 +176,11 @@ export interface StockStore {
   inboundStock(tenantId: string, stockSourceId: string, rows: readonly InboundStockRow[]): Promise<InboundStockOutcome>;
   /** Ключ Inbound API → тенант и источник; сам ключ сюда не попадает — только префикс и отпечаток */
   resolveInboundKey(keyPrefix: string, keySha256Hex: string): Promise<{ tenantId: string; stockSourceId: string } | null>;
+  /**
+   * Р-157: подтверждение заказа источником Inbound API. Освобождение по сроку [Р-25] остаётся СТРАХОВКОЙ, а не основным
+   * путём: источник, который сообщил об учёте заказа, закрывает резервацию сразу.
+   */
+  confirmInboundOrders(tenantId: string, stockSourceId: string, orderRefs: readonly string[]): Promise<ConfirmOrdersOutcome>;
   /** Буфер аккаунта + единицы записи QUANTITY для активных предложений продавца + включение синхронизации [Р-6] */
   enableStockSync(tenantId: string, channelAccountId: string, input: EnableStockSyncInput, actor: StockActor): Promise<EnableStockSyncResult>;
   /** Пересчёт публикуемого количества и записи в канал для изменившихся единиц; null — все товары тенанта */

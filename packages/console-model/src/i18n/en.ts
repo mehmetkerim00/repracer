@@ -552,6 +552,32 @@ export const en = {
       },
       noRight: 'Your role may view stock but not change sources or synchronisation.',
     },
+    /**
+     * Шаг 36 [Р-156]: письмо владельцу. Называет тенанта, канал, причину человеческим языком и ПЕРВОЕ действие —
+     * письмо без первого действия заставляет владельца искать, что делать, и это худшее время для поиска.
+     */
+    alerts: {
+      subject: (severity: string, what: string, tenant: string) => `repracer ${severity}: ${what} (${tenant})`,
+      severity: { CRITICAL: 'urgent', WARNING: 'attention' },
+      tenantLine: (tenant: string) => `Seller account: ${tenant}`,
+      channelLine: (channel: string, marketplaces: string) => `Channel: ${channel} (${marketplaces})`,
+      whenLine: (when: string) => `Happened: ${when}`,
+      firstStepLine: (step: string) => `First step: ${step}`,
+      digestSubject: (count: number, tenant: string) => `repracer: ${count} events of the last hour (${tenant})`,
+      digestIntro: (count: number) => `${count} events that do not need an immediate reaction happened in the last hour:`,
+      digestRow: (code: string, what: string, count: number, when: string) => `- ${what} (${code}) — ${count} times, last at ${when}`,
+      digestFirstStep: 'First step: open the console and check the offers of the channels named above.',
+      unknown: (code: string) => `event ${code}`,
+      unknownStep: 'Open the console: the event is recorded there with its details.',
+      codes: {
+        PRICING_STOPPED_BY_PERSON: { what: 'pricing is stopped by a person', step: 'If this was not you, remove the stop in the console and check who did it: the author is in the audit log.' },
+        PRICING_CHANNEL_DISTRUSTED: { what: 'the channel shows a price other than the one we sent', step: 'Open the console: prices of this channel are stopped until a person lifts the distrust. Compare our price with the price in the channel cabinet.' },
+        PRICE_WRITE_SCOPE_BLOCKED: { what: 'an offer is blocked: its price change did not go through', step: 'Open the offer in the console: the reason of the refusal is written there. Most refusals need an action in the channel cabinet.' },
+        PRICE_WRITE_NOT_SENT: { what: 'a price change was not sent to the channel', step: 'Open the price feed in the console and check the offers of this channel.' },
+        ANALYTICS_EXPORT_BACKLOG: { what: 'the export of competitor history to the analytics store is behind', step: 'No action from you is needed yet: the export catches up by itself. If the message repeats for a day, tell us.' },
+        SCHEDULER_JOB_FAILING: { what: 'a periodic job keeps failing', step: 'No action from you is needed: we see it too. Tell us if prices stop changing.' },
+      },
+    },
     products: {
       title: 'Products',
       totals: (t: { total: number; enabled: number; applying: number; stopped: number; off: number }) => `Total ${t.total}: on ${t.enabled}, in progress ${t.applying}, stopped ${t.stopped}, off ${t.off}.`,

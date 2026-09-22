@@ -1,0 +1,19 @@
+{
+  "name": "@repracer/alert-delivery",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Alert delivery to the seller (Р-156): CRITICAL by email immediately, WARNING as an hourly digest. The message names the tenant, the channel, the reason in human language and the first step.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "dependencies": {
+    "@repracer/console-model": "0.1.0",
+    "@repracer/pricing-store-pg": "0.1.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec test/*.test.ts"
+  }
+}

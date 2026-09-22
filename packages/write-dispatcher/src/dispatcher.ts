@@ -216,7 +216,63 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
     }
   }
 
-  async function runScope(tenantId: string, writeScopeId: string): Promise<ScopeDispatchReport> {
+  /**
+   * Р-155 (шаг 36): готовая к отправке запись может быть не отправлена сразу, а ОТДАНА обходу для пакета. Порядок и
+   * инвариант «одна запись в полёте на единицу» [Р-64, ADR-0005] это не трогает: запись уже захвачена (DISPATCHED),
+   * и в одном пакете не может оказаться двух записей одной единицы — их выдаёт `claimNext`, по одной на единицу.
+   */
+  interface CollectedClaim { tenantId: string; writeScopeId: string; channelAccountId: string; write: FieldWrite; report: ScopeDispatchReport }
+
+  /**
+   * Р-155: отправка ПАКЕТОМ. Сколько записей уходит одним запросом, решает адаптер канала (`planDispatch`): у Kaufland
+   * это до 150 unit одной витрины [K-01], у других каналов — по одной. Диспетчер только собирает совместимые готовые
+   * записи и разносит итоги обратно по единицам — разбор ответа по-прежнему поэлементный.
+   */
+  async function sendBatched(claims: readonly CollectedClaim[]): Promise<void> {
+    const tenantId = claims[0]!.tenantId;
+    const channelAccountId = claims[0]!.channelAccountId;
+    const writes = claims.map((c) => c.write);
+    const byWriteId = new Map(claims.map((c) => [c.write.channelWriteId, c]));
+    const ctx = callContext(tenantId, channelAccountId, `dispatch:batch:${claims[0]!.write.channelWriteId}:${writes.length}`);
+    const outcomes = new Map<string, WriteOutcome>();
+    try {
+      const adapter = await deps.adapterFor(tenantId, channelAccountId);
+      const plan = await adapter.planDispatch(ctx, writes);
+      for (const r of plan.rejected) outcomes.set(r.channelWriteId, { channelWriteId: r.channelWriteId, status: 'REJECTED', error: r.error });
+      for (const batch of plan.batches) {
+        // Пакет с записью одной единицы дважды невозможен: `claimNext` выдаёт по одной записи на единицу, но правило
+        // ядра проверяется и здесь — молчаливое нарушение порядка дороже отказа
+        const scopes = new Set(batch.items.map((w) => w.writeScope.writeScopeId));
+        if (scopes.size !== batch.items.length) {
+          for (const w of batch.items) outcomes.set(w.channelWriteId, { channelWriteId: w.channelWriteId, status: 'REJECTED', error: coreError('VALIDATION', 'PERMANENT', 'batch holds two writes of one scope') });
+          continue;
+        }
+        try {
+          const result = await adapter.dispatch(ctx, batch);
+          for (const o of result.outcomes) outcomes.set(o.channelWriteId, o);
+        } catch (error) {
+          // Исключение после отправки не исключено: итог каждой записи пакета неизвестен, перед повтором — сверка
+          for (const w of batch.items) outcomes.set(w.channelWriteId, { channelWriteId: w.channelWriteId, status: 'OUTCOME_UNKNOWN', error: coreError('UNKNOWN', 'TRANSIENT', String((error as Error).message ?? error).slice(0, 200)) });
+        }
+      }
+    } catch (error) {
+      for (const w of writes) outcomes.set(w.channelWriteId, { channelWriteId: w.channelWriteId, status: 'OUTCOME_UNKNOWN', error: coreError('UNKNOWN', 'TRANSIENT', String((error as Error).message ?? error).slice(0, 200)) });
+    }
+    for (const [writeId, claim] of byWriteId) {
+      const outcome = outcomes.get(writeId)
+        // Адаптер не запланировал запись и не отказал: к каналу обращения не было — повтор безопасен
+        ?? { channelWriteId: writeId, status: 'REJECTED' as const, error: coreError('UNKNOWN', 'TRANSIENT', 'adapter planned no batch for the write') };
+      const recorded = await deps.store.recordOutcome(claim.tenantId, claim.write, outcome, deps.now(), policy);
+      claim.report.steps.push({
+        action: 'DISPATCHED', channelWriteId: claim.write.channelWriteId, version: claim.write.version, attemptNo: claim.write.attemptNo,
+        outcome: outcome.status, recorded: recorded.status, reason: recorded.reason,
+      });
+      await afterRecorded(claim.tenantId, claim.write, recorded);
+      if (outcome.status === 'ACCEPTED' && outcome.appliedImmediately) await checkBasis(claim.tenantId, claim.write, outcome.observation, claim.report);
+    }
+  }
+
+  async function runScope(tenantId: string, writeScopeId: string, collect?: (claim: CollectedClaim) => void): Promise<ScopeDispatchReport> {
     const report: ScopeDispatchReport = { tenantId, writeScopeId, steps: [] };
     for (let i = 0; i < MAX_CLAIMS_PER_CALL; i++) {
       const claim = await deps.store.claimNext(tenantId, writeScopeId, deps.now(), policy);
@@ -249,6 +305,11 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
           continue;
         }
         case 'DISPATCH': {
+          if (collect) {
+            // Запись захвачена и ждёт пакета: отправит её обход, он же запишет итог и продолжит единицу
+            collect({ tenantId, writeScopeId, channelAccountId: claim.channelAccountId, write: claim.write, report });
+            return report;
+          }
           const outcome = await send(tenantId, claim.channelAccountId, claim.write);
           const recorded = await deps.store.recordOutcome(tenantId, claim.write, outcome, deps.now(), policy);
           report.steps.push({
@@ -274,27 +335,55 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
       });
       const unique = [...new Map(due.map((d) => [`${d.tenantId}:${d.writeScopeId}`, d])).values()];
       const reports: ScopeDispatchReport[] = [];
-      let next = 0;
-      const worker = async () => {
-        while (next < unique.length) {
-          const item = unique[next++]!;
-          try {
-            reports.push(await this.dispatchScope(item.tenantId, item.writeScopeId));
-          } catch (error) {
-            // Одна единица не роняет обход остальных, и её сбой не молчит [Р-64]. В алерт — только код ошибки: текст базы может нести суммы
-            const errorCode = String((error as { code?: unknown }).code ?? 'UNKNOWN');
-            reports.push({ tenantId: item.tenantId, writeScopeId: item.writeScopeId, steps: [{ action: 'ERROR', errorCode }] });
-            const key = `${item.tenantId}:${item.writeScopeId}:${errorCode}`;
-            const at = Date.parse(deps.now());
-            const last = scopeErrorAlertedAt.get(key);
-            if (last === undefined || at - last >= SCOPE_ERROR_REALERT_MS) {
-              scopeErrorAlertedAt.set(key, at);
-              await alert(item.tenantId, 'PRICE_WRITE_DISPATCH_ERROR', 'CRITICAL', { writeScopeId: item.writeScopeId, dueKind: item.dueKind, errorCode });
+      /**
+       * Р-155: обход идёт КРУГАМИ. Круг: у каждой единицы берётся её готовая запись (по одной — `claimNext`), готовые
+       * записи одного аккаунта уходят пакетами, итоги разносятся по единицам. Единица, освободившаяся после итога,
+       * участвует в следующем круге: так цепочка версий уходит, как и раньше, но запросов к каналу — на порядок меньше.
+       * Кругов не больше `MAX_CLAIMS_PER_CALL` — столько же захватов на единицу, сколько делал прежний обход.
+       */
+      let pending = unique;
+      for (let round = 0; round < MAX_CLAIMS_PER_CALL && pending.length > 0; round++) {
+        const collected: CollectedClaim[] = [];
+        const roundReports: ScopeDispatchReport[] = [];
+        let next = 0;
+        const worker = async () => {
+          while (next < pending.length) {
+            const item = pending[next++]!;
+            try {
+              roundReports.push(await serialized(`${item.tenantId}:${item.writeScopeId}`,
+                () => runScope(item.tenantId, item.writeScopeId, (claim) => collected.push(claim))));
+            } catch (error) {
+              // Одна единица не роняет обход остальных, и её сбой не молчит [Р-64]. В алерт — только код ошибки
+              const errorCode = String((error as { code?: unknown }).code ?? 'UNKNOWN');
+              roundReports.push({ tenantId: item.tenantId, writeScopeId: item.writeScopeId, steps: [{ action: 'ERROR', errorCode }] });
+              const key = `${item.tenantId}:${item.writeScopeId}:${errorCode}`;
+              const at = Date.parse(deps.now());
+              const last = scopeErrorAlertedAt.get(key);
+              if (last === undefined || at - last >= SCOPE_ERROR_REALERT_MS) {
+                scopeErrorAlertedAt.set(key, at);
+                await alert(item.tenantId, 'PRICE_WRITE_DISPATCH_ERROR', 'CRITICAL', { writeScopeId: item.writeScopeId, dueKind: item.dueKind, errorCode });
+              }
             }
           }
+        };
+        await Promise.all(Array.from({ length: Math.max(1, Math.min(options.concurrency ?? 8, pending.length)) }, worker));
+        // Пакеты — по аккаунту канала: у каждого свои учётные данные, свой лимитер и свои правила группировки
+        const byAccount = new Map<string, CollectedClaim[]>();
+        for (const c of collected) {
+          const key = `${c.tenantId}:${c.channelAccountId}`;
+          byAccount.set(key, [...(byAccount.get(key) ?? []), c]);
         }
-      };
-      await Promise.all(Array.from({ length: Math.max(1, Math.min(options.concurrency ?? 8, unique.length)) }, worker));
+        await Promise.all([...byAccount.values()].map((claims) => sendBatched(claims)));
+        for (const r of roundReports) {
+          const existing = reports.find((x) => x.tenantId === r.tenantId && x.writeScopeId === r.writeScopeId);
+          if (existing) existing.steps.push(...r.steps); else reports.push(r);
+        }
+        // Следующий круг — только единицы, у которых место освободилось и осталась работа
+        const freed = new Set(collected
+          .filter((c) => c.report.steps.some((step) => step.action === 'DISPATCHED' && step.recorded !== 'DISPATCHED' && step.recorded !== 'ACCEPTED'))
+          .map((c) => `${c.tenantId}:${c.writeScopeId}`));
+        pending = pending.filter((item) => freed.has(`${item.tenantId}:${item.writeScopeId}`));
+      }
       return { due: unique.length, reports };
     },
   };

@@ -18,6 +18,13 @@ export interface SchedulerConfig {
   /** svc_exporter: выгрузка суток в ClickHouse */
   exporterPgUrl: string;
   clickHouse: { url: string; ingest: { user: string; password: string }; verifier: { user: string; password: string } };
+  /**
+   * Р-156 (шаг 36): куда и от кого слать письма владельцу. Без настройки процесс не стартует, кроме явного
+   * `REPRACER_SCHEDULER_MAIL=off`: молча не доставлять алерты — худший исход, чем не запуститься.
+   */
+  mail: { apiUrl: string; apiKey: string; from: string } | null;
+  /** svc_alert_delivery: доставка читает алерты всех тенантов и адрес владельца, больше ничего (0120) */
+  alertDeliveryPgUrl: string | null;
   /** Р-127: адрес отметки во внешнем сервисе; без него процесс не стартует, кроме явного REPRACER_SCHEDULER_HEARTBEAT=off */
   heartbeatUrl: string | null;
   metricsPort: number;
@@ -43,8 +50,17 @@ export function loadConfig(env: Env = process.env, read: (path: string) => strin
   if (heartbeatUrl && !heartbeatUrl.startsWith('https://')) throw new ConfigError('CONFIG_INVALID: REPRACER_SCHEDULER_HEARTBEAT_URL must be https');
   const access = env.REPRACER_KAUFLAND_BUY_BOX_CHANGED_ACCESS ?? 'NOT_GRANTED';
   if (access !== 'GRANTED' && access !== 'NOT_GRANTED') throw new ConfigError('CONFIG_INVALID: REPRACER_KAUFLAND_BUY_BOX_CHANGED_ACCESS must be GRANTED or NOT_GRANTED');
+  const mailOff = env.REPRACER_SCHEDULER_MAIL === 'off';
+  const mail = mailOff ? null : {
+    apiUrl: required(env.REPRACER_MAIL_API_URL, 'REPRACER_MAIL_API_URL (or REPRACER_SCHEDULER_MAIL=off)'),
+    apiKey: required(secret(env, 'REPRACER_MAIL_API_KEY', read), 'REPRACER_MAIL_API_KEY (or REPRACER_SCHEDULER_MAIL=off)'),
+    from: required(env.REPRACER_MAIL_FROM, 'REPRACER_MAIL_FROM (or REPRACER_SCHEDULER_MAIL=off)'),
+  };
+  if (mail && !mail.apiUrl.startsWith('https://')) throw new ConfigError('CONFIG_INVALID: REPRACER_MAIL_API_URL must be https');
   return {
     owner: env.REPRACER_SCHEDULER_OWNER || `${hostname()}-${process.pid}`,
+    mail,
+    alertDeliveryPgUrl: mail ? required(secret(env, 'REPRACER_ALERT_DELIVERY_PG_URL', read), 'REPRACER_ALERT_DELIVERY_PG_URL (or REPRACER_SCHEDULER_MAIL=off)') : null,
     // 30 с по умолчанию: наибольшая пауза; сроки работ короче такта процесс ловит пробуждением к сроку
     tickMs: int(env, 'REPRACER_SCHEDULER_TICK_MS', 30_000, 1_000, 300_000),
     schedulerPgUrl: required(secret(env, 'REPRACER_SCHEDULER_PG_URL', read), 'REPRACER_SCHEDULER_PG_URL'),

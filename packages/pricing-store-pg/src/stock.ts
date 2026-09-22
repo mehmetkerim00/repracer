@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { Instant, OrderLine } from '@repracer/channel-port';
 import {
+  type ConfirmOrdersOutcome,
   availableOf, publishedQuantity, type CreateStockSourceResult, type EnableStockSyncInput, type EnableStockSyncResult, type InboundStockOutcome, type InboundStockRow,
   type OrderLinesOutcome, type RecalculationOutcome, type StockActor, type StockChannelRow, type StockDivergenceRow, type StockImportOutcome, type StockImportRow,
   type StockPage, type StockRow, type StockSourceMode, type StockSourceRow, type StockStore,
@@ -280,9 +281,32 @@ export class PgStockStore implements StockStore {
     });
   }
 
+  /**
+   * Р-157 (шаг 36, OQ-217): источник Inbound API сообщает «заказ учтён» — резервации этого заказа переходят в
+   * CONFIRMED_BY_SOURCE функцией базы `confirm_reservations_by_source` (она же сверяет, что пул принадлежит источнику).
+   * Повтор вызова безвреден: уже подтверждённые заказы названы отдельно, как и заказы, которых у источника нет.
+   */
+  async confirmInboundOrders(tenantId: string, stockSourceId: string, orderRefs: readonly string[]): Promise<ConfirmOrdersOutcome> {
+    return inTenant(this.options.stockPool, tenantId, async (tx) => {
+      const out: ConfirmOrdersOutcome = { confirmed: 0, alreadyConfirmed: [], unknownOrders: [] };
+      for (const ref of orderRefs) {
+        const { rows: [r] } = await tx.query(`SELECT channel_data.confirm_reservations_by_source($1, $2) AS n`, [stockSourceId, ref]);
+        const n = Number(r!.n);
+        if (n > 0) { out.confirmed += n; continue; }
+        // Ноль подтверждённых — либо заказ уже закрыт, либо его резерваций у этого источника нет; продавцу это разные вещи
+        const { rows: [known] } = await tx.query(
+          `SELECT count(*)::int AS n FROM channel_data.reservation r JOIN tenant_data.stock_pool sp
+                  ON sp.tenant_id = r.tenant_id AND sp.stock_pool_id = r.stock_pool_id
+            WHERE r.tenant_id = $1 AND r.channel_order_ref = $2 AND sp.stock_source_id = $3`, [tenantId, ref, stockSourceId]);
+        if (Number(known!.n) > 0) out.alreadyConfirmed.push(ref); else out.unknownOrders.push(ref);
+      }
+      return out;
+    });
+  }
+
   async recordOrderLines(tenantId: string, channelAccountId: string, lines: readonly OrderLine[], now: Instant): Promise<OrderLinesOutcome> {
     return inTenant(this.options.stockPool, tenantId, async (tx) => {
-      const out: OrderLinesOutcome = { created: 0, consumed: 0, released: 0, unknownOffers: 0, productIds: [] };
+      const out: OrderLinesOutcome = { created: 0, consumed: 0, released: 0, unknownOffers: 0, awaitingConfirmation: 0, productIds: [] };
       const touched = new Set<string>();
       for (const line of lines) {
         const id = line.identity;
@@ -313,11 +337,17 @@ export class PgStockStore implements StockStore {
             await tx.query(`UPDATE channel_data.reservation SET status = 'CONFIRMED_BY_SOURCE', confirmed_at = now(), confirmed_by_stock_source_id = $3, confirmed_external_order_ref = $4 WHERE tenant_id = $1 AND reservation_id = $2`,
               [tenantId, r!.reservation_id, pool.stock_source_id, line.externalOrderRef]);
           }
-          if (line.status === 'SHIPPED') await this.consume(tx, tenantId, r!.reservation_id, out, offer.product_id, touched);
+          // Отгрузка по только что созданной резервации: списать пул можно лишь после подтверждения источником [Р-25]
+          if (line.status === 'SHIPPED') {
+            if (pool.source_mode === 'INTERNAL_POOL') await this.consume(tx, tenantId, r!.reservation_id, out, offer.product_id, touched);
+            else out.awaitingConfirmation += 1;
+          }
           continue;
         }
         if (existing.status === 'CONSUMED' || existing.status === 'RELEASED') continue;
         if (line.status === 'SHIPPED' && existing.status === 'CONFIRMED_BY_SOURCE') await this.consume(tx, tenantId, existing.reservation_id, out, offer.product_id, touched);
+        // Р-157: отгружено, но источник заказ ещё не подтвердил — это НЕ тишина, а названное число: ждём подтверждения
+        else if (line.status === 'SHIPPED') out.awaitingConfirmation += 1;
         else if (line.status === 'CANCELLED') {
           await tx.query(`UPDATE channel_data.reservation SET status = 'RELEASED', released_at = now(), release_reason = 'ORDER_CANCELLED' WHERE tenant_id = $1 AND reservation_id = $2`, [tenantId, existing.reservation_id]);
           out.released += 1; touched.add(offer.product_id);

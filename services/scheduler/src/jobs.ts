@@ -38,12 +38,14 @@ export interface JobConfig {
   exportOffsetSeconds: number;
   exportLookbackDays: number;
   maintenanceEverySeconds: number;
+  /** Р-156: как часто заходит доставка алертов; дайджест WARNING всё равно уходит раз в час */
+  alertsDeliverEverySeconds: number;
 }
 
 export const DEFAULT_JOB_CONFIG: JobConfig = {
   pollEverySeconds: 60, pollBudgetRps: 10, pollMaxQueries: 600, lossReviewEverySeconds: 300, lossGraceSeconds: DEFAULT_LOSS_GRACE_SECONDS,
   amazonCallSeconds: 31, amazonBatch: 20, amazonCircleWarnHours: 24, haltReviewEverySeconds: 300, discoveryEverySeconds: 86_400, orderLinesEverySeconds: 300,
-  exportOffsetSeconds: 1_800, exportLookbackDays: 13, maintenanceEverySeconds: 3_600,
+  exportOffsetSeconds: 1_800, exportLookbackDays: 13, maintenanceEverySeconds: 3_600, alertsDeliverEverySeconds: 60,
 };
 
 export interface JobDeps {
@@ -74,6 +76,11 @@ export interface JobDeps {
     databaseNow(): Promise<Instant>;
   };
   /**
+   * Р-156 (шаг 36): доставка алертов владельцу — CRITICAL письмом немедленно, WARNING часовым дайджестом. Без неё алерт
+   * живёт только в базе и считается недоставленным; процесс без настроенной почты не стартует, если её не выключили явно.
+   */
+  alertDelivery?: { deliver(): Promise<{ immediate: number; digests: number; delivered: number; failed: number }> };
+  /**
    * Шаг 35 [Р-25, Р-152]: заказы канала → резервации → пересчёт публикуемого остатка → записи. Без хранилища остатков в
    * процессе работы нет; процесс без роли остатков — конфигурация, а не молчаливый пропуск.
    */
@@ -98,6 +105,7 @@ export const JOB_CATALOG: JobCatalogEntry[] = [
   { name: 'analytics-export-day', scope: 'GLOBAL', when: 'сутки UTC, в 00:30 следующих суток', missed: 'EVERY_SLOT: каждые пропущенные сутки выгружаются по очереди; провалившиеся, непроверенные и изменившиеся после проверки сутки повторяются каждым запуском из отставания (13 суток); секции журнала не удаляются без проверенной выгрузки; отставание CRITICAL — с 72 часов, принудительное удаление через 14 суток — CRITICAL ANALYTICS_PARTITION_FORCE_DROPPED' },
   { name: 'price-days-close', scope: 'GLOBAL', when: 'каждый час', missed: 'LATEST: функция закрывает все незакрытые сутки по очереди; сырьё цен не удаляется, пока сутки не закрыты' },
   { name: 'partitions', scope: 'GLOBAL', when: 'каждый час', missed: 'LATEST: секции созданы на 3 суток вперёд; простой дольше — отказ записи снимков и цен (CRITICAL через 2 суток)' },
+  { name: 'alerts-deliver', scope: 'GLOBAL', when: 'каждую минуту', missed: 'LATEST: письма уходят позже; CRITICAL, поднятый во время простоя, ждёт следующего запуска — алерт остаётся в базе без отметки доставки, и это видно запросом [Р-156]' },
   { name: 'retention', scope: 'GLOBAL', when: 'каждый час', missed: 'LATEST: удаление по сроку откладывается, данные хранятся дольше — PostgreSQL растёт; неподтверждённые резервации висят дольше TTL, и доступный остаток занижен всё это время; алерт о подтверждённой резервации старше 14 суток [Р-30] приходит позже' },
 ];
 
@@ -189,6 +197,18 @@ export function jobSource(deps: JobDeps): JobSource {
         lagWarningSeconds: hours(6), lagCriticalSeconds: hours(48), leaseSeconds: 600,
         async run({ now: n }) { await deps.maintenance.ensurePartitions(n); return { items: 0 }; },
       });
+      if (deps.alertDelivery) {
+        const delivery = deps.alertDelivery;
+        specs.push({
+          name: 'alerts-deliver', scope: null, retryKind: 'INTERNAL', intervalSeconds: cfg.alertsDeliverEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,
+          lagWarningSeconds: 600, lagCriticalSeconds: hours(2), leaseSeconds: 300,
+          async run() {
+            // Провал отправки работу не роняет: попытка засчитана в базе, алерт остаётся недоставленным и уйдёт следующим заходом
+            const r = await delivery.deliver();
+            return { items: r.delivered };
+          },
+        });
+      }
       specs.push({
         name: 'retention', scope: null, retryKind: 'INTERNAL', intervalSeconds: cfg.maintenanceEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,
         lagWarningSeconds: hours(6), lagCriticalSeconds: hours(168), leaseSeconds: 1800,

@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0119_verify_schema_invariants_v31.sql';
+const VERIFY = 'migrations/0121_verify_schema_invariants_v32.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -1202,6 +1202,33 @@ export const STEP32_ROWS = [
       // Сам разбор видов: объявить экран различий «только просмотром» значит отдать чужую начатую правку любому участнику
       m(replaceInFunction('security.bulk_job_cancel_action(text)', "p_kind IN ('PRICE_EVIDENCE', 'PRICE_FEED_EXPORT')", 'true'),
         smoke('a member cancels the bounds diff job of another member without the right to it (Р-143)')),
+    ],
+  },
+];
+
+/**
+ * Шаг 36 [Р-156]: алерт в базе и его доставка владельцу. Каждая новая защита — своя строка при создании [Р-108],
+ * и каждая ловится своей проверкой [Р-99].
+ */
+export const STEP36_ROWS = [
+  {
+    row: 'Р-156',
+    invariant: 'алерт неизменяем, поднимается недоставленным, доставка отмечается один раз и видом, который соответствует уровню',
+    mutations: [
+      m(dropConstraint('alert_delivered_names_kind', 'tenant_data.alert'), smoke('delivery recorded without naming how (Р-156)')),
+      m(dropConstraint('alert_digest_is_warning_only', 'tenant_data.alert'), smoke('a CRITICAL alert delivered as an hourly digest (Р-156)')),
+      m(dropConstraint('alert_severity_known', 'tenant_data.alert'), smoke('an alert of an unknown severity (Р-156)')),
+      m(dropConstraint('alert_code_shape', 'tenant_data.alert'), smoke('an alert code that is not a code (Р-156)')),
+      // Неизменяемость события держится правом ПО СТОЛБЦАМ: дай доставке всю таблицу — и она перепишет код события
+      m('GRANT UPDATE ON tenant_data.alert TO repracer_alert_delivery', smoke('rewriting the code of a raised alert (Р-156)')),
+      // Поднять алерт «уже доставленным» — получить отметку, не отправив письма
+      m(replaceInFunction('tenant_data.alert_before_write()',
+        "IF NEW.delivered_at IS NOT NULL THEN\n      RAISE EXCEPTION 'an alert cannot be raised as already delivered (Р-156)' USING ERRCODE = 'integrity_constraint_violation';\n    END IF;", ''),
+        smoke('an alert raised as already delivered (Р-156)')),
+      // Вторая отметка доставки скрыла бы второе письмо о том же событии
+      m(replaceInFunction('tenant_data.alert_before_write()',
+        "IF OLD.delivered_at IS NOT NULL AND NEW.delivered_at IS DISTINCT FROM OLD.delivered_at THEN", 'IF false THEN'),
+        smoke('recording a second delivery of the same alert (Р-156)')),
     ],
   },
 ];

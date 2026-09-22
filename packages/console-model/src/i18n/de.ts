@@ -554,6 +554,31 @@ export const de: Messages = {
       },
       noRight: 'Ihre Rolle darf den Bestand sehen, aber Quellen und Abgleich nicht ändern.',
     },
+    /**
+     * Шаг 36 [Р-156]: письмо владельцу. Называет тенанта, канал, причину человеческим языком и ПЕРВОЕ действие.
+     */
+    alerts: {
+      subject: (severity: string, what: string, tenant: string) => `repracer ${severity}: ${what} (${tenant})`,
+      severity: { CRITICAL: 'dringend', WARNING: 'zur Kenntnis' },
+      tenantLine: (tenant: string) => `Verkäuferkonto: ${tenant}`,
+      channelLine: (channel: string, marketplaces: string) => `Kanal: ${channel} (${marketplaces})`,
+      whenLine: (when: string) => `Passiert: ${when}`,
+      firstStepLine: (step: string) => `Erster Schritt: ${step}`,
+      digestSubject: (count: number, tenant: string) => `repracer: ${count} Ereignisse der letzten Stunde (${tenant})`,
+      digestIntro: (count: number) => `In der letzten Stunde gab es ${count} Ereignisse, die keine sofortige Reaktion brauchen:`,
+      digestRow: (code: string, what: string, count: number, when: string) => `- ${what} (${code}) — ${count}-mal, zuletzt um ${when}`,
+      digestFirstStep: 'Erster Schritt: Öffnen Sie die Konsole und prüfen Sie die Angebote der genannten Kanäle.',
+      unknown: (code: string) => `Ereignis ${code}`,
+      unknownStep: 'Öffnen Sie die Konsole: Das Ereignis ist dort mit seinen Einzelheiten festgehalten.',
+      codes: {
+        PRICING_STOPPED_BY_PERSON: { what: 'Die Preispflege wurde von einer Person gestoppt', step: 'Waren Sie das nicht, heben Sie den Stopp in der Konsole auf und prüfen Sie, wer ihn gesetzt hat: Der Urheber steht im Prüfprotokoll.' },
+        PRICING_CHANNEL_DISTRUSTED: { what: 'Der Kanal zeigt einen anderen Preis als den gesendeten', step: 'Öffnen Sie die Konsole: Die Preise dieses Kanals stehen still, bis ein Mensch das Misstrauen aufhebt. Vergleichen Sie unseren Preis mit dem Preis im Kanal-Konto.' },
+        PRICE_WRITE_SCOPE_BLOCKED: { what: 'Ein Angebot ist blockiert: Seine Preisänderung ging nicht durch', step: 'Öffnen Sie das Angebot in der Konsole: Der Grund der Ablehnung steht dort. Die meisten Ablehnungen brauchen eine Handlung im Kanal-Konto.' },
+        PRICE_WRITE_NOT_SENT: { what: 'Eine Preisänderung wurde nicht an den Kanal gesendet', step: 'Öffnen Sie die Preisänderungen in der Konsole und prüfen Sie die Angebote dieses Kanals.' },
+        ANALYTICS_EXPORT_BACKLOG: { what: 'Der Export der Wettbewerbshistorie ist im Rückstand', step: 'Von Ihnen ist noch nichts zu tun: Der Export holt selbst auf. Wiederholt sich die Meldung einen Tag lang, sagen Sie uns Bescheid.' },
+        SCHEDULER_JOB_FAILING: { what: 'Eine periodische Arbeit scheitert wiederholt', step: 'Von Ihnen ist nichts zu tun: Wir sehen es ebenfalls. Melden Sie sich, wenn die Preise sich nicht mehr ändern.' },
+      },
+    },
     products: {
       title: 'Produkte',
       totals: (t: { total: number; enabled: number; applying: number; stopped: number; off: number }) => `Gesamt ${t.total}: an ${t.enabled}, in Arbeit ${t.applying}, gestoppt ${t.stopped}, aus ${t.off}.`,

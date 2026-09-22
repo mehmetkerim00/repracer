@@ -197,3 +197,107 @@ test('Р-97, Р-100: остатки ведёт человек с правом н
   // движение ORDER_SHIPPED вставил триггер под ролью остатков — оно не административное
   assert.deepEqual([a.sources, a.allocations, a.movements], [2, 2, 2]);
 });
+
+test('Р-157: резервация Inbound API ждёт подтверждения источника — отгрузка до него не списывает пул и названа числом', async () => {
+  /**
+   * Шаг 36 [Р-157], остаток находки 13 ревью шага 35 и OQ-217: подтверждать резервацию Inbound API было НЕКОМУ, и
+   * отгрузка по неподтверждённой резервации пропадала молча — ни списания, ни числа. Теперь источник подтверждает заказ
+   * сам (`confirmInboundOrders`), а отгрузка до подтверждения считается в `awaitingConfirmation`.
+   *
+   * Состояние мира к этому тесту выведено из предыдущих, а не спрошено у проверяемых функций: товар 1 — внутренний пул
+   * 9 штук (10 по инвентаризации минус одна отгрузка теста Р-25), товар 2 — 3 во внутреннем пуле и 20 в пуле Inbound API,
+   * из них 2 держит неподтверждённая резервация `ttl-a`. Распределение канала — буфер 7, потолок 5, порог 3.
+   */
+  const account = world.ids.dbId(KAUFLAND);
+  const inboundSources = (await store.stockSources(world.tenantId)).filter((s) => s.mode === 'INBOUND_API');
+  assert.equal(inboundSources.length, 1, 'источник Inbound API в мире ровно один — тот, что завёл тест выше');
+  const sourceId = inboundSources[0]!.stockSourceId;
+  const line = (ref: string, status: 'OPEN' | 'SHIPPED', quantity: number, offer: string) => ({
+    externalOrderRef: `r157-${ref}`, externalOrderLineRef: `r157-line-${ref}`, identity: { marketplace: 'de', externalOfferId: offer }, quantity, orderedAt: now(), status,
+  });
+  /** Состояние резервации в базе: статус и заполненность полей подтверждения — по строке, а не по ответу хранилища */
+  const reservationOf = async (ref: string) => {
+    const [r] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
+      `SELECT status, source_mode, quantity, confirmed_at IS NOT NULL AS confirmed, confirmed_by_stock_source_id, confirmed_external_order_ref, consumed_at IS NOT NULL AS consumed
+         FROM channel_data.reservation WHERE channel_order_ref = $1`, [`r157-${ref}`])).rows);
+    return r as { status: string; source_mode: string; quantity: number; confirmed: boolean; confirmed_by_stock_source_id: string | null; confirmed_external_order_ref: string | null; consumed: boolean };
+  };
+  const shippedMovements = async () => {
+    const [m] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
+      `SELECT count(*)::int AS n, coalesce(sum(delta), 0)::int AS d FROM tenant_data.stock_movement WHERE reason = 'ORDER_SHIPPED'`)).rows);
+    return [Number(m.n), Number(m.d)] as [number, number];
+  };
+  const stockOf = async (sku: string) => {
+    const r = (await store.stockPage(world.tenantId, { offset: 0, limit: 10 })).items.find((x) => x.sku === sku)!;
+    return [r.onHand, r.reserved, r.available] as [number, number, number];
+  };
+
+  // Предпосылка теста: одна отгрузка внутреннего пула уже была, товар 2 держит 20 + 3 штуки и 2 из них зарезервированы
+  assert.deepEqual(await shippedMovements(), [1, -1], 'до этого теста списание по отгрузке было ровно одно — внутреннего пула');
+  assert.deepEqual(await stockOf('syn-prod-2'), [23, 2, 21]);
+
+  // 1. Заказ на товар с пулом Inbound API: пул источника больше внутреннего (20 против 3), резервация создаётся в нём
+  const opened = await store.recordOrderLines(world.tenantId, account, [line('a', 'OPEN', 4, 'SYN-OFFER-2')], now());
+  assert.deepEqual([opened.created, opened.consumed, opened.released, opened.unknownOffers, opened.awaitingConfirmation], [1, 0, 0, 0, 0]);
+  const created = await reservationOf('a');
+  assert.deepEqual([created.status, created.source_mode, created.confirmed, created.confirmed_by_stock_source_id], ['CREATED', 'INBOUND_API', false, null],
+    'резервация Inbound API не подтверждается сама собой — подтверждает источник [Р-25]');
+  // 23 в пулах, резервации 2 (ttl-a) + 4 (эта) = 6, доступное 23 − 6 = 17
+  assert.deepEqual(await stockOf('syn-prod-2'), [23, 6, 17]);
+
+  // 2. Отгрузка по неподтверждённой резервации: пул НЕ списывается, движения нет, и строка не пропадает — она названа числом
+  const shippedEarly = await store.recordOrderLines(world.tenantId, account, [line('a', 'SHIPPED', 4, 'SYN-OFFER-2')], now());
+  assert.deepEqual([shippedEarly.consumed, shippedEarly.awaitingConfirmation, shippedEarly.released], [0, 1, 0]);
+  assert.equal((await reservationOf('a')).status, 'CREATED', 'резервация осталась открытой: списывать пул, пока источник молчит, нельзя');
+  assert.deepEqual(await shippedMovements(), [1, -1], 'нового движения ORDER_SHIPPED не появилось');
+  assert.deepEqual(await stockOf('syn-prod-2'), [23, 6, 17], 'остаток и доступное не изменились');
+
+  // 3. Та же строка, пришедшая СРАЗУ отгруженной: резервация создаётся и тоже ждёт подтверждения, а не списывается
+  const bornShipped = await store.recordOrderLines(world.tenantId, account, [line('b', 'SHIPPED', 1, 'SYN-OFFER-2')], now());
+  assert.deepEqual([bornShipped.created, bornShipped.consumed, bornShipped.awaitingConfirmation], [1, 0, 1]);
+  assert.equal((await reservationOf('b')).status, 'CREATED');
+  assert.deepEqual(await stockOf('syn-prod-2'), [23, 7, 16], 'резервации 2 + 4 + 1 = 7');
+
+  // 4. Положительный контроль: у внутреннего пула источник — мы сами, и такая же строка списывает пул тем же вызовом.
+  // Товар 1: 9 штук, отгружена 1 → 8; движение вставляет триггер базы, а не код
+  const internal = await store.recordOrderLines(world.tenantId, account, [line('c', 'SHIPPED', 1, 'SYN-OFFER-1')], now());
+  assert.deepEqual([internal.created, internal.consumed, internal.awaitingConfirmation], [1, 1, 0], 'внутренний пул подтверждения источника не ждёт');
+  assert.deepEqual(await shippedMovements(), [2, -2]);
+  assert.deepEqual(await stockOf('syn-prod-1'), [8, 0, 8]);
+
+  // 5. Источник подтверждает ОБА своих заказа: статус, момент, источник и номер заказа — в строке базы
+  const confirmed = await store.confirmInboundOrders(world.tenantId, sourceId, ['r157-a', 'r157-b']);
+  assert.deepEqual(confirmed, { confirmed: 2, alreadyConfirmed: [], unknownOrders: [] });
+  for (const [ref, quantity] of [['a', 4], ['b', 1]] as const) {
+    const r = await reservationOf(ref);
+    assert.deepEqual([r.status, r.confirmed, r.confirmed_by_stock_source_id, r.confirmed_external_order_ref, r.quantity],
+      ['CONFIRMED_BY_SOURCE', true, sourceId, `r157-${ref}`, quantity], `заказ r157-${ref}: подтверждение несёт свой источник и свой номер заказа`);
+  }
+  // Подтверждается ТОЛЬКО названный заказ: резервация `ttl-a` того же источника и того же товара осталась неподтверждённой
+  const [others] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
+    `SELECT count(*)::int AS n FROM channel_data.reservation WHERE status = 'CREATED'`)).rows);
+  assert.equal(Number(others.n), 1, 'чужой заказ подтверждение не задело — открытой осталась резервация теста TTL');
+
+  // 6. Повтор безвреден и различает два случая: уже подтверждённый заказ и заказ, которого у источника нет вовсе
+  assert.deepEqual(await store.confirmInboundOrders(world.tenantId, sourceId, ['r157-a', 'r157-nie-gesehen']),
+    { confirmed: 0, alreadyConfirmed: ['r157-a'], unknownOrders: ['r157-nie-gesehen'] });
+  // Заказ ЧУЖОГО источника для этого источника неизвестен: внутренний пул подтверждает себя сам, и его заказа здесь нет
+  const foreign = (await store.stockSources(world.tenantId)).find((s) => s.mode === 'INTERNAL_POOL')!;
+  assert.deepEqual(await store.confirmInboundOrders(world.tenantId, sourceId, ['r157-c']), { confirmed: 0, alreadyConfirmed: [], unknownOrders: ['r157-c'] },
+    'заказ внутреннего пула источнику Inbound API не принадлежит');
+  assert.deepEqual(await store.confirmInboundOrders(world.tenantId, foreign.stockSourceId, ['r157-a']), { confirmed: 0, alreadyConfirmed: [], unknownOrders: ['r157-a'] },
+    'и наоборот: внутренний источник не подтверждает заказ Inbound API');
+
+  // 7. ПОСЛЕ подтверждения та же строка «отгружено» закрывает резервацию — доступное освобождается
+  const shippedAfter = await store.recordOrderLines(world.tenantId, account, [line('a', 'SHIPPED', 4, 'SYN-OFFER-2'), line('b', 'SHIPPED', 1, 'SYN-OFFER-2')], now());
+  assert.deepEqual([shippedAfter.consumed, shippedAfter.awaitingConfirmation], [2, 0], 'подтверждённая резервация списывается, и ждать больше нечего');
+  assert.deepEqual([(await reservationOf('a')).status, (await reservationOf('a')).consumed], ['CONSUMED', true]);
+  /**
+   * Пул Inbound API движением НЕ списывается, и это не пробел проверки: остаток пула источника — не наш [Р-6], журнал
+   * движений заведён только для внутреннего пула (0007: `stock_movement.source_mode` может быть лишь `INTERNAL_POOL`),
+   * а новое количество присылает сам источник. Поэтому после отгрузки 5 штук по подтверждённым резервациям физический
+   * остаток товара 2 остаётся прежним (23), а освобождается только зарезервированное: 23 − 2 = 21 доступно.
+   */
+  assert.deepEqual(await shippedMovements(), [2, -2], 'движений по-прежнему два — оба у внутреннего пула');
+  assert.deepEqual(await stockOf('syn-prod-2'), [23, 2, 21]);
+});

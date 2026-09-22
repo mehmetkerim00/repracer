@@ -177,23 +177,48 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
      * `Authorization: Bearer <ключ>`; ключ находится по префиксу и отпечатку ДО контекста тенанта. Неверный ключ — 401 без
      * подробностей. Устаревшее значение (asOf не новее известного) не применяется и называется в ответе.
      */
+    /**
+     * Ключ Inbound API находится по префиксу и отпечатку ДО контекста тенанта, а мир выбирается по ТЕНАНТУ ключа [Р-31]:
+     * миры одной базы находят ключи друг друга, и первый в списке забирал бы чужой (находка 5 ревью шага 35).
+     */
+    const inboundKeyHolder = async () => {
+      const raw = req.authorization?.startsWith('Bearer ') ? req.authorization.slice(7).trim() : '';
+      if (!/^rpk_[0-9a-f]{12}\.[0-9a-f]{48}$/.test(raw)) return null;
+      const prefix = raw.split('.')[0] ?? '';
+      for (const w of worlds) {
+        const r = await w.stock.resolveInboundKey(prefix, createHash('sha256').update(raw).digest('hex'));
+        if (!r) continue;
+        const own = worlds.find((x) => x.tenantId === r.tenantId);
+        return own ? { ...r, world: own } : null;
+      }
+      return null;
+    };
+
+    /**
+     * Р-157 (шаг 36, OQ-217): источник сообщает «заказ учтён» — резервации этого заказа закрываются сразу. Освобождение
+     * по сроку [Р-25] остаётся страховкой: до шага 36 подтверждать резервацию Inbound API было НЕКОМУ, и единственным
+     * путём был TTL — товар уже отгружен, а доступный остаток занижен сутки.
+     */
+    if (parts[0] === 'inbound' && parts[1] === 'v1' && parts[2] === 'orders') {
+      if (req.method !== 'POST') return fail(405, 'METHOD', s.method);
+      const resolved = await inboundKeyHolder();
+      if (!resolved) return fail(401, 'UNAUTHORIZED', s.unauthenticated);
+      const refs = Array.isArray(body.orders) ? (body.orders as unknown[]) : null;
+      if (!refs || refs.length === 0 || refs.length > INBOUND_ROWS_MAX) return fail(400, 'BAD_ROWS', s.badRequest);
+      const parsedRefs: string[] = [];
+      for (const r of refs) {
+        const x = r as Record<string, unknown>;
+        const ref = typeof x.externalOrderRef === 'string' ? x.externalOrderRef.trim() : '';
+        if (ref === '') return fail(400, 'BAD_ROWS', s.badRequest);
+        parsedRefs.push(ref);
+      }
+      const outcome = await resolved.world.stock.confirmInboundOrders(resolved.tenantId, resolved.stockSourceId, parsedRefs);
+      return ok(outcome);
+    }
+
     if (parts[0] === 'inbound' && parts[1] === 'v1' && parts[2] === 'stock') {
       if (req.method !== 'POST') return fail(405, 'METHOD', s.method);
-      const raw = req.authorization?.startsWith('Bearer ') ? req.authorization.slice(7).trim() : '';
-      const prefix = raw.split('.')[0] ?? '';
-      const resolved = /^rpk_[0-9a-f]{12}\.[0-9a-f]{48}$/.test(raw)
-        ? await (async () => {
-            // Мир выбирается по ТЕНАНТУ ключа [Р-31], а не по тому, чьё хранилище его нашло: миры одной базы находят ключи
-            // друг друга, и первый в списке забирал бы чужой ключ (находка 5 ревью шага 35 и её повторная проверка)
-            for (const w of worlds) {
-              const r = await w.stock.resolveInboundKey(prefix, createHash('sha256').update(raw).digest('hex'));
-              if (!r) continue;
-              const own = worlds.find((x) => x.tenantId === r.tenantId);
-              return own ? { ...r, world: own } : null;
-            }
-            return null;
-          })()
-        : null;
+      const resolved = await inboundKeyHolder();
       if (!resolved) return fail(401, 'UNAUTHORIZED', s.unauthenticated);
       const rows = Array.isArray(body.rows) ? (body.rows as unknown[]) : null;
       if (!rows || rows.length === 0 || rows.length > INBOUND_ROWS_MAX) return fail(400, 'BAD_ROWS', s.badRequest);

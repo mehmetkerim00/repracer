@@ -63,6 +63,8 @@ export interface KauflandLiveWorld {
   betweenTicks(): Promise<void>;
   /** Путь решения, вызываемый планировщиком с идентификаторами базы */
   pipelineForDbIds(): PricingPipeline;
+  /** Диспетчер мира целиком: обход собирает готовые записи в пакеты [Р-155] */
+  dispatcher: WriteDispatcher;
   /** Отправка ждущих записей единицы — как делает путь решения за брокером, по идентификаторам базы */
   dispatchScope(tenantId: string, writeScopeId: string): Promise<void>;
   /** Шаг 35: остатки мира (null — мир без остатков) */
@@ -222,7 +224,7 @@ export async function kauflandLiveWorld(input: {
     await stock.recalculate(seeded.tenantId, null, clock.iso() as never);
   }
   return {
-    channel: 'KAUFLAND', clock, world, seeded, adapter, simulator, pipeline, products: input.products, events: events.list, violations, buyboxCalls, requests,
+    channel: 'KAUFLAND', clock, world, seeded, adapter, simulator, pipeline, dispatcher, products: input.products, events: events.list, violations, buyboxCalls, requests,
     stock, stockPipeline,
     async betweenTicks() {
       // Трасса запросов проверке не нужна и за сутки растёт до сотен тысяч строк
