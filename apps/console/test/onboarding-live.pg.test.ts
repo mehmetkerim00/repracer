@@ -128,7 +128,7 @@ before(async () => {
   const startIso = new Date(Date.UTC(tomorrow.getUTCFullYear(), tomorrow.getUTCMonth(), tomorrow.getUTCDate(), 9, 0, 0)).toISOString();
   demo = await demoWorld({
     tag: 3401, startIso, bare: true, appPool, adminPool, provisioningPool, dispatcherPool: db.pool('svc_dispatcher', 2),
-    schedulerPool: db.pool('svc_scheduler', 3), exporterPool: db.pool('svc_exporter', 2),
+    schedulerPool: db.pool('svc_scheduler', 3), exporterPool: db.pool('svc_exporter', 2), stockPool: db.pool('svc_stock', 2),
   });
   const seeded = demo.live.seeded;
   const store = new PgPricingStore(appPool, { adminPool, bulkWorkerPool: db.pool('svc_bulk_worker', 2) });

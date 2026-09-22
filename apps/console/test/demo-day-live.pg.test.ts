@@ -4,7 +4,8 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { StandToken, WorldSummary } from '../src/api-types.ts';
 import { STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
-import { demoWorld, DEMO_OFFERS, type DemoWorld } from '@repracer/contract-tests/live';
+import { demoWorld, DEMO_OFFERS, DEMO_ON_HAND, type DemoWorld } from '@repracer/contract-tests/live';
+import type { StockDivergencesView, StockView } from '@repracer/console-model';
 import { createAuthenticator, MemoryIdentityDirectory, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
 import { PgPricingStore, PgStockStore, type PgPool } from '@repracer/pricing-store-pg';
@@ -47,6 +48,12 @@ async function get<T>(operation: string, url: string): Promise<{ status: number;
   return { status: r.status, body: (text ? JSON.parse(text) : null) as T, bytes, seconds };
 }
 
+/** Токен стенда живёт час, а сутки демо идут полтора: перед обходом экранов продавец входит заново — как и в жизни */
+async function signIn(): Promise<void> {
+  const token = await fetch(`${origin}/api/stand-issuer/token?locale=de`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ role: 'OWNER' }) });
+  owner = { authorization: `Bearer ${((await token.json()) as StandToken).accessToken}`, cookie: 'repracer_locale=de' };
+}
+
 before(async () => {
   db = await createIsolatedDatabase('demoday');
   const appPool: PgPool = db.pool('svc_app', 4);
@@ -57,7 +64,7 @@ before(async () => {
   // bare: false — мир уже настроен (себестоимость, границы, стратегия, движок включён): как после пройденного онбординга
   demo = await demoWorld({
     tag: 3500, startIso, bare: false, appPool, adminPool, provisioningPool: db.pool('svc_provisioning', 1), dispatcherPool: db.pool('svc_dispatcher', 2),
-    schedulerPool: db.pool('svc_scheduler', 3), exporterPool: db.pool('svc_exporter', 2),
+    schedulerPool: db.pool('svc_scheduler', 3), exporterPool: db.pool('svc_exporter', 2), stockPool: db.pool('svc_stock', 2),
   });
   const seeded = demo.live.seeded;
   const store = new PgPricingStore(appPool, { adminPool, bulkWorkerPool: db.pool('svc_bulk_worker', 2) });
@@ -85,8 +92,7 @@ before(async () => {
   server = createStandServer(handle);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const token = await fetch(`${origin}/api/stand-issuer/token?locale=de`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ role: 'OWNER' }) });
-  owner = { authorization: `Bearer ${((await token.json()) as StandToken).accessToken}`, cookie: 'repracer_locale=de' };
+  await signIn();
   const observerUrl = new URL(process.env.REPRACER_PG_ADMIN_URL!); observerUrl.pathname = `/${db.name}`;
   const { createPool } = await import('@repracer/pricing-store-pg');
   observer = createPool(observerUrl.toString(), { max: 1, applicationName: 'repracer-demo-day-observer' });
@@ -114,6 +120,7 @@ test('Р-154: сутки демо под планировщиком — объё
 });
 
 test('Р-154, Р-136: после суток каждый экран отвечает в пределе 10 с / 8 МБ, списки — страницами, счётчики — агрегатом', async () => {
+  await signIn();
   const worlds = await get<WorldSummary[]>('worlds (список миров)', '/api/worlds');
   assert.equal(worlds.status, 200);
   const summary = worlds.body.find((x) => x.id === DEMO_WORLD)!;
@@ -135,6 +142,9 @@ test('Р-154, Р-136: после суток каждый экран отвеча
     ['strategies', api('strategies')],
     ['compliance', api('compliance')],
     ['stop', api('stop')],
+    ['stock (первая страница)', api('stock')],
+    ['stock (последняя страница)', `${api('stock')}?offset=150&limit=50`],
+    ['stock/divergences', api('stock', 'divergences')],
     ['jobs', api('jobs')],
     ['offers (поиск)', `${api('offers')}?q=340100`],
   ];
@@ -162,4 +172,37 @@ test('Р-154, Р-136: после суток каждый экран отвеча
   // Товары: у показанных строк статистика решений есть, и она с сутки
   const products = results['products (первая страница)'] as { rows: Array<{ decisions: number | null }> };
   assert.ok(products.rows.every((r) => r.decisions !== null && r.decisions >= 100), `решений у показанных предложений: ${products.rows.slice(0, 3).map((r) => r.decisions)}`);
+});
+
+test('Р-151, Р-153 (задача D): демо показывает остатки — заказы симулятора уменьшают доступное, изменение расходится по каналу', async () => {
+  await signIn();
+  const stats = demo.live.simulator.stats;
+  assert.ok(stats.ordersPlaced >= 300 && stats.ordersShipped >= 200, `спрос за сутки: заказов ${stats.ordersPlaced}, отгружено ${stats.ordersShipped}, отменено ${stats.ordersCancelled}`);
+  const [r] = (await observer.query(
+    `SELECT count(*)::int AS reservations, count(*) FILTER (WHERE status = 'CONSUMED')::int AS consumed, count(*) FILTER (WHERE status IN ('CREATED', 'CONFIRMED_BY_SOURCE'))::int AS open
+       FROM channel_data.reservation WHERE tenant_id = $1`, [demo.live.seeded.tenantId])).rows;
+  assert.equal(Number(r.reservations), stats.ordersPlaced, 'каждый заказ канала — резервация');
+  const stock = await get<StockView>('stock (демо, после суток)', `${api('stock')}?limit=200`);
+  assert.equal(stock.status, 200);
+  assert.ok(stock.body.demo, 'экран остатков помечен как демо — здесь показываются штуки, не деньги, но путь тот же');
+  assert.deepEqual([stock.body.summary.products, stock.body.summary.synced], [DEMO_OFFERS, DEMO_OFFERS]);
+  assert.equal(stock.body.summary.openReservations, Number(r.open), 'открытые резервации на экране — из базы');
+  // Отгрузки списали пул: суммарный физический остаток меньше посеянного ровно на отгруженное
+  const onHand = stock.body.rows.reduce((a, x) => a + x.onHand, 0);
+  assert.equal(onHand, DEMO_OFFERS * DEMO_ON_HAND - Number(r.consumed), `физический остаток после отгрузок: ${onHand}`);
+  // Изменение разошлось по каналу: у каждой единицы канал подтвердил ровно «доступное минус буфер», и симулятор показывает то же
+  const units = new Map((demo.live.simulator.dump() as { units: Array<{ idUnit: number; amount: number }> }).units.map((u) => [`syn-prod-de-340${u.idUnit}`, u.amount]));
+  let confirmedMatches = 0;
+  for (const row of stock.body.rows) {
+    const c = row.channels[0]!;
+    assert.equal(c.published, Math.max(0, row.available - 2), `${row.sku}: публикуемое = доступное − буфер`);
+    if (c.tone === 'ok' && units.get(row.sku) === c.published) confirmedMatches += 1;
+  }
+  // Последние заказы могли прийти после последней записи (окно работы — 5 минут): почти все единицы подтверждены и совпадают
+  assert.ok(confirmedMatches >= DEMO_OFFERS - 20, `единиц, у которых подтверждённое каналом равно остатку в симуляторе: ${confirmedMatches} из ${DEMO_OFFERS}`);
+  const divergences = await get<StockDivergencesView>('stock/divergences (демо)', api('stock', 'divergences'));
+  assert.deepEqual(divergences.body.items, [], 'каждая последняя запись подтверждена каналом');
+  const [w] = (await observer.query(`SELECT count(*)::int AS n FROM tenant_data.channel_write_history WHERE tenant_id = $1 AND field = 'QUANTITY' AND final_status = 'APPLIED'`, [demo.live.seeded.tenantId])).rows;
+  console.log(JSON.stringify({ orders: stats, reservations: r, quantityWritesApplied: w.n, confirmedMatches }));
+  assert.ok(Number(w.n) >= 200 + stats.ordersPlaced / 2, `записей остатка, применённых каналом: ${w.n}`);
 });

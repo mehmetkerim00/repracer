@@ -1,6 +1,7 @@
-import type { ChannelAdapter, InboundDelivery } from '@repracer/channel-port';
+import type { AdapterCallContext, ChannelAdapter, InboundDelivery } from '@repracer/channel-port';
 import { createPricingPipeline, type MemorySeed, type MemorySeedScope, type PricingPipeline } from '@repracer/pricing-pipeline';
-import { PgPricingStore, PgWriteQueueStore, seedPricingWorld, translateStore, type PgPool, type SeededPricingWorld } from '@repracer/pricing-store-pg';
+import { PgPricingStore, PgStockStore, PgWriteQueueStore, seedPricingWorld, translateStore, type PgPool, type SeededPricingWorld } from '@repracer/pricing-store-pg';
+import { createStockPipeline, type StockPipeline } from '@repracer/stock-sync';
 import { createWriteDispatcher, type WriteDispatcher, type WriteQueueStore } from '@repracer/write-dispatcher';
 import { kauflandUnderTest } from '../adapters.ts';
 import { channelFetch, kauflandAuthChecker, type ChannelBehaviour, type ObservedRequest, type TraceEntry } from '../harness/channel.ts';
@@ -64,6 +65,14 @@ export interface KauflandLiveWorld {
   pipelineForDbIds(): PricingPipeline;
   /** Отправка ждущих записей единицы — как делает путь решения за брокером, по идентификаторам базы */
   dispatchScope(tenantId: string, writeScopeId: string): Promise<void>;
+  /** Шаг 35: остатки мира (null — мир без остатков) */
+  stock: PgStockStore | null;
+  stockPipeline: StockPipeline | null;
+  /**
+   * Заказы канала → резервации → пересчёт → записи, по идентификаторам БАЗЫ (как зовёт планировщик). Хранилище остатков
+   * работает в идентификаторах базы, а адаптер мира — в идентификаторах сценария: перевод здесь, как у `pipelineForDbIds`.
+   */
+  syncOrdersForDbIds(ctx: AdapterCallContext, since: string): Promise<{ lines: number; created: number; consumed: number; released: number; unknownOffers: number; writes: number }>;
 }
 
 function scopeOf(p: LiveProduct, account: string): MemorySeedScope {
@@ -100,6 +109,13 @@ export async function kauflandLiveWorld(input: {
   joinMember?: Parameters<typeof seedPricingWorld>[1]['joinMember'];
   /** Р-150: аккаунты других каналов, у которых нет доступа, — с перечнем того, чего не хватает */
   awaitingAccounts?: NonNullable<MemorySeed['accounts']>;
+  /**
+   * Шаг 35 [Р-152, Р-153]: остатки мира. Источник — внутренний пул с инвентаризацией `onHand` у каждого товара, буфер
+   * аккаунта `bufferUnits`, синхронизация включена; записи остатка уходят через диспетчер мира. Нужна роль остатков.
+   */
+  stock?: { onHand: number; bufferUnits: number; stockPool: PgPool };
+  /** Спрос модели канала: заказы, отгрузки, отмены (K-11 — заказ уменьшает amount у канала сам) */
+  demand?: KauflandChannelModelSpec['demand'];
 }): Promise<KauflandLiveWorld> {
   const tenantFixture = `10000000-0000-4000-8000-00000000${String(input.tag).padStart(4, '0')}`;
   const accountFixture = `20000000-0000-4000-8000-00000000${String(input.tag).padStart(4, '0')}`;
@@ -127,6 +143,7 @@ export async function kauflandLiveWorld(input: {
   const marketplaces = [...new Set(input.products.map((p) => p.marketplace))].sort();
   const channelModel: KauflandChannelModelSpec = {
     seed: input.seed, webhookUrl: `https://hooks.example.invalid/kaufland/${webhookToken}`,
+    ...(input.demand ? { demand: input.demand } : {}),
     units: input.products.map((p) => ({
       idUnit: Number(String(p.idProduct).slice(-6)), storefront: p.marketplace, idOffer: `SYN-OFFER-${p.idProduct}`, idProduct: p.idProduct, listingPriceMinor: 1850, amount: 5,
       ...(p.channelMinimumPriceMinor ? { minimumPriceMinor: p.channelMinimumPriceMinor } : {}),
@@ -188,8 +205,24 @@ export async function kauflandLiveWorld(input: {
   // OQ-216: пауза пути решения двигает ВИРТУАЛЬНЫЕ часы — по ним же считает бюджет адаптера
   const pipeline = createPricingPipeline({ store, adapter, alerts: deps.alerts, logger: deps.logger, now: () => clock.iso(), sleep: clock.sleep, dispatcher });
   const events = stamped(sink, clock);
+  // Шаг 35: остатки мира — тем же путём, что у продавца: источник, инвентаризация, буфер, включение; записи создаёт пересчёт
+  let stock: PgStockStore | null = null;
+  let stockPipeline: StockPipeline | null = null;
+  if (input.stock) {
+    stock = new PgStockStore({ adminPool: input.adminPool, stockPool: input.stock.stockPool });
+    stockPipeline = createStockPipeline({ store: stock, now: () => clock.iso() as never, dispatchScope: (t, ws) => dispatcher.dispatchScope(seeded.ids.fromDb(t), seeded.ids.fromDb(ws)) });
+    const actor = { membershipId: seeded.ownerMembershipId, userId: seeded.userId, mfa: true };
+    const source = await stock.createStockSource(seeded.tenantId, { mode: 'INTERNAL_POOL', name: 'Lager' }, actor);
+    if (source.status !== 'CREATED') throw new Error(`stock source of the world: ${source.status}`);
+    const imported = await stock.importStock(seeded.tenantId, source.stockSourceId, input.products.map((p) => ({ sku: String(p.idProduct).slice(-6), quantity: input.stock!.onHand })), actor);
+    if (imported.status !== 'APPLIED') throw new Error(`stock import of the world: ${imported.status}`);
+    const enabled = await stock.enableStockSync(seeded.tenantId, seeded.channelAccountId, { bufferUnits: input.stock.bufferUnits, maxQuantity: null, minQuantityToList: 0, acknowledgeSideEffects: false }, actor);
+    if (enabled.status !== 'ENABLED') throw new Error(`stock sync of the world: ${enabled.status}`);
+    await stock.recalculate(seeded.tenantId, null, clock.iso() as never);
+  }
   return {
     channel: 'KAUFLAND', clock, world, seeded, adapter, simulator, pipeline, products: input.products, events: events.list, violations, buyboxCalls, requests,
+    stock, stockPipeline,
     async betweenTicks() {
       // Трасса запросов проверке не нужна и за сутки растёт до сотен тысяч строк
       trace.length = 0;
@@ -199,6 +232,19 @@ export async function kauflandLiveWorld(input: {
       events.stamp();
     },
     pipelineForDbIds: () => dbIdPipeline(pipeline, seeded),
+    async syncOrdersForDbIds(ctx, since) {
+      if (!stockPipeline) return { lines: 0, created: 0, consumed: 0, released: 0, unknownOffers: 0, writes: 0 };
+      // Адаптеру — идентификаторы сценария (его каталог аккаунтов знает только их), хранилищу остатков — базы
+      const forAdapter = seeded.ids.fromDb(ctx);
+      const adapterForDbIds = new Proxy(adapter, {
+        get(target, prop, receiver) {
+          const value = Reflect.get(target, prop, receiver);
+          if (typeof value !== 'function') return value;
+          return (_ctx: AdapterCallContext, ...rest: unknown[]) => (value as (...a: unknown[]) => unknown).call(target, forAdapter, ...rest);
+        },
+      }) as ChannelAdapter;
+      return stockPipeline.syncOrders(ctx, adapterForDbIds, since as never);
+    },
     async dispatchScope(tenantId, writeScopeId) {
       await dispatcher.dispatchScope(seeded.ids.fromDb(tenantId), seeded.ids.fromDb(writeScopeId));
     },

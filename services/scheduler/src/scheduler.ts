@@ -22,6 +22,8 @@ export interface JobRunContext {
   /** Число успешных запусков до этого — окно сверки по кругу [Р-121] */
   runIndex: number;
   scope: JobScope | null;
+  /** Шаг 35: конец предыдущего успешного или неуспешного запуска — окно «с прошлого раза» для работ, читающих канал за период */
+  previousFinishedAt: Instant | null;
   /** Момент начала запуска: сроки вызовов каналов считаются от него, а не от начала такта (ревью шага 25, находка 1) */
   startedAt: Instant;
 }
@@ -125,7 +127,7 @@ export function createScheduler(options: SchedulerOptions) {
     // Долгий запуск продлевает аренду каждую треть её срока: второй процесс не начнёт ту же работу (ревью шага 25, находка 6)
     const heartbeat = setInterval(() => { void state.renew(claimed.jobKey, owner, spec.leaseSeconds).catch(() => false); }, Math.max(200, (spec.leaseSeconds * 1000) / 3));
     try {
-      const r = await spec.run({ slotAt: claimed.nextDueAt, now, runIndex: claimed.runsCompleted, scope: spec.scope, startedAt });
+      const r = await spec.run({ slotAt: claimed.nextDueAt, now, runIndex: claimed.runsCompleted, scope: spec.scope, startedAt, previousFinishedAt: claimed.lastFinishedAt });
       items = r.items;
       for (const a of r.alerts ?? []) await alerts.raise({ ...a, details: { job: claimed.jobKey, ...a.details } });
     } catch (e) {

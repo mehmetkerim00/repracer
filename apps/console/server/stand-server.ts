@@ -1047,7 +1047,7 @@ async function main(): Promise<void> {
       const { runConfiguredWorker } = await import('./bulk-worker.ts');
       const demo = await demoWorld({
         tag: 3400, startIso: new Date().toISOString(), bare: false, appPool: pool, adminPool, provisioningPool: role('svc_provisioning', 1),
-        dispatcherPool: role('svc_dispatcher', 2), schedulerPool: role('svc_scheduler', 3), exporterPool: role('svc_exporter', 2),
+        dispatcherPool: role('svc_dispatcher', 2), schedulerPool: role('svc_scheduler', 3), exporterPool: role('svc_exporter', 2), stockPool: role('svc_stock', 2),
         memberUsers, memberEmails: STAND_EMAILS, joinMember: pgStandJoinMember(adminPool, directory),
         wallClock: true,
       });

@@ -32,6 +32,8 @@ export interface JobConfig {
   haltReviewEverySeconds: number;
   /** Обход офферов [Р-120] — раз в сутки, допущение (OQ-163) */
   discoveryEverySeconds: number;
+  /** Шаг 35 [Р-25]: строки заказов канала — резервации; окно чтения перекрывает интервал, повторы безвредны (идемпотентно по строке заказа) */
+  orderLinesEverySeconds: number;
   /** Выгрузка суток UTC — через 30 минут после конца суток; дни с непроверенными секциями — повторно за 13 суток (принудительное удаление — 14) */
   exportOffsetSeconds: number;
   exportLookbackDays: number;
@@ -40,7 +42,7 @@ export interface JobConfig {
 
 export const DEFAULT_JOB_CONFIG: JobConfig = {
   pollEverySeconds: 60, pollBudgetRps: 10, pollMaxQueries: 600, lossReviewEverySeconds: 300, lossGraceSeconds: DEFAULT_LOSS_GRACE_SECONDS,
-  amazonCallSeconds: 31, amazonBatch: 20, amazonCircleWarnHours: 24, haltReviewEverySeconds: 300, discoveryEverySeconds: 86_400,
+  amazonCallSeconds: 31, amazonBatch: 20, amazonCircleWarnHours: 24, haltReviewEverySeconds: 300, discoveryEverySeconds: 86_400, orderLinesEverySeconds: 300,
   exportOffsetSeconds: 1_800, exportLookbackDays: 13, maintenanceEverySeconds: 3_600,
 };
 
@@ -67,6 +69,13 @@ export interface JobDeps {
     /** Часы базы: журнал удаления по сроку пишет момент базы, а не планировщика */
     databaseNow(): Promise<Instant>;
   };
+  /**
+   * Шаг 35 [Р-25, Р-152]: заказы канала → резервации → пересчёт публикуемого остатка → записи. Без хранилища остатков в
+   * процессе работы нет; процесс без роли остатков — конфигурация, а не молчаливый пропуск.
+   */
+  stock?: {
+    syncOrders(account: SchedulerAccount, ctx: AdapterCallContext, since: Instant): Promise<{ lines: number; created: number; consumed: number; released: number; unknownOffers: number; writes: number }>;
+  };
   /** Сверка уведомлений опросом включена для аккаунта [Р-121]; по умолчанию — если источник уведомлений канала доступен */
   reconcileEnabled?(account: SchedulerAccount, descriptor: ChannelDescriptor): boolean;
   config?: Partial<JobConfig>;
@@ -80,6 +89,7 @@ export const JOB_CATALOG: JobCatalogEntry[] = [
   { name: 'notification-loss-review', scope: 'ACCOUNT', when: 'каждые 5 мин', missed: 'LATEST: следующий запуск решает все просроченные проверки; вердикт ищет уведомление в журнале снимков, который хранится 3 суток после выгрузки (риск 26)' },
   { name: 'amazon-reconcile-rotation', scope: 'ACCOUNT', when: '31 с × число аккаунтов Amazon, аккаунты — со сдвигом на 31 с', missed: 'LATEST: окно круга — по числу успешных запусков; окно, отклонённое каналом, повторяется; пропуск не пропускает товары, круг сдвигается на время простоя' },
   { name: 'halt-review', scope: 'ACCOUNT', when: 'каждые 5 мин (каналы с выборкой)', missed: 'LATEST: остановка снимается позже' },
+  { name: 'order-lines', scope: 'ACCOUNT', when: 'каждые 5 мин', missed: 'LATEST: окно чтения — с предыдущего запуска; пропуск ничего не теряет, резервации создаются позже, доступный остаток в каналах завышен на время пропуска' },
   { name: 'offer-discovery', scope: 'ACCOUNT', when: 'раз в сутки', missed: 'LATEST: чужое ценообразование нового оффера обнаружится при записи или следующем обходе' },
   { name: 'analytics-export-day', scope: 'GLOBAL', when: 'сутки UTC, в 00:30 следующих суток', missed: 'EVERY_SLOT: каждые пропущенные сутки выгружаются по очереди; провалившиеся, непроверенные и изменившиеся после проверки сутки повторяются каждым запуском из отставания (13 суток); секции журнала не удаляются без проверенной выгрузки; отставание CRITICAL — с 72 часов, принудительное удаление через 14 суток — CRITICAL ANALYTICS_PARTITION_FORCE_DROPPED' },
   { name: 'price-days-close', scope: 'GLOBAL', when: 'каждый час', missed: 'LATEST: функция закрывает все незакрытые сутки по очереди; сырьё цен не удаляется, пока сутки не закрыты' },
@@ -252,6 +262,19 @@ export function jobSource(deps: JobDeps): JobSource {
             name: 'halt-review', scope, retryKind: 'CHANNEL', intervalSeconds: cfg.haltReviewEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,
             lagWarningSeconds: 1800, lagCriticalSeconds: hours(6), leaseSeconds: 300,
             async run({ startedAt }) { return { items: (await pipeline().reviewHalts(ctxOf(a, startedAt, 'halt-review', 120))).length }; },
+          });
+        }
+        if (deps.stock) {
+          const stock = deps.stock;
+          specs.push({
+            name: 'order-lines', scope, retryKind: 'CHANNEL', intervalSeconds: cfg.orderLinesEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,
+            lagWarningSeconds: cfg.orderLinesEverySeconds * 6, lagCriticalSeconds: hours(6), leaseSeconds: 300,
+            async run({ startedAt, previousFinishedAt }) {
+              // Окно — с конца прошлого запуска и ещё интервал назад: строка, обновлённая на границе, попадёт дважды, и это безвредно
+              const since = new Date(Date.parse(previousFinishedAt ?? startedAt) - cfg.orderLinesEverySeconds * 1000).toISOString();
+              const r = await stock.syncOrders(a, ctxOf(a, startedAt, 'order-lines', 120), since);
+              return { items: r.lines };
+            },
           });
         }
         specs.push({

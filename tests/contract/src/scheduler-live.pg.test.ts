@@ -97,7 +97,8 @@ before(async () => {
   const startMs = endMs - hours * HOUR;
   const clock = new VirtualClock(new Date(startMs).toISOString());
   const pools = { appPool: db.pool('svc_app', 4), adminPool: db.pool('svc_admin', 2), provisioningPool: db.pool('svc_provisioning', 1), dispatcherPool: db.pool('svc_dispatcher', 2) };
-  const k1 = await kauflandLiveWorld({ tag: 2601, clock, products: kaufland1, seed: 2601, ...pools });
+  // Шаг 35: у первого аккаунта Kaufland — остаток и спрос модели: работа `order-lines` ведёт резервации и записи остатка
+  const k1 = await kauflandLiveWorld({ tag: 2601, clock, products: kaufland1, seed: 2601, ...pools, stock: { onHand: 30, bufferUnits: 1, stockPool: db.pool('svc_stock', 2) }, demand: { orderEveryMs: 20 * 60_000, shipAfterMs: 2 * 3_600_000, cancelShare: 0.2 } });
   const k2 = await kauflandLiveWorld({ tag: 2602, clock, products: kaufland2, seed: 2602, buyBoxChanged: { lossShare: 0.3, debounceMs: 60_000 }, ...pools });
   const a1 = await amazonLiveWorld({ tag: 2603, clock, offers: 40, seed: 2603, lossShare: 0.3, priceChangeEveryHours: 2, ...pools });
   const byAccount = new Map<string, { pipelineForDbIds(): ReturnType<KauflandLiveWorld['pipelineForDbIds']> }>([
@@ -114,7 +115,13 @@ before(async () => {
     reconcileEnabled: (a) => a.channelAccountId !== k1.seeded.ids.dbId(k1.world.channelAccountId),
   });
   // Выгрузка в ClickHouse проверяется в CI (history-survives-stop): здесь ClickHouse нет — работа сообщает о провале и не держит слот
-  const deps: JobDeps = { ...base, exportDay: async () => { throw new Error('CLICKHOUSE_NOT_IN_THIS_TEST'); } };
+  const deps: JobDeps = {
+    ...base, exportDay: async () => { throw new Error('CLICKHOUSE_NOT_IN_THIS_TEST'); },
+    // Остатки есть только у k1; у остальных аккаунтов работа идёт и честно ничего не находит
+    stock: { syncOrders: async (a, ctx, since) => (a.channelAccountId === k1.seeded.ids.dbId(k1.world.channelAccountId)
+      ? k1.syncOrdersForDbIds(ctx, since)
+      : { lines: 0, created: 0, consumed: 0, released: 0, unknownOffers: 0, writes: 0 }) },
+  };
   const alerts: Live['alerts'] = [];
   const scheduler = createScheduler({ state: new PgSchedulerState(schedulerPool), source: jobSource(deps), owner: 'live-1', now: () => clock.iso(),
     alerts: { raise: async (a) => { alerts.push({ ...(a as unknown as Live["alerts"][number]), atMs: clock.nowMs() }); } } });
@@ -215,6 +222,27 @@ observes('halt-review', 'Р-42, Р-52: массовый сдвиг остана�
   assert.ok(halted && hoursOf(halted.atMs) >= 6 && hoursOf(halted.atMs) <= 6.1, `витрина остановлена сразу после сдвига: ${halted && hoursOf(halted.atMs)} ч`);
   assert.ok(released && hoursOf(released.atMs) - hoursOf(halted!.atMs) <= 0.6, `остановка снята выборкой после окна: ${released && hoursOf(released.atMs)} ч`);
   assert.equal(jobOf('halt-review').failed, 0);
+});
+
+observes('order-lines', 'Р-25, Р-152 (шаг 35): заказы канала становятся резервациями, отгрузка списывает пул, доступный остаток уходит в канал записью', async () => {
+  const job = jobOf('order-lines');
+  // Интервал 5 минут; такты с другими работами сдвигают запуски — не реже раза в 10 минут у каждого из трёх аккаунтов
+  assert.ok(job.runs >= 3 * 24 * 6, `работа шла у каждого из трёх аккаунтов не реже раза в десять минут: ${job.runs}`);
+  const failures = (await observer.query(`SELECT error_code, count(*)::int AS n FROM maintenance.scheduled_job_run WHERE job_name = 'order-lines' AND outcome = 'FAILED' GROUP BY 1`)).rows;
+  assert.equal(job.failed, 0, `ни одного провала: чтение заказов у симулятора не падает: ${JSON.stringify(failures)}`);
+  const stats = live.k1.simulator.stats;
+  assert.ok(stats.ordersPlaced >= 60 && stats.ordersShipped >= 40, `спрос модели: заказов ${stats.ordersPlaced}, отгружено ${stats.ordersShipped}, отменено ${stats.ordersCancelled}`);
+  const [r] = (await observer.query(
+    `SELECT count(*)::int AS reservations, count(*) FILTER (WHERE status = 'CONSUMED')::int AS consumed, count(*) FILTER (WHERE status = 'RELEASED')::int AS released
+       FROM channel_data.reservation WHERE tenant_id = $1`, [live.k1.seeded.tenantId])).rows;
+  // Каждый заказ модели — резервация; отгруженные списаны, отменённые освобождены (границы окна: последние могут ещё не закрыться)
+  assert.equal(Number(r.reservations), stats.ordersPlaced, 'резервация на каждую строку заказа канала');
+  assert.ok(Number(r.consumed) >= stats.ordersShipped - 3 && Number(r.released) >= stats.ordersCancelled - 3, `списано ${r.consumed} из ${stats.ordersShipped}, освобождено ${r.released} из ${stats.ordersCancelled}`);
+  const [m] = (await observer.query(`SELECT count(*)::int AS n, coalesce(-sum(delta), 0)::int AS shipped FROM tenant_data.stock_movement WHERE tenant_id = $1 AND reason = 'ORDER_SHIPPED'`, [live.k1.seeded.tenantId])).rows;
+  assert.equal(Number(m.shipped), Number(r.consumed), 'каждая отгрузка списала ровно одну единицу пула движением базы');
+  // Уменьшение доступного дошло до канала: записи остатка применены, и у единицы в симуляторе — наш остаток минус буфер
+  const [w] = (await observer.query(`SELECT count(*)::int AS n FROM tenant_data.channel_write_history WHERE tenant_id = $1 AND field = 'QUANTITY' AND final_status = 'APPLIED'`, [live.k1.seeded.tenantId])).rows;
+  assert.ok(Number(w.n) > stats.ordersPlaced / 2, `записей остатка, применённых каналом: ${w.n} при ${stats.ordersPlaced} заказах`);
 });
 
 observes('offer-discovery', 'Р-120, Р-12: обход офферов раз в сутки находит Smart Pricing продавца', () => {

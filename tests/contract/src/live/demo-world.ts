@@ -21,6 +21,8 @@ import { kauflandLiveWorld, type KauflandLiveWorld, type LiveProduct } from './k
  */
 
 export const DEMO_OFFERS = 200;
+/** Остаток каждого товара настроенного демо — хватает на сутки спроса (заказ каждые 4 минуты на 200 товаров) */
+export const DEMO_ON_HAND = 24;
 const HOUR = 3_600_000;
 
 /** Конкурентов у предложения РОВНО три [Р-151]: дрейф, война, расписание. Начальные цены вокруг 18,50 € — как у наших */
@@ -86,6 +88,8 @@ export interface DemoWorld {
 export async function demoWorld(input: {
   tag: number; startIso: string; bare: boolean; seed?: number;
   appPool: PgPool; adminPool: PgPool; provisioningPool: PgPool; dispatcherPool: PgPool; schedulerPool: PgPool; exporterPool: PgPool;
+  /** Шаг 35: роль остатков — у настроенного демо есть остаток и заказы */
+  stockPool: PgPool;
   /**
    * Часы мира — НАСТОЯЩИЕ (стенд для показа продавцу). Живой прогон идёт на виртуальных и проживает два часа за минуты; стенд
    * так не может: консоль пишет по часам базы, и мир, отставший от них, считает только что внесённую себестоимость ещё не
@@ -100,6 +104,12 @@ export async function demoWorld(input: {
   const clock = input.wallClock ? new WallClock() : new VirtualClock(input.startIso);
   const live = await kauflandLiveWorld({
     tag: input.tag, clock, products: demoProducts({ bare: input.bare }), seed: input.seed ?? input.tag, demo: true,
+    /**
+     * Шаг 35 (задача D): демо показывает и остатки. У настроенного мира — источник с инвентаризацией и включённая
+     * синхронизация (буфер 2); спрос модели — заказ каждые 4 минуты, отгрузка через час, каждый десятый отменяется.
+     * Пустой мир (онбординг) остатка не получает — его заводит продавец сам.
+     */
+    ...(input.bare ? {} : { stock: { onHand: DEMO_ON_HAND, bufferUnits: 2, stockPool: input.stockPool }, demand: { orderEveryMs: 4 * 60_000, shipAfterMs: HOUR, cancelShare: 0.1 } }),
     ...(input.memberUsers ? { memberUsers: input.memberUsers } : {}), ...(input.memberEmails ? { memberEmails: input.memberEmails } : {}),
     ...(input.joinMember ? { joinMember: input.joinMember } : {}),
     appPool: input.appPool, adminPool: input.adminPool, provisioningPool: input.provisioningPool, dispatcherPool: input.dispatcherPool,
@@ -123,6 +133,8 @@ export async function demoWorld(input: {
     ...base,
     accounts: async () => (await base.accounts()).filter((a) => a.channelAccountId === ownAccount),
     exportDay: async () => { throw new Error('CLICKHOUSE_NOT_IN_DEMO'); },
+    // Заказы канала → резервации → пересчёт → записи: работа `order-lines` планировщика ведёт конвейер остатков мира
+    ...(live.stockPipeline ? { stock: { syncOrders: (_a, ctx, since) => live.syncOrdersForDbIds(ctx, since) } } : {}),
   };
   return {
     live, clock,

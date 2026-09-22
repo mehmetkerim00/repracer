@@ -61,6 +61,26 @@ export interface KauflandChannelModelSpec {
   sellerPseudonym?: string;
   units: SimUnitSpec[];
   competitors: SimCompetitorSpec[];
+  /**
+   * Шаг 35: спрос. Модель сама создаёт заказы (`order-units`): раз в `orderEveryMs` — одна единица случайного оффера с остатком;
+   * через `shipAfterMs` заказ отгружается (`sent`), доля `cancelShare` — отменяется. Заказ уменьшает amount по K-11.
+   * Без `demand` заказов нет — как у сценариев до шага 35.
+   */
+  demand?: { orderEveryMs: number; shipAfterMs: number; cancelShare: number };
+}
+
+/** Строка заказа канала — только те поля, что отдаёт `GET /order-units` и берёт адаптер по белому списку [Р-4] */
+interface SimOrderUnit {
+  idOrderUnit: number;
+  idOrder: string;
+  idOffer: string;
+  storefront: string;
+  status: 'open' | 'sent' | 'cancelled';
+  tsCreatedMs: number;
+  tsUpdatedMs: number;
+  /** Когда заказ закроется (отгрузкой или отменой) */
+  closesAtMs: number;
+  willCancel: boolean;
 }
 
 interface UnitState extends Required<Omit<SimUnitSpec, 'deliveryDays' | 'minimumPriceMinor'>> {
@@ -97,6 +117,10 @@ export interface SimulatorStats {
   notificationsScheduled: number;
   notificationsLost: number;
   notificationsDelivered: number;
+  /** Шаг 35: спрос модели */
+  ordersPlaced: number;
+  ordersShipped: number;
+  ordersCancelled: number;
 }
 
 const PROBLEM = {
@@ -135,9 +159,11 @@ class Bucket {
 
 export class SimulatedKauflandChannel implements ChannelBehaviour {
   readonly params: KauflandModelParams;
+  private readonly orders: SimOrderUnit[] = [];
+  private nextOrderMs: number | null = null;
   readonly stats: SimulatorStats = {
     requests: {}, rateLimited: 0, editLimited: 0, timeouts: 0, timeoutsApplied: 0, bulkItemsMissing: 0, bulkItemsFailed: 0,
-    priceEditsApplied: 0, buyBoxChanges: 0, notificationsScheduled: 0, notificationsLost: 0, notificationsDelivered: 0,
+    priceEditsApplied: 0, buyBoxChanges: 0, notificationsScheduled: 0, notificationsLost: 0, notificationsDelivered: 0, ordersPlaced: 0, ordersShipped: 0, ordersCancelled: 0,
   };
   private readonly spec: KauflandChannelModelSpec;
   private readonly startMs: number;
@@ -202,6 +228,8 @@ export class SimulatedKauflandChannel implements ChannelBehaviour {
       if (u.pending && u.pending.visibleAtMs > this.nowMs) next = Math.min(next, u.pending.visibleAtMs);
       if (u.pendingAmount && u.pendingAmount.visibleAtMs > this.nowMs) next = Math.min(next, u.pendingAmount.visibleAtMs);
     }
+    if (this.nextOrderMs !== null && this.nextOrderMs > this.nowMs) next = Math.min(next, this.nextOrderMs);
+    for (const o of this.orders) if (o.status === 'open' && o.closesAtMs > this.nowMs) next = Math.min(next, o.closesAtMs);
     for (const c of this.competitors) {
       if (c.behaviour.kind === 'RANDOM_WALK' && c.nextStepMs > this.nowMs) next = Math.min(next, c.nextStepMs);
       if (c.behaviour.kind === 'SCHEDULE') {
@@ -214,6 +242,7 @@ export class SimulatedKauflandChannel implements ChannelBehaviour {
   }
 
   private applyDue(at: number): void {
+    this.applyDemand(at);
     for (const u of this.units.values()) {
       if (u.pending && u.pending.visibleAtMs <= at) {
         u.listingPriceMinor = u.pending.priceMinor;
@@ -439,6 +468,20 @@ export class SimulatedKauflandChannel implements ChannelBehaviour {
           : { id_unit: id, status_code: 404 };
       }) });
     }
+    if (request.method === 'GET' && request.path === '/v2/order-units') {
+      // Как у Kaufland: с момента ts_updated_from_iso, страница по offset, свежие обновления первыми
+      const since = Date.parse(request.query.ts_updated_from_iso ?? '');
+      const limit = Math.max(1, Math.min(Number(request.query.limit ?? 100), 100));
+      const offset = Math.max(0, Number(request.query.offset ?? 0));
+      const rows = this.orders.filter((o) => Number.isNaN(since) || o.tsUpdatedMs >= since).sort((a, b) => b.tsUpdatedMs - a.tsUpdatedMs || b.idOrderUnit - a.idOrderUnit);
+      return respond(200, {
+        data: rows.slice(offset, offset + limit).map((o) => ({
+          id_order_unit: o.idOrderUnit, id_order: o.idOrder, id_offer: o.idOffer, storefront: o.storefront, status: o.status,
+          ts_created_iso: new Date(o.tsCreatedMs).toISOString(), ts_updated_iso: new Date(o.tsUpdatedMs).toISOString(),
+        })),
+        pagination: { offset, limit, total: rows.length },
+      });
+    }
     if (request.method === 'GET' && request.path === '/v2/buybox') {
       const key = `${storefront}|${request.query.id_product}|${request.query.condition ?? 'new'}`;
       const offers = this.offersOf(key).slice(0, Number(request.query.limit ?? 10));
@@ -511,6 +554,35 @@ export class SimulatedKauflandChannel implements ChannelBehaviour {
     }
     if (typeof data.minimum_price === 'number') u.minimumPriceMinor = data.minimum_price;
     return { status: 200 };
+  }
+
+  /** Спрос модели: новые заказы по расписанию, закрытие открытых по сроку */
+  private applyDemand(at: number): void {
+    const d = this.spec.demand;
+    if (!d) return;
+    if (this.nextOrderMs === null) this.nextOrderMs = this.startMs + d.orderEveryMs;
+    while (this.nextOrderMs <= at) {
+      const inStock = [...this.units.values()].filter((u) => u.isLive && u.amount > 0);
+      if (inStock.length > 0) {
+        const u = inStock[Math.floor(this.rng.next() * inStock.length)]!;
+        const id = this.orders.length + 1;
+        this.orders.push({
+          idOrderUnit: 900_000 + id, idOrder: `SYN-ORDER-${id}`, idOffer: u.idOffer, storefront: u.storefront, status: 'open',
+          tsCreatedMs: this.nextOrderMs, tsUpdatedMs: this.nextOrderMs, closesAtMs: this.nextOrderMs + d.shipAfterMs, willCancel: this.rng.chance(d.cancelShare),
+        });
+        this.stats.ordersPlaced += 1;
+        // K-11: заказ уменьшает amount у всех unit этого id_offer — как placeOrder
+        if (this.params.orderDecrementsAmount) for (const x of this.units.values()) if (x.idOffer === u.idOffer) x.amount = Math.max(0, x.amount - 1);
+      }
+      this.nextOrderMs += d.orderEveryMs;
+    }
+    for (const o of this.orders) {
+      if (o.status === 'open' && o.closesAtMs <= at) {
+        o.status = o.willCancel ? 'cancelled' : 'sent';
+        o.tsUpdatedMs = o.closesAtMs;
+        if (o.willCancel) this.stats.ordersCancelled += 1; else this.stats.ordersShipped += 1;
+      }
+    }
   }
 
   /** Заказ покупателя: K-11 — уменьшает ли канал amount сам */
