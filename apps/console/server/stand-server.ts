@@ -246,8 +246,8 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       return ok(await Promise.all(visible.map(async ({ live, viewer }): Promise<WorldSummary> => {
         const [c, accounts] = await Promise.all([live.store.worldCounters(live.tenantId, live.clock.iso() as never), live.store.channelAccounts(live.tenantId)]);
         return {
-          id: live.id, title: live.title, description: live.description, failures: live.failures, scopes: c.scopes, decisions: c.decisionsLastDay,
-          rejected: c.interventionsLastWeek, activeStops: c.activeStops, activeHalts: c.activeHalts, role: m.values[viewer.role],
+          id: live.id, title: live.title, description: live.description, failures: live.failures, scopes: c.scopes, decisionsLastDay: c.decisionsLastDay,
+          interventionsLastWeek: c.interventionsLastWeek, activeStops: c.activeStops, activeHalts: c.activeHalts, role: m.values[viewer.role],
           // Р-151: демо помечается уже в списке миров; Р-150: сколько каналов ждёт доступа — видно до входа в мир
           demo: c.demo,
           awaitingAccess: accounts.filter((a) => a.authStatus === 'AWAITING_ACCESS').length,

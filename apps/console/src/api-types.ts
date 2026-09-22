@@ -9,8 +9,10 @@ export interface WorldSummary {
   /** Расхождения прогона сценария с его ожиданиями */
   failures: string[];
   scopes: number;
-  decisions: number;
-  rejected: number;
+  /** Р-154: счётчики считает база агрегатом за ОКНО, а не по всем решениям тенанта — окно названо в имени поля */
+  decisionsLastDay: number;
+  /** Решения, где движок вмешался: цена изменена или изменение остановлено Gate (всё, кроме NO_CHANGE) */
+  interventionsLastWeek: number;
   activeStops: number;
   activeHalts: number;
   /** Роль пользователя в этом мире */

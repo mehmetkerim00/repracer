@@ -124,7 +124,7 @@ test('Р-154, Р-136: после суток каждый экран отвеча
   const worlds = await get<WorldSummary[]>('worlds (список миров)', '/api/worlds');
   assert.equal(worlds.status, 200);
   const summary = worlds.body.find((x) => x.id === DEMO_WORLD)!;
-  assert.ok(summary.decisions >= MIN_DECISIONS, `список миров считает решения за сутки агрегатом: ${summary.decisions}`);
+  assert.ok(summary.decisionsLastDay >= MIN_DECISIONS, `список миров считает решения за сутки агрегатом: ${summary.decisionsLastDay}`);
 
   const screens: Array<[string, string]> = [
     ['onboarding', api('onboarding')],

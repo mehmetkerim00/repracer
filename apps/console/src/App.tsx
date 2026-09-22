@@ -78,7 +78,7 @@ export function WorldList({ worlds }: { worlds: readonly WorldSummary[] }) {
             <p className="small">
               {w.demo ? <><Badge tone="warn">{m.ui.app.demoBadge}</Badge> · </> : null}
               {w.awaitingAccess > 0 ? <><Badge tone="warn">{m.ui.onboarding.channels.status.AWAITING_ACCESS}: {w.awaitingAccess}</Badge> · </> : null}
-              {w.role} · {m.ui.app.counts(w.scopes, w.decisions, w.rejected)}
+              {w.role} · {m.ui.app.counts(w.scopes, w.decisionsLastDay, w.interventionsLastWeek)}
               {w.activeStops > 0 ? <> · <Badge tone="stop">{m.ui.app.activeStops(w.activeStops)}</Badge></> : null}
               {w.activeHalts > 0 ? <> · <Badge tone="warn">{m.ui.app.activeHalts(w.activeHalts)}</Badge></> : null}
               {w.failures.length > 0 ? <> · <Badge tone="warn">{m.ui.app.diverged(w.failures.length)}</Badge></> : null}

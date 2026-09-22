@@ -39,8 +39,8 @@ SELECT maintenance.ensure_partitions();
 SELECT maintenance.close_price_days();              -- ежечасно и до удаления партиций: закрывает прошедшие дни каждого часового пояса витрин (Р-29, Р-62); витрины без подтверждённого пояса пропускаются, секции сырья с их строками не удаляются (Р-65)
 SELECT maintenance.drop_expired_partitions();       -- повторять, пока не вернёт 0 (не больше 10 партиций за вызов)
 SELECT maintenance.delete_expired_rows();
-SELECT maintenance.release_expired_reservations();  -- каждые несколько минут, повторять, пока не вернёт 0 (Р-25)
-SELECT maintenance.alert_stale_confirmed_reservations(); -- ежедневно, повторять, пока не вернёт 0: алерт, не освобождение (Р-30)
+SELECT maintenance.release_expired_reservations();  -- работа `retention` планировщика, каждый час, повторять, пока не вернёт 0 (Р-25); до шага 35 её не звал никто
+SELECT maintenance.alert_stale_confirmed_reservations(); -- та же работа `retention`, повторять, пока не вернёт 0: алерт, не освобождение (Р-30)
 ```
 
 Экспорт партиций (экспортёр, роль `repracer_exporter`) пишет факт в `maintenance.partition_export`; без него партиция

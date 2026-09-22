@@ -66,6 +66,10 @@ export interface JobDeps {
     ensurePartitions(now: Instant): Promise<void>;
     dropExpiredPartitions(now: Instant): Promise<number>;
     deleteExpiredRows(now: Instant): Promise<number>;
+    /** Р-25: резервация, которую источник не подтвердил за TTL (24 ч), освобождается — иначе доступный остаток занижен навсегда */
+    releaseExpiredReservations(now: Instant): Promise<number>;
+    /** Р-30: подтверждённая резервация старше 14 суток НЕ освобождается, а поднимает алерт — её разбирает человек */
+    alertStaleConfirmedReservations(now: Instant): Promise<number>;
     /** Часы базы: журнал удаления по сроку пишет момент базы, а не планировщика */
     databaseNow(): Promise<Instant>;
   };
@@ -94,7 +98,7 @@ export const JOB_CATALOG: JobCatalogEntry[] = [
   { name: 'analytics-export-day', scope: 'GLOBAL', when: 'сутки UTC, в 00:30 следующих суток', missed: 'EVERY_SLOT: каждые пропущенные сутки выгружаются по очереди; провалившиеся, непроверенные и изменившиеся после проверки сутки повторяются каждым запуском из отставания (13 суток); секции журнала не удаляются без проверенной выгрузки; отставание CRITICAL — с 72 часов, принудительное удаление через 14 суток — CRITICAL ANALYTICS_PARTITION_FORCE_DROPPED' },
   { name: 'price-days-close', scope: 'GLOBAL', when: 'каждый час', missed: 'LATEST: функция закрывает все незакрытые сутки по очереди; сырьё цен не удаляется, пока сутки не закрыты' },
   { name: 'partitions', scope: 'GLOBAL', when: 'каждый час', missed: 'LATEST: секции созданы на 3 суток вперёд; простой дольше — отказ записи снимков и цен (CRITICAL через 2 суток)' },
-  { name: 'retention', scope: 'GLOBAL', when: 'каждый час', missed: 'LATEST: удаление по сроку откладывается, данные хранятся дольше — PostgreSQL растёт' },
+  { name: 'retention', scope: 'GLOBAL', when: 'каждый час', missed: 'LATEST: удаление по сроку откладывается, данные хранятся дольше — PostgreSQL растёт; неподтверждённые резервации висят дольше TTL, и доступный остаток занижен всё это время; алерт о подтверждённой резервации старше 14 суток [Р-30] приходит позже' },
 ];
 
 const hours = (h: number) => h * 3600;
@@ -190,7 +194,8 @@ export function jobSource(deps: JobDeps): JobSource {
         lagWarningSeconds: hours(6), lagCriticalSeconds: hours(168), leaseSeconds: 1800,
         async run({ now: n }) {
           const mark = await deps.maintenance.databaseNow();
-          const items = (await deps.maintenance.dropExpiredPartitions(n)) + (await deps.maintenance.deleteExpiredRows(n));
+          const items = (await deps.maintenance.dropExpiredPartitions(n)) + (await deps.maintenance.deleteExpiredRows(n))
+            + (await deps.maintenance.releaseExpiredReservations(n)) + (await deps.maintenance.alertStaleConfirmedReservations(n));
           // Ревью шага 25, находка 5: принудительное удаление невыгруженной секции — потеря истории, алерт
           const dropped = await deps.forceDroppedSince(mark);
           return { items, ...(dropped.length ? { alerts: [{ code: 'ANALYTICS_PARTITION_FORCE_DROPPED', severity: 'CRITICAL' as const, details: { partitions: dropped.slice(0, 10).join(','), count: dropped.length } }] } : {}) };

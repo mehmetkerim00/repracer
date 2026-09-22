@@ -305,7 +305,8 @@ export const en = {
       worldNotFound: (id: string) => `World “${id}” was not found.`,
       screenNotFound: 'There is no such screen.',
       gapsTitle: 'What data this screen does not have',
-      counts: (scopes: number, decisions: number, stopped: number) => `Offers ${scopes} · decisions ${decisions} · stopped changes ${stopped}`,
+      counts: (scopes: number, decisionsLastDay: number, interventionsLastWeek: number) =>
+        `Offers ${scopes} · decisions (24 h) ${decisionsLastDay} · interventions (7 days) ${interventionsLastWeek}`,
       diverged: (n: number) => `scenario differs from its expectations: ${n}`,
       activeStops: (n: number) => `stops ${n}`,
       activeHalts: (n: number) => `halts ${n}`,

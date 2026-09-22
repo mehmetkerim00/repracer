@@ -127,6 +127,37 @@ test('Inbound API: ключ находится по отпечатку, уста
   assert.deepEqual([row.onHand, row.available, row.channels[0]!.published], [23, 23, 21]);
 });
 
+test('Р-25: неподтверждённую резервацию освобождает по сроку работа планировщика, и срок считает база, а не вызывающий', async () => {
+  /**
+   * Находка 13 ревью шага 35: функция освобождения по TTL существовала с шага 2, и её не звал НИКТО. Резервация Inbound
+   * API (подтверждать её некому — OQ-217) висела бы вечно, а доступный остаток был бы занижен навсегда. Теперь её зовёт
+   * работа `retention` планировщика (проверка вызова — `services/scheduler/test/scheduler.test.ts`), а здесь — поведение
+   * на настоящей базе.
+   *
+   * Чего эта проверка НЕ делает: не ждёт настоящих суток. Освобождение по сроку база разрешает только после
+   * `expires_at` по СВОИМ часам, и подделать их нечем — поэтому проверяется, что до срока не освобождается ничего, ни
+   * само по себе, ни по просьбе вызывающего с временем из будущего.
+   */
+  const account = world.ids.dbId(KAUFLAND);
+  const line = (ref: string, offer: string) => ({ externalOrderRef: `ttl-${ref}`, externalOrderLineRef: `ttl-line-${ref}`, identity: { marketplace: 'de', externalOfferId: offer }, quantity: 2, orderedAt: now(), status: 'OPEN' as const });
+  // У товара 2 больший пул — Inbound API (20 против 3 внутреннего): резервация остаётся CREATED, подтверждать её некому
+  const inbound = await store.recordOrderLines(world.tenantId, account, [line('a', 'SYN-OFFER-2')], now());
+  assert.equal(inbound.created, 1);
+  assert.equal((await store.stockPage(world.tenantId, { offset: 0, limit: 10 })).items.find((r) => r.sku === 'syn-prod-2')!.reserved, 2,
+    'неподтверждённая резервация занижает доступное — ради этого срок и нужен');
+
+  const retention = db.pool('svc_scheduler', 1);
+  {
+    // Работа `retention` зовёт функцию с моментом базы: срок ещё не настал — не освобождается ничего
+    assert.equal(Number((await retention.query(`SELECT maintenance.release_expired_reservations(now()) AS n`)).rows[0].n), 0, 'свежая резервация по сроку не освобождается');
+    const [fresh] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(`SELECT count(*) FILTER (WHERE status = 'CREATED')::int AS created FROM channel_data.reservation`)).rows);
+    assert.equal(fresh.created, 1, 'резервация осталась открытой');
+    // Время из будущего в аргументе срок не приближает: база сверяет со своими часами
+    await assert.rejects(retention.query(`SELECT maintenance.release_expired_reservations(now() + interval '25 hours') AS n`),
+      (e: Error) => /has not expired yet/.test(e.message), 'освобождение по сроку — по часам базы, а не по аргументу вызывающего');
+  }
+});
+
 test('Р-97, Р-100: остатки ведёт человек с правом на каталог — зритель получает отказ, и он назван правом', async () => {
   const [viewer] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(`SELECT membership_id, user_id FROM tenant_data.membership WHERE role = 'VIEWER'`)).rows);
   assert.ok(viewer, 'в мире посева есть зритель');

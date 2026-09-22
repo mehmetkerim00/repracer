@@ -307,7 +307,8 @@ export const de: Messages = {
       worldNotFound: (id: string) => `Welt „${id}“ wurde nicht gefunden.`,
       screenNotFound: 'Diese Seite gibt es nicht.',
       gapsTitle: 'Welche Daten dieser Seite fehlen',
-      counts: (scopes: number, decisions: number, stopped: number) => `Angebote ${scopes} · Entscheidungen ${decisions} · gestoppte Änderungen ${stopped}`,
+      counts: (scopes: number, decisionsLastDay: number, interventionsLastWeek: number) =>
+        `Angebote ${scopes} · Entscheidungen (24 h) ${decisionsLastDay} · Eingriffe (7 Tage) ${interventionsLastWeek}`,
       diverged: (n: number) => `Szenario weicht von seinen Erwartungen ab: ${n}`,
       activeStops: (n: number) => `Stopps ${n}`,
       activeHalts: (n: number) => `Anhaltungen ${n}`,

@@ -83,6 +83,10 @@ export function pgJobDeps(o: PgJobDepsOptions): JobDeps {
       async ensurePartitions(now) { await o.schedulerPool.query('SELECT maintenance.ensure_partitions($1)', [now]); },
       dropExpiredPartitions: (now) => loop(async () => Number((await o.schedulerPool.query('SELECT maintenance.drop_expired_partitions($1) AS n', [now])).rows[0].n)),
       deleteExpiredRows: (now) => loop(async () => Number((await o.schedulerPool.query('SELECT maintenance.delete_expired_rows($1) AS n', [now])).rows[0].n)),
+      // Р-25: повторять, пока не вернёт 0 — функция работает пакетами по 1000 строк
+      releaseExpiredReservations: (now) => loop(async () => Number((await o.schedulerPool.query('SELECT maintenance.release_expired_reservations($1) AS n', [now])).rows[0].n)),
+      // Р-30: алерт, а НЕ освобождение — подтверждённую резервацию разбирает человек
+      alertStaleConfirmedReservations: (now) => loop(async () => Number((await o.schedulerPool.query('SELECT maintenance.alert_stale_confirmed_reservations($1) AS n', [now])).rows[0].n)),
     },
     ...(o.reconcileEnabled ? { reconcileEnabled: o.reconcileEnabled } : {}),
     ...(o.config ? { config: o.config } : {}),

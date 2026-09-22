@@ -113,7 +113,7 @@ function jobDeps(): JobDeps {
     exportDay: async (range) => ({ range, exports: [], unverified: [], missing: [] }),
     exportBacklog: async () => [],
     forceDroppedSince: async () => [],
-    maintenance: { closePriceDays: noop, correctClosedPriceDays: noop, ensurePartitions: async () => undefined, dropExpiredPartitions: noop, deleteExpiredRows: noop, databaseNow: async () => '2026-09-17T10:00:00.000Z' },
+    maintenance: { closePriceDays: noop, correctClosedPriceDays: noop, ensurePartitions: async () => undefined, dropExpiredPartitions: noop, deleteExpiredRows: noop, releaseExpiredReservations: noop, alertStaleConfirmedReservations: noop, databaseNow: async () => '2026-09-17T10:00:00.000Z' },
   };
 }
 
@@ -164,7 +164,7 @@ test('review of step 25, findings 1 and 7: call deadlines count from the job sta
     exportBacklog: async () => [{ group: 'WRITES', range: { from: '2026-09-15T00:00:00.000Z', to: '2026-09-16T00:00:00.000Z' }, reason: 'NOT_EXPORTED' },
       { group: 'SNAPSHOTS', range: { from: '2026-09-14T00:00:00.000Z', to: '2026-09-15T00:00:00.000Z' }, reason: 'ROWS_CHANGED' }],
     forceDroppedSince: async () => [],
-    maintenance: { closePriceDays: noop, correctClosedPriceDays: noop, ensurePartitions: async () => undefined, dropExpiredPartitions: noop, deleteExpiredRows: noop, databaseNow: async () => '2026-09-17T00:40:00.000Z' },
+    maintenance: { closePriceDays: noop, correctClosedPriceDays: noop, ensurePartitions: async () => undefined, dropExpiredPartitions: noop, deleteExpiredRows: noop, releaseExpiredReservations: noop, alertStaleConfirmedReservations: noop, databaseNow: async () => '2026-09-17T00:40:00.000Z' },
   };
   const c = clock('2026-09-17T00:40:00.000Z');
   const state = new MemorySchedulerState(c.now);
@@ -238,10 +238,30 @@ test('Р-133 (шаг 28): внутренняя работа повторяетс
   assert.equal(attemptsWithin(900, 'CHANNEL'), 1, 'у работы канала попытка одна: следующая — через сутки');
   // Ревью шага 28, находка 15: «в каталоге есть четыре имени» — проверка ни о чём. Значение имеет РАЗМЕТКА каждой работы, которую
   // отдаёт источник работ: в канал ходят только те, у кого CHANNEL
-  const specs = await jobSource({ ...jobDeps(), reconcileEnabled: () => true }).jobs('2026-09-17T10:00:00.000Z');
+  // Зависимости ПОЛНЫЕ: работы, которых нет без остатка или без сверки, иначе тихо выпали бы из проверки каталога
+  const specs = await jobSource({ ...jobDeps(), reconcileEnabled: () => true, stock: { syncOrders: async () => ({ lines: 0, created: 0, consumed: 0, released: 0, unknownOffers: 0, writes: 0 }) } }).jobs('2026-09-17T10:00:00.000Z');
   const kinds = new Map(specs.map((spec) => [spec.name, spec.retryKind]));
   assert.deepEqual([...kinds.keys()].sort(), [...JOB_CATALOG.map((j) => j.name)].sort(), 'у каждой работы каталога есть спецификация');
   const internal = [...kinds.entries()].filter(([, kind]) => kind === 'INTERNAL').map(([name]) => name).sort();
   assert.deepEqual(internal, ['analytics-export-day', 'notification-loss-review', 'partitions', 'price-days-close', 'retention'],
     'внутренние — те, что ходят только в наши хранилища; остальные обращаются к каналу [Р-133]');
+});
+
+test('Р-25: работа удаления по сроку ОСВОБОЖДАЕТ резервации, у которых истёк TTL, и считает их в своём итоге', async () => {
+  /**
+   * Находка 13 ревью шага 35: функция освобождения существовала с шага 2, и её не звал никто — резервация Inbound API
+   * висела бы вечно. Проверяется вызов и то, что освобождённые входят в число сделанного: иначе работа молчала бы о том,
+   * что она что-то сделала, и провал вызова остался бы незаметным.
+   */
+  const calls: string[] = [];
+  const deps = jobDeps();
+  const specs = await jobSource({
+    ...deps,
+    maintenance: { ...deps.maintenance, dropExpiredPartitions: async () => 2, deleteExpiredRows: async () => 3,
+      releaseExpiredReservations: async (now) => { calls.push(now); return 4; }, alertStaleConfirmedReservations: async () => 1 },
+  }).jobs('2026-09-17T10:00:00.000Z');
+  const retention = specs.find((spec) => spec.name === 'retention')!;
+  const result = await retention.run({ now: '2026-09-17T10:00:00.000Z' } as never);
+  assert.deepEqual(calls, ['2026-09-17T10:00:00.000Z'], 'работа зовёт освобождение по сроку с моментом запуска');
+  assert.equal(result.items, 10, 'сделанное — секции, строки, освобождённые резервации и алерты о зависших: 2 + 3 + 4 + 1');
 });
