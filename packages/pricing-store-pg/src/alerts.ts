@@ -33,6 +33,8 @@ export interface AlertDeliveryStore {
   markFailed(tenantId: string, alertIds: readonly string[], error: string): Promise<void>;
   /** Название тенанта для письма: владелец должен понять, о каком его аккаунте речь */
   tenantName(tenantId: string): Promise<string>;
+  /** Платформенный тенант: его алерты адресованы оператору платформы, а не продавцу [Р-156] */
+  platformTenantId(): Promise<string>;
 }
 
 /** Куда процессы кладут алерты: та же роль, что ведёт их транзакции */
@@ -41,22 +43,46 @@ export class PgAlertSink implements AlertSink {
   private readonly fallback?: AlertSink;
 
   /** `fallback` — журнал JSON: он продолжает получать всё, даже если база недоступна */
+  private platform: string | null = null;
+
   constructor(pool: PgPool, fallback?: AlertSink) {
     this.pool = pool;
     this.fallback = fallback;
   }
 
+  /** Идентификатор платформенного тенанта спрашивается у базы один раз за жизнь процесса */
+  private async platformTenant(): Promise<string> {
+    if (!this.platform) this.platform = String((await this.pool.query('SELECT security.platform_tenant_id() AS id')).rows[0]!.id);
+    return this.platform;
+  }
+
   async raise(alert: Parameters<AlertSink['raise']>[0]): Promise<void> {
     if (this.fallback) await this.fallback.raise(alert);
-    // Алерт без тенанта адресовать некому: он остаётся в журнале эксплуатации
-    if (!alert.tenantId) return;
-    const tenantId = String(alert.tenantId);
-    await inTenant(this.pool, tenantId, async (tx) => {
-      await tx.query(
-        `INSERT INTO tenant_data.alert (tenant_id, code, severity, channel_account_id, correlation_id, details)
-         VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
-        [tenantId, alert.code, alert.severity, alert.channelAccountId ?? null, alert.correlationId?.slice(0, 200) ?? null, JSON.stringify(alert.details ?? {})]);
-    });
+    /**
+     * Алерт без тенанта — платформенный: отставание выгрузки, падающая работа планировщика. Он тоже адресован человеку,
+     * только другому: не продавцу, а оператору платформы. Хранится он у платформенного тенанта, и доставка отличает
+     * его по этому признаку (без этого такой алерт уходил бы владельцу первого попавшегося продавца — или никуда).
+     */
+    /**
+     * Запись алерта НЕ ломает того, кто его поднял: алерт поднимается посреди пути решения и посреди отправки записи,
+     * и уронить их из-за недоступной базы или удалённого аккаунта канала — хуже, чем потерять одно письмо. Потеря не
+     * молчит: событие остаётся в журнале эксплуатации (`fallback`), а сбой записи попадает туда же кодом.
+     */
+    try {
+      const tenantId = alert.tenantId ? String(alert.tenantId) : await this.platformTenant();
+      await inTenant(this.pool, tenantId, async (tx) => {
+        await tx.query(
+          `INSERT INTO tenant_data.alert (tenant_id, code, severity, channel_account_id, correlation_id, details)
+           VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+          [tenantId, alert.code, alert.severity, alert.channelAccountId ?? null, alert.correlationId?.slice(0, 200) ?? null, JSON.stringify(alert.details ?? {})]);
+      });
+    } catch (error) {
+      await this.fallback?.raise({
+        code: 'ALERT_NOT_STORED', severity: 'WARNING',
+        ...(alert.tenantId ? { tenantId: alert.tenantId } : {}),
+        details: { of: alert.code, error: String((error as { code?: unknown }).code ?? 'UNKNOWN') },
+      });
+    }
   }
 }
 
@@ -83,6 +109,11 @@ export class PgAlertDeliveryStore implements AlertDeliveryStore {
       details: (r.details ?? {}) as Record<string, unknown>,
       raisedAt: new Date(r.raised_at as string).toISOString(), deliveryAttempts: Number(r.delivery_attempts),
     }));
+  }
+
+  async platformTenantId(): Promise<string> {
+    const { rows } = await this.pool.query('SELECT security.platform_tenant_id() AS id');
+    return String(rows[0]!.id);
   }
 
   async ownerEmail(tenantId: string): Promise<string | null> {

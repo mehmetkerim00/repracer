@@ -25,6 +25,8 @@ export interface AlertDeliveryDeps {
   store: AlertDeliveryStore;
   mail: MailSender;
   now: () => string;
+  /** Кому писать о платформенных событиях (отставание выгрузки, падающая работа): оператору, а не продавцу */
+  operatorEmail?: string;
   /** Язык писем продавца: тот же словарь, что у консоли [Р-72] */
   locale?: Locale;
   /** Сколько алертов уровня брать за один заход */
@@ -107,8 +109,10 @@ export function createAlertDelivery(deps: AlertDeliveryDeps) {
    */
   async function sendFor(rows: readonly AlertRow[], kind: 'EMAIL_IMMEDIATE' | 'EMAIL_DIGEST', build: (rows: AlertRow[], tenant: string, to: string) => MailMessage,
     outcome: DeliveryOutcome): Promise<void> {
+    const platform = await deps.store.platformTenantId();
     for (const [tenantId, list] of byTenant(rows)) {
-      const to = await deps.store.ownerEmail(tenantId);
+      // Платформенное событие адресовано оператору: у платформенного тенанта нет владельца-продавца
+      const to = tenantId === platform ? deps.operatorEmail ?? null : await deps.store.ownerEmail(tenantId);
       if (!to) { await deps.store.markFailed(tenantId, list.map((r) => r.alertId), 'NO_OWNER_EMAIL'); outcome.failed += list.length; continue; }
       const tenant = await deps.store.tenantName(tenantId);
       const groups = kind === 'EMAIL_IMMEDIATE' ? list.map((r) => [r]) : [list];

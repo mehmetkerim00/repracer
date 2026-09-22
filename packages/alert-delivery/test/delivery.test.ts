@@ -31,6 +31,7 @@ class MemoryAlertStore implements AlertDeliveryStore {
   }
 
   async ownerEmail(): Promise<string | null> { return this.owner; }
+  async platformTenantId(): Promise<string> { return 'platform-tenant'; }
   async tenantName(): Promise<string> { return 'Synthetischer Händler'; }
 
   async markDelivered(_tenantId: string, alertIds: readonly string[], kind: 'EMAIL_IMMEDIATE' | 'EMAIL_DIGEST', ref: string): Promise<number> {
@@ -127,4 +128,18 @@ test('Р-156: язык письма — язык словаря консоли [
   await h.delivery.deliver();
   assert.match(h.mail.sent[0]!.text, /pricing is stopped by a person/);
   assert.match(h.mail.sent[0]!.text, /First step: If this was not you/);
+});
+
+test('Р-156: событие ПЛАТФОРМЫ уходит оператору, а не владельцу продавца — у платформенного тенанта продавца нет', async () => {
+  const store = new MemoryAlertStore();
+  const mail = new FakeMail();
+  const delivery = createAlertDelivery({ store, mail, now: () => NOW, locale: 'de', operatorEmail: 'betrieb@example.invalid' });
+  store.add({ tenantId: 'platform-tenant', code: 'ANALYTICS_EXPORT_FAILED', severity: 'CRITICAL', raisedAt: ago(2) });
+  store.add({ code: 'PRICING_STOPPED_BY_PERSON', severity: 'CRITICAL', raisedAt: ago(2) });
+  const outcome = await delivery.deliver();
+
+  assert.equal(outcome.immediate, 2, 'два письма: одно оператору, одно владельцу');
+  assert.deepEqual(mail.sent.map((x) => x.to).sort(), ['betrieb@example.invalid', 'inhaber@example.invalid']);
+  // И адресаты не перепутаны: платформенное событие — оператору
+  assert.match(mail.sent.find((x) => x.to === 'betrieb@example.invalid')!.text, /ANALYTICS_EXPORT_FAILED|Export/);
 });

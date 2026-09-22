@@ -113,6 +113,9 @@ CREATE POLICY alert_delivery_tenant_read ON tenant_data.tenant FOR SELECT TO rep
 GRANT SELECT (tenant_id, name, kind, status) ON tenant_data.tenant TO repracer_alert_delivery;
 CREATE POLICY alert_delivery_user_read ON platform.app_user FOR SELECT TO repracer_alert_delivery USING (true);
 GRANT SELECT (user_id, email) ON platform.app_user TO repracer_alert_delivery;
+-- Письмо называет КАНАЛ: «у вас где-то не так» — не сообщение. Доставке нужны только имя канала и его витрины
+CREATE POLICY alert_delivery_account_read ON tenant_data.channel_account FOR SELECT TO repracer_alert_delivery USING (true);
+GRANT SELECT (tenant_id, channel_account_id, channel, marketplaces) ON tenant_data.channel_account TO repracer_alert_delivery;
 
 CREATE FUNCTION security.tenant_owner_email(p_tenant_id uuid) RETURNS text
   LANGUAGE sql STABLE AS $fn$
