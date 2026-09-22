@@ -567,6 +567,7 @@ export const en = {
       digestIntro: (count: number) => `${count} events that do not need an immediate reaction happened in the last hour:`,
       digestRow: (code: string, what: string, count: number, when: string) => `- ${what} (${code}) — ${count} times, last at ${when}`,
       digestFirstStep: 'First step: open the console and check the offers of the channels named above.',
+      repeated: (count: number, last: string) => `This happened ${count} times, the last at ${last}. One letter for all of them.`,
       unknown: (code: string) => `event ${code}`,
       unknownStep: 'Open the console: the event is recorded there with its details.',
       codes: {

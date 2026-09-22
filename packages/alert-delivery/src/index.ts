@@ -91,11 +91,29 @@ export function digestMessage(rows: readonly AlertRow[], tenant: string, to: str
   return { to, subject: m.ui.alerts.digestSubject(rows.length, tenant), text: lines.join('\n') };
 }
 
+/** Одно и то же событие много раз подряд: письмо одно, и в нём сказано, сколько их было [находка 13 ревью шага 36] */
+export function repeatedMessage(rows: readonly AlertRow[], tenant: string, to: string, m: Messages): MailMessage {
+  const first = rows[0]!;
+  const letter = immediateMessage(first, tenant, to, m);
+  const last = rows.reduce((a, b) => (a.raisedAt > b.raisedAt ? a : b));
+  return {
+    to,
+    subject: `${letter.subject} ×${rows.length}`,
+    text: `${letter.text}\n\n${m.ui.alerts.repeated(rows.length, m.when(last.raisedAt))}`,
+  };
+}
+
 export function createAlertDelivery(deps: AlertDeliveryDeps) {
   const m = messagesFor(deps.locale ?? 'de');
   const batchLimit = deps.batchLimit ?? 200;
   const quietMs = (deps.quietSeconds ?? 0) * 1000;
   const digestMs = (deps.digestSeconds ?? 3600) * 1000;
+
+  const byCode = (rows: readonly AlertRow[]): Map<string, AlertRow[]> => {
+    const map = new Map<string, AlertRow[]>();
+    for (const r of rows) map.set(r.code, [...(map.get(r.code) ?? []), r]);
+    return map;
+  };
 
   const byTenant = (rows: readonly AlertRow[]): Map<string, AlertRow[]> => {
     const map = new Map<string, AlertRow[]>();
@@ -115,7 +133,11 @@ export function createAlertDelivery(deps: AlertDeliveryDeps) {
       const to = tenantId === platform ? deps.operatorEmail ?? null : await deps.store.ownerEmail(tenantId);
       if (!to) { await deps.store.markFailed(tenantId, list.map((r) => r.alertId), 'NO_OWNER_EMAIL'); outcome.failed += list.length; continue; }
       const tenant = await deps.store.tenantName(tenantId);
-      const groups = kind === 'EMAIL_IMMEDIATE' ? list.map((r) => [r]) : [list];
+      /**
+       * Находка 13 ревью шага 36: остановка канала на каталоге в 10 000 предложений давала 10 000 отдельных писем
+       * одному владельцу. CRITICAL одного КОДА сворачивается в одно письмо с числом — событие видно, а ящик читаем.
+       */
+      const groups = kind === 'EMAIL_DIGEST' ? [list] : [...byCode(list).values()];
       for (const group of groups) {
         try {
           const { ref } = await deps.mail.send(build(group, tenant, to));
@@ -141,7 +163,8 @@ export function createAlertDelivery(deps: AlertDeliveryDeps) {
       const nowMs = Date.parse(deps.now());
       const before = new Date(nowMs - quietMs).toISOString();
       const critical = await deps.store.undelivered('CRITICAL', batchLimit, before);
-      await sendFor(critical, 'EMAIL_IMMEDIATE', (rows, tenant, to) => immediateMessage(rows[0]!, tenant, to, m), outcome);
+      await sendFor(critical, 'EMAIL_IMMEDIATE',
+        (rows, tenant, to) => (rows.length === 1 ? immediateMessage(rows[0]!, tenant, to, m) : repeatedMessage(rows, tenant, to, m)), outcome);
 
       const warnings = await deps.store.undelivered('WARNING', batchLimit, before);
       const ripe = [...byTenant(warnings).entries()]

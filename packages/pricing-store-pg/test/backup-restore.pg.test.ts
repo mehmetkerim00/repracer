@@ -73,7 +73,12 @@ test('Р-158: копия снимается тем же способом, что
 
 test('Р-158: база поднимается из копии на ЧИСТОЙ базе, и данные тенанта на месте', () => {
   execFileSync('psql', ['-d', superUrl('postgres'), '-c', `CREATE DATABASE ${restored}`], { env: psqlEnv(), stdio: 'pipe' });
-  execFileSync('pg_restore', ['--dbname', superUrl(restored), '--no-owner', '--exit-on-error', dumpFile], { env: psqlEnv(), stdio: 'pipe' });
+  /**
+   * БЕЗ `--no-owner` (находка 17 ревью шага 36): владение здесь существенно — функции `SECURITY DEFINER` принадлежат
+   * ролям схемы, а `FORCE ROW LEVEL SECURITY` считается относительно владельца таблицы. Восстановление, отдающее всё
+   * восстанавливающему, выглядит успешным и ломает модель прав.
+   */
+  execFileSync('pg_restore', ['--dbname', superUrl(restored), '--exit-on-error', dumpFile], { env: psqlEnv(), stdio: 'pipe' });
 
   // Числа сверяются с ИСХОДНОЙ базой, а не с ожиданием в голове теста
   for (const [what, sql] of [
@@ -109,7 +114,16 @@ test('Р-158: восстановленная база — не свалка ст
     'cannot be raised as already delivered', 'страж-триггер');
   // Политика строк: роль пути решения не видит чужого тенанта — значит RLS включена и после восстановления
   const rls = execFileSync('psql', ['-d', superUrl(restored), '-Atc',
-    `SELECT count(*) FROM pg_class WHERE relnamespace = 'tenant_data'::regnamespace AND relkind = 'r' AND NOT relrowsecurity`],
-    { env: psqlEnv(), encoding: 'utf8' });
-  assert.equal(rls.trim(), '0', 'у каждой таблицы тенанта включена политика строк [ADR-0003]');
+    `SELECT count(*) FROM pg_class WHERE relnamespace = 'tenant_data'::regnamespace AND relkind = 'r'
+       AND NOT (relrowsecurity AND relforcerowsecurity)`], { env: psqlEnv(), encoding: 'utf8' });
+  // Не только включена, но и ДЕЙСТВУЕТ НА ВЛАДЕЛЬЦА [ADR-0003]: без FORCE владелец таблицы читает чужого тенанта
+  assert.equal(rls.trim(), '0', 'у каждой таблицы тенанта политика строк включена и действует на владельца');
+  // Владение функциями пережило восстановление: `SECURITY DEFINER` от чужого владельца — другая модель прав
+  const owners = execFileSync('psql', ['-d', superUrl(restored), '-Atc',
+    `SELECT string_agg(DISTINCT pg_get_userbyid(proowner), ',') FROM pg_proc
+      WHERE prosecdef AND pronamespace IN ('security'::regnamespace, 'maintenance'::regnamespace, 'tenant_data'::regnamespace, 'channel_data'::regnamespace)`],
+    { env: psqlEnv(), encoding: 'utf8' }).trim();
+  assert.ok(owners.includes('repracer_owner') || owners.includes('repracer_retention'),
+    `функции SECURITY DEFINER принадлежат ролям схемы, а не восстанавливающему: ${owners}`);
+  assert.ok(!owners.split(',').includes('postgres'), `ни одна SECURITY DEFINER-функция не досталась суперпользователю: ${owners}`);
 });

@@ -101,7 +101,9 @@ export class PgAlertDeliveryStore implements AlertDeliveryStore {
          FROM tenant_data.alert a
          LEFT JOIN tenant_data.channel_account ca ON ca.tenant_id = a.tenant_id AND ca.channel_account_id = a.channel_account_id
         WHERE a.delivered_at IS NULL AND a.severity = $1 AND a.raised_at <= $2::timestamptz
-        ORDER BY a.raised_at, a.alert_id
+        -- Сперва те, что ещё не пытались отправить: алерт, который не уходит (нет владельца, провайдер отвергает
+        -- адрес), иначе занимал бы всё окно и не давал уйти свежему событию другого тенанта [находка 12 ревью шага 36]
+        ORDER BY a.delivery_attempts, a.raised_at, a.alert_id
         LIMIT $3`, [severity, before, limit]);
     return rows.map((r): AlertRow => ({
       tenantId: r.tenant_id, alertId: r.alert_id, code: r.code, severity: r.severity,

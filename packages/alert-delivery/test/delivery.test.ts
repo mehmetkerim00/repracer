@@ -143,3 +143,18 @@ test('Р-156: событие ПЛАТФОРМЫ уходит оператору,
   // И адресаты не перепутаны: платформенное событие — оператору
   assert.match(mail.sent.find((x) => x.to === 'betrieb@example.invalid')!.text, /ANALYTICS_EXPORT_FAILED|Export/);
 });
+
+test('Р-156: массовое событие не превращается в поток писем — одно письмо на код с числом [находка 13 ревью шага 36]', async () => {
+  const h = harness();
+  // Остановка канала на каталоге даёт тысячи одинаковых событий: владельцу нужно ОДНО письмо, а не тысяча
+  for (let i = 0; i < 25; i++) h.store.add({ code: 'PRICE_WRITE_SCOPE_BLOCKED', severity: 'CRITICAL', raisedAt: ago(30 - i) });
+  h.store.add({ code: 'PRICING_CHANNEL_DISTRUSTED', severity: 'CRITICAL', raisedAt: ago(2), channel: 'KAUFLAND', marketplaces: ['de'] });
+  const outcome = await h.delivery.deliver();
+
+  assert.deepEqual([outcome.immediate, outcome.delivered], [2, 26], 'два письма: по одному на КОД, и отмечены все 26 событий');
+  const blocked = h.mail.sent.find((x) => x.text.includes('Ein Angebot ist blockiert'))!;
+  assert.match(blocked.subject, /×25$/, `в теме письма число событий: ${blocked.subject}`);
+  assert.match(blocked.text, /Das ist 25-mal passiert/);
+  // Событие другого кода не склеилось с ними
+  assert.ok(h.mail.sent.some((x) => x.text.includes('Der Kanal zeigt einen anderen Preis')), 'второе событие — своим письмом');
+});

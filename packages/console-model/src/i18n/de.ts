@@ -568,6 +568,7 @@ export const de: Messages = {
       digestIntro: (count: number) => `In der letzten Stunde gab es ${count} Ereignisse, die keine sofortige Reaktion brauchen:`,
       digestRow: (code: string, what: string, count: number, when: string) => `- ${what} (${code}) — ${count}-mal, zuletzt um ${when}`,
       digestFirstStep: 'Erster Schritt: Öffnen Sie die Konsole und prüfen Sie die Angebote der genannten Kanäle.',
+      repeated: (count: number, last: string) => `Das ist ${count}-mal passiert, zuletzt um ${last}. Ein Brief für alle.`,
       unknown: (code: string) => `Ereignis ${code}`,
       unknownStep: 'Öffnen Sie die Konsole: Das Ereignis ist dort mit seinen Einzelheiten festgehalten.',
       codes: {

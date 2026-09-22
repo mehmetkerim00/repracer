@@ -217,12 +217,24 @@ test('Р-127: каждый разворачиваемый процесс отм�
      * Правило от этого не слабеет: как только профиль запустит наш файл, отметка станет обязательной — и путь к файлу
      * проверяется целиком, а не только `services/*`.
      */
-    const ours = [...compose.matchAll(/"((?:services|apps|packages)\/[\w./-]+\.ts)"/g)].map((x) => x[1]!);
-    if (ours.length === 0) {
-      assert.match(compose, /image:/, `развёртывание ${name} состоит из чужих образов и не запускает наш код`);
+    /**
+     * Наш код узнаётся по ЛЮБОМУ пути репозитория, а не только по `.ts` (находка 16 ревью шага 36): профиль production
+     * запускает `backup-loop.sh` — первая редакция правила его не видела. Исключение для профиля из чужих образов —
+     * ИМЕНОВАННОЕ, с причиной, а не «в compose есть слово image», которое истинно всегда.
+     */
+    const ours = [...compose.matchAll(/(?:^|[\s"'[])((?:services|apps|packages|scripts|tests)\/[\w./-]+\.(?:ts|mjs|js|sh))/gm)].map((x) => x[1]!);
+    const entryLike = ours.filter((f) => /\/(?:main|worker|server)\.[\w]+$/.test(f) || /src\/main\.ts$/.test(f));
+    if (entryLike.length === 0) {
+      /**
+       * Шаг 36: `deploy/production` — обратный прокси и суточная копия базы, оба чужими образами. Наш код там есть
+       * (`backup-loop.sh`), но это не ПРОЦЕСС продукта: он не ходит в каналы и не ведёт цены, отмечаться ему нечем.
+       * Список именованный: новый профиль с процессом продукта сюда не попадёт и потребует отметку.
+       */
+      assert.deepEqual([name], ['production'], `развёртывание ${name} не запускает процесс продукта — это должно быть названо в правиле`);
+      assert.ok(ours.every((f) => /\.sh$/.test(f)), `в профиле ${name} наш код — только вспомогательные скрипты: ${ours.join(', ')}`);
       continue;
     }
-    for (const main of ours) {
+    for (const main of entryLike) {
       assert.match(main, /^services\/[\w-]+\/src\/main\.ts$/, `развёртывание ${name} запускает наш код точкой входа процесса: ${main}`);
       entryPoints.push({ deployment: name, main });
     }
