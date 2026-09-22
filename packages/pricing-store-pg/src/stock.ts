@@ -288,17 +288,27 @@ export class PgStockStore implements StockStore {
    */
   async confirmInboundOrders(tenantId: string, stockSourceId: string, orderRefs: readonly string[]): Promise<ConfirmOrdersOutcome> {
     return inTenant(this.options.stockPool, tenantId, async (tx) => {
-      const out: ConfirmOrdersOutcome = { confirmed: 0, alreadyConfirmed: [], unknownOrders: [] };
-      for (const ref of orderRefs) {
+      const out: ConfirmOrdersOutcome = { confirmed: 0, alreadyConfirmed: [], releasedOrders: [], unknownOrders: [] };
+      // Повтор одного номера в одном запросе — один заказ, а не два [находка 27 ревью шага 36]
+      for (const ref of [...new Set(orderRefs)]) {
         const { rows: [r] } = await tx.query(`SELECT channel_data.confirm_reservations_by_source($1, $2) AS n`, [stockSourceId, ref]);
         const n = Number(r!.n);
         if (n > 0) { out.confirmed += n; continue; }
         // Ноль подтверждённых — либо заказ уже закрыт, либо его резерваций у этого источника нет; продавцу это разные вещи
+        /**
+         * Ноль подтверждённых — три РАЗНЫХ случая, и складу они не одно и то же [находка 8 ревью шага 36]: заказ уже
+         * подтверждён (и, может быть, списан), его резерв СНЯТ (отменён или освобождён по сроку — товар мог уйти
+         * другому покупателю), или резерваций этого заказа у источника нет вовсе.
+         */
         const { rows: [known] } = await tx.query(
-          `SELECT count(*)::int AS n FROM channel_data.reservation r JOIN tenant_data.stock_pool sp
+          `SELECT count(*) FILTER (WHERE r.status IN ('CONFIRMED_BY_SOURCE', 'CONSUMED'))::int AS confirmed,
+                  count(*) FILTER (WHERE r.status = 'RELEASED')::int AS released
+             FROM channel_data.reservation r JOIN tenant_data.stock_pool sp
                   ON sp.tenant_id = r.tenant_id AND sp.stock_pool_id = r.stock_pool_id
             WHERE r.tenant_id = $1 AND r.channel_order_ref = $2 AND sp.stock_source_id = $3`, [tenantId, ref, stockSourceId]);
-        if (Number(known!.n) > 0) out.alreadyConfirmed.push(ref); else out.unknownOrders.push(ref);
+        if (Number(known!.confirmed) > 0) out.alreadyConfirmed.push(ref);
+        else if (Number(known!.released) > 0) out.releasedOrders.push(ref);
+        else out.unknownOrders.push(ref);
       }
       return out;
     });
@@ -340,14 +350,15 @@ export class PgStockStore implements StockStore {
           // Отгрузка по только что созданной резервации: списать пул можно лишь после подтверждения источником [Р-25]
           if (line.status === 'SHIPPED') {
             if (pool.source_mode === 'INTERNAL_POOL') await this.consume(tx, tenantId, r!.reservation_id, out, offer.product_id, touched);
-            else out.awaitingConfirmation += 1;
+            else await this.reportShipped(tx, tenantId, r!.reservation_id, out);
           }
           continue;
         }
         if (existing.status === 'CONSUMED' || existing.status === 'RELEASED') continue;
         if (line.status === 'SHIPPED' && existing.status === 'CONFIRMED_BY_SOURCE') await this.consume(tx, tenantId, existing.reservation_id, out, offer.product_id, touched);
-        // Р-157: отгружено, но источник заказ ещё не подтвердил — это НЕ тишина, а названное число: ждём подтверждения
-        else if (line.status === 'SHIPPED') out.awaitingConfirmation += 1;
+        // Р-157: отгружено, но источник заказ ещё не подтвердил — факт отгрузки ЗАПОМИНАЕТСЯ, иначе подтверждение
+        // придёт позже и закрывать будет нечего (находка 7 ревью шага 36)
+        else if (line.status === 'SHIPPED') await this.reportShipped(tx, tenantId, existing.reservation_id, out);
         else if (line.status === 'CANCELLED') {
           await tx.query(`UPDATE channel_data.reservation SET status = 'RELEASED', released_at = now(), release_reason = 'ORDER_CANCELLED' WHERE tenant_id = $1 AND reservation_id = $2`, [tenantId, existing.reservation_id]);
           out.released += 1; touched.add(offer.product_id);
@@ -356,6 +367,17 @@ export class PgStockStore implements StockStore {
       out.productIds = [...touched];
       return out;
     });
+  }
+
+  /**
+   * Канал сообщил об отгрузке по резервации, которую источник ещё не подтвердил [Р-157]. Пул списать нельзя — остаток
+   * источника не наш [Р-6], — но факт запоминается: подтверждение закроет такую резервацию сразу (0122).
+   */
+  private async reportShipped(tx: Tx, tenantId: string, reservationId: string, out: OrderLinesOutcome): Promise<void> {
+    await tx.query(
+      `UPDATE channel_data.reservation SET shipped_reported_at = coalesce(shipped_reported_at, now())
+        WHERE tenant_id = $1 AND reservation_id = $2 AND status IN ('CREATED', 'CONFIRMED_BY_SOURCE')`, [tenantId, reservationId]);
+    out.awaitingConfirmation += 1;
   }
 
   /** Отгрузка: CONSUMED; движение ORDER_SHIPPED во внутреннем пуле вставляет триггер базы (0020), а не код */

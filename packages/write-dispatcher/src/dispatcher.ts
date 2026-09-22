@@ -95,6 +95,8 @@ export interface WriteDispatcherDeps {
   alerts: AlertSink;
   now: () => Instant;
   policy?: Partial<RetryPolicy>;
+  /** Р-155: сколько пакетов одного аккаунта уходит одновременно; темп канала держит его лимитер */
+  batchConcurrency?: number;
   /** Крайний срок одного вызова адаптера */
   callTimeoutMs?: number;
 }
@@ -122,6 +124,21 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
   const callTimeoutMs = deps.callTimeoutMs ?? 60_000;
   const tails = new Map<string, Promise<unknown>>();
   const scopeErrorAlertedAt = new Map<string, number>();
+
+  /**
+   * Р-155 (находка 11 ревью шага 36): пакет отправляется ВНЕ цепочки захвата, поэтому цепочку единицы продлевают явно —
+   * до записи итога. Иначе параллельный `dispatchScope` той же единицы (путь решения за брокером работает вместе с
+   * обходом) успевал сделать сверку, пока пакет в полёте, и настоящий итог канала терялся.
+   */
+  function extendSerialized(key: string, until: Promise<unknown>): void {
+    const quiet = until.then(() => undefined, () => undefined);
+    const previous = tails.get(key) ?? Promise.resolve();
+    const tail = previous.then(() => quiet, () => quiet);
+    tails.set(key, tail);
+    void tail.then(() => {
+      if (tails.get(key) === tail) tails.delete(key);
+    });
+  }
 
   function serialized<T>(key: string, fn: () => Promise<T>): Promise<T> {
     const previous = tails.get(key) ?? Promise.resolve();
@@ -233,28 +250,43 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
     const channelAccountId = claims[0]!.channelAccountId;
     const writes = claims.map((c) => c.write);
     const byWriteId = new Map(claims.map((c) => [c.write.channelWriteId, c]));
-    const ctx = callContext(tenantId, channelAccountId, `dispatch:batch:${claims[0]!.write.channelWriteId}:${writes.length}`);
+    const planCtx = callContext(tenantId, channelAccountId, `dispatch:plan:${claims[0]!.write.channelWriteId}:${writes.length}`);
     const outcomes = new Map<string, WriteOutcome>();
     try {
       const adapter = await deps.adapterFor(tenantId, channelAccountId);
-      const plan = await adapter.planDispatch(ctx, writes);
+      const plan = await adapter.planDispatch(planCtx, writes);
       for (const r of plan.rejected) outcomes.set(r.channelWriteId, { channelWriteId: r.channelWriteId, status: 'REJECTED', error: r.error });
-      for (const batch of plan.batches) {
+      /**
+       * Пакеты аккаунта идут с ограниченной параллельностью (находка 10 ревью шага 36): у Kaufland пакет — 150 записей,
+       * и пакетов немного, а у Amazon `planDispatch` делает пакет на КАЖДУЮ запись — строгая очередь уронила бы
+       * параллельность отправки с восьми до одной и задержку p95 [Р-8]. Темп канала держит его собственный лимитер.
+       */
+      const batches = [...plan.batches];
+      let nextBatch = 0;
+      const sendOne = async (batch: (typeof batches)[number]) => {
         // Пакет с записью одной единицы дважды невозможен: `claimNext` выдаёт по одной записи на единицу, но правило
         // ядра проверяется и здесь — молчаливое нарушение порядка дороже отказа
         const scopes = new Set(batch.items.map((w) => w.writeScope.writeScopeId));
         if (scopes.size !== batch.items.length) {
           for (const w of batch.items) outcomes.set(w.channelWriteId, { channelWriteId: w.channelWriteId, status: 'REJECTED', error: coreError('VALIDATION', 'PERMANENT', 'batch holds two writes of one scope') });
-          continue;
+          return;
         }
         try {
+          /**
+           * Срок — у КАЖДОГО пакета свой (находка 9 ревью шага 36): один срок на всю группу означал, что хвост большого
+           * обхода отказывает по таймауту целыми пакетами, не дойдя до канала. До Р-155 у каждой записи был свой свежий
+           * срок, и это свойство сохраняется.
+           */
+          const ctx = callContext(tenantId, channelAccountId, `dispatch:batch:${batch.batchId}`);
           const result = await adapter.dispatch(ctx, batch);
           for (const o of result.outcomes) outcomes.set(o.channelWriteId, o);
         } catch (error) {
           // Исключение после отправки не исключено: итог каждой записи пакета неизвестен, перед повтором — сверка
           for (const w of batch.items) outcomes.set(w.channelWriteId, { channelWriteId: w.channelWriteId, status: 'OUTCOME_UNKNOWN', error: coreError('UNKNOWN', 'TRANSIENT', String((error as Error).message ?? error).slice(0, 200)) });
         }
-      }
+      };
+      const worker = async () => { while (nextBatch < batches.length) await sendOne(batches[nextBatch++]!); };
+      await Promise.all(Array.from({ length: Math.max(1, Math.min(deps.batchConcurrency ?? 4, batches.length)) }, worker));
     } catch (error) {
       for (const w of writes) outcomes.set(w.channelWriteId, { channelWriteId: w.channelWriteId, status: 'OUTCOME_UNKNOWN', error: coreError('UNKNOWN', 'TRANSIENT', String((error as Error).message ?? error).slice(0, 200)) });
     }
@@ -373,7 +405,13 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
           const key = `${c.tenantId}:${c.channelAccountId}`;
           byAccount.set(key, [...(byAccount.get(key) ?? []), c]);
         }
-        await Promise.all([...byAccount.values()].map((claims) => sendBatched(claims)));
+        // Цепочка каждой захваченной единицы держится до записи итога её пакета [находка 11 ревью шага 36]
+        const sends = [...byAccount.values()].map((claims) => {
+          const sending = sendBatched(claims);
+          for (const c of claims) extendSerialized(`${c.tenantId}:${c.writeScopeId}`, sending);
+          return sending;
+        });
+        await Promise.all(sends);
         for (const r of roundReports) {
           const existing = reports.find((x) => x.tenantId === r.tenantId && x.writeScopeId === r.writeScopeId);
           if (existing) existing.steps.push(...r.steps); else reports.push(r);
