@@ -31,12 +31,13 @@ BEGIN
   END IF;
 END $$;
 
--- Тенант A: владелец, администратор, оператор и наблюдатель (для проверок ролей в smoke_admin.sql); тенант B: владелец
+-- Тенант A: владелец, администратор, оператор, наблюдатель и менеджер остатков (шаг 35) — для проверок ролей; тенант B: владелец
 SELECT security.provision_tenant('a0000000-0000-0000-0000-00000000000a', 'Tenant A', 'EU', '[
   {"membershipId": "a2000000-0000-0000-0000-00000000000a", "userId": "a1000000-0000-0000-0000-00000000000a", "email": "owner-a@example.test", "role": "OWNER", "mfaEnabled": true},
   {"membershipId": "a2000000-0000-0000-0000-0000000000ad", "userId": "a1000000-0000-0000-0000-0000000000ad", "email": "admin-a@example.test", "role": "ADMIN"},
   {"membershipId": "a2000000-0000-0000-0000-0000000000a0", "userId": "a1000000-0000-0000-0000-0000000000a0", "email": "operator-a@example.test", "role": "OPERATOR"},
-  {"membershipId": "a2000000-0000-0000-0000-0000000000a9", "userId": "a1000000-0000-0000-0000-0000000000a9", "email": "viewer-a@example.test", "role": "VIEWER"}
+  {"membershipId": "a2000000-0000-0000-0000-0000000000a9", "userId": "a1000000-0000-0000-0000-0000000000a9", "email": "viewer-a@example.test", "role": "VIEWER"},
+  {"membershipId": "a2000000-0000-0000-0000-0000000000a5", "userId": "a1000000-0000-0000-0000-0000000000a5", "email": "inventory-a@example.test", "role": "INVENTORY_MANAGER"}
 ]'::jsonb);
 SELECT security.provision_tenant('b0000000-0000-0000-0000-00000000000b', 'Tenant B', 'EU', '[
   {"membershipId": "b2000000-0000-0000-0000-00000000000b", "userId": "b1000000-0000-0000-0000-00000000000b", "email": "owner-b@example.test", "role": "OWNER", "mfaEnabled": true}

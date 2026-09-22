@@ -34,6 +34,8 @@ PGUSER=svc_admin "${PSQL[@]}" -d "$DB" -f tests/db/smoke_onboarding.sql
 "${PSQL[@]}" -d "$DB" -f tests/db/smoke_append_only.sql
 # Р-102: роль синхронизации остатка — только остатки и резервации
 PGUSER=svc_stock "${PSQL[@]}" -d "$DB" -f tests/db/smoke_stock.sql
+# Шаг 35 [Р-152]: путь остатков — административной ролью (остатки ведёт человек)
+PGUSER=svc_admin "${PSQL[@]}" -d "$DB" -f tests/db/smoke_stock_path.sql
 PGUSER=svc_scheduler "${PSQL[@]}" -d "$DB" -f tests/db/smoke_retention.sql
 PGUSER=svc_scheduler "${PSQL[@]}" -d "$DB" -Atc "SELECT maintenance.ensure_partitions(now())" > /dev/null
 echo "database ${DB} ready"

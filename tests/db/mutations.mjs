@@ -1210,6 +1210,40 @@ export const STEP32_ROWS = [
  * Шаг 34 [Р-149, Р-150, Р-151]: онбординг, канал без доступов, демо-тенант. Каждая новая защита — своя строка при создании
  * [Р-108], и каждая ловится своей проверкой [Р-99].
  */
+export const STEP35_ROWS = [
+  {
+    row: 'Р-152',
+    invariant: 'путь онбординга — один из двух названных; состояние шагов остатков выводится из данных; импорт остатков — задание с правом на каталог',
+    mutations: [
+      m(dropConstraint('onboarding_path_known', 'tenant_data.onboarding_progress'), smoke('the onboarding path is a name that does not exist (Р-152)')),
+      // Источник «есть», когда он ОТДАЛ остаток: без этого условия шаг зеленеет от пустого источника
+      m(replaceInFunction('tenant_data.onboarding_status(uuid)',
+        "AND EXISTS (SELECT 1 FROM tenant_data.stock_pool pl WHERE pl.tenant_id = p_tenant_id AND pl.stock_source_id = src.stock_source_id\n                             AND (pl.on_hand > 0 OR pl.source_as_of IS NOT NULL))",
+        ''),
+        smoke('a stock source without a single figure is not counted as delivering (Р-152)')),
+      // Шаг синхронизации считает ВКЛЮЧЁННЫЕ единицы; без условия он считал бы все заведённые
+      m(replaceInFunction('tenant_data.onboarding_status(uuid)', 'count(*) FILTER (WHERE q.quantity_sync_enabled)::int', 'count(*)::int'),
+        smoke('the sync step follows the enabled quantity scopes (Р-152)')),
+      // Право вида задания: остатки ведёт тот, кто ведёт каталог, — не тот, кто правит цены
+      m(replaceInFunction('security.bulk_job_cancel_action(text)', "WHEN p_kind IN ('STOCK_IMPORT', 'STOCK_SYNC_ENABLE') THEN 'MANAGE_CATALOG'", "WHEN p_kind IN ('STOCK_IMPORT', 'STOCK_SYNC_ENABLE') THEN 'MANAGE_PRICING'"),
+        smoke('an inventory manager creates a stock import job (Р-152)')),
+      // Административное действие таблиц остатков: MANAGE_CATALOG; поставить MANAGE_PRICING значит отдать остатки тому, кто правит цены
+      m(replaceInFunction('security.admin_write_action(text)', "('tenant_data.stock_source', 'MANAGE_CATALOG')", "('tenant_data.stock_source', 'MANAGE_PRICING')"),
+        smoke('an inventory manager creates a stock source (Р-152)')),
+    ],
+  },
+  {
+    row: 'Р-105 (шаг 35)',
+    invariant: 'шестая запись остатка в сессии: проверка «цена равна решению» не читает price_decision у записи количества',
+    mutations: [
+      // Вернуть проверку в ОДНО выражение с field = 'PRICE' — и с шестого исполнения роль остатков получает отказ права
+      m(replaceInFunction('tenant_data.channel_write_before_insert()',
+        "IF NEW.field = 'PRICE' THEN\n    IF NOT EXISTS (", "IF true THEN\n    IF NEW.field = 'PRICE' AND NOT EXISTS ("),
+        smoke('the stock role creates the sixth quantity write of a session (Р-105, шаг 35)')),
+    ],
+  },
+];
+
 export const STEP34_ROWS = [
   {
     row: 'Р-150',
