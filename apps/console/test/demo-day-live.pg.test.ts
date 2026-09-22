@@ -197,7 +197,7 @@ test('Р-151, Р-153 (задача D): демо показывает остат�
    * стоят, значит новых заказов не появится, и равенство ниже — утверждение о конвейере, а не о том, где остановились.
    */
   const tail = await demo.live.syncOrdersForDbIds(
-    { tenantId: demo.live.seeded.tenantId as never, channelAccountId: demo.live.seeded.channelAccountId as never, correlationId: 'demo-day-tail', deadline: demo.clock.iso() as never },
+    { tenantId: demo.live.seeded.tenantId as never, channelAccountId: demo.live.seeded.channelAccountId as never, correlationId: 'demo-day-tail', deadline: new Date(demo.clock.nowMs() + 120_000).toISOString() as never },
     new Date(demo.clock.nowMs() - 3 * 3_600_000).toISOString());
   const stats = demo.live.simulator.stats;
   assert.ok(stats.ordersPlaced >= 300 && stats.ordersShipped >= 200, `спрос за сутки: заказов ${stats.ordersPlaced}, отгружено ${stats.ordersShipped}, отменено ${stats.ordersCancelled}`);
