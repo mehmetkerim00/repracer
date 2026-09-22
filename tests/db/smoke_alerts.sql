@@ -30,3 +30,8 @@ SELECT pg_temp.expect_fail('an alert of an unknown severity (Р-156)', format($q
   INSERT INTO tenant_data.alert (tenant_id, code, severity) VALUES (%L, 'PRICE_WRITE_NOT_SENT', 'INFO') $q$, :tA), 'alert_severity_known');
 SELECT pg_temp.expect_fail('an alert code that is not a code (Р-156)', format($q$
   INSERT INTO tenant_data.alert (tenant_id, code, severity) VALUES (%L, 'preis kaputt', 'WARNING') $q$, :tA), 'alert_code_shape');
+
+-- Подробности события — объект, а не строка и не число: иначе письмо соберётся из чего угодно
+SELECT pg_temp.expect_fail('alert details that are not an object (Р-156)', format($q$
+  INSERT INTO tenant_data.alert (tenant_id, code, severity, details) VALUES (%L, 'PRICE_WRITE_NOT_SENT', 'WARNING', '"kaputt"'::jsonb) $q$, :tA),
+  'alert_details_object');

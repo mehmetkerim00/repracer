@@ -24,7 +24,8 @@ CREATE TABLE tenant_data.alert (
   code               text NOT NULL CONSTRAINT alert_code_shape CHECK (code ~ '^[A-Z][A-Z0-9_]{2,63}$'),
   severity           text NOT NULL CONSTRAINT alert_severity_known CHECK (severity IN ('WARNING', 'CRITICAL')),
   channel_account_id uuid,
-  correlation_id     text CONSTRAINT alert_correlation_shape CHECK (correlation_id IS NULL OR length(correlation_id) <= 200),
+  -- Длина отрезается вызывающим; своей проверки у неё нет, и ограничение-дубль здесь не заводится [Р-104]
+  correlation_id     text,
   /** Подробности события: только коды, идентификаторы и числа — секретов и данных покупателей здесь нет */
   details            jsonb NOT NULL DEFAULT '{}'::jsonb CONSTRAINT alert_details_object CHECK (jsonb_typeof(details) = 'object'),
   raised_at          timestamptz NOT NULL DEFAULT now(),
@@ -32,10 +33,10 @@ CREATE TABLE tenant_data.alert (
   delivered_at       timestamptz,
   delivery_kind      text CONSTRAINT alert_delivery_kind_known CHECK (delivery_kind IN ('EMAIL_IMMEDIATE', 'EMAIL_DIGEST')),
   /** Идентификатор письма у провайдера: доказательство отправки, не адрес получателя */
-  delivery_ref       text CONSTRAINT alert_delivery_ref_shape CHECK (delivery_ref IS NULL OR length(delivery_ref) <= 200),
+  delivery_ref       text,
   /** Сколько раз доставка не удалась: письмо, которое не ушло, не считается доставленным */
   delivery_attempts  int NOT NULL DEFAULT 0 CONSTRAINT alert_delivery_attempts_non_negative CHECK (delivery_attempts >= 0),
-  last_delivery_error text CONSTRAINT alert_delivery_error_shape CHECK (last_delivery_error IS NULL OR length(last_delivery_error) <= 200),
+  last_delivery_error text,
   PRIMARY KEY (tenant_id, alert_id),
   FOREIGN KEY (tenant_id, channel_account_id) REFERENCES tenant_data.channel_account (tenant_id, channel_account_id),
   -- Доставлен — значит известно, КАК доставлен: отметка без вида доставки ничего не доказывает
@@ -70,8 +71,12 @@ BEGIN
     END IF;
     RETURN NEW;
   END IF;
-  -- Доставка отмечается ОДИН раз: повторная отметка скрыла бы вторую отправку того же события
-  IF OLD.delivered_at IS NOT NULL AND NEW.delivered_at IS DISTINCT FROM OLD.delivered_at THEN
+  /**
+   * Доставленная строка не меняется ВООБЩЕ. Первая редакция сравнивала время и пропускала любой UPDATE, который
+   * `delivered_at` не трогал, — а следующая строка молча переставляла его на `now()` и меняла доказательство отправки
+   * (находка 5 ревью шага 36). Отметка доставки — одна, и после неё событие неизменяемо.
+   */
+  IF OLD.delivered_at IS NOT NULL THEN
     RAISE EXCEPTION 'delivery of alert % is already recorded (Р-156)', OLD.alert_id USING ERRCODE = 'integrity_constraint_violation';
   END IF;
   IF NEW.delivered_at IS NOT NULL THEN NEW.delivered_at := now(); END IF;
@@ -89,11 +94,17 @@ CREATE TRIGGER b_alert_before_write BEFORE INSERT OR UPDATE ON tenant_data.alert
  */
 GRANT INSERT ON tenant_data.alert TO repracer_app, repracer_dispatcher, repracer_retention;
 /**
- * Консоль алерты только ПОКАЗЫВАЕТ: регистрация таблицы даёт административной роли запись по умолчанию, и здесь она
- * снимается. Иначе у таблицы появилось бы административное действие [Р-100] со своими стражами и аудитом, а менять
- * поднятое событие из консоли нельзя вовсе: его правит только доставка, и только отметкой.
+ * Менять и удалять событие административная роль не может: регистрация таблицы даёт ей эти права по умолчанию, и здесь
+ * они снимаются — поднятое событие правит только доставка, и только отметкой.
+ *
+ * Честно про ВСТАВКУ (находка 6 ревью шага 36): снять её с административной роли нечем — `repracer_admin` входит в
+ * `repracer_app`, а вставка нужна пути решения. Значит алерт может вставить любой процесс этого семейства, включая
+ * административный сервис, и стража человека [Р-97] на этой таблице нет намеренно: алерт поднимает ПРОЦЕСС, а не
+ * человек, и подписывать его человеком было бы неправдой. Цена этого названа: тот, кто уже имеет доступ к
+ * административному сервису, может вписать в таблицу событие, которого не было. Читать и отмечать доставку он
+ * по-прежнему не может.
  */
-REVOKE INSERT, UPDATE, DELETE ON tenant_data.alert FROM repracer_admin;
+REVOKE UPDATE, DELETE ON tenant_data.alert FROM repracer_admin;
 GRANT SELECT ON tenant_data.alert TO repracer_admin;
 
 -- Доставка: читает алерты ВСЕХ тенантов и ставит только отметку доставки

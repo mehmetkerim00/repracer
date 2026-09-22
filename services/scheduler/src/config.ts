@@ -23,6 +23,8 @@ export interface SchedulerConfig {
    * `REPRACER_SCHEDULER_MAIL=off`: молча не доставлять алерты — худший исход, чем не запуститься.
    */
   mail: { apiUrl: string; apiKey: string; from: string } | null;
+  /** Кому писать о событиях ПЛАТФОРМЫ (у них нет тенанта): без адреса они копятся недоставленными [Р-156] */
+  operatorEmail: string | null;
   /** svc_alert_delivery: доставка читает алерты всех тенантов и адрес владельца, больше ничего (0120) */
   alertDeliveryPgUrl: string | null;
   /** Р-127: адрес отметки во внешнем сервисе; без него процесс не стартует, кроме явного REPRACER_SCHEDULER_HEARTBEAT=off */
@@ -57,9 +59,12 @@ export function loadConfig(env: Env = process.env, read: (path: string) => strin
     from: required(env.REPRACER_MAIL_FROM, 'REPRACER_MAIL_FROM (or REPRACER_SCHEDULER_MAIL=off)'),
   };
   if (mail && !mail.apiUrl.startsWith('https://')) throw new ConfigError('CONFIG_INVALID: REPRACER_MAIL_API_URL must be https');
+  // Адрес оператора обязателен вместе с почтой: события платформы иначе копятся недоставленными и вытесняют чужие
+  const operatorEmail = mail ? required(env.REPRACER_OPERATOR_EMAIL, 'REPRACER_OPERATOR_EMAIL (or REPRACER_SCHEDULER_MAIL=off)') : null;
   return {
     owner: env.REPRACER_SCHEDULER_OWNER || `${hostname()}-${process.pid}`,
     mail,
+    operatorEmail,
     alertDeliveryPgUrl: mail ? required(secret(env, 'REPRACER_ALERT_DELIVERY_PG_URL', read), 'REPRACER_ALERT_DELIVERY_PG_URL (or REPRACER_SCHEDULER_MAIL=off)') : null,
     // 30 с по умолчанию: наибольшая пауза; сроки работ короче такта процесс ловит пробуждением к сроку
     tickMs: int(env, 'REPRACER_SCHEDULER_TICK_MS', 30_000, 1_000, 300_000),

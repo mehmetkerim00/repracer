@@ -1226,9 +1226,14 @@ export const STEP36_ROWS = [
         "IF NEW.delivered_at IS NOT NULL THEN\n      RAISE EXCEPTION 'an alert cannot be raised as already delivered (Р-156)' USING ERRCODE = 'integrity_constraint_violation';\n    END IF;", ''),
         smoke('an alert raised as already delivered (Р-156)')),
       // Вторая отметка доставки скрыла бы второе письмо о том же событии
-      m(replaceInFunction('tenant_data.alert_before_write()',
-        "IF OLD.delivered_at IS NOT NULL AND NEW.delivered_at IS DISTINCT FROM OLD.delivered_at THEN", 'IF false THEN'),
+      m(replaceInFunction('tenant_data.alert_before_write()', 'IF OLD.delivered_at IS NOT NULL THEN', 'IF false THEN'),
         smoke('recording a second delivery of the same alert (Р-156)')),
+      // Находка 5 ревью шага 36: правка доставленной строки, не трогающая время доставки, переставляла его молча
+      m(replaceInFunction('tenant_data.alert_before_write()', 'IF OLD.delivered_at IS NOT NULL THEN', 'IF OLD.delivered_at IS NOT NULL AND NEW.delivered_at IS DISTINCT FROM OLD.delivered_at THEN'),
+        smoke('changing a delivered alert without touching the delivery time (Р-156)')),
+      m(dropConstraint('alert_details_object', 'tenant_data.alert'), smoke('alert details that are not an object (Р-156)')),
+      m(dropConstraint('alert_delivery_kind_known', 'tenant_data.alert'), smoke('delivery of an unknown kind (Р-156)')),
+      m(dropConstraint('alert_delivery_attempts_non_negative', 'tenant_data.alert'), smoke('a negative number of delivery attempts (Р-156)')),
     ],
   },
 ];

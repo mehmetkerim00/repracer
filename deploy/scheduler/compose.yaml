@@ -35,6 +35,15 @@ services:
       REPRACER_CH_VERIFIER_PASSWORD_FILE: /run/secrets/ch_verifier_password
       # Р-127: адрес отметки во внешнем сервисе содержит идентификатор проверки — тоже секрет
       REPRACER_SCHEDULER_HEARTBEAT_URL_FILE: /run/secrets/heartbeat_url
+      # Р-156 (шаг 36): доставка алертов владельцу. Без настройки процесс НЕ стартует — кроме явного выключения:
+      # молча не доставлять алерты хуже, чем не запуститься. Переменные названы здесь, иначе в контейнер не попадут
+      # (правило шага 28: docker compose передаёт только то, что названо в `environment` самого развёртывания)
+      REPRACER_SCHEDULER_MAIL: ${REPRACER_SCHEDULER_MAIL:-}
+      REPRACER_MAIL_API_URL: ${REPRACER_MAIL_API_URL:-}
+      REPRACER_MAIL_FROM: ${REPRACER_MAIL_FROM:-}
+      REPRACER_OPERATOR_EMAIL: ${REPRACER_OPERATOR_EMAIL:-}
+      REPRACER_MAIL_API_KEY_FILE: /run/secrets/mail_api_key
+      REPRACER_ALERT_DELIVERY_PG_URL_FILE: /run/secrets/alert_delivery_pg_url
     volumes:
       - ../..:/app:ro
       - ${REPRACER_SECRETS_DIR:?set REPRACER_SECRETS_DIR}:/run/secrets:ro

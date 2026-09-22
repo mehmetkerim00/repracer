@@ -8,3 +8,5 @@ services:
     # запускающего: `docker compose` передаёт в контейнер только то, что названо в `environment` самого развёртывания [Р-127].
     environment:
       REPRACER_SCHEDULER_HEARTBEAT: "off"
+      # Р-156: аккаунта почтового провайдера у проекта нет (OQ-224) — доставка выключена явно, как и отметка
+      REPRACER_SCHEDULER_MAIL: "off"

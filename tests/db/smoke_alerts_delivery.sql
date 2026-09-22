@@ -15,6 +15,15 @@ SELECT pg_temp.expect_fail('delivery recorded without naming how (Р-156)', form
 SELECT pg_temp.expect_fail('a CRITICAL alert delivered as an hourly digest (Р-156)', format($q$
   UPDATE tenant_data.alert SET delivered_at = now(), delivery_kind = 'EMAIL_DIGEST'
    WHERE tenant_id = %L AND alert_id = 'ae000000-0000-0000-0000-000000000001' $q$, :tA), 'alert_digest_is_warning_only');
+-- Вид доставки — из известных: «как-то доставлено» ничего не доказывает
+SELECT pg_temp.expect_fail('delivery of an unknown kind (Р-156)', format($q$
+  UPDATE tenant_data.alert SET delivered_at = now(), delivery_kind = 'CARRIER_PIGEON'
+   WHERE tenant_id = %L AND delivered_at IS NULL $q$, :tA), 'alert_delivery_kind_known');
+-- Отрицательное число попыток: счётчик, который умеет уменьшаться, скрывает неудачные отправки
+SELECT pg_temp.expect_fail('a negative number of delivery attempts (Р-156)', format($q$
+  UPDATE tenant_data.alert SET delivery_attempts = -1 WHERE tenant_id = %L AND delivered_at IS NULL $q$, :tA),
+  'alert_delivery_attempts_non_negative');
+
 -- --------------------------------------------------------------- Р-156: событие неизменяемо, кроме отметки доставки
 SELECT pg_temp.expect_fail('rewriting the code of a raised alert (Р-156)', format($q$
   UPDATE tenant_data.alert SET code = 'ANALYTICS_EXPORT_BACKLOG' WHERE tenant_id = %L AND alert_id = 'ae000000-0000-0000-0000-000000000001' $q$, :tA),
@@ -39,3 +48,8 @@ SELECT pg_temp.ok('the delivery role finds the owner email of the tenant (Р-156
     SELECT security.tenant_owner_email(%L) INTO mail;
     IF mail IS NULL OR position('@' IN mail) = 0 THEN RAISE EXCEPTION 'owner email of the tenant is not found'; END IF;
   END $x$ $q$, :tA));
+
+-- Находка 5 ревью шага 36: правка ДОСТАВЛЕННОЙ строки, не трогающая время доставки, переставляла его молча
+SELECT pg_temp.expect_fail('changing a delivered alert without touching the delivery time (Р-156)', format($q$
+  UPDATE tenant_data.alert SET delivery_ref = 'synthetic-mail-second'
+   WHERE tenant_id = %L AND alert_id = 'ae000000-0000-0000-0000-000000000001' $q$, :tA), 'is already recorded');

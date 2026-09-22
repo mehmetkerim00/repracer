@@ -211,9 +211,21 @@ test('Р-127: каждый разворачиваемый процесс отм�
     // `deploy/ci` — надстройки, которыми сборка поднимает остальные развёртывания, а не процесс
     if (name === 'ci' || !existsSync(new URL(`deploy/${name}/compose.yaml`, root))) continue;
     const compose = readFileSync(new URL(`deploy/${name}/compose.yaml`, root), 'utf8');
-    const main = /"(services\/[\w-]+\/src\/main\.ts)"/.exec(compose)?.[1];
-    assert.ok(main, `развёртывание ${name} называет свою точку входа в compose`);
-    entryPoints.push({ deployment: name, main: main! });
+    /**
+     * Наш процесс в развёртывании узнаётся по тому, что оно запускает ФАЙЛ РЕПОЗИТОРИЯ. Шаг 36: профиль production
+     * состоит из чужих образов (обратный прокси, копия базы) — отмечаться там нечему, и требовать отметку не от кого.
+     * Правило от этого не слабеет: как только профиль запустит наш файл, отметка станет обязательной — и путь к файлу
+     * проверяется целиком, а не только `services/*`.
+     */
+    const ours = [...compose.matchAll(/"((?:services|apps|packages)\/[\w./-]+\.ts)"/g)].map((x) => x[1]!);
+    if (ours.length === 0) {
+      assert.match(compose, /image:/, `развёртывание ${name} состоит из чужих образов и не запускает наш код`);
+      continue;
+    }
+    for (const main of ours) {
+      assert.match(main, /^services\/[\w-]+\/src\/main\.ts$/, `развёртывание ${name} запускает наш код точкой входа процесса: ${main}`);
+      entryPoints.push({ deployment: name, main });
+    }
   }
   assert.ok(entryPoints.length >= 3, `развёртывания найдены: ${entryPoints.map((e) => e.deployment).join(', ')}`);
 

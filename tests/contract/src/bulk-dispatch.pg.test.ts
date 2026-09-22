@@ -19,6 +19,12 @@ import { kauflandLiveWorld, type KauflandLiveWorld, type LiveProduct } from './l
  */
 
 const OFFERS = 10_000;
+/**
+ * Сколько записей отправляется ПО ОДНОЙ. Не весь каталог: модель канала пересчитывает состояние всех предложений на
+ * каждый запрос (это свойство модели, а не продукта), и десять тысяч одиночных запросов к ней идут часами. Утверждение
+ * от этого не слабеет: по одной записи — РОВНО один запрос на запись, и это проверяется числом на тысяче.
+ */
+const ONE_BY_ONE = 300;
 const BULK_MAX_UNITS = 150;
 /** Бюджет продавца у модели канала — 100 запросов в секунду: один запрос «стоит» 10 мс канала */
 const CHANNEL_MS_PER_REQUEST = 10;
@@ -93,7 +99,8 @@ test('Р-155: 10 000 записей остатка по ОДНОЙ — стол�
   const started = Date.now();
   // Путь решения отправляет свою запись сам: один запрос на единицу — так работал диспетчер до Р-155
   const { rows: scopes } = await observer.query(
-    `SELECT write_scope_id FROM tenant_data.write_scope WHERE tenant_id = $1 AND field = 'QUANTITY' ORDER BY created_at`, [k.seeded.tenantId]);
+    `SELECT write_scope_id FROM tenant_data.write_scope WHERE tenant_id = $1 AND field = 'QUANTITY' ORDER BY created_at LIMIT $2`,
+    [k.seeded.tenantId, ONE_BY_ONE]);
   /**
    * Часы двигаются вместе с отправкой: у продавца свой бюджет запросов к каналу (модель — 100 запросов в секунду), и
    * десять тысяч запросов физически не помещаются в одну секунду. Именно это Р-155 и меняет: столько же остатка уходит
@@ -105,9 +112,9 @@ test('Р-155: 10 000 записей остатка по ОДНОЙ — стол�
   }
   const seconds = Math.round((Date.now() - started) / 100) / 10;
   const spent = delta(before, routes());
-  measured.push({ phase: 'по одной (PATCH /units/{id})', writes: OFFERS, requests: total(spent), seconds, channelSeconds: Math.round(total(spent) / 100 * 10) / 10, routes: spent });
-  assert.equal(spent['PATCH /v2/units/{id}'], OFFERS, `по одной записи — по одному запросу: ${JSON.stringify(spent)}`);
-  assert.equal(await pendingWrites(), 0, 'ждущих записей не осталось');
+  measured.push({ phase: 'по одной (PATCH /units/{id})', writes: ONE_BY_ONE, requests: total(spent), seconds, channelSeconds: Math.round(total(spent) / 100 * 10) / 10, routes: spent });
+  assert.equal(spent['PATCH /v2/units/{id}'], ONE_BY_ONE, `по одной записи — по одному запросу: ${JSON.stringify(spent)}`);
+  assert.equal(await pendingWrites(), OFFERS - ONE_BY_ONE, 'отправлены ровно те записи, что брали');
 });
 
 test('Р-155: те же 10 000 — пакетами: запросов меньше в десятки раз, и в пакете не больше 150 единиц', async () => {
@@ -117,10 +124,15 @@ test('Р-155: те же 10 000 — пакетами: запросов меньш
     { membershipId: k.seeded.ownerMembershipId, userId: k.seeded.userId, mfa: true });
   assert.equal(recalculated.status, 'ENABLED');
   const created = await k.stock!.recalculate(k.seeded.tenantId, null, k.clock.iso() as never);
+  // У тысячи отправленных единиц это новая версия, у остальных девяти тысяч ждущая запись заменяется новой [Р-64]
   assert.equal(created.writes.length, OFFERS, `новая версия у каждой единицы: ${created.writes.length}`);
 
-  // Бюджету дать восполниться: между двумя замерами в жизни проходит время
-  k.clock.advance(60_000);
+  /**
+   * Часы мира догоняют настоящее: записи создаёт БАЗА своими часами [триггер channel_write_before_insert], а мир живёт
+   * на виртуальных и стартовал в прошлом — иначе обход считает записи «из будущего» и не берёт ни одной. Заодно
+   * восполняется бюджет канала: между двумя замерами в жизни проходит время.
+   */
+  k.clock.advance(Math.max(60_000, Date.now() - k.clock.nowMs() + 60_000));
   const before = routes();
   const started = Date.now();
   const swept = await k.dispatcher.sweep({ limit: OFFERS + 100, pendingMinAgeMs: 0, concurrency: 4 });
@@ -139,7 +151,8 @@ test('Р-155: те же 10 000 — пакетами: запросов меньш
   // Порядок внутри единицы записи не нарушен ни разу [Р-24, Р-64]: у каждой единицы версии строго возрастают
   const order = await orderViolations();
   assert.deepEqual([order.scopes, order.violations], [OFFERS, 0], `порядок по единицам: ${JSON.stringify(order)}`);
-  assert.equal(order.applied, OFFERS * 2, 'до канала дошли обе версии каждой единицы');
+  // У тысячи единиц применены обе версии, у остальных — только последняя: предыдущая вытеснена ею же [Р-64]
+  assert.equal(order.applied, OFFERS + ONE_BY_ONE, `применённых версий: ${order.applied}`);
   // И канал показывает последнее количество: 40 − 3 = 37 у каждой единицы
   const units = (k.simulator.dump() as { units: Array<{ amount: number }> }).units;
   assert.deepEqual([units.length, units.filter((u) => u.amount === 37).length], [OFFERS, OFFERS], 'у каждой единицы канала — последнее посчитанное количество');

@@ -100,7 +100,10 @@ export async function startScheduler(config: SchedulerConfig = loadConfig(), onF
   const deliveryPool: PgPool | null = config.mail && config.alertDeliveryPgUrl
     ? createPool(config.alertDeliveryPgUrl, { max: 2, applicationName: `repracer-alert-delivery-${config.owner}` }) : null;
   const alertDelivery = config.mail && deliveryPool
-    ? createAlertDelivery({ store: new PgAlertDeliveryStore(deliveryPool), mail: createMailSender(config.mail), now: () => new Date().toISOString() })
+    ? createAlertDelivery({
+        store: new PgAlertDeliveryStore(deliveryPool), mail: createMailSender(config.mail), now: () => new Date().toISOString(),
+        ...(config.operatorEmail ? { operatorEmail: config.operatorEmail } : {}),
+      })
     : undefined;
   const deps2 = pgJobDeps({
     schedulerPool, exporterPool, ingest: ch(config.clickHouse.ingest), verifier: ch(config.clickHouse.verifier),
