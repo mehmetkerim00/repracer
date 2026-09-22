@@ -274,9 +274,13 @@ export function jobSource(deps: JobDeps): JobSource {
           specs.push({
             name: 'order-lines', scope, retryKind: 'CHANNEL', intervalSeconds: cfg.orderLinesEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,
             lagWarningSeconds: cfg.orderLinesEverySeconds * 6, lagCriticalSeconds: hours(6), leaseSeconds: 300,
-            async run({ startedAt, previousFinishedAt }) {
-              // Окно — с конца прошлого запуска и ещё интервал назад: строка, обновлённая на границе, попадёт дважды, и это безвредно
-              const since = new Date(Date.parse(previousFinishedAt ?? startedAt) - cfg.orderLinesEverySeconds * 1000).toISOString();
+            async run({ startedAt, previousSucceededAt }) {
+              /**
+               * Окно — с конца прошлого УСПЕШНОГО запуска и ещё интервал назад: строка, обновлённая на границе, попадёт
+               * дважды, и это безвредно (резервация одна на строку заказа). От последнего ЛЮБОГО завершения окно считать
+               * нельзя: такт, провалившийся на бюджете канала, унёс бы заказы своих минут навсегда.
+               */
+              const since = new Date(Date.parse(previousSucceededAt ?? startedAt) - cfg.orderLinesEverySeconds * 1000).toISOString();
               const r = await stock.syncOrders(a, ctxOf(a, startedAt, 'order-lines', 120), since);
               return { items: r.lines };
             },

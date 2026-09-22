@@ -236,4 +236,9 @@ CREATE OR REPLACE FUNCTION security.admin_write_action(p_table text) RETURNS tex
   ) AS t(tbl, a) WHERE tbl = p_table
 $function$;
 
+-- Окно чтения заказов канала [Р-25] берётся от последнего УСПЕШНОГО запуска работы, а не от последнего любого: такт,
+-- провалившийся на бюджете канала, уносил с собой своё окно, и заказы этих минут не становились резервациями вовсе
+-- (найдено прогоном суток шага 35: 358 резерваций на 360 заказов). Столбец ведёт планировщик, как остальные отметки.
+ALTER TABLE maintenance.scheduled_job ADD COLUMN last_succeeded_at timestamptz;
+
 COMMIT;

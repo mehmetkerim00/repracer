@@ -14,6 +14,7 @@ import type {
   Instant,
   WriteOutcome,
 } from '@repracer/channel-port';
+import { waitingForBudget as waitForChannelBudget } from '@repracer/channel-port';
 import { assessShift, DEFAULT_SANITY_CONFIG, evaluateSnapshot, SANITY_RULESET, type AnchorName, type SanityCheck, type SanityConfig } from '@repracer/input-sanity';
 import { decide, GATE_PROFILE, repricingWarnings, validateRepricingEnablement } from '@repracer/price-gate';
 import {
@@ -182,33 +183,13 @@ interface ScopeEvaluation {
   invoked: number;
 }
 
-/** Ошибка вызова канала, как её бросают адаптеры: класс общий по форме, а не по модулю (у Kaufland и Amazon он свой) */
-function channelErrorOf(error: unknown): { code: string; retryAt?: string } | null {
-  const e = (error as { error?: { code?: unknown; retryAt?: unknown } } | null)?.error;
-  return e && typeof e.code === 'string' ? { code: e.code, ...(typeof e.retryAt === 'string' ? { retryAt: e.retryAt } : {}) } : null;
-}
 
 export function createPricingPipeline(deps: PipelineDeps) {
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }));
-  /**
-   * OQ-216 (шаг 35): «подождите до retryAt» — не провал. Первая редакция обхода предложений роняла всю работу, когда опрос
-   * конкурентов в том же такте забирал клиентский бюджет адаптера (25 запросов в секунду, K-04), и повтор по Р-132 шёл не
-   * раньше чем через сутки: чужой репрайсер нового оффера [Р-120] замечался на сутки позже. Ждём ровно до `retryAt` и
-   * только внутри срока вызова: за сроком — та же ошибка наружу, как и любая другая.
-   */
-  const waitingForBudget = async <T>(ctx: AdapterCallContext, call: () => Promise<T>): Promise<T> => {
-    for (let attempt = 0; ; attempt++) {
-      try {
-        return await call();
-      } catch (error) {
-        const e = channelErrorOf(error);
-        if (!e || e.code !== 'RATE_LIMITED' || !e.retryAt || attempt >= 10) throw error;
-        const waitMs = Date.parse(e.retryAt) - Date.parse(deps.now());
-        if (Date.parse(e.retryAt) > Date.parse(ctx.deadline)) throw error;
-        await sleep(Math.max(1, waitMs));
-      }
-    }
-  };
+  /** OQ-216: ожидание клиентского бюджета — общее правило порта, а не своя копия у каждого, кто ходит в канал */
+  const waitingForBudget = <T>(ctx: AdapterCallContext, call: () => Promise<T>): Promise<T> =>
+    waitForChannelBudget(ctx, call, { now: deps.now, sleep });
+
   const { store, adapter, alerts, logger } = deps;
   const massShift = { ...DEFAULT_SANITY_CONFIG.massShift, ...deps.sanityConfig?.massShift };
   const shift = { windowSeconds: massShift.windowSeconds, minFactor: massShift.minFactor };

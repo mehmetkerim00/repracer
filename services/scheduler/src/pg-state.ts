@@ -16,7 +16,7 @@ function row(r: Record<string, unknown>): JobState {
     catchUp: r.catch_up as JobState['catchUp'], intervalSeconds: Number(r.interval_seconds), firstDueAt: iso(r.created_at)!,
     nextDueAt: iso(r.next_due_at)!, runsCompleted: Number(r.runs_completed), coalescedSlots: Number(r.coalesced_slots),
     consecutiveFailures: Number(r.consecutive_failures), retryKind: (r.retry_kind as JobState['retryKind']) ?? 'CHANNEL', leaseOwner: (r.lease_owner as string | null) ?? null, leaseUntil: iso(r.lease_until),
-    lastStartedAt: iso(r.last_started_at), lastFinishedAt: iso(r.last_finished_at), lastOutcome: (r.last_outcome as JobState['lastOutcome']) ?? null,
+    lastStartedAt: iso(r.last_started_at), lastFinishedAt: iso(r.last_finished_at), lastSucceededAt: iso(r.last_succeeded_at), lastOutcome: (r.last_outcome as JobState['lastOutcome']) ?? null,
     lastError: (r.last_error as string | null) ?? null, registeredAt: iso(r.registered_at)!, lagLevel: r.lag_level as JobState['lagLevel'],
   };
 }
@@ -62,6 +62,7 @@ export class PgSchedulerState implements SchedulerStateStore {
       const { rowCount } = await client.query(
         `UPDATE maintenance.scheduled_job
             SET lease_owner = NULL, lease_until = NULL, next_due_at = $3, last_finished_at = $4, last_outcome = $5, last_error = $6,
+                last_succeeded_at = CASE WHEN $9 THEN $4::timestamptz ELSE last_succeeded_at END,
                 runs_completed = runs_completed + $7, coalesced_slots = coalesced_slots + $8,
                 consecutive_failures = CASE WHEN $9 THEN 0 ELSE consecutive_failures + 1 END
           WHERE job_key = $1 AND lease_owner = $2`,

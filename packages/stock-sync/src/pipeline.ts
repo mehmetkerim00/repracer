@@ -1,3 +1,4 @@
+import { waitingForBudget } from '@repracer/channel-port';
 import type { AdapterCallContext, ChannelAdapter, Instant, OrderLine } from '@repracer/channel-port';
 import type { StockStore } from './store.ts';
 
@@ -6,6 +7,8 @@ export interface StockPipelineDeps {
   now: () => Instant;
   /** Записи, созданные пересчётом, отправляет диспетчер [Р-64]; без него они ждут обхода */
   dispatchScope?: (tenantId: string, writeScopeId: string) => Promise<unknown>;
+  /** Часы мира: на виртуальных часах ждать настоящими секундами нельзя [OQ-216] */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export interface StockPipeline {
@@ -21,6 +24,7 @@ export interface StockPipeline {
  * ПОСЛЕ записи, проверяет диспетчер обратным чтением — и это единственное подтверждение, которое у экрана есть.
  */
 export function createStockPipeline(deps: StockPipelineDeps): StockPipeline {
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }));
   const dispatch = async (tenantId: string, writeScopeIds: string[]) => {
     if (!deps.dispatchScope) return;
     for (const id of writeScopeIds) await deps.dispatchScope(tenantId, id);
@@ -30,7 +34,8 @@ export function createStockPipeline(deps: StockPipelineDeps): StockPipeline {
       const lines: OrderLine[] = [];
       let cursor: string | undefined;
       for (let page = 0; page < 200; page++) {
-        const result = await adapter.readOrderLines(ctx, { since, limit: 100, ...(cursor ? { cursor } : {}) });
+        // OQ-216: бюджет канала делят опрос, записи и чтение заказов; не хватило — ждём до `retryAt`, а не роняем работу
+        const result = await waitingForBudget(ctx, () => adapter.readOrderLines(ctx, { since, limit: 100, ...(cursor ? { cursor } : {}) }), { now: deps.now, sleep });
         lines.push(...result.items);
         if (!result.nextCursor) break;
         cursor = result.nextCursor;

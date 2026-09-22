@@ -1082,7 +1082,7 @@ async function main(): Promise<void> {
       const store = new PgPricingStore(pool, { adminPool, bulkWorkerPool: role('svc_bulk_worker', 2) });
       // Шаг 35: остатки демо — те же роли, что в работе; записи остатка отправляет диспетчер мира
       const stock = new PgStockStore({ adminPool, stockPool: role('svc_stock', 2) });
-      const stockPipeline = createStockPipeline({ store: stock, now: () => demo.clock.iso() as never, dispatchScope: (t, ws) => demo.live.dispatchScope(t, ws) });
+      const stockPipeline = createStockPipeline({ store: stock, now: () => demo.clock.iso() as never, sleep: demo.clock.sleep, dispatchScope: (t, ws) => demo.live.dispatchScope(t, ws) });
       const accounts = [{ channelAccountId: seeded.channelAccountId, channel: 'KAUFLAND', marketplaces: ['de'], haltRelease: 'SAMPLE' as const }];
       const nowIso = () => demo.clock.iso();
       const descriptor = {

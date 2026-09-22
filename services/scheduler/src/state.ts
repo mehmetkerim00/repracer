@@ -37,6 +37,8 @@ export interface JobState extends JobRegistration {
   leaseUntil: Instant | null;
   lastStartedAt: Instant | null;
   lastFinishedAt: Instant | null;
+  /** Последнее УСПЕШНОЕ завершение: от него работы считают своё окно чтения [OQ-216, прогон суток шага 35] */
+  lastSucceededAt: Instant | null;
   lastOutcome: RunOutcome | null;
   lastError: string | null;
   /** Риск 31 (шаг 26): уровень отставания, о котором уже сообщено, — в хранилище, общий для процессов и перезапусков */
@@ -112,7 +114,7 @@ export class MemorySchedulerState implements SchedulerStateStore {
     }
     this.jobs.set(r.jobKey, {
       ...r, nextDueAt: r.firstDueAt, runsCompleted: 0, coalescedSlots: 0, consecutiveFailures: 0, leaseOwner: null, leaseUntil: null,
-      lastStartedAt: null, lastFinishedAt: null, lastOutcome: null, lastError: null, lagLevel: 'OK',
+      lastStartedAt: null, lastFinishedAt: null, lastSucceededAt: null, lastOutcome: null, lastError: null, lagLevel: 'OK',
     });
   }
 
@@ -141,6 +143,7 @@ export class MemorySchedulerState implements SchedulerStateStore {
     j.lastOutcome = input.outcome;
     j.lastError = input.error;
     if (input.outcome === 'SUCCEEDED') {
+      j.lastSucceededAt = input.run.finishedAt;
       j.runsCompleted += 1;
       j.coalescedSlots += input.coalesced;
       j.consecutiveFailures = 0;

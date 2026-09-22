@@ -265,3 +265,25 @@ test('Р-25: работа удаления по сроку ОСВОБОЖДАЕ�
   assert.deepEqual(calls, ['2026-09-17T10:00:00.000Z'], 'работа зовёт освобождение по сроку с моментом запуска');
   assert.equal(result.items, 10, 'сделанное — секции, строки, освобождённые резервации и алерты о зависших: 2 + 3 + 4 + 1');
 });
+
+test('Р-25 (прогон суток шага 35): окно чтения заказов считается от последнего УСПЕШНОГО запуска, а не от любого', async () => {
+  /**
+   * Такт, провалившийся на бюджете канала, уносил с собой своё окно: заказы этих минут не становились резервациями
+   * вовсе (358 резерваций на 360 заказов в прогоне суток). Окно берётся от последнего успеха и ещё интервал назад —
+   * строка на границе попадёт дважды, и это безвредно: резервация одна на строку заказа.
+   */
+  const windows: string[] = [];
+  const deps = jobDeps();
+  const specs = await jobSource({
+    ...deps, reconcileEnabled: () => true,
+    stock: { syncOrders: async (_a, _ctx, since) => { windows.push(since); return { lines: 0, created: 0, consumed: 0, released: 0, unknownOffers: 0, writes: 0 }; } },
+  }).jobs('2026-09-17T10:00:00.000Z');
+  const orderLines = specs.find((spec) => spec.name === 'order-lines')!;
+  const run = (previousSucceededAt: string | null, previousFinishedAt: string | null) =>
+    orderLines.run({ startedAt: '2026-09-17T10:30:00.000Z', previousSucceededAt, previousFinishedAt } as never);
+  // Успех был в 10:00, провал — в 10:25: окно идёт от 10:00 минус период работы (5 минут), а не от 10:25
+  await run('2026-09-17T10:00:00.000Z', '2026-09-17T10:25:00.000Z');
+  // Успеха не было вовсе: окно — от начала запуска минус период
+  await run(null, '2026-09-17T10:25:00.000Z');
+  assert.deepEqual(windows, ['2026-09-17T09:55:00.000Z', '2026-09-17T10:25:00.000Z']);
+});

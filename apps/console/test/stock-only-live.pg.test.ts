@@ -88,7 +88,7 @@ before(async () => {
   const store = new PgPricingStore(appPool, { adminPool, bulkWorkerPool: db.pool('svc_bulk_worker', 2) });
   const stock = new PgStockStore({ adminPool, stockPool: db.pool('svc_stock', 2) });
   // Записи остатка отправляет диспетчер мира — тот же, что отправляет цены [Р-64]
-  const stockPipeline = createStockPipeline({ store: stock, now: () => demo.clock.iso() as never, dispatchScope: (t, ws) => demo.live.dispatchScope(t, ws) });
+  const stockPipeline = createStockPipeline({ store: stock, now: () => demo.clock.iso() as never, sleep: demo.clock.sleep, dispatchScope: (t, ws) => demo.live.dispatchScope(t, ws) });
   const nowIso = () => demo.clock.iso();
   const accounts = [{ channelAccountId: seeded.channelAccountId, channel: 'KAUFLAND', marketplaces: ['de'], haltRelease: 'SAMPLE' as const }];
   const live: LiveWorld = {
