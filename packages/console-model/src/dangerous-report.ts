@@ -190,8 +190,9 @@ export function dangerousReport(world: StandWorld, slice: InterventionSlice, day
     worst: items[0] ?? null,
     byUnit: [...units.values()].sort((a, b) => b.count - a.count),
     byBound: [...bounds].map(([code, count]) => ({ code, title: (m.titles as Record<string, string | undefined>)[code] ?? code, count })),
-    items, truncated: days > HOT_DECISIONS_DAYS,
-    gaps: [gap(m, 'FLOOR_HOLD_TARGET_WINDOW'), gap(m, 'DANGEROUS_REPORT_WINDOW'), gap(m, 'DANGEROUS_THRESHOLD')],
+    // `truncated` был про глубину буфера решений; теперь ещё и про предел среза — обе причины неполноты названы
+    items, truncated: days > HOT_DECISIONS_DAYS || slice.truncated,
+    gaps: [gap(m, 'FLOOR_HOLD_TARGET_WINDOW'), gap(m, 'DANGEROUS_REPORT_WINDOW'), gap(m, 'DANGEROUS_THRESHOLD'), ...(slice.truncated ? [gap(m, 'INTERVENTIONS_TRUNCATED')] : [])],
   };
 }
 

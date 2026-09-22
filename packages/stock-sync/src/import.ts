@@ -54,9 +54,10 @@ export function parseStockSheet(rows: readonly (readonly string[])[], mapping?: 
     const sku = (r[m.sku] ?? '').trim();
     if (sku === '') { if (r.some((c) => c.trim() !== '')) skipped.push({ line, sku, reason: 'EMPTY_SKU' }); return; }
     if (seen.has(sku)) { skipped.push({ line, sku, reason: 'DUPLICATE_SKU' }); return; }
+    // Артикул занят с ПЕРВОГО появления, даже если строка не применится: иначе вторая строка того же артикула прошла бы молча
+    seen.add(sku);
     const quantity = parseQuantityCell(r[m.quantity] ?? '');
     if (quantity === null) { skipped.push({ line, sku, reason: 'BAD_QUANTITY' }); return; }
-    seen.add(sku);
     out.push({ sku, quantity });
   });
   if (out.length === 0 && skipped.length === 0) return { code: 'NO_ROWS' };

@@ -128,7 +128,7 @@ export async function buildStandWorlds(options: StandOptions = {}): Promise<Live
       identityTenantId: c.identity.tenantId, membershipAlias: (id) => c.identity.membershipAlias(id),
       store: c.store, pipeline: c.pipeline, clock: c.clock,
       // Остатки мира сценария — в памяти, из его же предложений: экран остатков и путь «только остатки» показываются без базы
-      stock: new InMemoryStockStore(stockOffersOf(scenario, accounts)),
+      stock: new InMemoryStockStore(stockOffersOf(scenario, accounts), { tenantId: c.tenantId }),
       callContext: (channelAccountId) => ({
         tenantId: c.tenantId as AdapterCallContext['tenantId'], channelAccountId: channelAccountId as AdapterCallContext['channelAccountId'],
         correlationId: `stand:${scenario.id}:${c.clock.nowMs()}`, deadline: c.clock.iso(60_000),

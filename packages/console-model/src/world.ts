@@ -52,8 +52,8 @@ export const GAP_CODES = [
   // Шаг 21: экраны стратегий, правки границ, ленты цен и отчёта об опасных изменениях
   'PREVIEW_LAST_SNAPSHOT', 'PREVIEW_CURRENT_BOUNDS', 'BOUND_LEVELS', 'MASS_EDIT_MFA_PER_TRANSACTION', 'IMPORT_NO_FX', 'IMPORT_OFFER_KEYS', 'FEED_WINDOW', 'PRICE_HISTORY_NOT_READ',
   'DANGEROUS_REPORT_WINDOW', 'DANGEROUS_THRESHOLD', 'FLOOR_HOLD_TARGET_WINDOW',
-  // Шаг 35 [Р-153]: экран остатков
-  'STOCK_CHANNEL_NOT_READ',
+  // Шаг 35 [Р-153]: экран остатков; [Р-154]: срез вмешательств ограничен
+  'STOCK_CHANNEL_NOT_READ', 'INTERVENTIONS_TRUNCATED',
   // Шаг 23: три вида остановки, ценообразование канала, стратегии и лента
   'DISTRUST_DETAILS', 'CHANNEL_PRICING_OFFERS_WITHOUT_SCOPE', 'PRICING_HEALTH_ISSUES', 'POSITION_STRATEGY',
   // Шаг 24: Omnibus

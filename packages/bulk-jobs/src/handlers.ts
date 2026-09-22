@@ -402,7 +402,8 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
            */
           const rows: string[][] = [];
           for (let offset = 0; offset < total; offset += FEED_PAGE_MAX) {
-            const page = await ctx.store.feedPage(ctx.tenantId, now, feedPageQuery({ ...query, offset, limit: Math.min(FEED_PAGE_MAX, total - offset) }));
+            // `counts: false`: счётчики групп — подсчёт по ВСЕЙ ленте, и на каждой из сотен страниц это был бы тот же квадрат, что чинил шаг 31
+            const page = await ctx.store.feedPage(ctx.tenantId, now, { ...feedPageQuery({ ...query, offset, limit: Math.min(FEED_PAGE_MAX, total - offset) }), counts: false });
             rows.push(...priceFeedRowsOf(world, m, page.items));
             await progress(rows.length, 'PRODUCING');
           }

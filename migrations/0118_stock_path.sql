@@ -67,6 +67,9 @@ CREATE OR REPLACE FUNCTION tenant_data.onboarding_status(p_tenant_id uuid)
       FROM tenant_data.offer_mapping om
       LEFT JOIN tenant_data.write_scope q ON q.tenant_id = om.tenant_id AND q.write_scope_id = om.quantity_write_scope_id AND q.status <> 'RETIRED'
      WHERE om.tenant_id = p_tenant_id AND om.status = 'ACTIVE' AND om.fulfillment = 'MERCHANT'
+       -- Сужение набора [Р-131] чтут ВСЕ шаги: предложение вне набора не считается и здесь (по единице записи ЦЕНЫ того же предложения)
+       AND (NOT EXISTS (SELECT 1 FROM chosen WHERE ids IS NOT NULL)
+            OR om.price_write_scope_id = ANY (ARRAY(SELECT unnest(c.ids) FROM chosen c)))
   )
   SELECT step, done_count, total_count,
          CASE WHEN step IN ('CHANNEL', 'STOCK_SOURCE') THEN done_count > 0 ELSE total_count > 0 AND done_count = total_count END AS done,
@@ -228,8 +231,6 @@ CREATE OR REPLACE FUNCTION security.admin_write_action(p_table text) RETURNS tex
     ('tenant_data.bulk_job', 'VIEW_PRICING'),
     -- Шаг 34 [Р-149]: путь ведёт тот, кто вправе править цены
     ('tenant_data.onboarding_progress', 'MANAGE_PRICING'),
-    -- Шаг 35 [Р-152]: остатки ведёт тот, кто вправе вести каталог (владелец, администратор, менеджер остатков)
-    ('tenant_data.stock_source', 'MANAGE_CATALOG'), ('tenant_data.stock_allocation', 'MANAGE_CATALOG'), ('tenant_data.stock_movement', 'MANAGE_CATALOG'),
     ('tenant_data.price_stop', 'OWN_GUARD'), ('channel_data.pricing_halt_review', 'OWN_GUARD'), ('tenant_data.membership', 'OWN_GUARD'),
     ('channel_data.pricing_halt_sample', 'OWN_GUARD')
   ) AS t(tbl, a) WHERE tbl = p_table

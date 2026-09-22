@@ -47,7 +47,7 @@ import type {
   ScopeEvaluationContext,
   ShiftWindow,
   SnapshotOutcome, ConsoleAuditRow, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow} from '@repracer/pricing-pipeline';
-import { FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES } from '@repracer/pricing-pipeline';
+import { FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT } from '@repracer/pricing-pipeline';
 import { inTenant, RollbackWith, type PgPool, type Tx } from './db.ts';
 import { PgWriteQueueStore } from './write-queue.ts';
 
@@ -1933,12 +1933,18 @@ export class PgPricingStore implements PricingStore {
 
   async decisionPage(tenantId: string, query: DecisionPageQuery): Promise<DecisionPage> {
     return inTenant(this.admin('decisionPage'), tenantId, async (tx) => {
-      const where = `d.tenant_id = $1${query.writeScopeId ? ' AND d.write_scope_id = $4' : ''}`;
-      const params: unknown[] = [tenantId, query.limit, query.offset, ...(query.writeScopeId ? [query.writeScopeId] : [])];
-      // Индексы 0117: (tenant_id, decided_at DESC) и (tenant_id, write_scope_id, decided_at DESC)
+      /**
+       * Условие у страницы и у счёта ОДНО, но номера подстановок у них свои: первая редакция переиспользовала текст с
+       * `$4`, а счёту передавала `[tenant, null, null, scope]` — PostgreSQL отказывался ещё на разборе («не удалось
+       * определить тип $2»), и страница решений по одному предложению отвечала 500 всегда (ревью шага 35, находка 2).
+       * Индексы 0117: (tenant_id, decided_at DESC) и (tenant_id, write_scope_id, decided_at DESC).
+       */
+      const scoped = (n: number) => `d.tenant_id = $1${query.writeScopeId ? ` AND d.write_scope_id = $${n}` : ''}`;
       const [{ rows }, { rows: [count] }] = await Promise.all([
-        tx.query(`SELECT ${DECISION_COLUMNS} ${DECISION_FROM} WHERE ${where} ORDER BY d.decided_at DESC, d.price_decision_id DESC LIMIT $2 OFFSET $3`, params),
-        tx.query(`SELECT count(*)::int AS n FROM channel_data.price_decision d WHERE ${where}`, [tenantId, ...(query.writeScopeId ? [null, null, query.writeScopeId] : [])]),
+        tx.query(`SELECT ${DECISION_COLUMNS} ${DECISION_FROM} WHERE ${scoped(4)} ORDER BY d.decided_at DESC, d.price_decision_id DESC LIMIT $2 OFFSET $3`,
+          [tenantId, query.limit, query.offset, ...(query.writeScopeId ? [query.writeScopeId] : [])]),
+        tx.query(`SELECT count(*)::int AS n FROM channel_data.price_decision d WHERE ${scoped(2)}`,
+          [tenantId, ...(query.writeScopeId ? [query.writeScopeId] : [])]),
       ]);
       return { items: rows.map(decisionRow), total: Number(count!.n) };
     });
@@ -1979,11 +1985,13 @@ export class PgPricingStore implements PricingStore {
   async interventions(tenantId: string, from: Instant, to: Instant): Promise<InterventionSlice> {
     return inTenant(this.admin('interventions'), tenantId, async (tx) => {
       const params = [tenantId, from, to];
+      const limit = INTERVENTION_SLICE_LIMIT;
       // Частичные индексы 0117 отсекают «без изменения» и обычные намерения ещё в индексе — обходятся только вмешательства
       const [decisions, intents, ended, rejected] = await Promise.all([
+        // Свежие первыми и не больше предела: отчёт за 30 суток на живом каталоге иначе тянул бы сотни тысяч слепков
         tx.query(`SELECT ${DECISION_COLUMNS} ${DECISION_FROM}
                    WHERE d.tenant_id = $1 AND d.outcome <> 'NO_CHANGE' AND d.decided_at > $2::timestamptz AND d.decided_at <= $3::timestamptz
-                   ORDER BY d.decided_at DESC, d.price_decision_id DESC`, params),
+                   ORDER BY d.decided_at DESC, d.price_decision_id DESC LIMIT ${limit + 1}`, params),
         /**
          * Граница эпизода удержания — по ВСЕМ намерениям единицы окна (оконная функция), наружу идут только намерения на
          * границе. Полный обход намерений окна здесь неизбежен: он и есть определение эпизода; но наружу не уходит
@@ -2000,17 +2008,25 @@ export class PgPricingStore implements PricingStore {
                               OVER (PARTITION BY write_scope_id ORDER BY created_at, price_intent_id), false) AS prev_capped
                       FROM channel_data.price_intent
                      WHERE tenant_id = $1 AND created_at > $2::timestamptz AND created_at <= $3::timestamptz) t
-                   WHERE capped ORDER BY created_at`, params),
+                   WHERE capped ORDER BY created_at LIMIT ${limit + 1}`, params),
         tx.query(`SELECT ${WRITE_HISTORY_COLUMNS} FROM tenant_data.channel_write_history h
                    LEFT JOIN channel_data.price_decision d ON d.tenant_id = h.tenant_id AND d.price_decision_id = h.price_decision_id
                    WHERE h.tenant_id = $1 AND h.field = 'PRICE' AND h.end_reason IN ('WRITE_BLOCKED_BY_BOUND_RECHECK', 'PRICING_STOPPED')
-                     AND h.created_at > $2::timestamptz AND h.created_at <= $3::timestamptz`, params),
+                     AND h.created_at > $2::timestamptz AND h.created_at <= $3::timestamptz
+                   ORDER BY h.created_at DESC LIMIT ${limit + 1}`, params),
         tx.query(`SELECT rejected_snapshot_id, channel_account_id, marketplace, channel_product_ref, condition, source, source_event_id,
                          observed_at, received_at, verdict, reason_code, alarm_class, details, ruleset_version
                     FROM channel_data.rejected_competitor_snapshot
-                   WHERE tenant_id = $1 AND received_at > $2::timestamptz AND received_at <= $3::timestamptz ORDER BY received_at`, params),
+                   WHERE tenant_id = $1 AND received_at > $2::timestamptz AND received_at <= $3::timestamptz ORDER BY received_at DESC LIMIT ${limit + 1}`, params),
       ]);
-      return { from, to, decisions: decisions.rows.map(decisionRow), intents: intents.rows.map((r) => ({ ...intentRow(r), episodeStart: r.prev_capped !== true })), endedWrites: ended.rows.map(writeRow), rejectedSnapshots: rejected.rows.map(rejectedSnapshotRow) };
+      const truncated = [decisions.rows, intents.rows, ended.rows, rejected.rows].some((r) => r.length > limit);
+      return {
+        from, to, truncated,
+        decisions: decisions.rows.slice(0, limit).map(decisionRow),
+        intents: intents.rows.slice(0, limit).map((r) => ({ ...intentRow(r), episodeStart: r.prev_capped !== true })),
+        endedWrites: ended.rows.slice(0, limit).map(writeRow),
+        rejectedSnapshots: rejected.rows.slice(0, limit).map(rejectedSnapshotRow),
+      };
     });
   }
 
@@ -2029,14 +2045,14 @@ export class PgPricingStore implements PricingStore {
             LEFT JOIN channel_data.price_decision d ON d.tenant_id = h.tenant_id AND d.price_decision_id = h.price_decision_id
            WHERE h.tenant_id = $1 AND h.field = 'PRICE' AND ($2::uuid IS NULL OR h.write_scope_id = $2) AND ($3::timestamptz IS NULL OR ${WRITE_AT('h')} >= $3))`;
       const base: unknown[] = [tenantId, query.writeScopeId ?? null, since];
-      const [{ rows: counts }, { rows }] = await Promise.all([
-        tx.query(`${scoped} SELECT ${groupSql} AS g, count(*)::int AS n FROM u GROUP BY 1`, base),
+      const groups: Record<FeedStatusGroup, number> = { APPLIED: 0, IN_FLIGHT: 0, NOT_SENT: 0, SUPERSEDED: 0 };
+      const [counted, { rows }] = await Promise.all([
+        query.counts === false ? null : tx.query(`${scoped} SELECT ${groupSql} AS g, count(*)::int AS n FROM u GROUP BY 1`, base),
         tx.query(`${scoped} SELECT u.* FROM u WHERE ($4::text IS NULL OR ${groupSql} = $4) ORDER BY u.at DESC, u.version DESC LIMIT $5 OFFSET $6`,
           [...base, query.status ?? null, query.limit, query.offset]),
       ]);
-      const groups: Record<FeedStatusGroup, number> = { APPLIED: 0, IN_FLIGHT: 0, NOT_SENT: 0, SUPERSEDED: 0 };
-      for (const c of counts) groups[c.g as FeedStatusGroup] = Number(c.n);
-      const total = query.status ? groups[query.status] : Object.values(groups).reduce((a, b) => a + b, 0);
+      for (const c of counted?.rows ?? []) groups[c.g as FeedStatusGroup] = Number(c.n);
+      const total = query.counts === false ? query.offset + rows.length : query.status ? groups[query.status] : Object.values(groups).reduce((a, b) => a + b, 0);
       // Решение и горячее намерение — только для строк страницы
       const decisionIds = [...new Set(rows.map((r) => r.price_decision_id).filter((x): x is string => typeof x === 'string'))];
       const decisions = new Map<string, ConsoleDecisionRow>();

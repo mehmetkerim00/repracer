@@ -6,6 +6,9 @@ import type {
   StockActor, StockChannelRow, StockDivergenceRow, StockImportOutcome, StockImportRow, StockPage, StockRow, StockSourceMode, StockSourceRow, StockStore,
 } from './store.ts';
 
+/** Запись «в полёте»: ещё не завершена. Тот же список, что у `PgStockStore`: PENDING, DISPATCHED, ACCEPTED */
+const IN_FLIGHT = ['PENDING', 'DISPATCHED', 'ACCEPTED'];
+
 /** Предложение продавца, остаток которого ведём мы: то, что в базе — активная строка offer_mapping с MERCHANT */
 export interface MemoryStockOffer {
   productId: string;
@@ -39,8 +42,11 @@ export class InMemoryStockStore implements StockStore {
   private readonly canManage: (actor: StockActor) => boolean;
 
   private readonly offers: readonly MemoryStockOffer[];
-  constructor(offers: readonly MemoryStockOffer[], options: { canManage?: (actor: StockActor) => boolean } = {}) {
+  /** Тенант мира: ключ Inbound API принадлежит ему, и Р-31 требует сверки */
+  private readonly tenantId: string;
+  constructor(offers: readonly MemoryStockOffer[], options: { canManage?: (actor: StockActor) => boolean; tenantId?: string } = {}) {
     this.offers = offers;
+    this.tenantId = options.tenantId ?? 'memory';
     this.canManage = options.canManage ?? (() => true);
   }
 
@@ -93,7 +99,7 @@ export class InMemoryStockStore implements StockStore {
   }
 
   async resolveInboundKey(keyPrefix: string, keySha256Hex: string): Promise<{ tenantId: string; stockSourceId: string } | null> {
-    for (const [stockSourceId, s] of this.sources) if (s.keyPrefix === keyPrefix && s.keySha256 === keySha256Hex && s.row.status === 'ACTIVE') return { tenantId: 'memory', stockSourceId };
+    for (const [stockSourceId, s] of this.sources) if (s.keyPrefix === keyPrefix && s.keySha256 === keySha256Hex && s.row.status === 'ACTIVE') return { tenantId: this.tenantId, stockSourceId };
     return null;
   }
 
@@ -171,13 +177,16 @@ export class InMemoryStockStore implements StockStore {
     const last = own[0] ?? null;
     const confirmed = own.find((w) => w.status === 'APPLIED') ?? null;
     const allocation = this.allocations.get(scope.offer.channelAccountId) ?? { bufferUnits: 0, maxQuantity: null, minQuantityToList: 0 };
-    const finished = own.find((w) => !['PENDING', 'DISPATCHED', 'ACCEPTED'].includes(w.status)) ?? null;
+    // Расхождение — ОДНО правило на все три места, где оно показывается (строка, список, счётчик); в PostgreSQL то же
+    // правило записано один раз в `PgStockStore.DIVERGED_SQL`: ПОСЛЕДНЯЯ запись завершена не применением и повтора нет
+    const inFlight = own.some((w) => IN_FLIGHT.includes(w.status));
+    const diverged = !inFlight && last !== null && !IN_FLIGHT.includes(last.status) && last.status !== 'APPLIED' && last.status !== 'SUPERSEDED' ? last : null;
     return {
       writeScopeId: scope.writeScopeId, channelAccountId: scope.offer.channelAccountId, channel: scope.offer.channel, marketplaces: scope.offer.marketplaces,
       syncEnabled: scope.enabled, published: publishedQuantity(this.availableOfProduct(scope.offer.productId).available, allocation),
       sent: last ? { quantity: last.quantity, status: last.status, at: last.at, version: last.version } : null,
       confirmed: confirmed ? { quantity: confirmed.quantity, at: confirmed.at } : null,
-      divergence: finished && finished.status !== 'APPLIED' && finished.status !== 'SUPERSEDED' ? { status: finished.status, since: finished.at, errorCode: finished.errorCode } : null,
+      divergence: diverged ? { status: diverged.status, since: diverged.at, errorCode: diverged.errorCode } : null,
       sideEffects: { requiresAck: scope.offer.requiresSideEffectsAck === true, acknowledged: scope.acknowledged, text: scope.offer.sideEffectsText ?? null },
     };
   }
@@ -193,7 +202,7 @@ export class InMemoryStockStore implements StockStore {
       items: rows.slice(query.offset, query.offset + query.limit), total: rows.length,
       summary: {
         products: rows.length, withStock: rows.filter((r) => r.onHand > 0).length, synced: channelRows.filter((c) => c.syncEnabled).length,
-        pendingWrites: this.writes.filter((w) => ['PENDING', 'DISPATCHED', 'ACCEPTED'].includes(w.status)).length,
+        pendingWrites: this.writes.filter((w) => IN_FLIGHT.includes(w.status)).length,
         diverged: channelRows.filter((c) => c.divergence !== null).length,
         openReservations: [...this.reservations.values()].filter((r) => r.status === 'OPEN').length,
       },

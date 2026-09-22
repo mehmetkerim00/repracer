@@ -194,8 +194,14 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           || typeof x.asOf !== 'string' || Number.isNaN(Date.parse(x.asOf))) return fail(400, 'BAD_ROWS', s.badRequest);
         parsed.push({ sku: x.sku.trim(), quantity: x.quantity as number, asOf: new Date(x.asOf).toISOString() });
       }
-      const outcome = await resolved.world.stock.inboundStock(resolved.world.tenantId, resolved.stockSourceId, parsed);
-      const propagated = outcome.productIds.length > 0 && resolved.world.stockPipeline ? await resolved.world.stockPipeline.propagate(resolved.world.tenantId, outcome.productIds) : { writes: 0, unchanged: 0 };
+      /**
+       * Р-31: тенант приходит с ключом и СВЕРЯЕТСЯ с миром, которому ключ принадлежит. Первая редакция писала в тенанта
+       * мира, а найденный тенант не использовала: пока мир на базе один, это совпадало, а на двух первый же мир списка
+       * поймал бы чужой ключ (ревью шага 35, находка 5).
+       */
+      if (resolved.tenantId !== resolved.world.tenantId) return fail(401, 'UNAUTHORIZED', s.unauthenticated);
+      const outcome = await resolved.world.stock.inboundStock(resolved.tenantId, resolved.stockSourceId, parsed);
+      const propagated = outcome.productIds.length > 0 && resolved.world.stockPipeline ? await resolved.world.stockPipeline.propagate(resolved.tenantId, outcome.productIds) : { writes: 0, unchanged: 0 };
       return ok({ applied: outcome.applied, stale: outcome.stale, unknownSkus: outcome.unknownSkus, writes: propagated.writes });
     }
 
@@ -315,8 +321,11 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           if (param !== null) return fail(404, 'NOT_FOUND', s.notFound);
           const query = parseListQuery(url.searchParams);
           if (!query) return fail(400, 'BAD_PAGE', s.badRequest);
-          const [page, sources] = await Promise.all([live.stock.stockPage(world.tenantId, query), live.stock.stockSources(world.tenantId)]);
-          return ok(stockView(world, page, query, sources, m));
+          // Смещение за концом подтягивается ДО выборки — иначе подпись «151–200 из 200» стоит над пустой таблицей
+          const probe = await live.stock.stockPage(world.tenantId, { offset: 0, limit: 1 });
+          const clamped = { ...query, offset: clampOffset(query, probe.total) };
+          const [page, sources] = await Promise.all([live.stock.stockPage(world.tenantId, clamped), live.stock.stockSources(world.tenantId)]);
+          return ok(stockView(world, page, clamped, sources, m));
         }
         case 'products': {
           const query = parseListQuery(url.searchParams);
@@ -385,10 +394,17 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           // Шаг 23: фильтры и страница — на сервере по всему окну ленты; неверный параметр — 400, а не молчаливое «все»
           const query = parseFeedQuery(url.searchParams);
           if (!query || (query.writeScopeId && !scopeById(world, query.writeScopeId))) return fail(400, 'BAD_FEED_QUERY', s.badRequest);
-          // Р-154: страницу, итог и счётчики групп отдаёт база; смещение за концом — к последней строке, как раньше
-          const probe = await live.store.feedPage(world.tenantId, world.now as never, feedPageQuery({ ...query, offset: 0, limit: 1 }));
-          const pageQuery = feedPageQuery(query, probe.total);
-          return ok(priceFeed(world, m, query, await live.store.feedPage(world.tenantId, world.now as never, pageQuery), pageQuery));
+          /**
+           * Р-154: страницу, итог и счётчики групп отдаёт база. Итог берётся из ПЕРВОГО запроса, и по нему подтягивается
+           * смещение за концом: второй запрос идёт без подсчёта (`counts: false`) — иначе полный агрегат считался бы дважды
+           * на каждый показ экрана (ревью шага 35, находка 8).
+           */
+          const first = await live.store.feedPage(world.tenantId, world.now as never, feedPageQuery(query));
+          const pageQuery = feedPageQuery(query, first.total);
+          const page = pageQuery.offset === feedPageQuery(query).offset
+            ? first
+            : { ...await live.store.feedPage(world.tenantId, world.now as never, { ...pageQuery, counts: false }), counts: first.counts, total: first.total };
+          return ok(priceFeed(world, m, query, page, pageQuery));
         }
         case 'dangerous': {
           /**
@@ -935,7 +951,8 @@ const MAX_BODY_BYTES = 64 * 1024;
  */
 const MAX_IMPORT_BODY_BYTES = 48 * 1024 * 1024;
 // Файлы продавца: себестоимость и остатки (шаг 35) — их предел выше, чем у обычного запроса экрана
-const bodyLimitFor = (url: string) => (url.includes('/cost-import/') || url.includes('/stock/import') ? MAX_IMPORT_BODY_BYTES : MAX_BODY_BYTES);
+// Файлы продавца (себестоимость, остатки) и партия Inbound API: их предел выше, чем у обычного запроса экрана
+const bodyLimitFor = (url: string) => (url.includes('/cost-import/') || url.includes('/stock/import') || url.includes('/inbound/v1/stock') ? MAX_IMPORT_BODY_BYTES : MAX_BODY_BYTES);
 
 function send(res: ServerResponse, r: ApiResponse): void {
   if (r.file) {

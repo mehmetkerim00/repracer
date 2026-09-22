@@ -73,14 +73,23 @@ export class PgStockStore implements StockStore {
           `SELECT p.product_id, unnest(array_remove(ARRAY[p.sku, p.gtin, om.external_unit_id, om.external_sku, om.channel_product_ref], NULL)) AS key
              FROM tenant_data.product p LEFT JOIN tenant_data.offer_mapping om ON om.tenant_id = p.tenant_id AND om.product_id = p.product_id AND om.status = 'ACTIVE'
             WHERE p.tenant_id = $1`, [tenantId]);
-        const byKey = new Map<string, string>();
-        for (const t of targets) byKey.set(String(t.key), t.product_id);
+        /**
+         * Один ключ — один товар. Артикул, подошедший ДВУМ товарам (чужой EAN в графе артикула, два активных предложения),
+         * не применяется вовсе: количество, ушедшее не тому товару, дороже пропущенной строки [Р-138].
+         */
+        const byKey = new Map<string, string | null>();
+        for (const t of targets) {
+          const key = String(t.key);
+          const known = byKey.get(key);
+          byKey.set(key, known === undefined || known === t.product_id ? t.product_id : null);
+        }
         for (const r of rows) {
           if (seen.has(r.sku)) { out.unmatched.push({ sku: r.sku, reason: 'DUPLICATE_SKU' }); continue; }
           seen.add(r.sku);
           if (!Number.isSafeInteger(r.quantity) || r.quantity < 0) { out.unmatched.push({ sku: r.sku, reason: 'BAD_QUANTITY' }); continue; }
           const productId = byKey.get(r.sku);
-          if (!productId) { out.unmatched.push({ sku: r.sku, reason: 'UNKNOWN_SKU' }); continue; }
+          if (productId === undefined) { out.unmatched.push({ sku: r.sku, reason: 'UNKNOWN_SKU' }); continue; }
+          if (productId === null) { out.unmatched.push({ sku: r.sku, reason: 'AMBIGUOUS_SKU' }); continue; }
           out.matched += 1;
           const { rows: [pool] } = await tx.query(
             `INSERT INTO tenant_data.stock_pool (tenant_id, stock_source_id, source_mode, product_id) VALUES ($1, $2, 'INTERNAL_POOL', $3)
@@ -254,7 +263,8 @@ export class PgStockStore implements StockStore {
          target AS (SELECT t.write_scope_id, t.last_quantity, coalesce(t.latest_version_created, 0) + 1 AS version, ${PgStockStore.PUBLISHED_SQL} AS q FROM t WHERE t.allocation_active),
          created AS (
            INSERT INTO tenant_data.channel_write (tenant_id, write_scope_id, field, quantity, version, origin, idempotency_key, created_at)
-           SELECT $1, g.write_scope_id, 'QUANTITY', g.q, g.version, 'STOCK_RECALC', 'stock:' || g.write_scope_id || ':' || g.version, $3::timestamptz
+           -- Время строки ставит триггер channel_write_before_insert часами базы; переданный момент влияет только на ключ идемпотентности
+          SELECT $1, g.write_scope_id, 'QUANTITY', g.q, g.version, 'STOCK_RECALC', 'stock:' || g.write_scope_id || ':' || g.version, $3::timestamptz
              FROM target g WHERE g.last_quantity IS NULL OR g.last_quantity <> g.q
            RETURNING write_scope_id, quantity, version)
          SELECT (SELECT json_agg(json_build_object('writeScopeId', c.write_scope_id, 'quantity', c.quantity, 'version', c.version)) FROM created c) AS writes,
@@ -324,35 +334,71 @@ export class PgStockStore implements StockStore {
            (SELECT array_agg(DISTINCT om.marketplace ORDER BY om.marketplace) FROM tenant_data.offer_mapping om WHERE om.tenant_id = $1 AND om.quantity_write_scope_id = t.write_scope_id) AS marketplaces,
            cap.requires_side_effects_ack, cap.side_effects, ws.side_effects_ack_at,
            lw.quantity AS sent_quantity, lw.status AS sent_status, lw.at AS sent_at, lw.version AS sent_version, lw.last_error_code AS sent_error,
-           lw.finished AS sent_finished,
+           coalesce(${'__DIVERGED__'}, false) AS diverged,
            ap.quantity AS confirmed_quantity, ap.accepted_at AS confirmed_at
       FROM (${'__TARGETS__'}) t
       JOIN tenant_data.write_scope ws ON ws.tenant_id = $1 AND ws.write_scope_id = t.write_scope_id
       JOIN tenant_data.channel_account ca ON ca.tenant_id = $1 AND ca.channel_account_id = t.channel_account_id
       JOIN platform.channel_capability cap ON cap.capability_id = ws.capability_id AND cap.version = ws.capability_version
+      LEFT JOIN LATERAL (${'__LAST_WRITE__'}) lw ON true
       LEFT JOIN LATERAL (
+        SELECT h.quantity, h.accepted_at FROM tenant_data.channel_write_history h
+         WHERE h.tenant_id = $1 AND h.write_scope_id = t.write_scope_id AND h.field = 'QUANTITY' AND h.final_status = 'APPLIED'
+         ORDER BY h.version DESC LIMIT 1) ap ON true`;
+
+  /**
+   * ПОСЛЕДНЯЯ запись остатка единицы: в полёте и завершённые в одном порядке версий. Один текст на все три места, где
+   * расхождение показывается (бейдж строки, список, счётчик сводки), — иначе они разойдутся [находка 11 ревью шага 35].
+   */
+  private static readonly LAST_WRITE_SQL = `
         SELECT u.quantity, u.status, u.at, u.version, u.last_error_code, u.finished FROM (
           SELECT w.quantity, w.status, coalesce(w.accepted_at, w.dispatched_at, w.created_at) AS at, w.version, w.last_error_code, false AS finished
             FROM tenant_data.channel_write w WHERE w.tenant_id = $1 AND w.write_scope_id = t.write_scope_id AND w.field = 'QUANTITY'
           UNION ALL
           SELECT h.quantity, h.final_status, coalesce(h.accepted_at, h.dispatched_at, h.created_at), h.version, h.last_error_code, true
             FROM tenant_data.channel_write_history h WHERE h.tenant_id = $1 AND h.write_scope_id = t.write_scope_id AND h.field = 'QUANTITY'
-        ) u ORDER BY u.version DESC LIMIT 1) lw ON true
-      LEFT JOIN LATERAL (
-        SELECT h.quantity, h.accepted_at FROM tenant_data.channel_write_history h
-         WHERE h.tenant_id = $1 AND h.write_scope_id = t.write_scope_id AND h.field = 'QUANTITY' AND h.final_status = 'APPLIED'
-         ORDER BY h.version DESC LIMIT 1) ap ON true`;
+        ) u ORDER BY u.version DESC LIMIT 1`;
+
+  /**
+   * ОДНО определение расхождения: последняя запись единицы ЗАВЕРШЕНА не применением и не вытеснением, и повтора уже нет
+   * (записи в полёте у единицы не осталось — пока она есть, продавцу показывают ход, а не расхождение). Считается в SQL,
+   * как и публикуемое количество; в памяти то же правило — `InMemoryStockStore.channelRow`.
+   */
+  private static readonly DIVERGED_SQL = `lw.finished AND lw.status NOT IN ('APPLIED', 'SUPERSEDED')
+    AND NOT EXISTS (SELECT 1 FROM tenant_data.channel_write w WHERE w.tenant_id = $1 AND w.write_scope_id = t.write_scope_id AND w.field = 'QUANTITY')`;
+
+  /**
+   * Кандидаты в расхождение — по водяным знакам единицы (одна таблица, без подробностей): на каталоге целевого клиента
+   * подробности по всем 10 000 единицам стоили 5,7 с при пустом результате [Р-154]. Окончательное решение — всё равно
+   * `DIVERGED_SQL`: кандидат, у которого расхождения нет, из списка и из счёта выпадает.
+   */
+  private static readonly DIVERGENCE_CANDIDATES_SQL = `
+    SELECT ss.write_scope_id FROM tenant_data.write_scope_sync_state ss
+      JOIN tenant_data.write_scope s ON s.tenant_id = ss.tenant_id AND s.write_scope_id = ss.write_scope_id AND s.field = 'QUANTITY' AND s.status <> 'RETIRED'
+     WHERE ss.tenant_id = $1 AND ss.latest_version_dispatched > 0 AND ss.latest_version_applied < ss.latest_version_dispatched
+       AND NOT EXISTS (SELECT 1 FROM tenant_data.channel_write w WHERE w.tenant_id = ss.tenant_id AND w.write_scope_id = ss.write_scope_id)`;
+
+  /** Счёт расхождений для сводки экрана: те же кандидаты и то же правило, что у списка */
+  private static divergedCountSql(): string {
+    return `(SELECT count(*) FROM (${PgStockStore.DIVERGENCE_CANDIDATES_SQL}) t
+               JOIN LATERAL (${PgStockStore.LAST_WRITE_SQL}) lw ON true
+              WHERE ${PgStockStore.DIVERGED_SQL})::int`;
+  }
+
+  private static channelRowsSql(): string {
+    return PgStockStore.CHANNEL_ROWS_SQL.replace('__DIVERGED__', PgStockStore.DIVERGED_SQL).replace('__LAST_WRITE__', PgStockStore.LAST_WRITE_SQL);
+  }
 
   private channelRow(r: Row): StockChannelRow {
     const allocation = { bufferUnits: Number(r.buffer_units ?? 0), maxQuantity: r.max_quantity === null || r.max_quantity === undefined ? null : Number(r.max_quantity), minQuantityToList: Number(r.min_quantity_to_list ?? 0) };
-    const finishedNotApplied = r.sent_finished === true && r.sent_status !== 'APPLIED' && r.sent_status !== 'SUPERSEDED';
+    const diverged = r.diverged === true;
     return {
       writeScopeId: r.write_scope_id, channelAccountId: r.channel_account_id, channel: r.channel, marketplaces: (r.marketplaces ?? []) as string[],
       syncEnabled: r.quantity_sync_enabled === true,
       published: publishedQuantity(availableOf(Number(r.on_hand), Number(r.reserved)), allocation),
       sent: r.sent_quantity === null || r.sent_quantity === undefined ? null : { quantity: Number(r.sent_quantity), status: r.sent_status, at: iso(r.sent_at), version: Number(r.sent_version) },
       confirmed: r.confirmed_quantity === null || r.confirmed_quantity === undefined ? null : { quantity: Number(r.confirmed_quantity), at: iso(r.confirmed_at) },
-      divergence: finishedNotApplied ? { status: r.sent_status, since: iso(r.sent_at), errorCode: r.sent_error ?? null } : null,
+      divergence: diverged ? { status: r.sent_status, since: iso(r.sent_at), errorCode: r.sent_error ?? null } : null,
       sideEffects: { requiresAck: r.requires_side_effects_ack === true, acknowledged: r.side_effects_ack_at !== null && r.side_effects_ack_at !== undefined, text: r.side_effects ?? null },
     };
   }
@@ -367,7 +413,7 @@ export class PgStockStore implements StockStore {
            FROM tenant_data.product p WHERE p.tenant_id = $1 ORDER BY p.sku, p.product_id LIMIT $2 OFFSET $3`, [tenantId, query.limit, query.offset]);
       const ids = products.map((p) => p.product_id as string);
       const { rows: channels } = ids.length === 0 ? { rows: [] as Row[] } : await tx.query(
-        PgStockStore.CHANNEL_ROWS_SQL.replace('__TARGETS__', `${PgStockStore.TARGETS_SQL} AND s.product_id = ANY($2::uuid[])`) + ' ORDER BY ca.channel, t.write_scope_id', [tenantId, ids]);
+        PgStockStore.channelRowsSql().replace('__TARGETS__', `${PgStockStore.TARGETS_SQL} AND s.product_id = ANY($2::uuid[])`) + ' ORDER BY ca.channel, t.write_scope_id', [tenantId, ids]);
       const byProduct = new Map<string, StockChannelRow[]>();
       for (const c of channels) byProduct.set(c.product_id, [...(byProduct.get(c.product_id) ?? []), this.channelRow(c)]);
       const items: StockRow[] = products.map((p) => ({
@@ -380,10 +426,8 @@ export class PgStockStore implements StockStore {
                 (SELECT count(*) FROM tenant_data.write_scope s WHERE s.tenant_id = $1 AND s.field = 'QUANTITY' AND s.status <> 'RETIRED' AND s.quantity_sync_enabled)::int AS synced,
                 (SELECT count(*) FROM tenant_data.channel_write w WHERE w.tenant_id = $1 AND w.field = 'QUANTITY' AND w.status IN ('PENDING', 'DISPATCHED', 'ACCEPTED', 'FAILED', 'BLOCKED'))::int AS pending,
                 (SELECT count(*) FROM channel_data.reservation r WHERE r.tenant_id = $1 AND r.status IN ('CREATED', 'CONFIRMED_BY_SOURCE'))::int AS open_reservations,
-                -- Расхождение: последняя отправленная версия завершена НЕ применением, и повтора уже нет (записи в полёте у единицы нет)
-                (SELECT count(*) FROM tenant_data.write_scope_sync_state ss JOIN tenant_data.write_scope s ON s.tenant_id = ss.tenant_id AND s.write_scope_id = ss.write_scope_id
-                  WHERE ss.tenant_id = $1 AND s.field = 'QUANTITY' AND ss.latest_version_dispatched > 0 AND ss.latest_version_applied < ss.latest_version_dispatched
-                    AND NOT EXISTS (SELECT 1 FROM tenant_data.channel_write w WHERE w.tenant_id = ss.tenant_id AND w.write_scope_id = ss.write_scope_id))::int AS diverged`,
+                -- Расхождение — ТО ЖЕ правило и те же кандидаты, что у списка расхождений
+                ${PgStockStore.divergedCountSql()} AS diverged`,
         [tenantId]);
       return {
         items, total: Number(s!.products),
@@ -394,20 +438,11 @@ export class PgStockStore implements StockStore {
 
   async stockDivergences(tenantId: string, limit: number): Promise<StockDivergenceRow[]> {
     return inTenant(this.options.adminPool, tenantId, async (tx) => {
-      /**
-       * Расхождение: последняя отправленная версия завершена НЕ применением, и повтора нет. Сначала — кандидаты по водяным
-       * знакам (одна таблица), подробности — только по ним: на каталоге целевого клиента подробности по всем 10 000 единицам
-       * стоили 5,7 с при пустом результате [Р-154]
-       */
       const { rows: candidates } = await tx.query(
-        `SELECT ss.write_scope_id FROM tenant_data.write_scope_sync_state ss
-           JOIN tenant_data.write_scope s ON s.tenant_id = ss.tenant_id AND s.write_scope_id = ss.write_scope_id AND s.field = 'QUANTITY' AND s.status <> 'RETIRED'
-          WHERE ss.tenant_id = $1 AND ss.latest_version_dispatched > 0 AND ss.latest_version_applied < ss.latest_version_dispatched
-            AND NOT EXISTS (SELECT 1 FROM tenant_data.channel_write w WHERE w.tenant_id = ss.tenant_id AND w.write_scope_id = ss.write_scope_id)
-          ORDER BY ss.updated_at DESC LIMIT $2`, [tenantId, limit]);
+        `${PgStockStore.DIVERGENCE_CANDIDATES_SQL} ORDER BY ss.updated_at DESC LIMIT $2`, [tenantId, limit]);
       if (candidates.length === 0) return [];
       const { rows } = await tx.query(
-        PgStockStore.CHANNEL_ROWS_SQL.replace('__TARGETS__', `${PgStockStore.TARGETS_SQL} AND s.write_scope_id = ANY($2::uuid[])`) + ` ORDER BY lw.at DESC`,
+        PgStockStore.channelRowsSql().replace('__TARGETS__', `${PgStockStore.TARGETS_SQL} AND s.write_scope_id = ANY($2::uuid[])`) + ` ORDER BY lw.at DESC`,
         [tenantId, candidates.map((c) => c.write_scope_id)]);
       const { rows: skus } = await tx.query(`SELECT product_id, sku FROM tenant_data.product WHERE tenant_id = $1 AND product_id = ANY($2::uuid[])`, [tenantId, rows.map((r) => r.product_id)]);
       const skuOf = new Map(skus.map((s) => [s.product_id, s.sku as string]));

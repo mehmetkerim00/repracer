@@ -41,6 +41,8 @@ let workerConfigPath = '';
 /** Сколько запросов сделал продавец и сколько прошло времени — ответ на «сколько шагов и минут до работающей синхронизации» */
 const journey: Array<{ step: string; method: string; url: string; seconds: number; status: number }> = [];
 let journeyStart = 0;
+/** Ключ Inbound API, выданный вторым тестом: третий шлёт им остаток единицы, которой в канале уже нет */
+let inboundKey = '';
 
 const api = (screen: string, param?: string) => `/api/worlds/${encodeURIComponent(WORLD)}/${screen}${param ? `/${param}` : ''}`;
 
@@ -217,6 +219,7 @@ test('Inbound API: ключ показан один раз; устаревшее
   const source = await step<{ stockSourceId: string; apiKey: string | null }>('источник: Inbound API', 'POST', api('stock', 'sources'), { mode: 'INBOUND_API', name: 'WMS' });
   assert.equal(source.status, 200);
   const key = source.body.apiKey!;
+  inboundKey = key;
   assert.match(key, /^rpk_/);
   const sku = String(340_100_001).slice(-6);
   const t1 = '2026-09-23T10:00:00.000Z';
@@ -232,4 +235,37 @@ test('Inbound API: ключ показан один раз; устаревшее
   assert.deepEqual([row.onHand, row.channels[0]!.published, row.channels[0]!.tone], [40, 38, 'ok'], JSON.stringify(row));
   const unit = (demo.live.simulator.dump() as { units: Array<{ idUnit: number; amount: number }> }).units.find((u) => String(u.idUnit) === sku)!;
   assert.equal(unit.amount, 38, 'новое количество дошло до канала');
+});
+
+test('Р-153: канал перестал принимать запись — расхождение «у нас / в канале» появляется и названо', async () => {
+  // Продавец удалил единицу в кабинете канала — обычная жизнь. У нас остаток есть, канал его больше не примет
+  const sku = String(340_100_002).slice(-6);
+  const productSku = `syn-prod-de-340${sku}`;
+  assert.equal(demo.live.simulator.removeUnit(Number(sku)), 1, 'единица была в канале и удалена продавцом');
+  const pushed = await call('POST', '/inbound/v1/stock', { rows: [{ sku, quantity: 77, asOf: '2026-09-23T12:00:00.000Z' }] }, { authorization: `Bearer ${inboundKey}`, cookie: '' });
+  assert.deepEqual(JSON.parse(pushed.text), { applied: 1, stale: 0, unknownSkus: [], writes: 1 }, pushed.text);
+  for (let i = 0; i < 10; i++) { await demo.live.betweenTicks(); demo.clock.advance(30_000); }
+
+  // Отдельный список расхождений: ровно эта единица, с тем, что отправлено, что подтверждено и почему не применено
+  const divergences = (await step<StockDivergencesView>('расхождения (есть)', 'GET', api('stock', 'divergences'))).body;
+  assert.equal(divergences.items.length, 1, JSON.stringify(divergences.items).slice(0, 400));
+  const item = divergences.items[0]!;
+  assert.deepEqual([item.sku, item.status, item.errorCode, item.channel], [productSku, 'DISCARDED_STALE', 'NOT_FOUND', 'KAUFLAND'], JSON.stringify(item));
+  // Расхождение НАЗВАНО словами продавца: и отправленное количество, и то, что канал его не принял
+  assert.match(item.text, new RegExp(String(item.sent)), item.text);
+  assert.ok(item.text !== divergences.none && /[A-Za-zА-Яа-я]{4}/.test(item.text), `текст расхождения — не заглушка: ${item.text}`);
+
+  // Та же строка на экране остатков: счётчик, бейдж строки и тон — одно правило расхождения на три места
+  const screen = (await step<StockView>('экран остатков с расхождением', 'GET', `${api('stock')}?limit=200`)).body;
+  assert.equal(screen.summary.diverged, 1, JSON.stringify(screen.summary));
+  const row = screen.rows.find((r) => r.sku === productSku)!;
+  assert.equal(row.channels[0]!.tone, 'stop', JSON.stringify(row.channels[0]));
+  assert.ok(row.channels[0]!.divergedText && row.channels[0]!.divergedText.length > 0, 'строка товара называет расхождение');
+  assert.equal(row.channels.filter((c) => c.divergedText !== null).length, 1);
+  // У остальных 199 товаров расхождения нет — список не «всё подряд»
+  assert.equal(screen.rows.filter((r) => r.channels.some((c) => c.divergedText !== null)).length, 1, 'расхождение только у своей единицы');
+
+  // Расхождение показано именно потому, что повтора нет: пока запись в полёте, продавцу показывают ход, а не расхождение
+  const [inFlight] = (await observer.query(`SELECT count(*)::int AS n FROM tenant_data.channel_write WHERE field = 'QUANTITY'`)).rows;
+  assert.equal(Number(inFlight.n), 0, 'неприменённая запись завершена, повтора в полёте нет — иначе это был бы ход, а не расхождение');
 });

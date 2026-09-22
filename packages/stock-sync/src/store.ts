@@ -31,7 +31,8 @@ export interface StockImportRow {
   quantity: number;
 }
 
-export type StockImportUnmatchedReason = 'UNKNOWN_SKU' | 'BAD_QUANTITY' | 'DUPLICATE_SKU';
+/** `AMBIGUOUS_SKU` — артикул подходит двум товарам: [Р-138] не угадывать, а показать продавцу */
+export type StockImportUnmatchedReason = 'UNKNOWN_SKU' | 'BAD_QUANTITY' | 'DUPLICATE_SKU' | 'AMBIGUOUS_SKU';
 
 export interface StockImportOutcome {
   status: 'APPLIED';

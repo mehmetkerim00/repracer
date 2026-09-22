@@ -592,6 +592,16 @@ export class SimulatedKauflandChannel implements ChannelBehaviour {
     for (const u of this.units.values()) if (u.idOffer === idOffer) u.amount = Math.max(0, u.amount - quantity);
   }
 
+  /**
+   * Продавец удалил единицу в кабинете канала. Наши записи для неё начинают получать 404 — это источник расхождения
+   * «у нас / в канале» [Р-153]: остаток у нас есть, канал его не принимает и не покажет. Возвращает, сколько удалено.
+   */
+  removeUnit(idUnit: number): number {
+    let removed = 0;
+    for (const [key, u] of [...this.units]) if (u.idUnit === idUnit) { this.units.delete(key); removed += 1; }
+    return removed;
+  }
+
   private unitView(u: UnitState): Record<string, unknown> {
     return {
       id_unit: u.idUnit, storefront: u.storefront, currency: 'EUR', condition: u.condition, status: 'available',

@@ -255,6 +255,7 @@ const gaps: Record<GapCode, { what: string; why: string }> = {
   MASS_EDIT_MFA_PER_TRANSACTION: { what: 'Second factor for mass edits: a transaction and a ten-minute window', why: 'Р-88, Р-135: applying an edit of more than one offer requires a second factor (0078), and since step 28 an edit split into separate transactions does not get around it either — costs or bounds of more than five offers within ten minutes without a second factor are refused (0103). The count is per tenant: a member of several tenants editing one offer in each is still not counted (the remainder of risk 17).' },
   IMPORT_NO_FX: { what: 'Import does not convert currencies', why: 'Р-61 allows the cost in the currency it arose in, but the import has no conversion: a row whose currency is not the currency of the offer is listed as unmatched instead of being converted silently.' },
   IMPORT_OFFER_KEYS: { what: 'A row finds its offer by the channel unit, the channel product reference or the EAN', why: 'The seller names the offer in the export as the channel names it. A key that matches two offers is listed as unmatched: only the seller knows which one the row is about.' },
+  INTERVENTIONS_TRUNCATED: { what: 'Older interventions of this period', why: 'The report shows the most recent 5000 interventions of the window: further back the screen would have to read hundreds of thousands of decisions. Narrow the period to see them.' },
   STOCK_CHANNEL_NOT_READ: { what: 'What the channel shows right now', why: 'The stock of a channel is read only when a write is confirmed by reading it back; between writes the channel is not polled. An order the channel decrements itself becomes visible with the next write. The screen shows what the channel CONFIRMED.' },
   FEED_WINDOW: { what: 'Older price changes', why: 'The feed is built from channel writes and decisions: finished writes are kept in PostgreSQL until they are exported (at least one day), decisions for 30 days (Р-28).' },
   PRICE_HISTORY_NOT_READ: { what: 'Price history of the channel', why: 'Applied prices are kept for 90 days and daily forever for Omnibus (Р-21), but the console does not read them yet.' },
@@ -530,7 +531,7 @@ export const en = {
         created: 'The stock file is being applied in the background. You can leave this page.',
         enableCreated: 'Synchronisation is being enabled in the background: channel units are created and the first quantities computed. You can leave this page.',
         result: (r: { matched: number; changed: number; unmatched: number; writes: number }) => `Rows matched: ${r.matched}; products changed: ${r.changed}; rows not matched: ${r.unmatched}; channel writes created: ${r.writes}.`,
-        unmatched: { UNKNOWN_SKU: 'article number unknown', BAD_QUANTITY: 'quantity is not a whole non-negative number', DUPLICATE_SKU: 'article number listed twice', EMPTY_SKU: 'empty article number' },
+        unmatched: { UNKNOWN_SKU: 'article number unknown', BAD_QUANTITY: 'quantity is not a whole non-negative number', DUPLICATE_SKU: 'article number listed twice', EMPTY_SKU: 'empty article number', AMBIGUOUS_SKU: 'the article number matches two products — it is not guessed' },
       },
       enable: {
         title: 'Synchronisation',

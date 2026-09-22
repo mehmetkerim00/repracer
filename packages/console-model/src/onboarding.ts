@@ -121,7 +121,10 @@ export function onboardingView(world: Pick<StandWorld, 'id' | 'demo' | 'viewer'>
     // Без выбранного пути «готово» не бывает: путь не пройден, пока не выбран
     resumeAt: path === null && resumeAt === 'DONE' ? 'CHANNEL' : resumeAt,
     resumeText: path === null ? t.paths.title : resumeAt === 'DONE' ? t.completed : t.resumeAt(t.steps[resumeAt]),
-    channels, narrowing, canLead: can(world.viewer.role, 'MANAGE_PRICING'), canEnable: can(world.viewer.role, 'ENABLE_REPRICING'),
+    channels, narrowing,
+    // Р-152: путь ведёт тот, кому он принадлежит: остатки — тот, кто ведёт каталог; с репрайсингом — тот, кто правит цены
+    canLead: path === 'STOCK' ? can(world.viewer.role, 'MANAGE_CATALOG') : can(world.viewer.role, 'MANAGE_PRICING'),
+    canEnable: can(world.viewer.role, 'ENABLE_REPRICING'),
     enableCount: enable ? enable.totalCount - enable.doneCount : 0,
   };
 }

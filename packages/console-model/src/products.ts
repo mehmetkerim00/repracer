@@ -124,17 +124,23 @@ export function applyingCell(scope: ConsoleScope, writes: readonly ConsoleWrite[
   }
 }
 
+/**
+ * Р-154: `writes` — только записи В ПОЛЁТЕ, применённая цена лежит в истории цен единицы (`scope.lastApplied`, по индексу).
+ * Первая редакция шага 35 оставила здесь поиск APPLIED по записям в полёте — и столбец «последнее изменение» у всех
+ * предложений навсегда показывал «нет» (ревью шага 35, находка 3).
+ */
 export function lastChangeCell(scope: ConsoleScope, writes: readonly ConsoleWrite[], m: Messages): StatusCell {
   const l = m.ui.lastChange;
-  const w = writes
-    .filter((x) => x.writeScopeId === scope.writeScopeId && (x.status === 'APPLIED' || x.status === 'ACCEPTED') && x.acceptedAt)
+  const accepted = writes
+    .filter((x) => x.writeScopeId === scope.writeScopeId && x.status === 'ACCEPTED' && x.acceptedAt)
     .sort((x, y) => Date.parse(y.acceptedAt!) - Date.parse(x.acceptedAt!))[0];
-  if (!w) return { tone: 'unknown', label: l.none, detail: l.noneDetail };
-  return {
-    tone: w.status === 'APPLIED' ? 'ok' : 'progress',
-    label: m.money(w.amountMinor, scope.currency),
-    detail: w.status === 'APPLIED' ? l.applied(m.when(w.acceptedAt)) : l.acceptedOnly(m.when(w.acceptedAt)),
-  };
+  const applied = scope.lastApplied;
+  // Принято каналом позже, чем применено: показываем принятое — оно новее, но применение ещё не подтверждено
+  if (accepted && (!applied || Date.parse(accepted.acceptedAt!) > Date.parse(applied.acceptedAt))) {
+    return { tone: 'progress', label: m.money(accepted.amountMinor, scope.currency), detail: l.acceptedOnly(m.when(accepted.acceptedAt)) };
+  }
+  if (!applied) return { tone: 'unknown', label: l.none, detail: l.noneDetail };
+  return { tone: 'ok', label: m.money(applied.amountMinor, scope.currency), detail: l.applied(m.when(applied.acceptedAt)) };
 }
 
 /** Шаг 23: наблюдения канала по офферу — последнее наблюдение ценообразования канала и последнее состояние PRICING_HEALTH */

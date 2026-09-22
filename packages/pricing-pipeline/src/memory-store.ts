@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { EXPLANATION_RULESETS } from './dictionary.ts';
 import { rotation } from './reconciliation.ts';
 import type { HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow} from './store.ts';
-import { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, FILE_PRODUCING_JOB_KINDS, READ_ONLY_JOB_KINDS } from './store.ts';
+import { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, FILE_PRODUCING_JOB_KINDS, INTERVENTION_SLICE_LIMIT, READ_ONLY_JOB_KINDS } from './store.ts';
 import { feedGroupOf, type ConsoleScopeRow, type ConsoleWriteRow, type ConsoleIntentRow, type DecisionPage, type DecisionPageQuery, type DecisionDetail, type ScopeDecisionStats, type InterventionSlice, type FeedPage, type FeedPageItem, type FeedPageQuery, type FeedStatusGroup, type WorldCounters } from './store.ts';
 /** Записи в полёте: одна на единицу, показываются в состоянии консоли; завершённые — только в ленте [Р-154] */
 const IN_FLIGHT_WRITE = new Set(['PENDING', 'DISPATCHED', 'ACCEPTED', 'FAILED', 'BLOCKED']);
@@ -1995,10 +1995,11 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       if (within(i.createdAt) && isCapped) intents.push({ ...i, episodeStart: !(previousCapped.get(i.writeScopeId) ?? false) });
       previousCapped.set(i.writeScopeId, isCapped);
     }
+    const decisions = this.decisions.filter((d) => d.outcome !== 'NO_CHANGE' && within(d.decidedAt)).sort(InMemoryPricingStore.newestFirst);
     return {
-      from, to,
-      decisions: this.decisions.filter((d) => d.outcome !== 'NO_CHANGE' && within(d.decidedAt)).sort(InMemoryPricingStore.newestFirst).map((d) => ({ ...d })),
-      intents,
+      from, to, truncated: decisions.length > INTERVENTION_SLICE_LIMIT || intents.length > INTERVENTION_SLICE_LIMIT,
+      decisions: decisions.slice(0, INTERVENTION_SLICE_LIMIT).map((d) => ({ ...d })),
+      intents: intents.slice(0, INTERVENTION_SLICE_LIMIT),
       endedWrites: this.writes.filter((w) => within(w.createdAt) && (w.endReason === 'WRITE_BLOCKED_BY_BOUND_RECHECK' || w.endReason === 'PRICING_STOPPED'))
         .map((w) => this.consoleWrite(w)),
       rejectedSnapshots: this.rejectedSnapshots.filter((r) => within(r.receivedAt)).map((r) => ({ ...r })),
@@ -2010,7 +2011,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     const since = query.sinceDays ? Date.parse(now) - query.sinceDays * 86_400_000 : null;
     const scoped = this.writes.filter((w) => (!query.writeScopeId || w.writeScopeId === query.writeScopeId) && (since === null || at(w) >= since));
     const counts: Record<FeedStatusGroup, number> = { APPLIED: 0, IN_FLIGHT: 0, NOT_SENT: 0, SUPERSEDED: 0 };
-    for (const w of scoped) counts[feedGroupOf(w.status)] += 1;
+    if (query.counts !== false) for (const w of scoped) counts[feedGroupOf(w.status)] += 1;
     const rows = scoped.filter((w) => !query.status || feedGroupOf(w.status) === query.status).sort((a, b) => at(b) - at(a) || b.version - a.version);
     const items = rows.slice(query.offset, query.offset + query.limit).map((w): FeedPageItem => {
       const decision = w.decisionId ? this.decisions.find((d) => d.decisionId === w.decisionId) ?? null : null;
@@ -2027,7 +2028,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   async worldCounters(_tenantId: string, now: Instant): Promise<WorldCounters> {
     const t = Date.parse(now);
     return {
-      scopes: this.scopes.size, demo: this.demo,
+      scopes: [...this.scopes.values()].filter((s) => s.status !== 'RETIRED').length, demo: this.demo,
       decisionsLastDay: this.decisions.filter((d) => Date.parse(d.decidedAt) > t - 86_400_000).length,
       interventionsLastWeek: this.decisions.filter((d) => d.outcome !== 'NO_CHANGE' && Date.parse(d.decidedAt) > t - 7 * 86_400_000).length,
       activeStops: this.stops.filter((s) => s.releasedAt === null).length,
