@@ -1828,8 +1828,18 @@ export class PgPricingStore implements PricingStore {
   async readConsoleState(tenantId: string, now: Instant): Promise<ConsoleState> {
     return inTenant(this.admin('readConsoleState'), tenantId, async (tx) => {
       const q = async (sql: string, params: unknown[] = [tenantId]) => (await tx.query(sql, params)).rows;
+      /**
+       * Каталог тенанта читается ЦЕЛИКОМ одним запросом, и верный план для него — хеш-соединения при любой статистике.
+       * Сразу после загрузки каталога (новый тенант, демо, первый импорт) статистики у таблиц ещё нет, планировщик
+       * оценивает каждую выборку в одну строку и соединяет предложения, единицы и товары вложенными циклами: на 200
+       * предложениях это 8 млн проходов и 7,7 с, первая запись продавца на пути остатков отвечала до 11,6 с при пределе
+       * экрана 10 с (найдено повторными прогонами шага 35, план — auto_explain). Коррелированные подзапросы по единице
+       * это не затрагивает: они не соединения. Настройка возвращается сразу после запроса.
+       */
+      await q(`SET LOCAL enable_nestloop = off`, []);
       const [scopeJson] = await q(`WITH sc AS (SELECT ${SCOPE_COLUMNS} ${SCOPE_FROM})
         SELECT coalesce(json_agg(${SCOPE_JSON} ORDER BY sc.created_at, sc.write_scope_id), '[]') AS scopes FROM sc`, [tenantId, now]);
+      await q(`SET LOCAL enable_nestloop = on`, []);
       const scopes = ((scopeJson?.scopes ?? []) as Row[]).map((j): ConsoleScopeRow => {
         const ctx = toScopeContext(j, now);
         const c = j.cost as Row | null;

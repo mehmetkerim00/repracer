@@ -144,7 +144,10 @@ test('stand API serves every screen of every world in German and English and ref
       assert.deepEqual([path.path, path.choices.map((c) => c.path), path.steps.find((x) => x.step === 'CHANNEL')?.done], [null, ['STOCK', 'STOCK_AND_PRICING'], true], `${w.id}: выбор пути после подключённого канала`);
       // Экран остатков и расхождений — у каждого мира, на обоих языках
       const stock = await get<StockView>(auth, api(w.id, 'stock') + q);
-      assert.ok(stock.traps.length > 0 && stock.traps.every((t) => t.text.length > 20), `${w.id}: ловушки каналов названы до записи`);
+      // Ловушка названа СОДЕРЖАНИЕМ, а не длиной строки: у каждого канала — своя область записи остатка [OQ-204, находка 19]
+      const trapFact: Record<string, RegExp> = { KAUFLAND: /id_offer/, AMAZON: /Р-1\b/ };
+      assert.ok(stock.traps.length > 0, `${w.id}: у мира есть каналы — есть и ловушки`);
+      for (const t of stock.traps) assert.match(t.text, trapFact[t.channel] ?? /Р-37/, `${w.id}: ловушка ${t.channel} называет свою область записи`);
       await get<unknown>(auth, api(w.id, 'stock', 'divergences') + q);
       assert.equal(path.demo, false, `${w.id}: мир сценария — не демо`);
       for (const d of (await get<DecisionListView>(auth, api(w.id, 'decisions') + q)).items) await get<DecisionTrace>(auth, api(w.id, 'decisions', d.decisionId) + q);

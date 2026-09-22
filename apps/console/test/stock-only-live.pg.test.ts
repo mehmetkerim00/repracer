@@ -186,9 +186,12 @@ test('Р-152: путь «только остатки» — от выбора п�
   for (let i = 0; i < 20; i++) { await demo.live.betweenTicks(); demo.clock.advance(30_000); }
   stockScreen = (await step<StockView>('экран остатков после записи', 'GET', api('stock'))).body;
   assert.deepEqual([stockScreen.summary.synced, stockScreen.summary.pendingWrites, stockScreen.summary.diverged], [DEMO_OFFERS, 0, 0], JSON.stringify(stockScreen.summary));
+  // Ожидаемое выведено из ФАЙЛА продавца, а не из экрана: строка i несла 10 + i mod 7, буфер 2, заказов на этом пути нет
+  const fromFile = new Map(skus.map((sku, i) => [`syn-prod-de-340${sku}`, 10 + (i % 7) - 2]));
+  assert.equal(stockScreen.rows.length, 50);
   for (const r of stockScreen.rows) {
     const c = r.channels[0]!;
-    assert.equal(c.published, Math.max(0, r.available - 2), `${r.sku}: публикуемое = доступное − буфер`);
+    assert.equal(c.published, fromFile.get(r.sku), `${r.sku}: публикуемое = количество из файла − буфер`);
     assert.ok(/bestätigt/.test(c.confirmedText) && c.tone === 'ok', `${r.sku}: канал подтвердил: ${c.confirmedText}`);
   }
   // Подтверждение — настоящее: в симуляторе канала у единиц ровно то количество, что мы отправили

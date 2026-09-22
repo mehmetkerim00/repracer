@@ -158,7 +158,29 @@ test('Р-25: неподтверждённую резервацию освобо�
   }
 });
 
-test('Р-97, Р-100: остатки ведёт человек с правом на каталог — зритель получает отказ, и он назван правом', async () => {
+test('Р-6: правило публикуемого количества в SQL и в коде совпадает и на потолке, и на пороге выставления — не только на буфере', async () => {
+  /**
+   * Находка 20 ревью шага 35: правило записано дважды — `PUBLISHED_SQL` (записи в канал) и `publishedQuantity` (экран), и
+   * их равенство проверялось только буфером. Здесь распределение задаёт все три параметра, а ожидаемые числа выведены
+   * вручную, а не той же функцией: иначе расхождение двух записей правила прошло бы незамеченным.
+   */
+  let page = await store.stockPage(world.tenantId, { offset: 0, limit: 10 });
+  const availableOf = (sku: string) => page.items.find((r) => r.sku === sku)!.available;
+  // Предпосылка: доступное к этому моменту — 9 у товара 1 и 21 у товара 2 (20 + 3 − резервация 2)
+  assert.deepEqual([availableOf('syn-prod-1'), availableOf('syn-prod-2')], [9, 21]);
+  // Буфер 7, потолок 5, порог выставления 3: товар 1 — 9 − 7 = 2 ниже порога → 0; товар 2 — 21 − 7 = 14 выше потолка → 5
+  const enabled = await store.enableStockSync(world.tenantId, world.ids.dbId(KAUFLAND), { bufferUnits: 7, maxQuantity: 5, minQuantityToList: 3, acknowledgeSideEffects: false }, owner());
+  assert.equal(enabled.status, 'ENABLED');
+  page = await store.stockPage(world.tenantId, { offset: 0, limit: 10 });
+  const shown = new Map(page.items.map((r) => [r.sku, r.channels[0]!.published]));
+  assert.deepEqual([shown.get('syn-prod-1'), shown.get('syn-prod-2')], [0, 5], 'экран (правило в коде): порог и потолок');
+  const writes = (await store.recalculate(world.tenantId, null, now())).writes;
+  const scopeOf = new Map(page.items.map((r) => [r.channels[0]!.writeScopeId, r.sku]));
+  const sent = new Map(writes.map((w) => [scopeOf.get(w.writeScopeId), w.quantity]));
+  assert.deepEqual([sent.get('syn-prod-1'), sent.get('syn-prod-2')], [0, 5], 'записи в канал (правило в SQL): те же порог и потолок');
+});
+
+test('Р-97, Р-100: остатки ведёт человек с правом на каталог — зритель получает отказ, каждая запись остатков в аудите', async () => {
   const [viewer] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(`SELECT membership_id, user_id FROM tenant_data.membership WHERE role = 'VIEWER'`)).rows);
   assert.ok(viewer, 'в мире посева есть зритель');
   const actor = { membershipId: viewer.membership_id as string, userId: viewer.user_id as string, mfa: true };
@@ -168,6 +190,7 @@ test('Р-97, Р-100: остатки ведёт человек с правом н
   const [a] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
     `SELECT count(*) FILTER (WHERE entity_type = 'tenant_data.stock_source')::int AS sources, count(*) FILTER (WHERE entity_type = 'tenant_data.stock_allocation')::int AS allocations,
             count(*) FILTER (WHERE entity_type = 'tenant_data.stock_movement')::int AS movements FROM audit.audit_event`)).rows);
-  // Два источника, один буфер, два движения инвентаризации; движение ORDER_SHIPPED вставил триггер под ролью остатков — оно не административное
-  assert.deepEqual([a.sources, a.allocations, a.movements], [2, 1, 2]);
+  // Два источника, две версии распределения (буфер 2, затем буфер 7 с потолком и порогом), два движения инвентаризации;
+  // движение ORDER_SHIPPED вставил триггер под ролью остатков — оно не административное
+  assert.deepEqual([a.sources, a.allocations, a.movements], [2, 2, 2]);
 });

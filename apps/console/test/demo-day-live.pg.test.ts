@@ -116,7 +116,10 @@ test('Р-154: сутки демо под планировщиком — объё
   console.log(JSON.stringify({ decisions: d!.n, interventions: d!.interventions, applied: w!.n, failures, seconds }));
   assert.ok(Number(d!.n) >= MIN_DECISIONS, `за сутки решений: ${d!.n} (ожидалось не меньше ${MIN_DECISIONS} — иначе нагрузка не та, что у живого тенанта)`);
   assert.ok(Number(w!.n) >= 1000, `записей цены, подтверждённых каналом: ${w!.n}`);
-  assert.deepEqual(failures.filter((f) => f.job_name !== 'analytics-export-day'), [], `провалы работ планировщика: ${JSON.stringify(failures)}`);
+  // Выгрузка суток проваливается по ОДНОЙ названной причине — ClickHouse в демо нет (проверяется в CI отдельно); любая другая
+  // причина или любая другая работа — провал прогона [находка 19 ревью шага 35: исключение без утверждения о его причине]
+  assert.deepEqual(failures.filter((f) => !(f.job_name === 'analytics-export-day' && f.error_code === 'CLICKHOUSE_NOT_IN_DEMO')), [],
+    `провалы работ планировщика: ${JSON.stringify(failures)}`);
 });
 
 test('Р-154, Р-136: после суток каждый экран отвечает в пределе 10 с / 8 МБ, списки — страницами, счётчики — агрегатом', async () => {
@@ -171,6 +174,7 @@ test('Р-154, Р-136: после суток каждый экран отвеча
   assert.ok(feed.counts.applied >= 1000 && feed.page.total === feed.counts.applied && feed.items.length <= 50, `лента: ${JSON.stringify({ counts: feed.counts, total: feed.page.total, shown: feed.items.length })}`);
   // Товары: у показанных строк статистика решений есть, и она с сутки
   const products = results['products (первая страница)'] as { rows: Array<{ decisions: number | null }> };
+  assert.equal(products.rows.length, 50, 'первая страница товаров полна — `every` по пустому списку ничего не утверждает');
   assert.ok(products.rows.every((r) => r.decisions !== null && r.decisions >= 100), `решений у показанных предложений: ${products.rows.slice(0, 3).map((r) => r.decisions)}`);
 });
 
@@ -195,7 +199,8 @@ test('Р-151, Р-153 (задача D): демо показывает остат�
   let confirmedMatches = 0;
   for (const row of stock.body.rows) {
     const c = row.channels[0]!;
-    assert.equal(c.published, Math.max(0, row.available - 2), `${row.sku}: публикуемое = доступное − буфер`);
+    // Не «публикуемое = доступное − 2»: обе стороны посчитала бы одна функция по одному агрегату. Настоящее сравнение —
+    // с каналом (симулятором) ниже [находка 19 ревью шага 35]
     if (c.tone === 'ok' && units.get(row.sku) === c.published) confirmedMatches += 1;
   }
   // Последние заказы могли прийти после последней записи (окно работы — 5 минут): почти все единицы подтверждены и совпадают
