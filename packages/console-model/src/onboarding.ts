@@ -71,7 +71,8 @@ export interface OnboardingView {
 
 const GO_TO: Record<Exclude<OnboardingStep, 'TENANT'>, string> = { CHANNEL: 'onboarding', COSTS: 'cost-import', BOUNDS: 'bounds', STRATEGY: 'strategies', ENABLE: 'products' };
 
-export function onboardingView(world: StandWorld, progress: OnboardingProgressRow | null, status: OnboardingStepStatus[],
+/** От мира экрану пути нужны три поля — не состояние консоли целиком: оно читает все решения тенанта (OQ-214) */
+export function onboardingView(world: Pick<StandWorld, 'id' | 'demo' | 'viewer'>, progress: OnboardingProgressRow | null, status: OnboardingStepStatus[],
   accounts: ChannelAccountRow[], m: Messages): OnboardingView {
   const t = m.ui.onboarding;
   const byStep = new Map(status.map((s) => [s.step, s]));

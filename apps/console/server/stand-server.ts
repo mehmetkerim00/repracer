@@ -218,6 +218,19 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     const live = worlds.find((w) => w.id === parts[2]);
     const viewer = live ? viewerIn(live) : null;
     if (!live || !viewer) return fail(404, 'WORLD_NOT_FOUND', s.notFound);
+    /**
+     * Р-149: экран пути читает ТОЛЬКО то, что показывает, — счётчики шагов, аккаунты, сужение и признак демо, — и не ждёт
+     * состояния консоли целиком (`live.view` читает все решения тенанта, OQ-214). На раннере CI первый запрос экрана пути
+     * демо-тенанта занял 10,98 с при пределе 10: остальные восемь — 0,04–0,09 с. Экран, у которого шесть чисел, не должен
+     * зависеть от размера ленты решений.
+     */
+    if (req.method === 'GET' && parts[3] === 'onboarding' && parts[4] === undefined) {
+      const [progress, status, accounts, demo] = await Promise.all([
+        live.store.onboardingProgress(live.tenantId), live.store.onboardingStatus(live.tenantId), live.store.channelAccounts(live.tenantId),
+        live.store.tenantIsDemo(live.tenantId),
+      ]);
+      return ok(onboardingView({ id: live.id, demo, viewer }, progress, status, accounts, m));
+    }
     const world = await live.view(viewer);
     /**
      * Р-151: признак демо — из БАЗЫ (`tenant.demo` в состоянии консоли), а не из настройки стенда. Первая редакция брала его
@@ -262,13 +275,6 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
 
     if (req.method === 'GET') {
       switch (screen) {
-        // Р-149: путь онбординга — состояние шагов выведено из данных хранилищем, экран ничего не считает сам
-        case 'onboarding': {
-          const [progress, status, accounts] = await Promise.all([
-            live.store.onboardingProgress(world.tenantId), live.store.onboardingStatus(world.tenantId), live.store.channelAccounts(world.tenantId),
-          ]);
-          return ok(onboardingView(world, progress, status, accounts, m));
-        }
         case 'products': {
           const query = parseListQuery(url.searchParams);
           return query ? ok(productList(world, m, query)) : fail(400, 'BAD_PAGE', s.badRequest);
