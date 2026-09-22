@@ -1207,8 +1207,8 @@ export const STEP32_ROWS = [
 ];
 
 /**
- * Шаг 34 [Р-149, Р-150, Р-151]: онбординг, канал без доступов, демо-тенант. Каждая новая защита — своя строка при создании
- * [Р-108], и каждая ловится своей проверкой [Р-99].
+ * Шаг 35 [Р-152, Р-153, Р-154]: путь «только остатки», экраны остатков, права остатков. Каждая новая защита — своя строка
+ * при создании [Р-108], и каждая ловится своей проверкой [Р-99].
  */
 export const STEP35_ROWS = [
   {
@@ -1230,6 +1230,9 @@ export const STEP35_ROWS = [
       // Административное действие таблиц остатков: MANAGE_CATALOG; поставить MANAGE_PRICING значит отдать остатки тому, кто правит цены
       m(replaceInFunction('security.admin_write_action(text)', "('tenant_data.stock_source', 'MANAGE_CATALOG')", "('tenant_data.stock_source', 'MANAGE_PRICING')"),
         smoke('an inventory manager creates a stock source (Р-152)')),
+      // Ключ Inbound API — своя строка матрицы и своя проверка [Р-108, находка 16 ревью шага 35]: одна строка не сторожит другую
+      m(replaceInFunction('security.admin_write_action(text)', "('tenant_data.inbound_api_key', 'MANAGE_CATALOG')", "('tenant_data.inbound_api_key', 'MANAGE_PRICING')"),
+        smoke('an inventory manager creates an inbound API key (Р-152)')),
     ],
   },
   {
@@ -1244,6 +1247,9 @@ export const STEP35_ROWS = [
   },
 ];
 
+/**
+ * Шаг 34 [Р-149, Р-150, Р-151]: онбординг, канал без доступов, демо-тенант.
+ */
 export const STEP34_ROWS = [
   {
     row: 'Р-150',
