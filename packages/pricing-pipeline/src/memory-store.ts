@@ -1987,10 +1987,14 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     const within = (at: string) => Date.parse(at) > Date.parse(from) && Date.parse(at) <= Date.parse(to);
     const capped = (i: ConsoleIntentRow) => i.reason.code === 'TARGET_OUTSIDE_BOUNDS_HOLD'
       || i.explanation.some((x) => x.code === 'CAPPED_AT_MIN_PRICE' || x.code === 'CAPPED_AT_MAX_PRICE');
-    // Граница эпизода — по ВСЕМ намерениям единицы в порядке времени, как оконная функция базы
+    /**
+     * Граница эпизода — по намерениям единицы ВНУТРИ окна, в порядке времени, ровно как оконная функция базы: удержание,
+     * начавшееся до окна и длящееся в нём, считается в окне одним удержанием. Прежняя редакция смотрела на все намерения,
+     * и на границе окна память и база давали разный ответ (находка 22 ревью шага 35).
+     */
     const previousCapped = new Map<string, boolean>();
     const intents: InterventionSlice['intents'] = [];
-    for (const i of [...this.intents].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))) {
+    for (const i of this.intents.filter((x) => within(x.createdAt)).sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))) {
       const isCapped = capped(i);
       if (within(i.createdAt) && isCapped) intents.push({ ...i, episodeStart: !(previousCapped.get(i.writeScopeId) ?? false) });
       previousCapped.set(i.writeScopeId, isCapped);

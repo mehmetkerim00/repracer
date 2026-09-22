@@ -295,7 +295,9 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
           const applied = await stock.importStock(ctx.tenantId, p.stockSourceId, parsed.rows, { membershipId: ctx.membershipId, userId: ctx.userId, mfa: job.createdWithMfa });
           if (applied.status !== 'APPLIED') throw Object.assign(new Error(applied.status), { cause: applied.status });
           await progress(parsed.rows.length, 'APPLYING');
-          const recalculated = applied.productIds.length > 0 ? await stock.recalculate(ctx.tenantId, applied.productIds, new Date().toISOString() as never) : { writes: [], unchanged: 0 };
+          // Часы МИРА, а не стены процесса (находка 21 ревью шага 35): на виртуальных часах стенда стена — чужое время
+          const now = (await options.world(ctx)).now as never;
+          const recalculated = applied.productIds.length > 0 ? await stock.recalculate(ctx.tenantId, applied.productIds, now) : { writes: [], unchanged: 0 };
           const unmatched = [...parsed.skipped.map((s) => ({ sku: s.sku, reason: s.reason })), ...applied.unmatched];
           const byReason: Record<string, number> = {};
           for (const u of unmatched) byReason[u.reason] = (byReason[u.reason] ?? 0) + 1;
@@ -325,7 +327,7 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
             { membershipId: ctx.membershipId, userId: ctx.userId, mfa: job.createdWithMfa });
           if (enabled.status !== 'ENABLED') throw Object.assign(new Error(enabled.status), { cause: enabled.status });
           await progress(enabled.scopes, 'APPLYING');
-          const recalculated = await stock.recalculate(ctx.tenantId, null, new Date().toISOString() as never);
+          const recalculated = await stock.recalculate(ctx.tenantId, null, (await options.world(ctx)).now as never);
           const view = { scopes: enabled.scopes, created: enabled.created, awaitingAck: enabled.awaitingAck, writes: recalculated.writes.length };
           return { ...view, view };
         },

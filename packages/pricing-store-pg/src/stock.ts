@@ -255,21 +255,26 @@ export class PgStockStore implements StockStore {
     CASE WHEN least(greatest(0, greatest(0, on_hand - reserved) - buffer_units), coalesce(max_quantity, 2147483647)) < min_quantity_to_list THEN 0
          ELSE least(greatest(0, greatest(0, on_hand - reserved) - buffer_units), coalesce(max_quantity, 2147483647)) END`;
 
-  async recalculate(tenantId: string, productIds: readonly string[] | null, now: Instant): Promise<RecalculationOutcome> {
+  /**
+   * `now` базе не нужен: время строки записи ставит триггер `channel_write_before_insert` часами базы, и переданное
+   * значение он перезаписал бы (находка 21 ревью шага 35 — параметр уходил в столбец и ни на что не влиял). Параметр
+   * остаётся в порте для хранилища в памяти, у которого своих часов нет.
+   */
+  async recalculate(tenantId: string, productIds: readonly string[] | null, _now: Instant): Promise<RecalculationOutcome> {
     return inTenant(this.options.stockPool, tenantId, async (tx) => {
       // Одним оператором на все изменившиеся единицы: новая версия вытесняет ждущую сама (триггеры channel_write) [Р-64]
       const { rows } = await tx.query(
         `WITH t AS (${PgStockStore.TARGETS_SQL} AND s.quantity_sync_enabled AND ($2::uuid[] IS NULL OR s.product_id = ANY($2))),
          target AS (SELECT t.write_scope_id, t.last_quantity, coalesce(t.latest_version_created, 0) + 1 AS version, ${PgStockStore.PUBLISHED_SQL} AS q FROM t WHERE t.allocation_active),
          created AS (
-           INSERT INTO tenant_data.channel_write (tenant_id, write_scope_id, field, quantity, version, origin, idempotency_key, created_at)
-           -- Время строки ставит триггер channel_write_before_insert часами базы; переданный момент влияет только на ключ идемпотентности
-          SELECT $1, g.write_scope_id, 'QUANTITY', g.q, g.version, 'STOCK_RECALC', 'stock:' || g.write_scope_id || ':' || g.version, $3::timestamptz
+           INSERT INTO tenant_data.channel_write (tenant_id, write_scope_id, field, quantity, version, origin, idempotency_key)
+           -- Время строки ставит триггер channel_write_before_insert часами базы
+          SELECT $1, g.write_scope_id, 'QUANTITY', g.q, g.version, 'STOCK_RECALC', 'stock:' || g.write_scope_id || ':' || g.version
              FROM target g WHERE g.last_quantity IS NULL OR g.last_quantity <> g.q
            RETURNING write_scope_id, quantity, version)
          SELECT (SELECT json_agg(json_build_object('writeScopeId', c.write_scope_id, 'quantity', c.quantity, 'version', c.version)) FROM created c) AS writes,
                 (SELECT count(*) FROM target g WHERE g.last_quantity = g.q)::int AS unchanged`,
-        [tenantId, productIds ? [...productIds] : null, now]);
+        [tenantId, productIds ? [...productIds] : null]);
       const r = rows[0]!;
       return { writes: ((r.writes ?? []) as Array<{ writeScopeId: string; quantity: number; version: number }>).map((w) => ({ ...w, quantity: Number(w.quantity), version: Number(w.version) })), unchanged: Number(r.unchanged) };
     });

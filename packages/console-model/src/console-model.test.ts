@@ -102,6 +102,10 @@ test('Р-117: the report counts the floor holding a strategy, not Gate rejection
         intent('i-4', '2026-09-15T11:00:00.000Z', { code: 'BUYBOX_UNDERCUT', params: {} }, [{ code: 'CAPPED_AT_MIN_PRICE', params: { targetMinor: 1000, minMinor: 1500, currency: 'EUR' } }], 1850),
   ];
   const en = messagesFor('en');
+  // Находка 22 ревью шага 35: граница эпизода считается ВНУТРИ окна, как оконная функция базы. Удержание 15.09 вне окна
+  // суток, поэтому i-1 (17.09) — начало эпизода в этом окне; в окне семи суток оно продолжает удержание 15.09
+  const episodeStartOf = async (days: number) => ((await sliceOf(intents, days)) as unknown as { intents: Array<{ intentId: string; episodeStart: boolean }> }).intents.find((i) => i.intentId === 'i-1')!.episodeStart;
+  assert.deepEqual([await episodeStartOf(1), await episodeStartOf(7)], [true, false]);
   const day = dangerousReport(world, await sliceOf(intents, 1), 1, en);
   assert.equal(day.headline, 'The floor held the price 2 times in the last 1 day; without it you would have sold €7.55 cheaper');
   assert.deepEqual(day.floorHolds.items.map((i) => [i.kind, i.target, i.floor, i.below]), [['HELD', '€14.00', '€15.00', '€4.50'], ['CAPPED', '€11.95', '€15.00', '€3.05']]);
