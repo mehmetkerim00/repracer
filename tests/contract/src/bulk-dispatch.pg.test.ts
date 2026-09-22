@@ -78,7 +78,7 @@ async function pendingWrites(): Promise<number> {
 /** Версии, дошедшие до канала, по единицам записи — проверка порядка [Р-24, Р-64], как в тесте очереди записей */
 async function orderViolations(): Promise<{ scopes: number; violations: number; applied: number }> {
   const { rows } = await observer.query(
-    `SELECT write_scope_id, array_agg(version ORDER BY coalesce(accepted_at, dispatched_at, created_at), version) AS versions
+    `SELECT write_scope_id, array_agg(version ORDER BY coalesce(accepted_at, dispatched_at, created_at), channel_write_id) AS versions
        FROM tenant_data.channel_write_history
       WHERE tenant_id = $1 AND field = 'QUANTITY' AND final_status = 'APPLIED'
       GROUP BY write_scope_id`, [k.seeded.tenantId]);
@@ -148,12 +148,27 @@ test('Р-155: те же 10 000 — пакетами: запросов меньш
   assert.ok(requests <= OFFERS / 10, `пакетная запись — на порядок меньше запросов: ${requests} против ${OFFERS}`);
   assert.equal(spent['POST /v2/units/bulk'], requests, `все запросы — пакетные: ${JSON.stringify(spent)}`);
 
+  /**
+   * Второй пакетный круг: у каждой единицы появляется ЕЩЁ одна версия, и она уходит тем же путём. Без этого утверждение
+   * о порядке провалиться не могло бы — сравнивать было бы нечего (находка 14 ревью шага 36).
+   */
+  await k.stock!.enableStockSync(k.seeded.tenantId, k.seeded.ids.dbId(k.world.channelAccountId),
+    { bufferUnits: 5, maxQuantity: null, minQuantityToList: 0, acknowledgeSideEffects: false },
+    { membershipId: k.seeded.ownerMembershipId, userId: k.seeded.userId, mfa: true });
+  const second = await k.stock!.recalculate(k.seeded.tenantId, null, k.clock.iso() as never);
+  assert.equal(second.writes.length, OFFERS, `вторая версия у каждой единицы: ${second.writes.length}`);
+  k.clock.advance(60_000);
+  const sweptAgain = await k.dispatcher.sweep({ limit: OFFERS + 100, pendingMinAgeMs: 0, concurrency: 4 });
+  assert.equal(sweptAgain.due, OFFERS, `второй круг взял все единицы: ${sweptAgain.due}`);
+
   // Порядок внутри единицы записи не нарушен ни разу [Р-24, Р-64]: у каждой единицы версии строго возрастают
   const order = await orderViolations();
   assert.deepEqual([order.scopes, order.violations], [OFFERS, 0], `порядок по единицам: ${JSON.stringify(order)}`);
   // У тысячи единиц применены обе версии, у остальных — только последняя: предыдущая вытеснена ею же [Р-64]
-  assert.equal(order.applied, OFFERS + ONE_BY_ONE, `применённых версий: ${order.applied}`);
+  // У каждой единицы применены две пакетные версии, у первых трёхсот — ещё и одиночная
+  assert.equal(order.applied, OFFERS * 2 + ONE_BY_ONE, `применённых версий: ${order.applied}`);
   // И канал показывает последнее количество: 40 − 3 = 37 у каждой единицы
   const units = (k.simulator.dump() as { units: Array<{ amount: number }> }).units;
-  assert.deepEqual([units.length, units.filter((u) => u.amount === 37).length], [OFFERS, OFFERS], 'у каждой единицы канала — последнее посчитанное количество');
+  // Последнее посчитанное количество: 40 штук инвентаризации минус буфер 5
+  assert.deepEqual([units.length, units.filter((u) => u.amount === 35).length], [OFFERS, OFFERS], 'у каждой единицы канала — последнее посчитанное количество');
 });

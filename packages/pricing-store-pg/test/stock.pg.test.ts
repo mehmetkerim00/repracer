@@ -267,12 +267,19 @@ test('Р-157: резервация Inbound API ждёт подтверждени
 
   // 5. Источник подтверждает ОБА своих заказа: статус, момент, источник и номер заказа — в строке базы
   const confirmed = await store.confirmInboundOrders(world.tenantId, sourceId, ['r157-a', 'r157-b']);
-  assert.deepEqual(confirmed, { confirmed: 2, alreadyConfirmed: [], unknownOrders: [] });
+  assert.deepEqual(confirmed, { confirmed: 2, alreadyConfirmed: [], releasedOrders: [], unknownOrders: [] });
+  /**
+   * Отгрузка по этим заказам канал УЖЕ сообщил (шаги 2 и 3), поэтому подтверждение не только подтверждает, но и
+   * ЗАКРЫВАЕТ резервацию тем же вызовом [Р-157, находка 7 ревью шага 36]. Иначе она висела бы вечно: освобождение по
+   * сроку берёт только `CREATED`, а строку заказа канал повторно отдаст лишь в ближайшее окно работы `order-lines`.
+   */
   for (const [ref, quantity] of [['a', 4], ['b', 1]] as const) {
     const r = await reservationOf(ref);
     assert.deepEqual([r.status, r.confirmed, r.confirmed_by_stock_source_id, r.confirmed_external_order_ref, r.quantity],
-      ['CONFIRMED_BY_SOURCE', true, sourceId, `r157-${ref}`, quantity], `заказ r157-${ref}: подтверждение несёт свой источник и свой номер заказа`);
+      ['CONSUMED', true, sourceId, `r157-${ref}`, quantity], `заказ r157-${ref}: подтверждение несёт свой источник, свой номер заказа и закрывает отгруженную резервацию`);
   }
+  // Доступное вернулось сразу: 23 штуки, из них держит только чужая резервация TTL на 2 → 21 доступно
+  assert.deepEqual(await stockOf('syn-prod-2'), [23, 2, 21], 'закрытая резервация освободила доступное, не дожидаясь второй строки заказа');
   // Подтверждается ТОЛЬКО названный заказ: резервация `ttl-a` того же источника и того же товара осталась неподтверждённой
   const [others] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
     `SELECT count(*)::int AS n FROM channel_data.reservation WHERE status = 'CREATED'`)).rows);
@@ -280,17 +287,17 @@ test('Р-157: резервация Inbound API ждёт подтверждени
 
   // 6. Повтор безвреден и различает два случая: уже подтверждённый заказ и заказ, которого у источника нет вовсе
   assert.deepEqual(await store.confirmInboundOrders(world.tenantId, sourceId, ['r157-a', 'r157-nie-gesehen']),
-    { confirmed: 0, alreadyConfirmed: ['r157-a'], unknownOrders: ['r157-nie-gesehen'] });
+    { confirmed: 0, alreadyConfirmed: ['r157-a'], releasedOrders: [], unknownOrders: ['r157-nie-gesehen'] });
   // Заказ ЧУЖОГО источника для этого источника неизвестен: внутренний пул подтверждает себя сам, и его заказа здесь нет
   const foreign = (await store.stockSources(world.tenantId)).find((s) => s.mode === 'INTERNAL_POOL')!;
-  assert.deepEqual(await store.confirmInboundOrders(world.tenantId, sourceId, ['r157-c']), { confirmed: 0, alreadyConfirmed: [], unknownOrders: ['r157-c'] },
+  assert.deepEqual(await store.confirmInboundOrders(world.tenantId, sourceId, ['r157-c']), { confirmed: 0, alreadyConfirmed: [], releasedOrders: [], unknownOrders: ['r157-c'] },
     'заказ внутреннего пула источнику Inbound API не принадлежит');
-  assert.deepEqual(await store.confirmInboundOrders(world.tenantId, foreign.stockSourceId, ['r157-a']), { confirmed: 0, alreadyConfirmed: [], unknownOrders: ['r157-a'] },
+  assert.deepEqual(await store.confirmInboundOrders(world.tenantId, foreign.stockSourceId, ['r157-a']), { confirmed: 0, alreadyConfirmed: [], releasedOrders: [], unknownOrders: ['r157-a'] },
     'и наоборот: внутренний источник не подтверждает заказ Inbound API');
 
-  // 7. ПОСЛЕ подтверждения та же строка «отгружено» закрывает резервацию — доступное освобождается
+  // 7. Повторная строка «отгружено» по уже закрытой резервации ничего не меняет: канал повторяет строки заказа, и это безвредно
   const shippedAfter = await store.recordOrderLines(world.tenantId, account, [line('a', 'SHIPPED', 4, 'SYN-OFFER-2'), line('b', 'SHIPPED', 1, 'SYN-OFFER-2')], now());
-  assert.deepEqual([shippedAfter.consumed, shippedAfter.awaitingConfirmation], [2, 0], 'подтверждённая резервация списывается, и ждать больше нечего');
+  assert.deepEqual([shippedAfter.consumed, shippedAfter.awaitingConfirmation], [0, 0], 'резервация уже закрыта подтверждением — повтор строки её не трогает');
   assert.deepEqual([(await reservationOf('a')).status, (await reservationOf('a')).consumed], ['CONSUMED', true]);
   /**
    * Пул Inbound API движением НЕ списывается, и это не пробел проверки: остаток пула источника — не наш [Р-6], журнал

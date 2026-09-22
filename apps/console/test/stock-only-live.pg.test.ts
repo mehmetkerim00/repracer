@@ -340,14 +340,14 @@ test('Р-157: склад подтверждает заказ по Inbound API �
   const confirmed = await call('POST', '/inbound/v1/orders', { orders: [{ externalOrderRef: orderRef }, { externalOrderRef: 'SYN-ORDER-NIE-GESEHEN' }] },
     { authorization: `Bearer ${inboundKey}`, cookie: '' });
   assert.equal(confirmed.status, 200, confirmed.text);
-  assert.deepEqual(JSON.parse(confirmed.text), { confirmed: 1, alreadyConfirmed: [], unknownOrders: ['SYN-ORDER-NIE-GESEHEN'] });
+  assert.deepEqual(JSON.parse(confirmed.text), { confirmed: 1, alreadyConfirmed: [], releasedOrders: [], unknownOrders: ['SYN-ORDER-NIE-GESEHEN'] });
   const [after] = (await observer.query(
     `SELECT status, confirmed_at IS NOT NULL AS confirmed, confirmed_external_order_ref FROM channel_data.reservation WHERE channel_order_ref = $1`, [orderRef])).rows;
   assert.deepEqual([after.status, after.confirmed, after.confirmed_external_order_ref], ['CONFIRMED_BY_SOURCE', true, orderRef],
     'подтверждение записано в резервацию с номером СВОЕГО заказа');
   // 5. Повтор безвреден: склад, пославший подтверждение дважды, получает «уже подтверждён», а не ошибку
   const again = await call('POST', '/inbound/v1/orders', { orders: [{ externalOrderRef: orderRef }] }, { authorization: `Bearer ${inboundKey}`, cookie: '' });
-  assert.deepEqual(JSON.parse(again.text), { confirmed: 0, alreadyConfirmed: [orderRef], unknownOrders: [] });
+  assert.deepEqual(JSON.parse(again.text), { confirmed: 0, alreadyConfirmed: [orderRef], releasedOrders: [], unknownOrders: [] });
 
   // 6. И только теперь отгрузка закрывает резервацию: доступное возвращается продавцу — 40 − 0 = 40, не через сутки
   const shipped = await stockStore.recordOrderLines(demo.live.seeded.tenantId, demo.live.seeded.channelAccountId, [orderLine('SHIPPED')], demo.clock.iso());
