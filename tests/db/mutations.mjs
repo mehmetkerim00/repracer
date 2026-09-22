@@ -1224,6 +1224,10 @@ export const STEP35_ROWS = [
       // Шаг синхронизации считает ВКЛЮЧЁННЫЕ единицы; без условия он считал бы все заведённые
       m(replaceInFunction('tenant_data.onboarding_status(uuid)', 'count(*) FILTER (WHERE q.quantity_sync_enabled)::int', 'count(*)::int'),
         smoke('the sync step follows the enabled quantity scopes (Р-152)')),
+      // Сужение набора в шаге синхронизации (находка 17 ревью шага 35): без условия шаг считает весь каталог
+      m(replaceInFunction('tenant_data.onboarding_status(uuid)',
+        "OR om.price_write_scope_id = ANY (ARRAY(SELECT unnest(c.ids) FROM chosen c)))", 'OR true)'),
+        smoke('the sync step follows the narrowed set like every other step (Р-152)')),
       // Право вида задания: остатки ведёт тот, кто ведёт каталог, — не тот, кто правит цены
       m(replaceInFunction('security.bulk_job_cancel_action(text)', "WHEN p_kind IN ('STOCK_IMPORT', 'STOCK_SYNC_ENABLE') THEN 'MANAGE_CATALOG'", "WHEN p_kind IN ('STOCK_IMPORT', 'STOCK_SYNC_ENABLE') THEN 'MANAGE_PRICING'"),
         smoke('an inventory manager creates a stock import job (Р-152)')),

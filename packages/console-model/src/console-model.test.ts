@@ -143,3 +143,15 @@ test('review of step 24, finding 12: the price evidence CSV neutralises spreadsh
   assert.ok(line.includes(`"'=HYPERLINK(""x"")"`), line);
   assert.ok(line.includes(`"'+cmd\r|x"`), line);
 });
+
+test('Р-152, находка 18 ревью шага 35: путь остатков ведёт тот, у кого право на каталог, а не на цены', async () => {
+  const { onboardingView } = await import('./index.ts');
+  const de = messagesFor('de');
+  const progress = (path: 'STOCK' | 'STOCK_AND_PRICING') => ({ scopeWriteScopeIds: null, path, startedAt: '2026-09-22T10:00:00.000Z', updatedAt: '2026-09-22T10:00:00.000Z' }) as never;
+  const view = (role: string, path: 'STOCK' | 'STOCK_AND_PRICING') =>
+    onboardingView({ id: 'w', demo: false, viewer: { role } } as never, progress(path), [], [], de);
+  // Менеджер остатков: право на каталог есть, на цены — нет
+  assert.deepEqual([view('INVENTORY_MANAGER', 'STOCK').canLead, view('INVENTORY_MANAGER', 'STOCK_AND_PRICING').canLead], [true, false]);
+  // Менеджер цен: цены правит, каталог — нет; путь остатков ведёт не он
+  assert.deepEqual([view('PRICING_MANAGER', 'STOCK').canLead, view('PRICING_MANAGER', 'STOCK_AND_PRICING').canLead], [false, true]);
+});

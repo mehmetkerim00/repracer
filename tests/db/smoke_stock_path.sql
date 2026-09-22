@@ -59,6 +59,21 @@ SELECT pg_temp.ok('the sync step follows the enabled quantity scopes (Р-152)', 
     IF after_done <> before_done THEN RAISE EXCEPTION 'switching synchronisation on did not move the step back'; END IF;
   END $x$ $q$, :tA, :tA, :tA, :tA, :tA, :tA));
 
+-- Сужение набора [Р-131] чтут ВСЕ шаги, и синхронизация тоже (находка 17 ревью шага 35: она считала весь каталог)
+SELECT pg_temp.ok('the sync step follows the narrowed set like every other step (Р-152)', format($q$
+  DO $x$
+  DECLARE one uuid; wide int; narrow int;
+  BEGIN
+    SELECT total_count INTO wide FROM tenant_data.onboarding_status(%L) WHERE step = 'STOCK_SYNC';
+    SELECT om.price_write_scope_id INTO one FROM tenant_data.offer_mapping om
+     WHERE om.tenant_id = %L AND om.status = 'ACTIVE' AND om.fulfillment = 'MERCHANT' AND om.price_write_scope_id IS NOT NULL LIMIT 1;
+    IF one IS NULL OR wide < 2 THEN RAISE EXCEPTION 'the smoke world has too few offers to narrow (%% offers)', wide; END IF;
+    UPDATE tenant_data.onboarding_progress SET scope_write_scope_ids = ARRAY[one] WHERE tenant_id = %L;
+    SELECT total_count INTO narrow FROM tenant_data.onboarding_status(%L) WHERE step = 'STOCK_SYNC';
+    IF narrow <> 1 THEN RAISE EXCEPTION 'the sync step ignores the narrowed set: %% offers instead of 1', narrow; END IF;
+    UPDATE tenant_data.onboarding_progress SET scope_write_scope_ids = NULL WHERE tenant_id = %L;
+  END $x$ $q$, :tA, :tA, :tA, :tA, :tA));
+
 -- --------------------------------------------------------------- Р-152, Р-143: импорт остатков — задание со своим правом
 SELECT set_config('app.user_id', :inventory, false) \gset
 -- Менеджер остатков ведёт остатки: источник заводит он, а не тот, кто правит цены [Р-100]

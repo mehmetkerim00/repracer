@@ -20,17 +20,19 @@ let world: SeededPricingWorld;
 let admin: PgPool;
 let store: PgStockStore;
 
-const scope = (n: number): MemorySeedScope => ({
+const scope = (n: number, extra: Partial<MemorySeedScope> = {}): MemorySeedScope => ({
   writeScopeId: `ws-${n}`, productId: `prod-${n}`, channelAccountId: KAUFLAND, marketplace: 'de', externalUnitId: String(3500 + n), externalOfferId: `SYN-OFFER-${n}`,
-  channelProductRef: `36235${n}`, condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'OFF', strategy: null, currentPriceMinor: 1900,
+  channelProductRef: `36235${n}`, condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'OFF', strategy: null, currentPriceMinor: 1900, ...extra,
 });
+/** Находка 12 ревью шага 35: EAN товара 2 совпадает со ссылкой канала товара 3 — артикул «40000003» подходит ДВУМ товарам */
+const AMBIGUOUS_KEY = '40000003';
 
 before(async () => {
   db = await createIsolatedDatabase('stock');
   admin = db.pool('svc_admin', 3);
   world = await seedPricingWorld(db.pool('svc_app'), {
     provisioningPool: db.pool('svc_provisioning', 1), adminPool: admin, fixtureTenantId: TENANT, fixtureChannelAccountId: KAUFLAND,
-    marketplaces: ['de', 'at'], clock: new Date().toISOString(), seed: { scopes: [scope(1), scope(2), scope(3)] },
+    marketplaces: ['de', 'at'], clock: new Date().toISOString(), seed: { scopes: [scope(1), scope(2, { gtin: AMBIGUOUS_KEY }), scope(3, { channelProductRef: AMBIGUOUS_KEY })] },
   });
   store = new PgStockStore({ adminPool: admin, stockPool: db.pool('svc_stock', 2) });
 });
@@ -45,10 +47,11 @@ test('Р-152: источник из файла → остаток в пуле; �
   assert.equal(created.status, 'CREATED');
   const sourceId = (created as { stockSourceId: string }).stockSourceId;
   // Артикулы продавца — единицы канала, как в импорте себестоимости; неизвестный артикул и отрицательное число — названы
-  const imported = await store.importStock(world.tenantId, sourceId, [{ sku: '3501', quantity: 10 }, { sku: '3502', quantity: 3 }, { sku: '3503', quantity: 0 }, { sku: 'nope', quantity: 1 }, { sku: '3501', quantity: 4 }], owner());
+  const imported = await store.importStock(world.tenantId, sourceId, [{ sku: '3501', quantity: 10 }, { sku: '3502', quantity: 3 }, { sku: '3503', quantity: 0 }, { sku: 'nope', quantity: 1 }, { sku: '3501', quantity: 4 }, { sku: AMBIGUOUS_KEY, quantity: 99 }], owner());
   assert.equal(imported.status, 'APPLIED');
   const i = imported as Extract<typeof imported, { status: 'APPLIED' }>;
-  assert.deepEqual([i.matched, i.changed, i.unmatched], [3, 2, [{ sku: 'nope', reason: 'UNKNOWN_SKU' }, { sku: '3501', reason: 'DUPLICATE_SKU' }]]);
+  // Артикул, подходящий двум товарам, не применяется НИКОМУ и назван [Р-138]: 99 штук не ушли ни товару 2, ни товару 3
+  assert.deepEqual([i.matched, i.changed, i.unmatched], [3, 2, [{ sku: 'nope', reason: 'UNKNOWN_SKU' }, { sku: '3501', reason: 'DUPLICATE_SKU' }, { sku: AMBIGUOUS_KEY, reason: 'AMBIGUOUS_SKU' }]]);
   // Остаток внутреннего пула менялся ТОЛЬКО движениями: движений столько, сколько изменившихся товаров
   const [m] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(`SELECT count(*)::int AS n, sum(delta)::int AS d FROM tenant_data.stock_movement`)).rows);
   assert.deepEqual([m.n, m.d], [2, 13]);

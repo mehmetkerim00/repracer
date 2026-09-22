@@ -182,7 +182,17 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       const raw = req.authorization?.startsWith('Bearer ') ? req.authorization.slice(7).trim() : '';
       const prefix = raw.split('.')[0] ?? '';
       const resolved = /^rpk_[0-9a-f]{12}\.[0-9a-f]{48}$/.test(raw)
-        ? await (async () => { for (const w of worlds) { const r = await w.stock.resolveInboundKey(prefix, createHash('sha256').update(raw).digest('hex')); if (r) return { ...r, world: w }; } return null; })()
+        ? await (async () => {
+            // Мир выбирается по ТЕНАНТУ ключа [Р-31], а не по тому, чьё хранилище его нашло: миры одной базы находят ключи
+            // друг друга, и первый в списке забирал бы чужой ключ (находка 5 ревью шага 35 и её повторная проверка)
+            for (const w of worlds) {
+              const r = await w.stock.resolveInboundKey(prefix, createHash('sha256').update(raw).digest('hex'));
+              if (!r) continue;
+              const own = worlds.find((x) => x.tenantId === r.tenantId);
+              return own ? { ...r, world: own } : null;
+            }
+            return null;
+          })()
         : null;
       if (!resolved) return fail(401, 'UNAUTHORIZED', s.unauthenticated);
       const rows = Array.isArray(body.rows) ? (body.rows as unknown[]) : null;

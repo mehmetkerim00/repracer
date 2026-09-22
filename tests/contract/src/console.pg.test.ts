@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
-import { messagesFor, type TraceStepKey } from '@repracer/console-model';
+import { lastChangeCell, messagesFor, type TraceStepKey } from '@repracer/console-model';
 import { traceOf } from './console/streams.ts';
 import { createPool } from '@repracer/pricing-store-pg';
 import { buildStandWorlds, STAND_USERS, type LiveWorld } from './console/stand.ts';
@@ -92,4 +92,31 @@ test('A: the trace on PostgreSQL equals the trace on the memory store, step by s
     const memory = memoryWorlds.find((m) => m.id === pg.id)!;
     assert.deepEqual(await shape(pg), await shape(memory), pg.id);
   }
+});
+
+test('Ревью шага 35, находки 2 и 3: страница решений ОДНОГО предложения и «последнее изменение» на PostgreSQL', { skip }, async () => {
+  let checkedScopes = 0;
+  let appliedCells = 0;
+  for (const w of pgWorlds) {
+    const world = await w.view(owner);
+    const all = (await w.store.decisionPage(world.tenantId, { offset: 0, limit: 200 })).items;
+    // Находка 2: с фильтром по предложению запрос счёта отказывал на разборе (параметры с дырами) — экран отвечал 500 всегда
+    const scopeId = all[0]?.writeScopeId;
+    if (!scopeId) continue;
+    const own = await w.store.decisionPage(world.tenantId, { offset: 0, limit: 200, writeScopeId: scopeId });
+    assert.ok(own.items.length > 0 && own.items.every((d) => d.writeScopeId === scopeId), `${w.id}: страница — только решения своего предложения`);
+    // Итог сверяется с полным списком там, где полный список целиком помещается на страницу
+    if (all.length < 200) {
+      assert.equal(own.total, all.filter((d) => d.writeScopeId === scopeId).length, `${w.id}: итог равен числу решений предложения во всём списке`);
+      checkedScopes += 1;
+    }
+    // Находка 3: ячейка читала применённые записи среди записей В ПОЛЁТЕ и была пустой у всех; теперь — из истории цен единицы
+    for (const scope of world.state.scopes.filter((s) => s.lastApplied)) {
+      const cell = lastChangeCell(scope, world.state.writes, en);
+      assert.notEqual(cell.tone, 'unknown', `${w.id}: у предложения с применённой ценой ячейка не «нет»`);
+      appliedCells += 1;
+    }
+  }
+  assert.ok(checkedScopes > 0, 'итог страницы по предложению сверен хотя бы в одном мире');
+  assert.ok(appliedCells > 0, 'хотя бы у одного предложения цена применена каналом — иначе вторая проверка ничего не утверждает');
 });

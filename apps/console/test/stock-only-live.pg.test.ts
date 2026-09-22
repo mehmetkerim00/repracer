@@ -105,7 +105,13 @@ before(async () => {
   directory.link({ issuer: STAND_ISSUER, subject: 'demo-owner' }, seeded.userId);
   directory.addMembership(seeded.userId, { tenantId: seeded.tenantId, membershipId: seeded.ownerMembershipId, role: 'OWNER' });
   const issuer = createTestIssuer({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE });
-  const handle = createStandApi([live], {
+  /**
+   * Мир-приманка на ТОЙ ЖЕ базе и с тем же хранилищем остатков, но другого тенанта — и первым в списке. Его хранилище
+   * находит ключ Inbound API настоящего тенанта (поиск идёт до контекста тенанта); сервер обязан отдать запись миру
+   * ТЕНАНТА КЛЮЧА, а не первому нашедшему (находка 5 ревью шага 35). Тест Inbound API ниже зеленеет только так.
+   */
+  const decoy: LiveWorld = { ...live, id: 'demo/decoy', title: 'Приманка', tenantId: '10000000-0000-4000-8000-00000000d3c0' };
+  const handle = createStandApi([decoy, live], {
     authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory }),
     simulator: { token: () => issuer.token('demo-owner', { email: 'owner@example.invalid', amr: ['pwd', 'otp'] }), expiresInSeconds: 3600 },
   });
@@ -231,6 +237,13 @@ test('Inbound API: ключ показан один раз; устаревшее
   assert.deepEqual(JSON.parse(first.text), { applied: 1, stale: 0, unknownSkus: ['nope'], writes: 1 });
   const stale = await call('POST', '/inbound/v1/stock', { rows: [{ sku, quantity: 5, asOf: '2026-09-23T09:00:00.000Z' }] }, { authorization: `Bearer ${key}`, cookie: '' });
   assert.deepEqual(JSON.parse(stale.text), { applied: 0, stale: 1, unknownSkus: [], writes: 0 });
+  // Находка 6 ревью шага 35: объявленный предел — 5000 строк, и он достижим (тело резалось на 64 КиБ, это ~1200 строк)
+  const batch = (n: number) => ({ rows: Array.from({ length: n }, (_, i) => ({ sku: `unbekannt-${i}`, quantity: 1, asOf: t1 })) });
+  const full = await call('POST', '/inbound/v1/stock', batch(5000), { authorization: `Bearer ${key}`, cookie: '' });
+  assert.equal(full.status, 200, `партия в 5000 строк доходит: ${full.status} ${full.text.slice(0, 120)}`);
+  assert.equal((JSON.parse(full.text) as { unknownSkus: string[] }).unknownSkus.length, 5000);
+  const over = await call('POST', '/inbound/v1/stock', batch(5001), { authorization: `Bearer ${key}`, cookie: '' });
+  assert.equal(over.status, 400, 'партия больше предела — названный отказ, а не молчаливое усечение');
   for (let i = 0; i < 10; i++) { await demo.live.betweenTicks(); demo.clock.advance(30_000); }
   const screen = (await step<StockView>('экран остатков', 'GET', api('stock'))).body;
   const row = screen.rows.find((r) => r.sku === 'syn-prod-de-340100001')!;
