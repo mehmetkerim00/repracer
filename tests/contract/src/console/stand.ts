@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url';
+import { InMemoryStockStore, type MemoryStockOffer, type StockPipeline, type StockStore } from '@repracer/stock-sync';
 import type { AdapterCallContext } from '@repracer/channel-port';
 import type { StandAccount, StandWorld, Viewer } from '@repracer/console-model';
 import { MemoryIdentityDirectory } from '@repracer/identity';
@@ -76,6 +77,10 @@ export interface LiveWorld {
   /** Расхождения прогона с ожиданиями сценария: мир показывается, но с пометкой */
   failures: string[];
   store: PricingStore;
+  /** Шаг 35 [Р-152, Р-153]: остатки — своё хранилище; у миров сценариев оно в памяти, у живых миров — PostgreSQL */
+  stock: StockStore;
+  /** Конвейер остатков: пересчёт и отправка записей (заказы канала читает планировщик) */
+  stockPipeline?: StockPipeline;
   pipeline: PricingPipeline;
   clock: VirtualClock;
   callContext(channelAccountId: string): AdapterCallContext;
@@ -122,6 +127,8 @@ export async function buildStandWorlds(options: StandOptions = {}): Promise<Live
       id: scenario.id, title: scenario.title, description: scenario.description, tenantId: c.tenantId, accounts, failures: report.failures,
       identityTenantId: c.identity.tenantId, membershipAlias: (id) => c.identity.membershipAlias(id),
       store: c.store, pipeline: c.pipeline, clock: c.clock,
+      // Остатки мира сценария — в памяти, из его же предложений: экран остатков и путь «только остатки» показываются без базы
+      stock: new InMemoryStockStore(stockOffersOf(scenario, accounts)),
       callContext: (channelAccountId) => ({
         tenantId: c.tenantId as AdapterCallContext['tenantId'], channelAccountId: channelAccountId as AdapterCallContext['channelAccountId'],
         correlationId: `stand:${scenario.id}:${c.clock.nowMs()}`, deadline: c.clock.iso(60_000),
@@ -133,6 +140,21 @@ export async function buildStandWorlds(options: StandOptions = {}): Promise<Live
     });
   }
   return worlds;
+}
+
+/** Предложения мира сценария глазами остатков: товар, артикул, id_offer (Kaufland) или SKU (Amazon) */
+function stockOffersOf(scenario: Scenario, accounts: StandAccount[]): MemoryStockOffer[] {
+  const byId = new Map(accounts.map((a) => [a.channelAccountId, a]));
+  return (scenario.world.pricing?.scopes ?? []).map((s) => {
+    const account = byId.get(s.channelAccountId);
+    const channel = account?.channel ?? 'KAUFLAND';
+    return {
+      productId: s.productId, sku: s.externalUnitId, gtin: s.gtin ?? null, channelAccountId: s.channelAccountId, channel,
+      marketplaces: account?.marketplaces ?? [s.marketplace],
+      externalOfferId: s.externalOfferId ?? (channel === 'AMAZON' ? s.externalUnitId : `offer-${s.externalUnitId}`),
+      ...(channel === 'AMAZON' ? { requiresSideEffectsAck: true, sideEffectsText: 'остаток MFN — одно значение на SKU во всех маркетплейсах региона [Р-1]' } : { sideEffectsText: 'unit с одинаковым id_offer на разных витринах имеют общие количество и склад [Р-35]' }),
+    };
+  });
 }
 
 /** Сопоставление стенда без базы: subject имитатора → пользователь участника и его членства в каждом мире [Р-78] */

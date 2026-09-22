@@ -14,7 +14,8 @@
     "@repracer/cost-import": "0.1.0",
     "@repracer/pricing-model": "0.1.0",
     "@repracer/pricing-pipeline": "0.1.0",
-    "@repracer/channel-port": "0.1.0"
+    "@repracer/channel-port": "0.1.0",
+    "@repracer/stock-sync": "0.1.0"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

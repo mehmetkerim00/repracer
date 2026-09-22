@@ -145,58 +145,67 @@ export class PgStockStore implements StockStore {
   async enableStockSync(tenantId: string, channelAccountId: string, input: EnableStockSyncInput, actor: StockActor): Promise<EnableStockSyncResult> {
     try {
       return await inTenant(this.options.adminPool, tenantId, async (tx) => {
-        // Предложения, остаток которых ведём мы (MERCHANT), у этого аккаунта; идентичность единицы — по возможности канала
-        const { rows: offers } = await tx.query(
-          `SELECT om.offer_mapping_id, om.product_id, om.channel, om.region, om.marketplace, om.external_offer_id, om.external_sku, om.external_unit_id, om.external_listing_id, om.quantity_write_scope_id,
-                  om.channel_offer_key
-             FROM tenant_data.offer_mapping om
-            WHERE om.tenant_id = $1 AND om.channel_account_id = $2 AND om.status = 'ACTIVE' AND om.fulfillment = 'MERCHANT'
-            ORDER BY om.created_at`, [tenantId, channelAccountId]);
-        if (offers.length === 0) return { status: 'NO_OFFERS' as const };
-        const channel = offers[0]!.channel as string;
+        const { rows: [acc] } = await tx.query(`SELECT channel FROM tenant_data.channel_account WHERE tenant_id = $1 AND channel_account_id = $2`, [tenantId, channelAccountId]);
+        if (!acc) return { status: 'NO_OFFERS' as const };
         const { rows: [cap] } = await tx.query(
           `SELECT capability_id, version, write_scope_kind, write_scope_key_template, budget_scope_attribute, requires_side_effects_ack
-             FROM platform.channel_capability WHERE channel = $1 AND field = 'QUANTITY' AND status = 'ACTIVE' ORDER BY valid_from DESC LIMIT 1`, [channel]);
-        if (!cap) throw new Error(`no ACTIVE ${channel} QUANTITY capability`);
+             FROM platform.channel_capability WHERE channel = $1 AND field = 'QUANTITY' AND status = 'ACTIVE' ORDER BY valid_from DESC LIMIT 1`, [acc.channel]);
+        if (!cap) throw new Error(`no ACTIVE ${acc.channel} QUANTITY capability`);
+        const template = cap.write_scope_key_template as string[];
+        const { rows: [n] } = await tx.query(
+          `SELECT count(*)::int AS offers FROM tenant_data.offer_mapping om WHERE om.tenant_id = $1 AND om.channel_account_id = $2 AND om.status = 'ACTIVE' AND om.fulfillment = 'MERCHANT'`,
+          [tenantId, channelAccountId]);
+        if (Number(n!.offers) === 0) return { status: 'NO_OFFERS' as const };
         // Буфер аккаунта [Р-6] — новая версия; страж базы требует его у каждой включённой единицы
-        const { rows: [last] } = await tx.query(`SELECT coalesce(max(version), 0)::int AS v FROM tenant_data.stock_allocation WHERE tenant_id = $1 AND scope_type = 'CHANNEL_ACCOUNT' AND channel_account_id = $2`, [tenantId, channelAccountId]);
         await tx.query(
           `INSERT INTO tenant_data.stock_allocation (tenant_id, scope_type, channel_account_id, buffer_units, max_quantity, min_quantity_to_list, is_active, version, created_by_membership_id)
-           VALUES ($1, 'CHANNEL_ACCOUNT', $2, $3, $4, $5, true, $6, $7)`,
-          [tenantId, channelAccountId, input.bufferUnits, input.maxQuantity, input.minQuantityToList, Number(last!.v) + 1, actor.membershipId]);
-        let created = 0; let awaitingAck = 0;
-        // Kaufland: единица — аккаунт + id_offer, ОБЩАЯ для витрин [Р-35]: витрины одного оффера делят одну единицу
-        const scopeByKey = new Map<string, string>();
-        for (const o of offers) {
-          let writeScopeId: string | null = o.quantity_write_scope_id ?? null;
-          const identity = { region: o.region, marketplace: o.marketplace, external_offer_id: o.external_offer_id, external_sku: o.external_sku, external_unit_id: o.external_unit_id, external_listing_id: o.external_listing_id };
-          const template = cap.write_scope_key_template as string[];
-          const key = template.map((k) => (k === 'channel_account' ? channelAccountId : String((identity as Record<string, unknown>)[k] ?? ''))).join('|');
-          if (!writeScopeId && scopeByKey.has(key)) writeScopeId = scopeByKey.get(key)!;
-          if (!writeScopeId) {
-            if (template.includes('external_offer_id') && !o.external_offer_id) continue; // без id_offer единицы остатка у Kaufland нет (0027)
-            const { rows: [s] } = await tx.query(
-              `INSERT INTO tenant_data.write_scope
-                 (tenant_id, channel_account_id, channel, field, product_id, capability_id, capability_version, scope_kind, scope_key, status, quantity_sync_enabled, budget_scope_key)
-               VALUES ($1, $2, $3, 'QUANTITY', $4, $5, $6, $7, tenant_data.derive_scope_key($8::jsonb, $9::text[]), 'ACTIVE', false, $10)
-               RETURNING write_scope_id`,
-              [tenantId, channelAccountId, channel, o.product_id, cap.capability_id, cap.version, cap.write_scope_kind, JSON.stringify(identity), template,
-               cap.budget_scope_attribute ? (identity as Record<string, string | null>)[cap.budget_scope_attribute as string] ?? null : null]);
-            writeScopeId = s!.write_scope_id;
-            created += 1;
-          }
-          scopeByKey.set(key, writeScopeId!);
-          await tx.query(`UPDATE tenant_data.offer_mapping SET quantity_write_scope_id = $3 WHERE tenant_id = $1 AND offer_mapping_id = $2 AND quantity_write_scope_id IS DISTINCT FROM $3`,
-            [tenantId, o.offer_mapping_id, writeScopeId]);
-          // INV-11: побочный эффект (Amazon EU — весь регион) подтверждает человек; без подтверждения единица есть, синхронизации нет
-          if (cap.requires_side_effects_ack === true && !input.acknowledgeSideEffects) { awaitingAck += 1; continue; }
-          await tx.query(
-            `UPDATE tenant_data.write_scope SET quantity_sync_enabled = true,
-                    side_effects_ack_membership_id = CASE WHEN requires_side_effects_ack THEN $3 ELSE side_effects_ack_membership_id END,
-                    side_effects_ack_at = CASE WHEN requires_side_effects_ack THEN now() ELSE side_effects_ack_at END
-              WHERE tenant_id = $1 AND write_scope_id = $2 AND NOT quantity_sync_enabled`, [tenantId, writeScopeId, actor.membershipId]);
-        }
-        return { status: 'ENABLED' as const, scopes: scopeByKey.size, created, awaitingAck };
+           VALUES ($1, 'CHANNEL_ACCOUNT', $2, $3, $4, $5, true,
+                   (SELECT coalesce(max(version), 0) + 1 FROM tenant_data.stock_allocation WHERE tenant_id = $1 AND scope_type = 'CHANNEL_ACCOUNT' AND channel_account_id = $2), $6)`,
+          [tenantId, channelAccountId, input.bufferUnits, input.maxQuantity, input.minQuantityToList, actor.membershipId]);
+        /**
+         * Единицы записи QUANTITY — одним оператором на все предложения: у Kaufland витрины одного id_offer делят ОДНУ
+         * единицу [Р-35], поэтому ключ единицы считается по шаблону возможности канала и берётся по одному на ключ. Предложение
+         * без атрибута ключа (Kaufland без id_offer, 0027) единицы не получает — и остаток у него не синхронизируется.
+         */
+        const identitySql = `jsonb_build_object('region', om.region, 'marketplace', om.marketplace, 'external_offer_id', om.external_offer_id, 'external_sku', om.external_sku,
+                                                'external_unit_id', om.external_unit_id, 'external_listing_id', om.external_listing_id)`;
+        const keyAttrs = template.filter((k) => k !== 'channel_account');
+        const keyPresent = keyAttrs.map((k) => `om.${k} IS NOT NULL`).join(' AND ') || 'true';
+        const { rows: [ins] } = await tx.query(
+          `WITH candidates AS (
+             SELECT DISTINCT ON (tenant_data.derive_scope_key(${identitySql}, $6::text[])) om.product_id, ${identitySql} AS identity
+               FROM tenant_data.offer_mapping om
+              WHERE om.tenant_id = $1 AND om.channel_account_id = $2 AND om.status = 'ACTIVE' AND om.fulfillment = 'MERCHANT'
+                AND om.quantity_write_scope_id IS NULL AND ${keyPresent}
+                AND NOT EXISTS (SELECT 1 FROM tenant_data.write_scope s WHERE s.tenant_id = om.tenant_id AND s.channel_account_id = om.channel_account_id AND s.field = 'QUANTITY'
+                                  AND s.scope_key = tenant_data.derive_scope_key(${identitySql}, $6::text[]))
+              ORDER BY tenant_data.derive_scope_key(${identitySql}, $6::text[]), om.created_at),
+           created AS (
+             INSERT INTO tenant_data.write_scope
+               (tenant_id, channel_account_id, channel, field, product_id, capability_id, capability_version, scope_kind, scope_key, status, quantity_sync_enabled, budget_scope_key)
+             SELECT $1, $2, $3, 'QUANTITY', c.product_id, $4, $5, $7, tenant_data.derive_scope_key(c.identity, $6::text[]), 'ACTIVE', false,
+                    CASE WHEN $8::text IS NULL THEN NULL ELSE c.identity ->> $8 END
+               FROM candidates c
+             RETURNING write_scope_id)
+           SELECT count(*)::int AS n FROM created`,
+          [tenantId, channelAccountId, acc.channel, cap.capability_id, cap.version, template, cap.write_scope_kind, cap.budget_scope_attribute ?? null]);
+        // Предложения ссылаются на свою единицу — и новые, и те, чья единица уже была (повторное включение)
+        await tx.query(
+          `UPDATE tenant_data.offer_mapping om SET quantity_write_scope_id = s.write_scope_id
+             FROM tenant_data.write_scope s
+            WHERE om.tenant_id = $1 AND om.channel_account_id = $2 AND om.status = 'ACTIVE' AND om.fulfillment = 'MERCHANT' AND om.quantity_write_scope_id IS NULL
+              AND s.tenant_id = om.tenant_id AND s.channel_account_id = om.channel_account_id AND s.field = 'QUANTITY' AND s.status <> 'RETIRED'
+              AND s.scope_key = tenant_data.derive_scope_key(${identitySql}, $3::text[])`, [tenantId, channelAccountId, template]);
+        const { rows: [scopes] } = await tx.query(
+          `SELECT count(*)::int AS n FROM tenant_data.write_scope s WHERE s.tenant_id = $1 AND s.channel_account_id = $2 AND s.field = 'QUANTITY' AND s.status <> 'RETIRED'`, [tenantId, channelAccountId]);
+        // INV-11: побочный эффект (Amazon EU — весь регион) подтверждает человек; без подтверждения единицы есть, синхронизации нет
+        if (cap.requires_side_effects_ack === true && !input.acknowledgeSideEffects) return { status: 'ENABLED' as const, scopes: Number(scopes!.n), created: Number(ins!.n), awaitingAck: Number(scopes!.n) };
+        await tx.query(
+          `UPDATE tenant_data.write_scope SET quantity_sync_enabled = true,
+                  side_effects_ack_membership_id = CASE WHEN requires_side_effects_ack THEN $3 ELSE side_effects_ack_membership_id END,
+                  side_effects_ack_at = CASE WHEN requires_side_effects_ack THEN now() ELSE side_effects_ack_at END
+            WHERE tenant_id = $1 AND channel_account_id = $2 AND field = 'QUANTITY' AND status <> 'RETIRED' AND NOT quantity_sync_enabled`, [tenantId, channelAccountId, actor.membershipId]);
+        return { status: 'ENABLED' as const, scopes: Number(scopes!.n), created: Number(ins!.n), awaitingAck: 0 };
       }, actor.userId, { mfa: actor.mfa });
     } catch (error) {
       if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
@@ -229,24 +238,30 @@ export class PgStockStore implements StockStore {
       LEFT JOIN tenant_data.write_scope_sync_state ss ON ss.tenant_id = s.tenant_id AND ss.write_scope_id = s.write_scope_id
      WHERE s.tenant_id = $1 AND s.field = 'QUANTITY' AND s.status <> 'RETIRED'`;
 
+  /**
+   * Публикуемое количество в SQL — то же правило, что `publishedQuantity` (§3.27); равенство двух записей правила
+   * утверждает тест хранилища: у каждой единицы страницы `published` (код) равен количеству созданной записи (SQL).
+   */
+  private static readonly PUBLISHED_SQL = `
+    CASE WHEN least(greatest(0, greatest(0, on_hand - reserved) - buffer_units), coalesce(max_quantity, 2147483647)) < min_quantity_to_list THEN 0
+         ELSE least(greatest(0, greatest(0, on_hand - reserved) - buffer_units), coalesce(max_quantity, 2147483647)) END`;
+
   async recalculate(tenantId: string, productIds: readonly string[] | null, now: Instant): Promise<RecalculationOutcome> {
     return inTenant(this.options.stockPool, tenantId, async (tx) => {
-      const { rows } = await tx.query(`${PgStockStore.TARGETS_SQL} AND s.quantity_sync_enabled AND ($2::uuid[] IS NULL OR s.product_id = ANY($2)) ORDER BY s.write_scope_id`,
-        [tenantId, productIds ? [...productIds] : null]);
-      const out: RecalculationOutcome = { writes: [], unchanged: 0 };
-      for (const r of rows) {
-        if (r.allocation_active !== true) continue;
-        const q = publishedQuantity(availableOf(Number(r.on_hand), Number(r.reserved)), { bufferUnits: Number(r.buffer_units), maxQuantity: r.max_quantity === null ? null : Number(r.max_quantity), minQuantityToList: Number(r.min_quantity_to_list) });
-        if (r.last_quantity !== null && r.last_quantity !== undefined && Number(r.last_quantity) === q) { out.unchanged += 1; continue; }
-        const version = Number(r.latest_version_created ?? 0) + 1;
-        // Новая версия вытесняет ждущую сама (триггеры channel_write); в полёте остаётся одна запись на единицу [Р-64]
-        await tx.query(
-          `INSERT INTO tenant_data.channel_write (tenant_id, write_scope_id, field, quantity, version, origin, idempotency_key, created_at)
-           VALUES ($1, $2, 'QUANTITY', $3, $4, 'STOCK_RECALC', $5, $6::timestamptz)`,
-          [tenantId, r.write_scope_id, q, version, `stock:${r.write_scope_id}:${version}`, now]);
-        out.writes.push({ writeScopeId: r.write_scope_id, quantity: q, version });
-      }
-      return out;
+      // Одним оператором на все изменившиеся единицы: новая версия вытесняет ждущую сама (триггеры channel_write) [Р-64]
+      const { rows } = await tx.query(
+        `WITH t AS (${PgStockStore.TARGETS_SQL} AND s.quantity_sync_enabled AND ($2::uuid[] IS NULL OR s.product_id = ANY($2))),
+         target AS (SELECT t.write_scope_id, t.last_quantity, coalesce(t.latest_version_created, 0) + 1 AS version, ${PgStockStore.PUBLISHED_SQL} AS q FROM t WHERE t.allocation_active),
+         created AS (
+           INSERT INTO tenant_data.channel_write (tenant_id, write_scope_id, field, quantity, version, origin, idempotency_key, created_at)
+           SELECT $1, g.write_scope_id, 'QUANTITY', g.q, g.version, 'STOCK_RECALC', 'stock:' || g.write_scope_id || ':' || g.version, $3::timestamptz
+             FROM target g WHERE g.last_quantity IS NULL OR g.last_quantity <> g.q
+           RETURNING write_scope_id, quantity, version)
+         SELECT (SELECT json_agg(json_build_object('writeScopeId', c.write_scope_id, 'quantity', c.quantity, 'version', c.version)) FROM created c) AS writes,
+                (SELECT count(*) FROM target g WHERE g.last_quantity = g.q)::int AS unchanged`,
+        [tenantId, productIds ? [...productIds] : null, now]);
+      const r = rows[0]!;
+      return { writes: ((r.writes ?? []) as Array<{ writeScopeId: string; quantity: number; version: number }>).map((w) => ({ ...w, quantity: Number(w.quantity), version: Number(w.version) })), unchanged: Number(r.unchanged) };
     });
   }
 
@@ -365,8 +380,10 @@ export class PgStockStore implements StockStore {
                 (SELECT count(*) FROM tenant_data.write_scope s WHERE s.tenant_id = $1 AND s.field = 'QUANTITY' AND s.status <> 'RETIRED' AND s.quantity_sync_enabled)::int AS synced,
                 (SELECT count(*) FROM tenant_data.channel_write w WHERE w.tenant_id = $1 AND w.field = 'QUANTITY' AND w.status IN ('PENDING', 'DISPATCHED', 'ACCEPTED', 'FAILED', 'BLOCKED'))::int AS pending,
                 (SELECT count(*) FROM channel_data.reservation r WHERE r.tenant_id = $1 AND r.status IN ('CREATED', 'CONFIRMED_BY_SOURCE'))::int AS open_reservations,
+                -- Расхождение: последняя отправленная версия завершена НЕ применением, и повтора уже нет (записи в полёте у единицы нет)
                 (SELECT count(*) FROM tenant_data.write_scope_sync_state ss JOIN tenant_data.write_scope s ON s.tenant_id = ss.tenant_id AND s.write_scope_id = ss.write_scope_id
-                  WHERE ss.tenant_id = $1 AND s.field = 'QUANTITY' AND ss.latest_version_dispatched > 0 AND ss.in_flight_write_id IS NULL AND ss.latest_version_applied < ss.latest_version_dispatched)::int AS diverged`,
+                  WHERE ss.tenant_id = $1 AND s.field = 'QUANTITY' AND ss.latest_version_dispatched > 0 AND ss.latest_version_applied < ss.latest_version_dispatched
+                    AND NOT EXISTS (SELECT 1 FROM tenant_data.channel_write w WHERE w.tenant_id = ss.tenant_id AND w.write_scope_id = ss.write_scope_id))::int AS diverged`,
         [tenantId]);
       return {
         items, total: Number(s!.products),
@@ -379,7 +396,8 @@ export class PgStockStore implements StockStore {
     return inTenant(this.options.adminPool, tenantId, async (tx) => {
       // Расхождение: последняя отправленная версия завершена НЕ применением — по водяным знакам, затем подробности строки
       const { rows } = await tx.query(
-        PgStockStore.CHANNEL_ROWS_SQL.replace('__TARGETS__', `${PgStockStore.TARGETS_SQL} AND ss.latest_version_dispatched > 0 AND ss.in_flight_write_id IS NULL AND ss.latest_version_applied < ss.latest_version_dispatched`)
+        PgStockStore.CHANNEL_ROWS_SQL.replace('__TARGETS__', `${PgStockStore.TARGETS_SQL} AND ss.latest_version_dispatched > 0 AND ss.latest_version_applied < ss.latest_version_dispatched
+             AND NOT EXISTS (SELECT 1 FROM tenant_data.channel_write w WHERE w.tenant_id = s.tenant_id AND w.write_scope_id = s.write_scope_id)`)
         + ` ORDER BY lw.at DESC LIMIT $2`, [tenantId, limit]);
       const { rows: skus } = await tx.query(`SELECT product_id, sku FROM tenant_data.product WHERE tenant_id = $1 AND product_id = ANY($2::uuid[])`, [tenantId, rows.map((r) => r.product_id)]);
       const skuOf = new Map(skus.map((s) => [s.product_id, s.sku as string]));

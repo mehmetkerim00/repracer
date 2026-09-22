@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer, type ViteDevServer } from 'vite';
-import { describe, messagesFor, type EnableResultView, type OnboardingView, type DecisionListView, type BulkJobView, type ComplianceView, type CostImportView, type DiscountCheckView, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
+import { describe, messagesFor, type EnableResultView, type OnboardingView, type StockView, type DecisionListView, type BulkJobView, type ComplianceView, type CostImportView, type DiscountCheckView, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
 import { buildStandWorlds, memoryStandDirectory, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
@@ -140,7 +140,12 @@ test('stand API serves every screen of every world in German and English and ref
        */
       const path = await get<OnboardingView>(auth, api(w.id, 'onboarding') + q);
       assert.ok(path.channels.some((c) => c.status === 'ACTIVE'), `${w.id}: у работающего мира есть подключённый канал`);
-      assert.notEqual(path.resumeAt, 'CHANNEL', `${w.id}: путь не останавливается на подключении канала`);
+      // Р-152: путь не выбран — экран предлагает выбор из двух после тенанта и канала; шаг канала при этом сделан
+      assert.deepEqual([path.path, path.choices.map((c) => c.path), path.steps.find((x) => x.step === 'CHANNEL')?.done], [null, ['STOCK', 'STOCK_AND_PRICING'], true], `${w.id}: выбор пути после подключённого канала`);
+      // Экран остатков и расхождений — у каждого мира, на обоих языках
+      const stock = await get<StockView>(auth, api(w.id, 'stock') + q);
+      assert.ok(stock.traps.length > 0 && stock.traps.every((t) => t.text.length > 20), `${w.id}: ловушки каналов названы до записи`);
+      await get<unknown>(auth, api(w.id, 'stock', 'divergences') + q);
       assert.equal(path.demo, false, `${w.id}: мир сценария — не демо`);
       for (const d of (await get<DecisionListView>(auth, api(w.id, 'decisions') + q)).items) await get<DecisionTrace>(auth, api(w.id, 'decisions', d.decisionId) + q);
       await get<RejectedView>(auth, api(w.id, 'rejected') + q);
@@ -910,7 +915,7 @@ test('Р-147: список заданий не несёт их итогов', as
  */
 test('Р-143, задача D: право на отмену чужого задания — право на его вид операции', async () => {
   const { canCancelBulkJob, CANCEL_ACTION } = await import('@repracer/console-model');
-  const KINDS = ['COST_IMPORT', 'BOUNDS_EDIT', 'BOUNDS_PLAN', 'STRATEGY_ASSIGN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT', 'REPRICING_ENABLE'] as const;
+  const KINDS = ['COST_IMPORT', 'BOUNDS_EDIT', 'BOUNDS_PLAN', 'STRATEGY_ASSIGN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT', 'REPRICING_ENABLE', 'STOCK_IMPORT'] as const;
   // Вид задания без решения о праве существовать не может: перечисление полное [Р-146]
   assert.deepEqual(Object.keys(CANCEL_ACTION).sort(), [...KINDS].sort(), 'у каждого вида задания названо право на его отмену');
 

@@ -10,6 +10,7 @@ import type { StrategyDefinition } from '@repracer/pricing-model';
 /** Стратегия предложения на момент предпросмотра — как её ждёт хранилище */
 type StrategyExpectation = { writeScopeId: string; strategyId: string | null; version: number | null };
 import type { BoundsEditInput, BulkJobRow, StrategyPreview } from '@repracer/pricing-pipeline';
+import { parseStockSheet, type StockStore } from '@repracer/stock-sync';
 import type { BulkJobContext, BulkJobHandlers, BulkJobWork } from './index.ts';
 import type { BulkJobPhase } from '@repracer/pricing-pipeline';
 
@@ -35,6 +36,8 @@ export interface BulkJobWorldOptions {
    * опрашивается: проверяются себестоимость [Р-131], границы и стратегия по данным базы.
    */
   enableRepricing?(ctx: BulkJobContext, scope: ConsoleScope): Promise<{ enabled: boolean; problems: Array<{ code: string; params?: Record<string, unknown> }> }>;
+  /** Шаг 35 [Р-152]: хранилище остатков — файл остатков применяется им от имени автора задания, пересчёт создаёт записи в каналы */
+  stock?: StockStore;
 }
 
 const PROGRESS_STEP = 500;
@@ -272,6 +275,40 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
      * себестоимости, границ, стратегии), не роняет задание: оно называется в итоге поимённо с причиной, остальные включаются.
      * Это не «целиком или никак» — включение обратимо и по одному, и продавцу важнее знать, ЧТО не включилось.
      */
+    /**
+     * Шаг 35 [Р-152]: файл остатков продавца. Разбор байтов — тот же, что у себестоимости (кодировка, разделитель, XLSX);
+     * смысл колонок — артикул и количество. Применение — инвентаризация внутреннего пула; затем пересчёт публикуемого
+     * количества создаёт записи в каналы, которые отправит диспетчер [Р-64]. Итог — поимённо с причинами, как у себестоимости.
+     */
+    async STOCK_IMPORT(job: BulkJobRow, ctx: BulkJobContext): Promise<BulkJobWork> {
+      const m = messagesFor(localeOf(job));
+      const p = job.params as { fileName: string; content: string; stockSourceId: string; encoding?: TableEncoding };
+      if (!options.stock) throw Object.assign(new Error('no stock store'), { cause: 'NOT_SUPPORTED' });
+      const stock = options.stock;
+      const sheet = readTable(Buffer.from(p.content, 'base64'), p.encoding);
+      const parsed = parseStockSheet(sheet.rows);
+      if ('code' in parsed) throw Object.assign(new Error(parsed.code), { cause: parsed.code });
+      return {
+        total: parsed.rows.length,
+        async run(progress) {
+          await progress(0, 'APPLYING');
+          const applied = await stock.importStock(ctx.tenantId, p.stockSourceId, parsed.rows, { membershipId: ctx.membershipId, userId: ctx.userId, mfa: job.createdWithMfa });
+          if (applied.status !== 'APPLIED') throw Object.assign(new Error(applied.status), { cause: applied.status });
+          await progress(parsed.rows.length, 'APPLYING');
+          const recalculated = applied.productIds.length > 0 ? await stock.recalculate(ctx.tenantId, applied.productIds, new Date().toISOString() as never) : { writes: [], unchanged: 0 };
+          const unmatched = [...parsed.skipped.map((s) => ({ sku: s.sku, reason: s.reason })), ...applied.unmatched];
+          const byReason: Record<string, number> = {};
+          for (const u of unmatched) byReason[u.reason] = (byReason[u.reason] ?? 0) + 1;
+          const view = {
+            matched: applied.matched, changed: applied.changed, unmatched: unmatched.length, writes: recalculated.writes.length,
+            byReason: Object.entries(byReason).map(([reason, count]) => ({ reason, title: (m.ui.stock.importFile.unmatched as Record<string, string>)[reason] ?? reason, count })),
+            examples: unmatched.slice(0, 50),
+          };
+          return { matched: applied.matched, changed: applied.changed, unmatched: unmatched.length, writes: recalculated.writes.length, view };
+        },
+      };
+    },
+
     async REPRICING_ENABLE(job: BulkJobRow, ctx: BulkJobContext): Promise<BulkJobWork> {
       const p = job.params as { writeScopeIds?: string[]; all?: boolean };
       const world = await options.world(ctx);

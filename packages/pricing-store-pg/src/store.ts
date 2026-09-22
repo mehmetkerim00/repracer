@@ -1367,10 +1367,10 @@ export class PgPricingStore implements PricingStore {
   async onboardingProgress(tenantId: string): Promise<OnboardingProgressRow | null> {
     return inTenant(this.admin('onboardingProgress'), tenantId, async (tx) => {
       const { rows } = await tx.query(
-        `SELECT scope_write_scope_ids, started_at, updated_at FROM tenant_data.onboarding_progress WHERE tenant_id = $1`, [tenantId]);
+        `SELECT scope_write_scope_ids, path, started_at, updated_at FROM tenant_data.onboarding_progress WHERE tenant_id = $1`, [tenantId]);
       const r = rows[0];
       return r === undefined ? null : {
-        scopeWriteScopeIds: (r.scope_write_scope_ids as string[] | null) ?? null,
+        scopeWriteScopeIds: (r.scope_write_scope_ids as string[] | null) ?? null, path: (r.path as OnboardingProgressRow['path']) ?? null,
         startedAt: String(r.started_at), updatedAt: String(r.updated_at),
       };
     });
@@ -1379,14 +1379,15 @@ export class PgPricingStore implements PricingStore {
   async saveOnboardingProgress(tenantId: string, input: OnboardingProgressInput, actor: AdminActor): Promise<'SAVED' | 'FORBIDDEN'> {
     try {
       await inTenant(this.admin('saveOnboardingProgress'), tenantId, async (tx) => {
-        // Одна строка на тенанта; хранится только сужение набора [Р-131]: список сужает, `null` снимает
+        // Одна строка на тенанта; хранится сужение набора [Р-131] (список сужает, `null` снимает, `undefined` не трогает) и путь [Р-152]
         await tx.query(
-          `INSERT INTO tenant_data.onboarding_progress (tenant_id, scope_write_scope_ids, updated_by_membership_id)
-           VALUES ($1, $2, $3)
+          `INSERT INTO tenant_data.onboarding_progress (tenant_id, scope_write_scope_ids, path, updated_by_membership_id)
+           VALUES ($1, $2, $4, $5)
            ON CONFLICT (tenant_id) DO UPDATE
-             SET scope_write_scope_ids = excluded.scope_write_scope_ids,
+             SET scope_write_scope_ids = CASE WHEN $3 THEN tenant_data.onboarding_progress.scope_write_scope_ids ELSE excluded.scope_write_scope_ids END,
+                 path = coalesce(excluded.path, tenant_data.onboarding_progress.path),
                  updated_at = now(), updated_by_membership_id = excluded.updated_by_membership_id`,
-          [tenantId, input.scopeWriteScopeIds, actor.membershipId]);
+          [tenantId, input.scopeWriteScopeIds ?? null, input.scopeWriteScopeIds === undefined, input.path ?? null, actor.membershipId]);
       }, actor.userId, { mfa: actor.mfa });
       return 'SAVED';
     } catch (error) {

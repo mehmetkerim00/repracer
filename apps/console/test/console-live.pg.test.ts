@@ -6,6 +6,7 @@ import { STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract
 import { createAuthenticator, MemoryIdentityDirectory, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
 import { inTenant, seedPricingWorld, PgPricingStore, type PgPool, type SeededPricingWorld } from '@repracer/pricing-store-pg';
+import { PgStockStore } from '@repracer/pricing-store-pg';
 import { createPricingPipeline, type MemorySeedScope } from '@repracer/pricing-pipeline';
 import { KAUFLAND_DESCRIPTOR } from '@repracer/kaufland-adapter';
 import { createIsolatedDatabase, type IsolatedDatabase } from '../../../packages/pricing-store-pg/test/isolated-db.ts';
@@ -188,6 +189,7 @@ before(async () => {
     seed: { scopes: Array.from({ length: OFFERS }, (_, i) => scope(i + 1)) },
   });
   const store = new PgPricingStore(pool, { adminPool: admin, bulkWorkerPool: db.pool('svc_bulk_worker', 2) });
+  const stock = new PgStockStore({ adminPool: admin, stockPool: db.pool('svc_stock', 2) });
   const now = new Date().toISOString();
   // Канал в этом прогоне не трогается: остановки и стратегии идут в базу. Любой вызов адаптера — ошибка прогона, а не тишина
   const channel = new Proxy({ descriptor: KAUFLAND_DESCRIPTOR } as Record<string, unknown>, {
@@ -199,7 +201,7 @@ before(async () => {
     id: WORLD_ID, title: 'Каталог целевого клиента', description: '10 000 предложений одного аккаунта', tenantId: world.tenantId,
     accounts: [{ channelAccountId: world.channelAccountId, channel: 'KAUFLAND', marketplaces: ['de'], haltRelease: 'SAMPLE' }],
     identityTenantId: world.tenantId, membershipAlias: (id) => id, failures: [],
-    store: store as never, pipeline: pipeline as never, clock: { iso: () => now, nowMs: () => Date.parse(now) } as never,
+    store: store as never, stock, pipeline: pipeline as never, clock: { iso: () => now, nowMs: () => Date.parse(now) } as never,
     callContext: (channelAccountId) => ({
       tenantId: world.tenantId as never, channelAccountId: channelAccountId as never, correlationId: 'console-live', deadline: now,
     }),

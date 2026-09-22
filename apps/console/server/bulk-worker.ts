@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { bulkJobHandlers } from '@repracer/bulk-jobs/handlers';
 import { bulkWorldReader, runBulkWorker, type BulkWorldDescriptor } from '@repracer/bulk-jobs/worker';
 import type { Instant } from '@repracer/channel-port';
-import { createPool, IdMap, PgPricingStore, translateStore } from '@repracer/pricing-store-pg';
+import { createPool, IdMap, PgPricingStore, PgStockStore, translateStore } from '@repracer/pricing-store-pg';
 import { createPricingPipeline, type PricingStore } from '@repracer/pricing-pipeline';
 import { AMAZON_DESCRIPTOR } from '@repracer/amazon-adapter';
 import { KAUFLAND_DESCRIPTOR } from '@repracer/kaufland-adapter';
@@ -52,6 +52,12 @@ function storeFor(pgUrl: string, world: BulkWorkerWorldConfig): PricingStore {
   return world.idAliases && world.idAliases.length > 0 ? translateStore(inner, IdMap.of(world.idAliases)) : inner;
 }
 
+/** Шаг 35 [Р-152]: остатки — административная роль (человеком) и роль остатков [Р-102] */
+function stockStoreFor(pgUrl: string): PgStockStore {
+  const role = (login: string, max: number) => createPool(pgUrl.replace('svc_app@', `${login}@`), { max, applicationName: `repracer-bulk-${login}` });
+  return new PgStockStore({ adminPool: role('svc_admin', 2), stockPool: role('svc_stock', 2) });
+}
+
 /**
  * OQ-201: предпросмотр стратегии считает путь решения. Канал при этом НЕ опрашивается — считается по последнему принятому
  * снимку, — поэтому адаптер здесь заглушка, у которой есть только описание канала: по нему определяется доступность стратегии
@@ -74,6 +80,7 @@ export async function runConfiguredWorker(config: BulkWorkerConfig, stopped: () 
     const pipelines = new Map(world.descriptor.accounts.map((a) => [a.channelAccountId, previewPipelineFor(store, a.channel, now)]));
     const handlers = bulkJobHandlers({
       world: bulkWorldReader(store, world.descriptor, now),
+      stock: stockStoreFor(config.pgUrl),
       // Шаг 34 [Р-149]: включение движка — тем же путём решения, что предпросмотр: канал не опрашивается
       enableRepricing: async (ctx, scope) => {
         const pipeline = pipelines.get(scope.channelAccountId);

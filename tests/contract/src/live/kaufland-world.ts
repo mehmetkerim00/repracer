@@ -71,13 +71,14 @@ function scopeOf(p: LiveProduct, account: string): MemorySeedScope {
   if (p.bare) {
     return {
       writeScopeId: `ws-${p.marketplace}-${id}`, productId: `prod-${p.marketplace}-${id}`, channelAccountId: account, marketplace: p.marketplace,
-      externalUnitId: id.slice(-6), channelProductRef: id, condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'OFF', strategy: null,
+      // Шаг 35: id_offer — ключ единицы ОСТАТКА у Kaufland [Р-35]; тот же, что у единицы симулятора
+      externalUnitId: id.slice(-6), externalOfferId: `SYN-OFFER-${id}`, channelProductRef: id, condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'OFF', strategy: null,
       currentPriceMinor: 1850, minPrice: null, maxPrice: null,
     } as MemorySeedScope;
   }
   return {
     writeScopeId: `ws-${p.marketplace}-${id}`, productId: `prod-${p.marketplace}-${id}`, channelAccountId: account, marketplace: p.marketplace,
-    externalUnitId: id.slice(-6), channelProductRef: id, condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: p.pricingMode ?? 'OFF',
+    externalUnitId: id.slice(-6), externalOfferId: `SYN-OFFER-${id}`, channelProductRef: id, condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: p.pricingMode ?? 'OFF',
     strategy: p.pricingMode === 'ENGINE' ? { strategyId: 'st-buybox', version: 1, params: { type: 'MATCH_BUYBOX', undercutMinor: 5, holdWhenWinning: true, atBound: 'CAP' }, deadbandMinor: 0 } : null,
     ...(p.costMinor ? { cost: { currency: 'EUR', costProfileId: `cp-${id}`, unitCostMinor: p.costMinor, fixedFeeMinor: 0, feeRateBp: 1500, tax: { regime: 'VAT_INCLUDED', vatRateBp: p.marketplace === 'at' ? 2000 : 1900 } } } : {}),
     currentPriceMinor: 1850, minPrice: { amountMinor: 1200, id: `min-${p.marketplace}-${id}` }, maxPrice: { amountMinor: 3000, id: `max-${p.marketplace}-${id}` },

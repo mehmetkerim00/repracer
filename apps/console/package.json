@@ -16,14 +16,15 @@
     "@repracer/pricing-pipeline": "0.1.0",
     "@repracer/channel-port": "0.1.0",
     "@repracer/amazon-adapter": "0.1.0",
-    "@repracer/kaufland-adapter": "0.1.0"
+    "@repracer/kaufland-adapter": "0.1.0",
+    "@repracer/stock-sync": "0.1.0"
   },
   "scripts": {
     "stand": "node --experimental-strip-types --disable-warning=ExperimentalWarning server/stand-server.ts",
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec test/console.test.ts test/console.pg.test.ts test/console-live.pg.test.ts test/onboarding-live.pg.test.ts test/demo-day-live.pg.test.ts",
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec test/console.test.ts test/console.pg.test.ts test/console-live.pg.test.ts test/onboarding-live.pg.test.ts test/stock-only-live.pg.test.ts test/demo-day-live.pg.test.ts",
     "bulk-worker": "node --experimental-strip-types --disable-warning=ExperimentalWarning server/bulk-worker.ts"
   },
   "devDependencies": {

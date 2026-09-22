@@ -671,7 +671,9 @@ export interface PricingStore {
  */
 export type BulkJobKind = 'COST_IMPORT' | 'BOUNDS_EDIT' | 'BOUNDS_PLAN' | 'STRATEGY_ASSIGN' | 'STRATEGY_PREVIEW' | 'PRICE_EVIDENCE' | 'PRICE_FEED_EXPORT'
   /** Шаг 34 [Р-149]: включение движка у набора предложений — последний шаг пути; право своё, ENABLE_REPRICING */
-  | 'REPRICING_ENABLE';
+  | 'REPRICING_ENABLE'
+  /** Шаг 35 [Р-152]: файл остатков продавца — инвентаризация внутреннего пула; право — на каталог (MANAGE_CATALOG) */
+  | 'STOCK_IMPORT';
 
 /**
  * Р-143 (шаг 31): виды заданий, которые НИЧЕГО НЕ МЕНЯЮТ. Им второй фактор не нужен, и создать их может любой участник; но
@@ -1019,12 +1021,21 @@ export interface WorldCounters {
 
 // --- онбординг [Р-149], канал без доступов [Р-150] --------------------------------------------------------------------
 
-export type OnboardingStep = 'TENANT' | 'CHANNEL' | 'COSTS' | 'BOUNDS' | 'STRATEGY' | 'ENABLE';
-export const ONBOARDING_STEPS: readonly OnboardingStep[] = ['TENANT', 'CHANNEL', 'COSTS', 'BOUNDS', 'STRATEGY', 'ENABLE'];
+export type OnboardingStep = 'TENANT' | 'CHANNEL' | 'STOCK_SOURCE' | 'STOCK_SYNC' | 'COSTS' | 'BOUNDS' | 'STRATEGY' | 'ENABLE';
+/** Р-152: два пути; репрайсинг — вторым шагом, когда остатки уже идут */
+export type OnboardingPath = 'STOCK' | 'STOCK_AND_PRICING';
+export const ONBOARDING_STOCK_STEPS: readonly OnboardingStep[] = ['TENANT', 'CHANNEL', 'STOCK_SOURCE', 'STOCK_SYNC'];
+export const ONBOARDING_PRICING_STEPS: readonly OnboardingStep[] = ['COSTS', 'BOUNDS', 'STRATEGY', 'ENABLE'];
+export const ONBOARDING_STEPS: readonly OnboardingStep[] = [...ONBOARDING_STOCK_STEPS, ...ONBOARDING_PRICING_STEPS];
+export function onboardingStepsOf(path: OnboardingPath | null): readonly OnboardingStep[] {
+  return path === 'STOCK' ? ONBOARDING_STOCK_STEPS : path === 'STOCK_AND_PRICING' ? ONBOARDING_STEPS : ['TENANT', 'CHANNEL'];
+}
 
 export interface OnboardingProgressRow {
   /** null — весь каталог; иначе — предложения, до которых путь сужен */
   scopeWriteScopeIds: string[] | null;
+  /** Р-152: выбранный путь; null — не выбран */
+  path: OnboardingPath | null;
   startedAt: string;
   updatedAt: string;
 }
@@ -1034,8 +1045,10 @@ export interface OnboardingProgressRow {
  * первый незавершённый шаг выведенного состояния, а хранимая галочка расходилась бы с данными.
  */
 export interface OnboardingProgressInput {
-  /** null — снять сужение */
-  scopeWriteScopeIds: string[] | null;
+  /** undefined — не менять; null — снять сужение */
+  scopeWriteScopeIds?: string[] | null;
+  /** undefined — не менять */
+  path?: OnboardingPath;
 }
 
 export interface OnboardingStepStatus {

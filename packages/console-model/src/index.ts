@@ -19,7 +19,8 @@ export { complianceView, discountCheckView, historyDepthView, PRICE_EVIDENCE_HEA
 export { columnName, costImportView, importTargets, PREVIEW_ROWS_SHOWN, SKIPPED_EXAMPLES, type CostImportView, type ImportPreviewRowView, type ImportSkippedGroupView } from './cost-import.ts';
 export { bulkJobsView, bulkJobView, canCancelBulkJob, CANCEL_ACTION, type BulkJobView, type BulkJobsView } from './jobs.ts';
 export { COST_IMPORT_REPORT_HEADER, costImportReportRows, csvOf, PRICE_FEED_CSV_HEADER, priceFeedFileName, priceFeedRowsOf } from './exports.ts';
-export { onboardingView, type OnboardingView, type OnboardingStepView, type ChannelAccountView, type EnableResultView } from './onboarding.ts';
+export { onboardingView, type OnboardingView, type OnboardingStepView, type ChannelAccountView, type EnableResultView, type OnboardingPathChoice } from './onboarding.ts';
+export { stockView, stockDivergencesView, stockTraps, type StockView, type StockRowView, type StockChannelCell, type StockTrap, type StockDivergencesView } from './stock.ts';
 export { pageInfo, clampOffset } from './page.ts';
 export { productPage } from './products.ts';
 /** Р-154: окно отчёта об отклонённых — семь суток; счётчики и строки — по вмешательствам окна, не по буферу */

@@ -1465,13 +1465,14 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
 
   async saveOnboardingProgress(_tenantId: string, input: OnboardingProgressInput, actor: AdminActor): Promise<'SAVED' | 'FORBIDDEN'> {
     if (!this.adminMember(actor)) return 'FORBIDDEN';
-    if (input.scopeWriteScopeIds !== null && input.scopeWriteScopeIds.length === 0) {
+    if (input.scopeWriteScopeIds !== undefined && input.scopeWriteScopeIds !== null && input.scopeWriteScopeIds.length === 0) {
       throw Object.assign(new Error('the onboarding set is narrowed to nothing (Р-131, Р-149)'), { code: '23514' });
     }
     const now = new Date().toISOString();
     const prev = this.onboarding;
     this.onboarding = {
-      scopeWriteScopeIds: input.scopeWriteScopeIds, startedAt: prev?.startedAt ?? now, updatedAt: now,
+      scopeWriteScopeIds: input.scopeWriteScopeIds === undefined ? (prev?.scopeWriteScopeIds ?? null) : input.scopeWriteScopeIds,
+      path: input.path ?? prev?.path ?? null, startedAt: prev?.startedAt ?? now, updatedAt: now,
     };
     return 'SAVED';
   }

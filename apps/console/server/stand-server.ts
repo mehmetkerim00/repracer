@@ -1,10 +1,12 @@
+import { createHash } from 'node:crypto';
+import { parseStockSheet } from '@repracer/stock-sync';
 import { createServer, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import {
   boundsDiffView, boundsView, bulkJobsView, bulkJobView, can, canCancelBulkJob, channelNotes, onboardingView, complianceView, fingerprint, costImportView, currentStrategies, listQuery, MAX_SCOPES, OFFER_CHOICES, pageOf, parseListQuery, type ListQuery, discountCheckView, dangerousReport, decisionListView, decisionTrace, describe, expandBoundsEdit, importTargets, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, scopeById, unitOf,
   parseStrategyDraft, planStop, priceFeed, productList, rejectedView, REPORT_PERIODS_DAYS, stopView, strategiesView,
   type Locale, type Messages, type StandWorld, type StopTarget, type Viewer,
-  productPage, clampOffset, feedPageQuery, REJECTED_WINDOW_DAYS,
+  productPage, clampOffset, feedPageQuery, REJECTED_WINDOW_DAYS, stockView, stockDivergencesView,
 } from '@repracer/console-model';
 import { buildPreview, readTable, suggestMapping, TABLE_ENCODINGS } from '@repracer/cost-import';
 import type { BulkJobInput, DiscountAnnouncementInput } from '@repracer/pricing-pipeline';
@@ -103,6 +105,8 @@ const isDay = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date
 export const EVIDENCE_MAX_DAYS = 550;
 /** Р-154: экран остановок показывает последние события аудита, а не весь журнал тенанта */
 const AUDIT_RECENT = 200;
+/** Inbound API: строк в одном вызове — не больше; склад шлёт партиями */
+const INBOUND_ROWS_MAX = 5000;
 /**
  * Шаг 30 [OQ-202]: предела строк у выгрузки больше НЕТ. Шаг 29 ввёл его (100 000), потому что 300 000 строк — это 28 МБ в одном
  * ответе экрана и десять секунд ожидания. Задание готовит файл в базе, и предел исчез вместе со своей причиной: ждать нечего,
@@ -167,6 +171,33 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       user: principal ? { subject: principal.subject, email: principal.email } : null, locale: l,
       simulator: identity.simulator ? STAND_ACCOUNTS.map((a) => ({ role: a.role, label: m.values[a.role] })) : null,
     });
+
+    /**
+     * Шаг 35 [Р-152]: Inbound API остатков — путь для склада продавца, а не для браузера. Свой ключ, не токен поставщика:
+     * `Authorization: Bearer <ключ>`; ключ находится по префиксу и отпечатку ДО контекста тенанта. Неверный ключ — 401 без
+     * подробностей. Устаревшее значение (asOf не новее известного) не применяется и называется в ответе.
+     */
+    if (parts[0] === 'inbound' && parts[1] === 'v1' && parts[2] === 'stock') {
+      if (req.method !== 'POST') return fail(405, 'METHOD', s.method);
+      const raw = req.authorization?.startsWith('Bearer ') ? req.authorization.slice(7).trim() : '';
+      const prefix = raw.split('.')[0] ?? '';
+      const resolved = /^rpk_[0-9a-f]{12}\.[0-9a-f]{48}$/.test(raw)
+        ? await (async () => { for (const w of worlds) { const r = await w.stock.resolveInboundKey(prefix, createHash('sha256').update(raw).digest('hex')); if (r) return { ...r, world: w }; } return null; })()
+        : null;
+      if (!resolved) return fail(401, 'UNAUTHORIZED', s.unauthenticated);
+      const rows = Array.isArray(body.rows) ? (body.rows as unknown[]) : null;
+      if (!rows || rows.length === 0 || rows.length > INBOUND_ROWS_MAX) return fail(400, 'BAD_ROWS', s.badRequest);
+      const parsed: Array<{ sku: string; quantity: number; asOf: string }> = [];
+      for (const r of rows) {
+        const x = r as Record<string, unknown>;
+        if (typeof x.sku !== 'string' || x.sku.trim() === '' || !Number.isSafeInteger(x.quantity) || (x.quantity as number) < 0
+          || typeof x.asOf !== 'string' || Number.isNaN(Date.parse(x.asOf))) return fail(400, 'BAD_ROWS', s.badRequest);
+        parsed.push({ sku: x.sku.trim(), quantity: x.quantity as number, asOf: new Date(x.asOf).toISOString() });
+      }
+      const outcome = await resolved.world.stock.inboundStock(resolved.world.tenantId, resolved.stockSourceId, parsed);
+      const propagated = outcome.productIds.length > 0 && resolved.world.stockPipeline ? await resolved.world.stockPipeline.propagate(resolved.world.tenantId, outcome.productIds) : { writes: 0, unchanged: 0 };
+      return ok({ applied: outcome.applied, stale: outcome.stale, unknownSkus: outcome.unknownSkus, writes: propagated.writes });
+    }
 
     if (parts[0] !== 'api') return fail(404, 'NOT_FOUND', s.notFound);
 
@@ -278,6 +309,15 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
 
     if (req.method === 'GET') {
       switch (screen) {
+        // Шаг 35 [Р-153]: остатки — страницей по товарам, сводка агрегатом, расхождения — отдельным списком
+        case 'stock': {
+          if (param === 'divergences') return ok(stockDivergencesView(world, await live.stock.stockDivergences(world.tenantId, 200), m));
+          if (param !== null) return fail(404, 'NOT_FOUND', s.notFound);
+          const query = parseListQuery(url.searchParams);
+          if (!query) return fail(400, 'BAD_PAGE', s.badRequest);
+          const [page, sources] = await Promise.all([live.stock.stockPage(world.tenantId, query), live.stock.stockSources(world.tenantId)]);
+          return ok(stockView(world, page, query, sources, m));
+        }
         case 'products': {
           const query = parseListQuery(url.searchParams);
           if (!query) return fail(400, 'BAD_PAGE', s.badRequest);
@@ -436,8 +476,64 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
      * движок, — оператор включает, хотя цен не правит. Первая редакция закрывала оба одним правом, и «своё право
      * включения» было недостижимо через консоль.
      */
+    /**
+     * Шаг 35 [Р-152, Р-153]: остатки. Источник, файл, включение — тот, кто ведёт каталог (MANAGE_CATALOG); выбор пути —
+     * тот, кто ведёт каталог или цены. Файл остатков — задание [Р-139]; включение — один запрос: единицы и записи
+     * создаются множественными операторами, а отправляет их диспетчер [Р-64].
+     */
+    if (screen === 'stock' && param !== null) {
+      if (!can(viewer.role, 'MANAGE_CATALOG')) return fail(403, 'FORBIDDEN', m.ui.stock.noRight);
+      const actor = { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) };
+      if (param === 'sources') {
+        const mode = body.mode === 'INBOUND_API' ? 'INBOUND_API' : body.mode === 'INTERNAL_POOL' ? 'INTERNAL_POOL' : null;
+        const name = typeof body.name === 'string' ? body.name.trim().slice(0, 200) : '';
+        if (!mode || name === '') return fail(400, 'BAD_SOURCE', s.badRequest);
+        const created = await live.stock.createStockSource(world.tenantId, { mode, name }, actor);
+        if (created.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
+        // Ключ уходит в ответ ОДИН раз и нигде не пишется — ни в журнал, ни в базу (там отпечаток)
+        return ok({ stockSourceId: created.stockSourceId, apiKey: created.apiKey });
+      }
+      if (param === 'import') {
+        if (typeof body.content !== 'string' || typeof body.fileName !== 'string' || typeof body.stockSourceId !== 'string') return fail(400, 'BAD_FILE', s.badRequest);
+        const sources = await live.stock.stockSources(world.tenantId);
+        const source = sources.find((x) => x.stockSourceId === body.stockSourceId);
+        if (!source || source.mode !== 'INTERNAL_POOL') return fail(400, 'BAD_SOURCE', s.badRequest);
+        let rows = 0;
+        try {
+          const parsed = parseStockSheet(readTable(Buffer.from(body.content, 'base64')).rows);
+          if ('code' in parsed) return fail(400, parsed.code, s.badRequest);
+          rows = parsed.rows.length;
+        } catch { return fail(400, 'BAD_FILE', s.badRequest); }
+        return createJob('STOCK_IMPORT', { fileName: body.fileName, content: body.content, stockSourceId: body.stockSourceId }, rows, m.ui.stock.importFile.created);
+      }
+      if (param === 'enable') {
+        const account = live.accounts.find((a) => a.channelAccountId === body.channelAccountId);
+        if (!account) return fail(400, 'BAD_ACCOUNT', s.badRequest);
+        const int = (v: unknown, fallback: number) => (v === undefined || v === null || v === '' ? fallback : Number.isSafeInteger(v) && (v as number) >= 0 ? (v as number) : null);
+        const bufferUnits = int(body.bufferUnits, 0); const minQuantityToList = int(body.minQuantityToList, 0);
+        const maxQuantity = body.maxQuantity === undefined || body.maxQuantity === null || body.maxQuantity === '' ? null : int(body.maxQuantity, 0);
+        if (bufferUnits === null || minQuantityToList === null || maxQuantity === null && body.maxQuantity !== undefined && body.maxQuantity !== null && body.maxQuantity !== '') return fail(400, 'BAD_ALLOCATION', s.badRequest);
+        if (maxQuantity !== null && maxQuantity < 1) return fail(400, 'BAD_ALLOCATION', s.badRequest);
+        const enabled = await live.stock.enableStockSync(world.tenantId, account.channelAccountId, { bufferUnits, maxQuantity, minQuantityToList, acknowledgeSideEffects: body.acknowledgeSideEffects === true }, actor);
+        if (enabled.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
+        if (enabled.status === 'NO_OFFERS') return fail(409, 'NO_OFFERS', m.ui.stock.enable.noOffers);
+        const propagated = live.stockPipeline ? await live.stockPipeline.propagate(world.tenantId, null) : await live.stock.recalculate(world.tenantId, null, world.now as never).then((r) => ({ writes: r.writes.length, unchanged: r.unchanged }));
+        return ok({ ...enabled, writes: propagated.writes, message: m.ui.stock.enable.done({ ...enabled, writes: propagated.writes }) });
+      }
+      return fail(404, 'NOT_FOUND', s.notFound);
+    }
+
     if (screen === 'onboarding' && param !== null) {
       const actor = { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) };
+      // Р-152: выбор пути — намерение продавца; его выбирает тот, кто ведёт остатки или цены
+      if (param === 'path') {
+        if (!can(viewer.role, 'MANAGE_CATALOG') && !can(viewer.role, 'MANAGE_PRICING')) return fail(403, 'FORBIDDEN', s.forbidden);
+        const path = body.path === 'STOCK' ? 'STOCK' : body.path === 'STOCK_AND_PRICING' ? 'STOCK_AND_PRICING' : null;
+        if (!path) return fail(400, 'BAD_PATH', s.badRequest);
+        const saved = await live.store.saveOnboardingProgress(world.tenantId, { path }, actor);
+        if (saved === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
+        return ok({ path });
+      }
       if (param === 'narrow') {
         if (!can(viewer.role, 'MANAGE_PRICING')) return fail(403, 'FORBIDDEN', m.ui.onboarding.noRight);
         // Сузить можно только до предложений с готовой себестоимостью — иного смысла у сужения нет [Р-131]; снять — тоже здесь.
@@ -945,7 +1041,8 @@ async function main(): Promise<void> {
      */
     if (process.env.REPRACER_DEMO === 'on') {
       const { demoWorld, DEMO_OFFERS, DEMO_COMPETITORS_PER_OFFER } = await import('@repracer/contract-tests/live');
-      const { PgPricingStore } = await import('@repracer/pricing-store-pg');
+      const { PgPricingStore, PgStockStore } = await import('@repracer/pricing-store-pg');
+      const { createStockPipeline } = await import('@repracer/stock-sync');
       const { runConfiguredWorker } = await import('./bulk-worker.ts');
       const demo = await demoWorld({
         tag: 3400, startIso: new Date().toISOString(), bare: false, appPool: pool, adminPool, provisioningPool: role('svc_provisioning', 1),
@@ -955,6 +1052,9 @@ async function main(): Promise<void> {
       });
       const seeded = demo.live.seeded;
       const store = new PgPricingStore(pool, { adminPool, bulkWorkerPool: role('svc_bulk_worker', 2) });
+      // Шаг 35: остатки демо — те же роли, что в работе; записи остатка отправляет диспетчер мира
+      const stock = new PgStockStore({ adminPool, stockPool: role('svc_stock', 2) });
+      const stockPipeline = createStockPipeline({ store: stock, now: () => demo.clock.iso() as never, dispatchScope: (t, ws) => demo.live.dispatchScope(t, ws) });
       const accounts = [{ channelAccountId: seeded.channelAccountId, channel: 'KAUFLAND', marketplaces: ['de'], haltRelease: 'SAMPLE' as const }];
       const nowIso = () => demo.clock.iso();
       const descriptor = {
@@ -964,7 +1064,7 @@ async function main(): Promise<void> {
       worlds.push({
         id: descriptor.id, title: descriptor.title, description: descriptor.description,
         tenantId: seeded.tenantId, accounts, identityTenantId: seeded.tenantId, membershipAlias: (id) => id, failures: [],
-        store: store as never, pipeline: demo.live.pipelineForDbIds() as never, clock: { iso: nowIso, nowMs: () => demo.clock.nowMs() } as never,
+        store: store as never, stock, stockPipeline, pipeline: demo.live.pipelineForDbIds() as never, clock: { iso: nowIso, nowMs: () => demo.clock.nowMs() } as never,
         callContext: (channelAccountId) => ({ tenantId: seeded.tenantId as never, channelAccountId: channelAccountId as never, correlationId: 'stand-demo', deadline: nowIso() }),
         view: async (viewer) => ({
           ...descriptor, now: nowIso(), viewer: { ...viewer }, state: await store.readConsoleState(seeded.tenantId, nowIso() as never),

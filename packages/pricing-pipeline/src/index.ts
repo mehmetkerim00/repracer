@@ -87,7 +87,8 @@ export type { ConsoleAuditRow } from './store.ts';
 export { comparedValue, DEFAULT_LOSS_GRACE_SECONDS, LOSS_GRACE_BASIS, reconcile, rotation, snapshotDigest, type HeldState, type ReconciliationOutcome } from './reconciliation.ts';
 export { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, READ_ONLY_JOB_KINDS } from './store.ts';
 // Шаг 34 [Р-149, Р-150]: онбординг и честное состояние канала
-export type { OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, OnboardingStep, ChannelAccountRow, ChannelAccessBlocker, ChannelAuthStatus } from './store.ts';
+export type { OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, OnboardingStep, OnboardingPath, ChannelAccountRow, ChannelAccessBlocker, ChannelAuthStatus } from './store.ts';
+export { ONBOARDING_STOCK_STEPS, ONBOARDING_PRICING_STEPS, onboardingStepsOf } from './store.ts';
 export { ONBOARDING_STEPS, CHANNEL_ACCESS_BLOCKERS } from './store.ts';
 // Шаг 35 [Р-154]: потоки консоли — страницами, окнами, агрегатами
 export type { DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, InterventionSlice, FeedStatusGroup, FeedPageQuery, FeedPageItem, FeedPage, WorldCounters } from './store.ts';

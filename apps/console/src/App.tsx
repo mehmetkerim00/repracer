@@ -7,6 +7,7 @@ import { BoundsScreen } from './screens/Bounds.tsx';
 import { ComplianceScreen } from './screens/Compliance.tsx';
 import { JobHistory } from './screens/Jobs.tsx';
 import { OnboardingScreen } from './screens/Onboarding.tsx';
+import { StockScreen } from './screens/Stock.tsx';
 import { DangerousScreen } from './screens/Dangerous.tsx';
 import { FeedScreen } from './screens/Feed.tsx';
 import { StrategiesScreen } from './screens/Strategies.tsx';
@@ -34,7 +35,7 @@ export function parseHash(hash: string): Route {
  * (находка 8 ревью шага 31).
  */
 /** Р-149 (шаг 34): путь онбординга — первый экран: с него продавец начинает и к нему возвращается, пока путь не пройден */
-const SCREENS = ['onboarding', 'products', 'decisions', 'strategies', 'feed', 'rejected', 'dangerous', 'bounds', 'cost-import', 'compliance', 'jobs', 'stop'] as const;
+const SCREENS = ['onboarding', 'stock', 'products', 'decisions', 'strategies', 'feed', 'rejected', 'dangerous', 'bounds', 'cost-import', 'compliance', 'jobs', 'stop'] as const;
 
 /** Вход [Р-78]: у поставщика identity; на стенде — имитатор с синтетическими пользователями. Паролей у нас нет */
 export function LoginView({ simulator, error, busy, onSignIn }: {
@@ -105,6 +106,7 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
         ))}
       </nav>
       {route.screen === 'onboarding' ? <OnboardingScreen worldId={world.id} />
+        : route.screen === 'stock' ? <StockScreen worldId={world.id} />
         : route.screen === 'products' ? <ProductsScreen worldId={world.id} />
         : route.screen === 'decisions' ? (route.param ? <TraceScreen worldId={world.id} decisionId={route.param} /> : <DecisionsScreen worldId={world.id} />)
           : route.screen === 'rejected' ? <RejectedScreen worldId={world.id} />

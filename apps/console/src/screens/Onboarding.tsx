@@ -25,12 +25,17 @@ export function OnboardingScreen({ worldId }: { worldId: string }) {
     void requestJson<{ jobId: string; job?: BulkJobView }>(worldPath(worldId, 'onboarding', 'enable'), { method: 'POST', body: {}, locale: m.locale })
       .then((r) => { setError(null); setResult(null); if (r.job) setJob(r.job); })
       .catch((e: unknown) => setError(errorText(e, m)));
+  // Р-152: выбор пути — намерение продавца; хранится в базе, путь возобновляется с места остановки
+  const choosePath = (path: 'STOCK' | 'STOCK_AND_PRICING') =>
+    void requestJson<unknown>(worldPath(worldId, 'onboarding', 'path'), { method: 'POST', body: { path }, locale: m.locale })
+      .then(() => { setError(null); retry(); })
+      .catch((e: unknown) => setError(errorText(e, m)));
 
   return (
     <Load resource={view} retry={retry}>
       {(v) => (
         <>
-          <OnboardingScreenView view={v} worldId={worldId} busy={job !== null} onNarrow={narrow} onEnable={enable} />
+          <OnboardingScreenView view={v} worldId={worldId} busy={job !== null} onNarrow={narrow} onEnable={enable} onChoosePath={choosePath} />
           {job ? <JobProgress worldId={worldId} jobId={job.jobId} onFinished={(done) => {
             setJob(null);
             setResult((done.result?.view ?? null) as EnableResultView | null);
@@ -45,8 +50,8 @@ export function OnboardingScreen({ worldId }: { worldId: string }) {
 }
 
 /** Экран без запросов: то, что отрисовывает тест из ответа сервера, — как у остальных экранов консоли */
-export function OnboardingScreenView({ view: v, worldId, busy, onNarrow, onEnable }: {
-  view: OnboardingView; worldId: string; busy: boolean; onNarrow: (widen: boolean) => void; onEnable: () => void;
+export function OnboardingScreenView({ view: v, worldId, busy, onNarrow, onEnable, onChoosePath }: {
+  view: OnboardingView; worldId: string; busy: boolean; onNarrow: (widen: boolean) => void; onEnable: () => void; onChoosePath?: (path: 'STOCK' | 'STOCK_AND_PRICING') => void;
 }) {
   const m = useMessages();
   const t = m.ui.onboarding;
@@ -56,6 +61,18 @@ export function OnboardingScreenView({ view: v, worldId, busy, onNarrow, onEnabl
       {v.demo ? <p className="notice"><Badge tone="warn">{m.ui.app.demoBadge}</Badge> {m.ui.app.demoBanner}</p> : null}
       <p className="muted">{v.intro}</p>
       <p className="notice"><strong>{v.resumeText}</strong></p>
+      {v.pathText ? <p className="small muted">{v.pathText}{v.canAddPricing && onChoosePath ? <> <button type="button" onClick={() => onChoosePath('STOCK_AND_PRICING')}>{t.paths.addPricing}</button></> : null}</p> : null}
+      {v.choices.length > 0 ? (
+        <div className="choices">
+          {v.choices.map((c) => (
+            <div key={c.path} className="card">
+              <h3>{c.title}</h3>
+              <p className="small">{c.detail}</p>
+              {onChoosePath ? <button type="button" onClick={() => onChoosePath(c.path)}>{t.paths.choose}</button> : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
       {!v.canLead ? <p className="muted">{t.noRight}</p> : null}
       {!v.canEnable ? <p className="muted">{t.noRightEnable}</p> : null}
       <ol className="steps">

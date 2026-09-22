@@ -7,7 +7,7 @@ import { STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract
 import { demoWorld, DEMO_OFFERS, type DemoWorld } from '@repracer/contract-tests/live';
 import { createAuthenticator, MemoryIdentityDirectory, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
-import { PgPricingStore, type PgPool } from '@repracer/pricing-store-pg';
+import { PgPricingStore, PgStockStore, type PgPool } from '@repracer/pricing-store-pg';
 import { createIsolatedDatabase, type IsolatedDatabase } from '../../../packages/pricing-store-pg/test/isolated-db.ts';
 import { createStandApi, createStandServer } from '../server/stand-server.ts';
 
@@ -61,12 +61,13 @@ before(async () => {
   });
   const seeded = demo.live.seeded;
   const store = new PgPricingStore(appPool, { adminPool, bulkWorkerPool: db.pool('svc_bulk_worker', 2) });
+  const stock = new PgStockStore({ adminPool, stockPool: db.pool('svc_stock', 2) });
   const nowIso = () => demo.clock.iso();
   const accounts = [{ channelAccountId: seeded.channelAccountId, channel: 'KAUFLAND', marketplaces: ['de'], haltRelease: 'SAMPLE' as const }];
   const live: LiveWorld = {
     id: DEMO_WORLD, title: 'Демо: Kaufland на симуляторе', description: `${DEMO_OFFERS} предложений`, tenantId: seeded.tenantId,
     accounts, identityTenantId: seeded.tenantId, membershipAlias: (id) => id, failures: [],
-    store: store as never, pipeline: demo.live.pipelineForDbIds() as never, clock: { iso: nowIso, nowMs: () => demo.clock.nowMs() } as never,
+    store: store as never, stock, pipeline: demo.live.pipelineForDbIds() as never, clock: { iso: nowIso, nowMs: () => demo.clock.nowMs() } as never,
     callContext: (channelAccountId) => ({ tenantId: seeded.tenantId as never, channelAccountId: channelAccountId as never, correlationId: 'demo-day', deadline: nowIso() }),
     view: async (viewer) => ({
       id: DEMO_WORLD, title: 'Демо: Kaufland на симуляторе', description: `${DEMO_OFFERS} предложений`, tenantId: seeded.tenantId, now: nowIso(),
