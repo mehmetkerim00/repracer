@@ -29,6 +29,9 @@ services:
       REPRACER_CONSOLE_OIDC_ISSUER: ${REPRACER_CONSOLE_OIDC_ISSUER:-}
       REPRACER_CONSOLE_OIDC_AUDIENCE: ${REPRACER_CONSOLE_OIDC_AUDIENCE:-}
       REPRACER_CONSOLE_OIDC_JWKS_URL: ${REPRACER_CONSOLE_OIDC_JWKS_URL:-}
+      # Р-127: отметка во внешнем сервисе. Адрес содержит идентификатор проверки — тоже секрет, поэтому файлом
+      REPRACER_CONSOLE_HEARTBEAT: ${REPRACER_CONSOLE_HEARTBEAT:-}
+      REPRACER_CONSOLE_HEARTBEAT_URL_FILE: /run/secrets/console_heartbeat_url
       # Секреты — файлами, не значениями: строка подключения несёт пароль роли [шаг 28, E]. У каждой роли свой файл [Р-90]
       REPRACER_CONSOLE_APP_PG_URL_FILE: /run/secrets/console_app_pg_url
       REPRACER_CONSOLE_ADMIN_PG_URL_FILE: /run/secrets/console_admin_pg_url

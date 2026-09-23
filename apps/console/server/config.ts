@@ -32,6 +32,11 @@ export interface ConsoleConfig {
   pgUrls: Readonly<Record<ConsoleRole, string>>;
   /** Вход настоящих продавцов [Р-78]: поставщик identity. Без него работает только гость демо */
   oidc: { issuer: string; audience: string; jwksUrl: string } | null;
+  /**
+   * Р-127: отметка во внешнем сервисе. Консоль — такой же разворачиваемый процесс, как планировщик: остановившуюся
+   * консоль публичного демо не заметит НИКТО, кроме посетителя, который просто уйдёт. Выключение — только явное.
+   */
+  heartbeatUrl: string | null;
 }
 
 /**
@@ -45,6 +50,10 @@ export type ConsoleRole = (typeof CONSOLE_ROLES)[number];
 
 const OIDC_VARS = ['REPRACER_CONSOLE_OIDC_ISSUER', 'REPRACER_CONSOLE_OIDC_AUDIENCE', 'REPRACER_CONSOLE_OIDC_JWKS_URL'] as const;
 
+// Секрет только из файла, кроме режима стенда [шаг 28, E] — тот же разбор, что у остальных процессов
+const secret = (env: Env, name: string, read: (path: string) => string) => secretFromEnv(env, name, read);
+const required = requiredValue;
+
 export function loadConsoleConfig(env: Env = process.env, read: (path: string) => string = (p) => readFileSync(p, 'utf8')): ConsoleConfig {
   const locale = env.REPRACER_CONSOLE_LOCALE ?? 'de';
   if (locale !== 'de' && locale !== 'en') throw new ConfigError('CONFIG_INVALID: REPRACER_CONSOLE_LOCALE must be de or en');
@@ -52,7 +61,7 @@ export function loadConsoleConfig(env: Env = process.env, read: (path: string) =
   const pgUrls = {} as Record<ConsoleRole, string>;
   for (const role of CONSOLE_ROLES) {
     const name = `REPRACER_CONSOLE_${role.toUpperCase()}_PG_URL`;
-    pgUrls[role] = requiredValue(secretFromEnv(env, name, read), name);
+    pgUrls[role] = required(secret(env, name, read), name);
   }
 
   const present = OIDC_VARS.filter((v) => env[v]);
@@ -76,7 +85,12 @@ export function loadConsoleConfig(env: Env = process.env, read: (path: string) =
     throw new ConfigError('CONFIG_MISSING: REPRACER_CONSOLE_PUBLIC_DEMO=on или вход у поставщика (REPRACER_CONSOLE_OIDC_*): консоль без единого пути входа не запускается');
   }
 
+  const heartbeatOff = env.REPRACER_CONSOLE_HEARTBEAT === 'off';
+  const heartbeatUrl = heartbeatOff ? null : required(secret(env, 'REPRACER_CONSOLE_HEARTBEAT_URL', read), 'REPRACER_CONSOLE_HEARTBEAT_URL (or REPRACER_CONSOLE_HEARTBEAT=off)');
+  if (heartbeatUrl && !heartbeatUrl.startsWith('https://')) throw new ConfigError('CONFIG_INVALID: REPRACER_CONSOLE_HEARTBEAT_URL must be https');
+
   return {
+    heartbeatUrl,
     // 0 — порт выдаёт система: так живой прогон поднимает ТОТ ЖЕ процесс, не занимая заранее известный порт
     port: intFromEnv(env, 'REPRACER_CONSOLE_PORT', 4319, 0, 65_535),
     metricsPort: intFromEnv(env, 'REPRACER_CONSOLE_METRICS_PORT', 9467, 0, 65_535),

@@ -54,6 +54,7 @@ export const MEASURED_FILES = new Set([
   'apps/console/test/onboarding-live.pg.test.ts',
   'apps/console/test/stock-only-live.pg.test.ts',
   'apps/console/test/demo-day-live.pg.test.ts',
+  'apps/console/test/guest-demo-live.pg.test.ts',
   'tests/contract/src/cost-import-live.pg.test.ts',
 ]);
 

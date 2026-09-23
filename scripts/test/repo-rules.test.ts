@@ -223,7 +223,14 @@ test('Р-127: каждый разворачиваемый процесс отм�
      * ИМЕНОВАННОЕ, с причиной, а не «в compose есть слово image», которое истинно всегда.
      */
     const ours = [...compose.matchAll(/(?:^|[\s"'[])((?:services|apps|packages|scripts|tests)\/[\w./-]+\.(?:ts|mjs|js|sh))/gm)].map((x) => x[1]!);
-    const entryLike = ours.filter((f) => /\/(?:main|worker|server)\.[\w]+$/.test(f) || /src\/main\.ts$/.test(f));
+    /**
+     * Точка входа — то, что развёртывание ЗАПУСКАЕТ (`command:` или `entrypoint:`), а не файл с подходящим именем
+     * (шаг 37): консоль запускается файлом `apps/console/server/console-service.ts`, и правило по имени его не видело
+     * бы — то есть новый разворачиваемый процесс прошёл бы мимо требования отмечаться.
+     */
+    const launched = new Set([...compose.matchAll(/^\s*(?:command|entrypoint):.*$/gm)]
+      .flatMap((line) => [...line[0].matchAll(/((?:services|apps|packages|scripts|tests)\/[\w./-]+\.(?:ts|mjs|js|sh))/g)].map((x) => x[1]!)));
+    const entryLike = ours.filter((f) => launched.has(f) && !/\.sh$/.test(f));
     if (entryLike.length === 0) {
       /**
        * Шаг 36: `deploy/production` — обратный прокси и суточная копия базы, оба чужими образами. Наш код там есть
@@ -235,7 +242,9 @@ test('Р-127: каждый разворачиваемый процесс отм�
       continue;
     }
     for (const main of entryLike) {
-      assert.match(main, /^services\/[\w-]+\/src\/main\.ts$/, `развёртывание ${name} запускает наш код точкой входа процесса: ${main}`);
+      // Процессы бэкенда живут в `services/<имя>/src/main.ts`, консоль — в своём приложении: оба варианта названы явно
+      assert.match(main, /^(?:services\/[\w-]+\/src\/main\.ts|apps\/[\w-]+\/server\/[\w-]+\.ts)$/,
+        `развёртывание ${name} запускает наш код точкой входа процесса: ${main}`);
       entryPoints.push({ deployment: name, main });
     }
   }
@@ -243,9 +252,10 @@ test('Р-127: каждый разворачиваемый процесс отм�
 
   const silent: string[] = [];
   for (const { deployment, main } of entryPoints) {
-    const dir = main.slice(0, main.lastIndexOf('/src/'));
+    // Настройки процесса лежат рядом с его точкой входа: `services/<имя>/src/config.ts` или `apps/<имя>/server/config.ts`
+    const dir = main.slice(0, main.lastIndexOf('/'));
     const source = readFileSync(new URL(main, root), 'utf8');
-    const configPath = `${dir}/src/config.ts`;
+    const configPath = `${dir}/config.ts`;
     const config = existsSync(new URL(configPath, root)) ? readFileSync(new URL(configPath, root), 'utf8') : '';
     // Процесс обязан СТАВИТЬ отметку и обязан уметь объяснить её отсутствие: выключение — только явное
     const beats = /createHeartbeat\s*\(/.test(source) && /heartbeat\.beat\s*\(/.test(source);
@@ -254,7 +264,7 @@ test('Р-127: каждый разворачиваемый процесс отм�
       silent.push(`${deployment} (${main}): отметка ${beats ? 'есть' : 'НЕ СТАВИТСЯ'}, явное выключение ${optOutIsExplicit ? 'есть' : 'ОТСУТСТВУЕТ'}`);
     }
     // Отметка у всех одна и та же: вторая реализация разойдётся с общей [Р-145]
-    assert.ok(!existsSync(new URL(`${dir}/src/heartbeat.ts`, root)), `${deployment}: своя реализация отметки`);
+    assert.ok(!existsSync(new URL(`${dir}/heartbeat.ts`, root)), `${deployment}: своя реализация отметки`);
   }
   assert.deepEqual(silent, [], 'разворачиваемый процесс без внешней отметки: его остановку никто не заметит [Р-127]');
 });

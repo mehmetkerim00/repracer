@@ -25,6 +25,10 @@ url svc_exporter exporter_pg_url
 url svc_dispatcher dispatcher_pg_url
 url svc_relay relay_pg_url
 url svc_inbound inbound_pg_url
+# Шаг 37 [Р-159]: у консоли — по файлу на роль подключения (apps/console/server/config.ts, CONSOLE_ROLES)
+for role in app admin authenticator onboarding provisioning dispatcher stock scheduler exporter fx_loader bulk_worker; do
+  url "svc_${role}" "console_${role}_pg_url"
+done
 printf 'ci-synthetic-ingest' > "$SECRETS/ch_ingest_password"
 printf 'ci-synthetic-verifier' > "$SECRETS/ch_verifier_password"
 # Очередь и ключи AWS — синтетические: живой очереди нет (OQ-167), проверяется старт процесса, а не работа с очередью
@@ -79,6 +83,40 @@ for stack in "${stacks[@]}"; do
   fi
 done
 
+# --------------------------------------------------------------------------- Р-159: профиль production целиком
+# Поднимается ВЕСЬ профиль (прокси + консоль), и прогон ходит по нему как браузер: через прокси, без заголовков, которых
+# не послала бы страница. До шага 37 прокси отвечал 503 — консоли как процесса не было (OQ-221)
+# Интерфейс собирается ДО подъёма: контейнер видит репозиторий только на чтение и собрать себя не может [Р-159]
+if [ ! -f apps/console/dist/index.html ]; then
+  echo "== сборка интерфейса (apps/console/dist)"
+  npm run build -w apps/console
+fi
+echo "== production (прокси + консоль)"
+PROD=(-f deploy/production/compose.yaml -f deploy/ci/production.override.yaml)
+prod_env=("REPRACER_SECRETS_DIR=$SECRETS" "REPRACER_BACKUP_DIR=$SECRETS" "REPRACER_DOMAIN=localhost" "REPRACER_ACME_EMAIL=ci@example.invalid")
+env "${prod_env[@]}" docker compose "${PROD[@]}" up -d
+prod_ok=0
+# Демо-тенант заводится при старте консоли: 200 предложений с конкурентами — это минуты, а не секунды
+for _ in $(seq 1 "${CONSOLE_WAIT_SECONDS:-420}"); do
+  if curl -sf "http://127.0.0.1:9467/healthz" > /dev/null; then prod_ok=1; break; fi
+  sleep 1
+done
+if [ "$prod_ok" = 1 ]; then
+  echo "   console: /healthz ответил 200"
+  if node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/console-guest-walk.mjs http://127.0.0.1:8080; then
+    echo "   production: путь гостя пройден через прокси"
+  else
+    echo "   production: путь гостя НЕ пройден"
+    env "${prod_env[@]}" docker compose "${PROD[@]}" logs --tail 120
+    failed=1
+  fi
+else
+  echo "   console: /healthz не ответил за ${CONSOLE_WAIT_SECONDS:-420} с"
+  env "${prod_env[@]}" docker compose "${PROD[@]}" logs --tail 120
+  failed=1
+fi
+env "${prod_env[@]}" docker compose "${PROD[@]}" down -v --remove-orphans > /dev/null 2>&1 || true
+
 for stack in "${started[@]}"; do
   IFS='|' read -r name compose override extra <<< "$stack"
   # shellcheck disable=SC2086
@@ -89,4 +127,4 @@ if [ "$failed" = 1 ]; then
   echo "DEPLOY SMOKE RED: не все процессы развёртывания поднялись"
   exit 1
 fi
-echo "DEPLOY SMOKE: все три процесса поднялись и ответили на /healthz"
+echo "DEPLOY SMOKE: три процесса и профиль production поднялись; гость прошёл путь через прокси"

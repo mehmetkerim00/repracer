@@ -1,0 +1,13 @@
+# Надстройка CI к профилю production: тот же прокси, но БЕЗ TLS. Сертификат Let's Encrypt требует настоящего домена, а
+# проверяется здесь другое — что прокси действительно отдаёт консоль, а не 503 [Р-159]. Сам Caddyfile развёртывания
+# (deploy/production/Caddyfile) этим файлом не подменяется в работе: он монтируется только надстройкой CI.
+:80 {
+	encode zstd gzip
+	log {
+		output stdout
+		format json
+	}
+	reverse_proxy console:4319 {
+		header_up X-Forwarded-Proto {scheme}
+	}
+}

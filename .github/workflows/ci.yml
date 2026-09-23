@@ -162,7 +162,8 @@ jobs:
       - name: 'All tests, no skips (Р-137: полная область — с брокером и ClickHouse)'
         run: node scripts/test-all.mjs --scope=full
       # Шаг 28, D: развёртывания поднимаются по-настоящему — три процесса стартуют и отвечают на /healthz (deploy/ci/README.md)
-      - name: Deployments start (шаг 28, D)
+      # Шаг 37 [Р-159]: сюда добавился профиль production целиком — прокси и КОНСОЛЬ, и путь гостя по нему как браузер
+      - name: Deployments start, and the guest walks the production profile (шаг 28 D, шаг 37 A)
         run: PG_HOST=host.docker.internal scripts/deploy-smoke.sh
 
   # Шаг 35 [Р-154]: демо-стенд живёт виртуальные СУТКИ, затем все экраны обходятся как браузер в пределе 10 с / 8 МБ.

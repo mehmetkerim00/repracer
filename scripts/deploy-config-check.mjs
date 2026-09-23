@@ -12,6 +12,9 @@ const stacks = [
     { REPRACER_KAFKA_BROKERS: 'host.docker.internal:19092' }],
   ['receiver', 'deploy/notification-receiver/compose.yaml', 'deploy/ci/receiver.override.yaml', 'receiver', '../services/notification-receiver/src/config.ts', 'loadReceiverConfig',
     { REPRACER_AMAZON_REGION: 'EU', REPRACER_AMAZON_APPLICATION_ID: 'amzn1.sellerapps.app.00000000-0000-0000-0000-000000000000' }],
+  // Шаг 37 [Р-159]: консоль — такое же развёртывание, и её конфигурация проверяется тем же способом и до подъёма
+  ['console', 'deploy/production/compose.yaml', 'deploy/ci/production.override.yaml', 'console', '../apps/console/server/config.ts', 'loadConsoleConfig',
+    { REPRACER_DOMAIN: 'localhost', REPRACER_ACME_EMAIL: 'ci@example.invalid', REPRACER_BACKUP_DIR: '/tmp/repracer-backups' }],
 ];
 let failed = false;
 for (const [name, compose, override, service, mod, fn, extra] of stacks) {

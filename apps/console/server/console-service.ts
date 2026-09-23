@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { ProcessHealth, serveHealth, type Env } from '@repracer/service-runtime';
+import { createHeartbeat, ProcessHealth, serveHealth, type Env } from '@repracer/service-runtime';
 import { createAuthenticator, remoteJwks, staticJwks, type Authenticator, type Principal } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
 import { createPool, type PgPool } from '@repracer/pricing-store-pg';
@@ -153,12 +153,31 @@ export async function startConsole(env: Env = process.env): Promise<RunningConso
   const alive = setInterval(() => health.alive(), 30_000);
   alive.unref();
 
+  /**
+   * Р-127: остановившуюся консоль не заметит никто — посетитель просто уйдёт, а продавец решит, что «опять упало».
+   * Поэтому процесс отмечается во внешнем сервисе, как планировщик, диспетчер и приёмник.
+   */
+  const heartbeat = config.heartbeatUrl ? createHeartbeat({ url: config.heartbeatUrl }) : null;
+  const beat = async (): Promise<void> => {
+    if (!heartbeat) return;
+    try {
+      await heartbeat.beat(health.healthy(120_000));
+    } catch {
+      // Сорванная отметка — не повод ронять консоль: внешний сервис заметит её отсутствие сам
+      health.count('heartbeat_failed');
+    }
+  };
+  const heartbeatTimer = setInterval(() => { void beat(); }, 60_000);
+  heartbeatTimer.unref();
+  void beat();
+
   return {
     port: (server.address() as { port: number }).port,
     metricsPort: healthServer.port,
     demoTenantId: state.demo?.tenantId ?? null,
     async close() {
       clearInterval(alive);
+      clearInterval(heartbeatTimer);
       state.demo?.stop();
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await healthServer.close();
