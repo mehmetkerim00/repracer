@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createHeartbeat, ProcessHealth, serveHealth, type Env } from '@repracer/service-runtime';
 import { createAuthenticator, remoteJwks, staticJwks, type Authenticator, type Principal } from '@repracer/identity';
-import { createTestIssuer } from '@repracer/identity/test-issuer';
+import { createLocalIssuer } from '@repracer/identity/test-issuer';
 import { createPool, type PgPool } from '@repracer/pricing-store-pg';
 import { PgIdentityDirectory } from '@repracer/identity/pg';
 import { pgStandJoinMember, pgStandUsers, STAND_EMAILS } from '@repracer/contract-tests/stand';
@@ -27,9 +27,12 @@ import { startDemoWorld, type RunningDemoWorld } from './demo-world.ts';
  * Издатель гостевых токенов. Это НЕ поставщик identity [Р-78]: у гостя нет учётной записи, и заводить её у поставщика
  * ради «посмотреть демо» значит просить человека зарегистрироваться, чтобы посмотреть демо без регистрации.
  *
- * Ключ живёт в памяти процесса: перезапуск консоли обнуляет гостевые сессии — и это правильно, гостю нечего терять.
- * Адрес обязан быть https: этого требует проверка значения у привязки входа (0048), и ею же он отличается от
- * настоящего поставщика.
+ * Ключ приходит файлом секретов и одинаков у всех реплик; перезапуск сессии не рвёт. Временный ключ в памяти
+ * разрешён только явно и означает «экземпляр один».
+ *
+ * Адрес издателя обязан быть https — этого требует проверка значения у привязки входа (0048). От настоящего поставщика
+ * его отличает НЕ схема (он тоже https), а то, что эта строка закреплена в базе функцией `security.guest_issuer()`:
+ * гостевое членство с чужим издателем база не создаёт.
  */
 export const GUEST_ISSUER = 'https://guest.repracer.invalid';
 const GUEST_AUDIENCE = 'repracer-console';
@@ -103,7 +106,14 @@ export async function startConsole(env: Env = process.env): Promise<RunningConso
   const pools = poolsFor(config);
   const directory = new PgIdentityDirectory(pools.authenticator as never);
 
-  const guestIssuer = createTestIssuer({ issuer: GUEST_ISSUER, audience: GUEST_AUDIENCE });
+  /**
+   * Ключ гостевого издателя приходит ИЗВНЕ (шаг 38): пока он рождался в памяти, две реплики за прокси подписывали
+   * разными ключами, и гость получал случайные 401. Временный ключ остаётся, но только по явному требованию.
+   */
+  const guestIssuer = createLocalIssuer({ issuer: GUEST_ISSUER, audience: GUEST_AUDIENCE, ...(config.guestKeyPem ? { privateKeyPem: config.guestKeyPem } : {}) });
+  if (config.publicDemo && !config.guestKeyPem) {
+    console.log(JSON.stringify({ level: 'WARN', code: 'GUEST_KEY_EPHEMERAL', message: 'ключ гостевого издателя временный: экземпляр консоли должен быть ОДИН, иначе гость получит 401 от соседней реплики' }));
+  }
   const guestAuth = createAuthenticator({ issuer: GUEST_ISSUER, audience: GUEST_AUDIENCE, jwks: staticJwks(guestIssuer.jwks), directory });
   const sellerAuth = config.oidc
     ? createAuthenticator({ issuer: config.oidc.issuer, audience: config.oidc.audience, jwks: remoteJwks(config.oidc.jwksUrl), directory })

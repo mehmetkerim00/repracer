@@ -19,6 +19,6 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec src/identity.test.ts src/jwks.test.ts test/identity.pg.test.ts"
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec src/identity.test.ts src/jwks.test.ts test/local-issuer.test.ts test/identity.pg.test.ts"
   }
 }
