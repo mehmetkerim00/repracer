@@ -29,8 +29,11 @@ services:
       REPRACER_CONSOLE_OIDC_ISSUER: ${REPRACER_CONSOLE_OIDC_ISSUER:-}
       REPRACER_CONSOLE_OIDC_AUDIENCE: ${REPRACER_CONSOLE_OIDC_AUDIENCE:-}
       REPRACER_CONSOLE_OIDC_JWKS_URL: ${REPRACER_CONSOLE_OIDC_JWKS_URL:-}
-      # Р-127: отметка во внешнем сервисе. Адрес содержит идентификатор проверки — тоже секрет, поэтому файлом
-      REPRACER_CONSOLE_HEARTBEAT: ${REPRACER_CONSOLE_HEARTBEAT:-}
+      # Р-127: отметка во внешнем сервисе. Адрес содержит идентификатор проверки — тоже секрет, поэтому файлом.
+      # Умолчание — `off` (находка 2 ревью шага 37): аккаунта внешнего сервиса у проекта нет (OQ-188), файла секрета
+      # взять неоткуда, и с пустым значением процесс НЕ СТАРТОВАЛ БЫ — тот самый дефект шага 28 в третьей форме.
+      # Появился аккаунт — `REPRACER_CONSOLE_HEARTBEAT=` (пусто) и файл `console_heartbeat_url` в каталоге секретов
+      REPRACER_CONSOLE_HEARTBEAT: ${REPRACER_CONSOLE_HEARTBEAT:-off}
       REPRACER_CONSOLE_HEARTBEAT_URL_FILE: /run/secrets/console_heartbeat_url
       # Секреты — файлами, не значениями: строка подключения несёт пароль роли [шаг 28, E]. У каждой роли свой файл [Р-90]
       REPRACER_CONSOLE_APP_PG_URL_FILE: /run/secrets/console_app_pg_url

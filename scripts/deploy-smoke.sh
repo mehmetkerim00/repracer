@@ -29,6 +29,14 @@ url svc_inbound inbound_pg_url
 for role in app admin authenticator onboarding provisioning dispatcher stock scheduler exporter fx_loader bulk_worker; do
   url "svc_${role}" "console_${role}_pg_url"
 done
+# Роль доставки алертов и ключ почты: их называет compose планировщика безусловно, и без файлов плоский профиль
+# (без надстройки CI) не разбирается — находка 2 ревью шага 37
+url svc_alert_delivery alert_delivery_pg_url
+printf 'syn-mail-key' > "$SECRETS/mail_api_key"
+# Адрес внешней отметки [Р-127]: синтетический, аккаунта сервиса у проекта нет (OQ-188). Нужен, чтобы РАЗБИРАЛАСЬ
+# конфигурация плоского профиля; отметки при этом никто не шлёт — процессы CI поднимаются с выключателем
+printf 'https://hc-ping.example.invalid/00000000-0000-4000-8000-000000000000' > "$SECRETS/heartbeat_url"
+printf 'https://hc-ping.example.invalid/00000000-0000-4000-8000-000000000001' > "$SECRETS/console_heartbeat_url"
 printf 'ci-synthetic-ingest' > "$SECRETS/ch_ingest_password"
 printf 'ci-synthetic-verifier' > "$SECRETS/ch_verifier_password"
 # Очередь и ключи AWS — синтетические: живой очереди нет (OQ-167), проверяется старт процесса, а не работа с очередью

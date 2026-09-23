@@ -33,6 +33,8 @@ export interface RunningDemoWorld {
 export interface DemoWorldOptions {
   pools: DemoWorldPools;
   pgUrl: string;
+  /** Строки подключения ролей исполнителя заданий: без них он выводил бы их подстановкой (находка 1 ревью шага 37) */
+  pgUrlsByRole?: Readonly<Record<'admin' | 'bulk_worker' | 'stock', string>>;
   /** Номер мира: у каждого посева свой тенант, поэтому пересев — это новый номер, а не правка старого */
   tag: number;
   memberUsers: Readonly<Record<string, string>>;
@@ -88,7 +90,10 @@ export async function startDemoWorld(options: DemoWorldOptions): Promise<Running
    */
   let stopped = false;
   let stopWorker = false;
-  const worker = runConfiguredWorker({ pgUrl: options.pgUrl, idleMs: 500, worlds: [{ descriptor, now: 'WALL_CLOCK' }] }, () => stopWorker)
+  const worker = runConfiguredWorker({
+    pgUrl: options.pgUrl, idleMs: 500, worlds: [{ descriptor, now: 'WALL_CLOCK' }],
+    ...(options.pgUrlsByRole ? { pgUrlsByRole: options.pgUrlsByRole } : {}),
+  }, () => stopWorker)
     .catch((error: unknown) => { if (!stopped) log(`demo bulk worker stopped: ${error instanceof Error ? error.message : String(error)}`); });
   // Время демо идёт, пока жив процесс. Конец прогона — тоже событие: молча остановившееся время выглядит как поломка цен
   const clockRun = demo.advance(options.hours ?? 24 * 365)

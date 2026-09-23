@@ -82,10 +82,19 @@ const stop = await walk('stop (остановить цены)', 'POST', `/api/wo
 check(stop.status === 403, `остановка цен гостю запрещена: ${stop.status}`);
 const bounds = await walk('bounds/plan (экран различий границ)', 'POST', `/api/worlds/${world}/bounds/plan`, { token, body: { offers: { all: true }, minPriceMinor: 100 } });
 check(bounds.status === 403, `правка границ гостю запрещена: ${bounds.status}`);
-const evidence = await walk('compliance/evidence (выгрузка доказательства)', 'POST', `/api/worlds/${world}/compliance/evidence`, { token, body: { from: '2026-01-01', to: '2026-01-31' } });
-check(evidence.status >= 400, `задание гостю запрещено: ${evidence.status}`);
+// Все три пути, которыми наблюдатель создаёт задание без проверки права в консоли [Р-143]: отказывает база
+for (const [what, path, body] of [
+  ['compliance/evidence (выгрузка доказательства)', `/api/worlds/${world}/compliance/evidence`, { from: '2026-01-01', to: '2026-01-31' }],
+  ['feed/export (выгрузка ленты цен)', `/api/worlds/${world}/feed/export`, { from: '2026-01-01', to: '2026-01-31' }],
+  ['strategies/preview (предпросмотр стратегии)', `/api/worlds/${world}/strategies/preview`, { offers: { all: true }, strategy: { kind: 'FIXED', amountMinor: 1900, currency: 'EUR' } }],
+]) {
+  const job = await walk(what, 'POST', path, { token, body });
+  // Именно отказ в ПРАВЕ: 400 от тела и 404 от переименованного маршрута зеленели бы так же
+  check(job.status === 403 && job.body?.error?.code === 'FORBIDDEN', `${what}: ${job.status} ${job.text.slice(0, 160)}`);
+}
 const jobs = await walk('jobs (список заданий)', 'GET', `/api/worlds/${world}/jobs`, { token });
-check((jobs.body?.items?.length ?? 0) === 0, `ни одного задания гостя: ${jobs.text.slice(0, 200)}`);
+check(jobs.status === 200, `список заданий отвечает: ${jobs.status}`);
+check(Array.isArray(jobs.body?.items) && jobs.body.items.length === 0, `ни одного задания гостя: ${jobs.text.slice(0, 200)}`);
 
 const screens = journey.filter((x) => !x.step.startsWith('decisions (ожидание'));
 const slowest = screens.reduce((a, b) => (a.seconds > b.seconds ? a : b));

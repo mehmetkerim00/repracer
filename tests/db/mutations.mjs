@@ -1261,6 +1261,10 @@ export const STEP37_ROWS = [
         smoke('a demo guest is promoted to a pricing manager (Р-160)')),
       m(dropTrigger('zz_bulk_job_no_guest', 'tenant_data.bulk_job'),
         smoke('a demo guest creates a price evidence job (Р-160)')),
+      // Издатель гостя закреплён в базе: снимите проверку — и публичная кнопка заведёт привязку к настоящему поставщику
+      m(replaceInFunction('security.create_demo_guest(uuid, text, text, text)',
+        "IF p_issuer IS DISTINCT FROM security.guest_issuer() THEN", 'IF false THEN'),
+        smoke('a guest linked to the identity provider of the sellers (Р-160, Р-98)')),
     ],
   },
   {

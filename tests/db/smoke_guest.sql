@@ -18,4 +18,11 @@ SELECT pg_temp.expect_fail('a guest of a tenant that is not a demo (Р-160)', $q
                                     'guest-smoke-0002', 'guest-smoke-0002@demo.invalid') $q$,
   'a guest membership exists only in a demo tenant');
 
+-- Находка 4 ревью шага 37: издатель закреплён В БАЗЕ. Иначе один вызов заводил бы привязку к НАСТОЯЩЕМУ поставщику
+-- мимо приглашения — и занимал бы пару (издатель, subject) настоящего человека, которого ещё не пригласили
+SELECT pg_temp.expect_fail('a guest linked to the identity provider of the sellers (Р-160, Р-98)', $q$
+  SELECT security.create_demo_guest('d0000000-0000-0000-0000-00000000000d', 'https://accounts.zitadel.example',
+                                    'ceo-subject-42', 'guest-smoke-0003@demo.invalid') $q$,
+  'a demo guest is linked to the guest issuer only');
+
 COMMIT;

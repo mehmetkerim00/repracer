@@ -34,6 +34,12 @@ import { startDemoWorld, type RunningDemoWorld } from './demo-world.ts';
 export const GUEST_ISSUER = 'https://guest.repracer.invalid';
 const GUEST_AUDIENCE = 'repracer-console';
 const GUEST_TOKEN_SECONDS = 3600;
+/**
+ * Сколько гостей демо выдаёт в минуту. Ограничение продукта, а не защита от злоумышленника: маршрут публичный, и без
+ * предела он позволяет кому угодно писать строки в платформенные таблицы (находка 5 ревью шага 37). Шестьдесят в
+ * минуту — это больше, чем бывает у демо, и меньше, чем нужно, чтобы его залить.
+ */
+const GUEST_SESSIONS_PER_MINUTE = 60;
 
 function poolsFor(config: ConsoleConfig): Record<ConsoleRole, PgPool> {
   const out = {} as Record<ConsoleRole, PgPool>;
@@ -46,12 +52,35 @@ function poolsFor(config: ConsoleConfig): Record<ConsoleRole, PgPool> {
 /**
  * Вход двумя путями сразу: продавец приходит с токеном поставщика, гость — с нашим. Оба проверяются ПОЛНОСТЬЮ (подпись,
  * издатель, получатель, сроки), и членства в обоих случаях читаются из базы при каждом запросе [Р-78].
+ *
+ * Издатель в токене читается БЕЗ проверки подписи — только чтобы выбрать проверяющего (находка 9 ревью шага 37).
+ * Довериться ему нельзя и не нужно: выбранный проверяющий всё равно сверяет издателя сам, и подделать свой `iss` значит
+ * лишь выбрать себе более строгую проверку. Зато публичное демо перестаёт зависеть от поставщика продавцов: пока
+ * гостевые токены проверялись после провайдерских, недоступный JWKS ронял и гостя тоже.
  */
-function bothIssuers(seller: Authenticator | null, guest: Authenticator): Authenticator {
+function issuerOf(authorization: string | undefined): string | null {
+  const jwt = /^Bearer\s+([\w-]+\.[\w-]+\.[\w-]+)$/.exec(authorization ?? '')?.[1];
+  if (!jwt) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(jwt.split('.')[1]!, 'base64url').toString('utf8')) as { iss?: unknown };
+    return typeof payload.iss === 'string' ? payload.iss : null;
+  } catch {
+    return null;
+  }
+}
+
+function bothIssuers(seller: Authenticator | null, guest: Authenticator, onSellerFailure: (error: unknown) => void): Authenticator {
   return {
     async authenticate(authorization: string | undefined): Promise<Principal | null> {
-      const asSeller = seller ? await seller.authenticate(authorization) : null;
-      return asSeller ?? guest.authenticate(authorization);
+      if (issuerOf(authorization) === GUEST_ISSUER) return guest.authenticate(authorization);
+      if (!seller) return guest.authenticate(authorization);
+      try {
+        return await seller.authenticate(authorization);
+      } catch (error) {
+        // Недоступный поставщик — не повод отвечать 500 гостю: его токен проверяется нашим ключом в памяти
+        onSellerFailure(error);
+        return guest.authenticate(authorization);
+      }
     },
   };
 }
@@ -86,13 +115,18 @@ export async function startConsole(env: Env = process.env): Promise<RunningConso
   // Список миров у процесса ОДИН и тот же объект: пересев заменяет его содержимое, а обработчик держит ту же ссылку
   const worlds: unknown[] = [];
   const memberUsers = await pgStandUsers(directory as never, pools.onboarding as never);
+  // Окно выдачи гостей: минута и счётчик в ней (находка 5 ревью шага 37)
+  const guestWindow = { minute: 0, issued: 0 };
 
   const reseed = async (): Promise<void> => {
     const previous = state.demo;
     tag += 1;
     const started = await startDemoWorld({
       pools: { app: pools.app, admin: pools.admin, provisioning: pools.provisioning, dispatcher: pools.dispatcher, scheduler: pools.scheduler, exporter: pools.exporter, stock: pools.stock, bulkWorker: pools.bulk_worker },
-      pgUrl: config.pgUrls.app, tag, memberUsers, memberEmails: STAND_EMAILS,
+      pgUrl: config.pgUrls.app,
+      // Роли исполнителя заданий — ЯВНО: в работе строка подключения несёт пароль, и подстановка роли молча не сработала бы
+      pgUrlsByRole: { admin: config.pgUrls.admin, bulk_worker: config.pgUrls.bulk_worker, stock: config.pgUrls.stock },
+      tag, memberUsers, memberEmails: STAND_EMAILS,
       joinMember: pgStandJoinMember(pools.admin as never, directory as never),
       log: (m) => console.log(JSON.stringify({ level: 'INFO', code: 'CONSOLE_DEMO', message: m })),
     });
@@ -111,13 +145,23 @@ export async function startConsole(env: Env = process.env): Promise<RunningConso
   if (config.publicDemo) await reseed();
 
   const identity: StandIdentity = {
-    authenticator: bothIssuers(sellerAuth, guestAuth),
+    authenticator: bothIssuers(sellerAuth, guestAuth, (error) => {
+      health.count('seller_identity_unavailable');
+      console.error(JSON.stringify({ level: 'ERROR', code: 'IDENTITY_PROVIDER_UNAVAILABLE', message: error instanceof Error ? error.message : String(error) }));
+    }),
     ...(config.publicDemo
       ? {
         guest: {
           async issue() {
             const tenantId = state.demo?.tenantId;
             if (!tenantId) throw new Error('DEMO_NOT_READY');
+            const minute = Math.floor(Date.now() / 60_000);
+            if (minute !== guestWindow.minute) { guestWindow.minute = minute; guestWindow.issued = 0; }
+            if (guestWindow.issued >= GUEST_SESSIONS_PER_MINUTE) {
+              health.count('guest_rate_limited');
+              throw new Error('GUEST_RATE_LIMIT');
+            }
+            guestWindow.issued += 1;
             const subject = `guest-${randomUUID()}`;
             // Членство гостя заводит БАЗА: здесь нет ни роли, ни прав — только адрес входа и тенант демо [Р-160]
             await pools.onboarding.query('SELECT security.create_demo_guest($1, $2, $3, $4)',

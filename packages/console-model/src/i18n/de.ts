@@ -349,6 +349,7 @@ export const de: Messages = {
       stopped: (impact: string) => `Gestoppt. ${impact}.`,
       resumed: 'Preisänderungen fortgesetzt.',
       released: 'Das Anhalten der Storefront wurde aufgehoben.',
+      demoBusy: 'Die Demo vergibt gerade keine weiteren Gastzugänge — bitte in einer Minute erneut versuchen.',
       unauthenticated: 'Bitte zuerst anmelden.',
       unknownAccount: 'Dieses Konto des Stands gibt es nicht.',
       mfaRequired: 'Das Aufheben eines Mandanten-Stopps erfordert eine Anmeldung mit zweitem Faktor.',

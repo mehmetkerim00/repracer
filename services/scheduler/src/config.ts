@@ -62,13 +62,16 @@ export function loadConfig(env: Env = process.env, read: (path: string) => strin
    * домена (OQ-224), и требовать их значило бы запретить запуск всем, кто ещё не завёл провайдера. Но «настроено
    * наполовину» — это опечатка, а не режим: назвал одну переменную — называй все три.
    */
-  const MAIL_VARS = ['REPRACER_MAIL_API_URL', 'REPRACER_MAIL_API_KEY', 'REPRACER_MAIL_API_KEY_FILE', 'REPRACER_MAIL_FROM'] as const;
-  const namedMail = MAIL_VARS.filter((v) => env[v]);
+  /**
+   * «Настроено» решают ЗНАЧЕНИЯ, которые дал оператор, а не имена переменных (находка 3 ревью шага 37): compose
+   * безусловно называет `REPRACER_MAIL_API_KEY_FILE`, и по наличию имени сухой режим был бы недостижим — процесс
+   * отказывался бы стартовать и винил бы оператора в переменной, которую задал сам compose.
+   */
+  const namedMail = (['REPRACER_MAIL_API_URL', 'REPRACER_MAIL_FROM'] as const).filter((v) => env[v]);
   const dry = !mailOff && namedMail.length === 0;
-  if (!mailOff && !dry) {
-    for (const v of ['REPRACER_MAIL_API_URL', 'REPRACER_MAIL_FROM'] as const) {
-      if (!env[v]) throw new ConfigError(`CONFIG_MISSING: ${v} (почта настраивается целиком: ${namedMail.join(', ')} уже задано)`);
-    }
+  if (!mailOff && !dry && namedMail.length === 1) {
+    const missing = namedMail[0] === 'REPRACER_MAIL_API_URL' ? 'REPRACER_MAIL_FROM' : 'REPRACER_MAIL_API_URL';
+    throw new ConfigError(`CONFIG_MISSING: ${missing} (почта настраивается целиком: ${namedMail[0]} уже задано)`);
   }
   const mail = mailOff || dry ? null : {
     apiUrl: required(env.REPRACER_MAIL_API_URL, 'REPRACER_MAIL_API_URL'),
@@ -77,8 +80,13 @@ export function loadConfig(env: Env = process.env, read: (path: string) => strin
   };
   if (mail && !mail.apiUrl.startsWith('https://')) throw new ConfigError('CONFIG_INVALID: REPRACER_MAIL_API_URL must be https');
   // Адрес оператора обязателен вместе с почтой: события платформы иначе копятся недоставленными и вытесняют чужие
-  // Адрес оператора и роль доставки нужны и в сухом режиме: письма собираются и отмечаются, меняется только отправка
-  const operatorEmail = mailOff ? null : required(env.REPRACER_OPERATOR_EMAIL, 'REPRACER_OPERATOR_EMAIL (or REPRACER_SCHEDULER_MAIL=off)');
+  /**
+   * Адрес оператора обязателен при НАСТОЯЩЕЙ отправке: без него событие платформы некому отправить, и оно копилось бы
+   * недоставленным. В сухом режиме его может не быть — тогда платформенное письмо честно отмечается `NO_OWNER_EMAIL`,
+   * и это видно запросом (находка 3 ревью шага 37: требовать его от того, кто ещё не завёл провайдера, — тот же
+   * отказ стартовать, от которого шаг уходил).
+   */
+  const operatorEmail = mail ? required(env.REPRACER_OPERATOR_EMAIL, 'REPRACER_OPERATOR_EMAIL') : env.REPRACER_OPERATOR_EMAIL || null;
   return {
     owner: env.REPRACER_SCHEDULER_OWNER || `${hostname()}-${process.pid}`,
     mail,

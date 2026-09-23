@@ -63,6 +63,8 @@ before(async () => {
     REPRACER_CONSOLE_PORT: '0', REPRACER_CONSOLE_METRICS_PORT: '0',
     REPRACER_CONSOLE_DIST: new URL('../dist', import.meta.url).pathname,
     REPRACER_CONSOLE_PUBLIC_DEMO: 'on',
+    // Р-127: отметку во внешнем сервисе прогон выключает ЯВНО — аккаунта сервиса у проекта нет (OQ-188)
+    REPRACER_CONSOLE_HEARTBEAT: 'off',
     REPRACER_CONSOLE_APP_PG_URL: url('svc_app'), REPRACER_CONSOLE_ADMIN_PG_URL: url('svc_admin'),
     REPRACER_CONSOLE_AUTHENTICATOR_PG_URL: url('svc_authenticator'), REPRACER_CONSOLE_ONBOARDING_PG_URL: url('svc_onboarding'),
     REPRACER_CONSOLE_PROVISIONING_PG_URL: url('svc_provisioning'), REPRACER_CONSOLE_DISPATCHER_PG_URL: url('svc_dispatcher'),
@@ -173,12 +175,39 @@ test('Р-160: гость не может НИЧЕГО изменить — от�
    * [Р-143]. Гостю его не даёт база (0124): иначе публичная кнопка запускала бы 27 МБ работы исполнителя на каждого
    * посетителя. Это единственный путь записи, который был открыт наблюдателю, — и именно поэтому он проверяется.
    */
-  const evidence = await walk<{ error: { code: string } }>('jobs (выгрузка доказательства)', 'POST', `/api/worlds/${w}/compliance/evidence`,
-    { token: guest, body: { from: '2026-01-01', to: '2026-01-31' } });
-  assert.ok(evidence.status >= 400, `гостю не дают создать задание: ${evidence.status} ${evidence.text.slice(0, 200)}`);
+  for (const [what, path, body] of [
+    ['выгрузка доказательства', `/api/worlds/${w}/compliance/evidence`, { from: '2026-01-01', to: '2026-01-31' }],
+    ['выгрузка ленты цен', `/api/worlds/${w}/feed/export`, { from: '2026-01-01', to: '2026-01-31' }],
+    ['предпросмотр стратегии', `/api/worlds/${w}/strategies/preview`, { offers: { all: true }, strategy: { kind: 'FIXED', amountMinor: 1900, currency: 'EUR' } }],
+  ] as Array<[string, string, unknown]>) {
+    const job = await walk<{ error: { code: string } }>(`jobs (${what})`, 'POST', path, { token: guest, body });
+    // Утверждается ИМЕННО отказ в праве, а не «какой-нибудь отказ»: 400 от кривого тела и 404 от переименованного
+    // маршрута зеленели бы так же (находка 7 ревью шага 37)
+    assert.equal(job.status, 403, `${what}: ${job.status} ${job.text.slice(0, 200)}`);
+    assert.equal(job.body.error.code, 'FORBIDDEN', `${what}: код отказа — ${job.text.slice(0, 200)}`);
+  }
 
   // И ни одной строки задания от гостя в базе не осталось
   const jobs = await walk<{ items: unknown[] }>('jobs (список заданий)', 'GET', `/api/worlds/${w}/jobs`, { token: guest });
   assert.equal(jobs.status, 200, jobs.text);
   assert.equal(jobs.body.items.length, 0, 'ни одно задание гостя не создалось');
+});
+
+/**
+ * Находка 5 ревью шага 37: маршрут гостя ПУБЛИЧНЫЙ, и каждый вызов пишет три строки в платформенные таблицы. Предел
+ * выдачи — свойство демо: он назван числом, отвечает 429 и человеческим текстом, а не 500 и не молчанием.
+ */
+test('Р-160: выдача гостей ограничена и отказ назван словами', async () => {
+  let issued = 0;
+  let refused: { status: number; body: { error: { code: string; message: string } } } | null = null;
+  // Предел — 60 в минуту; 61-й обязан получить отказ, а не сессию
+  for (let i = 0; i < 61 && !refused; i++) {
+    const r = await fetch(`${origin}/api/demo/guest`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    const body = JSON.parse(await r.text()) as { error: { code: string; message: string } };
+    if (r.status === 200) issued += 1; else refused = { status: r.status, body };
+  }
+  assert.ok(refused, `предел выдачи гостей существует: выдано ${issued} подряд без отказа`);
+  assert.equal(refused!.status, 429, 'отказ — «попробуйте позже», а не ошибка сервера');
+  assert.equal(refused!.body.error.code, 'DEMO_BUSY');
+  assert.match(refused!.body.error.message, /Gastzug|guest session/i, `отказ объяснён словами: ${refused!.body.error.message}`);
 });

@@ -113,6 +113,14 @@ RESET ROLE;
  * пользователь и привязка живут у ПЛАТФОРМЕННОГО тенанта (так устроены `platform.app_user` и `platform.external_identity`
  * с шага 2), у демо-тенанта — только членство.
  */
+/**
+ * Издатель гостевых токенов — ЗДЕСЬ, а не в константе приложения (находка 4 ревью шага 37). Иначе один вызов заводил бы
+ * привязку `(издатель настоящего поставщика, произвольный subject)` мимо приглашения: это обход Р-98, а не исключение
+ * из него, и он ещё и занимает пару — настоящий пользователь после этого входит под заранее созданной учётной записью.
+ */
+CREATE FUNCTION security.guest_issuer() RETURNS text
+  LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $fn$ SELECT 'https://guest.repracer.invalid' $fn$;
+
 CREATE FUNCTION security.create_demo_guest(p_tenant_id uuid, p_issuer text, p_subject text, p_email text)
   RETURNS TABLE (user_id uuid, membership_id uuid)
   LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $fn$
@@ -120,6 +128,10 @@ DECLARE
   v_user uuid := gen_random_uuid();
   v_membership uuid := gen_random_uuid();
 BEGIN
+  IF p_issuer IS DISTINCT FROM security.guest_issuer() THEN
+    RAISE EXCEPTION 'a demo guest is linked to the guest issuer only, not to the identity provider (Р-160, Р-98)'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
   -- Столбцы — ровно те, на которые у repracer_resolver есть право [Р-100]: статус ставит умолчание таблицы
   INSERT INTO platform.app_user (user_id, email, display_name)
   VALUES (v_user, lower(p_email), 'Demo-Gast');

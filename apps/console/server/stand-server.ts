@@ -272,7 +272,16 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     if (parts[1] === 'demo' && parts[2] === 'guest') {
       if (!identity.guest) return fail(404, 'NOT_FOUND', s.notFound);
       if (req.method !== 'POST') return fail(405, 'METHOD', s.method);
-      const issued = await identity.guest.issue();
+      /**
+       * Находка 5 ревью шага 37: маршрут ПУБЛИЧНЫЙ, и каждый вызов — три строки в платформенных таблицах. Без предела
+       * это способ писать в базу без учётной записи. Предел — свойство демо, и он назван продавцу словами, а не молча
+       * отдаёт 500.
+       */
+      const issued = await identity.guest.issue().catch((error: unknown) => {
+        if ((error as Error).message === 'GUEST_RATE_LIMIT') return null;
+        throw error;
+      });
+      if (!issued) return fail(429, 'DEMO_BUSY', s.demoBusy);
       return ok({ accessToken: issued.accessToken, tokenType: 'Bearer', expiresIn: issued.expiresIn });
     }
 
@@ -1017,7 +1026,13 @@ const MAX_IMPORT_BODY_BYTES = 48 * 1024 * 1024;
  * недостижим — 5000 номеров заказов весят ~200 КБ, то есть склад получал 413 вместо ответа. Нашлось замером: предел,
  * который никто не проверял по времени, не проверяли и по размеру.
  */
-const bodyLimitFor = (url: string) => (url.includes('/cost-import/') || url.includes('/stock/import') || url.includes('/inbound/v1/') ? MAX_IMPORT_BODY_BYTES : MAX_BODY_BYTES);
+/**
+ * Находка 6 ревью шага 37: предел выбирается ДО проверки токена — иначе тело пришлось бы читать, чтобы узнать, кто его
+ * шлёт. Пока консоль не смотрела в интернет, это было безразлично; теперь смотрит [Р-159], и аноним, шлющий 48 МиБ на
+ * адрес импорта, занимал бы память процесса до ответа 401. Большой предел даётся только тому, кто ПРЕДЪЯВИЛ вход:
+ * токен или ключ Inbound API. Проверка предъявленного — дальше и в прежнем месте.
+ */
+const bodyLimitFor = (url: string, authorized: boolean) => (authorized && (url.includes('/cost-import/') || url.includes('/stock/import') || url.includes('/inbound/v1/')) ? MAX_IMPORT_BODY_BYTES : MAX_BODY_BYTES);
 
 function send(res: ServerResponse, r: ApiResponse): void {
   if (r.file) {
@@ -1060,7 +1075,7 @@ export function createStandServer(
     }
     let size = 0;
     const chunks: Buffer[] = [];
-    const limit = bodyLimitFor(req.url ?? '');
+    const limit = bodyLimitFor(req.url ?? '', Boolean(req.headers.authorization));
     for await (const chunk of req) {
       size += (chunk as Buffer).length;
       if (size > limit) {

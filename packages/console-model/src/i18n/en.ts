@@ -347,6 +347,7 @@ export const en = {
       stopped: (impact: string) => `Stopped. ${impact}.`,
       resumed: 'Pricing resumed.',
       released: 'The storefront halt was released.',
+      demoBusy: 'The demo is not handing out more guest sessions right now — please try again in a minute.',
       unauthenticated: 'Sign in first.',
       unknownAccount: 'There is no such stand account.',
       mfaRequired: 'Resuming a tenant stop requires signing in with a second factor.',
