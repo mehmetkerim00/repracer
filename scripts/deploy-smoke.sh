@@ -37,6 +37,8 @@ printf 'syn-mail-key' > "$SECRETS/mail_api_key"
 # конфигурация плоского профиля; отметки при этом никто не шлёт — процессы CI поднимаются с выключателем
 printf 'https://hc-ping.example.invalid/00000000-0000-4000-8000-000000000000' > "$SECRETS/heartbeat_url"
 printf 'https://hc-ping.example.invalid/00000000-0000-4000-8000-000000000001' > "$SECRETS/console_heartbeat_url"
+printf 'https://hc-ping.example.invalid/00000000-0000-4000-8000-000000000002' > "$SECRETS/worker_heartbeat_url"
+printf 'https://hc-ping.example.invalid/00000000-0000-4000-8000-000000000003' > "$SECRETS/receiver_heartbeat_url"
 printf 'ci-synthetic-ingest' > "$SECRETS/ch_ingest_password"
 printf 'ci-synthetic-verifier' > "$SECRETS/ch_verifier_password"
 # Очередь и ключи AWS — синтетические: живой очереди нет (OQ-167), проверяется старт процесса, а не работа с очередью
