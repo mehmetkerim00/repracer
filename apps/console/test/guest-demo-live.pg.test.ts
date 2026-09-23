@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
+import { existsSync } from 'node:fs';
 import type { SessionView, StandToken, WorldSummary } from '../src/api-types.ts';
 import { messagesFor, type DecisionListView, type DecisionTrace, type ProductListView } from '@repracer/console-model';
 import { createIsolatedDatabase, type IsolatedDatabase } from '../../../packages/pricing-store-pg/test/isolated-db.ts';
@@ -52,6 +53,12 @@ async function walk<T>(step: string, method: string, path: string, options: { to
 }
 
 before(async () => {
+  /**
+   * Интерфейс собирается ОТДЕЛЬНО (`npm run build -w apps/console`): процесс отдаёт файлы, а не собирает их. Прогон без
+   * сборки проверял бы пустой каталог и молча терял смысл — поэтому он отказывается начинаться и говорит, чего не хватает.
+   */
+  const dist = new URL('../dist/index.html', import.meta.url);
+  assert.ok(existsSync(dist), 'интерфейс не собран: `npm run build -w apps/console` — процесс отдаёт собранные файлы, а не исходники');
   db = await createIsolatedDatabase('guestdemo');
   /**
    * Окружение процесса — значениями: это режим стенда. В работе строки подключения приходят ФАЙЛАМИ, и именно так их

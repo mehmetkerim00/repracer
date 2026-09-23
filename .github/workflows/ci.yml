@@ -50,6 +50,10 @@ jobs:
       - name: Every new protection has a catalog row (Р-108)
         run: node scripts/db/check-catalog-coverage.mjs
       - run: npm run typecheck
+      # Шаг 37 [Р-159]: интерфейс собирается ДО тестов — прогон гостя поднимает настоящий процесс консоли, а он отдаёт
+      # СОБРАННЫЕ файлы. Без этой сборки прогон проверял бы пустой каталог и молча терял смысл
+      - name: Console UI build (Р-159)
+        run: npm run build -w apps/console
       - name: Tests without infrastructure beyond PostgreSQL (Р-137)
         run: node scripts/test-all.mjs --scope=fast
 
@@ -159,6 +163,10 @@ jobs:
         # Раннер CI — четыре ядра: три параллельные копии базы проходят каталог заметно быстрее двух
         run: node scripts/db/mutation-check.mjs --jobs 3
       - run: npm run typecheck
+      # Шаг 37 [Р-159]: интерфейс собирается ДО тестов — прогон гостя поднимает настоящий процесс консоли, а он отдаёт
+      # СОБРАННЫЕ файлы. Без этой сборки прогон проверял бы пустой каталог и молча терял смысл
+      - name: Console UI build (Р-159)
+        run: npm run build -w apps/console
       - name: 'All tests, no skips (Р-137: полная область — с брокером и ClickHouse)'
         run: node scripts/test-all.mjs --scope=full
       # Шаг 28, D: развёртывания поднимаются по-настоящему — три процесса стартуют и отвечают на /healthz (deploy/ci/README.md)
