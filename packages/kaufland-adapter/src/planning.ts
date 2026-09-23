@@ -16,6 +16,13 @@ import { channelError } from './errors.ts';
 export const OPERATION_PATCH_UNIT = 'PATCH /units/{id_unit}';
 export const OPERATION_BULK_UNITS = 'POST /units/bulk';
 
+/**
+ * Порядок видов полей в плане [KFL_C20]: остаток вперёд цены. Уменьшение опубликованного остатка не блокируется ничем
+ * (инвариант 5 доменной модели), а пакеты уходят по очереди через лимитер канала — пусть первым уйдёт то, промедление
+ * с чем продаёт товар, которого нет.
+ */
+const BULK_FIELD_ORDER = ['QUANTITY', 'PRICE'] as const;
+
 type Rejection = { channelWriteId: ChannelWriteId; error: ChannelError };
 
 /** Unit, в который физически уходит запись. Для остатка — unit-носитель id_offer [Р-35]. */
@@ -123,19 +130,33 @@ export function planKauflandDispatch(
     }
   }
 
+  /**
+   * K-20 [KFL_C20], находка 9 ревью шага 36: в одно тело `POST /units/bulk` попадали и `listing_price`, и `amount` —
+   * `unit_data` документация описывает как объект полей unit, но поведение канала на СМЕШАННОМ теле (частичный отказ,
+   * порядок применения, что попадёт в `item_unit_changed`) не подтверждено ничем. До ответа поддержки пакеты режутся по
+   * ВИДУ ПОЛЯ: цена и количество уходят разными запросами. Это дороже (у смешанного каталога вдвое больше запросов при
+   * лимите 111 rps), но отказ одного вида не уносит с собой другой, а ответ 207 читается однозначно.
+   */
   const batches: DispatchBatch[] = [];
+  const fieldsInPlan = new Set(selected.map((w) => w.value.field));
+  if (fieldsInPlan.size > 1) {
+    logConservative(logger, ctx, 'KFL_C20_NO_MIXED_FIELD_BULK', { fields: [...fieldsInPlan].sort().join(','), writes: selected.length });
+  }
   for (const storefront of KAUFLAND_STOREFRONTS) {
     const open: Array<{ items: FieldWrite[]; units: Set<number> }> = [];
-    for (const write of selected) {
-      const target = unitTargetOf(write)!;
-      if (target.storefront !== storefront) continue;
-      let slot = open.find((b) => b.items.length < KAUFLAND_LIMITS.bulkMaxUnits && !b.units.has(target.idUnit));
-      if (!slot) {
-        slot = { items: [], units: new Set() };
-        open.push(slot);
+    for (const field of BULK_FIELD_ORDER) {
+      for (const write of selected) {
+        const target = unitTargetOf(write)!;
+        if (target.storefront !== storefront || write.value.field !== field) continue;
+        // Пакет не смешивает виды полей [KFL_C20]: место ищется только среди пакетов своего вида
+        let slot = open.find((b) => b.items[0]!.value.field === field && b.items.length < KAUFLAND_LIMITS.bulkMaxUnits && !b.units.has(target.idUnit));
+        if (!slot) {
+          slot = { items: [], units: new Set() };
+          open.push(slot);
+        }
+        slot.items.push(write);
+        slot.units.add(target.idUnit);
       }
-      slot.items.push(write);
-      slot.units.add(target.idUnit);
     }
     for (const slot of open) {
       batches.push({

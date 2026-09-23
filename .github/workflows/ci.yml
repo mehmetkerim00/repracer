@@ -50,6 +50,10 @@ jobs:
       - name: Every new protection has a catalog row (Р-108)
         run: node scripts/db/check-catalog-coverage.mjs
       - run: npm run typecheck
+      # Шаг 37 [Р-159]: интерфейс собирается ДО тестов — прогон гостя поднимает настоящий процесс консоли, а он отдаёт
+      # СОБРАННЫЕ файлы. Без этой сборки прогон проверял бы пустой каталог и молча терял смысл
+      - name: Console UI build (Р-159)
+        run: npm run build -w apps/console
       - name: Tests without infrastructure beyond PostgreSQL (Р-137)
         run: node scripts/test-all.mjs --scope=fast
 
@@ -89,7 +93,10 @@ jobs:
     # Р-137: полный прогон — при слиянии в main и по запросу; на ветке шага его запускает владелец перед слиянием
     if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
+    # Шаг 37: предел поднят с 75 до 110 минут. Полный прогон вырос дважды: прогоны-замеры идут ПО ОДНОМУ (шаг 36), а
+    # развёртывания теперь поднимают ещё и профиль production с консолью, у которой при старте заводится демо-тенант.
+    # Первый прогон шага 37 упёрся ровно в это и был снят по пределу на шаге развёртываний
+    timeout-minutes: 110
     services:
       postgres:
         image: postgres:16
@@ -159,10 +166,15 @@ jobs:
         # Раннер CI — четыре ядра: три параллельные копии базы проходят каталог заметно быстрее двух
         run: node scripts/db/mutation-check.mjs --jobs 3
       - run: npm run typecheck
+      # Шаг 37 [Р-159]: интерфейс собирается ДО тестов — прогон гостя поднимает настоящий процесс консоли, а он отдаёт
+      # СОБРАННЫЕ файлы. Без этой сборки прогон проверял бы пустой каталог и молча терял смысл
+      - name: Console UI build (Р-159)
+        run: npm run build -w apps/console
       - name: 'All tests, no skips (Р-137: полная область — с брокером и ClickHouse)'
         run: node scripts/test-all.mjs --scope=full
       # Шаг 28, D: развёртывания поднимаются по-настоящему — три процесса стартуют и отвечают на /healthz (deploy/ci/README.md)
-      - name: Deployments start (шаг 28, D)
+      # Шаг 37 [Р-159]: сюда добавился профиль production целиком — прокси и КОНСОЛЬ, и путь гостя по нему как браузер
+      - name: Deployments start, and the guest walks the production profile (шаг 28 D, шаг 37 A)
         run: PG_HOST=host.docker.internal scripts/deploy-smoke.sh
 
   # Шаг 35 [Р-154]: демо-стенд живёт виртуальные СУТКИ, затем все экраны обходятся как браузер в пределе 10 с / 8 МБ.

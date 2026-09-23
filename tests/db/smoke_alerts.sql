@@ -15,7 +15,12 @@ SELECT set_config('app.tenant_id', :tA, false), set_config('app.user_id', :owner
 SELECT pg_temp.ok('a process raises an alert for the owner (Р-156)', format($q$
   INSERT INTO tenant_data.alert (tenant_id, alert_id, code, severity, channel_account_id, details)
   VALUES (%L, 'ae000000-0000-0000-0000-000000000001', 'PRICING_STOPPED_BY_PERSON', 'CRITICAL', %L, '{"scope":"TENANT"}'::jsonb) $q$, :tA, :account));
-SELECT pg_temp.ok('a raised alert is undelivered until delivery marks it (Р-156)', format($q$
+
+
+-- Шаг 37 (задача D, OQ-224): второе событие — для сухого прогона доставки: письмо собирается и не уходит
+SELECT pg_temp.ok('an alert for the dry run of the delivery (OQ-224)', format($q$
+  INSERT INTO tenant_data.alert (tenant_id, alert_id, code, severity, channel_account_id, details)
+  VALUES (%L, 'ae000000-0000-0000-0000-000000000002', 'ANALYTICS_EXPORT_BACKLOG', 'WARNING', %L, '{"days":3}'::jsonb) $q$, :tA, :account));SELECT pg_temp.ok('a raised alert is undelivered until delivery marks it (Р-156)', format($q$
   DO $x$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM tenant_data.alert WHERE alert_id = 'ae000000-0000-0000-0000-000000000001' AND delivered_at IS NULL) THEN
       RAISE EXCEPTION 'a fresh alert must be undelivered';

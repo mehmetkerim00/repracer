@@ -5,4 +5,4 @@ export { PgWriteQueueStore, type PgWriteQueueStoreOptions } from './write-queue.
 export { IdMap, OWNER_MEMBERSHIP_ALIAS, seedPricingWorld, translateStore, type SeededPricingWorld, type SeedWorldInput } from './seed.ts';
 export { PgStockStore, type PgStockStoreOptions } from './stock.ts';
 // Шаг 36 [Р-156]: алерты в базе и их доставка владельцу
-export { PgAlertSink, PgAlertDeliveryStore, type AlertRow, type AlertDeliveryStore } from './alerts.ts';
+export { PgAlertSink, PgAlertDeliveryStore, type AlertRow, type AlertRecipient, type AlertDeliveryStore, type DeliveryKind } from './alerts.ts';

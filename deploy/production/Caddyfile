@@ -10,6 +10,9 @@
 		output stdout
 		format json
 	}
-	# Пока консоль не разворачивается (OQ-221), прокси отвечает честно: сертификат и домен уже настоящие
-	respond "repracer: die Verkäuferkonsole ist in diesem Profil noch nicht ausgerollt (OQ-221)" 503
+	# Шаг 37 [Р-159]: за прокси стоит консоль. TLS кончается здесь, дальше — сеть compose и обычный http
+	reverse_proxy console:4319 {
+		# Работоспособность процесса прокси не спрашивает: её спрашивает docker (healthcheck развёртывания консоли)
+		header_up X-Forwarded-Proto {scheme}
+	}
 }

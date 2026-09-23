@@ -107,6 +107,11 @@ export const CONSERVATIVE_RULES = {
     behaviour: 'Уведомление item_unit_* или buy_box_changed без payload — RESOURCE_CHANGED с идентичностью из resource: конкуренты — опрос GET /buybox, unit — обратное чтение (Р-46, выбор по факту доставки)',
     whenAnswered: '—',
   },
+  KFL_C20_NO_MIXED_FIELD_BULK: {
+    question: 'K-20',
+    behaviour: 'Пакет POST /units/bulk несёт поля ОДНОГО вида: цена и количество идут разными запросами, даже если это один unit одной витрины',
+    whenAnswered: 'Если смешанное тело обрабатывается как одно изменение unit — убрать разделение и слать цену с количеством одним запросом',
+  },
 } as const satisfies Record<string, ConservativeRule>;
 
 export type ConservativeRuleCode = keyof typeof CONSERVATIVE_RULES;

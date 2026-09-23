@@ -1,0 +1,26 @@
+# Надстройка CI к профилю production [Р-159]: база в CI поднята на хосте раннера, домена и сертификата нет.
+# Сами развёртывания этот файл не трогают.
+services:
+  proxy:
+    environment:
+      # Значения нужны compose до разбора: сам файл настроек прокси в CI подменяется на http-вариант
+      REPRACER_DOMAIN: localhost
+      REPRACER_ACME_EMAIL: ci@example.invalid
+    volumes:
+      - ../ci/Caddyfile:/etc/caddy/Caddyfile:ro
+    # Наружу — только локальный порт раннера: прогон ходит по нему как браузер, TLS в CI нет
+    ports:
+      - "127.0.0.1:8080:80"
+
+  console:
+    environment:
+      # Аккаунта внешнего сервиса у проекта нет (OQ-188): в CI отметка выключается ЯВНО, и это видно в журнале
+      REPRACER_CONSOLE_HEARTBEAT: "off"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:9467:9467"
+
+  # Копия базы в CI не снимается: восстановление проверяется своим тестом сборки (packages/pricing-store-pg/test/backup-restore.pg.test.ts)
+  backup:
+    profiles: ["never"]

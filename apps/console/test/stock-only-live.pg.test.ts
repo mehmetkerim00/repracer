@@ -29,6 +29,8 @@ import type { BulkWorkerConfig } from '../server/bulk-worker.ts';
 const WORLD = 'demo/kaufland';
 const LEASE_SECONDS = 5;
 const APPLY_LIMIT_SECONDS = 120;
+/** Срок ответа экрана [шаг 29]: столько же отводится и партии Inbound API предельного размера (находка 10 ревью шага 36) */
+const INBOUND_ORDERS_LIMIT_SECONDS = 10;
 
 let db: IsolatedDatabase;
 let demo: DemoWorld;
@@ -293,7 +295,12 @@ test('Р-153: канал перестал принимать запись — р
   assert.equal(Number(inFlight.n), 0, 'неприменённая запись завершена, повтора в полёте нет — иначе это был бы ход, а не расхождение');
 });
 
-test('Р-157: склад подтверждает заказ по Inbound API — резервация закрывается сразу, а не ждёт суток TTL', async () => {
+/**
+ * Находка 10 ревью шага 36: заголовок говорил «резервация закрывается сразу», а тест проверяет другое — подтверждение
+ * ИСТОЧНИКОМ. Закрывает резервацию отгрузка (шаг 6), и именно она перестала ждать суток: без подтверждения отгрузка по
+ * неподтверждённой резервации пропадала, и доступное возвращалось только по сроку [Р-25, Р-157].
+ */
+test('Р-157: склад подтверждает заказ по Inbound API — резервация подтверждена источником сразу, и отгрузка закрывает её, не дожидаясь суток TTL', async () => {
   /**
    * Шаг 36 [Р-157], OQ-217: резервацию Inbound API подтверждать было НЕКОМУ, и единственным выходом был срок в 24 часа —
    * товар уже уехал, а доступный остаток занижен сутки. Теперь склад продавца шлёт «заказ учтён» тем же ключом, что и
@@ -348,6 +355,32 @@ test('Р-157: склад подтверждает заказ по Inbound API �
   // 5. Повтор безвреден: склад, пославший подтверждение дважды, получает «уже подтверждён», а не ошибку
   const again = await call('POST', '/inbound/v1/orders', { orders: [{ externalOrderRef: orderRef }] }, { authorization: `Bearer ${inboundKey}`, cookie: '' });
   assert.deepEqual(JSON.parse(again.text), { confirmed: 0, alreadyConfirmed: [orderRef], releasedOrders: [], unknownOrders: [] });
+
+  /**
+   * Находка 10 ревью шага 36: предел «5000 заказов в одном вызове» был ОБЪЯВЛЕН и ни разу не измерен — ни по времени,
+   * ни по размеру. Замер нашёл, что он недостижим: 5000 номеров весят ~200 КБ, а предел тела запроса у всего, что не
+   * названо файлом продавца, — 64 КиБ, и склад получал 413 вместо ответа (исправлено в `bodyLimitFor`).
+   *
+   * Время печатается и утверждается: разбор идёт по одному номеру (две выборки на незнакомый заказ), и если предел
+   * когда-нибудь перестанет укладываться в срок ответа, это увидит прогон, а не склад продавца.
+   */
+  const bulkRefs = [{ externalOrderRef: orderRef }, ...Array.from({ length: 4999 }, (_, i) => ({ externalOrderRef: `SYN-ORDER-MASSE-${i}` }))];
+  const bulkBytes = Buffer.byteLength(JSON.stringify({ orders: bulkRefs }));
+  assert.ok(bulkBytes > 64 * 1024, `партия предельного размера больше обычного тела запроса: ${bulkBytes} байт`);
+  const bulkStarted = process.hrtime.bigint();
+  const bulk = await call('POST', '/inbound/v1/orders', { orders: bulkRefs }, { authorization: `Bearer ${inboundKey}`, cookie: '' });
+  const bulkSeconds = Math.round(Number(process.hrtime.bigint() - bulkStarted) / 1e6) / 1000;
+  assert.equal(bulk.status, 200, `партия в ${bulkRefs.length} заказов доходит и обрабатывается: ${bulk.status} ${bulk.text.slice(0, 200)}`);
+  const bulkBody = JSON.parse(bulk.text) as { confirmed: number; alreadyConfirmed: string[]; releasedOrders: string[]; unknownOrders: string[] };
+  assert.deepEqual([bulkBody.confirmed, bulkBody.alreadyConfirmed, bulkBody.releasedOrders, bulkBody.unknownOrders.length], [0, [orderRef], [], 4999],
+    'свой заказ назван уже подтверждённым, остальные 4999 — неизвестными: склад видит, что расходится');
+  journey.push({ step: `Inbound API: ${bulkRefs.length} заказов одним вызовом (${bulkBytes} байт)`, method: 'POST', url: '/inbound/v1/orders', seconds: bulkSeconds, status: bulk.status });
+  console.log(JSON.stringify({ inboundOrdersBatch: { orders: bulkRefs.length, bytes: bulkBytes, seconds: bulkSeconds } }));
+  assert.ok(bulkSeconds < INBOUND_ORDERS_LIMIT_SECONDS, `партия предельного размера укладывается в срок ответа экрана: ${bulkSeconds} с`);
+  // Партия больше предела — названный отказ, а не молчаливое усечение и не 413 без объяснения
+  const overOrders = await call('POST', '/inbound/v1/orders', { orders: [...bulkRefs, { externalOrderRef: 'SYN-ORDER-5001' }] }, { authorization: `Bearer ${inboundKey}`, cookie: '' });
+  assert.equal(overOrders.status, 400, overOrders.text.slice(0, 200));
+  assert.equal((JSON.parse(overOrders.text) as { error: { code: string } }).error.code, 'BAD_ROWS');
 
   // 6. И только теперь отгрузка закрывает резервацию: доступное возвращается продавцу — 40 − 0 = 40, не через сутки
   const shipped = await stockStore.recordOrderLines(demo.live.seeded.tenantId, demo.live.seeded.channelAccountId, [orderLine('SHIPPED')], demo.clock.iso());

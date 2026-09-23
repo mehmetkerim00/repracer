@@ -1,0 +1,70 @@
+# Р-159 (шаг 37, OQ-221): развёртывание КОНСОЛИ продавца — процесс, а не «запустите сервер стенда руками».
+#   npm ci && npm run build -w apps/console        # интерфейс собирается ДО подъёма: контейнер видит репозиторий только на чтение
+#   docker compose -f deploy/console/compose.yaml --env-file deploy/console/console.env up -d
+#
+# В промышленном профиле этот же сервис поднимается за обратным прокси (deploy/production/compose.yaml, `extends`), и наружу
+# его выставляет только прокси: у самого процесса ни TLS, ни 443-го порта нет [Р-158].
+name: repracer-console
+
+services:
+  console:
+    image: node:22.22.3-bookworm-slim
+    # Тег образа закреплён; закрепление по digest — при первом развёртывании в среде с доступом к реестру (проверить)
+    working_dir: /app
+    command: ["node", "--experimental-strip-types", "--disable-warning=ExperimentalWarning", "apps/console/server/console-service.ts"]
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      REPRACER_CONSOLE_PORT: "4319"
+      REPRACER_CONSOLE_METRICS_PORT: "9467"
+      # Собранный интерфейс: `npm run build -w apps/console` кладёт его сюда, контейнер только читает
+      REPRACER_CONSOLE_DIST: /app/apps/console/dist
+      REPRACER_CONSOLE_LOCALE: ${REPRACER_CONSOLE_LOCALE:-de}
+      # Р-160: публичное демо. `off` — кнопки «посмотреть демо» нет и маршрут гостя отвечает 404
+      REPRACER_CONSOLE_PUBLIC_DEMO: ${REPRACER_CONSOLE_PUBLIC_DEMO:-on}
+      REPRACER_CONSOLE_DEMO_RESEED_HOURS: ${REPRACER_CONSOLE_DEMO_RESEED_HOURS:-24}
+      # Вход продавца у поставщика identity [Р-78]: задаётся целиком или не задаётся вовсе (тогда работает только гость демо)
+      REPRACER_CONSOLE_OIDC_ISSUER: ${REPRACER_CONSOLE_OIDC_ISSUER:-}
+      REPRACER_CONSOLE_OIDC_AUDIENCE: ${REPRACER_CONSOLE_OIDC_AUDIENCE:-}
+      REPRACER_CONSOLE_OIDC_JWKS_URL: ${REPRACER_CONSOLE_OIDC_JWKS_URL:-}
+      # Р-127: отметка во внешнем сервисе. Адрес содержит идентификатор проверки — тоже секрет, поэтому файлом.
+      # Умолчание — `off` (находка 2 ревью шага 37): аккаунта внешнего сервиса у проекта нет (OQ-188), файла секрета
+      # взять неоткуда, и с пустым значением процесс НЕ СТАРТОВАЛ БЫ — тот самый дефект шага 28 в третьей форме.
+      # Появился аккаунт — `REPRACER_CONSOLE_HEARTBEAT=` (пусто) и файл `console_heartbeat_url` в каталоге секретов
+      REPRACER_CONSOLE_HEARTBEAT: ${REPRACER_CONSOLE_HEARTBEAT:-off}
+      REPRACER_CONSOLE_HEARTBEAT_URL_FILE: /run/secrets/console_heartbeat_url
+      # Секреты — файлами, не значениями: строка подключения несёт пароль роли [шаг 28, E]. У каждой роли свой файл [Р-90]
+      REPRACER_CONSOLE_APP_PG_URL_FILE: /run/secrets/console_app_pg_url
+      REPRACER_CONSOLE_ADMIN_PG_URL_FILE: /run/secrets/console_admin_pg_url
+      REPRACER_CONSOLE_AUTHENTICATOR_PG_URL_FILE: /run/secrets/console_authenticator_pg_url
+      REPRACER_CONSOLE_ONBOARDING_PG_URL_FILE: /run/secrets/console_onboarding_pg_url
+      REPRACER_CONSOLE_PROVISIONING_PG_URL_FILE: /run/secrets/console_provisioning_pg_url
+      REPRACER_CONSOLE_DISPATCHER_PG_URL_FILE: /run/secrets/console_dispatcher_pg_url
+      REPRACER_CONSOLE_STOCK_PG_URL_FILE: /run/secrets/console_stock_pg_url
+      REPRACER_CONSOLE_SCHEDULER_PG_URL_FILE: /run/secrets/console_scheduler_pg_url
+      REPRACER_CONSOLE_EXPORTER_PG_URL_FILE: /run/secrets/console_exporter_pg_url
+      REPRACER_CONSOLE_FX_LOADER_PG_URL_FILE: /run/secrets/console_fx_loader_pg_url
+      REPRACER_CONSOLE_BULK_WORKER_PG_URL_FILE: /run/secrets/console_bulk_worker_pg_url
+    volumes:
+      - ../..:/app:ro
+      - ${REPRACER_SECRETS_DIR:?set REPRACER_SECRETS_DIR}:/run/secrets:ro
+    restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      # Работоспособность — на порту метрик, отдельно от интерфейса: страница может тормозить, а процесс быть жив
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9467/healthz').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # Демо-тенант заводится при старте: 200 предложений с конкурентами — это минуты, и до конца посева консоль не отвечает
+      start_period: 300s
+    ports:
+      - "127.0.0.1:4319:4319"
+      - "127.0.0.1:9467:9467"
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"

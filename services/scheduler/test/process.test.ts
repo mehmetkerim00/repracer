@@ -40,15 +40,31 @@ test('Р-129: конфигурация процесса — секреты из 
   assert.throws(() => loadConfig({ ...ENV, REPRACER_SCHEDULER_HEARTBEAT_URL: 'http://hc-ping.com/x' }), /must be https/);
   assert.throws(() => loadConfig({ ...ENV, REPRACER_SCHEDULER_TICK_MS: '0' }), /REPRACER_SCHEDULER_TICK_MS/);
   /**
-   * Шаг 36 [Р-156]: молчащая доставка алертов хуже незапустившегося процесса — настройки почты обязательны, а отказ от
-   * них называется явно. Это находка 1 ревью шага 36 в обратную сторону: выключатель должен БЫТЬ и должен быть назван.
+   * Шаг 37, задача D: провайдера почты у проекта нет (OQ-224), поэтому умолчание — СУХОЙ РЕЖИМ: письма собираются и
+   * не отправляются. Требовать ключ значило бы запретить запуск всем, кто провайдера ещё не завёл; молчать о том, что
+   * письма не уходят, — обманывать. Поэтому `mail: null` при `mailOff: false`, и процесс говорит об этом в журнале.
    */
-  assert.throws(() => loadConfig({ ...ENV, REPRACER_MAIL_API_URL: undefined }), (e: Error) => e instanceof ConfigError && /REPRACER_MAIL_API_URL \(or REPRACER_SCHEDULER_MAIL=off\)/.test(e.message));
+  const { REPRACER_MAIL_API_URL: _u, REPRACER_MAIL_API_KEY: _k, REPRACER_MAIL_FROM: _f, ...withoutProvider } = ENV;
+  const dry = loadConfig(withoutProvider);
+  assert.equal(dry.mail, null, 'без настроек провайдера почта идёт всухую');
+  assert.equal(dry.mailOff, false, 'сухой режим — не «выключено»: доставка работает и ставит отметку DRY_RUN');
+  assert.equal(dry.operatorEmail, 'ops@example.invalid', 'адрес оператора нужен и всухую: письма ему собираются');
+  assert.ok(dry.alertDeliveryPgUrl, 'роль доставки нужна и всухую: отметка пишется в базу');
+
+  // «Настроено наполовину» — опечатка, а не режим: названа одна переменная — обязаны быть названы все
+  assert.throws(() => loadConfig({ ...ENV, REPRACER_MAIL_API_URL: undefined }),
+    (e: Error) => e instanceof ConfigError && /REPRACER_MAIL_API_URL \(почта настраивается целиком/.test(e.message));
+  assert.throws(() => loadConfig({ ...ENV, REPRACER_MAIL_FROM: undefined }), /REPRACER_MAIL_FROM \(почта настраивается целиком/);
   assert.throws(() => loadConfig({ ...ENV, REPRACER_OPERATOR_EMAIL: undefined }), /REPRACER_OPERATOR_EMAIL/);
   assert.throws(() => loadConfig({ ...ENV, REPRACER_ALERT_DELIVERY_PG_URL: undefined }), /REPRACER_ALERT_DELIVERY_PG_URL/);
   assert.throws(() => loadConfig({ ...ENV, REPRACER_MAIL_API_URL: 'http://mail.example.invalid/v3/send' }), /REPRACER_MAIL_API_URL must be https/);
+  // Полный набор — настоящая отправка
+  assert.deepEqual(loadConfig(ENV).mail, { apiUrl: 'https://mail.example.invalid/v3/send', apiKey: 'syn-mail-key', from: 'alerts@example.invalid' });
+
+  // Выключено ЦЕЛИКОМ — только явно: тогда доставки нет вовсе и алерты копятся недоставленными
   const off = loadConfig({ ...ENV, REPRACER_SCHEDULER_MAIL: 'off', REPRACER_MAIL_API_URL: undefined, REPRACER_MAIL_API_KEY: undefined, REPRACER_MAIL_FROM: undefined, REPRACER_OPERATOR_EMAIL: undefined, REPRACER_ALERT_DELIVERY_PG_URL: undefined });
   assert.equal(off.mail, null);
+  assert.equal(off.mailOff, true);
   assert.equal(off.operatorEmail, null);
   assert.equal(off.alertDeliveryPgUrl, null);
   // Нечитаемый файл секрета: в ошибке — имя переменной, не путь и не содержимое

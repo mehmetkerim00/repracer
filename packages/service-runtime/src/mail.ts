@@ -23,7 +23,34 @@ export interface MailConfig {
   timeoutMs?: number;
 }
 
-export function createMailSender(config: MailConfig, fetchImpl: typeof fetch = fetch) {
+/**
+ * Отправитель письма. `dry: true` — СУХОЙ РЕЖИМ (шаг 37, задача D): письмо собирается целиком и не уходит никуда.
+ * Это не «выключено»: событие разбирается, текст строится, отметка в базе ставится видом `DRY_RUN`, и запросом видно,
+ * что письма никто не получил. Провайдер подключается ключом и доменом — кода это не меняет (OQ-224).
+ */
+export interface MailSender {
+  send(message: MailMessage): Promise<{ ref: string }>;
+  dry?: boolean;
+}
+
+/**
+ * Сухой режим по умолчанию: у проекта нет ни ключа провайдера, ни домена отправителя (OQ-224). Молчать об этом нельзя,
+ * поэтому каждое несостоявшееся письмо оставляет строку журнала — БЕЗ получателя и без тела: в сухом режиме они такие
+ * же настоящие, как в рабочем.
+ */
+export function createDryMailSender(log: (line: string) => void = (l) => console.log(l)): MailSender {
+  let n = 0;
+  return {
+    dry: true,
+    async send(message: MailMessage): Promise<{ ref: string }> {
+      n += 1;
+      log(JSON.stringify({ level: 'INFO', code: 'MAIL_DRY_RUN', message: 'письмо собрано и не отправлено: провайдер не настроен (OQ-224)', details: { subjectLength: message.subject.length, textLength: message.text.length, letter: n } }));
+      return { ref: `dry-run-${n}` };
+    },
+  };
+}
+
+export function createMailSender(config: MailConfig, fetchImpl: typeof fetch = fetch): MailSender {
   if (!config.apiUrl.startsWith('https://')) throw new Error('CONFIG_INVALID: mail api url must be https');
   return {
     async send(message: MailMessage): Promise<{ ref: string }> {

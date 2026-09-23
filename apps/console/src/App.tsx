@@ -38,11 +38,14 @@ export function parseHash(hash: string): Route {
 const SCREENS = ['onboarding', 'stock', 'products', 'decisions', 'strategies', 'feed', 'rejected', 'dangerous', 'bounds', 'cost-import', 'compliance', 'jobs', 'stop'] as const;
 
 /** Вход [Р-78]: у поставщика identity; на стенде — имитатор с синтетическими пользователями. Паролей у нас нет */
-export function LoginView({ simulator, error, busy, onSignIn }: {
+export function LoginView({ simulator, demoGuest, error, busy, onSignIn, onDemo }: {
   simulator: SessionView['simulator'];
+  /** Р-160: публичное демо включено — кнопка «посмотреть демо» ведёт внутрь без регистрации */
+  demoGuest: boolean;
   error: string | null;
   busy: boolean;
   onSignIn: (role: string) => void;
+  onDemo: () => void;
 }) {
   const m = useMessages();
   const l = m.ui.app.login;
@@ -50,6 +53,14 @@ export function LoginView({ simulator, error, busy, onSignIn }: {
     <section className="card login">
       <h2>{l.title}</h2>
       <p className="muted">{l.hint}</p>
+      {demoGuest ? (
+        <>
+          <p className="notice">{l.demoGuestHint}</p>
+          <div className="buttons">
+            <button type="button" disabled={busy} onClick={onDemo}>{l.demoGuest}</button>
+          </div>
+        </>
+      ) : null}
       {simulator ? (
         <>
           <p className="notice">{l.simulator}</p>
@@ -153,6 +164,24 @@ export function App() {
   const loadSession = useCallback(() => apply(requestJson<SessionView>('/api/session')), [apply]);
   useEffect(loadSession, [loadSession]);
 
+  /**
+   * Р-160: «посмотреть демо». Гость получает НАБЛЮДАТЕЛЯ в демо-тенанте; дальше он ходит тем же кодом, что продавец, —
+   * своего пути у него нет, и поэтому экран не может случайно показать ему кнопку, которой база не даст сработать.
+   */
+  const enterDemo = async () => {
+    setBusy(true);
+    setLoginError(null);
+    try {
+      const { accessToken } = await requestJson<StandToken>('/api/demo/guest', { method: 'POST', body: {}, locale });
+      setAccessToken(accessToken);
+      setSession({ state: 'ready', data: await requestJson<SessionView>('/api/session', { locale }) });
+    } catch (error) {
+      setLoginError(errorText(error, m));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const signIn = async (role: string) => {
     setBusy(true);
     setLoginError(null);
@@ -195,7 +224,12 @@ export function App() {
             : session.state === 'error' ? <ErrorBox message={errorText(session.error, m)} onRetry={loadSession} />
               : user
                 ? <SignedIn key={user.subject} route={route} />
-                : <LoginView simulator={session.data.simulator} error={loginError} busy={busy} onSignIn={(role) => void signIn(role)} />}
+                : (
+                  <LoginView
+                    simulator={session.data.simulator} demoGuest={session.data.demoGuest} error={loginError} busy={busy}
+                    onSignIn={(role) => void signIn(role)} onDemo={() => void enterDemo()}
+                  />
+                )}
         </main>
       </div>
     </MessagesContext.Provider>

@@ -53,6 +53,12 @@ export interface StandIdentity {
    * не требующей, и регрессия «перестало просить» была невидима.
    */
   simulator?: { token(account: (typeof STAND_ACCOUNTS)[number], options?: { secondFactor?: boolean }): string; expiresInSeconds: number };
+  /**
+   * Р-160 (шаг 37): публичное демо. Гость приходит без регистрации и получает НАБЛЮДАТЕЛЯ в демо-тенанте: членство
+   * заводит база (`security.create_demo_guest`), а токен подписываем мы — поставщик про гостя не знает и знать не
+   * должен. Чего гость не может, держит база, а не этот маршрут: роль не повышается, заданий он не создаёт.
+   */
+  guest?: { issue(): Promise<{ accessToken: string; expiresIn: number }> };
 }
 
 export const LOCALE_COOKIE = 'repracer_locale';
@@ -105,7 +111,14 @@ const isDay = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date
 export const EVIDENCE_MAX_DAYS = 550;
 /** Р-154: экран остановок показывает последние события аудита, а не весь журнал тенанта */
 const AUDIT_RECENT = 200;
-/** Inbound API: строк в одном вызове — не больше; склад шлёт партиями */
+/**
+ * Inbound API: строк в одном вызове — не больше; склад шлёт партиями.
+ *
+ * Предел ИЗМЕРЕН (находка 10 ревью шага 36), а не объявлен: 5000 заказов в одном `POST /inbound/v1/orders` — 218 896
+ * байт тела и 1,6–2,7 секунды (два прогона) при сроке ответа экрана в 10 секунд (`apps/console/test/stock-only-live.pg.test.ts`, живой
+ * прогон через HTTP). Разбор идёт по одному номеру заказа, и до замера предел был недостижим: тело в 218 КБ отвергалось
+ * с 413, потому что этот маршрут не был назван партией продавца в `bodyLimitFor`.
+ */
 const INBOUND_ROWS_MAX = 5000;
 /**
  * Шаг 30 [OQ-202]: предела строк у выгрузки больше НЕТ. Шаг 29 ввёл его (100 000), потому что 300 000 строк — это 28 МБ в одном
@@ -170,6 +183,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     const sessionView = (l: Locale): SessionView => ({
       user: principal ? { subject: principal.subject, email: principal.email } : null, locale: l,
       simulator: identity.simulator ? STAND_ACCOUNTS.map((a) => ({ role: a.role, label: m.values[a.role] })) : null,
+      demoGuest: Boolean(identity.guest),
     });
 
     /**
@@ -249,6 +263,26 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         return ok(sessionView(body.locale), [localeCookie(body.locale)]);
       }
       return fail(404, 'NOT_FOUND', s.notFound);
+    }
+
+    /**
+     * Р-160: «посмотреть демо». Гостя заводит база и возвращает наблюдателя демо-тенанта; ответ — такой же токен, как у
+     * продавца, потому что дальше гость ходит ТЕМ ЖЕ путём: те же экраны, те же проверки прав, та же роль из членства.
+     */
+    if (parts[1] === 'demo' && parts[2] === 'guest') {
+      if (!identity.guest) return fail(404, 'NOT_FOUND', s.notFound);
+      if (req.method !== 'POST') return fail(405, 'METHOD', s.method);
+      /**
+       * Находка 5 ревью шага 37: маршрут ПУБЛИЧНЫЙ, и каждый вызов — три строки в платформенных таблицах. Без предела
+       * это способ писать в базу без учётной записи. Предел — свойство демо, и он назван продавцу словами, а не молча
+       * отдаёт 500.
+       */
+      const issued = await identity.guest.issue().catch((error: unknown) => {
+        if ((error as Error).message === 'GUEST_RATE_LIMIT') return null;
+        throw error;
+      });
+      if (!issued) return fail(429, 'DEMO_BUSY', s.demoBusy);
+      return ok({ accessToken: issued.accessToken, tokenType: 'Bearer', expiresIn: issued.expiresIn });
     }
 
     // Имитатор поставщика стенда: токен синтетического пользователя; в работе этого адреса нет
@@ -985,9 +1019,20 @@ const MAX_BODY_BYTES = 64 * 1024;
  * взят от предела базы: 200 000 строк типичной выгрузки — это ~24 МБ, в base64 — ~32 МБ.
  */
 const MAX_IMPORT_BODY_BYTES = 48 * 1024 * 1024;
-// Файлы продавца: себестоимость и остатки (шаг 35) — их предел выше, чем у обычного запроса экрана
-// Файлы продавца (себестоимость, остатки) и партия Inbound API: их предел выше, чем у обычного запроса экрана
-const bodyLimitFor = (url: string) => (url.includes('/cost-import/') || url.includes('/stock/import') || url.includes('/inbound/v1/stock') ? MAX_IMPORT_BODY_BYTES : MAX_BODY_BYTES);
+/**
+ * Файлы продавца (себестоимость, остатки) и ЛЮБАЯ партия Inbound API: их предел выше, чем у обычного запроса экрана.
+ *
+ * Находка 10 ревью шага 36: `/inbound/v1/orders` в этот список не входил, и объявленный предел в 5000 заказов был
+ * недостижим — 5000 номеров заказов весят ~200 КБ, то есть склад получал 413 вместо ответа. Нашлось замером: предел,
+ * который никто не проверял по времени, не проверяли и по размеру.
+ */
+/**
+ * Находка 6 ревью шага 37: предел выбирается ДО проверки токена — иначе тело пришлось бы читать, чтобы узнать, кто его
+ * шлёт. Пока консоль не смотрела в интернет, это было безразлично; теперь смотрит [Р-159], и аноним, шлющий 48 МиБ на
+ * адрес импорта, занимал бы память процесса до ответа 401. Большой предел даётся только тому, кто ПРЕДЪЯВИЛ вход:
+ * токен или ключ Inbound API. Проверка предъявленного — дальше и в прежнем месте.
+ */
+const bodyLimitFor = (url: string, authorized: boolean) => (authorized && (url.includes('/cost-import/') || url.includes('/stock/import') || url.includes('/inbound/v1/')) ? MAX_IMPORT_BODY_BYTES : MAX_BODY_BYTES);
 
 function send(res: ServerResponse, r: ApiResponse): void {
   if (r.file) {
@@ -1009,12 +1054,28 @@ function send(res: ServerResponse, r: ApiResponse): void {
  * входа именно затем, чтобы живой прогон шёл ЧЕРЕЗ НЕГО. Прогон, зовущий `createStandApi` напрямую, не видит ни предела тела, ни
  * битого JSON — а это ровно тот класс дефекта, ради которого принято Р-136 (на шаге 28 импорт не проходил из-за предела в 64 КиБ).
  */
-export function createStandServer(handle: ReturnType<typeof createStandApi>, locale: Locale = 'de') {
+export function createStandServer(
+  handle: ReturnType<typeof createStandApi>, locale: Locale = 'de',
+  /**
+   * Р-159 (шаг 37): тот же HTTP-слой отдаёт и СОБРАННЫЙ интерфейс — разворачиваемая консоль не поднимает второго сервера
+   * рядом. Адреса API и файлы страницы не пересекаются: всё, что начинается с `/api/` и `/inbound/`, идёт обработчику,
+   * остальное — файлам сборки. Стенд разработчика запускается без этого параметра: интерфейс ему даёт vite.
+   */
+  serveStatic?: (pathname: string) => { status: number; contentType: string; body: Buffer; cacheControl: string } | null,
+) {
   const fallback = messagesFor(locale).ui.server;
   return createServer(async (req, res) => {
+    const pathname = new URL(req.url ?? '/', 'http://console').pathname;
+    if (serveStatic && !pathname.startsWith('/api/') && !pathname.startsWith('/inbound/')) {
+      const file = serveStatic(pathname);
+      if (!file) return send(res, { status: 404, body: { error: { code: 'NOT_FOUND', message: fallback.notFound } } });
+      res.writeHead(file.status, { 'content-type': file.contentType, 'cache-control': file.cacheControl });
+      res.end(file.body);
+      return;
+    }
     let size = 0;
     const chunks: Buffer[] = [];
-    const limit = bodyLimitFor(req.url ?? '');
+    const limit = bodyLimitFor(req.url ?? '', Boolean(req.headers.authorization));
     for await (const chunk of req) {
       size += (chunk as Buffer).length;
       if (size > limit) {
@@ -1085,56 +1146,22 @@ async function main(): Promise<void> {
       }),
     });
     /**
-     * Р-151 (шаг 34): демо-тенант для показа продавцу — `REPRACER_DEMO=on`. Тот же мир, что в живом прогоне онбординга, но
-     * уже настроенный (себестоимость, границы, стратегия, движок включён), и время в нём ИДЁТ — НАСТОЯЩЕЕ, секунда в секунду.
+     * Р-151 (шаг 34): демо-тенант для показа продавцу — `REPRACER_DEMO=on`: уже настроенный мир (себестоимость, границы,
+     * стратегия, движок включён), время в нём НАСТОЯЩЕЕ, секунда в секунду. Ускорять его нельзя (ревью шага 34, находка 9).
      *
-     * Ускорять его нельзя (ревью шага 34, находка 9): у базы часы свои, и всё, что она считает по `now()` — действие
-     * себестоимости, сроки хранения, закрытие суток, — разошлось бы с путём решения, убежавшим вперёд. Поэтому демо живёт в
-     * настоящем: такт планировщика — 30 секунд, волна цен — раз в два часа. Рост данных — OQ-214.
+     * Шаг 37 [Р-159]: тот же мир поднимает разворачиваемая консоль, поэтому он живёт одним модулем, а не двумя копиями.
      */
     if (process.env.REPRACER_DEMO === 'on') {
-      const { demoWorld, DEMO_OFFERS, DEMO_COMPETITORS_PER_OFFER } = await import('@repracer/contract-tests/live');
-      const { PgPricingStore, PgStockStore } = await import('@repracer/pricing-store-pg');
-      const { createStockPipeline } = await import('@repracer/stock-sync');
-      const { runConfiguredWorker } = await import('./bulk-worker.ts');
-      const demo = await demoWorld({
-        tag: 3400, startIso: new Date().toISOString(), bare: false, appPool: pool, adminPool, provisioningPool: role('svc_provisioning', 1),
-        dispatcherPool: role('svc_dispatcher', 2), schedulerPool: role('svc_scheduler', 3), exporterPool: role('svc_exporter', 2), stockPool: role('svc_stock', 2),
-        memberUsers, memberEmails: STAND_EMAILS, joinMember: pgStandJoinMember(adminPool, directory),
-        wallClock: true,
+      const { startDemoWorld } = await import('./demo-world.ts');
+      const started = await startDemoWorld({
+        pools: {
+          app: pool, admin: adminPool, provisioning: role('svc_provisioning', 1), dispatcher: role('svc_dispatcher', 2),
+          scheduler: role('svc_scheduler', 3), exporter: role('svc_exporter', 2), stock: role('svc_stock', 2), bulkWorker: role('svc_bulk_worker', 2),
+        },
+        pgUrl: url, tag: 3400, memberUsers, memberEmails: STAND_EMAILS,
+        joinMember: pgStandJoinMember(adminPool, directory),
       });
-      const seeded = demo.live.seeded;
-      const store = new PgPricingStore(pool, { adminPool, bulkWorkerPool: role('svc_bulk_worker', 2) });
-      // Шаг 35: остатки демо — те же роли, что в работе; записи остатка отправляет диспетчер мира
-      const stock = new PgStockStore({ adminPool, stockPool: role('svc_stock', 2) });
-      const stockPipeline = createStockPipeline({ store: stock, now: () => demo.clock.iso() as never, sleep: demo.clock.sleep, dispatchScope: (t, ws) => demo.live.dispatchScope(t, ws) });
-      const accounts = [{ channelAccountId: seeded.channelAccountId, channel: 'KAUFLAND', marketplaces: ['de'], haltRelease: 'SAMPLE' as const }];
-      const nowIso = () => demo.clock.iso();
-      const descriptor = {
-        id: 'demo/kaufland', title: 'Demo · Kaufland (Simulator)', tenantId: seeded.tenantId, accounts,
-        description: `${DEMO_OFFERS} Angebote, je ${DEMO_COMPETITORS_PER_OFFER} Wettbewerber: Drift, Unterbieter, Preiswellen`,
-      };
-      worlds.push({
-        id: descriptor.id, title: descriptor.title, description: descriptor.description,
-        tenantId: seeded.tenantId, accounts, identityTenantId: seeded.tenantId, membershipAlias: (id) => id, failures: [],
-        store: store as never, stock, stockPipeline, pipeline: demo.live.pipelineForDbIds() as never, clock: { iso: nowIso, nowMs: () => demo.clock.nowMs() } as never,
-        callContext: (channelAccountId) => ({ tenantId: seeded.tenantId as never, channelAccountId: channelAccountId as never, correlationId: 'stand-demo', deadline: nowIso() }),
-        view: async (viewer) => ({
-          ...descriptor, now: nowIso(), viewer: { ...viewer }, state: await store.readConsoleState(seeded.tenantId, nowIso() as never),
-        }) as never,
-      });
-      /**
-       * Массовые операции демо выполняет исполнитель — иначе импорт, границы, стратегия и включение остались бы «в очереди»
-       * навсегда, и показать продавцу путь онбординга было бы нельзя. Тенант демо заводится при старте, поэтому настройки
-       * исполнителя собираются здесь же, а не читаются из файла.
-       */
-      void runConfiguredWorker({ pgUrl: url, idleMs: 500, worlds: [{ descriptor, now: 'WALL_CLOCK' }] })
-        .catch((error: unknown) => console.error('demo bulk worker stopped:', error instanceof Error ? error.message : error));
-      // Время демо идёт, пока жив стенд. Конец прогона — тоже событие: молча остановившееся время выглядело бы как поломка цен
-      void demo.advance(24 * 365)
-        .then(() => console.error('demo world reached the end of its run: prices no longer move — restart the stand'))
-        .catch((error: unknown) => console.error('demo world stopped:', error instanceof Error ? error.message : error));
-      console.log(`demo tenant ready: ${DEMO_OFFERS} offers, ${DEMO_COMPETITORS_PER_OFFER} competitors each`);
+      worlds.push(started.world);
     }
     handle = createStandApi(worlds, { authenticator: createAuthenticator({ ...verify, directory }), ...(simulator ? { simulator } : {}) });
   } else {

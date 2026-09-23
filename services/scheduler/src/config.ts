@@ -19,10 +19,14 @@ export interface SchedulerConfig {
   exporterPgUrl: string;
   clickHouse: { url: string; ingest: { user: string; password: string }; verifier: { user: string; password: string } };
   /**
-   * Р-156 (шаг 36): куда и от кого слать письма владельцу. Без настройки процесс не стартует, кроме явного
-   * `REPRACER_SCHEDULER_MAIL=off`: молча не доставлять алерты — худший исход, чем не запуститься.
+   * Р-156 (шаг 36): куда и от кого слать письма владельцу. Шаг 37, задача D: по умолчанию — СУХОЙ РЕЖИМ (`mail: null`,
+   * `mailOff: false`): письмо собирается целиком, никуда не уходит, и отметка доставки говорит это прямо (`DRY_RUN`).
+   * Провайдер подключается ключом, адресом API и доменом отправителя — кода это не меняет (OQ-224).
+   * `REPRACER_SCHEDULER_MAIL=off` — доставки нет вовсе: алерты копятся недоставленными, и это видно запросом.
    */
   mail: { apiUrl: string; apiKey: string; from: string } | null;
+  /** Доставка выключена ЦЕЛИКОМ (явным `off`), а не идёт всухую */
+  mailOff: boolean;
   /** Кому писать о событиях ПЛАТФОРМЫ (у них нет тенанта): без адреса они копятся недоставленными [Р-156] */
   operatorEmail: string | null;
   /** svc_alert_delivery: доставка читает алерты всех тенантов и адрес владельца, больше ничего (0120) */
@@ -53,19 +57,42 @@ export function loadConfig(env: Env = process.env, read: (path: string) => strin
   const access = env.REPRACER_KAUFLAND_BUY_BOX_CHANGED_ACCESS ?? 'NOT_GRANTED';
   if (access !== 'GRANTED' && access !== 'NOT_GRANTED') throw new ConfigError('CONFIG_INVALID: REPRACER_KAUFLAND_BUY_BOX_CHANGED_ACCESS must be GRANTED or NOT_GRANTED');
   const mailOff = env.REPRACER_SCHEDULER_MAIL === 'off';
-  const mail = mailOff ? null : {
-    apiUrl: required(env.REPRACER_MAIL_API_URL, 'REPRACER_MAIL_API_URL (or REPRACER_SCHEDULER_MAIL=off)'),
-    apiKey: required(secret(env, 'REPRACER_MAIL_API_KEY', read), 'REPRACER_MAIL_API_KEY (or REPRACER_SCHEDULER_MAIL=off)'),
-    from: required(env.REPRACER_MAIL_FROM, 'REPRACER_MAIL_FROM (or REPRACER_SCHEDULER_MAIL=off)'),
+  /**
+   * Шаг 37, задача D. Настроек провайдера нет — идём всухую, а не отказываемся стартовать: у проекта нет ни ключа, ни
+   * домена (OQ-224), и требовать их значило бы запретить запуск всем, кто ещё не завёл провайдера. Но «настроено
+   * наполовину» — это опечатка, а не режим: назвал одну переменную — называй все три.
+   */
+  /**
+   * «Настроено» решают ЗНАЧЕНИЯ, которые дал оператор, а не имена переменных (находка 3 ревью шага 37): compose
+   * безусловно называет `REPRACER_MAIL_API_KEY_FILE`, и по наличию имени сухой режим был бы недостижим — процесс
+   * отказывался бы стартовать и винил бы оператора в переменной, которую задал сам compose.
+   */
+  const namedMail = (['REPRACER_MAIL_API_URL', 'REPRACER_MAIL_FROM'] as const).filter((v) => env[v]);
+  const dry = !mailOff && namedMail.length === 0;
+  if (!mailOff && !dry && namedMail.length === 1) {
+    const missing = namedMail[0] === 'REPRACER_MAIL_API_URL' ? 'REPRACER_MAIL_FROM' : 'REPRACER_MAIL_API_URL';
+    throw new ConfigError(`CONFIG_MISSING: ${missing} (почта настраивается целиком: ${namedMail[0]} уже задано)`);
+  }
+  const mail = mailOff || dry ? null : {
+    apiUrl: required(env.REPRACER_MAIL_API_URL, 'REPRACER_MAIL_API_URL'),
+    apiKey: required(secret(env, 'REPRACER_MAIL_API_KEY', read), 'REPRACER_MAIL_API_KEY'),
+    from: required(env.REPRACER_MAIL_FROM, 'REPRACER_MAIL_FROM'),
   };
   if (mail && !mail.apiUrl.startsWith('https://')) throw new ConfigError('CONFIG_INVALID: REPRACER_MAIL_API_URL must be https');
   // Адрес оператора обязателен вместе с почтой: события платформы иначе копятся недоставленными и вытесняют чужие
-  const operatorEmail = mail ? required(env.REPRACER_OPERATOR_EMAIL, 'REPRACER_OPERATOR_EMAIL (or REPRACER_SCHEDULER_MAIL=off)') : null;
+  /**
+   * Адрес оператора обязателен при НАСТОЯЩЕЙ отправке: без него событие платформы некому отправить, и оно копилось бы
+   * недоставленным. В сухом режиме его может не быть — тогда платформенное письмо честно отмечается `NO_OWNER_EMAIL`,
+   * и это видно запросом (находка 3 ревью шага 37: требовать его от того, кто ещё не завёл провайдера, — тот же
+   * отказ стартовать, от которого шаг уходил).
+   */
+  const operatorEmail = mail ? required(env.REPRACER_OPERATOR_EMAIL, 'REPRACER_OPERATOR_EMAIL') : env.REPRACER_OPERATOR_EMAIL || null;
   return {
     owner: env.REPRACER_SCHEDULER_OWNER || `${hostname()}-${process.pid}`,
     mail,
+    mailOff,
     operatorEmail,
-    alertDeliveryPgUrl: mail ? required(secret(env, 'REPRACER_ALERT_DELIVERY_PG_URL', read), 'REPRACER_ALERT_DELIVERY_PG_URL (or REPRACER_SCHEDULER_MAIL=off)') : null,
+    alertDeliveryPgUrl: mailOff ? null : required(secret(env, 'REPRACER_ALERT_DELIVERY_PG_URL', read), 'REPRACER_ALERT_DELIVERY_PG_URL (or REPRACER_SCHEDULER_MAIL=off)'),
     // 30 с по умолчанию: наибольшая пауза; сроки работ короче такта процесс ловит пробуждением к сроку
     tickMs: int(env, 'REPRACER_SCHEDULER_TICK_MS', 30_000, 1_000, 300_000),
     schedulerPgUrl: required(secret(env, 'REPRACER_SCHEDULER_PG_URL', read), 'REPRACER_SCHEDULER_PG_URL'),

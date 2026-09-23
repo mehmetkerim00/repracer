@@ -210,7 +210,17 @@ test('Р-127: каждый разворачиваемый процесс отм�
   for (const name of readdirSync(new URL('deploy/', root))) {
     // `deploy/ci` — надстройки, которыми сборка поднимает остальные развёртывания, а не процесс
     if (name === 'ci' || !existsSync(new URL(`deploy/${name}/compose.yaml`, root))) continue;
-    const compose = readFileSync(new URL(`deploy/${name}/compose.yaml`, root), 'utf8');
+    /**
+     * Шаг 37 (находка 10 ревью): профиль берёт сервис ЧУЖОГО развёртывания через `extends`, и его `command:` виден
+     * только там. Без раскрытия `extends` правило считало бы, что в профиле процессов продукта нет, — то есть второй
+     * процесс, добавленный так же, прошёл бы мимо требования отмечаться. Это находка 7 ревью шага 33 в новой форме.
+     */
+    const readCompose = (file: string): string => {
+      const text = readFileSync(new URL(file, root), 'utf8');
+      const included = [...text.matchAll(/extends:\s*\n\s*file:\s*([^\s#]+)/g)].map((x) => x[1]!);
+      return [text, ...included.map((rel) => readCompose(`deploy/${name}/${rel}`.replace(/[^/]+\/\.\.\//g, '')))].join('\n');
+    };
+    const compose = readCompose(`deploy/${name}/compose.yaml`);
     /**
      * Наш процесс в развёртывании узнаётся по тому, что оно запускает ФАЙЛ РЕПОЗИТОРИЯ. Шаг 36: профиль production
      * состоит из чужих образов (обратный прокси, копия базы) — отмечаться там нечему, и требовать отметку не от кого.
@@ -223,19 +233,26 @@ test('Р-127: каждый разворачиваемый процесс отм�
      * ИМЕНОВАННОЕ, с причиной, а не «в compose есть слово image», которое истинно всегда.
      */
     const ours = [...compose.matchAll(/(?:^|[\s"'[])((?:services|apps|packages|scripts|tests)\/[\w./-]+\.(?:ts|mjs|js|sh))/gm)].map((x) => x[1]!);
-    const entryLike = ours.filter((f) => /\/(?:main|worker|server)\.[\w]+$/.test(f) || /src\/main\.ts$/.test(f));
+    /**
+     * Точка входа — то, что развёртывание ЗАПУСКАЕТ (`command:` или `entrypoint:`), а не файл с подходящим именем
+     * (шаг 37): консоль запускается файлом `apps/console/server/console-service.ts`, и правило по имени его не видело
+     * бы — то есть новый разворачиваемый процесс прошёл бы мимо требования отмечаться.
+     */
+    const launched = new Set([...compose.matchAll(/^\s*(?:command|entrypoint):.*$/gm)]
+      .flatMap((line) => [...line[0].matchAll(/((?:services|apps|packages|scripts|tests)\/[\w./-]+\.(?:ts|mjs|js|sh))/g)].map((x) => x[1]!)));
+    const entryLike = ours.filter((f) => launched.has(f) && !/\.sh$/.test(f));
     if (entryLike.length === 0) {
       /**
-       * Шаг 36: `deploy/production` — обратный прокси и суточная копия базы, оба чужими образами. Наш код там есть
-       * (`backup-loop.sh`), но это не ПРОЦЕСС продукта: он не ходит в каналы и не ведёт цены, отмечаться ему нечем.
-       * Список именованный: новый профиль с процессом продукта сюда не попадёт и потребует отметку.
+       * Шаг 37: именованных исключений больше НЕТ. Профиль production раньше состоял из чужих образов, а теперь берёт
+       * консоль через `extends` — и её точка входа видна правилу (находка 10 ревью шага 37). Развёртывание без нашего
+       * процесса вовсе — случай, которого сегодня не существует, и притворяться, что он предусмотрен, незачем.
        */
-      assert.deepEqual([name], ['production'], `развёртывание ${name} не запускает процесс продукта — это должно быть названо в правиле`);
-      assert.ok(ours.every((f) => /\.sh$/.test(f)), `в профиле ${name} наш код — только вспомогательные скрипты: ${ours.join(', ')}`);
-      continue;
+      assert.fail(`развёртывание ${name} не запускает ни одного нашего процесса: ${ours.join(', ') || 'нашего кода в нём нет'}`);
     }
     for (const main of entryLike) {
-      assert.match(main, /^services\/[\w-]+\/src\/main\.ts$/, `развёртывание ${name} запускает наш код точкой входа процесса: ${main}`);
+      // Процессы бэкенда живут в `services/<имя>/src/main.ts`, консоль — в своём приложении: оба варианта названы явно
+      assert.match(main, /^(?:services\/[\w-]+\/src\/main\.ts|apps\/[\w-]+\/server\/[\w-]+\.ts)$/,
+        `развёртывание ${name} запускает наш код точкой входа процесса: ${main}`);
       entryPoints.push({ deployment: name, main });
     }
   }
@@ -243,9 +260,10 @@ test('Р-127: каждый разворачиваемый процесс отм�
 
   const silent: string[] = [];
   for (const { deployment, main } of entryPoints) {
-    const dir = main.slice(0, main.lastIndexOf('/src/'));
+    // Настройки процесса лежат рядом с его точкой входа: `services/<имя>/src/config.ts` или `apps/<имя>/server/config.ts`
+    const dir = main.slice(0, main.lastIndexOf('/'));
     const source = readFileSync(new URL(main, root), 'utf8');
-    const configPath = `${dir}/src/config.ts`;
+    const configPath = `${dir}/config.ts`;
     const config = existsSync(new URL(configPath, root)) ? readFileSync(new URL(configPath, root), 'utf8') : '';
     // Процесс обязан СТАВИТЬ отметку и обязан уметь объяснить её отсутствие: выключение — только явное
     const beats = /createHeartbeat\s*\(/.test(source) && /heartbeat\.beat\s*\(/.test(source);
@@ -254,7 +272,7 @@ test('Р-127: каждый разворачиваемый процесс отм�
       silent.push(`${deployment} (${main}): отметка ${beats ? 'есть' : 'НЕ СТАВИТСЯ'}, явное выключение ${optOutIsExplicit ? 'есть' : 'ОТСУТСТВУЕТ'}`);
     }
     // Отметка у всех одна и та же: вторая реализация разойдётся с общей [Р-145]
-    assert.ok(!existsSync(new URL(`${dir}/src/heartbeat.ts`, root)), `${deployment}: своя реализация отметки`);
+    assert.ok(!existsSync(new URL(`${dir}/heartbeat.ts`, root)), `${deployment}: своя реализация отметки`);
   }
   assert.deepEqual(silent, [], 'разворачиваемый процесс без внешней отметки: его остановку никто не заметит [Р-127]');
 });
@@ -292,6 +310,69 @@ test('Р-146: ссылка из документации ведёт на сущ�
     }
   }
   assert.deepEqual(broken, [], 'ссылка из документации ведёт на несуществующий файл');
+});
+
+/**
+ * Находка 1 ревью шага 36: то же правило смотрело ТОЛЬКО `.md`, и профиль production в двух местах отсылал к
+ * `scripts/backup-restore-check.mjs`, которого нет. Файлы развёртывания и скрипты оболочки читают в тот же момент, что и
+ * документацию, — когда что-то не поднялось, — и ссылка в никуда там стоит ровно столько же времени.
+ *
+ * Ссылка здесь — не markdown, а путь репозитория внутри комментария или команды: `scripts/…`, `deploy/…`, `packages/…`.
+ * Файл окружения (`*.env`) в репозитории отсутствует намеренно (`.gitignore`: секреты не коммитятся) — его образец
+ * `*.env.example` и есть то, что должно существовать.
+ */
+test('Р-146: путь репозитория в развёртывании и скрипте ведёт на существующее место (находка 1 ревью шага 36)', async () => {
+  const { readdirSync, readFileSync, existsSync, statSync } = await import('node:fs');
+  const root = new URL('../../', import.meta.url);
+  const TOP = 'scripts|deploy|packages|apps|services|migrations|docs|tests|infra|schemas';
+  const REF = new RegExp(`(?:^|[\\s"'\`(<\\[=,])((?:${TOP})/[A-Za-z0-9._/-]+)`, 'g');
+
+  /**
+   * СОБИРАЕМЫЕ пути: их в репозитории нет и быть не должно (`.gitignore`), они появляются сборкой. Список именованный и
+   * с причиной — иначе правило либо краснеет на чистом клоне (так и случилось в CI шага 37: `apps/console/dist`
+   * существовал только у того, кто собирал интерфейс), либо молча разрешает любой несуществующий путь.
+   */
+  const BUILT = ['apps/console/dist'];
+  /** Путь, названный текстом, обязан существовать — сам, как образец для оператора или как результат сборки */
+  const resolves = (target: string) => existsSync(new URL(target, root)) || existsSync(new URL(`${target}.example`, root))
+    || BUILT.some((b) => target === b || target.startsWith(`${b}/`));
+  const refsOf = (text: string) => [...text.matchAll(REF)].map(([, p]) => p!.replace(/[.,:;)\]]+$/, ''));
+
+  /**
+   * Положительный контроль [Р-94]: детектор обязан отличать живой путь от мёртвого и не считать ссылкой то, что ею не
+   * является. Без него пустой список нарушителей не значит ничего — ровно так правило и пропустило находку 1.
+   */
+  const sample = 'запускается scripts/test-all.mjs, проверка — scripts/backup-restore-check.mjs (см. deploy/production/Caddyfile)';
+  assert.deepEqual(refsOf(sample), ['scripts/test-all.mjs', 'scripts/backup-restore-check.mjs', 'deploy/production/Caddyfile']);
+  assert.deepEqual(refsOf(sample).filter((p) => !resolves(p)), ['scripts/backup-restore-check.mjs'], 'детектор находит мёртвый путь');
+  assert.deepEqual(refsOf('образ postgres/17 и путь /var/lib/postgresql/data ссылками не считаются'), []);
+  // Собираемый путь разрешён, но только он сам: опечатка в нём — по-прежнему мёртвая ссылка
+  assert.deepEqual(refsOf('интерфейс лежит в apps/console/dist/index.html, а не в apps/console/build/index.html').filter((x) => !resolves(x)),
+    ['apps/console/build/index.html'], 'собираемый путь разрешён, опечатка в нём — нет');
+
+  const files: string[] = [];
+  const walk = (rel: string) => {
+    for (const name of readdirSync(new URL(rel, root))) {
+      if (name === 'node_modules' || name === '.git') continue;
+      const child = `${rel}${name}`;
+      if (statSync(new URL(child, root)).isDirectory()) walk(`${child}/`);
+      else if (rel.startsWith('deploy/') || name.endsWith('.sh')) files.push(child);
+    }
+  };
+  walk('');
+  assert.ok(files.length > 10, `файлов развёртывания и скриптов найдено: ${files.length}`);
+
+  const found: string[] = [];
+  const broken: string[] = [];
+  for (const file of files) {
+    for (const target of refsOf(readFileSync(new URL(file, root), 'utf8'))) {
+      found.push(target);
+      if (!resolves(target)) broken.push(`${file} → ${target}`);
+    }
+  }
+  // Второй положительный контроль: на настоящем дереве правило что-то ВИДИТ, а не молчит из-за неверного обхода
+  assert.ok(found.length > 20, `путей репозитория в развёртываниях и скриптах найдено: ${found.length}`);
+  assert.deepEqual(broken, [], 'развёртывание или скрипт ссылается на несуществующее место репозитория');
 });
 
 /**

@@ -28,6 +28,8 @@ export interface SessionView {
   user: { subject: string; email: string | null } | null;
   locale: Locale;
   simulator: Array<{ role: MemberRole; label: string }> | null;
+  /** Р-160: публичное демо включено — на странице входа есть кнопка «посмотреть демо», вход без регистрации */
+  demoGuest: boolean;
 }
 
 /** Токен имитатора поставщика стенда */

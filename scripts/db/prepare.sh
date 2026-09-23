@@ -29,6 +29,9 @@ PGUSER=svc_app "${PSQL[@]}" -d "$DB" -f tests/db/smoke_path.sql
 # Р-139 (шаг 30): защиты фоновых заданий — создание человеком административной ролью, ведение ролью исполнителя
 PGUSER=svc_admin "${PSQL[@]}" -d "$DB" -f tests/db/smoke_bulk_jobs.sql
 PGUSER=svc_admin "${PSQL[@]}" -d "$DB" -f tests/db/smoke_onboarding.sql
+# Шаг 37 [Р-160]: гость публичного демо — заводит роль онбординга, а всё, чего он не может, проверяет административная
+PGUSER=svc_onboarding "${PSQL[@]}" -d "$DB" -f tests/db/smoke_guest.sql
+PGUSER=svc_admin "${PSQL[@]}" -d "$DB" -f tests/db/smoke_guest_admin.sql
 "${PSQL[@]}" -d "$DB" -f tests/db/smoke_r65.sql
 # Р-103: у каждой append-only таблицы есть строка, изменение отклоняет триггер неизменяемости (откатываемая транзакция)
 "${PSQL[@]}" -d "$DB" -f tests/db/smoke_append_only.sql

@@ -236,9 +236,19 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
   /**
    * Р-155 (шаг 36): готовая к отправке запись может быть не отправлена сразу, а ОТДАНА обходу для пакета. Порядок и
    * инвариант «одна запись в полёте на единицу» [Р-64, ADR-0005] это не трогает: запись уже захвачена (DISPATCHED),
-   * и в одном пакете не может оказаться двух записей одной единицы — их выдаёт `claimNext`, по одной на единицу.
+   * и на ВХОДЕ пакета двух записей одной единицы быть не может — их выдаёт `claimNext`, по одной на единицу. Группирует
+   * же записи адаптер, и его ошибку ловит проверка в `sendBatched` (см. её комментарий).
    */
-  interface CollectedClaim { tenantId: string; writeScopeId: string; channelAccountId: string; write: FieldWrite; report: ScopeDispatchReport }
+  interface CollectedClaim {
+    tenantId: string; writeScopeId: string; channelAccountId: string; write: FieldWrite; report: ScopeDispatchReport;
+    /**
+     * Итог записи ГЛАЗАМИ ХРАНИЛИЩА (находка 5 ревью шага 36). Освободилось ли место единицы и ждёт ли следующая запись —
+     * знает база (`write_scope_sync_state`), и она отвечает это в `recordOutcome`. Первая редакция выводила то же самое из
+     * СТРОКИ ОТЧЁТА («статус не DISPATCHED и не ACCEPTED»), то есть пересказывала правило базы в диспетчере: разойдясь,
+     * они разошлись бы молча — обход просто перестал бы давать единице следующий круг.
+     */
+    recorded: RecordedOutcome | null;
+  }
 
   /**
    * Р-155: отправка ПАКЕТОМ. Сколько записей уходит одним запросом, решает адаптер канала (`planDispatch`): у Kaufland
@@ -264,8 +274,15 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
       const batches = [...plan.batches];
       let nextBatch = 0;
       const sendOne = async (batch: (typeof batches)[number]) => {
-        // Пакет с записью одной единицы дважды невозможен: `claimNext` выдаёт по одной записи на единицу, но правило
-        // ядра проверяется и здесь — молчаливое нарушение порядка дороже отказа
+        /**
+         * Две записи ОДНОЙ единицы в одном пакете — нарушение порядка [Р-24, ADR-0005]: канал применит их в своём
+         * порядке, и старая версия перезапишет новую.
+         *
+         * Находка 7 ревью шага 36 звала ветку непроваливаемой, потому что `claimNext` выдаёт по одной записи на единицу.
+         * Это верно про ВХОД, но пакеты собирает не ядро, а АДАПТЕР канала (`planDispatch`): достижимый случай — адаптер,
+         * который сгруппировал неверно. Проверяется ровно так (`dispatcher.test.ts`: «адаптер положил в пакет две записи
+         * одной единицы»): к каналу обращения нет, обе записи отказаны причиной, и повтор уйдёт по одной.
+         */
         const scopes = new Set(batch.items.map((w) => w.writeScope.writeScopeId));
         if (scopes.size !== batch.items.length) {
           for (const w of batch.items) outcomes.set(w.channelWriteId, { channelWriteId: w.channelWriteId, status: 'REJECTED', error: coreError('VALIDATION', 'PERMANENT', 'batch holds two writes of one scope') });
@@ -295,6 +312,7 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
         // Адаптер не запланировал запись и не отказал: к каналу обращения не было — повтор безопасен
         ?? { channelWriteId: writeId, status: 'REJECTED' as const, error: coreError('UNKNOWN', 'TRANSIENT', 'adapter planned no batch for the write') };
       const recorded = await deps.store.recordOutcome(claim.tenantId, claim.write, outcome, deps.now(), policy);
+      claim.recorded = recorded;
       claim.report.steps.push({
         action: 'DISPATCHED', channelWriteId: claim.write.channelWriteId, version: claim.write.version, attemptNo: claim.write.attemptNo,
         outcome: outcome.status, recorded: recorded.status, reason: recorded.reason,
@@ -339,7 +357,7 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
         case 'DISPATCH': {
           if (collect) {
             // Запись захвачена и ждёт пакета: отправит её обход, он же запишет итог и продолжит единицу
-            collect({ tenantId, writeScopeId, channelAccountId: claim.channelAccountId, write: claim.write, report });
+            collect({ tenantId, writeScopeId, channelAccountId: claim.channelAccountId, write: claim.write, report, recorded: null });
             return report;
           }
           const outcome = await send(tenantId, claim.channelAccountId, claim.write);
@@ -367,6 +385,8 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
       });
       const unique = [...new Map(due.map((d) => [`${d.tenantId}:${d.writeScopeId}`, d])).values()];
       const reports: ScopeDispatchReport[] = [];
+      /** Отчёт единицы по ключу «тенант:единица»: круги дописывают шаги в свой отчёт, а не ищут его перебором */
+      const reportByScope = new Map<string, ScopeDispatchReport>();
       /**
        * Р-155: обход идёт КРУГАМИ. Круг: у каждой единицы берётся её готовая запись (по одной — `claimNext`), готовые
        * записи одного аккаунта уходят пакетами, итоги разносятся по единицам. Единица, освободившаяся после итога,
@@ -399,11 +419,16 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
           }
         };
         await Promise.all(Array.from({ length: Math.max(1, Math.min(options.concurrency ?? 8, pending.length)) }, worker));
-        // Пакеты — по аккаунту канала: у каждого свои учётные данные, свой лимитер и свои правила группировки
+        /**
+         * Пакеты — по аккаунту канала: у каждого свои учётные данные, свой лимитер и свои правила группировки.
+         * Находка 6 ревью шага 36: группировка КОПИРОВАЛА накопленный список на каждую заявку (`[...prev, c]`) — на
+         * каталоге в 10 000 предложений это 50 млн копирований элементов на круг. Накопление в месте, а не копией.
+         */
         const byAccount = new Map<string, CollectedClaim[]>();
         for (const c of collected) {
           const key = `${c.tenantId}:${c.channelAccountId}`;
-          byAccount.set(key, [...(byAccount.get(key) ?? []), c]);
+          const list = byAccount.get(key);
+          if (list) list.push(c); else byAccount.set(key, [c]);
         }
         // Цепочка каждой захваченной единицы держится до записи итога её пакета [находка 11 ревью шага 36]
         const sends = [...byAccount.values()].map((claims) => {
@@ -412,15 +437,24 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
           return sending;
         });
         await Promise.all(sends);
+        /**
+         * Отчёт единицы за круг приклеивается к её отчёту за обход. Находка 6 ревью шага 36: поиск `find` по списку
+         * отчётов делал круг квадратичным — 10 000 единиц давали до 50 млн сравнений НА КРУГ, и это при восьми кругах.
+         * Адрес отчёта — тот же ключ `тенант:единица`, по которому обход уже группирует всё остальное.
+         */
         for (const r of roundReports) {
-          const existing = reports.find((x) => x.tenantId === r.tenantId && x.writeScopeId === r.writeScopeId);
-          if (existing) existing.steps.push(...r.steps); else reports.push(r);
+          const key = `${r.tenantId}:${r.writeScopeId}`;
+          const existing = reportByScope.get(key);
+          if (existing) existing.steps.push(...r.steps);
+          else { reportByScope.set(key, r); reports.push(r); }
         }
-        // Следующий круг — только единицы, у которых место освободилось и осталась работа
-        const freed = new Set(collected
-          .filter((c) => c.report.steps.some((step) => step.action === 'DISPATCHED' && step.recorded !== 'DISPATCHED' && step.recorded !== 'ACCEPTED'))
-          .map((c) => `${c.tenantId}:${c.writeScopeId}`));
-        pending = pending.filter((item) => freed.has(`${item.tenantId}:${item.writeScopeId}`));
+        /**
+         * Следующий круг — только единицы, у которых место освободилось И осталась работа. Это отвечает база
+         * (`queuedWaiting` = место свободно и в очереди ждёт запись), а не пересказ её правила по строке отчёта
+         * (находка 5 ревью шага 36).
+         */
+        const waiting = new Set(collected.filter((c) => c.recorded?.queuedWaiting === true).map((c) => `${c.tenantId}:${c.writeScopeId}`));
+        pending = pending.filter((item) => waiting.has(`${item.tenantId}:${item.writeScopeId}`));
       }
       return { due: unique.length, reports };
     },

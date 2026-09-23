@@ -42,6 +42,11 @@ SELECT security.provision_tenant('a0000000-0000-0000-0000-00000000000a', 'Tenant
 SELECT security.provision_tenant('b0000000-0000-0000-0000-00000000000b', 'Tenant B', 'EU', '[
   {"membershipId": "b2000000-0000-0000-0000-00000000000b", "userId": "b1000000-0000-0000-0000-00000000000b", "email": "owner-b@example.test", "role": "OWNER", "mfaEnabled": true}
 ]'::jsonb);
+-- Шаг 37 [Р-160, Р-151]: демо-тенант — обычный клиентский тенант с признаком демо, заданным ПРИ СОЗДАНИИ (0115).
+-- Он нужен смоуку гостя: гостевое членство существует только в демо-тенанте, и проверить это можно только имея оба
+SELECT security.provision_tenant('d0000000-0000-0000-0000-00000000000d', 'Demo tenant', 'EU', '[
+  {"membershipId": "d2000000-0000-0000-0000-00000000000d", "userId": "d1000000-0000-0000-0000-00000000000d", "email": "owner-demo@example.test", "role": "OWNER", "mfaEnabled": true}
+]'::jsonb, true);
 DO $$ BEGIN RAISE NOTICE 'PASS accept | tenants A and B provisioned with their owners (Р-90)'; END $$;
 
 -- Р-60, Р-94: тенант региона US в базе EU отклоняет именно проверка региона
