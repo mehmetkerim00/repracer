@@ -97,6 +97,8 @@ export function nextNineUtc(nowMs: number = Date.now()): string {
 export interface DemoWorld {
   live: KauflandLiveWorld;
   clock: VirtualClock;
+  /** Остановить ход демо: текущий `advance` завершается после такта [Р-160] */
+  stop(): void;
   /** Прогнать демо вперёд на N виртуальных часов настоящим планировщиком: опрос конкурентов, решения, записи в канал */
   advance(hours: number): Promise<void>;
 }
@@ -152,8 +154,15 @@ export async function demoWorld(input: {
     // Заказы канала → резервации → пересчёт → записи: работа `order-lines` планировщика ведёт конвейер остатков мира
     ...(live.stockPipeline ? { stock: { syncOrders: (_a, ctx, since) => live.syncOrdersForDbIds(ctx, since) } } : {}),
   };
+  /**
+   * Шаг 37 [Р-160]: демо можно ОСТАНОВИТЬ, не убивая процесс. Разворачиваемая консоль пересеивает демо по расписанию:
+   * старый мир останавливается, новый заводится рядом. Без этого единственным способом пересева был бы перезапуск
+   * процесса, и консоль на минуту переставала бы отвечать всем, включая продавцов.
+   */
+  let stopRequested = false;
   return {
     live, clock,
+    stop() { stopRequested = true; },
     async advance(hours) {
       const endMs = clock.nowMs() + hours * HOUR;
       const scheduler = createScheduler({
@@ -163,7 +172,7 @@ export async function demoWorld(input: {
       const running = runScheduler(scheduler, {
         tickMs: 30_000, clockMs: () => clock.nowMs(), logger: { log: () => {} },
         sleep: async (ms) => { await clock.sleep(ms); await live.betweenTicks(); },
-        shouldStop: () => clock.nowMs() >= endMs,
+        shouldStop: () => stopRequested || clock.nowMs() >= endMs,
       });
       await running.finished;
     },

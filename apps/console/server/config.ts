@@ -77,8 +77,9 @@ export function loadConsoleConfig(env: Env = process.env, read: (path: string) =
   }
 
   return {
-    port: intFromEnv(env, 'REPRACER_CONSOLE_PORT', 4319, 1, 65_535),
-    metricsPort: intFromEnv(env, 'REPRACER_CONSOLE_METRICS_PORT', 9467, 1, 65_535),
+    // 0 — порт выдаёт система: так живой прогон поднимает ТОТ ЖЕ процесс, не занимая заранее известный порт
+    port: intFromEnv(env, 'REPRACER_CONSOLE_PORT', 4319, 0, 65_535),
+    metricsPort: intFromEnv(env, 'REPRACER_CONSOLE_METRICS_PORT', 9467, 0, 65_535),
     distDir: requiredValue(env.REPRACER_CONSOLE_DIST, 'REPRACER_CONSOLE_DIST'),
     locale,
     publicDemo,

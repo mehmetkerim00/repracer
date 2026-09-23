@@ -64,11 +64,17 @@ export const PIPELINE_CONVERSIONS: ReadonlyArray<{ file: string; kaufland: strin
     file: k, kaufland: k, id: `amazon/pipeline/${k.replace(/^pipeline-|\.json$/g, '')}`,
     title: k.includes('queue') ? 'Вторая цена ждёт первую в полёте и не теряется' : 'Устаревшая ждущая цена вытесняется с причиной',
     patch: (s: Scenario) => {
-      s.description += ' Amazon: последняя отправка обхода — ACCEPTED без применения, единица остаётся в полёте до обратного чтения, поэтому шага IDLE нет.';
+      s.description += ' Amazon: последняя отправка обхода — ACCEPTED без применения, единица остаётся в полёте до обратного чтения (на Kaufland она в этот момент уже свободна).';
       const step = s.steps.find((x) => x.id === 'dispatcher-sweep') as { expect: { reports: Array<{ steps: Array<{ action: string; recorded?: string }> }> } };
       const steps = step.expect.reports[0]!.steps;
-      steps.pop();
-      steps[steps.length - 1]!.recorded = 'ACCEPTED';
+      /**
+       * Шаг 37 (находка 5 ревью шага 36): у сценария Kaufland больше нет завершающего шага IDLE — обход не спрашивает
+       * единицу, у которой по ответу хранилища пустая очередь. Патч снимал его здесь `steps.pop()` и после изменения
+       * снял бы саму отправку; теперь он правит ТОЛЬКО исход последней отправки, а лишнего шага нет ни у кого.
+       */
+      const last = steps[steps.length - 1]!;
+      if (last.action !== 'DISPATCHED') throw new Error(`ожидалась последняя отправка обхода, получено ${last.action}`);
+      last.recorded = 'ACCEPTED';
       const writes = (s.expect!.pipeline as PipelineExpect).writes!;
       writes[writes.length - 1]!.status = 'ACCEPTED';
     },

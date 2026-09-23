@@ -295,6 +295,59 @@ test('Р-146: ссылка из документации ведёт на сущ�
 });
 
 /**
+ * Находка 1 ревью шага 36: то же правило смотрело ТОЛЬКО `.md`, и профиль production в двух местах отсылал к
+ * `scripts/backup-restore-check.mjs`, которого нет. Файлы развёртывания и скрипты оболочки читают в тот же момент, что и
+ * документацию, — когда что-то не поднялось, — и ссылка в никуда там стоит ровно столько же времени.
+ *
+ * Ссылка здесь — не markdown, а путь репозитория внутри комментария или команды: `scripts/…`, `deploy/…`, `packages/…`.
+ * Файл окружения (`*.env`) в репозитории отсутствует намеренно (`.gitignore`: секреты не коммитятся) — его образец
+ * `*.env.example` и есть то, что должно существовать.
+ */
+test('Р-146: путь репозитория в развёртывании и скрипте ведёт на существующее место (находка 1 ревью шага 36)', async () => {
+  const { readdirSync, readFileSync, existsSync, statSync } = await import('node:fs');
+  const root = new URL('../../', import.meta.url);
+  const TOP = 'scripts|deploy|packages|apps|services|migrations|docs|tests|infra|schemas';
+  const REF = new RegExp(`(?:^|[\\s"'\`(<\\[=,])((?:${TOP})/[A-Za-z0-9._/-]+)`, 'g');
+
+  /** Путь, названный текстом, обязан существовать — сам или как образец, который оператор копирует */
+  const resolves = (target: string) => existsSync(new URL(target, root)) || existsSync(new URL(`${target}.example`, root));
+  const refsOf = (text: string) => [...text.matchAll(REF)].map(([, p]) => p!.replace(/[.,:;)\]]+$/, ''));
+
+  /**
+   * Положительный контроль [Р-94]: детектор обязан отличать живой путь от мёртвого и не считать ссылкой то, что ею не
+   * является. Без него пустой список нарушителей не значит ничего — ровно так правило и пропустило находку 1.
+   */
+  const sample = 'запускается scripts/test-all.mjs, проверка — scripts/backup-restore-check.mjs (см. deploy/production/Caddyfile)';
+  assert.deepEqual(refsOf(sample), ['scripts/test-all.mjs', 'scripts/backup-restore-check.mjs', 'deploy/production/Caddyfile']);
+  assert.deepEqual(refsOf(sample).filter((p) => !resolves(p)), ['scripts/backup-restore-check.mjs'], 'детектор находит мёртвый путь');
+  assert.deepEqual(refsOf('образ postgres/17 и путь /var/lib/postgresql/data ссылками не считаются'), []);
+
+  const files: string[] = [];
+  const walk = (rel: string) => {
+    for (const name of readdirSync(new URL(rel, root))) {
+      if (name === 'node_modules' || name === '.git') continue;
+      const child = `${rel}${name}`;
+      if (statSync(new URL(child, root)).isDirectory()) walk(`${child}/`);
+      else if (rel.startsWith('deploy/') || name.endsWith('.sh')) files.push(child);
+    }
+  };
+  walk('');
+  assert.ok(files.length > 10, `файлов развёртывания и скриптов найдено: ${files.length}`);
+
+  const found: string[] = [];
+  const broken: string[] = [];
+  for (const file of files) {
+    for (const target of refsOf(readFileSync(new URL(file, root), 'utf8'))) {
+      found.push(target);
+      if (!resolves(target)) broken.push(`${file} → ${target}`);
+    }
+  }
+  // Второй положительный контроль: на настоящем дереве правило что-то ВИДИТ, а не молчит из-за неверного обхода
+  assert.ok(found.length > 20, `путей репозитория в развёртываниях и скриптах найдено: ${found.length}`);
+  assert.deepEqual(broken, [], 'развёртывание или скрипт ссылается на несуществующее место репозитория');
+});
+
+/**
  * Шаг 36: прогон, утверждающий СЕКУНДЫ, шёл в одном процессе node с соседями по рабочему пространству и мерил их нагрузку —
  * предпросмотр стратегии на 10 000 предложений уложился в 58 секунд в одиночку и не уложился в предел 120, пока рядом шли
  * остальные живые прогоны консоли. Такие файлы названы в `MEASURED_FILES` и идут по одному. Правило держит список полным:

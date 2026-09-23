@@ -57,7 +57,16 @@ export function alertText(row: Pick<AlertRow, 'code'>, m: Messages): { what: str
   return known ?? { what: m.ui.alerts.unknown(row.code), step: m.ui.alerts.unknownStep };
 }
 
-/** Письмо об одном событии: тенант, канал, причина человеческим языком и первое действие [Р-156] */
+/**
+ * Письмо об одном событии: тенант, канал, причина человеческим языком и первое действие [Р-156].
+ *
+ * Находка 4 ревью шага 36: КОД события дайджест печатал, а срочное письмо запрещало — два правила об одном, и одно из
+ * них лишнее. Осталось одно: код печатается ВСЕГДА. Причина — у кода одна работа, и она не в том, чтобы объяснить
+ * событие (для этого есть текст словаря), а в том, чтобы на него сослаться: продавец пишет в поддержку «у меня
+ * PRICE_WRITE_SCOPE_BLOCKED», и это тот же код, что в `tenant_data.alert`, в журнале процесса и на экране консоли.
+ * Без него продавец пересказывает немецкую фразу, а мы ищем, о каком из шести кодов речь. Тексты словаря есть не у
+ * всех кодов [находка 3 ревью шага 36], и у остальных код — единственное, что в письме вообще названо точно.
+ */
 export function immediateMessage(row: AlertRow, tenant: string, to: string, m: Messages): MailMessage {
   const { what, step } = alertText(row, m);
   const severity = (m.ui.alerts.severity as Record<string, string>)[row.severity] ?? row.severity;
@@ -65,6 +74,7 @@ export function immediateMessage(row: AlertRow, tenant: string, to: string, m: M
     m.ui.alerts.tenantLine(tenant),
     ...(row.channel ? [m.ui.alerts.channelLine(row.channel, row.marketplaces.join(', '))] : []),
     m.ui.alerts.whenLine(m.when(row.raisedAt)),
+    m.ui.alerts.codeLine(row.code),
     '',
     what,
     '',

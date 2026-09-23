@@ -321,6 +321,8 @@ export const de: Messages = {
         signedIn: (name: string) => `Angemeldet: ${name}`,
         logout: 'Abmelden',
         noWorlds: 'Sie haben in keiner Welt des Stands eine Mitgliedschaft.',
+        demoGuest: 'Demo ansehen',
+        demoGuestHint: 'Ohne Registrierung: Sie sehen einen Demo-Mandanten als Beobachter. Die Daten sind synthetisch, der Weg ist echt — ändern können Sie darin nichts.',
       },
       dialog: {
         note: (min: number) => `Notiz — warum (mindestens ${min} Zeichen):`,
@@ -563,6 +565,7 @@ export const de: Messages = {
       tenantLine: (tenant: string) => `Verkäuferkonto: ${tenant}`,
       channelLine: (channel: string, marketplaces: string) => `Kanal: ${channel} (${marketplaces})`,
       whenLine: (when: string) => `Passiert: ${when}`,
+      codeLine: (code: string) => `Ereigniscode: ${code} (bitte bei Rückfragen nennen)`,
       firstStepLine: (step: string) => `Erster Schritt: ${step}`,
       digestSubject: (count: number, tenant: string) => `repracer: ${count} Ereignisse der letzten Stunde (${tenant})`,
       digestIntro: (count: number) => `In der letzten Stunde gab es ${count} Ereignisse, die keine sofortige Reaktion brauchen:`,

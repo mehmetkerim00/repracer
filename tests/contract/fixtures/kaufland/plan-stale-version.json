@@ -4,8 +4,8 @@
   "channel": "KAUFLAND",
   "apiVersion": "2.44.0",
   "title": "Устаревшая версия записи не уходит в канал; её подтверждение — NOT_APPLIED",
-  "description": "INV-03: в план попали версии 2 и 4 одной единицы записи цены и дубль версии 4. В пакет идёт только версия 4; версия 2 — STALE_VERSION, дубль — DUPLICATE_ACTION; запись CHANNEL_MIN_PRICE отклоняется всегда [Р-41, KFL_C04]. Затем подтверждение старой записи после окна: в канале значение новой версии — NOT_APPLIED с наблюдением [KFL_C08]. Запросов на запись нет.",
-  "tags": ["mandatory:stale-version", "planning", "confirm", "conservative:KFL_C04", "conservative:KFL_C08", "conservative:KFL_C10"],
+  "description": "INV-03: в план попали версии 2 и 4 одной единицы записи цены и дубль версии 4. В пакет идёт только версия 4; версия 2 — STALE_VERSION, дубль — DUPLICATE_ACTION; запись CHANNEL_MIN_PRICE отклоняется всегда [Р-41, KFL_C04]. Затем подтверждение старой записи после окна: в канале значение новой версии — NOT_APPLIED с наблюдением [KFL_C08]. Запросов на запись нет. Цена и количество идут РАЗНЫМИ запросами [KFL_C20, K-20]: поведение канала на смешанном теле POST /units/bulk документацией не подтверждено, и до ответа поддержки пакеты режутся по виду поля — количество вперёд цены.",
+  "tags": ["mandatory:stale-version", "planning", "confirm", "conservative:KFL_C04", "conservative:KFL_C08", "conservative:KFL_C10", "conservative:KFL_C20"],
   "provenance": {
     "kind": "SYNTHETIC_FROM_DOCS",
     "sources": ["docs/domain-model.md#INV-03", "docs/decisions.md#Р-41", "vendor/kaufland/seller-api-v2/2026-09-14/openapi.json#GET /units/{id_unit}"]
@@ -65,10 +65,17 @@
         "batches": [
           {
             "batchId": { "$regex": "^kfl:de:[0-9a-f]{16}$" },
-            "operation": "POST /units/bulk",
+            "operation": "PATCH /units/{id_unit}",
             "requestCount": 1,
             "budgetCharges": [],
-            "items": [{ "channelWriteId": "cw-0502", "version": 4 }, { "channelWriteId": "cw-0504" }]
+            "items": [{ "channelWriteId": "cw-0504" }]
+          },
+          {
+            "batchId": { "$regex": "^kfl:de:[0-9a-f]{16}$" },
+            "operation": "PATCH /units/{id_unit}",
+            "requestCount": 1,
+            "budgetCharges": [],
+            "items": [{ "channelWriteId": "cw-0502", "version": 4 }]
           }
         ],
         "rejected": {

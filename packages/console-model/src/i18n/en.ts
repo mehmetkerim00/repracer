@@ -319,6 +319,8 @@ export const en = {
         signedIn: (name: string) => `Signed in: ${name}`,
         logout: 'Sign out',
         noWorlds: 'You have no membership in any stand world.',
+        demoGuest: 'View the demo',
+        demoGuestHint: 'No sign-up needed: you see a demo tenant as an observer. The data is synthetic, the path is real — you cannot change anything in it.',
       },
       dialog: {
         note: (min: number) => `Note — why (at least ${min} characters):`,
@@ -562,6 +564,7 @@ export const en = {
       tenantLine: (tenant: string) => `Seller account: ${tenant}`,
       channelLine: (channel: string, marketplaces: string) => `Channel: ${channel} (${marketplaces})`,
       whenLine: (when: string) => `Happened: ${when}`,
+      codeLine: (code: string) => `Event code: ${code} (name it when you ask us about the event)`,
       firstStepLine: (step: string) => `First step: ${step}`,
       digestSubject: (count: number, tenant: string) => `repracer: ${count} events of the last hour (${tenant})`,
       digestIntro: (count: number) => `${count} events that do not need an immediate reaction happened in the last hour:`,

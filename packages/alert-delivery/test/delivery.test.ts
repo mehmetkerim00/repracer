@@ -68,9 +68,9 @@ test('Р-156: CRITICAL уходит письмом СРАЗУ, и письмо �
   assert.match(letter.subject, /Synthetischer Händler/);
   assert.match(letter.text, /Verkäuferkonto: Synthetischer Händler/);
   assert.match(letter.text, /Kanal: KAUFLAND \(de, at\)/);
-  // Причина — человеческим языком, без кода события в теле письма
+  // Причина — человеческим языком, и рядом КОД события: им продавец ссылается на событие в поддержке [находка 4 ревью шага 36]
   assert.match(letter.text, /Die Preispflege wurde von einer Person gestoppt/);
-  assert.ok(!letter.text.includes('PRICING_STOPPED_BY_PERSON'), `код события в письме продавцу не нужен: ${letter.text}`);
+  assert.match(letter.text, /Ereigniscode: PRICING_STOPPED_BY_PERSON \(bitte bei Rückfragen nennen\)/);
   // И первое действие: письмо без него заставляет искать, что делать
   assert.match(letter.text, /Erster Schritt: Waren Sie das nicht/);
 });
@@ -140,8 +140,16 @@ test('Р-156: событие ПЛАТФОРМЫ уходит оператору,
 
   assert.equal(outcome.immediate, 2, 'два письма: одно оператору, одно владельцу');
   assert.deepEqual(mail.sent.map((x) => x.to).sort(), ['betrieb@example.invalid', 'inhaber@example.invalid']);
-  // И адресаты не перепутаны: платформенное событие — оператору
-  assert.match(mail.sent.find((x) => x.to === 'betrieb@example.invalid')!.text, /ANALYTICS_EXPORT_FAILED|Export/);
+  /**
+   * И адресаты не перепутаны: у каждого письма СВОЙ код события. Первая редакция принимала любое из двух совпадений
+   * (`match(/ANALYTICS_EXPORT_FAILED|Export/)`) — такое утверждение зеленеет, даже если письмо вообще о другом
+   * (находка 10 ревью шага 36); теперь ожидание одно, и оно проверяет обе стороны обмена.
+   */
+  const toOperator = mail.sent.find((x) => x.to === 'betrieb@example.invalid')!;
+  const toOwner = mail.sent.find((x) => x.to === 'inhaber@example.invalid')!;
+  assert.match(toOperator.text, /Ereigniscode: ANALYTICS_EXPORT_FAILED \(bitte bei Rückfragen nennen\)/);
+  assert.match(toOwner.text, /Ereigniscode: PRICING_STOPPED_BY_PERSON \(bitte bei Rückfragen nennen\)/);
+  assert.ok(!toOwner.text.includes('ANALYTICS_EXPORT_FAILED'), `платформенное событие владельцу продавца не уходит: ${toOwner.text}`);
 });
 
 test('Р-156: массовое событие не превращается в поток писем — одно письмо на код с числом [находка 13 ревью шага 36]', async () => {
