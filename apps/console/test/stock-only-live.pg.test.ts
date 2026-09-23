@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import type { JobCreatedResponse, StandToken } from '../src/api-types.ts';
 import type { BulkJobView, OnboardingView, StockDivergencesView, StockView } from '@repracer/console-model';
 import { STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
-import { demoWorld, DEMO_OFFERS, type DemoWorld } from '@repracer/contract-tests/live';
+import { demoWorld, nextNineUtc, DEMO_OFFERS, type DemoWorld } from '@repracer/contract-tests/live';
 import { createAuthenticator, MemoryIdentityDirectory, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
 import { PgPricingStore, PgStockStore, type PgPool } from '@repracer/pricing-store-pg';
@@ -83,8 +83,8 @@ before(async () => {
   db = await createIsolatedDatabase('stockonly');
   const appPool: PgPool = db.pool('svc_app', 4);
   const adminPool: PgPool = db.pool('svc_admin', 4);
-  const tomorrow = new Date(Date.now() + 24 * 3_600_000);
-  const startIso = new Date(Date.UTC(tomorrow.getUTCFullYear(), tomorrow.getUTCMonth(), tomorrow.getUTCDate(), 9, 0, 0)).toISOString();
+  // Ближайшие 09:00 UTC после текущего момента: граница суток пересекается всегда, а мир не уходит от часов базы дальше суток
+  const startIso = nextNineUtc();
   // bare: true — предложения как пришли с канала; ни себестоимости, ни границ, ни стратегий здесь не появится
   demo = await demoWorld({
     tag: 3502, startIso, bare: true, appPool, adminPool, provisioningPool: db.pool('svc_provisioning', 1), dispatcherPool: db.pool('svc_dispatcher', 2),

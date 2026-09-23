@@ -11,7 +11,7 @@ import type { JobCreatedResponse, StandToken, WorldSummary } from '../src/api-ty
 import type { BoundsDiffView, BulkJobView, CostImportView, EnableResultView, OnboardingView, StrategyPreviewView } from '@repracer/console-model';
 import { DEMO_FILE_PREFIX, DEMO_ROW_MARK } from '@repracer/bulk-jobs';
 import { STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
-import { demoWorld, DEMO_COMPETITORS_PER_OFFER, DEMO_OFFERS, type DemoWorld } from '@repracer/contract-tests/live';
+import { demoWorld, nextNineUtc, DEMO_COMPETITORS_PER_OFFER, DEMO_OFFERS, type DemoWorld } from '@repracer/contract-tests/live';
 import { createAuthenticator, MemoryIdentityDirectory, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
 import { seedPricingWorld, PgPricingStore, PgStockStore, type PgPool } from '@repracer/pricing-store-pg';
@@ -120,12 +120,12 @@ before(async () => {
    * всем 150 предложениям: себестоимость, ввезённая через консоль, действует с НАСТОЯЩЕГО момента импорта (часы базы), а
    * путь решения смотрел на мир «четыре часа назад», где её ещё нет [Р-131].
    *
-   * Старт — 09:00 UTC ЗАВТРАШНИХ суток, а не «сейчас»: иначе у прогона был бы скрытый вход — время суток. Два виртуальных
-   * часа от «сейчас» в 22:30 пересекают границу суток (закрытие суток, секции по суткам UTC) — тот самый класс дефекта,
-   * из-за которого три живых прогона шага 29 краснели час в сутки (ревью шага 34, находка 13).
+   * Старт — не «сейчас»: иначе у прогона был бы скрытый вход — время суток. Два виртуальных часа от «сейчас» в 22:30
+   * пересекают границу суток (закрытие суток, секции по суткам UTC) — тот самый класс дефекта, из-за которого три живых
+   * прогона шага 29 краснели час в сутки (ревью шага 34, находка 13). Правило старта — `nextNineUtc` (шаг 36).
    */
-  const tomorrow = new Date(Date.now() + 24 * 3_600_000);
-  const startIso = new Date(Date.UTC(tomorrow.getUTCFullYear(), tomorrow.getUTCMonth(), tomorrow.getUTCDate(), 9, 0, 0)).toISOString();
+  // Ближайшие 09:00 UTC после текущего момента: граница суток пересекается всегда, а мир не уходит от часов базы дальше суток
+  const startIso = nextNineUtc();
   demo = await demoWorld({
     tag: 3401, startIso, bare: true, appPool, adminPool, provisioningPool, dispatcherPool: db.pool('svc_dispatcher', 2),
     schedulerPool: db.pool('svc_scheduler', 3), exporterPool: db.pool('svc_exporter', 2), stockPool: db.pool('svc_stock', 2),
