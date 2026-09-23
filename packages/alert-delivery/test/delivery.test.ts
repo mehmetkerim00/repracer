@@ -225,7 +225,7 @@ test('сухой режим: письмо собрано, не отправле�
   assert.equal(outcome.delivered, 1, 'событие разобрано и отмечено');
   assert.deepEqual([...store.delivered.values()].map((d) => d.kind), ['DRY_RUN'], 'вид отметки — сухой прогон, а не письмо');
   assert.equal(lines.length, 1, 'о каждом несостоявшемся письме остаётся строка журнала');
-  const logged = JSON.parse(lines[0]!) as { code: string; details: Record<string, number> };
+  const logged = JSON.parse(lines[0]!) as { code: string; details: { textLength: number } };
   assert.equal(logged.code, 'MAIL_DRY_RUN');
   assert.ok(logged.details.textLength > 100, `текст письма СОБРАН целиком: ${logged.details.textLength} знаков`);
   // Ни получателя, ни тела в журнале: всухую они такие же настоящие, как в работе
