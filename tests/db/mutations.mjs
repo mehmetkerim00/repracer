@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0123_verify_schema_invariants_v33.sql';
+const VERIFY = 'migrations/0125_verify_schema_invariants_v34.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -1242,6 +1242,33 @@ export const STEP36_ROWS = [
       m(dropConstraint('alert_details_object', 'tenant_data.alert'), smoke('alert details that are not an object (Р-156)')),
       m(dropConstraint('alert_delivery_kind_known', 'tenant_data.alert'), smoke('delivery of an unknown kind (Р-156)')),
       m(dropConstraint('alert_delivery_attempts_non_negative', 'tenant_data.alert'), smoke('a negative number of delivery attempts (Р-156)')),
+    ],
+  },
+];
+
+/**
+ * Шаг 37 [Р-160, Р-161]: гость публичного демо и язык тенанта. Гостевое членство заводится БЕЗ приглашения (исключение из
+ * Р-98), и держат его стражи, а не интерфейс: демо-тенант, неизменная роль, ни одного задания.
+ */
+export const STEP37_ROWS = [
+  {
+    row: 'Р-160',
+    invariant: 'гость демо: только в демо-тенанте, роль не повышается, заданий не создаёт — даже «ничего не меняющих»',
+    mutations: [
+      m(dropTrigger('b_membership_guest_demo_only', 'tenant_data.membership'),
+        smoke('a guest of a tenant that is not a demo (Р-160)')),
+      m(dropTrigger('b_membership_guest_stays_guest', 'tenant_data.membership'),
+        smoke('a demo guest is promoted to a pricing manager (Р-160)')),
+      m(dropTrigger('zz_bulk_job_no_guest', 'tenant_data.bulk_job'),
+        smoke('a demo guest creates a price evidence job (Р-160)')),
+    ],
+  },
+  {
+    row: 'Р-161',
+    invariant: 'язык тенанта — из списка словаря консоли: письмо на языке, которого у нас нет, ушло бы кодами',
+    mutations: [
+      m(dropConstraint('tenant_locale_known', 'tenant_data.tenant'),
+        smoke('a tenant language the console dictionary does not have (Р-161)')),
     ],
   },
 ];
