@@ -327,8 +327,15 @@ test('Р-146: путь репозитория в развёртывании и �
   const TOP = 'scripts|deploy|packages|apps|services|migrations|docs|tests|infra|schemas';
   const REF = new RegExp(`(?:^|[\\s"'\`(<\\[=,])((?:${TOP})/[A-Za-z0-9._/-]+)`, 'g');
 
-  /** Путь, названный текстом, обязан существовать — сам или как образец, который оператор копирует */
-  const resolves = (target: string) => existsSync(new URL(target, root)) || existsSync(new URL(`${target}.example`, root));
+  /**
+   * СОБИРАЕМЫЕ пути: их в репозитории нет и быть не должно (`.gitignore`), они появляются сборкой. Список именованный и
+   * с причиной — иначе правило либо краснеет на чистом клоне (так и случилось в CI шага 37: `apps/console/dist`
+   * существовал только у того, кто собирал интерфейс), либо молча разрешает любой несуществующий путь.
+   */
+  const BUILT = ['apps/console/dist'];
+  /** Путь, названный текстом, обязан существовать — сам, как образец для оператора или как результат сборки */
+  const resolves = (target: string) => existsSync(new URL(target, root)) || existsSync(new URL(`${target}.example`, root))
+    || BUILT.some((b) => target === b || target.startsWith(`${b}/`));
   const refsOf = (text: string) => [...text.matchAll(REF)].map(([, p]) => p!.replace(/[.,:;)\]]+$/, ''));
 
   /**
@@ -339,6 +346,9 @@ test('Р-146: путь репозитория в развёртывании и �
   assert.deepEqual(refsOf(sample), ['scripts/test-all.mjs', 'scripts/backup-restore-check.mjs', 'deploy/production/Caddyfile']);
   assert.deepEqual(refsOf(sample).filter((p) => !resolves(p)), ['scripts/backup-restore-check.mjs'], 'детектор находит мёртвый путь');
   assert.deepEqual(refsOf('образ postgres/17 и путь /var/lib/postgresql/data ссылками не считаются'), []);
+  // Собираемый путь разрешён, но только он сам: опечатка в нём — по-прежнему мёртвая ссылка
+  assert.deepEqual(refsOf('интерфейс лежит в apps/console/dist/index.html, а не в apps/console/build/index.html').filter((x) => !resolves(x)),
+    ['apps/console/build/index.html'], 'собираемый путь разрешён, опечатка в нём — нет');
 
   const files: string[] = [];
   const walk = (rel: string) => {
