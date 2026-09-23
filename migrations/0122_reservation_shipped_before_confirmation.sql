@@ -17,7 +17,8 @@ ALTER TABLE channel_data.reservation
 COMMENT ON COLUMN channel_data.reservation.shipped_reported_at IS
   'Шаг 36 [Р-157]: канал сообщил об отгрузке этой строки заказа, а источник ещё не подтвердил резервацию. Списать пул нельзя до подтверждения; после него резервация закрывается этим же фактом.';
 
--- Признак отгрузки ставится ДО закрытия резервации: у закрытой он уже ничего не меняет
+-- Отгруженную резервацию нельзя закрыть как свободную: товар уже уехал со склада, и «освободить» его нечем. Исключение одно —
+-- канал отменил заказ: там отгрузки не было. Эту же пару случаев проверяет смоук (Р-157) и снимает мутация [Р-108]
 ALTER TABLE channel_data.reservation
   ADD CONSTRAINT reservation_shipped_before_close CHECK (shipped_reported_at IS NULL OR status <> 'RELEASED' OR release_reason = 'ORDER_CANCELLED');
 

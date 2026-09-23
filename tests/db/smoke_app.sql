@@ -1191,6 +1191,19 @@ INSERT INTO channel_data.reservation (tenant_id, reservation_id, stock_pool_id, 
 VALUES (:tA, 'ac000000-0000-0000-0000-000000000002', 'ab000000-0000-0000-0000-000000000001', 'INTERNAL_POOL', 'a5000000-0000-0000-0000-000000000001', 1,
         'a4000000-0000-0000-0000-000000000002', 'AMAZON', 'ORDER-2', 'ORDER-2-L1', now(), now());
 SELECT channel_data.confirm_reservations_by_source('aa000000-0000-0000-0000-000000000001', 'ORDER-2') AS confirmed_order_2 \gset
+-- Р-157 (шаг 36, 0122): отгруженную резервацию нельзя закрыть как свободную — товар уже уехал со склада. Отмена заказа
+-- каналом — единственное исключение: там отгрузки не было
+INSERT INTO channel_data.reservation (tenant_id, reservation_id, stock_pool_id, source_mode, product_id, quantity, channel_account_id, channel, channel_order_ref, channel_order_line_ref, order_created_at, expires_at)
+VALUES (:tA, 'ac000000-0000-0000-0000-000000000003', 'ab000000-0000-0000-0000-000000000001', 'INTERNAL_POOL', 'a5000000-0000-0000-0000-000000000001', 1,
+        'a4000000-0000-0000-0000-000000000002', 'AMAZON', 'ORDER-3', 'ORDER-3-L1', now(), now());
+SELECT pg_temp.ok('the channel reports a shipment before the source confirms (Р-157)', $q$
+  UPDATE channel_data.reservation SET shipped_reported_at = now() WHERE reservation_id = 'ac000000-0000-0000-0000-000000000003' $q$);
+SELECT pg_temp.expect_fail('release a shipped reservation as free stock (Р-157)', $q$
+  UPDATE channel_data.reservation SET status = 'RELEASED', released_at = now(), release_reason = 'SOURCE_REJECTED', closed_at = now()
+   WHERE reservation_id = 'ac000000-0000-0000-0000-000000000003' $q$, 'reservation_shipped_before_close');
+SELECT pg_temp.ok('a shipped reservation is released when the channel cancels the order (Р-157)', $q$
+  UPDATE channel_data.reservation SET status = 'RELEASED', released_at = now(), release_reason = 'ORDER_CANCELLED', closed_at = now()
+   WHERE reservation_id = 'ac000000-0000-0000-0000-000000000003' $q$);
 COMMIT;
 
 -- ---------------------------------------------------------------- eBay: migration consent, irreversibility, budget
