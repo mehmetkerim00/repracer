@@ -178,7 +178,7 @@ test('Р-160: гость не может НИЧЕГО изменить — от�
   for (const [what, path, body] of [
     ['выгрузка доказательства', `/api/worlds/${w}/compliance/evidence`, { from: '2026-01-01', to: '2026-01-31' }],
     ['выгрузка ленты цен', `/api/worlds/${w}/feed/export`, { from: '2026-01-01', to: '2026-01-31' }],
-    ['предпросмотр стратегии', `/api/worlds/${w}/strategies/preview`, { offers: { all: true }, strategy: { kind: 'FIXED', amountMinor: 1900, currency: 'EUR' } }],
+    ['предпросмотр стратегии', `/api/worlds/${w}/strategies/preview`, { draft: { name: 'Gast-Vorschau', params: { type: 'FIXED', priceMinor: 1500 } }, all: true }],
   ] as Array<[string, string, unknown]>) {
     const job = await walk<{ error: { code: string } }>(`jobs (${what})`, 'POST', path, { token: guest, body });
     // Утверждается ИМЕННО отказ в праве, а не «какой-нибудь отказ»: 400 от кривого тела и 404 от переименованного

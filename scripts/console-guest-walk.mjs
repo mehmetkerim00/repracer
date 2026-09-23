@@ -86,7 +86,7 @@ check(bounds.status === 403, `правка границ гостю запрещ�
 for (const [what, path, body] of [
   ['compliance/evidence (выгрузка доказательства)', `/api/worlds/${world}/compliance/evidence`, { from: '2026-01-01', to: '2026-01-31' }],
   ['feed/export (выгрузка ленты цен)', `/api/worlds/${world}/feed/export`, { from: '2026-01-01', to: '2026-01-31' }],
-  ['strategies/preview (предпросмотр стратегии)', `/api/worlds/${world}/strategies/preview`, { offers: { all: true }, strategy: { kind: 'FIXED', amountMinor: 1900, currency: 'EUR' } }],
+  ['strategies/preview (предпросмотр стратегии)', `/api/worlds/${world}/strategies/preview`, { draft: { name: 'Gast-Vorschau', params: { type: 'FIXED', priceMinor: 1500 } }, all: true }],
 ]) {
   const job = await walk(what, 'POST', path, { token, body });
   // Именно отказ в ПРАВЕ: 400 от тела и 404 от переименованного маршрута зеленели бы так же
