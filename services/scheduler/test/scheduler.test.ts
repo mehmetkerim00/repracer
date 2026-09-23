@@ -239,11 +239,16 @@ test('Р-133 (шаг 28): внутренняя работа повторяетс
   // Ревью шага 28, находка 15: «в каталоге есть четыре имени» — проверка ни о чём. Значение имеет РАЗМЕТКА каждой работы, которую
   // отдаёт источник работ: в канал ходят только те, у кого CHANNEL
   // Зависимости ПОЛНЫЕ: работы, которых нет без остатка или без сверки, иначе тихо выпали бы из проверки каталога
-  const specs = await jobSource({ ...jobDeps(), reconcileEnabled: () => true, stock: { syncOrders: async () => ({ lines: 0, created: 0, consumed: 0, released: 0, unknownOffers: 0, writes: 0 }) } }).jobs('2026-09-17T10:00:00.000Z');
+  const specs = await jobSource({
+    ...jobDeps(), reconcileEnabled: () => true,
+    stock: { syncOrders: async () => ({ lines: 0, created: 0, consumed: 0, released: 0, unknownOffers: 0, writes: 0 }) },
+    // Шаг 36 [Р-156]: доставка алертов — работа каталога и появляется вместе со своей зависимостью
+    alertDelivery: { deliver: async () => ({ immediate: 0, digests: 0, delivered: 0, failed: 0 }) },
+  }).jobs('2026-09-17T10:00:00.000Z');
   const kinds = new Map(specs.map((spec) => [spec.name, spec.retryKind]));
   assert.deepEqual([...kinds.keys()].sort(), [...JOB_CATALOG.map((j) => j.name)].sort(), 'у каждой работы каталога есть спецификация');
   const internal = [...kinds.entries()].filter(([, kind]) => kind === 'INTERNAL').map(([name]) => name).sort();
-  assert.deepEqual(internal, ['analytics-export-day', 'notification-loss-review', 'partitions', 'price-days-close', 'retention'],
+  assert.deepEqual(internal, ['alerts-deliver', 'analytics-export-day', 'notification-loss-review', 'partitions', 'price-days-close', 'retention'],
     'внутренние — те, что ходят только в наши хранилища; остальные обращаются к каналу [Р-133]');
 });
 

@@ -41,6 +41,22 @@ export const INFRASTRUCTURE_FILES = new Set(INFRASTRUCTURE_TESTS.map((t) => t.fi
 /** Долгие прогоны идут СВОИМ заданием CI (ci.yml: demo-day), а не внутри полного — иначе полный вышел бы за предел */
 export const LONG_FILES = new Set(INFRASTRUCTURE_TESTS.filter((t) => t.needs === 'TIME').map((t) => t.file));
 
+/**
+ * Шаг 36: прогоны, которые УТВЕРЖДАЮТ время. Node запускает файлы одного рабочего пространства параллельно, и такой прогон
+ * делит процессор и PostgreSQL с соседями — тогда он измеряет не продукт, а загрузку машины. На шаге 36 это увидели прямо:
+ * предпросмотр стратегии на 10 000 предложений шёл 58 секунд в одиночку и не уложился в предел 120 секунд, пока рядом шли
+ * остальные живые прогоны консоли. Поэтому такие файлы идут ПО ОДНОМУ, без соседей в том же рабочем пространстве.
+ *
+ * Список явный: файл, утверждающий секунды и не названный здесь, снова начнёт мерить чужую нагрузку.
+ */
+export const MEASURED_FILES = new Set([
+  'apps/console/test/console-live.pg.test.ts',
+  'apps/console/test/onboarding-live.pg.test.ts',
+  'apps/console/test/stock-only-live.pg.test.ts',
+  'apps/console/test/demo-day-live.pg.test.ts',
+  'tests/contract/src/cost-import-live.pg.test.ts',
+]);
+
 /** Файлы области: быстрый прогон — всё, кроме инфраструктурных и долгих; полный — всё, кроме долгих; `long` — только долгие */
 export function filesForScope(included, scope) {
   if (scope === 'fast') return included.filter((f) => !INFRASTRUCTURE_FILES.has(f));
