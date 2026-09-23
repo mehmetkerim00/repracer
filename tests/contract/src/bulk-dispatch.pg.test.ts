@@ -157,7 +157,8 @@ test('Р-155: те же 10 000 — пакетами: запросов меньш
     { membershipId: k.seeded.ownerMembershipId, userId: k.seeded.userId, mfa: true });
   const second = await k.stock!.recalculate(k.seeded.tenantId, null, k.clock.iso() as never);
   assert.equal(second.writes.length, OFFERS, `вторая версия у каждой единицы: ${second.writes.length}`);
-  k.clock.advance(60_000);
+  // Часы мира снова догоняют настоящее: первый круг занял минуты, и записи второго созданы базой уже «в будущем» мира
+  k.clock.advance(Math.max(60_000, Date.now() - k.clock.nowMs() + 60_000));
   const sweptAgain = await k.dispatcher.sweep({ limit: OFFERS + 100, pendingMinAgeMs: 0, concurrency: 4 });
   assert.equal(sweptAgain.due, OFFERS, `второй круг взял все единицы: ${sweptAgain.due}`);
 
