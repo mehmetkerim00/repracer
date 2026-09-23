@@ -8,12 +8,12 @@ import { VirtualClock } from './harness/world.ts';
 import { kauflandLiveWorld, type KauflandLiveWorld, type LiveProduct } from './live/kaufland-world.ts';
 
 /**
- * Р-156 (шаг 36): алерт, который живёт только в базе, считается НЕдоставленным. Здесь проверяется ДОСТАВКА четырёх
+ * Р-156 (шаг 36): алерт, который живёт только в базе, считается НЕдоставленным. Здесь проверяется ДОСТАВКА пяти
  * событий: кому ушло письмо, о каком тенанте и канале, что в нём сказано человеческим языком и какое первое действие.
  * Письма перехватывает модель провайдера, как модель ClickHouse и модель очереди SQS.
  *
  * Честно о том, что здесь настоящее (находка 15 ревью шага 36): остановка человеком поднимается НАСТОЯЩИМ путём —
- * `pipeline.stopPricing`, тем же вызовом, что делает консоль. Остальные три события кладутся в хранилище алертов
+ * `pipeline.stopPricing`, тем же вызовом, что делает консоль. Остальные события кладутся в хранилище алертов
  * вызовом — проверяется доставка, а не то, как они рождаются: рождение недоверия каналу проверяет
  * `write-queue.pg.test.ts`, блокировку единицы — `dispatcher-defects.pg.test.ts`, отставание выгрузки —
  * `scheduler-live.pg.test.ts`, где та же доставка идёт настоящей работой планировщика. Данные синтетические.
@@ -49,8 +49,10 @@ before(async () => {
     `SELECT u.email FROM tenant_data.membership m JOIN platform.app_user u ON u.user_id = m.user_id
       WHERE m.tenant_id = $1 AND m.role = 'OWNER' AND m.status = 'ACTIVE'`, [k.seeded.tenantId])).rows[0]!.email);
   delivery = createAlertDelivery({
+    // Язык доставке НЕ задаётся [Р-161]: она берёт его у тенанта события, а `locale` осталось умолчанием на случай,
+    // когда языка нет вовсе. Проверяет это сценарий 5
     store: new PgAlertDeliveryStore(db.pool('svc_alert_delivery', 2)), mail, now: () => new Date().toISOString(),
-    locale: 'de', operatorEmail: 'betrieb@example.invalid', digestSeconds: 3600,
+    operatorEmail: 'betrieb@example.invalid', digestSeconds: 3600,
   });
 });
 
@@ -128,13 +130,13 @@ test('Р-156, сценарий 3: отставание выгрузки — пи
   // Час прошёл: дайджест уходит оператору
   const hourly = createAlertDelivery({
     store: new PgAlertDeliveryStore(db.pool('svc_alert_delivery', 1)), mail,
-    now: () => new Date(Date.now() + 2 * 3_600_000).toISOString(), locale: 'de', operatorEmail: 'betrieb@example.invalid', digestSeconds: 3600,
+    now: () => new Date(Date.now() + 2 * 3_600_000).toISOString(), operatorEmail: 'betrieb@example.invalid', digestSeconds: 3600,
   });
   const outcome = await hourly.deliver();
   assert.equal(outcome.digests, 1, JSON.stringify(outcome));
   const letter = mail.sent.at(-1)!;
   assert.equal(letter.to, 'betrieb@example.invalid', 'отставание выгрузки — дело оператора платформы, а не продавца');
-  assert.match(letter.text, /Der Export der Wettbewerbshistorie ist im Rückstand \(ANALYTICS_EXPORT_BACKLOG\) — 1-mal/);
+  assert.match(letter.text, /Die Ausfuhr der Wettbewerbshistorie nach ClickHouse ist im Rückstand \(ANALYTICS_EXPORT_BACKLOG\) — 1-mal/);
   assert.equal(lettersFor('Rückstand').filter((x) => x.to === ownerEmail).length, 0, 'продавцу об этом не пишут');
 });
 
@@ -161,4 +163,45 @@ test('Р-156, сценарий 4: запись без итога дольше ч
   assert.equal(all.filter((a) => !a.delivered).length, 0, `недоставленных не осталось: ${JSON.stringify(all)}`);
   assert.deepEqual(all.filter((a) => a.severity === 'WARNING').map((a) => a.kind), ['EMAIL_DIGEST']);
   assert.ok(all.filter((a) => a.severity === 'CRITICAL').every((a) => a.kind === 'EMAIL_IMMEDIATE'), JSON.stringify(all));
+});
+
+test('Р-161, сценарий 5: письмо приходит на языке ТЕНАНТА из базы, а не на умолчании доставки', async () => {
+  /**
+   * Доказательство Р-161. Доставка выше создана БЕЗ `locale`, то есть её умолчание — немецкий, и четыре письма выше
+   * пришли по-немецки не поэтому, а потому что у тенанта мира язык базы по умолчанию тоже немецкий. Здесь язык тенанта
+   * меняется в базе, и то же самое событие приходит по-английски — другим путём получить английское письмо нечем.
+   */
+  const localeInDb = async () => String((await observer.query(
+    `SELECT locale FROM tenant_data.tenant WHERE tenant_id = $1`, [k.seeded.tenantId])).rows[0]!.locale);
+  assert.equal(await localeInDb(), 'de', 'тенант мира заведён с языком базы по умолчанию');
+
+  const halted = async (marketplace: string) => alertSink.raise({
+    code: 'PRICING_CHANNEL_HALTED', severity: 'CRITICAL', tenantId: k.seeded.tenantId as never,
+    channelAccountId: k.seeded.channelAccountId as never, details: { marketplace },
+  });
+
+  await observer.query(`UPDATE tenant_data.tenant SET locale = 'en' WHERE tenant_id = $1`, [k.seeded.tenantId]);
+  assert.equal(await localeInDb(), 'en');
+  await halted('de');
+  const beforeEn = mail.sent.length;
+  assert.equal((await delivery.deliver()).immediate, 1, 'одно письмо немедленно');
+  const english = mail.sent[beforeEn]!;
+  assert.equal(english.to, ownerEmail, 'получатель тот же владелец — изменился только язык');
+  // Утверждается СОДЕРЖИМОЕ: подписи строк, текст события и первое действие — все три из английского словаря
+  assert.match(english.text, /Seller account: /);
+  assert.match(english.text, /a storefront is halted: competitor prices shifted all at once/);
+  assert.match(english.text, /First step: Open the console/);
+  assert.ok(!english.text.includes('Eine Storefront ist angehalten'), `письмо целиком английское: ${english.text}`);
+
+  /**
+   * И обратно: язык читается на КАЖДОМ заходе доставки, а не один раз при создании процесса. Без этого продавец,
+   * сменивший язык, читал бы прежние письма до перезапуска планировщика.
+   */
+  await observer.query(`UPDATE tenant_data.tenant SET locale = 'de' WHERE tenant_id = $1`, [k.seeded.tenantId]);
+  await halted('at');
+  assert.equal((await delivery.deliver()).immediate, 1);
+  const german = mail.sent.at(-1)!;
+  assert.match(german.text, /Verkäuferkonto: /);
+  assert.match(german.text, /Eine Storefront ist angehalten: Die Wettbewerbspreise haben sich auf einmal massenhaft verschoben/);
+  assert.ok(!german.text.includes('a storefront is halted'), `письмо целиком немецкое: ${german.text}`);
 });

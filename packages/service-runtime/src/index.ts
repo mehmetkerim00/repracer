@@ -3,4 +3,4 @@ export { credentialsFromFiles, jsonSink, pgAccountDirectory, type JsonSink } fro
 export { ProcessHealth, serveHealth, type HealthServer } from './health.ts';
 export { createHeartbeat, type Heartbeat, type HeartbeatOptions } from './heartbeat.ts';
 // Шаг 36 [Р-156]: письмо владельцу через HTTP-API провайдера, ключ — из файла секретов
-export { createMailSender, type MailConfig, type MailMessage } from './mail.ts';
+export { createDryMailSender, createMailSender, type MailConfig, type MailMessage, type MailSender } from './mail.ts';

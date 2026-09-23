@@ -1,4 +1,4 @@
-import { messagesFor, type Locale, type Messages } from '@repracer/console-model';
+import { LOCALES, messagesFor, type Locale, type Messages } from '@repracer/console-model';
 import type { AlertDeliveryStore, AlertRow } from '@repracer/pricing-store-pg';
 
 /**
@@ -19,6 +19,8 @@ export interface MailMessage {
 export interface MailSender {
   /** Отправить письмо; `ref` — идентификатор письма у провайдера, доказательство отправки (адрес в него не входит) */
   send(message: MailMessage): Promise<{ ref: string }>;
+  /** Сухой режим (шаг 37, OQ-224): письмо собирается и никуда не уходит; отметка доставки — `DRY_RUN` */
+  dry?: boolean;
 }
 
 export interface AlertDeliveryDeps {
@@ -27,7 +29,11 @@ export interface AlertDeliveryDeps {
   now: () => string;
   /** Кому писать о платформенных событиях (отставание выгрузки, падающая работа): оператору, а не продавцу */
   operatorEmail?: string;
-  /** Язык писем продавца: тот же словарь, что у консоли [Р-72] */
+  /**
+   * Язык письма, когда языка тенанта в базе нет [Р-161]: строки тенанта уже нет, или значение не из словаря консоли.
+   * Обычный язык письма берётся у ТЕНАНТА события, а не отсюда: до шага 37 его в базе не было, и все письма уходили
+   * по-немецки независимо от того, на каком языке продавец читает консоль (отложенная находка 2 ревью шага 36).
+   */
   locale?: Locale;
   /** Сколько алертов уровня брать за один заход */
   batchLimit?: number;
@@ -114,7 +120,13 @@ export function repeatedMessage(rows: readonly AlertRow[], tenant: string, to: s
 }
 
 export function createAlertDelivery(deps: AlertDeliveryDeps) {
-  const m = messagesFor(deps.locale ?? 'de');
+  const fallbackLocale = deps.locale ?? 'de';
+  /**
+   * Язык тенанта проверяется здесь, а не в хранилище: список языков — свойство словаря консоли [Р-72], и база о нём не
+   * знает. Значение вне словаря даёт умолчание, а не письмо из кодов.
+   */
+  const localeOf = (value: string | null | undefined): Locale =>
+    LOCALES.includes(value as Locale) ? value as Locale : fallbackLocale;
   const batchLimit = deps.batchLimit ?? 200;
   const quietMs = (deps.quietSeconds ?? 0) * 1000;
   const digestMs = (deps.digestSeconds ?? 3600) * 1000;
@@ -135,23 +147,37 @@ export function createAlertDelivery(deps: AlertDeliveryDeps) {
    * Адреса владельца может не быть (тенант без активного владельца — платформенный, демо до приглашения). Письмо тогда
    * не уходит, и алерт остаётся НЕдоставленным: это видно запросом, а не «ушло куда-то».
    */
-  async function sendFor(rows: readonly AlertRow[], kind: 'EMAIL_IMMEDIATE' | 'EMAIL_DIGEST', build: (rows: AlertRow[], tenant: string, to: string) => MailMessage,
+  async function sendFor(rows: readonly AlertRow[], kind: 'EMAIL_IMMEDIATE' | 'EMAIL_DIGEST', build: (rows: AlertRow[], tenant: string, to: string, m: Messages) => MailMessage,
     outcome: DeliveryOutcome): Promise<void> {
     const platform = await deps.store.platformTenantId();
-    for (const [tenantId, list] of byTenant(rows)) {
+    const groups = byTenant(rows);
+    // Р-161: имя, адрес и язык всех тенантов захода — одним запросом до цикла, а не запросом на тенанта внутри него
+    const recipients = await deps.store.recipients([...groups.keys()]);
+    for (const [tenantId, list] of groups) {
+      const who = recipients.get(tenantId);
       // Платформенное событие адресовано оператору: у платформенного тенанта нет владельца-продавца
-      const to = tenantId === platform ? deps.operatorEmail ?? null : await deps.store.ownerEmail(tenantId);
+      const to = tenantId === platform ? deps.operatorEmail ?? null : who?.email ?? null;
       if (!to) { await deps.store.markFailed(tenantId, list.map((r) => r.alertId), 'NO_OWNER_EMAIL'); outcome.failed += list.length; continue; }
-      const tenant = await deps.store.tenantName(tenantId);
+      /**
+       * Язык письма — язык ТЕНАНТА, к которому относится событие [Р-161]. Правило одно и для платформенного тенанта:
+       * язык оператора — это язык платформенной строки, и отдельной настройки у него нет.
+       */
+      const m = messagesFor(localeOf(who?.locale));
+      const tenant = who?.name ?? tenantId;
       /**
        * Находка 13 ревью шага 36: остановка канала на каталоге в 10 000 предложений давала 10 000 отдельных писем
        * одному владельцу. CRITICAL одного КОДА сворачивается в одно письмо с числом — событие видно, а ящик читаем.
        */
-      const groups = kind === 'EMAIL_DIGEST' ? [list] : [...byCode(list).values()];
-      for (const group of groups) {
+      const letters = kind === 'EMAIL_DIGEST' ? [list] : [...byCode(list).values()];
+      for (const group of letters) {
         try {
-          const { ref } = await deps.mail.send(build(group, tenant, to));
-          const marked = await deps.store.markDelivered(tenantId, group.map((r) => r.alertId), kind, ref);
+          const { ref } = await deps.mail.send(build(group, tenant, to, m));
+          /**
+           * Сухой режим (шаг 37, задача D): письмо СОБРАНО и не отправлено, и отметка говорит это прямо — `DRY_RUN`.
+           * Пометить его «доставленным письмом» значило бы записать в базу неправду; оставить недоставленным —
+           * потерять то, что событие разобрано и текст построен. Поэтому вид третий, и его знает база (0124).
+           */
+          const marked = await deps.store.markDelivered(tenantId, group.map((r) => r.alertId), deps.mail.dry ? 'DRY_RUN' : kind, ref);
           outcome.delivered += marked;
           if (kind === 'EMAIL_IMMEDIATE') outcome.immediate += 1; else outcome.digests += 1;
         } catch (error) {
@@ -174,13 +200,13 @@ export function createAlertDelivery(deps: AlertDeliveryDeps) {
       const before = new Date(nowMs - quietMs).toISOString();
       const critical = await deps.store.undelivered('CRITICAL', batchLimit, before);
       await sendFor(critical, 'EMAIL_IMMEDIATE',
-        (rows, tenant, to) => (rows.length === 1 ? immediateMessage(rows[0]!, tenant, to, m) : repeatedMessage(rows, tenant, to, m)), outcome);
+        (rows, tenant, to, m) => (rows.length === 1 ? immediateMessage(rows[0]!, tenant, to, m) : repeatedMessage(rows, tenant, to, m)), outcome);
 
       const warnings = await deps.store.undelivered('WARNING', batchLimit, before);
       const ripe = [...byTenant(warnings).entries()]
         .filter(([, list]) => nowMs - Date.parse(list[0]!.raisedAt) >= digestMs)
         .flatMap(([, list]) => list);
-      await sendFor(ripe, 'EMAIL_DIGEST', (rows, tenant, to) => digestMessage(rows, tenant, to, m), outcome);
+      await sendFor(ripe, 'EMAIL_DIGEST', (rows, tenant, to, m) => digestMessage(rows, tenant, to, m), outcome);
       return outcome;
     },
   };

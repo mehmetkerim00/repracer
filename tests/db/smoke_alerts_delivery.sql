@@ -53,3 +53,10 @@ SELECT pg_temp.ok('the delivery role finds the owner email of the tenant (Р-156
 SELECT pg_temp.expect_fail('changing a delivered alert without touching the delivery time (Р-156)', format($q$
   UPDATE tenant_data.alert SET delivery_ref = 'synthetic-mail-second'
    WHERE tenant_id = %L AND alert_id = 'ae000000-0000-0000-0000-000000000001' $q$, :tA), 'is already recorded');
+
+-- --------------------------------------------------------------- шаг 37 (задача D, OQ-224): третий вид отметки
+-- Провайдера почты у проекта нет, и письмо не уходит. База знает это состояние ОТДЕЛЬНЫМ видом: не «доставлено»
+-- (неправда) и не «недоставлено» (потеряли бы то, что событие разобрано и текст построен)
+SELECT pg_temp.ok('a letter composed and not sent is recorded as a dry run (OQ-224)', format($q$
+  UPDATE tenant_data.alert SET delivered_at = now(), delivery_kind = 'DRY_RUN', delivery_ref = 'dry-run-1'
+   WHERE tenant_id = %L AND alert_id = 'ae000000-0000-0000-0000-000000000002' $q$, :tA));

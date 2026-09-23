@@ -5,7 +5,7 @@ import { conservativeBudget, createKauflandAdapter } from '@repracer/kaufland-ad
 import { createPricingPipeline } from '@repracer/pricing-pipeline';
 import { createPool, PgAlertDeliveryStore, PgAlertSink, PgPricingStore, type PgPool } from '@repracer/pricing-store-pg';
 import { loadConfig, type SchedulerConfig } from './config.ts';
-import { createHeartbeat, createMailSender } from '@repracer/service-runtime';
+import { createDryMailSender, createHeartbeat, createMailSender } from '@repracer/service-runtime';
 import { createAlertDelivery } from '@repracer/alert-delivery';
 import { jobSource, type SchedulerAccount } from './jobs.ts';
 import { SchedulerMetrics, serveMetrics } from './metrics.ts';
@@ -97,14 +97,22 @@ export async function startScheduler(config: SchedulerConfig = loadConfig(), onF
   };
   const ch = (login: { user: string; password: string }) => new ClickHouseHttp({ url: config.clickHouse.url, user: login.user, password: login.password });
   const state = new PgSchedulerState(schedulerPool);
-  const deliveryPool: PgPool | null = config.mail && config.alertDeliveryPgUrl
+  const deliveryPool: PgPool | null = config.alertDeliveryPgUrl
     ? createPool(config.alertDeliveryPgUrl, { max: 2, applicationName: `repracer-alert-delivery-${config.owner}` }) : null;
-  const alertDelivery = config.mail && deliveryPool
+  /**
+   * Шаг 37, задача D: без настроек провайдера доставка идёт ВСУХУЮ — письмо собирается, не отправляется, и отметка
+   * говорит это прямо. Выключить её целиком можно только явно (`REPRACER_SCHEDULER_MAIL=off`), и тогда её здесь нет.
+   */
+  const mailSender = config.mail ? createMailSender(config.mail) : createDryMailSender((line: string) => sink.logger.log(JSON.parse(line) as never));
+  const alertDelivery = deliveryPool
     ? createAlertDelivery({
-        store: new PgAlertDeliveryStore(deliveryPool), mail: createMailSender(config.mail), now: () => new Date().toISOString(),
+        store: new PgAlertDeliveryStore(deliveryPool), mail: mailSender, now: () => new Date().toISOString(),
         ...(config.operatorEmail ? { operatorEmail: config.operatorEmail } : {}),
       })
     : undefined;
+  if (!config.mail && !config.mailOff) {
+    sink.logger.log({ level: 'WARN', code: 'MAIL_DRY_RUN_MODE', message: 'провайдер почты не настроен: письма собираются и не отправляются (OQ-224)', details: {} });
+  }
   const deps2 = pgJobDeps({
     schedulerPool, exporterPool, ingest: ch(config.clickHouse.ingest), verifier: ch(config.clickHouse.verifier),
     descriptorOf: (channel) => adapterFor(channel)?.descriptor ?? null, pipelineFor,

@@ -29,6 +29,9 @@ ALTER TABLE tenant_data.tenant
   ADD CONSTRAINT tenant_locale_known CHECK (locale IN ('de', 'en'));
 -- Язык меняет администратор тенанта: действие уже названо MANAGE_TENANT в security.admin_write_action
 GRANT UPDATE (locale) ON tenant_data.tenant TO repracer_admin;
+-- Читает язык тот, кто собирает письмо: у роли доставки право на столбцы (0120), и без этой строки она видит имя тенанта,
+-- но не его язык, — письмо снова уходило бы на умолчании
+GRANT SELECT (locale) ON tenant_data.tenant TO repracer_alert_delivery;
 
 -- ---------------------------------------------------------------- 2. Гостевое членство [Р-160]
 ALTER TABLE tenant_data.membership
