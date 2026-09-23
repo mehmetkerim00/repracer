@@ -36,6 +36,9 @@ PGUSER=svc_admin "${PSQL[@]}" -d "$DB" -f tests/db/smoke_onboarding.sql
 PGUSER=svc_stock "${PSQL[@]}" -d "$DB" -f tests/db/smoke_stock.sql
 # Шаг 35 [Р-152]: путь остатков — административной ролью (остатки ведёт человек)
 PGUSER=svc_admin "${PSQL[@]}" -d "$DB" -f tests/db/smoke_stock_path.sql
+# Шаг 36 [Р-156]: алерт и его доставка — административной ролью (события поднимают процессы, читает доставка)
+PGUSER=svc_admin "${PSQL[@]}" -d "$DB" -f tests/db/smoke_alerts.sql
+PGUSER=svc_alert_delivery "${PSQL[@]}" -d "$DB" -f tests/db/smoke_alerts_delivery.sql
 PGUSER=svc_scheduler "${PSQL[@]}" -d "$DB" -f tests/db/smoke_retention.sql
 PGUSER=svc_scheduler "${PSQL[@]}" -d "$DB" -Atc "SELECT maintenance.ensure_partitions(now())" > /dev/null
 echo "database ${DB} ready"

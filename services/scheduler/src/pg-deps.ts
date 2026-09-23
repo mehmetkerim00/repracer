@@ -17,6 +17,8 @@ export interface PgJobDepsOptions {
   pipelineFor(account: SchedulerAccount): PricingPipeline;
   descriptorOf(channel: string): ChannelDescriptor | null;
   reconcileEnabled?: JobDeps['reconcileEnabled'];
+  /** Р-156: доставка алертов владельцу; без неё работы `alerts-deliver` нет, и алерты остаются в базе недоставленными */
+  alertDelivery?: JobDeps['alertDelivery'];
   config?: Partial<JobConfig>;
 }
 
@@ -89,6 +91,7 @@ export function pgJobDeps(o: PgJobDepsOptions): JobDeps {
       alertStaleConfirmedReservations: (now) => loop(async () => Number((await o.schedulerPool.query('SELECT maintenance.alert_stale_confirmed_reservations($1) AS n', [now])).rows[0].n)),
     },
     ...(o.reconcileEnabled ? { reconcileEnabled: o.reconcileEnabled } : {}),
+    ...(o.alertDelivery ? { alertDelivery: o.alertDelivery } : {}),
     ...(o.config ? { config: o.config } : {}),
   };
 }

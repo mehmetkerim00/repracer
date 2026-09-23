@@ -18,6 +18,10 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_relay') THEN
     CREATE ROLE svc_relay LOGIN IN ROLE repracer_relay;
   END IF;
+  -- Шаг 36 [Р-156]: доставка алертов владельцу — читает алерты всех тенантов и адрес владельца, больше ничего
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_alert_delivery') THEN
+    CREATE ROLE svc_alert_delivery LOGIN IN ROLE repracer_alert_delivery;
+  END IF;
   -- Задание хранения и закрытия дней (проверка границы суток [Р-62])
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_scheduler') THEN
     CREATE ROLE svc_scheduler LOGIN IN ROLE repracer_retention;

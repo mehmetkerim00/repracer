@@ -2,7 +2,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import type { Instant, OrderLine } from '@repracer/channel-port';
 import { availableOf, publishedQuantity, type StockAllocation } from './published.ts';
 import type {
-  CreateStockSourceResult, EnableStockSyncInput, EnableStockSyncResult, InboundStockOutcome, InboundStockRow, OrderLinesOutcome, RecalculationOutcome,
+  ConfirmOrdersOutcome, CreateStockSourceResult, EnableStockSyncInput, EnableStockSyncResult, InboundStockOutcome, InboundStockRow, OrderLinesOutcome, RecalculationOutcome,
   StockActor, StockChannelRow, StockDivergenceRow, StockImportOutcome, StockImportRow, StockPage, StockRow, StockSourceMode, StockSourceRow, StockStore,
 } from './store.ts';
 
@@ -26,7 +26,11 @@ export interface MemoryStockOffer {
 interface Pool { stockSourceId: string; mode: StockSourceMode; productId: string; onHand: number; asOf: Instant | null }
 interface Scope { writeScopeId: string; offer: MemoryStockOffer; enabled: boolean; acknowledged: boolean; lastSent: number | null; version: number }
 interface Write { writeScopeId: string; quantity: number; version: number; status: string; at: Instant; errorCode: string | null }
-interface Reservation { key: string; productId: string; quantity: number; status: 'OPEN' | 'CONSUMED' | 'RELEASED' }
+interface Reservation {
+  key: string; productId: string; quantity: number; status: 'OPEN' | 'CONSUMED' | 'RELEASED';
+  /** Р-25: у внутреннего пула источник — мы сами, резервация подтверждена сразу; у Inbound API её подтверждает источник [Р-157] */
+  orderRef: string; stockSourceId: string | null; confirmed: boolean; shippedReported?: boolean;
+}
 
 /**
  * Хранилище остатков в памяти — те же правила, что у базы, для стенда без PostgreSQL и юнит-тестов. Записи здесь никто
@@ -103,6 +107,29 @@ export class InMemoryStockStore implements StockStore {
     return null;
   }
 
+  /** Р-157: источник сообщает «заказ учтён» — резервации этого заказа подтверждены; то же правило, что в базе */
+  async confirmInboundOrders(_tenantId: string, stockSourceId: string, orderRefs: readonly string[]): Promise<ConfirmOrdersOutcome> {
+    const out: ConfirmOrdersOutcome = { confirmed: 0, alreadyConfirmed: [], releasedOrders: [], unknownOrders: [] };
+    for (const ref of [...new Set(orderRefs)]) {
+      const mine = [...this.reservations.values()].filter((r) => r.orderRef === ref && r.stockSourceId === stockSourceId);
+      if (mine.length === 0) { out.unknownOrders.push(ref); continue; }
+      const open = mine.filter((r) => r.status === 'OPEN' && !r.confirmed);
+      if (open.length === 0) {
+        // Те же три случая, что в базе: подтверждён, снят или неизвестен [находка 8 ревью шага 36]
+        if (mine.some((r) => r.confirmed || r.status === 'CONSUMED')) out.alreadyConfirmed.push(ref);
+        else out.releasedOrders.push(ref);
+        continue;
+      }
+      for (const r of open) {
+        r.confirmed = true;
+        out.confirmed += 1;
+        // Отгрузка была до подтверждения — закрывается тем же вызовом
+        if (r.shippedReported) { r.status = 'CONSUMED'; const pool = this.pools.find((p) => p.productId === r.productId && p.mode === 'INTERNAL_POOL'); if (pool) pool.onHand = Math.max(0, pool.onHand - r.quantity); }
+      }
+    }
+    return out;
+  }
+
   async enableStockSync(_tenantId: string, channelAccountId: string, input: EnableStockSyncInput, actor: StockActor): Promise<EnableStockSyncResult> {
     if (!this.canManage(actor)) return { status: 'FORBIDDEN' };
     const offers = this.offers.filter((o) => o.channelAccountId === channelAccountId);
@@ -142,7 +169,7 @@ export class InMemoryStockStore implements StockStore {
   }
 
   async recordOrderLines(_tenantId: string, channelAccountId: string, lines: readonly OrderLine[], _now: Instant): Promise<OrderLinesOutcome> {
-    const out: OrderLinesOutcome = { created: 0, consumed: 0, released: 0, unknownOffers: 0, productIds: [] };
+    const out: OrderLinesOutcome = { created: 0, consumed: 0, released: 0, unknownOffers: 0, awaitingConfirmation: 0, productIds: [] };
     for (const line of lines) {
       const offer = this.offers.find((o) => o.channelAccountId === channelAccountId && o.externalOfferId === line.identity.externalOfferId);
       if (!offer) { out.unknownOffers += 1; continue; }
@@ -150,7 +177,12 @@ export class InMemoryStockStore implements StockStore {
       const existing = this.reservations.get(key);
       if (!existing) {
         if (line.status === 'CANCELLED' || line.status === 'RETURNED') continue;
-        this.reservations.set(key, { key, productId: offer.productId, quantity: line.quantity, status: 'OPEN' });
+        // Пул товара с наибольшим остатком — как в базе; от его источника зависит, кто подтверждает резервацию
+        const pool = [...this.pools].filter((x) => x.productId === offer.productId).sort((a, b) => b.onHand - a.onHand)[0];
+        this.reservations.set(key, {
+          key, productId: offer.productId, quantity: line.quantity, status: 'OPEN', orderRef: line.externalOrderRef,
+          stockSourceId: pool?.stockSourceId ?? null, confirmed: (pool?.mode ?? 'INTERNAL_POOL') === 'INTERNAL_POOL',
+        });
         out.created += 1; out.productIds.push(offer.productId);
         if (line.status === 'SHIPPED') this.ship(key, out);
         continue;
@@ -166,6 +198,8 @@ export class InMemoryStockStore implements StockStore {
   /** Отгрузка: резервация списана, остаток внутреннего пула уменьшен движением ORDER_SHIPPED — как триггер базы */
   private ship(key: string, out: OrderLinesOutcome): void {
     const r = this.reservations.get(key)!;
+    // Р-157: пул списывает только ПОДТВЕРЖДЁННАЯ резервация; неподтверждённая — названное число, а не тишина
+    if (!r.confirmed) { r.shippedReported = true; out.awaitingConfirmation += 1; return; }
     r.status = 'CONSUMED';
     const pool = this.pools.find((p) => p.productId === r.productId && p.mode === 'INTERNAL_POOL');
     if (pool) pool.onHand = Math.max(0, pool.onHand - r.quantity);

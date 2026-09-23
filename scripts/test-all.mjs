@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { findUnincludedTests } from './check-test-inclusion.mjs';
-import { filesForScope, INFRASTRUCTURE_TESTS } from './test-scopes.mjs';
+import { filesForScope, INFRASTRUCTURE_TESTS, MEASURED_FILES } from './test-scopes.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const inclusion = findUnincludedTests(root);
@@ -92,7 +92,12 @@ for (const file of selected) {
 }
 const runs = [];
 for (const [cwd, files] of [...byWorkspace].sort((a, b) => a[0].localeCompare(b[0]))) {
-  runs.push({ name: `workspace ${relative(root, cwd).split(sep).join('/') || '.'}`, ...(await runNode(cwd, files.sort())) });
+  const name = `workspace ${relative(root, cwd).split(sep).join('/') || '.'}`;
+  // Шаг 36: прогон, утверждающий СЕКУНДЫ, не делит машину с соседями — иначе он мерит их нагрузку (test-scopes.mjs)
+  const measured = files.filter((f) => MEASURED_FILES.has(relative(root, join(cwd, f)).split(sep).join('/')));
+  const shared = files.filter((f) => !measured.includes(f));
+  if (shared.length > 0) runs.push({ name, ...(await runNode(cwd, shared.sort())) });
+  for (const file of measured.sort()) runs.push({ name: `${name} (замер, в одиночку): ${file}`, ...(await runNode(cwd, [file])) });
 }
 runs.push({ name: 'repository scripts', ...(await run(['run', 'test:repo'])) });
 

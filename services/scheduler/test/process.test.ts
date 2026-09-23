@@ -23,6 +23,10 @@ const ENV = {
   REPRACER_KAUFLAND_FALLBACK_EMAIL: 'ops@example.invalid',
   REPRACER_AMAZON_APPLICATION_CREDENTIALS_REF: 'secret-ref:amazon-application',
   REPRACER_SCHEDULER_HEARTBEAT_URL: 'https://hc-ping.com/00000000-0000-4000-8000-000000000000',
+  // Шаг 36 [Р-156]: доставка алертов — часть процесса, поэтому её настройки обязательны наравне с остальными
+  REPRACER_MAIL_API_URL: 'https://mail.example.invalid/v3/send', REPRACER_MAIL_API_KEY: 'syn-mail-key',
+  REPRACER_MAIL_FROM: 'alerts@example.invalid', REPRACER_OPERATOR_EMAIL: 'ops@example.invalid',
+  REPRACER_ALERT_DELIVERY_PG_URL: 'postgres://svc_alert_delivery@db/repracer_eu',
 };
 
 test('Р-129: конфигурация процесса — секреты из файлов, обязательное названо, значения секретов в ошибки не попадают', () => {
@@ -35,6 +39,18 @@ test('Р-129: конфигурация процесса — секреты из 
   assert.equal(loadConfig({ ...ENV, REPRACER_SCHEDULER_HEARTBEAT_URL: undefined, REPRACER_SCHEDULER_HEARTBEAT: 'off' }).heartbeatUrl, null);
   assert.throws(() => loadConfig({ ...ENV, REPRACER_SCHEDULER_HEARTBEAT_URL: 'http://hc-ping.com/x' }), /must be https/);
   assert.throws(() => loadConfig({ ...ENV, REPRACER_SCHEDULER_TICK_MS: '0' }), /REPRACER_SCHEDULER_TICK_MS/);
+  /**
+   * Шаг 36 [Р-156]: молчащая доставка алертов хуже незапустившегося процесса — настройки почты обязательны, а отказ от
+   * них называется явно. Это находка 1 ревью шага 36 в обратную сторону: выключатель должен БЫТЬ и должен быть назван.
+   */
+  assert.throws(() => loadConfig({ ...ENV, REPRACER_MAIL_API_URL: undefined }), (e: Error) => e instanceof ConfigError && /REPRACER_MAIL_API_URL \(or REPRACER_SCHEDULER_MAIL=off\)/.test(e.message));
+  assert.throws(() => loadConfig({ ...ENV, REPRACER_OPERATOR_EMAIL: undefined }), /REPRACER_OPERATOR_EMAIL/);
+  assert.throws(() => loadConfig({ ...ENV, REPRACER_ALERT_DELIVERY_PG_URL: undefined }), /REPRACER_ALERT_DELIVERY_PG_URL/);
+  assert.throws(() => loadConfig({ ...ENV, REPRACER_MAIL_API_URL: 'http://mail.example.invalid/v3/send' }), /REPRACER_MAIL_API_URL must be https/);
+  const off = loadConfig({ ...ENV, REPRACER_SCHEDULER_MAIL: 'off', REPRACER_MAIL_API_URL: undefined, REPRACER_MAIL_API_KEY: undefined, REPRACER_MAIL_FROM: undefined, REPRACER_OPERATOR_EMAIL: undefined, REPRACER_ALERT_DELIVERY_PG_URL: undefined });
+  assert.equal(off.mail, null);
+  assert.equal(off.operatorEmail, null);
+  assert.equal(off.alertDeliveryPgUrl, null);
   // Нечитаемый файл секрета: в ошибке — имя переменной, не путь и не содержимое
   const thrown = (() => { try { loadConfig({ ...ENV, REPRACER_CH_INGEST_PASSWORD: undefined, REPRACER_CH_INGEST_PASSWORD_FILE: '/run/secrets/absent' }, () => { throw new Error('ENOENT: /run/secrets/absent'); }); return null; } catch (e) { return e as Error; } })();
   assert.equal(thrown?.message, 'CONFIG_SECRET_UNREADABLE: REPRACER_CH_INGEST_PASSWORD_FILE');

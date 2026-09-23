@@ -211,9 +211,33 @@ test('Р-127: каждый разворачиваемый процесс отм�
     // `deploy/ci` — надстройки, которыми сборка поднимает остальные развёртывания, а не процесс
     if (name === 'ci' || !existsSync(new URL(`deploy/${name}/compose.yaml`, root))) continue;
     const compose = readFileSync(new URL(`deploy/${name}/compose.yaml`, root), 'utf8');
-    const main = /"(services\/[\w-]+\/src\/main\.ts)"/.exec(compose)?.[1];
-    assert.ok(main, `развёртывание ${name} называет свою точку входа в compose`);
-    entryPoints.push({ deployment: name, main: main! });
+    /**
+     * Наш процесс в развёртывании узнаётся по тому, что оно запускает ФАЙЛ РЕПОЗИТОРИЯ. Шаг 36: профиль production
+     * состоит из чужих образов (обратный прокси, копия базы) — отмечаться там нечему, и требовать отметку не от кого.
+     * Правило от этого не слабеет: как только профиль запустит наш файл, отметка станет обязательной — и путь к файлу
+     * проверяется целиком, а не только `services/*`.
+     */
+    /**
+     * Наш код узнаётся по ЛЮБОМУ пути репозитория, а не только по `.ts` (находка 16 ревью шага 36): профиль production
+     * запускает `backup-loop.sh` — первая редакция правила его не видела. Исключение для профиля из чужих образов —
+     * ИМЕНОВАННОЕ, с причиной, а не «в compose есть слово image», которое истинно всегда.
+     */
+    const ours = [...compose.matchAll(/(?:^|[\s"'[])((?:services|apps|packages|scripts|tests)\/[\w./-]+\.(?:ts|mjs|js|sh))/gm)].map((x) => x[1]!);
+    const entryLike = ours.filter((f) => /\/(?:main|worker|server)\.[\w]+$/.test(f) || /src\/main\.ts$/.test(f));
+    if (entryLike.length === 0) {
+      /**
+       * Шаг 36: `deploy/production` — обратный прокси и суточная копия базы, оба чужими образами. Наш код там есть
+       * (`backup-loop.sh`), но это не ПРОЦЕСС продукта: он не ходит в каналы и не ведёт цены, отмечаться ему нечем.
+       * Список именованный: новый профиль с процессом продукта сюда не попадёт и потребует отметку.
+       */
+      assert.deepEqual([name], ['production'], `развёртывание ${name} не запускает процесс продукта — это должно быть названо в правиле`);
+      assert.ok(ours.every((f) => /\.sh$/.test(f)), `в профиле ${name} наш код — только вспомогательные скрипты: ${ours.join(', ')}`);
+      continue;
+    }
+    for (const main of entryLike) {
+      assert.match(main, /^services\/[\w-]+\/src\/main\.ts$/, `развёртывание ${name} запускает наш код точкой входа процесса: ${main}`);
+      entryPoints.push({ deployment: name, main });
+    }
   }
   assert.ok(entryPoints.length >= 3, `развёртывания найдены: ${entryPoints.map((e) => e.deployment).join(', ')}`);
 
@@ -268,4 +292,46 @@ test('Р-146: ссылка из документации ведёт на сущ�
     }
   }
   assert.deepEqual(broken, [], 'ссылка из документации ведёт на несуществующий файл');
+});
+
+/**
+ * Шаг 36: прогон, утверждающий СЕКУНДЫ, шёл в одном процессе node с соседями по рабочему пространству и мерил их нагрузку —
+ * предпросмотр стратегии на 10 000 предложений уложился в 58 секунд в одиночку и не уложился в предел 120, пока рядом шли
+ * остальные живые прогоны консоли. Такие файлы названы в `MEASURED_FILES` и идут по одному. Правило держит список полным:
+ * новый прогон с утверждением о секундах, не названный там, снова начнёт мерить чужую нагрузку — молча и мимо.
+ */
+test('Р-146: каждый прогон, утверждающий секунды, назван прогоном-замером (шаг 36)', async () => {
+  const { MEASURED_FILES } = await import('../test-scopes.mjs');
+  const { existsSync, readdirSync, readFileSync, statSync } = await import('node:fs');
+  const root = new URL('../../', import.meta.url);
+
+  for (const file of MEASURED_FILES) assert.ok(existsSync(new URL(file, root)), `названный замером файл существует: ${file}`);
+
+  const tests: string[] = [];
+  const walk = (rel: string) => {
+    for (const name of readdirSync(new URL(rel, root))) {
+      if (name === 'node_modules' || name === '.git') continue;
+      const child = `${rel}${name}`;
+      if (statSync(new URL(child, root)).isDirectory()) walk(`${child}/`);
+      else if (name.endsWith('.test.ts')) tests.push(child);
+    }
+  };
+  for (const dir of ['apps/', 'packages/', 'services/', 'tests/', 'scripts/']) walk(dir);
+  assert.ok(tests.length > 50, `тестов найдено: ${tests.length}`);
+
+  /**
+   * Прогон решает по времени двумя способами, и оба ищутся: утверждением о секундах и ПРЕДЕЛОМ ОЖИДАНИЯ, после которого
+   * прогон падает сам (`*_LIMIT_SECONDS` у опроса задания). Второй способ нашёлся сразу: `stock-only-live` секунд не
+   * утверждает, но отказывает по пределу ожидания — одного детектора здесь мало.
+   */
+  const ASSERTS_TIME = /assert\.ok\([^;]*\b(?:seconds|Seconds|ms|Ms|elapsed|duration)\b[^;]*[<>]=?[^;]*\)/;
+  const WAITS_BY_LIMIT = /\b[A-Z_]*LIMIT_(?:SECONDS|MS)\b/;
+  const decidesByTime = (text: string) => ASSERTS_TIME.test(text) || WAITS_BY_LIMIT.test(text);
+  // Положительный контроль: детектор действительно срабатывает — иначе пустой список «нарушителей» не значит ничего [Р-94]
+  const listed = [...MEASURED_FILES].filter((f) => decidesByTime(readFileSync(new URL(f, root), 'utf8')));
+  assert.deepEqual(listed.sort(), [...MEASURED_FILES].sort(), 'каждый названный замером прогон действительно решает по времени');
+  // Само правило называет искомые образцы текстом — иначе оно нашло бы себя
+  const SELF = 'scripts/test/repo-rules.test.ts';
+  const missing = tests.filter((f) => f !== SELF && !MEASURED_FILES.has(f) && decidesByTime(readFileSync(new URL(f, root), 'utf8')));
+  assert.deepEqual(missing, [], 'прогон утверждает время, но делит машину с соседями — назовите его в MEASURED_FILES');
 });

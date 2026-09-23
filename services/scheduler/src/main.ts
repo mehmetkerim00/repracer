@@ -3,9 +3,10 @@ import { createAmazonAdapter, TwoLevelBudget } from '@repracer/amazon-adapter';
 import type { AdapterDependencies, ChannelAdapter } from '@repracer/channel-port';
 import { conservativeBudget, createKauflandAdapter } from '@repracer/kaufland-adapter';
 import { createPricingPipeline } from '@repracer/pricing-pipeline';
-import { createPool, PgPricingStore, type PgPool } from '@repracer/pricing-store-pg';
+import { createPool, PgAlertDeliveryStore, PgAlertSink, PgPricingStore, type PgPool } from '@repracer/pricing-store-pg';
 import { loadConfig, type SchedulerConfig } from './config.ts';
-import { createHeartbeat } from '@repracer/service-runtime';
+import { createHeartbeat, createMailSender } from '@repracer/service-runtime';
+import { createAlertDelivery } from '@repracer/alert-delivery';
 import { jobSource, type SchedulerAccount } from './jobs.ts';
 import { SchedulerMetrics, serveMetrics } from './metrics.ts';
 import { pgJobDeps } from './pg-deps.ts';
@@ -51,10 +52,15 @@ export async function startScheduler(config: SchedulerConfig = loadConfig(), onF
   const schedulerPool: PgPool = createPool(config.schedulerPgUrl, { max: 4, applicationName: `repracer-scheduler-${config.owner}` });
   const appPool: PgPool = createPool(config.appPgUrl, { max: 8, applicationName: `repracer-scheduler-app-${config.owner}` });
   const exporterPool: PgPool = createPool(config.exporterPgUrl, { max: 2, applicationName: `repracer-scheduler-export-${config.owner}` });
+  /**
+   * Р-156: алерт идёт И в журнал эксплуатации, И в базу. Журнал — для того, кто смотрит за процессами; база — для
+   * владельца: из неё работа `alerts-deliver` шлёт письмо. Алерт без строки в базе доставить было бы нечем.
+   */
+  const alerts = new PgAlertSink(appPool, sink.alerts);
   const deps: AdapterDependencies = {
     accounts: pgAccountDirectory(appPool),
     credentials: credentialsFromFiles(config.channelSecretsDir),
-    alerts: sink.alerts,
+    alerts,
     logger: sink.logger,
     now: () => new Date().toISOString(),
   };
@@ -91,13 +97,22 @@ export async function startScheduler(config: SchedulerConfig = loadConfig(), onF
   };
   const ch = (login: { user: string; password: string }) => new ClickHouseHttp({ url: config.clickHouse.url, user: login.user, password: login.password });
   const state = new PgSchedulerState(schedulerPool);
+  const deliveryPool: PgPool | null = config.mail && config.alertDeliveryPgUrl
+    ? createPool(config.alertDeliveryPgUrl, { max: 2, applicationName: `repracer-alert-delivery-${config.owner}` }) : null;
+  const alertDelivery = config.mail && deliveryPool
+    ? createAlertDelivery({
+        store: new PgAlertDeliveryStore(deliveryPool), mail: createMailSender(config.mail), now: () => new Date().toISOString(),
+        ...(config.operatorEmail ? { operatorEmail: config.operatorEmail } : {}),
+      })
+    : undefined;
   const deps2 = pgJobDeps({
     schedulerPool, exporterPool, ingest: ch(config.clickHouse.ingest), verifier: ch(config.clickHouse.verifier),
     descriptorOf: (channel) => adapterFor(channel)?.descriptor ?? null, pipelineFor,
+    ...(alertDelivery ? { alertDelivery } : {}),
   });
   const metrics = new SchedulerMetrics();
   // Риск 31: часы сроков — часы базы
-  const scheduler = createScheduler({ state, source: jobSource(deps2), owner: config.owner, now: dueClockOf(state), alerts: sink.alerts });
+  const scheduler = createScheduler({ state, source: jobSource(deps2), owner: config.owner, now: dueClockOf(state), alerts });
   const heartbeat = config.heartbeatUrl ? createHeartbeat({ url: config.heartbeatUrl }) : null;
   // Живость цикла, а не завершение такта: работы такта берут аренду до 2 часов
   const server = await serveMetrics(metrics, { port: config.metricsPort, staleAfterMs: Math.max(5 * config.tickMs, 300_000) });

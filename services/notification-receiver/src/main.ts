@@ -2,7 +2,7 @@ import { createAmazonAdapter, TwoLevelBudget } from '@repracer/amazon-adapter';
 import { createNotificationReceiver, createSqsClient, pipelineSink, storeLedger, type NotificationReceiver } from '@repracer/amazon-notifications';
 import type { AdapterDependencies } from '@repracer/channel-port';
 import { createPricingPipeline } from '@repracer/pricing-pipeline';
-import { createPool, PgPricingStore, PgSellerRouter, type PgPool } from '@repracer/pricing-store-pg';
+import { createPool, PgAlertSink, PgPricingStore, PgSellerRouter, type PgPool } from '@repracer/pricing-store-pg';
 import { createHeartbeat, credentialsFromFiles, jsonSink, pgAccountDirectory, ProcessHealth, serveHealth } from '@repracer/service-runtime';
 import { loadReceiverConfig, type ReceiverConfig } from './config.ts';
 
@@ -24,12 +24,17 @@ export async function startReceiverProcess(config: ReceiverConfig = loadReceiver
   const sink = jsonSink();
   const health = new ProcessHealth();
   const appPool: PgPool = createPool(config.pgUrl, { max: 8, applicationName: `repracer-receiver-${config.receiverId}` });
+  /**
+   * Р-156 (шаг 36): алерты приёмника уведомлений тоже попадают в базу — из неё их доставляет работа планировщика.
+   * До шага 36 они жили строкой JSON в stdout, то есть нигде (находка 2 ревью шага 36).
+   */
+  const alerts = new PgAlertSink(appPool, sink.alerts);
   const inboundPool: PgPool = createPool(config.inboundPgUrl, { max: 2, applicationName: `repracer-receiver-${config.receiverId}-router` });
   const store = new PgPricingStore(appPool);
   const deps: AdapterDependencies = {
     accounts: pgAccountDirectory(appPool),
     credentials: credentialsFromFiles(config.channelSecretsDir),
-    alerts: sink.alerts,
+    alerts,
     logger: sink.logger,
     now: () => new Date().toISOString(),
   };
@@ -37,7 +42,7 @@ export async function startReceiverProcess(config: ReceiverConfig = loadReceiver
     deps, userAgent: config.userAgent, applicationCredentialsRef: config.amazon.applicationCredentialsRef, budget: new TwoLevelBudget(),
   });
   // Диспетчера нет: уведомление рождает решение и ждущую запись, событие о ней объявляет база, отправляет её процесс диспетчера [Р-64]
-  const pipeline = createPricingPipeline({ store, adapter, alerts: sink.alerts, logger: sink.logger, now: () => new Date().toISOString() });
+  const pipeline = createPricingPipeline({ store, adapter, alerts, logger: sink.logger, now: () => new Date().toISOString() });
   const receiver = createNotificationReceiver({
     sqs: createSqsClient({
       queueUrl: config.queueUrl,
@@ -52,7 +57,7 @@ export async function startReceiverProcess(config: ReceiverConfig = loadReceiver
     router: new PgSellerRouter(inboundPool),
     ledger: storeLedger(store),
     sink: pipelineSink(pipeline),
-    alerts: sink.alerts,
+    alerts,
     logger: sink.logger,
     now: () => new Date(),
     ...(config.silenceAlertAfterMs ? { policy: { silenceAlertAfterMs: config.silenceAlertAfterMs } } : {}),

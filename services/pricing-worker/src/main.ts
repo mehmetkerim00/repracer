@@ -1,7 +1,7 @@
 import { createAmazonAdapter, TwoLevelBudget } from '@repracer/amazon-adapter';
 import type { AdapterDependencies, ChannelAccountId, ChannelAdapter, TenantId } from '@repracer/channel-port';
 import { conservativeBudget, createKauflandAdapter } from '@repracer/kaufland-adapter';
-import { createPool, type PgPool } from '@repracer/pricing-store-pg';
+import { createPool, PgAlertSink, type PgPool } from '@repracer/pricing-store-pg';
 import { createHeartbeat, credentialsFromFiles, jsonSink, pgAccountDirectory, ProcessHealth, serveHealth } from '@repracer/service-runtime';
 import { loadWorkerConfig, type WorkerConfig } from './config.ts';
 import { startWorker, type RunningWorker } from './worker.ts';
@@ -60,10 +60,16 @@ export async function startWorkerProcess(config: WorkerConfig = loadWorkerConfig
   const sink = jsonSink();
   const health = new ProcessHealth();
   const appPool: PgPool = createPool(config.pgUrl, { max: 4, applicationName: `repracer-worker-${config.workerId}-directory` });
+  /**
+   * Р-156 (шаг 36): алерт идёт И в журнал эксплуатации, И в базу — из неё работа `alerts-deliver` шлёт письмо владельцу.
+   * Диспетчер поднимает `PRICE_WRITE_SCOPE_BLOCKED`, `PRICE_WRITE_NOT_SENT` и `PRICING_CHANNEL_DISTRUSTED`: без записи в
+   * базу письма об этих событиях не ушли бы никогда (находка 2 ревью шага 36).
+   */
+  const alerts = new PgAlertSink(appPool, sink.alerts);
   const deps: AdapterDependencies = {
     accounts: pgAccountDirectory(appPool),
     credentials: credentialsFromFiles(config.channelSecretsDir),
-    alerts: sink.alerts,
+    alerts,
     logger: sink.logger,
     now: () => new Date().toISOString(),
   };
@@ -75,7 +81,7 @@ export async function startWorkerProcess(config: WorkerConfig = loadWorkerConfig
     ...(config.relayPgUrl ? { relayPgUrl: config.relayPgUrl } : {}),
     kafkaBrokers: config.kafkaBrokers,
     adapterFor,
-    alerts: sink.alerts,
+    alerts,
     logger: sink.logger,
     partitionsConcurrently: config.partitionsConcurrently,
     sweepIntervalMs: config.sweepIntervalMs,

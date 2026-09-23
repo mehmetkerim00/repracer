@@ -63,6 +63,8 @@ export interface KauflandLiveWorld {
   betweenTicks(): Promise<void>;
   /** Путь решения, вызываемый планировщиком с идентификаторами базы */
   pipelineForDbIds(): PricingPipeline;
+  /** Диспетчер мира целиком: обход собирает готовые записи в пакеты [Р-155] */
+  dispatcher: WriteDispatcher;
   /** Отправка ждущих записей единицы — как делает путь решения за брокером, по идентификаторам базы */
   dispatchScope(tenantId: string, writeScopeId: string): Promise<void>;
   /** Шаг 35: остатки мира (null — мир без остатков) */
@@ -116,6 +118,11 @@ export async function kauflandLiveWorld(input: {
   stock?: { onHand: number; bufferUnits: number; stockPool: PgPool };
   /** Спрос модели канала: заказы, отгрузки, отмены (K-11 — заказ уменьшает amount у канала сам) */
   demand?: KauflandChannelModelSpec['demand'];
+  /**
+   * Шаг 36 [Р-156]: куда мир кладёт алерты СВЕРХ своего журнала — обычно в базу (`PgAlertSink`), откуда их забирает
+   * доставка. Без этого алерт остаётся в памяти прогона, и проверить доставку нечем.
+   */
+  alertSink?: { raise(alert: { code: string; severity: 'WARNING' | 'CRITICAL'; tenantId?: unknown; channelAccountId?: unknown; correlationId?: string; details: Readonly<Record<string, string | number | boolean>> }): Promise<void> };
 }): Promise<KauflandLiveWorld> {
   const tenantFixture = `10000000-0000-4000-8000-00000000${String(input.tag).padStart(4, '0')}`;
   const accountFixture = `20000000-0000-4000-8000-00000000${String(input.tag).padStart(4, '0')}`;
@@ -192,6 +199,22 @@ export async function kauflandLiveWorld(input: {
   const trace: TraceEntry[] = [];
   const fetch = channelFetch(observing, kauflandAuthChecker(world, clock), clock, violations, trace);
   const deps = worldDependencies(world, clock, sink);
+  if (input.alertSink) {
+    // Алерт идёт И в журнал прогона, И в переданное хранилище — как в процессе: журнал для эксплуатации, база для письма
+    const extra = input.alertSink;
+    const journal = deps.alerts;
+    deps.alerts = {
+      async raise(alert) {
+        await journal.raise(alert);
+        // Хранилищу — идентификаторы БАЗЫ: в процессе алерт поднимается уже в них, а мир живёт в идентификаторах сценария
+        await extra.raise({
+          ...alert,
+          ...(alert.tenantId ? { tenantId: seeded.ids.dbId(String(alert.tenantId)) } : {}),
+          ...(alert.channelAccountId ? { channelAccountId: seeded.ids.dbId(String(alert.channelAccountId)) } : {}),
+        } as never);
+      },
+    };
+  }
   const adapter = kauflandUnderTest({ deps, world, clock, fetch });
   const store = translateStore(new PgPricingStore(input.appPool, { adminPool: input.adminPool }), seeded.ids);
   const writeQueue = new PgWriteQueueStore(input.appPool, { scanPool: input.dispatcherPool });
@@ -222,7 +245,7 @@ export async function kauflandLiveWorld(input: {
     await stock.recalculate(seeded.tenantId, null, clock.iso() as never);
   }
   return {
-    channel: 'KAUFLAND', clock, world, seeded, adapter, simulator, pipeline, products: input.products, events: events.list, violations, buyboxCalls, requests,
+    channel: 'KAUFLAND', clock, world, seeded, adapter, simulator, pipeline, dispatcher, products: input.products, events: events.list, violations, buyboxCalls, requests,
     stock, stockPipeline,
     async betweenTicks() {
       // Трасса запросов проверке не нужна и за сутки растёт до сотен тысяч строк

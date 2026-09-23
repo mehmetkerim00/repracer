@@ -4,7 +4,7 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { StandToken, WorldSummary } from '../src/api-types.ts';
 import { STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
-import { demoWorld, DEMO_OFFERS, DEMO_ON_HAND, type DemoWorld } from '@repracer/contract-tests/live';
+import { demoWorld, nextNineUtc, DEMO_OFFERS, DEMO_ON_HAND, type DemoWorld } from '@repracer/contract-tests/live';
 import type { StockDivergencesView, StockView } from '@repracer/console-model';
 import { INTERVENTION_SLICE_LIMIT } from '@repracer/pricing-pipeline';
 import { createAuthenticator, MemoryIdentityDirectory, staticJwks } from '@repracer/identity';
@@ -59,9 +59,8 @@ before(async () => {
   db = await createIsolatedDatabase('demoday');
   const appPool: PgPool = db.pool('svc_app', 4);
   const adminPool: PgPool = db.pool('svc_admin', 4);
-  // Старт — 09:00 UTC завтрашних суток: сутки пересекут границу суток витрины ровно один раз, и это часть прогона, а не случайность
-  const tomorrow = new Date(Date.now() + 24 * 3_600_000);
-  const startIso = new Date(Date.UTC(tomorrow.getUTCFullYear(), tomorrow.getUTCMonth(), tomorrow.getUTCDate(), 9, 0, 0)).toISOString();
+  // Ближайшие 09:00 UTC после текущего момента: граница суток пересекается всегда, а мир не уходит от часов базы дальше суток
+  const startIso = nextNineUtc();
   // bare: false — мир уже настроен (себестоимость, границы, стратегия, движок включён): как после пройденного онбординга
   demo = await demoWorld({
     tag: 3500, startIso, bare: false, appPool, adminPool, provisioningPool: db.pool('svc_provisioning', 1), dispatcherPool: db.pool('svc_dispatcher', 2),

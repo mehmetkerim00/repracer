@@ -7,7 +7,7 @@ import { createPool, type PgPool } from '../src/index.ts';
  * repracer_template) — CREATE DATABASE … TEMPLATE, без повторного применения миграций: роли кластера уже созданы.
  * Нужны REPRACER_PG_URL (роль приложения) и REPRACER_PG_ADMIN_URL (суперпользователь стенда). Без них тест падает [Р-84].
  */
-export type TestRole = 'svc_app' | 'svc_fx_loader' | 'svc_dispatcher' | 'svc_exporter' | 'svc_admin' | 'svc_provisioning' | 'svc_authenticator' | 'svc_scheduler' | 'svc_relay' | 'svc_bulk_worker' | 'svc_stock';
+export type TestRole = 'svc_app' | 'svc_fx_loader' | 'svc_dispatcher' | 'svc_exporter' | 'svc_admin' | 'svc_provisioning' | 'svc_authenticator' | 'svc_scheduler' | 'svc_relay' | 'svc_bulk_worker' | 'svc_stock' | 'svc_alert_delivery';
 
 export interface IsolatedDatabase {
   name: string;

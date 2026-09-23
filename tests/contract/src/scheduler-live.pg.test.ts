@@ -18,7 +18,9 @@ const assert: typeof strictAssert = new Proxy(strictAssert, {
   },
 }) as typeof strictAssert;
 
-import { createPool, type PgPool } from '@repracer/pricing-store-pg';
+import { createPool, PgAlertDeliveryStore, PgAlertSink, type PgPool } from '@repracer/pricing-store-pg';
+import { createAlertDelivery } from '@repracer/alert-delivery';
+import { FakeMail } from '@repracer/alert-delivery/testing';
 import { createScheduler, JOB_CATALOG, jobSource, PgSchedulerState, pgJobDeps, runScheduler, type JobDeps } from '@repracer/scheduler';
 import { createIsolatedDatabase, requireEnv } from '../../../packages/pricing-store-pg/test/isolated-db.ts';
 import { VirtualClock } from './harness/world.ts';
@@ -74,6 +76,8 @@ interface Live {
   polls(w: KauflandLiveWorld, cls: ProductClass): number[];
 }
 let live: Live;
+/** Письма, перехваченные во время суток работы планировщика [Р-156] */
+let mail: FakeMail;
 
 before(async () => {
   /**
@@ -123,8 +127,29 @@ before(async () => {
       : { lines: 0, created: 0, consumed: 0, released: 0, unknownOffers: 0, writes: 0 }) },
   };
   const alerts: Live['alerts'] = [];
+  /**
+   * Шаг 36 [Р-156]: доставка алертов — работа планировщика, а не вызов из теста. Алерты пишутся в базу тем же
+   * хранилищем, что в процессе, письма перехватывает модель провайдера, и о самой работе есть утверждение ниже.
+   */
+  mail = new FakeMail();
+  const alertSink = new PgAlertSink(pools.appPool);
+  const delivery = createAlertDelivery({
+    store: new PgAlertDeliveryStore(db.pool('svc_alert_delivery', 2)), mail,
+    /**
+     * Часы доставки — НАСТОЯЩИЕ, а не виртуальные часы мира: время события ставит база (`raised_at := now()`), и
+     * сравнивать его с виртуальными часами, которые идут в прошлом, значит не увидеть ни одного события. В процессе
+     * обе стороны настоящие; расхождение живёт только в прогонах на виртуальных часах.
+     */
+    now: () => new Date().toISOString(),
+    locale: 'de', operatorEmail: 'betrieb@example.invalid', digestSeconds: 3600,
+  });
+  deps.alertDelivery = delivery;
   const scheduler = createScheduler({ state: new PgSchedulerState(schedulerPool), source: jobSource(deps), owner: 'live-1', now: () => clock.iso(),
-    alerts: { raise: async (a) => { alerts.push({ ...(a as unknown as Live["alerts"][number]), atMs: clock.nowMs() }); } } });
+    alerts: { raise: async (a) => {
+      alerts.push({ ...(a as unknown as Live["alerts"][number]), atMs: clock.nowMs() });
+      // Алерт идёт И в журнал прогона, И в базу — как в процессе планировщика
+      await alertSink.raise(a as never);
+    } } });
   // Конец окна задан якорем выше; виртуальные часы идут от startMs до endMs
   const started = Date.now();
   const sleeps: number[] = [];
@@ -276,6 +301,23 @@ observes('analytics-export-day', 'провал выгрузки сообщает
   assert.ok(live.alerts.some((a) => a.code === 'ANALYTICS_EXPORT_FAILED' && a.severity === 'CRITICAL'), 'провал выгрузки — CRITICAL');
   const job = jobOf('analytics-export-day');
   assert.ok(job.runs >= 1 && job.failed === 0, `слот выгрузки продвигается при провале суток: ${JSON.stringify(job)}`);
+});
+
+observes('alerts-deliver', 'Р-156 (шаг 36): алерты суток доставлены письмами, и недоставленных не осталось', async () => {
+  const job = jobOf('alerts-deliver');
+  assert.ok(job.runs > 0, `работа доставки запускалась: ${JSON.stringify(job)}`);
+  assert.equal(job.failed, 0, 'ни один заход доставки не провалился');
+  const [a] = (await observer.query(
+    `SELECT count(*)::int AS raised, count(*) FILTER (WHERE delivered_at IS NOT NULL)::int AS delivered,
+            count(*) FILTER (WHERE severity = 'CRITICAL' AND delivery_kind <> 'EMAIL_IMMEDIATE')::int AS wrong_kind
+       FROM tenant_data.alert`)).rows;
+  assert.ok(Number(a.raised) > 0, 'за сутки работы поднялся хотя бы один алерт — иначе доставлять нечего');
+  assert.equal(Number(a.wrong_kind), 0, 'CRITICAL доставляется письмом немедленно, а не дайджестом');
+  // Письма — настоящие по содержанию: у каждого есть получатель, тема и тело, и их столько же, сколько отмеченных доставок
+  assert.ok(mail.sent.length > 0, `писем за сутки: ${mail.sent.length}`);
+  assert.ok(mail.sent.every((x) => x.to.includes('@') && x.subject.includes('repracer') && x.text.length > 40),
+    `каждое письмо названо и не пусто: ${JSON.stringify(mail.sent[0])}`);
+  console.log(JSON.stringify({ alerts: a, letters: mail.sent.length, subjects: [...new Set(mail.sent.map((x) => x.subject.slice(0, 60)))].slice(0, 5) }));
 });
 
 test('Р-128: о каждой работе планировщика ВЫПОЛНЯЕТСЯ хотя бы одно утверждение', () => {
