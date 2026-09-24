@@ -62,7 +62,11 @@ function raisedInSource(): Map<string, string[]> {
       }
     }
   };
-  for (const root of ['packages', 'services']) walk(join(ROOT, root));
+  /**
+   * Шаг 38 (находка 7 ревью шага 37): обход захватывает и `apps/`. С шага 37 консоль — разворачиваемый процесс [Р-159],
+   * и алерт, поднятый из неё, правило не видело: «у каждого события есть текст» было бы ложным молча.
+   */
+  for (const root of ['packages', 'services', 'apps']) walk(join(ROOT, root));
   return found;
 }
 

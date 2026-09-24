@@ -28,6 +28,11 @@ export interface ConsoleConfig {
   publicDemo: boolean;
   /** Каждые сколько часов демо-мир пересеивается заново (Р-160): демо, в котором продавец что-то «сломал», показывать нельзя */
   demoReseedHours: number;
+  /**
+   * Закрытый ключ гостевого издателя (PEM, EC P-256). `null` — временный ключ в памяти процесса, и тогда экземпляр
+   * обязан быть ОДИН: две реплики с разными ключами дают гостю случайные 401 (находка 1 ревью шага 37).
+   */
+  guestKeyPem: string | null;
   /** Строки подключения по ролям: ключ — имя роли без `svc_` */
   pgUrls: Readonly<Record<ConsoleRole, string>>;
   /** Вход настоящих продавцов [Р-78]: поставщик identity. Без него работает только гость демо */
@@ -78,6 +83,14 @@ export function loadConsoleConfig(env: Env = process.env, read: (path: string) =
 
   const publicDemo = env.REPRACER_CONSOLE_PUBLIC_DEMO === 'on';
   /**
+   * Ключ гостевого издателя — из файла секретов, как все ключи. Временный ключ в памяти разрешён только ЯВНО
+   * (`REPRACER_CONSOLE_GUEST_KEY=ephemeral`) и означает «экземпляр один»: молчаливое умолчание здесь — это гость,
+   * получающий 401 на каждом втором запросе, как только рядом встанет вторая реплика.
+   */
+  const guestKeyPem = !publicDemo || env.REPRACER_CONSOLE_GUEST_KEY === 'ephemeral'
+    ? null
+    : requiredValue(secret(env, 'REPRACER_CONSOLE_GUEST_KEY', read), 'REPRACER_CONSOLE_GUEST_KEY (or REPRACER_CONSOLE_GUEST_KEY=ephemeral для одного экземпляра)');
+  /**
    * Процесс, который не пускает ни продавца, ни гостя, поднимать незачем: он ответит 401 на всё и будет выглядеть работающим.
    * Поэтому одно из двух обязано быть настроено, и отказ называет оба пути.
    */
@@ -99,6 +112,7 @@ export function loadConsoleConfig(env: Env = process.env, read: (path: string) =
     publicDemo,
     // Сутки по умолчанию: демо переживает рабочий день целиком, а следы вчерашних гостей не копятся
     demoReseedHours: intFromEnv(env, 'REPRACER_CONSOLE_DEMO_RESEED_HOURS', 24, 1, 24 * 30),
+    guestKeyPem,
     pgUrls,
     oidc,
   };

@@ -39,6 +39,8 @@ printf 'https://hc-ping.example.invalid/00000000-0000-4000-8000-000000000000' > 
 printf 'https://hc-ping.example.invalid/00000000-0000-4000-8000-000000000001' > "$SECRETS/console_heartbeat_url"
 printf 'https://hc-ping.example.invalid/00000000-0000-4000-8000-000000000002' > "$SECRETS/worker_heartbeat_url"
 printf 'https://hc-ping.example.invalid/00000000-0000-4000-8000-000000000003' > "$SECRETS/receiver_heartbeat_url"
+# Шаг 38: ключ гостевого издателя — файлом, как в работе. Синтетический, создаётся здесь же и уходит вместе с каталогом
+openssl ecparam -name prime256v1 -genkey -noout 2>/dev/null | openssl pkcs8 -topk8 -nocrypt -out "$SECRETS/console_guest_key" 2>/dev/null
 printf 'ci-synthetic-ingest' > "$SECRETS/ch_ingest_password"
 printf 'ci-synthetic-verifier' > "$SECRETS/ch_verifier_password"
 # Очередь и ключи AWS — синтетические: живой очереди нет (OQ-167), проверяется старт процесса, а не работа с очередью

@@ -72,6 +72,8 @@ before(async () => {
     REPRACER_CONSOLE_PUBLIC_DEMO: 'on',
     // Р-127: отметку во внешнем сервисе прогон выключает ЯВНО — аккаунта сервиса у проекта нет (OQ-188)
     REPRACER_CONSOLE_HEARTBEAT: 'off',
+    // Шаг 38: временный ключ гостевого издателя — прогон поднимает ОДИН экземпляр, и это сказано явно
+    REPRACER_CONSOLE_GUEST_KEY: 'ephemeral',
     REPRACER_CONSOLE_APP_PG_URL: url('svc_app'), REPRACER_CONSOLE_ADMIN_PG_URL: url('svc_admin'),
     REPRACER_CONSOLE_AUTHENTICATOR_PG_URL: url('svc_authenticator'), REPRACER_CONSOLE_ONBOARDING_PG_URL: url('svc_onboarding'),
     REPRACER_CONSOLE_PROVISIONING_PG_URL: url('svc_provisioning'), REPRACER_CONSOLE_DISPATCHER_PG_URL: url('svc_dispatcher'),

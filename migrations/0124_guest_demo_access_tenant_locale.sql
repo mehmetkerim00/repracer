@@ -73,8 +73,8 @@ CREATE TRIGGER b_membership_guest_demo_only BEFORE INSERT OR UPDATE OF guest, te
 CREATE FUNCTION tenant_data.membership_guest_stays_guest() RETURNS trigger
   LANGUAGE plpgsql SET search_path = pg_catalog AS $fn$
 BEGIN
-  -- Проверяется только СМЕНА РОЛИ: снять сам признак нечем — `guest` нет в списке изменяемых столбцов
-  -- (`security.restrict_update` на этой таблице), и такая правка отказывает раньше и по своей причине [Р-99]
+  -- Проверяется только СМЕНА РОЛИ: снять сам признак нечем — права UPDATE на столбец `guest` нет ни у кого, кроме
+  -- роли, которая членства создаёт, и такая правка отказывает раньше и своей причиной [Р-99, Р-100]
   IF OLD.guest AND NEW.role <> OLD.role THEN
     RAISE EXCEPTION 'a guest membership is never promoted: it stays a guest with the VIEWER role (Р-160)' USING ERRCODE = 'insufficient_privilege';
   END IF;

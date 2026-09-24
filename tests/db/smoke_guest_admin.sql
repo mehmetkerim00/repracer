@@ -37,6 +37,20 @@ SELECT pg_temp.expect_fail('a demo guest is promoted to a pricing manager (Р-16
   UPDATE tenant_data.membership SET role = 'PRICING_MANAGER' WHERE tenant_id = %L AND membership_id = %L $q$, :tDemo, :'guestM'),
   'a guest membership is never promoted');
 
+/**
+ * Снять сам признак гостя нечем. Держат это ДВА независимых механизма, и порядок именно такой:
+ *   1) право ПО СТОЛБЦАМ [Р-100] — `guest` не входит в список столбцов, на которые у административной роли есть UPDATE;
+ *   2) `security.restrict_update` на этой таблице — он пропускает только `role`, `status`, `revoked_at`.
+ * Первый отвечает раньше, его причину и называет проверка. Строки каталога мутаций у этой пары НЕТ намеренно [Р-104]:
+ * снятие любого из двух ловится вторым, то есть своей проверкой мутация не ловится — прогон это и показал.
+ *
+ * Находка 4 ревью шага 37: до шага 38 механизм был описан неверно (комментарий ссылался на страж), и ни одна проверка
+ * сюда не смотрела — свойство держалось молча.
+ */
+SELECT pg_temp.expect_fail('a demo guest stops being a guest (Р-160)', format($q$
+  UPDATE tenant_data.membership SET guest = false WHERE tenant_id = %L AND membership_id = %L $q$, :tDemo, :'guestM'),
+  'permission denied for table membership');
+
 -- --------------------------------------------------------------- задание от имени гостя [Р-160]
 -- Выгрузка доказательной истории требует лишь VIEW_PRICING [Р-143], и у наблюдателя оно есть: отказать обязан страж гостя
 SELECT pg_temp.expect_fail('a demo guest creates a price evidence job (Р-160)', format($q$

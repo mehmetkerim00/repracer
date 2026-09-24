@@ -35,6 +35,10 @@ services:
       # Появился аккаунт — `REPRACER_CONSOLE_HEARTBEAT=` (пусто) и файл `console_heartbeat_url` в каталоге секретов
       REPRACER_CONSOLE_HEARTBEAT: ${REPRACER_CONSOLE_HEARTBEAT:-off}
       REPRACER_CONSOLE_HEARTBEAT_URL_FILE: /run/secrets/console_heartbeat_url
+      # Р-160 (шаг 38): ключ гостевого издателя — ОДИН на все реплики, иначе гость получает 401 от соседней.
+      # `ephemeral` — временный ключ в памяти; годится, только пока экземпляр один
+      REPRACER_CONSOLE_GUEST_KEY: ${REPRACER_CONSOLE_GUEST_KEY:-}
+      REPRACER_CONSOLE_GUEST_KEY_FILE: /run/secrets/console_guest_key
       # Секреты — файлами, не значениями: строка подключения несёт пароль роли [шаг 28, E]. У каждой роли свой файл [Р-90]
       REPRACER_CONSOLE_APP_PG_URL_FILE: /run/secrets/console_app_pg_url
       REPRACER_CONSOLE_ADMIN_PG_URL_FILE: /run/secrets/console_admin_pg_url
