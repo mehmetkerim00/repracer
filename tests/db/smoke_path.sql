@@ -134,9 +134,16 @@ SELECT pg_temp.expect_fail('path assumes the administrative role (Р-90)', $q$ S
  */
 SELECT pg_temp.expect_fail('the decision path calls a read screen of the operator panel (Р-96)',
   $q$ SELECT count(*) FROM platform.operator_tenants() $q$, '^permission denied for function operator_tenants$');
+/**
+ * Действие панели зовётся с ДЕЙСТВУЮЩЕЙ учётной записью оператора и объявленным вторым фактором — иначе отказ пришёл бы
+ * от стража действия, а не от отсутствия права, и мутация «выдать право пути решения» осталась бы непойманной (это и
+ * показал полный прогон CI шага 40). Барьер здесь один: EXECUTE у пути решения нет.
+ */
+SELECT set_config('app.auth_mfa', 'on', true) \gset
 SELECT pg_temp.expect_fail('the decision path creates a tenant through the operator panel (Р-96)', $q$
-  SELECT security.operator_create_tenant(gen_random_uuid(), gen_random_uuid(), 'Path tenant', 'EU', gen_random_uuid(), 'path@example.test', 'de') $q$,
+  SELECT security.operator_create_tenant('ef000000-0000-4000-8000-000000000001', gen_random_uuid(), 'Path tenant', 'EU', gen_random_uuid(), 'path@example.test', 'de') $q$,
   '^permission denied for function operator_create_tenant$');
+SELECT set_config('app.auth_mfa', 'off', true) \gset
 
 -- ---------------------------------------------------------------- Р-96: разрешённое остаётся доступным (контроль)
 DO $$

@@ -331,13 +331,20 @@ CREATE FUNCTION platform.operator_snapshot_skips(p_limit int DEFAULT 200)
    LIMIT greatest(1, least(p_limit, 1000))
 $fn$;
 
-/** Журнал действий операторов [OQ-191]: панель показывает, кто из операторов что сделал и когда */
+/**
+ * Журнал действий операторов [OQ-191]: панель показывает, кто из операторов что сделал и когда.
+ *
+ * Условия `actor_type = 'SUPPORT_STAFF'` здесь НЕТ намеренно [Р-104]: границу держит ПОЛИТИКА СТРОК
+ * `operator_actions_audit`, и пока это условие стояло ещё и в теле функции, снятие политики не краснело нигде —
+ * полный прогон CI шага 40 показал это прямо (мутация «политика на USING (true)» осталась непойманной). Дубль удалён,
+ * у политики своя строка каталога и своя проверка смоука.
+ */
 CREATE FUNCTION platform.operator_actions_log(p_action text DEFAULT NULL, p_limit int DEFAULT 200)
   RETURNS TABLE (occurred_at timestamptz, action text, tenant_id uuid, entity_type text, entity_id uuid, operator_id uuid, changes jsonb)
   LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog AS $fn$
   SELECT a.occurred_at, a.action, a.tenant_id, a.entity_type, a.entity_id, a.actor_user_id, a.changes
     FROM audit.audit_event a
-   WHERE a.actor_type = 'SUPPORT_STAFF' AND (p_action IS NULL OR a.action = p_action)
+   WHERE p_action IS NULL OR a.action = p_action
    ORDER BY a.occurred_at DESC
    LIMIT greatest(1, least(p_limit, 1000))
 $fn$;
