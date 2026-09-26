@@ -287,10 +287,26 @@ async function measurePostgres(source: string, target: string, make: (i: number)
   await pgAdmin.query(`DROP TABLE IF EXISTS bench_size.${target}`);
   await pgAdmin.query(`CREATE TABLE bench_size.${target} (LIKE ${source} INCLUDING DEFAULTS INCLUDING INDEXES INCLUDING GENERATED INCLUDING STORAGE INCLUDING COMPRESSION)`);
   const { rows: cols } = await pgAdmin.query(
-    `SELECT column_name FROM information_schema.columns WHERE table_schema = 'bench_size' AND table_name = $1 AND is_generated = 'NEVER' ORDER BY ordinal_position`, [target]);
-  const names = cols.map((c) => `"${c.column_name}"`).join(', ');
+    `SELECT column_name, column_default FROM information_schema.columns
+       WHERE table_schema = 'bench_size' AND table_name = $1 AND is_generated = 'NEVER' ORDER BY ordinal_position`, [target]);
+  /**
+   * Замер называет ТОЛЬКО те столбцы, которые генератор действительно заполняет. Перечислять все — значит подставлять в
+   * новый NOT NULL столбец NULL вместо его умолчания: шаг 41 добавил `price_decision.shadow` со значением по умолчанию, и
+   * замер сжатия упал строкой «null value in column "shadow"», хотя сама таблица такую вставку принимает. Столбец, которого
+   * генератор не знает, берёт своё умолчание; столбец БЕЗ умолчания замер по-прежнему назовёт — и вставка честно откажет,
+   * потому что тогда генератор обязан его заполнять.
+   */
+  let names = '';
   for (let i = 0; i < PG_ROWS; i += 5_000) {
     const batch = Array.from({ length: Math.min(5_000, PG_ROWS - i) }, (_, k) => make(i + k));
+    if (names === '') {
+      // Ключи берутся у ПЕРВОЙ строки партии, а не у отдельного вызова генератора: генератор держит состояние (seed, series),
+      // и лишний вызов сдвинул бы данные замера.
+      const filled = new Set(Object.keys(batch[0]!));
+      const skipped = cols.filter((c) => !filled.has(c.column_name) && c.column_default !== null).map((c) => c.column_name);
+      names = cols.filter((c) => filled.has(c.column_name) || c.column_default === null).map((c) => `"${c.column_name}"`).join(', ');
+      if (skipped.length > 0) console.log(`  ${target}: столбцы со своим умолчанием, не заполняемые генератором: ${skipped.join(', ')}`);
+    }
     await pgAdmin.query(`INSERT INTO bench_size.${target} (${names}) SELECT ${names} FROM json_populate_recordset(NULL::bench_size.${target}, $1::json)`, [JSON.stringify(batch)]);
   }
   await pgAdmin.query(`VACUUM ANALYZE bench_size.${target}`);

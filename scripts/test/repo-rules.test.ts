@@ -456,3 +456,42 @@ test('Р-146: файл процесса CI разбирается — значе
   }
   assert.deepEqual(broken, [], 'значение с «: » закавычивается — иначе GitHub не разбирает файл и не видит его триггеров');
 });
+
+/**
+ * Р-146 (шаг 42, находка полного прогона шага 41): область прогона, названная в CI, СУЩЕСТВУЕТ и что-то выбирает.
+ * Задание `shadow-day` шага 41 упало строкой «неизвестная область прогона «shadow»», не запустив ни одного теста: список
+ * областей жил в двух местах — `test-scopes.mjs` знал, какие файлы брать, `test-all.mjs` — какое значение считать
+ * известным, и новая область попала только в первый. Список сведён в один (`SCOPES`), а это правило держит вторую
+ * половину: область из CI известна списку И выбирает хотя бы один файл. Пустая область была бы хуже неизвестной —
+ * задание зеленело бы, ничего не проверив.
+ */
+test('Р-146: каждая область прогона из CI существует и выбирает файлы (шаг 42)', async () => {
+  const { SCOPES, filesForScope } = await import('../test-scopes.mjs');
+  const { includedTestFiles } = await import('../check-test-inclusion.mjs');
+  const { fileURLToPath } = await import('node:url');
+  const included: string[] = [...includedTestFiles(fileURLToPath(root)).included];
+  assert.ok(included.length > 50, `файлов сборки найдено: ${included.length}`);
+
+  const dir = '.github/workflows/';
+  const used = new Set<string>();
+  for (const name of readdirSync(new URL(dir, root))) {
+    if (!name.endsWith('.yml') && !name.endsWith('.yaml')) continue;
+    for (const m of read(`${dir}${name}`).matchAll(/--scope=([A-Za-z0-9_-]+)/g)) used.add(m[1]);
+  }
+  assert.ok(used.size >= 3, `областей в CI найдено: ${[...used].join(', ')}`);
+
+  const unknown = [...used].filter((s) => !SCOPES.includes(s));
+  assert.deepEqual(unknown, [], 'область прогона из CI названа в SCOPES');
+
+  const empty = SCOPES.filter((s: string) => filesForScope(included, s).length === 0);
+  assert.deepEqual(empty, [], 'каждая область выбирает хотя бы один файл — пустая область зеленела бы, ничего не проверив');
+
+  /**
+   * Положительный контроль [Р-94]: выдуманное имя области НЕ отбраковывается выборкой файлов — последняя ветка
+   * `filesForScope` молча отдаёт ему набор полного прогона. Значит, неизвестное имя ловит только проверка аргумента в
+   * `test-all.mjs`, и правило выше (имя из CI названо в SCOPES) — не тавтология.
+   */
+  assert.ok(!SCOPES.includes('shadow-day'), 'имя ЗАДАНИЯ CI не является областью прогона — именно на этом упал шаг 41');
+  assert.deepEqual(filesForScope(included, 'shadow-day'), filesForScope(included, 'full'),
+    'неизвестное имя области выборка файлов не отвергает — его отвергает только проверка аргумента');
+});

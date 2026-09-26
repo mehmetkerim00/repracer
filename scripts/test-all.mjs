@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { findUnincludedTests } from './check-test-inclusion.mjs';
-import { filesForScope, INFRASTRUCTURE_TESTS, MEASURED_FILES } from './test-scopes.mjs';
+import { filesForScope, INFRASTRUCTURE_TESTS, MEASURED_FILES, SCOPES } from './test-scopes.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const inclusion = findUnincludedTests(root);
@@ -38,8 +38,8 @@ const ledgerEnv = {
  * так область выбирается по файлу, а не по пакету, и ни один тест не «пропускается» молча [Р-84].
  */
 const scope = (process.argv.find((a) => a.startsWith('--scope='))?.slice('--scope='.length) ?? 'full');
-if (scope !== 'fast' && scope !== 'full' && scope !== 'long') {
-  console.error(`BUILD RED: неизвестная область прогона «${scope}» (fast, full или long)`);
+if (!SCOPES.includes(scope)) {
+  console.error(`BUILD RED: неизвестная область прогона «${scope}» (${SCOPES.join(', ')})`);
   process.exit(1);
 }
 const selected = filesForScope(inclusion.included, scope);

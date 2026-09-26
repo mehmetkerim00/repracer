@@ -75,6 +75,13 @@ export const MEASURED_FILES = new Set([
   'apps/console/test/shadow-live.pg.test.ts',
 ]);
 
+/**
+ * Области прогона — ОДНИМ списком, и он же проверяет аргумент `--scope=` в `test-all.mjs`. До шага 42 список жил в двух
+ * местах: здесь (какие файлы брать) и там (какое значение считать известным). Новая область `shadow` была добавлена только
+ * здесь, и задание CI `shadow-day` падало строкой «неизвестная область прогона» — ни одного теста не запустив.
+ */
+export const SCOPES = ['fast', 'full', 'long', 'shadow'];
+
 /** Файлы области: быстрый прогон — всё, кроме инфраструктурных и долгих; полный — всё, кроме долгих; `long` — только долгие */
 export function filesForScope(included, scope) {
   if (scope === 'fast') return included.filter((f) => !INFRASTRUCTURE_FILES.has(f));
