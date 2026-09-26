@@ -56,6 +56,8 @@ export const MEASURED_FILES = new Set([
   'apps/console/test/demo-day-live.pg.test.ts',
   'apps/console/test/guest-demo-live.pg.test.ts',
   'tests/contract/src/cost-import-live.pg.test.ts',
+  // Шаг 40 [Р-165]: прогон панели оператора утверждает секунды экранов и держит под собой живой демо-мир
+  'apps/operator/test/operator-live.pg.test.ts',
 ]);
 
 /** Файлы области: быстрый прогон — всё, кроме инфраструктурных и долгих; полный — всё, кроме долгих; `long` — только долгие */

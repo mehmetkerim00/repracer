@@ -1,0 +1,19 @@
+{
+  "name": "@repracer/operator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Operator panel of the platform (Р-165…Р-168, step 40): a separate, non-public process with its own port — seven read screens of the operational state and exactly four actions (create a pilot tenant, invite its owner, resolve a snapshot skip, acknowledge an alert). No seller money is visible here: unit cost, bounds and price decisions are not granted to its database role at all.",
+  "type": "module",
+  "dependencies": {
+    "@repracer/alert-delivery": "0.1.0",
+    "@repracer/console-model": "0.1.0",
+    "@repracer/identity": "0.1.0",
+    "@repracer/pricing-store-pg": "0.1.0",
+    "@repracer/service-runtime": "0.1.0"
+  },
+  "scripts": {
+    "start": "node --experimental-strip-types --disable-warning=ExperimentalWarning server/operator-service.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec test/operator-config.test.ts test/operator-live.pg.test.ts"
+  }
+}

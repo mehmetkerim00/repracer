@@ -39,6 +39,13 @@ SELECT security.provision_tenant('a0000000-0000-0000-0000-00000000000a', 'Tenant
   {"membershipId": "a2000000-0000-0000-0000-0000000000a9", "userId": "a1000000-0000-0000-0000-0000000000a9", "email": "viewer-a@example.test", "role": "VIEWER"},
   {"membershipId": "a2000000-0000-0000-0000-0000000000a5", "userId": "a1000000-0000-0000-0000-0000000000a5", "email": "inventory-a@example.test", "role": "INVENTORY_MANAGER"}
 ]'::jsonb);
+/**
+ * Тенант C: владелец, который УЖЕ вошёл (привязка входа из smoke_setup.sql). Нужен шагу 40 [находка 7 ревью]: панель
+ * оператора выдаёт приглашение только ПЕРВОМУ входу владельца пилота, а перепривязка — дело владельца тенанта [Р-98].
+ */
+SELECT security.provision_tenant('c0000000-0000-0000-0000-00000000000c', 'Tenant C (владелец уже вошёл)', 'EU', '[
+  {"membershipId": "c2000000-0000-0000-0000-00000000000c", "userId": "c1000000-0000-0000-0000-0000000000cc", "email": "signed-in@example.test", "role": "OWNER"}
+]'::jsonb);
 SELECT security.provision_tenant('b0000000-0000-0000-0000-00000000000b', 'Tenant B', 'EU', '[
   {"membershipId": "b2000000-0000-0000-0000-00000000000b", "userId": "b1000000-0000-0000-0000-00000000000b", "email": "owner-b@example.test", "role": "OWNER", "mfaEnabled": true}
 ]'::jsonb);

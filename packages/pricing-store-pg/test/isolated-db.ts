@@ -7,7 +7,7 @@ import { createPool, type PgPool } from '../src/index.ts';
  * repracer_template) — CREATE DATABASE … TEMPLATE, без повторного применения миграций: роли кластера уже созданы.
  * Нужны REPRACER_PG_URL (роль приложения) и REPRACER_PG_ADMIN_URL (суперпользователь стенда). Без них тест падает [Р-84].
  */
-export type TestRole = 'svc_app' | 'svc_fx_loader' | 'svc_dispatcher' | 'svc_exporter' | 'svc_admin' | 'svc_provisioning' | 'svc_authenticator' | 'svc_scheduler' | 'svc_relay' | 'svc_bulk_worker' | 'svc_stock' | 'svc_alert_delivery' | 'svc_onboarding';
+export type TestRole = 'svc_app' | 'svc_fx_loader' | 'svc_dispatcher' | 'svc_exporter' | 'svc_admin' | 'svc_provisioning' | 'svc_authenticator' | 'svc_scheduler' | 'svc_relay' | 'svc_bulk_worker' | 'svc_stock' | 'svc_alert_delivery' | 'svc_onboarding' | 'svc_operator';
 
 export interface IsolatedDatabase {
   name: string;
@@ -15,6 +15,11 @@ export interface IsolatedDatabase {
   pool(role: TestRole, max?: number): PgPool;
   /** Суперпользователь стенда в этой базе — только для данных платформы теста (строки возможностей, статус витрины) */
   superuser(sql: string, params?: unknown[]): Promise<void>;
+  /**
+   * То же соединение, но с результатом: прогон смотрит на таблицу ИЗВНЕ — так, как смотрел бы человек с доступом к
+   * базе. Нужно там, где проверяемая таблица не видна НИ ОДНОЙ роли процесса (приглашения входа, шаг 40).
+   */
+  rows<T>(sql: string, params?: unknown[]): Promise<T[]>;
   drop(): Promise<void>;
 }
 
@@ -59,6 +64,17 @@ export async function createIsolatedDatabase(prefix: string): Promise<IsolatedDa
       const a = createPool(u.toString(), { max: 1, applicationName: 'repracer-isolated-db' });
       try {
         await a.query(sql, params);
+      } finally {
+        await a.end();
+      }
+    },
+    async rows<T>(sql: string, params: unknown[] = []): Promise<T[]> {
+      const u = new URL(adminUrl);
+      u.pathname = `/${name}`;
+      const a = createPool(u.toString(), { max: 1, applicationName: 'repracer-isolated-db' });
+      try {
+        const { rows } = await a.query(sql, params);
+        return rows as T[];
       } finally {
         await a.end();
       }

@@ -60,6 +60,10 @@ BEGIN
     CREATE ROLE svc_exporter LOGIN IN ROLE repracer_exporter;
   END IF;
   -- Шаг 25 [OQ-181]: разбор пропущенных выгрузкой снимков оператором
+  -- Шаг 40 [Р-165]: роль панели оператора платформы — только EXECUTE на функции панели
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_operator') THEN
+    CREATE ROLE svc_operator LOGIN IN ROLE repracer_operator;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_export_triage') THEN
     CREATE ROLE svc_export_triage LOGIN IN ROLE repracer_export_triage;
   END IF;

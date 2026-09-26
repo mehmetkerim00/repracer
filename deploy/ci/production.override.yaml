@@ -21,6 +21,15 @@ services:
     ports:
       - "127.0.0.1:9467:9467"
 
+  operator:
+    environment:
+      # Аккаунта внешнего сервиса у проекта нет (OQ-188): в CI отметка выключается ЯВНО
+      REPRACER_OPERATOR_HEARTBEAT: "off"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:9471:9471"
+
   # Копия базы в CI не снимается: восстановление проверяется своим тестом сборки (packages/pricing-store-pg/test/backup-restore.pg.test.ts)
   backup:
     profiles: ["never"]

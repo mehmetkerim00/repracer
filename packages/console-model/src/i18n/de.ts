@@ -560,6 +560,19 @@ export const de: Messages = {
     /**
      * Шаг 36 [Р-156]: письмо владельцу. Называет тенанта, канал, причину человеческим языком и ПЕРВОЕ действие.
      */
+    /**
+     * Шаг 40 [Р-166, Р-167]: то же письмо по-немецки. Язык выбирается по тенанту [Р-161], а не по языку оператора:
+     * приглашение читает продавец.
+     */
+    invitation: {
+      subject: (tenant: string) => `repracer: Einladung als Inhaber von ${tenant}`,
+      intro: (tenant: string) => `Ihr Verkäuferkonto „${tenant}“ wurde in repracer angelegt.`,
+      roleLine: 'Sie werden als INHABER eingeladen: Sie entscheiden, wer sonst Zugang bekommt und was die Preisautomatik darf.',
+      acceptLine: (url: string) => `Einladung annehmen: ${url}`,
+      expiresLine: (when: string) => `Die Einladung gilt bis ${when}. Danach bitten Sie uns um eine neue.`,
+      nextLine: 'Nach der Annahme führen wir Sie durch sechs Schritte: Kanal, Einstandskosten, Grenzen, Strategie, Motor einschalten. Bis Sie ihn selbst einschalten, ändert sich kein Preis.',
+      signature: 'repracer',
+    },
     alerts: {
       subject: (severity: string, what: string, tenant: string) => `repracer ${severity}: ${what} (${tenant})`,
       severity: { CRITICAL: 'dringend', WARNING: 'zur Kenntnis' },

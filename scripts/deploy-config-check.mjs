@@ -15,7 +15,21 @@ const stacks = [
   // Шаг 37 [Р-159]: консоль — такое же развёртывание, и её конфигурация проверяется тем же способом и до подъёма
   ['console', 'deploy/production/compose.yaml', 'deploy/ci/production.override.yaml', 'console', '../apps/console/server/config.ts', 'loadConsoleConfig',
     { REPRACER_DOMAIN: 'localhost', REPRACER_ACME_EMAIL: 'ci@example.invalid', REPRACER_BACKUP_DIR: '/tmp/repracer-backups' }],
+  // Шаг 40 [Р-165]: панель оператора — такое же развёртывание, и её конфигурация разбирается так же, до подъёма
+  ['operator', 'deploy/production/compose.yaml', 'deploy/ci/production.override.yaml', 'operator', '../apps/operator/server/config.ts', 'loadOperatorConfig',
+    { REPRACER_DOMAIN: 'localhost', REPRACER_ACME_EMAIL: 'ci@example.invalid', REPRACER_BACKUP_DIR: '/tmp/repracer-backups' }],
 ];
+/**
+ * Переменные, без которых compose не ИНТЕРПОЛИРУЕТСЯ вовсе. `docker compose config` разбирает файл целиком, поэтому
+ * обязательное значение сервиса панели (`${…:?}`) роняет и разбор записи консоли — того же файла. Находка 1 ревью шага 40:
+ * значения стояли только у записи панели, и полный прогон CI падал стеком до первого контейнера. Здесь они общие.
+ */
+const REQUIRED_FOR_INTERPOLATION = {
+  REPRACER_OPERATOR_OIDC_ISSUER: 'https://identity.example.invalid',
+  REPRACER_OPERATOR_OIDC_AUDIENCE: 'repracer-operator',
+  REPRACER_OPERATOR_OIDC_JWKS_URL: 'https://identity.example.invalid/keys',
+  REPRACER_OPERATOR_INVITATION_URL: 'https://app.example.invalid/invitation',
+};
 let failed = false;
 /**
  * Шаг 37 (находка 2 ревью): конфигурация разбирается ДВАЖДЫ — с надстройкой CI и БЕЗ неё. Надстройка чинит то, чего у
@@ -24,7 +38,7 @@ let failed = false;
  */
 for (const [name, compose, override, service, mod, fn, extra] of stacks) {
   const env = { REPRACER_SECRETS_DIR: secrets, REPRACER_AMAZON_APPLICATION_CREDENTIALS_REF: 'secret-ref:amazon-application',
-    REPRACER_KAUFLAND_FALLBACK_EMAIL: 'ops@example.invalid', ...extra };
+    REPRACER_KAUFLAND_FALLBACK_EMAIL: 'ops@example.invalid', ...REQUIRED_FOR_INTERPOLATION, ...extra };
   const loader = (await import(mod))[fn];
   for (const [what, files] of [['с надстройкой CI', ['-f', compose, '-f', override]], ['как есть, без надстройки CI', ['-f', compose]]]) {
     const out = execFileSync('docker', ['compose', ...files, 'config', '--format', 'json'], { env: { ...process.env, ...env }, encoding: 'utf8' });

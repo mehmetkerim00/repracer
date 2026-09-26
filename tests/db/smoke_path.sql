@@ -127,6 +127,17 @@ SELECT pg_temp.expect_fail('path resolves an external identity (finding 13, Р-9
   SELECT * FROM security.resolve_external_identity('https://idp.example.test', 'subject') $q$, '^permission denied for function resolve_external_identity$');
 SELECT pg_temp.expect_fail('path assumes the administrative role (Р-90)', $q$ SET ROLE repracer_admin $q$, '^permission denied to set role "repracer_admin"');
 
+/**
+ * Шаг 40 [Р-96, находка 4в ревью]: функции ПАНЕЛИ ОПЕРАТОРА пути решения недоступны. У них отозван PUBLIC, и это
+ * единственное, что мешает пути решения прочитать операционное состояние всех тенантов сразу — до этой строки снятие
+ * `REVOKE ... FROM PUBLIC` не краснело нигде.
+ */
+SELECT pg_temp.expect_fail('the decision path calls a read screen of the operator panel (Р-96)',
+  $q$ SELECT count(*) FROM platform.operator_tenants() $q$, '^permission denied for function operator_tenants$');
+SELECT pg_temp.expect_fail('the decision path creates a tenant through the operator panel (Р-96)', $q$
+  SELECT security.operator_create_tenant(gen_random_uuid(), gen_random_uuid(), 'Path tenant', 'EU', gen_random_uuid(), 'path@example.test', 'de') $q$,
+  '^permission denied for function operator_create_tenant$');
+
 -- ---------------------------------------------------------------- Р-96: разрешённое остаётся доступным (контроль)
 DO $$
 DECLARE

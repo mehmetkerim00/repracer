@@ -32,6 +32,8 @@ done
 # Роль доставки алертов и ключ почты: их называет compose планировщика безусловно, и без файлов плоский профиль
 # (без надстройки CI) не разбирается — находка 2 ревью шага 37
 url svc_alert_delivery alert_delivery_pg_url
+# Шаг 40 [Р-165]: роль панели оператора — свой файл, как у всех остальных
+url svc_operator operator_pg_url
 printf 'syn-mail-key' > "$SECRETS/mail_api_key"
 # Адрес внешней отметки [Р-127]: синтетический, аккаунта сервиса у проекта нет (OQ-188). Нужен, чтобы РАЗБИРАЛАСЬ
 # конфигурация плоского профиля; отметки при этом никто не шлёт — процессы CI поднимаются с выключателем
@@ -39,6 +41,7 @@ printf 'https://hc-ping.example.invalid/00000000-0000-4000-8000-000000000000' > 
 printf 'https://hc-ping.example.invalid/00000000-0000-4000-8000-000000000001' > "$SECRETS/console_heartbeat_url"
 printf 'https://hc-ping.example.invalid/00000000-0000-4000-8000-000000000002' > "$SECRETS/worker_heartbeat_url"
 printf 'https://hc-ping.example.invalid/00000000-0000-4000-8000-000000000003' > "$SECRETS/receiver_heartbeat_url"
+printf 'https://hc-ping.example.invalid/00000000-0000-4000-8000-000000000004' > "$SECRETS/operator_heartbeat_url"
 # Шаг 38: ключ гостевого издателя — файлом, как в работе. Синтетический, создаётся здесь же и уходит вместе с каталогом
 openssl ecparam -name prime256v1 -genkey -noout 2>/dev/null | openssl pkcs8 -topk8 -nocrypt -out "$SECRETS/console_guest_key" 2>/dev/null
 printf 'ci-synthetic-ingest' > "$SECRETS/ch_ingest_password"
@@ -105,7 +108,11 @@ if [ ! -f apps/console/dist/index.html ]; then
 fi
 echo "== production (прокси + консоль)"
 PROD=(-f deploy/production/compose.yaml -f deploy/ci/production.override.yaml)
-prod_env=("REPRACER_SECRETS_DIR=$SECRETS" "REPRACER_BACKUP_DIR=$SECRETS" "REPRACER_DOMAIN=localhost" "REPRACER_ACME_EMAIL=ci@example.invalid")
+prod_env=("REPRACER_SECRETS_DIR=$SECRETS" "REPRACER_BACKUP_DIR=$SECRETS" "REPRACER_DOMAIN=localhost" "REPRACER_ACME_EMAIL=ci@example.invalid"
+  # Шаг 40 [Р-165]: панель оператора поднимается вместе с профилем — со своим входом и своим портом
+  "REPRACER_OPERATOR_OIDC_ISSUER=https://identity.example.invalid" "REPRACER_OPERATOR_OIDC_AUDIENCE=repracer-operator"
+  "REPRACER_OPERATOR_OIDC_JWKS_URL=https://identity.example.invalid/keys"
+  "REPRACER_OPERATOR_INVITATION_URL=https://app.example.invalid/invitation")
 env "${prod_env[@]}" docker compose "${PROD[@]}" up -d
 prod_ok=0
 # Демо-тенант заводится при старте консоли: 200 предложений с конкурентами — это минуты, а не секунды
@@ -120,6 +127,36 @@ if [ "$prod_ok" = 1 ]; then
   else
     echo "   production: путь гостя НЕ пройден"
     env "${prod_env[@]}" docker compose "${PROD[@]}" logs --tail 120
+    failed=1
+  fi
+  # Шаг 40 [Р-165]: панель жива на СВОЁМ порту и недостижима через публичный прокси — иначе «не публичная» было бы словом
+  op_ok=0
+  for _ in $(seq 1 "${OPERATOR_WAIT_SECONDS:-90}"); do
+    if curl -sf "http://127.0.0.1:9471/healthz" > /dev/null; then op_ok=1; break; fi
+    sleep 1
+  done
+  if [ "$op_ok" = 1 ]; then
+    echo "   operator: /healthz ответил 200"
+    # Находка 2 ревью шага 40: кодом ответа это не проверяется — панель и БЕЗ токена отвечает 401, и «не 200» было бы
+    # истинно даже стоя за прокси. Ищем ОТПЕЧАТОК самой панели: `NO_TOKEN` встречается в репозитории один раз
+    # (apps/operator/server/panel.ts), а `operator panel` — только в её странице
+    through_proxy="$(curl -s -i http://127.0.0.1:8080/api/operator/tenants || true)$(curl -s http://127.0.0.1:8080/ || true)"
+    if printf '%s' "$through_proxy" | grep -qE 'NO_TOKEN|operator panel'; then
+      echo "   operator: панель ОТВЕЧАЕТ через публичный прокси — этого быть не должно [Р-165]"
+      failed=1
+    else
+      echo "   operator: через публичный прокси панели нет [Р-165]"
+      # Положительный контроль к проверке выше: на СВОЁМ порту тот же адрес отвечает отпечатком панели
+      if curl -s http://127.0.0.1:4327/api/operator/tenants | grep -q 'NO_TOKEN'; then
+        echo "   operator: на своём порту отпечаток панели виден — проверка выше способна покраснеть"
+      else
+        echo "   operator: отпечаток панели не найден и на СВОЁМ порту — проверка непубличности ничего не значит"
+        failed=1
+      fi
+    fi
+  else
+    echo "   operator: /healthz не ответил за ${OPERATOR_WAIT_SECONDS:-90} с"
+    env "${prod_env[@]}" docker compose "${PROD[@]}" logs --tail 120 operator
     failed=1
   fi
 else

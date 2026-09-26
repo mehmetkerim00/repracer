@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0125_verify_schema_invariants_v34.sql';
+const VERIFY = 'migrations/0127_verify_schema_invariants_v35.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -1239,6 +1239,14 @@ export const STEP36_ROWS = [
       // Находка 5 ревью шага 36: правка доставленной строки, не трогающая время доставки, переставляла его молча
       m(replaceInFunction('tenant_data.alert_before_write()', 'IF OLD.delivered_at IS NOT NULL THEN', 'IF OLD.delivered_at IS NOT NULL AND NEW.delivered_at IS DISTINCT FROM OLD.delivered_at THEN'),
         smoke('changing a delivered alert without touching the delivery time (Р-156)')),
+      /**
+       * Шаг 40 [Р-166]: страж сузился — у ДОСТАВЛЕННОЙ строки меняются ровно два столбца отметки «оператор увидел» и
+       * ни один другой. Снимите внутреннее сравнение — и доставленную строку можно переписать целиком, заодно с
+       * доказательством отправки; ловит это та же проверка, что нашла находку 5 ревью шага 36
+       */
+      m(replaceInFunction('tenant_data.alert_before_write()',
+        "IF to_jsonb(NEW) - 'acknowledged_at' - 'acknowledged_by' IS DISTINCT FROM to_jsonb(OLD) - 'acknowledged_at' - 'acknowledged_by' THEN", 'IF false THEN'),
+        smoke('changing a delivered alert without touching the delivery time (Р-156)')),
       m(dropConstraint('alert_details_object', 'tenant_data.alert'), smoke('alert details that are not an object (Р-156)')),
       m(dropConstraint('alert_delivery_kind_known', 'tenant_data.alert'), smoke('delivery of an unknown kind (Р-156)')),
       m(dropConstraint('alert_delivery_attempts_non_negative', 'tenant_data.alert'), smoke('a negative number of delivery attempts (Р-156)')),
@@ -1377,6 +1385,76 @@ export const STEP34_ROWS = [
            'STRATEGY_ASSIGN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT', 'REPRICING_ENABLE', 'KIND_WITHOUT_A_RIGHT'))`,
         verify('bulk job kind KIND_WITHOUT_A_RIGHT has no cancel right known to the permission matrix')),
       // Положительный контроль правила («проверки видов нет — правило говорит это») — своя проверка строки Р-139: мутация та же
+    ],
+  },
+];
+
+/**
+ * Шаг 40 [Р-165, Р-166]: панель оператора платформы. Держится она не интерфейсом: у роли панели нет прав ни на одну
+ * таблицу, а каждое из четырёх действий требует ДЕЙСТВУЮЩЕЙ учётной записи и второго фактора. Каждая мутация ниже —
+ * это ровно тот способ, которым панель превратилась бы в доступ ко всем тенантам сразу [Р-97].
+ */
+export const STEP40_ROWS = [
+  {
+    row: 'Р-165',
+    invariant: 'действие панели: действующая учётная запись оператора и второй фактор; отозванная запись не отличается от несуществующей',
+    mutations: [
+      m(replaceInFunction('security.operator_acting(uuid)',
+        "SELECT o.display_name INTO name FROM platform.platform_operator o WHERE o.operator_id = p_operator_id AND o.active;",
+        "SELECT o.display_name INTO name FROM platform.platform_operator o WHERE o.operator_id = p_operator_id;"),
+        smoke('a revoked operator account acts (Р-165)')),
+      m(replaceInFunction('security.operator_acting(uuid)', "IF coalesce(current_setting('app.auth_mfa', true), '') <> 'on' THEN", 'IF false THEN'),
+        smoke('the operator acknowledges an alert without a second factor (Р-165)'),
+        smoke('the operator creates a tenant without a second factor (Р-165)')),
+    ],
+  },
+  {
+    row: 'Р-166',
+    invariant: 'ровно четыре действия: приглашение уходит владельцу, отметка «увиден» ставится один раз, данных продавца панель не видит',
+    mutations: [
+      m(replaceInFunction('security.operator_invite_owner(uuid, uuid, text, bytea, interval)',
+        "IF NOT EXISTS (SELECT 1 FROM tenant_data.membership m JOIN platform.app_user u ON u.user_id = m.user_id\n                  WHERE m.tenant_id = p_tenant_id AND m.role = 'OWNER' AND u.email = lower(btrim(p_email))) THEN",
+        'IF false THEN'),
+        smoke('the operator invites an address that is not the owner (Р-166)')),
+      m(replaceInFunction('security.operator_acknowledge_alert(uuid, uuid, uuid)',
+        'AND acknowledged_at IS NULL;', ';'),
+        smoke('the same alert is acknowledged twice (Р-166)')),
+      /**
+       * Задача D шага 40: оператор видит ОПЕРАЦИОННОЕ состояние и не видит денег продавца. Это не намерение и не
+       * договорённость — это отсутствие права, и каждая строка ниже возвращает его обратно.
+       */
+      m('GRANT SELECT ON tenant_data.cost_profile TO repracer_operator', smoke('the operator reads the unit cost of a tenant (шаг 40, D)')),
+      m('GRANT SELECT ON tenant_data.min_price TO repracer_operator', smoke('the operator reads the price floors of a tenant (шаг 40, D)')),
+      m('GRANT SELECT ON channel_data.price_decision TO repracer_operator', smoke('the operator reads the price decisions of a tenant (шаг 40, D)')),
+      m('GRANT SELECT ON tenant_data.tenant TO repracer_operator', smoke('the operator reads the tenants table directly (Р-165)')),
+      /**
+       * Находка 4 ревью шага 40: четыре защиты панели жили без своей проверки. Три из них проверяемы, и вот они.
+       * Самая опасная — политика, отделяющая аудит ОПЕРАТОРОВ от аудита продавцов: расширь её до `USING (true)`, и
+       * панель увидит все административные действия всех тенантов.
+       */
+      m("ALTER POLICY operator_actions_audit ON audit.audit_event TO repracer_operator_actions USING (true)",
+        smoke('the operator sees the audit log of a seller (Р-165)', 'the operator does not see the audit log of sellers (Р-165)')),
+      m('GRANT EXECUTE ON FUNCTION security.operator_audit(uuid, uuid, text, text, uuid, jsonb) TO repracer_operator',
+        smoke('the operator writes the audit log directly (Р-165)')),
+      // Функции панели не исполняет кто попало: у них отозван PUBLIC, и это проверяет путь решения своей ролью
+      m('GRANT EXECUTE ON FUNCTION platform.operator_tenants() TO PUBLIC',
+        smoke('the decision path calls a read screen of the operator panel (Р-96)')),
+      m('GRANT EXECUTE ON FUNCTION security.operator_create_tenant(uuid, uuid, text, text, uuid, text, text) TO PUBLIC',
+        smoke('the decision path creates a tenant through the operator panel (Р-96)')),
+      // Приглашение панели — только ПЕРВЫЙ вход владельца пилота [находка 7 ревью шага 40]
+      m(replaceInFunction('security.operator_invite_owner(uuid, uuid, text, bytea, interval)',
+        'JOIN platform.external_identity e ON e.user_id = m.user_id', 'JOIN platform.external_identity e ON false'),
+        smoke('the operator invites an owner who already has a sign-in (Р-98)')),
+      // Язык пилота ставит действие оператора; без этой строки у каждого пилота немецкий, и письмо уходит не на его языке
+      m(replaceInFunction('security.operator_create_tenant(uuid, uuid, text, text, uuid, text, text)',
+        'UPDATE tenant_data.tenant SET locale = p_locale WHERE tenant_id = p_tenant_id;', ''),
+        smoke('the language of the pilot is not the one the operator named (Р-161)', 'the pilot is created in the language its owner reads (Р-161)')),
+      /**
+       * Строки для остановки цен здесь НЕТ намеренно [Р-104, прецедент шага 38]: дайте роли панели INSERT на
+       * `tenant_data.price_stop` — и отказ придёт от СОСЕДНЕЙ защиты (страж остановки читает членства, и права на них у
+       * панели тоже нет), то есть своей проверкой мутация не ловится. Прогон это и показал; сама проверка остановки
+       * в смоуке остаётся и названа там же.
+       */
     ],
   },
 ];

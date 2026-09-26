@@ -119,6 +119,19 @@ export function repeatedMessage(rows: readonly AlertRow[], tenant: string, to: s
   };
 }
 
+/**
+ * Шаг 40 [Р-166, Р-167]: письмо-приглашение владельцу пилота. Его шлёт панель оператора ТЕМ ЖЕ модулем доставки, что и
+ * алерты: второго способа отправлять письма в проекте нет, и заводить его ради панели значит завести второй сухой режим,
+ * второй перехватчик в прогонах и второй список текстов.
+ *
+ * Язык — тенанта [Р-161]: приглашение читает продавец, а не оператор.
+ */
+export function invitationMessage(to: string, tenant: string, acceptUrl: string, expiresAt: string, m: Messages): MailMessage {
+  const t = m.ui.invitation;
+  const lines = [t.intro(tenant), '', t.roleLine, '', t.acceptLine(acceptUrl), t.expiresLine(m.when(expiresAt)), '', t.nextLine, '', t.signature];
+  return { to, subject: t.subject(tenant), text: lines.join('\n') };
+}
+
 export function createAlertDelivery(deps: AlertDeliveryDeps) {
   const fallbackLocale = deps.locale ?? 'de';
   /**

@@ -559,6 +559,19 @@ export const en = {
      * Шаг 36 [Р-156]: письмо владельцу. Называет тенанта, канал, причину человеческим языком и ПЕРВОЕ действие —
      * письмо без первого действия заставляет владельца искать, что делать, и это худшее время для поиска.
      */
+    /**
+     * Шаг 40 [Р-166, Р-167]: письмо-приглашение владельцу пилота. Его отправляет ОПЕРАТОР платформы из панели, а
+     * дальше продавец идёт своим онбордингом [Р-149] — поэтому письмо говорит, что будет дальше, а не «добро пожаловать».
+     */
+    invitation: {
+      subject: (tenant: string) => `repracer: you are invited as the owner of ${tenant}`,
+      intro: (tenant: string) => `Your seller account "${tenant}" has been created in repracer.`,
+      roleLine: 'You are invited as the OWNER: you decide who else gets access and what the engine is allowed to do.',
+      acceptLine: (url: string) => `Accept the invitation: ${url}`,
+      expiresLine: (when: string) => `The invitation is valid until ${when}. After that ask us for a new one.`,
+      nextLine: 'After accepting you are guided through six steps: channel, unit cost, bounds, strategy, switching the engine on. Nothing changes prices until you switch it on yourself.',
+      signature: 'repracer',
+    },
     alerts: {
       subject: (severity: string, what: string, tenant: string) => `repracer ${severity}: ${what} (${tenant})`,
       severity: { CRITICAL: 'urgent', WARNING: 'attention' },

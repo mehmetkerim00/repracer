@@ -1,0 +1,58 @@
+# Р-165 (шаг 40): развёртывание ПАНЕЛИ ОПЕРАТОРА платформы.
+#   docker compose -f deploy/operator/compose.yaml --env-file deploy/operator/operator.env up -d
+#
+# Главное отличие от консоли: панель НЕ публична. Её порт слушает только loopback сервера, за обратным прокси её нет, и
+# домена у неё нет тоже — оператор добирается до неё SSH-туннелем:
+#   ssh -L 4327:127.0.0.1:4327 <сервер>   и открывает http://127.0.0.1:4327
+# Список разрешённых адресов вместо туннеля — свойство сервера (firewall), и compose делать вид, что решает это, не станет.
+name: repracer-operator
+
+services:
+  operator:
+    image: node:22.22.3-bookworm-slim
+    working_dir: /app
+    command: ["node", "--experimental-strip-types", "--disable-warning=ExperimentalWarning", "apps/operator/server/operator-service.ts"]
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      REPRACER_OPERATOR_PORT: "4327"
+      REPRACER_OPERATOR_METRICS_PORT: "9471"
+      # Вход оператора у поставщика identity [Р-78] — обязателен целиком: без него процесс не стартует [Р-165]
+      REPRACER_OPERATOR_OIDC_ISSUER: ${REPRACER_OPERATOR_OIDC_ISSUER:?set REPRACER_OPERATOR_OIDC_ISSUER}
+      REPRACER_OPERATOR_OIDC_AUDIENCE: ${REPRACER_OPERATOR_OIDC_AUDIENCE:?set REPRACER_OPERATOR_OIDC_AUDIENCE}
+      REPRACER_OPERATOR_OIDC_JWKS_URL: ${REPRACER_OPERATOR_OIDC_JWKS_URL:?set REPRACER_OPERATOR_OIDC_JWKS_URL}
+      # Ссылка, по которой владелец пилота принимает приглашение: это адрес КОНСОЛИ, не панели [Р-167]
+      REPRACER_OPERATOR_INVITATION_URL: ${REPRACER_OPERATOR_INVITATION_URL:?set REPRACER_OPERATOR_INVITATION_URL}
+      REPRACER_OPERATOR_INVITATION_TTL_HOURS: ${REPRACER_OPERATOR_INVITATION_TTL_HOURS:-168}
+      # Почта приглашения: тот же провайдер, что у доставки алертов [Р-156]. Не задан — СУХОЙ режим (OQ-224)
+      REPRACER_MAIL_API_URL: ${REPRACER_MAIL_API_URL:-}
+      REPRACER_MAIL_FROM: ${REPRACER_MAIL_FROM:-}
+      REPRACER_MAIL_API_KEY_FILE: /run/secrets/mail_api_key
+      # Р-127: отметка во внешнем сервисе. Умолчание — `off`: аккаунта у проекта нет (OQ-188), и с пустым значением
+      # процесс не стартовал бы вовсе
+      REPRACER_OPERATOR_HEARTBEAT: ${REPRACER_OPERATOR_HEARTBEAT:-off}
+      REPRACER_OPERATOR_HEARTBEAT_URL_FILE: /run/secrets/operator_heartbeat_url
+      # Роль подключения ОДНА [Р-90]: у панели ровно один набор прав, и второго ей не нужно
+      REPRACER_OPERATOR_PG_URL_FILE: /run/secrets/operator_pg_url
+    volumes:
+      - ../..:/app:ro
+      - ${REPRACER_SECRETS_DIR:?set REPRACER_SECRETS_DIR}:/run/secrets:ro
+    restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9471/healthz').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    ports:
+      # ТОЛЬКО loopback: наружу панель не выставляется ни портом, ни прокси [Р-165]
+      - "127.0.0.1:4327:4327"
+      - "127.0.0.1:9471:9471"
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"

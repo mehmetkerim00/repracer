@@ -9,6 +9,11 @@ BEGIN
 END $$;
 
 SET ROLE repracer_owner;
+-- Шаг 40 [Р-165]: учётные записи операторов платформы — действующая и отозванная (её действия обязаны отказывать)
+INSERT INTO platform.platform_operator (operator_id, issuer, subject, display_name, active) VALUES
+  ('ef000000-0000-4000-8000-000000000001', 'https://accounts.example.test', 'operator-1', 'Synthetischer Betrieb', true),
+  ('ef000000-0000-4000-8000-000000000002', 'https://accounts.example.test', 'operator-gone', 'Ehemaliger Betrieb', false);
+
 INSERT INTO platform.channel_capability
   (capability_id, version, status, valid_from, channel, region, api_mode, field, write_scope_kind,
    write_scope_key_template, budget_scope_attribute, object_edit_limit, processing_mode,
