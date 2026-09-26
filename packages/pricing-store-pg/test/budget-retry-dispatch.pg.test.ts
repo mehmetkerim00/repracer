@@ -69,7 +69,8 @@ test('finding 7: a budgeted retry refused because the storefront day boundary be
 
   await queue.recordOutcome(world.tenantId, write, { channelWriteId: write.channelWriteId, status: 'REJECTED', error: { class: 'TRANSIENT', code: 'RATE_LIMITED', scope: 'ITEM', message: 'synthetic', raiseAlert: false } }, now(), DEFAULT_RETRY_POLICY);
   assert.equal((await row()).status, 'FAILED');
-  await db.superuser(`UPDATE platform.marketplace SET time_zone_status = 'TO_VERIFY' WHERE channel = 'EBAY' AND marketplace = 'EBAY_DE'`);
+  // Р-172 (шаг 42): снятие подтверждения НАЗЫВАЕТ вопрос — «снова не подтверждено, а почему» база хранить обязывает
+  await db.superuser(`UPDATE platform.marketplace SET time_zone_status = 'TO_VERIFY', time_zone_question = 'OQ-112' WHERE channel = 'EBAY' AND marketplace = 'EBAY_DE'`);
 
   const sent: FieldWrite[] = [];
   const alerts: Array<Parameters<AlertSink['raise']>[0]> = [];

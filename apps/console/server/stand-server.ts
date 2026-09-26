@@ -622,6 +622,8 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         const detail = Object.entries(names).reduce((text, [code, name]) => (name ? text.replaceAll(code, name) : text), outcome.detail);
         return fail(409, 'PROPERTY_UNKNOWN', e.propertyUnknown(detail));
       }
+      // Р-172: витрины аккаунта не видны вовсе — это другой отказ, и подставлять в него имя свойства нечего
+      if (outcome.status === 'PROPERTY_INVISIBLE') return fail(409, 'PROPERTY_UNKNOWN', e.marketplacesInvisible(outcome.detail));
       return fail(403, 'FORBIDDEN', s.forbidden);
     }
 

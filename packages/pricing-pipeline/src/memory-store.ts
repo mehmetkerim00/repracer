@@ -147,6 +147,11 @@ export interface MemorySeed {
     channelAccountId: string; channel: 'KAUFLAND' | 'AMAZON' | 'EBAY'; region?: string; marketplaces: string[];
     /** Р-150: аккаунт заведён, доступа нет — честное состояние с перечнем того, чего не хватает */
     awaitingAccess?: Array<'PARTNER_REGISTRATION' | 'DEVELOPER_KEYS' | 'NOTIFICATION_QUEUE' | 'SELLER_AUTHORIZATION'>;
+    /**
+     * Шаг 42 [Р-172]: режим записи ЭТОГО аккаунта. Нужен витринам США: боевой аккаунт на `amazon.com` база не принимает,
+     * пока не известна граница суток, — и фикстура, которой нужен только путь решения, объявляет тень.
+     */
+    writeMode?: 'SHADOW' | 'LIVE';
   }>;
   /** Валюта и база цены витрин без единиц записи; по умолчанию — витрины Kaufland de и at */
   marketplaces?: Record<string, { currency: string; basis: PriceBasis; timeZone?: string | null }>;

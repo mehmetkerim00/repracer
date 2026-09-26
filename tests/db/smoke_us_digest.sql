@@ -55,23 +55,28 @@ SELECT pg_temp.expect_fail('a tax basis without a named source (Р-172)', $q$
  * Подтверждение свойства УБИРАЕТ его вопрос — это уборка, а не отказ: подтвердить свойство можно, не зная про столбец
  * вопроса, и «подтверждено, но вопрос открыт» не остаётся в базе никогда.
  */
-DO $$
-DECLARE
-  q text;
-BEGIN
-  UPDATE platform.marketplace SET tax_status = 'CONFIRMED',
-         tax_source = 'проба смоука: подтверждение убирает вопрос (Р-172)'
-   WHERE marketplace = 'at';
-  SELECT tax_question INTO q FROM platform.marketplace WHERE marketplace = 'at';
-  IF q IS NOT NULL THEN
-    RAISE EXCEPTION 'a confirmed property still carries an open question % (Р-172)', q;
-  END IF;
-  RAISE NOTICE 'PASS accept | confirming a property clears its open question (Р-172)';
-  -- Мир остаётся таким, каким его ждут соседние файлы
-  UPDATE platform.marketplace SET tax_status = 'CONSERVATIVE', tax_question = 'K-12',
-         tax_source = 'Р-53, Р-58: цены витрин Kaufland — брутто с НДС внутри; подтверждения документацией нет (K-12)'
-   WHERE marketplace = 'at';
-END $$;
+/**
+ * Проверка идёт ЧЕРЕЗ ПОМОЩНИК, а не сырым `DO`: мутационная проверка читает вывод по метке [Р-99], а сырой `RAISE` обрывает
+ * файл, ничего про метку не напечатав, — и снятая защита выглядела бы «проверка осталась зелёной». Мутационный прогон шага 42
+ * на этом и поймал ложную строку каталога: снятие триггера уборки не роняло ни одной названной проверки.
+ */
+SELECT pg_temp.ok('confirming a property clears its open question (Р-172)', $q$
+  DO $inner$
+  DECLARE
+    q text;
+  BEGIN
+    UPDATE platform.marketplace SET tax_status = 'CONFIRMED',
+           tax_source = 'проба смоука: подтверждение убирает вопрос (Р-172)'
+     WHERE marketplace = 'at';
+    SELECT tax_question INTO q FROM platform.marketplace WHERE marketplace = 'at';
+    IF q IS NOT NULL THEN
+      RAISE EXCEPTION 'a confirmed property still carries an open question % (Р-172)', q;
+    END IF;
+  END $inner$ $q$);
+-- Мир остаётся таким, каким его ждут соседние файлы (и после провала проверки выше — тоже)
+UPDATE platform.marketplace SET tax_status = 'CONSERVATIVE', tax_question = 'K-12',
+       tax_source = 'Р-53, Р-58: цены витрин Kaufland — брутто с НДС внутри; подтверждения документацией нет (K-12)'
+ WHERE marketplace = 'at';
 
 /**
  * Область записи — свойство ВОЗМОЖНОСТИ канала. Возможность версионируется, и правкой её не проверить (менять можно
@@ -125,6 +130,42 @@ SELECT pg_temp.expect_fail('switching to LIVE on a marketplace with an unknown p
   INSERT INTO tenant_data.channel_write_mode_change (tenant_id, channel_account_id, from_mode, to_mode, changed_by_membership_id, typed_confirmation)
   VALUES (%L, 'a4420000-0000-4000-8000-000000000001', 'SHADOW', 'LIVE', %L, 'seller-us') $q$, :tA, :ownerM),
   'marketplace property is unknown');
+
+/**
+ * Находка 1 ревью шага 42: состояние «боевой аккаунт с витриной, свойства которой неизвестны» достигалось ОБЫЧНОЙ
+ * ПРАВКОЙ — `marketplaces` изменяемый столбец, и проверка стояла только на переходе в бой. Теперь правило проверяется у
+ * обоих входов, и здесь — второй: боевому аккаунту добавляют `amazon.com`.
+ */
+SELECT pg_temp.expect_fail('adding amazon.com to a LIVE account (Р-172, находка 1 ревью шага 42)', format($q$
+  UPDATE tenant_data.channel_account SET marketplaces = ARRAY['A1PA6795UKMFR9', 'ATVPDKIKX0DER']
+   WHERE tenant_id = %L AND channel_account_id = 'a4000000-0000-0000-0000-000000000002' $q$, :tA),
+  'marketplace property is unknown');
+-- Положительный контроль [Р-94]: витрина с известными свойствами боевому аккаунту добавляется без возражений
+SELECT pg_temp.ok('adding a known marketplace to a LIVE account (Р-172)', format($q$
+  UPDATE tenant_data.channel_account SET marketplaces = ARRAY['A1PA6795UKMFR9']
+   WHERE tenant_id = %L AND channel_account_id = 'a4000000-0000-0000-0000-000000000002' $q$, :tA));
+
+/**
+ * Находка 6 ревью шага 42: аккаунт мог РОДИТЬСЯ боевым — страж режима стоял только на UPDATE. Создание боевого аккаунта
+ * на витрине с неизвестным свойством отклоняется тем же правилом.
+ */
+SELECT pg_temp.expect_fail('a channel account born LIVE on amazon.com (Р-172, находка 6 ревью шага 42)', format($q$
+  INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, region, external_account_id, marketplaces, credentials_ref, connected_by_membership_id, write_mode)
+  VALUES (%L, 'a4420000-0000-4000-8000-000000000002', 'AMAZON', 'NA', 'seller-us-2', ARRAY['ATVPDKIKX0DER'], 'vault://a/us2', %L, 'LIVE') $q$, :tA, :ownerM),
+  'marketplace property is unknown');
+
+/**
+ * Находка 2 ревью шага 42: ветку fail-closed «витрины аккаунта не ВИДНЫ» нечем было провалить — в мире не было аккаунта
+ * без витрин из справочника. Теперь есть: аккаунт, не называющий ни одной витрины, в бой не переводится, и причина
+ * своя — «свойства витрин не видны», а не «свойство неизвестно».
+ */
+SELECT pg_temp.ok('a channel account without marketplaces is connected in the shadow (Р-170)', format($q$
+  INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, external_account_id, marketplaces, credentials_ref, connected_by_membership_id)
+  VALUES (%L, 'a4420000-0000-4000-8000-000000000003', 'KAUFLAND', 'seller-no-storefront', ARRAY[]::text[], 'vault://a/none', %L) $q$, :tA, :ownerM));
+SELECT pg_temp.expect_fail('switching to LIVE an account whose marketplaces are not visible (Р-172, находка 2 ревью шага 42)', format($q$
+  INSERT INTO tenant_data.channel_write_mode_change (tenant_id, channel_account_id, from_mode, to_mode, changed_by_membership_id, typed_confirmation)
+  VALUES (%L, 'a4420000-0000-4000-8000-000000000003', 'SHADOW', 'LIVE', %L, 'seller-no-storefront') $q$, :tA, :ownerM),
+  'свойства витрин не видны');
 
 -- Положительный контроль [Р-94]: та же строка у аккаунта витрины `de`, свойства которой известны или консервативны
 

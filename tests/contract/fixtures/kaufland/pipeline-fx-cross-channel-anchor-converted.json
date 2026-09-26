@@ -137,7 +137,8 @@
           "region": "NA",
           "marketplaces": [
             "ATVPDKIKX0DER"
-          ]
+          ],
+          "writeMode": "SHADOW"
         }
       ],
       "fxRates": [

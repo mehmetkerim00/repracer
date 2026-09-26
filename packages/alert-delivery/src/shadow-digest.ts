@@ -42,7 +42,7 @@ export interface ShadowDigestOutcome {
   /** Тенанты в тени без адреса владельца: письмо некому отправить, и это видно числом */
   noRecipient: number;
   failed: number;
-  /** Строка периода уже была: письмо за эту неделю ушло, второе не отправляется [Р-174] */
+  /** Письмо за этот период уже ДОСТАВЛЕНО: второе не отправляется [Р-174] */
   alreadySent: number;
 }
 
@@ -95,15 +95,20 @@ export function createShadowDigest(deps: ShadowDigestDeps) {
           continue;
         }
         /**
-         * Р-174: строка периода пишется ДО отправки. Если она уже есть — письмо за эту неделю ушло, и второе не уходит:
-         * повторный прогон после простоя планировщика не пишет продавцу дважды.
+         * Р-174: строка периода пишется ДО отправки, и повторный прогон смотрит на ОТМЕТКУ ДОСТАВКИ, а не на наличие
+         * строки (находка 3 ревью шага 42). Доставлено — второе письмо не уходит; строка есть, а отметки нет — письмо не
+         * ушло (отказ провайдера или падение процесса между записью и отправкой), и прогон обязан попробовать снова.
          */
         const record = await deps.store.record(target);
-        if (record.alreadyRecorded) {
+        if (record.delivered) {
           outcome.alreadySent += 1;
-          log(JSON.stringify({ level: 'INFO', code: 'SHADOW_DIGEST_ALREADY_SENT', message: 'дайджест за этот период уже отправлен',
+          log(JSON.stringify({ level: 'INFO', code: 'SHADOW_DIGEST_ALREADY_SENT', message: 'дайджест за этот период уже доставлен',
             details: { tenantId: target.tenantId, digestId: record.digestId } }));
           continue;
+        }
+        if (record.alreadyRecorded) {
+          log(JSON.stringify({ level: 'WARN', code: 'SHADOW_DIGEST_RETRY', message: 'дайджест за этот период записан, но не доставлен: повтор',
+            details: { tenantId: target.tenantId, digestId: record.digestId } }));
         }
         const message = shadowDigestMessage(target, target.ownerEmail, messagesFor(localeOf(target.locale)));
         try {

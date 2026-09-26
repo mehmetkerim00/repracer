@@ -243,7 +243,12 @@ export async function seedPricingWorld(_pool: PgPool, input: SeedWorldInput): Pr
                                                 auth_status, access_blockers, connected_by_membership_id, write_mode)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
       [tenantId, id, a.channel, a.region ?? null, externalAccountId, a.marketplaces, awaiting ? null : 'secret-ref:synthetic',
-        awaiting ? 'AWAITING_ACCESS' : 'ACTIVE', awaiting ?? [], membershipId, writeMode],
+        /**
+         * Аккаунт, ЖДУЩИЙ доступа [Р-150], — всегда в тени: он не пишет ничего и так, а новый аккаунт подключается в тени
+         * [Р-170]. Боевым его делал только режим мира, и шаг 42 это нашёл: страж Р-172 отказывал «свойства витрин не
+         * видны», потому что у ждущего Amazon в мирах стенда стоит витрина `de` — код витрины Kaufland, а не Amazon.
+         */
+        awaiting ? 'AWAITING_ACCESS' : 'ACTIVE', awaiting ?? [], membershipId, awaiting ? 'SHADOW' : (a.writeMode ?? writeMode)],
     );
   };
   const capabilities = new Map<string, Row>();
@@ -457,10 +462,15 @@ export async function seedPricingWorld(_pool: PgPool, input: SeedWorldInput): Pr
           refAccount = otherAccounts.get('AMAZON') ?? randomUUID();
           if (!otherAccounts.has('AMAZON')) {
             otherAccounts.set('AMAZON', refAccount);
+            /**
+             * Аккаунт-ИСТОЧНИК ССЫЛКИ на другой канал: он существует, чтобы держать состояние конкурента, и не пишет
+             * ничего никогда. Поэтому он В ТЕНИ независимо от режима мира [Р-169]: витрина ссылки бывает и американской
+             * (`ATVPDKIKX0DER`), а боевой аккаунт на ней база не примет, пока не известна граница суток [Р-172].
+             */
             await tx.query(
               `INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, region, external_account_id, marketplaces, credentials_ref, connected_by_membership_id, write_mode)
-               VALUES ($1, $2, 'AMAZON', 'EU', $3, $4, 'secret-ref:synthetic', $5, $6)`,
-              [tenantId, refAccount, `syn-amz-${tag}`, [ref.marketplace], membershipId, writeMode],
+               VALUES ($1, $2, 'AMAZON', 'EU', $3, $4, 'secret-ref:synthetic', $5, 'SHADOW')`,
+              [tenantId, refAccount, `syn-amz-${tag}`, [ref.marketplace], membershipId],
             );
           }
         } else if (ref.channel !== 'KAUFLAND') {

@@ -21,11 +21,12 @@ function memoryDigestStore(targets: ShadowDigestTarget[]) {
     async record(t: ShadowDigestTarget) {
       const key = `${t.tenantId}|${t.periodStart}`;
       const existing = rows.get(key);
-      if (existing) return { digestId: existing.digestId, alreadyRecorded: true };
+      // Р-174: «строка есть» и «письмо доставлено» — разные вещи; повтор смотрит на отметку, а не на строку
+      if (existing) return { digestId: existing.digestId, alreadyRecorded: true, delivered: existing.deliveredKind !== null };
       seq += 1;
       const digestId = `digest-${seq}`;
       rows.set(key, { digestId, deliveredKind: null, ref: null, error: null, attempts: 0 });
-      return { digestId, alreadyRecorded: false };
+      return { digestId, alreadyRecorded: false, delivered: false };
     },
     async markDelivered(_tenantId: string, digestId: string, delivery: { kind: 'EMAIL_DIGEST' | 'DRY_RUN'; ref: string | null }) {
       for (const row of rows.values()) {
@@ -99,7 +100,21 @@ test('шаг 41: сбой провайдера считается провало
   assert.equal(failed.deliveredKind, null, 'письмо, которое не ушло, доставленным не считается');
 });
 
-test('шаг 42 [Р-174]: второе письмо за тот же период не уходит — строка периода уже есть', async () => {
+test('шаг 42 [Р-174]: письмо, которое НЕ ушло, повторяется на следующем прогоне — строка есть, отметки нет', async () => {
+  const mail = new FakeMail();
+  mail.failNext = 1;
+  const store = memoryDigestStore([target()]);
+  const digest = createShadowDigest({ store, mail, now: () => new Date().toISOString(), log: () => undefined });
+  const first = await digest.send();
+  assert.deepEqual([first.letters, first.failed], [0, 1], 'первый прогон: провайдер отказал, письмо не ушло');
+  const second = await digest.send();
+  assert.deepEqual([second.letters, second.alreadySent], [1, 0], 'второй прогон ОТПРАВИЛ письмо: недельный отчёт не теряется');
+  const row = [...store.rows.values()][0];
+  assert.equal(row?.deliveredKind, 'EMAIL_DIGEST', 'отметка доставки стоит после успешной попытки');
+  assert.equal(row?.attempts, 2, 'обе попытки посчитаны');
+});
+
+test('шаг 42 [Р-174]: второе письмо за тот же период не уходит — оно уже ДОСТАВЛЕНО', async () => {
   const mail = new FakeMail();
   const store = memoryDigestStore([target()]);
   const digest = createShadowDigest({ store, mail, now: () => new Date().toISOString(), log: () => undefined });

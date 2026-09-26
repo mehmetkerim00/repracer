@@ -110,7 +110,7 @@ export const JOB_CATALOG: JobCatalogEntry[] = [
   { name: 'price-days-close', scope: 'GLOBAL', when: 'каждый час', missed: 'LATEST: функция закрывает все незакрытые сутки по очереди; сырьё цен не удаляется, пока сутки не закрыты' },
   { name: 'partitions', scope: 'GLOBAL', when: 'каждый час', missed: 'LATEST: секции созданы на 3 суток вперёд; простой дольше — отказ записи снимков и цен (CRITICAL через 2 суток)' },
   { name: 'alerts-deliver', scope: 'GLOBAL', when: 'каждую минуту', missed: 'LATEST: письма уходят позже; CRITICAL, поднятый во время простоя, ждёт следующего запуска — алерт остаётся в базе без отметки доставки, и это видно запросом [Р-156]' },
-  { name: 'shadow-digest', scope: 'GLOBAL', when: 'раз в неделю', missed: 'LATEST: дайджест уходит позже; отметки доставки у него НЕТ (он отчёт, а не событие [Р-156]), поэтому пропуск недели виден только по журналу запусков' },
+  { name: 'shadow-digest', scope: 'GLOBAL', when: 'раз в неделю', missed: 'LATEST: дайджест уходит позже; у него ЕСТЬ отметка доставки [Р-174, шаг 42] — строка периода в tenant_data.shadow_digest, — поэтому пропуск недели и недоставленное письмо видны запросом, а повторный запуск не пишет продавцу дважды' },
   { name: 'retention', scope: 'GLOBAL', when: 'каждый час', missed: 'LATEST: удаление по сроку откладывается, данные хранятся дольше — PostgreSQL растёт; неподтверждённые резервации висят дольше TTL, и доступный остаток занижен всё это время; алерт о подтверждённой резервации старше 14 суток [Р-30] приходит позже' },
 ];
 
@@ -220,7 +220,8 @@ export function jobSource(deps: JobDeps): JobSource {
           name: 'shadow-digest', scope: null, retryKind: 'INTERNAL', intervalSeconds: cfg.shadowDigestEverySeconds, catchUp: 'LATEST',
           firstDueAt: immediately, lagWarningSeconds: hours(24), lagCriticalSeconds: hours(72), leaseSeconds: 600,
           async run() {
-            // Провал отправки работу не роняет: следующий заход соберёт те же числа заново — у дайджеста нет состояния
+            // Провал отправки работу не роняет: у строки периода остаётся отметка «не доставлено», и СЛЕДУЮЩИЙ заход
+            // отправляет письмо снова [Р-174, шаг 42]; доставленное второй раз не уходит — это держит база
             const r = await digest.send();
             return { items: r.letters };
           },

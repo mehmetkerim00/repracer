@@ -140,7 +140,7 @@ UPDATE platform.marketplace SET
  WHERE channel = 'AMAZON' AND country = 'US';
 
 UPDATE platform.marketplace SET
-  tax_status = 'CONSERVATIVE', tax_question = 'E-07', tax_closes_by = 'FIRST_LIVE_WRITE',
+  tax_status = 'CONSERVATIVE', tax_question = 'E-01', tax_closes_by = 'FIRST_LIVE_WRITE',
   tax_source = 'Р-58: EBAY_DE — брутто, EBAY_US — нетто; снимка спецификации eBay нет (E-01), поля не подтверждены',
   time_zone_closes_by = 'CHANNEL_SUPPORT', time_zone_question = 'OQ-112'
  WHERE channel = 'EBAY';
@@ -242,26 +242,82 @@ COMMENT ON FUNCTION platform.marketplace_readiness() IS
   'Р-172: ревизия свойств витрин — значение, статус и чем закрывается; значения собираются оттуда, где они живут';
 GRANT EXECUTE ON FUNCTION platform.marketplace_readiness() TO repracer_app, repracer_admin, repracer_operator;
 /**
- * Функция идёт ПРАВАМИ ВЫЗЫВАЮЩЕГО, а у справочников включена FORCE RLS: без своей политики строк роль видит пустоту, и
- * страж ниже пропустил бы перевод в бой МОЛЧА. Ровно это и случилось при первом прогоне смоука: административная роль
- * политики на `platform.marketplace` не имела, «неизвестных свойств» не нашлось, и бой включился. Поэтому здесь —
- * политики чтения для административной роли и роли панели, а у стража — ещё и проверка «ни одной строки не видно».
+ * Своих прав и политик этот шаг НЕ добавляет [Р-104, находка 8 ревью шага 42]: `repracer_admin` — член `repracer_app` с
+ * наследованием, а у `repracer_app` право на справочники и политики `marketplace_read` / `capability_read` есть с 0034 и
+ * 0027. Первая редакция выдала ещё и роли панели оператора — у неё не должно быть прав НИ НА ОДНУ таблицу [Р-165], и
+ * ревизию она не читает вовсе. Свойство «роль без доступа к справочнику не включает бой» держит не право, а fail-closed
+ * ветка правила: ноль видимых витрин — отказ.
  */
-CREATE POLICY marketplace_admin_read ON platform.marketplace FOR SELECT TO repracer_admin, repracer_operator USING (tenant_id = security.platform_tenant_id());
-CREATE POLICY capability_admin_read ON platform.channel_capability FOR SELECT TO repracer_admin, repracer_operator USING (tenant_id = security.platform_tenant_id());
-GRANT SELECT ON platform.marketplace, platform.channel_capability TO repracer_admin, repracer_operator;
 
 /**
- * Зубы Р-172: аккаунт нельзя перевести в БОЙ, пока у его витрины есть свойство со статусом UNKNOWN. Тень при этом
- * работает — она и есть способ дожить до подтверждения. Без этого стража продавец включил бы бой на amazon.com, у
- * которой не известна граница суток, и получил бы историю цен Omnibus с суточной границей, взятой из воздуха [Р-65].
+ * Зубы Р-172 — ОДНО правило, два входа. Правило: у боевого аккаунта свойства ВСЕХ его витрин должны быть видны и не
+ * должны быть неизвестны. Входов два, потому что состояние «боевой аккаунт с витриной, свойства которой неизвестны»
+ * достигается двумя разными путями, и проверка только на переходе в бой закрывает один из них:
+ *   1) перевод в бой (строка журнала) — страж `channel_write_mode_change_guard` ниже;
+ *   2) ДОБАВЛЕНИЕ ВИТРИНЫ боевому аккаунту обычной правкой (`marketplaces` — изменяемый столбец, 0012) и создание
+ *      аккаунта СРАЗУ боевым — страж `a_channel_account_live_marketplaces_known`. Это находка ревью шага 42: без него
+ *      боевой аккаунт получал `amazon.com` одним UPDATE — без журнала, без второго фактора и без всякой проверки,
+ *      то есть ровно то, что Р-172 объявляет невозможным.
+ * Правило живёт в одной функции: две копии разошлись бы в первый же шаг [Р-104 по духу].
  */
+CREATE FUNCTION security.marketplace_properties_unknown(p_channel text, p_marketplaces text[])
+  RETURNS text
+  LANGUAGE plpgsql STABLE SET search_path = pg_catalog AS $fn$
+DECLARE
+  u record;
+BEGIN
+  SELECT count(*) AS seen,
+         count(*) FILTER (WHERE r.status = 'UNKNOWN') AS unknown,
+         min(CASE WHEN r.status = 'UNKNOWN' THEN r.marketplace || ' / ' || r.property || ' (' || coalesce(r.question, 'вопрос не назван') || ')' END) AS first_unknown
+    INTO u
+    FROM platform.marketplace_readiness() r
+   WHERE r.channel = p_channel AND r.marketplace = ANY (p_marketplaces);
+  /**
+   * fail-closed [инвариант 6]: витрины аккаунта должны быть ВИДНЫ. Ноль строк значит одно из двух — аккаунт не называет
+   * ни одной витрины из справочника, или роль не видит справочник; в обоих случаях «неизвестных свойств нет» — неправда.
+   */
+  IF u.seen = 0 THEN
+    RETURN 'свойства витрин не видны: ' || coalesce(array_to_string(p_marketplaces, ', '), 'витрины не названы');
+  END IF;
+  IF u.unknown > 0 THEN
+    RETURN u.first_unknown;
+  END IF;
+  RETURN NULL;
+END $fn$;
+COMMENT ON FUNCTION security.marketplace_properties_unknown(text, text[]) IS
+  'Р-172: NULL — свойства всех витрин известны; иначе текст с витриной, свойством и вопросом. Ноль видимых витрин — тоже отказ';
+GRANT EXECUTE ON FUNCTION security.marketplace_properties_unknown(text, text[]) TO repracer_app, repracer_admin;
+
+/**
+ * Второй вход правила: боевой аккаунт не получает витрину с неизвестными свойствами ни правкой, ни при создании.
+ * Тень при этом не ограничена ничем — витрину можно добавить и смотреть, что движок сделал бы.
+ */
+CREATE FUNCTION tenant_data.channel_account_live_marketplaces_known() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = pg_catalog AS $fn$
+DECLARE
+  detail text;
+BEGIN
+  IF NEW.write_mode <> 'LIVE' THEN
+    RETURN NEW;
+  END IF;
+  detail := security.marketplace_properties_unknown(NEW.channel, NEW.marketplaces);
+  IF detail IS NOT NULL THEN
+    RAISE EXCEPTION 'marketplace property is unknown: % — LIVE writes stay closed while the shadow keeps working (Р-172)', detail
+      USING ERRCODE = 'integrity_constraint_violation';
+  END IF;
+  RETURN NEW;
+END $fn$;
+CREATE TRIGGER a_channel_account_live_marketplaces_known
+  BEFORE INSERT OR UPDATE OF marketplaces, write_mode ON tenant_data.channel_account
+  FOR EACH ROW EXECUTE FUNCTION tenant_data.channel_account_live_marketplaces_known();
+
+
 CREATE OR REPLACE FUNCTION tenant_data.channel_write_mode_change_guard() RETURNS trigger
   LANGUAGE plpgsql SET search_path = pg_catalog AS $fn$
 DECLARE
   m record;
   a record;
-  u record;
+  unknown_detail text;
 BEGIN
   SELECT mb.user_id, mb.role INTO m FROM tenant_data.membership mb
    WHERE mb.tenant_id = NEW.tenant_id AND mb.membership_id = NEW.changed_by_membership_id AND mb.status = 'ACTIVE';
@@ -293,24 +349,11 @@ BEGIN
     IF btrim(NEW.typed_confirmation) IS DISTINCT FROM a.external_account_id THEN
       RAISE EXCEPTION 'the typed confirmation does not name the channel account (Р-170)' USING ERRCODE = 'invalid_parameter_value';
     END IF;
-    /**
-     * Р-172: неизвестное свойство витрины держит БОЙ, а не тень. Проверка fail-closed [инвариант 6]: сначала требуется,
-     * чтобы свойства витрин аккаунта были ВИДНЫ — роль без политики строк на справочник видит пустоту, и «неизвестных
-     * свойств нет» было бы неправдой.
-     */
-    SELECT count(*) AS seen,
-           count(*) FILTER (WHERE r.status = 'UNKNOWN') AS unknown,
-           min(CASE WHEN r.status = 'UNKNOWN' THEN r.marketplace || ' / ' || r.property || ' (' || coalesce(r.question, 'вопрос не назван') || ')' END) AS first_unknown
-      INTO u
-      FROM platform.marketplace_readiness() r
-     WHERE r.channel = a.channel AND r.marketplace = ANY (a.marketplaces);
-    IF u.seen = 0 THEN
-      RAISE EXCEPTION 'properties of the marketplaces of channel account % are not visible: LIVE writes stay closed (Р-172)',
-        NEW.channel_account_id USING ERRCODE = 'integrity_constraint_violation';
-    END IF;
-    IF u.unknown > 0 THEN
+    -- Р-172: то же правило, что у стража аккаунта, — одной функцией (неизвестное свойство держит БОЙ, а не тень)
+    unknown_detail := security.marketplace_properties_unknown(a.channel, a.marketplaces);
+    IF unknown_detail IS NOT NULL THEN
       RAISE EXCEPTION 'marketplace property is unknown: % — LIVE writes stay closed while the shadow keeps working (Р-172)',
-        u.first_unknown USING ERRCODE = 'integrity_constraint_violation';
+        unknown_detail USING ERRCODE = 'integrity_constraint_violation';
     END IF;
     NEW.mfa := true;
   ELSIF m.role NOT IN ('OWNER', 'ADMIN') THEN
@@ -352,9 +395,17 @@ COMMENT ON FUNCTION platform.money_list_valid(jsonb) IS
  * N раз, и у M из них цель ещё известна — это $X». Делить одно на другое и выдавать за неделю нельзя: это была бы
  * выдумка про те удержания, чью цель мы честно уже удалили.
  */
-CREATE FUNCTION platform.shadow_floor_savings(p_tenant_id uuid, p_since interval)
+CREATE FUNCTION platform.shadow_floor_savings(p_tenant_id uuid, p_from timestamptz)
   RETURNS TABLE (savings jsonb, priced bigint)
   LANGUAGE sql STABLE SET search_path = pg_catalog AS $fn$
+  /**
+   * Окно приходит МОМЕНТОМ, а не интервалом (находка 4 ревью шага 42): экран считает своё окно от часов КОНСОЛИ (у живых
+   * прогонов они виртуальные), письмо — от суток базы, и функция, считавшая `now() - интервал` сама, давала на экране
+   * суммы по другому периоду, чем остальные его счётчики. Теперь окно одно на весь ответ, каким бы ни были часы.
+   *
+   * Снизу окно ограничено сроком ГОРЯЧЕГО НАМЕРЕНИЯ: старше трёх суток цели стратегии нет физически [Р-28], и проход по
+   * суточным секциям за её пределами читал бы миллионы строк ради заведомого нуля (находка 9 ревью).
+   */
   WITH held AS (
     SELECT i.currency,
            /**
@@ -373,8 +424,7 @@ CREATE FUNCTION platform.shadow_floor_savings(p_tenant_id uuid, p_since interval
            AND x -> 'params' ? 'targetMinor'
          LIMIT 1) step
      WHERE i.tenant_id = p_tenant_id AND d.shadow
-       -- Та же граница, что у письма: сутки минус окно (иначе суммы и счётчики считались бы по разным периодам)
-       AND i.created_at >= date_trunc('day', now()) - greatest(p_since, interval '1 hour')
+       AND i.created_at >= greatest(p_from, now() - interval '3 days')
        AND (step.params ->> 'targetMinor')::bigint < i.proposed_amount_minor
   )
   SELECT coalesce((SELECT jsonb_agg(jsonb_build_object('currency', currency, 'minor', total) ORDER BY currency)
@@ -410,7 +460,7 @@ CREATE FUNCTION platform.shadow_digest_targets(p_since interval DEFAULT interval
          fs.savings, fs.priced, w.from_ts, w.to_ts
     FROM shadowed s
     CROSS JOIN win w
-    CROSS JOIN LATERAL platform.shadow_floor_savings(s.tenant_id, p_since) fs
+    CROSS JOIN LATERAL platform.shadow_floor_savings(s.tenant_id, w.from_ts) fs
     LEFT JOIN LATERAL (
       SELECT count(*) AS decisions,
              count(*) FILTER (WHERE pd.outcome = 'APPROVED') AS changes,
@@ -440,13 +490,13 @@ ALTER FUNCTION platform.shadow_digest_targets(interval) OWNER TO repracer_retent
  * с правами роли удаления по сроку. Отдельным SECURITY DEFINER она была бы второй дверью к решениям о цене, а владение
  * ролью удаления без SECURITY DEFINER проверка схемы запрещает прямо (правило шага 19).
  */
-REVOKE EXECUTE ON FUNCTION platform.shadow_floor_savings(uuid, interval) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION platform.shadow_floor_savings(uuid, timestamptz) FROM PUBLIC;
 /**
  * Право звать функцию сумм есть у роли удаления (владелец функции дайджеста) и у АДМИНИСТРАТИВНОЙ роли — экран тени
  * показывает те же числа, что письмо [Р-171], и считает их тем же выражением. Роли доставки права НЕТ: ей суммы приходят
  * готовыми внутри `shadow_digest_targets`, и своего доступа к решениям о цене у неё по-прежнему нет [Р-100].
  */
-GRANT EXECUTE ON FUNCTION platform.shadow_floor_savings(uuid, interval) TO repracer_retention, repracer_admin;
+GRANT EXECUTE ON FUNCTION platform.shadow_floor_savings(uuid, timestamptz) TO repracer_retention, repracer_admin;
 
 -- ================================================================ D. Р-174: отметка доставки дайджеста
 SET ROLE repracer_owner;

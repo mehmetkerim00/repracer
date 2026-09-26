@@ -121,6 +121,12 @@ export type ShadowModeResult =
   | { status: 'MODE_MISMATCH'; mode: 'SHADOW' | 'LIVE' }
   /** Р-172: у витрины аккаунта есть свойство, которого мы не знаем — бой закрыт, тень работает */
   | { status: 'PROPERTY_UNKNOWN'; detail: string }
+  /**
+   * Р-172: витрин аккаунта не видно вовсе — он не называет ни одной витрины из справочника. Отдельный исход, а не текст
+   * того же: подставлять «свойство» в отказ, где свойства нет, значит показать продавцу «мы не знаем <список витрин>»
+   * (находка 10 ревью шага 42).
+   */
+  | { status: 'PROPERTY_INVISIBLE'; detail: string }
   | { status: 'FORBIDDEN' };
 
 const num = (v: unknown): number => Number(v ?? 0);
@@ -202,7 +208,8 @@ export class PgShadowStore {
          * Р-173: «без пола вы продали бы на X дешевле» — считает БАЗА тем же выражением, что дайджест [Р-171: экран и
          * письмо показывают одни и те же числа], и по каждой валюте отдельно [Р-71].
          */
-        tx.query(`SELECT savings, priced FROM platform.shadow_floor_savings($1, make_interval(days => $2))`, [tenantId, sinceDays]),
+        // Окно — ТО ЖЕ, что у остальных счётчиков экрана, и от часов консоли: у живых прогонов они виртуальные [Р-128]
+        tx.query(`SELECT savings, priced FROM platform.shadow_floor_savings($1, $2::timestamptz)`, [tenantId, since]),
         /**
          * Р-172: свойства витрин аккаунтов тенанта — значение, статус и чем закрывается. Экран показывает их рядом с
          * кнопкой «включить бой», потому что именно они её и держат.
@@ -292,8 +299,9 @@ export class PgShadowStore {
        * Р-172: отказ называет витрину, свойство и вопрос — эта строка доходит до продавца целиком, потому что «бой
        * нельзя» без «почему нельзя» превращается в «сломано».
        */
-      const property = /marketplace property is unknown: ([^—]+)—/.exec(message)
-        ?? /properties of the marketplaces of channel account (\S+) are not visible/.exec(message);
+      const invisible = /marketplace property is unknown: свойства витрин не видны: ([^—]*)—/.exec(message);
+      if (invisible) return { status: 'PROPERTY_INVISIBLE', detail: invisible[1]!.trim() };
+      const property = /marketplace property is unknown: ([^—]+)—/.exec(message);
       if (property) return { status: 'PROPERTY_UNKNOWN', detail: property[1]!.trim() };
       // Находка 6: режим брался из воздуха — теперь из самого отказа базы, иначе продавец читает «уже в бою» о теневом аккаунте
       const mismatch = /is in (SHADOW|LIVE) mode, not in/.exec(message);
@@ -334,8 +342,14 @@ export interface ShadowDigestTarget {
 /** Р-174: строка периода с отметкой доставки — «дайджест, живущий только в письме, недоказан» */
 export interface ShadowDigestRecord {
   digestId: string;
-  /** Уже есть строка за этот период: письмо не отправляется второй раз */
+  /** Уже есть строка за этот период */
   alreadyRecorded: boolean;
+  /**
+   * Уже ДОСТАВЛЕНО. Отличать это от «строка есть» обязательно (находка 3 ревью шага 42): строка пишется ДО отправки, и
+   * если провайдер отказал или процесс упал между записью и отправкой, письмо не ушло — повторный прогон обязан
+   * отправить его, а не отчитаться «уже отправлено». Недельный отчёт иначе терялся бы навсегда.
+   */
+  delivered: boolean;
 }
 
 export class PgShadowDigestStore {
@@ -372,11 +386,11 @@ export class PgShadowDigestStore {
        RETURNING digest_id`,
       [target.tenantId, target.periodStart, target.periodEnd, target.decisions, target.changes,
         target.heldWrites, target.floorHeld, JSON.stringify(target.floorSavings), target.floorSavingsHolds]);
-    if (rows.length > 0) return { digestId: rows[0]!.digest_id as string, alreadyRecorded: false };
+    if (rows.length > 0) return { digestId: rows[0]!.digest_id as string, alreadyRecorded: false, delivered: false };
     const { rows: [existing] } = await this.pool.query(
-      `SELECT digest_id FROM tenant_data.shadow_digest WHERE tenant_id = $1 AND period_start = $2`,
+      `SELECT digest_id, delivered_at FROM tenant_data.shadow_digest WHERE tenant_id = $1 AND period_start = $2`,
       [target.tenantId, target.periodStart]);
-    return { digestId: existing!.digest_id as string, alreadyRecorded: true };
+    return { digestId: existing!.digest_id as string, alreadyRecorded: true, delivered: existing!.delivered_at !== null };
   }
 
   /** Отметка доставки: время ставит база, вид — `EMAIL_DIGEST` или `DRY_RUN` (шаг 37), ошибка — своей строкой */

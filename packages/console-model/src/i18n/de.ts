@@ -599,6 +599,7 @@ export const de: Messages = {
         mfa: 'Das Scharfschalten braucht Ihren zweiten Faktor. Melden Sie sich damit an und wiederholen Sie es.',
         notOwner: 'Nur der Inhaber des Kontos schaltet das Schreiben scharf.',
         confirmation: 'Der eingetippte Text stimmt nicht mit dem Kontonamen überein. Tippen Sie ihn genau so ab.',
+        marketplacesInvisible: (list: string) => `Echte Schreibvorgänge bleiben zu: dieses Konto nennt keinen uns bekannten Marktplatz (${list || 'keiner genannt'}). Verbinden Sie seine Marktplätze, sonst bleibt es im Schatten.`,
         propertyUnknown: (detail: string) => `Echte Schreibvorgänge bleiben zu: ${detail} kennen wir für diesen Marktplatz nicht. Der Schattenmodus läuft weiter — Sie sehen weiterhin, was die Automatik täte.`,
         modeMismatch: 'Das Konto ist schon in diesem Modus — jemand hat es umgeschaltet, während dieser Bildschirm offen war.',
       },

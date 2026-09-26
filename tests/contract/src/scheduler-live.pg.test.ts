@@ -342,7 +342,8 @@ observes('shadow-digest', 'Р-171 (шаг 41): в мире без теневых
   const [m] = (await observer.query(`SELECT count(*)::int AS shadowed FROM tenant_data.channel_account WHERE write_mode = 'SHADOW'`)).rows;
   assert.equal(Number(m.shadowed), 0, 'в мире прогона нет теневых аккаунтов');
   const outcome = await shadowDigest.send();
-  assert.deepEqual(outcome, { letters: 0, quiet: 0, noRecipient: 0, failed: 0 }, `дайджест в боевом мире: ${JSON.stringify(outcome)}`);
+  // Шаг 42 [Р-174]: у исхода появилось число «письмо за этот период уже отправлено» — в боевом мире оно тоже ноль
+  assert.deepEqual(outcome, { letters: 0, quiet: 0, noRecipient: 0, failed: 0, alreadySent: 0 }, `дайджест в боевом мире: ${JSON.stringify(outcome)}`);
   assert.equal(digestMail.sent.length, 0, 'писем дайджеста не было: писать некому');
   console.log(JSON.stringify({ shadowDigest: { runs: job.runs, failed: job.failed, letters: digestMail.sent.length } }));
 });

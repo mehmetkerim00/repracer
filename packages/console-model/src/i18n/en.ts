@@ -599,6 +599,7 @@ export const en = {
         mfa: 'Switching on live writes needs your second factor. Sign in again with it and repeat.',
         notOwner: 'Only the owner of the account switches on live writes.',
         confirmation: 'The typed text does not match the account name. Type it exactly as shown.',
+        marketplacesInvisible: (list: string) => `Live writes stay closed: this account names no storefront we know (${list || 'none named'}). Connect its storefronts, or it stays in the shadow.`,
         propertyUnknown: (detail: string) => `Live writes stay closed: we do not know ${detail} for this storefront. The shadow keeps working — you keep seeing what the engine would do.`,
         modeMismatch: 'The account is already in that mode — someone switched it while this screen was open.',
       },

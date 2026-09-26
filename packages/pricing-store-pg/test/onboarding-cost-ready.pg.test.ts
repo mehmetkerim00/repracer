@@ -44,7 +44,9 @@ before(async () => {
     // Часы посева — час назад: себестоимость уже действует на момент проверки по часам базы
     marketplaces: ['de'], clock: new Date(Date.now() - 3_600_000).toISOString(),
     // Курсов в этой базе НЕТ вовсе: случай «себестоимость в чужой валюте без курса» воспроизводится честно
-    seed: { scopes: [eur(1, true), eur(2, false), eur(3, false), usd(4)], accounts: [{ channelAccountId: AMAZON_US, channel: 'AMAZON', region: 'NA', marketplaces: ['ATVPDKIKX0DER'] }] },
+    // Шаг 42 [Р-172]: аккаунт amazon.com — в тени: боевой база не примет, пока не известна граница суток (A-03).
+    // Проверка — про готовность себестоимости к включению движка, а не про запись в канал
+    seed: { scopes: [eur(1, true), eur(2, false), eur(3, false), usd(4)], accounts: [{ channelAccountId: AMAZON_US, channel: 'AMAZON', region: 'NA', marketplaces: ['ATVPDKIKX0DER'], writeMode: 'SHADOW' }] },
   });
   store = new PgPricingStore(pool, { adminPool: admin, bulkWorkerPool: db.pool('svc_bulk_worker', 2) });
   // Третьему предложению продавец ввозит себестоимость БЕЗ комиссии — ровно тот файл, на котором споткнулся первый прогон

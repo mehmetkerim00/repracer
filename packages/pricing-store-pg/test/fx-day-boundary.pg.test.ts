@@ -66,7 +66,8 @@ async function seedUs(n: number, fxRates: NonNullable<Parameters<typeof seedPric
   return seedPricingWorld(pool!, { provisioningPool: provisioning!, adminPool: admin!,
     fixtureTenantId: '10000000-0000-4000-8000-000000000001', fixtureChannelAccountId: KAUFLAND, marketplaces: ['de', 'at'], clock: new Date().toISOString(),
     fxLoaderPool: fxLoaderPool!,
-    seed: { scopes: [usScope(n)], accounts: [{ channelAccountId: AMAZON_US, channel: 'AMAZON', region: 'NA', marketplaces: ['ATVPDKIKX0DER'] }], fxRates, ...extra },
+    // Шаг 42 [Р-172]: аккаунт amazon.com — В ТЕНИ: боевой база не примет, пока не известна граница суток (A-03)
+    seed: { scopes: [usScope(n)], accounts: [{ channelAccountId: AMAZON_US, channel: 'AMAZON', region: 'NA', marketplaces: ['ATVPDKIKX0DER'], writeMode: 'SHADOW' }], fxRates, ...extra },
   });
 }
 

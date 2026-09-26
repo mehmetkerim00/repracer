@@ -1570,13 +1570,24 @@ export const STEP42_ROWS = [
     row: 'Р-172', critical: true,
     invariant: 'неизвестное свойство витрины держит БОЙ; статус, вопрос и способ закрытия — из закрытых списков',
     mutations: [
-      m(replaceInFunction('tenant_data.channel_write_mode_change_guard()', 'IF u.unknown > 0 THEN', 'IF false THEN'),
+      m(replaceInFunction('security.marketplace_properties_unknown(text, text[])', 'IF u.unknown > 0 THEN', 'IF false THEN'),
         smoke('switching to LIVE on a marketplace with an unknown property (Р-172)',
           'switching to LIVE on a marketplace whose properties are known (Р-172)')),
-      // Fail-closed: роль, не видящая справочник, не должна включать бой «потому что неизвестного не нашлось»
-      m(replaceInFunction('tenant_data.channel_write_mode_change_guard()', 'IF u.seen = 0 THEN', 'IF false THEN'),
-        smoke('switching to LIVE on a marketplace with an unknown property (Р-172)',
-          'switching to LIVE on a marketplace whose properties are known (Р-172)')),
+      /**
+       * Fail-closed: роль, не видящая справочник, не должна включать бой «потому что неизвестного не нашлось». Ловится
+       * СВОЕЙ проверкой — аккаунтом, который не называет ни одной витрины из справочника (находка 2 ревью шага 42: до
+       * неё эту мутацию не ловило ничто, и строка каталога держалась соседней проверкой).
+       */
+      m(replaceInFunction('security.marketplace_properties_unknown(text, text[])', 'IF u.seen = 0 THEN', 'IF false THEN'),
+        smoke('switching to LIVE an account whose marketplaces are not visible (Р-172, находка 2 ревью шага 42)')),
+      /**
+       * Второй вход того же правила: боевой аккаунт не получает витрину с неизвестными свойствами ни правкой, ни при
+       * создании (находки 1 и 6 ревью шага 42 — до них это делалось обычным UPDATE и обычным INSERT).
+       */
+      m(dropTrigger('a_channel_account_live_marketplaces_known', 'tenant_data.channel_account'),
+        smoke('adding amazon.com to a LIVE account (Р-172, находка 1 ревью шага 42)',
+          'a channel account born LIVE on amazon.com (Р-172, находка 6 ревью шага 42)',
+          'adding a known marketplace to a LIVE account (Р-172)')),
       m(dropConstraint('marketplace_property_status_known', 'platform.marketplace'),
         smoke('an unknown property status (Р-172)')),
       m(dropConstraint('marketplace_property_closes_by_known', 'platform.marketplace'),

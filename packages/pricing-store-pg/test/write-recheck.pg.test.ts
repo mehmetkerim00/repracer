@@ -47,6 +47,15 @@ const alerts: Array<Parameters<AlertSink['raise']>[0]> = [];
 
 before(async () => {
   db = await createIsolatedDatabase('r83');
+  /**
+   * Шаг 42 [Р-172]: боевой аккаунт на `amazon.com` база не принимает, пока не известна граница суток (A-03). Здесь
+   * проверяется ПЕРЕСЧЁТ ПОЛА перед отправкой [Р-83] на витрине США, то есть нужна именно боевая запись, — поэтому
+   * граница суток объявлена подтверждённой, КАК ЕСЛИ БЫ Amazon ответил. База изолированная: на другие прогоны это не
+   * влияет, а сам факт «с ответом канала витрина США пишет» стоит проверить ровно один раз.
+   */
+  await db.superuser(`UPDATE platform.marketplace SET time_zone = 'America/Los_Angeles', time_zone_status = 'CONFIRMED',
+                             time_zone_source = 'проба Р-83 на витрине США: граница суток объявлена подтверждённой, как если бы A-03 был закрыт'
+                       WHERE marketplace = 'ATVPDKIKX0DER'`);
   pool = db.pool('svc_app');
   world = await seedPricingWorld(pool, { provisioningPool: db.pool('svc_provisioning', 1), adminPool: db.pool('svc_admin', 2),
     fixtureTenantId: '10000000-0000-4000-8000-000000000083', fixtureChannelAccountId: ACCOUNT, marketplaces: ['de'], clock: now(),
