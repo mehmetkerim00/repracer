@@ -108,6 +108,8 @@ export const ENGINE_REASON_CODES = [
   // NO_OP
   'ALREADY_AT_TARGET',
   'WITHIN_DEADBAND',
+  // Р-171 (шаг 41): в ТЕНИ цена на витрине не двигается, и то же предложение повторялось бы на каждом опросе
+  'SHADOW_ALREADY_PROPOSED',
   'ALREADY_WINNING_BUYBOX',
   'NO_COMPETITOR_OFFERS',
   'TARGET_OUTSIDE_BOUNDS_HOLD',
@@ -179,6 +181,8 @@ export const DISPATCH_REASON_CODES = [
   'WRITE_BUDGET_DAY_UNCONFIRMED',
   // Р-116 (шаг 22): обратное чтение показало цену, отличающуюся от отправленной ровно на ставку налога, — остановка витрины
   'CHANNEL_PRICE_BASIS_MISMATCH',
+  // Р-169 (шаг 41): аккаунт ушёл в тень, пока запись была в полёте; повтор в канал не идёт
+  'WRITE_HELD_IN_SHADOW',
 ] as const;
 export type DispatchReasonCode = (typeof DISPATCH_REASON_CODES)[number];
 
@@ -196,6 +200,7 @@ export const WRITE_END_REASON_CODES = [
   'WRITE_PRICING_MODE_CHANGED',
   'WRITE_EDIT_BUDGET_EXHAUSTED',
   'WRITE_BUDGET_DAY_UNCONFIRMED',
+  'WRITE_HELD_IN_SHADOW',
 ] as const satisfies readonly AnyReasonCode[];
 export type WriteEndReasonCode = (typeof WRITE_END_REASON_CODES)[number];
 
@@ -452,6 +457,13 @@ export const REASON_PARAMS: Readonly<Record<AnyReasonCode, ParamSchema>> = {
   },
   STRATEGY_MISSING: {},
 
+  /**
+   * Р-171 (шаг 41): то же предложение уже удержано тенью. Без этой причины движок предлагал бы одно и то же на каждом
+   * опросе — в живом прогоне вышло 99 удержанных записей на предложение за сутки, экран тонул в дублях, а объём работы
+   * тени превышал боевой в двадцать раз.
+   */
+  SHADOW_ALREADY_PROPOSED: { proposedMinor: money('TENANT'), heldMinor: money('TENANT'), currency: currency() },
+
   WRITE_SUPERSEDED_BY_NEWER_VERSION: { newerVersion: count('TENANT'), newerWriteId: id('TENANT', O) },
   WRITE_RETRIES_EXHAUSTED: { attempts: count('TENANT'), code: oneOf(WRITE_ERROR_CODES, 'TENANT') },
   WRITE_PRICING_MODE_CHANGED: { mode: oneOf(PRICING_MODES, 'TENANT') },
@@ -465,6 +477,12 @@ export const REASON_PARAMS: Readonly<Record<AnyReasonCode, ParamSchema>> = {
   WRITE_SCOPE_BLOCKED: { code: oneOf(WRITE_ERROR_CODES, 'TENANT'), action: oneOf(SELLER_ACTIONS, 'TENANT') },
   // Находка 7 шага 15 [Р-65]: повтор записи с бюджетом правок, когда граница суток витрины перестала быть подтверждённой
   WRITE_BUDGET_DAY_UNCONFIRMED: { marketplace: id('TENANT') },
+  /**
+   * Р-169 (шаг 41): запись ушла в канал в БОЕВОМ режиме, канал отказал, а к моменту повтора аккаунт уже в тени. Повтор
+   * отклоняет страж режима, и диспетчер завершает запись этой причиной — иначе его обход падал бы на каждом круге
+   * (тот же класс, что находка 7 шага 15).
+   */
+  WRITE_HELD_IN_SHADOW: { channelAccountId: id('TENANT') },
   // Р-116: отправленная цена — наша, применённая — прочитана из канала
   CHANNEL_PRICE_BASIS_MISMATCH: {
     basisError: oneOf(BASIS_MISMATCH_DIRECTIONS, 'TENANT'), vatRateBp: bp('TENANT'), sentMinor: money('TENANT'), observedMinor: money('CHANNEL'),

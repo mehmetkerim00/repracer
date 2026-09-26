@@ -6,6 +6,8 @@
   "type": "module",
   "dependencies": {
     "@repracer/alert-delivery": "0.1.0",
+    "@repracer/contract-tests": "0.1.0",
+    "@repracer/console": "0.1.0",
     "@repracer/console-model": "0.1.0",
     "@repracer/identity": "0.1.0",
     "@repracer/pricing-store-pg": "0.1.0",

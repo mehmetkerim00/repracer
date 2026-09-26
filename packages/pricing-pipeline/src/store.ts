@@ -55,6 +55,11 @@ export interface PriceScopeContext {
   status: 'ACTIVE' | 'HELD' | 'CONTESTED' | 'BLOCKED' | 'RETIRED';
   strategy: StrategyDefinition | null;
   currentPriceMinor: number | null;
+  /**
+   * Р-171 (шаг 41): последнее предложение, удержанное ТЕНЬЮ. В бою — null: там «текущая цена» двигается сама, и повторов
+   * не бывает. В тени она не двигается никогда, и без этого поля движок предлагал бы одно и то же на каждом опросе.
+   */
+  shadowLastProposedMinor?: number | null;
   /** Цены, которые канал может сейчас показывать: действующая и недавно отправленные */
   knownPricesMinor: number[];
 }
@@ -290,6 +295,11 @@ export interface CommittedDecision {
   write: FieldWrite | null;
   /** Запись создана, но у единицы уже есть запись в полёте: новая ждёт её завершения, отправлять её сейчас нельзя (INV-03) */
   pendingWriteId: string | null;
+  /**
+   * Р-169 (шаг 41): запись удержана ТЕНЬЮ — она завершена и в канал не пойдёт. Отличается от `pendingWriteId` тем, что
+   * ждать нечего: это не очередь, а режим аккаунта, и на экране это разные причины [Р-94].
+   */
+  heldInShadow?: boolean;
 }
 
 export type EvaluationCommitResult =

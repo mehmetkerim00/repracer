@@ -95,7 +95,7 @@ const SCOPE_COLUMNS = `
   s.write_scope_id, s.product_id, s.channel_account_id, s.channel, m.marketplace, m.region, m.external_unit_id, m.external_sku, m.external_listing_id, m.channel_product_ref, m.condition,
   s.scope_key, p.gtin, s.currency, s.price_basis, s.tax_regime, s.pricing_mode, s.status, s.pricing_strategy_id, s.pricing_strategy_version, s.created_at,
   CASE WHEN ud.undercut_minor IS NULL THEN ps.params ELSE ps.params || jsonb_build_object('undercutMinor', ud.undercut_minor) END AS strategy_params,
-  ss.latest_version_accepted, ss.last_sent_amount_minor`;
+  ss.latest_version_accepted, ss.last_sent_amount_minor, ss.last_shadow_amount_minor`;
 
 const SCOPE_FROM = `
     FROM tenant_data.offer_mapping m
@@ -469,6 +469,8 @@ function toScopeContext(j: Row, now: Instant): ScopeEvaluationContext {
     status: r.status,
     strategy: toStrategy(r),
     currentPriceMinor: current,
+    // Р-171 (шаг 41): в тени движок сравнивает предложение с уже удержанным, а не с неподвижной ценой витрины
+    shadowLastProposedMinor: r.last_shadow_amount_minor === null || r.last_shadow_amount_minor === undefined ? null : Number(r.last_shadow_amount_minor),
     knownPricesMinor: [...known],
   };
   const bounds = (j.bounds ?? []) as Row[];
@@ -961,7 +963,18 @@ export class PgPricingStore implements PricingStore {
                            WHERE ss.tenant_id = w.tenant_id AND ss.write_scope_id = w.write_scope_id AND ss.in_flight_write_id IS NOT NULL)`,
       [tenantId, writeRow!.channel_write_id, now],
     );
-    if (claimed.rowCount !== 1) return { writeScopeId: scope.writeScopeId, intentId, decisionId, write: null, pendingWriteId: writeRow!.channel_write_id };
+    /**
+     * Находка 7 ревью шага 41: у теневой записи строки в очереди уже нет (её унёс в историю обработчик завершения), и
+     * «не перевелась в отправку» означало «ждёт впереди идущей записи» — чужая причина на экране «почему эта цена».
+     * Теперь путь решения различает эти два случая: тень называется тенью.
+     */
+    if (claimed.rowCount !== 1) {
+      const { rows: [still] } = await tx.query(
+        `SELECT status FROM tenant_data.channel_write WHERE tenant_id = $1 AND channel_write_id = $2`,
+        [tenantId, writeRow!.channel_write_id]);
+      if (!still) return { writeScopeId: scope.writeScopeId, intentId, decisionId, write: null, pendingWriteId: null, heldInShadow: true };
+      return { writeScopeId: scope.writeScopeId, intentId, decisionId, write: null, pendingWriteId: writeRow!.channel_write_id };
+    }
     return {
       writeScopeId: scope.writeScopeId, intentId, decisionId, pendingWriteId: null,
       write: {

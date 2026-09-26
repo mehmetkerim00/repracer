@@ -6,7 +6,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./testing": "./src/testing.ts"
+    "./testing": "./src/testing.ts",
+    "./shadow-digest": "./src/shadow-digest.ts"
   },
   "dependencies": {
     "@repracer/console-model": "0.1.0",

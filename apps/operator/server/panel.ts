@@ -89,6 +89,10 @@ function fromDatabase(error: unknown): PanelError {
   if (code === '42501') return new PanelError(403, 'FORBIDDEN', message);
   if (code === '22023') return new PanelError(400, 'INVALID_PARAMETER', message);
   if (code === '23000' || code === '23505' || code === '23514') return new PanelError(409, 'CONFLICT', message);
+  // Находка 11 ревью шага 40: разбор несуществующего пропуска даёт нарушение ссылки, а не «конфликт»
+  if (code === '23503') return new PanelError(404, 'NOT_FOUND', message);
+  // Не-uuid в теле — ошибка человека, а не падение панели
+  if (code === '22P02') return new PanelError(400, 'INVALID_PARAMETER', message);
   throw error;
 }
 
@@ -163,7 +167,10 @@ export function createPanel(deps: PanelDeps): Server {
     }
 
     const who = await acting(req);
-    const limit = Number(url.searchParams.get('limit') ?? '200');
+    // Находка 11 ревью шага 40: `?limit=abc` давал NaN и 500; предел — целое, иначе запрос неверен, а не сломан
+    const rawLimit = url.searchParams.get('limit');
+    const limit = rawLimit === null ? 200 : Number(rawLimit);
+    if (!Number.isInteger(limit) || limit < 1) throw new PanelError(400, 'INVALID_PARAMETER', 'limit — целое число больше нуля');
     const rest = path.slice('/api/operator/'.length);
 
     if (req.method === 'GET') {

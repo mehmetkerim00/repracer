@@ -90,6 +90,27 @@ before(async () => {
     hours: DEMO_HOURS, log: () => undefined,
   });
 
+  /**
+   * OQ-228 (шаг 41): экраны алертов и уведомлений в прогоне были ПУСТЫ — за два виртуальных часа демо-мира ни одного
+   * события не поднимается, а уведомлений Amazon в нём нет вовсе. Экран, который всегда пуст, может неверно показывать
+   * НЕпустое состояние, и заметит это человек, а не сборка. Поэтому события и уведомления сеет прогон — как их посеял бы
+   * путь решения и приёмник: панель их не создаёт и создавать не может [Р-166].
+   */
+  const demoTenant = demo.tenantId;
+  // Читается суперпользователем стенда: у административной роли строки видны только в контексте её тенанта (RLS)
+  const [account] = await db.rows<{ channel_account_id: string; channel: string }>(
+    `SELECT channel_account_id, channel FROM tenant_data.channel_account WHERE tenant_id = $1 LIMIT 1`, [demoTenant]);
+  await db.superuser(
+    `INSERT INTO tenant_data.alert (tenant_id, code, severity, channel_account_id, details)
+     VALUES ($1, 'PRICE_WRITE_NOT_SENT', 'CRITICAL', $2, '{"synthetic": true}'::jsonb),
+            ($1, 'NOTIFICATION_LATE', 'WARNING', $2, '{"synthetic": true}'::jsonb)`,
+    [demoTenant, account!.channel_account_id]);
+  await db.superuser(
+    `INSERT INTO channel_data.inbound_notification (tenant_id, channel_account_id, channel, notification_id, notification_type, event_time, received_at, processed_at)
+     VALUES ($1, $2, $3, 'syn-1', 'ANY_OFFER_CHANGED', now(), now(), now()),
+            ($1, $2, $3, 'syn-2', 'ANY_OFFER_CHANGED', now(), now(), now())`,
+    [demoTenant, account!.channel_account_id, account!.channel]);
+
   const key = generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).privateKey.export({ format: 'pem', type: 'pkcs8' }).toString();
   issuer = createLocalIssuer({ issuer: OPERATOR_ISSUER, audience: OPERATOR_AUDIENCE, privateKeyPem: key });
   panel = await startOperatorPanel({
@@ -167,6 +188,26 @@ test('Р-168: семь экранов панели отвечают на жив�
     if (queued === 0) await new Promise((resolve) => setTimeout(resolve, 2_000));
   }
   assert.ok(queued > 0, `в очереди диспетчера ${queued} записей через ${(Number(process.hrtime.bigint() - waited) / 1e9).toFixed(0)} с работы демо-мира`);
+
+  /**
+   * OQ-228 закрыт: экраны алертов и уведомлений наполнены, и это утверждается числами, а не «экран отвечает». Доставка
+   * алерта видна отдельным полем — событие в базе без отметки доставки считается НЕдоставленным [Р-156].
+   */
+  const alerts = await walk<{ alerts: Array<{ code: string; severity: string; delivered_at: string | null }> }>('алерты', 'GET', '/api/operator/alerts');
+  assert.ok(alerts.body.alerts.length >= 2, `на экране алертов ${alerts.body.alerts.length} событий`);
+  assert.ok(alerts.body.alerts.some((a) => a.severity === 'CRITICAL') && alerts.body.alerts.some((a) => a.severity === 'WARNING'),
+    'видны события обоих уровней: панель не фильтрует их молча');
+  assert.ok(alerts.body.alerts.every((a) => a.delivered_at === null), 'все события пока недоставлены — доставку ведёт планировщик, а не панель');
+  const notifications = await walk<{ notifications: Array<{ channel: string; notification_type: string; received: number; last_received_at: string }> }>('уведомления', 'GET', '/api/operator/notifications');
+  assert.ok(notifications.body.notifications.length >= 1, 'на экране приёмника есть строки');
+  const row = notifications.body.notifications[0]!;
+  assert.ok(row.received >= 2 && row.last_received_at !== null,
+    `приёмник показывает принятые уведомления по каналу и виду: получено ${row.received}`);
+  /**
+   * Столбца «разобрано» на экране нет намеренно (шаг 41, задача E): таблица приёмника хранит только разобранные
+   * уведомления, и такой счётчик был бы равен «получено» всегда — тавтология на экране [Р-94].
+   */
+  assert.ok(!Object.hasOwn(row, 'processed'), 'экран не показывает счётчик, равный другому счётчику по определению');
 
   const jobs = await walk<{ jobs: Array<{ job_key: string; runs_completed: number }> }>('работы планировщика', 'GET', '/api/operator/jobs');
   assert.ok(jobs.body.jobs.length >= 8, `в каталоге работ ${jobs.body.jobs.length} строк — работы планировщика видны все, а не выборкой`);
@@ -306,20 +347,14 @@ test('Р-166: две оставшиеся операции — алерт уви
    * Событие поднимает ПРОЦЕСС, а не панель [Р-156], и завести его себе панель не может — здесь его вставляет
    * суперпользователь стенда, как это сделал бы путь решения. Пропуск снимка — так же: его пишет выгрузка.
    */
-  const alertId = randomUUID();
-  await db.superuser(
-    `INSERT INTO tenant_data.alert (tenant_id, alert_id, code, severity, details)
-     VALUES ($1, $2, 'PRICE_WRITE_NOT_SENT', 'CRITICAL', '{"synthetic": true}'::jsonb)`, [tenantId, alertId]);
+  // Событие берётся посеянное в `before` — панель события не создаёт [Р-166]
+  const { alerts } = (await walk<{ alerts: Array<{ alert_id: string; acknowledged_at: string | null }> }>('алерты до отметки', 'GET', '/api/operator/alerts')).body;
+  const alertId = alerts.find((a) => a.acknowledged_at === null)!.alert_id;
   const skipId = randomUUID();
   await db.superuser(
     `INSERT INTO maintenance.snapshot_export_skip (subject_tenant_id, competitor_snapshot_id, partition_name, received_at, reason)
      VALUES ($1, $2, 'competitor_snapshot_2026_09_26', now(), 'NO_PRICES')`, [tenantId, skipId]);
 
-  const seen = await walk<{ alerts: Array<{ alert_id: string; acknowledged_at: string | null; delivered_at: string | null }> }>('алерты', 'GET', '/api/operator/alerts');
-  const row = seen.body.alerts.find((a) => a.alert_id === alertId);
-  assert.ok(row, 'новое событие видно на экране алертов');
-  assert.equal(row.acknowledged_at, null, 'и оно не отмечено: отметку ставит человек');
-  assert.equal(row.delivered_at, null, 'доставки владельцу ещё не было — панель показывает это отдельным полем [Р-156]');
 
   const ack = await walk<{ acknowledged: string }>('отметить алерт увиденным', 'POST', `/api/operator/alerts/${alertId}/acknowledge`, { body: { tenantId } });
   assert.equal(ack.status, 200, 'алерт отмечен увиденным');

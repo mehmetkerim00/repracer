@@ -3,10 +3,11 @@ import { createAmazonAdapter, TwoLevelBudget } from '@repracer/amazon-adapter';
 import type { AdapterDependencies, ChannelAdapter } from '@repracer/channel-port';
 import { conservativeBudget, createKauflandAdapter } from '@repracer/kaufland-adapter';
 import { createPricingPipeline } from '@repracer/pricing-pipeline';
-import { createPool, PgAlertDeliveryStore, PgAlertSink, PgPricingStore, type PgPool } from '@repracer/pricing-store-pg';
+import { createPool, PgAlertDeliveryStore, PgAlertSink, PgPricingStore, PgShadowDigestStore, type PgPool } from '@repracer/pricing-store-pg';
 import { loadConfig, type SchedulerConfig } from './config.ts';
 import { createDryMailSender, createHeartbeat, createMailSender } from '@repracer/service-runtime';
 import { createAlertDelivery } from '@repracer/alert-delivery';
+import { createShadowDigest } from '@repracer/alert-delivery/shadow-digest';
 import { jobSource, type SchedulerAccount } from './jobs.ts';
 import { SchedulerMetrics, serveMetrics } from './metrics.ts';
 import { pgJobDeps } from './pg-deps.ts';
@@ -104,6 +105,16 @@ export async function startScheduler(config: SchedulerConfig = loadConfig(), onF
    * говорит это прямо. Выключить её целиком можно только явно (`REPRACER_SCHEDULER_MAIL=off`), и тогда её здесь нет.
    */
   const mailSender = config.mail ? createMailSender(config.mail) : createDryMailSender((line: string) => sink.logger.log(JSON.parse(line) as never));
+  /**
+   * Шаг 41 [Р-171]: недельный дайджест тени идёт ТОЙ ЖЕ ролью и тем же отправителем, что алерты: второго пути писем в
+   * проекте нет, и заводить его ради отчёта значило бы завести второй сухой режим и второй перехватчик в прогонах.
+   */
+  const shadowDigest = deliveryPool
+    ? createShadowDigest({
+        store: new PgShadowDigestStore(deliveryPool), mail: mailSender, now: () => new Date().toISOString(),
+        log: (line: string) => sink.logger.log(JSON.parse(line) as never),
+      })
+    : undefined;
   const alertDelivery = deliveryPool
     ? createAlertDelivery({
         store: new PgAlertDeliveryStore(deliveryPool), mail: mailSender, now: () => new Date().toISOString(),
@@ -117,6 +128,7 @@ export async function startScheduler(config: SchedulerConfig = loadConfig(), onF
     schedulerPool, exporterPool, ingest: ch(config.clickHouse.ingest), verifier: ch(config.clickHouse.verifier),
     descriptorOf: (channel) => adapterFor(channel)?.descriptor ?? null, pipelineFor,
     ...(alertDelivery ? { alertDelivery } : {}),
+    ...(shadowDigest ? { shadowDigest } : {}),
   });
   const metrics = new SchedulerMetrics();
   // Риск 31: часы сроков — часы базы

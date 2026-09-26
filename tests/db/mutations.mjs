@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0127_verify_schema_invariants_v35.sql';
+const VERIFY = 'migrations/0129_verify_schema_invariants_v36.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -1455,6 +1455,105 @@ export const STEP40_ROWS = [
        * панели тоже нет), то есть своей проверкой мутация не ловится. Прогон это и показал; сама проверка остановки
        * в смоуке остаётся и названа там же.
        */
+    ],
+  },
+];
+
+/**
+ * Шаг 41 [Р-169…Р-171]: теневой режим. Инвариант «ни одна запись не уходит из тени» держат ТРИ механизма на трёх путях
+ * отправки, и каждый снимается здесь по одному. Плюс переключение режима: журнал, направление, роль, второй фактор и
+ * набранное подтверждение — каждое своей строкой [Р-99].
+ */
+export const STEP41_ROWS = [
+  {
+    row: 'Р-169', critical: true,
+    invariant: 'теневая запись не уходит в канал ни очередью, ни прямой отправкой, ни повтором после отказа канала',
+    mutations: [
+      // Путь 1: снимите ветку вставки — и теневая запись встанет в очередь диспетчера как обычная
+      m(replaceInFunction('tenant_data.channel_write_before_insert()',
+        "IF (SELECT ca.write_mode FROM tenant_data.channel_account ca\n       WHERE ca.tenant_id = NEW.tenant_id AND ca.channel_account_id = s.channel_account_id) = 'SHADOW' THEN",
+        'IF false THEN'),
+        smoke('a write of a shadow account waits in the queue (Р-169, путь 1)', 'a write of a shadow account is born finished and never queued (Р-169)')),
+      // Путь 3: аккаунт ушёл в тень, пока запись была в полёте; повтор после отказа канала обязан упереться в режим
+      m(replaceInFunction('tenant_data.channel_write_before_update()',
+        "IF (SELECT ca.write_mode FROM tenant_data.channel_account ca\n         WHERE ca.tenant_id = NEW.tenant_id AND ca.channel_account_id = s.channel_account_id) = 'SHADOW' THEN",
+        'IF false THEN'),
+        smoke('a retry after the channel failure leaves the shadow (Р-169, путь 3)')),
+      // Путь 2: состояние тени со следами отправки — запись, собранная мимо переходов
+      m(dropConstraint('channel_write_history_shadow_never_left', 'tenant_data.channel_write_history'),
+        smoke('a held write is recorded with a dispatch time (Р-169, путь 2)')),
+      // Теневая запись завершается УЖЕ ПРИ ВСТАВКЕ: без этого триггера она осталась бы в очереди диспетчера
+      m(dropTrigger('ea_channel_write_complete_shadow', 'tenant_data.channel_write'),
+        smoke('a write of a shadow account waits in the queue (Р-169, путь 1)', 'a write of a shadow account is born finished and never queued (Р-169)')),
+      // Уже уходившая запись тенью не помечается: её судьба — отказ, а не «удержано»
+      // Уход в тень УДЕРЖИВАЕТ ждущие записи: без ветки они остались бы в очереди, и диспетчер бился бы о страж режима
+      m(replaceInFunction('tenant_data.channel_write_mode_apply()', "AND w.status IN ('PENDING', 'BLOCKED');", "AND w.status IN ('NOTHING');"),
+        smoke('a pending write of an account that went to shadow still waits in the queue (Р-170)',
+          'going to shadow holds the writes that were still waiting (Р-170)')),
+      m(replaceInFunction('tenant_data.channel_write_mode_apply()', "AND w.status = 'FAILED';", "AND w.status = 'NOTHING';"),
+        smoke('a failed write of a shadow account still waits for a retry (Р-169)',
+          'a write that had already left is ended by its refusal, not marked as held (Р-169)')),
+    ],
+  },
+  {
+    row: 'Р-170', critical: true,
+    invariant: 'режим переключает строка журнала: направление, текущий режим, роль владельца, второй фактор и набранное подтверждение',
+    mutations: [
+      m(dropTrigger('a_channel_account_write_mode_only_from_journal', 'tenant_data.channel_account'),
+        smoke('the write mode is changed by a direct update (Р-170)')),
+      m(replaceInFunction('tenant_data.channel_write_mode_change_guard()',
+        'IF NEW.from_mode IS DISTINCT FROM a.write_mode THEN', 'IF false THEN'),
+        smoke('a mode change that names the wrong current mode (Р-170)')),
+      m(replaceInFunction('tenant_data.channel_write_mode_change_guard()', "IF m.role <> 'OWNER' THEN", 'IF false THEN'),
+        smoke('an admin switches the account to LIVE (Р-170)')),
+      m(replaceInFunction('tenant_data.channel_write_mode_change_guard()', 'IF NOT security.session_mfa() THEN', 'IF false THEN'),
+        smoke('switching to LIVE without a second factor (Р-170)')),
+      m(replaceInFunction('tenant_data.channel_write_mode_change_guard()',
+        'IF btrim(NEW.typed_confirmation) IS DISTINCT FROM a.external_account_id THEN', 'IF false THEN'),
+        smoke('switching to LIVE with a confirmation that does not name the account (Р-170)')),
+      m(dropConstraint('channel_write_mode_change_direction', 'tenant_data.channel_write_mode_change'),
+        smoke('a mode change that changes nothing (Р-170)')),
+      m(dropConstraint('channel_write_mode_change_live_confirmed', 'tenant_data.channel_write_mode_change'),
+        smoke('a switch back to SHADOW that carries a typed confirmation (Р-170)')),
+      m(dropConstraint('channel_account_write_mode_known', 'tenant_data.channel_account'),
+        smoke('a channel account with an unknown write mode (Р-169)'), smoke('a mode change to a mode that does not exist (Р-170)')),
+      // Автор перехода — человек сессии, а не любой участник тенанта [Р-97]
+      m(replaceInFunction('tenant_data.channel_write_mode_change_guard()',
+        'IF security.current_user_id() IS NOT NULL AND (m.user_id IS NULL OR m.user_id IS DISTINCT FROM security.current_user_id()) THEN', 'IF false THEN'),
+        smoke('a mode change signed with the membership of someone else (Р-97)')),
+      /**
+       * Строки мутации на `'a0_admin_write_person_insert', 'tenant_data.channel_write_mode_change'` НЕТ намеренно
+       * [Р-104]: применение строки журнала ВСЕГДА правит `tenant_data.channel_account`, и её собственный страж человека
+       * отвечает тем же отказом — изолировать журнальный нечем. Свойство «административная запись только при человеке»
+       * держится и проверяется на аккаунте; смоук журнала утверждает его наличие своей проверкой.
+       */
+      m(dropTrigger('zc_channel_write_mode_change_audit', 'tenant_data.channel_write_mode_change'),
+        smoke('switching the write mode is not written to the audit log (Р-97)',
+          'the database marks a decision of a shadow account and only it, and every switch is audited (Р-171, Р-97)')),
+      m(dropTrigger('zz_append_only', 'tenant_data.channel_write_mode_change'),
+        smoke('append-only tenant_data.channel_write_mode_change')),
+      m(dropTrigger('zz_no_truncate', 'tenant_data.channel_write_mode_change'),
+        smoke('truncate tenant_data.channel_write_mode_change')),
+    ],
+  },
+  {
+    row: 'Р-171',
+    invariant: '«потратило бы бюджет» — только у тени; решение теневого аккаунта помечает база',
+    mutations: [
+      m(dropConstraint('channel_write_history_would_spend_only_in_shadow', 'tenant_data.channel_write_history'),
+        smoke('a live write claims it would have spent the budget (Р-171)')),
+      // Признак «потратило бы» ставит база при создании: без него продавец не узнает цену перехода в бой
+      m(replaceInFunction('tenant_data.channel_write_before_insert()',
+        'NEW.would_spend_budget := NEW.budget_scope_key IS NOT NULL;', 'NEW.would_spend_budget := false;'),
+        smoke('the shadow write does not say it would have spent the edit budget (Р-171)',
+          'the shadow write would have spent the budget and spent none of it (Р-171)')),
+      // Признак тени доходит до ВЕЧНОГО ядра: без него через 30 суток теневое решение неотличимо от боевого [Р-38]
+      m(replaceInFunction('channel_data.price_decision_record_core()', 'NEW.sanity_ruleset, NEW.gate_profile, NEW.shadow', 'NEW.sanity_ruleset, NEW.gate_profile, false'),
+        smoke('the shadow flag of a decision does not reach the eternal core (Р-171, Р-38)',
+          'the database marks a decision of a shadow account and only it, and every switch is audited (Р-171, Р-97)')),
+      m(dropTrigger('ab_price_decision_copy_shadow', 'channel_data.price_decision'),
+        smoke('a decision of a shadow account is not marked as shadow (Р-171)',
+          'the database marks a decision of a shadow account and only it, and every switch is audited (Р-171, Р-97)')),
     ],
   },
 ];

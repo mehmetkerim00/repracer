@@ -118,10 +118,13 @@ export async function demoWorld(input: {
   memberUsers?: Readonly<Record<string, string>>;
   memberEmails?: Readonly<Record<string, string>>;
   joinMember?: Parameters<typeof kauflandLiveWorld>[0]['joinMember'];
+  /** Шаг 41 [Р-169]: демо в ТЕНИ — канал подключён, движок работает, записи не уходят */
+  writeMode?: 'SHADOW' | 'LIVE';
 }): Promise<DemoWorld> {
   const clock = input.wallClock ? new WallClock() : new VirtualClock(input.startIso);
   const live = await kauflandLiveWorld({
     tag: input.tag, clock, products: demoProducts({ bare: input.bare }), seed: input.seed ?? input.tag, demo: true,
+    ...(input.writeMode ? { writeMode: input.writeMode } : {}),
     /**
      * Шаг 35 (задача D): демо показывает и остатки. У настроенного мира — источник с инвентаризацией и включённая
      * синхронизация (буфер 2); спрос модели — заказ каждые 4 минуты, отгрузка через час, каждый десятый отменяется.

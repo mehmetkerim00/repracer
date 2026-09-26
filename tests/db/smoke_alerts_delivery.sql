@@ -60,3 +60,29 @@ SELECT pg_temp.expect_fail('changing a delivered alert without touching the deli
 SELECT pg_temp.ok('a letter composed and not sent is recorded as a dry run (OQ-224)', format($q$
   UPDATE tenant_data.alert SET delivered_at = now(), delivery_kind = 'DRY_RUN', delivery_ref = 'dry-run-1'
    WHERE tenant_id = %L AND alert_id = 'ae000000-0000-0000-0000-000000000002' $q$, :tA));
+
+/**
+ * Шаг 41 [Р-171, находка 13 ревью]: цели недельного дайджеста тени читает ЭТА роль, и до сих пор функция не проверялась
+ * ни быстрым, ни полным прогоном — только длинным заданием суток. Здесь она проверяется тем, чем и должна: правами этой
+ * роли на настоящих данных. В смоук-мире теневых аккаунтов нет (все объявлены боевыми), поэтому целей ноль — и это
+ * утверждается вместе с тем, что функция ВЫПОЛНЯЕТСЯ этой ролью (до исправления она молча отдавала ноль из-за RLS).
+ */
+DO $$
+DECLARE
+  t record;
+  n int;
+BEGIN
+  SELECT count(*) INTO n FROM platform.shadow_digest_targets();
+  -- Теневой аккаунт в мире ОДИН (его оставил smoke_shadow.sql); ноль здесь был бы истиной из пустоты [Р-94]
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'the digest sees % targets, the world has exactly one shadow account (Р-171)', n;
+  END IF;
+  SELECT * INTO t FROM platform.shadow_digest_targets();
+  IF t.owner_email IS NULL OR position('@' IN t.owner_email) = 0 THEN
+    RAISE EXCEPTION 'the digest target has no owner to write to: % (Р-156)', t.owner_email;
+  END IF;
+  IF t.shadow_accounts <> 1 OR t.locale NOT IN ('de', 'en') THEN
+    RAISE EXCEPTION 'the digest target is described wrongly: accounts=% locale=%', t.shadow_accounts, t.locale;
+  END IF;
+  RAISE NOTICE 'PASS accept | the delivery role reads the shadow digest targets: one tenant, its owner and its language (Р-171)';
+END $$;

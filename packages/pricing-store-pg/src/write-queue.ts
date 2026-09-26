@@ -76,6 +76,13 @@ function dispatchRefusal(error: unknown, write: Row): { status: 'DISCARDED_STALE
   // Раньше отказ не распознавался: захват пробрасывал ошибку, обход диспетчера падал на каждом круге, запись висела без алерта (Р-64)
   let m = /retry of a budgeted write: the day boundary of storefront (\S+) is not confirmed/.exec(message);
   if (m) return { status: 'DISCARDED_STALE', reason: { code: 'WRITE_BUDGET_DAY_UNCONFIRMED', params: { marketplace: m[1]! } } };
+  /**
+   * Р-169 (шаг 41): аккаунт ушёл в ТЕНЬ, пока запись была в полёте. Канал отказал, повтор упирается в страж режима — и
+   * без этой строки отказ не распознавался бы: захват пробрасывал бы ошибку, обход диспетчера падал бы на каждом круге,
+   * а запись висела бы без причины (ровно находка 7 шага 15 в новой форме).
+   */
+  m = /channel account (\S+) is in SHADOW mode: no write leaves the shadow/.exec(message);
+  if (m) return { status: 'DISCARDED_STALE', reason: { code: 'WRITE_HELD_IN_SHADOW', params: { channelAccountId: m[1]! } } };
   // Р-83 (0051): пол вычислен заново — min_price и пол маржи; пол не вычисляется — отдельное сообщение (не <NULL> в числе)
   m = /value (\d+) is below effective price floor (\d+) \(min_price (\d+), margin floor (\d+|none), min margin (\d+|none) bp\)/.exec(message);
   if (m) {

@@ -17,6 +17,12 @@ export const INFRASTRUCTURE_TESTS = [
     why: 'демо-стенд живёт виртуальные сутки (~30 мин работы планировщика), затем все экраны обходятся как браузер',
   },
   {
+    // Шаг 41 [Р-169…Р-171]: сутки демо В ТЕНИ — движок работает целиком, к каналу не уходит ни одного изменяющего запроса.
+    // Сутки на 200 предложениях — около получаса настоящего времени, как и боевые сутки шага 35
+    file: 'apps/console/test/shadow-live.pg.test.ts', needs: 'TIME',
+    why: 'сутки демо в теневом режиме, затем включение боя через консоль и возврат в тень',
+  },
+  {
     // Шаг 36 [Р-155]: замер пакетной записи на каталоге целевого клиента — 10 000 предложений отправляются дважды,
     // по одной и пакетами. Посев каталога и 10 000 одиночных отправок — десятки минут: в быстрый прогон не помещается
     file: 'tests/contract/src/bulk-dispatch.pg.test.ts', needs: 'TIME',
@@ -42,6 +48,13 @@ export const INFRASTRUCTURE_FILES = new Set(INFRASTRUCTURE_TESTS.map((t) => t.fi
 export const LONG_FILES = new Set(INFRASTRUCTURE_TESTS.filter((t) => t.needs === 'TIME').map((t) => t.file));
 
 /**
+ * Шаг 41 [Р-169]: сутки в ТЕНИ — своё задание CI (`shadow-day`), а не внутри `demo-day`. Причина арифметическая: в
+ * задании суток уже живут боевые сутки демо и замер пакетной записи, вместе это 91 минута при пределе 110 — третьи сутки
+ * в том же задании его гарантированно перерастили бы.
+ */
+export const SHADOW_FILES = new Set(['apps/console/test/shadow-live.pg.test.ts']);
+
+/**
  * Шаг 36: прогоны, которые УТВЕРЖДАЮТ время. Node запускает файлы одного рабочего пространства параллельно, и такой прогон
  * делит процессор и PostgreSQL с соседями — тогда он измеряет не продукт, а загрузку машины. На шаге 36 это увидели прямо:
  * предпросмотр стратегии на 10 000 предложений шёл 58 секунд в одиночку и не уложился в предел 120 секунд, пока рядом шли
@@ -58,11 +71,14 @@ export const MEASURED_FILES = new Set([
   'tests/contract/src/cost-import-live.pg.test.ts',
   // Шаг 40 [Р-165]: прогон панели оператора утверждает секунды экранов и держит под собой живой демо-мир
   'apps/operator/test/operator-live.pg.test.ts',
+  // Шаг 41: прогон тени утверждает секунды экрана и держит под собой суточный демо-мир
+  'apps/console/test/shadow-live.pg.test.ts',
 ]);
 
 /** Файлы области: быстрый прогон — всё, кроме инфраструктурных и долгих; полный — всё, кроме долгих; `long` — только долгие */
 export function filesForScope(included, scope) {
   if (scope === 'fast') return included.filter((f) => !INFRASTRUCTURE_FILES.has(f));
-  if (scope === 'long') return included.filter((f) => LONG_FILES.has(f));
+  if (scope === 'shadow') return included.filter((f) => SHADOW_FILES.has(f));
+  if (scope === 'long') return included.filter((f) => LONG_FILES.has(f) && !SHADOW_FILES.has(f));
   return included.filter((f) => !LONG_FILES.has(f));
 }

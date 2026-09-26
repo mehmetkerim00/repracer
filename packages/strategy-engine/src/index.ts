@@ -27,6 +27,12 @@ export interface EngineInput {
   /** Границы на момент расчёта; Gate перечитывает их из источника истины */
   bounds: { minMinor: number; maxMinor: number };
   currentPriceMinor: number | null;
+  /**
+   * Р-171 (шаг 41): последнее предложение, УДЕРЖАННОЕ тенью. В теневом режиме цена на витрине не двигается, поэтому
+   * сравнение с ней даёт «изменить» на каждом опросе; сравнение с уже удержанным предложением даёт честное «мы это уже
+   * предложили». В боевом режиме поле пустое.
+   */
+  shadowLastProposedMinor?: number | null;
   now: Instant;
   trigger: { type: TriggerType; sourceEventId?: string };
   intentTtlSeconds?: number;
@@ -112,6 +118,7 @@ function r<C extends EngineReasonCode>(code: C, params: Reason['params'] = {}): 
 
 export function runStrategy(input: EngineInput): EngineResult {
   const { strategy, snapshot, writeScope, bounds, currentPriceMinor: current, now } = input;
+  const heldInShadow = input.shadowLastProposedMinor ?? null;
   const params = strategy.params;
   const currency = writeScope.currency;
   const notEvaluated = (reason: Reason<EngineReasonCode>): EngineResult => ({ kind: 'NOT_EVALUATED', strategyType: params.type, reason });
@@ -245,6 +252,15 @@ export function runStrategy(input: EngineInput): EngineResult {
       const band = r('WITHIN_DEADBAND', { deltaMinor: delta, deadbandMinor: strategy.deadbandMinor, currency });
       return intent('NO_OP', current, band, [...explanation, band], referenceMinor);
     }
+  }
+  /**
+   * Р-171: то же самое предложение уже удержано тенью — повторять его незачем. Проверка стоит ПОСЛЕ сравнения с текущей
+   * ценой: в бою поле пустое, и ветка недостижима; в тени именно она превращает поток дублей в один held-write на
+   * изменение.
+   */
+  if (heldInShadow !== null && Math.abs(proposed - heldInShadow) <= strategy.deadbandMinor) {
+    const already = r('SHADOW_ALREADY_PROPOSED', { proposedMinor: proposed, heldMinor: heldInShadow, currency });
+    return intent('NO_OP', current ?? heldInShadow, already, [...explanation, already], referenceMinor);
   }
   return intent('CHANGED', proposed, explanation[explanation.length - 1]!, explanation, referenceMinor);
 

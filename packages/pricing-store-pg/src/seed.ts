@@ -102,6 +102,12 @@ export interface SeedWorldInput {
   marketplaces: string[];
   clock: Instant;
   seed: MemorySeed;
+  /**
+   * Шаг 41 [Р-170]: режим записи посеянных аккаунтов. Умолчание здесь — `LIVE`, и это НЕ спор с Р-170: умолчание БАЗЫ
+   * (`SHADOW`) относится к аккаунту, который подключил человек, а посев собирает мир, от которого тесты ждут отправок.
+   * Мир, которому нужна тень, просит её явно — так устроен живой прогон шага 41.
+   */
+  writeMode?: 'SHADOW' | 'LIVE';
   /** Р-151: тенант на симуляторе — помечается в базе, чтобы консоль показывала «демо» везде, где деньги */
   demo?: boolean;
   /** Существующие пользователи для членств сценария (псевдоним членства → user_id): один вход во все миры стенда [OQ-128, Р-9] */
@@ -219,6 +225,8 @@ export async function seedPricingWorld(_pool: PgPool, input: SeedWorldInput): Pr
   const scopes = new Map<string, ScopeInfo>();
 
   const fixtureChannel = input.fixtureChannel ?? 'KAUFLAND';
+  // Шаг 41 [Р-170]: мир посева боевой, если тень не попросили явно
+  const writeMode = input.writeMode ?? 'LIVE';
   const fixtureRegion = fixtureChannel === 'KAUFLAND' ? null : input.fixtureRegion ?? null;
   // Источник конкурентов проекций посева — по каналу аккаунта мира (CHECK competitor_state: источник принадлежит каналу)
   const fixtureSource = fixtureChannel === 'AMAZON' ? 'AMAZON_ANY_OFFER_CHANGED' : 'KAUFLAND_BUYBOX';
@@ -232,10 +240,10 @@ export async function seedPricingWorld(_pool: PgPool, input: SeedWorldInput): Pr
     const awaiting = a.awaitingAccess && a.awaitingAccess.length > 0 ? a.awaitingAccess : null;
     await tx.query(
       `INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, region, external_account_id, marketplaces, credentials_ref,
-                                                auth_status, access_blockers, connected_by_membership_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+                                                auth_status, access_blockers, connected_by_membership_id, write_mode)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
       [tenantId, id, a.channel, a.region ?? null, externalAccountId, a.marketplaces, awaiting ? null : 'secret-ref:synthetic',
-        awaiting ? 'AWAITING_ACCESS' : 'ACTIVE', awaiting ?? [], membershipId],
+        awaiting ? 'AWAITING_ACCESS' : 'ACTIVE', awaiting ?? [], membershipId, writeMode],
     );
   };
   const capabilities = new Map<string, Row>();
@@ -397,9 +405,9 @@ export async function seedPricingWorld(_pool: PgPool, input: SeedWorldInput): Pr
 
   await inTenant(input.adminPool, tenantId, async (tx) => {
     await tx.query(
-      `INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, region, external_account_id, marketplaces, credentials_ref, connected_by_membership_id)
-       VALUES ($1, $2, $3, $4, $5, $6, 'secret-ref:synthetic', $7)`,
-      [tenantId, accountId, fixtureChannel, fixtureRegion, input.fixtureExternalAccountId ?? `syn-${tag}`, input.marketplaces, membershipId],
+      `INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, region, external_account_id, marketplaces, credentials_ref, connected_by_membership_id, write_mode)
+       VALUES ($1, $2, $3, $4, $5, $6, 'secret-ref:synthetic', $7, $8)`,
+      [tenantId, accountId, fixtureChannel, fixtureRegion, input.fixtureExternalAccountId ?? `syn-${tag}`, input.marketplaces, membershipId, writeMode],
     );
     for (const a of seed.accounts ?? []) await connectAccountRow(tx, a, `syn-${a.channel.toLowerCase()}-${tag}`);
     for (const s of seed.scopes) await seedScope(tx, s);
@@ -450,9 +458,9 @@ export async function seedPricingWorld(_pool: PgPool, input: SeedWorldInput): Pr
           if (!otherAccounts.has('AMAZON')) {
             otherAccounts.set('AMAZON', refAccount);
             await tx.query(
-              `INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, region, external_account_id, marketplaces, credentials_ref, connected_by_membership_id)
-               VALUES ($1, $2, 'AMAZON', 'EU', $3, $4, 'secret-ref:synthetic', $5)`,
-              [tenantId, refAccount, `syn-amz-${tag}`, [ref.marketplace], membershipId],
+              `INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, region, external_account_id, marketplaces, credentials_ref, connected_by_membership_id, write_mode)
+               VALUES ($1, $2, 'AMAZON', 'EU', $3, $4, 'secret-ref:synthetic', $5, $6)`,
+              [tenantId, refAccount, `syn-amz-${tag}`, [ref.marketplace], membershipId, writeMode],
             );
           }
         } else if (ref.channel !== 'KAUFLAND') {

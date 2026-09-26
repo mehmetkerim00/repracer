@@ -113,3 +113,31 @@ test('availability on Kaufland sources: buy box via pull; early-access push does
   assert.ok(!market.available && market.unmet.KAUFLAND_COMPETITORS_COMPARER?.includes('RECONCILIATION_ONLY'));
   assert.ok(strategyAvailability({ type: 'FIXED', priceMinor: 1 }, []).available);
 });
+
+/**
+ * Р-171 (шаг 41): в ТЕНИ цена на витрине не двигается, поэтому сравнение с ней даёт «изменить» на каждом опросе. Живой
+ * прогон шага 41 это и показал: 99 удержанных записей на предложение за сутки. Движок сравнивает предложение ещё и с
+ * уже УДЕРЖАННЫМ — и второй раз то же самое не предлагает.
+ */
+test('шаг 41: то же предложение, уже удержанное тенью, даёт NO_OP с названной причиной', () => {
+  const base = input(matchBuybox());
+  // В тени текущей цены нет вовсе (в канал ничего не уходило), а удержанное предложение есть
+  const first = runStrategy({ ...base, currentPriceMinor: null });
+  assert.equal(first.kind, 'INTENT');
+  if (first.kind !== 'INTENT') return;
+  assert.equal(first.intent.intentClass, 'CHANGED', 'первое предложение тени — изменение');
+  const proposed = first.intent.proposedMinor;
+
+  const again = runStrategy({ ...base, currentPriceMinor: null, shadowLastProposedMinor: proposed });
+  assert.equal(again.kind, 'INTENT');
+  if (again.kind !== 'INTENT') return;
+  assert.equal(again.intent.intentClass, 'NO_OP', 'то же предложение второй раз — не изменение');
+  assert.equal(again.intent.reason.code, 'SHADOW_ALREADY_PROPOSED');
+  assert.deepEqual(again.intent.reason.params.heldMinor, proposed, 'причина называет удержанную цену');
+
+  // Положительный контроль [Р-94]: ДРУГОЕ предложение тень не глотает
+  const moved = runStrategy({ ...base, currentPriceMinor: null, shadowLastProposedMinor: proposed + 500 });
+  assert.equal(moved.kind, 'INTENT');
+  if (moved.kind !== 'INTENT') return;
+  assert.equal(moved.intent.intentClass, 'CHANGED', 'изменившееся предложение по-прежнему изменение');
+});

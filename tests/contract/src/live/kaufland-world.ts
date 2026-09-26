@@ -104,6 +104,11 @@ export async function kauflandLiveWorld(input: {
   params?: KauflandChannelModelSpec['params'];
   /** Р-151: тенант — демо; помечается в базе */
   demo?: boolean;
+  /**
+   * Шаг 41 [Р-169, Р-170]: режим записи аккаунта мира. `SHADOW` — путь решения работает целиком, а в канал не уходит
+   * ничего: именно так живой прогон шага 41 проверяет, что вызовов записи к симулятору НОЛЬ.
+   */
+  writeMode?: 'SHADOW' | 'LIVE';
   /** Существующие пользователи, их адреса и приём приглашений — как у посева стенда: существующий человек входит в тенант
    *  владельцем только своим адресом, остальными ролями — приглашением (находка 5 ревью шага 16) */
   memberUsers?: Readonly<Record<string, string>>;
@@ -174,6 +179,7 @@ export async function kauflandLiveWorld(input: {
   const seeded = await seedPricingWorld(input.appPool, {
     fixtureTenantId: tenantFixture, fixtureChannelAccountId: accountFixture, marketplaces, clock: startIso, seed: pricing,
     provisioningPool: input.provisioningPool, adminPool: input.adminPool, ...(input.demo ? { demo: true } : {}),
+    ...(input.writeMode ? { writeMode: input.writeMode } : {}),
     ...(input.memberUsers ? { memberUsers: input.memberUsers } : {}), ...(input.memberEmails ? { memberEmails: input.memberEmails } : {}),
     ...(input.joinMember ? { joinMember: input.joinMember } : {}),
   });

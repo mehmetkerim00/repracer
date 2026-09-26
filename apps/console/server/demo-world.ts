@@ -42,6 +42,8 @@ export interface DemoWorldOptions {
   joinMember: Parameters<typeof import('@repracer/contract-tests/live').demoWorld>[0]['joinMember'];
   /** Сколько виртуальных часов гонять мир вперёд (на настоящих часах — столько же настоящих) */
   hours?: number;
+  /** Шаг 41 [Р-169]: режим записи аккаунта демо; `SHADOW` — ни одной записи в канал */
+  writeMode?: 'SHADOW' | 'LIVE';
   log?: (message: string) => void;
 }
 
@@ -49,7 +51,7 @@ export async function startDemoWorld(options: DemoWorldOptions): Promise<Running
   const { pools, tag } = options;
   const log = options.log ?? ((m: string) => console.log(m));
   const { demoWorld, DEMO_OFFERS, DEMO_COMPETITORS_PER_OFFER } = await import('@repracer/contract-tests/live');
-  const { PgPricingStore, PgStockStore } = await import('@repracer/pricing-store-pg');
+  const { PgPricingStore, PgStockStore, PgShadowStore } = await import('@repracer/pricing-store-pg');
   const { createStockPipeline } = await import('@repracer/stock-sync');
   const { runConfiguredWorker } = await import('./bulk-worker.ts');
 
@@ -58,6 +60,7 @@ export async function startDemoWorld(options: DemoWorldOptions): Promise<Running
     provisioningPool: pools.provisioning, dispatcherPool: pools.dispatcher, schedulerPool: pools.scheduler,
     exporterPool: pools.exporter, stockPool: pools.stock,
     memberUsers: options.memberUsers, memberEmails: options.memberEmails, joinMember: options.joinMember,
+    ...(options.writeMode ? { writeMode: options.writeMode } : {}),
     wallClock: true,
   });
   const seeded = demo.live.seeded;
@@ -76,7 +79,10 @@ export async function startDemoWorld(options: DemoWorldOptions): Promise<Running
   const world = {
     id: descriptor.id, title: descriptor.title, description: descriptor.description,
     tenantId: seeded.tenantId, accounts, identityTenantId: seeded.tenantId, membershipAlias: (id: string) => id, failures: [],
-    store: store as never, stock, stockPipeline, pipeline: demo.live.pipelineForDbIds() as never,
+    store: store as never, stock, stockPipeline,
+    // Шаг 41 [Р-169]: теневой режим читается у живого мира — режим лежит в базе у аккаунта
+    shadow: new PgShadowStore({ adminPool: pools.admin }),
+    pipeline: demo.live.pipelineForDbIds() as never,
     clock: { iso: nowIso, nowMs: () => demo.clock.nowMs() } as never,
     callContext: (channelAccountId: string) => ({ tenantId: seeded.tenantId as never, channelAccountId: channelAccountId as never, correlationId: 'console-demo', deadline: nowIso() }),
     view: async (viewer: unknown) => ({

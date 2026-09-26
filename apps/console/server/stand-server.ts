@@ -6,7 +6,7 @@ import {
   boundsDiffView, boundsView, bulkJobsView, bulkJobView, can, canCancelBulkJob, channelNotes, onboardingView, complianceView, fingerprint, costImportView, currentStrategies, listQuery, MAX_SCOPES, OFFER_CHOICES, pageOf, parseListQuery, type ListQuery, discountCheckView, dangerousReport, decisionListView, decisionTrace, describe, expandBoundsEdit, importTargets, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, scopeById, unitOf,
   parseStrategyDraft, planStop, priceFeed, productList, rejectedView, REPORT_PERIODS_DAYS, stopView, strategiesView,
   type Locale, type Messages, type StandWorld, type StopTarget, type Viewer,
-  productPage, clampOffset, feedPageQuery, REJECTED_WINDOW_DAYS, stockView, stockDivergencesView,
+  productPage, clampOffset, feedPageQuery, REJECTED_WINDOW_DAYS, stockView, stockDivergencesView, shadowView,
 } from '@repracer/console-model';
 import { buildPreview, readTable, suggestMapping, TABLE_ENCODINGS } from '@repracer/cost-import';
 import type { BulkJobInput, DiscountAnnouncementInput } from '@repracer/pricing-pipeline';
@@ -384,6 +384,19 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
 
     if (req.method === 'GET') {
       switch (screen) {
+        /**
+         * Шаг 41 [Р-169…Р-171]: теневой режим. Сводку считает база агрегатом [Р-154], список удержанных записей идёт
+         * страницей. У мира сценария в памяти режима нет — честный 404 вместо выдуманных чисел.
+         */
+        case 'shadow': {
+          if (param !== null) return fail(404, 'NOT_FOUND', s.notFound);
+          if (!live.shadow) return fail(404, 'NOT_FOUND', s.notFound);
+          const query = parseListQuery(url.searchParams);
+          if (!query) return fail(400, 'BAD_PAGE', s.badRequest);
+          const probe = await live.shadow.shadowPage(world.tenantId, live.clock.iso(), { offset: 0, limit: 1 });
+          const clamped = { ...query, offset: clampOffset(query, probe.total) };
+          return ok(shadowView(world, await live.shadow.shadowPage(world.tenantId, live.clock.iso(), clamped), clamped, m));
+        }
         // Шаг 35 [Р-153]: остатки — страницей по товарам, сводка агрегатом, расхождения — отдельным списком
         case 'stock': {
           if (param === 'divergences') return ok(stockDivergencesView(world, await live.stock.stockDivergences(world.tenantId, 200), m));
@@ -566,6 +579,35 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
      * тот, кто ведёт каталог или цены. Файл остатков — задание [Р-139]; включение — один запрос: единицы и записи
      * создаются множественными операторами, а отправляет их диспетчер [Р-64].
      */
+    /**
+     * Шаг 41 [Р-170]: переключение режима записи. Консоль НЕ решает, кому это можно: она передаёт базе членство,
+     * пользователя сессии, второй фактор и набранное подтверждение, а отказ показывает тот, что пришёл от базы [Р-94].
+     */
+    if (screen === 'shadow' && param === 'mode') {
+      if (!live.shadow) return fail(404, 'NOT_FOUND', s.notFound);
+      /**
+       * Находка 5 ревью шага 41: маршрут был открыт любому, кто вошёл, — включая ПУБЛИЧНОГО гостя демо [Р-160], и отказ
+       * базы приходил 500-м. Право на управление тенантом проверяется здесь, а роль владельца для перехода в бой —
+       * по-прежнему в базе: консоль не решает, кому это можно, но и не пускает заведомо чужих.
+       */
+      if (!can(viewer.role, 'MANAGE_TENANT')) return fail(403, 'FORBIDDEN', m.ui.shadow.errors.notOwner);
+      const toMode = body.toMode === 'LIVE' ? 'LIVE' : body.toMode === 'SHADOW' ? 'SHADOW' : null;
+      if (typeof body.channelAccountId !== 'string' || toMode === null) return fail(400, 'BAD_REQUEST', s.badRequest);
+      const outcome = await live.shadow.switchWriteMode(world.tenantId, {
+        channelAccountId: body.channelAccountId, toMode,
+        ...(typeof body.typedConfirmation === 'string' ? { typedConfirmation: body.typedConfirmation } : {}),
+        ...(typeof body.note === 'string' ? { note: body.note } : {}),
+        membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr),
+      });
+      const e = m.ui.shadow.errors;
+      if (outcome.status === 'SWITCHED') return ok({ mode: outcome.mode, message: outcome.mode === 'LIVE' ? e.live : e.shadow });
+      if (outcome.status === 'MFA_REQUIRED') return fail(403, 'MFA_REQUIRED', e.mfa);
+      if (outcome.status === 'NOT_OWNER') return fail(403, 'FORBIDDEN', e.notOwner);
+      if (outcome.status === 'CONFIRMATION_MISMATCH') return fail(400, 'CONFIRMATION_MISMATCH', e.confirmation);
+      if (outcome.status === 'MODE_MISMATCH') return fail(409, 'MODE_MISMATCH', e.modeMismatch);
+      return fail(403, 'FORBIDDEN', s.forbidden);
+    }
+
     if (screen === 'stock' && param !== null) {
       if (!can(viewer.role, 'MANAGE_CATALOG')) return fail(403, 'FORBIDDEN', m.ui.stock.noRight);
       const actor = { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) };

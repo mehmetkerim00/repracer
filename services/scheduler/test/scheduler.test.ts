@@ -244,11 +244,13 @@ test('Р-133 (шаг 28): внутренняя работа повторяетс
     stock: { syncOrders: async () => ({ lines: 0, created: 0, consumed: 0, released: 0, unknownOffers: 0, writes: 0 }) },
     // Шаг 36 [Р-156]: доставка алертов — работа каталога и появляется вместе со своей зависимостью
     alertDelivery: { deliver: async () => ({ immediate: 0, digests: 0, delivered: 0, failed: 0 }) },
+    // Шаг 41 [Р-171]: недельный дайджест тени — так же: работа каталога появляется вместе со своей зависимостью
+    shadowDigest: { send: async () => ({ letters: 0, quiet: 0, noRecipient: 0, failed: 0 }) },
   }).jobs('2026-09-17T10:00:00.000Z');
   const kinds = new Map(specs.map((spec) => [spec.name, spec.retryKind]));
   assert.deepEqual([...kinds.keys()].sort(), [...JOB_CATALOG.map((j) => j.name)].sort(), 'у каждой работы каталога есть спецификация');
   const internal = [...kinds.entries()].filter(([, kind]) => kind === 'INTERNAL').map(([name]) => name).sort();
-  assert.deepEqual(internal, ['alerts-deliver', 'analytics-export-day', 'notification-loss-review', 'partitions', 'price-days-close', 'retention'],
+  assert.deepEqual(internal, ['alerts-deliver', 'analytics-export-day', 'notification-loss-review', 'partitions', 'price-days-close', 'retention', 'shadow-digest'],
     'внутренние — те, что ходят только в наши хранилища; остальные обращаются к каналу [Р-133]');
 });
 

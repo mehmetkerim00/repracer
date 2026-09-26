@@ -461,6 +461,9 @@ SELECT pg_temp.expect_fail('append-only tenant_data.cost_import', $q$
 -- TRUNCATE пакетов вместе со строками себестоимости: без CASCADE база отказывает внешним ключом, поэтому проверяется именно страж
 SELECT pg_temp.expect_fail('truncate tenant_data.cost_import', $q$ TRUNCATE tenant_data.cost_import CASCADE $q$,
   'TRUNCATE of tenant_data.cost_import is forbidden');
+-- Шаг 41 [Р-170]: журнал переключений теневого режима — тоже append-only, и TRUNCATE его не берёт
+SELECT pg_temp.expect_fail('truncate tenant_data.channel_write_mode_change', $q$ TRUNCATE tenant_data.channel_write_mode_change $q$,
+  'TRUNCATE of tenant_data.channel_write_mode_change is forbidden');
 SELECT pg_temp.expect_fail('truncate tenant_data.price_daily_system_correction', $q$ TRUNCATE tenant_data.price_daily_system_correction $q$,
   'TRUNCATE of tenant_data.price_daily_system_correction is forbidden');
 SELECT pg_temp.expect_fail('append-only tenant_data.price_daily_system_correction', $q$

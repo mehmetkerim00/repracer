@@ -3,7 +3,7 @@ import { after, test } from 'node:test';
 import type { ChannelAdapter, FieldWrite } from '@repracer/channel-port';
 import type { MemorySeedScope, ScopeEvaluationContext } from '@repracer/pricing-pipeline';
 import type { PriceDecisionDraft, PriceIntentDraft } from '@repracer/pricing-model';
-import { createWriteDispatcher, type ScopeDispatchReport } from '@repracer/write-dispatcher';
+import { createWriteDispatcher, DEFAULT_RETRY_POLICY, type ScopeDispatchReport } from '@repracer/write-dispatcher';
 import { createPool, inTenant, PgPricingStore, PgWriteQueueStore, seedPricingWorld } from '../src/index.ts';
 import { engineCost, explained } from './drafts.ts';
 
@@ -309,4 +309,60 @@ test('Р-64: events lost — the safety sweep alone delivers every latest price'
   assert.equal(result.orderViolations, 0);
   assert.equal(result.endedWithoutReason, 0);
   assert.ok(result.sweepFound > 0, 'the workload should have queued writes for the sweep to find');
+});
+
+/**
+ * Р-169 (шаг 41), ЧЕТВЁРТЫЙ путь: запись ушла в канал БОЕВОЙ, канал отказал, а к моменту повтора аккаунт уже в тени.
+ * Захват записи отвергает страж режима — и это должно стать ЗАВЕРШЕНИЕМ с названной причиной, а не исключением: иначе
+ * обход диспетчера падает на каждом круге, а запись висит без причины (находка 7 шага 15 в новой форме).
+ */
+test('Р-169: повтор записи после отказа канала в тени завершается причиной, а не исключением', { skip }, async () => {
+  const seeds = [scopeSeed(7410)];
+  const world = await seedPricingWorld(pool!, { provisioningPool: provisioning!, adminPool: admin!,
+    fixtureTenantId: '10000000-0000-4000-8000-000000004100', fixtureChannelAccountId: ACCOUNT,
+    marketplaces: ['de'], clock: now(), seed: { scopes: seeds } });
+  const tenantId = world.tenantId;
+  const store = new PgPricingStore(pool!);
+  const queue = new PgWriteQueueStore(pool!, { scanPool: scanPool! });
+  const writeScopeId = world.ids.toDb(seeds[0]!.writeScopeId);
+
+  const loaded = await store.loadScopeContext(tenantId, writeScopeId, now());
+  assert.ok(loaded, 'единица записи видна');
+  const scope = loaded.context.scope;
+  const committed = await store.commitEvaluation(tenantId, {
+    key: { channelAccountId: scope.channelAccountId, marketplace: scope.marketplace, channelProductRef: scope.channelProductRef, condition: scope.condition },
+    now: now(), decisions: [explained(approved(loaded.context, 1700))],
+  });
+  assert.equal(committed.status, 'COMMITTED');
+
+  /**
+   * Запись УЖЕ в полёте: путь решения отправляет свою запись сам (шаг 27), поэтому аккаунт был боевым в момент отправки —
+   * посев объявляет боевой режим явно [Р-170]. Захват это и сообщает.
+   */
+  const claimed = await queue.claimNext(tenantId, writeScopeId, now(), DEFAULT_RETRY_POLICY);
+  assert.equal(claimed.kind, 'IN_FLIGHT', `состояние записи: ${JSON.stringify(claimed)}`);
+  if (claimed.kind !== 'IN_FLIGHT') return;
+
+  // Пока запись в полёте, владелец уводит аккаунт в тень [Р-170]
+  await inTenant(admin!, tenantId, async (tx) => {
+    await tx.query(
+      `INSERT INTO tenant_data.channel_write_mode_change (tenant_id, channel_account_id, from_mode, to_mode, changed_by_membership_id, note)
+       VALUES ($1, $2, 'LIVE', 'SHADOW', $3, 'тест: уход в тень при записи в полёте')`,
+      [tenantId, scope.channelAccountId, world.ownerMembershipId]);
+  }, world.userId);
+
+  // Канал отказал — запись ждёт повтора
+  const failed = await queue.recordOutcome(tenantId, claimed.write, { kind: 'RETRY', error: { code: 'KFL_C05', retryAt: null } } as never, now(), DEFAULT_RETRY_POLICY);
+  assert.equal(failed.status, 'FAILED', `итог канала: ${JSON.stringify(failed)}`);
+
+  // Повтор: страж режима отказывает, и диспетчер завершает запись НАЗВАННОЙ причиной
+  const retried = await queue.claimNext(tenantId, writeScopeId, new Date(Date.now() + 600_000).toISOString(), DEFAULT_RETRY_POLICY);
+  assert.equal(retried.kind, 'ENDED', `повтор в тени: ${JSON.stringify(retried)}`);
+  if (retried.kind !== 'ENDED') return;
+  assert.equal(retried.status, 'DISCARDED_STALE');
+  assert.equal(retried.reason.code, 'WRITE_HELD_IN_SHADOW', 'причина названа: удержано тенью');
+  const [row] = (await inTenant(pool!, tenantId, async (tx) => (await tx.query(
+    `SELECT final_status, end_reason FROM tenant_data.channel_write_history WHERE tenant_id = $1 AND channel_write_id = $2`,
+    [tenantId, claimed.write.channelWriteId])).rows));
+  assert.equal(row?.end_reason, 'WRITE_HELD_IN_SHADOW', 'та же причина в истории записей');
 });

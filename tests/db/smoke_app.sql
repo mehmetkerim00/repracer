@@ -104,8 +104,10 @@ COMMIT;
 -- ---------------------------------------------------------------- Kaufland: scopes, min_price, Smart Pricing
 BEGIN;
 SELECT set_config('app.tenant_id', :tA, true), set_config('app.user_id', :uA, true) \gset
-INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, external_account_id, marketplaces, credentials_ref, connected_by_membership_id)
-VALUES (:tA, 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'seller-A', ARRAY['de','cz'], 'vault://a/kaufland', :mA);
+-- Шаг 41 [Р-170]: аккаунты смоук-мира — БОЕВЫЕ явно. Умолчание `SHADOW` держит записи в тени, и проверки отправки,
+-- бюджета и истории цен молча проверяли бы тень: их записи уходили бы в историю ещё до утверждений
+INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, external_account_id, marketplaces, credentials_ref, connected_by_membership_id, write_mode)
+VALUES (:tA, 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'seller-A', ARRAY['de','cz'], 'vault://a/kaufland', :mA, 'LIVE');
 INSERT INTO tenant_data.product (tenant_id, product_id, sku, kind) VALUES (:tA, 'a5000000-0000-0000-0000-000000000001', 'A-1', 'SIMPLE');
 INSERT INTO tenant_data.write_scope (tenant_id, write_scope_id, channel_account_id, channel, field, product_id, capability_id, capability_version,
   scope_kind, scope_key, currency, price_basis, tax_regime, pricing_mode)
@@ -1086,8 +1088,8 @@ ROLLBACK;
 -- ---------------------------------------------------------------- Amazon side effects, stock
 BEGIN;
 SELECT set_config('app.tenant_id', :tA, true), set_config('app.user_id', :uA, true) \gset
-INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, region, external_account_id, credentials_ref, connected_by_membership_id)
-VALUES (:tA, 'a4000000-0000-0000-0000-000000000002', 'AMAZON', 'EU', 'A2SPID', 'vault://a/amazon', :mA);
+INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, region, external_account_id, credentials_ref, connected_by_membership_id, write_mode)
+VALUES (:tA, 'a4000000-0000-0000-0000-000000000002', 'AMAZON', 'EU', 'A2SPID', 'vault://a/amazon', :mA, 'LIVE');
 INSERT INTO tenant_data.stock_allocation (tenant_id, scope_type, channel_account_id, buffer_units, version, created_by_membership_id)
 VALUES (:tA, 'CHANNEL_ACCOUNT', 'a4000000-0000-0000-0000-000000000002', 2, 1, :mA);
 SELECT pg_temp.expect_fail('Amazon EU quantity sync without side-effects ack (INV-11)', $q$
@@ -1209,8 +1211,8 @@ COMMIT;
 -- ---------------------------------------------------------------- eBay: migration consent, irreversibility, budget
 BEGIN;
 SELECT set_config('app.tenant_id', :tA, true), set_config('app.user_id', :uA, true) \gset
-INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, external_account_id, credentials_ref, connected_by_membership_id)
-VALUES (:tA, 'a4000000-0000-0000-0000-000000000003', 'EBAY', 'ebay-user-a', 'vault://a/ebay', :mA);
+INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, external_account_id, credentials_ref, connected_by_membership_id, write_mode)
+VALUES (:tA, 'a4000000-0000-0000-0000-000000000003', 'EBAY', 'ebay-user-a', 'vault://a/ebay', :mA, 'LIVE');
 INSERT INTO tenant_data.offer_mapping (tenant_id, offer_mapping_id, product_id, channel_account_id, channel, marketplace, channel_offer_key, external_sku, external_listing_id, ebay_listing_format, ebay_migration_status, status)
 VALUES (:tA, 'ad000000-0000-0000-0000-000000000001', 'a5000000-0000-0000-0000-000000000001', 'a4000000-0000-0000-0000-000000000003', 'EBAY', 'EBAY_DE', 'L1/A-1', 'A-1', 'L1', 'FIXED_PRICE', 'REQUIRED', 'MIGRATION_REQUIRED');
 SELECT pg_temp.expect_fail('auction marked migratable', $q$

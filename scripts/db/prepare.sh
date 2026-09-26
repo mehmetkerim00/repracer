@@ -33,13 +33,15 @@ PGUSER=svc_admin "${PSQL[@]}" -d "$DB" -f tests/db/smoke_onboarding.sql
 PGUSER=svc_onboarding "${PSQL[@]}" -d "$DB" -f tests/db/smoke_guest.sql
 PGUSER=svc_admin "${PSQL[@]}" -d "$DB" -f tests/db/smoke_guest_admin.sql
 "${PSQL[@]}" -d "$DB" -f tests/db/smoke_r65.sql
-# Р-103: у каждой append-only таблицы есть строка, изменение отклоняет триггер неизменяемости (откатываемая транзакция)
-"${PSQL[@]}" -d "$DB" -f tests/db/smoke_append_only.sql
 # Р-102: роль синхронизации остатка — только остатки и резервации
 PGUSER=svc_stock "${PSQL[@]}" -d "$DB" -f tests/db/smoke_stock.sql
 # Шаг 35 [Р-152]: путь остатков — административной ролью (остатки ведёт человек)
 PGUSER=svc_admin "${PSQL[@]}" -d "$DB" -f tests/db/smoke_stock_path.sql
 # Шаг 36 [Р-156]: алерт и его доставка — административной ролью (события поднимают процессы, читает доставка)
+# Шаг 41 [Р-169…Р-171]: теневой режим — административной ролью (переключает человек), после проверок отправки
+PGUSER=svc_admin "${PSQL[@]}" -d "$DB" -f tests/db/smoke_shadow.sql
+# Р-103: у каждой append-only таблицы есть строка, изменение отклоняет триггер неизменяемости (откатываемая транзакция)
+"${PSQL[@]}" -d "$DB" -f tests/db/smoke_append_only.sql
 PGUSER=svc_admin "${PSQL[@]}" -d "$DB" -f tests/db/smoke_alerts.sql
 PGUSER=svc_alert_delivery "${PSQL[@]}" -d "$DB" -f tests/db/smoke_alerts_delivery.sql
 # Шаг 40 [Р-165]: панель оператора платформы — своей ролью, у которой нет прав ни на одну таблицу

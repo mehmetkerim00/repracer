@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { InMemoryStockStore, type MemoryStockOffer, type StockPipeline, type StockStore } from '@repracer/stock-sync';
+import type { ShadowModeChange, ShadowModeResult, ShadowPage } from '@repracer/pricing-store-pg';
 import type { AdapterCallContext } from '@repracer/channel-port';
 import type { StandAccount, StandWorld, Viewer } from '@repracer/console-model';
 import { MemoryIdentityDirectory } from '@repracer/identity';
@@ -81,6 +82,11 @@ export interface LiveWorld {
   stock: StockStore;
   /** Конвейер остатков: пересчёт и отправка записей (заказы канала читает планировщик) */
   stockPipeline?: StockPipeline;
+  /**
+   * Шаг 41 [Р-169…Р-171]: теневой режим. Есть только у ЖИВЫХ миров на PostgreSQL: режим — свойство аккаунта в базе, и у
+   * мира сценария в памяти его нет. Экран тени у такого мира отвечает 404, а не выдумывает числа.
+   */
+  shadow?: ShadowReader;
   pipeline: PricingPipeline;
   clock: VirtualClock;
   callContext(channelAccountId: string): AdapterCallContext;
@@ -95,6 +101,12 @@ function accountsOf(scenario: Scenario): StandAccount[] {
     if (!accounts.some((x) => x.channelAccountId === a.channelAccountId)) accounts.push({ channelAccountId: a.channelAccountId, channel: a.channel, marketplaces: [...a.marketplaces], haltRelease: haltReleaseOf(a.channel) });
   }
   return accounts;
+}
+
+/** Узкий порт теневого режима: страница со сводкой и переключение режима [Р-169, Р-170] */
+export interface ShadowReader {
+  shadowPage(tenantId: string, now: string, query: { offset: number; limit: number; sinceDays?: number }): Promise<ShadowPage>;
+  switchWriteMode(tenantId: string, change: ShadowModeChange): Promise<ShadowModeResult>;
 }
 
 export interface StandOptions {

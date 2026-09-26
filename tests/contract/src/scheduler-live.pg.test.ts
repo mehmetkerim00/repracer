@@ -7,6 +7,8 @@ import { after, before, test } from 'node:test';
  */
 let currentJob: string | null = null;
 const assertionsOf = new Map<string, number>();
+const digestMail = new FakeMail();
+let shadowDigest: ReturnType<typeof createShadowDigest>;
 const assert: typeof strictAssert = new Proxy(strictAssert, {
   get(target, key, receiver) {
     const value = Reflect.get(target, key, receiver) as unknown;
@@ -20,7 +22,9 @@ const assert: typeof strictAssert = new Proxy(strictAssert, {
 
 import { createPool, PgAlertDeliveryStore, PgAlertSink, type PgPool } from '@repracer/pricing-store-pg';
 import { createAlertDelivery } from '@repracer/alert-delivery';
+import { createShadowDigest } from '@repracer/alert-delivery/shadow-digest';
 import { FakeMail } from '@repracer/alert-delivery/testing';
+import { PgShadowDigestStore } from '@repracer/pricing-store-pg';
 import { createScheduler, JOB_CATALOG, jobSource, PgSchedulerState, pgJobDeps, runScheduler, type JobDeps } from '@repracer/scheduler';
 import { createIsolatedDatabase, requireEnv } from '../../../packages/pricing-store-pg/test/isolated-db.ts';
 import { VirtualClock } from './harness/world.ts';
@@ -144,6 +148,16 @@ before(async () => {
     locale: 'de', operatorEmail: 'betrieb@example.invalid', digestSeconds: 3600,
   });
   deps.alertDelivery = delivery;
+  /**
+   * Шаг 41 [Р-171]: недельный дайджест тени — работа каталога, и появляется она вместе со своей зависимостью. В этом мире
+   * ОБА аккаунта боевые, поэтому наблюдаемое поведение здесь отрицательное: писать некому. Положительное (письмо с
+   * числами) утверждает свой прогон — apps/console/test/shadow-live.pg.test.ts.
+   */
+  shadowDigest = createShadowDigest({
+    store: new PgShadowDigestStore(db.pool('svc_alert_delivery', 1)), mail: digestMail,
+    now: () => new Date().toISOString(), log: () => undefined,
+  });
+  deps.shadowDigest = shadowDigest;
   const scheduler = createScheduler({ state: new PgSchedulerState(schedulerPool), source: jobSource(deps), owner: 'live-1', now: () => clock.iso(),
     alerts: { raise: async (a) => {
       alerts.push({ ...(a as unknown as Live["alerts"][number]), atMs: clock.nowMs() });
@@ -318,6 +332,19 @@ observes('alerts-deliver', 'Р-156 (шаг 36): алерты суток дост
   assert.ok(mail.sent.every((x) => x.to.includes('@') && x.subject.includes('repracer') && x.text.length > 40),
     `каждое письмо названо и не пусто: ${JSON.stringify(mail.sent[0])}`);
   console.log(JSON.stringify({ alerts: a, letters: mail.sent.length, subjects: [...new Set(mail.sent.map((x) => x.subject.slice(0, 60)))].slice(0, 5) }));
+});
+
+observes('shadow-digest', 'Р-171 (шаг 41): в мире без теневых аккаунтов дайджест не пишет никому, и работа не проваливается', async () => {
+  const job = jobOf('shadow-digest');
+  assert.ok(job.runs > 0, `работа дайджеста запускалась: ${JSON.stringify(job)}`);
+  assert.equal(job.failed, 0, 'ни один заход дайджеста не провалился');
+  // Оба аккаунта мира боевые — целей у дайджеста нет, и это ВИДНО числом, а не отсутствием письма
+  const [m] = (await observer.query(`SELECT count(*)::int AS shadowed FROM tenant_data.channel_account WHERE write_mode = 'SHADOW'`)).rows;
+  assert.equal(Number(m.shadowed), 0, 'в мире прогона нет теневых аккаунтов');
+  const outcome = await shadowDigest.send();
+  assert.deepEqual(outcome, { letters: 0, quiet: 0, noRecipient: 0, failed: 0 }, `дайджест в боевом мире: ${JSON.stringify(outcome)}`);
+  assert.equal(digestMail.sent.length, 0, 'писем дайджеста не было: писать некому');
+  console.log(JSON.stringify({ shadowDigest: { runs: job.runs, failed: job.failed, letters: digestMail.sent.length } }));
 });
 
 test('Р-128: о каждой работе планировщика ВЫПОЛНЯЕТСЯ хотя бы одно утверждение', () => {

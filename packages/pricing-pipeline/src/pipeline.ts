@@ -229,6 +229,8 @@ export function createPricingPipeline(deps: PipelineDeps) {
       cost: sc.cost,
       bounds: { minMinor: bounds.min.amountMinor, maxMinor: bounds.max.amountMinor },
       currentPriceMinor: scope.currentPriceMinor,
+      // Р-171: в тени сравнение идёт и с уже удержанным предложением — иначе оно повторялось бы на каждом опросе
+      ...(scope.shadowLastProposedMinor === null || scope.shadowLastProposedMinor === undefined ? {} : { shadowLastProposedMinor: scope.shadowLastProposedMinor }),
       now,
       trigger,
     });
@@ -286,6 +288,11 @@ export function createPricingPipeline(deps: PipelineDeps) {
     report.decisionId = committed.decisionId;
     const write = committed.write;
     if (!write) {
+      // Р-169: тень — своя причина с готовым текстом DE/EN, а не «ждёт впереди идущей записи» (находка 7 ревью шага 41)
+      if (committed.heldInShadow === true) {
+        report.stages.push({ stage: 'DISPATCH_PLAN', outcome: 'HELD_IN_SHADOW', reason: { code: 'WRITE_HELD_IN_SHADOW', params: {} } });
+        return;
+      }
       if (committed.pendingWriteId) {
         report.channelWriteId = committed.pendingWriteId;
         report.stages.push({ stage: 'DISPATCH_PLAN', outcome: 'QUEUED_BEHIND_IN_FLIGHT', reason: { code: 'WRITE_QUEUED_BEHIND_IN_FLIGHT', params: {} } });

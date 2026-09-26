@@ -40,12 +40,14 @@ export interface JobConfig {
   maintenanceEverySeconds: number;
   /** Р-156: как часто заходит доставка алертов; дайджест WARNING всё равно уходит раз в час */
   alertsDeliverEverySeconds: number;
+  /** Шаг 41 [Р-171]: период недельного дайджеста тени */
+  shadowDigestEverySeconds: number;
 }
 
 export const DEFAULT_JOB_CONFIG: JobConfig = {
   pollEverySeconds: 60, pollBudgetRps: 10, pollMaxQueries: 600, lossReviewEverySeconds: 300, lossGraceSeconds: DEFAULT_LOSS_GRACE_SECONDS,
   amazonCallSeconds: 31, amazonBatch: 20, amazonCircleWarnHours: 24, haltReviewEverySeconds: 300, discoveryEverySeconds: 86_400, orderLinesEverySeconds: 300,
-  exportOffsetSeconds: 1_800, exportLookbackDays: 13, maintenanceEverySeconds: 3_600, alertsDeliverEverySeconds: 60,
+  exportOffsetSeconds: 1_800, exportLookbackDays: 13, maintenanceEverySeconds: 3_600, alertsDeliverEverySeconds: 60, shadowDigestEverySeconds: 7 * 86_400,
 };
 
 export interface JobDeps {
@@ -80,6 +82,8 @@ export interface JobDeps {
    * живёт только в базе и считается недоставленным; процесс без настроенной почты не стартует, если её не выключили явно.
    */
   alertDelivery?: { deliver(): Promise<{ immediate: number; digests: number; delivered: number; failed: number }> };
+  /** Шаг 41 [Р-171]: недельный дайджест теневого режима — те же числа, что на экране, письмом владельцу */
+  shadowDigest?: { send(): Promise<{ letters: number; quiet: number; noRecipient: number; failed: number }> };
   /**
    * Шаг 35 [Р-25, Р-152]: заказы канала → резервации → пересчёт публикуемого остатка → записи. Без хранилища остатков в
    * процессе работы нет; процесс без роли остатков — конфигурация, а не молчаливый пропуск.
@@ -106,6 +110,7 @@ export const JOB_CATALOG: JobCatalogEntry[] = [
   { name: 'price-days-close', scope: 'GLOBAL', when: 'каждый час', missed: 'LATEST: функция закрывает все незакрытые сутки по очереди; сырьё цен не удаляется, пока сутки не закрыты' },
   { name: 'partitions', scope: 'GLOBAL', when: 'каждый час', missed: 'LATEST: секции созданы на 3 суток вперёд; простой дольше — отказ записи снимков и цен (CRITICAL через 2 суток)' },
   { name: 'alerts-deliver', scope: 'GLOBAL', when: 'каждую минуту', missed: 'LATEST: письма уходят позже; CRITICAL, поднятый во время простоя, ждёт следующего запуска — алерт остаётся в базе без отметки доставки, и это видно запросом [Р-156]' },
+  { name: 'shadow-digest', scope: 'GLOBAL', when: 'раз в неделю', missed: 'LATEST: дайджест уходит позже; отметки доставки у него НЕТ (он отчёт, а не событие [Р-156]), поэтому пропуск недели виден только по журналу запусков' },
   { name: 'retention', scope: 'GLOBAL', when: 'каждый час', missed: 'LATEST: удаление по сроку откладывается, данные хранятся дольше — PostgreSQL растёт; неподтверждённые резервации висят дольше TTL, и доступный остаток занижен всё это время; алерт о подтверждённой резервации старше 14 суток [Р-30] приходит позже' },
 ];
 
@@ -206,6 +211,18 @@ export function jobSource(deps: JobDeps): JobSource {
             // Провал отправки работу не роняет: попытка засчитана в базе, алерт остаётся недоставленным и уйдёт следующим заходом
             const r = await delivery.deliver();
             return { items: r.delivered };
+          },
+        });
+      }
+      if (deps.shadowDigest) {
+        const digest = deps.shadowDigest;
+        specs.push({
+          name: 'shadow-digest', scope: null, retryKind: 'INTERNAL', intervalSeconds: cfg.shadowDigestEverySeconds, catchUp: 'LATEST',
+          firstDueAt: immediately, lagWarningSeconds: hours(24), lagCriticalSeconds: hours(72), leaseSeconds: 600,
+          async run() {
+            // Провал отправки работу не роняет: следующий заход соберёт те же числа заново — у дайджеста нет состояния
+            const r = await digest.send();
+            return { items: r.letters };
           },
         });
       }
