@@ -24,7 +24,7 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec test/console.test.ts test/static.test.ts test/console.pg.test.ts test/console-live.pg.test.ts test/onboarding-live.pg.test.ts test/stock-only-live.pg.test.ts test/guest-demo-live.pg.test.ts test/demo-day-live.pg.test.ts test/shadow-live.pg.test.ts",
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec test/console.test.ts test/static.test.ts test/console.pg.test.ts test/console-live.pg.test.ts test/onboarding-live.pg.test.ts test/stock-only-live.pg.test.ts test/guest-demo-live.pg.test.ts test/demo-day-live.pg.test.ts test/shadow-live.pg.test.ts test/us-shadow-live.pg.test.ts",
     "bulk-worker": "node --experimental-strip-types --disable-warning=ExperimentalWarning server/bulk-worker.ts"
   },
   "devDependencies": {

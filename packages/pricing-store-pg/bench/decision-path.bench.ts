@@ -222,8 +222,9 @@ async function seedWorld(pool: PgPool): Promise<Omit<BenchWorld, 'scopes'>> {
       steps[label] = round((performance.now() - t) / 1000);
     };
     await step('account',
-      `INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, external_account_id, marketplaces, credentials_ref, connected_by_membership_id)
-       VALUES ($1, $2, 'KAUFLAND', $3, '{de,at}', 'secret-ref:synthetic', $4)`, [tenantId, accountId, `syn-bench-${tenantId.slice(0, 8)}`, membershipId]);
+      // Замер мерит БОЕВОЙ путь: в тени запись рождается завершённой [Р-169] и диспетчер её не видит — измерялось бы не то
+      `INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, external_account_id, marketplaces, credentials_ref, connected_by_membership_id, write_mode)
+       VALUES ($1, $2, 'KAUFLAND', $3, '{de,at}', 'secret-ref:synthetic', $4, 'LIVE')`, [tenantId, accountId, `syn-bench-${tenantId.slice(0, 8)}`, membershipId]);
     const { rows: [cap] } = await tx.query(`SELECT capability_id, version FROM platform.channel_capability WHERE channel = 'KAUFLAND' AND field = 'PRICE' AND status = 'ACTIVE' LIMIT 1`);
     if (!cap) throw new Error('no ACTIVE Kaufland PRICE capability: run packages/pricing-store-pg/test/setup.sql');
     await step('strategy',

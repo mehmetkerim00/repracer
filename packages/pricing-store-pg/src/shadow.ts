@@ -2,6 +2,12 @@ import type { Instant } from '@repracer/channel-port';
 import { inTenant, type PgPool } from './db.ts';
 
 /**
+ * Предел окна отчёта тени. Квартал — потому что решение «включать ли бой» принимается по неделям, а не по годам, и
+ * запрос за год прочитал бы историю решений целиком [Р-154].
+ */
+export const SHADOW_WINDOW_MAX_DAYS = 92;
+
+/**
  * Р-169…Р-171 (шаг 41): чтение теневого режима для консоли и для недельного дайджеста.
  *
  * Экран показывает то, чего продавец не видел бы иначе: что движок СДЕЛАЛ БЫ, будь канал боевым. Числа считает база
@@ -27,6 +33,29 @@ export interface ShadowSummary {
   heldQuantityWrites: number;
   /** Из удержанных записей — столько израсходовали бы внешний бюджет правок [Р-171] */
   wouldSpendBudget: number;
+  /**
+   * Р-173: «без пола вы продали бы на X дешевле» — по каждой валюте отдельно [Р-71]. Это РАЗНИЦА ЦЕН, посчитанная по
+   * уже хранимым столбцам решения, а не прогноз выручки: купил бы покупатель дешевле — мы не знаем (OQ-230).
+   */
+  floorSavings: Array<{ currency: string; minor: number }>;
+  /**
+   * Сколько удержаний пола попало в сумму. Меньше `floorHeld` — и это срок, а не потеря: цель стратегии выведена из цены
+   * конкурента и хранится три суток [Р-85, Р-28]. Экран и письмо говорят оба числа, а не делят одно на другое.
+   */
+  floorSavingsHolds: number;
+}
+
+/** Р-172: свойство витрины, его значение, статус и чем закрывается */
+export interface MarketplaceProperty {
+  channel: string;
+  marketplace: string;
+  country: string;
+  property: 'DAY_BOUNDARY' | 'PRICE_TAX_BASIS' | 'QUANTITY_SCOPE' | string;
+  value: string | null;
+  status: 'CONFIRMED' | 'CONSERVATIVE' | 'UNKNOWN' | string;
+  question: string | null;
+  closesBy: 'SHADOW_READ' | 'FIRST_LIVE_WRITE' | 'CHANNEL_SUPPORT' | string;
+  source: string;
 }
 
 export interface ShadowAccountRow {
@@ -66,6 +95,11 @@ export interface ShadowPage {
   rows: ShadowWriteRow[];
   total: number;
   accounts: ShadowAccountRow[];
+  /** Р-172: свойства витрин аккаунтов — что известно, что взято консервативно и что держит бой */
+  properties: MarketplaceProperty[];
+  /** Р-174: последние дайджесты с отметкой доставки — «отчёт, который никто не получил, не отчёт» */
+  digests: Array<{ periodStart: Instant; periodEnd: Instant; decisions: number; heldWrites: number;
+    floorSavings: Array<{ currency: string; minor: number }>; deliveredAt: Instant | null; deliveryKind: string | null }>;
 }
 
 export interface ShadowModeChange {
@@ -85,9 +119,19 @@ export type ShadowModeResult =
   | { status: 'NOT_OWNER' }
   | { status: 'CONFIRMATION_MISMATCH' }
   | { status: 'MODE_MISMATCH'; mode: 'SHADOW' | 'LIVE' }
+  /** Р-172: у витрины аккаунта есть свойство, которого мы не знаем — бой закрыт, тень работает */
+  | { status: 'PROPERTY_UNKNOWN'; detail: string }
   | { status: 'FORBIDDEN' };
 
 const num = (v: unknown): number => Number(v ?? 0);
+
+/** Список сумм из базы: массив пар «валюта, сумма» [Р-71]; всё, что не пара, отбрасывается — цифра без валюты не деньги */
+const moneyList = (v: unknown): Array<{ currency: string; minor: number }> =>
+  (Array.isArray(v) ? v : []).flatMap((e) => {
+    const row = e as { currency?: unknown; minor?: unknown };
+    return typeof row.currency === 'string' && row.minor !== undefined
+      ? [{ currency: row.currency, minor: Number(row.minor) }] : [];
+  });
 
 export class PgShadowStore {
   private readonly pools: { adminPool: PgPool };
@@ -101,9 +145,13 @@ export class PgShadowStore {
    */
   async shadowPage(tenantId: string, now: Instant, query: { offset: number; limit: number; sinceDays?: number }): Promise<ShadowPage> {
     const sinceDays = query.sinceDays ?? 7;
+    // Окно отчёта ограничено и здесь, а не только маршрутом: хранилище зовут и прогоны, и исполнитель дайджеста
+    if (!Number.isInteger(sinceDays) || sinceDays < 1 || sinceDays > SHADOW_WINDOW_MAX_DAYS) {
+      throw new Error(`shadow window must be 1..${SHADOW_WINDOW_MAX_DAYS} days, got ${sinceDays}`);
+    }
     const since = new Date(Date.parse(now) - sinceDays * 86_400_000).toISOString();
     return inTenant(this.pools.adminPool, tenantId, async (tx) => {
-      const [decisions, held, list, accounts] = await Promise.all([
+      const [decisions, held, list, accounts, savings, properties, digests] = await Promise.all([
         // Решения тени: считает база, и только по окну отчёта [Р-154]
         tx.query(
           /**
@@ -150,6 +198,25 @@ export class PgShadowStore {
                 ORDER BY mc.changed_at DESC LIMIT 1) c ON true
             WHERE ca.tenant_id = $1 AND ca.disconnected_at IS NULL
             ORDER BY ca.connected_at`, [tenantId]),
+        /**
+         * Р-173: «без пола вы продали бы на X дешевле» — считает БАЗА тем же выражением, что дайджест [Р-171: экран и
+         * письмо показывают одни и те же числа], и по каждой валюте отдельно [Р-71].
+         */
+        tx.query(`SELECT savings, priced FROM platform.shadow_floor_savings($1, make_interval(days => $2))`, [tenantId, sinceDays]),
+        /**
+         * Р-172: свойства витрин аккаунтов тенанта — значение, статус и чем закрывается. Экран показывает их рядом с
+         * кнопкой «включить бой», потому что именно они её и держат.
+         */
+        tx.query(
+          `SELECT r.* FROM platform.marketplace_readiness() r
+            WHERE EXISTS (SELECT 1 FROM tenant_data.channel_account ca
+                           WHERE ca.tenant_id = $1 AND ca.disconnected_at IS NULL
+                             AND ca.channel = r.channel AND r.marketplace = ANY (ca.marketplaces))
+            ORDER BY r.channel, r.marketplace, r.property`, [tenantId]),
+        // Р-174: доставлен ли отчёт — свойство строки периода, а не надежда процесса
+        tx.query(
+          `SELECT period_start, period_end, decisions, held_writes, floor_savings, delivered_at, delivery_kind
+             FROM tenant_data.shadow_digest WHERE tenant_id = $1 ORDER BY period_start DESC LIMIT 8`, [tenantId]),
       ]);
       const d = decisions.rows[0] ?? {};
       const h = held.rows[0] ?? {};
@@ -159,6 +226,7 @@ export class PgShadowStore {
           decisions: num(d.decisions), changes: num(d.changes), floorHeld: num(d.floor_held), ceilingHeld: num(d.ceiling_held),
           heldWrites: num(h.held), heldPriceWrites: num(h.held_price), heldQuantityWrites: num(h.held_quantity),
           wouldSpendBudget: num(h.would_spend),
+          floorSavings: moneyList(savings.rows[0]?.savings), floorSavingsHolds: num(savings.rows[0]?.priced),
         },
         total: num(h.held),
         rows: list.rows.map((r) => ({
@@ -175,6 +243,16 @@ export class PgShadowStore {
           changedByMembershipId: (r.changed_by_membership_id as string | null) ?? null,
           changedFrom: (r.from_mode as 'SHADOW' | 'LIVE' | null) ?? null,
           offers: num(r.offers), engineScopes: num(r.engine_scopes),
+        })),
+        properties: properties.rows.map((r) => ({
+          channel: r.channel as string, marketplace: r.marketplace as string, country: r.country as string,
+          property: r.property as string, value: (r.value as string | null) ?? null, status: r.status as string,
+          question: (r.question as string | null) ?? null, closesBy: r.closes_by as string, source: r.source as string,
+        })),
+        digests: digests.rows.map((r) => ({
+          periodStart: r.period_start as Instant, periodEnd: r.period_end as Instant,
+          decisions: num(r.decisions), heldWrites: num(r.held_writes), floorSavings: moneyList(r.floor_savings),
+          deliveredAt: (r.delivered_at as Instant | null) ?? null, deliveryKind: (r.delivery_kind as string | null) ?? null,
         })),
       };
     });
@@ -210,6 +288,13 @@ export class PgShadowStore {
        */
       if (/only the owner (switches|or an admin switches)/.test(message)) return { status: 'NOT_OWNER' };
       if (/typed confirmation does not name/.test(message)) return { status: 'CONFIRMATION_MISMATCH' };
+      /**
+       * Р-172: отказ называет витрину, свойство и вопрос — эта строка доходит до продавца целиком, потому что «бой
+       * нельзя» без «почему нельзя» превращается в «сломано».
+       */
+      const property = /marketplace property is unknown: ([^—]+)—/.exec(message)
+        ?? /properties of the marketplaces of channel account (\S+) are not visible/.exec(message);
+      if (property) return { status: 'PROPERTY_UNKNOWN', detail: property[1]!.trim() };
       // Находка 6: режим брался из воздуха — теперь из самого отказа базы, иначе продавец читает «уже в бою» о теневом аккаунте
       const mismatch = /is in (SHADOW|LIVE) mode, not in/.exec(message);
       if (mismatch) return { status: 'MODE_MISMATCH', mode: mismatch[1] as 'SHADOW' | 'LIVE' };
@@ -237,6 +322,20 @@ export interface ShadowDigestTarget {
   heldPriceWrites: number;
   heldQuantityWrites: number;
   wouldSpendBudget: number;
+  /** Р-173: «без пола продали бы на X дешевле» — по каждой валюте отдельно [Р-71] */
+  floorSavings: Array<{ currency: string; minor: number }>;
+  /** Сколько удержаний попало в сумму: у остальных цель стратегии уже удалена по сроку [Р-85, Р-28] */
+  floorSavingsHolds: number;
+  /** Окно письма — его же период в отметке доставки [Р-174] */
+  periodStart: Instant;
+  periodEnd: Instant;
+}
+
+/** Р-174: строка периода с отметкой доставки — «дайджест, живущий только в письме, недоказан» */
+export interface ShadowDigestRecord {
+  digestId: string;
+  /** Уже есть строка за этот период: письмо не отправляется второй раз */
+  alreadyRecorded: boolean;
 }
 
 export class PgShadowDigestStore {
@@ -255,6 +354,45 @@ export class PgShadowDigestStore {
       decisions: num(r.decisions), changes: num(r.changes), floorHeld: num(r.floor_held), ceilingHeld: num(r.ceiling_held),
       heldWrites: num(r.held_writes), heldPriceWrites: num(r.held_price_writes),
       heldQuantityWrites: num(r.held_quantity_writes), wouldSpendBudget: num(r.would_spend_budget),
+      floorSavings: moneyList(r.floor_savings), floorSavingsHolds: num(r.floor_savings_holds),
+      periodStart: r.period_start as Instant, periodEnd: r.period_end as Instant,
     }));
+  }
+
+  /**
+   * Р-174: строка периода ДО отправки. Второй дайджест за тот же период отклоняет база (`shadow_digest_one_per_period`),
+   * и это не ошибка процесса, а его защита: после простоя планировщика повторный прогон не пишет продавцу дважды.
+   */
+  async record(target: ShadowDigestTarget): Promise<ShadowDigestRecord> {
+    const { rows } = await this.pool.query(
+      `INSERT INTO tenant_data.shadow_digest
+         (tenant_id, period_start, period_end, decisions, changes, held_writes, floor_held, floor_savings, floor_savings_holds)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
+       ON CONFLICT (tenant_id, period_start) DO NOTHING
+       RETURNING digest_id`,
+      [target.tenantId, target.periodStart, target.periodEnd, target.decisions, target.changes,
+        target.heldWrites, target.floorHeld, JSON.stringify(target.floorSavings), target.floorSavingsHolds]);
+    if (rows.length > 0) return { digestId: rows[0]!.digest_id as string, alreadyRecorded: false };
+    const { rows: [existing] } = await this.pool.query(
+      `SELECT digest_id FROM tenant_data.shadow_digest WHERE tenant_id = $1 AND period_start = $2`,
+      [target.tenantId, target.periodStart]);
+    return { digestId: existing!.digest_id as string, alreadyRecorded: true };
+  }
+
+  /** Отметка доставки: время ставит база, вид — `EMAIL_DIGEST` или `DRY_RUN` (шаг 37), ошибка — своей строкой */
+  async markDelivered(tenantId: string, digestId: string, delivery: { kind: 'EMAIL_DIGEST' | 'DRY_RUN'; ref: string | null }): Promise<void> {
+    await this.pool.query(
+      `UPDATE tenant_data.shadow_digest
+          SET delivered_at = now(), delivery_kind = $3, delivery_ref = $4, delivery_attempts = delivery_attempts + 1
+        WHERE tenant_id = $1 AND digest_id = $2`,
+      [tenantId, digestId, delivery.kind, delivery.ref]);
+  }
+
+  async markFailed(tenantId: string, digestId: string, error: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE tenant_data.shadow_digest
+          SET delivery_attempts = delivery_attempts + 1, last_delivery_error = left($3, 500)
+        WHERE tenant_id = $1 AND digest_id = $2`,
+      [tenantId, digestId, error]);
   }
 }

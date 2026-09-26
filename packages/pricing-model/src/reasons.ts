@@ -482,7 +482,12 @@ export const REASON_PARAMS: Readonly<Record<AnyReasonCode, ParamSchema>> = {
    * отклоняет страж режима, и диспетчер завершает запись этой причиной — иначе его обход падал бы на каждом круге
    * (тот же класс, что находка 7 шага 15).
    */
-  WRITE_HELD_IN_SHADOW: { channelAccountId: id('TENANT') },
+  /**
+   * Находка 4 ревью шага 41: база кладёт в `end_params` ещё два ключа, и объявлен был один — необъявленный ключ
+   * интерфейс показать не может [Р-72]. `wouldSpendBudget` — Р-171, `blockedUnit` — единица была заблокирована, и в тени
+   * это единственное место, где факт виден (находка 6: тень перекрывает статус BLOCKED).
+   */
+  WRITE_HELD_IN_SHADOW: { channelAccountId: id('TENANT'), wouldSpendBudget: p('bool', 'TENANT', O), blockedUnit: p('bool', 'TENANT', O) },
   // Р-116: отправленная цена — наша, применённая — прочитана из канала
   CHANNEL_PRICE_BASIS_MISMATCH: {
     basisError: oneOf(BASIS_MISMATCH_DIRECTIONS, 'TENANT'), vatRateBp: bp('TENANT'), sentMinor: money('TENANT'), observedMinor: money('CHANNEL'),

@@ -42,11 +42,17 @@ import { SeededRandom } from './random.ts';
  */
 
 export const AMAZON_DE = 'A1PA6795UKMFR9';
+/** amazon.com: USD, цена НЕТТО (sales tax при покупке [Р-58]); граница суток не установлена [Р-65, Р-172] */
+export const AMAZON_US = 'ATVPDKIKX0DER';
 export const AMAZON_SIM_SOURCE = 'AMAZON_ANY_OFFER_CHANGED';
 
 export interface AmazonSkuSpec { sku: string; asin: string; marketplaces: string[]; priceMinor: number; quantity: number }
 export interface AmazonCompetitorSpec { sellerRef: string; marketplace: string; asin: string; priceMinor: number; schedule?: Array<{ atOffsetMs: number; priceMinor: number }> }
-export interface AmazonPortModelSpec { seed: number; params?: Partial<AmazonModelParams>; skus: AmazonSkuSpec[]; competitors: AmazonCompetitorSpec[] }
+export interface AmazonPortModelSpec {
+  seed: number; params?: Partial<AmazonModelParams>; skus: AmazonSkuSpec[]; competitors: AmazonCompetitorSpec[];
+  /** Витрина модели: по умолчанию amazon.de (EUR, брутто), для витрины США — `AMAZON_SIM_DESCRIPTOR_US` */
+  descriptor?: ChannelDescriptor;
+}
 
 interface Listing { sku: string; asin: string; marketplace: string; priceMinor: number; quantity: number; pendingPrice: { minor: number; at: number } | null; pendingQuantity: { value: number; at: number } | null; edits: number[] }
 
@@ -88,8 +94,18 @@ export const AMAZON_SIM_DESCRIPTOR: ChannelDescriptor = {
   competitorSources: AMAZON_DESCRIPTOR.competitorSources,
 };
 
+/**
+ * Шаг 42 [Р-172]: витрина США той же модели. Отличается ровно тем, чем отличается настоящая: регион NA, доллары, цена
+ * НЕТТО и НЕТ границы суток — `timeZone: null` вместо подставленного значения.
+ */
+export const AMAZON_SIM_DESCRIPTOR_US: ChannelDescriptor = {
+  ...AMAZON_SIM_DESCRIPTOR,
+  region: 'NA',
+  marketplaces: [{ code: AMAZON_US, currency: 'USD', priceBasis: 'NET', timeZone: null }],
+};
+
 export class SimulatedAmazonPort implements ChannelAdapter {
-  readonly descriptor = AMAZON_SIM_DESCRIPTOR;
+  readonly descriptor: ChannelDescriptor;
   readonly params: AmazonModelParams;
   readonly stats = { patchCalls: 0, patchRateLimited: 0, readCalls: 0, readRateLimited: 0, editLimited: 0, acceptedNeverApplied: 0, summaryCalls: 0, summaryRateLimited: 0, eventsLost: 0, eventsDelivered: 0 };
   private readonly deps: AdapterDependencies;
@@ -105,6 +121,8 @@ export class SimulatedAmazonPort implements ChannelAdapter {
   private nowMs: number;
 
   constructor(spec: AmazonPortModelSpec, deps: AdapterDependencies) {
+    // Шаг 42: витрина модели объявляется спецификацией — витрина США отличается регионом, валютой, базой и отсутствием пояса
+    this.descriptor = spec.descriptor ?? AMAZON_SIM_DESCRIPTOR;
     this.deps = deps;
     this.params = { ...defaultAmazonParams(), ...structuredClone(spec.params ?? {}) };
     this.startMs = Date.parse(deps.now());
@@ -120,6 +138,12 @@ export class SimulatedAmazonPort implements ChannelAdapter {
     this.application = new Bucket(appRate, Math.max(1, Math.round(p.application.burst * (appRate / p.application.ratePerSecond))), this.startMs);
     this.read = new Bucket(5, this.params.readBurst, this.startMs);
     this.summary = new Bucket(0.033, 1, this.startMs);
+  }
+
+  /** Валюта и база цены витрины модели: одна витрина на дескриптор (amazon.de — EUR брутто, amazon.com — USD нетто) */
+  private money(): { currency: string; basis: 'GROSS' | 'NET' } {
+    const mk = this.descriptor.marketplaces[0]!;
+    return { currency: mk.currency, basis: mk.priceBasis };
   }
 
   private now(): number {
@@ -233,7 +257,8 @@ export class SimulatedAmazonPort implements ChannelAdapter {
       if (!l) { result.failures.push({ writeScopeId: r.writeScope.writeScopeId, error: error('NOT_FOUND', 'listing not found') }); continue; }
       const observedAt = new Date(now).toISOString();
       const identity = { marketplace, externalSku: l.sku, channelProductRef: l.asin };
-      if (r.fields.includes('PRICE')) result.observations.push({ identity, field: 'PRICE', value: { field: 'PRICE', price: { amountMinor: l.priceMinor, currency: 'EUR', basis: 'GROSS' } }, observedAt, source: 'READBACK' });
+      // Шаг 42: валюта и база — свойства ВИТРИНЫ модели, а не константа: у amazon.com это доллары и НЕТТО [Р-58]
+      if (r.fields.includes('PRICE')) result.observations.push({ identity, field: 'PRICE', value: { field: 'PRICE', price: { amountMinor: l.priceMinor, currency: this.money().currency, basis: this.money().basis } }, observedAt, source: 'READBACK' });
       if (r.fields.includes('QUANTITY')) result.observations.push({ identity, field: 'QUANTITY', value: { field: 'QUANTITY', quantity: l.quantity }, observedAt, source: 'READBACK' });
     }
     return result;
@@ -261,7 +286,8 @@ export class SimulatedAmazonPort implements ChannelAdapter {
       ...[...this.listings.values()].filter((l) => l.marketplace === marketplace && l.asin === asin).map((l) => ({ isSelf: true, sellerRef: 'self', minor: l.priceMinor })),
       ...this.competitors.filter((c) => c.marketplace === marketplace && c.asin === asin).map((c) => ({ isSelf: false, sellerRef: c.sellerRef, minor: c.priceMinor })),
     ].sort((a, b) => a.minor - b.minor);
-    const money = (minor: number) => ({ amountMinor: minor, currency: 'EUR', basis: 'GROSS' as const });
+    const { currency, basis } = this.money();
+    const money = (minor: number) => ({ amountMinor: minor, currency, basis });
     return {
       marketplace, channelProductRef: asin, condition: 'new', source: AMAZON_SIM_SOURCE, sourceEventId: `sim-aoc-${asin}-${observedAt}`,
       observedAt: new Date(observedAt).toISOString(),

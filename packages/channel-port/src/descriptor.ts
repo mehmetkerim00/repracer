@@ -53,8 +53,12 @@ export interface MarketplaceDescriptor {
   code: string;
   currency: string;
   priceBasis: PriceBasis;
-  /** Граница «дня» для суточных свёрток и дневных бюджетов */
-  timeZone: string;
+  /**
+   * Граница «дня» для суточных свёрток и дневных бюджетов. `null` — граница НЕ УСТАНОВЛЕНА (amazon.com, EBAY_US: A-03,
+   * OQ-112): общего значения для США нет, и подставлять его нельзя [Р-65, Р-172]. Пустая строка раньше играла эту роль
+   * молча — читающий код видел «пояс есть, он пустой».
+   */
+  timeZone: string | null;
 }
 
 export type OptionalCapability = 'PUSH_SUBSCRIPTIONS' | 'LISTING_MIGRATION' | 'ASYNC_REPORTS' | 'COMPETITOR_PULL';

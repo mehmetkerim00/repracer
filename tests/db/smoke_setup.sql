@@ -17,30 +17,40 @@ INSERT INTO platform.platform_operator (operator_id, issuer, subject, display_na
 INSERT INTO platform.channel_capability
   (capability_id, version, status, valid_from, channel, region, api_mode, field, write_scope_kind,
    write_scope_key_template, budget_scope_attribute, object_edit_limit, processing_mode,
-   requires_side_effects_ack, observation_data_class)
+   requires_side_effects_ack, observation_data_class,
+   -- Р-172 (шаг 42): область записи объявляется явно; Amazon QUANTITY — консервативно, вопрос A-16
+   write_scope_status, write_scope_question, write_scope_closes_by)
 VALUES
   ('c0000000-0000-0000-0000-000000000001', 1, 'ACTIVE', now(), 'KAUFLAND', NULL, 'KAUFLAND_SELLER_API_V2', 'PRICE',
-   'ACCOUNT_STOREFRONT_UNIT', ARRAY['channel_account','marketplace','external_unit_id'], NULL, NULL, 'SYNC', false, 'CHANNEL_INFO'),
+   'ACCOUNT_STOREFRONT_UNIT', ARRAY['channel_account','marketplace','external_unit_id'], NULL, NULL, 'SYNC', false, 'CHANNEL_INFO',
+   'CONFIRMED', NULL, 'CHANNEL_SUPPORT'),
   ('c0000000-0000-0000-0000-000000000002', 1, 'ACTIVE', now(), 'KAUFLAND', NULL, 'KAUFLAND_SELLER_API_V2', 'QUANTITY',
-   'ACCOUNT_OFFER', ARRAY['channel_account','external_offer_id'], NULL, NULL, 'SYNC', true, 'CHANNEL_INFO'),
+   'ACCOUNT_OFFER', ARRAY['channel_account','external_offer_id'], NULL, NULL, 'SYNC', true, 'CHANNEL_INFO',
+   'CONFIRMED', NULL, 'CHANNEL_SUPPORT'),
   ('c0000000-0000-0000-0000-000000000003', 1, 'ACTIVE', now(), 'AMAZON', 'EU', 'AMAZON_LISTINGS_ITEMS', 'QUANTITY',
-   'ACCOUNT_REGION_SKU', ARRAY['channel_account','region','external_sku'], NULL, NULL, 'ASYNC', true, 'AMAZON_INFO'),
+   'ACCOUNT_REGION_SKU', ARRAY['channel_account','region','external_sku'], NULL, NULL, 'ASYNC', true, 'AMAZON_INFO',
+   'CONSERVATIVE', 'A-16', 'FIRST_LIVE_WRITE'),
   ('c0000000-0000-0000-0000-000000000004', 1, 'ACTIVE', now(), 'EBAY', NULL, 'EBAY_INVENTORY_API', 'QUANTITY',
    'ACCOUNT_INVENTORY_SKU', ARRAY['channel_account','external_sku'], 'external_listing_id',
-   '{"limit": 250, "quantity_reserve": 50, "unaccounted_margin": 10}', 'SYNC', false, 'CHANNEL_INFO'),
+   '{"limit": 250, "quantity_reserve": 50, "unaccounted_margin": 10}', 'SYNC', false, 'CHANNEL_INFO',
+   'CONSERVATIVE', 'E-01', 'CHANNEL_SUPPORT'),
   ('c0000000-0000-0000-0000-000000000005', 1, 'ACTIVE', now(), 'AMAZON', 'NA', 'AMAZON_LISTINGS_ITEMS', 'PRICE',
-   'ACCOUNT_REGION_MARKETPLACE_SKU', ARRAY['channel_account','region','marketplace','external_sku'], NULL, NULL, 'ASYNC', false, 'AMAZON_INFO'),
+   'ACCOUNT_REGION_MARKETPLACE_SKU', ARRAY['channel_account','region','marketplace','external_sku'], NULL, NULL, 'ASYNC', false, 'AMAZON_INFO',
+   'CONFIRMED', NULL, 'CHANNEL_SUPPORT'),
   ('c0000000-0000-0000-0000-000000000006', 1, 'ACTIVE', now(), 'AMAZON', 'EU', 'AMAZON_LISTINGS_ITEMS', 'PRICE',
-   'ACCOUNT_REGION_MARKETPLACE_SKU', ARRAY['channel_account','region','marketplace','external_sku'], NULL, NULL, 'ASYNC', false, 'AMAZON_INFO')
+   'ACCOUNT_REGION_MARKETPLACE_SKU', ARRAY['channel_account','region','marketplace','external_sku'], NULL, NULL, 'ASYNC', false, 'AMAZON_INFO',
+   'CONFIRMED', NULL, 'CHANNEL_SUPPORT')
 ON CONFLICT DO NOTHING;
 -- Р-111 (шаг 21): поле собственного пола цены канала (Amazon minimum_seller_allowed_price) не заводится как возможность Amazon
 \ir smoke_helpers.sql
 SELECT pg_temp.expect_fail('Amazon capability for the channel repricer floor (Р-111)', $q$
   INSERT INTO platform.channel_capability
     (capability_id, version, status, valid_from, channel, region, api_mode, field, write_scope_kind,
-     write_scope_key_template, budget_scope_attribute, object_edit_limit, processing_mode, requires_side_effects_ack, observation_data_class)
+     write_scope_key_template, budget_scope_attribute, object_edit_limit, processing_mode, requires_side_effects_ack, observation_data_class,
+     write_scope_status, write_scope_closes_by)
   VALUES ('c0000000-0000-0000-0000-0000000000f1', 1, 'ACTIVE', now(), 'AMAZON', 'EU', 'AMAZON_LISTINGS_ITEMS', 'CHANNEL_MIN_PRICE',
-     'ACCOUNT_REGION_MARKETPLACE_SKU', ARRAY['channel_account','region','marketplace','external_sku'], NULL, NULL, 'ASYNC', false, 'AMAZON_INFO') $q$,
+     'ACCOUNT_REGION_MARKETPLACE_SKU', ARRAY['channel_account','region','marketplace','external_sku'], NULL, NULL, 'ASYNC', false, 'AMAZON_INFO',
+     'CONFIRMED', 'CHANNEL_SUPPORT') $q$,
   'channel_capability_channel_min_price_only_kaufland');
 RESET ROLE;
 

@@ -73,6 +73,8 @@ export const MEASURED_FILES = new Set([
   'apps/operator/test/operator-live.pg.test.ts',
   // Шаг 41: прогон тени утверждает секунды экрана и держит под собой суточный демо-мир
   'apps/console/test/shadow-live.pg.test.ts',
+  // Шаг 42: прогон витрины США утверждает секунды экранов и держит под собой мир amazon.com
+  'apps/console/test/us-shadow-live.pg.test.ts',
 ]);
 
 /**

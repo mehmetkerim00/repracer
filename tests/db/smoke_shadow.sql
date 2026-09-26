@@ -361,6 +361,13 @@ SELECT pg_temp.expect_fail('a switch back to SHADOW that carries a typed confirm
   VALUES (%L, %L, 'LIVE', 'SHADOW', %L, 'seller-A') $q$, :tA, :kAcc, :ownerM),
   'channel_write_mode_change_live_confirmed');
 
+/**
+ * Шаг 42 [Р-172]: у аккаунта, который переводят в БОЙ, должна быть названа хотя бы одна витрина ИЗ СПРАВОЧНИКА — иначе
+ * неизвестно, куда он пишет, и свойства проверять не на чем (страж fail-closed). У аккаунта eBay смоука список витрин был
+ * пуст, и это ровно тот случай.
+ */
+UPDATE tenant_data.channel_account SET marketplaces = ARRAY['EBAY_DE'] WHERE tenant_id = :tA AND channel_account_id = :eAcc;
+
 -- Мир остаётся таким, каким его ждут соседние файлы: аккаунт eBay возвращается в бой
 SELECT pg_temp.ok('the eBay account returns to LIVE (Р-170)', format($q$
   INSERT INTO tenant_data.channel_write_mode_change (tenant_id, channel_account_id, from_mode, to_mode, changed_by_membership_id, typed_confirmation)

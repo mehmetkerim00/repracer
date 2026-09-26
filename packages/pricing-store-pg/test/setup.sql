@@ -73,13 +73,17 @@ SET ROLE repracer_owner;
 INSERT INTO platform.channel_capability
   (capability_id, version, status, valid_from, channel, region, api_mode, field, write_scope_kind,
    write_scope_key_template, budget_scope_attribute, object_edit_limit, processing_mode,
-   requires_side_effects_ack, observation_data_class)
+   requires_side_effects_ack, observation_data_class,
+   -- Р-172 (шаг 42): область записи объявляется ЯВНО — умолчания у столбца нет, потому что умолчание было бы утверждением
+   write_scope_status, write_scope_question, write_scope_closes_by)
 VALUES
   ('c0000000-0000-0000-0000-000000000001', 1, 'ACTIVE', now(), 'KAUFLAND', NULL, 'KAUFLAND_SELLER_API_V2', 'PRICE',
-   'ACCOUNT_STOREFRONT_UNIT', ARRAY['channel_account','marketplace','external_unit_id'], NULL, NULL, 'SYNC', false, 'CHANNEL_INFO'),
+   'ACCOUNT_STOREFRONT_UNIT', ARRAY['channel_account','marketplace','external_unit_id'], NULL, NULL, 'SYNC', false, 'CHANNEL_INFO',
+   'CONFIRMED', NULL, 'CHANNEL_SUPPORT'),
   -- Синтетическая строка для сценариев в USD [Р-57]: шаблон и режим обработки Amazon — (проверить) при адаптере Amazon
   ('c0000000-0000-0000-0000-000000000005', 1, 'ACTIVE', now(), 'AMAZON', 'NA', 'AMAZON_LISTINGS_ITEMS', 'PRICE',
-   'ACCOUNT_REGION_MARKETPLACE_SKU', ARRAY['channel_account','region','marketplace','external_sku'], NULL, NULL, 'ASYNC', false, 'AMAZON_INFO')
+   'ACCOUNT_REGION_MARKETPLACE_SKU', ARRAY['channel_account','region','marketplace','external_sku'], NULL, NULL, 'ASYNC', false, 'AMAZON_INFO',
+   'CONFIRMED', NULL, 'CHANNEL_SUPPORT')
 ON CONFLICT DO NOTHING;
 -- Шаг 35 [Р-152, Р-153]: единицы записи ОСТАТКА. Kaufland — аккаунт + id_offer, общий для витрин [Р-35] (шаблон закреплён 0027);
 -- Amazon — аккаунт + регион + SKU: одно значение на весь регион [Р-1], включение требует подтверждения побочного эффекта
@@ -87,14 +91,18 @@ ON CONFLICT DO NOTHING;
 INSERT INTO platform.channel_capability
   (capability_id, version, status, valid_from, channel, region, api_mode, field, write_scope_kind,
    write_scope_key_template, budget_scope_attribute, object_edit_limit, processing_mode,
-   requires_side_effects_ack, side_effects, channel_decrements_on_order, observation_data_class)
+   requires_side_effects_ack, side_effects, channel_decrements_on_order, observation_data_class,
+   write_scope_status, write_scope_question, write_scope_closes_by)
 VALUES
   ('c0000000-0000-0000-0000-000000000011', 1, 'ACTIVE', now(), 'KAUFLAND', NULL, 'KAUFLAND_SELLER_API_V2', 'QUANTITY',
    'ACCOUNT_OFFER', ARRAY['channel_account','external_offer_id'], NULL, NULL, 'SYNC', false,
-   'unit с одинаковым id_offer на разных витринах имеют общие количество и склад [Р-35]', NULL, 'CHANNEL_INFO'),
+   'unit с одинаковым id_offer на разных витринах имеют общие количество и склад [Р-35]', NULL, 'CHANNEL_INFO',
+   'CONFIRMED', NULL, 'CHANNEL_SUPPORT'),
+  -- Р-172: «одно значение на SKU в регионе» [Р-1] известно для MFN, а не для всех типов исполнения — A-16
   ('c0000000-0000-0000-0000-000000000015', 1, 'ACTIVE', now(), 'AMAZON', 'NA', 'AMAZON_LISTINGS_ITEMS', 'QUANTITY',
    'ACCOUNT_REGION_SKU', ARRAY['channel_account','region','external_sku'], NULL, NULL, 'ASYNC', true,
-   'остаток MFN — одно значение на SKU во всех маркетплейсах региона [Р-1]', true, 'AMAZON_INFO')
+   'остаток MFN — одно значение на SKU во всех маркетплейсах региона [Р-1]', true, 'AMAZON_INFO',
+   'CONSERVATIVE', 'A-16', 'FIRST_LIVE_WRITE')
 ON CONFLICT DO NOTHING;
 RESET ROLE;
 

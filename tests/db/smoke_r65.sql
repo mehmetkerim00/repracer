@@ -29,7 +29,8 @@ BEGIN
   END IF;
 END $$;
 BEGIN;
-UPDATE platform.marketplace SET time_zone_status = 'TO_VERIFY' WHERE channel = 'EBAY' AND marketplace = 'EBAY_DE';
+-- Р-172: снятие подтверждения НАЗЫВАЕТ вопрос — «снова не подтверждено, а почему» база хранить обязывает
+UPDATE platform.marketplace SET time_zone_status = 'TO_VERIFY', time_zone_question = 'OQ-112' WHERE channel = 'EBAY' AND marketplace = 'EBAY_DE';
 SELECT pg_temp.expect_fail('budgeted write while the storefront day boundary is unconfirmed (Р-65)', $q$
   INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, quantity, version, origin, budget_scope_key, budget_day)
   VALUES ('a0000000-0000-0000-0000-00000000000a', gen_random_uuid(), 'a6000000-0000-0000-0000-000000000003', 'QUANTITY', 2, 90, 'STOCK_RECALC', 'L1', (now() AT TIME ZONE 'Europe/Berlin')::date) $q$, 'edit budget day of storefront EBAY_DE is not confirmed');
@@ -56,7 +57,8 @@ DO $$ BEGIN
   END IF;
   RAISE NOTICE 'PASS reject | no attempt charged to a past budget day (C2)';
 END $$;
-UPDATE platform.marketplace SET time_zone_status = 'TO_VERIFY' WHERE channel = 'EBAY' AND marketplace = 'EBAY_DE';
+-- Р-172: снятие подтверждения НАЗЫВАЕТ вопрос — «снова не подтверждено, а почему» база хранить обязывает
+UPDATE platform.marketplace SET time_zone_status = 'TO_VERIFY', time_zone_question = 'OQ-112' WHERE channel = 'EBAY' AND marketplace = 'EBAY_DE';
 SELECT pg_temp.expect_fail('retry while the storefront day boundary is unconfirmed (C2, Р-65)', $q$
   UPDATE tenant_data.channel_write SET status = 'DISPATCHED', attempt_count = attempt_count + 1, next_attempt_at = NULL
    WHERE channel_write_id = 'a9000000-0000-0000-0000-000000000012' $q$, 'retry of a budgeted write: the day boundary of storefront');

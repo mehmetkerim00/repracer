@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0129_verify_schema_invariants_v36.sql';
+const VERIFY = 'migrations/0131_verify_schema_invariants_v37.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -1554,6 +1554,70 @@ export const STEP41_ROWS = [
       m(dropTrigger('ab_price_decision_copy_shadow', 'channel_data.price_decision'),
         smoke('a decision of a shadow account is not marked as shadow (Р-171)',
           'the database marks a decision of a shadow account and only it, and every switch is audited (Р-171, Р-97)')),
+    ],
+  },
+];
+
+/**
+ * Шаг 42 [Р-172…Р-174]: свойства витрин США с честным статусом, деньги дайджеста и его отметка доставки.
+ *
+ * Главное здесь — страж Р-172: пока у витрины аккаунта есть свойство со статусом UNKNOWN, бой не включается. Он снимается
+ * двумя мутациями, потому что обходов у него два: убрать проверку неизвестного и убрать проверку «свойства вообще видны»
+ * (первая редакция стража зеленела именно на второй — роль не видела справочник и «неизвестных свойств» не находила).
+ */
+export const STEP42_ROWS = [
+  {
+    row: 'Р-172', critical: true,
+    invariant: 'неизвестное свойство витрины держит БОЙ; статус, вопрос и способ закрытия — из закрытых списков',
+    mutations: [
+      m(replaceInFunction('tenant_data.channel_write_mode_change_guard()', 'IF u.unknown > 0 THEN', 'IF false THEN'),
+        smoke('switching to LIVE on a marketplace with an unknown property (Р-172)',
+          'switching to LIVE on a marketplace whose properties are known (Р-172)')),
+      // Fail-closed: роль, не видящая справочник, не должна включать бой «потому что неизвестного не нашлось»
+      m(replaceInFunction('tenant_data.channel_write_mode_change_guard()', 'IF u.seen = 0 THEN', 'IF false THEN'),
+        smoke('switching to LIVE on a marketplace with an unknown property (Р-172)',
+          'switching to LIVE on a marketplace whose properties are known (Р-172)')),
+      m(dropConstraint('marketplace_property_status_known', 'platform.marketplace'),
+        smoke('an unknown property status (Р-172)')),
+      m(dropConstraint('marketplace_property_closes_by_known', 'platform.marketplace'),
+        smoke('an unknown way to close a property (Р-172)')),
+      m(dropConstraint('marketplace_tax_question_named_while_unconfirmed', 'platform.marketplace'),
+        smoke('an unconfirmed tax basis without a named question (Р-172)')),
+      m(dropConstraint('marketplace_time_zone_question_named_while_unconfirmed', 'platform.marketplace'),
+        smoke('an unconfirmed day boundary without a named question (Р-172)')),
+      m(dropConstraint('marketplace_question_shape', 'platform.marketplace'),
+        smoke('a question that is not a question code (Р-172)')),
+      m(dropConstraint('marketplace_tax_source_named', 'platform.marketplace'),
+        smoke('a tax basis without a named source (Р-172)')),
+      m(dropTrigger('a_marketplace_confirmed_has_no_question', 'platform.marketplace'),
+        smoke('confirming a property clears its open question (Р-172)')),
+      m(dropConstraint('channel_capability_write_scope_status_known', 'platform.channel_capability'),
+        smoke('an unknown write scope status (Р-172)')),
+      m(dropConstraint('channel_capability_write_scope_closes_by_known', 'platform.channel_capability'),
+        smoke('an unknown way to close the write scope question (Р-172)')),
+      m(dropConstraint('channel_capability_write_scope_question_iff_unconfirmed', 'platform.channel_capability'),
+        smoke('a conservative write scope without a question (Р-172)')),
+    ],
+  },
+  {
+    row: 'Р-174', critical: false,
+    invariant: 'дайджест тени — событие с отметкой доставки: один на период, числа неизменяемы, доставка отмечается один раз',
+    mutations: [
+      m(dropConstraint('shadow_digest_one_per_period', 'tenant_data.shadow_digest'),
+        smoke('a second digest for the same period (Р-174)')),
+      m(dropConstraint('shadow_digest_period_sane', 'tenant_data.shadow_digest'),
+        smoke('a digest period that ends before it starts (Р-174)')),
+      m(dropConstraint('shadow_digest_numbers_non_negative', 'tenant_data.shadow_digest'),
+        smoke('a digest with a negative count (Р-174)')),
+      m(dropConstraint('shadow_digest_delivered_names_kind', 'tenant_data.shadow_digest'),
+        smoke('a delivery mark without its kind (Р-174)')),
+      m(dropConstraint('shadow_digest_delivery_kind_known', 'tenant_data.shadow_digest'),
+        smoke('an unknown delivery kind (Р-174)')),
+      // Р-173, Р-71: сумма без валюты — не деньги; ограничение зовёт `platform.money_list_valid`
+      m(dropConstraint('shadow_digest_savings_are_money', 'tenant_data.shadow_digest'),
+        smoke('a saving without a currency (Р-173, Р-71)', 'a saving that is a bare number (Р-173, Р-71)')),
+      m(dropTrigger('b_shadow_digest_before_write', 'tenant_data.shadow_digest'),
+        smoke('a digest recorded as already delivered (Р-174)', 'marking a delivered digest again (Р-174)')),
     ],
   },
 ];

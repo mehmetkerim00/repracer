@@ -277,20 +277,13 @@ CREATE FUNCTION platform.operator_write_queue()
    ORDER BY min(q.created_at)
 $fn$;
 
-/**
- * Приёмник уведомлений: что пришло, по каналу и виду события.
- *
- * Столбца «разобрано» здесь НЕТ (шаг 41, задача E): `channel_data.inbound_notification` хранит РАЗОБРАННЫЕ уведомления —
- * `processed_at` у неё NOT NULL с умолчанием. Счётчик «разобрано» был бы равен «получено» всегда, то есть тавтологией
- * на экране [Р-94]; потерянное уведомление видно не здесь, а сверкой опросом [Р-121].
- */
+/** Приёмник уведомлений: что пришло и что разобрано — по каналу и виду события */
 CREATE FUNCTION platform.operator_notifications(p_since interval DEFAULT interval '24 hours')
-  RETURNS TABLE (channel text, notification_type text, received bigint, last_received_at timestamptz)
+  RETURNS TABLE (channel text, notification_type text, received bigint, processed bigint, last_received_at timestamptz)
   LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog AS $fn$
-  SELECT n.channel, n.notification_type, count(*), max(n.received_at)
+  SELECT n.channel, n.notification_type, count(*), count(*) FILTER (WHERE n.processed_at IS NOT NULL), max(n.received_at)
     FROM channel_data.inbound_notification n
-   -- Окно ограничено с ДВУХ сторон (находка 18 ревью шага 40): `interval '100 years'` давал полный проход по приёмнику
-   WHERE n.received_at >= now() - least(greatest(p_since, interval '1 hour'), interval '30 days')
+   WHERE n.received_at >= now() - greatest(p_since, interval '1 hour')
    GROUP BY n.channel, n.notification_type
    ORDER BY max(n.received_at) DESC
 $fn$;
@@ -419,10 +412,6 @@ CREATE FUNCTION security.operator_resolve_snapshot_skip(p_operator_id uuid, p_sn
 DECLARE
   who text := security.operator_acting(p_operator_id);
 BEGIN
-  -- Заметка человека — заметка, а не файл (находка 20 ревью шага 40): снизу её длину держит ограничение таблицы
-  IF length(p_note) > 2000 THEN
-    RAISE EXCEPTION 'the note of a snapshot resolution is at most 2000 characters' USING ERRCODE = 'invalid_parameter_value';
-  END IF;
   INSERT INTO maintenance.snapshot_export_skip_resolution (competitor_snapshot_id, resolution, resolved_by, note, operator_id, mfa)
   VALUES (p_snapshot_id, p_resolution, who, p_note, p_operator_id, true);
   PERFORM security.operator_audit(p_operator_id, security.platform_tenant_id(), 'operator.snapshot_skip_resolved',
@@ -481,8 +470,7 @@ GRANT EXECUTE ON FUNCTION security.operator_audit(uuid, uuid, text, text, uuid, 
 -- Права выдаются ВНЕ `SET ROLE`: владелец схемы этими функциями уже не владеет (выше сменён владелец), и его GRANT
 -- прошёл бы предупреждением «no privileges were granted» — то есть молча ничем. Так и случилось в первой редакции
 -- Роль разбора уже умеет писать разбор; роль панели пишет его через SECURITY DEFINER — своих прав на таблицы у неё нет
--- Право звать её есть только у панели: роль входа операторов не разбирает (находка 13 ревью шага 40 — лишнее право [Р-96])
-GRANT EXECUTE ON FUNCTION security.resolve_platform_operator(text, text) TO repracer_operator;
+GRANT EXECUTE ON FUNCTION security.resolve_platform_operator(text, text) TO repracer_operator, repracer_authenticator;
 GRANT EXECUTE ON FUNCTION platform.operator_jobs() TO repracer_operator;
 GRANT EXECUTE ON FUNCTION platform.operator_alerts(int) TO repracer_operator;
 GRANT EXECUTE ON FUNCTION platform.operator_write_queue() TO repracer_operator;

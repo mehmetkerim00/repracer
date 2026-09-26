@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
 /**
@@ -494,4 +495,84 @@ test('Р-146: каждая область прогона из CI существ�
   assert.ok(!SCOPES.includes('shadow-day'), 'имя ЗАДАНИЯ CI не является областью прогона — именно на этом упал шаг 41');
   assert.deepEqual(filesForScope(included, 'shadow-day'), filesForScope(included, 'full'),
     'неизвестное имя области выборка файлов не отвергает — его отвергает только проверка аргумента');
+});
+
+/**
+ * Р-146 (находка 11 ревью шага 41): миграция, УЖЕ ПОПАВШАЯ В main, не правится на месте. До шага 42 правкой на месте
+ * пользовались свободно, и это работало ровно потому, что развёрнутой базы нет ни одной: `scripts/db/prepare.sh` каждый
+ * раз строит схему с нуля. С первой развёрнутой базой правка задним числом станет ложью — файл и база разойдутся молча,
+ * и обнаружится это на живом клиенте. Поэтому исправление выходит НОВОЙ миграцией (`CREATE OR REPLACE`, `ALTER`), а это
+ * правило держит границу: пока файл не в main, он черновик шага; попал в main — только новый номер.
+ *
+ * Правило намеренно смотрит на main, а не на историю ветки: внутри шага миграция переписывается сколько нужно.
+ */
+test('Р-146: миграция из main не меняется задним числом (находка 11 ревью шага 41)', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const cwd = fileURLToPath(root);
+  const git = (...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+
+  // Ветка может не знать main (свежий клон в CI забирает одну ветку) — тогда правило молчит, и говорит об этом вслух
+  let mainTree: string[];
+  try {
+    mainTree = git('ls-tree', '--name-only', 'main', 'migrations/').trim().split('\n').filter((l) => l.endsWith('.sql'));
+  } catch {
+    console.log('Р-146: ветки main здесь нет — правило «миграция из main не меняется» пропущено осознанно');
+    return;
+  }
+  assert.ok(mainTree.length > 50, `миграций в main: ${mainTree.length}`);
+
+  /**
+   * Проверка схемы (`*_verify_schema_invariants_*`) — исключение, и оно не дыра: она НЕ МЕНЯЕТ схему (единственный её
+   * DDL — временная таблица пробы), выполняется целиком на каждой сборке и по соглашению переносится под новый номер,
+   * чтобы идти последней. Исключение проверяется поведением: файл, называющий себя проверкой, но несущий DDL по
+   * постоянным объектам, из исключения выпадает.
+   */
+  const isVerify = (file: string): boolean => {
+    if (!/verify_schema_invariants/.test(file)) return false;
+    const text = existsSync(new URL(file, root)) ? readFileSync(new URL(file, root), 'utf8') : git('show', `main:${file}`);
+    const ddl = text.split('\n').filter((l) => /^\s*(CREATE|ALTER|DROP)\s+(TABLE|FUNCTION|INDEX|VIEW|SCHEMA|TYPE|POLICY)/i.test(l));
+    return ddl.length === 0;
+  };
+  assert.ok(mainTree.some(isVerify), 'проверка схемы среди миграций main найдена — иначе исключение ничего не значит');
+
+  const changed = mainTree.filter((file) => {
+    if (isVerify(file)) return false;
+    if (!existsSync(new URL(file, root))) return true;
+    const inMain = git('show', `main:${file}`);
+    const now = readFileSync(new URL(file, root), 'utf8');
+    return inMain !== now;
+  });
+
+  /**
+   * Исключение ровно одно и оно названо: миграции шага 41 (0128 и перенесённая проверка схемы 0129) в main НЕ попали —
+   * полный прогон шага был красным, — и шаг 42 правит их как черновик своей ветки. Как только они окажутся в main,
+   * список станет пустым, и следующая правка потребует новой миграции.
+   */
+  const DRAFT = ['migrations/0128_shadow_mode.sql'];
+  const inMainDrafts = DRAFT.filter((f) => mainTree.includes(f));
+  assert.deepEqual(inMainDrafts, [], `миграция объявлена черновиком, но уже лежит в main: ${inMainDrafts.join(', ')} — уберите её из списка DRAFT`);
+  assert.deepEqual(changed.filter((f) => !DRAFT.includes(f)), [],
+    'миграция из main изменена на месте: исправление выходит новой миграцией (CREATE OR REPLACE / ALTER)');
+});
+
+/**
+ * Р-146 (шаг 42, задача D): у второго региона тот же compose, значит и тот же НАБОР значений. Файл региона США — это
+ * конфигурация, а не копия кода, и единственный способ, которым он может сгнить, — разойтись с основным по переменным:
+ * новая переменная появляется в production.env.example, регион США о ней не знает, и развёртывание падает
+ * интерполяцией в тот день, когда US-сервер наконец появится. Правило держит оба файла одинаковыми по ключам.
+ */
+test('Р-146: профиль второго региона объявляет те же значения, что основной (шаг 42, D)', () => {
+  const keys = (file: string): string[] => read(file).split('\n')
+    .map((l) => l.trim()).filter((l) => l.length > 0 && !l.startsWith('#'))
+    .map((l) => l.split('=')[0]!.trim()).sort();
+  const eu = keys('deploy/production/production.env.example');
+  const us = keys('deploy/production/region-us.env.example');
+  assert.ok(eu.length >= 5, `переменных в основном профиле: ${eu.length}`);
+  assert.deepEqual(us, eu, 'набор значений второго региона совпадает с основным: расходятся ЗНАЧЕНИЯ, а не ключи');
+  // Значения обязаны различаться там, где различие и есть смысл региона [Р-60]: база, домен, каталоги
+  const value = (file: string, key: string): string => (read(file).match(new RegExp(`^${key}=(.*)$`, 'm'))?.[1] ?? '').trim();
+  for (const key of ['REPRACER_DOMAIN', 'REPRACER_SECRETS_DIR', 'REPRACER_BACKUP_DIR']) {
+    assert.notEqual(value('deploy/production/region-us.env.example', key), value('deploy/production/production.env.example', key),
+      `${key} второго региона отличается: иначе два региона писали бы в одну базу и один каталог`);
+  }
 });

@@ -6,7 +6,7 @@ import {
   boundsDiffView, boundsView, bulkJobsView, bulkJobView, can, canCancelBulkJob, channelNotes, onboardingView, complianceView, fingerprint, costImportView, currentStrategies, listQuery, MAX_SCOPES, OFFER_CHOICES, pageOf, parseListQuery, type ListQuery, discountCheckView, dangerousReport, decisionListView, decisionTrace, describe, expandBoundsEdit, importTargets, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, scopeById, unitOf,
   parseStrategyDraft, planStop, priceFeed, productList, rejectedView, REPORT_PERIODS_DAYS, stopView, strategiesView,
   type Locale, type Messages, type StandWorld, type StopTarget, type Viewer,
-  productPage, clampOffset, feedPageQuery, REJECTED_WINDOW_DAYS, stockView, stockDivergencesView, shadowView,
+  productPage, clampOffset, feedPageQuery, REJECTED_WINDOW_DAYS, stockView, stockDivergencesView, shadowView, SHADOW_PERIOD_DAYS,
 } from '@repracer/console-model';
 import { buildPreview, readTable, suggestMapping, TABLE_ENCODINGS } from '@repracer/cost-import';
 import type { BulkJobInput, DiscountAnnouncementInput } from '@repracer/pricing-pipeline';
@@ -393,9 +393,17 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           if (!live.shadow) return fail(404, 'NOT_FOUND', s.notFound);
           const query = parseListQuery(url.searchParams);
           if (!query) return fail(400, 'BAD_PAGE', s.badRequest);
-          const probe = await live.shadow.shadowPage(world.tenantId, live.clock.iso(), { offset: 0, limit: 1 });
+          /**
+           * Находка 3 ревью шага 41: окно отчёта выбирается из НАЗВАННЫХ вариантов, а не приходит свободным числом —
+           * иначе «дней = 100000» прошло бы до запроса и прочитало всю историю тенанта [Р-154].
+           */
+          const daysParam = url.searchParams.get('days');
+          const days = daysParam === null ? SHADOW_PERIOD_DAYS[0] : Number(daysParam);
+          if (!(SHADOW_PERIOD_DAYS as readonly number[]).includes(days)) return fail(400, 'BAD_PAGE', s.badRequest);
+          const probe = await live.shadow.shadowPage(world.tenantId, live.clock.iso(), { offset: 0, limit: 1, sinceDays: days });
           const clamped = { ...query, offset: clampOffset(query, probe.total) };
-          return ok(shadowView(world, await live.shadow.shadowPage(world.tenantId, live.clock.iso(), clamped), clamped, m));
+          const page = await live.shadow.shadowPage(world.tenantId, live.clock.iso(), { ...clamped, sinceDays: days });
+          return ok(shadowView(world, page, clamped, m, days));
         }
         // Шаг 35 [Р-153]: остатки — страницей по товарам, сводка агрегатом, расхождения — отдельным списком
         case 'stock': {
@@ -605,6 +613,15 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       if (outcome.status === 'NOT_OWNER') return fail(403, 'FORBIDDEN', e.notOwner);
       if (outcome.status === 'CONFIRMATION_MISMATCH') return fail(400, 'CONFIRMATION_MISMATCH', e.confirmation);
       if (outcome.status === 'MODE_MISMATCH') return fail(409, 'MODE_MISMATCH', e.modeMismatch);
+      /**
+       * Р-172: бой закрыт неизвестным свойством витрины — отказ называет витрину и свойство ЧЕЛОВЕЧЕСКИМ языком [Р-72].
+       * База отдаёт код свойства (`DAY_BOUNDARY`), и переводит его словарь: продавцу нужна «граница суток», а не имя столбца.
+       */
+      if (outcome.status === 'PROPERTY_UNKNOWN') {
+        const names = m.ui.shadow.properties.names;
+        const detail = Object.entries(names).reduce((text, [code, name]) => (name ? text.replaceAll(code, name) : text), outcome.detail);
+        return fail(409, 'PROPERTY_UNKNOWN', e.propertyUnknown(detail));
+      }
       return fail(403, 'FORBIDDEN', s.forbidden);
     }
 

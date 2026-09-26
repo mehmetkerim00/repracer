@@ -13,7 +13,8 @@ import { Badge, ErrorBox, errorText, Gaps, href, Load, Pager, useMessages } from
 export function ShadowScreen({ worldId }: { worldId: string }) {
   const m = useMessages();
   const [query, setQuery] = useState<ListQuery>({ offset: 0, limit: 50 });
-  const [view, retry] = useResource<ShadowView>(`${worldPath(worldId, 'shadow')}?offset=${query.offset}&limit=${query.limit}`, m.locale);
+  const [days, setDays] = useState(7);
+  const [view, retry] = useResource<ShadowView>(`${worldPath(worldId, 'shadow')}?offset=${query.offset}&limit=${query.limit}&days=${days}`, m.locale);
   const [error, setError] = useState<string | null>(null);
   const [typed, setTyped] = useState<Record<string, string>>({});
   const switchMode = (channelAccountId: string, toMode: 'SHADOW' | 'LIVE') =>
@@ -30,13 +31,17 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
           <section className="card">
             <h2>{m.ui.shadow.title}{v.demo ? <Badge tone="warn">DEMO</Badge> : null}</h2>
             <p>{v.intro}</p>
+            <p>{v.periods.map((p) => (
+              <button key={p.days} type="button" disabled={p.active}
+                onClick={() => { setDays(p.days); setQuery({ ...query, offset: 0 }); }}>{p.label}</button>
+            ))}</p>
             {v.anyShadow ? <ul>{v.summaryLines.map((line) => <li key={line}>{line}</li>)}</ul> : <p>{v.none}</p>}
             <p className="note">{v.cannot}</p>
           </section>
 
           <section className="card">
             <table>
-              <thead><tr><th>{m.ui.shadow.title}</th><th>{m.ui.shadow.modes.SHADOW}</th><th /></tr></thead>
+              <thead><tr><th>{c.account}</th><th>{c.mode}</th><th>{c.action}</th></tr></thead>
               <tbody>
                 {v.accounts.map((a) => (
                   <tr key={a.channelAccountId}>
@@ -64,8 +69,48 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
                 ))}
               </tbody>
             </table>
+            {v.liveBlockedText === null ? null : <p className="note">{v.liveBlockedText}</p>}
             {error === null ? null : <ErrorBox message={error} />}
           </section>
+
+          {/* Р-172: что мы про эти витрины НЕ знаем — рядом с кнопкой, которую это знание держит */}
+          {v.properties.length === 0 ? null : (
+            <section className="card">
+              <h3>{v.propertiesTitle}</h3>
+              <table>
+                <tbody>
+                  {v.properties.map((p) => (
+                    <tr key={`${p.marketplace}/${p.propertyText}`}>
+                      <td>{p.marketplace}</td>
+                      <td>{p.propertyText}<div className="note">{p.valueText}</div></td>
+                      <td>
+                        <Badge tone={p.blocksLive ? 'warn' : 'ok'}>{p.statusText}</Badge>
+                        <div className="note">{p.closesByText}{p.question === null ? null : ` · ${p.question}`}</div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          )}
+
+          {/* Р-174: отчёт, который никто не получил, — не отчёт */}
+          {v.digests.length === 0 ? null : (
+            <section className="card">
+              <h3>{v.digestsTitle}</h3>
+              <table>
+                <tbody>
+                  {v.digests.map((d) => (
+                    <tr key={d.periodText}>
+                      <td>{d.periodText}</td>
+                      <td>{d.decisions} / {d.heldWrites}{d.savingsText === null ? null : <div className="note">{d.savingsText}</div>}</td>
+                      <td><Badge tone={d.delivered ? 'ok' : 'warn'}>{d.deliveryText}</Badge></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          )}
 
           <section className="card">
             {v.rows.length === 0 ? <p>{v.none}</p> : (

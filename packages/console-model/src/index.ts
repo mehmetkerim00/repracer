@@ -22,7 +22,8 @@ export { COST_IMPORT_REPORT_HEADER, costImportReportRows, csvOf, PRICE_FEED_CSV_
 export { onboardingView, type OnboardingView, type OnboardingStepView, type ChannelAccountView, type EnableResultView, type OnboardingPathChoice } from './onboarding.ts';
 export { stockView, stockDivergencesView, stockTraps, type StockView, type StockRowView, type StockChannelCell, type StockTrap, type StockDivergencesView } from './stock.ts';
 // Шаг 41 [Р-169…Р-171]: экран теневого режима — сводка, would-be изменения и включение боя
-export { shadowView, shadowSummaryLines, type ShadowView, type ShadowAccountView, type ShadowWriteView } from './shadow.ts';
+export { shadowView, shadowSummaryLines, SHADOW_PERIOD_DAYS, type ShadowView, type ShadowAccountView,
+  type ShadowWriteView, type MarketplacePropertyView, type ShadowDigestView, type ShadowPeriodChoice } from './shadow.ts';
 export { pageInfo, clampOffset } from './page.ts';
 export { lastChangeCell, productPage } from './products.ts';
 /** Р-154: окно отчёта об отклонённых — семь суток; счётчики и строки — по вмешательствам окна, не по буферу */

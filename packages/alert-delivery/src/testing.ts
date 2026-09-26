@@ -9,6 +9,11 @@ export class FakeMail implements MailSender {
   readonly sent: Array<MailMessage & { ref: string }> = [];
   /** Сколько ближайших отправок провалить: письмо, которое не ушло, доставленным не считается */
   failNext = 0;
+  /**
+   * Сухой режим провайдера (шаг 37): письмо собирается целиком и не уходит никуда. Прогону это нужно, чтобы проверить
+   * ТРЕТИЙ вид отметки доставки [Р-174] — «собрано, не отправлено» отличается и от доставленного, и от провала.
+   */
+  dry = false;
   private no = 0;
 
   async send(message: MailMessage): Promise<{ ref: string }> {

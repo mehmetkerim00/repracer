@@ -6,8 +6,8 @@ import type { ChannelDescriptor, PriceBasis } from '@repracer/channel-port';
  */
 export const AMAZON_MARKETPLACES = {
   A1PA6795UKMFR9: { region: 'EU', country: 'DE', currency: 'EUR', basis: 'GROSS' as PriceBasis, timeZone: 'Europe/Berlin' },
-  // Граница суток amazon.com не установлена [Р-65]: пояс не подставляется
-  ATVPDKIKX0DER: { region: 'NA', country: 'US', currency: 'USD', basis: 'NET' as PriceBasis, timeZone: '' },
+  // Граница суток amazon.com НЕ УСТАНОВЛЕНА [Р-65, Р-172]: не пустая строка, а null — «значения нет» (A-03)
+  ATVPDKIKX0DER: { region: 'NA', country: 'US', currency: 'USD', basis: 'NET' as PriceBasis, timeZone: null as string | null },
 } as const;
 export type AmazonMarketplaceId = keyof typeof AMAZON_MARKETPLACES;
 

@@ -157,6 +157,12 @@ test('Р-169: сутки демо в тени — движок работает 
   // Записи СОЗДАВАЛИСЬ и удерживались: ноль здесь значил бы, что тень проверена пустотой
   assert.ok(Number(h!.held) > 0, `записей удержано тенью: ${h!.held}`);
   assert.equal(Number(h!.applied), 0, 'ни одна запись не применена каналом: их туда не отправляли');
+  /**
+   * Находка 7 ревью шага 41: «потратило бы бюджет» в этом прогоне НОЛЬ, и это свойство канала, а не пробел — у Kaufland
+   * бюджета правок нет [Р-19: он есть у eBay]. Ноль утверждается НАЗВАННЫМ ожиданием, иначе он выглядел бы как
+   * непроверенная пометка Р-171; сама пометка проверена смоуком `smoke_shadow.sql` на единице записи с бюджетом.
+   */
+  assert.equal(Number(h!.would_spend), 0, 'у Kaufland нет бюджета правок: пометка Р-171 проверяется смоуком, а не этим прогоном');
 
   // ГЛАВНОЕ УТВЕРЖДЕНИЕ [Р-169]: ни одного изменяющего запроса к каналу за сутки
   assert.deepEqual(writeRequests(), [], `запросы записи к симулятору за сутки в тени: ${JSON.stringify(writeRequests())}`);
@@ -214,12 +220,23 @@ test('Р-170: включение боя через консоль — со вт�
   assert.equal(live.status, 200, `включение боя: ${JSON.stringify(live.body)}`);
   assert.equal(live.body.mode, 'LIVE');
 
+  /**
+   * Находка 7 ревью шага 41: один виртуальный час мог не дать НИ ОДНОГО подтверждённого каналом изменения — решение
+   * зависит от того, сдвинулся ли конкурент, — и прогон краснел бы через раз. Теперь час добавляется, пока запись не
+   * появится, но не больше названного предела: если её нет и через шесть часов, это дефект, а не невезение.
+   */
   const before = await appliedWrites();
-  await demo.advance(1);
-  const after = await appliedWrites();
+  const LIVE_HOURS_LIMIT = 6;
+  let after = before;
+  let hours = 0;
+  while (after === before && hours < LIVE_HOURS_LIMIT) {
+    await demo.advance(1);
+    hours += 1;
+    after = await appliedWrites();
+  }
   const writes = writeRequests();
-  Object.assign(numbers, { appliedAfterGoingLive: after, writeRequestsAfterGoingLive: Object.fromEntries(writes) });
-  assert.ok(after > before, `после включения боя записи, подтверждённые каналом: ${after} (было ${before})`);
+  Object.assign(numbers, { appliedAfterGoingLive: after, liveHoursUntilFirstWrite: hours, writeRequestsAfterGoingLive: Object.fromEntries(writes) });
+  assert.ok(after > before, `после включения боя за ${hours} виртуальных часов записи, подтверждённые каналом: ${after} (было ${before})`);
   assert.ok(writes.length > 0, 'к каналу пошли изменяющие запросы — тень выключена не словом, а поведением');
 });
 
