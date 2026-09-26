@@ -416,3 +416,43 @@ test('Р-146: каждый прогон, утверждающий секунды
   const missing = tests.filter((f) => f !== SELF && !MEASURED_FILES.has(f) && decidesByTime(readFileSync(new URL(f, root), 'utf8')));
   assert.deepEqual(missing, [], 'прогон утверждает время, но делит машину с соседями — назовите его в MEASURED_FILES');
 });
+
+/**
+ * Р-146 (шаг 41, находка отправки ветки): файл процесса CI РАЗБИРАЕТСЯ. Прогон шага 41 покраснел раньше первого теста —
+ * «This run likely failed because of a workflow file issue»: имя шага несло двоеточие с пробелом («Сутки демо в ТЕНИ: …»),
+ * и YAML стал неразбираемым. Цена ошибки — не только красный прогон: GitHub перестаёт видеть у неразобранного файла
+ * триггеры, и `workflow_dispatch` отвечает 422, то есть полный прогон запустить НЕЧЕМ.
+ *
+ * Готового разбора YAML в проекте нет и зависимость ради правила не вводится [Р-33], поэтому правило проверяет ровно тот
+ * класс, который ломает разбор: значение скалярного ключа, начинающееся без кавычек и несущее «: ». Положительный
+ * контроль — та самая строка шага 41 до исправления.
+ */
+test('Р-146: файл процесса CI разбирается — значение ключа не несёт неэкранированного двоеточия (шаг 41)', () => {
+  const dir = '.github/workflows/';
+  const files = readdirSync(new URL(dir, root)).filter((n) => n.endsWith('.yml') || n.endsWith('.yaml'));
+  assert.ok(files.length > 0, `файлы процессов найдены: ${files.join(', ')}`);
+
+  /** Строка вида `ключ: значение`, где значение начинается не с кавычки, не с `|`/`>` и несёт ещё одно «: » */
+  const breaksYaml = (line: string): boolean => {
+    const m = /^(\s*(?:- )?)([A-Za-z0-9_.-]+):\s+(.*)$/.exec(line);
+    if (m === null) return false;
+    const value = m[3];
+    if (value === '' || value.startsWith('#')) return false;
+    if (/^['"[{|>&*]/.test(value)) return false;
+    return value.includes(': ');
+  };
+
+  // Положительный контроль [Р-94]: без него пустой список нарушителей не значит ничего
+  assert.ok(breaksYaml('      - name: Сутки демо в ТЕНИ: ни одного изменяющего запроса к каналу'), 'детектор ловит имя шага с двоеточием');
+  assert.ok(!breaksYaml("      - name: 'Сутки демо в ТЕНИ: ни одного изменяющего запроса к каналу'"), 'закавыченное значение нарушением не считается');
+  assert.ok(!breaksYaml('      - run: node scripts/test-all.mjs --scope=shadow'), 'обычная команда нарушением не считается');
+
+  const broken: string[] = [];
+  for (const name of files) {
+    const text = read(`${dir}${name}`);
+    text.split('\n').forEach((line, i) => {
+      if (breaksYaml(line)) broken.push(`${dir}${name}:${i + 1}: ${line.trim()}`);
+    });
+  }
+  assert.deepEqual(broken, [], 'значение с «: » закавычивается — иначе GitHub не разбирает файл и не видит его триггеров');
+});

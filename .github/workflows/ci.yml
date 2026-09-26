@@ -243,7 +243,7 @@ jobs:
       - run: npm ci
       - name: Database — migrations, template
         run: scripts/db/prepare.sh repracer_eu
-      - name: Сутки демо в ТЕНИ: ни одного изменяющего запроса к каналу, затем включение боя и возврат (Р-169…Р-171)
+      - name: 'Сутки демо в ТЕНИ: ни одного изменяющего запроса к каналу, затем включение боя и возврат (Р-169…Р-171)'
         run: node scripts/test-all.mjs --scope=shadow
 
   # Шаг 20: замер сжатия ClickHouse против оценки шага 4 (ADR-0004) — отдельное задание, итог — артефакт compression.json
