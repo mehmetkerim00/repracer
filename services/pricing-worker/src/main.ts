@@ -2,7 +2,7 @@ import { createAmazonAdapter, TwoLevelBudget } from '@repracer/amazon-adapter';
 import type { AdapterDependencies, ChannelAccountId, ChannelAdapter, TenantId } from '@repracer/channel-port';
 import { conservativeBudget, createKauflandAdapter } from '@repracer/kaufland-adapter';
 import { createPool, PgAlertSink, type PgPool } from '@repracer/pricing-store-pg';
-import { createHeartbeat, credentialsFromFiles, jsonSink, pgAccountDirectory, ProcessHealth, serveHealth } from '@repracer/service-runtime';
+import { channelCredentialsProvider, createHeartbeat, credentialsFromFiles, jsonSink, pgAccountDirectory, ProcessHealth, serveHealth } from '@repracer/service-runtime';
 import { loadWorkerConfig, type WorkerConfig } from './config.ts';
 import { startWorker, type RunningWorker } from './worker.ts';
 
@@ -66,9 +66,15 @@ export async function startWorkerProcess(config: WorkerConfig = loadWorkerConfig
    * базу письма об этих событиях не ушли бы никогда (находка 2 ревью шага 36).
    */
   const alerts = new PgAlertSink(appPool, sink.alerts);
+  const credentialsPool: PgPool | null = config.credentialsPgUrl
+    ? createPool(config.credentialsPgUrl, { max: 2, applicationName: `repracer-worker-${config.workerId}-credentials` }) : null;
   const deps: AdapterDependencies = {
     accounts: pgAccountDirectory(appPool),
-    credentials: credentialsFromFiles(config.channelSecretsDir),
+    credentials: channelCredentialsProvider({
+      files: credentialsFromFiles(config.channelSecretsDir),
+      vault: credentialsPool && config.channelApps.keyring ? { pool: credentialsPool, keyring: config.channelApps.keyring } : null,
+      amazonApplication: config.channelApps.amazon ? { ref: config.amazon.applicationCredentialsRef, ...config.channelApps.amazon } : null,
+    }),
     alerts,
     logger: sink.logger,
     now: () => new Date().toISOString(),
@@ -124,6 +130,7 @@ export async function startWorkerProcess(config: WorkerConfig = loadWorkerConfig
       await running.stop();
       await server.close();
       await appPool.end();
+      await credentialsPool?.end();
     },
   };
 }

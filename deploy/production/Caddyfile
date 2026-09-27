@@ -6,9 +6,19 @@
 {$REPRACER_DOMAIN} {
 	encode zstd gzip
 	# Журнал без тел запросов и без заголовков авторизации: токены продавца в логи не попадают
+	# Шаг 43, находка 10 ревью: адрес возврата OAuth несёт код согласия и state в строке запроса — журнал их маскирует
 	log {
 		output stdout
-		format json
+		format filter {
+			wrap json
+			fields {
+				request>uri query {
+					replace spapi_oauth_code REDACTED
+					replace code REDACTED
+					replace state REDACTED
+				}
+			}
+		}
 	}
 	# Шаг 37 [Р-159]: за прокси стоит консоль. TLS кончается здесь, дальше — сеть compose и обычный http
 	reverse_proxy console:4319 {

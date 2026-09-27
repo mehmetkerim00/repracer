@@ -202,6 +202,20 @@ test('Р-172, Р-61: движок работает в долларах, пол �
   Object.assign(numbers, { appliedWrites: Number(applied.rows[0]!.n), heldWrites: Number(held.rows[0]!.n), patchCalls: world.port.stats.patchCalls });
   assert.equal(Number(applied.rows[0]!.n), 0, 'ни одна запись не применена каналом');
   assert.equal(world.port.stats.patchCalls, 0, 'модель Amazon не получила НИ ОДНОГО patchListingsItem');
+  /**
+   * Положительный контроль счётчика (находка 17 ревью шага 42): ноль выше что-то значит, только если счётчик вообще растёт.
+   * Одна запись, отданная модели НАПРЯМУЮ, мимо диспетчера и тени, обязана его сдвинуть. Идентификаторы — сценарные:
+   * порт мира принимает тенанта и аккаунт посева (`amazonLiveWorld`, tag 4200), а не идентификаторы базы.
+   */
+  const asin = world.asins[0]!;
+  await world.port.dispatch({ tenantId: '10000000-0000-4000-8000-000000004200' as never, channelAccountId: '20000000-0000-4000-8000-000000004200' as never,
+    correlationId: 'patch-counter-control', deadline: clock.iso(60_000) as never }, {
+    batchId: 'patch-counter-control', operation: 'patchListingsItem', budgetCharges: [], requestCount: 1,
+    items: [{ channelWriteId: 'patch-counter-control' as never, version: 1, idempotencyKey: 'patch-counter-control', attemptNo: 1,
+      writeScope: { writeScopeId: `ws-amz-${asin}` as never, field: 'PRICE', scopeKey: asin, identity: { marketplace: US_MARKETPLACE, externalSku: `SYN-SKU-${asin}`, channelProductRef: asin } },
+      value: { field: 'PRICE', price: { amountMinor: 1900, currency: 'USD', basis: 'NET' } } }],
+  });
+  assert.equal(world.port.stats.patchCalls, 1, 'положительный контроль: запись, отданная модели напрямую, счётчик сдвигает');
   // Тень ЧИТАЕТ по-настоящему [Р-171]: ноль чтений означал бы, что конвейер просто стоял
   Object.assign(numbers, { summaryCalls: world.port.stats.summaryCalls, eventsDelivered: world.port.stats.eventsDelivered });
   assert.ok(world.port.stats.summaryCalls > 0, `чтений конкурентов у канала: ${world.port.stats.summaryCalls}`);
@@ -237,7 +251,9 @@ test('Р-172, Р-61: движок работает в долларах, пол �
 });
 
 test('Р-173: недельный дайджест по-английски несёт ДОЛЛАРЫ и не обещает заработка', async () => {
-  const digest = createShadowDigest({ store: new PgShadowDigestStore(deliveryPool), mail, now: () => clock.iso(), log: () => undefined });
+  const digest = createShadowDigest({ store: new PgShadowDigestStore(deliveryPool), mail,
+    // Прогон идёт на часах ТЕКУЩЕЙ недели: письмо о ней (в работе — о прошлой закрытой, находка 3 ревью шага 43)
+    sinceDays: 0, now: () => clock.iso(), log: () => undefined });
   const outcome = await digest.send();
   Object.assign(numbers, { digest: outcome });
   assert.equal(outcome.letters, 1, `писем: ${JSON.stringify(outcome)}`);

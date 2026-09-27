@@ -23,8 +23,9 @@ const assert: typeof strictAssert = new Proxy(strictAssert, {
 import { createPool, PgAlertDeliveryStore, PgAlertSink, type PgPool } from '@repracer/pricing-store-pg';
 import { createAlertDelivery } from '@repracer/alert-delivery';
 import { createShadowDigest } from '@repracer/alert-delivery/shadow-digest';
+import { createAuthorizationChecker, ephemeralKeyring } from '@repracer/channel-oauth';
 import { FakeMail } from '@repracer/alert-delivery/testing';
-import { PgShadowDigestStore } from '@repracer/pricing-store-pg';
+import { PgCredentialVault, PgShadowDigestStore } from '@repracer/pricing-store-pg';
 import { createScheduler, JOB_CATALOG, jobSource, PgSchedulerState, pgJobDeps, runScheduler, type JobDeps } from '@repracer/scheduler';
 import { createIsolatedDatabase, requireEnv } from '../../../packages/pricing-store-pg/test/isolated-db.ts';
 import { VirtualClock } from './harness/world.ts';
@@ -158,6 +159,15 @@ before(async () => {
     now: () => new Date().toISOString(), log: () => undefined,
   });
   deps.shadowDigest = shadowDigest;
+  /**
+   * Шаг 43 [Р-177]: проверка авторизаций — работа каталога. Аккаунты этого мира подключены ФАЙЛАМИ развёртывания, токенов
+   * OAuth у них нет: проверять нечего, и работа не должна ни проваливаться, ни трогать аккаунты. Положительное поведение
+   * (отзыв → REVOKED → письмо владельцу) утверждает свой прогон — apps/console/test/connect-live.pg.test.ts.
+   */
+  deps.channelAuthorizations = createAuthorizationChecker({
+    vault: new PgCredentialVault(db.pool('svc_credentials', 1)) as never, keyring: ephemeralKeyring('live-1'),
+    provider: () => null, http: async () => { throw new Error('NO_CHANNEL_APPS_IN_RUN'); }, olderThanSeconds: 0, limit: 100,
+  });
   const scheduler = createScheduler({ state: new PgSchedulerState(schedulerPool), source: jobSource(deps), owner: 'live-1', now: () => clock.iso(),
     alerts: { raise: async (a) => {
       alerts.push({ ...(a as unknown as Live["alerts"][number]), atMs: clock.nowMs() });
@@ -346,6 +356,15 @@ observes('shadow-digest', 'Р-171 (шаг 41): в мире без теневых
   assert.deepEqual(outcome, { letters: 0, quiet: 0, noRecipient: 0, failed: 0, alreadySent: 0 }, `дайджест в боевом мире: ${JSON.stringify(outcome)}`);
   assert.equal(digestMail.sent.length, 0, 'писем дайджеста не было: писать некому');
   console.log(JSON.stringify({ shadowDigest: { runs: job.runs, failed: job.failed, letters: digestMail.sent.length } }));
+});
+
+observes('channel-authorizations', 'Р-177 (шаг 43): в мире без токенов OAuth проверка авторизаций идёт, не проваливается и аккаунтов не трогает', async () => {
+  const job = jobOf('channel-authorizations');
+  assert.ok(job.runs > 0, `работа проверки авторизаций запускалась: ${JSON.stringify(job)}`);
+  assert.equal(job.failed, 0, 'ни один заход не провалился');
+  assert.equal(job.items, 0, 'проверять нечего: токенов OAuth в мире нет');
+  const [a] = (await observer.query(`SELECT count(*) FILTER (WHERE auth_status <> 'ACTIVE')::int AS touched FROM tenant_data.channel_account`)).rows;
+  assert.equal(Number(a.touched), 0, 'аккаунты, подключённые файлами, проверка не трогает');
 });
 
 test('Р-128: о каждой работе планировщика ВЫПОЛНЯЕТСЯ хотя бы одно утверждение', () => {

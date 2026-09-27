@@ -192,6 +192,42 @@ test('Р-148: доказательства не несут путей машин
 });
 
 /**
+ * Р-177 (шаг 43): токен канала — секрет, и в репозитории его не бывает НИГДЕ: ни в доказательствах, ни в логах, ни в
+ * фикстурах, ни в коде. Синтетические токены тестов с шага 33 несут приставку `syn-` — по ней правило отличает синтетику
+ * от настоящего токена, попавшего в файл (например, с выводом прогона на настоящем аккаунте).
+ *
+ * Формы — те же, что маскирует журнал процессов (`packages/channel-oauth/src/redact.ts`): новая форма добавляется в оба места.
+ */
+test('Р-177: в репозитории нет токенов каналов — только синтетика с приставкой syn-', async () => {
+  const { readFileSync, existsSync } = await import('node:fs');
+  const { execFileSync } = await import('node:child_process');
+  const TOKEN = /Atz[ar]\|(?!syn)[A-Za-z0-9_\-+/=.]{12,}|v\^1\.\d+#i\^1#(?!syn)[^\s"'`$]{12,}/;
+  // Зубы [Р-94]: правило обязано ловить токены формы из документации Amazon и формы eBay. Контроли склеены из частей —
+  // иначе правило нашло бы их в этом файле
+  const glue = (...parts: string[]) => parts.join('');
+  for (const bad of [
+    glue('refresh_token: Atz', 'r|IwEBIJ5xQh3dexampleexampleexample'),
+    glue('"access_token":"Atz', 'a|IQEBLjAsAhRmHjNgHpi0U-Dme37rR6CuUpSR"'),
+    glue('token v^1.1#', 'i^1#r^1#p^3#f^0#I^3#t^Ul4xMF8yOkE2RTc5'),
+  ]) assert.match(bad, TOKEN, `правило обязано ловить: ${bad.slice(0, 30)}`);
+  // Синтетика тестов и упоминание формы в тексте — не токен
+  for (const fine of ['Atzr|syn-refresh-token-0001', 'Atzr|synthetic-refresh', 'формы `Atzr|…`, `Atza|…`', 'startsWith(\'Atzr|\')', 'v^1.1#i^1#r#abc']) {
+    assert.doesNotMatch(fine, TOKEN, `правило не должно ловить: ${fine}`);
+  }
+  const root = new URL('../../', import.meta.url);
+  const files = execFileSync('git', ['ls-files', '-co', '--exclude-standard'], { cwd: root, maxBuffer: 64 * 1024 * 1024 }).toString('utf8').split('\n').filter(Boolean);
+  assert.ok(files.length > 500, `список файлов репозитория подозрительно мал: ${files.length}`);
+  const offenders: string[] = [];
+  for (const file of files) {
+    if (!/\.(ts|tsx|mjs|js|json|jsonl|md|log|txt|ya?ml|sh|sql|env|example|html)$/.test(file) || !existsSync(new URL(file, root))) continue;
+    const text = readFileSync(new URL(file, root), 'utf8');
+    const hit = TOKEN.exec(text);
+    if (hit) offenders.push(`${file}: ${hit[0].slice(0, 8)}…`);
+  }
+  assert.deepEqual(offenders, [], 'в репозитории строка формы токена канала без приставки syn- [Р-177]');
+});
+
+/**
  * OQ-183, OQ-194, задача E шага 33: внешний контроль покрывает ВСЕ разворачиваемые процессы, а не только планировщик.
  *
  * Р-127 говорит: работоспособность процесса контролируется извне, потому что изнутри остановленный процесс о себе не
@@ -548,7 +584,8 @@ test('Р-146: миграция из main не меняется задним чи
    * полный прогон шага был красным, — и шаг 42 правит их как черновик своей ветки. Как только они окажутся в main,
    * список станет пустым, и следующая правка потребует новой миграции.
    */
-  const DRAFT = ['migrations/0128_shadow_mode.sql'];
+  // Шаг 43: миграции шагов 41–42 слиты в main — черновиков нет
+  const DRAFT: string[] = [];
   const inMainDrafts = DRAFT.filter((f) => mainTree.includes(f));
   assert.deepEqual(inMainDrafts, [], `миграция объявлена черновиком, но уже лежит в main: ${inMainDrafts.join(', ')} — уберите её из списка DRAFT`);
   assert.deepEqual(changed.filter((f) => !DRAFT.includes(f)), [],

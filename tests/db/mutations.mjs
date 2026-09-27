@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0131_verify_schema_invariants_v37.sql';
+const VERIFY = 'migrations/0133_verify_schema_invariants_v38.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -1473,7 +1473,7 @@ export const STEP41_ROWS = [
       m(replaceInFunction('tenant_data.channel_write_before_insert()',
         "IF (SELECT ca.write_mode FROM tenant_data.channel_account ca\n       WHERE ca.tenant_id = NEW.tenant_id AND ca.channel_account_id = s.channel_account_id) = 'SHADOW' THEN",
         'IF false THEN'),
-        smoke('a write of a shadow account waits in the queue (Р-169, путь 1)', 'a write of a shadow account is born finished and never queued (Р-169)')),
+        smoke('a write of a shadow account is born finished and never queued (Р-169)')),
       // Путь 3: аккаунт ушёл в тень, пока запись была в полёте; повтор после отказа канала обязан упереться в режим
       m(replaceInFunction('tenant_data.channel_write_before_update()',
         "IF (SELECT ca.write_mode FROM tenant_data.channel_account ca\n         WHERE ca.tenant_id = NEW.tenant_id AND ca.channel_account_id = s.channel_account_id) = 'SHADOW' THEN",
@@ -1484,15 +1484,13 @@ export const STEP41_ROWS = [
         smoke('a held write is recorded with a dispatch time (Р-169, путь 2)')),
       // Теневая запись завершается УЖЕ ПРИ ВСТАВКЕ: без этого триггера она осталась бы в очереди диспетчера
       m(dropTrigger('ea_channel_write_complete_shadow', 'tenant_data.channel_write'),
-        smoke('a write of a shadow account waits in the queue (Р-169, путь 1)', 'a write of a shadow account is born finished and never queued (Р-169)')),
+        smoke('a write of a shadow account is born finished and never queued (Р-169)')),
       // Уже уходившая запись тенью не помечается: её судьба — отказ, а не «удержано»
       // Уход в тень УДЕРЖИВАЕТ ждущие записи: без ветки они остались бы в очереди, и диспетчер бился бы о страж режима
       m(replaceInFunction('tenant_data.channel_write_mode_apply()', "AND w.status IN ('PENDING', 'BLOCKED');", "AND w.status IN ('NOTHING');"),
-        smoke('a pending write of an account that went to shadow still waits in the queue (Р-170)',
-          'going to shadow holds the writes that were still waiting (Р-170)')),
+        smoke('going to shadow holds the writes that were still waiting (Р-170)')),
       m(replaceInFunction('tenant_data.channel_write_mode_apply()', "AND w.status = 'FAILED';", "AND w.status = 'NOTHING';"),
-        smoke('a failed write of a shadow account still waits for a retry (Р-169)',
-          'a write that had already left is ended by its refusal, not marked as held (Р-169)')),
+        smoke('a write that had already left is ended by its refusal, not marked as held (Р-169)')),
     ],
   },
   {
@@ -1629,6 +1627,164 @@ export const STEP42_ROWS = [
         smoke('a saving without a currency (Р-173, Р-71)', 'a saving that is a bare number (Р-173, Р-71)')),
       m(dropTrigger('b_shadow_digest_before_write', 'tenant_data.shadow_digest'),
         smoke('a digest recorded as already delivered (Р-174)', 'marking a delivered digest again (Р-174)')),
+    ],
+  },
+];
+
+/**
+ * Шаг 43 [Р-175…Р-177]: подключение канала продавцом по OAuth. Главное — строка Р-177: КТО может прочитать токен. Права
+ * по столбцам проверяются мутацией «выдать право» — если бы защиты не было, своя проверка это показала бы: консоль прочла бы
+ * шифротекст, путь решения увидел бы таблицу, роль адаптеров переписала бы токен. Плюс OQ-231 и OQ-232 (хвосты шага 42).
+ */
+const CHECKED = 'security.channel_authorization_checked(uuid, uuid, text, text)';
+export const STEP43_ROWS = [
+  {
+    row: 'Р-175', critical: false,
+    invariant: 'запрос согласия живёт не больше десяти минут, хранит только отпечаток state, завершается один раз и не после срока',
+    mutations: [
+      m(dropConstraint('channel_authorization_request_short_lived', 'tenant_data.channel_authorization_request'),
+        smoke('an authorization request that lives thirty minutes (Р-175)')),
+      m(dropConstraint('channel_authorization_request_state_is_sha256', 'tenant_data.channel_authorization_request'),
+        smoke('an authorization request that keeps the state itself (Р-177)')),
+      m(dropConstraint('channel_authorization_request_state_unique', 'tenant_data.channel_authorization_request'),
+        smoke('the same state twice (Р-175)')),
+      m(dropConstraint('channel_authorization_request_channel_oauth', 'tenant_data.channel_authorization_request'),
+        smoke('an OAuth request for a channel without OAuth (Р-175)')),
+      m(dropConstraint('channel_authorization_request_region_for_amazon', 'tenant_data.channel_authorization_request'),
+        smoke('an Amazon request without a region (Р-175)')),
+      m(dropConstraint('channel_authorization_request_status_known', 'tenant_data.channel_authorization_request'),
+        smoke('an unknown request status (Р-175)')),
+      m(dropConstraint('channel_authorization_request_completed_names_account', 'tenant_data.channel_authorization_request'),
+        smoke('a completed request that names no account (Р-175)')),
+      m(dropConstraint('channel_authorization_request_failure_named', 'tenant_data.channel_authorization_request'),
+        smoke('a denied request without a code (Р-175)')),
+      m(dropTrigger('b_channel_authorization_request_guard', 'tenant_data.channel_authorization_request'),
+        smoke('an authorization request born completed (Р-175)')),
+      // Второе завершение в FAILED держит и CHECK «COMPLETED называет аккаунт»; своя проверка — переезд на другой аккаунт
+      m(replaceInFunction('tenant_data.channel_authorization_request_guard()', "IF OLD.status <> 'PENDING' THEN", 'IF false THEN'),
+        smoke('moving a completed request to another account (Р-175)')),
+      // Код согласия живёт пять минут: возврат после срока запроса — чужой или устаревший, его отклоняет база
+      m(replaceInFunction('tenant_data.channel_authorization_request_guard()', "IF NEW.status = 'COMPLETED' AND now() > OLD.expires_at THEN", 'IF false THEN'),
+        smoke('a consent that came back after the request expired (Р-175)')),
+      // Находка 11 ревью шага 43: срок держит перезапись времени запроса, а не ограничение само по себе
+      m(replaceInFunction('tenant_data.channel_authorization_request_guard()', 'NEW.requested_at := now();', 'NULL;'),
+        smoke('an authorization request dated a year ahead (Р-175)')),
+      // Находка 9: обмен кода захватывается один раз и не после срока
+      m(replaceInFunction('tenant_data.channel_authorization_request_guard()', 'IF OLD.exchange_started_at IS NOT NULL THEN', 'IF false THEN'),
+        smoke('claiming the code exchange twice (Р-175)')),
+      m(replaceInFunction('tenant_data.channel_authorization_request_guard()', 'IF now() > OLD.expires_at THEN', 'IF false THEN'),
+        smoke('claiming the code exchange of an expired request (Р-175)')),
+      m(dropTrigger('channel_authorization_request_restrict_update', 'tenant_data.channel_authorization_request'),
+        smoke('rewriting the state of a request (Р-177)')),
+      m(dropTrigger('a0_admin_write_person_insert', 'tenant_data.channel_authorization_request'),
+        // Запись без человека отклоняет и журнал аудита (событие USER без пользователя); своя проверка стража — право роли
+        smoke('a viewer starts an authorization request (Р-175, Р-100)')),
+      m(dropTrigger('a0_admin_write_person_update', 'tenant_data.channel_authorization_request'),
+        smoke('a viewer closes an authorization request (Р-175, Р-100)')),
+      m(dropTrigger('zc_channel_authorization_request_audit', 'tenant_data.channel_authorization_request'),
+        smoke('starting a request is written to the audit log (Р-97)')),
+    ],
+  },
+  {
+    row: 'Р-177', critical: true,
+    invariant: 'токен канала — шифротекст AES-GCM; читает только роль адаптеров, пишет человек, версию и вытеснение ведёт база',
+    mutations: [
+      // КТО читает: у каждой роли — своя проверка, и «выдать лишнее право» она ловит отказом, которого не случилось
+      m('GRANT SELECT ON tenant_data.channel_credential TO repracer_admin',
+        smoke('the administrative role reads the ciphertext (Р-177)')),
+      m('GRANT UPDATE ON tenant_data.channel_credential TO repracer_admin',
+        smoke('the administrative role rewrites a token (Р-177)')),
+      m('GRANT SELECT ON tenant_data.channel_credential TO repracer_app',
+        smoke('the decision path reads channel tokens (Р-177)')),
+      m('GRANT UPDATE (ciphertext) ON tenant_data.channel_credential TO repracer_credentials',
+        smoke('the adapter role rewrites a token (Р-177)')),
+      // Находка 1 ревью шага 43: роль удаления по сроку (в ней планировщик и пул консоли) читала шифротекст целиком
+      m('GRANT SELECT ON tenant_data.channel_credential TO repracer_retention',
+        smoke('no login role except the adapter role reads the ciphertext of channel tokens (Р-177)')),
+      // Находка 4: ссылка `db:` — только на токен своего аккаунта
+      m(dropConstraint('channel_account_db_credentials_own', 'tenant_data.channel_account'),
+        smoke('an account that points at the token of another account (Р-177)')),
+      // Находка 6: аккаунт eBay без названного продавца (E-11) в бой не переводится
+      m(dropConstraint('channel_account_pending_identity_not_live', 'tenant_data.channel_account'),
+        smoke('an eBay account without a known seller goes live (Р-177, E-11)')),
+      m(`GRANT EXECUTE ON FUNCTION ${CHECKED} TO repracer_admin`,
+        smoke('the console declares a token verified (Р-177)')),
+      m(dropConstraint('channel_credential_not_plaintext', 'tenant_data.channel_credential'),
+        smoke('storing a refresh token in the clear (Р-177)')),
+      m(dropConstraint('channel_credential_iv_gcm', 'tenant_data.channel_credential'),
+        smoke('a sealed token with a wrong nonce length (Р-177)')),
+      m(dropConstraint('channel_credential_tag_gcm', 'tenant_data.channel_credential'),
+        smoke('a sealed token without its authentication tag (Р-177)')),
+      m(dropConstraint('channel_credential_key_id_shape', 'tenant_data.channel_credential'),
+        smoke('a key id that is not a key name (Р-177)')),
+      m(dropConstraint('channel_credential_failures_non_negative', 'tenant_data.channel_credential'),
+        smoke('a negative count of failed checks (Р-177)')),
+      m('DROP INDEX tenant_data.channel_credential_one_current',
+        smoke('two current versions of a token (Р-177)')),
+      // Без триггера версию не считает никто — законная запись токена отклоняется
+      m(dropTrigger('a_channel_credential_before_insert', 'tenant_data.channel_credential'),
+        smoke('the console stores the sealed refresh token (Р-177)')),
+      m(replaceInFunction('tenant_data.channel_credential_before_insert()',
+        'UPDATE tenant_data.channel_credential SET superseded_at = now()', 'UPDATE tenant_data.channel_credential SET superseded_at = superseded_at'),
+        smoke('a second authorization supersedes the first and is numbered by the database (Р-177)')),
+      m(replaceInFunction('tenant_data.channel_credential_before_insert()', 'coalesce(max(c.version), 0) + 1', '1'),
+        smoke('a second authorization supersedes the first and is numbered by the database (Р-177)')),
+      m(dropTrigger('a0_admin_write_person_insert', 'tenant_data.channel_credential'),
+        smoke('a viewer stores a channel token (Р-177, Р-100)')),
+      m(dropTrigger('zc_channel_credential_audit', 'tenant_data.channel_credential'),
+        smoke('storing a token is written to the audit log without the token (Р-97, Р-177)')),
+    ],
+  },
+  {
+    row: 'Р-177, отзыв', critical: false,
+    invariant: 'отзыв продавцом переводит аккаунт в REVOKED с CRITICAL-алертом; сеть — не отзыв; вытесненный токен аккаунт не трогает',
+    mutations: [
+      m(replaceInFunction(CHECKED, "IF p_outcome NOT IN ('OK', 'REVOKED', 'TRANSIENT', 'PLATFORM') THEN", 'IF false THEN'),
+        smoke('an unknown check outcome (Р-177)')),
+      m(replaceInFunction(CHECKED, 'SET verified_at = now(), check_failures = 0', 'SET verified_at = NULL, check_failures = 0'),
+        smoke('a successful check marks the token verified (Р-177)')),
+      m(replaceInFunction(CHECKED, 'AND failures = 3 THEN', 'AND false THEN'),
+        smoke('three transient failures raise one warning and keep the account connected (Р-177)')),
+      m(replaceInFunction(CHECKED, "UPDATE tenant_data.channel_account SET auth_status = 'REVOKED'", 'UPDATE tenant_data.channel_account SET auth_status = auth_status'),
+        smoke('a revoked authorization moves the account to REVOKED and raises a critical alert (Р-177)')),
+      m(replaceInFunction(CHECKED, "'CHANNEL_AUTHORIZATION_REVOKED', 'CRITICAL'", "'CHANNEL_AUTHORIZATION_REVOKED', 'WARNING'"),
+        smoke('a revoked authorization moves the account to REVOKED and raises a critical alert (Р-177)')),
+      m(replaceInFunction(CHECKED, 'IF c.superseded_at IS NOT NULL THEN', 'IF false THEN'),
+        smoke('a check of a superseded token changes nothing (Р-177)')),
+    ],
+  },
+  {
+    row: 'OQ-231, OQ-232', critical: false,
+    invariant: 'витрина вне справочника держит бой; удержание полом пишет база при вставке намерения — деньги с валютой, неизменяемо',
+    mutations: [
+      m(replaceInFunction('security.marketplace_properties_unknown(text, text[])', 'IF outside IS NOT NULL THEN', 'IF false THEN'),
+        smoke('a LIVE account with a marketplace outside the reference (OQ-231)')),
+      m(dropTrigger('zd_price_intent_record_floor_hold', 'channel_data.price_intent'),
+        smoke('the database records how far below the floor the strategy wanted (OQ-232)')),
+      // OQ-233: признак тени строки удержания — режим аккаунта; неверный признак унёс бы сумму дайджеста в ноль или в бой
+      m(replaceInFunction('channel_data.price_intent_record_floor_hold()', 'coalesce(in_shadow, false)', 'NOT coalesce(in_shadow, false)'),
+        smoke('the database records how far below the floor the strategy wanted (OQ-232)')),
+      // Находка 12 ревью шага 43: удержание пишет только триггер намерения — путь решения суммы не подделает
+      m('GRANT INSERT ON channel_data.floor_hold TO repracer_app',
+        smoke('the decision path writes a floor hold directly (Р-173)')),
+      m(dropConstraint('floor_hold_currency_iso', 'channel_data.floor_hold'),
+        smoke('a floor hold without a currency code (OQ-232, Р-71)')),
+      m(dropConstraint('floor_hold_below_positive', 'channel_data.floor_hold'),
+        smoke('a floor hold that is not below the floor (OQ-232)')),
+      m(dropTrigger('zz_append_only', 'channel_data.floor_hold'),
+        smoke('append-only channel_data.floor_hold')),
+      m(dropTrigger('zz_no_truncate', 'channel_data.floor_hold'),
+        smoke('truncate channel_data.floor_hold')),
+    ],
+  },
+  {
+    row: 'Р-173, находка 15 шага 42', critical: false,
+    invariant: 'сумма дайджеста — деньги: объект ровно из валюты и неотрицательной суммы',
+    mutations: [
+      m(replaceInFunction('platform.money_list_valid(jsonb)', "OR (e->>'minor')::numeric < 0", ''),
+        smoke('a negative saving (Р-173)')),
+      m(replaceInFunction('platform.money_list_valid(jsonb)', 'OR (SELECT count(*) FROM jsonb_object_keys(e)) <> 2)', ')'),
+        smoke('a saving that carries an extra key (Р-173, Р-85)')),
     ],
   },
 ];

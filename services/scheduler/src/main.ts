@@ -3,7 +3,7 @@ import { createAmazonAdapter, TwoLevelBudget } from '@repracer/amazon-adapter';
 import type { AdapterDependencies, ChannelAdapter } from '@repracer/channel-port';
 import { conservativeBudget, createKauflandAdapter } from '@repracer/kaufland-adapter';
 import { createPricingPipeline } from '@repracer/pricing-pipeline';
-import { createPool, PgAlertDeliveryStore, PgAlertSink, PgPricingStore, PgShadowDigestStore, type PgPool } from '@repracer/pricing-store-pg';
+import { createPool, PgAlertDeliveryStore, PgAlertSink, PgCredentialVault, PgPricingStore, PgShadowDigestStore, type PgPool } from '@repracer/pricing-store-pg';
 import { loadConfig, type SchedulerConfig } from './config.ts';
 import { createDryMailSender, createHeartbeat, createMailSender } from '@repracer/service-runtime';
 import { createAlertDelivery } from '@repracer/alert-delivery';
@@ -15,6 +15,8 @@ import { PgSchedulerState } from './pg-state.ts';
 import { runScheduler, type RunningScheduler } from './process.ts';
 import { createScheduler } from './scheduler.ts';
 import { credentialsFromFiles, jsonSink, pgAccountDirectory } from './runtime.ts';
+import { channelApps, channelCredentialsProvider } from '@repracer/service-runtime';
+import { createAuthorizationChecker } from '@repracer/channel-oauth';
 
 /**
  * Р-129 (шаг 26): точка входа процесса планировщика — сборка из конфигурации развёртывания. Один экземпляр на работу держит аренда в
@@ -58,9 +60,16 @@ export async function startScheduler(config: SchedulerConfig = loadConfig(), onF
    * владельца: из неё работа `alerts-deliver` шлёт письмо. Алерт без строки в базе доставить было бы нечем.
    */
   const alerts = new PgAlertSink(appPool, sink.alerts);
+  const credentialsPool: PgPool | null = config.credentialsPgUrl
+    ? createPool(config.credentialsPgUrl, { max: 2, applicationName: `repracer-scheduler-credentials-${config.owner}` }) : null;
   const deps: AdapterDependencies = {
     accounts: pgAccountDirectory(appPool),
-    credentials: credentialsFromFiles(config.channelSecretsDir),
+    // Шаг 43 [Р-177]: ссылка `db:` — токен, полученный OAuth: его читает роль адаптеров и открывает кольцо ключей процесса
+    credentials: channelCredentialsProvider({
+      files: credentialsFromFiles(config.channelSecretsDir),
+      vault: credentialsPool && config.channelApps.keyring ? { pool: credentialsPool, keyring: config.channelApps.keyring } : null,
+      amazonApplication: config.channelApps.amazon ? { ref: config.amazon.applicationCredentialsRef, ...config.channelApps.amazon } : null,
+    }),
     alerts,
     logger: sink.logger,
     now: () => new Date().toISOString(),
@@ -124,12 +133,26 @@ export async function startScheduler(config: SchedulerConfig = loadConfig(), onF
   if (!config.mail && !config.mailOff) {
     sink.logger.log({ level: 'WARN', code: 'MAIL_DRY_RUN_MODE', message: 'провайдер почты не настроен: письма собираются и не отправляются (OQ-224)', details: {} });
   }
-  const deps2 = pgJobDeps({
+  /**
+   * Шаг 43 [Р-177]: проверка авторизаций — обмен refresh-токена раз в период. Отзыв продавцом переводит аккаунт в REVOKED с
+   * письмом владельцу (это делает база); сломанные ключи приложения — алерт оператору. Токен не покидает проверку.
+   */
+  const apps = channelApps(config.channelApps);
+  const channelAuthorizations = credentialsPool && config.channelApps.keyring
+    ? createAuthorizationChecker({
+        vault: new PgCredentialVault(credentialsPool) as never, keyring: config.channelApps.keyring,
+        provider: (c) => apps.find((a) => a.channel === c.channel)?.provider ?? null,
+        http: (url, init) => fetch(url, init), olderThanSeconds: 50 * 60, limit: 500,
+        log: (event, fields) => sink.logger.log({ level: 'WARN', code: event.toUpperCase(), message: event, details: fields } as never),
+      })
+    : undefined;
+  const deps2Base = pgJobDeps({
     schedulerPool, exporterPool, ingest: ch(config.clickHouse.ingest), verifier: ch(config.clickHouse.verifier),
     descriptorOf: (channel) => adapterFor(channel)?.descriptor ?? null, pipelineFor,
     ...(alertDelivery ? { alertDelivery } : {}),
     ...(shadowDigest ? { shadowDigest } : {}),
   });
+  const deps2 = { ...deps2Base, ...(channelAuthorizations ? { channelAuthorizations } : {}) };
   const metrics = new SchedulerMetrics();
   // Риск 31: часы сроков — часы базы
   const scheduler = createScheduler({ state, source: jobSource(deps2), owner: config.owner, now: dueClockOf(state), alerts });
@@ -173,7 +196,7 @@ export async function startScheduler(config: SchedulerConfig = loadConfig(), onF
     clearInterval(heartbeatTimer);
     await running.stop();
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    await Promise.all([schedulerPool.end(), appPool.end(), exporterPool.end()]);
+    await Promise.all([schedulerPool.end(), appPool.end(), exporterPool.end(), ...(credentialsPool ? [credentialsPool.end()] : [])]);
   };
   return { running, metrics, stop };
 }

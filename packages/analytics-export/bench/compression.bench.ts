@@ -296,16 +296,22 @@ async function measurePostgres(source: string, target: string, make: (i: number)
    * генератор не знает, берёт своё умолчание; столбец БЕЗ умолчания замер по-прежнему назовёт — и вставка честно откажет,
    * потому что тогда генератор обязан его заполнять.
    */
-  let names = '';
+  const warned = new Set<string>();
   for (let i = 0; i < PG_ROWS; i += 5_000) {
     const batch = Array.from({ length: Math.min(5_000, PG_ROWS - i) }, (_, k) => make(i + k));
-    if (names === '') {
-      // Ключи берутся у ПЕРВОЙ строки партии, а не у отдельного вызова генератора: генератор держит состояние (seed, series),
-      // и лишний вызов сдвинул бы данные замера.
-      const filled = new Set(Object.keys(batch[0]!));
-      const skipped = cols.filter((c) => !filled.has(c.column_name) && c.column_default !== null).map((c) => c.column_name);
-      names = cols.filter((c) => filled.has(c.column_name) || c.column_default === null).map((c) => `"${c.column_name}"`).join(', ');
-      if (skipped.length > 0) console.log(`  ${target}: столбцы со своим умолчанием, не заполняемые генератором: ${skipped.join(', ')}`);
+    /**
+     * Находка 16 ревью шага 42: столбцы — ОБЪЕДИНЕНИЕ ключей ВСЕЙ партии, и у каждой партии своё. Первая редакция брала
+     * ключи у первой строки первой партии: генератор с условным ключом (поле есть у каждой десятой строки) молча терял бы
+     * его у всех строк замера, и замер мерил бы не те данные. Ключи читаются из готовой партии — отдельный вызов
+     * генератора сдвинул бы его состояние (seed, series).
+     */
+    const filled = new Set(batch.flatMap((row) => Object.keys(row)));
+    const skipped = cols.filter((c) => !filled.has(c.column_name) && c.column_default !== null).map((c) => c.column_name);
+    const names = cols.filter((c) => filled.has(c.column_name) || c.column_default === null).map((c) => `"${c.column_name}"`).join(', ');
+    const note = skipped.join(', ');
+    if (skipped.length > 0 && !warned.has(note)) {
+      warned.add(note);
+      console.log(`  ${target}: столбцы со своим умолчанием, не заполняемые генератором: ${note}`);
     }
     await pgAdmin.query(`INSERT INTO bench_size.${target} (${names}) SELECT ${names} FROM json_populate_recordset(NULL::bench_size.${target}, $1::json)`, [JSON.stringify(batch)]);
   }

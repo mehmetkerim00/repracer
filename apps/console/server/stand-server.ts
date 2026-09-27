@@ -15,6 +15,8 @@ import {
 } from '@repracer/contract-tests/stand';
 import { createAuthenticator, hasSecondFactor, remoteJwks, staticJwks, type Authenticator, type Principal } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
+import { connectionsView } from '@repracer/console-model';
+import type { ChannelConnectService } from './connect.ts';
 import {
   NOTE_MAX, NOTE_MIN, type BoundsIndexItem, type BoundsIndexView, type EnableResult, type NoteRequest, type SessionView, type StopRequest, type StrategySaveResponse, type WorldSummary,
 } from '../src/api-types.ts';
@@ -164,7 +166,15 @@ function conflictText(world: StandWorld, conflict: { writeScopeId: string; actua
   return m.ui.server.boundsConflictAt(unitOf(world, scope, m).label, m.money(conflict.actual.minMinor, scope.currency), m.money(conflict.actual.maxMinor, scope.currency));
 }
 
-export function createStandApi(worlds: readonly LiveWorld[], identity: StandIdentity) {
+/**
+ * Шаг 43 [Р-175]: службы консоли, которых нет у мира стенда. Подключение канала — у мира, чей тенант подключает каналы
+ * настоящим OAuth: процесс с кольцом ключей и приложениями каналов. Мира без службы экран честно показывает недоступным.
+ */
+export interface StandServices {
+  connect?(worldId: string): ChannelConnectService | null;
+}
+
+export function createStandApi(worlds: readonly LiveWorld[], identity: StandIdentity, services: StandServices = {}) {
   const localeCookie = (l: Locale) => `${LOCALE_COOKIE}=${l}; SameSite=Strict; Path=/; Max-Age=31536000`;
 
   return async function handle(req: ApiRequest): Promise<ApiResponse> {
@@ -340,6 +350,48 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       ]);
       return ok(onboardingView({ id: live.id, demo, viewer }, progress, status, accounts, m));
     }
+    /**
+     * Шаг 43 [Р-175…Р-177]: подключение каналов. Экран читает только аккаунты и запросы согласия — состояние консоли
+     * целиком ему не нужно [Р-154]. Начинает и завершает подключение тот, кто управляет тенантом; гость демо [Р-160] и
+     * наблюдатель получают 403 здесь, а запись без права всё равно отклонит база (страж административной записи).
+     */
+    if (parts[3] === 'connections') {
+      const connect = services.connect?.(live.id) ?? null;
+      const param4 = parts[4] ?? null;
+      const t = m.ui.connections;
+      if (req.method === 'GET' && param4 === null) {
+        const rows = connect ? await connect.connections(live.tenantId) : { accounts: [], pending: [] };
+        return ok(connectionsView({ worldId: live.id, role: viewer.role, now: new Date().toISOString() }, rows, connect ? connect.connectable() : [], m));
+      }
+      if (req.method !== 'POST' || (param4 !== 'start' && param4 !== 'callback')) return fail(404, 'NOT_FOUND', s.notFound);
+      if (!can(viewer.role, 'MANAGE_TENANT')) return fail(403, 'FORBIDDEN', t.noRight);
+      if (!connect) return fail(409, 'CHANNEL_UNAVAILABLE', t.errors.unavailable);
+      const actor = { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) };
+      if (param4 === 'start') {
+        const marketplaces = Array.isArray(body.marketplaces) && body.marketplaces.every((x) => typeof x === 'string') ? body.marketplaces as string[] : null;
+        if (typeof body.channel !== 'string' || !marketplaces) return fail(400, 'BAD_REQUEST', s.badRequest);
+        const started = await connect.start(live.tenantId, { channel: body.channel, marketplaces }, actor);
+        if (started.status === 'UNAVAILABLE') return fail(409, 'CHANNEL_UNAVAILABLE', t.errors.unavailable);
+        if (started.status === 'BAD_MARKETPLACES') return fail(400, 'BAD_MARKETPLACES', t.errors.badMarketplaces);
+        if (started.status === 'IDENTITY_UNKNOWN') return fail(409, 'IDENTITY_UNKNOWN', t.errors.identityUnknown);
+        return ok({ consentUrl: started.consentUrl, expiresAt: started.expiresAt });
+      }
+      // Параметры возврата — строками и не больше десятка: SPA пересылает их из адреса, по которому канал вернул браузер
+      const raw = (body.params ?? {}) as Record<string, unknown>;
+      const params: Record<string, string> = {};
+      for (const [k, v] of Object.entries(raw).slice(0, 10)) if (typeof v === 'string' && v.length <= 2048) params[k] = v;
+      const outcome = await connect.callback(live.tenantId, params, actor);
+      const e = t.errors;
+      if (outcome.status === 'CONNECTED') return ok({ channelAccountId: outcome.channelAccountId, reconnected: outcome.reconnected, message: e.connected(outcome.reconnected) });
+      if (outcome.status === 'DENIED') return fail(409, 'DENIED', e.denied);
+      if (outcome.status === 'EXPIRED') return fail(409, 'EXPIRED', e.expired);
+      if (outcome.status === 'ALREADY_DONE') return fail(409, 'ALREADY_DONE', e.alreadyDone);
+      if (outcome.status === 'EXCHANGE_FAILED') return fail(502, `EXCHANGE_${outcome.failure}`, e.exchange);
+      if (outcome.status === 'SELLER_TAKEN') return fail(409, 'SELLER_TAKEN', e.sellerTaken);
+      if (outcome.status === 'MFA_REQUIRED') return fail(403, 'MFA_REQUIRED', e.mfa);
+      return fail(400, outcome.status, e.unknownState);
+    }
+
     const world = await live.view(viewer);
     /**
      * Р-151: признак демо — из БАЗЫ (`tenant.demo` в состоянии консоли), а не из настройки стенда. Первая редакция брала его

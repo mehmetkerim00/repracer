@@ -300,7 +300,7 @@ export const en = {
       worlds: 'Stand worlds',
       worldsHint: 'Each world is a stand scenario on synthetic data. No channel is connected.',
       backToWorlds: '← Worlds',
-      screens: { onboarding: 'Setup', shadow: 'Shadow mode', stock: 'Stock', products: 'Products', decisions: 'Why this price', rejected: 'Stopped changes', bounds: 'Bounds', 'cost-import': 'Cost import', stop: 'Stop pricing', strategies: 'Strategies', feed: 'Price changes', dangerous: 'Dangerous changes', compliance: 'Omnibus', jobs: 'Bulk operations' },
+      screens: { connections: 'Channel connections', onboarding: 'Setup', shadow: 'Shadow mode', stock: 'Stock', products: 'Products', decisions: 'Why this price', rejected: 'Stopped changes', bounds: 'Bounds', 'cost-import': 'Cost import', stop: 'Stop pricing', strategies: 'Strategies', feed: 'Price changes', dangerous: 'Dangerous changes', compliance: 'Omnibus', jobs: 'Bulk operations' },
       loading: (seconds: number) => `Loading stand data. If there is no answer within ${seconds} s, an error is shown.`,
       timeout: (seconds: number) => `The stand did not answer within ${seconds} s. Is it running? npm run stand -w @repracer/console`,
       unavailable: (detail: string) => `The stand is unavailable: ${detail}`,
@@ -580,6 +580,73 @@ export const en = {
      * Шаг 41 [Р-169…Р-171]: теневой режим. Тексты написаны для продавца, который каналу пока не верит: они говорят, что
      * произошло БЫ, и ни слова о том, сколько бы он заработал — этого мы не знаем.
      */
+    connections: {
+      title: 'Channel connections',
+      intro: 'You connect a channel yourself: the button opens the consent page of the channel, you allow access there, and the channel sends you back here. A new connection starts in the shadow — the engine works completely and writes nothing.',
+      noRight: 'Only the owner or an administrator of the account connects channels.',
+      tokenNote: 'We keep the access of the channel encrypted and never show it — not here, not in letters, not in logs. You can withdraw it at any time in the channel itself; we notice that and tell you.',
+      connect: (channel: string) => `Connect ${channel}`,
+      connectAnother: (channel: string) => `Connect another ${channel} account`,
+      reconnect: 'Renew the access',
+      reconnectRevoked: 'Connect again',
+      pending: (until: string) => `Waiting for your consent on the page of the channel — until ${until}.`,
+      failed: (why: string) => `The last attempt did not connect: ${why}`,
+      platformMissing: (what: string) => `Not available yet: ${what}. Nothing is to be done by you — the button appears as soon as this is in place.`,
+      states: {
+        NOT_CONNECTED: 'not connected',
+        AWAITING_CONSENT: 'waiting for your consent',
+        AWAITING_PLATFORM: 'waiting for access of the platform',
+        AWAITING_ACCESS: 'waiting for access',
+        SHADOW: 'shadow: connected, nothing is written',
+        LIVE: 'live: prices are written',
+        REVOKED: 'access withdrawn in the channel',
+      } as Record<string, string>,
+      progress: {
+        discovering: 'Looking for your offers in the channel — the first ones appear here within minutes.',
+        shadow: (offers: number, decisions: number) => `Found ${offers} offers; the shadow made ${decisions} decisions in the last 24 hours.`,
+        shadowWaiting: (offers: number) => `Found ${offers} offers. The shadow starts counting once the offers have costs, bounds and a strategy — continue in Setup: without a declared cost the engine does not start, not even in the shadow.`,
+        live: (offers: number) => `${offers} offers found in the channel.`,
+        awaitingAccess: (what: string) => `Missing: ${what}.`,
+      },
+      authorization: {
+        external: 'Access is configured by the platform, not through this screen.',
+        obtained: (when: string) => `Access granted ${when}; not checked yet.`,
+        verified: (when: string, failures: number) => `Access last confirmed by the channel ${when}${failures > 0 ? ` (${failures} checks failed since)` : ''}.`,
+      },
+      marketplaces: {
+        A1PA6795UKMFR9: 'amazon.de',
+        ATVPDKIKX0DER: 'amazon.com',
+        EBAY_DE: 'ebay.de',
+        EBAY_US: 'ebay.com',
+      } as Record<string, string | undefined>,
+      missing: {
+        AMAZON_APPLICATION: 'our Amazon application (SP-API) is not registered yet',
+        EBAY_DEVELOPER_KEYS: 'our eBay developer keys are not issued yet (E-01)',
+      } as Record<string, string | undefined>,
+      failures: {
+        DENIED: 'you declined on the page of the channel',
+        EXPIRED: 'the consent came back too late — start again',
+        EXCHANGE_REVOKED: 'the channel did not accept the consent code — start again',
+        EXCHANGE_PLATFORM: 'the channel refused our application — this is on our side; please try again later',
+        EXCHANGE_TRANSIENT: 'the channel did not answer — start again in a few minutes',
+        SELLER_TAKEN: 'this seller account is already connected elsewhere',
+        MFA_REQUIRED: 'renewing an existing connection needs your second factor',
+        BAD_CALLBACK: 'the return from the channel did not belong to this connection — start again',
+      } as Record<string, string | undefined>,
+      errors: {
+        badMarketplaces: 'Choose storefronts of one region.',
+        unavailable: 'This channel cannot be connected yet.',
+        unknownState: 'This return does not belong to a connection started in this account. Start again from this screen.',
+        expired: 'The consent came back too late. Start again from this screen.',
+        alreadyDone: 'This connection is already finished.',
+        denied: 'You declined on the page of the channel. Nothing was connected.',
+        exchange: 'The channel did not confirm the consent. Nothing was connected; start again.',
+        identityUnknown: 'eBay does not tell us which seller signed in, so a second eBay connection could be the same seller twice. Reconnecting eBay becomes possible once we can identify the seller (question E-11).',
+        sellerTaken: 'This seller account is already connected — in another repracer account or as another connection. Nothing was connected; contact support if this is unexpected.',
+        mfa: 'Renewing the access of an existing connection needs your second factor. Sign in again with it and repeat.',
+        connected: (reconnected: boolean): string => reconnected ? 'Access renewed. The account works as before.' : 'Connected. The account starts in the shadow; your offers appear within minutes.',
+      },
+    },
     shadow: {
       title: 'Shadow mode',
       intro: 'The channel is connected and the engine runs completely — snapshots, checks, strategy, bounds, explanation. Nothing is written to the channel: every change below was held.',
@@ -626,7 +693,7 @@ export const en = {
       },
       digest: {
         subject: (tenant: string) => `repracer: what the engine would have done this week (${tenant})`,
-        intro: (tenant: string, accounts: number) => `Your account "${tenant}" runs ${accounts} channel connection(s) in shadow mode: the engine works completely and writes nothing to the channel. Here is what it would have done in the last seven days.`,
+        intro: (tenant: string, accounts: number) => `Your account "${tenant}" runs ${accounts} channel connection(s) in shadow mode: the engine works completely and writes nothing to the channel. Here is what it would have done last week (Monday to Sunday, UTC). The Shadow mode screen counts the last seven days up to now, so its numbers differ from this letter.`,
         cta: 'If these numbers look right, switch live writes on for the channel in the console — Shadow mode screen. Only you as the owner can do it, and it needs your second factor.',
         historyTitle: 'Weekly reports we sent you',
         notDelivered: 'not delivered yet',
@@ -692,6 +759,9 @@ export const en = {
         AMAZON_TENANT_MISMATCH: { what: 'an Amazon account does not belong to the seller account it was used for', step: 'Open the channel connections in the console: nothing is written for this account until the assignment is right.' },
         AMAZON_ACCOUNT_UNAVAILABLE: { what: 'the Amazon account cannot be used at the moment', step: 'Check the credentials of the account in the console: an expired application access is the most common cause.' },
         AMAZON_NOTIFICATION_SELLER_MISMATCH: { what: 'an Amazon notification names a seller other than the account it came through', step: 'Open the channel connections in the console: the notification was not used.' },
+        // Шаг 43 [Р-177]: отзыв авторизации продавцом на стороне канала — не тихая ошибка, а письмо владельцу
+        CHANNEL_AUTHORIZATION_REVOKED: { what: 'the channel no longer accepts our access to this account: most likely the authorization was withdrawn in the channel', step: 'Open the channel connections in the console and connect the account again: until then nothing is written to this channel, and the shadow stops counting.' },
+        CHANNEL_AUTHORIZATION_CHECK_FAILING: { what: 'the access to a channel account could not be checked several times in a row', step: 'Open the channel connections in the console: if the channel is reachable and this repeats, connect the account again.' },
         /**
          * --- События ПЛАТФОРМЫ: получатель — ОПЕРАТОР, а не продавец [находка 3 ревью шага 36].
          *
@@ -699,6 +769,8 @@ export const en = {
          * они человеку, который как раз и есть «мы». Такое письмо не говорит оператору НИЧЕГО: ни что случилось в
          * системе, ни куда смотреть. Теперь «что» называет механизм, а «первый шаг» — первое действие оператора.
          */
+        CHANNEL_APP_CREDENTIALS_REJECTED: { what: 'the token endpoint of a channel refused the keys of our application', step: 'Check the client id and secret of the named channel in the secret files of the deployment: sellers are not affected by their own doing, and their accounts stay connected.' },
+        CHANNEL_REVOCATIONS_SUSPICIOUS: { what: 'most checked channel accounts were refused with invalid_grant in one pass — more likely our failure than sellers withdrawing access', step: 'Check the application keys, the keyring file and recent changes of the channel application before telling sellers anything: their accounts were left connected.' },
         ALERT_NOT_STORED: { what: 'an event could not be stored in the database', step: 'Check that the database is reachable from the process it came from: the event exists only in the process log, and no letter is sent about it.' },
         ANALYTICS_EXPORT_BACKLOG: { what: 'the export of competitor history to ClickHouse is behind', step: 'Check in the scheduler run log since when the `analytics-export` job is behind, and check that ClickHouse is reachable. From 14 days of backlog on, the oldest days of the history are lost.' },
         ANALYTICS_EXPORT_FAILED: { what: 'the export of a day to ClickHouse failed', step: 'Check first that ClickHouse is reachable and read the error line in the process log; the day is repeated from the backlog.' },

@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { createHeartbeat, ProcessHealth, serveHealth, type Env } from '@repracer/service-runtime';
+import { channelApps, createHeartbeat, loadChannelAppsConfig, ProcessHealth, serveHealth, type Env } from '@repracer/service-runtime';
+import { ephemeralKeyring } from '@repracer/channel-oauth';
+import { createChannelConnectService } from './connect.ts';
 import { createAuthenticator, remoteJwks, staticJwks, type Authenticator, type Principal } from '@repracer/identity';
 import { createLocalIssuer } from '@repracer/identity/test-issuer';
-import { createPool, type PgPool } from '@repracer/pricing-store-pg';
+import { createPool, PgChannelConnectStore, type PgPool } from '@repracer/pricing-store-pg';
 import { PgIdentityDirectory } from '@repracer/identity/pg';
 import { pgStandJoinMember, pgStandUsers, STAND_EMAILS } from '@repracer/contract-tests/stand';
 import { createStandApi, createStandServer, type StandIdentity } from './stand-server.ts';
@@ -185,7 +187,19 @@ export async function startConsole(env: Env = process.env): Promise<RunningConso
       : {}),
   };
 
-  const api = createStandApi(worlds as never, identity);
+  /**
+   * Шаг 43 [Р-175]: подключение каналов продавцом. Приложения каналов и кольцо ключей читаются на СТАРТЕ: половина
+   * настройки — отказ процесса, а не отказ на первом возврате продавца. Ненастроенный канал экран покажет «ожидает
+   * доступа платформы» [Р-150]. Временное кольцо — только когда ни одного приложения нет: зашифровать им нечего.
+   * Демо-тенант настоящий канал не подключает: служба у мира демо отсутствует.
+   */
+  const apps = loadChannelAppsConfig(env);
+  const connectService = createChannelConnectService({
+    store: new PgChannelConnectStore(pools.admin), keyring: apps.keyring ?? ephemeralKeyring('no-channel-apps'), providers: channelApps(apps),
+    http: (url, init) => fetch(url, init),
+    log: (event, fields) => console.log(JSON.stringify({ level: 'INFO', code: event.toUpperCase(), details: fields })),
+  });
+  const api = createStandApi(worlds as never, identity, { connect: (worldId) => (worldId === state.demo?.world.id ? null : connectService) });
   const server = createStandServer(api, config.locale, createStaticHandler(config.distDir));
   const healthServer = await serveHealth(health, { port: config.metricsPort, prefix: 'repracer_console', staleAfterMs: 120_000, host: '0.0.0.0' });
   health.alive();

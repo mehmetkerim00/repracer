@@ -42,12 +42,17 @@ export interface JobConfig {
   alertsDeliverEverySeconds: number;
   /** Шаг 41 [Р-171]: период недельного дайджеста тени */
   shadowDigestEverySeconds: number;
+  /** Шаг 43 [Р-177]: как часто заходит проверка авторизаций каналов обменом refresh-токена */
+  authorizationCheckEverySeconds: number;
 }
 
 export const DEFAULT_JOB_CONFIG: JobConfig = {
   pollEverySeconds: 60, pollBudgetRps: 10, pollMaxQueries: 600, lossReviewEverySeconds: 300, lossGraceSeconds: DEFAULT_LOSS_GRACE_SECONDS,
   amazonCallSeconds: 31, amazonBatch: 20, amazonCircleWarnHours: 24, haltReviewEverySeconds: 300, discoveryEverySeconds: 86_400, orderLinesEverySeconds: 300,
-  exportOffsetSeconds: 1_800, exportLookbackDays: 13, maintenanceEverySeconds: 3_600, alertsDeliverEverySeconds: 60, shadowDigestEverySeconds: 7 * 86_400,
+  exportOffsetSeconds: 1_800, exportLookbackDays: 13, maintenanceEverySeconds: 3_600, alertsDeliverEverySeconds: 60,
+  // Находка 3 ревью шага 43: заход ЕЖЕДНЕВНЫЙ — письмо о прошлой закрытой неделе, недоставленное повторяется каждые сутки
+  shadowDigestEverySeconds: 86_400,
+  authorizationCheckEverySeconds: 3_600,
 };
 
 export interface JobDeps {
@@ -85,6 +90,11 @@ export interface JobDeps {
   /** Шаг 41 [Р-171]: недельный дайджест теневого режима — те же числа, что на экране, письмом владельцу */
   shadowDigest?: { send(): Promise<{ letters: number; quiet: number; noRecipient: number; failed: number }> };
   /**
+   * Шаг 43 [Р-177]: проверка авторизаций каналов. Отзыв продавцом виден только обменом refresh-токена (уведомления об
+   * отзыве в снимках нет — A-18, E-09); итог пишет база, отзыв — CRITICAL владельцу, сломанные ключи приложения — оператору.
+   */
+  channelAuthorizations?: { check(): Promise<{ checked: number; ok: number; revoked: number; transient: number; platform: number; platformChannels: string[]; suspiciousRevocations: number }> };
+  /**
    * Шаг 35 [Р-25, Р-152]: заказы канала → резервации → пересчёт публикуемого остатка → записи. Без хранилища остатков в
    * процессе работы нет; процесс без роли остатков — конфигурация, а не молчаливый пропуск.
    */
@@ -110,7 +120,8 @@ export const JOB_CATALOG: JobCatalogEntry[] = [
   { name: 'price-days-close', scope: 'GLOBAL', when: 'каждый час', missed: 'LATEST: функция закрывает все незакрытые сутки по очереди; сырьё цен не удаляется, пока сутки не закрыты' },
   { name: 'partitions', scope: 'GLOBAL', when: 'каждый час', missed: 'LATEST: секции созданы на 3 суток вперёд; простой дольше — отказ записи снимков и цен (CRITICAL через 2 суток)' },
   { name: 'alerts-deliver', scope: 'GLOBAL', when: 'каждую минуту', missed: 'LATEST: письма уходят позже; CRITICAL, поднятый во время простоя, ждёт следующего запуска — алерт остаётся в базе без отметки доставки, и это видно запросом [Р-156]' },
-  { name: 'shadow-digest', scope: 'GLOBAL', when: 'раз в неделю', missed: 'LATEST: дайджест уходит позже; у него ЕСТЬ отметка доставки [Р-174, шаг 42] — строка периода в tenant_data.shadow_digest, — поэтому пропуск недели и недоставленное письмо видны запросом, а повторный запуск не пишет продавцу дважды' },
+  { name: 'shadow-digest', scope: 'GLOBAL', when: 'раз в сутки: письмо о прошлой закрытой ISO-неделе (UTC); доставленное второй раз не уходит, недоставленное повторяется каждые сутки до конца следующей недели', missed: 'LATEST: дайджест уходит позже; у него ЕСТЬ отметка доставки [Р-174, шаг 42] — строка периода в tenant_data.shadow_digest, — поэтому пропуск недели и недоставленное письмо видны запросом, а повторный запуск не пишет продавцу дважды' },
+  { name: 'channel-authorizations', scope: 'GLOBAL', when: 'каждый час', missed: 'LATEST: отзыв авторизации продавцом обнаружится позже — до того записи в канал отказывают, и аккаунт не переведён в понятное состояние; токены сами не истекают быстрее срока канала' },
   { name: 'retention', scope: 'GLOBAL', when: 'каждый час', missed: 'LATEST: удаление по сроку откладывается, данные хранятся дольше — PostgreSQL растёт; неподтверждённые резервации висят дольше TTL, и доступный остаток занижен всё это время; алерт о подтверждённой резервации старше 14 суток [Р-30] приходит позже' },
 ];
 
@@ -224,6 +235,25 @@ export function jobSource(deps: JobDeps): JobSource {
             // отправляет письмо снова [Р-174, шаг 42]; доставленное второй раз не уходит — это держит база
             const r = await digest.send();
             return { items: r.letters };
+          },
+        });
+      }
+      if (deps.channelAuthorizations) {
+        const authorizations = deps.channelAuthorizations;
+        specs.push({
+          name: 'channel-authorizations', scope: null, retryKind: 'CHANNEL', intervalSeconds: cfg.authorizationCheckEverySeconds, catchUp: 'LATEST',
+          firstDueAt: immediately, lagWarningSeconds: hours(6), lagCriticalSeconds: hours(24), leaseSeconds: 900,
+          async run() {
+            const r = await authorizations.check();
+            // Отзыв продавцом алертом поднимает БАЗА (у тенанта, владельцу); здесь — только поломка платформы, для оператора
+            const alerts: Array<{ code: string; severity: 'WARNING' | 'CRITICAL'; details: Record<string, string | number | boolean | null> }> = [
+              ...(r.platform > 0 ? [{ code: 'CHANNEL_APP_CREDENTIALS_REJECTED', severity: 'CRITICAL' as const,
+                details: { channels: r.platformChannels.join(','), refused: r.platform } }] : []),
+              // Находка 7 ревью шага 43: массовый `invalid_grant` — не решение продавцов, а скорее наша поломка: оператору
+              ...(r.suspiciousRevocations > 0 ? [{ code: 'CHANNEL_REVOCATIONS_SUSPICIOUS', severity: 'CRITICAL' as const,
+                details: { refused: r.suspiciousRevocations, checked: r.checked } }] : []),
+            ];
+            return { items: r.checked, ...(alerts.length > 0 ? { alerts } : {}) };
           },
         });
       }

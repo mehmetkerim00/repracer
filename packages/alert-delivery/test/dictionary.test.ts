@@ -38,6 +38,9 @@ const BRANCHED: readonly RegExp[] = [
   /\bkind:\s*'alert',\s*code:[^,\n]*\?\s*'([A-Z][A-Z0-9_]+)'\s*:\s*'([A-Z][A-Z0-9_]+)'/g,
 ];
 
+/** INSERT INTO tenant_data.alert (…) VALUES (тенант, 'X', 'CRITICAL', …) — алерт, который поднимает функция базы */
+const SQL_FORM = /INSERT INTO tenant_data\.alert\s*\([^)]*\)\s*VALUES\s*\([^,()]+,\s*'([A-Z][A-Z0-9_]+)'\s*,\s*'(?:WARNING|CRITICAL)'/g;
+
 /** Коды, поднимаемые исходным текстом: тесты и фикстуры не в счёт — там коды выдуманные по условию сценария */
 function raisedInSource(): Map<string, string[]> {
   const found = new Map<string, string[]>();
@@ -67,6 +70,17 @@ function raisedInSource(): Map<string, string[]> {
    * и алерт, поднятый из неё, правило не видело: «у каждого события есть текст» было бы ложным молча.
    */
   for (const root of ['packages', 'services', 'apps']) walk(join(ROOT, root));
+  /**
+   * Шаг 43 [Р-177]: алерт поднимает и БАЗА — отзыв авторизации переводит аккаунт в REVOKED и пишет алерт функцией
+   * `security.channel_authorization_checked`. До шага 43 правило смотрело только TypeScript, и событие базы без текста
+   * пришло бы владельцу письмом «Ereignis CODE».
+   */
+  const dir = join(ROOT, 'migrations');
+  for (const name of readdirSync(dir).filter((n) => n.endsWith('.sql'))) {
+    const source = readFileSync(join(dir, name), 'utf8');
+    SQL_FORM.lastIndex = 0;
+    for (let m = SQL_FORM.exec(source); m; m = SQL_FORM.exec(source)) found.set(m[1]!, [...(found.get(m[1]!) ?? []), `migrations/${name}`]);
+  }
   return found;
 }
 
@@ -79,6 +93,8 @@ test('Р-161: у каждого события, которое поднимае�
   assert.ok(raised.size > 30, `детектор нашёл слишком мало событий, значит он сломан: ${raised.size}`);
   assert.ok(raised.has('PRICING_STOPPED_BY_PERSON') && raised.has('SCHEDULER_JOB_LAGGING') && raised.has('AMAZON_TENANT_MISMATCH'),
     `детектор обязан находить все три формы — прямой вызов, помощник процесса и код из условия: ${[...raised.keys()].join(', ')}`);
+  assert.ok(raised.get('CHANNEL_AUTHORIZATION_REVOKED')?.some((w) => w.startsWith('migrations/')),
+    'детектор обязан находить и алерт, который поднимает функция базы (шаг 43)');
 
   const withoutText = [...raised.keys()].filter((code) => !de[code] || !en[code]).sort();
   assert.deepEqual(withoutText, [], `событие без текста приходит письмом «Ereignis CODE»: ${withoutText.join(', ')}`);
@@ -118,7 +134,7 @@ test('Р-161: события ПЛАТФОРМЫ написаны голосом 
     'ANALYTICS_PARTITION_FORCE_DROPPED', 'COMPETITOR_POLL_BUDGET_EXCEEDED', 'COMPETITOR_POLL_FAILURES', 'AMAZON_RECONCILIATION_CIRCLE_SLOW',
     'SCHEDULER_JOB_FAILING', 'SCHEDULER_JOB_LAGGING', 'SCHEDULER_LEASE_LOST', 'BROKER_MESSAGE_POISONED', 'OUTBOX_SCOPE_SEQ_GAP_RELEASED',
     'WRITE_DISPATCH_SWEEP_FAILED', 'NOTIFICATION_QUEUE_SILENT', 'NOTIFICATION_UNPARSEABLE', 'NOTIFICATION_UNKNOWN_SELLER',
-    'NOTIFICATION_FOREIGN_APPLICATION', 'NOTIFICATION_GIVING_UP', 'ALERT_NOT_STORED'];
+    'NOTIFICATION_FOREIGN_APPLICATION', 'NOTIFICATION_GIVING_UP', 'ALERT_NOT_STORED', 'CHANNEL_APP_CREDENTIALS_REJECTED', 'CHANNEL_REVOCATIONS_SUSPICIOUS'];
   // Обороты продавца: «от вас ничего не требуется», «сообщите нам», «откройте консоль», «ваш кабинет канала»
   const sellerVoiceDe = /Von Ihnen ist|sagen Sie uns|melden Sie sich bei uns|Melden Sie sich|Öffnen Sie die Konsole|Kanal-Konto/;
   const sellerVoiceEn = /nothing is to be done by you|No action from you|contact us|tell us|Open the console|channel cabinet/i;

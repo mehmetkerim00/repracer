@@ -1,0 +1,15 @@
+{
+  "name": "@repracer/channel-oauth",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Р-175…Р-177: подключение канала продавцом — OAuth Amazon LWA и eBay по снимкам первоисточников, шифрование refresh-токена (AES-256-GCM), классификация отказов обмена токена, модель поставщика для прогонов. Без зависимостей.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./model": "./src/model.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test test/*.test.ts"
+  }
+}

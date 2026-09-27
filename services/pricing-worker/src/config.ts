@@ -1,5 +1,5 @@
 import { hostname } from 'node:os';
-import { ConfigError, intFromEnv, requiredValue, secretFromEnv, type Env } from '@repracer/service-runtime';
+import { ConfigError, intFromEnv, loadChannelAppsConfig, requiredValue, secretFromEnv, type ChannelAppsConfig, type Env } from '@repracer/service-runtime';
 
 /**
  * OQ-190 (шаг 27): конфигурация процесса пути решения за брокером — диспетчера записей [Р-64] и ретранслятора outbox [Р-34].
@@ -27,6 +27,13 @@ export interface WorkerConfig {
   userAgent: string;
   kaufland: { subscriptionFallbackEmail: string; partnerCredentialsRef: string | null; buyBoxChangedAccess: 'GRANTED' | 'NOT_GRANTED' };
   amazon: { applicationCredentialsRef: string };
+  /**
+   * Шаг 43, находка 2 ревью (критичная): аккаунт, подключённый продавцом по OAuth, несёт ссылку `db:` — токен читает роль
+   * адаптеров (svc_credentials), открывает кольцо ключей процесса. Без этого диспетчер отвечал бы `CREDENTIALS_UNREADABLE`
+   * на каждую запись боевого аккаунта Amazon.
+   */
+  channelApps: ChannelAppsConfig;
+  credentialsPgUrl: string | null;
 }
 
 /** Отметка обязательна, если её явно не выключили: процесс без внешнего контроля о своей смерти не сообщает [Р-127, OQ-194] */
@@ -42,6 +49,7 @@ export function loadWorkerConfig(env: Env = process.env, read?: (path: string) =
   if (access !== 'GRANTED' && access !== 'NOT_GRANTED') throw new ConfigError('CONFIG_INVALID: REPRACER_KAUFLAND_BUY_BOX_CHANGED_ACCESS must be GRANTED or NOT_GRANTED');
   const brokers = (env.REPRACER_KAFKA_BROKERS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
   if (brokers.length === 0) throw new ConfigError('CONFIG_MISSING: REPRACER_KAFKA_BROKERS');
+  const apps = loadChannelAppsConfig(env, read);
   return {
     workerId: env.REPRACER_WORKER_ID || `${hostname()}-${process.pid}`,
     pgUrl: requiredValue(secretFromEnv(env, 'REPRACER_APP_PG_URL', read), 'REPRACER_APP_PG_URL'),
@@ -61,5 +69,7 @@ export function loadWorkerConfig(env: Env = process.env, read?: (path: string) =
       buyBoxChangedAccess: access,
     },
     amazon: { applicationCredentialsRef: requiredValue(env.REPRACER_AMAZON_APPLICATION_CREDENTIALS_REF, 'REPRACER_AMAZON_APPLICATION_CREDENTIALS_REF') },
+    channelApps: apps,
+    credentialsPgUrl: apps.keyring ? requiredValue(secretFromEnv(env, 'REPRACER_CREDENTIALS_PG_URL', read), 'REPRACER_CREDENTIALS_PG_URL') : null,
   };
 }

@@ -51,6 +51,19 @@ services:
       REPRACER_CONSOLE_EXPORTER_PG_URL_FILE: /run/secrets/console_exporter_pg_url
       REPRACER_CONSOLE_FX_LOADER_PG_URL_FILE: /run/secrets/console_fx_loader_pg_url
       REPRACER_CONSOLE_BULK_WORKER_PG_URL_FILE: /run/secrets/console_bulk_worker_pg_url
+      # Шаг 43 [Р-175…Р-177]: подключение канала продавцом. Приложение канала — целиком или никак; пусто = «ожидает доступа
+      # платформы» на экране [Р-150]. Консоль токен ЗАПИСЫВАЕТ (шифротекстом) и прочитать его не может — права по столбцам
+      REPRACER_AMAZON_APP_ID: ${REPRACER_AMAZON_APP_ID:-}
+      REPRACER_AMAZON_LWA_CLIENT_ID: ${REPRACER_AMAZON_LWA_CLIENT_ID:-}
+      REPRACER_AMAZON_APP_DRAFT: ${REPRACER_AMAZON_APP_DRAFT:-on}
+      REPRACER_AMAZON_LWA_CLIENT_SECRET_FILE: ${REPRACER_AMAZON_LWA_CLIENT_SECRET_FILE:-}
+      REPRACER_EBAY_ENVIRONMENT: ${REPRACER_EBAY_ENVIRONMENT:-SANDBOX}
+      REPRACER_EBAY_CLIENT_ID: ${REPRACER_EBAY_CLIENT_ID:-}
+      REPRACER_EBAY_RUNAME: ${REPRACER_EBAY_RUNAME:-}
+      REPRACER_EBAY_SCOPES: ${REPRACER_EBAY_SCOPES:-}
+      REPRACER_EBAY_CLIENT_SECRET_FILE: ${REPRACER_EBAY_CLIENT_SECRET_FILE:-}
+      REPRACER_CHANNEL_KEYRING_FILE: ${REPRACER_CHANNEL_KEYRING_FILE:-}
+      REPRACER_CONNECT_REDIRECT_URL: ${REPRACER_CONNECT_REDIRECT_URL:-}
     volumes:
       - ../..:/app:ro
       - ${REPRACER_SECRETS_DIR:?set REPRACER_SECRETS_DIR}:/run/secrets:ro

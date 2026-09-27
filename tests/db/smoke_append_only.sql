@@ -37,6 +37,9 @@ SELECT set_config('app.tenant_id', 'a0000000-0000-0000-0000-00000000000a', true)
 
 INSERT INTO channel_data.competitor_move (tenant_id, channel_account_id, marketplace, channel_product_ref, condition, observed_at, move_bp, verdict)
 VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'de', 'R103-1', 'new', now(), 150, 'ACCEPT');
+-- Шаг 43 [OQ-232]: удержание полом — строка намерения, чью цель стратегия хотела ниже пола (синтетическая)
+INSERT INTO channel_data.floor_hold (tenant_id, price_intent_id, intent_created_at, write_scope_id, currency, below_minor, shadow)
+VALUES ('a0000000-0000-0000-0000-00000000000a', gen_random_uuid(), now(), 'a6000000-0000-0000-0000-000000000001', 'EUR', 150, true);
 -- Р-120 (0082): наблюдение собственного ценообразования канала
 INSERT INTO channel_data.offer_channel_pricing (tenant_id, channel_account_id, channel, marketplace, external_sku, automated_pricing, channel_bounds, source, observed_at)
 VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R103-SKU', false, false, 'DISCOVERY', now());
@@ -464,6 +467,9 @@ SELECT pg_temp.expect_fail('truncate tenant_data.cost_import', $q$ TRUNCATE tena
 -- Шаг 41 [Р-170]: журнал переключений теневого режима — тоже append-only, и TRUNCATE его не берёт
 SELECT pg_temp.expect_fail('truncate tenant_data.channel_write_mode_change', $q$ TRUNCATE tenant_data.channel_write_mode_change $q$,
   'TRUNCATE of tenant_data.channel_write_mode_change is forbidden');
+-- Шаг 43 [OQ-232]: удержания пола — производная от цены конкурента со сроком данных канала; TRUNCATE её не берёт
+SELECT pg_temp.expect_fail('truncate channel_data.floor_hold', $q$ TRUNCATE channel_data.floor_hold $q$,
+  'TRUNCATE of channel_data.floor_hold is forbidden');
 SELECT pg_temp.expect_fail('truncate tenant_data.price_daily_system_correction', $q$ TRUNCATE tenant_data.price_daily_system_correction $q$,
   'TRUNCATE of tenant_data.price_daily_system_correction is forbidden');
 SELECT pg_temp.expect_fail('append-only tenant_data.price_daily_system_correction', $q$

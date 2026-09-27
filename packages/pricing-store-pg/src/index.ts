@@ -11,3 +11,6 @@ export { PgShadowStore, PgShadowDigestStore, type ShadowAccountRow, type ShadowD
   type MarketplaceProperty, type ShadowDigestRecord, SHADOW_WINDOW_MAX_DAYS } from './shadow.ts';
 // Шаг 36 [Р-156]: алерты в базе и их доставка владельцу
 export { PgAlertSink, PgAlertDeliveryStore, type AlertRow, type AlertRecipient, type AlertDeliveryStore, type DeliveryKind } from './alerts.ts';
+// Шаг 43 [Р-175…Р-177]: подключение канала продавцом — запрос согласия, зашифрованный токен, хранилище роли адаптеров
+export { PgChannelConnectStore, PgCredentialVault, type ConnectStart, type ConnectComplete, type ConnectOutcome, type ConnectionRow,
+  type PendingRequestRow, type SealedCredential, type StoredCredential } from './channel-connect.ts';

@@ -26,6 +26,14 @@ services:
       REPRACER_KAUFLAND_BUY_BOX_CHANGED_ACCESS: ${REPRACER_KAUFLAND_BUY_BOX_CHANGED_ACCESS:-NOT_GRANTED}
       REPRACER_KAUFLAND_PARTNER_CREDENTIALS_REF: ${REPRACER_KAUFLAND_PARTNER_CREDENTIALS_REF:-}
       REPRACER_AMAZON_APPLICATION_CREDENTIALS_REF: ${REPRACER_AMAZON_APPLICATION_CREDENTIALS_REF:?set REPRACER_AMAZON_APPLICATION_CREDENTIALS_REF}
+      # Шаг 43, находка 2 ревью: аккаунты, подключённые продавцом по OAuth (ссылка `db:`), — токен из базы ролью адаптеров.
+      # Пусто = не настроено: такие аккаунты не пишут, и это видно отказом, а не молча
+      REPRACER_AMAZON_APP_ID: ${REPRACER_AMAZON_APP_ID:-}
+      REPRACER_AMAZON_LWA_CLIENT_ID: ${REPRACER_AMAZON_LWA_CLIENT_ID:-}
+      REPRACER_AMAZON_LWA_CLIENT_SECRET_FILE: ${REPRACER_AMAZON_LWA_CLIENT_SECRET_FILE:-}
+      REPRACER_CONNECT_REDIRECT_URL: ${REPRACER_CONNECT_REDIRECT_URL:-}
+      REPRACER_CHANNEL_KEYRING_FILE: ${REPRACER_CHANNEL_KEYRING_FILE:-}
+      REPRACER_CREDENTIALS_PG_URL_FILE: ${REPRACER_CREDENTIALS_PG_URL_FILE:-}
       # OQ-194 (шаг 28): адрес отметки во внешнем сервисе [Р-127] — секрет (в нём идентификатор проверки)
       REPRACER_WORKER_HEARTBEAT_URL_FILE: /run/secrets/worker_heartbeat_url
       # Секреты — файлами: в переменных окружения их видят все процессы контейнера и docker inspect

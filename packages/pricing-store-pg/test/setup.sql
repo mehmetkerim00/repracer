@@ -63,6 +63,10 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_operator') THEN
     CREATE ROLE svc_operator LOGIN IN ROLE repracer_operator;
   END IF;
+  -- Шаг 43 [Р-177]: роль адаптеров — единственная, кто читает шифротекст токена канала
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_credentials') THEN
+    CREATE ROLE svc_credentials LOGIN IN ROLE repracer_credentials;
+  END IF;
   -- Шаг 25 [OQ-181]: разбор пропущенных выгрузкой снимков оператором
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_export_triage') THEN
     CREATE ROLE svc_export_triage LOGIN IN ROLE repracer_export_triage;

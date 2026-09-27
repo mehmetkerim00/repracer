@@ -19,6 +19,7 @@ import type {
   InboundResult,
   OrderLine,
   Page,
+  PageRequest,
   ReadBackRequest,
   ReadBackResult,
   WriteOutcome,
@@ -107,7 +108,7 @@ export const AMAZON_SIM_DESCRIPTOR_US: ChannelDescriptor = {
 export class SimulatedAmazonPort implements ChannelAdapter {
   readonly descriptor: ChannelDescriptor;
   readonly params: AmazonModelParams;
-  readonly stats = { patchCalls: 0, patchRateLimited: 0, readCalls: 0, readRateLimited: 0, editLimited: 0, acceptedNeverApplied: 0, summaryCalls: 0, summaryRateLimited: 0, eventsLost: 0, eventsDelivered: 0 };
+  readonly stats = { patchCalls: 0, patchRateLimited: 0, readCalls: 0, readRateLimited: 0, editLimited: 0, acceptedNeverApplied: 0, summaryCalls: 0, summaryRateLimited: 0, eventsLost: 0, eventsDelivered: 0, discoveryCalls: 0 };
   private readonly deps: AdapterDependencies;
   private readonly startMs: number;
   private readonly rng: SeededRandom;
@@ -342,7 +343,25 @@ export class SimulatedAmazonPort implements ChannelAdapter {
     return result;
   }
 
-  async discoverOffers(): Promise<Page<DiscoveredOffer>> { return { items: [] }; }
+  /**
+   * Шаг 43 [Р-176]: обнаружение офферов нового аккаунта — `searchListingsItems` по снимку (адаптер, `listing.ts`): SKU продавца
+   * страницами, с правилом автоматического ценообразования в атрибутах [Р-120]. У модели правил нет — все офферы свободны.
+   * Квота поиска в снимке не названа (проверить), поэтому модель её не расходует и не придумывает.
+   */
+  async discoverOffers(_ctx: AdapterCallContext, page: PageRequest): Promise<Page<DiscoveredOffer>> {
+    this.now();
+    this.stats.discoveryCalls += 1;
+    const all = [...this.listings.values()].sort((a, b) => (a.sku === b.sku ? a.marketplace.localeCompare(b.marketplace) : a.sku.localeCompare(b.sku)));
+    const from = page.cursor ? Number(page.cursor) : 0;
+    const slice = all.slice(from, from + Math.max(1, page.limit));
+    const { currency, basis } = this.money();
+    const items: DiscoveredOffer[] = slice.map((l) => ({
+      identity: { ...(this.descriptor.region ? { region: this.descriptor.region } : {}), marketplace: l.marketplace, externalSku: l.sku, channelProductRef: l.asin },
+      gtins: [], condition: 'new', fulfillment: 'MERCHANT', currentPrice: { amountMinor: l.priceMinor, currency, basis },
+      currentQuantity: l.quantity, isLive: true, channelPricing: { automatedPricing: false, channelBounds: false },
+    }));
+    return { items, ...(from + slice.length < all.length ? { nextCursor: String(from + slice.length) } : {}) };
+  }
   async readOrderLines(): Promise<Page<OrderLine>> { return { items: [] }; }
   async handleInbound(_delivery: InboundDelivery): Promise<InboundResult> {
     return { kind: 'REJECTED', error: error('UNSUPPORTED', 'Amazon notifications are not modelled over HTTP; use drainSnapshots', { scope: 'BATCH' }), responseStatus: 400 };

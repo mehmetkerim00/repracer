@@ -47,6 +47,8 @@ PGUSER=svc_alert_delivery "${PSQL[@]}" -d "$DB" -f tests/db/smoke_alerts_deliver
 # Шаг 42 [Р-172…Р-174]: свойства витрин, деньги дайджеста и его отметка доставки — БЕЗ PGUSER: файл проверяет три роли
 # (владельца справочника, административную и роль доставки) и идёт до smoke_retention.sql, который закрывает тенанта A
 "${PSQL[@]}" -d "$DB" -f tests/db/smoke_us_digest.sql
+# Шаг 43 [Р-175…Р-177]: подключение канала продавцом — БЕЗ PGUSER: файл проверяет консоль, путь решения, панель и роль адаптеров
+"${PSQL[@]}" -d "$DB" -f tests/db/smoke_oauth.sql
 # Шаг 40 [Р-165]: панель оператора платформы — своей ролью, у которой нет прав ни на одну таблицу
 PGUSER=svc_operator "${PSQL[@]}" -d "$DB" -f tests/db/smoke_operator.sql
 PGUSER=svc_scheduler "${PSQL[@]}" -d "$DB" -f tests/db/smoke_retention.sql

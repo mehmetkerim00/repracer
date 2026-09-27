@@ -302,7 +302,7 @@ export const de: Messages = {
       worlds: 'Welten des Stands',
       worldsHint: 'Jede Welt ist ein Standszenario mit synthetischen Daten. Kein Kanal ist verbunden.',
       backToWorlds: '← Welten',
-      screens: { onboarding: 'Einrichtung', shadow: 'Schattenmodus', stock: 'Bestand', products: 'Produkte', decisions: 'Warum dieser Preis', rejected: 'Gestoppte Änderungen', bounds: 'Grenzen', 'cost-import': 'Selbstkosten-Import', stop: 'Preise stoppen', strategies: 'Strategien', feed: 'Preisänderungen', dangerous: 'Gefährliche Änderungen', compliance: 'Omnibus', jobs: 'Massenvorgänge' },
+      screens: { connections: 'Kanalverbindungen', onboarding: 'Einrichtung', shadow: 'Schattenmodus', stock: 'Bestand', products: 'Produkte', decisions: 'Warum dieser Preis', rejected: 'Gestoppte Änderungen', bounds: 'Grenzen', 'cost-import': 'Selbstkosten-Import', stop: 'Preise stoppen', strategies: 'Strategien', feed: 'Preisänderungen', dangerous: 'Gefährliche Änderungen', compliance: 'Omnibus', jobs: 'Massenvorgänge' },
       loading: (seconds: number) => `Standdaten werden geladen. Ohne Antwort innerhalb von ${seconds} s wird ein Fehler angezeigt.`,
       timeout: (seconds: number) => `Der Stand hat nicht innerhalb von ${seconds} s geantwortet. Läuft er? npm run stand -w @repracer/console`,
       unavailable: (detail: string) => `Der Stand ist nicht erreichbar: ${detail}`,
@@ -580,6 +580,73 @@ export const de: Messages = {
     /**
      * Шаг 41 [Р-169…Р-171]: тот же экран по-немецки. Язык — свойство тенанта [Р-161].
      */
+    connections: {
+      title: 'Kanalverbindungen',
+      intro: 'Sie verbinden einen Kanal selbst: der Knopf öffnet die Zustimmungsseite des Kanals, dort erlauben Sie den Zugriff, und der Kanal schickt Sie hierher zurück. Eine neue Verbindung beginnt im Schattenmodus — die Engine arbeitet vollständig und schreibt nichts.',
+      noRight: 'Kanäle verbindet nur der Inhaber oder ein Administrator des Kontos.',
+      tokenNote: 'Den Zugriff des Kanals bewahren wir verschlüsselt auf und zeigen ihn nie — nicht hier, nicht in Briefen, nicht in Protokollen. Sie können ihn jederzeit im Kanal selbst zurückziehen; wir bemerken das und sagen es Ihnen.',
+      connect: (channel: string) => `${channel} verbinden`,
+      connectAnother: (channel: string) => `Weiteres ${channel}-Konto verbinden`,
+      reconnect: 'Zugriff erneuern',
+      reconnectRevoked: 'Erneut verbinden',
+      pending: (until: string) => `Wir warten auf Ihre Zustimmung auf der Seite des Kanals — bis ${until}.`,
+      failed: (why: string) => `Der letzte Versuch hat nicht verbunden: ${why}`,
+      platformMissing: (what: string) => `Noch nicht verfügbar: ${what}. Von Ihnen ist nichts zu tun — der Knopf erscheint, sobald das vorliegt.`,
+      states: {
+        NOT_CONNECTED: 'nicht verbunden',
+        AWAITING_CONSENT: 'wartet auf Ihre Zustimmung',
+        AWAITING_PLATFORM: 'wartet auf Zugang der Plattform',
+        AWAITING_ACCESS: 'wartet auf Zugang',
+        SHADOW: 'Schatten: verbunden, es wird nichts geschrieben',
+        LIVE: 'live: Preise werden geschrieben',
+        REVOKED: 'Zugriff im Kanal zurückgezogen',
+      } as Record<string, string>,
+      progress: {
+        discovering: 'Wir suchen Ihre Angebote im Kanal — die ersten erscheinen hier innerhalb von Minuten.',
+        shadow: (offers: number, decisions: number) => `${offers} Angebote gefunden; der Schattenmodus hat in den letzten 24 Stunden ${decisions} Entscheidungen getroffen.`,
+        shadowWaiting: (offers: number) => `${offers} Angebote gefunden. Der Schattenmodus beginnt zu rechnen, sobald die Angebote Selbstkosten, Grenzen und eine Strategie haben — weiter unter Einrichtung: ohne erklärte Selbstkosten startet die Engine nicht, auch nicht im Schatten.`,
+        live: (offers: number) => `${offers} Angebote im Kanal gefunden.`,
+        awaitingAccess: (what: string) => `Es fehlt: ${what}.`,
+      },
+      authorization: {
+        external: 'Der Zugriff wird von der Plattform eingerichtet, nicht über diese Seite.',
+        obtained: (when: string) => `Zugriff erteilt ${when}; noch nicht geprüft.`,
+        verified: (when: string, failures: number) => `Zugriff zuletzt vom Kanal bestätigt ${when}${failures > 0 ? ` (seitdem ${failures} Prüfungen fehlgeschlagen)` : ''}.`,
+      },
+      marketplaces: {
+        A1PA6795UKMFR9: 'amazon.de',
+        ATVPDKIKX0DER: 'amazon.com',
+        EBAY_DE: 'ebay.de',
+        EBAY_US: 'ebay.com',
+      } as Record<string, string | undefined>,
+      missing: {
+        AMAZON_APPLICATION: 'unsere Amazon-Anwendung (SP-API) ist noch nicht registriert',
+        EBAY_DEVELOPER_KEYS: 'unsere eBay-Entwicklerschlüssel sind noch nicht ausgestellt (E-01)',
+      } as Record<string, string | undefined>,
+      failures: {
+        DENIED: 'Sie haben auf der Seite des Kanals abgelehnt',
+        EXPIRED: 'die Zustimmung kam zu spät zurück — bitte neu beginnen',
+        EXCHANGE_REVOKED: 'der Kanal hat den Zustimmungscode nicht angenommen — bitte neu beginnen',
+        EXCHANGE_PLATFORM: 'der Kanal hat unsere Anwendung abgelehnt — das liegt bei uns; bitte später erneut versuchen',
+        EXCHANGE_TRANSIENT: 'der Kanal hat nicht geantwortet — bitte in einigen Minuten neu beginnen',
+        SELLER_TAKEN: 'dieses Händlerkonto ist bereits anderswo verbunden',
+        MFA_REQUIRED: 'das Erneuern einer bestehenden Verbindung braucht Ihren zweiten Faktor',
+        BAD_CALLBACK: 'die Rückkehr vom Kanal gehörte nicht zu dieser Verbindung — bitte neu beginnen',
+      } as Record<string, string | undefined>,
+      errors: {
+        badMarketplaces: 'Wählen Sie Marktplätze einer Region.',
+        unavailable: 'Dieser Kanal lässt sich noch nicht verbinden.',
+        unknownState: 'Diese Rückkehr gehört zu keiner Verbindung, die in diesem Konto begonnen wurde. Beginnen Sie auf dieser Seite neu.',
+        expired: 'Die Zustimmung kam zu spät zurück. Beginnen Sie auf dieser Seite neu.',
+        alreadyDone: 'Diese Verbindung ist bereits abgeschlossen.',
+        denied: 'Sie haben auf der Seite des Kanals abgelehnt. Es wurde nichts verbunden.',
+        exchange: 'Der Kanal hat die Zustimmung nicht bestätigt. Es wurde nichts verbunden; beginnen Sie neu.',
+        identityUnknown: 'eBay nennt uns nicht, welcher Händler sich angemeldet hat; eine zweite eBay-Verbindung könnte derselbe Händler doppelt sein. Erneutes Verbinden von eBay wird möglich, sobald wir den Händler erkennen können (Frage E-11).',
+        sellerTaken: 'Dieses Händlerkonto ist bereits verbunden — in einem anderen repracer-Konto oder als andere Verbindung. Es wurde nichts verbunden; wenden Sie sich an den Support, falls das unerwartet ist.',
+        mfa: 'Das Erneuern des Zugriffs einer bestehenden Verbindung braucht Ihren zweiten Faktor. Melden Sie sich damit neu an und wiederholen Sie es.',
+        connected: (reconnected: boolean): string => reconnected ? 'Zugriff erneuert. Das Konto arbeitet wie zuvor.' : 'Verbunden. Das Konto beginnt im Schattenmodus; Ihre Angebote erscheinen innerhalb von Minuten.',
+      },
+    },
     shadow: {
       title: 'Schattenmodus',
       intro: 'Der Kanal ist verbunden und die Preisautomatik läuft vollständig — Snapshots, Prüfungen, Strategie, Grenzen, Begründung. In den Kanal wird nichts geschrieben: jede Änderung unten wurde zurückgehalten.',
@@ -626,7 +693,7 @@ export const de: Messages = {
       },
       digest: {
         subject: (tenant: string) => `repracer: was die Preisautomatik diese Woche getan hätte (${tenant})`,
-        intro: (tenant: string, accounts: number) => `Ihr Konto „${tenant}“ betreibt ${accounts} Kanalverbindung(en) im Schattenmodus: die Preisautomatik arbeitet vollständig und schreibt nichts in den Kanal. Das hätte sie in den letzten sieben Tagen getan.`,
+        intro: (tenant: string, accounts: number) => `Ihr Konto „${tenant}“ betreibt ${accounts} Kanalverbindung(en) im Schattenmodus: die Preisautomatik arbeitet vollständig und schreibt nichts in den Kanal. Das hätte sie in der letzten Woche (Montag bis Sonntag, UTC) getan. Die Seite Schattenmodus zählt die letzten sieben Tage bis jetzt, ihre Zahlen weichen daher von diesem Brief ab.`,
         cta: 'Wenn diese Zahlen stimmen, schalten Sie das Schreiben in der Konsole scharf — Bildschirm „Schattenmodus“. Das können nur Sie als Inhaber, und es braucht Ihren zweiten Faktor.',
         historyTitle: 'Wochenberichte, die wir Ihnen geschickt haben',
         notDelivered: 'noch nicht zugestellt',
@@ -692,6 +759,9 @@ export const de: Messages = {
         AMAZON_TENANT_MISMATCH: { what: 'Ein Amazon-Konto gehört nicht zu dem Verkäuferkonto, für das es verwendet wurde', step: 'Öffnen Sie die Kanalverbindungen in der Konsole: Für dieses Konto wird nichts geschrieben, bis die Zuordnung stimmt.' },
         AMAZON_ACCOUNT_UNAVAILABLE: { what: 'Das Amazon-Konto ist gerade nicht nutzbar', step: 'Prüfen Sie in der Konsole die Zugangsdaten des Kontos: Die häufigste Ursache ist ein abgelaufener Zugriff der Anwendung.' },
         AMAZON_NOTIFICATION_SELLER_MISMATCH: { what: 'Eine Amazon-Meldung nennt einen anderen Verkäufer als das Konto, über das sie kam', step: 'Öffnen Sie die Kanalverbindungen in der Konsole: Die Meldung wurde nicht verwendet.' },
+        // Шаг 43 [Р-177]: отзыв авторизации продавцом на стороне канала — не тихая ошибка, а письмо владельцу
+        CHANNEL_AUTHORIZATION_REVOKED: { what: 'Der Kanal akzeptiert unseren Zugriff auf dieses Konto nicht mehr: vermutlich wurde die Autorisierung im Kanal zurückgezogen', step: 'Öffnen Sie in der Konsole die Kanalverbindungen und verbinden Sie das Konto erneut: bis dahin wird nichts in diesen Kanal geschrieben, und der Schattenmodus rechnet nicht weiter.' },
+        CHANNEL_AUTHORIZATION_CHECK_FAILING: { what: 'Der Zugriff auf ein Kanalkonto ließ sich mehrmals hintereinander nicht prüfen', step: 'Öffnen Sie in der Konsole die Kanalverbindungen: ist der Kanal erreichbar und wiederholt sich das, verbinden Sie das Konto erneut.' },
         /**
          * --- События ПЛАТФОРМЫ: получатель — ОПЕРАТОР, а не продавец [находка 3 ревью шага 36].
          *
@@ -699,6 +769,8 @@ export const de: Messages = {
          * они человеку, который как раз и есть «мы». Такое письмо не говорит оператору НИЧЕГО: ни что случилось в
          * системе, ни куда смотреть. Теперь «что» называет механизм, а «первый шаг» — первое действие оператора.
          */
+        CHANNEL_APP_CREDENTIALS_REJECTED: { what: 'Der Token-Endpunkt eines Kanals hat die Schlüssel unserer Anwendung abgelehnt', step: 'Prüfen Sie Client-ID und Secret des genannten Kanals in den Secret-Dateien der Bereitstellung: die Händler haben nichts falsch gemacht, ihre Konten bleiben verbunden.' },
+        CHANNEL_REVOCATIONS_SUSPICIOUS: { what: 'Die meisten geprüften Kanalkonten wurden in einem Durchlauf mit invalid_grant abgelehnt — eher ein Fehler bei uns als ein Widerruf der Händler', step: 'Prüfen Sie Anwendungsschlüssel, Schlüsselbund-Datei und jüngste Änderungen der Kanal-Anwendung, bevor Händler informiert werden: ihre Konten blieben verbunden.' },
         ALERT_NOT_STORED: { what: 'Ein Ereignis konnte nicht in der Datenbank festgehalten werden', step: 'Prüfen Sie die Erreichbarkeit der Datenbank aus dem betroffenen Prozess: Das Ereignis steht nur noch im Prozess-Journal, und ein Brief darüber geht nicht heraus.' },
         ANALYTICS_EXPORT_BACKLOG: { what: 'Die Ausfuhr der Wettbewerbshistorie nach ClickHouse ist im Rückstand', step: 'Sehen Sie im Lauf-Journal des Planers nach, seit wann die Arbeit `analytics-export` zurückliegt, und prüfen Sie die Erreichbarkeit von ClickHouse. Ab 14 Tagen Rückstand sind die ältesten Tage der Historie verloren.' },
         ANALYTICS_EXPORT_FAILED: { what: 'Die Ausfuhr eines Tages nach ClickHouse ist gescheitert', step: 'Prüfen Sie zuerst die Erreichbarkeit von ClickHouse und die Fehlerzeile im Prozess-Journal; der Tag wird aus dem Rückstand wiederholt.' },

@@ -29,6 +29,11 @@ export const INFRASTRUCTURE_TESTS = [
     why: 'запись 10 000 предложений в канал дважды: по одной (столько же запросов) и пакетами (до 150 единиц в запросе)',
   },
   {
+    // Находка 17 ревью шага 42: два виртуальных часа витрины США со своей базой шли в БЫСТРОЙ области на каждый коммит
+    file: 'apps/console/test/us-shadow-live.pg.test.ts', needs: 'TIME',
+    why: 'витрина США в тени два виртуальных часа через консоль: решения в долларах, бой закрыт неизвестной границей суток, дайджест',
+  },
+  {
     file: 'packages/pricing-store-pg/test/clickhouse-export.pg.test.ts', needs: 'CLICKHOUSE',
     why: 'выгрузка суток в аналитический слой и сверка разбора: пишет и читает настоящий ClickHouse',
   },
@@ -75,6 +80,8 @@ export const MEASURED_FILES = new Set([
   'apps/console/test/shadow-live.pg.test.ts',
   // Шаг 42: прогон витрины США утверждает секунды экранов и держит под собой мир amazon.com
   'apps/console/test/us-shadow-live.pg.test.ts',
+  // Шаг 43: прогон подключения канала утверждает секунды экранов и держит под собой планировщик и мир Kaufland
+  'apps/console/test/connect-live.pg.test.ts',
 ]);
 
 /**

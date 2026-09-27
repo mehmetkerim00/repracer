@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { hostname } from 'node:os';
-import { ConfigError, intFromEnv, requiredValue, secretFromEnv } from '@repracer/service-runtime';
+import { ConfigError, intFromEnv, loadChannelAppsConfig, requiredValue, secretFromEnv, type ChannelAppsConfig } from '@repracer/service-runtime';
 
 /**
  * Р-129 (шаг 26): конфигурация процесса планировщика — из переменных окружения; секреты (адреса баз с паролями, пароли ClickHouse, адрес
@@ -39,6 +39,12 @@ export interface SchedulerConfig {
   userAgent: string;
   kaufland: { subscriptionFallbackEmail: string; partnerCredentialsRef: string | null; buyBoxChangedAccess: 'GRANTED' | 'NOT_GRANTED' };
   amazon: { applicationCredentialsRef: string };
+  /**
+   * Шаг 43 [Р-175…Р-177]: приложения каналов для обмена refresh-токенов подключённых продавцами аккаунтов и роль, которая
+   * читает шифротекст токенов (svc_credentials, 0132). Без приложений работы `channel-authorizations` нет.
+   */
+  channelApps: ChannelAppsConfig;
+  credentialsPgUrl: string | null;
 }
 
 export { ConfigError };
@@ -57,6 +63,7 @@ export function loadConfig(env: Env = process.env, read: (path: string) => strin
   const access = env.REPRACER_KAUFLAND_BUY_BOX_CHANGED_ACCESS ?? 'NOT_GRANTED';
   if (access !== 'GRANTED' && access !== 'NOT_GRANTED') throw new ConfigError('CONFIG_INVALID: REPRACER_KAUFLAND_BUY_BOX_CHANGED_ACCESS must be GRANTED or NOT_GRANTED');
   const mailOff = env.REPRACER_SCHEDULER_MAIL === 'off';
+  const apps = loadChannelAppsConfig(env, read);
   /**
    * Шаг 37, задача D. Настроек провайдера нет — идём всухую, а не отказываемся стартовать: у проекта нет ни ключа, ни
    * домена (OQ-224), и требовать их значило бы запретить запуск всем, кто ещё не завёл провайдера. Но «настроено
@@ -113,5 +120,7 @@ export function loadConfig(env: Env = process.env, read: (path: string) => strin
       buyBoxChangedAccess: access,
     },
     amazon: { applicationCredentialsRef: required(env.REPRACER_AMAZON_APPLICATION_CREDENTIALS_REF, 'REPRACER_AMAZON_APPLICATION_CREDENTIALS_REF') },
+    channelApps: apps,
+    credentialsPgUrl: apps.amazon || apps.ebay ? required(secret(env, 'REPRACER_CREDENTIALS_PG_URL', read), 'REPRACER_CREDENTIALS_PG_URL') : null,
   };
 }

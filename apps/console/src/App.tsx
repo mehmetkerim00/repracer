@@ -8,6 +8,10 @@ import { ComplianceScreen } from './screens/Compliance.tsx';
 import { JobHistory } from './screens/Jobs.tsx';
 import { OnboardingScreen } from './screens/Onboarding.tsx';
 import { ShadowScreen } from './screens/Shadow.tsx';
+import { captureConnectCallback, ConnectCallback, ConnectionsScreen, pendingConnectCallback } from './screens/Connections.tsx';
+
+// Р-175: возврат от канала запоминается ДО входа — адрес стирается сразу, код согласия в истории браузера не живёт
+captureConnectCallback();
 import { StockScreen } from './screens/Stock.tsx';
 import { DangerousScreen } from './screens/Dangerous.tsx';
 import { FeedScreen } from './screens/Feed.tsx';
@@ -36,7 +40,7 @@ export function parseHash(hash: string): Route {
  * (находка 8 ревью шага 31).
  */
 /** Р-149 (шаг 34): путь онбординга — первый экран: с него продавец начинает и к нему возвращается, пока путь не пройден */
-const SCREENS = ['onboarding', 'shadow', 'stock', 'products', 'decisions', 'strategies', 'feed', 'rejected', 'dangerous', 'bounds', 'cost-import', 'compliance', 'jobs', 'stop'] as const;
+const SCREENS = ['onboarding', 'connections', 'shadow', 'stock', 'products', 'decisions', 'strategies', 'feed', 'rejected', 'dangerous', 'bounds', 'cost-import', 'compliance', 'jobs', 'stop'] as const;
 
 /** Вход [Р-78]: у поставщика identity; на стенде — имитатор с синтетическими пользователями. Паролей у нас нет */
 export function LoginView({ simulator, demoGuest, error, busy, onSignIn, onDemo }: {
@@ -118,6 +122,7 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
         ))}
       </nav>
       {route.screen === 'onboarding' ? <OnboardingScreen worldId={world.id} />
+        : route.screen === 'connections' ? <ConnectionsScreen worldId={world.id} />
         : route.screen === 'shadow' ? <ShadowScreen worldId={world.id} />
         : route.screen === 'stock' ? <StockScreen worldId={world.id} />
         : route.screen === 'products' ? <ProductsScreen worldId={world.id} />
@@ -139,6 +144,8 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
 function SignedIn({ route }: { route: Route }) {
   const m = useMessages();
   const [worlds, retry] = useResource<WorldSummary[]>('/api/worlds', m.locale);
+  const [callback, setCallback] = useState(pendingConnectCallback);
+  if (callback) return <ConnectCallback onDone={() => setCallback(false)} />;
   return (
     <Load resource={worlds} retry={retry}>
       {(list) => (route.worldId === null ? <WorldList worlds={list} /> : <WorldScreen route={{ ...route, worldId: route.worldId }} worlds={list} />)}

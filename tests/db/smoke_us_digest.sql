@@ -213,6 +213,16 @@ SELECT pg_temp.expect_fail('a saving that is a bare number (Р-173, Р-71)', for
   INSERT INTO tenant_data.shadow_digest (tenant_id, period_start, period_end, decisions, changes, held_writes, floor_held, floor_savings)
   VALUES (%L, now() - interval '2 days', now(), 1, 1, 1, 1, '[4500]'::jsonb) $q$, :tA),
   'shadow_digest_savings_are_money');
+-- Находка 15 ревью шага 42: у проверки денег четыре ветки, и проверены были две. Лишний ключ — это цена конкурента,
+-- спрятанная в сумму дайджеста [Р-85]; отрицательная сумма — ошибка агрегата, а не «пол сэкономил минус»
+SELECT pg_temp.expect_fail('a saving that carries an extra key (Р-173, Р-85)', format($q$
+  INSERT INTO tenant_data.shadow_digest (tenant_id, period_start, period_end, decisions, changes, held_writes, floor_held, floor_savings)
+  VALUES (%L, now() - interval '2 days', now(), 1, 1, 1, 1, '[{"currency": "USD", "minor": 4500, "competitorMinor": 1999}]'::jsonb) $q$, :tA),
+  'shadow_digest_savings_are_money');
+SELECT pg_temp.expect_fail('a negative saving (Р-173)', format($q$
+  INSERT INTO tenant_data.shadow_digest (tenant_id, period_start, period_end, decisions, changes, held_writes, floor_held, floor_savings)
+  VALUES (%L, now() - interval '2 days', now(), 1, 1, 1, 1, '[{"currency": "USD", "minor": -1}]'::jsonb) $q$, :tA),
+  'shadow_digest_savings_are_money');
 
 -- Дайджест не рождается доставленным: отметка ставится ПОСЛЕ отправки, иначе она ничего не доказывает
 SELECT pg_temp.expect_fail('a digest recorded as already delivered (Р-174)', format($q$

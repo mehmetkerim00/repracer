@@ -130,7 +130,8 @@ END $$;
 /**
  * Ждущая запись НИКУДА не уходила — её удерживает тень: в очереди её больше нет, в истории она `SHADOW_HELD`.
  */
-DO $$
+SELECT pg_temp.ok('going to shadow holds the writes that were still waiting (Р-170)', $q$
+  DO $inner$
 DECLARE
   h record;
 BEGIN
@@ -143,14 +144,14 @@ BEGIN
     RAISE EXCEPTION 'a pending write is recorded as %/% instead of held by the shadow', h.final_status, h.end_reason;
   END IF;
   IF h.dispatched_at IS NOT NULL THEN RAISE EXCEPTION 'a write that never left carries a dispatch time'; END IF;
-  RAISE NOTICE 'PASS accept | going to shadow holds the writes that were still waiting (Р-170)';
-END $$;
+  END $inner$ $q$);
 
 /**
  * Что стало с записью, которая уже уходила и получила отказ канала: она НЕ помечена тенью (следы отправки у неё есть, и
  * «удержано тенью» было бы неправдой), а завершена отказом с той же причиной — повторов не будет.
  */
-DO $$
+SELECT pg_temp.ok('a write that had already left is ended by its refusal, not marked as held (Р-169)', $q$
+  DO $inner$
 DECLARE
   h record;
 BEGIN
@@ -163,8 +164,7 @@ BEGIN
     RAISE EXCEPTION 'a write that had already left is recorded as %/% instead of a refusal caused by the shadow', h.final_status, h.end_reason;
   END IF;
   IF h.dispatched_at IS NULL THEN RAISE EXCEPTION 'the write that had left lost its dispatch time'; END IF;
-  RAISE NOTICE 'PASS accept | a write that had already left is ended by its refusal, not marked as held (Р-169)';
-END $$;
+  END $inner$ $q$);
 
 -- --------------------------------------------------------------- путь 3: повтор отправленной записи в тени [Р-169]
 -- Запись ушла ДО перехода в тень и осталась в полёте: канал отказал, и повтор обязан упереться в режим
@@ -191,7 +191,8 @@ SELECT pg_temp.ok('a write that had left is ended with the shadow reason (Р-169
 -- Теневая запись рождается завершённой: в очереди (`PENDING`) её нет, и диспетчер её не видит
 INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, quantity, version, origin)
 VALUES (:tA, 'a9410000-0000-4000-8000-000000000002', :kScope, 'QUANTITY', 6, 2, 'STOCK_RECALC');
-DO $$
+SELECT pg_temp.ok('a write of a shadow account is born finished and never queued (Р-169)', $q$
+  DO $inner$
 DECLARE
   h record;
 BEGIN
@@ -210,8 +211,7 @@ BEGIN
   IF h.would_spend_budget THEN
     RAISE EXCEPTION 'a write without an external budget says it would have spent one (Р-171)';
   END IF;
-  RAISE NOTICE 'PASS accept | a write of a shadow account is born finished and never queued (Р-169)';
-END $$;
+  END $inner$ $q$);
 
 -- --------------------------------------------------------------- Р-171: «потратило бы бюджет» и нерастраченный бюджет
 -- Аккаунт eBay уходит в тень: у его листинга бюджет правок 250 в сутки, и в смоук-мире он израсходован полностью

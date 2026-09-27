@@ -196,7 +196,9 @@ test('Р-168, Р-171: экран тени и недельный дайджест
   assert.ok(screen.body.rows.some((r) => r.priceDecisionId !== null), 'у удержанных записей цены есть решение с объяснением');
   Object.assign(numbers, { screenSummary: screen.body.summary, screenSeconds: screen.seconds });
 
-  const digest = createShadowDigest({ store: new PgShadowDigestStore(deliveryPool), mail, now: () => new Date().toISOString(), log: () => undefined });
+  const digest = createShadowDigest({ store: new PgShadowDigestStore(deliveryPool), mail,
+    // Прогон идёт на часах ТЕКУЩЕЙ недели: письмо о ней (в работе — о прошлой закрытой, находка 3 ревью шага 43)
+    sinceDays: 0, now: () => new Date().toISOString(), log: () => undefined });
   const outcome = await digest.send();
   assert.equal(outcome.letters, 1, `дайджест: ${JSON.stringify(outcome)}`);
   const letter = mail.sent.at(-1)!;
