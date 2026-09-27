@@ -55,9 +55,8 @@
      — ответ 200, 09.10.2025, I ZR 183/24: нижняя цена за 30 дней должна быть указана однозначно, ясно различимо и
      хорошо читаемо.
    - [Wettbewerbszentrale, Jahresbericht 2025](https://www.wettbewerbszentrale.de/jahresbericht-2025-mehr-klagen-und-ein-neuer-name/)
-     — ответ 200. Страница «auf einen Blick» говорит «Die Zahl der Preiswerbungs-Fälle stieg erheblich um 11,6 Prozent».
-     Абсолютное число 644 со ссылкой на PDF отчёта приводит отраслевая статья (onlinemarktplatz.de); сам PDF отчёта (20 МБ)
-     целиком скачать не удалось.
+     — ответ 200. Полный текст отчёта (PDF, `wp-content/uploads/2026/06/Jahresbericht-2025-V1.1.pdf`, 20 МБ) говорит
+     дословно: «Preiswerbung war in 644 Fällen Thema: Hier ergab sich ein erhebliches Plus von 11,6 Prozent».
    - [LG München I, Endurteil vom 14.07.2025, 4 HK O 13950/24](https://www.gesetze-bayern.de/Content/Document/Y-300-Z-GRURRS-B-2025-N-17142)
      — официальный портал Баварии. Автоматический запрос получает страницу проверки «Security Check» (503); заголовок
      документа подтверждён поисковым индексом. Решение по источникам 2025 года не вступило в силу — страница говорит
