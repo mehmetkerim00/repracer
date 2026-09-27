@@ -135,8 +135,13 @@ export async function startConsole(env: Env = process.env): Promise<RunningConso
   // Список миров у процесса ОДИН и тот же объект: пересев заменяет его содержимое, а обработчик держит ту же ссылку
   const worlds: unknown[] = [];
   const memberUsers = await pgStandUsers(directory as never, pools.onboarding as never);
-  // Окно выдачи гостей: минута и счётчик в ней (находка 5 ревью шага 37)
-  const guestWindow = { minute: 0, issued: 0 };
+  // Окно выдачи гостей (находка 5 ревью шага 37)
+  /**
+   * Время выдачи гостей за последние 60 секунд — СКОЛЬЗЯЩЕЕ окно. Календарная минута (до шага 47) обнулялась на её границе:
+   * на стыке двух минут проходило вдвое больше предела за секунду, а тест предела краснел, когда его 61 запрос пересекал
+   * границу минуты (быстрый прогон CI шага 47) — скрытый вход «время на часах», как у прогонов шага 29.
+   */
+  const guestIssuedAt: number[] = [];
 
   const reseed = async (): Promise<void> => {
     const previous = state.demo;
@@ -175,13 +180,13 @@ export async function startConsole(env: Env = process.env): Promise<RunningConso
           async issue() {
             const tenantId = state.demo?.tenantId;
             if (!tenantId) throw new Error('DEMO_NOT_READY');
-            const minute = Math.floor(Date.now() / 60_000);
-            if (minute !== guestWindow.minute) { guestWindow.minute = minute; guestWindow.issued = 0; }
-            if (guestWindow.issued >= GUEST_SESSIONS_PER_MINUTE) {
+            const nowMs = Date.now();
+            while (guestIssuedAt.length > 0 && guestIssuedAt[0]! <= nowMs - 60_000) guestIssuedAt.shift();
+            if (guestIssuedAt.length >= GUEST_SESSIONS_PER_MINUTE) {
               health.count('guest_rate_limited');
               throw new Error('GUEST_RATE_LIMIT');
             }
-            guestWindow.issued += 1;
+            guestIssuedAt.push(nowMs);
             const subject = `guest-${randomUUID()}`;
             // Членство гостя заводит БАЗА: здесь нет ни роли, ни прав — только адрес входа и тенант демо [Р-160]
             await pools.onboarding.query('SELECT security.create_demo_guest($1, $2, $3, $4)',
