@@ -59,8 +59,9 @@
      дословно: «Preiswerbung war in 644 Fällen Thema: Hier ergab sich ein erhebliches Plus von 11,6 Prozent».
    - LG München I, 4 HK O 13950/24 — на странице две ссылки, обе проверены (ответ 200, в тексте — номер дела):
      [Verbraucherzentrale Baden-Württemberg, «Verbraucherzentrale setzt sich gegen Amazon durch»](https://www.verbraucherzentrale-bawue.de/pressemitteilungen/verbraucherzentrale-setzt-sich-gegen-amazon-durch-108829)
-     (пресс-релиз истца) и [LTO, «Amazon kassiert Niederlage im Streit um Rabatte»](https://www.lto.de/recht/nachrichten/n/4hko1395024-lg-muenchen-i-verbraucherzentrale-gegen-amazon-prime-deal-days). По источникам 2025 года
-     решение не вступило в силу — страница говорит «verlor», как в тексте владельца.
+     (пресс-релиз истца) и [LTO, «Amazon kassiert Niederlage im Streit um Rabatte»](https://www.lto.de/recht/nachrichten/n/4hko1395024-lg-muenchen-i-verbraucherzentrale-gegen-amazon-prime-deal-days). Решение первой инстанции и
+     не вступило в силу — страница говорит это прямо: «verlor dazu erstinstanzlich … Urteil nicht rechtskräftig»; у
+     каждого упоминания суда «erstinstanzlich» обязательно, и проверка текста без него краснеет.
    - Дополнительно, только здесь: [официальный текст решения на портале Баварии](https://www.gesetze-bayern.de/Content/Document/Y-300-Z-GRURRS-B-2025-N-17142) — **открывается только в
      браузере**: автоматический запрос получает страницу «Security Check» (503); заголовок документа подтверждён
      поисковым индексом.

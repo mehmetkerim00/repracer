@@ -31,6 +31,8 @@ test('Р-185: каждое правило краснеет на своей по�
     ['адрес источника как ресурс', spoil('/de/', '<link rel="stylesheet" href="/site.css">', '<link rel="stylesheet" href="/site.css"><link rel="prefetch" href="https://www.bundesgerichtshof.de/SharedDocs/Pressemitteilungen/DE/2025/2025184.html">'), /внешний адрес/],
     ['ресурс источника после ссылки', spoil('/de/', '</footer>', '</footer><link rel="prefetch" href="https://www.bundesgerichtshof.de/SharedDocs/Pressemitteilungen/DE/2025/2025184.html">'), /внешний адрес/],
     ['источник на английской', spoil('/', '<main>', '<main><a href="https://www.bundesgerichtshof.de/SharedDocs/Pressemitteilungen/DE/2025/2025184.html">BGH</a>'), /внешний адрес/],
+    ['LG München I без «erstinstanzlich» (источник)', spoil('/de/', 'LG München I (erstinstanzlich), 4 HK O', 'LG München I, 4 HK O'), /нет «erstinstanzlich»/],
+    ['LG München I без «erstinstanzlich» (текст)', spoil('/de/', 'verlor dazu erstinstanzlich vor dem', 'verlor dazu vor dem'), /нет «erstinstanzlich»/],
     ['тариф без периода', spoil('/de/', '39 €</span> pro Monat, zzgl. USt.', '39 €</span>'), /39 € pro Monat, zzgl\. USt\./],
     // Находка 6 ревью шага 46: порча только ДОБАВЛЯЕТ обещание — факт-оговорка на месте, краснеть обязано своё правило
     ['гарантия (DE)', spoil('/de/', 'Wir führen je Kanal', 'Wir garantieren Rechtssicherheit. Wir führen je Kanal'), /обещание гарантии/],

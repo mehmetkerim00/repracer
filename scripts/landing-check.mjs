@@ -22,13 +22,13 @@ export const REDIRECTS = { '/demo': '/#demo-soon', '/de/demo': '/de/#demo-soon',
 export const ALLOWED_PHRASES = {
   en: ['€39', '€89', '30 days', 'thousands of SKUs'],
   de: ['39 €', '89 €', '30 Tage', 'letzten 30 Tage', '§ 11 PAngV', '644 Fälle allein 2025 (+11,6 %)', 'der BGH hat 2025', '30-Tage-Bestpreis',
-    'Az. 4 HK O 13950/24', 'Nr. 184/2025', 'Jahresbericht 2025', 'LG München I, 4 HK O 13950/24', 'mehreren Tausend SKUs'],
+    'Az. 4 HK O 13950/24', 'Nr. 184/2025', 'Jahresbericht 2025', 'LG München I (erstinstanzlich), 4 HK O 13950/24', 'mehreren Tausend SKUs'],
 };
 /**
  * Факты Omnibus — предложение владельца ДОСЛОВНО (решение по лендингу после шага 46) и источники ссылками. Внешняя ссылка
  * разрешена только так: тег `<a>`, немецкая страница, один из трёх источников. Ресурсы (стили, картинки) — нет никогда.
  */
-export const OMNIBUS_SENTENCE = 'Preiswerbung wird aktiv abgemahnt: 644 Fälle allein 2025 (+11,6 %), und der BGH hat 2025 entschieden, dass der 30-Tage-Bestpreis klar genannt werden muss — auch Amazon verlor dazu vor dem LG München I (Az. 4 HK O 13950/24).';
+export const OMNIBUS_SENTENCE = 'Preiswerbung wird aktiv abgemahnt: 644 Fälle allein 2025 (+11,6 %), und der BGH hat 2025 entschieden, dass der 30-Tage-Bestpreis klar genannt werden muss — auch Amazon verlor dazu erstinstanzlich vor dem LG München I (Az. 4 HK O 13950/24; Urteil nicht rechtskräftig).';
 export const SOURCE_LINKS = [
   'https://www.bundesgerichtshof.de/SharedDocs/Pressemitteilungen/DE/2025/2025184.html',
   'https://www.wettbewerbszentrale.de/jahresbericht-2025-mehr-klagen-und-ein-neuer-name/',
@@ -125,6 +125,14 @@ export function landingProblems(pages, css) {
   if (/Omnibus|PAngV|BGH|13950/.test(textOf(en))) bad('/: блок Omnibus на английской странице');
   const deText = textOf(de);
   for (const link of SOURCE_LINKS) if (!de.includes(`href="${link}"`)) bad(`/de/: нет источника ${link}`);
+  /**
+   * Решение владельца (после шага 46): решение LG München I — первой инстанции и не вступило в силу. У КАЖДОГО упоминания
+   * суда рядом (в пределах 40 знаков до или после) стоит «erstinstanzlich» — иначе страница выдаёт его за окончательное.
+   */
+  for (const m of deText.matchAll(/LG München I\b/g)) {
+    const near = deText.slice(Math.max(0, m.index - 40), m.index + 'LG München I'.length + 40);
+    if (!near.includes('erstinstanzlich')) bad(`/de/: у упоминания LG München I нет «erstinstanzlich»: «${near.trim()}»`);
+  }
   for (const fact of [OMNIBUS_SENTENCE, 'Nachweis', DISCLAIMER]) {
     if (!deText.includes(fact)) bad(`/de/: в блоке Omnibus нет «${fact}»`);
   }
