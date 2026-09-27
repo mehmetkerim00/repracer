@@ -1,30 +1,15 @@
 # Р-158: TLS и сертификат — забота прокси. Приложение слушает только сеть compose и о сертификатах не знает.
+# Шаг 46 [Р-184]: корень домена — ЛЕНДИНГ (статические страницы apps/landing), консоль — на app.<домен>.
 {
 	email {$REPRACER_ACME_EMAIL}
 }
 
+import snippets.caddy
+
 {$REPRACER_DOMAIN} {
-	encode zstd gzip
-	# Журнал без тел запросов и без заголовков авторизации: токены продавца в логи не попадают
-	# Шаг 43, находка 10 ревью: адрес возврата OAuth несёт код согласия и state в строке запроса — журнал их маскирует
-	log {
-		output stdout
-		format filter {
-			wrap json
-			fields {
-				# Шаг 45 (находка 1 ревью): ID-токен страницы идёт своим заголовком — Caddy скрывает только Authorization и Cookie
-				request>headers>X-Repracer-Id-Token delete
-				request>uri query {
-					replace spapi_oauth_code REDACTED
-					replace code REDACTED
-					replace state REDACTED
-				}
-			}
-		}
-	}
-	# Шаг 37 [Р-159]: за прокси стоит консоль. TLS кончается здесь, дальше — сеть compose и обычный http
-	reverse_proxy console:4319 {
-		# Работоспособность процесса прокси не спрашивает: её спрашивает docker (healthcheck развёртывания консоли)
-		header_up X-Forwarded-Proto {scheme}
-	}
+	import landing
+}
+
+app.{$REPRACER_DOMAIN} {
+	import console
 }

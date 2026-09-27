@@ -331,7 +331,14 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     if (parts[1] === 'invitations' && parts[2] === 'accept') {
       if (req.method !== 'POST') return fail(405, 'METHOD', s.method);
       if (!identity.acceptInvitation) return fail(404, 'NOT_FOUND', s.notFound);
-      const verified = await identity.authenticator.identify(req.authorization);
+      let verified;
+      try {
+        verified = await identity.authenticator.identify(req.authorization);
+      } catch (error) {
+        // Находка 10 ревью шага 45: поставщик не ответил — это не «адрес не подтверждён» и не сбой консоли
+        if ((error as { code?: string }).code === 'USERINFO_UNAVAILABLE') return fail(503, 'IDENTITY_PROVIDER_UNAVAILABLE', m.ui.app.invitation.providerUnavailable);
+        throw error;
+      }
       if (!verified) return fail(401, 'UNAUTHENTICATED', s.unauthenticated);
       const invitation = typeof body.token === 'string' && /^[A-Za-z0-9_-]{16,128}$/.test(body.token) ? body.token : null;
       if (!invitation) return fail(400, 'BAD_INVITATION', m.ui.app.invitation.bad);

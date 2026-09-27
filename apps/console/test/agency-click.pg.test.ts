@@ -4,7 +4,7 @@ import { after, before, test } from 'node:test';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
 import { PgIdentityDirectory } from '@repracer/identity/pg';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
-import type { PgPool } from '@repracer/pricing-store-pg';
+import { PgPricingStore, type PgPool } from '@repracer/pricing-store-pg';
 import { createStandApi } from '../server/stand-server.ts';
 import { createTenantWorlds } from '../server/tenant-worlds.ts';
 import { createIsolatedDatabase, type IsolatedDatabase } from '../../../packages/pricing-store-pg/test/isolated-db.ts';
@@ -34,6 +34,8 @@ let userId = '';
 const tenantIds: string[] = [];
 const pools: PgPool[] = [];
 let roundTrips = 0;
+let worldsIndex: ReturnType<typeof createTenantWorlds>;
+let authenticate: (authorization: string) => Promise<import('@repracer/identity').Principal | null>;
 
 /** Пул, считающий обращения к базе: и одиночные запросы, и запросы клиента внутри транзакции */
 function counting(pool: PgPool): PgPool {
@@ -84,10 +86,12 @@ before(async () => {
   const idp = createTestIssuer({ issuer: ISSUER, audience: AUDIENCE });
   token = idp.token('agency-user', { email: 'agency@example.test', amr: ['pwd', 'otp'] });
   const authenticator = counting(db.pool('svc_authenticator', 2));
-  const worlds = createTenantWorlds({
+  const worlds = worldsIndex = createTenantWorlds({
     authenticator, app: counting(db.pool('svc_app', 4)), admin: counting(db.pool('svc_admin', 4)),
     bulkWorker: counting(db.pool('svc_bulk_worker', 2)), stock: counting(db.pool('svc_stock', 2)),
   });
+  const auth = createAuthenticator({ issuer: ISSUER, audience: AUDIENCE, jwks: staticJwks(idp.jwks), directory: new PgIdentityDirectory(authenticator as never) });
+  authenticate = (a) => auth.authenticate(a);
   handle = createStandApi([], {
     authenticator: createAuthenticator({ issuer: ISSUER, audience: AUDIENCE, jwks: staticJwks(idp.jwks), directory: new PgIdentityDirectory(authenticator as never) }),
   }, { tenantWorlds: (principal) => worlds.worldsFor(principal) });
@@ -149,4 +153,48 @@ test('Р-182: кэш миров снимается изменением член
   assert.ok(fresh, 'новое членство видно следующим запросом');
   assert.equal(fresh.role, 'Operator', 'роль — из свежего членства');
   assert.equal((await click(`/api/worlds/tenant-${added}/onboarding`)).status, 200);
+});
+
+/**
+ * Находка 8 ревью шага 45: отзыв членства в маршруте отсекает и второй рубеж — роль из свежих членств, — поэтому
+ * по ответу маршрута не видно, сброшен ли КЭШ. Здесь кэш проверяется сам: указатель миров после отзыва не содержит мира.
+ */
+test('Р-182: указатель миров (кэш) сбрасывается отзывом членства, а не сроком', async () => {
+  const target = tenantIds[5]!;
+  const before = await worldsIndex.worldsFor((await authenticate(`Bearer ${token}`))!);
+  assert.ok(before.entries.some((e) => e.tenantId === target), 'до отзыва мир в указателе');
+  await db.superuser(`SET session_replication_role = replica;
+    UPDATE tenant_data.membership SET status = 'REVOKED', revoked_at = now() WHERE tenant_id = '${target}' AND user_id = '${userId}';
+    SET session_replication_role = origin;`);
+  const after = await worldsIndex.worldsFor((await authenticate(`Bearer ${token}`))!);
+  assert.equal(after.entries.some((e) => e.tenantId === target), false, 'после отзыва — нет, хотя срок записи кэша не вышел');
+  assert.equal(await after.open(`tenant-${target}`), null, 'и открыть его указателем нельзя');
+});
+
+/**
+ * Находка 9 ревью шага 45: счётчики одним обращением сверяются с поштучными на НЕНУЛЕВЫХ данных — действующая остановка
+ * цен у одного тенанта, снятая у второго, признак демо у третьего. Иначе перепутанный столбец или фильтр в тексте запроса не увидел бы никто.
+ */
+test('Р-182: worldSummaries совпадает с worldCounters тенант за тенантом на ненулевых данных', async () => {
+  const [a, b, c] = [tenantIds[10]!, tenantIds[11]!, tenantIds[12]!];
+  await db.superuser(`SET session_replication_role = replica;
+    INSERT INTO tenant_data.price_stop (tenant_id, scope_type, stopped_by_membership_id, stop_note)
+      SELECT m.tenant_id, 'TENANT', m.membership_id, 'synthetic stop for the counter check'
+        FROM tenant_data.membership m WHERE m.user_id = '${userId}' AND m.tenant_id = '${a}';
+    -- Снятая остановка не считается: фильтр «действует» тоже сверяется
+    INSERT INTO tenant_data.price_stop (tenant_id, scope_type, stopped_by_membership_id, stop_note, released_at, released_by_membership_id, release_note)
+      SELECT m.tenant_id, 'TENANT', m.membership_id, 'synthetic stop, already released', now(), m.membership_id, 'released for the counter check'
+        FROM tenant_data.membership m WHERE m.user_id = '${userId}' AND m.tenant_id = '${b}';
+    UPDATE tenant_data.tenant SET demo = true WHERE tenant_id = '${c}';
+    SET session_replication_role = origin;`);
+  const store = new PgPricingStore(db.pool('svc_app', 2), { adminPool: db.pool('svc_admin', 2) });
+  const now = new Date().toISOString() as never;
+  const ids = [a, b, c, tenantIds[13]!];
+  const many = await store.worldSummaries(ids, now);
+  for (const id of ids) {
+    const { awaitingAccess, ...counters } = many.get(id)!;
+    assert.deepEqual(counters, await store.worldCounters(id, now), `тенант ${id}`);
+    assert.equal(awaitingAccess, 0);
+  }
+  assert.deepEqual([many.get(a)!.activeStops, many.get(b)!.activeStops, many.get(c)!.demo], [1, 0, true], 'данные ненулевые');
 });

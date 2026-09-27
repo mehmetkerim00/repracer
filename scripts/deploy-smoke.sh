@@ -106,6 +106,19 @@ if [ ! -f apps/console/dist/index.html ]; then
   echo "== сборка интерфейса (apps/console/dist)"
   npm run build -w apps/console
 fi
+# Шаг 46 (находка 3 ревью): Caddyfile СЕРВЕРА в CI подменяется http-вариантом, поэтому его адреса сайтов, глобальный блок
+# и импорт общих частей разбираются отдельно — тем же образом Caddy, что в профиле, с заполнителями вместо домена
+echo "== caddy validate: deploy/production/Caddyfile"
+if docker run --rm -v "$PWD/deploy/production:/etc/caddy:ro" -v "$PWD/apps/landing:/srv/landing:ro" \
+    -e REPRACER_DOMAIN=example.invalid -e REPRACER_ACME_EMAIL=ci@example.invalid -e REPRACER_LANDING_PUBLIC=off \
+    -e REPRACER_LANDING_DEMO_EN=/#demo-soon -e REPRACER_LANDING_DEMO_DE=/de/#demo-soon \
+    -e REPRACER_LANDING_CONTACT_EN=/#contact-soon -e REPRACER_LANDING_CONTACT_DE=/de/#contact-soon \
+    caddy:2.10.2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile; then
+  echo "   Caddyfile сервера разобран"
+else
+  echo "   Caddyfile сервера НЕ разбирается"
+  failed=1
+fi
 echo "== production (прокси + консоль)"
 PROD=(-f deploy/production/compose.yaml -f deploy/ci/production.override.yaml)
 prod_env=("REPRACER_SECRETS_DIR=$SECRETS" "REPRACER_BACKUP_DIR=$SECRETS" "REPRACER_DOMAIN=localhost" "REPRACER_ACME_EMAIL=ci@example.invalid"
@@ -130,6 +143,15 @@ if [ "$prod_ok" = 1 ]; then
   else
     echo "   production: путь гостя НЕ пройден"
     env "${prod_env[@]}" docker compose "${PROD[@]}" logs --tail 120
+    failed=1
+  fi
+  # Шаг 46 [Р-184, Р-185]: лендинг отдаёт ТОТ ЖЕ прокси с корня домена (в CI — по заголовку Host домена `localhost`):
+  # те же байты, что в репозитории, обе языковые версии, перенаправления «скоро», политика содержимого, 404 на чужое
+  if node scripts/landing-check.mjs http://127.0.0.1:8080 localhost; then
+    echo "   production: лендинг отдан прокси"
+  else
+    echo "   production: лендинг НЕ отдан прокси как в репозитории"
+    env "${prod_env[@]}" docker compose "${PROD[@]}" logs --tail 60 proxy
     failed=1
   fi
   # Шаг 40 [Р-165]: панель жива на СВОЁМ порту и недостижима через публичный прокси — иначе «не публичная» было бы словом

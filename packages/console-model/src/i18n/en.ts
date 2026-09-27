@@ -304,6 +304,7 @@ export const en = {
         bad: 'This invitation link is incomplete. Open it again from the letter.',
         refused: 'This invitation cannot be accepted: it has expired, was already used, or belongs to another address. Ask the sender for a new one.',
         unverified: 'Your identity provider has not confirmed the email address of this sign-in. Confirm the address there, sign in again and open the link once more.',
+        providerUnavailable: 'The sign-in provider did not answer. Nothing is lost — open the invitation link again in a minute.',
         accepted: 'Invitation accepted. Your account is ready.',
         signInFirst: 'Sign in to accept the invitation.',
       },

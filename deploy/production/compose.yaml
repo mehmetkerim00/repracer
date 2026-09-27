@@ -23,8 +23,20 @@ services:
     environment:
       REPRACER_DOMAIN: ${REPRACER_DOMAIN:?set REPRACER_DOMAIN}
       REPRACER_ACME_EMAIL: ${REPRACER_ACME_EMAIL:?set REPRACER_ACME_EMAIL}
+      # Шаг 46 [Р-184]: куда ведут «Live demo» и «контакт» лендинга. Не задано — на скрытый блок «скоро» своей языковой
+      # страницы (до развёртывания, шаг 38, ч. 2). Умолчание — здесь, а не в Caddyfile: пустое значение Caddy подставил бы
+      # как есть, и перенаправление вело бы в никуда
+      # Публикация лендинга — только явным `on` (Impressum и защита данных, § 5 DDG — deploy/production/README.md, 3б)
+      REPRACER_LANDING_PUBLIC: "${REPRACER_LANDING_PUBLIC:-off}"
+      REPRACER_LANDING_DEMO_EN: "${REPRACER_LANDING_DEMO_URL:-/#demo-soon}"
+      REPRACER_LANDING_DEMO_DE: "${REPRACER_LANDING_DEMO_URL:-/de/#demo-soon}"
+      REPRACER_LANDING_CONTACT_EN: "${REPRACER_LANDING_CONTACT_URL:-/#contact-soon}"
+      REPRACER_LANDING_CONTACT_DE: "${REPRACER_LANDING_CONTACT_URL:-/de/#contact-soon}"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./snippets.caddy:/etc/caddy/snippets.caddy:ro
+      # Шаг 46 [Р-184]: лендинг — статические страницы репозитория, отдаёт их этот же прокси
+      - ../../apps/landing:/srv/landing:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:

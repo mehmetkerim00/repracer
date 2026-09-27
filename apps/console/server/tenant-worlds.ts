@@ -32,6 +32,8 @@ export interface TenantWorldIndex {
 /** Срок записи кэша: страховка для того, чего членство не меняет (переименование, закрытие тенанта); членство — сразу */
 const INDEX_TTL_MS = 60_000;
 const INDEX_MAX_USERS = 10_000;
+/** Пустые списки (гости демо, пользователи без тенантов) — отдельно и меньше: они не вытесняют агентства */
+const EMPTY_MAX_USERS = 2_000;
 
 export interface TenantWorldPools {
   /** Роль входа: только она исполняет функцию списка миров пользователя */
@@ -70,6 +72,7 @@ export function createTenantWorlds(pools: TenantWorldPools, now: () => string = 
   const stockPipeline = createStockPipeline({ store: stock, now: now as never });
   const clock = { iso: now, nowMs: () => Date.parse(now()) } as never;
   const cache = new Map<string, { fingerprint: string; at: number; rows: Array<{ id: string; tenantId: string; title: string }> }>();
+  const emptyCache = new Map<string, { fingerprint: string; at: number; rows: Array<{ id: string; tenantId: string; title: string }> }>();
 
   const world = async (tenantId: string, name: string): Promise<LiveWorld> => {
     const rows = await store.channelAccounts(tenantId);
@@ -114,13 +117,21 @@ export function createTenantWorlds(pools: TenantWorldPools, now: () => string = 
      */
     async worldsFor(principal: Principal): Promise<TenantWorldIndex> {
       const fingerprint = principal.memberships.map((x) => `${x.tenantId}:${x.membershipId}:${x.role}`).sort().join('|');
-      let entry = cache.get(principal.userId);
+      let entry = cache.get(principal.userId) ?? emptyCache.get(principal.userId);
       if (!entry || entry.fingerprint !== fingerprint || Date.now() - entry.at > INDEX_TTL_MS) {
         const { rows } = await pools.authenticator.query('SELECT tenant_id, tenant_name FROM security.console_tenant_worlds($1)', [principal.userId]);
         entry = { fingerprint, at: Date.now(), rows: rows.map((r) => ({ id: `${TENANT_WORLD_PREFIX}${r.tenant_id as string}`, tenantId: r.tenant_id as string, title: r.tenant_name as string })) };
         cache.delete(principal.userId);
-        if (cache.size >= INDEX_MAX_USERS) cache.delete(cache.keys().next().value!);
-        cache.set(principal.userId, entry);
+        emptyCache.delete(principal.userId);
+        /**
+         * Находка 12 ревью шага 45: пустой список (гость демо — новый пользователь на каждого посетителя) не вытесняет
+         * пользователей агентств — он живёт в своём, меньшем кэше; находка 18 ревью шага 46: но и не идёт в базу на
+         * каждый запрос гостя
+         */
+        const target = entry.rows.length > 0 ? cache : emptyCache;
+        const limit = entry.rows.length > 0 ? INDEX_MAX_USERS : EMPTY_MAX_USERS;
+        if (target.size >= limit) target.delete(target.keys().next().value!);
+        target.set(principal.userId, entry);
       }
       const rowsOf = entry.rows;
       return {

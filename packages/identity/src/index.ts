@@ -130,18 +130,43 @@ export function createAuthenticator(options: AuthenticatorOptions) {
   };
 }
 
+/**
+ * Находка 10 ревью шага 45: недоступный поставщик — не «адрес не подтверждён». Сбой userinfo (сеть, тайм-аут, ответ не
+ * 200) — ошибка {@link UserinfoUnavailable}, и продавец читает «поставщик входа не ответил», а не совет подтвердить адрес.
+ */
+export class UserinfoUnavailable extends Error {
+  readonly code = 'USERINFO_UNAVAILABLE';
+}
+const USERINFO_TIMEOUT_MS = 5_000;
+
 /** userinfo поставщика: адрес конечной точки — из документа обнаружения; ответ — только адрес и его подтверждение */
 export function remoteUserinfo(issuer: string, doFetch: typeof fetch = fetch) {
   let endpoint: string | null = null;
+  /**
+   * Находки 16–17 ревью шага 46: 401/403 — не «поставщик недоступен», а «вход недействителен» (null: войдите снова);
+   * тело разбирается ВНУТРИ защиты — обрыв по тайм-ауту или не-JSON — тоже «недоступен», а не 500.
+   */
+  const call = async (url: string, init?: RequestInit): Promise<Record<string, unknown> | null> => {
+    try {
+      const r = await doFetch(url, { ...init, signal: AbortSignal.timeout(USERINFO_TIMEOUT_MS) });
+      if (r.status === 401 || r.status === 403) return null;
+      if (!r.ok) throw new UserinfoUnavailable(`userinfo: HTTP ${r.status}`);
+      const body = await r.json() as unknown;
+      if (!body || typeof body !== 'object') throw new UserinfoUnavailable('userinfo: not an object');
+      return body as Record<string, unknown>;
+    } catch (error) {
+      if (error instanceof UserinfoUnavailable) throw error;
+      throw new UserinfoUnavailable(`userinfo: ${error instanceof Error ? error.name : 'failed'}`);
+    }
+  };
   return async (accessToken: string): Promise<{ email: string | null; emailVerified: boolean } | null> => {
     if (!endpoint) {
-      const d = await (await doFetch(`${issuer.replace(/\/$/, '')}/.well-known/openid-configuration`)).json() as { userinfo_endpoint?: string };
-      if (!d.userinfo_endpoint) return null;
+      const d = await call(`${issuer.replace(/\/$/, '')}/.well-known/openid-configuration`);
+      if (!d || typeof d.userinfo_endpoint !== 'string') return null;
       endpoint = d.userinfo_endpoint;
     }
-    const r = await doFetch(endpoint, { headers: { authorization: `Bearer ${accessToken}` } });
-    if (!r.ok) return null;
-    const u = await r.json() as { email?: unknown; email_verified?: unknown };
+    const u = await call(endpoint, { headers: { authorization: `Bearer ${accessToken}` } });
+    if (!u) return null;
     return { email: typeof u.email === 'string' ? u.email : null, emailVerified: u.email_verified === true };
   };
 }

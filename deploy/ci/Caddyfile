@@ -1,23 +1,15 @@
 # Надстройка CI к профилю production: тот же прокси, но БЕЗ TLS. Сертификат Let's Encrypt требует настоящего домена, а
-# проверяется здесь другое — что прокси действительно отдаёт консоль, а не 503 [Р-159]. Сам Caddyfile развёртывания
-# (deploy/production/Caddyfile) этим файлом не подменяется в работе: он монтируется только надстройкой CI.
+# проверяется здесь другое — что прокси действительно отдаёт консоль, а не 503 [Р-159], и лендинг [Р-184]. Сам Caddyfile
+# развёртывания (deploy/production/Caddyfile) этим файлом не подменяется в работе: он монтируется только надстройкой CI.
+# Шаг 46: правила журнала, лендинга и консоли — ИМПОРТ тех же частей, что у развёртывания (deploy/production/snippets.caddy).
+import snippets.caddy
+
+# Лендинг — по имени домена CI (заголовок Host), как корень домена в работе
+http://localhost:80 {
+	import landing
+}
+
+# Консоль — всё остальное: прогон гостя ходит по 127.0.0.1, как в работе ходил бы по app.<домен>
 :80 {
-	encode zstd gzip
-	# Тот же фильтр журнала, что у прокси развёртывания (шаг 43, находка 10): подъём профиля в CI проверяет его синтаксис
-	log {
-		output stdout
-		format filter {
-			wrap json
-			fields {
-				request>uri query {
-					replace spapi_oauth_code REDACTED
-					replace code REDACTED
-					replace state REDACTED
-				}
-			}
-		}
-	}
-	reverse_proxy console:4319 {
-		header_up X-Forwarded-Proto {scheme}
-	}
+	import console
 }

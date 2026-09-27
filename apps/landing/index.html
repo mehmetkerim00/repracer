@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>repracer — repricing you can explain</title>
+<meta name="description" content="Repricing built for Kaufland and Amazon sellers: a floor from your own costs, a reason for every price, three stop switches and a shadow mode that cannot touch your prices.">
+<link rel="alternate" hreflang="de" href="/de/">
+<link rel="alternate" hreflang="en" href="/">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%231f5f4a'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/site.css">
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+  <b>repracer</b>
+  <nav aria-label="Language"><a href="/" aria-current="page" hreflang="en">EN</a><a href="/de/" hreflang="de">DE</a></nav>
+</header>
+
+<main>
+<h1>Repricing you can explain.</h1>
+<p class="lead">repracer is built to change your prices on Kaufland and Amazon by rules you can read — and never below a floor computed from your own costs.</p>
+<div class="cta">
+  <a class="btn primary" href="/contact">Become a design partner</a>
+  <a class="btn" href="/demo">Live demo</a>
+</div>
+
+<p class="note"><b>Where we are:</b> the product runs end to end on simulated marketplaces, and we are looking for design partners — sellers who try it on their own catalogue and tell us what is wrong. We have no customers to quote yet, so this page quotes none.</p>
+
+<section id="how">
+<h2>Deterministic, not a black box</h2>
+
+<h3>A floor from your costs</h3>
+<p>Enter your unit cost once. The floor is the highest of your minimum price and the price that still covers cost, marketplace fees and VAT. Strategies stop at the floor; a price that would still land below it is rejected, not corrected — and the check runs again before every single price is sent.</p>
+
+<h3>“Why this price” for every price</h3>
+<p>Every price change and every rejected price is stored with its steps: which inputs were checked, what the strategy wanted, which bound applied; a price left unchanged keeps its reason. Open a price and read why — in English or German.</p>
+
+<h3>Three stop switches</h3>
+<ul class="plain">
+  <li><b>Your kill switch.</b> Stops every price change for the whole account or one storefront. You press it; only you release it.</li>
+  <li><b>Automatic halt on suspicious data.</b> When competitor prices on a storefront shift in a way that looks like a data error, prices derived from competitors stop. Fixed and margin-based prices keep working.</li>
+  <li><b>Distrust of the channel.</b> When the price a marketplace applies differs from the one we sent by exactly the VAT rate — a sign that the price basis is wrong — every price on that storefront stops until a person releases it.</li>
+</ul>
+
+<h3>Shadow mode: watch for a week</h3>
+<p>Connect a marketplace and watch. In shadow mode the system cannot change your prices — physically: every write is recorded as held in the database and never leaves for the marketplace. You see each decision it would have made and why; you switch to live when you are ready, and back with one click.</p>
+</section>
+
+<section id="stock">
+<h2>It knows your stock, too</h2>
+<p>A repricer you can leave running has to know what you actually have. repracer keeps stock in sync across channels: one pool per product, a buffer per channel, orders reserve and lower what the channels show. We do not own your stock — your system sends it to us through an API or a file. In shadow mode stock writes are held too.</p>
+</section>
+
+<section id="pricing">
+<h2>Pricing</h2>
+<p><span class="price">from €39</span></p>
+<ul class="plain">
+  <li>around €89 for catalogues with thousands of SKUs</li>
+  <li>30 days free, no card</li>
+  <li>no surcharge per marketplace</li>
+</ul>
+</section>
+
+<section id="demo-soon" class="soon">
+<h2>Live demo — soon</h2>
+<p>The public demo opens with our hosted launch. Until then we show it in a call: ask for it as a design partner.</p>
+</section>
+
+<section id="contact-soon" class="soon">
+<h2>Contact — soon</h2>
+<p>The contact address is published with our hosted launch.</p>
+</section>
+</main>
+
+<footer>
+  <p>Built for Kaufland and Amazon; eBay next. Live connections open with our design partners. This page sets no cookies and loads nothing from other sites.</p>
+  <p><a href="/de/" hreflang="de">Deutsch</a></p>
+</footer>
+</div>
+</body>
+</html>

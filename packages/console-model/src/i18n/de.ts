@@ -306,6 +306,7 @@ export const de: Messages = {
         bad: 'Dieser Einladungslink ist unvollständig. Öffnen Sie ihn erneut aus dem Brief.',
         refused: 'Diese Einladung lässt sich nicht annehmen: sie ist abgelaufen, wurde schon verwendet oder gehört zu einer anderen Adresse. Bitten Sie den Absender um eine neue.',
         unverified: 'Ihr Identitätsanbieter hat die E-Mail-Adresse dieser Anmeldung nicht bestätigt. Bestätigen Sie die Adresse dort, melden Sie sich erneut an und öffnen Sie den Link noch einmal.',
+        providerUnavailable: 'Der Anmeldedienst hat nicht geantwortet. Es geht nichts verloren — öffnen Sie den Einladungslink in einer Minute erneut.',
         accepted: 'Einladung angenommen. Ihr Konto ist bereit.',
         signInFirst: 'Melden Sie sich an, um die Einladung anzunehmen.',
       },

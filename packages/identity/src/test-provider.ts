@@ -21,7 +21,7 @@ export interface ModelUser {
   amr: string[];
 }
 
-interface Grant { user: ModelUser; clientId: string; redirectUri: string; challenge: string; audience: string; issuedAt: number; used: boolean }
+interface Grant { user: ModelUser; clientId: string; redirectUri: string; challenge: string; audience: string; issuedAt: number; used: boolean; scope: string[] }
 
 export interface ModelIdentityProvider {
   /** Имя издателя в токенах (https, как у настоящего поставщика: база принимает только https-издателей) */
@@ -47,7 +47,8 @@ export async function startModelIdentityProvider(options: {
   let current: ModelUser | null = null;
   const grants = new Map<string, Grant>();
   /** Токен доступа → пользователь: для userinfo */
-  const issued = new Map<string, ModelUser>();
+  // Токен доступа → пользователь и scope входа: адрес userinfo отдаёт только при scope `email` (scopes.html снимка)
+  const issued = new Map<string, { user: ModelUser; scope: string[] }>();
   const stats = { authorizations: 0, tokens: 0, refused: 0 };
   const issuers = new Map<string, ReturnType<typeof createLocalIssuer>>();
   const issuerFor = (audience: string) => {
@@ -97,7 +98,7 @@ export async function startModelIdentityProvider(options: {
       }
       stats.authorizations += 1;
       const code = randomBytes(16).toString('base64url');
-      grants.set(code, { user: current, clientId: p.get('client_id')!, redirectUri, challenge: p.get('code_challenge')!, audience: client.audience, issuedAt: Date.now(), used: false });
+      grants.set(code, { user: current, clientId: p.get('client_id')!, redirectUri, challenge: p.get('code_challenge')!, audience: client.audience, issuedAt: Date.now(), used: false, scope: (p.get('scope') ?? '').split(' ') });
       const back = new URL(redirectUri);
       back.searchParams.set('code', code);
       if (p.get('state')) back.searchParams.set('state', p.get('state')!);
@@ -126,17 +127,18 @@ export async function startModelIdentityProvider(options: {
       // the project id are included»), и в нём есть `auth_time`; модель повторяет это, чтобы прогон ловил подмену токена
       const idToken = createLocalIssuer({ issuer: issuerName, audience: g.clientId, privateKeyPem: shared }).token(g.user.subject,
         { amr: g.user.amr, expiresInSeconds: 3600, extra: { aud: [g.clientId, g.audience], auth_time: Math.floor(Date.now() / 1000) } });
-      issued.set(accessToken, g.user);
+      issued.set(accessToken, { user: g.user, scope: g.scope });
       json(200, { access_token: accessToken, token_type: 'Bearer', expires_in: 3600, id_token: idToken });
       return;
     }
     if (url.pathname === '/oidc/v1/userinfo') {
-      const user = issued.get((req.headers.authorization ?? '').replace(/^Bearer /, ''));
-      if (!user) {
+      const grant = issued.get((req.headers.authorization ?? '').replace(/^Bearer /, ''));
+      const user = grant?.user;
+      if (!grant || !user) {
         json(401, { error: 'invalid_token' });
         return;
       }
-      json(200, { sub: user.subject, email: user.email, email_verified: true });
+      json(200, grant.scope.includes('email') ? { sub: user.subject, email: user.email, email_verified: true } : { sub: user.subject });
       return;
     }
     json(404, { error: 'not_found' });

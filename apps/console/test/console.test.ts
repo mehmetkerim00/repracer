@@ -1043,6 +1043,15 @@ test('находка 17 ревью шага 44: отказ приглашени�
   assert.equal((used.body as { error: { code: string } }).error.code, 'INVITATION_REFUSED');
   // Сбой базы — не отказ: ответ 500 выше по стеку, а не совет попросить новое приглашение
   await assert.rejects(api(failWith('57P01', 'terminating connection due to administrator command'))(request), /terminating connection/);
+  // Находка 10 ревью шага 45: поставщик не ответил на userinfo — 503 своим текстом, а не «адрес не подтверждён»
+  const { UserinfoUnavailable } = await import('@repracer/identity');
+  const noUserinfo = await createStandApi([], {
+    authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory: memoryStandDirectory([]),
+      userinfo: async () => { throw new UserinfoUnavailable('userinfo: HTTP 503'); } }),
+    acceptInvitation: async () => 'user-1',
+  })({ ...request, authorization: `Bearer ${issuer.token('new-owner', { extra: { email: undefined } })}` });
+  assert.equal(noUserinfo.status, 503);
+  assert.equal((noUserinfo.body as { error: { message: string } }).error.message, messagesFor('en').ui.app.invitation.providerUnavailable);
   const accepted = await api(async () => 'user-1')(request);
   assert.deepEqual(accepted.body, { accepted: true, message: messagesFor('en').ui.app.invitation.accepted });
 });

@@ -6,6 +6,8 @@ services:
       # Значения нужны compose до разбора: сам файл настроек прокси в CI подменяется на http-вариант
       REPRACER_DOMAIN: localhost
       REPRACER_ACME_EMAIL: ci@example.invalid
+      # Шаг 46: в CI лендинг проверяется опубликованным — страницы, перенаправления и политику содержимого
+      REPRACER_LANDING_PUBLIC: "on"
     volumes:
       - ../ci/Caddyfile:/etc/caddy/Caddyfile:ro
     # Наружу — только локальный порт раннера: прогон ходит по нему как браузер, TLS в CI нет

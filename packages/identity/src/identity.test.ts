@@ -108,3 +108,24 @@ test('шаг 45: ID-токен даёт второй фактор только �
   assert.equal(await auth.authenticate(`Bearer ${idFor()}`), null, 'ID-токен не входит как токен доступа');
   assert.equal(await auth.identify(`Bearer ${idFor()}`), null, 'и не принимает приглашения');
 });
+
+test('шаг 45, находка 10: сбой userinfo — «поставщик недоступен», а не «адрес не подтверждён»', async () => {
+  const { remoteUserinfo, UserinfoUnavailable } = await import('./index.ts');
+  const discovery = { userinfo_endpoint: 'https://idp.stand.repracer.test/oidc/v1/userinfo' };
+  const failing = remoteUserinfo(ISSUER, (async (url: string) => (String(url).endsWith('openid-configuration')
+    ? new Response(JSON.stringify(discovery)) : new Response('down', { status: 503 }))) as typeof fetch);
+  await assert.rejects(failing('syn-access'), (e: unknown) => e instanceof UserinfoUnavailable && /HTTP 503/.test((e as Error).message));
+  // 401 — вход недействителен: не «поставщик недоступен», а «войдите снова» (null)
+  const revoked = remoteUserinfo(ISSUER, (async (url: string) => (String(url).endsWith('openid-configuration')
+    ? new Response(JSON.stringify(discovery)) : new Response('{"error":"invalid_token"}', { status: 401 }))) as typeof fetch);
+  assert.equal(await revoked('syn-access'), null);
+  // Не-JSON в ответе — «недоступен», а не сырой SyntaxError (500)
+  const garbled = remoteUserinfo(ISSUER, (async (url: string) => (String(url).endsWith('openid-configuration')
+    ? new Response(JSON.stringify(discovery)) : new Response('<html>'))) as typeof fetch);
+  await assert.rejects(garbled('syn-access'), (e: unknown) => e instanceof UserinfoUnavailable);
+  const unreachable = remoteUserinfo(ISSUER, (async () => { throw new TypeError('fetch failed'); }) as typeof fetch);
+  await assert.rejects(unreachable('syn-access'), (e: unknown) => e instanceof UserinfoUnavailable);
+  const answer = (url: string) => (String(url).endsWith('openid-configuration') ? discovery : { sub: 's', email: 'owner@example.test', email_verified: true });
+  const fine = remoteUserinfo(ISSUER, (async (url: string) => new Response(JSON.stringify(answer(url)))) as typeof fetch);
+  assert.deepEqual(await fine('syn-access'), { email: 'owner@example.test', emailVerified: true });
+});

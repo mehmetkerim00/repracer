@@ -1,0 +1,65 @@
+# Шаг 46 [Р-184]: общие части прокси — журнал, лендинг, консоль. Их импортирует и Caddyfile развёртывания, и Caddyfile
+# надстройки CI: подъём профиля в CI проверяет ТЕ ЖЕ правила, что работают на сервере, а не их копию.
+
+# Журнал без тел запросов и без заголовков авторизации: токены продавца в логи не попадают
+# Шаг 43, находка 10 ревью: адрес возврата OAuth несёт код согласия и state в строке запроса — журнал их маскирует
+# Шаг 45 (находка 1 ревью): ID-токен страницы идёт своим заголовком — Caddy скрывает только Authorization и Cookie
+(access_log) {
+	log {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				request>headers>X-Repracer-Id-Token delete
+				request>uri query {
+					replace spapi_oauth_code REDACTED
+					replace code REDACTED
+					replace state REDACTED
+				}
+			}
+		}
+	}
+}
+
+# Лендинг [Р-184, Р-185]: только файлы, без JS и без внешних ресурсов — политика содержимого это закрепляет.
+# «Live demo» и «контакт» ведут на адреса из конфигурации; пока их нет (до развёртывания на VPS, шаг 38, ч. 2) —
+# на скрытый блок «скоро» той же страницы
+(landing) {
+	encode zstd gzip
+	import access_log
+	header {
+		Content-Security-Policy "default-src 'none'; style-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		-Server
+	}
+	# Находка 4 ревью шага 46: немецкая страница коммерческого сайта требует Impressum и сведений о защите данных
+	# (§ 5 DDG), а реквизитов в репозитории нет. Поэтому лендинг ОПУБЛИКОВАН только явным REPRACER_LANDING_PUBLIC=on —
+	# его ставит владелец, когда эти страницы есть; до того корень домена отвечает 404
+	@unpublished expression `{env.REPRACER_LANDING_PUBLIC} != "on"`
+	handle @unpublished {
+		respond "Not published" 404
+	}
+	handle {
+		root * /srv/landing
+		# Адреса задаёт compose профиля (там же умолчания «скоро»): см. deploy/production/compose.yaml
+		redir /demo {$REPRACER_LANDING_DEMO_EN} 302
+		redir /de/demo {$REPRACER_LANDING_DEMO_DE} 302
+		redir /contact {$REPRACER_LANDING_CONTACT_EN} 302
+		redir /de/contact {$REPRACER_LANDING_CONTACT_DE} 302
+		file_server {
+			# Файлы, скопированные на сервер мимо git (.DS_Store и подобные), не раздаются
+			hide .*
+		}
+	}
+}
+
+# Консоль продавца [Р-159]: TLS кончается здесь, дальше — сеть compose и обычный http
+(console) {
+	encode zstd gzip
+	import access_log
+	reverse_proxy console:4319 {
+		# Работоспособность процесса прокси не спрашивает: её спрашивает docker (healthcheck развёртывания консоли)
+		header_up X-Forwarded-Proto {scheme}
+	}
+}
