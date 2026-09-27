@@ -37,6 +37,8 @@ export const INVENTORY_PATH = '/sell/inventory/v1';
 export const BULK_UPDATE_PATH = `${INVENTORY_PATH}/bulk_update_price_quantity`;
 export const BULK_MIGRATE_PATH = `${INVENTORY_PATH}/bulk_migrate_listing`;
 export const TOKEN_PATH = '/identity/v1/oauth2/token';
+/** Fulfillment API — заказы; путь и поля (проверить): не из снимка и не из песочницы (E-20), scope sell.fulfillment.readonly */
+export const FULFILLMENT_ORDER_PATH = '/sell/fulfillment/v1/order';
 export const TRADING_PATH = '/ws/api.dll';
 /** Browse API: идентификатор предмета `v1|<listingId>|0`, fieldgroups=COMPACT — ровно так вызывала песочница */
 export const browseItemPath = (listingId: string): string => `/buy/browse/v1/item/v1|${listingId}|0`;
@@ -111,7 +113,8 @@ export const EBAY_DESCRIPTOR: ChannelDescriptor = {
   ],
   capabilities: ['LISTING_MIGRATION'],
   // Опроса конкурентов у адаптера нет — выборку для Р-52 взять неоткуда
-  haltRelease: { kind: 'MANUAL_ONLY', basis: 'Р-119: the eBay adapter reads no competitor data, a fresh independent sample cannot be taken' },
+  // Текст основания — как строка platform.channel_behaviour (0140); совпадение проверяет channel-reference.pg.test.ts
+  haltRelease: { kind: 'MANUAL_ONLY', basis: 'Р-119: no competitor data on eBay, a fresh independent sample cannot be taken' },
   priceHistory: { kind: 'UNAVAILABLE', basis: 'no specification snapshot (E-01); the sandbox run found no offer price history operation' },
   competitorSources: [],
 };

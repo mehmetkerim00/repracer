@@ -92,7 +92,7 @@ const COMPETITOR_RULES = ['MATCH_BUYBOX', 'BEAT_LOWEST', 'POSITION'];
  * Р-91: подрез стратегии — из channel_data.pricing_strategy_undercut (18 месяцев после замены версии), не из вечной версии стратегии
  */
 const SCOPE_COLUMNS = `
-  s.write_scope_id, s.product_id, s.channel_account_id, s.channel, m.marketplace, m.region, m.external_unit_id, m.external_sku, m.external_listing_id, m.channel_product_ref, m.condition,
+  s.write_scope_id, s.product_id, s.channel_account_id, s.channel, m.marketplace, m.region, m.external_unit_id, m.external_sku, m.external_listing_id, m.external_offer_id, m.channel_product_ref, m.condition,
   s.scope_key, p.gtin, s.currency, s.price_basis, s.tax_regime, s.pricing_mode, s.status, s.pricing_strategy_id, s.pricing_strategy_version, s.created_at,
   CASE WHEN ud.undercut_minor IS NULL THEN ps.params ELSE ps.params || jsonb_build_object('undercutMinor', ud.undercut_minor) END AS strategy_params,
   ss.latest_version_accepted, ss.last_sent_amount_minor, ss.last_shadow_amount_minor`;
@@ -456,7 +456,9 @@ function toScopeContext(j: Row, now: Instant): ScopeEvaluationContext {
     externalUnitId: r.external_unit_id ?? r.external_sku ?? '',
     identity: offerIdentityOf({
       channel: r.channel, field: 'PRICE', region: r.region, marketplace: r.marketplace, externalSku: r.external_sku,
-      externalListingId: r.external_listing_id, externalUnitId: r.external_unit_id,
+      // Шаг 47: у eBay предложение Inventory API — в идентичности записи цены (Р-164), как у диспетчера (write-queue.ts); без него
+      // путь решения отправлял запись eBay без offerId, и адаптер отклонял её до обращения к каналу
+      externalOfferId: r.external_offer_id, externalListingId: r.external_listing_id, externalUnitId: r.external_unit_id,
     }),
     channelProductRef: r.channel_product_ref ?? '',
     condition: portCondition(r.condition),
@@ -956,13 +958,35 @@ export class PgPricingStore implements PricingStore {
     // Проверка 3 из 3: перевод в отправку в той же транзакции — триггеры перепроверяют пол, потолок и остановку.
     // Запись в полёте у единицы — новая остаётся PENDING; завершение записи в полёте ставит событие scope.write.v1,
     // и её отправляет диспетчер [Р-64, 0036]
-    const claimed = await tx.query(
-      `UPDATE tenant_data.channel_write w SET status = 'DISPATCHED', attempt_count = attempt_count + 1, dispatched_at = $3
-        WHERE w.tenant_id = $1 AND w.channel_write_id = $2 AND w.status = 'PENDING'
-          AND NOT EXISTS (SELECT 1 FROM tenant_data.write_scope_sync_state ss
-                           WHERE ss.tenant_id = w.tenant_id AND ss.write_scope_id = w.write_scope_id AND ss.in_flight_write_id IS NOT NULL)`,
-      [tenantId, writeRow!.channel_write_id, now],
-    );
+    // Шаг 47 [Р-19, Р-163]: списание попытки правки (edit_budget) может отказать — бюджет объекта за сутки витрины исчерпан. Отказ не
+    // откатывает решение: точка сохранения, запись завершается BUDGET_EXHAUSTED с причиной — как у диспетчера (write-queue.ts)
+    await tx.query('SAVEPOINT claim_write');
+    let claimed;
+    try {
+      claimed = await tx.query(
+        `UPDATE tenant_data.channel_write w SET status = 'DISPATCHED', attempt_count = attempt_count + 1, dispatched_at = $3
+          WHERE w.tenant_id = $1 AND w.channel_write_id = $2 AND w.status = 'PENDING'
+            AND NOT EXISTS (SELECT 1 FROM tenant_data.write_scope_sync_state ss
+                             WHERE ss.tenant_id = w.tenant_id AND ss.write_scope_id = w.write_scope_id AND ss.in_flight_write_id IS NOT NULL)`,
+        [tenantId, writeRow!.channel_write_id, now],
+      );
+      await tx.query('RELEASE SAVEPOINT claim_write');
+    } catch (error) {
+      const e = error as { code?: string; constraint?: string };
+      if (e.code !== '23514' || !(e.constraint ?? '').startsWith('edit_budget')) throw error;
+      await tx.query('ROLLBACK TO SAVEPOINT claim_write');
+      const { rows: [ended] } = await tx.query(
+        `UPDATE tenant_data.channel_write
+            SET status = 'BUDGET_EXHAUSTED', end_reason = 'WRITE_EDIT_BUDGET_EXHAUSTED',
+                end_params = jsonb_strip_nulls(jsonb_build_object('source', 'DATABASE', 'budgetDay', to_char(budget_day, 'YYYY-MM-DD')))
+          WHERE tenant_id = $1 AND channel_write_id = $2 RETURNING to_char(budget_day, 'YYYY-MM-DD') AS budget_day`,
+        [tenantId, writeRow!.channel_write_id]);
+      const budgetDay: string | null = ended?.budget_day ?? null;
+      return {
+        writeScopeId: scope.writeScopeId, intentId, decisionId, write: null, pendingWriteId: null,
+        endedUnsent: { channelWriteId: writeRow!.channel_write_id, status: 'BUDGET_EXHAUSTED', reason: { code: 'WRITE_EDIT_BUDGET_EXHAUSTED', params: { source: 'DATABASE', ...(budgetDay ? { budgetDay } : {}) } } },
+      };
+    }
     /**
      * Находка 7 ревью шага 41: у теневой записи строки в очереди уже нет (её унёс в историю обработчик завершения), и
      * «не перевелась в отправку» означало «ждёт впереди идущей записи» — чужая причина на экране «почему эта цена».
@@ -1511,6 +1535,7 @@ export class PgPricingStore implements PricingStore {
       const { rows: [r] } = await tx.query('SELECT tenant_data.record_discovered_offers($1, $2, $3::jsonb) AS created', [tenantId, channelAccountId, JSON.stringify(offers.map((o) => ({
         marketplace: o.marketplace, external_sku: o.externalSku, external_unit_id: o.externalUnitId, external_offer_id: o.externalOfferId,
         channel_product_ref: o.channelProductRef, gtin: o.gtin, condition: o.condition, fulfillment: o.fulfillment,
+        external_listing_id: o.externalListingId ?? null, listing_format: o.listingFormat ?? null, writable: o.writable ?? null,
       })))]);
       return Number(r!.created);
     });
@@ -2266,6 +2291,26 @@ export class PgPricingStore implements PricingStore {
           WHERE m.tenant_id = $1 AND m.channel_account_id = $2 AND m.status <> 'ENDED' AND m.channel_product_ref IS NOT NULL`, [tenantId, channelAccountId]);
       const items = rows.map((r) => ({ marketplace: r.marketplace, channelProductRef: r.channel_product_ref, condition: portCondition(r.condition) }));
       return { queries: rotation(items, size, cycle), total: items.length };
+    });
+  }
+
+  async listScheduledScopes(tenantId: string, channelAccountId: string, now: Instant, limit: number): Promise<string[]> {
+    return this.tx(tenantId, async (tx) => {
+      // Стратегии без данных конкурентов — как strategy_unmet без требований (0082): фиксированная и маржинальная. Должна единица без
+      // решения за 24 часа; последнее решение — по индексу price_decision_scope_time_idx (tenant, write_scope, decided_at DESC), новый не нужен
+      const { rows } = await tx.query(
+        `SELECT s.write_scope_id FROM tenant_data.write_scope s
+           JOIN tenant_data.pricing_strategy ps
+             ON ps.tenant_id = s.tenant_id AND ps.pricing_strategy_id = s.pricing_strategy_id AND ps.version = s.pricing_strategy_version
+           LEFT JOIN LATERAL (SELECT d.decided_at FROM channel_data.price_decision d
+                               WHERE d.tenant_id = s.tenant_id AND d.write_scope_id = s.write_scope_id
+                               ORDER BY d.decided_at DESC LIMIT 1) last ON true
+          WHERE s.tenant_id = $1 AND s.channel_account_id = $2 AND s.field = 'PRICE' AND s.pricing_mode = 'ENGINE' AND s.status = 'ACTIVE'
+            AND ps.type IN ('FIXED', 'TARGET_MARGIN')
+            AND (last.decided_at IS NULL OR last.decided_at < $3::timestamptz - interval '24 hours')
+          ORDER BY last.decided_at ASC NULLS FIRST, s.write_scope_id
+          LIMIT $4`, [tenantId, channelAccountId, now, Math.max(0, limit)]);
+      return rows.map((r) => r.write_scope_id as string);
     });
   }
 

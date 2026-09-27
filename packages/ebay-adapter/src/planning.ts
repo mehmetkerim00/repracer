@@ -59,6 +59,11 @@ function batchIdOf(items: readonly FieldWrite[]): string {
 /**
  * Р-163: расход бюджета правок — по листингу, КАЖДАЯ попытка (Р-19): одна запись в вызове — одна попытка её поля. Ядро списывает
  * это в edit_budget до отправки; граница дня — у ядра (Р-65), адаптер только считает.
+ *
+ * Это расход ПЛАНА — одной HTTP-попытки на запись. Если канал ответил 401 и сессия повторила вызов с новым токеном (session.call),
+ * ушла вторая попытка той же записи: адаптер списывает её во второй слой (RollingDayLedger.recordSent) и возвращает её в attemptsMade
+ * результата отправки. База (edit_budget) считает попытки по attempt_count записи — одна на захват — и эту вторую попытку не видит
+ * (ревью шага 39, находка 14): она остаётся в запасе unaccounted_margin (10 правок).
  */
 export function budgetChargesOf(items: readonly FieldWrite[]): BudgetCharge[] {
   const byKey = new Map<string, BudgetCharge>();

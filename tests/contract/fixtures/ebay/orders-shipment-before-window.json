@@ -1,0 +1,146 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "ebay/orders/shipment-of-order-created-before-window",
+  "channel": "EBAY",
+  "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
+  "title": "Отгрузка заказа, созданного за три дня до окна чтения, читается: окно — по изменению заказа, а не по созданию",
+  "description": "Ревью шага 47, находка 1: при окне по creationdate отгрузка старого заказа не попадала ни в одно окно — резервация не списывалась, доступный остаток завышался (перепродажа). Окно — lastmodifieddate (проверить, E-20): заказ создан 72 часа назад, отгружен сейчас — строка SHIPPED со временем заказа. Ответ синтетический.",
+  "tags": [
+    "orders",
+    "mandatory:orders-shipment-before-window"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "docs/evidence/step39-ebay-sandbox.md",
+      "docs/channel-capabilities.md#9",
+      "docs/channel-capabilities.md#E-20"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-27T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn_ebay_seller_0001",
+      "marketplaces": [
+        "EBAY_DE",
+        "EBAY_US"
+      ],
+      "channel": "EBAY"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "syn-ebay-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "Syn-Repracer-SBX-0001",
+        "clientSecret": "SBX-syn-client-secret-0001"
+      },
+      "accessToken": "syn-ebay-user-token-0001",
+      "applicationToken": "syn-ebay-app-token-0001"
+    }
+  },
+  "steps": [
+    {
+      "id": "orders",
+      "kind": "call",
+      "method": "readOrderLines",
+      "args": [
+        {
+          "since": {
+            "$clockIso": -600000
+          },
+          "limit": 10
+        }
+      ],
+      "expect": {
+        "nextCursor": {
+          "$absent": true
+        },
+        "items": [
+          {
+            "externalOrderRef": "26-00047-00009",
+            "externalOrderLineRef": "10000470009",
+            "quantity": 1,
+            "status": "SHIPPED",
+            "orderedAt": {
+              "$clockIso": -259200000
+            },
+            "identity": {
+              "marketplace": "EBAY_DE",
+              "externalSku": "SYN-EBAY-17",
+              "externalListingId": "110000000017"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "user-token",
+      "note": "Обновление токена пользователя: grant_type=refresh_token + scope, Basic ключей приложения [песочница: ответ без нового refresh-токена]",
+      "request": {
+        "method": "POST",
+        "path": "/identity/v1/oauth2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "syn-ebay-user-token-0001",
+          "expires_in": 7200,
+          "token_type": "User Access Token"
+        }
+      },
+      "origin": "SYNTHETIC"
+    },
+    {
+      "origin": "SYNTHETIC",
+      "id": "orders-modified-in-window",
+      "request": {
+        "method": "GET",
+        "path": "/sell/fulfillment/v1/order",
+        "query": {
+          "filter": {
+            "$regex": "^lastmodifieddate:\\["
+          },
+          "limit": "10",
+          "offset": "0"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "total": 1,
+          "limit": 10,
+          "offset": 0,
+          "orders": [
+            {
+              "orderId": "26-00047-00009",
+              "creationDate": "2026-09-24T10:00:00.000Z",
+              "lastModifiedDate": "2026-09-27T09:59:00.000Z",
+              "orderFulfillmentStatus": "FULFILLED",
+              "lineItems": [
+                {
+                  "lineItemId": "10000470009",
+                  "sku": "SYN-EBAY-17",
+                  "legacyItemId": "110000000017",
+                  "quantity": 1,
+                  "lineItemFulfillmentStatus": "FULFILLED",
+                  "listingMarketplaceId": "EBAY_DE"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "expect": {
+    "noAlerts": true
+  }
+}

@@ -32,15 +32,7 @@ let world: SeededPricingWorld;
 
 before(async () => {
   db = await createIsolatedDatabase('finding7');
-  // Синтетическая возможность eBay для цены с бюджетом правок на листинг [Р-19]. Лимиты — из строки
-  // количества смоук-теста; настоящие параметры eBay PRICE — (проверить) при адаптере eBay (OQ-35, OQ-47)
-  await db.superuser(`INSERT INTO platform.channel_capability
-      (capability_id, version, status, valid_from, channel, region, api_mode, field, write_scope_kind, write_scope_key_template,
-       budget_scope_attribute, object_edit_limit, processing_mode, requires_side_effects_ack, observation_data_class,
-       write_scope_status, write_scope_question, write_scope_closes_by)
-    VALUES ('c0000000-0000-0000-0000-000000000016', 1, 'ACTIVE', now(), 'EBAY', NULL, 'EBAY_INVENTORY_API', 'PRICE', 'ACCOUNT_MARKETPLACE_SKU',
-      ARRAY['channel_account','marketplace','external_sku'], 'external_listing_id', '{"limit": 250, "quantity_reserve": 50, "unaccounted_margin": 10}', 'SYNC', false, 'CHANNEL_INFO',
-      'CONSERVATIVE', 'E-01', 'CHANNEL_SUPPORT')`);
+  // Возможность eBay для цены с бюджетом правок на листинг [Р-19, Р-163] — строка шаблона (test/setup.sql, шаг 47)
   await db.superuser(`UPDATE platform.marketplace SET time_zone_status = 'CONFIRMED' WHERE channel = 'EBAY' AND marketplace = 'EBAY_DE'`);
   pool = db.pool('svc_app');
   world = await seedPricingWorld(pool, { provisioningPool: db.pool('svc_provisioning', 1), adminPool: db.pool('svc_admin', 2),

@@ -108,8 +108,13 @@ export interface MemorySeedScope {
   channelAccountId: string;
   marketplace: string;
   externalUnitId: string;
-  /** Шаг 35: id_offer у Kaufland — ключ единицы записи ОСТАТКА, общий для витрин [Р-35]; без него остаток не синхронизируется (0027) */
+  /**
+   * Шаг 35: id_offer у Kaufland — ключ единицы записи ОСТАТКА, общий для витрин [Р-35]; без него остаток не синхронизируется (0027).
+   * Шаг 47: у eBay — предложение Inventory API (offerId); без него листинг не под Inventory API, и запись адаптер отклоняет (Р-164)
+   */
   externalOfferId?: string;
+  /** Шаг 47: eBay — идентификатор листинга (ItemID), ключ бюджета 250 правок [Р-19, Р-163]; SKU у eBay — externalUnitId */
+  externalListingId?: string;
   channelProductRef: string;
   condition: string;
   gtin?: string | null;
@@ -130,8 +135,8 @@ export interface MemorySeedScope {
 
 export interface MemorySeed {
   scopes: MemorySeedScope[];
-  /** Канал и регион аккаунта мира: из них строится идентичность записи (OQ-165); по умолчанию Kaufland без региона */
-  channel?: 'KAUFLAND' | 'AMAZON';
+  /** Канал и регион аккаунта мира: из них строится идентичность записи (OQ-165); по умолчанию Kaufland без региона. EBAY — шаг 47 */
+  channel?: 'KAUFLAND' | 'AMAZON' | 'EBAY';
   region?: string | null;
   /** Источники конкурентов канала — как platform.competitor_source: доступность стратегии при сохранении [Р-39, OQ-166] */
   competitorSources?: CompetitorSourceDescriptor[];
@@ -247,7 +252,7 @@ const NOTE_OK = (note: string | null | undefined) => typeof note === 'string' &&
 
 export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   private readonly tenantId: string;
-  private readonly channel: 'KAUFLAND' | 'AMAZON';
+  private readonly channel: 'KAUFLAND' | 'AMAZON' | 'EBAY';
   private readonly region: string | null;
   private readonly competitorSources: CompetitorSourceDescriptor[] | null;
   private readonly competitorSourcesByChannel: Partial<Record<string, CompetitorSourceDescriptor[]>>;
@@ -314,7 +319,8 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   constructor(seed: MemorySeed, options: { tenantId?: string } = {}) {
     this.tenantId = options.tenantId ?? 'memory-tenant';
     this.channel = seed.channel ?? 'KAUFLAND';
-    this.region = this.channel === 'KAUFLAND' ? null : seed.region ?? null;
+    // Регион — только у Amazon (SP-API); Kaufland и eBay (витрина — часть ключа) без региона
+    this.region = this.channel === 'AMAZON' ? seed.region ?? null : null;
     this.competitorSources = seed.competitorSources ? [...seed.competitorSources] : null;
     this.competitorSourcesByChannel = { ...(seed.competitorSourcesByChannel ?? {}) };
     for (const a of seed.accounts ?? []) this.accountChannels.set(a.channelAccountId, a.channel);
@@ -357,11 +363,15 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     }
   }
 
-  /** Как offer_mapping в PostgreSQL: у Kaufland ключ — unit, у Amazon — регион и SKU (OQ-165) */
+  /**
+   * Как offer_mapping в PostgreSQL: у Kaufland ключ — unit, у Amazon — регион и SKU (OQ-165); у eBay — витрина и SKU, а в идентичности
+   * записи ещё предложение Inventory API и листинг (Р-164: без предложения запись не уходит; листинг — ключ бюджета правок)
+   */
   private identityOf(row: ScopeRow) {
     return offerIdentityOf({
       channel: this.channel, field: 'PRICE', region: this.region, marketplace: row.marketplace,
       externalUnitId: this.channel === 'KAUFLAND' ? row.externalUnitId : null, externalSku: this.channel === 'KAUFLAND' ? null : row.externalUnitId,
+      ...(this.channel === 'EBAY' ? { externalOfferId: row.externalOfferId ?? null, externalListingId: row.externalListingId ?? null } : {}),
     });
   }
 
@@ -1734,6 +1744,18 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   /** Р-126: время последнего опроса товара (как channel_data.competitor_poll_state) */
   readonly pollState = new Map<string, Instant>();
 
+  async listScheduledScopes(_tenantId: string, channelAccountId: string, now: Instant, limit: number): Promise<string[]> {
+    const dayAgo = Date.parse(now) - 86_400_000;
+    const last = new Map<string, number>();
+    for (const d of this.decisions) last.set(d.writeScopeId, Math.max(last.get(d.writeScopeId) ?? 0, Date.parse(d.decidedAt)));
+    return [...this.scopes.values()]
+      .filter((s) => s.channelAccountId === channelAccountId && s.pricingMode === 'ENGINE' && s.status === 'ACTIVE' && s.strategy && !COMPETITOR_STRATEGIES.has(s.strategy.params.type))
+      .filter((s) => (last.get(s.writeScopeId) ?? 0) < dayAgo)
+      .sort((a, b) => (last.get(a.writeScopeId) ?? 0) - (last.get(b.writeScopeId) ?? 0) || a.writeScopeId.localeCompare(b.writeScopeId))
+      .slice(0, Math.max(0, limit))
+      .map((s) => s.writeScopeId);
+  }
+
   async listPollCandidates(_tenantId: string, channelAccountId: string, now: Instant): Promise<PollCandidate[]> {
     // Движение 10 000 б. п. — цена не изменилась: не волатильность (ревью шага 25, находка 2). Движение хранит товар как «ref|condition»:
     // сравнение с одним ref не находило ни одного движения, и в памяти все товары были холодными (найдено шагом «остаётся холодным» фикстуры)
@@ -1814,8 +1836,8 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   async reviewHaltBySample(_tenantId: string, haltId: string, now: Instant): Promise<HaltSampleReview> {
     const h = this.halts.find((x) => x.haltId === haltId && x.releasedAt === null && x.reasonCode === 'CHANNEL_MASS_SHIFT');
     if (!h) return 'NOT_ACTIVE';
-    // Как review_halt_by_sample (0082) и platform.channel_behaviour: на Amazon выборки нет — только ручное снятие [Р-119]
-    if (this.channel === 'AMAZON') return 'MANUAL_ONLY';
+    // Как review_halt_by_sample (0082) и platform.channel_behaviour: на Amazon и eBay выборки нет — только ручное снятие [Р-119]
+    if (this.channel !== 'KAUFLAND') return 'MANUAL_ONLY';
     if (Date.parse(now) < Date.parse(h.nextReviewAt)) return 'NOT_DUE';
     const eligible = new Set<string>();
     for (const s of this.scopes.values()) {

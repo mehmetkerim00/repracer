@@ -18,6 +18,8 @@ export function pgStoreFactory(
     /** Р-139: роль фонового исполнителя массовых операций — аренда и ход задания */
     bulkWorkerPool?: PgPool;
     joinMember?: (input: { tenantId: string; ownerUserId: string; membershipAlias: string; role: string; email: string }) => Promise<{ userId: string; membershipId: string }>;
+    /** Шаг 41 [Р-170]: режим записи аккаунта мира; по умолчанию посев боевой */
+    writeMode?: 'SHADOW' | 'LIVE';
   },
 ): PricingStoreFactory {
   return async (seed, world) => {
@@ -25,6 +27,9 @@ export function pgStoreFactory(
       fixtureTenantId: world.tenantId,
       fixtureChannelAccountId: world.channelAccountId,
       ...(world.account.channel === 'AMAZON' ? { fixtureChannel: 'AMAZON' as const, fixtureRegion: world.account.region ?? null } : {}),
+      // Шаг 47: мир eBay — аккаунт EBAY без региона; строки возможностей EBAY стенд кладёт в свою базу (ebay.pipeline.pg.test.ts)
+      ...(world.account.channel === 'EBAY' ? { fixtureChannel: 'EBAY' as const } : {}),
+      ...(options.writeMode ? { writeMode: options.writeMode } : {}),
       marketplaces: world.account.marketplaces,
       clock: world.clock,
       seed,

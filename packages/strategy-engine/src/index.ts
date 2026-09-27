@@ -91,6 +91,9 @@ export function strategyAvailability(
 ): { available: true; via: string | null } | { available: false; unmet: Record<string, string[]> } {
   const req = requirementOf(params);
   if (req.kind === null) return { available: true, via: null };
+  // Шаг 47: канал без источников конкурентов (eBay, Р-39) — причина названа, как в channel_data.strategy_unmet (0082): иначе недоступность
+  // выглядела бы пустым списком причин
+  if (sources.length === 0) return { available: false, unmet: { '*': ['NO_COMPETITOR_SOURCE'] } };
   const unmet: Record<string, string[]> = {};
   for (const s of sources) {
     const u: string[] = [];

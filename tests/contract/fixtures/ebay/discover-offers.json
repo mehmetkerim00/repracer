@@ -3,8 +3,8 @@
   "id": "ebay/discovery/offers",
   "channel": "EBAY",
   "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
-  "title": "Обнаружение: страница товаров Inventory API, предложения каждого SKU; без предложения (404 25713) — пропуск",
-  "description": "Ответ offer?sku= и 404 25713 записаны в песочнице; страница inventory_item (total, inventoryItems) в песочнице не записывалась — её форма синтетическая, (проверить). Курсор — смещение. Немигрированные листинги здесь не видны вовсе: их находит предполётная проверка.",
+  "title": "Обнаружение, фаза Inventory API: страница товаров, предложения каждого SKU — писать можно; без предложения (404 25713) — пропуск",
+  "description": "Ответ offer?sku= и 404 25713 записаны в песочнице; страница inventory_item (total, inventoryItems) в песочнице не записывалась — её форма синтетическая, (проверить). Курсор фазы — смещение; предложение Inventory API несёт listing {FIXED_PRICE, writable} [Р-164]. Старые листинги и аукционы — фаза Trading (сценарий ebay/discovery/legacy-and-auction).",
   "tags": [
     "discovery"
   ],
@@ -50,7 +50,7 @@
         }
       ],
       "expect": {
-        "nextCursor": "2",
+        "nextCursor": "2~110000000017",
         "items": [
           {
             "identity": {
@@ -68,7 +68,11 @@
               "basis": "GROSS"
             },
             "currentQuantity": 5,
-            "isLive": true
+            "isLive": true,
+            "listing": {
+              "format": "FIXED_PRICE",
+              "writable": true
+            }
           }
         ]
       }

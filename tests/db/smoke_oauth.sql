@@ -631,6 +631,71 @@ SELECT pg_temp.expect_fail('discovered offers written into the catalog of anothe
   'is unknown or disconnected');
 ROLLBACK;
 
+-- ================================================================ шаг 47 [Р-164]: каталог из обнаружения eBay
+-- Листинги eBay попадают в каталог все, с честным статусом: под Inventory API — ACTIVE с единицей записи цены (OFF),
+-- немигрированный — MIGRATION_REQUIRED, аукцион — INELIGIBLE; у двух последних единицы записи нет
+BEGIN;
+SET LOCAL ROLE repracer_app;
+SELECT set_config('app.tenant_id', 'a0000000-0000-0000-0000-00000000000a', true) \gset
+SELECT pg_temp.ok('eBay listings enter the catalog with an honest write status (step 47, Р-164)', $q$
+  DO $inner$
+  DECLARE
+    first int;
+    again int;
+    got text;
+  BEGIN
+    first := tenant_data.record_discovered_offers('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000003',
+      '[{"marketplace": "EBAY_DE", "external_sku": "SYN-EB-47-1", "external_offer_id": "91000000471", "external_listing_id": "110000000471", "listing_format": "FIXED_PRICE", "writable": true, "condition": "new"},
+        {"marketplace": "EBAY_DE", "external_sku": "SYN-EB-47-2", "external_listing_id": "110000000472", "listing_format": "FIXED_PRICE", "writable": false, "condition": "new"},
+        {"marketplace": "EBAY_DE", "external_sku": "SYN-EB-47-3", "external_listing_id": "110000000473", "listing_format": "AUCTION", "writable": false, "condition": "new"},
+        {"marketplace": "EBAY_DE", "external_sku": null, "external_listing_id": "110000000474", "listing_format": "FIXED_PRICE", "writable": false, "condition": "new"}]');
+    again := tenant_data.record_discovered_offers('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000003',
+      '[{"marketplace": "EBAY_DE", "external_sku": "SYN-EB-47-2", "external_listing_id": "110000000472", "listing_format": "FIXED_PRICE", "writable": false, "condition": "new"}]');
+    SELECT string_agg(coalesce(om.external_sku, 'L:' || om.external_listing_id) || ':' || om.status || ':' || om.ebay_migration_status || ':' || coalesce(ws.pricing_mode, 'no-scope'), ','
+                      ORDER BY coalesce(om.external_sku, 'L:' || om.external_listing_id)) INTO got
+      FROM tenant_data.offer_mapping om
+      LEFT JOIN tenant_data.write_scope ws ON ws.tenant_id = om.tenant_id AND ws.write_scope_id = om.price_write_scope_id
+     WHERE om.external_sku LIKE 'SYN-EB-47-%' OR om.external_listing_id = '110000000474';
+    -- Находка 3 ревью шага 47: листинг без SKU — тоже в каталоге, по номеру листинга, без единицы записи; повтор его не дублирует
+    IF first <> 4 OR again <> 0
+       OR got IS DISTINCT FROM 'L:110000000474:MIGRATION_REQUIRED:REQUIRED:no-scope,SYN-EB-47-1:ACTIVE:NOT_REQUIRED:OFF,SYN-EB-47-2:MIGRATION_REQUIRED:REQUIRED:no-scope,SYN-EB-47-3:INELIGIBLE:INELIGIBLE:no-scope' THEN
+      RAISE EXCEPTION 'eBay catalog: first %, again %, mappings % (expected 4, 0 and ACTIVE/MIGRATION_REQUIRED/INELIGIBLE)', first, again, got;
+    END IF;
+    again := tenant_data.record_discovered_offers('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000003',
+      '[{"marketplace": "EBAY_DE", "external_sku": null, "external_listing_id": "110000000474", "listing_format": "FIXED_PRICE", "writable": false, "condition": "new"}]');
+    IF again <> 0 THEN RAISE EXCEPTION 'SKU-less eBay listing catalogued twice'; END IF;
+    -- Находка 2 ревью шага 47: листинг мигрировали — прежнее «недоступное» сопоставление закрыто, новое пишется
+    again := tenant_data.record_discovered_offers('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000003',
+      '[{"marketplace": "EBAY_DE", "external_sku": "SYN-EB-47-2", "external_offer_id": "91000000472", "external_listing_id": "110000000472", "listing_format": "FIXED_PRICE", "writable": true, "condition": "new"}]');
+    SELECT string_agg(om.status || ':' || om.ebay_migration_status || ':' || coalesce(ws.pricing_mode, 'no-scope'), ',' ORDER BY om.status) INTO got
+      FROM tenant_data.offer_mapping om
+      LEFT JOIN tenant_data.write_scope ws ON ws.tenant_id = om.tenant_id AND ws.write_scope_id = om.price_write_scope_id
+     WHERE om.external_sku = 'SYN-EB-47-2';
+    IF again <> 1 OR got IS DISTINCT FROM 'ACTIVE:NOT_REQUIRED:OFF,ENDED:REQUIRED:no-scope' THEN
+      RAISE EXCEPTION 'migrated eBay listing on rediscovery: catalogued %, mappings % (expected 1 and ACTIVE with scope + ENDED)', again, got;
+    END IF;
+  END $inner$ $q$);
+ROLLBACK;
+
+-- Шаг 47 (находка 3 ревью): без SKU — только сопоставление без единицы записи (единицу не даёт страж ключа единицы);
+-- без номера листинга сопоставления eBay нет вовсе
+BEGIN;
+SET LOCAL ROLE repracer_admin;
+SELECT set_config('app.tenant_id', 'a0000000-0000-0000-0000-00000000000a', true), set_config('app.user_id', 'a1000000-0000-0000-0000-00000000000a', true) \gset
+SELECT pg_temp.expect_fail('an eBay mapping with a write scope but without SKU (step 47)', $q$
+  INSERT INTO tenant_data.offer_mapping (tenant_id, product_id, channel_account_id, channel, marketplace, channel_offer_key, external_listing_id,
+                                         ebay_listing_format, ebay_migration_status, status, quantity_write_scope_id)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a5000000-0000-0000-0000-000000000001', 'a4000000-0000-0000-0000-000000000003', 'EBAY', 'EBAY_DE',
+          'syn-no-sku-with-scope', '110000000479', 'FIXED_PRICE', 'NOT_REQUIRED', 'ACTIVE', 'a6000000-0000-0000-0000-000000000003') $q$,
+  'offer identity does not produce scope_key');
+SELECT pg_temp.expect_fail('an eBay mapping without a listing id (step 47)', $q$
+  INSERT INTO tenant_data.offer_mapping (tenant_id, product_id, channel_account_id, channel, marketplace, channel_offer_key, external_sku,
+                                         ebay_listing_format, ebay_migration_status, status)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a5000000-0000-0000-0000-000000000001', 'a4000000-0000-0000-0000-000000000003', 'EBAY', 'EBAY_DE',
+          'syn-no-listing-id', 'SYN-EB-47-9', 'FIXED_PRICE', 'REQUIRED', 'MIGRATION_REQUIRED') $q$,
+  'offer_mapping_ebay_identity');
+ROLLBACK;
+
 -- ================================================================ находка 12 ревью шага 44: свои проверки новых защит
 -- Мир тенанта — только по ДЕЙСТВУЮЩЕМУ членству и только у действующего тенанта
 -- Наблюдатель тенанта A видит мир A, пока членство действует; отзыв делает владелец в своей сессии

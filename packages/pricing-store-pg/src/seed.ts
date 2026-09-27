@@ -95,7 +95,7 @@ export interface SeedWorldInput {
   fixtureTenantId: string;
   fixtureChannelAccountId: string;
   /** Канал и регион аккаунта мира; по умолчанию Kaufland без региона. Amazon — сценарии адаптера Amazon на PostgreSQL (шаг 22) */
-  fixtureChannel?: 'KAUFLAND' | 'AMAZON';
+  fixtureChannel?: 'KAUFLAND' | 'AMAZON' | 'EBAY';
   /** Идентификатор аккаунта у канала (у Amazon — SellerId); по умолчанию синтетический по метке тенанта */
   fixtureExternalAccountId?: string;
   fixtureRegion?: string | null;
@@ -227,9 +227,11 @@ export async function seedPricingWorld(_pool: PgPool, input: SeedWorldInput): Pr
   const fixtureChannel = input.fixtureChannel ?? 'KAUFLAND';
   // Шаг 41 [Р-170]: мир посева боевой, если тень не попросили явно
   const writeMode = input.writeMode ?? 'LIVE';
-  const fixtureRegion = fixtureChannel === 'KAUFLAND' ? null : input.fixtureRegion ?? null;
+  // Регион — только у Amazon (SP-API); eBay и Kaufland без региона
+  const fixtureRegion = fixtureChannel === 'AMAZON' ? input.fixtureRegion ?? null : null;
   // Источник конкурентов проекций посева — по каналу аккаунта мира (CHECK competitor_state: источник принадлежит каналу)
-  const fixtureSource = fixtureChannel === 'AMAZON' ? 'AMAZON_ANY_OFFER_CHANGED' : 'KAUFLAND_BUYBOX';
+  // eBay: источников конкурентов нет вовсе (Р-39) — проекция конкурентов у мира eBay не засевается (ниже — отказ)
+  const fixtureSource = fixtureChannel === 'AMAZON' ? 'AMAZON_ANY_OFFER_CHANGED' : fixtureChannel === 'EBAY' ? null : 'KAUFLAND_BUYBOX';
   const accounts = new Map<string, { id: string; channel: string; region: string | null }>([[input.fixtureChannelAccountId, { id: accountId, channel: fixtureChannel, region: fixtureRegion }]]);
   /** Подключение аккаунта канала: при посеве и позже, в существующий тенант (Р-70: подключение при действующей остановке) */
   const connectAccountRow = async (tx: Tx, a: SeedAccount, externalAccountId: string): Promise<void> => {
@@ -289,10 +291,12 @@ export async function seedPricingWorld(_pool: PgPool, input: SeedWorldInput): Pr
     const ebay = account.channel === 'EBAY';
     const identity = {
       region: account.region, marketplace: s.marketplace,
-      // Amazon: SKU сценария — тот, что видит адаптер в запросах (фикстуры стенда); у прочих каналов — синтетический
-      external_unit_id: kaufland ? s.externalUnitId : null, external_sku: kaufland ? null : account.channel === 'AMAZON' ? s.externalUnitId : `syn-sku-${s.externalUnitId}`,
-      // eBay: бюджет правок — на листинг [Р-19]; листинг стенда — синтетический, уже на Inventory API (миграции нет, Р-2)
-      external_listing_id: ebay ? `syn-listing-${s.externalUnitId}` : null,
+      // Amazon и eBay со своим листингом (шаг 47): SKU сценария — тот, что видит адаптер в запросах (фикстуры стенда); иначе — синтетический
+      external_unit_id: kaufland ? s.externalUnitId : null,
+      external_sku: kaufland ? null : account.channel === 'AMAZON' || (ebay && s.externalListingId) ? s.externalUnitId : `syn-sku-${s.externalUnitId}`,
+      // eBay: бюджет правок — на листинг [Р-19]; листинг стенда — из сценария (шаг 47: ItemID, который ждёт адаптер) или синтетический, уже на
+      // Inventory API (миграции нет, Р-2)
+      external_listing_id: ebay ? s.externalListingId ?? `syn-listing-${s.externalUnitId}` : null,
     };
     await tx.query(
       `INSERT INTO tenant_data.write_scope
@@ -423,6 +427,7 @@ export async function seedPricingWorld(_pool: PgPool, input: SeedWorldInput): Pr
       return { marketplace: marketplace!, ref: ref!, condition: condition! };
     };
 
+    if (!fixtureSource && Object.keys(seed.competitorState ?? {}).length > 0) throw new Error(`competitorState seed: ${fixtureChannel} has no competitor source (Р-39)`);
     for (const [key, st] of Object.entries(seed.competitorState ?? {})) {
       const k = splitKey(key);
       const { rows: [mk] } = await tx.query(`SELECT currency, price_basis FROM platform.marketplace WHERE channel = $2 AND marketplace = $1`, [k.marketplace, fixtureChannel]);

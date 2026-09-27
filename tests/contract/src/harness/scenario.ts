@@ -4,6 +4,7 @@ import type { SanityConfig } from '@repracer/input-sanity';
 import type { MemorySeed, SeedBound } from '@repracer/pricing-pipeline';
 import type { CostInputs, TriggerType } from '@repracer/pricing-model';
 import type { KauflandChannelModelSpec } from '../simulator/kaufland-channel.ts';
+import type { EbayChannelModelSpec } from '../simulator/ebay-channel.ts';
 
 /**
  * Формат сценария контрактного теста. Один файл — один сценарий: мир (аккаунт, ключи, часы, бюджет, данные цен),
@@ -61,8 +62,8 @@ export interface World {
   pii?: string[];
   /** Строки, которых не должно быть в журнале и алертах (токен адреса вебхука) */
   secrets?: string[];
-  /** Симулятор [Р-113]: канал с состоянием вместо обменов; exchanges сценария пусты */
-  channelModel?: KauflandChannelModelSpec;
+  /** Симулятор [Р-113]: канал с состоянием вместо обменов; exchanges сценария пусты. Модель — по каналу сценария (eBay — шаг 47, Р-187) */
+  channelModel?: KauflandChannelModelSpec | EbayChannelModelSpec;
 }
 
 export type PortMethod =
@@ -172,6 +173,8 @@ export type PipelineStep = PipelineInboundStep | PipelinePollStep | PipelineReco
 export interface ChannelDeliverStep { id: string; kind: 'channelDeliver'; expect?: unknown }
 /** Симулятор: заказ покупателя в канале (K-11) */
 export interface ChannelOrderStep { id: string; kind: 'channelOrder'; idOffer: string; quantity: number }
+/** Симулятор eBay [Р-187, E-16]: другой инструмент продавца правит цену листинга через Trading API — живой листинг, но не предложение */
+export interface ChannelReviseStep { id: string; kind: 'channelRevise'; listingId: string; priceMinor: number; expect?: unknown }
 
 /**
  * Симулятор: прогон мира за период — каждые tickMs часы сдвигаются, уведомления модели идут через путь решения,
@@ -184,7 +187,7 @@ export interface ChannelRunStep {
   expect?: unknown;
 }
 
-export type Step = CallStep | InboundStep | ClockStep | PipelineStep | ChannelDeliverStep | ChannelOrderStep | ChannelRunStep;
+export type Step = CallStep | InboundStep | ClockStep | PipelineStep | ChannelDeliverStep | ChannelOrderStep | ChannelReviseStep | ChannelRunStep;
 
 export interface ScriptedResponse { status: number; headers?: Record<string, string>; body?: unknown }
 
@@ -266,7 +269,6 @@ export function validateScenario(s: Scenario): string[] {
   if (s.channel === 'EBAY' && (!s.world?.credentials?.application || !s.world.credentials.accessToken || !s.world.credentials.applicationToken || !s.world.credentials.seller?.refreshToken)) {
     problems.push('an eBay world needs credentials.application, credentials.seller.refreshToken, credentials.accessToken and credentials.applicationToken');
   }
-  if (s.channel === 'EBAY' && s.world?.pricing) problems.push('eBay scenarios drive the port only: the pricing path store has no eBay channel yet');
   const stepIds = new Set<string>();
   for (const step of s.steps ?? []) {
     if (stepIds.has(step.id)) problems.push(`duplicate step id ${step.id}`);
@@ -275,10 +277,12 @@ export function validateScenario(s: Scenario): string[] {
   }
   if (s.expect?.pipeline !== undefined && !s.world?.pricing) problems.push('expect.pipeline requires world.pricing');
   if (s.world?.channelModel && (s.exchanges ?? []).length > 0) problems.push('world.channelModel replaces exchanges: exchanges must be empty');
-  if (!s.world?.channelModel && (s.variants || s.expect?.channel !== undefined || (s.steps ?? []).some((st) => st.kind === 'channelDeliver' || st.kind === 'channelOrder' || st.kind === 'channelRun'))) {
+  if (!s.world?.channelModel && (s.variants || s.expect?.channel !== undefined || (s.steps ?? []).some((st) => st.kind === 'channelDeliver' || st.kind === 'channelOrder' || st.kind === 'channelRevise' || st.kind === 'channelRun'))) {
     problems.push('variants, expect.channel and channel steps require world.channelModel');
   }
-  for (const c of s.world?.channelModel?.competitors ?? []) {
+  if (s.world?.channelModel && ((s.channel === 'EBAY') !== ('listings' in s.world.channelModel))) problems.push('world.channelModel must be the model of the scenario channel');
+  if ((s.steps ?? []).some((st) => st.kind === 'channelRevise') && s.channel !== 'EBAY') problems.push('channelRevise is an eBay model step (Trading API edit by another tool)');
+  for (const c of (s.world?.channelModel && 'competitors' in s.world.channelModel ? s.world.channelModel.competitors : [])) {
     if (c.behaviour.kind === 'RANDOM_WALK' && !(c.behaviour.everyMs > 0)) problems.push(`competitor ${c.sellerRef}: RANDOM_WALK everyMs must be > 0`);
   }
   const exchangeIds = new Set<string>();
@@ -288,7 +292,7 @@ export function validateScenario(s: Scenario): string[] {
     const pathOk = s.channel === 'AMAZON'
       ? /^\/(listings\/2021-08-01\/items\/|auth\/o2\/token$|batches\/products\/pricing\/2022-05-01\/items\/competitiveSummary$)/.test(ex.request?.path ?? '')
       : s.channel === 'EBAY'
-        ? /^\/(sell\/inventory\/v1\/|buy\/browse\/v1\/item\/v1\|\d+\|0$|identity\/v1\/oauth2\/token$|ws\/api\.dll$)/.test(ex.request?.path ?? '')
+        ? /^\/(sell\/inventory\/v1\/|sell\/fulfillment\/v1\/order$|buy\/browse\/v1\/item\/v1\|\d+\|0$|identity\/v1\/oauth2\/token$|ws\/api\.dll$)/.test(ex.request?.path ?? '')
         : Boolean(ex.request?.path?.startsWith('/v2/'));
     if (!pathOk) problems.push(`exchange ${ex.id}: request.path is not an ${s.channel} API path`);
     if (Boolean(ex.response) === Boolean(ex.fault)) problems.push(`exchange ${ex.id}: exactly one of response or fault`);
@@ -304,7 +308,7 @@ export function expandVariants(s: Scenario): Array<{ variant: string; question: 
     const model = s.world.channelModel!;
     const steps = s.steps.map((step) => (v.stepExpect && step.id in v.stepExpect ? { ...step, expect: v.stepExpect[step.id] } : step)) as Step[];
     const scenario: Scenario = {
-      ...s, steps, world: { ...s.world, channelModel: { ...model, params: { ...model.params, ...v.params } } },
+      ...s, steps, world: { ...s.world, channelModel: { ...model, params: { ...model.params, ...v.params } } as World['channelModel'] },
       ...(v.expect ? { expect: v.expect } : {}),
     };
     return { variant: v.id, question: v.question, finding: v.finding ?? null, scenario };

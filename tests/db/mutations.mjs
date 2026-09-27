@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0139_verify_schema_invariants_v40.sql';
+const VERIFY = 'migrations/0141_verify_schema_invariants_v41.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -1833,7 +1833,7 @@ export const STEP44_ROWS = [
       m(replaceInFunction('tenant_data.record_discovered_offers(uuid, uuid, jsonb)', 'p.sku = coalesce(o.external_sku, o.external_offer_id, o.external_unit_id)', 'p.sku = coalesce(o.external_sku, o.external_unit_id)'),
         smoke('one Kaufland offer on two storefronts is one product; a channel-fulfilled offer stays out of stock sync (Р-35, Р-179)')),
       // Движок выключен: обнаружение цен не включает [Р-131]
-      m(replaceInFunction('tenant_data.record_discovered_offers(uuid, uuid, jsonb)', "mk.tax_regime, 'OFF', 'ACTIVE');", "mk.tax_regime, 'ENGINE', 'ACTIVE');"),
+      m(replaceInFunction('tenant_data.record_discovered_offers(uuid, uuid, jsonb)', "mk.tax_regime, 'OFF', 'ACTIVE',", "mk.tax_regime, 'ENGINE', 'ACTIVE',"),
         smoke('discovered offers become the catalog: only storefronts of the account, once (Р-179)')),
       m(replaceInFunction('tenant_data.record_discovered_offers(uuid, uuid, jsonb)', 'CONTINUE WHEN EXISTS', 'CONTINUE WHEN false AND EXISTS'),
         smoke('discovered offers become the catalog: only storefronts of the account, once (Р-179)')),
@@ -1861,7 +1861,7 @@ export const STEP45_ROWS = [
       m(replaceInFunction(DISCOVER, "AND om.price_write_scope_id = scope AND om.status <> 'ENDED'", 'AND om.price_write_scope_id = scope'),
         smoke('an ended offer listed again returns to the catalog on its own write scope (step 45)')),
       // Находка 7 ревью шага 45: первый пропуск «уже сопоставлено» тоже смотрит на статус — своя мутация
-      m(replaceInFunction(DISCOVER, "AND om.status <> 'ENDED'\n                             AND coalesce(om.external_sku", 'AND coalesce(om.external_sku'),
+      m(replaceInFunction(DISCOVER, "AND om.status <> 'ENDED'\n                             AND (coalesce(om.external_sku", 'AND (coalesce(om.external_sku'),
         smoke('an ended offer listed again returns to the catalog on its own write scope (step 45)')),
     ],
   },
@@ -1878,6 +1878,30 @@ export const STEP45_ROWS = [
         smoke('the keeper cannot delete the current channel token (step 45)')),
       m(dropTrigger('zb_channel_account_revoked_audit', 'tenant_data.channel_account'),
         smoke('a revoked authorization is an audit event of the system (step 45)')),
+    ],
+  },
+];
+
+/** Шаг 47 [Р-164]: каталог из обнаружения eBay — честный статус записи у каждого листинга (0140) */
+export const STEP47_ROWS = [
+  {
+    row: 'Р-164', critical: false,
+    invariant: 'немигрированный листинг и аукцион eBay попадают в каталог без единицы записи; писать можно только под Inventory API',
+    mutations: [
+      m(replaceInFunction(DISCOVER, "WHEN o.writable THEN 'NOT_REQUIRED'", "WHEN true THEN 'NOT_REQUIRED'"),
+        smoke('eBay listings enter the catalog with an honest write status (step 47, Р-164)')),
+      m(replaceInFunction(DISCOVER, "IF v_ebay IN ('REQUIRED', 'INELIGIBLE') THEN", 'IF false THEN'),
+        smoke('eBay listings enter the catalog with an honest write status (step 47, Р-164)')),
+      m(replaceInFunction(DISCOVER, "WHEN o.listing_format = 'AUCTION' THEN 'INELIGIBLE'", "WHEN false THEN 'INELIGIBLE'"),
+        smoke('eBay listings enter the catalog with an honest write status (step 47, Р-164)')),
+      // Находка 2 ревью шага 47: мигрированный листинг получает единицу записи при повторном обнаружении
+      m(replaceInFunction(DISCOVER, "AND om.status IN ('MIGRATION_REQUIRED', 'INELIGIBLE') AND om.external_sku = o.external_sku", 'AND false'),
+        smoke('eBay listings enter the catalog with an honest write status (step 47, Р-164)')),
+      // Находка 3 ревью шага 47: SKU-less листинг узнаётся по номеру листинга и не дублируется
+      m(replaceInFunction(DISCOVER, "OR (acc.channel = 'EBAY' AND o.external_sku IS NULL AND om.external_listing_id = o.external_listing_id)", ''),
+        smoke('eBay listings enter the catalog with an honest write status (step 47, Р-164)')),
+      m(dropConstraint('offer_mapping_ebay_identity', 'tenant_data.offer_mapping'),
+        smoke('an eBay mapping without a listing id (step 47)')),
     ],
   },
 ];

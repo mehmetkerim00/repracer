@@ -33,6 +33,8 @@ export interface EbayAdapterOptions {
   tokenCache?: EbayTokenCache;
   /** Окно подтверждения цены по живому листингу [EBAY_C05] */
   confirmationWindowMs?: number;
+  /** Ревью шага 47, находка 4: аккаунты, о чьём НДС сверху уже сказано алертом в этом процессе (один алерт на аккаунт) */
+  vatAlertedAccounts?: Set<string>;
 }
 
 export interface Session {
@@ -49,10 +51,11 @@ export type EbayTokenCache = Map<string, { token: string; expiresAtMs: number }>
 const TOKEN_EARLY_REFRESH_MS = 60_000;
 
 /** Настройки с состоянием адаптера — внутри адаптера только такие */
-export type ResolvedOptions = EbayAdapterOptions & { requestBudget: EbayRequestBudget; editLedger: EditAttemptLedger; tokenCache: EbayTokenCache };
+export type ResolvedOptions = EbayAdapterOptions & { requestBudget: EbayRequestBudget; editLedger: EditAttemptLedger; tokenCache: EbayTokenCache; vatAlertedAccounts: Set<string> };
 
 export function resolveOptions(options: EbayAdapterOptions): ResolvedOptions {
-  return { ...options, requestBudget: options.requestBudget ?? new TokenBucket(), editLedger: options.editLedger ?? new RollingDayLedger(), tokenCache: options.tokenCache ?? new Map() };
+  return { ...options, requestBudget: options.requestBudget ?? new TokenBucket(), editLedger: options.editLedger ?? new RollingDayLedger(), tokenCache: options.tokenCache ?? new Map(),
+    vatAlertedAccounts: options.vatAlertedAccounts ?? new Set() };
 }
 
 export function apiHost(options: EbayAdapterOptions): string {

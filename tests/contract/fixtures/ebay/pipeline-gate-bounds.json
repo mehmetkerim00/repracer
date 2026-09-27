@@ -1,0 +1,179 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "ebay/pipeline/gate-bounds",
+  "channel": "EBAY",
+  "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
+  "title": "Gate eBay: фиксированная цена ниже min_price и выше max_price отклоняется, запись не создаётся",
+  "description": "Р-43, Р-44: обе границы — вне движка стратегий. 9.00 при min_price 10.00 — BELOW_MIN_PRICE, 60.00 при max_price 50.00 — ABOVE_MAX_PRICE; решения хранятся с причиной и параметрами, в канал ничего не уходит.",
+  "tags": [
+    "pipeline",
+    "mandatory:pipeline-below-floor",
+    "mandatory:pipeline-above-max"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "docs/evidence/step39-ebay-sandbox.md",
+      "docs/decisions.md#Р-186"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-28T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn_ebay_seller_0001",
+      "marketplaces": [
+        "EBAY_DE"
+      ],
+      "channel": "EBAY"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "syn-ebay-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "Syn-Repracer-SBX-0001",
+        "clientSecret": "SBX-syn-client-secret-0001"
+      },
+      "accessToken": "syn-ebay-user-token-0001",
+      "applicationToken": "syn-ebay-app-token-0001"
+    },
+    "pricing": {
+      "scopes": [
+        {
+          "writeScopeId": "ws-ebay-price-2",
+          "productId": "prod-ebay-2",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "EBAY_DE",
+          "externalUnitId": "SYN-EBAY-P-02",
+          "externalOfferId": "9200000002",
+          "externalListingId": "120000000002",
+          "channelProductRef": "120000000002",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-fixed-2-900",
+            "version": 1,
+            "params": {
+              "type": "FIXED",
+              "priceMinor": 900
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1149,
+          "minPrice": {
+            "amountMinor": 1000,
+            "id": "min-ebay-2"
+          },
+          "maxPrice": {
+            "amountMinor": 5000,
+            "id": "max-ebay-2"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ebay-2",
+            "unitCostMinor": 500,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1100,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
+          }
+        },
+        {
+          "writeScopeId": "ws-ebay-price-3",
+          "productId": "prod-ebay-3",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "EBAY_DE",
+          "externalUnitId": "SYN-EBAY-P-03",
+          "externalOfferId": "9200000003",
+          "externalListingId": "120000000003",
+          "channelProductRef": "120000000003",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-fixed-3-6000",
+            "version": 1,
+            "params": {
+              "type": "FIXED",
+              "priceMinor": 6000
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1149,
+          "minPrice": {
+            "amountMinor": 1000,
+            "id": "min-ebay-3"
+          },
+          "maxPrice": {
+            "amountMinor": 5000,
+            "id": "max-ebay-3"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ebay-3",
+            "unitCostMinor": 500,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1100,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
+          }
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "below-min-price",
+      "kind": "pipelineRecompute",
+      "writeScopeId": "ws-ebay-price-2",
+      "trigger": {
+        "type": "COST_CHANGE"
+      },
+      "expect": {
+        "decision": {
+          "outcome": "REJECTED",
+          "rejectionReason": "BELOW_MIN_PRICE"
+        }
+      }
+    },
+    {
+      "id": "above-max-price",
+      "kind": "pipelineRecompute",
+      "writeScopeId": "ws-ebay-price-3",
+      "trigger": {
+        "type": "COST_CHANGE"
+      },
+      "expect": {
+        "decision": {
+          "outcome": "REJECTED",
+          "rejectionReason": "ABOVE_MAX_PRICE"
+        }
+      }
+    }
+  ],
+  "exchanges": [],
+  "expect": {
+    "pipeline": {
+      "decisions": [
+        {
+          "writeScopeId": "ws-ebay-price-2",
+          "rejectionReason": "BELOW_MIN_PRICE"
+        },
+        {
+          "writeScopeId": "ws-ebay-price-3",
+          "rejectionReason": "ABOVE_MAX_PRICE"
+        }
+      ],
+      "writes": []
+    }
+  }
+}

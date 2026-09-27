@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
 import { AMAZON_DESCRIPTOR } from '@repracer/amazon-adapter';
 import type { ChannelDescriptor } from '@repracer/channel-port';
+import { EBAY_DESCRIPTOR } from '@repracer/ebay-adapter';
 import { KAUFLAND_DESCRIPTOR } from '@repracer/kaufland-adapter';
 import type { StrategyParams } from '@repracer/pricing-model';
 import { standUserOf } from '@repracer/pricing-pipeline';
@@ -19,7 +20,8 @@ const admin = createPool(PG_URL.replace('svc_app@', 'svc_admin@'), { max: 1, app
 const provisioning = createPool(PG_URL.replace('svc_app@', 'svc_provisioning@'), { max: 1, applicationName: 'repracer-channel-reference-provisioning' });
 after(async () => { await pool.end(); await admin.end(); await provisioning.end(); });
 
-const DESCRIPTORS: ChannelDescriptor[] = [KAUFLAND_DESCRIPTOR, AMAZON_DESCRIPTOR];
+// Шаг 47: у eBay есть строка channel_behaviour (0140) и нет источников конкурентов — стратегии по ним недоступны (Р-39)
+const DESCRIPTORS: ChannelDescriptor[] = [KAUFLAND_DESCRIPTOR, AMAZON_DESCRIPTOR, EBAY_DESCRIPTOR];
 
 test('Р-119, Р-39: platform.channel_behaviour and platform.competitor_source equal the adapter descriptors', async () => {
   const { rows: behaviour } = await pool.query('SELECT channel, halt_release, basis FROM platform.channel_behaviour ORDER BY channel');

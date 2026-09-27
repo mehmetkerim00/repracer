@@ -1,0 +1,173 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "ebay/pipeline/discovery-catalog",
+  "channel": "EBAY",
+  "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
+  "title": "Обнаружение eBay путём решения: листинг под Inventory API, старая фиксированная цена и аукцион попадают в каталог — каждый со своим правом записи",
+  "description": "pipeline.discoverOffers проходит обе фазы курсора адаптера: Inventory API (предложение 30 — writable) и GetMyeBaySelling (31 — фиксированная цена не под Inventory API, 32 — аукцион; 30 там тоже есть и не повторяется). Каталог пишет база (0140): 30 — ACTIVE с единицей записи цены в режиме OFF, 31 — MIGRATION_REQUIRED без единицы, 32 — INELIGIBLE без единицы; проверка строк — ebay.pipeline.pg.test.ts. Ответы Trading и 404 25713 — по форме песочницы.",
+  "tags": [
+    "pipeline",
+    "mandatory:pipeline-discovery-catalog",
+    "discovery"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "docs/evidence/step39-ebay-sandbox.md",
+      "docs/decisions.md#Р-186",
+      "docs/decisions.md#Р-164"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-28T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn_ebay_seller_0001",
+      "marketplaces": [
+        "EBAY_DE"
+      ],
+      "channel": "EBAY"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "syn-ebay-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "Syn-Repracer-SBX-0001",
+        "clientSecret": "SBX-syn-client-secret-0001"
+      },
+      "accessToken": "syn-ebay-user-token-0001",
+      "applicationToken": "syn-ebay-app-token-0001"
+    },
+    "pricing": {
+      "scopes": []
+    },
+    "budget": {
+      "seller": {
+        "ratePerSecond": 100,
+        "burst": 100
+      }
+    }
+  },
+  "steps": [
+    {
+      "id": "discover-all-listings",
+      "kind": "pipelineDiscoverOffers",
+      "pageLimit": 5,
+      "expect": {
+        "offers": 3,
+        "withChannelPricing": []
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "user-token",
+      "request": {
+        "method": "POST",
+        "path": "/identity/v1/oauth2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "syn-ebay-user-token-0001",
+          "expires_in": 7200,
+          "token_type": "User Access Token"
+        }
+      }
+    },
+    {
+      "id": "inventory-page",
+      "request": {
+        "method": "GET",
+        "path": "/sell/inventory/v1/inventory_item",
+        "query": {
+          "limit": "5",
+          "offset": "0"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "total": 1,
+          "size": 1,
+          "limit": 5,
+          "inventoryItems": [
+            {
+              "sku": "SYN-EBAY-P-30",
+              "condition": "NEW"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "offers-30",
+      "request": {
+        "method": "GET",
+        "path": "/sell/inventory/v1/offer",
+        "query": {
+          "sku": "SYN-EBAY-P-30"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "total": 1,
+          "offers": [
+            {
+              "offerId": "9200000030",
+              "sku": "SYN-EBAY-P-30",
+              "marketplaceId": "EBAY_DE",
+              "format": "FIXED_PRICE",
+              "availableQuantity": 5,
+              "pricingSummary": {
+                "price": {
+                  "value": "11.49",
+                  "currency": "EUR"
+                }
+              },
+              "listing": {
+                "listingId": "120000000030",
+                "listingStatus": "ACTIVE",
+                "soldQuantity": 0
+              },
+              "status": "PUBLISHED"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "get-my-ebay-selling",
+      "request": {
+        "method": "POST",
+        "path": "/ws/api.dll",
+        "body": "<?xml version=\"1.0\" encoding=\"utf-8\"?><GetMyeBaySellingRequest xmlns=\"urn:ebay:apis:eBLBaseComponents\"><ActiveList><Include>true</Include><Pagination><EntriesPerPage>5</EntriesPerPage><PageNumber>1</PageNumber></Pagination></ActiveList><DetailLevel>ReturnAll</DetailLevel></GetMyeBaySellingRequest>"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "text/xml"
+        },
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<GetMyeBaySellingResponse xmlns=\"urn:ebay:apis:eBLBaseComponents\"><Ack>Success</Ack><ActiveList><ItemArray><Item><ItemID>120000000030</ItemID><ListingType>FixedPriceItem</ListingType><Quantity>4</Quantity><SellingStatus><CurrentPrice currencyID=\"EUR\">11.49</CurrentPrice></SellingStatus><SKU>SYN-EBAY-P-30</SKU><QuantityAvailable>4</QuantityAvailable></Item><Item><ItemID>120000000031</ItemID><ListingType>FixedPriceItem</ListingType><Quantity>4</Quantity><SellingStatus><CurrentPrice currencyID=\"EUR\">14.99</CurrentPrice></SellingStatus><SKU>SYN-EBAY-P-31</SKU><QuantityAvailable>4</QuantityAvailable></Item><Item><ItemID>120000000032</ItemID><ListingType>Chinese</ListingType><Quantity>4</Quantity><SellingStatus><CurrentPrice currencyID=\"EUR\">5.00</CurrentPrice></SellingStatus><SKU>SYN-EBAY-P-32</SKU><QuantityAvailable>4</QuantityAvailable></Item></ItemArray><PaginationResult><TotalNumberOfPages>1</TotalNumberOfPages><TotalNumberOfEntries>3</TotalNumberOfEntries></PaginationResult></ActiveList></GetMyeBaySellingResponse>"
+      }
+    }
+  ],
+  "expect": {
+    "noAlerts": true,
+    "logs": [
+      {
+        "code": "EBAY_C16_TRADING_LISTING_SITE",
+        "count": 1,
+        "details": {
+          "legacy": 2
+        }
+      }
+    ]
+  }
+}

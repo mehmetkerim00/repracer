@@ -35,7 +35,7 @@ export function pgAccountDirectory(appPool: PgPool) {
     async verify(tenantId: TenantId, channelAccountId: ChannelAccountId) {
       const row = await inTenant(appPool, tenantId, async (tx) => {
         const { rows: [r] } = await tx.query(
-          `SELECT channel, region, external_account_id, marketplaces, credentials_ref, auth_status, disconnected_at
+          `SELECT channel, region, external_account_id, marketplaces, credentials_ref, auth_status, disconnected_at, write_mode
              FROM tenant_data.channel_account WHERE channel_account_id = $1`, [channelAccountId]);
         return r ?? null;
       });
@@ -46,6 +46,7 @@ export function pgAccountDirectory(appPool: PgPool) {
         account: {
           tenantId, channelAccountId, channel: row.channel, ...(row.region ? { region: row.region } : {}),
           externalAccountId: row.external_account_id, marketplaces: [...row.marketplaces], credentialsRef: row.credentials_ref,
+          ...(row.write_mode === 'SHADOW' || row.write_mode === 'LIVE' ? { writeMode: row.write_mode as 'SHADOW' | 'LIVE' } : {}),
         },
       };
     },
@@ -115,11 +116,14 @@ export function channelCredentialsProvider(o: {
   files: { get(ref: string): Promise<Record<string, string>> };
   vault: { pool: PgPool; keyring: Keyring } | null;
   amazonApplication: { ref: string; clientId: string; clientSecret: string } | null;
+  /** Шаг 47: ключи приложения eBay — платформенные, как у Amazon; refresh-токен продавца — по ссылке `db:` аккаунта */
+  ebayApplication?: { ref: string; clientId: string; clientSecret: string } | null;
 }) {
   const inner = credentialsWithVault(o.files, o.vault);
   return {
     async get(ref: string): Promise<Record<string, string>> {
       if (o.amazonApplication && ref === o.amazonApplication.ref) return { clientId: o.amazonApplication.clientId, clientSecret: o.amazonApplication.clientSecret };
+      if (o.ebayApplication && ref === o.ebayApplication.ref) return { clientId: o.ebayApplication.clientId, clientSecret: o.ebayApplication.clientSecret };
       return inner.get(ref);
     },
   };

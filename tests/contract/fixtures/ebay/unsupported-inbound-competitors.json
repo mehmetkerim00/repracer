@@ -3,8 +3,8 @@
   "id": "ebay/port/unsupported",
   "channel": "EBAY",
   "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
-  "title": "Входящие, конкуренты и заказы eBay в шаге 39 не поддерживаются: отказ, а не пустота",
-  "description": "Доставка отклоняется 501 UNSUPPORTED без разбора тела; конкуренты — отказ по каждому запросу (пустой снимок выглядел бы как «конкурентов нет»); заказы — UNSUPPORTED (Fulfillment API не проверялся, в заказах PII, Р-4). Ни одного обмена.",
+  "title": "Входящие и конкуренты eBay не поддерживаются: отказ, а не пустота",
+  "description": "Доставка отклоняется 501 UNSUPPORTED без разбора тела; конкуренты — отказ по каждому запросу (пустой снимок выглядел бы как «конкурентов нет»). Ни одного обмена. Заказы с шага 47 читаются (ebay/orders/fulfillment-whitelist).",
   "tags": [
     "port",
     "mandatory:inbound-unsupported"
@@ -84,22 +84,6 @@
           }
         ]
       }
-    },
-    {
-      "id": "orders",
-      "kind": "call",
-      "method": "readOrderLines",
-      "args": [
-        {
-          "since": {
-            "$clockIso": -3600000
-          },
-          "limit": 10
-        }
-      ],
-      "expectThrows": {
-        "code": "UNSUPPORTED"
-      }
     }
   ],
   "exchanges": [],
@@ -108,7 +92,7 @@
     "logs": [
       {
         "code": "EBAY_UNSUPPORTED",
-        "count": 3
+        "count": 2
       }
     ]
   }

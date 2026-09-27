@@ -1,0 +1,241 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "ebay/orders/fulfillment-whitelist",
+  "channel": "EBAY",
+  "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
+  "title": "Заказы eBay (Fulfillment API) — только белый список полей: покупатель, адрес и почта не попадают ни в строки заказа, ни в журнал",
+  "description": "Ответ синтетический: Fulfillment API в песочнице не вызывался, у живого токена ещё нет scope sell.fulfillment.readonly — поля (проверить), вопрос E-20 [EBAY_C17]. Окно — фильтр lastmodifieddate (изменения заказа) с момента since, страницы — limit/offset до next/total. Отмена (cancelState CANCELED) — CANCELLED, lineItemFulfillmentStatus FULFILLED — SHIPPED, иначе OPEN; возвраты не читаются. Строка без lineItemId пропускается с кодом, а не угадывается. Покупатель — синтетический и проверяется как утечка PII (Р-4).",
+  "tags": [
+    "orders",
+    "mandatory:orders-whitelist",
+    "conservative:EBAY_C17_ORDER_FIELDS_UNVERIFIED"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "docs/evidence/step39-ebay-sandbox.md",
+      "docs/channel-capabilities.md#9",
+      "docs/channel-capabilities.md#E-20"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-27T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn_ebay_seller_0001",
+      "marketplaces": [
+        "EBAY_DE",
+        "EBAY_US"
+      ],
+      "channel": "EBAY"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "syn-ebay-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "Syn-Repracer-SBX-0001",
+        "clientSecret": "SBX-syn-client-secret-0001"
+      },
+      "accessToken": "syn-ebay-user-token-0001",
+      "applicationToken": "syn-ebay-app-token-0001"
+    },
+    "pii": [
+      "syn_buyer_0047",
+      "Synthetic Buyer 0047",
+      "syn-buyer-0047@example.invalid",
+      "Synthetische Strasse 47"
+    ]
+  },
+  "steps": [
+    {
+      "id": "orders",
+      "kind": "call",
+      "method": "readOrderLines",
+      "args": [
+        {
+          "since": {
+            "$clockIso": -3600000
+          },
+          "limit": 2
+        }
+      ],
+      "expect": {
+        "nextCursor": "2",
+        "items": [
+          {
+            "externalOrderRef": "26-00047-00001",
+            "externalOrderLineRef": "10000470001",
+            "quantity": 2,
+            "status": "OPEN",
+            "identity": {
+              "marketplace": "EBAY_DE",
+              "externalSku": "SYN-EBAY-17",
+              "externalListingId": "110000000017"
+            }
+          },
+          {
+            "externalOrderRef": "26-00047-00002",
+            "externalOrderLineRef": "10000470002",
+            "quantity": 1,
+            "status": "CANCELLED",
+            "identity": {
+              "marketplace": "EBAY_DE",
+              "externalSku": "SYN-EBAY-18"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "user-token",
+      "note": "Обновление токена пользователя: grant_type=refresh_token + scope, Basic ключей приложения [песочница: ответ без нового refresh-токена]",
+      "request": {
+        "method": "POST",
+        "path": "/identity/v1/oauth2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "syn-ebay-user-token-0001",
+          "expires_in": 7200,
+          "token_type": "User Access Token"
+        }
+      },
+      "origin": "SYNTHETIC"
+    },
+    {
+      "origin": "SYNTHETIC",
+      "id": "orders-page",
+      "request": {
+        "method": "GET",
+        "path": "/sell/fulfillment/v1/order",
+        "query": {
+          "filter": {
+            "$regex": "^lastmodifieddate:\\[\\d{4}-\\d{2}-\\d{2}T[\\d:.]+Z\\.\\.\\]$"
+          },
+          "limit": "2",
+          "offset": "0"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "href": "synthetic",
+          "total": 3,
+          "limit": 2,
+          "offset": 0,
+          "next": "synthetic-next",
+          "orders": [
+            {
+              "orderId": "26-00047-00001",
+              "creationDate": "2026-09-27T09:30:00.000Z",
+              "orderFulfillmentStatus": "NOT_STARTED",
+              "orderPaymentStatus": "PAID",
+              "buyer": {
+                "username": "syn_buyer_0047",
+                "buyerRegistrationAddress": {
+                  "fullName": "Synthetic Buyer 0047",
+                  "email": "syn-buyer-0047@example.invalid"
+                }
+              },
+              "fulfillmentStartInstructions": [
+                {
+                  "shippingStep": {
+                    "shipTo": {
+                      "fullName": "Synthetic Buyer 0047",
+                      "email": "syn-buyer-0047@example.invalid",
+                      "contactAddress": {
+                        "addressLine1": "Synthetische Strasse 47",
+                        "city": "Berlin",
+                        "countryCode": "DE"
+                      }
+                    }
+                  }
+                }
+              ],
+              "lineItems": [
+                {
+                  "lineItemId": "10000470001",
+                  "sku": "SYN-EBAY-17",
+                  "legacyItemId": "110000000017",
+                  "quantity": 2,
+                  "lineItemFulfillmentStatus": "NOT_STARTED",
+                  "listingMarketplaceId": "EBAY_DE",
+                  "title": "Synthetic item"
+                }
+              ]
+            },
+            {
+              "orderId": "26-00047-00002",
+              "creationDate": "2026-09-27T09:30:00.000Z",
+              "orderFulfillmentStatus": "NOT_STARTED",
+              "orderPaymentStatus": "PAID",
+              "buyer": {
+                "username": "syn_buyer_0047",
+                "buyerRegistrationAddress": {
+                  "fullName": "Synthetic Buyer 0047",
+                  "email": "syn-buyer-0047@example.invalid"
+                }
+              },
+              "fulfillmentStartInstructions": [
+                {
+                  "shippingStep": {
+                    "shipTo": {
+                      "fullName": "Synthetic Buyer 0047",
+                      "email": "syn-buyer-0047@example.invalid",
+                      "contactAddress": {
+                        "addressLine1": "Synthetische Strasse 47",
+                        "city": "Berlin",
+                        "countryCode": "DE"
+                      }
+                    }
+                  }
+                }
+              ],
+              "lineItems": [
+                {
+                  "lineItemId": "10000470002",
+                  "sku": "SYN-EBAY-18",
+                  "quantity": 1,
+                  "lineItemFulfillmentStatus": "NOT_STARTED",
+                  "listingMarketplaceId": "EBAY_DE"
+                },
+                {
+                  "sku": "SYN-EBAY-19",
+                  "quantity": 1,
+                  "lineItemFulfillmentStatus": "NOT_STARTED",
+                  "listingMarketplaceId": "EBAY_DE"
+                }
+              ],
+              "cancelStatus": {
+                "cancelState": "CANCELED"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "expect": {
+    "noAlerts": true,
+    "logs": [
+      {
+        "code": "EBAY_C17_ORDER_FIELDS_UNVERIFIED",
+        "question": "E-20",
+        "count": 1,
+        "details": {
+          "lines": 2,
+          "skipped": 1,
+          "skipped_lineItemId": 1
+        }
+      }
+    ]
+  }
+}

@@ -155,3 +155,10 @@ test('Р-152, находка 18 ревью шага 35: путь остатко�
   // Менеджер цен: цены правит, каталог — нет; путь остатков ведёт не он
   assert.deepEqual([view('PRICING_MANAGER', 'STOCK').canLead, view('PRICING_MANAGER', 'STOCK_AND_PRICING').canLead], [false, true]);
 });
+
+test('ревью шага 47, находка 11: недоступность стратегии на канале без источников конкурентов (ключ *) — словом словаря, без «*:» и без кода', async () => {
+  const { unmetText } = await import('./index.ts');
+  assert.equal(unmetText({ '*': ['NO_COMPETITOR_SOURCE'] }, messagesFor('en')), 'no competitor data source on this channel');
+  assert.equal(unmetText({ '*': ['NO_COMPETITOR_SOURCE'] }, messagesFor('de')), 'keine Quelle für Wettbewerbsdaten in diesem Kanal');
+  assert.equal(unmetText({ KAUFLAND_BUYBOX: ['BUYBOX_WINNER'] }, messagesFor('en')), 'KAUFLAND_BUYBOX: the Buy Box winner', 'у настоящего источника имя остаётся');
+});

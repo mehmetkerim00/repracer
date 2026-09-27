@@ -299,6 +299,17 @@ observes('offer-discovery', 'Р-120, Р-12: обход офферов раз в 
   assert.ok(live.k1.events.some((e) => e.code === 'KAUFLAND_SMART_PRICING_ACTIVE'), 'оффер с minimum_price в кабинете канала найден обходом');
 });
 
+observes('scheduled-recompute', 'шаг 47: пересчёт по расписанию идёт у каждого аккаунта и не проваливается; цен из данных конкурентов он не трогает', async () => {
+  const job = jobOf('scheduled-recompute');
+  // Сутки, 15 минут, три аккаунта — около 288 запусков; стратегии мира — по данным конкурентов, пересчитывать им нечего
+  assert.ok(job.runs >= 3 * 90, `пересчёт по расписанию запускался по всем аккаунтам: ${JSON.stringify(job)}`);
+  assert.equal(job.failed, 0, 'ни один запуск не провалился');
+  // Ревью шага 47, находка 5: должны только фиксированные и маржинальные единицы без решения за сутки — в этом мире их нет
+  assert.equal(job.items, 0, `пересчитывать нечего — ни одной должной единицы: ${JSON.stringify(job)}`);
+  const { rows: [t] } = await observer.query(`SELECT count(*)::int AS n FROM channel_data.price_decision WHERE trigger_type = 'SCHEDULE'`);
+  assert.equal(Number(t.n), 0, 'цены из данных конкурентов расписание не пересчитывает');
+});
+
 observes('price-days-close', 'Р-21: сутки цен закрываются в свёртку', async () => {
   const { rows } = await observer.query(
     `SELECT count(*)::int AS days, coalesce(sum(change_count), 0)::int AS changes FROM tenant_data.price_daily WHERE price_day < $1::date`, [new Date(live.endMs).toISOString().slice(0, 10)]);

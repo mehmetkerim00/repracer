@@ -1,0 +1,261 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "ebay/pipeline/kill-switch-tenant-stop",
+  "channel": "EBAY",
+  "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
+  "title": "Р-69, Р-70 на eBay: оператор останавливает тенанта — фиксированная цена удерживается; владелец возобновляет — цена уходит",
+  "description": "Наблюдатель остановить не может; оператор останавливает весь тенант. Фиксированная цена 15.00 при остановке человеком — HELD с PRICING_STOPPED. Оператор не может возобновить, владелец возобновляет с заметкой, и та же цена одобряется и уходит в eBay.",
+  "tags": [
+    "pipeline",
+    "mandatory:pipeline-kill-switch"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "docs/evidence/step39-ebay-sandbox.md",
+      "docs/decisions.md#Р-186"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-28T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn_ebay_seller_0001",
+      "marketplaces": [
+        "EBAY_DE"
+      ],
+      "channel": "EBAY"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "syn-ebay-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "Syn-Repracer-SBX-0001",
+        "clientSecret": "SBX-syn-client-secret-0001"
+      },
+      "accessToken": "syn-ebay-user-token-0001",
+      "applicationToken": "syn-ebay-app-token-0001"
+    },
+    "pricing": {
+      "scopes": [
+        {
+          "writeScopeId": "ws-ebay-price-7",
+          "productId": "prod-ebay-7",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "EBAY_DE",
+          "externalUnitId": "SYN-EBAY-P-07",
+          "externalOfferId": "9200000007",
+          "externalListingId": "120000000007",
+          "channelProductRef": "120000000007",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-fixed-7-1500",
+            "version": 1,
+            "params": {
+              "type": "FIXED",
+              "priceMinor": 1500
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1149,
+          "minPrice": {
+            "amountMinor": 1000,
+            "id": "min-ebay-7"
+          },
+          "maxPrice": {
+            "amountMinor": 5000,
+            "id": "max-ebay-7"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ebay-7",
+            "unitCostMinor": 500,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1100,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
+          }
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "viewer-cannot-stop",
+      "kind": "pricingStop",
+      "op": "stop",
+      "scope": "TENANT",
+      "membershipId": "membership-viewer",
+      "note": "Synthetic stand check of the kill switch",
+      "expect": {
+        "status": "FORBIDDEN"
+      }
+    },
+    {
+      "id": "operator-stops-tenant",
+      "kind": "pricingStop",
+      "op": "stop",
+      "scope": "TENANT",
+      "membershipId": "membership-operator",
+      "note": "Synthetic stand check of the kill switch",
+      "expect": {
+        "status": "STOPPED",
+        "stop": {
+          "scope": "TENANT",
+          "channelAccountId": null
+        }
+      }
+    },
+    {
+      "id": "fixed-price-held-by-stop",
+      "kind": "pipelineRecompute",
+      "writeScopeId": "ws-ebay-price-7",
+      "trigger": {
+        "type": "COST_CHANGE"
+      },
+      "expect": {
+        "decision": {
+          "outcome": "HELD",
+          "rejectionReason": "PRICING_STOPPED"
+        }
+      }
+    },
+    {
+      "id": "operator-cannot-resume-tenant",
+      "kind": "pricingStop",
+      "op": "release",
+      "stopIndex": 0,
+      "membershipId": "membership-operator",
+      "note": "Operator tries to resume the tenant",
+      "expect": {
+        "status": "FORBIDDEN"
+      }
+    },
+    {
+      "id": "owner-resumes",
+      "kind": "pricingStop",
+      "op": "release",
+      "stopIndex": 0,
+      "membershipId": "membership-owner",
+      "note": "Kill switch checked, resuming",
+      "expect": {
+        "status": "RELEASED"
+      }
+    },
+    {
+      "id": "fixed-price-after-resume",
+      "kind": "pipelineRecompute",
+      "writeScopeId": "ws-ebay-price-7",
+      "trigger": {
+        "type": "COST_CHANGE"
+      },
+      "expect": {
+        "decision": {
+          "outcome": "APPROVED",
+          "finalMinor": 1500
+        },
+        "dispatch": {
+          "status": "ACCEPTED"
+        }
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "user-token",
+      "request": {
+        "method": "POST",
+        "path": "/identity/v1/oauth2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "syn-ebay-user-token-0001",
+          "expires_in": 7200,
+          "token_type": "User Access Token"
+        }
+      }
+    },
+    {
+      "id": "bulk-1500",
+      "request": {
+        "method": "POST",
+        "path": "/sell/inventory/v1/bulk_update_price_quantity",
+        "body": {
+          "requests": [
+            {
+              "offers": [
+                {
+                  "offerId": "9200000007",
+                  "price": {
+                    "value": "15.00",
+                    "currency": "EUR"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "responses": [
+            {
+              "statusCode": 200,
+              "sku": "SYN-EBAY-P-07",
+              "offerId": "9200000007"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "expect": {
+    "alerts": [
+      {
+        "code": "PRICING_STOPPED_BY_PERSON",
+        "severity": "CRITICAL",
+        "count": 1
+      },
+      {
+        "code": "PRICING_RESUMED_BY_PERSON",
+        "severity": "WARNING",
+        "count": 1
+      }
+    ],
+    "pipeline": {
+      "stops": [
+        {
+          "scope": "TENANT"
+        }
+      ],
+      "decisions": [
+        {
+          "outcome": "HELD",
+          "rejectionReason": "PRICING_STOPPED",
+          "finalMinor": null
+        },
+        {
+          "outcome": "APPROVED",
+          "finalMinor": 1500
+        }
+      ],
+      "writes": [
+        {
+          "amountMinor": 1500
+        }
+      ]
+    }
+  }
+}

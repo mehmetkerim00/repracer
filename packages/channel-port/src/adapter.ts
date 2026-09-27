@@ -38,6 +38,8 @@ export interface VerifiedChannelAccount {
   externalAccountId: string;
   marketplaces: string[];
   credentialsRef: string;
+  /** Шаг 47 [Р-169]: режим записи аккаунта, если каталог его знает (база знает); адаптер называет его в алертах («в тени») */
+  writeMode?: 'SHADOW' | 'LIVE';
 }
 
 /**

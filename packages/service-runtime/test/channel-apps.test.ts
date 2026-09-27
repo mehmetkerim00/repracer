@@ -75,3 +75,23 @@ test('находка 2 ревью шага 39: без scope commerce.identity.re
   };
   assert.throws(() => loadChannelAppsConfig(env, read), /CONFIG_INVALID: REPRACER_EBAY_SCOPES must include https:\/\/api\.ebay\.com\/oauth\/api_scope\/commerce\.identity\.readonly/);
 });
+
+test('шаг 47: модель поставщика eBay (REPRACER_EBAY_OAUTH_BASE) — только в режиме стенда; вне его — отказ при старте с причиной', () => {
+  const ebayEnv = {
+    REPRACER_EBAY_ENVIRONMENT: 'SANDBOX', REPRACER_EBAY_CLIENT_ID: 'Syn-App-SBX', REPRACER_EBAY_RUNAME: 'Syn-RuName', REPRACER_EBAY_CLIENT_SECRET_FILE: '/s/ebay',
+    REPRACER_EBAY_SCOPES: 'https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/commerce.identity.readonly', REPRACER_CHANNEL_KEYRING_FILE: '/s/keyring',
+    REPRACER_EBAY_OAUTH_BASE: 'http://127.0.0.1:4711',
+  };
+  assert.throws(() => loadChannelAppsConfig(ebayEnv, read), /REPRACER_EBAY_OAUTH_BASE is accepted only with REPRACER_MODE=stand/);
+  assert.throws(() => loadChannelAppsConfig({ ...ebayEnv, REPRACER_MODE: 'production' }, read), /only with REPRACER_MODE=stand/);
+  const stand = loadChannelAppsConfig({ ...ebayEnv, REPRACER_MODE: 'stand' }, read);
+  assert.deepEqual(stand.ebay!.endpoints, { authorize: 'http://127.0.0.1:4711/oauth2/authorize', token: 'http://127.0.0.1:4711/identity/v1/oauth2/token', identity: 'http://127.0.0.1:4711/commerce/identity/v1/user/' });
+  const ebay = channelApps(stand).find((a) => a.channel === 'EBAY')!;
+  assert.equal(new URL(ebay.provider!.consentUrl({ state: 's', marketplaces: ['EBAY_DE'] })).origin, 'http://127.0.0.1:4711', 'согласие — у модели');
+  assert.equal(ebay.provider!.tokenRequest({ kind: 'CODE', code: 'c' }).url, 'http://127.0.0.1:4711/identity/v1/oauth2/token');
+  // Контроль: без переменной — настоящие конечные точки песочницы и в режиме стенда
+  const { REPRACER_EBAY_OAUTH_BASE: _omit, ...plain } = ebayEnv;
+  const real = channelApps(loadChannelAppsConfig({ ...plain, REPRACER_MODE: 'stand' }, read)).find((a) => a.channel === 'EBAY')!;
+  assert.equal(real.provider!.tokenRequest({ kind: 'CODE', code: 'c' }).url, 'https://api.sandbox.ebay.com/identity/v1/oauth2/token');
+  assert.throws(() => loadChannelAppsConfig({ REPRACER_MODE: 'stand', REPRACER_EBAY_OAUTH_BASE: 'http://127.0.0.1:1' }, read), /без приложения eBay/);
+});

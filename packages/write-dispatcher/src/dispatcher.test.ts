@@ -154,5 +154,47 @@ test('Р-64: следующий круг обхода даёт база — оч
   assert.deepEqual([continued.claims, continued.versions], [3, [1, 2]], 'очередь есть — единица получает следующий круг');
 });
 
+/**
+ * Шаг 47 [Р-186]: цена покупателя eBay (Browse, НДС сверху — E-17) приходит отдельным полем buyerPrice и в сверку базы цены Р-116 не
+ * идёт; цена, которую канал применил сам (effectivePrice у Amazon и Kaufland), — идёт, как прежде. Утверждается вызов проверки базы:
+ * при eBay-наблюдении его нет вовсе, при Amazon-наблюдении — с ценой ×1,19.
+ */
+test('Р-186: a buyer price with VAT on top (eBay buyerPrice) does not reach the Р-116 check; an effectivePrice (Amazon) still does', async () => {
+  const write: FieldWrite = {
+    channelWriteId: 'cw-1' as FieldWrite['channelWriteId'],
+    writeScope: { writeScopeId: 'ws-1' as FieldWrite['writeScope']['writeScopeId'], field: 'PRICE', scopeKey: 'ebay:de:1', identity: { marketplace: 'EBAY_DE', externalSku: 'SYN-1', externalOfferId: '1', externalListingId: '110000000001' } },
+    version: 1, idempotencyKey: 'idem-1', value: { field: 'PRICE', price: { amountMinor: 1349, currency: 'EUR', basis: 'GROSS' } }, attemptNo: 1,
+  };
+  const sent = { amountMinor: 1349, currency: 'EUR', basis: 'GROSS' as const };
+  const buyer = { amountMinor: 1605, currency: 'EUR', basis: 'GROSS' as const };
+  const run = async (extra: { buyerPrice?: typeof buyer; effectivePrice?: typeof buyer }) => {
+    const checked: number[] = [];
+    let claims = 0;
+    const store: WriteQueueStore = {
+      async dueScopes() { return [{ tenantId: 't1', writeScopeId: 'ws-1', dueKind: 'IN_FLIGHT_STALE', dueSince: '2026-09-15T09:00:00Z' }]; },
+      async claimNext(): Promise<ClaimResult> {
+        claims += 1;
+        return claims === 1 ? { kind: 'IN_FLIGHT', channelAccountId: 'acc-1', write, status: 'ACCEPTED', since: '2026-09-15T09:55:00.000Z', reconcileDue: true } : { kind: 'IDLE' };
+      },
+      async recordOutcome() { throw new Error('not reached'); },
+      async recordReconciliation(): Promise<RecordedOutcome> {
+        return { status: 'APPLIED', slotFreed: true, queuedWaiting: false, nextAttemptAt: null, reason: null, scopeBlocked: false };
+      },
+      async checkPriceBasis(_t, _w, observedMinor) { checked.push(observedMinor); return null; },
+    };
+    const adapter = {
+      async readBack() {
+        return { failures: [], observations: [{ identity: write.writeScope.identity, field: 'PRICE', value: { field: 'PRICE', price: sent }, observedAt: '2026-09-15T10:00:00.000Z', source: 'READBACK', ...extra }] };
+      },
+    } as unknown as ChannelAdapter;
+    const dispatcher = createWriteDispatcher({ store, adapterFor: () => adapter, alerts: { raise: async () => undefined }, now: () => '2026-09-15T10:00:00.000Z' });
+    const { reports } = await dispatcher.sweep({ concurrency: 1 });
+    assert.ok(reports[0]!.steps.some((st) => st.action === 'RECONCILED'), JSON.stringify(reports));
+    return checked;
+  };
+  assert.deepEqual(await run({ buyerPrice: buyer }), [], 'eBay: the buyer price with VAT on top is kept apart and never checked against the sent price');
+  assert.deepEqual(await run({ effectivePrice: buyer }), [1605], 'Amazon, Kaufland: the price the channel applied is checked, as before');
+});
+
 // Тип FieldWrite нужен только для совместимости сигнатуры адаптера в заглушке
 export type { FieldWrite };

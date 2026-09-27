@@ -1,11 +1,12 @@
 import { ClickHouseHttp } from '@repracer/analytics-export';
 import { createAmazonAdapter, TwoLevelBudget } from '@repracer/amazon-adapter';
+import { createEbayAdapter } from '@repracer/ebay-adapter';
 import type { AdapterDependencies, ChannelAdapter } from '@repracer/channel-port';
 import { conservativeBudget, createKauflandAdapter } from '@repracer/kaufland-adapter';
 import { createPricingPipeline } from '@repracer/pricing-pipeline';
 import { createPool, PgAlertDeliveryStore, PgAlertSink, PgCredentialVault, PgPricingStore, PgShadowDigestStore, type PgPool } from '@repracer/pricing-store-pg';
 import { loadConfig, type SchedulerConfig } from './config.ts';
-import { createDryMailSender, createHeartbeat, createMailSender } from '@repracer/service-runtime';
+import { createDryMailSender, createHeartbeat, createMailSender, EBAY_APPLICATION_REF } from '@repracer/service-runtime';
 import { createAlertDelivery } from '@repracer/alert-delivery';
 import { createShadowDigest } from '@repracer/alert-delivery/shadow-digest';
 import { jobSource, type SchedulerAccount } from './jobs.ts';
@@ -69,6 +70,8 @@ export async function startScheduler(config: SchedulerConfig = loadConfig(), onF
       files: credentialsFromFiles(config.channelSecretsDir),
       vault: credentialsPool && config.channelApps.keyring ? { pool: credentialsPool, keyring: config.channelApps.keyring } : null,
       amazonApplication: config.channelApps.amazon ? { ref: config.amazon.applicationCredentialsRef, ...config.channelApps.amazon } : null,
+      // Шаг 47: ключи приложения eBay — из конфигурации приложений каналов (как у Amazon), refresh-токен продавца — из хранилища
+      ebayApplication: config.channelApps.ebay ? { ref: EBAY_APPLICATION_REF, clientId: config.channelApps.ebay.clientId, clientSecret: config.channelApps.ebay.clientSecret } : null,
     }),
     alerts,
     logger: sink.logger,
@@ -86,8 +89,11 @@ export async function startScheduler(config: SchedulerConfig = loadConfig(), onF
       })
       : channel === 'AMAZON'
         ? createAmazonAdapter({ deps, userAgent: config.userAgent, applicationCredentialsRef: config.amazon.applicationCredentialsRef, budget: new TwoLevelBudget() })
-        : null;
-    // Канал без адаптера (eBay — снимка спецификации нет, Р-112): работ по аккаунту нет
+        // Шаг 47: адаптер eBay по песочнице [Р-162] — есть, когда приложение eBay настроено; иначе работ по аккаунту нет
+        : channel === 'EBAY' && config.channelApps.ebay
+          ? createEbayAdapter({ deps, environment: config.channelApps.ebay.environment, applicationCredentialsRef: EBAY_APPLICATION_REF, scopes: config.channelApps.ebay.scopes })
+          : null;
+    // Канал без адаптера: работ по аккаунту нет
     if (created) adapters.set(channel, created);
     return created;
   };

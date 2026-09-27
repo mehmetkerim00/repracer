@@ -162,3 +162,78 @@ export const AMAZON_PARAMETERS: { readonly [K in keyof AmazonModelParams]: Param
 export function defaultAmazonParams(): AmazonModelParams {
   return Object.fromEntries(Object.entries(AMAZON_PARAMETERS).map(([k, spec]) => [k, structuredClone(spec.default)])) as unknown as AmazonModelParams;
 }
+
+// ---------------------------------------------------------------------------
+// eBay Sell Inventory API — шаг 47 [Р-187]. Снимка спецификации нет (E-01): умолчание каждого параметра — ПОВЕДЕНИЕ ПЕСОЧНИЦЫ
+// 27.09.2026 (docs/evidence/step39-ebay-sandbox.md), статус OPEN — песочница не доказывает поведения боевого канала (Р-162).
+// ---------------------------------------------------------------------------
+
+export interface EbayModelParams {
+  /** E-04: лимит запросов продавца; null — не применяется (песочница отдаёт заглушку «100 вызовов на 15 с» и не отказывала) */
+  requestLimit: { calls: number; windowMs: number } | null;
+  /**
+   * E-02: 250 правок листинга в календарный день (Р-2). null — канал не отказывает (песочница: 260 правок подряд — все 200).
+   * countsFailed — отказ по элементу тоже списывает правку; status — ответ по элементу сверх лимита (код ошибки неизвестен)
+   */
+  listingEditLimit: { perDay: number; countsFailed: boolean; status: number } | null;
+  /** E-06: количество 0 — песочница ответила 400 25004, но применила: availableQuantity 0, листинг OUT_OF_STOCK (не завершён) */
+  quantityZero: 'ERROR_25004_APPLIED_OUT_OF_STOCK' | 'ERROR_25004_NOT_APPLIED' | 'APPLIED_LISTING_ENDED';
+  /** E-06: снимает ли запись количества > 0 статус OUT_OF_STOCK (песочница: нет — после количества 5 листинг остался OUT_OF_STOCK) */
+  restockClearsOutOfStock: boolean;
+  /** E-12: цена в валюте не витрины — песочница приняла (200) и сохранила её у предложения молча */
+  foreignCurrency: 'STORED_SILENTLY' | 'REJECTED_25709';
+  /** E-12: цена с тремя знаками — песочница молча округлила ВВЕРХ (11.999 → 12.0) */
+  subCentPrice: 'ROUNDED_UP_SILENTLY' | 'REJECTED_25709';
+  /** E-13: через сколько Browse видит правку живого листинга (песочница задержку не измеряла) */
+  browseLagMs: number;
+  /** E-15: Best Offer после bulk_migrate_listing — песочница его СОХРАНИЛА (вопреки документации, которую пересказывает Р-2) */
+  bestOfferOnMigration: 'KEPT' | 'LOST';
+  /** E-16: правка через Trading API после миграции — песочница: ReviseFixedPriceItem прошёл и изменил живую цену мимо предложения */
+  tradingReviseAfterMigration: 'APPLIES_TO_LISTING_NOT_OFFER' | 'REFUSED';
+  /**
+   * E-17: цена покупателя в Browse у EBAY_DE. Песочница (частный продавец): через ~25 минут после первых записей — цена продавца × 1,19
+   * с taxes[VAT, includedInPrice, ebayCollectAndRemitTax] без новой ревизии. NONE — цена покупателя равна цене продавца (брутто, Р-58)
+   */
+  buyerPriceTax: { mode: 'VAT_ON_TOP'; rateBp: number; afterFirstWriteMs: number } | { mode: 'NONE' };
+}
+
+export const EBAY_PARAMETERS: { readonly [K in keyof EbayModelParams]: ParameterSpec<EbayModelParams[K]> } = {
+  requestLimit: {
+    question: 'E-04', status: 'OPEN', meaning: 'лимит вызовов Inventory API продавца и приложения', default: null,
+    alternatives: [null, { calls: 100, windowMs: 15_000 }, { calls: 3, windowMs: 15_000 }],
+  },
+  listingEditLimit: {
+    question: 'E-02', status: 'OPEN', meaning: '250 правок листинга в день: применяет ли канал, учитывает ли отказы', default: null,
+    alternatives: [null, { perDay: 250, countsFailed: true, status: 400 }, { perDay: 250, countsFailed: false, status: 400 }],
+  },
+  quantityZero: {
+    question: 'E-06', status: 'OPEN', meaning: 'количество 0: ошибка 25004 при применённой записи, отказ без применения или завершение листинга',
+    default: 'ERROR_25004_APPLIED_OUT_OF_STOCK', alternatives: ['ERROR_25004_APPLIED_OUT_OF_STOCK', 'ERROR_25004_NOT_APPLIED', 'APPLIED_LISTING_ENDED'],
+  },
+  restockClearsOutOfStock: {
+    question: 'E-06', status: 'OPEN', meaning: 'запись количества > 0 снимает OUT_OF_STOCK', default: false, alternatives: [false, true],
+  },
+  foreignCurrency: {
+    question: 'E-12', status: 'OPEN', meaning: 'цена в валюте не витрины', default: 'STORED_SILENTLY', alternatives: ['STORED_SILENTLY', 'REJECTED_25709'],
+  },
+  subCentPrice: {
+    question: 'E-12', status: 'OPEN', meaning: 'цена с тремя знаками', default: 'ROUNDED_UP_SILENTLY', alternatives: ['ROUNDED_UP_SILENTLY', 'REJECTED_25709'],
+  },
+  browseLagMs: { question: 'E-13', status: 'OPEN', meaning: 'задержка Browse после правки листинга', default: 0, alternatives: [0, 120_000, 900_000] },
+  bestOfferOnMigration: {
+    question: 'E-15', status: 'OPEN', meaning: 'Best Offer после миграции листинга', default: 'KEPT', alternatives: ['KEPT', 'LOST'],
+  },
+  tradingReviseAfterMigration: {
+    question: 'E-16', status: 'OPEN', meaning: 'правки Trading API другим инструментом после миграции', default: 'APPLIES_TO_LISTING_NOT_OFFER',
+    alternatives: ['APPLIES_TO_LISTING_NOT_OFFER', 'REFUSED'],
+  },
+  buyerPriceTax: {
+    question: 'E-17', status: 'OPEN', meaning: 'цена покупателя EBAY_DE: НДС сверху (частный продавец песочницы) или равна цене продавца',
+    default: { mode: 'VAT_ON_TOP', rateBp: 1900, afterFirstWriteMs: 25 * 60_000 },
+    alternatives: [{ mode: 'VAT_ON_TOP', rateBp: 1900, afterFirstWriteMs: 25 * 60_000 }, { mode: 'VAT_ON_TOP', rateBp: 1900, afterFirstWriteMs: 0 }, { mode: 'NONE' }],
+  },
+};
+
+export function defaultEbayParams(): EbayModelParams {
+  return Object.fromEntries(Object.entries(EBAY_PARAMETERS).map(([k, spec]) => [k, structuredClone(spec.default)])) as unknown as EbayModelParams;
+}

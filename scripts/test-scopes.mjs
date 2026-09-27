@@ -84,6 +84,8 @@ export const MEASURED_FILES = new Set([
   'apps/console/test/connect-live.pg.test.ts',
   // Шаг 44 [Р-179]: полный путь пилота утверждает секунды экранов и держит под собой панель, поставщика входа и исполнителя заданий
   'apps/console/test/pilot-live.pg.test.ts',
+  // Шаг 47, D: путь пилота с каналом eBay утверждает секунды экранов и держит под собой панель, модели поставщиков и исполнителя
+  'apps/console/test/pilot-ebay-live.pg.test.ts',
 ]);
 
 /**

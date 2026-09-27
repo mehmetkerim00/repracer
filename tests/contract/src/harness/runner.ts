@@ -2,6 +2,7 @@ import type { AdapterCallContext, AdapterDependencies, ChannelAdapter, InboundDe
 import { signKauflandRequest } from '@repracer/kaufland-client';
 import { AMAZON_DESCRIPTOR } from '@repracer/amazon-adapter';
 import { KAUFLAND_DESCRIPTOR } from '@repracer/kaufland-adapter';
+import { EBAY_DESCRIPTOR } from '@repracer/ebay-adapter';
 import { createPricingPipeline, InMemoryPricingStore, standUserOf, type MemorySeed, type PricingPipeline, type PricingStore, type SeedBound, type SnapshotReport } from '@repracer/pricing-pipeline';
 import type { CostInputs } from '@repracer/pricing-model';
 import { createWriteDispatcher, type WriteDispatcher, type WriteQueueStore } from '@repracer/write-dispatcher';
@@ -10,7 +11,8 @@ import { neverWrittenAttributes } from '@repracer/channel-port';
 import { match } from './matchers.ts';
 import { createNotificationReceiver, createSqsClient, pipelineSink, storeLedger, type NotificationReceiver } from '@repracer/amazon-notifications';
 import { FakeSqs } from '@repracer/amazon-notifications/testing';
-import { SimulatedKauflandChannel } from '../simulator/kaufland-channel.ts';
+import { SimulatedKauflandChannel, type KauflandChannelModelSpec } from '../simulator/kaufland-channel.ts';
+import { SimulatedEbayChannel, type EbayChannelModelSpec } from '../simulator/ebay-channel.ts';
 import type { CallStep, InboundDeliverySpec, PipelineStep, Scenario, StepContext, World } from './scenario.ts';
 import { VirtualClock, worldDependencies, type Sink } from './world.ts';
 
@@ -36,18 +38,22 @@ export interface PricingStoreUnderTest {
 
 export type PricingStoreFactory = (seed: MemorySeed, world: World) => Promise<PricingStoreUnderTest>;
 
+/** Описания каналов, которые знает хранилище в памяти: витрины (валюта, база, пояс) и источники конкурентов [Р-39] */
+const DESCRIPTORS = { KAUFLAND: KAUFLAND_DESCRIPTOR, AMAZON: AMAZON_DESCRIPTOR, EBAY: EBAY_DESCRIPTOR } as const;
+
 export const memoryStoreFactory: PricingStoreFactory = async (seed, world) => {
-  const channel = world.account.channel === 'AMAZON' ? 'AMAZON' : 'KAUFLAND';
-  const competitorSources = channel === 'AMAZON' ? AMAZON_DESCRIPTOR.competitorSources : KAUFLAND_DESCRIPTOR.competitorSources;
+  const channel = world.account.channel === 'AMAZON' ? 'AMAZON' : world.account.channel === 'EBAY' ? 'EBAY' : 'KAUFLAND';
+  const all = Object.values(DESCRIPTORS).flatMap((d) => d.marketplaces);
   const store = new InMemoryPricingStore({
-    ...seed, channel, region: world.account.region ?? null, competitorSources: [...(competitorSources ?? [])],
+    // Шаг 47: у eBay источников конкурентов нет вовсе — стратегии по данным конкурентов недоступны (Р-39), фиксированная и маржинальная работают
+    ...seed, channel, region: world.account.region ?? null, competitorSources: [...(DESCRIPTORS[channel].competitorSources ?? [])],
     // Р-123 (шаг 24): часовой пояс витрины — из описания канала (пусто — пояс не установлен, Р-65)
     marketplaces: Object.fromEntries([
-      ...[...KAUFLAND_DESCRIPTOR.marketplaces, ...AMAZON_DESCRIPTOR.marketplaces].map((mk) => [mk.code, { currency: mk.currency, basis: mk.priceBasis, timeZone: mk.timeZone || null }]),
-      ...Object.entries(seed.marketplaces ?? {}).map(([code, mk]) => [code, { ...mk, timeZone: mk.timeZone ?? ([...KAUFLAND_DESCRIPTOR.marketplaces, ...AMAZON_DESCRIPTOR.marketplaces].find((x) => x.code === code)?.timeZone || null) }]),
+      ...all.map((mk) => [mk.code, { currency: mk.currency, basis: mk.priceBasis, timeZone: mk.timeZone || null }]),
+      ...Object.entries(seed.marketplaces ?? {}).map(([code, mk]) => [code, { ...mk, timeZone: mk.timeZone ?? (all.find((x) => x.code === code)?.timeZone || null) }]),
     ]),
     // OQ-173: доступность стратегии — по каналу аккаунта каждой единицы записи
-    competitorSourcesByChannel: { KAUFLAND: [...(KAUFLAND_DESCRIPTOR.competitorSources ?? [])], AMAZON: [...(AMAZON_DESCRIPTOR.competitorSources ?? [])] },
+    competitorSourcesByChannel: Object.fromEntries(Object.entries(DESCRIPTORS).map(([c, d]) => [c, [...(d.competitorSources ?? [])]])),
   }, { tenantId: world.tenantId });
   return {
     store,
@@ -71,6 +77,8 @@ export interface ScenarioHooks {
     clock: VirtualClock;
     /** Модель канала симулятора, если сценарий её задаёт */
     simulator: SimulatedKauflandChannel | null;
+    /** Модель eBay (шаг 47, Р-187), если сценарий eBay её задаёт */
+    ebaySimulator?: SimulatedEbayChannel | null;
   }): Promise<void>;
 }
 
@@ -325,9 +333,14 @@ export async function runScenario(
   const sink: Sink = { logs: [], alerts: [] };
   const violations: string[] = [];
   const trace: TraceEntry[] = [];
-  const channel = behaviour
-    ?? (world.channelModel ? new SimulatedKauflandChannel(world.channelModel, world.clock) : new ScriptedChannel(scenario.exchanges, scenario.expect?.allExchangesUsed ?? true));
+  const model = world.channelModel
+    ? scenario.channel === 'EBAY'
+      ? new SimulatedEbayChannel(world.channelModel as EbayChannelModelSpec, world.clock, { user: world.credentials.accessToken ?? '', application: world.credentials.applicationToken ?? '' })
+      : new SimulatedKauflandChannel(world.channelModel as KauflandChannelModelSpec, world.clock)
+    : null;
+  const channel = behaviour ?? model ?? new ScriptedChannel(scenario.exchanges, scenario.expect?.allExchangesUsed ?? true);
   const simulator = channel instanceof SimulatedKauflandChannel ? channel : null;
+  const ebaySimulator = channel instanceof SimulatedEbayChannel ? channel : null;
   const checker = scenario.channel === 'AMAZON' ? amazonRequestChecker(world, clock, neverWrittenAttributes('AMAZON'))
     : scenario.channel === 'EBAY' ? ebayRequestChecker(world, EBAY_STAND_HOST) : kauflandAuthChecker(world, clock);
   const fetch = channelFetch(channel, checker, clock, violations, trace);
@@ -360,9 +373,15 @@ export async function runScenario(
     }
 
     if (step.kind === 'channelOrder') { simulator!.placeOrder(step.idOffer, step.quantity, clock.nowMs()); continue; }
+    if (step.kind === 'channelRevise') {
+      const result = ebaySimulator!.reviseByOtherTool(step.listingId, step.priceMinor, clock.nowMs());
+      results[step.id] = result;
+      if (step.expect !== undefined) failures.push(...match(result, resolvePlaceholders(step.expect, clock), 'subset', step.id));
+      continue;
+    }
     if (step.kind === 'channelDeliver') {
       const snapshots: unknown[] = [];
-      const deliveries = simulator!.drainDeliveries(clock.nowMs());
+      const deliveries = simulator?.drainDeliveries(clock.nowMs()) ?? [];
       for (const d of deliveries) snapshots.push(...(await pipeline!.processInbound(buildDelivery(d, scenario, clock))).snapshots);
       const result = { deliveries: deliveries.length, snapshots };
       results[step.id] = result;
@@ -386,7 +405,7 @@ export async function runScenario(
       for (let elapsed = 0; elapsed < step.durationMs; elapsed += step.tickMs) {
         clock.advance(step.tickMs);
         summary.ticks += 1;
-        const deliveries = simulator!.drainDeliveries(clock.nowMs());
+        const deliveries = simulator?.drainDeliveries(clock.nowMs()) ?? [];
         summary.deliveries += deliveries.length;
         for (const d of deliveries) take((await pipeline!.processInbound(buildDelivery(d, scenario, clock))).snapshots);
         if (step.poll) {
@@ -456,8 +475,8 @@ export async function runScenario(
   if (expect.pipeline !== undefined && store) {
     failures.push(...match(pipelineState, resolvePlaceholders(expect.pipeline, clock), 'subset', 'pipeline'));
   }
-  if (expect.channel !== undefined && simulator) {
-    failures.push(...match(simulator.dump(), resolvePlaceholders(expect.channel, clock), 'subset', 'channel'));
+  if (expect.channel !== undefined && (simulator || ebaySimulator)) {
+    failures.push(...match((simulator ?? ebaySimulator)!.dump(), resolvePlaceholders(expect.channel, clock), 'subset', 'channel'));
   }
 
   // Секреты и синтетические PII не должны утечь
@@ -468,7 +487,7 @@ export async function runScenario(
   for (const pii of world.pii ?? []) if (jsonIncludes(everywhere, pii)) failures.push(`leak: PII sentinel "${pii}" appears in results, logs or alerts`);
   for (const secret of world.secrets ?? []) if (jsonIncludes(observability, secret)) failures.push(`leak: secret sentinel "${secret}" appears in logs or alerts`);
 
-  await hooks.onFinish?.({ scenario, store, pipeline, dispatcher, results, sink, clock, simulator });
+  await hooks.onFinish?.({ scenario, store, pipeline, dispatcher, results, sink, clock, simulator, ebaySimulator });
   return { failures, trace, logs: sink.logs, alerts: sink.alerts, results };
   } finally {
     await store?.close();

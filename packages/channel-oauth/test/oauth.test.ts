@@ -103,6 +103,22 @@ test('Р-175: поток eBay по официальному клиенту — B
   assert.deepEqual(denied, { kind: 'DENIED', state: 'e3', error: 'access_denied' }, 'отказ продавца на странице согласия назван');
 });
 
+test('шаг 47, E-10, E-11: модель eBay — возврат только code+state, срок refresh-токена в ответе, продавца называет Commerce Identity по токену доступа', async () => {
+  const cfg = { environment: 'SANDBOX' as const, clientId: 'Synthetic-App-SBX', clientSecret: 'SBX-secret', redirectUri: REDIRECT, scopes: ['https://api.ebay.com/oauth/api_scope/commerce.identity.readonly'] };
+  const model = new ModelOAuthProvider({ channel: 'EBAY', clientId: cfg.clientId, clientSecret: cfg.clientSecret, redirectUri: REDIRECT, now });
+  const provider = ebayOAuth({ ...cfg, endpoints: { authorize: 'https://auth.model.invalid/oauth2/authorize', token: 'https://api.model.invalid/identity/v1/oauth2/token', identity: 'https://apiz.model.invalid/commerce/identity/v1/user/' } });
+  const back = new URL(model.approve(provider.consentUrl({ state: 'e47-state', marketplaces: ['EBAY_DE'] }), 'syn_ebay_seller_47'));
+  assert.deepEqual([...back.searchParams.keys()].sort(), ['code', 'state'], 'eBay возвращает только code и state — продавца в возврате нет (E-11)');
+  const cb = provider.parseCallback(Object.fromEntries(back.searchParams));
+  assert.ok(cb.kind === 'CODE' && cb.sellerId === null);
+  const tokens = await exchangeCode(provider, cb.code, model.fetch);
+  assert.ok(tokens.ok, JSON.stringify(tokens));
+  assert.equal(tokens.refreshExpiresIn, 47_304_000, 'срок refresh-токена — полем refresh_token_expires_in (E-10, песочница)');
+  assert.equal(await provider.identifySeller!(tokens.accessToken, model.fetch), 'syn_ebay_seller_47', 'Commerce Identity называет продавца по токену доступа');
+  assert.equal(await provider.identifySeller!('v^1.1#i^1#syn-access-forged', model.fetch), null, 'чужой токен продавца не называет');
+  assert.equal(model.stats.identities, 1);
+});
+
 test('Р-177: шифротекст не открывается чужим аккаунтом, другим ключом и после подмены', () => {
   const keyring = ephemeralKeyring('k1');
   const owner = { tenantId: 't1', channelAccountId: 'a1' };

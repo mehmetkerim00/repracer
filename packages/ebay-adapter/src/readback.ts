@@ -1,4 +1,4 @@
-import type { AdapterCallContext, ChannelError, ConfirmationRequest, ConfirmationResult, IdentifiedObservation, OfferIdentity, ReadBackRequest, ReadBackResult, WriteScopeId } from '@repracer/channel-port';
+import type { AdapterCallContext, ChannelError, ConfirmationRequest, ConfirmationResult, IdentifiedObservation, Money, OfferIdentity, ReadBackRequest, ReadBackResult, WriteScopeId } from '@repracer/channel-port';
 import { logConservative } from './conservative.ts';
 import { browseItemPath, INVENTORY_PATH, marketplaceInfo } from './descriptor.ts';
 import { channelError, classifyHttpFailure } from './errors.ts';
@@ -61,6 +61,13 @@ export function withVat(minor: number, vatBp: number): number {
   return Math.floor((minor * (10_000 + vatBp) + 5_000) / 10_000);
 }
 
+/** Обратное к withVat: цена продавца, из которой округлением получилась цена покупателя; неоднозначно или нет такой — null */
+export function withoutVat(buyerMinor: number, vatBp: number): number | null {
+  const guess = Math.floor((buyerMinor * 10_000) / (10_000 + vatBp));
+  const hits = [guess - 1, guess, guess + 1].filter((s) => s > 0 && withVat(s, vatBp) === buyerMinor);
+  return hits.length === 1 ? hits[0]! : null;
+}
+
 function livenessOf(offer: EbayOffer): IdentifiedObservation['liveness'] | undefined {
   const s = offer.listing?.listingStatus;
   return typeof s === 'string' ? { isLive: s === 'ACTIVE', reasons: s === 'ACTIVE' ? [] : [s] } : undefined;
@@ -68,7 +75,8 @@ function livenessOf(offer: EbayOffer): IdentifiedObservation['liveness'] | undef
 
 /**
  * Обратное чтение. Цена — живой листинг из Browse API: GET offer показывает НАШУ запись, и после правки листинга через Trading API
- * она осталась прежней [песочница, EBAY_C05]; поэтому читаются оба, и расхождение «предложение ↔ листинг» — предупреждение (C10).
+ * она осталась прежней [песочница, EBAY_C05, Р-186]; поэтому читаются оба: значение наблюдения — живая цена продавца, цена покупателя
+ * Browse — buyerPrice, расхождение «предложение ↔ листинг» не на ставку НДС — предупреждение (C10).
  * Количество — availableQuantity предложения (количество листинга) и его статус (OUT_OF_STOCK) [EBAY_C07].
  */
 export async function readBackEbay(options: ResolvedOptions, ctx: AdapterCallContext, requests: readonly ReadBackRequest[]): Promise<ReadBackResult> {
@@ -121,22 +129,42 @@ export async function readBackEbay(options: ResolvedOptions, ctx: AdapterCallCon
     if (!live.ok) { fail(live.error); continue; }
     const buyerPrice = moneyOf(live.data.price, marketplace);
     if (!buyerPrice) { fail(channelError('NOT_FOUND', 'ITEM', 'the live eBay listing carries no readable price')); continue; }
-    if (buyerPrice.amountMinor !== recorded.amountMinor || buyerPrice.currency !== recorded.currency) {
-      const vatBp = vatIncludedBp(live.data);
-      if (vatBp !== null && buyerPrice.currency === recorded.currency && buyerPrice.amountMinor === withVat(recorded.amountMinor, vatBp)) {
-        // Цена покупателя — цена продавца плюс НДС из taxes: не другой инструмент; базу цены решает Р-116 пути решения [EBAY_C14]
-        logConservative(options.deps.logger, ctx, 'EBAY_C14_BROWSE_PRICE_WITH_VAT', { listingId, offerId, vatBasisPoints: vatBp });
-      } else {
-        logConservative(options.deps.logger, ctx, 'EBAY_C05_PRICE_READBACK_LIVE_LISTING', { listingId, offerId, divergence: true, sellerItemRevision: live.data.sellerItemRevision ?? null });
+    /**
+     * Р-186: живая цена — из Browse, GET offer отдаёт только НАШУ запись. Цена продавца наблюдения — живая цена листинга; цена
+     * покупателя (Browse как есть) — отдельным полем buyerPrice, которое сверка базы цены Р-116 не читает: НДС, добавленный eBay
+     * сверху (E-17), — не наша неверная база, а свойство продавца, которое решит бой.
+     */
+    let sellerPrice: Money = recorded;
+    const vatBp = vatIncludedBp(live.data);
+    if (buyerPrice.amountMinor === recorded.amountMinor && buyerPrice.currency === recorded.currency) {
+      logConservative(options.deps.logger, ctx, 'EBAY_C05_PRICE_READBACK_LIVE_LISTING', { listingId, offerId, divergence: false });
+    } else if (vatBp !== null && buyerPrice.currency === recorded.currency && buyerPrice.amountMinor === withVat(recorded.amountMinor, vatBp)) {
+      // Цена покупателя — цена продавца плюс НДС из taxes: листинг не правили, живая цена продавца — наша запись [EBAY_C14]
+      logConservative(options.deps.logger, ctx, 'EBAY_C14_BROWSE_PRICE_WITH_VAT', { listingId, offerId, vatBasisPoints: vatBp });
+      /**
+       * Ревью шага 47, находка 4: покупатели платят на ставку НДС больше нашей цены — продавец должен это увидеть. Один WARNING на
+       * аккаунт за процесс (не на каждое чтение), со ставкой; в тени — тоже, с пометкой режима: решение о базе цены принимается до боя.
+       */
+      if (!options.vatAlertedAccounts.has(session.account.channelAccountId)) {
+        options.vatAlertedAccounts.add(session.account.channelAccountId);
         await options.deps.alerts.raise({
-          code: 'EBAY_OFFER_LISTING_DIVERGENCE', severity: 'WARNING', tenantId: ctx.tenantId, channelAccountId: ctx.channelAccountId, correlationId: ctx.correlationId,
-          details: { listingId, offerId, reason: 'the live listing price differs from the Inventory API offer by more than the VAT: another tool edits the listing (preflight C10)' },
+          code: 'EBAY_BUYER_PRICE_VAT_ON_TOP', severity: 'WARNING', tenantId: ctx.tenantId, channelAccountId: ctx.channelAccountId, correlationId: ctx.correlationId,
+          details: { marketplace, vatBasisPoints: vatBp, writeMode: session.account.writeMode ?? 'UNKNOWN', shadow: session.account.writeMode === 'SHADOW',
+            note: session.account.writeMode === 'SHADOW' ? 'в тени: покупатели увидят цену с НДС сверху, когда аккаунт перейдёт в бой' : 'покупатели платят цену с НДС сверху' },
         });
       }
     } else {
-      logConservative(options.deps.logger, ctx, 'EBAY_C05_PRICE_READBACK_LIVE_LISTING', { listingId, offerId, divergence: false });
+      // Листинг правит другой инструмент (или Browse ещё не видит нашу правку): живая цена продавца — из Browse, без НДС сверху
+      const net = vatBp !== null && buyerPrice.currency === recorded.currency ? withoutVat(buyerPrice.amountMinor, vatBp) : null;
+      sellerPrice = { amountMinor: net ?? buyerPrice.amountMinor, currency: buyerPrice.currency, basis: recorded.basis };
+      logConservative(options.deps.logger, ctx, 'EBAY_C05_PRICE_READBACK_LIVE_LISTING', { listingId, offerId, divergence: true, sellerItemRevision: live.data.sellerItemRevision ?? null });
+      await options.deps.alerts.raise({
+        code: 'EBAY_OFFER_LISTING_DIVERGENCE', severity: 'WARNING', tenantId: ctx.tenantId, channelAccountId: ctx.channelAccountId, correlationId: ctx.correlationId,
+        details: { listingId, offerId, reason: 'the live listing price differs from the Inventory API offer by more than the VAT: another tool edits the listing (preflight C10)' },
+      });
     }
-    observations.push({ identity, field: 'PRICE', value: { field: 'PRICE', price: recorded }, effectivePrice: buyerPrice, observedAt, source: 'READBACK', ...(liveness ? { liveness } : {}) });
+    // effectivePrice у eBay не заполняется: цена покупателя не входит в проверку Р-116 [Р-186]
+    observations.push({ identity, field: 'PRICE', value: { field: 'PRICE', price: sellerPrice }, buyerPrice, observedAt, source: 'READBACK', ...(liveness ? { liveness } : {}) });
   }
   return { observations, failures };
 }

@@ -109,6 +109,12 @@ export interface IdentifiedObservation {
   sourceEventId?: string;
   /** Цена, которую видит покупатель, если канал меняет её сам (Kaufland Smart Pricing: price ≠ listing_price) */
   effectivePrice?: Money;
+  /**
+   * Шаг 47 [Р-186]: цена покупателя живого листинга, если канал САМ добавляет к цене продавца налог (eBay Browse: НДС сверху, E-17).
+   * Хранится отдельно от цены продавца и в сверку базы цены Р-116 НЕ идёт: та читает только effectivePrice ?? value.price.
+   * Решит ли E-17 бой (бизнес-продавец EBAY_DE) — тогда расхождение станет признаком неверной базы, а поле перейдёт в effectivePrice.
+   */
+  buyerPrice?: Money;
   liveness?: { isLive: boolean; reasons: string[] };
 }
 
@@ -198,6 +204,12 @@ export interface DiscoveredOffer {
    * автоматического ценообразования (Amazon), channelBounds — границы цены на стороне канала. Нет поля — канал этого не сообщает.
    */
   channelPricing?: { automatedPricing: boolean; channelBounds: boolean };
+  /**
+   * Шаг 47 [Р-164]: доступность листинга для записи там, где канал пишет не во все свои листинги (eBay: только под Inventory
+   * API). `writable: false` — листинг есть в каталоге продавца, но писать в него нельзя: не мигрирован (`MIGRATION_REQUIRED`)
+   * или аукцион (`INELIGIBLE`). Нет поля — канал пишет во все обнаруженные офферы.
+   */
+  listing?: { format: 'FIXED_PRICE' | 'AUCTION'; writable: boolean };
 }
 
 export interface OrderLine {

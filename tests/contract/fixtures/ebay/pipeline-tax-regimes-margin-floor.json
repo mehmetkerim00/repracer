@@ -1,0 +1,222 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "ebay/pipeline/tax-regimes-margin-floor",
+  "channel": "EBAY",
+  "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
+  "title": "Одна себестоимость, две витрины eBay: пол маржи EBAY_DE (EUR брутто) и EBAY_US (USD нетто) различается",
+  "description": "Себестоимость 10.00, комиссия 15 %, ограничение маржи 20 %, фиксированная цена 15.00. EBAY_DE — цена с НДС 19 %, маржа от цены без НДС: пол 19.15. EBAY_US — цена без sales tax (Р-58): пол 15.39. Обе цены ниже пола; причина хранится с параметрами. Аккаунт EBAY_US — в тени: граница суток EBAY_US не установлена (Р-65, OQ-112), и боевой режим держит свойство витрины со статусом UNKNOWN (Р-172).",
+  "tags": [
+    "pipeline",
+    "mandatory:pipeline-tax-regimes",
+    "r-57",
+    "r-58"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "docs/evidence/step39-ebay-sandbox.md",
+      "docs/decisions.md#Р-186"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-28T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn_ebay_seller_0001",
+      "marketplaces": [
+        "EBAY_DE"
+      ],
+      "channel": "EBAY"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "syn-ebay-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "Syn-Repracer-SBX-0001",
+        "clientSecret": "SBX-syn-client-secret-0001"
+      },
+      "accessToken": "syn-ebay-user-token-0001",
+      "applicationToken": "syn-ebay-app-token-0001"
+    },
+    "pricing": {
+      "scopes": [
+        {
+          "writeScopeId": "ws-ebay-price-4",
+          "productId": "prod-ebay-4",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "EBAY_DE",
+          "externalUnitId": "SYN-EBAY-P-04",
+          "externalOfferId": "9200000004",
+          "externalListingId": "120000000004",
+          "channelProductRef": "120000000004",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-fixed-4-1500",
+            "version": 1,
+            "params": {
+              "type": "FIXED",
+              "priceMinor": 1500
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1600,
+          "minPrice": {
+            "amountMinor": 1000,
+            "id": "min-ebay-4"
+          },
+          "maxPrice": {
+            "amountMinor": 5000,
+            "id": "max-ebay-4"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ebay-4",
+            "unitCostMinor": 1000,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
+          },
+          "guardrails": {
+            "guardrailIds": [
+              "g-margin-ebay-4"
+            ],
+            "minMarginBp": 2000
+          }
+        },
+        {
+          "writeScopeId": "ws-ebay-price-5",
+          "productId": "prod-ebay-5",
+          "channelAccountId": "20000000-0000-4000-8000-000000000002",
+          "marketplace": "EBAY_US",
+          "externalUnitId": "SYN-EBAY-P-05",
+          "externalOfferId": "9200000005",
+          "externalListingId": "120000000005",
+          "channelProductRef": "120000000005",
+          "condition": "new",
+          "currency": "USD",
+          "basis": "NET",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-fixed-5-1500",
+            "version": 1,
+            "params": {
+              "type": "FIXED",
+              "priceMinor": 1500
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1600,
+          "minPrice": {
+            "amountMinor": 1000,
+            "id": "min-ebay-5"
+          },
+          "maxPrice": {
+            "amountMinor": 5000,
+            "id": "max-ebay-5"
+          },
+          "cost": {
+            "currency": "USD",
+            "costProfileId": "cp-ebay-5",
+            "unitCostMinor": 1000,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "SALES_TAX_EXCLUDED"
+            }
+          },
+          "taxRegime": "SALES_TAX_EXCLUDED",
+          "guardrails": {
+            "guardrailIds": [
+              "g-margin-ebay-5"
+            ],
+            "minMarginBp": 2000
+          }
+        }
+      ],
+      "accounts": [
+        {
+          "channelAccountId": "20000000-0000-4000-8000-000000000002",
+          "channel": "EBAY",
+          "marketplaces": [
+            "EBAY_US"
+          ],
+          "writeMode": "SHADOW"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "recompute-eur-gross",
+      "kind": "pipelineRecompute",
+      "writeScopeId": "ws-ebay-price-4",
+      "trigger": {
+        "type": "COST_CHANGE"
+      },
+      "expect": {
+        "decision": {
+          "outcome": "REJECTED",
+          "rejectionReason": "BELOW_MARGIN_FLOOR",
+          "currency": "EUR",
+          "effectiveFloorMinor": 1915
+        }
+      }
+    },
+    {
+      "id": "recompute-usd-net",
+      "kind": "pipelineRecompute",
+      "writeScopeId": "ws-ebay-price-5",
+      "trigger": {
+        "type": "COST_CHANGE"
+      },
+      "expect": {
+        "decision": {
+          "outcome": "REJECTED",
+          "rejectionReason": "BELOW_MARGIN_FLOOR",
+          "currency": "USD",
+          "effectiveFloorMinor": 1539
+        }
+      }
+    }
+  ],
+  "exchanges": [],
+  "expect": {
+    "alerts": [
+      {
+        "code": "PRICE_REJECTED_BY_BOUND",
+        "severity": "WARNING",
+        "count": 2,
+        "details": {
+          "reason": "BELOW_MARGIN_FLOOR"
+        }
+      }
+    ],
+    "pipeline": {
+      "decisions": [
+        {
+          "writeScopeId": "ws-ebay-price-4",
+          "reasonParams": {
+            "proposedMinor": 1500,
+            "floorMinor": 1915
+          }
+        },
+        {
+          "writeScopeId": "ws-ebay-price-5",
+          "reasonParams": {
+            "proposedMinor": 1500,
+            "floorMinor": 1539
+          }
+        }
+      ],
+      "writes": []
+    }
+  }
+}

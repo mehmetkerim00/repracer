@@ -1,0 +1,409 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "ebay/pipeline/browse-vat-no-distrust",
+  "channel": "EBAY",
+  "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
+  "title": "Р-186: Browse показывает цену покупателя = отправленная × 1,19 — запись подтверждена, недоверия каналу нет, вторая цена уходит",
+  "description": "Фиксированная цена 13.49 уходит в EBAY_DE. Обратное чтение после окна: GET offer — 13.49, Browse — 16.05 с taxes [VAT 19 %, includedInPrice, ebayCollectAndRemitTax] — как в песочнице (E-17). У Amazon такое расхождение — неверная база цены и недоверие витрине [Р-116, сценарий amazon/pipeline/price-basis-mismatch-halt]; у eBay цена покупателя хранится отдельно (buyerPrice) и в сверку Р-116 не идёт, пока E-17 не решит бой. Запись APPLIED, остановки по недоверию нет, фиксированная цена второго товара уходит.",
+  "tags": [
+    "pipeline",
+    "mandatory:pipeline-price-basis-r186",
+    "conservative:EBAY_C14_BROWSE_PRICE_WITH_VAT"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "docs/evidence/step39-ebay-sandbox.md",
+      "docs/decisions.md#Р-186",
+      "docs/decisions.md#Р-116",
+      "docs/channel-capabilities.md#E-17"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-28T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn_ebay_seller_0001",
+      "marketplaces": [
+        "EBAY_DE"
+      ],
+      "channel": "EBAY"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "syn-ebay-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "Syn-Repracer-SBX-0001",
+        "clientSecret": "SBX-syn-client-secret-0001"
+      },
+      "accessToken": "syn-ebay-user-token-0001",
+      "applicationToken": "syn-ebay-app-token-0001"
+    },
+    "pricing": {
+      "scopes": [
+        {
+          "writeScopeId": "ws-ebay-price-12",
+          "productId": "prod-ebay-12",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "EBAY_DE",
+          "externalUnitId": "SYN-EBAY-P-12",
+          "externalOfferId": "9200000012",
+          "externalListingId": "120000000012",
+          "channelProductRef": "120000000012",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-fixed-12-1349",
+            "version": 1,
+            "params": {
+              "type": "FIXED",
+              "priceMinor": 1349
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1149,
+          "minPrice": {
+            "amountMinor": 1000,
+            "id": "min-ebay-12"
+          },
+          "maxPrice": {
+            "amountMinor": 5000,
+            "id": "max-ebay-12"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ebay-12",
+            "unitCostMinor": 500,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1100,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
+          }
+        },
+        {
+          "writeScopeId": "ws-ebay-price-13",
+          "productId": "prod-ebay-13",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "EBAY_DE",
+          "externalUnitId": "SYN-EBAY-P-13",
+          "externalOfferId": "9200000013",
+          "externalListingId": "120000000013",
+          "channelProductRef": "120000000013",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-fixed-13-2100",
+            "version": 1,
+            "params": {
+              "type": "FIXED",
+              "priceMinor": 2100
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1149,
+          "minPrice": {
+            "amountMinor": 1000,
+            "id": "min-ebay-13"
+          },
+          "maxPrice": {
+            "amountMinor": 5000,
+            "id": "max-ebay-13"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ebay-13",
+            "unitCostMinor": 500,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1100,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
+          }
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "first-fixed-price-accepted",
+      "kind": "pipelineRecompute",
+      "writeScopeId": "ws-ebay-price-12",
+      "trigger": {
+        "type": "COST_CHANGE"
+      },
+      "expect": {
+        "decision": {
+          "outcome": "APPROVED",
+          "finalMinor": 1349
+        }
+      }
+    },
+    {
+      "id": "in-flight-window-passes",
+      "kind": "advanceClock",
+      "ms": 121000
+    },
+    {
+      "id": "readback-shows-buyer-price-with-vat",
+      "kind": "pipelineDispatchDue",
+      "expect": {
+        "due": 1,
+        "reports": [
+          {
+            "writeScopeId": "ws-ebay-price-12",
+            "steps": [
+              {
+                "action": "RECONCILED",
+                "version": 1,
+                "result": "APPLIED",
+                "recorded": "APPLIED"
+              },
+              {
+                "action": "IDLE"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "second-fixed-price-not-held",
+      "kind": "pipelineRecompute",
+      "writeScopeId": "ws-ebay-price-13",
+      "trigger": {
+        "type": "COST_CHANGE"
+      },
+      "expect": {
+        "decision": {
+          "outcome": "APPROVED",
+          "finalMinor": 2100
+        },
+        "dispatch": {
+          "status": "ACCEPTED"
+        }
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "user-token",
+      "request": {
+        "method": "POST",
+        "path": "/identity/v1/oauth2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "syn-ebay-user-token-0001",
+          "expires_in": 7200,
+          "token_type": "User Access Token"
+        }
+      }
+    },
+    {
+      "id": "bulk-1349",
+      "request": {
+        "method": "POST",
+        "path": "/sell/inventory/v1/bulk_update_price_quantity",
+        "body": {
+          "requests": [
+            {
+              "offers": [
+                {
+                  "offerId": "9200000012",
+                  "price": {
+                    "value": "13.49",
+                    "currency": "EUR"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "responses": [
+            {
+              "statusCode": 200,
+              "sku": "SYN-EBAY-P-12",
+              "offerId": "9200000012"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "get-offer-1349",
+      "request": {
+        "method": "GET",
+        "path": "/sell/inventory/v1/offer/9200000012"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "offerId": "9200000012",
+          "sku": "SYN-EBAY-P-12",
+          "marketplaceId": "EBAY_DE",
+          "format": "FIXED_PRICE",
+          "availableQuantity": 5,
+          "pricingSummary": {
+            "price": {
+              "value": "13.49",
+              "currency": "EUR"
+            }
+          },
+          "listing": {
+            "listingId": "120000000012",
+            "listingStatus": "ACTIVE",
+            "soldQuantity": 0
+          },
+          "status": "PUBLISHED"
+        }
+      }
+    },
+    {
+      "id": "app-token",
+      "request": {
+        "method": "POST",
+        "path": "/identity/v1/oauth2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "syn-ebay-app-token-0001",
+          "expires_in": 7200,
+          "token_type": "Application Access Token"
+        }
+      }
+    },
+    {
+      "id": "browse-vat-1605",
+      "request": {
+        "method": "GET",
+        "path": "/buy/browse/v1/item/v1|120000000012|0",
+        "query": {
+          "fieldgroups": "COMPACT"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "itemId": "v1|120000000012|0",
+          "legacyItemId": "120000000012",
+          "sellerItemRevision": "3",
+          "price": {
+            "value": "16.05",
+            "currency": "EUR"
+          },
+          "estimatedAvailabilities": [
+            {
+              "estimatedAvailabilityStatus": "IN_STOCK",
+              "estimatedAvailableQuantity": 5
+            }
+          ],
+          "taxes": [
+            {
+              "taxJurisdiction": {
+                "region": {
+                  "regionName": "DE",
+                  "regionType": "COUNTRY"
+                }
+              },
+              "taxType": "VAT",
+              "taxPercentage": "19.0",
+              "includedInPrice": true,
+              "ebayCollectAndRemitTax": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "bulk-2100",
+      "request": {
+        "method": "POST",
+        "path": "/sell/inventory/v1/bulk_update_price_quantity",
+        "body": {
+          "requests": [
+            {
+              "offers": [
+                {
+                  "offerId": "9200000013",
+                  "price": {
+                    "value": "21.00",
+                    "currency": "EUR"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "responses": [
+            {
+              "statusCode": 200,
+              "sku": "SYN-EBAY-P-13",
+              "offerId": "9200000013"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "expect": {
+    "alerts": [
+      {
+        "code": "EBAY_BUYER_PRICE_VAT_ON_TOP",
+        "severity": "WARNING",
+        "count": 1,
+        "details": {
+          "vatBasisPoints": 1900
+        }
+      }
+    ],
+    "logs": [
+      {
+        "code": "EBAY_C14_BROWSE_PRICE_WITH_VAT",
+        "question": "E-17",
+        "count": 1,
+        "details": {
+          "vatBasisPoints": 1900
+        }
+      }
+    ],
+    "pipeline": {
+      "distrusts": [],
+      "halts": [],
+      "writes": [
+        {
+          "amountMinor": 1349,
+          "status": "APPLIED"
+        },
+        {
+          "amountMinor": 2100,
+          "status": "ACCEPTED"
+        }
+      ]
+    }
+  }
+}

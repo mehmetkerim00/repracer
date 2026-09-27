@@ -108,6 +108,21 @@ VALUES
    'остаток MFN — одно значение на SKU во всех маркетплейсах региона [Р-1]', true, 'AMAZON_INFO',
    'CONSERVATIVE', 'A-16', 'FIRST_LIVE_WRITE')
 ON CONFLICT DO NOTHING;
+-- Шаг 47: eBay — единица записи цены и остатка по предложению (аккаунт + витрина + SKU), бюджет правок на листинг
+-- 250/день с резервом остатка [Р-2, Р-19, Р-163]; ASYNC — применение подтверждает обратное чтение [Р-186]. Факты — песочница
+-- (docs/evidence/step39-ebay-sandbox.md), поэтому статус области записи — CONSERVATIVE до снимка документации (E-01)
+INSERT INTO platform.channel_capability
+  (capability_id, version, status, valid_from, channel, region, api_mode, field, write_scope_kind,
+   write_scope_key_template, budget_scope_attribute, object_edit_limit, processing_mode,
+   requires_side_effects_ack, observation_data_class, write_scope_status, write_scope_question, write_scope_closes_by)
+VALUES
+  ('c0000000-0000-0000-0000-0000000000e1', 1, 'ACTIVE', now(), 'EBAY', NULL, 'EBAY_INVENTORY_API', 'PRICE',
+   'ACCOUNT_MARKETPLACE_SKU', ARRAY['channel_account','marketplace','external_sku'], 'external_listing_id',
+   '{"limit": 250, "quantity_reserve": 50, "unaccounted_margin": 10}', 'ASYNC', false, 'CHANNEL_INFO', 'CONSERVATIVE', 'E-01', 'CHANNEL_SUPPORT'),
+  ('c0000000-0000-0000-0000-0000000000e2', 1, 'ACTIVE', now(), 'EBAY', NULL, 'EBAY_INVENTORY_API', 'QUANTITY',
+   'ACCOUNT_MARKETPLACE_SKU', ARRAY['channel_account','marketplace','external_sku'], 'external_listing_id',
+   '{"limit": 250, "quantity_reserve": 50, "unaccounted_margin": 10}', 'ASYNC', false, 'CHANNEL_INFO', 'CONSERVATIVE', 'E-01', 'CHANNEL_SUPPORT')
+ON CONFLICT DO NOTHING;
 RESET ROLE;
 
 -- Смоук-мир (tests/db) и сценарии стенда живут в фиксированной дате: секции суточных таблиц под неё создаются явно,

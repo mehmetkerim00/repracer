@@ -1,0 +1,140 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "ebay/pipeline/max-price-missing",
+  "channel": "EBAY",
+  "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
+  "title": "Р-43 на eBay: без max_price репрайсинг не включается; после задания границы — включается",
+  "description": "У предложения только min_price: включение отказывает MAX_PRICE_MISSING, режим остаётся OFF. После задания max_price 50.00 включение проходит — фиксированная стратегия доступна на канале без данных конкурентов (Р-39).",
+  "tags": [
+    "pipeline",
+    "mandatory:pipeline-max-missing"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "docs/evidence/step39-ebay-sandbox.md",
+      "docs/decisions.md#Р-186"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-28T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn_ebay_seller_0001",
+      "marketplaces": [
+        "EBAY_DE"
+      ],
+      "channel": "EBAY"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "syn-ebay-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "Syn-Repracer-SBX-0001",
+        "clientSecret": "SBX-syn-client-secret-0001"
+      },
+      "accessToken": "syn-ebay-user-token-0001",
+      "applicationToken": "syn-ebay-app-token-0001"
+    },
+    "pricing": {
+      "scopes": [
+        {
+          "writeScopeId": "ws-ebay-price-6",
+          "productId": "prod-ebay-6",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "EBAY_DE",
+          "externalUnitId": "SYN-EBAY-P-06",
+          "externalOfferId": "9200000006",
+          "externalListingId": "120000000006",
+          "channelProductRef": "120000000006",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "OFF",
+          "strategy": {
+            "strategyId": "st-fixed-6",
+            "version": 1,
+            "params": {
+              "type": "FIXED",
+              "priceMinor": 1299
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1149,
+          "minPrice": {
+            "amountMinor": 1000,
+            "id": "min-ebay-6"
+          },
+          "maxPrice": null,
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ebay-6",
+            "unitCostMinor": 500,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1100,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
+          }
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "enable-without-max",
+      "kind": "pipelineEnableRepricing",
+      "writeScopeId": "ws-ebay-price-6",
+      "expect": {
+        "enabled": false,
+        "problems": [
+          {
+            "code": "MAX_PRICE_MISSING"
+          }
+        ]
+      }
+    },
+    {
+      "id": "set-max-price",
+      "kind": "pricingMutation",
+      "op": "setBound",
+      "writeScopeId": "ws-ebay-price-6",
+      "bound": "max",
+      "value": {
+        "amountMinor": 5000,
+        "id": "max-ebay-6"
+      }
+    },
+    {
+      "id": "enable-with-both-bounds",
+      "kind": "pipelineEnableRepricing",
+      "writeScopeId": "ws-ebay-price-6",
+      "expect": {
+        "enabled": true,
+        "problems": []
+      }
+    }
+  ],
+  "exchanges": [],
+  "expect": {
+    "logs": [
+      {
+        "code": "REPRICING_NOT_ENABLED",
+        "count": 1
+      }
+    ],
+    "noAlerts": true,
+    "pipeline": {
+      "scopes": [
+        {
+          "pricingMode": "ENGINE"
+        }
+      ],
+      "decisions": [],
+      "writes": []
+    }
+  }
+}

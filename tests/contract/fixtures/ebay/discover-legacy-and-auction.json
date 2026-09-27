@@ -1,0 +1,264 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "ebay/discovery/legacy-and-auction",
+  "channel": "EBAY",
+  "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
+  "title": "Обнаружение ВСЕХ активных листингов: после Inventory API — GetMyeBaySelling; старая фиксированная цена — без права записи, аукцион — AUCTION",
+  "description": "Фаза Inventory API отдаёт предложение 17 (писать можно) и передаёт курсор фазе Trading. GetMyeBaySelling (ответ песочницы 27.09.2026: Ack Success, TotalNumberOfEntries 3, у предметов ItemID, SKU, ListingType, Quantity, QuantityAvailable, CurrentPrice/BuyItNowPrice и НЕТ поля витрины) перечисляет и листинг 17 — он отдан фазой Inventory, его номер едет в курсоре, и он не повторяется без лишнего offer?sku= (ревью шага 47, находка 7). Листинг 24 — фиксированная цена не под Inventory API: writable false, пишет только миграция владельцем [Р-164]. Листинг 25 — аукцион (Chinese): AUCTION, без цены, не управляется никогда [Р-2]. Витрина — та, для которой сделан вызов (сайт 77), при совпадении валюты [EBAY_C16, E-19].",
+  "tags": [
+    "discovery",
+    "mandatory:discovery-legacy-auction",
+    "conservative:EBAY_C16_TRADING_LISTING_SITE"
+  ],
+  "provenance": {
+    "kind": "RECONSTRUCTED_FROM_SANDBOX",
+    "sandbox": true,
+    "recordedAt": "2026-09-27",
+    "evidence": "docs/evidence/step39-ebay-sandbox.md",
+    "reviewedBy": "step39-review: обезличивание проверено",
+    "redactions": [
+      "listing, offer, policy ids and SKUs replaced with synthetic ones",
+      "request ids dropped",
+      "Trading API responses reduced to the elements the checks read; the Seller block (e-mail, address) removed",
+      "tokens were never logged"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-27T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn_ebay_seller_0001",
+      "marketplaces": [
+        "EBAY_DE"
+      ],
+      "channel": "EBAY"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "syn-ebay-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "Syn-Repracer-SBX-0001",
+        "clientSecret": "SBX-syn-client-secret-0001"
+      },
+      "accessToken": "syn-ebay-user-token-0001",
+      "applicationToken": "syn-ebay-app-token-0001"
+    }
+  },
+  "steps": [
+    {
+      "id": "inventory-phase",
+      "kind": "call",
+      "method": "discoverOffers",
+      "args": [
+        {
+          "limit": 2
+        }
+      ],
+      "expect": {
+        "nextCursor": "trd:0:1~110000000017",
+        "items": [
+          {
+            "identity": {
+              "externalListingId": "110000000017",
+              "externalOfferId": "9100000017"
+            },
+            "listing": {
+              "format": "FIXED_PRICE",
+              "writable": true
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "budget-refill",
+      "kind": "advanceClock",
+      "ms": 5000
+    },
+    {
+      "id": "trading-phase",
+      "kind": "call",
+      "method": "discoverOffers",
+      "args": [
+        {
+          "limit": 2,
+          "cursor": "trd:0:1~110000000017"
+        }
+      ],
+      "expect": {
+        "nextCursor": {
+          "$absent": true
+        },
+        "items": [
+          {
+            "identity": {
+              "marketplace": "EBAY_DE",
+              "externalSku": "SYN-EBAY-24",
+              "externalListingId": "110000000024",
+              "externalOfferId": {
+                "$absent": true
+              }
+            },
+            "currentPrice": {
+              "amountMinor": 1499,
+              "currency": "EUR"
+            },
+            "currentQuantity": 4,
+            "isLive": true,
+            "listing": {
+              "format": "FIXED_PRICE",
+              "writable": false
+            }
+          },
+          {
+            "identity": {
+              "marketplace": "EBAY_DE",
+              "externalSku": "SYN-EBAY-25",
+              "externalListingId": "110000000025"
+            },
+            "currentPrice": {
+              "$absent": true
+            },
+            "listing": {
+              "format": "AUCTION",
+              "writable": false
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "user-token",
+      "note": "Обновление токена пользователя: grant_type=refresh_token + scope, Basic ключей приложения [песочница: ответ без нового refresh-токена]",
+      "request": {
+        "method": "POST",
+        "path": "/identity/v1/oauth2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "syn-ebay-user-token-0001",
+          "expires_in": 7200,
+          "token_type": "User Access Token"
+        }
+      },
+      "origin": "SYNTHETIC"
+    },
+    {
+      "id": "inventory-page",
+      "request": {
+        "method": "GET",
+        "path": "/sell/inventory/v1/inventory_item",
+        "query": {
+          "limit": "2",
+          "offset": "0"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "total": 1,
+          "size": 1,
+          "limit": 2,
+          "inventoryItems": [
+            {
+              "sku": "SYN-EBAY-17",
+              "condition": "NEW"
+            }
+          ]
+        }
+      },
+      "origin": "SYNTHETIC"
+    },
+    {
+      "id": "offers-17",
+      "request": {
+        "method": "GET",
+        "path": "/sell/inventory/v1/offer",
+        "query": {
+          "sku": "SYN-EBAY-17"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "total": 1,
+          "size": 1,
+          "limit": 20,
+          "offers": [
+            {
+              "offerId": "9100000017",
+              "sku": "SYN-EBAY-17",
+              "marketplaceId": "EBAY_DE",
+              "format": "FIXED_PRICE",
+              "availableQuantity": 5,
+              "pricingSummary": {
+                "price": {
+                  "value": "11.49",
+                  "currency": "EUR"
+                }
+              },
+              "listingPolicies": {
+                "paymentPolicyId": "6200000002",
+                "returnPolicyId": "6200000003",
+                "fulfillmentPolicyId": "6200000001",
+                "eBayPlusIfEligible": false
+              },
+              "categoryId": "20695",
+              "merchantLocationKey": "syn-lager-1",
+              "tax": {
+                "applyTax": false
+              },
+              "listing": {
+                "listingId": "110000000017",
+                "listingStatus": "ACTIVE",
+                "soldQuantity": 0
+              },
+              "status": "PUBLISHED",
+              "listingDuration": "GTC"
+            }
+          ]
+        }
+      },
+      "origin": "SYNTHETIC"
+    },
+    {
+      "id": "get-my-ebay-selling",
+      "request": {
+        "method": "POST",
+        "path": "/ws/api.dll",
+        "body": "<?xml version=\"1.0\" encoding=\"utf-8\"?><GetMyeBaySellingRequest xmlns=\"urn:ebay:apis:eBLBaseComponents\"><ActiveList><Include>true</Include><Pagination><EntriesPerPage>2</EntriesPerPage><PageNumber>1</PageNumber></Pagination></ActiveList><DetailLevel>ReturnAll</DetailLevel></GetMyeBaySellingRequest>"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "text/xml"
+        },
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<GetMyeBaySellingResponse xmlns=\"urn:ebay:apis:eBLBaseComponents\"><Ack>Success</Ack><Version>1391</Version><ActiveList><ItemArray><Item><BuyItNowPrice currencyID=\"EUR\">11.49</BuyItNowPrice><ItemID>110000000017</ItemID><ListingType>FixedPriceItem</ListingType><Quantity>4</Quantity><SellingStatus><CurrentPrice currencyID=\"EUR\">11.49</CurrentPrice></SellingStatus><SKU>SYN-EBAY-17</SKU><QuantityAvailable>4</QuantityAvailable></Item><Item><BuyItNowPrice currencyID=\"EUR\">14.99</BuyItNowPrice><ItemID>110000000024</ItemID><ListingType>FixedPriceItem</ListingType><Quantity>4</Quantity><SellingStatus><CurrentPrice currencyID=\"EUR\">14.99</CurrentPrice></SellingStatus><SKU>SYN-EBAY-24</SKU><QuantityAvailable>4</QuantityAvailable></Item><Item><BuyItNowPrice currencyID=\"EUR\">0.0</BuyItNowPrice><ItemID>110000000025</ItemID><ListingType>Chinese</ListingType><Quantity>1</Quantity><SellingStatus><CurrentPrice currencyID=\"EUR\">5.00</CurrentPrice></SellingStatus><SKU>SYN-EBAY-25</SKU><QuantityAvailable>1</QuantityAvailable></Item></ItemArray><PaginationResult><TotalNumberOfPages>1</TotalNumberOfPages><TotalNumberOfEntries>3</TotalNumberOfEntries></PaginationResult></ActiveList></GetMyeBaySellingResponse>"
+      },
+      "origin": "SANDBOX"
+    }
+  ],
+  "expect": {
+    "noAlerts": true,
+    "logs": [
+      {
+        "code": "EBAY_C16_TRADING_LISTING_SITE",
+        "question": "E-19",
+        "count": 1,
+        "details": {
+          "marketplace": "EBAY_DE",
+          "legacy": 2,
+          "skippedSite": 0
+        }
+      }
+    ]
+  }
+}

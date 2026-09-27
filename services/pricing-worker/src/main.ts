@@ -1,8 +1,9 @@
 import { createAmazonAdapter, TwoLevelBudget } from '@repracer/amazon-adapter';
+import { createEbayAdapter } from '@repracer/ebay-adapter';
 import type { AdapterDependencies, ChannelAccountId, ChannelAdapter, TenantId } from '@repracer/channel-port';
 import { conservativeBudget, createKauflandAdapter } from '@repracer/kaufland-adapter';
 import { createPool, PgAlertSink, type PgPool } from '@repracer/pricing-store-pg';
-import { channelCredentialsProvider, createHeartbeat, credentialsFromFiles, jsonSink, pgAccountDirectory, ProcessHealth, serveHealth } from '@repracer/service-runtime';
+import { channelCredentialsProvider, createHeartbeat, credentialsFromFiles, EBAY_APPLICATION_REF, jsonSink, pgAccountDirectory, ProcessHealth, serveHealth } from '@repracer/service-runtime';
 import { loadWorkerConfig, type WorkerConfig } from './config.ts';
 import { startWorker, type RunningWorker } from './worker.ts';
 
@@ -40,8 +41,10 @@ export function channelAdapters(
       })
       : channel === 'AMAZON'
         ? createAmazonAdapter({ deps, userAgent: config.userAgent, applicationCredentialsRef: config.amazon.applicationCredentialsRef, budget: new TwoLevelBudget() })
-        // eBay адаптера нет до снимка спецификации [Р-112]: сообщение по такому аккаунту — отравленное, с алертом
-        : null;
+        // Шаг 47: адаптер eBay по песочнице [Р-162]; без настроенного приложения eBay сообщение — отравленное, с алертом
+        : channel === 'EBAY' && config.channelApps.ebay
+          ? createEbayAdapter({ deps, environment: config.channelApps.ebay.environment, applicationCredentialsRef: EBAY_APPLICATION_REF, scopes: config.channelApps.ebay.scopes })
+          : null;
     if (!created) throw new Error(`NO_ADAPTER: ${channel}`);
     byChannel.set(channel, created);
     return created;
@@ -74,6 +77,8 @@ export async function startWorkerProcess(config: WorkerConfig = loadWorkerConfig
       files: credentialsFromFiles(config.channelSecretsDir),
       vault: credentialsPool && config.channelApps.keyring ? { pool: credentialsPool, keyring: config.channelApps.keyring } : null,
       amazonApplication: config.channelApps.amazon ? { ref: config.amazon.applicationCredentialsRef, ...config.channelApps.amazon } : null,
+      // Шаг 47: ключи приложения eBay — из конфигурации приложений каналов (как у Amazon), refresh-токен продавца — из хранилища
+      ebayApplication: config.channelApps.ebay ? { ref: EBAY_APPLICATION_REF, clientId: config.channelApps.ebay.clientId, clientSecret: config.channelApps.ebay.clientSecret } : null,
     }),
     alerts,
     logger: sink.logger,

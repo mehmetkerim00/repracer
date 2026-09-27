@@ -300,6 +300,12 @@ export interface CommittedDecision {
    * ждать нечего: это не очередь, а режим аккаунта, и на экране это разные причины [Р-94].
    */
   heldInShadow?: boolean;
+  /**
+   * Шаг 47 [Р-19, Р-163]: запись создана, но база не дала списать попытку правки — бюджет объекта канала за сутки витрины исчерпан
+   * (edit_budget, у eBay — листинг). Решение и запись сохранены, запись завершена BUDGET_EXHAUSTED с причиной; в канал она не уйдёт.
+   * До шага 47 отказ бюджета в транзакции фиксации откатывал решение целиком (PRICING_COMMIT_FAILED) — решение терялось.
+   */
+  endedUnsent?: { channelWriteId: string; status: 'BUDGET_EXHAUSTED'; reason: { code: string; params: Record<string, string | number | boolean | null> } };
 }
 
 export type EvaluationCommitResult =
@@ -614,6 +620,14 @@ export interface PricingStore {
    * 10 000 б. п. (новая / прежняя = 1) — цена не изменилась и не считается (ревью шага 25, находка 2)
    */
   listPollCandidates(tenantId: string, channelAccountId: string, now: Instant): Promise<PollCandidate[]>;
+  /**
+   * Шаг 47: единицы записи цены аккаунта в режиме ENGINE, чья стратегия НЕ читает данных конкурентов (FIXED, TARGET_MARGIN), —
+   * их пересчитывает расписание. Без него такая цена не считалась нигде: пересчёт шёл только от снимка конкурентов, а у eBay
+   * конкурентов нет вовсе (Р-39) — живой прогон пилота eBay не получил ни одного решения.
+   * Ревью шага 47, находка 5: только ДОЛЖНЫЕ — без решения за последние 24 часа (первый раз — сразу после включения), самые давние
+   * первыми, не больше `limit`. Иначе 10 000 единиц давали бы ~960 000 решений NO_OP в сутки на тенанта
+   */
+  listScheduledScopes(tenantId: string, channelAccountId: string, now: Instant, limit: number): Promise<string[]>;
   /** Р-126: опрос товаров выполнен — время последнего опроса */
   markPolled(tenantId: string, channelAccountId: string, queries: readonly CompetitorQuery[], at: Instant): Promise<void>;
   omnibusCheck(tenantId: string, writeScopeId: string, startsAt: Instant): Promise<OmnibusPriorPrice>;
@@ -1113,4 +1127,8 @@ export interface DiscoveredCatalogOffer {
   condition: string;
   /** Способ исполнения от канала: CHANNEL (FBA/FBK) остаток не синхронизирует */
   fulfillment: 'MERCHANT' | 'CHANNEL';
+  /** Шаг 47 [Р-164]: eBay — номер листинга, формат и можно ли в него писать (под Inventory API) */
+  externalListingId?: string | null;
+  listingFormat?: 'FIXED_PRICE' | 'AUCTION' | null;
+  writable?: boolean | null;
 }

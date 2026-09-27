@@ -229,9 +229,10 @@ export class PgChannelConnectStore {
         tx.query(
           `SELECT ca.channel_account_id, ca.channel, ca.region, ca.marketplaces, ca.external_account_id, ca.auth_status, ca.access_blockers,
                   ca.write_mode, ca.connected_at,
-                  -- Р-176: «нашли N офферов» — то, что записало ОБНАРУЖЕНИЕ (searchListingsItems), по индексу последнего наблюдения
-                  (SELECT count(*)::int FROM (SELECT DISTINCT p.marketplace, p.external_sku FROM channel_data.offer_channel_pricing p
-                    WHERE p.tenant_id = ca.tenant_id AND p.channel_account_id = ca.channel_account_id AND p.source = 'DISCOVERY') found) AS offers,
+                  -- Р-176: «нашли N офферов» — каталог, который записало ОБНАРУЖЕНИЕ (0134, 0140). Шаг 47: раньше считались наблюдения
+                  -- собственного ценообразования канала — их пишет только Amazon, и у eBay экран всегда говорил «ищем»
+                  (SELECT count(*)::int FROM tenant_data.offer_mapping om
+                    WHERE om.tenant_id = ca.tenant_id AND om.channel_account_id = ca.channel_account_id AND om.status <> 'ENDED') AS offers,
                   (SELECT count(*)::int FROM channel_data.price_decision d
                      JOIN tenant_data.write_scope ws ON ws.tenant_id = d.tenant_id AND ws.write_scope_id = d.write_scope_id
                     WHERE d.tenant_id = ca.tenant_id AND ws.channel_account_id = ca.channel_account_id

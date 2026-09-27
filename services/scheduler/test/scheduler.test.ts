@@ -123,9 +123,10 @@ test('Р-126: the job source gives each account only the jobs its channel suppor
   const byAccount = (id: string) => specs.filter((s) => s.scope?.channelAccountId === id).map((s) => `${s.name}/${s.intervalSeconds}`).sort();
   assert.deepEqual(specs.filter((s) => !s.scope).map((s) => s.name).sort(), ['analytics-export-day', 'partitions', 'price-days-close', 'retention']);
   // Kaufland: buy_box_changed — ранний доступ, сверки нет по умолчанию; опрос и проверка остановки выборкой есть
-  assert.deepEqual(byAccount('20000000-0000-4000-8000-000000000001'), ['competitor-poll/60', 'halt-review/300', 'offer-discovery/86400']);
+  // Шаг 47: пересчёт цен, не зависящих от конкурентов, — у каждого аккаунта (у eBay это единственный источник решений)
+  assert.deepEqual(byAccount('20000000-0000-4000-8000-000000000001'), ['competitor-poll/60', 'halt-review/300', 'offer-discovery/86400', 'scheduled-recompute/900']);
   // Amazon: опроса для решения нет [AMZ_C07], остановка снимается только человеком [Р-119]; сверка по кругу — 31 с × 2 аккаунта (0.033 rps = 30,3 с)
-  assert.deepEqual(byAccount('20000000-0000-4000-8000-000000000002'), ['amazon-reconcile-rotation/62', 'notification-loss-review/300', 'offer-discovery/86400']);
+  assert.deepEqual(byAccount('20000000-0000-4000-8000-000000000002'), ['amazon-reconcile-rotation/62', 'notification-loss-review/300', 'offer-discovery/86400', 'scheduled-recompute/900']);
   const withPush = await jobSource({ ...deps, reconcileEnabled: () => true }).jobs('2026-09-17T10:00:00.000Z');
   assert.ok(withPush.some((s) => s.name === 'notification-loss-review' && s.scope?.channelAccountId === '20000000-0000-4000-8000-000000000001'),
     'Kaufland reconciliation is switched on per account when early access to buy_box_changed is granted');
@@ -295,4 +296,24 @@ test('Р-25 (прогон суток шага 35): окно чтения зак�
   // Успеха не было вовсе: окно — от начала запуска минус период
   await run(null, '2026-09-17T10:25:00.000Z');
   assert.deepEqual(windows, ['2026-09-17T09:55:00.000Z', '2026-09-17T10:25:00.000Z']);
+});
+
+test('ревью шага 47, находка 5: пересчёт по расписанию — предел за заход передаётся, все должные упали — провал запуска (пауза Р-132), часть — WARNING', async () => {
+  const outcomes: Array<{ scopes: number; changed: number; failed: number; firstError: string | null }> = [];
+  const limits: Array<number | undefined> = [];
+  const deps: JobDeps = { ...jobDeps(), pipelineFor: () => ({
+    recomputeScheduled: async (_ctx: unknown, o: { limit?: number }) => { limits.push(o.limit); return outcomes.shift()!; },
+  }) as never };
+  const spec = (await jobSource(deps).jobs('2026-09-17T10:00:00.000Z')).find((s) => s.name === 'scheduled-recompute' && s.scope?.channelAccountId === '20000000-0000-4000-8000-000000000001')!;
+  const run = () => spec.run({ now: '2026-09-17T10:00:00.000Z', startedAt: '2026-09-17T10:00:00.000Z', slotAt: '2026-09-17T10:00:00.000Z', runIndex: 0, previousSucceededAt: null } as never);
+  outcomes.push({ scopes: 3, changed: 3, failed: 0, firstError: null });
+  assert.deepEqual(await run(), { items: 3 });
+  assert.deepEqual(limits, [1_000], 'предел заход — 1000 единиц');
+  outcomes.push({ scopes: 4, changed: 1, failed: 2, firstError: 'Error' });
+  const partial = await run();
+  assert.deepEqual([partial.items, partial.alerts?.[0]?.code, partial.alerts?.[0]?.severity], [2, 'SCHEDULED_RECOMPUTE_FAILURES', 'WARNING']);
+  outcomes.push({ scopes: 2, changed: 0, failed: 2, firstError: 'CONTEXT_LOAD_FAILED' });
+  await assert.rejects(run(), /CONTEXT_LOAD_FAILED: all 2 due scopes failed/, 'все должные упали — запуск провален, а не «успех с нулём»');
+  outcomes.push({ scopes: 0, changed: 0, failed: 0, firstError: null });
+  assert.deepEqual(await run(), { items: 0 }, 'должных нет — пустой успешный запуск');
 });

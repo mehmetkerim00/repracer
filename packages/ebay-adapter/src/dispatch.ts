@@ -104,6 +104,14 @@ export async function dispatchEbay(options: ResolvedOptions, ctx: AdapterCallCon
   if (sendable.length === 0) return { batchId: batch.batchId, outcomes, attemptsMade: 0 };
 
   const sent = await call(options, ctx, session, { auth: 'USER', method: 'POST', path: BULK_UPDATE_PATH, body: bulkUpdateBody(sendable), idempotent: false, operation: OPERATION_BULK_UPDATE, preAcquired: true });
+  // Ревью шага 39, находка 14: повтор после 401 — вторая HTTP-попытка той же записи. Запросы записи транспорт не повторяет [EBAY_C02],
+  // поэтому попыток больше одной бывает только так; каждая лишняя списывается во второй слой бюджета, как и первая [Р-19, Р-163]
+  const httpAttempts = sent.kind === 'REFUSED' ? sent.attempts : sent.result.attempts;
+  if (httpAttempts > 1) {
+    for (const { listingKey, field, writes } of byListing.values()) {
+      if (writes.some((w) => sendable.includes(w))) ledger.recordSent({ listingKey, field, attempts: writes.length * (httpAttempts - 1) }, nowMs(options));
+    }
+  }
   if (sent.kind === 'REFUSED') {
     for (const w of sendable) outcomes.push({ channelWriteId: w.channelWriteId, status: 'REJECTED', error: sent.error });
     return { batchId: batch.batchId, outcomes, attemptsMade: sent.attempts };

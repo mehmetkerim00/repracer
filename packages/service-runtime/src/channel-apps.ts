@@ -17,7 +17,11 @@ export interface ChannelAppsConfig {
   /** Адрес возврата консоли (`https://…/connect/callback`); у eBay вместо адреса — RuName приложения */
   redirectUrl: string | null;
   amazon: { applicationId: string; clientId: string; clientSecret: string; draft: boolean; tokenUrl?: string } | null;
-  ebay: { environment: 'SANDBOX' | 'PRODUCTION'; clientId: string; clientSecret: string; ruName: string; scopes: string[] } | null;
+  ebay: {
+    environment: 'SANDBOX' | 'PRODUCTION'; clientId: string; clientSecret: string; ruName: string; scopes: string[];
+    /** Шаг 47: конечные точки МОДЕЛИ поставщика eBay (согласие, токены, Commerce Identity) — только в режиме стенда */
+    endpoints?: { authorize: string; token: string; identity: string };
+  } | null;
 }
 
 const onOff = (v: string | undefined, name: string): boolean => {
@@ -33,6 +37,21 @@ const ebayEnvironment = (v: string | undefined): 'SANDBOX' | 'PRODUCTION' => {
 const AMAZON_VARS = ['REPRACER_AMAZON_APP_ID', 'REPRACER_AMAZON_LWA_CLIENT_ID'] as const;
 const EBAY_VARS = ['REPRACER_EBAY_CLIENT_ID', 'REPRACER_EBAY_RUNAME', 'REPRACER_EBAY_SCOPES'] as const;
 export const EBAY_IDENTITY_SCOPE = 'https://api.ebay.com/oauth/api_scope/commerce.identity.readonly';
+/** Шаг 47: ссылка на ключи приложения eBay внутри процесса — их отдаёт провайдер учётных данных из конфигурации, не из файла */
+export const EBAY_APPLICATION_REF = 'platform:ebay-application';
+
+/**
+ * Шаг 47: модель поставщика eBay в прогоне пилота отвечает на петле — согласие, обмен кода и Commerce Identity (E-11) по одному
+ * базовому адресу. Подмена — ТОЛЬКО в режиме стенда: в работе адрес токенов, подменённый переменной окружения, увёл бы коды
+ * согласия и ключи приложения (Basic) на чужой хост.
+ */
+function modelEndpoints(env: Env): { authorize: string; token: string; identity: string } {
+  if (env.REPRACER_MODE !== 'stand') throw new ConfigError('CONFIG_INVALID: REPRACER_EBAY_OAUTH_BASE is accepted only with REPRACER_MODE=stand (модель поставщика eBay)');
+  let base: URL;
+  try { base = new URL(env.REPRACER_EBAY_OAUTH_BASE!); } catch { throw new ConfigError('CONFIG_INVALID: REPRACER_EBAY_OAUTH_BASE must be an absolute URL'); }
+  const origin = base.origin;
+  return { authorize: `${origin}/oauth2/authorize`, token: `${origin}/identity/v1/oauth2/token`, identity: `${origin}/commerce/identity/v1/user/` };
+}
 
 export function loadChannelAppsConfig(env: Env = process.env, read: (path: string) => string = (p) => readFileSync(p, 'utf8')): ChannelAppsConfig {
   const all = (vars: readonly string[], secretName: string, what: string): boolean => {
@@ -62,8 +81,10 @@ export function loadChannelAppsConfig(env: Env = process.env, read: (path: strin
       clientSecret: requiredValue(secretFromEnv(env, 'REPRACER_EBAY_CLIENT_SECRET', read), 'REPRACER_EBAY_CLIENT_SECRET_FILE'),
       // Scope называет конфигурация (E-08; набор, с которым работает песочница, — шаг 39)
       scopes: env.REPRACER_EBAY_SCOPES!.split(/\s+/).filter(Boolean),
+      ...(env.REPRACER_EBAY_OAUTH_BASE ? { endpoints: modelEndpoints(env) } : {}),
     }
     : null;
+  if (env.REPRACER_EBAY_OAUTH_BASE && !ebay) throw new ConfigError('CONFIG_INVALID: REPRACER_EBAY_OAUTH_BASE без приложения eBay — подменять нечего');
   /**
    * Находка 2 ревью шага 39: без scope `commerce.identity.readonly` продавца после обмена кода не назвать (E-11), и каждое
    * повторное подключение упиралось бы в отказ «продавец неизвестен». Отказ — при старте процесса, а не у продавца.
@@ -100,7 +121,7 @@ export function channelApps(c: ChannelAppsConfig): ChannelApp[] {
       ? { channel: 'AMAZON', marketplaces: AMAZON_MARKETPLACES, platformMissing: [], provider: amazonLwa({ ...c.amazon, redirectUri: c.redirectUrl }) }
       : { channel: 'AMAZON', marketplaces: AMAZON_MARKETPLACES, platformMissing: ['AMAZON_APPLICATION'], provider: null },
     c.ebay
-      ? { channel: 'EBAY', marketplaces: EBAY_MARKETPLACES, platformMissing: [], provider: ebayOAuth({ environment: c.ebay.environment, clientId: c.ebay.clientId, clientSecret: c.ebay.clientSecret, redirectUri: c.ebay.ruName, scopes: c.ebay.scopes }) }
+      ? { channel: 'EBAY', marketplaces: EBAY_MARKETPLACES, platformMissing: [], provider: ebayOAuth({ environment: c.ebay.environment, clientId: c.ebay.clientId, clientSecret: c.ebay.clientSecret, redirectUri: c.ebay.ruName, scopes: c.ebay.scopes, ...(c.ebay.endpoints ? { endpoints: c.ebay.endpoints } : {}) }) }
       : { channel: 'EBAY', marketplaces: EBAY_MARKETPLACES, platformMissing: ['EBAY_DEVELOPER_KEYS'], provider: null },
   ];
 }

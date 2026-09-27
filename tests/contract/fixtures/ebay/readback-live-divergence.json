@@ -3,8 +3,8 @@
   "id": "ebay/readback/offer-listing-divergence",
   "channel": "EBAY",
   "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
-  "title": "Живая цена листинга ≠ предложение Inventory API и разница — не НДС: предупреждение о другом инструменте (C10)",
-  "description": "По протоколу песочницы: после миграции ReviseFixedPriceItem через Trading API изменил живую цену (13.99), а GET offer продолжал показывать 14.99. Наблюдение, как у Kaufland и Amazon: цена продавца — из предложения (14.99), цена покупателя живого листинга — effectivePrice (13.99, Browse API) [EBAY_C05, токен приложения — EBAY_C06]. Разница не равна НДС из taxes (их нет) — WARNING EBAY_OFFER_LISTING_DIVERGENCE (листинг правит другой инструмент, C10).",
+  "title": "Живая цена листинга ≠ предложение Inventory API и разница — не НДС: наблюдение несёт живую цену, предупреждение о другом инструменте (C10)",
+  "description": "По протоколу песочницы: после миграции ReviseFixedPriceItem через Trading API изменил живую цену (13.99), а GET offer продолжал показывать 14.99. Р-186: живая цена и правки других инструментов — из Browse, GET offer отдаёт только нашу запись; значение наблюдения — живая цена 13.99, цена покупателя Browse — buyerPrice, effectivePrice у eBay нет [EBAY_C05, токен приложения — EBAY_C06]. Разница не равна НДС из taxes (их нет) — WARNING EBAY_OFFER_LISTING_DIVERGENCE (листинг правит другой инструмент, C10).",
   "tags": [
     "mandatory:readback-browse-divergence",
     "readback",
@@ -81,15 +81,18 @@
             "source": "READBACK",
             "value": {
               "price": {
-                "amountMinor": 1499,
+                "amountMinor": 1399,
                 "currency": "EUR",
                 "basis": "GROSS"
               }
             },
-            "effectivePrice": {
+            "buyerPrice": {
               "amountMinor": 1399,
               "currency": "EUR",
               "basis": "GROSS"
+            },
+            "effectivePrice": {
+              "$absent": true
             }
           }
         ]

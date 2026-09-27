@@ -36,6 +36,6 @@ export function createEbayAdapter(input: EbayAdapterOptions): ChannelAdapter & S
  */
 export function ebayAdapterFactory(config: Omit<EbayAdapterOptions, 'deps'>) {
   const state = resolveOptions({ ...config, deps: null as never });
-  const shared = { requestBudget: state.requestBudget, editLedger: state.editLedger, tokenCache: state.tokenCache };
+  const shared = { requestBudget: state.requestBudget, editLedger: state.editLedger, tokenCache: state.tokenCache, vatAlertedAccounts: state.vatAlertedAccounts };
   return (deps: AdapterDependencies): ChannelAdapter & SupportsListingMigration => createEbayAdapter({ ...config, ...shared, deps });
 }

@@ -10,8 +10,9 @@ import { loadScenarios, validateScenario, type Scenario } from './harness/scenar
 
 /**
  * Контрактный стенд eBay (шаг 39) [Р-162…Р-164]: сценарии порта на обменах, записанных в песочнице eBay и обезличенных
- * (provenance RECONSTRUCTED_FROM_SANDBOX, у каждого обмена — origin SANDBOX или SYNTHETIC), и синтетические там, где ответа песочницы нет. Путь решения о цене (сценарии pipeline-* Kaufland
- * и Amazon) для eBay не прогоняется: хранилище пути решения в памяти канала EBAY не знает — это следующий шаг, а не пропуск.
+ * (provenance RECONSTRUCTED_FROM_SANDBOX, у каждого обмена — origin SANDBOX или SYNTHETIC), и синтетические там, где ответа песочницы нет.
+ * Шаг 47: путь решения о цене для eBay (сценарии pipeline-*, ebay-fixtures/pipeline.ts) — здесь на хранилище в памяти, в
+ * ebay.pipeline.pg.test.ts — на PostgreSQL.
  */
 const loaded = loadScenarios(fileURLToPath(EBAY_FIXTURES_DIR));
 const logged = new Set<string>();
@@ -21,6 +22,10 @@ const MANDATORY = [
   'bulk-207-partial', '429', 'timeout-unknown-outcome', 'stale-version', 'budget-exhausted',
   'unmigrated-write-rejected', 'migration-without-consent', 'migration-with-consent', 'auction-ineligible', 'quantity-zero', 'currency-mismatch',
   'batch-split-25', 'price-below-minimum', 'request-level-400', 'readback-browse-divergence', 'browse-vat-on-top', 'inbound-unsupported',
+  // Шаг 47: путь решения — обязательные сценарии Kaufland и Amazon, применимые к каналу без данных конкурентов (Р-39), и сценарии eBay
+  'pipeline-write-confirmed', 'pipeline-below-floor', 'pipeline-above-max', 'pipeline-tax-regimes', 'pipeline-max-missing', 'pipeline-kill-switch',
+  'pipeline-halt-manual-release', 'pipeline-write-queue', 'pipeline-timeout-unknown-outcome', 'pipeline-budget-exhausted', 'pipeline-unmigrated-write',
+  'pipeline-price-basis-r186', 'discovery-legacy-auction', 'orders-whitelist', 'orders-shipment-before-window', 'pipeline-discovery-catalog',
 ];
 
 test('eBay fixtures are exactly what the builder produces', () => {

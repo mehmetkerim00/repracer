@@ -272,7 +272,8 @@ export const FX_CAUSES = ['FX_RATE_UNAVAILABLE', 'FX_RATE_STALE', 'UNSUPPORTED_C
 export const RULE_CODES = ['FIXED', 'TARGET_MARGIN', 'MATCH_BUYBOX', 'BEAT_LOWEST', 'POSITION'] as const;
 export const STRATEGY_TYPES = ['FIXED', 'TARGET_MARGIN', 'MATCH_BUYBOX', 'BEAT_LOWEST'] as const;
 export const LOWEST_SCOPES = ['VISIBLE_TOP_N', 'MARKET'] as const;
-export const UNMET_REQUIREMENTS = ['NO_SNAPSHOT', 'COMPLETENESS', 'BUYBOX_WINNER', 'OWN_RANK', 'SHIPPING', 'CONDITION', 'STALENESS', 'OWN_SHIPPING'] as const;
+/** Шаг 47: NO_COMPETITOR_SOURCE — у канала нет ни одного источника конкурентов (eBay, Р-39), как в channel_data.strategy_unmet (0082) */
+export const UNMET_REQUIREMENTS = ['NO_COMPETITOR_SOURCE', 'NO_SNAPSHOT', 'COMPLETENESS', 'BUYBOX_WINNER', 'OWN_RANK', 'SHIPPING', 'CONDITION', 'STALENESS', 'OWN_SHIPPING'] as const;
 export const COMPLETENESS_KINDS = ['TOP_N', 'CHEAPEST_ONLY', 'FULL'] as const;
 export const COST_INPUTS = ['COST_PROFILE', 'VAT_RATE'] as const;
 export const CURRENCY_SOURCES = ['SNAPSHOT', 'COST'] as const;

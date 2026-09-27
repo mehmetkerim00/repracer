@@ -293,6 +293,15 @@ export function createPricingPipeline(deps: PipelineDeps) {
         report.stages.push({ stage: 'DISPATCH_PLAN', outcome: 'HELD_IN_SHADOW', reason: { code: 'WRITE_HELD_IN_SHADOW', params: {} } });
         return;
       }
+      // Р-19, Р-163: бюджет правок в базе исчерпан при создании записи — решение сохранено, запись завершена без отправки (как диспетчер)
+      if (committed.endedUnsent) {
+        const ended = committed.endedUnsent;
+        report.channelWriteId = ended.channelWriteId;
+        report.stages.push({ stage: 'DISPATCH_PLAN', outcome: ended.status, reason: ended.reason as Reason });
+        await alerts.raise({ ...alertBase(ctx), code: 'PRICE_WRITE_NOT_SENT', severity: 'CRITICAL', details: {
+          writeScopeId: committed.writeScopeId, channelWriteId: ended.channelWriteId, reason: ended.reason.code, status: ended.status } });
+        return;
+      }
       if (committed.pendingWriteId) {
         report.channelWriteId = committed.pendingWriteId;
         report.stages.push({ stage: 'DISPATCH_PLAN', outcome: 'QUEUED_BEHIND_IN_FLIGHT', reason: { code: 'WRITE_QUEUED_BEHIND_IN_FLIGHT', params: {} } });
@@ -785,6 +794,33 @@ export function createPricingPipeline(deps: PipelineDeps) {
       };
     },
 
+    /**
+     * Шаг 47: пересчёт по расписанию — цены, которые не зависят от конкурентов (фиксированная, маржинальная). Снимок конкурентов
+     * их не будит, а на канале без данных конкурентов (eBay, Р-39) иначе не было бы ни одного решения. Сбой одной единицы не
+     * останавливает остальные: он считается и возвращается.
+     */
+    async recomputeScheduled(ctx: AdapterCallContext, options: { limit?: number } = {}): Promise<{ scopes: number; changed: number; failed: number; firstError: string | null }> {
+      // Ревью шага 47, находка 5: только должные (без решения за 24 часа), не больше предела за заход, самые давние первыми.
+      // Находка 6: запись, которой бюджет правок отказал, даёт CRITICAL PRICE_WRITE_NOT_SENT — при пересчёте раз в сутки не чаще раза в сутки
+      const ids = await store.listScheduledScopes(ctx.tenantId, ctx.channelAccountId, deps.now(), options.limit ?? 1_000);
+      let changed = 0;
+      let failed = 0;
+      let firstError: string | null = null;
+      for (const id of ids) {
+        try {
+          const r = await this.recompute(ctx, id, { type: 'SCHEDULE' });
+          if (r.decision?.decisionClass === 'CHANGED') changed += 1;
+        } catch (error) {
+          failed += 1;
+          const name = String((error as { code?: string }).code ?? (error as Error).name ?? 'Error').slice(0, 60);
+          firstError ??= name;
+          // Сбой единицы не молчит: код в журнал, число — в итог работы (все должные упали — работа FAILED, пауза Р-132)
+          await emit(ctx, [{ kind: 'log', level: 'WARN', code: 'SCHEDULED_RECOMPUTE_FAILED', message: 'SCHEDULED_RECOMPUTE_FAILED', details: { writeScopeId: id, error: name } }]);
+        }
+      }
+      return { scopes: ids.length, changed, failed, firstError };
+    },
+
     /** Пересчёт единицы без нового снимка: изменилась себестоимость, расписание, ручной запуск */
     async recompute(ctx: AdapterCallContext, writeScopeId: string, trigger: { type: TriggerType; sourceEventId?: string }): Promise<ScopeReport> {
       let report: ScopeReport = { writeScopeId, stages: [] };
@@ -907,7 +943,8 @@ export function createPricingPipeline(deps: PipelineDeps) {
         catalogued += await store.recordDiscoveredOffers(ctx.tenantId, ctx.channelAccountId, result.items.flatMap((o) => (o.identity.marketplace
           ? [{ marketplace: o.identity.marketplace, externalSku: o.identity.externalSku ?? null, externalUnitId: o.identity.externalUnitId ?? null,
               externalOfferId: o.identity.externalOfferId ?? null, channelProductRef: o.identity.channelProductRef ?? null, gtin: o.gtins[0] ?? null,
-              condition: o.condition, fulfillment: o.fulfillment }]
+              condition: o.condition, fulfillment: o.fulfillment,
+              ...(o.listing ? { externalListingId: o.identity.externalListingId ?? null, listingFormat: o.listing.format, writable: o.listing.writable } : {}) }]
           : [])));
         for (const o of observations) {
           if (o.automatedPricing || o.channelBounds) withChannelPricing.push({ marketplace: o.marketplace, externalSku: o.externalSku, automatedPricing: o.automatedPricing, channelBounds: o.channelBounds });

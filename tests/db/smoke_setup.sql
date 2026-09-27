@@ -30,10 +30,7 @@ VALUES
   ('c0000000-0000-0000-0000-000000000003', 1, 'ACTIVE', now(), 'AMAZON', 'EU', 'AMAZON_LISTINGS_ITEMS', 'QUANTITY',
    'ACCOUNT_REGION_SKU', ARRAY['channel_account','region','external_sku'], NULL, NULL, 'ASYNC', true, 'AMAZON_INFO',
    'CONSERVATIVE', 'A-16', 'FIRST_LIVE_WRITE'),
-  ('c0000000-0000-0000-0000-000000000004', 1, 'ACTIVE', now(), 'EBAY', NULL, 'EBAY_INVENTORY_API', 'QUANTITY',
-   'ACCOUNT_MARKETPLACE_SKU', ARRAY['channel_account','marketplace','external_sku'], 'external_listing_id',
-   '{"limit": 250, "quantity_reserve": 50, "unaccounted_margin": 10}', 'SYNC', false, 'CHANNEL_INFO',
-   'CONSERVATIVE', 'E-01', 'CHANNEL_SUPPORT'),
+  -- eBay (PRICE, QUANTITY) — в общей строке справочника стенда (packages/pricing-store-pg/test/setup.sql, шаг 47)
   ('c0000000-0000-0000-0000-000000000005', 1, 'ACTIVE', now(), 'AMAZON', 'NA', 'AMAZON_LISTINGS_ITEMS', 'PRICE',
    'ACCOUNT_REGION_MARKETPLACE_SKU', ARRAY['channel_account','region','marketplace','external_sku'], NULL, NULL, 'ASYNC', false, 'AMAZON_INFO',
    'CONFIRMED', NULL, 'CHANNEL_SUPPORT'),

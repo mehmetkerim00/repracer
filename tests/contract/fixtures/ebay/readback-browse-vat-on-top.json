@@ -3,8 +3,8 @@
   "id": "ebay/readback/browse-vat-on-top",
   "channel": "EBAY",
   "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
-  "title": "E-17: Browse = цена продавца × 1,19 с taxes VAT includedInPrice — effectivePrice несёт цену покупателя, предупреждения C10 нет",
-  "description": "По протоколу песочницы (раздел E-17): через ~25 минут после записи Browse показал 16.05 при отправленной 13.49, с taxes [{taxType VAT, taxPercentage 19.0, includedInPrice true, ebayCollectAndRemitTax true}]. Это не правка другим инструментом: цена продавца (13.49) — значение наблюдения, цена покупателя (16.05) — effectivePrice; расхождение ровно на ставку НДС из taxes — журнал EBAY_C14, без алерта C10. Неверную базу цены решает проверка Р-116 пути решения (диспетчер берёт effectivePrice ?? value.price). Подтверждение сравнивает цену продавца — APPLIED.",
+  "title": "E-17: Browse = цена продавца × 1,19 с taxes VAT includedInPrice — buyerPrice несёт цену покупателя, в Р-116 она не идёт, предупреждения C10 нет",
+  "description": "По протоколу песочницы (раздел E-17): через ~25 минут после записи Browse показал 16.05 при отправленной 13.49, с taxes [{taxType VAT, taxPercentage 19.0, includedInPrice true, ebayCollectAndRemitTax true}]. Это не правка другим инструментом: цена продавца (13.49) — значение наблюдения, цена покупателя (16.05) — buyerPrice; расхождение ровно на ставку НДС из taxes — журнал EBAY_C14, без алерта C10. Р-186: цена покупателя хранится отдельно и в сверку Р-116 не идёт (effectivePrice у eBay нет) — E-17 решит бой; путь решения — сценарий ebay/pipeline/browse-vat-no-distrust. Подтверждение сравнивает цену продавца — APPLIED.",
   "tags": [
     "mandatory:browse-vat-on-top",
     "readback",
@@ -94,10 +94,13 @@
                 "basis": "GROSS"
               }
             },
-            "effectivePrice": {
+            "buyerPrice": {
               "amountMinor": 1605,
               "currency": "EUR",
               "basis": "GROSS"
+            },
+            "effectivePrice": {
+              "$absent": true
             }
           }
         }
@@ -238,7 +241,16 @@
     }
   ],
   "expect": {
-    "noAlerts": true,
+    "alerts": [
+      {
+        "code": "EBAY_BUYER_PRICE_VAT_ON_TOP",
+        "severity": "WARNING",
+        "count": 1,
+        "details": {
+          "vatBasisPoints": 1900
+        }
+      }
+    ],
     "logs": [
       {
         "code": "EBAY_C14_BROWSE_PRICE_WITH_VAT",

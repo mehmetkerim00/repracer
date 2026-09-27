@@ -25,11 +25,13 @@ interface Grant { sellerId: string; code: string; issuedAt: number; used: boolea
 
 export class ModelOAuthProvider {
   readonly opts: ModelProviderOptions;
-  readonly stats = { consents: 0, denials: 0, codeExchanges: 0, refreshes: 0, refused: 0, revocations: 0 };
+  readonly stats = { consents: 0, denials: 0, codeExchanges: 0, refreshes: 0, refused: 0, revocations: 0, identities: 0 };
   /** Все выданные токены — прогон ищет их потом там, где их быть не должно */
   readonly issuedTokens: string[] = [];
   private readonly grants = new Map<string, Grant>();
   private readonly refreshTokens = new Map<string, { sellerId: string; revoked: boolean }>();
+  /** Шаг 47 (E-11): токен доступа → продавец — его называет Commerce Identity API модели eBay */
+  private readonly accessTokens = new Map<string, string>();
   private platformBroken = false;
 
   constructor(opts: ModelProviderOptions) {
@@ -87,8 +89,23 @@ export class ModelOAuthProvider {
     return { status, text: async () => JSON.stringify(body) };
   }
 
-  /** Конечная точка токенов — транспорт `fetch` для клиента */
-  readonly fetch: Fetch = async (_url, init) => {
+  /** Токен доступа продавца; у eBay ответ несёт срок refresh-токена полем refresh_token_expires_in [песочница, E-10] */
+  private access(sellerId: string): string {
+    const t = this.token('access');
+    this.accessTokens.set(t, sellerId);
+    return t;
+  }
+
+  /** Конечная точка токенов (и у eBay — Commerce Identity API) — транспорт `fetch` для клиента */
+  readonly fetch: Fetch = async (url, init) => {
+    // Шаг 47, E-11 [песочница]: `GET https://apiz…/commerce/identity/v1/user/` токеном продавца — userId
+    if (this.opts.channel === 'EBAY' && /\/commerce\/identity\/v1\/user\/?$/.test(new URL(url, 'http://model.invalid').pathname)) {
+      const bearer = (init.headers.authorization ?? init.headers.Authorization ?? '').replace(/^Bearer /, '');
+      const sellerId = this.accessTokens.get(bearer);
+      if (!sellerId) return this.reply(401, { errors: [{ errorId: 1001, message: 'Invalid access token' }] });
+      this.stats.identities += 1;
+      return this.reply(200, { userId: sellerId, username: `syn_${sellerId.slice(0, 12)}`, accountType: 'INDIVIDUAL', registrationMarketplaceId: 'EBAY_DE' });
+    }
     const form = new URLSearchParams(init.body);
     // Ключи приложения: у Amazon — в форме, у eBay — Basic (src/request.js)
     const basic = init.headers.authorization ?? init.headers.Authorization;
@@ -111,7 +128,9 @@ export class ModelOAuthProvider {
       grant.used = true;
       const refresh = this.token('refresh');
       this.refreshTokens.set(refresh, { sellerId: grant.sellerId, revoked: false });
-      return this.reply(200, { access_token: this.token('access'), token_type: 'bearer', expires_in: 3600, refresh_token: refresh });
+      return this.reply(200, this.opts.channel === 'EBAY'
+        ? { access_token: this.access(grant.sellerId), expires_in: 7200, refresh_token: refresh, refresh_token_expires_in: 47_304_000, token_type: 'User Access Token' }
+        : { access_token: this.access(grant.sellerId), token_type: 'bearer', expires_in: 3600, refresh_token: refresh });
     }
     if (grantType === 'refresh_token') {
       this.stats.refreshes += 1;
@@ -120,7 +139,10 @@ export class ModelOAuthProvider {
         this.stats.refused += 1;
         return this.reply(400, { error: 'invalid_grant', error_description: 'refresh token is invalid, expired or revoked' });
       }
-      return this.reply(200, { access_token: this.token('access'), token_type: 'bearer', expires_in: 3600 });
+      // eBay: обновление нового refresh-токена не выдаёт [песочница]
+      return this.reply(200, this.opts.channel === 'EBAY'
+        ? { access_token: this.access(known.sellerId), expires_in: 7200, token_type: 'User Access Token' }
+        : { access_token: this.access(known.sellerId), token_type: 'bearer', expires_in: 3600 });
     }
     this.stats.refused += 1;
     return this.reply(400, { error: 'unsupported_grant_type' });

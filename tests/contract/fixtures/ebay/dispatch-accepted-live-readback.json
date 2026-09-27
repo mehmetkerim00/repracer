@@ -213,7 +213,7 @@
                 "basis": "GROSS"
               }
             },
-            "effectivePrice": {
+            "buyerPrice": {
               "amountMinor": 1149,
               "currency": "EUR",
               "basis": "GROSS"

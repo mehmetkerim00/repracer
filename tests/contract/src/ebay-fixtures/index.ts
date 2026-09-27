@@ -1,6 +1,7 @@
-import { budgetChargesOf, GET_USER_PREFERENCES_REQUEST, getItemRequest, parseGetItem, snapshotSha256 } from '@repracer/ebay-adapter';
+import { budgetChargesOf, GET_USER_PREFERENCES_REQUEST, getItemRequest, getMyeBaySellingRequest, parseGetItem, snapshotSha256 } from '@repracer/ebay-adapter';
 import type { Exchange, Provenance, Scenario, Step, World } from '../harness/scenario.ts';
 import { SCENARIO_FORMAT } from '../harness/scenario.ts';
+import { buildEbayPipelineScenarios } from './pipeline.ts';
 
 /**
  * Построитель сценариев eBay (шаг 39) [Р-162…Р-164]. Сценарии RECONSTRUCTED_FROM_SANDBOX восстановлены по протоколу прогона в песочнице
@@ -181,7 +182,7 @@ export function buildEbayScenarios(): Array<{ file: string; scenario: Scenario }
         call('dispatch', 'dispatch', [batch('ebay:b1', [w])], { attemptsMade: 1, outcomes: [{ channelWriteId: 'cw-1', status: 'ACCEPTED', appliedImmediately: false }] }),
         call('confirm', 'confirm', [[confirmOf(w)]], [{ channelWriteId: 'cw-1', status: 'APPLIED', observation: { field: 'PRICE', source: 'READBACK',
           identity: { marketplace: 'EBAY_DE', externalSku: ids(1).sku, externalOfferId: ids(1).offerId, externalListingId: ids(1).listingId },
-          value: { price: { amountMinor: 1149, currency: 'EUR', basis: 'GROSS' } }, effectivePrice: { amountMinor: 1149, currency: 'EUR', basis: 'GROSS' },
+          value: { price: { amountMinor: 1149, currency: 'EUR', basis: 'GROSS' } }, buyerPrice: { amountMinor: 1149, currency: 'EUR', basis: 'GROSS' },
           liveness: { isLive: true, reasons: [] } } }]),
       ],
       [sb(userToken()), sb(bulkUpdate('bulk-ok', [{ offerId: ids(1).offerId, price: { value: '11.49', currency: 'EUR' } }], ok200([{ n: 1 }]))),
@@ -441,11 +442,11 @@ export function buildEbayScenarios(): Array<{ file: string; scenario: Scenario }
   {
     const w = priceWrite('cw-17', 15, 1399);
     out.push(scenario('readback-live-divergence.json', 'ebay/readback/offer-listing-divergence',
-      'Живая цена листинга ≠ предложение Inventory API и разница — не НДС: предупреждение о другом инструменте (C10)',
-      'По протоколу песочницы: после миграции ReviseFixedPriceItem через Trading API изменил живую цену (13.99), а GET offer продолжал показывать 14.99. Наблюдение, как у Kaufland и Amazon: цена продавца — из предложения (14.99), цена покупателя живого листинга — effectivePrice (13.99, Browse API) [EBAY_C05, токен приложения — EBAY_C06]. Разница не равна НДС из taxes (их нет) — WARNING EBAY_OFFER_LISTING_DIVERGENCE (листинг правит другой инструмент, C10).',
+      'Живая цена листинга ≠ предложение Inventory API и разница — не НДС: наблюдение несёт живую цену, предупреждение о другом инструменте (C10)',
+      'По протоколу песочницы: после миграции ReviseFixedPriceItem через Trading API изменил живую цену (13.99), а GET offer продолжал показывать 14.99. Р-186: живая цена и правки других инструментов — из Browse, GET offer отдаёт только нашу запись; значение наблюдения — живая цена 13.99, цена покупателя Browse — buyerPrice, effectivePrice у eBay нет [EBAY_C05, токен приложения — EBAY_C06]. Разница не равна НДС из taxes (их нет) — WARNING EBAY_OFFER_LISTING_DIVERGENCE (листинг правит другой инструмент, C10).',
       ['mandatory:readback-browse-divergence', 'readback', 'conservative:EBAY_C05_PRICE_READBACK_LIVE_LISTING', 'conservative:EBAY_C06_BROWSE_APPLICATION_TOKEN'], RECORDED,
       [call('read-back', 'readBack', [[readBackOf(w, ['PRICE'])]], { failures: [], observations: [{ field: 'PRICE', source: 'READBACK',
-        value: { price: { amountMinor: 1499, currency: 'EUR', basis: 'GROSS' } }, effectivePrice: { amountMinor: 1399, currency: 'EUR', basis: 'GROSS' } }] })],
+        value: { price: { amountMinor: 1399, currency: 'EUR', basis: 'GROSS' } }, buyerPrice: { amountMinor: 1399, currency: 'EUR', basis: 'GROSS' }, effectivePrice: { $absent: true } }] })],
       // Живая цена 13.99 после правки Trading API видна в протоколе по GetItem; ответ Browse с ней выведен
       [sb(userToken()), sb(getOffer('get-offer-after-revise', 15, { priceMinor: 1499, quantity: null, migrated: true })), sy(appToken()), sy(browse('browse-live', 15, 1399, '2', 4))],
       { alerts: [{ code: 'EBAY_OFFER_LISTING_DIVERGENCE', severity: 'WARNING', count: 1 }], logs: [{ code: 'EBAY_C05_PRICE_READBACK_LIVE_LISTING', details: { divergence: true } }, { code: 'EBAY_C06_BROWSE_APPLICATION_TOKEN', count: 1 }] }));
@@ -455,14 +456,14 @@ export function buildEbayScenarios(): Array<{ file: string; scenario: Scenario }
   {
     const w = priceWrite('cw-17b', 19, 1349);
     out.push(scenario('readback-browse-vat-on-top.json', 'ebay/readback/browse-vat-on-top',
-      'E-17: Browse = цена продавца × 1,19 с taxes VAT includedInPrice — effectivePrice несёт цену покупателя, предупреждения C10 нет',
-      'По протоколу песочницы (раздел E-17): через ~25 минут после записи Browse показал 16.05 при отправленной 13.49, с taxes [{taxType VAT, taxPercentage 19.0, includedInPrice true, ebayCollectAndRemitTax true}]. Это не правка другим инструментом: цена продавца (13.49) — значение наблюдения, цена покупателя (16.05) — effectivePrice; расхождение ровно на ставку НДС из taxes — журнал EBAY_C14, без алерта C10. Неверную базу цены решает проверка Р-116 пути решения (диспетчер берёт effectivePrice ?? value.price). Подтверждение сравнивает цену продавца — APPLIED.',
+      'E-17: Browse = цена продавца × 1,19 с taxes VAT includedInPrice — buyerPrice несёт цену покупателя, в Р-116 она не идёт, предупреждения C10 нет',
+      'По протоколу песочницы (раздел E-17): через ~25 минут после записи Browse показал 16.05 при отправленной 13.49, с taxes [{taxType VAT, taxPercentage 19.0, includedInPrice true, ebayCollectAndRemitTax true}]. Это не правка другим инструментом: цена продавца (13.49) — значение наблюдения, цена покупателя (16.05) — buyerPrice; расхождение ровно на ставку НДС из taxes — журнал EBAY_C14, без алерта C10. Р-186: цена покупателя хранится отдельно и в сверку Р-116 не идёт (effectivePrice у eBay нет) — E-17 решит бой; путь решения — сценарий ebay/pipeline/browse-vat-no-distrust. Подтверждение сравнивает цену продавца — APPLIED.',
       ['mandatory:browse-vat-on-top', 'readback', 'conservative:EBAY_C14_BROWSE_PRICE_WITH_VAT'], RECORDED,
       [call('confirm', 'confirm', [[confirmOf(w)]], [{ channelWriteId: 'cw-17b', status: 'APPLIED', observation: { field: 'PRICE',
-        value: { price: { amountMinor: 1349, currency: 'EUR', basis: 'GROSS' } }, effectivePrice: { amountMinor: 1605, currency: 'EUR', basis: 'GROSS' } } }])],
+        value: { price: { amountMinor: 1349, currency: 'EUR', basis: 'GROSS' } }, buyerPrice: { amountMinor: 1605, currency: 'EUR', basis: 'GROSS' }, effectivePrice: { $absent: true } } }])],
       // Ответ Browse с НДС — в протоколе; чтение предложения с 13.49 выведено (протокол называет 13.49 в GetItem и Browse)
       [sb(userToken()), sy(getOffer('get-offer', 19, { priceMinor: 1349, quantity: null, migrated: true })), sy(appToken()), sb(browse('browse-vat', 19, 1605, '3', 4, true))],
-      { noAlerts: true, logs: [{ code: 'EBAY_C14_BROWSE_PRICE_WITH_VAT', question: 'E-17', count: 1, details: { vatBasisPoints: 1900 } }] }));
+      { alerts: [{ code: 'EBAY_BUYER_PRICE_VAT_ON_TOP', severity: 'WARNING', count: 1, details: { vatBasisPoints: 1900 } }], logs: [{ code: 'EBAY_C14_BROWSE_PRICE_WITH_VAT', question: 'E-17', count: 1, details: { vatBasisPoints: 1900 } }] }));
   }
 
   // 18. Количество мигрированного предложения
@@ -479,12 +480,13 @@ export function buildEbayScenarios(): Array<{ file: string; scenario: Scenario }
 
   // 19. Обнаружение предложений
   out.push(scenario('discover-offers.json', 'ebay/discovery/offers',
-    'Обнаружение: страница товаров Inventory API, предложения каждого SKU; без предложения (404 25713) — пропуск',
-    'Ответ offer?sku= и 404 25713 записаны в песочнице; страница inventory_item (total, inventoryItems) в песочнице не записывалась — её форма синтетическая, (проверить). Курсор — смещение. Немигрированные листинги здесь не видны вовсе: их находит предполётная проверка.',
+    'Обнаружение, фаза Inventory API: страница товаров, предложения каждого SKU — писать можно; без предложения (404 25713) — пропуск',
+    'Ответ offer?sku= и 404 25713 записаны в песочнице; страница inventory_item (total, inventoryItems) в песочнице не записывалась — её форма синтетическая, (проверить). Курсор фазы — смещение; предложение Inventory API несёт listing {FIXED_PRICE, writable} [Р-164]. Старые листинги и аукционы — фаза Trading (сценарий ebay/discovery/legacy-and-auction).',
     ['discovery'], synthetic(),
-    [call('discover', 'discoverOffers', [{ limit: 2 }], { nextCursor: '2', items: [{
+    [call('discover', 'discoverOffers', [{ limit: 2 }], { nextCursor: `2~${ids(17).listingId}`, items: [{
       identity: { marketplace: 'EBAY_DE', externalSku: ids(17).sku, externalOfferId: ids(17).offerId, externalListingId: ids(17).listingId },
       gtins: [], condition: 'new', fulfillment: 'MERCHANT', currentPrice: { amountMinor: 1149, currency: 'EUR', basis: 'GROSS' }, currentQuantity: 5, isLive: true,
+      listing: { format: 'FIXED_PRICE', writable: true },
     }] })],
     [userToken(),
       { id: 'inventory-page', request: { method: 'GET', path: '/sell/inventory/v1/inventory_item', query: { limit: '2', offset: '0' } },
@@ -494,18 +496,97 @@ export function buildEbayScenarios(): Array<{ file: string; scenario: Scenario }
       offersBySku('offers-18-none', 18)],
     { noAlerts: true }));
 
-  // 20. Входящие, конкуренты, заказы
-  out.push(scenario('unsupported-inbound-competitors-orders.json', 'ebay/port/unsupported',
-    'Входящие, конкуренты и заказы eBay в шаге 39 не поддерживаются: отказ, а не пустота',
-    'Доставка отклоняется 501 UNSUPPORTED без разбора тела; конкуренты — отказ по каждому запросу (пустой снимок выглядел бы как «конкурентов нет»); заказы — UNSUPPORTED (Fulfillment API не проверялся, в заказах PII, Р-4). Ни одного обмена.',
+  // 19б. Обнаружение: старые листинги и аукционы через Trading API
+  {
+    const gms = `<?xml version="1.0" encoding="UTF-8"?>\n<GetMyeBaySellingResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Ack>Success</Ack><Version>1391</Version><ActiveList><ItemArray>`
+      + [[17, 'FixedPriceItem', '11.49'], [24, 'FixedPriceItem', '14.99'], [25, 'Chinese', '5.00']].map(([n, type, price]) =>
+        `<Item><BuyItNowPrice currencyID="EUR">${type === 'Chinese' ? '0.0' : price}</BuyItNowPrice><ItemID>${ids(n as number).listingId}</ItemID><ListingType>${type}</ListingType>`
+        + `<Quantity>${type === 'Chinese' ? 1 : 4}</Quantity><SellingStatus><CurrentPrice currencyID="EUR">${price}</CurrentPrice></SellingStatus><SKU>${ids(n as number).sku}</SKU>`
+        + `<QuantityAvailable>${type === 'Chinese' ? 1 : 4}</QuantityAvailable></Item>`).join('')
+      + '</ItemArray><PaginationResult><TotalNumberOfPages>1</TotalNumberOfPages><TotalNumberOfEntries>3</TotalNumberOfEntries></PaginationResult></ActiveList></GetMyeBaySellingResponse>';
+    out.push(scenario('discover-legacy-and-auction.json', 'ebay/discovery/legacy-and-auction',
+      'Обнаружение ВСЕХ активных листингов: после Inventory API — GetMyeBaySelling; старая фиксированная цена — без права записи, аукцион — AUCTION',
+      'Фаза Inventory API отдаёт предложение 17 (писать можно) и передаёт курсор фазе Trading. GetMyeBaySelling (ответ песочницы 27.09.2026: Ack Success, TotalNumberOfEntries 3, у предметов ItemID, SKU, ListingType, Quantity, QuantityAvailable, CurrentPrice/BuyItNowPrice и НЕТ поля витрины) перечисляет и листинг 17 — он отдан фазой Inventory, его номер едет в курсоре, и он не повторяется без лишнего offer?sku= (ревью шага 47, находка 7). Листинг 24 — фиксированная цена не под Inventory API: writable false, пишет только миграция владельцем [Р-164]. Листинг 25 — аукцион (Chinese): AUCTION, без цены, не управляется никогда [Р-2]. Витрина — та, для которой сделан вызов (сайт 77), при совпадении валюты [EBAY_C16, E-19].',
+      ['discovery', 'mandatory:discovery-legacy-auction', 'conservative:EBAY_C16_TRADING_LISTING_SITE'], RECORDED,
+      [
+        call('inventory-phase', 'discoverOffers', [{ limit: 2 }], { nextCursor: `trd:0:1~${ids(17).listingId}`, items: [{ identity: { externalListingId: ids(17).listingId, externalOfferId: ids(17).offerId }, listing: { format: 'FIXED_PRICE', writable: true } }] }),
+        wait('budget-refill', 5000),
+        call('trading-phase', 'discoverOffers', [{ limit: 2, cursor: `trd:0:1~${ids(17).listingId}` }], { nextCursor: { $absent: true }, items: [
+          { identity: { marketplace: 'EBAY_DE', externalSku: ids(24).sku, externalListingId: ids(24).listingId, externalOfferId: { $absent: true } }, currentPrice: { amountMinor: 1499, currency: 'EUR' },
+            currentQuantity: 4, isLive: true, listing: { format: 'FIXED_PRICE', writable: false } },
+          { identity: { marketplace: 'EBAY_DE', externalSku: ids(25).sku, externalListingId: ids(25).listingId }, currentPrice: { $absent: true }, listing: { format: 'AUCTION', writable: false } },
+        ] }),
+      ],
+      [sy(userToken()),
+        sy({ id: 'inventory-page', request: { method: 'GET', path: '/sell/inventory/v1/inventory_item', query: { limit: '2', offset: '0' } },
+          response: { status: 200, body: { total: 1, size: 1, limit: 2, inventoryItems: [{ sku: ids(17).sku, condition: 'NEW' }] } } }),
+        sy({ id: 'offers-17', request: { method: 'GET', path: '/sell/inventory/v1/offer', query: { sku: ids(17).sku } }, response: { status: 200, body: { total: 1, size: 1, limit: 20, offers: [offerBody(17)] } } }),
+        sb({ id: 'get-my-ebay-selling', request: { method: 'POST', path: '/ws/api.dll', body: getMyeBaySellingRequest(1, 2) }, response: xml(gms) }),
+      ],
+      { noAlerts: true, logs: [{ code: 'EBAY_C16_TRADING_LISTING_SITE', question: 'E-19', count: 1, details: { marketplace: 'EBAY_DE', legacy: 2, skippedSite: 0 } }] },
+      world({ account: { externalAccountId: 'syn_ebay_seller_0001', marketplaces: ['EBAY_DE'], channel: 'EBAY' } })));
+  }
+
+  // 19в. Заказы Fulfillment API — белый список
+  {
+    const BUYER = { username: 'syn_buyer_0047', fullName: 'Synthetic Buyer 0047', email: 'syn-buyer-0047@example.invalid', street: 'Synthetische Strasse 47' };
+    const order = (id: string, extra: Record<string, unknown>, lines: unknown[]) => ({
+      orderId: id, creationDate: '2026-09-27T09:30:00.000Z', orderFulfillmentStatus: 'NOT_STARTED', orderPaymentStatus: 'PAID',
+      buyer: { username: BUYER.username, buyerRegistrationAddress: { fullName: BUYER.fullName, email: BUYER.email } },
+      fulfillmentStartInstructions: [{ shippingStep: { shipTo: { fullName: BUYER.fullName, email: BUYER.email, contactAddress: { addressLine1: BUYER.street, city: 'Berlin', countryCode: 'DE' } } } }],
+      lineItems: lines, ...extra,
+    });
+    out.push(scenario('orders-whitelist.json', 'ebay/orders/fulfillment-whitelist',
+      'Заказы eBay (Fulfillment API) — только белый список полей: покупатель, адрес и почта не попадают ни в строки заказа, ни в журнал',
+      'Ответ синтетический: Fulfillment API в песочнице не вызывался, у живого токена ещё нет scope sell.fulfillment.readonly — поля (проверить), вопрос E-20 [EBAY_C17]. Окно — фильтр lastmodifieddate (изменения заказа) с момента since, страницы — limit/offset до next/total. Отмена (cancelState CANCELED) — CANCELLED, lineItemFulfillmentStatus FULFILLED — SHIPPED, иначе OPEN; возвраты не читаются. Строка без lineItemId пропускается с кодом, а не угадывается. Покупатель — синтетический и проверяется как утечка PII (Р-4).',
+      ['orders', 'mandatory:orders-whitelist', 'conservative:EBAY_C17_ORDER_FIELDS_UNVERIFIED'], synthetic('docs/channel-capabilities.md#E-20'),
+      [call('orders', 'readOrderLines', [{ since: { $clockIso: -3600_000 }, limit: 2 }], { nextCursor: '2', items: [
+        { externalOrderRef: '26-00047-00001', externalOrderLineRef: '10000470001', quantity: 2, status: 'OPEN', identity: { marketplace: 'EBAY_DE', externalSku: ids(17).sku, externalListingId: ids(17).listingId } },
+        { externalOrderRef: '26-00047-00002', externalOrderLineRef: '10000470002', quantity: 1, status: 'CANCELLED', identity: { marketplace: 'EBAY_DE', externalSku: ids(18).sku } },
+      ] })],
+      [{ ...userToken(), origin: 'SYNTHETIC' },
+        { origin: 'SYNTHETIC', id: 'orders-page', request: { method: 'GET', path: '/sell/fulfillment/v1/order', query: { filter: { $regex: '^lastmodifieddate:\\[\\d{4}-\\d{2}-\\d{2}T[\\d:.]+Z\\.\\.\\]$' }, limit: '2', offset: '0' } },
+          response: { status: 200, body: { href: 'synthetic', total: 3, limit: 2, offset: 0, next: 'synthetic-next', orders: [
+            order('26-00047-00001', {}, [{ lineItemId: '10000470001', sku: ids(17).sku, legacyItemId: ids(17).listingId, quantity: 2, lineItemFulfillmentStatus: 'NOT_STARTED', listingMarketplaceId: 'EBAY_DE', title: 'Synthetic item' }]),
+            order('26-00047-00002', { cancelStatus: { cancelState: 'CANCELED' } }, [
+              { lineItemId: '10000470002', sku: ids(18).sku, quantity: 1, lineItemFulfillmentStatus: 'NOT_STARTED', listingMarketplaceId: 'EBAY_DE' },
+              { sku: ids(19).sku, quantity: 1, lineItemFulfillmentStatus: 'NOT_STARTED', listingMarketplaceId: 'EBAY_DE' },
+            ]),
+          ] } } }],
+      { noAlerts: true, logs: [{ code: 'EBAY_C17_ORDER_FIELDS_UNVERIFIED', question: 'E-20', count: 1, details: { lines: 2, skipped: 1, skipped_lineItemId: 1 } }] },
+      world({ pii: [BUYER.username, BUYER.fullName, BUYER.email, BUYER.street] })));
+  }
+
+  // 19г. Отгрузка заказа, созданного до окна (ревью шага 47, находка 1)
+  out.push(scenario('orders-shipment-before-window.json', 'ebay/orders/shipment-of-order-created-before-window',
+    'Отгрузка заказа, созданного за три дня до окна чтения, читается: окно — по изменению заказа, а не по созданию',
+    'Ревью шага 47, находка 1: при окне по creationdate отгрузка старого заказа не попадала ни в одно окно — резервация не списывалась, доступный остаток завышался (перепродажа). Окно — lastmodifieddate (проверить, E-20): заказ создан 72 часа назад, отгружен сейчас — строка SHIPPED со временем заказа. Ответ синтетический.',
+    ['orders', 'mandatory:orders-shipment-before-window'], synthetic('docs/channel-capabilities.md#E-20'),
+    [call('orders', 'readOrderLines', [{ since: { $clockIso: -600_000 }, limit: 10 }], { nextCursor: { $absent: true }, items: [
+      { externalOrderRef: '26-00047-00009', externalOrderLineRef: '10000470009', quantity: 1, status: 'SHIPPED', orderedAt: { $clockIso: -72 * 3600_000 },
+        identity: { marketplace: 'EBAY_DE', externalSku: ids(17).sku, externalListingId: ids(17).listingId } },
+    ] })],
+    [{ ...userToken(), origin: 'SYNTHETIC' },
+      { origin: 'SYNTHETIC', id: 'orders-modified-in-window', request: { method: 'GET', path: '/sell/fulfillment/v1/order', query: { filter: { $regex: '^lastmodifieddate:\\[' }, limit: '10', offset: '0' } },
+        response: { status: 200, body: { total: 1, limit: 10, offset: 0, orders: [{
+          orderId: '26-00047-00009', creationDate: '2026-09-24T10:00:00.000Z', lastModifiedDate: '2026-09-27T09:59:00.000Z', orderFulfillmentStatus: 'FULFILLED',
+          lineItems: [{ lineItemId: '10000470009', sku: ids(17).sku, legacyItemId: ids(17).listingId, quantity: 1, lineItemFulfillmentStatus: 'FULFILLED', listingMarketplaceId: 'EBAY_DE' }],
+        }] } } }],
+    { noAlerts: true }));
+
+  // 20. Входящие и конкуренты
+  out.push(scenario('unsupported-inbound-competitors.json', 'ebay/port/unsupported',
+    'Входящие и конкуренты eBay не поддерживаются: отказ, а не пустота',
+    'Доставка отклоняется 501 UNSUPPORTED без разбора тела; конкуренты — отказ по каждому запросу (пустой снимок выглядел бы как «конкурентов нет»). Ни одного обмена. Заказы с шага 47 читаются (ebay/orders/fulfillment-whitelist).',
     ['port', 'mandatory:inbound-unsupported'], synthetic(),
     [
       { id: 'inbound', kind: 'inbound', delivery: { method: 'POST', url: 'https://hooks.example.invalid/ebay/syn-token', body: { metadata: { topic: 'SYN' } } },
         expect: { kind: 'REJECTED', responseStatus: 501, error: { code: 'UNSUPPORTED' } } } as Step,
       call('competitors', 'readCompetitors', [[{ marketplace: 'EBAY_DE', channelProductRef: ids(1).listingId, condition: 'new' }]], { snapshots: [], failures: [{ error: { code: 'UNSUPPORTED' } }] }),
-      call('orders', 'readOrderLines', [{ since: { $clockIso: -3600_000 }, limit: 10 }], undefined, { expectThrows: { code: 'UNSUPPORTED' } }),
     ],
-    [], { noAlerts: true, logs: [{ code: 'EBAY_UNSUPPORTED', count: 3 }] }));
+    [], { noAlerts: true, logs: [{ code: 'EBAY_UNSUPPORTED', count: 2 }] }));
 
+  // Шаг 47: путь решения eBay — на памяти и на PostgreSQL (pipeline.ts)
+  out.push(...buildEbayPipelineScenarios());
   return out.sort((a, b) => a.file.localeCompare(b.file));
 }

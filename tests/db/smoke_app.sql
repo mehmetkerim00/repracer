@@ -1250,7 +1250,7 @@ INSERT INTO tenant_data.stock_allocation (tenant_id, scope_type, channel_account
 VALUES (:tA, 'CHANNEL_ACCOUNT', 'a4000000-0000-0000-0000-000000000003', 1, 1, :mA);
 INSERT INTO tenant_data.write_scope (tenant_id, write_scope_id, channel_account_id, channel, field, product_id, capability_id, capability_version, scope_kind, scope_key, budget_scope_key, quantity_sync_enabled)
 VALUES (:tA, 'a6000000-0000-0000-0000-000000000003', 'a4000000-0000-0000-0000-000000000003', 'EBAY', 'QUANTITY', 'a5000000-0000-0000-0000-000000000001',
-        'c0000000-0000-0000-0000-000000000004', 1, 'ACCOUNT_MARKETPLACE_SKU', '["EBAY_DE", "A-1"]', 'L1', true);
+        'c0000000-0000-0000-0000-0000000000e2', 1, 'ACCOUNT_MARKETPLACE_SKU', '["EBAY_DE", "A-1"]', 'L1', true);
 UPDATE tenant_data.offer_mapping SET quantity_write_scope_id = 'a6000000-0000-0000-0000-000000000003' WHERE offer_mapping_id = 'ad000000-0000-0000-0000-000000000001';
 INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, quantity, version, origin, budget_scope_key, budget_day)
 VALUES (:tA, 'a9000000-0000-0000-0000-000000000011', 'a6000000-0000-0000-0000-000000000003', 'QUANTITY', 5, 1, 'STOCK_RECALC', 'L1', (now() AT TIME ZONE 'Europe/Berlin')::date);
@@ -1258,6 +1258,8 @@ SELECT pg_temp.expect_fail('increase uses reserved margin (241 > 240) (Р-19)', 
   UPDATE tenant_data.channel_write SET status = 'DISPATCHED', attempt_count = 241 WHERE channel_write_id = 'a9000000-0000-0000-0000-000000000011' $q$, 'edit_budget_quantity_limit');
 UPDATE tenant_data.channel_write SET status = 'DISPATCHED', attempt_count = 200 WHERE channel_write_id = 'a9000000-0000-0000-0000-000000000011';
 UPDATE tenant_data.channel_write SET status = 'ACCEPTED' WHERE channel_write_id = 'a9000000-0000-0000-0000-000000000011';
+-- Шаг 47: eBay — ASYNC [Р-186]: принятая запись в полёте, пока обратное чтение не подтвердит применение
+UPDATE tenant_data.channel_write SET status = 'APPLIED' WHERE channel_write_id = 'a9000000-0000-0000-0000-000000000011';
 INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, quantity, version, origin, budget_scope_key, budget_day)
 VALUES (:tA, 'a9000000-0000-0000-0000-000000000012', 'a6000000-0000-0000-0000-000000000003', 'QUANTITY', 3, 2, 'STOCK_RECALC', 'L1', (now() AT TIME ZONE 'Europe/Berlin')::date);
 SELECT pg_temp.ok('decrease may use margin: 200 + 50 = 250', $q$

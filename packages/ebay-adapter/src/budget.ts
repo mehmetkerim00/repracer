@@ -46,6 +46,11 @@ export interface EditAttemptLedger {
   /** Списать попытки поля по листингу или отказать, не списав ничего */
   tryCharge(charge: { listingKey: string; field: LedgerField; attempts: number }, nowMs: number):
     { ok: true } | { ok: false; retryAtMs: number; used: number; limit: number };
+  /**
+   * Ревью шага 39, находка 14: попытка, которая УЖЕ ушла в канал сверх списанной, — повтор записи после 401 (токен устарел раньше
+   * срока, session.call). Списывается безусловно: отказать уже нечему, а Р-19 считает каждую попытку.
+   */
+  recordSent(charge: { listingKey: string; field: LedgerField; attempts: number }, nowMs: number): void;
 }
 
 const DAY_MS = 24 * 3600_000;
@@ -69,6 +74,12 @@ export class RollingDayLedger implements EditAttemptLedger {
     for (let i = 0; i < count; i++) list.push({ at: atMs, field });
     list.sort((a, b) => a.at - b.at);
     this.attempts.set(listingKey, list);
+  }
+
+  recordSent(charge: { listingKey: string; field: LedgerField; attempts: number }, nowMs: number): void {
+    const list = this.attempts.get(charge.listingKey) ?? [];
+    for (let i = 0; i < charge.attempts; i++) list.push({ at: nowMs, field: charge.field });
+    this.attempts.set(charge.listingKey, list);
   }
 
   tryCharge(charge: { listingKey: string; field: LedgerField; attempts: number }, nowMs: number):

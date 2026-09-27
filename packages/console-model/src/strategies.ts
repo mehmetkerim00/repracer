@@ -245,6 +245,19 @@ export function previewToken(draft: StrategyDraft, previews: readonly StrategyPr
  */
 export const STRATEGY_PREVIEW_ROWS_SHOWN = 50;
 
+/**
+ * Невыполненные требования стратегии по источникам — текстом словаря. Ревью шага 47, находка 11: у канала без источников
+ * конкурентов (eBay, Р-39) база и движок называют причину ключом '*' — «источник» не называется, причина — словом, а не кодом.
+ */
+export function unmetText(unmet: Readonly<Record<string, readonly string[]>>, m: Messages): string {
+  return Object.entries(unmet)
+    .map(([source, codes]) => {
+      const words = codes.map((c) => m.values[c as keyof typeof m.values] ?? c).join(', ');
+      return source === '*' ? words : `${source}: ${words}`;
+    })
+    .join('; ');
+}
+
 export function strategyPreviewView(world: StandWorld, draft: StrategyDraft, previews: readonly StrategyPreview[], m: Messages,
   total = previews.length, shownRows = previews.length): StrategyPreviewView {
   const t = m.ui.strategies;
@@ -253,8 +266,7 @@ export function strategyPreviewView(world: StandWorld, draft: StrategyDraft, pre
     const scope = scopeById(world, p.writeScopeId)!;
     const money = (v: number | null | undefined) => m.money(v ?? null, p.currency);
     const strategy = p.stages.find((s) => s.stage === 'STRATEGY');
-    const unavailable = p.availability.available ? null
-      : t.unavailable(Object.entries(p.availability.unmet).map(([source, codes]) => `${source}: ${codes.map((c) => m.values[c as keyof typeof m.values] ?? c).join(', ')}`).join('; '));
+    const unavailable = p.availability.available ? null : t.unavailable(unmetText(p.availability.unmet, m));
     const d = p.decision;
     const dangerous = d?.outcome === 'REJECTED' && d.boundDeviationBp !== null && d.boundDeviationBp > DANGEROUS_DEVIATION_BP;
     let tone: Tone = 'unknown';
