@@ -57,13 +57,16 @@
    - [Wettbewerbszentrale, Jahresbericht 2025](https://www.wettbewerbszentrale.de/jahresbericht-2025-mehr-klagen-und-ein-neuer-name/)
      — ответ 200. Полный текст отчёта (PDF, `wp-content/uploads/2026/06/Jahresbericht-2025-V1.1.pdf`, 20 МБ) говорит
      дословно: «Preiswerbung war in 644 Fällen Thema: Hier ergab sich ein erhebliches Plus von 11,6 Prozent».
-   - [LG München I, Endurteil vom 14.07.2025, 4 HK O 13950/24](https://www.gesetze-bayern.de/Content/Document/Y-300-Z-GRURRS-B-2025-N-17142)
-     — официальный портал Баварии. Автоматический запрос получает страницу проверки «Security Check» (503); заголовок
-     документа подтверждён поисковым индексом. Решение по источникам 2025 года не вступило в силу — страница говорит
-     «verlor», как в тексте владельца.
+   - LG München I, 4 HK O 13950/24 — на странице две ссылки, обе проверены (ответ 200, в тексте — номер дела):
+     [Verbraucherzentrale Baden-Württemberg, «Verbraucherzentrale setzt sich gegen Amazon durch»](https://www.verbraucherzentrale-bawue.de/pressemitteilungen/verbraucherzentrale-setzt-sich-gegen-amazon-durch-108829)
+     (пресс-релиз истца) и [LTO, «Amazon kassiert Niederlage im Streit um Rabatte»](https://www.lto.de/recht/nachrichten/n/4hko1395024-lg-muenchen-i-verbraucherzentrale-gegen-amazon-prime-deal-days). По источникам 2025 года
+     решение не вступило в силу — страница говорит «verlor», как в тексте владельца.
+   - Дополнительно, только здесь: [официальный текст решения на портале Баварии](https://www.gesetze-bayern.de/Content/Document/Y-300-Z-GRURRS-B-2025-N-17142) — **открывается только в
+     браузере**: автоматический запрос получает страницу «Security Check» (503); заголовок документа подтверждён
+     поисковым индексом.
 
    Это единственные внешние ссылки лендинга. Проверка держит их поимённо: только тег `<a>`, только немецкая страница,
-   только эти три адреса. Любой внешний ресурс по-прежнему запрещён.
+   только эти четыре адреса. Любой внешний ресурс по-прежнему запрещён.
 2. **Тарифы:** «ab 39 € pro Monat, zzgl. USt.», «rund 89 € pro Monat, zzgl. USt.»; на английской странице — «per month,
    excl. VAT/sales tax».
 3. **Лендинг один**: EN по умолчанию, DE на `/de/`. В регионе США лендинг не публикуется: корень домена региона отвечает

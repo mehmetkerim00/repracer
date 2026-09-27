@@ -22,7 +22,7 @@ export const REDIRECTS = { '/demo': '/#demo-soon', '/de/demo': '/de/#demo-soon',
 export const ALLOWED_PHRASES = {
   en: ['€39', '€89', '30 days', 'thousands of SKUs'],
   de: ['39 €', '89 €', '30 Tage', 'letzten 30 Tage', '§ 11 PAngV', '644 Fälle allein 2025 (+11,6 %)', 'der BGH hat 2025', '30-Tage-Bestpreis',
-    'Az. 4 HK O 13950/24', 'Nr. 184/2025', 'Jahresbericht 2025', 'Endurteil vom 14.07.2025, 4 HK O 13950/24', 'mehreren Tausend SKUs'],
+    'Az. 4 HK O 13950/24', 'Nr. 184/2025', 'Jahresbericht 2025', 'LG München I, 4 HK O 13950/24', 'mehreren Tausend SKUs'],
 };
 /**
  * Факты Omnibus — предложение владельца ДОСЛОВНО (решение по лендингу после шага 46) и источники ссылками. Внешняя ссылка
@@ -32,7 +32,9 @@ export const OMNIBUS_SENTENCE = 'Preiswerbung wird aktiv abgemahnt: 644 Fälle a
 export const SOURCE_LINKS = [
   'https://www.bundesgerichtshof.de/SharedDocs/Pressemitteilungen/DE/2025/2025184.html',
   'https://www.wettbewerbszentrale.de/jahresbericht-2025-mehr-klagen-und-ein-neuer-name/',
-  'https://www.gesetze-bayern.de/Content/Document/Y-300-Z-GRURRS-B-2025-N-17142',
+  // LG München I, 4 HK O 13950/24: пресс-релиз истца и статья LTO (портал Баварии автоматике не отвечает — он в доказательстве)
+  'https://www.verbraucherzentrale-bawue.de/pressemitteilungen/verbraucherzentrale-setzt-sich-gegen-amazon-durch-108829',
+  'https://www.lto.de/recht/nachrichten/n/4hko1395024-lg-muenchen-i-verbraucherzentrale-gegen-amazon-prime-deal-days',
 ];
 /** Единственная допустимая фраза со словом «гарантия» — оговорка, что её НЕТ */
 const DISCLAIMER = 'keine Garantie der Rechtskonformität';
