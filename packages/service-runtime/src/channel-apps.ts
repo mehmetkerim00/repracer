@@ -32,6 +32,7 @@ const ebayEnvironment = (v: string | undefined): 'SANDBOX' | 'PRODUCTION' => {
 
 const AMAZON_VARS = ['REPRACER_AMAZON_APP_ID', 'REPRACER_AMAZON_LWA_CLIENT_ID'] as const;
 const EBAY_VARS = ['REPRACER_EBAY_CLIENT_ID', 'REPRACER_EBAY_RUNAME', 'REPRACER_EBAY_SCOPES'] as const;
+export const EBAY_IDENTITY_SCOPE = 'https://api.ebay.com/oauth/api_scope/commerce.identity.readonly';
 
 export function loadChannelAppsConfig(env: Env = process.env, read: (path: string) => string = (p) => readFileSync(p, 'utf8')): ChannelAppsConfig {
   const all = (vars: readonly string[], secretName: string, what: string): boolean => {
@@ -59,10 +60,17 @@ export function loadChannelAppsConfig(env: Env = process.env, read: (path: strin
       environment: ebayEnvironment(env.REPRACER_EBAY_ENVIRONMENT),
       clientId: env.REPRACER_EBAY_CLIENT_ID!, ruName: env.REPRACER_EBAY_RUNAME!,
       clientSecret: requiredValue(secretFromEnv(env, 'REPRACER_EBAY_CLIENT_SECRET', read), 'REPRACER_EBAY_CLIENT_SECRET_FILE'),
-      // Scope Inventory API не подтверждён снимком (E-08): его называет конфигурация, а не код
+      // Scope называет конфигурация (E-08; набор, с которым работает песочница, — шаг 39)
       scopes: env.REPRACER_EBAY_SCOPES!.split(/\s+/).filter(Boolean),
     }
     : null;
+  /**
+   * Находка 2 ревью шага 39: без scope `commerce.identity.readonly` продавца после обмена кода не назвать (E-11), и каждое
+   * повторное подключение упиралось бы в отказ «продавец неизвестен». Отказ — при старте процесса, а не у продавца.
+   */
+  if (ebay && !ebay.scopes.includes(EBAY_IDENTITY_SCOPE)) {
+    throw new ConfigError(`CONFIG_INVALID: REPRACER_EBAY_SCOPES must include ${EBAY_IDENTITY_SCOPE} (продавец eBay называется по нему, E-11)`);
+  }
   const keyringText = secretFromEnv(env, 'REPRACER_CHANNEL_KEYRING', read);
   if ((amazon || ebay) && !keyringText) throw new ConfigError('CONFIG_MISSING: REPRACER_CHANNEL_KEYRING_FILE (приложение канала настроено, а ключа шифрования токенов нет)');
   const redirectUrl = env.REPRACER_CONNECT_REDIRECT_URL ?? null;

@@ -1250,7 +1250,7 @@ INSERT INTO tenant_data.stock_allocation (tenant_id, scope_type, channel_account
 VALUES (:tA, 'CHANNEL_ACCOUNT', 'a4000000-0000-0000-0000-000000000003', 1, 1, :mA);
 INSERT INTO tenant_data.write_scope (tenant_id, write_scope_id, channel_account_id, channel, field, product_id, capability_id, capability_version, scope_kind, scope_key, budget_scope_key, quantity_sync_enabled)
 VALUES (:tA, 'a6000000-0000-0000-0000-000000000003', 'a4000000-0000-0000-0000-000000000003', 'EBAY', 'QUANTITY', 'a5000000-0000-0000-0000-000000000001',
-        'c0000000-0000-0000-0000-000000000004', 1, 'ACCOUNT_INVENTORY_SKU', '["A-1"]', 'L1', true);
+        'c0000000-0000-0000-0000-000000000004', 1, 'ACCOUNT_MARKETPLACE_SKU', '["EBAY_DE", "A-1"]', 'L1', true);
 UPDATE tenant_data.offer_mapping SET quantity_write_scope_id = 'a6000000-0000-0000-0000-000000000003' WHERE offer_mapping_id = 'ad000000-0000-0000-0000-000000000001';
 INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, quantity, version, origin, budget_scope_key, budget_day)
 VALUES (:tA, 'a9000000-0000-0000-0000-000000000011', 'a6000000-0000-0000-0000-000000000003', 'QUANTITY', 5, 1, 'STOCK_RECALC', 'L1', (now() AT TIME ZONE 'Europe/Berlin')::date);

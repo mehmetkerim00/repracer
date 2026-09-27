@@ -1,0 +1,128 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "ebay/plan/stale-version",
+  "channel": "EBAY",
+  "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
+  "title": "Две версии одной единицы записи в плане: отправляется старшая, младшая — STALE_VERSION",
+  "description": "INV-03: старое значение не отправляется. План без обращения к каналу.",
+  "tags": [
+    "mandatory:stale-version",
+    "plan"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "docs/evidence/step39-ebay-sandbox.md",
+      "docs/channel-capabilities.md#9"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-27T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn_ebay_seller_0001",
+      "marketplaces": [
+        "EBAY_DE",
+        "EBAY_US"
+      ],
+      "channel": "EBAY"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "syn-ebay-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "Syn-Repracer-SBX-0001",
+        "clientSecret": "SBX-syn-client-secret-0001"
+      },
+      "accessToken": "syn-ebay-user-token-0001",
+      "applicationToken": "syn-ebay-app-token-0001"
+    }
+  },
+  "steps": [
+    {
+      "id": "plan",
+      "kind": "call",
+      "method": "planDispatch",
+      "args": [
+        [
+          {
+            "channelWriteId": "cw-5a",
+            "version": 1,
+            "idempotencyKey": "cw-5a:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-6",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-06",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-06",
+                "externalOfferId": "9100000006",
+                "externalListingId": "110000000006"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1400,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          },
+          {
+            "channelWriteId": "cw-5b",
+            "version": 2,
+            "idempotencyKey": "cw-5b:2",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-6",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-06",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-06",
+                "externalOfferId": "9100000006",
+                "externalListingId": "110000000006"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1350,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          }
+        ]
+      ],
+      "expect": {
+        "batches": [
+          {
+            "items": [
+              {
+                "channelWriteId": "cw-5b"
+              }
+            ]
+          }
+        ],
+        "rejected": [
+          {
+            "channelWriteId": "cw-5a",
+            "error": {
+              "code": "STALE_VERSION",
+              "class": "PERMANENT"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "exchanges": [],
+  "expect": {
+    "noAlerts": true
+  }
+}

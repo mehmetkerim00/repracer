@@ -5,7 +5,9 @@ import type { Channel, OfferIdentity, WriteField } from './primitives.ts';
  * `OfferIdentity` только этой функцией из строки `tenant_data.offer_mapping` (или её двойника в памяти). До шага 23 путь решения
  * передавал Amazon SKU в `externalUnitId`, а диспетчер — в `externalSku` с регионом; адаптер принимал оба варианта.
  *
- * Правило: у ключа записи — только поля, которые есть у предложения; `externalOfferId` — ключ остатка Kaufland [Р-35], у цены его нет.
+ * Правило: у ключа записи — только поля, которые есть у предложения; `externalOfferId` — ключ остатка Kaufland [Р-35], у цены Kaufland
+ * его нет. eBay (шаг 39, Р-164): `externalOfferId` — предложение Inventory API, оно есть только у листинга под Inventory API; адаптер
+ * пишет цену и количество по нему и без него запись не отправляет — поэтому у eBay оно в идентичности обоих полей.
  */
 export interface OfferMappingKeys {
   channel: Channel;
@@ -23,7 +25,7 @@ export function offerIdentityOf(k: OfferMappingKeys): OfferIdentity {
   if (k.region) identity.region = k.region;
   if (k.marketplace) identity.marketplace = k.marketplace;
   if (k.externalSku) identity.externalSku = k.externalSku;
-  if (k.field === 'QUANTITY' && k.externalOfferId) identity.externalOfferId = k.externalOfferId;
+  if ((k.field === 'QUANTITY' || k.channel === 'EBAY') && k.externalOfferId) identity.externalOfferId = k.externalOfferId;
   if (k.externalListingId) identity.externalListingId = k.externalListingId;
   if (k.externalUnitId) identity.externalUnitId = k.externalUnitId;
   return identity;

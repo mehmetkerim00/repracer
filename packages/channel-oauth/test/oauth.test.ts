@@ -187,3 +187,18 @@ test('Р-177, находка 7 ревью шага 43: массовый invalid_
   assert.deepEqual([out.revoked, out.suspiciousRevocations], [0, 4], 'четыре отзыва из четырёх за проход — не отзыв');
   assert.ok(recorded.every((r) => r.endsWith(':TRANSIENT:SUSPICIOUS_MASS_INVALID_GRANT')), recorded.join(' '));
 });
+
+test('шаг 39, E-11 [песочница]: продавца eBay называет Commerce Identity API; сбой — «не знаем», а не чужой', async () => {
+  const { ebayOAuth, EBAY_IDENTITY_URL } = await import('../src/providers.ts');
+  const provider = ebayOAuth({ environment: 'SANDBOX', clientId: 'Syn-App-SBX', clientSecret: 'syn-secret', redirectUri: 'Syn-RuName', scopes: ['https://api.ebay.com/oauth/api_scope'] });
+  const calls: string[] = [];
+  const answer = (status: number, body: string) => async (url: string, init: { method: string; headers: Record<string, string> }) => {
+    calls.push(`${init.method} ${url} ${init.headers.authorization}`);
+    return { status, text: async () => body };
+  };
+  assert.equal(await provider.identifySeller!('syn-access', answer(200, '{"userId":"syn-ebay-user-1","username":"syn_seller"}')), 'syn-ebay-user-1');
+  assert.deepEqual(calls, [`GET ${EBAY_IDENTITY_URL.SANDBOX} Bearer syn-access`], 'хост apiz., токен продавца');
+  assert.equal(await provider.identifySeller!('syn-access', answer(404, '{"errors":[]}')), null);
+  assert.equal(await provider.identifySeller!('syn-access', answer(200, 'not json')), null);
+  assert.equal(await provider.identifySeller!('syn-access', answer(200, '{"username":"no-id"}')), null);
+});

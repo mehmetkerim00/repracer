@@ -1,0 +1,310 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "ebay/dispatch/connection-closed-unknown-outcome",
+  "channel": "EBAY",
+  "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
+  "title": "Обрыв соединения посреди записи: OUTCOME_UNKNOWN, без повтора; итог — обратным чтением",
+  "description": "В протоколе песочницы: «SocketError: other side closed» посреди bulk_update_price_quantity, «повтор прошёл». Запись не повторяется транспортом [EBAY_C02]; подтверждение читает предложение (ответ выведен — в протоколе чтения после обрыва нет) и сверяет его с оценкой Browse [EBAY_C13] — количество применено.",
+  "tags": [
+    "mandatory:timeout-unknown-outcome",
+    "dispatch",
+    "conservative:EBAY_C02_NO_TRANSPORT_RETRY_FOR_WRITES",
+    "conservative:EBAY_C13_QUANTITY_READBACK_OFFER_RECORD"
+  ],
+  "provenance": {
+    "kind": "RECONSTRUCTED_FROM_SANDBOX",
+    "sandbox": true,
+    "recordedAt": "2026-09-27",
+    "evidence": "docs/evidence/step39-ebay-sandbox.md",
+    "reviewedBy": "step39-review: обезличивание проверено",
+    "redactions": [
+      "listing, offer, policy ids and SKUs replaced with synthetic ones",
+      "request ids dropped",
+      "Trading API responses reduced to the elements the checks read; the Seller block (e-mail, address) removed",
+      "tokens were never logged"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-27T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn_ebay_seller_0001",
+      "marketplaces": [
+        "EBAY_DE",
+        "EBAY_US"
+      ],
+      "channel": "EBAY"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "syn-ebay-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "Syn-Repracer-SBX-0001",
+        "clientSecret": "SBX-syn-client-secret-0001"
+      },
+      "accessToken": "syn-ebay-user-token-0001",
+      "applicationToken": "syn-ebay-app-token-0001"
+    }
+  },
+  "steps": [
+    {
+      "id": "dispatch",
+      "kind": "call",
+      "method": "dispatch",
+      "args": [
+        {
+          "batchId": "ebay:b4",
+          "operation": "bulkUpdatePriceQuantity",
+          "items": [
+            {
+              "channelWriteId": "cw-4",
+              "version": 1,
+              "idempotencyKey": "cw-4:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-qty-5",
+                "field": "QUANTITY",
+                "scopeKey": "ebay|acct-1|SYN-EBAY-05",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-05",
+                  "externalOfferId": "9100000005",
+                  "externalListingId": "110000000005"
+                }
+              },
+              "value": {
+                "field": "QUANTITY",
+                "quantity": 3
+              }
+            }
+          ],
+          "budgetCharges": [
+            {
+              "budgetScopeKey": "110000000005",
+              "field": "QUANTITY",
+              "attempts": 1
+            }
+          ],
+          "requestCount": 1
+        }
+      ],
+      "expect": {
+        "attemptsMade": 1,
+        "outcomes": [
+          {
+            "channelWriteId": "cw-4",
+            "status": "OUTCOME_UNKNOWN",
+            "error": {
+              "code": "NETWORK",
+              "class": "TRANSIENT"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "confirm",
+      "kind": "call",
+      "method": "confirm",
+      "args": [
+        [
+          {
+            "channelWriteId": "cw-4",
+            "writeScope": {
+              "writeScopeId": "ws-ebay-qty-5",
+              "field": "QUANTITY",
+              "scopeKey": "ebay|acct-1|SYN-EBAY-05",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-05",
+                "externalOfferId": "9100000005",
+                "externalListingId": "110000000005"
+              }
+            },
+            "expected": {
+              "field": "QUANTITY",
+              "quantity": 3
+            },
+            "dispatchedAt": {
+              "$clockIso": 0
+            }
+          }
+        ]
+      ],
+      "expect": [
+        {
+          "channelWriteId": "cw-4",
+          "status": "APPLIED",
+          "observation": {
+            "field": "QUANTITY",
+            "value": {
+              "quantity": 3
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "user-token",
+      "note": "Обновление токена пользователя: grant_type=refresh_token + scope, Basic ключей приложения [песочница: ответ без нового refresh-токена]",
+      "request": {
+        "method": "POST",
+        "path": "/identity/v1/oauth2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "syn-ebay-user-token-0001",
+          "expires_in": 7200,
+          "token_type": "User Access Token"
+        }
+      },
+      "origin": "SANDBOX"
+    },
+    {
+      "id": "bulk-socket-closed",
+      "request": {
+        "method": "POST",
+        "path": "/sell/inventory/v1/bulk_update_price_quantity",
+        "body": {
+          "requests": [
+            {
+              "offers": [
+                {
+                  "offerId": "9100000005",
+                  "availableQuantity": 3
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "fault": "NETWORK_ERROR",
+      "origin": "SANDBOX"
+    },
+    {
+      "id": "get-offer",
+      "request": {
+        "method": "GET",
+        "path": "/sell/inventory/v1/offer/9100000005"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "offerId": "9100000005",
+          "sku": "SYN-EBAY-05",
+          "marketplaceId": "EBAY_DE",
+          "format": "FIXED_PRICE",
+          "availableQuantity": 3,
+          "pricingSummary": {
+            "price": {
+              "value": "11.49",
+              "currency": "EUR"
+            }
+          },
+          "listingPolicies": {
+            "paymentPolicyId": "6200000002",
+            "returnPolicyId": "6200000003",
+            "fulfillmentPolicyId": "6200000001",
+            "eBayPlusIfEligible": false
+          },
+          "categoryId": "20695",
+          "merchantLocationKey": "syn-lager-1",
+          "tax": {
+            "applyTax": false
+          },
+          "listing": {
+            "listingId": "110000000005",
+            "listingStatus": "ACTIVE",
+            "soldQuantity": 0
+          },
+          "status": "PUBLISHED",
+          "listingDuration": "GTC"
+        }
+      },
+      "origin": "SYNTHETIC"
+    },
+    {
+      "id": "app-token",
+      "note": "Токен приложения: grant_type=client_credentials, scope api_scope (официальный клиент eBay) — для Browse API [EBAY_C06]",
+      "request": {
+        "method": "POST",
+        "path": "/identity/v1/oauth2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "syn-ebay-app-token-0001",
+          "expires_in": 7200,
+          "token_type": "Application Access Token"
+        }
+      },
+      "origin": "SYNTHETIC"
+    },
+    {
+      "id": "browse-estimate",
+      "note": "Живой листинг: цена, оценка количества и счётчик правок продавца sellerItemRevision [песочница]",
+      "request": {
+        "method": "GET",
+        "path": "/buy/browse/v1/item/v1|110000000005|0",
+        "query": {
+          "fieldgroups": "COMPACT"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "itemId": "v1|110000000005|0",
+          "sellerItemRevision": "2",
+          "price": {
+            "value": "11.49",
+            "currency": "EUR"
+          },
+          "estimatedAvailabilities": [
+            {
+              "estimatedAvailabilityStatus": "IN_STOCK",
+              "estimatedAvailableQuantity": 3,
+              "estimatedSoldQuantity": 0,
+              "estimatedRemainingQuantity": 3
+            }
+          ],
+          "legacyItemId": "110000000005"
+        }
+      },
+      "origin": "SYNTHETIC"
+    }
+  ],
+  "expect": {
+    "noAlerts": true,
+    "logs": [
+      {
+        "code": "EBAY_C02_NO_TRANSPORT_RETRY_FOR_WRITES",
+        "question": "E-03",
+        "count": 1
+      },
+      {
+        "code": "EBAY_C13_QUANTITY_READBACK_OFFER_RECORD",
+        "question": "E-13",
+        "count": 1,
+        "details": {
+          "availableQuantity": 3,
+          "estimatedAvailableQuantity": 3,
+          "mismatch": false
+        }
+      }
+    ]
+  }
+}

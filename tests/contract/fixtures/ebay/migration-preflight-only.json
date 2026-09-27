@@ -1,0 +1,225 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "ebay/migration/preflight-without-consent",
+  "channel": "EBAY",
+  "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
+  "title": "Без согласия владельца — только предполётная проверка: фиксированная цена с Best Offer — READY_WITH_LOSSES, bulk_migrate_listing не вызывается",
+  "description": "Листинг, созданный Trading API: GetUserPreferences (out-of-stock control выключен), GetItem (FixedPriceItem, SKU, бизнес-политики, Best Offer), Inventory offer?sku= — 404 25713 (не под Inventory API). Вердикт READY_WITH_LOSSES: Best Offer — LOSS (песочница его сохранила, но Р-2 и E-15) [EBAY_C10]; шаблон — INFO «не определяется» [EBAY_C11]; другие инструменты — WARNING [EBAY_C12]; out-of-stock control — WARNING. Миграция без MigrationConsentProof невозможна по типу (ebay.contract.test.ts), а запись в этот листинг отклоняется [Р-164] — ни одного обмена миграции. Почта продавца из GetItem не попадает ни в результат, ни в журнал (Р-4).",
+  "tags": [
+    "mandatory:migration-without-consent",
+    "migration",
+    "conservative:EBAY_C10_BEST_OFFER_LOSS",
+    "conservative:EBAY_C11_TEMPLATE_UNDETECTABLE",
+    "conservative:EBAY_C12_OTHER_TOOLS_ALWAYS_WARN"
+  ],
+  "provenance": {
+    "kind": "RECONSTRUCTED_FROM_SANDBOX",
+    "sandbox": true,
+    "recordedAt": "2026-09-27",
+    "evidence": "docs/evidence/step39-ebay-sandbox.md",
+    "reviewedBy": "step39-review: обезличивание проверено",
+    "redactions": [
+      "listing, offer, policy ids and SKUs replaced with synthetic ones",
+      "request ids dropped",
+      "Trading API responses reduced to the elements the checks read; the Seller block (e-mail, address) removed",
+      "tokens were never logged"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-27T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn_ebay_seller_0001",
+      "marketplaces": [
+        "EBAY_DE",
+        "EBAY_US"
+      ],
+      "channel": "EBAY"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "syn-ebay-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "Syn-Repracer-SBX-0001",
+        "clientSecret": "SBX-syn-client-secret-0001"
+      },
+      "accessToken": "syn-ebay-user-token-0001",
+      "applicationToken": "syn-ebay-app-token-0001"
+    },
+    "pii": [
+      "syn-seller-0001@example.invalid"
+    ]
+  },
+  "steps": [
+    {
+      "id": "preflight",
+      "kind": "call",
+      "method": "preflight",
+      "args": [
+        [
+          "110000000020"
+        ]
+      ],
+      "expect": [
+        {
+          "listingId": "110000000020",
+          "verdict": "READY_WITH_LOSSES",
+          "listingSnapshotSha256": {
+            "$regex": "^[0-9a-f]{64}$"
+          },
+          "findings": {
+            "$unordered": [
+              {
+                "code": "C03_BEST_OFFER",
+                "severity": "LOSS"
+              },
+              {
+                "code": "C06_TEMPLATE",
+                "severity": "INFO"
+              },
+              {
+                "code": "C10_OTHER_TOOLS",
+                "severity": "WARNING"
+              },
+              {
+                "code": "C11_OUT_OF_STOCK_CONTROL",
+                "severity": "WARNING"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "write-still-refused",
+      "kind": "call",
+      "method": "planDispatch",
+      "args": [
+        [
+          {
+            "channelWriteId": "cw-9",
+            "version": 1,
+            "idempotencyKey": "cw-9:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-20",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-20",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-20",
+                "externalListingId": "110000000020"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1349,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          }
+        ]
+      ],
+      "expect": {
+        "batches": [],
+        "rejected": [
+          {
+            "channelWriteId": "cw-9",
+            "error": {
+              "code": "PRECONDITION_FAILED"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "user-token",
+      "note": "Обновление токена пользователя: grant_type=refresh_token + scope, Basic ключей приложения [песочница: ответ без нового refresh-токена]",
+      "request": {
+        "method": "POST",
+        "path": "/identity/v1/oauth2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "syn-ebay-user-token-0001",
+          "expires_in": 7200,
+          "token_type": "User Access Token"
+        }
+      },
+      "origin": "SANDBOX"
+    },
+    {
+      "id": "get-user-preferences",
+      "request": {
+        "method": "POST",
+        "path": "/ws/api.dll",
+        "body": "<?xml version=\"1.0\" encoding=\"utf-8\"?><GetUserPreferencesRequest xmlns=\"urn:ebay:apis:eBLBaseComponents\"><ShowOutOfStockControlPreference>true</ShowOutOfStockControlPreference></GetUserPreferencesRequest>"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "text/xml"
+        },
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<GetUserPreferencesResponse xmlns=\"urn:ebay:apis:eBLBaseComponents\"><Timestamp>2026-09-27T17:24:39.119Z</Timestamp><Ack>Success</Ack><Version>1271</Version><OutOfStockControlPreference>false</OutOfStockControlPreference></GetUserPreferencesResponse>"
+      },
+      "origin": "SANDBOX"
+    },
+    {
+      "id": "get-item",
+      "request": {
+        "method": "POST",
+        "path": "/ws/api.dll",
+        "body": "<?xml version=\"1.0\" encoding=\"utf-8\"?><GetItemRequest xmlns=\"urn:ebay:apis:eBLBaseComponents\"><ItemID>110000000020</ItemID><DetailLevel>ReturnAll</DetailLevel></GetItemRequest>"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "text/xml"
+        },
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<GetItemResponse xmlns=\"urn:ebay:apis:eBLBaseComponents\"><Timestamp>2026-09-27T17:24:36.316Z</Timestamp><Ack>Success</Ack><Version>1193</Version><Item><Currency>EUR</Currency><ItemID>110000000020</ItemID><ListingDesigner><LayoutID>7710000</LayoutID><ThemeID>7710</ThemeID></ListingDesigner><ListingDuration>GTC</ListingDuration><ListingType>FixedPriceItem</ListingType><Quantity>4</Quantity><Seller><Email>syn-seller-0001@example.invalid</Email><UserID>syn_ebay_seller_0001</UserID></Seller><SellingStatus><CurrentPrice currencyID=\"EUR\">14.99</CurrentPrice><ListingStatus>Active</ListingStatus></SellingStatus><Site>Germany</Site><BestOfferDetails><BestOfferCount>0</BestOfferCount><BestOfferEnabled>true</BestOfferEnabled><NewBestOffer>false</NewBestOffer></BestOfferDetails><SKU>SYN-EBAY-20</SKU><SellerProfiles><SellerShippingProfile><ShippingProfileID>6200000001</ShippingProfileID></SellerShippingProfile><SellerReturnProfile><ReturnProfileID>6200000003</ReturnProfileID></SellerReturnProfile><SellerPaymentProfile><PaymentProfileID>6200000002</PaymentProfileID></SellerPaymentProfile></SellerProfiles></Item></GetItemResponse>"
+      },
+      "origin": "SANDBOX"
+    },
+    {
+      "id": "offer-by-sku-not-managed",
+      "request": {
+        "method": "GET",
+        "path": "/sell/inventory/v1/offer",
+        "query": {
+          "sku": "SYN-EBAY-20"
+        }
+      },
+      "response": {
+        "status": 404,
+        "body": {
+          "errors": [
+            {
+              "errorId": 25713,
+              "domain": "API_INVENTORY",
+              "subdomain": "Selling",
+              "category": "Request",
+              "message": "This Offer is not available."
+            }
+          ]
+        }
+      },
+      "origin": "SANDBOX"
+    }
+  ],
+  "expect": {
+    "noAlerts": true,
+    "noLogCodes": [
+      "EBAY_LISTING_MIGRATION"
+    ]
+  }
+}

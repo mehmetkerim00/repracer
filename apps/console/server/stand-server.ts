@@ -462,6 +462,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       if (outcome.status === 'ALREADY_DONE') return fail(409, 'ALREADY_DONE', e.alreadyDone);
       if (outcome.status === 'EXCHANGE_FAILED') return fail(502, `EXCHANGE_${outcome.failure}`, e.exchange);
       if (outcome.status === 'SELLER_TAKEN') return fail(409, 'SELLER_TAKEN', e.sellerTaken);
+      if (outcome.status === 'IDENTITY_UNKNOWN') return fail(409, 'IDENTITY_UNKNOWN', t.errors.identityUnknown);
       if (outcome.status === 'MFA_REQUIRED') return fail(403, 'MFA_REQUIRED', e.mfa);
       return fail(400, outcome.status, e.unknownState);
     }

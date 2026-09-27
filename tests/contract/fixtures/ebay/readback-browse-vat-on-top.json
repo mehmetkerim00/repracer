@@ -1,0 +1,253 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "ebay/readback/browse-vat-on-top",
+  "channel": "EBAY",
+  "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
+  "title": "E-17: Browse = цена продавца × 1,19 с taxes VAT includedInPrice — effectivePrice несёт цену покупателя, предупреждения C10 нет",
+  "description": "По протоколу песочницы (раздел E-17): через ~25 минут после записи Browse показал 16.05 при отправленной 13.49, с taxes [{taxType VAT, taxPercentage 19.0, includedInPrice true, ebayCollectAndRemitTax true}]. Это не правка другим инструментом: цена продавца (13.49) — значение наблюдения, цена покупателя (16.05) — effectivePrice; расхождение ровно на ставку НДС из taxes — журнал EBAY_C14, без алерта C10. Неверную базу цены решает проверка Р-116 пути решения (диспетчер берёт effectivePrice ?? value.price). Подтверждение сравнивает цену продавца — APPLIED.",
+  "tags": [
+    "mandatory:browse-vat-on-top",
+    "readback",
+    "conservative:EBAY_C14_BROWSE_PRICE_WITH_VAT"
+  ],
+  "provenance": {
+    "kind": "RECONSTRUCTED_FROM_SANDBOX",
+    "sandbox": true,
+    "recordedAt": "2026-09-27",
+    "evidence": "docs/evidence/step39-ebay-sandbox.md",
+    "reviewedBy": "step39-review: обезличивание проверено",
+    "redactions": [
+      "listing, offer, policy ids and SKUs replaced with synthetic ones",
+      "request ids dropped",
+      "Trading API responses reduced to the elements the checks read; the Seller block (e-mail, address) removed",
+      "tokens were never logged"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-27T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn_ebay_seller_0001",
+      "marketplaces": [
+        "EBAY_DE",
+        "EBAY_US"
+      ],
+      "channel": "EBAY"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "syn-ebay-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "Syn-Repracer-SBX-0001",
+        "clientSecret": "SBX-syn-client-secret-0001"
+      },
+      "accessToken": "syn-ebay-user-token-0001",
+      "applicationToken": "syn-ebay-app-token-0001"
+    }
+  },
+  "steps": [
+    {
+      "id": "confirm",
+      "kind": "call",
+      "method": "confirm",
+      "args": [
+        [
+          {
+            "channelWriteId": "cw-17b",
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-19",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-19",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-19",
+                "externalOfferId": "9100000019",
+                "externalListingId": "110000000019"
+              }
+            },
+            "expected": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1349,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            },
+            "dispatchedAt": {
+              "$clockIso": 0
+            }
+          }
+        ]
+      ],
+      "expect": [
+        {
+          "channelWriteId": "cw-17b",
+          "status": "APPLIED",
+          "observation": {
+            "field": "PRICE",
+            "value": {
+              "price": {
+                "amountMinor": 1349,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            },
+            "effectivePrice": {
+              "amountMinor": 1605,
+              "currency": "EUR",
+              "basis": "GROSS"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "user-token",
+      "note": "Обновление токена пользователя: grant_type=refresh_token + scope, Basic ключей приложения [песочница: ответ без нового refresh-токена]",
+      "request": {
+        "method": "POST",
+        "path": "/identity/v1/oauth2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "syn-ebay-user-token-0001",
+          "expires_in": 7200,
+          "token_type": "User Access Token"
+        }
+      },
+      "origin": "SANDBOX"
+    },
+    {
+      "id": "get-offer",
+      "request": {
+        "method": "GET",
+        "path": "/sell/inventory/v1/offer/9100000019"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "offerId": "9100000019",
+          "sku": "SYN-EBAY-19",
+          "marketplaceId": "EBAY_DE",
+          "format": "FIXED_PRICE",
+          "pricingSummary": {
+            "price": {
+              "value": "13.49",
+              "currency": "EUR"
+            }
+          },
+          "listingPolicies": {
+            "eBayPlusIfEligible": false,
+            "bestOfferTerms": {
+              "bestOfferEnabled": true
+            }
+          },
+          "categoryId": "20695",
+          "merchantLocationKey": "syn-location-auto-1",
+          "tax": {
+            "applyTax": false
+          },
+          "listing": {
+            "listingId": "110000000019",
+            "listingStatus": "ACTIVE",
+            "soldQuantity": 0
+          },
+          "status": "PUBLISHED",
+          "listingDuration": "GTC"
+        }
+      },
+      "origin": "SYNTHETIC"
+    },
+    {
+      "id": "app-token",
+      "note": "Токен приложения: grant_type=client_credentials, scope api_scope (официальный клиент eBay) — для Browse API [EBAY_C06]",
+      "request": {
+        "method": "POST",
+        "path": "/identity/v1/oauth2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "syn-ebay-app-token-0001",
+          "expires_in": 7200,
+          "token_type": "Application Access Token"
+        }
+      },
+      "origin": "SYNTHETIC"
+    },
+    {
+      "id": "browse-vat",
+      "note": "Живой листинг: цена, оценка количества и счётчик правок продавца sellerItemRevision [песочница]",
+      "request": {
+        "method": "GET",
+        "path": "/buy/browse/v1/item/v1|110000000019|0",
+        "query": {
+          "fieldgroups": "COMPACT"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "itemId": "v1|110000000019|0",
+          "sellerItemRevision": "3",
+          "price": {
+            "value": "16.05",
+            "currency": "EUR"
+          },
+          "estimatedAvailabilities": [
+            {
+              "estimatedAvailabilityStatus": "IN_STOCK",
+              "estimatedAvailableQuantity": 4,
+              "estimatedSoldQuantity": 0,
+              "estimatedRemainingQuantity": 4
+            }
+          ],
+          "legacyItemId": "110000000019",
+          "taxes": [
+            {
+              "taxJurisdiction": {
+                "region": {
+                  "regionName": "DE",
+                  "regionType": "COUNTRY"
+                }
+              },
+              "taxType": "VAT",
+              "taxPercentage": "19.0",
+              "shippingAndHandlingTaxed": true,
+              "includedInPrice": true,
+              "ebayCollectAndRemitTax": true
+            }
+          ]
+        }
+      },
+      "origin": "SANDBOX"
+    }
+  ],
+  "expect": {
+    "noAlerts": true,
+    "logs": [
+      {
+        "code": "EBAY_C14_BROWSE_PRICE_WITH_VAT",
+        "question": "E-17",
+        "count": 1,
+        "details": {
+          "vatBasisPoints": 1900
+        }
+      }
+    ]
+  }
+}

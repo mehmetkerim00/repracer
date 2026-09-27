@@ -1,0 +1,157 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "ebay/migration/preflight-variations",
+  "channel": "EBAY",
+  "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
+  "title": "Листинг с вариациями: C12 — WARNING, цену вариации по живому листингу не подтвердить",
+  "description": "Вариаций в песочнице не было — GetItem синтетический. Browse-идентификатор v1|<ItemID>|0 адресует листинг, а не вариацию, поэтому подтверждение цены вариации не поддерживается [EBAY_C15, E-13]; бюджет 250 правок общий на все вариации (E-02).",
+  "tags": [
+    "migration",
+    "conservative:EBAY_C15_VARIATIONS_PRICE_CONFIRMATION"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "docs/evidence/step39-ebay-sandbox.md",
+      "docs/channel-capabilities.md#9"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-27T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn_ebay_seller_0001",
+      "marketplaces": [
+        "EBAY_DE",
+        "EBAY_US"
+      ],
+      "channel": "EBAY"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "syn-ebay-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "Syn-Repracer-SBX-0001",
+        "clientSecret": "SBX-syn-client-secret-0001"
+      },
+      "accessToken": "syn-ebay-user-token-0001",
+      "applicationToken": "syn-ebay-app-token-0001"
+    }
+  },
+  "steps": [
+    {
+      "id": "preflight",
+      "kind": "call",
+      "method": "preflight",
+      "args": [
+        [
+          "110000000023"
+        ]
+      ],
+      "expect": [
+        {
+          "listingId": "110000000023",
+          "verdict": "READY",
+          "findings": {
+            "$contains": [
+              {
+                "code": "C12_VARIATIONS",
+                "severity": "WARNING",
+                "details": {
+                  "$regex": "cannot be confirmed on the live listing"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "user-token",
+      "note": "Обновление токена пользователя: grant_type=refresh_token + scope, Basic ключей приложения [песочница: ответ без нового refresh-токена]",
+      "request": {
+        "method": "POST",
+        "path": "/identity/v1/oauth2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "syn-ebay-user-token-0001",
+          "expires_in": 7200,
+          "token_type": "User Access Token"
+        }
+      }
+    },
+    {
+      "id": "get-user-preferences",
+      "request": {
+        "method": "POST",
+        "path": "/ws/api.dll",
+        "body": "<?xml version=\"1.0\" encoding=\"utf-8\"?><GetUserPreferencesRequest xmlns=\"urn:ebay:apis:eBLBaseComponents\"><ShowOutOfStockControlPreference>true</ShowOutOfStockControlPreference></GetUserPreferencesRequest>"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "text/xml"
+        },
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<GetUserPreferencesResponse xmlns=\"urn:ebay:apis:eBLBaseComponents\"><Timestamp>2026-09-27T17:24:39.119Z</Timestamp><Ack>Success</Ack><Version>1271</Version><OutOfStockControlPreference>false</OutOfStockControlPreference></GetUserPreferencesResponse>"
+      }
+    },
+    {
+      "id": "get-item",
+      "request": {
+        "method": "POST",
+        "path": "/ws/api.dll",
+        "body": "<?xml version=\"1.0\" encoding=\"utf-8\"?><GetItemRequest xmlns=\"urn:ebay:apis:eBLBaseComponents\"><ItemID>110000000023</ItemID><DetailLevel>ReturnAll</DetailLevel></GetItemRequest>"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "text/xml"
+        },
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<GetItemResponse xmlns=\"urn:ebay:apis:eBLBaseComponents\"><Timestamp>2026-09-27T17:24:36.316Z</Timestamp><Ack>Success</Ack><Version>1193</Version><Item><Currency>EUR</Currency><ItemID>110000000023</ItemID><ListingDesigner><LayoutID>7710000</LayoutID><ThemeID>7710</ThemeID></ListingDesigner><ListingDuration>GTC</ListingDuration><ListingType>FixedPriceItem</ListingType><Quantity>4</Quantity><Seller><Email>syn-seller-0001@example.invalid</Email><UserID>syn_ebay_seller_0001</UserID></Seller><SellingStatus><CurrentPrice currencyID=\"EUR\">14.99</CurrentPrice><ListingStatus>Active</ListingStatus></SellingStatus><Site>Germany</Site><Variations><Variation><SKU>SYN-EBAY-23-S</SKU><Quantity>2</Quantity></Variation><Variation><SKU>SYN-EBAY-23-M</SKU><Quantity>2</Quantity></Variation></Variations><SKU>SYN-EBAY-23</SKU><SellerProfiles><SellerShippingProfile><ShippingProfileID>6200000001</ShippingProfileID></SellerShippingProfile><SellerReturnProfile><ReturnProfileID>6200000003</ReturnProfileID></SellerReturnProfile><SellerPaymentProfile><PaymentProfileID>6200000002</PaymentProfileID></SellerPaymentProfile></SellerProfiles></Item></GetItemResponse>"
+      }
+    },
+    {
+      "id": "offer-by-sku-not-managed",
+      "request": {
+        "method": "GET",
+        "path": "/sell/inventory/v1/offer",
+        "query": {
+          "sku": "SYN-EBAY-23"
+        }
+      },
+      "response": {
+        "status": 404,
+        "body": {
+          "errors": [
+            {
+              "errorId": 25713,
+              "domain": "API_INVENTORY",
+              "subdomain": "Selling",
+              "category": "Request",
+              "message": "This Offer is not available."
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "expect": {
+    "noAlerts": true,
+    "logs": [
+      {
+        "code": "EBAY_C15_VARIATIONS_PRICE_CONFIRMATION",
+        "count": 1,
+        "question": "E-13"
+      }
+    ]
+  }
+}

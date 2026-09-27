@@ -5,7 +5,7 @@ import { KAUFLAND_DESCRIPTOR } from '@repracer/kaufland-adapter';
 import { createPricingPipeline, InMemoryPricingStore, standUserOf, type MemorySeed, type PricingPipeline, type PricingStore, type SeedBound, type SnapshotReport } from '@repracer/pricing-pipeline';
 import type { CostInputs } from '@repracer/pricing-model';
 import { createWriteDispatcher, type WriteDispatcher, type WriteQueueStore } from '@repracer/write-dispatcher';
-import { amazonRequestChecker, channelFetch, kauflandAuthChecker, ScriptedChannel, type ChannelBehaviour, type TraceEntry } from './channel.ts';
+import { amazonRequestChecker, channelFetch, ebayRequestChecker, kauflandAuthChecker, ScriptedChannel, type ChannelBehaviour, type TraceEntry } from './channel.ts';
 import { neverWrittenAttributes } from '@repracer/channel-port';
 import { match } from './matchers.ts';
 import { createNotificationReceiver, createSqsClient, pipelineSink, storeLedger, type NotificationReceiver } from '@repracer/amazon-notifications';
@@ -13,6 +13,9 @@ import { FakeSqs } from '@repracer/amazon-notifications/testing';
 import { SimulatedKauflandChannel } from '../simulator/kaufland-channel.ts';
 import type { CallStep, InboundDeliverySpec, PipelineStep, Scenario, StepContext, World } from './scenario.ts';
 import { VirtualClock, worldDependencies, type Sink } from './world.ts';
+
+/** Шаг 39: сценарии eBay записаны в песочнице и идут на её хост [Р-162] */
+export const EBAY_STAND_HOST = 'https://api.sandbox.ebay.com';
 
 export interface AdapterUnderTest {
   (input: { deps: AdapterDependencies; world: World; clock: VirtualClock; fetch: typeof fetch }): ChannelAdapter;
@@ -325,7 +328,8 @@ export async function runScenario(
   const channel = behaviour
     ?? (world.channelModel ? new SimulatedKauflandChannel(world.channelModel, world.clock) : new ScriptedChannel(scenario.exchanges, scenario.expect?.allExchangesUsed ?? true));
   const simulator = channel instanceof SimulatedKauflandChannel ? channel : null;
-  const checker = scenario.channel === 'AMAZON' ? amazonRequestChecker(world, clock, neverWrittenAttributes('AMAZON')) : kauflandAuthChecker(world, clock);
+  const checker = scenario.channel === 'AMAZON' ? amazonRequestChecker(world, clock, neverWrittenAttributes('AMAZON'))
+    : scenario.channel === 'EBAY' ? ebayRequestChecker(world, EBAY_STAND_HOST) : kauflandAuthChecker(world, clock);
   const fetch = channelFetch(channel, checker, clock, violations, trace);
   const deps = worldDependencies(world, clock, sink);
   const adapter = adapterUnderTest({ deps, world, clock, fetch });
@@ -459,7 +463,7 @@ export async function runScenario(
   // Секреты и синтетические PII не должны утечь
   const everywhere = { results, logs: sink.logs, alerts: sink.alerts, pipeline: pipelineState };
   const observability = { logs: sink.logs, alerts: sink.alerts };
-  const creds = [...Object.values(world.credentials.seller), ...Object.values(world.credentials.partner ?? {}), ...Object.values(world.credentials.application ?? {}), world.credentials.accessToken];
+  const creds = [...Object.values(world.credentials.seller), ...Object.values(world.credentials.partner ?? {}), ...Object.values(world.credentials.application ?? {}), world.credentials.accessToken, world.credentials.applicationToken];
   for (const secret of creds) if (secret && jsonIncludes(everywhere, secret)) failures.push('leak: channel credentials appear in results, logs or alerts');
   for (const pii of world.pii ?? []) if (jsonIncludes(everywhere, pii)) failures.push(`leak: PII sentinel "${pii}" appears in results, logs or alerts`);
   for (const secret of world.secrets ?? []) if (jsonIncludes(observability, secret)) failures.push(`leak: secret sentinel "${secret}" appears in logs or alerts`);

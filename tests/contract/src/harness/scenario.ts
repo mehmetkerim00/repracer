@@ -20,7 +20,14 @@ export type Provenance =
   /** Собрано вручную по документации и спецификации канала; данные синтетические */
   | { kind: 'SYNTHETIC_FROM_DOCS'; sources: string[] }
   /** Записано рекордером с реального тестового аккаунта и обезличено; без рецензии не исполняется */
-  | { kind: 'RECORDED_REDACTED'; recordedAt: string; recorderVersion: string; redactions: string[]; reviewedBy: string | null };
+  | { kind: 'RECORDED_REDACTED'; recordedAt: string; recorderVersion: string; redactions: string[]; reviewedBy: string | null }
+  /**
+   * Шаг 39 [Р-162]: сценарий ВОССТАНОВЛЕН по прогону в песочнице канала, а не записан рекордером: обмены собраны по протоколу прогона
+   * (evidence) и обезличены. У каждого обмена — происхождение: SANDBOX — ответ есть в протоколе прогона (errorId, текст, статус — как
+   * ответила песочница; идентификаторы — синтетические), SYNTHETIC — ответа в протоколе нет, он выведен. Поведение песочницы не
+   * доказывает поведения боевого канала. Как и запись рекордера, без рецензии (reviewedBy) не исполняется.
+   */
+  | { kind: 'RECONSTRUCTED_FROM_SANDBOX'; sandbox: true; recordedAt: string; evidence: string; redactions: string[]; reviewedBy: string | null };
 
 export interface BucketSpec { ratePerSecond: number; burst: number }
 
@@ -36,13 +43,18 @@ export interface World {
    * Синтетические ключи. Kaufland: seller {clientKey, secretKey}, partner. Amazon: seller {refreshToken} (согласие продавца LWA),
    * application {clientId, clientSecret} (ключи приложения), accessToken — токен, который выдаёт обмен LWA сценария.
    */
-  credentials: { seller: Record<string, string>; partner?: Record<string, string>; application?: Record<string, string>; accessToken?: string };
+  /** eBay (шаг 39): accessToken — токен пользователя (обновление refresh-токена), applicationToken — токен приложения (client_credentials, Browse API) */
+  credentials: { seller: Record<string, string>; partner?: Record<string, string>; application?: Record<string, string>; accessToken?: string; applicationToken?: string };
   partner?: boolean;
   /** Ответ каталога аккаунтов для любого вызова: по умолчанию проверка тенанта и аккаунта мира */
   directory?: 'CHECK' | 'NOT_FOUND' | 'DISCONNECTED';
   budget?: { seller: BucketSpec; partner?: BucketSpec };
   client?: { timeoutMs?: number; maxAttempts?: number };
-  adapter?: { confirmationWindowMs?: number; webhookMaxAgeMs?: number; buyBoxChangedAccess?: 'GRANTED' | 'NOT_GRANTED'; amazonApplicationLoadRps?: number };
+  adapter?: {
+    confirmationWindowMs?: number; webhookMaxAgeMs?: number; buyBoxChangedAccess?: 'GRANTED' | 'NOT_GRANTED'; amazonApplicationLoadRps?: number;
+    /** eBay [Р-163]: попытки правки листинга, уже сделанные за последние сутки (второй слой бюджета, EBAY_C08) */
+    ebayEditAttempts?: Array<{ listingId: string; attempts: number; agoMs: number; field?: 'PRICE' | 'QUANTITY' }>;
+  };
   /** Данные пути решения о цене (хранилище в памяти); без них шаги pipeline* недоступны */
   pricing?: MemorySeed & { sanity?: Partial<SanityConfig> };
   /** Строки, которых не должно быть нигде в выходах, журнале и алертах (синтетические PII) */
@@ -55,7 +67,9 @@ export interface World {
 
 export type PortMethod =
   | 'planDispatch' | 'dispatch' | 'readBack' | 'confirm' | 'readCompetitors' | 'discoverOffers' | 'readOrderLines'
-  | 'ensureSubscriptions' | 'requestReport' | 'pollReport';
+  | 'ensureSubscriptions' | 'requestReport' | 'pollReport'
+  /** LISTING_MIGRATION (eBay, шаг 39): migrate принимает только доказательства согласия [Р-164] */
+  | 'preflight' | 'migrate';
 
 export interface StepContext { tenantId?: string; channelAccountId?: string; deadlineInMs?: number }
 
@@ -181,6 +195,8 @@ export interface Exchange {
   response?: ScriptedResponse;
   /** Сбой вместо ответа: TIMEOUT — канал не отвечает до отмены запроса клиентом; NETWORK_ERROR — обрыв */
   fault?: 'TIMEOUT' | 'NETWORK_ERROR';
+  /** Обязательно у сценария RECONSTRUCTED_FROM_SANDBOX: SANDBOX — ответ есть в протоколе прогона, SYNTHETIC — выведен */
+  origin?: 'SANDBOX' | 'SYNTHETIC';
 }
 
 export interface LogExpectation { code: string; count?: number; [key: string]: unknown }
@@ -189,7 +205,7 @@ export interface AlertExpectation { code: string; count?: number; [key: string]:
 export interface Scenario {
   format: typeof SCENARIO_FORMAT;
   id: string;
-  channel: 'KAUFLAND' | 'AMAZON';
+  channel: 'KAUFLAND' | 'AMAZON' | 'EBAY';
   apiVersion: string;
   title: string;
   description: string;
@@ -228,6 +244,17 @@ export function validateScenario(s: Scenario): string[] {
   if (!Array.isArray(s.tags)) problems.push('tags must be an array');
   if (s.provenance?.kind === 'RECORDED_REDACTED' && !s.provenance.reviewedBy) {
     problems.push('recorded fixture has not been reviewed (provenance.reviewedBy is null)');
+  } else if (s.provenance?.kind === 'RECONSTRUCTED_FROM_SANDBOX') {
+    // Р-162: сценарий по песочнице помечен явно, ведёт на протокол прогона, прошёл рецензию, и у каждого обмена названо происхождение
+    if (s.provenance.sandbox !== true || !/^\d{4}-\d{2}-\d{2}/.test(s.provenance.recordedAt ?? '') || !s.provenance.evidence) {
+      problems.push('a sandbox reconstruction needs sandbox: true, recordedAt and evidence');
+    }
+    if (!s.provenance.reviewedBy) problems.push('sandbox reconstruction has not been reviewed (provenance.reviewedBy is empty)');
+    if (s.channel !== 'EBAY') problems.push('RECONSTRUCTED_FROM_SANDBOX is used by eBay scenarios only (Р-162)');
+    for (const ex of s.exchanges ?? []) {
+      if (ex.origin !== 'SANDBOX' && ex.origin !== 'SYNTHETIC') problems.push(`exchange ${ex.id}: origin must be SANDBOX or SYNTHETIC in a sandbox reconstruction`);
+    }
+    if (!(s.exchanges ?? []).some((ex) => ex.origin === 'SANDBOX')) problems.push('a sandbox reconstruction without a single SANDBOX exchange is synthetic');
   } else if (s.provenance?.kind !== 'SYNTHETIC_FROM_DOCS' && s.provenance?.kind !== 'RECORDED_REDACTED') {
     problems.push('provenance.kind is unknown');
   }
@@ -236,6 +263,10 @@ export function validateScenario(s: Scenario): string[] {
   if (s.channel === 'AMAZON' && (!s.world?.credentials?.application || !s.world.credentials.accessToken || !s.world.account.region)) {
     problems.push('an Amazon world needs credentials.application, credentials.accessToken and account.region');
   }
+  if (s.channel === 'EBAY' && (!s.world?.credentials?.application || !s.world.credentials.accessToken || !s.world.credentials.applicationToken || !s.world.credentials.seller?.refreshToken)) {
+    problems.push('an eBay world needs credentials.application, credentials.seller.refreshToken, credentials.accessToken and credentials.applicationToken');
+  }
+  if (s.channel === 'EBAY' && s.world?.pricing) problems.push('eBay scenarios drive the port only: the pricing path store has no eBay channel yet');
   const stepIds = new Set<string>();
   for (const step of s.steps ?? []) {
     if (stepIds.has(step.id)) problems.push(`duplicate step id ${step.id}`);
@@ -256,7 +287,9 @@ export function validateScenario(s: Scenario): string[] {
     exchangeIds.add(ex.id);
     const pathOk = s.channel === 'AMAZON'
       ? /^\/(listings\/2021-08-01\/items\/|auth\/o2\/token$|batches\/products\/pricing\/2022-05-01\/items\/competitiveSummary$)/.test(ex.request?.path ?? '')
-      : Boolean(ex.request?.path?.startsWith('/v2/'));
+      : s.channel === 'EBAY'
+        ? /^\/(sell\/inventory\/v1\/|buy\/browse\/v1\/item\/v1\|\d+\|0$|identity\/v1\/oauth2\/token$|ws\/api\.dll$)/.test(ex.request?.path ?? '')
+        : Boolean(ex.request?.path?.startsWith('/v2/'));
     if (!pathOk) problems.push(`exchange ${ex.id}: request.path is not an ${s.channel} API path`);
     if (Boolean(ex.response) === Boolean(ex.fault)) problems.push(`exchange ${ex.id}: exactly one of response or fault`);
   }

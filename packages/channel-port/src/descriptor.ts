@@ -93,6 +93,12 @@ export interface EditBudgetRule {
   countsFailedAttempts: boolean;
   /** Один бюджет на все поля объекта (цена и остаток) */
   sharedAcrossFields: boolean;
+  /**
+   * Шаг 39: доля лимита, недоступная цене, — как tenant_data.edit_budget (0008): цена не больше limit − quantityReserve −
+   * unaccountedMargin, остаток может использовать весь лимит. Не задано — 0
+   */
+  quantityReserve?: number;
+  unaccountedMargin?: number;
 }
 
 export interface RateLimitRule {

@@ -9,7 +9,7 @@
  */
 
 export type OAuthChannel = 'AMAZON' | 'EBAY';
-export type Fetch = (url: string, init: { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal }) => Promise<{ status: number; text(): Promise<string> }>;
+export type Fetch = (url: string, init: { method: string; headers: Record<string, string>; body?: string; signal?: AbortSignal }) => Promise<{ status: number; text(): Promise<string> }>;
 
 export interface ConsentRequest {
   state: string;
@@ -29,6 +29,11 @@ export interface OAuthProvider {
   /** Разбор параметров возврата; `state` сверяет вызывающий — по отпечатку в базе */
   parseCallback(query: Readonly<Record<string, string | undefined>>): ConsentCallback;
   tokenRequest(grant: { kind: 'CODE'; code: string } | { kind: 'REFRESH'; refreshToken: string }): { url: string; headers: Record<string, string>; body: string };
+  /**
+   * Шаг 39 (E-11): кто продавец, если возврат его не называет (eBay). Вызывается свежим токеном доступа сразу после
+   * обмена кода; `null` — узнать не удалось, и аккаунт получает временный идентификатор, как на шаге 43.
+   */
+  identifySeller?(accessToken: string, http: Fetch): Promise<string | null>;
 }
 
 // ---------------------------------------------------------------------------------------------------- Amazon LWA
@@ -98,6 +103,17 @@ export const EBAY_ENDPOINTS = {
   SANDBOX: { authorize: 'https://auth.sandbox.ebay.com/oauth2/authorize', token: 'https://api.sandbox.ebay.com/identity/v1/oauth2/token' },
 } as const;
 
+/**
+ * Шаг 39, E-11 [песочница]: продавца называет Commerce Identity API `GET /commerce/identity/v1/user/` — на хосте `apiz.`
+ * (на `api.sandbox.ebay.com` тот же путь отвечает 404), scope `commerce.identity.readonly`; ответ несёт `userId`.
+ * Хост боя — по аналогии с песочницей (проверить при первом боевом подключении): если он ответит не так, аккаунт
+ * получает временный идентификатор, как до шага 39, а не чужой.
+ */
+export const EBAY_IDENTITY_URL = {
+  PRODUCTION: 'https://apiz.ebay.com/commerce/identity/v1/user/',
+  SANDBOX: 'https://apiz.sandbox.ebay.com/commerce/identity/v1/user/',
+} as const;
+
 export interface EbayOAuthConfig {
   environment: 'SANDBOX' | 'PRODUCTION';
   clientId: string;
@@ -110,7 +126,7 @@ export interface EbayOAuthConfig {
    */
   scopes: readonly string[];
   /** Подмена конечных точек — ТОЛЬКО для модели поставщика */
-  endpoints?: { authorize: string; token: string };
+  endpoints?: { authorize: string; token: string; identity?: string };
 }
 
 export function ebayOAuth(cfg: EbayOAuthConfig): OAuthProvider {
@@ -139,6 +155,17 @@ export function ebayOAuth(cfg: EbayOAuthConfig): OAuthProvider {
         ? new URLSearchParams({ grant_type: 'authorization_code', code: grant.code, redirect_uri: cfg.redirectUri })
         : new URLSearchParams({ grant_type: 'refresh_token', refresh_token: grant.refreshToken, scope: cfg.scopes.join(' ') });
       return { url: endpoints.token, headers: { 'content-type': 'application/x-www-form-urlencoded', authorization: basic }, body: form.toString() };
+    },
+    async identifySeller(accessToken, http) {
+      try {
+        // Находка 14 ревью шага 39: зависший поставщик не держит обратный вызов продавца — 10 с, затем «продавец не назван»
+        const r = await http(cfg.endpoints?.identity ?? EBAY_IDENTITY_URL[cfg.environment], { method: 'GET', headers: { authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(10_000) });
+        if (r.status !== 200) return null;
+        const body = JSON.parse(await r.text()) as { userId?: unknown };
+        return typeof body.userId === 'string' && body.userId.length > 0 && body.userId.length <= 128 ? body.userId : null;
+      } catch {
+        return null;
+      }
     },
   };
 }

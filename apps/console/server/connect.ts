@@ -44,7 +44,8 @@ export type CallbackOutcome =
   | ConnectOutcome
   | { status: 'DENIED' }
   | { status: 'BAD_CALLBACK' }
-  | { status: 'EXCHANGE_FAILED'; failure: 'REVOKED' | 'PLATFORM' | 'TRANSIENT' };
+  | { status: 'EXCHANGE_FAILED'; failure: 'REVOKED' | 'PLATFORM' | 'TRANSIENT' }
+  | { status: 'IDENTITY_UNKNOWN' };
 
 /** Срок запроса согласия: Amazon предупреждает, что поток дольше десяти минут ломается; база больше не примет */
 export const CONSENT_TTL_SECONDS = 600;
@@ -71,7 +72,8 @@ export function createChannelConnectService(o: {
       const regions = new Set(chosen.map((m) => m.region));
       // Витрины двух регионов одним согласием не авторизовать: у Amazon это разные Seller Central
       if (chosen.length === 0 || chosen.length !== input.marketplaces.length || regions.size !== 1) return { status: 'BAD_MARKETPLACES' };
-      if (p.channel === 'EBAY' && await o.store.hasAccount(tenantId, 'EBAY')) return { status: 'IDENTITY_UNKNOWN' };
+      // Шаг 39 (E-11, OQ-235): поставщик, который умеет назвать продавца после обмена, повторное подключение не ограничивает
+      if (p.channel === 'EBAY' && !p.provider.identifySeller && await o.store.hasAccount(tenantId, 'EBAY')) return { status: 'IDENTITY_UNKNOWN' };
       const { state, stateSha256 } = newState();
       let consentUrl: string;
       try {
@@ -119,8 +121,22 @@ export function createChannelConnectService(o: {
         return { status: 'EXCHANGE_FAILED', failure: tokens.failure };
       }
       const refresh = tokens.refreshToken!;
+      // Шаг 39 (E-11): eBay не называет продавца в возврате — его называет Commerce Identity API свежим токеном
+      const sellerId = cb.sellerId ?? (provider.identifySeller ? await provider.identifySeller(tokens.accessToken, o.http) : null);
+      /**
+       * Находка 2 ревью шага 39: продавца назвать не удалось (нет scope `commerce.identity.readonly`, другой хост в бою, сбой
+       * сети), а у тенанта уже есть аккаунт eBay — второй аккаунт `pending-identity:` был бы тем самым вредом OQ-235
+       * (удвоенные записи и бюджет правок). Отказ с понятной причиной, а не новый аккаунт; первый аккаунт — как на шаге 43.
+       */
+      if (cb.sellerId === null && sellerId === null) {
+        o.log?.('channel_connect_identity_unknown', { tenantId, channel: claim.channel });
+        if (claim.channel === 'EBAY' && await o.store.hasAccount(tenantId, 'EBAY')) {
+          await o.store.fail(tenantId, digest, 'FAILED', 'IDENTITY_UNKNOWN', actor);
+          return { status: 'IDENTITY_UNKNOWN' };
+        }
+      }
       const outcome = await o.store.complete(tenantId, {
-        stateSha256: digest, externalAccountId: cb.sellerId ?? null,
+        stateSha256: digest, externalAccountId: sellerId,
         seal: (channelAccountId) => sealToken(o.keyring, refresh, { tenantId, channelAccountId }),
         refreshExpiresAt: tokens.refreshExpiresIn === null ? null : new Date(Date.now() + tokens.refreshExpiresIn * 1000).toISOString() as never,
         ...actor,

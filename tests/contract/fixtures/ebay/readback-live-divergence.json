@@ -1,0 +1,238 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "ebay/readback/offer-listing-divergence",
+  "channel": "EBAY",
+  "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
+  "title": "Живая цена листинга ≠ предложение Inventory API и разница — не НДС: предупреждение о другом инструменте (C10)",
+  "description": "По протоколу песочницы: после миграции ReviseFixedPriceItem через Trading API изменил живую цену (13.99), а GET offer продолжал показывать 14.99. Наблюдение, как у Kaufland и Amazon: цена продавца — из предложения (14.99), цена покупателя живого листинга — effectivePrice (13.99, Browse API) [EBAY_C05, токен приложения — EBAY_C06]. Разница не равна НДС из taxes (их нет) — WARNING EBAY_OFFER_LISTING_DIVERGENCE (листинг правит другой инструмент, C10).",
+  "tags": [
+    "mandatory:readback-browse-divergence",
+    "readback",
+    "conservative:EBAY_C05_PRICE_READBACK_LIVE_LISTING",
+    "conservative:EBAY_C06_BROWSE_APPLICATION_TOKEN"
+  ],
+  "provenance": {
+    "kind": "RECONSTRUCTED_FROM_SANDBOX",
+    "sandbox": true,
+    "recordedAt": "2026-09-27",
+    "evidence": "docs/evidence/step39-ebay-sandbox.md",
+    "reviewedBy": "step39-review: обезличивание проверено",
+    "redactions": [
+      "listing, offer, policy ids and SKUs replaced with synthetic ones",
+      "request ids dropped",
+      "Trading API responses reduced to the elements the checks read; the Seller block (e-mail, address) removed",
+      "tokens were never logged"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-27T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn_ebay_seller_0001",
+      "marketplaces": [
+        "EBAY_DE",
+        "EBAY_US"
+      ],
+      "channel": "EBAY"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "syn-ebay-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "Syn-Repracer-SBX-0001",
+        "clientSecret": "SBX-syn-client-secret-0001"
+      },
+      "accessToken": "syn-ebay-user-token-0001",
+      "applicationToken": "syn-ebay-app-token-0001"
+    }
+  },
+  "steps": [
+    {
+      "id": "read-back",
+      "kind": "call",
+      "method": "readBack",
+      "args": [
+        [
+          {
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-15",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-15",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-15",
+                "externalOfferId": "9100000015",
+                "externalListingId": "110000000015"
+              }
+            },
+            "fields": [
+              "PRICE"
+            ]
+          }
+        ]
+      ],
+      "expect": {
+        "failures": [],
+        "observations": [
+          {
+            "field": "PRICE",
+            "source": "READBACK",
+            "value": {
+              "price": {
+                "amountMinor": 1499,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            },
+            "effectivePrice": {
+              "amountMinor": 1399,
+              "currency": "EUR",
+              "basis": "GROSS"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "user-token",
+      "note": "Обновление токена пользователя: grant_type=refresh_token + scope, Basic ключей приложения [песочница: ответ без нового refresh-токена]",
+      "request": {
+        "method": "POST",
+        "path": "/identity/v1/oauth2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "syn-ebay-user-token-0001",
+          "expires_in": 7200,
+          "token_type": "User Access Token"
+        }
+      },
+      "origin": "SANDBOX"
+    },
+    {
+      "id": "get-offer-after-revise",
+      "request": {
+        "method": "GET",
+        "path": "/sell/inventory/v1/offer/9100000015"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "offerId": "9100000015",
+          "sku": "SYN-EBAY-15",
+          "marketplaceId": "EBAY_DE",
+          "format": "FIXED_PRICE",
+          "pricingSummary": {
+            "price": {
+              "value": "14.99",
+              "currency": "EUR"
+            }
+          },
+          "listingPolicies": {
+            "eBayPlusIfEligible": false,
+            "bestOfferTerms": {
+              "bestOfferEnabled": true
+            }
+          },
+          "categoryId": "20695",
+          "merchantLocationKey": "syn-location-auto-1",
+          "tax": {
+            "applyTax": false
+          },
+          "listing": {
+            "listingId": "110000000015",
+            "listingStatus": "ACTIVE",
+            "soldQuantity": 0
+          },
+          "status": "PUBLISHED",
+          "listingDuration": "GTC"
+        }
+      },
+      "origin": "SANDBOX"
+    },
+    {
+      "id": "app-token",
+      "note": "Токен приложения: grant_type=client_credentials, scope api_scope (официальный клиент eBay) — для Browse API [EBAY_C06]",
+      "request": {
+        "method": "POST",
+        "path": "/identity/v1/oauth2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "syn-ebay-app-token-0001",
+          "expires_in": 7200,
+          "token_type": "Application Access Token"
+        }
+      },
+      "origin": "SYNTHETIC"
+    },
+    {
+      "id": "browse-live",
+      "note": "Живой листинг: цена, оценка количества и счётчик правок продавца sellerItemRevision [песочница]",
+      "request": {
+        "method": "GET",
+        "path": "/buy/browse/v1/item/v1|110000000015|0",
+        "query": {
+          "fieldgroups": "COMPACT"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "itemId": "v1|110000000015|0",
+          "sellerItemRevision": "2",
+          "price": {
+            "value": "13.99",
+            "currency": "EUR"
+          },
+          "estimatedAvailabilities": [
+            {
+              "estimatedAvailabilityStatus": "IN_STOCK",
+              "estimatedAvailableQuantity": 4,
+              "estimatedSoldQuantity": 0,
+              "estimatedRemainingQuantity": 4
+            }
+          ],
+          "legacyItemId": "110000000015"
+        }
+      },
+      "origin": "SYNTHETIC"
+    }
+  ],
+  "expect": {
+    "alerts": [
+      {
+        "code": "EBAY_OFFER_LISTING_DIVERGENCE",
+        "severity": "WARNING",
+        "count": 1
+      }
+    ],
+    "logs": [
+      {
+        "code": "EBAY_C05_PRICE_READBACK_LIVE_LISTING",
+        "details": {
+          "divergence": true
+        }
+      },
+      {
+        "code": "EBAY_C06_BROWSE_APPLICATION_TOKEN",
+        "count": 1
+      }
+    ]
+  }
+}

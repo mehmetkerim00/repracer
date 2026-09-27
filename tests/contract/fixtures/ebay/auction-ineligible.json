@@ -1,0 +1,132 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "ebay/migration/auction-ineligible",
+  "channel": "EBAY",
+  "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
+  "title": "Аукцион (ListingType Chinese) — INELIGIBLE: не мигрируется и не управляется",
+  "description": "Записано в песочнице: аукцион, созданный AddItem. Вердикт INELIGIBLE по C01 [Р-2, Р-164]; Inventory API для аукциона не запрашивается.",
+  "tags": [
+    "mandatory:auction-ineligible",
+    "migration"
+  ],
+  "provenance": {
+    "kind": "RECONSTRUCTED_FROM_SANDBOX",
+    "sandbox": true,
+    "recordedAt": "2026-09-27",
+    "evidence": "docs/evidence/step39-ebay-sandbox.md",
+    "reviewedBy": "step39-review: обезличивание проверено",
+    "redactions": [
+      "listing, offer, policy ids and SKUs replaced with synthetic ones",
+      "request ids dropped",
+      "Trading API responses reduced to the elements the checks read; the Seller block (e-mail, address) removed",
+      "tokens were never logged"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-27T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn_ebay_seller_0001",
+      "marketplaces": [
+        "EBAY_DE",
+        "EBAY_US"
+      ],
+      "channel": "EBAY"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "syn-ebay-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "Syn-Repracer-SBX-0001",
+        "clientSecret": "SBX-syn-client-secret-0001"
+      },
+      "accessToken": "syn-ebay-user-token-0001",
+      "applicationToken": "syn-ebay-app-token-0001"
+    }
+  },
+  "steps": [
+    {
+      "id": "preflight",
+      "kind": "call",
+      "method": "preflight",
+      "args": [
+        [
+          "110000000022"
+        ]
+      ],
+      "expect": [
+        {
+          "listingId": "110000000022",
+          "verdict": "INELIGIBLE",
+          "findings": {
+            "$contains": [
+              {
+                "code": "C01_AUCTION",
+                "severity": "BLOCKER"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "user-token",
+      "note": "Обновление токена пользователя: grant_type=refresh_token + scope, Basic ключей приложения [песочница: ответ без нового refresh-токена]",
+      "request": {
+        "method": "POST",
+        "path": "/identity/v1/oauth2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "syn-ebay-user-token-0001",
+          "expires_in": 7200,
+          "token_type": "User Access Token"
+        }
+      },
+      "origin": "SANDBOX"
+    },
+    {
+      "id": "get-user-preferences",
+      "request": {
+        "method": "POST",
+        "path": "/ws/api.dll",
+        "body": "<?xml version=\"1.0\" encoding=\"utf-8\"?><GetUserPreferencesRequest xmlns=\"urn:ebay:apis:eBLBaseComponents\"><ShowOutOfStockControlPreference>true</ShowOutOfStockControlPreference></GetUserPreferencesRequest>"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "text/xml"
+        },
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<GetUserPreferencesResponse xmlns=\"urn:ebay:apis:eBLBaseComponents\"><Timestamp>2026-09-27T17:24:39.119Z</Timestamp><Ack>Success</Ack><Version>1271</Version><OutOfStockControlPreference>false</OutOfStockControlPreference></GetUserPreferencesResponse>"
+      },
+      "origin": "SANDBOX"
+    },
+    {
+      "id": "get-item",
+      "request": {
+        "method": "POST",
+        "path": "/ws/api.dll",
+        "body": "<?xml version=\"1.0\" encoding=\"utf-8\"?><GetItemRequest xmlns=\"urn:ebay:apis:eBLBaseComponents\"><ItemID>110000000022</ItemID><DetailLevel>ReturnAll</DetailLevel></GetItemRequest>"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "text/xml"
+        },
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<GetItemResponse xmlns=\"urn:ebay:apis:eBLBaseComponents\"><Timestamp>2026-09-27T17:24:36.316Z</Timestamp><Ack>Success</Ack><Version>1193</Version><Item><Currency>EUR</Currency><ItemID>110000000022</ItemID><ListingDesigner><LayoutID>7710000</LayoutID><ThemeID>7710</ThemeID></ListingDesigner><ListingDuration>Days_7</ListingDuration><ListingType>Chinese</ListingType><Quantity>1</Quantity><Seller><Email>syn-seller-0001@example.invalid</Email><UserID>syn_ebay_seller_0001</UserID></Seller><SellingStatus><CurrentPrice currencyID=\"EUR\">5.0</CurrentPrice><ListingStatus>Active</ListingStatus></SellingStatus><Site>Germany</Site><SKU>SYN-EBAY-22</SKU><SellerProfiles><SellerShippingProfile><ShippingProfileID>6200000001</ShippingProfileID></SellerShippingProfile><SellerReturnProfile><ReturnProfileID>6200000003</ReturnProfileID></SellerReturnProfile><SellerPaymentProfile><PaymentProfileID>6200000002</PaymentProfileID></SellerPaymentProfile></SellerProfiles></Item></GetItemResponse>"
+      },
+      "origin": "SANDBOX"
+    }
+  ],
+  "expect": {
+    "noAlerts": true
+  }
+}

@@ -60,10 +60,18 @@ test('находка 14 ревью шага 43: состояние прилож�
 
 test('Р-175: eBay — песочница по явному значению, scope называет конфигурация (E-08)', () => {
   const c = loadChannelAppsConfig({
-    REPRACER_EBAY_CLIENT_ID: 'Syn-App-SBX', REPRACER_EBAY_RUNAME: 'Syn-RuName', REPRACER_EBAY_SCOPES: 'https://api.ebay.com/oauth/api_scope/sell.inventory',
+    REPRACER_EBAY_CLIENT_ID: 'Syn-App-SBX', REPRACER_EBAY_RUNAME: 'Syn-RuName', REPRACER_EBAY_SCOPES: 'https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/commerce.identity.readonly',
     REPRACER_EBAY_CLIENT_SECRET_FILE: '/s/ebay', REPRACER_CHANNEL_KEYRING_FILE: '/s/keyring', REPRACER_EBAY_ENVIRONMENT: 'SANDBOX',
   }, read);
   assert.equal(c.ebay?.environment, 'SANDBOX');
   const ebay = channelApps(c)[1]!;
   assert.match(ebay.provider!.consentUrl({ state: 's', marketplaces: [] }), /^https:\/\/auth\.sandbox\.ebay\.com\/oauth2\/authorize\?/);
+});
+
+test('находка 2 ревью шага 39: без scope commerce.identity.readonly приложение eBay не настраивается — продавца не назвать (E-11)', () => {
+  const env = {
+    REPRACER_EBAY_CLIENT_ID: 'Syn-App-SBX', REPRACER_EBAY_RUNAME: 'Syn-RuName', REPRACER_EBAY_SCOPES: 'https://api.ebay.com/oauth/api_scope/sell.inventory',
+    REPRACER_EBAY_CLIENT_SECRET_FILE: '/s/ebay', REPRACER_CHANNEL_KEYRING_FILE: '/s/keyring', REPRACER_EBAY_ENVIRONMENT: 'SANDBOX',
+  };
+  assert.throws(() => loadChannelAppsConfig(env, read), /CONFIG_INVALID: REPRACER_EBAY_SCOPES must include https:\/\/api\.ebay\.com\/oauth\/api_scope\/commerce\.identity\.readonly/);
 });

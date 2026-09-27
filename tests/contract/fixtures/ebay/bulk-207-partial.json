@@ -1,0 +1,232 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "ebay/dispatch/bulk-207-partial",
+  "channel": "EBAY",
+  "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
+  "title": "207: одно предложение принято, другое — 25604 «Offer not found»",
+  "description": "Записано в песочнице: верный и чужой offerId в одном вызове — 207, у верного 200, у чужого 400 25604. Принятое ждёт обратного чтения, ненайденное — NOT_FOUND без повтора.",
+  "tags": [
+    "mandatory:bulk-207-partial",
+    "dispatch"
+  ],
+  "provenance": {
+    "kind": "RECONSTRUCTED_FROM_SANDBOX",
+    "sandbox": true,
+    "recordedAt": "2026-09-27",
+    "evidence": "docs/evidence/step39-ebay-sandbox.md",
+    "reviewedBy": "step39-review: обезличивание проверено",
+    "redactions": [
+      "listing, offer, policy ids and SKUs replaced with synthetic ones",
+      "request ids dropped",
+      "Trading API responses reduced to the elements the checks read; the Seller block (e-mail, address) removed",
+      "tokens were never logged"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-27T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn_ebay_seller_0001",
+      "marketplaces": [
+        "EBAY_DE",
+        "EBAY_US"
+      ],
+      "channel": "EBAY"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "syn-ebay-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "Syn-Repracer-SBX-0001",
+        "clientSecret": "SBX-syn-client-secret-0001"
+      },
+      "accessToken": "syn-ebay-user-token-0001",
+      "applicationToken": "syn-ebay-app-token-0001"
+    }
+  },
+  "steps": [
+    {
+      "id": "dispatch",
+      "kind": "call",
+      "method": "dispatch",
+      "args": [
+        {
+          "batchId": "ebay:b2",
+          "operation": "bulkUpdatePriceQuantity",
+          "items": [
+            {
+              "channelWriteId": "cw-2a",
+              "version": 1,
+              "idempotencyKey": "cw-2a:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-2",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-02",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-02",
+                  "externalOfferId": "9100000002",
+                  "externalListingId": "110000000002"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1129,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            },
+            {
+              "channelWriteId": "cw-2b",
+              "version": 1,
+              "idempotencyKey": "cw-2b:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-3",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-03",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-03",
+                  "externalOfferId": "9100000003",
+                  "externalListingId": "110000000003"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1129,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            }
+          ],
+          "budgetCharges": [
+            {
+              "budgetScopeKey": "110000000002",
+              "field": "PRICE",
+              "attempts": 1
+            },
+            {
+              "budgetScopeKey": "110000000003",
+              "field": "PRICE",
+              "attempts": 1
+            }
+          ],
+          "requestCount": 1
+        }
+      ],
+      "expect": {
+        "attemptsMade": 1,
+        "outcomes": [
+          {
+            "channelWriteId": "cw-2a",
+            "status": "ACCEPTED",
+            "appliedImmediately": false
+          },
+          {
+            "channelWriteId": "cw-2b",
+            "status": "REJECTED",
+            "error": {
+              "code": "NOT_FOUND",
+              "class": "PERMANENT",
+              "scope": "ITEM",
+              "channelCode": "25604",
+              "httpStatus": 400
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "user-token",
+      "note": "Обновление токена пользователя: grant_type=refresh_token + scope, Basic ключей приложения [песочница: ответ без нового refresh-токена]",
+      "request": {
+        "method": "POST",
+        "path": "/identity/v1/oauth2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "syn-ebay-user-token-0001",
+          "expires_in": 7200,
+          "token_type": "User Access Token"
+        }
+      },
+      "origin": "SANDBOX"
+    },
+    {
+      "id": "bulk-partial",
+      "request": {
+        "method": "POST",
+        "path": "/sell/inventory/v1/bulk_update_price_quantity",
+        "body": {
+          "requests": [
+            {
+              "offers": [
+                {
+                  "offerId": "9100000002",
+                  "price": {
+                    "value": "11.29",
+                    "currency": "EUR"
+                  }
+                }
+              ]
+            },
+            {
+              "offers": [
+                {
+                  "offerId": "9100000003",
+                  "price": {
+                    "value": "11.29",
+                    "currency": "EUR"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 207,
+        "body": {
+          "responses": [
+            {
+              "statusCode": 200,
+              "sku": "SYN-EBAY-02",
+              "offerId": "9100000002"
+            },
+            {
+              "statusCode": 400,
+              "offerId": "9100000003",
+              "errors": [
+                {
+                  "errorId": 25604,
+                  "domain": "API_INVENTORY",
+                  "subdomain": "Selling",
+                  "category": "REQUEST",
+                  "message": "Input error. Offer not found. Please try input valid request or contact customer support.."
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "origin": "SANDBOX"
+    }
+  ],
+  "expect": {
+    "noAlerts": true
+  }
+}

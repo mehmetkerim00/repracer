@@ -1,0 +1,162 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "ebay/r164/unmigrated-write-rejected",
+  "channel": "EBAY",
+  "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
+  "title": "Р-164: запись в листинг не под Inventory API отклоняется до обращения к каналу — без миграции и без записи по SKU",
+  "description": "У идентичности нет offerId: листинг не мигрирован. План и отправка отказывают PRECONDITION_FAILED (единица требует человека) с кодом журнала; ни одного обмена — ни токена, ни записи, ни bulk_migrate_listing. В песочнице запись по SKU такого листинга — 400 25604 «SKU not found», то есть «попробовать» было бы тратой бюджета правок (Р-19).",
+  "tags": [
+    "mandatory:unmigrated-write-rejected",
+    "r164"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "docs/evidence/step39-ebay-sandbox.md",
+      "docs/channel-capabilities.md#9",
+      "docs/decisions.md#Р-164"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-27T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn_ebay_seller_0001",
+      "marketplaces": [
+        "EBAY_DE",
+        "EBAY_US"
+      ],
+      "channel": "EBAY"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "syn-ebay-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "Syn-Repracer-SBX-0001",
+        "clientSecret": "SBX-syn-client-secret-0001"
+      },
+      "accessToken": "syn-ebay-user-token-0001",
+      "applicationToken": "syn-ebay-app-token-0001"
+    }
+  },
+  "steps": [
+    {
+      "id": "plan",
+      "kind": "call",
+      "method": "planDispatch",
+      "args": [
+        [
+          {
+            "channelWriteId": "cw-8",
+            "version": 1,
+            "idempotencyKey": "cw-8:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-9",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-09",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-09",
+                "externalListingId": "110000000009"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1399,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          }
+        ]
+      ],
+      "expect": {
+        "batches": [],
+        "rejected": [
+          {
+            "channelWriteId": "cw-8",
+            "error": {
+              "code": "PRECONDITION_FAILED",
+              "class": "REQUIRES_HUMAN",
+              "scope": "ITEM"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "dispatch",
+      "kind": "call",
+      "method": "dispatch",
+      "args": [
+        {
+          "batchId": "ebay:b8",
+          "operation": "bulkUpdatePriceQuantity",
+          "items": [
+            {
+              "channelWriteId": "cw-8",
+              "version": 1,
+              "idempotencyKey": "cw-8:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-9",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-09",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-09",
+                  "externalListingId": "110000000009"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1399,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            }
+          ],
+          "budgetCharges": [
+            {
+              "budgetScopeKey": "110000000009",
+              "field": "PRICE",
+              "attempts": 1
+            }
+          ],
+          "requestCount": 1
+        }
+      ],
+      "expect": {
+        "attemptsMade": 0,
+        "outcomes": [
+          {
+            "channelWriteId": "cw-8",
+            "status": "REJECTED",
+            "error": {
+              "code": "PRECONDITION_FAILED"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "exchanges": [],
+  "expect": {
+    "noAlerts": true,
+    "logs": [
+      {
+        "code": "EBAY_R164_WRITE_TO_UNMIGRATED_LISTING",
+        "count": 2,
+        "details": {
+          "listingId": "110000000009"
+        }
+      }
+    ]
+  }
+}

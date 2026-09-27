@@ -1,0 +1,283 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "ebay/quantity/zero-applied-despite-error",
+  "channel": "EBAY",
+  "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
+  "title": "Количество 0: ответ 400 25004, но значение применено — OUTCOME_UNKNOWN, обратное чтение показывает 0 и OUT_OF_STOCK",
+  "description": "Записано в песочнице: offers[].availableQuantity=0 → 400, responses[] с errorId 25004 «quantity must be a valid number greater than 0»; GET offer после этого — availableQuantity 0, listingStatus OUT_OF_STOCK (листинг не завершён, E-06). Отказ был бы ложью: запись — OUTCOME_UNKNOWN без повтора [EBAY_C04], подтверждение — APPLIED с признаком «не живой: OUT_OF_STOCK». Уменьшение опубликованного остатка никогда не блокируется (инвариант 5).",
+  "tags": [
+    "mandatory:quantity-zero",
+    "quantity",
+    "conservative:EBAY_C04_QUANTITY_ZERO_OUTCOME_UNKNOWN"
+  ],
+  "provenance": {
+    "kind": "RECONSTRUCTED_FROM_SANDBOX",
+    "sandbox": true,
+    "recordedAt": "2026-09-27",
+    "evidence": "docs/evidence/step39-ebay-sandbox.md",
+    "reviewedBy": "step39-review: обезличивание проверено",
+    "redactions": [
+      "listing, offer, policy ids and SKUs replaced with synthetic ones",
+      "request ids dropped",
+      "Trading API responses reduced to the elements the checks read; the Seller block (e-mail, address) removed",
+      "tokens were never logged"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-27T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn_ebay_seller_0001",
+      "marketplaces": [
+        "EBAY_DE",
+        "EBAY_US"
+      ],
+      "channel": "EBAY"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "syn-ebay-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "Syn-Repracer-SBX-0001",
+        "clientSecret": "SBX-syn-client-secret-0001"
+      },
+      "accessToken": "syn-ebay-user-token-0001",
+      "applicationToken": "syn-ebay-app-token-0001"
+    }
+  },
+  "steps": [
+    {
+      "id": "dispatch",
+      "kind": "call",
+      "method": "dispatch",
+      "args": [
+        {
+          "batchId": "ebay:b12",
+          "operation": "bulkUpdatePriceQuantity",
+          "items": [
+            {
+              "channelWriteId": "cw-12",
+              "version": 1,
+              "idempotencyKey": "cw-12:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-qty-10",
+                "field": "QUANTITY",
+                "scopeKey": "ebay|acct-1|SYN-EBAY-10",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-10",
+                  "externalOfferId": "9100000010",
+                  "externalListingId": "110000000010"
+                }
+              },
+              "value": {
+                "field": "QUANTITY",
+                "quantity": 0
+              }
+            }
+          ],
+          "budgetCharges": [
+            {
+              "budgetScopeKey": "110000000010",
+              "field": "QUANTITY",
+              "attempts": 1
+            }
+          ],
+          "requestCount": 1
+        }
+      ],
+      "expect": {
+        "attemptsMade": 1,
+        "outcomes": [
+          {
+            "channelWriteId": "cw-12",
+            "status": "OUTCOME_UNKNOWN",
+            "error": {
+              "channelCode": "25004",
+              "httpStatus": 400
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "confirm",
+      "kind": "call",
+      "method": "confirm",
+      "args": [
+        [
+          {
+            "channelWriteId": "cw-12",
+            "writeScope": {
+              "writeScopeId": "ws-ebay-qty-10",
+              "field": "QUANTITY",
+              "scopeKey": "ebay|acct-1|SYN-EBAY-10",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-10",
+                "externalOfferId": "9100000010",
+                "externalListingId": "110000000010"
+              }
+            },
+            "expected": {
+              "field": "QUANTITY",
+              "quantity": 0
+            },
+            "dispatchedAt": {
+              "$clockIso": 0
+            }
+          }
+        ]
+      ],
+      "expect": [
+        {
+          "channelWriteId": "cw-12",
+          "status": "APPLIED",
+          "observation": {
+            "field": "QUANTITY",
+            "value": {
+              "quantity": 0
+            },
+            "liveness": {
+              "isLive": false,
+              "reasons": [
+                "OUT_OF_STOCK"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "user-token",
+      "note": "Обновление токена пользователя: grant_type=refresh_token + scope, Basic ключей приложения [песочница: ответ без нового refresh-токена]",
+      "request": {
+        "method": "POST",
+        "path": "/identity/v1/oauth2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "syn-ebay-user-token-0001",
+          "expires_in": 7200,
+          "token_type": "User Access Token"
+        }
+      },
+      "origin": "SANDBOX"
+    },
+    {
+      "id": "bulk-qty-zero",
+      "request": {
+        "method": "POST",
+        "path": "/sell/inventory/v1/bulk_update_price_quantity",
+        "body": {
+          "requests": [
+            {
+              "offers": [
+                {
+                  "offerId": "9100000010",
+                  "availableQuantity": 0
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "responses": [
+            {
+              "statusCode": 400,
+              "sku": "SYN-EBAY-10",
+              "offerId": "9100000010",
+              "errors": [
+                {
+                  "errorId": 25004,
+                  "domain": "API_INVENTORY",
+                  "subdomain": "Selling",
+                  "category": "REQUEST",
+                  "message": "The eBay listing associated with the inventory item, or the unpublished offer has an invalid quantity. The quantity must be a valid number greater than 0.",
+                  "parameters": [
+                    {
+                      "name": "ItemID",
+                      "value": "110000000010"
+                    },
+                    {
+                      "name": "SKU",
+                      "value": "SYN-EBAY-10"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "origin": "SANDBOX"
+    },
+    {
+      "id": "get-offer-zero",
+      "request": {
+        "method": "GET",
+        "path": "/sell/inventory/v1/offer/9100000010"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "offerId": "9100000010",
+          "sku": "SYN-EBAY-10",
+          "marketplaceId": "EBAY_DE",
+          "format": "FIXED_PRICE",
+          "availableQuantity": 0,
+          "pricingSummary": {
+            "price": {
+              "value": "11.29",
+              "currency": "EUR"
+            }
+          },
+          "listingPolicies": {
+            "paymentPolicyId": "6200000002",
+            "returnPolicyId": "6200000003",
+            "fulfillmentPolicyId": "6200000001",
+            "eBayPlusIfEligible": false
+          },
+          "categoryId": "20695",
+          "merchantLocationKey": "syn-lager-1",
+          "tax": {
+            "applyTax": false
+          },
+          "listing": {
+            "listingId": "110000000010",
+            "listingStatus": "OUT_OF_STOCK",
+            "soldQuantity": 0
+          },
+          "status": "PUBLISHED",
+          "listingDuration": "GTC"
+        }
+      },
+      "origin": "SANDBOX"
+    }
+  ],
+  "expect": {
+    "noAlerts": true,
+    "logs": [
+      {
+        "code": "EBAY_C04_QUANTITY_ZERO_OUTCOME_UNKNOWN",
+        "question": "E-06",
+        "count": 1
+      }
+    ]
+  }
+}

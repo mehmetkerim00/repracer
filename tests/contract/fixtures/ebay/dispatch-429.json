@@ -1,0 +1,174 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "ebay/dispatch/429",
+  "channel": "EBAY",
+  "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
+  "title": "429: запись не принята, повтор не раньше чем через 60 секунд",
+  "description": "Лимиты Inventory API неизвестны (песочница — заглушка, Р-162): ответ 429 не записан, форма тела синтетическая. Запись — REJECTED RATE_LIMITED с retryAt +60 с [EBAY_C01, E-04]; транспорт запись не повторяет.",
+  "tags": [
+    "mandatory:429",
+    "dispatch",
+    "conservative:EBAY_C01_REQUEST_BUDGET"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "docs/evidence/step39-ebay-sandbox.md",
+      "docs/channel-capabilities.md#9",
+      "docs/channel-capabilities.md#E-04"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-27T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn_ebay_seller_0001",
+      "marketplaces": [
+        "EBAY_DE",
+        "EBAY_US"
+      ],
+      "channel": "EBAY"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "syn-ebay-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "Syn-Repracer-SBX-0001",
+        "clientSecret": "SBX-syn-client-secret-0001"
+      },
+      "accessToken": "syn-ebay-user-token-0001",
+      "applicationToken": "syn-ebay-app-token-0001"
+    }
+  },
+  "steps": [
+    {
+      "id": "dispatch",
+      "kind": "call",
+      "method": "dispatch",
+      "args": [
+        {
+          "batchId": "ebay:b3",
+          "operation": "bulkUpdatePriceQuantity",
+          "items": [
+            {
+              "channelWriteId": "cw-3",
+              "version": 1,
+              "idempotencyKey": "cw-3:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-4",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-04",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-04",
+                  "externalOfferId": "9100000004",
+                  "externalListingId": "110000000004"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1500,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            }
+          ],
+          "budgetCharges": [
+            {
+              "budgetScopeKey": "110000000004",
+              "field": "PRICE",
+              "attempts": 1
+            }
+          ],
+          "requestCount": 1
+        }
+      ],
+      "expect": {
+        "attemptsMade": 1,
+        "outcomes": [
+          {
+            "channelWriteId": "cw-3",
+            "status": "REJECTED",
+            "error": {
+              "code": "RATE_LIMITED",
+              "class": "TRANSIENT",
+              "httpStatus": 429,
+              "retryAt": {
+                "$clockIso": 60000
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "user-token",
+      "note": "Обновление токена пользователя: grant_type=refresh_token + scope, Basic ключей приложения [песочница: ответ без нового refresh-токена]",
+      "request": {
+        "method": "POST",
+        "path": "/identity/v1/oauth2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "syn-ebay-user-token-0001",
+          "expires_in": 7200,
+          "token_type": "User Access Token"
+        }
+      }
+    },
+    {
+      "id": "bulk-429",
+      "request": {
+        "method": "POST",
+        "path": "/sell/inventory/v1/bulk_update_price_quantity",
+        "body": {
+          "requests": [
+            {
+              "offers": [
+                {
+                  "offerId": "9100000004",
+                  "price": {
+                    "value": "15.00",
+                    "currency": "EUR"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 429,
+        "body": {
+          "errors": [
+            {
+              "errorId": 2001,
+              "message": "Too many requests"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "expect": {
+    "noAlerts": true,
+    "logs": [
+      {
+        "code": "EBAY_C01_REQUEST_BUDGET",
+        "question": "E-04",
+        "count": 1
+      }
+    ]
+  }
+}

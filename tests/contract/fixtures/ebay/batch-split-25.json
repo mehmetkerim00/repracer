@@ -1,0 +1,1616 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "ebay/plan/batch-split-25",
+  "channel": "EBAY",
+  "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
+  "title": "26 записей: план делит на 25 + 1; пакет больше 25 при отправке отклоняется без обращения к каналу",
+  "description": "Песочница: 26 запросов в одном вызове — 400 25712 «The maximum size allowed is 25» на весь запрос [EBAY_C09]. План не собирает пакет больше 25; пакет, собранный мимо плана, отклоняется локально — ни одного обмена.",
+  "tags": [
+    "mandatory:batch-split-25",
+    "plan",
+    "conservative:EBAY_C09_BATCH_MAX_25"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "docs/evidence/step39-ebay-sandbox.md",
+      "docs/channel-capabilities.md#9"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-27T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn_ebay_seller_0001",
+      "marketplaces": [
+        "EBAY_DE",
+        "EBAY_US"
+      ],
+      "channel": "EBAY"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "syn-ebay-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "Syn-Repracer-SBX-0001",
+        "clientSecret": "SBX-syn-client-secret-0001"
+      },
+      "accessToken": "syn-ebay-user-token-0001",
+      "applicationToken": "syn-ebay-app-token-0001"
+    }
+  },
+  "steps": [
+    {
+      "id": "plan",
+      "kind": "call",
+      "method": "planDispatch",
+      "args": [
+        [
+          {
+            "channelWriteId": "cw-14-0",
+            "version": 1,
+            "idempotencyKey": "cw-14-0:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-30",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-30",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-30",
+                "externalOfferId": "9100000030",
+                "externalListingId": "110000000030"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1000,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          },
+          {
+            "channelWriteId": "cw-14-1",
+            "version": 1,
+            "idempotencyKey": "cw-14-1:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-31",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-31",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-31",
+                "externalOfferId": "9100000031",
+                "externalListingId": "110000000031"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1001,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          },
+          {
+            "channelWriteId": "cw-14-2",
+            "version": 1,
+            "idempotencyKey": "cw-14-2:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-32",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-32",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-32",
+                "externalOfferId": "9100000032",
+                "externalListingId": "110000000032"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1002,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          },
+          {
+            "channelWriteId": "cw-14-3",
+            "version": 1,
+            "idempotencyKey": "cw-14-3:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-33",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-33",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-33",
+                "externalOfferId": "9100000033",
+                "externalListingId": "110000000033"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1003,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          },
+          {
+            "channelWriteId": "cw-14-4",
+            "version": 1,
+            "idempotencyKey": "cw-14-4:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-34",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-34",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-34",
+                "externalOfferId": "9100000034",
+                "externalListingId": "110000000034"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1004,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          },
+          {
+            "channelWriteId": "cw-14-5",
+            "version": 1,
+            "idempotencyKey": "cw-14-5:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-35",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-35",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-35",
+                "externalOfferId": "9100000035",
+                "externalListingId": "110000000035"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1005,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          },
+          {
+            "channelWriteId": "cw-14-6",
+            "version": 1,
+            "idempotencyKey": "cw-14-6:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-36",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-36",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-36",
+                "externalOfferId": "9100000036",
+                "externalListingId": "110000000036"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1006,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          },
+          {
+            "channelWriteId": "cw-14-7",
+            "version": 1,
+            "idempotencyKey": "cw-14-7:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-37",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-37",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-37",
+                "externalOfferId": "9100000037",
+                "externalListingId": "110000000037"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1007,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          },
+          {
+            "channelWriteId": "cw-14-8",
+            "version": 1,
+            "idempotencyKey": "cw-14-8:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-38",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-38",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-38",
+                "externalOfferId": "9100000038",
+                "externalListingId": "110000000038"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1008,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          },
+          {
+            "channelWriteId": "cw-14-9",
+            "version": 1,
+            "idempotencyKey": "cw-14-9:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-39",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-39",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-39",
+                "externalOfferId": "9100000039",
+                "externalListingId": "110000000039"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1009,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          },
+          {
+            "channelWriteId": "cw-14-10",
+            "version": 1,
+            "idempotencyKey": "cw-14-10:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-40",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-40",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-40",
+                "externalOfferId": "9100000040",
+                "externalListingId": "110000000040"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1010,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          },
+          {
+            "channelWriteId": "cw-14-11",
+            "version": 1,
+            "idempotencyKey": "cw-14-11:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-41",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-41",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-41",
+                "externalOfferId": "9100000041",
+                "externalListingId": "110000000041"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1011,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          },
+          {
+            "channelWriteId": "cw-14-12",
+            "version": 1,
+            "idempotencyKey": "cw-14-12:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-42",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-42",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-42",
+                "externalOfferId": "9100000042",
+                "externalListingId": "110000000042"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1012,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          },
+          {
+            "channelWriteId": "cw-14-13",
+            "version": 1,
+            "idempotencyKey": "cw-14-13:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-43",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-43",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-43",
+                "externalOfferId": "9100000043",
+                "externalListingId": "110000000043"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1013,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          },
+          {
+            "channelWriteId": "cw-14-14",
+            "version": 1,
+            "idempotencyKey": "cw-14-14:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-44",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-44",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-44",
+                "externalOfferId": "9100000044",
+                "externalListingId": "110000000044"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1014,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          },
+          {
+            "channelWriteId": "cw-14-15",
+            "version": 1,
+            "idempotencyKey": "cw-14-15:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-45",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-45",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-45",
+                "externalOfferId": "9100000045",
+                "externalListingId": "110000000045"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1015,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          },
+          {
+            "channelWriteId": "cw-14-16",
+            "version": 1,
+            "idempotencyKey": "cw-14-16:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-46",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-46",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-46",
+                "externalOfferId": "9100000046",
+                "externalListingId": "110000000046"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1016,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          },
+          {
+            "channelWriteId": "cw-14-17",
+            "version": 1,
+            "idempotencyKey": "cw-14-17:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-47",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-47",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-47",
+                "externalOfferId": "9100000047",
+                "externalListingId": "110000000047"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1017,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          },
+          {
+            "channelWriteId": "cw-14-18",
+            "version": 1,
+            "idempotencyKey": "cw-14-18:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-48",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-48",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-48",
+                "externalOfferId": "9100000048",
+                "externalListingId": "110000000048"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1018,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          },
+          {
+            "channelWriteId": "cw-14-19",
+            "version": 1,
+            "idempotencyKey": "cw-14-19:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-49",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-49",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-49",
+                "externalOfferId": "9100000049",
+                "externalListingId": "110000000049"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1019,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          },
+          {
+            "channelWriteId": "cw-14-20",
+            "version": 1,
+            "idempotencyKey": "cw-14-20:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-50",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-50",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-50",
+                "externalOfferId": "9100000050",
+                "externalListingId": "110000000050"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1020,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          },
+          {
+            "channelWriteId": "cw-14-21",
+            "version": 1,
+            "idempotencyKey": "cw-14-21:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-51",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-51",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-51",
+                "externalOfferId": "9100000051",
+                "externalListingId": "110000000051"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1021,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          },
+          {
+            "channelWriteId": "cw-14-22",
+            "version": 1,
+            "idempotencyKey": "cw-14-22:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-52",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-52",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-52",
+                "externalOfferId": "9100000052",
+                "externalListingId": "110000000052"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1022,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          },
+          {
+            "channelWriteId": "cw-14-23",
+            "version": 1,
+            "idempotencyKey": "cw-14-23:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-53",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-53",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-53",
+                "externalOfferId": "9100000053",
+                "externalListingId": "110000000053"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1023,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          },
+          {
+            "channelWriteId": "cw-14-24",
+            "version": 1,
+            "idempotencyKey": "cw-14-24:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-54",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-54",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-54",
+                "externalOfferId": "9100000054",
+                "externalListingId": "110000000054"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1024,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          },
+          {
+            "channelWriteId": "cw-14-25",
+            "version": 1,
+            "idempotencyKey": "cw-14-25:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-55",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-55",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-55",
+                "externalOfferId": "9100000055",
+                "externalListingId": "110000000055"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1025,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          }
+        ]
+      ],
+      "expect": {
+        "rejected": [],
+        "batches": [
+          {
+            "requestCount": 1,
+            "items": [
+              {
+                "channelWriteId": "cw-14-0"
+              },
+              {
+                "channelWriteId": "cw-14-1"
+              },
+              {
+                "channelWriteId": "cw-14-2"
+              },
+              {
+                "channelWriteId": "cw-14-3"
+              },
+              {
+                "channelWriteId": "cw-14-4"
+              },
+              {
+                "channelWriteId": "cw-14-5"
+              },
+              {
+                "channelWriteId": "cw-14-6"
+              },
+              {
+                "channelWriteId": "cw-14-7"
+              },
+              {
+                "channelWriteId": "cw-14-8"
+              },
+              {
+                "channelWriteId": "cw-14-9"
+              },
+              {
+                "channelWriteId": "cw-14-10"
+              },
+              {
+                "channelWriteId": "cw-14-11"
+              },
+              {
+                "channelWriteId": "cw-14-12"
+              },
+              {
+                "channelWriteId": "cw-14-13"
+              },
+              {
+                "channelWriteId": "cw-14-14"
+              },
+              {
+                "channelWriteId": "cw-14-15"
+              },
+              {
+                "channelWriteId": "cw-14-16"
+              },
+              {
+                "channelWriteId": "cw-14-17"
+              },
+              {
+                "channelWriteId": "cw-14-18"
+              },
+              {
+                "channelWriteId": "cw-14-19"
+              },
+              {
+                "channelWriteId": "cw-14-20"
+              },
+              {
+                "channelWriteId": "cw-14-21"
+              },
+              {
+                "channelWriteId": "cw-14-22"
+              },
+              {
+                "channelWriteId": "cw-14-23"
+              },
+              {
+                "channelWriteId": "cw-14-24"
+              }
+            ]
+          },
+          {
+            "requestCount": 1,
+            "items": [
+              {
+                "channelWriteId": "cw-14-25"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "oversized-batch",
+      "kind": "call",
+      "method": "dispatch",
+      "args": [
+        {
+          "batchId": "ebay:b14",
+          "operation": "bulkUpdatePriceQuantity",
+          "items": [
+            {
+              "channelWriteId": "cw-14-0",
+              "version": 1,
+              "idempotencyKey": "cw-14-0:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-30",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-30",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-30",
+                  "externalOfferId": "9100000030",
+                  "externalListingId": "110000000030"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1000,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            },
+            {
+              "channelWriteId": "cw-14-1",
+              "version": 1,
+              "idempotencyKey": "cw-14-1:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-31",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-31",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-31",
+                  "externalOfferId": "9100000031",
+                  "externalListingId": "110000000031"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1001,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            },
+            {
+              "channelWriteId": "cw-14-2",
+              "version": 1,
+              "idempotencyKey": "cw-14-2:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-32",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-32",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-32",
+                  "externalOfferId": "9100000032",
+                  "externalListingId": "110000000032"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1002,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            },
+            {
+              "channelWriteId": "cw-14-3",
+              "version": 1,
+              "idempotencyKey": "cw-14-3:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-33",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-33",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-33",
+                  "externalOfferId": "9100000033",
+                  "externalListingId": "110000000033"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1003,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            },
+            {
+              "channelWriteId": "cw-14-4",
+              "version": 1,
+              "idempotencyKey": "cw-14-4:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-34",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-34",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-34",
+                  "externalOfferId": "9100000034",
+                  "externalListingId": "110000000034"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1004,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            },
+            {
+              "channelWriteId": "cw-14-5",
+              "version": 1,
+              "idempotencyKey": "cw-14-5:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-35",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-35",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-35",
+                  "externalOfferId": "9100000035",
+                  "externalListingId": "110000000035"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1005,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            },
+            {
+              "channelWriteId": "cw-14-6",
+              "version": 1,
+              "idempotencyKey": "cw-14-6:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-36",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-36",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-36",
+                  "externalOfferId": "9100000036",
+                  "externalListingId": "110000000036"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1006,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            },
+            {
+              "channelWriteId": "cw-14-7",
+              "version": 1,
+              "idempotencyKey": "cw-14-7:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-37",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-37",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-37",
+                  "externalOfferId": "9100000037",
+                  "externalListingId": "110000000037"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1007,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            },
+            {
+              "channelWriteId": "cw-14-8",
+              "version": 1,
+              "idempotencyKey": "cw-14-8:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-38",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-38",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-38",
+                  "externalOfferId": "9100000038",
+                  "externalListingId": "110000000038"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1008,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            },
+            {
+              "channelWriteId": "cw-14-9",
+              "version": 1,
+              "idempotencyKey": "cw-14-9:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-39",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-39",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-39",
+                  "externalOfferId": "9100000039",
+                  "externalListingId": "110000000039"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1009,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            },
+            {
+              "channelWriteId": "cw-14-10",
+              "version": 1,
+              "idempotencyKey": "cw-14-10:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-40",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-40",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-40",
+                  "externalOfferId": "9100000040",
+                  "externalListingId": "110000000040"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1010,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            },
+            {
+              "channelWriteId": "cw-14-11",
+              "version": 1,
+              "idempotencyKey": "cw-14-11:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-41",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-41",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-41",
+                  "externalOfferId": "9100000041",
+                  "externalListingId": "110000000041"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1011,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            },
+            {
+              "channelWriteId": "cw-14-12",
+              "version": 1,
+              "idempotencyKey": "cw-14-12:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-42",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-42",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-42",
+                  "externalOfferId": "9100000042",
+                  "externalListingId": "110000000042"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1012,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            },
+            {
+              "channelWriteId": "cw-14-13",
+              "version": 1,
+              "idempotencyKey": "cw-14-13:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-43",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-43",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-43",
+                  "externalOfferId": "9100000043",
+                  "externalListingId": "110000000043"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1013,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            },
+            {
+              "channelWriteId": "cw-14-14",
+              "version": 1,
+              "idempotencyKey": "cw-14-14:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-44",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-44",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-44",
+                  "externalOfferId": "9100000044",
+                  "externalListingId": "110000000044"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1014,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            },
+            {
+              "channelWriteId": "cw-14-15",
+              "version": 1,
+              "idempotencyKey": "cw-14-15:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-45",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-45",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-45",
+                  "externalOfferId": "9100000045",
+                  "externalListingId": "110000000045"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1015,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            },
+            {
+              "channelWriteId": "cw-14-16",
+              "version": 1,
+              "idempotencyKey": "cw-14-16:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-46",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-46",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-46",
+                  "externalOfferId": "9100000046",
+                  "externalListingId": "110000000046"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1016,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            },
+            {
+              "channelWriteId": "cw-14-17",
+              "version": 1,
+              "idempotencyKey": "cw-14-17:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-47",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-47",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-47",
+                  "externalOfferId": "9100000047",
+                  "externalListingId": "110000000047"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1017,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            },
+            {
+              "channelWriteId": "cw-14-18",
+              "version": 1,
+              "idempotencyKey": "cw-14-18:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-48",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-48",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-48",
+                  "externalOfferId": "9100000048",
+                  "externalListingId": "110000000048"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1018,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            },
+            {
+              "channelWriteId": "cw-14-19",
+              "version": 1,
+              "idempotencyKey": "cw-14-19:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-49",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-49",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-49",
+                  "externalOfferId": "9100000049",
+                  "externalListingId": "110000000049"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1019,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            },
+            {
+              "channelWriteId": "cw-14-20",
+              "version": 1,
+              "idempotencyKey": "cw-14-20:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-50",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-50",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-50",
+                  "externalOfferId": "9100000050",
+                  "externalListingId": "110000000050"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1020,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            },
+            {
+              "channelWriteId": "cw-14-21",
+              "version": 1,
+              "idempotencyKey": "cw-14-21:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-51",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-51",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-51",
+                  "externalOfferId": "9100000051",
+                  "externalListingId": "110000000051"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1021,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            },
+            {
+              "channelWriteId": "cw-14-22",
+              "version": 1,
+              "idempotencyKey": "cw-14-22:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-52",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-52",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-52",
+                  "externalOfferId": "9100000052",
+                  "externalListingId": "110000000052"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1022,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            },
+            {
+              "channelWriteId": "cw-14-23",
+              "version": 1,
+              "idempotencyKey": "cw-14-23:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-53",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-53",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-53",
+                  "externalOfferId": "9100000053",
+                  "externalListingId": "110000000053"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1023,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            },
+            {
+              "channelWriteId": "cw-14-24",
+              "version": 1,
+              "idempotencyKey": "cw-14-24:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-54",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-54",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-54",
+                  "externalOfferId": "9100000054",
+                  "externalListingId": "110000000054"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1024,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            },
+            {
+              "channelWriteId": "cw-14-25",
+              "version": 1,
+              "idempotencyKey": "cw-14-25:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-55",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-55",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-55",
+                  "externalOfferId": "9100000055",
+                  "externalListingId": "110000000055"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1025,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            }
+          ],
+          "budgetCharges": [
+            {
+              "budgetScopeKey": "110000000030",
+              "field": "PRICE",
+              "attempts": 1
+            },
+            {
+              "budgetScopeKey": "110000000031",
+              "field": "PRICE",
+              "attempts": 1
+            },
+            {
+              "budgetScopeKey": "110000000032",
+              "field": "PRICE",
+              "attempts": 1
+            },
+            {
+              "budgetScopeKey": "110000000033",
+              "field": "PRICE",
+              "attempts": 1
+            },
+            {
+              "budgetScopeKey": "110000000034",
+              "field": "PRICE",
+              "attempts": 1
+            },
+            {
+              "budgetScopeKey": "110000000035",
+              "field": "PRICE",
+              "attempts": 1
+            },
+            {
+              "budgetScopeKey": "110000000036",
+              "field": "PRICE",
+              "attempts": 1
+            },
+            {
+              "budgetScopeKey": "110000000037",
+              "field": "PRICE",
+              "attempts": 1
+            },
+            {
+              "budgetScopeKey": "110000000038",
+              "field": "PRICE",
+              "attempts": 1
+            },
+            {
+              "budgetScopeKey": "110000000039",
+              "field": "PRICE",
+              "attempts": 1
+            },
+            {
+              "budgetScopeKey": "110000000040",
+              "field": "PRICE",
+              "attempts": 1
+            },
+            {
+              "budgetScopeKey": "110000000041",
+              "field": "PRICE",
+              "attempts": 1
+            },
+            {
+              "budgetScopeKey": "110000000042",
+              "field": "PRICE",
+              "attempts": 1
+            },
+            {
+              "budgetScopeKey": "110000000043",
+              "field": "PRICE",
+              "attempts": 1
+            },
+            {
+              "budgetScopeKey": "110000000044",
+              "field": "PRICE",
+              "attempts": 1
+            },
+            {
+              "budgetScopeKey": "110000000045",
+              "field": "PRICE",
+              "attempts": 1
+            },
+            {
+              "budgetScopeKey": "110000000046",
+              "field": "PRICE",
+              "attempts": 1
+            },
+            {
+              "budgetScopeKey": "110000000047",
+              "field": "PRICE",
+              "attempts": 1
+            },
+            {
+              "budgetScopeKey": "110000000048",
+              "field": "PRICE",
+              "attempts": 1
+            },
+            {
+              "budgetScopeKey": "110000000049",
+              "field": "PRICE",
+              "attempts": 1
+            },
+            {
+              "budgetScopeKey": "110000000050",
+              "field": "PRICE",
+              "attempts": 1
+            },
+            {
+              "budgetScopeKey": "110000000051",
+              "field": "PRICE",
+              "attempts": 1
+            },
+            {
+              "budgetScopeKey": "110000000052",
+              "field": "PRICE",
+              "attempts": 1
+            },
+            {
+              "budgetScopeKey": "110000000053",
+              "field": "PRICE",
+              "attempts": 1
+            },
+            {
+              "budgetScopeKey": "110000000054",
+              "field": "PRICE",
+              "attempts": 1
+            },
+            {
+              "budgetScopeKey": "110000000055",
+              "field": "PRICE",
+              "attempts": 1
+            }
+          ],
+          "requestCount": 1
+        }
+      ],
+      "expect": {
+        "attemptsMade": 0,
+        "outcomes": {
+          "$every": {
+            "status": "REJECTED",
+            "error": {
+              "code": "VALIDATION",
+              "scope": "BATCH"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "exchanges": [],
+  "expect": {
+    "noAlerts": true,
+    "logs": [
+      {
+        "code": "EBAY_C09_BATCH_MAX_25",
+        "count": 1
+      }
+    ]
+  }
+}

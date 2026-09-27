@@ -134,6 +134,54 @@ export function amazonRequestChecker(world: World, clock: VirtualClock, forbidde
   };
 }
 
+/**
+ * Шаг 39: проверка запросов eBay на каждом обмене. Хост — песочница или бой по миру сценария; токен сервера токенов — Basic из ключей
+ * приложения, обновление refresh-токена продавца или client_credentials; Inventory — Bearer токена пользователя; Browse — Bearer токена
+ * приложения и витрина в X-EBAY-C-MARKETPLACE-ID; Trading — токен пользователя в X-EBAY-API-IAF-TOKEN. Ключ приложения и refresh-токен
+ * не появляются нигде, кроме запроса токена; запроса миграции без согласия стенд не видит — его отвергает тип (Р-164).
+ */
+export function ebayRequestChecker(world: World, host: string): (request: ObservedRequest) => string[] {
+  return (request) => {
+    const v: string[] = [];
+    const where = `${request.method} ${request.path}`;
+    const h = request.headers;
+    const app = world.credentials.application ?? {};
+    const secrets = [world.credentials.seller.refreshToken, app.clientSecret].filter((x): x is string => Boolean(x));
+    if (new URL(request.rawUrl).origin !== host) v.push(`${where}: request goes to ${new URL(request.rawUrl).origin}, not ${host}`);
+    if (request.path === '/identity/v1/oauth2/token') {
+      const form = new URLSearchParams(request.rawBody);
+      if (request.method !== 'POST') v.push(`${where}: token request must be POST`);
+      const basic = `Basic ${Buffer.from(`${app.clientId ?? ''}:${app.clientSecret ?? ''}`, 'utf8').toString('base64')}`;
+      if (h.authorization !== basic) v.push(`${where}: token request is not authorised with the application keys`);
+      const grant = form.get('grant_type');
+      if (grant === 'refresh_token') {
+        if (form.get('refresh_token') !== world.credentials.seller.refreshToken) v.push(`${where}: refresh_token is not the seller refresh token`);
+        if (!form.get('scope')) v.push(`${where}: refresh without scope`);
+      } else if (grant === 'client_credentials') {
+        if (form.get('scope') !== 'https://api.ebay.com/oauth/api_scope') v.push(`${where}: application token scope is not api_scope`);
+      } else {
+        v.push(`${where}: unexpected grant_type ${grant}`);
+      }
+      for (const s of secrets) if (request.rawUrl.includes(s)) v.push(`${where}: secret in the URL`);
+      return v;
+    }
+    if (request.path === '/ws/api.dll') {
+      if (h['x-ebay-api-iaf-token'] !== world.credentials.accessToken) v.push(`${where}: X-EBAY-API-IAF-TOKEN is not the user token`);
+      if (!h['x-ebay-api-call-name'] || !h['x-ebay-api-siteid'] || h['x-ebay-api-compatibility-level'] !== '1349') v.push(`${where}: Trading API headers are incomplete`);
+      if (h.authorization) v.push(`${where}: Trading API call carries an Authorization header`);
+    } else if (request.path.startsWith('/buy/browse/')) {
+      if (h.authorization !== `Bearer ${world.credentials.applicationToken}`) v.push(`${where}: Browse API is not called with the application token`);
+      if (!h['x-ebay-c-marketplace-id']) v.push(`${where}: X-EBAY-C-MARKETPLACE-ID is missing`);
+    } else if (h.authorization !== `Bearer ${world.credentials.accessToken}`) {
+      v.push(`${where}: Inventory API is not called with the user token`);
+    }
+    for (const s of secrets) {
+      if (request.rawUrl.includes(s) || request.rawBody.includes(s) || Object.values(h).includes(s)) v.push(`${where}: secret leaked into the request`);
+    }
+    return v;
+  };
+}
+
 export interface TraceEntry { method: string; path: string; exchangeId: string | null; outcome: string; atMs: number }
 
 function headersToRecord(headers: RequestInit['headers']): Record<string, string> {
@@ -195,7 +243,9 @@ export function channelFetch(
       });
     }
     const noBody = reply.status === 204 || reply.body === undefined;
-    return new Response(noBody ? null : JSON.stringify(reply.body), {
+    // Ответ XML (Trading API eBay) отдаётся строкой как есть, остальное — JSON
+    const xml = typeof reply.body === 'string' && (reply.headers['content-type'] ?? '').includes('xml');
+    return new Response(noBody ? null : xml ? reply.body as string : JSON.stringify(reply.body), {
       status: reply.status,
       headers: { 'content-type': 'application/json', ...reply.headers },
     });

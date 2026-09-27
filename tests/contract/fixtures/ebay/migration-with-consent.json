@@ -1,0 +1,279 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "ebay/migration/with-consent",
+  "channel": "EBAY",
+  "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
+  "title": "Миграция с согласием владельца: перепроверка снимка, bulk_migrate_listing одного листинга, предложение Inventory API в ответе",
+  "description": "Р-164: ровно один цикл, один листинг — как в песочнице. Согласие дано на снимок предполётной проверки (SHA-256 подмножества GetItem); перед вызовом листинг проверяется заново и снимок совпал. Ответ песочницы: responses[].statusCode 200, inventoryItems[{sku, offerId}] — MIGRATED с идентификатором предложения, которое дальше несёт идентичность записи.",
+  "tags": [
+    "mandatory:migration-with-consent",
+    "migration"
+  ],
+  "provenance": {
+    "kind": "RECONSTRUCTED_FROM_SANDBOX",
+    "sandbox": true,
+    "recordedAt": "2026-09-27",
+    "evidence": "docs/evidence/step39-ebay-sandbox.md",
+    "reviewedBy": "step39-review: обезличивание проверено",
+    "redactions": [
+      "listing, offer, policy ids and SKUs replaced with synthetic ones",
+      "request ids dropped",
+      "Trading API responses reduced to the elements the checks read; the Seller block (e-mail, address) removed",
+      "tokens were never logged"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-27T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn_ebay_seller_0001",
+      "marketplaces": [
+        "EBAY_DE",
+        "EBAY_US"
+      ],
+      "channel": "EBAY"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "syn-ebay-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "Syn-Repracer-SBX-0001",
+        "clientSecret": "SBX-syn-client-secret-0001"
+      },
+      "accessToken": "syn-ebay-user-token-0001",
+      "applicationToken": "syn-ebay-app-token-0001"
+    }
+  },
+  "steps": [
+    {
+      "id": "preflight",
+      "kind": "call",
+      "method": "preflight",
+      "args": [
+        [
+          "110000000021"
+        ]
+      ],
+      "expect": [
+        {
+          "listingId": "110000000021",
+          "verdict": "READY",
+          "listingSnapshotSha256": "ff42601d816cbb64d77cb23d7bc46d7c96ead223328fb8863c4756eb8473d7ab"
+        }
+      ]
+    },
+    {
+      "id": "budget-refill",
+      "kind": "advanceClock",
+      "ms": 5000
+    },
+    {
+      "id": "migrate",
+      "kind": "call",
+      "method": "migrate",
+      "args": [
+        [
+          {
+            "migrationConsentId": "mc-syn-0001",
+            "listingId": "110000000021",
+            "listingSnapshotSha256": "ff42601d816cbb64d77cb23d7bc46d7c96ead223328fb8863c4756eb8473d7ab",
+            "offerMappingStatus": "MIGRATION_STARTED"
+          }
+        ]
+      ],
+      "expect": [
+        {
+          "listingId": "110000000021",
+          "status": "MIGRATED",
+          "externalOfferIds": [
+            "9100000021"
+          ]
+        }
+      ]
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "user-token",
+      "note": "Обновление токена пользователя: grant_type=refresh_token + scope, Basic ключей приложения [песочница: ответ без нового refresh-токена]",
+      "request": {
+        "method": "POST",
+        "path": "/identity/v1/oauth2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "syn-ebay-user-token-0001",
+          "expires_in": 7200,
+          "token_type": "User Access Token"
+        }
+      },
+      "origin": "SANDBOX"
+    },
+    {
+      "id": "get-user-preferences",
+      "request": {
+        "method": "POST",
+        "path": "/ws/api.dll",
+        "body": "<?xml version=\"1.0\" encoding=\"utf-8\"?><GetUserPreferencesRequest xmlns=\"urn:ebay:apis:eBLBaseComponents\"><ShowOutOfStockControlPreference>true</ShowOutOfStockControlPreference></GetUserPreferencesRequest>"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "text/xml"
+        },
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<GetUserPreferencesResponse xmlns=\"urn:ebay:apis:eBLBaseComponents\"><Timestamp>2026-09-27T17:24:39.119Z</Timestamp><Ack>Success</Ack><Version>1271</Version><OutOfStockControlPreference>false</OutOfStockControlPreference></GetUserPreferencesResponse>"
+      },
+      "origin": "SANDBOX"
+    },
+    {
+      "id": "get-item",
+      "request": {
+        "method": "POST",
+        "path": "/ws/api.dll",
+        "body": "<?xml version=\"1.0\" encoding=\"utf-8\"?><GetItemRequest xmlns=\"urn:ebay:apis:eBLBaseComponents\"><ItemID>110000000021</ItemID><DetailLevel>ReturnAll</DetailLevel></GetItemRequest>"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "text/xml"
+        },
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<GetItemResponse xmlns=\"urn:ebay:apis:eBLBaseComponents\"><Timestamp>2026-09-27T17:24:36.316Z</Timestamp><Ack>Success</Ack><Version>1193</Version><Item><Currency>EUR</Currency><ItemID>110000000021</ItemID><ListingDesigner><LayoutID>7710000</LayoutID><ThemeID>7710</ThemeID></ListingDesigner><ListingDuration>GTC</ListingDuration><ListingType>FixedPriceItem</ListingType><Quantity>4</Quantity><Seller><Email>syn-seller-0001@example.invalid</Email><UserID>syn_ebay_seller_0001</UserID></Seller><SellingStatus><CurrentPrice currencyID=\"EUR\">14.99</CurrentPrice><ListingStatus>Active</ListingStatus></SellingStatus><Site>Germany</Site><SKU>SYN-EBAY-21</SKU><SellerProfiles><SellerShippingProfile><ShippingProfileID>6200000001</ShippingProfileID></SellerShippingProfile><SellerReturnProfile><ReturnProfileID>6200000003</ReturnProfileID></SellerReturnProfile><SellerPaymentProfile><PaymentProfileID>6200000002</PaymentProfileID></SellerPaymentProfile></SellerProfiles></Item></GetItemResponse>"
+      },
+      "origin": "SYNTHETIC"
+    },
+    {
+      "id": "offer-by-sku-not-managed",
+      "request": {
+        "method": "GET",
+        "path": "/sell/inventory/v1/offer",
+        "query": {
+          "sku": "SYN-EBAY-21"
+        }
+      },
+      "response": {
+        "status": 404,
+        "body": {
+          "errors": [
+            {
+              "errorId": 25713,
+              "domain": "API_INVENTORY",
+              "subdomain": "Selling",
+              "category": "Request",
+              "message": "This Offer is not available."
+            }
+          ]
+        }
+      },
+      "origin": "SANDBOX"
+    },
+    {
+      "id": "recheck-preferences",
+      "request": {
+        "method": "POST",
+        "path": "/ws/api.dll",
+        "body": "<?xml version=\"1.0\" encoding=\"utf-8\"?><GetUserPreferencesRequest xmlns=\"urn:ebay:apis:eBLBaseComponents\"><ShowOutOfStockControlPreference>true</ShowOutOfStockControlPreference></GetUserPreferencesRequest>"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "text/xml"
+        },
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<GetUserPreferencesResponse xmlns=\"urn:ebay:apis:eBLBaseComponents\"><Timestamp>2026-09-27T17:24:39.119Z</Timestamp><Ack>Success</Ack><Version>1271</Version><OutOfStockControlPreference>false</OutOfStockControlPreference></GetUserPreferencesResponse>"
+      },
+      "origin": "SANDBOX"
+    },
+    {
+      "id": "recheck-get-item",
+      "request": {
+        "method": "POST",
+        "path": "/ws/api.dll",
+        "body": "<?xml version=\"1.0\" encoding=\"utf-8\"?><GetItemRequest xmlns=\"urn:ebay:apis:eBLBaseComponents\"><ItemID>110000000021</ItemID><DetailLevel>ReturnAll</DetailLevel></GetItemRequest>"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "text/xml"
+        },
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<GetItemResponse xmlns=\"urn:ebay:apis:eBLBaseComponents\"><Timestamp>2026-09-27T17:24:36.316Z</Timestamp><Ack>Success</Ack><Version>1193</Version><Item><Currency>EUR</Currency><ItemID>110000000021</ItemID><ListingDesigner><LayoutID>7710000</LayoutID><ThemeID>7710</ThemeID></ListingDesigner><ListingDuration>GTC</ListingDuration><ListingType>FixedPriceItem</ListingType><Quantity>4</Quantity><Seller><Email>syn-seller-0001@example.invalid</Email><UserID>syn_ebay_seller_0001</UserID></Seller><SellingStatus><CurrentPrice currencyID=\"EUR\">14.99</CurrentPrice><ListingStatus>Active</ListingStatus></SellingStatus><Site>Germany</Site><SKU>SYN-EBAY-21</SKU><SellerProfiles><SellerShippingProfile><ShippingProfileID>6200000001</ShippingProfileID></SellerShippingProfile><SellerReturnProfile><ReturnProfileID>6200000003</ReturnProfileID></SellerReturnProfile><SellerPaymentProfile><PaymentProfileID>6200000002</PaymentProfileID></SellerPaymentProfile></SellerProfiles></Item></GetItemResponse>"
+      },
+      "origin": "SYNTHETIC"
+    },
+    {
+      "id": "recheck-offer-by-sku",
+      "request": {
+        "method": "GET",
+        "path": "/sell/inventory/v1/offer",
+        "query": {
+          "sku": "SYN-EBAY-21"
+        }
+      },
+      "response": {
+        "status": 404,
+        "body": {
+          "errors": [
+            {
+              "errorId": 25713,
+              "domain": "API_INVENTORY",
+              "subdomain": "Selling",
+              "category": "Request",
+              "message": "This Offer is not available."
+            }
+          ]
+        }
+      },
+      "origin": "SANDBOX"
+    },
+    {
+      "origin": "SANDBOX",
+      "id": "bulk-migrate",
+      "request": {
+        "method": "POST",
+        "path": "/sell/inventory/v1/bulk_migrate_listing",
+        "body": {
+          "requests": [
+            {
+              "listingId": "110000000021"
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "responses": [
+            {
+              "statusCode": 200,
+              "listingId": "110000000021",
+              "marketplaceId": "EBAY_DE",
+              "inventoryItems": [
+                {
+                  "sku": "SYN-EBAY-21",
+                  "offerId": "9100000021"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "expect": {
+    "noAlerts": true,
+    "logs": [
+      {
+        "code": "EBAY_LISTING_MIGRATION",
+        "count": 1,
+        "details": {
+          "listings": 1,
+          "consents": "mc-syn-0001"
+        }
+      }
+    ]
+  }
+}

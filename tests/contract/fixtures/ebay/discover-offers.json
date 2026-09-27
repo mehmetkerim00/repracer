@@ -1,0 +1,210 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "ebay/discovery/offers",
+  "channel": "EBAY",
+  "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
+  "title": "Обнаружение: страница товаров Inventory API, предложения каждого SKU; без предложения (404 25713) — пропуск",
+  "description": "Ответ offer?sku= и 404 25713 записаны в песочнице; страница inventory_item (total, inventoryItems) в песочнице не записывалась — её форма синтетическая, (проверить). Курсор — смещение. Немигрированные листинги здесь не видны вовсе: их находит предполётная проверка.",
+  "tags": [
+    "discovery"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "docs/evidence/step39-ebay-sandbox.md",
+      "docs/channel-capabilities.md#9"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-27T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn_ebay_seller_0001",
+      "marketplaces": [
+        "EBAY_DE",
+        "EBAY_US"
+      ],
+      "channel": "EBAY"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "syn-ebay-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "Syn-Repracer-SBX-0001",
+        "clientSecret": "SBX-syn-client-secret-0001"
+      },
+      "accessToken": "syn-ebay-user-token-0001",
+      "applicationToken": "syn-ebay-app-token-0001"
+    }
+  },
+  "steps": [
+    {
+      "id": "discover",
+      "kind": "call",
+      "method": "discoverOffers",
+      "args": [
+        {
+          "limit": 2
+        }
+      ],
+      "expect": {
+        "nextCursor": "2",
+        "items": [
+          {
+            "identity": {
+              "marketplace": "EBAY_DE",
+              "externalSku": "SYN-EBAY-17",
+              "externalOfferId": "9100000017",
+              "externalListingId": "110000000017"
+            },
+            "gtins": [],
+            "condition": "new",
+            "fulfillment": "MERCHANT",
+            "currentPrice": {
+              "amountMinor": 1149,
+              "currency": "EUR",
+              "basis": "GROSS"
+            },
+            "currentQuantity": 5,
+            "isLive": true
+          }
+        ]
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "user-token",
+      "note": "Обновление токена пользователя: grant_type=refresh_token + scope, Basic ключей приложения [песочница: ответ без нового refresh-токена]",
+      "request": {
+        "method": "POST",
+        "path": "/identity/v1/oauth2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "syn-ebay-user-token-0001",
+          "expires_in": 7200,
+          "token_type": "User Access Token"
+        }
+      }
+    },
+    {
+      "id": "inventory-page",
+      "request": {
+        "method": "GET",
+        "path": "/sell/inventory/v1/inventory_item",
+        "query": {
+          "limit": "2",
+          "offset": "0"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "total": 3,
+          "size": 2,
+          "limit": 2,
+          "inventoryItems": [
+            {
+              "sku": "SYN-EBAY-17",
+              "condition": "NEW",
+              "availability": {
+                "shipToLocationAvailability": {
+                  "quantity": 7
+                }
+              }
+            },
+            {
+              "sku": "SYN-EBAY-18",
+              "condition": "NEW"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "offers-17",
+      "request": {
+        "method": "GET",
+        "path": "/sell/inventory/v1/offer",
+        "query": {
+          "sku": "SYN-EBAY-17"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "total": 1,
+          "size": 1,
+          "limit": 20,
+          "offers": [
+            {
+              "offerId": "9100000017",
+              "sku": "SYN-EBAY-17",
+              "marketplaceId": "EBAY_DE",
+              "format": "FIXED_PRICE",
+              "availableQuantity": 5,
+              "pricingSummary": {
+                "price": {
+                  "value": "11.49",
+                  "currency": "EUR"
+                }
+              },
+              "listingPolicies": {
+                "paymentPolicyId": "6200000002",
+                "returnPolicyId": "6200000003",
+                "fulfillmentPolicyId": "6200000001",
+                "eBayPlusIfEligible": false
+              },
+              "categoryId": "20695",
+              "merchantLocationKey": "syn-lager-1",
+              "tax": {
+                "applyTax": false
+              },
+              "listing": {
+                "listingId": "110000000017",
+                "listingStatus": "ACTIVE",
+                "soldQuantity": 0
+              },
+              "status": "PUBLISHED",
+              "listingDuration": "GTC"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "offers-18-none",
+      "request": {
+        "method": "GET",
+        "path": "/sell/inventory/v1/offer",
+        "query": {
+          "sku": "SYN-EBAY-18"
+        }
+      },
+      "response": {
+        "status": 404,
+        "body": {
+          "errors": [
+            {
+              "errorId": 25713,
+              "domain": "API_INVENTORY",
+              "subdomain": "Selling",
+              "category": "Request",
+              "message": "This Offer is not available."
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "expect": {
+    "noAlerts": true
+  }
+}
