@@ -228,6 +228,41 @@ test('Р-177: в репозитории нет токенов каналов —
 });
 
 /**
+ * Шаг 44 (находка 1 ревью): обязательная переменная профиля production (`${VAR:?…}`) должна быть в окружении, которым
+ * CI поднимает профиль (`scripts/deploy-smoke.sh`). Проверка конфигурации подставляет значения сама и зеленеет, а подъём
+ * падает до первого контейнера — класс критичной находки шага 40.
+ */
+test('шаг 44: каждая обязательная переменная профиля production задана подъёмом профиля в CI', async () => {
+  const { readFileSync } = await import('node:fs');
+  const root = new URL('../../', import.meta.url);
+  const required = (text: string) => [...text.matchAll(/\$\{([A-Z0-9_]+):\?/g)].map((m) => m[1]!);
+  // Зубы [Р-94]: разбор находит обязательную переменную
+  assert.deepEqual(required('X: ${REPRACER_A:?set it} Y: ${REPRACER_B:-}'), ['REPRACER_A']);
+  const compose = readFileSync(new URL('deploy/production/compose.yaml', root), 'utf8');
+  const smoke = readFileSync(new URL('scripts/deploy-smoke.sh', root), 'utf8');
+  const vars = required(compose);
+  assert.ok(vars.length >= 4, `обязательных переменных профиля: ${vars.length}`);
+  const missing = vars.filter((v) => !smoke.includes(`${v}=`));
+  assert.deepEqual(missing, [], 'профиль production требует переменную, которой подъём в CI не задаёт');
+});
+
+/**
+ * Шаг 44 (находка 10 ревью): ссылка приглашения из письма ведёт на маршрут страницы консоли `/invite`. Пример,
+ * указывающий другой путь, отдаёт владельцу обычную страницу входа, и пилот не заводится.
+ */
+test('шаг 44: адрес приглашения в примерах развёртываний — маршрут страницы консоли /invite', async () => {
+  const { readFileSync } = await import('node:fs');
+  const root = new URL('../../', import.meta.url);
+  const login = readFileSync(new URL('apps/console/src/login.ts', root), 'utf8');
+  assert.match(login, /pathname === '\/invite'/, 'страница ловит ссылку приглашения на /invite');
+  for (const file of ['deploy/operator/operator.env.example', 'scripts/deploy-smoke.sh', 'scripts/deploy-config-check.mjs']) {
+    const urls = [...readFileSync(new URL(file, root), 'utf8').matchAll(/REPRACER_OPERATOR_INVITATION_URL[=:]\s*'?([^\s'"]+)/g)].map((m) => m[1]!);
+    assert.ok(urls.length > 0, `${file}: адрес приглашения задан`);
+    for (const u of urls) assert.match(u, /\/invite$/, `${file}: ${u}`);
+  }
+});
+
+/**
  * OQ-183, OQ-194, задача E шага 33: внешний контроль покрывает ВСЕ разворачиваемые процессы, а не только планировщик.
  *
  * Р-127 говорит: работоспособность процесса контролируется извне, потому что изнутри остановленный процесс о себе не

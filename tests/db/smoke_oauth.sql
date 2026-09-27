@@ -219,6 +219,10 @@ SELECT pg_temp.ok('storing a token is written to the audit log without the token
     IF ev IS NULL THEN
       RAISE EXCEPTION 'storing a token is not in the audit log (Р-97)';
     END IF;
+    -- Находка 20 ревью шага 43: в событии — только имена столбцов, фактор и время, значений (и шифротекста) нет
+    IF EXISTS (SELECT 1 FROM jsonb_object_keys(ev) k WHERE k NOT IN ('columns', 'secondFactor', 'at')) THEN
+      RAISE EXCEPTION 'the audit event of a token carries values: %%', ev;
+    END IF;
   END $inner$ $q$, :tA));
 
 RESET SESSION AUTHORIZATION;
@@ -256,6 +260,15 @@ SELECT pg_temp.ok('the adapter role reads the ciphertext (Р-177)', format($q$
 SELECT pg_temp.expect_fail('the adapter role rewrites a token (Р-177)', format($q$
   UPDATE tenant_data.channel_credential SET ciphertext = pg_temp.rb(48) WHERE tenant_id = %L $q$, :tA),
   'permission denied for table channel_credential');
+-- Находка 21 ревью шага 43: статус аккаунта и алерты роль адаптеров напрямую не трогает — только вызовом проверки
+SELECT pg_temp.expect_fail('the adapter role sets the auth status of an account directly (Р-177)', format($q$
+  UPDATE tenant_data.channel_account SET auth_status = 'ACTIVE' WHERE tenant_id = %L AND channel_account_id = %L $q$, :tA, :oAcc),
+  'permission denied for table channel_account');
+SELECT pg_temp.expect_fail('the adapter role raises an alert directly (Р-177)', format($q$
+  INSERT INTO tenant_data.alert (tenant_id, code, severity, details) VALUES (%L, 'CHANNEL_AUTHORIZATION_REVOKED', 'CRITICAL', '{}') $q$, :tA),
+  'permission denied for table alert');
+RESET ROLE;
+SET ROLE repracer_credential_keeper;
 SELECT pg_temp.expect_fail('a negative count of failed checks (Р-177)', format($q$
   UPDATE tenant_data.channel_credential SET check_failures = -1 WHERE tenant_id = %L AND channel_account_id = %L AND superseded_at IS NULL $q$, :tA, :oAcc),
   'channel_credential_failures_non_negative');
@@ -264,6 +277,8 @@ SELECT pg_temp.expect_fail('two current versions of a token (Р-177)', format($q
   UPDATE tenant_data.channel_credential SET superseded_at = NULL WHERE tenant_id = %L AND channel_account_id = %L AND version = 1 $q$, :tA, :oAcc),
   'channel_credential_one_current');
 
+RESET ROLE;
+SET ROLE repracer_credentials;
 -- Итоги проверки обменом токена
 SELECT pg_temp.expect_fail('an unknown check outcome (Р-177)', format($q$
   SELECT security.channel_authorization_checked(%L, (SELECT channel_credential_id FROM tenant_data.channel_credential WHERE tenant_id = %L AND channel_account_id = %L AND superseded_at IS NULL), 'FINE') $q$, :tA, :tA, :oAcc),
@@ -409,3 +424,164 @@ SELECT pg_temp.ok('the database records how far below the floor the strategy wan
     END IF;
   END $inner$ $q$, :tA, :tA, :tA));
 ROLLBACK;
+
+-- ================================================================ Р-178 (шаг 44): миры тенантов без демо
+-- Владелец демо-тенанта состоит в нём ДЕЙСТВУЮЩИМ членом — и мира тенанта у него нет: демо — только гостевой путь
+SET ROLE repracer_authenticator;
+SELECT pg_temp.ok('the console builds tenant worlds without the demo tenant (Р-178)', $q$
+  DO $inner$
+  DECLARE
+    demo int;
+    own int;
+  BEGIN
+    SELECT count(*) INTO demo FROM security.console_tenant_worlds('d1000000-0000-0000-0000-00000000000d');
+    SELECT count(*) INTO own FROM security.console_tenant_worlds('a1000000-0000-0000-0000-00000000000a') WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a';
+    IF demo <> 0 OR own <> 1 THEN
+      RAISE EXCEPTION 'tenant worlds: demo owner sees %, owner of tenant A sees own world % time(s)', demo, own;
+    END IF;
+  END $inner$ $q$);
+RESET ROLE;
+SET ROLE repracer_app;
+SELECT pg_temp.expect_fail('the decision path lists the worlds of a user (Р-178)',
+  $q$ SELECT 1 FROM security.console_tenant_worlds('a1000000-0000-0000-0000-00000000000a') $q$, 'permission denied for function console_tenant_worlds');
+RESET ROLE;
+
+-- ================================================================ Р-179 (шаг 44): каталог из обнаружения офферов
+BEGIN;
+SET LOCAL ROLE repracer_app;
+SELECT set_config('app.tenant_id', 'a0000000-0000-0000-0000-00000000000a', true) \gset
+SELECT pg_temp.ok('discovered offers become the catalog: only storefronts of the account, once (Р-179)', $q$
+  DO $inner$
+  DECLARE
+    first int;
+    again int;
+    mode text;
+  BEGIN
+    first := tenant_data.record_discovered_offers('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001',
+      '[{"marketplace": "de", "external_unit_id": "944001", "external_sku": null, "channel_product_ref": "SYN-P-944001", "gtin": null, "condition": "new"},
+        {"marketplace": "at", "external_unit_id": "944002", "external_sku": null, "channel_product_ref": "SYN-P-944002", "gtin": null, "condition": "new"}]');
+    again := tenant_data.record_discovered_offers('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001',
+      '[{"marketplace": "de", "external_unit_id": "944001", "external_sku": null, "channel_product_ref": "SYN-P-944001", "gtin": null, "condition": "new"}]');
+    SELECT ws.pricing_mode INTO mode FROM tenant_data.offer_mapping om
+      JOIN tenant_data.write_scope ws ON ws.tenant_id = om.tenant_id AND ws.write_scope_id = om.price_write_scope_id
+     WHERE om.external_unit_id = '944001';
+    IF first <> 1 OR again <> 0 OR mode IS DISTINCT FROM 'OFF' THEN
+      RAISE EXCEPTION 'catalog from discovery: first %, again %, mode % (expected 1, 0, OFF)', first, again, mode;
+    END IF;
+  END $inner$ $q$);
+ROLLBACK;
+-- Находки 2 и 3 ревью шага 44: один `id_offer` Kaufland на двух витринах — ОДИН товар [Р-35]; оффер FBK — CHANNEL
+BEGIN;
+UPDATE tenant_data.channel_account SET marketplaces = ARRAY['de', 'at'] WHERE channel_account_id = 'a4000000-0000-0000-0000-000000000001';
+SET LOCAL ROLE repracer_app;
+SELECT set_config('app.tenant_id', 'a0000000-0000-0000-0000-00000000000a', true) \gset
+SELECT pg_temp.ok('one Kaufland offer on two storefronts is one product; a channel-fulfilled offer stays out of stock sync (Р-35, Р-179)', $q$
+  DO $inner$
+  DECLARE
+    products int;
+    fbk text;
+  BEGIN
+    PERFORM tenant_data.record_discovered_offers('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001',
+      '[{"marketplace": "de", "external_unit_id": "944101", "external_offer_id": "SYN-OFFER-944", "external_sku": null, "channel_product_ref": null, "gtin": null, "condition": "new", "fulfillment": "MERCHANT"},
+        {"marketplace": "at", "external_unit_id": "944102", "external_offer_id": "SYN-OFFER-944", "external_sku": null, "channel_product_ref": null, "gtin": null, "condition": "new", "fulfillment": "MERCHANT"},
+        {"marketplace": "de", "external_unit_id": "944103", "external_offer_id": "SYN-OFFER-945", "external_sku": null, "channel_product_ref": null, "gtin": null, "condition": "new", "fulfillment": "CHANNEL"}]');
+    SELECT count(DISTINCT product_id) INTO products FROM tenant_data.offer_mapping WHERE external_offer_id = 'SYN-OFFER-944';
+    SELECT fulfillment INTO fbk FROM tenant_data.offer_mapping WHERE external_unit_id = '944103';
+    IF products <> 1 OR fbk IS DISTINCT FROM 'CHANNEL' THEN
+      RAISE EXCEPTION 'discovered Kaufland offer: % product(s) for one id_offer, fulfillment %', products, fbk;
+    END IF;
+  END $inner$ $q$);
+ROLLBACK;
+BEGIN;
+SET LOCAL ROLE repracer_app;
+SELECT set_config('app.tenant_id', 'd0000000-0000-0000-0000-00000000000d', true) \gset
+SELECT pg_temp.expect_fail('discovered offers written into the catalog of another tenant (Р-31)', $q$
+  SELECT tenant_data.record_discovered_offers('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001',
+    '[{"marketplace": "de", "external_unit_id": "944003", "external_sku": null, "channel_product_ref": null, "gtin": null, "condition": "new"}]') $q$,
+  'is unknown or disconnected');
+ROLLBACK;
+
+-- ================================================================ находка 12 ревью шага 44: свои проверки новых защит
+-- Мир тенанта — только по ДЕЙСТВУЮЩЕМУ членству и только у действующего тенанта
+-- Наблюдатель тенанта A видит мир A, пока членство действует; отзыв делает владелец в своей сессии
+SET ROLE repracer_authenticator;
+SELECT pg_temp.ok('an active viewer sees the world of the tenant (Р-178)', $q$
+  DO $inner$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM security.console_tenant_worlds('a1000000-0000-0000-0000-0000000000a9') WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a') THEN
+      RAISE EXCEPTION 'an active viewer does not see the world of tenant A';
+    END IF;
+  END $inner$ $q$);
+RESET ROLE;
+BEGIN;
+SET SESSION AUTHORIZATION svc_admin;
+SELECT set_config('app.tenant_id', :tA, true), set_config('app.user_id', :ownerU, true), set_config('app.auth_mfa', 'on', true) \gset
+UPDATE tenant_data.membership SET status = 'REVOKED', revoked_at = now() WHERE membership_id = 'a2000000-0000-0000-0000-0000000000a9';
+RESET SESSION AUTHORIZATION;
+SET LOCAL ROLE repracer_authenticator;
+SELECT pg_temp.ok('a revoked membership gives no tenant world (Р-178)', $q$
+  DO $inner$ BEGIN
+    IF EXISTS (SELECT 1 FROM security.console_tenant_worlds('a1000000-0000-0000-0000-0000000000a9') WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a') THEN
+      RAISE EXCEPTION 'a revoked member still sees the world of tenant A';
+    END IF;
+  END $inner$ $q$);
+ROLLBACK;
+BEGIN;
+UPDATE tenant_data.tenant SET status = 'OFFBOARDING', offboarding_requested_at = now() WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a';
+SET LOCAL ROLE repracer_authenticator;
+SELECT pg_temp.ok('a tenant being closed gives no tenant world (Р-178)', $q$
+  DO $inner$ BEGIN
+    IF EXISTS (SELECT 1 FROM security.console_tenant_worlds('a1000000-0000-0000-0000-00000000000a') WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a') THEN
+      RAISE EXCEPTION 'the owner still sees the world of an offboarding tenant';
+    END IF;
+  END $inner$ $q$);
+ROLLBACK;
+
+-- Исполнитель «все тенанты» не берёт демо: его ведёт исполнитель мира демо [Р-178]
+BEGIN;
+INSERT INTO tenant_data.bulk_job (tenant_id, kind, params, created_by_membership_id, created_by_user_id)
+VALUES ('d0000000-0000-0000-0000-00000000000d', 'PRICE_FEED_EXPORT', '{}', 'd2000000-0000-0000-0000-00000000000d', 'd1000000-0000-0000-0000-00000000000d'),
+       ('a0000000-0000-0000-0000-00000000000a', 'PRICE_FEED_EXPORT', '{}', 'a2000000-0000-0000-0000-00000000000a', 'a1000000-0000-0000-0000-00000000000a');
+SET LOCAL ROLE repracer_bulk_worker;
+SELECT pg_temp.ok('the all-tenants worker sees waiting tenants but never the demo tenant (Р-178)', $q$
+  DO $inner$
+  DECLARE
+    demo int;
+    own int;
+  BEGIN
+    SELECT count(*) FILTER (WHERE t = 'd0000000-0000-0000-0000-00000000000d'), count(*) FILTER (WHERE t = 'a0000000-0000-0000-0000-00000000000a')
+      INTO demo, own FROM security.bulk_job_waiting_tenants() t;
+    IF demo <> 0 OR own <> 1 THEN
+      RAISE EXCEPTION 'waiting tenants: demo %, tenant A %', demo, own;
+    END IF;
+  END $inner$ $q$);
+ROLLBACK;
+SET ROLE repracer_app;
+SELECT pg_temp.expect_fail('the decision path lists tenants with waiting jobs (Р-178)',
+  $q$ SELECT 1 FROM security.bulk_job_waiting_tenants() $q$, 'permission denied for function bulk_job_waiting_tenants');
+RESET ROLE;
+
+-- Отключённый аккаунт каталога не пишет
+BEGIN;
+UPDATE tenant_data.channel_account SET disconnected_at = now(), auth_status = 'DISCONNECTED' WHERE channel_account_id = 'a4000000-0000-0000-0000-000000000001';
+SET LOCAL ROLE repracer_app;
+SELECT set_config('app.tenant_id', 'a0000000-0000-0000-0000-00000000000a', true) \gset
+SELECT pg_temp.expect_fail('discovered offers of a disconnected account (Р-179)', $q$
+  SELECT tenant_data.record_discovered_offers('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001',
+    '[{"marketplace": "de", "external_unit_id": "944201", "external_sku": null, "channel_product_ref": null, "gtin": null, "condition": "new"}]') $q$,
+  'is unknown or disconnected');
+ROLLBACK;
+
+-- Обмен, ЗАХВАЧЕННЫЙ до срока, завершается и чуть позже срока (находка 17 ревью шага 43)
+SET SESSION AUTHORIZATION svc_admin;
+SELECT set_config('app.tenant_id', :tA, false), set_config('app.user_id', :ownerU, false), set_config('app.auth_mfa', 'on', false) \gset
+SELECT pg_temp.ok('a short request claimed in time (Р-175)', format($q$
+  INSERT INTO tenant_data.channel_authorization_request (tenant_id, authorization_request_id, channel, region, marketplaces, state_sha256, requested_by_membership_id, expires_at)
+  VALUES (%L, 'a4430000-0000-4000-8000-0000000000a5', 'AMAZON', 'EU', ARRAY['A1PA6795UKMFR9'], sha256('state-claimed'), %L, now() + interval '300 milliseconds') $q$, :tA, :ownerM));
+SELECT pg_temp.ok('the console claims the exchange before the deadline (Р-175)', format($q$
+  UPDATE tenant_data.channel_authorization_request SET exchange_started_at = now()
+   WHERE tenant_id = %L AND authorization_request_id = 'a4430000-0000-4000-8000-0000000000a5' $q$, :tA));
+SELECT pg_sleep(0.5);
+SELECT pg_temp.ok('an exchange claimed in time completes shortly after the deadline (Р-175)', format($q$
+  UPDATE tenant_data.channel_authorization_request SET status = 'COMPLETED', channel_account_id = %L
+   WHERE tenant_id = %L AND authorization_request_id = 'a4430000-0000-4000-8000-0000000000a5' $q$, :oAcc, :tA));
+RESET SESSION AUTHORIZATION;

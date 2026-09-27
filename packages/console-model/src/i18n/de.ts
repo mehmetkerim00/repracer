@@ -302,6 +302,13 @@ export const de: Messages = {
       worlds: 'Welten des Stands',
       worldsHint: 'Jede Welt ist ein Standszenario mit synthetischen Daten. Kein Kanal ist verbunden.',
       backToWorlds: '← Welten',
+      invitation: {
+        bad: 'Dieser Einladungslink ist unvollständig. Öffnen Sie ihn erneut aus dem Brief.',
+        refused: 'Diese Einladung lässt sich nicht annehmen: sie ist abgelaufen, wurde schon verwendet oder gehört zu einer anderen Adresse. Bitten Sie den Absender um eine neue.',
+        accepted: 'Einladung angenommen. Ihr Konto ist bereit.',
+        signInFirst: 'Melden Sie sich an, um die Einladung anzunehmen.',
+      },
+      signIn: 'Anmelden',
       screens: { connections: 'Kanalverbindungen', onboarding: 'Einrichtung', shadow: 'Schattenmodus', stock: 'Bestand', products: 'Produkte', decisions: 'Warum dieser Preis', rejected: 'Gestoppte Änderungen', bounds: 'Grenzen', 'cost-import': 'Selbstkosten-Import', stop: 'Preise stoppen', strategies: 'Strategien', feed: 'Preisänderungen', dangerous: 'Gefährliche Änderungen', compliance: 'Omnibus', jobs: 'Massenvorgänge' },
       loading: (seconds: number) => `Standdaten werden geladen. Ohne Antwort innerhalb von ${seconds} s wird ein Fehler angezeigt.`,
       timeout: (seconds: number) => `Der Stand hat nicht innerhalb von ${seconds} s geantwortet. Läuft er? npm run stand -w @repracer/console`,
@@ -589,6 +596,7 @@ export const de: Messages = {
       connectAnother: (channel: string) => `Weiteres ${channel}-Konto verbinden`,
       reconnect: 'Zugriff erneuern',
       reconnectRevoked: 'Erneut verbinden',
+      cancel: 'Diesen Verbindungsversuch abbrechen',
       pending: (until: string) => `Wir warten auf Ihre Zustimmung auf der Seite des Kanals — bis ${until}.`,
       failed: (why: string) => `Der letzte Versuch hat nicht verbunden: ${why}`,
       platformMissing: (what: string) => `Noch nicht verfügbar: ${what}. Von Ihnen ist nichts zu tun — der Knopf erscheint, sobald das vorliegt.`,
@@ -609,6 +617,7 @@ export const de: Messages = {
         awaitingAccess: (what: string) => `Es fehlt: ${what}.`,
       },
       authorization: {
+        revoked: 'Der Zugriff wurde im Kanal zurückgezogen: verbinden Sie erneut, um fortzufahren.',
         external: 'Der Zugriff wird von der Plattform eingerichtet, nicht über diese Seite.',
         obtained: (when: string) => `Zugriff erteilt ${when}; noch nicht geprüft.`,
         verified: (when: string, failures: number) => `Zugriff zuletzt vom Kanal bestätigt ${when}${failures > 0 ? ` (seitdem ${failures} Prüfungen fehlgeschlagen)` : ''}.`,
@@ -771,6 +780,7 @@ export const de: Messages = {
          */
         CHANNEL_APP_CREDENTIALS_REJECTED: { what: 'Der Token-Endpunkt eines Kanals hat die Schlüssel unserer Anwendung abgelehnt', step: 'Prüfen Sie Client-ID und Secret des genannten Kanals in den Secret-Dateien der Bereitstellung: die Händler haben nichts falsch gemacht, ihre Konten bleiben verbunden.' },
         CHANNEL_REVOCATIONS_SUSPICIOUS: { what: 'Die meisten geprüften Kanalkonten wurden in einem Durchlauf mit invalid_grant abgelehnt — eher ein Fehler bei uns als ein Widerruf der Händler', step: 'Prüfen Sie Anwendungsschlüssel, Schlüsselbund-Datei und jüngste Änderungen der Kanal-Anwendung, bevor Händler informiert werden: ihre Konten blieben verbunden.' },
+        CHANNEL_KEYRING_UNREADABLE: { what: 'Gespeicherte Kanal-Tokens lassen sich mit dem Schlüsselbund des Prozesses nicht öffnen', step: 'Prüfen Sie, ob die Schlüsselbund-Datei des Planers den in den Tokens genannten Schlüssel enthält: ein entfernter oder ersetzter Schlüssel macht die Tokens unlesbar, während die Händler weiter als verbunden gelten.' },
         ALERT_NOT_STORED: { what: 'Ein Ereignis konnte nicht in der Datenbank festgehalten werden', step: 'Prüfen Sie die Erreichbarkeit der Datenbank aus dem betroffenen Prozess: Das Ereignis steht nur noch im Prozess-Journal, und ein Brief darüber geht nicht heraus.' },
         ANALYTICS_EXPORT_BACKLOG: { what: 'Die Ausfuhr der Wettbewerbshistorie nach ClickHouse ist im Rückstand', step: 'Sehen Sie im Lauf-Journal des Planers nach, seit wann die Arbeit `analytics-export` zurückliegt, und prüfen Sie die Erreichbarkeit von ClickHouse. Ab 14 Tagen Rückstand sind die ältesten Tage der Historie verloren.' },
         ANALYTICS_EXPORT_FAILED: { what: 'Die Ausfuhr eines Tages nach ClickHouse ist gescheitert', step: 'Prüfen Sie zuerst die Erreichbarkeit von ClickHouse und die Fehlerzeile im Prozess-Journal; der Tag wird aus dem Rückstand wiederholt.' },

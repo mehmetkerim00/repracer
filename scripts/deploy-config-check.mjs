@@ -15,6 +15,9 @@ const stacks = [
   // Шаг 37 [Р-159]: консоль — такое же развёртывание, и её конфигурация проверяется тем же способом и до подъёма
   ['console', 'deploy/production/compose.yaml', 'deploy/ci/production.override.yaml', 'console', '../apps/console/server/config.ts', 'loadConsoleConfig',
     { REPRACER_DOMAIN: 'localhost', REPRACER_ACME_EMAIL: 'ci@example.invalid', REPRACER_BACKUP_DIR: '/tmp/repracer-backups' }],
+  // Шаг 44 (находка 8 ревью): исполнитель массовых заданий тенантов — отдельный процесс профиля
+  ['bulk-worker', 'deploy/production/compose.yaml', 'deploy/ci/production.override.yaml', 'bulk-worker', '../apps/console/server/bulk-worker.ts', 'bulkWorkerFromEnv',
+    { REPRACER_DOMAIN: 'localhost', REPRACER_ACME_EMAIL: 'ci@example.invalid', REPRACER_BACKUP_DIR: '/tmp/repracer-backups' }],
   // Шаг 40 [Р-165]: панель оператора — такое же развёртывание, и её конфигурация разбирается так же, до подъёма
   ['operator', 'deploy/production/compose.yaml', 'deploy/ci/production.override.yaml', 'operator', '../apps/operator/server/config.ts', 'loadOperatorConfig',
     { REPRACER_DOMAIN: 'localhost', REPRACER_ACME_EMAIL: 'ci@example.invalid', REPRACER_BACKUP_DIR: '/tmp/repracer-backups' }],
@@ -28,7 +31,12 @@ const REQUIRED_FOR_INTERPOLATION = {
   REPRACER_OPERATOR_OIDC_ISSUER: 'https://identity.example.invalid',
   REPRACER_OPERATOR_OIDC_AUDIENCE: 'repracer-operator',
   REPRACER_OPERATOR_OIDC_JWKS_URL: 'https://identity.example.invalid/keys',
-  REPRACER_OPERATOR_INVITATION_URL: 'https://app.example.invalid/invitation',
+  REPRACER_OPERATOR_INVITATION_URL: 'https://app.example.invalid/invite',
+  // Шаг 44 [Р-180]: промышленный профиль консоли без поставщика identity не разбирается вовсе — значения ZITADEL-вида
+  REPRACER_CONSOLE_OIDC_ISSUER: 'https://pilot.zitadel.example.invalid',
+  REPRACER_CONSOLE_OIDC_AUDIENCE: '000000000000000001',
+  REPRACER_CONSOLE_OIDC_JWKS_URL: 'https://pilot.zitadel.example.invalid/oauth/v2/keys',
+  REPRACER_CONSOLE_OIDC_CLIENT_ID: '000000000000000002@repracer',
 };
 let failed = false;
 /**

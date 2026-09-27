@@ -112,6 +112,8 @@ async function schedulerFor(minutes: number): Promise<void> {
   await running.finished;
 }
 
+const lwaApprove = (url: string) => model.approve(url, SELLER);
+
 /** Браузер продавца: страница согласия канала → «Allow» → адрес возврата. Параметры возврата SPA шлёт серверу как есть */
 function consent(consentUrl: string): Record<string, string> {
   const back = new URL(model.approve(consentUrl, SELLER));
@@ -256,6 +258,16 @@ test('Р-175, Р-176: от «Connect Amazon» до тени — продавец
   assert.equal(consentUrl.origin + consentUrl.pathname, 'https://sellercentral-europe.amazon.com/apps/authorize/consent', 'amazon.de — европейский Seller Central');
   const waiting = await call<ConnectionsView>('экран: ждём согласия', owner, 'GET', api('connections'));
   assert.equal(amazonOf(waiting.body).state, 'AWAITING_CONSENT');
+  // Находка 17 ревью шага 43: продавец закрыл страницу канала — отменяет попытку сам, а не ждёт десять минут
+  const cancelled = await call<{ cancelled: boolean }>('отменить попытку', owner, 'POST', api('connections', 'cancel'), { authorizationRequestId: amazonOf(waiting.body).pendingRequestId });
+  assert.equal(cancelled.status, 200, JSON.stringify(cancelled.body));
+  const afterCancel = await call<ConnectionsView>('экран после отмены', owner, 'GET', api('connections'));
+  assert.deepEqual([amazonOf(afterCancel.body).state, amazonOf(afterCancel.body).canConnect, amazonOf(afterCancel.body).pendingText], ['NOT_CONNECTED', true, null], 'отмена — снова «не подключён», без «последняя попытка не удалась»');
+  const cancelledUrl = started.body.consentUrl;
+  const late = await call<{ error: { code: string } }>('возврат отменённой попытки', owner, 'POST', api('connections', 'callback'), { params: Object.fromEntries(new URL(lwaApprove(cancelledUrl)).searchParams) });
+  assert.equal(late.status, 409, 'возврат отменённой попытки ничего не подключает');
+  const restarted = await call<{ consentUrl: string }>('Connect Amazon ещё раз', owner, 'POST', api('connections', 'start'), { channel: 'AMAZON', marketplaces: [AMAZON_DE] });
+  started.body.consentUrl = restarted.body.consentUrl;
 
   const params = await timed('согласие на странице канала', async () => consent(started.body.consentUrl));
   const back = await call<{ channelAccountId: string; reconnected: boolean }>('возврат с кодом', owner, 'POST', api('connections', 'callback'), { params });
@@ -279,9 +291,15 @@ test('Р-175, Р-176: от «Connect Amazon» до тени — продавец
   // Планировщик берёт новый аккаунт на ближайшем такте: `offer-discovery` у аккаунта — «сразу» [Р-176]
   await timed('планировщик: первый такт с новым аккаунтом', () => schedulerFor(1));
   const { rows: [run] } = await observer.query(
-    `SELECT outcome, items FROM maintenance.scheduled_job_run WHERE job_name = 'offer-discovery' AND job_key LIKE '%' || $1 || '%' ORDER BY finished_at DESC LIMIT 1`, [connectedAccountId]);
-  assert.deepEqual([run?.outcome, run?.items], ['SUCCEEDED', SELLER_OFFERS], 'обнаружение офферов нового аккаунта прошло само, без действия человека');
+    `SELECT outcome, items, error_code FROM maintenance.scheduled_job_run WHERE job_name = 'offer-discovery' AND job_key LIKE '%' || $1 || '%' ORDER BY finished_at DESC LIMIT 1`, [connectedAccountId]);
+  assert.deepEqual([run?.outcome, run?.items], ['SUCCEEDED', SELLER_OFFERS], `обнаружение офферов нового аккаунта прошло само, без действия человека (${run?.error_code ?? ''} ${logLines.filter((l) => l.includes('offer-discovery')).slice(-2).join(' ').slice(0, 600)})`);
 
+  // Шаг 44 [Р-179]: обнаружение записало КАТАЛОГ — товар, предложение, единица записи цены в режиме OFF на каждый оффер
+  const { rows: [cat] } = await observer.query(
+    `SELECT count(DISTINCT om.offer_mapping_id)::int AS offers, count(DISTINCT ws.write_scope_id) FILTER (WHERE ws.pricing_mode = 'OFF' AND ws.currency = 'EUR')::int AS scopes
+       FROM tenant_data.offer_mapping om JOIN tenant_data.write_scope ws ON ws.tenant_id = om.tenant_id AND ws.write_scope_id = om.price_write_scope_id
+      WHERE om.channel_account_id = $1`, [connectedAccountId]);
+  assert.deepEqual([cat.offers, cat.scopes], [SELLER_OFFERS, SELLER_OFFERS], 'каталог из обнаружения: предложения и единицы записи цены (движок выключен)');
   const found = await call<ConnectionsView>('экран: нашли офферы', owner, 'GET', api('connections'));
   const a = accountOf(found.body)!;
   assert.equal(a.offers, SELLER_OFFERS, `нашли ${a.offers} офферов`);
@@ -351,7 +369,8 @@ test('Р-177: токены и коды согласия не встречают�
   // Положительный контроль поиска: у отозванного аккаунта в дампе есть идентификатор продавца — искать есть где
   assert.ok(dump.includes(SELLER), 'дамп содержит данные прогона');
   for (const [where, text] of places) {
-    const leaked = secrets.filter((s) => text.includes(s));
+    // Находка 20 ревью шага 43: bytea в дампе — шестнадцатеричный; токен, попавший байтами в чужую таблицу, ищется и так
+    const leaked = secrets.filter((s) => text.includes(s) || text.includes(Buffer.from(s, 'utf8').toString('hex')));
     assert.deepEqual(leaked.map((s) => `${s.slice(0, 5)}…`), [], `${where}: найден секрет`);
     assert.doesNotMatch(text, /Atzr\||Atza\|/, `${where}: нет ни одной строки формы токена Amazon`);
   }

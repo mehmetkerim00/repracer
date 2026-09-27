@@ -28,6 +28,7 @@ export interface ChannelConnectService {
   connections(tenantId: string): Promise<{ accounts: ConnectionRow[]; pending: PendingRequestRow[] }>;
   start(tenantId: string, input: { channel: string; marketplaces: string[] }, actor: Actor): Promise<StartOutcome>;
   callback(tenantId: string, params: Record<string, string>, actor: Actor): Promise<CallbackOutcome>;
+  cancel(tenantId: string, authorizationRequestId: string, actor: Actor): Promise<boolean>;
 }
 
 export interface Actor { membershipId: string; userId: string; mfa: boolean }
@@ -61,6 +62,7 @@ export function createChannelConnectService(o: {
       channel: p.channel, platformMissing: [...p.platformMissing], marketplaces: p.marketplaces.map((m) => m.id),
     })),
     connections: (tenantId) => o.store.connections(tenantId),
+    cancel: (tenantId, id, actor) => o.store.cancel(tenantId, id, actor),
 
     async start(tenantId, input, actor) {
       const p = byChannel(input.channel);

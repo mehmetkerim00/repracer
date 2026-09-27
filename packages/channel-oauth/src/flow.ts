@@ -16,6 +16,9 @@ import type { Fetch, OAuthProvider } from './providers.ts';
  * продавцу канал из-за нашей неосведомлённости.
  */
 
+/** Срок одного обмена токена: дольше — это сеть, а не ответ канала (класс TRANSIENT) */
+export const TOKEN_TIMEOUT_MS = 15_000;
+
 export type TokenFailure = 'REVOKED' | 'PLATFORM' | 'TRANSIENT';
 
 export type TokenResult =
@@ -43,7 +46,8 @@ export async function requestToken(provider: OAuthProvider, grant: Parameters<OA
   let status: number;
   let text: string;
   try {
-    const res = await http(req.url, { method: 'POST', headers: req.headers, body: req.body });
+    // Находка 16 ревью шага 43: обмен без срока держал бы аренду работы проверки до её конца
+    const res = await http(req.url, { method: 'POST', headers: req.headers, body: req.body, signal: AbortSignal.timeout(TOKEN_TIMEOUT_MS) });
     status = res.status;
     text = await res.text();
   } catch {

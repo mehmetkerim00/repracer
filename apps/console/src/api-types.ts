@@ -30,6 +30,8 @@ export interface SessionView {
   simulator: Array<{ role: MemberRole; label: string }> | null;
   /** Р-160: публичное демо включено — на странице входа есть кнопка «посмотреть демо», вход без регистрации */
   demoGuest: boolean;
+  /** Шаг 44 [Р-178]: вход продавца у поставщика identity (код с PKCE); null — настоящего входа нет, только стенд или гость */
+  oidc: { issuer: string; clientId: string; scope: string } | null;
 }
 
 /** Токен имитатора поставщика стенда */

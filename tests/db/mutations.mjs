@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0133_verify_schema_invariants_v38.sql';
+const VERIFY = 'migrations/0137_verify_schema_invariants_v39.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -1664,12 +1664,15 @@ export const STEP43_ROWS = [
       m(replaceInFunction('tenant_data.channel_authorization_request_guard()', "IF OLD.status <> 'PENDING' THEN", 'IF false THEN'),
         smoke('moving a completed request to another account (Р-175)')),
       // Код согласия живёт пять минут: возврат после срока запроса — чужой или устаревший, его отклоняет база
-      m(replaceInFunction('tenant_data.channel_authorization_request_guard()', "IF NEW.status = 'COMPLETED' AND now() > OLD.expires_at THEN", 'IF false THEN'),
+      m(replaceInFunction('tenant_data.channel_authorization_request_guard()', "IF NEW.status = 'COMPLETED' AND now() > OLD.expires_at + (CASE WHEN OLD.exchange_started_at <= OLD.expires_at THEN interval '2 minutes' ELSE interval '0' END) THEN", 'IF false THEN'),
         smoke('a consent that came back after the request expired (Р-175)')),
       // Находка 11 ревью шага 43: срок держит перезапись времени запроса, а не ограничение само по себе
       m(replaceInFunction('tenant_data.channel_authorization_request_guard()', 'NEW.requested_at := now();', 'NULL;'),
         smoke('an authorization request dated a year ahead (Р-175)')),
       // Находка 9: обмен кода захватывается один раз и не после срока
+      // Находка 12 ревью шага 44: окно завершения захваченного обмена — две минуты, не больше и не меньше «вовсе нет»
+      m(replaceInFunction('tenant_data.channel_authorization_request_guard()', "THEN interval '2 minutes' ELSE interval '0' END", "THEN interval '0' ELSE interval '0' END"),
+        smoke('an exchange claimed in time completes shortly after the deadline (Р-175)')),
       m(replaceInFunction('tenant_data.channel_authorization_request_guard()', 'IF OLD.exchange_started_at IS NOT NULL THEN', 'IF false THEN'),
         smoke('claiming the code exchange twice (Р-175)')),
       m(replaceInFunction('tenant_data.channel_authorization_request_guard()', 'IF now() > OLD.expires_at THEN', 'IF false THEN'),
@@ -1696,6 +1699,12 @@ export const STEP43_ROWS = [
         smoke('the administrative role rewrites a token (Р-177)')),
       m('GRANT SELECT ON tenant_data.channel_credential TO repracer_app',
         smoke('the decision path reads channel tokens (Р-177)')),
+      // Находка 21 ревью шага 43: статус аккаунта и алерт — только функцией проверки узкой роли-хранителя
+      m('GRANT UPDATE (auth_status) ON tenant_data.channel_account TO repracer_credentials',
+        smoke('the adapter role sets the auth status of an account directly (Р-177)')),
+      // Право вставки без политики строк ловит RLS — мутация снимает защиту целиком: право и политику, как было до находки 21
+      m('GRANT INSERT ON tenant_data.alert TO repracer_credentials; CREATE POLICY mutation_credentials_alert ON tenant_data.alert FOR INSERT TO repracer_credentials WITH CHECK (true)',
+        smoke('the adapter role raises an alert directly (Р-177)')),
       m('GRANT UPDATE (ciphertext) ON tenant_data.channel_credential TO repracer_credentials',
         smoke('the adapter role rewrites a token (Р-177)')),
       // Находка 1 ревью шага 43: роль удаления по сроку (в ней планировщик и пул консоли) читала шифротекст целиком
@@ -1785,6 +1794,51 @@ export const STEP43_ROWS = [
         smoke('a negative saving (Р-173)')),
       m(replaceInFunction('platform.money_list_valid(jsonb)', 'OR (SELECT count(*) FROM jsonb_object_keys(e)) <> 2)', ')'),
         smoke('a saving that carries an extra key (Р-173, Р-85)')),
+    ],
+  },
+];
+
+/**
+ * Шаг 44 [Р-178, Р-179]: миры тенантов в консоли и каталог из обнаружения офферов.
+ */
+export const STEP44_ROWS = [
+  {
+    row: 'Р-178', critical: false,
+    invariant: 'мир тенанта строится только для клиентского тенанта, не демо; список миров пользователя видит только роль входа',
+    mutations: [
+      m(replaceInFunction('security.console_tenant_worlds(uuid)', 'AND NOT t.demo', ''),
+        smoke('the console builds tenant worlds without the demo tenant (Р-178)')),
+      m('GRANT EXECUTE ON FUNCTION security.console_tenant_worlds(uuid) TO repracer_app',
+        smoke('the decision path lists the worlds of a user (Р-178)')),
+      m(replaceInFunction('security.console_tenant_worlds(uuid)', "AND m.status = 'ACTIVE'", ''),
+        smoke('a revoked membership gives no tenant world (Р-178)')),
+      m(replaceInFunction('security.console_tenant_worlds(uuid)', "AND t.status NOT IN ('OFFBOARDING', 'CLOSED')", ''),
+        smoke('a tenant being closed gives no tenant world (Р-178)')),
+      m(replaceInFunction('security.bulk_job_waiting_tenants()', 'WHERE NOT t.demo AND', 'WHERE'),
+        smoke('the all-tenants worker sees waiting tenants but never the demo tenant (Р-178)')),
+      m('GRANT EXECUTE ON FUNCTION security.bulk_job_waiting_tenants() TO repracer_app',
+        smoke('the decision path lists tenants with waiting jobs (Р-178)')),
+    ],
+  },
+  {
+    row: 'Р-179', critical: false,
+    invariant: 'обнаружение пишет каталог только своего тенанта, только витрин аккаунта и один раз; движок выключен',
+    mutations: [
+      m(replaceInFunction('tenant_data.record_discovered_offers(uuid, uuid, jsonb)', 'AND o.marketplace = ANY (acc.marketplaces)', ''),
+        smoke('discovered offers become the catalog: only storefronts of the account, once (Р-179)')),
+      m(replaceInFunction('tenant_data.record_discovered_offers(uuid, uuid, jsonb)', "CASE WHEN o.fulfillment = 'CHANNEL' THEN 'CHANNEL' ELSE 'MERCHANT' END", "'MERCHANT'"),
+        smoke('one Kaufland offer on two storefronts is one product; a channel-fulfilled offer stays out of stock sync (Р-35, Р-179)')),
+      m(replaceInFunction('tenant_data.record_discovered_offers(uuid, uuid, jsonb)', 'AND a.disconnected_at IS NULL', ''),
+        smoke('discovered offers of a disconnected account (Р-179)')),
+      m(replaceInFunction('tenant_data.record_discovered_offers(uuid, uuid, jsonb)', 'p.sku = coalesce(o.external_sku, o.external_offer_id, o.external_unit_id)', 'p.sku = coalesce(o.external_sku, o.external_unit_id)'),
+        smoke('one Kaufland offer on two storefronts is one product; a channel-fulfilled offer stays out of stock sync (Р-35, Р-179)')),
+      // Движок выключен: обнаружение цен не включает [Р-131]
+      m(replaceInFunction('tenant_data.record_discovered_offers(uuid, uuid, jsonb)', "mk.tax_regime, 'OFF', 'ACTIVE');", "mk.tax_regime, 'ENGINE', 'ACTIVE');"),
+        smoke('discovered offers become the catalog: only storefronts of the account, once (Р-179)')),
+      m(replaceInFunction('tenant_data.record_discovered_offers(uuid, uuid, jsonb)', 'CONTINUE WHEN EXISTS', 'CONTINUE WHEN false AND EXISTS'),
+        smoke('discovered offers become the catalog: only storefronts of the account, once (Р-179)')),
+      // Чужой тенант держат ДВЕ политики (чтение аккаунта и WITH CHECK вставки): снятие одной ловит вторая — отдельной
+      // строки нет [Р-104]; проверка «чужой тенант» остаётся положительным утверждением поведения
     ],
   },
 ];

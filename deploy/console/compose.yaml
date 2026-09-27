@@ -29,6 +29,11 @@ services:
       REPRACER_CONSOLE_OIDC_ISSUER: ${REPRACER_CONSOLE_OIDC_ISSUER:-}
       REPRACER_CONSOLE_OIDC_AUDIENCE: ${REPRACER_CONSOLE_OIDC_AUDIENCE:-}
       REPRACER_CONSOLE_OIDC_JWKS_URL: ${REPRACER_CONSOLE_OIDC_JWKS_URL:-}
+      # Шаг 44 [Р-178]: страница входит у поставщика сама (код с PKCE) — ей нужен идентификатор клиента SPA и scope
+      REPRACER_CONSOLE_OIDC_CLIENT_ID: ${REPRACER_CONSOLE_OIDC_CLIENT_ID:-}
+      REPRACER_CONSOLE_OIDC_SCOPE: ${REPRACER_CONSOLE_OIDC_SCOPE:-}
+      # Р-180: профиль задаёт развёртывание-потребитель; у отдельного развёртывания консоли — умолчание
+      REPRACER_PROFILE: ${REPRACER_PROFILE:-}
       # Р-127: отметка во внешнем сервисе. Адрес содержит идентификатор проверки — тоже секрет, поэтому файлом.
       # Умолчание — `off` (находка 2 ревью шага 37): аккаунта внешнего сервиса у проекта нет (OQ-188), файла секрета
       # взять неоткуда, и с пустым значением процесс НЕ СТАРТОВАЛ БЫ — тот самый дефект шага 28 в третьей форме.
@@ -55,9 +60,9 @@ services:
       # платформы» на экране [Р-150]. Консоль токен ЗАПИСЫВАЕТ (шифротекстом) и прочитать его не может — права по столбцам
       REPRACER_AMAZON_APP_ID: ${REPRACER_AMAZON_APP_ID:-}
       REPRACER_AMAZON_LWA_CLIENT_ID: ${REPRACER_AMAZON_LWA_CLIENT_ID:-}
-      REPRACER_AMAZON_APP_DRAFT: ${REPRACER_AMAZON_APP_DRAFT:-on}
+      REPRACER_AMAZON_APP_DRAFT: ${REPRACER_AMAZON_APP_DRAFT:-}
       REPRACER_AMAZON_LWA_CLIENT_SECRET_FILE: ${REPRACER_AMAZON_LWA_CLIENT_SECRET_FILE:-}
-      REPRACER_EBAY_ENVIRONMENT: ${REPRACER_EBAY_ENVIRONMENT:-SANDBOX}
+      REPRACER_EBAY_ENVIRONMENT: ${REPRACER_EBAY_ENVIRONMENT:-}
       REPRACER_EBAY_CLIENT_ID: ${REPRACER_EBAY_CLIENT_ID:-}
       REPRACER_EBAY_RUNAME: ${REPRACER_EBAY_RUNAME:-}
       REPRACER_EBAY_SCOPES: ${REPRACER_EBAY_SCOPES:-}

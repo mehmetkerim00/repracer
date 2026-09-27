@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { channelApps, createHeartbeat, loadChannelAppsConfig, ProcessHealth, serveHealth, type Env } from '@repracer/service-runtime';
 import { ephemeralKeyring } from '@repracer/channel-oauth';
 import { createChannelConnectService } from './connect.ts';
+import { createTenantWorlds } from './tenant-worlds.ts';
 import { createAuthenticator, remoteJwks, staticJwks, type Authenticator, type Principal } from '@repracer/identity';
 import { createLocalIssuer } from '@repracer/identity/test-issuer';
 import { createPool, PgChannelConnectStore, type PgPool } from '@repracer/pricing-store-pg';
@@ -86,6 +87,11 @@ function bothIssuers(seller: Authenticator | null, guest: Authenticator, onSelle
         onSellerFailure(error);
         return guest.authenticate(authorization);
       }
+    },
+    // Приглашение принимает только вход у поставщика продавцов: гостевой токен демо в тенант не ведёт [Р-160, Р-178]
+    async identify(authorization: string | undefined) {
+      if (!seller || issuerOf(authorization) === GUEST_ISSUER) return null;
+      return seller.identify(authorization);
     },
   };
 }
@@ -199,7 +205,23 @@ export async function startConsole(env: Env = process.env): Promise<RunningConso
     http: (url, init) => fetch(url, init),
     log: (event, fields) => console.log(JSON.stringify({ level: 'INFO', code: event.toUpperCase(), details: fields })),
   });
-  const api = createStandApi(worlds as never, identity, { connect: (worldId) => (worldId === state.demo?.world.id ? null : connectService) });
+  /**
+   * Шаг 44 [Р-178]: мир каждого тенанта пользователя — по членствам из базы. Демо остаётся своим миром гостевого пути;
+   * список тенантов для мира строит база, и демо-тенанта в нём нет никогда.
+   */
+  // Задания тенантов продавцов ведёт ОТДЕЛЬНЫЙ процесс `bulk-worker` промышленного профиля (находка 8 ревью шага 44)
+  const tenantWorlds = createTenantWorlds({ authenticator: pools.authenticator, app: pools.app, admin: pools.admin, bulkWorker: pools.bulk_worker, stock: pools.stock });
+  const api = createStandApi(worlds as never, {
+    ...identity,
+    ...(config.oidc ? {
+      oidc: { issuer: config.oidc.issuer, clientId: config.oidc.clientId, scope: config.oidc.scope },
+      acceptInvitation: (token, v) => directory.acceptInvitation(token, { issuer: v.issuer, subject: v.subject }, v.email, v.emailVerified),
+    } : {}),
+  }, {
+    connect: (worldId) => (worldId === state.demo?.world.id ? null : connectService),
+    tenantWorlds: (principal) => tenantWorlds.worldsFor(principal),
+    inbound: (prefix, sha) => tenantWorlds.inbound(prefix, sha),
+  });
   const server = createStandServer(api, config.locale, createStaticHandler(config.distDir));
   const healthServer = await serveHealth(health, { port: config.metricsPort, prefix: 'repracer_console', staleAfterMs: 120_000, host: '0.0.0.0' });
   health.alive();

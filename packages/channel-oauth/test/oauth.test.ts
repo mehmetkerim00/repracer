@@ -162,7 +162,7 @@ test('Р-177: проверка авторизаций — отзыв, полом
   const out = await checker.check();
   // Отзыв записывается после прохода: сперва видно, не отказывают ли всем сразу (находка 7 ревью шага 43)
   assert.deepEqual(recorded, [['c0', 'OK', null], ['c2', 'PLATFORM', 'KEYRING'], ['c1', 'REVOKED', 'invalid_grant']]);
-  assert.deepEqual([out.checked, out.ok, out.revoked, out.platform, out.platformChannels], [3, 1, 1, 1, ['AMAZON']]);
+  assert.deepEqual([out.checked, out.ok, out.revoked, out.platform, out.keyringFailures], [3, 1, 1, 0, 1], 'чужой ключ — своя причина, не «ключи приложения»');
   const leaked = model.issuedTokens.filter((t) => logs.join('\n').includes(t) || JSON.stringify(out).includes(t));
   assert.deepEqual(leaked, [], 'токен не попадает ни в журнал, ни в итог проверки');
 });

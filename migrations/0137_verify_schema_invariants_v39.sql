@@ -1,4 +1,4 @@
--- 0133_verify_schema_invariants_v38.sql
+-- 0137_verify_schema_invariants_v39.sql
 -- Проверка схемы после шагов 41 и 42 — последняя в наборе (0109, 0112, 0114, 0116, 0119, 0121, 0123, 0125 и 0127 остаются историей).
 -- Шаг 42 [Р-172…Р-174] новых ПРАВИЛ не добавил: свойства витрин со статусом, суммы дайджеста и его отметка доставки
 -- держатся ограничениями и стражами 0130, и у каждого своя строка каталога мутаций [Р-108]. Правила проверки нашли на
@@ -354,7 +354,9 @@ BEGIN
     IF r.f::text NOT IN ('security.resolve_channel_account(text,text,text)', 'tenant_data.lock_decision_products(uuid,uuid[])',
                          'channel_data.review_halt_by_sample(uuid,uuid,timestamp with time zone)',
                          -- Шаг 24 [Р-121]: вердикт сверки опросом ставит база, путь решения только вызывает проверку
-                         'channel_data.review_notification_loss(uuid,uuid,timestamp with time zone)') THEN
+                         'channel_data.review_notification_loss(uuid,uuid,timestamp with time zone)',
+                         -- Шаг 44 [Р-179]: обнаружение офферов записывает каталог функцией узкой роли — цен и движка она не трогает
+                         'tenant_data.record_discovered_offers(uuid,uuid,jsonb)') THEN
       bad := bad || format('%s: SECURITY DEFINER function executable by the decision path is not in the allow list (Р-96)', r.f);
     END IF;
   END LOOP;

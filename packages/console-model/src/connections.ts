@@ -53,6 +53,9 @@ export interface ConnectionChannelView {
   marketplaces: Array<{ id: string; label: string }>;
   missingText: string | null;
   pendingText: string | null;
+  /** Находка 17 ревью шага 43: ждущий запрос отменяется продавцом, а не держит кнопку десять минут */
+  pendingRequestId: string | null;
+  cancelLabel: string;
 }
 
 export interface ConnectionsView {
@@ -86,7 +89,9 @@ export function connectionsView(
     const progressText = state === 'SHADOW'
       ? (a.offers === 0 ? t.progress.discovering : a.shadowDecisions24h === 0 ? t.progress.shadowWaiting(a.offers) : t.progress.shadow(a.offers, a.shadowDecisions24h))
       : state === 'LIVE' ? t.progress.live(a.offers) : state === 'AWAITING_ACCESS' ? t.progress.awaitingAccess(a.accessBlockers.join(', ')) : null;
+    // Находка 18 ревью шага 43: у отозванного — «доступ отозван», а не «последний раз подтверждён»
     const authorizationText = !a.oauth ? t.authorization.external
+      : state === 'REVOKED' ? t.authorization.revoked
       : a.credentialVerifiedAt ? t.authorization.verified(a.credentialVerifiedAt, a.credentialCheckFailures)
         : t.authorization.obtained(a.credentialObtainedAt ?? a.connectedAt);
     return {
@@ -99,9 +104,13 @@ export function connectionsView(
   });
   const channels = connectable.map((c): ConnectionChannelView => {
     const pending = rows.pending.find((p) => p.channel === c.channel && p.status === 'PENDING' && Date.parse(p.expiresAt) > nowMs) ?? null;
-    const has = rows.accounts.some((a) => a.channel === c.channel);
-    const state: ConnectionState = c.platformMissing.length > 0 ? 'AWAITING_PLATFORM' : pending ? 'AWAITING_CONSENT' : has ? accountState(rows.accounts.find((a) => a.channel === c.channel)!) : 'NOT_CONNECTED';
-    const failed = rows.pending.find((p) => p.channel === c.channel && p.status !== 'PENDING' && p.status !== 'COMPLETED') ?? null;
+    // Находка 18: состояние канала — по НОВЕЙШЕМУ аккаунту, а не по первому в списке
+    const newest = rows.accounts.filter((a) => a.channel === c.channel).sort((x, y) => Date.parse(y.connectedAt) - Date.parse(x.connectedAt))[0] ?? null;
+    const state: ConnectionState = c.platformMissing.length > 0 ? 'AWAITING_PLATFORM' : pending ? 'AWAITING_CONSENT' : newest ? accountState(newest) : 'NOT_CONNECTED';
+    // Провал показывается, только если он новее последнего удавшегося подключения канала (запросы идут новейшими первыми)
+    const latest = rows.pending.find((p) => p.channel === c.channel && p.status !== 'PENDING') ?? null;
+    const failed = latest && latest.status !== 'COMPLETED' && latest.failureCode !== 'CANCELLED' ? latest : null;
+    const has = newest !== null;
     return {
       channel: c.channel, state, stateText: t.states[state] ?? state,
       canConnect: canManage && c.platformMissing.length === 0 && pending === null,
@@ -109,6 +118,8 @@ export function connectionsView(
       marketplaces: c.marketplaces.map((id) => ({ id, label: t.marketplaces[id] ?? id })),
       missingText: c.platformMissing.length > 0 ? t.platformMissing(c.platformMissing.map((code) => t.missing[code] ?? code).join('; ')) : null,
       pendingText: pending ? t.pending(pending.expiresAt) : failed ? t.failed(t.failures[failed.failureCode ?? failed.status] ?? failed.failureCode ?? failed.status) : null,
+      pendingRequestId: pending && canManage ? pending.authorizationRequestId : null,
+      cancelLabel: t.cancel,
     };
   });
   return {

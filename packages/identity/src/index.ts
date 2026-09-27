@@ -65,6 +65,20 @@ export function createAuthenticator(options: Omit<VerifyOptions, 'jwks'> & { jwk
       const user = await options.directory.resolve({ issuer: token.issuer, subject: token.subject });
       return user ? { ...user, issuer: token.issuer, subject: token.subject, email: token.email, emailVerified: token.emailVerified, amr: token.amr } : null;
     },
+    /**
+     * Шаг 44 [Р-178]: проверенный токен БЕЗ сопоставления — только для приёма приглашения: новый владелец входит у
+     * поставщика впервые, и пользователя у нас ещё нет. Ни членств, ни ролей этот ответ не несёт.
+     */
+    async identify(authorization: string | undefined): Promise<Awaited<ReturnType<typeof verifyToken>> | null> {
+      const m = /^Bearer ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/.exec(authorization ?? '');
+      if (!m) return null;
+      try {
+        return await verifyToken(m[1]!, options);
+      } catch (error) {
+        if (error instanceof TokenError) return null;
+        throw error;
+      }
+    },
   };
 }
 

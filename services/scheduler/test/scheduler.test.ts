@@ -247,7 +247,7 @@ test('Р-133 (шаг 28): внутренняя работа повторяетс
     // Шаг 41 [Р-171]: недельный дайджест тени — так же: работа каталога появляется вместе со своей зависимостью
     shadowDigest: { send: async () => ({ letters: 0, quiet: 0, noRecipient: 0, failed: 0 }) },
     // Шаг 43 [Р-177]: проверка авторизаций ходит в конечную точку токенов канала — работа класса CHANNEL
-    channelAuthorizations: { check: async () => ({ checked: 0, ok: 0, revoked: 0, transient: 0, platform: 0, platformChannels: [], suspiciousRevocations: 0 }) },
+    channelAuthorizations: { check: async () => ({ checked: 0, ok: 0, revoked: 0, transient: 0, platform: 0, platformChannels: [], suspiciousRevocations: 0, keyringFailures: 0 }) },
   }).jobs('2026-09-17T10:00:00.000Z');
   const kinds = new Map(specs.map((spec) => [spec.name, spec.retryKind]));
   assert.deepEqual([...kinds.keys()].sort(), [...JOB_CATALOG.map((j) => j.name)].sort(), 'у каждой работы каталога есть спецификация');

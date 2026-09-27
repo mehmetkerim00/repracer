@@ -300,6 +300,13 @@ export const en = {
       worlds: 'Stand worlds',
       worldsHint: 'Each world is a stand scenario on synthetic data. No channel is connected.',
       backToWorlds: '← Worlds',
+      invitation: {
+        bad: 'This invitation link is incomplete. Open it again from the letter.',
+        refused: 'This invitation cannot be accepted: it has expired, was already used, or belongs to another address. Ask the sender for a new one.',
+        accepted: 'Invitation accepted. Your account is ready.',
+        signInFirst: 'Sign in to accept the invitation.',
+      },
+      signIn: 'Sign in',
       screens: { connections: 'Channel connections', onboarding: 'Setup', shadow: 'Shadow mode', stock: 'Stock', products: 'Products', decisions: 'Why this price', rejected: 'Stopped changes', bounds: 'Bounds', 'cost-import': 'Cost import', stop: 'Stop pricing', strategies: 'Strategies', feed: 'Price changes', dangerous: 'Dangerous changes', compliance: 'Omnibus', jobs: 'Bulk operations' },
       loading: (seconds: number) => `Loading stand data. If there is no answer within ${seconds} s, an error is shown.`,
       timeout: (seconds: number) => `The stand did not answer within ${seconds} s. Is it running? npm run stand -w @repracer/console`,
@@ -589,6 +596,7 @@ export const en = {
       connectAnother: (channel: string) => `Connect another ${channel} account`,
       reconnect: 'Renew the access',
       reconnectRevoked: 'Connect again',
+      cancel: 'Cancel this connection attempt',
       pending: (until: string) => `Waiting for your consent on the page of the channel — until ${until}.`,
       failed: (why: string) => `The last attempt did not connect: ${why}`,
       platformMissing: (what: string) => `Not available yet: ${what}. Nothing is to be done by you — the button appears as soon as this is in place.`,
@@ -609,6 +617,7 @@ export const en = {
         awaitingAccess: (what: string) => `Missing: ${what}.`,
       },
       authorization: {
+        revoked: 'Access was withdrawn in the channel: connect again to continue.',
         external: 'Access is configured by the platform, not through this screen.',
         obtained: (when: string) => `Access granted ${when}; not checked yet.`,
         verified: (when: string, failures: number) => `Access last confirmed by the channel ${when}${failures > 0 ? ` (${failures} checks failed since)` : ''}.`,
@@ -771,6 +780,7 @@ export const en = {
          */
         CHANNEL_APP_CREDENTIALS_REJECTED: { what: 'the token endpoint of a channel refused the keys of our application', step: 'Check the client id and secret of the named channel in the secret files of the deployment: sellers are not affected by their own doing, and their accounts stay connected.' },
         CHANNEL_REVOCATIONS_SUSPICIOUS: { what: 'most checked channel accounts were refused with invalid_grant in one pass — more likely our failure than sellers withdrawing access', step: 'Check the application keys, the keyring file and recent changes of the channel application before telling sellers anything: their accounts were left connected.' },
+        CHANNEL_KEYRING_UNREADABLE: { what: 'stored channel tokens cannot be opened with the keyring of the process', step: 'Check that the keyring file of the scheduler holds the key named in the stored tokens: a removed or replaced key makes the tokens unreadable, while the sellers still count as connected.' },
         ALERT_NOT_STORED: { what: 'an event could not be stored in the database', step: 'Check that the database is reachable from the process it came from: the event exists only in the process log, and no letter is sent about it.' },
         ANALYTICS_EXPORT_BACKLOG: { what: 'the export of competitor history to ClickHouse is behind', step: 'Check in the scheduler run log since when the `analytics-export` job is behind, and check that ClickHouse is reachable. From 14 days of backlog on, the oldest days of the history are lost.' },
         ANALYTICS_EXPORT_FAILED: { what: 'the export of a day to ClickHouse failed', step: 'Check first that ClickHouse is reachable and read the error line in the process log; the day is repeated from the backlog.' },

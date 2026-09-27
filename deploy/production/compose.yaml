@@ -37,8 +37,49 @@ services:
     extends:
       file: ../console/compose.yaml
       service: console
+    # Шаг 44 [Р-180]: промышленный профиль поднимается ТОЛЬКО с настоящим поставщиком identity. Без значений compose
+    # отказывает ещё до контейнера, а процесс — при старте своей причиной; имитатора входа здесь нет и быть не может
+    environment:
+      REPRACER_PROFILE: production
+      REPRACER_CONSOLE_OIDC_ISSUER: ${REPRACER_CONSOLE_OIDC_ISSUER:?set REPRACER_CONSOLE_OIDC_ISSUER (Р-180)}
+      REPRACER_CONSOLE_OIDC_AUDIENCE: ${REPRACER_CONSOLE_OIDC_AUDIENCE:?set REPRACER_CONSOLE_OIDC_AUDIENCE (Р-180)}
+      REPRACER_CONSOLE_OIDC_JWKS_URL: ${REPRACER_CONSOLE_OIDC_JWKS_URL:?set REPRACER_CONSOLE_OIDC_JWKS_URL (Р-180)}
+      REPRACER_CONSOLE_OIDC_CLIENT_ID: ${REPRACER_CONSOLE_OIDC_CLIENT_ID:?set REPRACER_CONSOLE_OIDC_CLIENT_ID (Р-180)}
     # Порты своего развёртывания консоль оставляет как есть: они локальные (127.0.0.1) и нужны для осмотра на сервере.
     # Наружу её выставляет ТОЛЬКО прокси: 4319 на внешнем адресе не слушает никто
+
+  # Шаг 44 (находка 8 ревью): массовые задания тенантов продавцов — ОТДЕЛЬНЫЙ процесс [Р-139]: тяжёлая работа заданий
+  # не занимает цикл событий консоли. Тенантов с ждущими заданиями называет база; роли — те же файлы секретов, что у консоли
+  bulk-worker:
+    image: node:22.22.3-bookworm-slim
+    working_dir: /app
+    command: ["node", "--experimental-strip-types", "--disable-warning=ExperimentalWarning", "apps/console/server/bulk-worker.ts"]
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      REPRACER_BULK_METRICS_PORT: "9473"
+      # Р-127: отметка во внешнем сервисе; аккаунта сервиса нет (OQ-188) — выключение только явное, как у консоли
+      REPRACER_BULK_HEARTBEAT: ${REPRACER_BULK_HEARTBEAT:-off}
+      REPRACER_BULK_HEARTBEAT_URL_FILE: /run/secrets/bulk_heartbeat_url
+      REPRACER_BULK_APP_PG_URL_FILE: /run/secrets/console_app_pg_url
+      REPRACER_BULK_ADMIN_PG_URL_FILE: /run/secrets/console_admin_pg_url
+      REPRACER_BULK_BULK_WORKER_PG_URL_FILE: /run/secrets/console_bulk_worker_pg_url
+      REPRACER_BULK_STOCK_PG_URL_FILE: /run/secrets/console_stock_pg_url
+    volumes:
+      - ../..:/app:ro
+      - ${REPRACER_SECRETS_DIR:?set REPRACER_SECRETS_DIR}:/run/secrets:ro
+    restart: unless-stopped
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9473/healthz').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    ports:
+      - "127.0.0.1:9473:9473"
+    logging: { driver: json-file, options: { max-size: 50m, max-file: "5" } }
 
   # Шаг 40 [Р-165]: панель оператора платформы. Она НЕ за прокси и НЕ в Caddyfile намеренно: наружу её не выставляет
   # ничто, до неё добираются SSH-туннелем на 127.0.0.1:4327 или из названного списка адресов на самом сервере.

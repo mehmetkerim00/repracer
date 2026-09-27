@@ -30,7 +30,7 @@ function harness(retryAt: string | undefined, refuseTimes: number) {
       return page.cursor ? { items: [] } : { items: [], nextCursor: 'p2' };
     },
   } as unknown as ChannelAdapter;
-  const store = { async recordOfferChannelPricing() { return 0; } } as unknown as PricingStore;
+  const store = { async recordOfferChannelPricing() { return 0; }, async recordDiscoveredOffers() { return 0; } } as unknown as PricingStore;
   const pipeline = createPricingPipeline({
     store, adapter, alerts: { raise: async () => undefined }, logger: { log: () => undefined },
     now: () => new Date(nowMs).toISOString() as never,

@@ -61,6 +61,13 @@ export interface StandIdentity {
    * должен. Чего гость не может, держит база, а не этот маршрут: роль не повышается, заданий он не создаёт.
    */
   guest?: { issue(): Promise<{ accessToken: string; expiresIn: number }> };
+  /** Шаг 44 [Р-178]: настоящий вход у поставщика — страница уходит к нему сама (код с PKCE) */
+  oidc?: { issuer: string; clientId: string; scope: string };
+  /**
+   * Шаг 44 [Р-179]: приём приглашения из письма. Новый владелец входит у поставщика впервые — пользователя у нас ещё нет,
+   * поэтому токен проверяется без сопоставления, а связь (издатель, subject) ↔ пользователь создаёт база по приглашению.
+   */
+  acceptInvitation?(invitationToken: string, verified: { issuer: string; subject: string; email: string | null; emailVerified: boolean }): Promise<string>;
 }
 
 export const LOCALE_COOKIE = 'repracer_locale';
@@ -172,6 +179,13 @@ function conflictText(world: StandWorld, conflict: { writeScopeId: string; actua
  */
 export interface StandServices {
   connect?(worldId: string): ChannelConnectService | null;
+  /**
+   * Шаг 44 [Р-178]: миры тенантов пользователя — по его членствам, из базы (`security.console_tenant_worlds`). Демо сюда не
+   * попадает никогда: гостевой путь — свои миры в списке `worlds`, и смешать их нечем.
+   */
+  tenantWorlds?(principal: Principal): Promise<LiveWorld[]>;
+  /** Шаг 44 (находка 4 ревью): ключ Inbound API → тенант → его мир, вне списка миров стенда */
+  inbound?(prefix: string, sha256Hex: string): Promise<{ tenantId: string; stockSourceId: string; world: LiveWorld } | null>;
 }
 
 export function createStandApi(worlds: readonly LiveWorld[], identity: StandIdentity, services: StandServices = {}) {
@@ -194,6 +208,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       user: principal ? { subject: principal.subject, email: principal.email } : null, locale: l,
       simulator: identity.simulator ? STAND_ACCOUNTS.map((a) => ({ role: a.role, label: m.values[a.role] })) : null,
       demoGuest: Boolean(identity.guest),
+      oidc: identity.oidc ?? null,
     });
 
     /**
@@ -215,7 +230,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         const own = worlds.find((x) => x.tenantId === r.tenantId);
         return own ? { ...r, world: own } : null;
       }
-      return null;
+      return services.inbound ? services.inbound(prefix, createHash('sha256').update(raw).digest('hex')) : null;
     };
 
     /**
@@ -306,8 +321,30 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       return ok({ accessToken: identity.simulator.token(account, { secondFactor }), tokenType: 'Bearer', expiresIn: identity.simulator.expiresInSeconds });
     }
 
+    /**
+     * Шаг 44 [Р-179]: приём приглашения. Токен проверен поставщиком (подпись, издатель, аудитория, сроки), адрес подтверждён
+     * им же и совпадает с адресом приглашения — это сверяет база. Повторный приём и чужое приглашение — отказ базы.
+     */
+    if (parts[1] === 'invitations' && parts[2] === 'accept') {
+      if (req.method !== 'POST') return fail(405, 'METHOD', s.method);
+      if (!identity.acceptInvitation) return fail(404, 'NOT_FOUND', s.notFound);
+      const verified = await identity.authenticator.identify(req.authorization);
+      if (!verified) return fail(401, 'UNAUTHENTICATED', s.unauthenticated);
+      const invitation = typeof body.token === 'string' && /^[A-Za-z0-9_-]{16,128}$/.test(body.token) ? body.token : null;
+      if (!invitation) return fail(400, 'BAD_INVITATION', m.ui.app.invitation.bad);
+      try {
+        await identity.acceptInvitation(invitation, { issuer: verified.issuer, subject: verified.subject, email: verified.email, emailVerified: verified.emailVerified });
+      } catch {
+        // Причина отказа базы продавцу не пересказывается: истёкшее, чужое и уже принятое приглашение выглядят одинаково
+        return fail(409, 'INVITATION_REFUSED', m.ui.app.invitation.refused);
+      }
+      return ok({ accepted: true, message: m.ui.app.invitation.accepted });
+    }
+
     if (!principal) return fail(401, 'UNAUTHENTICATED', s.unauthenticated);
     if (parts[1] !== 'worlds') return fail(404, 'NOT_FOUND', s.notFound);
+    // Р-178: миры запроса — миры стенда и демо плюс миры тенантов пользователя из базы
+    const allWorlds: readonly LiveWorld[] = services.tenantWorlds ? [...worlds, ...(await services.tenantWorlds(principal))] : worlds;
 
     // Роль — из членства при каждом запросе; мира без членства для пользователя нет
     const viewerIn = (live: LiveWorld): Viewer | null => {
@@ -317,7 +354,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
 
     if (parts.length === 2) {
       if (req.method !== 'GET') return fail(405, 'METHOD', s.method);
-      const visible = worlds.flatMap((live) => {
+      const visible = allWorlds.flatMap((live) => {
         const viewer = viewerIn(live);
         return viewer ? [{ live, viewer }] : [];
       });
@@ -334,7 +371,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       })));
     }
 
-    const live = worlds.find((w) => w.id === parts[2]);
+    const live = allWorlds.find((w) => w.id === parts[2]);
     const viewer = live ? viewerIn(live) : null;
     if (!live || !viewer) return fail(404, 'WORLD_NOT_FOUND', s.notFound);
     /**
@@ -363,10 +400,15 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         const rows = connect ? await connect.connections(live.tenantId) : { accounts: [], pending: [] };
         return ok(connectionsView({ worldId: live.id, role: viewer.role, now: new Date().toISOString() }, rows, connect ? connect.connectable() : [], m));
       }
-      if (req.method !== 'POST' || (param4 !== 'start' && param4 !== 'callback')) return fail(404, 'NOT_FOUND', s.notFound);
+      if (req.method !== 'POST' || (param4 !== 'start' && param4 !== 'callback' && param4 !== 'cancel')) return fail(404, 'NOT_FOUND', s.notFound);
       if (!can(viewer.role, 'MANAGE_TENANT')) return fail(403, 'FORBIDDEN', t.noRight);
       if (!connect) return fail(409, 'CHANNEL_UNAVAILABLE', t.errors.unavailable);
       const actor = { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) };
+      if (param4 === 'cancel') {
+        const id = typeof body.authorizationRequestId === 'string' && /^[0-9a-f-]{36}$/.test(body.authorizationRequestId) ? body.authorizationRequestId : null;
+        if (!id) return fail(400, 'BAD_REQUEST', s.badRequest);
+        return (await connect.cancel(live.tenantId, id, actor)) ? ok({ cancelled: true }) : fail(409, 'ALREADY_DONE', t.errors.alreadyDone);
+      }
       if (param4 === 'start') {
         const marketplaces = Array.isArray(body.marketplaces) && body.marketplaces.every((x) => typeof x === 'string') ? body.marketplaces as string[] : null;
         if (typeof body.channel !== 'string' || !marketplaces) return fail(400, 'BAD_REQUEST', s.badRequest);

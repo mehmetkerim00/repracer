@@ -20,6 +20,16 @@ export interface ChannelAppsConfig {
   ebay: { environment: 'SANDBOX' | 'PRODUCTION'; clientId: string; clientSecret: string; ruName: string; scopes: string[] } | null;
 }
 
+const onOff = (v: string | undefined, name: string): boolean => {
+  if (v === 'on') return true;
+  if (v === 'off') return false;
+  throw new ConfigError(`CONFIG_MISSING: ${name}=on|off (приложение настроено — его состояние называется явно)`);
+};
+const ebayEnvironment = (v: string | undefined): 'SANDBOX' | 'PRODUCTION' => {
+  if (v === 'SANDBOX' || v === 'PRODUCTION') return v;
+  throw new ConfigError('CONFIG_MISSING: REPRACER_EBAY_ENVIRONMENT=SANDBOX|PRODUCTION (приложение настроено — окружение называется явно)');
+};
+
 const AMAZON_VARS = ['REPRACER_AMAZON_APP_ID', 'REPRACER_AMAZON_LWA_CLIENT_ID'] as const;
 const EBAY_VARS = ['REPRACER_EBAY_CLIENT_ID', 'REPRACER_EBAY_RUNAME', 'REPRACER_EBAY_SCOPES'] as const;
 
@@ -36,13 +46,15 @@ export function loadChannelAppsConfig(env: Env = process.env, read: (path: strin
     ? {
       applicationId: env.REPRACER_AMAZON_APP_ID!, clientId: env.REPRACER_AMAZON_LWA_CLIENT_ID!,
       clientSecret: requiredValue(secretFromEnv(env, 'REPRACER_AMAZON_LWA_CLIENT_SECRET', read), 'REPRACER_AMAZON_LWA_CLIENT_SECRET_FILE'),
-      // Приложение в состоянии Draft согласуется только с version=beta (website-authorization-workflow)
-      draft: (env.REPRACER_AMAZON_APP_DRAFT ?? 'on') !== 'off',
+      // Приложение в состоянии Draft согласуется только с version=beta (website-authorization-workflow). Умолчания нет
+      // (находка 14 ревью шага 43): «черновик» по умолчанию у опубликованного приложения — ловушка на первом согласии
+      draft: onOff(env.REPRACER_AMAZON_APP_DRAFT, 'REPRACER_AMAZON_APP_DRAFT'),
     }
     : null;
   const ebay = all(EBAY_VARS, 'REPRACER_EBAY_CLIENT_SECRET', 'приложение eBay')
     ? {
-      environment: env.REPRACER_EBAY_ENVIRONMENT === 'PRODUCTION' ? 'PRODUCTION' as const : 'SANDBOX' as const,
+      // Песочница или бой — называется явно: умолчание «песочница» у боевого приложения молча не подключало бы никого
+      environment: ebayEnvironment(env.REPRACER_EBAY_ENVIRONMENT),
       clientId: env.REPRACER_EBAY_CLIENT_ID!, ruName: env.REPRACER_EBAY_RUNAME!,
       clientSecret: requiredValue(secretFromEnv(env, 'REPRACER_EBAY_CLIENT_SECRET', read), 'REPRACER_EBAY_CLIENT_SECRET_FILE'),
       // Scope Inventory API не подтверждён снимком (E-08): его называет конфигурация, а не код

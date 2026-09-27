@@ -3,9 +3,19 @@
 # (deploy/production/Caddyfile) этим файлом не подменяется в работе: он монтируется только надстройкой CI.
 :80 {
 	encode zstd gzip
+	# Тот же фильтр журнала, что у прокси развёртывания (шаг 43, находка 10): подъём профиля в CI проверяет его синтаксис
 	log {
 		output stdout
-		format json
+		format filter {
+			wrap json
+			fields {
+				request>uri query {
+					replace spapi_oauth_code REDACTED
+					replace code REDACTED
+					replace state REDACTED
+				}
+			}
+		}
 	}
 	reverse_proxy console:4319 {
 		header_up X-Forwarded-Proto {scheme}

@@ -36,7 +36,9 @@ export interface ConsoleConfig {
   /** Строки подключения по ролям: ключ — имя роли без `svc_` */
   pgUrls: Readonly<Record<ConsoleRole, string>>;
   /** Вход настоящих продавцов [Р-78]: поставщик identity. Без него работает только гость демо */
-  oidc: { issuer: string; audience: string; jwksUrl: string } | null;
+  oidc: { issuer: string; audience: string; jwksUrl: string; clientId: string; scope: string } | null;
+  /** Шаг 44 [Р-180]: промышленный профиль — поднимается ТОЛЬКО с настоящим поставщиком identity */
+  profile: 'production' | 'default';
   /**
    * Р-127: отметка во внешнем сервисе. Консоль — такой же разворачиваемый процесс, как планировщик: остановившуюся
    * консоль публичного демо не заметит НИКТО, кроме посетителя, который просто уйдёт. Выключение — только явное.
@@ -53,7 +55,9 @@ export const CONSOLE_ROLES = [
 ] as const;
 export type ConsoleRole = (typeof CONSOLE_ROLES)[number];
 
-const OIDC_VARS = ['REPRACER_CONSOLE_OIDC_ISSUER', 'REPRACER_CONSOLE_OIDC_AUDIENCE', 'REPRACER_CONSOLE_OIDC_JWKS_URL'] as const;
+const OIDC_VARS = ['REPRACER_CONSOLE_OIDC_ISSUER', 'REPRACER_CONSOLE_OIDC_AUDIENCE', 'REPRACER_CONSOLE_OIDC_JWKS_URL', 'REPRACER_CONSOLE_OIDC_CLIENT_ID'] as const;
+/** Издатели, которые настоящим поставщиком не являются: имитатор стенда и локальные адреса [Р-180] */
+const NOT_A_PROVIDER = /^https?:\/\/(identity\.stand\.repracer\.test|localhost|127\.\d+\.\d+\.\d+|\[::1\])(:\d+)?(\/|$)/;
 
 // Секрет только из файла, кроме режима стенда [шаг 28, E] — тот же разбор, что у остальных процессов
 const secret = (env: Env, name: string, read: (path: string) => string) => secretFromEnv(env, name, read);
@@ -75,10 +79,25 @@ export function loadConsoleConfig(env: Env = process.env, read: (path: string) =
     const missing = OIDC_VARS.filter((v) => !env[v]);
     if (missing.length > 0) throw new ConfigError(`CONFIG_MISSING: ${missing.join(', ')} (вход у поставщика настраивается целиком или не настраивается вовсе)`);
     // Поставщик отвечает по https: токен и ключи по открытому каналу — это раздача чужих сессий
-    if (!/^https:\/\//.test(env.REPRACER_CONSOLE_OIDC_ISSUER!) || !/^https:\/\//.test(env.REPRACER_CONSOLE_OIDC_JWKS_URL!)) {
+    // Модель поставщика прогона слушает http на петле — это допустимо только в режиме стенда
+    const stand = env.REPRACER_MODE === 'stand';
+    if (!stand && (!/^https:\/\//.test(env.REPRACER_CONSOLE_OIDC_ISSUER!) || !/^https:\/\//.test(env.REPRACER_CONSOLE_OIDC_JWKS_URL!))) {
       throw new ConfigError('CONFIG_INVALID: REPRACER_CONSOLE_OIDC_ISSUER and REPRACER_CONSOLE_OIDC_JWKS_URL must be https URLs');
     }
-    oidc = { issuer: env.REPRACER_CONSOLE_OIDC_ISSUER!, audience: env.REPRACER_CONSOLE_OIDC_AUDIENCE!, jwksUrl: env.REPRACER_CONSOLE_OIDC_JWKS_URL! };
+    oidc = { issuer: env.REPRACER_CONSOLE_OIDC_ISSUER!, audience: env.REPRACER_CONSOLE_OIDC_AUDIENCE!, jwksUrl: env.REPRACER_CONSOLE_OIDC_JWKS_URL!,
+      clientId: env.REPRACER_CONSOLE_OIDC_CLIENT_ID!, scope: env.REPRACER_CONSOLE_OIDC_SCOPE || 'openid email profile' };
+  }
+  /**
+   * Р-180 (шаг 44): промышленный профиль без настоящего входа продавцов не поднимается. Отказ — ПРИ СТАРТЕ и своей
+   * причиной, а не 500 при первом входе: процесс, в который продавец войти не может, выглядел бы работающим.
+   */
+  const profile = env.REPRACER_PROFILE === 'production' ? 'production' as const : 'default' as const;
+  if (profile === 'production') {
+    if (!oidc) throw new ConfigError('CONFIG_MISSING: REPRACER_CONSOLE_OIDC_* — промышленный профиль поднимается только с настоящим поставщиком identity (Р-180)');
+    if (env.REPRACER_MODE === 'stand') throw new ConfigError('CONFIG_INVALID: REPRACER_MODE=stand в промышленном профиле — режим стенда пускает имитатор входа (Р-180)');
+    if (NOT_A_PROVIDER.test(oidc.issuer) || NOT_A_PROVIDER.test(oidc.jwksUrl)) {
+      throw new ConfigError('CONFIG_INVALID: REPRACER_CONSOLE_OIDC_ISSUER — имитатор или локальный адрес, а не поставщик identity (Р-180)');
+    }
   }
 
   const publicDemo = env.REPRACER_CONSOLE_PUBLIC_DEMO === 'on';
@@ -115,5 +134,6 @@ export function loadConsoleConfig(env: Env = process.env, read: (path: string) =
     guestKeyPem,
     pgUrls,
     oidc,
+    profile,
   };
 }

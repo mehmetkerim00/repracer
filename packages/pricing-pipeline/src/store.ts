@@ -627,6 +627,11 @@ export interface PricingStore {
   unassignStrategy(tenantId: string, input: StrategyUnassignInput, actor: AdminActor): Promise<StrategyUnassignResult>;
   /** Р-120: наблюдения при обнаружении офферов — до назначения стратегии; назначение по действующему наблюдению отклоняет БД (0082) */
   recordOfferChannelPricing(tenantId: string, channelAccountId: string, observations: readonly OfferChannelPricingObservation[]): Promise<number>;
+  /**
+   * Шаг 44 [Р-179]: обнаруженные офферы становятся каталогом тенанта — товар по SKU, предложение, единица записи цены в
+   * режиме OFF. Идемпотентно; возвращает число СОЗДАННЫХ предложений. Цен и движка не касается [Р-131].
+   */
+  recordDiscoveredOffers(tenantId: string, channelAccountId: string, offers: readonly DiscoveredCatalogOffer[]): Promise<number>;
   /** Шаг 23: PRICING_HEALTH — в решение не входит, состояние оффера для продавца */
   recordPricingHealth(tenantId: string, channelAccountId: string, health: PricingHealthObservation, notification?: InboundNotificationEntry): Promise<'RECORDED' | 'DUPLICATE_NOTIFICATION'>;
   /** Шаг 23: журнал обработанных уведомлений тенанта — повтор доставки из очереди не обрабатывается второй раз */
@@ -1094,4 +1099,18 @@ export interface ChannelAccountRow {
   marketplaces: string[];
   authStatus: ChannelAuthStatus;
   accessBlockers: ChannelAccessBlocker[];
+}
+
+/** Шаг 44 [Р-179]: оффер канала для каталога — идентичность предложения, без цены (цена — решение движка, а не каталога) */
+export interface DiscoveredCatalogOffer {
+  marketplace: string;
+  externalSku: string | null;
+  externalUnitId: string | null;
+  /** Kaufland: `id_offer` — общий на витрины ключ остатка [Р-35] */
+  externalOfferId: string | null;
+  channelProductRef: string | null;
+  gtin: string | null;
+  condition: string;
+  /** Способ исполнения от канала: CHANNEL (FBA/FBK) остаток не синхронизирует */
+  fulfillment: 'MERCHANT' | 'CHANNEL';
 }

@@ -21,6 +21,13 @@ services:
     ports:
       - "127.0.0.1:9467:9467"
 
+  bulk-worker:
+    environment:
+      # Аккаунта внешнего сервиса у проекта нет (OQ-188): в CI отметка выключается ЯВНО
+      REPRACER_BULK_HEARTBEAT: "off"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
   operator:
     environment:
       # Аккаунта внешнего сервиса у проекта нет (OQ-188): в CI отметка выключается ЯВНО

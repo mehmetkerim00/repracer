@@ -113,7 +113,8 @@ export class PgChannelConnectStore {
     try {
       return await inTenant(this.adminPool, tenantId, async (tx) => {
         const { rows: [req] } = await tx.query(
-          `SELECT authorization_request_id, channel, region, marketplaces, status, expires_at < now() AS expired
+          `SELECT authorization_request_id, channel, region, marketplaces, status,
+                  expires_at + CASE WHEN exchange_started_at <= expires_at THEN interval '2 minutes' ELSE interval '0' END < now() AS expired
              FROM tenant_data.channel_authorization_request WHERE tenant_id = $1 AND state_sha256 = $2 FOR UPDATE`,
           [tenantId, c.stateSha256]);
         if (!req) return { status: 'UNKNOWN_STATE' } as ConnectOutcome;
@@ -193,6 +194,16 @@ export class PgChannelConnectStore {
     if (claimed) return { status: 'CLAIMED', channel: claimed.channel as 'AMAZON' | 'EBAY' };
     const s = await this.requestStatus(tenantId, stateSha256);
     return { status: s === 'PENDING' ? 'DONE' : s };
+  }
+
+  /** Находка 17 ревью шага 43: продавец закрыл страницу канала — ждущий запрос отменяется, а не держит кнопку десять минут */
+  async cancel(tenantId: string, authorizationRequestId: string, actor: { userId: string; mfa: boolean }): Promise<boolean> {
+    return inTenant(this.adminPool, tenantId, async (tx) => {
+      const r = await tx.query(
+        `UPDATE tenant_data.channel_authorization_request SET status = 'FAILED', failure_code = 'CANCELLED'
+          WHERE tenant_id = $1 AND authorization_request_id = $2 AND status = 'PENDING' AND exchange_started_at IS NULL`, [tenantId, authorizationRequestId]);
+      return (r.rowCount ?? 0) > 0;
+    }, actor.userId, { mfa: actor.mfa });
   }
 
   /** Есть ли у тенанта действующий аккаунт канала — eBay без названного продавца повторно не подключается (E-11) */
@@ -303,8 +314,8 @@ export class PgCredentialVault {
          FROM tenant_data.channel_credential cr
          JOIN tenant_data.channel_account ca ON ca.tenant_id = cr.tenant_id AND ca.channel_account_id = cr.channel_account_id
         WHERE cr.superseded_at IS NULL AND ca.auth_status = 'ACTIVE' AND ca.disconnected_at IS NULL
-          AND (cr.verified_at IS NULL OR cr.verified_at < now() - make_interval(secs => $1))
-        ORDER BY cr.verified_at NULLS FIRST LIMIT $2`, [olderThanSeconds, limit]);
+          AND (cr.last_checked_at IS NULL OR cr.last_checked_at < now() - make_interval(secs => $1))
+        ORDER BY cr.last_checked_at NULLS FIRST LIMIT $2`, [olderThanSeconds, limit]);
     return rows.map((r) => this.row(r));
   }
 

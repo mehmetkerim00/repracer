@@ -1002,6 +1002,11 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     return observations.length;
   }
 
+  /** Каталог мира в памяти задаёт сценарий: обнаружение его не расширяет (стенд утверждает сценарий, а не каталог) */
+  async recordDiscoveredOffers(): Promise<number> {
+    return 0;
+  }
+
   async recordPricingHealth(_tenantId: string, channelAccountId: string, health: PricingHealthObservation, notification?: InboundNotificationEntry): Promise<'RECORDED' | 'DUPLICATE_NOTIFICATION'> {
     if (notification) {
       const key = `${this.channel}|${notification.notificationId}`;

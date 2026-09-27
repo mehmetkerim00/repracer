@@ -82,6 +82,8 @@ export const MEASURED_FILES = new Set([
   'apps/console/test/us-shadow-live.pg.test.ts',
   // Шаг 43: прогон подключения канала утверждает секунды экранов и держит под собой планировщик и мир Kaufland
   'apps/console/test/connect-live.pg.test.ts',
+  // Шаг 44 [Р-179]: полный путь пилота утверждает секунды экранов и держит под собой панель, поставщика входа и исполнителя заданий
+  'apps/console/test/pilot-live.pg.test.ts',
 ]);
 
 /**

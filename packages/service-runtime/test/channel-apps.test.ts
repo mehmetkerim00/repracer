@@ -21,6 +21,7 @@ const amazonEnv = {
   REPRACER_AMAZON_APP_ID: 'amzn1.sellerapps.app.syn', REPRACER_AMAZON_LWA_CLIENT_ID: 'amzn1.application-oa2-client.syn',
   REPRACER_AMAZON_LWA_CLIENT_SECRET_FILE: '/s/amazon', REPRACER_CHANNEL_KEYRING_FILE: '/s/keyring',
   REPRACER_CONNECT_REDIRECT_URL: 'https://console.example.invalid/connect/callback',
+  REPRACER_AMAZON_APP_DRAFT: 'on',
 };
 
 test('Р-150: ничего не настроено — процесс стартует, оба канала «ожидают доступа платформы» с причиной', () => {
@@ -49,10 +50,18 @@ test('Р-175, Р-177: половина настройки, приложение 
   assert.throws(() => loadChannelAppsConfig({ ...inEnv, REPRACER_AMAZON_LWA_CLIENT_SECRET: 'syn-in-env' }, read), /CONFIG_SECRET_IN_ENV/);
 });
 
-test('Р-175: eBay по умолчанию — песочница, scope называет конфигурация (E-08)', () => {
+test('находка 14 ревью шага 43: состояние приложения Amazon и окружение eBay называются явно — умолчаний-ловушек нет', () => {
+  const { REPRACER_AMAZON_APP_DRAFT: _d, ...noDraft } = amazonEnv;
+  assert.throws(() => loadChannelAppsConfig(noDraft, read), /CONFIG_MISSING: REPRACER_AMAZON_APP_DRAFT=on\|off/);
+  assert.equal(loadChannelAppsConfig({ ...amazonEnv, REPRACER_AMAZON_APP_DRAFT: 'off' }, read).amazon?.draft, false);
+  assert.throws(() => loadChannelAppsConfig({ REPRACER_EBAY_CLIENT_ID: 'x', REPRACER_EBAY_RUNAME: 'y', REPRACER_EBAY_SCOPES: 'z', REPRACER_EBAY_CLIENT_SECRET_FILE: '/s/ebay', REPRACER_CHANNEL_KEYRING_FILE: '/s/keyring' }, read),
+    /CONFIG_MISSING: REPRACER_EBAY_ENVIRONMENT/);
+});
+
+test('Р-175: eBay — песочница по явному значению, scope называет конфигурация (E-08)', () => {
   const c = loadChannelAppsConfig({
     REPRACER_EBAY_CLIENT_ID: 'Syn-App-SBX', REPRACER_EBAY_RUNAME: 'Syn-RuName', REPRACER_EBAY_SCOPES: 'https://api.ebay.com/oauth/api_scope/sell.inventory',
-    REPRACER_EBAY_CLIENT_SECRET_FILE: '/s/ebay', REPRACER_CHANNEL_KEYRING_FILE: '/s/keyring',
+    REPRACER_EBAY_CLIENT_SECRET_FILE: '/s/ebay', REPRACER_CHANNEL_KEYRING_FILE: '/s/keyring', REPRACER_EBAY_ENVIRONMENT: 'SANDBOX',
   }, read);
   assert.equal(c.ebay?.environment, 'SANDBOX');
   const ebay = channelApps(c)[1]!;

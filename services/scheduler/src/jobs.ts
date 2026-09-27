@@ -93,7 +93,7 @@ export interface JobDeps {
    * Шаг 43 [Р-177]: проверка авторизаций каналов. Отзыв продавцом виден только обменом refresh-токена (уведомления об
    * отзыве в снимках нет — A-18, E-09); итог пишет база, отзыв — CRITICAL владельцу, сломанные ключи приложения — оператору.
    */
-  channelAuthorizations?: { check(): Promise<{ checked: number; ok: number; revoked: number; transient: number; platform: number; platformChannels: string[]; suspiciousRevocations: number }> };
+  channelAuthorizations?: { check(): Promise<{ checked: number; ok: number; revoked: number; transient: number; platform: number; platformChannels: string[]; suspiciousRevocations: number; keyringFailures: number }> };
   /**
    * Шаг 35 [Р-25, Р-152]: заказы канала → резервации → пересчёт публикуемого остатка → записи. Без хранилища остатков в
    * процессе работы нет; процесс без роли остатков — конфигурация, а не молчаливый пропуск.
@@ -252,6 +252,9 @@ export function jobSource(deps: JobDeps): JobSource {
               // Находка 7 ревью шага 43: массовый `invalid_grant` — не решение продавцов, а скорее наша поломка: оператору
               ...(r.suspiciousRevocations > 0 ? [{ code: 'CHANNEL_REVOCATIONS_SUSPICIOUS', severity: 'CRITICAL' as const,
                 details: { refused: r.suspiciousRevocations, checked: r.checked } }] : []),
+              // Находка 15: токен не открывается кольцом ключей процесса — своя причина, а не «ключи приложения отклонены»
+              ...(r.keyringFailures > 0 ? [{ code: 'CHANNEL_KEYRING_UNREADABLE', severity: 'CRITICAL' as const,
+                details: { credentials: r.keyringFailures } }] : []),
             ];
             return { items: r.checked, ...(alerts.length > 0 ? { alerts } : {}) };
           },

@@ -9,7 +9,7 @@
  */
 
 export type OAuthChannel = 'AMAZON' | 'EBAY';
-export type Fetch = (url: string, init: { method: string; headers: Record<string, string>; body: string }) => Promise<{ status: number; text(): Promise<string> }>;
+export type Fetch = (url: string, init: { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal }) => Promise<{ status: number; text(): Promise<string> }>;
 
 export interface ConsentRequest {
   state: string;

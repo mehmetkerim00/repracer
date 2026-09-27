@@ -50,7 +50,9 @@ export function loadOperatorConfig(env: Env = process.env, read: (path: string) 
   if (missing.length > 0) {
     throw new ConfigError(`CONFIG_MISSING: ${missing.join(', ')} (у панели оператора нет входа без поставщика identity: гостя и стендового входа в ней нет [Р-165])`);
   }
-  if (!/^https:\/\//.test(env.REPRACER_OPERATOR_OIDC_ISSUER!) || !/^https:\/\//.test(env.REPRACER_OPERATOR_OIDC_JWKS_URL!)) {
+  // Шаг 44 [Р-179]: модель поставщика прогона отдаёт ключи по http на петле — допустимо только в режиме стенда
+  const loopbackKeys = env.REPRACER_MODE === 'stand' && /^http:\/\/127\.0\.0\.1:\d+\//.test(env.REPRACER_OPERATOR_OIDC_JWKS_URL!);
+  if (!/^https:\/\//.test(env.REPRACER_OPERATOR_OIDC_ISSUER!) || (!loopbackKeys && !/^https:\/\//.test(env.REPRACER_OPERATOR_OIDC_JWKS_URL!))) {
     throw new ConfigError('CONFIG_INVALID: REPRACER_OPERATOR_OIDC_ISSUER and REPRACER_OPERATOR_OIDC_JWKS_URL must be https URLs');
   }
 
@@ -79,7 +81,10 @@ export function loadOperatorConfig(env: Env = process.env, read: (path: string) 
 
   const invitationBaseUrl = requiredValue(env.REPRACER_OPERATOR_INVITATION_URL, 'REPRACER_OPERATOR_INVITATION_URL');
   // Ссылка из письма ведёт по https: приглашение несёт токен, и отдавать его по открытому каналу — раздача чужого входа
-  if (!invitationBaseUrl.startsWith('https://')) throw new ConfigError('CONFIG_INVALID: REPRACER_OPERATOR_INVITATION_URL must be https');
+  // Шаг 44 [Р-179]: прогон пилота ведёт ссылку в консоль прогона на петле — http допустим только в режиме стенда
+  if (!invitationBaseUrl.startsWith('https://') && !(env.REPRACER_MODE === 'stand' && /^http:\/\/127\.0\.0\.1:\d+\//.test(invitationBaseUrl))) {
+    throw new ConfigError('CONFIG_INVALID: REPRACER_OPERATOR_INVITATION_URL must be https');
+  }
 
   return {
     port: intFromEnv(env, 'REPRACER_OPERATOR_PORT', 4327, 0, 65_535),

@@ -43,6 +43,10 @@ export function ConnectionsScreen({ worldId }: { worldId: string }) {
                   <h3>{c.channel} <Badge tone={tone(c.state)}>{c.stateText}</Badge></h3>
                   {c.missingText ? <p className="note">{c.missingText}</p> : null}
                   {c.pendingText ? <p className="note">{c.pendingText}</p> : null}
+                  {c.pendingRequestId ? (
+                    <button type="button" onClick={() => void requestJson(worldPath(worldId, 'connections', 'cancel'), { method: 'POST', locale: m.locale, body: { authorizationRequestId: c.pendingRequestId } })
+                      .then(() => retry()).catch((e: unknown) => setError(errorText(e, m)))}>{c.cancelLabel}</button>
+                  ) : null}
                   {c.canConnect ? (
                     <p>
                       {c.marketplaces.map((mk) => (

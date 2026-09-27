@@ -46,7 +46,7 @@ import type {
   ProductKey,
   ScopeEvaluationContext,
   ShiftWindow,
-  SnapshotOutcome, ConsoleAuditRow, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow} from '@repracer/pricing-pipeline';
+  SnapshotOutcome, ConsoleAuditRow, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveredCatalogOffer, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow} from '@repracer/pricing-pipeline';
 import { FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT } from '@repracer/pricing-pipeline';
 import { inTenant, RollbackWith, type PgPool, type Tx } from './db.ts';
 import { PgWriteQueueStore } from './write-queue.ts';
@@ -1501,6 +1501,18 @@ export class PgPricingStore implements PricingStore {
           marketplace: o.marketplace, external_sku: o.externalSku, automated_pricing: o.automatedPricing, channel_bounds: o.channelBounds, source: o.source, observed_at: o.observedAt,
         })))]);
       return rowCount ?? 0;
+    });
+  }
+
+  /** Шаг 44 [Р-179]: каталог из обнаружения — функцией базы узкой роли (0134); тенант функция сверяет с сессией [Р-31] */
+  async recordDiscoveredOffers(tenantId: string, channelAccountId: string, offers: readonly DiscoveredCatalogOffer[]): Promise<number> {
+    if (offers.length === 0) return 0;
+    return this.tx(tenantId, async (tx) => {
+      const { rows: [r] } = await tx.query('SELECT tenant_data.record_discovered_offers($1, $2, $3::jsonb) AS created', [tenantId, channelAccountId, JSON.stringify(offers.map((o) => ({
+        marketplace: o.marketplace, external_sku: o.externalSku, external_unit_id: o.externalUnitId, external_offer_id: o.externalOfferId,
+        channel_product_ref: o.channelProductRef, gtin: o.gtin, condition: o.condition, fulfillment: o.fulfillment,
+      })))]);
+      return Number(r!.created);
     });
   }
 

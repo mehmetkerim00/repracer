@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { LOCALES, messagesFor, type Locale } from '@repracer/console-model';
 import type { SessionView, StandToken, WorldSummary } from './api-types.ts';
 import { requestJson, setAccessToken, useResource, type Resource } from './api.ts';
@@ -8,10 +8,13 @@ import { ComplianceScreen } from './screens/Compliance.tsx';
 import { JobHistory } from './screens/Jobs.tsx';
 import { OnboardingScreen } from './screens/Onboarding.tsx';
 import { ShadowScreen } from './screens/Shadow.tsx';
+import { captureLoginReturns, completeLogin, forgetInvitation, pendingInvitation, startLogin } from './login.ts';
 import { captureConnectCallback, ConnectCallback, ConnectionsScreen, pendingConnectCallback } from './screens/Connections.tsx';
 
 // Р-175: возврат от канала запоминается ДО входа — адрес стирается сразу, код согласия в истории браузера не живёт
 captureConnectCallback();
+// Шаг 44 [Р-178]: возврат от поставщика входа и ссылка приглашения — тоже до входа
+captureLoginReturns();
 import { StockScreen } from './screens/Stock.tsx';
 import { DangerousScreen } from './screens/Dangerous.tsx';
 import { FeedScreen } from './screens/Feed.tsx';
@@ -43,7 +46,9 @@ export function parseHash(hash: string): Route {
 const SCREENS = ['onboarding', 'connections', 'shadow', 'stock', 'products', 'decisions', 'strategies', 'feed', 'rejected', 'dangerous', 'bounds', 'cost-import', 'compliance', 'jobs', 'stop'] as const;
 
 /** Вход [Р-78]: у поставщика identity; на стенде — имитатор с синтетическими пользователями. Паролей у нас нет */
-export function LoginView({ simulator, demoGuest, error, busy, onSignIn, onDemo }: {
+export function LoginView({ simulator, demoGuest, oidc, error, busy, onSignIn, onDemo }: {
+  /** Шаг 44 [Р-178]: настоящий вход у поставщика identity */
+  oidc?: SessionView['oidc'];
   simulator: SessionView['simulator'];
   /** Р-160: публичное демо включено — кнопка «посмотреть демо» ведёт внутрь без регистрации */
   demoGuest: boolean;
@@ -58,6 +63,12 @@ export function LoginView({ simulator, demoGuest, error, busy, onSignIn, onDemo 
     <section className="card login">
       <h2>{l.title}</h2>
       <p className="muted">{l.hint}</p>
+      {oidc ? (
+        <div className="buttons">
+          <button type="button" disabled={busy} onClick={() => void startLogin(oidc)}>{m.ui.app.signIn}</button>
+          {pendingInvitation() ? <p className="notice">{m.ui.app.invitation.signInFirst}</p> : null}
+        </div>
+      ) : null}
       {demoGuest ? (
         <>
           <p className="notice">{l.demoGuestHint}</p>
@@ -174,6 +185,35 @@ export function App() {
   useEffect(loadSession, [loadSession]);
 
   /**
+   * Шаг 44 [Р-178, Р-179]: возврат от поставщика → токен в памяти вкладки; если продавец пришёл по ссылке приглашения —
+   * приглашение принимается сразу после входа, и список миров показывает его тенанта.
+   */
+  const finished = useRef(false);
+  useEffect(() => {
+    if (session.state !== 'ready' || finished.current) return;
+    finished.current = true;
+    void (async () => {
+      try {
+        const token = await completeLogin(session.data.oidc);
+        if (token) setAccessToken(token);
+        const invite = pendingInvitation();
+        if (invite && (token || session.data.user)) {
+          /**
+           * Находка 9 ревью шага 44: отказ приглашения (уже принято, чужой адрес, истекло) не запирает вход — приглашение
+           * забывается, сессия перечитывается, и продавец видит свои миры и текст отказа, а не страницу входа по кругу.
+           */
+          forgetInvitation();
+          await requestJson('/api/invitations/accept', { method: 'POST', body: { token: invite }, locale })
+            .catch((error: unknown) => setLoginError(errorText(error, m)));
+        }
+        if (token) loadSession();
+      } catch (error) {
+        setLoginError(errorText(error, m));
+      }
+    })();
+  }, [session]);
+
+  /**
    * Р-160: «посмотреть демо». Гость получает НАБЛЮДАТЕЛЯ в демо-тенанте; дальше он ходит тем же кодом, что продавец, —
    * своего пути у него нет, и поэтому экран не может случайно показать ему кнопку, которой база не даст сработать.
    */
@@ -232,10 +272,10 @@ export function App() {
           {session.state === 'loading' ? <p className="loading" role="status">{m.ui.app.loading(8)}</p>
             : session.state === 'error' ? <ErrorBox message={errorText(session.error, m)} onRetry={loadSession} />
               : user
-                ? <SignedIn key={user.subject} route={route} />
+                ? <>{loginError ? <p className="error" role="alert">{loginError}</p> : null}<SignedIn key={user.subject} route={route} /></>
                 : (
                   <LoginView
-                    simulator={session.data.simulator} demoGuest={session.data.demoGuest} error={loginError} busy={busy}
+                    simulator={session.data.simulator} demoGuest={session.data.demoGuest} oidc={session.data.oidc} error={loginError} busy={busy}
                     onSignIn={(role) => void signIn(role)} onDemo={() => void enterDemo()}
                   />
                 )}

@@ -112,7 +112,10 @@ prod_env=("REPRACER_SECRETS_DIR=$SECRETS" "REPRACER_BACKUP_DIR=$SECRETS" "REPRAC
   # Шаг 40 [Р-165]: панель оператора поднимается вместе с профилем — со своим входом и своим портом
   "REPRACER_OPERATOR_OIDC_ISSUER=https://identity.example.invalid" "REPRACER_OPERATOR_OIDC_AUDIENCE=repracer-operator"
   "REPRACER_OPERATOR_OIDC_JWKS_URL=https://identity.example.invalid/keys"
-  "REPRACER_OPERATOR_INVITATION_URL=https://app.example.invalid/invitation")
+  "REPRACER_OPERATOR_INVITATION_URL=https://app.example.invalid/invite"
+  # Шаг 44 [Р-180]: промышленный профиль консоли без поставщика identity не поднимается — значения ZITADEL-вида
+  "REPRACER_CONSOLE_OIDC_ISSUER=https://pilot.zitadel.example.invalid" "REPRACER_CONSOLE_OIDC_AUDIENCE=000000000000000001"
+  "REPRACER_CONSOLE_OIDC_JWKS_URL=https://pilot.zitadel.example.invalid/oauth/v2/keys" "REPRACER_CONSOLE_OIDC_CLIENT_ID=000000000000000002@repracer")
 env "${prod_env[@]}" docker compose "${PROD[@]}" up -d
 prod_ok=0
 # Демо-тенант заводится при старте консоли: 200 предложений с конкурентами — это минуты, а не секунды

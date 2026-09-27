@@ -889,11 +889,12 @@ export function createPricingPipeline(deps: PipelineDeps) {
      * действующим правилом отклоняет база (0082). Возвращает офферы с ценообразованием канала для экрана консоли.
      */
     async discoverOffers(ctx: AdapterCallContext, options: { pageLimit?: number; maxPages?: number } = {}): Promise<{
-      offers: number; recorded: number; withChannelPricing: Array<{ marketplace: string; externalSku: string; automatedPricing: boolean; channelBounds: boolean }>;
+      offers: number; recorded: number; catalogued: number; withChannelPricing: Array<{ marketplace: string; externalSku: string; automatedPricing: boolean; channelBounds: boolean }>;
     }> {
       let cursor: string | undefined;
       let offers = 0;
       let recorded = 0;
+      let catalogued = 0;
       const withChannelPricing: Array<{ marketplace: string; externalSku: string; automatedPricing: boolean; channelBounds: boolean }> = [];
       for (let page = 0; page < (options.maxPages ?? 50); page++) {
         const result = await waitingForBudget(ctx, () => adapter.discoverOffers(ctx, { limit: options.pageLimit ?? 20, ...(cursor ? { cursor } : {}) }));
@@ -902,6 +903,12 @@ export function createPricingPipeline(deps: PipelineDeps) {
           ? [{ marketplace: o.identity.marketplace, externalSku: o.identity.externalSku, ...o.channelPricing, source: 'DISCOVERY' as const, observedAt: deps.now() }]
           : []));
         recorded += await store.recordOfferChannelPricing(ctx.tenantId, ctx.channelAccountId, observations);
+        // Шаг 44 [Р-179]: оффер канала становится каталогом тенанта — иначе после подключения продавцу нечего настраивать
+        catalogued += await store.recordDiscoveredOffers(ctx.tenantId, ctx.channelAccountId, result.items.flatMap((o) => (o.identity.marketplace
+          ? [{ marketplace: o.identity.marketplace, externalSku: o.identity.externalSku ?? null, externalUnitId: o.identity.externalUnitId ?? null,
+              externalOfferId: o.identity.externalOfferId ?? null, channelProductRef: o.identity.channelProductRef ?? null, gtin: o.gtins[0] ?? null,
+              condition: o.condition, fulfillment: o.fulfillment }]
+          : [])));
         for (const o of observations) {
           if (o.automatedPricing || o.channelBounds) withChannelPricing.push({ marketplace: o.marketplace, externalSku: o.externalSku, automatedPricing: o.automatedPricing, channelBounds: o.channelBounds });
         }
@@ -911,7 +918,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
       if (withChannelPricing.length > 0) {
         await emit(ctx, [{ kind: 'alert', code: 'OFFERS_WITH_CHANNEL_PRICING', severity: 'WARNING', details: { offers: withChannelPricing.length } }]);
       }
-      return { offers, recorded, withChannelPricing };
+      return { offers, recorded, catalogued, withChannelPricing };
     },
 
     /** Р-118: снятие остановки по недоверию каналу — только человек; права, второй фактор и заметку проверяют хранилище и БД */

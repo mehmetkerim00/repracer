@@ -42,6 +42,8 @@ export interface AuthorizationCheckOutcome {
    * записаны как временные с кодом `SUSPICIOUS_MASS_INVALID_GRANT`, аккаунты не тронуты, писем продавцам нет.
    */
   suspiciousRevocations: number;
+  /** Находка 15 ревью шага 43: токен не открывается нашим кольцом ключей — поломка хранения, а не ключей приложения */
+  keyringFailures: number;
 }
 
 /** Порог предохранителя: отзывов за проход не меньше этого числа И больше половины проверенных */
@@ -61,7 +63,7 @@ export interface AuthorizationCheckerOptions {
 export function createAuthorizationChecker(o: AuthorizationCheckerOptions) {
   return {
     async check(): Promise<AuthorizationCheckOutcome> {
-      const out: AuthorizationCheckOutcome = { checked: 0, ok: 0, revoked: 0, transient: 0, platform: 0, noProvider: 0, platformChannels: [], suspiciousRevocations: 0 };
+      const out: AuthorizationCheckOutcome = { checked: 0, ok: 0, revoked: 0, transient: 0, platform: 0, noProvider: 0, platformChannels: [], suspiciousRevocations: 0, keyringFailures: 0 };
       const revoked: Array<{ c: CheckableCredential; code: string }> = [];
       const platform = (channel: string) => { out.platform += 1; if (!out.platformChannels.includes(channel)) out.platformChannels.push(channel); };
       for (const c of await o.vault.due(o.olderThanSeconds, o.limit)) {
@@ -77,7 +79,7 @@ export function createAuthorizationChecker(o: AuthorizationCheckerOptions) {
         } catch {
           // Не открывается нашим кольцом ключей — это наша поломка (ключ удалён или подменён), а не отзыв продавцом
           await o.vault.recordCheck(c.tenantId, c.credentialId, 'PLATFORM', 'KEYRING');
-          platform(c.channel);
+          out.keyringFailures += 1;
           continue;
         }
         const r = await refreshAccess(provider, token, o.http);
