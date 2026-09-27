@@ -28,6 +28,21 @@ BEGIN
     RAISE EXCEPTION '%: %', failure, label;
   END IF;
 END $$;
+CREATE FUNCTION pg_temp.ok(label text, q text) RETURNS void LANGUAGE plpgsql AS $$
+-- Р-95: как у expect_fail — при repracer.smoke_collect = on отказ разрешённого действия пишется предупреждением CHECK FAILED
+BEGIN
+  BEGIN
+    EXECUTE q;
+    SET CONSTRAINTS ALL IMMEDIATE;
+  EXCEPTION WHEN others THEN
+    IF current_setting('repracer.smoke_collect', true) = 'on' THEN
+      RAISE WARNING 'CHECK FAILED: % | ACCEPTED ACTION WAS REFUSED (% %)', label, SQLSTATE, left(SQLERRM, 160);
+      RETURN;
+    END IF;
+    RAISE;
+  END;
+  RAISE NOTICE 'PASS accept | %', label;
+END $$;
 BEGIN;
 -- Р-172: снятие подтверждения НАЗЫВАЕТ вопрос — «снова не подтверждено, а почему» база хранить обязывает
 UPDATE platform.marketplace SET time_zone_status = 'TO_VERIFY', time_zone_question = 'OQ-112' WHERE channel = 'EBAY' AND marketplace = 'EBAY_DE';
@@ -62,6 +77,55 @@ UPDATE platform.marketplace SET time_zone_status = 'TO_VERIFY', time_zone_questi
 SELECT pg_temp.expect_fail('retry while the storefront day boundary is unconfirmed (C2, Р-65)', $q$
   UPDATE tenant_data.channel_write SET status = 'DISPATCHED', attempt_count = attempt_count + 1, next_attempt_at = NULL
    WHERE channel_write_id = 'a9000000-0000-0000-0000-000000000012' $q$, 'retry of a budgeted write: the day boundary of storefront');
+UPDATE platform.marketplace SET time_zone_status = 'CONFIRMED' WHERE channel = 'EBAY' AND marketplace = 'EBAY_DE';
+-- Р-188 (шаг 47): граница суток нужна только БОЕВОЙ записи. Теневая запись создаётся без дня бюджета, а боевая при
+-- неподтверждённой границе невозможна по-прежнему — ослабление для тени не протекает в бой. Режим аккаунта в смоуке
+-- переключается мимо журнала (от суперпользователя, без триггеров): журнал и его стражи проверяет smoke_shadow.sql.
+UPDATE platform.marketplace SET time_zone_status = 'TO_VERIFY', time_zone_question = 'OQ-112' WHERE channel = 'EBAY' AND marketplace = 'EBAY_DE';
+SET LOCAL session_replication_role = replica;
+UPDATE tenant_data.channel_account SET write_mode = 'SHADOW' WHERE channel_account_id = 'a4000000-0000-0000-0000-000000000003';
+SET LOCAL session_replication_role = origin;
+SELECT pg_temp.ok('a shadow budgeted write needs no confirmed day boundary and gets no budget day (Р-188)', $q$
+  DO $i$
+  DECLARE
+    w uuid := gen_random_uuid();
+    r record;
+  BEGIN
+    INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, quantity, version, origin, budget_scope_key, budget_day)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', w, 'a6000000-0000-0000-0000-000000000003', 'QUANTITY', 2, 188, 'STOCK_RECALC', 'L1', (now() AT TIME ZONE 'Europe/Berlin')::date);
+    SELECT final_status, budget_day, would_spend_budget INTO r FROM tenant_data.channel_write_history WHERE channel_write_id = w;
+    IF r.final_status IS DISTINCT FROM 'SHADOW_HELD' OR r.budget_day IS NOT NULL OR r.would_spend_budget IS NOT TRUE THEN
+      RAISE EXCEPTION 'shadow write kept a budget day or lost «would spend»: %', row_to_json(r);
+    END IF;
+    -- Условие 2 Р-188: «потратило бы» на витрине без подтверждённой границы — приблизительно, и база это считает
+    IF platform.shadow_would_spend_unconfirmed('a0000000-0000-0000-0000-00000000000a', now() - interval '1 hour', now() + interval '1 hour') < 1 THEN
+      RAISE EXCEPTION 'a would-spend write at an unconfirmed day boundary is not counted as approximate';
+    END IF;
+  END $i$ $q$);
+SET LOCAL session_replication_role = replica;
+UPDATE tenant_data.channel_account SET write_mode = 'LIVE' WHERE channel_account_id = 'a4000000-0000-0000-0000-000000000003';
+SET LOCAL session_replication_role = origin;
+SELECT pg_temp.expect_fail('a LIVE budgeted write at an unconfirmed day boundary stays impossible next to the shadow exception (Р-188)', $q$
+  INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, quantity, version, origin, budget_scope_key, budget_day)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', gen_random_uuid(), 'a6000000-0000-0000-0000-000000000003', 'QUANTITY', 2, 189, 'STOCK_RECALC', 'L1', (now() AT TIME ZONE 'Europe/Berlin')::date) $q$,
+  'edit budget day of storefront EBAY_DE is not confirmed');
+-- Условие 1 Р-188: перевод в бой при неподтверждённой границе — отказ. Второй вход того же правила (0130) — боевой аккаунт
+-- eBay не получает витрину с неподтверждённой границей суток; перевод журналом проверяет smoke_shadow.sql
+SELECT pg_temp.expect_fail('a LIVE eBay account on a storefront with an unconfirmed day boundary (Р-188, Р-172)', $q$
+  UPDATE tenant_data.channel_account SET marketplaces = ARRAY['EBAY_DE'] WHERE channel_account_id = 'a4000000-0000-0000-0000-000000000003' $q$,
+  'marketplace property is unknown: EBAY_DE / DAY_BOUNDARY');
+-- Исключение ограничения — только у удержанной тенью записи: запись без дня при ключе бюджета в любом другом статусе
+-- база не принимает. Триггеры выключены, чтобы ограничение отвечало само, а не страж дня выше [Р-99]
+SET LOCAL session_replication_role = replica;
+SELECT pg_temp.expect_fail('a budgeted write without a budget day outside the shadow (Р-188)', $q$
+  INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, quantity, version, origin, status, budget_scope_key)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', gen_random_uuid(), 'a6000000-0000-0000-0000-000000000003', 'QUANTITY', 2, 190, 'STOCK_RECALC', 'PENDING', 'L1') $q$,
+  'channel_write_budget_day_iff_key');
+SELECT pg_temp.expect_fail('a budget day without a budget key (Р-19, Р-188)', $q$
+  INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, quantity, version, origin, status, budget_day)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', gen_random_uuid(), 'a6000000-0000-0000-0000-000000000003', 'QUANTITY', 2, 191, 'STOCK_RECALC', 'SHADOW_HELD', current_date) $q$,
+  'channel_write_budget_day_iff_key');
+SET LOCAL session_replication_role = origin;
 UPDATE platform.marketplace SET time_zone_status = 'CONFIRMED' WHERE channel = 'EBAY' AND marketplace = 'EBAY_DE';
 -- Р-75, Р-61 (правила 23 и 33 проверки схемы заменены поведением, Р-93): справочник объяснения и курс ЕЦБ неизменяемы даже для суперпользователя
 SELECT pg_temp.expect_fail('explanation ruleset is immutable (Р-75)', $q$

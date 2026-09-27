@@ -721,7 +721,9 @@ export const en = {
         floorHeld: (n: number) => `The price landed exactly on the floor ${n} times — the floor decided it, and without the floor it would have gone lower`,
         ceilingHeld: (n: number) => `The price landed exactly on the ceiling ${n} times`,
         held: (all: number, prices: number, quantities: number) => `Writes held by the shadow: ${all} (prices ${prices}, stock ${quantities})`,
-        budget: (n: number) => `Of them ${n} would have used the external edit budget of the channel`,
+        budget: (n: number, approximate = false) => approximate
+          ? `Of them about ${n} would have used the external edit budget of the channel — approximate: the day boundary of the storefront is not confirmed, so the budget cannot be split by day`
+          : `Of them ${n} would have used the external edit budget of the channel`,
         savings: (money: string, holds: number) => `Without the floor you would have sold ${money} cheaper in total — counted on the ${holds} holds where we still keep what the strategy wanted`,
         savingsNote: 'That number is the difference between your floor and what the strategy wanted — not a forecast of revenue: whether a buyer would have bought at the lower price is not something we know. Holds older than three days are counted but not priced: what the strategy wanted came from a competitor price, and we do not keep it longer.',
       },

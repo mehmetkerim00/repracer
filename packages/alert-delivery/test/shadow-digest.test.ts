@@ -45,7 +45,7 @@ const target = (over: Partial<ShadowDigestTarget> = {}): ShadowDigestTarget => (
   tenantId: '00000000-0000-4000-8000-000000000001', tenantName: 'Händler Nord', locale: 'de',
   ownerEmail: 'owner@example.test', shadowAccounts: 1,
   decisions: 1440, changes: 212, floorHeld: 37, ceilingHeld: 4,
-  heldWrites: 216, heldPriceWrites: 212, heldQuantityWrites: 4, wouldSpendBudget: 4,
+  heldWrites: 216, heldPriceWrites: 212, heldQuantityWrites: 4, wouldSpendBudget: 4, wouldSpendUnconfirmed: 0,
   floorSavings: [{ currency: 'EUR', minor: 4500 }], floorSavingsHolds: 30,
   periodStart: '2026-09-19T09:00:00.000Z', periodEnd: '2026-09-26T09:00:00.000Z', ...over,
 });
@@ -145,4 +145,13 @@ test('шаг 42 [Р-71]: суммы двух валют не складываю�
     'x@example.test', messagesFor('en'));
   assert.match(letter.text, /45\.00/, 'сумма в евро названа');
   assert.match(letter.text, /12\.00/, 'сумма в долларах названа отдельно');
+});
+
+test('Р-188: «потратило бы» при неподтверждённой границе суток письмо называет приблизительным, при подтверждённой — нет', () => {
+  const exact = shadowDigestMessage(target({ locale: 'de' }), 'x@example.test', messagesFor('de'));
+  const approx = shadowDigestMessage(target({ locale: 'de', wouldSpendUnconfirmed: 3 }), 'x@example.test', messagesFor('de'));
+  const approxEn = shadowDigestMessage(target({ locale: 'en', wouldSpendUnconfirmed: 3 }), 'x@example.test', messagesFor('en'));
+  assert.doesNotMatch(exact.text, /ungefähr|etwa \d/, 'граница подтверждена — число точное, пометки нет');
+  assert.match(approx.text, /Davon hätten etwa 4 .*ungefähr: die Tagesgrenze des Marktplatzes ist nicht bestätigt/, 'число помечено приблизительным и названа причина');
+  assert.match(approxEn.text, /Of them about 4 .*approximate: the day boundary of the storefront is not confirmed/, 'то же по-английски');
 });

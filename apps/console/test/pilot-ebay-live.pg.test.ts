@@ -179,10 +179,10 @@ const writeRequests = () => (routes()['POST /sell/inventory/v1/bulk_update_price
 before(async () => {
   db = await createIsolatedDatabase('pilot47ebay');
   /**
-   * Граница суток EBAY_DE в шаблоне — TO_VERIFY (Р-65): база отказывает любой записи с бюджетом правок, а у eBay бюджет есть
-   * у каждой записи цены (листинг, Р-19) — даже у теневой. Стенд подтверждает её в своей базе, как tests/db/smoke_setup.sql.
+   * Р-188: граница суток EBAY_DE в шаблоне — TO_VERIFY (Р-65, OQ-112), и прогон её НЕ подтверждает. До Р-188 база отказывала
+   * даже теневой записи с бюджетом правок, и прогон подтверждал границу суперпользователем — склейка против Р-179. Теперь
+   * теневая запись создаётся без дня бюджета, а бой на такой витрине закрыт (утверждается в конце прогона).
    */
-  await db.superuser(`SET ROLE repracer_owner; UPDATE platform.marketplace SET time_zone_status = 'CONFIRMED' WHERE channel = 'EBAY' AND marketplace = 'EBAY_DE'; RESET ROLE;`);
   const appPool: PgPool = db.pool('svc_app', 4);
   const adminPool: PgPool = db.pool('svc_admin', 4);
   clock = new VirtualClock(nextNineUtc());
@@ -415,6 +415,31 @@ test('шаг 47, D: путь пилота с eBay — от оператора в
     `SELECT count(*)::int AS writes, count(*) FILTER (WHERE final_status = 'SHADOW_HELD')::int AS held FROM tenant_data.channel_write_history WHERE tenant_id = $1`, [ids.tenantId]);
   assert.ok(w.writes >= MANAGED, `записи созданы: ${w.writes}`);
   assert.equal(w.writes, w.held, 'в тени ни одна запись не ушла в канал');
+  // Р-188: теневая запись — без дня бюджета, «потратило бы» — у каждой (у eBay бюджет есть у каждой записи цены, Р-19)
+  const { rows: [b] } = await observer.query(
+    `SELECT count(*) FILTER (WHERE budget_day IS NOT NULL)::int AS with_day, count(*) FILTER (WHERE would_spend_budget)::int AS would_spend
+       FROM tenant_data.channel_write_history WHERE tenant_id = $1 AND final_status = 'SHADOW_HELD'`, [ids.tenantId]);
+  assert.deepEqual([b.with_day, b.would_spend], [0, w.held], `у теневой записи дня бюджета нет, «потратило бы» — у каждой: ${JSON.stringify(b)}`);
+  // Условие 2 Р-188: граница не подтверждена — число «потратило бы» экран называет приблизительным
+  const shadowScreen = await consoleCall<{ summary: { wouldSpendBudget: number; wouldSpendUnconfirmed: number }; summaryLines: string[];
+    properties: Array<{ marketplace: string; propertyText: string; blocksLive: boolean; question: string | null }>; liveBlockedText: string | null }>(
+    'экран тени: «потратило бы» — приблизительно', 'GET', `${api('shadow')}?offset=0&limit=20`);
+  assert.equal(shadowScreen.status, 200);
+  assert.ok(shadowScreen.body.summary.wouldSpendBudget > 0, 'тень посчитала, сколько записей потратили бы бюджет правок');
+  assert.equal(shadowScreen.body.summary.wouldSpendUnconfirmed, shadowScreen.body.summary.wouldSpendBudget, 'все они — на витрине без подтверждённой границы');
+  assert.ok(shadowScreen.body.summaryLines.some((l) => /about \d+ would have used the external edit budget .*approximate: the day boundary of the storefront is not confirmed/.test(l)),
+    `строка сводки помечена приблизительной: ${JSON.stringify(shadowScreen.body.summaryLines)}`);
+  const boundary = shadowScreen.body.properties.find((p) => p.marketplace === 'EBAY_DE' && /Day boundary/.test(p.propertyText));
+  assert.ok(boundary?.blocksLive && boundary.question === 'OQ-112', `граница суток EBAY_DE держит бой и названа вопросом: ${JSON.stringify(boundary)}`);
+  assert.ok(shadowScreen.body.liveBlockedText !== null, 'экран говорит про закрытый бой ДО нажатия кнопки');
+  // Условие 1 Р-188: перевод в бой при неподтверждённой границе — 409, и аккаунт остаётся в тени
+  const live = await consoleCall<{ error: { code: string; message: string } }>('включить бой на EBAY_DE — отказ', 'POST', api('shadow', 'mode'),
+    { channelAccountId: ids.accountId, toMode: 'LIVE', typedConfirmation: SELLER });
+  assert.equal(live.status, 409, `бой на витрине с неподтверждённой границей суток: ${JSON.stringify(live.body)}`);
+  assert.equal(live.body.error.code, 'PROPERTY_UNKNOWN');
+  assert.match(live.body.error.message, /day boundary/i, 'отказ называет свойство витрины');
+  const { rows: [still] } = await observer.query(`SELECT write_mode FROM tenant_data.channel_account WHERE channel_account_id = $1`, [ids.accountId]);
+  assert.equal(still.write_mode, 'SHADOW', 'аккаунт остался в тени');
   const { rows: [t] } = await observer.query(`SELECT count(*)::int AS n FROM channel_data.price_decision WHERE tenant_id = $1 AND trigger_type = 'SCHEDULE'`, [ids.tenantId]);
   assert.ok(t.n >= MANAGED, `решения пришли от пересчёта по расписанию: ${t.n}`);
   assert.equal(writeRequests(), 0, `до модели eBay не дошло ни одной записи (только чтения): ${JSON.stringify(routes())}`);

@@ -720,7 +720,9 @@ export const de: Messages = {
         floorHeld: (n: number) => `Der Preis landete ${n}-mal genau auf der Untergrenze — sie hat ihn bestimmt, ohne sie wäre er tiefer gegangen`,
         ceilingHeld: (n: number) => `Der Preis landete ${n}-mal genau auf der Obergrenze`,
         held: (all: number, prices: number, quantities: number) => `Vom Schatten zurückgehalten: ${all} Schreibvorgänge (Preise ${prices}, Bestand ${quantities})`,
-        budget: (n: number) => `Davon hätten ${n} das externe Änderungsbudget des Kanals verbraucht`,
+        budget: (n: number, approximate = false) => approximate
+          ? `Davon hätten etwa ${n} das externe Änderungsbudget des Kanals verbraucht — ungefähr: die Tagesgrenze des Marktplatzes ist nicht bestätigt, das Budget lässt sich nicht nach Tagen aufteilen`
+          : `Davon hätten ${n} das externe Änderungsbudget des Kanals verbraucht`,
         savings: (money: string, holds: number) => `Ohne die Untergrenze hätten Sie insgesamt ${money} billiger verkauft — gerechnet auf die ${holds} Haltevorgänge, deren Strategieziel wir noch haben`,
         savingsNote: 'Diese Zahl ist die Differenz zwischen Ihrer Untergrenze und dem, was die Strategie wollte — keine Umsatzprognose: ob ein Käufer zum niedrigeren Preis gekauft hätte, wissen wir nicht. Haltevorgänge, die älter als drei Tage sind, werden gezählt, aber nicht bewertet: das Ziel der Strategie stammt aus einem Wettbewerberpreis, und den behalten wir nicht länger.',
       },

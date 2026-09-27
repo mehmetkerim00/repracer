@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0141_verify_schema_invariants_v41.sql';
+const VERIFY = 'migrations/0142_verify_schema_invariants_v41.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -1902,6 +1902,36 @@ export const STEP47_ROWS = [
         smoke('eBay listings enter the catalog with an honest write status (step 47, Р-164)')),
       m(dropConstraint('offer_mapping_ebay_identity', 'tenant_data.offer_mapping'),
         smoke('an eBay mapping without a listing id (step 47)')),
+    ],
+  },
+  /**
+   * Р-188 (решение владельца после ревью шага 47): граница суток нужна только боевой записи. Ослабление для тени не
+   * должно уметь протечь в бой — у каждого края исключения своя проверка.
+   */
+  {
+    row: 'Р-188', critical: true,
+    invariant: 'теневая запись — без дня бюджета; боевая при неподтверждённой границе суток невозможна, и бой на такой витрине не включается',
+    mutations: [
+      // Исключение «тень» протекло в бой: страж пропускает запись любого режима, день бюджета остаётся — ограничение
+      // «ключ ⇔ день» её уже не остановит, и боевая запись при неподтверждённой границе уходит
+      m(replaceInFunction('tenant_data.channel_write_budget_day_guard()', "= 'SHADOW' THEN\n    NEW.budget_day := NULL;", 'IS NOT NULL THEN'),
+        smoke('a LIVE budgeted write at an unconfirmed day boundary stays impossible next to the shadow exception (Р-188)')),
+      // Тень снова требует границу и день — теневая запись eBay без подтверждения невозможна (склейка прогона пилота)
+      m(replaceInFunction('tenant_data.channel_write_budget_day_guard()', 'NEW.budget_day := NULL;', 'NEW.budget_day := NEW.budget_day;'),
+        smoke('a shadow budgeted write needs no confirmed day boundary and gets no budget day (Р-188)')),
+      m(dropConstraint('channel_write_budget_day_iff_key', 'tenant_data.channel_write'),
+        smoke('a budgeted write without a budget day outside the shadow (Р-188)'), smoke('a budget day without a budget key (Р-19, Р-188)')),
+      // Исключение ограничения без условия статуса — запись без дня при ключе бюджета принимается в любом статусе
+      m(`ALTER TABLE tenant_data.channel_write DROP CONSTRAINT channel_write_budget_day_iff_key;
+         ALTER TABLE tenant_data.channel_write ADD CONSTRAINT channel_write_budget_day_iff_key
+           CHECK ((budget_scope_key IS NULL) = (budget_day IS NULL) OR (budget_scope_key IS NOT NULL AND budget_day IS NULL)) NOT VALID`,
+        smoke('a budgeted write without a budget day outside the shadow (Р-188)')),
+      // Условие 1: у канала с бюджетом правок неподтверждённая граница держит бой (0130, одно правило, два входа)
+      m(replaceInFunction('platform.marketplace_readiness()', "c.budget_scope_attribute IS NOT NULL) THEN 'UNKNOWN'", "false) THEN 'UNKNOWN'"),
+        smoke('a LIVE eBay account on a storefront with an unconfirmed day boundary (Р-188, Р-172)')),
+      // Условие 2: «потратило бы» при неподтверждённой границе помечено приблизительным
+      m(replaceInFunction('platform.shadow_would_spend_unconfirmed(uuid, timestamptz, timestamptz)', "AND (m.time_zone IS NULL OR m.time_zone_status <> 'CONFIRMED')", 'AND false'),
+        smoke('a shadow budgeted write needs no confirmed day boundary and gets no budget day (Р-188)')),
     ],
   },
 ];

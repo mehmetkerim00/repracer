@@ -55,7 +55,7 @@ export function shadowDigestMessage(target: ShadowDigestTarget, to: string, m: R
     t.summary.floorHeld(target.floorHeld),
     t.summary.ceilingHeld(target.ceilingHeld),
     t.summary.held(target.heldWrites, target.heldPriceWrites, target.heldQuantityWrites),
-    t.summary.budget(target.wouldSpendBudget),
+    t.summary.budget(target.wouldSpendBudget, target.wouldSpendUnconfirmed > 0),
     /**
      * Р-173: деньги — только когда пол действительно удерживал цену. «На 0,00 € дешевле» приучает не читать письмо, и
      * рядом с числом стоит оговорка: это разница цен, а не прогноз выручки.

@@ -34,6 +34,12 @@ export interface ShadowSummary {
   /** Из удержанных записей — столько израсходовали бы внешний бюджет правок [Р-171] */
   wouldSpendBudget: number;
   /**
+   * Р-188: из них — на витринах, чья граница суток НЕ подтверждена. Больше нуля — число «потратило бы» приблизительное:
+   * бюджет правок считается по суткам витрины, а без границы точного деления по дням нет. Считает база
+   * (`platform.shadow_would_spend_unconfirmed`) — та же функция, что у дайджеста [Р-171].
+   */
+  wouldSpendUnconfirmed: number;
+  /**
    * Р-173: «без пола вы продали бы на X дешевле» — по каждой валюте отдельно [Р-71]. Это РАЗНИЦА ЦЕН, посчитанная по
    * уже хранимым столбцам решения, а не прогноз выручки: купил бы покупатель дешевле — мы не знаем (OQ-230).
    */
@@ -157,7 +163,7 @@ export class PgShadowStore {
     }
     const since = new Date(Date.parse(now) - sinceDays * 86_400_000).toISOString();
     return inTenant(this.pools.adminPool, tenantId, async (tx) => {
-      const [decisions, held, list, accounts, savings, properties, digests] = await Promise.all([
+      const [decisions, held, list, accounts, savings, properties, digests, unconfirmed] = await Promise.all([
         // Решения тени: считает база, и только по окну отчёта [Р-154]
         tx.query(
           /**
@@ -224,6 +230,8 @@ export class PgShadowStore {
         tx.query(
           `SELECT period_start, period_end, decisions, held_writes, floor_savings, delivered_at, delivery_kind
              FROM tenant_data.shadow_digest WHERE tenant_id = $1 ORDER BY period_start DESC LIMIT 8`, [tenantId]),
+        // Р-188: «потратило бы» при неподтверждённой границе суток — приблизительно; окно — то же, что у счётчиков экрана
+        tx.query(`SELECT platform.shadow_would_spend_unconfirmed($1, $2::timestamptz, $3::timestamptz) AS n`, [tenantId, since, now]),
       ]);
       const d = decisions.rows[0] ?? {};
       const h = held.rows[0] ?? {};
@@ -232,7 +240,7 @@ export class PgShadowStore {
           since, until: now,
           decisions: num(d.decisions), changes: num(d.changes), floorHeld: num(d.floor_held), ceilingHeld: num(d.ceiling_held),
           heldWrites: num(h.held), heldPriceWrites: num(h.held_price), heldQuantityWrites: num(h.held_quantity),
-          wouldSpendBudget: num(h.would_spend),
+          wouldSpendBudget: num(h.would_spend), wouldSpendUnconfirmed: num(unconfirmed.rows[0]?.n),
           floorSavings: moneyList(savings.rows[0]?.savings), floorSavingsHolds: num(savings.rows[0]?.priced),
         },
         total: num(h.held),
@@ -330,6 +338,8 @@ export interface ShadowDigestTarget {
   heldPriceWrites: number;
   heldQuantityWrites: number;
   wouldSpendBudget: number;
+  /** Р-188: из них — на витринах с неподтверждённой границей суток; больше нуля — «приблизительно» (та же функция, что у экрана) */
+  wouldSpendUnconfirmed: number;
   /** Р-173: «без пола продали бы на X дешевле» — по каждой валюте отдельно [Р-71] */
   floorSavings: Array<{ currency: string; minor: number }>;
   /** Сколько удержаний попало в сумму: у остальных цель стратегии уже удалена по сроку [Р-85, Р-28] */
@@ -368,6 +378,7 @@ export class PgShadowDigestStore {
       decisions: num(r.decisions), changes: num(r.changes), floorHeld: num(r.floor_held), ceilingHeld: num(r.ceiling_held),
       heldWrites: num(r.held_writes), heldPriceWrites: num(r.held_price_writes),
       heldQuantityWrites: num(r.held_quantity_writes), wouldSpendBudget: num(r.would_spend_budget),
+      wouldSpendUnconfirmed: num(r.would_spend_unconfirmed),
       floorSavings: moneyList(r.floor_savings), floorSavingsHolds: num(r.floor_savings_holds),
       periodStart: r.period_start as Instant, periodEnd: r.period_end as Instant,
     }));

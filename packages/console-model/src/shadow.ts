@@ -98,7 +98,8 @@ export function shadowSummaryLines(summary: ShadowSummary, m: Messages): string[
     t.floorHeld(summary.floorHeld),
     t.ceilingHeld(summary.ceilingHeld),
     t.held(summary.heldWrites, summary.heldPriceWrites, summary.heldQuantityWrites),
-    t.budget(summary.wouldSpendBudget),
+    // Р-188: без подтверждённой границы суток бюджет по дням не делится — число помечено приблизительным
+    t.budget(summary.wouldSpendBudget, summary.wouldSpendUnconfirmed > 0),
     /**
      * Р-173: деньги. Строка появляется ТОЛЬКО когда пол действительно удерживал цену: «на 0,00 € дешевле» — шум, а
      * продавец, читающий такую строку каждую неделю, перестаёт читать письмо.
