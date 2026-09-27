@@ -24,6 +24,8 @@ export interface CheckableCredential {
 export interface CredentialVaultPort {
   due(olderThanSeconds: number, limit: number): Promise<CheckableCredential[]>;
   recordCheck(tenantId: string, credentialId: string, outcome: 'OK' | TokenFailure, code: string | null): Promise<string>;
+  /** Шаг 45 (хвост шага 43): вытесненные версии старше 30 суток удаляет база функцией хранителя; ответ — сколько */
+  purgeSuperseded(): Promise<number>;
 }
 
 export interface AuthorizationCheckOutcome {
@@ -44,6 +46,8 @@ export interface AuthorizationCheckOutcome {
   suspiciousRevocations: number;
   /** Находка 15 ревью шага 43: токен не открывается нашим кольцом ключей — поломка хранения, а не ключей приложения */
   keyringFailures: number;
+  /** Вытесненных версий токенов удалено по сроку за проход */
+  purged: number;
 }
 
 /** Порог предохранителя: отзывов за проход не меньше этого числа И больше половины проверенных */
@@ -63,7 +67,14 @@ export interface AuthorizationCheckerOptions {
 export function createAuthorizationChecker(o: AuthorizationCheckerOptions) {
   return {
     async check(): Promise<AuthorizationCheckOutcome> {
-      const out: AuthorizationCheckOutcome = { checked: 0, ok: 0, revoked: 0, transient: 0, platform: 0, noProvider: 0, platformChannels: [], suspiciousRevocations: 0, keyringFailures: 0 };
+      const out: AuthorizationCheckOutcome = { checked: 0, ok: 0, revoked: 0, transient: 0, platform: 0, noProvider: 0, platformChannels: [], suspiciousRevocations: 0, keyringFailures: 0, purged: 0 };
+      // Срок вытесненных токенов — каждым проходом: шифротекст, который больше не нужен, не живёт дольше срока
+      // Находка 6 ревью шага 45: уборка — вспомогательная; её сбой не должен останавливать обнаружение отзывов
+      try {
+        out.purged = await o.vault.purgeSuperseded();
+      } catch (error) {
+        o.log?.('CHANNEL_CREDENTIALS_PURGE_FAILED', { message: error instanceof Error ? error.message : String(error) });
+      }
       const revoked: Array<{ c: CheckableCredential; code: string }> = [];
       const platform = (channel: string) => { out.platform += 1; if (!out.platformChannels.includes(channel)) out.platformChannels.push(channel); };
       for (const c of await o.vault.due(o.olderThanSeconds, o.limit)) {

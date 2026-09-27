@@ -1025,3 +1025,24 @@ test('OQ-196: окно массовой правки объясняется пр
   // И это не заглушка «неизвестный код»: такой текст назвал бы сам код
   assert.ok(!window!.includes('MFA_REQUIRED_WINDOW'), window!);
 });
+
+test('находка 17 ревью шага 44: отказ приглашения — только отказ базы; неподтверждённый адрес назван, сбой базы — не «истекло»', async () => {
+  const issuer = createTestIssuer({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE });
+  const failWith = (code: string, message: string) => async () => { throw Object.assign(new Error(message), { code }); };
+  const api = (accept: () => Promise<string>) => createStandApi([], {
+    authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory: memoryStandDirectory([]) }),
+    acceptInvitation: accept,
+  });
+  const request = { method: 'POST', url: '/api/invitations/accept', body: { token: 'syn-invitation-token-0001' },
+    authorization: `Bearer ${issuer.token('new-owner', { email: 'owner@example.test' })}`, cookie: 'repracer_locale=en' };
+  const unverified = await api(failWith('42501', 'the provider has not verified the email of this sign-in (finding 11)'))(request);
+  assert.equal(unverified.status, 409);
+  assert.equal((unverified.body as { error: { code: string } }).error.code, 'INVITATION_EMAIL_UNVERIFIED');
+  assert.equal((unverified.body as { error: { message: string } }).error.message, messagesFor('en').ui.app.invitation.unverified);
+  const used = await api(failWith('42501', 'invitation is unknown, used or expired'))(request);
+  assert.equal((used.body as { error: { code: string } }).error.code, 'INVITATION_REFUSED');
+  // Сбой базы — не отказ: ответ 500 выше по стеку, а не совет попросить новое приглашение
+  await assert.rejects(api(failWith('57P01', 'terminating connection due to administrator command'))(request), /terminating connection/);
+  const accepted = await api(async () => 'user-1')(request);
+  assert.deepEqual(accepted.body, { accepted: true, message: messagesFor('en').ui.app.invitation.accepted });
+});

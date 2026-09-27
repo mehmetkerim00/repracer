@@ -28,8 +28,7 @@ export const PANEL_PAGE = `<!doctype html>
  select { background: #0f1115; color: #e6e8ec; border: 1px solid #2b3040; padding: 6px; border-radius: 4px; }
 </style></head><body>
 <header><b>repracer</b> operator panel · <span id="who">not signed in</span>
-  <input id="token" size="40" placeholder="Bearer token of the identity provider" autocomplete="off">
-  <button id="signin">sign in</button></header>
+  <button id="signin">sign in with the identity provider</button></header>
 <nav>
   <button data-screen="tenants" aria-current="true">tenants</button>
   <button data-screen="jobs">scheduler jobs</button>
@@ -74,15 +73,18 @@ export const PANEL_PAGE = `<!doctype html>
   </section>
   <table id="grid"></table>
 </main>
-<script>
+<script type="module">
+// Р-183 (шаг 45): вход у поставщика — код с PKCE ТЕМ ЖЕ модулем, что у консоли; токены живут в памяти вкладки
+import { beginLogin, finishLogin } from '/oidc.js';
 const $ = (id) => document.getElementById(id);
 let token = '';
+let idToken = '';
 let screen = 'tenants';
 const KEYS = { tenants: 'tenants', jobs: 'jobs', alerts: 'alerts', 'write-queue': 'queue', notifications: 'notifications', 'snapshot-skips': 'skips', actions: 'actions' };
 async function call(path, method, payload) {
   const r = await fetch('/api/operator/' + path, {
     method: method || 'GET',
-    headers: { authorization: 'Bearer ' + token, ...(payload ? { 'content-type': 'application/json' } : {}) },
+    headers: { authorization: 'Bearer ' + token, ...(idToken ? { 'x-repracer-id-token': idToken } : {}), ...(payload ? { 'content-type': 'application/json' } : {}) },
     ...(payload ? { body: JSON.stringify(payload) } : {}),
   });
   const body = await r.json();
@@ -132,15 +134,35 @@ async function load() {
     render(body[KEYS[screen]] || []);
   } catch (e) { $('status').textContent = 'error: ' + e.message; $('grid').innerHTML = ''; }
 }
+const loginConfig = async () => (await fetch('/api/operator/login-config')).json();
+const redirectUri = location.origin + '/auth/callback';
 $('signin').onclick = async () => {
-  token = $('token').value.trim();
+  try {
+    const { url, pending } = await beginLogin(await loginConfig(), redirectUri);
+    sessionStorage.setItem('repracer-operator-login', JSON.stringify(pending));
+    location.assign(url);
+  } catch (e) { $('who').textContent = 'sign-in failed: ' + e.message; }
+};
+async function session() {
   try {
     const s = await call('session');
     $('who').textContent = s.displayName + (s.secondFactor ? ' · second factor present' : ' · NO second factor: actions will be refused');
     $('actions').hidden = false;
     await load();
   } catch (e) { $('who').textContent = 'sign-in refused: ' + e.message; }
-};
+}
+if (location.pathname === '/auth/callback') {
+  const q = new URLSearchParams(location.search);
+  const pending = JSON.parse(sessionStorage.getItem('repracer-operator-login') || 'null');
+  sessionStorage.removeItem('repracer-operator-login');
+  history.replaceState(null, '', '/');
+  try {
+    if (!pending) throw new Error('OIDC_NO_PENDING_LOGIN');
+    const t = await finishLogin(await loginConfig(), { code: q.get('code'), state: q.get('state'), error: q.get('error') }, pending);
+    token = t.accessToken; idToken = t.idToken || '';
+    await session();
+  } catch (e) { $('who').textContent = 'sign-in failed: ' + e.message; }
+}
 for (const b of document.querySelectorAll('nav button')) b.onclick = () => {
   for (const other of document.querySelectorAll('nav button')) other.setAttribute('aria-current', String(other === b));
   screen = b.dataset.screen; void load();

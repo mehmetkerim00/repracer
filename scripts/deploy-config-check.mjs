@@ -31,6 +31,7 @@ const REQUIRED_FOR_INTERPOLATION = {
   REPRACER_OPERATOR_OIDC_ISSUER: 'https://identity.example.invalid',
   REPRACER_OPERATOR_OIDC_AUDIENCE: 'repracer-operator',
   REPRACER_OPERATOR_OIDC_JWKS_URL: 'https://identity.example.invalid/keys',
+  REPRACER_OPERATOR_OIDC_CLIENT_ID: '000000000000000003@repracer',
   REPRACER_OPERATOR_INVITATION_URL: 'https://app.example.invalid/invite',
   // Шаг 44 [Р-180]: промышленный профиль консоли без поставщика identity не разбирается вовсе — значения ZITADEL-вида
   REPRACER_CONSOLE_OIDC_ISSUER: 'https://pilot.zitadel.example.invalid',

@@ -305,6 +305,7 @@ export const de: Messages = {
       invitation: {
         bad: 'Dieser Einladungslink ist unvollständig. Öffnen Sie ihn erneut aus dem Brief.',
         refused: 'Diese Einladung lässt sich nicht annehmen: sie ist abgelaufen, wurde schon verwendet oder gehört zu einer anderen Adresse. Bitten Sie den Absender um eine neue.',
+        unverified: 'Ihr Identitätsanbieter hat die E-Mail-Adresse dieser Anmeldung nicht bestätigt. Bestätigen Sie die Adresse dort, melden Sie sich erneut an und öffnen Sie den Link noch einmal.',
         accepted: 'Einladung angenommen. Ihr Konto ist bereit.',
         signInFirst: 'Melden Sie sich an, um die Einladung anzunehmen.',
       },
@@ -557,7 +558,9 @@ export const de: Messages = {
         minToList: 'Darunter wird das Angebot mit 0 gelistet',
         acknowledge: 'Ich verstehe die Nebenwirkung dieses Kanals und bestätige sie',
         submit: 'Abgleich einschalten',
-        done: (r: { scopes: number; created: number; awaitingAck: number; writes: number }) => `Abgleich für ${r.scopes} Kanaleinheiten eingeschaltet (${r.created} neu). Schreibvorgänge erzeugt: ${r.writes}.${r.awaitingAck > 0 ? ` ${r.awaitingAck} Einheiten warten auf Ihre Bestätigung der Nebenwirkung.` : ''}`,
+        done: (r: { scopes: number; created: number; awaitingAck: number; writes: number }) => r.awaitingAck > 0
+          ? `Der Abgleich läuft für ${r.awaitingAck} von ${r.scopes} Kanaleinheiten NOCH NICHT: sie warten auf Ihre Bestätigung der Nebenwirkung (${r.created} neue Einheiten, Schreibvorgänge erzeugt: ${r.writes}).`
+          : `Abgleich für ${r.scopes} Kanaleinheiten eingeschaltet (${r.created} neu). Schreibvorgänge erzeugt: ${r.writes}.`,
         noOffers: 'Dieses Konto hat keine Angebote, deren Bestand wir führen.',
       },
       divergences: {

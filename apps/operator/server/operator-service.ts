@@ -47,7 +47,7 @@ export async function startOperatorPanel(env: Env = process.env, overrides: Pane
 
   const server = createPanel({
     pool,
-    oidc: { issuer: config.oidc.issuer, audience: config.oidc.audience, jwks },
+    oidc: { issuer: config.oidc.issuer, audience: config.oidc.audience, jwks, clientId: config.oidc.clientId, scope: config.oidc.scope },
     mail,
     invitationBaseUrl: config.invitationBaseUrl,
     invitationTtlHours: config.invitationTtlHours,

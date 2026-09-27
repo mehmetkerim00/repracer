@@ -19,7 +19,9 @@ on:
 jobs:
   fast:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # Шаг 45: живые прогоны подключения и пилота идут по одному (MEASURED_FILES) — быстрая область выросла до ~25 мин,
+    # и прогон шага 44 по запросу упёрся в прежние 30 минут (тесты не падали, задание отменено пределом)
+    timeout-minutes: 40
     services:
       postgres:
         image: postgres:16

@@ -34,14 +34,14 @@ export async function startLogin(cfg: OidcClientConfig): Promise<void> {
 }
 
 /** Возврат от поставщика, если он есть: токен доступа или null */
-export async function completeLogin(cfg: OidcClientConfig | null): Promise<string | null> {
+export async function completeLogin(cfg: OidcClientConfig | null): Promise<{ accessToken: string; idToken: string | null } | null> {
   const s = storage();
   const back = s?.getItem(PENDING_RETURN);
   const pending = s?.getItem(PENDING_LOGIN);
   if (!back || !pending || !cfg) return null;
   s?.removeItem(PENDING_RETURN);
   s?.removeItem(PENDING_LOGIN);
-  return finishLogin(cfg, JSON.parse(back) as { code?: string; state?: string }, JSON.parse(pending) as PendingLogin);
+  return finishLogin(cfg, JSON.parse(back) as { code?: string; state?: string; error?: string }, JSON.parse(pending) as PendingLogin);
 }
 
 export function pendingInvitation(): string | null {

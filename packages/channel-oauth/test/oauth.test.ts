@@ -156,7 +156,7 @@ test('Р-177: проверка авторизаций — отзыв, полом
   const logs: string[] = [];
   const { createAuthorizationChecker } = await import('../src/index.ts');
   const checker = createAuthorizationChecker({
-    vault: { due: async () => rows, recordCheck: async (_t, id, outcome, code) => { recorded.push([id, outcome, code]); return outcome; } },
+    vault: { due: async () => rows, purgeSuperseded: async () => 0, recordCheck: async (_t, id, outcome, code) => { recorded.push([id, outcome, code]); return outcome; } },
     keyring, provider: () => amazon(), http: model.fetch, olderThanSeconds: 0, limit: 10, log: (e, f) => logs.push(JSON.stringify({ e, ...f })),
   });
   const out = await checker.check();
@@ -181,7 +181,7 @@ test('Р-177, находка 7 ревью шага 43: массовый invalid_
   const recorded: string[] = [];
   const { createAuthorizationChecker } = await import('../src/index.ts');
   const out = await createAuthorizationChecker({
-    vault: { due: async () => rows, recordCheck: async (_t, id, outcome, code) => { recorded.push(`${id}:${outcome}:${code}`); return outcome; } },
+    vault: { due: async () => rows, purgeSuperseded: async () => 0, recordCheck: async (_t, id, outcome, code) => { recorded.push(`${id}:${outcome}:${code}`); return outcome; } },
     keyring, provider: () => amazon(), http: model.fetch, olderThanSeconds: 0, limit: 10,
   }).check();
   assert.deepEqual([out.revoked, out.suspiciousRevocations], [0, 4], 'четыре отзыва из четырёх за проход — не отзыв');

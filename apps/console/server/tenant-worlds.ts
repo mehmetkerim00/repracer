@@ -2,13 +2,14 @@ import { AMAZON_DESCRIPTOR } from '@repracer/amazon-adapter';
 import type { LiveWorld } from '@repracer/contract-tests/stand';
 import type { Principal } from '@repracer/identity';
 import { KAUFLAND_DESCRIPTOR } from '@repracer/kaufland-adapter';
-import { createPricingPipeline } from '@repracer/pricing-pipeline';
+import { createPricingPipeline, type WorldCounters } from '@repracer/pricing-pipeline';
 import { PgAlertSink, PgPricingStore, PgShadowStore, PgStockStore, type PgPool } from '@repracer/pricing-store-pg';
 import { createStockPipeline } from '@repracer/stock-sync';
 
 /**
  * Шаг 44 [Р-178]: мир КАЖДОГО тенанта в работе. До шага 44 разворачиваемая консоль знала один мир — демо, и продавец с
- * настоящим входом видел пустой список (OQ-234). Теперь мир строится из членства пользователя при каждом запросе:
+ * настоящим входом видел пустой список (OQ-234). Теперь мир строится из членства пользователя (с шага 45 — указатель
+ * с кэшем по отпечатку членств и только запрошенный мир, Р-182):
  * какие тенанты — решает база (`security.console_tenant_worlds`: клиентские, не демо, членство не гостевое), консоль
  * лишь собирает экраны поверх тех же хранилищ, что у мира стенда.
  *
@@ -17,6 +18,20 @@ import { createStockPipeline } from '@repracer/stock-sync';
  */
 
 export const TENANT_WORLD_PREFIX = 'tenant-';
+
+/**
+ * Р-182 (шаг 45): миры пользователя — УКАЗАТЕЛЬ, а не собранные миры. Список показывает счётчики всех тенантов одним
+ * обращением к базе (`worldSummaries`), а мир собирается только тот, в который пришёл запрос (`open`).
+ */
+export interface TenantWorldIndex {
+  entries: ReadonlyArray<{ id: string; tenantId: string; title: string }>;
+  summaries(): Promise<Map<string, WorldCounters & { awaitingAccess: number }>>;
+  open(worldId: string): Promise<LiveWorld | null>;
+}
+
+/** Срок записи кэша: страховка для того, чего членство не меняет (переименование, закрытие тенанта); членство — сразу */
+const INDEX_TTL_MS = 60_000;
+const INDEX_MAX_USERS = 10_000;
 
 export interface TenantWorldPools {
   /** Роль входа: только она исполняет функцию списка миров пользователя */
@@ -54,6 +69,7 @@ export function createTenantWorlds(pools: TenantWorldPools, now: () => string = 
   // Р-152: изменения остатка из Inbound API пересчитываются сразу; записи отправит диспетчер [Р-64]
   const stockPipeline = createStockPipeline({ store: stock, now: now as never });
   const clock = { iso: now, nowMs: () => Date.parse(now()) } as never;
+  const cache = new Map<string, { fingerprint: string; at: number; rows: Array<{ id: string; tenantId: string; title: string }> }>();
 
   const world = async (tenantId: string, name: string): Promise<LiveWorld> => {
     const rows = await store.channelAccounts(tenantId);
@@ -88,10 +104,34 @@ export function createTenantWorlds(pools: TenantWorldPools, now: () => string = 
       const r = await stock.resolveInboundKey(prefix, sha256Hex);
       return r ? { ...r, world: await world(r.tenantId, '') } : null;
     },
-    /** Миры пользователя: по его членствам из базы, без демо и без гостевых членств [Р-178] */
-    async worldsFor(principal: Principal): Promise<LiveWorld[]> {
-      const { rows } = await pools.authenticator.query('SELECT tenant_id, tenant_name FROM security.console_tenant_worlds($1)', [principal.userId]);
-      return Promise.all(rows.map((r) => world(r.tenant_id as string, r.tenant_name as string)));
+    /**
+     * Миры пользователя: по его членствам из базы, без демо и без гостевых членств [Р-178].
+     *
+     * Р-182: список тенантов пользователя кэшируется, а ключ записи — ОТПЕЧАТОК ЧЛЕНСТВ из principal, который вход
+     * читает из базы при каждом запросе (`resolve_external_identity`). Поэтому изменение членства — новое, отозванное,
+     * смена роли — меняет ключ, и следующий же запрос строит список заново, на любой реплике: устаревший мир опаснее
+     * медленного. Даже устаревшая запись не открывает мир без членства — роль в мире берётся из свежего principal.
+     */
+    async worldsFor(principal: Principal): Promise<TenantWorldIndex> {
+      const fingerprint = principal.memberships.map((x) => `${x.tenantId}:${x.membershipId}:${x.role}`).sort().join('|');
+      let entry = cache.get(principal.userId);
+      if (!entry || entry.fingerprint !== fingerprint || Date.now() - entry.at > INDEX_TTL_MS) {
+        const { rows } = await pools.authenticator.query('SELECT tenant_id, tenant_name FROM security.console_tenant_worlds($1)', [principal.userId]);
+        entry = { fingerprint, at: Date.now(), rows: rows.map((r) => ({ id: `${TENANT_WORLD_PREFIX}${r.tenant_id as string}`, tenantId: r.tenant_id as string, title: r.tenant_name as string })) };
+        cache.delete(principal.userId);
+        if (cache.size >= INDEX_MAX_USERS) cache.delete(cache.keys().next().value!);
+        cache.set(principal.userId, entry);
+      }
+      const rowsOf = entry.rows;
+      return {
+        entries: rowsOf,
+        summaries: () => store.worldSummaries(rowsOf.map((r) => r.tenantId), now() as never),
+        // Аккаунты мира читаются при каждом открытии: канал мог быть подключён минуту назад, и кэшировать их нечем сверить
+        open: async (worldId) => {
+          const hit = rowsOf.find((r) => r.id === worldId);
+          return hit ? world(hit.tenantId, hit.title) : null;
+        },
+      };
     },
   };
 }

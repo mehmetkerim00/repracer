@@ -120,6 +120,7 @@ before(async () => {
     REPRACER_OPERATOR_PG_URL: db.url('svc_operator'),
     REPRACER_OPERATOR_OIDC_ISSUER: OPERATOR_ISSUER, REPRACER_OPERATOR_OIDC_AUDIENCE: OPERATOR_AUDIENCE,
     REPRACER_OPERATOR_OIDC_JWKS_URL: 'https://identity.repracer.invalid/keys',
+    REPRACER_OPERATOR_OIDC_CLIENT_ID: 'operator-panel',
     REPRACER_OPERATOR_STAND_KEY: key,
     REPRACER_OPERATOR_INVITATION_URL: 'https://app.repracer.invalid/invitation',
     // Р-127: отметку во внешнем сервисе прогон выключает ЯВНО — аккаунта сервиса у проекта нет (OQ-188)

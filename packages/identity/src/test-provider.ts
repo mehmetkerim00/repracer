@@ -46,6 +46,8 @@ export async function startModelIdentityProvider(options: {
   let issuerName = '';
   let current: ModelUser | null = null;
   const grants = new Map<string, Grant>();
+  /** Токен доступа → пользователь: для userinfo */
+  const issued = new Map<string, ModelUser>();
   const stats = { authorizations: 0, tokens: 0, refused: 0 };
   const issuers = new Map<string, ReturnType<typeof createLocalIssuer>>();
   const issuerFor = (audience: string) => {
@@ -76,7 +78,7 @@ export async function startModelIdentityProvider(options: {
     }
     if (url.pathname === '/.well-known/openid-configuration') {
       json(200, { issuer: issuerName, authorization_endpoint: `${origin}/oauth/v2/authorize`, token_endpoint: `${origin}/oauth/v2/token`,
-        jwks_uri: `${origin}/oauth/v2/keys`, code_challenge_methods_supported: ['S256'], response_types_supported: ['code'] });
+        jwks_uri: `${origin}/oauth/v2/keys`, userinfo_endpoint: `${origin}/oidc/v1/userinfo`, code_challenge_methods_supported: ['S256'], response_types_supported: ['code'] });
       return;
     }
     if (url.pathname === '/oauth/v2/keys') {
@@ -115,8 +117,26 @@ export async function startModelIdentityProvider(options: {
       }
       g.used = true;
       stats.tokens += 1;
-      const accessToken = issuerFor(g.audience).token(g.user.subject, { email: g.user.email, amr: g.user.amr, expiresInSeconds: 3600, extra: { email_verified: true } });
-      json(200, { access_token: accessToken, token_type: 'Bearer', expires_in: 3600 });
+      /**
+       * Шаг 45 [OQ-238]: как у ZITADEL по снимку `vendor/zitadel/2026-09-27/claims.html`: в токене ДОСТУПА нет ни `amr`,
+       * ни адреса; `amr` — только в ID-токене (аудитория — клиент), адрес и его подтверждение — в userinfo.
+       */
+      const accessToken = issuerFor(g.audience).token(g.user.subject, { amr: [], expiresInSeconds: 3600, extra: { amr: undefined } });
+      // Находка 1 ревью шага 45: у ZITADEL аудитория ID-токена — все клиенты И проект («by default all client id's and
+      // the project id are included»), и в нём есть `auth_time`; модель повторяет это, чтобы прогон ловил подмену токена
+      const idToken = createLocalIssuer({ issuer: issuerName, audience: g.clientId, privateKeyPem: shared }).token(g.user.subject,
+        { amr: g.user.amr, expiresInSeconds: 3600, extra: { aud: [g.clientId, g.audience], auth_time: Math.floor(Date.now() / 1000) } });
+      issued.set(accessToken, g.user);
+      json(200, { access_token: accessToken, token_type: 'Bearer', expires_in: 3600, id_token: idToken });
+      return;
+    }
+    if (url.pathname === '/oidc/v1/userinfo') {
+      const user = issued.get((req.headers.authorization ?? '').replace(/^Bearer /, ''));
+      if (!user) {
+        json(401, { error: 'invalid_token' });
+        return;
+      }
+      json(200, { sub: user.subject, email: user.email, email_verified: true });
       return;
     }
     json(404, { error: 'not_found' });

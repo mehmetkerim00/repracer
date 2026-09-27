@@ -27,9 +27,18 @@ export class ApiError extends Error {
  * Токен поставщика identity [Р-78] — только в памяти страницы: не в localStorage и не в cookie; перезагрузка страницы — новый вход.
  */
 let accessToken: string | null = null;
-export function setAccessToken(token: string | null): void {
+/** Шаг 45 [OQ-238]: ID-токен поставщика — там, и только там, методы входа (второй фактор) у ZITADEL */
+let idToken: string | null = null;
+export function setAccessToken(token: string | null, id: string | null = null): void {
   accessToken = token;
+  idToken = token ? id : null;
 }
+/** Имя заголовка ID-токена: одно на страницу, сервер и прогоны */
+export const ID_TOKEN_HEADER = 'x-repracer-id-token';
+const authHeaders = (): Record<string, string> => ({
+  ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
+  ...(idToken ? { [ID_TOKEN_HEADER]: idToken } : {}),
+});
 
 /**
  * База адресов API. В браузере она пустая: страница ходит к своему же источнику. Задаёт её только стенд, когда консольный
@@ -62,7 +71,7 @@ export async function requestJson<T>(path: string, init: { method?: 'GET' | 'POS
       credentials: 'same-origin',
       headers: {
         ...(init.body === undefined ? {} : { 'content-type': 'application/json' }),
-        ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
+        ...authHeaders(),
       },
       ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
       signal: controller.signal,
@@ -123,7 +132,7 @@ export interface FetchedFile {
 export async function fetchFile(path: string, locale?: Locale): Promise<FetchedFile> {
   const response = await fetch(`${apiOrigin}${withLocale(path, locale)}`, {
     credentials: 'same-origin',
-    headers: { ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}) },
+    headers: authHeaders(),
   });
   if (!response.ok) throw new ApiError({ kind: 'BAD_RESPONSE', status: response.status });
   const disposition = response.headers.get('content-disposition') ?? '';

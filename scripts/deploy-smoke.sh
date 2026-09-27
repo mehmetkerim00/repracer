@@ -111,7 +111,7 @@ PROD=(-f deploy/production/compose.yaml -f deploy/ci/production.override.yaml)
 prod_env=("REPRACER_SECRETS_DIR=$SECRETS" "REPRACER_BACKUP_DIR=$SECRETS" "REPRACER_DOMAIN=localhost" "REPRACER_ACME_EMAIL=ci@example.invalid"
   # Шаг 40 [Р-165]: панель оператора поднимается вместе с профилем — со своим входом и своим портом
   "REPRACER_OPERATOR_OIDC_ISSUER=https://identity.example.invalid" "REPRACER_OPERATOR_OIDC_AUDIENCE=repracer-operator"
-  "REPRACER_OPERATOR_OIDC_JWKS_URL=https://identity.example.invalid/keys"
+  "REPRACER_OPERATOR_OIDC_JWKS_URL=https://identity.example.invalid/keys" "REPRACER_OPERATOR_OIDC_CLIENT_ID=000000000000000003@repracer"
   "REPRACER_OPERATOR_INVITATION_URL=https://app.example.invalid/invite"
   # Шаг 44 [Р-180]: промышленный профиль консоли без поставщика identity не поднимается — значения ZITADEL-вида
   "REPRACER_CONSOLE_OIDC_ISSUER=https://pilot.zitadel.example.invalid" "REPRACER_CONSOLE_OIDC_AUDIENCE=000000000000000001"

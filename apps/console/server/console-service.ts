@@ -4,7 +4,7 @@ import { channelApps, createHeartbeat, loadChannelAppsConfig, ProcessHealth, ser
 import { ephemeralKeyring } from '@repracer/channel-oauth';
 import { createChannelConnectService } from './connect.ts';
 import { createTenantWorlds } from './tenant-worlds.ts';
-import { createAuthenticator, remoteJwks, staticJwks, type Authenticator, type Principal } from '@repracer/identity';
+import { createAuthenticator, remoteJwks, remoteUserinfo, staticJwks, type Authenticator, type Principal } from '@repracer/identity';
 import { createLocalIssuer } from '@repracer/identity/test-issuer';
 import { createPool, PgChannelConnectStore, type PgPool } from '@repracer/pricing-store-pg';
 import { PgIdentityDirectory } from '@repracer/identity/pg';
@@ -77,11 +77,11 @@ function issuerOf(authorization: string | undefined): string | null {
 
 function bothIssuers(seller: Authenticator | null, guest: Authenticator, onSellerFailure: (error: unknown) => void): Authenticator {
   return {
-    async authenticate(authorization: string | undefined): Promise<Principal | null> {
+    async authenticate(authorization: string | undefined, idToken?: string): Promise<Principal | null> {
       if (issuerOf(authorization) === GUEST_ISSUER) return guest.authenticate(authorization);
       if (!seller) return guest.authenticate(authorization);
       try {
-        return await seller.authenticate(authorization);
+        return await seller.authenticate(authorization, idToken);
       } catch (error) {
         // Недоступный поставщик — не повод отвечать 500 гостю: его токен проверяется нашим ключом в памяти
         onSellerFailure(error);
@@ -124,7 +124,9 @@ export async function startConsole(env: Env = process.env): Promise<RunningConso
   }
   const guestAuth = createAuthenticator({ issuer: GUEST_ISSUER, audience: GUEST_AUDIENCE, jwks: staticJwks(guestIssuer.jwks), directory });
   const sellerAuth = config.oidc
-    ? createAuthenticator({ issuer: config.oidc.issuer, audience: config.oidc.audience, jwks: remoteJwks(config.oidc.jwksUrl), directory })
+    // Шаг 45 [OQ-238]: второй фактор — из ID-токена клиента страницы, адрес для приглашения — из userinfo (снимок ZITADEL)
+    ? createAuthenticator({ issuer: config.oidc.issuer, audience: config.oidc.audience, jwks: remoteJwks(config.oidc.jwksUrl), directory,
+        idTokenAudience: config.oidc.clientId, userinfo: remoteUserinfo(config.oidc.discoveryBase ?? config.oidc.issuer) })
     : null;
 
   // Держатель, а не переменная: пересев меняет мир, а замыкания (гость, остановка) смотрят на ТЕКУЩИЙ

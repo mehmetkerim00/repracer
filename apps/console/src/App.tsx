@@ -169,6 +169,8 @@ export function App() {
   const [locale, setLocale] = useState<Locale>('de');
   const [session, setSession] = useState<Resource<SessionView>>(() => ({ state: 'loading', startedAt: Date.now() }));
   const [loginError, setLoginError] = useState<string | null>(null);
+  // Находка 17 ревью шага 44: принятое приглашение называется словами — раньше продавец не видел ничего
+  const [loginNotice, setLoginNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const m = messagesFor(locale);
 
@@ -194,8 +196,9 @@ export function App() {
     finished.current = true;
     void (async () => {
       try {
-        const token = await completeLogin(session.data.oidc);
-        if (token) setAccessToken(token);
+        const login = await completeLogin(session.data.oidc);
+        const token = login?.accessToken ?? null;
+        if (login) setAccessToken(login.accessToken, login.idToken);
         const invite = pendingInvitation();
         if (invite && (token || session.data.user)) {
           /**
@@ -203,7 +206,8 @@ export function App() {
            * забывается, сессия перечитывается, и продавец видит свои миры и текст отказа, а не страницу входа по кругу.
            */
           forgetInvitation();
-          await requestJson('/api/invitations/accept', { method: 'POST', body: { token: invite }, locale })
+          await requestJson<{ accepted: boolean; message?: string }>('/api/invitations/accept', { method: 'POST', body: { token: invite }, locale })
+            .then((r) => setLoginNotice(r.message ?? m.ui.app.invitation.accepted))
             .catch((error: unknown) => setLoginError(errorText(error, m)));
         }
         if (token) loadSession();
@@ -272,7 +276,7 @@ export function App() {
           {session.state === 'loading' ? <p className="loading" role="status">{m.ui.app.loading(8)}</p>
             : session.state === 'error' ? <ErrorBox message={errorText(session.error, m)} onRetry={loadSession} />
               : user
-                ? <>{loginError ? <p className="error" role="alert">{loginError}</p> : null}<SignedIn key={user.subject} route={route} /></>
+                ? <>{loginError ? <p className="error" role="alert">{loginError}</p> : null}{loginNotice ? <p className="notice" role="status">{loginNotice}</p> : null}<SignedIn key={user.subject} route={route} /></>
                 : (
                   <LoginView
                     simulator={session.data.simulator} demoGuest={session.data.demoGuest} oidc={session.data.oidc} error={loginError} busy={busy}

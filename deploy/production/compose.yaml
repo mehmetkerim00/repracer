@@ -88,6 +88,9 @@ services:
     extends:
       file: ../operator/compose.yaml
       service: operator
+    environment:
+      # Р-183 (шаг 45): режим стенда, ключ стенда и локальный издатель — отказ процесса при старте
+      REPRACER_PROFILE: production
 
   # Суточная копия базы: pg_dump в том, старше REPRACER_BACKUP_KEEP_DAYS — удаляется (срок копий ≤ 7 суток, OQ-61)
   #

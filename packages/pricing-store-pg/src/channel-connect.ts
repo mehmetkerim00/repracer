@@ -324,4 +324,10 @@ export class PgCredentialVault {
       [tenantId, credentialId, outcome, code]);
     return r!.result as string;
   }
+
+  /** Шаг 45: удаление вытесненных версий старше 30 суток — функцией хранителя; время — часы базы */
+  async purgeSuperseded(): Promise<number> {
+    const { rows: [r] } = await this.pool.query('SELECT security.purge_superseded_channel_credentials() AS n');
+    return Number(r!.n);
+  }
 }

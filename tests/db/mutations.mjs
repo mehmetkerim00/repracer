@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0137_verify_schema_invariants_v39.sql';
+const VERIFY = 'migrations/0139_verify_schema_invariants_v40.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -1839,6 +1839,45 @@ export const STEP44_ROWS = [
         smoke('discovered offers become the catalog: only storefronts of the account, once (Р-179)')),
       // Чужой тенант держат ДВЕ политики (чтение аккаунта и WITH CHECK вставки): снятие одной ловит вторая — отдельной
       // строки нет [Р-104]; проверка «чужой тенант» остаётся положительным утверждением поведения
+    ],
+  },
+];
+
+/**
+ * Шаг 45: хвосты ревью шагов 43 и 44 (0138). Каталог из обнаружения — идемпотентность по ключу единицы записи и
+ * возврат завершённого предложения; вытесненные токены — срок функцией хранителя, действующую версию держит политика;
+ * перевод аккаунта в REVOKED — событие аудита системы.
+ */
+const DISCOVER = 'tenant_data.record_discovered_offers(uuid, uuid, jsonb)';
+export const STEP45_ROWS = [
+  {
+    row: 'Р-179', critical: false,
+    invariant: 'обнаружение не рождает вторую единицу записи с тем же ключом и возвращает в каталог завершённое предложение',
+    mutations: [
+      m(replaceInFunction(DISCOVER, "AND s.scope_key = v_scope_key AND s.status <> 'RETIRED'", 'AND false'),
+        smoke('the same channel unit written differently is catalogued once, by the write scope key (step 45)')),
+      m(replaceInFunction(DISCOVER, 'CONTINUE WHEN scope IS NOT NULL AND EXISTS', 'CONTINUE WHEN false AND EXISTS'),
+        smoke('the same channel unit written differently is catalogued once, by the write scope key (step 45)')),
+      m(replaceInFunction(DISCOVER, "AND om.price_write_scope_id = scope AND om.status <> 'ENDED'", 'AND om.price_write_scope_id = scope'),
+        smoke('an ended offer listed again returns to the catalog on its own write scope (step 45)')),
+      // Находка 7 ревью шага 45: первый пропуск «уже сопоставлено» тоже смотрит на статус — своя мутация
+      m(replaceInFunction(DISCOVER, "AND om.status <> 'ENDED'\n                             AND coalesce(om.external_sku", 'AND coalesce(om.external_sku'),
+        smoke('an ended offer listed again returns to the catalog on its own write scope (step 45)')),
+    ],
+  },
+  {
+    row: 'Р-177', critical: false,
+    invariant: 'вытесненный токен канала живёт не дольше срока, действующий не удаляется; перевод в REVOKED — в аудите',
+    mutations: [
+      // Находка 4 ревью шага 45: срок — не «сразу»
+      m(replaceInFunction('security.purge_superseded_channel_credentials()', "interval '30 days'", "interval '0 days'"),
+        smoke('a superseded channel token is deleted after its term, the current one is kept (step 45)')),
+      m('DROP POLICY keeper_purge_superseded ON tenant_data.channel_credential',
+        smoke('a superseded channel token is deleted after its term, the current one is kept (step 45)')),
+      m('ALTER POLICY keeper_purge_superseded ON tenant_data.channel_credential USING (true)',
+        smoke('the keeper cannot delete the current channel token (step 45)')),
+      m(dropTrigger('zb_channel_account_revoked_audit', 'tenant_data.channel_account'),
+        smoke('a revoked authorization is an audit event of the system (step 45)')),
     ],
   },
 ];

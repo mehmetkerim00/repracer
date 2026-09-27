@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { TenantWorldIndex } from './tenant-worlds.ts';
 import { parseStockSheet } from '@repracer/stock-sync';
 import { createServer, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
@@ -35,6 +36,8 @@ export interface ApiRequest {
   url: string;
   body: unknown;
   authorization?: string | undefined;
+  /** Шаг 45 [OQ-238]: ID-токен поставщика — методы входа (второй фактор) */
+  idToken?: string | undefined;
   cookie?: string | undefined;
 }
 
@@ -183,7 +186,7 @@ export interface StandServices {
    * Шаг 44 [Р-178]: миры тенантов пользователя — по его членствам, из базы (`security.console_tenant_worlds`). Демо сюда не
    * попадает никогда: гостевой путь — свои миры в списке `worlds`, и смешать их нечем.
    */
-  tenantWorlds?(principal: Principal): Promise<LiveWorld[]>;
+  tenantWorlds?(principal: Principal): Promise<TenantWorldIndex>;
   /** Шаг 44 (находка 4 ревью): ключ Inbound API → тенант → его мир, вне списка миров стенда */
   inbound?(prefix: string, sha256Hex: string): Promise<{ tenantId: string; stockSourceId: string; world: LiveWorld } | null>;
 }
@@ -203,7 +206,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     const fail = (status: number, code: string, message: string): ApiResponse => ({ status, body: { error: { code, message } } });
     const body = (req.body ?? {}) as Record<string, unknown>;
     // Токен поставщика проверяется при каждом запросе; недействительный токен — как его отсутствие
-    const principal: Principal | null = await identity.authenticator.authenticate(req.authorization);
+    const principal: Principal | null = await identity.authenticator.authenticate(req.authorization, req.idToken);
     const sessionView = (l: Locale): SessionView => ({
       user: principal ? { subject: principal.subject, email: principal.email } : null, locale: l,
       simulator: identity.simulator ? STAND_ACCOUNTS.map((a) => ({ role: a.role, label: m.values[a.role] })) : null,
@@ -334,17 +337,24 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       if (!invitation) return fail(400, 'BAD_INVITATION', m.ui.app.invitation.bad);
       try {
         await identity.acceptInvitation(invitation, { issuer: verified.issuer, subject: verified.subject, email: verified.email, emailVerified: verified.emailVerified });
-      } catch {
-        // Причина отказа базы продавцу не пересказывается: истёкшее, чужое и уже принятое приглашение выглядят одинаково
-        return fail(409, 'INVITATION_REFUSED', m.ui.app.invitation.refused);
+      } catch (error) {
+        /**
+         * Находка 17 ревью шага 44: отказ — это отказ БАЗЫ (`insufficient_privilege`), а не любая ошибка: сбой базы раньше
+         * тоже отвечал «истекло или использовано», и продавец просил новое приглашение, которое не помогло бы. Истёкшее,
+         * чужое и уже принятое приглашение по-прежнему выглядят одинаково — кроме неподтверждённого адреса: его продавец
+         * исправляет сам, у поставщика, и это надо сказать.
+         */
+        if ((error as { code?: string }).code !== '42501') throw error;
+        const unverified = /has not verified the email/.test((error as Error).message);
+        return fail(409, unverified ? 'INVITATION_EMAIL_UNVERIFIED' : 'INVITATION_REFUSED', unverified ? m.ui.app.invitation.unverified : m.ui.app.invitation.refused);
       }
       return ok({ accepted: true, message: m.ui.app.invitation.accepted });
     }
 
     if (!principal) return fail(401, 'UNAUTHENTICATED', s.unauthenticated);
     if (parts[1] !== 'worlds') return fail(404, 'NOT_FOUND', s.notFound);
-    // Р-178: миры запроса — миры стенда и демо плюс миры тенантов пользователя из базы
-    const allWorlds: readonly LiveWorld[] = services.tenantWorlds ? [...worlds, ...(await services.tenantWorlds(principal))] : worlds;
+    // Р-178: миры запроса — миры стенда и демо плюс миры тенантов пользователя из базы; Р-182: указатель, а не собранные миры
+    const tenantIndex = services.tenantWorlds ? await services.tenantWorlds(principal) : null;
 
     // Роль — из членства при каждом запросе; мира без членства для пользователя нет
     const viewerIn = (live: LiveWorld): Viewer | null => {
@@ -354,12 +364,27 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
 
     if (parts.length === 2) {
       if (req.method !== 'GET') return fail(405, 'METHOD', s.method);
-      const visible = allWorlds.flatMap((live) => {
+      const visible = worlds.flatMap((live) => {
         const viewer = viewerIn(live);
         return viewer ? [{ live, viewer }] : [];
       });
+      /**
+       * Р-182: миры тенантов — счётчики всех одним обращением к базе. Роль — из свежих членств, как у миров стенда:
+       * запись указателя без членства в списке не появится.
+       */
+      const tenantSummaries = tenantIndex && tenantIndex.entries.length > 0 ? await tenantIndex.summaries() : new Map();
+      const tenantRows = (tenantIndex?.entries ?? []).flatMap((e): WorldSummary[] => {
+        const membership = principal.memberships.find((x) => x.tenantId === e.tenantId);
+        const c = tenantSummaries.get(e.tenantId);
+        if (!membership || !c) return [];
+        return [{
+          id: e.id, title: e.title, description: '', failures: [], scopes: c.scopes, decisionsLastDay: c.decisionsLastDay,
+          interventionsLastWeek: c.interventionsLastWeek, activeStops: c.activeStops, activeHalts: c.activeHalts, role: m.values[membership.role],
+          demo: c.demo, awaitingAccess: c.awaitingAccess,
+        }];
+      });
       // Р-154: список миров — счётчики агрегатом, без чтения состояния ни одного мира
-      return ok(await Promise.all(visible.map(async ({ live, viewer }): Promise<WorldSummary> => {
+      return ok([...await Promise.all(visible.map(async ({ live, viewer }): Promise<WorldSummary> => {
         const [c, accounts] = await Promise.all([live.store.worldCounters(live.tenantId, live.clock.iso() as never), live.store.channelAccounts(live.tenantId)]);
         return {
           id: live.id, title: live.title, description: live.description, failures: live.failures, scopes: c.scopes, decisionsLastDay: c.decisionsLastDay,
@@ -368,10 +393,10 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           demo: c.demo,
           awaitingAccess: accounts.filter((a) => a.authStatus === 'AWAITING_ACCESS').length,
         };
-      })));
+      })), ...tenantRows]);
     }
 
-    const live = allWorlds.find((w) => w.id === parts[2]);
+    const live = worlds.find((w) => w.id === parts[2]) ?? (await tenantIndex?.open(parts[2]!)) ?? undefined;
     const viewer = live ? viewerIn(live) : null;
     if (!live || !viewer) return fail(404, 'WORLD_NOT_FOUND', s.notFound);
     /**
@@ -1255,7 +1280,8 @@ export function createStandServer(
       return send(res, { status: 400, body: { error: { code: 'BAD_JSON', message: fallback.badJson } } });
     }
     try {
-      send(res, await handle({ method: req.method ?? 'GET', url: req.url ?? '/', body, authorization: req.headers.authorization, cookie: req.headers.cookie }));
+      send(res, await handle({ method: req.method ?? 'GET', url: req.url ?? '/', body, authorization: req.headers.authorization,
+        idToken: typeof req.headers['x-repracer-id-token'] === 'string' ? req.headers['x-repracer-id-token'] : undefined, cookie: req.headers.cookie }));
     } catch (error) {
       // Задача D шага 34: тенант без единого канала — не поломка стенда, а честное состояние [Р-150]
       if ((error as { cause?: unknown }).cause === 'NO_CHANNEL') return send(res, { status: 409, body: { error: { code: 'NO_CHANNEL', message: fallback.noChannel } } });

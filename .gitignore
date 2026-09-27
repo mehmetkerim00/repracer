@@ -57,6 +57,8 @@ vendor/*
 !vendor/aws/
 !vendor/ebay/
 !vendor/healthchecks/
+# Шаг 45 [OQ-238]: снимок документации ZITADEL — решение по email_verified и amr стоит на нём; вне git его бы не было в CI
+!vendor/zitadel/
 
 # --- Infrastructure ---
 .terraform/

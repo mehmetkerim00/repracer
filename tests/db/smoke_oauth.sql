@@ -343,6 +343,15 @@ SELECT pg_temp.ok('a revoked authorization moves the account to REVOKED and rais
       RAISE EXCEPTION 'no critical alert for the owner (Р-177, Р-156)';
     END IF;
   END $inner$ $q$, :tA, :oAcc, :tA, :oAcc));
+-- Хвост шага 43 (шаг 45, 0138): перевод в REVOKED — событие аудита от имени системы; пишет его функция роли аудита
+SELECT pg_temp.ok('a revoked authorization is an audit event of the system (step 45)', format($q$
+  DO $inner$
+  BEGIN
+    IF NOT EXISTS (SELECT 1 FROM audit.audit_event WHERE tenant_id = %L AND entity_id = %L AND actor_type = 'SYSTEM'
+                    AND action = 'channel.authorization_revoked' AND changes ->> 'from' = 'ACTIVE' AND changes ->> 'to' = 'REVOKED') THEN
+      RAISE EXCEPTION 'the move to REVOKED left no audit event';
+    END IF;
+  END $inner$ $q$, :tA, :oAcc));
 SET ROLE repracer_credentials;
 -- Итог проверки ВЫТЕСНЕННОЙ версии аккаунт не трогает: продавец уже авторизовал заново
 SELECT pg_temp.ok('a check of a superseded token changes nothing (Р-177)', format($q$
@@ -355,6 +364,56 @@ SELECT pg_temp.ok('a check of a superseded token changes nothing (Р-177)', form
     END IF;
   END $inner$ $q$, :tA, :tA, :oAcc));
 RESET ROLE;
+-- Хвост шага 43 (шаг 45, 0138): вытесненная версия токена удаляется через 30 суток, не раньше; действующая — никогда.
+-- Время — часы базы, поэтому возраст отметки вытеснения задаёт суперпользователь смоука (функция определителя) внутри
+-- проверки, а транзакция откатывается. Находка 4 ревью шага 45: версия моложе срока ОБЯЗАНА остаться
+BEGIN;
+CREATE FUNCTION pg_temp.age_superseded(p_tenant uuid, p_account uuid, p_age interval) RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $f$
+BEGIN
+  SET LOCAL session_replication_role = replica;
+  UPDATE tenant_data.channel_credential SET superseded_at = now() - p_age
+   WHERE tenant_id = p_tenant AND channel_account_id = p_account AND superseded_at IS NOT NULL;
+  SET LOCAL session_replication_role = origin;
+END $f$;
+GRANT EXECUTE ON FUNCTION pg_temp.age_superseded(uuid, uuid, interval) TO repracer_credentials;
+SET LOCAL ROLE repracer_credentials;
+SELECT pg_temp.ok('a superseded channel token is deleted after its term, the current one is kept (step 45)', format($q$
+  DO $inner$
+  DECLARE
+    young_purged int;
+    young_left int;
+    purged int;
+    superseded int;
+    current_left int;
+  BEGIN
+    PERFORM pg_temp.age_superseded(%L, %L, interval '1 day');
+    young_purged := security.purge_superseded_channel_credentials();
+    SELECT count(*) INTO young_left FROM tenant_data.channel_credential WHERE tenant_id = %L AND channel_account_id = %L AND superseded_at IS NOT NULL;
+    PERFORM pg_temp.age_superseded(%L, %L, interval '31 days');
+    purged := security.purge_superseded_channel_credentials();
+    SELECT count(*) FILTER (WHERE superseded_at IS NOT NULL), count(*) FILTER (WHERE superseded_at IS NULL) INTO superseded, current_left
+      FROM tenant_data.channel_credential WHERE tenant_id = %L AND channel_account_id = %L;
+    IF young_purged <> 0 OR young_left < 1 OR purged < 1 OR superseded <> 0 OR current_left <> 1 THEN
+      RAISE EXCEPTION 'term: 1 day old purged %%, left %%; 31 days old purged %%, %% superseded left, %% current (expected 0, >=1, >=1, 0, 1)',
+        young_purged, young_left, purged, superseded, current_left;
+    END IF;
+  END $inner$ $q$, :tA, :oAcc, :tA, :oAcc, :tA, :oAcc, :tA, :oAcc));
+ROLLBACK;
+-- Действующую версию функция хранителя не удалит, даже если её текст изменят: политика строк — только вытесненные
+BEGIN;
+SET LOCAL ROLE repracer_credential_keeper;
+SELECT pg_temp.ok('the keeper cannot delete the current channel token (step 45)', format($q$
+  DO $inner$
+  DECLARE
+    n int;
+  BEGIN
+    DELETE FROM tenant_data.channel_credential WHERE tenant_id = %L AND channel_account_id = %L AND superseded_at IS NULL;
+    GET DIAGNOSTICS n = ROW_COUNT;
+    IF n <> 0 THEN
+      RAISE EXCEPTION 'the keeper deleted %% current token(s)', n;
+    END IF;
+  END $inner$ $q$, :tA, :oAcc));
+ROLLBACK;
 
 -- Отметку проверки ставит только роль адаптеров: консоль «проверенным» токен не объявит
 SET ROLE repracer_admin;
@@ -450,13 +509,32 @@ RESET ROLE;
 BEGIN;
 SET LOCAL ROLE repracer_app;
 SELECT set_config('app.tenant_id', 'a0000000-0000-0000-0000-00000000000a', true) \gset
+-- Шаг 45 (Р-104): действующее предложение, чья единица записи выведена из работы (RETIRED), обнаружение не трогает —
+-- иначе рождается вторая единица с тем же ключом и второе сопоставление, и такт падает на уникальности сопоставления.
+-- Вывод из работы — суперпользователем смоука (функция определителя), чтобы весь сценарий шёл ВНУТРИ своей проверки:
+-- сбой подготовки вне неё не засчитывался бы этой проверке [Р-99]
+RESET ROLE;
+CREATE FUNCTION pg_temp.retire_discovered(p_unit text) RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $f$
+BEGIN
+  SET LOCAL session_replication_role = replica;
+  UPDATE tenant_data.write_scope SET status = 'RETIRED', retired_at = now()
+   WHERE write_scope_id = (SELECT price_write_scope_id FROM tenant_data.offer_mapping WHERE external_unit_id = p_unit);
+  SET LOCAL session_replication_role = origin;
+END $f$;
+SET LOCAL ROLE repracer_app;
 SELECT pg_temp.ok('discovered offers become the catalog: only storefronts of the account, once (Р-179)', $q$
   DO $inner$
   DECLARE
     first int;
     again int;
+    retired int;
     mode text;
   BEGIN
+    PERFORM tenant_data.record_discovered_offers('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001',
+      '[{"marketplace": "de", "external_unit_id": "944009", "external_sku": null, "channel_product_ref": null, "gtin": null, "condition": "new"}]');
+    PERFORM pg_temp.retire_discovered('944009');
+    retired := tenant_data.record_discovered_offers('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001',
+      '[{"marketplace": "de", "external_unit_id": "944009", "external_sku": null, "channel_product_ref": null, "gtin": null, "condition": "new"}]');
     first := tenant_data.record_discovered_offers('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001',
       '[{"marketplace": "de", "external_unit_id": "944001", "external_sku": null, "channel_product_ref": "SYN-P-944001", "gtin": null, "condition": "new"},
         {"marketplace": "at", "external_unit_id": "944002", "external_sku": null, "channel_product_ref": "SYN-P-944002", "gtin": null, "condition": "new"}]');
@@ -465,8 +543,8 @@ SELECT pg_temp.ok('discovered offers become the catalog: only storefronts of the
     SELECT ws.pricing_mode INTO mode FROM tenant_data.offer_mapping om
       JOIN tenant_data.write_scope ws ON ws.tenant_id = om.tenant_id AND ws.write_scope_id = om.price_write_scope_id
      WHERE om.external_unit_id = '944001';
-    IF first <> 1 OR again <> 0 OR mode IS DISTINCT FROM 'OFF' THEN
-      RAISE EXCEPTION 'catalog from discovery: first %, again %, mode % (expected 1, 0, OFF)', first, again, mode;
+    IF first <> 1 OR again <> 0 OR retired <> 0 OR mode IS DISTINCT FROM 'OFF' THEN
+      RAISE EXCEPTION 'catalog from discovery: first %, again %, retired scope %, mode % (expected 1, 0, 0, OFF)', first, again, retired, mode;
     END IF;
   END $inner$ $q$);
 ROLLBACK;
@@ -489,6 +567,58 @@ SELECT pg_temp.ok('one Kaufland offer on two storefronts is one product; a chann
     SELECT fulfillment INTO fbk FROM tenant_data.offer_mapping WHERE external_unit_id = '944103';
     IF products <> 1 OR fbk IS DISTINCT FROM 'CHANNEL' THEN
       RAISE EXCEPTION 'discovered Kaufland offer: % product(s) for one id_offer, fulfillment %', products, fbk;
+    END IF;
+  END $inner$ $q$);
+ROLLBACK;
+-- Находка 15 ревью шага 44 (шаг 45, 0138): идемпотентность — по КЛЮЧУ единицы записи, а завершённое предложение
+-- возвращается в каталог. Прежняя функция роняла такт нарушением `write_scope_key_uq`, когда то же предложение
+-- приходило с SKU, а в первый раз — без него, и держала вне каталога навсегда предложение, выставленное снова
+BEGIN;
+SET LOCAL ROLE repracer_app;
+SELECT set_config('app.tenant_id', 'a0000000-0000-0000-0000-00000000000a', true) \gset
+SELECT pg_temp.ok('the same channel unit written differently is catalogued once, by the write scope key (step 45)', $q$
+  DO $inner$
+  DECLARE
+    first int;
+    again int;
+    scopes int;
+  BEGIN
+    first := tenant_data.record_discovered_offers('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001',
+      '[{"marketplace": "de", "external_unit_id": "944201", "external_sku": null, "channel_product_ref": null, "gtin": null, "condition": "new"}]');
+    again := tenant_data.record_discovered_offers('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001',
+      '[{"marketplace": "de", "external_unit_id": "944201", "external_sku": "SYN-SKU-944201", "channel_product_ref": null, "gtin": null, "condition": "new"}]');
+    SELECT count(*) INTO scopes FROM tenant_data.write_scope ws
+      JOIN tenant_data.offer_mapping om ON om.tenant_id = ws.tenant_id AND om.price_write_scope_id = ws.write_scope_id
+     WHERE om.external_unit_id = '944201';
+    IF first <> 1 OR again <> 0 OR scopes <> 1 THEN
+      RAISE EXCEPTION 'same unit twice: first %, again %, mapped scopes % (expected 1, 0, 1)', first, again, scopes;
+    END IF;
+  END $inner$ $q$);
+ROLLBACK;
+BEGIN;
+SET LOCAL ROLE repracer_app;
+SELECT set_config('app.tenant_id', 'a0000000-0000-0000-0000-00000000000a', true) \gset
+SELECT tenant_data.record_discovered_offers('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001',
+  '[{"marketplace": "de", "external_unit_id": "944301", "external_sku": null, "channel_product_ref": null, "gtin": null, "condition": "new"}]') \gset
+RESET ROLE;
+-- Канал завершил предложение (строку помечает синхронизация каталога; здесь — суперпользователь смоука)
+SET LOCAL session_replication_role = replica;
+UPDATE tenant_data.offer_mapping SET status = 'ENDED', ended_at = now() WHERE external_unit_id = '944301';
+SET LOCAL session_replication_role = origin;
+SET LOCAL ROLE repracer_app;
+SELECT pg_temp.ok('an ended offer listed again returns to the catalog on its own write scope (step 45)', $q$
+  DO $inner$
+  DECLARE
+    back int;
+    active int;
+    scopes int;
+  BEGIN
+    back := tenant_data.record_discovered_offers('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001',
+      '[{"marketplace": "de", "external_unit_id": "944301", "external_sku": null, "channel_product_ref": null, "gtin": null, "condition": "new"}]');
+    SELECT count(*) FILTER (WHERE status <> 'ENDED'), count(DISTINCT price_write_scope_id) INTO active, scopes
+      FROM tenant_data.offer_mapping WHERE external_unit_id = '944301';
+    IF back <> 1 OR active <> 1 OR scopes <> 1 THEN
+      RAISE EXCEPTION 'ended offer listed again: catalogued %, active %, scopes % (expected 1, 1, 1)', back, active, scopes;
     END IF;
   END $inner$ $q$);
 ROLLBACK;

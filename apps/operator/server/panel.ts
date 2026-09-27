@@ -1,8 +1,10 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { stripTypeScriptTypes } from 'node:module';
 import { invitationMessage, type MailSender } from '@repracer/alert-delivery';
 import { LOCALES, messagesFor, type Locale } from '@repracer/console-model';
-import { hasSecondFactor, TokenError, verifyToken, type JwksSource } from '@repracer/identity';
+import { amrFromIdToken, hasSecondFactor, TokenError, verifyToken, type JwksSource, type VerifiedToken } from '@repracer/identity';
 import type { PgPool } from '@repracer/pricing-store-pg';
 import { PANEL_PAGE } from './page.ts';
 
@@ -19,7 +21,8 @@ import { PANEL_PAGE } from './page.ts';
 
 export interface PanelDeps {
   pool: PgPool;
-  oidc: { issuer: string; audience: string; jwks: JwksSource };
+  /** clientId — публичный клиент страницы панели (PKCE); аудитория её ID-токена [Р-183] */
+  oidc: { issuer: string; audience: string; jwks: JwksSource; clientId: string; scope: string };
   mail: MailSender;
   invitationBaseUrl: string;
   invitationTtlHours: number;
@@ -96,9 +99,26 @@ function fromDatabase(error: unknown): PanelError {
   throw error;
 }
 
+/**
+ * Р-183 (шаг 45, OQ-236): модуль входа страницы панели — ТОТ ЖЕ файл, что у консоли (`apps/console/src/oidc.ts`), без
+ * типов. Второй реализации PKCE нет: страница консоли, страница панели и живой прогон ходят к поставщику одним кодом [Р-142].
+ */
+const LOGIN_MODULE = stripTypeScriptTypes(readFileSync(new URL('../../console/src/oidc.ts', import.meta.url), 'utf8'));
+const ID_TOKEN_HEADER = 'x-repracer-id-token';
+
 export function createPanel(deps: PanelDeps): Server {
   const count = deps.count ?? (() => undefined);
   const now = deps.now ?? (() => new Date());
+
+  /**
+   * Р-183 [OQ-238, снимок `vendor/zitadel/2026-09-27/claims.html`]: у ZITADEL методы входа (`amr`) есть только в
+   * ID-токене. Страница передаёт его рядом с токеном доступа; он принимается, если выдан клиенту панели тем же
+   * поставщиком ТОМУ ЖЕ субъекту. Чужой или испорченный ID-токен — просто «второго фактора нет»: отказывает база.
+   */
+  async function idTokenAmr(req: IncomingMessage, access: VerifiedToken): Promise<string[]> {
+    const raw = req.headers[ID_TOKEN_HEADER];
+    return amrFromIdToken(typeof raw === 'string' ? raw : undefined, access, { ...deps.oidc, audience: deps.oidc.clientId });
+  }
 
   /** Кто пришёл: проверенный токен → действующая учётная запись оператора. Чужому токену панель отвечает 401 */
   async function acting(req: IncomingMessage): Promise<Acting> {
@@ -112,6 +132,8 @@ export function createPanel(deps: PanelDeps): Server {
       if (error instanceof TokenError) throw new PanelError(401, 'TOKEN_REJECTED', 'токен не принят');
       throw error;
     }
+    // Находка 1 ревью шага 45: ID-токен — не пропуск, даже если его аудитория совпала
+    if (token.idTokenShaped) throw new PanelError(401, 'TOKEN_REJECTED', 'токен не принят');
     const { rows } = await deps.pool.query<{ operator_id: string; display_name: string }>(
       'SELECT operator_id, display_name FROM security.resolve_platform_operator($1, $2)', [token.issuer, token.subject]);
     const row = rows[0];
@@ -120,7 +142,7 @@ export function createPanel(deps: PanelDeps): Server {
       // Человек с настоящим входом, но без учётной записи оператора, — не оператор: панель не список сотрудников
       throw new PanelError(403, 'NOT_AN_OPERATOR', 'учётной записи оператора платформы нет или она отозвана [Р-165]');
     }
-    return { operatorId: row.operator_id, displayName: row.display_name, mfa: hasSecondFactor(token.amr) };
+    return { operatorId: row.operator_id, displayName: row.display_name, mfa: hasSecondFactor([...token.amr, ...await idTokenAmr(req, token)]) };
   }
 
   /** Чтение: одна функция базы — один экран. Ни цен, ни себестоимости в них нет, и прав на них у роли тоже нет */
@@ -156,9 +178,20 @@ export function createPanel(deps: PanelDeps): Server {
     const path = url.pathname;
 
     // Страница панели: разметка без данных. Всё, что в ней показано, приходит теми же запросами, что ниже
-    if (req.method === 'GET' && (path === '/' || path === '/index.html')) {
+    // Возврат от поставщика — та же страница: она сама обменяет код на токены [Р-183]
+    if (req.method === 'GET' && (path === '/' || path === '/index.html' || path === '/auth/callback')) {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
       res.end(PANEL_PAGE);
+      return;
+    }
+    if (req.method === 'GET' && path === '/oidc.js') {
+      res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(LOGIN_MODULE);
+      return;
+    }
+    // Где входить — до входа: издатель, клиент и scope страницы. Секретов нет: клиент публичный (PKCE)
+    if (req.method === 'GET' && path === '/api/operator/login-config') {
+      json(res, 200, { issuer: deps.oidc.issuer, clientId: deps.oidc.clientId, scope: deps.oidc.scope });
       return;
     }
     if (!path.startsWith('/api/operator/')) {

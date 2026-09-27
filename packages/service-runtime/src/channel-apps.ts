@@ -16,7 +16,7 @@ export interface ChannelAppsConfig {
   keyring: Keyring | null;
   /** Адрес возврата консоли (`https://…/connect/callback`); у eBay вместо адреса — RuName приложения */
   redirectUrl: string | null;
-  amazon: { applicationId: string; clientId: string; clientSecret: string; draft: boolean } | null;
+  amazon: { applicationId: string; clientId: string; clientSecret: string; draft: boolean; tokenUrl?: string } | null;
   ebay: { environment: 'SANDBOX' | 'PRODUCTION'; clientId: string; clientSecret: string; ruName: string; scopes: string[] } | null;
 }
 
@@ -49,6 +49,8 @@ export function loadChannelAppsConfig(env: Env = process.env, read: (path: strin
       // Приложение в состоянии Draft согласуется только с version=beta (website-authorization-workflow). Умолчания нет
       // (находка 14 ревью шага 43): «черновик» по умолчанию у опубликованного приложения — ловушка на первом согласии
       draft: onOff(env.REPRACER_AMAZON_APP_DRAFT, 'REPRACER_AMAZON_APP_DRAFT'),
+      // Шаг 45 [Р-181]: модель поставщика LWA прогона отвечает на петле — адрес токенов подменяется ТОЛЬКО в режиме стенда
+      ...(env.REPRACER_MODE === 'stand' && env.REPRACER_AMAZON_LWA_TOKEN_URL ? { tokenUrl: env.REPRACER_AMAZON_LWA_TOKEN_URL } : {}),
     }
     : null;
   const ebay = all(EBAY_VARS, 'REPRACER_EBAY_CLIENT_SECRET', 'приложение eBay')

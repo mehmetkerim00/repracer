@@ -2135,6 +2135,48 @@ export class PgPricingStore implements PricingStore {
     });
   }
 
+  /**
+   * Р-182 (шаг 45): список миров пользователя агентства — счётчики ВСЕХ его тенантов одним обращением к базе. Контекст
+   * тенанта по-прежнему свой у каждого запроса (RLS не ослаблен): один текст из пар «контекст тенанта; счётчики» в одной
+   * транзакции. Значения идут в текст литералами, поэтому идентификаторы и время проверяются здесь же. До Р-182 список из
+   * 50 тенантов стоил 452 обращения.
+   */
+  async worldSummaries(tenantIds: readonly string[], now: Instant): Promise<Map<string, WorldCounters & { awaitingAccess: number }>> {
+    const out = new Map<string, WorldCounters & { awaitingAccess: number }>();
+    if (tenantIds.length === 0) return out;
+    if (!tenantIds.every((t) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(t))) throw new Error('tenant ids must be UUIDs');
+    const at = new Date(now);
+    if (Number.isNaN(at.getTime())) throw new Error('now must be an instant');
+    const iso = at.toISOString();
+    const statements = tenantIds.map((t) => `SELECT set_config('app.tenant_id', '${t}', true);
+      SELECT '${t}'::uuid AS tenant_id,
+             (SELECT count(*) FROM tenant_data.write_scope s WHERE s.tenant_id = '${t}' AND s.field = 'PRICE' AND s.status <> 'RETIRED')::int AS scopes,
+             (SELECT count(*) FROM channel_data.price_decision d WHERE d.tenant_id = '${t}' AND d.decided_at > '${iso}'::timestamptz - interval '1 day')::int AS decisions_day,
+             (SELECT count(*) FROM channel_data.price_decision d WHERE d.tenant_id = '${t}' AND d.outcome <> 'NO_CHANGE' AND d.decided_at > '${iso}'::timestamptz - interval '7 days')::int AS interventions_week,
+             (SELECT count(*) FROM tenant_data.price_stop p WHERE p.tenant_id = '${t}' AND p.released_at IS NULL)::int AS stops,
+             (SELECT count(*) FROM channel_data.pricing_halt h WHERE h.tenant_id = '${t}' AND h.released_at IS NULL)::int AS halts,
+             (SELECT demo FROM tenant_data.tenant x WHERE x.tenant_id = '${t}') AS demo,
+             (SELECT count(*) FROM tenant_data.channel_account a WHERE a.tenant_id = '${t}' AND a.disconnected_at IS NULL AND a.auth_status = 'AWAITING_ACCESS')::int AS awaiting;`);
+    const client = await this.admin('worldSummaries').connect();
+    try {
+      const results = await client.query(`BEGIN READ ONLY; ${statements.join('\n')} COMMIT;`) as unknown as Array<{ rows: Row[] }>;
+      for (const result of results) {
+        const r = result.rows?.[0];
+        if (!r || r.tenant_id === undefined) continue;
+        out.set(r.tenant_id as string, {
+          scopes: Number(r.scopes), decisionsLastDay: Number(r.decisions_day), interventionsLastWeek: Number(r.interventions_week),
+          activeStops: Number(r.stops), activeHalts: Number(r.halts), demo: r.demo === true, awaitingAccess: Number(r.awaiting),
+        });
+      }
+      return out;
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   private static haltInfo(r: Row): HaltInfo {
     return {
       haltId: r.pricing_halt_id, channelAccountId: r.channel_account_id, marketplace: r.marketplace, reasonCode: r.reason_code,

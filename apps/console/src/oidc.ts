@@ -44,7 +44,9 @@ export async function beginLogin(cfg: OidcClientConfig, redirectUri: string, htt
 }
 
 /** Возврат от поставщика: `state` сверяется с запомненным, код меняется на токен доступа */
-export async function finishLogin(cfg: OidcClientConfig, params: { code?: string | null; state?: string | null }, pending: PendingLogin, http: Fetch = fetch as unknown as Fetch): Promise<string> {
+export async function finishLogin(cfg: OidcClientConfig, params: { code?: string | null; state?: string | null; error?: string | null }, pending: PendingLogin, http: Fetch = fetch as unknown as Fetch): Promise<{ accessToken: string; idToken: string | null }> {
+  // Поставщик вернул отказ (продавец отменил вход, клиент не настроен) — называется его кодом, а не «state не совпал»
+  if (params.error) throw new Error(`OIDC_${/^[a-z_]{1,40}$/.test(params.error) ? params.error.toUpperCase() : 'ERROR'}`);
   if (!params.code || !params.state || params.state !== pending.state) throw new Error('OIDC_STATE_MISMATCH');
   const d = await discovery(cfg.issuer, http);
   const r = await http(d.token_endpoint, {
@@ -52,7 +54,8 @@ export async function finishLogin(cfg: OidcClientConfig, params: { code?: string
     body: new URLSearchParams({ grant_type: 'authorization_code', code: params.code, redirect_uri: pending.redirectUri, client_id: cfg.clientId, code_verifier: pending.verifier }).toString(),
   });
   if (!r.ok) throw new Error(`OIDC_TOKEN_${r.status}`);
-  const t = await r.json() as { access_token?: string };
+  const t = await r.json() as { access_token?: string; id_token?: string };
   if (!t.access_token) throw new Error('OIDC_NO_ACCESS_TOKEN');
-  return t.access_token;
+  // ID-токен несёт методы входа (второй фактор) — у ZITADEL их нет в токене доступа [OQ-238]
+  return { accessToken: t.access_token, idToken: typeof t.id_token === 'string' ? t.id_token : null };
 }

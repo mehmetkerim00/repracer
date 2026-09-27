@@ -21,7 +21,16 @@ export interface OperatorConfig {
    * Вход оператора у поставщика identity [Р-78] — ОБЯЗАТЕЛЕН. Ни симулятора стенда, ни гостевого входа [Р-160] здесь
    * нет: панель — это чужие тенанты, и «зайти посмотреть» в неё нельзя.
    */
-  oidc: { issuer: string; audience: string; jwksUrl: string };
+  oidc: {
+    issuer: string; audience: string; jwksUrl: string;
+    /**
+     * Р-183 (шаг 45, OQ-236): страница панели сама входит у поставщика — код авторизации с PKCE, публичный клиент.
+     * Клиент называет конфигурация; ID-токен этого клиента несёт методы входа (второй фактор) [OQ-238].
+     */
+    clientId: string; scope: string;
+  };
+  /** Р-183: `REPRACER_PROFILE=production` — ни стенда, ни ключа стенда, ни локального издателя (как Р-180 у консоли) */
+  profile: 'production' | 'default';
   /** Адрес, по которому владелец принимает приглашение: попадает в письмо [Р-167] */
   invitationBaseUrl: string;
   /** Срок приглашения в часах: база принимает не больше 14 суток (0053) */
@@ -39,7 +48,9 @@ export interface OperatorConfig {
 }
 
 const secret = (env: Env, name: string, read: (path: string) => string) => secretFromEnv(env, name, read);
-const OIDC_VARS = ['REPRACER_OPERATOR_OIDC_ISSUER', 'REPRACER_OPERATOR_OIDC_AUDIENCE', 'REPRACER_OPERATOR_OIDC_JWKS_URL'] as const;
+const OIDC_VARS = ['REPRACER_OPERATOR_OIDC_ISSUER', 'REPRACER_OPERATOR_OIDC_AUDIENCE', 'REPRACER_OPERATOR_OIDC_JWKS_URL', 'REPRACER_OPERATOR_OIDC_CLIENT_ID'] as const;
+/** Издатели, которые настоящим поставщиком не являются: имитатор стенда и локальные адреса — тот же список, что у консоли [Р-180] */
+const NOT_A_PROVIDER = /^https?:\/\/(identity\.stand\.repracer\.test|localhost|127\.\d+\.\d+\.\d+|\[::1\])(:\d+)?(\/|$)/;
 
 export function loadOperatorConfig(env: Env = process.env, read: (path: string) => string = (p) => readFileSync(p, 'utf8')): OperatorConfig {
   const missing = OIDC_VARS.filter((v) => !env[v]);
@@ -74,6 +85,18 @@ export function loadOperatorConfig(env: Env = process.env, read: (path: string) 
     : requiredValue(secret(env, 'REPRACER_OPERATOR_HEARTBEAT_URL', read), 'REPRACER_OPERATOR_HEARTBEAT_URL (or REPRACER_OPERATOR_HEARTBEAT=off)');
   if (heartbeatUrl && !heartbeatUrl.startsWith('https://')) throw new ConfigError('CONFIG_INVALID: REPRACER_OPERATOR_HEARTBEAT_URL must be https');
 
+  /**
+   * Р-183 (шаг 45): промышленный профиль панели — только настоящий поставщик. Отказ ПРИ СТАРТЕ своей причиной: режим
+   * стенда пускает ключ стенда (свои токены вместо поставщика) и адреса на петле, и в работе это вход в чужие тенанты.
+   */
+  const profile = env.REPRACER_PROFILE === 'production' ? 'production' as const : 'default' as const;
+  if (profile === 'production') {
+    if (env.REPRACER_MODE === 'stand') throw new ConfigError('CONFIG_INVALID: REPRACER_MODE=stand в промышленном профиле панели — режим стенда пускает ключ стенда и адреса на петле (Р-183)');
+    if (NOT_A_PROVIDER.test(env.REPRACER_OPERATOR_OIDC_ISSUER!) || NOT_A_PROVIDER.test(env.REPRACER_OPERATOR_OIDC_JWKS_URL!)) {
+      throw new ConfigError('CONFIG_INVALID: REPRACER_OPERATOR_OIDC_ISSUER — имитатор или локальный адрес, а не поставщик identity (Р-183)');
+    }
+  }
+
   const standKey = env.REPRACER_OPERATOR_STAND_KEY ?? null;
   if (standKey && env.REPRACER_MODE !== 'stand') {
     throw new ConfigError('CONFIG_INVALID: REPRACER_OPERATOR_STAND_KEY is accepted only with REPRACER_MODE=stand (в работе ключи входа приходят от поставщика identity)');
@@ -90,7 +113,11 @@ export function loadOperatorConfig(env: Env = process.env, read: (path: string) 
     port: intFromEnv(env, 'REPRACER_OPERATOR_PORT', 4327, 0, 65_535),
     metricsPort: intFromEnv(env, 'REPRACER_OPERATOR_METRICS_PORT', 9471, 0, 65_535),
     pgUrl: requiredValue(secret(env, 'REPRACER_OPERATOR_PG_URL', read), 'REPRACER_OPERATOR_PG_URL'),
-    oidc: { issuer: env.REPRACER_OPERATOR_OIDC_ISSUER!, audience: env.REPRACER_OPERATOR_OIDC_AUDIENCE!, jwksUrl: env.REPRACER_OPERATOR_OIDC_JWKS_URL! },
+    oidc: {
+      issuer: env.REPRACER_OPERATOR_OIDC_ISSUER!, audience: env.REPRACER_OPERATOR_OIDC_AUDIENCE!, jwksUrl: env.REPRACER_OPERATOR_OIDC_JWKS_URL!,
+      clientId: env.REPRACER_OPERATOR_OIDC_CLIENT_ID!, scope: env.REPRACER_OPERATOR_OIDC_SCOPE || 'openid profile',
+    },
+    profile,
     invitationBaseUrl,
     invitationTtlHours: intFromEnv(env, 'REPRACER_OPERATOR_INVITATION_TTL_HOURS', 168, 1, 14 * 24),
     mail,

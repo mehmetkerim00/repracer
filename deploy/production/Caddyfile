@@ -12,6 +12,8 @@
 		format filter {
 			wrap json
 			fields {
+				# Шаг 45 (находка 1 ревью): ID-токен страницы идёт своим заголовком — Caddy скрывает только Authorization и Cookie
+				request>headers>X-Repracer-Id-Token delete
 				request>uri query {
 					replace spapi_oauth_code REDACTED
 					replace code REDACTED

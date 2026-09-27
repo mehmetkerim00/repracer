@@ -16,6 +16,7 @@ const BASE: Record<string, string> = {
   REPRACER_OPERATOR_OIDC_ISSUER: 'https://identity.example.invalid',
   REPRACER_OPERATOR_OIDC_AUDIENCE: 'repracer-operator',
   REPRACER_OPERATOR_OIDC_JWKS_URL: 'https://identity.example.invalid/keys',
+  REPRACER_OPERATOR_OIDC_CLIENT_ID: '000000000000000003@repracer',
   REPRACER_OPERATOR_INVITATION_URL: 'https://app.example.invalid/invitation',
   REPRACER_OPERATOR_HEARTBEAT: 'off',
 };
@@ -62,4 +63,25 @@ test('шаг 40: ссылка приглашения и отметка внеш�
     (e: Error) => e instanceof ConfigError && /REPRACER_OPERATOR_HEARTBEAT_URL/.test(e.message));
   const beating = loadOperatorConfig({ ...watched, REPRACER_OPERATOR_HEARTBEAT_URL_FILE: '/run/secrets/heartbeat' }, read);
   assert.equal(beating.heartbeatUrl, 'https://hc.example.invalid/ping/abc');
+});
+
+test('Р-183: промышленный профиль панели — ни режима стенда, ни ключа стенда, ни локального издателя; отказ при старте', () => {
+  const production = { ...BASE, REPRACER_PROFILE: 'production' };
+  assert.equal(loadOperatorConfig(production, read).profile, 'production', 'настоящий поставщик — стартует');
+  assert.throws(() => loadOperatorConfig({ ...production, REPRACER_MODE: 'stand', REPRACER_OPERATOR_STAND_KEY: 'pem' }, read),
+    (e: Error) => e instanceof ConfigError && /REPRACER_MODE=stand в промышленном профиле панели/.test(e.message));
+  assert.throws(() => loadOperatorConfig({ ...production, REPRACER_OPERATOR_OIDC_ISSUER: 'https://identity.stand.repracer.test' }, read),
+    (e: Error) => e instanceof ConfigError && /имитатор или локальный адрес/.test(e.message));
+  assert.throws(() => loadOperatorConfig({ ...production, REPRACER_OPERATOR_OIDC_JWKS_URL: 'https://127.0.0.1:8443/keys' }, read),
+    (e: Error) => e instanceof ConfigError && /имитатор или локальный адрес/.test(e.message));
+  // Вне профиля режим стенда по-прежнему поднимает ТОТ ЖЕ процесс для живого прогона [Р-136]
+  assert.equal(loadOperatorConfig({ ...BASE, REPRACER_MODE: 'stand', REPRACER_OPERATOR_STAND_KEY: 'pem' }, read).standIssuerKeyPem, 'pem');
+});
+
+test('Р-183: страница панели входит у поставщика сама — клиент PKCE обязателен, scope по умолчанию без адреса', () => {
+  const { REPRACER_OPERATOR_OIDC_CLIENT_ID: _c, ...noClient } = BASE;
+  assert.throws(() => loadOperatorConfig(noClient, read), (e: Error) => e instanceof ConfigError && /REPRACER_OPERATOR_OIDC_CLIENT_ID/.test(e.message));
+  assert.deepEqual(
+    (({ clientId, scope }) => ({ clientId, scope }))(loadOperatorConfig(BASE, read).oidc),
+    { clientId: '000000000000000003@repracer', scope: 'openid profile' });
 });

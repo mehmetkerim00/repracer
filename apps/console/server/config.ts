@@ -36,7 +36,9 @@ export interface ConsoleConfig {
   /** Строки подключения по ролям: ключ — имя роли без `svc_` */
   pgUrls: Readonly<Record<ConsoleRole, string>>;
   /** Вход настоящих продавцов [Р-78]: поставщик identity. Без него работает только гость демо */
-  oidc: { issuer: string; audience: string; jwksUrl: string; clientId: string; scope: string } | null;
+  oidc: { issuer: string; audience: string; jwksUrl: string; clientId: string; scope: string;
+    /** Только режим стенда: где на самом деле отвечает модель поставщика (имя издателя — https, модель — на петле) */
+    discoveryBase?: string } | null;
   /** Шаг 44 [Р-180]: промышленный профиль — поднимается ТОЛЬКО с настоящим поставщиком identity */
   profile: 'production' | 'default';
   /**
@@ -85,7 +87,8 @@ export function loadConsoleConfig(env: Env = process.env, read: (path: string) =
       throw new ConfigError('CONFIG_INVALID: REPRACER_CONSOLE_OIDC_ISSUER and REPRACER_CONSOLE_OIDC_JWKS_URL must be https URLs');
     }
     oidc = { issuer: env.REPRACER_CONSOLE_OIDC_ISSUER!, audience: env.REPRACER_CONSOLE_OIDC_AUDIENCE!, jwksUrl: env.REPRACER_CONSOLE_OIDC_JWKS_URL!,
-      clientId: env.REPRACER_CONSOLE_OIDC_CLIENT_ID!, scope: env.REPRACER_CONSOLE_OIDC_SCOPE || 'openid email profile' };
+      clientId: env.REPRACER_CONSOLE_OIDC_CLIENT_ID!, scope: env.REPRACER_CONSOLE_OIDC_SCOPE || 'openid email profile',
+      ...(stand && env.REPRACER_CONSOLE_OIDC_DISCOVERY_BASE ? { discoveryBase: env.REPRACER_CONSOLE_OIDC_DISCOVERY_BASE } : {}) };
   }
   /**
    * Р-180 (шаг 44): промышленный профиль без настоящего входа продавцов не поднимается. Отказ — ПРИ СТАРТЕ и своей

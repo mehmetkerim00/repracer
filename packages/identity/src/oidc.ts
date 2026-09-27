@@ -42,6 +42,14 @@ export interface VerifiedToken {
   email: string | null;
   /** OIDC email_verified: адрес подтверждён поставщиком; без true приглашение не принимается (находка 11) */
   emailVerified: boolean;
+  /** `iat` — время выпуска; по нему ID-токен привязывается к токену доступа того же обмена кода (шаг 45) */
+  issuedAt: number | null;
+  /**
+   * Шаг 45 (находка 1 ревью): у токена форма ID-ТОКЕНА — `auth_time` или `nonce`. По матрице ZITADEL
+   * (`vendor/zitadel/2026-09-27/claims.html`) `auth_time` есть только в ID-токене, а `nonce` — только в нём и только по
+   * запросу; токен доступа их не несёт. Такой токен как `Authorization: Bearer` не принимается.
+   */
+  idTokenShaped: boolean;
 }
 
 export interface VerifyOptions {
@@ -121,6 +129,8 @@ export async function verifyToken(token: string, options: VerifyOptions): Promis
     amr: Array.isArray(claims.amr) ? claims.amr.filter((x): x is string => typeof x === 'string') : [],
     email: typeof claims.email === 'string' ? claims.email : null,
     emailVerified: claims.email_verified === true,
+    issuedAt: typeof claims.iat === 'number' ? claims.iat : null,
+    idTokenShaped: claims.auth_time !== undefined || claims.nonce !== undefined,
   };
 }
 
