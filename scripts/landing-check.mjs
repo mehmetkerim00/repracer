@@ -21,8 +21,19 @@ export const REDIRECTS = { '/demo': '/#demo-soon', '/de/demo': '/de/#demo-soon',
  */
 export const ALLOWED_PHRASES = {
   en: ['€39', '€89', '30 days', 'thousands of SKUs'],
-  de: ['39 €', '89 €', '30 Tage', 'letzten 30 Tage', '§ 11 PAngV', 'BGH-Urteil 2025', '644 Fälle im Jahr 2025', 'Az. 4 HK O 13950/24', 'mehreren Tausend SKUs'],
+  de: ['39 €', '89 €', '30 Tage', 'letzten 30 Tage', '§ 11 PAngV', '644 Fälle allein 2025 (+11,6 %)', 'der BGH hat 2025', '30-Tage-Bestpreis',
+    'Az. 4 HK O 13950/24', 'Nr. 184/2025', 'Jahresbericht 2025', 'Endurteil vom 14.07.2025, 4 HK O 13950/24', 'mehreren Tausend SKUs'],
 };
+/**
+ * Факты Omnibus — предложение владельца ДОСЛОВНО (решение по лендингу после шага 46) и источники ссылками. Внешняя ссылка
+ * разрешена только так: тег `<a>`, немецкая страница, один из трёх источников. Ресурсы (стили, картинки) — нет никогда.
+ */
+export const OMNIBUS_SENTENCE = 'Preiswerbung wird aktiv abgemahnt: 644 Fälle allein 2025 (+11,6 %), und der BGH hat 2025 entschieden, dass der 30-Tage-Bestpreis klar genannt werden muss — auch Amazon verlor dazu vor dem LG München I (Az. 4 HK O 13950/24).';
+export const SOURCE_LINKS = [
+  'https://www.bundesgerichtshof.de/SharedDocs/Pressemitteilungen/DE/2025/2025184.html',
+  'https://www.wettbewerbszentrale.de/jahresbericht-2025-mehr-klagen-und-ein-neuer-name/',
+  'https://www.gesetze-bayern.de/Content/Document/Y-300-Z-GRURRS-B-2025-N-17142',
+];
 /** Единственная допустимая фраза со словом «гарантия» — оговорка, что её НЕТ */
 const DISCLAIMER = 'keine Garantie der Rechtskonformität';
 const MAX_PAGE_BYTES = 20_000;
@@ -43,7 +54,7 @@ const textOf = (html) => {
 };
 /** Все ссылочные атрибуты с любыми кавычками и без них */
 const refsOf = (html) => [...html.matchAll(/\s(src|href|action|srcset|poster|data|formaction)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)]
-  .map((m) => ({ attr: m[1].toLowerCase(), ref: m[2] ?? m[3] ?? m[4] }));
+  .map((m) => ({ attr: m[1].toLowerCase(), ref: m[2] ?? m[3] ?? m[4], at: m.index }));
 const idsOf = (html) => new Set([...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]));
 const sectionIdsOf = (html) => [...html.matchAll(/<section id="([^"]+)"/g)].map((m) => m[1]);
 
@@ -60,9 +71,14 @@ export function landingProblems(pages, css) {
     if (/<script|<iframe|<img|<object|<embed|<picture|<video|<audio|<svg/i.test(html)) bad(`${path}: скрипт, фрейм или картинка на странице`);
     // Стили — только файлом: встроенный стиль прячет url(...) от проверки ресурсов и нарушил бы политику содержимого
     if (/<style|\sstyle\s*=/i.test(html)) bad(`${path}: встроенный стиль`);
-    for (const { attr, ref } of refsOf(html)) {
+    for (const { attr, ref, at } of refsOf(html)) {
       if (attr === 'srcset' || attr === 'poster' || attr === 'data' || attr === 'formaction' || attr === 'action') { bad(`${path}: атрибут ${attr}`); continue; }
-      if (/^(?:[a-z]+:)?\/\//i.test(ref)) bad(`${path}: внешний адрес ${ref}`);
+      if (/^(?:[a-z]+:)?\/\//i.test(ref)) {
+        // Тег, в котором стоит адрес: внешняя ССЫЛКА на источник — да, внешний РЕСУРС — нет
+        // Тег — по позиции ЭТОГО атрибута, а не первого вхождения адреса: ресурс после ссылки с тем же адресом не проходит
+        const tag = html.slice(html.lastIndexOf('<', at), at);
+        if (!(lang === 'de' && attr === 'href' && /^<a(?:\s|$)/i.test(tag) && SOURCE_LINKS.includes(ref))) bad(`${path}: внешний адрес ${ref}`);
+      }
       else if (ref.startsWith('data:')) { if (!ref.startsWith('data:image/svg+xml,')) bad(`${path}: встроенный ресурс ${ref.slice(0, 30)}`); }
       else if (ref.startsWith('#')) { if (!idsOf(html).has(ref.slice(1))) bad(`${path}: якорь ${ref} не найден`); }
       else if (ref.startsWith('/')) {
@@ -91,7 +107,9 @@ export function landingProblems(pages, css) {
     if (/[А-Яа-яЁё]|Р-\d/.test(html)) bad(`${path}: внутренний текст (кириллица или номер решения)`);
     // Честный статус и тарифы — на обеих страницах
     if (!/design.partner/i.test(text)) bad(`${path}: нет статуса «ищем design-партнёров»`);
-    for (const need of lang === 'en' ? ['€39', '€89', '30 days', 'no card', 'no surcharge per marketplace'] : ['39 €', '89 €', '30 Tage', 'ohne Karte', 'kein Aufpreis je Marktplatz']) {
+    for (const need of lang === 'en'
+      ? ['€39 per month, excl. VAT/sales tax', '€89 per month, excl. VAT/sales tax', '30 days', 'no card', 'no surcharge per marketplace']
+      : ['39 € pro Monat, zzgl. USt.', '89 € pro Monat, zzgl. USt.', '30 Tage', 'ohne Karte', 'kein Aufpreis je Marktplatz']) {
       if (!text.includes(need)) bad(`${path}: в тарифах нет «${need}»`);
     }
     // Детерминизм, который продаём: пол из себестоимости, «почему эта цена», три стоп-крана, тень
@@ -104,7 +122,8 @@ export function landingProblems(pages, css) {
   // Omnibus — ТОЛЬКО на немецкой странице [Р-185]
   if (/Omnibus|PAngV|BGH|13950/.test(textOf(en))) bad('/: блок Omnibus на английской странице');
   const deText = textOf(de);
-  for (const fact of ['BGH-Urteil 2025', '644 Fälle im Jahr 2025', 'LG München I, Az. 4 HK O 13950/24 gegen Amazon', 'Nachweis', DISCLAIMER]) {
+  for (const link of SOURCE_LINKS) if (!de.includes(`href="${link}"`)) bad(`/de/: нет источника ${link}`);
+  for (const fact of [OMNIBUS_SENTENCE, 'Nachweis', DISCLAIMER]) {
     if (!deText.includes(fact)) bad(`/de/: в блоке Omnibus нет «${fact}»`);
   }
   // Обе версии полные: те же разделы, кроме немецкого Omnibus

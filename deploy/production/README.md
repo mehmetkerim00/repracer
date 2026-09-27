@@ -143,7 +143,7 @@ docker compose -p repracer-production-us -f deploy/production/compose.yaml \
 
 | Что | Где меняется |
 |---|---|
-| домен и сертификат | `REPRACER_DOMAIN` файла значений |
+| домен и сертификат | `REPRACER_DOMAIN` файла значений; консоль — на `app.<домен региона>`, лендинга в регионе США нет (он один, на основном домене) |
 | строки подключения к базе США | файлы `app_pg_url`, `admin_pg_url`, `backup_pg_url` в своём `REPRACER_SECRETS_DIR` |
 | каталог копий | `REPRACER_BACKUP_DIR` |
 | регион самой базы | `ALTER DATABASE repracer_us SET repracer.region = 'US';` — без этого база не даст создать клиентского тенанта (0002) |
