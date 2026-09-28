@@ -223,6 +223,19 @@ export class PgStockStore implements StockStore {
     }
   }
 
+  /**
+   * Шаг 52 (п. 8): день бюджета записи `h` уже прошёл по поясу её витрины — бюджет правок обновился [Р-19, Р-65]. У боевой записи день есть
+   * всегда (Р-188: без подтверждённой границы суток записи с бюджетом не создаются), у теневой его нет — и она никогда не BUDGET_EXHAUSTED
+   */
+  private static readonly BUDGET_DAY_PASSED_SQL = `(
+      -- Ревью шага 52, находка 2: канал (второй слой eBay — скользящие 24 часа) назвал, когда бюджет обновится, — это время прошло
+      (h.end_params ->> 'resetsAt') IS NOT NULL AND (h.end_params ->> 'resetsAt')::timestamptz <= now()
+      OR h.budget_day IS NOT NULL AND h.budget_day < (
+      SELECT (now() AT TIME ZONE m.time_zone)::date FROM tenant_data.offer_mapping om
+        JOIN platform.marketplace m ON m.channel = s.channel AND m.marketplace = om.marketplace
+       WHERE om.tenant_id = s.tenant_id AND om.quantity_write_scope_id = s.write_scope_id AND m.time_zone IS NOT NULL
+       ORDER BY om.created_at LIMIT 1))`;
+
   /** Доступный остаток и буфер каждой включённой единицы QUANTITY (SQL один на все вызовы) */
   private static readonly TARGETS_SQL = `
     WITH stock AS (
@@ -244,7 +257,9 @@ export class PgStockStore implements StockStore {
            -- значение, шаг 51) количество в канале застревало до следующего изменения остатка
            coalesce((SELECT w.quantity FROM tenant_data.channel_write w WHERE w.tenant_id = s.tenant_id AND w.write_scope_id = s.write_scope_id AND w.version = ss.latest_version_created),
                     (SELECT h.quantity FROM tenant_data.channel_write_history h WHERE h.tenant_id = s.tenant_id AND h.write_scope_id = s.write_scope_id AND h.version = ss.latest_version_created
-                        AND h.final_status NOT IN ('DISCARDED_STALE', 'NOT_APPLIED'))) AS last_quantity
+                        AND h.final_status NOT IN ('DISCARDED_STALE', 'NOT_APPLIED')
+                        -- Шаг 52 (п. 8): версия, упёршаяся в бюджет правок ПРОШЛОГО дня витрины, значением канала не стала, а бюджет обновился
+                        AND NOT (h.final_status = 'BUDGET_EXHAUSTED' AND ${PgStockStore.BUDGET_DAY_PASSED_SQL}))) AS last_quantity
       FROM tenant_data.write_scope s
       LEFT JOIN stock st ON st.product_id = s.product_id
       LEFT JOIN reserved rv ON rv.product_id = s.product_id
@@ -315,6 +330,22 @@ export class PgStockStore implements StockStore {
         else out.unknownOrders.push(ref);
       }
       return out;
+    });
+  }
+
+  /**
+   * Шаг 52 (п. 8): товары аккаунта, у которых последняя запись количества упёрлась в бюджет правок прошлого дня витрины. Их пересчитывает
+   * работа чтения заказов — и без новых заказов значение уходит в канал после смены суток, а не ждёт изменения остатка
+   */
+  async budgetRolledOverProducts(tenantId: string, channelAccountId: string): Promise<string[]> {
+    return inTenant(this.options.stockPool, tenantId, async (tx) => {
+      const { rows } = await tx.query(
+        `SELECT DISTINCT s.product_id FROM tenant_data.write_scope s
+           JOIN tenant_data.write_scope_sync_state ss ON ss.tenant_id = s.tenant_id AND ss.write_scope_id = s.write_scope_id
+           JOIN tenant_data.channel_write_history h ON h.tenant_id = s.tenant_id AND h.write_scope_id = s.write_scope_id AND h.version = ss.latest_version_created
+          WHERE s.tenant_id = $1 AND s.channel_account_id = $2 AND s.field = 'QUANTITY' AND s.quantity_sync_enabled AND s.status <> 'RETIRED'
+            AND h.final_status = 'BUDGET_EXHAUSTED' AND ${PgStockStore.BUDGET_DAY_PASSED_SQL}`, [tenantId, channelAccountId]);
+      return rows.map((r) => String(r.product_id));
     });
   }
 
@@ -478,9 +509,20 @@ export class PgStockStore implements StockStore {
         PgStockStore.channelRowsSql().replace('__TARGETS__', `${PgStockStore.TARGETS_SQL} AND s.product_id = ANY($2::uuid[])`) + ' ORDER BY ca.channel, t.write_scope_id', [tenantId, ids]);
       const byProduct = new Map<string, StockChannelRow[]>();
       for (const c of channels) byProduct.set(c.product_id, [...(byProduct.get(c.product_id) ?? []), this.channelRow(c)]);
+      // Шаг 52: количество, которым управляет канал (FBA), — последнее наблюдение каждого предложения CHANNEL товара, только чтение
+      const { rows: managed } = ids.length === 0 ? { rows: [] as Row[] } : await tx.query(
+        `SELECT om.product_id, om.channel, om.marketplace, o.quantity, o.observed_at
+           FROM tenant_data.offer_mapping om
+           JOIN LATERAL (SELECT x.quantity, x.observed_at FROM channel_data.channel_quantity_observation x
+                          WHERE x.tenant_id = om.tenant_id AND x.offer_mapping_id = om.offer_mapping_id ORDER BY x.observed_at DESC LIMIT 1) o ON true
+          WHERE om.tenant_id = $1 AND om.product_id = ANY($2::uuid[]) AND om.fulfillment = 'CHANNEL' AND om.status <> 'ENDED'
+          ORDER BY om.channel, om.marketplace`, [tenantId, ids]);
+      const managedOf = new Map<string, NonNullable<StockRow['channelManaged']>>();
+      for (const m of managed) managedOf.set(m.product_id, [...(managedOf.get(m.product_id) ?? []), { channel: m.channel, marketplace: m.marketplace, quantity: Number(m.quantity), observedAt: iso(m.observed_at) }]);
       const items: StockRow[] = products.map((p) => ({
         productId: p.product_id, sku: p.sku, gtin: p.gtin ?? null, onHand: Number(p.on_hand), reserved: Number(p.reserved), available: availableOf(Number(p.on_hand), Number(p.reserved)),
         channels: byProduct.get(p.product_id) ?? [],
+        ...(managedOf.has(p.product_id) ? { channelManaged: managedOf.get(p.product_id)! } : {}),
       }));
       const { rows: [s] } = await tx.query(
         `SELECT (SELECT count(*) FROM tenant_data.product p WHERE p.tenant_id = $1)::int AS products,

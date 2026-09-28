@@ -490,3 +490,26 @@ test('Р-189 end to end: a refused probe moves the account to one SKU per call a
   assert.equal((accepted.model.stats.requests['POST /sell/inventory/v1/bulk_update_price_quantity'] ?? 0) - accepted.nextRequests, 2);
   assert.equal(accepted.nextRequests, 1, 'MULTI: the next three versions went in one call');
 });
+
+/** Шаг 52 (Growth Check: число элементов на странице может измениться): канал урезает limit обнаружения до 2 — все предложения по разу */
+test('step 52: eBay discovery with pages cut to 2 records reads every managed offer once and moves on to the Trading phase', async () => {
+  for (const pageSizeCap of [null, 2]) {
+    const clock = new VirtualClock('2026-09-28T10:00:00.000Z');
+    const w = world({ seed: 52, params: { pageSizeCap }, listings: [1, 2, 3, 4, 5].map((n) => listing(n)) });
+    const model = new SimulatedEbayChannel(w.channelModel as EbayChannelModelSpec, w.clock, { user: USER_TOKEN, application: APP_TOKEN });
+    const violations: string[] = [];
+    const adapter = ebayUnderTest({ deps: worldDependencies(w, clock, { logs: [], alerts: [] }), world: w, clock, fetch: channelFetch(model, ebayRequestChecker(w, EBAY_STAND_HOST), clock, violations, []) });
+    const ctx = { tenantId: w.tenantId, channelAccountId: w.channelAccountId, correlationId: 'step52', deadline: new Date(clock.nowMs() + 600_000).toISOString() } as never;
+    const skus: string[] = [];
+    let cursor: string | undefined;
+    for (let i = 0; i < 20; i++) {
+      const p = await adapter.discoverOffers(ctx, { limit: 10, ...(cursor ? { cursor } : {}) });
+      skus.push(...p.items.map((o) => o.identity.externalSku!));
+      if (!p.nextCursor || p.nextCursor.startsWith('trd:')) break;
+      cursor = p.nextCursor;
+      clock.advance(1_000);
+    }
+    assert.deepEqual(skus.sort(), [1, 2, 3, 4, 5].map((n) => L(n).sku).sort(), `pageSizeCap ${pageSizeCap}: every offer once`);
+    assert.deepEqual(violations, []);
+  }
+});

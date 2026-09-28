@@ -230,7 +230,7 @@ export function buildEbayPipelineScenarios(): Array<{ file: string; scenario: Sc
   // 8. Бюджет 250 правок исчерпан посреди дня
   out.push(scenario('pipeline-budget-exhausted-mid-day.json', 'ebay/pipeline/budget-exhausted-mid-day',
     'Р-163 на пути решения: 190-я правка цены листинга уходит, следующая цена — BUDGET_EXHAUSTED без обращения к eBay, с алертом',
-    'За пять часов по листингу было 189 попыток правки цены (второй слой бюджета, EBAY_C08). Первая цена 8.90 уходит (190-я попытка) и подтверждается. Себестоимость растёт, вторая цена 10.68 одобрена, но адаптер не отправляет её: цене — 250 − резерв остатка 50 − запас 10 = 190 попыток за любые 24 часа [Р-163]. Запись завершается BUDGET_EXHAUSTED, алерт PRICE_WRITE_NOT_SENT; запросов к eBay — ни одного. Первый слой — edit_budget в базе (ebay.pipeline.pg.test.ts).',
+    'За пять часов по листингу было 189 попыток правки цены (второй слой бюджета, EBAY_C08). Первая цена 8.90 уходит (190-я попытка) и подтверждается. Себестоимость растёт, вторая цена 10.68 одобрена, но адаптер не отправляет её: цене — 250 − резерв остатка 50 − запас 10 = 190 попыток за любые 24 часа [Р-163]. Запись завершается BUDGET_EXHAUSTED, алерт PRICE_WRITE_NOT_SENT уровня WARNING (шаг 52: ожидаемое ограничение канала, значение уйдёт после смены суток); запросов к eBay — ни одного. Первый слой — edit_budget в базе (ebay.pipeline.pg.test.ts).',
     ['mandatory:pipeline-budget-exhausted', 'conservative:EBAY_C08_EDIT_BUDGET_ROLLING_DAY'],
     world({ scopes: [scope(10, { minPrice: { amountMinor: 500, id: 'min-ebay-10' }, strategy: { strategyId: 'st-margin-10', version: 1, params: { type: 'TARGET_MARGIN', targetMarginBp: 2000 }, deadbandMinor: 0 } })] },
       { adapter: { ebayEditAttempts: [{ listingId: pids(10).listingId, attempts: 189, agoMs: 5 * 3600_000, field: 'PRICE' }] } }),
@@ -242,7 +242,8 @@ export function buildEbayPipelineScenarios(): Array<{ file: string; scenario: Sc
       dispatchDue('confirm-first-refuse-second'),
     ],
     [userToken(), bulkPrice('bulk-890-attempt-190', 10, 890), getOffer('get-offer-890', 10, 890), appToken(), browse('browse-890', 10, 890, '191')],
-    { alerts: [{ code: 'PRICE_WRITE_NOT_SENT', severity: 'CRITICAL', count: 1, details: { status: 'BUDGET_EXHAUSTED' } }],
+    // Шаг 52 (п. 8): исчерпанный бюджет — ожидаемое ограничение канала, WARNING (часовой дайджест), а не письмо на каждую запись
+    { alerts: [{ code: 'PRICE_WRITE_NOT_SENT', severity: 'WARNING', count: 1, details: { status: 'BUDGET_EXHAUSTED' } }],
       logs: [{ code: 'EBAY_C08_EDIT_BUDGET_ROLLING_DAY', question: 'E-02', count: 1, details: { used: 190, limit: 190, field: 'PRICE' } }],
       pipeline: { writes: [{ version: 1, status: 'APPLIED' }, { version: 2, status: 'BUDGET_EXHAUSTED' }] } },
     ['docs/decisions.md#Р-163']));

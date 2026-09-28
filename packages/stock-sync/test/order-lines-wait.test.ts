@@ -58,3 +58,26 @@ test('OQ-216: retryAt за сроком вызова — ошибка наруж
     (e: BudgetError) => e.error.code === 'RATE_LIMITED');
   assert.deepEqual([h.slept, h.reads()], [[], 0], 'за сроком вызова не ждём вовсе');
 });
+
+/**
+ * Шаг 52 (Growth Check, страницы): строки заказов читаются, пока канал отдаёт курсор. Пустая страница С курсором — не конец; тот же курсор
+ * второй раз — ошибка, а не вечный обход (работу повторит планировщик тем же окном)
+ */
+test('step 52: an empty page with a cursor is not the end; the same cursor twice stops the read with an error', async () => {
+  const line = (n: number) => ({ externalOrderRef: `o-${n}`, externalOrderLineRef: `l-${n}`, identity: { marketplace: 'de', externalOfferId: `SYN-${n}` }, quantity: 1, orderedAt: '2026-09-22T09:00:00.000Z', status: 'OPEN' });
+  const pages: Record<string, { items: unknown[]; nextCursor?: string }> = {
+    '': { items: [], nextCursor: 'p2' }, p2: { items: [line(1)], nextCursor: 'p3' }, p3: { items: [line(2)] },
+  };
+  const recorded: unknown[] = [];
+  const store = {
+    async recordOrderLines(_t: string, _a: string, lines: unknown[]) { recorded.push(...lines); return { created: lines.length, consumed: 0, released: 0, unknownOffers: 0, productIds: [] }; },
+    async recalculate() { return { writes: [], unchanged: 0 }; },
+  } as unknown as StockStore;
+  const pipeline = createStockPipeline({ store, now: () => '2026-09-22T09:00:00.000Z' as never, sleep: async () => undefined });
+  const adapter = { async readOrderLines(_c: unknown, w: { cursor?: string }) { return pages[w.cursor ?? '']; } } as unknown as ChannelAdapter;
+  const r = await pipeline.syncOrders(ctx('2026-09-22T09:02:00.000Z'), adapter, '2026-09-22T08:55:00.000Z' as never);
+  assert.deepEqual([r.lines, recorded.length], [2, 2], 'both lines behind the empty page were read');
+
+  const stuck = { async readOrderLines(_c: unknown, w: { cursor?: string }) { return { items: [], nextCursor: w.cursor ?? 'same' }; } } as unknown as ChannelAdapter;
+  await assert.rejects(pipeline.syncOrders(ctx('2026-09-22T09:02:00.000Z'), stuck, '2026-09-22T08:55:00.000Z' as never), /same page cursor/);
+});

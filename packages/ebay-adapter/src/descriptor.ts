@@ -137,10 +137,9 @@ export const EBAY_DESCRIPTOR: ChannelDescriptor = {
    */
   writeRetry: {
     maxAttempts: 3,
-    retryOn: [
-      { code: 'CHANNEL_UNAVAILABLE' }, { code: 'TIMEOUT' }, { code: 'NETWORK' },
-      { code: 'RATE_LIMITED', notSentOnly: true }, { code: 'ACTION_NOT_ALLOWED' },
-    ],
+    // Ответы канала, после которых повтор допустим: 5xx и отказ формы пакета (EBAY_C18). Таймаут, обрыв и отказ до отправки ответа канала не
+    // имеют — они повторяются в пределах трёх попыток по правилу ядра (шаг 52)
+    retryOn: [{ code: 'CHANNEL_UNAVAILABLE' }, { code: 'ACTION_NOT_ALLOWED' }],
     basis: 'eBay Application Growth Check: retries for a maximum of two times for infrastructure errors (vendor/ebay/2026-09-28/get-started-with-ebay-apis.html)',
   },
 };

@@ -1222,6 +1222,19 @@ const MAX_IMPORT_BODY_BYTES = 48 * 1024 * 1024;
  */
 const bodyLimitFor = (url: string, authorized: boolean) => (authorized && (url.includes('/cost-import/') || url.includes('/stock/import') || url.includes('/inbound/v1/')) ? MAX_IMPORT_BODY_BYTES : MAX_BODY_BYTES);
 
+/**
+ * Шаг 52 (OWASP A05, самопроверка — docs/evidence/step52-owasp.md): заголовки безопасности каждого ответа консоли, страницы и API.
+ * Консоль не встраивается в чужие страницы (frame-ancestors, X-Frame-Options), тип содержимого не угадывается, адрес страницы не уходит
+ * третьим сторонам в Referer (ссылка приглашения несёт токен во фрагменте — фрагмент браузер и так не шлёт). Полная политика
+ * источников скриптов и соединений — отдельной строкой плана: ей нужен адрес поставщика identity из конфигурации
+ */
+export const SECURITY_HEADERS: Readonly<Record<string, string>> = {
+  'content-security-policy': "frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'",
+  'x-frame-options': 'DENY',
+  'x-content-type-options': 'nosniff',
+  'referrer-policy': 'no-referrer',
+};
+
 function send(res: ServerResponse, r: ApiResponse): void {
   if (r.file) {
     res.writeHead(r.status, {
@@ -1253,6 +1266,7 @@ export function createStandServer(
 ) {
   const fallback = messagesFor(locale).ui.server;
   return createServer(async (req, res) => {
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(name, value);
     const pathname = new URL(req.url ?? '/', 'http://console').pathname;
     if (serveStatic && !pathname.startsWith('/api/') && !pathname.startsWith('/inbound/')) {
       const file = serveStatic(pathname);

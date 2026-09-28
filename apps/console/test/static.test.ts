@@ -82,3 +82,24 @@ test('шаг 37: выход за каталог сборки закрыт и в 
   // Путь с нулевым байтом не обрабатывается вовсе: такие имена файлов не бывают у сборки
   assert.equal(serve('/index\u0000.html'), null, 'адрес с нулевым байтом отвергается до обращения к файловой системе');
 });
+
+/**
+ * Шаг 52 (OWASP A05, самопроверка): заголовки безопасности у страницы, у API и у ответа об ошибке — через настоящий HTTP-слой консоли
+ */
+test('step 52: the page, the API and an error answer carry the security headers of the console', async () => {
+  const { createStandServer, SECURITY_HEADERS } = await import('../server/stand-server.ts');
+  const handle = (async () => ({ status: 401, body: { error: { code: 'UNAUTHENTICATED', message: 'sign in' } } })) as never;
+  const server = createStandServer(handle, 'en', serve);
+  await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+  try {
+    const { port } = server.address() as { port: number };
+    for (const path of ['/', '/api/v1/worlds', '/robots.txt']) {
+      const r = await fetch(`http://127.0.0.1:${port}${path}`);
+      await r.arrayBuffer();
+      for (const [name, value] of Object.entries(SECURITY_HEADERS)) assert.equal(r.headers.get(name), value, `${path}: ${name}`);
+    }
+    assert.match(SECURITY_HEADERS['content-security-policy']!, /frame-ancestors 'none'/);
+  } finally {
+    await new Promise<void>((done) => server.close(() => done()));
+  }
+});

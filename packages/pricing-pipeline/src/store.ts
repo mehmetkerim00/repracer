@@ -648,6 +648,11 @@ export interface PricingStore {
    * режиме OFF. Идемпотентно; возвращает число СОЗДАННЫХ предложений. Цен и движка не касается [Р-131].
    */
   recordDiscoveredOffers(tenantId: string, channelAccountId: string, offers: readonly DiscoveredCatalogOffer[]): Promise<number>;
+  /**
+   * Шаг 52: количество, которым управляет канал (FBA), у предложений CHANNEL — наблюдение для экрана остатков (только чтение, 18 месяцев);
+   * предложения FBM пропускаются базой. Нет у хранилища — наблюдение не хранится
+   */
+  recordChannelQuantities?(tenantId: string, channelAccountId: string, items: ReadonlyArray<{ marketplace: string; externalSku: string; quantity: number; observedAt: Instant }>): Promise<number>;
   /** Шаг 23: PRICING_HEALTH — в решение не входит, состояние оффера для продавца */
   recordPricingHealth(tenantId: string, channelAccountId: string, health: PricingHealthObservation, notification?: InboundNotificationEntry): Promise<'RECORDED' | 'DUPLICATE_NOTIFICATION'>;
   /** Шаг 23: журнал обработанных уведомлений тенанта — повтор доставки из очереди не обрабатывается второй раз */

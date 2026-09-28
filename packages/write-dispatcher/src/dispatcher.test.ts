@@ -309,3 +309,46 @@ test('step 51: the dispatcher records outcomes with the channel write retry rule
   for (const p of policies) assert.deepEqual(p, { maxAttempts: 3, retryOn: rule.retryOn });
   assert.equal(dispatcher.policy.maxAttempts, 5, 'the core policy itself is unchanged for other channels');
 });
+
+/** Ревью шага 51, находка 10: адаптер недоступен при записи итога — правило аккаунта, известное раньше; неизвестно — ответы канала не повторяются */
+test('step 52: when the adapter cannot be had while recording, the known rule of the account is used; unknown — no channel answer is retried', async () => {
+  const write: FieldWrite = {
+    channelWriteId: 'cw-1' as FieldWrite['channelWriteId'],
+    writeScope: { writeScopeId: 'ws-1' as FieldWrite['writeScope']['writeScopeId'], field: 'PRICE', scopeKey: 'k', identity: { marketplace: 'EBAY_DE', externalSku: 'S1' } },
+    version: 1, idempotencyKey: 'idem-1', value: { field: 'PRICE', price: { amountMinor: 1999, currency: 'EUR', basis: 'GROSS' } }, attemptNo: 1,
+  };
+  const run = async (failOn: (call: number) => boolean) => {
+    const policies: Array<{ maxAttempts: number; retryOn: unknown }> = [];
+    let due = true;
+    let calls = 0;
+    const store: WriteQueueStore = {
+      async dueScopes() { return []; },
+      async claimNext(): Promise<ClaimResult> { if (!due) return { kind: 'IDLE' }; due = false; return { kind: 'DISPATCH', channelAccountId: 'acc-1', write }; },
+      async recordOutcome(_t, _w, _o, _now, p): Promise<RecordedOutcome> {
+        policies.push({ maxAttempts: p.maxAttempts, retryOn: p.retryOn });
+        return { status: 'FAILED', slotFreed: true, queuedWaiting: false, nextAttemptAt: null, reason: null, scopeBlocked: false };
+      },
+      async checkPriceBasis() { return null; },
+      async recordEbayBatchOutcome() { throw new Error('not reached'); },
+      async recordReconciliation() { throw new Error('not reached'); },
+    };
+    const rule = { maxAttempts: 3, retryOn: [{ code: 'CHANNEL_UNAVAILABLE' as const }], basis: 'test' };
+    const adapter = {
+      descriptor: { writeRetry: rule },
+      async planDispatch() { return { batches: [{ batchId: 'b', operation: 'op', items: [write], budgetCharges: [], requestCount: 1 }], rejected: [] }; },
+      async dispatch() { return { batchId: 'b', outcomes: [{ channelWriteId: write.channelWriteId, status: 'REJECTED', error: { class: 'TRANSIENT', code: 'RATE_LIMITED', scope: 'BATCH', message: '429', raiseAlert: false, httpStatus: 429 } }], attemptsMade: 1 }; },
+    } as unknown as ChannelAdapter;
+    const dispatcher = createWriteDispatcher({ store, adapterFor: () => { calls += 1; if (failOn(calls)) throw new Error('catalog unavailable'); return adapter; },
+      alerts: { raise: async () => undefined }, now: () => '2026-09-15T10:00:00.000Z' });
+    await dispatcher.dispatchScope('t1', 'ws-1');
+    due = true;
+    await dispatcher.dispatchScope('t1', 'ws-1');
+    return policies;
+  };
+  // Первый итог — правило адаптера; во втором вызов за правилом падает — берётся известное правило аккаунта (отправка прошла на своём вызове)
+  const known = await run((c) => c === 4);
+  assert.deepEqual(known[1], { maxAttempts: 3, retryOn: [{ code: 'CHANNEL_UNAVAILABLE' }] });
+  // Правило ещё не известно, и адаптер недоступен при записи итога — ответы канала не повторяются
+  const unknown = await run((c) => c === 2);
+  assert.deepEqual(unknown[0], { maxAttempts: 3, retryOn: [{ code: 'CHANNEL_UNAVAILABLE' }] });
+});

@@ -33,6 +33,8 @@ export interface StockRowView {
   reserved: number;
   available: number;
   channels: StockChannelCell[];
+  /** Шаг 52: количество, которым управляет канал (Amazon FBA), — текстом «управляет Amazon», только для чтения [Р-6] */
+  channelManaged: string[];
 }
 
 export interface StockTrap {
@@ -98,7 +100,8 @@ export function stockView(world: StandWorld, page: StockPage, query: ListQuery, 
   const t = m.ui.stock;
   return {
     worldId: world.id, demo: world.demo === true, intro: t.intro, summary: page.summary, summaryText: t.summary(page.summary),
-    rows: page.items.map((r: StockRow): StockRowView => ({ productId: r.productId, sku: r.sku, gtin: r.gtin, onHand: r.onHand, reserved: r.reserved, available: r.available, channels: r.channels.map((c) => channelCell(c, m)) })),
+    rows: page.items.map((r: StockRow): StockRowView => ({ productId: r.productId, sku: r.sku, gtin: r.gtin, onHand: r.onHand, reserved: r.reserved, available: r.available, channels: r.channels.map((c) => channelCell(c, m)),
+      channelManaged: (r.channelManaged ?? []).map((c) => t.channel.managedByChannel((m.values as Record<string, string | undefined>)[c.channel] ?? c.channel, c.marketplace, c.quantity, m.when(c.observedAt))) })),
     page: pageInfo(query, page.total, m),
     sources: sources.map((s) => ({ ...s, modeText: t.sources.modes[s.mode], productsText: t.sources.products(s.products) })),
     traps: stockTraps(world, m),

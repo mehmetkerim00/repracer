@@ -121,7 +121,8 @@ export function StockScreenView({ view: v, worldId, query, onQuery }: { view: St
                 <td>{r.sku}{r.gtin ? <span className="small muted"> · {r.gtin}</span> : null}</td>
                 <td>{r.onHand}</td><td>{r.reserved}</td><td>{r.available}</td>
                 <td>
-                  {r.channels.length === 0 ? <span className="muted">—</span> : (
+                  {r.channelManaged.length > 0 ? <ul className="small muted">{r.channelManaged.map((text, i) => <li key={i}>{text}</li>)}</ul> : null}
+                  {r.channels.length === 0 ? (r.channelManaged.length > 0 ? null : <span className="muted">—</span>) : (
                     <ul className="small">
                       {r.channels.map((c) => (
                         <li key={c.writeScopeId}>

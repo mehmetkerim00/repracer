@@ -3,7 +3,7 @@ import { after, before, test } from 'node:test';
 import { createHash } from 'node:crypto';
 import type { MemorySeedScope } from '@repracer/pricing-pipeline';
 import { DEFAULT_RETRY_POLICY } from '@repracer/write-dispatcher';
-import { PgStockStore, PgWriteQueueStore, inTenant, seedPricingWorld, type PgPool, type SeededPricingWorld } from '../src/index.ts';
+import { PgPricingStore, PgStockStore, PgWriteQueueStore, inTenant, seedPricingWorld, type PgPool, type SeededPricingWorld } from '../src/index.ts';
 import { createIsolatedDatabase, type IsolatedDatabase } from './isolated-db.ts';
 
 /**
@@ -328,4 +328,67 @@ test('step 51 review: a quantity version refused by the channel is not "already 
   const again = await store.recalculate(world.tenantId, null, now());
   assert.deepEqual(again.writes.map((w) => [w.writeScopeId, w.quantity]), [[row.write_scope_id, Number(row.quantity)]], 'the refused value is created again, the others are unchanged');
   assert.equal((await store.recalculate(world.tenantId, null, now())).writes.length, 0, 'a pending new version counts as created: no duplicate');
+});
+
+/**
+ * Шаг 52 (п. 8): запись количества, упёршаяся в бюджет правок, в тот же день витрины не пересоздаётся (бюджет исчерпан), а после смены
+ * суток — пересоздаётся, и товар попадает в пересчёт работой чтения заказов без новых заказов. День «позавчера» ставит суперпользователь:
+ * база даёт записи только текущий день витрины (0141)
+ */
+test('step 52: a quantity write refused by the edit budget is not recreated the same day, and is recreated once the storefront day rolled over', async () => {
+  const queue = new PgWriteQueueStore(db.pool('svc_app', 1));
+  const [row] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
+    `SELECT w.write_scope_id, w.quantity, s.product_id FROM tenant_data.channel_write w JOIN tenant_data.write_scope s USING (tenant_id, write_scope_id)
+      WHERE w.field = 'QUANTITY' AND w.status = 'PENDING' ORDER BY w.quantity DESC LIMIT 1`)).rows);
+  const claim = await queue.claimNext(world.tenantId, row.write_scope_id, now(), DEFAULT_RETRY_POLICY);
+  const write = (claim as Extract<typeof claim, { kind: 'DISPATCH' }>).write;
+  const ended = await queue.recordOutcome(world.tenantId, write, { channelWriteId: write.channelWriteId, status: 'REJECTED',
+    error: { class: 'TRANSIENT', code: 'EDIT_BUDGET_EXHAUSTED', scope: 'ITEM', message: 'synthetic budget', raiseAlert: false } }, now(), DEFAULT_RETRY_POLICY);
+  assert.equal(ended.status, 'BUDGET_EXHAUSTED');
+  const account = world.ids.dbId(KAUFLAND);
+  /**
+   * Ревью шага 52, находка 4: день бюджета ставит суперпользователь по поясу ВИТРИНЫ (не UTC) — сперва сегодняшний: повтора нет, потому
+   * что день не прошёл, а не потому, что дня нет; затем вчерашний; отдельно — сегодняшний день, но время обновления, названное каналом, прошло
+   */
+  const setDay = (dayExpr: string, resetsAt: string | null) => db.superuser(`SET session_replication_role = replica;
+    UPDATE tenant_data.channel_write_history SET budget_scope_key = 'syn-budget-key',
+           budget_day = ${dayExpr},
+           end_params = ${resetsAt ? `jsonb_set(coalesce(end_params, '{}'::jsonb), '{resetsAt}', to_jsonb('${resetsAt}'::text))` : `coalesce(end_params, '{}'::jsonb) - 'resetsAt'`}
+     WHERE channel_write_id = '${write.channelWriteId}';
+    SET session_replication_role = origin`);
+  const today = `(now() AT TIME ZONE (SELECT time_zone FROM platform.marketplace WHERE channel = 'KAUFLAND' AND marketplace = 'de'))::date`;
+  await setDay(today, null);
+  assert.deepEqual(await store.budgetRolledOverProducts(world.tenantId, account), [], 'the budget day of the storefront has not passed');
+  assert.equal((await store.recalculate(world.tenantId, null, now())).writes.length, 0, 'same day: no new write into a used-up budget');
+  await setDay(today, new Date(Date.now() + 3_600_000).toISOString());
+  assert.deepEqual(await store.budgetRolledOverProducts(world.tenantId, account), [], 'the channel renews the budget later');
+  await setDay(today, new Date(Date.now() - 60_000).toISOString());
+  assert.deepEqual(await store.budgetRolledOverProducts(world.tenantId, account), [row.product_id], 'the channel renewal time has passed (rolling window)');
+  await setDay(`${today} - 1`, null);
+  assert.deepEqual(await store.budgetRolledOverProducts(world.tenantId, account), [row.product_id], 'the storefront day rolled over');
+  const again = await store.recalculate(world.tenantId, [row.product_id], now());
+  assert.deepEqual(again.writes.map((w) => [w.writeScopeId, w.quantity]), [[row.write_scope_id, Number(row.quantity)]]);
+});
+
+/**
+ * Шаг 52 (п. 7): количество, которым управляет канал (FBA/FBK), — наблюдение предложения CHANNEL из обнаружения; экран остатков показывает
+ * его только для чтения, в доступное наше количество оно не входит. У предложения FBM такого количества нет — база его пропускает
+ */
+test('step 52: the channel managed quantity of a channel fulfilled offer reaches the stock screen read-only; a merchant offer gets none', async () => {
+  const pricing = new PgPricingStore(db.pool('svc_app', 1));
+  const account = world.ids.dbId(KAUFLAND);
+  await pricing.recordDiscoveredOffers(world.tenantId, account, [
+    { marketplace: 'de', externalSku: 'SYN-FBK-52', externalUnitId: '3552', externalOfferId: null, channelProductRef: null, gtin: null, condition: 'new', fulfillment: 'CHANNEL' },
+  ]);
+  const recorded = await pricing.recordChannelQuantities(world.tenantId, account, [
+    { marketplace: 'de', externalSku: 'SYN-FBK-52', quantity: 12, observedAt: now() },
+    // Предложение FBM (из посева мира) — количества «управляет канал» у него нет, база пропускает
+    { marketplace: 'de', externalSku: 'syn-prod-1', quantity: 99, observedAt: now() },
+  ]);
+  assert.equal(recorded, 1);
+  const page = await store.stockPage(world.tenantId, { offset: 0, limit: 50 });
+  const fbk = page.items.find((r) => r.sku === 'SYN-FBK-52')!;
+  assert.deepEqual(fbk.channelManaged?.map((c) => [c.channel, c.marketplace, c.quantity]), [['KAUFLAND', 'de', 12]]);
+  assert.deepEqual([fbk.onHand, fbk.available, fbk.channels.length], [0, 0, 0], 'not our stock, no quantity write scope');
+  assert.equal(page.items.filter((r) => (r.channelManaged ?? []).length > 0).length, 1, 'only the channel fulfilled offer');
 });

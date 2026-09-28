@@ -38,10 +38,15 @@ export function createStockPipeline(deps: StockPipelineDeps): StockPipeline {
         const result = await waitingForBudget(ctx, () => adapter.readOrderLines(ctx, { since, limit: 100, ...(cursor ? { cursor } : {}) }), { now: deps.now, sleep });
         lines.push(...result.items);
         if (!result.nextCursor) break;
+        // Шаг 52: канал вернул тот же курсор — продвинуться нечем; ошибка, а не вечный обход (работу повторит планировщик, окно то же)
+        if (result.nextCursor === cursor) throw new Error('the channel returned the same page cursor again: order lines are not read further');
         cursor = result.nextCursor;
       }
       const recorded = await deps.store.recordOrderLines(ctx.tenantId, ctx.channelAccountId, lines, deps.now());
-      const recalculated = recorded.productIds.length > 0 ? await deps.store.recalculate(ctx.tenantId, recorded.productIds, deps.now()) : { writes: [], unchanged: 0 };
+      // Шаг 52 (п. 8): и товары, чья запись упёрлась в бюджет правок прошлого дня, — после смены суток значение уходит снова
+      const rolledOver = (await deps.store.budgetRolledOverProducts?.(ctx.tenantId, ctx.channelAccountId)) ?? [];
+      const products = [...new Set([...recorded.productIds, ...rolledOver])];
+      const recalculated = products.length > 0 ? await deps.store.recalculate(ctx.tenantId, products, deps.now()) : { writes: [], unchanged: 0 };
       await dispatch(ctx.tenantId, recalculated.writes.map((w) => w.writeScopeId));
       return { lines: lines.length, created: recorded.created, consumed: recorded.consumed, released: recorded.released, unknownOffers: recorded.unknownOffers, writes: recalculated.writes.length };
     },

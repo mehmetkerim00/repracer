@@ -142,6 +142,15 @@ export interface AmazonModelParams {
    * includedData — по умолчанию нет; вариант проверяет, что белый список адаптера не пропускает их дальше
    */
   ordersBuyerWithoutDataset: boolean;
+  /**
+   * Шаг 52: страницы searchListingsItems и searchOrders короче запрошенного размера (`pageSizeCap`) и одна пустая страница с токеном
+   * продолжения перед данными (`emptyPageFirst`). Модели не обещают, что страница полная: токен — единственный признак продолжения
+   */
+  paging: { pageSizeCap: number | null; emptyPageFirst: boolean };
+  /** A-21 (шаг 52): что делает Amazon с записью DEFAULT по SKU сети Amazon — не применяет или переводит листинг в исполнение продавцом */
+  fbaDefaultWrite: 'NOT_APPLIED' | 'SWITCHES_TO_MERCHANT';
+  /** A-22 (шаг 52): ставится ли quantityFulfilled у строк заказа PARTIALLY_SHIPPED */
+  partialShipmentReported: boolean;
 }
 
 export const AMAZON_PARAMETERS: { readonly [K in keyof AmazonModelParams]: ParameterSpec<AmazonModelParams[K]> } = {
@@ -163,6 +172,12 @@ export const AMAZON_PARAMETERS: { readonly [K in keyof AmazonModelParams]: Param
     alternatives: [{ delayMs: 60_000, lossShare: 0 }, { delayMs: 600_000, lossShare: 0.2 }],
   },
   ordersBuyerWithoutDataset: { question: 'A-20', status: 'OPEN', meaning: 'данные покупателя в searchOrders без набора BUYER', default: false, alternatives: [false, true] },
+  paging: {
+    question: null, status: 'OPEN', meaning: 'страница короче запрошенной и пустая страница с токеном продолжения',
+    default: { pageSizeCap: null, emptyPageFirst: false }, alternatives: [{ pageSizeCap: null, emptyPageFirst: false }, { pageSizeCap: 2, emptyPageFirst: true }],
+  },
+  fbaDefaultWrite: { question: 'A-21', status: 'OPEN', meaning: 'запись DEFAULT по SKU сети Amazon', default: 'NOT_APPLIED', alternatives: ['NOT_APPLIED', 'SWITCHES_TO_MERCHANT'] },
+  partialShipmentReported: { question: 'A-22', status: 'OPEN', meaning: 'quantityFulfilled у строк частично отгруженного заказа', default: true, alternatives: [true, false] },
 };
 
 export function defaultAmazonParams(): AmazonModelParams {
@@ -207,6 +222,12 @@ export interface EbayModelParams {
    * элементам; код и текст ошибки синтетические (настоящий неизвестен)
    */
   multiSkuPerCall: 'ACCEPTED' | 'REFUSED_WHOLE_REQUEST';
+  /**
+   * Шаг 52: страница короче запрошенной. Требование Growth Check — приложение не ломается, если eBay изменит число элементов на странице
+   * (get-started-with-ebay-apis.html снимка 2026-09-28). null — страница как просили; число — канал урезает limit до него, `next` и `total`
+   * остаются верными
+   */
+  pageSizeCap: number | null;
 }
 
 export const EBAY_PARAMETERS: { readonly [K in keyof EbayModelParams]: ParameterSpec<EbayModelParams[K]> } = {
@@ -247,6 +268,10 @@ export const EBAY_PARAMETERS: { readonly [K in keyof EbayModelParams]: Parameter
   multiSkuPerCall: {
     question: 'E-22', status: 'OPEN', meaning: 'пакет предложений разных SKU в одном вызове bulk_update_price_quantity: принимается (песочница) или отвергается целиком (описание операции)',
     default: 'ACCEPTED', alternatives: ['ACCEPTED', 'REFUSED_WHOLE_REQUEST'],
+  },
+  pageSizeCap: {
+    question: null, status: 'OPEN', meaning: 'канал отдаёт страницу короче запрошенной (Growth Check: число элементов на странице может измениться)',
+    default: null, alternatives: [null, 2],
   },
 };
 

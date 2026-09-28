@@ -41,10 +41,11 @@ export interface ChannelDescriptor {
 export interface WriteRetryRule {
   maxAttempts: number;
   /**
-   * Коды временных ошибок, после которых запись повторяется. `notSentOnly` — только если запрос к каналу не уходил
-   * (у ошибки нет httpStatus: клиентский бюджет запросов), такой повтор не обращение к каналу
+   * Коды временных ошибок с ОТВЕТОМ канала (у ошибки есть httpStatus), после которых запись повторяется. Шаг 52 (ревью шага 51, находка 9):
+   * временная ошибка без ответа канала — таймаут, обрыв, отказ нашего бюджета или ошибка ядра до отправки — правилом канала не отсекается
+   * и повторяется в пределах `maxAttempts`
    */
-  retryOn: readonly { code: ChannelErrorCode; notSentOnly?: boolean }[];
+  retryOn: readonly { code: ChannelErrorCode }[];
   basis: string;
 }
 

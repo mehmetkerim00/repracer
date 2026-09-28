@@ -371,7 +371,9 @@ export function createPricingPipeline(deps: PipelineDeps) {
     if (recorded.scopeBlocked) {
       await alerts.raise({ ...alertBase(ctx), code: 'PRICE_WRITE_SCOPE_BLOCKED', severity: 'CRITICAL', details });
     } else if (recorded.status === 'DISCARDED_STALE' || recorded.status === 'BUDGET_EXHAUSTED' || recorded.status === 'NOT_APPLIED') {
-      await alerts.raise({ ...alertBase(ctx), code: 'PRICE_WRITE_NOT_SENT', severity: 'CRITICAL', details: { ...details, status: recorded.status } });
+      // Шаг 52 (п. 8): исчерпанный бюджет правок — ожидаемое ограничение канала, значение уйдёт после смены суток витрины: WARNING (дайджест)
+      // Путь решения пишет только цену; количество (CRITICAL) — диспетчер (ревью шага 52, находка 3)
+      await alerts.raise({ ...alertBase(ctx), code: 'PRICE_WRITE_NOT_SENT', severity: recorded.status === 'BUDGET_EXHAUSTED' ? 'WARNING' : 'CRITICAL', details: { ...details, status: recorded.status } });
     }
     if (!deps.dispatcher || !recorded.queuedWaiting) return;
     const dispatched = await deps.dispatcher.dispatchScope(ctx.tenantId, writeScopeId);
@@ -958,10 +960,16 @@ export function createPricingPipeline(deps: PipelineDeps) {
               condition: o.condition, fulfillment: o.fulfillment,
               ...(o.listing ? { externalListingId: o.identity.externalListingId ?? null, listingFormat: o.listing.format, writable: o.listing.writable } : {}) }]
           : [])));
+        // Шаг 52: количество, которым управляет канал (FBA), — наблюдение для экрана остатков; наша запись его не касается [Р-6]
+        const managed = result.items.flatMap((o) => (o.fulfillment === 'CHANNEL' && o.currentQuantity !== undefined && o.identity.marketplace && o.identity.externalSku
+          ? [{ marketplace: o.identity.marketplace, externalSku: o.identity.externalSku, quantity: o.currentQuantity, observedAt: deps.now() }] : []));
+        if (managed.length > 0) await store.recordChannelQuantities?.(ctx.tenantId, ctx.channelAccountId, managed);
         for (const o of observations) {
           if (o.automatedPricing || o.channelBounds) withChannelPricing.push({ marketplace: o.marketplace, externalSku: o.externalSku, automatedPricing: o.automatedPricing, channelBounds: o.channelBounds });
         }
         if (!result.nextCursor) break;
+        // Шаг 52: канал вернул тот же курсор — продвинуться нечем; ошибка, а не обход до предела страниц одной и той же страницей
+        if (result.nextCursor === cursor) throw new Error('the channel returned the same page cursor again: discovery stops');
         cursor = result.nextCursor;
       }
       if (withChannelPricing.length > 0) {

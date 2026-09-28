@@ -30,8 +30,8 @@ interface BrowseItem {
 
 type Read<T> = { ok: true; data: T } | { ok: false; error: ChannelError };
 
-export async function getOffer(options: ResolvedOptions, ctx: AdapterCallContext, session: Session, offerId: string): Promise<Read<EbayOffer>> {
-  const r = await call(options, ctx, session, { auth: 'USER', method: 'GET', path: `${INVENTORY_PATH}/offer/${offerId}`, operation: 'getOffer' });
+export async function getOffer(options: ResolvedOptions, ctx: AdapterCallContext, session: Session, offerId: string, marketplace?: string): Promise<Read<EbayOffer>> {
+  const r = await call(options, ctx, session, { auth: 'USER', method: 'GET', path: `${INVENTORY_PATH}/offer/${offerId}`, operation: 'getOffer', ...(marketplace ? { marketplace } : {}) });
   if (r.kind === 'REFUSED') return { ok: false, error: r.error };
   if (!r.result.ok) return { ok: false, error: classifyHttpFailure(r.result.status, r.result.body, 'ITEM', nowMs(options)) };
   return { ok: true, data: (r.result.body ?? {}) as EbayOffer };
@@ -103,7 +103,7 @@ export async function readBackEbay(options: ResolvedOptions, ctx: AdapterCallCon
     const fail = (error: ChannelError) => failures.push({ writeScopeId: r.writeScope.writeScopeId, error });
     if (!offerId) { fail(channelError('PRECONDITION_FAILED', 'ITEM', 'read-back needs the eBay offerId: the listing is not under Inventory API (Р-164)')); continue; }
     let offer = offers.get(offerId);
-    if (!offer) { offer = await getOffer(options, ctx, session, offerId); offers.set(offerId, offer); }
+    if (!offer) { offer = await getOffer(options, ctx, session, offerId, id.marketplace); offers.set(offerId, offer); }
     if (!offer.ok) { fail(offer.error); continue; }
     const o = offer.data;
     const marketplace = o.marketplaceId ?? id.marketplace;

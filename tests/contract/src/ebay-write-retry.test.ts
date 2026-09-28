@@ -31,6 +31,10 @@ test('eBay write retry rule: at most two retries, only infrastructure failures; 
   // Отказ нашего клиентского бюджета или режима пакетов до отправки — в eBay запроса не было, повтор допустим
   assert.equal(planOutcomeTransition(fail('RATE_LIMITED'), 1, NOW, policy).to, 'RETRY');
   assert.equal(planOutcomeTransition(fail('ACTION_NOT_ALLOWED'), 1, NOW, policy).to, 'RETRY');
+  // Шаг 52 (ревью шага 51, находка 9): ошибка ядра без ответа канала («адаптер не запланировал запись») — не отказ канала, повтор допустим
+  assert.equal(planOutcomeTransition({ channelWriteId: id, status: 'REJECTED', error: coreError('UNKNOWN', 'TRANSIENT', 'adapter planned no batch for the write') }, 1, NOW, policy).to, 'RETRY');
+  // …а ответ канала с незнакомым временным кодом — отказ без повтора
+  assert.equal(planOutcomeTransition(fail('UNKNOWN' as 'RATE_LIMITED', 418), 1, NOW, policy).to, 'DISCARD');
   // Сверка «не применено» тоже расходует попытку: после третьей повтора нет
   assert.equal(planReconciliationTransition('DISPATCHED', { kind: 'NOT_APPLIED', observedMinor: null }, 3, NOW, NOW, policy).to, 'DISCARD');
   // Прочие каналы — прежняя общая политика: 429 повторяется

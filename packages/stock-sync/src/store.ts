@@ -137,6 +137,11 @@ export interface StockRow {
   reserved: number;
   available: number;
   channels: StockChannelRow[];
+  /**
+   * Шаг 52: количество, которым управляет КАНАЛ (Amazon FBA), у предложений товара — только для чтения, последнее наблюдение. В доступное
+   * наше количество не входит и нашей записи не касается [Р-6]
+   */
+  channelManaged?: Array<{ channel: string; marketplace: string; quantity: number; observedAt: Instant }>;
 }
 
 export interface StockSummary {
@@ -192,6 +197,8 @@ export interface StockStore {
   recalculate(tenantId: string, productIds: readonly string[] | null, now: Instant): Promise<RecalculationOutcome>;
   /** Строки заказов канала → резервации [Р-25]: OPEN — создаётся и подтверждается, SHIPPED — списывается, CANCELLED — освобождается */
   recordOrderLines(tenantId: string, channelAccountId: string, lines: readonly OrderLine[], now: Instant): Promise<OrderLinesOutcome>;
+  /** Шаг 52: товары аккаунта, чья последняя запись количества упёрлась в бюджет правок прошлого дня витрины — пересчитать после смены суток */
+  budgetRolledOverProducts?(tenantId: string, channelAccountId: string): Promise<string[]>;
   stockPage(tenantId: string, query: { offset: number; limit: number }): Promise<StockPage>;
   stockDivergences(tenantId: string, limit: number): Promise<StockDivergenceRow[]>;
 }

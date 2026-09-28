@@ -1546,6 +1546,17 @@ export class PgPricingStore implements PricingStore {
     });
   }
 
+  /** Шаг 52 (0144): количество, которым управляет канал, — функция роли каталога; предложения FBM она пропускает */
+  async recordChannelQuantities(tenantId: string, channelAccountId: string, items: ReadonlyArray<{ marketplace: string; externalSku: string; quantity: number; observedAt: Instant }>): Promise<number> {
+    if (items.length === 0) return 0;
+    return this.tx(tenantId, async (tx) => {
+      const { rows: [r] } = await tx.query('SELECT channel_data.record_channel_quantities($1, $2, $3::jsonb) AS recorded', [tenantId, channelAccountId, JSON.stringify(items.map((i) => ({
+        marketplace: i.marketplace, external_sku: i.externalSku, quantity: i.quantity, observed_at: i.observedAt,
+      })))]);
+      return Number(r!.recorded);
+    });
+  }
+
   /** Шаг 23: состояние PRICING_HEALTH оффера (0083) — данные канала, 18 месяцев */
   /** OQ-171: запись журнала уведомлений в переданной транзакции; false — уведомление уже записано */
   private async insertNotification(tx: Tx, tenantId: string, entry: InboundNotificationEntry): Promise<boolean> {

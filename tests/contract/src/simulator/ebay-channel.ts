@@ -235,11 +235,13 @@ export class SimulatedEbayChannel implements ChannelBehaviour {
     if (method === 'GET' && path === '/sell/inventory/v1/inventory_item') {
       // Шаг 50 [песочница]: без Accept-Language песочница отвечает 400 25709 — модель тоже (спецификация заголовка не объявляет, E-23)
       if (!request.headers['accept-language']) return json(400, { errors: [restError(25709, 'Invalid value for header Accept-Language.')] });
-      const limit = Math.max(1, Number(request.query.limit ?? 25));
+      // Шаг 52: канал может урезать limit (параметр pageSizeCap) — страница короче запрошенной, `next` и `total` верны
+      const limit = Math.min(Math.max(1, Number(request.query.limit ?? 25)), this.params.pageSizeCap ?? Number.MAX_SAFE_INTEGER);
       const offset = Math.max(0, Number(request.query.offset ?? 0));
       const managed = [...this.listings.values()].filter((l) => l.offer).sort((a, b) => a.sku.localeCompare(b.sku));
       const page = managed.slice(offset, offset + limit);
       return json(200, { total: managed.length, size: page.length, limit, offset,
+        ...(offset + page.length < managed.length ? { next: `https://api.sandbox.ebay.com/sell/inventory/v1/inventory_item?limit=${limit}&offset=${offset + page.length}` } : {}),
         inventoryItems: page.map((l) => ({ sku: l.sku, condition: 'NEW', availability: { shipToLocationAvailability: { quantity: l.live.quantity } } })) });
     }
     if (method === 'GET' && path === '/sell/inventory/v1/offer') {

@@ -16,6 +16,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Шаг 52 (OWASP A08): токен заданий только читает репозиторий — прогонам больше не нужно
+permissions:
+  contents: read
+
 jobs:
   fast:
     runs-on: ubuntu-24.04
@@ -45,6 +49,8 @@ jobs:
           cache: npm
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
       - run: npm ci
+      # Шаг 52 (OWASP A06): известные уязвимости зависимостей уровня high и выше — красная сборка
+      - run: npm audit --audit-level=high
       - name: Every test file is in the build (Р-89)
         run: node scripts/check-test-inclusion.mjs
       - name: Database — migrations, template, smoke tests of the schema

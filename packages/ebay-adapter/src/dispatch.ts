@@ -137,7 +137,11 @@ export async function dispatchEbay(options: ResolvedOptions, ctx: AdapterCallCon
   sendable = batch.items.filter((w) => charged.includes(w));
   if (sendable.length === 0) return { batchId: batch.batchId, outcomes, attemptsMade: 0 };
 
-  const sent = await call(options, ctx, session, { auth: 'USER', method: 'POST', path: BULK_UPDATE_PATH, body: bulkUpdateBody(sendable), idempotent: false, operation: OPERATION_BULK_UPDATE, preAcquired: true });
+  // Шаг 52 (E-23): пакет одной витрины — её язык; пакет разных витрин — язык первой витрины аккаунта
+  const batchMarketplaces = new Set(sendable.map((w) => w.writeScope.identity.marketplace));
+  const onlyMarketplace = batchMarketplaces.size === 1 ? [...batchMarketplaces][0] : undefined;
+  const sent = await call(options, ctx, session, { auth: 'USER', method: 'POST', path: BULK_UPDATE_PATH, body: bulkUpdateBody(sendable), idempotent: false, operation: OPERATION_BULK_UPDATE, preAcquired: true,
+    ...(onlyMarketplace ? { marketplace: onlyMarketplace } : {}) });
   // Ревью шага 39, находка 14: повтор после 401 — вторая HTTP-попытка той же записи. Запросы записи транспорт не повторяет [EBAY_C02],
   // поэтому попыток больше одной бывает только так; каждая лишняя списывается во второй слой бюджета, как и первая [Р-19, Р-163]
   const httpAttempts = sent.kind === 'REFUSED' ? sent.attempts : sent.result.attempts;

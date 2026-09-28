@@ -203,7 +203,9 @@ export class SimulatedAmazonChannel implements ChannelBehaviour {
       const included = listOf(request.query.includedData);
       if (operation === 'searchListingsItems') {
         const skus = [...new Set([...this.offers.values()].filter((o) => marketplaces.includes(o.marketplace)).map((o) => o.sku))].sort();
-        const size = Math.max(1, Math.min(20, Number(request.query.pageSize ?? 10)));
+        // Шаг 52: страница может быть короче pageSize, а первая — пустой с токеном (параметр paging)
+        const size = Math.min(Math.max(1, Math.min(20, Number(request.query.pageSize ?? 10))), this.params.paging.pageSizeCap ?? 20);
+        if (!request.query.pageToken && this.params.paging.emptyPageFirst) return json(200, { numberOfResults: skus.length, pagination: { nextToken: 'syn-page-0' }, items: [] }, limitHeader);
         const start = request.query.pageToken ? Number(/^syn-page-(\d+)$/.exec(request.query.pageToken)?.[1] ?? Number.NaN) : 0;
         if (!Number.isSafeInteger(start)) return json(400, synError('INVALID_INPUT', 'pageToken is not a token of this model'));
         const page = skus.slice(start, start + size);
@@ -239,7 +241,12 @@ export class SimulatedAmazonChannel implements ChannelBehaviour {
         const v = p.value?.[0] as { fulfillment_channel_code?: string; quantity?: number } | undefined;
         if (!v || v.fulfillment_channel_code !== 'DEFAULT' || !Number.isSafeInteger(v.quantity) || (v.quantity as number) < 0) return json(400, synError('INVALID_INPUT', 'fulfillment_availability needs DEFAULT and a quantity ≥ 0'));
         // A-21: что делает Amazon с DEFAULT по SKU сети Amazon, снимок не говорит — модель не применяет и считает (адаптер не должен слать)
-        if (list[0]!.fulfillmentCode !== null && list[0]!.fulfillmentCode !== 'DEFAULT') { this.stats.fbaQuantityWrites += 1; continue; }
+        if (list[0]!.fulfillmentCode !== null && list[0]!.fulfillmentCode !== 'DEFAULT') {
+          this.stats.fbaQuantityWrites += 1;
+          // Гипотеза варианта A-21: запись DEFAULT переводит листинг в исполнение продавцом
+          if (this.params.fbaDefaultWrite === 'SWITCHES_TO_MERCHANT') for (const o of list) o.fulfillmentCode = 'DEFAULT';
+          continue;
+        }
         // A-01: количество DEFAULT — одно на регион (все витрины SKU) или только витрина запроса
         const targets = this.params.quantityScope === 'REGION' ? [...this.offers.values()].filter((o) => o.sku === sku) : list.filter((o) => o.marketplace === marketplaces[0]);
         if (!neverApplied) for (const t of targets) t.pending.push({ atMs: applyAt, quantity: v.quantity as number });
@@ -267,8 +274,16 @@ export class SimulatedAmazonChannel implements ChannelBehaviour {
     }
     // Модель: «You must provide exactly one of createdAfter and lastUpdatedAfter»
     if (Boolean(q.createdAfter) === Boolean(q.lastUpdatedAfter)) return json(400, synError('INVALID_INPUT', 'exactly one of createdAfter and lastUpdatedAfter'));
-    const size = Number(q.maxResultsPerPage ?? 100);
-    if (!Number.isSafeInteger(size) || size < 1 || size > 100) return json(400, synError('INVALID_INPUT', 'maxResultsPerPage must be 1…100'));
+    const asked = Number(q.maxResultsPerPage ?? 100);
+    if (!Number.isSafeInteger(asked) || asked < 1 || asked > 100) return json(400, synError('INVALID_INPUT', 'maxResultsPerPage must be 1…100'));
+    // Шаг 52: страница может быть короче запрошенной, а первая — пустой с токеном (параметр paging)
+    const size = Math.min(asked, this.params.paging.pageSizeCap ?? asked);
+    if (!q.paginationToken && this.params.paging.emptyPageFirst) {
+      const token = `syn-orders-page-${this.orderPages.size + 1}`;
+      const { paginationToken: _t, ...first } = q;
+      this.orderPages.set(token, { q: first, start: 0 });
+      return json(200, { orders: [], pagination: { nextToken: token } }, headers);
+    }
     const sinceMs = Date.parse(q.createdAfter ?? q.lastUpdatedAfter!);
     const marketplaces = listOf(q.marketplaceIds);
     const fulfilledBy = listOf(q.fulfilledBy);
@@ -289,7 +304,9 @@ export class SimulatedAmazonChannel implements ChannelBehaviour {
       orderItems: o.items.map((i) => ({
         orderItemId: i.orderItemId, quantityOrdered: i.quantity,
         product: { sellerSku: i.sku, asin: this.offersOfSku(i.sku, [o.marketplace])[0]?.asin ?? 'B0SYNUNKNOWN' },
-        ...(included.includes('FULFILLMENT') ? { fulfillment: { quantityFulfilled: i.quantityFulfilled ?? 0, quantityUnfulfilled: i.quantity - (i.quantityFulfilled ?? 0) } } : {}),
+        // A-22: у частично отгруженного заказа канал может не сообщать отгрузку строк (вариант)
+        ...(included.includes('FULFILLMENT') && (o.status !== 'PARTIALLY_SHIPPED' || this.params.partialShipmentReported)
+          ? { fulfillment: { quantityFulfilled: i.quantityFulfilled ?? 0, quantityUnfulfilled: i.quantity - (i.quantityFulfilled ?? 0) } } : {}),
         ...(included.includes('CANCELLATION') && i.cancelledBy ? { cancellation: { cancellationExecution: { cancelledBy: i.cancelledBy } } } : {}),
       })),
     }));

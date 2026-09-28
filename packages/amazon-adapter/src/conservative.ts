@@ -69,7 +69,7 @@ export const AMAZON_CONSERVATIVE_RULES = {
   },
   AMZ_C13_FBA_BY_CHANNEL_CODE: {
     question: 'A-21',
-    behaviour: 'Шаг 51: способ исполнения оффера — по fulfillmentAvailability: код DEFAULT — наш (FBM, MERCHANT); только иной код — Amazon (FBA, CHANNEL); ни одного кода — неизвестно, и оффер считается CHANNEL: количество по нему не пишется (fail-closed). Коды сети Amazon в снимке не перечислены. Количество FBA читается getInventorySummaries (fulfillableQuantity) в предложение обнаружения; в базу и на экраны оно пока не доходит (ревью шага 51, находка 7 — отложено)',
+    behaviour: 'Шаг 51: способ исполнения оффера — по fulfillmentAvailability: код DEFAULT — наш (FBM, MERCHANT); только иной код — Amazon (FBA, CHANNEL); ни одного кода — неизвестно, и оффер считается CHANNEL: количество по нему не пишется (fail-closed). Коды сети Amazon в снимке не перечислены. Количество FBA читается getInventorySummaries (fulfillableQuantity) в предложение обнаружения; шаг 52 — база хранит его наблюдением предложения CHANNEL (0144, 18 месяцев), экран остатков показывает «управляет Amazon», только чтение',
     whenAnswered: 'Если Amazon назовёт коды сети FBA по регионам — неизвестный код станет ошибкой обнаружения, а не молчаливым CHANNEL',
   },
   AMZ_C14_FBA_QUANTITY_NEVER_WRITTEN: {

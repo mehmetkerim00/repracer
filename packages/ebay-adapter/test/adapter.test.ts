@@ -841,3 +841,57 @@ test('E-23: Accept-Language follows the first storefront of the account — en-U
   assert.deepEqual([...await run(['EBAY_US'])], ['en-US']);
   assert.deepEqual([...await run(['EBAY_DE'])], ['de-DE']);
 });
+
+/**
+ * Шаг 52 (Growth Check: «не ломаться, если eBay изменит число элементов на странице»): следующее смещение limit/offset — из `next` или по
+ * числу пришедших записей, а не `offset + limit`: иначе страница короче запрошенной перепрыгивала через записи
+ */
+test('step 52: short pages — the next offset follows next or the records returned, never offset + limit; an empty page without next ends', async () => {
+  const { nextOffsetOf } = await import('../src/listing.ts');
+  assert.equal(nextOffsetOf(0, 2, 10, undefined, 5), 2, 'short page with total: continue after what came');
+  assert.equal(nextOffsetOf(0, 2, 10, 'https://api.ebay.com/sell/fulfillment/v1/order?limit=2&offset=2', 5), 2, 'next names the offset');
+  assert.equal(nextOffsetOf(4, 1, 10, undefined, 5), null, 'the last record reached');
+  assert.equal(nextOffsetOf(0, 10, 10, undefined, undefined), 10, 'no total: a full page continues');
+  assert.equal(nextOffsetOf(0, 3, 10, undefined, undefined), null, 'no total: a short page is the last');
+  assert.equal(nextOffsetOf(6, 0, 10, undefined, 20), null, 'empty page without next: no progress, stop instead of looping');
+  assert.equal(nextOffsetOf(6, 0, 10, 'https://api.ebay.com/x?offset=16', 20), 16, 'empty page with next: follow next');
+
+  // Заказы через адаптер: канал урезает limit 10 до 2, всего 5 заказов — все пять строк ровно по разу
+  const orders = Array.from({ length: 5 }, (_, i) => ({ orderId: `syn-order-${i}`, creationDate: '2026-09-28T08:00:00.000Z',
+    cancelStatus: { cancelState: 'NONE_REQUESTED' }, lineItems: [{ lineItemId: `syn-line-${i}`, sku: 'SYN-S', legacyItemId: '110000000001', quantity: 1, lineItemFulfillmentStatus: 'NOT_STARTED', listingMarketplaceId: 'EBAY_DE' }] }));
+  const w = world((r) => {
+    const offset = Number(r.url.searchParams.get('offset') ?? 0);
+    const page = orders.slice(offset, offset + 2);
+    return { status: 200, body: { total: 5, limit: 2, offset, orders: page } };
+  }, { marketplaces: ['EBAY_DE'] });
+  const seen: string[] = [];
+  let cursor: string | undefined;
+  for (let i = 0; i < 10; i++) {
+    const p = await w.adapter.readOrderLines(ctx, { since: '2026-09-28T00:00:00.000Z', limit: 10, ...(cursor ? { cursor } : {}) });
+    seen.push(...p.items.map((l) => l.externalOrderLineRef));
+    if (!p.nextCursor) break;
+    cursor = p.nextCursor;
+  }
+  assert.deepEqual(seen, orders.map((o) => o.lineItems[0]!.lineItemId), 'every line once, none skipped');
+});
+
+/** Шаг 52 (ревью шага 51, находка 14): у аккаунта EBAY_US и EBAY_DE запись и чтение предложения EBAY_DE идут с de-DE, вызовы уровня аккаунта — с языком первой витрины */
+test('E-23, step 52: Accept-Language of a single-storefront call is the language of that storefront, not of the first storefront of the account', async () => {
+  const w0 = write('41', eur(1499));
+  const w = world((r) => {
+    if (r.url.pathname === '/sell/inventory/v1/bulk_update_price_quantity') return { status: 200, body: { responses: [{ statusCode: 200, offerId: w0.writeScope.identity.externalOfferId }] } };
+    if (r.url.pathname.startsWith('/sell/inventory/v1/offer/')) {
+      return { status: 200, body: { offerId: w0.writeScope.identity.externalOfferId, sku: 'SYN-41', marketplaceId: 'EBAY_DE', format: 'FIXED_PRICE', availableQuantity: 4,
+        pricingSummary: { price: { value: '14.99', currency: 'EUR' } }, listing: { listingId: w0.writeScope.identity.externalListingId, listingStatus: 'ACTIVE' } } };
+    }
+    if (r.url.pathname === '/sell/fulfillment/v1/order') return { status: 200, body: { total: 0, orders: [] } };
+    return { status: 200, body: { price: { value: '14.99', currency: 'EUR' } } };
+  }, { marketplaces: ['EBAY_US', 'EBAY_DE'] });
+  await w.adapter.dispatch(ctx, batchOf([w0]));
+  await w.adapter.readBack(ctx, [{ writeScope: w0.writeScope, fields: ['QUANTITY'] }]);
+  await w.adapter.readOrderLines(ctx, { since: '2026-09-28T00:00:00.000Z', limit: 10 });
+  const lang = (path: string) => w.seen.find((x) => x.url.pathname.startsWith(path))!.headers['accept-language'];
+  assert.equal(lang('/sell/inventory/v1/bulk_update_price_quantity'), 'de-DE', 'a write of an EBAY_DE offer');
+  assert.equal(lang('/sell/inventory/v1/offer/'), 'de-DE', 'the read-back of an EBAY_DE offer');
+  assert.equal(lang('/sell/fulfillment/v1/order'), 'en-US', 'an account-level call: the first storefront');
+});

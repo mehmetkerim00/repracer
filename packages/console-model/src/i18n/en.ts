@@ -522,6 +522,7 @@ export const en = {
         off: 'synchronisation off',
         awaitingAck: 'waiting for your confirmation of the side effect',
         shared: (marketplaces: string) => `one value for: ${marketplaces}`,
+        managedByChannel: (channel: string, marketplace: string, n: number, when: string) => `managed by ${channel} · ${marketplace}: ${n} (${when}) — shown only, we never write it`,
         diverged: (status: string, when: string) => `DIVERGED: the last write ended ${status} (${when}) — the channel shows something else`,
       },
       // Р-153: the traps are named BEFORE the first write, from the channel capability, not discovered afterwards

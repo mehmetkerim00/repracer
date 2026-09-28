@@ -71,7 +71,7 @@
   - DEFAULT — FBM (MERCHANT);
   - только иной код — FBA (CHANNEL);
   - кодов нет — CHANNEL без количества (fail-closed).
-- **Количество FBA** — `getInventorySummaries` (`fulfillableQuantity`, не `totalQuantity` с поставками в пути) в предложение обнаружения. **В базу и на экраны оно пока не доходит** (ревью, находка 7): у `DiscoveredOffer.currentQuantity` нет потребителя — отложено.
+- **Количество FBA** — `getInventorySummaries` (`fulfillableQuantity`, не `totalQuantity` с поставками в пути) в предложение обнаружения. В базу и на экраны оно на шаге 51 не доходило (ревью, находка 7); шаг 52 — наблюдение в базе (0144) и строка на экране остатков ([step52-tails.md](step52-tails.md)).
 - **Запись количества.** Чтение перед записью количества теперь просит и `fulfillmentAvailability`. SKU сети Amazon без DEFAULT или вовсе без кодов (ревью, находка 8) — `PRECONDITION_FAILED` («нужен человек»), PATCH не уходит: запись DEFAULT могла бы перевести листинг в наше исполнение (A-21).
 - **Обратное чтение количества:** сеть Amazon — `PRECONDITION_FAILED`, и сверка блокирует единицу сразу, а не через час неизвестного итога (ревью, находка 6, `planReconciliationTransition`); пусто — «нет данных» (`MERCHANT_QUANTITY_ABSENT`), а не 0, как у eBay.
 

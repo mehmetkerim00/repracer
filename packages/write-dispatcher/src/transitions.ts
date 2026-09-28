@@ -39,10 +39,14 @@ export function retryPolicyFor(base: RetryPolicy, rule: WriteRetryRule | undefin
   return { ...base, maxAttempts: Math.max(1, Math.min(base.maxAttempts, rule.maxAttempts)), retryOn: rule.retryOn };
 }
 
-/** Повторяема ли временная ошибка по правилу канала */
+/**
+ * Повторяема ли временная ошибка по правилу канала. Правило канала говорит об ОТВЕТАХ канала: ошибка без httpStatus (таймаут, обрыв, отказ
+ * нашего бюджета, ошибка ядра до отправки) им не отсекается — ревью шага 51, находка 9: «адаптер не запланировал запись» выбрасывалась как
+ * отказ канала
+ */
 export function retryableByChannel(policy: RetryPolicy, error: ChannelError): boolean {
-  if (!policy.retryOn) return true;
-  return policy.retryOn.some((r) => r.code === error.code && (!r.notSentOnly || error.httpStatus === undefined));
+  if (!policy.retryOn || error.httpStatus === undefined) return true;
+  return policy.retryOn.some((r) => r.code === error.code);
 }
 
 /** Значения по умолчанию — допущение до замеров задержек каналов (Р-8: p95 Kaufland < 2 мин) */

@@ -137,11 +137,17 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
    * не больше двух повторов и только после сбоя инфраструктуры). Адаптер недоступен — общая политика: итог записи важнее,
    * а повтор после такого сбоя снова пройдёт здесь
    */
+  const knownPolicies = new Map<string, RetryPolicy>();
   async function policyOf(tenantId: string, channelAccountId: string): Promise<RetryPolicy> {
     try {
-      return retryPolicyFor(policy, (await deps.adapterFor(tenantId, channelAccountId)).descriptor.writeRetry);
+      const p = retryPolicyFor(policy, (await deps.adapterFor(tenantId, channelAccountId)).descriptor?.writeRetry);
+      knownPolicies.set(channelAccountId, p);
+      return p;
     } catch {
-      return policy;
+      // Ревью шага 51, находка 10: адаптер недоступен при записи итога — правило этого аккаунта, известное раньше; неизвестно — строгое для
+      // любого канала: не больше трёх попыток и повтор только после сбоя инфраструктуры (ревью шага 52, находка 5: `retryOn: []` отбрасывал
+      // и 5xx Kaufland и Amazon)
+      return knownPolicies.get(channelAccountId) ?? { ...policy, maxAttempts: Math.min(3, policy.maxAttempts), retryOn: [{ code: 'CHANNEL_UNAVAILABLE' }] };
     }
   }
 
@@ -266,7 +272,9 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
     const blockedCode = recorded.reason?.params?.code;
     if (recorded.scopeBlocked) await alert(tenantId, 'PRICE_WRITE_SCOPE_BLOCKED', 'CRITICAL', { ...details, reason: recorded.reason?.code ?? 'UNKNOWN', ...(typeof blockedCode === 'string' ? { code: blockedCode } : {}) });
     else if (recorded.status === 'DISCARDED_STALE' || recorded.status === 'BUDGET_EXHAUSTED' || recorded.status === 'NOT_APPLIED') {
-      await alert(tenantId, 'PRICE_WRITE_NOT_SENT', 'CRITICAL', { ...details, status: recorded.status, reason: recorded.reason?.code ?? 'UNKNOWN' });
+      // Шаг 52 (п. 8): исчерпанный бюджет правок ЦЕНЫ — ожидаемое ограничение канала, значение уйдёт после обновления бюджета: WARNING (дайджест).
+      // Количество — CRITICAL (ревью шага 52, находка 3): неотправленное уменьшение остатка — риск перепродажи [инвариант 5]
+      await alert(tenantId, 'PRICE_WRITE_NOT_SENT', recorded.status === 'BUDGET_EXHAUSTED' && write.value.field === 'PRICE' ? 'WARNING' : 'CRITICAL', { ...details, status: recorded.status, reason: recorded.reason?.code ?? 'UNKNOWN' });
     }
   }
 

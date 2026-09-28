@@ -190,10 +190,10 @@ export function ebayRequestChecker(world: World, host: string): (request: Observ
      * Шаг 51 (E-23): язык REST-вызова — язык первой витрины аккаунта (EBAY_DE — de-DE [песочница], EBAY_US — en-US, живьём не проверен).
      * Отсутствие заголовка модель канала отвергает сама (400 25709, как песочница); чужой язык — нарушение стенда, а не ответ канала
      */
+    // Шаг 52: язык вызова одной витрины — её язык, вызова уровня аккаунта — первой; стенд требует язык ОДНОЙ ИЗ витрин аккаунта
     if (request.path.startsWith('/sell/') && h['accept-language']) {
-      const first = world.account.marketplaces[0] as keyof typeof EBAY_MARKETPLACES | undefined;
-      const expected = first && EBAY_MARKETPLACES[first] ? EBAY_MARKETPLACES[first].acceptLanguage : null;
-      if (expected && h['accept-language'] !== expected) v.push(`${where}: Accept-Language ${h['accept-language']} is not the language of the account storefront ${first} (${expected})`);
+      const languages: string[] = world.account.marketplaces.flatMap((m) => { const l: string | undefined = EBAY_MARKETPLACES[m as keyof typeof EBAY_MARKETPLACES]?.acceptLanguage; return l ? [l] : []; });
+      if (languages.length > 0 && !languages.includes(h['accept-language'])) v.push(`${where}: Accept-Language ${h['accept-language']} is not the language of an account storefront (${languages.join(', ')})`);
     }
     for (const s of secrets) {
       if (request.rawUrl.includes(s) || request.rawBody.includes(s) || Object.values(h).includes(s)) v.push(`${where}: secret leaked into the request`);

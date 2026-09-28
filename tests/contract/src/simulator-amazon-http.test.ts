@@ -49,8 +49,10 @@ const confirmOf = (w: ReturnType<typeof priceWrite> | ReturnType<typeof quantity
 const FBM = 'SYN-SKU-FBM-0001';
 const FBA = 'SYN-SKU-FBA-0002';
 const NONE = 'SYN-SKU-NON-0003';
+/** Витрина региона EU вне Release 1.0 (marketplace-ids: France) — только в модели, чтобы вариант A-01 было видно */
+const FR = 'A13V1IB3VIYZZH';
 const offers = [
-  { sku: FBM, asin: 'B0SYN00001', marketplaces: [DE], priceMinor: 1999, quantity: 5 },
+  { sku: FBM, asin: 'B0SYN00001', marketplaces: [DE, FR], priceMinor: 1999, quantity: 5 },
   { sku: FBA, asin: 'B0SYN00002', marketplaces: [DE], priceMinor: 2499, quantity: 12, fulfillmentCode: FBA_CODE },
   { sku: NONE, asin: 'B0SYN00003', marketplaces: [DE], priceMinor: 2999, quantity: 0, fulfillmentCode: null },
 ];
@@ -67,7 +69,10 @@ SCENARIOS.push(scenario('amazon-sim/fba-read-only', 'Модель SP-API: FBM и
     ] }),
     call('fba-quantity', 'dispatch', [batch('b-fba', [quantityWrite('cw-fba', FBA, 30)])], { outcomes: [{ status: 'REJECTED', error: { code: 'PRECONDITION_FAILED' } }] }),
   ],
-  { noAlerts: true, channel: { stats: { fbaQuantityWrites: 0, requests: { patchListingsItem: { $absent: true }, getInventorySummaries: 1 } } } }));
+  { noAlerts: true, channel: { stats: { fbaQuantityWrites: 0, requests: { patchListingsItem: { $absent: true }, getInventorySummaries: 1 } } } },
+  [{ id: 'a21-default-switches-to-merchant', question: 'A-21', params: { fbaDefaultWrite: 'SWITCHES_TO_MERCHANT' },
+    finding: 'если запись DEFAULT перевела бы листинг в наше исполнение — она не уходит: сеть листинга не меняется',
+    expect: { noAlerts: true, channel: { offers: { $contains: [{ sku: FBA, fulfillmentCode: FBA_CODE }] }, stats: { fbaQuantityWrites: 0 } } } }]));
 
 // 2. Запись цены и количества: асинхронное применение (A-06) и область количества (A-01)
 {
@@ -83,8 +88,11 @@ SCENARIOS.push(scenario('amazon-sim/fba-read-only', 'Модель SP-API: FBM и
       wait('apply-delay', 3 * MIN),
       call('confirm-late', 'confirm', [[confirmOf(price), confirmOf(qty)]], [{ status: 'APPLIED' }, { status: 'APPLIED', observation: { value: { quantity: 7 } } }]),
     ],
-    { noAlerts: true, channel: { offers: { $contains: [{ sku: FBM, priceMinor: 1899, quantity: 7, pending: 0 }] }, stats: { accepted: 2, applied: 2 } } },
-    [{ id: 'a06-never-applied', question: 'A-06', params: { acceptedNotAppliedShare: 1 }, finding: 'принятое не применено — подтверждение PENDING, а в окне после — NOT_APPLIED (ядро)',
+    { noAlerts: true, channel: { offers: { $contains: [{ sku: FBM, marketplace: DE, priceMinor: 1899, quantity: 7, pending: 0 }, { sku: FBM, marketplace: FR, quantity: 7 }] }, stats: { accepted: 2, applied: 3 } } },
+    [{ id: 'a01-quantity-per-marketplace', question: 'A-01', params: { quantityScope: 'MARKETPLACE' },
+      finding: 'если количество — на витрину, запись DE не меняет FR; единица записи аккаунт + регион + SKU [Р-194] тогда шире нужного, но не опаснее',
+      expect: { noAlerts: true, channel: { offers: { $contains: [{ sku: FBM, marketplace: DE, quantity: 7 }, { sku: FBM, marketplace: FR, quantity: 5 }] } } } },
+    { id: 'a06-never-applied', question: 'A-06', params: { acceptedNotAppliedShare: 1 }, finding: 'принятое не применено — подтверждение PENDING, а в окне после — NOT_APPLIED (ядро)',
       stepExpect: { 'confirm-late': [{ status: 'PENDING' }, { status: 'PENDING' }] },
       expect: { noAlerts: true, channel: { offers: { $contains: [{ sku: FBM, priceMinor: 1999, quantity: 5 }] }, stats: { acceptedNeverApplied: 2 } } } }]));
 }
@@ -114,7 +122,11 @@ SCENARIOS.push(scenario('amazon-sim/fba-read-only', 'Модель SP-API: FBM и
         { items: [{ externalOrderLineRef: 'syn-oi-4', status: 'CANCELLED' }], nextCursor: { $absent: true } }),
     ],
     { noAlerts: true, channel: { stats: { requests: { searchOrders: 2 } } } },
-    [{ id: 'a20-buyer-without-dataset', question: 'A-20', params: { ordersBuyerWithoutDataset: true }, finding: 'данные покупателя без набора BUYER — белый список адаптера их не пропускает',
+    [{ id: 'a22-partial-not-reported', question: 'A-22', params: { partialShipmentReported: false },
+      finding: 'без quantityFulfilled у строк частично отгруженного заказа отгруженная строка остаётся OPEN: резервация держится дольше, перепродажи нет',
+      stepExpect: { 'page-1': { items: [expected[0], expected[1], { externalOrderLineRef: 'syn-oi-3', status: 'OPEN' }], nextCursor: 'syn-orders-page-1' } },
+      expect: { noAlerts: true, channel: { stats: { requests: { searchOrders: 2 } } } } },
+    { id: 'a20-buyer-without-dataset', question: 'A-20', params: { ordersBuyerWithoutDataset: true }, finding: 'данные покупателя без набора BUYER — белый список адаптера их не пропускает',
       expect: { noAlerts: true, channel: { stats: { requests: { searchOrders: 2 } } } } }]));
 }
 
@@ -162,7 +174,10 @@ test('every open Amazon question of the HTTP model is exercised by a variant and
   const capabilities = readFileSync(fileURLToPath(new URL('../../../docs/channel-capabilities.md', import.meta.url)), 'utf8');
   for (const q of ['A-01', 'A-06', 'A-20', 'A-21', 'A-22', 'A-23']) assert.ok(capabilities.includes(`| ${q} |`), `${q} is not a question in channel-capabilities.md`);
   const exercised = new Set(SCENARIOS.flatMap((s) => (s.variants ?? []).map((v) => v.question)));
-  for (const q of ['A-06', 'A-20']) assert.ok(exercised.has(q), `${q} has no variant`);
+  // Шаг 52 (ревью шага 51, находка 12): вариант есть у каждого открытого вопроса модели; A-23 — только лимит бюджета адаптера (тест бюджета ниже)
+  const asked = new Set(Object.values(AMAZON_PARAMETERS).map((p) => p.question).filter((q): q is string => q !== null));
+  for (const q of ['A-01', 'A-06', 'A-20', 'A-21', 'A-22']) assert.ok(exercised.has(q), `${q} has no variant`);
+  for (const q of ['A-20', 'A-21', 'A-22']) assert.ok(asked.has(q), `${q} is not a parameter of the model`);
   assert.equal(AMAZON_PARAMETERS.ordersBuyerWithoutDataset.question, 'A-20');
 });
 
@@ -179,4 +194,49 @@ test('searchOrders budget: the undocumented application limit is not the pair li
   }
   const refused = budget.tryAcquire('A1SYNSELLERA', 'searchOrders', t0);
   assert.equal(refused.ok === false && refused.level, 'PAIR', 'the 21st call of one seller is refused by the pair limit');
+});
+
+/**
+ * Шаг 52 (страница короче запрошенной): обход через модель — страницы по 2 при запрошенных 20 и 10 и первая пустая с токеном. Каждое
+ * предложение и каждая строка заказа — ровно по разу, обход конечен, нарушений стенда нет
+ */
+test('step 52: short pages and an empty page with a token — discovery and order lines read everything once and end', async () => {
+  const { channelFetch, amazonRequestChecker } = await import('./harness/channel.ts');
+  const { VirtualClock, worldDependencies } = await import('./harness/world.ts');
+  const { SimulatedAmazonChannel } = await import('./simulator/amazon-channel.ts');
+  const { neverWrittenAttributes } = await import('@repracer/channel-port');
+  const many = Array.from({ length: 7 }, (_, i) => ({ sku: `SYN-SKU-PG-${i}`, asin: `B0SYNPG00${i}`, marketplaces: [DE], priceMinor: 1000 + i, quantity: 1 }));
+  const orders: SimAmazonOrderSpec[] = Array.from({ length: 5 }, (_, i) => ({ orderId: `901-00002${i}0-0000001`, marketplace: DE, fulfilledBy: 'MERCHANT' as const, status: 'UNSHIPPED' as const,
+    createdOffsetMs: -3_600_000, updatedOffsetMs: -3_600_000 + i, items: [{ orderItemId: `syn-pg-oi-${i}`, sku: many[i]!.sku, quantity: 1 }] }));
+  for (const paging of [{ pageSizeCap: null, emptyPageFirst: false }, { pageSizeCap: 2, emptyPageFirst: true }]) {
+    const w = world({ seed: 52, offers: many, orders, params: { paging } });
+    const clock = new VirtualClock(w.clock);
+    const violations: string[] = [];
+    const model = new SimulatedAmazonChannel(w.channelModel as AmazonChannelModelSpec, w.clock, ACCESS_TOKEN);
+    const adapter = amazonUnderTest({ deps: worldDependencies(w, clock, { logs: [], alerts: [] }), world: w, clock,
+      fetch: channelFetch(model, amazonRequestChecker(w, clock, neverWrittenAttributes('AMAZON')), clock, violations, []) });
+    const ctx = { tenantId: w.tenantId, channelAccountId: w.channelAccountId, correlationId: 'step52-paging', deadline: new Date(clock.nowMs() + 600_000).toISOString() } as never;
+    const skus: string[] = [];
+    let cursor: string | undefined;
+    let pages = 0;
+    for (; pages < 20; pages++) {
+      const p = await adapter.discoverOffers(ctx, { limit: 20, ...(cursor ? { cursor } : {}) });
+      skus.push(...p.items.map((o) => o.identity.externalSku!));
+      if (!p.nextCursor) break;
+      cursor = p.nextCursor;
+      clock.advance(1_000);
+    }
+    assert.deepEqual(skus.sort(), many.map((o) => o.sku).sort(), `${JSON.stringify(paging)}: every offer once`);
+    assert.ok(pages < 20, 'discovery ended');
+    const lines: string[] = [];
+    cursor = undefined;
+    for (pages = 0; pages < 20; pages++) {
+      const p = await adapter.readOrderLines(ctx, { since: new Date(clock.nowMs() - 86_400_000).toISOString() as never, limit: 10, ...(cursor ? { cursor } : {}) });
+      lines.push(...p.items.map((l) => l.externalOrderLineRef));
+      if (!p.nextCursor) break;
+      cursor = p.nextCursor;
+    }
+    assert.deepEqual(lines.sort(), orders.map((o) => o.items[0]!.orderItemId).sort(), `${JSON.stringify(paging)}: every order line once`);
+    assert.deepEqual(violations, []);
+  }
 });

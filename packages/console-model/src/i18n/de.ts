@@ -524,6 +524,7 @@ export const de: Messages = {
         off: 'Abgleich aus',
         awaitingAck: 'wartet auf Ihre Bestätigung der Nebenwirkung',
         shared: (marketplaces: string) => `ein Wert für: ${marketplaces}`,
+        managedByChannel: (channel: string, marketplace: string, n: number, when: string) => `verwaltet ${channel} · ${marketplace}: ${n} (${when}) — nur Anzeige, wir schreiben es nie`,
         diverged: (status: string, when: string) => `ABWEICHUNG: der letzte Schreibvorgang endete mit ${status} (${when}) — der Kanal zeigt etwas anderes`,
       },
       // Р-153: die Fallen werden VOR dem ersten Schreiben aus der Kanalfähigkeit benannt, nicht danach entdeckt

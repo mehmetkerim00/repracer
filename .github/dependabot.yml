@@ -1,0 +1,11 @@
+# Шаг 52 (OWASP A06): уведомления об обновлениях зависимостей — npm и действия GitHub (образы развёртываний закрепляются по digest отдельным шагом)
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

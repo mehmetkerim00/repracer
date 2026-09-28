@@ -31,6 +31,8 @@
 		Content-Security-Policy "default-src 'none'; style-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 		X-Content-Type-Options nosniff
 		Referrer-Policy no-referrer
+		# Шаг 52 (OWASP A02, A05): браузер ходит на домен только по https — TLS кончается здесь
+		Strict-Transport-Security "max-age=31536000"
 		-Server
 	}
 	# Находка 4 ревью шага 46: немецкая страница коммерческого сайта требует Impressum и сведений о защите данных
@@ -58,6 +60,11 @@
 (console) {
 	encode zstd gzip
 	import access_log
+	# Шаг 52 (OWASP A02, A05): https — у прокси (TLS кончается здесь); остальные заголовки безопасности ставит сама консоль
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
 	reverse_proxy console:4319 {
 		# Работоспособность процесса прокси не спрашивает: её спрашивает docker (healthcheck развёртывания консоли)
 		header_up X-Forwarded-Proto {scheme}

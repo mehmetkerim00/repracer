@@ -90,12 +90,34 @@ async function offersOfSku(options: ResolvedOptions, ctx: AdapterCallContext, se
 /** Витрины eBay аккаунта в порядке аккаунта — порядок фаз Trading в курсоре */
 const ebayMarketplacesOf = (session: Session): string[] => session.account.marketplaces.filter((m) => marketplaceInfo(m));
 
+/**
+ * Шаг 52 (Growth Check: «не ломаться, если eBay изменит число элементов на странице»): следующее смещение страниц limit/offset.
+ * Прежде бралось `offset + limit`: страница КОРОЧЕ запрошенной (канал урезал limit) при `total` больше — перепрыгивала через
+ * `limit − пришедшее` записей, и они терялись. Теперь:
+ * - есть `next` (адрес следующей страницы) со смещением впереди текущего — смещение из него;
+ * - иначе пришли записи — `offset + пришедшее`, пока не достигнут `total` (без `total` — пока страница полная);
+ * - пустая страница без `next` — конец: продвинуться нечем, повтор того же смещения зациклил бы обход.
+ */
+export function nextOffsetOf(offset: number, returned: number, limit: number, next: unknown, total: unknown): number | null {
+  if (typeof next === 'string' && next.length > 0) {
+    const m = /[?&]offset=(\d{1,9})(?:&|$)/.exec(next);
+    const fromNext = m ? Number(m[1]) : null;
+    if (fromNext !== null && fromNext > offset) return fromNext;
+    if (returned > 0) return offset + returned;
+    return null;
+  }
+  if (returned === 0) return null;
+  const after = offset + returned;
+  if (typeof total === 'number') return after < total ? after : null;
+  return returned >= limit ? after : null;
+}
+
 async function discoverInventory(options: ResolvedOptions, ctx: AdapterCallContext, session: Session, offset: number, limit: number, carried: Known): Promise<Page<DiscoveredOffer>> {
   const known: Set<string> | null = carried === null ? null : new Set(carried);
   const itemsRead = await call(options, ctx, session, { auth: 'USER', method: 'GET', path: `${INVENTORY_PATH}/inventory_item`, query: { limit, offset }, operation: 'getInventoryItems' });
   if (itemsRead.kind === 'REFUSED') throw new ChannelCallError(itemsRead.error);
   if (!itemsRead.result.ok) throw new ChannelCallError(classifyHttpFailure(itemsRead.result.status, itemsRead.result.body, 'BATCH', nowMs(options)));
-  const body = (itemsRead.result.body ?? {}) as { total?: number; inventoryItems?: InventoryItem[] };
+  const body = (itemsRead.result.body ?? {}) as { total?: number; next?: unknown; inventoryItems?: InventoryItem[] };
   const items: DiscoveredOffer[] = [];
   for (const item of body.inventoryItems ?? []) {
     if (typeof item.sku !== 'string' || item.sku.length === 0) continue;
@@ -121,8 +143,8 @@ async function discoverInventory(options: ResolvedOptions, ctx: AdapterCallConte
       });
     }
   }
-  const next = offset + limit;
-  if (typeof body.total === 'number' && next < body.total) return { items, nextCursor: `${next}${knownTail(known)}` };
+  const next = nextOffsetOf(offset, (body.inventoryItems ?? []).length, limit, body.next, body.total);
+  if (next !== null) return { items, nextCursor: `${next}${knownTail(known)}` };
   // Фаза Inventory окончена — дальше старые листинги и аукционы Trading API, начиная с первой витрины аккаунта
   return { items, ...(ebayMarketplacesOf(session).length > 0 ? { nextCursor: `trd:0:1${knownTail(known)}` } : {}) };
 }
@@ -278,10 +300,8 @@ export async function readOrderLinesEbay(options: ResolvedOptions, ctx: AdapterC
   // Только коды и числа — ни номера заказа, ни данных покупателя (Р-4)
   logConservative(options.deps.logger, ctx, 'EBAY_C17_ORDER_FIELDS_UNVERIFIED', { lines: items.length, skipped: Object.values(skipped).reduce((a, b) => a + b, 0),
     ...Object.fromEntries(Object.entries(skipped).map(([k, v]) => [`skipped_${k}`, v])) });
-  const total = typeof body.total === 'number' ? body.total : null;
-  const hasNext = typeof body.next === 'string' && body.next.length > 0;
-  const nextOffset = offset + limit;
-  return { items, ...(hasNext || (total !== null && nextOffset < total) ? { nextCursor: String(nextOffset) } : {}) };
+  const next = nextOffsetOf(offset, Array.isArray(body.orders) ? body.orders.length : 0, limit, body.next, body.total);
+  return { items, ...(next !== null ? { nextCursor: String(next) } : {}) };
 }
 
 const UNSUPPORTED_WHY = {

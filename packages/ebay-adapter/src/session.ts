@@ -175,6 +175,8 @@ export interface CallSpec {
   /** Trading API: имя вызова и сайт — токен пользователя идёт в X-EBAY-API-IAF-TOKEN */
   trading?: { callName: string; siteId: number };
   operation: string;
+  /** Шаг 52 (E-23): витрина вызова, если она одна и известна — её язык в Accept-Language; иначе язык первой витрины аккаунта */
+  marketplace?: string;
   /** Срок и бюджет запросов уже проверены вызывающим (запись: до списания попытки правки листинга) */
   preAcquired?: boolean;
   /**
@@ -215,8 +217,8 @@ export async function call(options: ResolvedOptions, ctx: AdapterCallContext, se
         'content-type': 'text/xml', 'x-ebay-api-call-name': spec.trading.callName, 'x-ebay-api-siteid': String(spec.trading.siteId),
         'x-ebay-api-compatibility-level': TRADING_COMPATIBILITY_LEVEL, 'x-ebay-api-iaf-token': token.token,
       }
-      // Шаг 50: без Accept-Language живая песочница отвергает GET inventory_item (400 25709); язык — по первой витрине аккаунта
-      : { accept: 'application/json', 'accept-language': acceptLanguageOf(session), authorization: `Bearer ${token.token}`, ...(body === undefined ? {} : { 'content-type': 'application/json' }) };
+      // Шаг 50: без Accept-Language живая песочница отвергает GET inventory_item (400 25709); язык — витрины вызова или первой витрины аккаунта
+      : { accept: 'application/json', 'accept-language': acceptLanguageOf(session, spec.marketplace), authorization: `Bearer ${token.token}`, ...(body === undefined ? {} : { 'content-type': 'application/json' }) };
     const result = await send({
       fetch: options.fetch ?? fetch, sleep: options.sleep ?? ((ms) => new Promise<void>((r) => setTimeout(r, ms))),
       timeoutMs: options.timeoutMs ?? 30_000, retry: { ...DEFAULT_READ_RETRY, ...options.readRetry },
@@ -231,8 +233,12 @@ export async function call(options: ResolvedOptions, ctx: AdapterCallContext, se
   }
 }
 
-/** Шаг 50 (E-23): язык REST-вызовов — по первой витрине eBay аккаунта; витрина вне справочника — язык EBAY_DE */
-function acceptLanguageOf(session: Session): string {
+/**
+ * Шаг 50 (E-23): язык REST-вызовов. Шаг 52 (ревью шага 51, находка 14): у вызова одной витрины (запись, чтение предложения) — язык ЭТОЙ витрины;
+ * у вызовов уровня аккаунта (страницы товаров, заказы) — первой витрины аккаунта; витрина вне справочника — язык EBAY_DE
+ */
+function acceptLanguageOf(session: Session, marketplace?: string): string {
+  if (marketplace && marketplaceInfo(marketplace)) return marketplaceInfo(marketplace)!.acceptLanguage;
   const first = session.account.marketplaces.find((m) => marketplaceInfo(m));
   return first ? marketplaceInfo(first)!.acceptLanguage : EBAY_MARKETPLACES.EBAY_DE.acceptLanguage;
 }
