@@ -487,6 +487,6 @@ test('Р-189 end to end: a refused probe moves the account to one SKU per call a
   assert.equal(accepted.w.account.ebayBatchMode, 'MULTI');
   assert.deepEqual(accepted.modes.ebayBatchRefusals, []);
   assert.deepEqual(accepted.sweeps, [3], 'one sweep: probe of 2 SKUs + one single');
-  assert.equal(accepted.model.stats.requests['POST /sell/inventory/v1/bulk_update_price_quantity'] - accepted.nextRequests, 2);
+  assert.equal((accepted.model.stats.requests['POST /sell/inventory/v1/bulk_update_price_quantity'] ?? 0) - accepted.nextRequests, 2);
   assert.equal(accepted.nextRequests, 1, 'MULTI: the next three versions went in one call');
 });
