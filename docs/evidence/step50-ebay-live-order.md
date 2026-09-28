@@ -39,3 +39,22 @@
 
 Чтобы довести проверку до резервации, нужен ОПЛАЧЕННЫЙ заказ. Например, покупатель с адресом доставки в стране витрины
 (DE для EBAY_DE), если касса песочницы её пропускает.
+
+## E-09: отзыв авторизации продавцом — не проверено живьём
+
+Владелец искал, где тестовый продавец песочницы отзывает доступ приложения. В My eBay продавца нет раздела Account settings /
+Third-party app access, прямой адрес настроек аккаунта песочницы не работает. **В песочнице отзыв продавцом невозможен** —
+это ограничение её интерфейса.
+
+Снимок документации (`vendor/ebay/2026-09-28/authorization.html`, раздел о токенах Auth'n'Auth):
+
+> «EBay users can revoke tokens by going to the Third-party app access page in My eBay. When a user revokes a token for an
+> application, that token expires immediately. Any API calls made with the expired token fail with an error (error code
+> 16110).»
+
+- Код 16110 и страница «Third-party app access» названы для токенов Auth'n'Auth. Каким ответом отвечает OAuth-обмен
+  refresh-токена после отзыва, снимок не говорит. Известно только, что refresh-токен «can be unexpectedly revoked … the user
+  can … revoke their consent».
+- **Итог:** гипотеза «`invalid_grant` при обмене refresh-токена означает отзыв» остаётся гипотезой. Обработка `REVOKED`
+  шага 43 (перевод аккаунта, CRITICAL владельцу, массовый `invalid_grant` — подозрение на нашу поломку) не меняется.
+- **Как закрыть:** на первом боевом аккаунте пилота — отзыв продавцом и один обмен refresh-токена с записью ответа.
