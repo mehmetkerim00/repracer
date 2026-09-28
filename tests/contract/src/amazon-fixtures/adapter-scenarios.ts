@@ -1,6 +1,6 @@
 import type { Exchange, Scenario, Step } from '../harness/scenario.ts';
 import { SCENARIO_FORMAT } from '../harness/scenario.ts';
-import { accepted, amazonWorld, anyOfferChanged, competitiveSummaryExchange, DE, delivery, patchPriceExchange, preReadExchange, pricingHealthNotification, readBackExchange, SELLER, tokenExchange, US } from './build.ts';
+import { accepted, amazonWorld, anyOfferChanged, competitiveSummaryExchange, DE, delivery, fbaSummariesExchange, patchPriceExchange, preReadExchange, pricingHealthNotification, readBackExchange, searchListingsExchange, searchOrdersExchange, SELLER, tokenExchange, US } from './build.ts';
 
 /** Сценарии адаптера Amazon: обязательные сценарии Kaufland в смысле Amazon и асинхронное применение (шаг 22). Данные синтетические */
 
@@ -24,10 +24,10 @@ function priceWrite(id: string, version: number, minor: number, marketplace = DE
   };
 }
 
-function quantityWrite(id: string, version: number, quantity: number) {
+function quantityWrite(id: string, version: number, quantity: number, skuValue = SKU) {
   return {
     channelWriteId: id, version, idempotencyKey: `${id}:${version}`, attemptNo: 1,
-    writeScope: { writeScopeId: 'ws-amz-qty-EU-7001', field: 'QUANTITY', scopeKey: `amazon|acct-1|EU|${SKU}`, identity: { region: 'EU', marketplace: DE, externalSku: SKU } },
+    writeScope: { writeScopeId: skuValue === SKU ? 'ws-amz-qty-EU-7001' : `ws-amz-qty-EU-${skuValue}`, field: 'QUANTITY', scopeKey: `amazon|acct-1|EU|${skuValue}`, identity: { region: 'EU', marketplace: DE, externalSku: skuValue } },
     value: { field: 'QUANTITY', quantity },
   };
 }
@@ -231,7 +231,7 @@ export function buildAdapterScenarios(): Array<{ file: string; scenario: Scenari
       call('dispatch', 'dispatch', [batch('amz:q1', [quantityWrite('cw-q1', 1, 7)])], { outcomes: [{ channelWriteId: 'cw-q1', status: 'ACCEPTED', appliedImmediately: false }] }),
       call('readback', 'readBack', [[{ writeScope: quantityWrite('cw-q1', 1, 7).writeScope, fields: ['QUANTITY'] }]], { observations: [{ field: 'QUANTITY', value: { quantity: 7 }, identity: { region: 'EU', externalSku: SKU } }], failures: [] }),
     ],
-    [tokenExchange(), preReadExchange('read', SKU, [{ priceMinor: 1850, quantity: 3 }]),
+    [tokenExchange(), preReadExchange('read', SKU, [{ priceMinor: 1850, quantity: 3 }], { forQuantity: true }),
       { id: 'patch-quantity', request: { method: 'PATCH', path: `/listings/2021-08-01/items/${SELLER}/${SKU}`, query: { marketplaceIds: DE, includedData: 'issues' },
         body: { productType: 'SYNTHETIC_PRODUCT_TYPE', patches: [{ op: 'merge', path: '/attributes/fulfillment_availability', value: [{ fulfillment_channel_code: 'DEFAULT', quantity: 7 }] }] } },
         // Заголовок модели: лимит пары аккаунт–приложение для операции [AMZ_C10]
@@ -240,8 +240,8 @@ export function buildAdapterScenarios(): Array<{ file: string; scenario: Scenari
     { noAlerts: true, logs: [{ code: 'AMZ_C10_RATE_LIMIT_HEADER', count: 1, details: { operation: 'patchListingsItem', rate: 5 } }] }));
 
   add('competitive-summary-and-orders.json', scenario('amazon/port/competitive-summary',
-    'Р-121: getCompetitiveSummary — снимок только для сверки; строки заказов — отказ',
-    'Шаг 24. Сверка потерь ANY_OFFER_CHANGED [AMZ_C11]: пакет до 20 ASIN, lowestPricedOffers New/Consumer, снимок источника AMAZON_COMPETITIVE_SUMMARY без победителя Buy Box, своё предложение — по SellerId. Ошибка товара в пакете — отказ этого товара; состояние не new — UNSUPPORTED без запроса. Второй пакет сразу — RATE_LIMITED ограничителем (0.033 rps, burst 1), без обращения к Amazon. Orders API нет в снимке, данные с PII [Р-4].',
+    'Р-121: getCompetitiveSummary — снимок только для сверки',
+    'Шаг 24. Сверка потерь ANY_OFFER_CHANGED [AMZ_C11]: пакет до 20 ASIN, lowestPricedOffers New/Consumer, снимок источника AMAZON_COMPETITIVE_SUMMARY без победителя Buy Box, своё предложение — по SellerId. Ошибка товара в пакете — отказ этого товара; состояние не new — UNSUPPORTED без запроса. Второй пакет сразу — RATE_LIMITED ограничителем (0.033 rps, burst 1), без обращения к Amazon. Строки заказов — сценарий orders-merchant-whitelist (шаг 51).',
     ['port', 'r-121'],
     [
       call('competitors', 'readCompetitors', [[
@@ -261,7 +261,6 @@ export function buildAdapterScenarios(): Array<{ file: string; scenario: Scenari
       }),
       call('throttled', 'readCompetitors', [[{ marketplace: DE, channelProductRef: 'B000007001', condition: 'new' }]],
         { snapshots: [], failures: [{ error: { code: 'RATE_LIMITED', retryAt: { $isoInstant: true } } }] }),
-      call('orders', 'readOrderLines', [{ since: { $clockIso: -86_400_000 }, limit: 10 }], undefined, { expectThrows: { code: 'UNSUPPORTED' } }),
     ],
     [
       tokenExchange(),
@@ -271,6 +270,90 @@ export function buildAdapterScenarios(): Array<{ file: string; scenario: Scenari
       ]),
     ],
     { noAlerts: true, logs: [{ code: 'AMZ_C07_COMPETITOR_PULL_UNAVAILABLE', count: 2 }, { code: 'AMZ_C11_COMPETITIVE_SUMMARY_RECONCILIATION', count: 2 }, { code: 'AMZ_C01_TWO_LEVEL_BUDGET', count: 1 }] }, amazonWorld(), PRICING_SOURCES));
+
+  /**
+   * Шаг 51 [AMZ_C12, A-20]: строки заказов — searchOrders по времени изменения, только заказы продавца, без данных покупателя. Ответ синтетический по
+   * модели orders_2026-01-01 (снимок 2026-09-29): статусы из перечня FulfillmentStatus, отмена строки — набор CANCELLATION, отгрузка строки — FULFILLMENT
+   */
+  const since = { $clockIso: -86_400_000 };
+  const item = (id: string, skuValue: string, qty: number, extra: Record<string, unknown> = {}) => ({ orderItemId: id, quantityOrdered: qty, product: { asin: 'B000007001', sellerSku: skuValue, title: 'Synthetic item' }, ...extra });
+  const order = (id: string, status: string, items: unknown[], extra: Record<string, unknown> = {}) => ({
+    orderId: id, createdTime: '2026-09-27T08:00:00Z', lastUpdatedTime: '2026-09-28T09:00:00Z', salesChannel: { channelName: 'AMAZON', marketplaceId: DE, marketplaceName: 'Amazon.de' },
+    fulfillment: { fulfillmentStatus: status, fulfilledBy: 'MERCHANT' }, orderItems: items, ...extra,
+  });
+  add('orders-merchant-whitelist.json', scenario('amazon/orders/merchant-whitelist',
+    'Шаг 51: строки заказов — searchOrders по времени изменения, только FBM, белый список без данных покупателя',
+    'Запрос: lastUpdatedAfter, fulfilledBy=MERCHANT (заказы FBA исполняет Amazon из своего остатка — наш пул они не трогают, Р-6), includedData=FULFILLMENT,CANCELLATION без BUYER и RECIPIENT [Р-4]. Статус строки: отменённый заказ и исполненная отмена строки — CANCELLED; заказ SHIPPED или строка отгружена целиком — SHIPPED; PARTIALLY_SHIPPED с неполной отгрузкой строки — OPEN (резервация держится целиком); UNFULFILLABLE, заказ вне Amazon и чужая витрина — пропуск с числом в журнале. Лишнее поле ответа (синтетический покупатель) до строки не доходит. Вторая страница — по paginationToken.',
+    ['orders', 'conservative:AMZ_C12_ORDERS_MERCHANT_WHITELIST'],
+    [
+      call('orders-page-1', 'readOrderLines', [{ since, limit: 10 }], { nextCursor: 'syn-orders-page-2', items: [
+        { externalOrderRef: '901-0000001-0000001', externalOrderLineRef: 'syn-item-11', quantity: 2, status: 'OPEN', orderedAt: '2026-09-27T08:00:00.000Z', identity: { region: 'EU', marketplace: DE, externalSku: SKU, channelProductRef: 'B000007001' } },
+        { externalOrderLineRef: 'syn-item-12', quantity: 1, status: 'CANCELLED', identity: { externalSku: 'SYN-SKU-7002' } },
+        { externalOrderRef: '901-0000002-0000002', externalOrderLineRef: 'syn-item-21', status: 'SHIPPED' },
+        { externalOrderRef: '901-0000003-0000003', externalOrderLineRef: 'syn-item-31', quantity: 3, status: 'OPEN' },
+        { externalOrderLineRef: 'syn-item-32', status: 'SHIPPED' },
+        { externalOrderRef: '901-0000007-0000007', externalOrderLineRef: 'syn-item-71', status: 'CANCELLED' },
+      ] }),
+      call('orders-page-2', 'readOrderLines', [{ since, limit: 10, cursor: 'syn-orders-page-2' }], { items: [{ externalOrderRef: '901-0000008-0000008', status: 'OPEN' }] }),
+    ],
+    [
+      tokenExchange(),
+      searchOrdersExchange('search-orders-1', { $isoInstant: true }, [
+        order('901-0000001-0000001', 'UNSHIPPED', [item('syn-item-11', SKU, 2), item('syn-item-12', 'SYN-SKU-7002', 1, { cancellation: { cancellationExecution: { cancelledBy: 'MERCHANT' } } })],
+          { buyer: { buyerCompanyName: 'syn-not-requested-buyer-field' } }),
+        order('901-0000002-0000002', 'SHIPPED', [item('syn-item-21', SKU, 1)]),
+        order('901-0000003-0000003', 'PARTIALLY_SHIPPED', [item('syn-item-31', SKU, 3, { fulfillment: { quantityFulfilled: 1, quantityUnfulfilled: 2 } }),
+          item('syn-item-32', 'SYN-SKU-7002', 1, { fulfillment: { quantityFulfilled: 1, quantityUnfulfilled: 0 } })]),
+        order('901-0000004-0000004', 'UNFULFILLABLE', [item('syn-item-41', SKU, 1)]),
+        order('901-0000005-0000005', 'UNSHIPPED', [item('syn-item-51', SKU, 1)], { salesChannel: { channelName: 'NON_AMAZON' } }),
+        order('901-0000006-0000006', 'UNSHIPPED', [item('syn-item-61', SKU, 1)], { salesChannel: { channelName: 'AMAZON', marketplaceId: US } }),
+        order('901-0000007-0000007', 'CANCELLED', [item('syn-item-71', SKU, 1)]),
+      ], { nextToken: 'syn-orders-page-2' }),
+      searchOrdersExchange('search-orders-2', { $isoInstant: true }, [order('901-0000008-0000008', 'PENDING', [item('syn-item-81', SKU, 1)])], { paginationToken: 'syn-orders-page-2' }),
+    ],
+    { noAlerts: true, logs: [{ code: 'AMZ_C12_ORDERS_MERCHANT_WHITELIST', count: 2 },
+      { code: 'AMZ_C12_ORDERS_MERCHANT_WHITELIST', details: { lines: 6, skipped: 3, skipped_fulfillmentStatus_UNFULFILLABLE: 1, skipped_salesChannel: 1, skipped_marketplace: 1 } }] },
+    amazonWorld(), [...SOURCES, 'vendor/amazon/sp-api-models/2026-09-29/models/orders-api-model/orders_2026-01-01.json']));
+
+  /**
+   * Шаг 51 [Р-6, AMZ_C13, AMZ_C14]: FBA читается, но не пишется. Код сети Amazon синтетический (коды снимок не перечисляет, A-21)
+   */
+  const FBM = 'SYN-SKU-FBM-7101';
+  const FBA = 'SYN-SKU-FBA-7102';
+  const NONE = 'SYN-SKU-NON-7103';
+  const AFN_CODE = [{ fulfillmentChannelCode: 'SYN_AMAZON_NETWORK_CODE', quantity: 12 }];
+  add('fba-read-only.json', scenario('amazon/fba/read-only',
+    'Шаг 51: FBA — по коду сети исполнения; количество FBA читается getInventorySummaries и никогда не пишется',
+    'Обнаружение: DEFAULT — FBM (MERCHANT, количество — наше); только иной код — FBA (CHANNEL, количество — fulfillableQuantity из getInventorySummaries, только для показа); кодов нет — неизвестно, CHANNEL без количества (fail-closed: количество не пишется). Запись количества по SKU, который оказался в сети Amazon, не уходит: чтение перед записью видит сеть без DEFAULT — PRECONDITION_FAILED, PATCH нет. Обратное чтение количества: сеть Amazon — PRECONDITION_FAILED, пусто — «нет данных» (UNKNOWN), а не 0.',
+    ['quantity', 'fba', 'conservative:AMZ_C13_FBA_BY_CHANNEL_CODE', 'conservative:AMZ_C14_FBA_QUANTITY_NEVER_WRITTEN'],
+    [
+      call('discover', 'discoverOffers', [{ limit: 20 }], { items: [
+        { identity: { externalSku: FBM }, fulfillment: 'MERCHANT', currentQuantity: 5 },
+        { identity: { externalSku: FBA }, fulfillment: 'CHANNEL', currentQuantity: 12 },
+        { identity: { externalSku: NONE }, fulfillment: 'CHANNEL', currentQuantity: { $absent: true } },
+      ] }),
+      call('fba-quantity-write', 'dispatch', [batch('amz:qfba', [quantityWrite('cw-qfba', 1, 30, FBA)])],
+        { outcomes: [{ channelWriteId: 'cw-qfba', status: 'REJECTED', error: { code: 'PRECONDITION_FAILED', class: 'REQUIRES_HUMAN' } }] }),
+      call('readback-fba', 'readBack', [[{ writeScope: quantityWrite('cw-r1', 1, 30, FBA).writeScope, fields: ['QUANTITY'] }]],
+        { observations: [], failures: [{ error: { code: 'PRECONDITION_FAILED' } }] }),
+      call('readback-none', 'readBack', [[{ writeScope: quantityWrite('cw-r2', 1, 30, NONE).writeScope, fields: ['QUANTITY'] }]],
+        { observations: [], failures: [{ error: { code: 'UNKNOWN', channelCode: 'MERCHANT_QUANTITY_ABSENT' } }] }),
+    ],
+    [
+      tokenExchange(),
+      searchListingsExchange('search', [
+        { sku: FBM, offers: [{ priceMinor: 1850, quantity: 5 }], fulfillment: [{ fulfillmentChannelCode: 'DEFAULT', quantity: 5 }] },
+        { sku: FBA, offers: [{ priceMinor: 1950 }], fulfillment: AFN_CODE },
+        { sku: NONE, offers: [{ priceMinor: 2050 }] },
+      ]),
+      fbaSummariesExchange('fba-summaries', DE, [FBA], [{ sku: FBA, fulfillable: 12, total: 15 }]),
+      preReadExchange('pre-read-fba', FBA, [{ priceMinor: 1950 }], { forQuantity: true, fulfillment: AFN_CODE }),
+      readBackExchange('readback-fba', FBA, [{ priceMinor: 1950 }], AFN_CODE),
+      readBackExchange('readback-none', NONE, [{ priceMinor: 2050 }], []),
+    ],
+    { noAlerts: true, logs: [{ code: 'AMZ_C13_FBA_BY_CHANNEL_CODE', count: 1, details: { fba: 1, unknown: 1, fbaQuantitiesRead: 1 } },
+      { code: 'AMZ_C14_FBA_QUANTITY_NEVER_WRITTEN', count: 2 }] },
+    amazonWorld(), [...SOURCES, 'vendor/amazon/sp-api-models/2026-09-29/models/fba-inventory-api-model/fbaInventory.json']));
 
   add('tenant-mismatch.json', scenario('amazon/port/tenant-mismatch',
     'Р-31: тенант сообщения не владеет аккаунтом — отказ до обращения к Amazon',

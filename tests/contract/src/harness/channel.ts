@@ -127,6 +127,16 @@ export function amazonRequestChecker(world: World, clock: VirtualClock, forbidde
     for (const s of secrets) {
       if (request.rawUrl.includes(s) || request.rawBody.includes(s) || Object.values(h).includes(s)) v.push(`${where}: secret leaked into the request`);
     }
+    /**
+     * Шаг 51 [Р-4, Р-6, AMZ_C12]: заказы — без наборов данных покупателя и получателя и только заказы продавца (FBA наш пул не трогает).
+     * Правило проекта, а не ответ канала: нарушение стенда
+     */
+    // Каждая страница: со страницей параметры первого запроса повторяются (модель Orders 2026-01-01), проверяются и они
+    if (request.path === '/orders/2026-01-01/orders') {
+      const datasets = (request.query.includedData ?? '').split(',');
+      if (datasets.includes('BUYER') || datasets.includes('RECIPIENT')) v.push(`${where}: searchOrders requests buyer or recipient data (Р-4)`);
+      if (request.query.fulfilledBy !== 'MERCHANT') v.push(`${where}: searchOrders must read merchant fulfilled orders only (Р-6), got fulfilledBy=${request.query.fulfilledBy ?? 'none'}`);
+    }
     for (const attribute of forbiddenAttributes) {
       // Ключ значения или путь операции PATCH (`/attributes/<атрибут>`): ревью шага 22, находка 8
       if (request.rawBody.includes(`"${attribute}"`) || request.rawBody.includes(`/attributes/${attribute}`)) v.push(`${where}: body writes ${attribute}, which is never written (Р-114)`);

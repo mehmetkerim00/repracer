@@ -3,7 +3,7 @@ import type { ListingsItem } from '@repracer/amazon-client';
 import { logConservative } from './conservative.ts';
 import { marketplaceInfo } from './descriptor.ts';
 import { channelError, classifyFailure } from './errors.ts';
-import { channelOwnedPricing, hasDiscountedPrice, listingPath, merchantQuantity, ourPrice, purchasePrice } from './mapping.ts';
+import { channelOwnedPricing, fulfillmentOf, hasDiscountedPrice, listingPath, merchantQuantity, ourPrice, purchasePrice } from './mapping.ts';
 import { skuOf } from './planning.ts';
 import { acquire, nowMs, observeRateLimit, openSession, type AmazonAdapterOptions } from './session.ts';
 
@@ -60,7 +60,17 @@ export async function readBackAmazon(options: AmazonAdapterOptions, ctx: Adapter
           ...(effective ? { effectivePrice: effective } : {}), ...(liveness ? { liveness } : {}) });
       } else {
         const quantity = merchantQuantity(item);
-        if (quantity === null) { failures.push({ writeScopeId: r.writeScope.writeScopeId, error: channelError('NOT_FOUND', 'ITEM', 'no merchant fulfilled quantity (DEFAULT)') }); continue; }
+        if (quantity === null) {
+          // Шаг 51: сеть Amazon без DEFAULT — количество не наше [AMZ_C14, Р-6]; пусто — «нет данных», а не 0 (как у eBay, EBAY_C07)
+          const fulfillment = fulfillmentOf(item);
+          if (fulfillment.kind === 'AMAZON') {
+            logConservative(options.deps.logger, ctx, 'AMZ_C14_FBA_QUANTITY_NEVER_WRITTEN', { stage: 'READBACK', codes: fulfillment.codes.join(',') });
+            failures.push({ writeScopeId: r.writeScope.writeScopeId, error: channelError('PRECONDITION_FAILED', 'ITEM', 'the SKU is fulfilled by Amazon (FBA): its quantity is managed by Amazon and is not ours to confirm (Р-6)') });
+          } else {
+            failures.push({ writeScopeId: r.writeScope.writeScopeId, error: channelError('UNKNOWN', 'ITEM', 'no merchant fulfilled quantity (DEFAULT): no data, not zero', { channelCode: 'MERCHANT_QUANTITY_ABSENT' }) });
+          }
+          continue;
+        }
         observations.push({ identity: { region: session.region, marketplace, externalSku: sku }, field: 'QUANTITY', value: { field: 'QUANTITY', quantity }, observedAt, source: 'READBACK' });
       }
     }

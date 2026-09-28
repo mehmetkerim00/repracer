@@ -273,7 +273,7 @@ const SCENARIOS: Scenario[] = [];
   const w13 = priceWrite('cw-13', 13, 1313);
   const live = { externalAccountId: 'syn_ebay_seller_0001', marketplaces: ['EBAY_DE'], channel: 'EBAY', writeMode: 'LIVE' as const, ebayBatchMode: 'PROBE' as const };
   SCENARIOS.push(scenario('ebay-sim/multi-sku-probe', 'E-22 на модели: боевой аккаунт в пробе — один пакет из 2 SKU, остальные по одному; песочница пакет принимает',
-    'Р-189: описание bulkUpdatePriceQuantity — «Only one SKU (one product) can be updated per call», схема и песочница — до 25 разных SKU. Боевой аккаунт без доказанного режима (проба) отправляет ОДИН пакет из 2 SKU, остальные записи — по одной (EBAY_C18). Песочница пакет принимает: итог пакета «принят» — база переведёт аккаунт в MULTI. Вариант: канал отвергает вызов с разными SKU целиком (400 без ответов по элементам, код ошибки синтетический) — адаптер отдаёт TRANSIENT (значение канал не оценивал), итог «отвергнут», база переведёт аккаунт в «1 SKU на вызов» с алертом; ядро такой ответ 4xx не повторяет (шаг 51, правило канала).',
+    'Р-189: описание bulkUpdatePriceQuantity — «Only one SKU (one product) can be updated per call», схема и песочница — до 25 разных SKU. Боевой аккаунт без доказанного режима (проба) отправляет ОДИН пакет из 2 SKU, остальные записи — по одной (EBAY_C18). Песочница пакет принимает: итог пакета «принят» — база переведёт аккаунт в MULTI. Вариант: канал отвергает вызов с разными SKU целиком (400 без ответов по элементам, код ошибки синтетический) — адаптер отдаёт TRANSIENT (значение канал не оценивал), итог «отвергнут», база переведёт аккаунт в «1 SKU на вызов» с алертом; правило повтора eBay переотправляет такой отказ по одному SKU в пределах трёх попыток (шаг 51).',
     world({ seed: 11, listings: [listing(11), listing(12), listing(13)] }, { account: live }),
     [
       call('plan-probe', 'planDispatch', [[w11, w12, w13]], { rejected: [], batches: [{ items: [{ channelWriteId: 'cw-11' }, { channelWriteId: 'cw-12' }] }, { items: [{ channelWriteId: 'cw-13' }] }] }),
@@ -282,7 +282,7 @@ const SCENARIOS: Scenario[] = [];
     ],
     { noAlerts: true, logs: [{ code: 'EBAY_C18_MULTI_SKU_PROBE', question: 'E-22', count: 1 }], channel: { stats: { itemsApplied: 3, multiSkuRefused: 0 } } },
     [{ id: 'e22-multi-sku-refused', question: 'E-22', params: { multiSkuPerCall: 'REFUSED_WHOLE_REQUEST' },
-      finding: 'пакет из 2 SKU отвергнут целиком — итог «отвергнут», записи TRANSIENT без повтора ядром (ответ 4xx, шаг 51); запись одного SKU проходит',
+      finding: 'пакет из 2 SKU отвергнут целиком — записи переотправляемы (TRANSIENT, форма вызова), итог «отвергнут»; запись одного SKU проходит',
       stepExpect: { 'dispatch-probe': { attemptsMade: 1, ebayBatchOutcome: { multiSkuAccepted: false }, outcomes: [
         { status: 'REJECTED', error: { class: 'TRANSIENT', code: 'ACTION_NOT_ALLOWED', channelCode: '99022', httpStatus: 400 } },
         { status: 'REJECTED', error: { class: 'TRANSIENT', code: 'ACTION_NOT_ALLOWED', channelCode: '99022', httpStatus: 400 } }] } },
@@ -409,10 +409,11 @@ test('Р-187: 25016 carries MinValue; refused items do not raise sellerItemRevis
  * Шаг 49 [Р-189, E-22] — путь целиком: диспетчер, адаптер и модель eBay, режим пакетов — у хранилища (как `record_ebay_batch_outcome`), каталог
  * аккаунтов читает его на каждом вызове. Три ждущие записи боевого аккаунта в пробе: пакет из 2 SKU и одна запись. Модель по умолчанию (как
  * песочница) пакет принимает — аккаунт в MULTI, всё за один обход. Вариант E-22 — пакет отвергнут целиком: аккаунт переходит в SINGLE.
- * Шаг 51 (Growth Check): ответ eBay 4xx не повторяется — отвергнутые записи завершаются отказом канала по правилу повтора адаптера
- * (хранилище теста решает НАСТОЯЩИМИ правилами переходов с политикой, которую передал диспетчер), а следующие записи тех же единиц уходят по одной.
+ * Шаг 51: хранилище теста решает НАСТОЯЩИМИ правилами переходов с политикой, которую передал диспетчер (правило повтора eBay, Growth Check):
+ * отказ ФОРМЫ пакета — единственный ответ 4xx, после которого то же значение уходит снова, по одному SKU и в пределах трёх попыток; следующие
+ * версии тех же единиц тоже уходят по одной.
  */
-test('Р-189 end to end: a refused probe moves the account to one SKU per call, the refused writes are not retried (step 51) and the next writes go one by one; an accepted probe moves it to MULTI', async () => {
+test('Р-189 end to end: a refused probe moves the account to one SKU per call and the refused writes arrive one by one within the eBay retry rule; an accepted probe moves it to MULTI', async () => {
   const run = async (multiSkuPerCall: 'ACCEPTED' | 'REFUSED_WHOLE_REQUEST') => {
     const clock = new VirtualClock('2026-09-28T10:00:00.000Z');
     const w = world({ seed: 20, params: { multiSkuPerCall }, listings: [listing(21), listing(22), listing(23)] },
@@ -473,12 +474,12 @@ test('Р-189 end to end: a refused probe moves the account to one SKU per call, 
   const refused = await run('REFUSED_WHOLE_REQUEST');
   assert.equal(refused.w.account.ebayBatchMode, 'SINGLE');
   assert.deepEqual(refused.modes.ebayBatchRefusals.map((r) => [r.from, r.to, r.question]), [['PROBE', 'SINGLE', 'E-22']], 'one refusal, recorded once');
-  assert.equal(refused.model.stats.multiSkuRefused, 1, 'the channel refused the multi-SKU call once and it was never sent again');
-  assert.deepEqual(refused.sweeps, [3], 'the refused writes were not due again: an eBay 4xx is not retried (step 51)');
+  assert.equal(refused.model.stats.multiSkuRefused, 1, 'the channel refused the multi-SKU call once — the resends went one SKU per call');
+  assert.deepEqual(refused.sweeps, [3, 2], 'the two refused writes were due again in the next sweep (form refusal: value not evaluated)');
   assert.equal(refused.nextRequests, 3, 'the next versions of all three scopes went one SKU per call');
   assert.deepEqual([...refused.state.values()].map((v) => v.status), ['DONE', 'DONE', 'DONE'], 'the next versions arrived');
-  assert.equal(refused.model.stats.itemsApplied, 1 + 3, 'first round: only the single write; the two refused ones were not applied');
-  assert.equal(refused.model.stats.requests['POST /sell/inventory/v1/bulk_update_price_quantity'], 2 + 3, 'probe (refused) + single, then three singles');
+  assert.equal(refused.model.stats.itemsApplied, 3 + 3, 'first round: all three arrived (two of them resent one by one), then the next versions');
+  assert.equal(refused.model.stats.requests['POST /sell/inventory/v1/bulk_update_price_quantity'], 4 + 3, 'probe (refused) + single, two resends, then three singles');
   assert.deepEqual(refused.violations, []);
 
   const accepted = await run('ACCEPTED');

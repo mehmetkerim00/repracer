@@ -117,6 +117,16 @@ export function buildEbayPipelineScenarios(): Array<{ file: string; scenario: Sc
     { noAlerts: true, pipeline: { writes: [{ writeScopeId: 'ws-ebay-price-1', amountMinor: 1299, version: 1, status: 'APPLIED' }], distrusts: [], halts: [] },
       logs: [{ code: 'EBAY_C05_PRICE_READBACK_LIVE_LISTING', details: { divergence: false } }] }));
 
+  // 1б. Шаг 51 (Growth Check, ревью шага 51, находка 5): своя отправка пути решения берёт правило повтора канала — ответ eBay 429 не повторяется
+  out.push(scenario('pipeline-write-429-not-retried.json', 'ebay/pipeline/write-429-not-retried',
+    'Путь решения eBay: ответ 429 на первую отправку записи — отказ канала без повтора (правило повтора eBay, Growth Check)',
+    'Своя отправка пути решения записывает итог по правилу повтора канала (descriptor.writeRetry): у eBay повторяются только сбои инфраструктуры (5xx, таймаут, обрыв соединения), не больше двух раз; ответ 4xx на значение — отказ канала, запись завершается с причиной, срока повтора у неё нет. Без правила канала (общая политика) та же запись стала бы FAILED со сроком повтора — это и утверждается. Тело 429 синтетическое.',
+    ['growth-check'],
+    world({ scopes: [scope(9)] }),
+    [recompute('rate-limited-first-send', 'ws-ebay-price-9', { decision: { outcome: 'APPROVED', finalMinor: 1299 }, dispatch: { status: 'REJECTED', error: { code: 'RATE_LIMITED', httpStatus: 429 } } })],
+    [userToken(), { ...bulkPrice('bulk-429', 9, 1299), response: { status: 429, body: { errors: [{ errorId: 2001, domain: 'SYNTHETIC', message: 'Too many requests (synthetic)' }] } } }],
+    { pipeline: { writes: [{ writeScopeId: 'ws-ebay-price-9', amountMinor: 1299, status: 'DISCARDED_STALE' }] } }));
+
   // 2. Gate: ниже пола и выше потолка
   out.push(scenario('pipeline-gate-bounds.json', 'ebay/pipeline/gate-bounds',
     'Gate eBay: фиксированная цена ниже min_price и выше max_price отклоняется, запись не создаётся',

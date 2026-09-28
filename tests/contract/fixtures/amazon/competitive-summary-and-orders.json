@@ -3,8 +3,8 @@
   "id": "amazon/port/competitive-summary",
   "channel": "AMAZON",
   "apiVersion": "listings-items-2021-08-01",
-  "title": "Р-121: getCompetitiveSummary — снимок только для сверки; строки заказов — отказ",
-  "description": "Шаг 24. Сверка потерь ANY_OFFER_CHANGED [AMZ_C11]: пакет до 20 ASIN, lowestPricedOffers New/Consumer, снимок источника AMAZON_COMPETITIVE_SUMMARY без победителя Buy Box, своё предложение — по SellerId. Ошибка товара в пакете — отказ этого товара; состояние не new — UNSUPPORTED без запроса. Второй пакет сразу — RATE_LIMITED ограничителем (0.033 rps, burst 1), без обращения к Amazon. Orders API нет в снимке, данные с PII [Р-4].",
+  "title": "Р-121: getCompetitiveSummary — снимок только для сверки",
+  "description": "Шаг 24. Сверка потерь ANY_OFFER_CHANGED [AMZ_C11]: пакет до 20 ASIN, lowestPricedOffers New/Consumer, снимок источника AMAZON_COMPETITIVE_SUMMARY без победителя Buy Box, своё предложение — по SellerId. Ошибка товара в пакете — отказ этого товара; состояние не new — UNSUPPORTED без запроса. Второй пакет сразу — RATE_LIMITED ограничителем (0.033 rps, burst 1), без обращения к Amazon. Строки заказов — сценарий orders-merchant-whitelist (шаг 51).",
   "tags": [
     "port",
     "r-121"
@@ -158,22 +158,6 @@
             }
           }
         ]
-      }
-    },
-    {
-      "id": "orders",
-      "kind": "call",
-      "method": "readOrderLines",
-      "args": [
-        {
-          "since": {
-            "$clockIso": -86400000
-          },
-          "limit": 10
-        }
-      ],
-      "expectThrows": {
-        "code": "UNSUPPORTED"
       }
     }
   ],

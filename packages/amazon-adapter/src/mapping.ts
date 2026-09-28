@@ -79,6 +79,16 @@ export function merchantQuantity(item: ListingsItem): number | null {
   return fa && Number.isSafeInteger(fa.quantity) && (fa.quantity as number) >= 0 ? (fa.quantity as number) : null;
 }
 
+/**
+ * Шаг 51 [AMZ_C13, A-21]: способ исполнения по fulfillmentAvailability. DEFAULT — наша сеть (FBM); только иные коды — сеть Amazon (FBA);
+ * кодов нет — неизвестно. Коды сети Amazon снимок не перечисляет, поэтому «не DEFAULT» и есть признак FBA
+ */
+export function fulfillmentOf(item: ListingsItem): { kind: 'MERCHANT' | 'AMAZON' | 'UNKNOWN'; codes: string[] } {
+  const codes = [...new Set((item.fulfillmentAvailability ?? []).map((f) => f.fulfillmentChannelCode).filter((c): c is string => typeof c === 'string' && c.length > 0))];
+  if (codes.includes('DEFAULT')) return { kind: 'MERCHANT', codes };
+  return { kind: codes.length > 0 ? 'AMAZON' : 'UNKNOWN', codes };
+}
+
 export function productTypeOf(item: ListingsItem, marketplaceId: string): string | null {
   return (item.summaries ?? []).find((s) => s.marketplaceId === marketplaceId)?.productType ?? item.summaries?.[0]?.productType ?? null;
 }

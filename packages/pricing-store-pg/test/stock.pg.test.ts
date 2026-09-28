@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { createHash } from 'node:crypto';
 import type { MemorySeedScope } from '@repracer/pricing-pipeline';
-import { PgStockStore, inTenant, seedPricingWorld, type PgPool, type SeededPricingWorld } from '../src/index.ts';
+import { DEFAULT_RETRY_POLICY } from '@repracer/write-dispatcher';
+import { PgStockStore, PgWriteQueueStore, inTenant, seedPricingWorld, type PgPool, type SeededPricingWorld } from '../src/index.ts';
 import { createIsolatedDatabase, type IsolatedDatabase } from './isolated-db.ts';
 
 /**
@@ -307,4 +308,24 @@ test('Р-157: резервация Inbound API ждёт подтверждени
    */
   assert.deepEqual(await shippedMovements(), [2, -2], 'движений по-прежнему два — оба у внутреннего пула');
   assert.deepEqual(await stockOf('syn-prod-2'), [23, 2, 21]);
+});
+
+/**
+ * Ревью шага 51, находки 2–3: запись количества, которую канал отверг (у eBay с шага 51 — любой ответ 4xx на значение, без повтора), значением
+ * канала не стала. Пересчёт не считает её «уже созданной» и создаёт новую версию того же количества — иначе количество у канала застревало бы
+ * до следующего изменения остатка (перепродажа при уменьшении)
+ */
+test('step 51 review: a quantity version refused by the channel is not "already created" — the next recalculation creates it again', async () => {
+  const queue = new PgWriteQueueStore(db.pool('svc_app', 1));
+  const [row] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
+    `SELECT w.write_scope_id, w.quantity FROM tenant_data.channel_write w WHERE w.field = 'QUANTITY' AND w.status = 'PENDING' ORDER BY w.quantity DESC LIMIT 1`)).rows);
+  const claim = await queue.claimNext(world.tenantId, row.write_scope_id, now(), DEFAULT_RETRY_POLICY);
+  assert.equal(claim.kind, 'DISPATCH');
+  const write = (claim as Extract<typeof claim, { kind: 'DISPATCH' }>).write;
+  const refused = await queue.recordOutcome(world.tenantId, write, { channelWriteId: write.channelWriteId, status: 'REJECTED',
+    error: { class: 'PERMANENT', code: 'VALIDATION', scope: 'ITEM', message: 'synthetic refusal', raiseAlert: false, httpStatus: 400 } }, now(), DEFAULT_RETRY_POLICY);
+  assert.equal(refused.reason?.code, 'WRITE_NOT_ACCEPTED_BY_CHANNEL');
+  const again = await store.recalculate(world.tenantId, null, now());
+  assert.deepEqual(again.writes.map((w) => [w.writeScopeId, w.quantity]), [[row.write_scope_id, Number(row.quantity)]], 'the refused value is created again, the others are unchanged');
+  assert.equal((await store.recalculate(world.tenantId, null, now())).writes.length, 0, 'a pending new version counts as created: no duplicate');
 });

@@ -98,16 +98,27 @@ function summaries(skuValue: string, offers: readonly OfferState[]) {
   return offers.map((o) => ({ marketplaceId: o.marketplace ?? DE, asin: o.asin ?? `B0${skuValue.replace(/\D/g, '').slice(-8).padStart(8, '0')}`, productType: 'SYNTHETIC_PRODUCT_TYPE', status: ['BUYABLE', 'DISCOVERABLE'] }));
 }
 
-export function preReadExchange(id: string, skuValue: string, offers: readonly OfferState[]): Exchange {
+/**
+ * Чтение оффера перед записью. Шаг 51: перед записью количества — и fulfillmentAvailability [AMZ_C14]: `fulfillment` — коды сети в ответе
+ * (по умолчанию DEFAULT с количеством оффера, если оно задано)
+ */
+export function preReadExchange(id: string, skuValue: string, offers: readonly OfferState[], options: { forQuantity?: boolean; fulfillment?: ReadonlyArray<{ fulfillmentChannelCode: string; quantity?: number }> } = {}): Exchange {
   return {
-    id, note: 'Чтение оффера перед записью: тип товара и собственное ценообразование канала [AMZ_C03, AMZ_C09]',
-    request: { method: 'GET', path: listingPath(skuValue), query: { marketplaceIds: offers.map((o) => o.marketplace ?? DE).join(','), includedData: 'summaries,attributes' } },
-    response: { status: 200, body: { sku: skuValue, summaries: summaries(skuValue, offers), attributes: attributes(offers) } },
+    id, note: options.forQuantity ? 'Чтение оффера перед записью количества: тип товара и сеть исполнения [AMZ_C09, AMZ_C14]' : 'Чтение оффера перед записью: тип товара и собственное ценообразование канала [AMZ_C03, AMZ_C09]',
+    request: { method: 'GET', path: listingPath(skuValue), query: { marketplaceIds: offers.map((o) => o.marketplace ?? DE).join(','),
+      includedData: options.forQuantity ? 'summaries,attributes,fulfillmentAvailability' : 'summaries,attributes' } },
+    response: { status: 200, body: { sku: skuValue, summaries: summaries(skuValue, offers), attributes: attributes(offers),
+      ...(options.forQuantity ? { fulfillmentAvailability: options.fulfillment ?? defaultFulfillment(offers) } : {}) } },
   };
 }
 
+function defaultFulfillment(offers: readonly OfferState[]) {
+  const q = offers.find((o) => o.quantity !== undefined)?.quantity;
+  return q !== undefined ? [{ fulfillmentChannelCode: 'DEFAULT', quantity: q }] : [];
+}
+
 /** Р-120: страница searchListingsItems с атрибутами — обнаружение офферов и их собственного ценообразования в канале */
-export function searchListingsExchange(id: string, items: ReadonlyArray<{ sku: string; offers: readonly OfferState[] }>, pageSize = 20): Exchange {
+export function searchListingsExchange(id: string, items: ReadonlyArray<{ sku: string; offers: readonly OfferState[]; fulfillment?: ReadonlyArray<{ fulfillmentChannelCode: string; quantity?: number }> }>, pageSize = 20): Exchange {
   const marketplaces = [...new Set(items.flatMap((i) => i.offers.map((o) => o.marketplace ?? DE)))];
   return {
     id, note: 'searchListingsItems с attributes: привязка к правилу ценообразования и границы канала видны до назначения стратегии [Р-120]',
@@ -117,20 +128,20 @@ export function searchListingsExchange(id: string, items: ReadonlyArray<{ sku: s
       items: items.map((i) => ({
         sku: i.sku, summaries: summaries(i.sku, i.offers), attributes: attributes(i.offers), issues: [],
         offers: i.offers.map((o) => ({ marketplaceId: o.marketplace ?? DE, offerType: 'B2C', price: { currencyCode: o.currency ?? 'EUR', amount: String(major(o.purchaseMinor ?? o.priceMinor)) } })),
-        fulfillmentAvailability: [],
+        fulfillmentAvailability: i.fulfillment ?? [],
       })),
     } },
   };
 }
 
-export function readBackExchange(id: string, skuValue: string, offers: readonly OfferState[]): Exchange {
+export function readBackExchange(id: string, skuValue: string, offers: readonly OfferState[], fulfillment?: ReadonlyArray<{ fulfillmentChannelCode: string; quantity?: number }>): Exchange {
   return {
     id,
     request: { method: 'GET', path: listingPath(skuValue), query: { marketplaceIds: offers.map((o) => o.marketplace ?? DE).join(','), includedData: 'summaries,attributes,offers,fulfillmentAvailability,issues' } },
     response: { status: 200, body: {
       sku: skuValue, summaries: summaries(skuValue, offers), attributes: attributes(offers), issues: [],
       offers: offers.map((o) => ({ marketplaceId: o.marketplace ?? DE, offerType: 'B2C', price: { currencyCode: o.currency ?? 'EUR', amount: String(major(o.purchaseMinor ?? o.priceMinor)) } })),
-      fulfillmentAvailability: offers.some((o) => o.quantity !== undefined) ? [{ fulfillmentChannelCode: 'DEFAULT', quantity: offers.find((o) => o.quantity !== undefined)!.quantity }] : [],
+      fulfillmentAvailability: fulfillment ?? defaultFulfillment(offers),
     } },
   };
 }
@@ -333,5 +344,30 @@ export function competitiveSummaryExchange(id: string, items: ReadonlyArray<{ as
           shippingOptions: [{ shippingOptionType: 'DEFAULT', price: { amount: major(o.shippingMinor ?? 0), currencyCode: o.currency ?? 'EUR' } }],
         })),
       }] } })) } },
+  };
+}
+
+/**
+ * Шаг 51: searchOrders (Orders 2026-01-01, снимок 2026-09-29) — только заказы продавца, наборы FULFILLMENT и CANCELLATION, без BUYER и RECIPIENT.
+ * Ответ синтетический по модели; `extra` — поля заказа вне белого списка адаптера (данных людей в фикстурах нет — только признаки синтетики)
+ */
+export function searchOrdersExchange(id: string, since: unknown, orders: readonly Record<string, unknown>[], options: { marketplaces?: readonly string[]; nextToken?: string; paginationToken?: string; pageSize?: number } = {}): Exchange {
+  return {
+    id, note: 'searchOrders: lastUpdatedAfter, fulfilledBy=MERCHANT, includedData без BUYER и RECIPIENT [AMZ_C12, Р-4]',
+    // Со страницей — те же параметры, что у первого запроса (модель: «All other parameters must be provided with the same values»)
+    request: { method: 'GET', path: '/orders/2026-01-01/orders', query: { lastUpdatedAfter: since, marketplaceIds: (options.marketplaces ?? [DE]).join(','), fulfilledBy: 'MERCHANT',
+      includedData: 'FULFILLMENT,CANCELLATION', maxResultsPerPage: String(options.pageSize ?? 10), ...(options.paginationToken ? { paginationToken: options.paginationToken } : {}) } },
+    response: { status: 200, body: { orders, ...(options.nextToken ? { pagination: { nextToken: options.nextToken } } : {}) } },
+  };
+}
+
+/** Шаг 51: getInventorySummaries (FBA Inventory v1) — количество FBA по витрине, только чтение [AMZ_C13] */
+export function fbaSummariesExchange(id: string, marketplace: string, skus: readonly string[], summaries: ReadonlyArray<{ sku: string; fulfillable: number; total?: number }>): Exchange {
+  return {
+    id, note: 'getInventorySummaries: количество FBA читается, но не пишется [Р-6, AMZ_C14]',
+    request: { method: 'GET', path: '/fba/inventory/v1/summaries', query: { details: 'true', granularityType: 'Marketplace', granularityId: marketplace, marketplaceIds: marketplace, sellerSkus: skus.join(',') } },
+    response: { status: 200, body: { payload: { granularity: { granularityType: 'Marketplace', granularityId: marketplace },
+      inventorySummaries: summaries.map((x) => ({ sellerSku: x.sku, asin: `B0${x.sku.replace(/\D/g, '').slice(-8).padStart(8, '0')}`, condition: 'NewItem', totalQuantity: x.total ?? x.fulfillable,
+        inventoryDetails: { fulfillableQuantity: x.fulfillable, inboundWorkingQuantity: 0, inboundShippedQuantity: 0, inboundReceivingQuantity: 0 } })) } } },
   };
 }

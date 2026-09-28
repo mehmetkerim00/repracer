@@ -1,0 +1,452 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "amazon/orders/merchant-whitelist",
+  "channel": "AMAZON",
+  "apiVersion": "listings-items-2021-08-01",
+  "title": "Шаг 51: строки заказов — searchOrders по времени изменения, только FBM, белый список без данных покупателя",
+  "description": "Запрос: lastUpdatedAfter, fulfilledBy=MERCHANT (заказы FBA исполняет Amazon из своего остатка — наш пул они не трогают, Р-6), includedData=FULFILLMENT,CANCELLATION без BUYER и RECIPIENT [Р-4]. Статус строки: отменённый заказ и исполненная отмена строки — CANCELLED; заказ SHIPPED или строка отгружена целиком — SHIPPED; PARTIALLY_SHIPPED с неполной отгрузкой строки — OPEN (резервация держится целиком); UNFULFILLABLE, заказ вне Amazon и чужая витрина — пропуск с числом в журнале. Лишнее поле ответа (синтетический покупатель) до строки не доходит. Вторая страница — по paginationToken.",
+  "tags": [
+    "orders",
+    "conservative:AMZ_C12_ORDERS_MERCHANT_WHITELIST"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "vendor/amazon/sp-api-models/2026-09-16/models/listings-items-api-model/listingsItems_2021-08-01.json",
+      "https://developer-docs.amazon/sp-api/docs/manage-purchasable-offer.md",
+      "https://developer-docs.amazon/sp-api/docs/listings-items-api-rate-limits.md",
+      "https://developer-docs.amazon/sp-api/docs/building-listings-management-workflows-guide.md",
+      "vendor/amazon/sp-api-models/2026-09-29/models/orders-api-model/orders_2026-01-01.json"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "A1SYNSELLER0001",
+      "marketplaces": [
+        "A1PA6795UKMFR9"
+      ],
+      "channel": "AMAZON",
+      "region": "EU"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "Atzr|syn-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "amzn1.application-oa2-client.syn0001",
+        "clientSecret": "syn-lwa-client-secret-0001"
+      },
+      "accessToken": "Atza|syn-access-token-0001"
+    }
+  },
+  "steps": [
+    {
+      "id": "orders-page-1",
+      "kind": "call",
+      "method": "readOrderLines",
+      "args": [
+        {
+          "since": {
+            "$clockIso": -86400000
+          },
+          "limit": 10
+        }
+      ],
+      "expect": {
+        "nextCursor": "syn-orders-page-2",
+        "items": [
+          {
+            "externalOrderRef": "901-0000001-0000001",
+            "externalOrderLineRef": "syn-item-11",
+            "quantity": 2,
+            "status": "OPEN",
+            "orderedAt": "2026-09-27T08:00:00.000Z",
+            "identity": {
+              "region": "EU",
+              "marketplace": "A1PA6795UKMFR9",
+              "externalSku": "SYN-SKU-7001",
+              "channelProductRef": "B000007001"
+            }
+          },
+          {
+            "externalOrderLineRef": "syn-item-12",
+            "quantity": 1,
+            "status": "CANCELLED",
+            "identity": {
+              "externalSku": "SYN-SKU-7002"
+            }
+          },
+          {
+            "externalOrderRef": "901-0000002-0000002",
+            "externalOrderLineRef": "syn-item-21",
+            "status": "SHIPPED"
+          },
+          {
+            "externalOrderRef": "901-0000003-0000003",
+            "externalOrderLineRef": "syn-item-31",
+            "quantity": 3,
+            "status": "OPEN"
+          },
+          {
+            "externalOrderLineRef": "syn-item-32",
+            "status": "SHIPPED"
+          },
+          {
+            "externalOrderRef": "901-0000007-0000007",
+            "externalOrderLineRef": "syn-item-71",
+            "status": "CANCELLED"
+          }
+        ]
+      }
+    },
+    {
+      "id": "orders-page-2",
+      "kind": "call",
+      "method": "readOrderLines",
+      "args": [
+        {
+          "since": {
+            "$clockIso": -86400000
+          },
+          "limit": 10,
+          "cursor": "syn-orders-page-2"
+        }
+      ],
+      "expect": {
+        "items": [
+          {
+            "externalOrderRef": "901-0000008-0000008",
+            "status": "OPEN"
+          }
+        ]
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "lwa-token",
+      "note": "Токен LWA по refresh_token (connecting-to-the-selling-partner-api); тело формы проверяет стенд",
+      "request": {
+        "method": "POST",
+        "path": "/auth/o2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "Atza|syn-access-token-0001",
+          "token_type": "bearer",
+          "expires_in": 3600,
+          "refresh_token": "Atzr|syn-refresh-token-0001"
+        }
+      }
+    },
+    {
+      "id": "search-orders-1",
+      "note": "searchOrders: lastUpdatedAfter, fulfilledBy=MERCHANT, includedData без BUYER и RECIPIENT [AMZ_C12, Р-4]",
+      "request": {
+        "method": "GET",
+        "path": "/orders/2026-01-01/orders",
+        "query": {
+          "lastUpdatedAfter": {
+            "$isoInstant": true
+          },
+          "marketplaceIds": "A1PA6795UKMFR9",
+          "fulfilledBy": "MERCHANT",
+          "includedData": "FULFILLMENT,CANCELLATION",
+          "maxResultsPerPage": "10"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "orders": [
+            {
+              "orderId": "901-0000001-0000001",
+              "createdTime": "2026-09-27T08:00:00Z",
+              "lastUpdatedTime": "2026-09-28T09:00:00Z",
+              "salesChannel": {
+                "channelName": "AMAZON",
+                "marketplaceId": "A1PA6795UKMFR9",
+                "marketplaceName": "Amazon.de"
+              },
+              "fulfillment": {
+                "fulfillmentStatus": "UNSHIPPED",
+                "fulfilledBy": "MERCHANT"
+              },
+              "orderItems": [
+                {
+                  "orderItemId": "syn-item-11",
+                  "quantityOrdered": 2,
+                  "product": {
+                    "asin": "B000007001",
+                    "sellerSku": "SYN-SKU-7001",
+                    "title": "Synthetic item"
+                  }
+                },
+                {
+                  "orderItemId": "syn-item-12",
+                  "quantityOrdered": 1,
+                  "product": {
+                    "asin": "B000007001",
+                    "sellerSku": "SYN-SKU-7002",
+                    "title": "Synthetic item"
+                  },
+                  "cancellation": {
+                    "cancellationExecution": {
+                      "cancelledBy": "MERCHANT"
+                    }
+                  }
+                }
+              ],
+              "buyer": {
+                "buyerCompanyName": "syn-not-requested-buyer-field"
+              }
+            },
+            {
+              "orderId": "901-0000002-0000002",
+              "createdTime": "2026-09-27T08:00:00Z",
+              "lastUpdatedTime": "2026-09-28T09:00:00Z",
+              "salesChannel": {
+                "channelName": "AMAZON",
+                "marketplaceId": "A1PA6795UKMFR9",
+                "marketplaceName": "Amazon.de"
+              },
+              "fulfillment": {
+                "fulfillmentStatus": "SHIPPED",
+                "fulfilledBy": "MERCHANT"
+              },
+              "orderItems": [
+                {
+                  "orderItemId": "syn-item-21",
+                  "quantityOrdered": 1,
+                  "product": {
+                    "asin": "B000007001",
+                    "sellerSku": "SYN-SKU-7001",
+                    "title": "Synthetic item"
+                  }
+                }
+              ]
+            },
+            {
+              "orderId": "901-0000003-0000003",
+              "createdTime": "2026-09-27T08:00:00Z",
+              "lastUpdatedTime": "2026-09-28T09:00:00Z",
+              "salesChannel": {
+                "channelName": "AMAZON",
+                "marketplaceId": "A1PA6795UKMFR9",
+                "marketplaceName": "Amazon.de"
+              },
+              "fulfillment": {
+                "fulfillmentStatus": "PARTIALLY_SHIPPED",
+                "fulfilledBy": "MERCHANT"
+              },
+              "orderItems": [
+                {
+                  "orderItemId": "syn-item-31",
+                  "quantityOrdered": 3,
+                  "product": {
+                    "asin": "B000007001",
+                    "sellerSku": "SYN-SKU-7001",
+                    "title": "Synthetic item"
+                  },
+                  "fulfillment": {
+                    "quantityFulfilled": 1,
+                    "quantityUnfulfilled": 2
+                  }
+                },
+                {
+                  "orderItemId": "syn-item-32",
+                  "quantityOrdered": 1,
+                  "product": {
+                    "asin": "B000007001",
+                    "sellerSku": "SYN-SKU-7002",
+                    "title": "Synthetic item"
+                  },
+                  "fulfillment": {
+                    "quantityFulfilled": 1,
+                    "quantityUnfulfilled": 0
+                  }
+                }
+              ]
+            },
+            {
+              "orderId": "901-0000004-0000004",
+              "createdTime": "2026-09-27T08:00:00Z",
+              "lastUpdatedTime": "2026-09-28T09:00:00Z",
+              "salesChannel": {
+                "channelName": "AMAZON",
+                "marketplaceId": "A1PA6795UKMFR9",
+                "marketplaceName": "Amazon.de"
+              },
+              "fulfillment": {
+                "fulfillmentStatus": "UNFULFILLABLE",
+                "fulfilledBy": "MERCHANT"
+              },
+              "orderItems": [
+                {
+                  "orderItemId": "syn-item-41",
+                  "quantityOrdered": 1,
+                  "product": {
+                    "asin": "B000007001",
+                    "sellerSku": "SYN-SKU-7001",
+                    "title": "Synthetic item"
+                  }
+                }
+              ]
+            },
+            {
+              "orderId": "901-0000005-0000005",
+              "createdTime": "2026-09-27T08:00:00Z",
+              "lastUpdatedTime": "2026-09-28T09:00:00Z",
+              "salesChannel": {
+                "channelName": "NON_AMAZON"
+              },
+              "fulfillment": {
+                "fulfillmentStatus": "UNSHIPPED",
+                "fulfilledBy": "MERCHANT"
+              },
+              "orderItems": [
+                {
+                  "orderItemId": "syn-item-51",
+                  "quantityOrdered": 1,
+                  "product": {
+                    "asin": "B000007001",
+                    "sellerSku": "SYN-SKU-7001",
+                    "title": "Synthetic item"
+                  }
+                }
+              ]
+            },
+            {
+              "orderId": "901-0000006-0000006",
+              "createdTime": "2026-09-27T08:00:00Z",
+              "lastUpdatedTime": "2026-09-28T09:00:00Z",
+              "salesChannel": {
+                "channelName": "AMAZON",
+                "marketplaceId": "ATVPDKIKX0DER"
+              },
+              "fulfillment": {
+                "fulfillmentStatus": "UNSHIPPED",
+                "fulfilledBy": "MERCHANT"
+              },
+              "orderItems": [
+                {
+                  "orderItemId": "syn-item-61",
+                  "quantityOrdered": 1,
+                  "product": {
+                    "asin": "B000007001",
+                    "sellerSku": "SYN-SKU-7001",
+                    "title": "Synthetic item"
+                  }
+                }
+              ]
+            },
+            {
+              "orderId": "901-0000007-0000007",
+              "createdTime": "2026-09-27T08:00:00Z",
+              "lastUpdatedTime": "2026-09-28T09:00:00Z",
+              "salesChannel": {
+                "channelName": "AMAZON",
+                "marketplaceId": "A1PA6795UKMFR9",
+                "marketplaceName": "Amazon.de"
+              },
+              "fulfillment": {
+                "fulfillmentStatus": "CANCELLED",
+                "fulfilledBy": "MERCHANT"
+              },
+              "orderItems": [
+                {
+                  "orderItemId": "syn-item-71",
+                  "quantityOrdered": 1,
+                  "product": {
+                    "asin": "B000007001",
+                    "sellerSku": "SYN-SKU-7001",
+                    "title": "Synthetic item"
+                  }
+                }
+              ]
+            }
+          ],
+          "pagination": {
+            "nextToken": "syn-orders-page-2"
+          }
+        }
+      }
+    },
+    {
+      "id": "search-orders-2",
+      "note": "searchOrders: lastUpdatedAfter, fulfilledBy=MERCHANT, includedData без BUYER и RECIPIENT [AMZ_C12, Р-4]",
+      "request": {
+        "method": "GET",
+        "path": "/orders/2026-01-01/orders",
+        "query": {
+          "lastUpdatedAfter": {
+            "$isoInstant": true
+          },
+          "marketplaceIds": "A1PA6795UKMFR9",
+          "fulfilledBy": "MERCHANT",
+          "includedData": "FULFILLMENT,CANCELLATION",
+          "maxResultsPerPage": "10",
+          "paginationToken": "syn-orders-page-2"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "orders": [
+            {
+              "orderId": "901-0000008-0000008",
+              "createdTime": "2026-09-27T08:00:00Z",
+              "lastUpdatedTime": "2026-09-28T09:00:00Z",
+              "salesChannel": {
+                "channelName": "AMAZON",
+                "marketplaceId": "A1PA6795UKMFR9",
+                "marketplaceName": "Amazon.de"
+              },
+              "fulfillment": {
+                "fulfillmentStatus": "PENDING",
+                "fulfilledBy": "MERCHANT"
+              },
+              "orderItems": [
+                {
+                  "orderItemId": "syn-item-81",
+                  "quantityOrdered": 1,
+                  "product": {
+                    "asin": "B000007001",
+                    "sellerSku": "SYN-SKU-7001",
+                    "title": "Synthetic item"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "expect": {
+    "noAlerts": true,
+    "logs": [
+      {
+        "code": "AMZ_C12_ORDERS_MERCHANT_WHITELIST",
+        "count": 2
+      },
+      {
+        "code": "AMZ_C12_ORDERS_MERCHANT_WHITELIST",
+        "details": {
+          "lines": 6,
+          "skipped": 3,
+          "skipped_fulfillmentStatus_UNFULFILLABLE": 1,
+          "skipped_salesChannel": 1,
+          "skipped_marketplace": 1
+        }
+      }
+    ]
+  }
+}

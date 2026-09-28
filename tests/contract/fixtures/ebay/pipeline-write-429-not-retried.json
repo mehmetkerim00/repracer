@@ -1,0 +1,177 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "ebay/pipeline/write-429-not-retried",
+  "channel": "EBAY",
+  "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
+  "title": "Путь решения eBay: ответ 429 на первую отправку записи — отказ канала без повтора (правило повтора eBay, Growth Check)",
+  "description": "Своя отправка пути решения записывает итог по правилу повтора канала (descriptor.writeRetry): у eBay повторяются только сбои инфраструктуры (5xx, таймаут, обрыв соединения), не больше двух раз; ответ 4xx на значение — отказ канала, запись завершается с причиной, срока повтора у неё нет. Без правила канала (общая политика) та же запись стала бы FAILED со сроком повтора — это и утверждается. Тело 429 синтетическое.",
+  "tags": [
+    "pipeline",
+    "growth-check"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "docs/evidence/step39-ebay-sandbox.md",
+      "docs/decisions.md#Р-186"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-28T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn_ebay_seller_0001",
+      "marketplaces": [
+        "EBAY_DE"
+      ],
+      "channel": "EBAY"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "syn-ebay-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "Syn-Repracer-SBX-0001",
+        "clientSecret": "SBX-syn-client-secret-0001"
+      },
+      "accessToken": "syn-ebay-user-token-0001",
+      "applicationToken": "syn-ebay-app-token-0001"
+    },
+    "pricing": {
+      "scopes": [
+        {
+          "writeScopeId": "ws-ebay-price-9",
+          "productId": "prod-ebay-9",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "EBAY_DE",
+          "externalUnitId": "SYN-EBAY-P-09",
+          "externalOfferId": "9200000009",
+          "externalListingId": "120000000009",
+          "channelProductRef": "120000000009",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-fixed-9",
+            "version": 1,
+            "params": {
+              "type": "FIXED",
+              "priceMinor": 1299
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1149,
+          "minPrice": {
+            "amountMinor": 1000,
+            "id": "min-ebay-9"
+          },
+          "maxPrice": {
+            "amountMinor": 5000,
+            "id": "max-ebay-9"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-ebay-9",
+            "unitCostMinor": 500,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1100,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
+          }
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "rate-limited-first-send",
+      "kind": "pipelineRecompute",
+      "writeScopeId": "ws-ebay-price-9",
+      "trigger": {
+        "type": "COST_CHANGE"
+      },
+      "expect": {
+        "decision": {
+          "outcome": "APPROVED",
+          "finalMinor": 1299
+        },
+        "dispatch": {
+          "status": "REJECTED",
+          "error": {
+            "code": "RATE_LIMITED",
+            "httpStatus": 429
+          }
+        }
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "user-token",
+      "request": {
+        "method": "POST",
+        "path": "/identity/v1/oauth2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "syn-ebay-user-token-0001",
+          "expires_in": 7200,
+          "token_type": "User Access Token"
+        }
+      }
+    },
+    {
+      "id": "bulk-429",
+      "request": {
+        "method": "POST",
+        "path": "/sell/inventory/v1/bulk_update_price_quantity",
+        "body": {
+          "requests": [
+            {
+              "offers": [
+                {
+                  "offerId": "9200000009",
+                  "price": {
+                    "value": "12.99",
+                    "currency": "EUR"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 429,
+        "body": {
+          "errors": [
+            {
+              "errorId": 2001,
+              "domain": "SYNTHETIC",
+              "message": "Too many requests (synthetic)"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "expect": {
+    "pipeline": {
+      "writes": [
+        {
+          "writeScopeId": "ws-ebay-price-9",
+          "amountMinor": 1299,
+          "status": "DISCARDED_STALE"
+        }
+      ]
+    }
+  }
+}

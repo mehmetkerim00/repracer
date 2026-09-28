@@ -137,6 +137,11 @@ export interface AmazonModelParams {
   acceptedNotAppliedShare: number;
   /** A-08: задержка и потери ANY_OFFER_CHANGED */
   anyOfferChanged: { delayMs: number; lossShare: number };
+  /**
+   * A-20 (шаг 51, HTTP-модель): отдаёт ли searchOrders данные покупателя без набора BUYER. Модель Orders 2026-01-01 описывает их набором
+   * includedData — по умолчанию нет; вариант проверяет, что белый список адаптера не пропускает их дальше
+   */
+  ordersBuyerWithoutDataset: boolean;
 }
 
 export const AMAZON_PARAMETERS: { readonly [K in keyof AmazonModelParams]: ParameterSpec<AmazonModelParams[K]> } = {
@@ -157,6 +162,7 @@ export const AMAZON_PARAMETERS: { readonly [K in keyof AmazonModelParams]: Param
     question: 'A-08', status: 'OPEN', meaning: 'задержка и потери ANY_OFFER_CHANGED', default: { delayMs: 60_000, lossShare: 0 },
     alternatives: [{ delayMs: 60_000, lossShare: 0 }, { delayMs: 600_000, lossShare: 0.2 }],
   },
+  ordersBuyerWithoutDataset: { question: 'A-20', status: 'OPEN', meaning: 'данные покупателя в searchOrders без набора BUYER', default: false, alternatives: [false, true] },
 };
 
 export function defaultAmazonParams(): AmazonModelParams {

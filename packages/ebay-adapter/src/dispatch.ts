@@ -181,14 +181,14 @@ export async function dispatchEbay(options: ResolvedOptions, ctx: AdapterCallCon
     /**
      * Р-189 (E-22): пакет разных SKU отвергнут ЦЕЛИКОМ (4xx без ответов по элементам). Документация говорит «один SKU на вызов» — значит,
      * отвергнута форма вызова, а не значения: класс TRANSIENT (значение канал не оценивал), итог пакета — false, и база переводит аккаунт в
-     * «1 SKU на вызов» с алертом (0142). Второго алерта здесь нет. Шаг 51: ответ eBay 4xx ядро НЕ повторяет (Growth Check, descriptor.writeRetry) —
-     * записи завершаются отказом канала, следующая запись этих единиц уходит по одной.
+     * «1 SKU на вызов» с алертом (0142). Второго алерта здесь нет. Шаг 51: правило повтора eBay (Growth Check) отказ ФОРМЫ переотправляет по одному
+     * SKU — значение канал не оценивал (descriptor.writeRetry, в пределах трёх попыток); прочие ответы 4xx не повторяются.
      */
     const e = firstRestError(result.body);
     logConservative(options.deps.logger, ctx, 'EBAY_C18_MULTI_SKU_PROBE', { batchId: batch.batchId, mode: mode!, skus, sent: true, status: String(status), channelCode: e?.errorId !== undefined ? String(e.errorId) : null });
     const error: ChannelError = { class: 'TRANSIENT', code: 'ACTION_NOT_ALLOWED', scope: 'BATCH', raiseAlert: false, httpStatus: status as number,
       ...(e?.errorId !== undefined ? { channelCode: String(e.errorId) } : {}),
-      message: `eBay refused a batch of ${skus} different SKUs as a whole (${describeRestError(e, `HTTP ${String(status)}`)}): not retried, next writes go one SKU per call (E-22)`.slice(0, 300) };
+      message: `eBay refused a batch of ${skus} different SKUs as a whole (${describeRestError(e, `HTTP ${String(status)}`)}): resent one SKU per call (E-22)`.slice(0, 300) };
     for (const w of sendable) outcomes.push({ channelWriteId: w.channelWriteId, status: 'REJECTED', error });
     return { batchId: batch.batchId, outcomes, attemptsMade: result.attempts, ...(report ? { ebayBatchOutcome: { multiSkuAccepted: false } } : {}) };
   }

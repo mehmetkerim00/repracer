@@ -5,6 +5,7 @@ import type { MemorySeed, SeedBound } from '@repracer/pricing-pipeline';
 import type { CostInputs, TriggerType } from '@repracer/pricing-model';
 import type { KauflandChannelModelSpec } from '../simulator/kaufland-channel.ts';
 import type { EbayChannelModelSpec } from '../simulator/ebay-channel.ts';
+import type { AmazonChannelModelSpec } from '../simulator/amazon-channel.ts';
 
 /**
  * Формат сценария контрактного теста. Один файл — один сценарий: мир (аккаунт, ключи, часы, бюджет, данные цен),
@@ -70,7 +71,7 @@ export interface World {
   /** Строки, которых не должно быть в журнале и алертах (токен адреса вебхука) */
   secrets?: string[];
   /** Симулятор [Р-113]: канал с состоянием вместо обменов; exchanges сценария пусты. Модель — по каналу сценария (eBay — шаг 47, Р-187) */
-  channelModel?: KauflandChannelModelSpec | EbayChannelModelSpec;
+  channelModel?: KauflandChannelModelSpec | EbayChannelModelSpec | AmazonChannelModelSpec;
 }
 
 export type PortMethod =
@@ -287,7 +288,9 @@ export function validateScenario(s: Scenario): string[] {
   if (!s.world?.channelModel && (s.variants || s.expect?.channel !== undefined || (s.steps ?? []).some((st) => st.kind === 'channelDeliver' || st.kind === 'channelOrder' || st.kind === 'channelRevise' || st.kind === 'channelRun'))) {
     problems.push('variants, expect.channel and channel steps require world.channelModel');
   }
-  if (s.world?.channelModel && ((s.channel === 'EBAY') !== ('listings' in s.world.channelModel))) problems.push('world.channelModel must be the model of the scenario channel');
+  if (s.world?.channelModel && ((s.channel === 'EBAY') !== ('listings' in s.world.channelModel) || (s.channel === 'AMAZON') !== ('offers' in s.world.channelModel))) {
+    problems.push('world.channelModel must be the model of the scenario channel');
+  }
   if ((s.steps ?? []).some((st) => st.kind === 'channelRevise') && s.channel !== 'EBAY') problems.push('channelRevise is an eBay model step (Trading API edit by another tool)');
   for (const c of (s.world?.channelModel && 'competitors' in s.world.channelModel ? s.world.channelModel.competitors : [])) {
     if (c.behaviour.kind === 'RANDOM_WALK' && !(c.behaviour.everyMs > 0)) problems.push(`competitor ${c.sellerRef}: RANDOM_WALK everyMs must be > 0`);
@@ -297,7 +300,7 @@ export function validateScenario(s: Scenario): string[] {
     if (exchangeIds.has(ex.id)) problems.push(`duplicate exchange id ${ex.id}`);
     exchangeIds.add(ex.id);
     const pathOk = s.channel === 'AMAZON'
-      ? /^\/(listings\/2021-08-01\/items\/|auth\/o2\/token$|batches\/products\/pricing\/2022-05-01\/items\/competitiveSummary$)/.test(ex.request?.path ?? '')
+      ? /^\/(listings\/2021-08-01\/items\/|auth\/o2\/token$|batches\/products\/pricing\/2022-05-01\/items\/competitiveSummary$|orders\/2026-01-01\/orders$|fba\/inventory\/v1\/summaries$)/.test(ex.request?.path ?? '')
       : s.channel === 'EBAY'
         ? /^\/(sell\/inventory\/v1\/|sell\/fulfillment\/v1\/order$|sell\/account\/v1\/payment_policy\/[\w-]+$|buy\/browse\/v1\/item\/v1\|\d+\|0$|identity\/v1\/oauth2\/token$|ws\/api\.dll$)/.test(ex.request?.path ?? '')
         : Boolean(ex.request?.path?.startsWith('/v2/'));

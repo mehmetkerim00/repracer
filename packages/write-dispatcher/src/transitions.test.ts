@@ -75,3 +75,11 @@ test('a channel rule tightens the core policy and never loosens it', () => {
   assert.equal(loose.maxAttempts, DEFAULT_RETRY_POLICY.maxAttempts);
   assert.equal(retryPolicyFor(DEFAULT_RETRY_POLICY, undefined), DEFAULT_RETRY_POLICY);
 });
+
+test('step 51 review, finding 6: a human-required precondition of the offer (Amazon FBA SKU) blocks the scope at once with its code; a token failure does not', () => {
+  const fba = { ...coreError('PRECONDITION_FAILED', 'REQUIRES_HUMAN', 'the SKU is fulfilled by Amazon'), scope: 'ITEM' as const };
+  const t = planReconciliationTransition('ACCEPTED', { kind: 'UNKNOWN', error: fba }, 1, NOW, NOW, DEFAULT_RETRY_POLICY);
+  assert.deepEqual(t.to === 'UNRESOLVED' && [t.errorCode, t.reason.params.code], ['PRECONDITION_FAILED', 'PRECONDITION_FAILED']);
+  const token = { ...coreError('AUTH_INVALID', 'REQUIRES_HUMAN', 'token endpoint refused'), scope: 'ACCOUNT' as const };
+  assert.equal(planReconciliationTransition('ACCEPTED', { kind: 'UNKNOWN', error: token }, 1, NOW, NOW, DEFAULT_RETRY_POLICY).to, 'RECONCILE');
+});

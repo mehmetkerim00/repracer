@@ -238,9 +238,13 @@ export class PgStockStore implements StockStore {
            coalesce(st.on_hand, 0) AS on_hand, coalesce(rv.reserved, 0) AS reserved,
            a.buffer_units, a.max_quantity, a.min_quantity_to_list, a.is_active AS allocation_active,
            ss.last_sent_quantity, ss.latest_version_created, ss.in_flight_write_id,
-           -- Последнее СОЗДАННОЕ значение (ждущее или ушедшее): повторный пересчёт без изменений не плодит версий
+           -- Последнее СОЗДАННОЕ значение (ждущее или ушедшее): повторный пересчёт без изменений не плодит версий.
+           -- Ревью шага 51, находки 2–3: версия, которую канал отверг или не применил (DISCARDED_STALE, NOT_APPLIED), значением канала не стала —
+           -- она не считается «уже созданной», и пересчёт создаёт новую версию того же количества. Иначе после отказа (у eBay — любой 4xx на
+           -- значение, шаг 51) количество в канале застревало до следующего изменения остатка
            coalesce((SELECT w.quantity FROM tenant_data.channel_write w WHERE w.tenant_id = s.tenant_id AND w.write_scope_id = s.write_scope_id AND w.version = ss.latest_version_created),
-                    (SELECT h.quantity FROM tenant_data.channel_write_history h WHERE h.tenant_id = s.tenant_id AND h.write_scope_id = s.write_scope_id AND h.version = ss.latest_version_created)) AS last_quantity
+                    (SELECT h.quantity FROM tenant_data.channel_write_history h WHERE h.tenant_id = s.tenant_id AND h.write_scope_id = s.write_scope_id AND h.version = ss.latest_version_created
+                        AND h.final_status NOT IN ('DISCARDED_STALE', 'NOT_APPLIED'))) AS last_quantity
       FROM tenant_data.write_scope s
       LEFT JOIN stock st ON st.product_id = s.product_id
       LEFT JOIN reserved rv ON rv.product_id = s.product_id

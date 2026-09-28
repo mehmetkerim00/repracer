@@ -62,6 +62,21 @@ export const AMAZON_CONSERVATIVE_RULES = {
     behaviour: 'Заголовок x-amzn-RateLimit-Limit (лимит пары аккаунт–приложение) заменяет скорость пары в бюджете; уровень приложения заголовок не описывает',
     whenAnswered: '—',
   },
+  AMZ_C12_ORDERS_MERCHANT_WHITELIST: {
+    question: 'A-20',
+    behaviour: 'Шаг 51: строки заказов — searchOrders (Orders 2026-01-01) по времени изменения заказа, только fulfilledBy=MERCHANT (заказы FBA наш пул не трогают, Р-6), наборы FULFILLMENT и CANCELLATION без BUYER и RECIPIENT; из ответа берётся белый список (номер заказа и строки, SKU, количество, витрина, статус), прочее не читается. Статус строки: отмена заказа или исполненная отмена строки — CANCELLED; отгружено всё количество строки (или заказ SHIPPED) — SHIPPED; PENDING, PENDING_AVAILABILITY, UNSHIPPED, PARTIALLY_SHIPPED без полной отгрузки строки — OPEN (резервация держится целиком, перепродажи нет); UNFULFILLABLE и незнакомый статус — строка пропускается и считается в журнале',
+    whenAnswered: 'Если Amazon подтвердит, что без наборов BUYER и RECIPIENT данных покупателя в ответе нет никогда, и опишет UNFULFILLABLE для заказов продавца — белый список остаётся, пропуск UNFULFILLABLE заменяется правилом',
+  },
+  AMZ_C13_FBA_BY_CHANNEL_CODE: {
+    question: 'A-21',
+    behaviour: 'Шаг 51: способ исполнения оффера — по fulfillmentAvailability: код DEFAULT — наш (FBM, MERCHANT); только иной код — Amazon (FBA, CHANNEL); ни одного кода — неизвестно, и оффер считается CHANNEL: количество по нему не пишется (fail-closed). Коды сети Amazon в снимке не перечислены. Количество FBA читается getInventorySummaries (fulfillableQuantity) в предложение обнаружения; в базу и на экраны оно пока не доходит (ревью шага 51, находка 7 — отложено)',
+    whenAnswered: 'Если Amazon назовёт коды сети FBA по регионам — неизвестный код станет ошибкой обнаружения, а не молчаливым CHANNEL',
+  },
+  AMZ_C14_FBA_QUANTITY_NEVER_WRITTEN: {
+    question: null,
+    behaviour: 'Шаг 51 [Р-6]: количеством FBA управляет Amazon. Запись QUANTITY по SKU, у которого чтение перед записью показывает сеть Amazon без кода DEFAULT или не показывает кодов вовсе, не отправляется; обратное чтение такого SKU (сеть Amazon) — отказ «нужен человек», и сверка блокирует единицу сразу (каталог считал оффер FBM, а он ушёл в FBA)',
+    whenAnswered: '—',
+  },
 } as const satisfies Record<string, ConservativeRule>;
 
 export type AmazonConservativeRuleCode = keyof typeof AMAZON_CONSERVATIVE_RULES;

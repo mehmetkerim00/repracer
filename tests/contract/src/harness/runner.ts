@@ -13,6 +13,7 @@ import { createNotificationReceiver, createSqsClient, pipelineSink, storeLedger,
 import { FakeSqs } from '@repracer/amazon-notifications/testing';
 import { SimulatedKauflandChannel, type KauflandChannelModelSpec } from '../simulator/kaufland-channel.ts';
 import { SimulatedEbayChannel, type EbayChannelModelSpec } from '../simulator/ebay-channel.ts';
+import { SimulatedAmazonChannel, type AmazonChannelModelSpec } from '../simulator/amazon-channel.ts';
 import type { CallStep, InboundDeliverySpec, PipelineStep, Scenario, StepContext, World } from './scenario.ts';
 import { VirtualClock, worldDependencies, type Sink } from './world.ts';
 
@@ -338,11 +339,15 @@ export async function runScenario(
   const model = world.channelModel
     ? scenario.channel === 'EBAY'
       ? new SimulatedEbayChannel(world.channelModel as EbayChannelModelSpec, world.clock, { user: world.credentials.accessToken ?? '', application: world.credentials.applicationToken ?? '' })
-      : new SimulatedKauflandChannel(world.channelModel as KauflandChannelModelSpec, world.clock)
+      // Шаг 51: HTTP-модель SP-API — через неё идёт настоящий адаптер Amazon
+      : scenario.channel === 'AMAZON'
+        ? new SimulatedAmazonChannel(world.channelModel as AmazonChannelModelSpec, world.clock, world.credentials.accessToken ?? '')
+        : new SimulatedKauflandChannel(world.channelModel as KauflandChannelModelSpec, world.clock)
     : null;
   const channel = behaviour ?? model ?? new ScriptedChannel(scenario.exchanges, scenario.expect?.allExchangesUsed ?? true);
   const simulator = channel instanceof SimulatedKauflandChannel ? channel : null;
   const ebaySimulator = channel instanceof SimulatedEbayChannel ? channel : null;
+  const amazonSimulator = channel instanceof SimulatedAmazonChannel ? channel : null;
   const checker = scenario.channel === 'AMAZON' ? amazonRequestChecker(world, clock, neverWrittenAttributes('AMAZON'))
     : scenario.channel === 'EBAY' ? ebayRequestChecker(world, world.adapter?.ebayEnvironment === 'PRODUCTION' ? EBAY_PRODUCTION_HOST : EBAY_STAND_HOST) : kauflandAuthChecker(world, clock);
   const fetch = channelFetch(channel, checker, clock, violations, trace);
@@ -491,8 +496,8 @@ export async function runScenario(
   if (expect.pipeline !== undefined && store) {
     failures.push(...match(pipelineState, resolvePlaceholders(expect.pipeline, clock), 'subset', 'pipeline'));
   }
-  if (expect.channel !== undefined && (simulator || ebaySimulator)) {
-    failures.push(...match((simulator ?? ebaySimulator)!.dump(), resolvePlaceholders(expect.channel, clock), 'subset', 'channel'));
+  if (expect.channel !== undefined && (simulator || ebaySimulator || amazonSimulator)) {
+    failures.push(...match((simulator ?? ebaySimulator ?? amazonSimulator)!.dump(), resolvePlaceholders(expect.channel, clock), 'subset', 'channel'));
   }
 
   // Секреты и синтетические PII не должны утечь

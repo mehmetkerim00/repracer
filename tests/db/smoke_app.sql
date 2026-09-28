@@ -1252,6 +1252,13 @@ INSERT INTO tenant_data.write_scope (tenant_id, write_scope_id, channel_account_
 VALUES (:tA, 'a6000000-0000-0000-0000-000000000003', 'a4000000-0000-0000-0000-000000000003', 'EBAY', 'QUANTITY', 'a5000000-0000-0000-0000-000000000001',
         'c0000000-0000-0000-0000-0000000000e2', 1, 'ACCOUNT_MARKETPLACE_SKU', '["EBAY_DE", "A-1"]', 'L1', true);
 UPDATE tenant_data.offer_mapping SET quantity_write_scope_id = 'a6000000-0000-0000-0000-000000000003' WHERE offer_mapping_id = 'ad000000-0000-0000-0000-000000000001';
+-- Шаг 51 [Р-6]: количеством предложения, которое исполняет канал (Amazon FBA), управляет канал — единицы записи количества у него нет
+-- Способ исполнения после вставки не меняется (страж столбцов), поэтому правило достижимо только при вставке
+SELECT pg_temp.expect_fail('channel fulfilled offer keeps a quantity write scope (Р-6)', $q$
+  INSERT INTO tenant_data.offer_mapping (tenant_id, product_id, channel_account_id, channel, marketplace, channel_offer_key, external_sku, external_offer_id, external_listing_id,
+    ebay_listing_format, ebay_migration_status, fulfillment, quantity_write_scope_id)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a5000000-0000-0000-0000-000000000001', 'a4000000-0000-0000-0000-000000000003', 'EBAY', 'EBAY_DE', 'L1/A-9', 'A-1', 'O9', 'L1',
+    'FIXED_PRICE', 'MIGRATED', 'CHANNEL', 'a6000000-0000-0000-0000-000000000003') $q$, 'offer_mapping_check7');
 INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, quantity, version, origin, budget_scope_key, budget_day)
 VALUES (:tA, 'a9000000-0000-0000-0000-000000000011', 'a6000000-0000-0000-0000-000000000003', 'QUANTITY', 5, 1, 'STOCK_RECALC', 'L1', (now() AT TIME ZONE 'Europe/Berlin')::date);
 SELECT pg_temp.expect_fail('increase uses reserved margin (241 > 240) (Р-19)', $q$

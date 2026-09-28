@@ -148,13 +148,13 @@
     },
     {
       "id": "read",
-      "note": "Чтение оффера перед записью: тип товара и собственное ценообразование канала [AMZ_C03, AMZ_C09]",
+      "note": "Чтение оффера перед записью количества: тип товара и сеть исполнения [AMZ_C09, AMZ_C14]",
       "request": {
         "method": "GET",
         "path": "/listings/2021-08-01/items/A1SYNSELLER0001/SYN-SKU-7001",
         "query": {
           "marketplaceIds": "A1PA6795UKMFR9",
-          "includedData": "summaries,attributes"
+          "includedData": "summaries,attributes,fulfillmentAvailability"
         }
       },
       "response": {
@@ -195,7 +195,13 @@
                 "quantity": 3
               }
             ]
-          }
+          },
+          "fulfillmentAvailability": [
+            {
+              "fulfillmentChannelCode": "DEFAULT",
+              "quantity": 3
+            }
+          ]
         }
       }
     },

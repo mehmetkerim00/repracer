@@ -3,7 +3,7 @@ import type { ListingsItem, ListingsItemPatchRequest, ListingsItemSubmissionResp
 import { logConservative } from './conservative.ts';
 import { marketplaceInfo } from './descriptor.ts';
 import { channelError, classifyFailure, classifyIssue } from './errors.ts';
-import { channelOwnedPricing, listingPath, minorToDecimal, productTypeOf } from './mapping.ts';
+import { channelOwnedPricing, fulfillmentOf, listingPath, minorToDecimal, productTypeOf } from './mapping.ts';
 import { skuOf } from './planning.ts';
 import { acquire, deadlinePassed, nowMs, observeRateLimit, openSession, type AmazonAdapterOptions } from './session.ts';
 
@@ -51,13 +51,29 @@ export async function dispatchAmazon(options: AmazonAdapterOptions, ctx: Adapter
   const readBudget = acquire(options, ctx, session, 'getListingsItem');
   if (readBudget) return rejectAll(batch, readBudget);
   const read = await session.client.request<ListingsItem>('GET', listingPath(session.sellerId, sku), {
-    query: { marketplaceIds: marketplaces, includedData: ['summaries', 'attributes'] }, ...(ctx.signal ? { signal: ctx.signal } : {}),
+    // Шаг 51: перед записью количества — и способ исполнения [AMZ_C14]
+    query: { marketplaceIds: marketplaces, includedData: quantity ? ['summaries', 'attributes', 'fulfillmentAvailability'] : ['summaries', 'attributes'] },
+    ...(ctx.signal ? { signal: ctx.signal } : {}),
   });
   if (!read.ok) return rejectAll(batch, classifyFailure(read, 'ITEM', nowMs(options)), read.attempts.length);
   observeRateLimit(options, ctx, session, 'getListingsItem', read.headers);
   const productType = productTypeOf(read.data, marketplaces[0]!);
   if (!productType) return rejectAll(batch, channelError('NOT_FOUND', 'ITEM', 'listing has no summary with a product type in the requested stores'), read.attempts.length);
   logConservative(options.deps.logger, ctx, 'AMZ_C09_PRODUCT_TYPE_FROM_SUMMARIES', { marketplaces: marketplaces.length });
+  /**
+   * Шаг 51 [Р-6, AMZ_C14]: количеством FBA управляет Amazon. SKU в сети Amazon без DEFAULT — запись количества не уходит: запись DEFAULT
+   * могла бы перевести листинг в наше исполнение. Нужен человек — каталог считал оффер FBM. Кодов нет вовсе — тоже отказ (ревью шага 51,
+   * находка 8): обнаружение считает такой оффер неизвестным (fail-closed), и запись не должна решать за него
+   */
+  if (quantity) {
+    const fulfillment = fulfillmentOf(read.data);
+    if (fulfillment.kind !== 'MERCHANT') {
+      logConservative(options.deps.logger, ctx, 'AMZ_C14_FBA_QUANTITY_NEVER_WRITTEN', { stage: 'DISPATCH', codes: fulfillment.codes.join(',') });
+      return rejectAll(batch, channelError('PRECONDITION_FAILED', 'ITEM', fulfillment.kind === 'AMAZON'
+        ? 'the SKU is fulfilled by Amazon (FBA): its quantity is managed by Amazon and is never written by us (Р-6)'
+        : 'the SKU shows no fulfillment network (no DEFAULT): the quantity is not written until the offer is known to be merchant fulfilled'), read.attempts.length);
+    }
+  }
 
   const outcomes: WriteOutcome[] = [];
   let sendable = batch.items;

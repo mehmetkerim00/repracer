@@ -128,15 +128,18 @@ export const EBAY_DESCRIPTOR: ChannelDescriptor = {
   /**
    * Шаг 51, Growth Check («retries for a maximum of two times for infrastructure errors», get-started-with-ebay-apis.html снимка
    * 2026-09-28): запись — не больше трёх попыток (два повтора) и только после сбоя инфраструктуры: 5xx и недоступный сервер токенов
-   * (CHANNEL_UNAVAILABLE), таймаут, обрыв соединения. Ответ eBay 4xx (включая 429 и отказ формы пакета EBAY_C18) не повторяется. Отказ
-   * НАШЕГО клиентского бюджета или режима пакетов до отправки повторяем: запрос в eBay не уходил (у ошибки нет httpStatus).
+   * (CHANNEL_UNAVAILABLE), таймаут, обрыв соединения. Ответ eBay 4xx на значение (включая 429) не повторяется. Отказ НАШЕГО клиентского
+   * бюджета или режима пакетов до отправки повторяем: запрос в eBay не уходил (у ошибки нет httpStatus). Исключение — отказ ФОРМЫ пакета
+   * EBAY_C18 (Р-189, ACTION_NOT_ALLOWED класса TRANSIENT; ревью шага 51, находка 2): значение eBay не оценивал, и то же значение уходит ДРУГИМ
+   * вызовом — по одному SKU; это приспособление к названному ограничению, а не повтор после сбоя, и оно в пределах тех же трёх попыток.
+   * Без него записи количества пробы не пересоздавались бы, пока не изменится остаток.
    * Итог неизвестен (запрос мог дойти) — не повтор, а сверка обратным чтением; повтор после неё тоже считается попыткой.
    */
   writeRetry: {
     maxAttempts: 3,
     retryOn: [
       { code: 'CHANNEL_UNAVAILABLE' }, { code: 'TIMEOUT' }, { code: 'NETWORK' },
-      { code: 'RATE_LIMITED', notSentOnly: true }, { code: 'ACTION_NOT_ALLOWED', notSentOnly: true },
+      { code: 'RATE_LIMITED', notSentOnly: true }, { code: 'ACTION_NOT_ALLOWED' },
     ],
     basis: 'eBay Application Growth Check: retries for a maximum of two times for infrastructure errors (vendor/ebay/2026-09-28/get-started-with-ebay-apis.html)',
   },

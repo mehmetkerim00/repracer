@@ -157,7 +157,10 @@ export function planReconciliationTransition(
   // Р-115 (шаг 22): обратное чтение показало правило автоматического ценообразования канала или границы канала — сверку не повторять
   // час, единица блокируется сразу с кодом канала; принятая запись остаётся принятой. Прочие отказы «нужен человек» (например, отказ
   // сервера токенов) сразу не блокируют: они не про оффер и могут пройти (ревью шага 22, находка 2)
-  if (result.kind === 'UNKNOWN' && result.error?.class === 'REQUIRES_HUMAN' && CHANNEL_PRICING_CODES.has(result.error.code)) {
+  // Шаг 51 (ревью, находка 6): так же — невыполненное условие ПРЕДЛОЖЕНИЯ (PRECONDITION_FAILED по элементу: Amazon FBA-SKU, количество которого
+  // ведёт Amazon [AMZ_C14]; eBay — листинг не под Inventory API): сверка его не изменит, человек разбирает сразу и с кодом канала
+  if (result.kind === 'UNKNOWN' && result.error?.class === 'REQUIRES_HUMAN'
+    && (CHANNEL_PRICING_CODES.has(result.error.code) || (result.error.code === 'PRECONDITION_FAILED' && result.error.scope === 'ITEM'))) {
     const code = result.error.code;
     return { to: 'UNRESOLVED', errorCode: code, reason: { code: 'WRITE_SCOPE_BLOCKED', params: { code, action: sellerActionFor(code) } } };
   }

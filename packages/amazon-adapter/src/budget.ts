@@ -39,6 +39,12 @@ export class TwoLevelBudget implements AmazonRequestBudget {
   tryAcquire(sellerId: string, operation: AmazonOperation, nowMs: number): { ok: true } | { ok: false; retryAtMs: number; level: 'PAIR' | 'APPLICATION' } {
     const limits = AMAZON_RATE_LIMITS[operation];
     const pair = this.bucket(`pair:${sellerId}:${operation}`, limits.pair.ratePerSecond, limits.pair.burst, nowMs);
+    // Шаг 51 (ревью, находка 4): лимит приложения операции неизвестен — только лимит пары, превышение приложения покажет 429 канала [A-23]
+    if (limits.application === null) {
+      if (pair.tokens < 1) return { ok: false, retryAtMs: nowMs + (pair.rate > 0 ? Math.ceil(((1 - pair.tokens) / pair.rate) * 1000) : 60_000), level: 'PAIR' };
+      pair.tokens -= 1;
+      return { ok: true };
+    }
     const appRate = Math.max(0, limits.application.ratePerSecond - this.otherLoad());
     // Запас приложения — доля burst, оставшаяся после расхода других продавцов: при полной нагрузке запаса нет
     // Пока приложение не исчерпано, хотя бы один запрос проходит: иначе при свободной доле меньше 1/burst запросы не шли вовсе

@@ -76,3 +76,51 @@ export interface LowestPricedOffer { lowestPricedOffersInput: { itemCondition: s
 export interface CompetitiveSummaryResponseBody { asin: string; marketplaceId: string; lowestPricedOffers?: LowestPricedOffer[]; errors?: SpApiError[] }
 export interface CompetitiveSummaryResponse { status: { statusCode?: number; reasonPhrase?: string }; body: CompetitiveSummaryResponseBody }
 export interface CompetitiveSummaryBatchResponse { responses: CompetitiveSummaryResponse[] }
+
+/**
+ * Шаг 51: Orders API 2026-01-01 (`searchOrders`) — вручную по снимку
+ * vendor/amazon/sp-api-models/2026-09-29/models/orders-api-model/orders_2026-01-01.json. Перенесены ТОЛЬКО поля белого списка
+ * адаптера: данных покупателя и получателя (`buyer`, `recipient`, наборы BUYER/RECIPIENT) в типе нет намеренно [Р-4].
+ */
+export interface SearchOrdersResponse {
+  orders?: OrderRecord[];
+  pagination?: { nextToken?: string };
+}
+
+/** definitions.Order (белый список) */
+export interface OrderRecord {
+  orderId?: string;
+  createdTime?: string;
+  lastUpdatedTime?: string;
+  salesChannel?: { channelName?: string; marketplaceId?: string };
+  /** Набор FULFILLMENT: definitions.OrderFulfillment */
+  fulfillment?: { fulfillmentStatus?: string; fulfilledBy?: string };
+  orderItems?: OrderItemRecord[];
+}
+
+/** definitions.OrderItem (белый список) */
+export interface OrderItemRecord {
+  orderItemId?: string;
+  quantityOrdered?: number;
+  product?: { asin?: string; sellerSku?: string };
+  /** Набор FULFILLMENT: definitions.ItemFulfillment */
+  fulfillment?: { quantityFulfilled?: number; quantityUnfulfilled?: number };
+  /** Набор CANCELLATION: definitions.ItemCancellation; причину (свободный текст) адаптер не читает */
+  cancellation?: { cancellationExecution?: { cancelledBy?: string } };
+}
+
+/**
+ * Шаг 51: FBA Inventory v1 (`getInventorySummaries`) — вручную по снимку
+ * vendor/amazon/sp-api-models/2026-09-29/models/fba-inventory-api-model/fbaInventory.json. Только чтение: количество FBA ведёт Amazon [Р-6]
+ */
+export interface InventorySummariesResponse {
+  payload?: { inventorySummaries?: InventorySummaryRecord[] };
+  pagination?: { nextToken?: string };
+}
+
+export interface InventorySummaryRecord {
+  sellerSku?: string;
+  asin?: string;
+  totalQuantity?: number;
+  inventoryDetails?: { fulfillableQuantity?: number };
+}

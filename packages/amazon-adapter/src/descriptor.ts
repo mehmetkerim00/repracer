@@ -22,6 +22,12 @@ export const AMAZON_RATE_LIMITS = {
   searchListingsItems: { pair: { ratePerSecond: 5, burst: 5 }, application: { ratePerSecond: 100 } },
   // Модель productPricing_2022-05-01 (Usage Plan): 0.033 rps, burst 1. Лимит уровня приложения не документирован — равен лимиту пары [AMZ_C11, A-15]
   getCompetitiveSummary: { pair: { ratePerSecond: 0.033, burst: 1 }, application: { ratePerSecond: 0.033, documented: false } },
+  // Шаг 51, снимок 2026-09-29 (Usage Plan в описании операции): searchOrders 0.0056 rps, burst 20; getInventorySummaries 2 rps, burst 2.
+  // Лимит уровня приложения моделью не описан [A-23]. Ревью шага 51, находка 4: приравнять его к лимиту пары нельзя — это одно ведро на
+  // ВСЕ аккаунты процесса, и уже два аккаунта с чтением заказов раз в 5 минут исчерпали бы его (заказы читались бы с отставанием в часы —
+  // перепродажа). Держится только лимит пары; превышение лимита приложения канал покажет ответом 429
+  searchOrders: { pair: { ratePerSecond: 0.0056, burst: 20 }, application: null },
+  getInventorySummaries: { pair: { ratePerSecond: 2, burst: 2 }, application: null },
 } as const;
 export type AmazonOperation = keyof typeof AMAZON_RATE_LIMITS;
 
@@ -35,6 +41,12 @@ export const COMPETITIVE_SUMMARY_PATH = '/batches/products/pricing/2022-05-01/it
 export const SEARCH_PAGE_MAX = 20;
 /** Модель: quantity — integer, minimum 0; верхний предел не задан — (проверить) */
 export const MAX_QUANTITY = 1_000_000;
+/** Шаг 51: searchOrders (Orders 2026-01-01) — maxResultsPerPage 1…100 (модель) */
+export const ORDERS_PATH = '/orders/2026-01-01/orders';
+export const ORDERS_PAGE_MAX = 100;
+/** Шаг 51: getInventorySummaries (FBA Inventory v1) — sellerSkus до 50, marketplaceIds ровно одна (модель) */
+export const FBA_SUMMARIES_PATH = '/fba/inventory/v1/summaries';
+export const FBA_SUMMARIES_SKUS_MAX = 50;
 
 export const AMAZON_DESCRIPTOR: ChannelDescriptor = {
   channel: 'AMAZON',
@@ -73,8 +85,10 @@ export const AMAZON_DESCRIPTOR: ChannelDescriptor = {
   ],
   rateLimits: Object.entries(AMAZON_RATE_LIMITS).flatMap(([operation, r]) => [
     { owner: 'SELLER_APPLICATION_OPERATION' as const, operation, requestsPerSecond: r.pair.ratePerSecond, burst: r.pair.burst, source: 'DOCUMENTED' as const },
-    { owner: 'APPLICATION' as const, operation, requestsPerSecond: r.application.ratePerSecond,
-      source: 'documented' in r.application && r.application.documented === false ? 'UNKNOWN' as const : 'DOCUMENTED' as const },
+    r.application === null
+      ? { owner: 'APPLICATION' as const, operation, source: 'UNKNOWN' as const }
+      : { owner: 'APPLICATION' as const, operation, requestsPerSecond: r.application.ratePerSecond,
+        source: 'documented' in r.application && r.application.documented === false ? 'UNKNOWN' as const : 'DOCUMENTED' as const },
   ]),
   capabilities: [],
   // Р-119: опроса конкурентов нет (getCompetitiveSummary 0.033 rps, AMZ_C07) — выборку для Р-52 взять неоткуда

@@ -315,7 +315,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
       const outcome: WriteOutcome = { channelWriteId: rejected.channelWriteId, status: 'REJECTED', error: rejected.error };
       report.dispatch = outcome;
       report.stages.push({ stage: 'DISPATCH_PLAN', outcome: 'REJECTED', reason: channelRefusal(rejected.error) as Reason });
-      await handOff(ctx, write.writeScope.writeScopeId, await store.recordDispatch(ctx.tenantId, write, outcome, deps.now(), adapter.descriptor.writeRetry), report);
+      await handOff(ctx, write.writeScope.writeScopeId, await store.recordDispatch(ctx.tenantId, write, outcome, deps.now(), adapter.descriptor?.writeRetry), report);
     }
     for (const batch of plan.batches) {
       report.stages.push({ stage: 'DISPATCH_PLAN', outcome: 'PLANNED' });
@@ -338,7 +338,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
           stage: 'DISPATCH', outcome: outcome.status,
           ...(outcome.status === 'ACCEPTED' ? {} : { reason: channelRefusal(outcome.error) as Reason }),
         });
-        const recorded = await store.recordDispatch(ctx.tenantId, write, outcome, deps.now(), adapter.descriptor.writeRetry);
+        const recorded = await store.recordDispatch(ctx.tenantId, write, outcome, deps.now(), adapter.descriptor?.writeRetry);
         // Р-116 на первой отправке: синхронный канал применил запись сразу, сверки диспетчером не будет (ревью шага 22, находка 1)
         if (outcome.status === 'ACCEPTED' && outcome.appliedImmediately) await checkBasis(ctx, write, outcome.observation, report);
         await handOff(ctx, write.writeScope.writeScopeId, recorded, report);

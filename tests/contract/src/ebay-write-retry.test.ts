@@ -22,11 +22,12 @@ test('eBay write retry rule: at most two retries, only infrastructure failures; 
     const third = planOutcomeTransition(fail(code, status), 3, NOW, policy);
     assert.deepEqual(third.to === 'DISCARD' && third.reason, { code: 'WRITE_RETRIES_EXHAUSTED', params: { attempts: 3, code } }, `${code}: no third retry`);
   }
-  // Ответ eBay 4xx — отказ канала без повтора, даже если адаптер отнёс его к временным (429, отказ формы пакета EBAY_C18)
-  for (const [code, status] of [['RATE_LIMITED', 429], ['ACTION_NOT_ALLOWED', 400]] as const) {
-    const t = planOutcomeTransition(fail(code, status), 1, NOW, policy);
-    assert.deepEqual(t.to === 'DISCARD' && [t.reason.code, t.reason.params.httpStatus], ['WRITE_NOT_ACCEPTED_BY_CHANNEL', status], `${code} ${status}: not retried`);
-  }
+  // Ответ eBay 4xx на значение — отказ канала без повтора, даже если адаптер отнёс его к временным (429)
+  const tooMany = planOutcomeTransition(fail('RATE_LIMITED', 429), 1, NOW, policy);
+  assert.deepEqual(tooMany.to === 'DISCARD' && [tooMany.reason.code, tooMany.reason.params.httpStatus], ['WRITE_NOT_ACCEPTED_BY_CHANNEL', 429], '429: not retried');
+  // Отказ ФОРМЫ пакета EBAY_C18 (Р-189): значение не оценено — переотправка по одному SKU, но в пределах тех же трёх попыток
+  assert.equal(planOutcomeTransition(fail('ACTION_NOT_ALLOWED', 400), 1, NOW, policy).to, 'RETRY');
+  assert.equal(planOutcomeTransition(fail('ACTION_NOT_ALLOWED', 400), 3, NOW, policy).to, 'DISCARD');
   // Отказ нашего клиентского бюджета или режима пакетов до отправки — в eBay запроса не было, повтор допустим
   assert.equal(planOutcomeTransition(fail('RATE_LIMITED'), 1, NOW, policy).to, 'RETRY');
   assert.equal(planOutcomeTransition(fail('ACTION_NOT_ALLOWED'), 1, NOW, policy).to, 'RETRY');

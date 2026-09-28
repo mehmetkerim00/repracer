@@ -1,0 +1,626 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "amazon/fba/read-only",
+  "channel": "AMAZON",
+  "apiVersion": "listings-items-2021-08-01",
+  "title": "Шаг 51: FBA — по коду сети исполнения; количество FBA читается getInventorySummaries и никогда не пишется",
+  "description": "Обнаружение: DEFAULT — FBM (MERCHANT, количество — наше); только иной код — FBA (CHANNEL, количество — fulfillableQuantity из getInventorySummaries, только для показа); кодов нет — неизвестно, CHANNEL без количества (fail-closed: количество не пишется). Запись количества по SKU, который оказался в сети Amazon, не уходит: чтение перед записью видит сеть без DEFAULT — PRECONDITION_FAILED, PATCH нет. Обратное чтение количества: сеть Amazon — PRECONDITION_FAILED, пусто — «нет данных» (UNKNOWN), а не 0.",
+  "tags": [
+    "quantity",
+    "fba",
+    "conservative:AMZ_C13_FBA_BY_CHANNEL_CODE",
+    "conservative:AMZ_C14_FBA_QUANTITY_NEVER_WRITTEN"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "vendor/amazon/sp-api-models/2026-09-16/models/listings-items-api-model/listingsItems_2021-08-01.json",
+      "https://developer-docs.amazon/sp-api/docs/manage-purchasable-offer.md",
+      "https://developer-docs.amazon/sp-api/docs/listings-items-api-rate-limits.md",
+      "https://developer-docs.amazon/sp-api/docs/building-listings-management-workflows-guide.md",
+      "vendor/amazon/sp-api-models/2026-09-29/models/fba-inventory-api-model/fbaInventory.json"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "A1SYNSELLER0001",
+      "marketplaces": [
+        "A1PA6795UKMFR9"
+      ],
+      "channel": "AMAZON",
+      "region": "EU"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "Atzr|syn-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "amzn1.application-oa2-client.syn0001",
+        "clientSecret": "syn-lwa-client-secret-0001"
+      },
+      "accessToken": "Atza|syn-access-token-0001"
+    }
+  },
+  "steps": [
+    {
+      "id": "discover",
+      "kind": "call",
+      "method": "discoverOffers",
+      "args": [
+        {
+          "limit": 20
+        }
+      ],
+      "expect": {
+        "items": [
+          {
+            "identity": {
+              "externalSku": "SYN-SKU-FBM-7101"
+            },
+            "fulfillment": "MERCHANT",
+            "currentQuantity": 5
+          },
+          {
+            "identity": {
+              "externalSku": "SYN-SKU-FBA-7102"
+            },
+            "fulfillment": "CHANNEL",
+            "currentQuantity": 12
+          },
+          {
+            "identity": {
+              "externalSku": "SYN-SKU-NON-7103"
+            },
+            "fulfillment": "CHANNEL",
+            "currentQuantity": {
+              "$absent": true
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "fba-quantity-write",
+      "kind": "call",
+      "method": "dispatch",
+      "args": [
+        {
+          "batchId": "amz:qfba",
+          "operation": "patchListingsItem",
+          "items": [
+            {
+              "channelWriteId": "cw-qfba",
+              "version": 1,
+              "idempotencyKey": "cw-qfba:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-amz-qty-EU-SYN-SKU-FBA-7102",
+                "field": "QUANTITY",
+                "scopeKey": "amazon|acct-1|EU|SYN-SKU-FBA-7102",
+                "identity": {
+                  "region": "EU",
+                  "marketplace": "A1PA6795UKMFR9",
+                  "externalSku": "SYN-SKU-FBA-7102"
+                }
+              },
+              "value": {
+                "field": "QUANTITY",
+                "quantity": 30
+              }
+            }
+          ],
+          "budgetCharges": [],
+          "requestCount": 2
+        }
+      ],
+      "expect": {
+        "outcomes": [
+          {
+            "channelWriteId": "cw-qfba",
+            "status": "REJECTED",
+            "error": {
+              "code": "PRECONDITION_FAILED",
+              "class": "REQUIRES_HUMAN"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "readback-fba",
+      "kind": "call",
+      "method": "readBack",
+      "args": [
+        [
+          {
+            "writeScope": {
+              "writeScopeId": "ws-amz-qty-EU-SYN-SKU-FBA-7102",
+              "field": "QUANTITY",
+              "scopeKey": "amazon|acct-1|EU|SYN-SKU-FBA-7102",
+              "identity": {
+                "region": "EU",
+                "marketplace": "A1PA6795UKMFR9",
+                "externalSku": "SYN-SKU-FBA-7102"
+              }
+            },
+            "fields": [
+              "QUANTITY"
+            ]
+          }
+        ]
+      ],
+      "expect": {
+        "observations": [],
+        "failures": [
+          {
+            "error": {
+              "code": "PRECONDITION_FAILED"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "readback-none",
+      "kind": "call",
+      "method": "readBack",
+      "args": [
+        [
+          {
+            "writeScope": {
+              "writeScopeId": "ws-amz-qty-EU-SYN-SKU-NON-7103",
+              "field": "QUANTITY",
+              "scopeKey": "amazon|acct-1|EU|SYN-SKU-NON-7103",
+              "identity": {
+                "region": "EU",
+                "marketplace": "A1PA6795UKMFR9",
+                "externalSku": "SYN-SKU-NON-7103"
+              }
+            },
+            "fields": [
+              "QUANTITY"
+            ]
+          }
+        ]
+      ],
+      "expect": {
+        "observations": [],
+        "failures": [
+          {
+            "error": {
+              "code": "UNKNOWN",
+              "channelCode": "MERCHANT_QUANTITY_ABSENT"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "lwa-token",
+      "note": "Токен LWA по refresh_token (connecting-to-the-selling-partner-api); тело формы проверяет стенд",
+      "request": {
+        "method": "POST",
+        "path": "/auth/o2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "Atza|syn-access-token-0001",
+          "token_type": "bearer",
+          "expires_in": 3600,
+          "refresh_token": "Atzr|syn-refresh-token-0001"
+        }
+      }
+    },
+    {
+      "id": "search",
+      "note": "searchListingsItems с attributes: привязка к правилу ценообразования и границы канала видны до назначения стратегии [Р-120]",
+      "request": {
+        "method": "GET",
+        "path": "/listings/2021-08-01/items/A1SYNSELLER0001",
+        "query": {
+          "marketplaceIds": "A1PA6795UKMFR9",
+          "includedData": "summaries,attributes,offers,fulfillmentAvailability",
+          "pageSize": "20"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "numberOfResults": 3,
+          "pagination": {},
+          "items": [
+            {
+              "sku": "SYN-SKU-FBM-7101",
+              "summaries": [
+                {
+                  "marketplaceId": "A1PA6795UKMFR9",
+                  "asin": "B000007101",
+                  "productType": "SYNTHETIC_PRODUCT_TYPE",
+                  "status": [
+                    "BUYABLE",
+                    "DISCOVERABLE"
+                  ]
+                }
+              ],
+              "attributes": {
+                "purchasable_offer": [
+                  {
+                    "marketplace_id": "A1PA6795UKMFR9",
+                    "currency": "EUR",
+                    "audience": "ALL",
+                    "our_price": [
+                      {
+                        "schedule": [
+                          {
+                            "value_with_tax": 18.5
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ],
+                "fulfillment_availability": [
+                  {
+                    "fulfillment_channel_code": "DEFAULT",
+                    "quantity": 5
+                  }
+                ]
+              },
+              "issues": [],
+              "offers": [
+                {
+                  "marketplaceId": "A1PA6795UKMFR9",
+                  "offerType": "B2C",
+                  "price": {
+                    "currencyCode": "EUR",
+                    "amount": "18.5"
+                  }
+                }
+              ],
+              "fulfillmentAvailability": [
+                {
+                  "fulfillmentChannelCode": "DEFAULT",
+                  "quantity": 5
+                }
+              ]
+            },
+            {
+              "sku": "SYN-SKU-FBA-7102",
+              "summaries": [
+                {
+                  "marketplaceId": "A1PA6795UKMFR9",
+                  "asin": "B000007102",
+                  "productType": "SYNTHETIC_PRODUCT_TYPE",
+                  "status": [
+                    "BUYABLE",
+                    "DISCOVERABLE"
+                  ]
+                }
+              ],
+              "attributes": {
+                "purchasable_offer": [
+                  {
+                    "marketplace_id": "A1PA6795UKMFR9",
+                    "currency": "EUR",
+                    "audience": "ALL",
+                    "our_price": [
+                      {
+                        "schedule": [
+                          {
+                            "value_with_tax": 19.5
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              "issues": [],
+              "offers": [
+                {
+                  "marketplaceId": "A1PA6795UKMFR9",
+                  "offerType": "B2C",
+                  "price": {
+                    "currencyCode": "EUR",
+                    "amount": "19.5"
+                  }
+                }
+              ],
+              "fulfillmentAvailability": [
+                {
+                  "fulfillmentChannelCode": "SYN_AMAZON_NETWORK_CODE",
+                  "quantity": 12
+                }
+              ]
+            },
+            {
+              "sku": "SYN-SKU-NON-7103",
+              "summaries": [
+                {
+                  "marketplaceId": "A1PA6795UKMFR9",
+                  "asin": "B000007103",
+                  "productType": "SYNTHETIC_PRODUCT_TYPE",
+                  "status": [
+                    "BUYABLE",
+                    "DISCOVERABLE"
+                  ]
+                }
+              ],
+              "attributes": {
+                "purchasable_offer": [
+                  {
+                    "marketplace_id": "A1PA6795UKMFR9",
+                    "currency": "EUR",
+                    "audience": "ALL",
+                    "our_price": [
+                      {
+                        "schedule": [
+                          {
+                            "value_with_tax": 20.5
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              "issues": [],
+              "offers": [
+                {
+                  "marketplaceId": "A1PA6795UKMFR9",
+                  "offerType": "B2C",
+                  "price": {
+                    "currencyCode": "EUR",
+                    "amount": "20.5"
+                  }
+                }
+              ],
+              "fulfillmentAvailability": []
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "fba-summaries",
+      "note": "getInventorySummaries: количество FBA читается, но не пишется [Р-6, AMZ_C14]",
+      "request": {
+        "method": "GET",
+        "path": "/fba/inventory/v1/summaries",
+        "query": {
+          "details": "true",
+          "granularityType": "Marketplace",
+          "granularityId": "A1PA6795UKMFR9",
+          "marketplaceIds": "A1PA6795UKMFR9",
+          "sellerSkus": "SYN-SKU-FBA-7102"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "payload": {
+            "granularity": {
+              "granularityType": "Marketplace",
+              "granularityId": "A1PA6795UKMFR9"
+            },
+            "inventorySummaries": [
+              {
+                "sellerSku": "SYN-SKU-FBA-7102",
+                "asin": "B000007102",
+                "condition": "NewItem",
+                "totalQuantity": 15,
+                "inventoryDetails": {
+                  "fulfillableQuantity": 12,
+                  "inboundWorkingQuantity": 0,
+                  "inboundShippedQuantity": 0,
+                  "inboundReceivingQuantity": 0
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "pre-read-fba",
+      "note": "Чтение оффера перед записью количества: тип товара и сеть исполнения [AMZ_C09, AMZ_C14]",
+      "request": {
+        "method": "GET",
+        "path": "/listings/2021-08-01/items/A1SYNSELLER0001/SYN-SKU-FBA-7102",
+        "query": {
+          "marketplaceIds": "A1PA6795UKMFR9",
+          "includedData": "summaries,attributes,fulfillmentAvailability"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "sku": "SYN-SKU-FBA-7102",
+          "summaries": [
+            {
+              "marketplaceId": "A1PA6795UKMFR9",
+              "asin": "B000007102",
+              "productType": "SYNTHETIC_PRODUCT_TYPE",
+              "status": [
+                "BUYABLE",
+                "DISCOVERABLE"
+              ]
+            }
+          ],
+          "attributes": {
+            "purchasable_offer": [
+              {
+                "marketplace_id": "A1PA6795UKMFR9",
+                "currency": "EUR",
+                "audience": "ALL",
+                "our_price": [
+                  {
+                    "schedule": [
+                      {
+                        "value_with_tax": 19.5
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "fulfillmentAvailability": [
+            {
+              "fulfillmentChannelCode": "SYN_AMAZON_NETWORK_CODE",
+              "quantity": 12
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "readback-fba",
+      "request": {
+        "method": "GET",
+        "path": "/listings/2021-08-01/items/A1SYNSELLER0001/SYN-SKU-FBA-7102",
+        "query": {
+          "marketplaceIds": "A1PA6795UKMFR9",
+          "includedData": "summaries,attributes,offers,fulfillmentAvailability,issues"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "sku": "SYN-SKU-FBA-7102",
+          "summaries": [
+            {
+              "marketplaceId": "A1PA6795UKMFR9",
+              "asin": "B000007102",
+              "productType": "SYNTHETIC_PRODUCT_TYPE",
+              "status": [
+                "BUYABLE",
+                "DISCOVERABLE"
+              ]
+            }
+          ],
+          "attributes": {
+            "purchasable_offer": [
+              {
+                "marketplace_id": "A1PA6795UKMFR9",
+                "currency": "EUR",
+                "audience": "ALL",
+                "our_price": [
+                  {
+                    "schedule": [
+                      {
+                        "value_with_tax": 19.5
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "issues": [],
+          "offers": [
+            {
+              "marketplaceId": "A1PA6795UKMFR9",
+              "offerType": "B2C",
+              "price": {
+                "currencyCode": "EUR",
+                "amount": "19.5"
+              }
+            }
+          ],
+          "fulfillmentAvailability": [
+            {
+              "fulfillmentChannelCode": "SYN_AMAZON_NETWORK_CODE",
+              "quantity": 12
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "readback-none",
+      "request": {
+        "method": "GET",
+        "path": "/listings/2021-08-01/items/A1SYNSELLER0001/SYN-SKU-NON-7103",
+        "query": {
+          "marketplaceIds": "A1PA6795UKMFR9",
+          "includedData": "summaries,attributes,offers,fulfillmentAvailability,issues"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "sku": "SYN-SKU-NON-7103",
+          "summaries": [
+            {
+              "marketplaceId": "A1PA6795UKMFR9",
+              "asin": "B000007103",
+              "productType": "SYNTHETIC_PRODUCT_TYPE",
+              "status": [
+                "BUYABLE",
+                "DISCOVERABLE"
+              ]
+            }
+          ],
+          "attributes": {
+            "purchasable_offer": [
+              {
+                "marketplace_id": "A1PA6795UKMFR9",
+                "currency": "EUR",
+                "audience": "ALL",
+                "our_price": [
+                  {
+                    "schedule": [
+                      {
+                        "value_with_tax": 20.5
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "issues": [],
+          "offers": [
+            {
+              "marketplaceId": "A1PA6795UKMFR9",
+              "offerType": "B2C",
+              "price": {
+                "currencyCode": "EUR",
+                "amount": "20.5"
+              }
+            }
+          ],
+          "fulfillmentAvailability": []
+        }
+      }
+    }
+  ],
+  "expect": {
+    "noAlerts": true,
+    "logs": [
+      {
+        "code": "AMZ_C13_FBA_BY_CHANNEL_CODE",
+        "count": 1,
+        "details": {
+          "fba": 1,
+          "unknown": 1,
+          "fbaQuantitiesRead": 1
+        }
+      },
+      {
+        "code": "AMZ_C14_FBA_QUANTITY_NEVER_WRITTEN",
+        "count": 2
+      }
+    ]
+  }
+}
