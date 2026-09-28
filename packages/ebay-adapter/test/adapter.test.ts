@@ -305,7 +305,7 @@ function tradingWorld(listingType: string, extra: string, after: (r: Seen) => Re
     if (r.url.pathname === '/ws/api.dll') {
       assert.equal(r.headers['x-ebay-api-iaf-token'], 'syn-user-token');
       assert.equal(r.headers['x-ebay-api-siteid'], '77');
-      assert.equal(r.headers['x-ebay-api-compatibility-level'], '1349');
+      assert.equal(r.headers['x-ebay-api-compatibility-level'], '1477', 'step 53: the current Trading compatibility level');
       return { status: 200, xml: r.headers['x-ebay-api-call-name'] === 'GetUserPreferences' ? prefsXml : getItemXml(listingType, extra, site, o.parts) };
     }
     if (r.url.pathname.startsWith('/sell/account/v1/payment_policy/')) {

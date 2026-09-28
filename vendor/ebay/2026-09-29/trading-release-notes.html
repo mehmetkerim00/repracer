@@ -1,0 +1,6240 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head>
+        <meta content="text/html; charset=utf-8" http-equiv="Content-Type">
+        <link href="/DevZone/assets/navstyle.css" rel="StyleSheet" type="text/css">
+        <link href="/DevZone/assets/api.css" rel="StyleSheet" type="text/css">
+        <link href="/DevZone/assets/ss-styles.css" rel="StyleSheet" type="text/css">
+        <link href="/DevZone/assets/ebay.css" rel="StyleSheet" type="text/css">
+        <link href="/DevZone/assets/types.css" rel="StyleSheet" type="text/css">
+        <link href="/DevZone/assets/icons/icon.css" rel="StyleSheet" type="text/css">
+        <link href="/DevZone/assets/icons/icon-button.css" rel="StyleSheet" type="text/css">
+        <link href="/DevZone/assets/smartmenus/css/sm-core-css.css" rel="StyleSheet" type="text/css">
+        <link href="/DevZone/assets/smartmenus/css/sm-edp/sm-edp-theme.css" rel="StyleSheet" type="text/css">
+        <link href="/DevZone/assets/ss-print.css" media="print" rel="StyleSheet" type="text/css">
+        <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js" type="text/javascript"></script>
+        <script src="/DevZone/assets/navstyle.js" type="text/javascript"></script>
+        <script src="/DevZone/assets/tablist.js" type="text/javascript"></script>
+        <script src="/DevZone/assets/smartmenus/jquery.smartmenus.js" type="text/javascript"></script>
+        <title>Release Notes - Trading API</title>
+</head>
+
+<body>
+
+<a class="navinstr" value="notoc"> </a>
+<a class="navhighlight" value="Release Notes"> </a>
+<a class="navinstr" value="notoc"></a>
+
+<div id="headbar">
+
+  <div id="dochead">
+<span id="realm">eBay Trading API</span></div>
+   <nav aria-label="Site navigation">
+        <!-- Mobile menu toggle button (menu/close icon) -->
+        <input aria-hidden="true" id="main-menu-state" type="checkbox">
+        <label class="main-menu-btn" for="main-menu-state">
+            <span aria-label="Menu" aria-role="button" class="main-menu-btn-icon"></span>
+        </label>
+        <!-- Site logo-->
+        <a aria-label="Go to the eBay Developers Program home page" href="/">
+            <img alt="eBay Developers Program logo" aria-hidden="true" class="logo" src="/DevZone/assets/edp-logo.svg">
+        </a>
+        <!-- Menu bar and menus -->
+        <ul class="sm sm-edp" id="main-menu">
+            <li>
+                <a data-text="Join" href="/join">Join</a>
+                <ul>
+                    <li>
+                        <a href="/join/about-the-developers-program">About the Developers Program</a>
+                    </li>
+                    <li>
+                        <a href="/join/benefits">Benefits</a>
+                    </li>
+                    <li>
+                        <a href="/join/policies">Policies</a>
+                    </li>
+                    <li>
+                        <a href="/join/api-license-agreement">API License Agreement</a>
+                    </li>
+                </ul>
+            </li>
+            <li>
+                <a data-text="Develops" href="/develop">Develop<span aria-label="New notifications" class="badge" role="img">New</span></a>
+                <ul>
+                    <li>
+                        <a href="/develop/get-started">Get Started</a>
+                        <ul>
+                            <li>
+                                <a href="/api-docs/static/authorization_guide_landing.html">Authorization</a>
+                            </li>
+                            <li>
+                                <a href="/api-docs/static/ebay-rest-landing.html">Using eBay RESTful APIs</a>
+                            </li>
+                            <li>
+                                <a href="/develop/get-started/api-call-limits">API Call Limits</a>
+                            </li>
+                            <li>
+                                <a href="/develop/get-started/api-deprecation-status">API Deprecations</a>
+                            </li>
+                            <li>
+                                <a href="/develop/get-started/api-status">API Site Status</a>
+                            </li>
+                        </ul>
+                    </li>
+                    <li>
+                        <a href="/develop/selling-apps">Selling Apps</a>
+                        <ul>
+                            <li>
+                                <a href="/develop/selling-apps/listing-management">Listing Management</a>
+                            </li>
+                            <li>
+                                <a href="/develop/selling-apps/selling-metadata">Selling Metadata</a>
+                            </li>
+                            <li>
+                                <a href="/develop/selling-apps/account-management">Account Management</a>
+                            </li>
+                            <li>
+                                <a href="/develop/selling-apps/order-management">Order Management</a>
+                            </li>
+                            <li>
+                                <a href="/develop/selling-apps/communication">Communication</a>
+                            </li>
+                            <li>
+                                <a href="/develop/selling-apps/marketing-and-promotions-1">Marketing and Promotions</a>
+                            </li>
+                            <li>
+                                <a href="/develop/selling-apps/analytics-and-reporting">Analytics and Reporting</a>
+                            </li>
+                            <li>
+                                <a href="/develop/selling-apps/other-apis-1">Other APIs</a>
+                            </li>
+                        </ul>
+                    </li>
+                    <li>
+                        <a href="/develop/buying-apps">Buying Apps</a>
+                        <ul>
+                            <li>
+                                <a href="/develop/buying-apps/inventory-discovery-and-refresh">Inventory Discovery &amp; Refresh</a>
+                            </li>
+                            <li>
+                                <a href="/develop/buying-apps/marketing-and-discounts">Marketing and Discounts</a>
+                            </li>
+                            <li>
+                                <a href="/develop/buying-apps/marketplace-metadata">Marketplace Metadata</a>
+                            </li>
+                            <li>
+                                <a href="/develop/buying-apps/checkout-bid">Checkout/Bid</a>
+                            </li>
+                            <li>
+                                <a href="/develop/buying-apps/research-apis">Research APIs</a>
+                            </li>
+                            <li>
+                                <a href="/develop/buying-apps/other-apis">Other APIs</a>
+                            </li>
+                        </ul>
+                    </li>
+                    <li>
+                        <a href="/develop/application-settings-and-insights">Apps Settings &amp; Insights</a>
+                    </li>
+                    <li>
+                        <a href="/develop/sdks-and-widgets">SDKs &amp; Widgets</a>
+                    </li>
+                    <li>
+                        <a href="/develop/tools">Tools</a>
+                        <ul>
+                            <li>
+                                <a aria-label="Open Sandbox in new window/tab" href="http://sandbox.ebay.com/" target="_blank">
+                                    eBay Sandbox
+                                </a>
+                                
+                                <ul>
+                                    <li>
+                                        <a href="/sandbox/register">Create Test Users</a>
+                                    </li>
+                                    <li>
+                                        <a href="/sandbox/reset-password">Reset Password</a>
+                                    </li>
+                                    <li>
+                                        <a href="/support/api-status/sandbox">Sandbox Status</a>
+                                    </li>
+                                </ul>
+                            </li>
+                            <li>
+                                <a href="/my/api_test_tool">API Explorer</a>
+                            </li>
+                            <li>
+                                <a href="/develop/tools/wsdl-pruner">WSDL Pruner</a>
+                            </li>
+                        </ul>
+                    </li>
+                </ul>
+            </li>
+            <li>
+                <a data-text="Grows" href="/grow">Grow</a>
+                <ul>
+                    <li>
+                        <a href="/grow/application-growth-check">Application Growth Check</a>
+                    </li>
+                    <li>
+                        <a href="/grow/affiliate-program">Affiliate Program</a>
+                    </li>
+                    <li>
+                        <a href="/grow/loyalty-program">Loyalty Program</a>
+                    </li>
+                    <li>
+                        <a href="/grow/events">Events</a>
+                    </li>
+                    <li>
+                        <a href="/grow/awards">Awards</a>
+                    </li>
+                </ul>
+            </li>
+            <li>
+                <a data-text="Updates" href="/updates">Updates</a>
+                <ul>
+                    <li>
+                        <a href="/updates/api-updates">API updates</a>
+                    </li>
+                    <li>
+                        <a href="/updates/newsletter">Newsletter</a>
+                    </li>
+                    <li>
+                        <a href="/updates/blog">Blog</a>
+                    </li>
+                </ul>
+            </li>
+            <li>
+                <a data-text="Support" href="/support">Support</a>
+                <ul>
+                    <li>
+                        <a href="/support/api-status">API Status</a>
+                    </li>
+                    <li>
+                        <a href="/support/faq">FAQs</a>
+                    </li>
+                    <li>
+                        <a href="https://forums.developer.ebay.com/index.html">
+                            Developer Community Forum
+                        </a>
+                    </li>
+                    <li>
+                        <a href="/support/knowledge-base">Knowledge Base</a>
+                    </li>
+                    <li>
+                        <a href="/support/developer-account-support">Developer Account Support</a>
+                    </li>
+                    <li>
+                        <a href="/my/support/tickets">Developer Technical Support</a>
+                    </li>
+                </ul>
+            </li>
+            <li>
+            <a aria-label="My Account" href="/signin">
+                <svg height="22" id="icon-user-profile" viewbox="0 0 22 24" width="22">
+                    <path d="M11 19.925a8.925 8.925 0 100-17.85 8.925 8.925 0 000 17.85zm0 1.575C5.201 21.5.5 16.799.5 11S5.201.5 11 .5 21.5 5.201 21.5 11 16.799 21.5 11 21.5zm6.052-3.829a2.21 2.21 0 00-1.317-2.025l-2.439-1.023a1.816 1.816 0 01-1.116-1.727 1.81 1.81 0 01.708-1.406c.961-.735 1.365-1.94 1.055-3.146-.326-1.264-1.48-2.147-2.807-2.147-.81 0-1.57.317-2.141.893a2.934 2.934 0 00.306 4.4c.437.335.695.848.708 1.406a1.816 1.816 0 01-1.116 1.727l-2.439 1.023a2.2 2.2 0 00-1.313 1.892.744.744 0 11-1.484-.09 3.688 3.688 0 012.21-3.177l2.453-1.03a.327.327 0 00.202-.311.322.322 0 00-.122-.248 4.423 4.423 0 01-1.744-3.529 4.394 4.394 0 011.286-3.12A4.467 4.467 0 0111.135 4.7a4.373 4.373 0 014.247 3.269c.457 1.773-.169 3.622-1.593 4.713a.322.322 0 00-.122.248.327.327 0 00.202.312l2.453 1.029a3.706 3.706 0 012.217 3.4h-1.487z"></path>
+                </svg>
+            </a>
+            <ul>
+                <li>
+                    <a href="/my/keys">Application Keysets</a>
+                </li>
+                <li>
+                    <a href="/my/auth">User Access Tokens</a>
+                </li>
+                <li>
+                    <a href="my/push">
+                        Alerts and Notifications
+                    </a>
+                </li>
+                <li>
+                    <a href="my/stats">Application Reports</a>
+                </li>
+                <li>
+                    <a href="/my/profile">Profile &amp; contacts</a>
+                </li>
+            </ul>
+        </li>
+        <li>
+            <a aria-label="Search" href="/search">
+                <svg height="22" id="icon-search" viewbox="0 0 22 22" width="22">
+                    <path d="M2 9a7 7 0 1114 0A7 7 0 012 9m19.703 11.29l-5.67-5.67-.008-.003A8.954 8.954 0 0018 9a9 9 0 00-9-9 9 9 0 00-9 9 9 9 0 009 9 8.958 8.958 0 005.66-2.007l5.663 5.717c.19.187.445.292.71.29a1 1 0 00.67-1.71"></path>
+                </svg>
+            </a>
+        </li>
+     </ul>
+    </nav>
+   <div id="docsetAll">
+   <ul>
+      <li><a href="../../../../../api-docs/user-guides/static/trading-user-guide-landing.html">User Guide</a></li>
+      <li><a href="../../../../../api-docs/user-guides/static/make-a-call-landing.html">Making a Call</a></li>
+      <li><a href="Reference/eBay/index.html">API Reference</a></li>
+      <li><a href="HowTo/index.html">Tutorials</a></li>
+      <li><a href="ReleaseNotes.html">Release Notes</a></li>
+   </ul>
+   </div>
+
+</div>
+
+<!-- Start bottom half divs -->
+<div id="bottomhalf">
+<a name="top"></a>
+
+
+<div id="sidebarButtonCont">
+        <div id="sidebarButton"> </div>
+    </div>
+
+<aside id="sidebar">
+    <div id="tocnav"></div>
+    </aside>
+    <!-- Start doc content -->
+    <a name="top"></a>
+    <main id="doc">
+
+
+
+<!-- Start doc content -->
+<h1>Trading API Release Notes</h1>
+<p>The latest version of the Trading API has rolled out to all the API machines and is now available! Be sure to check out all the new features and known issues. For older release notes, see the <a href="ReleaseNotesArchive.html">Release Notes Archive</a>.</p>
+
+<!-- start of version table -->
+<div class="Table">
+<table>
+<tbody>
+<tr>
+  <th>Release Version</th>
+  <th>Release Date</th>
+  <th>Description of Release</th>
+</tr>
+<tr>
+  <td class="current"><a href="#1477">1477</a></td>
+  <td class="current">2026-August-24</td>
+  <td class="current">New size validation error message added for eBay Fashion Listings</td>
+</tr>
+<tr>
+  <td><a href="#1475">1475</a></td>
+  <td>2026-June-04</td>
+  <td>Decommissioned <b>GetCategoryFeatures</b> </td>
+</tr>
+<tr>
+  <td><a href="#1455">1455</a></td>
+  <td>2026-June-04</td>
+  <td>Updates for multileg shipments; New Error Message Added in Version 1455; Support for Size Standardization for eBay Fashion Listings.</td>
+</tr>
+<tr>
+  <td><a href="#1453">1453</a></td>
+  <td>2026-April-15</td>
+  <td>Decommissioned <b>GetCategories</b> </td>
+</tr>
+<tr>
+  <td><a href="#1451">1451</a></td>
+  <td>2026-February-2</td>
+  <td>Decommissioned <b>GetVeROReportStatus</b>, <b>GetVeROReasonCodeDetails</b>, and <b>VeROReportItems</b></td>
+</tr>
+<tr>
+  <td><a href="#1423">1423</a></td>
+  <td>2025-July-28</td>
+  <td>Decommissioned <b>ExtendSiteHostedPictures</b> call; decommissioned <b>ExtensionInDays</b> field of the <b>UploadSiteHostedPictures</b> call; provided Inventory Mapping API support to the Add/Revise/Relist family of calls; new seller accepted value added to BestOfferStatusCodeType</td>
+</tr>
+<tr>
+  <td><a href="#1421">1421</a></td>
+  <td>2025-July-15</td>
+  <td>Support for easy returns in P&amp;A listings added; New MotorPurchase container added to TransactionProgramType to support Secure Purchase for motor vehicle orders; item fulfillment location information can now be returned the <b>GetOrders</b>, <b>GetItemTransactions</b>, and <b>GetSellerTransactions</b> responses; removed decommissioned enumerated values from <b>NotificationEventTypeCodeType</b></td>
+</tr>
+<tr>
+  <td><a href="#1415">1415</a></td>
+  <td>2025-May-29</td>
+  <td>EPS URL links are now required to be HTTPS for Revise/Relist calls; New Error Message Added in Version 1415; GetCategoryMappings Call Decommissioned; DescriptionReviseMode field use change</td>
+</tr>
+<tr>
+  <td><a href="#1399">1399</a></td>
+  <td>2025-February-5</td>
+  <td>Launch of Buyer Protection for private seller purchases on ebay.co.uk; Added error message for 1399; GeteBayOfficialTime Call Decommissioned; ValidateTestUserRegistration Call Decommissioned; Challenge Calls Decommissioned</td>
+</tr>
+<tr>
+  <td><a href="#1395">1395</a></td>
+  <td>2025-January-14</td>
+  <td>New ContactURL field added to ManufacturerType and ResponsiblePersonType, and two new pre-owned item conditions available for apparel categories.</td>
+</tr>
+<tr>
+  <td><a href="#1391">1391</a></td>
+  <td>2024-December-19</td>
+  <td>New tax ID values added to <b>ValueTypeCodeType</b>.<br><br>Updated restrictions on P&amp;A tuner category listings.</td>
+</tr>
+<tr>
+  <td><a href="#1379">1379</a></td>
+  <td>2024-October-14</td>
+  <td>Decommissioned <b>GetClientAlertsAuthToken</b> call</td>
+</tr>
+<tr>
+  <td><a href="#1375">1375</a></td>
+  <td>2024-August-26</td>
+  <td>Decommissioned DeletedFromUnsoldList and DeletedFromSoldList containers and their associated fields from the <b>GetMyeBaySelling</b> call; decommissioned UserData.<b>SummarySchedule</b> and UserData.<b>SMSSubscription</b> fields for the <b>GetNotificationPreferences</b> and <b>SetNotificationPreferences</b> calls; removed <b>UserIDChanged</b> enumerated value from <b>NotificationEventTypeCodeType</b>.</td>
+</tr>
+<tr>
+  <td><a href="#1371">1371</a></td>
+  <td>2024-July-17</td>
+  <td>New schema added to support GPSR information<br><br> Removed economic operator fields from Add/Revise/Relist and VerifyItem family of calls</td>
+</tr>
+<tr>
+  <td><a href="#1367">1367</a></td>
+  <td>2024-July-1</td>
+  <td>Decommissioned GetSuggestedCategories call; removed related types</td>
+</tr>
+<tr>
+  <td><a href="#1363">1363</a></td>
+  <td>2024-May-29</td>
+  <td>New requirement when adding EPA approved products</td>
+</tr>
+<tr>
+  <td><a href="#1359">1359</a></td>
+  <td>2024-May-08</td>
+  <td>New error codes for 1359</td>
+</tr>
+<tr>
+  <td><a href="#1357">1357</a></td>
+  <td>2024-April-08</td>
+  <td>New Fee and Credit enumerated values added to <b>GetAccount</b>.</td>
+</tr>
+<tr>
+  <td><a href="#1355">1355</a></td>
+  <td>2024-April-02</td>
+  <td>Decommissioned GetSellerDashboard call; removed related types</td>
+</tr>
+<tr>
+  <td><a href="#1349">1349</a></td>
+  <td>2024-February-26</td>
+  <td>Decommissioned TicketListingDetails and QuantityInfo containers and their associated fields for the Add/Revise/Relist/Verify and GetItem family of calls; Decommissioned UpdateReturnPolicy and UpdateSellerInfo fields in the ReviseItem call; decommissioned OriginatingPostalCode field</td>
+</tr>
+<tr>
+  <td><a href="#1345">1345</a></td>
+  <td>2024-February-05</td>
+  <td>New schema added to support economic operator information.<br><br>Decommissioned GetOrderTransactions call; cleaned up decommissioned order-related fields in the GetOrders, GetSellerTransactions, GetItemTransactions, and GetMyeBaySelling calls</td>
+</tr>
+
+
+
+</tbody>
+</table>
+</div>
+
+<!-- real end of version table -->
+<!-- end of version table -->
+
+
+
+
+<!-- True end of version table -->
+<br>
+
+<!-- ## Release Notes for r1477 ############################## -->
+
+<p class="btt" style="font-size: 80%;"></p>
+
+<h2 id="1477">Version 1477</h2>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<td><a href="#1477-CC">Changed Calls - 1477</a> </td>
+						<td> </td>
+			<td><a href="#1477-SC">Schema Changes - 1477</a></td>
+						<td> </td>
+			<td><a href="#1477-AN">Announcements - 1477</a> </td>
+		
+		</tr>
+
+		
+		<tr>
+			<td><a href="#1477-NF">New Features - 1477</a>               </td>	
+						<td> </td>
+			<td><a href="#1477-CF">Changed Functionality - 1477</a>      </td>
+				<td> </td>
+
+			<td><a href="#1477-DC">Document Changes and Errata - 1477</a></td>
+		</tr>
+	</table>
+</div>
+<p>For a current list of known issues, see the <a href="/support/api-status">API Status</a> page, or visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<h3 id="1477-CC">Index of Changed Calls - 1477</h3>
+
+<p>These calls were added, modified, deprecated, or affected by documentation changes in this release. The changes are described below as well as in each call&#39;s Change History.</p>
+
+<h4>New Calls</h4>
+<!-- #  -->
+<!-- ################################# -->
+<!-- # 1477 New Call Table ######## -->
+<p>No new calls in this release.</p>
+<!-- # 1477 New Call Table ######## -->
+<!-- ################################# -->
+
+<h4>Changed Calls</h4>
+
+<!-- ################################# -->
+<!-- # 1477 Changed Call Table ######## -->
+<p>No changed calls in this release.</p>
+<!-- # 1477 Changed Call Table ######## -->
+<!-- ################################# -->
+
+<h3 id="1477-SC">Schema Changes - 1477</h3>
+
+<p><b>Enumeration note:</b> You need to use this release version or higher to retrieve new code list values
+that were added in this release. See <a href="/devzone/guides/features-guide/default.html#Basics/Call-APISchema.html#CodeLists">Code Lists</a>.
+</p>
+
+<h3 id="1477-AN">Announcements - 1477</h3>
+
+<!--
+<p>None for this release.</p>
+-->
+<h4>Change Requests</h4>
+
+<p>See the <a href="/support/api-status">API Status</a> page for announcements regarding recently resolved or current system wide issues. Visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1477-NF">New Features - 1477</h3>
+
+<p>This section describes new features that have been added as of this release. New features can involve new calls, new
+capabilities, and/or new fields added to existing calls.</p>
+
+<p>For logical or functional changes to existing features and calls, including code list changes, see <a href="#1477-CF">Changed Functionality - 1477</a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1477-CF">Changed Functionality - 1477</h3>
+
+<p>This section describes logical or functional changes that have been made to existing functionality, including new
+code list values and/or changes in validation rules.</p>
+
+<a name="1477Nwszvldtnrrrmssg"></a>
+<h4>New size validation error message added for eBay Fashion Listings</h4>
+
+<p>
+To support size standardization for <b>Apparel &amp; Footwear</b> listings, the following blocking error has been added and replaces Error 21920467. The long version of the message is used below.
+</p>
+<ul>
+<li>(error) <b>21920468</b>: Long error: <i>replaceable_value</i> is not a valid value for Size. Select a value from the available options.</li>
+</ul>
+<p><span class="\&quot;tablenote\&quot;"><span style="\&quot;color:#004680\&quot;"><strong>Note: </strong>The long message is parameterized with the invalid size value from the request.</span></span></p>
+
+<p>For more information, see <a href="/updates/blog/size-standardization" target="_blank">Size Standardization for eBay Fashion Listings</a>.
+</p>
+
+
+
+<!--
+<p>None for this release.</p>
+-->
+
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1477-DC">Documentation Changes and Errata - 1477</h3>
+
+<p>This section lists additional documentation changes and corrections that were made with this release and that are
+not already mentioned in <a href="#1477-NF">New Features - 1477</a> and <a href="#1477-CF"><span class="Link">
+Changed Functionality - 1477</span></a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+
+
+<!-- ## Release Notes for r1475 ############################## -->
+
+<p class="btt" style="font-size: 80%;"></p>
+
+<h2 id="1475">Version 1475</h2>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<td><a href="#1475-CC">Changed Calls - 1475</a> </td>
+						<td> </td>
+			<td><a href="#1475-SC">Schema Changes - 1475</a></td>
+						<td> </td>
+			<td><a href="#1475-AN">Announcements - 1475</a> </td>
+		
+		</tr>
+
+		
+		<tr>
+			<td><a href="#1475-NF">New Features - 1475</a>               </td>	
+						<td> </td>
+			<td><a href="#1475-CF">Changed Functionality - 1475</a>      </td>
+				<td> </td>
+
+			<td><a href="#1475-DC">Document Changes and Errata - 1475</a></td>
+		</tr>
+	</table>
+</div>
+<p>For a current list of known issues, see the <a href="/support/api-status">API Status</a> page, or visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<h3 id="1475-CC">Index of Changed Calls - 1475</h3>
+
+<p>These calls were added, modified, deprecated, or affected by documentation changes in this release. The changes are described below as well as in each call&#39;s Change History.</p>
+
+<h4>New Calls</h4>
+<!-- #  -->
+<!-- ################################# -->
+<!-- # 1475 New Call Table ######## -->
+<p>No new calls in this release.</p>
+<!-- # 1475 New Call Table ######## -->
+<!-- ################################# -->
+
+<h4>Changed Calls</h4>
+
+<!-- ################################# -->
+<!-- # 1475 Changed Call Table ######## -->
+<p>No changed calls in this release.</p>
+<!-- # 1475 Changed Call Table ######## -->
+<!-- ################################# -->
+
+<h3 id="1475-SC">Schema Changes - 1475</h3>
+
+<p><b>Enumeration note:</b> You need to use this release version or higher to retrieve new code list values
+that were added in this release. See <a href="/devzone/guides/features-guide/default.html#Basics/Call-APISchema.html#CodeLists">Code Lists</a>.
+</p>
+
+<div class="Table">
+<table cellspacing="2">
+	<thead>
+		<th>Name</th>
+		<th>Part of Schema</th>
+		<th>Type of Change</th>
+	</thead>
+	<tbody>
+		<tr>
+			<td>
+				<p>AdditionalCompatibilityEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>AdFormatEnabledCodeType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>AttributeConversionEnabledFeatureDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>BasicUpgradePackEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>BestOfferAutoAcceptEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>BestOfferAutoDeclineEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>BestOfferCounterEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>BestOfferEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>BrandMPNIdentifierEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>BuyerGuaranteeEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>CategoryFeatureType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ClassifiedAdAutoAcceptEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ClassifiedAdAutoDeclineEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ClassifiedAdBestOfferEnabledCodeType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ClassifiedAdBestOfferEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ClassifiedAdCompanyNameEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ClassifiedAdContactByAddressEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ClassifiedAdContactByEmailEnabledDefintionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ClassifiedAdContactByPhoneEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ClassifiedAdCounterOfferEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ClassifiedAdPaymentMethodEnabledCodeType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ClassifiedAdPaymentMethodEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ClassifiedAdPayPerLeadEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ClassifiedAdPhoneCountDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ClassifiedAdShippingMethodEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ClassifiedAdStreetCountDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>CombinedFixedPriceTreatmentEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>CompatibleVehicleTypeDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ConditionEnabledCodeType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ConditionEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ConditionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ConditionValuesDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ConditionValuesType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>CrossBorderTradeAustraliaEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>CrossBorderTradeGBEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>CrossBorderTradeNorthAmericaEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>DepositSupportedDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>DigitalGoodDeliveryEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>DomesticRefundMethodCodeType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>DomesticRefundMethodDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>DomesticReturnsAcceptedCodeType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>DomesticReturnsAcceptedDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>DomesticReturnsDurationCodeType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>DomesticReturnsDurationDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>DomesticReturnsShipmentPayeeCodeType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>DomesticReturnsShipmentPayeeDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>DutchBINEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>EANEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>eBayMotorsProAdFormatEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>eBayMotorsProAutoAcceptEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>eBayMotorsProAutoDeclineEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>eBayMotorsProBestOfferEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>eBayMotorsProCompanyNameEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>eBayMotorsProContactByAddressEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>eBayMotorsProContactByEmailEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>eBayMotorsProContactByPhoneEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>eBayMotorsProCounterOfferEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>eBayMotorsProPaymentMethodCheckOutEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>eBayMotorsProPhoneCountDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>eBayMotorsProSellerContactDetailsEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>eBayMotorsProShippingMethodEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>eBayMotorsProStreetCountDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>EpidSupportedDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ExpressConditionRequiredDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ExpressEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ExpressPicturesRequiredDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>FeatureDefinitionsType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>FeatureIDCodeType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>FreeGalleryPlusEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>FreePicturePackEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>GeographicExposureCodeType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>GetCategoryFeaturesRequestType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>GetCategoryFeaturesResponseType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>GlobalShippingEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>Group1MaxFlatShippingCostDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>Group2MaxFlatShippingCostDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>Group3MaxFlatShippingCostDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>HandlingTimeEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>HomePageFeaturedEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>INEscrowWorkflowTimelineCodeType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>INEscrowWorkflowTimelineDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>InternationalRefundMethodCodeType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>InternationalRefundMethodDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>InternationalReturnsAcceptedCodeType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>InternationalReturnsAcceptedDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>InternationalReturnsDurationCodeType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>InternationalReturnsDurationDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>InternationalReturnsShipmentPayeeCodeType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>InternationalReturnsShipmentPayeeDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ISBNEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ItemCompatibilityEnabledCodeType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ItemCompatibilityEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ItemSpecificsEnabledCodeType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ItemSpecificsEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>KTypeSupportedDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ListingDurationDefinitionsType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ListingDurationDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ListingDurationReferenceType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ListingEnhancementDurationDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ListingEnhancementDurationReferenceType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>LocalListingDistancesNonSubscriptionDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>LocalListingDistancesRegularDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>LocalListingDistancesSpecialtyDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>LocalMarketAdFormatEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>LocalMarketAutoAcceptEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>LocalMarketAutoDeclineEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>LocalMarketBestOfferEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>LocalMarketCompanyNameEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>LocalMarketContactByAddressEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>LocalMarketContactByEmailEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>LocalMarketContactByPhoneEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>LocalMarketCounterOfferEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>LocalMarketNonSubscriptionDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>LocalMarketPaymentMethodCheckOutEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>LocalMarketPhoneCountDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>LocalMarketPremiumSubscriptionDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>LocalMarketRegularSubscriptionDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>LocalMarketSellerContactDetailsEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>LocalMarketShippingMethodEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>LocalMarketSpecialitySubscriptionDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>LocalMarketStreetCountDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>MaxFlatShippingCostCBTExemptDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>MaxFlatShippingCostDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>MaxGranularFitmentCountDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>MaxItemCompatibilityDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>MinimumReservePriceDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>MinItemCompatibilityDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>NonSubscriptionDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>PaisaPayFullEscrowEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>PaymentMethodDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>PayPalRequiredDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>PayPalRequiredForStoreOwnerDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>PickupDropOffEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>PremiumSubscriptionDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ProductCreationEnabledCodeType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ProductCreationEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ProductIdentiferEnabledCodeType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ProductRequiredEnabledCodeType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ProductRequiredEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ProfileCategoryGroupCodeType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ProfileCategoryGroupDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ProPackEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ProPackPlusEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>RegularSubscriptionDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ReturnPolicyDescriptionEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ReturnPolicyEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ReturnsAcceptedCodeType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ReturnsRefundMethodCodeType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>RevisePriceAllowedDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ReviseQuantityAllowedDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>SafePaymentRequiredDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>SellerContactDetailsEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>SellerProvidedTitleSupportedDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>SiteDefaultsType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>SkypeMeNonTransactionalEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>SkypeMeTransactionalEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>SpecialitySubscriptionDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>StoreInventoryEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>StoreOwnerExtendedListingDurationsDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>StoreOwnerExtendedListingDurationsEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>StoreOwnerExtendedListingDurationsType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>TCREnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>UPCEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>UserConsentRequiredDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ValueCategoryDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>ValuePackEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>VariationsEnabledDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>VINSupportedDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<p>VRMSupportedDefinitionType</p>
+			</td>
+			<td>
+				<p>Type</p>
+			</td>
+			<td>
+				<p>Removed</p>
+			</td>
+		</tr>
+	</tbody>
+</table>
+
+</div>
+
+
+<h3 id="1475-AN">Announcements - 1475</h3>
+
+<!--
+<p>None for this release.</p>
+-->
+<h4>Change Requests</h4>
+
+<p>See the <a href="/support/api-status">API Status</a> page for announcements regarding recently resolved or current system wide issues. Visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1475-NF">New Features - 1475</h3>
+
+<p>This section describes new features that have been added as of this release. New features can involve new calls, new
+capabilities, and/or new fields added to existing calls.</p>
+
+<p>For logical or functional changes to existing features and calls, including code list changes, see <a href="#1475-CF">Changed Functionality - 1475</a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1475-CF">Changed Functionality - 1475</h3>
+
+<p>This section describes logical or functional changes that have been made to existing functionality, including new
+code list values and/or changes in validation rules.</p>
+
+<a name="1475VRCllsDcmmssnd"></a>
+<h4>GetCategoryFeatures call decommissioned</h4>
+<p>
+The <b>GetCategoryFeatures</b> call has been decommissioned, and the associated call reference documentation has been removed. Additionally, all types exclusively used by these calls have been removed from the Trading WSDL. You can see the full list of removed types in the <a href="#1475-SC">Schema Changes - 1475</a>
+</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1475-DC">Documentation Changes and Errata - 1475</h3>
+
+<p>This section lists additional documentation changes and corrections that were made with this release and that are
+not already mentioned in <a href="#1475-NF">New Features - 1475</a> and <a href="#1475-CF"><span class="Link">
+Changed Functionality - 1475</span></a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+
+<!-- ## Release Notes for r1455 ############################## -->
+
+<p class="btt" style="font-size: 80%;"></p>
+
+<h2 id="1455">Version 1455</h2>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<td><a href="#1455-CC">Changed Calls - 1455</a> </td>
+						<td> </td>
+			<td><a href="#1455-SC">Schema Changes - 1455</a></td>
+						<td> </td>
+			<td><a href="#1455-AN">Announcements - 1455</a> </td>
+		
+		</tr>
+
+		
+		<tr>
+			<td><a href="#1455-NF">New Features - 1455</a>               </td>	
+						<td> </td>
+			<td><a href="#1455-CF">Changed Functionality - 1455</a>      </td>
+				<td> </td>
+
+			<td><a href="#1455-DC">Document Changes and Errata - 1455</a></td>
+		</tr>
+	</table>
+</div>
+<p>For a current list of known issues, see the <a href="/support/api-status">API Status</a> page, or visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<h3 id="1455-CC">Index of Changed Calls - 1455</h3>
+
+<p>These calls were added, modified, deprecated, or affected by documentation changes in this release. The changes are described below as well as in each call&#39;s Change History.</p>
+
+<h4>New Calls</h4>
+<!-- #  -->
+<!-- ################################# -->
+<!-- # 1455 New Call Table ######## -->
+<p>No new calls in this release.</p>
+<!-- # 1455 New Call Table ######## -->
+<!-- ################################# -->
+
+<h4>Changed Calls</h4>
+
+<!-- ################################# -->
+<!-- # 1455 Changed Call Table ######## -->
+<ul>
+<li><a href="Reference/eBay/GetItemTransactions.html#ChangeHistory">GetItemTransactions</a></li>
+<li><a href="Reference/eBay/GetOrders.html#ChangeHistory">GetOrders</a></li>
+<li><a href="Reference/eBay/GetSellerTransactions.html#ChangeHistory">GetSellerTransactions</a></li>
+</ul>
+<!-- # 1455 Changed Call Table ######## -->
+<!-- ################################# -->
+
+<h3 id="1455-SC">Schema Changes - 1455</h3>
+
+<p><b>Enumeration note:</b> You need to use this release version or higher to retrieve new code list values
+that were added in this release. See <a href="/devzone/guides/features-guide/default.html#Basics/Call-APISchema.html#CodeLists">Code Lists</a>.
+</p>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<th>Name</th>
+			<th>Part of Schema</th>
+			<th>Type of Change</th>
+		</tr>
+		<tr>
+			<td>
+				<code><b>MultiLegShippingDetailsType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Modified</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>ShippingDetailsType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Modified</td>
+		</tr>	
+	</table>
+</div>
+
+
+<h3 id="1455-AN">Announcements - 1455</h3>
+
+<!--
+<p>None for this release.</p>
+-->
+<h4>Change Requests</h4>
+
+<p>See the <a href="/support/api-status">API Status</a> page for announcements regarding recently resolved or current system wide issues. Visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1455-NF">New Features - 1455</h3>
+
+<p>This section describes new features that have been added as of this release. New features can involve new calls, new
+capabilities, and/or new fields added to existing calls.</p>
+
+<p>For logical or functional changes to existing features and calls, including code list changes, see <a href="#1455-CF">Changed Functionality - 1455</a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1455-CF">Changed Functionality - 1455</h3>
+
+<p>This section describes logical or functional changes that have been made to existing functionality, including new
+code list values and/or changes in validation rules.</p>
+
+<a name="1455FnlDstntnAddrssf"></a>
+<h4>FinalDestinationAddress field added</h4>
+<p>A new optional <b>FinalDestinationAddress</b> field has been added to <b>MultiLegShippingDetailsType</b> for multi-leg shipping orders. This field may be returned in applicable calls for multi-leg shipments. When returned, it can include <b>CityName</b>, <b>StateOrProvince</b>, <b>Country</b>, <b>PostalCode</b>, and street name.</p>
+<p>For <b>GetItemTransactions</b> and <b>GetOrders</b> calls, this functionality was released on 2026-06-01. For <b>GetSellerTransactions</b> calls, it was released on 2026-06-24.</p>
+<p><span class="tablenote"><span style="color:#004680"><strong>Note:</strong> The street name may not always be populated.</span></span></p>
+
+<a name="1455ShppngLblPlcyfld"></a>
+<h4>ShippingLabelPolicy field added</h4>
+<p>A new optional <b>ShippingLabelPolicy</b> field has been added to <b>ShippingDetailsType</b>. This field may be returned for applicable order line items. When present, the seller must generate and use a shipping label in accordance with the specified policy. If the field is not returned, no shipping label policy is enforced. Possible value: <code>EBAY_ONLY</code>, which indicates the item must be shipped using an eBay-provided shipping label.</p>
+<p>For <b>GetItemTransactions</b> and <b>GetOrders</b> calls, this functionality was released on 2026-06-01. For <b>GetSellerTransactions</b> calls, it was released on 2026-06-24.</p>
+
+
+<a name="1455Adddwrnngndrrrms"></a>
+<h4>Added warning and error message for 1455</h4>
+<p>
+For the Australia (AU) marketplace only, this release introduces new Pro subscriptions functionality. To support this, the following warning and error messages may be returned in the <b>AddItem</b>, <b>AddFixedPriceItem</b>, <b>ReviseItem</b>, and <b>ReviseFixedPriceItem</b> calls:</p><ul>
+<li>(warning) <b>21920459</b>: This listing has been updated to single quantity. To create multi-quantity listings, upgrade to a Pro subscription.
+</li><li>(error) <b>21920460</b>: You can&#39;t have item variations in a single listing. To create multi-variation listings, upgrade to a Pro subscription.
+</li>
+</ul>
+
+
+
+
+<a name="1455SpprtfrSzStndrdz"></a>
+<h4>Support for Size Standardization for eBay Fashion Listings </h4>
+<p>
+To support size standardization for <b>Apparel &amp; Footwear</b> listings, the following new warning messages were added in the 1455 release. The long version of each message is used below.
+</p>
+<ul>
+<li>(warning) <b>21920466</b>: The product aspects for this category no longer support custom <i>replaceable_value</i>. We updated your custom <i>replaceable_value</i> value to our standard <i>replaceable_value</i> value and saved your listing. Buyers will see the updated <i>replaceable_value</i> value.</li>
+<li>(warning) <b>21920467</b>: The product aspects for this category no longer support custom <i>replaceable_value</i>. Requests with custom <i>replaceable_value</i> values will be rejected starting July 2026. Update your request to send our standard <i>replaceable_value</i> values.</li>
+</ul>
+<p>For more information, see <a href="/updates/blog/size-standardization" target="_blank">Size Standardization for eBay Fashion Listings</a>.
+</p>
+
+
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1455-DC">Documentation Changes and Errata - 1455</h3>
+
+<p>This section lists additional documentation changes and corrections that were made with this release and that are
+not already mentioned in <a href="#1455-NF">New Features - 1455</a> and <a href="#1455-CF"><span class="Link">
+Changed Functionality - 1455</span></a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<!-- ## Release Notes for r1453 ############################## -->
+
+<p class="btt" style="font-size: 80%;"></p>
+
+<h2 id="1453">Version 1453</h2>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<td><a href="#1453-CC">Changed Calls - 1453</a> </td>
+						<td> </td>
+			<td><a href="#1453-SC">Schema Changes - 1453</a></td>
+						<td> </td>
+			<td><a href="#1453-AN">Announcements - 1453</a> </td>
+		
+		</tr>
+
+		
+		<tr>
+			<td><a href="#1453-NF">New Features - 1453</a>               </td>	
+						<td> </td>
+			<td><a href="#1453-CF">Changed Functionality - 1453</a>      </td>
+				<td> </td>
+
+			<td><a href="#1453-DC">Document Changes and Errata - 1453</a></td>
+		</tr>
+	</table>
+</div>
+<p>For a current list of known issues, see the <a href="/support/api-status">API Status</a> page, or visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<h3 id="1453-CC">Index of Changed Calls - 1453</h3>
+
+<p>These calls were added, modified, deprecated, or affected by documentation changes in this release. The changes are described below as well as in each call&#39;s Change History.</p>
+
+<h4>New Calls</h4>
+<!-- #  -->
+<!-- ################################# -->
+<!-- # 1453 New Call Table ######## -->
+<p>No new calls in this release.</p>
+<!-- # 1453 New Call Table ######## -->
+<!-- ################################# -->
+
+<h4>Changed Calls</h4>
+
+<!-- ################################# -->
+<!-- # 1453 Changed Call Table ######## -->
+<p>No changed calls in this release.</p>
+<!-- # 1453 Changed Call Table ######## -->
+<!-- ################################# -->
+
+<h3 id="1453-SC">Schema Changes - 1453</h3>
+
+<p><b>Enumeration note:</b> You need to use this release version or higher to retrieve new code list values
+that were added in this release. See <a href="/devzone/guides/features-guide/default.html#Basics/Call-APISchema.html#CodeLists">Code Lists</a>.
+</p>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<th>Name</th>
+			<th>Part of Schema</th>
+			<th>Type of Change</th>
+		</tr>
+		<tr>
+			<td>
+				<code><b>CategoryArrayType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>GetCategoriesRequestType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>GetCategoriesResponseType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>		
+	</table>
+</div>
+
+
+<h3 id="1453-AN">Announcements - 1453</h3>
+
+<!--
+<p>None for this release.</p>
+-->
+<h4>Change Requests</h4>
+
+<p>See the <a href="/support/api-status">API Status</a> page for announcements regarding recently resolved or current system wide issues. Visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1453-NF">New Features - 1453</h3>
+
+<p>This section describes new features that have been added as of this release. New features can involve new calls, new
+capabilities, and/or new fields added to existing calls.</p>
+
+<p>For logical or functional changes to existing features and calls, including code list changes, see <a href="#1453-CF">Changed Functionality - 1453</a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1453-CF">Changed Functionality - 1453</h3>
+
+<p>This section describes logical or functional changes that have been made to existing functionality, including new
+code list values and/or changes in validation rules.</p>
+
+<a name="1453VRCllsDcmmssnd"></a>
+<h4>GetCategories call decommissioned</h4>
+<p>
+The <b>GetCategories</b> call has been decommissioned, and the associated call reference documentation has been removed. Additionally, all types exclusively used by these calls have been removed from the Trading WSDL. You can see the full list of removed types in the <a href="#1453-SC">Schema Changes - 1453</a>
+</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1453-DC">Documentation Changes and Errata - 1453</h3>
+
+<p>This section lists additional documentation changes and corrections that were made with this release and that are
+not already mentioned in <a href="#1453-NF">New Features - 1453</a> and <a href="#1453-CF"><span class="Link">
+Changed Functionality - 1453</span></a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+
+
+
+
+
+
+
+
+
+<!-- ## Release Notes for r1451 ############################## -->
+
+<p class="btt" style="font-size: 80%;"></p>
+
+<h2 id="1451">Version 1451</h2>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<td><a href="#1451-CC">Changed Calls - 1451</a> </td>
+						<td> </td>
+			<td><a href="#1451-SC">Schema Changes - 1451</a></td>
+						<td> </td>
+			<td><a href="#1451-AN">Announcements - 1451</a> </td>
+		
+		</tr>
+
+		
+		<tr>
+			<td><a href="#1451-NF">New Features - 1451</a>               </td>	
+						<td> </td>
+			<td><a href="#1451-CF">Changed Functionality - 1451</a>      </td>
+				<td> </td>
+
+			<td><a href="#1451-DC">Document Changes and Errata - 1451</a></td>
+		</tr>
+	</table>
+</div>
+<p>For a current list of known issues, see the <a href="/support/api-status">API Status</a> page, or visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<h3 id="1451-CC">Index of Changed Calls - 1451</h3>
+
+<p>These calls were added, modified, deprecated, or affected by documentation changes in this release. The changes are described below as well as in each call&#39;s Change History.</p>
+
+<h4>New Calls</h4>
+<!-- #  -->
+<!-- ################################# -->
+<!-- # 1451 New Call Table ######## -->
+<p>No new calls in this release.</p>
+<!-- # 1451 New Call Table ######## -->
+<!-- ################################# -->
+
+<h4>Changed Calls</h4>
+
+<!-- ################################# -->
+<!-- # 1451 Changed Call Table ######## -->
+<p>No changed calls in this release.</p>
+<!-- # 1451 Changed Call Table ######## -->
+<!-- ################################# -->
+
+<h3 id="1451-SC">Schema Changes - 1451</h3>
+
+<p><b>Enumeration note:</b> You need to use this release version or higher to retrieve new code list values
+that were added in this release. See <a href="/devzone/guides/features-guide/default.html#Basics/Call-APISchema.html#CodeLists">Code Lists</a>.
+</p>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<th>Name</th>
+			<th>Part of Schema</th>
+			<th>Type of Change</th>
+		</tr>
+		<tr>
+			<td>
+				<code><b>VeROReasonCodeDetailsType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>VeROSiteDetailType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>ReasonCodeDetailType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>		
+		<tr>
+			<td>
+				<code><b>VeROReportedItemDetailsType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>VeROReportedItemType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>VeROItemStatusCodeType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>VeROReportPacketStatusCodeType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>VeROReportItemsType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>VeROReportItemType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>ShippingRegionCodeType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>
+	</table>
+</div>
+
+
+<h3 id="1451-AN">Announcements - 1451</h3>
+
+<!--
+<p>None for this release.</p>
+-->
+<h4>Change Requests</h4>
+
+<p>See the <a href="/support/api-status">API Status</a> page for announcements regarding recently resolved or current system wide issues. Visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1451-NF">New Features - 1451</h3>
+
+<p>This section describes new features that have been added as of this release. New features can involve new calls, new
+capabilities, and/or new fields added to existing calls.</p>
+
+<p>For logical or functional changes to existing features and calls, including code list changes, see <a href="#1451-CF">Changed Functionality - 1451</a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1451-CF">Changed Functionality - 1451</h3>
+
+<p>This section describes logical or functional changes that have been made to existing functionality, including new
+code list values and/or changes in validation rules.</p>
+
+<a name="1451VRCllsDcmmssnd"></a>
+<h4>VeRo Calls Decommissioned</h4>
+<p>
+The <b>GetVeROReportStatus</b>, <b>GetVeROReasonCodeDetails</b>, and <b>VeROReportItems</b> calls have been decommissioned, and the associated call reference documentation has been removed. Additionally, all types exclusively used by these calls have been removed from the Trading WSDL. You can see the full list of removed types in the <a href="#1451-SC">Schema Changes - 1451</a>
+</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1451-DC">Documentation Changes and Errata - 1451</h3>
+
+<p>This section lists additional documentation changes and corrections that were made with this release and that are
+not already mentioned in <a href="#1451-NF">New Features - 1451</a> and <a href="#1451-CF"><span class="Link">
+Changed Functionality - 1451</span></a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+
+
+
+<!-- ## Release Notes for r1423 ############################## -->
+
+<p class="btt" style="font-size: 80%;"></p>
+
+<h2 id="1423">Version 1423</h2>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<td><a href="#1423-CC">Changed Calls - 1423</a> </td>
+						<td> </td>
+			<td><a href="#1423-SC">Schema Changes - 1423</a></td>
+						<td> </td>
+			<td><a href="#1423-AN">Announcements - 1423</a> </td>
+		
+		</tr>
+
+		
+		<tr>
+			<td><a href="#1423-NF">New Features - 1423</a>               </td>	
+						<td> </td>
+			<td><a href="#1423-CF">Changed Functionality - 1423</a>      </td>
+				<td> </td>
+
+			<td><a href="#1423-DC">Document Changes and Errata - 1423</a></td>
+		</tr>
+	</table>
+</div>
+<p>For a current list of known issues, see the <a href="/support/api-status">API Status</a> page, or visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<h3 id="1423-CC">Index of Changed Calls - 1423</h3>
+
+<p>These calls were added, modified, deprecated, or affected by documentation changes in this release. The changes are described below as well as in each call&#39;s Change History.</p>
+
+<h4>New Calls</h4>
+<!-- #  -->
+<!-- ################################# -->
+<!-- # 1423 New Call Table ######## -->
+<p>No new calls in this release.</p>
+<!-- # 1423 New Call Table ######## -->
+<!-- ################################# -->
+
+<h4>Changed Calls</h4>
+
+<!-- ################################# -->
+<!-- # 1423 Changed Call Table ######## -->
+<ul>
+<li><a href="Reference/eBay/AddFixedPriceItem.html#ChangeHistory">AddFixedPriceItem</a></li>
+<li><a href="Reference/eBay/AddItem.html#ChangeHistory">AddItem</a></li>
+<li><a href="Reference/eBay/AddItems.html#ChangeHistory">AddItems</a></li>
+<li><a href="Reference/eBay/RelistFixedPriceItem.html#ChangeHistory">RelistFixedPriceItem</a></li>
+<li><a href="Reference/eBay/RelistItem.html#ChangeHistory">RelistItem</a></li>
+<li><a href="Reference/eBay/ReviseFixedPriceItem.html#ChangeHistory">ReviseFixedPriceItem</a></li>
+<li><a href="Reference/eBay/ReviseItem.html#ChangeHistory">ReviseItem</a></li>
+<li><a href="Reference/eBay/UploadSiteHostedPictures.html#ChangeHistory">UploadSiteHostedPictures</a></li>
+</ul>
+<!-- # 1423 Changed Call Table ######## -->
+<!-- ################################# -->
+
+<h3 id="1423-SC">Schema Changes - 1423</h3>
+
+<p><b>Enumeration note:</b> You need to use this release version or higher to retrieve new code list values
+that were added in this release. See <a href="/devzone/guides/features-guide/default.html#Basics/Call-APISchema.html#CodeLists">Code Lists</a>.
+</p>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<th>Name</th>
+			<th>Part of Schema</th>
+			<th>Type of Change</th>
+		</tr>
+		<tr>
+			<td>
+				<code><b>ExtendSiteHostedPicturesRequest</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>ExtendSiteHostedPicturesResponse</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>ExtensionInDays</b></code>
+			</td>
+			<td>Field</td>
+			<td>Removed</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>ItemType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Modified</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>MappingReferenceId</b></code>
+			</td>
+			<td>Field</td>
+			<td>Added</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>BestOfferStatusCodeType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Modified</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>Accepted</b></code>
+			</td>
+			<td>Enum</td>
+			<td>Modified</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>SellerAccept</b></code>
+			</td>
+			<td>Enum</td>
+			<td>Added</td>
+		</tr>		
+	</table>
+</div>
+
+
+<h3 id="1423-AN">Announcements - 1423</h3>
+
+<!--
+<p>None for this release.</p>
+-->
+<h4>Change Requests</h4>
+
+<p>See the <a href="/support/api-status">API Status</a> page for announcements regarding recently resolved or current system wide issues. Visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1423-NF">New Features - 1423</h3>
+
+<p>This section describes new features that have been added as of this release. New features can involve new calls, new
+capabilities, and/or new fields added to existing calls.</p>
+
+<p>For logical or functional changes to existing features and calls, including code list changes, see <a href="#1423-CF">Changed Functionality - 1423</a>.</p>
+
+<a name="1423PrvddbInvntryMpp"></a>
+<h4>Provided <b>Inventory Mapping API</b> support to the Add/Revise/Relist family of calls</h4>
+<p>A reference identifier, introduced through the <b>MappingReferenceId</b> field, has been added to attribute the source of data across API families. This ID is returned in the response of a call to the <b>Inventory Mapping API</b>. Using this ID helps associate requests with the original source used to create the listing.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1423-CF">Changed Functionality - 1423</h3>
+
+<p>This section describes logical or functional changes that have been made to existing functionality, including new
+code list values and/or changes in validation rules.</p>
+
+<a name="1423ExtndStHstdPctrs"></a>
+<h4>ExtendSiteHostedPictures Call Decommissioned</h4>
+<p>
+The <b>ExtendSiteHostedPictures</b> call has been decommissioned, and the call reference documentation has been removed. Additionally, all types exclusively used by <b>ExtendSiteHostedPictures</b> have been removed from the Trading WSDL. You can see a full list of removed types in <a href="#1423-SC">Schema Changes - 1423</a>
+</p>
+
+<a name="1423ExtnsnInDysflddc"></a>
+<h4>ExtensionInDays field decommissioned</h4>
+<p>
+The <b>ExtensionInDays</b> field of the <b>UploadSiteHostedPictures</b> call has been decommissioned and removed from the WSDL, as eBay no longer supports extending the life of unused EPS URLs beyond 30 days. 
+</p>
+
+<a name="1423Nwsllrccptdvlddd"></a>
+<h4>New seller accepted value added to BestOfferStatusCodeType</h4>
+<p>
+A new enumerated value, <b>SellerAccept</b>, was added to the <b>BestOfferStatusCodeType</b> to support seller acceptance of a buyer&#39;s offer. The <b>Accepted</b> enumerated value is now returned only after the buyer has completed the payment. See <a href="#1423-SC">Schema Changes - 1423</a> for specifics.
+</p>
+
+
+<h3 id="1423-DC">Documentation Changes and Errata - 1423</h3>
+
+<p>This section lists additional documentation changes and corrections that were made with this release and that are
+not already mentioned in <a href="#1423-NF">New Features - 1423</a> and <a href="#1423-CF"><span class="Link">
+Changed Functionality - 1423</span></a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+
+
+
+
+<!-- ## Release Notes for r1421 ############################## -->
+
+<p class="btt" style="font-size: 80%;"></p>
+
+<h2 id="1421">Version 1421</h2>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<td><a href="#1421-CC">Changed Calls - 1421</a> </td>
+						<td> </td>
+			<td><a href="#1421-SC">Schema Changes - 1421</a></td>
+						<td> </td>
+			<td><a href="#1421-AN">Announcements - 1421</a> </td>
+		
+		</tr>
+
+		
+		<tr>
+			<td><a href="#1421-NF">New Features - 1421</a>               </td>	
+						<td> </td>
+			<td><a href="#1421-CF">Changed Functionality - 1421</a>      </td>
+				<td> </td>
+
+			<td><a href="#1421-DC">Document Changes and Errata - 1421</a></td>
+		</tr>
+	</table>
+</div>
+<p>For a current list of known issues, see the <a href="/support/api-status">API Status</a> page, or visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<h3 id="1421-CC">Index of Changed Calls - 1421</h3>
+
+<p>These calls were added, modified, deprecated, or affected by documentation changes in this release. The changes are described below as well as in each call&#39;s Change History.</p>
+
+<h4>New Calls</h4>
+<!-- #  -->
+<!-- ################################# -->
+<!-- # 1421 New Call Table ######## -->
+<p>No new calls in this release.</p>
+<!-- # 1421 New Call Table ######## -->
+<!-- ################################# -->
+
+<h4>Changed Calls</h4>
+
+<!-- ################################# -->
+<!-- # 1421 Changed Call Table ######## -->
+<ul>
+<li><a href="Reference/eBay/GetItemTransactions.html#ChangeHistory">GetItemTransactions</a></li>
+<li><a href="Reference/eBay/GetNotificationPreferences.html#ChangeHistory">GetNotificationPreferences</a></li>
+<li><a href="Reference/eBay/GetNotificationsUsage.html#ChangeHistory">GetNotificationsUsage</a></li>
+<li><a href="Reference/eBay/GetOrders.html#ChangeHistory">GetOrders</a></li>
+<li><a href="Reference/eBay/SetNotificationPreferences.html#ChangeHistory">SetNotificationPreferences</a></li>
+</ul>
+<!-- # 1421 Changed Call Table ######## -->
+<!-- ################################# -->
+
+<h3 id="1421-SC">Schema Changes - 1421</h3>
+
+<p><b>Enumeration note:</b> You need to use this release version or higher to retrieve new code list values
+that were added in this release. See <a href="/devzone/guides/features-guide/default.html#Basics/Call-APISchema.html#CodeLists">Code Lists</a>.
+</p>
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<th>Name</th>
+			<th>Part of Schema</th>
+			<th>Type of Change</th>
+		</tr>
+		<tr>
+			<td>
+				<code><b>TransactionProgramType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Modified</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>MotorPurchaseType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Added</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>NotificationEventTypeCodeType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Modified</td>
+		</tr>
+	</table>
+</div>
+
+
+<h3 id="1421-AN">Announcements - 1421</h3>
+
+<!--
+<p>None for this release.</p>
+-->
+<h4>Change Requests</h4>
+
+<p>See the <a href="/support/api-status">API Status</a> page for announcements regarding recently resolved or current system wide issues. Visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1421-NF">New Features - 1421</h3>
+
+<p>This section describes new features that have been added as of this release. New features can involve new calls, new
+capabilities, and/or new fields added to existing calls.</p>
+
+<p>For logical or functional changes to existing features and calls, including code list changes, see <a href="#1421-CF">Changed Functionality - 1421</a>.</p>
+
+<a name="1421NwMtrPrchscntnrd"></a>
+<h4>New MotorPurchase container added to TransactionProgramType</h4>
+<p>
+A new container, <b>MotorPurchase</b>, has been added to <b>TransactionProgramType</b> and will be returned by <b>GetOrders</b> and <b>GetItemTransactions</b> as applicable. This container provides details on a motor vehicle that is being ordered using Secure Purchase.  
+</p>
+
+<h3 id="1421-CF">Changed Functionality - 1421</h3>
+
+<p>This section describes logical or functional changes that have been made to existing functionality, including new
+code list values and/or changes in validation rules.</p>
+
+<a name="1421SpprtfrEsyRtrnsn"></a>
+<h4>Support for easy returns in P&amp;A listings added</h4>
+
+<p>To facilitate easy returns on the eBay-US site exclusively, sellers of eligible Parts &amp; Accessories (P&amp;A) listings are required to offer buyers a minimum of 30-day free returns. Initially, starting July 15, 2025, eBay will automatically update return policy settings as applicable and return a warning. Beginning in late August, 2025, listing creation and revision will be blocked with error 2190443 returned. Eligible listings must meet specific criteria. For more information, visit the applicable <a href="https://www.ebay.com/sellercenter/news/2025-june/parts-accessories-return-policy" target="_blank">Seller Center help page</a>. Also see <a href="/api-docs/user-guides/static/trading-user-guide/ebay-motors-parts-accessories-easy-returns.html" target="_blank">Support for easy returns in Parts and Accessories</a>.</p> 
+<p>To support the new functionality, the following error message and warning have been added in this release.</p>
+<ul>
+  <li>(error) <b>21920443</b>: This P&amp;A listing has a non-compliant domestic return policy. Please update the return window to 30-days (or more) and/or update return shipping cost payer to Seller, and then make another call. Sellers using business policies must make the same changes to their return business policy and then make another call. To learn more, visit https://www.ebay.com/sellercenter/news/2025-june/parts-accessories-return-policy.</li>
+  <li>(warning) <b>21920444</b>: This P&amp;A listing requires a minimum 30-day return period and seller-paid return shipping. eBay automatically updated the listing&#39;s return policy settings to meet these requirements. Sellers using business policies should update their return business policy for future P&amp;A listings. To learn more, visit https://www.ebay.com/sellercenter/news/2025-june/parts-accessories-return-policy.</li>
+</ul>
+
+<a name="1421Itmflfllmntlctnn"></a>
+<h4>Item fulfillment location information now returned </h4>
+<p>
+Item fulfillment location information can now be returned in the <b>Location</b> field of the <b>GetOrders</b>, <b>GetItemTransactions</b>, and <b>GetSellerTransactions</b> calls if applicable. If the item is shipped from a fulfillment center location through the Multi-Warehouse Program, this field will return the location details (including the country and zip code) of the fulfillment center closest to the buyer.
+</p>
+
+<a name="1421Rmvddcmmssndnmrt"></a>
+<h4>Removed decommissioned enumerated values from <b>NotificationEventTypeCodeType</b></h4>
+
+<p>The following notification event enumerated values were decommissioned: <code>AccountSuspended</code>, <code>BuyerNoShow</code>, <code>AccountSummary</code>, <code>AccountSuspended</code>, <code>EBNOrderCanceled</code>, <code>EBNOrderPickedUp</code>, <code>EmailAddressChanged</code>, <code>None</code>, <code>PasswordChanged</code>, <code>PasswordHintChanged</code>, <code>PaymentDetailChanged</code>, and <code>WebnextMobilePhotoSync</code>. These values are no longer available for the <a href="/Devzone/XML/docs/Reference/eBay/GetNotificationPreferences.html" target="_blank">GetNotificationPreferences</a>, <a href="/Devzone/XML/docs/Reference/eBay/GetNotificationsUsage.html" target="_blank">GetNotificationsUsage</a>, and <a href="/Devzone/XML/docs/Reference/eBay/SetNotificationPreferences.html" target="_blank">SetNotificationPreferences</a> calls.</p>
+
+
+ 
+
+<h3 id="1421-DC">Documentation Changes and Errata - 1421</h3>
+
+<p>This section lists additional documentation changes and corrections that were made with this release and that are
+not already mentioned in <a href="#1421-NF">New Features - 1421</a> and <a href="#1421-CF"><span class="Link">
+Changed Functionality - 1421</span></a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+
+<!-- ## Release Notes for r1415 ############################## -->
+
+<p class="btt" style="font-size: 80%;"></p>
+
+<h2 id="1415">Version 1415</h2>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<td><a href="#1415-CC">Changed Calls - 1415</a> </td>
+						<td> </td>
+			<td><a href="#1415-SC">Schema Changes - 1415</a></td>
+						<td> </td>
+			<td><a href="#1415-AN">Announcements - 1415</a> </td>
+		
+		</tr>
+
+		
+		<tr>
+			<td><a href="#1415-NF">New Features - 1415</a>               </td>	
+						<td> </td>
+			<td><a href="#1415-CF">Changed Functionality - 1415</a>      </td>
+				<td> </td>
+
+			<td><a href="#1415-DC">Document Changes and Errata - 1415</a></td>
+		</tr>
+	</table>
+</div>
+<p>For a current list of known issues, see the <a href="/support/api-status">API Status</a> page, or visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<h3 id="1415-CC">Index of Changed Calls - 1415</h3>
+
+<p>These calls were added, modified, deprecated, or affected by documentation changes in this release. The changes are described below as well as in each call&#39;s Change History.</p>
+
+<h4>New Calls</h4>
+<!-- #  -->
+<!-- ################################# -->
+<!-- # 1415 New Call Table ######## -->
+<p>No new calls in this release.</p>
+<!-- # 1415 New Call Table ######## -->
+<!-- ################################# -->
+
+<h4>Changed Calls</h4>
+
+<!-- ################################# -->
+<!-- # 1415 Changed Call Table ######## -->
+<p>No changed calls in this release.</p>
+<!-- # 1415 Changed Call Table ######## -->
+<!-- ################################# -->
+
+<h3 id="1415-SC">Schema Changes - 1415</h3>
+
+<p><b>Enumeration note:</b> You need to use this release version or higher to retrieve new code list values
+that were added in this release. See <a href="/devzone/guides/features-guide/default.html#Basics/Call-APISchema.html#CodeLists">Code Lists</a>.
+</p>
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<th>Name</th>
+			<th>Part of Schema</th>
+			<th>Type of Change</th>
+		</tr>
+		<tr>
+			<td>
+				<code><b>CategoryMappingType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>GetCategoryMappingsRequest</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>GetCategoryMappingsResponse</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>		
+	</table>
+</div>
+
+<h3 id="1415-AN">Announcements - 1415</h3>
+
+<!--
+<p>None for this release.</p>
+-->
+<h4>Change Requests</h4>
+
+<p>See the <a href="/support/api-status">API Status</a> page for announcements regarding recently resolved or current system wide issues. Visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1415-NF">New Features - 1415</h3>
+
+<p>This section describes new features that have been added as of this release. New features can involve new calls, new
+capabilities, and/or new fields added to existing calls.</p>
+
+<p>For logical or functional changes to existing features and calls, including code list changes, see <a href="#1415-CF">Changed Functionality - 1415</a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1415-CF">Changed Functionality - 1415</h3>
+
+<p>This section describes logical or functional changes that have been made to existing functionality, including new
+code list values and/or changes in validation rules.</p>
+
+<a name="1415NwErrrMssgAdddfr"></a>
+<h4>New Error Message Added in Version 1415</h4>
+<p>To support EPS URL links now being required to use HTTPS (HyperText Transfer Protocol Secure) for Revise calls, the following error message has been added in this release. It is returned in <b>ReviseFixedPriceItem</b> and <b>ReviseItem</b> calls when attempting to add images using HTTP resources, specifically for the EBAY-US site only.</p> 
+
+<p><span class="\&quot;tablenote\&quot;"><span style="\&quot;color:#004680\&quot;"><strong>Note: </strong>For <b>ReviseItem</b>/<b>ReviseFixedPriceItem</b> calls, error code <b>21920412</b> is no longer returned and has been replaced by <b>21919490</b>.</span></span></p>
+
+<ul>
+  <li>(Error Code: <b>21919490</b>): eBay security policy only allows HTTPS resources in listings, not HTTP. Please update or remove any HTTP resources.</li>
+</ul>
+<a name="1415GtCtgryMppngsCll"></a>
+<h4>GetCategoryMappings Call Decommissioned</h4>
+<p>
+The <b>GetCategoryMappings</b> call has been decommissioned, and the call reference documentation has been removed. Additionally, all types exclusively used by <b>getCategoryMappings</b> have been removed from the Trading WSDL. You can see the full list of removed types in the <a href="#1413-SC">Schema Changes - 1413</a>
+
+<a name="1415DscrptnRvsMdflds"></a>
+</p><h4>DescriptionReviseMode field use change</h4>
+<p>The <b>DescriptionReviseMode</b> field, used by the <b>ReviseItem</b> and <b>ReviseFixedPriceItem</b> calls, should no longer be used since it no longer supports the ability to append or prepend text using the <b>Append</b> or <b>Prepend</b> values, but only supports the <b>Replace</b> value. If this field is used and set to <b>Append</b> or <b>Prepend</b>, it will default to <b>Replace</b>, and whatever text is supplied in the <b>Item.Description</b> field will completely overwrite the current description for the active listing. If you wish to update the description for an active listing using a revise call, just provide the full description in the <b>Item.Description</b> field and do not use this field at all. This field will be completely removed from the WSDL within a few months.</p>
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1415-DC">Documentation Changes and Errata - 1415</h3>
+
+<p>This section lists additional documentation changes and corrections that were made with this release and that are
+not already mentioned in <a href="#1415-NF">New Features - 1415</a> and <a href="#1415-CF"><span class="Link">
+Changed Functionality - 1415</span></a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<!-- ## Release Notes for r1399 ############################## -->
+
+<p class="btt" style="font-size: 80%;"></p>
+
+<h2 id="1399">Version 1399</h2>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<td><a href="#1399-CC">Changed Calls - 1399</a> </td>
+						<td> </td>
+			<td><a href="#1399-SC">Schema Changes - 1399</a></td>
+						<td> </td>
+			<td><a href="#1399-AN">Announcements - 1399</a> </td>
+		
+		</tr>
+
+		
+		<tr>
+			<td><a href="#1399-NF">New Features - 1399</a>               </td>	
+						<td> </td>
+			<td><a href="#1399-CF">Changed Functionality - 1399</a>      </td>
+				<td> </td>
+
+			<td><a href="#1399-DC">Document Changes and Errata - 1399</a></td>
+		</tr>
+	</table>
+</div>
+<p>For a current list of known issues, see the <a href="/support/api-status">API Status</a> page, or visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<h3 id="1399-CC">Index of Changed Calls - 1399</h3>
+
+<p>These calls were added, modified, deprecated, or affected by documentation changes in this release. The changes are described below as well as in each call&#39;s Change History.</p>
+
+<h4>New Calls</h4>
+<!-- #  -->
+<!-- ################################# -->
+<!-- # 1399 New Call Table ######## -->
+<p>No new calls in this release.</p>
+<!-- # 1399 New Call Table ######## -->
+<!-- ################################# -->
+
+<h4>Changed Calls</h4>
+
+<!-- ################################# -->
+<!-- # 1399 Changed Call Table ######## -->
+<ul>
+<li><a href="Reference/eBay/CompleteSale.html#ChangeHistory">CompleteSale</a></li>
+</ul>
+<!-- # 1399 Changed Call Table ######## -->
+<!-- ################################# -->
+
+<h3 id="1399-SC">Schema Changes - 1399</h3>
+
+<p><b>Enumeration note:</b> You need to use this release version or higher to retrieve new code list values
+that were added in this release. See <a href="/devzone/guides/features-guide/default.html#Basics/Call-APISchema.html#CodeLists">Code Lists</a>.
+</p>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<th>Name</th>
+			<th>Part of Schema</th>
+			<th>Type of Change</th>
+		</tr>
+		<tr>
+			<td>
+				<code><b><a href="/devzone/xml/docs/Reference/eBay/types/OrderType.html" target="_blank">OrderType</a></b></code>
+			</td>
+			<td>Type</td>
+			<td>Modified</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b><a href="/devzone/xml/docs/Reference/eBay/types/PaymentInformationType.html" target="_blank">PaymentInformationType</a></b></code>
+			</td>
+			<td>Type</td>
+			<td>Modified</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b><a href="/devzone/xml/docs/Reference/eBay/types/TaxDetailsType.html" target="_blank">TaxDetailsType</a></b></code>
+			</td>
+			<td>Type</td>
+			<td>Modified</td>
+		</tr>		
+		<tr>
+			<td>
+				<code><b><a href="/devzone/xml/docs/Reference/eBay/types/TaxesType.html" target="_blank">TaxesType</a></b></code>
+			</td>
+			<td>Type</td>
+			<td>Modified</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>GeteBayOfficialTimeRequestType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>		<tr>
+			<td>
+				<code><b>GeteBayOfficialTimeResponseType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>		<tr>
+			<td>
+				<code><b>ValidateTestUserRegistrationRequestType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>		<tr>
+			<td>
+				<code><b>ValidateTestUserRegistrationResponseType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>		<tr>
+			<td>
+				<code><b>ValidateChallengeInputResponseType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>		<tr>
+			<td>
+				<code><b>ValidateChallengeInputResponseType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>		<tr>
+			<td>
+				<code><b>GetChallengeTokenRequestType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>GetChallengeTokenResponseType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>
+	</table>
+</div>
+
+
+
+<h3 id="1399-AN">Announcements - 1399</h3>
+
+<!--
+<p>None for this release.</p>
+-->
+<h4>Change Requests</h4>
+
+<p>See the <a href="/support/api-status">API Status</a> page for announcements regarding recently resolved or current system wide issues. Visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+
+
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1399-NF">New Features - 1399</h3>
+
+<p>This section describes new features that have been added as of this release. New features can involve new calls, new
+capabilities, and/or new fields added to existing calls.</p>
+
+<p>For logical or functional changes to existing features and calls, including code list changes, see <a href="#1399-CF">Changed Functionality - 1399</a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1399-CF">Changed Functionality - 1399</h3>
+
+<p>This section describes logical or functional changes that have been made to existing functionality, including new
+code list values and/or changes in validation rules.</p>
+
+<a name="1399LnchfByrPrtctnnv"></a>
+<h4>Launch of Buyer Protection for private seller purchases on ebay.co.uk</h4>
+<p>
+Going forward, buyers on UK marketplace will be charged a buyer protection fee. These fees will be reflected in the calls as noted in the applicable fields. For UK-based private sellers (excluding Vehicles, Classified Ads, and Property), a <a href="https://www.ebay.co.uk/help/buying/paying-items/buyer-protection-fee?id=5594" target="_blank">Buyer Protection fee</a> will be added to their listings. This fee will be paid for by the buyer. See <a href="/Devzone/XML/docs/ReleaseNotes.html#1399-CC" target="_blank">Changed Calls - 1399</a> for calls which have fields affected.
+</p>
+
+<a name="1399Updtdrrrmssgsfr1"></a>
+<h4>Added error message for 1399</h4>
+<p>
+In order to support the new functionality of Buyer Protection, the following error message has been added in this release and is returned in <b>CompleteSale</b>: </p><ul>
+<li>(error) <b>21920438</b>: Invalid request: one of the items cannot be marked as paid.
+</li>
+</ul>
+
+
+
+<a name="1399GtByOffclTmCllDc"></a>
+<h4>GeteBayOfficialTime Call Decommissioned</h4>
+<p>
+The <b>GeteBayOfficialTime</b> call has been decommissioned decommissioned as of January 27, 2025, and the call reference documentation has been removed. Additionally, all types exclusively used by <b>GeteBayOfficialTime</b> have been removed from the Trading WSDL. You can see the full list of removed types in the <a href="#1399-SC">Schema Changes - 1399</a>
+</p>
+
+<a name="1399VldtTstUsrRgstrt"></a>
+<h4>ValidateTestUserRegistration Call Decommissioned</h4>
+<p>
+The <b>ValidateTestUserRegistration</b> call has been decommissioned as of January 30, 2025, and the call reference documentation has been removed. Additionally, all types exclusively used by <b>ValidateTestUserRegistration</b> have been removed from the Trading WSDL. You can see the full list of removed types in the <a href="#1399-SC">Schema Changes - 1399</a>
+</p>
+
+<a name="1399ChllngCllsDcmmss"></a>
+<h4>Challenge Calls Decommissioned</h4>
+The following challenge calls have been decommissioned as of January 30, 2025, and the call reference documentation has been removed:
+<ul>
+	<li>GetChallengeToken</li>
+	<li>ValidateChallengeInput</li>
+</ul>
+<p>
+Additionally, all types exclusively used by either call have been removed from the Trading WSDL. You can see the full list of removed types in the <a href="#1399-SC">Schema Changes - 1399</a>
+</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1399-DC">Documentation Changes and Errata - 1399</h3>
+
+<p>This section lists additional documentation changes and corrections that were made with this release and that are
+not already mentioned in <a href="#1399-NF">New Features - 1399</a> and <a href="#1399-CF"><span class="Link">
+Changed Functionality - 1399</span></a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+
+
+
+
+
+<!-- ## Release Notes for r1395 ############################## -->
+
+<p class="btt" style="font-size: 80%;"></p>
+
+<h2 id="1395">Version 1395</h2>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<td><a href="#1395-CC">Changed Calls - 1395</a> </td>
+						<td> </td>
+			<td><a href="#1395-SC">Schema Changes - 1395</a></td>
+						<td> </td>
+			<td><a href="#1395-AN">Announcements - 1395</a> </td>
+		
+		</tr>
+
+		
+		<tr>
+			<td><a href="#1395-NF">New Features - 1395</a>               </td>	
+						<td> </td>
+			<td><a href="#1395-CF">Changed Functionality - 1395</a>      </td>
+				<td> </td>
+
+			<td><a href="#1395-DC">Document Changes and Errata - 1395</a></td>
+		</tr>
+	</table>
+</div>
+<p>For a current list of known issues, see the <a href="/support/api-status">API Status</a> page, or visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<h3 id="1395-CC">Index of Changed Calls - 1395</h3>
+
+<p>These calls were added, modified, deprecated, or affected by documentation changes in this release. The changes are described below as well as in each call&#39;s Change History.</p>
+
+<h4>New Calls</h4>
+<!-- #  -->
+<!-- ################################# -->
+<!-- # 1395 New Call Table ######## -->
+<p>No new calls in this release.</p>
+<!-- # 1395 New Call Table ######## -->
+<!-- ################################# -->
+
+<h4>Changed Calls</h4>
+
+<!-- ################################# -->
+<!-- # 1395 Changed Call Table ######## -->
+<ul>
+<li><a href="Reference/eBay/AddFixedPriceItem.html#ChangeHistory">AddFixedPriceItem</a></li>
+<li><a href="Reference/eBay/AddItem.html#ChangeHistory">AddItem</a></li>
+<li><a href="Reference/eBay/AddItems.html#ChangeHistory">AddItems</a></li>
+<li><a href="Reference/eBay/GetItem.html#ChangeHistory">GetItem</a></li>
+<li><a href="Reference/eBay/RelistFixedPriceItem.html#ChangeHistory">RelistFixedPriceItem</a></li>
+<li><a href="Reference/eBay/RelistItem.html#ChangeHistory">RelistItem</a></li>
+<li><a href="Reference/eBay/ReviseFixedPriceItem.html#ChangeHistory">ReviseFixedPriceItem</a></li>
+<li><a href="Reference/eBay/ReviseItem.html#ChangeHistory">ReviseItem</a></li>
+<li><a href="Reference/eBay/VerifyAddFixedPriceItem.html#ChangeHistory">VerifyAddFixedPriceItem</a></li>
+<li><a href="Reference/eBay/VerifyRelistItem.html#ChangeHistory">VerifyRelistItem</a></li>
+</ul>
+<!-- # 1395 Changed Call Table ######## -->
+<!-- ################################# -->
+
+<h3 id="1395-SC">Schema Changes - 1395</h3>
+
+<p><b>Enumeration note:</b> You need to use this release version or higher to retrieve new code list values
+that were added in this release. See <a href="/devzone/guides/features-guide/default.html#Basics/Call-APISchema.html#CodeLists">Code Lists</a>.
+</p>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<th>Name</th>
+			<th>Part of Schema</th>
+			<th>Type of Change</th>
+		</tr>
+		<tr>
+			<td>
+				<code>Regulatory.<b>ManufacturerType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Modified</td>
+		</tr>
+		<tr>
+			<td>
+				<code>Regulatory.ManufacturerType.<b>ContactURL</b></code>
+			</td>
+			<td>Field</td>
+			<td>Added</td>
+		</tr>
+		<tr>
+			<td>
+				<code>Regulatory.<b>ResponsiblePersonType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Modified</td>
+		</tr>	
+		<tr>
+			<td>
+				<code>Regulatory.ResponsiblePersonType.<b>ContactURL</b></code>
+			</td>
+			<td>Field</td>
+			<td>Added</td>
+		</tr>			
+	</table>
+</div>
+
+
+<h3 id="1395-AN">Announcements - 1395</h3>
+
+<!--
+<p>None for this release.</p>
+-->
+<h4>Change Requests</h4>
+
+<p>See the <a href="/support/api-status">API Status</a> page for announcements regarding recently resolved or current system wide issues. Visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1395-NF">New Features - 1395</h3>
+
+<p>This section describes new features that have been added as of this release. New features can involve new calls, new
+capabilities, and/or new fields added to existing calls.</p>
+
+<p>For logical or functional changes to existing features and calls, including code list changes, see <a href="#1395-CF">Changed Functionality - 1395</a>.</p>
+
+<a name="1395NwCntctURLfldddd"></a>
+<h4>New ContactURL field added to ManufacturerType and ResponsiblePersonType</h4>
+<p>
+A new field, <b>ContactURL</b>, has been added to <b>ManufacturerType</b> and <b>ResponsiblePersonType</b>. This field allows users to input a manufacturer&#39;s and/or a Responsible Person&#39;s contact URL as an electronic contact method when inputting GPSR information for a listing. 
+</p>
+<p>
+The following error message has rolled out with the 1395 release. The long version of the message is used below:</p><ul>
+<li>(error) <b>21920435</b>: The contact URL is incorrectly formatted. Please update the formatting.
+</li>
+</ul>
+
+
+<h3 id="1395-CF">Changed Functionality - 1395</h3>
+
+<p>This section describes logical or functional changes that have been made to existing functionality, including new
+code list values and/or changes in validation rules.</p>
+
+<a name="1395Twnwprwndtmcndtn"></a>
+<h4>Two new pre-owned item conditions available for apparel categories in Australia</h4>
+
+<p>As of January 22, the following two <i>Pre-owned</i> item conditions are now supported for 222 apparel categories in Australia:
+</p><ul>
+<li>ConditionID 2990 for Pre-owned - Excellent</li>
+<li>ConditionID 3010 for Pre-owned - Fair</li>
+</ul>
+
+
+<p>For the affected categories, the condition name for ConditionID 3000 has been changed from Pre-owned to Pre-owned - Good. The item condition names for all active listings with ConditionID 3000 will automatically be updated from Pre-owned to Pre-owned - Good. However, we strongly encourage you to revise your existing listings with Pre-owned Excellent (2990) or Pre-owned Fair (3010) if either of those conditions more accurately describe the condition of your item. </p>
+
+<p>See the <a href="https://developer.ebay.com/updates/newsletter/q4_2024" target="_blank">Q4 2024 Newsletter</a> for more information on the affected categories, or you can also use <a href="https://developer.ebay.com/api-docs/sell/metadata/resources/marketplace/methods/getItemConditionPolicies" target="_blank">getItemConditionPolicies</a> or <a href="https://developer.ebay.com/Devzone/XML/docs/Reference/eBay/GetCategoryFeatures.html" target="_blank">GetCategoryFeatures</a> to see which apparel categories support the new item conditions.</p>
+
+<p>These same changes are expected to roll out to all eBay marketplaces in early February, and we will update release notes when that happens.</p>
+<a name="1395Updtdrrrmssgsfr1"></a>
+<h4>Updated error messages for 1395</h4>
+<p>
+In order to support the new <b>ContactURL</b> field, the following error messages have been updated with the 1395 release. The long version of each message is used below: </p><ul>
+<li>(error) <b>21920432</b>: Seller must provide at least one form of contact info for Manufacturer -  address, email, contact URL or phone.
+</li>
+<li>(error) <b>21920433</b>: Seller must provide at least one form of contact info for Responsible Person -  address, email, contact URL or phone.
+</li>
+</ul>
+
+
+<h3 id="1395-DC">Documentation Changes and Errata - 1395</h3>
+
+<p>This section lists additional documentation changes and corrections that were made with this release and that are
+not already mentioned in <a href="#1395-NF">New Features - 1395</a> and <a href="#1395-CF"><span class="Link">
+Changed Functionality - 1395</span></a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<!-- ## Release Notes for r1391 ############################## -->
+
+<p class="btt" style="font-size: 80%;"></p>
+
+<h2 id="1391">Version 1391</h2>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<td><a href="#1391-CC">Changed Calls - 1391</a> </td>
+						<td> </td>
+			<td><a href="#1391-SC">Schema Changes - 1391</a></td>
+						<td> </td>
+			<td><a href="#1391-AN">Announcements - 1391</a> </td>
+		
+		</tr>
+
+		
+		<tr>
+			<td><a href="#1391-NF">New Features - 1391</a>               </td>	
+						<td> </td>
+			<td><a href="#1391-CF">Changed Functionality - 1391</a>      </td>
+				<td> </td>
+
+			<td><a href="#1391-DC">Document Changes and Errata - 1391</a></td>
+		</tr>
+	</table>
+</div>
+<p>For a current list of known issues, see the <a href="/support/api-status">API Status</a> page, or visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<h3 id="1391-CC">Index of Changed Calls - 1391</h3>
+
+<p>These calls were added, modified, deprecated, or affected by documentation changes in this release. The changes are described below as well as in each call&#39;s Change History.</p>
+
+<h4>New Calls</h4>
+<!-- #  -->
+<!-- ################################# -->
+<!-- # 1391 New Call Table ######## -->
+<p>No new calls in this release.</p>
+<!-- # 1391 New Call Table ######## -->
+<!-- ################################# -->
+
+<h4>Changed Calls</h4>
+
+<!-- ################################# -->
+<!-- # 1391 Changed Call Table ######## -->
+<ul>
+<li><a href="Reference/eBay/GetItemTransactions.html#ChangeHistory">GetItemTransactions</a></li>
+<li><a href="Reference/eBay/GetOrders.html#ChangeHistory">GetOrders</a></li>
+<li><a href="Reference/eBay/GetSellerTransactions.html#ChangeHistory">GetSellerTransactions</a></li>
+</ul>
+<!-- # 1391 Changed Call Table ######## -->
+<!-- ################################# -->
+
+<h3 id="1391-SC">Schema Changes - 1391</h3>
+
+<p><b>Enumeration note:</b> You need to use this release version or higher to retrieve new code list values
+that were added in this release. See <a href="/devzone/guides/features-guide/default.html#Basics/Call-APISchema.html#CodeLists">Code Lists</a>.
+</p>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<th>Name</th>
+			<th>Part of Schema</th>
+			<th>Type of Change</th>
+		</tr>
+		<tr>
+			<td>
+				<code><b>ValueTypeCodeType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Modified</td>
+		</tr>
+		<tr>
+			<td>
+				<code>ValueTypeCodeType.<b>CURP</b></code>
+			</td>
+			<td>Enum</td>
+			<td>Added</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>ValueTypeCodeType</b>.RFC</code>
+			</td>
+			<td>Enum</td>
+			<td>Added</td>
+		</tr>	
+		<tr>
+			<td>
+				<code><b>ValueTypeCodeType</b>.RUT</code>
+			</td>
+			<td>Enum</td>
+			<td>Added</td>
+		</tr>			
+	</table>
+</div>
+
+
+<h3 id="1391-AN">Announcements - 1391</h3>
+
+<!--
+<p>None for this release.</p>
+-->
+<h4>Change Requests</h4>
+
+<p>See the <a href="/support/api-status">API Status</a> page for announcements regarding recently resolved or current system wide issues. Visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1391-NF">New Features - 1391</h3>
+
+<p>This section describes new features that have been added as of this release. New features can involve new calls, new
+capabilities, and/or new fields added to existing calls.</p>
+
+<p>For logical or functional changes to existing features and calls, including code list changes, see <a href="#1391-CF">Changed Functionality - 1391</a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1391-CF">Changed Functionality - 1391</h3>
+
+<p>This section describes logical or functional changes that have been made to existing functionality, including new
+code list values and/or changes in validation rules.</p>
+
+<a name="1391NwnmrtdvlsdddtVl"></a>
+<h4>New enumerated values added to ValueTypeCodeType</h4>
+<p>
+Three new enumerated values were added to <b>ValueTypeCodeType</b> to support Mexican and Chilean Tax IDs. See <a href="#1391-SC">Schema Changes - 1391</a> for specifics. 
+</p>
+
+<a name="1391UpdtdrstrctnsfrP"></a>
+<h4>Updated restrictions for P&amp;A tuners category listings</h4>
+<p>
+When creating a listing in the Auto Performance Tuning Devices &amp; Software category, sellers must use an eBay catalog product. Previously, if a seller added any additional product details, like additional item specifics, the listing would be blocked and an error would occur. With this release, if a seller provides any additional product information, that information will now just be dropped, and a warning will be returned.
+</p>
+<p>
+To support this, the following error message has been added in the 1391 release. The long version of the message is used: 
+</p><ul>
+<li>
+(warning) <b>21920437</b>: When listing in <i>replaceable_value</i>, all product details come from eBay catalog. Any product information provided by the seller will be dropped.
+</li>
+</ul>
+
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1391-DC">Documentation Changes and Errata - 1391</h3>
+
+<p>This section lists additional documentation changes and corrections that were made with this release and that are
+not already mentioned in <a href="#1391-NF">New Features - 1391</a> and <a href="#1391-CF"><span class="Link">
+Changed Functionality - 1391</span></a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<!-- ## Release Notes for r1379 ############################## -->
+
+<p class="btt" style="font-size: 80%;"></p>
+
+<h2 id="1379">Version 1379</h2>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<td><a href="#1379-CC">Changed Calls - 1379</a> </td>
+						<td> </td>
+			<td><a href="#1379-SC">Schema Changes - 1379</a></td>
+						<td> </td>
+			<td><a href="#1379-AN">Announcements - 1379</a> </td>
+		
+		</tr>
+
+		
+		<tr>
+			<td><a href="#1379-NF">New Features - 1379</a>               </td>	
+						<td> </td>
+			<td><a href="#1379-CF">Changed Functionality - 1379</a>      </td>
+				<td> </td>
+
+			<td><a href="#1379-DC">Document Changes and Errata - 1379</a></td>
+		</tr>
+	</table>
+</div>
+<p>For a current list of known issues, see the <a href="/support/api-status">API Status</a> page, or visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<h3 id="1379-CC">Index of Changed Calls - 1379</h3>
+
+<p>These calls were added, modified, deprecated, or affected by documentation changes in this release. The changes are described below as well as in each call&#39;s Change History.</p>
+
+<h4>New Calls</h4>
+<!-- #  -->
+<!-- ################################# -->
+<!-- # 1379 New Call Table ######## -->
+<p>No new calls in this release.</p>
+<!-- # 1379 New Call Table ######## -->
+<!-- ################################# -->
+
+<h4>Changed Calls</h4>
+
+<!-- ################################# -->
+<!-- # 1379 Changed Call Table ######## -->
+<p>No changed calls in this release.</p>
+<!-- # 1379 Changed Call Table ######## -->
+<!-- ################################# -->
+
+<h3 id="1379-SC">Schema Changes - 1379</h3>
+
+<p><b>Enumeration note:</b> You need to use this release version or higher to retrieve new code list values
+that were added in this release. See <a href="/devzone/guides/features-guide/default.html#Basics/Call-APISchema.html#CodeLists">Code Lists</a>.
+</p>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<th>Name</th>
+			<th>Part of Schema</th>
+			<th>Type of Change</th>
+		</tr>
+		<tr>
+			<td>
+				<code><b>GetClientAlertsAuthTokenRequestType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>GetClientAlertsAuthTokenResponseType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>
+	</table>
+</div>
+
+
+<h3 id="1379-AN">Announcements - 1379</h3>
+
+<!--
+<p>None for this release.</p>
+-->
+<h4>Change Requests</h4>
+
+<p>See the <a href="/support/api-status">API Status</a> page for announcements regarding recently resolved or current system wide issues. Visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1379-NF">New Features - 1379</h3>
+
+<p>This section describes new features that have been added as of this release. New features can involve new calls, new
+capabilities, and/or new fields added to existing calls.</p>
+
+<p>For logical or functional changes to existing features and calls, including code list changes, see <a href="#1379-CF">Changed Functionality - 1379</a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1379-CF">Changed Functionality - 1379</h3>
+
+<p>This section describes logical or functional changes that have been made to existing functionality, including new
+code list values and/or changes in validation rules.</p>
+
+<a name="1379GtClntAlrtsAthTk"></a>
+<h4>GetClientAlertsAuthToken Call Decommissioned</h4>
+<p>
+The <b>GetClientAlertsAuthToken</b> call has been decommissioned, and the call reference documentation has been removed. Additionally, all types exclusively used by <b>GetClientAlertsAuthToken</b> have been removed from the Trading WSDL. You can see the full list of removed types in the <a href="#1379-SC">Schema Changes - 1379</a>
+</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1379-DC">Documentation Changes and Errata - 1379</h3>
+
+<p>This section lists additional documentation changes and corrections that were made with this release and that are
+not already mentioned in <a href="#1379-NF">New Features - 1379</a> and <a href="#1379-CF"><span class="Link">
+Changed Functionality - 1379</span></a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+
+
+<!-- ## Release Notes for r1375 ############################## -->
+
+<p class="btt" style="font-size: 80%;"></p>
+
+<h2 id="1375">Version 1375</h2>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<td><a href="#1375-CC">Changed Calls - 1375</a> </td>
+						<td> </td>
+			<td><a href="#1375-SC">Schema Changes - 1375</a></td>
+						<td> </td>
+			<td><a href="#1375-AN">Announcements - 1375</a> </td>
+		
+		</tr>
+
+		
+		<tr>
+			<td><a href="#1375-NF">New Features - 1375</a>               </td>	
+						<td> </td>
+			<td><a href="#1375-CF">Changed Functionality - 1375</a>      </td>
+				<td> </td>
+
+			<td><a href="#1375-DC">Document Changes and Errata - 1375</a></td>
+		</tr>
+	</table>
+</div>
+<p>For a current list of known issues, see the <a href="/support/api-status">API Status</a> page, or visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<h3 id="1375-CC">Index of Changed Calls - 1375</h3>
+
+<p>These calls were added, modified, deprecated, or affected by documentation changes in this release. The changes are described below as well as in each call&#39;s Change History.</p>
+
+<h4>New Calls</h4>
+<!-- #  -->
+<!-- ################################# -->
+<!-- # 1375 New Call Table ######## -->
+<p>No new calls in this release.</p>
+<!-- # 1375 New Call Table ######## -->
+<!-- ################################# -->
+
+<h4>Changed Calls</h4>
+
+<!-- ################################# -->
+<!-- # 1375 Changed Call Table ######## -->
+<p>No changed calls in this release.</p>
+<!-- # 1375 Changed Call Table ######## -->
+<!-- ################################# -->
+
+<h3 id="1375-SC">Schema Changes - 1375</h3>
+
+<p><b>Enumeration note:</b> You need to use this release version or higher to retrieve new code list values
+that were added in this release. See <a href="/devzone/guides/features-guide/default.html#Basics/Call-APISchema.html#CodeLists">Code Lists</a>.
+</p>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<th>Name</th>
+			<th>Part of Schema</th>
+			<th>Type of Change</th>
+		</tr>
+		<tr>
+			<td>
+				<code><b>SMSSubscriptionType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>SummaryEventScheduleType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>DeletedFromUnsoldList</b></code>
+			</td>
+			<td>Field</td>
+			<td>Removed</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>DeletedFromSoldList</b></code>
+			</td>
+			<td>Field</td>
+			<td>Removed</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>NotificationEventTypeCodeType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Modified</td>
+		</tr>		
+	</table>
+</div>
+
+
+<h3 id="1375-AN">Announcements - 1375</h3>
+
+<!--
+<p>None for this release.</p>
+-->
+<h4>Change Requests</h4>
+
+<p>See the <a href="/support/api-status">API Status</a> page for announcements regarding recently resolved or current system wide issues. Visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1375-NF">New Features - 1375</h3>
+
+<p>This section describes new features that have been added as of this release. New features can involve new calls, new
+capabilities, and/or new fields added to existing calls.</p>
+
+<p>For logical or functional changes to existing features and calls, including code list changes, see <a href="#1375-CF">Changed Functionality - 1375</a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1375-CF">Changed Functionality - 1375</h3>
+
+<p>This section describes logical or functional changes that have been made to existing functionality, including new
+code list values and/or changes in validation rules.</p>
+
+<a name="1375DltdFrmUnsldLstn"></a>
+<h4>DeletedFromUnsoldList and DeletedFromSoldList containers decommissioned</h4>
+The <b>DeletedFromUnsoldList</b> and <b>DeletedFromSoldList</b> containers and their associated fields in the <a href="/devzone/xml/docs/reference/ebay/GetMyeBaySelling.html" target="_blank">GetMyeBaySelling</a> call have been decommissioned and removed from the WSDL.
+
+<a name="1375SmmrySchdlndSMSS"></a>
+<h4>SummarySchedule and SMSSubscription containers decommissioned</h4>
+The <b>UserData.SummarySchedule</b> and <b>UserData.SMSSubscription</b> containers and their associated fields in the <a href="/devzone/xml/docs/Reference/eBay/GetNotificationPreferences.html" target="_blank">GetNotificationPreferences</a> and <a href="/devzone/xml/docs/Reference/eBay/SetNotificationPreferences.html" target="_blank">SetNotificationPreferences</a> calls have been decommissioned and removed from the WSDL.
+
+<a name="1375RmvdnnwrkngUsrID"></a>
+<h4>Removed non-working UserIDChanged enumerated value from NotificationEventTypeCodeType</h4>
+The notification platform does not support <b>UserIDChanged</b>, so it has been removed as an enumerated value from the <a href="/Devzone/XML/docs/Reference/eBay/types/NotificationEventTypeCodeType.html">NotificationEventTypeCodeType</a> and the <a href="/Devzone/XML/docs/Reference/eBay/GetNotificationPreferences.html">GetNotificationPreferences</a>, <a href="/Devzone/XML/docs/Reference/eBay/GetNotificationsUsage.html">GetNotificationsUsage</a>, and <a href="/Devzone/XML/docs/Reference/eBay/SetNotificationPreferences.html">SetNotificationPreferences</a> calls.
+
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1375-DC">Documentation Changes and Errata - 1375</h3>
+
+<p>This section lists additional documentation changes and corrections that were made with this release and that are
+not already mentioned in <a href="#1375-NF">New Features - 1375</a> and <a href="#1375-CF"><span class="Link">
+Changed Functionality - 1375</span></a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+
+
+
+
+
+
+<!-- ## Release Notes for r1371 ############################## -->
+
+<p class="btt" style="font-size: 80%;"></p>
+
+<h2 id="1371">Version 1371</h2>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<td><a href="#1371-CC">Changed Calls - 1371</a> </td>
+						<td> </td>
+			<td><a href="#1371-SC">Schema Changes - 1371</a></td>
+						<td> </td>
+			<td><a href="#1371-AN">Announcements - 1371</a> </td>
+
+		</tr>
+
+		
+		<tr>
+			<td><a href="#1371-NF">New Features - 1371</a>               </td>
+						<td> </td>
+			<td><a href="#1371-CF">Changed Functionality - 1371</a>      </td>
+				<td> </td>
+
+			<td><a href="#1371-DC">Document Changes and Errata - 1371</a></td>
+		</tr>
+	</table>
+</div>
+<p>For a current list of known issues, see the <a href="/support/api-status">API Status</a> page, or visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<h3 id="1371-CC">Index of Changed Calls - 1371</h3>
+
+<p>These calls were added, modified, deprecated, or affected by documentation changes in this release. The changes are described below as well as in each call&#39;s Change History.</p>
+
+<h4>New Calls</h4>
+<!-- #  -->
+<!-- ################################# -->
+<!-- # 1371 New Call Table ######## -->
+<p>No new calls in this release.</p>
+<!-- # 1371 New Call Table ######## -->
+<!-- ################################# -->
+
+<h4>Changed Calls</h4>
+
+<!-- ################################# -->
+<!-- # 1371 Changed Call Table ######## -->
+<ul>
+<li><a href="Reference/eBay/AddFixedPriceItem.html#ChangeHistory">AddFixedPriceItem</a></li>
+<li><a href="Reference/eBay/AddItem.html#ChangeHistory">AddItem</a></li>
+<li><a href="Reference/eBay/AddItems.html#ChangeHistory">AddItems</a></li>
+<li><a href="Reference/eBay/GetItem.html#ChangeHistory">GetItem</a></li>
+<li><a href="Reference/eBay/RelistFixedPriceItem.html#ChangeHistory">RelistFixedPriceItem</a></li>
+<li><a href="Reference/eBay/RelistItem.html#ChangeHistory">RelistItem</a></li>
+<li><a href="Reference/eBay/ReviseFixedPriceItem.html#ChangeHistory">ReviseFixedPriceItem</a></li>
+<li><a href="Reference/eBay/ReviseItem.html#ChangeHistory">ReviseItem</a></li>
+<li><a href="Reference/eBay/VerifyAddFixedPriceItem.html#ChangeHistory">VerifyAddFixedPriceItem</a></li>
+<li><a href="Reference/eBay/VerifyRelistItem.html#ChangeHistory">VerifyRelistItem</a></li>
+</ul>
+<!-- # 1371 Changed Call Table ######## -->
+<!-- ################################# -->
+
+<h3 id="1371-SC">Schema Changes - 1371</h3>
+
+<p><b>Enumeration note:</b> You need to use this release version or higher to retrieve new code list values
+that were added in this release. See <a href="/devzone/guides/features-guide/default.html#Basics/Call-APISchema.html#CodeLists">Code Lists</a>.
+</p>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<th>Name</th>
+			<th>Part of Schema</th>
+			<th>Type of Change</th>
+		</tr>
+		<tr>
+			<td>
+				<code><b>RegulatoryType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Modified</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>DocumentsType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Added</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>DocumentType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Added</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>ManufacturerType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Added</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>ProductSafetyType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Added</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>ResponsiblePersonsType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Added</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>ResponsiblePersonType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Added</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>ResponsiblePersonCodeTypes</b></code>
+			</td>
+			<td>Type</td>
+			<td>Added</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>ResponsiblePersonCodeType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Added</td>
+		</tr>
+	</table>
+</div>
+
+
+<h3 id="1371-AN">Announcements - 1371</h3>
+
+<p>Economic Operator is being decommissioned and should no longer be used for the Add/Revise/Relist and VerifyItem family of calls. As it is currently still supported, Economic Operator-related fields will be returned if applicable for the GetItem call.</p>
+
+<h4>Change Requests</h4>
+
+<p>See the <a href="/support/api-status">API Status</a> page for announcements regarding recently resolved or current system wide issues. Visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1371-NF">New Features - 1371</h3>
+
+<p>This section describes new features that have been added as of this release. New features can involve new calls, new
+capabilities, and/or new fields added to existing calls.</p>
+
+<p>For logical or functional changes to existing features and calls, including code list changes, see <a href="#1371-CF">Changed Functionality - 1371</a>.</p>
+
+<a name="1371NwschmdddtspprtG"></a>
+<h4>New schema added to support GPSR information</h4>
+<p>
+In preparation for new legal requirements by the European Union taking effect on December 13th 2024, schema changes have been made to support GPSR related fields. The <b>Documents</b>, <b>Manufacturer</b>, <b>ProductSafety</b>, and <b>ResponsiblePersons</b> containers provide GPSR information for products shipped or sold in the EU and Northern Ireland.
+</p>
+
+<p>
+The following new error messages related to using GPSR information were added in the 1371 release. The long version of each message is used below.
+</p>
+<ul>
+  <li>(error) <b>21920418</b>: Regulatory document ID(s) <i>replaceable_value</i> not found. Please use valid ID(s).
+  </li>
+  <li>(error) <b>21920419</b>: Duplicate regulatory document ID(s) <i>replaceable_value</i> sent in the request. Duplicate ID(s) have been ignored.
+  </li>
+  <li>(error) <b>21920420</b>: Regulatory document structure incorrect. Max allowed number of entries is <i>replaceable_value</i>.
+  </li>
+  <li>(error) <b>21920421</b>: Invalid document state for ID(s) <i>replaceable_value</i>. Documents must be in the SUBMITTED or ACCEPTED state.
+  </li>
+  <li>(error) <b>21920422</b>: Product Safety structure incorrect for <i>replaceable_value</i>. Max allowed number of entries is <i>replaceable_value</i>.
+  </li>
+  <li>(error) <b>21920423</b>: Product Safety information incomplete. Your listing must include product safety pictograms &amp; statements.
+  </li>
+  <li>(error) <b>21920424</b>: Manufacturer address information is incomplete. When providing the address, please provide the street, city, postal code and country
+  </li>
+  <li>(error) <b>21920425</b>: Manufacturer information is incomplete. Please provide the company name.
+  </li>
+  <li>(error) <b>21920426</b>: Responsible Person structure incorrect for <i>replaceable_value</i>. Max allowed number of entries is <i>replaceable_value</i>.
+  </li>
+  <li>(error) <b>21920427</b>: Responsible Person address information is incomplete. When providing the address, please provide the street, city, postal code and country
+  </li>
+  <li>(error) <b>21920428</b>: Responsible Person information is incomplete. Please provide the company name.
+  </li>
+  <li>(error) <b>21920429</b>: Either the Manufacturer or at least one of the Responsible Persons must be located in the EU.
+  </li>
+  <li>(error) <b>21920430</b>: Please provide a minimum of <i>replaceable_value</i> and a maximum of <i>replaceable_value</i> types for a Responsible Person.
+  </li>
+  <li>(error) <b>21920431</b>: Seller must provide at least one form of contact info for Economic Operator - either phone, email or address.
+  </li>
+  <li>(error) <b>21920432</b>: Seller must provide at least one form of contact info for Manufacturer - either phone, email or address.
+  </li>
+  <li>(error) <b>21920433</b>: Seller must provide at least one form of contact info for Responsible Person - either phone, email or address.
+  </li>
+</ul>
+<p>These error messages can be viewed in the <a href="/devzone/XML/docs/Reference/eBay/Errors/ErrorMessages.htm#ErrorsByNumber" target="_blank">Errors by Number</a> page.</p>
+
+<h3 id="1371-CF">Changed Functionality - 1371</h3>
+
+<p>This section describes logical or functional changes that have been made to existing functionality, including new
+code list values and/or changes in validation rules.</p>
+
+
+<p>None for this release.</p>
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1371-DC">Documentation Changes and Errata - 1371</h3>
+
+<p>This section lists additional documentation changes and corrections that were made with this release and that are
+not already mentioned in <a href="#1371-NF">New Features - 1371</a> and <a href="#1371-CF"><span class="Link">
+Changed Functionality - 1371</span></a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+
+<!-- ## Release Notes for r1367 ############################## -->
+
+<p class="btt" style="font-size: 80%;"></p>
+
+<h2 id="1367">Version 1367</h2>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<td><a href="#1367-CC">Changed Calls - 1367</a> </td>
+						<td> </td>
+			<td><a href="#1367-SC">Schema Changes - 1367</a></td>
+						<td> </td>
+			<td><a href="#1367-AN">Announcements - 1367</a> </td>
+
+		</tr>
+
+		
+		<tr>
+			<td><a href="#1367-NF">New Features - 1367</a>               </td>
+						<td> </td>
+			<td><a href="#1367-CF">Changed Functionality - 1367</a>      </td>
+				<td> </td>
+
+			<td><a href="#1367-DC">Document Changes and Errata - 1367</a></td>
+		</tr>
+	</table>
+</div>
+<p>For a current list of known issues, see the <a href="/support/api-status">API Status</a> page, or visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<h3 id="1367-CC">Index of Changed Calls - 1367</h3>
+
+<p>These calls were added, modified, deprecated, or affected by documentation changes in this release. The changes are described below as well as in each call&#39;s Change History.</p>
+
+<h4>New Calls</h4>
+<!-- #  -->
+<!-- ################################# -->
+<!-- # 1359 New Call Table ######## -->
+<p>No new calls in this release.</p>
+<!-- # 1359 New Call Table ######## -->
+<!-- ################################# -->
+
+<h4>Changed Calls</h4>
+
+<!-- ################################# -->
+<!-- # 1359 Changed Call Table ######## -->
+<p>No changed calls in this release.</p>
+<!-- # 1359 Changed Call Table ######## -->
+<!-- ################################# -->
+
+<h3 id="1367-SC">Schema Changes - 1367</h3>
+
+<p><b>Enumeration note:</b> You need to use this release version or higher to retrieve new code list values
+that were added in this release. See <a href="/devzone/guides/features-guide/default.html#Basics/Call-APISchema.html#CodeLists">Code Lists</a>.
+</p>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<th>Name</th>
+			<th>Part of Schema</th>
+			<th>Type of Change</th>
+		</tr>
+		<tr>
+			<td>
+				<code><b>SuggestedCategoryArrayType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>SuggestedCategoryType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>
+	</table>
+</div>
+
+
+<h3 id="1367-AN">Announcements - 1367</h3>
+
+<!--
+<p>None for this release.</p>
+-->
+<h4>Change Requests</h4>
+
+<p>See the <a href="/support/api-status">API Status</a> page for announcements regarding recently resolved or current system wide issues. Visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1367-NF">New Features - 1367</h3>
+
+<p>This section describes new features that have been added as of this release. New features can involve new calls, new
+capabilities, and/or new fields added to existing calls.</p>
+
+<p>For logical or functional changes to existing features and calls, including code list changes, see <a href="#1367-CF">Changed Functionality - 1367</a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1367-CF">Changed Functionality - 1367</h3>
+
+<p>This section describes logical or functional changes that have been made to existing functionality, including new
+code list values and/or changes in validation rules.</p>
+
+<a name="1367GtSggstdCtgrsCll"></a>
+<h4>GetSuggestedCategories Call Decommissioned</h4>
+<p>
+The <b>GetSuggestedCategories</b> call has been decommissioned, and the call reference documentation has been removed. Additionally, all types exclusively used by <b>GetSuggestedCategories</b> have been removed from the Trading WSDL. You can see the full list of removed types in the <a href="#1367-SC">Schema Changes - 1367</a>
+</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1367-DC">Documentation Changes and Errata - 1367</h3>
+
+<p>This section lists additional documentation changes and corrections that were made with this release and that are
+not already mentioned in <a href="#1367-NF">New Features - 1367</a> and <a href="#1359-CF"><span class="Link">
+Changed Functionality - 1367</span></a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<!-- ## Release Notes for r1363 ############################## -->
+
+<p class="btt" style="font-size: 80%;"></p>
+
+<h2 id="1363">Version 1363</h2>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<td><a href="#1363-CC">Changed Calls - 1363</a> </td>
+						<td> </td>
+			<td><a href="#1363-SC">Schema Changes - 1363</a></td>
+						<td> </td>
+			<td><a href="#1363-AN">Announcements - 1363</a> </td>
+
+		</tr>
+
+		
+		<tr>
+			<td><a href="#1363-NF">New Features - 1363</a>               </td>
+						<td> </td>
+			<td><a href="#1363-CF">Changed Functionality - 1363</a>      </td>
+				<td> </td>
+
+			<td><a href="#1363-DC">Document Changes and Errata - 1363</a></td>
+		</tr>
+	</table>
+</div>
+<p>For a current list of known issues, see the <a href="/support/api-status">API Status</a> page, or visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<h3 id="1363-CC">Index of Changed Calls - 1363</h3>
+
+<p>These calls were added, modified, deprecated, or affected by documentation changes in this release. The changes are described below as well as in each call&#39;s Change History.</p>
+
+<h4>New Calls</h4>
+<!-- #  -->
+<!-- ################################# -->
+<!-- # 1363 New Call Table ######## -->
+<p>No new calls in this release.</p>
+<!-- # 1363 New Call Table ######## -->
+<!-- ################################# -->
+
+<h4>Changed Calls</h4>
+
+<!-- ################################# -->
+<!-- # 1363 Changed Call Table ######## -->
+<p>No changed calls in this release.</p>
+<!-- # 1363 Changed Call Table ######## -->
+<!-- ################################# -->
+
+<h3 id="1363-SC">Schema Changes - 1363</h3>
+
+<p>None for this release.</p>
+
+
+<h3 id="1363-AN">Announcements - 1363</h3>
+
+<!--
+<p>None for this release.</p>
+-->
+<h4>Change Requests</h4>
+
+<p>See the <a href="/support/api-status">API Status</a> page for announcements regarding recently resolved or current system wide issues. Visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1363-NF">New Features - 1363</h3>
+
+<p>This section describes new features that have been added as of this release. New features can involve new calls, new
+capabilities, and/or new fields added to existing calls.</p>
+
+<p>For logical or functional changes to existing features and calls, including code list changes, see <a href="#1363-CF">Changed Functionality - 1363</a>.</p>
+
+
+<a name="1363NwrqrmntwhnddngE"></a>
+<h4>New requirement when adding EPA approved products</h4>
+<p>
+A new requirement adding support for EPA approved tuning devices and software products was added to category Id 173651 (Auto Performance Tuning Devices &amp; Software). See <a href="#1363Nwrrrmssgsfr1363">New error messages for 1363</a> for updated errors.
+<span class="tablenote"><b>Note: </b>
+	When listing in <b>categoryID</b> 173651 (Tuning devices &amp; software), use of catalog products is required. For more information, see <a href="/api-docs/user-guides/static/trading-user-guide/tuning-devices-and-software.html" target="_blank">Tuning devices and software</a>.
+</span>
+</p>
+
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1363-CF">Changed Functionality - 1363</h3>
+
+<p>This section describes logical or functional changes that have been made to existing functionality, including new
+code list values and/or changes in validation rules.</p>
+
+<a name="1363Nwrrrmssgsfr1363"></a>
+<h4>New error messages for 1363</h4>
+<p>
+Below is a list of new or changed error and warning messages that rolled out with the 1363 release and are related to specific parts and accessory categories. The long version of each message is used below:
+
+</p><ul>
+	<li>(error) <b>21920416</b>: When listing in <i>replaceable_value</i>, key information such as <i>replaceable_value</i> comes from eBay&#39;s catalog and should be left blank.</li>
+	<li>(error) <b>21920417</b>: When listing in <i>replaceable_value</i>, sellers are required to adopt eBay&#39;s catalog data which will provide all the necessary details for the product.</li>
+</ul>
+<p>These error messages can be viewed in the <a href="/devzone/XML/docs/Reference/eBay/Errors/ErrorMessages.htm#ErrorsByNumber" target="_blank">Errors by Number</a> page.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1363-DC">Documentation Changes and Errata - 1363</h3>
+
+<p>This section lists additional documentation changes and corrections that were made with this release and that are
+not already mentioned in <a href="#1363-NF">New Features - 1363</a> and <a href="#1363-CF"><span class="Link">
+Changed Functionality - 1363</span></a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+
+
+
+
+
+
+<!-- ## Release Notes for r1359 ############################## -->
+
+<p class="btt" style="font-size: 80%;"></p>
+
+<h2 id="1359">Version 1359</h2>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<td><a href="#1359-CC">Changed Calls - 1359</a> </td>
+						<td> </td>
+			<td><a href="#1359-SC">Schema Changes - 1359</a></td>
+						<td> </td>
+			<td><a href="#1359-AN">Announcements - 1359</a> </td>
+
+		</tr>
+
+		
+		<tr>
+			<td><a href="#1359-NF">New Features - 1359</a>               </td>
+						<td> </td>
+			<td><a href="#1359-CF">Changed Functionality - 1359</a>      </td>
+				<td> </td>
+
+			<td><a href="#1359-DC">Document Changes and Errata - 1359</a></td>
+		</tr>
+	</table>
+</div>
+<p>For a current list of known issues, see the <a href="/support/api-status">API Status</a> page, or visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<h3 id="1359-CC">Index of Changed Calls - 1359</h3>
+
+<p>These calls were added, modified, deprecated, or affected by documentation changes in this release. The changes are described below as well as in each call&#39;s Change History.</p>
+
+<h4>New Calls</h4>
+<!-- #  -->
+<!-- ################################# -->
+<!-- # 1359 New Call Table ######## -->
+<p>No new calls in this release.</p>
+<!-- # 1359 New Call Table ######## -->
+<!-- ################################# -->
+
+<h4>Changed Calls</h4>
+
+<!-- ################################# -->
+<!-- # 1359 Changed Call Table ######## -->
+<p>No changed calls in this release.</p>
+<!-- # 1359 Changed Call Table ######## -->
+<!-- ################################# -->
+
+<h3 id="1359-SC">Schema Changes - 1359</h3>
+
+<p>None for this release.</p>
+
+
+
+
+<h3 id="1359-AN">Announcements - 1359</h3>
+
+<!--
+<p>None for this release.</p>
+-->
+<h4>Change Requests</h4>
+
+<p>See the <a href="/support/api-status">API Status</a> page for announcements regarding recently resolved or current system wide issues. Visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1359-NF">New Features - 1359</h3>
+
+<p>This section describes new features that have been added as of this release. New features can involve new calls, new
+capabilities, and/or new fields added to existing calls.</p>
+
+<p>For logical or functional changes to existing features and calls, including code list changes, see <a href="#1359-CF">Changed Functionality - 1359</a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1359-CF">Changed Functionality - 1359</h3>
+
+<p>This section describes logical or functional changes that have been made to existing functionality, including new
+code list values and/or changes in validation rules.</p>
+
+<a name="1359Nwrrrcdsfr1359"></a>
+<h4>New error messages for 1359</h4>
+<p>
+Below is a list of new or changed error and warning messages that rolled out with the 1359 release. The long version of each message is used below:
+</p><ul>
+	<li>(warning) <b>21919456</b>: (changed severity and message text) Seller has opted into business policies. Please use policy IDs rather than legacy fields for Shipping, Payments or Returns or new policies may be automatically created seller&#39;s behalf.</li>
+	<li>(error) <b>21920409</b>:  A minimum of <i>replaceable_value</i> photos is required to list in category <i>replaceable_value</i>.</li>
+	<li>(warning) <b>21920410</b>: The selected shipping service <i>replaceable_value</i> is not supported with the selected shipping package type. The shipping service has been dropped from the listing.</li>
+	<li>(warning) <b>21920411</b>: The field <i>replaceable_value</i> is deprecated and will be decommissioned as of <i>replaceable_value</i> and will no longer be recognized or accepted.</li>
+	<li>(warning) <b>21920412</b>: eBay Picture Service (EPS) URL links are now required to be HTTPS links. HTTP links are converted to HTTPS links right now. Starting August 2024, HTTP EPS links will not be supported.</li>
+	<li>(error) <b>21920413</b>: The category chosen is not valid for this auto related item. Please choose another category.</li>
+	<li>(error) <b>21920414</b>: Seller is not eligible for Managed Shipping. Please opt out of Managed Shipping.</li>
+	<li>(error) <b>21920415</b>: The package dimensions required for calculated shipping are missing. Provide valid numbers for the dimensions.</li>
+</ul>
+
+<p>These error messages can be viewed in the <a href="/devzone/XML/docs/Reference/eBay/Errors/ErrorMessages.htm#ErrorsByNumber" target="_blank">Errors by Number</a> page.</p>
+
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1359-DC">Documentation Changes and Errata - 1359</h3>
+
+<p>This section lists additional documentation changes and corrections that were made with this release and that are
+not already mentioned in <a href="#1359-NF">New Features - 1359</a> and <a href="#1359-CF"><span class="Link">
+Changed Functionality - 1359</span></a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+
+
+
+<!-- ## Release Notes for r1357 ############################## -->
+
+<p class="btt" style="font-size: 80%;"></p>
+
+<h2 id="1357">Version 1357</h2>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<td><a href="#1357-CC">Changed Calls - 1357</a> </td>
+						<td> </td>
+			<td><a href="#1357-SC">Schema Changes - 1357</a></td>
+						<td> </td>
+			<td><a href="#1357-AN">Announcements - 1357</a> </td>
+
+		</tr>
+
+		
+		<tr>
+			<td><a href="#1357-NF">New Features - 1357</a>               </td>
+						<td> </td>
+			<td><a href="#1357-CF">Changed Functionality - 1357</a>      </td>
+				<td> </td>
+
+			<td><a href="#1357-DC">Document Changes and Errata - 1357</a></td>
+		</tr>
+	</table>
+</div>
+<p>For a current list of known issues, see the <a href="/support/api-status">API Status</a> page, or visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<h3 id="1357-CC">Index of Changed Calls - 1357</h3>
+
+<p>These calls were added, modified, deprecated, or affected by documentation changes in this release. The changes are described below as well as in each call&#39;s Change History.</p>
+
+<h4>New Calls</h4>
+<!-- #  -->
+<!-- ################################# -->
+<!-- # 1357 New Call Table ######## -->
+<p>No new calls in this release.</p>
+<!-- # 1357 New Call Table ######## -->
+<!-- ################################# -->
+
+<h4>Changed Calls</h4>
+
+<!-- ################################# -->
+<!-- # 1357 Changed Call Table ######## -->
+<ul>
+<li><a href="Reference/eBay/GetAccount.html#ChangeHistory">GetAccount</a></li>
+</ul>
+<!-- # 1357 Changed Call Table ######## -->
+<!-- ################################# -->
+
+<h3 id="1357-SC">Schema Changes - 1357</h3>
+
+<p><b>Enumeration note:</b> You need to use this release version or higher to retrieve new code list values
+that were added in this release. See <a href="/devzone/guides/features-guide/default.html#Basics/Call-APISchema.html#CodeLists">Code Lists</a>.
+</p>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<th>Name</th>
+			<th>Part of Schema</th>
+			<th>Type of Change</th>
+		</tr>
+		<tr>
+			<td>
+				<code><b>AccountDetailEntryCodeType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Modified</td>
+		</tr>
+		<tr>
+			<td>
+				<code>AccountDetailEntryCodeType.<b>RegulatoryOperatingFee</b></code>
+			</td>
+			<td>Enum</td>
+			<td>Added</td>
+		</tr>
+		<tr>
+			<td>
+				<code>AccountDetailEntryCodeType.<b>RegulatoryOperatingFeeCredit</b></code>
+			</td>
+			<td>Enum</td>
+			<td>Added</td>
+		</tr>
+		<tr>
+			<td>
+				<code>AccountDetailEntryCodeType.<b>DHLPaymentProcessingFee</b></code>
+			</td>
+			<td>Enum</td>
+			<td>Added</td>
+		</tr>
+		<tr>
+			<td>
+				<code>AccountDetailEntryCodeType.<b>DHLPaymentProcessingFeeCredit</b></code>
+			</td>
+			<td>Enum</td>
+			<td>Added</td>
+		</tr>
+	</table>
+</div>
+
+
+<h3 id="1357-AN">Announcements - 1357</h3>
+
+<!--
+<p>None for this release.</p>
+-->
+<h4>Change Requests</h4>
+
+<p>See the <a href="/support/api-status">API Status</a> page for announcements regarding recently resolved or current system wide issues. Visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1357-NF">New Features - 1357</h3>
+
+<p>This section describes new features that have been added as of this release. New features can involve new calls, new
+capabilities, and/or new fields added to existing calls.</p>
+
+<p>For logical or functional changes to existing features and calls, including code list changes, see <a href="#1357-CF">Changed Functionality - 1357</a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1357-CF">Changed Functionality - 1357</h3>
+
+<p>This section describes logical or functional changes that have been made to existing functionality, including new
+code list values and/or changes in validation rules.</p>
+
+<a name="1357NwFndCrdtnmrtdvl"></a>
+<h4>New Fee and Credit enumerated values added to GetAccount</h4>
+<p>
+Four enumerated values were added. See <a href="#1357-SC">Schema Changes - 1357</a> for specifics.</p>
+
+
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+
+<h3 id="1357-DC">Documentation Changes and Errata - 1357</h3>
+
+<p>This section lists additional documentation changes and corrections that were made with this release and that are
+not already mentioned in <a href="#1357-NF">New Features - 1357</a> and <a href="#1357-CF"><span class="Link">
+Changed Functionality - 1357</span></a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+
+
+
+
+
+<!-- ## Release Notes for r1355 ############################## -->
+
+<p class="btt" style="font-size: 80%;"></p>
+
+<h2 id="1355">Version 1355</h2>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<td><a href="#1355-CC">Changed Calls - 1355</a> </td>
+						<td> </td>
+			<td><a href="#1355-SC">Schema Changes - 1355</a></td>
+						<td> </td>
+			<td><a href="#1355-AN">Announcements - 1355</a> </td>
+
+		</tr>
+
+		
+		<tr>
+			<td><a href="#1355-NF">New Features - 1355</a>               </td>
+						<td> </td>
+			<td><a href="#1355-CF">Changed Functionality - 1355</a>      </td>
+				<td> </td>
+
+			<td><a href="#1355-DC">Document Changes and Errata - 1355</a></td>
+		</tr>
+	</table>
+</div>
+<p>For a current list of known issues, see the <a href="/support/api-status">API Status</a> page, or visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<h3 id="1355-CC">Index of Changed Calls - 1355</h3>
+
+<p>These calls were added, modified, deprecated, or affected by documentation changes in this release. The changes are described below as well as in each call&#39;s Change History.</p>
+
+<h4>New Calls</h4>
+<!-- #  -->
+<!-- ################################# -->
+<!-- # 1355 New Call Table ######## -->
+<p>No new calls in this release.</p>
+<!-- # 1355 New Call Table ######## -->
+<!-- ################################# -->
+
+<h4>Changed Calls</h4>
+
+<!-- ################################# -->
+<!-- # 1355 Changed Call Table ######## -->
+<p>No changed calls in this release.</p>
+<!-- # 1355 Changed Call Table ######## -->
+<!-- ################################# -->
+
+<h3 id="1355-SC">Schema Changes - 1355</h3>
+
+<p><b>Enumeration note:</b> You need to use this release version or higher to retrieve new code list values
+that were added in this release. See <a href="/devzone/guides/features-guide/default.html#Basics/Call-APISchema.html#CodeLists">Code Lists</a>.
+</p>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr><th>Name</th><th>Part of Schema</th><th>Type of Change</th></tr>
+		<tr><td><code><b>BuyerSatisfactionDashboardType</b></code></td><td>Type</td><td>Removed</td></tr>
+		<tr><td><code><b>BuyerSatisfactionStatusCodeType</b></code></td><td>Type</td><td>Removed</td></tr>
+		<tr><td><code><b>PerformanceDashboardType</b></code></td><td>Type</td><td>Removed</td></tr>
+		<tr><td><code><b>PerformanceStatusCodeType</b></code></td><td>Type</td><td>Removed</td></tr>
+		<tr><td><code><b>PolicyComplianceDashboardType</b></code></td><td>Type</td><td>Removed</td></tr>
+		<tr><td><code><b>PolicyComplianceStatusCodeType </b></code></td><td>Type</td><td>Removed</td></tr>
+		<tr><td><code><b>PowerSellerDashboardType</b></code></td><td>Type</td><td>Removed</td></tr>
+		<tr><td><code><b>SearchStandingDashboardType</b></code></td><td>Type</td><td>Removed</td></tr>
+		<tr><td><code><b>SearchStandingStatusCodeType</b></code></td><td>Type</td><td>Removed</td></tr>
+		<tr><td><code><b>SellerAccountDashboardType</b></code></td><td>Type</td><td>Removed</td></tr>
+		<tr><td><code><b>SellerAccountStatusCodeType</b></code></td><td>Type</td><td>Removed</td></tr>
+		<tr><td><code><b>SellerDashboardAlertSeverityCodeType</b></code></td><td>Type</td><td>Removed</td></tr>
+		<tr><td><code><b>SellerDashboardAlertType</b></code></td><td>Type</td><td>Removed</td></tr>
+		<tr><td><code><b>SellerFeeDiscountDashboardType</b></code></td><td>Type</td><td>Removed</td></tr>
+	</table>
+</div>
+
+
+<h3 id="1355-AN">Announcements - 1355</h3>
+
+<!--
+<p>None for this release.</p>
+-->
+<h4>Change Requests</h4>
+
+<p>See the <a href="/support/api-status">API Status</a> page for announcements regarding recently resolved or current system wide issues. Visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1355-NF">New Features - 1355</h3>
+
+<p>This section describes new features that have been added as of this release. New features can involve new calls, new
+capabilities, and/or new fields added to existing calls.</p>
+
+<p>For logical or functional changes to existing features and calls, including code list changes, see <a href="#1355-CF">Changed Functionality - 1355</a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1355-CF">Changed Functionality - 1355</h3>
+
+<p>This section describes logical or functional changes that have been made to existing functionality, including new
+code list values and/or changes in validation rules.</p>
+
+<a name="1355GtChrtsCllDcmmss"></a>
+<h4>GetSellerDashboard Call Decommissioned</h4>
+<p>
+The <b>GetSellerDashboard</b> call has been decommissioned, and the call reference documentation has been removed. Additionally, all types exclusively used by <b>GetSellerDashboard</b> have been removed from the Trading WSDL. You can see the full list of removed types in the <a href="#1355-SC">Schema Changes - 1355</a>. The alternative for this API is <a href="/api-docs/sell/analytics/resources/seller_standards_profile/methods/findSellerStandardsProfiles" target="_blank">Seller Standards Profile</a> methods of the <a href="/api-docs/sell/analytics/overview.html" target="_blank">Sell Analytics API</a>.
+</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1355-DC">Documentation Changes and Errata - 1355</h3>
+
+<p>This section lists additional documentation changes and corrections that were made with this release and that are
+not already mentioned in <a href="#1355-NF">New Features - 1355</a> and <a href="#1355-CF"><span class="Link">
+Changed Functionality - 1355</span></a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+
+
+
+
+
+<!-- ## Release Notes for r1349 ############################## -->
+
+<p class="btt" style="font-size: 80%;"></p>
+
+<h2 id="1349">Version 1349</h2>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<td><a href="#1349-CC">Changed Calls - 1349</a> </td>
+						<td> </td>
+			<td><a href="#1349-SC">Schema Changes - 1349</a></td>
+						<td> </td>
+			<td><a href="#1349-AN">Announcements - 1349</a> </td>
+
+		</tr>
+
+		
+		<tr>
+			<td><a href="#1349-NF">New Features - 1349</a>               </td>
+						<td> </td>
+			<td><a href="#1349-CF">Changed Functionality - 1349</a>      </td>
+				<td> </td>
+
+			<td><a href="#1349-DC">Document Changes and Errata - 1349</a></td>
+		</tr>
+	</table>
+</div>
+<p>For a current list of known issues, see the <a href="/support/api-status">API Status</a> page, or visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<h3 id="1349-CC">Index of Changed Calls - 1349</h3>
+
+<p>These calls were added, modified, deprecated, or affected by documentation changes in this release. The changes are described below as well as in each call&#39;s Change History.</p>
+
+<h4>New Calls</h4>
+<!-- #  -->
+<!-- ################################# -->
+<!-- # 1347 New Call Table ######## -->
+<p>No new calls in this release.</p>
+<!-- # 1347 New Call Table ######## -->
+<!-- ################################# -->
+
+<h4>Changed Calls</h4>
+
+<!-- ################################# -->
+<!-- # 1347 Changed Call Table ######## -->
+<ul>
+<li><a href="Reference/eBay/AddFixedPriceItem.html#ChangeHistory">AddFixedPriceItem</a></li>
+<li><a href="Reference/eBay/AddItem.html#ChangeHistory">AddItem</a></li>
+<li><a href="Reference/eBay/AddItems.html#ChangeHistory">AddItems</a></li>
+<li><a href="Reference/eBay/GetItem.html#ChangeHistory">GetItem</a></li>
+<li><a href="Reference/eBay/GetItemShipping.html#ChangeHistory">GetItemShipping</a></li>
+<li><a href="Reference/eBay/GetItemTransactions.html#ChangeHistory">GetItemTransactions</a></li>
+<li><a href="Reference/eBay/GetOrders.html#ChangeHistory">GetOrders</a></li>
+<li><a href="Reference/eBay/GetSellerList.html#ChangeHistory">GetSellerList</a></li>
+<li><a href="Reference/eBay/GetSellerTransactions.html#ChangeHistory">GetSellerTransactions</a></li>
+<li><a href="Reference/eBay/RelistFixedPriceItem.html#ChangeHistory">RelistFixedPriceItem</a></li>
+<li><a href="Reference/eBay/RelistItem.html#ChangeHistory">RelistItem</a></li>
+<li><a href="Reference/eBay/ReviseFixedPriceItem.html#ChangeHistory">ReviseFixedPriceItem</a></li>
+<li><a href="Reference/eBay/ReviseItem.html#ChangeHistory">ReviseItem</a></li>
+<li><a href="Reference/eBay/VerifyAddFixedPriceItem.html#ChangeHistory">VerifyAddFixedPriceItem</a></li>
+<li><a href="Reference/eBay/VerifyAddItem.html#ChangeHistory">VerifyAddItem</a></li>
+<li><a href="Reference/eBay/VerifyRelistItem.html#ChangeHistory">VerifyRelistItem</a></li>
+</ul>
+<!-- # 1347 Changed Call Table ######## -->
+<!-- ################################# -->
+
+<h3 id="1349-SC">Schema Changes - 1349</h3>
+
+<p><b>Enumeration note:</b> You need to use this release version or higher to retrieve new code list values
+that were added in this release. See <a href="/devzone/guides/features-guide/default.html#Basics/Call-APISchema.html#CodeLists">Code Lists</a>.
+</p>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<th>Name</th>
+			<th>Part of Schema</th>
+			<th>Type of Change</th>
+		</tr>
+		<tr>
+			<td>
+				<code><b>TicketListingDetailsType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>QuantityInfoType</b></code>
+			</td>
+			<td>Type</td>
+			<td>Removed</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>UpdateReturnPolicy</b></code>
+			</td>
+			<td>Field</td>
+			<td>Removed</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>UpdateSellerInfo</b></code>
+			</td>
+			<td>Field</td>
+			<td>Removed</td>
+		</tr>
+		<tr>
+			<td>
+				<code><b>OriginatingPostalCode</b></code>
+			</td>
+			<td>Field</td>
+			<td>Removed</td>
+		</tr>
+	</table>
+</div>
+
+
+<h3 id="1349-AN">Announcements - 1349</h3>
+
+<!--
+<p>None for this release.</p>
+-->
+<h4>Change Requests</h4>
+
+<p>See the <a href="/support/api-status">API Status</a> page for announcements regarding recently resolved or current system wide issues. Visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1349-NF">New Features - 1349</h3>
+
+<p>This section describes new features that have been added as of this release. New features can involve new calls, new
+capabilities, and/or new fields added to existing calls.</p>
+
+<p>For logical or functional changes to existing features and calls, including code list changes, see <a href="#1349-CF">Changed Functionality - 1349</a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1349-CF">Changed Functionality - 1349</h3>
+
+<p>This section describes logical or functional changes that have been made to existing functionality, including new
+code list values and/or changes in validation rules.</p>
+
+<h4>TicketListingDetails and QuantityInfo containers decommissioned in Add/Revise/Relist/Verify calls
+</h4>
+<p>
+The <b>TicketListingDetails</b> and <b>QuantityInfo</b> containers and their associated fields in Add/Revise/Relist/Verify and related calls have been decommissioned and removed from the WSDL.
+</p>
+
+<h4>UpdateReturnPolicy and UpdateSellerInfo decommissioned in ReviseItem call
+</h4>
+<p>
+The <b>UpdateReturnPolicy</b> and <b>UpdateSellerInfofields</b> fields in the ReviseItem call have been decommissioned and removed from the WSDL.
+</p>
+
+<h4>OriginatingPostalCode field decommissioned
+</h4>
+<p>
+The <b>OriginatingPostalCode</b> field,  used by the Add/Revise/Relist/Verify and GetItem family, has been decommissioned and removed from the WSDL.
+
+
+</p>
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1349-DC">Documentation Changes and Errata - 1349</h3>
+
+<p>This section lists additional documentation changes and corrections that were made with this release and that are
+not already mentioned in <a href="#1349-NF">New Features - 1349</a> and <a href="#1349-CF"><span class="Link">
+Changed Functionality - 1349</span></a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<!-- ## Release Notes for r1345 ############################## -->
+
+<p class="btt" style="font-size: 80%;"></p>
+
+<h2 id="1345">Version 1345</h2>
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr>
+			<td><a href="#1345-CC">Changed Calls - 1345</a> </td>
+						<td> </td>
+			<td><a href="#1345-SC">Schema Changes - 1345</a></td>
+						<td> </td>
+			<td><a href="#1345-AN">Announcements - 1345</a> </td>
+
+		</tr>
+
+		
+		<tr>
+			<td><a href="#1345-NF">New Features - 1345</a>               </td>
+						<td> </td>
+			<td><a href="#1345-CF">Changed Functionality - 1345</a>      </td>
+				<td> </td>
+
+			<td><a href="#1345-DC">Document Changes and Errata - 1345</a></td>
+		</tr>
+	</table>
+</div>
+<p>For a current list of known issues, see the <a href="/support/api-status">API Status</a> page, or visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<h3 id="1345-CC">Index of Changed Calls - 1345</h3>
+
+<p>These calls were added, modified, deprecated, or affected by documentation changes in this release. The changes are described below as well as in each call&#39;s Change History.</p>
+
+<h4>New Calls</h4>
+<!-- #  -->
+<!-- ################################# -->
+<!-- # 1345 New Call Table ######## -->
+<p>No new calls in this release.</p>
+<!-- # 1345 New Call Table ######## -->
+<!-- ################################# -->
+
+<h4>Changed Calls</h4>
+
+
+<!-- ################################# -->
+<!-- # 1345 Changed Call Table ######## -->
+<ul>
+<li><a href="Reference/eBay/AddFixedPriceItem.html#ChangeHistory">AddFixedPriceItem</a></li>
+<li><a href="Reference/eBay/AddItem.html#ChangeHistory">AddItem</a></li>
+<li><a href="Reference/eBay/AddItems.html#ChangeHistory">AddItems</a></li>
+<li><a href="Reference/eBay/GetItem.html#ChangeHistory">GetItem</a></li>
+<li><a href="Reference/eBay/GetMyeBaySelling.html#ChangeHistory">GetMyeBaySelling</a></li>
+<li><a href="Reference/eBay/RelistFixedPriceItem.html#ChangeHistory">RelistFixedPriceItem</a></li>
+<li><a href="Reference/eBay/RelistItem.html#ChangeHistory">RelistItem</a></li>
+<li><a href="Reference/eBay/ReviseFixedPriceItem.html#ChangeHistory">ReviseFixedPriceItem</a></li>
+<li><a href="Reference/eBay/ReviseItem.html#ChangeHistory">ReviseItem</a></li>
+<li><a href="Reference/eBay/VerifyAddFixedPriceItem.html#ChangeHistory">VerifyAddFixedPriceItem</a></li>
+<li><a href="Reference/eBay/VerifyAddItem.html#ChangeHistory">VerifyAddItem</a></li>
+<li><a href="Reference/eBay/VerifyRelistItem.html#ChangeHistory">VerifyRelistItem</a></li>
+</ul>
+<!-- # 1345 Changed Call Table ######## -->
+<!-- ################################# -->
+
+
+<ul>
+<li><a href="Reference/eBay/GetOrders.html#ChangeHistory">GetOrders</a> *</li>
+<li><a href="Reference/eBay/GetSellerTransactions.html#ChangeHistory">GetSellerTransactions</a> *</li>
+<li><a href="Reference/eBay/GetItemTransactions.html#ChangeHistory">GetItemTransactions</a> *</li>
+<li><b>GetOrderTransactions</b> (decommissioned)</li>
+</ul>
+<p>* See <a href="#1345-SC">Schema Changes - 1345</a> for numerous fields removed from response payloads.</p>
+
+
+<h3 id="1345-SC">Schema Changes - 1345</h3>
+
+<p><b>Enumeration note:</b> You need to use this release version or higher to retrieve new code list values
+that were added in this release. See <a href="/devzone/guides/features-guide/default.html#Basics/Call-APISchema.html#CodeLists">Code Lists</a>.
+</p>
+
+
+
+
+<div class="Table">
+	<table cellspacing="2">
+		<tr><th>Name</th><th>Part of Schema</th><th>Type of Change</th></tr>
+		<tr><td><code><b>EconomicOperator</b></code></td><td>Type</td><td>Added</td></tr>
+		<tr><td><code><b>RegulatoryType</b></code></td><td>Type</td><td>Modified</td></tr>
+		<tr><td><code><b>AddressUsageCodeType</b></code></td><td>Type</td><td>Removed</td></tr>
+		<tr><td><code><b>ExternalTransactionType</b></code></td><td>Type</td><td>Removed</td></tr>
+		<tr><td><code><b>GetOrderTransactionsRequestType</b></code></td><td>Type</td><td>Removed</td></tr>
+		<tr><td><code><b>GetOrderTransactionsResponseType</b></code></td><td>Type</td><td>Removed</td></tr>
+		<tr><td><code><b>ItemTransactionIDArrayType</b></code></td><td>Type</td><td>Removed</td></tr>
+		<tr><td><code><b>ItemTransactionIDType</b></code></td><td>Type</td><td>Removed</td></tr>
+		<tr><td><code><b>PaymentHoldDetailType</b></code></td><td>Type</td><td>Removed</td></tr>
+		<tr><td><code><b>PaymentHoldReasonCodeType</b></code></td><td>Type</td><td>Removed</td></tr>
+		<tr><td><code><b>PaymentTransactionStatusCodeType</b></code></td><td>Type</td><td>Removed</td></tr>
+		<tr><td><code><b>RequiredSellerActionArrayType</b></code></td><td>Type</td><td>Removed</td></tr>
+		<tr><td><code><b>RequiredSellerActionCodeType</b></code></td><td>Type</td><td>Removed</td></tr>
+		<tr><td><code><b>SellingManagerProductDetailsType</b></code></td><td>Type</td><td>Removed</td></tr>
+		<tr><td><code><b>UnpaidItemCaseOpenTypeCodeType</b></code></td><td>Type</td><td>Removed</td></tr>
+		<tr><td><code><b>UnpaidItemCaseStatusTypeCodeType</b></code></td><td>Type</td><td>Removed</td></tr>
+		<tr><td><code><b>UnpaidItemType</b></code></td><td>Type</td><td>Removed</td></tr>
+	</table>
+</div>
+
+Fields used exclusively by <b>GetOrderTransactions</b> were removed. Also, numerous fields in the response payloads of the <b>GetOrders</b>, <b>GetItemTransactions</b>, <b>GetSellerTransactions</b>, and <b>GetMyeBaySelling</b> calls were removed. See the <a href="https://developer.ebay.com/devzone/deprecated_trading_ordermgmt_fields.pdf" target="_blank">Deprecated Trading Order Management Fields</a> document for a complete list of these fields and reasons.
+
+<h3 id="1345-AN">Announcements - 1345</h3>
+
+<!--
+<p>None for this release.</p>
+-->
+<h4>Change Requests</h4>
+
+<p>See the <a href="/support/api-status">API Status</a> page for announcements regarding recently resolved or current system wide issues. Visit the <a href="/support">Support</a> page for account support, technical support, and other support resources.</p>
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1345-NF">New Features - 1345</h3>
+
+<p>This section describes new features that have been added as of this release. New features can involve new calls, new
+capabilities, and/or new fields added to existing calls.</p>
+
+<p>For logical or functional changes to existing features and calls, including code list changes, see <a href="#1345-CF">Changed Functionality - 1345</a>.</p>
+
+<a name="1345NwschmdddtspprtE"></a>
+<h4>New schema added to support Economic Operator information</h4>
+<p>
+To support new legal requirements by the European Union and the UK to provide Economic Operator information, schema changes have been made. The <b>EconomicOperator</b> container (<b>EconomicOperatorType</b>) provides required Economic Operator information about the manufacturer and/or supplier of the item. The <b>EconomicOperator</b> field has also been added to <b>Regulatorytype</b>.
+</p>
+
+<p>
+The following new error messages related to using Economic Operator information were added in the 1345 release. The long version of each message is used below.
+</p>
+<ul>
+
+<li>(Error) <b>21920388</b>: Economic Operator address information is incomplete. When providing the address, please provide the company name, street, city, postal code and country.</li>
+<li>(Error) <b>21920399</b>: Economic Operator information is incomplete. Please provide the company name.</li>
+<li>(Error) <b>21920403</b>: The email address provided is formatted incorrectly.</li>
+</ul>
+<p>These error messages can be viewed in the <a href="/devzone/XML/docs/Reference/eBay/Errors/ErrorMessages.htm#ErrorsByNumber">Errors By Number</a> page.
+</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1345-CF">Changed Functionality - 1345</h3>
+
+<p>This section describes logical or functional changes that have been made to existing functionality, including new
+code list values and/or changes in validation rules.</p>
+
+
+<a name="1343GtOrdrTrnsctnsCl"></a>
+<h4>GetOrderTransactions Call Decommissioned</h4>
+<p>
+The <b>GetOrderTransactions</b> call has been decommissioned, and the call reference documentation has been removed. Additionally, all types exclusively used by <b>GetOrderTransactions</b> have been removed from the Trading WSDL. You can see the full list of removed types in the <a href="#1345-SC">Schema Changes - 1345</a>
+</p>
+
+<a name="1345NmrsOrdrrltdFlds"></a>
+<h4>Numerous Order-related Fields Decommissioned</h4>
+<p>Removed numerous order-related fields in the <b>GetOrders</b>, <b>GetSellerTransactions</b>, <b>GetItemTransactions</b>, and <b>GetMyeBaySelling</b> calls. See the <a href="https://developer.ebay.com/devzone/deprecated_trading_ordermgmt_fields.pdf" target="_blank">Deprecated Trading Order Management Fields</a> document for a complete list of these fields and reasons.</p>
+
+
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+<h3 id="1345-DC">Documentation Changes and Errata - 1345</h3>
+
+<p>This section lists additional documentation changes and corrections that were made with this release and that are
+not already mentioned in <a href="#1345-NF">New Features - 1345</a> and <a href="#1345-CF"><span class="Link">
+Changed Functionality - 1345</span></a>.</p>
+
+<p>None for this release.</p>
+
+<!--
+<p>None for this release.</p>
+-->
+
+<!--
+<h4>Heading Template</h4>
+<p>
+Body Template
+</p>
+-->
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!-- End doc content -->
+
+<br><br><br><br>
+</main>
+
+<!-- End bottom half divs -->
+</div><footer>
+        <p class="footer_notes">
+            <a href="/support/faq">FAQs</a>
+            <a href="https://community.ebay.com/t5/Developer-Groups/ct-p/developergroup">Developer Community Forum</a>
+            <a href="/my/support/tickets">Developer Technical Support</a>
+            <a href="/develop/apis">APIs</a>
+            <a href="/join/api-license-agreement">API License Agreement</a>
+        </p>
+        <p class="copyright">Copyright 1999-2026 eBay Inc. All rights reserved. 
+            <a href="http://pages.ebay.com/help/policies/user-agreement.html?rt=nc" target="_blank" title="opens in new window or tab">User agreement</a>, 
+            <a href="http://pages.ebay.com/help/policies/privacy-policy.html?rt=nc" target="_blank" title="opens in new window or tab">Privacy policy</a>, 
+            <a href="http://pages.ebay.com/help/account/cookies-web-beacons.html" target="_blank" title="opens in new window or tab">Cookies</a>.
+        </p>
+        </footer>
+
+
+</body>
+</html>
+<!-- RcmdId EDPWEB_DOCUMENTATION,RlogId t6favpfg4dlkr%3D9%60bwt%60d5%60jhs.%3D03a233%3A3e*w%60ut222*k1%60t%60-1a0ea3234f6-0x2304 --><!-- SiteId: 0, Environment: production, AppName: edpweb, PageId: 2367673 --><script type="text/javascript">(function(scope){var CosHeaders={"X_EBAY_C_TRACKING":"guid=ea3235021a00a6285d0d9e67ffff8bd1,pageid=2367673,cobrandId=0"};scope.cosHeadersInfo={getCosHeaders:function(){return CosHeaders;},getTrackingHeaders:function(){return CosHeaders.X_EBAY_C_TRACKING;}};})(window)</script>

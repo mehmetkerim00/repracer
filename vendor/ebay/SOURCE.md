@@ -56,3 +56,12 @@
 Спецификаций Fulfillment API (заказы, E-20), Browse API (подтверждение цены, E-13) и документации Trading API
 (GetMyeBaySelling, GetItem — E-19). Сверка ячеек с песочницей — [docs/channel-capabilities.md](../../docs/channel-capabilities.md)
 (§1, §2, §9) и [docs/evidence/step48-ebay-snapshot.md](../../docs/evidence/step48-ebay-snapshot.md).
+
+## Дополнение 2026-09-29 (шаг 53): Trading и устаревания
+
+Каталог [`2026-09-29/`](2026-09-29/), проверка: `cd vendor/ebay/2026-09-29 && shasum -a 256 -c SHA256SUMS`.
+
+| Файл | Что это | Источник |
+|---|---|---|
+| `trading-release-notes.html` | Заметки к выпускам Trading API: версии 1345…1477 со сводкой изменений и изменёнными вызовами | https://developer.ebay.com/devzone/xml/docs/releasenotes.html — загружено без входа 2026-09-29 (User-Agent браузера), не изменялось |
+| `DEPRECATION-NOTE.md` | Факты об устареваниях со слов руководителя — страница статуса устаревания отвечала нам 403 | https://developer.ebay.com/develop/apis/api-deprecation-status (доснять в следующую живую браузер-сессию) |

@@ -2,7 +2,7 @@ export { createEbayAdapter, ebayAdapterFactory } from './adapter.ts';
 export { CONSERVATIVE_REQUEST_BUDGET, RollingDayLedger, TokenBucket, type EbayRequestBudget, type EditAttemptLedger, type LedgerField } from './budget.ts';
 export { EBAY_CONSERVATIVE_RULES, type EbayConservativeRuleCode } from './conservative.ts';
 export {
-  BULK_MIGRATE_MAX, BULK_UPDATE_MAX, EBAY_DESCRIPTOR, EDIT_BUDGET, EBAY_HOSTS, EBAY_MARKETPLACES, LISTING_EDITS_PER_DAY, OPERATION_BULK_UPDATE,
+  BULK_MIGRATE_MAX, BULK_UPDATE_MAX, EBAY_DESCRIPTOR, TRADING_COMPATIBILITY_LEVEL, EDIT_BUDGET, EBAY_HOSTS, EBAY_MARKETPLACES, LISTING_EDITS_PER_DAY, OPERATION_BULK_UPDATE,
   type EbayEnvironment, type EbayMarketplaceId,
 } from './descriptor.ts';
 export { bulkUpdateBody } from './dispatch.ts';

@@ -55,8 +55,14 @@ export const browseItemPath = (listingId: string): string => `/buy/browse/v1/ite
 export const BULK_UPDATE_MAX = 25;
 /** Р-2: `bulk_migrate_listing` — от 1 до 5 листингов за вызов; песочница проверила только 1 (Р-164) */
 export const BULK_MIGRATE_MAX = 5;
-/** Trading API: уровень совместимости, которым работала песочница */
-export const TRADING_COMPATIBILITY_LEVEL = '1349';
+/**
+ * Trading API. Шаг 53: уровень совместимости Trading — текущий 1477 (выпуск 2026-08-24, заметки к выпускам — devzone/xml/docs/releasenotes.html, загружены
+ * 2026-09-29). 1349 был ниже ориентира поддержки eBay («18 months old»). Между 1349 и 1477 для НАШИХ вызовов (GetItem, GetUserPreferences,
+ * GetMyeBaySelling): 1375 — из GetMyeBaySelling сняты DeletedFromUnsoldList/DeletedFromSoldList (мы берём только ActiveList); 1371 — поля
+ * GPSR в GetItem (разбор чекера их не читает); 1423 — новое значение BestOfferStatusCodeType (читаем только BestOfferEnabled). Живьём уровень
+ * 1477 не проверен — следующая сессия песочницы
+ */
+export const TRADING_COMPATIBILITY_LEVEL = '1477';
 /** Scope токена приложения (client_credentials) — src/constants.js официального клиента eBay (vendor/ebay/oauth-client) */
 export const APPLICATION_SCOPE = 'https://api.ebay.com/oauth/api_scope';
 /** Верхний предел количества не известен (E-03): наш предел, а не канала */
