@@ -67,8 +67,9 @@
 # Шаг 49 [Р-192]: уведомления eBay Marketplace Account Deletion — GET с challenge_code и POST уведомления. Остальные адреса
 # домена консоли этим маршрутом не затрагиваются; тела запросов в журнал не пишутся (журнал без тел, см. access_log)
 (ebay_deletion) {
+	# Журнал не импортируется внутри handle: `log` — директива уровня сайта, и Caddy её здесь не принимает (CI шага 49 это
+	# показал — прокси не стартовал). Запросы пути журналирует access_log, который сайт уже включает фрагментом консоли
 	handle /ebay/account-deletion {
-		import access_log
 		reverse_proxy ebay-account-deletion:8470
 	}
 }
