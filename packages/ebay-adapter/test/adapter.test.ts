@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { AdapterCallContext, AdapterLogEntry, ChannelAccountId, FieldWrite, MigrationConsentProof, TenantId } from '@repracer/channel-port';
 import {
-  bulkUpdateBody, budgetChargesOf, createEbayAdapter, ebayAdapterFactory, decimalToMinor, formatMinor, NOT_MIGRATED_LOG_CODE, parseGetItem, RollingDayLedger, snapshotSha256, TokenBucket,
+  bulkUpdateBody, budgetChargesOf, createEbayAdapter, ebayAdapterFactory, decimalToMinor, EBAY_MARKETPLACES, formatMinor, NOT_MIGRATED_LOG_CODE, parseGetItem, RollingDayLedger, snapshotSha256, TokenBucket,
 } from '../src/index.ts';
 
 /** Модульные проверки адаптера eBay (шаг 39). Данные синтетические; формы ответов — как у песочницы (docs/evidence/step39-ebay-sandbox.md) */
@@ -287,17 +287,18 @@ test('ebayAdapterFactory: adapters of one factory share the token cache and the 
   assert.equal(base.tokens.n, 1, 'the second adapter reused the user token of the first');
 });
 
-const getItemXml = (listingType: string, extra = '') => `<?xml version="1.0" encoding="UTF-8"?>
-<GetItemResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Ack>Success</Ack><Item><ItemID>110000000020</ItemID><ListingDesigner><LayoutID>7710000</LayoutID><ThemeID>7710</ThemeID></ListingDesigner><ListingType>${listingType}</ListingType><Seller><Email>syn-seller@example.invalid</Email></Seller><SKU>SYN-LEGACY</SKU><SellerProfiles><SellerShippingProfile><ShippingProfileID>6200000001</ShippingProfileID></SellerShippingProfile></SellerProfiles>${extra}</Item></GetItemResponse>`;
+// `Site` и `Currency` — как у песочницы: GetItem с сайтом 77 отвечает Site=Germany, Currency=EUR (шаг 39); `site: null` — ответ без поля
+const getItemXml = (listingType: string, extra = '', site: string | null = 'Germany') => `<?xml version="1.0" encoding="UTF-8"?>
+<GetItemResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Ack>Success</Ack><Item><Currency>EUR</Currency><ItemID>110000000020</ItemID><ListingDesigner><LayoutID>7710000</LayoutID><ThemeID>7710</ThemeID></ListingDesigner><ListingType>${listingType}</ListingType><Seller><Email>syn-seller@example.invalid</Email></Seller>${site === null ? '' : `<Site>${site}</Site>`}<SKU>SYN-LEGACY</SKU><SellerProfiles><SellerShippingProfile><ShippingProfileID>6200000001</ShippingProfileID></SellerShippingProfile></SellerProfiles>${extra}</Item></GetItemResponse>`;
 const prefsXml = '<?xml version="1.0" encoding="UTF-8"?><GetUserPreferencesResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Ack>Success</Ack><OutOfStockControlPreference>false</OutOfStockControlPreference></GetUserPreferencesResponse>';
 
-function tradingWorld(listingType: string, extra: string, after: (r: Seen) => Reply) {
+function tradingWorld(listingType: string, extra: string, after: (r: Seen) => Reply, site: string | null = 'Germany') {
   return world((r) => {
     if (r.url.pathname === '/ws/api.dll') {
       assert.equal(r.headers['x-ebay-api-iaf-token'], 'syn-user-token');
       assert.equal(r.headers['x-ebay-api-siteid'], '77');
       assert.equal(r.headers['x-ebay-api-compatibility-level'], '1349');
-      return { status: 200, xml: r.headers['x-ebay-api-call-name'] === 'GetUserPreferences' ? prefsXml : getItemXml(listingType, extra) };
+      return { status: 200, xml: r.headers['x-ebay-api-call-name'] === 'GetUserPreferences' ? prefsXml : getItemXml(listingType, extra, site) };
     }
     return after(r);
   });
@@ -545,4 +546,44 @@ test('review 47 #4: VAT on top in Browse raises EBAY_BUYER_PRICE_VAT_ON_TOP once
   const plain = world((q) => (q.url.pathname.startsWith('/sell/') ? handler(q) : { status: 200, body: { price: { value: '13.49', currency: 'EUR' } } }), { writeMode: 'LIVE' });
   await plain.adapter.readBack(ctx, [{ writeScope: w0.writeScope, fields: ['PRICE'] }]);
   assert.deepEqual(plain.alerts, []);
+});
+
+/**
+ * Хвост шага 47 (E-19, находка 8 ревью): у предметов GetMyeBaySelling нет поля витрины, и фаза Trading относит листинг к
+ * витрине ВЫЗОВА по валюте цены (EBAY_C16). Это верно, пока у каждой валюты одна витрина eBay. Ветку «две витрины одной
+ * валюты» в адаптере проверить нечем — такой витрины нет, — поэтому свойство держит правило [Р-146]: витрина с уже занятой
+ * валютой (например, EBAY_AT) не добавляется, пока E-19 не закрыт — точным путём был бы `GetItem` (в песочнице он отвечает
+ * `Site`), но это вызов на каждый старый листинг из общего лимита приложения.
+ */
+const sharedCurrencies = (marketplaces: Record<string, { currency: string }>) => {
+  const byCurrency = new Map<string, string[]>();
+  for (const [code, m] of Object.entries(marketplaces)) byCurrency.set(m.currency, [...(byCurrency.get(m.currency) ?? []), code]);
+  return [...byCurrency.entries()].filter(([, codes]) => codes.length > 1);
+};
+test('E-19: the currency names the eBay storefront of a Trading listing only while each currency has one storefront', () => {
+  // Положительный контроль: вторая евровая витрина правило краснит — иначе оно зеленело бы и без свойства [Р-94]
+  assert.deepEqual(sharedCurrencies({ ...EBAY_MARKETPLACES, EBAY_AT: { currency: 'EUR' } }), [['EUR', ['EBAY_DE', 'EBAY_AT']]]);
+  const shared = sharedCurrencies(EBAY_MARKETPLACES);
+  assert.deepEqual(shared, [], `two eBay storefronts share a currency — a Trading listing would land on both; resolve E-19 first: ${JSON.stringify(shared)}`);
+});
+
+/**
+ * Шаг 48 (E-19, находка 3 ревью): обнаружение относит старый листинг к витрине аккаунта по валюте, а GetMyeBaySelling отдаёт
+ * листинги ВСЕГО аккаунта. Евровый листинг ebay.at попадает в каталог как EBAY_DE — и перед миграцией витрину сверяет GetItem.
+ */
+test('E-19: a legacy listing on another eBay site is INELIGIBLE for this account before migration; an unnamed site is a WARNING', async () => {
+  const notFound = () => ({ status: 404, body: { errors: [{ errorId: 25713, message: 'This Offer is not available.' }] } });
+  const foreign = tradingWorld('FixedPriceItem', '', notFound, 'Austria');
+  const [p] = await foreign.adapter.preflight(ctx, ['110000000020']);
+  assert.equal(p!.verdict, 'INELIGIBLE', 'чужой сайт продавец исправить не может');
+  assert.ok(p!.findings.some((f) => f.code === 'C13_SITE' && f.severity === 'BLOCKER' && /site Austria/.test(f.details)), JSON.stringify(p!.findings));
+  const unnamed = tradingWorld('FixedPriceItem', '', notFound, null);
+  const [q] = await unnamed.adapter.preflight(ctx, ['110000000020']);
+  assert.ok(q!.findings.some((f) => f.code === 'C13_SITE_UNCONFIRMED' && f.severity === 'WARNING'), JSON.stringify(q!.findings));
+  assert.notEqual(q!.verdict, 'INELIGIBLE', 'неназванный сайт — предупреждение, а не отказ');
+  assert.ok(unnamed.logs.some((l) => l.code === 'EBAY_C16_TRADING_LISTING_SITE' && l.details?.confirmed === false), 'консервативное правило записано в журнал');
+  // Свой сайт — ни препятствия, ни предупреждения
+  const own = tradingWorld('FixedPriceItem', '', notFound);
+  const [r] = await own.adapter.preflight(ctx, ['110000000020']);
+  assert.ok(!r!.findings.some((f) => f.code.startsWith('C13_')), JSON.stringify(r!.findings));
 });

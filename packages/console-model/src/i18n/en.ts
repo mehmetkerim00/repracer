@@ -619,6 +619,7 @@ export const en = {
         shadow: (offers: number, decisions: number) => `Found ${offers} offers; the shadow made ${decisions} decisions in the last 24 hours.`,
         shadowWaiting: (offers: number) => `Found ${offers} offers. The shadow starts counting once the offers have costs, bounds and a strategy — continue in Setup: without a declared cost the engine does not start, not even in the shadow.`,
         live: (offers: number) => `${offers} offers found in the channel.`,
+        unmanaged: (unmanaged: number, writable: number) => `Of them we can write to ${writable}; ${unmanaged === 1 ? '1 is' : `${unmanaged} are`} not open for our writes (for eBay: listings not under the Inventory API, which only the owner can migrate, or auctions, which are never managed).`,
         awaitingAccess: (what: string) => `Missing: ${what}.`,
       },
       authorization: {
@@ -780,6 +781,7 @@ export const en = {
         EBAY_OFFER_LISTING_DIVERGENCE: { what: 'the live eBay listing price differs from the price we recorded for the offer: another program edits this listing', step: 'Check which tools still edit this listing through the Trading API; their changes override ours and are not visible to repricing.' },
         C10_OTHER_TOOLS: { what: 'before migrating an eBay listing: other programs that edit it through the Trading API must be named', step: 'Declare every tool that edits this listing; after migration their edits and ours diverge.' },
         C11_OUT_OF_STOCK_CONTROL: { what: 'before migrating an eBay listing: out-of-stock control is off', step: 'Turn on out-of-stock control in your eBay settings so that quantity 0 does not end the listing.' },
+        C13_SITE_UNCONFIRMED: { what: 'before migrating an eBay listing: its eBay site could not be matched to a storefront of this account — the listing was placed by its currency', step: 'Check on eBay which site the listing is on; migrate it only if it belongs to the storefront shown here.' },
         C12_VARIATIONS: { what: 'before migrating an eBay listing: it has variations — the 250 daily edits are shared by all of them, and a variation price cannot be confirmed on the live listing', step: 'Decide whether this listing should be repriced at all; prices of its variations stay unconfirmed until eBay confirms how to read them.' },
         AMAZON_ACCOUNT_UNAVAILABLE: { what: 'the Amazon account cannot be used at the moment', step: 'Check the credentials of the account in the console: an expired application access is the most common cause.' },
         AMAZON_NOTIFICATION_SELLER_MISMATCH: { what: 'an Amazon notification names a seller other than the account it came through', step: 'Open the channel connections in the console: the notification was not used.' },

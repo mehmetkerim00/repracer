@@ -359,6 +359,9 @@ test('шаг 47, D: путь пилота с eBay — от оператора в
   const account = found.body.accounts.find((a) => a.channelAccountId === ids.accountId)!;
   assert.equal(account.state, 'SHADOW');
   assert.ok(account.offers >= MANAGED, `тень нашла листинги: ${account.offers} — ${account.progressText}`);
+  // Шаг 48 (находка 9 ревью шага 47, находка 4 ревью шага 48): «нашли N» называет и то, что вести нельзя — аукцион и немигрированный
+  assert.deepEqual([account.offers, account.unmanagedOffers], [MANAGED + 2, 2], `число найденных и неуправляемых: ${account.progressText}`);
+  assert.match(account.progressText ?? '', new RegExp(`Found ${MANAGED + 2} offers\\..* we can write to ${MANAGED}; 2 are not open for our writes`), 'экран говорит оба числа');
   const { rows: catalog } = await observer.query<{ status: string; migration: string; format: string; n: number; scopes: number }>(
     `SELECT m.status, m.ebay_migration_status AS migration, m.ebay_listing_format AS format, count(*)::int AS n, count(m.price_write_scope_id)::int AS scopes
        FROM tenant_data.offer_mapping m WHERE m.tenant_id = $1 GROUP BY 1, 2, 3 ORDER BY 1`, [ids.tenantId]);

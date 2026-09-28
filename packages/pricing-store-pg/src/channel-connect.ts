@@ -65,6 +65,11 @@ export interface ConnectionRow {
   connectedAt: Instant;
   /** Р-176: «нашли N офферов» — предложения аккаунта, найденные обходом */
   offers: number;
+  /**
+   * Хвост шага 47 (находка 9 ревью): из них — предложения, которые мы вести не можем: у сопоставления нет единицы записи цены
+   * (у eBay — немигрированный листинг и аукцион, Р-164). «Нашли N» без этого числа обещало N управляемых предложений.
+   */
+  unmanagedOffers: number;
   /** «тень начала считать» — решения в тени за последние сутки */
   shadowDecisions24h: number;
   credentialObtainedAt: Instant | null;
@@ -233,6 +238,9 @@ export class PgChannelConnectStore {
                   -- собственного ценообразования канала — их пишет только Amazon, и у eBay экран всегда говорил «ищем»
                   (SELECT count(*)::int FROM tenant_data.offer_mapping om
                     WHERE om.tenant_id = ca.tenant_id AND om.channel_account_id = ca.channel_account_id AND om.status <> 'ENDED') AS offers,
+                  (SELECT count(*)::int FROM tenant_data.offer_mapping om
+                    WHERE om.tenant_id = ca.tenant_id AND om.channel_account_id = ca.channel_account_id AND om.status <> 'ENDED'
+                      AND om.price_write_scope_id IS NULL) AS unmanaged,
                   (SELECT count(*)::int FROM channel_data.price_decision d
                      JOIN tenant_data.write_scope ws ON ws.tenant_id = d.tenant_id AND ws.write_scope_id = d.write_scope_id
                     WHERE d.tenant_id = ca.tenant_id AND ws.channel_account_id = ca.channel_account_id
@@ -256,7 +264,7 @@ export class PgChannelConnectStore {
           marketplaces: [...(r.marketplaces as string[])], externalAccountId: r.external_account_id as string,
           authStatus: r.auth_status as string, accessBlockers: [...((r.access_blockers as string[] | null) ?? [])],
           writeMode: r.write_mode as 'SHADOW' | 'LIVE', connectedAt: iso(r.connected_at),
-          offers: Number(r.offers), shadowDecisions24h: Number(r.shadow_decisions),
+          offers: Number(r.offers), unmanagedOffers: Number(r.unmanaged), shadowDecisions24h: Number(r.shadow_decisions),
           credentialObtainedAt: r.obtained_at ? iso(r.obtained_at) : null, credentialVerifiedAt: r.verified_at ? iso(r.verified_at) : null,
           credentialCheckFailures: Number(r.check_failures ?? 0), oauth: r.obtained_at !== null,
         })),

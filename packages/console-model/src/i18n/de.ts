@@ -618,6 +618,7 @@ export const de: Messages = {
         shadow: (offers: number, decisions: number) => `${offers} Angebote gefunden; der Schattenmodus hat in den letzten 24 Stunden ${decisions} Entscheidungen getroffen.`,
         shadowWaiting: (offers: number) => `${offers} Angebote gefunden. Der Schattenmodus beginnt zu rechnen, sobald die Angebote Selbstkosten, Grenzen und eine Strategie haben — weiter unter Einrichtung: ohne erklärte Selbstkosten startet die Engine nicht, auch nicht im Schatten.`,
         live: (offers: number) => `${offers} Angebote im Kanal gefunden.`,
+        unmanaged: (unmanaged: number, writable: number) => `Davon können wir ${writable} ändern; ${unmanaged === 1 ? '1 ist' : `${unmanaged} sind`} für unsere Änderungen nicht offen (bei eBay: Angebote außerhalb der Inventory API, die nur der Inhaber migrieren kann, oder Auktionen, die nie geführt werden).`,
         awaitingAccess: (what: string) => `Es fehlt: ${what}.`,
       },
       authorization: {
@@ -779,6 +780,7 @@ export const de: Messages = {
         EBAY_OFFER_LISTING_DIVERGENCE: { what: 'Der Live-Preis des eBay-Angebots weicht von dem Preis ab, den wir für das Angebot erfasst haben: Ein anderes Programm bearbeitet dieses Angebot', step: 'Prüfen Sie, welche Werkzeuge dieses Angebot noch über die Trading API bearbeiten; ihre Änderungen überschreiben unsere und sind für das Repricing nicht sichtbar.' },
         C10_OTHER_TOOLS: { what: 'Vor der Migration eines eBay-Angebots: Andere Programme, die es über die Trading API bearbeiten, müssen benannt werden', step: 'Nennen Sie jedes Werkzeug, das dieses Angebot bearbeitet; nach der Migration laufen dessen und unsere Änderungen auseinander.' },
         C11_OUT_OF_STOCK_CONTROL: { what: 'Vor der Migration eines eBay-Angebots: Die Option „Nicht vorrätig“ ist ausgeschaltet', step: 'Schalten Sie die Option „Nicht vorrätig“ in Ihren eBay-Einstellungen ein, damit Bestand 0 das Angebot nicht beendet.' },
+        C13_SITE_UNCONFIRMED: { what: 'Vor der Migration eines eBay-Angebots: Die eBay-Website des Angebots ließ sich keinem Marktplatz dieses Kontos zuordnen — das Angebot wurde nach seiner Währung eingeordnet', step: 'Prüfen Sie bei eBay, auf welcher Website das Angebot steht; migrieren Sie es nur, wenn es zum hier angezeigten Marktplatz gehört.' },
         C12_VARIATIONS: { what: 'Vor der Migration eines eBay-Angebots: Es hat Varianten — die 250 täglichen Änderungen teilen sich alle Varianten, und der Preis einer Variante lässt sich am Live-Angebot nicht bestätigen', step: 'Entscheiden Sie, ob dieses Angebot überhaupt automatisch bepreist werden soll; Variantenpreise bleiben unbestätigt, bis eBay klärt, wie sie zu lesen sind.' },
         AMAZON_ACCOUNT_UNAVAILABLE: { what: 'Das Amazon-Konto ist gerade nicht nutzbar', step: 'Prüfen Sie in der Konsole die Zugangsdaten des Kontos: Die häufigste Ursache ist ein abgelaufener Zugriff der Anwendung.' },
         AMAZON_NOTIFICATION_SELLER_MISMATCH: { what: 'Eine Amazon-Meldung nennt einen anderen Verkäufer als das Konto, über das sie kam', step: 'Öffnen Sie die Kanalverbindungen in der Konsole: Die Meldung wurde nicht verwendet.' },

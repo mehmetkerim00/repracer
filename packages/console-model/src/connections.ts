@@ -38,6 +38,8 @@ export interface ConnectionAccountView {
   progressText: string | null;
   authorizationText: string;
   offers: number;
+  /** Из них — вести нельзя: нет единицы записи цены (у eBay — немигрированные листинги и аукционы) */
+  unmanagedOffers: number;
   shadowDecisions24h: number;
   /** Повторная авторизация: у отозванного — главное действие, у действующего — обновить доступ */
   canReconnect: boolean;
@@ -86,9 +88,12 @@ export function connectionsView(
   const nowMs = Date.parse(input.now);
   const accounts = rows.accounts.map((a): ConnectionAccountView => {
     const state = accountState(a);
-    const progressText = state === 'SHADOW'
+    const found = state === 'SHADOW'
       ? (a.offers === 0 ? t.progress.discovering : a.shadowDecisions24h === 0 ? t.progress.shadowWaiting(a.offers) : t.progress.shadow(a.offers, a.shadowDecisions24h))
       : state === 'LIVE' ? t.progress.live(a.offers) : state === 'AWAITING_ACCESS' ? t.progress.awaitingAccess(a.accessBlockers.join(', ')) : null;
+    // Хвост шага 47: «нашли N» называет и те, что вести нельзя (немигрированные листинги и аукционы eBay, Р-164)
+    const progressText = found !== null && (state === 'SHADOW' || state === 'LIVE') && a.offers > 0 && a.unmanagedOffers > 0
+      ? `${found} ${t.progress.unmanaged(a.unmanagedOffers, a.offers - a.unmanagedOffers)}` : found;
     // Находка 18 ревью шага 43: у отозванного — «доступ отозван», а не «последний раз подтверждён»
     const authorizationText = !a.oauth ? t.authorization.external
       : state === 'REVOKED' ? t.authorization.revoked
@@ -96,7 +101,7 @@ export function connectionsView(
         : t.authorization.obtained(a.credentialObtainedAt ?? a.connectedAt);
     return {
       channelAccountId: a.channelAccountId, channel: a.channel, label: `${a.channel} · ${a.externalAccountId} · ${a.marketplaces.join(', ')}`, marketplaces: [...a.marketplaces],
-      state, stateText: t.states[state] ?? state, progressText, authorizationText, offers: a.offers, shadowDecisions24h: a.shadowDecisions24h,
+      state, stateText: t.states[state] ?? state, progressText, authorizationText, offers: a.offers, unmanagedOffers: a.unmanagedOffers, shadowDecisions24h: a.shadowDecisions24h,
       // eBay не называет продавца (E-11): повторное согласие создало бы второй аккаунт того же продавца (находка 6 ревью шага 43)
       canReconnect: canManage && a.channel === 'AMAZON' && a.oauth,
       reconnectLabel: state === 'REVOKED' ? t.reconnectRevoked : t.reconnect,

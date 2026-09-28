@@ -12,7 +12,7 @@ import { messagesFor } from './i18n/index.ts';
 const NOW = '2026-09-27T10:00:00.000Z';
 const row = (over: Partial<ConnectionRow>): ConnectionRow => ({
   channelAccountId: 'acc-1', channel: 'AMAZON', region: 'EU', marketplaces: ['A1PA6795UKMFR9'], externalAccountId: 'A3SYN',
-  authStatus: 'ACTIVE', accessBlockers: [], writeMode: 'SHADOW', connectedAt: NOW as never, offers: 0, shadowDecisions24h: 0,
+  authStatus: 'ACTIVE', accessBlockers: [], writeMode: 'SHADOW', connectedAt: NOW as never, offers: 0, unmanagedOffers: 0, shadowDecisions24h: 0,
   credentialObtainedAt: NOW as never, credentialVerifiedAt: null, credentialCheckFailures: 0, oauth: true, ...over,
 });
 const pending = (over: Partial<PendingRequestRow>): PendingRequestRow => ({
@@ -62,4 +62,24 @@ test('Р-176, Р-177, Р-150: тень с прогрессом, бой, отзы
   const viewer = connectionsView({ worldId: 'w', role: 'VIEWER', now: NOW }, { accounts: [row({ authStatus: 'REVOKED' })], pending: [] }, apps, m);
   assert.deepEqual([viewer.canManage, viewer.channels[0]!.canConnect, viewer.accounts[0]!.canReconnect], [false, false, false]);
   assert.ok(viewer.noRightText);
+});
+
+test('хвост шага 47: «нашли N» называет и то, что вести нельзя, — немигрированные листинги и аукционы eBay', () => {
+  const m = messagesFor('en');
+  const v = connectionsView({ worldId: 'w', role: 'OWNER', now: NOW }, {
+    accounts: [
+      row({ channelAccountId: 'mixed', channel: 'EBAY', offers: 10, unmanagedOffers: 2 }),
+      row({ channelAccountId: 'clean', channel: 'EBAY', offers: 10, unmanagedOffers: 0 }),
+    ], pending: [],
+  }, apps, m);
+  const by = Object.fromEntries(v.accounts.map((a) => [a.channelAccountId, a]));
+  assert.match(by.mixed!.progressText!, /Found 10 offers\..* Of them we can write to 8; 2 are not open for our writes/);
+  assert.doesNotMatch(by.clean!.progressText!, /not open for our writes/, 'все управляемые — второй фразы нет');
+  const de = connectionsView({ worldId: 'w', role: 'OWNER', now: NOW }, { accounts: [row({ channel: 'EBAY', offers: 10, unmanagedOffers: 2 })], pending: [] }, apps, messagesFor('de'));
+  assert.match(de.accounts[0]!.progressText!, /Davon können wir 8 ändern; 2 sind für unsere Änderungen nicht offen/);
+});
+
+test('хвост шага 47: одно неуправляемое предложение — в единственном числе', () => {
+  const v = connectionsView({ worldId: 'w', role: 'OWNER', now: NOW }, { accounts: [row({ channel: 'EBAY', offers: 3, unmanagedOffers: 1 })], pending: [] }, apps, messagesFor('en'));
+  assert.match(v.accounts[0]!.progressText!, /write to 2; 1 is not open/);
 });

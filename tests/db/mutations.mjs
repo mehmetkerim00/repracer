@@ -1902,6 +1902,12 @@ export const STEP47_ROWS = [
         smoke('eBay listings enter the catalog with an honest write status (step 47, Р-164)')),
       m(dropConstraint('offer_mapping_ebay_identity', 'tenant_data.offer_mapping'),
         smoke('an eBay mapping without a listing id (step 47)')),
+      /**
+       * Хвост шага 47 (находка 13 ревью): у ветки «ключ бюджета из атрибута справочника» в 0140 своей строки НЕТ намеренно
+       * [Р-104]: это вычисление, а не защита. Значение ключа сверяет триггер `offer_mapping_scope_guard` (0034, базовый
+       * список шага 19): чужой ключ он отклоняет при вставке сопоставления, и мутацию ветки ловит он, а не проверка 0140
+       * (ревью шага 48, находка 1).
+       */
     ],
   },
   /**

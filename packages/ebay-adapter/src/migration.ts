@@ -47,6 +47,9 @@ export interface ListingFacts {
   themeId: string | null;
   layoutId: string | null;
   outOfStockControl: boolean | null;
+  /** Сайт и валюта листинга (`Site`, `Currency` в GetItem [песочница]). В отпечаток согласия не входят: у листинга они не меняются */
+  site?: string | null;
+  currency?: string | null;
 }
 
 export function parseGetItem(xml: string): { ok: true; facts: Omit<ListingFacts, 'outOfStockControl'> } | { ok: false; error: string } {
@@ -69,7 +72,7 @@ export function parseGetItem(xml: string): { ok: true; facts: Omit<ListingFacts,
       charity: has(own, 'Charity') || has(own, 'CharityID'),
       buyerRequirements: has(own, 'BuyerRequirementDetails'),
       sellerProfiles: profiles !== null && /<\w+ProfileID>\d+<\/\w+ProfileID>/.test(profiles),
-      themeId: tag(own, 'ThemeID'), layoutId: tag(own, 'LayoutID'),
+      themeId: tag(own, 'ThemeID'), layoutId: tag(own, 'LayoutID'), site: tag(own, 'Site'), currency: tag(own, 'Currency'),
     },
   };
 }
@@ -125,6 +128,22 @@ async function preflightAll(options: ResolvedOptions, ctx: AdapterCallContext, s
     const findings: ListingPreflight['findings'] = [];
     const auction = facts.listingType === 'Chinese';
     if (auction) findings.push({ code: 'C01_AUCTION', severity: 'BLOCKER', details: 'auction listing (ListingType Chinese): auctions are never migrated or managed (Р-2)' });
+    /**
+     * Шаг 48 (E-19, находка 3 ревью): обнаружение относит старый листинг к витрине аккаунта только по ВАЛЮТЕ — GetMyeBaySelling
+     * отдаёт листинги всего аккаунта, и евровый листинг ebay.at попал бы в каталог как EBAY_DE. Миграция — единственное действие
+     * с таким листингом, и перед ней витрина сверяется по сайту GetItem: чужой сайт — препятствие, неопознанный — предупреждение.
+     */
+    // Сверяется витрина, к которой обнаружение отнесло листинг, — витрина аккаунта с валютой листинга (EBAY_C16)
+    const placedOn = session.account.marketplaces.filter((m) => { const i = marketplaceInfo(m); return i !== null && (!facts.currency || i.currency === facts.currency); });
+    const siteNames = placedOn.map((m) => marketplaceInfo(m)?.tradingSiteName ?? null);
+    if (!facts.site || !siteNames.includes(facts.site)) {
+      if (facts.site && siteNames.length > 0 && siteNames.every((n) => n !== null)) {
+        findings.push({ code: 'C13_SITE', severity: 'BLOCKER', details: `the listing is on eBay site ${facts.site}, not on a storefront of this account; discovery placed it by currency (E-19)` });
+      } else {
+        logConservative(options.deps.logger, ctx, 'EBAY_C16_TRADING_LISTING_SITE', { listingId, site: facts.site ?? null, confirmed: false });
+        findings.push({ code: 'C13_SITE_UNCONFIRMED', severity: 'WARNING', details: `the eBay site of the listing (${facts.site ?? 'not named'}) cannot be matched to a storefront of this account (E-19)` });
+      }
+    }
     const skus = [facts.sku, ...(facts.variationSkus ?? [])].filter((s): s is string => Boolean(s));
     const missingSku = !facts.sku && (facts.variationSkus === null || facts.variationSkus.some((s) => !s));
     const duplicateSku = facts.variationSkus !== null && new Set(facts.variationSkus).size !== facts.variationSkus.length;
@@ -157,7 +176,8 @@ async function preflightAll(options: ResolvedOptions, ctx: AdapterCallContext, s
     const sha = snapshotSha256(facts);
     const blockers = findings.filter((f) => f.severity === 'BLOCKER');
     let verdict: ListingPreflight['verdict'];
-    if (auction) verdict = 'INELIGIBLE';
+    // Листинг чужого сайта eBay этому аккаунту не принадлежит: исправить это продавец не может — не FIXABLE, а INELIGIBLE (шаг 48)
+    if (auction || findings.some((f) => f.code === 'C13_SITE')) verdict = 'INELIGIBLE';
     else if (managedUnknown !== null || outOfStockControl === null) {
       findings.push({ code: 'PREFLIGHT_INCOMPLETE', severity: 'BLOCKER', details: managedUnknown ?? 'out-of-stock control preference was not read' });
       verdict = 'UNKNOWN';

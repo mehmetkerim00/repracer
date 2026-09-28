@@ -11,10 +11,12 @@ import type { ChannelDescriptor, PriceBasis } from '@repracer/channel-port';
  * Витрины eBay Release 1.0 [Р-56] — как строки platform.marketplace (0034, 0040). Граница суток EBAY_US не установлена (Р-65, OQ-112):
  * null, а не пустая строка. siteId — заголовок X-EBAY-API-SITEID Trading API: 77 — Германия, 0 — США [песочница: GetItem с 77 отвечает
  * Site=Germany].
+ * tradingSiteName — значение `Site` в ответе GetItem у листинга этой витрины (шаг 48, E-19): у EBAY_DE — `Germany` [песочница], у
+ * EBAY_US — не проверено (null, а не догадка «US»): предполётная проверка такой листинг не опознаёт и предупреждает.
  */
 export const EBAY_MARKETPLACES = {
-  EBAY_DE: { currency: 'EUR', basis: 'GROSS' as PriceBasis, timeZone: 'Europe/Berlin' as string | null, tradingSiteId: 77 },
-  EBAY_US: { currency: 'USD', basis: 'NET' as PriceBasis, timeZone: null as string | null, tradingSiteId: 0 },
+  EBAY_DE: { currency: 'EUR', basis: 'GROSS' as PriceBasis, timeZone: 'Europe/Berlin' as string | null, tradingSiteId: 77, tradingSiteName: 'Germany' as string | null },
+  EBAY_US: { currency: 'USD', basis: 'NET' as PriceBasis, timeZone: null as string | null, tradingSiteId: 0, tradingSiteName: null as string | null },
 } as const;
 export type EbayMarketplaceId = keyof typeof EBAY_MARKETPLACES;
 
