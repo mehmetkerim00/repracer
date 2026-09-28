@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { isNeverWritten, type AdapterCallContext, type AdapterLogger, type BudgetCharge, type ChannelError, type ChannelWriteId, type DispatchBatch, type DispatchPlan, type FieldWrite, type VerifiedChannelAccount } from '@repracer/channel-port';
 import { logConservative } from './conservative.ts';
-import { BULK_UPDATE_MAX, MAX_QUANTITY, marketplaceInfo, OPERATION_BULK_UPDATE } from './descriptor.ts';
+import { BULK_UPDATE_MAX, type EbayEnvironment, MAX_QUANTITY, marketplaceInfo, OPERATION_BULK_UPDATE } from './descriptor.ts';
 import { channelError } from './errors.ts';
 import { budgetKeyOf, listingIdOf, offerIdOf } from './mapping.ts';
 
@@ -77,11 +77,44 @@ export function budgetChargesOf(items: readonly FieldWrite[]): BudgetCharge[] {
   return [...byKey.values()];
 }
 
+/** Р-189 (E-22): режим пакетов боевого аккаунта eBay */
+export type EbayBatchMode = 'PROBE' | 'MULTI' | 'SINGLE';
+
+/**
+ * Режим пакетов, который ограничивает запись. Тень — без ограничений (запись не уходит вовсе [Р-169]). Боевой аккаунт без названного
+ * режима — проба (инвариант 6). Каталог не назвал режим записи: в БОЮ (PRODUCTION) — тоже проба, fail-closed (ревью шага 49, находка 14);
+ * в песочнице — без ограничений Р-189, как на шаге 39. Итог пакета сообщается только у аккаунта, который каталог назвал боевым
+ * (`reportsBatchOutcome`): функция базы принимает его только там.
+ */
+export function liveBatchMode(account: Pick<VerifiedChannelAccount, 'writeMode' | 'ebayBatchMode'>, environment: EbayEnvironment): EbayBatchMode | null {
+  if (account.writeMode === 'SHADOW') return null;
+  if (account.writeMode === 'LIVE' || environment === 'PRODUCTION') return account.ebayBatchMode ?? 'PROBE';
+  return null;
+}
+
+export function reportsBatchOutcome(account: Pick<VerifiedChannelAccount, 'writeMode'>): boolean {
+  return account.writeMode === 'LIVE';
+}
+
+/** Сколько разных SKU в одном вызове: проба — 2 (только первый пакет плана), один SKU на вызов — 1, иначе предел канала */
+export function maxSkusPerCall(mode: EbayBatchMode | null): number {
+  return mode === 'SINGLE' ? 1 : mode === 'PROBE' ? 2 : BULK_UPDATE_MAX;
+}
+
+/** SKU записи: у eBay предложение и SKU одной витрины — одно к одному; без SKU — предложение */
+export const skuOf = (w: FieldWrite): string => w.writeScope.identity.externalSku ?? offerIdOf(w.writeScope.identity) ?? w.channelWriteId;
+
+export function distinctSkus(items: readonly FieldWrite[]): number {
+  return new Set(items.map(skuOf)).size;
+}
+
 /**
  * План без обращения к каналу: проверка значений и предусловия Р-164; одна запись на единицу записи — старшая версия (INV-03);
  * пакет — одна витрина, не больше 25 записей и не больше одной записи на предложение [EBAY_C09]; каждая отправка — один запрос.
+ * Р-189 (E-22): у боевого аккаунта число разных SKU в вызове ограничено режимом — проба: ОДИН пакет из 2 SKU на план, остальные по одному;
+ * один SKU на вызов — по одному [EBAY_C18].
  */
-export function planEbayDispatch(ctx: AdapterCallContext, account: VerifiedChannelAccount, writes: readonly FieldWrite[], logger: AdapterLogger): DispatchPlan {
+export function planEbayDispatch(ctx: AdapterCallContext, account: VerifiedChannelAccount, writes: readonly FieldWrite[], logger: AdapterLogger, environment: EbayEnvironment): DispatchPlan {
   const rejected: Array<{ channelWriteId: ChannelWriteId; error: ChannelError }> = [];
   const valid: FieldWrite[] = [];
   for (const w of writes) {
@@ -102,21 +135,35 @@ export function planEbayDispatch(ctx: AdapterCallContext, account: VerifiedChann
       ? channelError('DUPLICATE_ACTION', 'ITEM', `duplicate write of version ${w.version} for the same write scope`)
       : channelError('STALE_VERSION', 'ITEM', `version ${w.version} is older than version ${top.version} in the same plan`) });
   }
+  const mode = liveBatchMode(account, environment);
+  // Проба — ОДИН пакет из 2 SKU на план: остальные записи идут по одной, пока канал не ответил на пробу
+  let probeOpen = mode === 'PROBE';
   // Пакеты по витрине; предложение входит в пакет не больше одного раза (цена и количество одного предложения — разные вызовы)
-  const byMarketplace = new Map<string, FieldWrite[][]>();
+  const byMarketplace = new Map<string, Array<{ items: FieldWrite[]; skus: Set<string>; cap: number }>>();
   for (const w of selected) {
     const key = w.writeScope.identity.marketplace ?? '';
     const groups = byMarketplace.get(key) ?? [];
     const offerId = offerIdOf(w.writeScope.identity)!;
-    let group = groups.find((g) => g.length < BULK_UPDATE_MAX && !g.some((x) => offerIdOf(x.writeScope.identity) === offerId));
-    if (!group) { group = []; groups.push(group); }
-    group.push(w);
+    const sku = skuOf(w);
+    let group = groups.find((g) => g.items.length < BULK_UPDATE_MAX && !g.items.some((x) => offerIdOf(x.writeScope.identity) === offerId)
+      && (g.skus.has(sku) || g.skus.size < g.cap));
+    if (!group) {
+      const cap = mode === 'PROBE' ? (probeOpen ? 2 : 1) : maxSkusPerCall(mode);
+      if (mode === 'PROBE' && probeOpen) probeOpen = false;
+      group = { items: [], skus: new Set(), cap };
+      groups.push(group);
+    }
+    group.items.push(w);
+    group.skus.add(sku);
     byMarketplace.set(key, groups);
   }
   const batches: DispatchBatch[] = [];
   for (const groups of byMarketplace.values()) {
-    for (const items of groups) batches.push({ batchId: batchIdOf(items), operation: OPERATION_BULK_UPDATE, items, budgetCharges: budgetChargesOf(items), requestCount: 1 });
+    for (const { items } of groups) batches.push({ batchId: batchIdOf(items), operation: OPERATION_BULK_UPDATE, items, budgetCharges: budgetChargesOf(items), requestCount: 1 });
   }
   if (selected.length > BULK_UPDATE_MAX) logConservative(logger, ctx, 'EBAY_C09_BATCH_MAX_25', { writes: selected.length, batches: batches.length });
+  if (mode === 'PROBE' || mode === 'SINGLE') {
+    if (new Set(selected.map(skuOf)).size > 1) logConservative(logger, ctx, 'EBAY_C18_MULTI_SKU_PROBE', { mode, writes: selected.length, batches: batches.length });
+  }
   return { batches, rejected };
 }

@@ -28,4 +28,4 @@ export { pageInfo, clampOffset } from './page.ts';
 export { lastChangeCell, productPage } from './products.ts';
 /** Р-154: окно отчёта об отклонённых — семь суток; счётчики и строки — по вмешательствам окна, не по буферу */
 export { REJECTED_WINDOW_DAYS } from './rejected.ts';
-export { connectionsView, accountState, type ConnectionsView, type ConnectionAccountView, type ConnectionChannelView, type ConnectionState, type ConnectableChannel } from './connections.ts';
+export { connectionsView, accountState, channelLimitText, type ConnectionsView, type ConnectionAccountView, type ConnectionChannelView, type ConnectionState, type ConnectableChannel } from './connections.ts';

@@ -1,0 +1,438 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "ebay/dispatch/multi-sku-probe-refused",
+  "channel": "EBAY",
+  "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
+  "title": "Р-189: боевой аккаунт в пробе — один пакет из 2 SKU; отказ всего вызова — записи повторяемы, итог пакета «отвергнут»",
+  "description": "Описание bulkUpdatePriceQuantity в снимке 2026-09-28 — «Only one SKU (one product) can be updated per call», схема и песочница — до 25 разных SKU (E-22). Боевой аккаунт без доказанного режима планирует один пакет из 2 SKU, остальные записи — по одной [EBAY_C18]. Здесь канал отвергает пакет целиком (400 без ответов по элементам; код и текст синтетические — настоящего ответа никто не видел): записи TRANSIENT, результат несёт ebayBatchOutcome {multiSkuAccepted: false}, по которому база переводит аккаунт в «1 SKU на вызов» и сама поднимает алерт (0142) — у адаптера алерта нет. Запись одного SKU итога не несёт.",
+  "tags": [
+    "dispatch",
+    "conservative:EBAY_C18_MULTI_SKU_PROBE"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "docs/evidence/step39-ebay-sandbox.md",
+      "docs/channel-capabilities.md#9",
+      "vendor/ebay/2026-09-28/sell_inventory_v1_oas3.json",
+      "docs/channel-capabilities.md#E-22"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-27T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn_ebay_seller_0001",
+      "marketplaces": [
+        "EBAY_DE",
+        "EBAY_US"
+      ],
+      "channel": "EBAY",
+      "writeMode": "LIVE",
+      "ebayBatchMode": "PROBE"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "syn-ebay-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "Syn-Repracer-SBX-0001",
+        "clientSecret": "SBX-syn-client-secret-0001"
+      },
+      "accessToken": "syn-ebay-user-token-0001",
+      "applicationToken": "syn-ebay-app-token-0001"
+    }
+  },
+  "steps": [
+    {
+      "id": "plan-probe",
+      "kind": "call",
+      "method": "planDispatch",
+      "args": [
+        [
+          {
+            "channelWriteId": "cw-21a",
+            "version": 1,
+            "idempotencyKey": "cw-21a:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-24",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-24",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-24",
+                "externalOfferId": "9100000024",
+                "externalListingId": "110000000024"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1321,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          },
+          {
+            "channelWriteId": "cw-21b",
+            "version": 1,
+            "idempotencyKey": "cw-21b:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-25",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-25",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-25",
+                "externalOfferId": "9100000025",
+                "externalListingId": "110000000025"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1322,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          },
+          {
+            "channelWriteId": "cw-21c",
+            "version": 1,
+            "idempotencyKey": "cw-21c:1",
+            "attemptNo": 1,
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-26",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-26",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-26",
+                "externalOfferId": "9100000026",
+                "externalListingId": "110000000026"
+              }
+            },
+            "value": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1323,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            }
+          }
+        ]
+      ],
+      "expect": {
+        "rejected": [],
+        "batches": [
+          {
+            "items": [
+              {
+                "channelWriteId": "cw-21a"
+              },
+              {
+                "channelWriteId": "cw-21b"
+              }
+            ]
+          },
+          {
+            "items": [
+              {
+                "channelWriteId": "cw-21c"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "dispatch-probe",
+      "kind": "call",
+      "method": "dispatch",
+      "args": [
+        {
+          "batchId": "ebay:probe",
+          "operation": "bulkUpdatePriceQuantity",
+          "items": [
+            {
+              "channelWriteId": "cw-21a",
+              "version": 1,
+              "idempotencyKey": "cw-21a:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-24",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-24",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-24",
+                  "externalOfferId": "9100000024",
+                  "externalListingId": "110000000024"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1321,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            },
+            {
+              "channelWriteId": "cw-21b",
+              "version": 1,
+              "idempotencyKey": "cw-21b:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-25",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-25",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-25",
+                  "externalOfferId": "9100000025",
+                  "externalListingId": "110000000025"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1322,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            }
+          ],
+          "budgetCharges": [
+            {
+              "budgetScopeKey": "110000000024",
+              "field": "PRICE",
+              "attempts": 1
+            },
+            {
+              "budgetScopeKey": "110000000025",
+              "field": "PRICE",
+              "attempts": 1
+            }
+          ],
+          "requestCount": 1
+        }
+      ],
+      "expect": {
+        "attemptsMade": 1,
+        "ebayBatchOutcome": {
+          "multiSkuAccepted": false
+        },
+        "outcomes": [
+          {
+            "channelWriteId": "cw-21a",
+            "status": "REJECTED",
+            "error": {
+              "class": "TRANSIENT",
+              "code": "ACTION_NOT_ALLOWED",
+              "scope": "BATCH",
+              "httpStatus": 400,
+              "channelCode": "99022",
+              "message": {
+                "$regex": "one SKU per call \\(E-22\\)"
+              }
+            }
+          },
+          {
+            "channelWriteId": "cw-21b",
+            "status": "REJECTED",
+            "error": {
+              "class": "TRANSIENT",
+              "code": "ACTION_NOT_ALLOWED",
+              "scope": "BATCH",
+              "httpStatus": 400,
+              "channelCode": "99022",
+              "message": {
+                "$regex": "one SKU per call \\(E-22\\)"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "dispatch-single",
+      "kind": "call",
+      "method": "dispatch",
+      "args": [
+        {
+          "batchId": "ebay:single",
+          "operation": "bulkUpdatePriceQuantity",
+          "items": [
+            {
+              "channelWriteId": "cw-21c",
+              "version": 1,
+              "idempotencyKey": "cw-21c:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-ebay-price-EBAY_DE-26",
+                "field": "PRICE",
+                "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-26",
+                "identity": {
+                  "marketplace": "EBAY_DE",
+                  "externalSku": "SYN-EBAY-26",
+                  "externalOfferId": "9100000026",
+                  "externalListingId": "110000000026"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1323,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
+              }
+            }
+          ],
+          "budgetCharges": [
+            {
+              "budgetScopeKey": "110000000026",
+              "field": "PRICE",
+              "attempts": 1
+            }
+          ],
+          "requestCount": 1
+        }
+      ],
+      "expect": {
+        "ebayBatchOutcome": {
+          "$absent": true
+        },
+        "outcomes": [
+          {
+            "channelWriteId": "cw-21c",
+            "status": "ACCEPTED"
+          }
+        ]
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "user-token",
+      "note": "Обновление токена пользователя: grant_type=refresh_token + scope, Basic ключей приложения [песочница: ответ без нового refresh-токена]",
+      "request": {
+        "method": "POST",
+        "path": "/identity/v1/oauth2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "syn-ebay-user-token-0001",
+          "expires_in": 7200,
+          "token_type": "User Access Token"
+        }
+      },
+      "origin": "SYNTHETIC"
+    },
+    {
+      "id": "bulk-two-skus-refused",
+      "request": {
+        "method": "POST",
+        "path": "/sell/inventory/v1/bulk_update_price_quantity",
+        "body": {
+          "requests": [
+            {
+              "offers": [
+                {
+                  "offerId": "9100000024",
+                  "price": {
+                    "value": "13.21",
+                    "currency": "EUR"
+                  }
+                }
+              ]
+            },
+            {
+              "offers": [
+                {
+                  "offerId": "9100000025",
+                  "price": {
+                    "value": "13.22",
+                    "currency": "EUR"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "errors": [
+            {
+              "errorId": 99022,
+              "domain": "SYNTHETIC",
+              "category": "REQUEST",
+              "message": "Only one SKU can be updated per call (synthetic, E-22)"
+            }
+          ]
+        }
+      },
+      "origin": "SYNTHETIC"
+    },
+    {
+      "id": "bulk-one-sku",
+      "request": {
+        "method": "POST",
+        "path": "/sell/inventory/v1/bulk_update_price_quantity",
+        "body": {
+          "requests": [
+            {
+              "offers": [
+                {
+                  "offerId": "9100000026",
+                  "price": {
+                    "value": "13.23",
+                    "currency": "EUR"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "responses": [
+            {
+              "statusCode": 200,
+              "sku": "SYN-EBAY-26",
+              "offerId": "9100000026"
+            }
+          ]
+        }
+      },
+      "origin": "SYNTHETIC"
+    }
+  ],
+  "expect": {
+    "noAlerts": true,
+    "logs": [
+      {
+        "code": "EBAY_C18_MULTI_SKU_PROBE",
+        "question": "E-22",
+        "count": 2
+      }
+    ]
+  }
+}

@@ -226,7 +226,7 @@ export async function kauflandLiveWorld(input: {
   const writeQueue = new PgWriteQueueStore(input.appPool, { scanPool: input.dispatcherPool });
   const queue = translateStore<WriteQueueStore>({
     claimNext: writeQueue.claimNext.bind(writeQueue), recordOutcome: writeQueue.recordOutcome.bind(writeQueue),
-    recordReconciliation: writeQueue.recordReconciliation.bind(writeQueue), checkPriceBasis: writeQueue.checkPriceBasis.bind(writeQueue),
+    recordReconciliation: writeQueue.recordReconciliation.bind(writeQueue), checkPriceBasis: writeQueue.checkPriceBasis.bind(writeQueue), recordEbayBatchOutcome: writeQueue.recordEbayBatchOutcome.bind(writeQueue),
     dueScopes: async (at, options) => (await writeQueue.dueScopes(at, options)).filter((d) => d.tenantId === seeded.tenantId),
   }, seeded.ids);
   const dispatcher: WriteDispatcher = createWriteDispatcher({ store: queue, adapterFor: () => adapter, alerts: deps.alerts, now: () => clock.iso() });

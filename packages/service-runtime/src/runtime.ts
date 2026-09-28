@@ -35,7 +35,7 @@ export function pgAccountDirectory(appPool: PgPool) {
     async verify(tenantId: TenantId, channelAccountId: ChannelAccountId) {
       const row = await inTenant(appPool, tenantId, async (tx) => {
         const { rows: [r] } = await tx.query(
-          `SELECT channel, region, external_account_id, marketplaces, credentials_ref, auth_status, disconnected_at, write_mode
+          `SELECT channel, region, external_account_id, marketplaces, credentials_ref, auth_status, disconnected_at, write_mode, ebay_batch_mode
              FROM tenant_data.channel_account WHERE channel_account_id = $1`, [channelAccountId]);
         return r ?? null;
       });
@@ -47,6 +47,8 @@ export function pgAccountDirectory(appPool: PgPool) {
           tenantId, channelAccountId, channel: row.channel, ...(row.region ? { region: row.region } : {}),
           externalAccountId: row.external_account_id, marketplaces: [...row.marketplaces], credentialsRef: row.credentials_ref,
           ...(row.write_mode === 'SHADOW' || row.write_mode === 'LIVE' ? { writeMode: row.write_mode as 'SHADOW' | 'LIVE' } : {}),
+          // Р-189 (E-22): режим пакетов eBay читается на КАЖДОМ verify — переход, записанный базой, виден следующему вызову; NULL — проба
+          ...(row.channel === 'EBAY' ? { ebayBatchMode: row.ebay_batch_mode === 'MULTI' || row.ebay_batch_mode === 'SINGLE' ? row.ebay_batch_mode as 'MULTI' | 'SINGLE' : 'PROBE' as const } : {}),
         },
       };
     },

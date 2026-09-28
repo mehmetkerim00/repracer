@@ -86,6 +86,12 @@ export interface DispatchResult {
   /** Фактическое число HTTP-попыток (с повторами транспорта) — для сверки с бюджетом */
   attemptsMade: number;
   rateLimit?: RateLimitObservation;
+  /**
+   * Шаг 49 [Р-189, E-22]: итог боевого пакета РАЗНЫХ SKU у eBay. true — канал принял пакет и ответил по элементам; false — отверг
+   * пакет целиком (записи повторяются по одной). Пакет из одного SKU итога не несёт. Ядро передаёт итог в хранилище
+   * (`channel_data.record_ebay_batch_outcome`), и режим пакетов аккаунта меняется только вперёд.
+   */
+  ebayBatchOutcome?: { multiSkuAccepted: boolean };
 }
 
 export interface RateLimitObservation {
@@ -115,6 +121,12 @@ export interface IdentifiedObservation {
    * Решит ли E-17 бой (бизнес-продавец EBAY_DE) — тогда расхождение станет признаком неверной базы, а поле перейдёт в effectivePrice.
    */
   buyerPrice?: Money;
+  /**
+   * Шаг 49 [Р-190, E-21]: значение — НАША запись у канала (eBay: предложение Inventory API, `GET offer`), а не живой листинг.
+   * Так подтверждается запись eBay в бою, пока лицензия Browse не выяснена: правки других программ и цену покупателя такое
+   * наблюдение не видит, а сверка базы цены Р-116 по нему ограничена.
+   */
+  ownRecordOnly?: boolean;
   liveness?: { isLive: boolean; reasons: string[] };
 }
 

@@ -1,0 +1,12 @@
+0d4bb74c96aa30f377809ed0e71c041c8e4c2c4396dbe1ff4a7bc78c70b4a3dd  ./LICENSE.md
+0594d0b80f093cdbd1e69a957b8e4c0256788a1a4c93009149805c22ca4fb7e7  ./README.md
+6ab755cb5cd009c256ceb4d8181b724ba17e2d5d945749acc965a96487dd3280  ./examples/config.json
+8b3a02a3535de210b5c22492b45c117ccbccbe09826e49dfaf15ac7f688aa7b0  ./lib/client.js
+b805d9a716a8feb80d530fcbf2c5c5f79aea3df7a81a44d87a03e63aa95c0251  ./lib/constants.js
+d74517af2d39402ea392b0d3ec5b1e82e1cc471402dfd4d46a634cef9c9121b9  ./lib/index.js
+0c8fc9bfcf3d2d2589242a6eab0f2711514174be71537b592350709c27bf188a  ./lib/processor/accountDeletionMessageProcessor.js
+b175b10a5678d98c8cd70bc7e55c8c4c7ce5ebb501cf31e7bdecd34de9379ad5  ./lib/processor/processor.js
+61f79c2566930469dcf6abd8c586692d484ae1a22f1a6c15b8b687e9176d961f  ./lib/validator.js
+885af1b25fd4e185dc053a2bcfa16974d45c36e083fb69dc55d7c83949041153  ./package.json
+0a8aff68566d827470dcade6d085a49414b7485fe8efba78815eb9b22c7dd53e  ./test/test.js
+05ed1f92299042ef1b4b42ec26085eada42846525a1e245e1550bfabfd7976e3  ./test/test.json

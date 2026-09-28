@@ -470,6 +470,9 @@ SELECT pg_temp.expect_fail('truncate tenant_data.channel_write_mode_change', $q$
 -- Шаг 43 [OQ-232]: удержания пола — производная от цены конкурента со сроком данных канала; TRUNCATE её не берёт
 SELECT pg_temp.expect_fail('truncate channel_data.floor_hold', $q$ TRUNCATE channel_data.floor_hold $q$,
   'TRUNCATE of channel_data.floor_hold is forbidden');
+-- Шаг 49 [Р-192]: журнал уведомлений eBay Account Deletion — доказательство исполнения, стереть его нельзя
+SELECT pg_temp.expect_fail('truncate platform.ebay_account_deletion_notice', $q$ TRUNCATE platform.ebay_account_deletion_notice $q$,
+  'TRUNCATE of platform.ebay_account_deletion_notice is forbidden');
 SELECT pg_temp.expect_fail('truncate tenant_data.price_daily_system_correction', $q$ TRUNCATE tenant_data.price_daily_system_correction $q$,
   'TRUNCATE of tenant_data.price_daily_system_correction is forbidden');
 SELECT pg_temp.expect_fail('append-only tenant_data.price_daily_system_correction', $q$

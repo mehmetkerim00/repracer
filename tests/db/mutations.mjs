@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0142_verify_schema_invariants_v41.sql';
+const VERIFY = 'migrations/0143_verify_schema_invariants_v42.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -1938,6 +1938,84 @@ export const STEP47_ROWS = [
       // Условие 2: «потратило бы» при неподтверждённой границе помечено приблизительным
       m(replaceInFunction('platform.shadow_would_spend_unconfirmed(uuid, timestamptz, timestamptz)', "AND (m.time_zone IS NULL OR m.time_zone_status <> 'CONFIRMED')", 'AND false'),
         smoke('a shadow budgeted write needs no confirmed day boundary and gets no budget day (Р-188)')),
+    ],
+  },
+];
+
+/**
+ * Шаг 49 [Р-189, Р-192]: режим пакетов eBay (только вперёд, только у боевого аккаунта eBay) и удаление данных продавца по
+ * уведомлению eBay Marketplace Account Deletion (токены, идентификатор, отключение, алерт, аудит, журнал по хэшу).
+ */
+const BATCH = 'channel_data.record_ebay_batch_outcome(uuid, uuid, boolean)';
+const DELETION = 'security.ebay_account_deletion(text, text, timestamp with time zone, integer)';
+const TRANSITIONS = 'tenant_data.channel_account_ebay_transitions()';
+export const STEP49_ROWS = [
+  {
+    row: 'Р-190', critical: false,
+    invariant: 'применение, подтверждённое только нашей записью у канала, помечено и бывает только у применённой записи',
+    mutations: [
+      m(dropConstraint('channel_write_history_own_record_only_applied', 'tenant_data.channel_write_history'),
+        smoke('a write confirmed by our own offer record that was not applied (Р-190)')),
+    ],
+  },
+  {
+    row: 'Р-189', critical: false,
+    invariant: 'режим пакетов eBay меняется только вперёд и только итогом боевой записи; отказ мультипакета — SINGLE и алерт с E-22',
+    mutations: [
+      m(replaceInFunction(TRANSITIONS, "OR (OLD.ebay_batch_mode = 'MULTI' AND NEW.ebay_batch_mode = 'SINGLE')", 'OR true'),
+        smoke('the eBay batch mode goes back from SINGLE to MULTI (Р-189)')),
+      m(dropConstraint('channel_account_ebay_batch_mode_known', 'tenant_data.channel_account'),
+        smoke('a batch mode on a non-eBay account (Р-189)')),
+      m(replaceInFunction(BATCH, "IF a.write_mode <> 'LIVE' THEN", 'IF false THEN'),
+        smoke('a batch outcome of an eBay account in the shadow (Р-169, Р-189)')),
+      m(replaceInFunction(BATCH, "UPDATE tenant_data.channel_account SET ebay_batch_mode = 'SINGLE'", "UPDATE tenant_data.channel_account SET ebay_batch_mode = ebay_batch_mode"),
+        smoke('an accepted multi-SKU batch moves the eBay account from the probe to MULTI; a refusal moves it to SINGLE with an E-22 alert (Р-189)')),
+      m(replaceInFunction(BATCH, "'EBAY_MULTI_SKU_REFUSED', 'WARNING'", "'EBAY_BATCH_OTHER', 'WARNING'"),
+        smoke('the refused multi-SKU batch raises one alert naming E-22 (Р-189)')),
+      // Находка 8 ревью: тенант вызова — тенант сессии
+      m(replaceInFunction(BATCH, 'IF p_tenant_id IS DISTINCT FROM security.current_tenant_id() THEN', 'IF false THEN'),
+        smoke('an eBay batch outcome for an account of another tenant (Р-189)')),
+    ],
+  },
+  {
+    row: 'Р-192', critical: true,
+    invariant: 'уведомление eBay об удалении стирает токены и идентификатор продавца, отключает аккаунт, извещает и пишет аудит; журнал хранит хэш; приёмник не видит таблиц',
+    mutations: [
+      m(replaceInFunction(DELETION, 'DELETE FROM tenant_data.channel_credential WHERE', 'DELETE FROM tenant_data.channel_credential WHERE false AND'),
+        smoke('after the deletion notice nothing in the database names the eBay user (Р-192)')),
+      m(replaceInFunction(DELETION, "external_account_id = 'deleted:' || a.channel_account_id::text", 'external_account_id = external_account_id'),
+        smoke('after the deletion notice nothing in the database names the eBay user (Р-192)')),
+      m(replaceInFunction(DELETION, "'EBAY_ACCOUNT_DELETED_BY_USER', 'CRITICAL'", "'EBAY_ACCOUNT_OTHER', 'CRITICAL'"),
+        smoke('after the deletion notice nothing in the database names the eBay user (Р-192)')),
+      m(replaceInFunction(DELETION, "sha256(convert_to(p_user_id, 'UTF8'))", "sha256(convert_to(p_notification_id, 'UTF8'))"),
+        smoke('after the deletion notice nothing in the database names the eBay user (Р-192)')),
+      // Повтор того же уведомления — один раз: без проверки номера второй вызов упирается в ключ журнала
+      m(replaceInFunction(DELETION, 'IF FOUND THEN\n    RETURN QUERY SELECT n', 'IF false THEN\n    RETURN QUERY SELECT n'),
+        smoke('an eBay deletion notice removes the tokens, disconnects the account, forgets the eBay user id and is audited (Р-192)')),
+      m(dropTrigger('zc_channel_account_deleted_audit', 'tenant_data.channel_account'),
+        smoke('after the deletion notice nothing in the database names the eBay user (Р-192)')),
+      m(replaceInFunction(TRANSITIONS, "AND NOT (OLD.channel = 'EBAY' AND NEW.auth_status = 'DISCONNECTED' AND NEW.external_account_id = 'deleted:' || NEW.channel_account_id::text)", 'AND false'),
+        smoke('the eBay user id of an account changes to anything but deleted:<account> (Р-192)')),
+      m(replaceInFunction(TRANSITIONS, "NEW.auth_status = 'DISCONNECTED' AND NEW.external_account_id", 'NEW.external_account_id'),
+        smoke('an eBay user id is erased while the account stays connected (Р-192)')),
+      // Роль входа не видит даже схему таблиц (находка 12 ревью) — утечка моделируется целиком: схема и таблица
+      m('GRANT USAGE ON SCHEMA tenant_data TO repracer_ebay_deletion; GRANT SELECT ON tenant_data.channel_account TO repracer_ebay_deletion',
+        smoke('the eBay deletion receiver reads accounts directly (Р-192)')),
+      m('GRANT USAGE ON SCHEMA tenant_data TO repracer_ebay_deletion; GRANT SELECT, DELETE ON tenant_data.channel_credential TO repracer_ebay_deletion',
+        smoke('the eBay deletion receiver deletes tokens directly (Р-192)')),
+      m(dropConstraint('ebay_account_deletion_notice_id_shape', 'platform.ebay_account_deletion_notice'), smoke('an eBay deletion notice with a strange notification id (Р-192)')),
+      m(dropConstraint('ebay_account_deletion_notice_hash_len', 'platform.ebay_account_deletion_notice'), smoke('an eBay deletion notice keeps something other than a SHA-256 of the user (Р-192)')),
+      m(dropConstraint('ebay_account_deletion_notice_attempt', 'platform.ebay_account_deletion_notice'), smoke('an eBay deletion notice with no publish attempt (Р-192)')),
+      m(dropConstraint('ebay_account_deletion_notice_accounts', 'platform.ebay_account_deletion_notice'), smoke('an eBay deletion notice with a negative count of deleted accounts (Р-192)')),
+      m(dropConstraint('ebay_account_deletion_notice_platform_tenant', 'platform.ebay_account_deletion_notice'), smoke('an eBay deletion notice in a seller tenant (Р-192)')),
+      m(dropTrigger('zz_append_only', 'platform.ebay_account_deletion_notice'), smoke('append-only platform.ebay_account_deletion_notice')),
+      m(dropTrigger('zz_no_truncate', 'platform.ebay_account_deletion_notice'), smoke('truncate platform.ebay_account_deletion_notice')),
+      // Находка 3 ревью: о пользователе, которого у нас нет, журнал не пишет ничего
+      m(replaceInFunction(DELETION, 'IF n > 0 THEN', 'IF true THEN'),
+        smoke('an eBay deletion notice for a user we do not know deletes nothing and records nothing (Р-192)')),
+      // Находка 2 ревью: журнал переключения в бой хранит отметку, а не набранный идентификатор (userId у eBay)
+      m(replaceInFunction('tenant_data.channel_write_mode_change_guard()', "NEW.typed_confirmation := 'matched';", ''),
+        smoke('the LIVE switch keeps a mark, not the typed account id (Р-192)')),
     ],
   },
 ];

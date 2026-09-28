@@ -216,7 +216,7 @@ before(async () => {
     REPRACER_CONSOLE_OIDC_ISSUER: provider.issuer, REPRACER_CONSOLE_OIDC_AUDIENCE: CONSOLE_AUDIENCE, REPRACER_CONSOLE_OIDC_JWKS_URL: provider.jwksUrl,
     REPRACER_CONSOLE_OIDC_CLIENT_ID: 'console-spa', REPRACER_CONSOLE_OIDC_DISCOVERY_BASE: provider.origin,
     REPRACER_EBAY_ENVIRONMENT: 'SANDBOX', REPRACER_EBAY_CLIENT_ID: EBAY_CLIENT_ID, REPRACER_EBAY_CLIENT_SECRET: EBAY_CLIENT_SECRET,
-    REPRACER_EBAY_RUNAME: ruName, REPRACER_EBAY_SCOPES: EBAY_SCOPES.join(' '),
+    REPRACER_EBAY_RUNAME: ruName, REPRACER_EBAY_SCOPES: EBAY_SCOPES.join(' '), REPRACER_EBAY_ACCOUNT_DELETION: 'registered',
     REPRACER_EBAY_OAUTH_BASE: `http://127.0.0.1:${(ebayOauthServer.address() as AddressInfo).port}`,
     REPRACER_CHANNEL_KEYRING: KEYRING, REPRACER_CONNECT_REDIRECT_URL: ruName,
   });
@@ -264,7 +264,7 @@ before(async () => {
   dispatcher = createWriteDispatcher({
     store: {
       claimNext: writeQueue.claimNext.bind(writeQueue), recordOutcome: writeQueue.recordOutcome.bind(writeQueue),
-      recordReconciliation: writeQueue.recordReconciliation.bind(writeQueue), checkPriceBasis: writeQueue.checkPriceBasis.bind(writeQueue),
+      recordReconciliation: writeQueue.recordReconciliation.bind(writeQueue), checkPriceBasis: writeQueue.checkPriceBasis.bind(writeQueue), recordEbayBatchOutcome: writeQueue.recordEbayBatchOutcome.bind(writeQueue),
       dueScopes: async (at: Parameters<typeof writeQueue.dueScopes>[0], o: Parameters<typeof writeQueue.dueScopes>[1]) => (await writeQueue.dueScopes(at, o)).filter((d) => d.tenantId === ids.tenantId),
     } as never,
     adapterFor: () => adapter, alerts: { async raise() {} }, now: () => clock.iso(),

@@ -320,6 +320,18 @@ export function createPricingPipeline(deps: PipelineDeps) {
     for (const batch of plan.batches) {
       report.stages.push({ stage: 'DISPATCH_PLAN', outcome: 'PLANNED' });
       const res = await adapter.dispatch(ctx, batch);
+      /**
+       * Р-189 (E-22): своя отправка пути решения — одна запись, итога пакета разных SKU у неё не бывает; если адаптер его всё же сообщил,
+       * он идёт в хранилище тем же путём, что у диспетчера. Сбой записи итога не роняет отправку.
+       */
+      if (res.ebayBatchOutcome) {
+        try {
+          await store.recordEbayBatchOutcome(ctx.tenantId, ctx.channelAccountId, res.ebayBatchOutcome.multiSkuAccepted);
+        } catch (error) {
+          await alerts.raise({ ...alertBase(ctx), code: 'EBAY_BATCH_OUTCOME_NOT_RECORDED', severity: 'WARNING', details: {
+            channelAccountId: ctx.channelAccountId, multiSkuAccepted: res.ebayBatchOutcome.multiSkuAccepted, errorCode: String((error as { code?: unknown }).code ?? 'UNKNOWN') } });
+        }
+      }
       for (const outcome of res.outcomes) {
         report.dispatch = outcome;
         report.stages.push({

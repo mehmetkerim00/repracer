@@ -426,6 +426,8 @@ export const en = {
       retry: (amount: string) => `Retry: ${amount}`, retryDetail: (error: string, attempt: number, when: string) => `Temporary error (${error}); attempt ${attempt} after ${when}`,
       blocked: (amount: string) => `Blocked: ${amount}`, blockedDetail: (error: string) => `The channel needs a person (${error})`, noErrorCode: 'no error code',
     },
+    /** Шаг 49 [Р-190], находка 9 ревью: запись подтверждена только нашей записью у канала (eBay в бою без Browse) */
+    ownRecordConfirmation: 'confirmed by the offer record, not by the live listing (question E-21)',
     writeStatus: {
       PENDING: 'queued', DISPATCHED: 'sent, waiting for the channel', ACCEPTED: 'accepted by the channel', APPLIED: 'applied by the channel', FAILED: 'temporary channel error',
       SUPERSEDED: 'replaced by a newer price', DISCARDED_STALE: 'not sent', BUDGET_EXHAUSTED: 'edit budget used up', NOT_APPLIED: 'not applied by the channel', BLOCKED: 'blocked',
@@ -597,6 +599,8 @@ export const en = {
       intro: 'You connect a channel yourself: the button opens the consent page of the channel, you allow access there, and the channel sends you back here. A new connection starts in the shadow — the engine works completely and writes nothing.',
       noRight: 'Only the owner or an administrator of the account connects channels.',
       tokenNote: 'We keep the access of the channel encrypted and never show it — not here, not in letters, not in logs. You can withdraw it at any time in the channel itself; we notice that and tell you.',
+      /** Шаг 49 [Р-190, E-21]: что мы на eBay в бою пока не видим — у каждого аккаунта eBay, словами */
+      ebayLiveLimits: 'In live mode we do not yet see on eBay the price buyers see or edits made by other programs: our writes are confirmed by the offer record, and the price-basis check is limited (question E-21).',
       connect: (channel: string) => `Connect ${channel}`,
       connectAnother: (channel: string) => `Connect another ${channel} account`,
       reconnect: 'Renew the access',
@@ -637,6 +641,7 @@ export const en = {
       missing: {
         AMAZON_APPLICATION: 'our Amazon application (SP-API) is not registered yet',
         EBAY_DEVELOPER_KEYS: 'our eBay developer keys are not issued yet (E-01)',
+        EBAY_ACCOUNT_DELETION_ENDPOINT: 'eBay account deletion notifications are not received for this region — eBay cannot be connected until our address is registered in the eBay developer portal',
       } as Record<string, string | undefined>,
       failures: {
         DENIED: 'you declined on the page of the channel',
@@ -779,6 +784,10 @@ export const en = {
         SCHEDULED_RECOMPUTE_FAILURES: { what: 'the daily recalculation of fixed and margin prices failed for some offers', step: 'The other offers were calculated; the failed ones are retried on the next run. Contact us if this keeps repeating.' },
         EBAY_BUYER_PRICE_VAT_ON_TOP: { what: 'eBay shows buyers your price plus VAT: buyers pay the tax rate more than the price we send (also reported in shadow mode)', step: 'Check in your eBay account whether your prices count as gross prices (business account, VAT). Until that is settled this storefront is not treated as a wrong price basis — review your prices before going live.' },
         EBAY_OFFER_LISTING_DIVERGENCE: { what: 'the live eBay listing price differs from the price we recorded for the offer: another program edits this listing', step: 'Check which tools still edit this listing through the Trading API; their changes override ours and are not visible to repricing.' },
+        // Шаг 49 [Р-189, E-22]: режим пакетов eBay; [Р-192]: удаление данных пользователем eBay — оба поднимает функция базы (0142)
+        EBAY_MULTI_SKU_REFUSED: { what: 'eBay refused to update several products in one call for this account: from now on we send your eBay price and stock changes one product per call', step: 'Nothing is to be done by you: the changes still arrive, only with more calls. We have asked eBay whether several products per call are allowed (question E-22) and switch back only after an answer.' },
+        EBAY_BATCH_OUTCOME_NOT_RECORDED: { what: 'we could not store whether eBay accepts several products in one call for this account', step: 'Your changes were sent and their results recorded; only the batch mode stays as it was and is checked again with the next batch. Contact us if this repeats.' },
+        EBAY_ACCOUNT_DELETED_BY_USER: { what: 'the eBay user of this account asked eBay to delete their data: we deleted the access tokens and disconnected the account', step: 'Nothing is written to this eBay account any more. It can be connected again only with a new consent on eBay — open the channel connections in the console if this account should keep working.' },
         C10_OTHER_TOOLS: { what: 'before migrating an eBay listing: other programs that edit it through the Trading API must be named', step: 'Declare every tool that edits this listing; after migration their edits and ours diverge.' },
         C11_OUT_OF_STOCK_CONTROL: { what: 'before migrating an eBay listing: out-of-stock control is off', step: 'Turn on out-of-stock control in your eBay settings so that quantity 0 does not end the listing.' },
         C13_SITE_UNCONFIRMED: { what: 'before migrating an eBay listing: its eBay site could not be matched to a storefront of this account — the listing was placed by its currency', step: 'Check on eBay which site the listing is on; migrate it only if it belongs to the storefront shown here.' },

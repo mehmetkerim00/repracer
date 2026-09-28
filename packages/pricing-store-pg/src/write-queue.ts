@@ -246,6 +246,17 @@ export class PgWriteQueueStore implements WriteQueueStore {
     return rows.map((r) => ({ tenantId: r.tenant_id, writeScopeId: r.write_scope_id, dueKind: r.due_kind, dueSince: iso(r.due_since) }));
   }
 
+  /**
+   * Р-189 (E-22): итог боевого пакета разных SKU — функцией базы (0142): переход режима только вперёд, отказ — алерт EBAY_MULTI_SKU_REFUSED,
+   * который ставит сама функция. Теневой и не-eBay аккаунт база отвергает исключением.
+   */
+  async recordEbayBatchOutcome(tenantId: string, channelAccountId: string, multiSkuAccepted: boolean): Promise<string> {
+    return inTenant(this.pool, tenantId, async (tx) => {
+      const { rows: [r] } = await tx.query(`SELECT channel_data.record_ebay_batch_outcome($1::uuid, $2::uuid, $3::boolean) AS mode`, [tenantId, channelAccountId, multiSkuAccepted]);
+      return String(r!.mode);
+    });
+  }
+
   async checkPriceBasis(tenantId: string, write: FieldWrite, observedMinor: number, now: Instant): Promise<PriceBasisDistrust | null> {
     if (write.value.field !== 'PRICE') return null;
     const sentMinor = write.value.price.amountMinor;
@@ -332,7 +343,8 @@ export class PgWriteQueueStore implements WriteQueueStore {
       case 'ACCEPTED':
         // Код прежней временной ошибки не остаётся у принятой записи: иначе он попадёт в причину HELD (ревью шага 22, находка 13)
         if (from === 'DISPATCHED') await set(`status = 'ACCEPTED', accepted_at = $3, next_attempt_at = NULL, last_error_code = NULL`, [now]);
-        if (t.applied) await set(`status = 'APPLIED', applied_at = $3, finished_at = $3, next_attempt_at = NULL`, [now]);
+        // Р-190 (находка 9 ревью шага 49): вид подтверждения — в том же UPDATE, что переводит запись в APPLIED, и дальше в историю
+        if (t.applied) await set(`status = 'APPLIED', applied_at = $3, finished_at = $3, next_attempt_at = NULL, confirmed_by_own_record = $4`, [now, t.ownRecordOnly === true]);
         status = t.applied ? 'APPLIED' : 'ACCEPTED';
         reason = t.reason;
         break;

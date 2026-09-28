@@ -173,10 +173,10 @@ const DECISION_FROM = `FROM channel_data.price_decision d
   LEFT JOIN channel_data.price_decision_snapshot_ref ref ON ref.tenant_id = d.tenant_id AND ref.price_decision_id = d.price_decision_id`;
 const WRITE_HOT_COLUMNS = `w.channel_write_id, w.write_scope_id, w.price_decision_id, w.amount_minor, w.currency, w.price_basis, w.version, w.status,
   w.attempt_count, w.created_at, w.dispatched_at, w.accepted_at, w.next_attempt_at, w.last_error_code, w.end_reason, w.end_params,
-  w.superseded_by_write_id, coalesce(d.competitor_derived, false) AS competitor_derived`;
+  w.superseded_by_write_id, coalesce(d.competitor_derived, false) AS competitor_derived, w.confirmed_by_own_record`;
 const WRITE_HISTORY_COLUMNS = `h.channel_write_id, h.write_scope_id, h.price_decision_id, h.amount_minor, h.currency, h.price_basis, h.version, h.final_status AS status,
   h.attempt_count, h.created_at, h.dispatched_at, h.accepted_at, NULL::timestamptz AS next_attempt_at, h.last_error_code, h.end_reason, h.end_params,
-  h.superseded_by_write_id, coalesce(d.competitor_derived, false) AS competitor_derived`;
+  h.superseded_by_write_id, coalesce(d.competitor_derived, false) AS competitor_derived, h.confirmed_by_own_record`;
 /** Момент записи для ленты: применена → отправлена → создана; по нему же построен индекс истории (0117) */
 const WRITE_AT = (alias: string) => `coalesce(${alias}.accepted_at, ${alias}.dispatched_at, ${alias}.created_at)`;
 
@@ -211,7 +211,7 @@ function writeRow(r: Row): ConsoleWriteRow {
     basis: r.price_basis, version: r.version, status: r.status, attemptCount: r.attempt_count, competitorDerived: r.competitor_derived, createdAt: iso(r.created_at),
     dispatchedAt: r.dispatched_at ? iso(r.dispatched_at) : null, acceptedAt: r.accepted_at ? iso(r.accepted_at) : null,
     nextAttemptAt: r.next_attempt_at ? iso(r.next_attempt_at) : null, lastErrorCode: r.last_error_code, endReason: r.end_reason,
-    endParams: r.end_params ?? {}, supersededByWriteId: r.superseded_by_write_id,
+    endParams: r.end_params ?? {}, supersededByWriteId: r.superseded_by_write_id, confirmedByOwnRecord: r.confirmed_by_own_record === true,
   };
 }
 
@@ -1020,6 +1020,10 @@ export class PgPricingStore implements PricingStore {
   // --- оценка: транзакция 3 ----------------------------------------------------
   async checkPriceBasis(tenantId: string, write: FieldWrite, observedMinor: number, now: Instant) {
     return this.writeQueue.checkPriceBasis(tenantId, write, observedMinor, now);
+  }
+
+  async recordEbayBatchOutcome(tenantId: string, channelAccountId: string, multiSkuAccepted: boolean): Promise<string> {
+    return this.writeQueue.recordEbayBatchOutcome(tenantId, channelAccountId, multiSkuAccepted);
   }
 
   async recordDispatch(tenantId: string, write: FieldWrite, outcome: WriteOutcome, now: Instant): Promise<DispatchRecorded> {

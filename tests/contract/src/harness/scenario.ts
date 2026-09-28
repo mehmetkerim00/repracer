@@ -38,7 +38,12 @@ export interface World {
   tenantId: string;
   channelAccountId: string;
   /** region — регион SP-API аккаунта Amazon (EU, NA) */
-  account: { externalAccountId: string; marketplaces: string[]; channel?: string; region?: string };
+  account: {
+    externalAccountId: string; marketplaces: string[]; channel?: string; region?: string;
+    /** Шаг 49: режим записи и режим пакетов eBay, как их отдаёт каталог аккаунтов базы [Р-169, Р-189]; без них — как раньше (режим неизвестен) */
+    writeMode?: 'SHADOW' | 'LIVE';
+    ebayBatchMode?: 'PROBE' | 'MULTI' | 'SINGLE';
+  };
   /** Синтетические ключи; seller обязателен, partner — если partner = true */
   /**
    * Синтетические ключи. Kaufland: seller {clientKey, secretKey}, partner. Amazon: seller {refreshToken} (согласие продавца LWA),
@@ -55,6 +60,8 @@ export interface World {
     confirmationWindowMs?: number; webhookMaxAgeMs?: number; buyBoxChangedAccess?: 'GRANTED' | 'NOT_GRANTED'; amazonApplicationLoadRps?: number;
     /** eBay [Р-163]: попытки правки листинга, уже сделанные за последние сутки (второй слой бюджета, EBAY_C08) */
     ebayEditAttempts?: Array<{ listingId: string; attempts: number; agoMs: number; field?: 'PRICE' | 'QUANTITY' }>;
+    /** Шаг 49 [Р-190]: окружение eBay; PRODUCTION — боевой хост и Browse недоступен (E-21). По умолчанию — песочница */
+    ebayEnvironment?: 'SANDBOX' | 'PRODUCTION';
   };
   /** Данные пути решения о цене (хранилище в памяти); без них шаги pipeline* недоступны */
   pricing?: MemorySeed & { sanity?: Partial<SanityConfig> };
@@ -292,7 +299,7 @@ export function validateScenario(s: Scenario): string[] {
     const pathOk = s.channel === 'AMAZON'
       ? /^\/(listings\/2021-08-01\/items\/|auth\/o2\/token$|batches\/products\/pricing\/2022-05-01\/items\/competitiveSummary$)/.test(ex.request?.path ?? '')
       : s.channel === 'EBAY'
-        ? /^\/(sell\/inventory\/v1\/|sell\/fulfillment\/v1\/order$|buy\/browse\/v1\/item\/v1\|\d+\|0$|identity\/v1\/oauth2\/token$|ws\/api\.dll$)/.test(ex.request?.path ?? '')
+        ? /^\/(sell\/inventory\/v1\/|sell\/fulfillment\/v1\/order$|sell\/account\/v1\/payment_policy\/[\w-]+$|buy\/browse\/v1\/item\/v1\|\d+\|0$|identity\/v1\/oauth2\/token$|ws\/api\.dll$)/.test(ex.request?.path ?? '')
         : Boolean(ex.request?.path?.startsWith('/v2/'));
     if (!pathOk) problems.push(`exchange ${ex.id}: request.path is not an ${s.channel} API path`);
     if (Boolean(ex.response) === Boolean(ex.fault)) problems.push(`exchange ${ex.id}: exactly one of response or fault`);

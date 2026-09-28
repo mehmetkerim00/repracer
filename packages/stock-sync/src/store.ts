@@ -122,7 +122,7 @@ export interface StockChannelRow {
   /** Последняя запись в канал: в полёте или завершённая */
   sent: { quantity: number; status: string; at: Instant; version: number } | null;
   /** Последняя запись, которую канал ПОДТВЕРДИЛ обратным чтением (APPLIED) */
-  confirmed: { quantity: number; at: Instant } | null;
+  confirmed: { quantity: number; at: Instant; /** Р-190: подтверждено только нашей записью у канала (eBay в бою без Browse) */ ownRecordOnly?: boolean } | null;
   /** Последняя завершённая запись не применена каналом или не ушла — расхождение «у нас / в канале» */
   divergence: { status: string; since: Instant; errorCode: string | null } | null;
   /** Побочный эффект записи по возможности канала [Р-153]: общая на регион / на id_offer; требует ли подтверждения */

@@ -40,6 +40,8 @@ PGUSER=svc_admin "${PSQL[@]}" -d "$DB" -f tests/db/smoke_stock_path.sql
 # Шаг 36 [Р-156]: алерт и его доставка — административной ролью (события поднимают процессы, читает доставка)
 # Шаг 41 [Р-169…Р-171]: теневой режим — административной ролью (переключает человек), после проверок отправки
 PGUSER=svc_admin "${PSQL[@]}" -d "$DB" -f tests/db/smoke_shadow.sql
+# Шаг 49 [Р-189, Р-192]: режим пакетов eBay и удаление по уведомлению eBay — БЕЗ PGUSER, роли внутри; до append-only (строка журнала, Р-103)
+"${PSQL[@]}" -d "$DB" -f tests/db/smoke_ebay_deletion.sql
 # Р-103: у каждой append-only таблицы есть строка, изменение отклоняет триггер неизменяемости (откатываемая транзакция)
 "${PSQL[@]}" -d "$DB" -f tests/db/smoke_append_only.sql
 PGUSER=svc_admin "${PSQL[@]}" -d "$DB" -f tests/db/smoke_alerts.sql

@@ -392,14 +392,14 @@ export class PgStockStore implements StockStore {
            cap.requires_side_effects_ack, cap.side_effects, ws.side_effects_ack_at,
            lw.quantity AS sent_quantity, lw.status AS sent_status, lw.at AS sent_at, lw.version AS sent_version, lw.last_error_code AS sent_error,
            coalesce(${'__DIVERGED__'}, false) AS diverged,
-           ap.quantity AS confirmed_quantity, ap.accepted_at AS confirmed_at
+           ap.quantity AS confirmed_quantity, ap.accepted_at AS confirmed_at, ap.confirmed_by_own_record AS confirmed_own_record
       FROM (${'__TARGETS__'}) t
       JOIN tenant_data.write_scope ws ON ws.tenant_id = $1 AND ws.write_scope_id = t.write_scope_id
       JOIN tenant_data.channel_account ca ON ca.tenant_id = $1 AND ca.channel_account_id = t.channel_account_id
       JOIN platform.channel_capability cap ON cap.capability_id = ws.capability_id AND cap.version = ws.capability_version
       LEFT JOIN LATERAL (${'__LAST_WRITE__'}) lw ON true
       LEFT JOIN LATERAL (
-        SELECT h.quantity, h.accepted_at FROM tenant_data.channel_write_history h
+        SELECT h.quantity, h.accepted_at, h.confirmed_by_own_record FROM tenant_data.channel_write_history h
          WHERE h.tenant_id = $1 AND h.write_scope_id = t.write_scope_id AND h.field = 'QUANTITY' AND h.final_status = 'APPLIED'
          ORDER BY h.version DESC LIMIT 1) ap ON true`;
 
@@ -454,7 +454,8 @@ export class PgStockStore implements StockStore {
       syncEnabled: r.quantity_sync_enabled === true,
       published: publishedQuantity(availableOf(Number(r.on_hand), Number(r.reserved)), allocation),
       sent: r.sent_quantity === null || r.sent_quantity === undefined ? null : { quantity: Number(r.sent_quantity), status: r.sent_status, at: iso(r.sent_at), version: Number(r.sent_version) },
-      confirmed: r.confirmed_quantity === null || r.confirmed_quantity === undefined ? null : { quantity: Number(r.confirmed_quantity), at: iso(r.confirmed_at) },
+      confirmed: r.confirmed_quantity === null || r.confirmed_quantity === undefined ? null
+        : { quantity: Number(r.confirmed_quantity), at: iso(r.confirmed_at), ...(r.confirmed_own_record === true ? { ownRecordOnly: true } : {}) },
       divergence: diverged ? { status: r.sent_status, since: iso(r.sent_at), errorCode: r.sent_error ?? null } : null,
       sideEffects: { requiresAck: r.requires_side_effects_ack === true, acknowledged: r.side_effects_ack_at !== null && r.side_effects_ack_at !== undefined, text: r.side_effects ?? null },
     };

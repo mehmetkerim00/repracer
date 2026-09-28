@@ -4,7 +4,7 @@
   "channel": "EBAY",
   "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
   "title": "Миграция с согласием владельца: перепроверка снимка, bulk_migrate_listing одного листинга, предложение Inventory API в ответе",
-  "description": "Р-164: ровно один цикл, один листинг — как в песочнице. Согласие дано на снимок предполётной проверки (SHA-256 подмножества GetItem); перед вызовом листинг проверяется заново и снимок совпал. Ответ песочницы: responses[].statusCode 200, inventoryItems[{sku, offerId}] — MIGRATED с идентификатором предложения, которое дальше несёт идентичность записи.",
+  "description": "Р-164: ровно один цикл, один листинг — как в песочнице. Согласие дано на снимок предполётной проверки (SHA-256 подмножества GetItem); перед вызовом листинг проверяется заново и снимок совпал. Ответ песочницы: responses[].statusCode 200, inventoryItems[{sku, offerId}] — MIGRATED с идентификатором предложения, которое дальше несёт идентичность записи. Шаг 49 [Р-191]: GetItem этого сценария синтетический (записанный листинг был с Best Offer), город листинга в нём задан; немедленная оплата платёжной политики — синтетическим ответом Account API при проверке и при перепроверке. Перепроверка стала на запрос длиннее — адаптер ждёт свой клиентский бюджет запросов перед необратимым вызовом, а не отказывает.",
   "tags": [
     "mandatory:migration-with-consent",
     "migration"
@@ -143,7 +143,25 @@
         "headers": {
           "content-type": "text/xml"
         },
-        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<GetItemResponse xmlns=\"urn:ebay:apis:eBLBaseComponents\"><Timestamp>2026-09-27T17:24:36.316Z</Timestamp><Ack>Success</Ack><Version>1193</Version><Item><Currency>EUR</Currency><ItemID>110000000021</ItemID><ListingDesigner><LayoutID>7710000</LayoutID><ThemeID>7710</ThemeID></ListingDesigner><ListingDuration>GTC</ListingDuration><ListingType>FixedPriceItem</ListingType><Quantity>4</Quantity><Seller><Email>syn-seller-0001@example.invalid</Email><UserID>syn_ebay_seller_0001</UserID></Seller><SellingStatus><CurrentPrice currencyID=\"EUR\">14.99</CurrentPrice><ListingStatus>Active</ListingStatus></SellingStatus><Site>Germany</Site><SKU>SYN-EBAY-21</SKU><SellerProfiles><SellerShippingProfile><ShippingProfileID>6200000001</ShippingProfileID></SellerShippingProfile><SellerReturnProfile><ReturnProfileID>6200000003</ReturnProfileID></SellerReturnProfile><SellerPaymentProfile><PaymentProfileID>6200000002</PaymentProfileID></SellerPaymentProfile></SellerProfiles></Item></GetItemResponse>"
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<GetItemResponse xmlns=\"urn:ebay:apis:eBLBaseComponents\"><Timestamp>2026-09-27T17:24:36.316Z</Timestamp><Ack>Success</Ack><Version>1193</Version><Item><Currency>EUR</Currency><ItemID>110000000021</ItemID><ListingDesigner><LayoutID>7710000</LayoutID><ThemeID>7710</ThemeID></ListingDesigner><ListingDuration>GTC</ListingDuration><ListingType>FixedPriceItem</ListingType><Quantity>4</Quantity><Seller><Email>syn-seller-0001@example.invalid</Email><UserID>syn_ebay_seller_0001</UserID></Seller><SellingStatus><CurrentPrice currencyID=\"EUR\">14.99</CurrentPrice><ListingStatus>Active</ListingStatus></SellingStatus><Location>Syn-Stadt</Location><Site>Germany</Site><SKU>SYN-EBAY-21</SKU><SellerProfiles><SellerShippingProfile><ShippingProfileID>6200000001</ShippingProfileID></SellerShippingProfile><SellerReturnProfile><ReturnProfileID>6200000003</ReturnProfileID></SellerReturnProfile><SellerPaymentProfile><PaymentProfileID>6200000002</PaymentProfileID></SellerPaymentProfile></SellerProfiles></Item></GetItemResponse>"
+      },
+      "origin": "SYNTHETIC"
+    },
+    {
+      "id": "payment-policy",
+      "note": "Платёжная политика листинга: немедленная оплата — условие bulkMigrateListing [док, Р-191]; ответ синтетический",
+      "request": {
+        "method": "GET",
+        "path": "/sell/account/v1/payment_policy/6200000002"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "paymentPolicyId": "6200000002",
+          "name": "syn-payment-policy",
+          "marketplaceId": "EBAY_DE",
+          "immediatePay": true
+        }
       },
       "origin": "SYNTHETIC"
     },
@@ -200,7 +218,25 @@
         "headers": {
           "content-type": "text/xml"
         },
-        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<GetItemResponse xmlns=\"urn:ebay:apis:eBLBaseComponents\"><Timestamp>2026-09-27T17:24:36.316Z</Timestamp><Ack>Success</Ack><Version>1193</Version><Item><Currency>EUR</Currency><ItemID>110000000021</ItemID><ListingDesigner><LayoutID>7710000</LayoutID><ThemeID>7710</ThemeID></ListingDesigner><ListingDuration>GTC</ListingDuration><ListingType>FixedPriceItem</ListingType><Quantity>4</Quantity><Seller><Email>syn-seller-0001@example.invalid</Email><UserID>syn_ebay_seller_0001</UserID></Seller><SellingStatus><CurrentPrice currencyID=\"EUR\">14.99</CurrentPrice><ListingStatus>Active</ListingStatus></SellingStatus><Site>Germany</Site><SKU>SYN-EBAY-21</SKU><SellerProfiles><SellerShippingProfile><ShippingProfileID>6200000001</ShippingProfileID></SellerShippingProfile><SellerReturnProfile><ReturnProfileID>6200000003</ReturnProfileID></SellerReturnProfile><SellerPaymentProfile><PaymentProfileID>6200000002</PaymentProfileID></SellerPaymentProfile></SellerProfiles></Item></GetItemResponse>"
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<GetItemResponse xmlns=\"urn:ebay:apis:eBLBaseComponents\"><Timestamp>2026-09-27T17:24:36.316Z</Timestamp><Ack>Success</Ack><Version>1193</Version><Item><Currency>EUR</Currency><ItemID>110000000021</ItemID><ListingDesigner><LayoutID>7710000</LayoutID><ThemeID>7710</ThemeID></ListingDesigner><ListingDuration>GTC</ListingDuration><ListingType>FixedPriceItem</ListingType><Quantity>4</Quantity><Seller><Email>syn-seller-0001@example.invalid</Email><UserID>syn_ebay_seller_0001</UserID></Seller><SellingStatus><CurrentPrice currencyID=\"EUR\">14.99</CurrentPrice><ListingStatus>Active</ListingStatus></SellingStatus><Location>Syn-Stadt</Location><Site>Germany</Site><SKU>SYN-EBAY-21</SKU><SellerProfiles><SellerShippingProfile><ShippingProfileID>6200000001</ShippingProfileID></SellerShippingProfile><SellerReturnProfile><ReturnProfileID>6200000003</ReturnProfileID></SellerReturnProfile><SellerPaymentProfile><PaymentProfileID>6200000002</PaymentProfileID></SellerPaymentProfile></SellerProfiles></Item></GetItemResponse>"
+      },
+      "origin": "SYNTHETIC"
+    },
+    {
+      "id": "recheck-payment-policy",
+      "note": "Платёжная политика листинга: немедленная оплата — условие bulkMigrateListing [док, Р-191]; ответ синтетический",
+      "request": {
+        "method": "GET",
+        "path": "/sell/account/v1/payment_policy/6200000002"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "paymentPolicyId": "6200000002",
+          "name": "syn-payment-policy",
+          "marketplaceId": "EBAY_DE",
+          "immediatePay": true
+        }
       },
       "origin": "SYNTHETIC"
     },

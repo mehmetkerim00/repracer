@@ -63,6 +63,10 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_operator') THEN
     CREATE ROLE svc_operator LOGIN IN ROLE repracer_operator;
   END IF;
+  -- Шаг 49 [Р-192]: приёмник уведомлений eBay Marketplace Account Deletion — только EXECUTE на функцию приёма
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_ebay_deletion') THEN
+    CREATE ROLE svc_ebay_deletion LOGIN IN ROLE repracer_ebay_deletion;
+  END IF;
   -- Шаг 43 [Р-177]: роль адаптеров — единственная, кто читает шифротекст токена канала
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_credentials') THEN
     CREATE ROLE svc_credentials LOGIN IN ROLE repracer_credentials;

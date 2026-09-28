@@ -270,7 +270,11 @@ function channelStep(world: StandWorld, d: ConsoleDecision, writes: readonly Con
   const confirmation = [gap(m, 'CONFIRMATION_SOURCE')];
   if (!last) return { key: 'CHANNEL', title: t.titles.CHANNEL, status: 'SKIPPED', summary: t.nothingSent, items, gaps: [] };
   switch (last.status) {
-    case 'APPLIED': return { key: 'CHANNEL', title: t.titles.CHANNEL, status: items.length ? 'WARN' : 'OK', summary: t.channelApplied(money(last.amountMinor), m.when(last.acceptedAt)), items, gaps: confirmation };
+    case 'APPLIED': {
+      // Р-190 (находка 9 ревью шага 49): подтверждено только нашей записью у канала — продавец видит это словами, а не «подтверждено»
+      const own: TraceItem[] = last.confirmedByOwnRecord ? [{ label: m.ui.ownRecordConfirmation, outcome: 'INFO' }] : [];
+      return { key: 'CHANNEL', title: t.titles.CHANNEL, status: items.length ? 'WARN' : 'OK', summary: t.channelApplied(money(last.amountMinor), m.when(last.acceptedAt)), items: [...items, ...own], gaps: confirmation };
+    }
     case 'ACCEPTED': return { key: 'CHANNEL', title: t.titles.CHANNEL, status: 'WARN', summary: t.channelAccepted(money(last.amountMinor), m.when(last.acceptedAt)), items, gaps: confirmation };
     case 'DISPATCHED': return { key: 'CHANNEL', title: t.titles.CHANNEL, status: 'WARN', summary: t.channelWaiting(m.when(last.dispatchedAt)), items, gaps: [] };
     case 'NOT_APPLIED': return { key: 'CHANNEL', title: t.titles.CHANNEL, status: 'STOP', summary: t.channelNotApplied, items, gaps: [] };

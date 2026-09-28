@@ -428,6 +428,8 @@ export const de: Messages = {
       retry: (amount: string) => `Wiederholung: ${amount}`, retryDetail: (error: string, attempt: number, when: string) => `Vorübergehender Fehler (${error}); Versuch ${attempt} nach ${when}`,
       blocked: (amount: string) => `Blockiert: ${amount}`, blockedDetail: (error: string) => `Der Kanal braucht eine Person (${error})`, noErrorCode: 'kein Fehlercode',
     },
+    /** Шаг 49 [Р-190], находка 9 ревью: запись подтверждена только нашей записью у канала (eBay в бою без Browse) */
+    ownRecordConfirmation: 'bestätigt über den Angebotsdatensatz, nicht über das Live-Angebot (Frage E-21)',
     writeStatus: {
       PENDING: 'in Warteschlange', DISPATCHED: 'gesendet, wartet auf den Kanal', ACCEPTED: 'vom Kanal angenommen', APPLIED: 'vom Kanal übernommen', FAILED: 'vorübergehender Kanalfehler',
       SUPERSEDED: 'durch neueren Preis ersetzt', DISCARDED_STALE: 'nicht gesendet', BUDGET_EXHAUSTED: 'Änderungsbudget aufgebraucht', NOT_APPLIED: 'vom Kanal nicht übernommen', BLOCKED: 'blockiert',
@@ -596,6 +598,8 @@ export const de: Messages = {
       intro: 'Sie verbinden einen Kanal selbst: der Knopf öffnet die Zustimmungsseite des Kanals, dort erlauben Sie den Zugriff, und der Kanal schickt Sie hierher zurück. Eine neue Verbindung beginnt im Schattenmodus — die Engine arbeitet vollständig und schreibt nichts.',
       noRight: 'Kanäle verbindet nur der Inhaber oder ein Administrator des Kontos.',
       tokenNote: 'Den Zugriff des Kanals bewahren wir verschlüsselt auf und zeigen ihn nie — nicht hier, nicht in Briefen, nicht in Protokollen. Sie können ihn jederzeit im Kanal selbst zurückziehen; wir bemerken das und sagen es Ihnen.',
+      /** Шаг 49 [Р-190, E-21]: что мы на eBay в бою пока не видим — у каждого аккаунта eBay, словами */
+      ebayLiveLimits: 'Den Preis, den Käufer sehen, und Änderungen anderer Programme sehen wir auf eBay im Live-Betrieb noch nicht: Unsere Änderungen werden über den Angebotsdatensatz bestätigt, die Prüfung der Preisbasis ist eingeschränkt (Frage E-21).',
       connect: (channel: string) => `${channel} verbinden`,
       connectAnother: (channel: string) => `Weiteres ${channel}-Konto verbinden`,
       reconnect: 'Zugriff erneuern',
@@ -636,6 +640,7 @@ export const de: Messages = {
       missing: {
         AMAZON_APPLICATION: 'unsere Amazon-Anwendung (SP-API) ist noch nicht registriert',
         EBAY_DEVELOPER_KEYS: 'unsere eBay-Entwicklerschlüssel sind noch nicht ausgestellt (E-01)',
+        EBAY_ACCOUNT_DELETION_ENDPOINT: 'eBay-Benachrichtigungen über gelöschte Konten werden für diese Region nicht empfangen — eBay lässt sich erst verbinden, wenn unsere Adresse im eBay-Entwicklerportal registriert ist',
       } as Record<string, string | undefined>,
       failures: {
         DENIED: 'Sie haben auf der Seite des Kanals abgelehnt',
@@ -778,6 +783,10 @@ export const de: Messages = {
         SCHEDULED_RECOMPUTE_FAILURES: { what: 'Die tägliche Neuberechnung fester und margenbasierter Preise ist für einen Teil der Angebote fehlgeschlagen', step: 'Die übrigen Angebote wurden berechnet; die fehlgeschlagenen kommen beim nächsten Durchlauf wieder dran. Wiederholt sich die Meldung, melden Sie sich bei uns.' },
         EBAY_BUYER_PRICE_VAT_ON_TOP: { what: 'eBay zeigt Käufern Ihren Preis zuzüglich Mehrwertsteuer: Käufer zahlen um den Steuersatz mehr als der Preis, den wir senden (auch im Schattenmodus angezeigt)', step: 'Prüfen Sie in Ihrem eBay-Konto, ob Ihre Preise als Bruttopreise gelten (gewerbliches Konto, Umsatzsteuer). Bis das geklärt ist, gilt diese eBay-Seite nicht als falsche Preisbasis — prüfen Sie Ihre Preise, bevor Sie live schalten.' },
         EBAY_OFFER_LISTING_DIVERGENCE: { what: 'Der Live-Preis des eBay-Angebots weicht von dem Preis ab, den wir für das Angebot erfasst haben: Ein anderes Programm bearbeitet dieses Angebot', step: 'Prüfen Sie, welche Werkzeuge dieses Angebot noch über die Trading API bearbeiten; ihre Änderungen überschreiben unsere und sind für das Repricing nicht sichtbar.' },
+        // Шаг 49 [Р-189, E-22]: режим пакетов eBay; [Р-192]: удаление данных пользователем eBay — оба поднимает функция базы (0142)
+        EBAY_MULTI_SKU_REFUSED: { what: 'eBay hat für dieses Konto abgelehnt, mehrere Produkte in einem Aufruf zu ändern: Ab jetzt senden wir Ihre eBay-Preis- und Bestandsänderungen einzeln pro Produkt', step: 'Sie müssen nichts tun: Die Änderungen kommen weiterhin an, nur mit mehr Aufrufen. Wir haben eBay gefragt, ob mehrere Produkte pro Aufruf erlaubt sind (Frage E-22), und stellen erst nach einer Antwort zurück.' },
+        EBAY_BATCH_OUTCOME_NOT_RECORDED: { what: 'Wir konnten nicht speichern, ob eBay für dieses Konto mehrere Produkte in einem Aufruf annimmt', step: 'Ihre Änderungen wurden gesendet und ihre Ergebnisse erfasst; nur der Sammelmodus bleibt unverändert und wird beim nächsten Sammelaufruf erneut geprüft. Melden Sie sich bei uns, wenn sich das wiederholt.' },
+        EBAY_ACCOUNT_DELETED_BY_USER: { what: 'Der eBay-Nutzer dieses Kontos hat eBay gebeten, seine Daten zu löschen: Wir haben die Zugangstoken gelöscht und das Konto getrennt', step: 'Auf dieses eBay-Konto wird nichts mehr geschrieben. Verbinden lässt es sich nur mit einer neuen Zustimmung bei eBay — öffnen Sie die Kanalverbindungen in der Konsole, wenn das Konto weiterarbeiten soll.' },
         C10_OTHER_TOOLS: { what: 'Vor der Migration eines eBay-Angebots: Andere Programme, die es über die Trading API bearbeiten, müssen benannt werden', step: 'Nennen Sie jedes Werkzeug, das dieses Angebot bearbeitet; nach der Migration laufen dessen und unsere Änderungen auseinander.' },
         C11_OUT_OF_STOCK_CONTROL: { what: 'Vor der Migration eines eBay-Angebots: Die Option „Nicht vorrätig“ ist ausgeschaltet', step: 'Schalten Sie die Option „Nicht vorrätig“ in Ihren eBay-Einstellungen ein, damit Bestand 0 das Angebot nicht beendet.' },
         C13_SITE_UNCONFIRMED: { what: 'Vor der Migration eines eBay-Angebots: Die eBay-Website des Angebots ließ sich keinem Marktplatz dieses Kontos zuordnen — das Angebot wurde nach seiner Währung eingeordnet', step: 'Prüfen Sie bei eBay, auf welcher Website das Angebot steht; migrieren Sie es nur, wenn es zum hier angezeigten Marktplatz gehört.' },

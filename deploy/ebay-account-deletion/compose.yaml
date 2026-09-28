@@ -1,0 +1,55 @@
+# Шаг 49 [Р-192, E-18]: развёртывание приёмника уведомлений eBay Marketplace Account Deletion.
+#   docker compose -f deploy/ebay-account-deletion/compose.yaml --env-file deploy/ebay-account-deletion/deletion.env up -d
+#
+# До ПЕРВОГО боевого вызова eBay приложение подписывается на эти уведомления (адрес https, проверка challenge-кодом) —
+# без этого боевой ключ не активируется. В промышленном профиле сервис берётся отсюда через `extends` и выставляется
+# наружу только общим прокси (deploy/production, маршрут /ebay/account-deletion); у самого процесса ни TLS, ни 443-го порта нет.
+name: repracer-ebay-account-deletion
+
+services:
+  ebay-account-deletion:
+    image: node:22.22.3-bookworm-slim
+    # Тег образа закреплён; закрепление по digest — при первом развёртывании в среде с доступом к реестру (проверить)
+    working_dir: /app
+    command: ["node", "--experimental-strip-types", "--disable-warning=ExperimentalWarning", "services/ebay-account-deletion/src/main.ts"]
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      REPRACER_EBAY_DELETION_PORT: "8470"
+      REPRACER_EBAY_DELETION_METRICS_PORT: "9470"
+      # Адрес, зарегистрированный в портале eBay (Alerts and Notifications) — он же входит в хэш ответа на challenge
+      REPRACER_EBAY_DELETION_ENDPOINT: ${REPRACER_EBAY_DELETION_ENDPOINT:?set REPRACER_EBAY_DELETION_ENDPOINT (Р-192)}
+      # Свои имена в окружении профиля: общие `REPRACER_EBAY_CLIENT_ID`/`…_ENVIRONMENT` читают консоль, планировщик и диспетчер,
+      # и значение, заданное ради приёмника, делало бы у них приложение eBay «настроенным наполовину» — отказ при старте.
+      # Значения — те же App ID и окружение, что у приложения eBay продукта
+      REPRACER_EBAY_ENVIRONMENT: ${REPRACER_EBAY_DELETION_ENVIRONMENT:?set REPRACER_EBAY_DELETION_ENVIRONMENT (PRODUCTION or SANDBOX)}
+      REPRACER_EBAY_CLIENT_ID: ${REPRACER_EBAY_DELETION_CLIENT_ID:?set REPRACER_EBAY_DELETION_CLIENT_ID (App ID приложения eBay, Р-192)}
+      # Р-127: отметка во внешнем сервисе; аккаунта сервиса у проекта нет (OQ-188) — умолчание `off`, как у консоли
+      REPRACER_EBAY_DELETION_HEARTBEAT: ${REPRACER_EBAY_DELETION_HEARTBEAT:-off}
+      REPRACER_EBAY_DELETION_HEARTBEAT_URL_FILE: /run/secrets/ebay_deletion_heartbeat_url
+      # Секреты — файлами: проверочный токен входит в ответ на challenge, секрет приложения — в получение ключа
+      # Notification API, строка базы — пароль роли, у которой нет прав ни на одну таблицу [Р-90]
+      REPRACER_EBAY_DELETION_VERIFICATION_TOKEN_FILE: /run/secrets/ebay_deletion_verification_token
+      REPRACER_EBAY_DELETION_PG_URL_FILE: /run/secrets/ebay_deletion_pg_url
+      REPRACER_EBAY_CLIENT_SECRET_FILE: /run/secrets/ebay_client_secret
+    volumes:
+      - ../..:/app:ro
+      - ${REPRACER_SECRETS_DIR:?set REPRACER_SECRETS_DIR}:/run/secrets:ro
+    restart: unless-stopped
+    stop_grace_period: 20s
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9470/healthz').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    ports:
+      - "127.0.0.1:8470:8470"
+      - "127.0.0.1:9470:9470"
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"

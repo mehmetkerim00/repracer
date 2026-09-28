@@ -2,14 +2,15 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { InMemoryPricingStore, standUserOf, type MemorySeedScope } from '@repracer/pricing-pipeline';
-import { inTenant, seedPricingWorld, type PgPool } from '@repracer/pricing-store-pg';
+import { inTenant, PgWriteQueueStore, seedPricingWorld, type PgPool } from '@repracer/pricing-store-pg';
+import { pgAccountDirectory } from '../../../packages/service-runtime/src/index.ts';
 import { createIsolatedDatabase, type IsolatedDatabase } from '../../../packages/pricing-store-pg/test/isolated-db.ts';
 import { ebayUnderTest } from './adapters.ts';
 import { EBAY_FIXTURES_DIR } from './ebay-fixtures/index.ts';
 import { pids } from './ebay-fixtures/pipeline.ts';
 import { pgStoreFactory } from './harness/pg-store.ts';
-import { runScenario } from './harness/runner.ts';
-import { loadScenarios, type Scenario } from './harness/scenario.ts';
+import { memoryStoreFactory, runScenario } from './harness/runner.ts';
+import { loadScenarios, SCENARIO_FORMAT, type Scenario } from './harness/scenario.ts';
 
 /**
  * Шаг 47: путь решения eBay на настоящей PostgreSQL — те же сценарии pipeline-*, что на памяти (ebay.contract.test.ts), и то, что может
@@ -78,10 +79,10 @@ const scopeOf = (n: number, extra: Partial<MemorySeedScope> = {}): MemorySeedSco
   ...extra,
 });
 
-async function seedWorld(n: number, scopes: MemorySeedScope[]) {
+async function seedWorld(n: number, scopes: MemorySeedScope[], writeMode?: 'SHADOW' | 'LIVE') {
   return seedPricingWorld(pools.app, {
     provisioningPool: pools.provisioning, adminPool: pools.admin, fixtureTenantId: `10000000-0000-4000-8000-0000000047${String(n).padStart(2, '0')}`,
-    fixtureChannelAccountId: ACCOUNT, fixtureChannel: 'EBAY', marketplaces: ['EBAY_DE'], clock: new Date().toISOString(), seed: { scopes },
+    fixtureChannelAccountId: ACCOUNT, fixtureChannel: 'EBAY', marketplaces: ['EBAY_DE'], clock: new Date().toISOString(), seed: { scopes }, ...(writeMode ? { writeMode } : {}),
   });
 }
 
@@ -178,4 +179,80 @@ test('Р-164, 0140: discovery through the pricing path puts every eBay listing i
     { listing: pids(31).listingId, status: 'MIGRATION_REQUIRED', migration: 'REQUIRED', format: 'FIXED_PRICE', scope: null },
     { listing: pids(32).listingId, status: 'INELIGIBLE', migration: 'INELIGIBLE', format: 'AUCTION', scope: null },
   ], 'only the listing under Inventory API gets a price write scope; the legacy one waits for the owner, the auction is never managed');
+});
+
+/**
+ * Шаг 49 [Р-189, E-22]: режим пакетов боевого аккаунта eBay — через ту же проводку, что в работе: итог пакета записывает очередь записей роли
+ * пути решения (`channel_data.record_ebay_batch_outcome`), каталог аккаунтов (`pgAccountDirectory`) читает режим на каждом verify. Переход
+ * только вперёд, отказ — ОДИН алерт с вопросом E-22, теневой аккаунт итога не принимает.
+ */
+test('Р-189: the batch outcome moves the eBay batch mode forward only; the account directory reads it on every verify; one alert per refusal; the shadow refuses', async () => {
+  const w = await seedWorld(5, [scopeOf(45)], 'LIVE');
+  const queue = new PgWriteQueueStore(pools.app, { scanPool: pools.scan });
+  const directory = pgAccountDirectory(pools.app);
+  const modeNow = async () => {
+    const v = await directory.verify(w.tenantId as never, w.channelAccountId as never);
+    assert.ok(v.ok, JSON.stringify(v));
+    return [v.account.writeMode, v.account.ebayBatchMode];
+  };
+  const alerts = async () => db.rows<{ code: string; severity: string; details: Record<string, string> }>(
+    `SELECT code, severity, details FROM tenant_data.alert WHERE tenant_id = $1 AND code = 'EBAY_MULTI_SKU_REFUSED' ORDER BY raised_at`, [w.tenantId]);
+  assert.deepEqual(await modeNow(), ['LIVE', 'PROBE'], 'no outcome yet — a probe');
+  assert.equal(await queue.recordEbayBatchOutcome(w.tenantId, w.channelAccountId, true), 'MULTI');
+  assert.deepEqual(await modeNow(), ['LIVE', 'MULTI'], 'the directory sees the new mode on the next verify');
+  assert.deepEqual(await alerts(), []);
+  assert.equal(await queue.recordEbayBatchOutcome(w.tenantId, w.channelAccountId, false), 'SINGLE');
+  assert.equal(await queue.recordEbayBatchOutcome(w.tenantId, w.channelAccountId, false), 'SINGLE');
+  assert.equal(await queue.recordEbayBatchOutcome(w.tenantId, w.channelAccountId, true), 'SINGLE', 'no automatic way back from one SKU per call');
+  assert.deepEqual(await modeNow(), ['LIVE', 'SINGLE']);
+  assert.deepEqual(await alerts(), [{ code: 'EBAY_MULTI_SKU_REFUSED', severity: 'WARNING', details: { from: 'MULTI', to: 'SINGLE', question: 'E-22' } }], 'one alert for the one transition');
+  const shadow = await seedWorld(6, [scopeOf(46)], 'SHADOW');
+  await assert.rejects(new PgWriteQueueStore(pools.app, { scanPool: pools.scan }).recordEbayBatchOutcome(shadow.tenantId, shadow.channelAccountId, false),
+    (e: Error) => { assert.match(e.message, /in the shadow: nothing was sent/); return true; });
+});
+
+/**
+ * Шаг 49 [Р-190], находка 9 ревью: в бою Browse не вызывается, и подтверждение записи eBay — только НАША запись предложения. Это доходит до
+ * базы: запись, применённая по записи предложения, ложится в историю с confirmed_by_own_record = true (тот же UPDATE, что переводит в
+ * APPLIED); хранилище в памяти помнит то же. Канал — модель eBay [Р-187] на боевом хосте стенда.
+ */
+function productionScenario(): Scenario {
+  const i = pids(48);
+  return {
+    format: SCENARIO_FORMAT, id: 'ebay/pipeline/production-own-record', channel: 'EBAY', apiVersion: 'sell-inventory-v1 (model)', tags: ['ebay'],
+    title: 'Р-190: боевая запись eBay подтверждена записью предложения', description: 'Синтетический сценарий: модель eBay, окружение PRODUCTION.',
+    provenance: { kind: 'SYNTHETIC_FROM_DOCS', sources: ['docs/channel-capabilities.md#E-21'] },
+    world: {
+      clock: '2026-09-28T10:00:00.000Z', tenantId: '10000000-0000-4000-8000-000000000001', channelAccountId: ACCOUNT,
+      account: { externalAccountId: 'syn_ebay_seller_0001', marketplaces: ['EBAY_DE'], channel: 'EBAY', writeMode: 'LIVE', ebayBatchMode: 'PROBE' },
+      credentials: { seller: { refreshToken: 'syn-ebay-refresh-token-0001' }, application: { clientId: 'Syn-Repracer-PRD-0001', clientSecret: 'PRD-syn-client-secret-0001' },
+        accessToken: 'syn-ebay-user-token-0001', applicationToken: 'syn-ebay-app-token-0001' },
+      adapter: { ebayEnvironment: 'PRODUCTION' }, budget: { seller: { ratePerSecond: 100, burst: 100 } },
+      channelModel: { seed: 48, listings: [{ listingId: i.listingId, offerId: i.offerId, sku: i.sku, marketplace: 'EBAY_DE', priceMinor: 1149, quantity: 5 }] },
+      pricing: { scopes: [scopeOf(48)] },
+    },
+    steps: [
+      { id: 'fixed-price', kind: 'pipelineRecompute', writeScopeId: 'ws-ebay-db-48', trigger: { type: 'COST_CHANGE' }, expect: { decision: { outcome: 'APPROVED', finalMinor: 1299 }, dispatch: { status: 'ACCEPTED' } } },
+      { id: 'in-flight-window', kind: 'advanceClock', ms: 121_000 },
+      { id: 'reconcile', kind: 'pipelineDispatchDue', expect: { reports: [{ steps: [{ action: 'RECONCILED', result: 'APPLIED', recorded: 'APPLIED' }, { action: 'IDLE' }] }] } },
+    ],
+    exchanges: [],
+    expect: { logs: [{ code: 'EBAY_C19_BROWSE_UNAVAILABLE_IN_PRODUCTION', count: 1 }], noLogCodes: ['EBAY_C05_PRICE_READBACK_LIVE_LISTING'] },
+  } as unknown as Scenario;
+}
+
+test('Р-190: a PRODUCTION eBay write confirmed by the offer record reaches the history with confirmed_by_own_record = true (PostgreSQL and memory)', async () => {
+  let tenantId = '';
+  const report = await runScenario(productionScenario(), ebayUnderTest, undefined, factory('LIVE'), { async onFinish(f) { tenantId = f.store!.identity!.tenantId; } });
+  const trace = report.trace.map((t) => `  ${t.method} ${t.path} → ${t.outcome}`).join('\n');
+  assert.deepEqual(report.failures, [], `${report.failures.join('\n')}\ntrace:\n${trace}`);
+  assert.ok(!report.trace.some((t) => t.path.startsWith('/buy/')), 'no Browse call in production');
+  const rows = await db.rows<{ final_status: string; confirmed_by_own_record: boolean }>(
+    `SELECT final_status, confirmed_by_own_record FROM tenant_data.channel_write_history WHERE tenant_id = $1 AND field = 'PRICE'`, [tenantId]);
+  assert.deepEqual(rows, [{ final_status: 'APPLIED', confirmed_by_own_record: true }]);
+
+  let writes: unknown = null;
+  const memory = await runScenario(productionScenario(), ebayUnderTest, undefined, memoryStoreFactory, { async onFinish(f) { writes = ((await f.store!.dump()) as { writes: unknown }).writes; } });
+  assert.deepEqual(memory.failures, [], memory.failures.join('\n'));
+  assert.deepEqual((writes as Array<{ status: string; confirmedByOwnRecord: boolean }>).map((w) => [w.status, w.confirmedByOwnRecord]), [['APPLIED', true]]);
 });

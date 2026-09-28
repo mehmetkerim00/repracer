@@ -83,3 +83,70 @@ test('хвост шага 47: одно неуправляемое предлож
   const v = connectionsView({ worldId: 'w', role: 'OWNER', now: NOW }, { accounts: [row({ channel: 'EBAY', offers: 3, unmanagedOffers: 1 })], pending: [] }, apps, messagesFor('en'));
   assert.match(v.accounts[0]!.progressText!, /write to 2; 1 is not open/);
 });
+
+/**
+ * Шаг 49 [Р-190, E-21]: в бою Browse у eBay недоступен — продавец узнаёт словами, чего мы на eBay не видим: цену покупателя и правки
+ * других программ, подтверждение — по записи предложения, проверка базы цены ограничена. Окружения экран не знает — текст у любого
+ * аккаунта eBay (и у карточки канала eBay до подключения), на экране подключений и на экране тени; у Amazon его нет.
+ */
+test('Р-190: every eBay account and the eBay channel card say in words what live mode does not see; Amazon does not; both languages', async () => {
+  const { shadowView } = await import('./shadow.ts');
+  const ebayApps: ConnectableChannel[] = [{ channel: 'AMAZON', platformMissing: [], marketplaces: ['A1PA6795UKMFR9'] }, { channel: 'EBAY', platformMissing: [], marketplaces: ['EBAY_DE'] }];
+  const expected = {
+    en: 'In live mode we do not yet see on eBay the price buyers see or edits made by other programs: our writes are confirmed by the offer record, and the price-basis check is limited (question E-21).',
+    de: 'Den Preis, den Käufer sehen, und Änderungen anderer Programme sehen wir auf eBay im Live-Betrieb noch nicht: Unsere Änderungen werden über den Angebotsdatensatz bestätigt, die Prüfung der Preisbasis ist eingeschränkt (Frage E-21).',
+  };
+  for (const locale of ['de', 'en'] as const) {
+    const m = messagesFor(locale);
+    const v = connectionsView({ worldId: 'w', role: 'OWNER', now: NOW }, {
+      accounts: [row({ channelAccountId: 'ebay-shadow', channel: 'EBAY', marketplaces: ['EBAY_DE'] }), row({ channelAccountId: 'ebay-live', channel: 'EBAY', marketplaces: ['EBAY_DE'], writeMode: 'LIVE' }), row({ channelAccountId: 'amazon' })],
+      pending: [],
+    }, ebayApps, m);
+    const by = Object.fromEntries(v.accounts.map((a) => [a.channelAccountId, a.channelLimitText]));
+    assert.deepEqual(by, { 'ebay-shadow': expected[locale], 'ebay-live': expected[locale], amazon: null });
+    assert.deepEqual(v.channels.map((c) => [c.channel, c.channelLimitText]), [['AMAZON', null], ['EBAY', expected[locale]]], 'the eBay card says it before connecting');
+
+    const account = (channelAccountId: string, channel: string) => ({ channelAccountId, channel, displayName: null, externalAccountId: `syn-${channelAccountId}`, writeMode: 'SHADOW' as const,
+      authStatus: 'ACTIVE', changedAt: null, changedByMembershipId: null, changedFrom: null, offers: 3, engineScopes: 3 });
+    const shadow = shadowView(
+      { id: 'w', title: 't', description: 'd', tenantId: 't', now: NOW, accounts: [], viewer: { membershipId: 'membership-owner', role: 'OWNER' }, state: {} as never },
+      { summary: { since: NOW, until: NOW, decisions: 0, changes: 0, floorHeld: 0, ceilingHeld: 0, heldWrites: 0, heldPriceWrites: 0, heldQuantityWrites: 0,
+        wouldSpendBudget: 0, wouldSpendUnconfirmed: 0, floorSavings: [], floorSavingsHolds: 0 } as never,
+        rows: [], total: 0, accounts: [account('ebay', 'EBAY'), account('amazon', 'AMAZON')], properties: [], digests: [] },
+      { offset: 0, limit: 20 } as never, m, 7);
+    assert.deepEqual(shadow.accounts.map((a) => [a.channelAccountId, a.channelLimitText]), [['ebay', expected[locale]], ['amazon', null]], 'the shadow screen says it before the live button');
+  }
+});
+
+/**
+ * Шаг 49 [Р-190], находка 9 ревью: запись eBay, подтверждённая в бою только НАШЕЙ записью предложения (Browse недоступен), — не
+ * «подтверждено каналом» без оговорки: лента цен и экран остатков говорят это словами. Запись, подтверждённая живым листингом, — без оговорки.
+ */
+test('Р-190: a write confirmed by our own offer record is named so on the price feed and the stock screen; a live-listing confirmation is not', async () => {
+  const { feedItemOf } = await import('./price-feed.ts');
+  const { channelCell } = await import('./stock.ts');
+  const expected = { en: 'confirmed by the offer record, not by the live listing (question E-21)', de: 'bestätigt über den Angebotsdatensatz, nicht über das Live-Angebot (Frage E-21)' };
+  const world = { id: 'w', title: 't', description: 'd', tenantId: 't', now: NOW, accounts: [], viewer: { membershipId: 'membership-owner', role: 'OWNER' }, state: { scopes: [], strategies: [] } } as never;
+  const write = (own: boolean, status = 'APPLIED') => ({ channelWriteId: 'cw', writeScopeId: 'ws', decisionId: null, amountMinor: 1349, currency: 'EUR', basis: 'GROSS' as const, version: 1, status,
+    attemptCount: 1, competitorDerived: false, createdAt: NOW, dispatchedAt: NOW, acceptedAt: NOW, nextAttemptAt: null, lastErrorCode: null, endReason: null, endParams: {},
+    supersededByWriteId: null, confirmedByOwnRecord: own });
+  const cell = (ownRecordOnly: boolean) => ({ writeScopeId: 'ws-q', channelAccountId: 'acc', channel: 'EBAY', marketplaces: ['EBAY_DE'], syncEnabled: true, published: 3,
+    sent: { quantity: 3, status: 'APPLIED', at: NOW, version: 1 }, confirmed: { quantity: 3, at: NOW, ...(ownRecordOnly ? { ownRecordOnly: true } : {}) }, divergence: null,
+    sideEffects: { requiresAck: false, acknowledged: false, text: null } });
+  for (const locale of ['de', 'en'] as const) {
+    const m = messagesFor(locale);
+    assert.equal(feedItemOf(world, m, { write: write(true), decision: null, intentCurrentMinor: null }).confirmation, expected[locale]);
+    assert.equal(feedItemOf(world, m, { write: write(false), decision: null, intentCurrentMinor: null }).confirmation, null, 'the live listing confirmed it — no remark');
+    assert.ok(channelCell(cell(true) as never, m).confirmedText.endsWith(expected[locale]), channelCell(cell(true) as never, m).confirmedText);
+    assert.ok(!channelCell(cell(false) as never, m).confirmedText.includes('E-21'));
+  }
+});
+
+test('review 49 #11: the eBay card waiting for the account deletion endpoint names the reason in words, not by its code', () => {
+  for (const locale of ['de', 'en'] as const) {
+    const v = connectionsView({ worldId: 'w', role: 'OWNER', now: NOW }, { accounts: [], pending: [] },
+      [{ channel: 'EBAY', platformMissing: ['EBAY_ACCOUNT_DELETION_ENDPOINT'], marketplaces: ['EBAY_DE'] }], messagesFor(locale));
+    assert.deepEqual([v.channels[0]!.state, v.channels[0]!.canConnect], ['AWAITING_PLATFORM', false]);
+    assert.ok(v.channels[0]!.missingText && !v.channels[0]!.missingText.includes('EBAY_ACCOUNT_DELETION_ENDPOINT') && /eBay/.test(v.channels[0]!.missingText), v.channels[0]!.missingText!);
+  }
+});

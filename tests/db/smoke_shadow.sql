@@ -292,6 +292,15 @@ SELECT set_config('app.user_id', :ownerU, false) \gset
 SELECT pg_temp.ok('the owner switches the account to LIVE with a second factor and a typed confirmation (Р-170)', format($q$
   INSERT INTO tenant_data.channel_write_mode_change (tenant_id, channel_account_id, from_mode, to_mode, changed_by_membership_id, typed_confirmation)
   VALUES (%L, %L, 'SHADOW', 'LIVE', %L, 'seller-A') $q$, :tA, :kAcc, :ownerM));
+-- Шаг 49 (находка 2 ревью, Р-192): журнал хранит отметку сверки, а не набранный идентификатор аккаунта (у eBay это userId)
+SELECT pg_temp.ok('the LIVE switch keeps a mark, not the typed account id (Р-192)', format($q$
+  DO $i$
+  BEGIN
+    IF EXISTS (SELECT 1 FROM tenant_data.channel_write_mode_change WHERE channel_account_id = %L AND typed_confirmation = 'seller-A')
+       OR NOT EXISTS (SELECT 1 FROM tenant_data.channel_write_mode_change WHERE channel_account_id = %L AND to_mode = 'LIVE' AND typed_confirmation = 'matched') THEN
+      RAISE EXCEPTION 'the journal keeps the typed account id instead of the mark';
+    END IF;
+  END $i$ $q$, :kAcc, :kAcc));
 
 -- Признак тени у решения: теневое — истина, боевое — ложь
 INSERT INTO channel_data.price_intent (tenant_id, price_intent_id, created_at, write_scope_id, created_by_membership_id, trigger_type, proposed_amount_minor, currency, price_basis, expires_at, rule_code)

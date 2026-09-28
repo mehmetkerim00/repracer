@@ -60,8 +60,8 @@ test('находка 14 ревью шага 43: состояние прилож�
 
 test('Р-175: eBay — песочница по явному значению, scope называет конфигурация (E-08)', () => {
   const c = loadChannelAppsConfig({
-    REPRACER_EBAY_CLIENT_ID: 'Syn-App-SBX', REPRACER_EBAY_RUNAME: 'Syn-RuName', REPRACER_EBAY_SCOPES: 'https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/commerce.identity.readonly',
-    REPRACER_EBAY_CLIENT_SECRET_FILE: '/s/ebay', REPRACER_CHANNEL_KEYRING_FILE: '/s/keyring', REPRACER_EBAY_ENVIRONMENT: 'SANDBOX',
+    REPRACER_EBAY_CLIENT_ID: 'Syn-App-SBX', REPRACER_EBAY_RUNAME: 'Syn-RuName', REPRACER_EBAY_SCOPES: 'https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.account https://api.ebay.com/oauth/api_scope/commerce.identity.readonly',
+    REPRACER_EBAY_CLIENT_SECRET_FILE: '/s/ebay', REPRACER_CHANNEL_KEYRING_FILE: '/s/keyring', REPRACER_EBAY_ENVIRONMENT: 'SANDBOX', REPRACER_EBAY_ACCOUNT_DELETION: 'registered',
   }, read);
   assert.equal(c.ebay?.environment, 'SANDBOX');
   const ebay = channelApps(c)[1]!;
@@ -79,7 +79,7 @@ test('находка 2 ревью шага 39: без scope commerce.identity.re
 test('шаг 47: модель поставщика eBay (REPRACER_EBAY_OAUTH_BASE) — только в режиме стенда; вне его — отказ при старте с причиной', () => {
   const ebayEnv = {
     REPRACER_EBAY_ENVIRONMENT: 'SANDBOX', REPRACER_EBAY_CLIENT_ID: 'Syn-App-SBX', REPRACER_EBAY_RUNAME: 'Syn-RuName', REPRACER_EBAY_CLIENT_SECRET_FILE: '/s/ebay',
-    REPRACER_EBAY_SCOPES: 'https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/commerce.identity.readonly', REPRACER_CHANNEL_KEYRING_FILE: '/s/keyring',
+    REPRACER_EBAY_SCOPES: 'https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/sell.account https://api.ebay.com/oauth/api_scope/commerce.identity.readonly', REPRACER_CHANNEL_KEYRING_FILE: '/s/keyring',
     REPRACER_EBAY_OAUTH_BASE: 'http://127.0.0.1:4711',
   };
   assert.throws(() => loadChannelAppsConfig(ebayEnv, read), /REPRACER_EBAY_OAUTH_BASE is accepted only with REPRACER_MODE=stand/);
@@ -94,4 +94,34 @@ test('шаг 47: модель поставщика eBay (REPRACER_EBAY_OAUTH_BAS
   const real = channelApps(loadChannelAppsConfig({ ...plain, REPRACER_MODE: 'stand' }, read)).find((a) => a.channel === 'EBAY')!;
   assert.equal(real.provider!.tokenRequest({ kind: 'CODE', code: 'c' }).url, 'https://api.sandbox.ebay.com/identity/v1/oauth2/token');
   assert.throws(() => loadChannelAppsConfig({ REPRACER_MODE: 'stand', REPRACER_EBAY_OAUTH_BASE: 'http://127.0.0.1:1' }, read), /без приложения eBay/);
+});
+
+/**
+ * Шаг 49, находка 16 ревью: без scope sell.account платёжную политику листинга не прочитать — предполётная проверка C14 (Р-191) была бы
+ * UNKNOWN у каждого листинга. Отказ — при старте процесса.
+ */
+test('review 49 #16: without the sell.account scope the eBay application is not configured — immediate payment could never be read (Р-191)', () => {
+  const env = {
+    REPRACER_EBAY_CLIENT_ID: 'Syn-App-SBX', REPRACER_EBAY_RUNAME: 'Syn-RuName', REPRACER_EBAY_SCOPES: 'https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/commerce.identity.readonly',
+    REPRACER_EBAY_CLIENT_SECRET_FILE: '/s/ebay', REPRACER_CHANNEL_KEYRING_FILE: '/s/keyring', REPRACER_EBAY_ENVIRONMENT: 'SANDBOX',
+  };
+  assert.throws(() => loadChannelAppsConfig(env, read), /CONFIG_INVALID: REPRACER_EBAY_SCOPES must include https:\/\/api\.ebay\.com\/oauth\/api_scope\/sell\.account/);
+  assert.equal(loadChannelAppsConfig({ ...env, REPRACER_EBAY_SCOPES: `${env.REPRACER_EBAY_SCOPES} https://api.ebay.com/oauth/api_scope/sell.account` }, read).ebay?.scopes.length, 3);
+});
+
+/**
+ * Шаг 49 [Р-192], находка 11 ревью: до регистрации приёмника уведомлений eBay Marketplace Account Deletion подключать продавцов eBay нельзя —
+ * канал «ожидает доступа платформы» с названной причиной; поставщик остаётся, чтобы уже подключённые аккаунты проверялись.
+ */
+test('review 49 #11: eBay is not connectable until the account deletion endpoint is registered; the value is named exactly', () => {
+  const env = {
+    REPRACER_EBAY_CLIENT_ID: 'Syn-App-SBX', REPRACER_EBAY_RUNAME: 'Syn-RuName', REPRACER_EBAY_CLIENT_SECRET_FILE: '/s/ebay', REPRACER_CHANNEL_KEYRING_FILE: '/s/keyring', REPRACER_EBAY_ENVIRONMENT: 'SANDBOX',
+    REPRACER_EBAY_SCOPES: 'https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.account https://api.ebay.com/oauth/api_scope/commerce.identity.readonly',
+  };
+  const without = channelApps(loadChannelAppsConfig(env, read)).find((a) => a.channel === 'EBAY')!;
+  assert.deepEqual(without.platformMissing, ['EBAY_ACCOUNT_DELETION_ENDPOINT']);
+  assert.ok(without.provider, 'the provider stays: already connected accounts keep being checked');
+  const registered = channelApps(loadChannelAppsConfig({ ...env, REPRACER_EBAY_ACCOUNT_DELETION: 'registered' }, read)).find((a) => a.channel === 'EBAY')!;
+  assert.deepEqual(registered.platformMissing, []);
+  assert.throws(() => loadChannelAppsConfig({ ...env, REPRACER_EBAY_ACCOUNT_DELETION: 'yes' }, read), /CONFIG_INVALID: REPRACER_EBAY_ACCOUNT_DELETION=registered/);
 });

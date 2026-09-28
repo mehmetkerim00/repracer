@@ -1,0 +1,272 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "ebay/readback/production-offer-record",
+  "channel": "EBAY",
+  "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
+  "title": "Р-190: в бою Browse не вызывается — цена и количество подтверждаются записью предложения, цены покупателя нет",
+  "description": "Browse — часть Buy API, и лицензия на неё для репрайсера не выяснена (E-21): в боевом окружении адаптер Browse не вызывает и токен приложения не берёт. Подтверждение — GET offer (НАША запись): APPLIED, наблюдение помечено ownRecordOnly, buyerPrice нет; правку листинга другой программой так не увидеть, а сверка базы цены Р-116 ограничена. Журнал EBAY_C19 — один раз на аккаунт, а не на каждое чтение. Хост — боевой, ответы синтетические: ни одного обмена с живым eBay.",
+  "tags": [
+    "readback",
+    "conservative:EBAY_C19_BROWSE_UNAVAILABLE_IN_PRODUCTION"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "docs/evidence/step39-ebay-sandbox.md",
+      "docs/channel-capabilities.md#9",
+      "docs/channel-capabilities.md#E-21"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-27T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn_ebay_seller_0001",
+      "marketplaces": [
+        "EBAY_DE",
+        "EBAY_US"
+      ],
+      "channel": "EBAY",
+      "writeMode": "LIVE",
+      "ebayBatchMode": "MULTI"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "syn-ebay-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "Syn-Repracer-SBX-0001",
+        "clientSecret": "SBX-syn-client-secret-0001"
+      },
+      "accessToken": "syn-ebay-user-token-0001",
+      "applicationToken": "syn-ebay-app-token-0001"
+    },
+    "adapter": {
+      "ebayEnvironment": "PRODUCTION"
+    }
+  },
+  "steps": [
+    {
+      "id": "confirm",
+      "kind": "call",
+      "method": "confirm",
+      "args": [
+        [
+          {
+            "channelWriteId": "cw-22",
+            "writeScope": {
+              "writeScopeId": "ws-ebay-price-EBAY_DE-27",
+              "field": "PRICE",
+              "scopeKey": "ebay|acct-1|EBAY_DE|SYN-EBAY-27",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-27",
+                "externalOfferId": "9100000027",
+                "externalListingId": "110000000027"
+              }
+            },
+            "expected": {
+              "field": "PRICE",
+              "price": {
+                "amountMinor": 1349,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            },
+            "dispatchedAt": {
+              "$clockIso": 0
+            }
+          }
+        ]
+      ],
+      "expect": [
+        {
+          "channelWriteId": "cw-22",
+          "status": "APPLIED",
+          "observation": {
+            "field": "PRICE",
+            "source": "READBACK",
+            "ownRecordOnly": true,
+            "value": {
+              "price": {
+                "amountMinor": 1349,
+                "currency": "EUR",
+                "basis": "GROSS"
+              }
+            },
+            "buyerPrice": {
+              "$absent": true
+            },
+            "effectivePrice": {
+              "$absent": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "read-quantity",
+      "kind": "call",
+      "method": "readBack",
+      "args": [
+        [
+          {
+            "writeScope": {
+              "writeScopeId": "ws-ebay-qty-27",
+              "field": "QUANTITY",
+              "scopeKey": "ebay|acct-1|SYN-EBAY-27",
+              "identity": {
+                "marketplace": "EBAY_DE",
+                "externalSku": "SYN-EBAY-27",
+                "externalOfferId": "9100000027",
+                "externalListingId": "110000000027"
+              }
+            },
+            "fields": [
+              "QUANTITY"
+            ]
+          }
+        ]
+      ],
+      "expect": {
+        "failures": [],
+        "observations": [
+          {
+            "field": "QUANTITY",
+            "ownRecordOnly": true,
+            "value": {
+              "quantity": 3
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "user-token",
+      "note": "Обновление токена пользователя: grant_type=refresh_token + scope, Basic ключей приложения [песочница: ответ без нового refresh-токена]",
+      "request": {
+        "method": "POST",
+        "path": "/identity/v1/oauth2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "syn-ebay-user-token-0001",
+          "expires_in": 7200,
+          "token_type": "User Access Token"
+        }
+      },
+      "origin": "SYNTHETIC"
+    },
+    {
+      "id": "get-offer",
+      "request": {
+        "method": "GET",
+        "path": "/sell/inventory/v1/offer/9100000027"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "offerId": "9100000027",
+          "sku": "SYN-EBAY-27",
+          "marketplaceId": "EBAY_DE",
+          "format": "FIXED_PRICE",
+          "availableQuantity": 3,
+          "pricingSummary": {
+            "price": {
+              "value": "13.49",
+              "currency": "EUR"
+            }
+          },
+          "listingPolicies": {
+            "paymentPolicyId": "6200000002",
+            "returnPolicyId": "6200000003",
+            "fulfillmentPolicyId": "6200000001",
+            "eBayPlusIfEligible": false
+          },
+          "categoryId": "20695",
+          "merchantLocationKey": "syn-lager-1",
+          "tax": {
+            "applyTax": false
+          },
+          "listing": {
+            "listingId": "110000000027",
+            "listingStatus": "ACTIVE",
+            "soldQuantity": 0
+          },
+          "status": "PUBLISHED",
+          "listingDuration": "GTC"
+        }
+      },
+      "origin": "SYNTHETIC"
+    },
+    {
+      "id": "get-offer-quantity",
+      "request": {
+        "method": "GET",
+        "path": "/sell/inventory/v1/offer/9100000027"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "offerId": "9100000027",
+          "sku": "SYN-EBAY-27",
+          "marketplaceId": "EBAY_DE",
+          "format": "FIXED_PRICE",
+          "availableQuantity": 3,
+          "pricingSummary": {
+            "price": {
+              "value": "13.49",
+              "currency": "EUR"
+            }
+          },
+          "listingPolicies": {
+            "paymentPolicyId": "6200000002",
+            "returnPolicyId": "6200000003",
+            "fulfillmentPolicyId": "6200000001",
+            "eBayPlusIfEligible": false
+          },
+          "categoryId": "20695",
+          "merchantLocationKey": "syn-lager-1",
+          "tax": {
+            "applyTax": false
+          },
+          "listing": {
+            "listingId": "110000000027",
+            "listingStatus": "ACTIVE",
+            "soldQuantity": 0
+          },
+          "status": "PUBLISHED",
+          "listingDuration": "GTC"
+        }
+      },
+      "origin": "SYNTHETIC"
+    }
+  ],
+  "expect": {
+    "noAlerts": true,
+    "logs": [
+      {
+        "code": "EBAY_C19_BROWSE_UNAVAILABLE_IN_PRODUCTION",
+        "question": "E-21",
+        "count": 1
+      }
+    ],
+    "noLogCodes": [
+      "EBAY_C05_PRICE_READBACK_LIVE_LISTING",
+      "EBAY_C06_BROWSE_APPLICATION_TOKEN"
+    ]
+  }
+}

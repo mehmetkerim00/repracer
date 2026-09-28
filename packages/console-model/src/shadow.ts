@@ -1,5 +1,6 @@
 import { can } from '@repracer/pricing-model';
 import type { MarketplaceProperty, ShadowAccountRow, ShadowPage, ShadowSummary, ShadowWriteRow } from '@repracer/pricing-store-pg';
+import { channelLimitText } from './connections.ts';
 import type { Messages } from './i18n/index.ts';
 import { pageInfo, type ListQuery, type PageInfo } from './page.ts';
 import { gap, type Gap, type StandWorld } from './world.ts';
@@ -20,6 +21,8 @@ export interface ShadowAccountView extends ShadowAccountRow {
   confirmationHint: string;
   canGoLive: boolean;
   canGoShadow: boolean;
+  /** Шаг 49 [Р-190, E-21]: чего на этом канале в бою пока не видно — до кнопки «включить бой», словами */
+  channelLimitText: string | null;
 }
 
 export interface ShadowWriteView extends ShadowWriteRow {
@@ -135,6 +138,7 @@ function accountView(a: ShadowAccountRow, world: StandWorld, m: Messages): Shado
     // Включить бой может только владелец [Р-170]; вернуть в тень — он же и администратор
     canGoLive: a.writeMode === 'SHADOW' && world.viewer.role === 'OWNER',
     canGoShadow: a.writeMode === 'LIVE' && can(world.viewer.role, 'MANAGE_TENANT'),
+    channelLimitText: channelLimitText(a.channel, m),
   };
 }
 

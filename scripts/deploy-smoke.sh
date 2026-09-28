@@ -34,6 +34,10 @@ done
 url svc_alert_delivery alert_delivery_pg_url
 # Шаг 40 [Р-165]: роль панели оператора — свой файл, как у всех остальных
 url svc_operator operator_pg_url
+# Шаг 49 [Р-192]: приёмник eBay Account Deletion — своя роль, проверочный токен по правилам eBay (32–80 символов)
+url svc_ebay_deletion ebay_deletion_pg_url
+printf 'syn_ci_verification-token_0123456789abcdef' > "$SECRETS/ebay_deletion_verification_token"
+printf 'syn-ebay-client-secret-ci' > "$SECRETS/ebay_client_secret"
 printf 'syn-mail-key' > "$SECRETS/mail_api_key"
 # Адрес внешней отметки [Р-127]: синтетический, аккаунта сервиса у проекта нет (OQ-188). Нужен, чтобы РАЗБИРАЛАСЬ
 # конфигурация плоского профиля; отметки при этом никто не шлёт — процессы CI поднимаются с выключателем
@@ -128,7 +132,10 @@ prod_env=("REPRACER_SECRETS_DIR=$SECRETS" "REPRACER_BACKUP_DIR=$SECRETS" "REPRAC
   "REPRACER_OPERATOR_INVITATION_URL=https://app.example.invalid/invite"
   # Шаг 44 [Р-180]: промышленный профиль консоли без поставщика identity не поднимается — значения ZITADEL-вида
   "REPRACER_CONSOLE_OIDC_ISSUER=https://pilot.zitadel.example.invalid" "REPRACER_CONSOLE_OIDC_AUDIENCE=000000000000000001"
-  "REPRACER_CONSOLE_OIDC_JWKS_URL=https://pilot.zitadel.example.invalid/oauth/v2/keys" "REPRACER_CONSOLE_OIDC_CLIENT_ID=000000000000000002@repracer")
+  "REPRACER_CONSOLE_OIDC_JWKS_URL=https://pilot.zitadel.example.invalid/oauth/v2/keys" "REPRACER_CONSOLE_OIDC_CLIENT_ID=000000000000000002@repracer"
+  # Шаг 49 [Р-192]: приёмник eBay Account Deletion — адрес, как его зарегистрировали бы в портале eBay
+  "REPRACER_EBAY_DELETION_ENDPOINT=https://app.example.invalid/ebay/account-deletion" "REPRACER_EBAY_DELETION_ENVIRONMENT=PRODUCTION"
+  "REPRACER_EBAY_DELETION_CLIENT_ID=syn-ebay-client-ci")
 env "${prod_env[@]}" docker compose "${PROD[@]}" up -d
 prod_ok=0
 # Демо-тенант заводится при старте консоли: 200 предложений с конкурентами — это минуты, а не секунды
@@ -152,6 +159,23 @@ if [ "$prod_ok" = 1 ]; then
   else
     echo "   production: лендинг НЕ отдан прокси как в репозитории"
     env "${prod_env[@]}" docker compose "${PROD[@]}" logs --tail 60 proxy
+    failed=1
+  fi
+  # Шаг 49 [Р-192]: приёмник eBay Account Deletion отвечает на challenge ЧЕРЕЗ ПРОКСИ — так, как его проверит eBay при
+  # подписке: 200, application/json и хэш кода, проверочного токена и зарегистрированного адреса
+  del_ok=0
+  for _ in $(seq 1 "${DELETION_WAIT_SECONDS:-60}"); do
+    if curl -sf "http://127.0.0.1:9470/healthz" > /dev/null; then del_ok=1; break; fi
+    sleep 1
+  done
+  expected_challenge="$(node -e "process.stdout.write(require('crypto').createHash('sha256').update('ci-49' + require('fs').readFileSync(process.argv[1], 'utf8').trim() + 'https://app.example.invalid/ebay/account-deletion').digest('hex'))" "$SECRETS/ebay_deletion_verification_token")"
+  challenge="$(curl -s -D - 'http://127.0.0.1:8080/ebay/account-deletion?challenge_code=ci-49' || true)"
+  if [ "$del_ok" = 1 ] && printf '%s' "$challenge" | grep -qi 'content-type: application/json' && printf '%s' "$challenge" | grep -q "\"challengeResponse\":\"$expected_challenge\""; then
+    echo "   ebay-account-deletion: challenge через прокси — 200 и верный хэш [Р-192]"
+  else
+    echo "   ebay-account-deletion: challenge через прокси НЕ ответил верным хэшем"
+    printf '%s\n' "$challenge" | head -12
+    env "${prod_env[@]}" docker compose "${PROD[@]}" logs --tail 60 ebay-account-deletion
     failed=1
   fi
   # Шаг 40 [Р-165]: панель жива на СВОЁМ порту и недостижима через публичный прокси — иначе «не публичная» было бы словом

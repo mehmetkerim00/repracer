@@ -35,6 +35,8 @@ export interface EbayAdapterOptions {
   confirmationWindowMs?: number;
   /** Ревью шага 47, находка 4: аккаунты, о чьём НДС сверху уже сказано алертом в этом процессе (один алерт на аккаунт) */
   vatAlertedAccounts?: Set<string>;
+  /** Шаг 49 [Р-190]: аккаунты, о которых в этом процессе уже записано «Browse в бою недоступен» (EBAY_C19 — один раз на аккаунт) */
+  browseUnavailableLogged?: Set<string>;
 }
 
 export interface Session {
@@ -51,11 +53,21 @@ export type EbayTokenCache = Map<string, { token: string; expiresAtMs: number }>
 const TOKEN_EARLY_REFRESH_MS = 60_000;
 
 /** Настройки с состоянием адаптера — внутри адаптера только такие */
-export type ResolvedOptions = EbayAdapterOptions & { requestBudget: EbayRequestBudget; editLedger: EditAttemptLedger; tokenCache: EbayTokenCache; vatAlertedAccounts: Set<string> };
+export type ResolvedOptions = EbayAdapterOptions & {
+  requestBudget: EbayRequestBudget; editLedger: EditAttemptLedger; tokenCache: EbayTokenCache; vatAlertedAccounts: Set<string>; browseUnavailableLogged: Set<string>;
+};
 
 export function resolveOptions(options: EbayAdapterOptions): ResolvedOptions {
   return { ...options, requestBudget: options.requestBudget ?? new TokenBucket(), editLedger: options.editLedger ?? new RollingDayLedger(), tokenCache: options.tokenCache ?? new Map(),
-    vatAlertedAccounts: options.vatAlertedAccounts ?? new Set() };
+    vatAlertedAccounts: options.vatAlertedAccounts ?? new Set(), browseUnavailableLogged: options.browseUnavailableLogged ?? new Set() };
+}
+
+/**
+ * Р-190 (E-21): Browse API — часть Buy API, и лицензия на неё для репрайсера не выяснена. В бою Browse считается НЕДОСТУПНЫМ и не
+ * вызывается; в песочнице — доступен, как на шаге 39.
+ */
+export function browseAvailable(options: Pick<EbayAdapterOptions, 'environment'>): boolean {
+  return options.environment !== 'PRODUCTION';
 }
 
 export function apiHost(options: EbayAdapterOptions): string {
@@ -165,6 +177,11 @@ export interface CallSpec {
   operation: string;
   /** Срок и бюджет запросов уже проверены вызывающим (запись: до списания попытки правки листинга) */
   preAcquired?: boolean;
+  /**
+   * Ревью шага 49, находка 10: при отказе КЛИЕНТСКОГО бюджета запросов ждать до retryAt в пределах срока вызова, а не отказывать. Безопасно
+   * для любого вызова: при таком отказе запрос не отправлялся. Нужен предполётной проверке и миграции — они делают несколько чтений подряд.
+   */
+  waitForBudget?: boolean;
 }
 
 export type CallOutcome = { kind: 'HTTP'; result: HttpResult } | { kind: 'REFUSED'; error: ChannelError; attempts: number };
@@ -180,7 +197,12 @@ function queryString(query: CallSpec['query']): string {
  */
 export async function call(options: ResolvedOptions, ctx: AdapterCallContext, session: Session, spec: CallSpec): Promise<CallOutcome> {
   if (!spec.preAcquired) {
-    const refused = deadlinePassed(options, ctx) ?? acquire(options, ctx, session, spec.operation);
+    let refused = deadlinePassed(options, ctx) ?? acquire(options, ctx, session, spec.operation);
+    for (let waits = 0; refused && spec.waitForBudget && refused.code === 'RATE_LIMITED' && refused.retryAt
+      && Date.parse(refused.retryAt) <= Date.parse(ctx.deadline) && waits < 20; waits++) {
+      await (options.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms))))(Math.max(1, Date.parse(refused.retryAt) - nowMs(options)));
+      refused = deadlinePassed(options, ctx) ?? acquire(options, ctx, session, spec.operation);
+    }
     if (refused) return { kind: 'REFUSED', error: refused, attempts: 0 };
   }
   let attempts = 0;

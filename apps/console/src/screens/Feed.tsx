@@ -91,7 +91,7 @@ export function FeedScreenView({ view, onQuery }: { view: PriceFeedView; onQuery
                   <td className="num">{i.from ?? '–'}</td>
                   <td className="num">{i.to}</td>
                   <td className="num">{i.change ?? '–'}</td>
-                  <td><Badge tone={i.tone}>{i.status}</Badge></td>
+                  <td><Badge tone={i.tone}>{i.status}</Badge>{i.confirmation ? <div className="note">{i.confirmation}</div> : null}</td>
                   <td>{i.source}</td>
                   <td>{i.reason ? <ReasonLine reason={i.reason} /> : null}</td>
                   <td>{i.decisionId ? <a href={href(view.worldId, 'decisions', i.decisionId)}>{m.ui.rejected.path}</a> : null}</td>

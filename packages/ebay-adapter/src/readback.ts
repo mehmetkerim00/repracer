@@ -3,7 +3,7 @@ import { logConservative } from './conservative.ts';
 import { browseItemPath, INVENTORY_PATH, marketplaceInfo } from './descriptor.ts';
 import { channelError, classifyHttpFailure } from './errors.ts';
 import { listingIdOf, moneyOf, offerIdOf } from './mapping.ts';
-import { call, nowMs, openSession, type ResolvedOptions, type Session } from './session.ts';
+import { browseAvailable, call, nowMs, openSession, type ResolvedOptions, type Session } from './session.ts';
 
 const DEFAULT_CONFIRMATION_WINDOW_MS = 10 * 60_000;
 
@@ -68,13 +68,23 @@ export function withoutVat(buyerMinor: number, vatBp: number): number | null {
   return hits.length === 1 ? hits[0]! : null;
 }
 
+/** Р-190 (E-21): «Browse в бою недоступен» — в журнал один раз на аккаунт за процесс, а не на каждое чтение [EBAY_C19] */
+function noteBrowseUnavailable(options: ResolvedOptions, ctx: AdapterCallContext, session: Session): void {
+  const id = session.account.channelAccountId;
+  if (options.browseUnavailableLogged.has(id)) return;
+  options.browseUnavailableLogged.add(id);
+  logConservative(options.deps.logger, ctx, 'EBAY_C19_BROWSE_UNAVAILABLE_IN_PRODUCTION', { environment: options.environment, writeMode: session.account.writeMode ?? null });
+}
+
 function livenessOf(offer: EbayOffer): IdentifiedObservation['liveness'] | undefined {
   const s = offer.listing?.listingStatus;
   return typeof s === 'string' ? { isLive: s === 'ACTIVE', reasons: s === 'ACTIVE' ? [] : [s] } : undefined;
 }
 
 /**
- * Обратное чтение. Цена — живой листинг из Browse API: GET offer показывает НАШУ запись, и после правки листинга через Trading API
+ * Обратное чтение. В бою (PRODUCTION) Browse не вызывается [Р-190, EBAY_C19]: цена и количество — запись предложения, помеченная
+ * ownRecordOnly. В песочнице — как на шаге 47:
+ * Цена — живой листинг из Browse API: GET offer показывает НАШУ запись, и после правки листинга через Trading API
  * она осталась прежней [песочница, EBAY_C05, Р-186]; поэтому читаются оба: значение наблюдения — живая цена продавца, цена покупателя
  * Browse — buyerPrice, расхождение «предложение ↔ листинг» не на ставку НДС — предупреждение (C10).
  * Количество — availableQuantity предложения (количество листинга) и его статус (OUT_OF_STOCK) [EBAY_C07].
@@ -111,7 +121,8 @@ export async function readBackEbay(options: ResolvedOptions, ctx: AdapterCallCon
         continue;
       }
       // Запись предложения — наша; у активного листинга сверяется с оценкой Browse, расхождение — предупреждение [EBAY_C13]
-      if (listingId && marketplace && marketplaceInfo(marketplace) && o.listing?.listingStatus === 'ACTIVE') {
+      if (!browseAvailable(options)) noteBrowseUnavailable(options, ctx, session);
+      else if (listingId && marketplace && marketplaceInfo(marketplace) && o.listing?.listingStatus === 'ACTIVE') {
         const live = await getLiveListing(options, ctx, session, listingId, marketplace);
         const estimated = live.ok ? live.data.estimatedAvailabilities?.find((e) => Number.isSafeInteger(e.estimatedAvailableQuantity))?.estimatedAvailableQuantity : undefined;
         logConservative(options.deps.logger, ctx, 'EBAY_C13_QUANTITY_READBACK_OFFER_RECORD', {
@@ -119,12 +130,23 @@ export async function readBackEbay(options: ResolvedOptions, ctx: AdapterCallCon
           mismatch: estimated !== undefined && estimated !== o.availableQuantity, browse: live.ok ? 'OK' : live.error.code,
         });
       }
-      observations.push({ identity, field: 'QUANTITY', value: { field: 'QUANTITY', quantity: o.availableQuantity! }, observedAt, source: 'READBACK', ...(liveness ? { liveness } : {}) });
+      observations.push({ identity, field: 'QUANTITY', value: { field: 'QUANTITY', quantity: o.availableQuantity! }, observedAt, source: 'READBACK',
+        ...(browseAvailable(options) ? {} : { ownRecordOnly: true }), ...(liveness ? { liveness } : {}) });
       continue;
     }
     const recorded = moneyOf(o.pricingSummary?.price, marketplace);
     if (!recorded) { fail(channelError('NOT_FOUND', 'ITEM', 'the eBay offer carries no readable seller price')); continue; }
     if (!listingId || !marketplace || !marketplaceInfo(marketplace)) { fail(channelError('NOT_FOUND', 'ITEM', 'the eBay offer is not published: no listing to read the live price from')); continue; }
+    if (!browseAvailable(options)) {
+      /**
+       * Р-190 (E-21): в бою Browse не вызывается, пока лицензия Buy API не выяснена. Подтверждение — НАША запись предложения: цены
+       * покупателя нет (buyerPrice не заполняется), правку листинга другой программой (C10, EBAY_OFFER_LISTING_DIVERGENCE) это чтение
+       * не видит, а сверка Р-116 сравнивает отправленное с нашей же записью — она ограничена, и наблюдение помечено ownRecordOnly.
+       */
+      noteBrowseUnavailable(options, ctx, session);
+      observations.push({ identity, field: 'PRICE', value: { field: 'PRICE', price: recorded }, observedAt, source: 'READBACK', ownRecordOnly: true, ...(liveness ? { liveness } : {}) });
+      continue;
+    }
     const live = await getLiveListing(options, ctx, session, listingId, marketplace);
     if (!live.ok) { fail(live.error); continue; }
     const buyerPrice = moneyOf(live.data.price, marketplace);

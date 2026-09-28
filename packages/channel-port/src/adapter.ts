@@ -40,6 +40,12 @@ export interface VerifiedChannelAccount {
   credentialsRef: string;
   /** Шаг 47 [Р-169]: режим записи аккаунта, если каталог его знает (база знает); адаптер называет его в алертах («в тени») */
   writeMode?: 'SHADOW' | 'LIVE';
+  /**
+   * Шаг 49 [Р-189, E-22]: режим пакетов боевого аккаунта eBay, если каталог его знает (база: `channel_account.ebay_batch_mode`,
+   * NULL — проба). PROBE — первая боевая запись пакетом из 2 SKU; MULTI — пакет разных SKU принят, до 25; SINGLE — один SKU на вызов.
+   * Каталог читает его на каждом verify: смена режима видна следующему вызову адаптера без перезапуска.
+   */
+  ebayBatchMode?: 'PROBE' | 'MULTI' | 'SINGLE';
 }
 
 /**

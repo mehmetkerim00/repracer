@@ -29,6 +29,9 @@ test('a scope whose claim throws does not stop the sweep: other scopes are proce
     async checkPriceBasis() {
       throw new Error('not reached');
     },
+    async recordEbayBatchOutcome() {
+      throw new Error('not reached');
+    },
     async recordReconciliation() {
       throw new Error('not reached');
     },
@@ -80,6 +83,7 @@ test('Р-24: в пакете адаптера две позиции одной �
       return { status: 'FAILED', slotFreed: true, queuedWaiting: false, nextAttemptAt: null, reason: null, scopeBlocked: false };
     },
     async checkPriceBasis() { return null; },
+    async recordEbayBatchOutcome() { throw new Error('not reached'); },
     async recordReconciliation() { throw new Error('not reached'); },
   };
   let dispatched = 0;
@@ -132,6 +136,7 @@ test('Р-64: следующий круг обхода даёт база — оч
         return { status: 'APPLIED', slotFreed: true, queuedWaiting, nextAttemptAt: null, reason: null, scopeBlocked: false };
       },
       async checkPriceBasis() { return null; },
+      async recordEbayBatchOutcome() { throw new Error('not reached'); },
       async recordReconciliation() { throw new Error('not reached'); },
     };
     const adapter = {
@@ -181,6 +186,7 @@ test('Р-186: a buyer price with VAT on top (eBay buyerPrice) does not reach the
         return { status: 'APPLIED', slotFreed: true, queuedWaiting: false, nextAttemptAt: null, reason: null, scopeBlocked: false };
       },
       async checkPriceBasis(_t, _w, observedMinor) { checked.push(observedMinor); return null; },
+      async recordEbayBatchOutcome() { throw new Error('not reached'); },
     };
     const adapter = {
       async readBack() {
@@ -194,6 +200,67 @@ test('Р-186: a buyer price with VAT on top (eBay buyerPrice) does not reach the
   };
   assert.deepEqual(await run({ buyerPrice: buyer }), [], 'eBay: the buyer price with VAT on top is kept apart and never checked against the sent price');
   assert.deepEqual(await run({ effectivePrice: buyer }), [1605], 'Amazon, Kaufland: the price the channel applied is checked, as before');
+});
+
+/**
+ * Шаг 49 [Р-189, E-22]: итог пакета разных SKU, который сообщил адаптер, диспетчер передаёт хранилищу — и только его: пакет без итога
+ * хранилище не трогает. Сбой записи итога не роняет запись итогов самих записей, оператор видит алерт.
+ */
+test('Р-189: the dispatcher hands the eBay multi-SKU batch outcome to the store; a batch without it does not; a store failure is an alert, not a lost outcome', async () => {
+  const make = (n: number): FieldWrite => ({
+    channelWriteId: `cw-${n}` as FieldWrite['channelWriteId'],
+    writeScope: { writeScopeId: `ws-${n}` as FieldWrite['writeScope']['writeScopeId'], field: 'PRICE', scopeKey: `ebay:de:${n}`, identity: { marketplace: 'EBAY_DE', externalSku: `SYN-${n}`, externalOfferId: String(n), externalListingId: `11000000000${n}` } },
+    version: 1, idempotencyKey: `idem-${n}`, value: { field: 'PRICE', price: { amountMinor: 1300 + n, currency: 'EUR', basis: 'GROSS' } }, attemptNo: 1,
+  });
+  const run = async (outcome: { multiSkuAccepted: boolean } | undefined, storeFails = false, alertsThrow = false) => {
+    const recorded: Array<[string, string, boolean]> = [];
+    const outcomes: WriteOutcome[] = [];
+    const alerts: Array<{ code: string }> = [];
+    const claimed = new Set<string>();
+    const store: WriteQueueStore = {
+      async dueScopes() { return [1, 2].map((n) => ({ tenantId: 't1', writeScopeId: `ws-${n}`, dueKind: 'PENDING' as const, dueSince: '2026-09-15T09:00:00Z' })); },
+      async claimNext(_t, writeScopeId): Promise<ClaimResult> {
+        if (claimed.has(writeScopeId)) return { kind: 'IDLE' };
+        claimed.add(writeScopeId);
+        return { kind: 'DISPATCH', channelAccountId: 'acc-ebay', write: make(Number(writeScopeId.slice(3))) };
+      },
+      async recordOutcome(_t, _w, o): Promise<RecordedOutcome> {
+        outcomes.push(o);
+        return { status: 'FAILED', slotFreed: true, queuedWaiting: false, nextAttemptAt: '2026-09-15T10:00:02.000Z', reason: null, scopeBlocked: false };
+      },
+      async checkPriceBasis() { return null; },
+      async recordReconciliation() { throw new Error('not reached'); },
+      async recordEbayBatchOutcome(t, a, accepted) {
+        if (storeFails) throw Object.assign(new Error('permission denied'), { code: '42501' });
+        recorded.push([t, a, accepted]);
+        return accepted ? 'MULTI' : 'SINGLE';
+      },
+    };
+    const refused = { class: 'TRANSIENT' as const, code: 'ACTION_NOT_ALLOWED' as const, scope: 'BATCH' as const, message: 'multi-SKU refused', raiseAlert: false };
+    const adapter = {
+      async planDispatch(_ctx: unknown, writes: readonly FieldWrite[]) {
+        return { batches: [{ batchId: 'b-1', operation: 'bulkUpdatePriceQuantity', items: [...writes], budgetCharges: [], requestCount: 1 }], rejected: [] };
+      },
+      async dispatch(_ctx: unknown, batch: { batchId: string; items: readonly FieldWrite[] }) {
+        return { batchId: batch.batchId, attemptsMade: 1, ...(outcome ? { ebayBatchOutcome: outcome } : {}),
+          outcomes: batch.items.map((w) => ({ channelWriteId: w.channelWriteId, status: 'REJECTED' as const, error: refused })) };
+      },
+    } as unknown as ChannelAdapter;
+    const dispatcher = createWriteDispatcher({ store, adapterFor: () => adapter, alerts: { raise: async (a) => { alerts.push(a); if (alertsThrow) throw new Error('alert sink down'); } }, now: () => '2026-09-15T10:00:00.000Z' });
+    await dispatcher.sweep({ concurrency: 1 });
+    return { recorded, outcomes, alerts };
+  };
+  const refusedRun = await run({ multiSkuAccepted: false });
+  assert.deepEqual(refusedRun.recorded, [['t1', 'acc-ebay', false]], 'one batch — one outcome, with the account of the batch');
+  assert.equal(refusedRun.outcomes.length, 2, 'both writes of the refused batch got their own outcome');
+  assert.deepEqual((await run({ multiSkuAccepted: true })).recorded, [['t1', 'acc-ebay', true]]);
+  assert.deepEqual((await run(undefined)).recorded, [], 'a batch without an outcome does not touch the batch mode');
+  const failing = await run({ multiSkuAccepted: false }, true);
+  assert.equal(failing.outcomes.length, 2, 'the store failure does not lose the outcomes of the writes');
+  assert.deepEqual(failing.alerts.map((a) => a.code), ['EBAY_BATCH_OUTCOME_NOT_RECORDED']);
+  // Находка 20 ревью шага 49: даже если упал и приёмник алертов, известные итоги записей не превращаются в OUTCOME_UNKNOWN
+  const sinkDown = await run({ multiSkuAccepted: false }, true, true);
+  assert.deepEqual(sinkDown.outcomes.map((o) => [o.status, o.status === 'REJECTED' ? o.error.code : null]), [['REJECTED', 'ACTION_NOT_ALLOWED'], ['REJECTED', 'ACTION_NOT_ALLOWED']]);
 });
 
 // Тип FieldWrite нужен только для совместимости сигнатуры адаптера в заглушке

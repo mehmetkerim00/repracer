@@ -3,7 +3,7 @@ import { logConservative } from './conservative.ts';
 import { BULK_UPDATE_MAX, BULK_UPDATE_PATH, OPERATION_BULK_UPDATE } from './descriptor.ts';
 import { channelError, classifyHttpFailure, describeRestError, type EbayRestError, firstRestError } from './errors.ts';
 import { formatMinor, listingIdOf, offerIdOf } from './mapping.ts';
-import { validateWrite } from './planning.ts';
+import { distinctSkus, liveBatchMode, maxSkusPerCall, reportsBatchOutcome, validateWrite } from './planning.ts';
 import { acquire, call, deadlinePassed, nowMs, openSession, type ResolvedOptions } from './session.ts';
 
 function rejectAll(batch: DispatchBatch, error: ChannelError, attemptsMade = 0): DispatchResult {
@@ -53,6 +53,24 @@ function itemOutcome(options: ResolvedOptions, ctx: AdapterCallContext, w: Field
   }
 }
 
+/**
+ * Коды eBay, которые говорят о ЗНАЧЕНИЯХ запроса, а не о его форме [песочница]: 25709 — неверное значение (весь запрос), 25604 — предложение
+ * или SKU не найдены, 25016 — цена ниже минимума витрины, 25002 — ошибка пользователя во входных данных; 25712 — больше 25 (наша ошибка плана).
+ */
+const VALUE_ERROR_IDS: ReadonlySet<number> = new Set([25709, 25604, 25016, 25002, 25712]);
+
+/**
+ * Отказ всего вызова, который может означать «пакет разных SKU не принимается» [EBAY_C18] — только 400 БЕЗ ответов по элементам и с кодом,
+ * не относящимся к значениям (ревью шага 49, находка 6). Переход в «1 SKU на вызов» необратим, поэтому 404, 409, 401, 403, 429 и 400 с
+ * кодом значения — обычная классификация, без итога пакета.
+ */
+export function isMultiSkuRefusal(status: number | 'NETWORK_ERROR' | 'TIMEOUT', body: unknown): boolean {
+  if (status !== 400) return false;
+  const errors = (body as { errors?: unknown } | null | undefined)?.errors;
+  const ids = Array.isArray(errors) ? errors.map((e) => (e as EbayRestError | null)?.errorId).filter((x): x is number => typeof x === 'number') : [];
+  return !ids.some((id) => VALUE_ERROR_IDS.has(id));
+}
+
 export async function dispatchEbay(options: ResolvedOptions, ctx: AdapterCallContext, batch: DispatchBatch): Promise<DispatchResult> {
   const opened = await openSession(options, ctx);
   if (!opened.ok) return rejectAll(batch, opened.error);
@@ -70,6 +88,22 @@ export async function dispatchEbay(options: ResolvedOptions, ctx: AdapterCallCon
     return rejectAll(batch, channelError('VALIDATION', 'BATCH', `a batch holds at most ${BULK_UPDATE_MAX} writes, one per offer (use planDispatch)`));
   }
   if (sendable.length === 0) return { batchId: batch.batchId, outcomes, attemptsMade: 0 };
+  /**
+   * Р-189 (E-22): режим пакетов читается заново (openSession → каталог). План, собранный до перехода в «1 SKU на вызов», к каналу не идёт:
+   * записи возвращаются повторяемыми без обращения к eBay и без расхода бюджета правок, следующий план соберёт их по одной.
+   */
+  const mode = liveBatchMode(session.account, options.environment);
+  const skus = distinctSkus(sendable);
+  if (skus > maxSkusPerCall(mode)) {
+    logConservative(options.deps.logger, ctx, 'EBAY_C18_MULTI_SKU_PROBE', { batchId: batch.batchId, mode: mode ?? 'NONE', skus, sent: false });
+    const error: ChannelError = { class: 'TRANSIENT', code: 'ACTION_NOT_ALLOWED', scope: 'BATCH', raiseAlert: false,
+      message: `the batch holds ${skus} SKUs, the eBay batch mode ${mode} of the account allows ${maxSkusPerCall(mode)} per call (E-22): not sent, replanned` };
+    for (const w of sendable) outcomes.push({ channelWriteId: w.channelWriteId, status: 'REJECTED', error });
+    return { batchId: batch.batchId, outcomes, attemptsMade: 0 };
+  }
+  // Итог пакета разных SKU сообщается только у боевого аккаунта: функция базы принимает его только там [Р-169]
+  const multiSku = mode !== null && skus >= 2;
+  const report = multiSku && reportsBatchOutcome(session.account);
 
   // Срок и бюджет запросов — до списания попытки правки: отказ клиентского бюджета не расходует 250 правок листинга
   const refused = deadlinePassed(options, ctx) ?? acquire(options, ctx, session, OPERATION_BULK_UPDATE);
@@ -127,7 +161,35 @@ export async function dispatchEbay(options: ResolvedOptions, ctx: AdapterCallCon
       const r = list.find((x) => x?.offerId === offerId) ?? (list.length === sendable.length ? list[i] : undefined);
       outcomes.push(itemOutcome(options, ctx, w, r, status));
     });
-    return { batchId: batch.batchId, outcomes, attemptsMade: result.attempts };
+    /**
+     * Р-189: канал ответил ПО ЭЛЕМЕНТАМ (200 или 207) — пакет разных SKU принят как форма вызова. 400 с ответами по элементам итога не
+     * несёт: отказ всех элементов может быть и отказом формы, и отказом значений — режим аккаунта по нему не меняется.
+     */
+    /**
+     * Ревью шага 49, находка 7: «принят» — только если ответ по элементу пришёл для КАЖДОГО предложения пакета. Ответ не на все — итог
+     * пакета не сообщается (режим не меняется), в журнал — сколько SKU отправлено и сколько ответов пришло.
+     */
+    const answered = sendable.filter((w) => list.some((x) => x?.offerId === offerIdOf(w.writeScope.identity))).length;
+    const everyOffer = answered === sendable.length;
+    if (multiSku && (status === 200 || status === 207) && !everyOffer) {
+      logConservative(options.deps.logger, ctx, 'EBAY_C18_MULTI_SKU_PROBE', { batchId: batch.batchId, mode: mode!, skus, sent: true, status: String(status), answered, outcome: 'NOT_REPORTED' });
+    }
+    return { batchId: batch.batchId, outcomes, attemptsMade: result.attempts,
+      ...(report && (status === 200 || status === 207) && everyOffer ? { ebayBatchOutcome: { multiSkuAccepted: true } } : {}) };
+  }
+  if (multiSku && isMultiSkuRefusal(status, result.body) && !result.outcomeUnknown) {
+    /**
+     * Р-189 (E-22): пакет разных SKU отвергнут ЦЕЛИКОМ (4xx без ответов по элементам). Документация говорит «один SKU на вызов» — значит,
+     * отвергнута форма вызова, а не значения: записи повторяемы (TRANSIENT при коде, который по умолчанию окончательный — осознанно:
+     * значение канал не оценивал), итог пакета — false, и база переводит аккаунт в «1 SKU на вызов» с алертом (0142). Второго алерта здесь нет.
+     */
+    const e = firstRestError(result.body);
+    logConservative(options.deps.logger, ctx, 'EBAY_C18_MULTI_SKU_PROBE', { batchId: batch.batchId, mode: mode!, skus, sent: true, status: String(status), channelCode: e?.errorId !== undefined ? String(e.errorId) : null });
+    const error: ChannelError = { class: 'TRANSIENT', code: 'ACTION_NOT_ALLOWED', scope: 'BATCH', raiseAlert: false, httpStatus: status as number,
+      ...(e?.errorId !== undefined ? { channelCode: String(e.errorId) } : {}),
+      message: `eBay refused a batch of ${skus} different SKUs as a whole (${describeRestError(e, `HTTP ${String(status)}`)}): retried one SKU per call (E-22)`.slice(0, 300) };
+    for (const w of sendable) outcomes.push({ channelWriteId: w.channelWriteId, status: 'REJECTED', error });
+    return { batchId: batch.batchId, outcomes, attemptsMade: result.attempts, ...(report ? { ebayBatchOutcome: { multiSkuAccepted: false } } : {}) };
   }
   const error = classifyHttpFailure(status, result.body, 'BATCH', nowMs(options));
   if (result.outcomeUnknown) {

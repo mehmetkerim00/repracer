@@ -1,5 +1,5 @@
--- 0142_verify_schema_invariants_v41.sql
--- Проверка схемы после шагов 41–47 и Р-188 — последняя в наборе (прежние номера остаются историей: файл переносится под новый
+-- 0143_verify_schema_invariants_v42.sql
+-- Проверка схемы после шагов 41–49 — последняя в наборе (прежние номера остаются историей: файл переносится под новый
 -- номер, чтобы идти последним).
 -- Шаг 45 правил не добавил: 0138 — хвосты ревью (каталог из обнаружения, срок вытесненных токенов, REVOKED в аудит);
 -- у каждой новой защиты своя проверка в смоуке и строка каталога мутаций [Р-108].
@@ -361,7 +361,9 @@ BEGIN
                          -- Шаг 24 [Р-121]: вердикт сверки опросом ставит база, путь решения только вызывает проверку
                          'channel_data.review_notification_loss(uuid,uuid,timestamp with time zone)',
                          -- Шаг 44 [Р-179]: обнаружение офферов записывает каталог функцией узкой роли — цен и движка она не трогает
-                         'tenant_data.record_discovered_offers(uuid,uuid,jsonb)') THEN
+                         'tenant_data.record_discovered_offers(uuid,uuid,jsonb)',
+                         -- Шаг 49 [Р-189]: итог боевого пакета eBay — только режим пакетов аккаунта, вперёд; цен и границ не трогает
+                         'channel_data.record_ebay_batch_outcome(uuid,uuid,boolean)') THEN
       bad := bad || format('%s: SECURITY DEFINER function executable by the decision path is not in the allow list (Р-96)', r.f);
     END IF;
   END LOOP;

@@ -18,6 +18,8 @@ import { VirtualClock, worldDependencies, type Sink } from './world.ts';
 
 /** Шаг 39: сценарии eBay записаны в песочнице и идут на её хост [Р-162] */
 export const EBAY_STAND_HOST = 'https://api.sandbox.ebay.com';
+/** Шаг 49 [Р-190]: сценарии боевого окружения (синтетические) — боевой хост; ни одного обмена с живым eBay стенд не делает */
+export const EBAY_PRODUCTION_HOST = 'https://api.ebay.com';
 
 export interface AdapterUnderTest {
   (input: { deps: AdapterDependencies; world: World; clock: VirtualClock; fetch: typeof fetch }): ChannelAdapter;
@@ -342,7 +344,7 @@ export async function runScenario(
   const simulator = channel instanceof SimulatedKauflandChannel ? channel : null;
   const ebaySimulator = channel instanceof SimulatedEbayChannel ? channel : null;
   const checker = scenario.channel === 'AMAZON' ? amazonRequestChecker(world, clock, neverWrittenAttributes('AMAZON'))
-    : scenario.channel === 'EBAY' ? ebayRequestChecker(world, EBAY_STAND_HOST) : kauflandAuthChecker(world, clock);
+    : scenario.channel === 'EBAY' ? ebayRequestChecker(world, world.adapter?.ebayEnvironment === 'PRODUCTION' ? EBAY_PRODUCTION_HOST : EBAY_STAND_HOST) : kauflandAuthChecker(world, clock);
   const fetch = channelFetch(channel, checker, clock, violations, trace);
   const deps = worldDependencies(world, clock, sink);
   const adapter = adapterUnderTest({ deps, world, clock, fetch });
@@ -355,7 +357,21 @@ export async function runScenario(
   if (world.pricing) {
     const { sanity, ...seed } = world.pricing;
     store = await storeFactory(seed, world);
-    dispatcher = createWriteDispatcher({ store: store.queue, adapterFor: () => adapter, alerts: deps.alerts, now: () => clock.iso() });
+    /**
+     * Шаг 49 [Р-189]: итог пакета разных SKU хранилище записывает в свой аккаунт (база — `ebay_batch_mode`), а каталог мира стенда читает
+     * `world.account` — режим, который вернуло хранилище, становится режимом мира, как у каталога базы на следующем verify.
+     */
+    const queue = store.queue;
+    const recordEbayBatchOutcome = async (t: string, a: string, accepted: boolean) => {
+      const mode = await queue.recordEbayBatchOutcome(t, a, accepted);
+      if (mode === 'MULTI' || mode === 'SINGLE') world.account.ebayBatchMode = mode;
+      return mode;
+    };
+    dispatcher = createWriteDispatcher({
+      store: { claimNext: queue.claimNext.bind(queue), recordOutcome: queue.recordOutcome.bind(queue), recordReconciliation: queue.recordReconciliation.bind(queue),
+        dueScopes: queue.dueScopes.bind(queue), checkPriceBasis: queue.checkPriceBasis.bind(queue), recordEbayBatchOutcome },
+      adapterFor: () => adapter, alerts: deps.alerts, now: () => clock.iso(),
+    });
     pipeline = createPricingPipeline({
       store: store.store, adapter, alerts: deps.alerts, logger: deps.logger, now: () => clock.iso(), dispatcher, ...(sanity ? { sanityConfig: sanity } : {}),
     });

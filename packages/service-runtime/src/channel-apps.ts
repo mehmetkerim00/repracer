@@ -21,6 +21,11 @@ export interface ChannelAppsConfig {
     environment: 'SANDBOX' | 'PRODUCTION'; clientId: string; clientSecret: string; ruName: string; scopes: string[];
     /** Шаг 47: конечные точки МОДЕЛИ поставщика eBay (согласие, токены, Commerce Identity) — только в режиме стенда */
     endpoints?: { authorize: string; token: string; identity: string };
+    /**
+     * Шаг 49 [Р-192], находка 11 ревью: приёмник уведомлений eBay Marketplace Account Deletion зарегистрирован в портале eBay для региона
+     * (`REPRACER_EBAY_ACCOUNT_DELETION=registered`). Без него подключать продавцов eBay нельзя — канал «ожидает доступа платформы».
+     */
+    accountDeletionRegistered: boolean;
   } | null;
 }
 
@@ -37,6 +42,14 @@ const ebayEnvironment = (v: string | undefined): 'SANDBOX' | 'PRODUCTION' => {
 const AMAZON_VARS = ['REPRACER_AMAZON_APP_ID', 'REPRACER_AMAZON_LWA_CLIENT_ID'] as const;
 const EBAY_VARS = ['REPRACER_EBAY_CLIENT_ID', 'REPRACER_EBAY_RUNAME', 'REPRACER_EBAY_SCOPES'] as const;
 export const EBAY_IDENTITY_SCOPE = 'https://api.ebay.com/oauth/api_scope/commerce.identity.readonly';
+/** Шаг 49 [Р-191], находка 16 ревью: платёжная политика листинга (immediatePay) читается Account API — без scope проверка C14 всегда UNKNOWN */
+export const EBAY_ACCOUNT_SCOPE = 'https://api.ebay.com/oauth/api_scope/sell.account';
+
+const accountDeletion = (v: string | undefined): boolean => {
+  if (v === undefined || v === '') return false;
+  if (v === 'registered') return true;
+  throw new ConfigError('CONFIG_INVALID: REPRACER_EBAY_ACCOUNT_DELETION=registered — или не задавать, пока адрес приёмника не зарегистрирован в портале eBay (Р-192)');
+};
 /** Шаг 47: ссылка на ключи приложения eBay внутри процесса — их отдаёт провайдер учётных данных из конфигурации, не из файла */
 export const EBAY_APPLICATION_REF = 'platform:ebay-application';
 
@@ -82,6 +95,7 @@ export function loadChannelAppsConfig(env: Env = process.env, read: (path: strin
       // Scope называет конфигурация (E-08; набор, с которым работает песочница, — шаг 39)
       scopes: env.REPRACER_EBAY_SCOPES!.split(/\s+/).filter(Boolean),
       ...(env.REPRACER_EBAY_OAUTH_BASE ? { endpoints: modelEndpoints(env) } : {}),
+      accountDeletionRegistered: accountDeletion(env.REPRACER_EBAY_ACCOUNT_DELETION),
     }
     : null;
   if (env.REPRACER_EBAY_OAUTH_BASE && !ebay) throw new ConfigError('CONFIG_INVALID: REPRACER_EBAY_OAUTH_BASE без приложения eBay — подменять нечего');
@@ -91,6 +105,9 @@ export function loadChannelAppsConfig(env: Env = process.env, read: (path: strin
    */
   if (ebay && !ebay.scopes.includes(EBAY_IDENTITY_SCOPE)) {
     throw new ConfigError(`CONFIG_INVALID: REPRACER_EBAY_SCOPES must include ${EBAY_IDENTITY_SCOPE} (продавец eBay называется по нему, E-11)`);
+  }
+  if (ebay && !ebay.scopes.includes(EBAY_ACCOUNT_SCOPE)) {
+    throw new ConfigError(`CONFIG_INVALID: REPRACER_EBAY_SCOPES must include ${EBAY_ACCOUNT_SCOPE} (немедленная оплата платёжной политики перед миграцией, Р-191)`);
   }
   const keyringText = secretFromEnv(env, 'REPRACER_CHANNEL_KEYRING', read);
   if ((amazon || ebay) && !keyringText) throw new ConfigError('CONFIG_MISSING: REPRACER_CHANNEL_KEYRING_FILE (приложение канала настроено, а ключа шифрования токенов нет)');
@@ -120,8 +137,10 @@ export function channelApps(c: ChannelAppsConfig): ChannelApp[] {
     c.amazon && c.redirectUrl
       ? { channel: 'AMAZON', marketplaces: AMAZON_MARKETPLACES, platformMissing: [], provider: amazonLwa({ ...c.amazon, redirectUri: c.redirectUrl }) }
       : { channel: 'AMAZON', marketplaces: AMAZON_MARKETPLACES, platformMissing: ['AMAZON_APPLICATION'], provider: null },
+    // Р-192: без зарегистрированного приёмника удаления аккаунтов подключать нельзя, но поставщик остаётся — у уже подключённых
+    // аккаунтов планировщик продолжает проверять авторизацию
     c.ebay
-      ? { channel: 'EBAY', marketplaces: EBAY_MARKETPLACES, platformMissing: [], provider: ebayOAuth({ environment: c.ebay.environment, clientId: c.ebay.clientId, clientSecret: c.ebay.clientSecret, redirectUri: c.ebay.ruName, scopes: c.ebay.scopes, ...(c.ebay.endpoints ? { endpoints: c.ebay.endpoints } : {}) }) }
+      ? { channel: 'EBAY', marketplaces: EBAY_MARKETPLACES, platformMissing: c.ebay.accountDeletionRegistered ? [] : ['EBAY_ACCOUNT_DELETION_ENDPOINT'], provider: ebayOAuth({ environment: c.ebay.environment, clientId: c.ebay.clientId, clientSecret: c.ebay.clientSecret, redirectUri: c.ebay.ruName, scopes: c.ebay.scopes, ...(c.ebay.endpoints ? { endpoints: c.ebay.endpoints } : {}) }) }
       : { channel: 'EBAY', marketplaces: EBAY_MARKETPLACES, platformMissing: ['EBAY_DEVELOPER_KEYS'], provider: null },
   ];
 }

@@ -76,7 +76,7 @@ export function stockTraps(world: StandWorld, m: Messages): StockTrap[] {
   }));
 }
 
-function channelCell(c: StockChannelRow, m: Messages): StockChannelCell {
+export function channelCell(c: StockChannelRow, m: Messages): StockChannelCell {
   const s = m.ui.stock.channel;
   const channelName = (m.values as Record<string, string | undefined>)[c.channel] ?? c.channel;
   const awaitingAck = c.sideEffects.requiresAck && !c.sideEffects.acknowledged;
@@ -86,7 +86,8 @@ function channelCell(c: StockChannelRow, m: Messages): StockChannelCell {
     sharedText: c.marketplaces.length > 1 ? s.shared(c.marketplaces.join(', ')) : null,
     syncEnabled: c.syncEnabled, published: c.published,
     sentText: c.sent ? s.sent(c.sent.quantity, status(c.sent.status), m.when(c.sent.at)) : s.notSent,
-    confirmedText: c.confirmed ? s.confirmed(c.confirmed.quantity, m.when(c.confirmed.at)) : s.notConfirmed,
+    // Р-190 (находка 9 ревью шага 49): подтверждение только нашей записью у канала названо словами
+    confirmedText: c.confirmed ? `${s.confirmed(c.confirmed.quantity, m.when(c.confirmed.at))}${c.confirmed.ownRecordOnly ? ` — ${m.ui.ownRecordConfirmation}` : ''}` : s.notConfirmed,
     divergedText: c.divergence ? s.diverged(status(c.divergence.status), m.when(c.divergence.since)) : null,
     awaitingAck,
     tone: !c.syncEnabled ? (awaitingAck ? 'warn' : 'off') : c.divergence ? 'stop' : c.sent && c.confirmed && c.sent.quantity === c.confirmed.quantity ? 'ok' : c.sent ? 'progress' : 'off',

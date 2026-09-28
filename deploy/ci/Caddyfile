@@ -11,5 +11,6 @@ http://localhost:80 {
 
 # Консоль — всё остальное: прогон гостя ходит по 127.0.0.1, как в работе ходил бы по app.<домен>
 :80 {
+	import ebay_deletion
 	import console
 }

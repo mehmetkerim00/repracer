@@ -21,6 +21,9 @@ const stacks = [
   // Шаг 40 [Р-165]: панель оператора — такое же развёртывание, и её конфигурация разбирается так же, до подъёма
   ['operator', 'deploy/production/compose.yaml', 'deploy/ci/production.override.yaml', 'operator', '../apps/operator/server/config.ts', 'loadOperatorConfig',
     { REPRACER_DOMAIN: 'localhost', REPRACER_ACME_EMAIL: 'ci@example.invalid', REPRACER_BACKUP_DIR: '/tmp/repracer-backups' }],
+  // Шаг 49 [Р-192]: приёмник eBay Account Deletion — процесс профиля, его конфигурация разбирается так же, до подъёма
+  ['ebay-account-deletion', 'deploy/production/compose.yaml', 'deploy/ci/production.override.yaml', 'ebay-account-deletion', '../services/ebay-account-deletion/src/config.ts', 'loadDeletionConfig',
+    { REPRACER_DOMAIN: 'localhost', REPRACER_ACME_EMAIL: 'ci@example.invalid', REPRACER_BACKUP_DIR: '/tmp/repracer-backups' }],
 ];
 /**
  * Переменные, без которых compose не ИНТЕРПОЛИРУЕТСЯ вовсе. `docker compose config` разбирает файл целиком, поэтому
@@ -38,6 +41,10 @@ const REQUIRED_FOR_INTERPOLATION = {
   REPRACER_CONSOLE_OIDC_AUDIENCE: '000000000000000001',
   REPRACER_CONSOLE_OIDC_JWKS_URL: 'https://pilot.zitadel.example.invalid/oauth/v2/keys',
   REPRACER_CONSOLE_OIDC_CLIENT_ID: '000000000000000002@repracer',
+  // Шаг 49 [Р-192]: без адреса приёмника eBay Account Deletion профиль production не разбирается вовсе (как без OIDC, Р-180)
+  REPRACER_EBAY_DELETION_ENDPOINT: 'https://app.example.invalid/ebay/account-deletion',
+  REPRACER_EBAY_DELETION_ENVIRONMENT: 'PRODUCTION',
+  REPRACER_EBAY_DELETION_CLIENT_ID: 'syn-ebay-client-ci',
 };
 let failed = false;
 /**

@@ -41,6 +41,7 @@ services:
       - caddy_config:/config
     depends_on:
       - console
+      - ebay-account-deletion
     logging: { driver: json-file, options: { max-size: 50m, max-file: "5" } }
 
   # Шаг 37 [Р-159, OQ-221 закрыт]: консоль — процесс. Описан он ОДИН раз, в своём развёртывании, и берётся оттуда:
@@ -103,6 +104,13 @@ services:
     environment:
       # Р-183 (шаг 45): режим стенда, ключ стенда и локальный издатель — отказ процесса при старте
       REPRACER_PROFILE: production
+
+  # Шаг 49 [Р-192, E-18]: приёмник уведомлений eBay Marketplace Account Deletion. Без него боевой ключ eBay не
+  # активируется. Описан в своём развёртывании; наружу — только через прокси, маршрут /ebay/account-deletion
+  ebay-account-deletion:
+    extends:
+      file: ../ebay-account-deletion/compose.yaml
+      service: ebay-account-deletion
 
   # Суточная копия базы: pg_dump в том, старше REPRACER_BACKUP_KEEP_DAYS — удаляется (срок копий ≤ 7 суток, OQ-61)
   #

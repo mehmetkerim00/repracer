@@ -44,6 +44,12 @@ export interface ConnectionAccountView {
   /** Повторная авторизация: у отозванного — главное действие, у действующего — обновить доступ */
   canReconnect: boolean;
   reconnectLabel: string;
+  /**
+   * Шаг 49 [Р-190, E-21]: чего мы на этом канале в бою пока не видим — словами. У eBay: цену покупателя и правки других программ (Browse в
+   * бою недоступен), подтверждение — по записи предложения, сверка базы цены ограничена. Окружение (песочница или бой) экран не знает,
+   * поэтому текст — у любого аккаунта eBay: честнее сказать лишнее в песочнице, чем промолчать в бою.
+   */
+  channelLimitText: string | null;
 }
 
 export interface ConnectionChannelView {
@@ -58,6 +64,8 @@ export interface ConnectionChannelView {
   /** Находка 17 ревью шага 43: ждущий запрос отменяется продавцом, а не держит кнопку десять минут */
   pendingRequestId: string | null;
   cancelLabel: string;
+  /** Шаг 49 [Р-190]: то же ограничение канала — ещё до подключения, чтобы продавец знал его заранее */
+  channelLimitText: string | null;
 }
 
 export interface ConnectionsView {
@@ -69,6 +77,11 @@ export interface ConnectionsView {
   channels: ConnectionChannelView[];
   accounts: ConnectionAccountView[];
   tokenNote: string;
+}
+
+/** Р-190 (E-21): ограничение боевого чтения канала словами; сейчас оно есть только у eBay */
+export function channelLimitText(channel: string, m: Messages): string | null {
+  return channel === 'EBAY' ? m.ui.connections.ebayLiveLimits : null;
 }
 
 export function accountState(a: Pick<ConnectionRow, 'authStatus' | 'writeMode'>): ConnectionState {
@@ -105,6 +118,7 @@ export function connectionsView(
       // eBay не называет продавца (E-11): повторное согласие создало бы второй аккаунт того же продавца (находка 6 ревью шага 43)
       canReconnect: canManage && a.channel === 'AMAZON' && a.oauth,
       reconnectLabel: state === 'REVOKED' ? t.reconnectRevoked : t.reconnect,
+      channelLimitText: channelLimitText(a.channel, m),
     };
   });
   const channels = connectable.map((c): ConnectionChannelView => {
@@ -125,6 +139,7 @@ export function connectionsView(
       pendingText: pending ? t.pending(pending.expiresAt) : failed ? t.failed(t.failures[failed.failureCode ?? failed.status] ?? failed.failureCode ?? failed.status) : null,
       pendingRequestId: pending && canManage ? pending.authorizationRequestId : null,
       cancelLabel: t.cancel,
+      channelLimitText: channelLimitText(c.channel, m),
     };
   });
   return {

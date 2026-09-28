@@ -648,3 +648,27 @@ test('Р-146: профиль второго региона объявляет т
       `${key} второго региона отличается: иначе два региона писали бы в одну базу и один каталог`);
   }
 });
+
+/**
+ * Находка 1 ревью шага 49 [Р-146]: новый пакет рабочего пространства без записи в `package-lock.json` — `npm ci` каждого
+ * задания CI отказывает ещё до первого теста («Missing: … from lock file»), а локально всё зелено (node_modules уже есть).
+ * Правило: у каждого каталога рабочего пространства с package.json есть запись `packages["<путь>"]` в lock-файле.
+ */
+test('Р-146, шаг 49: каждое рабочее пространство записано в package-lock.json — иначе npm ci в CI отказывает', async () => {
+  const { readFileSync, readdirSync, existsSync } = await import('node:fs');
+  const root = new URL('../../', import.meta.url);
+  const pkg = JSON.parse(readFileSync(new URL('package.json', root), 'utf8')) as { workspaces: string[] };
+  const lock = JSON.parse(readFileSync(new URL('package-lock.json', root), 'utf8')) as { packages: Record<string, unknown> };
+  const dirs: string[] = [];
+  for (const pattern of pkg.workspaces) {
+    if (pattern.endsWith('/*')) {
+      const base = pattern.slice(0, -2);
+      for (const name of readdirSync(new URL(`${base}/`, root))) if (existsSync(new URL(`${base}/${name}/package.json`, root))) dirs.push(`${base}/${name}`);
+    } else if (existsSync(new URL(`${pattern}/package.json`, root))) dirs.push(pattern);
+  }
+  const missing = (d: string[], l: Record<string, unknown>) => d.filter((x) => !(x in l));
+  // Зубы [Р-94]: рабочее пространство без записи правило обязано назвать
+  assert.deepEqual(missing([...dirs, 'services/syn-not-in-lock'], lock.packages), ['services/syn-not-in-lock']);
+  assert.ok(dirs.length > 20, `рабочих пространств подозрительно мало: ${dirs.length}`);
+  assert.deepEqual(missing(dirs, lock.packages), [], 'рабочее пространство без записи в package-lock.json: npm install --package-lock-only');
+});

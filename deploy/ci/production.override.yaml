@@ -39,6 +39,13 @@ services:
     ports:
       - "127.0.0.1:9471:9471"
 
+  # Шаг 49 [Р-192]: приёмник eBay Account Deletion — отметка выключена явно (OQ-188), метрики на локальном порту
+  ebay-account-deletion:
+    environment:
+      REPRACER_EBAY_DELETION_HEARTBEAT: "off"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
   # Копия базы в CI не снимается: восстановление проверяется своим тестом сборки (packages/pricing-store-pg/test/backup-restore.pg.test.ts)
   backup:
     profiles: ["never"]

@@ -1,0 +1,19 @@
+{
+  "name": "@repracer/ebay-account-deletion",
+  "version": "0.1.0",
+  "private": true,
+  "description": "eBay Marketplace Account Deletion receiver (step 49, Р-192): challenge response, signature verification by the eBay Notification API key, deletion of the seller's eBay data in the database, audited.",
+  "type": "module",
+  "exports": { ".": "./src/main.ts" },
+  "dependencies": {
+    "@repracer/pricing-store-pg": "0.1.0",
+    "@repracer/service-runtime": "0.1.0",
+    "pg": "8.23.0"
+  },
+  "devDependencies": { "@types/pg": "8.23.1" },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec test/*.test.ts",
+    "start": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/main.ts"
+  }
+}

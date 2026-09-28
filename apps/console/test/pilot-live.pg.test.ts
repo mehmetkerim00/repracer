@@ -246,7 +246,7 @@ before(async () => {
   dispatcher = createWriteDispatcher({
     store: {
       claimNext: writeQueue.claimNext.bind(writeQueue), recordOutcome: writeQueue.recordOutcome.bind(writeQueue),
-      recordReconciliation: writeQueue.recordReconciliation.bind(writeQueue), checkPriceBasis: writeQueue.checkPriceBasis.bind(writeQueue),
+      recordReconciliation: writeQueue.recordReconciliation.bind(writeQueue), checkPriceBasis: writeQueue.checkPriceBasis.bind(writeQueue), recordEbayBatchOutcome: writeQueue.recordEbayBatchOutcome.bind(writeQueue),
       dueScopes: async (at: Parameters<typeof writeQueue.dueScopes>[0], o: Parameters<typeof writeQueue.dueScopes>[1]) => (await writeQueue.dueScopes(at, o)).filter((d) => d.tenantId === ids.tenantId),
     } as never,
     adapterFor: () => port, alerts: { async raise() {} }, now: () => clock.iso(),

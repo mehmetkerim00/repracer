@@ -195,6 +195,12 @@ export interface EbayModelParams {
    * с taxes[VAT, includedInPrice, ebayCollectAndRemitTax] без новой ревизии. NONE — цена покупателя равна цене продавца (брутто, Р-58)
    */
   buyerPriceTax: { mode: 'VAT_ON_TOP'; rateBp: number; afterFirstWriteMs: number } | { mode: 'NONE' };
+  /**
+   * E-22 (шаг 49, Р-189): пакет РАЗНЫХ SKU в bulk_update_price_quantity. Песочница приняла до 25 предложений разных SKU; описание операции
+   * в снимке — «Only one SKU (one product) can be updated per call». REFUSED_WHOLE_REQUEST — отказ всего вызова 400 без ответов по
+   * элементам; код и текст ошибки синтетические (настоящий неизвестен)
+   */
+  multiSkuPerCall: 'ACCEPTED' | 'REFUSED_WHOLE_REQUEST';
 }
 
 export const EBAY_PARAMETERS: { readonly [K in keyof EbayModelParams]: ParameterSpec<EbayModelParams[K]> } = {
@@ -231,6 +237,10 @@ export const EBAY_PARAMETERS: { readonly [K in keyof EbayModelParams]: Parameter
     question: 'E-17', status: 'OPEN', meaning: 'цена покупателя EBAY_DE: НДС сверху (частный продавец песочницы) или равна цене продавца',
     default: { mode: 'VAT_ON_TOP', rateBp: 1900, afterFirstWriteMs: 25 * 60_000 },
     alternatives: [{ mode: 'VAT_ON_TOP', rateBp: 1900, afterFirstWriteMs: 25 * 60_000 }, { mode: 'VAT_ON_TOP', rateBp: 1900, afterFirstWriteMs: 0 }, { mode: 'NONE' }],
+  },
+  multiSkuPerCall: {
+    question: 'E-22', status: 'OPEN', meaning: 'пакет предложений разных SKU в одном вызове bulk_update_price_quantity: принимается (песочница) или отвергается целиком (описание операции)',
+    default: 'ACCEPTED', alternatives: ['ACCEPTED', 'REFUSED_WHOLE_REQUEST'],
   },
 };
 

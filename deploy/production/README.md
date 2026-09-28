@@ -119,6 +119,16 @@ ssh -L 4327:127.0.0.1:4327 <пользователь>@<сервер>   # зат�
 - **Каналы**: положить учётные данные в `channels/` и подключить аккаунт — пока из консоли это сделать нельзя (OQ-213).
 - **Оператор платформы** [Р-165]: учётная запись оператора заводится строкой в `platform.platform_operator`
   (`issuer`, `subject` из токена поставщика identity, `display_name`, `active`) — панель операторов себе не создаёт.
+- **eBay: удаление аккаунтов** [Р-192, E-18]: до первого боевого вызова eBay — в портале eBay (Application Keys →
+  Notifications → Marketplace Account Deletion) задать почту, адрес `https://app.<домен>/ebay/account-deletion` (ровно
+  `REPRACER_EBAY_DELETION_ENDPOINT`) и проверочный токен (файл `ebay_deletion_verification_token`, 32–80 символов
+  `[A-Za-z0-9_-]`). «Save» сразу шлёт challenge — приёмник должен быть поднят; затем «Send Test Notification». После этого —
+  `REPRACER_EBAY_ACCOUNT_DELETION=registered`: без него консоль eBay не подключает.
+- **eBay: восстановление из копии** (принятый риск 36): удаление по уведомлению восстановление из копии отменяет. После
+  восстановления найти в журнале приёмника (`docker compose logs ebay-account-deletion`) строки `EBAY_DELETION_APPLIED`
+  за период между снятием копии и восстановлением: в них `accountIds` — наши идентификаторы удалённых аккаунтов (не данные
+  пользователя eBay). Для каждого — вручную от владельца схемы удалить строки `tenant_data.channel_credential` аккаунта и
+  перевести его в `DISCONNECTED` с `external_account_id = 'deleted:<id>'` (страж это разрешает только так).
 
 ## 5. Чего профиль не делает
 

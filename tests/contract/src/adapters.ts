@@ -57,7 +57,7 @@ export const ebayUnderTest: AdapterUnderTest = ({ deps, world, clock, fetch }) =
   const ledger = new RollingDayLedger();
   for (const x of world.adapter?.ebayEditAttempts ?? []) ledger.preload(`ebay:${world.channelAccountId}|${x.listingId}`, x.attempts, clock.nowMs() - x.agoMs, x.field ?? 'PRICE');
   return createEbayAdapter({
-    deps, environment: 'SANDBOX', applicationCredentialsRef: APPLICATION_CREDENTIALS_REF, scopes: EBAY_STAND_SCOPES,
+    deps, environment: world.adapter?.ebayEnvironment ?? 'SANDBOX', applicationCredentialsRef: APPLICATION_CREDENTIALS_REF, scopes: EBAY_STAND_SCOPES,
     fetch, sleep: clock.sleep, timeoutMs: world.client?.timeoutMs ?? 40,
     readRetry: { maxAttempts: world.client?.maxAttempts ?? 3, baseDelayMs: 500, maxDelayMs: 20_000 },
     ...(world.budget ? { requestBudget: new TokenBucket(world.budget.seller) } : {}),

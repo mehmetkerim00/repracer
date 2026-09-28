@@ -42,6 +42,7 @@ export function ConnectionsScreen({ worldId }: { worldId: string }) {
                 <div key={c.channel} className="card">
                   <h3>{c.channel} <Badge tone={tone(c.state)}>{c.stateText}</Badge></h3>
                   {c.missingText ? <p className="note">{c.missingText}</p> : null}
+                  {c.channelLimitText ? <p className="notice">{c.channelLimitText}</p> : null}
                   {c.pendingText ? <p className="note">{c.pendingText}</p> : null}
                   {c.pendingRequestId ? (
                     <button type="button" onClick={() => void requestJson(worldPath(worldId, 'connections', 'cancel'), { method: 'POST', locale: m.locale, body: { authorizationRequestId: c.pendingRequestId } })
@@ -69,7 +70,10 @@ export function ConnectionsScreen({ worldId }: { worldId: string }) {
                 {v.accounts.map((a) => (
                   <tr key={a.channelAccountId}>
                     <td>{a.label}</td>
-                    <td><Badge tone={tone(a.state)}>{a.stateText}</Badge>{a.progressText ? <div className="note">{a.progressText}</div> : null}</td>
+                    <td>
+                      <Badge tone={tone(a.state)}>{a.stateText}</Badge>{a.progressText ? <div className="note">{a.progressText}</div> : null}
+                      {a.channelLimitText ? <div className="note">{a.channelLimitText}</div> : null}
+                    </td>
                     <td className="note">{a.authorizationText}</td>
                     <td>{a.canReconnect ? <button type="button" onClick={() => start(a.channel, a.marketplaces)}>{a.reconnectLabel}</button> : null}</td>
                   </tr>

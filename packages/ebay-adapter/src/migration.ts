@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { AdapterCallContext, ChannelError, ListingPreflight, MigrationConsentProof, MigrationOutcome } from '@repracer/channel-port';
 import { logConservative } from './conservative.ts';
-import { BULK_MIGRATE_MAX, BULK_MIGRATE_PATH, EBAY_MARKETPLACES, INVENTORY_PATH, marketplaceInfo } from './descriptor.ts';
+import { BULK_MIGRATE_MAX, BULK_MIGRATE_PATH, EBAY_MARKETPLACES, INVENTORY_PATH, marketplaceInfo, paymentPolicyPath } from './descriptor.ts';
 import { channelError, classifyHttpFailure, describeRestError, type EbayRestError, firstRestError } from './errors.ts';
 import { LISTING_ID_RE } from './mapping.ts';
 import type { EbayOffer } from './readback.ts';
@@ -25,6 +25,33 @@ function tag(xml: string, name: string): string | null {
 function has(xml: string, name: string): boolean {
   return new RegExp(`<${name}[\\s>/]`).test(xml);
 }
+/**
+ * Прямые дочерние элементы: имя → содержимое первого вхождения на ВЕРХНЕМ уровне. Нужны для полей листинга, имена которых повторяются
+ * внутри вложенных блоков: `PostalCode` есть и в адресе продавца (`Seller/RegistrationAddress`), а место листинга — только поле ItemType.
+ */
+function topLevel(xml: string, names: readonly string[]): Map<string, string> {
+  const out = new Map<string, string>();
+  const re = /<(\/?)([A-Za-z][\w.-]*)(?:\s[^>]*?)?(\/?)>/g;
+  let depth = 0;
+  let open: { name: string; start: number } | null = null;
+  for (let m = re.exec(xml); m; m = re.exec(xml)) {
+    const [whole, closing, name, selfClosing] = m;
+    if (selfClosing) {
+      if (depth === 0 && names.includes(name!) && !out.has(name!)) out.set(name!, '');
+      continue;
+    }
+    if (!closing) {
+      if (depth === 0) open = { name: name!, start: m.index + whole.length };
+      depth += 1;
+    } else {
+      depth -= 1;
+      if (depth === 0 && open && open.name === name && names.includes(name!) && !out.has(name!)) out.set(name!, xml.slice(open.start, m.index));
+      if (depth === 0) open = null;
+    }
+  }
+  return out;
+}
+
 function blocks(xml: string, name: string): string[] {
   return [...xml.matchAll(new RegExp(`<${name}(?:\\s[^>]*)?>([\\s\\S]*?)</${name}>`, 'g'))].map((m) => m[1]!);
 }
@@ -50,6 +77,13 @@ export interface ListingFacts {
   /** Сайт и валюта листинга (`Site`, `Currency` в GetItem [песочница]). В отпечаток согласия не входят: у листинга они не меняются */
   site?: string | null;
   currency?: string | null;
+  /**
+   * Шаг 49 [Р-191]: платёжная бизнес-политика листинга (`SellerProfiles/SellerPaymentProfile/PaymentProfileID` — так в GetItem песочницы)
+   * и задано ли место листинга (`PostalCode` или `Location` в ItemType — так называет их документация bulkMigrateListing). Значения места
+   * не хранятся — только признак. В отпечаток согласия не входят: это условия миграции, а не то, что при ней теряется.
+   */
+  paymentProfileId?: string | null;
+  itemLocationSet?: boolean;
 }
 
 export function parseGetItem(xml: string): { ok: true; facts: Omit<ListingFacts, 'outOfStockControl'> } | { ok: false; error: string } {
@@ -63,6 +97,10 @@ export function parseGetItem(xml: string): { ok: true; facts: Omit<ListingFacts,
   const itemId = tag(own, 'ItemID') ?? '';
   const bestOffer = tag(own, 'BestOfferDetails');
   const profiles = tag(own, 'SellerProfiles');
+  const paymentProfile = profiles === null ? null : tag(profiles, 'SellerPaymentProfile');
+  const paymentProfileId = paymentProfile === null ? null : (tag(paymentProfile, 'PaymentProfileID') ?? '').trim();
+  const place = topLevel(own, ['PostalCode', 'Location']);
+  const itemLocationSet = [...place.values()].some((v) => v.trim().length > 0);
   return {
     ok: true,
     facts: {
@@ -73,6 +111,7 @@ export function parseGetItem(xml: string): { ok: true; facts: Omit<ListingFacts,
       buyerRequirements: has(own, 'BuyerRequirementDetails'),
       sellerProfiles: profiles !== null && /<\w+ProfileID>\d+<\/\w+ProfileID>/.test(profiles),
       themeId: tag(own, 'ThemeID'), layoutId: tag(own, 'LayoutID'), site: tag(own, 'Site'), currency: tag(own, 'Currency'),
+      paymentProfileId: paymentProfileId === null || paymentProfileId === '' ? null : paymentProfileId, itemLocationSet,
     },
   };
 }
@@ -93,7 +132,7 @@ function siteIdOf(session: Session): number {
 }
 
 async function trading(options: ResolvedOptions, ctx: AdapterCallContext, session: Session, callName: string, xml: string): Promise<{ ok: true; xml: string } | { ok: false; error: string }> {
-  const r = await call(options, ctx, session, { auth: 'USER', method: 'POST', path: '', body: xml, trading: { callName, siteId: siteIdOf(session) }, idempotent: true, operation: callName });
+  const r = await call(options, ctx, session, { auth: 'USER', method: 'POST', path: '', body: xml, trading: { callName, siteId: siteIdOf(session) }, idempotent: true, operation: callName, waitForBudget: true });
   if (r.kind === 'REFUSED') return { ok: false, error: `${r.error.code}: ${r.error.message}` };
   if (!r.result.ok || typeof r.result.body !== 'string') return { ok: false, error: `HTTP ${String(r.result.status)}` };
   return { ok: true, xml: r.result.body };
@@ -101,7 +140,7 @@ async function trading(options: ResolvedOptions, ctx: AdapterCallContext, sessio
 
 /** C02: листинг уже под Inventory API — у SKU есть предложение этого листинга; 404 25713 — нет [песочница] */
 async function managedOffers(options: ResolvedOptions, ctx: AdapterCallContext, session: Session, sku: string, listingId: string): Promise<{ ok: true; offerIds: string[] } | { ok: false; error: string }> {
-  const r = await call(options, ctx, session, { auth: 'USER', method: 'GET', path: `${INVENTORY_PATH}/offer`, query: { sku }, operation: 'getOffers' });
+  const r = await call(options, ctx, session, { auth: 'USER', method: 'GET', path: `${INVENTORY_PATH}/offer`, query: { sku }, operation: 'getOffers', waitForBudget: true });
   if (r.kind === 'REFUSED') return { ok: false, error: `${r.error.code}: ${r.error.message}` };
   if (r.result.status === 404 && firstRestError(r.result.body)?.errorId === 25713) return { ok: true, offerIds: [] };
   if (!r.result.ok) return { ok: false, error: describeRestError(firstRestError(r.result.body), `HTTP ${String(r.result.status)}`) };
@@ -109,11 +148,28 @@ async function managedOffers(options: ResolvedOptions, ctx: AdapterCallContext, 
   return { ok: true, offerIds: offers.filter((o) => o.listing?.listingId === listingId && typeof o.offerId === 'string').map((o) => o.offerId!) };
 }
 
+/**
+ * Р-191: немедленная оплата платёжной политики — `immediatePay` Account API [док: sell_account_v1_oas3.json, getPaymentPolicy]. Документация
+ * говорит «if this field is returned as true, immediate payment is required»: true — требование выполнено, false — нет, поле не пришло —
+ * не знаем (не угадываем «выключено»). Любой сбой чтения — тоже «не знаем».
+ */
+type ImmediatePay = { ok: true; immediatePay: boolean | null } | { ok: false; error: string };
+
+async function paymentPolicyImmediatePay(options: ResolvedOptions, ctx: AdapterCallContext, session: Session, paymentPolicyId: string): Promise<ImmediatePay> {
+  const r = await call(options, ctx, session, { auth: 'USER', method: 'GET', path: paymentPolicyPath(paymentPolicyId), operation: 'getPaymentPolicy', waitForBudget: true });
+  if (r.kind === 'REFUSED') return { ok: false, error: `${r.error.code}: ${r.error.message}` };
+  if (!r.result.ok) return { ok: false, error: `payment policy: ${describeRestError(firstRestError(r.result.body), `HTTP ${String(r.result.status)}`)}` };
+  const v = (r.result.body as { immediatePay?: unknown } | null | undefined)?.immediatePay;
+  return { ok: true, immediatePay: typeof v === 'boolean' ? v : null };
+}
+
 async function preflightAll(options: ResolvedOptions, ctx: AdapterCallContext, session: Session, listingIds: readonly string[]): Promise<Preflighted[]> {
   const prefs = await trading(options, ctx, session, 'GetUserPreferences', GET_USER_PREFERENCES_REQUEST);
   const oosText = prefs.ok ? tag(prefs.xml, 'OutOfStockControlPreference') : null;
   const outOfStockControl = oosText === 'true' ? true : oosText === 'false' ? false : null;
   const out: Preflighted[] = [];
+  // Одна политика — у многих листингов: читается один раз за проверку
+  const policies = new Map<string, ImmediatePay>();
   for (const listingId of listingIds) {
     const unknown = (details: string): Preflighted => ({
       listingId, listingSnapshotSha256: createHash('sha256').update(`unknown:${listingId}`).digest('hex'), verdict: 'UNKNOWN', offerIds: [],
@@ -149,6 +205,25 @@ async function preflightAll(options: ResolvedOptions, ctx: AdapterCallContext, s
     const duplicateSku = facts.variationSkus !== null && new Set(facts.variationSkus).size !== facts.variationSkus.length;
     if (missingSku || duplicateSku) findings.push({ code: 'C07_SKU', severity: 'BLOCKER', details: missingSku ? 'the listing or a variation has no SKU: set SKUs on eBay' : 'variation SKUs repeat: make them unique on eBay' });
     if (!facts.sellerProfiles) findings.push({ code: 'C08_BUSINESS_POLICIES', severity: 'BLOCKER', details: 'the listing uses no business policies (payment, shipping, return): assign them on eBay' });
+    /**
+     * Р-191: условия bulkMigrateListing из снимка документации [док] — у платёжной политики листинга включена немедленная оплата, и в
+     * листинге задан индекс или город. До шага 49 их не проверял никто, и листинг без них получал отказ при необратимой миграции (25718).
+     */
+    let incomplete: string | null = null;
+    if (!auction) {
+      if (facts.paymentProfileId === null || facts.paymentProfileId === undefined) {
+        findings.push({ code: 'C14_IMMEDIATE_PAY', severity: 'BLOCKER', details: 'the listing has no payment business policy, so immediate payment cannot be required: assign a payment policy with immediate payment on eBay' });
+      } else {
+        let policy = policies.get(facts.paymentProfileId);
+        if (!policy) { policy = await paymentPolicyImmediatePay(options, ctx, session, facts.paymentProfileId); policies.set(facts.paymentProfileId, policy); }
+        // Находка 15 ревью шага 49: не угадываем, но подсказываем, что проверить продавцу
+        const hint = 'make sure immediate payment is turned on in the payment policy on eBay';
+        if (!policy.ok) incomplete = `the payment policy of the listing was not read (${policy.error}); ${hint}`;
+        else if (policy.immediatePay === null) incomplete = `the payment policy of the listing does not state immediatePay; ${hint}`;
+        else if (!policy.immediatePay) findings.push({ code: 'C14_IMMEDIATE_PAY', severity: 'BLOCKER', details: 'immediate payment is off in the payment policy of the listing: bulkMigrateListing requires it — turn it on in the policy on eBay' });
+      }
+      if (!facts.itemLocationSet) findings.push({ code: 'C15_LOCATION', severity: 'BLOCKER', details: 'the listing names neither a postal code nor a city (PostalCode, Location): bulkMigrateListing requires one — set it on eBay' });
+    }
     if (facts.bestOfferEnabled) {
       logConservative(options.deps.logger, ctx, 'EBAY_C10_BEST_OFFER_LOSS', { listingId });
       findings.push({ code: 'C03_BEST_OFFER', severity: 'LOSS', details: 'Best Offer is enabled: after migration its settings can no longer be managed (Р-2; the sandbox kept it — not proven for production, E-15)' });
@@ -178,8 +253,9 @@ async function preflightAll(options: ResolvedOptions, ctx: AdapterCallContext, s
     let verdict: ListingPreflight['verdict'];
     // Листинг чужого сайта eBay этому аккаунту не принадлежит: исправить это продавец не может — не FIXABLE, а INELIGIBLE (шаг 48)
     if (auction || findings.some((f) => f.code === 'C13_SITE')) verdict = 'INELIGIBLE';
-    else if (managedUnknown !== null || outOfStockControl === null) {
-      findings.push({ code: 'PREFLIGHT_INCOMPLETE', severity: 'BLOCKER', details: managedUnknown ?? 'out-of-stock control preference was not read' });
+    // Условие миграции, которое не удалось прочитать, не мешает узнать, что листинг уже под Inventory API (тогда миграции нет)
+    else if (managedUnknown !== null || outOfStockControl === null || (incomplete !== null && offerIds.length === 0)) {
+      findings.push({ code: 'PREFLIGHT_INCOMPLETE', severity: 'BLOCKER', details: managedUnknown ?? incomplete ?? 'out-of-stock control preference was not read' });
       verdict = 'UNKNOWN';
     } else if (offerIds.length > 0) verdict = 'ALREADY_MANAGED';
     else if (blockers.length > 0) verdict = 'FIXABLE';
@@ -255,7 +331,12 @@ export async function migrateEbay(options: ResolvedOptions, ctx: AdapterCallCont
       correlationId: ctx.correlationId, tenantId: ctx.tenantId, channelAccountId: ctx.channelAccountId,
       details: { listings: send.length, consents: send.map(({ p }) => p.migrationConsentId).join(',') },
     });
-    const r = await call(options, ctx, session, { auth: 'USER', method: 'POST', path: BULK_MIGRATE_PATH, body: { requests: send.map(({ p }) => ({ listingId: p.listingId })) }, idempotent: false, operation: 'bulkMigrateListing' });
+    /**
+     * Шаг 49 [Р-191]: перепроверка перед миграцией длиннее клиентского запаса запросов [EBAY_C01]: без ожидания миграция отказывала бы
+     * собственным бюджетом. Ожидание — только отказа КЛИЕНТСКОГО бюджета (запрос не отправлен), это не повтор записи (EBAY_C02).
+     */
+    const r = await call(options, ctx, session, { auth: 'USER', method: 'POST', path: BULK_MIGRATE_PATH, body: { requests: send.map(({ p }) => ({ listingId: p.listingId })) },
+      idempotent: false, operation: 'bulkMigrateListing', waitForBudget: true });
     if (r.kind === 'REFUSED') {
       for (const { p, i } of send) outcomes[i] = { listingId: p.listingId, status: 'FAILED', error: r.error };
     } else {

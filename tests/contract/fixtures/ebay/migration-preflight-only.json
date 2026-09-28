@@ -3,8 +3,8 @@
   "id": "ebay/migration/preflight-without-consent",
   "channel": "EBAY",
   "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
-  "title": "Без согласия владельца — только предполётная проверка: фиксированная цена с Best Offer — READY_WITH_LOSSES, bulk_migrate_listing не вызывается",
-  "description": "Листинг, созданный Trading API: GetUserPreferences (out-of-stock control выключен), GetItem (FixedPriceItem, SKU, бизнес-политики, Best Offer), Inventory offer?sku= — 404 25713 (не под Inventory API). Вердикт READY_WITH_LOSSES: Best Offer — LOSS (песочница его сохранила, но Р-2 и E-15) [EBAY_C10]; шаблон — INFO «не определяется» [EBAY_C11]; другие инструменты — WARNING [EBAY_C12]; out-of-stock control — WARNING. Миграция без MigrationConsentProof невозможна по типу (ebay.contract.test.ts), а запись в этот листинг отклоняется [Р-164] — ни одного обмена миграции. Почта продавца из GetItem не попадает ни в результат, ни в журнал (Р-4).",
+  "title": "Без согласия владельца — только предполётная проверка: ответ песочницы без индекса и города — FIXABLE (Р-191), Best Offer — LOSS, bulk_migrate_listing не вызывается",
+  "description": "Листинг, созданный Trading API: GetUserPreferences (out-of-stock control выключен), GetItem (FixedPriceItem, SKU, бизнес-политики, Best Offer), платёжная политика (Account API, синтетический ответ: немедленная оплата включена), Inventory offer?sku= — 404 25713 (не под Inventory API). Шаг 49 [Р-191]: документация bulkMigrateListing требует индекс или город листинга (PostalCode, Location); записанный ответ песочницы сокращён до элементов, которые проверки читали на шаге 39, и ни того, ни другого в нём нет. Ответ не дополняется — это подделка записи, — поэтому честный итог по этому ответу: C15_LOCATION BLOCKER и вердикт FIXABLE (был READY_WITH_LOSSES). Остальные находки прежние: Best Offer — LOSS (песочница его сохранила, но Р-2 и E-15) [EBAY_C10]; шаблон — INFO «не определяется» [EBAY_C11]; другие инструменты — WARNING [EBAY_C12]; out-of-stock control — WARNING. Миграция без MigrationConsentProof невозможна по типу (ebay.contract.test.ts), а запись в этот листинг отклоняется [Р-164] — ни одного обмена миграции. Почта продавца из GetItem не попадает ни в результат, ни в журнал (Р-4).",
   "tags": [
     "mandatory:migration-without-consent",
     "migration",
@@ -65,7 +65,7 @@
       "expect": [
         {
           "listingId": "110000000020",
-          "verdict": "READY_WITH_LOSSES",
+          "verdict": "FIXABLE",
           "listingSnapshotSha256": {
             "$regex": "^[0-9a-f]{64}$"
           },
@@ -86,6 +86,10 @@
               {
                 "code": "C11_OUT_OF_STOCK_CONTROL",
                 "severity": "WARNING"
+              },
+              {
+                "code": "C15_LOCATION",
+                "severity": "BLOCKER"
               }
             ]
           }
@@ -189,6 +193,24 @@
         "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<GetItemResponse xmlns=\"urn:ebay:apis:eBLBaseComponents\"><Timestamp>2026-09-27T17:24:36.316Z</Timestamp><Ack>Success</Ack><Version>1193</Version><Item><Currency>EUR</Currency><ItemID>110000000020</ItemID><ListingDesigner><LayoutID>7710000</LayoutID><ThemeID>7710</ThemeID></ListingDesigner><ListingDuration>GTC</ListingDuration><ListingType>FixedPriceItem</ListingType><Quantity>4</Quantity><Seller><Email>syn-seller-0001@example.invalid</Email><UserID>syn_ebay_seller_0001</UserID></Seller><SellingStatus><CurrentPrice currencyID=\"EUR\">14.99</CurrentPrice><ListingStatus>Active</ListingStatus></SellingStatus><Site>Germany</Site><BestOfferDetails><BestOfferCount>0</BestOfferCount><BestOfferEnabled>true</BestOfferEnabled><NewBestOffer>false</NewBestOffer></BestOfferDetails><SKU>SYN-EBAY-20</SKU><SellerProfiles><SellerShippingProfile><ShippingProfileID>6200000001</ShippingProfileID></SellerShippingProfile><SellerReturnProfile><ReturnProfileID>6200000003</ReturnProfileID></SellerReturnProfile><SellerPaymentProfile><PaymentProfileID>6200000002</PaymentProfileID></SellerPaymentProfile></SellerProfiles></Item></GetItemResponse>"
       },
       "origin": "SANDBOX"
+    },
+    {
+      "id": "payment-policy",
+      "note": "Платёжная политика листинга: немедленная оплата — условие bulkMigrateListing [док, Р-191]; ответ синтетический",
+      "request": {
+        "method": "GET",
+        "path": "/sell/account/v1/payment_policy/6200000002"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "paymentPolicyId": "6200000002",
+          "name": "syn-payment-policy",
+          "marketplaceId": "EBAY_DE",
+          "immediatePay": true
+        }
+      },
+      "origin": "SYNTHETIC"
     },
     {
       "id": "offer-by-sku-not-managed",

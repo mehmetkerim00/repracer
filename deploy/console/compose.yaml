@@ -67,6 +67,9 @@ services:
       REPRACER_EBAY_RUNAME: ${REPRACER_EBAY_RUNAME:-}
       REPRACER_EBAY_SCOPES: ${REPRACER_EBAY_SCOPES:-}
       REPRACER_EBAY_CLIENT_SECRET_FILE: ${REPRACER_EBAY_CLIENT_SECRET_FILE:-}
+      # Шаг 49 [Р-192, OQ-239]: `registered` — приёмник eBay Account Deletion ЭТОГО региона зарегистрирован в портале eBay;
+      # без признака канал eBay «ожидает доступа платформы»: подключить продавца, чьё удаление не дойдёт до базы, нельзя
+      REPRACER_EBAY_ACCOUNT_DELETION: ${REPRACER_EBAY_ACCOUNT_DELETION:-}
       REPRACER_CHANNEL_KEYRING_FILE: ${REPRACER_CHANNEL_KEYRING_FILE:-}
       REPRACER_CONNECT_REDIRECT_URL: ${REPRACER_CONNECT_REDIRECT_URL:-}
     volumes:

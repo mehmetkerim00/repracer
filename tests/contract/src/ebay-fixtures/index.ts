@@ -137,12 +137,17 @@ const NOT_AVAILABLE = { status: 404, body: { errors: [{ errorId: 25713, domain: 
 function xml(body: string) { return { status: 200, headers: { 'content-type': 'text/xml' }, body }; }
 
 /** GetItem, сокращённый до элементов, которые читают проверки; Seller оставлен с синтетической почтой — проверка утечки (Р-4) */
-function getItemXml(n: number, listingType: 'FixedPriceItem' | 'Chinese', bestOffer: boolean, variations: string[] = []): string {
+/**
+ * Шаг 49 [Р-191]: `place` — город листинга (`Location`). В ОТВЕТАХ ПЕСОЧНИЦЫ его нет: протокол шага 39 сократил GetItem до элементов, которые
+ * тогда читали проверки, и ни `PostalCode`, ни `Location` в нём нет. Ответ песочницы не дополняется (фикстура не подделывается) — город
+ * ставится только в синтетические ответы (origin SYNTHETIC).
+ */
+function getItemXml(n: number, listingType: 'FixedPriceItem' | 'Chinese', bestOffer: boolean, variations: string[] = [], place = false): string {
   return '<?xml version="1.0" encoding="UTF-8"?>\n<GetItemResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Timestamp>2026-09-27T17:24:36.316Z</Timestamp><Ack>Success</Ack>'
     + `<Version>1193</Version><Item><Currency>EUR</Currency><ItemID>${ids(n).listingId}</ItemID><ListingDesigner><LayoutID>7710000</LayoutID><ThemeID>7710</ThemeID></ListingDesigner>`
     + `<ListingDuration>${listingType === 'Chinese' ? 'Days_7' : 'GTC'}</ListingDuration><ListingType>${listingType}</ListingType><Quantity>${listingType === 'Chinese' ? 1 : 4}</Quantity>`
     + `<Seller><Email>${SELLER_EMAIL}</Email><UserID>syn_ebay_seller_0001</UserID></Seller><SellingStatus><CurrentPrice currencyID="EUR">${listingType === 'Chinese' ? '5.0' : '14.99'}</CurrentPrice><ListingStatus>Active</ListingStatus></SellingStatus>`
-    + `<Site>Germany</Site>${bestOffer ? '<BestOfferDetails><BestOfferCount>0</BestOfferCount><BestOfferEnabled>true</BestOfferEnabled><NewBestOffer>false</NewBestOffer></BestOfferDetails>' : ''}`
+    + `${place ? '<Location>Syn-Stadt</Location>' : ''}<Site>Germany</Site>${bestOffer ? '<BestOfferDetails><BestOfferCount>0</BestOfferCount><BestOfferEnabled>true</BestOfferEnabled><NewBestOffer>false</NewBestOffer></BestOfferDetails>' : ''}`
     + (variations.length > 0 ? `<Variations>${variations.map((v) => `<Variation><SKU>${v}</SKU><Quantity>2</Quantity></Variation>`).join('')}</Variations>` : '')
     + `<SKU>${ids(n).sku}</SKU><SellerProfiles><SellerShippingProfile><ShippingProfileID>6200000001</ShippingProfileID></SellerShippingProfile><SellerReturnProfile><ReturnProfileID>6200000003</ReturnProfileID></SellerReturnProfile><SellerPaymentProfile><PaymentProfileID>6200000002</PaymentProfileID></SellerPaymentProfile></SellerProfiles></Item></GetItemResponse>`;
 }
@@ -150,7 +155,17 @@ const PREFS_XML = '<?xml version="1.0" encoding="UTF-8"?>\n<GetUserPreferencesRe
 
 const trading = (id: string, body: string, response: string): Exchange => ({ id, request: { method: 'POST', path: '/ws/api.dll', body }, response: xml(response) });
 const prefs = (id = 'get-user-preferences') => trading(id, GET_USER_PREFERENCES_REQUEST, PREFS_XML);
-const getItem = (id: string, n: number, type: 'FixedPriceItem' | 'Chinese', bestOffer: boolean, variations: string[] = []) => trading(id, getItemRequest(ids(n).listingId), getItemXml(n, type, bestOffer, variations));
+const getItem = (id: string, n: number, type: 'FixedPriceItem' | 'Chinese', bestOffer: boolean, variations: string[] = [], place = false) =>
+  trading(id, getItemRequest(ids(n).listingId), getItemXml(n, type, bestOffer, variations, place));
+/**
+ * Шаг 49 [Р-191]: Account API getPaymentPolicy — `immediatePay` платёжной политики листинга (снимок sell_account_v1_oas3.json). Песочница этот
+ * вызов не делала: обмен всегда SYNTHETIC; тело — поля схемы PaymentPolicy.
+ */
+const paymentPolicy = (id: string, immediatePay: boolean | null = true): Exchange => sy({
+  id, note: 'Платёжная политика листинга: немедленная оплата — условие bulkMigrateListing [док, Р-191]; ответ синтетический',
+  request: { method: 'GET', path: '/sell/account/v1/payment_policy/6200000002' },
+  response: { status: 200, body: { paymentPolicyId: '6200000002', name: 'syn-payment-policy', marketplaceId: 'EBAY_DE', ...(immediatePay === null ? {} : { immediatePay }) } },
+});
 const offersBySku = (id: string, n: number): Exchange => ({ id, request: { method: 'GET', path: '/sell/inventory/v1/offer', query: { sku: ids(n).sku } }, response: NOT_AVAILABLE });
 
 // ---------------------------------------------------------------------------------------------------- сценарии
@@ -299,30 +314,31 @@ export function buildEbayScenarios(): Array<{ file: string; scenario: Scenario }
 
   // 9. Предполётная проверка без согласия: миграции нет
   out.push(scenario('migration-preflight-only.json', 'ebay/migration/preflight-without-consent',
-    'Без согласия владельца — только предполётная проверка: фиксированная цена с Best Offer — READY_WITH_LOSSES, bulk_migrate_listing не вызывается',
-    'Листинг, созданный Trading API: GetUserPreferences (out-of-stock control выключен), GetItem (FixedPriceItem, SKU, бизнес-политики, Best Offer), Inventory offer?sku= — 404 25713 (не под Inventory API). Вердикт READY_WITH_LOSSES: Best Offer — LOSS (песочница его сохранила, но Р-2 и E-15) [EBAY_C10]; шаблон — INFO «не определяется» [EBAY_C11]; другие инструменты — WARNING [EBAY_C12]; out-of-stock control — WARNING. Миграция без MigrationConsentProof невозможна по типу (ebay.contract.test.ts), а запись в этот листинг отклоняется [Р-164] — ни одного обмена миграции. Почта продавца из GetItem не попадает ни в результат, ни в журнал (Р-4).',
+    'Без согласия владельца — только предполётная проверка: ответ песочницы без индекса и города — FIXABLE (Р-191), Best Offer — LOSS, bulk_migrate_listing не вызывается',
+    'Листинг, созданный Trading API: GetUserPreferences (out-of-stock control выключен), GetItem (FixedPriceItem, SKU, бизнес-политики, Best Offer), платёжная политика (Account API, синтетический ответ: немедленная оплата включена), Inventory offer?sku= — 404 25713 (не под Inventory API). Шаг 49 [Р-191]: документация bulkMigrateListing требует индекс или город листинга (PostalCode, Location); записанный ответ песочницы сокращён до элементов, которые проверки читали на шаге 39, и ни того, ни другого в нём нет. Ответ не дополняется — это подделка записи, — поэтому честный итог по этому ответу: C15_LOCATION BLOCKER и вердикт FIXABLE (был READY_WITH_LOSSES). Остальные находки прежние: Best Offer — LOSS (песочница его сохранила, но Р-2 и E-15) [EBAY_C10]; шаблон — INFO «не определяется» [EBAY_C11]; другие инструменты — WARNING [EBAY_C12]; out-of-stock control — WARNING. Миграция без MigrationConsentProof невозможна по типу (ebay.contract.test.ts), а запись в этот листинг отклоняется [Р-164] — ни одного обмена миграции. Почта продавца из GetItem не попадает ни в результат, ни в журнал (Р-4).',
     ['mandatory:migration-without-consent', 'migration', 'conservative:EBAY_C10_BEST_OFFER_LOSS', 'conservative:EBAY_C11_TEMPLATE_UNDETECTABLE', 'conservative:EBAY_C12_OTHER_TOOLS_ALWAYS_WARN'], RECORDED,
     [
-      call('preflight', 'preflight', [[ids(20).listingId]], [{ listingId: ids(20).listingId, verdict: 'READY_WITH_LOSSES', listingSnapshotSha256: { $regex: '^[0-9a-f]{64}$' },
+      call('preflight', 'preflight', [[ids(20).listingId]], [{ listingId: ids(20).listingId, verdict: 'FIXABLE', listingSnapshotSha256: { $regex: '^[0-9a-f]{64}$' },
         findings: { $unordered: [
           { code: 'C03_BEST_OFFER', severity: 'LOSS' }, { code: 'C06_TEMPLATE', severity: 'INFO' },
           { code: 'C10_OTHER_TOOLS', severity: 'WARNING' }, { code: 'C11_OUT_OF_STOCK_CONTROL', severity: 'WARNING' },
+          { code: 'C15_LOCATION', severity: 'BLOCKER' },
         ] } }]),
       call('write-still-refused', 'planDispatch', [[priceWrite('cw-9', 20, 1349, { migrated: false })]], { batches: [], rejected: [{ channelWriteId: 'cw-9', error: { code: 'PRECONDITION_FAILED' } }] }),
     ],
-    [sb(userToken()), sb(prefs()), sb(getItem('get-item', 20, 'FixedPriceItem', true)), sb(offersBySku('offer-by-sku-not-managed', 20))],
+    [sb(userToken()), sb(prefs()), sb(getItem('get-item', 20, 'FixedPriceItem', true)), paymentPolicy('payment-policy'), sb(offersBySku('offer-by-sku-not-managed', 20))],
     { noAlerts: true, noLogCodes: ['EBAY_LISTING_MIGRATION'] },
     world({ pii: [SELLER_EMAIL] })));
 
   // 10. Миграция с согласием
   {
-    const parsed = parseGetItem(getItemXml(21, 'FixedPriceItem', false));
+    const parsed = parseGetItem(getItemXml(21, 'FixedPriceItem', false, [], true));
     if (!parsed.ok) throw new Error(parsed.error);
     const sha = snapshotSha256({ ...parsed.facts, outOfStockControl: false });
     const proof = { migrationConsentId: 'mc-syn-0001', listingId: ids(21).listingId, listingSnapshotSha256: sha, offerMappingStatus: 'MIGRATION_STARTED' };
     out.push(scenario('migration-with-consent.json', 'ebay/migration/with-consent',
       'Миграция с согласием владельца: перепроверка снимка, bulk_migrate_listing одного листинга, предложение Inventory API в ответе',
-      'Р-164: ровно один цикл, один листинг — как в песочнице. Согласие дано на снимок предполётной проверки (SHA-256 подмножества GetItem); перед вызовом листинг проверяется заново и снимок совпал. Ответ песочницы: responses[].statusCode 200, inventoryItems[{sku, offerId}] — MIGRATED с идентификатором предложения, которое дальше несёт идентичность записи.',
+      'Р-164: ровно один цикл, один листинг — как в песочнице. Согласие дано на снимок предполётной проверки (SHA-256 подмножества GetItem); перед вызовом листинг проверяется заново и снимок совпал. Ответ песочницы: responses[].statusCode 200, inventoryItems[{sku, offerId}] — MIGRATED с идентификатором предложения, которое дальше несёт идентичность записи. Шаг 49 [Р-191]: GetItem этого сценария синтетический (записанный листинг был с Best Offer), город листинга в нём задан; немедленная оплата платёжной политики — синтетическим ответом Account API при проверке и при перепроверке. Перепроверка стала на запрос длиннее — адаптер ждёт свой клиентский бюджет запросов перед необратимым вызовом, а не отказывает.',
       ['mandatory:migration-with-consent', 'migration'], RECORDED,
       [
         call('preflight', 'preflight', [[ids(21).listingId]], [{ listingId: ids(21).listingId, verdict: 'READY', listingSnapshotSha256: sha }]),
@@ -330,8 +346,8 @@ export function buildEbayScenarios(): Array<{ file: string; scenario: Scenario }
         call('migrate', 'migrate', [[proof]], [{ listingId: ids(21).listingId, status: 'MIGRATED', externalOfferIds: [ids(21).offerId] }]),
       ],
       // Записанный листинг был с Best Offer; этот — без него, его GetItem выведен
-      [sb(userToken()), sb(prefs()), sy(getItem('get-item', 21, 'FixedPriceItem', false)), sb(offersBySku('offer-by-sku-not-managed', 21)),
-        sb(prefs('recheck-preferences')), sy(getItem('recheck-get-item', 21, 'FixedPriceItem', false)), sb(offersBySku('recheck-offer-by-sku', 21)),
+      [sb(userToken()), sb(prefs()), sy(getItem('get-item', 21, 'FixedPriceItem', false, [], true)), paymentPolicy('payment-policy'), sb(offersBySku('offer-by-sku-not-managed', 21)),
+        sb(prefs('recheck-preferences')), sy(getItem('recheck-get-item', 21, 'FixedPriceItem', false, [], true)), paymentPolicy('recheck-payment-policy'), sb(offersBySku('recheck-offer-by-sku', 21)),
         { origin: 'SANDBOX', id: 'bulk-migrate', request: { method: 'POST', path: '/sell/inventory/v1/bulk_migrate_listing', body: { requests: [{ listingId: ids(21).listingId }] } },
           response: { status: 200, body: { responses: [{ statusCode: 200, listingId: ids(21).listingId, marketplaceId: 'EBAY_DE', inventoryItems: [{ sku: ids(21).sku, offerId: ids(21).offerId }] }] } } }],
       { noAlerts: true, logs: [{ code: 'EBAY_LISTING_MIGRATION', count: 1, details: { listings: 1, consents: 'mc-syn-0001' } }] }));
@@ -344,7 +360,7 @@ export function buildEbayScenarios(): Array<{ file: string; scenario: Scenario }
     ['migration', 'conservative:EBAY_C15_VARIATIONS_PRICE_CONFIRMATION'], synthetic(),
     [call('preflight', 'preflight', [[ids(23).listingId]], [{ listingId: ids(23).listingId, verdict: 'READY',
       findings: { $contains: [{ code: 'C12_VARIATIONS', severity: 'WARNING', details: { $regex: 'cannot be confirmed on the live listing' } }] } }])],
-    [userToken(), prefs(), getItem('get-item', 23, 'FixedPriceItem', false, ['SYN-EBAY-23-S', 'SYN-EBAY-23-M']), offersBySku('offer-by-sku-not-managed', 23)],
+    [userToken(), prefs(), getItem('get-item', 23, 'FixedPriceItem', false, ['SYN-EBAY-23-S', 'SYN-EBAY-23-M'], true), paymentPolicy('payment-policy'), offersBySku('offer-by-sku-not-managed', 23)],
     { noAlerts: true, logs: [{ code: 'EBAY_C15_VARIATIONS_PRICE_CONFIRMATION', count: 1, question: 'E-13' }] }));
 
   // 11. Аукцион
@@ -573,6 +589,48 @@ export function buildEbayScenarios(): Array<{ file: string; scenario: Scenario }
           lineItems: [{ lineItemId: '10000470009', sku: ids(17).sku, legacyItemId: ids(17).listingId, quantity: 1, lineItemFulfillmentStatus: 'FULFILLED', listingMarketplaceId: 'EBAY_DE' }],
         }] } } }],
     { noAlerts: true }));
+
+  // 21. Р-189 (E-22): боевой аккаунт в пробе — пакет из 2 SKU отвергнут целиком
+  {
+    const a = priceWrite('cw-21a', 24, 1321);
+    const b = priceWrite('cw-21b', 25, 1322);
+    const c = priceWrite('cw-21c', 26, 1323);
+    const refusedError = { class: 'TRANSIENT', code: 'ACTION_NOT_ALLOWED', scope: 'BATCH', httpStatus: 400, channelCode: '99022', message: { $regex: 'one SKU per call \\(E-22\\)' } };
+    out.push(scenario('dispatch-multi-sku-probe-refused.json', 'ebay/dispatch/multi-sku-probe-refused',
+      'Р-189: боевой аккаунт в пробе — один пакет из 2 SKU; отказ всего вызова — записи повторяемы, итог пакета «отвергнут»',
+      'Описание bulkUpdatePriceQuantity в снимке 2026-09-28 — «Only one SKU (one product) can be updated per call», схема и песочница — до 25 разных SKU (E-22). Боевой аккаунт без доказанного режима планирует один пакет из 2 SKU, остальные записи — по одной [EBAY_C18]. Здесь канал отвергает пакет целиком (400 без ответов по элементам; код и текст синтетические — настоящего ответа никто не видел): записи TRANSIENT, результат несёт ebayBatchOutcome {multiSkuAccepted: false}, по которому база переводит аккаунт в «1 SKU на вызов» и сама поднимает алерт (0142) — у адаптера алерта нет. Запись одного SKU итога не несёт.',
+      ['dispatch', 'conservative:EBAY_C18_MULTI_SKU_PROBE'], synthetic('vendor/ebay/2026-09-28/sell_inventory_v1_oas3.json', 'docs/channel-capabilities.md#E-22'),
+      [
+        call('plan-probe', 'planDispatch', [[a, b, c]], { rejected: [], batches: [{ items: [{ channelWriteId: 'cw-21a' }, { channelWriteId: 'cw-21b' }] }, { items: [{ channelWriteId: 'cw-21c' }] }] }),
+        call('dispatch-probe', 'dispatch', [batch('ebay:probe', [a, b])], { attemptsMade: 1, ebayBatchOutcome: { multiSkuAccepted: false }, outcomes: [
+          { channelWriteId: 'cw-21a', status: 'REJECTED', error: refusedError }, { channelWriteId: 'cw-21b', status: 'REJECTED', error: refusedError }] }),
+        call('dispatch-single', 'dispatch', [batch('ebay:single', [c])], { ebayBatchOutcome: { $absent: true }, outcomes: [{ channelWriteId: 'cw-21c', status: 'ACCEPTED' }] }),
+      ],
+      [{ ...userToken(), origin: 'SYNTHETIC' },
+        sy(bulkUpdate('bulk-two-skus-refused', [{ offerId: ids(24).offerId, price: { value: '13.21', currency: 'EUR' } }, { offerId: ids(25).offerId, price: { value: '13.22', currency: 'EUR' } }],
+          { status: 400, body: { errors: [{ errorId: 99022, domain: 'SYNTHETIC', category: 'REQUEST', message: 'Only one SKU can be updated per call (synthetic, E-22)' }] } })),
+        sy(bulkUpdate('bulk-one-sku', [{ offerId: ids(26).offerId, price: { value: '13.23', currency: 'EUR' } }], ok200([{ n: 26 }])))],
+      { noAlerts: true, logs: [{ code: 'EBAY_C18_MULTI_SKU_PROBE', question: 'E-22', count: 2 }] },
+      world({ account: { externalAccountId: 'syn_ebay_seller_0001', marketplaces: ['EBAY_DE', 'EBAY_US'], channel: 'EBAY', writeMode: 'LIVE', ebayBatchMode: 'PROBE' } })));
+  }
+
+  // 22. Р-190 (E-21): бой без Browse — подтверждение записью предложения
+  {
+    const w = priceWrite('cw-22', 27, 1349);
+    const q = quantityWrite('cw-22q', 27, 3);
+    out.push(scenario('readback-production-offer-record.json', 'ebay/readback/production-offer-record',
+      'Р-190: в бою Browse не вызывается — цена и количество подтверждаются записью предложения, цены покупателя нет',
+      'Browse — часть Buy API, и лицензия на неё для репрайсера не выяснена (E-21): в боевом окружении адаптер Browse не вызывает и токен приложения не берёт. Подтверждение — GET offer (НАША запись): APPLIED, наблюдение помечено ownRecordOnly, buyerPrice нет; правку листинга другой программой так не увидеть, а сверка базы цены Р-116 ограничена. Журнал EBAY_C19 — один раз на аккаунт, а не на каждое чтение. Хост — боевой, ответы синтетические: ни одного обмена с живым eBay.',
+      ['readback', 'conservative:EBAY_C19_BROWSE_UNAVAILABLE_IN_PRODUCTION'], synthetic('docs/channel-capabilities.md#E-21'),
+      [
+        call('confirm', 'confirm', [[confirmOf(w)]], [{ channelWriteId: 'cw-22', status: 'APPLIED', observation: { field: 'PRICE', source: 'READBACK', ownRecordOnly: true,
+          value: { price: { amountMinor: 1349, currency: 'EUR', basis: 'GROSS' } }, buyerPrice: { $absent: true }, effectivePrice: { $absent: true } } }]),
+        call('read-quantity', 'readBack', [[readBackOf(q, ['QUANTITY'])]], { failures: [], observations: [{ field: 'QUANTITY', ownRecordOnly: true, value: { quantity: 3 } }] }),
+      ],
+      [{ ...userToken(), origin: 'SYNTHETIC' }, sy(getOffer('get-offer', 27, { priceMinor: 1349, quantity: 3 })), sy(getOffer('get-offer-quantity', 27, { priceMinor: 1349, quantity: 3 }))],
+      { noAlerts: true, logs: [{ code: 'EBAY_C19_BROWSE_UNAVAILABLE_IN_PRODUCTION', question: 'E-21', count: 1 }], noLogCodes: ['EBAY_C05_PRICE_READBACK_LIVE_LISTING', 'EBAY_C06_BROWSE_APPLICATION_TOKEN'] },
+      world({ adapter: { ebayEnvironment: 'PRODUCTION' }, account: { externalAccountId: 'syn_ebay_seller_0001', marketplaces: ['EBAY_DE', 'EBAY_US'], channel: 'EBAY', writeMode: 'LIVE', ebayBatchMode: 'MULTI' } })));
+  }
 
   // 20. Входящие и конкуренты
   out.push(scenario('unsupported-inbound-competitors.json', 'ebay/port/unsupported',

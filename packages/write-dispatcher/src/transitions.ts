@@ -40,7 +40,11 @@ export type WriteReason = Reason<string>;
 
 export type OutcomeTransition =
   /** ACCEPTED; applied — сразу APPLIED */
-  | { to: 'ACCEPTED'; applied: boolean; reason: WriteReason | null }
+  | {
+    to: 'ACCEPTED'; applied: boolean; reason: WriteReason | null;
+    /** Р-190 (находка 9 ревью шага 49): применение подтверждено только НАШЕЙ записью у канала — база ставит confirmed_by_own_record */
+    ownRecordOnly?: boolean;
+  }
   /** FAILED со сроком следующей попытки той же версии */
   | { to: 'RETRY'; errorCode: string; nextAttemptAt: Instant; reason: WriteReason }
   /** Остаётся в полёте, сверка обратным чтением к сроку */
@@ -65,7 +69,10 @@ export function backoffMs(policy: RetryPolicy, attemptNo: number): number {
 }
 
 export function planOutcomeTransition(outcome: WriteOutcome, attemptNo: number, now: Instant, policy: RetryPolicy): OutcomeTransition {
-  if (outcome.status === 'ACCEPTED') return { to: 'ACCEPTED', applied: outcome.appliedImmediately, reason: null };
+  if (outcome.status === 'ACCEPTED') {
+    return { to: 'ACCEPTED', applied: outcome.appliedImmediately, reason: null,
+      ...(outcome.appliedImmediately && outcome.observation?.ownRecordOnly === true ? { ownRecordOnly: true } : {}) };
+  }
   // Запрос мог дойти до канала: повтор вслепую запрещён, сначала обратное чтение
   if (outcome.status === 'OUTCOME_UNKNOWN') return { to: 'RECONCILE', errorCode: outcome.error.code, nextAttemptAt: at(now, policy.reconcileAfterMs) };
   return planFailure(outcome.error, attemptNo, now, policy);
@@ -101,14 +108,17 @@ export function channelRefusal(error: ChannelError): WriteReason {
 }
 
 export type Reconciliation =
-  | { kind: 'APPLIED' }
+  /** ownRecordOnly — наблюдение было записью у канала, а не живым листингом (eBay в бою без Browse, Р-190) */
+  | { kind: 'APPLIED'; ownRecordOnly?: boolean }
   | { kind: 'NOT_APPLIED'; observedMinor: number | null }
   | { kind: 'UNKNOWN'; error: ChannelError | null };
 
 export function planReconciliationTransition(
   status: 'DISPATCHED' | 'ACCEPTED', result: Reconciliation, attemptNo: number, inFlightSince: Instant, now: Instant, policy: RetryPolicy,
 ): OutcomeTransition {
-  if (result.kind === 'APPLIED') return { to: 'ACCEPTED', applied: true, reason: { code: 'WRITE_OUTCOME_RECONCILED', params: { result: 'APPLIED' } } };
+  if (result.kind === 'APPLIED') {
+    return { to: 'ACCEPTED', applied: true, reason: { code: 'WRITE_OUTCOME_RECONCILED', params: { result: 'APPLIED' } }, ...(result.ownRecordOnly ? { ownRecordOnly: true } : {}) };
+  }
   if (result.kind === 'NOT_APPLIED') {
     if (status === 'DISPATCHED') {
       // Канал значение не получил: та же версия отправляется снова (попытка расходует бюджет правок, Р-19)

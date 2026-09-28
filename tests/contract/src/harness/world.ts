@@ -63,6 +63,9 @@ export function worldDependencies(world: World, clock: VirtualClock, sink: Sink)
             externalAccountId: world.account.externalAccountId,
             marketplaces: [...world.account.marketplaces],
             credentialsRef: SELLER_CREDENTIALS_REF,
+            // Шаг 49: читается на каждом verify, как каталог базы, — переход режима пакетов виден следующему вызову [Р-189]
+            ...(world.account.writeMode ? { writeMode: world.account.writeMode } : {}),
+            ...(world.account.ebayBatchMode ? { ebayBatchMode: world.account.ebayBatchMode } : {}),
           },
         };
       },

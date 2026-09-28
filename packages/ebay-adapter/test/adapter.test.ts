@@ -15,7 +15,7 @@ const ctx: AdapterCallContext = { tenantId: TENANT, channelAccountId: ACCOUNT, c
 interface Seen { method: string; url: URL; headers: Record<string, string>; body: string }
 type Reply = { status: number; body?: unknown; xml?: string } | 'NETWORK_ERROR' | 'BODY_BREAKS';
 
-function world(handler: (r: Seen) => Reply, options: { ledger?: RollingDayLedger; requestBudget?: TokenBucket; writeMode?: 'SHADOW' | 'LIVE' } = {}) {
+function world(handler: (r: Seen) => Reply, options: { ledger?: RollingDayLedger; requestBudget?: TokenBucket; writeMode?: 'SHADOW' | 'LIVE'; batchMode?: () => 'PROBE' | 'MULTI' | 'SINGLE' | undefined; environment?: 'SANDBOX' | 'PRODUCTION' } = {}) {
   const seen: Seen[] = [];
   const logs: AdapterLogEntry[] = [];
   const alerts: Array<{ code: string }> = [];
@@ -41,14 +41,14 @@ function world(handler: (r: Seen) => Reply, options: { ledger?: RollingDayLedger
   const adapter = createEbayAdapter({
     deps: {
       accounts: { verify: async (tenantId, channelAccountId) => (tenantId === TENANT && channelAccountId === ACCOUNT
-        ? { ok: true, account: { tenantId, channelAccountId, channel: 'EBAY', externalAccountId: 'syn-seller', marketplaces: ['EBAY_DE', 'EBAY_US'], credentialsRef: 'cred:seller', ...(options.writeMode ? { writeMode: options.writeMode } : {}) } }
+        ? { ok: true, account: { tenantId, channelAccountId, channel: 'EBAY', externalAccountId: 'syn-seller', marketplaces: ['EBAY_DE', 'EBAY_US'], credentialsRef: 'cred:seller', ...(options.writeMode ? { writeMode: options.writeMode } : {}), ...(options.batchMode?.() ? { ebayBatchMode: options.batchMode() } : {}) } }
         : { ok: false, reason: 'TENANT_MISMATCH' }) },
       credentials: { get: async (ref): Promise<Record<string, string>> => (ref === 'cred:seller' ? { refreshToken: 'syn-refresh' } : { clientId: 'Syn-App-SBX', clientSecret: 'syn-secret' }) },
       alerts: { raise: async (a) => { alerts.push(a); } },
       logger: { log: (e) => { logs.push(e); } },
       now: () => new Date(clock).toISOString(),
     },
-    environment: 'SANDBOX', applicationCredentialsRef: 'cred:app', scopes: ['https://api.ebay.com/oauth/api_scope/sell.inventory'],
+    environment: options.environment ?? 'SANDBOX', applicationCredentialsRef: 'cred:app', scopes: ['https://api.ebay.com/oauth/api_scope/sell.inventory'],
     fetch: fetchFn, sleep: async (ms) => { clock += ms; }, timeoutMs: 1000,
     ...(options.ledger ? { editLedger: options.ledger } : {}),
     ...(options.requestBudget ? { requestBudget: options.requestBudget } : {}),
@@ -287,18 +287,31 @@ test('ebayAdapterFactory: adapters of one factory share the token cache and the 
   assert.equal(base.tokens.n, 1, 'the second adapter reused the user token of the first');
 });
 
-// `Site` и `Currency` — как у песочницы: GetItem с сайтом 77 отвечает Site=Germany, Currency=EUR (шаг 39); `site: null` — ответ без поля
-const getItemXml = (listingType: string, extra = '', site: string | null = 'Germany') => `<?xml version="1.0" encoding="UTF-8"?>
-<GetItemResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Ack>Success</Ack><Item><Currency>EUR</Currency><ItemID>110000000020</ItemID><ListingDesigner><LayoutID>7710000</LayoutID><ThemeID>7710</ThemeID></ListingDesigner><ListingType>${listingType}</ListingType><Seller><Email>syn-seller@example.invalid</Email></Seller>${site === null ? '' : `<Site>${site}</Site>`}<SKU>SYN-LEGACY</SKU><SellerProfiles><SellerShippingProfile><ShippingProfileID>6200000001</ShippingProfileID></SellerShippingProfile></SellerProfiles>${extra}</Item></GetItemResponse>`;
+// `Site` и `Currency` — как у песочницы: GetItem с сайтом 77 отвечает Site=Germany, Currency=EUR (шаг 39); `site: null` — ответ без поля.
+// Шаг 49 [Р-191]: платёжная политика (`SellerPaymentProfile/PaymentProfileID`, как в GetItem песочницы) и место листинга (`Location` или
+// `PostalCode` — синтетические значения юнит-теста); `Seller/RegistrationAddress/PostalCode` — адрес продавца, а не место листинга
+interface ItemParts { payment?: boolean; place?: 'Location' | 'PostalCode' | null; sellerPostalCode?: boolean }
+const getItemXml = (listingType: string, extra = '', site: string | null = 'Germany', parts: ItemParts = {}) => `<?xml version="1.0" encoding="UTF-8"?>
+<GetItemResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Ack>Success</Ack><Item><Currency>EUR</Currency><ItemID>110000000020</ItemID><ListingDesigner><LayoutID>7710000</LayoutID><ThemeID>7710</ThemeID></ListingDesigner><ListingType>${listingType}</ListingType>`
+  + `${(parts.place ?? 'Location') === 'Location' && parts.place !== null ? '<Location>Syn-Stadt</Location>' : parts.place === 'PostalCode' ? '<PostalCode>99999</PostalCode>' : ''}`
+  + `<Seller><Email>syn-seller@example.invalid</Email>${parts.sellerPostalCode ? '<RegistrationAddress><PostalCode>99998</PostalCode></RegistrationAddress>' : ''}</Seller>${site === null ? '' : `<Site>${site}</Site>`}<SKU>SYN-LEGACY</SKU>`
+  + `<SellerProfiles><SellerShippingProfile><ShippingProfileID>6200000001</ShippingProfileID></SellerShippingProfile>${parts.payment === false ? '' : '<SellerPaymentProfile><PaymentProfileID>6200000002</PaymentProfileID></SellerPaymentProfile>'}</SellerProfiles>${extra}</Item></GetItemResponse>`;
 const prefsXml = '<?xml version="1.0" encoding="UTF-8"?><GetUserPreferencesResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Ack>Success</Ack><OutOfStockControlPreference>false</OutOfStockControlPreference></GetUserPreferencesResponse>';
+/** Account API getPaymentPolicy [док: sell_account_v1_oas3.json]; ответ синтетический — песочница этот вызов не делала */
+const POLICY_OK: Reply = { status: 200, body: { paymentPolicyId: '6200000002', name: 'syn-payment', marketplaceId: 'EBAY_DE', immediatePay: true } };
 
-function tradingWorld(listingType: string, extra: string, after: (r: Seen) => Reply, site: string | null = 'Germany') {
+function tradingWorld(listingType: string, extra: string, after: (r: Seen) => Reply, site: string | null = 'Germany', o: { parts?: ItemParts; policy?: Reply } = {}) {
   return world((r) => {
     if (r.url.pathname === '/ws/api.dll') {
       assert.equal(r.headers['x-ebay-api-iaf-token'], 'syn-user-token');
       assert.equal(r.headers['x-ebay-api-siteid'], '77');
       assert.equal(r.headers['x-ebay-api-compatibility-level'], '1349');
-      return { status: 200, xml: r.headers['x-ebay-api-call-name'] === 'GetUserPreferences' ? prefsXml : getItemXml(listingType, extra, site) };
+      return { status: 200, xml: r.headers['x-ebay-api-call-name'] === 'GetUserPreferences' ? prefsXml : getItemXml(listingType, extra, site, o.parts) };
+    }
+    if (r.url.pathname.startsWith('/sell/account/v1/payment_policy/')) {
+      assert.equal(r.url.pathname, '/sell/account/v1/payment_policy/6200000002');
+      assert.equal(r.headers.authorization, 'Bearer syn-user-token', 'Account API — токеном пользователя (scope sell.account)');
+      return o.policy ?? POLICY_OK;
     }
     return after(r);
   });
@@ -586,4 +599,222 @@ test('E-19: a legacy listing on another eBay site is INELIGIBLE for this account
   const own = tradingWorld('FixedPriceItem', '', notFound);
   const [r] = await own.adapter.preflight(ctx, ['110000000020']);
   assert.ok(!r!.findings.some((f) => f.code.startsWith('C13_')), JSON.stringify(r!.findings));
+});
+
+/**
+ * Шаг 49 [Р-191]: условия bulkMigrateListing из снимка документации — немедленная оплата платёжной политики и индекс или город листинга.
+ * У каждого требования три исхода: выполнено — препятствия нет; не выполнено — BLOCKER и FIXABLE; прочитать не удалось — PREFLIGHT_INCOMPLETE и
+ * UNKNOWN (не угадываем).
+ */
+test('Р-191: immediate payment of the payment policy — on: no blocker; off: C14 BLOCKER, FIXABLE; unread or not stated: UNKNOWN', async () => {
+  const notFound = () => ({ status: 404, body: { errors: [{ errorId: 25713, message: 'This Offer is not available.' }] } }) as Reply;
+  const codes = (p: { findings: Array<{ code: string; severity: string }> }) => p.findings.map((f) => `${f.code}:${f.severity}`);
+  const on = tradingWorld('FixedPriceItem', '', notFound);
+  const [a] = await on.adapter.preflight(ctx, ['110000000020']);
+  assert.equal(a!.verdict, 'READY', JSON.stringify(a));
+  assert.ok(!codes(a!).some((c) => c.startsWith('C14_')));
+  assert.equal(on.seen.filter((r) => r.url.pathname.startsWith('/sell/account/')).length, 1, 'the policy is read once');
+
+  const off = tradingWorld('FixedPriceItem', '', notFound, 'Germany', { policy: { status: 200, body: { paymentPolicyId: '6200000002', immediatePay: false } } });
+  const [b] = await off.adapter.preflight(ctx, ['110000000020']);
+  assert.equal(b!.verdict, 'FIXABLE');
+  assert.ok(b!.findings.some((f) => f.code === 'C14_IMMEDIATE_PAY' && f.severity === 'BLOCKER' && /immediate payment is off/.test(f.details)), JSON.stringify(b));
+
+  const noPolicy = tradingWorld('FixedPriceItem', '', notFound, 'Germany', { parts: { payment: false } });
+  const [c] = await noPolicy.adapter.preflight(ctx, ['110000000020']);
+  assert.equal(c!.verdict, 'FIXABLE');
+  assert.ok(c!.findings.some((f) => f.code === 'C14_IMMEDIATE_PAY' && /no payment business policy/.test(f.details)), JSON.stringify(c));
+  assert.equal(noPolicy.seen.filter((r) => r.url.pathname.startsWith('/sell/account/')).length, 0, 'nothing to read without a policy id');
+
+  for (const policy of [{ status: 403, body: { errors: [{ errorId: 1100, message: 'Access denied' }] } }, { status: 200, body: { paymentPolicyId: '6200000002' } }] as Reply[]) {
+    const unread = tradingWorld('FixedPriceItem', '', notFound, 'Germany', { policy });
+    const [d] = await unread.adapter.preflight(ctx, ['110000000020']);
+    assert.equal(d!.verdict, 'UNKNOWN', JSON.stringify(d));
+    assert.ok(d!.findings.some((f) => f.code === 'PREFLIGHT_INCOMPLETE' && /payment policy/.test(f.details) && /immediate payment is turned on in the payment policy on eBay/.test(f.details)), JSON.stringify(d));
+    assert.ok(!d!.findings.some((f) => f.code === 'C14_IMMEDIATE_PAY'), 'an unread policy is not guessed to be off');
+  }
+});
+
+test('Р-191: postal code or city of the listing — Location or PostalCode: no blocker; neither: C15 BLOCKER; the seller address does not count; GetItem unread: UNKNOWN', async () => {
+  const notFound = () => ({ status: 404, body: { errors: [{ errorId: 25713, message: 'This Offer is not available.' }] } }) as Reply;
+  for (const place of ['Location', 'PostalCode'] as const) {
+    const w = tradingWorld('FixedPriceItem', '', notFound, 'Germany', { parts: { place } });
+    const [p] = await w.adapter.preflight(ctx, ['110000000020']);
+    assert.equal(p!.verdict, 'READY', `${place}: ${JSON.stringify(p)}`);
+  }
+  const none = tradingWorld('FixedPriceItem', '', notFound, 'Germany', { parts: { place: null, sellerPostalCode: true } });
+  const [q] = await none.adapter.preflight(ctx, ['110000000020']);
+  assert.equal(q!.verdict, 'FIXABLE');
+  assert.ok(q!.findings.some((f) => f.code === 'C15_LOCATION' && f.severity === 'BLOCKER'), JSON.stringify(q));
+  assert.ok(!JSON.stringify([q, none.logs]).includes('99998'), 'the postal code of the seller address is neither read as the listing place nor copied anywhere');
+  const parsed = parseGetItem(getItemXml('FixedPriceItem', '', 'Germany', { place: null, sellerPostalCode: true }));
+  assert.ok(parsed.ok && parsed.facts.itemLocationSet === false && parsed.facts.paymentProfileId === '6200000002');
+  // GetItem не прочитан — ни одного из требований не знаем: UNKNOWN, а не «нет места»
+  const broken = world((r) => (r.url.pathname === '/ws/api.dll' && r.headers['x-ebay-api-call-name'] === 'GetItem'
+    ? { status: 200, xml: '<?xml version="1.0" encoding="UTF-8"?><GetItemResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Ack>Failure</Ack><Errors><ShortMessage>Internal error</ShortMessage><ErrorCode>10007</ErrorCode></Errors></GetItemResponse>' }
+    : r.url.pathname === '/ws/api.dll' ? { status: 200, xml: prefsXml } : { status: 500 }));
+  const [u] = await broken.adapter.preflight(ctx, ['110000000020']);
+  assert.equal(u!.verdict, 'UNKNOWN');
+  assert.ok(!u!.findings.some((f) => f.code === 'C15_LOCATION'), JSON.stringify(u));
+});
+
+test('Р-191: the requirements do not enter the consent snapshot — they are conditions of the migration, not what it loses', () => {
+  const a = parseGetItem(getItemXml('FixedPriceItem'));
+  const b = parseGetItem(getItemXml('FixedPriceItem', '', 'Germany', { place: null, payment: false }));
+  assert.ok(a.ok && b.ok);
+  assert.equal(snapshotSha256({ ...a.facts, outOfStockControl: false }), snapshotSha256({ ...b.facts, outOfStockControl: false }));
+});
+
+/**
+ * Шаг 49 [Р-189, E-22]: снимок говорит «один SKU на вызов», схема и песочница — до 25. Боевой аккаунт доказывает пакет сам: проба — один
+ * пакет из 2 SKU на план, остальные по одному; MULTI — до 25; SINGLE — по одному; тень и аккаунт без режима записи — как раньше.
+ */
+test('Р-189: batch planning by the batch mode of a LIVE account — probe 2 + singles, MULTI up to 25, SINGLE one SKU per call; shadow unchanged', async () => {
+  const many = Array.from({ length: 30 }, (_, i) => write(String(200 + i), eur(1000 + i)));
+  const sizes = async (o: Parameters<typeof world>[1]) => {
+    const w = world(() => ({ status: 200 }), o);
+    return { sizes: (await w.adapter.planDispatch(ctx, many)).batches.map((b) => b.items.length).sort((x, y) => y - x), logs: w.logs };
+  };
+  const probe = await sizes({ writeMode: 'LIVE', batchMode: () => 'PROBE' });
+  assert.deepEqual(probe.sizes, [2, ...Array(28).fill(1)], 'one probe of 2 SKUs, the rest one per call');
+  assert.ok(probe.logs.some((l) => l.code === 'EBAY_C18_MULTI_SKU_PROBE' && l.question === 'E-22'));
+  assert.deepEqual((await sizes({ writeMode: 'LIVE' })).sizes, [2, ...Array(28).fill(1)], 'a LIVE account without a named mode is a probe (fail-closed)');
+  assert.deepEqual((await sizes({ writeMode: 'LIVE', batchMode: () => 'MULTI' })).sizes, [25, 5]);
+  assert.deepEqual((await sizes({ writeMode: 'LIVE', batchMode: () => 'SINGLE' })).sizes, Array(30).fill(1));
+  assert.deepEqual((await sizes({ writeMode: 'SHADOW', batchMode: () => 'SINGLE' })).sizes, [25, 5], 'the shadow sends nothing: its plan is unchanged');
+});
+
+test('Р-189: a LIVE multi-SKU batch accepted per element is multiSkuAccepted=true; refused as a whole it is retried (TRANSIENT) with false; one SKU carries no outcome', async () => {
+  const a = write('41', eur(1301));
+  const b = write('42', eur(1302));
+  const perItem = () => ({ status: 200, body: { responses: [a, b].map((x) => ({ statusCode: 200, offerId: x.writeScope.identity.externalOfferId })) } }) as Reply;
+  const accepted = await world(perItem, { writeMode: 'LIVE', batchMode: () => 'PROBE' }).adapter.dispatch(ctx, batchOf([a, b]));
+  assert.deepEqual(accepted.ebayBatchOutcome, { multiSkuAccepted: true });
+  assert.deepEqual(accepted.outcomes.map((o) => o.status), ['ACCEPTED', 'ACCEPTED']);
+  // Ответ всего вызова без ответов по элементам — отказ формы: код ошибки канала синтетический (реальный неизвестен, E-22)
+  const whole = world(() => ({ status: 400, body: { errors: [{ errorId: 99001, message: 'Only one SKU can be updated per call (synthetic)' }] } }), { writeMode: 'LIVE', batchMode: () => 'PROBE' });
+  const refused = await whole.adapter.dispatch(ctx, batchOf([a, b]));
+  assert.deepEqual(refused.ebayBatchOutcome, { multiSkuAccepted: false });
+  for (const o of refused.outcomes) {
+    assert.ok(o.status === 'REJECTED' && o.error.class === 'TRANSIENT' && o.error.code === 'ACTION_NOT_ALLOWED' && o.error.channelCode === '99001' && /one SKU per call/.test(o.error.message), JSON.stringify(o));
+  }
+  assert.ok(whole.logs.some((l) => l.code === 'EBAY_C18_MULTI_SKU_PROBE' && l.details?.sent === true));
+  assert.equal(whole.alerts.length, 0, 'the alert is raised by the database function, not a second time here');
+  // Не отказ формы: 429 и 25712 — прежняя классификация, итога нет; один SKU — итога нет; тень — итога нет
+  const limited = await world(() => ({ status: 429, body: { errors: [{ errorId: 2001, message: 'Too many requests' }] } }), { writeMode: 'LIVE', batchMode: () => 'PROBE' }).adapter.dispatch(ctx, batchOf([a, b]));
+  assert.equal(limited.ebayBatchOutcome, undefined);
+  assert.equal(limited.outcomes[0]!.status === 'REJECTED' && limited.outcomes[0]!.error.code, 'RATE_LIMITED');
+  const single = await world(() => ({ status: 400, body: { errors: [{ errorId: 25709, message: 'Invalid value' }] } }), { writeMode: 'LIVE', batchMode: () => 'PROBE' }).adapter.dispatch(ctx, batchOf([a]));
+  assert.equal(single.ebayBatchOutcome, undefined, 'one SKU carries no batch outcome');
+  assert.ok(single.outcomes[0]!.status === 'REJECTED' && single.outcomes[0]!.error.class === 'PERMANENT', 'one SKU refused — the old classification');
+  const shadow = await world(perItem, { writeMode: 'SHADOW' }).adapter.dispatch(ctx, batchOf([a, b]));
+  assert.equal(shadow.ebayBatchOutcome, undefined, 'the database takes an outcome only from a LIVE account');
+});
+
+test('Р-189: a plan made before the account went SINGLE is not sent — retried without a call and without an edit charge', async () => {
+  let mode: 'PROBE' | 'SINGLE' = 'PROBE';
+  const w = world(() => ({ status: 200 }), { writeMode: 'LIVE', batchMode: () => mode });
+  const a = write('43', eur(1303));
+  const b = write('44', eur(1304));
+  const plan = await w.adapter.planDispatch(ctx, [a, b]);
+  assert.deepEqual(plan.batches.map((x) => x.items.length), [2]);
+  mode = 'SINGLE';
+  const r = await w.adapter.dispatch(ctx, plan.batches[0]!);
+  assert.equal(w.seen.length, 0, 'no call to eBay');
+  assert.equal(r.attemptsMade, 0);
+  assert.ok(r.outcomes.every((o) => o.status === 'REJECTED' && o.error.class === 'TRANSIENT'), JSON.stringify(r.outcomes));
+  assert.equal(r.ebayBatchOutcome, undefined, 'nothing was sent — no outcome');
+  const replanned = await w.adapter.planDispatch(ctx, [a, b]);
+  assert.deepEqual(replanned.batches.map((x) => x.items.length), [1, 1], 'the next plan reads the new mode');
+});
+
+/**
+ * Шаг 49 [Р-190, E-21]: в бою Browse не вызывается, пока лицензия Buy API не выяснена. Цена и количество подтверждаются записью
+ * предложения (ownRecordOnly), цены покупателя нет, правку другой программой не видно — это записано в журнал ОДИН раз на аккаунт.
+ */
+test('Р-190: PRODUCTION never calls Browse — price and quantity from the offer record (ownRecordOnly), no buyerPrice, no C10 alert, EBAY_C19 once per account', async () => {
+  const price = write('51', eur(1349));
+  const qty = write('51', { field: 'QUANTITY', quantity: 3 });
+  const offer = (value: string) => ({ status: 200, body: { offerId: price.writeScope.identity.externalOfferId, sku: 'SYN-51', marketplaceId: 'EBAY_DE', availableQuantity: 3,
+    pricingSummary: { price: { value, currency: 'EUR' } }, listing: { listingId: price.writeScope.identity.externalListingId, listingStatus: 'ACTIVE' } } }) as Reply;
+  const w = world((r) => {
+    assert.ok(!r.url.pathname.startsWith('/buy/'), `Browse must not be called in production: ${r.url.pathname}`);
+    assert.equal(r.url.origin, 'https://api.ebay.com', 'production host');
+    return offer('13.49');
+  }, { environment: 'PRODUCTION', writeMode: 'LIVE' });
+  const read = await w.adapter.readBack(ctx, [{ writeScope: price.writeScope, fields: ['PRICE'] }, { writeScope: qty.writeScope, fields: ['QUANTITY'] }]);
+  assert.deepEqual(read.failures, []);
+  const [p, q] = read.observations;
+  assert.ok(p!.value.field === 'PRICE' && p!.value.price.amountMinor === 1349 && p!.ownRecordOnly === true && p!.buyerPrice === undefined && p!.effectivePrice === undefined, JSON.stringify(p));
+  assert.ok(q!.value.field === 'QUANTITY' && q!.value.quantity === 3 && q!.ownRecordOnly === true, JSON.stringify(q));
+  const [c] = await w.adapter.confirm(ctx, [{ channelWriteId: price.channelWriteId, writeScope: price.writeScope, expected: price.value, dispatchedAt: NOW as never }]);
+  assert.equal(c!.status, 'APPLIED', 'the write is confirmed by the offer record');
+  assert.equal(w.alerts.length, 0, 'no EBAY_OFFER_LISTING_DIVERGENCE: another tool is not visible without Browse');
+  assert.equal(w.logs.filter((l) => l.code === 'EBAY_C19_BROWSE_UNAVAILABLE_IN_PRODUCTION' && l.question === 'E-21').length, 1, 'logged once per account, not per read');
+  assert.ok(!w.logs.some((l) => l.code === 'EBAY_C06_BROWSE_APPLICATION_TOKEN'));
+  assert.equal(w.tokens.n, 1, 'only the user token was requested — no application token for Browse');
+  // Песочница: Browse по-прежнему читается, наблюдение не помечено
+  const sb = world((r) => (r.url.pathname.startsWith('/buy/') ? { status: 200, body: { price: { value: '13.49', currency: 'EUR' } } } : offer('13.49')));
+  const sbRead = await sb.adapter.readBack(ctx, [{ writeScope: price.writeScope, fields: ['PRICE'] }]);
+  assert.ok(sb.seen.some((r) => r.url.pathname.startsWith('/buy/browse/')), 'the sandbox still reads the live listing');
+  assert.equal(sbRead.observations[0]!.ownRecordOnly, undefined);
+});
+
+/**
+ * Ревью шага 49, находка 10: перепроверка перед миграцией пяти листингов — это 12 чтений и вызов миграции при клиентском запасе 4 запроса
+ * [EBAY_C01]. Отказ клиентского бюджета — запрос не отправлен, поэтому адаптер ждёт до retryAt в пределах срока вызова, а не объявляет
+ * листинг «не перепроверен».
+ */
+test('review 49 #10: consent for 5 listings passes the full re-check under the default client request budget and migrates all five', async () => {
+  const idsOf = Array.from({ length: 5 }, (_, i) => `11000000003${i}`);
+  const itemFor = (id: string) => getItemXml('FixedPriceItem').replace('<ItemID>110000000020</ItemID>', `<ItemID>${id}</ItemID>`);
+  const w = world((r) => {
+    if (r.url.pathname === '/ws/api.dll') {
+      if (r.headers['x-ebay-api-call-name'] === 'GetUserPreferences') return { status: 200, xml: prefsXml };
+      return { status: 200, xml: itemFor(/<ItemID>(\d+)<\/ItemID>/.exec(r.body)![1]!) };
+    }
+    if (r.url.pathname.startsWith('/sell/account/v1/payment_policy/')) return POLICY_OK;
+    if (r.url.pathname === '/sell/inventory/v1/offer') return { status: 404, body: { errors: [{ errorId: 25713, message: 'This Offer is not available.' }] } };
+    assert.equal(r.url.pathname, '/sell/inventory/v1/bulk_migrate_listing');
+    return { status: 200, body: { responses: idsOf.map((id, i) => ({ statusCode: 200, listingId: id, inventoryItems: [{ sku: 'SYN-LEGACY', offerId: `900000004${i}` }] })) } };
+  });
+  const pre = await w.adapter.preflight(ctx, idsOf);
+  assert.deepEqual(pre.map((p) => p.verdict), Array(5).fill('READY'), 'the preflight itself waits for the budget too');
+  const proofs: MigrationConsentProof[] = pre.map((p, i) => ({ migrationConsentId: `mc-${i}`, listingId: p.listingId, listingSnapshotSha256: p.listingSnapshotSha256, offerMappingStatus: 'MIGRATION_STARTED' }));
+  const out = await w.adapter.migrate(ctx, proofs);
+  assert.deepEqual(out.map((o) => o.status), Array(5).fill('MIGRATED'), JSON.stringify(out));
+  assert.equal(w.seen.filter((r) => r.url.pathname.endsWith('bulk_migrate_listing')).length, 1);
+  assert.ok(w.logs.some((l) => l.code === 'EBAY_C01_REQUEST_BUDGET'), 'the client budget was hit — and waited for, not refused');
+});
+
+/**
+ * Ревью шага 49, находки 6, 7, 14: отказом формы считается только 400 без ответов по элементам с кодом, не относящимся к значениям; «принят» —
+ * только при ответе по каждому предложению; в бою каталог без режима записи — проба.
+ */
+test('review 49 #6 #7 #14: value errors, 404/409 are not a multi-SKU refusal; accepted only with an answer per offer; PRODUCTION without a write mode is a probe', async () => {
+  const a = write('61', eur(1301));
+  const b = write('62', eur(1302));
+  for (const reply of [
+    { status: 400, body: { errors: [{ errorId: 25709, message: 'Invalid value for Offers.price.value.' }] } },
+    { status: 400, body: { errors: [{ errorId: 25604, message: 'Offer not found' }] } },
+    { status: 400, body: { errors: [{ errorId: 25016, message: 'below minimum' }] } },
+    { status: 400, body: { errors: [{ errorId: 25002, message: 'user error' }] } },
+    { status: 404, body: { errors: [{ errorId: 99001, message: 'not found' }] } },
+    { status: 409, body: { errors: [{ errorId: 99002, message: 'conflict' }] } },
+  ] as Reply[]) {
+    const r = await world(() => reply, { writeMode: 'LIVE', batchMode: () => 'PROBE' }).adapter.dispatch(ctx, batchOf([a, b]));
+    assert.equal(r.ebayBatchOutcome, undefined, `no batch outcome for ${JSON.stringify(reply)}`);
+    assert.ok(r.outcomes.every((o) => o.status === 'REJECTED' && o.error.class !== 'TRANSIENT'), `the ordinary classification: ${JSON.stringify(r.outcomes)}`);
+  }
+  // 200 с ответом только по одному предложению из двух — итог пакета не сообщается, журнал называет числа
+  const half = world(() => ({ status: 200, body: { responses: [{ statusCode: 200, offerId: a.writeScope.identity.externalOfferId }] } }), { writeMode: 'LIVE', batchMode: () => 'PROBE' });
+  const r = await half.adapter.dispatch(ctx, batchOf([a, b]));
+  assert.equal(r.ebayBatchOutcome, undefined);
+  assert.ok(half.logs.some((l) => l.code === 'EBAY_C18_MULTI_SKU_PROBE' && l.details?.skus === 2 && l.details?.answered === 1 && l.details?.outcome === 'NOT_REPORTED'), JSON.stringify(half.logs));
+  // Бой без режима записи в каталоге — проба; песочница без режима — как раньше
+  const many = Array.from({ length: 5 }, (_, i) => write(String(300 + i), eur(1000 + i)));
+  const prod = await world(() => ({ status: 200 }), { environment: 'PRODUCTION' }).adapter.planDispatch(ctx, many);
+  assert.deepEqual(prod.batches.map((x) => x.items.length).sort((x, y) => y - x), [2, 1, 1, 1]);
+  const sb = await world(() => ({ status: 200 })).adapter.planDispatch(ctx, many);
+  assert.deepEqual(sb.batches.map((x) => x.items.length), [5]);
 });

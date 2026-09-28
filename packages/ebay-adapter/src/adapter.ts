@@ -16,7 +16,7 @@ export function createEbayAdapter(input: EbayAdapterOptions): ChannelAdapter & S
     async planDispatch(ctx, writes) {
       const opened = await openSession(options, ctx);
       if (!opened.ok) return { batches: [], rejected: writes.map((w) => ({ channelWriteId: w.channelWriteId, error: opened.error })) };
-      return planEbayDispatch(ctx, opened.session.account, writes, options.deps.logger);
+      return planEbayDispatch(ctx, opened.session.account, writes, options.deps.logger, options.environment);
     },
     dispatch: (ctx, batch) => dispatchEbay(options, ctx, batch),
     readBack: (ctx, requests) => readBackEbay(options, ctx, requests),
@@ -36,6 +36,7 @@ export function createEbayAdapter(input: EbayAdapterOptions): ChannelAdapter & S
  */
 export function ebayAdapterFactory(config: Omit<EbayAdapterOptions, 'deps'>) {
   const state = resolveOptions({ ...config, deps: null as never });
-  const shared = { requestBudget: state.requestBudget, editLedger: state.editLedger, tokenCache: state.tokenCache, vatAlertedAccounts: state.vatAlertedAccounts };
+  const shared = { requestBudget: state.requestBudget, editLedger: state.editLedger, tokenCache: state.tokenCache, vatAlertedAccounts: state.vatAlertedAccounts,
+    browseUnavailableLogged: state.browseUnavailableLogged };
   return (deps: AdapterDependencies): ChannelAdapter & SupportsListingMigration => createEbayAdapter({ ...config, ...shared, deps });
 }

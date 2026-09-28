@@ -57,7 +57,7 @@ export function pgStoreFactory(
       claimNext: writeQueue.claimNext.bind(writeQueue),
       recordOutcome: writeQueue.recordOutcome.bind(writeQueue),
       recordReconciliation: writeQueue.recordReconciliation.bind(writeQueue),
-      checkPriceBasis: writeQueue.checkPriceBasis.bind(writeQueue),
+      checkPriceBasis: writeQueue.checkPriceBasis.bind(writeQueue), recordEbayBatchOutcome: writeQueue.recordEbayBatchOutcome.bind(writeQueue),
       dueScopes: async (at, options) => (await writeQueue.dueScopes(at, options)).filter((d) => d.tenantId === seeded.tenantId),
     }, seeded.ids);
     const order = seed.scopes.map((s) => s.writeScopeId);

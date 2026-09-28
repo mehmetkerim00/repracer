@@ -12,7 +12,9 @@ import { defaultEbayParams, type EbayModelParams } from './params.ts';
  * - Browse — живая цена, оценка количества, sellerItemRevision и цена покупателя с НДС сверху, если так велит параметр E-17;
  * - Trading: GetUserPreferences, GetItem, ReviseFixedPriceItem «другим инструментом» — меняет живой листинг, но не предложение (E-16);
  * - bulk_migrate_listing: предложение появляется без availableQuantity, Best Offer — по E-15;
- * - 250 правок в день канал не применяет, пока его не включит параметр E-02; лимит запросов — только по E-04.
+ * - 250 правок в день канал не применяет, пока его не включит параметр E-02; лимит запросов — только по E-04;
+ * - пакет разных SKU принимается, как в песочнице; вариант E-22 отвергает его целиком (Р-189);
+ * - Account API getPaymentPolicy — немедленная оплата платёжной политики (Р-191; ответ синтетический, песочница вызов не делала).
  * Не моделируется: страницы inventory_item (обнаружение), заказы, уведомления, вариации. Все данные синтетические.
  */
 
@@ -32,6 +34,10 @@ export interface SimEbayListingSpec {
   revisionsToday?: number;
   /** Предложение без availableQuantity — так пришло мигрированное в песочнице (EBAY_C07) */
   offerWithoutQuantity?: boolean;
+  /** Шаг 49 [Р-191]: у листинга задан город (Location); по умолчанию — да */
+  itemLocation?: boolean;
+  /** Шаг 49 [Р-191]: у листинга есть платёжная бизнес-политика; по умолчанию — да */
+  paymentPolicy?: boolean;
 }
 
 /** world.channelModel сценария eBay */
@@ -40,6 +46,8 @@ export interface EbayChannelModelSpec {
   params?: Partial<EbayModelParams>;
   sellerUserId?: string;
   outOfStockControl?: boolean;
+  /** Шаг 49 [Р-191]: `immediatePay` платёжной политики модели (Account API); null — поле не приходит; по умолчанию true */
+  immediatePay?: boolean | null;
   listings: SimEbayListingSpec[];
 }
 
@@ -72,6 +80,8 @@ export interface EbaySimulatorStats {
   otherToolRevisions: number;
   otherToolRefused: number;
   migrations: number;
+  /** E-22: вызовы с разными SKU, отвергнутые целиком (параметр multiSkuPerCall) */
+  multiSkuRefused: number;
 }
 
 const CURRENCY: Readonly<Record<string, string>> = { EBAY_DE: 'EUR', EBAY_US: 'USD' };
@@ -86,14 +96,24 @@ const restError = (errorId: number, message: string, parameters?: Array<{ name: 
 });
 
 /** GetItem, сокращённый до элементов, которые читает предполётная проверка адаптера (как фикстуры шага 39) */
-export function ebayGetItemXml(l: { listingId: string; sku: string; format: 'FIXED_PRICE' | 'AUCTION'; bestOffer: boolean; priceMinor: number; quantity: number; currency: string }): string {
+export const SIM_PAYMENT_POLICY_ID = '6200000002';
+
+/**
+ * Шаг 49 [Р-191]: у листинга модели по умолчанию есть платёжная политика и город (`Location` в ItemType) — условия bulkMigrateListing из
+ * снимка документации; `itemLocation: false` и `paymentPolicy: false` их убирают. Значения синтетические.
+ */
+export function ebayGetItemXml(l: { listingId: string; sku: string; format: 'FIXED_PRICE' | 'AUCTION'; bestOffer: boolean; priceMinor: number; quantity: number; currency: string;
+  itemLocation?: boolean; paymentPolicy?: boolean }): string {
   const type = l.format === 'AUCTION' ? 'Chinese' : 'FixedPriceItem';
   return `<?xml version="1.0" encoding="UTF-8"?>\n<GetItemResponse xmlns="${XMLNS}"><Ack>Success</Ack><Version>1193</Version><Item><Currency>${l.currency}</Currency><ItemID>${l.listingId}</ItemID>`
     + '<ListingDesigner><LayoutID>7710000</LayoutID><ThemeID>7710</ThemeID></ListingDesigner>'
     + `<ListingDuration>${l.format === 'AUCTION' ? 'Days_7' : 'GTC'}</ListingDuration><ListingType>${type}</ListingType><Quantity>${l.quantity}</Quantity>`
     + `<SellingStatus><CurrentPrice currencyID="${l.currency}">${major(l.priceMinor)}</CurrentPrice><ListingStatus>Active</ListingStatus></SellingStatus>`
     + (l.bestOffer ? '<BestOfferDetails><BestOfferCount>0</BestOfferCount><BestOfferEnabled>true</BestOfferEnabled><NewBestOffer>false</NewBestOffer></BestOfferDetails>' : '')
-    + `<SKU>${l.sku}</SKU><SellerProfiles><SellerShippingProfile><ShippingProfileID>6200000001</ShippingProfileID></SellerShippingProfile></SellerProfiles></Item></GetItemResponse>`;
+    + (l.itemLocation === false ? '' : '<Location>Syn-Stadt</Location>')
+    + `<SKU>${l.sku}</SKU><SellerProfiles><SellerShippingProfile><ShippingProfileID>6200000001</ShippingProfileID></SellerShippingProfile>`
+    + (l.paymentPolicy === false ? '' : `<SellerPaymentProfile><PaymentProfileID>${SIM_PAYMENT_POLICY_ID}</PaymentProfileID></SellerPaymentProfile>`)
+    + '</SellerProfiles></Item></GetItemResponse>';
 }
 
 function tradingFailure(code: string, message: string): string {
@@ -104,7 +124,7 @@ export class SimulatedEbayChannel implements ChannelBehaviour {
   readonly params: EbayModelParams;
   readonly stats: EbaySimulatorStats = {
     requests: {}, rateLimited: 0, editLimited: 0, itemsApplied: 0, itemsRejected: 0, roundedUpSilently: 0, foreignCurrencyStored: 0,
-    otherToolRevisions: 0, otherToolRefused: 0, migrations: 0,
+    otherToolRevisions: 0, otherToolRefused: 0, migrations: 0, multiSkuRefused: 0,
   };
   private readonly spec: EbayChannelModelSpec;
   private readonly tokens: { user: string; application: string };
@@ -224,6 +244,13 @@ export class SimulatedEbayChannel implements ChannelBehaviour {
       const l = [...this.listings.values()].find((x) => x.sku === request.query.sku && x.offer);
       return l ? json(200, { total: 1, size: 1, limit: 20, offers: [this.offerBody(l)] }) : json(404, { errors: [restError(25713, 'This Offer is not available.')] });
     }
+    // Шаг 49 [Р-191]: Account API getPaymentPolicy [док: sell_account_v1_oas3.json]; ответ синтетический — песочница этот вызов не делала
+    if (method === 'GET' && path.startsWith('/sell/account/v1/payment_policy/')) {
+      const id = decodeURIComponent(path.slice('/sell/account/v1/payment_policy/'.length));
+      if (id !== SIM_PAYMENT_POLICY_ID) return json(404, { errors: [{ errorId: 20404, domain: 'SYNTHETIC', message: 'payment policy not found (model)' }] });
+      const immediatePay = this.spec.immediatePay === undefined ? true : this.spec.immediatePay;
+      return json(200, { paymentPolicyId: id, name: 'syn-payment-policy', marketplaceId: 'EBAY_DE', ...(immediatePay === null ? {} : { immediatePay }) });
+    }
     const browse = /^\/buy\/browse\/v1\/item\/v1\|(\d+)\|0$/.exec(path);
     if (method === 'GET' && browse) {
       const l = this.listings.get(browse[1]!);
@@ -252,7 +279,9 @@ export class SimulatedEbayChannel implements ChannelBehaviour {
       const l = this.listings.get(itemId);
       if (call === 'GetItem') {
         if (!l) return xml(tradingFailure('17', 'Item cannot be accessed (model).'));
-        return xml(ebayGetItemXml({ listingId: l.listingId, sku: l.sku, format: l.format, bestOffer: l.bestOffer, priceMinor: l.live.priceMinor, quantity: l.live.quantity, currency: l.live.currency }));
+        const spec = this.spec.listings.find((x) => x.listingId === l.listingId);
+        return xml(ebayGetItemXml({ listingId: l.listingId, sku: l.sku, format: l.format, bestOffer: l.bestOffer, priceMinor: l.live.priceMinor, quantity: l.live.quantity, currency: l.live.currency,
+          ...(spec?.itemLocation === false ? { itemLocation: false } : {}), ...(spec?.paymentPolicy === false ? { paymentPolicy: false } : {}) }));
       }
       if (call === 'ReviseFixedPriceItem') {
         const price = /<StartPrice[^>]*>([\d.]+)<\/StartPrice>/.exec(body)?.[1];
@@ -295,6 +324,19 @@ export class SimulatedEbayChannel implements ChannelBehaviour {
     if (!Array.isArray(requests)) return json(400, { errors: [restError(25709, 'Invalid value for requests.')] });
     // [песочница] 26 запросов — 400 25712 на весь запрос
     if (requests.length > 25) return json(400, { errors: [restError(25712, 'Invalid request size. The maximum size allowed is 25.')] });
+    // E-22 (Р-189): описание операции — «один SKU на вызов». Вариант модели отвергает вызов с разными SKU ЦЕЛИКОМ, ничего не применяя;
+    // код и текст — синтетические: настоящего ответа боевого канала никто не видел
+    if (this.params.multiSkuPerCall === 'REFUSED_WHOLE_REQUEST') {
+      const skus = new Set(requests.map((r) => {
+        const o = r.offers?.[0] ?? {};
+        const byOffer = typeof o.offerId === 'string' ? [...this.listings.values()].find((x) => x.offer?.offerId === o.offerId) : undefined;
+        return byOffer?.sku ?? (typeof o.sku === 'string' ? o.sku : String(o.offerId ?? ''));
+      }));
+      if (skus.size > 1) {
+        this.stats.multiSkuRefused += 1;
+        return json(400, { errors: [{ errorId: 99022, domain: 'SYNTHETIC', category: 'REQUEST', message: 'Only one SKU can be updated per call (model hypothesis E-22, the channel error code is unknown)' }] });
+      }
+    }
     // Проверка всего запроса ДО применения: 25709 — ни один элемент не применяется [песочница: цена -1.00 и «abc»]
     const parsed: Array<{ offerId: string | null; sku: string | null; priceMinor: number | null; currency: string | null; quantity: number | null; roundedUp: boolean }> = [];
     for (const r of requests) {

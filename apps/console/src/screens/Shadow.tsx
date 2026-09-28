@@ -50,6 +50,7 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
                       <Badge tone={a.writeMode === 'SHADOW' ? 'warn' : 'ok'}>{a.modeText}</Badge>
                       {a.changedText === null ? null : <div className="note">{a.changedText}</div>}
                       <div className="note">{m.ui.shadow.volume(a.offers, a.engineScopes)}</div>
+                      {a.channelLimitText === null ? null : <div className="note">{a.channelLimitText}</div>}
                     </td>
                     <td>
                       {a.canGoLive ? (

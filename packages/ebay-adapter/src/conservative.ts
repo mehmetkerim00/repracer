@@ -93,6 +93,16 @@ export const EBAY_CONSERVATIVE_RULES = {
     behaviour: 'Заказы Fulfillment API читаются по времени ИЗМЕНЕНИЯ (фильтр lastmodifieddate, проверить) и по белому списку полей (orderId, creationDate, cancelStatus.cancelState, lineItems: lineItemId, sku, legacyItemId, quantity, lineItemFulfillmentStatus, listingMarketplaceId), имена которых не подтверждены снимком (проверить); строка без нужного поля или с непонятным статусом пропускается с кодом журнала; витрина — из строки или единственная витрина аккаунта; возвраты не читаются (строка остаётся OPEN)',
     whenAnswered: 'По снимку Fulfillment API — поля и статусы сверяются, возвраты — отдельный статус RETURNED',
   },
+  EBAY_C18_MULTI_SKU_PROBE: {
+    question: 'E-22',
+    behaviour: 'Р-189: описание bulkUpdatePriceQuantity в снимке говорит «Only one SKU (one product) can be updated per call», а схема и песочница принимают до 25 предложений разных SKU. Боевой аккаунт доказывает пакет сам: первая боевая запись — пакет из 2 SKU (проба); пакет разных SKU принят — до 25; отвергнут целиком (4xx без ответов по элементам) — записи повторяются по одной (класс TRANSIENT: отвергнута форма вызова, а не значение), аккаунт переходит в режим «1 SKU на вызов» функцией базы с алертом EBAY_MULTI_SKU_REFUSED; обратно автоматически не возвращается',
+    whenAnswered: 'Если eBay подтвердит пакет разных SKU — проба не нужна (режим MULTI сразу); если запретит — SINGLE для всех аккаунтов',
+  },
+  EBAY_C19_BROWSE_UNAVAILABLE_IN_PRODUCTION: {
+    question: 'E-21',
+    behaviour: 'Р-190: в бою Browse API не вызывается, пока лицензия Buy API не выяснена. Подтверждение записи — обратное чтение предложения (GET offer, наша запись); цену покупателя и правки листинга другими программами (C10) в бою не видим; сверка базы цены Р-116 на eBay ограничена: её вход — наша же запись. Пишется один раз на аккаунт за процесс',
+    whenAnswered: 'Если лицензия Buy API для репрайсера подтверждена — Browse в бою включается, подтверждение цены переходит на живой листинг (EBAY_C05)',
+  },
 } as const satisfies Record<string, ConservativeRule>;
 
 export type EbayConservativeRuleCode = keyof typeof EBAY_CONSERVATIVE_RULES;

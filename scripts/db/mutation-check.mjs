@@ -74,7 +74,9 @@ async function smoke(db) {
     ['svc_onboarding', 'tests/db/smoke_guest.sql'], ['svc_admin', 'tests/db/smoke_guest_admin.sql'], ['postgres', 'tests/db/smoke_r65.sql'],
     ['svc_stock', 'tests/db/smoke_stock.sql'], ['svc_admin', 'tests/db/smoke_stock_path.sql'],
     // Шаг 41 [Р-169]: теневой режим — после проверок отправки, тем же порядком, что в prepare.sh
-    ['svc_admin', 'tests/db/smoke_shadow.sql'], ['postgres', 'tests/db/smoke_append_only.sql'], ['svc_admin', 'tests/db/smoke_alerts.sql'], ['svc_alert_delivery', 'tests/db/smoke_alerts_delivery.sql'],
+    ['svc_admin', 'tests/db/smoke_shadow.sql'],
+    // Шаг 49 [Р-189, Р-192]: режим пакетов eBay и удаление по уведомлению — до append-only, как в prepare.sh
+    ['postgres', 'tests/db/smoke_ebay_deletion.sql'], ['postgres', 'tests/db/smoke_append_only.sql'], ['svc_admin', 'tests/db/smoke_alerts.sql'], ['svc_alert_delivery', 'tests/db/smoke_alerts_delivery.sql'],
     // Шаг 42 [Р-172…Р-174]: свойства витрин и дайджест — тем же порядком, что в prepare.sh, до закрытия тенанта A
     ['postgres', 'tests/db/smoke_us_digest.sql'],
     // Шаг 43 [Р-175…Р-177]: подключение канала продавцом — тем же порядком, что в prepare.sh
@@ -225,8 +227,8 @@ const describeExpect = (e) => e.smoke !== undefined ? `smoke «${e.smoke}»` : e
 const describeMutation = (m) => typeof m === 'string' ? m.replace(/\s+/g, ' ').slice(0, 110) : `${m.fn}: «${m.from.slice(0, 50)}…» → «${m.to.slice(0, 30)}…»`;
 const sameCheck = (a, b) => describeExpect(a) === describeExpect(b);
 
-const { R93_ROWS, STEP17_ROWS = [], STEP18_ROWS = [], STEP19_ROWS = [], STEP20_ROWS = [], STEP21_ROWS = [], STEP22_ROWS = [], STEP23_ROWS = [], STEP24_ROWS = [], STEP25_ROWS = [], STEP25_B_ROWS = [], STEP25_D_ROWS = [], STEP26_ROWS = [], STEP27_ROWS = [], STEP28_ROWS = [], STEP30_ROWS = [], STEP32_ROWS = [], STEP34_ROWS = [], STEP35_ROWS = [], STEP36_ROWS = [], STEP37_ROWS = [], STEP40_ROWS = [], STEP41_ROWS = [], STEP42_ROWS = [], STEP43_ROWS = [], STEP44_ROWS = [], STEP45_ROWS = [], STEP47_ROWS = [], R93_NOT_MUTATED = [] } = await import(pathToFileURL(catalogPath).href);
-const rows = [...R93_ROWS, ...(process.argv.includes('--r93-only') ? [] : [...STEP17_ROWS, ...STEP18_ROWS, ...STEP19_ROWS, ...STEP20_ROWS, ...STEP21_ROWS, ...STEP22_ROWS, ...STEP23_ROWS, ...STEP24_ROWS, ...STEP25_ROWS, ...STEP25_B_ROWS, ...STEP25_D_ROWS, ...STEP26_ROWS, ...STEP27_ROWS, ...STEP28_ROWS, ...STEP30_ROWS, ...STEP32_ROWS, ...STEP34_ROWS, ...STEP35_ROWS, ...STEP36_ROWS, ...STEP37_ROWS, ...STEP40_ROWS, ...STEP41_ROWS, ...STEP42_ROWS, ...STEP43_ROWS, ...STEP44_ROWS, ...STEP45_ROWS, ...STEP47_ROWS])]
+const { R93_ROWS, STEP17_ROWS = [], STEP18_ROWS = [], STEP19_ROWS = [], STEP20_ROWS = [], STEP21_ROWS = [], STEP22_ROWS = [], STEP23_ROWS = [], STEP24_ROWS = [], STEP25_ROWS = [], STEP25_B_ROWS = [], STEP25_D_ROWS = [], STEP26_ROWS = [], STEP27_ROWS = [], STEP28_ROWS = [], STEP30_ROWS = [], STEP32_ROWS = [], STEP34_ROWS = [], STEP35_ROWS = [], STEP36_ROWS = [], STEP37_ROWS = [], STEP40_ROWS = [], STEP41_ROWS = [], STEP42_ROWS = [], STEP43_ROWS = [], STEP44_ROWS = [], STEP45_ROWS = [], STEP47_ROWS = [], STEP49_ROWS = [], R93_NOT_MUTATED = [] } = await import(pathToFileURL(catalogPath).href);
+const rows = [...R93_ROWS, ...(process.argv.includes('--r93-only') ? [] : [...STEP17_ROWS, ...STEP18_ROWS, ...STEP19_ROWS, ...STEP20_ROWS, ...STEP21_ROWS, ...STEP22_ROWS, ...STEP23_ROWS, ...STEP24_ROWS, ...STEP25_ROWS, ...STEP25_B_ROWS, ...STEP25_D_ROWS, ...STEP26_ROWS, ...STEP27_ROWS, ...STEP28_ROWS, ...STEP30_ROWS, ...STEP32_ROWS, ...STEP34_ROWS, ...STEP35_ROWS, ...STEP36_ROWS, ...STEP37_ROWS, ...STEP40_ROWS, ...STEP41_ROWS, ...STEP42_ROWS, ...STEP43_ROWS, ...STEP44_ROWS, ...STEP45_ROWS, ...STEP47_ROWS, ...STEP49_ROWS])]
   .filter((r) => !only || only.includes(r.row))
   // Задача E шага 30 [OQ-203]: быстрый прогон CI гоняет критичные строки каталога — защиты, которыми держится цена
   .filter((r) => !process.argv.includes('--critical') || r.critical === true);

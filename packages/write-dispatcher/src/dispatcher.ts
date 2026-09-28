@@ -1,4 +1,4 @@
-import type { AdapterCallContext, AlertSink, ChannelAdapter, FieldWrite, IdentifiedObservation, Instant, WriteOutcome } from '@repracer/channel-port';
+import type { AdapterCallContext, AlertSink, ChannelAdapter, DispatchResult, FieldWrite, IdentifiedObservation, Instant, WriteOutcome } from '@repracer/channel-port';
 import {
   coreError,
   DEFAULT_RETRY_POLICY,
@@ -68,6 +68,12 @@ export interface WriteQueueStore {
    * Действующая остановка той же причины не дублируется: возвращается она же. null — не признак базы цены.
    */
   checkPriceBasis(tenantId: string, write: FieldWrite, observedMinor: number, now: Instant): Promise<PriceBasisDistrust | null>;
+  /**
+   * Р-189 (E-22): итог боевого пакета РАЗНЫХ SKU у eBay. Хранилище переводит режим пакетов аккаунта только вперёд (проба → MULTI или
+   * SINGLE, MULTI → SINGLE) и при отказе само поднимает алерт с вопросом E-22 (`channel_data.record_ebay_batch_outcome`, 0142).
+   * Возвращает режим после итога. Каталог аккаунтов читает режим на каждом вызове адаптера — повтор идёт уже в новом режиме.
+   */
+  recordEbayBatchOutcome(tenantId: string, channelAccountId: string, multiSkuAccepted: boolean): Promise<string>;
 }
 
 export type DispatchStep =
@@ -164,6 +170,22 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
     await deps.alerts.raise({ code, severity, tenantId: tenantId as AdapterCallContext['tenantId'], details });
   }
 
+  /**
+   * Р-189: итог пакета разных SKU — в хранилище. Сбой записи итога не роняет отправку (записи уже ушли и их итоги записываются дальше):
+   * режим остаётся прежним, следующий пакет снова проверит его, а оператор видит алерт.
+   */
+  async function recordBatchOutcome(tenantId: string, channelAccountId: string, result: DispatchResult): Promise<void> {
+    if (!result.ebayBatchOutcome) return;
+    try {
+      await deps.store.recordEbayBatchOutcome(tenantId, channelAccountId, result.ebayBatchOutcome.multiSkuAccepted);
+    } catch (error) {
+      // Сбой приёмника алертов тоже не выходит наружу: итоги записей пакета уже известны и не должны стать OUTCOME_UNKNOWN
+      await alert(tenantId, 'EBAY_BATCH_OUTCOME_NOT_RECORDED', 'WARNING', {
+        channelAccountId, multiSkuAccepted: result.ebayBatchOutcome.multiSkuAccepted, errorCode: String((error as { code?: unknown }).code ?? 'UNKNOWN'),
+      }).catch(() => undefined);
+    }
+  }
+
   async function send(tenantId: string, channelAccountId: string, write: FieldWrite): Promise<WriteOutcome> {
     const ctx = callContext(tenantId, channelAccountId, `dispatch:${write.channelWriteId}:${write.attemptNo}`);
     try {
@@ -175,6 +197,7 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
       // Адаптер не запланировал запись и не отказал: к каналу обращения не было — повтор безопасен
       if (!batch) return { channelWriteId: write.channelWriteId, status: 'REJECTED', error: coreError('UNKNOWN', 'TRANSIENT', 'adapter planned no batch for the write') };
       const result = await adapter.dispatch(ctx, batch);
+      await recordBatchOutcome(tenantId, channelAccountId, result);
       return result.outcomes.find((o) => o.channelWriteId === write.channelWriteId)
         ?? { channelWriteId: write.channelWriteId, status: 'OUTCOME_UNKNOWN', error: coreError('UNKNOWN', 'TRANSIENT', 'adapter returned no outcome for the write') };
     } catch (error) {
@@ -216,7 +239,7 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
       if (failure) return { result: { kind: 'UNKNOWN', error: failure.error } };
       const observation = result.observations.find((o) => o.field === write.value.field);
       if (!observation) return { result: { kind: 'UNKNOWN', error: null } };
-      if (sameWriteValue(observation.value, write.value)) return { result: { kind: 'APPLIED' }, observation };
+      if (sameWriteValue(observation.value, write.value)) return { result: { kind: 'APPLIED', ...(observation.ownRecordOnly === true ? { ownRecordOnly: true } : {}) }, observation };
       const observedMinor = observation.value.field === 'PRICE' ? observation.value.price.amountMinor : null;
       return { result: { kind: 'NOT_APPLIED', observedMinor }, observation };
     } catch {
@@ -288,6 +311,7 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
           for (const w of batch.items) outcomes.set(w.channelWriteId, { channelWriteId: w.channelWriteId, status: 'REJECTED', error: coreError('VALIDATION', 'PERMANENT', 'batch holds two writes of one scope') });
           return;
         }
+        let result: DispatchResult | null = null;
         try {
           /**
            * Срок — у КАЖДОГО пакета свой (находка 9 ревью шага 36): один срок на всю группу означал, что хвост большого
@@ -295,12 +319,14 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
            * срок, и это свойство сохраняется.
            */
           const ctx = callContext(tenantId, channelAccountId, `dispatch:batch:${batch.batchId}`);
-          const result = await adapter.dispatch(ctx, batch);
+          result = await adapter.dispatch(ctx, batch);
           for (const o of result.outcomes) outcomes.set(o.channelWriteId, o);
         } catch (error) {
           // Исключение после отправки не исключено: итог каждой записи пакета неизвестен, перед повтором — сверка
           for (const w of batch.items) outcomes.set(w.channelWriteId, { channelWriteId: w.channelWriteId, status: 'OUTCOME_UNKNOWN', error: coreError('UNKNOWN', 'TRANSIENT', String((error as Error).message ?? error).slice(0, 200)) });
         }
+        // Ревью шага 49, находка 20: итог пакета — ПОСЛЕ блока отправки: итоги записей уже известны, и сбой здесь их не перепишет
+        if (result) await recordBatchOutcome(tenantId, channelAccountId, result);
       };
       const worker = async () => { while (nextBatch < batches.length) await sendOne(batches[nextBatch++]!); };
       await Promise.all(Array.from({ length: Math.max(1, Math.min(deps.batchConcurrency ?? 4, batches.length)) }, worker));

@@ -544,6 +544,8 @@ export interface PricingStore {
   recordDispatch(tenantId: string, write: FieldWrite, outcome: WriteOutcome, now: Instant): Promise<DispatchRecorded>;
   /** Р-116: как WriteQueueStore.checkPriceBasis — для первой отправки пути решения (ревью шага 22, находка 1) */
   checkPriceBasis(tenantId: string, write: FieldWrite, observedMinor: number, now: Instant): Promise<{ distrustId: string; reason: { code: string; params: Record<string, unknown> } } | null>;
+  /** Р-189 (E-22): как WriteQueueStore.recordEbayBatchOutcome — если своя отправка пути решения несёт итог пакета разных SKU */
+  recordEbayBatchOutcome(tenantId: string, channelAccountId: string, multiSkuAccepted: boolean): Promise<string>;
   /**
    * Р-118: снятие остановки по недоверию каналу — только человек с правом RELEASE_CHANNEL_DISTRUST, от своего имени, со вторым фактором
    * и заметкой; БД дублирует проверки (0082). RELEASED или NOT_ACTIVE (уже снята или не существует).
@@ -870,6 +872,8 @@ export interface ConsoleWriteRow {
   endReason: string | null;
   endParams: Reason['params'];
   supersededByWriteId: string | null;
+  /** Р-190 (шаг 49): применение подтверждено только нашей записью у канала (eBay: предложение), не живым листингом */
+  confirmedByOwnRecord: boolean;
 }
 
 export interface ConsoleHaltRow {

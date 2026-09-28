@@ -229,6 +229,8 @@ interface WriteRow {
   endReason: string | null;
   endParams: Record<string, string | number | boolean | null>;
   supersededByWriteId: string | null;
+  /** Р-190: применение подтверждено только нашей записью у канала (как channel_write.confirmed_by_own_record) */
+  confirmedByOwnRecord?: boolean;
 }
 
 interface CompetitorRow {
@@ -1039,6 +1041,31 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     if (!this.inboundNotifications.has(key)) this.inboundNotifications.set(key, { ...entry });
   }
 
+  /** Р-189 (E-22): режим пакетов аккаунтов eBay; нет строки — проба (как NULL в `channel_account.ebay_batch_mode`) */
+  readonly ebayBatchModes = new Map<string, 'MULTI' | 'SINGLE'>();
+  /** Р-189: как алерт EBAY_MULTI_SKU_REFUSED, который поднимает функция базы, — хранилище в памяти алертов не пишет, оно их помнит */
+  readonly ebayBatchRefusals: Array<{ channelAccountId: string; from: 'PROBE' | 'MULTI'; to: 'SINGLE'; question: 'E-22' }> = [];
+
+  /** Как channel_data.record_ebay_batch_outcome (0142): только боевой аккаунт eBay, переход только вперёд, отказ — запись об отказе */
+  async recordEbayBatchOutcome(_tenantId: string, channelAccountId: string, multiSkuAccepted: boolean): Promise<string> {
+    const channel = this.accountChannels.get(channelAccountId) ?? this.channel;
+    if (channel !== 'EBAY') throw new Error(`account ${channelAccountId} is not an eBay account`);
+    // Теневой режим в памяти объявляют только аккаунты посева; остальные — боевые, как посев по умолчанию
+    if (this.seedAccounts.find((a) => a.channelAccountId === channelAccountId)?.writeMode === 'SHADOW') {
+      throw new Error('batch outcome of an eBay account in the shadow: nothing was sent (Р-169, Р-189)');
+    }
+    const current = this.ebayBatchModes.get(channelAccountId) ?? null;
+    if (multiSkuAccepted) {
+      if (current === null) this.ebayBatchModes.set(channelAccountId, 'MULTI');
+      return this.ebayBatchModes.get(channelAccountId)!;
+    }
+    if (current !== 'SINGLE') {
+      this.ebayBatchModes.set(channelAccountId, 'SINGLE');
+      this.ebayBatchRefusals.push({ channelAccountId, from: current ?? 'PROBE', to: 'SINGLE', question: 'E-22' });
+    }
+    return 'SINGLE';
+  }
+
   /** Как PgWriteQueueStore.checkPriceBasis: ставка — товара или страны витрины; недоверие каналу — одно на витрину и причину [Р-118] */
   async checkPriceBasis(_tenantId: string, write: FieldWrite, observedMinor: number, now: Instant): Promise<PriceBasisDistrust | null> {
     if (write.value.field !== 'PRICE') return null;
@@ -1122,6 +1149,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
         w.nextAttemptAt = null;
         if (from === 'DISPATCHED') w.lastErrorCode = null;
         w.status = t.applied ? 'APPLIED' : 'ACCEPTED';
+        if (t.applied) w.confirmedByOwnRecord = t.ownRecordOnly === true;
         reason = t.reason;
         if (from === 'DISPATCHED') this.priceAccepted(w, now);
         break;
@@ -1980,7 +2008,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       channelWriteId: w.channelWriteId, writeScopeId: w.writeScopeId, decisionId: w.decisionId, amountMinor: w.amountMinor, currency: w.currency, basis: w.basis,
       version: w.version, status: w.status, attemptCount: w.attemptCount, competitorDerived: w.competitorDerived, createdAt: w.createdAt, dispatchedAt: w.dispatchedAt,
       acceptedAt: w.acceptedAt, nextAttemptAt: w.nextAttemptAt, lastErrorCode: w.lastErrorCode, endReason: w.endReason, endParams: { ...w.endParams },
-      supersededByWriteId: w.supersededByWriteId,
+      supersededByWriteId: w.supersededByWriteId, confirmedByOwnRecord: w.confirmedByOwnRecord === true,
     };
   }
 
@@ -2094,7 +2122,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
         writeScopeId: d.writeScopeId, outcome: d.outcome, decisionClass: d.decisionClass, rejectionReason: d.rejectionReason, finalMinor: d.finalMinor,
         reasonParams: d.reason.params, fx: d.fx ?? null, boundDeviationBp: d.boundDeviationBp,
       })),
-      writes: this.writes.map((w) => ({ writeScopeId: w.writeScopeId, amountMinor: w.amountMinor, version: w.version, status: w.status, endReason: w.endReason })),
+      writes: this.writes.map((w) => ({ writeScopeId: w.writeScopeId, amountMinor: w.amountMinor, version: w.version, status: w.status, endReason: w.endReason, confirmedByOwnRecord: w.confirmedByOwnRecord === true })),
       divergenceCases: this.divergenceCases.map((c) => ({ writeScopeId: c.writeScopeId, expectedMinor: c.expectedMinor, observedMinor: c.observedMinor, cause: c.cause, status: c.status })),
       competitorState: Object.fromEntries([...this.competitorState.entries()].map(([k, v]) => [k, {
         observedAt: v.observedAt, buyboxMinor: v.buyboxMinor, lowestMinor: v.lowestMinor,

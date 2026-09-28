@@ -11,6 +11,12 @@ import { expandVariants, SCENARIO_FORMAT, validateScenario, type Scenario, type 
 import { VirtualClock } from './harness/world.ts';
 import { ebayGetItemXml, SimulatedEbayChannel, type EbayChannelModelSpec, type SimEbayListingSpec } from './simulator/ebay-channel.ts';
 import { EBAY_PARAMETERS } from './simulator/params.ts';
+import type { AdapterLogEntry, FieldWrite } from '@repracer/channel-port';
+import { InMemoryPricingStore } from '@repracer/pricing-pipeline';
+import { createWriteDispatcher, type ClaimResult, type RecordedOutcome, type WriteQueueStore } from '@repracer/write-dispatcher';
+import { ebayRequestChecker } from './harness/channel.ts';
+import { EBAY_STAND_HOST } from './harness/runner.ts';
+import { worldDependencies, type RaisedAlert } from './harness/world.ts';
 
 /**
  * Модель eBay в симуляторе [Р-187]: сценарии того же формата, канал с состоянием, адаптер и путь решения — настоящие. Модель повторяет
@@ -252,6 +258,40 @@ const SCENARIOS: Scenario[] = [];
       expect: { noAlerts: true, channel: { listings: [{ bestOffer: false, offer: { bestOffer: false } }], stats: { migrations: 1 } } } }]));
 }
 
+// 10. E-22 (Р-189): пакет разных SKU у БОЕВОГО аккаунта — проба пакетом из 2 SKU
+{
+  const w11 = priceWrite('cw-11', 11, 1311);
+  const w12 = priceWrite('cw-12', 12, 1312);
+  const w13 = priceWrite('cw-13', 13, 1313);
+  const live = { externalAccountId: 'syn_ebay_seller_0001', marketplaces: ['EBAY_DE'], channel: 'EBAY', writeMode: 'LIVE' as const, ebayBatchMode: 'PROBE' as const };
+  SCENARIOS.push(scenario('ebay-sim/multi-sku-probe', 'E-22 на модели: боевой аккаунт в пробе — один пакет из 2 SKU, остальные по одному; песочница пакет принимает',
+    'Р-189: описание bulkUpdatePriceQuantity — «Only one SKU (one product) can be updated per call», схема и песочница — до 25 разных SKU. Боевой аккаунт без доказанного режима (проба) отправляет ОДИН пакет из 2 SKU, остальные записи — по одной (EBAY_C18). Песочница пакет принимает: итог пакета «принят» — база переведёт аккаунт в MULTI. Вариант: канал отвергает вызов с разными SKU целиком (400 без ответов по элементам, код ошибки синтетический) — записи повторяемы (TRANSIENT), итог «отвергнут», база переведёт аккаунт в «1 SKU на вызов» с алертом.',
+    world({ seed: 11, listings: [listing(11), listing(12), listing(13)] }, { account: live }),
+    [
+      call('plan-probe', 'planDispatch', [[w11, w12, w13]], { rejected: [], batches: [{ items: [{ channelWriteId: 'cw-11' }, { channelWriteId: 'cw-12' }] }, { items: [{ channelWriteId: 'cw-13' }] }] }),
+      call('dispatch-probe', 'dispatch', [batch('b-probe', [w11, w12])], { attemptsMade: 1, ebayBatchOutcome: { multiSkuAccepted: true }, outcomes: [{ status: 'ACCEPTED' }, { status: 'ACCEPTED' }] }),
+      call('dispatch-single', 'dispatch', [batch('b-single', [w13])], { ebayBatchOutcome: { $absent: true }, outcomes: [{ status: 'ACCEPTED' }] }),
+    ],
+    { noAlerts: true, logs: [{ code: 'EBAY_C18_MULTI_SKU_PROBE', question: 'E-22', count: 1 }], channel: { stats: { itemsApplied: 3, multiSkuRefused: 0 } } },
+    [{ id: 'e22-multi-sku-refused', question: 'E-22', params: { multiSkuPerCall: 'REFUSED_WHOLE_REQUEST' },
+      finding: 'пакет из 2 SKU отвергнут целиком — записи повторяемы (TRANSIENT), итог «отвергнут»; запись одного SKU проходит',
+      stepExpect: { 'dispatch-probe': { attemptsMade: 1, ebayBatchOutcome: { multiSkuAccepted: false }, outcomes: [
+        { status: 'REJECTED', error: { class: 'TRANSIENT', code: 'ACTION_NOT_ALLOWED', channelCode: '99022', httpStatus: 400 } },
+        { status: 'REJECTED', error: { class: 'TRANSIENT', code: 'ACTION_NOT_ALLOWED', channelCode: '99022', httpStatus: 400 } }] } },
+      expect: { noAlerts: true, logs: [{ code: 'EBAY_C18_MULTI_SKU_PROBE', question: 'E-22', count: 2 }], channel: { stats: { itemsApplied: 1, multiSkuRefused: 1 } } } }]));
+}
+
+// 11. Р-191: условия bulkMigrateListing — немедленная оплата и город листинга
+{
+  const noLocation = listing(14, { offerId: undefined, migratedOfferId: L(14).offerId, itemLocation: false });
+  SCENARIOS.push(scenario('ebay-sim/migration-requirements', 'Р-191 на модели: без немедленной оплаты в платёжной политике и без индекса или города листинг — FIXABLE до миграции, а не отказ 25718 при ней',
+    'Документация bulkMigrateListing (снимок 2026-09-28): платёжная политика с немедленной оплатой (`immediatePay` Account API) и `PostalCode` или `Location` в листинге. Модель: у листинга 14 нет города, у платёжной политики модели немедленная оплата выключена — два препятствия C14 и C15, вердикт FIXABLE. Ответ Account API синтетический (песочница этот вызов не делала).',
+    world({ seed: 14, immediatePay: false, listings: [noLocation] }),
+    [call('preflight', 'preflight', [[L(14).listingId]], [{ listingId: L(14).listingId, verdict: 'FIXABLE', findings: { $contains: [
+      { code: 'C14_IMMEDIATE_PAY', severity: 'BLOCKER' }, { code: 'C15_LOCATION', severity: 'BLOCKER' }] } }])],
+    { noAlerts: true, channel: { stats: { migrations: 0 } } }));
+}
+
 // ------------------------------------------------------------------------------------------------ прогоны
 
 const variantsRun: string[] = [];
@@ -273,7 +313,7 @@ for (const s of SCENARIOS) {
 
 test('every open eBay question in the model is exercised by a scenario variant and exists in channel-capabilities.md', () => {
   const asked = new Set(Object.values(EBAY_PARAMETERS).map((p) => p.question).filter((q): q is string => q !== null));
-  assert.deepEqual([...asked].sort(), ['E-02', 'E-04', 'E-06', 'E-12', 'E-13', 'E-15', 'E-16', 'E-17']);
+  assert.deepEqual([...asked].sort(), ['E-02', 'E-04', 'E-06', 'E-12', 'E-13', 'E-15', 'E-16', 'E-17', 'E-22']);
   const exercised = new Set(SCENARIOS.flatMap((s) => (s.variants ?? []).map((v) => v.question)));
   assert.deepEqual([...asked].filter((q) => !exercised.has(q)).sort(), []);
   const capabilities = readFileSync(fileURLToPath(new URL('../../../docs/channel-capabilities.md', import.meta.url)), 'utf8');
@@ -340,4 +380,76 @@ test('Р-187: 25016 carries MinValue; refused items do not raise sellerItemRevis
   for (let i = 0; i < 260; i++) assert.equal((await m.bulk([{ offerId: L(1).offerId, price: { value: `${10 + (i % 5)}.00`, currency: 'EUR' } }])).status, 200);
   const browse = await m.get(`/buy/browse/v1/item/v1|${L(1).listingId}|0`);
   assert.equal(browse.body.sellerItemRevision, '261', '260 applied edits on top of revision 1; the two refusals did not count');
+});
+
+/**
+ * Шаг 49 [Р-189, E-22] — путь целиком: диспетчер, адаптер и модель eBay, режим пакетов — у хранилища (как `record_ebay_batch_outcome`), каталог
+ * аккаунтов читает его на каждом вызове. Три ждущие записи боевого аккаунта в пробе: пакет из 2 SKU и одна запись. Модель по умолчанию (как
+ * песочница) пакет принимает — аккаунт в MULTI, всё за один обход. Вариант E-22 — пакет отвергнут целиком: аккаунт переходит в SINGLE, отвергнутые
+ * записи повторяются по одной и доходят.
+ */
+test('Р-189 end to end: a refused probe moves the account to one SKU per call and the refused writes arrive one by one; an accepted probe moves it to MULTI', async () => {
+  const run = async (multiSkuPerCall: 'ACCEPTED' | 'REFUSED_WHOLE_REQUEST') => {
+    const clock = new VirtualClock('2026-09-28T10:00:00.000Z');
+    const w = world({ seed: 20, params: { multiSkuPerCall }, listings: [listing(21), listing(22), listing(23)] },
+      { account: { externalAccountId: 'syn_ebay_seller_0001', marketplaces: ['EBAY_DE'], channel: 'EBAY', writeMode: 'LIVE', ebayBatchMode: 'PROBE' } });
+    const model = new SimulatedEbayChannel(w.channelModel as EbayChannelModelSpec, w.clock, { user: USER_TOKEN, application: APP_TOKEN });
+    const violations: string[] = [];
+    const sink = { logs: [] as AdapterLogEntry[], alerts: [] as RaisedAlert[] };
+    const adapter = ebayUnderTest({ deps: worldDependencies(w, clock, sink), world: w, clock, fetch: channelFetch(model, ebayRequestChecker(w, EBAY_STAND_HOST), clock, violations, []) });
+    const modes = new InMemoryPricingStore({ scopes: [], channel: 'EBAY' }, { tenantId: TENANT });
+    const writes = [21, 22, 23].map((n) => priceWrite(`cw-${n}`, n, 1300 + n) as unknown as FieldWrite);
+    const state = new Map(writes.map((x) => [x.writeScope.writeScopeId as string, { write: x, status: 'PENDING' as 'PENDING' | 'RETRY' | 'DONE', at: 0, attempts: 0 }]));
+    const store: WriteQueueStore = {
+      async dueScopes() {
+        return [...state.entries()].filter(([, v]) => v.status !== 'DONE' && v.at <= clock.nowMs())
+          .map(([id]) => ({ tenantId: TENANT, writeScopeId: id, dueKind: 'PENDING' as const, dueSince: clock.iso() }));
+      },
+      async claimNext(_t, id): Promise<ClaimResult> {
+        const v = state.get(id)!;
+        if (v.status === 'DONE' || v.at > clock.nowMs() || v.attempts > 0 && v.status === 'PENDING') return { kind: 'IDLE' };
+        v.attempts += 1;
+        v.status = 'PENDING';
+        return { kind: 'DISPATCH', channelAccountId: ACCOUNT, write: { ...v.write, attemptNo: v.attempts } };
+      },
+      async recordOutcome(_t, write, outcome): Promise<RecordedOutcome> {
+        const v = state.get(write.writeScope.writeScopeId)!;
+        const retry = outcome.status === 'REJECTED' && outcome.error.class === 'TRANSIENT';
+        v.status = outcome.status === 'ACCEPTED' ? 'DONE' : retry ? 'RETRY' : 'DONE';
+        v.at = retry ? clock.nowMs() + 2_000 : 0;
+        return { status: outcome.status === 'ACCEPTED' ? 'ACCEPTED' : 'FAILED', slotFreed: true, queuedWaiting: false, nextAttemptAt: retry ? clock.iso(2_000) : null, reason: null, scopeBlocked: false };
+      },
+      async recordReconciliation() { throw new Error('not reached'); },
+      async checkPriceBasis() { return null; },
+      async recordEbayBatchOutcome(t, a, accepted) {
+        const mode = await modes.recordEbayBatchOutcome(t, a, accepted);
+        w.account.ebayBatchMode = mode as 'MULTI' | 'SINGLE';
+        return mode;
+      },
+    };
+    const dispatcher = createWriteDispatcher({ store, adapterFor: () => adapter, alerts: { raise: async (x) => { sink.alerts.push(x); } }, now: () => clock.iso() });
+    const sweeps: number[] = [];
+    for (let i = 0; i < 4 && [...state.values()].some((v) => v.status !== 'DONE'); i++) {
+      sweeps.push((await dispatcher.sweep({ pendingMinAgeMs: 0 })).due);
+      clock.advance(5_000);
+    }
+    return { model, state, modes, sweeps, w, violations, sink };
+  };
+
+  const refused = await run('REFUSED_WHOLE_REQUEST');
+  assert.deepEqual([...refused.state.values()].map((v) => v.status), ['DONE', 'DONE', 'DONE'], 'every write arrived');
+  assert.equal(refused.w.account.ebayBatchMode, 'SINGLE');
+  assert.deepEqual(refused.modes.ebayBatchRefusals.map((r) => [r.from, r.to, r.question]), [['PROBE', 'SINGLE', 'E-22']], 'one refusal, recorded once');
+  assert.equal(refused.model.stats.multiSkuRefused, 1, 'the channel refused the multi-SKU call once — the retries went one SKU per call');
+  assert.equal(refused.model.stats.itemsApplied, 3);
+  assert.equal(refused.model.stats.requests['POST /sell/inventory/v1/bulk_update_price_quantity'], 4, 'probe (refused) + single, then two singles');
+  assert.deepEqual(refused.sweeps, [3, 2], 'the two refused writes were due again in the next sweep');
+  assert.deepEqual(refused.violations, []);
+
+  const accepted = await run('ACCEPTED');
+  assert.deepEqual([...accepted.state.values()].map((v) => v.status), ['DONE', 'DONE', 'DONE']);
+  assert.equal(accepted.w.account.ebayBatchMode, 'MULTI');
+  assert.deepEqual(accepted.modes.ebayBatchRefusals, []);
+  assert.deepEqual(accepted.sweeps, [3], 'one sweep: probe of 2 SKUs + one single');
+  assert.equal(accepted.model.stats.requests['POST /sell/inventory/v1/bulk_update_price_quantity'], 2);
 });

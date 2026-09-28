@@ -63,3 +63,12 @@
 		header_up X-Forwarded-Proto {scheme}
 	}
 }
+
+# Шаг 49 [Р-192]: уведомления eBay Marketplace Account Deletion — GET с challenge_code и POST уведомления. Остальные адреса
+# домена консоли этим маршрутом не затрагиваются; тела запросов в журнал не пишутся (журнал без тел, см. access_log)
+(ebay_deletion) {
+	handle /ebay/account-deletion {
+		import access_log
+		reverse_proxy ebay-account-deletion:8470
+	}
+}

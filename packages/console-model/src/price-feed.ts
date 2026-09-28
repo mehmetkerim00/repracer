@@ -23,6 +23,8 @@ export interface FeedItem {
   source: string;
   reason: HumanReason | null;
   decisionId: string | null;
+  /** Шаг 49 [Р-190]: применённая запись подтверждена только нашей записью у канала — словами, иначе null */
+  confirmation: string | null;
 }
 
 export const FEED_STATUS_GROUPS = ['APPLIED', 'IN_FLIGHT', 'NOT_SENT', 'SUPERSEDED'] as const;
@@ -109,6 +111,7 @@ export function feedItemOf(world: StandWorld, m: Messages, item: FeedPageItem): 
     from: from === null ? null : m.money(from, w.currency), to: m.money(w.amountMinor, w.currency), change: m.change(from, w.amountMinor),
     status: f.statuses[w.status as keyof typeof f.statuses] ?? w.status, tone: STATUS_TONE[w.status] ?? 'unknown', source,
     reason: ended ?? (decision ? describe(decision.reason, m) : null), decisionId: w.decisionId,
+    confirmation: w.status === 'APPLIED' && w.confirmedByOwnRecord ? m.ui.ownRecordConfirmation : null,
   };
 }
 

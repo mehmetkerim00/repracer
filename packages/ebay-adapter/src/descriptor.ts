@@ -38,6 +38,9 @@ export const EBAY_HOSTS: Readonly<Record<EbayEnvironment, { api: string; apiz: s
 export const INVENTORY_PATH = '/sell/inventory/v1';
 export const BULK_UPDATE_PATH = `${INVENTORY_PATH}/bulk_update_price_quantity`;
 export const BULK_MIGRATE_PATH = `${INVENTORY_PATH}/bulk_migrate_listing`;
+/** Шаг 49 [Р-191]: Account API — платёжная бизнес-политика, `GET /payment_policy/{payment_policy_id}` (снимок sell_account_v1_oas3.json, scope sell.account) */
+export const ACCOUNT_PATH = '/sell/account/v1';
+export const paymentPolicyPath = (paymentPolicyId: string): string => `${ACCOUNT_PATH}/payment_policy/${encodeURIComponent(paymentPolicyId)}`;
 export const TOKEN_PATH = '/identity/v1/oauth2/token';
 /** Fulfillment API — заказы; путь и поля (проверить): не из снимка и не из песочницы (E-20), scope sell.fulfillment.readonly */
 export const FULFILLMENT_ORDER_PATH = '/sell/fulfillment/v1/order';
