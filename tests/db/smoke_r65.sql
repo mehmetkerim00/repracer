@@ -62,6 +62,14 @@ SELECT pg_temp.expect_fail('US storefront confirmed without a time zone', $q$
 UPDATE tenant_data.channel_write SET status = 'FAILED', next_attempt_at = now() WHERE channel_write_id = 'a9000000-0000-0000-0000-000000000012';
 SET LOCAL session_replication_role = replica;
 UPDATE tenant_data.channel_write SET budget_day = budget_day - 1 WHERE channel_write_id = 'a9000000-0000-0000-0000-000000000012';
+/**
+ * Шаг 52 (полный CI шага 51 около 22:08 UTC): smoke_app мог списать бюджет правок ДО полуночи витрины, а эта проверка идёт ПОСЛЕ неё —
+ * тогда «сегодняшний бюджет исчерпан» было неправдой, а строка бюджета вчерашнего дня — законной, и проверка краснела раз в сутки
+ * (скрытый вход «время на часах», как на шаге 29). Исчерпанный бюджет переносится на ТЕКУЩИЕ сутки витрины явно, а не зависит от часов
+ */
+UPDATE tenant_data.edit_budget SET budget_day = (now() AT TIME ZONE 'Europe/Berlin')::date
+ WHERE budget_scope_key = 'L1' AND budget_day < (now() AT TIME ZONE 'Europe/Berlin')::date
+   AND NOT EXISTS (SELECT 1 FROM tenant_data.edit_budget t WHERE t.budget_scope_key = 'L1' AND t.budget_day = (now() AT TIME ZONE 'Europe/Berlin')::date);
 SET LOCAL session_replication_role = origin;
 SELECT pg_temp.expect_fail('retry after midnight is charged to today, whose budget is exhausted (C2, Р-19)', $q$
   UPDATE tenant_data.channel_write SET status = 'DISPATCHED', attempt_count = attempt_count + 1, next_attempt_at = NULL
