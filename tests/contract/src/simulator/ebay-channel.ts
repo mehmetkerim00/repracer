@@ -233,6 +233,8 @@ export class SimulatedEbayChannel implements ChannelBehaviour {
     }
     // Шаг 47: обнаружение — страница товаров Inventory API (limit/offset) и активные листинги Trading API
     if (method === 'GET' && path === '/sell/inventory/v1/inventory_item') {
+      // Шаг 50 [песочница]: без Accept-Language песочница отвечает 400 25709 — модель тоже (спецификация заголовка не объявляет, E-23)
+      if (!request.headers['accept-language']) return json(400, { errors: [restError(25709, 'Invalid value for header Accept-Language.')] });
       const limit = Math.max(1, Number(request.query.limit ?? 25));
       const offset = Math.max(0, Number(request.query.offset ?? 0));
       const managed = [...this.listings.values()].filter((l) => l.offer).sort((a, b) => a.sku.localeCompare(b.sku));

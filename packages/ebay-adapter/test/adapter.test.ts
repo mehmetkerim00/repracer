@@ -442,6 +442,8 @@ test('discovery: Inventory API phase (writable), then GetMyeBaySelling per store
   });
   const p1 = await w.adapter.discoverOffers(ctx, { limit: 10 });
   assert.deepEqual(p1.items.map((i) => [i.identity.externalListingId, i.listing]), [['110000000001', { format: 'FIXED_PRICE', writable: true }]]);
+  // Шаг 50 [песочница]: без Accept-Language живая песочница отвечает на GET inventory_item 400 25709 — язык первой витрины аккаунта
+  assert.equal(w.seen.find((x) => x.url.pathname === '/sell/inventory/v1/inventory_item')!.headers['accept-language'], 'de-DE');
   assert.equal(p1.nextCursor, 'trd:0:1~110000000001', 'the Inventory phase is over: the Trading phase starts at the first storefront and carries the listings already given');
   const offerCalls = () => w.seen.filter((x) => x.url.pathname === '/sell/inventory/v1/offer').length;
   const offersAfterInventory = offerCalls();

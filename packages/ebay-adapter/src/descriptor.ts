@@ -13,10 +13,13 @@ import type { ChannelDescriptor, PriceBasis } from '@repracer/channel-port';
  * Site=Germany].
  * tradingSiteName — значение `Site` в ответе GetItem у листинга этой витрины (шаг 48, E-19): у EBAY_DE — `Germany` [песочница], у
  * EBAY_US — не проверено (null, а не догадка «US»): предполётная проверка такой листинг не опознаёт и предупреждает.
+ * acceptLanguage — заголовок `Accept-Language` REST-вызовов (шаг 50): живая песочница отвечает на `GET inventory_item` без него
+ * 400 `25709` «Invalid value for header Accept-Language.», а спецификация снимка заголовка не объявляет (расхождение [док]
+ * против [песочница], E-23). `de-DE` принят песочницей; `en-US` для EBAY_US — (проверить), E-23.
  */
 export const EBAY_MARKETPLACES = {
-  EBAY_DE: { currency: 'EUR', basis: 'GROSS' as PriceBasis, timeZone: 'Europe/Berlin' as string | null, tradingSiteId: 77, tradingSiteName: 'Germany' as string | null },
-  EBAY_US: { currency: 'USD', basis: 'NET' as PriceBasis, timeZone: null as string | null, tradingSiteId: 0, tradingSiteName: null as string | null },
+  EBAY_DE: { currency: 'EUR', basis: 'GROSS' as PriceBasis, timeZone: 'Europe/Berlin' as string | null, tradingSiteId: 77, tradingSiteName: 'Germany' as string | null, acceptLanguage: 'de-DE' },
+  EBAY_US: { currency: 'USD', basis: 'NET' as PriceBasis, timeZone: null as string | null, tradingSiteId: 0, tradingSiteName: null as string | null, acceptLanguage: 'en-US' },
 } as const;
 export type EbayMarketplaceId = keyof typeof EBAY_MARKETPLACES;
 

@@ -3,7 +3,7 @@ import type { AdapterCallContext, AdapterDependencies, ChannelError, VerifiedCha
 import { EBAY_ENDPOINTS, ebayOAuth, refreshAccess, requestToken, type OAuthProvider } from '@repracer/channel-oauth';
 import { type EbayRequestBudget, type EditAttemptLedger, RollingDayLedger, TokenBucket } from './budget.ts';
 import { logConservative } from './conservative.ts';
-import { APPLICATION_SCOPE, EBAY_HOSTS, type EbayEnvironment, TOKEN_PATH, TRADING_COMPATIBILITY_LEVEL, TRADING_PATH } from './descriptor.ts';
+import { APPLICATION_SCOPE, EBAY_HOSTS, EBAY_MARKETPLACES, type EbayEnvironment, marketplaceInfo, TOKEN_PATH, TRADING_COMPATIBILITY_LEVEL, TRADING_PATH } from './descriptor.ts';
 import { channelError, tokenFailureError } from './errors.ts';
 import { DEFAULT_READ_RETRY, type HttpResult, type RetryPolicy, send } from './http.ts';
 
@@ -215,7 +215,8 @@ export async function call(options: ResolvedOptions, ctx: AdapterCallContext, se
         'content-type': 'text/xml', 'x-ebay-api-call-name': spec.trading.callName, 'x-ebay-api-siteid': String(spec.trading.siteId),
         'x-ebay-api-compatibility-level': TRADING_COMPATIBILITY_LEVEL, 'x-ebay-api-iaf-token': token.token,
       }
-      : { accept: 'application/json', authorization: `Bearer ${token.token}`, ...(body === undefined ? {} : { 'content-type': 'application/json' }) };
+      // Шаг 50: без Accept-Language живая песочница отвергает GET inventory_item (400 25709); язык — по первой витрине аккаунта
+      : { accept: 'application/json', 'accept-language': acceptLanguageOf(session), authorization: `Bearer ${token.token}`, ...(body === undefined ? {} : { 'content-type': 'application/json' }) };
     const result = await send({
       fetch: options.fetch ?? fetch, sleep: options.sleep ?? ((ms) => new Promise<void>((r) => setTimeout(r, ms))),
       timeoutMs: options.timeoutMs ?? 30_000, retry: { ...DEFAULT_READ_RETRY, ...options.readRetry },
@@ -228,4 +229,10 @@ export async function call(options: ResolvedOptions, ctx: AdapterCallContext, se
     if (result.status === 401 && !fresh) continue;
     return { kind: 'HTTP', result: { ...result, attempts } };
   }
+}
+
+/** Шаг 50 (E-23): язык REST-вызовов — по первой витрине eBay аккаунта; витрина вне справочника — язык EBAY_DE */
+function acceptLanguageOf(session: Session): string {
+  const first = session.account.marketplaces.find((m) => marketplaceInfo(m));
+  return first ? marketplaceInfo(first)!.acceptLanguage : EBAY_MARKETPLACES.EBAY_DE.acceptLanguage;
 }
