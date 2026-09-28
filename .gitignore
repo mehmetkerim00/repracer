@@ -68,3 +68,6 @@ vendor/*
 !*.tfvars.example
 .terraform.lock.hcl.bak
 kubeconfig*
+
+# Шаг 48: сюда владелец кладёт файлы eBay, сохранённые в браузере с входом; в репозиторий идёт только обезличенный снимок vendor/ebay/<дата>/
+vendor/ebay/incoming/
