@@ -1,3 +1,4 @@
+import { EBAY_MARKETPLACES } from '@repracer/ebay-adapter';
 import { signKauflandRequest } from '@repracer/kaufland-client';
 import { match } from './matchers.ts';
 import type { Exchange, World } from './scenario.ts';
@@ -174,6 +175,15 @@ export function ebayRequestChecker(world: World, host: string): (request: Observ
       if (!h['x-ebay-c-marketplace-id']) v.push(`${where}: X-EBAY-C-MARKETPLACE-ID is missing`);
     } else if (h.authorization !== `Bearer ${world.credentials.accessToken}`) {
       v.push(`${where}: Inventory API is not called with the user token`);
+    }
+    /**
+     * Шаг 51 (E-23): язык REST-вызова — язык первой витрины аккаунта (EBAY_DE — de-DE [песочница], EBAY_US — en-US, живьём не проверен).
+     * Отсутствие заголовка модель канала отвергает сама (400 25709, как песочница); чужой язык — нарушение стенда, а не ответ канала
+     */
+    if (request.path.startsWith('/sell/') && h['accept-language']) {
+      const first = world.account.marketplaces[0] as keyof typeof EBAY_MARKETPLACES | undefined;
+      const expected = first && EBAY_MARKETPLACES[first] ? EBAY_MARKETPLACES[first].acceptLanguage : null;
+      if (expected && h['accept-language'] !== expected) v.push(`${where}: Accept-Language ${h['accept-language']} is not the language of the account storefront ${first} (${expected})`);
     }
     for (const s of secrets) {
       if (request.rawUrl.includes(s) || request.rawBody.includes(s) || Object.values(h).includes(s)) v.push(`${where}: secret leaked into the request`);

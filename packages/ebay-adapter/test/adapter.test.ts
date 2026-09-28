@@ -15,7 +15,7 @@ const ctx: AdapterCallContext = { tenantId: TENANT, channelAccountId: ACCOUNT, c
 interface Seen { method: string; url: URL; headers: Record<string, string>; body: string }
 type Reply = { status: number; body?: unknown; xml?: string } | 'NETWORK_ERROR' | 'BODY_BREAKS';
 
-function world(handler: (r: Seen) => Reply, options: { ledger?: RollingDayLedger; requestBudget?: TokenBucket; writeMode?: 'SHADOW' | 'LIVE'; batchMode?: () => 'PROBE' | 'MULTI' | 'SINGLE' | undefined; environment?: 'SANDBOX' | 'PRODUCTION' } = {}) {
+function world(handler: (r: Seen) => Reply, options: { ledger?: RollingDayLedger; requestBudget?: TokenBucket; writeMode?: 'SHADOW' | 'LIVE'; batchMode?: () => 'PROBE' | 'MULTI' | 'SINGLE' | undefined; environment?: 'SANDBOX' | 'PRODUCTION'; marketplaces?: string[] } = {}) {
   const seen: Seen[] = [];
   const logs: AdapterLogEntry[] = [];
   const alerts: Array<{ code: string }> = [];
@@ -41,7 +41,7 @@ function world(handler: (r: Seen) => Reply, options: { ledger?: RollingDayLedger
   const adapter = createEbayAdapter({
     deps: {
       accounts: { verify: async (tenantId, channelAccountId) => (tenantId === TENANT && channelAccountId === ACCOUNT
-        ? { ok: true, account: { tenantId, channelAccountId, channel: 'EBAY', externalAccountId: 'syn-seller', marketplaces: ['EBAY_DE', 'EBAY_US'], credentialsRef: 'cred:seller', ...(options.writeMode ? { writeMode: options.writeMode } : {}), ...(options.batchMode?.() ? { ebayBatchMode: options.batchMode() } : {}) } }
+        ? { ok: true, account: { tenantId, channelAccountId, channel: 'EBAY', externalAccountId: 'syn-seller', marketplaces: options.marketplaces ?? ['EBAY_DE', 'EBAY_US'], credentialsRef: 'cred:seller', ...(options.writeMode ? { writeMode: options.writeMode } : {}), ...(options.batchMode?.() ? { ebayBatchMode: options.batchMode() } : {}) } }
         : { ok: false, reason: 'TENANT_MISMATCH' }) },
       credentials: { get: async (ref): Promise<Record<string, string>> => (ref === 'cred:seller' ? { refreshToken: 'syn-refresh' } : { clientId: 'Syn-App-SBX', clientSecret: 'syn-secret' }) },
       alerts: { raise: async (a) => { alerts.push(a); } },
@@ -819,4 +819,25 @@ test('review 49 #6 #7 #14: value errors, 404/409 are not a multi-SKU refusal; ac
   assert.deepEqual(prod.batches.map((x) => x.items.length).sort((x, y) => y - x), [2, 1, 1, 1]);
   const sb = await world(() => ({ status: 200 })).adapter.planDispatch(ctx, many);
   assert.deepEqual(sb.batches.map((x) => x.items.length), [5]);
+});
+
+/**
+ * Шаг 51, хвост E-23: заголовок Accept-Language REST-вызовов — язык ПЕРВОЙ витрины аккаунта. Аккаунт EBAY_US шлёт en-US, аккаунт
+ * EBAY_DE — de-DE. Живьём проверен только de-DE (песочница шага 50); US-листинга в песочнице нет — en-US не проверен (E-23)
+ */
+test('E-23: Accept-Language follows the first storefront of the account — en-US for an EBAY_US account, de-DE for an EBAY_DE one, on every REST call', async () => {
+  const run = async (marketplaces: string[]) => {
+    const w = world((r) => {
+      if (r.url.pathname === '/sell/inventory/v1/inventory_item') return { status: 200, body: { total: 0, inventoryItems: [] } };
+      if (r.url.pathname === '/sell/fulfillment/v1/order') return { status: 200, body: { total: 0, orders: [] } };
+      return { status: 200, xml: GMS('', 1) };
+    }, { marketplaces });
+    await w.adapter.discoverOffers(ctx, { limit: 10 });
+    await w.adapter.readOrderLines(ctx, { since: '2026-09-28T00:00:00.000Z', limit: 10 });
+    const rest = w.seen.filter((x) => x.url.pathname.startsWith('/sell/'));
+    assert.ok(rest.length >= 2, `REST calls were made (${rest.map((x) => x.url.pathname).join(', ')})`);
+    return new Set(rest.map((x) => x.headers['accept-language']));
+  };
+  assert.deepEqual([...await run(['EBAY_US'])], ['en-US']);
+  assert.deepEqual([...await run(['EBAY_DE'])], ['de-DE']);
 });

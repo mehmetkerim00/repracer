@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { ChannelWriteId } from '@repracer/channel-port';
-import { coreError, DEFAULT_RETRY_POLICY, planOutcomeTransition, planReconciliationTransition } from './index.ts';
+import { coreError, DEFAULT_RETRY_POLICY, planOutcomeTransition, planReconciliationTransition, retryPolicyFor } from './index.ts';
 
 const NOW = '2026-09-14T10:00:00.000Z';
 const id = 'cw-1' as ChannelWriteId;
@@ -68,4 +68,10 @@ test('Р-115: a read-back refusal that requires a person blocks the write scope 
   // Ревью шага 22, находка 2: отказ «нужен человек» не про оффер (сервер токенов) единицу сразу не блокирует
   const auth = { ...error, code: 'AUTH_INVALID' as const, scope: 'ACCOUNT' as const };
   assert.equal(planReconciliationTransition('ACCEPTED', { kind: 'UNKNOWN', error: auth }, 1, '2026-09-14T10:04:59.000Z', now, DEFAULT_RETRY_POLICY).to, 'RECONCILE');
+});
+
+test('a channel rule tightens the core policy and never loosens it', () => {
+  const loose = retryPolicyFor(DEFAULT_RETRY_POLICY, { maxAttempts: 50, retryOn: [{ code: 'TIMEOUT' }], basis: 'test' });
+  assert.equal(loose.maxAttempts, DEFAULT_RETRY_POLICY.maxAttempts);
+  assert.equal(retryPolicyFor(DEFAULT_RETRY_POLICY, undefined), DEFAULT_RETRY_POLICY);
 });

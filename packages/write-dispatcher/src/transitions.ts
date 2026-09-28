@@ -1,4 +1,4 @@
-import type { ChannelError, Instant, WriteOutcome, WriteValue } from '@repracer/channel-port';
+import type { ChannelError, Instant, WriteOutcome, WriteRetryRule, WriteValue } from '@repracer/channel-port';
 import { sellerActionFor, type Reason } from '@repracer/pricing-model';
 
 /**
@@ -23,6 +23,26 @@ export interface RetryPolicy {
    * разбора человеком, поднимается один CRITICAL-алерт (D1 ретроспективного ревью шага 14). Значение — допущение (проверить).
    */
   unresolvedOutcomeLimitMs: number;
+  /**
+   * Шаг 51: временные ошибки, после которых запись повторяется, если канал их ограничил (`descriptor.writeRetry`, eBay Growth
+   * Check); нет — повторяется любая временная
+   */
+  retryOn?: WriteRetryRule['retryOn'];
+}
+
+/**
+ * Политика записи для канала: правило канала ужесточает общую, но не ослабляет — попыток не больше общего предела
+ * (правило канала с большим числом попыток — ошибка описания, а не разрешение)
+ */
+export function retryPolicyFor(base: RetryPolicy, rule: WriteRetryRule | undefined): RetryPolicy {
+  if (!rule) return base;
+  return { ...base, maxAttempts: Math.max(1, Math.min(base.maxAttempts, rule.maxAttempts)), retryOn: rule.retryOn };
+}
+
+/** Повторяема ли временная ошибка по правилу канала */
+export function retryableByChannel(policy: RetryPolicy, error: ChannelError): boolean {
+  if (!policy.retryOn) return true;
+  return policy.retryOn.some((r) => r.code === error.code && (!r.notSentOnly || error.httpStatus === undefined));
 }
 
 /** Значения по умолчанию — допущение до замеров задержек каналов (Р-8: p95 Kaufland < 2 мин) */
@@ -87,6 +107,8 @@ function planFailure(error: ChannelError, attemptNo: number, now: Instant, polic
     return { to: 'BLOCK_SCOPE', errorCode: error.code, reason: { code: 'WRITE_SCOPE_BLOCKED', params: { code: error.code, action: sellerActionFor(error.code) } } };
   }
   if (error.class === 'PERMANENT') return { to: 'DISCARD', errorCode: error.code, reason: channelRefusal(error) };
+  // Шаг 51: канал запрещает повтор после этой ошибки (eBay: только сбои инфраструктуры) — отказ канала без повтора
+  if (!retryableByChannel(policy, error)) return { to: 'DISCARD', errorCode: error.code, reason: channelRefusal(error) };
   if (attemptNo >= policy.maxAttempts) {
     return { to: 'DISCARD', errorCode: error.code, reason: { code: 'WRITE_RETRIES_EXHAUSTED', params: { attempts: attemptNo, code: error.code } } };
   }

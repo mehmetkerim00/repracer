@@ -6,7 +6,7 @@ import { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, FILE_PRODUCING_JOB_K
 import { feedGroupOf, type ConsoleScopeRow, type ConsoleWriteRow, type ConsoleIntentRow, type DecisionPage, type DecisionPageQuery, type DecisionDetail, type ScopeDecisionStats, type InterventionSlice, type FeedPage, type FeedPageItem, type FeedPageQuery, type FeedStatusGroup, type WorldCounters } from './store.ts';
 /** Записи в полёте: одна на единицу, показываются в состоянии консоли; завершённые — только в ленте [Р-154] */
 const IN_FLIGHT_WRITE = new Set(['PENDING', 'DISPATCHED', 'ACCEPTED', 'FAILED', 'BLOCKED']);
-import { offerIdentityOf, type CompetitorQuery, type CompetitorSnapshot, type CompetitorSourceDescriptor, type FieldWrite, type Instant, type OfferIdentity, type PriceBasis, type PricingHealthObservation, type WriteOutcome } from '@repracer/channel-port';
+import { offerIdentityOf, type CompetitorQuery, type CompetitorSnapshot, type CompetitorSourceDescriptor, type FieldWrite, type Instant, type OfferIdentity, type PriceBasis, type PricingHealthObservation, type WriteOutcome, type WriteRetryRule } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange, SanityContext } from '@repracer/input-sanity';
 import { assertWriteWithinBounds, NO_GUARDRAILS, type GuardrailSet } from '@repracer/price-gate';
 import { strategyAvailability } from '@repracer/strategy-engine';
@@ -46,6 +46,7 @@ import {
   DEFAULT_RETRY_POLICY,
   planOutcomeTransition,
   planReconciliationTransition,
+  retryPolicyFor,
   type ClaimResult,
   type DueKind,
   type DueScope,
@@ -848,8 +849,8 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     this.competitorDaily.set(k, days);
   }
 
-  async recordDispatch(tenantId: string, write: FieldWrite, outcome: WriteOutcome, now: Instant): Promise<DispatchRecorded> {
-    return this.recordOutcome(tenantId, write, outcome, now, DEFAULT_RETRY_POLICY);
+  async recordDispatch(tenantId: string, write: FieldWrite, outcome: WriteOutcome, now: Instant, rule?: WriteRetryRule): Promise<DispatchRecorded> {
+    return this.recordOutcome(tenantId, write, outcome, now, retryPolicyFor(DEFAULT_RETRY_POLICY, rule));
   }
 
   // --- WriteQueueStore [Р-64]: те же правила, что PgWriteQueueStore и триггеры channel_write -------------

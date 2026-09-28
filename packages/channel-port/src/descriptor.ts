@@ -1,4 +1,5 @@
 import type { Channel, IdentityAttribute, PriceBasis, WriteField } from './primitives.ts';
+import type { ChannelErrorCode } from './errors.ts';
 
 /**
  * Самоописание адаптера. Это та же информация, что строка platform.channel_capability (ADR-0002):
@@ -29,6 +30,22 @@ export interface ChannelDescriptor {
    * спецификации с основанием
    */
   priceHistory: { kind: 'AVAILABLE' | 'UNAVAILABLE'; basis: string };
+  /**
+   * Шаг 51: правило повтора ЗАПИСИ, которого требует канал; нет — общая политика ядра (write-dispatcher DEFAULT_RETRY_POLICY).
+   * Ядро применяет его само [ADR-0006: адаптер не решает о повторах]: попыток одной версии не больше `maxAttempts` (включая
+   * первую), и повторяется только временная ошибка из `retryOn`; прочие временные завершаются отказом канала без повтора.
+   */
+  writeRetry?: WriteRetryRule;
+}
+
+export interface WriteRetryRule {
+  maxAttempts: number;
+  /**
+   * Коды временных ошибок, после которых запись повторяется. `notSentOnly` — только если запрос к каналу не уходил
+   * (у ошибки нет httpStatus: клиентский бюджет запросов), такой повтор не обращение к каналу
+   */
+  retryOn: readonly { code: ChannelErrorCode; notSentOnly?: boolean }[];
+  basis: string;
 }
 
 export interface CompetitorSourceDescriptor {

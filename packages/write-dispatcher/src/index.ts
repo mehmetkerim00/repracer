@@ -19,6 +19,8 @@ export {
   channelRefusal,
   planOutcomeTransition,
   planReconciliationTransition,
+  retryableByChannel,
+  retryPolicyFor,
   sameWriteValue,
   type OutcomeTransition,
   type Reconciliation,

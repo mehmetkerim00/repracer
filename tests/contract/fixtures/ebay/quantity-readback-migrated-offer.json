@@ -3,7 +3,7 @@
   "id": "ebay/readback/migrated-offer-without-quantity",
   "channel": "EBAY",
   "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
-  "title": "У мигрированного предложения нет availableQuantity: обратное чтение отказывает, а не угадывает",
+  "title": "У мигрированного предложения нет availableQuantity: «нет данных» — обратное чтение отказывает, а не угадывает (ни 0, ни другой уровень)",
   "description": "Записано в песочнице: предложение, созданное bulk_migrate_listing, пришло без availableQuantity (у листинга количество 4). Уровни количества у eBay разные (товар и предложение) — адаптер не подставляет другой уровень [EBAY_C07, E-03].",
   "tags": [
     "quantity",
@@ -78,7 +78,8 @@
           {
             "writeScopeId": "ws-ebay-qty-16",
             "error": {
-              "code": "NOT_FOUND",
+              "code": "UNKNOWN",
+              "channelCode": "OFFER_QUANTITY_ABSENT",
               "scope": "ITEM"
             }
           }

@@ -486,10 +486,10 @@ export function buildEbayScenarios(): Array<{ file: string; scenario: Scenario }
   {
     const w = quantityWrite('cw-18', 16, 4);
     out.push(scenario('quantity-readback-migrated-offer.json', 'ebay/readback/migrated-offer-without-quantity',
-      'У мигрированного предложения нет availableQuantity: обратное чтение отказывает, а не угадывает',
+      'У мигрированного предложения нет availableQuantity: «нет данных» — обратное чтение отказывает, а не угадывает (ни 0, ни другой уровень)',
       'Записано в песочнице: предложение, созданное bulk_migrate_listing, пришло без availableQuantity (у листинга количество 4). Уровни количества у eBay разные (товар и предложение) — адаптер не подставляет другой уровень [EBAY_C07, E-03].',
       ['quantity', 'readback', 'conservative:EBAY_C07_QUANTITY_LEVEL_OFFER'], RECORDED,
-      [call('read-back', 'readBack', [[readBackOf(w, ['QUANTITY'])]], { observations: [], failures: [{ writeScopeId: 'ws-ebay-qty-16', error: { code: 'NOT_FOUND', scope: 'ITEM' } }] })],
+      [call('read-back', 'readBack', [[readBackOf(w, ['QUANTITY'])]], { observations: [], failures: [{ writeScopeId: 'ws-ebay-qty-16', error: { code: 'UNKNOWN', channelCode: 'OFFER_QUANTITY_ABSENT', scope: 'ITEM' } }] })],
       [sb(userToken()), sb(getOffer('get-offer-migrated', 16, { priceMinor: 1499, quantity: null, migrated: true }))],
       { noAlerts: true, logs: [{ code: 'EBAY_C07_QUANTITY_LEVEL_OFFER', question: 'E-03', count: 1 }] }));
   }

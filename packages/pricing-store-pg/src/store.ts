@@ -1,11 +1,11 @@
 import type { ExplanationRuleset as DictionaryRuleset } from '@repracer/pricing-model';
 import {
   floorCauseFromDatabase, convertMinor, type FxQuote } from '@repracer/pricing-model';
-import { DEFAULT_RETRY_POLICY } from '@repracer/write-dispatcher';
+import { DEFAULT_RETRY_POLICY, retryPolicyFor } from '@repracer/write-dispatcher';
 import {
   rotation, type BulkJobArtifact, type BulkJobCreated, type BulkJobInput, type BulkJobOutcome, type BulkJobProgress, type BulkJobRow,
 } from '@repracer/pricing-pipeline';
-import { offerIdentityOf, type CompetitorQuery, type CompetitorSnapshot, type FieldWrite, type Instant, type PricingHealthObservation, type WriteOutcome } from '@repracer/channel-port';
+import { offerIdentityOf, type CompetitorQuery, type CompetitorSnapshot, type FieldWrite, type Instant, type PricingHealthObservation, type WriteOutcome, type WriteRetryRule } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange } from '@repracer/input-sanity';
 import type { GuardrailSet } from '@repracer/price-gate';
 import type { OmnibusPriorPrice } from '@repracer/pricing-model';
@@ -1026,10 +1026,11 @@ export class PgPricingStore implements PricingStore {
     return this.writeQueue.recordEbayBatchOutcome(tenantId, channelAccountId, multiSkuAccepted);
   }
 
-  async recordDispatch(tenantId: string, write: FieldWrite, outcome: WriteOutcome, now: Instant): Promise<DispatchRecorded> {
+  async recordDispatch(tenantId: string, write: FieldWrite, outcome: WriteOutcome, now: Instant, rule?: WriteRetryRule): Promise<DispatchRecorded> {
     // Те же правила, что у диспетчера [Р-64]: временная ошибка — повтор со сроком, неизвестный итог — сверка обратным чтением,
     // постоянная — завершение с причиной. Раньше отказ канала оставлял запись FAILED без продолжения.
-    return this.writeQueue.recordOutcome(tenantId, write, outcome, now, DEFAULT_RETRY_POLICY);
+    // Шаг 51: правило повтора канала (eBay: не больше двух повторов, только сбои инфраструктуры) — как у диспетчера
+    return this.writeQueue.recordOutcome(tenantId, write, outcome, now, retryPolicyFor(DEFAULT_RETRY_POLICY, rule));
   }
 
   // --- включение репрайсинга ---------------------------------------------------

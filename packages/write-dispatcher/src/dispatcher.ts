@@ -2,6 +2,7 @@ import type { AdapterCallContext, AlertSink, ChannelAdapter, DispatchResult, Fie
 import {
   coreError,
   DEFAULT_RETRY_POLICY,
+  retryPolicyFor,
   sameWriteValue,
   type Reconciliation,
   type RetryPolicy,
@@ -130,6 +131,19 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
   const callTimeoutMs = deps.callTimeoutMs ?? 60_000;
   const tails = new Map<string, Promise<unknown>>();
   const scopeErrorAlertedAt = new Map<string, number>();
+
+  /**
+   * Шаг 51: политика записи канала аккаунта — общая, ужесточённая правилом канала (`descriptor.writeRetry`; eBay Growth Check:
+   * не больше двух повторов и только после сбоя инфраструктуры). Адаптер недоступен — общая политика: итог записи важнее,
+   * а повтор после такого сбоя снова пройдёт здесь
+   */
+  async function policyOf(tenantId: string, channelAccountId: string): Promise<RetryPolicy> {
+    try {
+      return retryPolicyFor(policy, (await deps.adapterFor(tenantId, channelAccountId)).descriptor.writeRetry);
+    } catch {
+      return policy;
+    }
+  }
 
   /**
    * Р-155 (находка 11 ревью шага 36): пакет отправляется ВНЕ цепочки захвата, поэтому цепочку единицы продлевают явно —
@@ -337,7 +351,7 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
       const outcome = outcomes.get(writeId)
         // Адаптер не запланировал запись и не отказал: к каналу обращения не было — повтор безопасен
         ?? { channelWriteId: writeId, status: 'REJECTED' as const, error: coreError('UNKNOWN', 'TRANSIENT', 'adapter planned no batch for the write') };
-      const recorded = await deps.store.recordOutcome(claim.tenantId, claim.write, outcome, deps.now(), policy);
+      const recorded = await deps.store.recordOutcome(claim.tenantId, claim.write, outcome, deps.now(), await policyOf(tenantId, channelAccountId));
       claim.recorded = recorded;
       claim.report.steps.push({
         action: 'DISPATCHED', channelWriteId: claim.write.channelWriteId, version: claim.write.version, attemptNo: claim.write.attemptNo,
@@ -373,7 +387,7 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
             return report;
           }
           const { result, observation } = await readBack(tenantId, claim.channelAccountId, claim.write);
-          const recorded = await deps.store.recordReconciliation(tenantId, claim.write, result, deps.now(), policy);
+          const recorded = await deps.store.recordReconciliation(tenantId, claim.write, result, deps.now(), await policyOf(tenantId, claim.channelAccountId));
           report.steps.push({ action: 'RECONCILED', channelWriteId: claim.write.channelWriteId, version: claim.write.version, result: result.kind, recorded: recorded.status });
           await afterRecorded(tenantId, claim.write, recorded);
           if (result.kind === 'APPLIED') await checkBasis(tenantId, claim.write, observation, report);
@@ -387,7 +401,7 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
             return report;
           }
           const outcome = await send(tenantId, claim.channelAccountId, claim.write);
-          const recorded = await deps.store.recordOutcome(tenantId, claim.write, outcome, deps.now(), policy);
+          const recorded = await deps.store.recordOutcome(tenantId, claim.write, outcome, deps.now(), await policyOf(tenantId, claim.channelAccountId));
           report.steps.push({
             action: 'DISPATCHED', channelWriteId: claim.write.channelWriteId, version: claim.write.version, attemptNo: claim.write.attemptNo,
             outcome: outcome.status, recorded: recorded.status, reason: recorded.reason,

@@ -125,4 +125,19 @@ export const EBAY_DESCRIPTOR: ChannelDescriptor = {
   haltRelease: { kind: 'MANUAL_ONLY', basis: 'Р-119: no competitor data on eBay, a fresh independent sample cannot be taken' },
   priceHistory: { kind: 'UNAVAILABLE', basis: 'no specification snapshot (E-01); the sandbox run found no offer price history operation' },
   competitorSources: [],
+  /**
+   * Шаг 51, Growth Check («retries for a maximum of two times for infrastructure errors», get-started-with-ebay-apis.html снимка
+   * 2026-09-28): запись — не больше трёх попыток (два повтора) и только после сбоя инфраструктуры: 5xx и недоступный сервер токенов
+   * (CHANNEL_UNAVAILABLE), таймаут, обрыв соединения. Ответ eBay 4xx (включая 429 и отказ формы пакета EBAY_C18) не повторяется. Отказ
+   * НАШЕГО клиентского бюджета или режима пакетов до отправки повторяем: запрос в eBay не уходил (у ошибки нет httpStatus).
+   * Итог неизвестен (запрос мог дойти) — не повтор, а сверка обратным чтением; повтор после неё тоже считается попыткой.
+   */
+  writeRetry: {
+    maxAttempts: 3,
+    retryOn: [
+      { code: 'CHANNEL_UNAVAILABLE' }, { code: 'TIMEOUT' }, { code: 'NETWORK' },
+      { code: 'RATE_LIMITED', notSentOnly: true }, { code: 'ACTION_NOT_ALLOWED', notSentOnly: true },
+    ],
+    basis: 'eBay Application Growth Check: retries for a maximum of two times for infrastructure errors (vendor/ebay/2026-09-28/get-started-with-ebay-apis.html)',
+  },
 };

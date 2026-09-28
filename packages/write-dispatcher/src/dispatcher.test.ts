@@ -265,3 +265,47 @@ test('Р-189: the dispatcher hands the eBay multi-SKU batch outcome to the store
 
 // Тип FieldWrite нужен только для совместимости сигнатуры адаптера в заглушке
 export type { FieldWrite };
+
+/**
+ * Шаг 51 (eBay Growth Check): правило повтора записи берёт ДИСПЕТЧЕР у адаптера канала аккаунта (`descriptor.writeRetry`), а не
+ * общая политика. Сверяются политики, которые хранилище получило на обоих путях (пакетом и по одной записи)
+ */
+test('step 51: the dispatcher records outcomes with the channel write retry rule of the account adapter', async () => {
+  const write: FieldWrite = {
+    channelWriteId: 'cw-1' as FieldWrite['channelWriteId'],
+    writeScope: { writeScopeId: 'ws-1' as FieldWrite['writeScope']['writeScopeId'], field: 'PRICE', scopeKey: 'ebay:de:1', identity: { marketplace: 'EBAY_DE', externalSku: 'S1' } },
+    version: 1, idempotencyKey: 'idem-1', value: { field: 'PRICE', price: { amountMinor: 1999, currency: 'EUR', basis: 'GROSS' } }, attemptNo: 1,
+  };
+  const policies: Array<{ maxAttempts: number; retryOn: unknown }> = [];
+  // Одна запись к отправке на каждый вызов диспетчера: обход и dispatchScope получают её по разу
+  let due = true;
+  const store: WriteQueueStore = {
+    async dueScopes() { return [{ tenantId: 't1', writeScopeId: 'ws-1', dueKind: 'PENDING', dueSince: '2026-09-15T09:00:00Z' }]; },
+    async claimNext(): Promise<ClaimResult> {
+      if (!due) return { kind: 'IDLE' };
+      due = false;
+      return { kind: 'DISPATCH', channelAccountId: 'acc-1', write };
+    },
+    async recordOutcome(_t, _w, _o, _now, policy): Promise<RecordedOutcome> {
+      policies.push({ maxAttempts: policy.maxAttempts, retryOn: policy.retryOn });
+      return { status: 'FAILED', slotFreed: true, queuedWaiting: false, nextAttemptAt: null, reason: null, scopeBlocked: false };
+    },
+    async checkPriceBasis() { return null; },
+    async recordEbayBatchOutcome() { throw new Error('not reached'); },
+    async recordReconciliation() { throw new Error('not reached'); },
+  };
+  const rule = { maxAttempts: 3, retryOn: [{ code: 'TIMEOUT' as const }], basis: 'test' };
+  const failed = { channelWriteId: write.channelWriteId, status: 'REJECTED' as const, error: { class: 'TRANSIENT' as const, code: 'CHANNEL_UNAVAILABLE' as const, scope: 'BATCH' as const, message: '503', raiseAlert: false, httpStatus: 503 } };
+  const adapter = {
+    descriptor: { writeRetry: rule },
+    async planDispatch() { return { batches: [{ batchId: 'b-1', operation: 'bulkUpdatePriceQuantity', items: [write], budgetCharges: [], requestCount: 1 }], rejected: [] }; },
+    async dispatch() { return { batchId: 'b-1', outcomes: [failed], attemptsMade: 1 }; },
+  } as unknown as ChannelAdapter;
+  const dispatcher = createWriteDispatcher({ store, adapterFor: () => adapter, alerts: { raise: async () => undefined }, now: () => '2026-09-15T10:00:00.000Z' });
+  await dispatcher.sweep({ concurrency: 1 });
+  due = true;
+  await dispatcher.dispatchScope('t1', 'ws-1');
+  assert.equal(policies.length, 2, 'both the sweep batch path and the single-scope path recorded an outcome');
+  for (const p of policies) assert.deepEqual(p, { maxAttempts: 3, retryOn: rule.retryOn });
+  assert.equal(dispatcher.policy.maxAttempts, 5, 'the core policy itself is unchanged for other channels');
+});

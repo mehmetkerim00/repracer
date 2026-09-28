@@ -115,9 +115,15 @@ export async function readBackEbay(options: ResolvedOptions, ctx: AdapterCallCon
     const liveness = livenessOf(o);
     if (r.writeScope.field === 'QUANTITY') {
       if (!Number.isSafeInteger(o.availableQuantity)) {
-        // Песочница: у мигрированного предложения availableQuantity не было — не угадываем [EBAY_C07]
+        /**
+         * Песочница (шаги 39 и 50): у мигрированного предложения availableQuantity нет, а Browse показывает у листинга 4 [EBAY_C07].
+         * Шаг 51: пустое поле — «нет данных», а не ноль и не «не найдено». Наблюдения нет (ни 0, ни значение другого уровня); отказ —
+         * UNKNOWN с кодом канала OFFER_QUANTITY_ABSENT: сверка записи остаётся «итог неизвестен» (не NOT_APPLIED — повторной отправки
+         * нет, не расхождение с нашим значением) до предела неизвестного итога, дальше — разбор человеком, как любой неизвестный итог
+         */
         logConservative(options.deps.logger, ctx, 'EBAY_C07_QUANTITY_LEVEL_OFFER', { offerId, availableQuantity: null });
-        fail(channelError('NOT_FOUND', 'ITEM', 'the eBay offer carries no availableQuantity: the listing quantity is not read from another level'));
+        fail(channelError('UNKNOWN', 'ITEM', 'the eBay offer carries no availableQuantity: no data, not zero; the listing quantity is not read from another level',
+          { channelCode: 'OFFER_QUANTITY_ABSENT' }));
         continue;
       }
       // Запись предложения — наша; у активного листинга сверяется с оценкой Browse, расхождение — предупреждение [EBAY_C13]
