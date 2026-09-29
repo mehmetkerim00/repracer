@@ -45,7 +45,7 @@ test('step 53: Amazon FBA quantity goes from discovery through the database to t
   };
   let tenantId = '';
   const report = await runScenario(scenario, amazonUnderTest, undefined, pgStoreFactory(pool, scanPool, fxLoaderPool, { adminPool, provisioningPool }),
-    { onFinish: ({ store }) => { tenantId = (store as unknown as { identity: { tenantId: string } }).identity.tenantId; } });
+    { onFinish: async ({ store }) => { tenantId = (store as unknown as { identity: { tenantId: string } }).identity.tenantId; } });
   assert.deepEqual(report.failures, [], report.failures.join('\n'));
   const page = await new PgStockStore({ adminPool, stockPool }).stockPage(tenantId, { offset: 0, limit: 50 });
   const fba = page.items.find((r) => r.sku === 'SYN-FBA-5302');
