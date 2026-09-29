@@ -67,7 +67,7 @@ jobs:
       - name: Console UI build (Р-159)
         run: npm run build -w apps/console
       - name: Tests without infrastructure beyond PostgreSQL (Р-137)
-        run: node scripts/test-all.mjs --scope=fast --no-typecheck
+        run: node scripts/test-all.mjs --scope=fast --ci
 
   # Задача E шага 30 [OQ-203]: быстрый прогон не должен пропускать регрессию в защитах, которыми держится цена
   guards:
@@ -183,7 +183,7 @@ jobs:
       - name: Console UI build (Р-159)
         run: npm run build -w apps/console
       - name: 'All tests, no skips (Р-137: полная область — с брокером и ClickHouse)'
-        run: node scripts/test-all.mjs --scope=full --no-typecheck
+        run: node scripts/test-all.mjs --scope=full --ci
       # Шаг 28, D: развёртывания поднимаются по-настоящему — три процесса стартуют и отвечают на /healthz (deploy/ci/README.md)
       # Шаг 37 [Р-159]: сюда добавился профиль production целиком — прокси и КОНСОЛЬ, и путь гостя по нему как браузер
       - name: Deployments start, and the guest walks the production profile (шаг 28 D, шаг 37 A)
@@ -223,7 +223,7 @@ jobs:
       - name: Database — migrations, template
         run: scripts/db/prepare.sh repracer_eu
       - name: A virtual day of the demo stand, then every screen within its limit (Р-154, OQ-214)
-        run: node scripts/test-all.mjs --scope=long --no-typecheck
+        run: node scripts/test-all.mjs --scope=long --ci
 
 
   shadow-day:
@@ -256,7 +256,7 @@ jobs:
       - name: Database — migrations, template
         run: scripts/db/prepare.sh repracer_eu
       - name: 'Сутки демо в ТЕНИ: ни одного изменяющего запроса к каналу, затем включение боя и возврат (Р-169…Р-171)'
-        run: node scripts/test-all.mjs --scope=shadow --no-typecheck
+        run: node scripts/test-all.mjs --scope=shadow --ci
 
   # Шаг 20: замер сжатия ClickHouse против оценки шага 4 (ADR-0004) — отдельное задание, итог — артефакт compression.json
   clickhouse-compression:

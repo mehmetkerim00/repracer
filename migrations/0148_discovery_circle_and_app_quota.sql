@@ -27,8 +27,9 @@ GRANT EXECUTE ON FUNCTION security.current_tenant_id(), security.platform_tenant
 
 -- ================================================================ 1. суточная квота приложения
 CREATE TABLE platform.channel_app_quota_day (
-  tenant_id   uuid NOT NULL DEFAULT security.platform_tenant_id() CHECK (tenant_id = security.platform_tenant_id())
-              REFERENCES tenant_data.tenant (tenant_id),
+  -- Строка платформы: тенант — платформенный по умолчанию; писать другой не даёт политика строк узкой роли (WITH CHECK) — отдельный CHECK
+  -- был бы дублем, пойманным только соседней защитой [Р-104]
+  tenant_id   uuid NOT NULL DEFAULT security.platform_tenant_id() REFERENCES tenant_data.tenant (tenant_id),
   channel     text NOT NULL,
   api         text NOT NULL,
   -- Сутки квоты — UTC: граница суток квоты eBay документацией не названа (проверить, E-04); сутки UTC — одинаковые для всех процессов
