@@ -73,6 +73,7 @@ set -a; . deploy/production/production.env; set +a; bash deploy/production/logs-
 docker compose -f deploy/production/compose.yaml --env-file deploy/production/production.env up -d
 
 # 5. Процессы продукта — своими профилями
+#    Планировщику нужен и файл stock_pg_url (роль svc_stock, чтение заказов — шаг 56); без него процесс не стартует — deploy/scheduler/README.md
 docker compose -f deploy/scheduler/compose.yaml --env-file deploy/scheduler/scheduler.env up -d
 docker compose -f deploy/worker/compose.yaml --env-file deploy/worker/worker.env up -d
 docker compose -f deploy/notification-receiver/compose.yaml --env-file deploy/notification-receiver/receiver.env up -d

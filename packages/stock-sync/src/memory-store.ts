@@ -176,6 +176,7 @@ export class InMemoryStockStore implements StockStore {
     for (const line of lines) {
       const offer = this.offers.find((o) => o.channelAccountId === channelAccountId && o.externalOfferId === line.identity.externalOfferId);
       if (!offer) { out.unknownOffers += 1; continue; }
+      out.productIds.push(offer.productId); // шаг 57: как в базе — пересчёт у всех сопоставленных строк
       const key = `${channelAccountId}|${line.externalOrderLineRef}|${offer.productId}`;
       const existing = this.reservations.get(key);
       if (!existing) {

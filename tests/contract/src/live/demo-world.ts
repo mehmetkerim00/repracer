@@ -139,7 +139,7 @@ export async function demoWorld(input: {
       awaitingAccess: ['NOTIFICATION_QUEUE', 'SELLER_AUTHORIZATION'] }],
   });
   const base = pgJobDeps({
-    schedulerPool: input.schedulerPool, exporterPool: input.exporterPool, ingest: null as never, verifier: null as never,
+    schedulerPool: input.schedulerPool, exporterPool: input.exporterPool, ingest: null as never, verifier: null as never, includeDemoTenants: true,
     descriptorOf: (channel) => (channel === 'KAUFLAND' ? live.adapter.descriptor : null),
     pipelineFor: () => live.pipelineForDbIds(),
     reconcileEnabled: () => false,

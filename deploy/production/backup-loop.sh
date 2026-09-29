@@ -20,8 +20,13 @@ PUBLIC_KEY="${REPRACER_BACKUP_PUBLIC_KEY_FILE:-/run/secrets/backup_public_key.as
 ONCE="${REPRACER_BACKUP_ONCE:-0}"
 export GNUPGHOME="$(mktemp -d)"
 # Ревью шага 54, находка 13: временный каталог ключей и недописанные части убираются при любом выходе, в том числе по SIGTERM
-trap 'rm -rf "$GNUPGHOME"; rm -f "$OUT"/repracer-*.part' EXIT
+SLEEP_PID=""
+# Шаг 57: ловушка гасит и свой сон — осиротевший `sleep` держал бы вывод процесса открытым до конца срока
+trap 'if [[ -n "$SLEEP_PID" ]]; then kill "$SLEEP_PID" 2>/dev/null || true; fi; rm -rf "$GNUPGHOME"; rm -f "$OUT"/repracer-*.part' EXIT
 trap 'exit 143' TERM INT
+# Шаг 57 (ревью шага 55, находка 12): остановка SIGKILL посреди конвейера `pg_dump` ловушек не исполняет — недописанные части прошлого
+# процесса убираются при старте следующего
+rm -f "$OUT"/repracer-*.part
 encrypt() { gpg --batch --no-tty --quiet --trust-model always --recipient-file "$PUBLIC_KEY" --encrypt --output "$1"; }
 sha() { if command -v sha256sum >/dev/null; then sha256sum "$@" | awk '{print $1}'; else shasum -a 256 "$@" | awk '{print $1}'; fi; }
 # Отметка провала: файл живёт, пока копия не удалась, и исчезает с первой удавшейся. Внешний контроль видит её файлом,
@@ -61,5 +66,10 @@ while true; do
   # `-mtime +N` удаляет файлы старше N ПОЛНЫХ суток, поэтому берётся на сутки меньше: заявлено «не больше 7»
   find "$OUT" -name 'repracer-*' -type f -mtime "+$((KEEP_DAYS - 1))" -delete
   if [[ "$ONCE" == 1 ]]; then [[ "$FAILURES" -eq 0 ]] && exit 0 || exit 1; fi
-  sleep "$NEXT"
+  # Шаг 57 (ревью шага 55, находка 12): bash исполняет ловушку только после выхода процесса переднего плана — `sleep` на сутки держал бы
+  # SIGTERM до SIGKILL по сроку остановки контейнера. `wait` прерывается сигналом сразу
+  sleep "$NEXT" &
+  SLEEP_PID=$!
+  wait "$SLEEP_PID"
+  SLEEP_PID=""
 done

@@ -1,3 +1,4 @@
+import { systemClock } from '@repracer/channel-port';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { bulkJobHandlers } from '@repracer/bulk-jobs/handlers';
@@ -131,7 +132,7 @@ function previewPipelineFor(store: PricingStore, channel: string, now: () => Ins
 /** Мир одного тенанта: аккаунты описания обновляются на ходу — канал, подключённый после запуска, получает свой путь решения */
 async function runWorld(config: BulkWorkerConfig, world: BulkWorkerWorldConfig, owner: string, stopped: () => boolean): Promise<void> {
   const store = storeFor(config, world);
-  const now = (): Instant => (world.now === 'WALL_CLOCK' ? new Date().toISOString() as Instant : world.now);
+  const now = (): Instant => (world.now === 'WALL_CLOCK' ? systemClock.now() : world.now);
   // Свой путь решения на канал: доступность стратегии — свойство канала, и один пайплайн на все каналы дал бы чужой ответ
   const pipelines = new Map<string, ReturnType<typeof previewPipelineFor>>();
   const pipelineOf = (channelAccountId: string) => {
@@ -202,7 +203,7 @@ export async function runConfiguredWorker(config: BulkWorkerConfig, stopped: () 
         try {
           const { rows } = await workerPool.query('SELECT t AS tenant_id FROM security.bulk_job_waiting_tenants() t');
           waiting = new Set(rows.map((r) => r.tenant_id as string));
-          const seen = Date.now();
+          const seen = systemClock.nowMs();
           for (const tenantId of waiting) lastWaiting.set(tenantId, seen);
           for (const tenantId of waiting) {
             if (worlds.has(tenantId)) continue;
@@ -215,7 +216,7 @@ export async function runConfiguredWorker(config: BulkWorkerConfig, stopped: () 
             })));
             worlds.set(tenantId, world);
             // Цикл уходит, когда ждущих заданий у тенанта не осталось (задание, которое уже идёт, он доделывает)
-            const loop = runWorld(config, world, owner, () => stopped() || (!waiting.has(tenantId) && Date.now() - (lastWaiting.get(tenantId) ?? 0) > lingerMs))
+            const loop = runWorld(config, world, owner, () => stopped() || (!waiting.has(tenantId) && systemClock.nowMs() - (lastWaiting.get(tenantId) ?? 0) > lingerMs))
               .catch((error: unknown) => log('BULK_TENANT_WORKER_FAILED', { tenantId, message: error instanceof Error ? error.message : String(error) }))
               .finally(() => { worlds.delete(tenantId); lastWaiting.delete(tenantId); tenantLoops.delete(loop); });
             tenantLoops.add(loop);

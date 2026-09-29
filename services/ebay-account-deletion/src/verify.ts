@@ -1,3 +1,4 @@
+import { systemClock } from '@repracer/service-runtime';
 import { createHash, createVerify } from 'node:crypto';
 
 /**
@@ -102,7 +103,7 @@ export function notificationApiKeys(options: {
   maxFetchesPerMinute?: number;
 }): PublicKeySource {
   const fetchFn = options.fetchFn ?? fetch;
-  const now = options.now ?? Date.now;
+  const now = options.now ?? systemClock.nowMs;
   const ttl = options.keyTtlMs ?? 3_600_000;
   const unknownTtl = options.unknownTtlMs ?? 600_000;
   const maxPerMinute = options.maxFetchesPerMinute ?? 10;

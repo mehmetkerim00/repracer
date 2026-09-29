@@ -1577,14 +1577,14 @@ export class PgPricingStore implements PricingStore {
 
   /** Шаг 23: состояние PRICING_HEALTH оффера (0083) — данные канала, 18 месяцев */
   /** Шаг 56 (0150): место чтения заказов аккаунта — начало окна и курсор; функцией узкой роли */
-  async orderReadPosition(tenantId: string, channelAccountId: string): Promise<{ since: Instant; cursor: string } | null> {
+  async orderReadPosition(tenantId: string, channelAccountId: string): Promise<{ since: Instant; cursor: string | null } | null> {
     return this.tx(tenantId, async (tx) => {
       const { rows: [r] } = await tx.query('SELECT since, cursor FROM tenant_data.order_read_position($1, $2)', [tenantId, channelAccountId]);
-      return r ? { since: (r.since instanceof Date ? r.since.toISOString() : String(r.since)) as Instant, cursor: String(r.cursor) } : null;
+      return r ? { since: (r.since instanceof Date ? r.since.toISOString() : String(r.since)) as Instant, cursor: r.cursor === null ? null : String(r.cursor) } : null;
     });
   }
 
-  async saveOrderReadPosition(tenantId: string, channelAccountId: string, position: { since: Instant; cursor: string } | null, at: Instant): Promise<void> {
+  async saveOrderReadPosition(tenantId: string, channelAccountId: string, position: { since: Instant; cursor: string | null } | null, at: Instant): Promise<void> {
     await this.tx(tenantId, async (tx) => {
       await tx.query('SELECT tenant_data.save_order_read_position($1, $2, $3, $4, $5)', [tenantId, channelAccountId, position?.since ?? null, position?.cursor ?? null, at]);
     });
@@ -1606,9 +1606,11 @@ export class PgPricingStore implements PricingStore {
     });
   }
 
-  async saveDiscoveryCircle(tenantId: string, channelAccountId: string, entry: { startedFrom: string | null; cursor: string | null; stop: DiscoveryStop; at: Instant }): Promise<void> {
-    await this.tx(tenantId, async (tx) => {
-      await tx.query('SELECT tenant_data.save_discovery_circle($1, $2, $3, $4, $5, $6)', [tenantId, channelAccountId, entry.startedFrom, entry.cursor, entry.stop, entry.at]);
+  async saveDiscoveryCircle(tenantId: string, channelAccountId: string, entry: { startedFrom: string | null; cursor: string | null; stop: DiscoveryStop; startedAt: Instant; at: Instant; noProgress: boolean }): Promise<'SAVED' | 'RESET'> {
+    return this.tx(tenantId, async (tx) => {
+      const { rows: [r] } = await tx.query('SELECT tenant_data.save_discovery_circle($1, $2, $3, $4, $5, $6, $7, $8) AS result',
+        [tenantId, channelAccountId, entry.startedFrom, entry.cursor, entry.stop, entry.startedAt, entry.at, entry.noProgress]);
+      return r?.result === 'RESET' ? 'RESET' : 'SAVED';
     });
   }
 
@@ -2392,7 +2394,7 @@ export class PgPricingStore implements PricingStore {
         `SELECT s.write_scope_id FROM tenant_data.write_scope s
            JOIN tenant_data.pricing_strategy ps
              ON ps.tenant_id = s.tenant_id AND ps.pricing_strategy_id = s.pricing_strategy_id AND ps.version = s.pricing_strategy_version
-           LEFT JOIN LATERAL (SELECT d.decided_at FROM channel_data.price_decision d
+           LEFT JOIN LATERAL (SELECT d.decided_at, d.price_decision_id FROM channel_data.price_decision d
                                WHERE d.tenant_id = s.tenant_id AND d.write_scope_id = s.write_scope_id
                                ORDER BY d.decided_at DESC LIMIT 1) last ON true
           WHERE s.tenant_id = $1 AND s.channel_account_id = $2 AND s.field = 'PRICE' AND s.pricing_mode = 'ENGINE' AND s.status = 'ACTIVE'
@@ -2405,7 +2407,9 @@ export class PgPricingStore implements PricingStore {
                       renewed: true,
                       // Ревью шага 53, находка 7: после обновления бюджета единица должна ОДИН раз — пока решения после отказа не было; иначе
                       // единица без новой версии (NO_OP, пропуск) выбиралась бы каждым заходом и первой, занимая предел
-                      extra: '(last.decided_at IS NULL OR last.decided_at < h.finished_at)' })}))
+                      // Ревью шага 55, находка 8: «решения после отказа не было» — ПОСЛЕДНЕЕ решение единицы и есть то, что породило упёршуюся
+                      // запись (сравнение по идентичности, а не по времени решения против времени завершения записи — это часы разных процессов)
+                      extra: '(last.price_decision_id IS NULL OR h.price_decision_id IS NULL OR last.price_decision_id = h.price_decision_id)' })}))
           ORDER BY last.decided_at ASC NULLS FIRST, s.write_scope_id
           LIMIT $4`, [tenantId, channelAccountId, now, Math.max(0, limit)]);
       return rows.map((r) => r.write_scope_id as string);

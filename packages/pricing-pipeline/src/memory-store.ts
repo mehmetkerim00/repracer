@@ -595,7 +595,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
    * Шаг 53 (как PostgreSQL, 0141 и store.ts): последняя запись цены единицы упёрлась в бюджет правок; обновился ли он — прошло время, названное
    * каналом, или сутки бюджета. Поясов витрин память не ведёт — сутки бюджета здесь сравниваются по дате UTC
    */
-  private priceBudgetExhausted(writeScopeId: string, now: Instant): { resetsAt: Instant | null; budgetDay: string | null; renewed: boolean; writeCreatedAt: Instant } | null {
+  private priceBudgetExhausted(writeScopeId: string, now: Instant): { resetsAt: Instant | null; budgetDay: string | null; renewed: boolean; writeCreatedAt: Instant; decisionId: string | null } | null {
     const last = this.writes.filter((w) => w.writeScopeId === writeScopeId).sort((a, b) => b.version - a.version)[0];
     if (!last || last.status !== 'BUDGET_EXHAUSTED') return null;
     const resetsAt = typeof last.endParams.resetsAt === 'string' ? last.endParams.resetsAt : null;
@@ -603,7 +603,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     if (!resetsAt && !budgetDay) return null;
     // Шаг 55 (ревью шага 53, находка 6): время, названное каналом, решает само
     const renewed = resetsAt !== null ? Date.parse(resetsAt) <= Date.parse(now) : budgetDay !== null && budgetDay < now.slice(0, 10);
-    return { resetsAt, budgetDay, renewed, writeCreatedAt: last.createdAt };
+    return { resetsAt, budgetDay, renewed, writeCreatedAt: last.createdAt, decisionId: last.decisionId ?? null };
   }
 
   // --- PricingStore: оценка ------------------------------------------------
@@ -1046,20 +1046,26 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
 
   /** Каталог мира в памяти задаёт сценарий: обнаружение его не расширяет (стенд утверждает сценарий, а не каталог) */
   /** Шаг 55: круг обнаружения и суточная квота приложения — как в PostgreSQL (0148) */
-  readonly discoveryCircle = new Map<string, { cursor: string | null; stop: DiscoveryStop; at: Instant; startedAt: Instant | null; completedAt: Instant | null }>();
+  readonly discoveryCircle = new Map<string, { cursor: string | null; stop: DiscoveryStop; at: Instant; startedAt: Instant | null; completedAt: Instant | null; failures: number }>();
   readonly appQuota = new Map<string, number>();
 
   async discoveryCircleCursor(_tenantId: string, channelAccountId: string): Promise<string | null> {
     return this.discoveryCircle.get(channelAccountId)?.cursor ?? null;
   }
 
-  async saveDiscoveryCircle(_tenantId: string, channelAccountId: string, entry: { startedFrom: string | null; cursor: string | null; stop: DiscoveryStop; at: Instant }): Promise<void> {
+  async saveDiscoveryCircle(_tenantId: string, channelAccountId: string, entry: { startedFrom: string | null; cursor: string | null; stop: DiscoveryStop; startedAt: Instant; at: Instant; noProgress: boolean }): Promise<'SAVED' | 'RESET'> {
     if (entry.stop === 'COMPLETED' && entry.cursor !== null || ['DEADLINE', 'APP_QUOTA', 'PAGE_LIMIT'].includes(entry.stop) && entry.cursor === null) {
       throw new Error('a completed circle has no cursor, an interrupted one has one');
     }
     const prev = this.discoveryCircle.get(channelAccountId);
-    this.discoveryCircle.set(channelAccountId, { cursor: entry.cursor, stop: entry.stop, at: entry.at,
-      startedAt: entry.startedFrom === null ? entry.at : (prev?.startedAt ?? null), completedAt: entry.stop === 'COMPLETED' ? entry.at : (prev?.completedAt ?? null) });
+    // Как PostgreSQL (0152): сброс — на третьем подряд отказе без прогресса
+    let failures = entry.stop === 'FAILED' && entry.noProgress ? (prev?.failures ?? 0) + 1 : 0;
+    let cursor = entry.cursor;
+    let result: 'SAVED' | 'RESET' = 'SAVED';
+    if (failures >= 3) { cursor = null; failures = 0; result = 'RESET'; }
+    this.discoveryCircle.set(channelAccountId, { cursor, stop: entry.stop, at: entry.at, failures,
+      startedAt: entry.startedFrom === null ? entry.startedAt : (prev?.startedAt ?? null), completedAt: entry.stop === 'COMPLETED' ? entry.at : (prev?.completedAt ?? null) });
+    return result;
   }
 
   async discoveryCircleState(_tenantId: string, channelAccountId: string) {
@@ -1843,7 +1849,9 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
         if ((last.get(s.writeScopeId) ?? 0) < dayAgo) return true;
         // Как PostgreSQL (ревью шага 53, находка 7): после обновления бюджета — один раз, пока решения после отказа не было
         const b = this.priceBudgetExhausted(s.writeScopeId, now);
-        return b?.renewed === true && (last.get(s.writeScopeId) ?? 0) <= Date.parse(b.writeCreatedAt);
+        // Как PostgreSQL (ревью шага 55, находка 8): последнее решение единицы — то, что породило упёршуюся запись
+        const lastDecision = this.decisions.filter((d) => d.writeScopeId === s.writeScopeId).sort((x, y) => Date.parse(y.decidedAt) - Date.parse(x.decidedAt))[0];
+        return b?.renewed === true && (!lastDecision || !b.decisionId || lastDecision.decisionId === b.decisionId);
       })
       .sort((a, b) => (last.get(a.writeScopeId) ?? 0) - (last.get(b.writeScopeId) ?? 0) || a.writeScopeId.localeCompare(b.writeScopeId))
       .slice(0, Math.max(0, limit))

@@ -48,7 +48,7 @@ export class OutboxRelay {
 
   constructor(options: OutboxRelayOptions) {
     this.options = {
-      relayName: 'default', batchSize: 2000, overlapMs: 60_000, gapTimeoutMs: 30_000, pollIntervalMs: 200, now: () => Date.now(), ...options,
+      relayName: 'default', batchSize: 2000, overlapMs: 60_000, gapTimeoutMs: 30_000, pollIntervalMs: 200, now: () => Date.now(), ...options, // real-clock: умолчание пакета без зависимости от channel-port; процессы передают свои часы
     };
   }
 

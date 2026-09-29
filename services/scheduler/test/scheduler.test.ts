@@ -313,7 +313,7 @@ test('ревью шага 53, находка 3: повтор курсора в �
 
 test('шаг 56 (ревью шага 54, находка 8): чтение заказов, упёршееся в предел страниц, — место записано, следующий заход продолжает то же окно; без хранилища места окно держится', async () => {
   const calls: Array<{ since: string; cursor: string | undefined }> = [];
-  let saved: { since: string; cursor: string } | null = null;
+  let saved: { since: string; cursor: string | null } | null = null;
   let page = 0;
   const deps = jobDeps();
   const specs = await jobSource({
@@ -339,15 +339,48 @@ test('шаг 56 (ревью шага 54, находка 8): чтение зак�
   const noStore = await jobSource({ ...jobDeps(), reconcileEnabled: () => true, stock: {
     syncOrders: async () => ({ lines: 20_000, created: 0, consumed: 0, released: 0, unknownOffers: 0, writes: 0, pageLimit: { pages: 200, nextCursor: 'c' } }) } }).jobs('2026-09-17T10:00:00.000Z');
   await assert.rejects(noStore.find((spec) => spec.name === 'order-lines')!.run({ startedAt: '2026-09-17T10:30:00.000Z', previousSucceededAt: null, previousFinishedAt: null } as never),
-    /HOLD_WINDOW ORDER_LINES_PAGE_LIMIT_REACHED/);
+    /ORDER_LINES_PAGE_LIMIT_REACHED HOLD_WINDOW:/);
+});
+
+test('шаг 57 (ревью шага 56, находки 3–4): курсор, который канал больше не принимает, и петля курсора в продолжении снимают курсор, но держат начало окна', async () => {
+  const calls: Array<{ since: string; cursor: string | undefined }> = [];
+  let saved: { since: string; cursor: string | null } | null = { since: '2026-09-17T09:00:00.000Z', cursor: 'expired-cursor' };
+  let next: 'refuse' | 'loop' | 'ok' = 'refuse';
+  const deps = jobDeps();
+  const specs = await jobSource({
+    ...deps, reconcileEnabled: () => true,
+    stock: {
+      syncOrders: async (_a, _ctx, since, options) => {
+        calls.push({ since, cursor: options?.cursor });
+        if (next === 'refuse') throw new Error('CHANNEL_REJECTED: cursor is not valid');
+        return { lines: 5, created: 5, consumed: 0, released: 0, unknownOffers: 0, writes: 0, ...(next === 'loop' ? { cursorRepeated: true } : {}) };
+      },
+      positions: { get: async () => saved, save: async (_a, position) => { saved = position; } },
+    },
+  }).jobs('2026-09-17T10:00:00.000Z');
+  const orderLines = specs.find((spec) => spec.name === 'order-lines')!;
+  const run = (startedAt: string) => orderLines.run({ startedAt, previousSucceededAt: '2026-09-17T09:50:00.000Z', previousFinishedAt: null } as never);
+  await assert.rejects(run('2026-09-17T10:00:00.000Z'), /CHANNEL_REJECTED/);
+  assert.deepEqual(saved, { since: '2026-09-17T09:00:00.000Z', cursor: null }, 'the refused cursor is dropped, the window start is kept');
+  next = 'loop';
+  await assert.rejects(run('2026-09-17T10:05:00.000Z'), /CHANNEL_PAGE_CURSOR_REPEATED HOLD_WINDOW:/);
+  assert.deepEqual(calls[1], { since: '2026-09-17T09:00:00.000Z', cursor: undefined }, 'the window is re-read from its start, without a cursor');
+  assert.deepEqual(saved, { since: '2026-09-17T09:00:00.000Z', cursor: null }, 'a cursor loop in the continuation keeps the window start');
+  next = 'ok';
+  await run('2026-09-17T10:10:00.000Z');
+  assert.deepEqual([calls[2]?.since, saved], ['2026-09-17T09:00:00.000Z', null], 'the window read to its end clears the place');
 });
 
 test('ревью шага 54, находка 7: провал, держащий окно, повторяется в свой период — петля курсора канала не растягивает паузу до суток', async () => {
   const { dueOf, JobHoldsWindowError } = await import('../src/index.ts');
   const base = { jobKey: 'order-lines:a', jobName: 'order-lines', scope: 'ACCOUNT', catchUp: 'LATEST', retryKind: 'CHANNEL', intervalSeconds: 300,
     nextDueAt: '2026-09-17T10:05:00.000Z', lastFinishedAt: '2026-09-17T10:00:00.000Z', lastOutcome: 'FAILED', consecutiveFailures: 6 } as never;
-  const held = new JobHoldsWindowError('CHANNEL_PAGE_CURSOR_REPEATED: order lines read 3').message;
+  const held = new JobHoldsWindowError('CHANNEL_PAGE_CURSOR_REPEATED', 'order lines read 3').message;
   assert.equal(dueOf({ ...(base as object), lastError: held } as never), '2026-09-17T10:05:00.000Z', 'the next run keeps the 5-minute pace');
+  // Шаг 57 (ревью шага 55, находка 9): код ошибки в журнале и алерте — причина, а не признак держания окна
+  assert.match(held, /^CHANNEL_PAGE_CURSOR_REPEATED HOLD_WINDOW:/);
+  assert.ok(Date.parse(dueOf({ ...(base as object), lastError: 'CHANNEL_PAGE_CURSOR_REPEATED: without the hold mark' } as never)) > Date.parse('2026-09-17T12:00:00.000Z'),
+    'only the hold mark keeps the pace, not the cause code alone');
   assert.ok(Date.parse(dueOf({ ...(base as object), lastError: 'RATE_LIMITED: …' } as never)) > Date.parse('2026-09-17T12:00:00.000Z'),
     'an ordinary failure still backs off (Р-132)');
 });

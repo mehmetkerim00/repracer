@@ -1,18 +1,1 @@
-{
- "apps/console/server/bulk-worker.ts": 3,
- "apps/console/server/console-service.ts": 1,
- "apps/console/server/demo-world.ts": 1,
- "apps/operator/server/panel.ts": 1,
- "packages/amazon-client/src/transport.ts": 1,
- "packages/broker/src/outbox-relay.ts": 1,
- "packages/identity/src/oidc.ts": 2,
- "packages/identity/src/test-issuer.ts": 1,
- "packages/identity/src/test-provider.ts": 3,
- "packages/kaufland-client/src/transport.ts": 1,
- "packages/service-runtime/src/heartbeat.ts": 1,
- "services/ebay-account-deletion/src/verify.ts": 1,
- "services/notification-receiver/src/main.ts": 3,
- "services/pricing-worker/src/main.ts": 1,
- "services/scheduler/src/main.ts": 4,
- "services/scheduler/src/process.ts": 1
-}
+{}

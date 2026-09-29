@@ -664,7 +664,11 @@ export interface PricingStore {
   discoveryCircleCursor?(tenantId: string, channelAccountId: string): Promise<string | null>;
   /** Шаг 56: состояние круга — курсор, начало текущего круга, закрытие прошлого (заходить ли; сколько длится круг аккаунта, Р-198) */
   discoveryCircleState?(tenantId: string, channelAccountId: string): Promise<{ cursor: string | null; circleStartedAt: Instant | null; lastCircleCompletedAt: Instant | null; lastStop: string | null } | null>;
-  saveDiscoveryCircle?(tenantId: string, channelAccountId: string, entry: { startedFrom: string | null; cursor: string | null; stop: DiscoveryStop; at: Instant }): Promise<void>;
+  /**
+   * Шаг 57: `startedAt` — начало захода (длительность круга, Р-198); `noProgress` — заход упал, не прочитав ни страницы с места продолжения.
+   * 'RESET' — третий такой отказ подряд, круг сброшен к началу (ревью шага 56, находка 6)
+   */
+  saveDiscoveryCircle?(tenantId: string, channelAccountId: string, entry: { startedFrom: string | null; cursor: string | null; stop: DiscoveryStop; startedAt: Instant; at: Instant; noProgress: boolean }): Promise<'SAVED' | 'RESET'>;
   /** Шаг 55 (OQ-240): один вызов из суточной квоты канала на приложение, размазанной по суткам; false — отложить вызов */
   reserveAppCall?(channel: string, quota: string, dayLimit: number, at: Instant): Promise<boolean>;
   /** Шаг 23: PRICING_HEALTH — в решение не входит, состояние оффера для продавца */

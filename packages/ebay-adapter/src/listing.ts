@@ -31,7 +31,7 @@ function attr(xml: string, name: string, attribute: string): string | null {
 }
 
 /**
- * Курсор обнаружения — две фазы подряд: `<offset>` — страницы Inventory API (писать можно), `trd:<витрина>:<страница>` — активные
+ * Курсор обнаружения — две фазы подряд: `<offset>` — страницы Inventory API (писать можно), `trd:<id витрины>:<страница>` — активные
  * листинги Trading API (GetMyeBaySelling) по каждой витрине аккаунта: там и старые листинги, которые Inventory API не видит.
  */
 /**
@@ -40,7 +40,7 @@ function attr(xml: string, name: string, attribute: string): string | null {
  * каждый предмет с SKU прежним способом. `known: null` — набор неизвестен (переполнение или курсор без набора).
  */
 type Known = ReadonlySet<string> | null;
-type DiscoveryCursor = { phase: 'INVENTORY'; offset: number; known: Known } | { phase: 'TRADING'; marketplace: number; page: number; known: Known };
+type DiscoveryCursor = { phase: 'INVENTORY'; offset: number; known: Known } | { phase: 'TRADING'; marketplace: string | null; page: number; known: Known };
 export const MAX_CARRIED_LISTINGS = 500;
 
 function parseKnown(tail: string | undefined, fresh: boolean): Known {
@@ -63,8 +63,16 @@ export function discoveryQuotaOfEbay(cursor: string | undefined): string | null 
 
 function parseCursor(cursor: string | undefined): DiscoveryCursor {
   const [head, tail] = (cursor ?? '').split('~', 2) as [string, string | undefined];
-  const t = /^trd:(\d{1,2}):(\d{1,6})$/.exec(head);
-  if (t) return { phase: 'TRADING', marketplace: Number(t[1]), page: Math.max(1, Number(t[2])), known: parseKnown(tail, false) };
+  /**
+   * Шаг 57 (ревью шага 55, находка 10): витрина — по идентификатору, а не по номеру в списке витрин аккаунта. Номер после смены витрин
+   * аккаунта указал бы на ЧУЖУЮ витрину сохранённого круга. Курсор прежнего вида (номер) и витрина, которой у аккаунта больше нет, —
+   * `marketplace: null`: фаза Trading начинается с первой витрины заново (повтор чтения безвреден, пропуск — нет)
+   */
+  const t = /^trd:(EBAY_[A-Z]{2,6}|\d{1,2}):(\d{1,6})$/.exec(head);
+  if (t) {
+    const byId = /^EBAY_/.test(t[1]!);
+    return { phase: 'TRADING', marketplace: byId ? t[1]! : null, page: byId ? Math.max(1, Number(t[2])) : 1, known: parseKnown(tail, false) };
+  }
   // Первая страница — набор пуст и известен; старый курсор без набора (до шага 47) — набор неизвестен, фаза Trading проверит сама
   return { phase: 'INVENTORY', offset: /^\d{1,9}$/.test(head) ? Number(head) : 0, known: parseKnown(tail, cursor === undefined || cursor === '') };
 }
@@ -155,11 +163,15 @@ async function discoverInventory(options: ResolvedOptions, ctx: AdapterCallConte
   const next = nextOffsetOf(offset, (body.inventoryItems ?? []).length, limit, body.next, body.total);
   if (next !== null) return { items, nextCursor: `${next}${knownTail(known)}` };
   // Фаза Inventory окончена — дальше старые листинги и аукционы Trading API, начиная с первой витрины аккаунта
-  return { items, ...(ebayMarketplacesOf(session).length > 0 ? { nextCursor: `trd:0:1${knownTail(known)}` } : {}) };
+  return { items, ...(ebayMarketplacesOf(session).length > 0 ? { nextCursor: `trd:${ebayMarketplacesOf(session)[0]}:1${knownTail(known)}` } : {}) };
 }
 
-async function discoverTrading(options: ResolvedOptions, ctx: AdapterCallContext, session: Session, mpIndex: number, pageNumber: number, perPage: number, known: Known): Promise<Page<DiscoveredOffer>> {
+async function discoverTrading(options: ResolvedOptions, ctx: AdapterCallContext, session: Session, cursorMarketplace: string | null, cursorPage: number, perPage: number, known: Known): Promise<Page<DiscoveredOffer>> {
   const marketplaces = ebayMarketplacesOf(session);
+  const found = cursorMarketplace === null ? -1 : marketplaces.indexOf(cursorMarketplace as never);
+  // Витрины нет у аккаунта (или курсор прежнего вида) — с первой витрины и первой страницы
+  const mpIndex = found >= 0 ? found : 0;
+  const pageNumber = found >= 0 ? cursorPage : 1;
   const marketplace = marketplaces[mpIndex];
   if (!marketplace) return { items: [] };
   const info = marketplaceInfo(marketplace)!;
@@ -223,8 +235,8 @@ async function discoverTrading(options: ResolvedOptions, ctx: AdapterCallContext
   const entries = Number(tag(pagination, 'TotalNumberOfEntries') ?? NaN);
   const totalPages = Number.isSafeInteger(pages) ? pages : Number.isSafeInteger(entries) ? Math.ceil(entries / perPage) : pageNumber;
   const tail = known === null ? '' : knownTail(known);
-  if (pageNumber < totalPages) return { items, nextCursor: `trd:${mpIndex}:${pageNumber + 1}${tail}` };
-  return { items, ...(mpIndex + 1 < marketplaces.length ? { nextCursor: `trd:${mpIndex + 1}:1${tail}` } : {}) };
+  if (pageNumber < totalPages) return { items, nextCursor: `trd:${marketplace}:${pageNumber + 1}${tail}` };
+  return { items, ...(mpIndex + 1 < marketplaces.length ? { nextCursor: `trd:${marketplaces[mpIndex + 1]}:1${tail}` } : {}) };
 }
 
 // ------------------------------------------------------------------------------------------------ заказы (Fulfillment API)

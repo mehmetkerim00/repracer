@@ -629,8 +629,10 @@ export const en = {
         awaitingAccess: (what: string) => `Missing: ${what}.`,
       },
       discovery: {
-        running: (h: number, hadCircle: boolean) => `Catalogue discovery: the current circle has been running ${h} h${hadCircle ? '' : ' (the first one)'} — a listing only a full circle sees (older eBay listings) appears within one circle.`,
-        completed: (h: number, at: string) => `Catalogue discovery: the last full circle took ${h} h, closed ${at.slice(0, 16).replace('T', ' ')} UTC — a listing only a full circle sees (older eBay listings) appears within one circle.`,
+        // Шаг 57 (ревью шага 56, находка 5): честная граница — остаток текущего круга, пауза до нового (сутки после закрытия, плюс час
+        // захода) и ещё один круг: листинг, появившийся позади курсора, текущий круг уже не увидит
+        running: (h: number, hadCircle: boolean) => `Catalogue discovery: the current circle has been running ${h} h${hadCircle ? '' : ' (the first one)'} — a listing only a full circle sees (older eBay listings) appears within two circles and a day at most; the hours are named once a circle closes.`,
+        completed: (h: number, at: string, boundH: number) => `Catalogue discovery: the last full circle took ${h} h, closed ${at.slice(0, 16).replace('T', ' ')} UTC — a listing only a full circle sees (older eBay listings) appears within about ${boundH} h at most (two circles and a day).`,
       },
       authorization: {
         revoked: 'Access was withdrawn in the channel: connect again to continue.',

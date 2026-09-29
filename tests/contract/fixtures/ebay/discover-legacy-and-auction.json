@@ -57,7 +57,7 @@
         }
       ],
       "expect": {
-        "nextCursor": "trd:0:1~110000000017",
+        "nextCursor": "trd:EBAY_DE:1~110000000017",
         "items": [
           {
             "identity": {
@@ -84,7 +84,7 @@
       "args": [
         {
           "limit": 2,
-          "cursor": "trd:0:1~110000000017"
+          "cursor": "trd:EBAY_DE:1~110000000017"
         }
       ],
       "expect": {

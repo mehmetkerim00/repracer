@@ -20,7 +20,7 @@
 - Изоляция тенантов в БД: общая схема, `tenant_id NOT NULL` в каждой таблице, RLS `ENABLE` + `FORCE`, составные FK,
   роли без `BYPASSRLS` ([ADR-0003](../adr/0003-tenant-isolation.md), [0001_foundation.sql](../../migrations/0001_foundation.sql)).
   Последняя проверка схемы проверяет это для всех таблиц и отсутствие `BYPASSRLS` у ролей
-  ([0151_verify_schema_invariants_v44.sql](../../migrations/0151_verify_schema_invariants_v44.sql)).
+  ([0153_verify_schema_invariants_v44.sql](../../migrations/0153_verify_schema_invariants_v44.sql)).
 - Роли подключения разделены [Р-90, Р-96]: у пути решения нет прав на аудит, членства, тенантов, остановки человеком;
   права — списком разрешённого и по столбцам [Р-100] ([0058_role_separation.sql](../../migrations/0058_role_separation.sql),
   [0062_decision_path_allow_list.sql](../../migrations/0062_decision_path_allow_list.sql)).
@@ -97,7 +97,7 @@
   столбцов, фиксированные статусы) и в одном месте для значений — `worldSummaries`, где идентификаторы тенантов предварительно
   проверяются регулярным выражением UUID, а время — разбором даты
   ([packages/pricing-store-pg/src/store.ts](../../packages/pricing-store-pg/src/store.ts)).
-- `SECURITY DEFINER` — с фиксированным `search_path`; это проверяет правило схемы ([0143](../../migrations/0151_verify_schema_invariants_v44.sql)).
+- `SECURITY DEFINER` — с фиксированным `search_path`; это проверяет правило схемы ([0143](../../migrations/0153_verify_schema_invariants_v44.sql)).
 - XSS: консоль — React, `dangerouslySetInnerHTML` в коде нет; панель оператора пишет значения через `textContent`
   ([apps/operator/server/page.ts](../../apps/operator/server/page.ts)).
 - Имя файла выгрузки очищается до `[\w.\-]` в `Content-Disposition` ([stand-server.ts](../../apps/console/server/stand-server.ts)).

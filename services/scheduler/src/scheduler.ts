@@ -97,12 +97,21 @@ export function retryDelaySeconds(intervalSeconds: number, consecutiveFailures: 
  * без удвоения: иначе чтение заказов аккаунта деградировало бы до раза в сутки. Серия провалов по-прежнему считается и поднимает алерт
  */
 export class JobHoldsWindowError extends Error {
-  constructor(message: string) { super(`HOLD_WINDOW ${message}`); }
+  /**
+   * Шаг 57 (ревью шага 55, находка 9): причина — ПЕРВЫМ словом, признак держания окна — за ней. Раньше приставка `HOLD_WINDOW` шла первой и
+   * становилась кодом ошибки в журнале запусков и в алерте провала — причину (`CHANNEL_PAGE_CURSOR_REPEATED`) не видел никто
+   */
+  constructor(cause: string, detail: string) {
+    if (!/^[A-Z][A-Z0-9_]{2,}$/.test(cause)) throw new Error(`a window-holding failure needs a cause code, got ${cause}`);
+    super(`${cause} HOLD_WINDOW: ${detail}`);
+  }
 }
+
+const HOLDS_WINDOW = /^[A-Z][A-Z0-9_]{2,} HOLD_WINDOW:/;
 
 export function dueOf(j: JobState): Instant {
   if (j.lastOutcome !== 'FAILED' || !j.lastFinishedAt) return j.nextDueAt;
-  const delay = j.lastError?.startsWith('HOLD_WINDOW ') ? j.intervalSeconds : retryDelaySeconds(j.intervalSeconds, j.consecutiveFailures, j.retryKind);
+  const delay = HOLDS_WINDOW.test(j.lastError ?? '') ? j.intervalSeconds : retryDelaySeconds(j.intervalSeconds, j.consecutiveFailures, j.retryKind);
   const retry = Date.parse(j.lastFinishedAt) + delay * 1000;
   return retry > Date.parse(j.nextDueAt) ? new Date(retry).toISOString() : j.nextDueAt;
 }

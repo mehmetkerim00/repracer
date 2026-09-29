@@ -1,3 +1,4 @@
+import { systemClock } from '@repracer/channel-port';
 import type { PgPool } from '@repracer/pricing-store-pg';
 import type { LiveWorld } from '@repracer/contract-tests/stand';
 
@@ -56,7 +57,7 @@ export async function startDemoWorld(options: DemoWorldOptions): Promise<Running
   const { runConfiguredWorker } = await import('./bulk-worker.ts');
 
   const demo = await demoWorld({
-    tag, startIso: new Date().toISOString(), bare: false, appPool: pools.app, adminPool: pools.admin,
+    tag, startIso: systemClock.now(), bare: false, appPool: pools.app, adminPool: pools.admin,
     provisioningPool: pools.provisioning, dispatcherPool: pools.dispatcher, schedulerPool: pools.scheduler,
     exporterPool: pools.exporter, stockPool: pools.stock,
     memberUsers: options.memberUsers, memberEmails: options.memberEmails, joinMember: options.joinMember,

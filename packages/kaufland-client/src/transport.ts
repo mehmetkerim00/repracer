@@ -116,7 +116,7 @@ export function createKauflandClient(options: KauflandClientOptions): KauflandCl
   const baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, '');
   const retry: RetryPolicy = { ...DEFAULT_RETRY, ...options.retry };
   const doFetch = options.fetch ?? fetch;
-  const now = options.now ?? Date.now;
+  const now = options.now ?? Date.now; // real-clock: умолчание пакета без зависимости от channel-port; процессы передают свои часы
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const timeoutMs = options.timeoutMs ?? 30_000;
 

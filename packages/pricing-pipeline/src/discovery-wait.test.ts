@@ -93,7 +93,7 @@ test('step 53: a cursor seen before stops discovery, keeps the pages already rec
 });
 
 test('step 54: discovery reads past 1000 offers, and when it does reach its page limit it says so with a WARNING', async () => {
-  const run = async (pagesInChannel: number, maxPages?: number) => {
+  const run = async (pagesInChannel: number, maxPages?: number, circle = false) => {
     let read = 0;
     const alerts: string[] = [];
     const adapter = {
@@ -103,7 +103,8 @@ test('step 54: discovery reads past 1000 offers, and when it does reach its page
         return { items: [{ identity: { marketplace: 'A1PA6795UKMFR9', externalSku: `syn-sku-${n}` }, gtins: [], condition: 'NEW', fulfillment: 'MERCHANT' }], ...(n + 1 < pagesInChannel ? { nextCursor: String(n + 1) } : {}) };
       },
     } as unknown as ChannelAdapter;
-    const store = { async recordOfferChannelPricing() { return 0; }, async recordDiscoveredOffers(_t: unknown, _a: unknown, items: unknown[]) { return items.length; } } as unknown as PricingStore;
+    const store = { async recordOfferChannelPricing() { return 0; }, async recordDiscoveredOffers(_t: unknown, _a: unknown, items: unknown[]) { return items.length; },
+      ...(circle ? { async discoveryCircleState() { return null; }, async saveDiscoveryCircle() { return 'SAVED'; } } : {}) } as unknown as PricingStore;
     const pipeline = createPricingPipeline({ store, adapter, alerts: { raise: async (a: { code: string }) => { alerts.push(a.code); } } as never,
       logger: { log: () => undefined }, now: () => '2026-09-29T09:00:00.000Z' as never, sleep: async () => undefined });
     const r = await pipeline.discoverOffers(ctx('2026-09-29T09:25:00.000Z'), { pageLimit: 1, ...(maxPages ? { maxPages } : {}) });
@@ -115,6 +116,8 @@ test('step 54: discovery reads past 1000 offers, and when it does reach its page
   assert.deepEqual([capped.read, capped.alerts], [4, ['DISCOVERY_PAGE_LIMIT_REACHED']], 'at the limit with a cursor left — WARNING');
   const exact = await run(4, 4);
   assert.deepEqual(exact.alerts, [], 'a catalogue that ends exactly at the limit is complete — no alert');
+  const circled = await run(10, 4, true);
+  assert.deepEqual([circled.read, circled.alerts], [4, []], 'step 57 (review of step 55, finding 11): with a circle store the limit is the circle going on — no alert');
 });
 
 test('step 55 (OQ-240): discovery is a circle — a run stopped by its deadline or by the app quota is continued by the next one from the same place', async () => {
@@ -176,12 +179,17 @@ test('step 56 (review of step 55, findings 3–4): a failure keeps the progress;
   } as unknown as ChannelAdapter;
   let state: { cursor: string | null; circleStartedAt: string | null; lastCircleCompletedAt: string | null; lastStop: string | null } | null = null;
   const saved: Array<[string | null, string | null, string]> = [];
+  let failures = 0;
   const store = {
     async recordOfferChannelPricing() { return 0; }, async recordDiscoveredOffers() { return 0; },
     async discoveryCircleState() { return state; },
-    async saveDiscoveryCircle(_t: unknown, _a: unknown, e: { startedFrom: string | null; cursor: string | null; stop: string; at: string }) {
+    async saveDiscoveryCircle(_t: unknown, _a: unknown, e: { startedFrom: string | null; cursor: string | null; stop: string; at: string; noProgress: boolean }) {
       saved.push([e.startedFrom, e.cursor, e.stop]);
-      state = { cursor: e.cursor, circleStartedAt: null, lastCircleCompletedAt: e.stop === 'COMPLETED' ? e.at : state?.lastCircleCompletedAt ?? null, lastStop: e.stop };
+      failures = e.noProgress ? failures + 1 : 0;
+      const reset = failures >= 3;
+      if (reset) failures = 0;
+      state = { cursor: reset ? null : e.cursor, circleStartedAt: null, lastCircleCompletedAt: e.stop === 'COMPLETED' ? e.at : state?.lastCircleCompletedAt ?? null, lastStop: e.stop };
+      return reset ? 'RESET' : 'SAVED';
     },
   } as unknown as PricingStore;
   const pipeline = createPricingPipeline({ store, adapter, alerts: { raise: async (a: { code: string }) => { alerts.push(a.code); } } as never, logger: { log: () => undefined },
@@ -190,9 +198,12 @@ test('step 56 (review of step 55, findings 3–4): a failure keeps the progress;
   // Отказ на p2 после двух прочитанных страниц — место p2 записано, прогресс не пропал
   await assert.rejects(run(), /channel refused/);
   assert.deepEqual(saved.at(-1), [null, 'p2', 'FAILED']);
-  // Следующий заход падает на том же месте, не прочитав ни страницы, — круг сброшен к началу, WARNING
+  // Следующие заходы падают на том же месте, не прочитав ни страницы: место держится; на третьем подряд круг сброшен к началу (шаг 57)
   await assert.rejects(run(), /channel refused/);
-  assert.deepEqual([saved.at(-1), alerts], [['p2', null, 'FAILED'], ['DISCOVERY_CIRCLE_RESET']]);
+  await assert.rejects(run(), /channel refused/);
+  assert.deepEqual([(state as { cursor: string | null } | null)?.cursor, alerts], ['p2', []], 'two failures at the resume point keep the place');
+  await assert.rejects(run(), /channel refused/);
+  assert.deepEqual([(state as { cursor: string | null } | null)?.cursor, alerts], [null, ['DISCOVERY_CIRCLE_RESET']]);
   // Канал ожил — круг с начала до конца; следующий заход в пределах суток канал не трогает
   failAt = null;
   assert.equal((await run()).stop, 'COMPLETED');

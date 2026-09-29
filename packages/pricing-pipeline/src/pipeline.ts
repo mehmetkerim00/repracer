@@ -964,6 +964,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
        * продавца обходится за несколько заходов, а не обрывается каждые сутки на одном месте. Страницы, которых квота приложения не
        * касается, бюджетом ядра не ограничиваются
        */
+      const runStartedAt = deps.now();
       const state = (await store.discoveryCircleState?.(ctx.tenantId, ctx.channelAccountId)) ?? null;
       const startedFrom = state ? state.cursor : ((await store.discoveryCircleCursor?.(ctx.tenantId, ctx.channelAccountId)) ?? null);
       // Шаг 56: круг закрыт недавно, продолжать нечего — канал не трогаем; заход работы каждый час, круг — раз в `circleEveryMs`
@@ -1039,19 +1040,24 @@ export function createPricingPipeline(deps: PipelineDeps) {
          * страница, отказывающая всегда, не держит круг (и новые предложения первой фазы) на себе
          */
         if (pagesRead > 0 && cursor !== undefined) {
-          await store.saveDiscoveryCircle?.(ctx.tenantId, ctx.channelAccountId, { startedFrom, cursor, stop: 'FAILED', at: deps.now() });
+          await store.saveDiscoveryCircle?.(ctx.tenantId, ctx.channelAccountId, { startedFrom, cursor, stop: 'FAILED', startedAt: runStartedAt, at: deps.now(), noProgress: false });
         } else if (startedFrom !== null) {
-          await store.saveDiscoveryCircle?.(ctx.tenantId, ctx.channelAccountId, { startedFrom, cursor: null, stop: 'FAILED', at: deps.now() });
-          await emit(ctx, [{ kind: 'alert', code: 'DISCOVERY_CIRCLE_RESET', severity: 'WARNING', details: { reason: String((error as { code?: string })?.code ?? 'FAILED').slice(0, 60) } }]);
+          // Ревью шага 56, находка 6: отказ на месте продолжения считается; круг сбрасывается к началу только на третьем подряд
+          const saved = await store.saveDiscoveryCircle?.(ctx.tenantId, ctx.channelAccountId, { startedFrom, cursor: startedFrom, stop: 'FAILED', startedAt: runStartedAt, at: deps.now(), noProgress: true });
+          if (saved === 'RESET') {
+            await emit(ctx, [{ kind: 'alert', code: 'DISCOVERY_CIRCLE_RESET', severity: 'WARNING', details: { reason: String((error as { code?: string })?.code ?? 'FAILED').slice(0, 60) } }]);
+          }
         }
         throw error;
       }
-      if (stop === 'PAGE_LIMIT') {
+      // Шаг 57 (ревью шага 55, находка 11): с хранилищем круга предел страниц — обычный ход круга (следующий заход продолжит с места),
+      // и WARNING на каждом заходе учил бы его не замечать. Без хранилища хвост за пределом не прочитает никто — это и есть событие
+      if (stop === 'PAGE_LIMIT' && !store.saveDiscoveryCircle) {
         await emit(ctx, [{ kind: 'alert', code: 'DISCOVERY_PAGE_LIMIT_REACHED', severity: 'WARNING', details: { pages: maxPages, offers } }]);
       }
       // Прерванный заход без единой страницы с начала круга курсора не имеет — записывать нечего, следующий начнёт с начала
       if (stop === 'COMPLETED' || cursor !== undefined) {
-        await store.saveDiscoveryCircle?.(ctx.tenantId, ctx.channelAccountId, { startedFrom, cursor: stop === 'COMPLETED' ? null : cursor!, stop: stop!, at: deps.now() });
+        await store.saveDiscoveryCircle?.(ctx.tenantId, ctx.channelAccountId, { startedFrom, cursor: stop === 'COMPLETED' ? null : cursor!, stop: stop!, startedAt: runStartedAt, at: deps.now(), noProgress: false });
       }
       if (withChannelPricing.length > 0) {
         await emit(ctx, [{ kind: 'alert', code: 'OFFERS_WITH_CHANNEL_PRICING', severity: 'WARNING', details: { offers: withChannelPricing.length } }]);

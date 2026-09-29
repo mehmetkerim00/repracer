@@ -1,3 +1,4 @@
+import { systemClock } from '@repracer/channel-port';
 import { createAmazonAdapter, TwoLevelBudget } from '@repracer/amazon-adapter';
 import { createNotificationReceiver, createSqsClient, pipelineSink, storeLedger, type NotificationReceiver } from '@repracer/amazon-notifications';
 import type { AdapterDependencies } from '@repracer/channel-port';
@@ -36,13 +37,13 @@ export async function startReceiverProcess(config: ReceiverConfig = loadReceiver
     credentials: credentialsFromFiles(config.channelSecretsDir),
     alerts,
     logger: sink.logger,
-    now: () => new Date().toISOString(),
+    now: systemClock.now,
   };
   const adapter = createAmazonAdapter({
     deps, userAgent: config.userAgent, applicationCredentialsRef: config.amazon.applicationCredentialsRef, budget: new TwoLevelBudget(),
   });
   // Диспетчера нет: уведомление рождает решение и ждущую запись, событие о ней объявляет база, отправляет её процесс диспетчера [Р-64]
-  const pipeline = createPricingPipeline({ store, adapter, alerts, logger: sink.logger, now: () => new Date().toISOString() });
+  const pipeline = createPricingPipeline({ store, adapter, alerts, logger: sink.logger, now: systemClock.now });
   const receiver = createNotificationReceiver({
     sqs: createSqsClient({
       queueUrl: config.queueUrl,
@@ -59,7 +60,7 @@ export async function startReceiverProcess(config: ReceiverConfig = loadReceiver
     sink: pipelineSink(pipeline),
     alerts,
     logger: sink.logger,
-    now: () => new Date(),
+    now: () => new Date(systemClock.nowMs()),
     ...(config.silenceAlertAfterMs ? { policy: { silenceAlertAfterMs: config.silenceAlertAfterMs } } : {}),
   });
   const abort = new AbortController();

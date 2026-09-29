@@ -770,4 +770,8 @@ test('шаг 56: каждая необязательная возможност�
   const wiring = read('services/scheduler/src/main.ts') + read('services/scheduler/src/pg-deps.ts');
   assert.ok(members(read('services/scheduler/src/jobs.ts')).includes('stock'), 'the rule sees the optional members of JobDeps');
   assert.deepEqual(missing(read('services/scheduler/src/jobs.ts'), wiring), [], 'an optional capability of the scheduler jobs is not passed by the process entry point');
+  // Шаг 57: карта «возможность → работа» полна — тест точки входа проверяет заведение ровно этих работ
+  const jobs = read('services/scheduler/src/jobs.ts');
+  const mapped = [...(/export const CAPABILITY_JOBS = \{([\s\S]*?)\} as const/.exec(jobs)?.[1] ?? '').matchAll(/^\s+([a-zA-Z]+):/gm)].map((m) => m[1]!).sort();
+  assert.deepEqual(mapped, members(jobs).filter((m) => !(m in ABSENT_ON_PURPOSE)).sort(), 'CAPABILITY_JOBS names every optional capability of JobDeps');
 });

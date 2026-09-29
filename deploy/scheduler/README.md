@@ -29,6 +29,7 @@ docker compose -f deploy/scheduler/compose.yaml --env-file deploy/scheduler/sche
 |---|---|
 | `scheduler_pg_url` | адрес базы для роли `svc_scheduler` (состояние работ, обслуживание) |
 | `app_pg_url` | адрес базы для роли `svc_app` (путь решения: опрос, сверка, обход офферов) |
+| `stock_pg_url` | адрес базы для роли `svc_stock` (работа `order-lines`: заказы канала → резервации → пересчёт публикуемого остатка; шаг 56). Без файла процесс не стартует: `CONFIG_MISSING: REPRACER_STOCK_PG_URL` |
 | `exporter_pg_url` | адрес базы для роли `svc_exporter` (выгрузка суток) |
 | `ch_ingest_password`, `ch_verifier_password` | пароли ClickHouse |
 | `heartbeat_url` | адрес отметки во внешнем сервисе (содержит идентификатор проверки) |

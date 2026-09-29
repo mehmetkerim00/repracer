@@ -1,3 +1,4 @@
+import { systemClock } from '@repracer/channel-port';
 /**
  * Р-127 (шаг 26): работоспособность планировщика контролируется извне. Процесс отмечается во внешнем сервисе по методу «dead man's switch»:
  * успешный такт — отметка «жив», провал такта — отметка «сбой». Отсутствие отметки дольше периода и допуска внешний сервис превращает в
@@ -35,7 +36,7 @@ export function createHeartbeat(options: HeartbeatOptions): Heartbeat {
   const minInterval = options.minIntervalMs ?? 60_000;
   // 5 отметок в минуту — предел сервиса [док]; между любыми отметками держим 12 с, иначе «мигающий» планировщик теряет отметки о сбое
   const minGap = options.minGapMs ?? 12_000;
-  const now = options.clockMs ?? Date.now;
+  const now = options.clockMs ?? systemClock.nowMs;
   let lastSent: { at: number; ok: boolean } | null = null;
   return {
     async beat(tickOk) {

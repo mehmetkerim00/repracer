@@ -91,9 +91,11 @@ function run(args) {
  * ~20 минутах тестов, поэтому идёт целиком и параллельно с тестами, а не по изменённым пакетам. В CI у заданий проверка типов —
  * своим шагом до тестов, и задание передаёт `--no-typecheck`, чтобы не делать её дважды
  */
-// Шаг 56: у CI обе проверки — свои шаги задания (ci.yml), и задание передаёт `--ci`; `--no-typecheck` остаётся прежним именем того же
-const ciSeparate = process.argv.includes('--ci') || process.argv.includes('--no-typecheck');
-const typecheck = ciSeparate ? null : new Promise((resolve) => {
+// Шаг 55: у CI обе проверки — свои шаги задания (ci.yml), и задание передаёт `--ci`. Шаг 57 (ревью шага 55, находка 16): `--no-typecheck`
+// снимает ТОЛЬКО проверку типов — раньше он молча снимал и покрытие каталога мутаций
+const ciSeparate = process.argv.includes('--ci');
+const skipTypecheck = ciSeparate || process.argv.includes('--no-typecheck');
+const typecheck = skipTypecheck ? null : new Promise((resolve) => {
   const child = spawn('npm', ['run', 'typecheck'], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '';
   for (const stream of [child.stdout, child.stderr]) stream.on('data', (chunk) => { output += chunk; });
@@ -133,7 +135,7 @@ for (const r of runs) {
 }
 if (totals.tests === 0) problems.push('no tests ran');
 /**
- * Шаг 56: покрытие каталога мутаций (Р-108) — тоже часть локальной сборки. Быстрый CI шага 55 краснел на нём: новая защита без строки
+ * Шаг 55 (после красного CI): покрытие каталога мутаций (Р-108) — тоже часть локальной сборки. Быстрый CI шага 55 краснел на нём: новая защита без строки
  * каталога прошла локальный прогон, потому что он проверку не запускал. База к этому моменту подготовлена — тесты её уже прошли
  */
 if (!ciSeparate) {

@@ -525,9 +525,9 @@ export function buildEbayScenarios(): Array<{ file: string; scenario: Scenario }
       'Фаза Inventory API отдаёт предложение 17 (писать можно) и передаёт курсор фазе Trading. GetMyeBaySelling (ответ песочницы 27.09.2026: Ack Success, TotalNumberOfEntries 3, у предметов ItemID, SKU, ListingType, Quantity, QuantityAvailable, CurrentPrice/BuyItNowPrice и НЕТ поля витрины) перечисляет и листинг 17 — он отдан фазой Inventory, его номер едет в курсоре, и он не повторяется без лишнего offer?sku= (ревью шага 47, находка 7). Листинг 24 — фиксированная цена не под Inventory API: writable false, пишет только миграция владельцем [Р-164]. Листинг 25 — аукцион (Chinese): AUCTION, без цены, не управляется никогда [Р-2]. Витрина — та, для которой сделан вызов (сайт 77), при совпадении валюты [EBAY_C16, E-19].',
       ['discovery', 'mandatory:discovery-legacy-auction', 'conservative:EBAY_C16_TRADING_LISTING_SITE'], RECORDED,
       [
-        call('inventory-phase', 'discoverOffers', [{ limit: 2 }], { nextCursor: `trd:0:1~${ids(17).listingId}`, items: [{ identity: { externalListingId: ids(17).listingId, externalOfferId: ids(17).offerId }, listing: { format: 'FIXED_PRICE', writable: true } }] }),
+        call('inventory-phase', 'discoverOffers', [{ limit: 2 }], { nextCursor: `trd:EBAY_DE:1~${ids(17).listingId}`, items: [{ identity: { externalListingId: ids(17).listingId, externalOfferId: ids(17).offerId }, listing: { format: 'FIXED_PRICE', writable: true } }] }),
         wait('budget-refill', 5000),
-        call('trading-phase', 'discoverOffers', [{ limit: 2, cursor: `trd:0:1~${ids(17).listingId}` }], { nextCursor: { $absent: true }, items: [
+        call('trading-phase', 'discoverOffers', [{ limit: 2, cursor: `trd:EBAY_DE:1~${ids(17).listingId}` }], { nextCursor: { $absent: true }, items: [
           { identity: { marketplace: 'EBAY_DE', externalSku: ids(24).sku, externalListingId: ids(24).listingId, externalOfferId: { $absent: true } }, currentPrice: { amountMinor: 1499, currency: 'EUR' },
             currentQuantity: 4, isLive: true, listing: { format: 'FIXED_PRICE', writable: false } },
           { identity: { marketplace: 'EBAY_DE', externalSku: ids(25).sku, externalListingId: ids(25).listingId }, currentPrice: { $absent: true }, listing: { format: 'AUCTION', writable: false } },

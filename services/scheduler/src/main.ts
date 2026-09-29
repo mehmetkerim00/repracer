@@ -1,3 +1,4 @@
+import { systemClock } from '@repracer/channel-port';
 import { ClickHouseHttp } from '@repracer/analytics-export';
 import { createAmazonAdapter, TwoLevelBudget } from '@repracer/amazon-adapter';
 import { createEbayAdapter } from '@repracer/ebay-adapter';
@@ -78,7 +79,7 @@ export async function startScheduler(config: SchedulerConfig = loadConfig(), onF
     }),
     alerts,
     logger: sink.logger,
-    now: () => new Date().toISOString(),
+    now: systemClock.now,
   };
   const adapters = new Map<string, ChannelAdapter>();
   const adapterFor = (channel: string): ChannelAdapter | null => {
@@ -109,7 +110,7 @@ export async function startScheduler(config: SchedulerConfig = loadConfig(), onF
       const adapter = adapterFor(account.channel);
       if (!adapter) throw new Error(`NO_ADAPTER: ${account.channel}`);
       // Диспетчер записей — отдельный процесс (services/pricing-worker): планировщик ставит записи в очередь, не отправляет их
-      pipeline = createPricingPipeline({ store, adapter, alerts: sink.alerts, logger: sink.logger, now: () => new Date().toISOString() });
+      pipeline = createPricingPipeline({ store, adapter, alerts: sink.alerts, logger: sink.logger, now: systemClock.now });
       pipelines.set(key, pipeline);
     }
     return pipeline;
@@ -120,7 +121,7 @@ export async function startScheduler(config: SchedulerConfig = loadConfig(), onF
    * у планировщика нет и не будет [Р-90]: пути заказов она не нужна, и обращение к ней — громкий отказ, а не тихая подмена ролью остатков
    */
   const noAdminPool = new Proxy({}, { get: () => () => { throw new Error('the scheduler has no administrative role: this stock operation belongs to the console'); } }) as PgPool;
-  const stockPipeline = createStockPipeline({ store: new PgStockStore({ adminPool: noAdminPool, stockPool }), now: () => new Date().toISOString() }); // real-clock: точка сборки процесса
+  const stockPipeline = createStockPipeline({ store: new PgStockStore({ adminPool: noAdminPool, stockPool }), now: systemClock.now }); // real-clock: точка сборки процесса
   const stockDeps = {
     syncOrders: (account: SchedulerAccount, ctx: Parameters<typeof stockPipeline.syncOrders>[0], since: string, options?: { cursor?: string }) => {
       const adapter = adapterFor(account.channel);
@@ -129,7 +130,7 @@ export async function startScheduler(config: SchedulerConfig = loadConfig(), onF
     },
     positions: {
       get: (account: SchedulerAccount) => store.orderReadPosition(account.tenantId, account.channelAccountId),
-      save: (account: SchedulerAccount, position: { since: string; cursor: string } | null, at: string) =>
+      save: (account: SchedulerAccount, position: { since: string; cursor: string | null } | null, at: string) =>
         store.saveOrderReadPosition(account.tenantId, account.channelAccountId, position as never, at as never),
     },
   };
@@ -148,13 +149,13 @@ export async function startScheduler(config: SchedulerConfig = loadConfig(), onF
    */
   const shadowDigest = deliveryPool
     ? createShadowDigest({
-        store: new PgShadowDigestStore(deliveryPool), mail: mailSender, now: () => new Date().toISOString(),
+        store: new PgShadowDigestStore(deliveryPool), mail: mailSender, now: systemClock.now,
         log: (line: string) => sink.logger.log(JSON.parse(line) as never),
       })
     : undefined;
   const alertDelivery = deliveryPool
     ? createAlertDelivery({
-        store: new PgAlertDeliveryStore(deliveryPool), mail: mailSender, now: () => new Date().toISOString(),
+        store: new PgAlertDeliveryStore(deliveryPool), mail: mailSender, now: systemClock.now,
         ...(config.operatorEmail ? { operatorEmail: config.operatorEmail } : {}),
       })
     : undefined;

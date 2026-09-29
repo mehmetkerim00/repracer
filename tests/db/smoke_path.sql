@@ -167,12 +167,16 @@ DO $$ BEGIN
 END $$;
 -- Прерванный заход несёт курсор, закрытый круг — нет; чужой или несуществующий аккаунт круга не получает
 SELECT pg_temp.expect_fail('a completed discovery circle keeps a cursor (OQ-240)', $q$
-  SELECT tenant_data.save_discovery_circle('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', NULL, 'x', 'COMPLETED', '2026-09-29 00:30+00') $q$,
+  SELECT tenant_data.save_discovery_circle('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', NULL, 'x', 'COMPLETED', '2026-09-29 00:00+00', '2026-09-29 00:30+00', false) $q$,
   'a completed circle has no cursor');
+-- Шаг 57 (ревью шага 55, находка 14): прерванный заход без курсора — продолжить нечем, такая запись отклоняется
+SELECT pg_temp.expect_fail('an interrupted discovery circle has no cursor (step 57)', $q$
+  SELECT tenant_data.save_discovery_circle('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'x', NULL, 'PAGE_LIMIT', '2026-09-29 00:00+00', '2026-09-29 00:30+00', false) $q$,
+  'an interrupted one has one');
 SELECT pg_temp.expect_fail('a discovery circle of an account outside the tenant (OQ-240)', $q$
-  SELECT tenant_data.save_discovery_circle('a0000000-0000-0000-0000-00000000000a', gen_random_uuid(), NULL, 'x', 'DEADLINE', '2026-09-29 00:30+00') $q$,
+  SELECT tenant_data.save_discovery_circle('a0000000-0000-0000-0000-00000000000a', gen_random_uuid(), NULL, 'x', 'DEADLINE', '2026-09-29 00:00+00', '2026-09-29 00:30+00', false) $q$,
   'violates foreign key constraint');
-SELECT tenant_data.save_discovery_circle('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', NULL, 'smoke-cursor', 'DEADLINE', '2026-09-29 00:30+00') \gset
+SELECT tenant_data.save_discovery_circle('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', NULL, 'smoke-cursor', 'DEADLINE', '2026-09-29 00:00+00', '2026-09-29 00:30+00', false) AS circle_saved \gset
 DO $$ BEGIN
   IF tenant_data.discovery_circle_cursor('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001') IS DISTINCT FROM 'smoke-cursor' THEN
     RAISE EXCEPTION 'the saved discovery circle is not read back';
@@ -181,14 +185,38 @@ DO $$ BEGIN
 END $$;
 -- Шаг 56: место чтения заказов — начало окна и курсор вместе; положительный контроль — сохранение и чтение своей строки
 SELECT pg_temp.expect_fail('an order read position without its cursor (step 56)', $q$
-  SELECT tenant_data.save_order_read_position('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', '2026-09-29 00:00+00', NULL, '2026-09-29 00:30+00') $q$,
-  'keeps the window start and the cursor together');
+  SELECT tenant_data.save_order_read_position('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', NULL, 'page-7', '2026-09-29 00:30+00') $q$,
+  'an order read cursor needs the start of its window');
 SELECT tenant_data.save_order_read_position('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', '2026-09-29 00:00+00', 'page-201', '2026-09-29 00:30+00') \gset
 DO $$ BEGIN
   IF (SELECT cursor FROM tenant_data.order_read_position('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001')) IS DISTINCT FROM 'page-201' THEN
     RAISE EXCEPTION 'the saved order read position is not read back';
   END IF;
   RAISE NOTICE 'PASS accept | the order read position is kept (step 56)';
+END $$;
+-- Шаг 57 (ревью шага 56, находка 6): один отказ на месте продолжения круг не сбрасывает — место держится; сброс — на третьем подряд
+SELECT pg_temp.expect_fail('one failure at the resume point resets the discovery circle (step 57)', $q$
+  DO $d$ BEGIN
+    PERFORM tenant_data.save_discovery_circle('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'smoke-cursor', 'smoke-cursor', 'FAILED', '2026-09-29 00:40+00', '2026-09-29 00:41+00', true);
+    IF tenant_data.discovery_circle_cursor('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001') IS NOT DISTINCT FROM 'smoke-cursor' THEN
+      RAISE EXCEPTION 'the discovery circle keeps its place after one failure';
+    END IF;
+  END $d$ $q$, 'the discovery circle keeps its place after one failure');
+DO $$ DECLARE r text; BEGIN
+  -- Проверка выше откатила свой отказ (подтранзакция expect_fail) — здесь три подряд
+  FOR i IN 1..2 LOOP
+    r := tenant_data.save_discovery_circle('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'smoke-cursor', 'smoke-cursor', 'FAILED', '2026-09-29 00:42+00', '2026-09-29 00:43+00', true);
+    IF r <> 'SAVED' OR tenant_data.discovery_circle_cursor('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001') IS DISTINCT FROM 'smoke-cursor' THEN
+      RAISE EXCEPTION 'failure % in a row already moved the circle (%)', i, r;
+    END IF;
+  END LOOP;
+  r := tenant_data.save_discovery_circle('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'smoke-cursor', 'smoke-cursor', 'FAILED', '2026-09-29 00:44+00', '2026-09-29 00:45+00', true);
+  IF r <> 'RESET' OR tenant_data.discovery_circle_cursor('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001') IS NOT NULL THEN
+    RAISE EXCEPTION 'the third failure in a row did not reset the circle (%)', r;
+  END IF;
+  -- Место снова для проверки видимости чужим тенантом ниже
+  PERFORM tenant_data.save_discovery_circle('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', NULL, 'smoke-cursor', 'DEADLINE', '2026-09-29 00:46+00', '2026-09-29 00:47+00', false);
+  RAISE NOTICE 'PASS accept | the third failure in a row resets the discovery circle (step 57)';
 END $$;
 SELECT set_config('app.tenant_id', 'b0000000-0000-0000-0000-00000000000b', true) \gset
 SELECT pg_temp.expect_fail('another tenant reads the discovery circle (OQ-240)', $q$
@@ -197,6 +225,10 @@ SELECT pg_temp.expect_fail('another tenant reads the discovery circle (OQ-240)',
       RAISE EXCEPTION 'the discovery circle of another tenant is not visible';
     END IF;
   END $d$ $q$, 'the discovery circle of another tenant is not visible');
+-- Шаг 57 (ревью шага 55, находка 14): и записать чужой круг нельзя — WITH CHECK политики строк, а не только её USING
+SELECT pg_temp.expect_fail('another tenant writes the discovery circle (step 57)', $q$
+  SELECT tenant_data.save_discovery_circle('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', NULL, 'foreign-cursor', 'DEADLINE', '2026-09-29 00:48+00', '2026-09-29 00:49+00', false) $q$,
+  'row-level security policy');
 SELECT set_config('app.tenant_id', 'a0000000-0000-0000-0000-00000000000a', true) \gset
 
 -- ---------------------------------------------------------------- Р-96: разрешённое остаётся доступным (контроль)

@@ -29,7 +29,8 @@ services:
       REPRACER_CONSOLE_RATE_AUTHORIZED: ${REPRACER_CONSOLE_RATE_AUTHORIZED:-600}
       REPRACER_CONSOLE_RATE_ANONYMOUS: ${REPRACER_CONSOLE_RATE_ANONYMOUS:-120}
       REPRACER_CONSOLE_TRUST_PROXY: ${REPRACER_CONSOLE_TRUST_PROXY:-off}
-      # Шаг 54: реплик — одна; больше одной процесс отказывается запускаться — нужен общий счётчик частоты (он в памяти процесса)
+      # Шаг 54: реплик — одна; больше одной процесс отказывается запускаться — нужен общий счётчик частоты (он в памяти процесса).
+      # Шаг 57: и без объявления — вторая копия (`--scale`, ручной запуск) не получает блокировку одной реплики в базе и не стартует
       REPRACER_CONSOLE_REPLICAS: ${REPRACER_CONSOLE_REPLICAS:-1}
       # Вход продавца у поставщика identity [Р-78]: задаётся целиком или не задаётся вовсе (тогда работает только гость демо)
       REPRACER_CONSOLE_OIDC_ISSUER: ${REPRACER_CONSOLE_OIDC_ISSUER:-}

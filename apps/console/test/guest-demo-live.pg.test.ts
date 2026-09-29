@@ -28,6 +28,7 @@ const FIRST_DECISION_LIMIT_SECONDS = 180;
 let db: IsolatedDatabase;
 let console_: RunningConsole;
 let origin = '';
+let consoleEnv: Record<string, string> = {};
 let guest = '';
 let worldId = '';
 /** Путь гостя: сколько запросов и сколько времени от кнопки до объяснения цены */
@@ -65,7 +66,7 @@ before(async () => {
    * читает проверка конфигурации развёртывания (scripts/deploy-config-check.mjs) — здесь проверяется не она, а путь гостя.
    */
   const url = (login: Parameters<typeof db.url>[0]) => db.url(login);
-  console_ = await startConsole({
+  consoleEnv = {
     REPRACER_MODE: 'stand',
     REPRACER_CONSOLE_PORT: '0', REPRACER_CONSOLE_METRICS_PORT: '0',
     REPRACER_CONSOLE_DIST: new URL('../dist', import.meta.url).pathname,
@@ -80,7 +81,8 @@ before(async () => {
     REPRACER_CONSOLE_STOCK_PG_URL: url('svc_stock'), REPRACER_CONSOLE_SCHEDULER_PG_URL: url('svc_scheduler'),
     REPRACER_CONSOLE_EXPORTER_PG_URL: url('svc_exporter'), REPRACER_CONSOLE_FX_LOADER_PG_URL: url('svc_fx_loader'),
     REPRACER_CONSOLE_BULK_WORKER_PG_URL: url('svc_bulk_worker'),
-  });
+  };
+  console_ = await startConsole(consoleEnv);
   origin = `http://127.0.0.1:${console_.port}`;
 });
 
@@ -89,6 +91,15 @@ after(async () => {
   await db?.drop();
   // Числа пути гостя — в журнал прогона: отчёт шага берёт их отсюда, а не пересказывает
   process.stdout.write(`${JSON.stringify({ guestJourney: journey, secondsUntilFirstDecision }, null, 1)}\n`);
+});
+
+/**
+ * Шаг 57 (п. 5): одна реплика — гарантия, а не объявление. Вторая копия ТОГО ЖЕ процесса с тем же объявлением `REPRACER_CONSOLE_REPLICAS=1`
+ * (так её дал бы `docker compose --scale` или ручной запуск рядом) отказывает при старте своей причиной, а первая продолжает отвечать
+ */
+test('step 57: a second console process on the same database refuses to start — the rate limiter lives in one process', async () => {
+  await assert.rejects(startConsole({ ...consoleEnv, REPRACER_CONSOLE_REPLICAS: '1' }), /^Error: CONSOLE_ALREADY_RUNNING: another console process holds the single-replica lock/);
+  assert.equal((await fetch(`${origin}/healthz`.replace(String(console_.port), String(console_.metricsPort)))).status, 200, 'the first console keeps serving');
 });
 
 test('Р-159: процесс отдаёт собранный интерфейс и говорит о своей работоспособности', async () => {

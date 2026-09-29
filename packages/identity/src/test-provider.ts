@@ -41,7 +41,10 @@ export async function startModelIdentityProvider(options: {
   /** Клиенты (приложения) у поставщика: идентификатор → разрешённые адреса возврата и аудитория токена */
   clients: Record<string, { redirectUris: string[]; audience: string }>;
   issuer?: string;
+  /** Шаг 57: часы модели (время выдачи кода, `auth_time`) — прогон может передать свои */
+  nowMs?: () => number;
 }): Promise<ModelIdentityProvider> {
+  const nowMs = options.nowMs ?? Date.now; // real-clock: умолчание модели поставщика; пакет identity не зависит от channel-port
   let origin = '';
   let issuerName = '';
   let current: ModelUser | null = null;
@@ -98,7 +101,7 @@ export async function startModelIdentityProvider(options: {
       }
       stats.authorizations += 1;
       const code = randomBytes(16).toString('base64url');
-      grants.set(code, { user: current, clientId: p.get('client_id')!, redirectUri, challenge: p.get('code_challenge')!, audience: client.audience, issuedAt: Date.now(), used: false, scope: (p.get('scope') ?? '').split(' ') });
+      grants.set(code, { user: current, clientId: p.get('client_id')!, redirectUri, challenge: p.get('code_challenge')!, audience: client.audience, issuedAt: nowMs(), used: false, scope: (p.get('scope') ?? '').split(' ') });
       const back = new URL(redirectUri);
       back.searchParams.set('code', code);
       if (p.get('state')) back.searchParams.set('state', p.get('state')!);
@@ -110,7 +113,7 @@ export async function startModelIdentityProvider(options: {
       const form = new URLSearchParams(await body(req));
       const g = grants.get(form.get('code') ?? '');
       const verifier = form.get('code_verifier') ?? '';
-      if (form.get('grant_type') !== 'authorization_code' || !g || g.used || Date.now() - g.issuedAt > 60_000 || g.clientId !== form.get('client_id')
+      if (form.get('grant_type') !== 'authorization_code' || !g || g.used || nowMs() - g.issuedAt > 60_000 || g.clientId !== form.get('client_id')
           || g.redirectUri !== form.get('redirect_uri') || createHash('sha256').update(verifier).digest('base64url') !== g.challenge) {
         stats.refused += 1;
         json(400, { error: 'invalid_grant' });
@@ -126,7 +129,7 @@ export async function startModelIdentityProvider(options: {
       // Находка 1 ревью шага 45: у ZITADEL аудитория ID-токена — все клиенты И проект («by default all client id's and
       // the project id are included»), и в нём есть `auth_time`; модель повторяет это, чтобы прогон ловил подмену токена
       const idToken = createLocalIssuer({ issuer: issuerName, audience: g.clientId, privateKeyPem: shared }).token(g.user.subject,
-        { amr: g.user.amr, expiresInSeconds: 3600, extra: { aud: [g.clientId, g.audience], auth_time: Math.floor(Date.now() / 1000) } });
+        { amr: g.user.amr, expiresInSeconds: 3600, extra: { aud: [g.clientId, g.audience], auth_time: Math.floor(nowMs() / 1000) } });
       issued.set(accessToken, { user: g.user, scope: g.scope });
       json(200, { access_token: accessToken, token_type: 'Bearer', expires_in: 3600, id_token: idToken });
       return;

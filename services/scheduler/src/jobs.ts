@@ -60,6 +60,18 @@ export interface JobConfig {
   scheduledRecomputeLimit: number;
 }
 
+/**
+ * Шаг 57 (п. 2): необязательная возможность работ → работа, которую она заводит. Без возможности работы в процессе нет вовсе (так было
+ * с `stock` до шага 56). Правило репозитория держит список равным необязательным членам `JobDeps`, тест точки входа
+ * (`production-composition.pg.test.ts`) — что настоящий `startScheduler` в промышленной конфигурации заводит каждую из этих работ
+ */
+export const CAPABILITY_JOBS = {
+  stock: 'order-lines',
+  alertDelivery: 'alerts-deliver',
+  shadowDigest: 'shadow-digest',
+  channelAuthorizations: 'channel-authorizations',
+} as const;
+
 export const DEFAULT_JOB_CONFIG: JobConfig = {
   pollEverySeconds: 60, pollBudgetRps: 10, pollMaxQueries: 600, lossReviewEverySeconds: 300, lossGraceSeconds: DEFAULT_LOSS_GRACE_SECONDS,
   amazonCallSeconds: 31, amazonBatch: 20, amazonCircleWarnHours: 24, haltReviewEverySeconds: 300, discoveryEverySeconds: 3_600, discoveryCircleEverySeconds: 86_400, discoveryAppQuotas: { EBAY_TRADING: 3000 }, orderLinesEverySeconds: 300,
@@ -122,8 +134,9 @@ export interface JobDeps {
      * предела на огромном окне — это видно алертом)
      */
     positions?: {
-      get(account: SchedulerAccount): Promise<{ since: Instant; cursor: string } | null>;
-      save(account: SchedulerAccount, position: { since: Instant; cursor: string } | null, at: Instant): Promise<void>;
+      /** Шаг 57: место без курсора держит только начало окна — следующий заход перечитывает окно от начала (ревью шага 56, находки 3–4) */
+      get(account: SchedulerAccount): Promise<{ since: Instant; cursor: string | null } | null>;
+      save(account: SchedulerAccount, position: { since: Instant; cursor: string | null } | null, at: Instant): Promise<void>;
     };
   };
   /** Сверка уведомлений опросом включена для аккаунта [Р-121]; по умолчанию — если источник уведомлений канала доступен */
@@ -380,10 +393,21 @@ export function jobSource(deps: JobDeps): JobSource {
               const saved = (await stock.positions?.get(a)) ?? null;
               // Шаг 56: прошлый заход упёрся в предел страниц — продолжаем ЕГО окно с его курсора; иначе — окно от прошлого успеха
               const since = saved?.since ?? new Date(Date.parse(previousSucceededAt ?? startedAt) - cfg.orderLinesEverySeconds * 1000).toISOString();
-              const r = await stock.syncOrders(a, ctxOf(a, startedAt, 'order-lines', 120), since, saved ? { cursor: saved.cursor } : {});
+              let r: Awaited<ReturnType<typeof stock.syncOrders>>;
+              try {
+                r = await stock.syncOrders(a, ctxOf(a, startedAt, 'order-lines', 120), since, saved?.cursor ? { cursor: saved.cursor } : {});
+              } catch (error) {
+                /**
+                 * Шаг 57 (ревью шага 56, находка 3): курсор, который канал больше не принимает (истёк, сменился формат), держал бы работу на
+                 * себе вечно — каждый заход падал бы на нём. Курсор снимается, начало окна остаётся: следующий заход перечитывает окно от
+                 * начала (повтор строки безвреден — резервация одна на строку заказа). Провал — как был, с паузой и алертом по Р-132
+                 */
+                if (saved?.cursor) await stock.positions?.save(a, { since: saved.since, cursor: null }, startedAt);
+                throw error;
+              }
               if (r.pageLimit && !stock.positions) {
                 // Места хранить негде — успех сдвинул бы окно и потерял хвост: окно держится провалом без удвоения паузы (шаг 55)
-                throw new JobHoldsWindowError(`ORDER_LINES_PAGE_LIMIT_REACHED: order lines read ${r.lines} in ${r.pageLimit.pages} pages, no position store, the window is kept`);
+                throw new JobHoldsWindowError('ORDER_LINES_PAGE_LIMIT_REACHED', `order lines read ${r.lines} in ${r.pageLimit.pages} pages, no position store, the window is kept`);
               }
               if (r.pageLimit) {
                 /**
@@ -393,15 +417,20 @@ export function jobSource(deps: JobDeps): JobSource {
                 await stock.positions?.save(a, { since, cursor: r.pageLimit.nextCursor }, startedAt);
                 return { items: r.lines, alerts: [{ code: 'ORDER_LINES_PAGE_LIMIT_REACHED', severity: 'WARNING' as const, details: { pages: r.pageLimit.pages, lines: r.lines, continued: saved !== null } }] };
               }
-              if (saved) await stock.positions?.save(a, null, startedAt);
+              if (saved && !r.cursorRepeated) await stock.positions?.save(a, null, startedAt);
               /**
                * Шаг 53: канал повторил курсор — прочитанное уже записано. Шаг 54 (ревью шага 53, находка 3): запуск при этом —
                * ПРОВАЛ, а не успех с предупреждением. Успех двигал бы `previousSucceededAt`, и страницы за петлёй курсора старше
                * одного интервала не читались бы никогда — заказы без резерваций, перепродажа. Провал оставляет окно на месте:
                * следующий запуск читает его снова (повтор строки безвреден), пауза и алерт провала — по Р-132
                */
-              if (r.cursorRepeated && saved) await stock.positions?.save(a, null, startedAt);
-              if (r.cursorRepeated) throw new JobHoldsWindowError(`CHANNEL_PAGE_CURSOR_REPEATED: order lines read ${r.lines}, the window is kept for the next run`);
+              /**
+               * Шаг 57 (ревью шага 56, находка 4): петля курсора в ПРОДОЛЖЕНИИ — окно этого захода начинается с сохранённого места, а не с
+               * прошлого успеха. Стереть место значило бы потерять начало окна: следующий заход считал бы окно от прошлого успеха (заход с
+               * пределом страниц — тоже успех), и хвост исходного окна не прочитал бы никто. Держится начало окна без курсора
+               */
+              if (r.cursorRepeated && saved) await stock.positions?.save(a, { since, cursor: null }, startedAt);
+              if (r.cursorRepeated) throw new JobHoldsWindowError('CHANNEL_PAGE_CURSOR_REPEATED', `order lines read ${r.lines}, the window is kept for the next run`);
               return { items: r.lines };
             },
           });

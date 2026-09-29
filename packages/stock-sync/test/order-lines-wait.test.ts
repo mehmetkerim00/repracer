@@ -105,3 +105,30 @@ test('step 56 (review of step 54, finding 8): the page limit is reported with th
   const rest = await pipeline.syncOrders(ctx('2026-09-29T09:10:00.000Z'), adapter, '2026-09-29T08:00:00.000Z' as never, { cursor: first.pageLimit!.nextCursor, maxPages: 200 });
   assert.deepEqual([seen.slice(3), rest.pageLimit], [['c3', 'c4', 'c5', 'c6', 'c7', 'c8', 'c9'], undefined], 'the continuation reads the rest of the window to its end');
 });
+
+test('шаг 57 (ревью шага 56, находка 1): повтор окна после упавшего пересчёта пересчитывает те же товары; гонка версий с консолью — один повтор пересчёта', async () => {
+  const { InMemoryStockStore } = await import('../src/memory-store.ts');
+  const memory = new InMemoryStockStore([{ productId: 'p-1', channelAccountId: 'a', externalOfferId: 'SYN-1' } as never]);
+  const line = { externalOrderRef: 'o-1', externalOrderLineRef: 'l-1', identity: { marketplace: 'de', externalOfferId: 'SYN-1' }, quantity: 1, orderedAt: '2026-09-22T09:00:00.000Z', status: 'OPEN' } as never;
+  await memory.recordOrderLines('t', 'a', [line], '2026-09-22T09:00:00.000Z' as never);
+  const again = await memory.recordOrderLines('t', 'a', [line], '2026-09-22T09:05:00.000Z' as never);
+  assert.deepEqual([again.created, again.productIds], [0, ['p-1']], 'the reservation exists already, the product is still recalculated');
+
+  const recalculated: string[][] = [];
+  let refuse = 1;
+  const store = {
+    async recordOrderLines() { return { created: 0, consumed: 0, released: 0, unknownOffers: 0, awaitingConfirmation: 0, productIds: ['p-1'] }; },
+    async recalculate(_t: string, products: string[]) {
+      recalculated.push(products);
+      if (refuse-- > 0) throw new Error('version 7 is not greater than latest created version 7 of write_scope w-1');
+      return { writes: [], unchanged: 1 };
+    },
+  } as unknown as StockStore;
+  const adapter = { async readOrderLines() { return { items: [line] }; } } as unknown as ChannelAdapter;
+  const pipeline = createStockPipeline({ store, now: () => '2026-09-22T09:00:00.000Z' as never });
+  await pipeline.syncOrders(ctx('2026-09-22T09:02:00.000Z'), adapter, '2026-09-22T08:55:00.000Z' as never);
+  assert.deepEqual(recalculated, [['p-1'], ['p-1']], 'the loser of the version race recalculates once');
+  refuse = 2;
+  await assert.rejects(pipeline.syncOrders(ctx('2026-09-22T09:02:00.000Z'), adapter, '2026-09-22T08:55:00.000Z' as never), /is not greater/,
+    'the race is retried once, not in a loop');
+});

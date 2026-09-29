@@ -36,6 +36,19 @@ export function createStockPipeline(deps: StockPipelineDeps): StockPipeline {
     if (!deps.dispatchScope) return;
     for (const id of writeScopeIds) await deps.dispatchScope(tenantId, id);
   };
+  /**
+   * Шаг 57 (ревью шага 56, находка 1): пересчёт консоли (`propagate`) и работы заказов вычисляют следующую версию записи одной единицы из
+   * одного и того же «последнего»; второй получает отказ триггера «version … is not greater». Проигравший пересчитывает ОДИН раз — с новой
+   * последней версией; это повтор гонки, а не провала, и дальше он не растягивается
+   */
+  const recalculateRacing = async (tenantId: string, products: readonly string[]) => {
+    try {
+      return await deps.store.recalculate(tenantId, products, deps.now());
+    } catch (error) {
+      if (!/version \d+ is not greater than latest created version/.test(String((error as Error)?.message ?? error))) throw error;
+      return deps.store.recalculate(tenantId, products, deps.now());
+    }
+  };
   return {
     async syncOrders(ctx, adapter, since, options = {}) {
       const lines: OrderLine[] = [];
@@ -60,7 +73,7 @@ export function createStockPipeline(deps: StockPipelineDeps): StockPipeline {
       // Шаг 52 (п. 8): и товары, чья запись упёрлась в бюджет правок прошлого дня, — после смены суток значение уходит снова
       const rolledOver = (await deps.store.budgetRolledOverProducts?.(ctx.tenantId, ctx.channelAccountId)) ?? [];
       const products = [...new Set([...recorded.productIds, ...rolledOver])];
-      const recalculated = products.length > 0 ? await deps.store.recalculate(ctx.tenantId, products, deps.now()) : { writes: [], unchanged: 0 };
+      const recalculated = products.length > 0 ? await recalculateRacing(ctx.tenantId, products) : { writes: [], unchanged: 0 };
       await dispatch(ctx.tenantId, recalculated.writes.map((w) => w.writeScopeId));
       return { lines: lines.length, created: recorded.created, consumed: recorded.consumed, released: recorded.released, unknownOffers: recorded.unknownOffers, writes: recalculated.writes.length,
         ...(cursorRepeated ? { cursorRepeated: true } : {}), ...(pageLimit ? { pageLimit } : {}) };

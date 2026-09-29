@@ -1,3 +1,4 @@
+import { systemClock } from '@repracer/service-runtime';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
@@ -108,7 +109,7 @@ const ID_TOKEN_HEADER = 'x-repracer-id-token';
 
 export function createPanel(deps: PanelDeps): Server {
   const count = deps.count ?? (() => undefined);
-  const now = deps.now ?? (() => new Date());
+  const now = deps.now ?? (() => new Date(systemClock.nowMs()));
 
   /**
    * Р-183 [OQ-238, снимок `vendor/zitadel/2026-09-27/claims.html`]: у ZITADEL методы входа (`amr`) есть только в

@@ -1,3 +1,4 @@
+import { systemClock } from '@repracer/channel-port';
 import { createAmazonAdapter, TwoLevelBudget } from '@repracer/amazon-adapter';
 import { createEbayAdapter } from '@repracer/ebay-adapter';
 import type { AdapterDependencies, ChannelAccountId, ChannelAdapter, TenantId } from '@repracer/channel-port';
@@ -82,7 +83,7 @@ export async function startWorkerProcess(config: WorkerConfig = loadWorkerConfig
     }),
     alerts,
     logger: sink.logger,
-    now: () => new Date().toISOString(),
+    now: systemClock.now,
   };
   const adapterFor = channelAdapters(deps, config, pgAccountDirectory(appPool));
   const running = await startWorker({

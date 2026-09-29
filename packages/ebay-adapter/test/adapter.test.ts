@@ -444,7 +444,7 @@ test('discovery: Inventory API phase (writable), then GetMyeBaySelling per store
   assert.deepEqual(p1.items.map((i) => [i.identity.externalListingId, i.listing]), [['110000000001', { format: 'FIXED_PRICE', writable: true }]]);
   // Шаг 50 [песочница]: без Accept-Language живая песочница отвечает на GET inventory_item 400 25709 — язык первой витрины аккаунта
   assert.equal(w.seen.find((x) => x.url.pathname === '/sell/inventory/v1/inventory_item')!.headers['accept-language'], 'de-DE');
-  assert.equal(p1.nextCursor, 'trd:0:1~110000000001', 'the Inventory phase is over: the Trading phase starts at the first storefront and carries the listings already given');
+  assert.equal(p1.nextCursor, 'trd:EBAY_DE:1~110000000001', 'the Inventory phase is over: the Trading phase starts at the first storefront and carries the listings already given');
   const offerCalls = () => w.seen.filter((x) => x.url.pathname === '/sell/inventory/v1/offer').length;
   const offersAfterInventory = offerCalls();
   w.advance(5000);
@@ -454,7 +454,7 @@ test('discovery: Inventory API phase (writable), then GetMyeBaySelling per store
     { id: '110000000002', sku: 'SYN-L', mk: 'EBAY_DE', offer: undefined, listing: { format: 'FIXED_PRICE', writable: false }, price: 1499 },
     { id: '110000000003', sku: 'SYN-A', mk: 'EBAY_DE', offer: undefined, listing: { format: 'AUCTION', writable: false }, price: undefined },
   ], 'the managed listing 110000000001 is not repeated; the auction carries no price');
-  assert.equal(de.nextCursor, 'trd:1:1~110000000001', 'then the second storefront of the account');
+  assert.equal(de.nextCursor, 'trd:EBAY_US:1~110000000001', 'then the second storefront of the account');
   assert.equal(offerCalls(), offersAfterInventory, 'review 47 #7: the Trading phase excludes the carried listings without offer?sku= per item');
   w.advance(5000);
   const us = await w.adapter.discoverOffers(ctx, { limit: 10, cursor: de.nextCursor! });
@@ -464,10 +464,18 @@ test('discovery: Inventory API phase (writable), then GetMyeBaySelling per store
   // Курсор без набора (старый или переполненный `~*`) — прежняя проверка offer?sku= для каждого предмета с SKU
   w.advance(5000);
   const before = offerCalls();
-  const fallback = await w.adapter.discoverOffers(ctx, { limit: 10, cursor: 'trd:0:1~*' });
+  const fallback = await w.adapter.discoverOffers(ctx, { limit: 10, cursor: 'trd:EBAY_DE:1~*' });
   assert.deepEqual(fallback.items.map((i) => i.identity.externalListingId), ['110000000002', '110000000003'], 'the managed listing is still excluded — by the offer check');
   assert.equal(offerCalls() - before, 3, 'without a carried set every item with a SKU is checked');
   assert.ok(w.logs.some((l) => l.code === 'EBAY_C16_TRADING_LISTING_SITE' && l.details?.checkedBySku === 3));
+  // Шаг 57 (ревью шага 55, находка 10): витрина курсора — по идентификатору. Курсор прежнего вида (номер) и витрина, которой у аккаунта нет,
+  // начинают фазу Trading с первой витрины и первой страницы, а не с чужой витрины по номеру
+  const lastSite = () => w.seen.filter((x) => x.url.pathname === '/ws/api.dll').at(-1)!;
+  for (const stale of ['trd:1:4~*', 'trd:EBAY_GB:4~*']) {
+    w.advance(5000);
+    const r = await w.adapter.discoverOffers(ctx, { limit: 10, cursor: stale });
+    assert.deepEqual([lastSite().headers['x-ebay-api-siteid'], /<PageNumber>1<\/PageNumber>/.test(String(lastSite().body)), r.nextCursor], ['77', true, 'trd:EBAY_US:1'], stale);
+  }
 });
 
 test('review 47 #7, #3: the carried set is bounded; an unknown ListingType is counted, a listing without SKU is emitted with its listing id only', async () => {
@@ -490,9 +498,9 @@ test('review 47 #7, #3: the carried set is bounded; an unknown ListingType is co
     cursor = page.nextCursor;
     if (cursor?.startsWith('trd:')) break;
   }
-  assert.equal(cursor, 'trd:0:1~*', 'more than 500 carried listings — the cursor stops carrying them');
+  assert.equal(cursor, 'trd:EBAY_DE:1~*', 'more than 500 carried listings — the cursor stops carrying them');
   w.advance(1000);
-  const trading = await w.adapter.discoverOffers(ctx, { limit: 100, cursor: 'trd:0:1~' });
+  const trading = await w.adapter.discoverOffers(ctx, { limit: 100, cursor: 'trd:EBAY_DE:1~' });
   assert.deepEqual(trading.items.map((i) => [i.identity, i.listing]), [[{ marketplace: 'EBAY_DE', externalListingId: '110000000077' }, { format: 'FIXED_PRICE', writable: false }]],
     'a legacy listing without SKU is emitted with its listing id only; the unknown AdType is not guessed');
   assert.ok(w.logs.some((l) => l.code === 'EBAY_C16_TRADING_LISTING_SITE' && l.details?.unknownType === 1));

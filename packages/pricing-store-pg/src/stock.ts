@@ -406,6 +406,7 @@ export class PgStockStore implements StockStore {
               AND (($3::text IS NOT NULL AND om.external_offer_id = $3) OR ($4::text IS NOT NULL AND om.external_sku = $4) OR ($5::text IS NOT NULL AND om.external_unit_id = $5))
             LIMIT 1`, [tenantId, channelAccountId, id.externalOfferId ?? null, id.externalSku ?? null, id.externalUnitId ?? null]);
         if (!offer) { out.unknownOffers += 1; continue; }
+        touched.add(offer.product_id); // шаг 57: пересчёт — у всех сопоставленных строк, см. OrderLinesOutcome.productIds
         const { rows: [existing] } = await tx.query(
           `SELECT reservation_id, status, stock_pool_id FROM channel_data.reservation WHERE tenant_id = $1 AND channel_account_id = $2 AND channel_order_line_ref = $3 AND product_id = $4`,
           [tenantId, channelAccountId, line.externalOrderLineRef, offer.product_id]);

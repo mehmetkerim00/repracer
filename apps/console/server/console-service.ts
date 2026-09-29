@@ -1,3 +1,4 @@
+import { systemClock } from '@repracer/channel-port';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { channelApps, createHeartbeat, loadChannelAppsConfig, ProcessHealth, serveHealth, type Env } from '@repracer/service-runtime';
@@ -13,6 +14,7 @@ import { createStandApi, consoleContentSecurityPolicy, createStandServer, type S
 import { createStaticHandler } from './static.ts';
 import { loadConsoleConfig, CONSOLE_ROLES, type ConsoleConfig, type ConsoleRole } from './config.ts';
 import { startDemoWorld, type RunningDemoWorld } from './demo-world.ts';
+import { acquireConsoleReplicaLock } from './single-replica.ts';
 
 /**
  * Р-159 (шаг 37, OQ-221): консоль продавца как РАЗВОРАЧИВАЕМЫЙ процесс. До этого шага в репозитории был только сервер
@@ -112,6 +114,21 @@ export async function startConsole(env: Env = process.env): Promise<RunningConso
   const config = loadConsoleConfig(env);
   const health = new ProcessHealth();
   const pools = poolsFor(config);
+  /**
+   * Шаг 57 (п. 5): одна реплика — блокировкой в базе, до всего остального (посева демо, ограничителя, порта): вторая копия консоли
+   * отказывает при старте своей причиной, как бы её ни запустили. Потерянное соединение блокировки — выход процесса с кодом 1
+   */
+  let closeForLostLock: () => Promise<void> = async () => undefined;
+  let replicaLock: Awaited<ReturnType<typeof acquireConsoleReplicaLock>>;
+  try {
+    replicaLock = await acquireConsoleReplicaLock(pools.app, (error) => {
+      console.error(JSON.stringify({ level: 'ERROR', code: 'CONSOLE_REPLICA_LOCK_LOST', message: error instanceof Error ? error.message : String(error) }));
+      void closeForLostLock().finally(() => { process.exitCode = 1; });
+    });
+  } catch (error) {
+    await Promise.all(CONSOLE_ROLES.map((r) => pools[r].end()));
+    throw error;
+  }
   const directory = new PgIdentityDirectory(pools.authenticator as never);
 
   /**
@@ -180,7 +197,7 @@ export async function startConsole(env: Env = process.env): Promise<RunningConso
           async issue() {
             const tenantId = state.demo?.tenantId;
             if (!tenantId) throw new Error('DEMO_NOT_READY');
-            const nowMs = Date.now();
+            const nowMs = systemClock.nowMs();
             while (guestIssuedAt.length > 0 && guestIssuedAt[0]! <= nowMs - 60_000) guestIssuedAt.shift();
             if (guestIssuedAt.length >= GUEST_SESSIONS_PER_MINUTE) {
               health.count('guest_rate_limited');
@@ -272,7 +289,7 @@ export async function startConsole(env: Env = process.env): Promise<RunningConso
   heartbeatTimer.unref();
   void beat();
 
-  return {
+  const running: RunningConsole = {
     port: (server.address() as { port: number }).port,
     metricsPort: healthServer.port,
     demoTenantId: state.demo?.tenantId ?? null,
@@ -282,9 +299,12 @@ export async function startConsole(env: Env = process.env): Promise<RunningConso
       state.demo?.stop();
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await healthServer.close();
+      await replicaLock.release();
       await Promise.all(CONSOLE_ROLES.map((r) => pools[r].end()));
     },
   };
+  closeForLostLock = () => running.close();
+  return running;
 }
 
 export async function main(): Promise<void> {

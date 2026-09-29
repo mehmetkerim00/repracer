@@ -11,6 +11,12 @@ import type { JobConfig, JobDeps, SchedulerAccount } from './jobs.ts';
  */
 export interface PgJobDepsOptions {
   schedulerPool: PgPool;
+  /**
+   * Шаг 57 (ревью шага 56, находка 2): демо-тенант [Р-151] живёт на симуляторе внутри стенда; процесс планировщика, ходящий в НАСТОЯЩИЕ
+   * каналы, его аккаунтов не берёт — иначе работы демо шли бы боевыми адаптерами с синтетическими учётными данными (отказы, алерты,
+   * расход квоты приложения). Включает его только мир демо, у которого канал — модель
+   */
+  includeDemoTenants?: boolean;
   exporterPool: PgPool;
   ingest: ClickHouseHttp;
   verifier: ClickHouseHttp;
@@ -19,6 +25,8 @@ export interface PgJobDepsOptions {
   reconcileEnabled?: JobDeps['reconcileEnabled'];
   /** Р-156: доставка алертов владельцу; без неё работы `alerts-deliver` нет, и алерты остаются в базе недоставленными */
   alertDelivery?: JobDeps['alertDelivery'];
+  /** Шаг 57: недельный дайджест тени [Р-171, Р-174] — до шага 57 точка входа его передавала, а сборка зависимостей теряла: письма не уходили */
+  shadowDigest?: JobDeps['shadowDigest'];
   config?: Partial<JobConfig>;
 }
 
@@ -38,7 +46,8 @@ export function pgJobDeps(o: PgJobDepsOptions): JobDeps {
         `SELECT a.tenant_id, a.channel_account_id, a.channel FROM tenant_data.channel_account a
            JOIN tenant_data.tenant t ON t.tenant_id = a.tenant_id
           WHERE a.disconnected_at IS NULL AND a.auth_status = 'ACTIVE' AND t.kind = 'CUSTOMER' AND t.status NOT IN ('OFFBOARDING', 'CLOSED')
-          ORDER BY a.tenant_id, a.channel_account_id`);
+            AND ($1::boolean OR NOT t.demo)
+          ORDER BY a.tenant_id, a.channel_account_id`, [o.includeDemoTenants === true]);
       return rows.map((r) => ({ tenantId: r.tenant_id, channelAccountId: r.channel_account_id, channel: r.channel }));
     },
     descriptorOf: o.descriptorOf,
@@ -92,6 +101,7 @@ export function pgJobDeps(o: PgJobDepsOptions): JobDeps {
     },
     ...(o.reconcileEnabled ? { reconcileEnabled: o.reconcileEnabled } : {}),
     ...(o.alertDelivery ? { alertDelivery: o.alertDelivery } : {}),
+    ...(o.shadowDigest ? { shadowDigest: o.shadowDigest } : {}),
     ...(o.config ? { config: o.config } : {}),
   };
 }

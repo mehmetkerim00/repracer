@@ -628,8 +628,8 @@ export const de: Messages = {
         awaitingAccess: (what: string) => `Es fehlt: ${what}.`,
       },
       discovery: {
-        running: (h: number, hadCircle: boolean) => `Katalogsuche: Der aktuelle Durchlauf läuft seit ${h} Std.${hadCircle ? '' : ' (der erste)'} — ein Angebot, das nur ein vollständiger Durchlauf sieht (ältere eBay-Angebote), erscheint innerhalb eines Durchlaufs.`,
-        completed: (h: number, at: string) => `Katalogsuche: Der letzte vollständige Durchlauf dauerte ${h} Std., abgeschlossen ${at.slice(0, 16).replace('T', ' ')} UTC — ein Angebot, das nur ein vollständiger Durchlauf sieht (ältere eBay-Angebote), erscheint innerhalb eines Durchlaufs.`,
+        running: (h: number, hadCircle: boolean) => `Katalogsuche: Der aktuelle Durchlauf läuft seit ${h} Std.${hadCircle ? '' : ' (der erste)'} — ein Angebot, das nur ein vollständiger Durchlauf sieht (ältere eBay-Angebote), erscheint spätestens innerhalb von zwei Durchläufen und einem Tag; die Stunden nennen wir, sobald ein Durchlauf abgeschlossen ist.`,
+        completed: (h: number, at: string, boundH: number) => `Katalogsuche: Der letzte vollständige Durchlauf dauerte ${h} Std., abgeschlossen ${at.slice(0, 16).replace('T', ' ')} UTC — ein Angebot, das nur ein vollständiger Durchlauf sieht (ältere eBay-Angebote), erscheint spätestens nach etwa ${boundH} Std. (zwei Durchläufe und ein Tag).`,
       },
       authorization: {
         revoked: 'Der Zugriff wurde im Kanal zurückgezogen: verbinden Sie erneut, um fortzufahren.',

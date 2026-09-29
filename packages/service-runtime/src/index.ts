@@ -5,3 +5,6 @@ export { createHeartbeat, type Heartbeat, type HeartbeatOptions } from './heartb
 // Шаг 36 [Р-156]: письмо владельцу через HTTP-API провайдера, ключ — из файла секретов
 export { createDryMailSender, createMailSender, type MailConfig, type MailMessage, type MailSender } from './mail.ts';
 export { loadChannelAppsConfig, channelApps, EBAY_APPLICATION_REF, EBAY_IDENTITY_SCOPE, EBAY_ACCOUNT_SCOPE, type ChannelAppsConfig, type ChannelApp } from './channel-apps.ts';
+
+// Шаг 57: единственный источник настоящих часов — для процессов, зависящих только от этого пакета (панель, приёмник удаления eBay)
+export { systemClock } from '@repracer/channel-port';

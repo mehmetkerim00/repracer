@@ -46,7 +46,7 @@ export function createLocalIssuer(options: LocalIssuerOptions) {
   // `kid` — отпечаток открытого ключа: один ключ у двух процессов даёт один и тот же `kid`
   const kid = createHash('sha256').update(publicKey.export({ format: 'der', type: 'spki' })).digest('base64url').slice(0, 22);
   const jwk = { ...(publicKey.export({ format: 'jwk' }) as Jwk), kid, alg: 'ES256', use: 'sig' };
-  const now = options.now ?? Date.now;
+  const now = options.now ?? Date.now; // real-clock: умолчание пакета без зависимости от channel-port; процессы передают свои часы
   const encode = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64url');
   return {
     issuer: options.issuer,
