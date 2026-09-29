@@ -2,14 +2,20 @@
 # Шаг 54 (OWASP A09, DPP Amazon: журналы ≥ 12 месяцев). Решение руководителя: горячий хвост на сервере — сутки сжатым файлом,
 # не меньше 30 суток; дальше — сжатые МЕСЯЧНЫЕ архивы рядом с архивом событий, тем же видом ключа, что у архива ядра
 # (`tenant=<id>/<таблица>/<секция>.json.gz`, packages/analytics-export): `platform=logs/<проект compose>/<ГГГГ-ММ>.log.gz`.
-# Вынос с сервера — вместе с резервной копией (README, «Вынос с сервера»). Отдельного хранилища журналов не заводим до замеров пилота.
+# Вынос с сервера — вместе с резервной копией (README, 3в). Отдельного хранилища журналов не заводим до замеров пилота.
 #
-# Запускается НА ХОСТЕ раз в сутки таймером systemd (deploy/production/systemd): журналы контейнеров видит только docker.
-#   logs-archive.sh            — вчерашние сутки UTC
-#   logs-archive.sh 2026-09-28 — названные сутки (повторный запуск тех же суток перезаписывает их файл — безвредно)
+# Шаг 55 (ревью шага 54, находки 10–12): у каждого проекта — ОТМЕТКА «выгружено по» (`$HOT/<проект>/.until`). Заход выгружает всё от
+# отметки до своего конца, сутками: пропущенные сутки догоняются, а не теряются. Журнал контейнера живёт, пока жив контейнер, и
+# `docker compose up`, пересоздающий контейнер, уносит его — поэтому перед каждой выкладкой запускается `logs-archive.sh --until-now`
+# (README, раздел 3): выгружается текущий день по сей момент, а ночной заход допишет остаток суток в тот же файл. Сбой одного проекта
+# не останавливает остальные: он пишется строкой ALERT и файлом-отметкой `LOGS_ARCHIVE_FAILED`, код выхода — 1.
 #
+#   logs-archive.sh              — полные сутки UTC до сегодняшней полуночи (таймер systemd, 00:20 UTC)
+#   logs-archive.sh --until-now  — по текущий момент (перед выкладкой)
+#
+# Время — REPRACER_LOGS_NOW (ISO UTC), если задано: так проверка не зависит от настоящих часов (шаг 55, п. 3); иначе часы хоста.
 # Секретов здесь нет: процессы токены и тела запросов в журнал не пишут [Р-177], прокси убирает заголовок Authorization.
-set -euo pipefail
+set -uo pipefail
 
 HOT="${REPRACER_LOGS_HOT_DIR:?set REPRACER_LOGS_HOT_DIR}"
 ARCHIVE="${REPRACER_ARCHIVE_DIR:?set REPRACER_ARCHIVE_DIR}"
@@ -18,33 +24,56 @@ HOT_DAYS="${REPRACER_LOGS_HOT_DAYS:-30}"
 KEEP_MONTHS="${REPRACER_LOGS_KEEP_MONTHS:-13}"
 PROJECTS="${REPRACER_LOG_PROJECTS:-repracer-production repracer-scheduler repracer-worker repracer-notification-receiver}"
 DOCKER="${REPRACER_DOCKER:-docker}"
+NOW="${REPRACER_LOGS_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 
 # Даты: GNU date на сервере, BSD date на машине разработчика (тест)
-shift_day() { date -u -d "$1 $2 days" +%Y-%m-%d 2>/dev/null || date -u -j -v"$2"d -f %Y-%m-%d "$1" +%Y-%m-%d; }
-shift_month() { date -u -d "$1-01 $2 months" +%Y-%m 2>/dev/null || date -u -j -v"$2"m -f %Y-%m-%d "$1-01" +%Y-%m; }
+# BSD `-v` без знака УСТАНАВЛИВАЕТ поле (`-v1d` — первое число), а не прибавляет: знак ставится всегда (шаг 55 — сдвиг вперёд зацикливал заход)
+signed() { [[ "$1" == -* || "$1" == +* ]] && echo "$1" || echo "+$1"; }
+shift_day() { date -u -d "$1 $2 days" +%Y-%m-%d 2>/dev/null || date -u -j -v"$(signed "$2")"d -f %Y-%m-%d "$1" +%Y-%m-%d; }
+shift_month() { date -u -d "$1-01 $2 months" +%Y-%m 2>/dev/null || date -u -j -v"$(signed "$2")"m -f %Y-%m-%d "$1-01" +%Y-%m; }
 sha() { if command -v sha256sum >/dev/null; then sha256sum "$1" | awk '{print $1}'; else shasum -a 256 "$1" | awk '{print $1}'; fi; }
 
-DAY="${1:-$(shift_day "$(date -u +%Y-%m-%d)" -1)}"
-[[ "$DAY" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || { echo "{\"event\":\"LOGS_ARCHIVE_BAD_DAY\",\"day\":\"$DAY\"}" >&2; exit 2; }
-CUTOFF_DAY="$(shift_day "$DAY" "-$HOT_DAYS")"
-CUTOFF_MONTH="${CUTOFF_DAY:0:7}"
-OLDEST_MONTH="$(shift_month "${DAY:0:7}" "-$KEEP_MONTHS")"
+[[ "$NOW" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || { echo "{\"event\":\"LOGS_ARCHIVE_BAD_NOW\",\"now\":\"$NOW\"}" >&2; exit 2; }
+case "${1:-}" in
+  --until-now) END="$NOW" ;;
+  "") END="${NOW:0:10}T00:00:00Z" ;;
+  *) echo "{\"event\":\"LOGS_ARCHIVE_BAD_ARGUMENT\",\"argument\":\"$1\"}" >&2; exit 2 ;;
+esac
+TODAY="${NOW:0:10}"
+CUTOFF_MONTH="$(shift_day "$TODAY" "-$HOT_DAYS")"; CUTOFF_MONTH="${CUTOFF_MONTH:0:7}"
+OLDEST_MONTH="$(shift_month "${TODAY:0:7}" "-$KEEP_MONTHS")"
+FAILED=0
 
-for P in $PROJECTS; do
+archive_project() {
+  local P="$1" mark from day seg_end out
   mkdir -p "$HOT/$P" "$ARCHIVE/platform=logs/$P"
-  # 1. Сутки — одним сжатым файлом. Сначала .part: оборванная выгрузка не выдаёт себя за сутки
-  OUT="$HOT/$P/$DAY.log.gz"
-  "$DOCKER" compose -p "$P" logs --no-color --timestamps --since "${DAY}T00:00:00Z" --until "${DAY}T23:59:59.999999999Z" | gzip -9 > "$OUT.part"
-  mv "$OUT.part" "$OUT"
+  mark="$HOT/$P/.until"
+  # Первый заход проекта — со вчерашней полуночи: раньше выгрузки не было и отмечать нечего
+  from="$(cat "$mark" 2>/dev/null || echo "$(shift_day "$TODAY" -1)T00:00:00Z")"
+  # 1. От отметки до конца захода — по суткам UTC; каждый отрезок дописывается к файлу своих суток (цепочка gzip-членов — корректный gzip)
+  while [[ "$from" < "$END" ]]; do
+    day="${from:0:10}"
+    seg_end="$(shift_day "$day" 1)T00:00:00Z"
+    [[ "$from" < "$seg_end" ]] || { echo "{\"event\":\"LOGS_ARCHIVE_CLOCK_BROKEN\",\"from\":\"$from\"}" >&2; return 1; }
+    [[ "$seg_end" < "$END" ]] || seg_end="$END"
+    out="$HOT/$P/$day.log.gz"
+    if ! "$DOCKER" compose -p "$P" logs --no-color --timestamps --since "$from" --until "$seg_end" | gzip -9 > "$out.part"; then
+      rm -f "$out.part"
+      echo "{\"event\":\"ALERT\",\"code\":\"LOGS_ARCHIVE_FAILED\",\"severity\":\"WARNING\",\"project\":\"$P\",\"from\":\"$from\"}" >&2
+      return 1
+    fi
+    cat "$out.part" >> "$out" && rm -f "$out.part"
+    # Отметка — после того, как отрезок записан: оборванный заход повторит отрезок, а не пропустит
+    printf '%s' "$seg_end" > "$mark.part" && mv "$mark.part" "$mark"
+    from="$seg_end"
+  done
 
-  # 2. Месяц, целиком вышедший из горячего окна (все его сутки старше CUTOFF_DAY), становится одним архивом. Горячий хвост поэтому
-  #    от 30 до 61 суток. Архив собирается ТОЛЬКО пока его нет: если процесс упал после сборки и до удаления суток, следующий запуск
-  #    лишь доудалит сутки — архив уже собран из полного набора, пересборка из остатка потеряла бы удалённое
+  # 2. Месяц, целиком вышедший из горячего окна, становится одним архивом. Горячий хвост поэтому от 30 до 61 суток. Архив собирается
+  #    ТОЛЬКО пока его нет: если процесс упал после сборки и до удаления суток, следующий заход лишь доудалит сутки
   for M in $(ls "$HOT/$P" | sed -n 's/^\([0-9]\{4\}-[0-9]\{2\}\)-[0-9]\{2\}\.log\.gz$/\1/p' | sort -u); do
     [[ "$M" < "$CUTOFF_MONTH" ]] || continue
     DEST="$ARCHIVE/platform=logs/$P/$M.log.gz"
     if [[ ! -f "$DEST" ]]; then
-      # Сжатые файлы суток склеиваются как есть: цепочка gzip-членов — корректный gzip
       cat $(ls "$HOT/$P/$M"-*.log.gz | sort) > "$DEST.part"
       sha "$DEST.part" > "$DEST.sha256"
       mv "$DEST.part" "$DEST"
@@ -59,5 +88,13 @@ for P in $PROJECTS; do
     M="$(basename "$F" .log.gz)"
     if [[ "$M" < "$OLDEST_MONTH" ]]; then rm -f "$F" "$F.sha256"; echo "{\"event\":\"LOGS_MONTH_EXPIRED\",\"project\":\"$P\",\"month\":\"$M\"}"; fi
   done
-done
-echo "{\"event\":\"LOGS_DAY_DONE\",\"day\":\"$DAY\"}"
+}
+
+for P in $PROJECTS; do archive_project "$P" || FAILED=1; done
+# Отметка провала для внешнего контроля — как у копии базы (BACKUP_FAILED): живёт, пока заход не удался целиком
+if [[ "$FAILED" == 1 ]]; then
+  printf '{"code":"LOGS_ARCHIVE_FAILED","at":"%s"}\n' "$NOW" > "$HOT/LOGS_ARCHIVE_FAILED"
+  exit 1
+fi
+rm -f "$HOT/LOGS_ARCHIVE_FAILED"
+echo "{\"event\":\"LOGS_ARCHIVE_DONE\",\"until\":\"$END\"}"

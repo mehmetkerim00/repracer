@@ -60,4 +60,24 @@ export function rotation(items: readonly CompetitorQuery[], size: number, cycle:
   return Array.from({ length: Math.min(size, n) }, (_, i) => sorted[(start + i) % n]!);
 }
 
+/**
+ * Шаг 55 (OQ-241): сверка по кругу — СТРАХОВКА уведомлений, и её лимит на приложение мал (Amazon `getCompetitiveSummary`, A-15). Первыми
+ * идут товары с самой давней последней сверкой (`lastSeenMs`, null — не сверялись никогда): отказавшие в прошлом вызове и новые не ждут
+ * конца круга. Давность уведомлений здесь намеренно не учитывается: товар с частыми уведомлениями иначе не сверялся бы часами, а круг
+ * страхует именно от их потери. При равной давности (в том числе у мира, где не сверялось ничего) — прежний порядок круга по номеру
+ * вызова: окна те же, что у `rotation`. Одинаково в памяти и на PostgreSQL
+ */
+export function stalestFirst(items: ReadonlyArray<{ query: CompetitorQuery; lastSeenMs: number | null }>, size: number, cycle: number): CompetitorQuery[] {
+  const n = items.length;
+  if (n === 0 || size <= 0) return [];
+  const sorted = [...items].sort((a, b) => cmp(a.query.marketplace, b.query.marketplace) || cmp(a.query.channelProductRef, b.query.channelProductRef) || cmp(a.query.condition, b.query.condition));
+  const start = ((Math.floor(cycle) % n) * Math.min(size, n)) % n;
+  const position = new Map(sorted.map((it, i) => [it, (i - start + n) % n]));
+  return [...sorted]
+    .sort((a, b) => (a.lastSeenMs === b.lastSeenMs ? 0 : a.lastSeenMs === null ? -1 : b.lastSeenMs === null ? 1 : a.lastSeenMs - b.lastSeenMs)
+      || position.get(a)! - position.get(b)!)
+    .slice(0, Math.min(size, n))
+    .map((it) => it.query);
+}
+
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);

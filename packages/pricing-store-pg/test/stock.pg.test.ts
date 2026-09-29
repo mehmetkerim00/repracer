@@ -364,6 +364,9 @@ test('step 52: a quantity write refused by the edit budget is not recreated the 
   assert.deepEqual(await store.budgetRolledOverProducts(world.tenantId, account), [], 'the channel renews the budget later');
   await setDay(today, new Date(Date.now() - 60_000).toISOString());
   assert.deepEqual(await store.budgetRolledOverProducts(world.tenantId, account), [row.product_id], 'the channel renewal time has passed (rolling window)');
+  // Шаг 55 (ревью шага 53, находка 6): сутки витрины сменились, но окно канала, названное им самим, ещё не прошло — бюджет не обновился
+  await setDay(`${today} - 1`, new Date(Date.now() + 3_600_000).toISOString());
+  assert.deepEqual(await store.budgetRolledOverProducts(world.tenantId, account), [], 'the storefront day rolled over, the channel window has not');
   await setDay(`${today} - 1`, null);
   assert.deepEqual(await store.budgetRolledOverProducts(world.tenantId, account), [row.product_id], 'the storefront day rolled over');
   const again = await store.recalculate(world.tenantId, [row.product_id], now());

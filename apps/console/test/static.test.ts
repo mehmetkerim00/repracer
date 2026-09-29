@@ -131,8 +131,36 @@ test('step 53, 54: rate limit per address — made-up tokens share one budget; 4
   assert.ok(Number(proxied.forged[3]!.retryAfter) >= 1 && Number(proxied.forged[3]!.retryAfter) <= 60, 'Retry-After in seconds');
   assert.deepEqual(proxied.anon.map((x) => x.status), [200, 200, 200], 'behind the trusted proxy each forwarded address is its own client');
   const direct = await run(false);
-  // Без доверия прокси все запросы — с одного адреса сокета: три с заголовком исчерпали и анонимный предел
-  assert.deepEqual(direct.anon.map((x) => x.status), [429, 429, 429], 'without a trusted proxy X-Forwarded-For is ignored: one address, already over');
+  // Без доверия прокси все запросы — с одного адреса сокета: X-Forwarded-For не создаёт новых клиентов. Шаг 55 (ревью шага 54, находка 4):
+  // счётчик без входа отдельный — запросы с заголовком его не выбрали, и третий анонимный упирается в свой предел 2
+  assert.deepEqual(direct.anon.map((x) => x.status), [200, 200, 429], 'without a trusted proxy X-Forwarded-For is ignored: one address');
+});
+
+test('step 55: an office behind one address — signed-in traffic does not use up the anonymous budget; the page and assets are not limited', async () => {
+  const { createStandServer } = await import('../server/stand-server.ts');
+  const handle = (async () => ({ status: 200, body: { ok: true } })) as never;
+  const server = createStandServer(handle, 'en', serve, { rateLimit: { authorizedPerMinute: 3, anonymousPerMinute: 2, trustProxy: true } });
+  await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+  const { port } = server.address() as { port: number };
+  const status = async (path: string, headers: Record<string, string>) => (await fetch(`http://127.0.0.1:${port}${path}`, { headers })).status;
+  const office = { 'x-forwarded-for': '198.51.100.20' };
+  try {
+    // Вкладка заданий выбрала предел адреса «с входом»
+    for (let i = 0; i < 3; i++) assert.equal(await status('/api/v1/worlds', { ...office, authorization: 'Bearer syn-tab' }), 200);
+    assert.equal(await status('/api/v1/worlds', { ...office, authorization: 'Bearer syn-tab' }), 429);
+    // Коллега за тем же адресом перезагружает страницу: страница и файлы сборки не считаются, анонимный API — свой счётчик
+    for (let i = 0; i < 5; i++) assert.equal(await status('/', office), 200, 'the page is never rate limited');
+    assert.equal(await status('/api/v1/worlds', office), 200, 'the anonymous counter of the address is untouched');
+  } finally { await new Promise<void>((done) => server.close(() => done())); }
+});
+
+test('step 55: an IPv6 client is limited by its /64 — a new address per request does not escape the limit', async () => {
+  const { clientKeyOf } = await import('../server/stand-server.ts');
+  assert.equal(clientKeyOf('2001:db8:1:2:aaaa::1'), clientKeyOf('2001:0db8:0001:0002:ffff:1:2:3'), 'one /64');
+  assert.notEqual(clientKeyOf('2001:db8:1:2::1'), clientKeyOf('2001:db8:1:3::1'), 'another /64 is another client');
+  assert.equal(clientKeyOf('::ffff:203.0.113.5'), '203.0.113.5', 'IPv4 in IPv6 — the IPv4 address');
+  assert.equal(clientKeyOf('203.0.113.5'), '203.0.113.5');
+  assert.equal(clientKeyOf('2001:db8::1'), '2001:db8:0:0::/64');
 });
 
 test('step 54: the limiter memory is capped — the address silent for longest is evicted, and one request never walks the map', async () => {

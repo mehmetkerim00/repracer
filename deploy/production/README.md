@@ -67,7 +67,9 @@ PGHOST=db PGUSER=postgres scripts/db/prepare.sh repracer_eu
 # 3. Интерфейс: контейнер видит репозиторий только на чтение и собрать себя не может
 npm run build -w apps/console
 
-# 4. Профиль: прокси + консоль + суточная копия
+# 4. Профиль: прокси + консоль + суточная копия. ПЕРЕД КАЖДЫМ `up`, который пересоздаёт контейнеры (выкладка, смена образа), —
+#    выгрузка журналов по сей момент: журнал контейнера уходит вместе с контейнером (шаг 55, раздел 3в)
+set -a; . deploy/production/production.env; set +a; bash deploy/production/logs-archive.sh --until-now
 docker compose -f deploy/production/compose.yaml --env-file deploy/production/production.env up -d
 
 # 5. Процессы продукта — своими профилями
@@ -130,9 +132,12 @@ gpg --output globals.sql --decrypt repracer-<время>.globals.sql.gpg
 psql -d postgres -f globals.sql && createdb repracer_eu && pg_restore --dbname repracer_eu --exit-on-error repracer.dump   # без --no-owner
 ```
 
-**Журналы ≥ 12 месяцев.** Таймер хоста `repracer-logs-archive.timer` (файлы в [systemd/](systemd/)) раз в сутки выгружает вчерашние
-журналы контейнеров всех проектов (`docker compose -p <проект> logs`) в `REPRACER_LOGS_HOT_DIR/<проект>/<день>.log.gz` — горячий
-хвост 30–61 суток; месяц, целиком вышедший из окна, становится `REPRACER_ARCHIVE_DIR/platform=logs/<проект>/<ГГГГ-ММ>.log.gz` с
+**Журналы ≥ 12 месяцев.** Таймер хоста `repracer-logs-archive.timer` (файлы в [systemd/](systemd/)) раз в сутки выгружает журналы
+контейнеров всех проектов (`docker compose -p <проект> logs`) от отметки «выгружено по» (`<проект>/.until`) до полуночи — пропущенные
+сутки догоняются — в `REPRACER_LOGS_HOT_DIR/<проект>/<день>.log.gz`; горячий хвост 30–61 суток. **Журнал контейнера живёт, пока жив
+контейнер:** перезапуск по `restart` его сохраняет, а `docker compose up`, пересоздающий контейнер, — уносит. Поэтому перед каждой
+выкладкой — `logs-archive.sh --until-now` (раздел 3, шаг 4); выкладка без этого теряет журнал с начала суток. Сбой проекта не
+останавливает остальные и оставляет файл-отметку `REPRACER_LOGS_HOT_DIR/LOGS_ARCHIVE_FAILED` для внешнего контроля (как `BACKUP_FAILED`); месяц, целиком вышедший из окна, становится `REPRACER_ARCHIVE_DIR/platform=logs/<проект>/<ГГГГ-ММ>.log.gz` с
 суммой SHA-256; месяцы старше 13 уходят ([logs-archive.sh](logs-archive.sh), тест — `scripts/test/logs-archive.test.ts`). Ротация
 контейнера — 50 МБ × 5 файлов: журнал, выросший за сутки больше 250 МБ, выгрузка застанет не целиком (замер — на пилоте).
 Региону США путь в `repracer-logs-archive.service` меняется на `/srv/repracer-us`.

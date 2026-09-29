@@ -48,6 +48,7 @@ import type {
   HaltInfo,
   PricingStore,
   ProductKey,
+  DiscoveryStop,
   ScopeEvaluationContext,
   SnapshotOutcome,
   SnapshotRef,
@@ -731,6 +732,9 @@ export function createPricingPipeline(deps: PipelineDeps) {
       const { queries, total } = await store.pickReconciliationSample(ctx.tenantId, ctx.channelAccountId, options.size, options.cycle);
       if (queries.length === 0) return { snapshots: [], failures: [], reconciliation: emptyReconciliation(), queries: 0, total };
       const polled = await pollCompetitors(ctx, queries, { reconcile: { ...(options.graceSeconds ? { graceSeconds: options.graceSeconds } : {}) } });
+      // Шаг 55 (OQ-241): сверенные товары отмечаются — давность считается и у товара, по которому канал ничего не вернул; отказавшие остаются самыми давними
+      const failed = new Set(polled.failures.map((f) => `${f.query.marketplace}|${f.query.channelProductRef}|${f.query.condition}`));
+      await store.markPolled(ctx.tenantId, ctx.channelAccountId, queries.filter((q) => !failed.has(`${q.marketplace}|${q.channelProductRef}|${q.condition}`)), deps.now());
       return { ...polled, queries: queries.length, total };
     },
 
@@ -944,10 +948,19 @@ export function createPricingPipeline(deps: PipelineDeps) {
      * Страницы — пока канал отдаёт курсор (не больше maxPages); наблюдения записываются хранилищем, назначение стратегии оферу с
      * действующим правилом отклоняет база (0082). Возвращает офферы с ценообразованием канала для экрана консоли.
      */
-    async discoverOffers(ctx: AdapterCallContext, options: { pageLimit?: number; maxPages?: number } = {}): Promise<{
+    async discoverOffers(ctx: AdapterCallContext, options: { pageLimit?: number; maxPages?: number; quotas?: Readonly<Record<string, number>>; deadlineMarginMs?: number } = {}): Promise<{
       offers: number; recorded: number; catalogued: number; withChannelPricing: Array<{ marketplace: string; externalSku: string; automatedPricing: boolean; channelBounds: boolean }>;
+      stop: DiscoveryStop; resumed: boolean;
     }> {
-      let cursor: string | undefined;
+      /**
+       * Шаг 55 (OQ-240; ревью шага 54, находка 9): обход — КРУГ. Заход продолжает с курсора, на котором остановился прошлый, и останавливается
+       * сам: за `deadlineMarginMs` до срока вызова (по часам ядра, а не настоящим), перед страницей, на которую не хватает суточной квоты
+       * приложения (`quotas`, имя квоты страницы называет адаптер), и на пределе страниц. Где остановился — записывается; каталог крупного
+       * продавца обходится за несколько заходов, а не обрывается каждые сутки на одном месте. Страницы, которых квота приложения не
+       * касается, бюджетом ядра не ограничиваются
+       */
+      const startedFrom = (await store.discoveryCircleCursor?.(ctx.tenantId, ctx.channelAccountId)) ?? null;
+      let cursor: string | undefined = startedFrom ?? undefined;
       let offers = 0;
       let recorded = 0;
       let catalogued = 0;
@@ -955,14 +968,21 @@ export function createPricingPipeline(deps: PipelineDeps) {
       // Шаг 53 (ревью шага 52, находка 6): все виденные курсоры; на повторе записанное остаётся, обход кончается с WARNING
       const seen = new Set<string>();
       /**
-       * Шаг 54 (расчёт пиковых объёмов): прежний предел — 50 страниц по 20, около 1000 предложений, и каждый заход начинался заново:
-       * каталог больше 1000 предложений не обнаруживался целиком никогда, а у eBay до второй фазы (старые листинги, Trading) дело не
-       * доходило. Предел — 5000 страниц (100 000 предложений при 20 на странице); заход ограничен и сроком вызова. Упёрлись в предел —
-       * WARNING с числом, а не молчаливо обрезанный каталог
+       * Шаг 54 (расчёт пиковых объёмов): предел — 5000 страниц (100 000 предложений при 20 на странице); упёрлись — WARNING с числом, а не
+       * молчаливо обрезанный каталог. С шага 55 заход, упёршийся в предел, продолжается следующим заходом с того же места
        */
       const maxPages = options.maxPages ?? 5000;
-      let truncated = false;
-      for (let page = 0; page < maxPages; page++) {
+      const margin = options.deadlineMarginMs ?? 60_000;
+      let stop: DiscoveryStop | null = null;
+      for (let page = 0; stop === null; page++) {
+        if (page >= maxPages) { stop = 'PAGE_LIMIT'; break; }
+        if (Date.parse(ctx.deadline) - Date.parse(deps.now()) < margin) { stop = 'DEADLINE'; break; }
+        const quota = adapter.discoveryQuotaOf?.(cursor) ?? null;
+        const dayLimit = quota ? options.quotas?.[quota] : undefined;
+        if (quota && dayLimit !== undefined && store.reserveAppCall && !(await store.reserveAppCall(adapter.descriptor.channel, quota, dayLimit, deps.now()))) {
+          stop = 'APP_QUOTA';
+          break;
+        }
         const result = await waitingForBudget(ctx, () => adapter.discoverOffers(ctx, { limit: options.pageLimit ?? 20, ...(cursor ? { cursor } : {}) }));
         offers += result.items.length;
         const observations = result.items.flatMap((o) => (o.channelPricing && o.identity.externalSku && o.identity.marketplace
@@ -983,22 +1003,28 @@ export function createPricingPipeline(deps: PipelineDeps) {
         for (const o of observations) {
           if (o.automatedPricing || o.channelBounds) withChannelPricing.push({ marketplace: o.marketplace, externalSku: o.externalSku, automatedPricing: o.automatedPricing, channelBounds: o.channelBounds });
         }
-        if (!result.nextCursor) break;
+        if (!result.nextCursor) { cursor = undefined; stop = 'COMPLETED'; break; }
         if (seen.has(result.nextCursor) || result.nextCursor === cursor) {
+          // Петля курсора канала: круг считается закрытым (следующий заход начнёт с начала), прочитанное записано
           await emit(ctx, [{ kind: 'alert', code: 'CHANNEL_PAGE_CURSOR_REPEATED', severity: 'WARNING', details: { stage: 'DISCOVERY', pages: page + 1 } }]);
+          cursor = undefined;
+          stop = 'COMPLETED';
           break;
         }
         seen.add(result.nextCursor);
         cursor = result.nextCursor;
-        if (page === maxPages - 1) truncated = true;
       }
-      if (truncated) {
+      if (stop === 'PAGE_LIMIT') {
         await emit(ctx, [{ kind: 'alert', code: 'DISCOVERY_PAGE_LIMIT_REACHED', severity: 'WARNING', details: { pages: maxPages, offers } }]);
+      }
+      // Прерванный заход без единой страницы с начала круга курсора не имеет — записывать нечего, следующий начнёт с начала
+      if (stop === 'COMPLETED' || cursor !== undefined) {
+        await store.saveDiscoveryCircle?.(ctx.tenantId, ctx.channelAccountId, { startedFrom, cursor: stop === 'COMPLETED' ? null : cursor!, stop: stop!, at: deps.now() });
       }
       if (withChannelPricing.length > 0) {
         await emit(ctx, [{ kind: 'alert', code: 'OFFERS_WITH_CHANNEL_PRICING', severity: 'WARNING', details: { offers: withChannelPricing.length } }]);
       }
-      return { offers, recorded, catalogued, withChannelPricing };
+      return { offers, recorded, catalogued, withChannelPricing, stop: stop!, resumed: startedFrom !== null };
     },
 
     /** Р-118: снятие остановки по недоверию каналу — только человек; права, второй фактор и заметку проверяют хранилище и БД */

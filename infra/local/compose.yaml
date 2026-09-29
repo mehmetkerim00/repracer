@@ -5,7 +5,7 @@ name: repracer-local
 
 services:
   redpanda:
-    image: redpandadata/redpanda:v26.2.2
+    image: redpandadata/redpanda:v26.2.2@sha256:468bd13a9f2bd24794cb7fddc867c767fb1008b9a07b297b89fde48c564d7d96
     command:
       - redpanda
       - start
@@ -26,7 +26,7 @@ services:
       retries: 30
 
   clickhouse:
-    image: clickhouse/clickhouse-server:26.8.4.11
+    image: clickhouse/clickhouse-server:26.8.4.11@sha256:b1d9f9baec7727c779a6febb2a95eb08a8e1de3f463294e3ebb35c3d3fb30360
     environment:
       CLICKHOUSE_USER: repracer_local_admin
       CLICKHOUSE_PASSWORD: ${REPRACER_CH_PASSWORD:?set REPRACER_CH_PASSWORD}

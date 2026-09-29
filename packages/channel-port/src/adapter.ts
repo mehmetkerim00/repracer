@@ -135,6 +135,12 @@ export interface ChannelAdapter {
   /** Постранично перечислить офферы аккаунта — для сопоставления с товарами и сверки */
   discoverOffers(ctx: AdapterCallContext, page: PageRequest): Promise<Page<DiscoveredOffer>>;
 
+  /**
+   * Шаг 55 (OQ-240): квота на ПРИЛОЖЕНИЕ, которую расходует страница обхода с этим курсором (`undefined` — первая страница), или null —
+   * страница квоты приложения не касается. Формат курсора знает только адаптер; ядро по имени квоты спрашивает суточный бюджет в базе
+   */
+  discoveryQuotaOf?(cursor: string | undefined): string | null;
+
   /** Строки заказов за окно — резервации (Р-25) и сверка пропущенных уведомлений */
   readOrderLines(ctx: AdapterCallContext, window: { since: Instant } & PageRequest): Promise<Page<OrderLine>>;
 

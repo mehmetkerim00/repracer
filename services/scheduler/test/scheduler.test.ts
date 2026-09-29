@@ -311,6 +311,16 @@ test('ревью шага 53, находка 3: повтор курсора в �
   assert.deepEqual(windows, ['2026-09-17T09:55:00.000Z'], 'the lines were read from the kept window (the store records them before the failure)');
 });
 
+test('ревью шага 54, находка 7: провал, держащий окно, повторяется в свой период — петля курсора канала не растягивает паузу до суток', async () => {
+  const { dueOf, JobHoldsWindowError } = await import('../src/index.ts');
+  const base = { jobKey: 'order-lines:a', jobName: 'order-lines', scope: 'ACCOUNT', catchUp: 'LATEST', retryKind: 'CHANNEL', intervalSeconds: 300,
+    nextDueAt: '2026-09-17T10:05:00.000Z', lastFinishedAt: '2026-09-17T10:00:00.000Z', lastOutcome: 'FAILED', consecutiveFailures: 6 } as never;
+  const held = new JobHoldsWindowError('CHANNEL_PAGE_CURSOR_REPEATED: order lines read 3').message;
+  assert.equal(dueOf({ ...(base as object), lastError: held } as never), '2026-09-17T10:05:00.000Z', 'the next run keeps the 5-minute pace');
+  assert.ok(Date.parse(dueOf({ ...(base as object), lastError: 'RATE_LIMITED: …' } as never)) > Date.parse('2026-09-17T12:00:00.000Z'),
+    'an ordinary failure still backs off (Р-132)');
+});
+
 test('ревью шага 47, находка 5: пересчёт по расписанию — предел за заход передаётся, все должные упали — провал запуска (пауза Р-132), часть — WARNING', async () => {
   const outcomes: Array<{ scopes: number; changed: number; failed: number; firstError: string | null }> = [];
   const limits: Array<number | undefined> = [];

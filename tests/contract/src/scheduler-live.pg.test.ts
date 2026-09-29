@@ -258,7 +258,16 @@ observes('notification-loss-review', 'Р-121: потерянные уведом�
 observes('amazon-reconcile-rotation', 'Р-121, A-15: круг сверки обходит все офферы, ограничитель канала не отклоняет вызовы', () => {
   const compared = live.a1.asins.map((a) => (live.a1.comparedAt.get(a) ?? []).length);
   assert.equal(live.a1.port.stats.summaryRateLimited, 0, 'вызовы getCompetitiveSummary не отклонены ограничителем 0.033 rps');
-  assert.ok(Math.min(...compared) > 1000, `каждый оффер сверен за сутки: минимум ${Math.min(...compared)}`);
+  /**
+   * Шаг 55 (OQ-241): круг — страховка уведомлений, первыми — товары с самой давней последней сверкой. Свойство круга — ОХВАТ: ни один оффер
+   * не ждёт сверки дольше часа (первая редакция шага ставила вперёд давность любого сигнала канала — оффер с частыми уведомлениями ждал 228 минут)
+   */
+  assert.ok(Math.min(...compared) > 100, `каждый оффер сверен за сутки: минимум ${Math.min(...compared)}`);
+  const longestGapMs = Math.max(...live.a1.asins.map((a) => {
+    const at = [...(live.a1.comparedAt.get(a) ?? [])].sort((x, y) => x - y);
+    return Math.max(0, ...at.slice(1).map((t, i) => t - at[i]!));
+  }));
+  assert.ok(longestGapMs <= 3_600_000, `ни один оффер не ждёт сверки дольше часа: ${Math.round(longestGapMs / 60_000)} мин`);
   const calls = [...live.a1.summaryCalls.values()].flat().sort((a, b) => a - b);
   const closest = Math.min(...calls.slice(1).map((t, i) => t - calls[i]!).filter((d) => d > 0));
   assert.ok(closest >= 31_000, `два вызова подряд ближе лимита: ${closest} мс`);

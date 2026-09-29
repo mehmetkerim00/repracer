@@ -1,4 +1,4 @@
--- 0147_verify_schema_invariants_v44.sql
+-- 0149_verify_schema_invariants_v44.sql
 -- Проверка схемы после шагов 41–52 — последняя в наборе (прежние номера остаются историей: файл переносится под новый
 -- номер, чтобы идти последним).
 -- Шаг 45 правил не добавил: 0138 — хвосты ревью (каталог из обнаружения, срок вытесненных токенов, REVOKED в аудит);
@@ -365,7 +365,11 @@ BEGIN
                          -- Шаг 49 [Р-189]: итог боевого пакета eBay — только режим пакетов аккаунта, вперёд; цен и границ не трогает
                          'channel_data.record_ebay_batch_outcome(uuid,uuid,boolean)',
                          -- Шаг 52: количество, которым управляет канал (FBA), — наблюдение предложения CHANNEL; цен и записей не трогает
-                         'channel_data.record_channel_quantities(uuid,uuid,jsonb)') THEN
+                         'channel_data.record_channel_quantities(uuid,uuid,jsonb)',
+                         -- Шаг 55 (OQ-240): суточная квота приложения и круг обнаружения — операционный счётчик и курсор, цен не трогают
+                         'platform.reserve_channel_app_call(text,text,integer,timestamp with time zone)',
+                         'tenant_data.save_discovery_circle(uuid,uuid,text,text,text,timestamp with time zone)',
+                         'tenant_data.discovery_circle_cursor(uuid,uuid)') THEN
       bad := bad || format('%s: SECURITY DEFINER function executable by the decision path is not in the allow list (Р-96)', r.f);
     END IF;
   END LOOP;

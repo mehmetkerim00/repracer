@@ -52,6 +52,15 @@ function knownTail(known: Known): string {
   return known === null || known.size > MAX_CARRIED_LISTINGS ? '~*' : known.size === 0 ? '~' : `~${[...known].join(',')}`;
 }
 
+/**
+ * Шаг 55 (OQ-240): квота приложения, которую расходует страница обхода. Фаза Trading (`trd:…`) — суточная квота Trading API на приложение
+ * (5 000 по умолчанию, vendor/ebay/2026-09-28/api-call-limits.html); фаза Inventory — 2 млн в сутки, её бюджетом ядро не ограничивает
+ */
+export const EBAY_TRADING_QUOTA = 'EBAY_TRADING';
+export function discoveryQuotaOfEbay(cursor: string | undefined): string | null {
+  return cursor !== undefined && parseCursor(cursor).phase === 'TRADING' ? EBAY_TRADING_QUOTA : null;
+}
+
 function parseCursor(cursor: string | undefined): DiscoveryCursor {
   const [head, tail] = (cursor ?? '').split('~', 2) as [string, string | undefined];
   const t = /^trd:(\d{1,2}):(\d{1,6})$/.exec(head);

@@ -19,6 +19,9 @@ PUBLIC_KEY="${REPRACER_BACKUP_PUBLIC_KEY_FILE:-/run/secrets/backup_public_key.as
 # Одна итерация и выход с кодом — так тест сборки гоняет ТОТ ЖЕ скрипт (packages/pricing-store-pg/test/backup-restore.pg.test.ts)
 ONCE="${REPRACER_BACKUP_ONCE:-0}"
 export GNUPGHOME="$(mktemp -d)"
+# Ревью шага 54, находка 13: временный каталог ключей и недописанные части убираются при любом выходе, в том числе по SIGTERM
+trap 'rm -rf "$GNUPGHOME"; rm -f "$OUT"/repracer-*.part' EXIT
+trap 'exit 143' TERM INT
 encrypt() { gpg --batch --no-tty --quiet --trust-model always --recipient-file "$PUBLIC_KEY" --encrypt --output "$1"; }
 sha() { if command -v sha256sum >/dev/null; then sha256sum "$@" | awk '{print $1}'; else shasum -a 256 "$@" | awk '{print $1}'; fi; }
 # Отметка провала: файл живёт, пока копия не удалась, и исчезает с первой удавшейся. Внешний контроль видит её файлом,

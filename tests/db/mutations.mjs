@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0147_verify_schema_invariants_v44.sql';
+const VERIFY = 'migrations/0149_verify_schema_invariants_v44.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -2037,6 +2037,32 @@ export const STEP52_ROWS = [
         smoke('negative channel managed quantity')),
       m('GRANT USAGE ON SCHEMA channel_data TO repracer_app; GRANT INSERT ON channel_data.channel_quantity_current TO repracer_app',
         smoke('the decision path writes a channel managed quantity directly (Р-96)')),
+      // Шаг 55 (ревью шага 53, находка 9): страж обязан стоять и на обновлении — перевод предложения в FBM ловит своя проверка
+      m(`DROP TRIGGER channel_quantity_current_channel_only ON channel_data.channel_quantity_current;
+         CREATE TRIGGER channel_quantity_current_channel_only BEFORE INSERT ON channel_data.channel_quantity_current
+           FOR EACH ROW EXECUTE FUNCTION channel_data.channel_quantity_observation_guard()`,
+        smoke('channel managed quantity moved to a merchant fulfilled offer (Р-6)')),
+    ],
+  },
+];
+
+/**
+ * Шаг 55 (0148, OQ-240): суточная квота вызовов канала на приложение — размазана по суткам; круг обнаружения — курсор закрытого круга
+ * снят, чужой аккаунт круга не получает, чужой тенант круга не видит
+ */
+export const STEP55_ROWS = [
+  {
+    row: 'шаг 55 (OQ-240)', critical: false,
+    invariant: 'квота приложения не выдаёт больше доли суток; закрытый круг без курсора, прерванный — с курсором; круг виден только своему тенанту',
+    mutations: [
+      m(replaceInFunction('platform.reserve_channel_app_call(text,text,integer,timestamp with time zone)', 'WHERE q.spent < least(q.day_limit, allowed)', 'WHERE true'),
+        smoke('the app quota grants more than the slice of the day (OQ-240)')),
+      m(replaceInFunction('platform.reserve_channel_app_call(text,text,integer,timestamp with time zone)', '+ 3600) / 86400.0', '+ 86400) / 86400.0'),
+        smoke('the app quota grants more than the slice of the day (OQ-240)')),
+      m(replaceInFunction('tenant_data.save_discovery_circle(uuid,uuid,text,text,text,timestamp with time zone)', "IF (p_stop = 'COMPLETED') <> (p_cursor IS NULL) THEN", 'IF false THEN'),
+        smoke('a completed discovery circle keeps a cursor (OQ-240)')),
+      m('ALTER POLICY discovery_circle ON tenant_data.channel_discovery_circle USING (true) WITH CHECK (true)',
+        smoke('another tenant reads the discovery circle (OQ-240)')),
     ],
   },
 ];

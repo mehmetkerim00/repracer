@@ -1291,6 +1291,20 @@ export interface RateLimitConfig {
   maxClients?: number;
 }
 
+/**
+ * Шаг 55 (ревью шага 54, находка 5): ключ адреса. IPv6 — префикс /64: у любого VPS их тысячи, и адрес на запрос обходил бы предел и
+ * вытеснял счётчики законных клиентов; IPv4 и IPv4 в IPv6 (::ffff:a.b.c.d) — адрес целиком
+ */
+export function clientKeyOf(address: string): string {
+  const a = address.replace(/^\[|\]$/g, '').toLowerCase();
+  if (!a.includes(':') || /^::ffff:\d+\.\d+\.\d+\.\d+$/.test(a)) return a.replace(/^::ffff:/, '');
+  const [head, tail = ''] = a.split('::');
+  const left = head ? head.split(':') : [];
+  const right = tail ? tail.split(':') : [];
+  const groups = a.includes('::') ? [...left, ...Array(Math.max(0, 8 - left.length - right.length)).fill('0'), ...right] : left;
+  return `${groups.slice(0, 4).map((g) => g.replace(/^0+(?=.)/, '')).join(':')}::/64`;
+}
+
 export function createRateLimiter(config: RateLimitConfig) {
   const now = config.now ?? (() => Date.now());
   const maxClients = config.maxClients ?? 20_000;
@@ -1302,7 +1316,13 @@ export function createRateLimiter(config: RateLimitConfig) {
   const check = (headers: Record<string, string | string[] | undefined>, remoteAddress: string | undefined): { ok: true } | { ok: false; retryAfterSeconds: number } => {
     const auth = typeof headers.authorization === 'string' && headers.authorization.length > 0;
     const forwarded = typeof headers['x-forwarded-for'] === 'string' ? headers['x-forwarded-for'].split(',')[0]!.trim() : '';
-    const key = config.trustProxy && forwarded ? forwarded : (remoteAddress ?? 'unknown');
+    const address = clientKeyOf(config.trustProxy && forwarded ? forwarded : (remoteAddress ?? 'unknown'));
+    /**
+     * Шаг 55 (ревью шага 54, находка 4): у адреса ДВА счётчика — без входа и с заголовком входа. Общий счётчик ломал офис за одним NAT:
+     * вкладка экрана заданий выбирала анонимный предел адреса, и перезагрузка страницы любым сотрудником получала 429. Выдуманные токены
+     * одного адреса по-прежнему делят один бюджет «с заголовком» (находка 1 ревью шага 53)
+     */
+    const key = `${auth ? 'auth' : 'anon'}|${address}`;
     const limit = auth ? config.authorizedPerMinute : config.anonymousPerMinute;
     const t = now();
     const list = (hits.get(key) ?? []).filter((x) => x > t - 60_000);
@@ -1335,7 +1355,10 @@ export function createStandServer(
   const server = createServer(async (req, res) => {
     for (const [name, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(name, value);
     if (options.contentSecurityPolicy) res.setHeader('content-security-policy', options.contentSecurityPolicy);
-    if (limited) {
+    // Шаг 55 (ревью шага 54, находка 4): предел — у API и Inbound API; страница и файлы сборки дешёвы (из памяти) и грузятся без входа
+    // пачкой — считать их значило бы отдавать бюджет адреса перезагрузкам страницы
+    const limitedPath = /^\/(api|inbound)\//.test(new URL(req.url ?? '/', 'http://console').pathname);
+    if (limited && limitedPath) {
       const verdict = limited(req.headers, req.socket.remoteAddress);
       if (!verdict.ok) {
         res.setHeader('retry-after', String(verdict.retryAfterSeconds));

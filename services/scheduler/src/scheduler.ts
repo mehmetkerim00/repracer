@@ -91,9 +91,19 @@ export function retryDelaySeconds(intervalSeconds: number, consecutiveFailures: 
   return Math.min(intervalSeconds * 2 ** doublings, RETRY_BACKOFF_CAP_SECONDS);
 }
 
+/**
+ * Шаг 55 (ревью шага 54, находка 7): провал, который ДЕРЖИТ окно работы (прочитанное записано, окно следующего запуска не сдвигается),
+ * но причина которого — у канала и повтором через растущую паузу не лечится (петля курсора). Такой запуск повторяется в свой период,
+ * без удвоения: иначе чтение заказов аккаунта деградировало бы до раза в сутки. Серия провалов по-прежнему считается и поднимает алерт
+ */
+export class JobHoldsWindowError extends Error {
+  constructor(message: string) { super(`HOLD_WINDOW ${message}`); }
+}
+
 export function dueOf(j: JobState): Instant {
   if (j.lastOutcome !== 'FAILED' || !j.lastFinishedAt) return j.nextDueAt;
-  const retry = Date.parse(j.lastFinishedAt) + retryDelaySeconds(j.intervalSeconds, j.consecutiveFailures, j.retryKind) * 1000;
+  const delay = j.lastError?.startsWith('HOLD_WINDOW ') ? j.intervalSeconds : retryDelaySeconds(j.intervalSeconds, j.consecutiveFailures, j.retryKind);
+  const retry = Date.parse(j.lastFinishedAt) + delay * 1000;
   return retry > Date.parse(j.nextDueAt) ? new Date(retry).toISOString() : j.nextDueAt;
 }
 

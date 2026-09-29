@@ -1,7 +1,7 @@
 import type { DailyExportReport, DayRange, ExportGroup } from '@repracer/analytics-export';
 import type { AdapterCallContext, ChannelAccountId, ChannelDescriptor, Instant, TenantId } from '@repracer/channel-port';
 import { DEFAULT_LOSS_GRACE_SECONDS, type PricingPipeline } from '@repracer/pricing-pipeline';
-import type { JobSource, JobSpec } from './scheduler.ts';
+import { JobHoldsWindowError, type JobSource, type JobSpec } from './scheduler.ts';
 
 type JobAlert = { code: string; severity: 'WARNING' | 'CRITICAL'; details: Record<string, string | number | boolean | null> };
 
@@ -32,6 +32,12 @@ export interface JobConfig {
   haltReviewEverySeconds: number;
   /** Обход офферов [Р-120] — раз в сутки, допущение (OQ-163) */
   discoveryEverySeconds: number;
+  /**
+   * Шаг 55 (OQ-240): суточный бюджет квот ПРИЛОЖЕНИЯ для обхода предложений, по имени квоты (его называет адаптер страницы). eBay Trading —
+   * 5 000 вызовов в сутки по умолчанию на приложение (снимок vendor/ebay/2026-09-28/api-call-limits.html); обходу — 3 000, остальное —
+   * предполётной проверке миграции (GetItem, GetUserPreferences) и запасу. После Application Growth Check поднимается конфигурацией
+   */
+  discoveryAppQuotas: Readonly<Record<string, number>>;
   /** Шаг 35 [Р-25]: строки заказов канала — резервации; окно чтения перекрывает интервал, повторы безвредны (идемпотентно по строке заказа) */
   orderLinesEverySeconds: number;
   /** Выгрузка суток UTC — через 30 минут после конца суток; дни с непроверенными секциями — повторно за 13 суток (принудительное удаление — 14) */
@@ -52,7 +58,7 @@ export interface JobConfig {
 
 export const DEFAULT_JOB_CONFIG: JobConfig = {
   pollEverySeconds: 60, pollBudgetRps: 10, pollMaxQueries: 600, lossReviewEverySeconds: 300, lossGraceSeconds: DEFAULT_LOSS_GRACE_SECONDS,
-  amazonCallSeconds: 31, amazonBatch: 20, amazonCircleWarnHours: 24, haltReviewEverySeconds: 300, discoveryEverySeconds: 86_400, orderLinesEverySeconds: 300,
+  amazonCallSeconds: 31, amazonBatch: 20, amazonCircleWarnHours: 24, haltReviewEverySeconds: 300, discoveryEverySeconds: 86_400, discoveryAppQuotas: { EBAY_TRADING: 3000 }, orderLinesEverySeconds: 300,
   exportOffsetSeconds: 1_800, exportLookbackDays: 13, maintenanceEverySeconds: 3_600, alertsDeliverEverySeconds: 60,
   // Находка 3 ревью шага 43: заход ЕЖЕДНЕВНЫЙ — письмо о прошлой закрытой неделе, недоставленное повторяется каждые сутки
   shadowDigestEverySeconds: 86_400,
@@ -366,7 +372,7 @@ export function jobSource(deps: JobDeps): JobSource {
                * одного интервала не читались бы никогда — заказы без резерваций, перепродажа. Провал оставляет окно на месте:
                * следующий запуск читает его снова (повтор строки безвреден), пауза и алерт провала — по Р-132
                */
-              if (r.cursorRepeated) throw new Error(`CHANNEL_PAGE_CURSOR_REPEATED: order lines read ${r.lines}, the window is kept for the next run`);
+              if (r.cursorRepeated) throw new JobHoldsWindowError(`CHANNEL_PAGE_CURSOR_REPEATED: order lines read ${r.lines}, the window is kept for the next run`);
               return { items: r.lines };
             },
           });
@@ -387,7 +393,11 @@ export function jobSource(deps: JobDeps): JobSource {
           name: 'offer-discovery', scope, retryKind: 'CHANNEL', intervalSeconds: cfg.discoveryEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,
           lagWarningSeconds: hours(36), lagCriticalSeconds: hours(72), leaseSeconds: 1800,
           async run({ startedAt }) {
-            const r = await pipeline().discoverOffers(ctxOf(a, startedAt, 'offer-discovery', 1500));
+            /**
+             * Шаг 55 (OQ-240; ревью шага 54, находка 9): заход — отрезок круга. Срок вызова и квота приложения останавливают его сами, место
+             * записано, следующий заход продолжит. Круг, не закрытый заходом, — не провал: это нормальный ход крупного каталога
+             */
+            const r = await pipeline().discoverOffers(ctxOf(a, startedAt, 'offer-discovery', 1500), { quotas: cfg.discoveryAppQuotas });
             return { items: r.offers };
           },
         });

@@ -17,6 +17,9 @@ done
 "${PSQL[@]}" -d "$DB" -f packages/pricing-store-pg/test/setup.sql
 # Шаблон — копия базы сразу после миграций, без данных смоук-тестов (изолированные базы тестов, test/isolated-db.ts)
 "${PSQL[@]}" -d postgres -c "CREATE DATABASE ${TEMPLATE} TEMPLATE ${DB}"
+# Шаг 55 (п. 3): смоук-мир живёт в фиксированной дате 2026-09-14…15 — её секции только в базе смоук-тестов, не в шаблоне: иначе шаблон
+# стареет, и удаление по сроку в изолированных базах сносит их принудительно (packages/pricing-store-pg/test/setup.sql)
+"${PSQL[@]}" -d "$DB" -f tests/db/smoke_partitions.sql
 
 echo "== smoke"
 "${PSQL[@]}" -d "$DB" -f tests/db/smoke_setup.sql

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { EXPLANATION_RULESETS } from './dictionary.ts';
-import { rotation } from './reconciliation.ts';
-import type { HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow} from './store.ts';
+import { stalestFirst } from './reconciliation.ts';
+import type { HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveryStop, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow} from './store.ts';
 import { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, FILE_PRODUCING_JOB_KINDS, INTERVENTION_SLICE_LIMIT, READ_ONLY_JOB_KINDS } from './store.ts';
 import { feedGroupOf, type ConsoleScopeRow, type ConsoleWriteRow, type ConsoleIntentRow, type DecisionPage, type DecisionPageQuery, type DecisionDetail, type ScopeDecisionStats, type InterventionSlice, type FeedPage, type FeedPageItem, type FeedPageQuery, type FeedStatusGroup, type WorldCounters } from './store.ts';
 /** Записи в полёте: одна на единицу, показываются в состоянии консоли; завершённые — только в ленте [Р-154] */
@@ -585,14 +585,15 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
    * Шаг 53 (как PostgreSQL, 0141 и store.ts): последняя запись цены единицы упёрлась в бюджет правок; обновился ли он — прошло время, названное
    * каналом, или сутки бюджета. Поясов витрин память не ведёт — сутки бюджета здесь сравниваются по дате UTC
    */
-  private priceBudgetExhausted(writeScopeId: string, now: Instant): { resetsAt: Instant | null; budgetDay: string | null; renewed: boolean } | null {
+  private priceBudgetExhausted(writeScopeId: string, now: Instant): { resetsAt: Instant | null; budgetDay: string | null; renewed: boolean; writeCreatedAt: Instant } | null {
     const last = this.writes.filter((w) => w.writeScopeId === writeScopeId).sort((a, b) => b.version - a.version)[0];
     if (!last || last.status !== 'BUDGET_EXHAUSTED') return null;
     const resetsAt = typeof last.endParams.resetsAt === 'string' ? last.endParams.resetsAt : null;
     const budgetDay = typeof last.endParams.budgetDay === 'string' ? last.endParams.budgetDay : null;
     if (!resetsAt && !budgetDay) return null;
-    const renewed = (resetsAt !== null && Date.parse(resetsAt) <= Date.parse(now)) || (budgetDay !== null && budgetDay < now.slice(0, 10));
-    return { resetsAt, budgetDay, renewed };
+    // Шаг 55 (ревью шага 53, находка 6): время, названное каналом, решает само
+    const renewed = resetsAt !== null ? Date.parse(resetsAt) <= Date.parse(now) : budgetDay !== null && budgetDay < now.slice(0, 10);
+    return { resetsAt, budgetDay, renewed, writeCreatedAt: last.createdAt };
   }
 
   // --- PricingStore: оценка ------------------------------------------------
@@ -1034,6 +1035,31 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   }
 
   /** Каталог мира в памяти задаёт сценарий: обнаружение его не расширяет (стенд утверждает сценарий, а не каталог) */
+  /** Шаг 55: круг обнаружения и суточная квота приложения — как в PostgreSQL (0148) */
+  readonly discoveryCircle = new Map<string, { cursor: string | null; stop: DiscoveryStop; at: Instant }>();
+  readonly appQuota = new Map<string, number>();
+
+  async discoveryCircleCursor(_tenantId: string, channelAccountId: string): Promise<string | null> {
+    return this.discoveryCircle.get(channelAccountId)?.cursor ?? null;
+  }
+
+  async saveDiscoveryCircle(_tenantId: string, channelAccountId: string, entry: { startedFrom: string | null; cursor: string | null; stop: DiscoveryStop; at: Instant }): Promise<void> {
+    if ((entry.stop === 'COMPLETED') !== (entry.cursor === null)) throw new Error('a completed circle has no cursor, an interrupted one has one');
+    this.discoveryCircle.set(channelAccountId, { cursor: entry.cursor, stop: entry.stop, at: entry.at });
+  }
+
+  async reserveAppCall(channel: string, quota: string, dayLimit: number, at: Instant): Promise<boolean> {
+    if (!(dayLimit > 0)) throw new Error('app quota needs a positive daily limit');
+    const day = at.slice(0, 10);
+    const sinceMidnight = (Date.parse(at) - Date.parse(`${day}T00:00:00.000Z`)) / 1000;
+    const allowed = Math.min(dayLimit, Math.ceil((dayLimit * (sinceMidnight + 3600)) / 86_400));
+    const key = `${channel}|${quota}|${day}`;
+    const spent = this.appQuota.get(key) ?? 0;
+    if (spent >= allowed) return false;
+    this.appQuota.set(key, spent + 1);
+    return true;
+  }
+
   async recordDiscoveredOffers(): Promise<number> {
     return 0;
   }
@@ -1798,7 +1824,12 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     return [...this.scopes.values()]
       .filter((s) => s.channelAccountId === channelAccountId && s.pricingMode === 'ENGINE' && s.status === 'ACTIVE' && s.strategy && !COMPETITOR_STRATEGIES.has(s.strategy.params.type))
       // Шаг 53: запись цены упёрлась в бюджет, и он обновился — единица должна сразу
-      .filter((s) => (last.get(s.writeScopeId) ?? 0) < dayAgo || this.priceBudgetExhausted(s.writeScopeId, now)?.renewed === true)
+      .filter((s) => {
+        if ((last.get(s.writeScopeId) ?? 0) < dayAgo) return true;
+        // Как PostgreSQL (ревью шага 53, находка 7): после обновления бюджета — один раз, пока решения после отказа не было
+        const b = this.priceBudgetExhausted(s.writeScopeId, now);
+        return b?.renewed === true && (last.get(s.writeScopeId) ?? 0) <= Date.parse(b.writeCreatedAt);
+      })
       .sort((a, b) => (last.get(a.writeScopeId) ?? 0) - (last.get(b.writeScopeId) ?? 0) || a.writeScopeId.localeCompare(b.writeScopeId))
       .slice(0, Math.max(0, limit))
       .map((s) => s.writeScopeId);
@@ -1833,7 +1864,12 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       if (s.channelAccountId !== channelAccountId || !s.channelProductRef) continue;
       refs.set(productKey(s), { marketplace: s.marketplace, channelProductRef: s.channelProductRef, condition: s.condition });
     }
-    return { queries: rotation([...refs.values()], size, cycle), total: refs.size };
+    // Шаг 55 (OQ-241): давность — последней СВЕРКИ, как в PostgreSQL
+    const seen = (q: CompetitorQuery): number | null => {
+      const at = this.pollState.get(`${channelAccountId}|${productKey(q as never)}`);
+      return at ? Date.parse(at) : null;
+    };
+    return { queries: stalestFirst([...refs.values()].map((q) => ({ query: q, lastSeenMs: seen(q) })), size, cycle), total: refs.size };
   }
 
   async pickReviewSample(_tenantId: string, halt: HaltInfo, size: number): Promise<CompetitorQuery[]> {

@@ -3,7 +3,7 @@ import {
   floorCauseFromDatabase, convertMinor, type FxQuote } from '@repracer/pricing-model';
 import { DEFAULT_RETRY_POLICY, retryPolicyFor } from '@repracer/write-dispatcher';
 import {
-  rotation, type BulkJobArtifact, type BulkJobCreated, type BulkJobInput, type BulkJobOutcome, type BulkJobProgress, type BulkJobRow,
+  type BulkJobArtifact, type BulkJobCreated, type BulkJobInput, type BulkJobOutcome, type BulkJobProgress, type BulkJobRow,
 } from '@repracer/pricing-pipeline';
 import { offerIdentityOf, type CompetitorQuery, type CompetitorSnapshot, type FieldWrite, type Instant, type PricingHealthObservation, type WriteOutcome, type WriteRetryRule } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange } from '@repracer/input-sanity';
@@ -46,8 +46,8 @@ import type {
   ProductKey,
   ScopeEvaluationContext,
   ShiftWindow,
-  SnapshotOutcome, ConsoleAuditRow, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveredCatalogOffer, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow} from '@repracer/pricing-pipeline';
-import { FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT } from '@repracer/pricing-pipeline';
+  SnapshotOutcome, ConsoleAuditRow, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveredCatalogOffer, DiscoveryStop, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow} from '@repracer/pricing-pipeline';
+import { FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT, stalestFirst } from '@repracer/pricing-pipeline';
 import { inTenant, RollbackWith, type PgPool, type Tx } from './db.ts';
 import { PgWriteQueueStore } from './write-queue.ts';
 
@@ -237,14 +237,15 @@ function auditRow(r: Row): ConsoleAuditRow {
  * обновился (`renewed = true`) — прошли сутки витрины или время обновления, названное каналом. Выражения тенанта, единицы, «сейчас» и
  * «сегодня витрины» передаёт вызывающий: контекст оценки и выбор единиц расписания устроены по-разному
  */
-function priceBudgetExhaustedSql(o: { tenant: string; scope: string; now: string; today: string; renewed: boolean }): string {
+/** Шаг 55 (ревью шага 53, находка 6): время, названное каналом, решает само — смена суток витрины не обновляет окно канала, которое ещё не прошло */
+function priceBudgetExhaustedSql(o: { tenant: string; scope: string; now: string; today: string; renewed: boolean; extra?: string }): string {
   const renewedExpr = `((h.end_params ->> 'resetsAt') IS NOT NULL AND (h.end_params ->> 'resetsAt')::timestamptz <= ${o.now}
-      OR h.budget_day IS NOT NULL AND h.budget_day < (${o.today}))`;
+      OR (h.end_params ->> 'resetsAt') IS NULL AND h.budget_day IS NOT NULL AND h.budget_day < (${o.today}))`;
   return `SELECT h.end_params, h.budget_day FROM tenant_data.write_scope_sync_state ss
      JOIN tenant_data.channel_write_history h ON h.tenant_id = ss.tenant_id AND h.write_scope_id = ss.write_scope_id AND h.version = ss.latest_version_created
     WHERE ss.tenant_id = ${o.tenant} AND ss.write_scope_id = ${o.scope} AND h.field = 'PRICE' AND h.final_status = 'BUDGET_EXHAUSTED'
       AND ((h.end_params ->> 'resetsAt') IS NOT NULL OR h.budget_day IS NOT NULL)
-      AND ${o.renewed ? '' : 'NOT '}${renewedExpr}`;
+      AND ${o.renewed ? '' : 'NOT '}${renewedExpr}${o.extra ? ` AND ${o.extra}` : ''}`;
 }
 
 const SCOPE_JSON = `json_build_object(
@@ -1579,6 +1580,26 @@ export class PgPricingStore implements PricingStore {
   }
 
   /** Шаг 23: состояние PRICING_HEALTH оффера (0083) — данные канала, 18 месяцев */
+  /** Шаг 55 (0148): курсор круга обнаружения аккаунта — функцией узкой роли, прав на таблицу у пути решения нет */
+  async discoveryCircleCursor(tenantId: string, channelAccountId: string): Promise<string | null> {
+    return this.tx(tenantId, async (tx) => {
+      const { rows: [r] } = await tx.query('SELECT tenant_data.discovery_circle_cursor($1, $2) AS cursor', [tenantId, channelAccountId]);
+      return (r?.cursor as string | null) ?? null;
+    });
+  }
+
+  async saveDiscoveryCircle(tenantId: string, channelAccountId: string, entry: { startedFrom: string | null; cursor: string | null; stop: DiscoveryStop; at: Instant }): Promise<void> {
+    await this.tx(tenantId, async (tx) => {
+      await tx.query('SELECT tenant_data.save_discovery_circle($1, $2, $3, $4, $5, $6)', [tenantId, channelAccountId, entry.startedFrom, entry.cursor, entry.stop, entry.at]);
+    });
+  }
+
+  /** Шаг 55 (0148, OQ-240): вызов из суточной квоты приложения — счётчик общий для всех процессов, поэтому в базе */
+  async reserveAppCall(channel: string, quota: string, dayLimit: number, at: Instant): Promise<boolean> {
+    const { rows: [r] } = await this.pool.query('SELECT platform.reserve_channel_app_call($1, $2, $3, $4) AS granted', [channel, quota, dayLimit, at]);
+    return r?.granted === true;
+  }
+
   /** OQ-171: запись журнала уведомлений в переданной транзакции; false — уведомление уже записано */
   private async insertNotification(tx: Tx, tenantId: string, entry: InboundNotificationEntry): Promise<boolean> {
     const { rowCount } = await tx.query(
@@ -2322,12 +2343,25 @@ export class PgPricingStore implements PricingStore {
 
   async pickReconciliationSample(tenantId: string, channelAccountId: string, size: number, cycle: number): Promise<{ queries: CompetitorQuery[]; total: number }> {
     return this.tx(tenantId, async (tx) => {
-      // Офферы аккаунта с товаром канала; порядок и окно — rotation, как в памяти
+      /**
+       * Офферы аккаунта с товаром канала. Шаг 55 (OQ-241): первыми — те, чья ПОСЛЕДНЯЯ СВЕРКА давнее (`competitor_poll_state`, её ставит
+       * сама сверка; никогда не сверенные — первыми, отказавшие остаются давними). Не давность уведомления: оффер с частыми уведомлениями
+       * тогда не сверялся бы часами (живой прогон планировщика: 228 минут), а круг — страховка как раз от потерянных уведомлений.
+       * При равной давности — окно круга, как в памяти (`stalestFirst`)
+       */
       const { rows } = await tx.query(
-        `SELECT DISTINCT m.marketplace, m.channel_product_ref, m.condition FROM tenant_data.offer_mapping m
-          WHERE m.tenant_id = $1 AND m.channel_account_id = $2 AND m.status <> 'ENDED' AND m.channel_product_ref IS NOT NULL`, [tenantId, channelAccountId]);
-      const items = rows.map((r) => ({ marketplace: r.marketplace, channelProductRef: r.channel_product_ref, condition: portCondition(r.condition) }));
-      return { queries: rotation(items, size, cycle), total: items.length };
+        `SELECT DISTINCT ON (m.marketplace, m.channel_product_ref, m.condition) m.marketplace, m.channel_product_ref, m.condition,
+                ps.last_polled_at AS last_seen
+           FROM tenant_data.offer_mapping m
+           LEFT JOIN channel_data.competitor_poll_state ps ON ps.tenant_id = m.tenant_id AND ps.channel_account_id = m.channel_account_id
+                AND ps.marketplace = m.marketplace AND ps.channel_product_ref = m.channel_product_ref AND ps.condition = m.condition
+          WHERE m.tenant_id = $1 AND m.channel_account_id = $2 AND m.status <> 'ENDED' AND m.channel_product_ref IS NOT NULL
+          ORDER BY m.marketplace, m.channel_product_ref, m.condition, last_seen DESC NULLS LAST`, [tenantId, channelAccountId]);
+      const items = rows.map((r) => ({
+        query: { marketplace: r.marketplace, channelProductRef: r.channel_product_ref, condition: portCondition(r.condition) },
+        lastSeenMs: r.last_seen ? Date.parse(r.last_seen instanceof Date ? r.last_seen.toISOString() : String(r.last_seen)) : null,
+      }));
+      return { queries: stalestFirst(items, size, cycle), total: items.length };
     });
   }
 
@@ -2349,7 +2383,10 @@ export class PgPricingStore implements PricingStore {
                  OR EXISTS (${priceBudgetExhaustedSql({ tenant: 's.tenant_id', scope: 's.write_scope_id', now: '$3::timestamptz',
                       today: `SELECT ($3::timestamptz AT TIME ZONE m.time_zone)::date FROM tenant_data.offer_mapping om JOIN platform.marketplace m ON m.channel = s.channel AND m.marketplace = om.marketplace
                                WHERE om.tenant_id = s.tenant_id AND om.price_write_scope_id = s.write_scope_id AND m.time_zone IS NOT NULL ORDER BY om.created_at LIMIT 1`,
-                      renewed: true })}))
+                      renewed: true,
+                      // Ревью шага 53, находка 7: после обновления бюджета единица должна ОДИН раз — пока решения после отказа не было; иначе
+                      // единица без новой версии (NO_OP, пропуск) выбиралась бы каждым заходом и первой, занимая предел
+                      extra: '(last.decided_at IS NULL OR last.decided_at < h.finished_at)' })}))
           ORDER BY last.decided_at ASC NULLS FIRST, s.write_scope_id
           LIMIT $4`, [tenantId, channelAccountId, now, Math.max(0, limit)]);
       return rows.map((r) => r.write_scope_id as string);

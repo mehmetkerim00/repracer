@@ -658,6 +658,14 @@ export interface PricingStore {
    * предложения FBM пропускаются базой. Нет у хранилища — наблюдение не хранится
    */
   recordChannelQuantities?(tenantId: string, channelAccountId: string, items: ReadonlyArray<{ marketplace: string; externalSku: string; quantity: number; observedAt: Instant }>): Promise<number>;
+  /**
+   * Шаг 55 (OQ-240; ревью шага 54, находка 9): круг обнаружения аккаунта — где остановился прошлый заход. Каталог крупного продавца обходится
+   * за несколько заходов; без хранилища круга каждый заход начинал бы с начала и обрывался бы на том же месте
+   */
+  discoveryCircleCursor?(tenantId: string, channelAccountId: string): Promise<string | null>;
+  saveDiscoveryCircle?(tenantId: string, channelAccountId: string, entry: { startedFrom: string | null; cursor: string | null; stop: DiscoveryStop; at: Instant }): Promise<void>;
+  /** Шаг 55 (OQ-240): один вызов из суточной квоты канала на приложение, размазанной по суткам; false — отложить вызов */
+  reserveAppCall?(channel: string, quota: string, dayLimit: number, at: Instant): Promise<boolean>;
   /** Шаг 23: PRICING_HEALTH — в решение не входит, состояние оффера для продавца */
   recordPricingHealth(tenantId: string, channelAccountId: string, health: PricingHealthObservation, notification?: InboundNotificationEntry): Promise<'RECORDED' | 'DUPLICATE_NOTIFICATION'>;
   /** Шаг 23: журнал обработанных уведомлений тенанта — повтор доставки из очереди не обрабатывается второй раз */
@@ -1146,3 +1154,6 @@ export interface DiscoveredCatalogOffer {
   listingFormat?: 'FIXED_PRICE' | 'AUCTION' | null;
   writable?: boolean | null;
 }
+
+/** Шаг 55: чем кончился заход обхода — круг закрыт, срок вызова, квота приложения, предел страниц захода */
+export type DiscoveryStop = 'COMPLETED' | 'DEADLINE' | 'APP_QUOTA' | 'PAGE_LIMIT';

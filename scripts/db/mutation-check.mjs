@@ -66,7 +66,7 @@ const dropDb = (name) => psql('postgres', ['-c', `DROP DATABASE IF EXISTS ${name
 /** Смоук-тесты как в scripts/db/prepare.sh, в режиме сбора: провал проверки — предупреждение CHECK FAILED, прогон идёт дальше */
 async function smoke(db) {
   const env = { PGOPTIONS: '-c repracer.smoke_collect=on' };
-  const steps = [['postgres', 'tests/db/smoke_setup.sql'], ['svc_provisioning', 'tests/db/smoke_provision.sql'], ['svc_admin', 'tests/db/smoke_app.sql'],
+  const steps = [['postgres', 'tests/db/smoke_partitions.sql'], ['postgres', 'tests/db/smoke_setup.sql'], ['svc_provisioning', 'tests/db/smoke_provision.sql'], ['svc_admin', 'tests/db/smoke_app.sql'],
     ['svc_admin', 'tests/db/smoke_admin.sql'], ['svc_app', 'tests/db/smoke_path.sql'],
     // Шаг 30 [Р-139]: защиты фоновых заданий — файл переключает роль на исполнителя сам
     ['svc_admin', 'tests/db/smoke_bulk_jobs.sql'], ['svc_admin', 'tests/db/smoke_onboarding.sql'],
@@ -227,8 +227,8 @@ const describeExpect = (e) => e.smoke !== undefined ? `smoke «${e.smoke}»` : e
 const describeMutation = (m) => typeof m === 'string' ? m.replace(/\s+/g, ' ').slice(0, 110) : `${m.fn}: «${m.from.slice(0, 50)}…» → «${m.to.slice(0, 30)}…»`;
 const sameCheck = (a, b) => describeExpect(a) === describeExpect(b);
 
-const { R93_ROWS, STEP17_ROWS = [], STEP18_ROWS = [], STEP19_ROWS = [], STEP20_ROWS = [], STEP21_ROWS = [], STEP22_ROWS = [], STEP23_ROWS = [], STEP24_ROWS = [], STEP25_ROWS = [], STEP25_B_ROWS = [], STEP25_D_ROWS = [], STEP26_ROWS = [], STEP27_ROWS = [], STEP28_ROWS = [], STEP30_ROWS = [], STEP32_ROWS = [], STEP34_ROWS = [], STEP35_ROWS = [], STEP36_ROWS = [], STEP37_ROWS = [], STEP40_ROWS = [], STEP41_ROWS = [], STEP42_ROWS = [], STEP43_ROWS = [], STEP44_ROWS = [], STEP45_ROWS = [], STEP47_ROWS = [], STEP49_ROWS = [], STEP52_ROWS = [], R93_NOT_MUTATED = [] } = await import(pathToFileURL(catalogPath).href);
-const rows = [...R93_ROWS, ...(process.argv.includes('--r93-only') ? [] : [...STEP17_ROWS, ...STEP18_ROWS, ...STEP19_ROWS, ...STEP20_ROWS, ...STEP21_ROWS, ...STEP22_ROWS, ...STEP23_ROWS, ...STEP24_ROWS, ...STEP25_ROWS, ...STEP25_B_ROWS, ...STEP25_D_ROWS, ...STEP26_ROWS, ...STEP27_ROWS, ...STEP28_ROWS, ...STEP30_ROWS, ...STEP32_ROWS, ...STEP34_ROWS, ...STEP35_ROWS, ...STEP36_ROWS, ...STEP37_ROWS, ...STEP40_ROWS, ...STEP41_ROWS, ...STEP42_ROWS, ...STEP43_ROWS, ...STEP44_ROWS, ...STEP45_ROWS, ...STEP47_ROWS, ...STEP49_ROWS, ...STEP52_ROWS])]
+const { R93_ROWS, STEP17_ROWS = [], STEP18_ROWS = [], STEP19_ROWS = [], STEP20_ROWS = [], STEP21_ROWS = [], STEP22_ROWS = [], STEP23_ROWS = [], STEP24_ROWS = [], STEP25_ROWS = [], STEP25_B_ROWS = [], STEP25_D_ROWS = [], STEP26_ROWS = [], STEP27_ROWS = [], STEP28_ROWS = [], STEP30_ROWS = [], STEP32_ROWS = [], STEP34_ROWS = [], STEP35_ROWS = [], STEP36_ROWS = [], STEP37_ROWS = [], STEP40_ROWS = [], STEP41_ROWS = [], STEP42_ROWS = [], STEP43_ROWS = [], STEP44_ROWS = [], STEP45_ROWS = [], STEP47_ROWS = [], STEP49_ROWS = [], STEP52_ROWS = [], STEP55_ROWS = [], R93_NOT_MUTATED = [] } = await import(pathToFileURL(catalogPath).href);
+const rows = [...R93_ROWS, ...(process.argv.includes('--r93-only') ? [] : [...STEP17_ROWS, ...STEP18_ROWS, ...STEP19_ROWS, ...STEP20_ROWS, ...STEP21_ROWS, ...STEP22_ROWS, ...STEP23_ROWS, ...STEP24_ROWS, ...STEP25_ROWS, ...STEP25_B_ROWS, ...STEP25_D_ROWS, ...STEP26_ROWS, ...STEP27_ROWS, ...STEP28_ROWS, ...STEP30_ROWS, ...STEP32_ROWS, ...STEP34_ROWS, ...STEP35_ROWS, ...STEP36_ROWS, ...STEP37_ROWS, ...STEP40_ROWS, ...STEP41_ROWS, ...STEP42_ROWS, ...STEP43_ROWS, ...STEP44_ROWS, ...STEP45_ROWS, ...STEP47_ROWS, ...STEP49_ROWS, ...STEP52_ROWS, ...STEP55_ROWS])]
   .filter((r) => !only || only.includes(r.row))
   // Задача E шага 30 [OQ-203]: быстрый прогон CI гоняет критичные строки каталога — защиты, которыми держится цена
   .filter((r) => !process.argv.includes('--critical') || r.critical === true);

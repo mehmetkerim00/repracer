@@ -95,6 +95,12 @@ test('Р-159: процесс отдаёт собранный интерфейс 
   const page = await walk<never>('index.html (страница)', 'GET', '/');
   assert.equal(page.status, 200, 'страница отдаётся тем же процессом, что API');
   assert.match(page.text, /<div id="root">/, 'это собранная страница консоли, а не заглушка');
+  // Шаг 55 (ревью шага 53, находка 10): полная CSP — заголовком ОТВЕТА процесса, собранного `startConsole`, а не строкой функции: снятие
+  // передачи политики в console-service.ts эта проверка видит
+  for (const path of ['/', '/api/v1/worlds', '/api/no-such-route']) {
+    const csp = (await fetch(`${origin}${path}`)).headers.get('content-security-policy') ?? '';
+    for (const part of ["default-src 'self'", "script-src 'self'", "connect-src 'self'", "frame-ancestors 'none'"]) assert.ok(csp.includes(part), `${path}: ${part} in «${csp}»`);
+  }
 
   // Файл сборки берётся из САМОЙ страницы: так проверяется, что отдаётся именно то, на что она ссылается
   const asset = /src="([^"]+\.js)"/.exec(page.text)?.[1];

@@ -116,3 +116,47 @@ test('step 54: discovery reads past 1000 offers, and when it does reach its page
   const exact = await run(4, 4);
   assert.deepEqual(exact.alerts, [], 'a catalogue that ends exactly at the limit is complete — no alert');
 });
+
+test('step 55 (OQ-240): discovery is a circle — a run stopped by its deadline or by the app quota is continued by the next one from the same place', async () => {
+  // Канал: 6 страниц; страницы с курсором `t…` — «фаза Trading», их квоту называет адаптер
+  const cursors = [undefined, 'i1', 'i2', 't3', 't4', 't5'];
+  let nowMs = Date.parse('2026-09-29T09:00:00.000Z');
+  const read: Array<string | undefined> = [];
+  const adapter = {
+    descriptor: { channel: 'EBAY' },
+    discoveryQuotaOf: (c: string | undefined) => (c?.startsWith('t') ? 'EBAY_TRADING' : null),
+    async discoverOffers(_ctx: unknown, page: { cursor?: string }) {
+      read.push(page.cursor);
+      nowMs += 10_000; // страница — 10 с по часам ядра
+      const i = cursors.indexOf(page.cursor);
+      return { items: [{ identity: { marketplace: 'EBAY_DE', externalSku: `syn-sku-${i}` }, gtins: [], condition: 'NEW', fulfillment: 'MERCHANT' }], ...(i + 1 < cursors.length ? { nextCursor: cursors[i + 1] } : {}) };
+    },
+  } as unknown as ChannelAdapter;
+  const saved: Array<{ startedFrom: string | null; cursor: string | null; stop: string }> = [];
+  let circle: string | null = null;
+  let tradingGranted = 1;
+  const store = {
+    async recordOfferChannelPricing() { return 0; }, async recordDiscoveredOffers(_t: unknown, _a: unknown, items: unknown[]) { return items.length; },
+    async discoveryCircleCursor() { return circle; },
+    async saveDiscoveryCircle(_t: unknown, _a: unknown, e: { startedFrom: string | null; cursor: string | null; stop: string }) { saved.push(e); circle = e.cursor; },
+    async reserveAppCall(channel: string, quota: string, limit: number) { assert.deepEqual([channel, quota, limit], ['EBAY', 'EBAY_TRADING', 3000]); return tradingGranted-- > 0; },
+  } as unknown as PricingStore;
+  const pipeline = createPricingPipeline({ store, adapter, alerts: { raise: async () => undefined }, logger: { log: () => undefined },
+    now: () => new Date(nowMs).toISOString() as never, sleep: async () => undefined });
+  const run = (deadlineInMs: number) => pipeline.discoverOffers(ctx(new Date(nowMs + deadlineInMs).toISOString()), { pageLimit: 1, quotas: { EBAY_TRADING: 3000 }, deadlineMarginMs: 5_000 });
+
+  // Заход 1: срок позволяет две страницы (24 с при запасе 5 с) — остановился по сроку, место записано
+  const first = await run(24_000);
+  assert.deepEqual([first.stop, first.resumed, read], ['DEADLINE', false, [undefined, 'i1']]);
+  // Заход 2: продолжает с i2; квота Trading даёт одну страницу — остановился по квоте перед второй
+  const second = await run(600_000);
+  assert.deepEqual([second.stop, second.resumed, read.slice(2)], ['APP_QUOTA', true, ['i2', 't3']]);
+  // Заход 3: квота восстановилась (новые сутки) — дочитал круг, курсор снят
+  tradingGranted = 5;
+  const third = await run(600_000);
+  assert.deepEqual([third.stop, read.slice(4)], ['COMPLETED', ['t4', 't5']]);
+  assert.deepEqual(saved.map((s) => [s.startedFrom, s.cursor, s.stop]), [[null, 'i2', 'DEADLINE'], ['i2', 't4', 'APP_QUOTA'], ['t4', null, 'COMPLETED']]);
+  // Заход 4: новый круг с начала
+  await run(15_000);
+  assert.equal(read[6], undefined, 'after a completed circle the next run starts from the first page');
+});

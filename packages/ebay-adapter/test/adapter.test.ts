@@ -895,3 +895,20 @@ test('E-23, step 52: Accept-Language of a single-storefront call is the language
   assert.equal(lang('/sell/inventory/v1/offer/'), 'de-DE', 'the read-back of an EBAY_DE offer');
   assert.equal(lang('/sell/fulfillment/v1/order'), 'en-US', 'an account-level call: the first storefront');
 });
+
+test('step 55 (OQ-240): quotas are read from Developer Analytics — the application with the application token, the seller with the user token (not verified live)', async () => {
+  const w = world((r) => {
+    if (r.url.pathname === '/developer/analytics/v1_beta/rate_limit/') {
+      assert.equal(r.headers.authorization, 'Bearer syn-app-token', 'application quotas — application token');
+      assert.equal(r.url.searchParams.get('api_name'), 'TradingAPI');
+      return { status: 200, body: { rateLimits: [{ apiContext: 'TradingAPI', apiName: 'TradingAPI', apiVersion: 'v1', resources: [{ name: 'TradingAPI', rates: [{ count: 1200, limit: 5000, remaining: 3800, reset: '2026-09-28T07:00:00.000Z', timeWindow: 86400 }] }] }] } };
+    }
+    assert.equal(r.url.pathname, '/developer/analytics/v1_beta/user_rate_limit/');
+    assert.equal(r.headers.authorization, 'Bearer syn-user-token', 'user quotas — the seller token');
+    return { status: 200, body: { rateLimits: [] } };
+  });
+  const app = await w.adapter.readRateLimits(ctx, 'APPLICATION', { apiName: 'TradingAPI' });
+  assert.deepEqual(app.ok && app.limits[0]?.resources[0]?.rates[0], { count: 1200, limit: 5000, remaining: 3800, reset: '2026-09-28T07:00:00.000Z', timeWindow: 86400 });
+  const user = await w.adapter.readRateLimits(ctx, 'USER');
+  assert.deepEqual(user, { ok: true, limits: [] });
+});

@@ -41,3 +41,19 @@ test('Р-121: the rotation covers every product in ceil(n / size) consecutive ca
   const many = Array.from({ length: 80 }, (_, i) => ({ marketplace: 'A1PA6795UKMFR9', channelProductRef: `B${String(i).padStart(9, '0')}`, condition: 'new' }));
   assert.equal(new Set([0, 1, 2, 3].flatMap((c) => rotation(many, 20, c).map((q) => q.channelProductRef))).size, 80);
 });
+
+test('step 55 (OQ-241): the circle checks first what was reconciled longest ago (never — first); equal staleness keeps the old windows', async () => {
+  const { stalestFirst, rotation } = await import('./reconciliation.ts');
+  const q = (ref: string) => ({ marketplace: 'A1PA6795UKMFR9', channelProductRef: ref, condition: 'new' as const });
+  const items = ['B0SYN1', 'B0SYN2', 'B0SYN3', 'B0SYN4', 'B0SYN5'].map(q);
+  // Никто ничего не сообщал: те же окна, что прежний круг
+  for (const cycle of [0, 1, 2, 7]) {
+    assert.deepEqual(stalestFirst(items.map((query) => ({ query, lastSeenMs: null })), 2, cycle), rotation(items, 2, cycle), `cycle ${cycle}`);
+  }
+  // 1, 2, 3 сверены только что; 4 — сутки назад, 5 не сверялся никогда — они первыми, при любом номере вызова
+  const now = Date.parse('2026-09-29T12:00:00Z');
+  const seen = [now - 60_000, now - 120_000, now - 180_000, now - 86_400_000, null];
+  const withSeen = items.map((query, i) => ({ query, lastSeenMs: seen[i]! }));
+  for (const cycle of [0, 3]) assert.deepEqual(stalestFirst(withSeen, 2, cycle).map((x) => x.channelProductRef), ['B0SYN5', 'B0SYN4']);
+  assert.deepEqual(stalestFirst(withSeen, 10, 0).length, 5, 'never more than there are');
+});

@@ -10,5 +10,6 @@ export { ChannelCallError } from './errors.ts';
 export { decimalToMinor, formatMinor } from './mapping.ts';
 export { GET_USER_PREFERENCES_REQUEST, getItemRequest, parseGetItem, snapshotSha256, type ListingFacts } from './migration.ts';
 export { budgetChargesOf, NOT_MIGRATED_LOG_CODE } from './planning.ts';
-export { getMyeBaySellingRequest } from './listing.ts';
+export { discoveryQuotaOfEbay, EBAY_TRADING_QUOTA, getMyeBaySellingRequest } from './listing.ts';
 export type { EbayAdapterOptions, EbayTokenCache } from './session.ts';
+export { RATE_LIMIT_PATH, USER_RATE_LIMIT_PATH, type EbayRate, type EbayRateLimit } from './limits.ts';

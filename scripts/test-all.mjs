@@ -85,6 +85,19 @@ function run(args) {
   });
 }
 
+/**
+ * Шаг 55: проверка типов — часть ЛОКАЛЬНОЙ сборки. CI дважды краснел на том, чего локальный прогон не видел (шаги 51 и 53: ошибка
+ * типов в тесте): быстрая область, не проверяющая типы, говорит «зелено» о коде, который CI не соберёт. Полная проверка — ~70 с при
+ * ~20 минутах тестов, поэтому идёт целиком и параллельно с тестами, а не по изменённым пакетам. В CI у заданий проверка типов —
+ * своим шагом до тестов, и задание передаёт `--no-typecheck`, чтобы не делать её дважды
+ */
+const typecheck = process.argv.includes('--no-typecheck') ? null : new Promise((resolve) => {
+  const child = spawn('npm', ['run', 'typecheck'], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+  let output = '';
+  for (const stream of [child.stdout, child.stderr]) stream.on('data', (chunk) => { output += chunk; });
+  child.on('close', (code) => resolve({ code, output }));
+});
+
 const byWorkspace = new Map();
 for (const file of selected) {
   const cwd = workspaceOf(file);
@@ -117,6 +130,13 @@ for (const r of runs) {
   if (own === 0) problems.push(`${r.name}: no test summary found`);
 }
 if (totals.tests === 0) problems.push('no tests ran');
+if (typecheck) {
+  const tc = await typecheck;
+  const errors = tc.output.split('\n').filter((l) => /error TS\d+/.test(l));
+  for (const e of errors) console.error(`TYPE ERROR: ${e.trim()}`);
+  console.log(`TYPECHECK ${JSON.stringify({ exitCode: tc.code, errors: errors.length })}`);
+  if (tc.code !== 0) problems.push(`typecheck failed (${errors.length} errors)`);
+}
 // Р-89: каждый включённый в сборку файл действительно выполнился (скрипт мог назвать файл, но отфильтровать его или не дойти до него)
 const executed = new Set(existsSync(ledger) ? readFileSync(ledger, 'utf8').split('\n').filter(Boolean).map((f) => relative(root, f).split(sep).join('/')) : []);
 rmSync(ledgerDir, { recursive: true, force: true });

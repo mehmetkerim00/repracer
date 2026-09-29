@@ -11,7 +11,11 @@ import { ErrorBox, errorText, useMessages } from '../components.tsx';
  * единственный вопрос, который у продавца возникает при сбое, — прошло ли наполовину.
  */
 
-const POLL_MS = 500;
+/**
+ * Шаг 55 (ревью шага 54, находка 4): 2 с, а не 500 мс — вкладка с идущим заданием делала 120 запросов в минуту и одна выбирала предел адреса
+ * консоли; ход задания меняется секундами, продавцу 2 с не заметны
+ */
+const POLL_MS = 2000;
 
 export function JobProgress({ worldId, jobId, onFinished }: { worldId: string; jobId: string; onFinished?: (job: BulkJobView) => void }) {
   const m = useMessages();

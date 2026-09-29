@@ -45,7 +45,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0 (шаг 53, закреплено по SHA, OWASP A08)
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '22'
+          node-version: '22.22.3'
           cache: npm
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
       - run: npm ci
@@ -67,7 +67,7 @@ jobs:
       - name: Console UI build (Р-159)
         run: npm run build -w apps/console
       - name: Tests without infrastructure beyond PostgreSQL (Р-137)
-        run: node scripts/test-all.mjs --scope=fast
+        run: node scripts/test-all.mjs --scope=fast --no-typecheck
 
   # Задача E шага 30 [OQ-203]: быстрый прогон не должен пропускать регрессию в защитах, которыми держится цена
   guards:
@@ -92,7 +92,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0 (шаг 53, закреплено по SHA, OWASP A08)
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '22'
+          node-version: '22.22.3'
           cache: npm
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
       - run: npm ci
@@ -140,11 +140,11 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0 (шаг 53, закреплено по SHA, OWASP A08)
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '22'
+          node-version: '22.22.3'
           cache: npm
       - name: Redpanda (порядок записей за брокером, Р-24) — версия как в infra/local/compose.yaml
         run: |
-          docker run -d --name redpanda -p 19092:19092 redpandadata/redpanda:v26.2.2 redpanda start \
+          docker run -d --name redpanda -p 19092:19092 redpandadata/redpanda:v26.2.2@sha256:468bd13a9f2bd24794cb7fddc867c767fb1008b9a07b297b89fde48c564d7d96 redpanda start \
             --overprovisioned --smp 1 --memory 1G --reserve-memory 0M --node-id 0 --check=false \
             --kafka-addr PLAINTEXT://0.0.0.0:19092 --advertise-kafka-addr PLAINTEXT://127.0.0.1:19092
           for i in $(seq 1 60); do docker exec redpanda rpk cluster health 2>/dev/null | grep -q 'Healthy:.*true' && exit 0; sleep 2; done
@@ -153,7 +153,7 @@ jobs:
         run: |
           docker run -d --name clickhouse -p 18123:8123 --ulimit nofile=262144:262144 \
             -e CLICKHOUSE_USER=$REPRACER_CH_USER -e CLICKHOUSE_PASSWORD=$REPRACER_CH_PASSWORD -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 \
-            clickhouse/clickhouse-server:26.8.4.11
+            clickhouse/clickhouse-server:26.8.4.11@sha256:b1d9f9baec7727c779a6febb2a95eb08a8e1de3f463294e3ebb35c3d3fb30360
           for i in $(seq 1 60); do curl -sf http://127.0.0.1:18123/ping && exit 0; sleep 2; done
           docker logs clickhouse; exit 1
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
@@ -183,7 +183,7 @@ jobs:
       - name: Console UI build (Р-159)
         run: npm run build -w apps/console
       - name: 'All tests, no skips (Р-137: полная область — с брокером и ClickHouse)'
-        run: node scripts/test-all.mjs --scope=full
+        run: node scripts/test-all.mjs --scope=full --no-typecheck
       # Шаг 28, D: развёртывания поднимаются по-настоящему — три процесса стартуют и отвечают на /healthz (deploy/ci/README.md)
       # Шаг 37 [Р-159]: сюда добавился профиль production целиком — прокси и КОНСОЛЬ, и путь гостя по нему как браузер
       - name: Deployments start, and the guest walks the production profile (шаг 28 D, шаг 37 A)
@@ -216,14 +216,14 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0 (шаг 53, закреплено по SHA, OWASP A08)
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '22'
+          node-version: '22.22.3'
           cache: npm
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
       - run: npm ci
       - name: Database — migrations, template
         run: scripts/db/prepare.sh repracer_eu
       - name: A virtual day of the demo stand, then every screen within its limit (Р-154, OQ-214)
-        run: node scripts/test-all.mjs --scope=long
+        run: node scripts/test-all.mjs --scope=long --no-typecheck
 
 
   shadow-day:
@@ -249,14 +249,14 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0 (шаг 53, закреплено по SHA, OWASP A08)
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '22'
+          node-version: '22.22.3'
           cache: npm
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
       - run: npm ci
       - name: Database — migrations, template
         run: scripts/db/prepare.sh repracer_eu
       - name: 'Сутки демо в ТЕНИ: ни одного изменяющего запроса к каналу, затем включение боя и возврат (Р-169…Р-171)'
-        run: node scripts/test-all.mjs --scope=shadow
+        run: node scripts/test-all.mjs --scope=shadow --no-typecheck
 
   # Шаг 20: замер сжатия ClickHouse против оценки шага 4 (ADR-0004) — отдельное задание, итог — артефакт compression.json
   clickhouse-compression:
@@ -282,13 +282,13 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0 (шаг 53, закреплено по SHA, OWASP A08)
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '22'
+          node-version: '22.22.3'
           cache: npm
       - name: ClickHouse
         run: |
           docker run -d --name clickhouse -p 18123:8123 --ulimit nofile=262144:262144 \
             -e CLICKHOUSE_USER=$REPRACER_CH_USER -e CLICKHOUSE_PASSWORD=$REPRACER_CH_PASSWORD -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 \
-            clickhouse/clickhouse-server:26.8.4.11
+            clickhouse/clickhouse-server:26.8.4.11@sha256:b1d9f9baec7727c779a6febb2a95eb08a8e1de3f463294e3ebb35c3d3fb30360
           for i in $(seq 1 60); do curl -sf http://127.0.0.1:18123/ping && exit 0; sleep 2; done
           docker logs clickhouse; exit 1
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16

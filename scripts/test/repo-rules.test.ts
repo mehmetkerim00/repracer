@@ -709,3 +709,35 @@ test('шаг 54: порты развёртываний публикуются т
   assert.ok(all.some((e) => e.includes('operator 127.0.0.1:4327:4327')), 'правило видит порт панели — иначе оно ничего не проверяет');
   assert.deepEqual(offending(all), [], 'порт, опубликованный не на loopback');
 });
+
+/**
+ * Шаг 55 (п. 3): зависимость от НАСТОЯЩИХ часов — третий раз класс ошибки (шаги 29, 51, календарь шаблона шага 54). В коде продукта время
+ * берётся зависимостью (`now` у пути решения, работ планировщика, заданий, транспортов) — тогда стенд и живые прогоны задают свои часы.
+ * Прямые обращения к часам (`Date.now`, `new Date()`, `performance.now()`) вне тестов и интерфейса браузера — по списку
+ * scripts/real-clock-baseline.json: новое обращение краснит сборку, список только сокращается. Обращение, которому часы нужны по делу
+ * (точка сборки процесса, замер длительности), помечается на своей строке `// real-clock: <причина>`
+ */
+test('шаг 55: новое обращение к настоящим часам в коде продукта — только с пометкой; список прежних только сокращается', async () => {
+  const { readdirSync, readFileSync, statSync } = await import('node:fs');
+  const PATTERN = /\bDate\.now\b|new Date\(\s*\)|performance\.now\(/g;
+  const count = (text: string) => text.split('\n').filter((l) => !l.includes('real-clock:')).reduce((n, l) => n + (l.match(PATTERN)?.length ?? 0), 0);
+  // Положительный контроль: правило видит все три формы и уважает пометку
+  assert.equal(count('const a = Date.now();\nconst b = new Date();\nconst c = performance.now();\nconst d = new Date(x);\nconst e = Date.now(); // real-clock: startup'), 3);
+  const productFile = (p: string) => /\.(ts|tsx|mjs)$/.test(p) && !p.includes('.test.') && !p.includes('/test/') && !p.includes('/node_modules/')
+    && !p.includes('/dist/') && !p.includes('/generated/') && !/^apps\/(console|operator)\/src\//.test(p);
+  const walk = (dir: string): string[] => readdirSync(new URL(dir, root)).flatMap((name) => {
+    const rel = `${dir}${name}`;
+    if (name === 'node_modules' || name === 'dist' || name === 'test' || name === 'generated') return [];
+    return statSync(new URL(rel, root)).isDirectory() ? walk(`${rel}/`) : [rel];
+  });
+  const actual = new Map<string, number>();
+  for (const f of ['packages/', 'services/', 'apps/'].flatMap(walk).filter(productFile)) {
+    const n = count(readFileSync(new URL(f, root), 'utf8'));
+    if (n > 0) actual.set(f, n);
+  }
+  const baseline = JSON.parse(read('scripts/real-clock-baseline.json')) as Record<string, number>;
+  const grown = [...actual].filter(([f, n]) => n > (baseline[f] ?? 0)).map(([f, n]) => `${f}: ${n} > ${baseline[f] ?? 0}`);
+  assert.deepEqual(grown, [], 'new real-clock access in product code: take `now` as a dependency or mark the line `// real-clock: <reason>`');
+  const shrunk = Object.entries(baseline).filter(([f, n]) => (actual.get(f) ?? 0) < n).map(([f, n]) => `${f}: ${actual.get(f) ?? 0} < ${n}`);
+  assert.deepEqual(shrunk, [], 'fewer real-clock calls than the baseline says — lower the number in scripts/real-clock-baseline.json');
+});

@@ -201,8 +201,21 @@ if [ "$prod_ok" = 1 ]; then
         # Шаг 54 (OQ-227): и по ВНЕШНЕМУ адресу машины панель недостижима — порт слушает только loopback. Положительный
         # контроль — ответ на 127.0.0.1 строкой выше: тот же запрос по внешнему адресу обязан остаться без отпечатка
         ext_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
-        if [ -z "$ext_ip" ]; then
-          echo "   operator: внешний адрес машины не найден — недостижимость извне не проверена"
+        # Шаг 55 (ревью шага 54, находка 15): положительный контроль на ТОМ ЖЕ внешнем адресе — слушатель на 0.0.0.0 обязан ответить.
+        # Иначе адрес, по которому не отвечает ничто (не тот интерфейс, фильтр), делал проверку ниже зелёной всегда
+        control_ok=0
+        if [ -n "$ext_ip" ]; then
+          mkdir -p "$SECRETS/ext-control" && printf 'ext-control-ok' > "$SECRETS/ext-control/index.html"
+          python3 -m http.server 4399 --bind 0.0.0.0 --directory "$SECRETS/ext-control" > /dev/null 2>&1 &
+          control_pid=$!
+          for _ in $(seq 1 20); do
+            if curl -s --max-time 2 "http://$ext_ip:4399/" | grep -q 'ext-control-ok'; then control_ok=1; break; fi
+            sleep 0.5
+          done
+          kill "$control_pid" 2>/dev/null || true
+        fi
+        if [ -z "$ext_ip" ] || [ "$control_ok" != 1 ]; then
+          echo "   operator: внешний адрес машины ($ext_ip) не отвечает даже контрольному слушателю — недостижимость панели извне не проверена"
           failed=1
         elif curl -s --max-time 3 "http://$ext_ip:4327/api/operator/tenants" | grep -q 'NO_TOKEN'; then
           echo "   operator: панель ОТВЕЧАЕТ по внешнему адресу машины — порт опубликован не только на loopback (OQ-227)"

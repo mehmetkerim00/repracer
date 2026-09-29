@@ -155,6 +155,7 @@ export async function startScheduler(config: SchedulerConfig = loadConfig(), onF
   const deps2Base = pgJobDeps({
     schedulerPool, exporterPool, ingest: ch(config.clickHouse.ingest), verifier: ch(config.clickHouse.verifier),
     descriptorOf: (channel) => adapterFor(channel)?.descriptor ?? null, pipelineFor,
+    config: { discoveryAppQuotas: config.discoveryAppQuotas },
     ...(alertDelivery ? { alertDelivery } : {}),
     ...(shadowDigest ? { shadowDigest } : {}),
   });

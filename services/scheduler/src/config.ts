@@ -44,6 +44,8 @@ export interface SchedulerConfig {
    * читает шифротекст токенов (svc_credentials, 0132). Без приложений работы `channel-authorizations` нет.
    */
   channelApps: ChannelAppsConfig;
+  /** Шаг 55 (OQ-240): суточный бюджет квот приложения для обхода предложений (eBay Trading) */
+  discoveryAppQuotas: Readonly<Record<string, number>>;
   credentialsPgUrl: string | null;
 }
 
@@ -121,6 +123,8 @@ export function loadConfig(env: Env = process.env, read: (path: string) => strin
     },
     amazon: { applicationCredentialsRef: required(env.REPRACER_AMAZON_APPLICATION_CREDENTIALS_REF, 'REPRACER_AMAZON_APPLICATION_CREDENTIALS_REF') },
     channelApps: apps,
+    // Шаг 55 (OQ-240): бюджет суточной квоты Trading API приложения для обхода предложений eBay; после Growth Check — выше
+    discoveryAppQuotas: { EBAY_TRADING: int(env, 'REPRACER_EBAY_TRADING_DISCOVERY_DAILY_BUDGET', 3000, 1, 10_000_000) },
     credentialsPgUrl: apps.amazon || apps.ebay ? required(secret(env, 'REPRACER_CREDENTIALS_PG_URL', read), 'REPRACER_CREDENTIALS_PG_URL') : null,
   };
 }

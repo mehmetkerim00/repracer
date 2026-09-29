@@ -8,20 +8,24 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 /**
- * Шаг 54 (OWASP A09): журналы ≥ 12 месяцев — горячий хвост сутками, дальше месячные архивы. Проверяется ТОТ ЖЕ скрипт, что запускает
- * таймер на сервере; вместо docker — подставная команда, печатающая строки своих суток. Утверждается наблюдаемое: что лежит на диске
+ * Шаг 54 (OWASP A09): журналы ≥ 12 месяцев — горячий хвост сутками, дальше месячные архивы. Шаг 55 (ревью шага 54, находки 10–12):
+ * отметка «выгружено по» у каждого проекта — пропущенные сутки догоняются, выгрузка перед выкладкой (`--until-now`) и ночной заход
+ * пишут в один файл суток, сбой одного проекта не останавливает остальные. Проверяется ТОТ ЖЕ скрипт, что запускает таймер; вместо
+ * docker — подставная команда, печатающая свои аргументы; время — REPRACER_LOGS_NOW, а не часы машины
  */
 const SCRIPT = join(import.meta.dirname, '..', '..', 'deploy', 'production', 'logs-archive.sh');
 
-function world() {
+function world(projects = 'repracer-production') {
   const root = mkdtempSync(join(tmpdir(), 'logs-archive-'));
   const fake = join(root, 'docker');
-  // docker compose -p P logs --no-color --timestamps --since DAYT00:00:00Z --until …
-  writeFileSync(fake, '#!/bin/bash\nfor i in 1 2; do echo "$3 ${8%%T*} line $i"; done\n');
+  // docker compose -p P logs --no-color --timestamps --since FROM --until TO; проект repracer-missing отвечает ошибкой, как compose без проекта
+  writeFileSync(fake, '#!/bin/bash\nif [ "$3" = repracer-missing ]; then echo "no such project" >&2; exit 1; fi\necho "$3 $8 .. ${10}"\n');
   chmodSync(fake, 0o755);
-  const env = { ...process.env, REPRACER_LOGS_HOT_DIR: join(root, 'hot'), REPRACER_ARCHIVE_DIR: join(root, 'archive'), REPRACER_LOG_PROJECTS: 'repracer-production', REPRACER_DOCKER: fake };
-  const run = (day: string) => execFileSync('bash', [SCRIPT, day], { env, encoding: 'utf8' });
-  return { root, run, hot: join(root, 'hot', 'repracer-production'), months: join(root, 'archive', 'platform=logs', 'repracer-production') };
+  const env = (now: string) => ({ ...process.env, REPRACER_LOGS_HOT_DIR: join(root, 'hot'), REPRACER_ARCHIVE_DIR: join(root, 'archive'), REPRACER_LOG_PROJECTS: projects, REPRACER_DOCKER: fake, REPRACER_LOGS_NOW: now });
+  const run = (now: string, ...args: string[]) => execFileSync('bash', [SCRIPT, ...args], { env: env(now), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const hot = join(root, 'hot', 'repracer-production');
+  const lines = (file: string) => gunzipSync(readFileSync(file)).toString('utf8').trim().split('\n');
+  return { root, run, hot, lines, months: join(root, 'archive', 'platform=logs', 'repracer-production') };
 }
 
 const days = (from: string, to: string): string[] => {
@@ -30,18 +34,48 @@ const days = (from: string, to: string): string[] => {
   return out;
 };
 
-test('step 54: a day of logs becomes a compressed hot file; a month that has left the 30-day window becomes one archive with its checksum', () => {
+test('step 54, 55: nightly runs keep a hot day file per day; a month out of the 30-day window becomes one archive with its checksum', () => {
   const w = world();
   try {
-    for (const d of days('2026-07-01', '2026-08-31')) w.run(d);
-    const hot = readdirSync(w.hot).sort();
-    assert.deepEqual([hot[0], hot[hot.length - 1], hot.length], ['2026-08-01.log.gz', '2026-08-31.log.gz', 31], 'August is still inside the hot window (cutoff 2026-08-01)');
+    // Ночной заход в 00:20 UTC каждых суток с 2026-07-02 по 2026-09-01: выгружает прошедшие сутки
+    for (const d of days('2026-07-02', '2026-09-01')) w.run(`${d}T00:20:00Z`);
+    const hot = readdirSync(w.hot).filter((f) => f.endsWith('.log.gz')).sort();
+    assert.deepEqual([hot[0], hot[hot.length - 1], hot.length], ['2026-08-01.log.gz', '2026-08-31.log.gz', 31], 'August is still inside the hot window');
     assert.deepEqual(readdirSync(w.months).sort(), ['2026-07.log.gz', '2026-07.log.gz.sha256'], 'July is one month archive');
-    const july = gunzipSync(readFileSync(join(w.months, '2026-07.log.gz'))).toString('utf8').trim().split('\n');
-    assert.equal(july.length, 62, 'every line of all 31 July days, two per day');
-    assert.deepEqual([july[0], july[61]], ['repracer-production 2026-07-01 line 1', 'repracer-production 2026-07-31 line 2'], 'in day order');
+    const july = w.lines(join(w.months, '2026-07.log.gz'));
+    assert.equal(july.length, 31, 'one dump per July day');
+    assert.deepEqual([july[0], july[30]], ['repracer-production 2026-07-01T00:00:00Z .. 2026-07-02T00:00:00Z',
+      'repracer-production 2026-07-31T00:00:00Z .. 2026-08-01T00:00:00Z'], 'in day order, each day exactly its own 24 hours');
     const sum = createHash('sha256').update(readFileSync(join(w.months, '2026-07.log.gz'))).digest('hex');
     assert.equal(readFileSync(join(w.months, '2026-07.log.gz.sha256'), 'utf8').trim(), sum);
+  } finally { rmSync(w.root, { recursive: true, force: true }); }
+});
+
+test('step 55: missed nights are caught up from the mark; a dump before a redeploy and the next night write one day file without gaps', () => {
+  const w = world();
+  try {
+    w.run('2026-07-02T00:20:00Z');
+    // Три ночи сервер был выключен — первый заход после них догоняет 07-02, 07-03, 07-04
+    w.run('2026-07-05T00:20:00Z');
+    assert.deepEqual(readdirSync(w.hot).filter((f) => f.endsWith('.log.gz')).sort(), ['2026-07-01.log.gz', '2026-07-02.log.gz', '2026-07-03.log.gz', '2026-07-04.log.gz']);
+    // Выкладка в 13:45: журнал контейнера сейчас исчезнет — выгружается день по этот момент; ночью — остаток суток
+    w.run('2026-07-05T13:45:00Z', '--until-now');
+    w.run('2026-07-06T00:20:00Z');
+    assert.deepEqual(w.lines(join(w.hot, '2026-07-05.log.gz')), [
+      'repracer-production 2026-07-05T00:00:00Z .. 2026-07-05T13:45:00Z',
+      'repracer-production 2026-07-05T13:45:00Z .. 2026-07-06T00:00:00Z',
+    ], 'the day is covered once, in two segments, without a gap or an overlap');
+    assert.equal(readFileSync(join(w.hot, '.until'), 'utf8'), '2026-07-06T00:00:00Z');
+  } finally { rmSync(w.root, { recursive: true, force: true }); }
+});
+
+test('step 55: a project that fails does not stop the others; the failure is marked for the outside monitor and the run exits 1', () => {
+  const w = world('repracer-missing repracer-production');
+  try {
+    assert.throws(() => w.run('2026-07-02T00:20:00Z'), (e: { status?: number; stderr?: string }) => e.status === 1 && /LOGS_ARCHIVE_FAILED/.test(String(e.stderr)));
+    assert.deepEqual(readdirSync(w.hot).filter((f) => f.endsWith('.log.gz')), ['2026-07-01.log.gz'], 'the healthy project was archived');
+    assert.equal(existsSync(join(w.root, 'hot', 'LOGS_ARCHIVE_FAILED')), true);
+    assert.equal(existsSync(join(w.root, 'hot', 'repracer-missing', '.until')), false, 'the failed project keeps no mark — it is retried from the same place');
   } finally { rmSync(w.root, { recursive: true, force: true }); }
 });
 
@@ -50,11 +84,11 @@ test('step 54: month archives are kept at least 12 months; an archive already bu
   try {
     mkdirSync(w.months, { recursive: true });
     for (const m of ['2025-05', '2025-06', '2025-07']) writeFileSync(join(w.months, `${m}.log.gz`), 'old');
-    // Сборка месяца прервалась после архива и до удаления суток: архив полный, в горячем каталоге остаток суток
     mkdirSync(w.hot, { recursive: true });
     writeFileSync(join(w.months, '2026-06.log.gz'), 'built from the full set');
     writeFileSync(join(w.hot, '2026-06-30.log.gz'), 'leftover');
-    w.run('2026-08-15');
+    writeFileSync(join(w.hot, '.until'), '2026-08-15T00:00:00Z');
+    w.run('2026-08-15T00:20:00Z');
     const kept = readdirSync(w.months).filter((f) => f.endsWith('.log.gz')).sort();
     assert.deepEqual(kept, ['2025-07.log.gz', '2026-06.log.gz'], '2026-08 minus 13 months = 2025-07 is kept; older months are gone');
     assert.equal(readFileSync(join(w.months, '2026-06.log.gz'), 'utf8'), 'built from the full set', 'the archive was not rebuilt from the leftover');
@@ -62,10 +96,11 @@ test('step 54: month archives are kept at least 12 months; an archive already bu
   } finally { rmSync(w.root, { recursive: true, force: true }); }
 });
 
-test('step 54: a malformed day is refused before any file is touched', () => {
+test('step 54, 55: a malformed time or argument is refused before any file is touched', () => {
   const w = world();
   try {
-    assert.throws(() => w.run('yesterday'), /LOGS_ARCHIVE_BAD_DAY|status 2/);
-    assert.equal(existsSync(w.hot), false);
+    assert.throws(() => w.run('yesterday'), /status 2|LOGS_ARCHIVE_BAD_NOW/);
+    assert.throws(() => w.run('2026-07-02T00:20:00Z', '--until-tomorrow'), /status 2|LOGS_ARCHIVE_BAD_ARGUMENT/);
+    assert.equal(existsSync(join(w.root, 'hot')), false);
   } finally { rmSync(w.root, { recursive: true, force: true }); }
 });

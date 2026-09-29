@@ -1,4 +1,10 @@
-import { EBAY_MARKETPLACES, TRADING_COMPATIBILITY_LEVEL } from '@repracer/ebay-adapter';
+import { EBAY_MARKETPLACES } from '@repracer/ebay-adapter';
+
+/**
+ * Шаг 55 (ревью шага 53, находка 12): версия Trading, которую стенд ТРЕБУЕТ, — литерал из заметок к выпускам (vendor/ebay/2026-09-29,
+ * 1477 от 24.08.2026), а не константа того же адаптера: сравнение адаптера с самим собой пропустило бы любой откат
+ */
+const TRADING_LEVEL_REQUIRED = '1477';
 import { signKauflandRequest } from '@repracer/kaufland-client';
 import { match } from './matchers.ts';
 import type { Exchange, World } from './scenario.ts';
@@ -178,7 +184,7 @@ export function ebayRequestChecker(world: World, host: string): (request: Observ
     }
     if (request.path === '/ws/api.dll') {
       if (h['x-ebay-api-iaf-token'] !== world.credentials.accessToken) v.push(`${where}: X-EBAY-API-IAF-TOKEN is not the user token`);
-      if (!h['x-ebay-api-call-name'] || !h['x-ebay-api-siteid'] || h['x-ebay-api-compatibility-level'] !== TRADING_COMPATIBILITY_LEVEL) v.push(`${where}: Trading API headers are incomplete`);
+      if (!h['x-ebay-api-call-name'] || !h['x-ebay-api-siteid'] || h['x-ebay-api-compatibility-level'] !== TRADING_LEVEL_REQUIRED) v.push(`${where}: Trading API headers are incomplete`);
       if (h.authorization) v.push(`${where}: Trading API call carries an Authorization header`);
     } else if (request.path.startsWith('/buy/browse/')) {
       if (h.authorization !== `Bearer ${world.credentials.applicationToken}`) v.push(`${where}: Browse API is not called with the application token`);
