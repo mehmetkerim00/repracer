@@ -372,8 +372,17 @@ observes('retention', 'секция снимков удаляется по ср�
   const { rows: [mark] } = await observer.query(
     `SELECT count(*)::int AS n FROM maintenance.partition_export WHERE partition_name = $1 AND verified_at IS NOT NULL`, [`channel_data.${bg.oldPartition}`]);
   assert.equal(mark.n, 0, 'непроверенная секция и не отмечена проверенной');
-  const { rows: [forced] } = await observer.query(`SELECT count(*)::int AS n FROM maintenance.retention_run WHERE action = 'PARTITION_FORCE_DROPPED'`);
-  assert.equal(forced.n, 0, 'принудительных удалений невыгруженных секций не было');
+  /**
+   * Шаг 54: принудительное удаление считается по секциям ОКНА ПРОГОНА (с суток старой секции и позже). Шаблон базы несёт пустые секции
+   * фиксированной даты стенда (2026-09-14…18, packages/pricing-store-pg/test/setup.sql), и с 2026-09-29 они старше предела
+   * принудительного удаления: удаление по сроку сносит их законно, по одной в сутки. Утверждение «ни одного принудительного удаления
+   * вообще» стало зависеть от календаря — скрытый вход «дата на часах», как у шагов 29 и 47. Секции самого прогона этим не прикрыты
+   */
+  const { rows: [forced] } = await observer.query(
+    `SELECT count(*)::int AS n, coalesce(string_agg(table_name || ' ' || coalesce(object_name, '?') || ' cutoff ' || coalesce(cutoff::text, '?'), '; '), '') AS what
+       FROM maintenance.retention_run WHERE action = 'PARTITION_FORCE_DROPPED' AND cutoff >= $1::timestamptz`,
+    [new Date(Date.parse(`${bg.oldPartition.slice(-8, -4)}-${bg.oldPartition.slice(-4, -2)}-${bg.oldPartition.slice(-2)}T00:00:00Z`)).toISOString()]);
+  assert.equal(forced.n, 0, `принудительных удалений невыгруженных секций окна прогона не было: ${forced.what}`);
   // Секции, выгрузка которых проверена, удаляются: за прогон удалена хотя бы одна, и все удалённые — из проверенных
   const { rows: [dropped] } = await observer.query(
     `SELECT count(*)::int AS n FROM maintenance.retention_run WHERE action = 'PARTITION_DROPPED' AND table_name = 'channel_data.competitor_snapshot_log'`);
