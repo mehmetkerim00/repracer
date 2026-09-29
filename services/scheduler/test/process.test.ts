@@ -78,6 +78,27 @@ test('Р-129: конфигурация процесса — секреты из 
   assert.throws(() => loadConfig(production), /CONFIG_SECRET_IN_ENV: REPRACER_SCHEDULER_HEARTBEAT_URL/);
 });
 
+test('Шаг 58 (ревью шага 56, находка 15): адрес Seller API Kaufland задаётся только в режиме стенда; в работе — отказ своей причиной', () => {
+  assert.equal(loadConfig(ENV).kaufland.baseUrl, null, 'без переменной — умолчание клиента');
+  assert.equal(loadConfig({ ...ENV, REPRACER_KAUFLAND_BASE_URL: 'http://127.0.0.1:18080/v2' }).kaufland.baseUrl, 'http://127.0.0.1:18080/v2');
+  assert.throws(() => loadConfig({ ...ENV, REPRACER_KAUFLAND_BASE_URL: 'ftp://model.invalid/v2' }), /CONFIG_INVALID: REPRACER_KAUFLAND_BASE_URL must be an http\(s\) URL/);
+  // Промышленная конфигурация — секреты файлами; сама по себе она проходит, и отказ ниже — именно из-за адреса канала
+  const secretNames = ['REPRACER_SCHEDULER_PG_URL', 'REPRACER_APP_PG_URL', 'REPRACER_STOCK_PG_URL', 'REPRACER_EXPORTER_PG_URL', 'REPRACER_CH_INGEST_PASSWORD',
+    'REPRACER_CH_VERIFIER_PASSWORD', 'REPRACER_SCHEDULER_HEARTBEAT_URL', 'REPRACER_MAIL_API_KEY', 'REPRACER_ALERT_DELIVERY_PG_URL'] as const;
+  const { REPRACER_MODE: _stand, ...rest } = ENV;
+  const production: Record<string, string | undefined> = { ...rest };
+  const files: Record<string, string> = {};
+  for (const name of secretNames) {
+    files[`/run/secrets/${name}`] = (ENV as Record<string, string>)[name]!;
+    production[name] = undefined;
+    production[`${name}_FILE`] = `/run/secrets/${name}`;
+  }
+  const read = (p: string) => files[p] ?? (() => { throw new Error('ENOENT'); })();
+  assert.equal(loadConfig(production, read).kaufland.baseUrl, null, 'промышленная конфигурация без адреса канала проходит');
+  assert.throws(() => loadConfig({ ...production, REPRACER_KAUFLAND_BASE_URL: 'http://127.0.0.1:18080/v2' }, read),
+    (e: Error) => e instanceof ConfigError && e.message === 'CONFIG_INVALID: REPRACER_KAUFLAND_BASE_URL is accepted only with REPRACER_MODE=stand (модель канала Kaufland)');
+});
+
 test('Р-129: учётные данные канала — файл на ссылку; подстановка пути отклоняется, содержимое не попадает в ошибку', async () => {
   const store = credentialsFromFiles('/run/secrets/channels', (p) => {
     if (p === '/run/secrets/channels/secret-ref_kaufland-0001') return JSON.stringify({ clientKey: 'syn-key', secretKey: 'syn-secret' });

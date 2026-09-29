@@ -631,8 +631,9 @@ export const en = {
       discovery: {
         // Шаг 57 (ревью шага 56, находка 5): честная граница — остаток текущего круга, пауза до нового (сутки после закрытия, плюс час
         // захода) и ещё один круг: листинг, появившийся позади курсора, текущий круг уже не увидит
-        running: (h: number, hadCircle: boolean) => `Catalogue discovery: the current circle has been running ${h} h${hadCircle ? '' : ' (the first one)'} — a listing only a full circle sees (older eBay listings) appears within two circles and a day at most; the hours are named once a circle closes.`,
-        completed: (h: number, at: string, boundH: number) => `Catalogue discovery: the last full circle took ${h} h, closed ${at.slice(0, 16).replace('T', ' ')} UTC — a listing only a full circle sees (older eBay listings) appears within about ${boundH} h at most (two circles and a day).`,
+        // Шаг 58 (ревью шага 56, находка 9): пояснение о старых листингах eBay — только у аккаунта eBay
+        running: (h: number, hadCircle: boolean, ebay: boolean) => `Catalogue discovery: the current circle has been running ${h} h${hadCircle ? '' : ' (the first one)'} — a listing only a full circle sees${ebay ? ' (older eBay listings)' : ''} appears within two circles and a day at most; the hours are named once a circle closes.`,
+        completed: (h: number, at: string, boundH: number, ebay: boolean) => `Catalogue discovery: the last full circle took ${h} h, closed ${at.slice(0, 16).replace('T', ' ')} UTC — a listing only a full circle sees${ebay ? ' (older eBay listings)' : ''} appears within about ${boundH} h at most (two circles and a day).`,
       },
       authorization: {
         revoked: 'Access was withdrawn in the channel: connect again to continue.',
@@ -772,6 +773,7 @@ export const en = {
         PRICE_WRITE_SCOPE_BLOCKED: { what: 'an offer is blocked: its price change did not go through', step: 'Open the offer in the console: the reason of the refusal is written there. Most refusals need an action in the channel cabinet.' },
         PRICE_WRITE_NOT_SENT: { what: 'a price change was not sent to the channel', step: 'Open the price feed in the console and check the offers of this channel.' },
         DISCOVERY_PAGE_LIMIT_REACHED: { what: 'offer discovery reached its page limit before the channel had returned every offer', step: 'Offers beyond the limit are not in the catalog yet. Contact us with the event code — the limit will be adjusted for your catalog.' },
+        ORDER_LINES_FIRST_WINDOW_CAPPED: { what: 'the first reading of orders for a newly connected account did not go back to the moment of connection — only the last day was read', step: 'Orders placed earlier are expected to be in your stock source already. If an older order changed your stock, correct the stock in the source; contact us with the event code if this repeats.' },
         ORDER_LINES_PAGE_LIMIT_REACHED: { what: 'reading the orders reached the page limit of one run', step: 'Nothing is lost: what was read is recorded and the next run continues from the same place. If the alert keeps repeating for hours, contact us with the event code.' },
         DISCOVERY_CIRCLE_RESET: { what: 'offer discovery failed again at the same place and starts its circle over', step: 'Usually nothing is to be done: the next circle reads the catalogue again. If the alert repeats, contact us with the event code.' },
         CHANNEL_PAGE_CURSOR_REPEATED: { what: 'the channel returned a page it had already given, so reading stopped early', step: 'Nothing is lost: what was read is kept and the next run reads the same window again. If the alert repeats, contact us with the event code.' },

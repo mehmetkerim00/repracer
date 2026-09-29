@@ -8,9 +8,11 @@ SELECT maintenance.ensure_partitions('2026-09-15 12:00+00'::timestamptz) IS NOT 
  * Шаг 56 (п. 6): смоук-мир не пересекает полночь витрины. Бюджет правок исчерпывается «сегодня» одним файлом (smoke_app.sql) и
  * проверяется другими (smoke_r65.sql, smoke_stock.sql), а страж базы сверяет день бюджета с ТЕКУЩИМИ сутками витрины по её часам —
  * заморозить часы базы нельзя, и параметр дня тут не поможет: запись со вчерашним днём отклонит сам страж. Поэтому последовательность
- * не начинается за 15 минут до полуночи Europe/Berlin — ждёт минуту после неё. Последовательность идёт ~3 минуты: исход не зависит от
- * того, когда её запустили (prepare.sh и каждый прогон мутации идут через этот файл первым)
+ * не начинается за 2 минуты до полуночи Europe/Berlin — ждёт 30 секунд после неё. Шаг 58 (ревью шага 56, находка 17): окно было 15 минут
+ * при оценке «~3 минуты» и спало до 16 минут; замер CI шага 56 — вся смоук-последовательность ~4 с (18:17:50 → 18:17:54), окно 2 минуты —
+ * запас ×30, сон — не дольше 2,5 минут. Исход не зависит от того, когда её запустили (prepare.sh и каждый прогон мутации идут через этот
+ * файл первым)
  */
-SELECT CASE WHEN (date_trunc('day', now() AT TIME ZONE 'Europe/Berlin') + interval '1 day') - (now() AT TIME ZONE 'Europe/Berlin') < interval '15 minutes'
-            THEN pg_sleep(extract(epoch FROM (date_trunc('day', now() AT TIME ZONE 'Europe/Berlin') + interval '1 day' + interval '1 minute')
+SELECT CASE WHEN (date_trunc('day', now() AT TIME ZONE 'Europe/Berlin') + interval '1 day') - (now() AT TIME ZONE 'Europe/Berlin') < interval '2 minutes'
+            THEN pg_sleep(extract(epoch FROM (date_trunc('day', now() AT TIME ZONE 'Europe/Berlin') + interval '1 day' + interval '30 seconds')
                                             - (now() AT TIME ZONE 'Europe/Berlin'))) END IS NULL AS smoke_day_guard \gset

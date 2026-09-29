@@ -119,8 +119,8 @@ export function connectionsView(
     const completed = a.discoveryCircleCompletedAt ? Date.parse(a.discoveryCircleCompletedAt) : null;
     const discoveryText = started === null ? null
       // Граница Р-198 (шаг 57): два круга и сутки паузы до нового круга плюс час захода работы — округлено вверх до часа
-      : completed !== null && completed >= started ? t.discovery.completed(hours(started, completed), a.discoveryCircleCompletedAt!, Math.ceil(2 * hours(started, completed) + 25))
-        : t.discovery.running(hours(started, nowMs), completed !== null);
+      : completed !== null && completed >= started ? t.discovery.completed(hours(started, completed), a.discoveryCircleCompletedAt!, Math.ceil(2 * hours(started, completed) + 25), a.channel === 'EBAY')
+        : t.discovery.running(hours(started, nowMs), completed !== null, a.channel === 'EBAY');
     return {
       discoveryText,
       channelAccountId: a.channelAccountId, channel: a.channel, label: `${a.channel} · ${a.externalAccountId} · ${a.marketplaces.join(', ')}`, marketplaces: [...a.marketplaces],

@@ -12,7 +12,8 @@ type JobAlert = { code: string; severity: 'WARNING' | 'CRITICAL'; details: Recor
  * Частоты — допущения продукта, не лимиты каналов; лимиты держат ограничители адаптеров.
  */
 
-export interface SchedulerAccount { tenantId: string; channelAccountId: string; channel: string }
+/** Шаг 58: `connectedAt` — время подключения аккаунта; от него первое окно чтения заказов (заказ между согласием и первым заходом не теряется) */
+export interface SchedulerAccount { tenantId: string; channelAccountId: string; channel: string; connectedAt?: Instant }
 
 export interface JobConfig {
   pollEverySeconds: number;
@@ -44,6 +45,12 @@ export interface JobConfig {
   discoveryAppQuotas: Readonly<Record<string, number>>;
   /** Шаг 35 [Р-25]: строки заказов канала — резервации; окно чтения перекрывает интервал, повторы безвредны (идемпотентно по строке заказа) */
   orderLinesEverySeconds: number;
+  /**
+   * Шаг 58 (ревью шага 56, находка 10): первое окно чтения заказов — от подключения аккаунта, но не глубже этого предела. Отгруженный заказ
+   * резервация списывает с пула; заказ, отгруженный задолго до подключения, уже учтён в остатке источника, и его списание было бы вторым.
+   * Сутки — с запасом больше промежутка «согласие → первый заход работы»; урезанное окно — WARNING, а не молчание
+   */
+  orderLinesFirstLookbackSeconds: number;
   /** Выгрузка суток UTC — через 30 минут после конца суток; дни с непроверенными секциями — повторно за 13 суток (принудительное удаление — 14) */
   exportOffsetSeconds: number;
   exportLookbackDays: number;
@@ -65,6 +72,9 @@ export interface JobConfig {
  * с `stock` до шага 56). Правило репозитория держит список равным необязательным членам `JobDeps`, тест точки входа
  * (`production-composition.pg.test.ts`) — что настоящий `startScheduler` в промышленной конфигурации заводит каждую из этих работ
  */
+/** Шаг 58: сохранённый курсор заказов снимается на третьем провале подряд — как круг обнаружения (0152) */
+export const ORDER_CURSOR_DROP_AFTER_FAILURES = 3;
+
 export const CAPABILITY_JOBS = {
   stock: 'order-lines',
   alertDelivery: 'alerts-deliver',
@@ -74,7 +84,7 @@ export const CAPABILITY_JOBS = {
 
 export const DEFAULT_JOB_CONFIG: JobConfig = {
   pollEverySeconds: 60, pollBudgetRps: 10, pollMaxQueries: 600, lossReviewEverySeconds: 300, lossGraceSeconds: DEFAULT_LOSS_GRACE_SECONDS,
-  amazonCallSeconds: 31, amazonBatch: 20, amazonCircleWarnHours: 24, haltReviewEverySeconds: 300, discoveryEverySeconds: 3_600, discoveryCircleEverySeconds: 86_400, discoveryAppQuotas: { EBAY_TRADING: 3000 }, orderLinesEverySeconds: 300,
+  amazonCallSeconds: 31, amazonBatch: 20, amazonCircleWarnHours: 24, haltReviewEverySeconds: 300, discoveryEverySeconds: 3_600, discoveryCircleEverySeconds: 86_400, discoveryAppQuotas: { EBAY_TRADING: 3000 }, orderLinesEverySeconds: 300, orderLinesFirstLookbackSeconds: 86_400,
   exportOffsetSeconds: 1_800, exportLookbackDays: 13, maintenanceEverySeconds: 3_600, alertsDeliverEverySeconds: 60,
   // Находка 3 ревью шага 43: заход ЕЖЕДНЕВНЫЙ — письмо о прошлой закрытой неделе, недоставленное повторяется каждые сутки
   shadowDigestEverySeconds: 86_400,
@@ -384,7 +394,7 @@ export function jobSource(deps: JobDeps): JobSource {
           specs.push({
             name: 'order-lines', scope, retryKind: 'CHANNEL', intervalSeconds: cfg.orderLinesEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,
             lagWarningSeconds: cfg.orderLinesEverySeconds * 6, lagCriticalSeconds: hours(6), leaseSeconds: 300,
-            async run({ startedAt, previousSucceededAt }) {
+            async run({ startedAt, previousSucceededAt, consecutiveFailures }) {
               /**
                * Окно — с конца прошлого УСПЕШНОГО запуска и ещё интервал назад: строка, обновлённая на границе, попадёт
                * дважды, и это безвредно (резервация одна на строку заказа). От последнего ЛЮБОГО завершения окно считать
@@ -392,17 +402,41 @@ export function jobSource(deps: JobDeps): JobSource {
                */
               const saved = (await stock.positions?.get(a)) ?? null;
               // Шаг 56: прошлый заход упёрся в предел страниц — продолжаем ЕГО окно с его курсора; иначе — окно от прошлого успеха
-              const since = saved?.since ?? new Date(Date.parse(previousSucceededAt ?? startedAt) - cfg.orderLinesEverySeconds * 1000).toISOString();
+              /**
+               * Шаг 58 (ревью шага 56, находка 10): без прошлого успеха окно было «последние 5 минут от запуска» — заказ между согласием продавца и
+               * первым заходом работы (и между первым заходом и первым УСПЕХОМ, если заходы падали) не читался никогда. Теперь первое окно — от
+               * подключения аккаунта, не глубже предела `orderLinesFirstLookbackSeconds`
+               */
+              const firstFloorMs = Date.parse(startedAt) - cfg.orderLinesFirstLookbackSeconds * 1000;
+              const connectedMs = a.connectedAt ? Date.parse(a.connectedAt) - cfg.orderLinesEverySeconds * 1000 : null;
+              const firstWindowCapped = !saved && !previousSucceededAt && connectedMs !== null && connectedMs < firstFloorMs;
+              const firstSinceMs = connectedMs === null ? Date.parse(startedAt) - cfg.orderLinesEverySeconds * 1000 : Math.max(connectedMs, firstFloorMs);
+              const since = saved?.since
+                ?? (previousSucceededAt ? new Date(Date.parse(previousSucceededAt) - cfg.orderLinesEverySeconds * 1000).toISOString() : new Date(firstSinceMs).toISOString());
+              const cappedAlert = firstWindowCapped
+                ? [{ code: 'ORDER_LINES_FIRST_WINDOW_CAPPED', severity: 'WARNING' as const, details: { connectedAt: a.connectedAt!, since, lookbackHours: cfg.orderLinesFirstLookbackSeconds / 3600 } }] : [];
               let r: Awaited<ReturnType<typeof stock.syncOrders>>;
               try {
                 r = await stock.syncOrders(a, ctxOf(a, startedAt, 'order-lines', 120), since, saved?.cursor ? { cursor: saved.cursor } : {});
               } catch (error) {
                 /**
-                 * Шаг 57 (ревью шага 56, находка 3): курсор, который канал больше не принимает (истёк, сменился формат), держал бы работу на
-                 * себе вечно — каждый заход падал бы на нём. Курсор снимается, начало окна остаётся: следующий заход перечитывает окно от
-                 * начала (повтор строки безвреден — резервация одна на строку заказа). Провал — как был, с паузой и алертом по Р-132
+                 * Шаг 58 (ревью шага 57, находка 2): чтение оборвалось посреди окна — прочитанное записано, место — последний принятый курсор;
+                 * следующий заход продолжит с него, а не с начала окна
                  */
-                if (saved?.cursor) await stock.positions?.save(a, { since: saved.since, cursor: null }, startedAt);
+                const interrupted = error as { linesRecorded?: number; cursor?: string };
+                if (typeof interrupted.linesRecorded === 'number' && interrupted.cursor) {
+                  await stock.positions?.save(a, { since, cursor: interrupted.cursor }, startedAt);
+                  throw error;
+                }
+                /**
+                 * Шаг 57 (ревью шага 56, находка 3): курсор, который канал больше не принимает (истёк, сменился формат), держал бы работу на
+                 * себе вечно. Шаг 58 (ревью шага 57, находка 2): но и снимать его на ПЕРВОМ отказе нельзя — разовый 5xx, сбой записи или пересчёта
+                 * отбрасывал заход к началу окна, и при отказе раз в два-три захода окно не дочитывалось никогда. Курсор снимается на третьем
+                 * провале подряд (как круг обнаружения, 0152); начало окна остаётся всегда. Провал — с паузой и алертом по Р-132
+                 */
+                if (saved?.cursor && (consecutiveFailures ?? 0) + 1 >= ORDER_CURSOR_DROP_AFTER_FAILURES) {
+                  await stock.positions?.save(a, { since: saved.since, cursor: null }, startedAt);
+                }
                 throw error;
               }
               if (r.pageLimit && !stock.positions) {
@@ -415,7 +449,7 @@ export function jobSource(deps: JobDeps): JobSource {
                  * без паузы провала) продолжит то же окно. Запуск — успех: окно следующего обычного запуска перекрывает это, ничего не теряется
                  */
                 await stock.positions?.save(a, { since, cursor: r.pageLimit.nextCursor }, startedAt);
-                return { items: r.lines, alerts: [{ code: 'ORDER_LINES_PAGE_LIMIT_REACHED', severity: 'WARNING' as const, details: { pages: r.pageLimit.pages, lines: r.lines, continued: saved !== null } }] };
+                return { items: r.lines, alerts: [...cappedAlert, { code: 'ORDER_LINES_PAGE_LIMIT_REACHED', severity: 'WARNING' as const, details: { pages: r.pageLimit.pages, lines: r.lines, continued: saved !== null } }] };
               }
               if (saved && !r.cursorRepeated) await stock.positions?.save(a, null, startedAt);
               /**
@@ -431,7 +465,7 @@ export function jobSource(deps: JobDeps): JobSource {
                */
               if (r.cursorRepeated && saved) await stock.positions?.save(a, { since, cursor: null }, startedAt);
               if (r.cursorRepeated) throw new JobHoldsWindowError('CHANNEL_PAGE_CURSOR_REPEATED', `order lines read ${r.lines}, the window is kept for the next run`);
-              return { items: r.lines };
+              return { items: r.lines, ...(cappedAlert.length > 0 ? { alerts: cappedAlert } : {}) };
             },
           });
         }

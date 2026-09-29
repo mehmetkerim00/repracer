@@ -3,7 +3,7 @@ import { after, before, test } from 'node:test';
 import { createHash } from 'node:crypto';
 import type { MemorySeedScope } from '@repracer/pricing-pipeline';
 import { DEFAULT_RETRY_POLICY } from '@repracer/write-dispatcher';
-import { PgPricingStore, PgStockStore, PgWriteQueueStore, inTenant, seedPricingWorld, type PgPool, type SeededPricingWorld } from '../src/index.ts';
+import { createPool, PgPricingStore, PgStockStore, PgWriteQueueStore, inTenant, seedPricingWorld, type PgPool, type SeededPricingWorld } from '../src/index.ts';
 import { createIsolatedDatabase, type IsolatedDatabase } from './isolated-db.ts';
 
 /**
@@ -514,4 +514,42 @@ test('step 54: a quantity held by shadow is sent after the account goes live —
   // В бою: работа чтения заказов находит товар и без новых заказов, пересчёт создаёт запись 0
   assert.ok((await store.budgetRolledOverProducts(world.tenantId, account)).includes(productId), 'the order-lines job picks the product up (with the other products held in shadow)');
   assert.deepEqual(writesFor(await store.recalculate(world.tenantId, [productId], now())), [0], 'the channel still holds 8 — 0 is written');
+});
+
+/**
+ * Шаг 58 (ревью шага 57, находка 1): пересчёты тенанта идут по очереди. Работа заказов, Inbound API, импорт и включение синхронизации
+ * считали следующую версию из одной «последней»: проигравший получал «version … is not greater», а повтор его запроса видел строку уже
+ * учтённой и не пересчитывал — завышенное количество оставалось в канале. Шесть пересчётов разом: ни одного отказа, изменившаяся единица
+ * получает ровно одну новую версию
+ */
+test('step 58: concurrent recalculations of a tenant queue up — none fails on the version race, a changed unit gets one new version', async () => {
+  const sourceId = (await store.stockSources(world.tenantId))[0]!.stockSourceId;
+  await store.importStock(world.tenantId, sourceId, [{ sku: '3502', quantity: 7 }], owner());
+  const results = await Promise.allSettled(Array.from({ length: 6 }, () => store.recalculate(world.tenantId, null, now())));
+  const refused = results.filter((r) => r.status === 'rejected').map((r) => String((r as PromiseRejectedResult).reason?.message ?? r));
+  assert.deepEqual(refused, [], 'no recalculation fails on the version race');
+  const writes = results.flatMap((r) => (r as PromiseFulfilledResult<{ writes: Array<{ writeScopeId: string }> }>).value.writes);
+  assert.ok(writes.length > 0, 'the changed unit got its new version');
+  assert.equal(new Set(writes.map((w) => w.writeScopeId)).size, writes.length, 'no unit got a version per racer');
+  assert.equal((await store.recalculate(world.tenantId, null, now())).writes.length, 0, 'the queue left nothing to recalculate');
+  /**
+   * Очередь — детерминированно: на трёх единицах шесть пересчётов редко пересекаются по времени, и тест выше зеленел бы и без блокировки.
+   * Пересчёт, начатый другим процессом (его транзакция держит блокировку пересчёта тенанта), заставляет этот ждать своей фиксации
+   */
+  const url = new URL(process.env.REPRACER_PG_ADMIN_URL!); url.pathname = `/${db.name}`;
+  const other = createPool(url.toString(), { max: 1, applicationName: 'repracer-stock-recalc-other' });
+  const client = await other.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended('repracer.stock_recalculate:' || $1::text, 0))", [world.tenantId]);
+    let settled = false;
+    const waiting = store.recalculate(world.tenantId, null, now()).then((r) => { settled = true; return r; });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    assert.equal(settled, false, 'a recalculation waits while another one of the tenant is open');
+    await client.query('COMMIT');
+    assert.equal((await waiting).writes.length, 0);
+  } finally {
+    client.release();
+    await other.end();
+  }
 });

@@ -107,6 +107,8 @@ export interface RunningConsole {
   port: number;
   metricsPort: number;
   demoTenantId: string | null;
+  /** Шаг 58: серверные keepalive сессии блокировки одной реплики — как их видит база (ревью шага 57, находка 3) */
+  replicaLockKeepalive(): Promise<{ idle: number; interval: number; count: number }>;
   close(): Promise<void>;
 }
 
@@ -293,6 +295,7 @@ export async function startConsole(env: Env = process.env): Promise<RunningConso
     port: (server.address() as { port: number }).port,
     metricsPort: healthServer.port,
     demoTenantId: state.demo?.tenantId ?? null,
+    replicaLockKeepalive: () => replicaLock.keepalive(),
     async close() {
       clearInterval(alive);
       clearInterval(heartbeatTimer);

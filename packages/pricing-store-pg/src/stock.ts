@@ -310,6 +310,14 @@ export class PgStockStore implements StockStore {
    */
   async recalculate(tenantId: string, productIds: readonly string[] | null, _now: Instant): Promise<RecalculationOutcome> {
     return inTenant(this.options.stockPool, tenantId, async (tx) => {
+      /**
+       * Шаг 58 (ревью шага 57, находка 1): пересчёты тенанта идут ПО ОЧЕРЕДИ. Работа заказов, Inbound API (`propagate`), импорт остатков и
+       * включение синхронизации считали следующую версию записи одной единицы из одной и той же «последней»; проигравший получал отказ
+       * триггера «version … is not greater», а повтор его запроса видел строку уже учтённой и не пересчитывал ничего — завышенное количество
+       * оставалось в канале. Блокировка транзакции на тенанта: второй пересчёт ждёт первого и затем читает свежий снимок (READ COMMITTED,
+       * новый оператор). Одна блокировка, а не по единицам: взаимоблокировки пересекающихся наборов нет; полный пересчёт 10 000 единиц — ~2 с
+       */
+      await tx.query("SELECT pg_advisory_xact_lock(hashtextextended('repracer.stock_recalculate:' || $1::text, 0))", [tenantId]);
       // Одним оператором на все изменившиеся единицы: новая версия вытесняет ждущую сама (триггеры channel_write) [Р-64]
       const { rows } = await tx.query(
         `WITH t AS (${PgStockStore.TARGETS_SQL} AND s.quantity_sync_enabled AND ($2::uuid[] IS NULL OR s.product_id = ANY($2))),

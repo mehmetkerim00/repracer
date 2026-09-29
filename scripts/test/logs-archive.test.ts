@@ -119,3 +119,25 @@ test('step 56 (review of step 55, finding 5): a month archive that is not whole 
     assert.equal(existsSync(join(w.root, 'hot', 'LOGS_ARCHIVE_FAILED')), true);
   } finally { rmSync(w.root, { recursive: true, force: true }); }
 });
+
+/**
+ * Шаг 58 (ревью шага 56, находка 11): дописывание на месте (`>>`), оборвавшееся посреди, оставляло в файле суток недописанный член gzip. Теперь
+ * сутки собираются в новый файл и заменяют прежний только целыми. Отказ записи имитируется каталогом на месте нового файла
+ */
+test('step 58: a failed append leaves the day file and the mark as they were; the next run appends the segment whole', () => {
+  const w = world();
+  try {
+    w.run('2026-07-02T00:20:00Z');
+    w.run('2026-07-02T06:00:00Z', '--until-now');
+    const day = join(w.hot, '2026-07-02.log.gz');
+    const before = readFileSync(day);
+    const mark = readFileSync(join(w.hot, '.until'), 'utf8');
+    mkdirSync(`${day}.new`);
+    assert.throws(() => w.run('2026-07-02T12:00:00Z', '--until-now'), (e: { status?: number; stderr?: string }) => e.status === 1 && /"stage":"append"/.test(String(e.stderr)));
+    assert.deepEqual([readFileSync(day).equals(before), readFileSync(join(w.hot, '.until'), 'utf8')], [true, mark], 'the day file and the mark are untouched');
+    rmSync(`${day}.new`, { recursive: true });
+    w.run('2026-07-02T12:00:00Z', '--until-now');
+    assert.deepEqual(w.lines(day), ['repracer-production 2026-07-02T00:00:00Z .. 2026-07-02T06:00:00Z', 'repracer-production 2026-07-02T06:00:00Z .. 2026-07-02T12:00:00Z'],
+      'the day file is a whole gzip with both segments');
+  } finally { rmSync(w.root, { recursive: true, force: true }); }
+});

@@ -28,6 +28,8 @@ export interface JobRunContext {
   previousSucceededAt: Instant | null;
   /** Момент начала запуска: сроки вызовов каналов считаются от него, а не от начала такта (ревью шага 25, находка 1) */
   startedAt: Instant;
+  /** Шаг 58: провалов подряд до этого запуска — работа решает, когда отказ перестаёт быть случайным (ревью шага 57, находка 2) */
+  consecutiveFailures?: number;
 }
 
 export interface JobSpec {
@@ -148,7 +150,7 @@ export function createScheduler(options: SchedulerOptions) {
     // Долгий запуск продлевает аренду каждую треть её срока: второй процесс не начнёт ту же работу (ревью шага 25, находка 6)
     const heartbeat = setInterval(() => { void state.renew(claimed.jobKey, owner, spec.leaseSeconds).catch(() => false); }, Math.max(200, (spec.leaseSeconds * 1000) / 3));
     try {
-      const r = await spec.run({ slotAt: claimed.nextDueAt, now, runIndex: claimed.runsCompleted, scope: spec.scope, startedAt, previousFinishedAt: claimed.lastFinishedAt, previousSucceededAt: claimed.lastSucceededAt });
+      const r = await spec.run({ slotAt: claimed.nextDueAt, now, runIndex: claimed.runsCompleted, scope: spec.scope, startedAt, previousFinishedAt: claimed.lastFinishedAt, previousSucceededAt: claimed.lastSucceededAt, consecutiveFailures: claimed.consecutiveFailures });
       items = r.items;
       for (const a of r.alerts ?? []) await alerts.raise({ ...a, details: { job: claimed.jobKey, ...a.details } });
     } catch (e) {

@@ -147,24 +147,33 @@ SELECT set_config('app.auth_mfa', 'off', true) \gset
 
 -- ---------------------------------------------------------------- шаг 55 (OQ-240): квота приложения и круг обнаружения
 /**
- * Шаг 56 (ревью шага 55, находка 6): квота приложения — не больше ceil(лимит / 24) в час: при лимите 48 — два вызова в час 00:00–01:00 UTC,
- * третий — отказ; следующий час — снова доступен. Время — у вызывающего (часы стенда), а не часы базы: проверка от времени запуска не зависит
+ * Шаг 56, 58: квота приложения — не больше floor(лимит / 25) в час (любое окно в 24 часа задевает не больше 25 корзин): при лимите 50 — два
+ * вызова в час 00:00–01:00 UTC, третий — отказ (прежняя формула ceil(50 / 24) дала бы три); следующий час — снова доступен. Время — у
+ * вызывающего (часы стенда), а не часы базы: проверка от времени запуска не зависит
  */
 DO $$ BEGIN
-  IF NOT platform.reserve_channel_app_call('EBAY', 'SMOKE_QUOTA', 48, '2026-09-29 00:10+00')
-     OR NOT platform.reserve_channel_app_call('EBAY', 'SMOKE_QUOTA', 48, '2026-09-29 00:50+00') THEN
+  IF NOT platform.reserve_channel_app_call('EBAY', 'SMOKE_QUOTA', 50, '2026-09-29 00:10+00')
+     OR NOT platform.reserve_channel_app_call('EBAY', 'SMOKE_QUOTA', 50, '2026-09-29 00:50+00') THEN
     RAISE EXCEPTION 'the first two calls of the hour were refused';
   END IF;
   RAISE NOTICE 'PASS accept | the app quota grants the slice of the hour (OQ-240)';
 END $$;
 SELECT pg_temp.expect_fail('the app quota grants more than the slice of the hour (OQ-240)', $q$
   DO $d$ BEGIN
-    IF NOT platform.reserve_channel_app_call('EBAY', 'SMOKE_QUOTA', 48, '2026-09-29 00:59+00') THEN RAISE EXCEPTION 'app quota slice of the hour is spent'; END IF;
+    IF NOT platform.reserve_channel_app_call('EBAY', 'SMOKE_QUOTA', 50, '2026-09-29 00:59+00') THEN RAISE EXCEPTION 'app quota slice of the hour is spent'; END IF;
   END $d$ $q$, 'app quota slice of the hour is spent');
 DO $$ BEGIN
-  IF NOT platform.reserve_channel_app_call('EBAY', 'SMOKE_QUOTA', 48, '2026-09-29 01:00+00') THEN RAISE EXCEPTION 'the next hour was refused'; END IF;
+  IF NOT platform.reserve_channel_app_call('EBAY', 'SMOKE_QUOTA', 50, '2026-09-29 01:00+00') THEN RAISE EXCEPTION 'the next hour was refused'; END IF;
   RAISE NOTICE 'PASS accept | the next hour has its own slice (OQ-240)';
 END $$;
+-- Шаг 58: лимит меньше 25 корзинами не делится — отказ своей причиной, а не корзина 0, молча не дающая ни одного вызова
+SELECT pg_temp.expect_fail('an app quota below 25 a day gives an empty hourly slice (step 58)', $q$
+  SELECT platform.reserve_channel_app_call('EBAY', 'SMOKE_QUOTA_SMALL', 24, '2026-09-29 00:10+00') $q$,
+  'needs a daily limit of at least 25');
+-- Шаг 58 (ревью шага 56, находка 18): мёртвой политики у счётчика квоты нет, а роль пути решения счётчик не читает — у неё нет прав
+SELECT pg_temp.expect_fail('the decision path reads the app quota counter (step 58)', $q$
+  SELECT count(*) FROM platform.channel_app_quota_hour $q$,
+  'permission denied');
 -- Прерванный заход несёт курсор, закрытый круг — нет; чужой или несуществующий аккаунт круга не получает
 SELECT pg_temp.expect_fail('a completed discovery circle keeps a cursor (OQ-240)', $q$
   SELECT tenant_data.save_discovery_circle('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', NULL, 'x', 'COMPLETED', '2026-09-29 00:00+00', '2026-09-29 00:30+00', false) $q$,

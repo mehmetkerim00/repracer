@@ -192,8 +192,29 @@ test('step 56: on 10 000 quantity units the full recalculation, the order-lines 
   const recalc = await timed('stock recalculate, 10 000 units, nothing changed', () => k.stock!.recalculate(tenant, null, k.clock.iso() as never));
   assert.equal(recalc.result.writes.length, 0, 'nothing changed — the channel holds every value, no write');
   assert.ok(recalc.seconds <= 60, `the full recalculation of 10 000 units: ${recalc.seconds} s (limit 60 — half the call deadline of the order-lines job)`);
-  const rolled = await timed('order-lines selection (budgetRolledOverProducts)', () => k.stock!.budgetRolledOverProducts(tenant, account));
+  const rolled = await timed('order-lines selection (budgetRolledOverProducts), no candidates', () => k.stock!.budgetRolledOverProducts(tenant, account));
   assert.ok(rolled.seconds <= 10, `the order-lines selection: ${rolled.seconds} s`);
+  /**
+   * Шаг 58 (ревью шага 56, находка 14): выборка на мире БЕЗ кандидатов мерила пустоту. Кандидаты — тем же ходом, что в работе: аккаунт уходит
+   * в тень, остаток всех 10 000 товаров меняется, тень удерживает 10 000 записей, аккаунт возвращается в бой — канал этих значений не видел,
+   * и выборка работы заказов обязана найти все 10 000 товаров
+   */
+  const { PgShadowStore } = await import('@repracer/pricing-store-pg');
+  const shadow = new PgShadowStore({ adminPool: db.pool('svc_admin', 1) });
+  const owner = { membershipId: k.seeded.ownerMembershipId, userId: k.seeded.userId };
+  const { rows: [acc] } = await observer.query('SELECT external_account_id FROM tenant_data.channel_account WHERE channel_account_id = $1', [account]);
+  const off = await shadow.switchWriteMode(tenant, { channelAccountId: account, toMode: 'SHADOW', ...owner, mfa: false });
+  assert.equal(off.status, 'SWITCHED', JSON.stringify(off));
+  const source = (await k.stock!.stockSources(tenant))[0]!.stockSourceId;
+  const imported = await k.stock!.importStock(tenant, source, products.map((p) => ({ sku: String(p.idProduct).slice(-6), quantity: 30 })), { ...owner, mfa: true });
+  assert.equal(imported.status, 'APPLIED', JSON.stringify(imported).slice(0, 300));
+  const held = await k.stock!.recalculate(tenant, null, k.clock.iso() as never);
+  assert.equal(held.writes.length, OFFERS, 'every unit gets a new quantity, held by shadow');
+  const on = await shadow.switchWriteMode(tenant, { channelAccountId: account, toMode: 'LIVE', ...owner, mfa: true, typedConfirmation: String(acc!.external_account_id) });
+  assert.equal(on.status, 'SWITCHED', JSON.stringify(on));
+  const candidates = await timed('order-lines selection (budgetRolledOverProducts), 10 000 candidates', () => k.stock!.budgetRolledOverProducts(tenant, account));
+  assert.equal(candidates.result.length, OFFERS, 'the selection finds every product the channel has not seen');
+  assert.ok(candidates.seconds <= 10, `the order-lines selection over 10 000 candidates: ${candidates.seconds} s`);
   const page = await timed('stock screen page', () => k.stock!.stockPage(tenant, { offset: 0, limit: 50 }));
   assert.ok(page.result.items.length > 0 && page.seconds <= 10, `the stock screen page: ${page.seconds} s (screen limit 10, Р-136)`);
   const div = await timed('stock divergences', () => k.stock!.stockDivergences(tenant, 50));

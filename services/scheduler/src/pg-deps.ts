@@ -43,12 +43,12 @@ export function pgJobDeps(o: PgJobDepsOptions): JobDeps {
   return {
     async accounts() {
       const { rows } = await o.schedulerPool.query(
-        `SELECT a.tenant_id, a.channel_account_id, a.channel FROM tenant_data.channel_account a
+        `SELECT a.tenant_id, a.channel_account_id, a.channel, a.connected_at FROM tenant_data.channel_account a
            JOIN tenant_data.tenant t ON t.tenant_id = a.tenant_id
           WHERE a.disconnected_at IS NULL AND a.auth_status = 'ACTIVE' AND t.kind = 'CUSTOMER' AND t.status NOT IN ('OFFBOARDING', 'CLOSED')
             AND ($1::boolean OR NOT t.demo)
           ORDER BY a.tenant_id, a.channel_account_id`, [o.includeDemoTenants === true]);
-      return rows.map((r) => ({ tenantId: r.tenant_id, channelAccountId: r.channel_account_id, channel: r.channel }));
+      return rows.map((r) => ({ tenantId: r.tenant_id, channelAccountId: r.channel_account_id, channel: r.channel, connectedAt: (r.connected_at instanceof Date ? r.connected_at.toISOString() : String(r.connected_at)) as Instant }));
     },
     descriptorOf: o.descriptorOf,
     pipelineFor: o.pipelineFor,

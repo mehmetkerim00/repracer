@@ -30,24 +30,30 @@ export interface StockPipeline {
  * единицы записи, изменившееся уходит записью. Канал здесь читается только за заказами; что канал показывает
  * ПОСЛЕ записи, проверяет диспетчер обратным чтением — и это единственное подтверждение, которое у экрана есть.
  */
+/**
+ * Шаг 58 (ревью шага 57, находка 2): чтение заказов оборвалось посреди окна — прочитанные строки уже записаны; `cursor` — последний
+ * курсор, который канал принял (продолжение с него), `undefined` — оборвалось на первой странице после начала окна
+ */
+export class OrderReadInterrupted extends Error {
+  readonly code: string;
+  readonly causeError: unknown;
+  readonly cursor: string | undefined;
+  readonly linesRecorded: number;
+  constructor(causeError: unknown, cursor: string | undefined, linesRecorded: number) {
+    const code = String((causeError as { error?: { code?: string }; code?: string })?.error?.code ?? (causeError as { code?: string })?.code ?? 'ORDER_READ_FAILED');
+    super(`${/^[A-Z][A-Z0-9_]{2,}$/.test(code) ? code : 'ORDER_READ_FAILED'}: order lines read interrupted after ${linesRecorded} lines: ${String((causeError as Error)?.message ?? causeError).slice(0, 200)}`);
+    this.code = code;
+    this.causeError = causeError;
+    this.cursor = cursor;
+    this.linesRecorded = linesRecorded;
+  }
+}
+
 export function createStockPipeline(deps: StockPipelineDeps): StockPipeline {
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }));
   const dispatch = async (tenantId: string, writeScopeIds: string[]) => {
     if (!deps.dispatchScope) return;
     for (const id of writeScopeIds) await deps.dispatchScope(tenantId, id);
-  };
-  /**
-   * Шаг 57 (ревью шага 56, находка 1): пересчёт консоли (`propagate`) и работы заказов вычисляют следующую версию записи одной единицы из
-   * одного и того же «последнего»; второй получает отказ триггера «version … is not greater». Проигравший пересчитывает ОДИН раз — с новой
-   * последней версией; это повтор гонки, а не провала, и дальше он не растягивается
-   */
-  const recalculateRacing = async (tenantId: string, products: readonly string[]) => {
-    try {
-      return await deps.store.recalculate(tenantId, products, deps.now());
-    } catch (error) {
-      if (!/version \d+ is not greater than latest created version/.test(String((error as Error)?.message ?? error))) throw error;
-      return deps.store.recalculate(tenantId, products, deps.now());
-    }
   };
   return {
     async syncOrders(ctx, adapter, since, options = {}) {
@@ -61,7 +67,23 @@ export function createStockPipeline(deps: StockPipelineDeps): StockPipeline {
       for (let page = 0; ; page++) {
         if (page >= maxPages) { pageLimit = { pages: page, nextCursor: cursor! }; break; }
         // OQ-216: бюджет канала делят опрос, записи и чтение заказов; не хватило — ждём до `retryAt`, а не роняем работу
-        const result = await waitingForBudget(ctx, () => adapter.readOrderLines(ctx, { since, limit: 100, ...(cursor ? { cursor } : {}) }), { now: deps.now, sleep });
+        let result: Awaited<ReturnType<typeof adapter.readOrderLines>>;
+        try {
+          result = await waitingForBudget(ctx, () => adapter.readOrderLines(ctx, { since, limit: 100, ...(cursor ? { cursor } : {}) }), { now: deps.now, sleep });
+        } catch (error) {
+          /**
+           * Шаг 58 (ревью шага 57, находка 2): отказ канала посреди чтения терял весь заход — строки записывались только после последней
+           * страницы, и 150 прочитанных страниц читались снова. Прочитанное записывается, а наружу уходит отказ с последним ПРИНЯТЫМ
+           * курсором: следующий заход продолжит с него. Отказ на первой странице захода — прежний отказ, курсора у него нет
+           */
+          if (lines.length === 0 && page === 0) throw error;
+          const recorded = await deps.store.recordOrderLines(ctx.tenantId, ctx.channelAccountId, lines, deps.now());
+          if (recorded.productIds.length > 0) {
+            const r = await deps.store.recalculate(ctx.tenantId, recorded.productIds, deps.now());
+            await dispatch(ctx.tenantId, r.writes.map((w) => w.writeScopeId));
+          }
+          throw new OrderReadInterrupted(error, cursor, lines.length);
+        }
         lines.push(...result.items);
         if (!result.nextCursor) break;
         // Канал вернул уже виденный курсор — продвинуться нечем: чтение останавливается, прочитанное записывается ниже, алерт — у работы
@@ -73,7 +95,7 @@ export function createStockPipeline(deps: StockPipelineDeps): StockPipeline {
       // Шаг 52 (п. 8): и товары, чья запись упёрлась в бюджет правок прошлого дня, — после смены суток значение уходит снова
       const rolledOver = (await deps.store.budgetRolledOverProducts?.(ctx.tenantId, ctx.channelAccountId)) ?? [];
       const products = [...new Set([...recorded.productIds, ...rolledOver])];
-      const recalculated = products.length > 0 ? await recalculateRacing(ctx.tenantId, products) : { writes: [], unchanged: 0 };
+      const recalculated = products.length > 0 ? await deps.store.recalculate(ctx.tenantId, products, deps.now()) : { writes: [], unchanged: 0 };
       await dispatch(ctx.tenantId, recalculated.writes.map((w) => w.writeScopeId));
       return { lines: lines.length, created: recorded.created, consumed: recorded.consumed, released: recorded.released, unknownOffers: recorded.unknownOffers, writes: recalculated.writes.length,
         ...(cursorRepeated ? { cursorRepeated: true } : {}), ...(pageLimit ? { pageLimit } : {}) };

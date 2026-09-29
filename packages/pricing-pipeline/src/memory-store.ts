@@ -1074,9 +1074,9 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   }
 
   async reserveAppCall(channel: string, quota: string, dayLimit: number, at: Instant): Promise<boolean> {
-    if (!(dayLimit > 0)) throw new Error('app quota needs a positive daily limit');
-    // Шаг 56 (ревью шага 55, находка 6): как PostgreSQL (0150) — не больше ceil(лимит / 24) в час UTC
-    const allowed = Math.ceil(dayLimit / 24);
+    if (!(dayLimit >= 25)) throw new Error('app quota needs a daily limit of at least 25 (one call per hourly bucket of any 24-hour window)');
+    // Шаг 58: как PostgreSQL (0154) — не больше floor(лимит / 25) в час UTC: окно в 24 часа задевает не больше 25 корзин
+    const allowed = Math.floor(dayLimit / 25);
     const key = `${channel}|${quota}|${at.slice(0, 13)}`;
     const spent = this.appQuota.get(key) ?? 0;
     if (spent >= allowed) return false;

@@ -1,4 +1,4 @@
--- 0153_verify_schema_invariants_v44.sql
+-- 0155_verify_schema_invariants_v44.sql
 -- Проверка схемы после шагов 41–52 — последняя в наборе (прежние номера остаются историей: файл переносится под новый
 -- номер, чтобы идти последним).
 -- Шаг 45 правил не добавил: 0138 — хвосты ревью (каталог из обнаружения, срок вытесненных токенов, REVOKED в аудит);
@@ -138,9 +138,14 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- 2. Политика для приложения у тенантных, канальных, аудиторских и платформенных таблиц; у LEGAL приложения нет вовсе
+  -- 2. Политика для приложения у тенантных, канальных, аудиторских и платформенных таблиц, КОТОРЫХ ПРИЛОЖЕНИЕ КАСАЕТСЯ; у LEGAL приложения нет
+  --    вовсе. Шаг 58 (ревью шага 56, находка 18): правило требовало политику и у таблицы, на которую у `repracer_app` нет ни одного права, —
+  --    так появилась мёртвая политика счётчика квоты (0148), выглядевшая защитой. Политика нужна там, где роль может читать или писать [Р-93]
   FOR r IN SELECT table_name, storage_class FROM security.table_registry LOOP
     IF r.storage_class IN ('TENANT', 'CHANNEL', 'AUDIT', 'PLATFORM')
+       AND (has_table_privilege('repracer_app', r.table_name, 'SELECT') OR has_table_privilege('repracer_app', r.table_name, 'INSERT')
+            OR has_table_privilege('repracer_app', r.table_name, 'UPDATE') OR has_table_privilege('repracer_app', r.table_name, 'DELETE')
+            OR has_any_column_privilege('repracer_app', r.table_name, 'SELECT, INSERT, UPDATE'))
        AND NOT EXISTS (SELECT 1 FROM pg_policy WHERE polrelid = r.table_name AND 'repracer_app'::regrole::oid = ANY (polroles)) THEN
       bad := bad || format('%s: no policy for repracer_app', r.table_name);
     END IF;

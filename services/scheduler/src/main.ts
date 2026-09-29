@@ -90,6 +90,8 @@ export async function startScheduler(config: SchedulerConfig = loadConfig(), onF
         deps, userAgent: config.userAgent, subscriptionFallbackEmail: config.kaufland.subscriptionFallbackEmail, budget: conservativeBudget(),
         ...(config.kaufland.partnerCredentialsRef ? { partnerCredentialsRef: config.kaufland.partnerCredentialsRef } : {}),
         buyBoxChangedAccess: config.kaufland.buyBoxChangedAccess,
+        // Шаг 58 (ревью шага 56, находка 15): адрес модели канала — только стенд (config.ts отказывает ему вне `REPRACER_MODE=stand`)
+        ...(config.kaufland.baseUrl ? { baseUrl: config.kaufland.baseUrl } : {}),
       })
       : channel === 'AMAZON'
         ? createAmazonAdapter({ deps, userAgent: config.userAgent, applicationCredentialsRef: config.amazon.applicationCredentialsRef, budget: new TwoLevelBudget() })
@@ -120,7 +122,8 @@ export async function startScheduler(config: SchedulerConfig = loadConfig(), onF
    * прогоны, и в работе заказы канала не становились резервациями, а доступный остаток после продажи не уменьшался. Административной роли
    * у планировщика нет и не будет [Р-90]: пути заказов она не нужна, и обращение к ней — громкий отказ, а не тихая подмена ролью остатков
    */
-  const noAdminPool = new Proxy({}, { get: () => () => { throw new Error('the scheduler has no administrative role: this stock operation belongs to the console'); } }) as PgPool;
+  // Шаг 58 (ревью шага 56, находка 16): `then` — не метод пула: иначе `await` на нём бросал бы ошибку роли вместо того, чтобы вернуть сам объект
+  const noAdminPool = new Proxy({}, { get: (_t, prop) => (prop === 'then' ? undefined : () => { throw new Error('the scheduler has no administrative role: this stock operation belongs to the console'); }) }) as PgPool;
   const stockPipeline = createStockPipeline({ store: new PgStockStore({ adminPool: noAdminPool, stockPool }), now: systemClock.now }); // real-clock: точка сборки процесса
   const stockDeps = {
     syncOrders: (account: SchedulerAccount, ctx: Parameters<typeof stockPipeline.syncOrders>[0], since: string, options?: { cursor?: string }) => {
@@ -226,7 +229,7 @@ export async function startScheduler(config: SchedulerConfig = loadConfig(), onF
     clearInterval(heartbeatTimer);
     await running.stop();
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    await Promise.all([schedulerPool.end(), appPool.end(), stockPool.end(), exporterPool.end(), ...(credentialsPool ? [credentialsPool.end()] : [])]);
+    await Promise.all([schedulerPool.end(), appPool.end(), stockPool.end(), exporterPool.end(), ...(credentialsPool ? [credentialsPool.end()] : []), ...(deliveryPool ? [deliveryPool.end()] : [])]); // шаг 58: и пул доставки алертов
   };
   return { running, metrics, stop };
 }

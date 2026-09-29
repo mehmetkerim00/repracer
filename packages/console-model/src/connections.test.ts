@@ -159,4 +159,7 @@ test('step 56–57 (Р-198): the connection says how long the discovery circle r
   assert.match(view({ discoveryCircleStartedAt: '2026-09-29T06:00:00.000Z' as never }) ?? '', /running 6 h \(the first one\)/);
   assert.match(view({ discoveryCircleStartedAt: '2026-09-27T12:00:00.000Z' as never, discoveryCircleCompletedAt: '2026-09-28T18:00:00.000Z' as never }) ?? '', /last full circle took 30 h.*within about 85 h at most \(two circles and a day\)/);
   assert.match(view({ discoveryCircleStartedAt: '2026-09-29T06:00:00.000Z' as never }) ?? '', /within two circles and a day at most/, 'no promise of «one circle»');
+  // Шаг 58 (ревью шага 56, находка 9): «старые листинги eBay» — только у аккаунта eBay
+  assert.doesNotMatch(view({ discoveryCircleStartedAt: '2026-09-29T06:00:00.000Z' as never }) ?? '', /eBay/, 'an Amazon account is not told about eBay listings');
+  assert.match(view({ channel: 'EBAY', discoveryCircleStartedAt: '2026-09-29T06:00:00.000Z' as never }) ?? '', /older eBay listings/);
 });

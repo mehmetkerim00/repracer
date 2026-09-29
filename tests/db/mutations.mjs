@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0153_verify_schema_invariants_v44.sql';
+const VERIFY = 'migrations/0155_verify_schema_invariants_v44.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -2057,8 +2057,13 @@ export const STEP55_ROWS = [
     mutations: [
       m(replaceInFunction('platform.reserve_channel_app_call(text,text,integer,timestamp with time zone)', 'WHERE q.spent < per_hour', 'WHERE true'),
         smoke('the app quota grants more than the slice of the hour (OQ-240)')),
-      m(replaceInFunction('platform.reserve_channel_app_call(text,text,integer,timestamp with time zone)', 'per_hour := ceil(p_day_limit / 24.0)::integer;', 'per_hour := p_day_limit;'),
+      m(replaceInFunction('platform.reserve_channel_app_call(text,text,integer,timestamp with time zone)', 'per_hour := p_day_limit / 25;', 'per_hour := p_day_limit;'),
         smoke('the app quota grants more than the slice of the hour (OQ-240)')),
+      // Шаг 58 (0154): корзина floor(L / 25), а не прежняя ceil(L / 24) — окно в 24 часа задевает 25 корзин
+      m(replaceInFunction('platform.reserve_channel_app_call(text,text,integer,timestamp with time zone)', 'per_hour := p_day_limit / 25;', 'per_hour := ceil(p_day_limit / 24.0)::integer;'),
+        smoke('the app quota grants more than the slice of the hour (OQ-240)')),
+      m(replaceInFunction('platform.reserve_channel_app_call(text,text,integer,timestamp with time zone)', 'IF p_day_limit IS NULL OR p_day_limit < 25 THEN', 'IF p_day_limit IS NULL OR p_day_limit <= 0 THEN'),
+        smoke('an app quota below 25 a day gives an empty hourly slice (step 58)')),
       m(replaceInFunction('tenant_data.save_discovery_circle(uuid,uuid,text,text,text,timestamp with time zone,timestamp with time zone,boolean)', "IF p_stop = 'COMPLETED' AND p_cursor IS NOT NULL OR", 'IF false AND'),
         smoke('a completed discovery circle keeps a cursor (OQ-240)')),
       m('ALTER POLICY discovery_circle ON tenant_data.channel_discovery_circle USING (true) WITH CHECK (true)',

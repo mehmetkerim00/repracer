@@ -62,8 +62,13 @@ archive_project() {
       echo "{\"event\":\"ALERT\",\"code\":\"LOGS_ARCHIVE_FAILED\",\"severity\":\"WARNING\",\"project\":\"$P\",\"from\":\"$from\"}" >&2
       return 1
     fi
-    # Ревью шага 55, находка 5: каждая запись проверяется — дописывание, упавшее на полном диске, не двигает отметку и не теряет отрезок
-    if ! { cat "$out.part" >> "$out" && rm -f "$out.part" && printf '%s' "$seg_end" > "$mark.part" && mv "$mark.part" "$mark"; }; then
+    # Ревью шага 55, находка 5: каждая запись проверяется — дописывание, упавшее на полном диске, не двигает отметку и не теряет отрезок.
+    # Шаг 58 (ревью шага 56, находка 11): дописывание на месте (`>>`), оборвавшееся посреди, оставляло в файле суток недописанный член gzip —
+    # его находил лишь `gzip -t` архива в конце месяца. Сутки собираются в новый файл, проверяются и только тогда заменяют прежний
+    parts=("$out.part"); if [[ -f "$out" ]]; then parts=("$out" "$out.part"); fi
+    if ! { cat "${parts[@]}" > "$out.new" && gzip -t "$out.new" && mv "$out.new" "$out" && rm -f "$out.part" \
+           && printf '%s' "$seg_end" > "$mark.part" && mv "$mark.part" "$mark"; }; then
+      rm -f "$out.new"
       echo "{\"event\":\"ALERT\",\"code\":\"LOGS_ARCHIVE_FAILED\",\"severity\":\"WARNING\",\"project\":\"$P\",\"from\":\"$from\",\"stage\":\"append\"}" >&2
       return 1
     fi

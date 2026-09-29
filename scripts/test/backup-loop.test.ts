@@ -28,14 +28,14 @@ test('step 57: the backup loop answers SIGTERM during its sleep with its own tra
     });
     let stderr = '';
     await new Promise<void>((resolve) => child.stderr.on('data', (d: Buffer) => { stderr += String(d); if (stderr.includes('BACKUP_FAILED')) resolve(); }));
-    // Провал записан отметкой, и процесс ушёл в сон до повтора
-    assert.ok(existsSync(join(out, 'BACKUP_FAILED')), 'the failure mark is written');
-    assert.deepEqual(readdirSync(out).filter((f) => f.endsWith('.part')), [], 'the part left by a killed run is removed at start');
     // Сигнал — ПОСРЕДИ сна: процесс `sleep` скрипта уже существует (иначе ловушка сработала бы после `find`, и старый скрипт прошёл бы тоже)
     const { execFileSync } = await import('node:child_process');
     const sleeping = () => { try { return execFileSync('pgrep', ['-P', String(child.pid), 'sleep'], { encoding: 'utf8' }).trim() !== ''; } catch { return false; } };
     for (let i = 0; i < 400 && !sleeping(); i++) await new Promise((resolve) => setTimeout(resolve, 50));
     assert.ok(sleeping(), 'the script sleeps until its retry');
+    // Шаг 58: отметка провала — после сна (скрипт пишет строку алерта раньше файла отметки: проверка сразу по строке гонялась с ним, CI шага 57)
+    assert.ok(existsSync(join(out, 'BACKUP_FAILED')), 'the failure mark is written');
+    assert.deepEqual(readdirSync(out).filter((f) => f.endsWith('.part')), [], 'the part left by a killed run is removed at start');
     const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => child.on('exit', (code, signal) => resolve({ code, signal })));
     child.kill('SIGTERM');
     // Запасной SIGKILL — только чтобы прогон не висел час на сломанном скрипте; им закончиться прогон не должен

@@ -39,7 +39,14 @@ export interface SchedulerConfig {
   /** Каталог учётных данных каналов: файл на ссылку учётных данных аккаунта (credentials_ref) */
   channelSecretsDir: string;
   userAgent: string;
-  kaufland: { subscriptionFallbackEmail: string; partnerCredentialsRef: string | null; buyBoxChangedAccess: 'GRANTED' | 'NOT_GRANTED' };
+  kaufland: {
+    subscriptionFallbackEmail: string; partnerCredentialsRef: string | null; buyBoxChangedAccess: 'GRANTED' | 'NOT_GRANTED';
+    /**
+     * Шаг 58 (ревью шага 56, находка 15): адрес Seller API — только в режиме стенда (`REPRACER_MODE=stand`): живой прогон производственного
+     * состава направляет процесс на HTTP-модель Kaufland. В работе адрес — умолчание клиента; переменная вне стенда — отказ при старте
+     */
+    baseUrl: string | null;
+  };
   amazon: { applicationCredentialsRef: string };
   /**
    * Шаг 43 [Р-175…Р-177]: приложения каналов для обмена refresh-токенов подключённых продавцами аккаунтов и роль, которая
@@ -61,6 +68,12 @@ const required = requiredValue;
 const int = intFromEnv;
 
 export function loadConfig(env: Env = process.env, read: (path: string) => string = (p) => readFileSync(p, 'utf8')): SchedulerConfig {
+  // Шаг 58 (ревью шага 56, находка 15): адрес канала подменяется только стендом — проверка до секретов, своей причиной
+  const kauflandBaseUrl = env.REPRACER_KAUFLAND_BASE_URL || null;
+  if (kauflandBaseUrl && env.REPRACER_MODE !== 'stand') {
+    throw new ConfigError('CONFIG_INVALID: REPRACER_KAUFLAND_BASE_URL is accepted only with REPRACER_MODE=stand (модель канала Kaufland)');
+  }
+  if (kauflandBaseUrl && !/^https?:\/\/[^/\s]+(\/\S*)?$/.test(kauflandBaseUrl)) throw new ConfigError('CONFIG_INVALID: REPRACER_KAUFLAND_BASE_URL must be an http(s) URL');
   const heartbeatOff = env.REPRACER_SCHEDULER_HEARTBEAT === 'off';
   const heartbeatUrl = heartbeatOff ? null : required(secret(env, 'REPRACER_SCHEDULER_HEARTBEAT_URL', read), 'REPRACER_SCHEDULER_HEARTBEAT_URL (or REPRACER_SCHEDULER_HEARTBEAT=off)');
   if (heartbeatUrl && !heartbeatUrl.startsWith('https://')) throw new ConfigError('CONFIG_INVALID: REPRACER_SCHEDULER_HEARTBEAT_URL must be https');
@@ -124,6 +137,7 @@ export function loadConfig(env: Env = process.env, read: (path: string) => strin
       subscriptionFallbackEmail: required(env.REPRACER_KAUFLAND_FALLBACK_EMAIL, 'REPRACER_KAUFLAND_FALLBACK_EMAIL'),
       partnerCredentialsRef: env.REPRACER_KAUFLAND_PARTNER_CREDENTIALS_REF || null,
       buyBoxChangedAccess: access,
+      baseUrl: kauflandBaseUrl,
     },
     amazon: { applicationCredentialsRef: required(env.REPRACER_AMAZON_APPLICATION_CREDENTIALS_REF, 'REPRACER_AMAZON_APPLICATION_CREDENTIALS_REF') },
     channelApps: apps,

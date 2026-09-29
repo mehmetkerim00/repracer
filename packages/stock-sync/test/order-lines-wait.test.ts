@@ -106,7 +106,7 @@ test('step 56 (review of step 54, finding 8): the page limit is reported with th
   assert.deepEqual([seen.slice(3), rest.pageLimit], [['c3', 'c4', 'c5', 'c6', 'c7', 'c8', 'c9'], undefined], 'the continuation reads the rest of the window to its end');
 });
 
-test('шаг 57 (ревью шага 56, находка 1): повтор окна после упавшего пересчёта пересчитывает те же товары; гонка версий с консолью — один повтор пересчёта', async () => {
+test('шаг 57 (ревью шага 56, находка 1): повтор окна после упавшего пересчёта пересчитывает те же товары (гонку версий с шага 58 снимает блокировка пересчёта в базе)', async () => {
   const { InMemoryStockStore } = await import('../src/memory-store.ts');
   const memory = new InMemoryStockStore([{ productId: 'p-1', channelAccountId: 'a', externalOfferId: 'SYN-1' } as never]);
   const line = { externalOrderRef: 'o-1', externalOrderLineRef: 'l-1', identity: { marketplace: 'de', externalOfferId: 'SYN-1' }, quantity: 1, orderedAt: '2026-09-22T09:00:00.000Z', status: 'OPEN' } as never;
@@ -114,21 +114,31 @@ test('шаг 57 (ревью шага 56, находка 1): повтор окн�
   const again = await memory.recordOrderLines('t', 'a', [line], '2026-09-22T09:05:00.000Z' as never);
   assert.deepEqual([again.created, again.productIds], [0, ['p-1']], 'the reservation exists already, the product is still recalculated');
 
+});
+
+test('шаг 58 (ревью шага 57, находка 2): отказ канала посреди окна — прочитанное записано и пересчитано, наружу — последний принятый курсор', async () => {
+  const recorded: number[] = [];
   const recalculated: string[][] = [];
-  let refuse = 1;
-  const store = {
-    async recordOrderLines() { return { created: 0, consumed: 0, released: 0, unknownOffers: 0, awaitingConfirmation: 0, productIds: ['p-1'] }; },
-    async recalculate(_t: string, products: string[]) {
-      recalculated.push(products);
-      if (refuse-- > 0) throw new Error('version 7 is not greater than latest created version 7 of write_scope w-1');
-      return { writes: [], unchanged: 1 };
+  let calls = 0;
+  const adapter = {
+    async readOrderLines(_ctx: unknown, page: { cursor?: string }) {
+      calls += 1;
+      if (calls === 3) throw Object.assign(new Error('boom'), { error: { code: 'CHANNEL_UNAVAILABLE' } });
+      const n = calls;
+      return { items: [{ externalOrderRef: `o-${n}`, externalOrderLineRef: `l-${n}`, identity: { marketplace: 'de', externalOfferId: 'SYN-1' }, quantity: 1, orderedAt: '2026-09-22T09:00:00.000Z', status: 'OPEN' }],
+        nextCursor: `c-${n}`, ...(page.cursor ? {} : {}) };
     },
+  } as unknown as ChannelAdapter;
+  const store = {
+    async recordOrderLines(_t: string, _a: string, lines: unknown[]) { recorded.push(lines.length); return { created: lines.length, consumed: 0, released: 0, unknownOffers: 0, awaitingConfirmation: 0, productIds: ['p-1'] }; },
+    async recalculate(_t: string, products: string[]) { recalculated.push(products); return { writes: [], unchanged: 1 }; },
   } as unknown as StockStore;
-  const adapter = { async readOrderLines() { return { items: [line] }; } } as unknown as ChannelAdapter;
   const pipeline = createStockPipeline({ store, now: () => '2026-09-22T09:00:00.000Z' as never });
-  await pipeline.syncOrders(ctx('2026-09-22T09:02:00.000Z'), adapter, '2026-09-22T08:55:00.000Z' as never);
-  assert.deepEqual(recalculated, [['p-1'], ['p-1']], 'the loser of the version race recalculates once');
-  refuse = 2;
-  await assert.rejects(pipeline.syncOrders(ctx('2026-09-22T09:02:00.000Z'), adapter, '2026-09-22T08:55:00.000Z' as never), /is not greater/,
-    'the race is retried once, not in a loop');
+  const { OrderReadInterrupted } = await import('../src/pipeline.ts');
+  await assert.rejects(pipeline.syncOrders(ctx('2026-09-22T09:02:00.000Z'), adapter, '2026-09-22T08:55:00.000Z' as never),
+    (e: InstanceType<typeof OrderReadInterrupted>) => e instanceof OrderReadInterrupted && e.cursor === 'c-2' && e.linesRecorded === 2 && /^CHANNEL_UNAVAILABLE: /.test(e.message));
+  assert.deepEqual([recorded, recalculated], [[2], [['p-1']]], 'the two lines read before the failure are recorded and recalculated');
+  // Отказ на первой странице — прежний отказ канала: записывать нечего
+  calls = 2;
+  await assert.rejects(pipeline.syncOrders(ctx('2026-09-22T09:02:00.000Z'), adapter, '2026-09-22T08:55:00.000Z' as never), /^Error: boom$/);
 });
