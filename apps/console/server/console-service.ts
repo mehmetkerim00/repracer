@@ -9,7 +9,7 @@ import { createLocalIssuer } from '@repracer/identity/test-issuer';
 import { createPool, PgChannelConnectStore, type PgPool } from '@repracer/pricing-store-pg';
 import { PgIdentityDirectory } from '@repracer/identity/pg';
 import { pgStandJoinMember, pgStandUsers, STAND_EMAILS } from '@repracer/contract-tests/stand';
-import { createStandApi, createStandServer, type StandIdentity } from './stand-server.ts';
+import { createStandApi, consoleContentSecurityPolicy, createStandServer, type StandIdentity } from './stand-server.ts';
 import { createStaticHandler } from './static.ts';
 import { loadConsoleConfig, CONSOLE_ROLES, type ConsoleConfig, type ConsoleRole } from './config.ts';
 import { startDemoWorld, type RunningDemoWorld } from './demo-world.ts';
@@ -229,7 +229,11 @@ export async function startConsole(env: Env = process.env): Promise<RunningConso
     tenantWorlds: (principal) => tenantWorlds.worldsFor(principal),
     inbound: (prefix, sha) => tenantWorlds.inbound(prefix, sha),
   });
-  const server = createStandServer(api, config.locale, createStaticHandler(config.distDir));
+  // Шаг 53 (OWASP A04, A05): ограничение частоты и полная политика содержимого — адреса поставщика входа из конфигурации
+  const server = createStandServer(api, config.locale, createStaticHandler(config.distDir), {
+    rateLimit: config.rateLimit,
+    contentSecurityPolicy: consoleContentSecurityPolicy(config.oidc ? [config.oidc.issuer, ...(config.oidc.discoveryBase ? [config.oidc.discoveryBase] : [])] : []),
+  });
   const healthServer = await serveHealth(health, { port: config.metricsPort, prefix: 'repracer_console', staleAfterMs: 120_000, host: '0.0.0.0' });
   health.alive();
   // Консоль слушает ВСЕ адреса контейнера: снаружи её выставляет только прокси, у самого процесса TLS нет [Р-158]

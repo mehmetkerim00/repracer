@@ -13,7 +13,9 @@ export interface StockPipelineDeps {
 
 export interface StockPipeline {
   /** Заказы канала за окно → резервации → пересчёт затронутых товаров → записи */
-  syncOrders(ctx: AdapterCallContext, adapter: ChannelAdapter, since: Instant): Promise<{ lines: number; created: number; consumed: number; released: number; unknownOffers: number; writes: number }>;
+  syncOrders(ctx: AdapterCallContext, adapter: ChannelAdapter, since: Instant): Promise<{ lines: number; created: number; consumed: number; released: number; unknownOffers: number; writes: number;
+    /** Шаг 53: канал вернул уже виденный курсор — чтение остановлено, прочитанное записано */
+    cursorRepeated?: boolean }>;
   /** После изменения остатка (импорт, Inbound API): пересчёт названных товаров и отправка изменившихся единиц */
   propagate(tenantId: string, productIds: readonly string[] | null): Promise<{ writes: number; unchanged: number }>;
 }
@@ -33,13 +35,17 @@ export function createStockPipeline(deps: StockPipelineDeps): StockPipeline {
     async syncOrders(ctx, adapter, since) {
       const lines: OrderLine[] = [];
       let cursor: string | undefined;
+      // Шаг 53 (ревью шага 52, находка 6): все виденные курсоры — ловится и A→B→A; на повторе прочитанное не теряется
+      const seen = new Set<string>();
+      let cursorRepeated = false;
       for (let page = 0; page < 200; page++) {
         // OQ-216: бюджет канала делят опрос, записи и чтение заказов; не хватило — ждём до `retryAt`, а не роняем работу
         const result = await waitingForBudget(ctx, () => adapter.readOrderLines(ctx, { since, limit: 100, ...(cursor ? { cursor } : {}) }), { now: deps.now, sleep });
         lines.push(...result.items);
         if (!result.nextCursor) break;
-        // Шаг 52: канал вернул тот же курсор — продвинуться нечем; ошибка, а не вечный обход (работу повторит планировщик, окно то же)
-        if (result.nextCursor === cursor) throw new Error('the channel returned the same page cursor again: order lines are not read further');
+        // Канал вернул уже виденный курсор — продвинуться нечем: чтение останавливается, прочитанное записывается ниже, алерт — у работы
+        if (seen.has(result.nextCursor) || result.nextCursor === cursor) { cursorRepeated = true; break; }
+        seen.add(result.nextCursor);
         cursor = result.nextCursor;
       }
       const recorded = await deps.store.recordOrderLines(ctx.tenantId, ctx.channelAccountId, lines, deps.now());
@@ -48,7 +54,8 @@ export function createStockPipeline(deps: StockPipelineDeps): StockPipeline {
       const products = [...new Set([...recorded.productIds, ...rolledOver])];
       const recalculated = products.length > 0 ? await deps.store.recalculate(ctx.tenantId, products, deps.now()) : { writes: [], unchanged: 0 };
       await dispatch(ctx.tenantId, recalculated.writes.map((w) => w.writeScopeId));
-      return { lines: lines.length, created: recorded.created, consumed: recorded.consumed, released: recorded.released, unknownOffers: recorded.unknownOffers, writes: recalculated.writes.length };
+      return { lines: lines.length, created: recorded.created, consumed: recorded.consumed, released: recorded.released, unknownOffers: recorded.unknownOffers, writes: recalculated.writes.length,
+        ...(cursorRepeated ? { cursorRepeated: true } : {}) };
     },
     async propagate(tenantId, productIds) {
       const r = await deps.store.recalculate(tenantId, productIds, deps.now());

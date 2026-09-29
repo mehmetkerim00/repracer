@@ -574,7 +574,25 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       priceStop: stop ? InMemoryPricingStore.stopRef(stop) : null,
       blocking: this.blocking(row),
       changesInLastHour: (row.changesLastHour ?? 0) + (this.changes.get(row.writeScopeId) ?? []).filter((at) => at >= since).length,
+      ...((): { budgetExhausted?: { resetsAt: Instant | null; budgetDay: string | null } } => {
+        const b = this.priceBudgetExhausted(row.writeScopeId, now);
+        return b && !b.renewed ? { budgetExhausted: { resetsAt: b.resetsAt, budgetDay: b.budgetDay } } : {};
+      })(),
     };
+  }
+
+  /**
+   * Шаг 53 (как PostgreSQL, 0141 и store.ts): последняя запись цены единицы упёрлась в бюджет правок; обновился ли он — прошло время, названное
+   * каналом, или сутки бюджета. Поясов витрин память не ведёт — сутки бюджета здесь сравниваются по дате UTC
+   */
+  private priceBudgetExhausted(writeScopeId: string, now: Instant): { resetsAt: Instant | null; budgetDay: string | null; renewed: boolean } | null {
+    const last = this.writes.filter((w) => w.writeScopeId === writeScopeId).sort((a, b) => b.version - a.version)[0];
+    if (!last || last.status !== 'BUDGET_EXHAUSTED') return null;
+    const resetsAt = typeof last.endParams.resetsAt === 'string' ? last.endParams.resetsAt : null;
+    const budgetDay = typeof last.endParams.budgetDay === 'string' ? last.endParams.budgetDay : null;
+    if (!resetsAt && !budgetDay) return null;
+    const renewed = (resetsAt !== null && Date.parse(resetsAt) <= Date.parse(now)) || (budgetDay !== null && budgetDay < now.slice(0, 10));
+    return { resetsAt, budgetDay, renewed };
   }
 
   // --- PricingStore: оценка ------------------------------------------------
@@ -1779,7 +1797,8 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     for (const d of this.decisions) last.set(d.writeScopeId, Math.max(last.get(d.writeScopeId) ?? 0, Date.parse(d.decidedAt)));
     return [...this.scopes.values()]
       .filter((s) => s.channelAccountId === channelAccountId && s.pricingMode === 'ENGINE' && s.status === 'ACTIVE' && s.strategy && !COMPETITOR_STRATEGIES.has(s.strategy.params.type))
-      .filter((s) => (last.get(s.writeScopeId) ?? 0) < dayAgo)
+      // Шаг 53: запись цены упёрлась в бюджет, и он обновился — единица должна сразу
+      .filter((s) => (last.get(s.writeScopeId) ?? 0) < dayAgo || this.priceBudgetExhausted(s.writeScopeId, now)?.renewed === true)
       .sort((a, b) => (last.get(a.writeScopeId) ?? 0) - (last.get(b.writeScopeId) ?? 0) || a.writeScopeId.localeCompare(b.writeScopeId))
       .slice(0, Math.max(0, limit))
       .map((s) => s.writeScopeId);

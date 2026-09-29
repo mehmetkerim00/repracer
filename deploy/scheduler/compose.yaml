@@ -7,8 +7,8 @@ name: repracer-scheduler
 
 services:
   scheduler:
-    image: node:22.22.3-bookworm-slim
-    # Тег образа закреплён; закрепление по digest (image: node@sha256:…) — при первом развёртывании в среде с доступом к реестру (проверить)
+    image: node:22.22.3-bookworm-slim@sha256:e21fc383b50d5347dc7a9f1cae45b8f4e2f0d39f7ade28e4eef7d2934522b752
+    # Шаг 53 (OWASP A08): образ закреплён тегом и digest (реестр Docker Hub, 2026-09-29) — обновление образа — правка этой строки (Dependabot предлагает её сам)
     working_dir: /app
     command: ["node", "--experimental-strip-types", "--disable-warning=ExperimentalWarning", "services/scheduler/src/main.ts"]
     user: "1000:1000"

@@ -8,7 +8,7 @@ name: repracer-ebay-account-deletion
 
 services:
   ebay-account-deletion:
-    image: node:22.22.3-bookworm-slim
+    image: node:22.22.3-bookworm-slim@sha256:e21fc383b50d5347dc7a9f1cae45b8f4e2f0d39f7ade28e4eef7d2934522b752
     # Тег образа закреплён; закрепление по digest — при первом развёртывании в среде с доступом к реестру (проверить)
     working_dir: /app
     command: ["node", "--experimental-strip-types", "--disable-warning=ExperimentalWarning", "services/ebay-account-deletion/src/main.ts"]

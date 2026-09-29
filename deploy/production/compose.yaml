@@ -15,7 +15,7 @@ name: repracer-production
 services:
   # TLS терминируется ЗДЕСЬ: у приложения нет ни сертификатов, ни 80-го порта — ему достаточно loopback [Р-158]
   proxy:
-    image: caddy:2.10.2-alpine
+    image: caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
     restart: unless-stopped
     ports:
       - "80:80"
@@ -54,6 +54,8 @@ services:
     # отказывает ещё до контейнера, а процесс — при старте своей причиной; имитатора входа здесь нет и быть не может
     environment:
       REPRACER_PROFILE: production
+      # Шаг 53: консоль стоит за Caddy профиля — адрес клиента для ограничения частоты берётся из X-Forwarded-For
+      REPRACER_CONSOLE_TRUST_PROXY: "on"
       REPRACER_CONSOLE_OIDC_ISSUER: ${REPRACER_CONSOLE_OIDC_ISSUER:?set REPRACER_CONSOLE_OIDC_ISSUER (Р-180)}
       REPRACER_CONSOLE_OIDC_AUDIENCE: ${REPRACER_CONSOLE_OIDC_AUDIENCE:?set REPRACER_CONSOLE_OIDC_AUDIENCE (Р-180)}
       REPRACER_CONSOLE_OIDC_JWKS_URL: ${REPRACER_CONSOLE_OIDC_JWKS_URL:?set REPRACER_CONSOLE_OIDC_JWKS_URL (Р-180)}
@@ -64,7 +66,7 @@ services:
   # Шаг 44 (находка 8 ревью): массовые задания тенантов продавцов — ОТДЕЛЬНЫЙ процесс [Р-139]: тяжёлая работа заданий
   # не занимает цикл событий консоли. Тенантов с ждущими заданиями называет база; роли — те же файлы секретов, что у консоли
   bulk-worker:
-    image: node:22.22.3-bookworm-slim
+    image: node:22.22.3-bookworm-slim@sha256:e21fc383b50d5347dc7a9f1cae45b8f4e2f0d39f7ade28e4eef7d2934522b752
     working_dir: /app
     command: ["node", "--experimental-strip-types", "--disable-warning=ExperimentalWarning", "apps/console/server/bulk-worker.ts"]
     user: "1000:1000"
@@ -124,7 +126,7 @@ services:
   # Пока такое правило у внешнего сервиса не заведено, провал копии остаётся замеченным только человеком в журнале —
   # это ограничение названо здесь, а не выдано за работающий механизм (OQ-188: аккаунта внешнего сервиса ещё нет).
   backup:
-    image: postgres:16.10-bookworm
+    image: postgres:16.10-bookworm@sha256:38471f330eb885e04de130b768d6db4e10469e2311879c7e5c699f6d2d8a1c74
     user: "1000:1000"
     environment:
       REPRACER_BACKUP_KEEP_DAYS: ${REPRACER_BACKUP_KEEP_DAYS:-7}

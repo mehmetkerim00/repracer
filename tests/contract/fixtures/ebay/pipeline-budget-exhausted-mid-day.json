@@ -4,7 +4,7 @@
   "channel": "EBAY",
   "apiVersion": "sell-inventory-v1 (sandbox 2026-09-27)",
   "title": "Р-163 на пути решения: 190-я правка цены листинга уходит, следующая цена — BUDGET_EXHAUSTED без обращения к eBay, с алертом",
-  "description": "За пять часов по листингу было 189 попыток правки цены (второй слой бюджета, EBAY_C08). Первая цена 8.90 уходит (190-я попытка) и подтверждается. Себестоимость растёт, вторая цена 10.68 одобрена, но адаптер не отправляет её: цене — 250 − резерв остатка 50 − запас 10 = 190 попыток за любые 24 часа [Р-163]. Запись завершается BUDGET_EXHAUSTED, алерт PRICE_WRITE_NOT_SENT уровня WARNING (шаг 52: ожидаемое ограничение канала, значение уйдёт после смены суток); запросов к eBay — ни одного. Первый слой — edit_budget в базе (ebay.pipeline.pg.test.ts).",
+  "description": "За пять часов по листингу было 189 попыток правки цены (второй слой бюджета, EBAY_C08). Первая цена 8.90 уходит (190-я попытка) и подтверждается. Себестоимость растёт, вторая цена 10.68 одобрена, но адаптер не отправляет её: цене — 250 − резерв остатка 50 − запас 10 = 190 попыток за любые 24 часа [Р-163]. Запись завершается BUDGET_EXHAUSTED, алерт PRICE_WRITE_NOT_SENT уровня WARNING (шаг 52: ожидаемое ограничение канала, значение уйдёт после смены суток); запросов к eBay — ни одного. Шаг 53: следующая оценка, пока бюджет не обновился, пропускается без решения и без записи. Первый слой — edit_budget в базе (ebay.pipeline.pg.test.ts).",
   "tags": [
     "pipeline",
     "mandatory:pipeline-budget-exhausted",
@@ -155,6 +155,47 @@
     {
       "id": "confirm-first-refuse-second",
       "kind": "pipelineDispatchDue"
+    },
+    {
+      "id": "cost-rises-again",
+      "kind": "pricingMutation",
+      "op": "setCost",
+      "writeScopeId": "ws-ebay-price-10",
+      "value": {
+        "currency": "EUR",
+        "costProfileId": "cp-ebay-10",
+        "unitCostMinor": 700,
+        "fixedFeeMinor": 0,
+        "feeRateBp": 1100,
+        "tax": {
+          "regime": "VAT_INCLUDED",
+          "vatRateBp": 1900
+        }
+      }
+    },
+    {
+      "id": "third-price-skipped",
+      "kind": "pipelineRecompute",
+      "writeScopeId": "ws-ebay-price-10",
+      "trigger": {
+        "type": "COST_CHANGE"
+      },
+      "expect": {
+        "decision": {
+          "$absent": true
+        },
+        "stages": {
+          "$contains": [
+            {
+              "stage": "SCOPE",
+              "outcome": "SKIPPED",
+              "reason": {
+                "code": "WRITE_EDIT_BUDGET_EXHAUSTED"
+              }
+            }
+          ]
+        }
+      }
     }
   ],
   "exchanges": [

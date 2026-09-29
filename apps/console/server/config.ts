@@ -42,6 +42,11 @@ export interface ConsoleConfig {
   /** Шаг 44 [Р-180]: промышленный профиль — поднимается ТОЛЬКО с настоящим поставщиком identity */
   profile: 'production' | 'default';
   /**
+   * Шаг 53 (OWASP A04): ограничение частоты запросов на клиента в минуту. `trustProxy` — адрес анонима из `X-Forwarded-For`:
+   * включается только за своим прокси (профиль production), иначе аноним выбирал бы себе адрес сам
+   */
+  rateLimit: { authorizedPerMinute: number; anonymousPerMinute: number; trustProxy: boolean };
+  /**
    * Р-127: отметка во внешнем сервисе. Консоль — такой же разворачиваемый процесс, как планировщик: остановившуюся
    * консоль публичного демо не заметит НИКТО, кроме посетителя, который просто уйдёт. Выключение — только явное.
    */
@@ -138,5 +143,10 @@ export function loadConsoleConfig(env: Env = process.env, read: (path: string) =
     pgUrls,
     oidc,
     profile,
+    rateLimit: {
+      authorizedPerMinute: intFromEnv(env, 'REPRACER_CONSOLE_RATE_AUTHORIZED', 600, 10, 100_000),
+      anonymousPerMinute: intFromEnv(env, 'REPRACER_CONSOLE_RATE_ANONYMOUS', 120, 10, 100_000),
+      trustProxy: env.REPRACER_CONSOLE_TRUST_PROXY === 'on',
+    },
   };
 }

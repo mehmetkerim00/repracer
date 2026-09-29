@@ -215,6 +215,12 @@ export function createPricingPipeline(deps: PipelineDeps) {
       stages.push({ stage: 'SCOPE', outcome: 'SKIPPED', reason: { code: 'SCOPE_NOT_ENGINE', params: { mode: scope.pricingMode } } });
       return { report, toCommit: null, invoked: 0 };
     }
+    // Шаг 53: бюджет правок последней записи ещё не обновился — решение уйти некуда, и оно не создаётся (ни ядра, ни записи, ни алерта)
+    if (sc.budgetExhausted) {
+      stages.push({ stage: 'SCOPE', outcome: 'SKIPPED', reason: { code: 'WRITE_EDIT_BUDGET_EXHAUSTED', params: { source: 'CHANNEL',
+        ...(sc.budgetExhausted.resetsAt ? { resetsAt: sc.budgetExhausted.resetsAt } : {}), ...(sc.budgetExhausted.budgetDay ? { budgetDay: String(sc.budgetExhausted.budgetDay).slice(0, 10) } : {}) } } });
+      return { report, toCommit: null, invoked: 0 };
+    }
     if (bounds.min.status !== 'RESOLVED' || bounds.max.status !== 'RESOLVED') {
       const bound = bounds.min.status !== 'RESOLVED' ? 'min' : 'max';
       const cause = bounds.min.status !== 'RESOLVED' ? bounds.min.cause : (bounds.max as { cause: string }).cause;
@@ -946,6 +952,8 @@ export function createPricingPipeline(deps: PipelineDeps) {
       let recorded = 0;
       let catalogued = 0;
       const withChannelPricing: Array<{ marketplace: string; externalSku: string; automatedPricing: boolean; channelBounds: boolean }> = [];
+      // Шаг 53 (ревью шага 52, находка 6): все виденные курсоры; на повторе записанное остаётся, обход кончается с WARNING
+      const seen = new Set<string>();
       for (let page = 0; page < (options.maxPages ?? 50); page++) {
         const result = await waitingForBudget(ctx, () => adapter.discoverOffers(ctx, { limit: options.pageLimit ?? 20, ...(cursor ? { cursor } : {}) }));
         offers += result.items.length;
@@ -968,8 +976,11 @@ export function createPricingPipeline(deps: PipelineDeps) {
           if (o.automatedPricing || o.channelBounds) withChannelPricing.push({ marketplace: o.marketplace, externalSku: o.externalSku, automatedPricing: o.automatedPricing, channelBounds: o.channelBounds });
         }
         if (!result.nextCursor) break;
-        // Шаг 52: канал вернул тот же курсор — продвинуться нечем; ошибка, а не обход до предела страниц одной и той же страницей
-        if (result.nextCursor === cursor) throw new Error('the channel returned the same page cursor again: discovery stops');
+        if (seen.has(result.nextCursor) || result.nextCursor === cursor) {
+          await emit(ctx, [{ kind: 'alert', code: 'CHANNEL_PAGE_CURSOR_REPEATED', severity: 'WARNING', details: { stage: 'DISCOVERY', pages: page + 1 } }]);
+          break;
+        }
+        seen.add(result.nextCursor);
         cursor = result.nextCursor;
       }
       if (withChannelPricing.length > 0) {

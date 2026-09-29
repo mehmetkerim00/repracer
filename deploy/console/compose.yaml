@@ -8,7 +8,7 @@ name: repracer-console
 
 services:
   console:
-    image: node:22.22.3-bookworm-slim
+    image: node:22.22.3-bookworm-slim@sha256:e21fc383b50d5347dc7a9f1cae45b8f4e2f0d39f7ade28e4eef7d2934522b752
     # Тег образа закреплён; закрепление по digest — при первом развёртывании в среде с доступом к реестру (проверить)
     working_dir: /app
     command: ["node", "--experimental-strip-types", "--disable-warning=ExperimentalWarning", "apps/console/server/console-service.ts"]
@@ -25,6 +25,10 @@ services:
       # Р-160: публичное демо. `off` — кнопки «посмотреть демо» нет и маршрут гостя отвечает 404
       REPRACER_CONSOLE_PUBLIC_DEMO: ${REPRACER_CONSOLE_PUBLIC_DEMO:-on}
       REPRACER_CONSOLE_DEMO_RESEED_HOURS: ${REPRACER_CONSOLE_DEMO_RESEED_HOURS:-24}
+      # Шаг 53 (OWASP A04): ограничение частоты на клиента в минуту; адрес анонима из X-Forwarded-For — только за своим прокси
+      REPRACER_CONSOLE_RATE_AUTHORIZED: ${REPRACER_CONSOLE_RATE_AUTHORIZED:-600}
+      REPRACER_CONSOLE_RATE_ANONYMOUS: ${REPRACER_CONSOLE_RATE_ANONYMOUS:-120}
+      REPRACER_CONSOLE_TRUST_PROXY: ${REPRACER_CONSOLE_TRUST_PROXY:-off}
       # Вход продавца у поставщика identity [Р-78]: задаётся целиком или не задаётся вовсе (тогда работает только гость демо)
       REPRACER_CONSOLE_OIDC_ISSUER: ${REPRACER_CONSOLE_OIDC_ISSUER:-}
       REPRACER_CONSOLE_OIDC_AUDIENCE: ${REPRACER_CONSOLE_OIDC_AUDIENCE:-}

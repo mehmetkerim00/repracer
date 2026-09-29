@@ -63,7 +63,7 @@ test('OQ-216: retryAt за сроком вызова — ошибка наруж
  * Шаг 52 (Growth Check, страницы): строки заказов читаются, пока канал отдаёт курсор. Пустая страница С курсором — не конец; тот же курсор
  * второй раз — ошибка, а не вечный обход (работу повторит планировщик тем же окном)
  */
-test('step 52: an empty page with a cursor is not the end; the same cursor twice stops the read with an error', async () => {
+test('step 52, 53: an empty page with a cursor is not the end; a cursor seen before stops the read and keeps what was read', async () => {
   const line = (n: number) => ({ externalOrderRef: `o-${n}`, externalOrderLineRef: `l-${n}`, identity: { marketplace: 'de', externalOfferId: `SYN-${n}` }, quantity: 1, orderedAt: '2026-09-22T09:00:00.000Z', status: 'OPEN' });
   const pages: Record<string, { items: unknown[]; nextCursor?: string }> = {
     '': { items: [], nextCursor: 'p2' }, p2: { items: [line(1)], nextCursor: 'p3' }, p3: { items: [line(2)] },
@@ -78,6 +78,10 @@ test('step 52: an empty page with a cursor is not the end; the same cursor twice
   const r = await pipeline.syncOrders(ctx('2026-09-22T09:02:00.000Z'), adapter, '2026-09-22T08:55:00.000Z' as never);
   assert.deepEqual([r.lines, recorded.length], [2, 2], 'both lines behind the empty page were read');
 
-  const stuck = { async readOrderLines(_c: unknown, w: { cursor?: string }) { return { items: [], nextCursor: w.cursor ?? 'same' }; } } as unknown as ChannelAdapter;
-  await assert.rejects(pipeline.syncOrders(ctx('2026-09-22T09:02:00.000Z'), stuck, '2026-09-22T08:55:00.000Z' as never), /same page cursor/);
+  // Шаг 53: A→B→A — чтение останавливается на уже виденном курсоре, прочитанное записано, признак повтора у результата
+  const loop: Record<string, { items: unknown[]; nextCursor?: string }> = { '': { items: [line(3)], nextCursor: 'A' }, A: { items: [line(4)], nextCursor: 'B' }, B: { items: [line(5)], nextCursor: 'A' } };
+  recorded.length = 0;
+  const looping = { async readOrderLines(_c: unknown, w: { cursor?: string }) { return loop[w.cursor ?? '']; } } as unknown as ChannelAdapter;
+  const r2 = await pipeline.syncOrders(ctx('2026-09-22T09:02:00.000Z'), looping, '2026-09-22T08:55:00.000Z' as never);
+  assert.deepEqual([r2.lines, recorded.length, r2.cursorRepeated], [3, 3, true], 'three pages read once, kept, and the repeat is reported');
 });

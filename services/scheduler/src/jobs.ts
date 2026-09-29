@@ -105,7 +105,7 @@ export interface JobDeps {
    * процессе работы нет; процесс без роли остатков — конфигурация, а не молчаливый пропуск.
    */
   stock?: {
-    syncOrders(account: SchedulerAccount, ctx: AdapterCallContext, since: Instant): Promise<{ lines: number; created: number; consumed: number; released: number; unknownOffers: number; writes: number }>;
+    syncOrders(account: SchedulerAccount, ctx: AdapterCallContext, since: Instant): Promise<{ lines: number; created: number; consumed: number; released: number; unknownOffers: number; writes: number; cursorRepeated?: boolean }>;
   };
   /** Сверка уведомлений опросом включена для аккаунта [Р-121]; по умолчанию — если источник уведомлений канала доступен */
   reconcileEnabled?(account: SchedulerAccount, descriptor: ChannelDescriptor): boolean;
@@ -360,7 +360,8 @@ export function jobSource(deps: JobDeps): JobSource {
                */
               const since = new Date(Date.parse(previousSucceededAt ?? startedAt) - cfg.orderLinesEverySeconds * 1000).toISOString();
               const r = await stock.syncOrders(a, ctxOf(a, startedAt, 'order-lines', 120), since);
-              return { items: r.lines };
+              // Шаг 53: канал повторил курсор — прочитанное записано, следующий запуск читает то же окно; видно алертом
+              return { items: r.lines, ...(r.cursorRepeated ? { alerts: [{ code: 'CHANNEL_PAGE_CURSOR_REPEATED', severity: 'WARNING' as const, details: { stage: 'ORDER_LINES', lines: r.lines } }] } : {}) };
             },
           });
         }

@@ -1235,6 +1235,20 @@ export const SECURITY_HEADERS: Readonly<Record<string, string>> = {
   'referrer-policy': 'no-referrer',
 };
 
+/**
+ * Шаг 53 (OWASP A05): полная политика содержимого консоли. Страница — только свои скрипты, стили и картинки, без встроенного кода;
+ * соединения — свой адрес и поставщик входа (страница читает его настройки и меняет код на токен, PKCE). Конечная точка токена должна
+ * жить на адресе поставщика — у ZITADEL так и есть; иначе её адрес добавляется сюда
+ */
+export function consoleContentSecurityPolicy(identityOrigins: readonly string[]): string {
+  const origins = [...new Set(identityOrigins.flatMap((u) => { try { return [new URL(u).origin]; } catch { return []; } }))];
+  return [
+    "default-src 'self'", "script-src 'self'", "style-src 'self'", "img-src 'self' data:", "font-src 'self'",
+    `connect-src ${["'self'", ...origins].join(' ')}`,
+    "frame-ancestors 'none'", "base-uri 'self'", "object-src 'none'", "form-action 'self'",
+  ].join('; ');
+}
+
 function send(res: ServerResponse, r: ApiResponse): void {
   if (r.file) {
     res.writeHead(r.status, {
@@ -1255,6 +1269,45 @@ function send(res: ServerResponse, r: ApiResponse): void {
  * входа именно затем, чтобы живой прогон шёл ЧЕРЕЗ НЕГО. Прогон, зовущий `createStandApi` напрямую, не видит ни предела тела, ни
  * битого JSON — а это ровно тот класс дефекта, ради которого принято Р-136 (на шаге 28 импорт не проходил из-за предела в 64 КиБ).
  */
+/**
+ * Шаг 53 (OWASP A04, самопроверка шага 52): ограничение частоты запросов консоли — страница, API и Inbound API идут через этот слой.
+ * Скользящее окно в минуту на клиента: клиент — предъявленный вход (заголовок Authorization — токен или ключ Inbound API, по SHA-256,
+ * сам заголовок не хранится), иначе адрес. За прокси адрес — первый в `X-Forwarded-For`, только если это разрешено (`trustProxy`):
+ * иначе все анонимы делили бы адрес прокси, а доверять заголовку без прокси — значит дать анониму выбирать себе адрес.
+ * Процессный счётчик: у нескольких реплик свой у каждой — предел на клиента растёт кратно (записано в самопроверке)
+ */
+export interface RateLimitConfig {
+  /** Запросов в минуту на предъявленный вход (токен или ключ) */
+  authorizedPerMinute: number;
+  /** Запросов в минуту на адрес без входа (страница, гость демо до входа) */
+  anonymousPerMinute: number;
+  trustProxy: boolean;
+  now?: () => number;
+}
+
+export function createRateLimiter(config: RateLimitConfig) {
+  const now = config.now ?? (() => Date.now());
+  const hits = new Map<string, number[]>();
+  return (headers: Record<string, string | string[] | undefined>, remoteAddress: string | undefined): { ok: true } | { ok: false; retryAfterSeconds: number } => {
+    const auth = typeof headers.authorization === 'string' && headers.authorization.length > 0 ? headers.authorization : null;
+    const forwarded = typeof headers['x-forwarded-for'] === 'string' ? headers['x-forwarded-for'].split(',')[0]!.trim() : '';
+    const address = config.trustProxy && forwarded ? forwarded : (remoteAddress ?? 'unknown');
+    const key = auth ? `auth:${createHash('sha256').update(auth).digest('hex')}` : `addr:${address}`;
+    const limit = auth ? config.authorizedPerMinute : config.anonymousPerMinute;
+    const t = now();
+    const list = (hits.get(key) ?? []).filter((x) => x > t - 60_000);
+    if (list.length >= limit) {
+      hits.set(key, list);
+      return { ok: false, retryAfterSeconds: Math.max(1, Math.ceil((list[0]! + 60_000 - t) / 1000)) };
+    }
+    list.push(t);
+    hits.set(key, list);
+    // Память ограничена: ключи без запросов за минуту уходят при росте карты
+    if (hits.size > 50_000) for (const [k, v] of hits) if (v.every((x) => x <= t - 60_000)) hits.delete(k);
+    return { ok: true };
+  };
+}
+
 export function createStandServer(
   handle: ReturnType<typeof createStandApi>, locale: Locale = 'de',
   /**
@@ -1263,10 +1316,21 @@ export function createStandServer(
    * остальное — файлам сборки. Стенд разработчика запускается без этого параметра: интерфейс ему даёт vite.
    */
   serveStatic?: (pathname: string) => { status: number; contentType: string; body: Buffer; cacheControl: string } | null,
+  options: { rateLimit?: RateLimitConfig; contentSecurityPolicy?: string } = {},
 ) {
   const fallback = messagesFor(locale).ui.server;
+  const limited = options.rateLimit ? createRateLimiter(options.rateLimit) : null;
   return createServer(async (req, res) => {
     for (const [name, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(name, value);
+    if (options.contentSecurityPolicy) res.setHeader('content-security-policy', options.contentSecurityPolicy);
+    if (limited) {
+      const verdict = limited(req.headers, req.socket.remoteAddress);
+      if (!verdict.ok) {
+        res.setHeader('retry-after', String(verdict.retryAfterSeconds));
+        req.resume();
+        return send(res, { status: 429, body: { error: { code: 'RATE_LIMITED', message: fallback.rateLimited } } });
+      }
+    }
     const pathname = new URL(req.url ?? '/', 'http://console').pathname;
     if (serveStatic && !pathname.startsWith('/api/') && !pathname.startsWith('/inbound/')) {
       const file = serveStatic(pathname);

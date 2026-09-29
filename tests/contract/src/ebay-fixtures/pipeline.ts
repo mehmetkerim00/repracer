@@ -230,7 +230,7 @@ export function buildEbayPipelineScenarios(): Array<{ file: string; scenario: Sc
   // 8. Бюджет 250 правок исчерпан посреди дня
   out.push(scenario('pipeline-budget-exhausted-mid-day.json', 'ebay/pipeline/budget-exhausted-mid-day',
     'Р-163 на пути решения: 190-я правка цены листинга уходит, следующая цена — BUDGET_EXHAUSTED без обращения к eBay, с алертом',
-    'За пять часов по листингу было 189 попыток правки цены (второй слой бюджета, EBAY_C08). Первая цена 8.90 уходит (190-я попытка) и подтверждается. Себестоимость растёт, вторая цена 10.68 одобрена, но адаптер не отправляет её: цене — 250 − резерв остатка 50 − запас 10 = 190 попыток за любые 24 часа [Р-163]. Запись завершается BUDGET_EXHAUSTED, алерт PRICE_WRITE_NOT_SENT уровня WARNING (шаг 52: ожидаемое ограничение канала, значение уйдёт после смены суток); запросов к eBay — ни одного. Первый слой — edit_budget в базе (ebay.pipeline.pg.test.ts).',
+    'За пять часов по листингу было 189 попыток правки цены (второй слой бюджета, EBAY_C08). Первая цена 8.90 уходит (190-я попытка) и подтверждается. Себестоимость растёт, вторая цена 10.68 одобрена, но адаптер не отправляет её: цене — 250 − резерв остатка 50 − запас 10 = 190 попыток за любые 24 часа [Р-163]. Запись завершается BUDGET_EXHAUSTED, алерт PRICE_WRITE_NOT_SENT уровня WARNING (шаг 52: ожидаемое ограничение канала, значение уйдёт после смены суток); запросов к eBay — ни одного. Шаг 53: следующая оценка, пока бюджет не обновился, пропускается без решения и без записи. Первый слой — edit_budget в базе (ebay.pipeline.pg.test.ts).',
     ['mandatory:pipeline-budget-exhausted', 'conservative:EBAY_C08_EDIT_BUDGET_ROLLING_DAY'],
     world({ scopes: [scope(10, { minPrice: { amountMinor: 500, id: 'min-ebay-10' }, strategy: { strategyId: 'st-margin-10', version: 1, params: { type: 'TARGET_MARGIN', targetMarginBp: 2000 }, deadbandMinor: 0 } })] },
       { adapter: { ebayEditAttempts: [{ listingId: pids(10).listingId, attempts: 189, agoMs: 5 * 3600_000, field: 'PRICE' }] } }),
@@ -240,6 +240,11 @@ export function buildEbayPipelineScenarios(): Array<{ file: string; scenario: Sc
       recompute('second-price-queued', 'ws-ebay-price-10', { decision: { outcome: 'APPROVED', finalMinor: 1068 } }),
       wait('reconcile-window', IN_FLIGHT_WINDOW_MS),
       dispatchDue('confirm-first-refuse-second'),
+      // Шаг 53 (ревью шага 52, находка 13): пока бюджет не обновился, новое решение уйти некуда — оценка пропускается без решения,
+      // без записи и без нового алерта (прежде каждая оценка давала CHANGED в вечное ядро и запись BUDGET_EXHAUSTED)
+      { id: 'cost-rises-again', kind: 'pricingMutation', op: 'setCost', writeScopeId: 'ws-ebay-price-10', value: EUR_COST(10, 700) } as Step,
+      recompute('third-price-skipped', 'ws-ebay-price-10', { decision: { $absent: true },
+        stages: { $contains: [{ stage: 'SCOPE', outcome: 'SKIPPED', reason: { code: 'WRITE_EDIT_BUDGET_EXHAUSTED' } }] } }),
     ],
     [userToken(), bulkPrice('bulk-890-attempt-190', 10, 890), getOffer('get-offer-890', 10, 890), appToken(), browse('browse-890', 10, 890, '191')],
     // Шаг 52 (п. 8): исчерпанный бюджет — ожидаемое ограничение канала, WARNING (часовой дайджест), а не письмо на каждую запись

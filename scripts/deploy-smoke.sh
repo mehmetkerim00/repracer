@@ -117,7 +117,7 @@ if docker run --rm -v "$PWD/deploy/production:/etc/caddy:ro" -v "$PWD/apps/landi
     -e REPRACER_DOMAIN=example.invalid -e REPRACER_ACME_EMAIL=ci@example.invalid -e REPRACER_LANDING_PUBLIC=off \
     -e REPRACER_LANDING_DEMO_EN=/#demo-soon -e REPRACER_LANDING_DEMO_DE=/de/#demo-soon \
     -e REPRACER_LANDING_CONTACT_EN=/#contact-soon -e REPRACER_LANDING_CONTACT_DE=/de/#contact-soon \
-    caddy:2.10.2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile; then
+    caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile; then
   echo "   Caddyfile сервера разобран"
 else
   echo "   Caddyfile сервера НЕ разбирается"

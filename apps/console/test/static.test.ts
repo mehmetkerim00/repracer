@@ -103,3 +103,40 @@ test('step 52: the page, the API and an error answer carry the security headers 
     await new Promise<void>((done) => server.close(() => done()));
   }
 });
+
+/**
+ * Шаг 53 (OWASP A04): ограничение частоты — через настоящий HTTP-слой. Предел на клиента: вход (по отпечатку заголовка) и адрес — раздельно;
+ * адрес из X-Forwarded-For — только при доверии прокси; превышение — 429 с Retry-After и понятной причиной
+ */
+test('step 53: rate limit per client — 429 with Retry-After; another token is another client; X-Forwarded-For only behind a trusted proxy', async () => {
+  const { createStandServer } = await import('../server/stand-server.ts');
+  const handle = (async () => ({ status: 200, body: { ok: true } })) as never;
+  const run = async (trustProxy: boolean) => {
+    const server = createStandServer(handle, 'en', serve, { rateLimit: { authorizedPerMinute: 3, anonymousPerMinute: 2, trustProxy } });
+    await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+    const { port } = server.address() as { port: number };
+    const get = async (headers: Record<string, string>) => { const r = await fetch(`http://127.0.0.1:${port}/api/v1/worlds`, { headers }); const body = await r.json() as { error?: { code: string } }; return { status: r.status, retryAfter: r.headers.get('retry-after'), code: body.error?.code }; };
+    try {
+      const a = [await get({ authorization: 'Bearer syn-a' }), await get({ authorization: 'Bearer syn-a' }), await get({ authorization: 'Bearer syn-a' }), await get({ authorization: 'Bearer syn-a' })];
+      const b = await get({ authorization: 'Bearer syn-b' });
+      const anon = [await get({ 'x-forwarded-for': '203.0.113.1' }), await get({ 'x-forwarded-for': '203.0.113.2' }), await get({ 'x-forwarded-for': '203.0.113.3' })];
+      return { a, b, anon };
+    } finally { await new Promise<void>((done) => server.close(() => done())); }
+  };
+  const direct = await run(false);
+  assert.deepEqual(direct.a.map((x) => x.status), [200, 200, 200, 429], 'the fourth request of one token in a minute');
+  assert.equal(direct.a[3]!.code, 'RATE_LIMITED');
+  assert.ok(Number(direct.a[3]!.retryAfter) >= 1 && Number(direct.a[3]!.retryAfter) <= 60, 'Retry-After in seconds');
+  assert.equal(direct.b.status, 200, 'another token is another client');
+  assert.deepEqual(direct.anon.map((x) => x.status), [200, 200, 429], 'without a trusted proxy X-Forwarded-For is ignored: one address');
+  const proxied = await run(true);
+  assert.deepEqual(proxied.anon.map((x) => x.status), [200, 200, 200], 'behind the trusted proxy each forwarded address is its own client');
+});
+
+test('step 53: the full content security policy allows only own code and the identity provider origin', async () => {
+  const { consoleContentSecurityPolicy } = await import('../server/stand-server.ts');
+  const csp = consoleContentSecurityPolicy(['https://syn-instance.zitadel.example/', 'not a url']);
+  for (const part of ["default-src 'self'", "script-src 'self'", "style-src 'self'", "frame-ancestors 'none'", "object-src 'none'"]) assert.ok(csp.includes(part), part);
+  assert.match(csp, /connect-src 'self' https:\/\/syn-instance\.zitadel\.example(;|$)/);
+  assert.ok(!csp.includes('unsafe-inline') && !csp.includes('unsafe-eval'));
+});

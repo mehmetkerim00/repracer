@@ -40,17 +40,18 @@ VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-0000000
 -- Шаг 43 [OQ-232]: удержание полом — строка намерения, чью цель стратегия хотела ниже пола (синтетическая)
 INSERT INTO channel_data.floor_hold (tenant_id, price_intent_id, intent_created_at, write_scope_id, currency, below_minor, shadow)
 VALUES ('a0000000-0000-0000-0000-00000000000a', gen_random_uuid(), now(), 'a6000000-0000-0000-0000-000000000001', 'EUR', 150, true);
--- Шаг 52 (0144): количество, которым управляет канал, — у синтетического предложения, которое исполняет канал (FBA/FBK)
+-- Шаг 52 (0144), шаг 53 (0146, Р-196): текущее количество, которым управляет канал, — у синтетического предложения, которое исполняет канал (FBA/FBK)
 INSERT INTO tenant_data.offer_mapping (tenant_id, offer_mapping_id, product_id, channel_account_id, channel, marketplace, channel_offer_key, external_unit_id, fulfillment, status)
 VALUES ('a0000000-0000-0000-0000-00000000000a', 'ad000000-0000-0000-0000-0000000000f1', 'a5000000-0000-0000-0000-000000000001', 'a4000000-0000-0000-0000-000000000001',
         'KAUFLAND', 'de', 'R103-CHANNEL', 'R103-CHANNEL-UNIT', 'CHANNEL', 'ACTIVE');
-INSERT INTO channel_data.channel_quantity_observation (tenant_id, offer_mapping_id, quantity, observed_at)
+INSERT INTO channel_data.channel_quantity_current (tenant_id, offer_mapping_id, quantity, observed_at)
 VALUES ('a0000000-0000-0000-0000-00000000000a', 'ad000000-0000-0000-0000-0000000000f1', 12, now());
 -- Пишет только функция роли каталога: путь решения напрямую не пишет даже в предложение CHANNEL (страж не мешает — отказывает право)
 SET LOCAL ROLE repracer_app;
 SELECT pg_temp.expect_fail('the decision path writes a channel managed quantity directly (Р-96)', $q$
-  INSERT INTO channel_data.channel_quantity_observation (tenant_id, offer_mapping_id, quantity, observed_at)
-  VALUES ('a0000000-0000-0000-0000-00000000000a', 'ad000000-0000-0000-0000-0000000000f1', 1, now()) $q$, '^permission denied for table channel_quantity_observation$');
+  INSERT INTO channel_data.channel_quantity_current (tenant_id, offer_mapping_id, quantity, observed_at)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'ad000000-0000-0000-0000-0000000000f1', 1, now()) ON CONFLICT DO NOTHING $q$,
+  '^permission denied for table channel_quantity_current$');
 RESET ROLE;
 -- Р-120 (0082): наблюдение собственного ценообразования канала
 INSERT INTO channel_data.offer_channel_pricing (tenant_id, channel_account_id, channel, marketplace, external_sku, automated_pricing, channel_bounds, source, observed_at)
@@ -589,16 +590,18 @@ SELECT pg_temp.expect_fail('pricing health threshold without its currency (Р-71
   INSERT INTO channel_data.offer_pricing_health (tenant_id, channel_account_id, channel, marketplace, channel_product_ref, condition, issue_type, event_time, competitive_price_threshold_minor, currency, notification_id)
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R103-1', 'new', 'BuyBoxDisqualification', now(), 1999, NULL, 'SYN-N-R71') $q$, 'offer_pricing_health_threshold_money');
 SELECT pg_temp.expect_fail('truncate channel_data.offer_pricing_health', $q$ TRUNCATE channel_data.offer_pricing_health $q$, 'TRUNCATE of channel_data.offer_pricing_health is forbidden');
--- Шаг 52 (0144): количество «управляет канал» — только у предложения, которое исполняет канал, и не отрицательное; стереть журнал нельзя
+-- Шаг 52 (0144), шаг 53 (0146, Р-196): количество «управляет канал» — только у предложения, которое исполняет канал, и не отрицательное
 SELECT pg_temp.expect_fail('channel managed quantity of a merchant fulfilled offer (Р-6)', $q$
-  INSERT INTO channel_data.channel_quantity_observation (tenant_id, offer_mapping_id, quantity, observed_at)
+  INSERT INTO channel_data.channel_quantity_current (tenant_id, offer_mapping_id, quantity, observed_at)
   SELECT tenant_id, offer_mapping_id, 3, now() FROM tenant_data.offer_mapping WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a' AND fulfillment = 'MERCHANT' LIMIT 1 $q$,
   'channel managed quantity belongs only to an offer fulfilled by the channel');
 SELECT pg_temp.expect_fail('negative channel managed quantity', $q$
-  INSERT INTO channel_data.channel_quantity_observation (tenant_id, offer_mapping_id, quantity, observed_at)
-  VALUES ('a0000000-0000-0000-0000-00000000000a', 'ad000000-0000-0000-0000-0000000000f1', -1, now()) $q$, 'channel_quantity_observation_quantity_nonnegative');
-SELECT pg_temp.expect_fail('truncate channel_data.channel_quantity_observation', $q$ TRUNCATE channel_data.channel_quantity_observation $q$,
-  'TRUNCATE of channel_data.channel_quantity_observation is forbidden');
+  UPDATE channel_data.channel_quantity_current SET quantity = -1 WHERE offer_mapping_id = 'ad000000-0000-0000-0000-0000000000f1' $q$, 'channel_quantity_current_quantity_nonnegative');
+-- Р-196: проекция обновляется на месте — страж держит и UPDATE: текущее значение нельзя перевесить на FBM-предложение
+SELECT pg_temp.expect_fail('channel managed quantity moved to a merchant fulfilled offer (Р-6)', $q$
+  UPDATE channel_data.channel_quantity_current SET offer_mapping_id = (SELECT offer_mapping_id FROM tenant_data.offer_mapping
+    WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a' AND fulfillment = 'MERCHANT' LIMIT 1)
+   WHERE offer_mapping_id = 'ad000000-0000-0000-0000-0000000000f1' $q$, 'channel managed quantity belongs only to an offer fulfilled by the channel');
 
 -- Находка 4 ревью шага 16, Р-93, Р-103: у каждой append-only таблицы есть строка, и изменение строки отклоняет именно триггер неизменяемости
 DO $$

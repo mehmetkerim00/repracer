@@ -256,10 +256,17 @@ export class PgStockStore implements StockStore {
            -- она не считается «уже созданной», и пересчёт создаёт новую версию того же количества. Иначе после отказа (у eBay — любой 4xx на
            -- значение, шаг 51) количество в канале застревало до следующего изменения остатка
            coalesce((SELECT w.quantity FROM tenant_data.channel_write w WHERE w.tenant_id = s.tenant_id AND w.write_scope_id = s.write_scope_id AND w.version = ss.latest_version_created),
-                    (SELECT h.quantity FROM tenant_data.channel_write_history h WHERE h.tenant_id = s.tenant_id AND h.write_scope_id = s.write_scope_id AND h.version = ss.latest_version_created
-                        AND h.final_status NOT IN ('DISCARDED_STALE', 'NOT_APPLIED')
-                        -- Шаг 52 (п. 8): версия, упёршаяся в бюджет правок ПРОШЛОГО дня витрины, значением канала не стала, а бюджет обновился
-                        AND NOT (h.final_status = 'BUDGET_EXHAUSTED' AND ${PgStockStore.BUDGET_DAY_PASSED_SQL}))) AS last_quantity
+                    /**
+                     * Последняя версия в истории считается созданной, если она ДОШЛА до канала (APPLIED), удержана тенью (SHADOW_HELD) или упёрлась
+                     * в бюджет, который ещё не обновился (новая запись ушла бы в тот же исчерпанный бюджет). Иначе — отвергнута, не применена или
+                     * бюджет обновился — сравнение идёт с последней ПРИМЕНЁННОЙ версией, то есть с тем, что канал держит: шаг 53 (ревью шага 52,
+                     * находка 11) — значение, которое уже стоит у канала, заново не отправляется
+                     */
+                    (SELECT h.quantity FROM tenant_data.channel_write_history h WHERE h.tenant_id = s.tenant_id AND h.write_scope_id = s.write_scope_id
+                        AND (h.final_status = 'APPLIED'
+                             OR h.version = ss.latest_version_created AND (h.final_status = 'SHADOW_HELD'
+                                  OR h.final_status = 'BUDGET_EXHAUSTED' AND NOT ${PgStockStore.BUDGET_DAY_PASSED_SQL}))
+                      ORDER BY h.version DESC LIMIT 1)) AS last_quantity
       FROM tenant_data.write_scope s
       LEFT JOIN stock st ON st.product_id = s.product_id
       LEFT JOIN reserved rv ON rv.product_id = s.product_id
@@ -513,8 +520,8 @@ export class PgStockStore implements StockStore {
       const { rows: managed } = ids.length === 0 ? { rows: [] as Row[] } : await tx.query(
         `SELECT om.product_id, om.channel, om.marketplace, o.quantity, o.observed_at
            FROM tenant_data.offer_mapping om
-           JOIN LATERAL (SELECT x.quantity, x.observed_at FROM channel_data.channel_quantity_observation x
-                          WHERE x.tenant_id = om.tenant_id AND x.offer_mapping_id = om.offer_mapping_id ORDER BY x.observed_at DESC LIMIT 1) o ON true
+           -- Р-196: проекция текущего значения предложения (0146)
+           JOIN channel_data.channel_quantity_current o ON o.tenant_id = om.tenant_id AND o.offer_mapping_id = om.offer_mapping_id
           WHERE om.tenant_id = $1 AND om.product_id = ANY($2::uuid[]) AND om.fulfillment = 'CHANNEL' AND om.status <> 'ENDED'
           ORDER BY om.channel, om.marketplace`, [tenantId, ids]);
       const managedOf = new Map<string, NonNullable<StockRow['channelManaged']>>();

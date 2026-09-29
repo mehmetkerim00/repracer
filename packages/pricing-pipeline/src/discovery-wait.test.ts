@@ -63,3 +63,31 @@ test('OQ-216: бюджет, который не восполняется, не �
   await assert.rejects(stuck.pipeline.discoverOffers(ctx('2026-09-22T09:25:00.000Z')), /RATE_LIMITED/);
   assert.equal(stuck.slept.length, 10);
 });
+
+test('step 53: a cursor seen before stops discovery, keeps the pages already recorded and raises a WARNING', async () => {
+  // Канал отдаёт курсоры A → B → A: третья страница была бы повтором первой, а цикл — вечным
+  const next: Record<string, string> = { '': 'A', A: 'B', B: 'A' };
+  const pages: Array<string | undefined> = [];
+  const catalogued: number[] = [];
+  const alerts: Array<{ code: string; severity: string }> = [];
+  const adapter = {
+    async discoverOffers(_ctx: unknown, page: { cursor?: string }) {
+      pages.push(page.cursor);
+      const sku = `syn-sku-${page.cursor ?? '0'}`;
+      return { items: [{ identity: { marketplace: 'A1PA6795UKMFR9', externalSku: sku }, gtins: [], condition: 'NEW', fulfillment: 'MERCHANT' }], nextCursor: next[page.cursor ?? ''] };
+    },
+  } as unknown as ChannelAdapter;
+  const store = {
+    async recordOfferChannelPricing() { return 0; },
+    async recordDiscoveredOffers(_t: unknown, _a: unknown, items: unknown[]) { catalogued.push(items.length); return items.length; },
+  } as unknown as PricingStore;
+  const pipeline = createPricingPipeline({
+    store, adapter, alerts: { raise: async (a: { code: string; severity: string }) => { alerts.push({ code: a.code, severity: a.severity }); } } as never,
+    logger: { log: () => undefined }, now: () => '2026-09-29T09:00:00.000Z' as never, sleep: async () => undefined,
+  });
+  const r = await pipeline.discoverOffers(ctx('2026-09-29T09:25:00.000Z'), { pageLimit: 1 });
+  assert.deepEqual(pages, [undefined, 'A', 'B'], 'the repeated cursor A is not read again');
+  assert.equal(r.catalogued, 3, 'the three pages read are kept, not thrown away');
+  assert.deepEqual(catalogued, [1, 1, 1]);
+  assert.deepEqual(alerts.filter((a) => a.code === 'CHANNEL_PAGE_CURSOR_REPEATED'), [{ code: 'CHANNEL_PAGE_CURSOR_REPEATED', severity: 'WARNING' }]);
+});

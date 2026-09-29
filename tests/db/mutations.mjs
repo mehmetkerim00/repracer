@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0145_verify_schema_invariants_v43.sql';
+const VERIFY = 'migrations/0147_verify_schema_invariants_v44.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -2025,19 +2025,18 @@ export const STEP49_ROWS = [
  */
 export const STEP52_ROWS = [
   {
-    row: 'шаг 52, п. 7 (Р-6)', critical: false,
-    invariant: 'количество «управляет канал» — только у предложения, которое исполняет канал, не отрицательное, неизменяемое; путь решения его не пишет',
+    // Шаг 53 (Р-196): журнал 0144 заменён проекцией текущего значения (0146) — строка каталога держит защиты проекции
+    row: 'шаг 52, п. 7 (Р-6), шаг 53 (Р-196)', critical: false,
+    invariant: 'количество «управляет канал» — только у предложения, которое исполняет канал (вставка и обновление), не отрицательное; путь решения его не пишет',
     mutations: [
-      m(dropTrigger('channel_quantity_observation_channel_only', 'channel_data.channel_quantity_observation'),
+      m(dropTrigger('channel_quantity_current_channel_only', 'channel_data.channel_quantity_current'),
         smoke('channel managed quantity of a merchant fulfilled offer (Р-6)')),
-      m(dropConstraint('channel_quantity_observation_quantity_nonnegative', 'channel_data.channel_quantity_observation'),
+      m(replaceInFunction('channel_data.channel_quantity_observation_guard()', "AND om.fulfillment = 'CHANNEL'", ''),
+        smoke('channel managed quantity moved to a merchant fulfilled offer (Р-6)')),
+      m(dropConstraint('channel_quantity_current_quantity_nonnegative', 'channel_data.channel_quantity_current'),
         smoke('negative channel managed quantity')),
-      m('GRANT USAGE ON SCHEMA channel_data TO repracer_app; GRANT INSERT ON channel_data.channel_quantity_observation TO repracer_app',
+      m('GRANT USAGE ON SCHEMA channel_data TO repracer_app; GRANT INSERT ON channel_data.channel_quantity_current TO repracer_app',
         smoke('the decision path writes a channel managed quantity directly (Р-96)')),
-      m(dropTrigger('zz_append_only', 'channel_data.channel_quantity_observation'),
-        smoke('append-only channel_data.channel_quantity_observation')),
-      m(dropTrigger('zz_no_truncate', 'channel_data.channel_quantity_observation'),
-        smoke('truncate channel_data.channel_quantity_observation')),
     ],
   },
 ];

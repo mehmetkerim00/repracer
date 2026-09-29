@@ -100,6 +100,11 @@ export interface ScopeEvaluationContext {
   /** Почему единица не активна: ошибка канала, требующая человека */
   blocking: { errorCode: string; since: Instant } | null;
   changesInLastHour: number;
+  /**
+   * Шаг 53 (ревью шага 52, находка 13): последняя запись цены упёрлась в бюджет правок, который ещё не обновился — новое решение уйти
+   * некуда, оценка пропускается без решения (иначе каждая оценка горячего яруса давала CHANGED и запись BUDGET_EXHAUSTED)
+   */
+  budgetExhausted?: { resetsAt: Instant | null; budgetDay: string | null } | null;
 }
 
 /** Ссылка на полный снимок решения: истекает через 18 месяцев [Р-38, Р-68] */

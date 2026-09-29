@@ -392,3 +392,45 @@ test('step 52: the channel managed quantity of a channel fulfilled offer reaches
   assert.deepEqual([fbk.onHand, fbk.available, fbk.channels.length], [0, 0, 0], 'not our stock, no quantity write scope');
   assert.equal(page.items.filter((r) => (r.channelManaged ?? []).length > 0).length, 1, 'only the channel fulfilled offer');
 });
+
+/**
+ * Шаг 53 (ревью шага 52, находка 11): после отвергнутой версии сравнение идёт с тем, что канал ДЕРЖИТ (последняя применённая версия).
+ * Остаток вернулся к применённому значению — запись не создаётся; остался другим — создаётся
+ */
+test('step 53: after a refused version the value the channel already holds is not sent again', async () => {
+  const queue = new PgWriteQueueStore(db.pool('svc_app', 1));
+  const account = world.ids.dbId(KAUFLAND);
+  const sourceId = (await store.stockSources(world.tenantId))[0]!.stockSourceId;
+  const scopeOf = async () => (await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
+    `SELECT s.write_scope_id FROM tenant_data.write_scope s JOIN tenant_data.product p USING (tenant_id, product_id)
+      WHERE s.field = 'QUANTITY' AND p.sku = 'syn-prod-3'`)).rows))[0]!.write_scope_id as string;
+  const scope = await scopeOf();
+  const settle = async (outcome: 'APPLIED' | 'REFUSED') => {
+    for (let i = 0; i < 4; i++) {
+      const claim = await queue.claimNext(world.tenantId, scope, now(), DEFAULT_RETRY_POLICY);
+      if (claim.kind !== 'DISPATCH') return;
+      const w = (claim as Extract<typeof claim, { kind: 'DISPATCH' }>).write;
+      await queue.recordOutcome(world.tenantId, w, outcome === 'APPLIED'
+        ? { channelWriteId: w.channelWriteId, status: 'ACCEPTED', appliedImmediately: true }
+        : { channelWriteId: w.channelWriteId, status: 'REJECTED', error: { class: 'PERMANENT', code: 'VALIDATION', scope: 'ITEM', message: 'synthetic refusal', raiseAlert: false, httpStatus: 400 } },
+      now(), DEFAULT_RETRY_POLICY);
+    }
+  };
+  const writesFor = (r: { writes: Array<{ writeScopeId: string; quantity: number }> }) => r.writes.filter((w) => w.writeScopeId === scope).map((w) => w.quantity);
+  // Применённое значение канала: остаток 7, буфер 2 → 5
+  // Правило канала — явно: прежние тесты файла меняли потолок и порог выставления
+  await store.enableStockSync(world.tenantId, account, { bufferUnits: 2, maxQuantity: null, minQuantityToList: 0, acknowledgeSideEffects: false }, owner());
+  await store.importStock(world.tenantId, sourceId, [{ sku: '3503', quantity: 7 }], owner());
+  await store.recalculate(world.tenantId, null, now());
+  await settle('APPLIED');
+  // Новая версия 6 (остаток 8) отвергнута каналом
+  await store.importStock(world.tenantId, sourceId, [{ sku: '3503', quantity: 8 }], owner());
+  assert.deepEqual(writesFor(await store.recalculate(world.tenantId, null, now())), [6]);
+  await settle('REFUSED');
+  // Остаток вернулся к 7: канал держит 5 — повторной записи нет
+  await store.importStock(world.tenantId, sourceId, [{ sku: '3503', quantity: 7 }], owner());
+  assert.deepEqual(writesFor(await store.recalculate(world.tenantId, null, now())), [], 'the channel already holds 5');
+  // Остаток 9: канал держит 5, нужно 7 — запись есть
+  await store.importStock(world.tenantId, sourceId, [{ sku: '3503', quantity: 9 }], owner());
+  assert.deepEqual(writesFor(await store.recalculate(world.tenantId, null, now())), [7]);
+});

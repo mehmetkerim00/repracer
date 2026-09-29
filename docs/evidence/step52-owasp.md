@@ -20,7 +20,7 @@
 - Изоляция тенантов в БД: общая схема, `tenant_id NOT NULL` в каждой таблице, RLS `ENABLE` + `FORCE`, составные FK,
   роли без `BYPASSRLS` ([ADR-0003](../adr/0003-tenant-isolation.md), [0001_foundation.sql](../../migrations/0001_foundation.sql)).
   Последняя проверка схемы проверяет это для всех таблиц и отсутствие `BYPASSRLS` у ролей
-  ([0145_verify_schema_invariants_v43.sql](../../migrations/0145_verify_schema_invariants_v43.sql)).
+  ([0147_verify_schema_invariants_v44.sql](../../migrations/0147_verify_schema_invariants_v44.sql)).
 - Роли подключения разделены [Р-90, Р-96]: у пути решения нет прав на аудит, членства, тенантов, остановки человеком;
   права — списком разрешённого и по столбцам [Р-100] ([0058_role_separation.sql](../../migrations/0058_role_separation.sql),
   [0062_decision_path_allow_list.sql](../../migrations/0062_decision_path_allow_list.sql)).
@@ -97,7 +97,7 @@
   столбцов, фиксированные статусы) и в одном месте для значений — `worldSummaries`, где идентификаторы тенантов предварительно
   проверяются регулярным выражением UUID, а время — разбором даты
   ([packages/pricing-store-pg/src/store.ts](../../packages/pricing-store-pg/src/store.ts)).
-- `SECURITY DEFINER` — с фиксированным `search_path`; это проверяет правило схемы ([0143](../../migrations/0145_verify_schema_invariants_v43.sql)).
+- `SECURITY DEFINER` — с фиксированным `search_path`; это проверяет правило схемы ([0143](../../migrations/0147_verify_schema_invariants_v44.sql)).
 - XSS: консоль — React, `dangerouslySetInnerHTML` в коде нет; панель оператора пишет значения через `textContent`
   ([apps/operator/server/page.ts](../../apps/operator/server/page.ts)).
 - Имя файла выгрузки очищается до `[\w.\-]` в `Content-Disposition` ([stand-server.ts](../../apps/console/server/stand-server.ts)).
@@ -295,18 +295,37 @@
 | A02, A05 | `Strict-Transport-Security: max-age=31536000` и `-Server` у консоли и лендинга на прокси (TLS кончается там) | [deploy/production/snippets.caddy](../../deploy/production/snippets.caddy) | — |
 | A08 | `permissions: contents: read` — токен заданий CI только читает репозиторий | [.github/workflows/ci.yml](../../.github/workflows/ci.yml) | Действия по SHA и образы по digest — отдельно (нужна сеть и сверка) |
 
+## Исправлено в шаге 53
+
+Порядок — по заданию шага 53: частота, CSP, закрепление, затем три крупных пункта, которые в шаг не вошли.
+
+| Категория | Что сделано | Где | Проверка |
+|---|---|---|---|
+| A04 (п. 8) | Ограничение частоты в HTTP-слое консоли, ДО разбора тела и проверки входа: скользящее окно 60 с на ключ клиента. Ключ — SHA-256 заголовка `Authorization` (ключ Inbound API, токен продавца, токен гостя демо — у каждого свой счётчик) или адрес клиента без него; `X-Forwarded-For` учитывается только при `REPRACER_CONSOLE_TRUST_PROXY=on` (в промышленном профиле консоль стоит за Caddy). Пределы — `REPRACER_CONSOLE_RATE_AUTHORIZED` (600) и `REPRACER_CONSOLE_RATE_ANONYMOUS` (120). Отказ — `429 RATE_LIMITED` с `Retry-After` и текстом словаря DE/EN | [stand-server.ts](../../apps/console/server/stand-server.ts) (`createRateLimiter`), [config.ts](../../apps/console/server/config.ts), [deploy/console](../../deploy/console/compose.yaml) | [static.test.ts](../../apps/console/test/static.test.ts): 429 после предела, чужой ключ не делит счётчик, `X-Forwarded-For` без доверия прокси игнорируется |
+| A05 (п. 2) | Полная CSP консоли: `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' <origin поставщика identity>; frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'`. Origin поставщика берётся из конфигурации (издатель и адрес discovery) — у страницы нет другого внешнего адресата | [stand-server.ts](../../apps/console/server/stand-server.ts) (`consoleContentSecurityPolicy`), [console-service.ts](../../apps/console/server/console-service.ts) | тест HTTP-слоя: заголовок на странице, API и ошибке; origin поставщика в `connect-src` |
+| A06, A08 (п. 3) | Действия GitHub закреплены по SHA коммита (с тегом в комментарии), образы — `тег@sha256:…` в CI и во всех `deploy/*/compose.yaml` и смоуке развёртываний; `npm audit --omit=dev --audit-level=high` — блокирующий, отчёт по зависимостям разработки — отдельным неблокирующим шагом | [ci.yml](../../.github/workflows/ci.yml), `deploy/*/compose.yaml`, [deploy-smoke.sh](../../scripts/deploy-smoke.sh) | полный прогон CI поднимает развёртывания по закреплённым образам |
+
+**Не вошло в шаг 53 — первая строка плана шага 54** (оценки прежние):
+
+1. **A09 (п. 9): журналы процессов и прокси ≥ 12 месяцев.** Централизованный сбор со сроком хранения; выбор хранилища — решение владельца. ~1–2 дня.
+2. **A02 (п. 6): шифрование и вынос резервной копии.** Шифрование открытым ключом в `backup-loop.sh` (закрытый — вне сервера), выгрузка за пределы машины, тест восстановления из шифрованной копии. Сначала — проверить, есть ли в образе `postgres:16.10-bookworm` нужный инструмент шифрования (проверить). ~1 день.
+3. **A01/A05 (п. 7): изоляция панели оператора (OQ-227).** Unix-сокет или проверка в смоуке развёртываний «порт панели недоступен снаружи». ~0,5–1 день.
+
 ## Сводка
+
+Состояние после шага 53.
+
 
 | Категория (2021) | Оценка | Главное |
 |---|---|---|
 | A01 Broken Access Control | соответствует | RLS + FORCE, роли по столбцам, второй фактор в базе, мутационная проверка; панель — OQ-227 |
 | A02 Cryptographic Failures | частично | AES-256-GCM с AAD, RS256/ES256; HSTS у прокси — шаг 52; копия БД не шифруется (план) |
 | A03 Injection | соответствует | параметризованный SQL, UUID-проверка в единственной интерполяции значений, React/`textContent` |
-| A04 Insecure Design | соответствует | инварианты цены в БД, тень по умолчанию, fail-closed; нет общего ограничения частоты |
-| A05 Security Misconfiguration | частично | секреты файлами, non-root read-only, лендинг с CSP; у консоли с шага 52 — frame-ancestors, X-Frame-Options, nosniff, Referrer-Policy; полной CSP (`default-src`, `script-src`, `connect-src`) нет — план |
-| A06 Vulnerable and Outdated Components | частично (было «слабое место») | мало зависимостей, точные версии; с шага 52 — `npm audit --audit-level=high` в быстром задании CI и Dependabot для npm и действий GitHub; образы развёртываний по тегу, а не digest (план) |
+| A04 Insecure Design | соответствует | инварианты цены в БД, тень по умолчанию, fail-closed; ограничение частоты в HTTP-слое консоли — шаг 53 |
+| A05 Security Misconfiguration | соответствует | секреты файлами, non-root read-only, лендинг с CSP; у консоли — полная CSP (шаг 53), X-Frame-Options, nosniff, Referrer-Policy; изоляция панели — план шага 54 (OQ-227) |
+| A06 Vulnerable and Outdated Components | соответствует (было «слабое место») | мало зависимостей, точные версии; с шага 52 — `npm audit --audit-level=high` в быстром задании CI и Dependabot для npm и действий GitHub; с шага 53 — образы по digest, действия по SHA |
 | A07 Identification and Authentication Failures | частично | внешний IdP, строгая проверка JWT, PKCE, MFA из ID-токена; ZITADEL живьём не проверен (OQ-141) |
-| A08 Software and Data Integrity Failures | частично | lock-файл, снимки с SHA-256, подписи вебхуков; `permissions: contents: read` в CI — шаг 52; actions по тегу, а не SHA (план) |
+| A08 Software and Data Integrity Failures | соответствует | lock-файл, снимки с SHA-256, подписи вебхуков; `permissions: contents: read` в CI — шаг 52; с шага 53 — действия по SHA, образы по digest |
 | A09 Security Logging and Monitoring Failures | частично | аудит 18 мес, алерты с доставкой; отметка (OQ-188) и почта (OQ-224) не проверены живьём, журналы процессов без срока |
 | A10 Server-Side Request Forgery | соответствует | все исходящие адреса — константы или конфигурация; `kid` ограничен формой и частотой |
 

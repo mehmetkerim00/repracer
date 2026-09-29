@@ -232,6 +232,21 @@ function auditRow(r: Row): ConsoleAuditRow {
   };
 }
 
+/**
+ * Шаг 53 (ревью шага 52, находка 13): последняя запись цены единицы упёрлась в бюджет правок, и он НЕ обновился (`renewed = false`) или
+ * обновился (`renewed = true`) — прошли сутки витрины или время обновления, названное каналом. Выражения тенанта, единицы, «сейчас» и
+ * «сегодня витрины» передаёт вызывающий: контекст оценки и выбор единиц расписания устроены по-разному
+ */
+function priceBudgetExhaustedSql(o: { tenant: string; scope: string; now: string; today: string; renewed: boolean }): string {
+  const renewedExpr = `((h.end_params ->> 'resetsAt') IS NOT NULL AND (h.end_params ->> 'resetsAt')::timestamptz <= ${o.now}
+      OR h.budget_day IS NOT NULL AND h.budget_day < (${o.today}))`;
+  return `SELECT h.end_params, h.budget_day FROM tenant_data.write_scope_sync_state ss
+     JOIN tenant_data.channel_write_history h ON h.tenant_id = ss.tenant_id AND h.write_scope_id = ss.write_scope_id AND h.version = ss.latest_version_created
+    WHERE ss.tenant_id = ${o.tenant} AND ss.write_scope_id = ${o.scope} AND h.field = 'PRICE' AND h.final_status = 'BUDGET_EXHAUSTED'
+      AND ((h.end_params ->> 'resetsAt') IS NOT NULL OR h.budget_day IS NOT NULL)
+      AND ${o.renewed ? '' : 'NOT '}${renewedExpr}`;
+}
+
 const SCOPE_JSON = `json_build_object(
   'row', row_to_json(sc),
   'observed', (SELECT o.observed_amount_minor FROM channel_data.observed_channel_state o
@@ -250,6 +265,11 @@ const SCOPE_JSON = `json_build_object(
   'changes', (SELECT count(*) FROM tenant_data.price_history h
                WHERE h.tenant_id = $1 AND h.write_scope_id = sc.write_scope_id AND h.corrects_price_history_id IS NULL
                  AND h.accepted_at >= $2::timestamptz - interval '1 hour' AND h.accepted_at <= $2::timestamptz),
+  -- Шаг 53: пока бюджет последней записи цены не обновился, новое решение уйти некуда — оценка пропускается без решения
+  'budgetExhausted', (SELECT json_build_object('resetsAt', x.end_params ->> 'resetsAt', 'budgetDay', x.budget_day)
+                        FROM (${priceBudgetExhaustedSql({ tenant: '$1', scope: 'sc.write_scope_id', now: '$2::timestamptz',
+                          today: `SELECT ($2::timestamptz AT TIME ZONE m.time_zone)::date FROM platform.marketplace m WHERE m.channel = sc.channel AND m.marketplace = sc.marketplace AND m.time_zone IS NOT NULL`,
+                          renewed: false })}) x LIMIT 1),
   'bounds', (${BOUNDS_ROWS}),
   'halt', (${ACTIVE_HALT_JSON}),
   'distrust', (${ACTIVE_DISTRUST_JSON}),
@@ -526,6 +546,7 @@ function toScopeContext(j: Row, now: Instant): ScopeEvaluationContext {
     priceStop,
     blocking: blocking ? { errorCode: blocking.errorCode, since: iso(blocking.since) } : null,
     changesInLastHour: Number(j.changes ?? 0),
+    ...(j.budgetExhausted ? { budgetExhausted: { resetsAt: (j.budgetExhausted as Row).resetsAt ?? null, budgetDay: (j.budgetExhausted as Row).budgetDay ?? null } } : {}),
   };
 }
 
@@ -2323,7 +2344,12 @@ export class PgPricingStore implements PricingStore {
                                ORDER BY d.decided_at DESC LIMIT 1) last ON true
           WHERE s.tenant_id = $1 AND s.channel_account_id = $2 AND s.field = 'PRICE' AND s.pricing_mode = 'ENGINE' AND s.status = 'ACTIVE'
             AND ps.type IN ('FIXED', 'TARGET_MARGIN')
-            AND (last.decided_at IS NULL OR last.decided_at < $3::timestamptz - interval '24 hours')
+            AND (last.decided_at IS NULL OR last.decided_at < $3::timestamptz - interval '24 hours'
+                 -- Шаг 53: запись цены упёрлась в бюджет, и он обновился — единица должна сразу, а не через сутки от прошлого решения
+                 OR EXISTS (${priceBudgetExhaustedSql({ tenant: 's.tenant_id', scope: 's.write_scope_id', now: '$3::timestamptz',
+                      today: `SELECT ($3::timestamptz AT TIME ZONE m.time_zone)::date FROM tenant_data.offer_mapping om JOIN platform.marketplace m ON m.channel = s.channel AND m.marketplace = om.marketplace
+                               WHERE om.tenant_id = s.tenant_id AND om.price_write_scope_id = s.write_scope_id AND m.time_zone IS NOT NULL ORDER BY om.created_at LIMIT 1`,
+                      renewed: true })}))
           ORDER BY last.decided_at ASC NULLS FIRST, s.write_scope_id
           LIMIT $4`, [tenantId, channelAccountId, now, Math.max(0, limit)]);
       return rows.map((r) => r.write_scope_id as string);
