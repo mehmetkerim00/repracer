@@ -62,9 +62,12 @@ archive_project() {
       echo "{\"event\":\"ALERT\",\"code\":\"LOGS_ARCHIVE_FAILED\",\"severity\":\"WARNING\",\"project\":\"$P\",\"from\":\"$from\"}" >&2
       return 1
     fi
-    cat "$out.part" >> "$out" && rm -f "$out.part"
+    # Ревью шага 55, находка 5: каждая запись проверяется — дописывание, упавшее на полном диске, не двигает отметку и не теряет отрезок
+    if ! { cat "$out.part" >> "$out" && rm -f "$out.part" && printf '%s' "$seg_end" > "$mark.part" && mv "$mark.part" "$mark"; }; then
+      echo "{\"event\":\"ALERT\",\"code\":\"LOGS_ARCHIVE_FAILED\",\"severity\":\"WARNING\",\"project\":\"$P\",\"from\":\"$from\",\"stage\":\"append\"}" >&2
+      return 1
+    fi
     # Отметка — после того, как отрезок записан: оборванный заход повторит отрезок, а не пропустит
-    printf '%s' "$seg_end" > "$mark.part" && mv "$mark.part" "$mark"
     from="$seg_end"
   done
 
@@ -74,11 +77,16 @@ archive_project() {
     [[ "$M" < "$CUTOFF_MONTH" ]] || continue
     DEST="$ARCHIVE/platform=logs/$P/$M.log.gz"
     if [[ ! -f "$DEST" ]]; then
-      cat $(ls "$HOT/$P/$M"-*.log.gz | sort) > "$DEST.part"
-      sha "$DEST.part" > "$DEST.sha256"
-      mv "$DEST.part" "$DEST"
+      # Ревью шага 55, находка 5: урезанный архив (полный диск) не получает суммы и не заменяет сутки — сутки остаются, заход — провал
+      if ! { cat $(ls "$HOT/$P/$M"-*.log.gz | sort) > "$DEST.part" && gzip -t "$DEST.part" && sha "$DEST.part" > "$DEST.sha256" && mv "$DEST.part" "$DEST"; }; then
+        rm -f "$DEST.part" "$DEST.sha256"
+        echo "{\"event\":\"ALERT\",\"code\":\"LOGS_ARCHIVE_FAILED\",\"severity\":\"WARNING\",\"project\":\"$P\",\"month\":\"$M\",\"stage\":\"month\"}" >&2
+        return 1
+      fi
       echo "{\"event\":\"LOGS_MONTH_ARCHIVED\",\"project\":\"$P\",\"month\":\"$M\"}"
     fi
+    # Сутки удаляются только за целым архивом месяца
+    gzip -t "$DEST" || { echo "{\"event\":\"ALERT\",\"code\":\"LOGS_ARCHIVE_FAILED\",\"severity\":\"WARNING\",\"project\":\"$P\",\"month\":\"$M\",\"stage\":\"verify\"}" >&2; return 1; }
     rm -f "$HOT/$P/$M"-*.log.gz
   done
 

@@ -1,4 +1,5 @@
 import type { AdapterCallContext, AdapterLogger, AlertSink, ChannelAdapter, CompetitorSnapshot } from '@repracer/channel-port';
+import { systemClock } from '@repracer/channel-port';
 import { createKafka, createKeyedProducer, OutboxRelay, runKeyedConsumer, TOPICS, type ReceivedMessage, type RunningConsumer } from '@repracer/broker';
 import { createPricingPipeline } from '@repracer/pricing-pipeline';
 import { createPool, PgPricingStore, PgWriteQueueStore, type PgPool } from '@repracer/pricing-store-pg';
@@ -44,6 +45,8 @@ export interface WorkerOptions {
   onConsumed?: (message: ReceivedMessage, workerId: string) => Promise<void>;
   /** Обход-страховка прошёл: точка входа считает по нему живость процесса (ревью шага 27, находка 3) */
   onSweep?: (result: unknown) => Promise<void>;
+  /** Шаг 56 (п. 6): часы пути решения — зависимость; сроки вызовов и время решений не читают настоящие часы мимо неё */
+  now?: () => string;
 }
 
 export interface RunningWorker {
@@ -51,6 +54,7 @@ export interface RunningWorker {
 }
 
 export async function startWorker(options: WorkerOptions): Promise<RunningWorker> {
+  const clock = options.now ?? systemClock.now;
   const pool: PgPool = createPool(options.pgUrl, { max: 16, applicationName: `repracer-worker-${options.workerId}` });
   const scanPool: PgPool = createPool(options.dispatcherPgUrl, { max: 2, applicationName: `repracer-worker-${options.workerId}-sweep` });
   const relayPool: PgPool | null = options.relayPgUrl ? createPool(options.relayPgUrl, { max: 1, applicationName: `repracer-worker-${options.workerId}-relay` }) : null;
@@ -59,14 +63,14 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
     store: new PgWriteQueueStore(pool, { scanPool }),
     adapterFor: (tenantId, accountId) => options.adapterFor(tenantId, accountId),
     alerts: options.alerts,
-    now: () => new Date().toISOString(),
+    now: clock,
   });
   const pipelines = new Map<string, ReturnType<typeof createPricingPipeline>>();
   const pipelineFor = async (tenantId: string, accountId: string) => {
     const key = `${tenantId}:${accountId}`;
     let p = pipelines.get(key);
     if (!p) {
-      p = createPricingPipeline({ store, adapter: await options.adapterFor(tenantId, accountId), alerts: options.alerts, logger: options.logger, now: () => new Date().toISOString(), dispatcher });
+      p = createPricingPipeline({ store, adapter: await options.adapterFor(tenantId, accountId), alerts: options.alerts, logger: options.logger, now: clock, dispatcher });
       pipelines.set(key, p);
     }
     return p;
@@ -94,7 +98,7 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
         tenantId: envelope.tenantId as AdapterCallContext['tenantId'],
         channelAccountId: envelope.channelAccountId as AdapterCallContext['channelAccountId'],
         correlationId: envelope.correlationId,
-        deadline: new Date(Date.now() + 60_000).toISOString(),
+        deadline: new Date(Date.parse(clock()) + 60_000).toISOString(),
       };
       await (await pipelineFor(envelope.tenantId, envelope.channelAccountId)).processSnapshot(ctx, envelope.snapshot);
     },

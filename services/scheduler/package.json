@@ -18,6 +18,7 @@
     "@repracer/pricing-pipeline": "0.1.0",
     "@repracer/pricing-store-pg": "0.1.0",
     "@repracer/service-runtime": "0.1.0",
+    "@repracer/stock-sync": "0.1.0",
     "pg": "8.23.0"
   },
   "devDependencies": {

@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0149_verify_schema_invariants_v44.sql';
+const VERIFY = 'migrations/0151_verify_schema_invariants_v44.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -2055,14 +2055,23 @@ export const STEP55_ROWS = [
     row: 'шаг 55 (OQ-240)', critical: false,
     invariant: 'квота приложения не выдаёт больше доли суток; закрытый круг без курсора, прерванный — с курсором; круг виден только своему тенанту',
     mutations: [
-      m(replaceInFunction('platform.reserve_channel_app_call(text,text,integer,timestamp with time zone)', 'WHERE q.spent < least(q.day_limit, allowed)', 'WHERE true'),
-        smoke('the app quota grants more than the slice of the day (OQ-240)')),
-      m(replaceInFunction('platform.reserve_channel_app_call(text,text,integer,timestamp with time zone)', '+ 3600) / 86400.0', '+ 86400) / 86400.0'),
-        smoke('the app quota grants more than the slice of the day (OQ-240)')),
-      m(replaceInFunction('tenant_data.save_discovery_circle(uuid,uuid,text,text,text,timestamp with time zone)', "IF (p_stop = 'COMPLETED') <> (p_cursor IS NULL) THEN", 'IF false THEN'),
+      m(replaceInFunction('platform.reserve_channel_app_call(text,text,integer,timestamp with time zone)', 'WHERE q.spent < per_hour', 'WHERE true'),
+        smoke('the app quota grants more than the slice of the hour (OQ-240)')),
+      m(replaceInFunction('platform.reserve_channel_app_call(text,text,integer,timestamp with time zone)', 'per_hour := ceil(p_day_limit / 24.0)::integer;', 'per_hour := p_day_limit;'),
+        smoke('the app quota grants more than the slice of the hour (OQ-240)')),
+      m(replaceInFunction('tenant_data.save_discovery_circle(uuid,uuid,text,text,text,timestamp with time zone)', "IF p_stop = 'COMPLETED' AND p_cursor IS NOT NULL OR", 'IF false AND'),
         smoke('a completed discovery circle keeps a cursor (OQ-240)')),
       m('ALTER POLICY discovery_circle ON tenant_data.channel_discovery_circle USING (true) WITH CHECK (true)',
         smoke('another tenant reads the discovery circle (OQ-240)')),
+    ],
+  },
+  {
+    // Шаг 56 (0150, ревью шага 54, находка 8): чтение заказов, упёршееся в предел страниц, продолжается с записанного места
+    row: 'шаг 56 (место чтения заказов)', critical: false,
+    invariant: 'место чтения заказов — начало окна и курсор вместе или ни того ни другого',
+    mutations: [
+      m(replaceInFunction('tenant_data.save_order_read_position(uuid,uuid,timestamp with time zone,text,timestamp with time zone)', 'IF (p_since IS NULL) <> (p_cursor IS NULL) THEN', 'IF false THEN'),
+        smoke('an order read position without its cursor (step 56)')),
     ],
   },
 ];

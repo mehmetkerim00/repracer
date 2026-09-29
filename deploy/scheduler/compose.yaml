@@ -30,6 +30,8 @@ services:
       # Секреты — файлами, не значениями: в переменных окружения их видят все процессы контейнера и docker inspect
       REPRACER_SCHEDULER_PG_URL_FILE: /run/secrets/scheduler_pg_url
       REPRACER_APP_PG_URL_FILE: /run/secrets/app_pg_url
+      # Шаг 56: роль остатков — чтение заказов канала (работа order-lines) [Р-25]
+      REPRACER_STOCK_PG_URL_FILE: /run/secrets/stock_pg_url
       REPRACER_EXPORTER_PG_URL_FILE: /run/secrets/exporter_pg_url
       REPRACER_CH_INGEST_PASSWORD_FILE: /run/secrets/ch_ingest_password
       REPRACER_CH_VERIFIER_PASSWORD_FILE: /run/secrets/ch_verifier_password

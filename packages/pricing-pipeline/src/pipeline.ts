@@ -732,9 +732,12 @@ export function createPricingPipeline(deps: PipelineDeps) {
       const { queries, total } = await store.pickReconciliationSample(ctx.tenantId, ctx.channelAccountId, options.size, options.cycle);
       if (queries.length === 0) return { snapshots: [], failures: [], reconciliation: emptyReconciliation(), queries: 0, total };
       const polled = await pollCompetitors(ctx, queries, { reconcile: { ...(options.graceSeconds ? { graceSeconds: options.graceSeconds } : {}) } });
-      // Шаг 55 (OQ-241): сверенные товары отмечаются — давность считается и у товара, по которому канал ничего не вернул; отказавшие остаются самыми давними
-      const failed = new Set(polled.failures.map((f) => `${f.query.marketplace}|${f.query.channelProductRef}|${f.query.condition}`));
-      await store.markPolled(ctx.tenantId, ctx.channelAccountId, queries.filter((q) => !failed.has(`${q.marketplace}|${q.channelProductRef}|${q.condition}`)), deps.now());
+      /**
+       * Шаг 55 (OQ-241): отмечается каждый товар попытки — и сверенный, и отказавший. Ревью шага 55, находка 2: отказавший, не отмеченный,
+       * навсегда оставался «самым давним», и 20 товаров с постоянным отказом занимали каждое окно — остальные не сверялись бы никогда.
+       * Отказавший повторится в своём круге; отказ окна виден провалом запуска (jobs.ts)
+       */
+      await store.markPolled(ctx.tenantId, ctx.channelAccountId, queries, deps.now());
       return { ...polled, queries: queries.length, total };
     },
 
@@ -948,9 +951,11 @@ export function createPricingPipeline(deps: PipelineDeps) {
      * Страницы — пока канал отдаёт курсор (не больше maxPages); наблюдения записываются хранилищем, назначение стратегии оферу с
      * действующим правилом отклоняет база (0082). Возвращает офферы с ценообразованием канала для экрана консоли.
      */
-    async discoverOffers(ctx: AdapterCallContext, options: { pageLimit?: number; maxPages?: number; quotas?: Readonly<Record<string, number>>; deadlineMarginMs?: number } = {}): Promise<{
+    async discoverOffers(ctx: AdapterCallContext, options: { pageLimit?: number; maxPages?: number; quotas?: Readonly<Record<string, number>>; deadlineMarginMs?: number;
+      /** Шаг 56 (ревью шага 55, находка 4): не начинать НОВЫЙ круг раньше, чем через столько после закрытия прошлого; прерванный — продолжать сразу */
+      circleEveryMs?: number } = {}): Promise<{
       offers: number; recorded: number; catalogued: number; withChannelPricing: Array<{ marketplace: string; externalSku: string; automatedPricing: boolean; channelBounds: boolean }>;
-      stop: DiscoveryStop; resumed: boolean;
+      stop: DiscoveryStop | 'NOT_DUE'; resumed: boolean;
     }> {
       /**
        * Шаг 55 (OQ-240; ревью шага 54, находка 9): обход — КРУГ. Заход продолжает с курсора, на котором остановился прошлый, и останавливается
@@ -959,7 +964,13 @@ export function createPricingPipeline(deps: PipelineDeps) {
        * продавца обходится за несколько заходов, а не обрывается каждые сутки на одном месте. Страницы, которых квота приложения не
        * касается, бюджетом ядра не ограничиваются
        */
-      const startedFrom = (await store.discoveryCircleCursor?.(ctx.tenantId, ctx.channelAccountId)) ?? null;
+      const state = (await store.discoveryCircleState?.(ctx.tenantId, ctx.channelAccountId)) ?? null;
+      const startedFrom = state ? state.cursor : ((await store.discoveryCircleCursor?.(ctx.tenantId, ctx.channelAccountId)) ?? null);
+      // Шаг 56: круг закрыт недавно, продолжать нечего — канал не трогаем; заход работы каждый час, круг — раз в `circleEveryMs`
+      if (startedFrom === null && options.circleEveryMs !== undefined && state?.lastCircleCompletedAt
+          && Date.parse(deps.now()) - Date.parse(state.lastCircleCompletedAt) < options.circleEveryMs) {
+        return { offers: 0, recorded: 0, catalogued: 0, withChannelPricing: [], stop: 'NOT_DUE', resumed: false };
+      }
       let cursor: string | undefined = startedFrom ?? undefined;
       let offers = 0;
       let recorded = 0;
@@ -974,16 +985,22 @@ export function createPricingPipeline(deps: PipelineDeps) {
       const maxPages = options.maxPages ?? 5000;
       const margin = options.deadlineMarginMs ?? 60_000;
       let stop: DiscoveryStop | null = null;
+      // Ревью шага 55, находка 3: запас до срока — не меньше двух самых долгих страниц захода (страница Inventory eBay — до 21 вызова)
+      let longestPageMs = 0;
+      let pagesRead = 0;
+      try {
       for (let page = 0; stop === null; page++) {
         if (page >= maxPages) { stop = 'PAGE_LIMIT'; break; }
-        if (Date.parse(ctx.deadline) - Date.parse(deps.now()) < margin) { stop = 'DEADLINE'; break; }
+        if (Date.parse(ctx.deadline) - Date.parse(deps.now()) < Math.max(margin, 2 * longestPageMs)) { stop = 'DEADLINE'; break; }
         const quota = adapter.discoveryQuotaOf?.(cursor) ?? null;
         const dayLimit = quota ? options.quotas?.[quota] : undefined;
         if (quota && dayLimit !== undefined && store.reserveAppCall && !(await store.reserveAppCall(adapter.descriptor.channel, quota, dayLimit, deps.now()))) {
           stop = 'APP_QUOTA';
           break;
         }
+        const pageStartedMs = Date.parse(deps.now());
         const result = await waitingForBudget(ctx, () => adapter.discoverOffers(ctx, { limit: options.pageLimit ?? 20, ...(cursor ? { cursor } : {}) }));
+        longestPageMs = Math.max(longestPageMs, Date.parse(deps.now()) - pageStartedMs);
         offers += result.items.length;
         const observations = result.items.flatMap((o) => (o.channelPricing && o.identity.externalSku && o.identity.marketplace
           ? [{ marketplace: o.identity.marketplace, externalSku: o.identity.externalSku, ...o.channelPricing, source: 'DISCOVERY' as const, observedAt: deps.now() }]
@@ -1013,6 +1030,21 @@ export function createPricingPipeline(deps: PipelineDeps) {
         }
         seen.add(result.nextCursor);
         cursor = result.nextCursor;
+        pagesRead += 1;
+      }
+      } catch (error) {
+        /**
+         * Ревью шага 55, находка 3: заход, упавший посреди (отказ канала, срок вызова), сохраняет место последней прочитанной страницы —
+         * прочитанное не пропадает как прогресс. Упал на самом месте продолжения, не прочитав ни страницы, — круг сбрасывается к началу:
+         * страница, отказывающая всегда, не держит круг (и новые предложения первой фазы) на себе
+         */
+        if (pagesRead > 0 && cursor !== undefined) {
+          await store.saveDiscoveryCircle?.(ctx.tenantId, ctx.channelAccountId, { startedFrom, cursor, stop: 'FAILED', at: deps.now() });
+        } else if (startedFrom !== null) {
+          await store.saveDiscoveryCircle?.(ctx.tenantId, ctx.channelAccountId, { startedFrom, cursor: null, stop: 'FAILED', at: deps.now() });
+          await emit(ctx, [{ kind: 'alert', code: 'DISCOVERY_CIRCLE_RESET', severity: 'WARNING', details: { reason: String((error as { code?: string })?.code ?? 'FAILED').slice(0, 60) } }]);
+        }
+        throw error;
       }
       if (stop === 'PAGE_LIMIT') {
         await emit(ctx, [{ kind: 'alert', code: 'DISCOVERY_PAGE_LIMIT_REACHED', severity: 'WARNING', details: { pages: maxPages, offers } }]);

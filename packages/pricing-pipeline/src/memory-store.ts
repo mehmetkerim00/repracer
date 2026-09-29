@@ -1,3 +1,4 @@
+import { systemClock } from '@repracer/channel-port';
 import { createHash } from 'node:crypto';
 import { EXPLANATION_RULESETS } from './dictionary.ts';
 import { stalestFirst } from './reconciliation.ts';
@@ -319,7 +320,16 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   private readonly changes = new Map<string, number[]>();
   private seq = 0;
 
-  constructor(seed: MemorySeed, options: { tenantId?: string } = {}) {
+  /**
+   * Шаг 56 (п. 6): часы хранилища — зависимость. Сроки аренды заданий (второй фактор задания проверяется по ЖИВОЙ аренде), граница суток
+   * Omnibus «не раньше сегодня», времена создания — по часам мира, а не по настоящим: стенд с виртуальными часами иначе видел бы
+   * аренду истёкшей или сутки чужими в зависимости от часа запуска
+   */
+  private readonly now: () => Instant;
+  private nowMs(): number { return Date.parse(this.now()); }
+
+  constructor(seed: MemorySeed, options: { tenantId?: string; now?: () => Instant } = {}) {
+    this.now = options.now ?? systemClock.now;
     this.tenantId = options.tenantId ?? 'memory-tenant';
     this.channel = seed.channel ?? 'KAUFLAND';
     // Регион — только у Amazon (SP-API); Kaufland и eBay (витрина — часть ключа) без региона
@@ -1036,7 +1046,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
 
   /** Каталог мира в памяти задаёт сценарий: обнаружение его не расширяет (стенд утверждает сценарий, а не каталог) */
   /** Шаг 55: круг обнаружения и суточная квота приложения — как в PostgreSQL (0148) */
-  readonly discoveryCircle = new Map<string, { cursor: string | null; stop: DiscoveryStop; at: Instant }>();
+  readonly discoveryCircle = new Map<string, { cursor: string | null; stop: DiscoveryStop; at: Instant; startedAt: Instant | null; completedAt: Instant | null }>();
   readonly appQuota = new Map<string, number>();
 
   async discoveryCircleCursor(_tenantId: string, channelAccountId: string): Promise<string | null> {
@@ -1044,16 +1054,24 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   }
 
   async saveDiscoveryCircle(_tenantId: string, channelAccountId: string, entry: { startedFrom: string | null; cursor: string | null; stop: DiscoveryStop; at: Instant }): Promise<void> {
-    if ((entry.stop === 'COMPLETED') !== (entry.cursor === null)) throw new Error('a completed circle has no cursor, an interrupted one has one');
-    this.discoveryCircle.set(channelAccountId, { cursor: entry.cursor, stop: entry.stop, at: entry.at });
+    if (entry.stop === 'COMPLETED' && entry.cursor !== null || ['DEADLINE', 'APP_QUOTA', 'PAGE_LIMIT'].includes(entry.stop) && entry.cursor === null) {
+      throw new Error('a completed circle has no cursor, an interrupted one has one');
+    }
+    const prev = this.discoveryCircle.get(channelAccountId);
+    this.discoveryCircle.set(channelAccountId, { cursor: entry.cursor, stop: entry.stop, at: entry.at,
+      startedAt: entry.startedFrom === null ? entry.at : (prev?.startedAt ?? null), completedAt: entry.stop === 'COMPLETED' ? entry.at : (prev?.completedAt ?? null) });
+  }
+
+  async discoveryCircleState(_tenantId: string, channelAccountId: string) {
+    const c = this.discoveryCircle.get(channelAccountId);
+    return c ? { cursor: c.cursor, circleStartedAt: c.startedAt, lastCircleCompletedAt: c.completedAt, lastStop: c.stop } : null;
   }
 
   async reserveAppCall(channel: string, quota: string, dayLimit: number, at: Instant): Promise<boolean> {
     if (!(dayLimit > 0)) throw new Error('app quota needs a positive daily limit');
-    const day = at.slice(0, 10);
-    const sinceMidnight = (Date.parse(at) - Date.parse(`${day}T00:00:00.000Z`)) / 1000;
-    const allowed = Math.min(dayLimit, Math.ceil((dayLimit * (sinceMidnight + 3600)) / 86_400));
-    const key = `${channel}|${quota}|${day}`;
+    // Шаг 56 (ревью шага 55, находка 6): как PostgreSQL (0150) — не больше ceil(лимит / 24) в час UTC
+    const allowed = Math.ceil(dayLimit / 24);
+    const key = `${channel}|${quota}|${at.slice(0, 13)}`;
     const spent = this.appQuota.get(key) ?? 0;
     if (spent >= allowed) return false;
     this.appQuota.set(key, spent + 1);
@@ -1286,10 +1304,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   }
 
   // --- PricingStore: включение репрайсинга ----------------------------------
-  async getPriceScope(_tenantId: string, writeScopeId: string): Promise<PriceScopeContext | null> {
-    const row = this.scopes.get(writeScopeId);
-    return row ? this.context(row) : null;
-  }
+
 
   async resolveBounds(_tenantId: string, writeScopeId: string): Promise<BoundsRead> {
     const row = this.scope(writeScopeId);
@@ -1318,7 +1333,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
 
   async omnibusCheck(_tenantId: string, writeScopeId: string, startsAt: Instant): Promise<OmnibusPriorPrice> {
     // Как omnibus_lowest_prior_price (0091): цены, которые канал не применил, не учитываются; цены мимо нас — кейсы расхождения
-    return omnibusLowestPriorPrice(this.priceHistory.filter((h) => h.writeScopeId === writeScopeId && !h.notApplied), this.timeZoneOf(writeScopeId), startsAt, new Date().toISOString(), {
+    return omnibusLowestPriorPrice(this.priceHistory.filter((h) => h.writeScopeId === writeScopeId && !h.notApplied), this.timeZoneOf(writeScopeId), startsAt, this.now(), {
       connectedAt: this.scopeConnectedAt.get(writeScopeId) ?? null,
       external: this.divergenceCases.filter((c) => c.writeScopeId === writeScopeId).map((c) => ({ at: c.openedAt, amountMinor: c.observedMinor })),
     });
@@ -1333,11 +1348,11 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     if (input.endsAt !== null && Date.parse(input.endsAt) <= Date.parse(input.startsAt)) return { status: 'INVALID', cause: 'PERIOD_INVALID' };
     // Как discount_announcement_guard: начало — не раньше текущих суток витрины (без пояса — суток UTC)
     const tz = this.timeZoneOf(input.writeScopeId) ?? 'UTC';
-    if (Date.parse(input.startsAt) < zonedDayStart(localDate(Date.now(), tz), tz)) return { status: 'INVALID', cause: 'STARTS_BEFORE_TODAY' };
+    if (Date.parse(input.startsAt) < zonedDayStart(localDate(this.nowMs(), tz), tz)) return { status: 'INVALID', cause: 'STARTS_BEFORE_TODAY' };
     const check = await this.omnibusCheck('', input.writeScopeId, input.startsAt);
     if (omnibusVerdict(check, input.referencePriceMinor) === 'VIOLATION') return { status: 'VIOLATION', check };
     const announcement: DiscountAnnouncementRow = {
-      ...input, announcementId: this.id('discount'), createdAt: new Date().toISOString(), createdByMembershipId: actor.membershipId, check,
+      ...input, announcementId: this.id('discount'), createdAt: this.now(), createdByMembershipId: actor.membershipId, check,
     };
     this.discounts.push(announcement);
     return { status: 'ANNOUNCED', announcement };
@@ -1379,7 +1394,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     if (!actor.bulkJobId) return false;
     const job = this.bulkJobs.find((j) => j.jobId === actor.bulkJobId);
     return job !== undefined && job.createdWithMfa && job.status === 'RUNNING'
-      && job.leaseUntil !== null && Date.parse(job.leaseUntil) > Date.now() && kinds.includes(job.kind);
+      && job.leaseUntil !== null && Date.parse(job.leaseUntil) > this.nowMs() && kinds.includes(job.kind);
   }
 
   private adminMember(actor: AdminActor): ConsoleMemberRow | null {
@@ -1447,9 +1462,9 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     if (waiting.length >= BULK_JOB_QUEUE_LIMIT) return { status: 'QUEUE_FULL' };
     // Предел участника меньше общего: один не занимает очередь тенанта [находка 14 ревью шага 31]
     if (waiting.filter((j) => j.createdByMembershipId === actor.membershipId).length >= BULK_JOB_MEMBER_QUEUE_LIMIT) return { status: 'QUEUE_FULL' };
-    const createdAt = new Date().toISOString();
+    const createdAt = this.now();
     const job: BulkJobRow = {
-      jobId: `job-${this.bulkJobs.length + 1}-${Date.now().toString(36)}`, kind: input.kind, status: 'PENDING', params: input.params, phase: 'PREPARING',
+      jobId: `job-${this.bulkJobs.length + 1}-${this.nowMs().toString(36)}`, kind: input.kind, status: 'PENDING', params: input.params, phase: 'PREPARING',
       totalItems: input.totalItems ?? null, doneItems: 0, result: null, errorCode: null, attempts: 0,
       createdWithMfa: actor.mfa === true, createdByMembershipId: actor.membershipId, createdByUserId: actor.userId, createdAt,
       startedAt: null, finishedAt: null, leaseOwner: null, leaseUntil: null, leaseExpired: false,
@@ -1459,14 +1474,14 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   }
 
   async claimBulkJob(_tenantId: string, owner: string, leaseSeconds: number): Promise<BulkJobRow | null> {
-    const now = Date.now();
+    const now = this.nowMs();
     const job = this.bulkJobs.find((j) => j.status === 'PENDING' || j.status === 'INTERRUPTED'
       || (j.status === 'RUNNING' && j.leaseUntil !== null && Date.parse(j.leaseUntil) <= now));
     if (!job) return null;
     job.status = 'RUNNING';
     job.leaseOwner = owner;
     job.leaseUntil = new Date(now + leaseSeconds * 1000).toISOString();
-    job.startedAt = job.startedAt ?? new Date().toISOString();
+    job.startedAt = job.startedAt ?? this.now();
     job.attempts += 1;
     job.phase = 'PREPARING';
     job.doneItems = 0;
@@ -1479,7 +1494,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     if (progress.phase !== undefined) job.phase = progress.phase;
     if (progress.done !== undefined) job.doneItems = progress.done;
     if (progress.total !== undefined) job.totalItems = progress.total;
-    job.leaseUntil = new Date(Date.now() + (progress.leaseSeconds ?? 60) * 1000).toISOString();
+    job.leaseUntil = new Date(this.nowMs() + (progress.leaseSeconds ?? 60) * 1000).toISOString();
     return true;
   }
 
@@ -1497,7 +1512,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     job.result = outcome.result ?? null;
     job.errorCode = outcome.status === 'FAILED' ? outcome.errorCode : null;
     job.phase = 'DONE';
-    job.finishedAt = new Date().toISOString();
+    job.finishedAt = this.now();
     job.leaseOwner = null;
     job.leaseUntil = null;
     return true;
@@ -1514,7 +1529,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     const job = this.bulkJobs.find((j) => j.jobId === jobId);
     if (!job || job.status !== 'PENDING') return 'NOT_WAITING';
     job.status = 'CANCELLED';
-    job.finishedAt = new Date().toISOString();
+    job.finishedAt = this.now();
     return 'CANCELLED';
   }
 
@@ -1561,7 +1576,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     if (input.scopeWriteScopeIds !== undefined && input.scopeWriteScopeIds !== null && input.scopeWriteScopeIds.length === 0) {
       throw Object.assign(new Error('the onboarding set is narrowed to nothing (Р-131, Р-149)'), { code: '23514' });
     }
-    const now = new Date().toISOString();
+    const now = this.now();
     const prev = this.onboarding;
     this.onboarding = {
       scopeWriteScopeIds: input.scopeWriteScopeIds === undefined ? (prev?.scopeWriteScopeIds ?? null) : input.scopeWriteScopeIds,
@@ -1574,7 +1589,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   async onboardingStatus(tenantId: string): Promise<OnboardingStepStatus[]> {
     const chosen = this.onboarding?.scopeWriteScopeIds ?? null;
     const rows = [...this.scopes.values()].filter((s) => s.status !== 'RETIRED' && (chosen === null || chosen.includes(s.writeScopeId)));
-    const now = new Date().toISOString() as Instant;
+    const now = this.now() as Instant;
     let costs = 0; let bounds = 0; let strategies = 0; let engines = 0;
     for (const s of rows) {
       const loaded = await this.loadScopeContext(tenantId, s.writeScopeId, now);
@@ -1624,7 +1639,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   }
 
   async scopesWithCost(tenantId: string): Promise<string[]> {
-    const now = new Date().toISOString() as Instant;
+    const now = this.now() as Instant;
     const ids: string[] = [];
     for (const s of this.scopes.values()) {
       if (s.status === 'RETIRED') continue;
@@ -1708,7 +1723,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     };
     this.rememberStrategy(strategy);
     this.strategyMeta.set(`${strategy.strategyId}@${strategy.version}`, {
-      strategyId: strategy.strategyId, version: strategy.version, name: input.name.trim(), status: 'ACTIVE', createdAt: new Date().toISOString(), createdByMembershipId: actor.membershipId,
+      strategyId: strategy.strategyId, version: strategy.version, name: input.name.trim(), status: 'ACTIVE', createdAt: this.now(), createdByMembershipId: actor.membershipId,
     });
     for (const id of input.assignTo) this.scope(id).strategy = strategy;
     return { status: 'SAVED', strategy, assigned: [...input.assignTo] };

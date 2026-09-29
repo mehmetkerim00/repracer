@@ -173,3 +173,29 @@ test('Р-155: те же 10 000 — пакетами: запросов меньш
   // Последнее посчитанное количество: 40 штук инвентаризации минус буфер 5
   assert.deepEqual([units.length, units.filter((u) => u.amount === 35).length], [OFFERS, OFFERS], 'у каждой единицы канала — последнее посчитанное количество');
 });
+
+/**
+ * Шаг 56 (ревью шага 54, находка 3): замер запроса «что держит канал» на каталоге целевого клиента — на машине CI, а не на шумной машине
+ * разработчика. Правило шагов 53–55 — коррелированные подзапросы по истории количества на КАЖДУЮ единицу; индекс 0148 и одна последняя
+ * применённая версия должны держать полный пересчёт и экран остатков в пределах
+ */
+test('step 56: on 10 000 quantity units the full recalculation, the order-lines selection and the stock screen stay within their limits', async () => {
+  const tenant = k.seeded.tenantId;
+  const account = k.seeded.ids.dbId(k.world.channelAccountId);
+  const timed = async <T>(phase: string, fn: () => Promise<T>) => {
+    const started = performance.now();
+    const result = await fn();
+    const seconds = Math.round((performance.now() - started) / 10) / 100;
+    measured.push({ phase, writes: 0, requests: 0, seconds, channelSeconds: 0, routes: {} });
+    return { result, seconds };
+  };
+  const recalc = await timed('stock recalculate, 10 000 units, nothing changed', () => k.stock!.recalculate(tenant, null, k.clock.iso() as never));
+  assert.equal(recalc.result.writes.length, 0, 'nothing changed — the channel holds every value, no write');
+  assert.ok(recalc.seconds <= 60, `the full recalculation of 10 000 units: ${recalc.seconds} s (limit 60 — half the call deadline of the order-lines job)`);
+  const rolled = await timed('order-lines selection (budgetRolledOverProducts)', () => k.stock!.budgetRolledOverProducts(tenant, account));
+  assert.ok(rolled.seconds <= 10, `the order-lines selection: ${rolled.seconds} s`);
+  const page = await timed('stock screen page', () => k.stock!.stockPage(tenant, { offset: 0, limit: 50 }));
+  assert.ok(page.result.items.length > 0 && page.seconds <= 10, `the stock screen page: ${page.seconds} s (screen limit 10, Р-136)`);
+  const div = await timed('stock divergences', () => k.stock!.stockDivergences(tenant, 50));
+  assert.ok(div.seconds <= 10, `stock divergences: ${div.seconds} s (screen limit 10, Р-136)`);
+});

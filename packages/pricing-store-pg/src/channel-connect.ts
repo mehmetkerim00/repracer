@@ -77,6 +77,12 @@ export interface ConnectionRow {
   credentialCheckFailures: number;
   /** Подключён ли OAuth (токен в базе) или файлом развёртывания / вручную оператором */
   oauth: boolean;
+  /**
+   * Шаг 56 (Р-198): круг обнаружения предложений — начало текущего или последнего круга и закрытие последнего. Новый листинг, который
+   * видит только полный обход (старые листинги eBay), попадает в систему не позже одного круга — продавец видит, сколько он длится
+   */
+  discoveryCircleStartedAt: Instant | null;
+  discoveryCircleCompletedAt: Instant | null;
 }
 
 export interface PendingRequestRow {
@@ -245,8 +251,9 @@ export class PgChannelConnectStore {
                      JOIN tenant_data.write_scope ws ON ws.tenant_id = d.tenant_id AND ws.write_scope_id = d.write_scope_id
                     WHERE d.tenant_id = ca.tenant_id AND ws.channel_account_id = ca.channel_account_id
                       AND d.shadow AND d.decided_at >= now() - interval '1 day') AS shadow_decisions,
-                  cr.obtained_at, cr.verified_at, cr.check_failures
+                  cr.obtained_at, cr.verified_at, cr.check_failures, dc.circle_started_at, dc.last_circle_completed_at
              FROM tenant_data.channel_account ca
+             LEFT JOIN LATERAL tenant_data.discovery_circle_state(ca.tenant_id, ca.channel_account_id) dc ON true
              LEFT JOIN tenant_data.channel_credential cr
                ON cr.tenant_id = ca.tenant_id AND cr.channel_account_id = ca.channel_account_id AND cr.superseded_at IS NULL
             WHERE ca.tenant_id = $1 AND ca.disconnected_at IS NULL
@@ -267,6 +274,8 @@ export class PgChannelConnectStore {
           offers: Number(r.offers), unmanagedOffers: Number(r.unmanaged), shadowDecisions24h: Number(r.shadow_decisions),
           credentialObtainedAt: r.obtained_at ? iso(r.obtained_at) : null, credentialVerifiedAt: r.verified_at ? iso(r.verified_at) : null,
           credentialCheckFailures: Number(r.check_failures ?? 0), oauth: r.obtained_at !== null,
+          discoveryCircleStartedAt: r.circle_started_at ? iso(r.circle_started_at) : null,
+          discoveryCircleCompletedAt: r.last_circle_completed_at ? iso(r.last_circle_completed_at) : null,
         })),
         pending: pending.rows.map((r) => ({
           authorizationRequestId: r.authorization_request_id as string, channel: r.channel as string, marketplaces: [...(r.marketplaces as string[])],

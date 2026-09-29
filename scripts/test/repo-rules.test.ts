@@ -688,6 +688,13 @@ test('шаг 54: порты развёртываний публикуются т
     for (const line of text.split('\n')) {
       const svc = /^  ([a-z0-9-]+):\s*$/.exec(line);
       if (svc) { service = svc[1]!; inPorts = -1; continue; }
+      // Шаг 56 (ревью шага 54, находка 16): `network_mode: host` публикует ВСЕ порты процесса мимо `ports`; встроенная форма `ports: [...]`
+      if (/^\s+network_mode:\s*["']?host["']?\s*(#.*)?$/.test(line)) { out.push(`${file} ${service} network_mode:host`); continue; }
+      const inline = /^\s+ports:\s*\[(.*)\]\s*(#.*)?$/.exec(line);
+      if (inline) {
+        for (const item of inline[1]!.split(',').map((x) => x.trim().replace(/^["']|["']$/g, '')).filter(Boolean)) out.push(`${file} ${service} ${item}`);
+        continue;
+      }
       const ports = /^(\s+)ports:\s*$/.exec(line);
       if (ports) { inPorts = ports[1]!.length; continue; }
       if (inPorts >= 0) {
@@ -700,8 +707,9 @@ test('шаг 54: порты развёртываний публикуются т
   };
   const offending = (entries: string[]) => entries.filter((e) => !OUTWARD.has(e) && !/ 127\.0\.0\.1:\d+:\d+$/.test(e));
   // Положительный контроль: проброшенный наружу порт панели правило обязано увидеть — в любой записи
-  const bad = 'services:\n  operator:\n    ports:\n      - "4327:4327"\n      - 0.0.0.0:9471:9471\n      - "127.0.0.1:1:1"\n';
-  assert.deepEqual(offending(published('synthetic.yaml', bad)), ['synthetic.yaml operator 4327:4327', 'synthetic.yaml operator 0.0.0.0:9471:9471']);
+  const bad = 'services:\n  operator:\n    ports:\n      - "4327:4327"\n      - 0.0.0.0:9471:9471\n      - "127.0.0.1:1:1"\n  console:\n    ports: ["4319:4319", "127.0.0.1:2:2"]\n  worker:\n    network_mode: host\n';
+  assert.deepEqual(offending(published('synthetic.yaml', bad)), ['synthetic.yaml operator 4327:4327', 'synthetic.yaml operator 0.0.0.0:9471:9471',
+    'synthetic.yaml console 4319:4319', 'synthetic.yaml worker network_mode:host']);
   const files = readdirSync(new URL('deploy/', root)).flatMap((d) => ['compose.yaml', 'production.override.yaml', 'console.override.yaml']
     .map((f) => `deploy/${d}/${f}`)).filter((f) => existsSync(new URL(f, root)));
   const ci = readdirSync(new URL('deploy/ci/', root)).filter((f) => f.endsWith('.yaml')).map((f) => `deploy/ci/${f}`);
@@ -720,14 +728,15 @@ test('шаг 54: порты развёртываний публикуются т
 test('шаг 55: новое обращение к настоящим часам в коде продукта — только с пометкой; список прежних только сокращается', async () => {
   const { readdirSync, readFileSync, statSync } = await import('node:fs');
   const PATTERN = /\bDate\.now\b|new Date\(\s*\)|performance\.now\(/g;
-  const count = (text: string) => text.split('\n').filter((l) => !l.includes('real-clock:')).reduce((n, l) => n + (l.match(PATTERN)?.length ?? 0), 0);
+  // Шаг 56 (ревью шага 55, находка 13): пометка — только с причиной; `bench/` — замеры длительности, вне кода продукта
+  const count = (text: string) => text.split('\n').filter((l) => !/real-clock:\s*\S/.test(l)).reduce((n, l) => n + (l.match(PATTERN)?.length ?? 0), 0);
   // Положительный контроль: правило видит все три формы и уважает пометку
-  assert.equal(count('const a = Date.now();\nconst b = new Date();\nconst c = performance.now();\nconst d = new Date(x);\nconst e = Date.now(); // real-clock: startup'), 3);
+  assert.equal(count('const a = Date.now();\nconst b = new Date();\nconst c = performance.now();\nconst d = new Date(x);\nconst e = Date.now(); // real-clock: startup\nconst f = Date.now(); // real-clock:'), 4);
   const productFile = (p: string) => /\.(ts|tsx|mjs)$/.test(p) && !p.includes('.test.') && !p.includes('/test/') && !p.includes('/node_modules/')
     && !p.includes('/dist/') && !p.includes('/generated/') && !/^apps\/(console|operator)\/src\//.test(p);
   const walk = (dir: string): string[] => readdirSync(new URL(dir, root)).flatMap((name) => {
     const rel = `${dir}${name}`;
-    if (name === 'node_modules' || name === 'dist' || name === 'test' || name === 'generated') return [];
+    if (name === 'node_modules' || name === 'dist' || name === 'test' || name === 'generated' || name === 'bench') return [];
     return statSync(new URL(rel, root)).isDirectory() ? walk(`${rel}/`) : [rel];
   });
   const actual = new Map<string, number>();
@@ -740,4 +749,25 @@ test('шаг 55: новое обращение к настоящим часам 
   assert.deepEqual(grown, [], 'new real-clock access in product code: take `now` as a dependency or mark the line `// real-clock: <reason>`');
   const shrunk = Object.entries(baseline).filter(([f, n]) => (actual.get(f) ?? 0) < n).map(([f, n]) => `${f}: ${actual.get(f) ?? 0} < ${n}`);
   assert.deepEqual(shrunk, [], 'fewer real-clock calls than the baseline says — lower the number in scripts/real-clock-baseline.json');
+});
+
+/**
+ * Шаг 56: необязательная возможность работ планировщика (`JobDeps`: `stock`, `alertDelivery`, …) передаётся в точке входа процесса —
+ * иначе работа в процессе не заводится вовсе. Так было с `stock`: работа order-lines существовала только в живых прогонах, которые
+ * собирают зависимости сами, а в работе заказы канала не становились резервациями. Сознательно отсутствующее — поимённо с причиной
+ */
+test('шаг 56: каждая необязательная возможность работ планировщика передана в точке входа процесса', async () => {
+  const members = (jobs: string) => [...(/export interface JobDeps \{([\s\S]*?)\n\}/.exec(jobs)?.[1] ?? '').matchAll(/^ {2}([a-zA-Z]+)\?[:(]/gm)].map((m) => m[1]!);
+  const ABSENT_ON_PURPOSE: Record<string, string> = {
+    // Умолчание — «включено, если источник уведомлений канала доступен» (jobs.ts); точка входа его не переопределяет
+    reconcileEnabled: 'default rule in jobs.ts',
+    // Конфигурация работ — умолчания DEFAULT_JOB_CONFIG, переопределяется частично (discoveryAppQuotas передаётся pg-deps)
+    config: 'passed through pg-deps when configured',
+  };
+  const missing = (jobs: string, wiring: string) => members(jobs).filter((m) => !(m in ABSENT_ON_PURPOSE) && !new RegExp(`\\b${m}\\b\\s*[:,}]`).test(wiring));
+  // Положительный контроль: возможность, которую точка входа не передаёт, правило видит
+  assert.deepEqual(missing('export interface JobDeps {\n  accounts(): x;\n  stock?: { a(): b };\n  alertDelivery?: x;\n}', 'const deps = { alertDelivery, };'), ['stock']);
+  const wiring = read('services/scheduler/src/main.ts') + read('services/scheduler/src/pg-deps.ts');
+  assert.ok(members(read('services/scheduler/src/jobs.ts')).includes('stock'), 'the rule sees the optional members of JobDeps');
+  assert.deepEqual(missing(read('services/scheduler/src/jobs.ts'), wiring), [], 'an optional capability of the scheduler jobs is not passed by the process entry point');
 });

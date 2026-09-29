@@ -557,7 +557,6 @@ export interface PricingStore {
    */
   releaseDistrust(tenantId: string, distrustId: string, release: { membershipId: string; userId: string; mfa: boolean; note: string; at: Instant }): Promise<'RELEASED' | 'NOT_ACTIVE'>;
 
-  getPriceScope(tenantId: string, writeScopeId: string): Promise<PriceScopeContext | null>;
   resolveBounds(tenantId: string, writeScopeId: string): Promise<BoundsRead>;
   /** Включение режима ENGINE; реализация обязана отказать без обеих границ (как триггер 0030) */
   /** Р-97: смена режима — действие человека; userId — пользователь сессии административного сервиса */
@@ -663,6 +662,8 @@ export interface PricingStore {
    * за несколько заходов; без хранилища круга каждый заход начинал бы с начала и обрывался бы на том же месте
    */
   discoveryCircleCursor?(tenantId: string, channelAccountId: string): Promise<string | null>;
+  /** Шаг 56: состояние круга — курсор, начало текущего круга, закрытие прошлого (заходить ли; сколько длится круг аккаунта, Р-198) */
+  discoveryCircleState?(tenantId: string, channelAccountId: string): Promise<{ cursor: string | null; circleStartedAt: Instant | null; lastCircleCompletedAt: Instant | null; lastStop: string | null } | null>;
   saveDiscoveryCircle?(tenantId: string, channelAccountId: string, entry: { startedFrom: string | null; cursor: string | null; stop: DiscoveryStop; at: Instant }): Promise<void>;
   /** Шаг 55 (OQ-240): один вызов из суточной квоты канала на приложение, размазанной по суткам; false — отложить вызов */
   reserveAppCall?(channel: string, quota: string, dayLimit: number, at: Instant): Promise<boolean>;
@@ -1156,4 +1157,4 @@ export interface DiscoveredCatalogOffer {
 }
 
 /** Шаг 55: чем кончился заход обхода — круг закрыт, срок вызова, квота приложения, предел страниц захода */
-export type DiscoveryStop = 'COMPLETED' | 'DEADLINE' | 'APP_QUOTA' | 'PAGE_LIMIT';
+export type DiscoveryStop = 'COMPLETED' | 'DEADLINE' | 'APP_QUOTA' | 'PAGE_LIMIT' | 'FAILED';

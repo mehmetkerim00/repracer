@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { systemClock } from '@repracer/channel-port';
 import type { Instant, OrderLine } from '@repracer/channel-port';
 import {
   type ConfirmOrdersOutcome,
@@ -384,8 +385,10 @@ export class PgStockStore implements StockStore {
                    OR h.final_status = 'SHADOW_HELD' AND EXISTS (SELECT 1 FROM tenant_data.channel_account ca
                         WHERE ca.tenant_id = s.tenant_id AND ca.channel_account_id = s.channel_account_id AND ca.write_mode = 'LIVE'))
          )
-         SELECT DISTINCT t.product_id FROM (${PgStockStore.TARGETS_SQL}) t
-          WHERE t.write_scope_id IN (SELECT write_scope_id FROM candidates) AND t.in_flight_write_id IS NULL
+         -- Ревью шага 55, находка 7: цели — только кандидатов (внутри подзапроса, а не по всему каталогу тенанта) и только с включённым
+         -- распределением: при выключенном пересчёт (recalculate) записи не создаёт, и товар возвращался бы каждые 5 минут бессрочно
+         SELECT DISTINCT t.product_id FROM (${PgStockStore.TARGETS_SQL} AND s.write_scope_id IN (SELECT write_scope_id FROM candidates)) t
+          WHERE t.allocation_active AND t.in_flight_write_id IS NULL
             AND t.last_quantity IS DISTINCT FROM (${PgStockStore.PUBLISHED_SQL})`, [tenantId, channelAccountId]);
       return rows.map((r) => String(r.product_id));
     });
@@ -595,7 +598,7 @@ export class PgStockStore implements StockStore {
       return rows.map((r) => {
         const c = this.channelRow(r);
         return { writeScopeId: c.writeScopeId, productId: r.product_id, sku: skuOf.get(r.product_id) ?? '', channel: c.channel, marketplaces: c.marketplaces,
-          sent: c.sent?.quantity ?? 0, confirmed: c.confirmed?.quantity ?? null, status: c.sent?.status ?? 'UNKNOWN', errorCode: c.divergence?.errorCode ?? null, since: c.sent?.at ?? iso(new Date()) };
+          sent: c.sent?.quantity ?? 0, confirmed: c.confirmed?.quantity ?? null, status: c.sent?.status ?? 'UNKNOWN', errorCode: c.divergence?.errorCode ?? null, since: c.sent?.at ?? systemClock.now() };
       });
     });
   }

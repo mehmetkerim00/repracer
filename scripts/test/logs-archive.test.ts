@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { gunzipSync } from 'node:zlib';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -85,13 +85,13 @@ test('step 54: month archives are kept at least 12 months; an archive already bu
     mkdirSync(w.months, { recursive: true });
     for (const m of ['2025-05', '2025-06', '2025-07']) writeFileSync(join(w.months, `${m}.log.gz`), 'old');
     mkdirSync(w.hot, { recursive: true });
-    writeFileSync(join(w.months, '2026-06.log.gz'), 'built from the full set');
+    writeFileSync(join(w.months, '2026-06.log.gz'), gzipSync('built from the full set'));
     writeFileSync(join(w.hot, '2026-06-30.log.gz'), 'leftover');
     writeFileSync(join(w.hot, '.until'), '2026-08-15T00:00:00Z');
     w.run('2026-08-15T00:20:00Z');
     const kept = readdirSync(w.months).filter((f) => f.endsWith('.log.gz')).sort();
     assert.deepEqual(kept, ['2025-07.log.gz', '2026-06.log.gz'], '2026-08 minus 13 months = 2025-07 is kept; older months are gone');
-    assert.equal(readFileSync(join(w.months, '2026-06.log.gz'), 'utf8'), 'built from the full set', 'the archive was not rebuilt from the leftover');
+    assert.equal(gunzipSync(readFileSync(join(w.months, '2026-06.log.gz'))).toString('utf8'), 'built from the full set', 'the archive was not rebuilt from the leftover');
     assert.equal(existsSync(join(w.hot, '2026-06-30.log.gz')), false, 'the leftover day is removed');
   } finally { rmSync(w.root, { recursive: true, force: true }); }
 });
@@ -102,5 +102,20 @@ test('step 54, 55: a malformed time or argument is refused before any file is to
     assert.throws(() => w.run('yesterday'), /status 2|LOGS_ARCHIVE_BAD_NOW/);
     assert.throws(() => w.run('2026-07-02T00:20:00Z', '--until-tomorrow'), /status 2|LOGS_ARCHIVE_BAD_ARGUMENT/);
     assert.equal(existsSync(join(w.root, 'hot')), false);
+  } finally { rmSync(w.root, { recursive: true, force: true }); }
+});
+
+test('step 56 (review of step 55, finding 5): a month archive that is not whole does not let the days go; the run fails for the monitor', () => {
+  const w = world();
+  try {
+    mkdirSync(w.months, { recursive: true });
+    mkdirSync(w.hot, { recursive: true });
+    // Архив месяца «есть», но это не целый gzip (оборвался на полном диске прошлым заходом)
+    writeFileSync(join(w.months, '2026-06.log.gz'), 'truncated');
+    writeFileSync(join(w.hot, '2026-06-30.log.gz'), gzipSync('the last day of June'));
+    writeFileSync(join(w.hot, '.until'), '2026-08-15T00:00:00Z');
+    assert.throws(() => w.run('2026-08-15T00:20:00Z'), (e: { status?: number; stderr?: string }) => e.status === 1 && /"stage":"verify"/.test(String(e.stderr)));
+    assert.equal(existsSync(join(w.hot, '2026-06-30.log.gz')), true, 'the day stays until its month archive is whole');
+    assert.equal(existsSync(join(w.root, 'hot', 'LOGS_ARCHIVE_FAILED')), true);
   } finally { rmSync(w.root, { recursive: true, force: true }); }
 });

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { systemClock } from '@repracer/channel-port';
 import { signRequest, type AwsCredentials } from './sigv4.ts';
 
 /**
@@ -47,7 +48,7 @@ export function createSqsClient(options: SqsClientOptions): SqsClient {
   const region = regionOfQueue(options.queueUrl);
   const endpoint = `https://sqs.${region}.amazonaws.com/`;
   const doFetch = options.fetch ?? fetch;
-  const now = options.now ?? (() => new Date());
+  const now = options.now ?? (() => new Date(systemClock.nowMs()));
 
   async function call<T>(operation: string, payload: Record<string, unknown>, extraTimeoutMs = 0): Promise<SqsResult<T>> {
     const body = JSON.stringify({ QueueUrl: options.queueUrl, ...payload });

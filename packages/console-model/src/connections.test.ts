@@ -13,7 +13,8 @@ const NOW = '2026-09-27T10:00:00.000Z';
 const row = (over: Partial<ConnectionRow>): ConnectionRow => ({
   channelAccountId: 'acc-1', channel: 'AMAZON', region: 'EU', marketplaces: ['A1PA6795UKMFR9'], externalAccountId: 'A3SYN',
   authStatus: 'ACTIVE', accessBlockers: [], writeMode: 'SHADOW', connectedAt: NOW as never, offers: 0, unmanagedOffers: 0, shadowDecisions24h: 0,
-  credentialObtainedAt: NOW as never, credentialVerifiedAt: null, credentialCheckFailures: 0, oauth: true, ...over,
+  credentialObtainedAt: NOW as never, credentialVerifiedAt: null, credentialCheckFailures: 0, oauth: true,
+  discoveryCircleStartedAt: null, discoveryCircleCompletedAt: null, ...over,
 });
 const pending = (over: Partial<PendingRequestRow>): PendingRequestRow => ({
   authorizationRequestId: 'r1', channel: 'AMAZON', marketplaces: ['A1PA6795UKMFR9'], requestedAt: NOW as never,
@@ -149,4 +150,12 @@ test('review 49 #11: the eBay card waiting for the account deletion endpoint nam
     assert.deepEqual([v.channels[0]!.state, v.channels[0]!.canConnect], ['AWAITING_PLATFORM', false]);
     assert.ok(v.channels[0]!.missingText && !v.channels[0]!.missingText.includes('EBAY_ACCOUNT_DELETION_ENDPOINT') && /eBay/.test(v.channels[0]!.missingText), v.channels[0]!.missingText!);
   }
+});
+
+test('step 56 (Р-198): the connection says how long the discovery circle runs — a listing only a full circle sees appears within one circle', () => {
+  const m = messagesFor('en');
+  const view = (over: Partial<ConnectionRow>) => connectionsView({ worldId: 'w', role: 'OWNER', now: '2026-09-29T12:00:00.000Z' }, { accounts: [row(over)], pending: [] }, [], m).accounts[0]!.discoveryText;
+  assert.equal(view({}), null, 'no circle yet — nothing to say');
+  assert.match(view({ discoveryCircleStartedAt: '2026-09-29T06:00:00.000Z' as never }) ?? '', /running 6 h \(the first one\)/);
+  assert.match(view({ discoveryCircleStartedAt: '2026-09-27T12:00:00.000Z' as never, discoveryCircleCompletedAt: '2026-09-28T18:00:00.000Z' as never }) ?? '', /last full circle took 30 h/);
 });

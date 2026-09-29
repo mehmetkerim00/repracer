@@ -85,3 +85,23 @@ test('step 52, 53: an empty page with a cursor is not the end; a cursor seen bef
   const r2 = await pipeline.syncOrders(ctx('2026-09-22T09:02:00.000Z'), looping, '2026-09-22T08:55:00.000Z' as never);
   assert.deepEqual([r2.lines, recorded.length, r2.cursorRepeated], [3, 3, true], 'three pages read once, kept, and the repeat is reported');
 });
+
+test('step 56 (review of step 54, finding 8): the page limit is reported with the cursor to continue from; a continuation starts at that cursor', async () => {
+  const seen: Array<string | undefined> = [];
+  const adapter = {
+    async readOrderLines(_ctx: unknown, w: { cursor?: string }) {
+      seen.push(w.cursor);
+      const n = w.cursor ? Number(w.cursor.slice(1)) : 0;
+      return { items: [], ...(n < 9 ? { nextCursor: `c${n + 1}` } : {}) };
+    },
+  } as unknown as ChannelAdapter;
+  const store = {
+    async recordOrderLines() { return { created: 0, consumed: 0, released: 0, unknownOffers: 0, productIds: [] }; },
+    async recalculate() { return { writes: [], unchanged: 0 }; },
+  } as unknown as StockStore;
+  const pipeline = createStockPipeline({ store, now: () => '2026-09-29T09:00:00.000Z' as never, sleep: async () => undefined });
+  const first = await pipeline.syncOrders(ctx('2026-09-29T09:10:00.000Z'), adapter, '2026-09-29T08:00:00.000Z' as never, { maxPages: 3 });
+  assert.deepEqual([seen, first.pageLimit], [[undefined, 'c1', 'c2'], { pages: 3, nextCursor: 'c3' }], 'three pages read, the fourth is where the next run starts');
+  const rest = await pipeline.syncOrders(ctx('2026-09-29T09:10:00.000Z'), adapter, '2026-09-29T08:00:00.000Z' as never, { cursor: first.pageLimit!.nextCursor, maxPages: 200 });
+  assert.deepEqual([seen.slice(3), rest.pageLimit], [['c3', 'c4', 'c5', 'c6', 'c7', 'c8', 'c9'], undefined], 'the continuation reads the rest of the window to its end');
+});

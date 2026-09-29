@@ -145,8 +145,8 @@ test('step 55 (OQ-240): discovery is a circle — a run stopped by its deadline 
     now: () => new Date(nowMs).toISOString() as never, sleep: async () => undefined });
   const run = (deadlineInMs: number) => pipeline.discoverOffers(ctx(new Date(nowMs + deadlineInMs).toISOString()), { pageLimit: 1, quotas: { EBAY_TRADING: 3000 }, deadlineMarginMs: 5_000 });
 
-  // Заход 1: срок позволяет две страницы (24 с при запасе 5 с) — остановился по сроку, место записано
-  const first = await run(24_000);
+  // Заход 1: срок позволяет две страницы (34 с; запас — две самых долгих страницы, 20 с) — остановился по сроку, место записано
+  const first = await run(34_000);
   assert.deepEqual([first.stop, first.resumed, read], ['DEADLINE', false, [undefined, 'i1']]);
   // Заход 2: продолжает с i2; квота Trading даёт одну страницу — остановился по квоте перед второй
   const second = await run(600_000);
@@ -159,4 +159,45 @@ test('step 55 (OQ-240): discovery is a circle — a run stopped by its deadline 
   // Заход 4: новый круг с начала
   await run(15_000);
   assert.equal(read[6], undefined, 'after a completed circle the next run starts from the first page');
+});
+
+test('step 56 (review of step 55, findings 3–4): a failure keeps the progress; a failure on the resumed place resets the circle; a closed circle is not re-read before its time', async () => {
+  const cursors = [undefined, 'p1', 'p2', 'p3'];
+  let nowMs = Date.parse('2026-09-29T09:00:00.000Z');
+  let failAt: string | null = 'p2';
+  const alerts: string[] = [];
+  const adapter = {
+    descriptor: { channel: 'EBAY' },
+    async discoverOffers(_ctx: unknown, page: { cursor?: string }) {
+      if (page.cursor === failAt) throw Object.assign(new Error('channel refused'), { code: 'CHANNEL_UNAVAILABLE' });
+      const i = cursors.indexOf(page.cursor);
+      return { items: [], ...(i + 1 < cursors.length ? { nextCursor: cursors[i + 1] } : {}) };
+    },
+  } as unknown as ChannelAdapter;
+  let state: { cursor: string | null; circleStartedAt: string | null; lastCircleCompletedAt: string | null; lastStop: string | null } | null = null;
+  const saved: Array<[string | null, string | null, string]> = [];
+  const store = {
+    async recordOfferChannelPricing() { return 0; }, async recordDiscoveredOffers() { return 0; },
+    async discoveryCircleState() { return state; },
+    async saveDiscoveryCircle(_t: unknown, _a: unknown, e: { startedFrom: string | null; cursor: string | null; stop: string; at: string }) {
+      saved.push([e.startedFrom, e.cursor, e.stop]);
+      state = { cursor: e.cursor, circleStartedAt: null, lastCircleCompletedAt: e.stop === 'COMPLETED' ? e.at : state?.lastCircleCompletedAt ?? null, lastStop: e.stop };
+    },
+  } as unknown as PricingStore;
+  const pipeline = createPricingPipeline({ store, adapter, alerts: { raise: async (a: { code: string }) => { alerts.push(a.code); } } as never, logger: { log: () => undefined },
+    now: () => new Date(nowMs).toISOString() as never, sleep: async () => undefined });
+  const run = () => pipeline.discoverOffers(ctx(new Date(nowMs + 600_000).toISOString()), { pageLimit: 1, circleEveryMs: 86_400_000 });
+  // Отказ на p2 после двух прочитанных страниц — место p2 записано, прогресс не пропал
+  await assert.rejects(run(), /channel refused/);
+  assert.deepEqual(saved.at(-1), [null, 'p2', 'FAILED']);
+  // Следующий заход падает на том же месте, не прочитав ни страницы, — круг сброшен к началу, WARNING
+  await assert.rejects(run(), /channel refused/);
+  assert.deepEqual([saved.at(-1), alerts], [['p2', null, 'FAILED'], ['DISCOVERY_CIRCLE_RESET']]);
+  // Канал ожил — круг с начала до конца; следующий заход в пределах суток канал не трогает
+  failAt = null;
+  assert.equal((await run()).stop, 'COMPLETED');
+  nowMs += 3_600_000;
+  assert.equal((await run()).stop, 'NOT_DUE');
+  nowMs += 86_400_000;
+  assert.equal((await run()).stop, 'COMPLETED', 'a new circle once the circle interval has passed');
 });

@@ -627,6 +627,10 @@ export const de: Messages = {
         unmanaged: (unmanaged: number, writable: number) => `Davon können wir ${writable} ändern; ${unmanaged === 1 ? '1 ist' : `${unmanaged} sind`} für unsere Änderungen nicht offen (bei eBay: Angebote außerhalb der Inventory API, die nur der Inhaber migrieren kann, oder Auktionen, die nie geführt werden).`,
         awaitingAccess: (what: string) => `Es fehlt: ${what}.`,
       },
+      discovery: {
+        running: (h: number, hadCircle: boolean) => `Katalogsuche: Der aktuelle Durchlauf läuft seit ${h} Std.${hadCircle ? '' : ' (der erste)'} — ein Angebot, das nur ein vollständiger Durchlauf sieht (ältere eBay-Angebote), erscheint innerhalb eines Durchlaufs.`,
+        completed: (h: number, at: string) => `Katalogsuche: Der letzte vollständige Durchlauf dauerte ${h} Std., abgeschlossen ${at.slice(0, 16).replace('T', ' ')} UTC — ein Angebot, das nur ein vollständiger Durchlauf sieht (ältere eBay-Angebote), erscheint innerhalb eines Durchlaufs.`,
+      },
       authorization: {
         revoked: 'Der Zugriff wurde im Kanal zurückgezogen: verbinden Sie erneut, um fortzufahren.',
         external: 'Der Zugriff wird von der Plattform eingerichtet, nicht über diese Seite.',
@@ -765,6 +769,8 @@ export const de: Messages = {
         PRICE_WRITE_SCOPE_BLOCKED: { what: 'Ein Angebot ist blockiert: Seine Preisänderung ging nicht durch', step: 'Öffnen Sie das Angebot in der Konsole: Der Grund der Ablehnung steht dort. Die meisten Ablehnungen brauchen eine Handlung im Kanal-Konto.' },
         PRICE_WRITE_NOT_SENT: { what: 'Eine Preisänderung wurde nicht an den Kanal gesendet', step: 'Öffnen Sie die Preisänderungen in der Konsole und prüfen Sie die Angebote dieses Kanals.' },
         DISCOVERY_PAGE_LIMIT_REACHED: { what: 'Die Angebotssuche hat ihre Seitengrenze erreicht, bevor der Kanal alle Angebote geliefert hat', step: 'Angebote jenseits der Grenze sind noch nicht im Katalog. Melden Sie sich bei uns mit dem Ereigniscode — die Grenze wird für Ihren Katalog angepasst.' },
+        ORDER_LINES_PAGE_LIMIT_REACHED: { what: 'Das Lesen der Bestellungen hat die Seitengrenze eines Laufs erreicht', step: 'Es geht nichts verloren: Gelesenes ist erfasst, der nächste Lauf setzt an derselben Stelle fort. Wiederholt sich der Hinweis über Stunden, melden Sie sich bei uns mit dem Ereigniscode.' },
+        DISCOVERY_CIRCLE_RESET: { what: 'Die Angebotssuche ist an derselben Stelle erneut gescheitert und beginnt ihren Durchlauf von vorn', step: 'Meist ist nichts zu tun: Der nächste Durchlauf liest den Katalog neu. Wiederholt sich der Hinweis, melden Sie sich bei uns mit dem Ereigniscode.' },
         CHANNEL_PAGE_CURSOR_REPEATED: { what: 'Der Kanal hat eine bereits gelieferte Seite erneut geliefert, das Lesen wurde vorzeitig beendet', step: 'Es geht nichts verloren: Gelesenes bleibt erhalten, und der nächste Lauf liest dasselbe Zeitfenster erneut. Wiederholt sich der Hinweis, melden Sie sich bei uns mit dem Ereigniscode.' },
         PRICE_WRITE_BLOCKED_BY_RECHECK: { what: 'Eine Preisänderung wurde unmittelbar vor dem Senden zurückgehalten: Die Untergrenze hatte sich inzwischen geändert', step: 'Meist ist nichts zu tun — der Preis wird mit den neuen Kosten neu berechnet. Wiederholt sich die Meldung für dasselbe Angebot, prüfen Sie dessen Einstandskosten.' },
         PRICE_WRITE_DISPATCH_ERROR: { what: 'Eine wartende Preisänderung konnte nicht abgeschickt werden', step: 'Prüfen Sie in der Konsole den Zustand des Kanal-Kontos: Die häufigste Ursache sind abgelaufene Zugangsdaten.' },

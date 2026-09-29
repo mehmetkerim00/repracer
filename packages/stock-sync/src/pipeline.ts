@@ -13,9 +13,14 @@ export interface StockPipelineDeps {
 
 export interface StockPipeline {
   /** Заказы канала за окно → резервации → пересчёт затронутых товаров → записи */
-  syncOrders(ctx: AdapterCallContext, adapter: ChannelAdapter, since: Instant): Promise<{ lines: number; created: number; consumed: number; released: number; unknownOffers: number; writes: number;
+  syncOrders(ctx: AdapterCallContext, adapter: ChannelAdapter, since: Instant, options?: { cursor?: string; maxPages?: number }): Promise<{ lines: number; created: number; consumed: number; released: number; unknownOffers: number; writes: number;
     /** Шаг 53: канал вернул уже виденный курсор — чтение остановлено, прочитанное записано */
-    cursorRepeated?: boolean }>;
+    cursorRepeated?: boolean;
+    /**
+     * Шаг 56 (ревью шага 54, находка 8): чтение упёрлось в предел страниц захода, а канал отдал курсор дальше — прочитанное записано,
+     * следующий заход продолжит с `nextCursor` при том же начале окна. Раньше хвост окна терялся молча
+     */
+    pageLimit?: { pages: number; nextCursor: string } }>;
   /** После изменения остатка (импорт, Inbound API): пересчёт названных товаров и отправка изменившихся единиц */
   propagate(tenantId: string, productIds: readonly string[] | null): Promise<{ writes: number; unchanged: number }>;
 }
@@ -32,13 +37,16 @@ export function createStockPipeline(deps: StockPipelineDeps): StockPipeline {
     for (const id of writeScopeIds) await deps.dispatchScope(tenantId, id);
   };
   return {
-    async syncOrders(ctx, adapter, since) {
+    async syncOrders(ctx, adapter, since, options = {}) {
       const lines: OrderLine[] = [];
-      let cursor: string | undefined;
+      let cursor: string | undefined = options.cursor;
+      const maxPages = Math.max(1, options.maxPages ?? 200);
+      let pageLimit: { pages: number; nextCursor: string } | undefined;
       // Шаг 53 (ревью шага 52, находка 6): все виденные курсоры — ловится и A→B→A; на повторе прочитанное не теряется
       const seen = new Set<string>();
       let cursorRepeated = false;
-      for (let page = 0; page < 200; page++) {
+      for (let page = 0; ; page++) {
+        if (page >= maxPages) { pageLimit = { pages: page, nextCursor: cursor! }; break; }
         // OQ-216: бюджет канала делят опрос, записи и чтение заказов; не хватило — ждём до `retryAt`, а не роняем работу
         const result = await waitingForBudget(ctx, () => adapter.readOrderLines(ctx, { since, limit: 100, ...(cursor ? { cursor } : {}) }), { now: deps.now, sleep });
         lines.push(...result.items);
@@ -55,7 +63,7 @@ export function createStockPipeline(deps: StockPipelineDeps): StockPipeline {
       const recalculated = products.length > 0 ? await deps.store.recalculate(ctx.tenantId, products, deps.now()) : { writes: [], unchanged: 0 };
       await dispatch(ctx.tenantId, recalculated.writes.map((w) => w.writeScopeId));
       return { lines: lines.length, created: recorded.created, consumed: recorded.consumed, released: recorded.released, unknownOffers: recorded.unknownOffers, writes: recalculated.writes.length,
-        ...(cursorRepeated ? { cursorRepeated: true } : {}) };
+        ...(cursorRepeated ? { cursorRepeated: true } : {}), ...(pageLimit ? { pageLimit } : {}) };
     },
     async propagate(tenantId, productIds) {
       const r = await deps.store.recalculate(tenantId, productIds, deps.now());

@@ -29,3 +29,4 @@ export {
 } from './adapter.ts';
 export { isNeverWritten, NEVER_WRITTEN_CHANNEL_ATTRIBUTES, neverWrittenAttributes, type NeverWrittenReason } from './never-written.ts';
 export { offerIdentityOf, type OfferMappingKeys } from './identity.ts';
+export { systemClock } from './clock.ts';

@@ -326,11 +326,23 @@ export function standClock(): string {
   return process.env.REPRACER_STAND_CLOCK ?? new Date(Math.floor(Date.now() / 1000) * 1000).toISOString();
 }
 
+/**
+ * Шаг 56 (п. 6): ЗАМОРОЖЕННЫЙ старт сценария — время суток, с которым сценарий написан (обычно 10:00 UTC), на последней прошедшей дате.
+ * Прежний старт «сейчас» переносил в сценарий настоящее время суток: сценарий, двигающий часы на сутки, пересекал полночь витрины или UTC
+ * в зависимости от часа запуска. Прошлое, а не будущее, и не дальше суток назад — стражи базы, сравнивающие с её часами, видят то же
+ */
+export function frozenStandStart(authoredIso: string, nowMs: number = Date.now()): string {
+  if (process.env.REPRACER_STAND_CLOCK) return process.env.REPRACER_STAND_CLOCK;
+  const timeOfDayMs = ((Date.parse(authoredIso) % 86_400_000) + 86_400_000) % 86_400_000;
+  const today = Math.floor(nowMs / 86_400_000) * 86_400_000 + timeOfDayMs;
+  return new Date(today <= nowMs ? today : today - 86_400_000).toISOString();
+}
+
 export async function runScenario(
   original: Scenario, adapterUnderTest: AdapterUnderTest, behaviour?: ChannelBehaviour, storeFactory: PricingStoreFactory = memoryStoreFactory,
   hooks: ScenarioHooks = {},
 ): Promise<ScenarioReport> {
-  const scenario = rebaseScenario(original, standClock());
+  const scenario = rebaseScenario(original, frozenStandStart(original.world.clock));
   const { world } = scenario;
   const clock = new VirtualClock(world.clock);
   const sink: Sink = { logs: [], alerts: [] };

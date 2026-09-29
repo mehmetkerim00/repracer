@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 /**
  * Р-156 (шаг 36): отправка письма владельцу. Провайдер конфигурируем: развёртывание называет адрес HTTP-API провайдера,
  * ключ (из файла секретов) и адрес отправителя. Своего SMTP мы не поднимаем и новых зависимостей не вводим — письмо
@@ -65,7 +66,7 @@ export function createMailSender(config: MailConfig, fetchImpl: typeof fetch = f
         if (!response.ok) throw new Error(`MAIL_HTTP_${response.status}`);
         // Идентификатор письма у провайдера — доказательство отправки; его формат у провайдеров разный, поэтому терпим любой
         const body = await response.json().catch(() => ({})) as { id?: unknown; messageId?: unknown };
-        const ref = typeof body.id === 'string' ? body.id : typeof body.messageId === 'string' ? body.messageId : `sent-${Date.now()}`;
+        const ref = typeof body.id === 'string' ? body.id : typeof body.messageId === 'string' ? body.messageId : `sent-${randomUUID()}`;
         return { ref };
       } finally {
         clearTimeout(timer);

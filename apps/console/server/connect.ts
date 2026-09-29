@@ -1,4 +1,5 @@
 import { exchangeCode, newState, sealToken, stateDigest, type Fetch, type Keyring, type OAuthProvider } from '@repracer/channel-oauth';
+import { systemClock } from '@repracer/channel-port';
 import type { ConnectableChannel } from '@repracer/console-model';
 import type { ConnectionRow, ConnectOutcome, PendingRequestRow, PgChannelConnectStore } from '@repracer/pricing-store-pg';
 
@@ -56,7 +57,10 @@ export function createChannelConnectService(o: {
   providers: readonly ConnectProvider[];
   http: Fetch;
   log?: (event: string, fields: Record<string, unknown>) => void;
+  /** Шаг 56 (п. 6): срок refresh-токена считается от часов сервиса, а не от настоящих мимо зависимости */
+  now?: () => string;
 }): ChannelConnectService {
+  const nowMs = () => Date.parse((o.now ?? systemClock.now)());
   const byChannel = (channel: string) => o.providers.find((p) => p.channel === channel) ?? null;
   return {
     connectable: () => o.providers.map((p) => ({
@@ -138,7 +142,7 @@ export function createChannelConnectService(o: {
       const outcome = await o.store.complete(tenantId, {
         stateSha256: digest, externalAccountId: sellerId,
         seal: (channelAccountId) => sealToken(o.keyring, refresh, { tenantId, channelAccountId }),
-        refreshExpiresAt: tokens.refreshExpiresIn === null ? null : new Date(Date.now() + tokens.refreshExpiresIn * 1000).toISOString() as never,
+        refreshExpiresAt: tokens.refreshExpiresIn === null ? null : new Date(nowMs() + tokens.refreshExpiresIn * 1000).toISOString() as never,
         ...actor,
       });
       if (outcome.status === 'SELLER_TAKEN' || outcome.status === 'MFA_REQUIRED') await o.store.fail(tenantId, digest, 'FAILED', outcome.status, actor);

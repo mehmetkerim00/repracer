@@ -15,6 +15,8 @@ export interface SchedulerConfig {
   schedulerPgUrl: string;
   /** svc_app: путь решения — опрос, сверка, обход офферов [Р-90] */
   appPgUrl: string;
+  /** Шаг 56: svc_stock — чтение заказов канала в резервации и пересчёт публикуемого остатка (работа order-lines) [Р-25, Р-102] */
+  stockPgUrl: string;
   /** svc_exporter: выгрузка суток в ClickHouse */
   exporterPgUrl: string;
   clickHouse: { url: string; ingest: { user: string; password: string }; verifier: { user: string; password: string } };
@@ -106,6 +108,8 @@ export function loadConfig(env: Env = process.env, read: (path: string) => strin
     tickMs: int(env, 'REPRACER_SCHEDULER_TICK_MS', 30_000, 1_000, 300_000),
     schedulerPgUrl: required(secret(env, 'REPRACER_SCHEDULER_PG_URL', read), 'REPRACER_SCHEDULER_PG_URL'),
     appPgUrl: required(secret(env, 'REPRACER_APP_PG_URL', read), 'REPRACER_APP_PG_URL'),
+    // Шаг 56: без роли остатков планировщик не читал бы заказов вовсе — работа order-lines в процессе не заводилась (найдено шагом 56)
+    stockPgUrl: required(secret(env, 'REPRACER_STOCK_PG_URL', read), 'REPRACER_STOCK_PG_URL'),
     exporterPgUrl: required(secret(env, 'REPRACER_EXPORTER_PG_URL', read), 'REPRACER_EXPORTER_PG_URL'),
     clickHouse: {
       url: required(env.REPRACER_CH_URL, 'REPRACER_CH_URL'),

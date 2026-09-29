@@ -15,6 +15,7 @@ const ENV = {
   REPRACER_MODE: 'stand',
   REPRACER_SCHEDULER_PG_URL: 'postgres://svc_scheduler@db/repracer_eu',
   REPRACER_APP_PG_URL: 'postgres://svc_app@db/repracer_eu',
+  REPRACER_STOCK_PG_URL: 'postgres://svc_stock@db/repracer_eu',
   REPRACER_EXPORTER_PG_URL: 'postgres://svc_exporter@db/repracer_eu',
   REPRACER_CH_URL: 'http://clickhouse:8123',
   REPRACER_CH_INGEST_USER: 'ingest', REPRACER_CH_INGEST_PASSWORD: 'syn-ingest',

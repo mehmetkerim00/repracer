@@ -1,4 +1,4 @@
--- 0149_verify_schema_invariants_v44.sql
+-- 0151_verify_schema_invariants_v44.sql
 -- Проверка схемы после шагов 41–52 — последняя в наборе (прежние номера остаются историей: файл переносится под новый
 -- номер, чтобы идти последним).
 -- Шаг 45 правил не добавил: 0138 — хвосты ревью (каталог из обнаружения, срок вытесненных токенов, REVOKED в аудит);
@@ -369,7 +369,11 @@ BEGIN
                          -- Шаг 55 (OQ-240): суточная квота приложения и круг обнаружения — операционный счётчик и курсор, цен не трогают
                          'platform.reserve_channel_app_call(text,text,integer,timestamp with time zone)',
                          'tenant_data.save_discovery_circle(uuid,uuid,text,text,text,timestamp with time zone)',
-                         'tenant_data.discovery_circle_cursor(uuid,uuid)') THEN
+                         'tenant_data.discovery_circle_cursor(uuid,uuid)',
+                         -- Шаг 56: место чтения заказов — начало окна и курсор, цен не трогает
+                         'tenant_data.save_order_read_position(uuid,uuid,timestamp with time zone,text,timestamp with time zone)',
+                         'tenant_data.order_read_position(uuid,uuid)',
+                         'tenant_data.discovery_circle_state(uuid,uuid)') THEN
       bad := bad || format('%s: SECURITY DEFINER function executable by the decision path is not in the allow list (Р-96)', r.f);
     END IF;
   END LOOP;

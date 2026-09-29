@@ -1,4 +1,5 @@
 import type { AdapterLogger } from '@repracer/channel-port';
+import { systemClock } from '@repracer/channel-port';
 import type { Scheduler, TickReport } from './scheduler.ts';
 
 /**
@@ -43,7 +44,7 @@ export function runScheduler(scheduler: Scheduler, options: RunSchedulerOptions)
     while (!stopped && !options.shouldStop?.()) {
       let ok = true;
       options.onIterationStart?.();
-      const clockMs = options.clockMs ?? Date.now;
+      const clockMs = options.clockMs ?? systemClock.nowMs;
       const tickStarted = clockMs();
       let sleepMs = options.tickMs;
       let report: TickReport | null = null;
@@ -67,7 +68,7 @@ export function runScheduler(scheduler: Scheduler, options: RunSchedulerOptions)
         options.logger.log({ level: 'WARN', code: 'SCHEDULER_TICK_FAILED', message: 'SCHEDULER_TICK_FAILED', details: { error: String((error as Error).message).slice(0, 200) } });
       }
       try {
-        await options.onTick?.({ ok, at: Date.now(), report });
+        await options.onTick?.({ ok, at: clockMs(), report });
       } catch (error) {
         options.logger.log({ level: 'WARN', code: 'SCHEDULER_HEARTBEAT_FAILED', message: 'SCHEDULER_HEARTBEAT_FAILED', details: { error: String((error as Error).message).slice(0, 200) } });
       }

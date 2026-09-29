@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { systemClock } from '@repracer/channel-port';
 import { csvOf } from '@repracer/console-model';
 import type { BulkJobKind, BulkJobPhase, BulkJobRow, PricingStore } from '@repracer/pricing-pipeline';
 
@@ -129,7 +130,7 @@ export async function runNextBulkJob(options: BulkJobRunnerOptions): Promise<{ j
     // Автор — человек, создавший задание: процесс пишет его именем, а не объявляет автором себя [Р-97]
     const work = await handler(job, { tenantId, store, jobId: job.jobId, membershipId: job.createdByMembershipId, userId: job.createdByUserId });
     await store.updateBulkJobProgress(tenantId, job.jobId, owner, { phase: 'PREPARING', done: 0, total: work.total, leaseSeconds });
-    const now = options.now ?? (() => Date.now());
+    const now = options.now ?? systemClock.nowMs;
     let lastAt = 0;
     const everyMs = (options.progressEverySeconds ?? 1) * 1000;
     const progress = async (done: number, phase?: BulkJobPhase) => {

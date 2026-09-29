@@ -21,6 +21,7 @@ mkdir -p "$SECRETS/channels"
 url() { printf 'postgres://%s@%s:%s/%s' "$1" "$PG_HOST" "$PG_PORT" "$DB" > "$SECRETS/$2"; }
 url svc_scheduler scheduler_pg_url
 url svc_app app_pg_url
+url svc_stock stock_pg_url
 url svc_exporter exporter_pg_url
 url svc_dispatcher dispatcher_pg_url
 url svc_relay relay_pg_url
@@ -112,6 +113,25 @@ if [ ! -f apps/console/dist/index.html ]; then
 fi
 # Шаг 46 (находка 3 ревью): Caddyfile СЕРВЕРА в CI подменяется http-вариантом, поэтому его адреса сайтов, глобальный блок
 # и импорт общих частей разбираются отдельно — тем же образом Caddy, что в профиле, с заполнителями вместо домена
+# Шаг 56 (ревью шага 54, находка 14): GnuPG в ЗАКРЕПЛЁННОМ образе копии базы — запуском, а не чтением Dockerfile. Образ берётся из
+# профиля production (сервис backup), пользователь — тот же 1000:1000; шифрование — теми же флагами, что backup-loop.sh (открытый ключ
+# файлом), расшифровка — одноразовой парой. Прошли байты туда и обратно — копия в работе зашифруется
+echo "== gpg в образе копии базы"
+backup_image="$(awk '/^  backup:/{f=1} f && /image:/{print $2; exit}' deploy/production/compose.yaml)"
+if docker run --rm --user 1000:1000 -e HOME=/tmp "$backup_image" bash -c '
+    set -euo pipefail
+    export GNUPGHOME="$(mktemp -d)"
+    gpg --batch --pinentry-mode loopback --passphrase "" --quick-gen-key "repracer backup smoke <backup-smoke@example.invalid>" default default never 2>/dev/null
+    gpg --batch --armor --export backup-smoke@example.invalid > "$GNUPGHOME/pub.asc"
+    printf "repracer-backup-smoke" | gpg --batch --no-tty --quiet --trust-model always --recipient-file "$GNUPGHOME/pub.asc" --encrypt --output "$GNUPGHOME/x.gpg"
+    head -c 5 "$GNUPGHOME/x.gpg" | grep -q PGDMP && exit 3
+    gpg --batch --no-tty --quiet --pinentry-mode loopback --passphrase "" --decrypt "$GNUPGHOME/x.gpg"' | grep -qx 'repracer-backup-smoke'; then
+  echo "   gpg: образ $backup_image шифрует и расшифровывает (флаги backup-loop.sh)"
+else
+  echo "   gpg: в образе $backup_image шифрование копии НЕ работает"
+  failed=1
+fi
+
 echo "== caddy validate: deploy/production/Caddyfile"
 if docker run --rm -v "$PWD/deploy/production:/etc/caddy:ro" -v "$PWD/apps/landing:/srv/landing:ro" \
     -e REPRACER_DOMAIN=example.invalid -e REPRACER_ACME_EMAIL=ci@example.invalid -e REPRACER_LANDING_PUBLIC=off \

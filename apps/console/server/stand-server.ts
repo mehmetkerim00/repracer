@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { systemClock } from '@repracer/channel-port';
 import type { TenantWorldIndex } from './tenant-worlds.ts';
 import { parseStockSheet } from '@repracer/stock-sync';
 import { createServer, type ServerResponse } from 'node:http';
@@ -430,7 +431,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       const t = m.ui.connections;
       if (req.method === 'GET' && param4 === null) {
         const rows = connect ? await connect.connections(live.tenantId) : { accounts: [], pending: [] };
-        return ok(connectionsView({ worldId: live.id, role: viewer.role, now: new Date().toISOString() }, rows, connect ? connect.connectable() : [], m));
+        return ok(connectionsView({ worldId: live.id, role: viewer.role, now: systemClock.now() }, rows, connect ? connect.connectable() : [], m));
       }
       if (req.method !== 'POST' || (param4 !== 'start' && param4 !== 'callback' && param4 !== 'cancel')) return fail(404, 'NOT_FOUND', s.notFound);
       if (!can(viewer.role, 'MANAGE_TENANT')) return fail(403, 'FORBIDDEN', t.noRight);
@@ -1306,7 +1307,7 @@ export function clientKeyOf(address: string): string {
 }
 
 export function createRateLimiter(config: RateLimitConfig) {
-  const now = config.now ?? (() => Date.now());
+  const now = config.now ?? systemClock.nowMs;
   const maxClients = config.maxClients ?? 20_000;
   // Порядок вставки Map — порядок последнего обращения: адрес переставляется в конец при каждом запросе
   const hits = new Map<string, number[]>();

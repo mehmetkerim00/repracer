@@ -138,3 +138,12 @@ test('step 22: the Amazon request checker flags a never-written attribute in a b
   assert.match(check({ ...ok, rawUrl: `${ok.rawUrl}?x=syn-client-secret` }).join(), /secret leaked/);
   assert.match(check({ ...ok, path: '/auth/o2/token', method: 'POST', rawBody: 'grant_type=refresh_token&refresh_token=wrong&client_id=syn-client&client_secret=syn-client-secret' }).join(), /not the seller refresh token/);
 });
+
+test('step 56: a scenario starts at the time of day it was written with, on the latest date not in the future — whenever the run starts', async () => {
+  const { frozenStandStart } = await import('./harness/runner.ts');
+  const authored = '2026-09-14T10:00:00.000Z';
+  // Запуск в 03:00 UTC — ещё не 10:00: вчерашние 10:00; запуск в 22:30 — сегодняшние 10:00. Время суток сценария — всегда 10:00
+  assert.equal(frozenStandStart(authored, Date.parse('2026-09-29T03:00:00.000Z')), '2026-09-28T10:00:00.000Z');
+  assert.equal(frozenStandStart(authored, Date.parse('2026-09-29T22:30:00.000Z')), '2026-09-29T10:00:00.000Z');
+  assert.equal(frozenStandStart(authored, Date.parse('2026-09-29T10:00:00.000Z')), '2026-09-29T10:00:00.000Z', 'exactly now is not the future');
+});

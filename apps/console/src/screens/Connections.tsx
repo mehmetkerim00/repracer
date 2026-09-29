@@ -74,7 +74,7 @@ export function ConnectionsScreen({ worldId }: { worldId: string }) {
                       <Badge tone={tone(a.state)}>{a.stateText}</Badge>{a.progressText ? <div className="note">{a.progressText}</div> : null}
                       {a.channelLimitText ? <div className="note">{a.channelLimitText}</div> : null}
                     </td>
-                    <td className="note">{a.authorizationText}</td>
+                    <td className="note">{a.authorizationText}{a.discoveryText ? <><br />{a.discoveryText}</> : null}</td>
                     <td>{a.canReconnect ? <button type="button" onClick={() => start(a.channel, a.marketplaces)}>{a.reconnectLabel}</button> : null}</td>
                   </tr>
                 ))}

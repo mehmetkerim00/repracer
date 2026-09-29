@@ -124,9 +124,9 @@ test('Р-126: the job source gives each account only the jobs its channel suppor
   assert.deepEqual(specs.filter((s) => !s.scope).map((s) => s.name).sort(), ['analytics-export-day', 'partitions', 'price-days-close', 'retention']);
   // Kaufland: buy_box_changed — ранний доступ, сверки нет по умолчанию; опрос и проверка остановки выборкой есть
   // Шаг 47: пересчёт цен, не зависящих от конкурентов, — у каждого аккаунта (у eBay это единственный источник решений)
-  assert.deepEqual(byAccount('20000000-0000-4000-8000-000000000001'), ['competitor-poll/60', 'halt-review/300', 'offer-discovery/86400', 'scheduled-recompute/900']);
+  assert.deepEqual(byAccount('20000000-0000-4000-8000-000000000001'), ['competitor-poll/60', 'halt-review/300', 'offer-discovery/3600', 'scheduled-recompute/900']);
   // Amazon: опроса для решения нет [AMZ_C07], остановка снимается только человеком [Р-119]; сверка по кругу — 31 с × 2 аккаунта (0.033 rps = 30,3 с)
-  assert.deepEqual(byAccount('20000000-0000-4000-8000-000000000002'), ['amazon-reconcile-rotation/62', 'notification-loss-review/300', 'offer-discovery/86400', 'scheduled-recompute/900']);
+  assert.deepEqual(byAccount('20000000-0000-4000-8000-000000000002'), ['amazon-reconcile-rotation/62', 'notification-loss-review/300', 'offer-discovery/3600', 'scheduled-recompute/900']);
   const withPush = await jobSource({ ...deps, reconcileEnabled: () => true }).jobs('2026-09-17T10:00:00.000Z');
   assert.ok(withPush.some((s) => s.name === 'notification-loss-review' && s.scope?.channelAccountId === '20000000-0000-4000-8000-000000000001'),
     'Kaufland reconciliation is switched on per account when early access to buy_box_changed is granted');
@@ -309,6 +309,37 @@ test('ревью шага 53, находка 3: повтор курсора в �
   await assert.rejects(orderLines.run({ startedAt: '2026-09-17T10:30:00.000Z', previousSucceededAt: '2026-09-17T10:00:00.000Z', previousFinishedAt: null } as never),
     /CHANNEL_PAGE_CURSOR_REPEATED/, 'a repeated cursor fails the run — a success would move the window past the unread pages');
   assert.deepEqual(windows, ['2026-09-17T09:55:00.000Z'], 'the lines were read from the kept window (the store records them before the failure)');
+});
+
+test('шаг 56 (ревью шага 54, находка 8): чтение заказов, упёршееся в предел страниц, — место записано, следующий заход продолжает то же окно; без хранилища места окно держится', async () => {
+  const calls: Array<{ since: string; cursor: string | undefined }> = [];
+  let saved: { since: string; cursor: string } | null = null;
+  let page = 0;
+  const deps = jobDeps();
+  const specs = await jobSource({
+    ...deps, reconcileEnabled: () => true,
+    stock: {
+      syncOrders: async (_a, _ctx, since, options) => {
+        calls.push({ since, cursor: options?.cursor });
+        page += 1;
+        return { lines: 20_000, created: 0, consumed: 0, released: 0, unknownOffers: 0, writes: 0, ...(page === 1 ? { pageLimit: { pages: 200, nextCursor: 'cursor-201' } } : {}) };
+      },
+      positions: { get: async () => saved, save: async (_a, position) => { saved = position; } },
+    },
+  }).jobs('2026-09-17T10:00:00.000Z');
+  const orderLines = specs.find((spec) => spec.name === 'order-lines')!;
+  const first = await orderLines.run({ startedAt: '2026-09-17T10:30:00.000Z', previousSucceededAt: '2026-09-17T10:00:00.000Z', previousFinishedAt: null } as never);
+  assert.deepEqual(saved, { since: '2026-09-17T09:55:00.000Z', cursor: 'cursor-201' }, 'the place is recorded');
+  assert.equal(first.alerts?.[0]?.code, 'ORDER_LINES_PAGE_LIMIT_REACHED');
+  // Следующий заход — окно прошлого (не от нового успеха) с его курсора; дочитал — место снято
+  await orderLines.run({ startedAt: '2026-09-17T10:35:00.000Z', previousSucceededAt: '2026-09-17T10:30:00.000Z', previousFinishedAt: null } as never);
+  assert.deepEqual(calls[1], { since: '2026-09-17T09:55:00.000Z', cursor: 'cursor-201' });
+  assert.equal(saved, null, 'the place is cleared once the window is read');
+  // Хранилища места нет — успех сдвинул бы окно: запуск держит окно провалом без удвоения паузы
+  const noStore = await jobSource({ ...jobDeps(), reconcileEnabled: () => true, stock: {
+    syncOrders: async () => ({ lines: 20_000, created: 0, consumed: 0, released: 0, unknownOffers: 0, writes: 0, pageLimit: { pages: 200, nextCursor: 'c' } }) } }).jobs('2026-09-17T10:00:00.000Z');
+  await assert.rejects(noStore.find((spec) => spec.name === 'order-lines')!.run({ startedAt: '2026-09-17T10:30:00.000Z', previousSucceededAt: null, previousFinishedAt: null } as never),
+    /HOLD_WINDOW ORDER_LINES_PAGE_LIMIT_REACHED/);
 });
 
 test('ревью шага 54, находка 7: провал, держащий окно, повторяется в свой период — петля курсора канала не растягивает паузу до суток', async () => {

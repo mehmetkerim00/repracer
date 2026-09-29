@@ -1,4 +1,5 @@
 import { randomUUID, createHash } from 'node:crypto';
+import { systemClock } from '@repracer/channel-port';
 import type { Instant, OrderLine } from '@repracer/channel-port';
 import { availableOf, publishedQuantity, type StockAllocation } from './published.ts';
 import type {
@@ -48,7 +49,9 @@ export class InMemoryStockStore implements StockStore {
   private readonly offers: readonly MemoryStockOffer[];
   /** Тенант мира: ключ Inbound API принадлежит ему, и Р-31 требует сверки */
   private readonly tenantId: string;
-  constructor(offers: readonly MemoryStockOffer[], options: { canManage?: (actor: StockActor) => boolean; tenantId?: string } = {}) {
+  private readonly now: () => string;
+  constructor(offers: readonly MemoryStockOffer[], options: { canManage?: (actor: StockActor) => boolean; tenantId?: string; now?: () => string } = {}) {
+    this.now = options.now ?? systemClock.now;
     this.offers = offers;
     this.tenantId = options.tenantId ?? 'memory';
     this.canManage = options.canManage ?? (() => true);
@@ -63,7 +66,7 @@ export class InMemoryStockStore implements StockStore {
     const stockSourceId = randomUUID();
     const apiKey = input.mode === 'INBOUND_API' ? `rpk_${randomUUID().replace(/-/g, '')}` : null;
     this.sources.set(stockSourceId, {
-      row: { stockSourceId, mode: input.mode, name: input.name, status: 'ACTIVE', createdAt: new Date().toISOString(), products: 0, hasKey: apiKey !== null },
+      row: { stockSourceId, mode: input.mode, name: input.name, status: 'ACTIVE', createdAt: this.now(), products: 0, hasKey: apiKey !== null },
       ...(apiKey ? { keyPrefix: apiKey.slice(0, 12), keySha256: createHash('sha256').update(apiKey).digest('hex') } : {}),
     });
     return { status: 'CREATED', stockSourceId, apiKey };

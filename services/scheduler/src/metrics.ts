@@ -1,4 +1,5 @@
 import { createServer, type Server } from 'node:http';
+import { systemClock } from '@repracer/channel-port';
 import type { TickReport } from './scheduler.ts';
 
 /**
@@ -19,7 +20,7 @@ export class SchedulerMetrics {
   private heartbeatFailures = 0;
   private readonly now: () => number;
 
-  constructor(now: () => number = Date.now) {
+  constructor(now: () => number = systemClock.nowMs) {
     this.now = now;
     this.startedAtMs = now();
   }

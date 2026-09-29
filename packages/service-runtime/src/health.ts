@@ -1,4 +1,5 @@
 import { createServer, type Server } from 'node:http';
+import { systemClock } from '@repracer/channel-port';
 
 /**
  * Работоспособность процесса снаружи (OQ-190, как у планировщика 0129): `/healthz` — 200, пока цикл процесса шевелился не позже
@@ -11,7 +12,7 @@ export class ProcessHealth {
   private lastAliveMs: number | null = null;
   private readonly counters = new Map<string, number>();
 
-  constructor(now: () => number = Date.now) {
+  constructor(now: () => number = systemClock.nowMs) {
     this.now = now;
     this.startedAtMs = now();
   }

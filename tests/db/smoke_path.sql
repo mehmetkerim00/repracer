@@ -147,20 +147,24 @@ SELECT set_config('app.auth_mfa', 'off', true) \gset
 
 -- ---------------------------------------------------------------- шаг 55 (OQ-240): квота приложения и круг обнаружения
 /**
- * Суточная квота приложения размазана по суткам: в 00:30 UTC из 24 вызовов доступно ceil(24 × (1800 + 3600) / 86400) = 2. Время — у
- * вызывающего (часы стенда), а не часы базы: проверка от настоящего времени суток не зависит
+ * Шаг 56 (ревью шага 55, находка 6): квота приложения — не больше ceil(лимит / 24) в час: при лимите 48 — два вызова в час 00:00–01:00 UTC,
+ * третий — отказ; следующий час — снова доступен. Время — у вызывающего (часы стенда), а не часы базы: проверка от времени запуска не зависит
  */
 DO $$ BEGIN
-  IF NOT platform.reserve_channel_app_call('EBAY', 'SMOKE_QUOTA', 24, '2026-09-29 00:30+00')
-     OR NOT platform.reserve_channel_app_call('EBAY', 'SMOKE_QUOTA', 24, '2026-09-29 00:30+00') THEN
-    RAISE EXCEPTION 'the first two calls of the day slice were refused';
+  IF NOT platform.reserve_channel_app_call('EBAY', 'SMOKE_QUOTA', 48, '2026-09-29 00:10+00')
+     OR NOT platform.reserve_channel_app_call('EBAY', 'SMOKE_QUOTA', 48, '2026-09-29 00:50+00') THEN
+    RAISE EXCEPTION 'the first two calls of the hour were refused';
   END IF;
-  RAISE NOTICE 'PASS accept | the app quota grants the day slice (OQ-240)';
+  RAISE NOTICE 'PASS accept | the app quota grants the slice of the hour (OQ-240)';
 END $$;
-SELECT pg_temp.expect_fail('the app quota grants more than the slice of the day (OQ-240)', $q$
+SELECT pg_temp.expect_fail('the app quota grants more than the slice of the hour (OQ-240)', $q$
   DO $d$ BEGIN
-    IF NOT platform.reserve_channel_app_call('EBAY', 'SMOKE_QUOTA', 24, '2026-09-29 00:30+00') THEN RAISE EXCEPTION 'app quota slice of the day is spent'; END IF;
-  END $d$ $q$, 'app quota slice of the day is spent');
+    IF NOT platform.reserve_channel_app_call('EBAY', 'SMOKE_QUOTA', 48, '2026-09-29 00:59+00') THEN RAISE EXCEPTION 'app quota slice of the hour is spent'; END IF;
+  END $d$ $q$, 'app quota slice of the hour is spent');
+DO $$ BEGIN
+  IF NOT platform.reserve_channel_app_call('EBAY', 'SMOKE_QUOTA', 48, '2026-09-29 01:00+00') THEN RAISE EXCEPTION 'the next hour was refused'; END IF;
+  RAISE NOTICE 'PASS accept | the next hour has its own slice (OQ-240)';
+END $$;
 -- Прерванный заход несёт курсор, закрытый круг — нет; чужой или несуществующий аккаунт круга не получает
 SELECT pg_temp.expect_fail('a completed discovery circle keeps a cursor (OQ-240)', $q$
   SELECT tenant_data.save_discovery_circle('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', NULL, 'x', 'COMPLETED', '2026-09-29 00:30+00') $q$,
@@ -174,6 +178,17 @@ DO $$ BEGIN
     RAISE EXCEPTION 'the saved discovery circle is not read back';
   END IF;
   RAISE NOTICE 'PASS accept | the discovery circle is read back by its own tenant (OQ-240)';
+END $$;
+-- Шаг 56: место чтения заказов — начало окна и курсор вместе; положительный контроль — сохранение и чтение своей строки
+SELECT pg_temp.expect_fail('an order read position without its cursor (step 56)', $q$
+  SELECT tenant_data.save_order_read_position('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', '2026-09-29 00:00+00', NULL, '2026-09-29 00:30+00') $q$,
+  'keeps the window start and the cursor together');
+SELECT tenant_data.save_order_read_position('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', '2026-09-29 00:00+00', 'page-201', '2026-09-29 00:30+00') \gset
+DO $$ BEGIN
+  IF (SELECT cursor FROM tenant_data.order_read_position('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001')) IS DISTINCT FROM 'page-201' THEN
+    RAISE EXCEPTION 'the saved order read position is not read back';
+  END IF;
+  RAISE NOTICE 'PASS accept | the order read position is kept (step 56)';
 END $$;
 SELECT set_config('app.tenant_id', 'b0000000-0000-0000-0000-00000000000b', true) \gset
 SELECT pg_temp.expect_fail('another tenant reads the discovery circle (OQ-240)', $q$

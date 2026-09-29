@@ -30,8 +30,12 @@ export interface JobConfig {
   amazonBatch: number;
   amazonCircleWarnHours: number;
   haltReviewEverySeconds: number;
-  /** Обход офферов [Р-120] — раз в сутки, допущение (OQ-163) */
+  /**
+   * Обход офферов [Р-120]. Шаг 56 (ревью шага 55, находка 4): заход — раз в час, НОВЫЙ круг — не чаще `discoveryCircleEverySeconds` (сутки,
+   * допущение OQ-163): прерванный сроком или квотой круг продолжается в пределах часа, а не через сутки; закрытый — канал не трогается
+   */
   discoveryEverySeconds: number;
+  discoveryCircleEverySeconds: number;
   /**
    * Шаг 55 (OQ-240): суточный бюджет квот ПРИЛОЖЕНИЯ для обхода предложений, по имени квоты (его называет адаптер страницы). eBay Trading —
    * 5 000 вызовов в сутки по умолчанию на приложение (снимок vendor/ebay/2026-09-28/api-call-limits.html); обходу — 3 000, остальное —
@@ -58,7 +62,7 @@ export interface JobConfig {
 
 export const DEFAULT_JOB_CONFIG: JobConfig = {
   pollEverySeconds: 60, pollBudgetRps: 10, pollMaxQueries: 600, lossReviewEverySeconds: 300, lossGraceSeconds: DEFAULT_LOSS_GRACE_SECONDS,
-  amazonCallSeconds: 31, amazonBatch: 20, amazonCircleWarnHours: 24, haltReviewEverySeconds: 300, discoveryEverySeconds: 86_400, discoveryAppQuotas: { EBAY_TRADING: 3000 }, orderLinesEverySeconds: 300,
+  amazonCallSeconds: 31, amazonBatch: 20, amazonCircleWarnHours: 24, haltReviewEverySeconds: 300, discoveryEverySeconds: 3_600, discoveryCircleEverySeconds: 86_400, discoveryAppQuotas: { EBAY_TRADING: 3000 }, orderLinesEverySeconds: 300,
   exportOffsetSeconds: 1_800, exportLookbackDays: 13, maintenanceEverySeconds: 3_600, alertsDeliverEverySeconds: 60,
   // Находка 3 ревью шага 43: заход ЕЖЕДНЕВНЫЙ — письмо о прошлой закрытой неделе, недоставленное повторяется каждые сутки
   shadowDigestEverySeconds: 86_400,
@@ -111,7 +115,16 @@ export interface JobDeps {
    * процессе работы нет; процесс без роли остатков — конфигурация, а не молчаливый пропуск.
    */
   stock?: {
-    syncOrders(account: SchedulerAccount, ctx: AdapterCallContext, since: Instant): Promise<{ lines: number; created: number; consumed: number; released: number; unknownOffers: number; writes: number; cursorRepeated?: boolean }>;
+    syncOrders(account: SchedulerAccount, ctx: AdapterCallContext, since: Instant, options?: { cursor?: string }): Promise<{ lines: number; created: number; consumed: number; released: number; unknownOffers: number; writes: number; cursorRepeated?: boolean; pageLimit?: { pages: number; nextCursor: string } }>;
+    /**
+     * Шаг 56 (ревью шага 54, находка 8): место чтения заказов аккаунта — заход, упёршийся в предел страниц, записывает начало окна и
+     * курсор, следующий продолжает оттуда. Без хранилища места работа читает окно заново (ничего не теряя, но и не продвигаясь дальше
+     * предела на огромном окне — это видно алертом)
+     */
+    positions?: {
+      get(account: SchedulerAccount): Promise<{ since: Instant; cursor: string } | null>;
+      save(account: SchedulerAccount, position: { since: Instant; cursor: string } | null, at: Instant): Promise<void>;
+    };
   };
   /** Сверка уведомлений опросом включена для аккаунта [Р-121]; по умолчанию — если источник уведомлений канала доступен */
   reconcileEnabled?(account: SchedulerAccount, descriptor: ChannelDescriptor): boolean;
@@ -364,14 +377,30 @@ export function jobSource(deps: JobDeps): JobSource {
                * дважды, и это безвредно (резервация одна на строку заказа). От последнего ЛЮБОГО завершения окно считать
                * нельзя: такт, провалившийся на бюджете канала, унёс бы заказы своих минут навсегда.
                */
-              const since = new Date(Date.parse(previousSucceededAt ?? startedAt) - cfg.orderLinesEverySeconds * 1000).toISOString();
-              const r = await stock.syncOrders(a, ctxOf(a, startedAt, 'order-lines', 120), since);
+              const saved = (await stock.positions?.get(a)) ?? null;
+              // Шаг 56: прошлый заход упёрся в предел страниц — продолжаем ЕГО окно с его курсора; иначе — окно от прошлого успеха
+              const since = saved?.since ?? new Date(Date.parse(previousSucceededAt ?? startedAt) - cfg.orderLinesEverySeconds * 1000).toISOString();
+              const r = await stock.syncOrders(a, ctxOf(a, startedAt, 'order-lines', 120), since, saved ? { cursor: saved.cursor } : {});
+              if (r.pageLimit && !stock.positions) {
+                // Места хранить негде — успех сдвинул бы окно и потерял хвост: окно держится провалом без удвоения паузы (шаг 55)
+                throw new JobHoldsWindowError(`ORDER_LINES_PAGE_LIMIT_REACHED: order lines read ${r.lines} in ${r.pageLimit.pages} pages, no position store, the window is kept`);
+              }
+              if (r.pageLimit) {
+                /**
+                 * Шаг 56 (ревью шага 54, находка 8): предел страниц захода — прочитанное записано, место — тоже; следующий заход (через период,
+                 * без паузы провала) продолжит то же окно. Запуск — успех: окно следующего обычного запуска перекрывает это, ничего не теряется
+                 */
+                await stock.positions?.save(a, { since, cursor: r.pageLimit.nextCursor }, startedAt);
+                return { items: r.lines, alerts: [{ code: 'ORDER_LINES_PAGE_LIMIT_REACHED', severity: 'WARNING' as const, details: { pages: r.pageLimit.pages, lines: r.lines, continued: saved !== null } }] };
+              }
+              if (saved) await stock.positions?.save(a, null, startedAt);
               /**
                * Шаг 53: канал повторил курсор — прочитанное уже записано. Шаг 54 (ревью шага 53, находка 3): запуск при этом —
                * ПРОВАЛ, а не успех с предупреждением. Успех двигал бы `previousSucceededAt`, и страницы за петлёй курсора старше
                * одного интервала не читались бы никогда — заказы без резерваций, перепродажа. Провал оставляет окно на месте:
                * следующий запуск читает его снова (повтор строки безвреден), пауза и алерт провала — по Р-132
                */
+              if (r.cursorRepeated && saved) await stock.positions?.save(a, null, startedAt);
               if (r.cursorRepeated) throw new JobHoldsWindowError(`CHANNEL_PAGE_CURSOR_REPEATED: order lines read ${r.lines}, the window is kept for the next run`);
               return { items: r.lines };
             },
@@ -397,7 +426,7 @@ export function jobSource(deps: JobDeps): JobSource {
              * Шаг 55 (OQ-240; ревью шага 54, находка 9): заход — отрезок круга. Срок вызова и квота приложения останавливают его сами, место
              * записано, следующий заход продолжит. Круг, не закрытый заходом, — не провал: это нормальный ход крупного каталога
              */
-            const r = await pipeline().discoverOffers(ctxOf(a, startedAt, 'offer-discovery', 1500), { quotas: cfg.discoveryAppQuotas });
+            const r = await pipeline().discoverOffers(ctxOf(a, startedAt, 'offer-discovery', 1500), { quotas: cfg.discoveryAppQuotas, circleEveryMs: cfg.discoveryCircleEverySeconds * 1000 });
             return { items: r.offers };
           },
         });

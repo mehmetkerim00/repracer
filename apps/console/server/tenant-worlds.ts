@@ -1,4 +1,5 @@
 import { AMAZON_DESCRIPTOR } from '@repracer/amazon-adapter';
+import { systemClock } from '@repracer/channel-port';
 import type { LiveWorld } from '@repracer/contract-tests/stand';
 import type { Principal } from '@repracer/identity';
 import { KAUFLAND_DESCRIPTOR } from '@repracer/kaufland-adapter';
@@ -50,7 +51,7 @@ const consoleAdapter = (channel: string) => new Proxy({ descriptor: channel === 
   get: (target, key) => (key in target ? target[key as string] : noChannel),
 }) as never;
 
-export function createTenantWorlds(pools: TenantWorldPools, now: () => string = () => new Date().toISOString()) {
+export function createTenantWorlds(pools: TenantWorldPools, now: () => string = systemClock.now) {
   const store = new PgPricingStore(pools.app, { adminPool: pools.admin, bulkWorkerPool: pools.bulkWorker });
   const stock = new PgStockStore({ adminPool: pools.admin, stockPool: pools.stock });
   const shadow = new PgShadowStore({ adminPool: pools.admin });
@@ -118,9 +119,9 @@ export function createTenantWorlds(pools: TenantWorldPools, now: () => string = 
     async worldsFor(principal: Principal): Promise<TenantWorldIndex> {
       const fingerprint = principal.memberships.map((x) => `${x.tenantId}:${x.membershipId}:${x.role}`).sort().join('|');
       let entry = cache.get(principal.userId) ?? emptyCache.get(principal.userId);
-      if (!entry || entry.fingerprint !== fingerprint || Date.now() - entry.at > INDEX_TTL_MS) {
+      if (!entry || entry.fingerprint !== fingerprint || Date.parse(now()) - entry.at > INDEX_TTL_MS) {
         const { rows } = await pools.authenticator.query('SELECT tenant_id, tenant_name FROM security.console_tenant_worlds($1)', [principal.userId]);
-        entry = { fingerprint, at: Date.now(), rows: rows.map((r) => ({ id: `${TENANT_WORLD_PREFIX}${r.tenant_id as string}`, tenantId: r.tenant_id as string, title: r.tenant_name as string })) };
+        entry = { fingerprint, at: Date.parse(now()), rows: rows.map((r) => ({ id: `${TENANT_WORLD_PREFIX}${r.tenant_id as string}`, tenantId: r.tenant_id as string, title: r.tenant_name as string })) };
         cache.delete(principal.userId);
         emptyCache.delete(principal.userId);
         /**

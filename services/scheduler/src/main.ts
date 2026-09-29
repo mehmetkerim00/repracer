@@ -4,7 +4,8 @@ import { createEbayAdapter } from '@repracer/ebay-adapter';
 import type { AdapterDependencies, ChannelAdapter } from '@repracer/channel-port';
 import { conservativeBudget, createKauflandAdapter } from '@repracer/kaufland-adapter';
 import { createPricingPipeline } from '@repracer/pricing-pipeline';
-import { createPool, PgAlertDeliveryStore, PgAlertSink, PgCredentialVault, PgPricingStore, PgShadowDigestStore, type PgPool } from '@repracer/pricing-store-pg';
+import { createPool, PgAlertDeliveryStore, PgAlertSink, PgCredentialVault, PgPricingStore, PgShadowDigestStore, PgStockStore, type PgPool } from '@repracer/pricing-store-pg';
+import { createStockPipeline } from '@repracer/stock-sync';
 import { loadConfig, type SchedulerConfig } from './config.ts';
 import { createDryMailSender, createHeartbeat, createMailSender, EBAY_APPLICATION_REF } from '@repracer/service-runtime';
 import { createAlertDelivery } from '@repracer/alert-delivery';
@@ -55,6 +56,8 @@ export async function startScheduler(config: SchedulerConfig = loadConfig(), onF
   const sink = jsonSink();
   const schedulerPool: PgPool = createPool(config.schedulerPgUrl, { max: 4, applicationName: `repracer-scheduler-${config.owner}` });
   const appPool: PgPool = createPool(config.appPgUrl, { max: 8, applicationName: `repracer-scheduler-app-${config.owner}` });
+  // Шаг 56: роль остатков — работа order-lines (заказы канала → резервации → пересчёт публикуемого остатка) [Р-25, Р-102]
+  const stockPool: PgPool = createPool(config.stockPgUrl, { max: 2, applicationName: `repracer-scheduler-stock-${config.owner}` });
   const exporterPool: PgPool = createPool(config.exporterPgUrl, { max: 2, applicationName: `repracer-scheduler-export-${config.owner}` });
   /**
    * Р-156: алерт идёт И в журнал эксплуатации, И в базу. Журнал — для того, кто смотрит за процессами; база — для
@@ -111,6 +114,25 @@ export async function startScheduler(config: SchedulerConfig = loadConfig(), onF
     }
     return pipeline;
   };
+  /**
+   * Шаг 56: до этого шага планировщик процесса НЕ заводил работу order-lines вовсе — её зависимость `stock` передавали только живые
+   * прогоны, и в работе заказы канала не становились резервациями, а доступный остаток после продажи не уменьшался. Административной роли
+   * у планировщика нет и не будет [Р-90]: пути заказов она не нужна, и обращение к ней — громкий отказ, а не тихая подмена ролью остатков
+   */
+  const noAdminPool = new Proxy({}, { get: () => () => { throw new Error('the scheduler has no administrative role: this stock operation belongs to the console'); } }) as PgPool;
+  const stockPipeline = createStockPipeline({ store: new PgStockStore({ adminPool: noAdminPool, stockPool }), now: () => new Date().toISOString() }); // real-clock: точка сборки процесса
+  const stockDeps = {
+    syncOrders: (account: SchedulerAccount, ctx: Parameters<typeof stockPipeline.syncOrders>[0], since: string, options?: { cursor?: string }) => {
+      const adapter = adapterFor(account.channel);
+      if (!adapter) throw new Error(`NO_ADAPTER: ${account.channel}`);
+      return stockPipeline.syncOrders(ctx, adapter, since as never, options);
+    },
+    positions: {
+      get: (account: SchedulerAccount) => store.orderReadPosition(account.tenantId, account.channelAccountId),
+      save: (account: SchedulerAccount, position: { since: string; cursor: string } | null, at: string) =>
+        store.saveOrderReadPosition(account.tenantId, account.channelAccountId, position as never, at as never),
+    },
+  };
   const ch = (login: { user: string; password: string }) => new ClickHouseHttp({ url: config.clickHouse.url, user: login.user, password: login.password });
   const state = new PgSchedulerState(schedulerPool);
   const deliveryPool: PgPool | null = config.alertDeliveryPgUrl
@@ -159,7 +181,7 @@ export async function startScheduler(config: SchedulerConfig = loadConfig(), onF
     ...(alertDelivery ? { alertDelivery } : {}),
     ...(shadowDigest ? { shadowDigest } : {}),
   });
-  const deps2 = { ...deps2Base, ...(channelAuthorizations ? { channelAuthorizations } : {}) };
+  const deps2 = { ...deps2Base, stock: stockDeps, ...(channelAuthorizations ? { channelAuthorizations } : {}) };
   const metrics = new SchedulerMetrics();
   // Риск 31: часы сроков — часы базы
   const scheduler = createScheduler({ state, source: jobSource(deps2), owner: config.owner, now: dueClockOf(state), alerts });
@@ -203,7 +225,7 @@ export async function startScheduler(config: SchedulerConfig = loadConfig(), onF
     clearInterval(heartbeatTimer);
     await running.stop();
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    await Promise.all([schedulerPool.end(), appPool.end(), exporterPool.end(), ...(credentialsPool ? [credentialsPool.end()] : [])]);
+    await Promise.all([schedulerPool.end(), appPool.end(), stockPool.end(), exporterPool.end(), ...(credentialsPool ? [credentialsPool.end()] : [])]);
   };
   return { running, metrics, stop };
 }

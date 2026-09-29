@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { adapterOrder } from './order-checker.ts';
 import { fork, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { after, test } from 'node:test';
@@ -106,6 +107,7 @@ interface ProofResult {
   consumedFirstOutOfOrder: number;
   redeliveries: number;
   adapterVersionViolations: number;
+  adapterIdempotentRepeats: number;
   scopesWithLostLatestPrice: number;
   strandedPending: number;
   outOfOrderRejections: number;
@@ -229,13 +231,12 @@ async function runProof(options: { keyed: boolean; killOne: boolean }): Promise<
   }
 
   const { rows: calls } = await admin!.query(`SELECT write_scope_id, version, amount_minor FROM proof.adapter_call WHERE run_id = $1 ORDER BY seq`, [runId]);
-  const lastCall = new Map<string, { version: number; amount: number }>();
-  let adapterVersionViolations = 0;
-  for (const c of calls) {
-    const prev = lastCall.get(c.write_scope_id);
-    if (prev && Number(c.version) <= prev.version) adapterVersionViolations++;
-    lastCall.set(c.write_scope_id, { version: Number(c.version), amount: Number(c.amount_minor) });
-  }
+  /**
+   * Шаг 56: нарушение порядка — версия МЕНЬШЕ наибольшей, уже отправленной по единице (старая после новой), либо та же версия с ДРУГОЙ
+   * суммой. Повтор той же версии с той же суммой — законная повторная отправка после убитого экземпляра (at-least-once до канала,
+   * идемпотентно по версии): прежнее `<=` считал её нарушением, и полный прогон шага 53 краснел на законном поведении (2 повтора)
+   */
+  const { lastCall, adapterVersionViolations, adapterIdempotentRepeats } = adapterOrder(calls as never);
 
   const state = await inTenant(pool!, world.tenantId, async (tx) => {
     const { rows: latest } = await tx.query(
@@ -262,7 +263,7 @@ async function runProof(options: { keyed: boolean; killOne: boolean }): Promise<
   const { rows: [w] } = await admin!.query(`SELECT count(DISTINCT worker_id) AS n FROM proof.consumed WHERE run_id = $1`, [runId]);
 
   return {
-    consumedFirstOutOfOrder, redeliveries, adapterVersionViolations, scopesWithLostLatestPrice: lost, strandedPending: state.pending,
+    consumedFirstOutOfOrder, redeliveries, adapterVersionViolations, adapterIdempotentRepeats, scopesWithLostLatestPrice: lost, strandedPending: state.pending,
     outOfOrderRejections: state.outOfOrder, outOfOrderRejectionsNotRedelivered: state.rejectedNotRedelivered, workersThatConsumed: Number(w.n), adapterCalls: calls.length, decisionsApproved: state.approved,
     messagesPublished: messages.length, snapshotsConsumed: seen.size === 0 ? 0 : [...seen.values()].reduce((n, set) => n + set.size, 0), alerts: Object.fromEntries(alertsByCode),
   };

@@ -303,8 +303,14 @@ observes('order-lines', 'Р-25, Р-152 (шаг 35): заказы канала с
   assert.ok(Number(w.n) > stats.ordersPlaced / 2, `записей остатка, применённых каналом: ${w.n} при ${stats.ordersPlaced} заказах`);
 });
 
-observes('offer-discovery', 'Р-120, Р-12: обход офферов раз в сутки находит Smart Pricing продавца', () => {
-  assert.equal(jobOf('offer-discovery').runs, 6, 'по два обхода на каждый из трёх аккаунтов за сутки');
+observes('offer-discovery', 'Р-120, Р-12: обход офферов раз в сутки находит Smart Pricing продавца', async () => {
+  /**
+   * Шаг 56 (ревью шага 55, находка 4): заход — раз в час, новый КРУГ — не чаще суток. Заходы без круга канал не трогают (`NOT_DUE`, ноль
+   * предложений); кругов — по два на каждый из трёх аккаунтов за сутки прогона, как прежних суточных обходов
+   */
+  assert.ok(jobOf('offer-discovery').runs >= 3 * 24, `заход каждый час у каждого аккаунта: ${jobOf('offer-discovery').runs}`);
+  const [c] = (await observer.query(`SELECT count(*)::int AS n FROM maintenance.scheduled_job_run WHERE job_name = 'offer-discovery' AND items > 0`)).rows;
+  assert.equal(Number(c.n), 6, 'по два круга обхода на каждый из трёх аккаунтов за сутки');
   assert.ok(live.k1.events.some((e) => e.code === 'KAUFLAND_SMART_PRICING_ACTIVE'), 'оффер с minimum_price в кабинете канала найден обходом');
 });
 

@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { systemClock } from '@repracer/channel-port';
 import { join } from 'node:path';
 import type { AdapterDependencies, AdapterLogEntry, AlertSink, ChannelAccountId, TenantId } from '@repracer/channel-port';
 import { inTenant, PgCredentialVault, type PgPool } from '@repracer/pricing-store-pg';
@@ -62,7 +63,7 @@ export interface JsonSink {
 }
 
 /** Журнал и алерты процесса: строка JSON в stdout, без тел запросов и секретов */
-export function jsonSink(raw: (line: string) => void = (l) => process.stdout.write(`${l}\n`), now: () => string = () => new Date().toISOString()): JsonSink {
+export function jsonSink(raw: (line: string) => void = (l) => process.stdout.write(`${l}\n`), now: () => string = systemClock.now): JsonSink {
   /**
    * Р-177 (шаг 43): вторая линия против утечки токена — каждая строка журнала проходит маскирование форм токенов.
    * Первая линия — код не передаёт токены в журнал вовсе; эта ловит то, что всё-таки попало (текст ошибки канала,

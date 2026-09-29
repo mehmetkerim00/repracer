@@ -628,6 +628,10 @@ export const en = {
         unmanaged: (unmanaged: number, writable: number) => `Of them we can write to ${writable}; ${unmanaged === 1 ? '1 is' : `${unmanaged} are`} not open for our writes (for eBay: listings not under the Inventory API, which only the owner can migrate, or auctions, which are never managed).`,
         awaitingAccess: (what: string) => `Missing: ${what}.`,
       },
+      discovery: {
+        running: (h: number, hadCircle: boolean) => `Catalogue discovery: the current circle has been running ${h} h${hadCircle ? '' : ' (the first one)'} — a listing only a full circle sees (older eBay listings) appears within one circle.`,
+        completed: (h: number, at: string) => `Catalogue discovery: the last full circle took ${h} h, closed ${at.slice(0, 16).replace('T', ' ')} UTC — a listing only a full circle sees (older eBay listings) appears within one circle.`,
+      },
       authorization: {
         revoked: 'Access was withdrawn in the channel: connect again to continue.',
         external: 'Access is configured by the platform, not through this screen.',
@@ -766,6 +770,8 @@ export const en = {
         PRICE_WRITE_SCOPE_BLOCKED: { what: 'an offer is blocked: its price change did not go through', step: 'Open the offer in the console: the reason of the refusal is written there. Most refusals need an action in the channel cabinet.' },
         PRICE_WRITE_NOT_SENT: { what: 'a price change was not sent to the channel', step: 'Open the price feed in the console and check the offers of this channel.' },
         DISCOVERY_PAGE_LIMIT_REACHED: { what: 'offer discovery reached its page limit before the channel had returned every offer', step: 'Offers beyond the limit are not in the catalog yet. Contact us with the event code — the limit will be adjusted for your catalog.' },
+        ORDER_LINES_PAGE_LIMIT_REACHED: { what: 'reading the orders reached the page limit of one run', step: 'Nothing is lost: what was read is recorded and the next run continues from the same place. If the alert keeps repeating for hours, contact us with the event code.' },
+        DISCOVERY_CIRCLE_RESET: { what: 'offer discovery failed again at the same place and starts its circle over', step: 'Usually nothing is to be done: the next circle reads the catalogue again. If the alert repeats, contact us with the event code.' },
         CHANNEL_PAGE_CURSOR_REPEATED: { what: 'the channel returned a page it had already given, so reading stopped early', step: 'Nothing is lost: what was read is kept and the next run reads the same window again. If the alert repeats, contact us with the event code.' },
         PRICE_WRITE_BLOCKED_BY_RECHECK: { what: 'a price change was held right before sending: the floor had changed in the meantime', step: 'Usually nothing is to be done — the price is recomputed with the new cost. If the message repeats for the same offer, check its unit cost.' },
         PRICE_WRITE_DISPATCH_ERROR: { what: 'a waiting price change could not be sent off', step: 'Check the state of the channel account in the console: expired credentials are the most common cause.' },

@@ -1056,10 +1056,6 @@ export class PgPricingStore implements PricingStore {
   }
 
   // --- включение репрайсинга ---------------------------------------------------
-  async getPriceScope(tenantId: string, writeScopeId: string): Promise<PriceScopeContext | null> {
-    const loaded = await this.loadScopeContext(tenantId, writeScopeId, new Date().toISOString());
-    return loaded?.context.scope ?? null;
-  }
 
   async resolveBounds(tenantId: string, writeScopeId: string): Promise<BoundsRead> {
     return this.tx(tenantId, async (tx) => {
@@ -1580,11 +1576,33 @@ export class PgPricingStore implements PricingStore {
   }
 
   /** Шаг 23: состояние PRICING_HEALTH оффера (0083) — данные канала, 18 месяцев */
+  /** Шаг 56 (0150): место чтения заказов аккаунта — начало окна и курсор; функцией узкой роли */
+  async orderReadPosition(tenantId: string, channelAccountId: string): Promise<{ since: Instant; cursor: string } | null> {
+    return this.tx(tenantId, async (tx) => {
+      const { rows: [r] } = await tx.query('SELECT since, cursor FROM tenant_data.order_read_position($1, $2)', [tenantId, channelAccountId]);
+      return r ? { since: (r.since instanceof Date ? r.since.toISOString() : String(r.since)) as Instant, cursor: String(r.cursor) } : null;
+    });
+  }
+
+  async saveOrderReadPosition(tenantId: string, channelAccountId: string, position: { since: Instant; cursor: string } | null, at: Instant): Promise<void> {
+    await this.tx(tenantId, async (tx) => {
+      await tx.query('SELECT tenant_data.save_order_read_position($1, $2, $3, $4, $5)', [tenantId, channelAccountId, position?.since ?? null, position?.cursor ?? null, at]);
+    });
+  }
+
   /** Шаг 55 (0148): курсор круга обнаружения аккаунта — функцией узкой роли, прав на таблицу у пути решения нет */
   async discoveryCircleCursor(tenantId: string, channelAccountId: string): Promise<string | null> {
     return this.tx(tenantId, async (tx) => {
       const { rows: [r] } = await tx.query('SELECT tenant_data.discovery_circle_cursor($1, $2) AS cursor', [tenantId, channelAccountId]);
       return (r?.cursor as string | null) ?? null;
+    });
+  }
+
+  async discoveryCircleState(tenantId: string, channelAccountId: string): Promise<{ cursor: string | null; circleStartedAt: Instant | null; lastCircleCompletedAt: Instant | null; lastStop: string | null } | null> {
+    return this.tx(tenantId, async (tx) => {
+      const { rows: [r] } = await tx.query('SELECT * FROM tenant_data.discovery_circle_state($1, $2)', [tenantId, channelAccountId]);
+      const iso = (v: unknown) => (v ? ((v instanceof Date ? v.toISOString() : String(v)) as Instant) : null);
+      return r ? { cursor: (r.cursor as string | null) ?? null, circleStartedAt: iso(r.circle_started_at), lastCircleCompletedAt: iso(r.last_circle_completed_at), lastStop: (r.last_stop as string | null) ?? null } : null;
     });
   }
 
@@ -2354,7 +2372,8 @@ export class PgPricingStore implements PricingStore {
                 ps.last_polled_at AS last_seen
            FROM tenant_data.offer_mapping m
            LEFT JOIN channel_data.competitor_poll_state ps ON ps.tenant_id = m.tenant_id AND ps.channel_account_id = m.channel_account_id
-                AND ps.marketplace = m.marketplace AND ps.channel_product_ref = m.channel_product_ref AND ps.condition = m.condition
+                -- Ревью шага 55, находка 1: отметку ставит markPolled условием порта (нижний регистр), предложение хранит его верхним
+                AND ps.marketplace = m.marketplace AND ps.channel_product_ref = m.channel_product_ref AND ps.condition = lower(m.condition)
           WHERE m.tenant_id = $1 AND m.channel_account_id = $2 AND m.status <> 'ENDED' AND m.channel_product_ref IS NOT NULL
           ORDER BY m.marketplace, m.channel_product_ref, m.condition, last_seen DESC NULLS LAST`, [tenantId, channelAccountId]);
       const items = rows.map((r) => ({

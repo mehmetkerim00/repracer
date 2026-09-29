@@ -37,6 +37,8 @@ export interface ConnectionAccountView {
   /** Р-176: что уже видно — офферы и решения тени */
   progressText: string | null;
   authorizationText: string;
+  /** Шаг 56 (Р-198): сколько длится круг обхода каталога — столько же ждёт новый листинг, который видит только полный обход */
+  discoveryText: string | null;
   offers: number;
   /** Из них — вести нельзя: нет единицы записи цены (у eBay — немигрированные листинги и аукционы) */
   unmanagedOffers: number;
@@ -112,7 +114,14 @@ export function connectionsView(
       : state === 'REVOKED' ? t.authorization.revoked
       : a.credentialVerifiedAt ? t.authorization.verified(a.credentialVerifiedAt, a.credentialCheckFailures)
         : t.authorization.obtained(a.credentialObtainedAt ?? a.connectedAt);
+    const hours = (fromMs: number, toMs: number) => Math.max(0, Math.round(((toMs - fromMs) / 3_600_000) * 10) / 10);
+    const started = a.discoveryCircleStartedAt ? Date.parse(a.discoveryCircleStartedAt) : null;
+    const completed = a.discoveryCircleCompletedAt ? Date.parse(a.discoveryCircleCompletedAt) : null;
+    const discoveryText = started === null ? null
+      : completed !== null && completed >= started ? t.discovery.completed(hours(started, completed), a.discoveryCircleCompletedAt!)
+        : t.discovery.running(hours(started, nowMs), completed !== null);
     return {
+      discoveryText,
       channelAccountId: a.channelAccountId, channel: a.channel, label: `${a.channel} · ${a.externalAccountId} · ${a.marketplaces.join(', ')}`, marketplaces: [...a.marketplaces],
       state, stateText: t.states[state] ?? state, progressText, authorizationText, offers: a.offers, unmanagedOffers: a.unmanagedOffers, shadowDecisions24h: a.shadowDecisions24h,
       // eBay не называет продавца (E-11): повторное согласие создало бы второй аккаунт того же продавца (находка 6 ревью шага 43)
