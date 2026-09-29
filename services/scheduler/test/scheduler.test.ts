@@ -298,6 +298,19 @@ test('Р-25 (прогон суток шага 35): окно чтения зак�
   assert.deepEqual(windows, ['2026-09-17T09:55:00.000Z', '2026-09-17T10:25:00.000Z']);
 });
 
+test('ревью шага 53, находка 3: повтор курсора в заказах — прочитанное записано, а запуск провален, и окно следующего не сдвигается', async () => {
+  const windows: string[] = [];
+  const deps = jobDeps();
+  const specs = await jobSource({
+    ...deps, reconcileEnabled: () => true,
+    stock: { syncOrders: async (_a, _ctx, since) => { windows.push(since); return { lines: 3, created: 3, consumed: 0, released: 0, unknownOffers: 0, writes: 0, cursorRepeated: true }; } },
+  }).jobs('2026-09-17T10:00:00.000Z');
+  const orderLines = specs.find((spec) => spec.name === 'order-lines')!;
+  await assert.rejects(orderLines.run({ startedAt: '2026-09-17T10:30:00.000Z', previousSucceededAt: '2026-09-17T10:00:00.000Z', previousFinishedAt: null } as never),
+    /CHANNEL_PAGE_CURSOR_REPEATED/, 'a repeated cursor fails the run — a success would move the window past the unread pages');
+  assert.deepEqual(windows, ['2026-09-17T09:55:00.000Z'], 'the lines were read from the kept window (the store records them before the failure)');
+});
+
 test('ревью шага 47, находка 5: пересчёт по расписанию — предел за заход передаётся, все должные упали — провал запуска (пауза Р-132), часть — WARNING', async () => {
   const outcomes: Array<{ scopes: number; changed: number; failed: number; firstError: string | null }> = [];
   const limits: Array<number | undefined> = [];

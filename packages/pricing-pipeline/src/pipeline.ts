@@ -954,7 +954,15 @@ export function createPricingPipeline(deps: PipelineDeps) {
       const withChannelPricing: Array<{ marketplace: string; externalSku: string; automatedPricing: boolean; channelBounds: boolean }> = [];
       // Шаг 53 (ревью шага 52, находка 6): все виденные курсоры; на повторе записанное остаётся, обход кончается с WARNING
       const seen = new Set<string>();
-      for (let page = 0; page < (options.maxPages ?? 50); page++) {
+      /**
+       * Шаг 54 (расчёт пиковых объёмов): прежний предел — 50 страниц по 20, около 1000 предложений, и каждый заход начинался заново:
+       * каталог больше 1000 предложений не обнаруживался целиком никогда, а у eBay до второй фазы (старые листинги, Trading) дело не
+       * доходило. Предел — 5000 страниц (100 000 предложений при 20 на странице); заход ограничен и сроком вызова. Упёрлись в предел —
+       * WARNING с числом, а не молчаливо обрезанный каталог
+       */
+      const maxPages = options.maxPages ?? 5000;
+      let truncated = false;
+      for (let page = 0; page < maxPages; page++) {
         const result = await waitingForBudget(ctx, () => adapter.discoverOffers(ctx, { limit: options.pageLimit ?? 20, ...(cursor ? { cursor } : {}) }));
         offers += result.items.length;
         const observations = result.items.flatMap((o) => (o.channelPricing && o.identity.externalSku && o.identity.marketplace
@@ -982,6 +990,10 @@ export function createPricingPipeline(deps: PipelineDeps) {
         }
         seen.add(result.nextCursor);
         cursor = result.nextCursor;
+        if (page === maxPages - 1) truncated = true;
+      }
+      if (truncated) {
+        await emit(ctx, [{ kind: 'alert', code: 'DISCOVERY_PAGE_LIMIT_REACHED', severity: 'WARNING', details: { pages: maxPages, offers } }]);
       }
       if (withChannelPricing.length > 0) {
         await emit(ctx, [{ kind: 'alert', code: 'OFFERS_WITH_CHANNEL_PRICING', severity: 'WARNING', details: { offers: withChannelPricing.length } }]);

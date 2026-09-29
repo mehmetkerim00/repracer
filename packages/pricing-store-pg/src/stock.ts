@@ -257,16 +257,31 @@ export class PgStockStore implements StockStore {
            -- значение, шаг 51) количество в канале застревало до следующего изменения остатка
            coalesce((SELECT w.quantity FROM tenant_data.channel_write w WHERE w.tenant_id = s.tenant_id AND w.write_scope_id = s.write_scope_id AND w.version = ss.latest_version_created),
                     /**
-                     * Последняя версия в истории считается созданной, если она ДОШЛА до канала (APPLIED), удержана тенью (SHADOW_HELD) или упёрлась
-                     * в бюджет, который ещё не обновился (новая запись ушла бы в тот же исчерпанный бюджет). Иначе — отвергнута, не применена или
-                     * бюджет обновился — сравнение идёт с последней ПРИМЕНЁННОЙ версией, то есть с тем, что канал держит: шаг 53 (ревью шага 52,
-                     * находка 11) — значение, которое уже стоит у канала, заново не отправляется
+                     * Последняя версия в истории считается значением канала, если она ДОШЛА до канала (APPLIED), упёрлась в бюджет, который ещё
+                     * не обновился (новая запись ушла бы в тот же исчерпанный бюджет), или удержана тенью, ПОКА аккаунт в тени. Шаг 54 (ревью
+                     * шага 53, находка 5): после перевода в бой удержанная тенью версия значением канала не является — канал её не видел.
                      */
                     (SELECT h.quantity FROM tenant_data.channel_write_history h WHERE h.tenant_id = s.tenant_id AND h.write_scope_id = s.write_scope_id
+                        AND h.version = ss.latest_version_created
                         AND (h.final_status = 'APPLIED'
-                             OR h.version = ss.latest_version_created AND (h.final_status = 'SHADOW_HELD'
-                                  OR h.final_status = 'BUDGET_EXHAUSTED' AND NOT ${PgStockStore.BUDGET_DAY_PASSED_SQL}))
-                      ORDER BY h.version DESC LIMIT 1)) AS last_quantity
+                             OR h.final_status = 'SHADOW_HELD' AND EXISTS (SELECT 1 FROM tenant_data.channel_account ca
+                                  WHERE ca.tenant_id = s.tenant_id AND ca.channel_account_id = s.channel_account_id AND ca.write_mode = 'SHADOW')
+                             OR h.final_status = 'BUDGET_EXHAUSTED' AND NOT ${PgStockStore.BUDGET_DAY_PASSED_SQL})),
+                    /**
+                     * Шаг 53 (ревью шага 52, находка 11): иначе — последняя ПРИМЕНЁННАЯ версия, то есть то, что канал держит. Шаг 54 (ревью шага 53,
+                     * находка 4): только если КАЖДАЯ версия после неё до канала точно не дошла — не отправлялась вовсе или канал ответил отказом 4xx
+                     * на неё и не принял. Версия с неизвестным исходом (не применена после ACCEPTED у асинхронного Amazon, повторы исчерпаны после
+                     * 5xx или таймаута) могла примениться позже — тогда значение канала неизвестно (NULL), и запись создаётся: уменьшение остатка
+                     * не блокируется никогда [инвариант 5]
+                     */
+                    (SELECT a.quantity FROM tenant_data.channel_write_history a WHERE a.tenant_id = s.tenant_id AND a.write_scope_id = s.write_scope_id
+                        AND a.final_status = 'APPLIED'
+                        AND NOT EXISTS (SELECT 1 FROM tenant_data.channel_write_history x
+                              WHERE x.tenant_id = s.tenant_id AND x.write_scope_id = s.write_scope_id AND x.version > a.version
+                                AND NOT (x.dispatched_at IS NULL
+                                         OR x.final_status = 'DISCARDED_STALE' AND x.accepted_at IS NULL AND x.end_reason = 'WRITE_NOT_ACCEPTED_BY_CHANNEL'
+                                            AND (x.end_params ->> 'httpStatus')::int BETWEEN 400 AND 499))
+                      ORDER BY a.version DESC LIMIT 1)) AS last_quantity
       FROM tenant_data.write_scope s
       LEFT JOIN stock st ON st.product_id = s.product_id
       LEFT JOIN reserved rv ON rv.product_id = s.product_id
@@ -341,8 +356,9 @@ export class PgStockStore implements StockStore {
   }
 
   /**
-   * Шаг 52 (п. 8): товары аккаунта, у которых последняя запись количества упёрлась в бюджет правок прошлого дня витрины. Их пересчитывает
-   * работа чтения заказов — и без новых заказов значение уходит в канал после смены суток, а не ждёт изменения остатка
+   * Шаг 52 (п. 8): товары аккаунта, у которых последняя запись количества упёрлась в бюджет правок прошлого дня витрины, и (шаг 54)
+   * удержана тенью, когда аккаунт уже в бою. Их пересчитывает работа чтения заказов — значение уходит в канал без новых заказов,
+   * а не ждёт изменения остатка
    */
   async budgetRolledOverProducts(tenantId: string, channelAccountId: string): Promise<string[]> {
     return inTenant(this.options.stockPool, tenantId, async (tx) => {
@@ -351,7 +367,11 @@ export class PgStockStore implements StockStore {
            JOIN tenant_data.write_scope_sync_state ss ON ss.tenant_id = s.tenant_id AND ss.write_scope_id = s.write_scope_id
            JOIN tenant_data.channel_write_history h ON h.tenant_id = s.tenant_id AND h.write_scope_id = s.write_scope_id AND h.version = ss.latest_version_created
           WHERE s.tenant_id = $1 AND s.channel_account_id = $2 AND s.field = 'QUANTITY' AND s.quantity_sync_enabled AND s.status <> 'RETIRED'
-            AND h.final_status = 'BUDGET_EXHAUSTED' AND ${PgStockStore.BUDGET_DAY_PASSED_SQL}`, [tenantId, channelAccountId]);
+            AND (h.final_status = 'BUDGET_EXHAUSTED' AND ${PgStockStore.BUDGET_DAY_PASSED_SQL}
+                 -- Шаг 54 (ревью шага 53, находка 5): аккаунт переведён в бой, а последняя версия удержана тенью — канал её не видел,
+                 -- и значение уходит первым же заходом работы, а не ждёт изменения остатка
+                 OR h.final_status = 'SHADOW_HELD' AND EXISTS (SELECT 1 FROM tenant_data.channel_account ca
+                      WHERE ca.tenant_id = s.tenant_id AND ca.channel_account_id = s.channel_account_id AND ca.write_mode = 'LIVE'))`, [tenantId, channelAccountId]);
       return rows.map((r) => String(r.product_id));
     });
   }

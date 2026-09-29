@@ -129,6 +129,17 @@ export function loadConsoleConfig(env: Env = process.env, read: (path: string) =
   const heartbeatUrl = heartbeatOff ? null : required(secret(env, 'REPRACER_CONSOLE_HEARTBEAT_URL', read), 'REPRACER_CONSOLE_HEARTBEAT_URL (or REPRACER_CONSOLE_HEARTBEAT=off)');
   if (heartbeatUrl && !heartbeatUrl.startsWith('https://')) throw new ConfigError('CONFIG_INVALID: REPRACER_CONSOLE_HEARTBEAT_URL must be https');
 
+  /**
+   * Шаг 54 (п. 3): счётчик частоты запросов живёт в памяти процесса — у второй реплики свой, и предел на адрес фактически удваивается.
+   * Пока общего счётчика нет, конфигурация, заявляющая больше одной реплики, — отказ при старте своей причиной. Общий счётчик —
+   * отдельным решением, когда вторая реплика реально понадобится. Вторую копию через `docker compose --scale` не даст и развёртывание:
+   * порт консоли закреплён на хосте (127.0.0.1:4319, deploy/console)
+   */
+  const replicas = intFromEnv(env, 'REPRACER_CONSOLE_REPLICAS', 1, 1, 64);
+  if (replicas > 1) {
+    throw new ConfigError(`CONFIG_INVALID: REPRACER_CONSOLE_REPLICAS=${replicas} — нужен общий счётчик частоты: ограничитель запросов консоли живёт в памяти процесса, и у каждой реплики он свой (шаг 54)`);
+  }
+
   return {
     heartbeatUrl,
     // 0 — порт выдаёт система: так живой прогон поднимает ТОТ ЖЕ процесс, не занимая заранее известный порт

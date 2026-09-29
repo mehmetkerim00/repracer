@@ -360,8 +360,14 @@ export function jobSource(deps: JobDeps): JobSource {
                */
               const since = new Date(Date.parse(previousSucceededAt ?? startedAt) - cfg.orderLinesEverySeconds * 1000).toISOString();
               const r = await stock.syncOrders(a, ctxOf(a, startedAt, 'order-lines', 120), since);
-              // Шаг 53: канал повторил курсор — прочитанное записано, следующий запуск читает то же окно; видно алертом
-              return { items: r.lines, ...(r.cursorRepeated ? { alerts: [{ code: 'CHANNEL_PAGE_CURSOR_REPEATED', severity: 'WARNING' as const, details: { stage: 'ORDER_LINES', lines: r.lines } }] } : {}) };
+              /**
+               * Шаг 53: канал повторил курсор — прочитанное уже записано. Шаг 54 (ревью шага 53, находка 3): запуск при этом —
+               * ПРОВАЛ, а не успех с предупреждением. Успех двигал бы `previousSucceededAt`, и страницы за петлёй курсора старше
+               * одного интервала не читались бы никогда — заказы без резерваций, перепродажа. Провал оставляет окно на месте:
+               * следующий запуск читает его снова (повтор строки безвреден), пауза и алерт провала — по Р-132
+               */
+              if (r.cursorRepeated) throw new Error(`CHANNEL_PAGE_CURSOR_REPEATED: order lines read ${r.lines}, the window is kept for the next run`);
+              return { items: r.lines };
             },
           });
         }

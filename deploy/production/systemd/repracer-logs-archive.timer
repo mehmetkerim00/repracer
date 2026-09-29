@@ -1,0 +1,10 @@
+# Раз в сутки после полуночи UTC; пропущенный запуск (сервер был выключен) выполняется при старте — Persistent
+[Unit]
+Description=repracer: daily logs archive
+
+[Timer]
+OnCalendar=*-*-* 00:20:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

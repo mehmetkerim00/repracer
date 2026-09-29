@@ -672,3 +672,40 @@ test('Р-146, шаг 49: каждое рабочее пространство з
   assert.ok(dirs.length > 20, `рабочих пространств подозрительно мало: ${dirs.length}`);
   assert.deepEqual(missing(dirs, lock.packages), [], 'рабочее пространство без записи в package-lock.json: npm install --package-lock-only');
 });
+
+/**
+ * Шаг 54 (OQ-227, OWASP A01/A05): панель оператора и все порты процессов и метрик публикуются ТОЛЬКО на loopback — наружу смотрят
+ * лишь 80 и 443 прокси профиля production. До шага 54 это держалось ручной проверкой `ss -ltnp` на сервере: развёртывание,
+ * пробросившее 4327 наружу, выглядело правильным. Теперь такая строка краснит сборку; положительный контроль — на синтетике
+ */
+test('шаг 54: порты развёртываний публикуются только на 127.0.0.1, наружу — только 80 и 443 прокси (OQ-227)', async () => {
+  const { readdirSync, readFileSync, existsSync } = await import('node:fs');
+  const OUTWARD = new Set(['deploy/production/compose.yaml proxy 80:80', 'deploy/production/compose.yaml proxy 443:443']);
+  const published = (file: string, text: string): string[] => {
+    const out: string[] = [];
+    let service = '';
+    let inPorts = -1;
+    for (const line of text.split('\n')) {
+      const svc = /^  ([a-z0-9-]+):\s*$/.exec(line);
+      if (svc) { service = svc[1]!; inPorts = -1; continue; }
+      const ports = /^(\s+)ports:\s*$/.exec(line);
+      if (ports) { inPorts = ports[1]!.length; continue; }
+      if (inPorts >= 0) {
+        const item = /^(\s+)-\s*["']?([^"'\s#]+)["']?/.exec(line);
+        if (item && item[1]!.length >= inPorts) { out.push(`${file} ${service} ${item[2]!}`); continue; }
+        if (line.trim() !== '' && !line.trim().startsWith('#')) inPorts = -1;
+      }
+    }
+    return out;
+  };
+  const offending = (entries: string[]) => entries.filter((e) => !OUTWARD.has(e) && !/ 127\.0\.0\.1:\d+:\d+$/.test(e));
+  // Положительный контроль: проброшенный наружу порт панели правило обязано увидеть — в любой записи
+  const bad = 'services:\n  operator:\n    ports:\n      - "4327:4327"\n      - 0.0.0.0:9471:9471\n      - "127.0.0.1:1:1"\n';
+  assert.deepEqual(offending(published('synthetic.yaml', bad)), ['synthetic.yaml operator 4327:4327', 'synthetic.yaml operator 0.0.0.0:9471:9471']);
+  const files = readdirSync(new URL('deploy/', root)).flatMap((d) => ['compose.yaml', 'production.override.yaml', 'console.override.yaml']
+    .map((f) => `deploy/${d}/${f}`)).filter((f) => existsSync(new URL(f, root)));
+  const ci = readdirSync(new URL('deploy/ci/', root)).filter((f) => f.endsWith('.yaml')).map((f) => `deploy/ci/${f}`);
+  const all = [...new Set([...files, ...ci])].flatMap((f) => published(f, readFileSync(new URL(f, root), 'utf8')));
+  assert.ok(all.some((e) => e.includes('operator 127.0.0.1:4327:4327')), 'правило видит порт панели — иначе оно ничего не проверяет');
+  assert.deepEqual(offending(all), [], 'порт, опубликованный не на loopback');
+});

@@ -434,3 +434,81 @@ test('step 53: after a refused version the value the channel already holds is no
   await store.importStock(world.tenantId, sourceId, [{ sku: '3503', quantity: 9 }], owner());
   assert.deepEqual(writesFor(await store.recalculate(world.tenantId, null, now())), [7]);
 });
+
+/**
+ * Ревью шага 53, находка 4: версия с НЕИЗВЕСТНЫМ исходом — асинхронный канал принял её (ACCEPTED), а сверка не увидела применения за
+ * срок подтверждения (NOT_APPLIED), — могла примениться позже. Значение канала тогда неизвестно, и уменьшение остатка к прежнему
+ * применённому значению обязано уйти в канал [инвариант 5], а не считаться «уже стоящим там»
+ */
+test('step 54: after a version with an unknown outcome the old applied value is sent again — a decrease is never skipped', async () => {
+  const queue = new PgWriteQueueStore(db.pool('svc_app', 1));
+  const account = world.ids.dbId(KAUFLAND);
+  const sourceId = (await store.stockSources(world.tenantId))[0]!.stockSourceId;
+  const scope = (await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
+    `SELECT s.write_scope_id FROM tenant_data.write_scope s JOIN tenant_data.product p USING (tenant_id, product_id)
+      WHERE s.field = 'QUANTITY' AND p.sku = 'syn-prod-3'`)).rows) as Array<{ write_scope_id: string }>)[0]!.write_scope_id;
+  const writesFor = (r: { writes: Array<{ writeScopeId: string; quantity: number }> }) => r.writes.filter((w) => w.writeScopeId === scope).map((w) => w.quantity);
+  const claim = async () => {
+    const c = await queue.claimNext(world.tenantId, scope, now(), DEFAULT_RETRY_POLICY);
+    assert.equal(c.kind, 'DISPATCH', JSON.stringify(c));
+    return (c as Extract<typeof c, { kind: 'DISPATCH' }>).write;
+  };
+  await store.enableStockSync(world.tenantId, account, { bufferUnits: 2, maxQuantity: null, minQuantityToList: 0, acknowledgeSideEffects: false }, owner());
+  await store.importStock(world.tenantId, sourceId, [{ sku: '3503', quantity: 11 }], owner());
+  await store.recalculate(world.tenantId, null, now());
+  const applied = await claim();
+  await queue.recordOutcome(world.tenantId, applied, { channelWriteId: applied.channelWriteId, status: 'ACCEPTED', appliedImmediately: true }, now(), DEFAULT_RETRY_POLICY);
+  // Канал держит 9. Новая версия 12 принята асинхронно, и сверка за срок подтверждения применения не увидела
+  await store.importStock(world.tenantId, sourceId, [{ sku: '3503', quantity: 14 }], owner());
+  assert.deepEqual(writesFor(await store.recalculate(world.tenantId, null, now())), [12]);
+  const unknown = await claim();
+  await queue.recordOutcome(world.tenantId, unknown, { channelWriteId: unknown.channelWriteId, status: 'ACCEPTED', appliedImmediately: false }, now(), DEFAULT_RETRY_POLICY);
+  const late = new Date(Date.now() + DEFAULT_RETRY_POLICY.confirmationTimeoutMs + 60_000).toISOString();
+  const r = await queue.recordReconciliation(world.tenantId, unknown, { kind: 'NOT_APPLIED', observedMinor: null }, late, DEFAULT_RETRY_POLICY);
+  assert.equal(r.status, 'NOT_APPLIED', JSON.stringify(r));
+  // Остаток вернулся к 11: применённое значение — 9, но версия 12 могла примениться позже — 9 уходит снова
+  await store.importStock(world.tenantId, sourceId, [{ sku: '3503', quantity: 11 }], owner());
+  assert.deepEqual(writesFor(await store.recalculate(world.tenantId, null, now())), [9], 'the channel may hold 12 — the decrease to 9 is written');
+});
+
+/**
+ * Ревью шага 53, находка 5: версия, удержанная тенью, значение канала, пока аккаунт в тени, — и перестаёт им быть в бою. Остаток упал
+ * в тени до 0; после перевода в бой 0 уходит в канал работой чтения заказов, не дожидаясь нового изменения остатка
+ */
+test('step 54: a quantity held by shadow is sent after the account goes live — the channel never saw it', async () => {
+  const { PgShadowStore } = await import('../src/index.ts');
+  const queue = new PgWriteQueueStore(db.pool('svc_app', 1));
+  const shadow = new PgShadowStore({ adminPool: admin });
+  const account = world.ids.dbId(KAUFLAND);
+  const sourceId = (await store.stockSources(world.tenantId))[0]!.stockSourceId;
+  const scopeRow = (await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
+    `SELECT s.write_scope_id, s.product_id FROM tenant_data.write_scope s JOIN tenant_data.product p USING (tenant_id, product_id)
+      WHERE s.field = 'QUANTITY' AND p.sku = 'syn-prod-3'`)).rows) as Array<{ write_scope_id: string; product_id: string }>)[0]!;
+  const scope = scopeRow.write_scope_id;
+  const productId = scopeRow.product_id;
+  const writesFor = (r: { writes: Array<{ writeScopeId: string; quantity: number }> }) => r.writes.filter((w) => w.writeScopeId === scope).map((w) => w.quantity);
+  const typed = (await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
+    `SELECT external_account_id FROM tenant_data.channel_account WHERE channel_account_id = $1`, [account])).rows) as Array<{ external_account_id: string }>)[0]!.external_account_id;
+  await store.enableStockSync(world.tenantId, account, { bufferUnits: 2, maxQuantity: null, minQuantityToList: 0, acknowledgeSideEffects: false }, owner());
+  await store.importStock(world.tenantId, sourceId, [{ sku: '3503', quantity: 10 }], owner());
+  await store.recalculate(world.tenantId, null, now());
+  const c = await queue.claimNext(world.tenantId, scope, now(), DEFAULT_RETRY_POLICY);
+  assert.equal(c.kind, 'DISPATCH', JSON.stringify(c));
+  const w = (c as Extract<typeof c, { kind: 'DISPATCH' }>).write;
+  await queue.recordOutcome(world.tenantId, w, { channelWriteId: w.channelWriteId, status: 'ACCEPTED', appliedImmediately: true }, now(), DEFAULT_RETRY_POLICY);
+  // В канале 8. Аккаунт уходит в тень, остаток падает до 2 → 0 удержан тенью
+  const off = await shadow.switchWriteMode(world.tenantId, { channelAccountId: account, toMode: 'SHADOW', membershipId: world.ownerMembershipId, userId: world.userId, mfa: false });
+  assert.equal(off.status, 'SWITCHED', JSON.stringify(off));
+  try {
+    await store.importStock(world.tenantId, sourceId, [{ sku: '3503', quantity: 2 }], owner());
+    assert.deepEqual(writesFor(await store.recalculate(world.tenantId, null, now())), [0], 'held by shadow');
+    assert.deepEqual(writesFor(await store.recalculate(world.tenantId, null, now())), [], 'while in shadow the held 0 is not held again');
+    assert.deepEqual(await store.budgetRolledOverProducts(world.tenantId, account), [], 'nothing to resend while in shadow');
+  } finally {
+    const on = await shadow.switchWriteMode(world.tenantId, { channelAccountId: account, toMode: 'LIVE', membershipId: world.ownerMembershipId, userId: world.userId, mfa: true, typedConfirmation: typed });
+    assert.equal(on.status, 'SWITCHED', JSON.stringify(on));
+  }
+  // В бою: работа чтения заказов находит товар и без новых заказов, пересчёт создаёт запись 0
+  assert.ok((await store.budgetRolledOverProducts(world.tenantId, account)).includes(productId), 'the order-lines job picks the product up (with the other products held in shadow)');
+  assert.deepEqual(writesFor(await store.recalculate(world.tenantId, [productId], now())), [0], 'the channel still holds 8 — 0 is written');
+});

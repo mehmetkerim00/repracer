@@ -39,3 +39,8 @@ test('Р-180: имитатор стенда и локальный издател
   const { REPRACER_CONSOLE_OIDC_CLIENT_ID: _c, ...noClient } = zitadel;
   assert.throws(() => loadConsoleConfig({ ...base, ...noClient }, read), /CONFIG_MISSING: REPRACER_CONSOLE_OIDC_CLIENT_ID/);
 });
+
+test('шаг 54: больше одной реплики консоли — отказ при старте: нужен общий счётчик частоты', () => {
+  assert.equal(loadConsoleConfig({ ...base, REPRACER_CONSOLE_REPLICAS: '1' }, read).profile, 'default', 'одна реплика — законно');
+  assert.throws(() => loadConsoleConfig({ ...base, REPRACER_CONSOLE_REPLICAS: '2' }, read), /REPRACER_CONSOLE_REPLICAS=2 — нужен общий счётчик частоты/);
+});

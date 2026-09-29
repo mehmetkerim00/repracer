@@ -133,6 +133,8 @@ services:
       REPRACER_BACKUP_EVERY_SECONDS: ${REPRACER_BACKUP_EVERY_SECONDS:-86400}
       REPRACER_BACKUP_RETRY_SECONDS: ${REPRACER_BACKUP_RETRY_SECONDS:-900}
       PGURL_FILE: /run/secrets/backup_pg_url
+      # Шаг 54 (OWASP A02): ОТКРЫТЫЙ ключ GnuPG, которым шифруется копия; закрытый — вне сервера (README, «Шифрование копии»)
+      REPRACER_BACKUP_PUBLIC_KEY_FILE: /run/secrets/backup_public_key.asc
     entrypoint: ["/bin/bash", "/opt/repracer/backup-loop.sh"]
     volumes:
       - ./backup-loop.sh:/opt/repracer/backup-loop.sh:ro

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { MemorySeedScope } from '@repracer/pricing-pipeline';
@@ -63,12 +63,52 @@ function count(dbName: string, sql: string): number {
   return Number(out.trim());
 }
 
-test('Р-158: копия снимается тем же способом, что суточной работой профиля, и она не пуста', () => {
+/**
+ * Шаг 54 (OWASP A02): копия ШИФРУЕТСЯ открытым ключом GnuPG, закрытый ключ — вне сервера. Здесь работает ТОТ ЖЕ скрипт, что суточная
+ * работа профиля (`deploy/production/backup-loop.sh`, одна итерация), с одноразовой парой ключей; расшифровывает копию закрытый ключ,
+ * которого у скрипта нет, — и дальше восстановление идёт из РАСШИФРОВАННОЙ копии, как в работе
+ */
+const SCRIPT = join(import.meta.dirname, '..', '..', '..', 'deploy', 'production', 'backup-loop.sh');
+const gpgHome = () => { const h = join(dir, 'owner-gnupg'); mkdirSync(h, { recursive: true, mode: 0o700 }); return h; };
+const gpg = (args: string[]) => execFileSync('gpg', ['--homedir', gpgHome(), '--batch', '--no-tty', '--pinentry-mode', 'loopback', '--passphrase', '', ...args], { stdio: 'pipe' });
+const runBackup = (out: string, publicKey: string) => {
+  const urlFile = join(dir, 'backup_pg_url');
+  writeFileSync(urlFile, superUrl(db.name));
+  mkdirSync(out, { recursive: true });
+  try {
+    execFileSync('bash', [SCRIPT], { env: { ...psqlEnv(), PGURL_FILE: urlFile, REPRACER_BACKUP_OUT: out, REPRACER_BACKUP_PUBLIC_KEY_FILE: publicKey, REPRACER_BACKUP_ONCE: '1' }, stdio: 'pipe' });
+    return 0;
+  } catch (error) { return (error as { status?: number }).status ?? -1; }
+};
+
+test('шаг 54: суточная работа снимает копию ЗАШИФРОВАННОЙ открытым ключом; без закрытого она не читается, с ним — это копия базы', () => {
+  // Пара ключей владельца: на сервер уходит только открытый
+  gpg(['--quick-gen-key', 'repracer backup test <backup@example.invalid>', 'default', 'default', 'never']);
+  const publicKey = join(dir, 'backup_public_key.asc');
+  writeFileSync(publicKey, gpg(['--armor', '--export', 'backup@example.invalid']));
+  const out = join(dir, 'backups');
+  assert.equal(runBackup(out, publicKey), 0, 'одна итерация суточной работы удалась');
+  const files = readdirSync(out).sort();
+  const dumpGpg = files.find((f) => f.endsWith('.dump.gpg'));
+  assert.ok(dumpGpg && files.some((f) => f.endsWith('.globals.sql.gpg')) && files.some((f) => f.endsWith('.sha256')), `копия, роли и суммы: ${files.join(', ')}`);
+  assert.ok(!files.some((f) => f.endsWith('.dump') || f.endsWith('.sql') || f.endsWith('.part')), `ни одного открытого файла на диске: ${files.join(', ')}`);
+  const encrypted = readFileSync(join(out, dumpGpg!));
+  assert.notEqual(encrypted.subarray(0, 5).toString('latin1'), 'PGDMP', 'на диске не формат pg_dump');
+  assert.ok(!encrypted.includes(Buffer.from('tenant_data')), 'имена схем в зашифрованной копии не читаются');
+  // Закрытый ключ владельца расшифровывает её в обычную копию pg_dump
   dumpFile = join(dir, 'repracer.dump');
-  // Тот же вызов, что в deploy/production/backup-loop.sh: формат с оглавлением, восстанавливается pg_restore
-  execFileSync('pg_dump', ['--dbname', superUrl(db.name), '--format=custom', '--file', dumpFile], { env: psqlEnv(), stdio: 'pipe' });
+  gpg(['--output', dumpFile, '--decrypt', join(out, dumpGpg!)]);
+  assert.equal(readFileSync(dumpFile).subarray(0, 5).toString('latin1'), 'PGDMP', 'расшифрованная — формат pg_dump');
   const bytes = statSync(dumpFile).size;
   assert.ok(bytes > 50_000, `копия базы с данными не может быть крошечной: ${bytes} байт`);
+});
+
+test('шаг 54: без открытого ключа копия НЕ пишется открытой — провал с отметкой BACKUP_FAILED (fail-closed)', () => {
+  const out = join(dir, 'backups-no-key');
+  assert.equal(runBackup(out, join(dir, 'missing.asc')), 1);
+  const files = readdirSync(out);
+  assert.deepEqual(files, ['BACKUP_FAILED'], `на диске только отметка провала: ${files.join(', ')}`);
+  assert.equal(existsSync(join(out, 'BACKUP_FAILED')), true);
 });
 
 test('Р-158: база поднимается из копии на ЧИСТОЙ базе, и данные тенанта на месте', () => {

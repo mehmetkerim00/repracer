@@ -1271,41 +1271,53 @@ function send(res: ServerResponse, r: ApiResponse): void {
  */
 /**
  * Шаг 53 (OWASP A04, самопроверка шага 52): ограничение частоты запросов консоли — страница, API и Inbound API идут через этот слой.
- * Скользящее окно в минуту на клиента: клиент — предъявленный вход (заголовок Authorization — токен или ключ Inbound API, по SHA-256,
- * сам заголовок не хранится), иначе адрес. За прокси адрес — первый в `X-Forwarded-For`, только если это разрешено (`trustProxy`):
+ * Скользящее окно в минуту на АДРЕС клиента. За прокси адрес — первый в `X-Forwarded-For`, только если это разрешено (`trustProxy`):
  * иначе все анонимы делили бы адрес прокси, а доверять заголовку без прокси — значит дать анониму выбирать себе адрес.
- * Процессный счётчик: у нескольких реплик свой у каждой — предел на клиента растёт кратно (записано в самопроверке)
+ *
+ * Шаг 54 (ревью шага 53, находки 1–2): ключ — только адрес, а не отпечаток заголовка Authorization. Заголовок до проверки входа
+ * ничего не доказывает: выдуманный токен на каждый запрос давал новый счётчик, и предел не действовал вовсе. Запрос с заголовком
+ * получает БОЛЬШИЙ предел того же счётчика адреса — выдуманные токены одного адреса делят один бюджет. Ключей не больше `maxClients`
+ * (вытесняется давно молчавший), просроченные убирает таймер, а не запрос — у атакующего нет способа сделать запрос дорогим.
+ * Процессный счётчик: у нескольких реплик свой у каждой — поэтому реплика одна, и это держит страж конфигурации (шаг 54, п. 3)
  */
 export interface RateLimitConfig {
-  /** Запросов в минуту на предъявленный вход (токен или ключ) */
+  /** Запросов в минуту на адрес, если запрос предъявляет вход (токен или ключ Inbound API) */
   authorizedPerMinute: number;
   /** Запросов в минуту на адрес без входа (страница, гость демо до входа) */
   anonymousPerMinute: number;
   trustProxy: boolean;
   now?: () => number;
+  /** Предел числа адресов в памяти; по умолчанию 20 000 */
+  maxClients?: number;
 }
 
 export function createRateLimiter(config: RateLimitConfig) {
   const now = config.now ?? (() => Date.now());
+  const maxClients = config.maxClients ?? 20_000;
+  // Порядок вставки Map — порядок последнего обращения: адрес переставляется в конец при каждом запросе
   const hits = new Map<string, number[]>();
-  return (headers: Record<string, string | string[] | undefined>, remoteAddress: string | undefined): { ok: true } | { ok: false; retryAfterSeconds: number } => {
-    const auth = typeof headers.authorization === 'string' && headers.authorization.length > 0 ? headers.authorization : null;
+  const sweep = () => { const edge = now() - 60_000; for (const [k, v] of hits) if (v[v.length - 1]! <= edge) hits.delete(k); };
+  const timer = setInterval(sweep, 30_000);
+  timer.unref();
+  const check = (headers: Record<string, string | string[] | undefined>, remoteAddress: string | undefined): { ok: true } | { ok: false; retryAfterSeconds: number } => {
+    const auth = typeof headers.authorization === 'string' && headers.authorization.length > 0;
     const forwarded = typeof headers['x-forwarded-for'] === 'string' ? headers['x-forwarded-for'].split(',')[0]!.trim() : '';
-    const address = config.trustProxy && forwarded ? forwarded : (remoteAddress ?? 'unknown');
-    const key = auth ? `auth:${createHash('sha256').update(auth).digest('hex')}` : `addr:${address}`;
+    const key = config.trustProxy && forwarded ? forwarded : (remoteAddress ?? 'unknown');
     const limit = auth ? config.authorizedPerMinute : config.anonymousPerMinute;
     const t = now();
     const list = (hits.get(key) ?? []).filter((x) => x > t - 60_000);
+    hits.delete(key);
     if (list.length >= limit) {
       hits.set(key, list);
-      return { ok: false, retryAfterSeconds: Math.max(1, Math.ceil((list[0]! + 60_000 - t) / 1000)) };
+      return { ok: false, retryAfterSeconds: Math.max(1, Math.ceil((list[list.length - limit]! + 60_000 - t) / 1000)) };
     }
     list.push(t);
     hits.set(key, list);
-    // Память ограничена: ключи без запросов за минуту уходят при росте карты
-    if (hits.size > 50_000) for (const [k, v] of hits) if (v.every((x) => x <= t - 60_000)) hits.delete(k);
+    // Жёсткий потолок памяти: вытесняется адрес, молчавший дольше всех (первый в порядке обращения)
+    while (hits.size > maxClients) hits.delete(hits.keys().next().value!);
     return { ok: true };
   };
+  return Object.assign(check, { size: () => hits.size, close: () => clearInterval(timer) });
 }
 
 export function createStandServer(
@@ -1320,7 +1332,7 @@ export function createStandServer(
 ) {
   const fallback = messagesFor(locale).ui.server;
   const limited = options.rateLimit ? createRateLimiter(options.rateLimit) : null;
-  return createServer(async (req, res) => {
+  const server = createServer(async (req, res) => {
     for (const [name, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(name, value);
     if (options.contentSecurityPolicy) res.setHeader('content-security-policy', options.contentSecurityPolicy);
     if (limited) {
@@ -1376,6 +1388,8 @@ export function createStandServer(
       send(res, { status: 500, body: { error: { code: 'STAND_ERROR', message: fallback.standError } } });
     }
   });
+  if (limited) server.on('close', () => limited.close());
+  return server;
 }
 
 async function main(): Promise<void> {

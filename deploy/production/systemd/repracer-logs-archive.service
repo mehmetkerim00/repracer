@@ -1,0 +1,10 @@
+# Шаг 54 (OWASP A09): суточная выгрузка журналов контейнеров и месячные архивы (deploy/production/logs-archive.sh).
+# Ставится на хост: оба файла (deploy/production/systemd/repracer-logs-archive.service и deploy/production/systemd/repracer-logs-archive.timer)
+# копируются в /etc/systemd/system/, затем systemctl enable --now repracer-logs-archive.timer
+[Unit]
+Description=repracer: daily container logs to the hot tail and monthly archives
+
+[Service]
+Type=oneshot
+EnvironmentFile=/srv/repracer/app/deploy/production/production.env
+ExecStart=/bin/bash /srv/repracer/app/deploy/production/logs-archive.sh

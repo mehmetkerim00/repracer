@@ -91,3 +91,28 @@ test('step 53: a cursor seen before stops discovery, keeps the pages already rec
   assert.deepEqual(catalogued, [1, 1, 1]);
   assert.deepEqual(alerts.filter((a) => a.code === 'CHANNEL_PAGE_CURSOR_REPEATED'), [{ code: 'CHANNEL_PAGE_CURSOR_REPEATED', severity: 'WARNING' }]);
 });
+
+test('step 54: discovery reads past 1000 offers, and when it does reach its page limit it says so with a WARNING', async () => {
+  const run = async (pagesInChannel: number, maxPages?: number) => {
+    let read = 0;
+    const alerts: string[] = [];
+    const adapter = {
+      async discoverOffers(_ctx: unknown, page: { cursor?: string }) {
+        const n = page.cursor ? Number(page.cursor) : 0;
+        read += 1;
+        return { items: [{ identity: { marketplace: 'A1PA6795UKMFR9', externalSku: `syn-sku-${n}` }, gtins: [], condition: 'NEW', fulfillment: 'MERCHANT' }], ...(n + 1 < pagesInChannel ? { nextCursor: String(n + 1) } : {}) };
+      },
+    } as unknown as ChannelAdapter;
+    const store = { async recordOfferChannelPricing() { return 0; }, async recordDiscoveredOffers(_t: unknown, _a: unknown, items: unknown[]) { return items.length; } } as unknown as PricingStore;
+    const pipeline = createPricingPipeline({ store, adapter, alerts: { raise: async (a: { code: string }) => { alerts.push(a.code); } } as never,
+      logger: { log: () => undefined }, now: () => '2026-09-29T09:00:00.000Z' as never, sleep: async () => undefined });
+    const r = await pipeline.discoverOffers(ctx('2026-09-29T09:25:00.000Z'), { pageLimit: 1, ...(maxPages ? { maxPages } : {}) });
+    return { read, catalogued: r.catalogued, alerts };
+  };
+  const big = await run(1200);
+  assert.deepEqual([big.read, big.catalogued, big.alerts], [1200, 1200, []], 'the old limit of 50 pages is gone; a whole catalogue is read with no alert');
+  const capped = await run(10, 4);
+  assert.deepEqual([capped.read, capped.alerts], [4, ['DISCOVERY_PAGE_LIMIT_REACHED']], 'at the limit with a cursor left — WARNING');
+  const exact = await run(4, 4);
+  assert.deepEqual(exact.alerts, [], 'a catalogue that ends exactly at the limit is complete — no alert');
+});
