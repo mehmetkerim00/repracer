@@ -102,6 +102,29 @@ BEGIN
   RETURN NULL;
 END $fn$;
 
+/**
+ * Полный прогон CI шага 61: страж включения количества (0158) держал условие ОДНИМ выражением с подзапросом к `channel_account`. С шестого
+ * исполнения в сессии PL/pgSQL переходит на общий план, подзапрос остаётся и у единиц ЦЕНЫ — и роль каталога, создающая единицы цены
+ * обнаружением (`record_discovered_offers`) и не имеющая права читать аккаунт, получала `permission denied for table channel_account`.
+ * Та же ловушка, что шаг 35 нашёл у проверки «цена равна решению»: подзапрос — отдельным оператором внутри ветки количества
+ */
+CREATE OR REPLACE FUNCTION tenant_data.write_scope_quantity_writes_confirmed() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = pg_catalog AS $fn$
+BEGIN
+  IF NEW.field <> 'QUANTITY' OR NOT coalesce(NEW.quantity_sync_enabled, false) THEN
+    RETURN NEW;
+  END IF;
+  IF TG_OP = 'UPDATE' AND OLD.quantity_sync_enabled THEN
+    RETURN NEW;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM tenant_data.channel_account ca
+                  WHERE ca.tenant_id = NEW.tenant_id AND ca.channel_account_id = NEW.channel_account_id AND ca.quantity_writes_confirmed) THEN
+    RAISE EXCEPTION 'quantity writes of channel account % are not confirmed by the owner: another tool may manage stock there (Р-202)', NEW.channel_account_id
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END $fn$;
+
 -- ---------------------------------------------------------------- 2. причина завершения и страж отправки
 ALTER TABLE tenant_data.channel_write DROP CONSTRAINT channel_write_end_reason_known;
 ALTER TABLE tenant_data.channel_write

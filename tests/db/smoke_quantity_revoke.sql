@@ -129,4 +129,20 @@ SELECT pg_temp.ok('the revocation and the new confirmation are in the audit log 
     END IF;
   END $d$ $q$);
 
+/**
+ * Полный прогон CI шага 61: страж включения количества держал подзапрос к аккаунту в одном выражении с проверкой поля, и на общем плане
+ * (с шестого исполнения в сессии) роль каталога, создающая единицы ЦЕНЫ обнаружением, получала отказ права на `channel_account`.
+ * Общий план здесь — принудительно: число исполнений до перехода зависит от статистики, и локально ловушка не срабатывала
+ */
+SET LOCAL ROLE repracer_app;
+SELECT set_config('app.tenant_id', :tA, true) \gset
+SELECT pg_temp.ok('discovery creates price write scopes on a generic plan without reading the account (Р-202, шаг 35)', $q$
+  DO $d$ DECLARE i int; BEGIN
+    PERFORM set_config('plan_cache_mode', 'force_generic_plan', true);
+    FOR i IN 1..8 LOOP
+      PERFORM tenant_data.record_discovered_offers('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001',
+        format('[{"marketplace": "de", "external_unit_id": "96110%s", "external_sku": null, "channel_product_ref": null, "gtin": null, "condition": "new"}]', i)::jsonb);
+    END LOOP;
+  END $d$ $q$);
+
 ROLLBACK;

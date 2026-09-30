@@ -2194,6 +2194,9 @@ export const STEP61_ROWS = [
       m(replaceInFunction('tenant_data.channel_quantity_writes_confirmation_apply()', "AND w.field = 'QUANTITY' AND w.status IN ('PENDING', 'BLOCKED', 'FAILED')", 'AND false'),
         smoke('a revocation discards the unsent quantity versions with its reason (Р-202)')),
       m(dropTrigger('bd_channel_write_quantity_writes_guard', 'tenant_data.channel_write'), smoke('a retry sends quantity after the revocation (Р-202)')),
+      // Полный прогон CI шага 61: подзапрос к аккаунту — только в ветке количества; без ранней ветки роль каталога упирается в право
+      m(replaceInFunction('tenant_data.write_scope_quantity_writes_confirmed()', "IF NEW.field <> 'QUANTITY' OR NOT coalesce(NEW.quantity_sync_enabled, false) THEN", 'IF false THEN'),
+        smoke('discovery creates price write scopes on a generic plan without reading the account (Р-202, шаг 35)')),
     ],
   },
 ];
