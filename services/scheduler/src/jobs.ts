@@ -72,6 +72,9 @@ export interface JobConfig {
  * с `stock` до шага 56). Правило репозитория держит список равным необязательным членам `JobDeps`, тест точки входа
  * (`production-composition.pg.test.ts`) — что настоящий `startScheduler` в промышленной конфигурации заводит каждую из этих работ
  */
+/** Шаг 59 (ревью шага 58, находки 1–2): место чтения заказов — начало окна, курсор, начало чтения цепочки и отказы на курсоре */
+export interface OrderReadPlace { since: Instant; cursor: string | null; readFrom: Instant | null; cursorFailures: number }
+
 /** Шаг 58: сохранённый курсор заказов снимается на третьем провале подряд — как круг обнаружения (0152) */
 export const ORDER_CURSOR_DROP_AFTER_FAILURES = 3;
 
@@ -137,7 +140,8 @@ export interface JobDeps {
    * процессе работы нет; процесс без роли остатков — конфигурация, а не молчаливый пропуск.
    */
   stock?: {
-    syncOrders(account: SchedulerAccount, ctx: AdapterCallContext, since: Instant, options?: { cursor?: string }): Promise<{ lines: number; created: number; consumed: number; released: number; unknownOffers: number; writes: number; cursorRepeated?: boolean; pageLimit?: { pages: number; nextCursor: string } }>;
+    syncOrders(account: SchedulerAccount, ctx: AdapterCallContext, since: Instant, options?: { cursor?: string }): Promise<{ lines: number; created: number; consumed: number; released: number; unknownOffers: number; writes: number; cursorRepeated?: boolean; pageLimit?: { pages: number; nextCursor: string };
+      silentSources?: Array<{ stockSourceId: string; reservations: number; oldestConfirmedAt: Instant }> }>;
     /**
      * Шаг 56 (ревью шага 54, находка 8): место чтения заказов аккаунта — заход, упёршийся в предел страниц, записывает начало окна и
      * курсор, следующий продолжает оттуда. Без хранилища места работа читает окно заново (ничего не теряя, но и не продвигаясь дальше
@@ -145,8 +149,8 @@ export interface JobDeps {
      */
     positions?: {
       /** Шаг 57: место без курсора держит только начало окна — следующий заход перечитывает окно от начала (ревью шага 56, находки 3–4) */
-      get(account: SchedulerAccount): Promise<{ since: Instant; cursor: string | null } | null>;
-      save(account: SchedulerAccount, position: { since: Instant; cursor: string | null } | null, at: Instant): Promise<void>;
+      get(account: SchedulerAccount): Promise<OrderReadPlace | null>;
+      save(account: SchedulerAccount, position: OrderReadPlace | null, at: Instant): Promise<void>;
     };
   };
   /** Сверка уведомлений опросом включена для аккаунта [Р-121]; по умолчанию — если источник уведомлений канала доступен */
@@ -394,78 +398,86 @@ export function jobSource(deps: JobDeps): JobSource {
           specs.push({
             name: 'order-lines', scope, retryKind: 'CHANNEL', intervalSeconds: cfg.orderLinesEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,
             lagWarningSeconds: cfg.orderLinesEverySeconds * 6, lagCriticalSeconds: hours(6), leaseSeconds: 300,
-            async run({ startedAt, previousSucceededAt, consecutiveFailures }) {
+            async run({ startedAt, previousSucceededAt }) {
+              const intervalMs = cfg.orderLinesEverySeconds * 1000;
+              const positions = stock.positions;
+              const saved = (await positions?.get(a)) ?? null;
               /**
-               * Окно — с конца прошлого УСПЕШНОГО запуска и ещё интервал назад: строка, обновлённая на границе, попадёт
-               * дважды, и это безвредно (резервация одна на строку заказа). От последнего ЛЮБОГО завершения окно считать
-               * нельзя: такт, провалившийся на бюджете канала, унёс бы заказы своих минут навсегда.
+               * Окно чтения. Шаг 59 (ревью шага 58, находка 1): следующее окно начинается от НАЧАЛА ЧТЕНИЯ прошлого (минус интервал), а не от
+               * конца прошлого успешного запуска. Канал отдаёт окно в виде первой страницы (Kaufland — `ts_updated:desc` со смещением): строка,
+               * обновлённая после первой страницы, уходит наверх, до смещения, и продолжение по курсору её не видит. Цепочка продолжений
+               * переживает провалы с паузой, и от конца последнего запуска всё обновлённое за время цепочки не читалось никогда — перепродажа.
+               * Поэтому место хранится всегда: начало окна, курсор, начало чтения цепочки (`readFrom`) и отказы на курсоре.
+               *
+               * Шаг 58 (ревью шага 56, находка 10): первое окно — от подключения аккаунта, не глубже `orderLinesFirstLookbackSeconds`. Шаг 59
+               * (ревью шага 58, находка 4): оно закрепляется местом при первой попытке — предел «сутки от запуска» не ползёт вперёд с провалами
                */
-              const saved = (await stock.positions?.get(a)) ?? null;
-              // Шаг 56: прошлый заход упёрся в предел страниц — продолжаем ЕГО окно с его курсора; иначе — окно от прошлого успеха
-              /**
-               * Шаг 58 (ревью шага 56, находка 10): без прошлого успеха окно было «последние 5 минут от запуска» — заказ между согласием продавца и
-               * первым заходом работы (и между первым заходом и первым УСПЕХОМ, если заходы падали) не читался никогда. Теперь первое окно — от
-               * подключения аккаунта, не глубже предела `orderLinesFirstLookbackSeconds`
-               */
+              const connectedMs = a.connectedAt ? Date.parse(a.connectedAt) - intervalMs : null;
               const firstFloorMs = Date.parse(startedAt) - cfg.orderLinesFirstLookbackSeconds * 1000;
-              const connectedMs = a.connectedAt ? Date.parse(a.connectedAt) - cfg.orderLinesEverySeconds * 1000 : null;
-              const firstWindowCapped = !saved && !previousSucceededAt && connectedMs !== null && connectedMs < firstFloorMs;
-              const firstSinceMs = connectedMs === null ? Date.parse(startedAt) - cfg.orderLinesEverySeconds * 1000 : Math.max(connectedMs, firstFloorMs);
+              const firstSinceMs = connectedMs === null ? Date.parse(startedAt) - intervalMs : Math.max(connectedMs, firstFloorMs);
               const since = saved?.since
-                ?? (previousSucceededAt ? new Date(Date.parse(previousSucceededAt) - cfg.orderLinesEverySeconds * 1000).toISOString() : new Date(firstSinceMs).toISOString());
-              const cappedAlert = firstWindowCapped
+                ?? (previousSucceededAt ? new Date(Date.parse(previousSucceededAt) - intervalMs).toISOString() : new Date(firstSinceMs).toISOString());
+              if (!saved && !previousSucceededAt && positions) await positions.save(a, { since, cursor: null, readFrom: null, cursorFailures: 0 }, startedAt);
+              const continuing = Boolean(saved?.cursor);
+              // Начало чтения цепочки: продолжение — первая страница цепочки; иначе — этот заход
+              const readFrom = continuing ? (saved!.readFrom ?? startedAt) : startedAt;
+              // Первое окно, не дотянувшееся до подключения, — WARNING при первом успехе (до него прошлого успеха нет)
+              const cappedAlert = !previousSucceededAt && connectedMs !== null && Date.parse(since) > connectedMs
                 ? [{ code: 'ORDER_LINES_FIRST_WINDOW_CAPPED', severity: 'WARNING' as const, details: { connectedAt: a.connectedAt!, since, lookbackHours: cfg.orderLinesFirstLookbackSeconds / 3600 } }] : [];
               let r: Awaited<ReturnType<typeof stock.syncOrders>>;
               try {
-                r = await stock.syncOrders(a, ctxOf(a, startedAt, 'order-lines', 120), since, saved?.cursor ? { cursor: saved.cursor } : {});
+                r = await stock.syncOrders(a, ctxOf(a, startedAt, 'order-lines', 120), since, continuing ? { cursor: saved!.cursor! } : {});
               } catch (error) {
                 /**
-                 * Шаг 58 (ревью шага 57, находка 2): чтение оборвалось посреди окна — прочитанное записано, место — последний принятый курсор;
-                 * следующий заход продолжит с него, а не с начала окна
+                 * Шаг 58 (ревью шага 57, находка 2): чтение оборвалось посреди окна — прочитанное записано, место — последний принятый курсор.
+                 * Шаг 59 (ревью шага 58, находка 2): заход, продвинувшийся вперёд, — не обычный провал: он повторяется в свой период, без
+                 * удвоения паузы (иначе отставание заказов росло бы вместе с паузой), и не считается отказом на курсоре
                  */
-                const interrupted = error as { linesRecorded?: number; cursor?: string };
+                const interrupted = error as { linesRecorded?: number; cursor?: string; code?: string };
                 if (typeof interrupted.linesRecorded === 'number' && interrupted.cursor) {
-                  await stock.positions?.save(a, { since, cursor: interrupted.cursor }, startedAt);
-                  throw error;
+                  await positions?.save(a, { since, cursor: interrupted.cursor, readFrom, cursorFailures: 0 }, startedAt);
+                  const cause = /^[A-Z][A-Z0-9_]{2,}$/.test(String(interrupted.code)) ? String(interrupted.code) : 'ORDER_READ_INTERRUPTED';
+                  throw new JobHoldsWindowError(cause, `order lines read interrupted after ${interrupted.linesRecorded} lines, continued from the last accepted cursor`);
                 }
                 /**
-                 * Шаг 57 (ревью шага 56, находка 3): курсор, который канал больше не принимает (истёк, сменился формат), держал бы работу на
-                 * себе вечно. Шаг 58 (ревью шага 57, находка 2): но и снимать его на ПЕРВОМ отказе нельзя — разовый 5xx, сбой записи или пересчёта
-                 * отбрасывал заход к началу окна, и при отказе раз в два-три захода окно не дочитывалось никогда. Курсор снимается на третьем
-                 * провале подряд (как круг обнаружения, 0152); начало окна остаётся всегда. Провал — с паузой и алертом по Р-132
+                 * Шаг 57–59: курсор, который канал больше не принимает, держал бы работу на себе вечно; снимать его на первом отказе тоже нельзя —
+                 * разовый 5xx отбрасывал заход к началу окна. Отказы считаются НА САМОМ курсоре (ревью шага 58, находка 2): третий подряд снимает
+                 * его, начало окна и начало чтения остаются
                  */
-                if (saved?.cursor && (consecutiveFailures ?? 0) + 1 >= ORDER_CURSOR_DROP_AFTER_FAILURES) {
-                  await stock.positions?.save(a, { since: saved.since, cursor: null }, startedAt);
+                if (continuing && positions) {
+                  const failures = saved!.cursorFailures + 1;
+                  await positions.save(a, failures >= ORDER_CURSOR_DROP_AFTER_FAILURES
+                    ? { since: saved!.since, cursor: null, readFrom: saved!.readFrom, cursorFailures: 0 }
+                    : { ...saved!, cursorFailures: failures }, startedAt);
                 }
                 throw error;
               }
-              if (r.pageLimit && !stock.positions) {
+              /**
+               * Шаг 59 [Р-200]: источник Inbound API молчит сутки после подтверждения отгруженного заказа — вычитание отгруженного держится
+               * (в каналах меньше, чем могло бы быть, — безопасная сторона), и продавец узнаёт, что его система не присылает остаток
+               */
+              const silentAlerts = (r.silentSources ?? []).map((x) => ({ code: 'INBOUND_SOURCE_SILENT', severity: 'WARNING' as const,
+                details: { stockSourceId: x.stockSourceId, reservations: x.reservations, oldestConfirmedAt: x.oldestConfirmedAt } }));
+              if (r.pageLimit && !positions) {
                 // Места хранить негде — успех сдвинул бы окно и потерял хвост: окно держится провалом без удвоения паузы (шаг 55)
                 throw new JobHoldsWindowError('ORDER_LINES_PAGE_LIMIT_REACHED', `order lines read ${r.lines} in ${r.pageLimit.pages} pages, no position store, the window is kept`);
               }
               if (r.pageLimit) {
-                /**
-                 * Шаг 56 (ревью шага 54, находка 8): предел страниц захода — прочитанное записано, место — тоже; следующий заход (через период,
-                 * без паузы провала) продолжит то же окно. Запуск — успех: окно следующего обычного запуска перекрывает это, ничего не теряется
-                 */
-                await stock.positions?.save(a, { since, cursor: r.pageLimit.nextCursor }, startedAt);
-                return { items: r.lines, alerts: [...cappedAlert, { code: 'ORDER_LINES_PAGE_LIMIT_REACHED', severity: 'WARNING' as const, details: { pages: r.pageLimit.pages, lines: r.lines, continued: saved !== null } }] };
+                // Шаг 56: предел страниц захода — прочитанное записано, место — тоже; следующий заход продолжит ту же цепочку
+                await positions!.save(a, { since, cursor: r.pageLimit.nextCursor, readFrom, cursorFailures: 0 }, startedAt);
+                return { items: r.lines, alerts: [...cappedAlert, ...silentAlerts, { code: 'ORDER_LINES_PAGE_LIMIT_REACHED', severity: 'WARNING' as const, details: { pages: r.pageLimit.pages, lines: r.lines, continued: continuing } }] };
               }
-              if (saved && !r.cursorRepeated) await stock.positions?.save(a, null, startedAt);
               /**
-               * Шаг 53: канал повторил курсор — прочитанное уже записано. Шаг 54 (ревью шага 53, находка 3): запуск при этом —
-               * ПРОВАЛ, а не успех с предупреждением. Успех двигал бы `previousSucceededAt`, и страницы за петлёй курсора старше
-               * одного интервала не читались бы никогда — заказы без резерваций, перепродажа. Провал оставляет окно на месте:
-               * следующий запуск читает его снова (повтор строки безвреден), пауза и алерт провала — по Р-132
+               * Шаг 53–57: канал повторил курсор — прочитанное записано, но окно не дочитано: запуск — провал (успех сдвинул бы окно), место —
+               * начало окна без курсора: следующий заход перечитывает окно от его начала (повтор строки безвреден)
                */
-              /**
-               * Шаг 57 (ревью шага 56, находка 4): петля курсора в ПРОДОЛЖЕНИИ — окно этого захода начинается с сохранённого места, а не с
-               * прошлого успеха. Стереть место значило бы потерять начало окна: следующий заход считал бы окно от прошлого успеха (заход с
-               * пределом страниц — тоже успех), и хвост исходного окна не прочитал бы никто. Держится начало окна без курсора
-               */
-              if (r.cursorRepeated && saved) await stock.positions?.save(a, { since, cursor: null }, startedAt);
-              if (r.cursorRepeated) throw new JobHoldsWindowError('CHANNEL_PAGE_CURSOR_REPEATED', `order lines read ${r.lines}, the window is kept for the next run`);
-              return { items: r.lines, ...(cappedAlert.length > 0 ? { alerts: cappedAlert } : {}) };
+              if (r.cursorRepeated) {
+                await positions?.save(a, { since, cursor: null, readFrom: null, cursorFailures: 0 }, startedAt);
+                throw new JobHoldsWindowError('CHANNEL_PAGE_CURSOR_REPEATED', `order lines read ${r.lines}, the window is kept for the next run`);
+              }
+              // Окно дочитано: следующее — от начала чтения этой цепочки минус интервал (ревью шага 58, находка 1)
+              await positions?.save(a, { since: new Date(Date.parse(readFrom) - intervalMs).toISOString() as Instant, cursor: null, readFrom: null, cursorFailures: 0 }, startedAt);
+              return { items: r.lines, ...(cappedAlert.length + silentAlerts.length > 0 ? { alerts: [...cappedAlert, ...silentAlerts] } : {}) };
             },
           });
         }

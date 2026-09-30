@@ -311,30 +311,35 @@ test('ревью шага 53, находка 3: повтор курсора в �
   assert.deepEqual(windows, ['2026-09-17T09:55:00.000Z'], 'the lines were read from the kept window (the store records them before the failure)');
 });
 
-test('шаг 56 (ревью шага 54, находка 8): чтение заказов, упёршееся в предел страниц, — место записано, следующий заход продолжает то же окно; без хранилища места окно держится', async () => {
+type Place = { since: string; cursor: string | null; readFrom: string | null; cursorFailures: number };
+
+test('шаг 56–59 (ревью шага 54, находка 8; ревью шага 58, находка 1): предел страниц — место записано, продолжение дочитывает окно, а следующее окно — от первой страницы цепочки', async () => {
   const calls: Array<{ since: string; cursor: string | undefined }> = [];
-  let saved: { since: string; cursor: string | null } | null = null;
+  let saved: Place | null = null;
   let page = 0;
-  const deps = jobDeps();
   const specs = await jobSource({
-    ...deps, reconcileEnabled: () => true,
+    ...jobDeps(), reconcileEnabled: () => true,
     stock: {
       syncOrders: async (_a, _ctx, since, options) => {
         calls.push({ since, cursor: options?.cursor });
         page += 1;
         return { lines: 20_000, created: 0, consumed: 0, released: 0, unknownOffers: 0, writes: 0, ...(page === 1 ? { pageLimit: { pages: 200, nextCursor: 'cursor-201' } } : {}) };
       },
-      positions: { get: async () => saved, save: async (_a, position) => { saved = position; } },
+      positions: { get: async () => saved, save: async (_a, position) => { saved = position as Place | null; } },
     },
   }).jobs('2026-09-17T10:00:00.000Z');
   const orderLines = specs.find((spec) => spec.name === 'order-lines')!;
   const first = await orderLines.run({ startedAt: '2026-09-17T10:30:00.000Z', previousSucceededAt: '2026-09-17T10:00:00.000Z', previousFinishedAt: null } as never);
-  assert.deepEqual(saved, { since: '2026-09-17T09:55:00.000Z', cursor: 'cursor-201' }, 'the place is recorded');
+  assert.deepEqual(saved, { since: '2026-09-17T09:55:00.000Z', cursor: 'cursor-201', readFrom: '2026-09-17T10:30:00.000Z', cursorFailures: 0 }, 'the place and the start of the reading are recorded');
   assert.equal(first.alerts?.[0]?.code, 'ORDER_LINES_PAGE_LIMIT_REACHED');
-  // Следующий заход — окно прошлого (не от нового успеха) с его курсора; дочитал — место снято
-  await orderLines.run({ startedAt: '2026-09-17T10:35:00.000Z', previousSucceededAt: '2026-09-17T10:30:00.000Z', previousFinishedAt: null } as never);
+  // Продолжение через сорок минут паузы: окно прошлого, с его курсора
+  await orderLines.run({ startedAt: '2026-09-17T11:10:00.000Z', previousSucceededAt: '2026-09-17T10:30:00.000Z', previousFinishedAt: null } as never);
   assert.deepEqual(calls[1], { since: '2026-09-17T09:55:00.000Z', cursor: 'cursor-201' });
-  assert.equal(saved, null, 'the place is cleared once the window is read');
+  // Ревью шага 58, находка 1: строки, обновлённые после первой страницы цепочки (10:30), продолжение не видит — следующее окно начинается
+  // от 10:25, а не от конца продолжения (11:10 − 5 мин): прежнее правило теряло всё обновлённое с 10:30 до 11:05
+  assert.deepEqual(saved, { since: '2026-09-17T10:25:00.000Z', cursor: null, readFrom: null, cursorFailures: 0 });
+  await orderLines.run({ startedAt: '2026-09-17T11:15:00.000Z', previousSucceededAt: '2026-09-17T11:10:00.000Z', previousFinishedAt: null } as never);
+  assert.deepEqual(calls[2], { since: '2026-09-17T10:25:00.000Z', cursor: undefined }, 'the next window starts before the first page of the chain');
   // Хранилища места нет — успех сдвинул бы окно: запуск держит окно провалом без удвоения паузы
   const noStore = await jobSource({ ...jobDeps(), reconcileEnabled: () => true, stock: {
     syncOrders: async () => ({ lines: 20_000, created: 0, consumed: 0, released: 0, unknownOffers: 0, writes: 0, pageLimit: { pages: 200, nextCursor: 'c' } }) } }).jobs('2026-09-17T10:00:00.000Z');
@@ -342,43 +347,45 @@ test('шаг 56 (ревью шага 54, находка 8): чтение зак�
     /ORDER_LINES_PAGE_LIMIT_REACHED HOLD_WINDOW:/);
 });
 
-test('шаг 57–58 (ревью шага 56, находки 3–4; ревью шага 57, находка 2): курсор, который канал не принимает, снимается на третьем отказе подряд, петля курсора в продолжении — сразу; начало окна держится', async () => {
+test('шаг 57–59: курсор, который канал не принимает, снимается на третьем отказе НА НЁМ; петля курсора держит начало окна; прерывание с прогрессом — в свой период', async () => {
   const calls: Array<{ since: string; cursor: string | undefined }> = [];
-  let saved: { since: string; cursor: string | null } | null = { since: '2026-09-17T09:00:00.000Z', cursor: 'expired-cursor' };
+  let saved: Place | null = { since: '2026-09-17T09:00:00.000Z', cursor: 'expired-cursor', readFrom: '2026-09-17T09:10:00.000Z', cursorFailures: 0 };
   let next: 'refuse' | 'loop' | 'ok' | 'interrupted' = 'refuse';
-  const deps = jobDeps();
   const specs = await jobSource({
-    ...deps, reconcileEnabled: () => true,
+    ...jobDeps(), reconcileEnabled: () => true,
     stock: {
       syncOrders: async (_a, _ctx, since, options) => {
         calls.push({ since, cursor: options?.cursor });
         if (next === 'refuse') throw new Error('CHANNEL_REJECTED: cursor is not valid');
-        if (next === 'interrupted') throw Object.assign(new Error('CHANNEL_UNAVAILABLE: order lines read interrupted after 40 lines'), { linesRecorded: 40, cursor: 'accepted-cursor' });
+        if (next === 'interrupted') throw Object.assign(new Error('CHANNEL_UNAVAILABLE: order lines read interrupted after 40 lines'), { linesRecorded: 40, cursor: 'accepted-cursor', code: 'CHANNEL_UNAVAILABLE' });
         return { lines: 5, created: 5, consumed: 0, released: 0, unknownOffers: 0, writes: 0, ...(next === 'loop' ? { cursorRepeated: true } : {}) };
       },
-      positions: { get: async () => saved, save: async (_a, position) => { saved = position; } },
+      positions: { get: async () => saved, save: async (_a, position) => { saved = position as Place | null; } },
     },
   }).jobs('2026-09-17T10:00:00.000Z');
   const orderLines = specs.find((spec) => spec.name === 'order-lines')!;
-  const run = (startedAt: string, consecutiveFailures = 0) => orderLines.run({ startedAt, previousSucceededAt: '2026-09-17T09:50:00.000Z', previousFinishedAt: null, consecutiveFailures } as never);
-  // Шаг 58 (ревью шага 57, находка 2): первый и второй отказ курсор держат — разовый 5xx не отбрасывает заход к началу окна
-  await assert.rejects(run('2026-09-17T09:55:00.000Z', 0), /CHANNEL_REJECTED/);
-  await assert.rejects(run('2026-09-17T09:57:00.000Z', 1), /CHANNEL_REJECTED/);
-  assert.deepEqual(saved, { since: '2026-09-17T09:00:00.000Z', cursor: 'expired-cursor' }, 'two failures keep the cursor');
-  await assert.rejects(run('2026-09-17T10:00:00.000Z', 2), /CHANNEL_REJECTED/);
-  assert.deepEqual(saved, { since: '2026-09-17T09:00:00.000Z', cursor: null }, 'the third failure in a row drops the cursor, the window start is kept');
-  calls.splice(0, 2);
+  const run = (startedAt: string) => orderLines.run({ startedAt, previousSucceededAt: '2026-09-17T09:50:00.000Z', previousFinishedAt: null } as never);
+  // Первый и второй отказ курсор держат — разовый 5xx не отбрасывает заход к началу окна; отказы считаются на курсоре
+  await assert.rejects(run('2026-09-17T09:55:00.000Z'), /CHANNEL_REJECTED/);
+  await assert.rejects(run('2026-09-17T09:57:00.000Z'), /CHANNEL_REJECTED/);
+  assert.deepEqual([saved!.cursor, saved!.cursorFailures], ['expired-cursor', 2], 'two failures keep the cursor');
+  await assert.rejects(run('2026-09-17T10:00:00.000Z'), /CHANNEL_REJECTED/);
+  assert.deepEqual(saved, { since: '2026-09-17T09:00:00.000Z', cursor: null, readFrom: '2026-09-17T09:10:00.000Z', cursorFailures: 0 },
+    'the third failure on the cursor drops it; the window start stays');
+  // Прерывание с прогрессом: место — последний принятый курсор, провал держит окно и идёт в свой период, отказом на курсоре не считается
+  saved = { since: '2026-09-17T09:00:00.000Z', cursor: 'c-1', readFrom: '2026-09-17T09:10:00.000Z', cursorFailures: 2 };
+  next = 'interrupted';
+  await assert.rejects(run('2026-09-17T10:02:00.000Z'), /^Error: CHANNEL_UNAVAILABLE HOLD_WINDOW:/);
+  assert.deepEqual(saved, { since: '2026-09-17T09:00:00.000Z', cursor: 'accepted-cursor', readFrom: '2026-09-17T09:10:00.000Z', cursorFailures: 0 },
+    'progress resets the failures on the cursor and keeps the start of the reading');
+  // Петля курсора в продолжении — начало окна держится без курсора
   next = 'loop';
   await assert.rejects(run('2026-09-17T10:05:00.000Z'), /CHANNEL_PAGE_CURSOR_REPEATED HOLD_WINDOW:/);
-  assert.deepEqual(calls[1], { since: '2026-09-17T09:00:00.000Z', cursor: undefined }, 'the window is re-read from its start, without a cursor');
-  assert.deepEqual(saved, { since: '2026-09-17T09:00:00.000Z', cursor: null }, 'a cursor loop in the continuation keeps the window start');
+  assert.deepEqual(saved, { since: '2026-09-17T09:00:00.000Z', cursor: null, readFrom: null, cursorFailures: 0 });
   next = 'ok';
   await run('2026-09-17T10:10:00.000Z');
-  assert.deepEqual([calls[2]?.since, saved], ['2026-09-17T09:00:00.000Z', null], 'the window read to its end clears the place');
-  // Отказ посреди чтения: прочитанное записано конвейером, место — последний принятый курсор
-  next = 'interrupted';
-  await assert.rejects(run('2026-09-17T10:15:00.000Z'), /interrupted/);
-  assert.deepEqual(saved, { since: calls.at(-1)!.since, cursor: 'accepted-cursor' }, 'the next run continues from the last accepted cursor');
+  assert.deepEqual([calls.at(-1), saved], [{ since: '2026-09-17T09:00:00.000Z', cursor: undefined },
+    { since: '2026-09-17T10:05:00.000Z', cursor: null, readFrom: null, cursorFailures: 0 }], 'the window read from its start; the next one starts at this reading');
 });
 
 test('шаг 58 (ревью шага 56, находка 10): первое окно заказов — от подключения аккаунта, а не последние 5 минут; глубже суток — урезано с WARNING', async () => {
@@ -404,6 +411,27 @@ test('шаг 58 (ревью шага 56, находка 10): первое окн
   assert.equal(capped.alerts?.[0]?.code, 'ORDER_LINES_FIRST_WINDOW_CAPPED');
 });
 
+test('шаг 59 (ревью шага 58, находка 4): первое окно закрепляется при первой попытке — провалы не сдвигают его предел вперёд, WARNING — при первом успехе', async () => {
+  let saved: Place | null = null;
+  const windows: string[] = [];
+  let fail = true;
+  const specs = await jobSource({
+    ...jobDeps(), reconcileEnabled: () => true,
+    accounts: async () => [{ tenantId: '10000000-0000-4000-8000-000000000001', channelAccountId: '20000000-0000-4000-8000-000000000001', channel: 'KAUFLAND', connectedAt: '2026-09-10T08:00:00.000Z' as never }],
+    stock: {
+      syncOrders: async (_a, _ctx, since) => { windows.push(since); if (fail) throw new Error('CHANNEL_UNAVAILABLE: down'); return { lines: 0, created: 0, consumed: 0, released: 0, unknownOffers: 0, writes: 0 }; },
+      positions: { get: async () => saved, save: async (_a, position) => { saved = position as Place | null; } },
+    },
+  }).jobs('2026-09-17T10:00:00.000Z');
+  const orderLines = specs.find((spec) => spec.name === 'order-lines')!;
+  await assert.rejects(orderLines.run({ startedAt: '2026-09-17T10:00:00.000Z', previousSucceededAt: null, previousFinishedAt: null } as never), /CHANNEL_UNAVAILABLE/);
+  // Сутки провалов спустя окно то же: предел «сутки от запуска» не пересчитывается от каждой новой попытки
+  fail = false;
+  const ok = await orderLines.run({ startedAt: '2026-09-18T09:00:00.000Z', previousSucceededAt: null, previousFinishedAt: null } as never);
+  assert.deepEqual(windows, ['2026-09-16T10:00:00.000Z', '2026-09-16T10:00:00.000Z'], 'the first window is pinned by the first attempt');
+  assert.equal(ok.alerts?.[0]?.code, 'ORDER_LINES_FIRST_WINDOW_CAPPED', 'the capped first window is still reported, at the first success');
+});
+
 test('ревью шага 54, находка 7: провал, держащий окно, повторяется в свой период — петля курсора канала не растягивает паузу до суток', async () => {
   const { dueOf, JobHoldsWindowError } = await import('../src/index.ts');
   const base = { jobKey: 'order-lines:a', jobName: 'order-lines', scope: 'ACCOUNT', catchUp: 'LATEST', retryKind: 'CHANNEL', intervalSeconds: 300,
@@ -412,6 +440,8 @@ test('ревью шага 54, находка 7: провал, держащий �
   assert.equal(dueOf({ ...(base as object), lastError: held } as never), '2026-09-17T10:05:00.000Z', 'the next run keeps the 5-minute pace');
   // Шаг 57 (ревью шага 55, находка 9): код ошибки в журнале и алерте — причина, а не признак держания окна
   assert.match(held, /^CHANNEL_PAGE_CURSOR_REPEATED HOLD_WINDOW:/);
+  // Шаг 59 (ревью шага 57, находка 5): прежняя форма шага 56 тоже держит темп — выкладка не растягивает паузу работы, державшей окно
+  assert.equal(dueOf({ ...(base as object), lastError: 'HOLD_WINDOW CHANNEL_PAGE_CURSOR_REPEATED: order lines read 3' } as never), '2026-09-17T10:05:00.000Z');
   assert.ok(Date.parse(dueOf({ ...(base as object), lastError: 'CHANNEL_PAGE_CURSOR_REPEATED: without the hold mark' } as never)) > Date.parse('2026-09-17T12:00:00.000Z'),
     'only the hold mark keeps the pace, not the cause code alone');
   assert.ok(Date.parse(dueOf({ ...(base as object), lastError: 'RATE_LIMITED: …' } as never)) > Date.parse('2026-09-17T12:00:00.000Z'),

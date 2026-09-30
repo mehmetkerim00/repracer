@@ -45,9 +45,17 @@ OLDEST_MONTH="$(shift_month "${TODAY:0:7}" "-$KEEP_MONTHS")"
 FAILED=0
 
 archive_project() {
-  local P="$1" mark from day seg_end out
+  local P="$1" mark from day seg_end out pend_end pend_out
   mkdir -p "$HOT/$P" "$ARCHIVE/platform=logs/$P"
   mark="$HOT/$P/.until"
+  # Шаг 59 (ревью шага 58, находка 5): процесс, убитый между заменой файла суток и сдвигом отметки, выгрузил бы отрезок повторно — строки
+  # задвоились бы. Отметка-кандидат (`.until.pending`: конец отрезка и файл суток) пишется ДО замены файла: осталась без `<сутки>.new` —
+  # замена случилась, кандидат становится отметкой; осталась рядом с `.new` — замены не было, оба убираются и отрезок выгружается снова
+  if [[ -f "$mark.pending" ]]; then
+    read -r pend_end pend_out < "$mark.pending" || true
+    if [[ -n "${pend_out:-}" && -f "$pend_out.new" ]]; then rm -f "$pend_out.new" "$mark.pending"
+    else mv "$mark.pending" "$mark.part" && printf '%s' "$pend_end" > "$mark.part" && mv "$mark.part" "$mark"; fi
+  fi
   # Первый заход проекта — со вчерашней полуночи: раньше выгрузки не было и отмечать нечего
   from="$(cat "$mark" 2>/dev/null || echo "$(shift_day "$TODAY" -1)T00:00:00Z")"
   # 1. От отметки до конца захода — по суткам UTC; каждый отрезок дописывается к файлу своих суток (цепочка gzip-членов — корректный gzip)
@@ -66,9 +74,10 @@ archive_project() {
     # Шаг 58 (ревью шага 56, находка 11): дописывание на месте (`>>`), оборвавшееся посреди, оставляло в файле суток недописанный член gzip —
     # его находил лишь `gzip -t` архива в конце месяца. Сутки собираются в новый файл, проверяются и только тогда заменяют прежний
     parts=("$out.part"); if [[ -f "$out" ]]; then parts=("$out" "$out.part"); fi
-    if ! { cat "${parts[@]}" > "$out.new" && gzip -t "$out.new" && mv "$out.new" "$out" && rm -f "$out.part" \
-           && printf '%s' "$seg_end" > "$mark.part" && mv "$mark.part" "$mark"; }; then
-      rm -f "$out.new"
+    if ! { cat "${parts[@]}" > "$out.new" && gzip -t "$out.new" && printf '%s %s' "$seg_end" "$out" > "$mark.pending" \
+           && mv "$out.new" "$out" && rm -f "$out.part" && printf '%s' "$seg_end" > "$mark.part" && mv "$mark.part" "$mark" && rm -f "$mark.pending"; }; then
+      # Кандидат отметки убирается, только если замены не было; иначе его подхватит следующий заход (см. восстановление выше)
+      if [[ -f "$out.new" ]]; then rm -f "$out.new" "$mark.pending"; fi
       echo "{\"event\":\"ALERT\",\"code\":\"LOGS_ARCHIVE_FAILED\",\"severity\":\"WARNING\",\"project\":\"$P\",\"from\":\"$from\",\"stage\":\"append\"}" >&2
       return 1
     fi

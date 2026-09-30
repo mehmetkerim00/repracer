@@ -56,6 +56,11 @@ export interface InboundStockOutcome {
   stale: number;
   unknownSkus: string[];
   productIds: string[];
+  /**
+   * Шаг 59 (ревью шага 58, находка 3): товары ВСЕХ узнанных строк, включая устаревшие. Пересчёт после присылки может отказать по пределу
+   * ожидания очереди пересчётов (503); повтор той же присылки придёт устаревшим — и без этого списка не пересчитал бы ничего
+   */
+  recognizedProductIds: string[];
 }
 
 export interface EnableStockSyncInput {
@@ -92,6 +97,8 @@ export interface OrderLinesOutcome {
    * источник, — но и молчать нельзя: до шага 36 такая строка просто пропадала (остаток ревью шага 35, находка 13)
    */
   awaitingConfirmation: number;
+  /** Шаг 59 [Р-199]: новых строк возврата — у внутреннего пула ждут решения человека, у Inbound API — сведения */
+  returns: number;
   /**
    * Шаг 57 (ревью шага 56, находка 1): товары ВСЕХ сопоставленных строк, а не только изменённых этим вызовом. Запись резерваций и пересчёт —
    * разные транзакции: упади пересчёт, повтор того же окна резерваций уже не меняет, и список «изменённых» пуст — остаток в каналах остался бы
@@ -199,7 +206,16 @@ export interface StockStore {
   /** Буфер аккаунта + единицы записи QUANTITY для активных предложений продавца + включение синхронизации [Р-6] */
   enableStockSync(tenantId: string, channelAccountId: string, input: EnableStockSyncInput, actor: StockActor): Promise<EnableStockSyncResult>;
   /** Пересчёт публикуемого количества и записи в канал для изменившихся единиц; null — все товары тенанта */
-  recalculate(tenantId: string, productIds: readonly string[] | null, now: Instant): Promise<RecalculationOutcome>;
+  recalculate(tenantId: string, productIds: readonly string[] | null, now: Instant, options?: { lockTimeoutMs?: number }): Promise<RecalculationOutcome>;
+  /** Шаг 59 [Р-199]: возвраты — ждущие решения человека первыми, затем последние решённые и сведения по чужим пулам */
+  listReturns?(tenantId: string, limit: number): Promise<OrderReturnRow[]>;
+  /**
+   * Шаг 59 [Р-199]: решение человека о возврате внутреннего пула — «принять на склад» (движение RETURN с автором) или «не принимать».
+   * Права (каталог), человек и аудит — у базы
+   */
+  decideReturn?(tenantId: string, orderReturnId: string, decision: { accept: boolean; note: string | null }, actor: StockActor): Promise<DecideReturnOutcome>;
+  /** Шаг 59 [Р-200]: источники Inbound API, молчащие сутки после подтверждения отгруженного заказа; каждая резервация — один раз */
+  markSilentInboundSources?(tenantId: string): Promise<Array<{ stockSourceId: string; reservations: number; oldestConfirmedAt: Instant }>>;
   /** Строки заказов канала → резервации [Р-25]: OPEN — создаётся и подтверждается, SHIPPED — списывается, CANCELLED — освобождается */
   recordOrderLines(tenantId: string, channelAccountId: string, lines: readonly OrderLine[], now: Instant): Promise<OrderLinesOutcome>;
   /** Шаг 52: товары аккаунта, чья последняя запись количества упёрлась в бюджет правок прошлого дня витрины — пересчитать после смены суток */
@@ -207,3 +223,23 @@ export interface StockStore {
   stockPage(tenantId: string, query: { offset: number; limit: number }): Promise<StockPage>;
   stockDivergences(tenantId: string, limit: number): Promise<StockDivergenceRow[]>;
 }
+
+/** Шаг 59 [Р-199]: строка возврата для экрана остатков */
+export interface OrderReturnRow {
+  orderReturnId: string;
+  productId: string;
+  sku: string;
+  channel: string;
+  channelOrderLineRef: string;
+  quantity: number;
+  /** INTERNAL_POOL — решает человек; иначе — только сведения, остаток ведёт источник [Р-6] */
+  sourceMode: string;
+  status: 'PENDING' | 'ACCEPTED' | 'DISMISSED' | 'INFO_ONLY';
+  reportedAt: Instant;
+  decidedAt: Instant | null;
+  note: string | null;
+}
+
+export type DecideReturnOutcome =
+  | { status: 'DECIDED'; productId: string; accepted: boolean }
+  | { status: 'NOT_FOUND' | 'NOT_PENDING' | 'FORBIDDEN' };

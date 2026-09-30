@@ -114,7 +114,7 @@ export function buildQuery(query: RequestInit['query']): string {
 
 export function createSpApiClient(options: SpApiClientOptions): SpApiClient {
   const doFetch = options.fetch ?? fetch;
-  const now = options.now ?? Date.now; // real-clock: умолчание пакета без зависимости от channel-port; процессы передают свои часы
+  const now = options.now ?? Date.now; // real-clock: умолчание пакета без зависимости от channel-port — в бою это настоящие часы, свои передают тесты (шаг 59)
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const retry = { ...DEFAULT_RETRY, ...options.retry };
   const timeoutMs = options.timeoutMs ?? 30_000;

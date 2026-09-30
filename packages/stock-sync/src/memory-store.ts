@@ -3,8 +3,8 @@ import { systemClock } from '@repracer/channel-port';
 import type { Instant, OrderLine } from '@repracer/channel-port';
 import { availableOf, publishedQuantity, type StockAllocation } from './published.ts';
 import type {
-  ConfirmOrdersOutcome, CreateStockSourceResult, EnableStockSyncInput, EnableStockSyncResult, InboundStockOutcome, InboundStockRow, OrderLinesOutcome, RecalculationOutcome,
-  StockActor, StockChannelRow, StockDivergenceRow, StockImportOutcome, StockImportRow, StockPage, StockRow, StockSourceMode, StockSourceRow, StockStore,
+  ConfirmOrdersOutcome, CreateStockSourceResult, DecideReturnOutcome, EnableStockSyncInput, EnableStockSyncResult, InboundStockOutcome, InboundStockRow, OrderLinesOutcome, RecalculationOutcome,
+  OrderReturnRow, StockActor, StockChannelRow, StockDivergenceRow, StockImportOutcome, StockImportRow, StockPage, StockRow, StockSourceMode, StockSourceRow, StockStore,
 } from './store.ts';
 
 /** Запись «в полёте»: ещё не завершена. Тот же список, что у `PgStockStore`: PENDING, DISPATCHED, ACCEPTED */
@@ -31,13 +31,20 @@ interface Reservation {
   key: string; productId: string; quantity: number; status: 'OPEN' | 'CONSUMED' | 'RELEASED';
   /** Р-25: у внутреннего пула источник — мы сами, резервация подтверждена сразу; у Inbound API её подтверждает источник [Р-157] */
   orderRef: string; stockSourceId: string | null; confirmed: boolean; shippedReported?: boolean;
+  /** Шаг 59 [Р-200]: время подтверждения источником — отгруженное по Inbound API вычитается, пока источник не пришлёт остаток позже него */
+  confirmedAt?: Instant; channelOrderLineRef?: string; channel?: string;
 }
+
+/** Шаг 59 [Р-199]: строка возврата — как `channel_data.order_return` */
+export interface MemoryOrderReturn { reservationKey: string; productId: string; quantity: number; foreignPool: boolean; status: 'PENDING' | 'ACCEPTED' | 'DISMISSED' | 'INFO_ONLY'; reportedAt: Instant; decidedAt: Instant | null; note: string | null }
 
 /**
  * Хранилище остатков в памяти — те же правила, что у базы, для стенда без PostgreSQL и юнит-тестов. Записи здесь никто
  * не отправляет (диспетчера в памяти нет): они остаются ждущими, и экран так и говорит.
  */
 export class InMemoryStockStore implements StockStore {
+  /** Шаг 59 [Р-199]: строки возврата */
+  readonly returns: MemoryOrderReturn[] = [];
   private readonly sources = new Map<string, { row: StockSourceRow; keyPrefix?: string; keySha256?: string }>();
   private readonly pools: Pool[] = [];
   private readonly allocations = new Map<string, StockAllocation>();
@@ -93,10 +100,11 @@ export class InMemoryStockStore implements StockStore {
   }
 
   async inboundStock(_tenantId: string, stockSourceId: string, rows: readonly InboundStockRow[]): Promise<InboundStockOutcome> {
-    const out: InboundStockOutcome = { applied: 0, stale: 0, unknownSkus: [], productIds: [] };
+    const out: InboundStockOutcome = { applied: 0, stale: 0, unknownSkus: [], productIds: [], recognizedProductIds: [] };
     for (const r of rows) {
       const offer = this.offers.find((o) => o.sku === r.sku);
       if (!offer) { out.unknownSkus.push(r.sku); continue; }
+      out.recognizedProductIds.push(offer.productId);
       let pool = this.pools.find((p) => p.stockSourceId === stockSourceId && p.productId === offer.productId);
       if (!pool) { pool = { stockSourceId, mode: 'INBOUND_API', productId: offer.productId, onHand: 0, asOf: null }; this.pools.push(pool); }
       if (pool.asOf !== null && Date.parse(r.asOf) <= Date.parse(pool.asOf)) { out.stale += 1; continue; }
@@ -125,6 +133,7 @@ export class InMemoryStockStore implements StockStore {
       }
       for (const r of open) {
         r.confirmed = true;
+        r.confirmedAt = this.now() as Instant;
         out.confirmed += 1;
         // Отгрузка была до подтверждения — закрывается тем же вызовом
         if (r.shippedReported) { r.status = 'CONSUMED'; const pool = this.pools.find((p) => p.productId === r.productId && p.mode === 'INTERNAL_POOL'); if (pool) pool.onHand = Math.max(0, pool.onHand - r.quantity); }
@@ -152,7 +161,11 @@ export class InMemoryStockStore implements StockStore {
 
   private availableOfProduct(productId: string): { onHand: number; reserved: number; available: number } {
     const onHand = this.pools.filter((p) => p.productId === productId).reduce((a, p) => a + p.onHand, 0);
-    const reserved = [...this.reservations.values()].filter((r) => r.productId === productId && r.status === 'OPEN').reduce((a, r) => a + r.quantity, 0);
+    // Шаг 59 [Р-200]: отгруженное по Inbound API вычитается, пока источник не пришлёт остаток с asOf позже подтверждения заказа — как в базе
+    const inbound = this.pools.find((p) => p.productId === productId && p.mode === 'INBOUND_API');
+    const held = (r: Reservation) => r.status === 'CONSUMED' && inbound !== undefined && r.stockSourceId === inbound.stockSourceId
+      && (inbound.asOf === null || r.confirmedAt === undefined || Date.parse(inbound.asOf) <= Date.parse(r.confirmedAt));
+    const reserved = [...this.reservations.values()].filter((r) => r.productId === productId && (r.status === 'OPEN' || held(r))).reduce((a, r) => a + r.quantity, 0);
     return { onHand, reserved, available: availableOf(onHand, reserved) };
   }
 
@@ -172,7 +185,7 @@ export class InMemoryStockStore implements StockStore {
   }
 
   async recordOrderLines(_tenantId: string, channelAccountId: string, lines: readonly OrderLine[], _now: Instant): Promise<OrderLinesOutcome> {
-    const out: OrderLinesOutcome = { created: 0, consumed: 0, released: 0, unknownOffers: 0, awaitingConfirmation: 0, productIds: [] };
+    const out: OrderLinesOutcome = { created: 0, consumed: 0, released: 0, unknownOffers: 0, awaitingConfirmation: 0, returns: 0, productIds: [] };
     for (const line of lines) {
       const offer = this.offers.find((o) => o.channelAccountId === channelAccountId && o.externalOfferId === line.identity.externalOfferId);
       if (!offer) { out.unknownOffers += 1; continue; }
@@ -189,6 +202,17 @@ export class InMemoryStockStore implements StockStore {
         });
         out.created += 1; out.productIds.push(offer.productId);
         if (line.status === 'SHIPPED') this.ship(key, out);
+        continue;
+      }
+      // Шаг 59 [Р-199]: как в базе — возврат по отгруженной (или отгружаемой этой же строкой) резервации — строка возврата
+      if (line.status === 'RETURNED') {
+        if (existing.status === 'RELEASED') continue;
+        if (existing.status === 'OPEN') this.ship(key, out);
+        if (!this.returns.some((x) => x.reservationKey === key)) {
+          const foreignPool = !existing.confirmed || this.pools.some((p) => p.productId === existing.productId && p.mode !== 'INTERNAL_POOL' && p.stockSourceId === existing.stockSourceId);
+          this.returns.push({ reservationKey: key, productId: existing.productId, quantity: existing.quantity, foreignPool, status: foreignPool ? 'INFO_ONLY' : 'PENDING', reportedAt: this.now() as Instant, decidedAt: null, note: null });
+          out.returns += 1;
+        }
         continue;
       }
       if (existing.status !== 'OPEN') continue;
@@ -257,4 +281,46 @@ export class InMemoryStockStore implements StockStore {
     }
     return rows.slice(0, limit);
   }
+  /**
+   * Шаг 59 [Р-199]: возвраты — ждущие решения первыми, как в базе. Идентификатор строки — UUID-вид отпечатка ключа резервации
+   * (строка возврата одна на резервацию)
+   */
+  async listReturns(_tenantId: string, limit: number): Promise<OrderReturnRow[]> {
+    const rows = this.returns.map((x): OrderReturnRow => {
+      const [channelAccountId = '', lineRef = ''] = x.reservationKey.split('|');
+      const reservation = this.reservations.get(x.reservationKey);
+      const offer = this.offers.find((o) => o.productId === x.productId && o.channelAccountId === channelAccountId) ?? this.offers.find((o) => o.productId === x.productId);
+      const source = reservation?.stockSourceId ? this.sources.get(reservation.stockSourceId)?.row.mode : undefined;
+      return {
+        orderReturnId: memoryReturnId(x.reservationKey), productId: x.productId, sku: offer?.sku ?? x.productId, channel: offer?.channel ?? '',
+        channelOrderLineRef: lineRef, quantity: x.quantity, sourceMode: x.foreignPool ? (source ?? 'INBOUND_API') : 'INTERNAL_POOL',
+        status: x.status, reportedAt: x.reportedAt, decidedAt: x.decidedAt, note: x.note,
+      };
+    });
+    return [...rows.filter((r) => r.status === 'PENDING'), ...rows.filter((r) => r.status !== 'PENDING')].slice(0, Math.max(1, Math.min(limit, 500)));
+  }
+
+  /** Шаг 59 [Р-199]: «принять на склад» — остаток внутреннего пула растёт на количество возврата; «не принимать» — только решение */
+  async decideReturn(_tenantId: string, orderReturnId: string, decision: { accept: boolean; note: string | null }, actor: StockActor): Promise<DecideReturnOutcome> {
+    if (!this.canManage(actor)) return { status: 'FORBIDDEN' };
+    const x = this.returns.find((r) => memoryReturnId(r.reservationKey) === orderReturnId);
+    if (!x) return { status: 'NOT_FOUND' };
+    if (x.status !== 'PENDING') return { status: 'NOT_PENDING' };
+    if (decision.accept) {
+      const reservation = this.reservations.get(x.reservationKey);
+      let pool = this.pools.find((p) => p.productId === x.productId && p.mode === 'INTERNAL_POOL' && (!reservation?.stockSourceId || p.stockSourceId === reservation.stockSourceId));
+      if (!pool) { pool = { stockSourceId: reservation?.stockSourceId ?? 'memory-return', mode: 'INTERNAL_POOL', productId: x.productId, onHand: 0, asOf: null }; this.pools.push(pool); }
+      pool.onHand += x.quantity;
+    }
+    x.status = decision.accept ? 'ACCEPTED' : 'DISMISSED';
+    x.decidedAt = this.now() as Instant;
+    x.note = decision.note?.slice(0, 500) ?? null;
+    return { status: 'DECIDED', productId: x.productId, accepted: decision.accept };
+  }
+}
+
+/** Шаг 59 [Р-199]: идентификатор строки возврата в памяти — UUID-вид отпечатка ключа резервации (консоль принимает только UUID) */
+function memoryReturnId(reservationKey: string): string {
+  const h = createHash('sha256').update(reservationKey).digest('hex');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
 }

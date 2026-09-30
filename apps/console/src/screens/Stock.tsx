@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { BulkJobView, StockDivergencesView, StockView } from '@repracer/console-model';
+import type { BulkJobView, StockDivergencesView, StockReturnsView, StockView } from '@repracer/console-model';
 import type { ListQuery } from '@repracer/console-model';
 import { requestJson, useResource, worldPath } from '../api.ts';
 import { Badge, ErrorBox, errorText, Gaps, href, Load, Pager, useMessages } from '../components.tsx';
@@ -92,6 +92,7 @@ export function StockScreen({ worldId }: { worldId: string }) {
             </section>
           ) : <p className="muted">{m.ui.stock.noRight}</p>}
           <Load resource={divergences} retry={retryDivergences}>{(d) => <StockDivergences view={d} />}</Load>
+          <StockReturns worldId={worldId} onDecided={refresh} />
           {message ? <p className="notice" role="status">{message}</p> : null}
           {error ? <ErrorBox message={error} onRetry={refresh} /> : null}
         </>
@@ -154,6 +155,67 @@ export function StockDivergences({ view }: { view: StockDivergencesView }) {
       {view.items.length === 0 ? <p className="muted">{view.none}</p> : (
         <ul className="small">{view.items.map((d) => <li key={d.writeScopeId}><strong>{d.sku}</strong> · {(m.values as Record<string, string | undefined>)[d.channel] ?? d.channel} {d.marketplaces.join(', ')}: {d.text}</li>)}</ul>
       )}
+    </section>
+  );
+}
+
+/**
+ * Шаг 59 [Р-199]: возвраты. У ждущей строки внутреннего пула — две кнопки и заметка; у источника Inbound API — пояснение,
+ * что остаток ведёт система продавца. После решения список и экран остатков перезагружаются
+ */
+export function StockReturns({ worldId, onDecided }: { worldId: string; onDecided: () => void }) {
+  const m = useMessages();
+  const [view, retry] = useResource<StockReturnsView>(worldPath(worldId, 'stock', 'returns'), m.locale);
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const decide = (orderReturnId: string, accept: boolean) => {
+    setBusy(orderReturnId);
+    void requestJson<{ message: string }>(worldPath(worldId, 'stock', 'returns'), { method: 'POST', body: { orderReturnId, accept, note: notes[orderReturnId] ?? '' }, locale: m.locale })
+      .then((r) => { setError(null); setMessage(r.message); })
+      .catch((e: unknown) => { setMessage(null); setError(errorText(e, m)); })
+      .finally(() => { setBusy(null); retry(); onDecided(); });
+  };
+  return (
+    <Load resource={view} retry={retry}>
+      {(v) => <StockReturnsList view={v} notes={notes} busy={busy} onNote={(id, text) => setNotes((n) => ({ ...n, [id]: text }))} onDecide={decide} message={message} error={error} onRetry={retry} />}
+    </Load>
+  );
+}
+
+/** Список возвратов без запросов — то, что отрисовывает тест из ответа сервера */
+export function StockReturnsList({ view: v, notes, busy, onNote, onDecide, message, error, onRetry }: {
+  view: StockReturnsView; notes: Record<string, string>; busy: string | null; onNote: (id: string, text: string) => void; onDecide: (id: string, accept: boolean) => void;
+  message: string | null; error: string | null; onRetry: () => void;
+}) {
+  const m = useMessages();
+  const t = m.ui.stock.returns;
+  return (
+    <section className="card">
+      <h3>{t.title}</h3>
+      <p className="small muted">{v.intro}</p>
+      <p><strong>{v.pendingText}</strong></p>
+      {v.items.length === 0 ? <p className="muted">{v.none}</p> : (
+        <ul className="small">
+          {v.items.map((r) => (
+            <li key={r.orderReturnId}>
+              <Badge tone={r.pending ? 'warn' : r.infoOnly ? 'off' : 'ok'}>{r.statusText}</Badge> <strong>{r.sku}</strong> · {r.channel} · {r.channelOrderLineRef}: {r.text}
+              {r.note ? <em> — {r.note}</em> : null}
+              {r.pending && v.canDecide ? (
+                <div>
+                  <label>{t.note} <input value={notes[r.orderReturnId] ?? ''} onChange={(e) => onNote(r.orderReturnId, e.currentTarget.value)} maxLength={500} /></label>
+                  <button type="button" onClick={() => onDecide(r.orderReturnId, true)} disabled={busy !== null}>{t.accept}</button>
+                  <button type="button" onClick={() => onDecide(r.orderReturnId, false)} disabled={busy !== null}>{t.dismiss}</button>
+                </div>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+      {!v.canDecide && v.pendingCount > 0 ? <p className="muted">{m.ui.stock.noRight}</p> : null}
+      {message ? <p className="notice" role="status">{message}</p> : null}
+      {error ? <ErrorBox message={error} onRetry={onRetry} /> : null}
     </section>
   );
 }

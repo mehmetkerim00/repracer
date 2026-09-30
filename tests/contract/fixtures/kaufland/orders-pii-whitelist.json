@@ -29,7 +29,8 @@
           "$exact": [
             { "externalOrderRef": "SYN-ORDER-0001", "externalOrderLineRef": "7001", "identity": { "marketplace": "de", "externalOfferId": "SYN-OFFER-4101" }, "quantity": 1, "orderedAt": "2026-09-14T08:00:00.000Z", "status": "OPEN" },
             { "externalOrderRef": "SYN-ORDER-0002", "externalOrderLineRef": "7002", "identity": { "marketplace": "at", "externalOfferId": "SYN-OFFER-4101" }, "quantity": 1, "orderedAt": "2026-09-14T08:30:00.000Z", "status": "CANCELLED" },
-            { "externalOrderRef": "SYN-ORDER-0004", "externalOrderLineRef": "7004", "identity": { "marketplace": "de", "externalOfferId": "SYN-OFFER-4102" }, "quantity": 1, "orderedAt": "2026-09-14T09:30:00.000Z", "status": "OPEN" }
+            { "externalOrderRef": "SYN-ORDER-0004", "externalOrderLineRef": "7004", "identity": { "marketplace": "de", "externalOfferId": "SYN-OFFER-4102" }, "quantity": 1, "orderedAt": "2026-09-14T09:30:00.000Z", "status": "OPEN" },
+            { "externalOrderRef": "SYN-ORDER-0005", "externalOrderLineRef": "7005", "identity": { "marketplace": "de", "externalOfferId": "SYN-OFFER-4102" }, "quantity": 1, "orderedAt": "2026-09-14T10:00:00.000Z", "status": "SHIPPED" }
           ]
         },
         "nextCursor": { "$absent": true }
@@ -66,9 +67,12 @@
             {
               "id_order_unit": 7004, "id_order": "SYN-ORDER-0004", "ts_created_iso": "2026-09-14T09:30:00Z", "status": "weird_new_status", "id_offer": "SYN-OFFER-4102", "storefront": "de",
               "shipping_address": { "first_name": "Erika", "city": "Synthstadt" }
+            },
+            {
+              "id_order_unit": 7005, "id_order": "SYN-ORDER-0005", "ts_created_iso": "2026-09-14T10:00:00Z", "status": "sent_and_autopaid", "id_offer": "SYN-OFFER-4102", "storefront": "de"
             }
           ],
-          "pagination": { "offset": 0, "limit": 50, "total": 4 }
+          "pagination": { "offset": 0, "limit": 50, "total": 5 }
         }
       }
     }

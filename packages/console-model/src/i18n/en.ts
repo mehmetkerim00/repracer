@@ -380,6 +380,7 @@ export const en = {
       andMoreProblems: (n: number) => `and ${n} more offers with the same problems`,
       tooManyScopes: (asked: number, limit: number) => `${asked} offers selected; at most ${limit} are changed at once. Select fewer or use the import.`,
       badRequest: 'The request is not valid.',
+      busy: 'Stock is being recalculated for this seller right now — send the same request again in a few seconds.',
       planChanged: 'The data changed since the difference screen was shown. Review the differences again.',
       previewChanged: 'The preview changed since it was shown. Run the preview again before saving.',
       strategyUnavailable: 'This strategy cannot be assigned: the channel does not deliver the competitor data it needs (Р-39).',
@@ -573,6 +574,24 @@ export const en = {
         row: (sent: number, confirmed: string, status: string, when: string) => `sent ${sent}, channel confirmed ${confirmed}; last write ${status} (${when})`,
         cannot: 'Between writes the channel is not read: an order decrement on the channel side becomes visible only with the next write. This screen shows what the channel CONFIRMED, not what it shows right now.',
       },
+      // Шаг 59 [Р-199]: возвраты — на полку ставит человек; у источника Inbound API — только сведения [Р-6]
+      returns: {
+        title: 'Returns',
+        intro: 'A return reported by the channel is not added to stock automatically: the item may come back damaged. For the internal pool you decide whether it goes back on the shelf; for an Inbound API source your system keeps the stock and will send the new figure itself.',
+        none: 'No returns.',
+        pendingCount: (n: number): string => (n === 0 ? 'No returns waiting for a decision.' : `${n} return(s) waiting for your decision.`),
+        status: { PENDING: 'waiting for a decision', ACCEPTED: 'put back in stock', DISMISSED: 'not put back', INFO_ONLY: 'for information only' },
+        awaiting: (n: number, when: string) => `${n} unit(s) returned (${when}) — waiting for your decision; stock is unchanged until then.`,
+        infoOnly: (n: number, when: string) => `${n} unit(s) returned (${when}) — for information only: the stock is kept by your system, it will send the new figure.`,
+        accepted: (n: number, when: string) => `${n} unit(s) put back in stock (${when}).`,
+        dismissed: (n: number, when: string) => `not put back in stock (${when}); stock unchanged (${n} unit(s) returned).`,
+        accept: 'Put back in stock',
+        dismiss: 'Do not put back',
+        note: 'Note (optional)',
+        decided: (accepted: boolean): string => (accepted ? 'The return was put back in stock; channel quantities are being recalculated.' : 'The return was not put back in stock.'),
+        notPending: 'This return has already been decided — the list has been reloaded.',
+        notFound: 'This return was not found.',
+      },
       noRight: 'Your role may view stock but not change sources or synchronisation.',
     },
     /**
@@ -632,8 +651,8 @@ export const en = {
         // Шаг 57 (ревью шага 56, находка 5): честная граница — остаток текущего круга, пауза до нового (сутки после закрытия, плюс час
         // захода) и ещё один круг: листинг, появившийся позади курсора, текущий круг уже не увидит
         // Шаг 58 (ревью шага 56, находка 9): пояснение о старых листингах eBay — только у аккаунта eBay
-        running: (h: number, hadCircle: boolean, ebay: boolean) => `Catalogue discovery: the current circle has been running ${h} h${hadCircle ? '' : ' (the first one)'} — a listing only a full circle sees${ebay ? ' (older eBay listings)' : ''} appears within two circles and a day at most; the hours are named once a circle closes.`,
-        completed: (h: number, at: string, boundH: number, ebay: boolean) => `Catalogue discovery: the last full circle took ${h} h, closed ${at.slice(0, 16).replace('T', ' ')} UTC — a listing only a full circle sees${ebay ? ' (older eBay listings)' : ''} appears within about ${boundH} h at most (two circles and a day).`,
+        running: (h: number, hadCircle: boolean, ebay: boolean) => `Catalogue discovery: the current circle has been running ${h} h${hadCircle ? '' : ' (the first one)'} — a listing only a full circle sees${ebay ? ' (older eBay listings)' : ''} appears within about two circles and a day; the hours are named once a circle closes.`,
+        completed: (h: number, at: string, boundH: number, ebay: boolean) => `Catalogue discovery: the last full circle took ${h} h, closed ${at.slice(0, 16).replace('T', ' ')} UTC — a listing only a full circle sees${ebay ? ' (older eBay listings)' : ''} appears within about ${boundH} h (two circles and a day), if the next circle is not longer than the last one.`,
       },
       authorization: {
         revoked: 'Access was withdrawn in the channel: connect again to continue.',
@@ -773,6 +792,7 @@ export const en = {
         PRICE_WRITE_SCOPE_BLOCKED: { what: 'an offer is blocked: its price change did not go through', step: 'Open the offer in the console: the reason of the refusal is written there. Most refusals need an action in the channel cabinet.' },
         PRICE_WRITE_NOT_SENT: { what: 'a price change was not sent to the channel', step: 'Open the price feed in the console and check the offers of this channel.' },
         DISCOVERY_PAGE_LIMIT_REACHED: { what: 'offer discovery reached its page limit before the channel had returned every offer', step: 'Offers beyond the limit are not in the catalog yet. Contact us with the event code — the limit will be adjusted for your catalog.' },
+        INBOUND_SOURCE_SILENT: { what: 'your stock system has not sent a stock figure for a day after confirming a shipped order — we keep subtracting the shipped pieces so the channels do not show what has left', step: 'Check that your system still sends stock through the Inbound API. Once it sends a figure newer than the order confirmation, the subtraction ends by itself.' },
         ORDER_LINES_FIRST_WINDOW_CAPPED: { what: 'the first reading of orders for a newly connected account did not go back to the moment of connection — only the last day was read', step: 'Orders placed earlier are expected to be in your stock source already. If an older order changed your stock, correct the stock in the source; contact us with the event code if this repeats.' },
         ORDER_LINES_PAGE_LIMIT_REACHED: { what: 'reading the orders reached the page limit of one run', step: 'Nothing is lost: what was read is recorded and the next run continues from the same place. If the alert keeps repeating for hours, contact us with the event code.' },
         DISCOVERY_CIRCLE_RESET: { what: 'offer discovery failed again at the same place and starts its circle over', step: 'Usually nothing is to be done: the next circle reads the catalogue again. If the alert repeats, contact us with the event code.' },

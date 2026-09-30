@@ -20,9 +20,13 @@ export interface StockPipeline {
      * Шаг 56 (ревью шага 54, находка 8): чтение упёрлось в предел страниц захода, а канал отдал курсор дальше — прочитанное записано,
      * следующий заход продолжит с `nextCursor` при том же начале окна. Раньше хвост окна терялся молча
      */
-    pageLimit?: { pages: number; nextCursor: string } }>;
+    pageLimit?: { pages: number; nextCursor: string };
+    /** Шаг 59 [Р-199]: новых строк возврата */
+    returns?: number;
+    /** Шаг 59 [Р-200]: источники Inbound API, молчащие сутки после подтверждения отгруженного заказа (каждая резервация — один раз) */
+    silentSources?: Array<{ stockSourceId: string; reservations: number; oldestConfirmedAt: Instant }> }>;
   /** После изменения остатка (импорт, Inbound API): пересчёт названных товаров и отправка изменившихся единиц */
-  propagate(tenantId: string, productIds: readonly string[] | null): Promise<{ writes: number; unchanged: number }>;
+  propagate(tenantId: string, productIds: readonly string[] | null, options?: { lockTimeoutMs?: number }): Promise<{ writes: number; unchanged: number }>;
 }
 
 /**
@@ -97,11 +101,14 @@ export function createStockPipeline(deps: StockPipelineDeps): StockPipeline {
       const products = [...new Set([...recorded.productIds, ...rolledOver])];
       const recalculated = products.length > 0 ? await deps.store.recalculate(ctx.tenantId, products, deps.now()) : { writes: [], unchanged: 0 };
       await dispatch(ctx.tenantId, recalculated.writes.map((w) => w.writeScopeId));
+      // Шаг 59 [Р-200]: источник Inbound API, молчащий сутки после подтверждения отгруженного заказа, — наружу, алерт поднимает работа
+      const silentSources = (await deps.store.markSilentInboundSources?.(ctx.tenantId)) ?? [];
       return { lines: lines.length, created: recorded.created, consumed: recorded.consumed, released: recorded.released, unknownOffers: recorded.unknownOffers, writes: recalculated.writes.length,
+        returns: recorded.returns, ...(silentSources.length > 0 ? { silentSources } : {}),
         ...(cursorRepeated ? { cursorRepeated: true } : {}), ...(pageLimit ? { pageLimit } : {}) };
     },
-    async propagate(tenantId, productIds) {
-      const r = await deps.store.recalculate(tenantId, productIds, deps.now());
+    async propagate(tenantId, productIds, options = {}) {
+      const r = await deps.store.recalculate(tenantId, productIds, deps.now(), options);
       await dispatch(tenantId, r.writes.map((w) => w.writeScopeId));
       return { writes: r.writes.length, unchanged: r.unchanged };
     },

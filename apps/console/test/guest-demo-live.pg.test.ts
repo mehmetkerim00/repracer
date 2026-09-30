@@ -98,9 +98,10 @@ after(async () => {
  * (так её дал бы `docker compose --scale` или ручной запуск рядом) отказывает при старте своей причиной, а первая продолжает отвечать
  */
 test('step 57: a second console process on the same database refuses to start — the rate limiter lives in one process', async () => {
-  // Шаг 58 (ревью шага 57, находка 3): отказ называет держателя — оператор отличает живой процесс от осиротевшей сессии
+  // Шаг 58 (ревью шага 57, находка 3): отказ называет держателя — оператор отличает живой процесс от осиротевшей сессии; адрес — любой
+  // (в CI база в контейнере, и адрес клиента — сеть Docker, а не 127.0.0.1: так быстрый CI шага 58 и покраснел)
   await assert.rejects(startConsole({ ...consoleEnv, REPRACER_CONSOLE_REPLICAS: '1' }),
-    /^Error: CONSOLE_ALREADY_RUNNING: another console process holds the single-replica lock.*holder: pid \d+, repracer-console-app, from 127\.0\.0\.1, session since \d{4}-/);
+    /^Error: CONSOLE_ALREADY_RUNNING: another console process holds the single-replica lock.*holder: pid \d+, repracer-console-app, from [0-9a-f.:]+, session since \d{4}-/);
   // Держатель, пропавший вместе с хостом, снимается сервером базы за минуту, а не за ~2 часа keepalive ОС
   assert.deepEqual(await console_.replicaLockKeepalive(), { idle: 30, interval: 10, count: 3 });
   assert.equal((await fetch(`${origin}/healthz`.replace(String(console_.port), String(console_.metricsPort)))).status, 200, 'the first console keeps serving');

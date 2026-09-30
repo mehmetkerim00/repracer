@@ -121,16 +121,25 @@ export async function startConsole(env: Env = process.env): Promise<RunningConso
    * отказывает при старте своей причиной, как бы её ни запустили. Потерянное соединение блокировки — выход процесса с кодом 1
    */
   let closeForLostLock: () => Promise<void> = async () => undefined;
+  // Шаг 59 (ревью шага 57, находка 4): блокировка, потерянная ВО ВРЕМЯ старта (посев демо — секунды), — отказ старта, а не консоль без неё
+  let lostDuringStart: unknown = null;
   let replicaLock: Awaited<ReturnType<typeof acquireConsoleReplicaLock>>;
   try {
     replicaLock = await acquireConsoleReplicaLock(pools.app, (error) => {
       console.error(JSON.stringify({ level: 'ERROR', code: 'CONSOLE_REPLICA_LOCK_LOST', message: error instanceof Error ? error.message : String(error) }));
+      lostDuringStart = error;
       void closeForLostLock().finally(() => { process.exitCode = 1; });
     });
   } catch (error) {
     await Promise.all(CONSOLE_ROLES.map((r) => pools[r].end()));
     throw error;
   }
+  const assertLockHeld = () => {
+    if (lostDuringStart !== null) throw new Error('CONSOLE_REPLICA_LOCK_LOST: the single-replica lock was lost while the console was starting');
+  };
+  // Ошибка старта после взятия блокировки (посев, занятый порт) отпускает блокировку и пулы — иначе они жили бы до выхода процесса
+  let started = false;
+  try {
   const directory = new PgIdentityDirectory(pools.authenticator as never);
 
   /**
@@ -256,6 +265,7 @@ export async function startConsole(env: Env = process.env): Promise<RunningConso
   const healthServer = await serveHealth(health, { port: config.metricsPort, prefix: 'repracer_console', staleAfterMs: 120_000, host: '0.0.0.0' });
   health.alive();
   // Консоль слушает ВСЕ адреса контейнера: снаружи её выставляет только прокси, у самого процесса TLS нет [Р-158]
+  assertLockHeld();
   await new Promise<void>((resolve) => server.listen(config.port, '0.0.0.0', () => {
     console.log(JSON.stringify({ level: 'INFO', code: 'CONSOLE_STARTED', message: `console on :${config.port}`, details: { publicDemo: config.publicDemo, seller: Boolean(config.oidc) } }));
     resolve();
@@ -307,7 +317,15 @@ export async function startConsole(env: Env = process.env): Promise<RunningConso
     },
   };
   closeForLostLock = () => running.close();
+  assertLockHeld();
+  started = true;
   return running;
+  } finally {
+    if (!started) {
+      await replicaLock.release();
+      await Promise.all(CONSOLE_ROLES.map((r) => pools[r].end()));
+    }
+  }
 }
 
 export async function main(): Promise<void> {

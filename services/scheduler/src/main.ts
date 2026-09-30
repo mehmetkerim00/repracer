@@ -133,7 +133,7 @@ export async function startScheduler(config: SchedulerConfig = loadConfig(), onF
     },
     positions: {
       get: (account: SchedulerAccount) => store.orderReadPosition(account.tenantId, account.channelAccountId),
-      save: (account: SchedulerAccount, position: { since: string; cursor: string | null } | null, at: string) =>
+      save: (account: SchedulerAccount, position: Parameters<typeof store.saveOrderReadPosition>[2], at: string) =>
         store.saveOrderReadPosition(account.tenantId, account.channelAccountId, position as never, at as never),
     },
   };

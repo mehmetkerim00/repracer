@@ -141,3 +141,33 @@ test('step 58: a failed append leaves the day file and the mark as they were; th
       'the day file is a whole gzip with both segments');
   } finally { rmSync(w.root, { recursive: true, force: true }); }
 });
+
+/**
+ * Шаг 59 (ревью шага 58, находка 5): процесс убит между заменой файла суток и сдвигом отметки — следующий заход не выгружает отрезок второй
+ * раз: отметка-кандидат, записанная до замены, становится отметкой. Состояние «после убийства» собирается руками: отрезок уже в файле суток,
+ * отметка прежняя, кандидат лежит
+ */
+test('step 59: a run killed between the day file replacement and the mark does not duplicate the segment', () => {
+  const w = world();
+  try {
+    w.run('2026-07-02T00:20:00Z');
+    w.run('2026-07-02T06:00:00Z', '--until-now');
+    const day = join(w.hot, '2026-07-02.log.gz');
+    const markFile = join(w.hot, '.until');
+    const afterReplacement = readFileSync(markFile, 'utf8');
+    // «Убит после замены»: отметка ещё прежняя, кандидат с концом записанного отрезка лежит
+    writeFileSync(markFile, '2026-07-02T00:00:00Z');
+    writeFileSync(`${markFile}.pending`, `${afterReplacement} ${day}`);
+    w.run('2026-07-02T06:00:00Z', '--until-now');
+    assert.deepEqual(w.lines(day), ['repracer-production 2026-07-02T00:00:00Z .. 2026-07-02T06:00:00Z'], 'the segment is in the day file once');
+    assert.equal(readFileSync(markFile, 'utf8'), afterReplacement);
+    assert.equal(existsSync(`${markFile}.pending`), false);
+    // «Убит до замены»: кандидат рядом с несостоявшимся `.new` — оба убираются, отрезок выгружается снова один раз
+    writeFileSync(markFile, afterReplacement);
+    writeFileSync(`${markFile}.pending`, `2026-07-02T12:00:00Z ${day}`);
+    writeFileSync(`${day}.new`, 'syn-partial');
+    w.run('2026-07-02T12:00:00Z', '--until-now');
+    assert.deepEqual(w.lines(day), ['repracer-production 2026-07-02T00:00:00Z .. 2026-07-02T06:00:00Z', 'repracer-production 2026-07-02T06:00:00Z .. 2026-07-02T12:00:00Z']);
+    assert.equal(existsSync(`${day}.new`), false);
+  } finally { rmSync(w.root, { recursive: true, force: true }); }
+});

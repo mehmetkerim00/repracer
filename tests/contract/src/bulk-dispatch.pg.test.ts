@@ -208,8 +208,11 @@ test('step 56: on 10 000 quantity units the full recalculation, the order-lines 
   const source = (await k.stock!.stockSources(tenant))[0]!.stockSourceId;
   const imported = await k.stock!.importStock(tenant, source, products.map((p) => ({ sku: String(p.idProduct).slice(-6), quantity: 30 })), { ...owner, mfa: true });
   assert.equal(imported.status, 'APPLIED', JSON.stringify(imported).slice(0, 300));
-  const held = await k.stock!.recalculate(tenant, null, k.clock.iso() as never);
+  // Шаг 59 (ревью шага 58, находка 3): пересчёт держит очередь пересчётов тенанта — замеряется и случай «изменилось всё», а не только «ничего»
+  const heldRun = await timed('stock recalculate, 10 000 units, 10 000 changed', () => k.stock!.recalculate(tenant, null, k.clock.iso() as never));
+  const held = heldRun.result;
   assert.equal(held.writes.length, OFFERS, 'every unit gets a new quantity, held by shadow');
+  assert.ok(heldRun.seconds <= 60, `the full recalculation with 10 000 changes: ${heldRun.seconds} s (limit 60)`);
   const on = await shadow.switchWriteMode(tenant, { channelAccountId: account, toMode: 'LIVE', ...owner, mfa: true, typedConfirmation: String(acc!.external_account_id) });
   assert.equal(on.status, 'SWITCHED', JSON.stringify(on));
   const candidates = await timed('order-lines selection (budgetRolledOverProducts), 10 000 candidates', () => k.stock!.budgetRolledOverProducts(tenant, account));

@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0155_verify_schema_invariants_v44.sql';
+const VERIFY = 'migrations/0157_verify_schema_invariants_v44.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -893,7 +893,7 @@ export const STEP26_ROWS = [
         node(T('omnibus-applied-time.pg.test.ts'), 'OQ-180', 'OQ-180: a price applied after midnight is rolled up into the day it was accepted', '^0$')),
       // Шаг 27, D [OQ-192]: правило «цена закрытых суток остаётся в них» заменено поправкой — мутации в строке OQ-192
       // Закрытие тенанта удаляет отметки времени применения: таблица названа в purge_tenant_data (правило проверки схемы)
-      m(replaceInFunction('maintenance.purge_tenant_data(uuid,boolean)', "'tenant_data.price_history_applied', ", ''),
+      m(replaceInFunction('maintenance.purge_tenant_data(uuid)', "'tenant_data.price_history_applied', ", ''),
         verify('tenant_data\\.price_history_applied: tenant closure does not delete the table')),
       m(dropTrigger('zz_append_only', 'tenant_data.price_history_applied'), smoke('append-only tenant_data.price_history_applied')),
       m(dropTrigger('zz_no_truncate', 'tenant_data.price_history_applied'), smoke('truncate tenant_data.price_history_applied')),
@@ -935,7 +935,7 @@ export const STEP27_ROWS = [
       m(dropTrigger('zz_append_only', 'tenant_data.price_daily_system_correction'), smoke('append-only tenant_data.price_daily_system_correction')),
       m(dropTrigger('zz_no_truncate', 'tenant_data.price_daily_system_correction'), smoke('truncate tenant_data.price_daily_system_correction')),
       // Закрытие тенанта удаляет поправки: таблица названа в очистке (правило проверки схемы шага 27, задача F)
-      m(replaceInFunction('maintenance.purge_tenant_data(uuid,boolean)', ", 'tenant_data.price_daily_system_correction'", ''),
+      m(replaceInFunction('maintenance.purge_tenant_data(uuid)', ", 'tenant_data.price_daily_system_correction'", ''),
         verify('tenant_data\\.price_daily_system_correction: tenant closure does not delete the table')),
     ],
   },
@@ -979,7 +979,7 @@ export const STEP28_ROWS = [
       m(`${dropConstraint('cost_profile_import_batch_fk', 'tenant_data.cost_profile')}; ${dropTrigger('zz_no_truncate', 'tenant_data.cost_import')}`,
         smoke('truncate tenant_data.cost_import')),
       // Закрытие тенанта удаляет пакеты импорта: таблица названа в очистке (правило проверки схемы шага 27, задача F)
-      m(replaceInFunction('maintenance.purge_tenant_data(uuid,boolean)', ", 'tenant_data.cost_import'", ''),
+      m(replaceInFunction('maintenance.purge_tenant_data(uuid)', ", 'tenant_data.cost_import'", ''),
         verify('tenant_data\\.cost_import: tenant closure does not delete the table')),
     ],
   },
@@ -2078,8 +2078,53 @@ export const STEP55_ROWS = [
     row: 'шаг 56 (место чтения заказов)', critical: false,
     invariant: 'курсор места чтения заказов — только вместе с началом окна (начало окна без курсора держит окно, шаг 57)',
     mutations: [
-      m(replaceInFunction('tenant_data.save_order_read_position(uuid,uuid,timestamp with time zone,text,timestamp with time zone)', 'IF p_cursor IS NOT NULL AND p_since IS NULL THEN', 'IF false THEN'),
+      m(replaceInFunction('tenant_data.save_order_read_position(uuid,uuid,timestamp with time zone,text,timestamp with time zone,integer,timestamp with time zone)', 'IF p_cursor IS NOT NULL AND (p_since IS NULL OR p_read_from IS NULL) THEN', 'IF false THEN'),
         smoke('an order read position without its cursor (step 56)')),
+      m(replaceInFunction('tenant_data.save_order_read_position(uuid,uuid,timestamp with time zone,text,timestamp with time zone,integer,timestamp with time zone)', 'OR p_read_from IS NULL', ''),
+        smoke('an order read cursor without the start of its reading (step 59)')),
+      m(dropConstraint('channel_discovery_circle_order_cursor_failures_check', 'tenant_data.channel_discovery_circle'),
+        smoke('negative failures on an order read cursor (step 59)')),
+    ],
+  },
+];
+
+/**
+ * Шаг 59 (0156): решения владельца — возврат на полку ставит человек [Р-199]; закрытие тенанта — выгрузка, 30 суток льготы, удержание
+ * только с основанием [Р-201]. Правило Р-200 (вычитание отгруженного Inbound API) — в запросах пересчёта, это код, проверяется тестом
+ */
+export const STEP59_ROWS = [
+  {
+    row: 'шаг 59 (Р-199)', critical: false,
+    invariant: 'возврат внутреннего пула решает человек один раз; принятый на склад — движение RETURN своего пула на своё количество тем же человеком; у чужого пула — только сведения',
+    mutations: [
+      m(dropTrigger('b_order_return_decision_guard', 'channel_data.order_return'), smoke('a decided return is decided again (Р-199)')),
+      m(replaceInFunction('channel_data.order_return_decision_guard()', "IF OLD.status <> 'PENDING' THEN", 'IF false THEN'), smoke('a decided return is decided again (Р-199)')),
+      m(replaceInFunction('channel_data.order_return_decision_guard()', 'OR mv.delta IS DISTINCT FROM NEW.quantity', ''),
+        smoke('a return is accepted with a movement of another quantity (Р-199)')),
+      m(dropConstraint('order_return_info_only_iff_foreign_pool', 'channel_data.order_return'), smoke('a return of the internal pool is born for information only (Р-199)')),
+      m(dropConstraint('order_return_accepted_has_movement', 'channel_data.order_return'), smoke('a return is born accepted without a stock movement (Р-199)')),
+      m(dropConstraint('order_return_decision_has_author', 'channel_data.order_return'), smoke('a return is dismissed without its author (Р-199)')),
+      m(dropConstraint('order_return_status_known', 'channel_data.order_return'), smoke('a return with a status that does not exist (Р-199)')),
+      m(dropConstraint('order_return_quantity_check', 'channel_data.order_return'), smoke('a return of zero pieces (Р-199)')),
+      m(dropTrigger('a0_admin_write_person_insert', 'channel_data.order_return'), verify('channel_data\\.order_return: administrative INSERT without the person guard')),
+      m(dropTrigger('a0_admin_write_person_update', 'channel_data.order_return'), verify('channel_data\\.order_return: administrative UPDATE without the person guard')),
+      m(dropTrigger('zz_admin_write_audit_insert', 'channel_data.order_return'), verify('channel_data\\.order_return: administrative INSERT is not written to the audit log')),
+      m(dropTrigger('zz_admin_write_audit_update', 'channel_data.order_return'), verify('channel_data\\.order_return: administrative UPDATE is not written to the audit log')),
+    ],
+  },
+  {
+    row: 'шаг 59 (Р-201)', critical: false,
+    invariant: 'закрытый тенант удаляется только после 30 суток льготы и выгрузки доказательств клиенту; удержание доказательств — с основанием, и пока оно есть, не удаляется ничего',
+    mutations: [
+      m(replaceInFunction('maintenance.purge_tenant_data(uuid)', "IF closed_ts > now() - interval '30 days' THEN", 'IF false THEN'),
+        smoke('purge during the 30-day grace period after closure (Р-201)')),
+      m(replaceInFunction('maintenance.purge_tenant_data(uuid)', 'IF hold IS NOT NULL THEN', 'IF false THEN'), smoke('purge while the price evidence is held (Р-201)')),
+      m(replaceInFunction('maintenance.purge_tenant_data(uuid)', 'AND NOT EXISTS (SELECT 1 FROM maintenance.tenant_purge_status WHERE subject_tenant_id = p_tenant_id AND evidence_exported_at IS NOT NULL) THEN', 'AND false THEN'),
+        smoke('purge the price evidence before it is exported to the customer (Р-201)')),
+      m(replaceInFunction('maintenance.record_closure_evidence_export(uuid,text,bigint)', "IF NOT EXISTS (SELECT 1 FROM tenant_data.tenant WHERE tenant_id = p_tenant_id AND kind = 'CUSTOMER' AND status = 'CLOSED') THEN", 'IF false THEN'),
+        smoke('closure evidence export recorded for a tenant that is not closed (Р-201)')),
+      m(dropConstraint('tenant_purge_status_evidence_export_whole', 'maintenance.tenant_purge_status'), smoke('closure evidence export without a SHA-256 (Р-201)')),
+      m(dropConstraint('tenant_purge_status_evidence_hold_explained', 'maintenance.tenant_purge_status'), smoke('price evidence held by a direct write without a reason (Р-201)')),
     ],
   },
 ];

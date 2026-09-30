@@ -60,6 +60,8 @@ test('Р-129: конфигурация процесса — секреты из 
   assert.throws(() => loadConfig({ ...ENV, REPRACER_ALERT_DELIVERY_PG_URL: undefined }), /REPRACER_ALERT_DELIVERY_PG_URL/);
   // Шаг 57 (п. 3): без роли остатков планировщик не стартует — иначе работа чтения заказов молча не заводилась бы (шаг 56)
   assert.throws(() => loadConfig({ ...ENV, REPRACER_STOCK_PG_URL: undefined }), (e: Error) => e instanceof ConfigError && /REPRACER_STOCK_PG_URL/.test(e.message));
+  // Шаг 59 (ревью шага 58, находка 9): режим стенда в промышленном профиле — отказ своей причиной
+  assert.throws(() => loadConfig({ ...ENV, REPRACER_MODE: 'stand', REPRACER_PROFILE: 'production' }), (e: Error) => e instanceof ConfigError && /REPRACER_MODE=stand в промышленном профиле/.test(e.message));
   assert.throws(() => loadConfig({ ...ENV, REPRACER_MAIL_API_URL: 'http://mail.example.invalid/v3/send' }), /REPRACER_MAIL_API_URL must be https/);
   // Полный набор — настоящая отправка
   assert.deepEqual(loadConfig(ENV).mail, { apiUrl: 'https://mail.example.invalid/v3/send', apiKey: 'syn-mail-key', from: 'alerts@example.invalid' });

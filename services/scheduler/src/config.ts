@@ -68,6 +68,11 @@ const required = requiredValue;
 const int = intFromEnv;
 
 export function loadConfig(env: Env = process.env, read: (path: string) => string = (p) => readFileSync(p, 'utf8')): SchedulerConfig {
+  // Шаг 59 (ревью шага 58, находка 9): режим стенда в промышленном профиле — отказ, как у консоли и панели (Р-180): стенд принимает секреты
+  // значениями переменных и адрес модели канала вместо настоящего
+  if (env.REPRACER_PROFILE === 'production' && env.REPRACER_MODE === 'stand') {
+    throw new ConfigError('CONFIG_INVALID: REPRACER_MODE=stand в промышленном профиле — режим стенда принимает секреты значениями и модель канала');
+  }
   // Шаг 58 (ревью шага 56, находка 15): адрес канала подменяется только стендом — проверка до секретов, своей причиной
   const kauflandBaseUrl = env.REPRACER_KAUFLAND_BASE_URL || null;
   if (kauflandBaseUrl && env.REPRACER_MODE !== 'stand') {

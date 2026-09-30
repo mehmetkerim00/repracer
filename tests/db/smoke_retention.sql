@@ -155,8 +155,43 @@ UPDATE tenant_data.tenant SET status = 'OFFBOARDING' WHERE tenant_id = 'a0000000
 SELECT maintenance.purge_tenant_channel_data('a0000000-0000-0000-0000-00000000000a') AS channel_rows_purged \gset
 \echo 'channel rows purged:' :channel_rows_purged
 UPDATE tenant_data.tenant SET status = 'CLOSED', closed_at = now() WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a';
-SELECT pg_temp.expect_fail('purge tenant data without price_history confirmation (OQ-22)', $q$ SELECT maintenance.purge_tenant_data('a0000000-0000-0000-0000-00000000000a') $q$, 'has price evidence; deletion requires explicit confirmation');
-SELECT maintenance.purge_tenant_data('a0000000-0000-0000-0000-00000000000a', true) AS tenant_rows_purged \gset
+-- Шаг 59 [Р-201, OQ-22]: 30 суток льготы после закрытия — раньше не удаляется ничего, даже выгруженное (выгрузка записана, чтобы отказ
+-- давала именно льгота, а не соседнее условие [Р-99])
+SELECT maintenance.record_closure_evidence_export('a0000000-0000-0000-0000-00000000000a', repeat('b', 64), 1);
+SELECT pg_temp.expect_fail('purge during the 30-day grace period after closure (Р-201)', $q$ SELECT maintenance.purge_tenant_data('a0000000-0000-0000-0000-00000000000a') $q$,
+  'is in its 30-day grace period after closure');
+UPDATE maintenance.tenant_purge_status SET evidence_exported_at = NULL, evidence_export_sha256 = NULL, evidence_export_rows = NULL
+ WHERE subject_tenant_id = 'a0000000-0000-0000-0000-00000000000a';
+UPDATE tenant_data.tenant SET closed_at = now() - interval '31 days' WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a';
+-- Доказательства цен уходят только после выгрузки клиенту
+SELECT pg_temp.expect_fail('purge the price evidence before it is exported to the customer (Р-201)', $q$ SELECT maintenance.purge_tenant_data('a0000000-0000-0000-0000-00000000000a') $q$,
+  'has price evidence not yet exported to the customer');
+SELECT pg_temp.expect_fail('closure evidence export recorded for a tenant that is not closed (Р-201)', $q$
+  SELECT maintenance.record_closure_evidence_export('b0000000-0000-0000-0000-00000000000b', repeat('a', 64), 1) $q$, 'is exported for a CLOSED customer tenant');
+SELECT pg_temp.expect_fail('closure evidence export without a SHA-256 (Р-201)', $q$
+  SELECT maintenance.record_closure_evidence_export('a0000000-0000-0000-0000-00000000000a', 'not-a-checksum', 42) $q$, 'tenant_purge_status_evidence_export_whole');
+SELECT maintenance.record_closure_evidence_export('a0000000-0000-0000-0000-00000000000a', repeat('a', 64), 42);
+-- Роль, которой доступна прямая запись в состояние очистки, не обходит основание удержания функцией
+SELECT pg_temp.expect_fail('price evidence held by a direct write without a reason (Р-201)', $q$
+  UPDATE maintenance.tenant_purge_status SET evidence_hold_reason = 'keep', evidence_hold_by = 'ef000000-0000-4000-8000-000000000001', evidence_hold_at = now()
+   WHERE subject_tenant_id = 'a0000000-0000-0000-0000-00000000000a' $q$, 'tenant_purge_status_evidence_hold_explained');
+-- Удержание — только с основанием в аудите, от активного оператора со вторым фактором; пока оно действует — не удаляется ничего
+SELECT set_config('app.auth_mfa', 'on', false) \gset
+SELECT pg_temp.expect_fail('price evidence held without a reason (Р-201)', $q$
+  SELECT maintenance.hold_price_evidence('ef000000-0000-4000-8000-000000000001', 'a0000000-0000-0000-0000-00000000000a', 'keep') $q$, 'tenant_purge_status_evidence_hold_explained');
+SELECT maintenance.hold_price_evidence('ef000000-0000-4000-8000-000000000001', 'a0000000-0000-0000-0000-00000000000a', 'Synthetic dispute: customer asked in writing to keep the evidence');
+SELECT pg_temp.expect_fail('purge while the price evidence is held (Р-201)', $q$ SELECT maintenance.purge_tenant_data('a0000000-0000-0000-0000-00000000000a') $q$,
+  'is held: Synthetic dispute');
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM audit.audit_event WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a' AND action = 'closure.price_evidence_held'
+                  AND changes->>'reason' LIKE 'Synthetic dispute%') THEN
+    RAISE EXCEPTION 'the hold of the price evidence is not in the audit log with its reason';
+  END IF;
+  RAISE NOTICE 'PASS accept | the hold of the price evidence is audited with its reason (Р-201)';
+END $$;
+SELECT maintenance.release_price_evidence_hold('ef000000-0000-4000-8000-000000000001', 'a0000000-0000-0000-0000-00000000000a', 'synthetic: dispute settled');
+SELECT set_config('app.auth_mfa', '', false) \gset
+SELECT maintenance.purge_tenant_data('a0000000-0000-0000-0000-00000000000a') AS tenant_rows_purged \gset
 \echo 'tenant rows purged:' :tenant_rows_purged
 SELECT count(*) AS legal_consents FROM legal.migration_consent_record WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a' \gset
 \echo 'eBay consents kept in legal hold (Р-26):' :legal_consents

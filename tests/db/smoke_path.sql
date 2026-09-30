@@ -194,11 +194,19 @@ DO $$ BEGIN
 END $$;
 -- Шаг 56: место чтения заказов — начало окна и курсор вместе; положительный контроль — сохранение и чтение своей строки
 SELECT pg_temp.expect_fail('an order read position without its cursor (step 56)', $q$
-  SELECT tenant_data.save_order_read_position('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', NULL, 'page-7', '2026-09-29 00:30+00') $q$,
+  SELECT tenant_data.save_order_read_position('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', NULL, 'page-7', '2026-09-29 00:05+00', 0, '2026-09-29 00:30+00') $q$,
   'an order read cursor needs the start of its window');
-SELECT tenant_data.save_order_read_position('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', '2026-09-29 00:00+00', 'page-201', '2026-09-29 00:30+00') \gset
+SELECT pg_temp.expect_fail('negative failures on an order read cursor (step 59)', $q$
+  SELECT tenant_data.save_order_read_position('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', '2026-09-29 00:00+00', 'page-7', '2026-09-29 00:05+00', -1, '2026-09-29 00:30+00') $q$,
+  'channel_discovery_circle_order_cursor_failures_check');
+-- Шаг 59 (ревью шага 58, находка 1): и без начала чтения цепочки — иначе дочитанное окно не знает, откуда начинать следующее
+SELECT pg_temp.expect_fail('an order read cursor without the start of its reading (step 59)', $q$
+  SELECT tenant_data.save_order_read_position('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', '2026-09-29 00:00+00', 'page-7', NULL, 0, '2026-09-29 00:30+00') $q$,
+  'an order read cursor needs the start of its window and of its reading');
+SELECT tenant_data.save_order_read_position('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', '2026-09-29 00:00+00', 'page-201', '2026-09-29 00:05+00', 1, '2026-09-29 00:30+00') \gset
 DO $$ BEGIN
-  IF (SELECT cursor FROM tenant_data.order_read_position('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001')) IS DISTINCT FROM 'page-201' THEN
+  IF (SELECT (cursor, read_from, cursor_failures) FROM tenant_data.order_read_position('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001'))
+     IS DISTINCT FROM ('page-201'::text, '2026-09-29 00:05+00'::timestamptz, 1) THEN
     RAISE EXCEPTION 'the saved order read position is not read back';
   END IF;
   RAISE NOTICE 'PASS accept | the order read position is kept (step 56)';

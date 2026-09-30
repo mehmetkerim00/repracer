@@ -43,7 +43,7 @@ export async function acquireConsoleReplicaLock(pool: PgPool, onLost: (error: un
       const { rows: [h] } = await client.query(
         `SELECT a.pid, a.application_name, host(a.client_addr) AS client_addr, a.backend_start, a.state_change
            FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
-          WHERE l.locktype = 'advisory' AND l.granted AND l.database = (SELECT oid FROM pg_database WHERE datname = current_database())
+          WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1 AND l.database = (SELECT oid FROM pg_database WHERE datname = current_database())
             AND ((l.classid::bigint << 32) | l.objid::bigint) = hashtextextended($1, 0)`, [CONSOLE_REPLICA_LOCK_KEY]);
       throw new ConsoleAlreadyRunningError(h
         ? `pid ${h.pid}, ${h.application_name || 'no application name'}, from ${h.client_addr ?? 'local socket'}, session since ${new Date(h.backend_start).toISOString()}`

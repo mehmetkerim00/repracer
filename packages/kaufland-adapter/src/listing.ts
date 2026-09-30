@@ -100,7 +100,14 @@ const ORDER_STATUS: Readonly<Record<string, OrderLine['status']>> = {
   open: 'OPEN',
   need_to_be_sent: 'OPEN',
   sent: 'SHIPPED',
+  /**
+   * Шаг 59 (разбор OQ-218): значение есть в `OrderUnitStatus` снимка (vendor/kaufland/seller-api-v2/2026-09-14/openapi.json), описания нет —
+   * K-21. Без записи в карте строка уходила в OPEN с предупреждением и держала резервацию, не списывая пул. «sent» в имени — отгрузка;
+   * ошибка в сторону SHIPPED списывает пул один раз, ошибка в сторону OPEN держит резервацию бессрочно
+   */
+  sent_and_autopaid: 'SHIPPED',
   received: 'SHIPPED',
+  // Шаг 59 [Р-199]: «возвращено» строки заказа — не «лежит на полке»: снимок смысла не раскрывает (K-21), на склад ставит человек
   returned: 'RETURNED',
   returned_paid: 'RETURNED',
   cancelled: 'CANCELLED',

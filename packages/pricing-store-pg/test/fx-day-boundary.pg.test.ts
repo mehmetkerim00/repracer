@@ -62,6 +62,13 @@ function approved(context: ScopeEvaluationContext, amountMinor: number, at: stri
   };
 }
 
+/**
+ * Шаг 59: курс дня D доступен с 14:00 UTC дня D — как публикует ЕЦБ, а не «сейчас − 20 ч». Справочник курсов общий для базы и неизменяем:
+ * курс вчерашнего дня, «доступный» ночью по UTC раньше 09:00 того же дня, видели сценарии замороженного стенда (старт — авторские 09:00
+ * последней прошедшей даты) и брали его вместо своего — пять сценариев fx краснели с 00:00 до ~04:00 UTC (найдено быстрой областью шага 59)
+ */
+const ecbPublished = (nowMs: number) => `${iso(nowMs - 24 * HOUR).slice(0, 10)}T14:00:00.000Z`;
+
 async function seedUs(n: number, fxRates: NonNullable<Parameters<typeof seedPricingWorld>[1]['seed']['fxRates']>, extra: Partial<Parameters<typeof seedPricingWorld>[1]['seed']> = {}) {
   return seedPricingWorld(pool!, { provisioningPool: provisioning!, adminPool: admin!,
     fixtureTenantId: '10000000-0000-4000-8000-000000000001', fixtureChannelAccountId: KAUFLAND, marketplaces: ['de', 'at'], clock: new Date().toISOString(),
@@ -73,7 +80,7 @@ async function seedUs(n: number, fxRates: NonNullable<Parameters<typeof seedPric
 
 test('Р-61 in the database: a decision on a converted cost is refused without its exchange rate and stored with it', { skip }, async () => {
   const nowMs = Date.now();
-  const rate = { source: 'ECB' as const, rateDate: iso(nowMs - 24 * HOUR).slice(0, 10), base: 'EUR' as const, quote: 'USD', rateMicros: 1_155_100, availableFrom: iso(nowMs - 20 * HOUR) };
+  const rate = { source: 'ECB' as const, rateDate: iso(nowMs - 24 * HOUR).slice(0, 10), base: 'EUR' as const, quote: 'USD', rateMicros: 1_155_100, availableFrom: ecbPublished(nowMs) };
   const world = await seedUs(8101, [rate]);
   const store = new PgPricingStore(pool!);
   const ws = world.ids.dbId('ws-us-8101');
@@ -100,7 +107,7 @@ test('Р-63 on PostgreSQL: with only a stale ECB rate the same-EAN anchor declin
   // Решение через 30 дней после последнего курса: курс устарел, в контексте он есть, но не применяется (FX_MAX_RATE_AGE_DAYS)
   const nowMs = Date.now();
   const decisionMs = nowMs + 30 * 24 * HOUR;
-  const rate = { source: 'ECB' as const, rateDate: iso(nowMs - 24 * HOUR).slice(0, 10), base: 'EUR' as const, quote: 'USD', rateMicros: 1_155_100, availableFrom: iso(nowMs - 20 * HOUR) };
+  const rate = { source: 'ECB' as const, rateDate: iso(nowMs - 24 * HOUR).slice(0, 10), base: 'EUR' as const, quote: 'USD', rateMicros: 1_155_100, availableFrom: ecbPublished(nowMs) };
   const de: MemorySeedScope = {
     writeScopeId: 'ws-de-8201', productId: 'prod-8201', channelAccountId: KAUFLAND, marketplace: 'de', externalUnitId: '8201', channelProductRef: '362008201',
     condition: 'new', gtin: '2000000082016', currency: 'EUR', basis: 'GROSS', pricingMode: 'ENGINE', cost: engineCost(), strategy: BUYBOX, currentPriceMinor: 1850,

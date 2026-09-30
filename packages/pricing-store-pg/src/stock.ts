@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { systemClock } from '@repracer/channel-port';
 import type { Instant, OrderLine } from '@repracer/channel-port';
 import {
-  type ConfirmOrdersOutcome,
+  type ConfirmOrdersOutcome, type DecideReturnOutcome, type OrderReturnRow,
   availableOf, publishedQuantity, type CreateStockSourceResult, type EnableStockSyncInput, type EnableStockSyncResult, type InboundStockOutcome, type InboundStockRow,
   type OrderLinesOutcome, type RecalculationOutcome, type StockActor, type StockChannelRow, type StockDivergenceRow, type StockImportOutcome, type StockImportRow,
   type StockPage, type StockRow, type StockSourceMode, type StockSourceRow, type StockStore,
@@ -115,7 +115,7 @@ export class PgStockStore implements StockStore {
 
   async inboundStock(tenantId: string, stockSourceId: string, rows: readonly InboundStockRow[]): Promise<InboundStockOutcome> {
     return inTenant(this.options.stockPool, tenantId, async (tx) => {
-      const out: InboundStockOutcome = { applied: 0, stale: 0, unknownSkus: [], productIds: [] };
+      const out: InboundStockOutcome = { applied: 0, stale: 0, unknownSkus: [], productIds: [], recognizedProductIds: [] };
       for (const r of rows) {
         const { rows: [p] } = await tx.query(
           `SELECT p.product_id FROM tenant_data.product p
@@ -123,6 +123,7 @@ export class PgStockStore implements StockStore {
                                                                          AND om.status = 'ACTIVE' AND $2 IN (om.external_unit_id, om.external_sku, om.channel_product_ref)))
             LIMIT 1`, [tenantId, r.sku]);
         if (!p) { out.unknownSkus.push(r.sku); continue; }
+        out.recognizedProductIds.push(p.product_id);
         /**
          * INV-10: значение не новее известного не применяется — страж базы `stock_pool_guard` отказывает, здесь отказ
          * превращается в «устарело» без прерывания остальных строк (точка сохранения).
@@ -240,12 +241,22 @@ export class PgStockStore implements StockStore {
        ORDER BY om.created_at LIMIT 1))`;
 
   /** Доступный остаток и буфер каждой включённой единицы QUANTITY (SQL один на все вызовы) */
+  /**
+   * Шаг 59 [Р-200]: что вычитается из пула как зарезервированное — открытые резервации И отгруженные по источнику Inbound API, пока источник
+   * не прислал остаток с `asOf` позже подтверждения заказа. Остаток источника не наш [Р-6]: при отгрузке мы его не уменьшаем, но и не даём
+   * доступному вырасти на уехавший товар до его присылки. Одно условие — во всех местах, где считается «зарезервировано»
+   */
+  static readonly RESERVED_SQL = `(r.status IN ('CREATED', 'CONFIRMED_BY_SOURCE')
+    OR r.status = 'CONSUMED' AND r.source_mode = 'INBOUND_API'
+       AND NOT EXISTS (SELECT 1 FROM tenant_data.stock_pool sp WHERE sp.tenant_id = r.tenant_id AND sp.stock_pool_id = r.stock_pool_id
+                         AND sp.source_as_of > r.confirmed_at))`;
+
   private static readonly TARGETS_SQL = `
     WITH stock AS (
       SELECT p.product_id, coalesce(sum(p.on_hand), 0)::int AS on_hand FROM tenant_data.stock_pool p WHERE p.tenant_id = $1 GROUP BY p.product_id
     ), reserved AS (
       SELECT r.product_id, coalesce(sum(r.quantity), 0)::int AS reserved FROM channel_data.reservation r
-       WHERE r.tenant_id = $1 AND r.status IN ('CREATED', 'CONFIRMED_BY_SOURCE') GROUP BY r.product_id
+       WHERE r.tenant_id = $1 AND ${PgStockStore.RESERVED_SQL} GROUP BY r.product_id
     ), allocation AS (
       SELECT DISTINCT ON (a.channel_account_id) a.channel_account_id, a.buffer_units, a.max_quantity, a.min_quantity_to_list, a.is_active
         FROM tenant_data.stock_allocation a WHERE a.tenant_id = $1 AND a.scope_type = 'CHANNEL_ACCOUNT' ORDER BY a.channel_account_id, a.version DESC
@@ -308,14 +319,20 @@ export class PgStockStore implements StockStore {
    * значение он перезаписал бы (находка 21 ревью шага 35 — параметр уходил в столбец и ни на что не влиял). Параметр
    * остаётся в порте для хранилища в памяти, у которого своих часов нет.
    */
-  async recalculate(tenantId: string, productIds: readonly string[] | null, _now: Instant): Promise<RecalculationOutcome> {
+  async recalculate(tenantId: string, productIds: readonly string[] | null, _now: Instant, options: { lockTimeoutMs?: number } = {}): Promise<RecalculationOutcome> {
     return inTenant(this.options.stockPool, tenantId, async (tx) => {
+      /**
+       * Шаг 59 (ревью шага 58, находка 3): ожидающий пересчёт держит соединение пула; у Inbound API (синхронный запрос склада, пул консоли
+       * на два соединения) ожидание ограничено — отказ `55P03` становится 503 с Retry-After, а не очередью, занявшей пул всех тенантов
+       */
+      if (options.lockTimeoutMs !== undefined) await tx.query(`SET LOCAL lock_timeout = '${Math.max(1, Math.trunc(options.lockTimeoutMs))}ms'`);
       /**
        * Шаг 58 (ревью шага 57, находка 1): пересчёты тенанта идут ПО ОЧЕРЕДИ. Работа заказов, Inbound API (`propagate`), импорт остатков и
        * включение синхронизации считали следующую версию записи одной единицы из одной и той же «последней»; проигравший получал отказ
        * триггера «version … is not greater», а повтор его запроса видел строку уже учтённой и не пересчитывал ничего — завышенное количество
        * оставалось в канале. Блокировка транзакции на тенанта: второй пересчёт ждёт первого и затем читает свежий снимок (READ COMMITTED,
-       * новый оператор). Одна блокировка, а не по единицам: взаимоблокировки пересекающихся наборов нет; полный пересчёт 10 000 единиц — ~2 с
+       * новый оператор). Одна блокировка, а не по единицам: взаимоблокировки пересекающихся наборов нет. Длительность — замер задания long
+       * (`bulk-dispatch.pg.test.ts`: пересчёт 10 000 единиц без изменений и с 10 000 изменений)
        */
       await tx.query("SELECT pg_advisory_xact_lock(hashtextextended('repracer.stock_recalculate:' || $1::text, 0))", [tenantId]);
       // Одним оператором на все изменившиеся единицы: новая версия вытесняет ждущую сама (триггеры channel_write) [Р-64]
@@ -402,9 +419,80 @@ export class PgStockStore implements StockStore {
     });
   }
 
+  /** Шаг 59 [Р-199]: возвраты тенанта — ждущие решения первыми */
+  async listReturns(tenantId: string, limit: number): Promise<OrderReturnRow[]> {
+    return inTenant(this.options.adminPool, tenantId, async (tx) => {
+      const { rows } = await tx.query(
+        `SELECT o.order_return_id, o.product_id, p.sku, o.channel, o.channel_order_line_ref, o.quantity, o.source_mode, o.status, o.reported_at, o.decided_at, o.note
+           FROM channel_data.order_return o JOIN tenant_data.product p ON p.tenant_id = o.tenant_id AND p.product_id = o.product_id
+          WHERE o.tenant_id = $1
+          ORDER BY (o.status = 'PENDING') DESC, o.reported_at DESC LIMIT $2`, [tenantId, Math.max(1, Math.min(limit, 500))]);
+      const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : String(v)) as Instant;
+      return rows.map((r) => ({
+        orderReturnId: String(r.order_return_id), productId: String(r.product_id), sku: String(r.sku), channel: String(r.channel),
+        channelOrderLineRef: String(r.channel_order_line_ref), quantity: Number(r.quantity), sourceMode: String(r.source_mode),
+        status: r.status as OrderReturnRow['status'], reportedAt: iso(r.reported_at), decidedAt: r.decided_at ? iso(r.decided_at) : null, note: (r.note as string | null) ?? null,
+      }));
+    });
+  }
+
+  /**
+   * Шаг 59 [Р-199]: «принять на склад» — движение RETURN во внутренний пул возврата на его количество, с автором; «не принимать» — только
+   * решение. Одна транзакция: движение без решения или решение без движения база не примет (страж 0156). Права — MANAGE_CATALOG у базы
+   */
+  async decideReturn(tenantId: string, orderReturnId: string, decision: { accept: boolean; note: string | null }, actor: StockActor): Promise<DecideReturnOutcome> {
+    // Не идентификатор — не найдено, а не 22P02 из базы (консоль проверяет и сама; хранилище не полагается на вызывающего)
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderReturnId)) return { status: 'NOT_FOUND' };
+    try {
+      return await inTenant(this.options.adminPool, tenantId, async (tx) => {
+        const { rows: [r] } = await tx.query(
+          `SELECT status, stock_pool_id, quantity, product_id FROM channel_data.order_return WHERE tenant_id = $1 AND order_return_id = $2 FOR UPDATE`, [tenantId, orderReturnId]);
+        if (!r) return { status: 'NOT_FOUND' as const };
+        if (r.status !== 'PENDING') return { status: 'NOT_PENDING' as const };
+        let movement: string | null = null;
+        if (decision.accept) {
+          const { rows: [m] } = await tx.query(
+            `INSERT INTO tenant_data.stock_movement (tenant_id, stock_pool_id, delta, reason, created_by_membership_id, occurred_at)
+             VALUES ($1, $2, $3, 'RETURN', $4, now()) RETURNING stock_movement_id`, [tenantId, r.stock_pool_id, r.quantity, actor.membershipId]);
+          movement = String(m!.stock_movement_id);
+        }
+        await tx.query(
+          `UPDATE channel_data.order_return SET status = $3, stock_movement_id = $4, decided_by_membership_id = $5, decided_at = now(), note = $6
+            WHERE tenant_id = $1 AND order_return_id = $2`,
+          [tenantId, orderReturnId, decision.accept ? 'ACCEPTED' : 'DISMISSED', movement, actor.membershipId, decision.note?.slice(0, 500) ?? null]);
+        return { status: 'DECIDED' as const, productId: String(r.product_id), accepted: decision.accept };
+      }, actor.userId, { mfa: actor.mfa });
+    } catch (error) {
+      if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
+      throw error;
+    }
+  }
+
+  /**
+   * Шаг 59 [Р-200]: источники Inbound API, молчащие сутки после подтверждения отгруженного заказа, — вычитание отгруженного держится, но
+   * о том, что источник не прислал остаток, продавец должен узнать. Отметка ставится на резервацию: WARNING один раз, а не каждые 5 минут.
+   * Время — часы базы, как у `confirmed_at`
+   */
+  async markSilentInboundSources(tenantId: string): Promise<Array<{ stockSourceId: string; reservations: number; oldestConfirmedAt: Instant }>> {
+    return inTenant(this.options.stockPool, tenantId, async (tx) => {
+      const { rows } = await tx.query(
+        `WITH marked AS (
+           UPDATE channel_data.reservation r SET source_silence_alerted_at = now()
+            WHERE r.tenant_id = $1 AND r.status = 'CONSUMED' AND r.source_mode = 'INBOUND_API' AND r.source_silence_alerted_at IS NULL
+              AND r.confirmed_at < now() - interval '24 hours'
+              AND NOT EXISTS (SELECT 1 FROM tenant_data.stock_pool sp WHERE sp.tenant_id = r.tenant_id AND sp.stock_pool_id = r.stock_pool_id AND sp.source_as_of > r.confirmed_at)
+           RETURNING r.stock_pool_id, r.confirmed_at)
+         SELECT p.stock_source_id, count(*)::int AS reservations, min(m.confirmed_at) AS oldest
+           FROM marked m JOIN tenant_data.stock_pool p ON p.tenant_id = $1 AND p.stock_pool_id = m.stock_pool_id
+          GROUP BY p.stock_source_id`, [tenantId]);
+      return rows.map((r) => ({ stockSourceId: String(r.stock_source_id), reservations: Number(r.reservations),
+        oldestConfirmedAt: (r.oldest instanceof Date ? r.oldest.toISOString() : String(r.oldest)) as Instant }));
+    });
+  }
+
   async recordOrderLines(tenantId: string, channelAccountId: string, lines: readonly OrderLine[], now: Instant): Promise<OrderLinesOutcome> {
     return inTenant(this.options.stockPool, tenantId, async (tx) => {
-      const out: OrderLinesOutcome = { created: 0, consumed: 0, released: 0, unknownOffers: 0, awaitingConfirmation: 0, productIds: [] };
+      const out: OrderLinesOutcome = { created: 0, consumed: 0, released: 0, unknownOffers: 0, awaitingConfirmation: 0, returns: 0, productIds: [] };
       const touched = new Set<string>();
       for (const line of lines) {
         const id = line.identity;
@@ -441,6 +529,24 @@ export class PgStockStore implements StockStore {
             if (pool.source_mode === 'INTERNAL_POOL') await this.consume(tx, tenantId, r!.reservation_id, out, offer.product_id, touched);
             else await this.reportShipped(tx, tenantId, r!.reservation_id, out);
           }
+          continue;
+        }
+        /**
+         * Шаг 59 [Р-199]: «возвращено» по отгруженной резервации — строка возврата: у внутреннего пула её ставит на полку человек, у
+         * источника Inbound API — только сведения. Возврат, пришедший раньше отгрузки (опрос не застал `sent`), сначала закрывает отгрузку:
+         * раньше такая строка не делала ничего, и резервация висела до алерта Р-30 (найдено разбором каналов шага 59)
+         */
+        if (line.status === 'RETURNED') {
+          if (existing.status === 'RELEASED') continue;
+          if (existing.status === 'CONFIRMED_BY_SOURCE') await this.consume(tx, tenantId, existing.reservation_id, out, offer.product_id, touched);
+          else if (existing.status === 'CREATED') await this.reportShipped(tx, tenantId, existing.reservation_id, out);
+          const { rowCount } = await tx.query(
+            `INSERT INTO channel_data.order_return (tenant_id, reservation_id, product_id, stock_pool_id, source_mode, quantity, channel, channel_order_line_ref, status)
+             SELECT r.tenant_id, r.reservation_id, r.product_id, r.stock_pool_id, r.source_mode, r.quantity, r.channel, r.channel_order_line_ref,
+                    CASE WHEN r.source_mode = 'INTERNAL_POOL' THEN 'PENDING' ELSE 'INFO_ONLY' END
+               FROM channel_data.reservation r WHERE r.tenant_id = $1 AND r.reservation_id = $2
+             ON CONFLICT (tenant_id, reservation_id) DO NOTHING`, [tenantId, existing.reservation_id]);
+          out.returns += rowCount ?? 0;
           continue;
         }
         if (existing.status === 'CONSUMED' || existing.status === 'RELEASED') continue;
@@ -556,7 +662,7 @@ export class PgStockStore implements StockStore {
       const { rows: products } = await tx.query(
         `SELECT p.product_id, p.sku, p.gtin,
                 coalesce((SELECT sum(sp.on_hand) FROM tenant_data.stock_pool sp WHERE sp.tenant_id = p.tenant_id AND sp.product_id = p.product_id), 0)::int AS on_hand,
-                coalesce((SELECT sum(r.quantity) FROM channel_data.reservation r WHERE r.tenant_id = p.tenant_id AND r.product_id = p.product_id AND r.status IN ('CREATED', 'CONFIRMED_BY_SOURCE')), 0)::int AS reserved
+                coalesce((SELECT sum(r.quantity) FROM channel_data.reservation r WHERE r.tenant_id = p.tenant_id AND r.product_id = p.product_id AND ${PgStockStore.RESERVED_SQL}), 0)::int AS reserved
            FROM tenant_data.product p WHERE p.tenant_id = $1 ORDER BY p.sku, p.product_id LIMIT $2 OFFSET $3`, [tenantId, query.limit, query.offset]);
       const ids = products.map((p) => p.product_id as string);
       const { rows: channels } = ids.length === 0 ? { rows: [] as Row[] } : await tx.query(

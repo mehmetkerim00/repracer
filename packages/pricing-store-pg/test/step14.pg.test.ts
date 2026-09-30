@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
-import { exportCoreArchive, MemoryArchiveSink, archiveKey, decodeBundle } from '@repracer/analytics-export';
+import { exportCoreArchive, exportClosureEvidence, closureEvidenceKey, MemoryArchiveSink, archiveKey, decodeBundle } from '@repracer/analytics-export';
 import { can, MEMBER_ROLES, PRICING_ACTIONS, type PriceDecisionDraft, type PriceIntentDraft } from '@repracer/pricing-model';
 import { EXPLANATION_RULESETS, standUserOf, type MemorySeedScope } from '@repracer/pricing-pipeline';
 import { createPool, inTenant, PgPricingStore, seedPricingWorld, type SeededPricingWorld } from '../src/index.ts';
@@ -212,4 +212,48 @@ test('Р-79: the core archive exported by the exporter role explains every row w
     `INSERT INTO maintenance.partition_export (parent_table, partition_name, target, exported_rows, verified_at, explanation_dictionary_included)
      VALUES ('tenant_data.price_intent_core', 'tenant_data.price_intent_core_y1999m01', 'ARCHIVE', 0, now(), false)`)), /partition_export_core_archive_self_contained/,
     'Р-79: a verified archive of the core without the explanation dictionary is refused');
+});
+
+/**
+ * Шаг 59 [Р-201, OQ-22]: закрытие тенанта. Доказательства цен уходят клиенту пакетом, который объясняет себя без базы; удаление — только после
+ * записанной выгрузки и 30 суток льготы, и тогда удаляется ВСЁ, включая доказательства
+ */
+test('Р-201: the closure exports the price evidence to the customer, then the purge deletes it all; without the export the purge refuses', async () => {
+  const store = new PgPricingStore(pool!, { adminPool: admin! });
+  const w = await seed([scopeSeed(5)]);
+  const ctx = await contextOf(store, w.tenantId, w.ids.dbId('ws-5'));
+  const r = await store.commitEvaluation(w.tenantId, {
+    key: { channelAccountId: ctx.scope.channelAccountId, marketplace: ctx.scope.marketplace, channelProductRef: ctx.scope.channelProductRef, condition: ctx.scope.condition },
+    now: now(), decisions: [explained(approved(ctx, 1990))],
+  });
+  assert.equal(r.status, 'COMMITTED', JSON.stringify(r));
+  const url = new URL(process.env.REPRACER_PG_ADMIN_URL!); url.pathname = new URL(PG_URL!).pathname;
+  const su = createPool(url.toString(), { max: 1, applicationName: 'repracer-r201-closure' });
+  const retention = createPool(PG_URL!.replace('svc_app@', 'svc_scheduler@'), { max: 1, applicationName: 'repracer-r201-retention' });
+  try {
+    // Закрытие процедурой: отключение → очистка данных каналов → CLOSED; тридцать одни сутки назад — льгота прошла
+    await su.query(`UPDATE tenant_data.tenant SET status = 'OFFBOARDING' WHERE tenant_id = $1`, [w.tenantId]);
+    await retention.query('SELECT maintenance.purge_tenant_channel_data($1)', [w.tenantId]);
+    await su.query(`UPDATE tenant_data.tenant SET status = 'CLOSED', closed_at = now() - interval '31 days' WHERE tenant_id = $1`, [w.tenantId]);
+    await assert.rejects(retention.query('SELECT maintenance.purge_tenant_data($1)', [w.tenantId]), /has price evidence not yet exported to the customer/);
+
+    const sink = new MemoryArchiveSink();
+    const exported = await exportClosureEvidence(exporter!, sink, w.tenantId);
+    assert.equal(exported.selfContained, true);
+    assert.ok(exported.perTable['tenant_data.price_intent_core']! >= 1, 'the decisions travel with their explanation');
+    assert.deepEqual([...sink.objects.keys()], [closureEvidenceKey(w.tenantId)], 'one package under the tenant prefix (Р-23)');
+    const { rows: [mark] } = await su.query(`SELECT evidence_export_sha256, evidence_export_rows FROM maintenance.tenant_purge_status WHERE subject_tenant_id = $1`, [w.tenantId]);
+    assert.deepEqual([mark.evidence_export_sha256, Number(mark.evidence_export_rows)], [exported.sha256, exported.rows], 'the export is recorded with its checksum');
+
+    await retention.query('SELECT maintenance.purge_tenant_data($1)', [w.tenantId]);
+    const { rows: [left] } = await su.query(
+      `SELECT (SELECT count(*) FROM tenant_data.price_intent_core WHERE tenant_id = $1)::int AS core, (SELECT count(*) FROM tenant_data.price_daily WHERE tenant_id = $1)::int AS daily,
+              (SELECT count(*) FROM tenant_data.price_history WHERE tenant_id = $1)::int AS history`, [w.tenantId]);
+    assert.deepEqual(left, { core: 0, daily: 0, history: 0 }, 'after the export and the grace period nothing of the price evidence stays with us');
+    // Пакет у клиента объясняет себя без базы — база уже пуста
+    assert.ok(sink.objects.get(closureEvidenceKey(w.tenantId))!.length > 0);
+  } finally {
+    await su.end();
+    await retention.end();
+  }
 });

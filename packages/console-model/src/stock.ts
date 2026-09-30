@@ -1,5 +1,5 @@
 import { can } from '@repracer/pricing-model';
-import type { StockChannelRow, StockDivergenceRow, StockPage, StockRow, StockSourceRow } from '@repracer/stock-sync';
+import type { OrderReturnRow, StockChannelRow, StockDivergenceRow, StockPage, StockRow, StockSourceRow } from '@repracer/stock-sync';
 import type { Messages } from './i18n/index.ts';
 import { pageInfo, type ListQuery, type PageInfo } from './page.ts';
 import { gap, type Gap, type StandWorld } from './world.ts';
@@ -118,5 +118,57 @@ export function stockDivergencesView(world: StandWorld, rows: readonly StockDive
     worldId: world.id,
     items: rows.map((r) => ({ ...r, text: t.row(r.sent, r.confirmed === null ? '—' : String(r.confirmed), status(r.status), m.when(r.since)) })),
     none: t.none, cannot: t.cannot,
+  };
+}
+
+/**
+ * Шаг 59 [Р-199]: возвраты. Возврат по отгруженной резервации сам в пул не попадает: товар мог вернуться повреждённым,
+ * и на полку его ставит человек. У внутреннего пула строка ждёт решения («принять на склад» / «не принимать»); у источника
+ * Inbound API — только сведения: остаток ведёт система продавца [Р-6], и возврат придёт от неё новым значением.
+ */
+export interface StockReturnItem {
+  orderReturnId: string;
+  productId: string;
+  sku: string;
+  channel: string;
+  channelOrderLineRef: string;
+  quantity: number;
+  status: OrderReturnRow['status'];
+  statusText: string;
+  /** Строка ждёт решения человека — у неё две кнопки */
+  pending: boolean;
+  /** Только сведения: остаток ведёт источник продавца */
+  infoOnly: boolean;
+  /** Пояснение строки: что ждёт, кто решил и что это значит для остатка */
+  text: string;
+  note: string | null;
+}
+
+export interface StockReturnsView {
+  worldId: string;
+  intro: string;
+  items: StockReturnItem[];
+  pendingCount: number;
+  pendingText: string;
+  none: string;
+  canDecide: boolean;
+}
+
+export function stockReturnsView(world: StandWorld, rows: readonly OrderReturnRow[], m: Messages): StockReturnsView {
+  const t = m.ui.stock.returns;
+  const channelName = (c: string) => (m.values as Record<string, string | undefined>)[c] ?? c;
+  const items = rows.map((r): StockReturnItem => ({
+    orderReturnId: r.orderReturnId, productId: r.productId, sku: r.sku, channel: channelName(r.channel), channelOrderLineRef: r.channelOrderLineRef, quantity: r.quantity,
+    status: r.status, statusText: t.status[r.status], pending: r.status === 'PENDING', infoOnly: r.status === 'INFO_ONLY',
+    text: r.status === 'PENDING' ? t.awaiting(r.quantity, m.when(r.reportedAt))
+      : r.status === 'INFO_ONLY' ? t.infoOnly(r.quantity, m.when(r.reportedAt))
+      : r.status === 'ACCEPTED' ? t.accepted(r.quantity, m.when(r.decidedAt))
+      : t.dismissed(r.quantity, m.when(r.decidedAt)),
+    note: r.note,
+  }));
+  const pendingCount = items.filter((x) => x.pending).length;
+  return {
+    worldId: world.id, intro: t.intro, items, pendingCount, pendingText: t.pendingCount(pendingCount), none: t.none,
+    canDecide: can(world.viewer.role, 'MANAGE_CATALOG'),
   };
 }

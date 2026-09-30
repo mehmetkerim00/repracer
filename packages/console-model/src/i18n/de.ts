@@ -382,6 +382,7 @@ export const de: Messages = {
       andMoreProblems: (n: number) => `und ${n} weitere Angebote mit denselben Problemen`,
       tooManyScopes: (asked: number, limit: number) => `${asked} Angebote ausgewählt, auf einmal werden höchstens ${limit} geändert. Wählen Sie weniger aus oder nehmen Sie den Import.`,
       badRequest: 'Die Anfrage ist ungültig.',
+      busy: 'Der Bestand dieses Händlers wird gerade neu berechnet — senden Sie dieselbe Anfrage in einigen Sekunden erneut.',
       planChanged: 'Die Daten haben sich seit der Anzeige der Unterschiede geändert. Bitte die Unterschiede erneut prüfen.',
       previewChanged: 'Die Vorschau hat sich seit der Anzeige geändert. Bitte vor dem Speichern erneut ausführen.',
       strategyUnavailable: 'Diese Strategie kann nicht zugewiesen werden: der Kanal liefert die benötigten Wettbewerbsdaten nicht (Р-39).',
@@ -574,6 +575,24 @@ export const de: Messages = {
         row: (sent: number, confirmed: string, status: string, when: string) => `gesendet ${sent}, Kanal bestätigte ${confirmed}; letzter Schreibvorgang ${status} (${when})`,
         cannot: 'Zwischen zwei Schreibvorgängen wird der Kanal nicht gelesen: eine Bestellung, die der Kanal selbst abzieht, wird erst mit dem nächsten Schreibvorgang sichtbar. Dieser Bildschirm zeigt, was der Kanal BESTÄTIGT hat, nicht, was er gerade anzeigt.',
       },
+      // Шаг 59 [Р-199]: возвраты — на полку ставит человек; у источника Inbound API — только сведения [Р-6]
+      returns: {
+        title: 'Retouren',
+        intro: 'Eine vom Kanal gemeldete Retoure wird nicht automatisch dem Bestand zugebucht: die Ware kann beschädigt zurückkommen. Beim internen Bestand entscheiden Sie, ob sie wieder ins Lager geht; bei einer Inbound-API-Quelle führt Ihr System den Bestand und meldet den neuen Wert selbst.',
+        none: 'Keine Retouren.',
+        pendingCount: (n: number) => (n === 0 ? 'Keine Retouren warten auf eine Entscheidung.' : `${n} Retoure(n) warten auf Ihre Entscheidung.`),
+        status: { PENDING: 'wartet auf Entscheidung', ACCEPTED: 'ins Lager übernommen', DISMISSED: 'nicht übernommen', INFO_ONLY: 'nur zur Information' },
+        awaiting: (n: number, when: string) => `${n} Stück retourniert (${when}) — wartet auf Ihre Entscheidung; bis dahin bleibt der Bestand unverändert.`,
+        infoOnly: (n: number, when: string) => `${n} Stück retourniert (${when}) — nur zur Information: den Bestand führt Ihr System, es meldet den neuen Wert.`,
+        accepted: (n: number, when: string) => `${n} Stück ins Lager übernommen (${when}).`,
+        dismissed: (n: number, when: string) => `nicht ins Lager übernommen (${when}); Bestand unverändert (${n} Stück retourniert).`,
+        accept: 'Ins Lager übernehmen',
+        dismiss: 'Nicht übernehmen',
+        note: 'Notiz (optional)',
+        decided: (accepted: boolean) => (accepted ? 'Die Retoure wurde ins Lager übernommen; die Mengen in den Kanälen werden neu berechnet.' : 'Die Retoure wurde nicht ins Lager übernommen.'),
+        notPending: 'Über diese Retoure wurde bereits entschieden — die Liste wurde neu geladen.',
+        notFound: 'Diese Retoure wurde nicht gefunden.',
+      },
       noRight: 'Ihre Rolle darf den Bestand sehen, aber Quellen und Abgleich nicht ändern.',
     },
     /**
@@ -629,8 +648,8 @@ export const de: Messages = {
       },
       discovery: {
         // Шаг 58 (ревью шага 56, находка 9): пояснение о старых листингах eBay — только у аккаунта eBay
-        running: (h: number, hadCircle: boolean, ebay: boolean) => `Katalogsuche: Der aktuelle Durchlauf läuft seit ${h} Std.${hadCircle ? '' : ' (der erste)'} — ein Angebot, das nur ein vollständiger Durchlauf sieht${ebay ? ' (ältere eBay-Angebote)' : ''}, erscheint spätestens innerhalb von zwei Durchläufen und einem Tag; die Stunden nennen wir, sobald ein Durchlauf abgeschlossen ist.`,
-        completed: (h: number, at: string, boundH: number, ebay: boolean) => `Katalogsuche: Der letzte vollständige Durchlauf dauerte ${h} Std., abgeschlossen ${at.slice(0, 16).replace('T', ' ')} UTC — ein Angebot, das nur ein vollständiger Durchlauf sieht${ebay ? ' (ältere eBay-Angebote)' : ''}, erscheint spätestens nach etwa ${boundH} Std. (zwei Durchläufe und ein Tag).`,
+        running: (h: number, hadCircle: boolean, ebay: boolean) => `Katalogsuche: Der aktuelle Durchlauf läuft seit ${h} Std.${hadCircle ? '' : ' (der erste)'} — ein Angebot, das nur ein vollständiger Durchlauf sieht${ebay ? ' (ältere eBay-Angebote)' : ''}, erscheint nach etwa zwei Durchläufen und einem Tag; die Stunden nennen wir, sobald ein Durchlauf abgeschlossen ist.`,
+        completed: (h: number, at: string, boundH: number, ebay: boolean) => `Katalogsuche: Der letzte vollständige Durchlauf dauerte ${h} Std., abgeschlossen ${at.slice(0, 16).replace('T', ' ')} UTC — ein Angebot, das nur ein vollständiger Durchlauf sieht${ebay ? ' (ältere eBay-Angebote)' : ''}, erscheint nach etwa ${boundH} Std. (zwei Durchläufe und ein Tag), sofern der nächste Durchlauf nicht länger dauert als der letzte.`,
       },
       authorization: {
         revoked: 'Der Zugriff wurde im Kanal zurückgezogen: verbinden Sie erneut, um fortzufahren.',
@@ -770,6 +789,7 @@ export const de: Messages = {
         PRICE_WRITE_SCOPE_BLOCKED: { what: 'Ein Angebot ist blockiert: Seine Preisänderung ging nicht durch', step: 'Öffnen Sie das Angebot in der Konsole: Der Grund der Ablehnung steht dort. Die meisten Ablehnungen brauchen eine Handlung im Kanal-Konto.' },
         PRICE_WRITE_NOT_SENT: { what: 'Eine Preisänderung wurde nicht an den Kanal gesendet', step: 'Öffnen Sie die Preisänderungen in der Konsole und prüfen Sie die Angebote dieses Kanals.' },
         DISCOVERY_PAGE_LIMIT_REACHED: { what: 'Die Angebotssuche hat ihre Seitengrenze erreicht, bevor der Kanal alle Angebote geliefert hat', step: 'Angebote jenseits der Grenze sind noch nicht im Katalog. Melden Sie sich bei uns mit dem Ereigniscode — die Grenze wird für Ihren Katalog angepasst.' },
+        INBOUND_SOURCE_SILENT: { what: 'Ihr Bestandssystem hat seit einem Tag nach der Bestätigung einer versandten Bestellung keinen Bestand gesendet — wir ziehen die versandten Stücke weiter ab, damit die Kanäle nicht zeigen, was schon weg ist', step: 'Prüfen Sie, ob Ihr System den Bestand noch über die Inbound-API sendet. Sobald ein Bestand nach der Bestellbestätigung eintrifft, endet der Abzug von selbst.' },
         ORDER_LINES_FIRST_WINDOW_CAPPED: { what: 'das erste Lesen der Bestellungen eines neu verbundenen Kontos reichte nicht bis zum Zeitpunkt der Verbindung zurück — gelesen wurde nur der letzte Tag', step: 'Frühere Bestellungen sollten bereits in Ihrer Bestandsquelle enthalten sein. Hat eine ältere Bestellung den Bestand verändert, korrigieren Sie ihn in der Quelle; wiederholt sich der Hinweis, melden Sie sich mit dem Ereigniscode.' },
         ORDER_LINES_PAGE_LIMIT_REACHED: { what: 'Das Lesen der Bestellungen hat die Seitengrenze eines Laufs erreicht', step: 'Es geht nichts verloren: Gelesenes ist erfasst, der nächste Lauf setzt an derselben Stelle fort. Wiederholt sich der Hinweis über Stunden, melden Sie sich bei uns mit dem Ereigniscode.' },
         DISCOVERY_CIRCLE_RESET: { what: 'Die Angebotssuche ist an derselben Stelle erneut gescheitert und beginnt ihren Durchlauf von vorn', step: 'Meist ist nichts zu tun: Der nächste Durchlauf liest den Katalog neu. Wiederholt sich der Hinweis, melden Sie sich bei uns mit dem Ereigniscode.' },

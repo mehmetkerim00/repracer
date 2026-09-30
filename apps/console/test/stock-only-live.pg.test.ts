@@ -8,13 +8,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { JobCreatedResponse, StandToken } from '../src/api-types.ts';
-import type { BulkJobView, OnboardingView, StockDivergencesView, StockView } from '@repracer/console-model';
+import type { BulkJobView, OnboardingView, StockDivergencesView, StockReturnsView, StockView } from '@repracer/console-model';
 import { STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { demoWorld, nextNineUtc, DEMO_OFFERS, type DemoWorld } from '@repracer/contract-tests/live';
 import { createAuthenticator, MemoryIdentityDirectory, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
 import { PgPricingStore, PgStockStore, type PgPool } from '@repracer/pricing-store-pg';
-import { createStockPipeline } from '@repracer/stock-sync';
+import { createStockPipeline, type StockPipeline } from '@repracer/stock-sync';
 import { createIsolatedDatabase, type IsolatedDatabase } from '../../../packages/pricing-store-pg/test/isolated-db.ts';
 import { createStandApi, createStandServer } from '../server/stand-server.ts';
 import type { BulkWorkerConfig } from '../server/bulk-worker.ts';
@@ -51,6 +51,10 @@ let inboundKey = '';
  * сама не создаёт (мир этого прогона — пустой, без спроса); всё, что делает продавец и его склад, идёт по HTTP.
  */
 let stockStore: PgStockStore;
+/** Шаг 59 [Р-199]: конвейер мира — им прогон делает то, что после заказа делает работа `order-lines` (пересчёт и запись) */
+let worldStockPipeline: StockPipeline;
+/** Шаг 59 [Р-199]: наблюдатель тенанта — видит возвраты, но не решает (403 у консоли) */
+let viewerAuth: { authorization: string; cookie: string };
 
 const api = (screen: string, param?: string) => `/api/worlds/${encodeURIComponent(WORLD)}/${screen}${param ? `/${param}` : ''}`;
 
@@ -98,6 +102,7 @@ before(async () => {
   stockStore = stock;
   // Записи остатка отправляет диспетчер мира — тот же, что отправляет цены [Р-64]
   const stockPipeline = createStockPipeline({ store: stock, now: () => demo.clock.iso() as never, sleep: demo.clock.sleep, dispatchScope: (t, ws) => demo.live.dispatchScope(t, ws) });
+  worldStockPipeline = stockPipeline;
   const nowIso = () => demo.clock.iso();
   const accounts = [{ channelAccountId: seeded.channelAccountId, channel: 'KAUFLAND', marketplaces: ['de'], haltRelease: 'SAMPLE' as const }];
   const live: LiveWorld = {
@@ -113,6 +118,10 @@ before(async () => {
   const directory = new MemoryIdentityDirectory();
   directory.link({ issuer: STAND_ISSUER, subject: 'demo-owner' }, seeded.userId);
   directory.addMembership(seeded.userId, { tenantId: seeded.tenantId, membershipId: seeded.ownerMembershipId, role: 'OWNER' });
+  // Шаг 59 [Р-199]: наблюдатель — синтетический пользователь стенда; 403 ему отвечает консоль, до базы
+  const viewerUser = '1d000000-0000-4000-8000-000000000199';
+  directory.link({ issuer: STAND_ISSUER, subject: 'demo-viewer' }, viewerUser);
+  directory.addMembership(viewerUser, { tenantId: seeded.tenantId, membershipId: '1e000000-0000-4000-8000-000000000199', role: 'VIEWER' });
   const issuer = createTestIssuer({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE });
   /**
    * Мир-приманка на ТОЙ ЖЕ базе и с тем же хранилищем остатков, но другого тенанта — и первым в списке. Его хранилище
@@ -122,13 +131,15 @@ before(async () => {
   const decoy: LiveWorld = { ...live, id: 'demo/decoy', title: 'Приманка', tenantId: '10000000-0000-4000-8000-00000000d3c0' };
   const handle = createStandApi([decoy, live], {
     authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory }),
-    simulator: { token: () => issuer.token('demo-owner', { email: 'owner@example.invalid', amr: ['pwd', 'otp'] }), expiresInSeconds: 3600 },
+    simulator: { token: (account) => issuer.token(account.role === 'VIEWER' ? 'demo-viewer' : 'demo-owner', { email: 'owner@example.invalid', amr: ['pwd', 'otp'] }), expiresInSeconds: 3600 },
   });
   server = createStandServer(handle);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const token = await fetch(`${origin}/api/stand-issuer/token?locale=de`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ role: 'OWNER' }) });
   owner = { authorization: `Bearer ${((await token.json()) as StandToken).accessToken}`, cookie: 'repracer_locale=de' };
+  const viewerToken = await fetch(`${origin}/api/stand-issuer/token?locale=de`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ role: 'VIEWER' }) });
+  viewerAuth = { authorization: `Bearer ${((await viewerToken.json()) as StandToken).accessToken}`, cookie: 'repracer_locale=de' };
   const observerUrl = new URL(process.env.REPRACER_PG_ADMIN_URL!); observerUrl.pathname = `/${db.name}`;
   const { createPool } = await import('@repracer/pricing-store-pg');
   observer = createPool(observerUrl.toString(), { max: 1, applicationName: 'repracer-stock-only-observer' });
@@ -382,9 +393,100 @@ test('Р-157: склад подтверждает заказ по Inbound API �
   assert.equal(overOrders.status, 400, overOrders.text.slice(0, 200));
   assert.equal((JSON.parse(overOrders.text) as { error: { code: string } }).error.code, 'BAD_ROWS');
 
-  // 6. И только теперь отгрузка закрывает резервацию: доступное возвращается продавцу — 40 − 0 = 40, не через сутки
+  // 6. Отгрузка закрывает резервацию. Шаг 59 [Р-200, OQ-223]: доступное НЕ возвращается к 40 — товар уехал, а источник ещё не прислал
+  // новый остаток; отгруженные 3 вычитаются, пока его присылка не окажется позже подтверждения заказа
   const shipped = await stockStore.recordOrderLines(demo.live.seeded.tenantId, demo.live.seeded.channelAccountId, [orderLine('SHIPPED')], demo.clock.iso());
   assert.deepEqual([shipped.consumed, shipped.awaitingConfirmation], [1, 0]);
   const afterRow = (await step<StockView>('экран остатков после отгрузки', 'GET', `${api('stock')}?limit=200`)).body.rows.find((r) => r.sku === productSku)!;
-  assert.deepEqual([afterRow.onHand, afterRow.reserved, afterRow.available], [40, 0, 40]);
+  assert.deepEqual([afterRow.onHand, afterRow.reserved, afterRow.available], [40, 3, 37], 'the shipped pieces stay subtracted until the source sends a newer figure');
+  // 7. Склад присылает остаток после подтверждения — в нём отгрузка уже учтена (его пул 30 − 3 = 27; ещё 10 — во внутреннем пуле),
+  // вычитание кончается само
+  const pushed = await call('POST', '/inbound/v1/stock', { rows: [{ sku: productSku, quantity: 27, asOf: new Date(Date.now() + 1000).toISOString() }] }, { authorization: `Bearer ${inboundKey}`, cookie: '' });
+  assert.equal(pushed.status, 200, pushed.text.slice(0, 200));
+  const settledRow = (await step<StockView>('экран остатков после присылки склада', 'GET', `${api('stock')}?limit=200`)).body.rows.find((r) => r.sku === productSku)!;
+  assert.deepEqual([settledRow.onHand, settledRow.reserved, settledRow.available], [37, 0, 37], 'the newer figure of the source already counts the shipment');
+});
+
+/**
+ * Шаг 59 [Р-199], OQ-218: возврат по отгруженному заказу не возвращает остаток сам — товар мог вернуться повреждённым.
+ * Строка возврата ждёт человека: наблюдатель её видит, но не решает; владелец «принимает на склад» — движение RETURN,
+ * доступное растёт ровно на количество возврата, и новое количество уходит в канал; повторное решение — 409.
+ * Заказ канала подставлен вызовом хранилища (как его приносит работа `order-lines`); всё, что делает продавец, — по HTTP.
+ */
+test('Р-199: возврат внутреннего пула — ждёт решения; наблюдатель 403; «принять на склад» поднимает доступное и уходит в канал; повтор — 409', async () => {
+  const productSku = 'syn-prod-de-340100005';
+  const unitId = 100005;
+  const [offer] = (await observer.query(
+    `SELECT om.external_offer_id, om.marketplace FROM tenant_data.offer_mapping om
+       JOIN tenant_data.product p ON p.tenant_id = om.tenant_id AND p.product_id = om.product_id WHERE p.sku = $1`, [productSku])).rows;
+  assert.ok(offer?.external_offer_id, `у товара ${productSku} есть предложение канала`);
+  const orderLine = (status: 'OPEN' | 'SHIPPED' | 'RETURNED') => ({
+    externalOrderRef: 'SYN-ORDER-R199', externalOrderLineRef: 'SYN-ORDER-R199-1', identity: { marketplace: offer.marketplace as string, externalOfferId: offer.external_offer_id as string },
+    quantity: 3, orderedAt: demo.clock.iso(), status,
+  });
+  const rowOf = async (label: string) => (await step<StockView>(label, 'GET', `${api('stock')}?limit=200`)).body.rows.find((r) => r.sku === productSku)!;
+  const settle = async () => { for (let i = 0; i < 10; i++) { await demo.live.betweenTicks(); demo.clock.advance(30_000); } };
+  const unitAmount = () => (demo.live.simulator.dump() as { units: Array<{ idUnit: number; amount: number }> }).units.find((u) => u.idUnit === unitId)!.amount;
+  const tenantId = demo.live.seeded.tenantId; const account = demo.live.seeded.channelAccountId;
+
+  const start = await rowOf('экран остатков до заказа');
+  // Файл первого теста: 10 + (4 mod 7) = 14 во внутреннем пуле, буфер 2 → в канале 12
+  assert.deepEqual([start.onHand, start.reserved, start.available], [14, 0, 14], JSON.stringify(start));
+  assert.equal(unitAmount(), 12);
+
+  // Заказ, отгрузка — пул списан движением базы; пересчёт, как после работы `order-lines`, уносит 11 − 2 = 9 в канал
+  assert.equal((await stockStore.recordOrderLines(tenantId, account, [orderLine('OPEN')], demo.clock.iso())).created, 1);
+  assert.equal((await stockStore.recordOrderLines(tenantId, account, [orderLine('SHIPPED')], demo.clock.iso())).consumed, 1);
+  await worldStockPipeline.propagate(tenantId, null);
+  await settle();
+  const shipped = await rowOf('экран остатков после отгрузки');
+  assert.deepEqual([shipped.onHand, shipped.reserved, shipped.available], [11, 0, 11]);
+  assert.equal(unitAmount(), 9, 'отгрузка дошла до канала');
+
+  // Возврат: строка возврата PENDING, остаток НЕ изменился
+  const returned = await stockStore.recordOrderLines(tenantId, account, [orderLine('RETURNED')], demo.clock.iso());
+  assert.equal(returned.returns, 1, JSON.stringify(returned));
+  await worldStockPipeline.propagate(tenantId, null);
+  const list = await step<StockReturnsView>('возвраты', 'GET', api('stock', 'returns'));
+  assert.equal(list.status, 200, JSON.stringify(list.body));
+  const item = list.body.items.find((x) => x.sku === productSku)!;
+  assert.ok(item, JSON.stringify(list.body.items));
+  assert.deepEqual([item.status, item.pending, item.infoOnly, item.quantity, item.channelOrderLineRef, list.body.pendingCount, list.body.canDecide],
+    ['PENDING', true, false, 3, 'SYN-ORDER-R199-1', 1, true]);
+  assert.match(item.text, /wartet auf Ihre Entscheidung/, 'строка названа на языке продавца');
+  assert.deepEqual([(await rowOf('экран остатков после возврата')).available, unitAmount()], [11, 9], 'возврат сам в пул не попадает');
+
+  // Наблюдатель видит список, но решать не может — 403 от консоли, а в базе ничего не изменилось
+  const viewerList = await call('GET', api('stock', 'returns'), undefined, viewerAuth);
+  assert.equal(viewerList.status, 200, viewerList.text);
+  assert.equal((JSON.parse(viewerList.text) as StockReturnsView).canDecide, false);
+  const denied = await call('POST', api('stock', 'returns'), { orderReturnId: item.orderReturnId, accept: true }, viewerAuth);
+  assert.equal(denied.status, 403, denied.text);
+  assert.equal((JSON.parse(denied.text) as { error: { code: string } }).error.code, 'FORBIDDEN');
+  assert.equal((await observer.query(`SELECT status FROM channel_data.order_return WHERE order_return_id = $1`, [item.orderReturnId])).rows[0].status, 'PENDING');
+  // Не идентификатор — названный отказ до базы, а не 500
+  const bad = await call('POST', api('stock', 'returns'), { orderReturnId: 'nope', accept: true });
+  assert.equal(bad.status, 400, bad.text);
+
+  // Владелец принимает на склад: 200, движение RETURN с автором, доступное +3, новое количество уходит в канал
+  const accepted = await step<{ status: string; accepted: boolean; writes: number; message: string }>('принять возврат на склад', 'POST', api('stock', 'returns'),
+    { orderReturnId: item.orderReturnId, accept: true, note: 'Ware unbeschädigt' });
+  assert.equal(accepted.status, 200, JSON.stringify(accepted.body));
+  assert.deepEqual([accepted.body.status, accepted.body.accepted, accepted.body.writes], ['DECIDED', true, 1]);
+  const [movement] = (await observer.query(
+    `SELECT m.reason, m.delta, m.created_by_membership_id::text AS author, o.status, o.note FROM channel_data.order_return o
+       JOIN tenant_data.stock_movement m ON m.tenant_id = o.tenant_id AND m.stock_movement_id = o.stock_movement_id WHERE o.order_return_id = $1`, [item.orderReturnId])).rows;
+  assert.deepEqual([movement.reason, Number(movement.delta), movement.author, movement.status, movement.note], ['RETURN', 3, demo.live.seeded.ownerMembershipId, 'ACCEPTED', 'Ware unbeschädigt']);
+  await settle();
+  const after = await rowOf('экран остатков после приёма возврата');
+  assert.deepEqual([after.onHand, after.available], [14, 14], 'доступное выросло ровно на количество возврата');
+  assert.equal(unitAmount(), 12, 'новое количество дошло до канала');
+  const afterList = (await step<StockReturnsView>('возвраты после решения', 'GET', api('stock', 'returns'))).body;
+  assert.deepEqual([afterList.pendingCount, afterList.items.find((x) => x.orderReturnId === item.orderReturnId)!.status], [0, 'ACCEPTED']);
+
+  // Повторное решение — 409 своим кодом; остаток второй раз не растёт
+  const again = await call('POST', api('stock', 'returns'), { orderReturnId: item.orderReturnId, accept: true });
+  assert.equal(again.status, 409, again.text);
+  assert.equal((JSON.parse(again.text) as { error: { code: string } }).error.code, 'RETURN_NOT_PENDING');
+  assert.equal((await rowOf('экран остатков после повтора')).available, 14);
 });

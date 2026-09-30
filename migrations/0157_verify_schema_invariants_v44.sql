@@ -1,4 +1,4 @@
--- 0155_verify_schema_invariants_v44.sql
+-- 0157_verify_schema_invariants_v44.sql
 -- Проверка схемы после шагов 41–52 — последняя в наборе (прежние номера остаются историей: файл переносится под новый
 -- номер, чтобы идти последним).
 -- Шаг 45 правил не добавил: 0138 — хвосты ревью (каталог из обнаружения, срок вытесненных токенов, REVOKED в аудит);
@@ -197,7 +197,7 @@ BEGIN
     -- Строка самого тенанта остаётся: в ней записано закрытие (очистка проверяет по ней статус и обезличивает имя), удалять её нечем
     IF r.storage_class IN ('TENANT', 'CHANNEL') AND r.table_name <> 'tenant_data.tenant'::regclass
        AND position('''' || r.table_name::text || '''' IN
-             pg_get_functiondef('maintenance.purge_tenant_data(uuid,boolean)'::regprocedure)
+             pg_get_functiondef('maintenance.purge_tenant_data(uuid)'::regprocedure)
              || pg_get_functiondef('maintenance.purge_tenant_channel_data(uuid)'::regprocedure)) = 0 THEN
       bad := bad || format('%s: tenant closure does not delete the table (purge_tenant_data)', r.table_name);
     END IF;
@@ -376,7 +376,7 @@ BEGIN
                          'tenant_data.save_discovery_circle(uuid,uuid,text,text,text,timestamp with time zone,timestamp with time zone,boolean)',
                          'tenant_data.discovery_circle_cursor(uuid,uuid)',
                          -- Шаг 56: место чтения заказов — начало окна и курсор, цен не трогает
-                         'tenant_data.save_order_read_position(uuid,uuid,timestamp with time zone,text,timestamp with time zone)',
+                         'tenant_data.save_order_read_position(uuid,uuid,timestamp with time zone,text,timestamp with time zone,integer,timestamp with time zone)',
                          'tenant_data.order_read_position(uuid,uuid)',
                          'tenant_data.discovery_circle_state(uuid,uuid)') THEN
       bad := bad || format('%s: SECURITY DEFINER function executable by the decision path is not in the allow list (Р-96)', r.f);

@@ -162,3 +162,57 @@ test('ревью шага 47, находка 11: недоступность ст
   assert.equal(unmetText({ '*': ['NO_COMPETITOR_SOURCE'] }, messagesFor('de')), 'keine Quelle für Wettbewerbsdaten in diesem Kanal');
   assert.equal(unmetText({ KAUFLAND_BUYBOX: ['BUYBOX_WINNER'] }, messagesFor('en')), 'KAUFLAND_BUYBOX: the Buy Box winner', 'у настоящего источника имя остаётся');
 });
+
+/**
+ * Шаг 59 [Р-199]: возвраты на экране остатков. Возврат по отгруженной резервации внутреннего пула ждёт решения человека
+ * (остаток не меняется сам), у источника Inbound API — только сведения. Хранилище в памяти — те же правила, что у базы
+ */
+test('Р-199: возврат внутреннего пула ждёт решения человека, возврат источника Inbound API — только сведения; принятие поднимает остаток ровно один раз', async () => {
+  const { stockReturnsView } = await import('./index.ts');
+  const { InMemoryStockStore } = await import('@repracer/stock-sync');
+  const offers = [
+    { productId: 'p-own', sku: 'syn-own', channelAccountId: 'acc', channel: 'KAUFLAND', marketplaces: ['de'], externalOfferId: 'SYN-OWN' },
+    { productId: 'p-wms', sku: 'syn-wms', channelAccountId: 'acc', channel: 'KAUFLAND', marketplaces: ['de'], externalOfferId: 'SYN-WMS' },
+  ];
+  const store = new InMemoryStockStore(offers, { now: () => '2026-09-30T10:00:00.000Z' });
+  const actor = { membershipId: 'm-1', userId: 'u-1', mfa: false };
+  const pool = await store.createStockSource('t', { mode: 'INTERNAL_POOL', name: 'Lager' }, actor);
+  const wms = await store.createStockSource('t', { mode: 'INBOUND_API', name: 'WMS' }, actor);
+  assert.ok(pool.status === 'CREATED' && wms.status === 'CREATED');
+  await store.importStock('t', pool.stockSourceId, [{ sku: 'syn-own', quantity: 10 }], actor);
+  await store.inboundStock('t', wms.stockSourceId, [{ sku: 'syn-wms', quantity: 20, asOf: '2026-09-30T09:00:00.000Z' }]);
+  const line = (offer: string, status: 'OPEN' | 'SHIPPED' | 'RETURNED') => ({
+    externalOrderRef: `SYN-ORDER-${offer}`, externalOrderLineRef: `SYN-LINE-${offer}`, identity: { marketplace: 'de', externalOfferId: offer }, quantity: 2, orderedAt: '2026-09-30T09:30:00.000Z', status,
+  }) as never;
+  await store.recordOrderLines('t', 'acc', [line('SYN-OWN', 'SHIPPED'), line('SYN-WMS', 'OPEN')], '2026-09-30T09:30:00.000Z' as never);
+  const onHand = async (sku: string) => (await store.stockPage('t', { offset: 0, limit: 10 })).items.find((r) => r.sku === sku)!.onHand;
+  assert.equal(await onHand('syn-own'), 8, 'отгрузка списала пул');
+  const returned = await store.recordOrderLines('t', 'acc', [line('SYN-OWN', 'RETURNED'), line('SYN-WMS', 'RETURNED')], '2026-09-30T09:40:00.000Z' as never);
+  assert.equal(returned.returns, 2);
+  assert.equal(await onHand('syn-own'), 8, 'возврат сам в пул не попадает — на полку ставит человек');
+
+  const rows = await store.listReturns('t', 50);
+  const de = messagesFor('de'); const en = messagesFor('en');
+  const owner = stockReturnsView({ id: 'w', demo: false, viewer: { role: 'OWNER' } } as never, rows, de);
+  assert.deepEqual(owner.items.map((x) => [x.sku, x.status, x.pending, x.infoOnly]), [['syn-own', 'PENDING', true, false], ['syn-wms', 'INFO_ONLY', false, true]], 'ждущие решения — первыми');
+  assert.deepEqual([owner.pendingCount, owner.canDecide], [1, true]);
+  assert.equal(owner.pendingText, de.ui.stock.returns.pendingCount(1));
+  assert.equal(owner.items[0]!.statusText, de.ui.stock.returns.status.PENDING);
+  assert.match(owner.items[0]!.text, /^2 Stück retourniert/);
+  // INFO_ONLY называет, что остаток ведёт система продавца, — на обоих языках, а не пустую строку
+  assert.match(stockReturnsView({ id: 'w', demo: false, viewer: { role: 'OWNER' } } as never, rows, en).items[1]!.text, /kept by your system/);
+  assert.match(owner.items[1]!.text, /führt Ihr System/);
+  assert.equal(stockReturnsView({ id: 'w', demo: false, viewer: { role: 'VIEWER' } } as never, rows, de).canDecide, false, 'зритель видит, но не решает');
+
+  // Решение: права — у хранилища; повтор и сведения — NOT_PENDING; принятие поднимает остаток на количество возврата
+  const forbidden = new InMemoryStockStore(offers, { canManage: () => false });
+  assert.deepEqual(await forbidden.decideReturn('t', owner.items[0]!.orderReturnId, { accept: true, note: null }, actor), { status: 'FORBIDDEN' });
+  assert.deepEqual(await store.decideReturn('t', owner.items[1]!.orderReturnId, { accept: true, note: null }, actor), { status: 'NOT_PENDING' }, 'сведения не принимаются в пул');
+  assert.deepEqual(await store.decideReturn('t', '00000000-0000-4000-8000-000000000000', { accept: true, note: null }, actor), { status: 'NOT_FOUND' });
+  assert.deepEqual(await store.decideReturn('t', owner.items[0]!.orderReturnId, { accept: true, note: 'ok' }, actor), { status: 'DECIDED', productId: 'p-own', accepted: true });
+  assert.equal(await onHand('syn-own'), 10);
+  assert.deepEqual(await store.decideReturn('t', owner.items[0]!.orderReturnId, { accept: true, note: null }, actor), { status: 'NOT_PENDING' });
+  assert.equal(await onHand('syn-own'), 10, 'повторное решение остаток не поднимает');
+  const after = stockReturnsView({ id: 'w', demo: false, viewer: { role: 'OWNER' } } as never, await store.listReturns('t', 50), en);
+  assert.deepEqual([after.pendingCount, after.items.find((x) => x.sku === 'syn-own')!.statusText, after.items.find((x) => x.sku === 'syn-own')!.note], [0, en.ui.stock.returns.status.ACCEPTED, 'ok']);
+});

@@ -653,6 +653,9 @@ function toBulkJob(r: Row): BulkJobRow {
   };
 }
 
+/** Шаг 59 (ревью шага 58, находки 1–2): место чтения заказов аккаунта */
+export interface OrderReadPosition { since: Instant; cursor: string | null; readFrom: Instant | null; cursorFailures: number }
+
 export class PgPricingStore implements PricingStore {
   private readonly pool: PgPool;
   private readonly adminPool: PgPool | null;
@@ -1577,16 +1580,19 @@ export class PgPricingStore implements PricingStore {
 
   /** Шаг 23: состояние PRICING_HEALTH оффера (0083) — данные канала, 18 месяцев */
   /** Шаг 56 (0150): место чтения заказов аккаунта — начало окна и курсор; функцией узкой роли */
-  async orderReadPosition(tenantId: string, channelAccountId: string): Promise<{ since: Instant; cursor: string | null } | null> {
+  /** Шаг 56–59: место чтения заказов аккаунта — начало окна, курсор, начало чтения цепочки и отказы на курсоре (0156) */
+  async orderReadPosition(tenantId: string, channelAccountId: string): Promise<OrderReadPosition | null> {
     return this.tx(tenantId, async (tx) => {
-      const { rows: [r] } = await tx.query('SELECT since, cursor FROM tenant_data.order_read_position($1, $2)', [tenantId, channelAccountId]);
-      return r ? { since: (r.since instanceof Date ? r.since.toISOString() : String(r.since)) as Instant, cursor: r.cursor === null ? null : String(r.cursor) } : null;
+      const { rows: [r] } = await tx.query('SELECT since, cursor, read_from, cursor_failures FROM tenant_data.order_read_position($1, $2)', [tenantId, channelAccountId]);
+      const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : String(v)) as Instant;
+      return r ? { since: iso(r.since), cursor: r.cursor === null ? null : String(r.cursor), readFrom: r.read_from === null ? null : iso(r.read_from), cursorFailures: Number(r.cursor_failures ?? 0) } : null;
     });
   }
 
-  async saveOrderReadPosition(tenantId: string, channelAccountId: string, position: { since: Instant; cursor: string | null } | null, at: Instant): Promise<void> {
+  async saveOrderReadPosition(tenantId: string, channelAccountId: string, position: OrderReadPosition | null, at: Instant): Promise<void> {
     await this.tx(tenantId, async (tx) => {
-      await tx.query('SELECT tenant_data.save_order_read_position($1, $2, $3, $4, $5)', [tenantId, channelAccountId, position?.since ?? null, position?.cursor ?? null, at]);
+      await tx.query('SELECT tenant_data.save_order_read_position($1, $2, $3, $4, $5, $6, $7)',
+        [tenantId, channelAccountId, position?.since ?? null, position?.cursor ?? null, position?.readFrom ?? null, position?.cursorFailures ?? 0, at]);
     });
   }
 

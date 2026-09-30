@@ -8,7 +8,7 @@ import {
   boundsDiffView, boundsView, bulkJobsView, bulkJobView, can, canCancelBulkJob, channelNotes, onboardingView, complianceView, fingerprint, costImportView, currentStrategies, listQuery, MAX_SCOPES, OFFER_CHOICES, pageOf, parseListQuery, type ListQuery, discountCheckView, dangerousReport, decisionListView, decisionTrace, describe, expandBoundsEdit, importTargets, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, scopeById, unitOf,
   parseStrategyDraft, planStop, priceFeed, productList, rejectedView, REPORT_PERIODS_DAYS, stopView, strategiesView,
   type Locale, type Messages, type StandWorld, type StopTarget, type Viewer,
-  productPage, clampOffset, feedPageQuery, REJECTED_WINDOW_DAYS, stockView, stockDivergencesView, shadowView, SHADOW_PERIOD_DAYS,
+  productPage, clampOffset, feedPageQuery, REJECTED_WINDOW_DAYS, stockView, stockDivergencesView, stockReturnsView, shadowView, SHADOW_PERIOD_DAYS,
 } from '@repracer/console-model';
 import { buildPreview, readTable, suggestMapping, TABLE_ENCODINGS } from '@repracer/cost-import';
 import type { BulkJobInput, DiscountAnnouncementInput } from '@repracer/pricing-pipeline';
@@ -46,6 +46,8 @@ export interface ApiResponse {
   status: number;
   body: unknown;
   setCookies?: string[];
+  /** Шаг 59: ответ «повторите через N секунд» (503 очереди пересчётов остатков) */
+  retryAfterSeconds?: number;
   /** Файл задания [OQ-202]: он не JSON — выгрузка в 28 МБ внутри JSON была бы тем же синхронным ответом, только длиннее */
   file?: { contentType: string; content: string; fileName: string };
 }
@@ -133,6 +135,13 @@ const AUDIT_RECENT = 200;
  * с 413, потому что этот маршрут не был назван партией продавца в `bodyLimitFor`.
  */
 const INBOUND_ROWS_MAX = 5000;
+/** Шаг 59 (ревью шага 58, находка 3): сколько склад ждёт очередь пересчётов остатков тенанта, прежде чем получить 503 */
+const INBOUND_RECALC_WAIT_MS = 5_000;
+/** Шаг 59 [Р-199]: сколько строк возврата показывает экран остатков — ждущие решения идут первыми */
+const RETURNS_LIST_LIMIT = 200;
+/** Шаг 59 [Р-199]: идентификатор строки возврата — UUID; иное не доходит до базы (там 22P02 стал бы 500) */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const INBOUND_RECALC_RETRY_SECONDS = 10;
 /**
  * Шаг 30 [OQ-202]: предела строк у выгрузки больше НЕТ. Шаг 29 ввёл его (100 000), потому что 300 000 строк — это 28 МБ в одном
  * ответе экрана и десять секунд ожидания. Задание готовит файл в базе, и предел исчез вместе со своей причиной: ждать нечего,
@@ -279,7 +288,21 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
        */
       if (resolved.tenantId !== resolved.world.tenantId) return fail(401, 'UNAUTHORIZED', s.unauthenticated);
       const outcome = await resolved.world.stock.inboundStock(resolved.tenantId, resolved.stockSourceId, parsed);
-      const propagated = outcome.productIds.length > 0 && resolved.world.stockPipeline ? await resolved.world.stockPipeline.propagate(resolved.tenantId, outcome.productIds) : { writes: 0, unchanged: 0 };
+      /**
+       * Шаг 59 (ревью шага 58, находка 3): пересчёты тенанта идут по очереди; склад не ждёт очередь дольше INBOUND_RECALC_WAIT_MS — пул
+       * остатков консоли общий для всех тенантов. Отказ — 503 с Retry-After; повтор той же присылки придёт устаревшим, поэтому пересчитываются
+       * товары ВСЕХ узнанных строк, а не только применённых
+       */
+      const products = [...new Set(outcome.recognizedProductIds)];
+      let propagated = { writes: 0, unchanged: 0 };
+      if (products.length > 0 && resolved.world.stockPipeline) {
+        try {
+          propagated = await resolved.world.stockPipeline.propagate(resolved.tenantId, products, { lockTimeoutMs: INBOUND_RECALC_WAIT_MS });
+        } catch (error) {
+          if ((error as { code?: string }).code !== '55P03') throw error;
+          return { ...fail(503, 'STOCK_RECALCULATION_BUSY', s.busy), retryAfterSeconds: INBOUND_RECALC_RETRY_SECONDS };
+        }
+      }
       return ok({ applied: outcome.applied, stale: outcome.stale, unknownSkus: outcome.unknownSkus, writes: propagated.writes });
     }
 
@@ -536,6 +559,11 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         // Шаг 35 [Р-153]: остатки — страницей по товарам, сводка агрегатом, расхождения — отдельным списком
         case 'stock': {
           if (param === 'divergences') return ok(stockDivergencesView(world, await live.stock.stockDivergences(world.tenantId, 200), m));
+          // Шаг 59 [Р-199]: возвраты — ждущие решения человека первыми; у хранилища без возвратов маршрута нет
+          if (param === 'returns') {
+            if (!live.stock.listReturns) return fail(404, 'NOT_FOUND', s.notFound);
+            return ok(stockReturnsView(world, await live.stock.listReturns(world.tenantId, RETURNS_LIST_LIMIT), m));
+          }
           if (param !== null) return fail(404, 'NOT_FOUND', s.notFound);
           const query = parseListQuery(url.searchParams);
           if (!query) return fail(400, 'BAD_PAGE', s.badRequest);
@@ -779,6 +807,33 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           rows = parsed.rows.length;
         } catch { return fail(400, 'BAD_FILE', s.badRequest); }
         return createJob('STOCK_IMPORT', { fileName: body.fileName, content: body.content, stockSourceId: body.stockSourceId }, rows, m.ui.stock.importFile.created);
+      }
+      /**
+       * Шаг 59 [Р-199]: решение человека о возврате внутреннего пула. Автоматического возврата в пул нет: «принять на склад» —
+       * движение RETURN с автором (права, человека и аудит проверяет база), «не принимать» — только решение. После принятия
+       * товар пересчитывается и уходит в каналы тем же конвейером, что после Inbound API
+       */
+      if (param === 'returns') {
+        if (!live.stock.decideReturn) return fail(404, 'NOT_FOUND', s.notFound);
+        if (typeof body.orderReturnId !== 'string' || !UUID_RE.test(body.orderReturnId) || typeof body.accept !== 'boolean'
+          || (body.note !== undefined && body.note !== null && typeof body.note !== 'string')) return fail(400, 'BAD_RETURN', s.badRequest);
+        const note = typeof body.note === 'string' && body.note.trim() !== '' ? body.note.trim().slice(0, 500) : null;
+        const decided = await live.stock.decideReturn(world.tenantId, body.orderReturnId, { accept: body.accept, note }, actor);
+        if (decided.status === 'NOT_FOUND') return fail(404, 'RETURN_NOT_FOUND', m.ui.stock.returns.notFound);
+        if (decided.status === 'NOT_PENDING') return fail(409, 'RETURN_NOT_PENDING', m.ui.stock.returns.notPending);
+        if (decided.status !== 'DECIDED') return fail(403, 'FORBIDDEN', m.ui.stock.noRight);
+        let writes = 0;
+        let recalculationPending = false;
+        if (decided.accepted && live.stockPipeline) {
+          try {
+            writes = (await live.stockPipeline.propagate(world.tenantId, [decided.productId], { lockTimeoutMs: INBOUND_RECALC_WAIT_MS })).writes;
+          } catch (error) {
+            // Решение уже записано; пересчёт занят очередью тенанта — количество уйдёт со следующим пересчётом, а не отказом человеку
+            if ((error as { code?: string }).code !== '55P03') throw error;
+            recalculationPending = true;
+          }
+        }
+        return ok({ status: 'DECIDED', accepted: decided.accepted, productId: decided.productId, writes, recalculationPending, message: m.ui.stock.returns.decided(decided.accepted) });
       }
       if (param === 'enable') {
         const account = live.accounts.find((a) => a.channelAccountId === body.channelAccountId);
@@ -1261,6 +1316,7 @@ function send(res: ServerResponse, r: ApiResponse): void {
   }
   res.writeHead(r.status, {
     'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...(r.setCookies ? { 'set-cookie': r.setCookies } : {}),
+    ...(r.retryAfterSeconds !== undefined ? { 'retry-after': String(r.retryAfterSeconds) } : {}),
   });
   res.end(JSON.stringify(r.body));
 }

@@ -44,7 +44,7 @@ export async function startModelIdentityProvider(options: {
   /** Шаг 57: часы модели (время выдачи кода, `auth_time`) — прогон может передать свои */
   nowMs?: () => number;
 }): Promise<ModelIdentityProvider> {
-  const nowMs = options.nowMs ?? Date.now; // real-clock: умолчание модели поставщика; пакет identity не зависит от channel-port
+  const nowMs = options.nowMs ?? Date.now; // real-clock: умолчание модели поставщика — свои часы передают прогоны; пакет identity не зависит от channel-port
   let origin = '';
   let issuerName = '';
   let current: ModelUser | null = null;

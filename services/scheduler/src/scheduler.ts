@@ -109,7 +109,11 @@ export class JobHoldsWindowError extends Error {
   }
 }
 
-const HOLDS_WINDOW = /^[A-Z][A-Z0-9_]{2,} HOLD_WINDOW:/;
+/**
+ * Шаг 59 (ревью шага 57, находка 5): и прежняя форма шага 56 (`HOLD_WINDOW CAUSE: …`) — работа, державшая окно в момент выкладки, иначе получила
+ * бы обычную паузу, растущую до суток. Прежнюю форму можно убрать, когда в `maintenance.scheduled_job` не останется ни одной такой ошибки
+ */
+const HOLDS_WINDOW = /^(?:HOLD_WINDOW |[A-Z][A-Z0-9_]{2,} HOLD_WINDOW:)/;
 
 export function dueOf(j: JobState): Instant {
   if (j.lastOutcome !== 'FAILED' || !j.lastFinishedAt) return j.nextDueAt;

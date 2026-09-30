@@ -279,8 +279,11 @@ test('Р-157: резервация Inbound API ждёт подтверждени
     assert.deepEqual([r.status, r.confirmed, r.confirmed_by_stock_source_id, r.confirmed_external_order_ref, r.quantity],
       ['CONSUMED', true, sourceId, `r157-${ref}`, quantity], `заказ r157-${ref}: подтверждение несёт свой источник, свой номер заказа и закрывает отгруженную резервацию`);
   }
-  // Доступное вернулось сразу: 23 штуки, из них держит только чужая резервация TTL на 2 → 21 доступно
-  assert.deepEqual(await stockOf('syn-prod-2'), [23, 2, 21], 'закрытая резервация освободила доступное, не дожидаясь второй строки заказа');
+  /**
+   * Шаг 59 [Р-200, OQ-223]: до шага 59 доступное здесь сразу возвращалось к 21 — на 5 штук, которые уже уехали, пока источник не пришлёт
+   * новый остаток. Теперь отгруженное по Inbound API вычитается, пока источник не пришлёт остаток с asOf позже подтверждения: 2 (ttl-a) + 5
+   */
+  assert.deepEqual(await stockOf('syn-prod-2'), [23, 7, 16], 'shipped pieces of the Inbound API source stay subtracted until the source sends a newer figure');
   // Подтверждается ТОЛЬКО названный заказ: резервация `ttl-a` того же источника и того же товара осталась неподтверждённой
   const [others] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
     `SELECT count(*)::int AS n FROM channel_data.reservation WHERE status = 'CREATED'`)).rows);
@@ -307,7 +310,23 @@ test('Р-157: резервация Inbound API ждёт подтверждени
    * остаток товара 2 остаётся прежним (23), а освобождается только зарезервированное: 23 − 2 = 21 доступно.
    */
   assert.deepEqual(await shippedMovements(), [2, -2], 'движений по-прежнему два — оба у внутреннего пула');
-  assert.deepEqual(await stockOf('syn-prod-2'), [23, 2, 21]);
+  assert.deepEqual(await stockOf('syn-prod-2'), [23, 7, 16], 'Р-200: still held — the source has not sent a newer figure');
+  /**
+   * Шаг 59 [Р-200]: источник присылает остаток. Отметка ДО подтверждения заказов (его система ещё не учла отгрузку) вычитание не снимает;
+   * отметка ПОСЛЕ — снимает: его 15 уже учитывают уехавшие 5 штук (20 − 5), и вычитать их второй раз нельзя
+   */
+  const [conf] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
+    `SELECT max(confirmed_at) AS at FROM channel_data.reservation WHERE channel_order_ref IN ('r157-a', 'r157-b')`)).rows);
+  const confirmedAt = Date.parse(String(conf.at instanceof Date ? conf.at.toISOString() : conf.at));
+  const [pool] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
+    `SELECT source_as_of FROM tenant_data.stock_pool WHERE source_mode = 'INBOUND_API' ORDER BY source_as_of DESC LIMIT 1`)).rows);
+  const before = new Date(Math.max(Date.parse(String(pool.source_as_of instanceof Date ? pool.source_as_of.toISOString() : pool.source_as_of)) + 1000, confirmedAt - 1000)).toISOString();
+  if (Date.parse(before) < confirmedAt) {
+    await store.inboundStock(world.tenantId, sourceId, [{ sku: '3502', quantity: 20, asOf: before as never }]);
+    assert.deepEqual(await stockOf('syn-prod-2'), [23, 7, 16], 'a figure older than the confirmation does not end the subtraction');
+  }
+  await store.inboundStock(world.tenantId, sourceId, [{ sku: '3502', quantity: 15, asOf: new Date(confirmedAt + 1000).toISOString() as never }]);
+  assert.deepEqual(await stockOf('syn-prod-2'), [18, 2, 16], 'the newer figure of the source already counts the shipped pieces: they are no longer subtracted');
 });
 
 /**
@@ -548,8 +567,95 @@ test('step 58: concurrent recalculations of a tenant queue up — none fails on 
     assert.equal(settled, false, 'a recalculation waits while another one of the tenant is open');
     await client.query('COMMIT');
     assert.equal((await waiting).writes.length, 0);
+    // Шаг 59 (ревью шага 58, находка 3): у Inbound API ожидание ограничено — отказ `55P03`, консоль отвечает 503 с Retry-After
+    await client.query('BEGIN');
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended('repracer.stock_recalculate:' || $1::text, 0))", [world.tenantId]);
+    await assert.rejects(store.recalculate(world.tenantId, null, now(), { lockTimeoutMs: 200 }), (e: { code?: string }) => e.code === '55P03',
+      'a bounded wait gives up with lock_not_available instead of holding a pool connection');
+    await client.query('ROLLBACK');
   } finally {
     client.release();
     await other.end();
   }
+});
+
+/**
+ * Шаг 59 [Р-199]: «возвращено» канала — строка возврата. У внутреннего пула её ставит на полку человек движением RETURN с автором (в
+ * аудите), у источника Inbound API — только сведения. Возврат, пришедший раньше отгрузки, сначала закрывает отгрузку
+ */
+test('step 59 (Р-199): a returned order line becomes a return the person puts back to stock; the Inbound API source only sees it', async () => {
+  const account = world.ids.dbId(KAUFLAND);
+  const line = (ref: string, status: 'OPEN' | 'SHIPPED' | 'RETURNED', offer: string, quantity = 1) => ({
+    externalOrderRef: `r199-${ref}`, externalOrderLineRef: `r199-line-${ref}`, identity: { marketplace: 'de', externalOfferId: offer }, quantity, orderedAt: now(), status,
+  });
+  const stockOf = async (sku: string) => {
+    const r = (await store.stockPage(world.tenantId, { offset: 0, limit: 10 })).items.find((x) => x.sku === sku)!;
+    return [r.onHand, r.reserved, r.available] as [number, number, number];
+  };
+  // Внутренний пул: заказ отгружен, затем возвращён — пул не растёт сам, возврат ждёт решения
+  const [before] = [await stockOf('syn-prod-1')];
+  await store.recordOrderLines(world.tenantId, account, [line('a', 'SHIPPED', 'SYN-OFFER-1', 2)], now());
+  const returned = await store.recordOrderLines(world.tenantId, account, [line('a', 'RETURNED', 'SYN-OFFER-1', 2)], now());
+  assert.equal(returned.returns, 1);
+  assert.deepEqual(await stockOf('syn-prod-1'), [before[0] - 2, before[1], before[2] - 2], 'the channel\'s «returned» does not put anything back to stock by itself');
+  assert.equal((await store.recordOrderLines(world.tenantId, account, [line('a', 'RETURNED', 'SYN-OFFER-1', 2)], now())).returns, 0, 'a repeated line does not double the return');
+  // Возврат раньше отгрузки: опрос не застал «отгружено» — отгрузка закрывается тем же вызовом, возврат заводится
+  await store.recordOrderLines(world.tenantId, account, [line('b', 'OPEN', 'SYN-OFFER-1')], now());
+  const early = await store.recordOrderLines(world.tenantId, account, [line('b', 'RETURNED', 'SYN-OFFER-1')], now());
+  assert.deepEqual([early.consumed, early.returns], [1, 1], 'a return seen before the shipment closes the shipment first — the reservation does not hang');
+  // Источник Inbound API: строка только для сведения
+  await store.recordOrderLines(world.tenantId, account, [line('c', 'OPEN', 'SYN-OFFER-2')], now());
+  const sourceId = (await store.stockSources(world.tenantId)).find((x) => x.mode === 'INBOUND_API')!.stockSourceId;
+  await store.confirmInboundOrders(world.tenantId, sourceId, ['r199-c']);
+  await store.recordOrderLines(world.tenantId, account, [line('c', 'RETURNED', 'SYN-OFFER-2')], now());
+  const list = await store.listReturns(world.tenantId, 50);
+  const byLine = (ref: string) => list.find((r) => r.channelOrderLineRef === `r199-line-${ref}`)!;
+  assert.deepEqual([byLine('a').status, byLine('a').quantity, byLine('b').status, byLine('c').status], ['PENDING', 2, 'PENDING', 'INFO_ONLY']);
+  assert.equal(list[0]!.status, 'PENDING', 'pending returns come first');
+
+  // Зритель не решает — права у базы
+  const [viewer] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(`SELECT membership_id, user_id FROM tenant_data.membership WHERE role = 'VIEWER'`)).rows);
+  assert.deepEqual(await store.decideReturn(world.tenantId, byLine('a').orderReturnId, { accept: true, note: null }, { membershipId: viewer.membership_id, userId: viewer.user_id, mfa: true }),
+    { status: 'FORBIDDEN' });
+  // Владелец принимает на склад: пул +2 движением RETURN с автором, событие в аудите
+  const onHand = (await stockOf('syn-prod-1'))[0];
+  const accepted = await store.decideReturn(world.tenantId, byLine('a').orderReturnId, { accept: true, note: 'synthetic: checked, sellable' }, owner());
+  assert.equal(accepted.status, 'DECIDED');
+  assert.equal((await stockOf('syn-prod-1'))[0], onHand + 2, 'the accepted return reaches the pool');
+  const [mv] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
+    `SELECT m.delta, m.created_by_membership_id FROM tenant_data.stock_movement m JOIN channel_data.order_return o ON o.stock_movement_id = m.stock_movement_id
+      WHERE o.order_return_id = $1`, [byLine('a').orderReturnId])).rows);
+  assert.deepEqual([Number(mv.delta), mv.created_by_membership_id], [2, world.ownerMembershipId], 'a RETURN movement with its author');
+  const [audited] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
+    `SELECT count(*)::int AS n FROM audit.audit_event WHERE entity_type = 'channel_data.order_return' AND entity_id = $1`, [byLine('a').orderReturnId])).rows);
+  assert.ok(Number(audited.n) >= 1, 'the decision is in the audit log');
+  assert.deepEqual(await store.decideReturn(world.tenantId, byLine('a').orderReturnId, { accept: false, note: null }, owner()), { status: 'NOT_PENDING' });
+  // «Не принимать» — без движения
+  const pool = (await stockOf('syn-prod-1'))[0];
+  assert.equal((await store.decideReturn(world.tenantId, byLine('b').orderReturnId, { accept: false, note: 'synthetic: damaged' }, owner())).status, 'DECIDED');
+  assert.equal((await stockOf('syn-prod-1'))[0], pool, 'a dismissed return does not touch the pool');
+  // Сведения по чужому пулу решению не подлежат
+  assert.deepEqual(await store.decideReturn(world.tenantId, byLine('c').orderReturnId, { accept: true, note: null }, owner()), { status: 'NOT_PENDING' });
+});
+
+/** Шаг 59 [Р-200]: источник Inbound API, молчащий сутки после подтверждения отгруженного заказа, — один раз на резервацию */
+test('step 59 (Р-200): an Inbound API source silent for a day after a confirmed shipped order is reported once per reservation', async () => {
+  const account = world.ids.dbId(KAUFLAND);
+  const sourceId = (await store.stockSources(world.tenantId)).find((x) => x.mode === 'INBOUND_API')!.stockSourceId;
+  await store.recordOrderLines(world.tenantId, account, [{ externalOrderRef: 'r200-a', externalOrderLineRef: 'r200-line-a', identity: { marketplace: 'de', externalOfferId: 'SYN-OFFER-2' }, quantity: 1, orderedAt: now(), status: 'SHIPPED' }], now());
+  await store.confirmInboundOrders(world.tenantId, sourceId, ['r200-a']);
+  assert.deepEqual(await store.markSilentInboundSources(world.tenantId), [], 'a fresh confirmation is not silence yet');
+  // Сутки назад — часы базы не двигаются: время подтверждения сдвигает суперпользователь (синтетика)
+  const url = new URL(process.env.REPRACER_PG_ADMIN_URL!); url.pathname = `/${db.name}`;
+  const su = createPool(url.toString(), { max: 1, applicationName: 'repracer-r200-clock' });
+  try {
+    await su.query('SET session_replication_role = replica');
+    await su.query(`UPDATE channel_data.reservation SET confirmed_at = confirmed_at - interval '25 hours', consumed_at = consumed_at - interval '25 hours', closed_at = closed_at - interval '25 hours',
+                           created_at = created_at - interval '25 hours', expires_at = expires_at - interval '25 hours' WHERE channel_order_ref = 'r200-a'`);
+    // Источник молчит: его последняя присылка старше подтверждения заказа
+    await su.query(`UPDATE tenant_data.stock_pool SET source_as_of = now() - interval '30 hours' WHERE source_mode = 'INBOUND_API'`);
+  } finally { await su.end(); }
+  const silent = await store.markSilentInboundSources(world.tenantId);
+  assert.deepEqual(silent.map((x) => [x.stockSourceId, x.reservations]), [[sourceId, 1]]);
+  assert.deepEqual(await store.markSilentInboundSources(world.tenantId), [], 'once per reservation, not every five minutes');
 });

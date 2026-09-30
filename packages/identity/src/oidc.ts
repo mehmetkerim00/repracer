@@ -111,7 +111,7 @@ export async function verifyToken(token: string, options: VerifyOptions): Promis
     : verifySignature('sha256', data, { key, dsaEncoding: 'ieee-p1363' }, signature);
   if (!valid) reject('SIGNATURE');
 
-  const now = Math.floor((options.now ?? Date.now)() / 1000); // real-clock: умолчание пакета без зависимости от channel-port; процессы передают свои часы
+  const now = Math.floor((options.now ?? Date.now)() / 1000); // real-clock: умолчание пакета без зависимости от channel-port — в бою это настоящие часы, свои передают тесты (шаг 59)
   const leeway = options.leewaySeconds ?? 60;
   if (claims.iss !== options.issuer) reject('ISSUER');
   const audience = typeof claims.aud === 'string' ? [claims.aud]
@@ -163,7 +163,7 @@ export interface RemoteJwksOptions {
  */
 export function remoteJwks(url: string, options: RemoteJwksOptions = {}): JwksSource {
   const doFetch = options.fetch ?? fetch;
-  const now = options.now ?? Date.now; // real-clock: умолчание пакета без зависимости от channel-port; процессы передают свои часы
+  const now = options.now ?? Date.now; // real-clock: умолчание пакета без зависимости от channel-port — в бою это настоящие часы, свои передают тесты (шаг 59)
   const ttl = (options.ttlSeconds ?? 600) * 1000;
   const minRefresh = (options.minRefreshSeconds ?? 30) * 1000;
   const maxStale = (options.maxStaleSeconds ?? 86_400) * 1000;
