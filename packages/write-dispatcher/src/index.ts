@@ -1,5 +1,6 @@
 export {
   createWriteDispatcher,
+  writeAlertCode,
   type ClaimResult,
   type DispatchStep,
   type DueKind,

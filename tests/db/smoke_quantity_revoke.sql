@@ -30,21 +30,23 @@ VALUES (:tA, :rScope1, :kAcc, 'KAUFLAND', 'QUANTITY', 'a5000000-0000-0000-0000-0
         'ACCOUNT_OFFER', '["a4000000-0000-0000-0000-000000000001", "OFF-61B"]', true),
        (:tA, :rScope3, :kAcc, 'KAUFLAND', 'QUANTITY', 'a5000000-0000-0000-0000-000000000001', 'c0000000-0000-0000-0000-000000000011', 1,
         'ACCOUNT_OFFER', '["a4000000-0000-0000-0000-000000000001", "OFF-61C"]', true);
+/**
+ * Шаг 63 (ревью шага 62, находки 2 и 3): включение синхронизации количества берёт РАЗДЕЛЯЕМУЮ блокировку своего аккаунта, выдача и отзыв —
+ * ИСКЛЮЧИТЕЛЬНУЮ; ключ — аккаунт (advisory с двумя ключами: classid = 202, objid = hashtext(аккаунт), objsubid = 2). Проверяется сразу
+ * после включения, до любой отправки: иначе блокировку мог взять кто-то другой. Гонку одна сессия не покажет — её проверяют два сеанса
+ * теста хранилища (stock.pg.test.ts, шаг 63)
+ */
+SELECT pg_temp.ok('enabling quantity sync takes the shared lock of its account (Р-202, шаг 63)', $q$
+  DO $d$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND classid = 202 AND objsubid = 2 AND mode = 'ShareLock' AND pid = pg_backend_pid()
+                    AND objid::bigint = (hashtext('a4000000-0000-0000-0000-000000000001')::bigint & 4294967295)) THEN
+      RAISE EXCEPTION 'enabling quantity sync did not take the shared lock of its account';
+    END IF;
+  END $d$ $q$);
 -- Первая запись в полёте на момент отзыва: её уже не вернуть
 INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, quantity, version, origin)
 VALUES (:tA, 'a9610000-0000-4000-8000-000000000001', :rScope1, 'QUANTITY', 7, 1, 'STOCK_RECALC');
 UPDATE tenant_data.channel_write SET status = 'DISPATCHED', attempt_count = 1 WHERE channel_write_id = 'a9610000-0000-4000-8000-000000000001';
-/**
- * Шаг 62 (ревью шага 61, находки 2 и 7): отправка количества берёт РАЗДЕЛЯЕМУЮ блокировку аккаунта, отзыв — ИСКЛЮЧИТЕЛЬНУЮ: так отзыв
- * ждёт захвата, начатого до него, а повтор отправки после отзыва видит отзыв. Одна сессия гонку не покажет, поэтому проверяется сама
- * блокировка, взятая своей транзакцией (advisory с двумя ключами: classid = 202, objsubid = 2)
- */
-SELECT pg_temp.ok('the dispatch of a quantity write takes the shared lock of its account (Р-202, шаг 62)', $q$
-  DO $d$ BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND classid = 202 AND objsubid = 2 AND mode = 'ShareLock' AND pid = pg_backend_pid()) THEN
-      RAISE EXCEPTION 'the dispatch did not take the shared lock of the account';
-    END IF;
-  END $d$ $q$);
 -- Вторая ушла, получила отказ канала и ждёт повтора
 INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, quantity, version, origin)
 VALUES (:tA, 'a9610000-0000-4000-8000-000000000002', :rScope2, 'QUANTITY', 3, 1, 'STOCK_RECALC');
@@ -88,7 +90,8 @@ SELECT pg_temp.ok('the owner revokes quantity writes with the typed account (Р-
   VALUES (%L, %L, ' seller-A ', %L, 'REVOKE') $q$, :tA, :kAcc, :ownerM));
 SELECT pg_temp.ok('a revocation takes the exclusive lock of the account (Р-202, шаг 62)', $q$
   DO $d$ BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND classid = 202 AND objsubid = 2 AND mode = 'ExclusiveLock' AND pid = pg_backend_pid()) THEN
+    IF NOT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND classid = 202 AND objsubid = 2 AND mode = 'ExclusiveLock' AND pid = pg_backend_pid()
+                    AND objid::bigint = (hashtext('a4000000-0000-0000-0000-000000000001')::bigint & 4294967295)) THEN
       RAISE EXCEPTION 'the revocation did not take the exclusive lock of the account';
     END IF;
   END $d$ $q$);

@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0163_verify_schema_invariants_v44.sql';
+const VERIFY = 'migrations/0165_verify_schema_invariants_v44.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -2189,7 +2189,7 @@ export const STEP61_ROWS = [
       m(replaceInFunction('tenant_data.channel_quantity_writes_confirmation_apply()', 'UPDATE tenant_data.write_scope SET quantity_sync_enabled = false',
         'UPDATE tenant_data.write_scope SET quantity_sync_enabled = quantity_sync_enabled'),
         smoke('a revocation switches quantity sync of the account off at once (Р-202)')),
-      m(replaceInFunction('tenant_data.channel_quantity_writes_confirmation_apply()', "AND w.field = 'QUANTITY' AND w.status IN ('PENDING', 'BLOCKED', 'FAILED')", 'AND false'),
+      m(replaceInFunction('tenant_data.channel_quantity_writes_confirmation_apply()', "AND f.field = 'QUANTITY' AND f.status IN ('PENDING', 'BLOCKED', 'FAILED')", 'AND false'),
         smoke('a revocation discards the unsent quantity versions with its reason (Р-202)')),
       m(dropTrigger('bd_channel_write_quantity_writes_guard', 'tenant_data.channel_write'), smoke('a retry sends quantity after the revocation (Р-202)')),
       // Полный прогон CI шага 61: подзапрос к аккаунту — только в ветке количества; без ранней ветки роль каталога упирается в право
@@ -2212,14 +2212,42 @@ export const STEP62_ROWS = [
         smoke('a revocation takes the exclusive lock of the account (Р-202, шаг 62)')),
       m(replaceInFunction('tenant_data.channel_quantity_writes_confirmation_guard()', 'PERFORM pg_advisory_xact_lock(202,', 'PERFORM pg_advisory_xact_lock_shared(202,'),
         smoke('a revocation takes the exclusive lock of the account (Р-202, шаг 62)')),
+      // Шаг 63: блокировку отправки проверяет гонка двух сеансов — в одной сессии её уже держит включение единиц
       m(replaceInFunction('tenant_data.channel_write_quantity_writes_guard()', 'PERFORM pg_advisory_xact_lock_shared(202, hashtext(account::text));', 'PERFORM 1;'),
-        smoke('the dispatch of a quantity write takes the shared lock of its account (Р-202, шаг 62)')),
+        node(T('stock.pg.test.ts'), 'step 63', 'step 63: a retry of a quantity write waits for a revocation in progress', 'resolved')),
       // Ревью шага 62, находка 1: запрет двух писателей — на итоговой строке при любой глубине, а не только при смене ответа
       m(replaceInFunction('tenant_data.channel_account_other_tools_guard()', "IF NEW.other_tools IN ('STOCK', 'STOCK_AND_PRICES') AND NEW.quantity_writes_confirmed THEN",
         "IF NEW.other_tools IS DISTINCT FROM OLD.other_tools AND NEW.other_tools IN ('STOCK', 'STOCK_AND_PRICES') AND NEW.quantity_writes_confirmed THEN"),
         smoke('a confirmation applied over another tool managing stock (Р-202, гонка, шаг 62)')),
       m(replaceInFunction('channel_data.record_channel_observations(uuid, uuid, jsonb)', 'AND qs.quantity_sync_enabled) THEN', ') THEN'),
         node(T('stock.pg.test.ts'), 'step 62', 'step 62: after the revocation a higher quantity of another tool is not an external edit', '^1$')),
+    ],
+  },
+];
+
+/**
+ * Шаг 63 (0164): включение синхронизации количества упорядочено той же блокировкой аккаунта, что выдача, отзыв и отправка; ключ блокировки —
+ * аккаунт. Гонку двух сеансов проверяет stock.pg.test.ts (шаг 63), взятие блокировки своей сессией с ключом — смоук отзыва
+ */
+export const STEP63_ROWS = [
+  {
+    row: 'шаг 63 (Р-202, блокировка включения и ключ)', critical: false,
+    invariant: 'включение синхронизации количества ждёт идущего отзыва и отзыв ждёт идущего включения; все три стража берут блокировку по ключу своего аккаунта',
+    mutations: [
+      m(replaceInFunction('tenant_data.write_scope_quantity_writes_confirmed()', 'PERFORM pg_advisory_xact_lock_shared(202, hashtext(NEW.channel_account_id::text));', 'PERFORM 1;'),
+        smoke('enabling quantity sync takes the shared lock of its account (Р-202, шаг 63)'),
+        node(T('stock.pg.test.ts'), 'step 63', 'step 63: enabling quantity sync waits for a revocation in progress', 'resolved'),
+        node(T('stock.pg.test.ts'), 'step 63', 'step 63: a revocation waits for an enabling in progress', 'resolved')),
+      m(replaceInFunction('tenant_data.write_scope_quantity_writes_confirmed()', 'hashtext(NEW.channel_account_id::text)', 'hashtext(NEW.tenant_id::text)'),
+        smoke('enabling quantity sync takes the shared lock of its account (Р-202, шаг 63)')),
+      m(replaceInFunction('tenant_data.channel_quantity_writes_confirmation_guard()', 'hashtext(NEW.channel_account_id::text)', 'hashtext(NEW.tenant_id::text)'),
+        smoke('a revocation takes the exclusive lock of the account (Р-202, шаг 62)')),
+      // Ревью шага 63, находка 3: без SKIP LOCKED отзыв ждёт строку, занятую захватом, а захват — блокировку отзыва: цикл, 40P01
+      m(replaceInFunction('tenant_data.channel_quantity_writes_confirmation_apply()', 'FOR UPDATE OF f SKIP LOCKED', 'FOR UPDATE OF f'),
+        node(T('stock.pg.test.ts'), 'step 63', 'step 63: the revocation skips the write held by a claim instead of waiting for it', '^40P01$'),
+        node(T('stock.pg.test.ts'), 'step 63', 'step 63: a claim racing a revocation ends with the refusal of the dispatch guard, not a deadlock', '^40P01$')),
+      m(replaceInFunction('tenant_data.channel_write_quantity_writes_guard()', 'hashtext(account::text)', 'hashtext(NEW.tenant_id::text)'),
+        node(T('stock.pg.test.ts'), 'step 63', 'step 63: a retry of a quantity write waits for a revocation in progress', 'resolved')),
     ],
   },
 ];

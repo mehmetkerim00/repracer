@@ -185,7 +185,7 @@ export class PgWriteQueueStore implements WriteQueueStore {
           if (Number(c.attempt_count) >= policy.maxAttempts) {
             const reason = { code: 'WRITE_RETRIES_EXHAUSTED', params: { attempts: Number(c.attempt_count), code: 'MAX_ATTEMPTS' } };
             await this.end(tx, tenantId, c.channel_write_id, 'DISCARDED_STALE', reason);
-            return { kind: 'ENDED', channelWriteId: c.channel_write_id, status: 'DISCARDED_STALE', reason };
+            return { kind: 'ENDED', channelWriteId: c.channel_write_id, field: c.field, status: 'DISCARDED_STALE', reason };
           }
         }
         await tx.query('SAVEPOINT claim');
@@ -209,7 +209,7 @@ export class PgWriteQueueStore implements WriteQueueStore {
           } else {
             await this.end(tx, tenantId, c.channel_write_id, refusal.status, refusal.reason);
           }
-          return { kind: 'ENDED', channelWriteId: c.channel_write_id, status: refusal.status, reason: refusal.reason };
+          return { kind: 'ENDED', channelWriteId: c.channel_write_id, field: c.field, status: refusal.status, reason: refusal.reason };
         }
       }
       return { kind: 'IDLE' };

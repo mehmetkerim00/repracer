@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { AlertSink, ChannelAdapter, FieldWrite, WriteOutcome } from '@repracer/channel-port';
-import { createWriteDispatcher, type ClaimResult, type RecordedOutcome, type WriteQueueStore } from './index.ts';
+import { createWriteDispatcher, writeAlertCode, type ClaimResult, type RecordedOutcome, type WriteQueueStore } from './index.ts';
 
 /**
  * Находка 7 шага 15 [Р-64]: сбой одной единицы при обходе не роняет обход остальных и не молчит. До исправления sweep ждал
@@ -359,13 +359,17 @@ test('step 52: when the adapter cannot be had while recording, the known rule of
  */
 test('step 62 (Р-202): a quantity write ended by the revocation raises QUANTITY_WRITE_NOT_SENT, other endings keep their name', async () => {
   const ended: Record<string, ClaimResult> = {
-    revoked: { kind: 'ENDED', channelWriteId: 'w-q', status: 'DISCARDED_STALE', reason: { code: 'QUANTITY_WRITES_REVOKED', params: { channelAccountId: 'a' } } } as ClaimResult,
-    price: { kind: 'ENDED', channelWriteId: 'w-p', status: 'DISCARDED_STALE', reason: { code: 'WRITE_BLOCKED_BY_BOUND_RECHECK', params: {} } } as ClaimResult,
+    revoked: { kind: 'ENDED', channelWriteId: 'w-q', field: 'QUANTITY', status: 'DISCARDED_STALE', reason: { code: 'QUANTITY_WRITES_REVOKED', params: { channelAccountId: 'a' } } } as ClaimResult,
+    price: { kind: 'ENDED', channelWriteId: 'w-p', field: 'PRICE', status: 'DISCARDED_STALE', reason: { code: 'WRITE_BLOCKED_BY_BOUND_RECHECK', params: {} } } as ClaimResult,
+    // Шаг 63: все пути — бюджет правок и блокировка единицы у записи количества тоже про остаток, у записи цены — про цену
+    quantityBudget: { kind: 'ENDED', channelWriteId: 'w-qb', field: 'QUANTITY', status: 'BUDGET_EXHAUSTED', reason: { code: 'WRITE_EDIT_BUDGET_EXHAUSTED', params: {} } } as ClaimResult,
+    quantityBlocked: { kind: 'ENDED', channelWriteId: 'w-qk', field: 'QUANTITY', status: 'BLOCKED', reason: { code: 'WRITE_SCOPE_BLOCKED', params: { code: 'X' } } } as ClaimResult,
+    priceBlocked: { kind: 'ENDED', channelWriteId: 'w-pk', field: 'PRICE', status: 'BLOCKED', reason: { code: 'WRITE_SCOPE_BLOCKED', params: { code: 'X' } } } as ClaimResult,
   };
   const served = new Set<string>();
   const store: WriteQueueStore = {
     async dueScopes() {
-      return [{ tenantId: 't1', writeScopeId: 'revoked', dueKind: 'RETRY', dueSince: '2026-09-15T09:00:00Z' }, { tenantId: 't1', writeScopeId: 'price', dueKind: 'PENDING', dueSince: '2026-09-15T09:00:00Z' }];
+      return Object.keys(ended).map((writeScopeId) => ({ tenantId: 't1', writeScopeId, dueKind: 'PENDING' as const, dueSince: '2026-09-15T09:00:00Z' }));
     },
     async claimNext(_t, writeScopeId): Promise<ClaimResult> {
       if (served.has(writeScopeId)) return { kind: 'IDLE' };
@@ -383,4 +387,10 @@ test('step 62 (Р-202): a quantity write ended by the revocation raises QUANTITY
   const byScope = new Map(alerts.map((a) => [a.details.writeScopeId, [a.code, a.severity]]));
   assert.deepEqual(byScope.get('revoked'), ['QUANTITY_WRITE_NOT_SENT', 'WARNING'], 'the quantity write ended by the revocation is not named a price');
   assert.deepEqual(byScope.get('price'), ['PRICE_WRITE_NOT_SENT', 'WARNING']);
+  assert.deepEqual(byScope.get('quantityBudget'), ['QUANTITY_WRITE_NOT_SENT', 'CRITICAL'], 'step 63: a quantity write out of edit budget is not named a price and is critical (Р-195)');
+  assert.deepEqual(byScope.get('quantityBlocked'), ['QUANTITY_WRITE_SCOPE_BLOCKED', 'CRITICAL'], 'step 63: a blocked quantity unit is not named a price');
+  assert.deepEqual(byScope.get('priceBlocked'), ['PRICE_WRITE_SCOPE_BLOCKED', 'CRITICAL']);
+  // Помощник — один на все пути, включая запись итога канала
+  assert.deepEqual([writeAlertCode('QUANTITY', 'notSent'), writeAlertCode('QUANTITY', 'scopeBlocked'), writeAlertCode('PRICE', 'notSent'), writeAlertCode('CHANNEL_MIN_PRICE', 'scopeBlocked')],
+    ['QUANTITY_WRITE_NOT_SENT', 'QUANTITY_WRITE_SCOPE_BLOCKED', 'PRICE_WRITE_NOT_SENT', 'PRICE_WRITE_SCOPE_BLOCKED']);
 });

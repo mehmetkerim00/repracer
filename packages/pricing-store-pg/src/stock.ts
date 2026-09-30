@@ -483,12 +483,18 @@ export class PgStockStore implements StockStore {
          * Ревью шага 61, находка 2: счётчики — под той же исключительной блокировкой аккаунта, что берёт страж журнала (захваты
          * диспетчера ждут её), а снятое — по самой строке отзыва в истории, а не прикидкой до вставки
          */
-        await tx.query(`SELECT pg_advisory_xact_lock(202, hashtext($1::text))`, [channelAccountId]);
-        const { rows: [c] } = await tx.query(
+        /**
+         * Шаг 63 (ревью шага 62, находка 5): блокировку и счётчики берёт только владелец — иначе отказ «не владелец» держал бы захваты
+         * диспетчера этого аккаунта на время отказа. Решает по-прежнему страж базы: роль здесь лишь говорит, стоит ли брать блокировку
+         */
+        const { rows: [member] } = await tx.query(`SELECT role FROM tenant_data.membership WHERE tenant_id = $1 AND membership_id = $2`, [tenantId, actor.membershipId]);
+        const owner = member?.role === 'OWNER';
+        if (owner) await tx.query(`SELECT pg_advisory_xact_lock(202, hashtext($1::text))`, [channelAccountId]);
+        const { rows: [c] } = owner ? await tx.query(
           `SELECT (SELECT count(*) FROM tenant_data.write_scope WHERE tenant_id = $1 AND channel_account_id = $2 AND field = 'QUANTITY' AND quantity_sync_enabled)::int AS scopes,
                   (SELECT count(*) FROM tenant_data.channel_write w JOIN tenant_data.write_scope ws ON ws.tenant_id = w.tenant_id AND ws.write_scope_id = w.write_scope_id
                     WHERE w.tenant_id = $1 AND ws.channel_account_id = $2 AND w.field = 'QUANTITY' AND w.status IN ('DISPATCHED', 'ACCEPTED'))::int AS in_flight`,
-          [tenantId, channelAccountId]);
+          [tenantId, channelAccountId]) : { rows: [{ scopes: 0, in_flight: 0 }] };
         const { rows: [r] } = await tx.query(
           `INSERT INTO tenant_data.channel_quantity_writes_confirmation (tenant_id, channel_account_id, typed_confirmation, confirmed_by_membership_id, action)
            VALUES ($1, $2, $3, $4, 'REVOKE') RETURNING confirmation_id`,

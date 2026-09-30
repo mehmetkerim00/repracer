@@ -1,4 +1,4 @@
-import type { AdapterCallContext, AlertSink, ChannelAdapter, DispatchResult, FieldWrite, IdentifiedObservation, Instant, WriteOutcome } from '@repracer/channel-port';
+import type { AdapterCallContext, AlertSink, ChannelAdapter, DispatchResult, FieldWrite, IdentifiedObservation, Instant, WriteField, WriteOutcome } from '@repracer/channel-port';
 import {
   coreError,
   DEFAULT_RETRY_POLICY,
@@ -37,8 +37,23 @@ export type ClaimResult =
   | { kind: 'IN_FLIGHT'; channelAccountId: string; write: FieldWrite; status: 'DISPATCHED' | 'ACCEPTED'; since: Instant; reconcileDue: boolean }
   | { kind: 'RETRY_LATER'; channelWriteId: string; at: Instant }
   /** Запись не может быть отправлена и завершена с причиной (или ждёт разбора в BLOCKED) */
-  | { kind: 'ENDED'; channelWriteId: string; status: 'DISCARDED_STALE' | 'BUDGET_EXHAUSTED' | 'BLOCKED'; reason: WriteReason }
+  /** Шаг 63: поле записи — имя алерта о ней зависит от того, цена это или количество (`writeAlertCode`) */
+  | { kind: 'ENDED'; channelWriteId: string; field: WriteField; status: 'DISCARDED_STALE' | 'BUDGET_EXHAUSTED' | 'BLOCKED'; reason: WriteReason }
   | { kind: 'IDLE' };
+
+/**
+ * Шаг 63 (ревью шага 62, находка 4): имя алерта о записи — по её ПОЛЮ, во всех путях диспетчера (бюджет правок, блокировка единицы,
+ * отзыв, повторы): запись количества — алерт про остаток, запись цены — про цену. Один помощник, чтобы класс закрылся, а не одна ветка.
+ * Коды — литералами в таблице: правило словаря событий (Р-161) читает их отсюда
+ */
+const WRITE_ALERT_CODES = {
+  PRICE: { notSent: 'PRICE_WRITE_NOT_SENT', scopeBlocked: 'PRICE_WRITE_SCOPE_BLOCKED' },
+  CHANNEL_MIN_PRICE: { notSent: 'PRICE_WRITE_NOT_SENT', scopeBlocked: 'PRICE_WRITE_SCOPE_BLOCKED' },
+  QUANTITY: { notSent: 'QUANTITY_WRITE_NOT_SENT', scopeBlocked: 'QUANTITY_WRITE_SCOPE_BLOCKED' },
+} as const satisfies Record<WriteField, { notSent: string; scopeBlocked: string }>;
+export function writeAlertCode(field: WriteField, kind: 'notSent' | 'scopeBlocked'): string {
+  return WRITE_ALERT_CODES[field][kind];
+}
 
 export interface RecordedOutcome {
   status: 'DISPATCHED' | 'ACCEPTED' | 'APPLIED' | 'NOT_APPLIED' | 'FAILED' | 'DISCARDED_STALE' | 'BUDGET_EXHAUSTED';
@@ -270,11 +285,11 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
   async function afterRecorded(tenantId: string, write: FieldWrite, recorded: RecordedOutcome): Promise<void> {
     const details = { writeScopeId: write.writeScope.writeScopeId, channelWriteId: write.channelWriteId, version: write.version };
     const blockedCode = recorded.reason?.params?.code;
-    if (recorded.scopeBlocked) await alert(tenantId, 'PRICE_WRITE_SCOPE_BLOCKED', 'CRITICAL', { ...details, reason: recorded.reason?.code ?? 'UNKNOWN', ...(typeof blockedCode === 'string' ? { code: blockedCode } : {}) });
+    if (recorded.scopeBlocked) await alert(tenantId, writeAlertCode(write.value.field, 'scopeBlocked'), 'CRITICAL', { ...details, reason: recorded.reason?.code ?? 'UNKNOWN', ...(typeof blockedCode === 'string' ? { code: blockedCode } : {}) });
     else if (recorded.status === 'DISCARDED_STALE' || recorded.status === 'BUDGET_EXHAUSTED' || recorded.status === 'NOT_APPLIED') {
       // Шаг 52 (п. 8): исчерпанный бюджет правок ЦЕНЫ — ожидаемое ограничение канала, значение уйдёт после обновления бюджета: WARNING (дайджест).
       // Количество — CRITICAL (ревью шага 52, находка 3): неотправленное уменьшение остатка — риск перепродажи [инвариант 5]
-      await alert(tenantId, 'PRICE_WRITE_NOT_SENT', recorded.status === 'BUDGET_EXHAUSTED' && write.value.field === 'PRICE' ? 'WARNING' : 'CRITICAL', { ...details, status: recorded.status, reason: recorded.reason?.code ?? 'UNKNOWN' });
+      await alert(tenantId, writeAlertCode(write.value.field, 'notSent'), recorded.status === 'BUDGET_EXHAUSTED' && write.value.field === 'PRICE' ? 'WARNING' : 'CRITICAL', { ...details, status: recorded.status, reason: recorded.reason?.code ?? 'UNKNOWN' });
     }
   }
 
@@ -383,16 +398,12 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
           return report;
         case 'ENDED': {
           report.steps.push({ action: 'ENDED', channelWriteId: claim.channelWriteId, status: claim.status, reason: claim.reason });
-          const severity = claim.status === 'BLOCKED' || claim.reason.code === 'CHANNEL_HALTED' || claim.reason.code === 'CHANNEL_DISTRUSTED' ? 'CRITICAL' : 'WARNING';
-          // Шаг 62 (ревью шага 61, находка 6): запись количества, снятая отзывом владельца, — не «цена»; у неё своё имя. Код — литералом
-          // в вызове: правило словаря событий (Р-161) видит поднятые коды по форме вызова
-          if (claim.status !== 'BLOCKED' && claim.reason.code === 'QUANTITY_WRITES_REVOKED') {
-            await alert(tenantId, 'QUANTITY_WRITE_NOT_SENT', 'WARNING',
-              { writeScopeId, channelWriteId: claim.channelWriteId, status: claim.status, reason: claim.reason.code });
-          } else {
-            await alert(tenantId, claim.status === 'BLOCKED' ? 'PRICE_WRITE_SCOPE_BLOCKED' : 'PRICE_WRITE_NOT_SENT', severity,
-              { writeScopeId, channelWriteId: claim.channelWriteId, status: claim.status, reason: claim.reason.code });
-          }
+          // Р-195 (ревью шага 63, находка 2): запись количества, упёршаяся в бюджет правок, — CRITICAL, как при записи итога канала
+          const severity = claim.status === 'BLOCKED' || claim.reason.code === 'CHANNEL_HALTED' || claim.reason.code === 'CHANNEL_DISTRUSTED'
+            || (claim.field === 'QUANTITY' && claim.status === 'BUDGET_EXHAUSTED') ? 'CRITICAL' : 'WARNING';
+          // Шаг 63: имя алерта — по полю записи (`writeAlertCode`), во всех завершениях, а не только при отзыве
+          await alert(tenantId, writeAlertCode(claim.field, claim.status === 'BLOCKED' ? 'scopeBlocked' : 'notSent'), severity,
+            { writeScopeId, channelWriteId: claim.channelWriteId, status: claim.status, reason: claim.reason.code });
           if (claim.status === 'BLOCKED') return report;
           continue;
         }

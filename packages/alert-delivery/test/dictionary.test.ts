@@ -34,6 +34,8 @@ const FORMS: readonly RegExp[] = [
 
 /** Тот же список форм, но код выбирается условием: `code: mismatch ? 'A' : 'B'` — обе ветви поднимают алерт */
 const BRANCHED: readonly RegExp[] = [
+  // Шаг 63: таблица имён алертов записи по полю (`writeAlertCode` диспетчера) — { notSent: 'X', scopeBlocked: 'Y' }
+  /\bnotSent:\s*'([A-Z][A-Z0-9_]+)',\s*scopeBlocked:\s*'([A-Z][A-Z0-9_]+)'/g,
   /raise\(\{[\s\S]{0,300}?\bcode:[^,\n]*\?\s*'([A-Z][A-Z0-9_]+)'\s*:\s*'([A-Z][A-Z0-9_]+)'/g,
   /\bkind:\s*'alert',\s*code:[^,\n]*\?\s*'([A-Z][A-Z0-9_]+)'\s*:\s*'([A-Z][A-Z0-9_]+)'/g,
 ];

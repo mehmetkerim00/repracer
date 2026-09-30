@@ -793,3 +793,110 @@ test('step 62 (Р-202): after the revocation the quantity of another tool is not
   assert.deepEqual(await store.confirmQuantityWrites(world.tenantId, account, typed, owner()), { status: 'CONFIRMED' });
   assert.equal((await store.enableStockSync(world.tenantId, account, { bufferUnits: 2, maxQuantity: null, minQuantityToList: 0, acknowledgeSideEffects: false }, owner())).status, 'ENABLED');
 });
+
+/**
+ * Шаг 63 (ревью шага 62, находки 2 и 3): отзыв подтверждения, включение синхронизации единицы и отправка количества упорядочены ОДНОЙ
+ * блокировкой аккаунта — проверяется настоящей гонкой двух сеансов (одна сессия её не покажет). Ожидание видно по пределу ожидания
+ * блокировки (`lock_timeout`): без блокировки второй сеанс прошёл бы сразу. Каждый порядок — своё утверждение:
+ *  - включение ПОСЛЕ начала отзыва ждёт его и затем видит отзыв (отказ);
+ *  - отзыв ПОСЛЕ начала включения ждёт его и затем выключает единицу сам;
+ *  - повтор отправки записи, бывшей в канале, ждёт идущего отзыва
+ */
+test('step 63 (Р-202): revocation, enabling quantity sync and dispatch are ordered by one account lock — two sessions', async () => {
+  const account = world.ids.dbId(KAUFLAND);
+  const typed = (await store.quantityWritesState(world.tenantId, account))!.externalAccountId;
+  const adminPool = db.pool('svc_admin', 2);
+  const appPool = db.pool('svc_app', 1);
+  const queue = new PgWriteQueueStore(appPool);
+  const sourceId = (await store.stockSources(world.tenantId)).find((x) => x.mode === 'INTERNAL_POOL')!.stockSourceId;
+  const scopeOf = async (sku: string) => (await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
+    `SELECT s.write_scope_id FROM tenant_data.write_scope s JOIN tenant_data.product p USING (tenant_id, product_id) WHERE s.field = 'QUANTITY' AND p.sku = $1`, [sku])).rows))[0]!.write_scope_id as string;
+  const open = async (pool: typeof admin, lockTimeoutMs?: number) => {
+    const c = await pool.connect();
+    await c.query(`BEGIN; SELECT set_config('app.tenant_id', '${world.tenantId}', true), set_config('app.user_id', '${world.userId}', true)`);
+    if (lockTimeoutMs) await c.query(`SET LOCAL lock_timeout = '${lockTimeoutMs}ms'`);
+    return c;
+  };
+  const revokeIn = (c: Awaited<ReturnType<typeof open>>) => c.query(
+    `INSERT INTO tenant_data.channel_quantity_writes_confirmation (tenant_id, channel_account_id, typed_confirmation, confirmed_by_membership_id, action) VALUES ($1, $2, $3, $4, 'REVOKE')`,
+    [world.tenantId, account, typed, world.ownerMembershipId]);
+  const enableIn = (c: Awaited<ReturnType<typeof open>>, scope: string) => c.query(
+    `UPDATE tenant_data.write_scope SET quantity_sync_enabled = true WHERE tenant_id = $1 AND write_scope_id = $2`, [world.tenantId, scope]);
+  const LOCK_TIMEOUT = /lock timeout/;
+  const second = await scopeOf('syn-prod-2');
+  const reconfirm = async () => {
+    assert.deepEqual(await store.confirmQuantityWrites(world.tenantId, account, typed, owner()), { status: 'CONFIRMED' });
+    assert.equal((await store.enableStockSync(world.tenantId, account, { bufferUnits: 2, maxQuantity: null, minQuantityToList: 0, acknowledgeSideEffects: false }, owner())).status, 'ENABLED');
+  };
+  {
+    // Пулы теста закрывает база теста (`db.drop`) — здесь не закрываются
+    // 1. Включение после начала отзыва: единица выключена заранее, отзыв держит исключительную блокировку
+    await inTenant(admin, world.tenantId, (tx) => tx.query(`UPDATE tenant_data.write_scope SET quantity_sync_enabled = false WHERE write_scope_id = $1`, [second]), world.userId);
+    const r1 = await open(adminPool);
+    await revokeIn(r1);
+    const e1 = await open(adminPool, 300);
+    await assert.rejects(enableIn(e1, second), LOCK_TIMEOUT, 'step 63: enabling quantity sync waits for a revocation in progress');
+    await e1.query('ROLLBACK'); e1.release();
+    await r1.query('COMMIT'); r1.release();
+    await assert.rejects(inTenant(admin, world.tenantId, (tx) => enableIn(tx as never, second), world.userId), /are not confirmed by the owner/,
+      'after the revocation the enabling sees it and is refused');
+    await reconfirm();
+
+    // 2. Отзыв после начала включения: включение законно, отзыв ждёт его и выключает единицу сам
+    await inTenant(admin, world.tenantId, (tx) => tx.query(`UPDATE tenant_data.write_scope SET quantity_sync_enabled = false WHERE write_scope_id = $1`, [second]), world.userId);
+    const e2 = await open(adminPool);
+    await enableIn(e2, second);
+    const r2 = await open(adminPool, 300);
+    await assert.rejects(revokeIn(r2), LOCK_TIMEOUT, 'step 63: a revocation waits for an enabling in progress');
+    await r2.query('ROLLBACK'); r2.release();
+    await e2.query('COMMIT'); e2.release();
+    assert.equal((await store.revokeQuantityWrites(world.tenantId, account, typed, owner())).status, 'REVOKED');
+    const [left] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(`SELECT quantity_sync_enabled FROM tenant_data.write_scope WHERE write_scope_id = $1`, [second])).rows);
+    assert.equal(left.quantity_sync_enabled, false, 'the enabling that came first is switched off by the revocation itself');
+    await reconfirm();
+
+    // 3. Повтор отправки: запись в полёте, канал отказал, пока идёт отзыв, — повтор ждёт отзыва
+    const flying = await scopeOf('syn-prod-1');
+    await store.importStock(world.tenantId, sourceId, [{ sku: '3501', quantity: 63 }], owner());
+    await store.recalculate(world.tenantId, [(await inTenant(admin, world.tenantId, async (tx) => (await tx.query(`SELECT product_id FROM tenant_data.write_scope WHERE write_scope_id = $1`, [flying])).rows))[0]!.product_id], now());
+    const claim = await queue.claimNext(world.tenantId, flying, now(), DEFAULT_RETRY_POLICY);
+    assert.equal(claim.kind, 'DISPATCH', JSON.stringify(claim));
+    const w = (claim as Extract<typeof claim, { kind: 'DISPATCH' }>).write;
+    const r3 = await open(adminPool);
+    await revokeIn(r3);
+    const d3 = await open(appPool, 300);
+    await d3.query(`UPDATE tenant_data.channel_write SET status = 'FAILED', last_error_code = 'KFL_5XX', next_attempt_at = now() WHERE channel_write_id = $1`, [w.channelWriteId]);
+    await assert.rejects(d3.query(`UPDATE tenant_data.channel_write SET status = 'DISPATCHED', attempt_count = attempt_count + 1, dispatched_at = now(), next_attempt_at = NULL WHERE channel_write_id = $1`, [w.channelWriteId]),
+      LOCK_TIMEOUT, 'step 63: a retry of a quantity write waits for a revocation in progress');
+    await d3.query('ROLLBACK'); d3.release();
+    await r3.query('COMMIT'); r3.release();
+    await reconfirm();
+
+    /**
+     * 4. Ревью шага 63, находка 3: захват диспетчера сперва держит строку записи, отзыв берёт блокировку аккаунта и снимает записи, захват
+     * затем ждёт блокировку аккаунта. Прежний отзыв ждал занятую строку — цикл ожиданий, `40P01` одному из двух. Теперь отзыв занятую запись
+     * пропускает и фиксируется, а захват после него получает отказ стража отправки — ту причину, которую распознаёт диспетчер
+     */
+    // Своя единица: у первой запись из случая 3 так и осталась в полёте
+    const third = await scopeOf('syn-prod-3');
+    await store.importStock(world.tenantId, sourceId, [{ sku: '3503', quantity: 64 }], owner());
+    await store.recalculate(world.tenantId, [(await inTenant(admin, world.tenantId, async (tx) => (await tx.query(`SELECT product_id FROM tenant_data.write_scope WHERE write_scope_id = $1`, [third])).rows))[0]!.product_id], now());
+    const [pending] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
+      `SELECT channel_write_id FROM tenant_data.channel_write WHERE write_scope_id = $1 AND status = 'PENDING' ORDER BY version DESC LIMIT 1`, [third])).rows);
+    assert.ok(pending, 'a pending quantity write to claim');
+    const d4 = await open(appPool);
+    await d4.query(`SELECT 1 FROM tenant_data.channel_write WHERE channel_write_id = $1 FOR UPDATE`, [pending.channel_write_id]);
+    const r4 = await open(adminPool);
+    const revoking = revokeIn(r4).then(() => 'revoked', (e: { code?: string }) => e.code ?? 'error');
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const claiming = d4.query(`UPDATE tenant_data.channel_write SET status = 'DISPATCHED', attempt_count = attempt_count + 1, dispatched_at = now() WHERE channel_write_id = $1`,
+      [pending.channel_write_id]).then(() => 'dispatched', (e: { code?: string; message?: string }) => { console.log('CLAIM REFUSAL', e.code, e.message); return e.code ?? 'error'; });
+    // Отзыв не ждал занятую строку: его транзакция уже готова к фиксации, а захват упёрся в блокировку аккаунта до неё
+    assert.equal(await revoking, 'revoked', 'step 63: the revocation skips the write held by a claim instead of waiting for it');
+    await r4.query('COMMIT'); r4.release();
+    const claimed = await claiming;
+    await d4.query('ROLLBACK').catch(() => undefined); d4.release();
+    assert.equal(claimed, '23514', 'step 63: a claim racing a revocation ends with the refusal of the dispatch guard, not a deadlock');
+    await reconfirm();
+  }
+});
