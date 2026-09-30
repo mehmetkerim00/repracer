@@ -450,7 +450,7 @@ export class PgStockStore implements StockStore {
       return await inTenant(this.options.adminPool, tenantId, async (tx) => {
         const { rows: [a] } = await tx.query(`SELECT quantity_writes_confirmed FROM tenant_data.channel_account WHERE tenant_id = $1 AND channel_account_id = $2`, [tenantId, channelAccountId]);
         if (!a) return { status: 'NOT_FOUND' as const };
-        if (a.quantity_writes_confirmed) return { status: 'ALREADY_CONFIRMED' as const };
+        // Шаг 62 (ревью шага 61, находка 3): состояние решает страж базы — после проверки роли, как хранилище в памяти
         await tx.query(
           `INSERT INTO tenant_data.channel_quantity_writes_confirmation (tenant_id, channel_account_id, typed_confirmation, confirmed_by_membership_id) VALUES ($1, $2, $3, $4)`,
           [tenantId, channelAccountId, typedConfirmation, actor.membershipId]);
@@ -462,7 +462,8 @@ export class PgStockStore implements StockStore {
       if (/are already confirmed/.test(message)) return { status: 'ALREADY_CONFIRMED' };
       if (/does not name the channel account/.test(message)) return { status: 'CONFIRMATION_MISMATCH' };
       if (/answer first whether another tool/.test(message)) return { status: 'ANSWER_FIRST' };
-      if (/another tool updates stock in this channel/.test(message)) return { status: 'OTHER_TOOL_MANAGES_STOCK' };
+      // Шаг 62: запрет двух писателей держит страж аккаунта на итоговой строке — его отказ и есть «остатки ведёт другой инструмент»
+      if (/another tool managing stock would make two writers/.test(message)) return { status: 'OTHER_TOOL_MANAGES_STOCK' };
       if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
       throw error;
     }
@@ -477,7 +478,7 @@ export class PgStockStore implements StockStore {
       return await inTenant(this.options.adminPool, tenantId, async (tx) => {
         const { rows: [a] } = await tx.query(`SELECT quantity_writes_confirmed FROM tenant_data.channel_account WHERE tenant_id = $1 AND channel_account_id = $2`, [tenantId, channelAccountId]);
         if (!a) return { status: 'NOT_FOUND' as const };
-        if (!a.quantity_writes_confirmed) return { status: 'NOT_CONFIRMED' as const };
+        // Шаг 62 (ревью шага 61, находка 3): «отзывать нечего» решает страж базы — после проверки роли, как хранилище в памяти
         /**
          * Ревью шага 61, находка 2: счётчики — под той же исключительной блокировкой аккаунта, что берёт страж журнала (захваты
          * диспетчера ждут её), а снятое — по самой строке отзыва в истории, а не прикидкой до вставки

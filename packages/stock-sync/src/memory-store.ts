@@ -177,8 +177,9 @@ export class InMemoryStockStore implements StockStore {
     if (this.quantityWritesConfirmed.has(channelAccountId)) return { status: 'ALREADY_CONFIRMED' };
     const answer = this.otherTools.get(channelAccountId);
     if (!answer) return { status: 'ANSWER_FIRST' };
-    if (answer === 'STOCK' || answer === 'STOCK_AND_PRICES') return { status: 'OTHER_TOOL_MANAGES_STOCK' };
+    // Шаг 62: как в базе — набранное проверяет страж журнала, а «остатки ведёт другой» отказывает страж аккаунта при применении, позже
     if (typedConfirmation.trim() !== this.externalAccountIdOf(channelAccountId)) return { status: 'CONFIRMATION_MISMATCH' };
+    if (answer === 'STOCK' || answer === 'STOCK_AND_PRICES') return { status: 'OTHER_TOOL_MANAGES_STOCK' };
     this.quantityWritesConfirmed.add(channelAccountId);
     return { status: 'CONFIRMED' };
   }

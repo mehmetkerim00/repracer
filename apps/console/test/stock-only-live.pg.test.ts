@@ -246,7 +246,9 @@ test('Р-152: путь «только остатки» — от выбора п�
   connection = await connectionsOf('экран подключений: остатки ведёт другой инструмент');
   assert.deepEqual([connection.otherTools.answer, connection.quantityWrites.canConfirm, connection.otherTools.warning], ['STOCK', false, null]);
   assert.ok(connection.quantityWrites.blockedText, 'сказано, почему подтвердить нельзя');
-  assert.deepEqual(codeOf(await confirm(connection.label)), [409, 'OTHER_TOOL_MANAGES_STOCK']);
+  // Шаг 62: верно набранный идентификатор — отказ всё равно, и причина — чужой инструмент остатков (набранное проверяется раньше)
+  const [external] = (await observer.query(`SELECT external_account_id FROM tenant_data.channel_account WHERE channel_account_id = $1`, [accountId])).rows;
+  assert.deepEqual(codeOf(await confirm(String(external.external_account_id))), [409, 'OTHER_TOOL_MANAGES_STOCK']);
   const stockManaged = await step<Failure>('включение при чужом инструменте остатков', 'POST', api('stock', 'enable'), enableBody);
   assert.deepEqual([stockManaged.status, stockManaged.body.error.code], [409, 'QUANTITY_WRITES_NOT_CONFIRMED']);
   assert.notEqual(stockManaged.body.error.message, notConfirmed.body.error.message, 'при чужом инструменте остатков отказ говорит именно это');
@@ -371,6 +373,8 @@ test('шаг 61 [Р-202]: отзыв записи количества чере�
   assert.deepEqual([revoked.body.disabledScopes, revoked.body.discardedWrites, revoked.body.inFlightWrites], [DEMO_OFFERS, 0, 0]);
   assert.match(revoked.body.message, /Widerrufen/, revoked.body.message);
   assert.deepEqual(codeOf(await revoke(typed)), [409, 'NOT_CONFIRMED'], 'отзывать нечего');
+  // Шаг 62 (ревью шага 61, находка 3): порядок отказов как у хранилища в памяти — не владелец узнаёт, что он не владелец
+  assert.deepEqual(codeOf(await revoke(typed, adminAuth)), [403, 'NOT_OWNER'], 'администратору на неподтверждённом аккаунте — «только владелец»');
   connection = await connectionOf('экран подключений после отзыва');
   assert.deepEqual([connection.quantityWrites.confirmed, connection.quantityWrites.canRevoke, connection.quantityWrites.canConfirm], [false, false, true]);
   const stockScreen = (await step<StockView>('экран остатков после отзыва', 'GET', api('stock'))).body;

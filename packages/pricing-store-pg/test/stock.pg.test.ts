@@ -775,3 +775,21 @@ test('step 61 (Р-202): revoking quantity writes stops them at once — pending 
     `SELECT count(*)::int AS n FROM audit.audit_event WHERE entity_type LIKE '%channel_quantity_writes_confirmation'`)).rows);
   assert.equal(audit.n, 3, 'выдача, отзыв и повторная выдача — три события аудита');
 });
+
+/**
+ * Шаг 62 (ревью шага 61, находка 5): после отзыва подтверждения количество в канале законно ведёт другой инструмент — его повышения не
+ * «внешние правки», и счётчик на экране подключений не растёт. Порядок отказов у базы — как у хранилища в памяти: не владелец узнаёт,
+ * что он не владелец, а не что отзывать нечего
+ */
+test('step 62 (Р-202): after the revocation the quantity of another tool is not an external edit', async () => {
+  const pricing = new PgPricingStore(db.pool('svc_app', 1), { adminPool: admin });
+  const account = world.ids.dbId(KAUFLAND);
+  const typed = (await store.quantityWritesState(world.tenantId, account))!.externalAccountId;
+  const seen = (quantity: number) => pricing.recordChannelObservations(world.tenantId, account, [{
+    marketplace: 'de', externalSku: null, externalOfferId: 'SYN-OFFER-1', externalUnitId: '3501', priceMinor: null, currency: null, quantity, observedAt: now() as never }]);
+  assert.equal(await seen(900), 1, 'while we write quantity, a higher quantity we never wrote is an external edit (control)');
+  assert.equal((await store.revokeQuantityWrites(world.tenantId, account, typed, owner())).status, 'REVOKED');
+  assert.equal(await seen(950), 0, 'step 62: after the revocation a higher quantity of another tool is not an external edit');
+  assert.deepEqual(await store.confirmQuantityWrites(world.tenantId, account, typed, owner()), { status: 'CONFIRMED' });
+  assert.equal((await store.enableStockSync(world.tenantId, account, { bufferUnits: 2, maxQuantity: null, minQuantityToList: 0, acknowledgeSideEffects: false }, owner())).status, 'ENABLED');
+});

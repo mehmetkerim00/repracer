@@ -352,3 +352,35 @@ test('step 52: when the adapter cannot be had while recording, the known rule of
   const unknown = await run((c) => c === 2);
   assert.deepEqual(unknown[0], { maxAttempts: 3, retryOn: [{ code: 'CHANNEL_UNAVAILABLE' }] });
 });
+
+/**
+ * Шаг 62 (ревью шага 61, находка 6): запись количества, которую завершил отзыв подтверждения владельцем [Р-202], поднимает алерт со своим
+ * именем — «запись количества не отправлена», а не «цена не отправлена»; прочие завершения — как раньше
+ */
+test('step 62 (Р-202): a quantity write ended by the revocation raises QUANTITY_WRITE_NOT_SENT, other endings keep their name', async () => {
+  const ended: Record<string, ClaimResult> = {
+    revoked: { kind: 'ENDED', channelWriteId: 'w-q', status: 'DISCARDED_STALE', reason: { code: 'QUANTITY_WRITES_REVOKED', params: { channelAccountId: 'a' } } } as ClaimResult,
+    price: { kind: 'ENDED', channelWriteId: 'w-p', status: 'DISCARDED_STALE', reason: { code: 'WRITE_BLOCKED_BY_BOUND_RECHECK', params: {} } } as ClaimResult,
+  };
+  const served = new Set<string>();
+  const store: WriteQueueStore = {
+    async dueScopes() {
+      return [{ tenantId: 't1', writeScopeId: 'revoked', dueKind: 'RETRY', dueSince: '2026-09-15T09:00:00Z' }, { tenantId: 't1', writeScopeId: 'price', dueKind: 'PENDING', dueSince: '2026-09-15T09:00:00Z' }];
+    },
+    async claimNext(_t, writeScopeId): Promise<ClaimResult> {
+      if (served.has(writeScopeId)) return { kind: 'IDLE' };
+      served.add(writeScopeId);
+      return ended[writeScopeId]!;
+    },
+    async recordOutcome() { throw new Error('not reached'); },
+    async checkPriceBasis() { throw new Error('not reached'); },
+    async recordEbayBatchOutcome() { throw new Error('not reached'); },
+    async recordReconciliation() { throw new Error('not reached'); },
+  };
+  const alerts: Array<Parameters<AlertSink['raise']>[0]> = [];
+  const dispatcher = createWriteDispatcher({ store, adapterFor: () => ({}) as ChannelAdapter, alerts: { raise: async (a) => { alerts.push(a); } }, now: () => '2026-09-15T10:00:00.000Z' });
+  await dispatcher.sweep({ concurrency: 1 });
+  const byScope = new Map(alerts.map((a) => [a.details.writeScopeId, [a.code, a.severity]]));
+  assert.deepEqual(byScope.get('revoked'), ['QUANTITY_WRITE_NOT_SENT', 'WARNING'], 'the quantity write ended by the revocation is not named a price');
+  assert.deepEqual(byScope.get('price'), ['PRICE_WRITE_NOT_SENT', 'WARNING']);
+});

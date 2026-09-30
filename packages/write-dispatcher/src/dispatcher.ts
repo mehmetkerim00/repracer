@@ -384,8 +384,15 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
         case 'ENDED': {
           report.steps.push({ action: 'ENDED', channelWriteId: claim.channelWriteId, status: claim.status, reason: claim.reason });
           const severity = claim.status === 'BLOCKED' || claim.reason.code === 'CHANNEL_HALTED' || claim.reason.code === 'CHANNEL_DISTRUSTED' ? 'CRITICAL' : 'WARNING';
-          await alert(tenantId, claim.status === 'BLOCKED' ? 'PRICE_WRITE_SCOPE_BLOCKED' : 'PRICE_WRITE_NOT_SENT', severity,
-            { writeScopeId, channelWriteId: claim.channelWriteId, status: claim.status, reason: claim.reason.code });
+          // Шаг 62 (ревью шага 61, находка 6): запись количества, снятая отзывом владельца, — не «цена»; у неё своё имя. Код — литералом
+          // в вызове: правило словаря событий (Р-161) видит поднятые коды по форме вызова
+          if (claim.status !== 'BLOCKED' && claim.reason.code === 'QUANTITY_WRITES_REVOKED') {
+            await alert(tenantId, 'QUANTITY_WRITE_NOT_SENT', 'WARNING',
+              { writeScopeId, channelWriteId: claim.channelWriteId, status: claim.status, reason: claim.reason.code });
+          } else {
+            await alert(tenantId, claim.status === 'BLOCKED' ? 'PRICE_WRITE_SCOPE_BLOCKED' : 'PRICE_WRITE_NOT_SENT', severity,
+              { writeScopeId, channelWriteId: claim.channelWriteId, status: claim.status, reason: claim.reason.code });
+          }
           if (claim.status === 'BLOCKED') return report;
           continue;
         }

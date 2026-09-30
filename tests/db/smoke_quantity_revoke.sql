@@ -34,6 +34,17 @@ VALUES (:tA, :rScope1, :kAcc, 'KAUFLAND', 'QUANTITY', 'a5000000-0000-0000-0000-0
 INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, quantity, version, origin)
 VALUES (:tA, 'a9610000-0000-4000-8000-000000000001', :rScope1, 'QUANTITY', 7, 1, 'STOCK_RECALC');
 UPDATE tenant_data.channel_write SET status = 'DISPATCHED', attempt_count = 1 WHERE channel_write_id = 'a9610000-0000-4000-8000-000000000001';
+/**
+ * Шаг 62 (ревью шага 61, находки 2 и 7): отправка количества берёт РАЗДЕЛЯЕМУЮ блокировку аккаунта, отзыв — ИСКЛЮЧИТЕЛЬНУЮ: так отзыв
+ * ждёт захвата, начатого до него, а повтор отправки после отзыва видит отзыв. Одна сессия гонку не покажет, поэтому проверяется сама
+ * блокировка, взятая своей транзакцией (advisory с двумя ключами: classid = 202, objsubid = 2)
+ */
+SELECT pg_temp.ok('the dispatch of a quantity write takes the shared lock of its account (Р-202, шаг 62)', $q$
+  DO $d$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND classid = 202 AND objsubid = 2 AND mode = 'ShareLock' AND pid = pg_backend_pid()) THEN
+      RAISE EXCEPTION 'the dispatch did not take the shared lock of the account';
+    END IF;
+  END $d$ $q$);
 -- Вторая ушла, получила отказ канала и ждёт повтора
 INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, quantity, version, origin)
 VALUES (:tA, 'a9610000-0000-4000-8000-000000000002', :rScope2, 'QUANTITY', 3, 1, 'STOCK_RECALC');
@@ -42,6 +53,19 @@ UPDATE tenant_data.channel_write SET status = 'FAILED', last_error_code = 'KFL_5
 -- Третья ждёт отправки
 INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, quantity, version, origin)
 VALUES (:tA, 'a9610000-0000-4000-8000-000000000003', :rScope3, 'QUANTITY', 9, 1, 'STOCK_RECALC');
+-- Шаг 62 (ревью шага 61, находка 7): четвёртая — в заблокированной единице, она рождается BLOCKED и тоже неотправленная
+INSERT INTO tenant_data.write_scope (tenant_id, write_scope_id, channel_account_id, channel, field, product_id, capability_id, capability_version,
+  scope_kind, scope_key, quantity_sync_enabled, status)
+VALUES (:tA, 'a6610000-0000-4000-8000-000000000004', :kAcc, 'KAUFLAND', 'QUANTITY', 'a5000000-0000-0000-0000-000000000001', 'c0000000-0000-0000-0000-000000000011', 1,
+        'ACCOUNT_OFFER', '["a4000000-0000-0000-0000-000000000001", "OFF-61D"]', true, 'BLOCKED');
+INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, quantity, version, origin)
+VALUES (:tA, 'a9610000-0000-4000-8000-000000000004', 'a6610000-0000-4000-8000-000000000004', 'QUANTITY', 5, 1, 'STOCK_RECALC');
+SELECT pg_temp.ok('a quantity write of a blocked unit is born BLOCKED (подготовка, шаг 62)', $q$
+  DO $d$ BEGIN
+    IF (SELECT status FROM tenant_data.channel_write WHERE channel_write_id = 'a9610000-0000-4000-8000-000000000004') <> 'BLOCKED' THEN
+      RAISE EXCEPTION 'the write of a blocked unit is not BLOCKED';
+    END IF;
+  END $d$ $q$);
 
 -- ---------------------------------------------------------------- кто отзывает
 -- Администратор: право MANAGE_TENANT у него есть, поэтому отказывает именно правило «только владелец»
@@ -62,6 +86,12 @@ SELECT pg_temp.expect_fail('a journal row of an unknown action (Р-202)', format
 SELECT pg_temp.ok('the owner revokes quantity writes with the typed account (Р-202)', format($q$
   INSERT INTO tenant_data.channel_quantity_writes_confirmation (tenant_id, channel_account_id, typed_confirmation, confirmed_by_membership_id, action)
   VALUES (%L, %L, ' seller-A ', %L, 'REVOKE') $q$, :tA, :kAcc, :ownerM));
+SELECT pg_temp.ok('a revocation takes the exclusive lock of the account (Р-202, шаг 62)', $q$
+  DO $d$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND classid = 202 AND objsubid = 2 AND mode = 'ExclusiveLock' AND pid = pg_backend_pid()) THEN
+      RAISE EXCEPTION 'the revocation did not take the exclusive lock of the account';
+    END IF;
+  END $d$ $q$);
 SELECT pg_temp.ok('a revocation switches quantity sync of the account off at once (Р-202)', $q$
   DO $d$ BEGIN
     IF (SELECT quantity_writes_confirmed FROM tenant_data.channel_account WHERE channel_account_id = 'a4000000-0000-0000-0000-000000000001') THEN
@@ -79,7 +109,7 @@ SELECT pg_temp.ok('a revocation discards the unsent quantity versions with its r
       RAISE EXCEPTION 'an unsent quantity version waits in the queue after the revocation';
     END IF;
     FOR h IN SELECT final_status, end_reason FROM tenant_data.channel_write_history
-              WHERE channel_write_id IN ('a9610000-0000-4000-8000-000000000002', 'a9610000-0000-4000-8000-000000000003') LOOP
+              WHERE channel_write_id IN ('a9610000-0000-4000-8000-000000000002', 'a9610000-0000-4000-8000-000000000003', 'a9610000-0000-4000-8000-000000000004') LOOP
       IF h.final_status <> 'DISCARDED_STALE' OR h.end_reason <> 'QUANTITY_WRITES_REVOKED' THEN
         RAISE EXCEPTION 'an unsent quantity version is ended as %/% instead of by the revocation', h.final_status, h.end_reason;
       END IF;
@@ -91,6 +121,14 @@ SELECT pg_temp.ok('a revocation discards the unsent quantity versions with its r
     -- Ушедшая запись не отзывается: её не вернуть
     IF (SELECT status FROM tenant_data.channel_write WHERE channel_write_id = 'a9610000-0000-4000-8000-000000000001') <> 'DISPATCHED' THEN
       RAISE EXCEPTION 'the revocation rewrote a write that had already left';
+    END IF;
+  END $d$ $q$);
+SELECT pg_temp.ok('a revocation discards the quantity version of a blocked unit too (Р-202, шаг 62)', $q$
+  DO $d$ BEGIN
+    IF EXISTS (SELECT 1 FROM tenant_data.channel_write WHERE channel_write_id = 'a9610000-0000-4000-8000-000000000004')
+       OR NOT EXISTS (SELECT 1 FROM tenant_data.channel_write_history WHERE channel_write_id = 'a9610000-0000-4000-8000-000000000004'
+                       AND final_status = 'DISCARDED_STALE' AND end_reason = 'QUANTITY_WRITES_REVOKED') THEN
+      RAISE EXCEPTION 'the blocked quantity version survived the revocation';
     END IF;
   END $d$ $q$);
 SELECT pg_temp.expect_fail('quantity writes revoked twice (Р-202)', format($q$

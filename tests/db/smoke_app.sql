@@ -1111,7 +1111,7 @@ SELECT pg_temp.expect_fail('quantity writes confirmed before the answer about ot
 UPDATE tenant_data.channel_account SET other_tools = 'STOCK' WHERE tenant_id = :tA AND channel_account_id = 'a4000000-0000-0000-0000-000000000002';
 SELECT pg_temp.expect_fail('quantity writes confirmed while another tool manages stock (Р-202)', $q$
   INSERT INTO tenant_data.channel_quantity_writes_confirmation (tenant_id, channel_account_id, typed_confirmation, confirmed_by_membership_id)
-  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000002', 'A2SPID', 'a2000000-0000-0000-0000-00000000000a') $q$, 'another tool updates stock in this channel');
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000002', 'A2SPID', 'a2000000-0000-0000-0000-00000000000a') $q$, 'another tool managing stock would make two writers');
 -- Через помощник, а не сырым DO … RAISE: сырой отказ обрывает файл, и проверки ниже раннер не видит [Р-99]
 SELECT pg_temp.ok('the answer about other tools is stored with its author and time (Р-202)', $q$
   DO $d$ BEGIN

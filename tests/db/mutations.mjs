@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0161_verify_schema_invariants_v44.sql';
+const VERIFY = 'migrations/0163_verify_schema_invariants_v44.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -2145,8 +2145,6 @@ export const STEP60_ROWS = [
         smoke('quantity writes confirmed by a non-owner (Р-202)'), smoke('quantity writes revoked by a non-owner (Р-202)')),
       m(replaceInFunction('tenant_data.channel_quantity_writes_confirmation_guard()', 'IF a.other_tools IS NULL THEN', 'IF false THEN'),
         smoke('quantity writes confirmed before the answer about other tools (Р-202)')),
-      m(replaceInFunction('tenant_data.channel_quantity_writes_confirmation_guard()', "IF a.other_tools IN ('STOCK', 'STOCK_AND_PRICES') THEN", 'IF false THEN'),
-        smoke('quantity writes confirmed while another tool manages stock (Р-202)')),
       m(replaceInFunction('tenant_data.channel_quantity_writes_confirmation_guard()', 'IF btrim(NEW.typed_confirmation) IS DISTINCT FROM a.external_account_id THEN', 'IF false THEN'),
         smoke('quantity writes confirmed with a mistyped account (Р-202)')),
       m(dropTrigger('a_channel_account_other_tools_guard', 'tenant_data.channel_account'),
@@ -2197,6 +2195,31 @@ export const STEP61_ROWS = [
       // Полный прогон CI шага 61: подзапрос к аккаунту — только в ветке количества; без ранней ветки роль каталога упирается в право
       m(replaceInFunction('tenant_data.write_scope_quantity_writes_confirmed()', "IF NEW.field <> 'QUANTITY' OR NOT coalesce(NEW.quantity_sync_enabled, false) THEN", 'IF false THEN'),
         smoke('discovery creates price write scopes on a generic plan without reading the account (Р-202, шаг 35)')),
+    ],
+  },
+];
+
+/**
+ * Шаг 62 (0162): отложенный список шага 61 [Р-202] — блокировка аккаунта у выдачи и отзыва (исключительная) и у отправки количества
+ * (разделяемая), внешние правки количества только у синхронизируемой единицы. Блокировка строки аккаунта FOR UPDATE снята как дубль [Р-104]
+ */
+export const STEP62_ROWS = [
+  {
+    row: 'шаг 62 (Р-202, блокировка и правки)', critical: false,
+    invariant: 'отзыв и выдача берут исключительную блокировку аккаунта, отправка количества — разделяемую; после отзыва чужое количество — не внешняя правка',
+    mutations: [
+      m(replaceInFunction('tenant_data.channel_quantity_writes_confirmation_guard()', 'PERFORM pg_advisory_xact_lock(202, hashtext(NEW.channel_account_id::text));', 'PERFORM 1;'),
+        smoke('a revocation takes the exclusive lock of the account (Р-202, шаг 62)')),
+      m(replaceInFunction('tenant_data.channel_quantity_writes_confirmation_guard()', 'PERFORM pg_advisory_xact_lock(202,', 'PERFORM pg_advisory_xact_lock_shared(202,'),
+        smoke('a revocation takes the exclusive lock of the account (Р-202, шаг 62)')),
+      m(replaceInFunction('tenant_data.channel_write_quantity_writes_guard()', 'PERFORM pg_advisory_xact_lock_shared(202, hashtext(account::text));', 'PERFORM 1;'),
+        smoke('the dispatch of a quantity write takes the shared lock of its account (Р-202, шаг 62)')),
+      // Ревью шага 62, находка 1: запрет двух писателей — на итоговой строке при любой глубине, а не только при смене ответа
+      m(replaceInFunction('tenant_data.channel_account_other_tools_guard()', "IF NEW.other_tools IN ('STOCK', 'STOCK_AND_PRICES') AND NEW.quantity_writes_confirmed THEN",
+        "IF NEW.other_tools IS DISTINCT FROM OLD.other_tools AND NEW.other_tools IN ('STOCK', 'STOCK_AND_PRICES') AND NEW.quantity_writes_confirmed THEN"),
+        smoke('a confirmation applied over another tool managing stock (Р-202, гонка, шаг 62)')),
+      m(replaceInFunction('channel_data.record_channel_observations(uuid, uuid, jsonb)', 'AND qs.quantity_sync_enabled) THEN', ') THEN'),
+        node(T('stock.pg.test.ts'), 'step 62', 'step 62: after the revocation a higher quantity of another tool is not an external edit', '^1$')),
     ],
   },
 ];

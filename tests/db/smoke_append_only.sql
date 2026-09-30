@@ -620,6 +620,23 @@ SELECT pg_temp.expect_fail('an external edit of a field that does not exist (Р-
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'a6000000-0000-0000-0000-000000000001', 'TITLE', 5, 3, NULL, gen_random_uuid(), now()) $q$,
   'external_edit_field_known');
 
+/**
+ * Шаг 62 (ревью шага 62, находка 1): гонка «подтверждение ↔ ответ „остатки ведёт другой инструмент“». Ответ блокировку аккаунта не берёт, и
+ * страж журнала мог прочитать прежний ответ «нет», а применение подтверждения — лечь поверх зафиксированного «остатки». Одна сессия гонку
+ * не покажет, поэтому страж журнала здесь выключен на время проверки: применение видит «остатки», которого страж журнала не видел, и
+ * отказать обязан страж аккаунта — на ИТОГОВОЙ строке
+ */
+INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, external_account_id, marketplaces, credentials_ref, connected_by_membership_id)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4620000-0000-4000-8000-000000000001', 'KAUFLAND', 'syn-race-62', ARRAY['de'], 'vault://a/race-62',
+        'a2000000-0000-0000-0000-00000000000a');
+UPDATE tenant_data.channel_account SET other_tools = 'STOCK' WHERE channel_account_id = 'a4620000-0000-4000-8000-000000000001';
+ALTER TABLE tenant_data.channel_quantity_writes_confirmation DISABLE TRIGGER b_channel_quantity_writes_confirmation_guard;
+SELECT pg_temp.expect_fail('a confirmation applied over another tool managing stock (Р-202, гонка, шаг 62)', $q$
+  INSERT INTO tenant_data.channel_quantity_writes_confirmation (tenant_id, channel_account_id, typed_confirmation, confirmed_by_membership_id)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4620000-0000-4000-8000-000000000001', 'matched', 'a2000000-0000-0000-0000-00000000000a') $q$,
+  'another tool managing stock would make two writers');
+ALTER TABLE tenant_data.channel_quantity_writes_confirmation ENABLE TRIGGER b_channel_quantity_writes_confirmation_guard;
+
 -- Находка 4 ревью шага 16, Р-93, Р-103: у каждой append-only таблицы есть строка, и изменение строки отклоняет именно триггер неизменяемости
 DO $$
 DECLARE
