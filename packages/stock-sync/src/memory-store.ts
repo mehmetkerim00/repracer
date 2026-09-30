@@ -3,7 +3,7 @@ import { systemClock } from '@repracer/channel-port';
 import type { Instant, OrderLine } from '@repracer/channel-port';
 import { availableOf, publishedQuantity, type StockAllocation } from './published.ts';
 import type {
-  ConfirmOrdersOutcome, CreateStockSourceResult, DecideReturnOutcome, EnableStockSyncInput, EnableStockSyncResult, InboundStockOutcome, InboundStockRow, OrderLinesOutcome, RecalculationOutcome,
+  AnswerOtherToolsResult, ConfirmOrdersOutcome, ConfirmQuantityWritesResult, OtherTools, QuantityWritesState, CreateStockSourceResult, DecideReturnOutcome, EnableStockSyncInput, EnableStockSyncResult, InboundStockOutcome, InboundStockRow, OrderLinesOutcome, RecalculationOutcome,
   OrderReturnRow, StockActor, StockChannelRow, StockDivergenceRow, StockImportOutcome, StockImportRow, StockPage, StockRow, StockSourceMode, StockSourceRow, StockStore,
 } from './store.ts';
 
@@ -142,10 +142,41 @@ export class InMemoryStockStore implements StockStore {
     return out;
   }
 
+  /** Шаг 60 [Р-202]: ответы о других инструментах и подтверждения записи количества — как в базе */
+  readonly otherTools = new Map<string, OtherTools>();
+  readonly quantityWritesConfirmed = new Set<string>();
+
+  async answerOtherTools(_tenantId: string, channelAccountId: string, answer: OtherTools, actor: StockActor): Promise<AnswerOtherToolsResult> {
+    if (!this.canManage(actor)) return { status: 'FORBIDDEN' };
+    if (!this.offers.some((o) => o.channelAccountId === channelAccountId)) return { status: 'NOT_FOUND' };
+    if ((answer === 'STOCK' || answer === 'STOCK_AND_PRICES') && this.quantityWritesConfirmed.has(channelAccountId)) return { status: 'CONFLICT', reason: 'QUANTITY_WRITES_CONFIRMED' };
+    this.otherTools.set(channelAccountId, answer);
+    return { status: 'ANSWERED' };
+  }
+
+  async quantityWritesState(_tenantId: string, channelAccountId: string): Promise<QuantityWritesState | null> {
+    if (!this.offers.some((o) => o.channelAccountId === channelAccountId)) return null;
+    return { externalAccountId: channelAccountId, otherTools: this.otherTools.get(channelAccountId) ?? null, confirmed: this.quantityWritesConfirmed.has(channelAccountId) };
+  }
+
+  /** В памяти внешнего идентификатора аккаунта нет — набранным подтверждением служит идентификатор аккаунта */
+  async confirmQuantityWrites(_tenantId: string, channelAccountId: string, typedConfirmation: string, actor: StockActor): Promise<ConfirmQuantityWritesResult> {
+    if (!this.canManage(actor)) return { status: 'FORBIDDEN' };
+    if (!this.offers.some((o) => o.channelAccountId === channelAccountId)) return { status: 'NOT_FOUND' };
+    if (this.quantityWritesConfirmed.has(channelAccountId)) return { status: 'ALREADY_CONFIRMED' };
+    const answer = this.otherTools.get(channelAccountId);
+    if (!answer) return { status: 'ANSWER_FIRST' };
+    if (answer === 'STOCK' || answer === 'STOCK_AND_PRICES') return { status: 'OTHER_TOOL_MANAGES_STOCK' };
+    if (typedConfirmation.trim() !== channelAccountId) return { status: 'CONFIRMATION_MISMATCH' };
+    this.quantityWritesConfirmed.add(channelAccountId);
+    return { status: 'CONFIRMED' };
+  }
+
   async enableStockSync(_tenantId: string, channelAccountId: string, input: EnableStockSyncInput, actor: StockActor): Promise<EnableStockSyncResult> {
     if (!this.canManage(actor)) return { status: 'FORBIDDEN' };
     const offers = this.offers.filter((o) => o.channelAccountId === channelAccountId);
     if (offers.length === 0) return { status: 'NO_OFFERS' };
+    if (!this.quantityWritesConfirmed.has(channelAccountId)) return { status: 'NOT_CONFIRMED', otherTools: this.otherTools.get(channelAccountId) ?? null };
     this.allocations.set(channelAccountId, { bufferUnits: input.bufferUnits, maxQuantity: input.maxQuantity, minQuantityToList: input.minQuantityToList });
     let created = 0; let awaitingAck = 0;
     for (const offer of offers) {

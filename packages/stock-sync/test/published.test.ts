@@ -51,6 +51,10 @@ test('Р-6: хранилище в памяти считает то же, что 
   const actor = { membershipId: 'm', userId: 'u', mfa: true };
   const source = await store.createStockSource('t', { mode: 'INTERNAL_POOL', name: 'L' }, actor) as { stockSourceId: string };
   await store.importStock('t', source.stockSourceId, [{ sku: 'A-1', quantity: 10 }], actor);
+  // Шаг 60 [Р-202]: без ответа о других инструментах и подтверждения владельца запись количества выключена
+  assert.deepEqual(await store.enableStockSync('t', 'acc', { bufferUnits: 2, maxQuantity: null, minQuantityToList: 0, acknowledgeSideEffects: false }, actor), { status: 'NOT_CONFIRMED', otherTools: null });
+  await store.answerOtherTools('t', 'acc', 'NONE', actor);
+  assert.equal((await store.confirmQuantityWrites('t', 'acc', 'acc', actor)).status, 'CONFIRMED');
   await store.enableStockSync('t', 'acc', { bufferUnits: 2, maxQuantity: null, minQuantityToList: 0, acknowledgeSideEffects: false }, actor);
   const now = new Date().toISOString();
   assert.deepEqual((await store.recalculate('t', null, now as never)).writes.map((w) => w.quantity), [8]);

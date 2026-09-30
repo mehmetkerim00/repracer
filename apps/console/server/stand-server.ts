@@ -17,7 +17,7 @@ import {
 } from '@repracer/contract-tests/stand';
 import { createAuthenticator, hasSecondFactor, remoteJwks, staticJwks, type Authenticator, type Principal } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
-import { connectionsView } from '@repracer/console-model';
+import { connectionsView, OTHER_TOOLS_ANSWERS } from '@repracer/console-model';
 import type { ChannelConnectService } from './connect.ts';
 import {
   NOTE_MAX, NOTE_MIN, type BoundsIndexItem, type BoundsIndexView, type EnableResult, type NoteRequest, type SessionView, type StopRequest, type StrategySaveResponse, type WorldSummary,
@@ -456,10 +456,44 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         const rows = connect ? await connect.connections(live.tenantId) : { accounts: [], pending: [] };
         return ok(connectionsView({ worldId: live.id, role: viewer.role, now: systemClock.now() }, rows, connect ? connect.connectable() : [], m));
       }
-      if (req.method !== 'POST' || (param4 !== 'start' && param4 !== 'callback' && param4 !== 'cancel')) return fail(404, 'NOT_FOUND', s.notFound);
+      if (req.method !== 'POST' || (param4 !== 'start' && param4 !== 'callback' && param4 !== 'cancel' && param4 !== 'other-tools' && param4 !== 'quantity-writes')) return fail(404, 'NOT_FOUND', s.notFound);
       if (!can(viewer.role, 'MANAGE_TENANT')) return fail(403, 'FORBIDDEN', t.noRight);
-      if (!connect) return fail(409, 'CHANNEL_UNAVAILABLE', t.errors.unavailable);
       const actor = { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) };
+      /**
+       * Шаг 60 [Р-202]: внешние писатели канала. Ответ «обновляет ли другой инструмент остатки или цены» и подтверждение записи
+       * количества — через хранилище остатков, а не через службу подключения: у мира без OAuth (стенд, файл развёртывания)
+       * вопрос тот же. Кто подтверждает (только владелец), что набрано и не противоречит ли ответу — проверяет база; консоль
+       * лишь переводит её исход в код HTTP, не переписывая причину [Р-94]. Второй фактор не нужен [Р-202]
+       */
+      if (param4 === 'other-tools' || param4 === 'quantity-writes') {
+        const e = t.errors;
+        const accountId = typeof body.channelAccountId === 'string' ? body.channelAccountId : null;
+        if (!accountId || !live.accounts.some((a) => a.channelAccountId === accountId)) return fail(404, 'ACCOUNT_NOT_FOUND', e.accountNotFound);
+        if (param4 === 'other-tools') {
+          if (!live.stock.answerOtherTools) return fail(404, 'NOT_FOUND', s.notFound);
+          const answer = OTHER_TOOLS_ANSWERS.find((x) => x === body.answer) ?? null;
+          if (!answer) return fail(400, 'BAD_ANSWER', e.badAnswer);
+          const answered = await live.stock.answerOtherTools(live.tenantId, accountId, answer, actor);
+          if (answered.status === 'ANSWERED') return ok({ answer, message: t.otherTools.answered, warning: answer === 'PRICES' || answer === 'STOCK_AND_PRICES' ? t.otherTools.twoRepricers : null });
+          if (answered.status === 'NOT_FOUND') return fail(404, 'ACCOUNT_NOT_FOUND', e.accountNotFound);
+          if (answered.status === 'CONFLICT') return fail(409, 'QUANTITY_WRITES_CONFIRMED', e.answerConflictConfirmed);
+          return fail(403, 'FORBIDDEN', t.noRight);
+        }
+        if (!live.stock.confirmQuantityWrites) return fail(404, 'NOT_FOUND', s.notFound);
+        if (typeof body.typedConfirmation !== 'string' || body.typedConfirmation.length > 256) return fail(400, 'CONFIRMATION_MISMATCH', e.confirmationMismatch);
+        const confirmed = await live.stock.confirmQuantityWrites(live.tenantId, accountId, body.typedConfirmation, actor);
+        switch (confirmed.status) {
+          case 'CONFIRMED': return ok({ confirmed: true, message: t.quantityWrites.confirmed });
+          case 'NOT_OWNER': return fail(403, 'NOT_OWNER', e.notOwner);
+          case 'FORBIDDEN': return fail(403, 'FORBIDDEN', t.noRight);
+          case 'NOT_FOUND': return fail(404, 'ACCOUNT_NOT_FOUND', e.accountNotFound);
+          case 'ALREADY_CONFIRMED': return fail(409, 'ALREADY_CONFIRMED', e.alreadyConfirmed);
+          case 'CONFIRMATION_MISMATCH': return fail(400, 'CONFIRMATION_MISMATCH', e.confirmationMismatch);
+          case 'ANSWER_FIRST': return fail(409, 'ANSWER_FIRST', e.answerFirst);
+          case 'OTHER_TOOL_MANAGES_STOCK': return fail(409, 'OTHER_TOOL_MANAGES_STOCK', e.otherToolManagesStock);
+        }
+      }
+      if (!connect) return fail(409, 'CHANNEL_UNAVAILABLE', t.errors.unavailable);
       if (param4 === 'cancel') {
         const id = typeof body.authorizationRequestId === 'string' && /^[0-9a-f-]{36}$/.test(body.authorizationRequestId) ? body.authorizationRequestId : null;
         if (!id) return fail(400, 'BAD_REQUEST', s.badRequest);
@@ -846,6 +880,15 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         // Р-139: включение — задание; сколько предложений оно затронет, известно заранее — это размер шага пути
         const status = (await live.store.onboardingStatus(world.tenantId)).find((x) => x.step === 'STOCK_SYNC');
         if (!status || status.totalCount === 0) return fail(409, 'NO_OFFERS', m.ui.stock.enable.noOffers);
+        /**
+         * Шаг 60 [Р-202]: запись количества выключена, пока владелец не подтвердил на экране подключений, что количество в
+         * этом канале не ведут другие инструменты. Проверяется ДО создания задания — иначе продавец увидел бы провал задания
+         * вместо объяснения; само задание и база откажут так же (NOT_CONFIRMED, страж write_scope)
+         */
+        const writes = live.stock.quantityWritesState ? await live.stock.quantityWritesState(world.tenantId, account.channelAccountId) : null;
+        if (writes && !writes.confirmed) {
+          return fail(409, 'QUANTITY_WRITES_NOT_CONFIRMED', m.ui.stock.enable.notConfirmed(writes.otherTools === 'STOCK' || writes.otherTools === 'STOCK_AND_PRICES'));
+        }
         return createJob('STOCK_SYNC_ENABLE', { channelAccountId: account.channelAccountId, bufferUnits, maxQuantity, minQuantityToList, acknowledgeSideEffects: body.acknowledgeSideEffects === true },
           status.totalCount, m.ui.stock.importFile.enableCreated);
       }

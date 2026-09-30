@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ConnectionsView } from '@repracer/console-model';
+import type { ConnectionAccountView, ConnectionsView } from '@repracer/console-model';
 import { requestJson, useResource, worldPath } from '../api.ts';
 import { Badge, ErrorBox, errorText, Load, useMessages } from '../components.tsx';
 
@@ -76,6 +76,7 @@ export function ConnectionsScreen({ worldId }: { worldId: string }) {
                     </td>
                     <td className="note">{a.authorizationText}{a.discoveryText ? <><br />{a.discoveryText}</> : null}</td>
                     <td>{a.canReconnect ? <button type="button" onClick={() => start(a.channel, a.marketplaces)}>{a.reconnectLabel}</button> : null}</td>
+                    <td><ExternalWriters worldId={worldId} account={a} onChanged={retry} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -85,6 +86,48 @@ export function ConnectionsScreen({ worldId }: { worldId: string }) {
         </>
       )}
     </Load>
+  );
+}
+
+/**
+ * Шаг 60 [Р-202]: внешние писатели канала — у каждого аккаунта. Вопрос «обновляет ли другой инструмент остатки или цены»,
+ * предупреждение о двух репрайсерах, запись количества (выключена, пока владелец не подтвердит набранным идентификатором
+ * аккаунта) и счётчик внешних правок за сутки. Кто может подтвердить и не противоречит ли подтверждение ответу, решает база.
+ */
+function ExternalWriters({ worldId, account: a, onChanged }: { worldId: string; account: ConnectionAccountView; onChanged: () => void }) {
+  const m = useMessages();
+  const [typed, setTyped] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const post = (path: 'other-tools' | 'quantity-writes', body: Record<string, unknown>) =>
+    void requestJson<{ message: string }>(worldPath(worldId, 'connections', path), { method: 'POST', locale: m.locale, body: { channelAccountId: a.channelAccountId, ...body } })
+      .then((r) => { setError(null); setMessage(r.message); onChanged(); })
+      .catch((e: unknown) => { setMessage(null); setError(errorText(e, m)); });
+  const q = a.quantityWrites;
+  return (
+    <div>
+      <p><strong>{a.otherTools.question}</strong> {a.otherTools.text}</p>
+      {a.otherTools.options.length > 0 ? (
+        <p>
+          {a.otherTools.options.map((o) => (
+            <button key={o.answer} type="button" disabled={o.answer === a.otherTools.answer} onClick={() => post('other-tools', { answer: o.answer })}>{o.label}</button>
+          ))}
+        </p>
+      ) : null}
+      {a.otherTools.warning ? <p className="notice" role="alert">{a.otherTools.warning}</p> : null}
+      <p><Badge tone={q.confirmed ? 'ok' : 'warn'}>{q.text}</Badge></p>
+      {q.blockedText ? <p className="note">{q.blockedText}</p> : null}
+      {q.canConfirm ? (
+        <p>
+          <label>{q.confirmationHint} <input value={typed} onChange={(e) => setTyped(e.currentTarget.value)} /></label>
+          <button type="button" disabled={typed.trim() === ''} onClick={() => post('quantity-writes', { typedConfirmation: typed })}>{q.confirmLabel}</button>
+        </p>
+      ) : null}
+      <p>{a.externalEditsText}</p>
+      <p className="note">{a.externalEditsNote}</p>
+      {message ? <p className="notice" role="status">{message}</p> : null}
+      {error ? <ErrorBox message={error} /> : null}
+    </div>
   );
 }
 

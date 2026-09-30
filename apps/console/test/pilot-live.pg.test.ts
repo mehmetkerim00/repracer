@@ -27,6 +27,7 @@ import { createIsolatedDatabase, type IsolatedDatabase, type TestRole } from '..
 import { startConsole, type RunningConsole } from '../server/console-service.ts';
 import { CONSOLE_ROLES } from '../server/config.ts';
 import { ID_TOKEN_HEADER } from '../src/api.ts';
+import { confirmQuantityWritesAsOwner } from './quantity-writes.ts';
 
 /**
  * Р-179 (шаг 44): ПОЛНЫЙ путь пилота одним живым прогоном через HTTP как браузер [Р-136, Р-142], без склеек:
@@ -358,6 +359,12 @@ test('Р-179: путь пилота целиком — от оператора �
   assert.equal(source.status, 200, JSON.stringify(source.body));
   const stockCsv = ['Artikelnummer;Bestand', ...skus.map((s) => `${s};7`)].join('\r\n');
   await job('остатки: файл', api('stock', 'import'), { fileName: 'bestand.csv', content: Buffer.from(stockCsv).toString('base64'), stockSourceId: source.body.stockSourceId });
+  // Шаг 60 [Р-202]: при подключении владельца спрашивают о других инструментах канала; запись количества — после его подтверждения
+  assert.deepEqual([account.otherTools.answer, account.quantityWrites.confirmed], [null, false], 'новый аккаунт: вопрос не отвечен, запись количества выключена');
+  const notConfirmed = await consoleCall<{ error: { code: string } }>('остатки: синхронизация до подтверждения записи количества', 'POST', api('stock', 'enable'), { channelAccountId: ids.accountId, bufferUnits: 1, maxQuantity: null, minQuantityToList: 0 });
+  assert.deepEqual([notConfirmed.status, notConfirmed.body.error.code], [409, 'QUANTITY_WRITES_NOT_CONFIRMED']);
+  await timed('подключения: других инструментов нет, запись количества подтверждена', () =>
+    confirmQuantityWritesAsOwner((method, url, body) => consoleCall(`подключения ${method}`, method, url, body), api('connections'), ids.accountId));
   // Р-1: остаток Amazon ЕС пишется на весь регион — экран остатков называет это ДО записи, и продавец подтверждает
   const first = await job('остатки: синхронизация без подтверждения региона', api('stock', 'enable'), { channelAccountId: ids.accountId, bufferUnits: 1, maxQuantity: null, minQuantityToList: 0 });
   assert.match(first.headline, new RegExp(`NOT running yet for ${OFFERS} of ${OFFERS} channel units`), `без подтверждения региона синхронизация ждёт его: ${first.headline}`);

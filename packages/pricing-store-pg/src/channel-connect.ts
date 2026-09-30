@@ -83,6 +83,16 @@ export interface ConnectionRow {
    */
   discoveryCircleStartedAt: Instant | null;
   discoveryCircleCompletedAt: Instant | null;
+  /**
+   * Шаг 60 [Р-202]: обновляет ли другой инструмент остатки или цены в этом канале — ответ владельца (NULL — не отвечено);
+   * автора и время ставит база
+   */
+  otherTools: 'NONE' | 'STOCK' | 'PRICES' | 'STOCK_AND_PRICES' | null;
+  otherToolsAnsweredAt: Instant | null;
+  /** Шаг 60 [Р-202]: владелец подтвердил, что количество в канале не ведут другие инструменты — без этого запись количества выключена */
+  quantityWritesConfirmed: boolean;
+  /** Шаг 60 [Р-202]: внешние правки канала за сутки по часам базы — цены или количество, которых мы не писали (`channel_data.external_edit`) */
+  externalEdits24h: number;
 }
 
 export interface PendingRequestRow {
@@ -251,6 +261,11 @@ export class PgChannelConnectStore {
                      JOIN tenant_data.write_scope ws ON ws.tenant_id = d.tenant_id AND ws.write_scope_id = d.write_scope_id
                     WHERE d.tenant_id = ca.tenant_id AND ws.channel_account_id = ca.channel_account_id
                       AND d.shadow AND d.decided_at >= now() - interval '1 day') AS shadow_decisions,
+                  -- Шаг 60 [Р-202]: внешние правки аккаунта за сутки (индекс external_edit_account_recent_idx, 0158); административная роль
+                  -- видит журнал правок политикой роли пути решения, в которую входит
+                  (SELECT count(*)::int FROM channel_data.external_edit e
+                    WHERE e.tenant_id = ca.tenant_id AND e.channel_account_id = ca.channel_account_id AND e.recorded_at >= now() - interval '1 day') AS external_edits,
+                  ca.other_tools, ca.other_tools_answered_at, ca.quantity_writes_confirmed,
                   cr.obtained_at, cr.verified_at, cr.check_failures, dc.circle_started_at, dc.last_circle_completed_at
              FROM tenant_data.channel_account ca
              LEFT JOIN LATERAL tenant_data.discovery_circle_state(ca.tenant_id, ca.channel_account_id) dc ON true
@@ -276,6 +291,10 @@ export class PgChannelConnectStore {
           credentialCheckFailures: Number(r.check_failures ?? 0), oauth: r.obtained_at !== null,
           discoveryCircleStartedAt: r.circle_started_at ? iso(r.circle_started_at) : null,
           discoveryCircleCompletedAt: r.last_circle_completed_at ? iso(r.last_circle_completed_at) : null,
+          otherTools: (r.other_tools as ConnectionRow['otherTools']) ?? null,
+          otherToolsAnsweredAt: r.other_tools_answered_at ? iso(r.other_tools_answered_at) : null,
+          quantityWritesConfirmed: r.quantity_writes_confirmed === true,
+          externalEdits24h: Number(r.external_edits),
         })),
         pending: pending.rows.map((r) => ({
           authorizationRequestId: r.authorization_request_id as string, channel: r.channel as string, marketplaces: [...(r.marketplaces as string[])],

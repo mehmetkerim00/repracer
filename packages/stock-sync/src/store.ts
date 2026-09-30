@@ -77,7 +77,20 @@ export interface EnableStockSyncInput {
 export type EnableStockSyncResult =
   | { status: 'ENABLED'; scopes: number; created: number; awaitingAck: number }
   | { status: 'NO_OFFERS' }
-  | { status: 'FORBIDDEN' };
+  | { status: 'FORBIDDEN' }
+  /** Шаг 60 [Р-202]: владелец не подтвердил, что количество в этом канале не ведут другие инструменты — запись количества выключена */
+  | { status: 'NOT_CONFIRMED'; otherTools: OtherTools | null };
+
+/** Шаг 60 [Р-202]: обновляет ли другой инструмент остатки или цены в этом канале — ответ владельца */
+export type OtherTools = 'NONE' | 'STOCK' | 'PRICES' | 'STOCK_AND_PRICES';
+
+export interface QuantityWritesState { externalAccountId: string; otherTools: OtherTools | null; confirmed: boolean }
+
+export type AnswerOtherToolsResult = { status: 'ANSWERED' } | { status: 'FORBIDDEN' | 'NOT_FOUND' } | { status: 'CONFLICT'; reason: 'QUANTITY_WRITES_CONFIRMED' };
+
+export type ConfirmQuantityWritesResult =
+  | { status: 'CONFIRMED' }
+  | { status: 'FORBIDDEN' | 'NOT_OWNER' | 'NOT_FOUND' | 'ALREADY_CONFIRMED' | 'CONFIRMATION_MISMATCH' | 'ANSWER_FIRST' | 'OTHER_TOOL_MANAGES_STOCK' };
 
 /** Пересчёт: какие записи созданы. Отправляет их диспетчер [Р-64], не пересчёт */
 export interface RecalculationOutcome {
@@ -207,6 +220,12 @@ export interface StockStore {
   enableStockSync(tenantId: string, channelAccountId: string, input: EnableStockSyncInput, actor: StockActor): Promise<EnableStockSyncResult>;
   /** Пересчёт публикуемого количества и записи в канал для изменившихся единиц; null — все товары тенанта */
   recalculate(tenantId: string, productIds: readonly string[] | null, now: Instant, options?: { lockTimeoutMs?: number }): Promise<RecalculationOutcome>;
+  /** Шаг 60 [Р-202]: состояние записи количества аккаунта — что набирать при подтверждении, ответ о других инструментах, подтверждено ли */
+  quantityWritesState?(tenantId: string, channelAccountId: string): Promise<QuantityWritesState | null>;
+  /** Шаг 60 [Р-202]: ответ владельца о других инструментах канала — автор и время ставит база */
+  answerOtherTools?(tenantId: string, channelAccountId: string, answer: OtherTools, actor: StockActor): Promise<AnswerOtherToolsResult>;
+  /** Шаг 60 [Р-202]: владелец подтверждает набранным идентификатором аккаунта, что количество в канале не ведут другие инструменты */
+  confirmQuantityWrites?(tenantId: string, channelAccountId: string, typedConfirmation: string, actor: StockActor): Promise<ConfirmQuantityWritesResult>;
   /** Шаг 59 [Р-199]: возвраты — ждущие решения человека первыми, затем последние решённые и сведения по чужим пулам */
   listReturns?(tenantId: string, limit: number): Promise<OrderReturnRow[]>;
   /**

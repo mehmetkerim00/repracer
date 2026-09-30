@@ -567,6 +567,10 @@ export const en = {
           ? `Synchronisation is NOT running yet for ${r.awaitingAck} of ${r.scopes} channel units: they wait for your confirmation of the side effect (${r.created} new units, writes created: ${r.writes}).`
           : `Synchronisation enabled for ${r.scopes} channel units (${r.created} new). Writes created: ${r.writes}.`,
         noOffers: 'This account has no offers whose stock we manage.',
+        // Шаг 60 [Р-202]: запись количества выключена до подтверждения владельца на экране подключений
+        notConfirmed: (otherToolManagesStock: boolean): string => otherToolManagesStock
+          ? 'Stock writes to this channel are off: you told us on the Channel connections screen that another tool updates stock here, and two tools writing stock overwrite each other. Switch that tool off and change the answer there first.'
+          : 'Stock writes to this channel are off: the owner has not yet confirmed on the Channel connections screen that no other tool manages stock here. Answer the question there and confirm; then enable the synchronisation.',
       },
       divergences: {
         title: 'Divergences: ours vs channel',
@@ -621,6 +625,30 @@ export const en = {
       noRight: 'Only the owner or an administrator of the account connects channels.',
       tokenNote: 'We keep the access of the channel encrypted and never show it — not here, not in letters, not in logs. You can withdraw it at any time in the channel itself; we notice that and tell you.',
       /** Шаг 49 [Р-190, E-21]: что мы на eBay в бою пока не видим — у каждого аккаунта eBay, словами */
+      /** Шаг 60 [Р-202]: внешние писатели канала — вопрос при подключении, запись количества по подтверждению владельца, внешние правки */
+      otherTools: {
+        question: 'Does another tool update stock or prices in this channel?',
+        unanswered: 'Not answered yet.',
+        current: (answer: string) => `Your answer: ${answer}.`,
+        answers: { NONE: 'no other tool', STOCK: 'another tool updates stock', PRICES: 'another tool updates prices', STOCK_AND_PRICES: 'another tool updates stock and prices' } as Record<'NONE' | 'STOCK' | 'PRICES' | 'STOCK_AND_PRICES', string>,
+        options: { NONE: 'No other tool', STOCK: 'Yes — stock', PRICES: 'Yes — prices', STOCK_AND_PRICES: 'Yes — stock and prices' } as Record<'NONE' | 'STOCK' | 'PRICES' | 'STOCK_AND_PRICES', string>,
+        twoRepricers: 'Two repricers on one channel are not allowed: each would react to the prices of the other. Switch off the other tool for this channel — or keep our engine out of it (leave the account in the shadow and do not switch on repricing).',
+        answered: 'Answer saved.',
+      },
+      quantityWrites: {
+        off: 'Stock writes to this channel: off — the owner has to confirm that no other tool manages stock here.',
+        on: 'Stock writes to this channel: on — confirmed by the owner.',
+        answerFirst: 'Answer the question above first.',
+        otherToolManagesStock: 'Another tool updates stock in this channel: if we wrote stock too, the two would overwrite each other. Stock writes stay off until that tool is switched off and the answer is changed.',
+        ownerOnly: 'Only the owner confirms stock writes.',
+        hint: (id: string) => `To confirm that no other tool manages stock in this channel, type the channel account ID: ${id}`,
+        submit: 'Confirm and allow stock writes',
+        confirmed: 'Confirmed: stock writes to this channel are allowed. Enable the synchronisation on the Stock screen.',
+      },
+      externalEdits: {
+        count: (n: number) => `External edits in the last 24 hours: ${n}`,
+        note: 'An external edit is a price or a stock quantity in the channel that we did not write and that differs from our target: someone else — another tool or a manual edit — changes this channel.',
+      },
       ebayLiveLimits: 'In live mode we do not yet see on eBay the price buyers see or edits made by other programs: our writes are confirmed by the offer record, and the price-basis check is limited (question E-21).',
       connect: (channel: string) => `Connect ${channel}`,
       connectAnother: (channel: string) => `Connect another ${channel} account`,
@@ -693,6 +721,15 @@ export const en = {
         sellerTaken: 'This seller account is already connected — in another repracer account or as another connection. Nothing was connected; contact support if this is unexpected.',
         mfa: 'Renewing the access of an existing connection needs your second factor. Sign in again with it and repeat.',
         connected: (reconnected: boolean): string => reconnected ? 'Access renewed. The account works as before.' : 'Connected. The account starts in the shadow; your offers appear within minutes.',
+        // Шаг 60 [Р-202]: ответ о других инструментах и подтверждение записи количества — каждый исход своим текстом
+        badAnswer: 'Choose one of the answers.',
+        accountNotFound: 'This channel account is not connected in this repracer account.',
+        answerConflictConfirmed: 'Stock writes to this channel are already confirmed by the owner: with another tool updating stock here, the two would overwrite each other. This answer is not accepted.',
+        notOwner: 'Only the owner confirms stock writes to a channel.',
+        alreadyConfirmed: 'Stock writes to this channel are already confirmed.',
+        confirmationMismatch: 'The typed text does not match the channel account ID. Type it exactly as shown.',
+        answerFirst: 'Answer first whether another tool updates stock or prices in this channel.',
+        otherToolManagesStock: 'You told us another tool updates stock in this channel: our stock writes would overwrite it and it would overwrite ours. Stock writes stay off; switch that tool off and change your answer first.',
       },
     },
     shadow: {

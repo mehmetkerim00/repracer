@@ -8,16 +8,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { JobCreatedResponse, StandToken } from '../src/api-types.ts';
-import type { BulkJobView, OnboardingView, StockDivergencesView, StockReturnsView, StockView } from '@repracer/console-model';
+import type { BulkJobView, ConnectionsView, OnboardingView, StockDivergencesView, StockReturnsView, StockView } from '@repracer/console-model';
 import { STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { demoWorld, nextNineUtc, DEMO_OFFERS, type DemoWorld } from '@repracer/contract-tests/live';
 import { createAuthenticator, MemoryIdentityDirectory, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
-import { PgPricingStore, PgStockStore, type PgPool } from '@repracer/pricing-store-pg';
+import { PgChannelConnectStore, PgPricingStore, PgStockStore, type PgPool } from '@repracer/pricing-store-pg';
 import { createStockPipeline, type StockPipeline } from '@repracer/stock-sync';
 import { createIsolatedDatabase, type IsolatedDatabase } from '../../../packages/pricing-store-pg/test/isolated-db.ts';
 import { createStandApi, createStandServer } from '../server/stand-server.ts';
 import type { BulkWorkerConfig } from '../server/bulk-worker.ts';
+import { connectionsOnly } from './quantity-writes.ts';
 
 /**
  * Р-152 (шаг 35): путь «только остатки» живым прогоном через консоль как браузер [Р-136, Р-142] — от пустого пути до
@@ -55,6 +56,8 @@ let stockStore: PgStockStore;
 let worldStockPipeline: StockPipeline;
 /** Шаг 59 [Р-199]: наблюдатель тенанта — видит возвраты, но не решает (403 у консоли) */
 let viewerAuth: { authorization: string; cookie: string };
+/** Шаг 60 [Р-202]: администратор тенанта — управляет подключениями, но запись количества подтверждает только владелец (база) */
+let adminAuth: { authorization: string; cookie: string };
 
 const api = (screen: string, param?: string) => `/api/worlds/${encodeURIComponent(WORLD)}/${screen}${param ? `/${param}` : ''}`;
 
@@ -122,6 +125,19 @@ before(async () => {
   const viewerUser = '1d000000-0000-4000-8000-000000000199';
   directory.link({ issuer: STAND_ISSUER, subject: 'demo-viewer' }, viewerUser);
   directory.addMembership(viewerUser, { tenantId: seeded.tenantId, membershipId: '1e000000-0000-4000-8000-000000000199', role: 'VIEWER' });
+  /**
+   * Шаг 60 [Р-202]: администратор — настоящий участник тенанта в базе (как агентство шага 45, вставкой суперпользователя в мир
+   * прогона): консоль пропускает его к подтверждению записи количества, и отказ «только владелец» даёт база своим стражем
+   */
+  const adminUser = '1d000000-0000-4000-8000-000000000198';
+  const adminMembership = '1e000000-0000-4000-8000-000000000198';
+  await db.superuser(`
+    SET session_replication_role = replica;
+    INSERT INTO platform.app_user (user_id, email) VALUES ('${adminUser}', 'admin@example.invalid');
+    INSERT INTO tenant_data.membership (tenant_id, membership_id, user_id, role, status) VALUES ('${seeded.tenantId}', '${adminMembership}', '${adminUser}', 'ADMIN', 'ACTIVE');
+    SET session_replication_role = origin;`);
+  directory.link({ issuer: STAND_ISSUER, subject: 'demo-admin' }, adminUser);
+  directory.addMembership(adminUser, { tenantId: seeded.tenantId, membershipId: adminMembership, role: 'ADMIN' });
   const issuer = createTestIssuer({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE });
   /**
    * Мир-приманка на ТОЙ ЖЕ базе и с тем же хранилищем остатков, но другого тенанта — и первым в списке. Его хранилище
@@ -131,7 +147,10 @@ before(async () => {
   const decoy: LiveWorld = { ...live, id: 'demo/decoy', title: 'Приманка', tenantId: '10000000-0000-4000-8000-00000000d3c0' };
   const handle = createStandApi([decoy, live], {
     authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory }),
-    simulator: { token: (account) => issuer.token(account.role === 'VIEWER' ? 'demo-viewer' : 'demo-owner', { email: 'owner@example.invalid', amr: ['pwd', 'otp'] }), expiresInSeconds: 3600 },
+    simulator: { token: (account) => issuer.token(account.role === 'VIEWER' ? 'demo-viewer' : account.role === 'ADMIN' ? 'demo-admin' : 'demo-owner', { email: 'owner@example.invalid', amr: ['pwd', 'otp'] }), expiresInSeconds: 3600 },
+  }, {
+    // Шаг 60 [Р-202]: экран подключений мира — аккаунты из базы тем же хранилищем, что в работе; подключать новые каналы нечем
+    connect: (worldId) => (worldId === WORLD ? connectionsOnly(new PgChannelConnectStore(adminPool)) : null),
   });
   server = createStandServer(handle);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -140,6 +159,8 @@ before(async () => {
   owner = { authorization: `Bearer ${((await token.json()) as StandToken).accessToken}`, cookie: 'repracer_locale=de' };
   const viewerToken = await fetch(`${origin}/api/stand-issuer/token?locale=de`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ role: 'VIEWER' }) });
   viewerAuth = { authorization: `Bearer ${((await viewerToken.json()) as StandToken).accessToken}`, cookie: 'repracer_locale=de' };
+  const adminToken = await fetch(`${origin}/api/stand-issuer/token?locale=de`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ role: 'ADMIN' }) });
+  adminAuth = { authorization: `Bearer ${((await adminToken.json()) as StandToken).accessToken}`, cookie: 'repracer_locale=de' };
   const observerUrl = new URL(process.env.REPRACER_PG_ADMIN_URL!); observerUrl.pathname = `/${db.name}`;
   const { createPool } = await import('@repracer/pricing-store-pg');
   observer = createPool(observerUrl.toString(), { max: 1, applicationName: 'repracer-stock-only-observer' });
@@ -195,6 +216,67 @@ test('Р-152: путь «только остатки» — от выбора п�
   let stockScreen = (await step<StockView>('экран остатков', 'GET', api('stock'))).body;
   assert.ok(stockScreen.traps.some((t) => t.channel === 'KAUFLAND' && /id_offer/.test(t.text)), 'ловушка Kaufland названа до записи');
   assert.deepEqual([stockScreen.summary.products, stockScreen.summary.withStock, stockScreen.summary.synced], [DEMO_OFFERS, DEMO_OFFERS, 0]);
+
+  /**
+   * Шаг 60 [Р-202]: запись количества выключена, пока владелец не подтвердил на экране подключений, что другие инструменты
+   * количество в этом канале не ведут. Путь продавца: отказ включения с объяснением → экран подключений → ответ → подтверждение
+   */
+  const accountId = demo.live.seeded.channelAccountId;
+  const enableBody = { channelAccountId: accountId, bufferUnits: 2, maxQuantity: null, minQuantityToList: 0 };
+  type Failure = { error: { code: string; message: string } };
+  const notConfirmed = await step<Failure>('включение до подтверждения записи количества', 'POST', api('stock', 'enable'), enableBody);
+  assert.deepEqual([notConfirmed.status, notConfirmed.body.error.code], [409, 'QUANTITY_WRITES_NOT_CONFIRMED'], JSON.stringify(notConfirmed.body));
+  assert.match(notConfirmed.body.error.message, /Kanalverbindungen/, 'отказ отправляет на экран подключений');
+  const connectionsOf = async (name: string) => {
+    const screen = await step<ConnectionsView>(name, 'GET', api('connections'));
+    assert.equal(screen.status, 200, JSON.stringify(screen.body).slice(0, 300));
+    return screen.body.accounts.find((a) => a.channelAccountId === accountId)!;
+  };
+  let connection = await connectionsOf('экран подключений: вопрос о других инструментах');
+  assert.deepEqual([connection.otherTools.answer, connection.otherTools.question, connection.quantityWrites.confirmed, connection.quantityWrites.canConfirm, connection.externalEdits24h],
+    [null, 'Aktualisiert ein anderes Tool Bestände oder Preise in diesem Kanal?', false, false, 0], 'не отвечено, запись количества выключена, внешних правок нет');
+  assert.match(connection.quantityWrites.text, /aus/, connection.quantityWrites.text);
+  assert.match(connection.externalEditsText, /: 0$/, connection.externalEditsText);
+  const answer = (name: string, value: string, auth = owner) => call('POST', api('connections', 'other-tools'), { channelAccountId: accountId, answer: value }, auth);
+  const confirm = (typedConfirmation: string, auth = owner) => call('POST', api('connections', 'quantity-writes'), { channelAccountId: accountId, typedConfirmation }, auth);
+  const codeOf = (r: { status: number; text: string }) => [r.status, (JSON.parse(r.text) as Failure).error.code];
+  // Без ответа подтверждать нечего; ответ «остатки ведёт другой инструмент» подтверждение запрещает — своей причиной базы
+  assert.deepEqual(codeOf(await confirm('irrelevant')), [409, 'ANSWER_FIRST']);
+  assert.equal((await answer('остатки', 'STOCK')).status, 200);
+  connection = await connectionsOf('экран подключений: остатки ведёт другой инструмент');
+  assert.deepEqual([connection.otherTools.answer, connection.quantityWrites.canConfirm, connection.otherTools.warning], ['STOCK', false, null]);
+  assert.ok(connection.quantityWrites.blockedText, 'сказано, почему подтвердить нельзя');
+  assert.deepEqual(codeOf(await confirm(connection.label)), [409, 'OTHER_TOOL_MANAGES_STOCK']);
+  const stockManaged = await step<Failure>('включение при чужом инструменте остатков', 'POST', api('stock', 'enable'), enableBody);
+  assert.deepEqual([stockManaged.status, stockManaged.body.error.code], [409, 'QUANTITY_WRITES_NOT_CONFIRMED']);
+  assert.notEqual(stockManaged.body.error.message, notConfirmed.body.error.message, 'при чужом инструменте остатков отказ говорит именно это');
+  // Цены ведёт другой инструмент — два репрайсера на одном канале: предупреждение на экране подключений
+  assert.equal((await answer('цены', 'PRICES')).status, 200);
+  connection = await connectionsOf('экран подключений: цены ведёт другой инструмент');
+  assert.match(connection.otherTools.warning ?? '', /Zwei Repricer/, 'предупреждение о двух репрайсерах');
+  assert.equal(connection.quantityWrites.canConfirm, true, 'чужой инструмент цен запись количества не запрещает');
+  assert.equal((await answer('других нет', 'NONE')).status, 200);
+  connection = await connectionsOf('экран подключений: других инструментов нет');
+  assert.deepEqual([connection.otherTools.answer, connection.otherTools.warning, connection.quantityWrites.canConfirm], ['NONE', null, true]);
+  const typed = connection.quantityWrites.typeToConfirm!;
+  assert.ok(connection.quantityWrites.confirmationHint!.includes(typed), 'экран показывает, что набрать');
+  // Не владелец: наблюдателю отказывает консоль, администратору — база («подтверждает только владелец»)
+  assert.deepEqual(codeOf(await confirm(typed, viewerAuth)), [403, 'FORBIDDEN']);
+  assert.deepEqual(codeOf(await confirm(typed, adminAuth)), [403, 'NOT_OWNER']);
+  assert.equal((await answer('администратор отвечает', 'NONE', adminAuth)).status, 200, 'ответ даёт тот, кто управляет подключениями');
+  // Владелец с неверным текстом — отказ; верный — подтверждено, повтор — «уже подтверждено»
+  assert.deepEqual(codeOf(await confirm(`${typed}x`)), [400, 'CONFIRMATION_MISMATCH']);
+  const confirmedNow = await step<{ confirmed: boolean }>('подтверждение записи количества владельцем', 'POST', api('connections', 'quantity-writes'), { channelAccountId: accountId, typedConfirmation: ` ${typed} ` });
+  assert.equal(confirmedNow.status, 200, JSON.stringify(confirmedNow.body));
+  assert.deepEqual(codeOf(await confirm(typed)), [409, 'ALREADY_CONFIRMED']);
+  // При действующем подтверждении ответ «остатки ведёт другой инструмент» отклоняет база — два писателя не появятся обходом
+  assert.deepEqual(codeOf(await answer('остатки после подтверждения', 'STOCK')), [409, 'QUANTITY_WRITES_CONFIRMED']);
+  connection = await connectionsOf('экран подключений: запись количества включена');
+  assert.deepEqual([connection.quantityWrites.confirmed, connection.quantityWrites.canConfirm, connection.otherTools.answer], [true, false, 'NONE']);
+  assert.match(connection.quantityWrites.text, /an —/, connection.quantityWrites.text);
+  const [journal] = (await observer.query(`SELECT count(*)::int AS n, min(typed_confirmation) AS typed FROM tenant_data.channel_quantity_writes_confirmation WHERE channel_account_id = $1`, [accountId])).rows;
+  assert.deepEqual([journal.n, journal.typed], [1, 'matched'], 'одна строка журнала подтверждения; набранное хранится отметкой');
+
   const enableJob = await step<JobCreatedResponse>('включение синхронизации (задание)', 'POST', api('stock', 'enable'),
     { channelAccountId: demo.live.seeded.channelAccountId, bufferUnits: 2, maxQuantity: null, minQuantityToList: 0 });
   assert.equal(enableJob.status, 200, JSON.stringify(enableJob.body).slice(0, 300));
@@ -240,6 +322,28 @@ test('Р-152: путь «только остатки» — от выбора п�
   const [pricing] = (await observer.query(`SELECT (SELECT count(*) FROM tenant_data.cost_profile)::int AS costs, (SELECT count(*) FROM tenant_data.pricing_strategy)::int AS strategies,
                                                   (SELECT count(*) FROM tenant_data.write_scope WHERE field = 'PRICE' AND pricing_mode = 'ENGINE')::int AS engines`)).rows;
   assert.deepEqual([pricing.costs, pricing.strategies, pricing.engines], [0, 0, 0]);
+});
+
+test('шаг 60 [Р-202]: счётчик внешних правок на экране подключений — правки аккаунта за сутки по часам базы', async () => {
+  const accountId = demo.live.seeded.channelAccountId;
+  const edits = async () => ((await step<ConnectionsView>('экран подключений: внешние правки', 'GET', api('connections'))).body.accounts.find((a) => a.channelAccountId === accountId)!);
+  assert.equal((await edits()).externalEdits24h, 0, 'обход не видел чужих значений — правок нет');
+  /**
+   * Правки пишет обход предложений функцией роли каталога; здесь их кладёт суперпользователь мира прогона: две свежие (цена и
+   * количество) и одна позавчерашняя — счётчик обязан показать ровно две, то есть и окно суток, и чтение журнала правок
+   * административной ролью (политикой роли пути решения) настоящие
+   */
+  const [scope] = (await observer.query(`SELECT write_scope_id FROM tenant_data.write_scope WHERE channel_account_id = $1 AND field = 'QUANTITY' LIMIT 1`, [accountId])).rows;
+  await db.superuser(`
+    SET session_replication_role = replica;
+    INSERT INTO channel_data.external_edit (tenant_id, channel_account_id, write_scope_id, field, observed_value, our_value, currency, since_write_id, observed_at, recorded_at) VALUES
+      ('${demo.live.seeded.tenantId}', '${accountId}', '${scope.write_scope_id}', 'QUANTITY', 40, 12, NULL, gen_random_uuid(), now(), now()),
+      ('${demo.live.seeded.tenantId}', '${accountId}', '${scope.write_scope_id}', 'PRICE', 1999, 2099, 'EUR', gen_random_uuid(), now(), now() - interval '1 hour'),
+      ('${demo.live.seeded.tenantId}', '${accountId}', '${scope.write_scope_id}', 'QUANTITY', 50, 12, NULL, gen_random_uuid(), now() - interval '2 days', now() - interval '2 days');
+    SET session_replication_role = origin;`);
+  const after = await edits();
+  assert.equal(after.externalEdits24h, 2, 'две правки за сутки; позавчерашняя не считается');
+  assert.match(after.externalEditsText, /: 2$/, after.externalEditsText);
 });
 
 test('Inbound API: ключ показан один раз; устаревшее значение не применяется; новое доходит до канала', async () => {

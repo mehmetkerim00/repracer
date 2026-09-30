@@ -58,6 +58,19 @@ test('Р-152: источник из файла → остаток в пуле; �
   assert.deepEqual([m.n, m.d], [2, 13]);
   assert.equal((await store.stockSources(world.tenantId))[0]!.products, 2, 'источник отдал остаток двух товаров');
 
+  // Шаг 60 [Р-202]: без подтверждения владельца запись количества выключена — ответ «остатки ведёт другой инструмент» подтверждение запрещает
+  const account = world.ids.dbId(KAUFLAND);
+  assert.deepEqual(await store.enableStockSync(world.tenantId, account, { bufferUnits: 2, maxQuantity: null, minQuantityToList: 0, acknowledgeSideEffects: false }, owner()),
+    { status: 'NOT_CONFIRMED', otherTools: null });
+  const typed = (await store.quantityWritesState(world.tenantId, account))!.externalAccountId;
+  assert.deepEqual(await store.confirmQuantityWrites(world.tenantId, account, typed, owner()), { status: 'ANSWER_FIRST' });
+  assert.deepEqual(await store.answerOtherTools(world.tenantId, account, 'STOCK', owner()), { status: 'ANSWERED' });
+  assert.deepEqual(await store.confirmQuantityWrites(world.tenantId, account, typed, owner()), { status: 'OTHER_TOOL_MANAGES_STOCK' });
+  assert.deepEqual(await store.answerOtherTools(world.tenantId, account, 'PRICES', owner()), { status: 'ANSWERED' });
+  assert.deepEqual(await store.confirmQuantityWrites(world.tenantId, account, `${typed}-typo`, owner()), { status: 'CONFIRMATION_MISMATCH' });
+  assert.deepEqual(await store.confirmQuantityWrites(world.tenantId, account, typed, owner()), { status: 'CONFIRMED' });
+  assert.deepEqual(await store.answerOtherTools(world.tenantId, account, 'STOCK_AND_PRICES', owner()), { status: 'CONFLICT', reason: 'QUANTITY_WRITES_CONFIRMED' });
+  assert.deepEqual(await store.quantityWritesState(world.tenantId, account), { externalAccountId: typed, otherTools: 'PRICES', confirmed: true });
   const enabled = await store.enableStockSync(world.tenantId, world.ids.dbId(KAUFLAND), { bufferUnits: 2, maxQuantity: null, minQuantityToList: 0, acknowledgeSideEffects: false }, owner());
   assert.deepEqual(enabled, { status: 'ENABLED', scopes: 3, created: 3, awaitingAck: 0 });
   const [q] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
@@ -658,4 +671,49 @@ test('step 59 (Р-200): an Inbound API source silent for a day after a confirmed
   const silent = await store.markSilentInboundSources(world.tenantId);
   assert.deepEqual(silent.map((x) => [x.stockSourceId, x.reservations]), [[sourceId, 1]]);
   assert.deepEqual(await store.markSilentInboundSources(world.tenantId), [], 'once per reservation, not every five minutes');
+});
+
+/**
+ * Шаг 60 [Р-202]: внешняя правка — значение канала, которого мы не писали и которое не совпадает с нашей целью. Количество — только вверх от
+ * нашего применённого (продажу канал списывает сам, K-11); одно чужое значение после одной нашей записи — одна правка
+ */
+test('step 60 (Р-202): the channel showing a value we did not write is an external edit — once, upward only for quantity', async () => {
+  const pricing = new PgPricingStore(db.pool('svc_app', 1), { adminPool: admin });
+  const queue = new PgWriteQueueStore(db.pool('svc_app', 1));
+  const account = world.ids.dbId(KAUFLAND);
+  const sourceId = (await store.stockSources(world.tenantId)).find((x) => x.mode === 'INTERNAL_POOL')!.stockSourceId;
+  // Своя применённая запись количества у товара 1 (Kaufland: единица количества — id_offer)
+  await store.importStock(world.tenantId, sourceId, [{ sku: '3501', quantity: 33 }], owner());
+  await store.recalculate(world.tenantId, null, now());
+  const [q] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
+    `SELECT w.write_scope_id, w.quantity FROM tenant_data.channel_write w JOIN tenant_data.offer_mapping m ON m.quantity_write_scope_id = w.write_scope_id
+      WHERE m.external_offer_id = 'SYN-OFFER-1' AND w.field = 'QUANTITY' AND w.status = 'PENDING'`)).rows);
+  assert.ok(q, 'a pending quantity write of product 1');
+  const claim = await queue.claimNext(world.tenantId, q.write_scope_id, now(), DEFAULT_RETRY_POLICY);
+  assert.equal(claim.kind, 'DISPATCH', JSON.stringify(claim));
+  const w = (claim as Extract<typeof claim, { kind: 'DISPATCH' }>).write;
+  await queue.recordOutcome(world.tenantId, w, { channelWriteId: w.channelWriteId, status: 'ACCEPTED', appliedImmediately: true }, now(), DEFAULT_RETRY_POLICY);
+  const ours = Number(q.quantity);
+  const seen = (quantity: number | null, priceMinor: number | null = null) => pricing.recordChannelObservations(world.tenantId, account, [{
+    marketplace: 'de', externalSku: null, externalOfferId: 'SYN-OFFER-1', externalUnitId: '3501', priceMinor, currency: priceMinor === null ? null : 'EUR', quantity, observedAt: now() as never }]);
+  assert.equal(await seen(ours), 0, 'our own value is not an external edit');
+  assert.equal(await seen(ours - 1), 0, 'a lower quantity is a sale the channel wrote off itself (K-11), not an external edit');
+  assert.equal(await seen(ours + 5), 1, 'a higher quantity we never wrote is an external edit');
+  assert.equal(await seen(ours + 5), 0, 'the same foreign value after the same write of ours is counted once');
+  // Цена: своя применённая запись цены (в мире остатков цены не пишутся — вставлена суперпользователем, синтетика)
+  const url = new URL(process.env.REPRACER_PG_ADMIN_URL!); url.pathname = `/${db.name}`;
+  const su = createPool(url.toString(), { max: 1, applicationName: 'repracer-r202-price' });
+  try {
+    await su.query('SET session_replication_role = replica');
+    await su.query(
+      `INSERT INTO tenant_data.channel_write_history (tenant_id, channel_write_id, finished_at, write_scope_id, field, amount_minor, currency, price_basis, version, origin,
+                                                     final_status, attempt_count, created_at, dispatched_at, accepted_at, applied_at)
+       SELECT m.tenant_id, gen_random_uuid(), now(), m.price_write_scope_id, 'PRICE', 1900, 'EUR', 'GROSS', 1, 'ENGINE', 'APPLIED', 1, now(), now(), now(), now()
+         FROM tenant_data.offer_mapping m WHERE m.tenant_id = $1 AND m.external_offer_id = 'SYN-OFFER-1'`, [world.tenantId]);
+  } finally { await su.end(); }
+  assert.equal(await seen(null, 1900), 0, 'the price we wrote is ours');
+  assert.equal(await seen(null, 2150), 1, 'a price we did not write and do not aim at is an external edit');
+  const [edits] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
+    `SELECT count(*) FILTER (WHERE field = 'QUANTITY')::int AS q, count(*) FILTER (WHERE field = 'PRICE')::int AS p FROM channel_data.external_edit WHERE channel_account_id = $1`, [account])).rows);
+  assert.deepEqual([edits.q, edits.p], [1, 1]);
 });

@@ -46,7 +46,7 @@ import type {
   ProductKey,
   ScopeEvaluationContext,
   ShiftWindow,
-  SnapshotOutcome, ConsoleAuditRow, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveredCatalogOffer, DiscoveryStop, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow} from '@repracer/pricing-pipeline';
+  SnapshotOutcome, ConsoleAuditRow, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveredCatalogOffer, DiscoveryStop, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, ChannelObservation} from '@repracer/pricing-pipeline';
 import { FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT, stalestFirst } from '@repracer/pricing-pipeline';
 import { inTenant, RollbackWith, type PgPool, type Tx } from './db.ts';
 import { PgWriteQueueStore } from './write-queue.ts';
@@ -1564,6 +1564,18 @@ export class PgPricingStore implements PricingStore {
         external_listing_id: o.externalListingId ?? null, listing_format: o.listingFormat ?? null, writable: o.writable ?? null,
       })))]);
       return Number(r!.created);
+    });
+  }
+
+  /** Шаг 60 [Р-202]: наблюдения обхода — функцией роли каталога (0158): внешние правки цены и количества */
+  async recordChannelObservations(tenantId: string, channelAccountId: string, items: ReadonlyArray<ChannelObservation>): Promise<number> {
+    if (items.length === 0) return 0;
+    return this.tx(tenantId, async (tx) => {
+      const { rows: [r] } = await tx.query('SELECT channel_data.record_channel_observations($1, $2, $3::jsonb) AS recorded', [tenantId, channelAccountId, JSON.stringify(items.map((i) => ({
+        marketplace: i.marketplace, external_sku: i.externalSku, external_offer_id: i.externalOfferId, external_unit_id: i.externalUnitId,
+        price_minor: i.priceMinor, currency: i.currency, quantity: i.quantity, observed_at: i.observedAt,
+      })))]);
+      return Number(r!.recorded);
     });
   }
 

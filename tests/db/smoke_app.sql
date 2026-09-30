@@ -109,6 +109,10 @@ SELECT set_config('app.tenant_id', :tA, true), set_config('app.user_id', :uA, tr
 INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, external_account_id, marketplaces, credentials_ref, connected_by_membership_id, write_mode)
 -- Шаг 43 [OQ-231]: у БОЕВОГО аккаунта все витрины — из справочника; `cz` там нет, и витрина вне справочника держит бой
 VALUES (:tA, 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'seller-A', ARRAY['de'], 'vault://a/kaufland', :mA, 'LIVE');
+-- Шаг 60 [Р-202]: мир объявляет явно — другие инструменты количество у этого аккаунта не ведут
+UPDATE tenant_data.channel_account SET other_tools = 'NONE' WHERE tenant_id = :tA AND channel_account_id = 'a4000000-0000-0000-0000-000000000001';
+INSERT INTO tenant_data.channel_quantity_writes_confirmation (tenant_id, channel_account_id, typed_confirmation, confirmed_by_membership_id)
+VALUES (:tA, 'a4000000-0000-0000-0000-000000000001', 'seller-A', :mA);
 INSERT INTO tenant_data.product (tenant_id, product_id, sku, kind) VALUES (:tA, 'a5000000-0000-0000-0000-000000000001', 'A-1', 'SIMPLE');
 INSERT INTO tenant_data.write_scope (tenant_id, write_scope_id, channel_account_id, channel, field, product_id, capability_id, capability_version,
   scope_kind, scope_key, currency, price_basis, tax_regime, pricing_mode)
@@ -1094,6 +1098,50 @@ INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel,
 VALUES (:tA, 'a4000000-0000-0000-0000-000000000002', 'AMAZON', 'EU', 'A2SPID', ARRAY['A1PA6795UKMFR9'], 'vault://a/amazon', :mA, 'LIVE');
 INSERT INTO tenant_data.stock_allocation (tenant_id, scope_type, channel_account_id, buffer_units, version, created_by_membership_id)
 VALUES (:tA, 'CHANNEL_ACCOUNT', 'a4000000-0000-0000-0000-000000000002', 2, 1, :mA);
+-- ---------------------------------------------------------------- Шаг 60 [Р-202]: внешние писатели канала
+-- Запись количества по умолчанию выключена: без подтверждения владельца синхронизацию количества не включить
+-- Отказ должен идти ТОЛЬКО от стража подтверждения: подтверждение побочных эффектов (INV-11) дано, остальное — как у разрешённой записи
+SELECT pg_temp.expect_fail('quantity sync on an account without the owner confirmation (Р-202)', $q$
+  INSERT INTO tenant_data.write_scope (tenant_id, channel_account_id, channel, field, product_id, capability_id, capability_version, scope_kind, scope_key, requires_side_effects_ack, quantity_sync_enabled, side_effects_ack_at, side_effects_ack_membership_id)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000002', 'AMAZON', 'QUANTITY', 'a5000000-0000-0000-0000-000000000001',
+          'c0000000-0000-0000-0000-000000000003', 1, 'ACCOUNT_REGION_SKU', '["EU", "A-1"]', true, true, now(), 'a2000000-0000-0000-0000-00000000000a') $q$, 'are not confirmed by the owner');
+SELECT pg_temp.expect_fail('quantity writes confirmed before the answer about other tools (Р-202)', $q$
+  INSERT INTO tenant_data.channel_quantity_writes_confirmation (tenant_id, channel_account_id, typed_confirmation, confirmed_by_membership_id)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000002', 'A2SPID', 'a2000000-0000-0000-0000-00000000000a') $q$, 'answer first whether another tool updates stock or prices');
+UPDATE tenant_data.channel_account SET other_tools = 'STOCK' WHERE tenant_id = :tA AND channel_account_id = 'a4000000-0000-0000-0000-000000000002';
+SELECT pg_temp.expect_fail('quantity writes confirmed while another tool manages stock (Р-202)', $q$
+  INSERT INTO tenant_data.channel_quantity_writes_confirmation (tenant_id, channel_account_id, typed_confirmation, confirmed_by_membership_id)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000002', 'A2SPID', 'a2000000-0000-0000-0000-00000000000a') $q$, 'another tool updates stock in this channel');
+-- Через помощник, а не сырым DO … RAISE: сырой отказ обрывает файл, и проверки ниже раннер не видит [Р-99]
+SELECT pg_temp.ok('the answer about other tools is stored with its author and time (Р-202)', $q$
+  DO $d$ BEGIN
+    IF (SELECT other_tools_answered_at IS NULL OR other_tools_answered_by IS DISTINCT FROM 'a1000000-0000-0000-0000-00000000000a'::uuid
+          FROM tenant_data.channel_account WHERE channel_account_id = 'a4000000-0000-0000-0000-000000000002') THEN
+      RAISE EXCEPTION 'the answer about other tools does not carry its author and time';
+    END IF;
+  END $d$ $q$);
+UPDATE tenant_data.channel_account SET other_tools = 'PRICES' WHERE tenant_id = :tA AND channel_account_id = 'a4000000-0000-0000-0000-000000000002';
+SELECT pg_temp.expect_fail('quantity writes confirmed with a mistyped account (Р-202)', $q$
+  INSERT INTO tenant_data.channel_quantity_writes_confirmation (tenant_id, channel_account_id, typed_confirmation, confirmed_by_membership_id)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000002', 'A2SPID-typo', 'a2000000-0000-0000-0000-00000000000a') $q$, 'the typed confirmation does not name the channel account');
+-- Администратор: право MANAGE_TENANT у него есть, поэтому отказывает именно правило «только владелец», а не страж административной записи
+SELECT pg_temp.expect_fail('quantity writes confirmed by a non-owner (Р-202)', $q$
+  DO $d$ BEGIN
+    PERFORM set_config('app.user_id', 'a1000000-0000-0000-0000-0000000000ad', true);
+    INSERT INTO tenant_data.channel_quantity_writes_confirmation (tenant_id, channel_account_id, typed_confirmation, confirmed_by_membership_id)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000002', 'A2SPID', 'a2000000-0000-0000-0000-0000000000ad');
+  END $d$ $q$, 'only the owner confirms quantity writes');
+SELECT set_config('app.user_id', :uA, true) \gset
+SELECT pg_temp.expect_fail('quantity writes switched on by a direct update (Р-202)', $q$
+  UPDATE tenant_data.channel_account SET quantity_writes_confirmed = true WHERE channel_account_id = 'a4000000-0000-0000-0000-000000000002' $q$, 'not directly');
+INSERT INTO tenant_data.channel_quantity_writes_confirmation (tenant_id, channel_account_id, typed_confirmation, confirmed_by_membership_id)
+VALUES (:tA, 'a4000000-0000-0000-0000-000000000002', ' A2SPID ', :mA);
+SELECT pg_temp.expect_fail('another tool declared for stock after quantity writes are confirmed (Р-202)', $q$
+  UPDATE tenant_data.channel_account SET other_tools = 'STOCK_AND_PRICES' WHERE channel_account_id = 'a4000000-0000-0000-0000-000000000002' $q$,
+  'another tool managing stock would make two writers');
+SELECT pg_temp.expect_fail('an answer about other tools that does not exist (Р-202)', $q$
+  UPDATE tenant_data.channel_account SET other_tools = 'SOMETIMES' WHERE channel_account_id = 'a4000000-0000-0000-0000-000000000002' $q$,
+  'channel_account_other_tools_known');
 SELECT pg_temp.expect_fail('Amazon EU quantity sync without side-effects ack (INV-11)', $q$
   INSERT INTO tenant_data.write_scope (tenant_id, channel_account_id, channel, field, product_id, capability_id, capability_version, scope_kind, scope_key, requires_side_effects_ack, quantity_sync_enabled)
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000002', 'AMAZON', 'QUANTITY', 'a5000000-0000-0000-0000-000000000001',
@@ -1216,6 +1264,10 @@ SELECT set_config('app.tenant_id', :tA, true), set_config('app.user_id', :uA, tr
 -- Шаг 42 [Р-172]: витрина названа и здесь — у боевого аккаунта она обязательна, у теневого нет
 INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, external_account_id, marketplaces, credentials_ref, connected_by_membership_id, write_mode)
 VALUES (:tA, 'a4000000-0000-0000-0000-000000000003', 'EBAY', 'ebay-user-a', ARRAY['EBAY_DE'], 'vault://a/ebay', :mA, 'LIVE');
+-- Шаг 60 [Р-202]: мир объявляет явно — другие инструменты количество у этого аккаунта не ведут
+UPDATE tenant_data.channel_account SET other_tools = 'NONE' WHERE tenant_id = :tA AND channel_account_id = 'a4000000-0000-0000-0000-000000000003';
+INSERT INTO tenant_data.channel_quantity_writes_confirmation (tenant_id, channel_account_id, typed_confirmation, confirmed_by_membership_id)
+VALUES (:tA, 'a4000000-0000-0000-0000-000000000003', 'ebay-user-a', :mA);
 INSERT INTO tenant_data.offer_mapping (tenant_id, offer_mapping_id, product_id, channel_account_id, channel, marketplace, channel_offer_key, external_sku, external_listing_id, ebay_listing_format, ebay_migration_status, status)
 VALUES (:tA, 'ad000000-0000-0000-0000-000000000001', 'a5000000-0000-0000-0000-000000000001', 'a4000000-0000-0000-0000-000000000003', 'EBAY', 'EBAY_DE', 'L1/A-1', 'A-1', 'L1', 'FIXED_PRICE', 'REQUIRED', 'MIGRATION_REQUIRED');
 SELECT pg_temp.expect_fail('auction marked migratable', $q$

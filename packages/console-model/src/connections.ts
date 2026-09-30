@@ -52,6 +52,42 @@ export interface ConnectionAccountView {
    * поэтому текст — у любого аккаунта eBay: честнее сказать лишнее в песочнице, чем промолчать в бою.
    */
   channelLimitText: string | null;
+  /** Шаг 60 [Р-202]: ответ владельца «обновляет ли другой инструмент остатки или цены в этом канале» */
+  otherTools: OtherToolsView;
+  /** Шаг 60 [Р-202]: запись количества — выключена до подтверждения владельца */
+  quantityWrites: QuantityWritesView;
+  /** Шаг 60 [Р-202]: внешние правки канала за сутки — цены или количество, которых мы не писали */
+  externalEdits24h: number;
+  externalEditsText: string;
+  externalEditsNote: string;
+}
+
+/** Шаг 60 [Р-202]: ответы на вопрос о других инструментах канала */
+export type OtherToolsAnswer = 'NONE' | 'STOCK' | 'PRICES' | 'STOCK_AND_PRICES';
+export const OTHER_TOOLS_ANSWERS: readonly OtherToolsAnswer[] = ['NONE', 'STOCK', 'PRICES', 'STOCK_AND_PRICES'];
+
+export interface OtherToolsView {
+  answer: OtherToolsAnswer | null;
+  question: string;
+  /** Ответ словами или «ещё не отвечено» */
+  text: string;
+  /** Кнопки ответа — у того, кто управляет подключениями; ответ можно поменять */
+  options: Array<{ answer: OtherToolsAnswer; label: string }>;
+  /** Ответ с ценами — два репрайсера на одном канале недопустимы */
+  warning: string | null;
+}
+
+export interface QuantityWritesView {
+  confirmed: boolean;
+  /** «выключена — нужно подтверждение владельца» / «включена, подтверждено» */
+  text: string;
+  /** Почему подтвердить нельзя: не отвечено, остатки ведёт другой инструмент, подтверждает только владелец */
+  blockedText: string | null;
+  canConfirm: boolean;
+  /** Что набрать — внешний идентификатор аккаунта; только у того, кто может подтвердить */
+  typeToConfirm: string | null;
+  confirmationHint: string | null;
+  confirmLabel: string;
 }
 
 export interface ConnectionChannelView {
@@ -92,6 +128,45 @@ export function accountState(a: Pick<ConnectionRow, 'authStatus' | 'writeMode'>)
   return a.writeMode === 'LIVE' ? 'LIVE' : 'SHADOW';
 }
 
+const managesStock = (a: OtherToolsAnswer | null) => a === 'STOCK' || a === 'STOCK_AND_PRICES';
+const managesPrices = (a: OtherToolsAnswer | null) => a === 'PRICES' || a === 'STOCK_AND_PRICES';
+
+/** Шаг 60 [Р-202]: вопрос о других инструментах, запись количества и внешние правки аккаунта — словами */
+export function externalWritersView(
+  a: Pick<ConnectionRow, 'externalAccountId' | 'otherTools' | 'quantityWritesConfirmed' | 'externalEdits24h'>,
+  role: MemberRole, m: Messages,
+): Pick<ConnectionAccountView, 'otherTools' | 'quantityWrites' | 'externalEdits24h' | 'externalEditsText' | 'externalEditsNote'> {
+  const t = m.ui.connections;
+  const answer = a.otherTools;
+  const canAnswer = can(role, 'MANAGE_TENANT');
+  // Подтверждает только владелец — это проверяет база; экран не предлагает формы тому, у кого база откажет
+  const isOwner = role === 'OWNER';
+  const blockedText = a.quantityWritesConfirmed ? null
+    : answer === null ? t.quantityWrites.answerFirst
+    : managesStock(answer) ? t.quantityWrites.otherToolManagesStock
+    : !isOwner ? t.quantityWrites.ownerOnly : null;
+  const canConfirm = !a.quantityWritesConfirmed && isOwner && answer !== null && !managesStock(answer);
+  return {
+    otherTools: {
+      answer, question: t.otherTools.question,
+      text: answer === null ? t.otherTools.unanswered : t.otherTools.current(t.otherTools.answers[answer]),
+      options: canAnswer ? OTHER_TOOLS_ANSWERS.map((x) => ({ answer: x, label: t.otherTools.options[x] })) : [],
+      warning: managesPrices(answer) ? t.otherTools.twoRepricers : null,
+    },
+    quantityWrites: {
+      confirmed: a.quantityWritesConfirmed,
+      text: a.quantityWritesConfirmed ? t.quantityWrites.on : t.quantityWrites.off,
+      blockedText, canConfirm,
+      typeToConfirm: canConfirm ? a.externalAccountId : null,
+      confirmationHint: canConfirm ? t.quantityWrites.hint(a.externalAccountId) : null,
+      confirmLabel: t.quantityWrites.submit,
+    },
+    externalEdits24h: a.externalEdits24h,
+    externalEditsText: t.externalEdits.count(a.externalEdits24h),
+    externalEditsNote: t.externalEdits.note,
+  };
+}
+
 export function connectionsView(
   input: { worldId: string; role: MemberRole; now: string },
   rows: { accounts: ConnectionRow[]; pending: PendingRequestRow[] },
@@ -129,6 +204,7 @@ export function connectionsView(
       canReconnect: canManage && a.channel === 'AMAZON' && a.oauth,
       reconnectLabel: state === 'REVOKED' ? t.reconnectRevoked : t.reconnect,
       channelLimitText: channelLimitText(a.channel, m),
+      ...externalWritersView(a, input.role, m),
     };
   });
   const channels = connectable.map((c): ConnectionChannelView => {

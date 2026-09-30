@@ -6,7 +6,7 @@ import { DIFF_ROWS_SHOWN, LIST_PAGE_DEFAULT, type BoundsDiffView, type BulkJobVi
 import { STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { createAuthenticator, MemoryIdentityDirectory, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
-import { inTenant, seedPricingWorld, PgPricingStore, type PgPool, type SeededPricingWorld } from '@repracer/pricing-store-pg';
+import { inTenant, seedPricingWorld, PgChannelConnectStore, PgPricingStore, type PgPool, type SeededPricingWorld } from '@repracer/pricing-store-pg';
 import { PgStockStore } from '@repracer/pricing-store-pg';
 import { createPricingPipeline, type MemorySeedScope } from '@repracer/pricing-pipeline';
 import { KAUFLAND_DESCRIPTOR } from '@repracer/kaufland-adapter';
@@ -21,6 +21,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { BulkWorkerConfig } from '../server/bulk-worker.ts';
 import { fetchFile, setAccessToken, setApiOrigin } from '../src/api.ts';
+import { confirmQuantityWritesAsOwner, connectionsOnly } from './quantity-writes.ts';
 
 /**
  * Р-136 (шаг 29): живой прогон ВСЕХ операций продавца ЧЕРЕЗ КОНСОЛЬ на объёме целевого клиента — 10 000 офферов. Не вызов
@@ -224,6 +225,9 @@ before(async () => {
       token: (_a, options) => issuer.token('live-owner', { email: 'owner@example.invalid', amr: options?.secondFactor === false ? ['pwd'] : ['pwd', 'otp'] }),
       expiresInSeconds: 900,
     },
+  }, {
+    // Шаг 60 [Р-202]: экран подключений мира — аккаунт из базы; на нём владелец подтверждает запись количества
+    connect: (worldId) => (worldId === WORLD_ID ? connectionsOnly(new PgChannelConnectStore(admin)) : null),
   });
   server = createStandServer(handle);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -603,6 +607,8 @@ test('Р-153: остатки на 10 000 предложений — файл, в
   // Товаров с нулевым остатком движение не создаёт: строка «0» у пустого пула ничего не меняет
   assert.deepEqual([importView.matched, importView.unmatched], [OFFERS, 0], JSON.stringify(importView));
   assert.equal(importView.changed, lines.length - 1 - Array.from({ length: OFFERS }, (_, i) => (i * 7) % 50).filter((q) => q === 0).length);
+  // Шаг 60 [Р-202]: запись количества — после подтверждения владельца на экране подключений, как у продавца
+  await confirmQuantityWritesAsOwner((method, url, body) => measure(`connections ${method}`, method, url, body), api('connections'), world.channelAccountId);
   const enabledJob = await runBulkOperation('stock/enable (10 000 единиц)', api('stock', 'enable'), { channelAccountId: world.channelAccountId, bufferUnits: 1, maxQuantity: null, minQuantityToList: 0 });
   const enabled = (enabledJob.result as { view: { scopes: number; created: number; writes: number } }).view;
   assert.deepEqual([enabled.scopes, enabled.created, enabled.writes], [OFFERS, OFFERS, OFFERS]);

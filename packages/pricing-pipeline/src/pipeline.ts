@@ -955,7 +955,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
       /** Шаг 56 (ревью шага 55, находка 4): не начинать НОВЫЙ круг раньше, чем через столько после закрытия прошлого; прерванный — продолжать сразу */
       circleEveryMs?: number } = {}): Promise<{
       offers: number; recorded: number; catalogued: number; withChannelPricing: Array<{ marketplace: string; externalSku: string; automatedPricing: boolean; channelBounds: boolean }>;
-      stop: DiscoveryStop | 'NOT_DUE'; resumed: boolean;
+      stop: DiscoveryStop | 'NOT_DUE'; resumed: boolean; externalEdits?: number;
     }> {
       /**
        * Шаг 55 (OQ-240; ревью шага 54, находка 9): обход — КРУГ. Заход продолжает с курсора, на котором остановился прошлый, и останавливается
@@ -974,6 +974,8 @@ export function createPricingPipeline(deps: PipelineDeps) {
       }
       let cursor: string | undefined = startedFrom ?? undefined;
       let offers = 0;
+      // Шаг 60 [Р-202]: новых внешних правок за заход — видно числом на экране подключений (сутки), здесь — в ответе захода
+      let externalEdits = 0;
       let recorded = 0;
       let catalogued = 0;
       const withChannelPricing: Array<{ marketplace: string; externalSku: string; automatedPricing: boolean; channelBounds: boolean }> = [];
@@ -1018,6 +1020,15 @@ export function createPricingPipeline(deps: PipelineDeps) {
         const managed = result.items.flatMap((o) => (o.fulfillment === 'CHANNEL' && o.currentQuantity !== undefined && o.identity.marketplace && o.identity.externalSku
           ? [{ marketplace: o.identity.marketplace, externalSku: o.identity.externalSku, quantity: o.currentQuantity, observedAt: deps.now() }] : []));
         if (managed.length > 0) await store.recordChannelQuantities?.(ctx.tenantId, ctx.channelAccountId, managed);
+        /**
+         * Шаг 60 [Р-202]: цена и количество, которые канал показывает у наших предложений (FBM), — наблюдения для диагностики двух писателей:
+         * значение, которого мы не писали и которое не совпадает с нашей целью, база записывает внешней правкой (0158)
+         */
+        const seenValues = result.items.flatMap((o) => (o.fulfillment !== 'CHANNEL' && o.identity.marketplace && (o.currentPrice || o.currentQuantity !== undefined)
+          ? [{ marketplace: o.identity.marketplace, externalSku: o.identity.externalSku ?? null, externalOfferId: o.identity.externalOfferId ?? null,
+               externalUnitId: o.identity.externalUnitId ?? null, priceMinor: o.currentPrice?.amountMinor ?? null, currency: o.currentPrice?.currency ?? null,
+               quantity: o.currentQuantity ?? null, observedAt: deps.now() }] : []));
+        if (seenValues.length > 0) externalEdits += (await store.recordChannelObservations?.(ctx.tenantId, ctx.channelAccountId, seenValues)) ?? 0;
         for (const o of observations) {
           if (o.automatedPricing || o.channelBounds) withChannelPricing.push({ marketplace: o.marketplace, externalSku: o.externalSku, automatedPricing: o.automatedPricing, channelBounds: o.channelBounds });
         }
@@ -1062,7 +1073,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
       if (withChannelPricing.length > 0) {
         await emit(ctx, [{ kind: 'alert', code: 'OFFERS_WITH_CHANNEL_PRICING', severity: 'WARNING', details: { offers: withChannelPricing.length } }]);
       }
-      return { offers, recorded, catalogued, withChannelPricing, stop: stop!, resumed: startedFrom !== null };
+      return { offers, recorded, catalogued, withChannelPricing, stop: stop!, resumed: startedFrom !== null, externalEdits };
     },
 
     /** Р-118: снятие остановки по недоверию каналу — только человек; права, второй фактор и заметку проверяют хранилище и БД */

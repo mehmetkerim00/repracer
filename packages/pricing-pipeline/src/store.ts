@@ -658,6 +658,11 @@ export interface PricingStore {
    */
   recordChannelQuantities?(tenantId: string, channelAccountId: string, items: ReadonlyArray<{ marketplace: string; externalSku: string; quantity: number; observedAt: Instant }>): Promise<number>;
   /**
+   * Шаг 60 [Р-202]: цена и количество канала у наших предложений — база сравнивает с последней применённой записью и целью и пишет внешние
+   * правки (0158); возвращает число новых правок
+   */
+  recordChannelObservations?(tenantId: string, channelAccountId: string, items: ReadonlyArray<ChannelObservation>): Promise<number>;
+  /**
    * Шаг 55 (OQ-240; ревью шага 54, находка 9): круг обнаружения аккаунта — где остановился прошлый заход. Каталог крупного продавца обходится
    * за несколько заходов; без хранилища круга каждый заход начинал бы с начала и обрывался бы на том же месте
    */
@@ -1162,3 +1167,15 @@ export interface DiscoveredCatalogOffer {
 
 /** Шаг 55: чем кончился заход обхода — круг закрыт, срок вызова, квота приложения, предел страниц захода */
 export type DiscoveryStop = 'COMPLETED' | 'DEADLINE' | 'APP_QUOTA' | 'PAGE_LIMIT' | 'FAILED';
+
+/** Шаг 60 [Р-202]: что канал показывает у нашего предложения */
+export interface ChannelObservation {
+  marketplace: string;
+  externalSku: string | null;
+  externalOfferId: string | null;
+  externalUnitId: string | null;
+  priceMinor: number | null;
+  currency: string | null;
+  quantity: number | null;
+  observedAt: Instant;
+}

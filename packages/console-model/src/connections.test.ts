@@ -14,7 +14,8 @@ const row = (over: Partial<ConnectionRow>): ConnectionRow => ({
   channelAccountId: 'acc-1', channel: 'AMAZON', region: 'EU', marketplaces: ['A1PA6795UKMFR9'], externalAccountId: 'A3SYN',
   authStatus: 'ACTIVE', accessBlockers: [], writeMode: 'SHADOW', connectedAt: NOW as never, offers: 0, unmanagedOffers: 0, shadowDecisions24h: 0,
   credentialObtainedAt: NOW as never, credentialVerifiedAt: null, credentialCheckFailures: 0, oauth: true,
-  discoveryCircleStartedAt: null, discoveryCircleCompletedAt: null, ...over,
+  discoveryCircleStartedAt: null, discoveryCircleCompletedAt: null,
+  otherTools: null, otherToolsAnsweredAt: null, quantityWritesConfirmed: false, externalEdits24h: 0, ...over,
 });
 const pending = (over: Partial<PendingRequestRow>): PendingRequestRow => ({
   authorizationRequestId: 'r1', channel: 'AMAZON', marketplaces: ['A1PA6795UKMFR9'], requestedAt: NOW as never,
@@ -162,4 +163,40 @@ test('step 56–57 (Р-198): the connection says how long the discovery circle r
   // Шаг 58 (ревью шага 56, находка 9): «старые листинги eBay» — только у аккаунта eBay
   assert.doesNotMatch(view({ discoveryCircleStartedAt: '2026-09-29T06:00:00.000Z' as never }) ?? '', /eBay/, 'an Amazon account is not told about eBay listings');
   assert.match(view({ channel: 'EBAY', discoveryCircleStartedAt: '2026-09-29T06:00:00.000Z' as never }) ?? '', /older eBay listings/);
+});
+
+test('шаг 60 [Р-202]: вопрос о других инструментах, запись количества по подтверждению владельца и внешние правки — словами на обоих языках', () => {
+  for (const locale of ['de', 'en'] as const) {
+    const m = messagesFor(locale);
+    const t = m.ui.connections;
+    const account = (role: 'OWNER' | 'ADMIN' | 'VIEWER', over: Partial<ConnectionRow>) => connectionsView({ worldId: 'w', role, now: NOW }, { accounts: [row(over)], pending: [] }, [], m).accounts[0]!;
+    // Не отвечено: вопрос задан, запись количества выключена, подтвердить нельзя — сначала ответ
+    const fresh = account('OWNER', {});
+    assert.deepEqual([fresh.otherTools.answer, fresh.otherTools.text, fresh.otherTools.options.map((o) => o.answer), fresh.otherTools.warning],
+      [null, t.otherTools.unanswered, ['NONE', 'STOCK', 'PRICES', 'STOCK_AND_PRICES'], null]);
+    assert.deepEqual([fresh.quantityWrites.confirmed, fresh.quantityWrites.text, fresh.quantityWrites.blockedText, fresh.quantityWrites.canConfirm, fresh.quantityWrites.typeToConfirm],
+      [false, t.quantityWrites.off, t.quantityWrites.answerFirst, false, null]);
+    // «Нет других инструментов»: владелец видит форму и что набрать — внешний идентификатор аккаунта
+    const none = account('OWNER', { otherTools: 'NONE' });
+    assert.deepEqual([none.quantityWrites.canConfirm, none.quantityWrites.typeToConfirm, none.quantityWrites.blockedText], [true, 'A3SYN', null]);
+    assert.ok(none.quantityWrites.confirmationHint!.includes('A3SYN'), none.quantityWrites.confirmationHint!);
+    // Не владелец формы не получает — база ему откажет; наблюдатель не отвечает на вопрос
+    assert.deepEqual([account('ADMIN', { otherTools: 'NONE' }).quantityWrites.canConfirm, account('ADMIN', { otherTools: 'NONE' }).quantityWrites.blockedText], [false, t.quantityWrites.ownerOnly]);
+    assert.deepEqual(account('VIEWER', {}).otherTools.options, []);
+    // Остатки ведёт другой инструмент: подтвердить нельзя, и сказано почему
+    for (const answer of ['STOCK', 'STOCK_AND_PRICES'] as const) {
+      const v = account('OWNER', { otherTools: answer });
+      assert.deepEqual([v.quantityWrites.canConfirm, v.quantityWrites.blockedText], [false, t.quantityWrites.otherToolManagesStock], answer);
+    }
+    // Цены ведёт другой инструмент — предупреждение о двух репрайсерах; у ответов без цен его нет
+    for (const answer of ['PRICES', 'STOCK_AND_PRICES'] as const) assert.equal(account('OWNER', { otherTools: answer }).otherTools.warning, t.otherTools.twoRepricers, answer);
+    for (const answer of ['NONE', 'STOCK'] as const) assert.equal(account('OWNER', { otherTools: answer }).otherTools.warning, null, answer);
+    // Подтверждено: включена, формы нет
+    const on = account('OWNER', { otherTools: 'NONE', quantityWritesConfirmed: true, externalEdits24h: 3 });
+    assert.deepEqual([on.quantityWrites.confirmed, on.quantityWrites.text, on.quantityWrites.canConfirm, on.quantityWrites.blockedText], [true, t.quantityWrites.on, false, null]);
+    // Счётчик внешних правок — число из строки, а не константа
+    assert.equal(on.externalEdits24h, 3);
+    assert.ok(on.externalEditsText.endsWith(': 3'), on.externalEditsText);
+    assert.ok(fresh.externalEditsText.endsWith(': 0'), fresh.externalEditsText);
+  }
 });

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { BulkJobView, StockDivergencesView, StockReturnsView, StockView } from '@repracer/console-model';
 import type { ListQuery } from '@repracer/console-model';
-import { requestJson, useResource, worldPath } from '../api.ts';
+import { ApiError, requestJson, useResource, worldPath } from '../api.ts';
 import { Badge, ErrorBox, errorText, Gaps, href, Load, Pager, useMessages } from '../components.tsx';
 import { JobProgress } from './Jobs.tsx';
 
@@ -35,6 +35,8 @@ export function StockScreen({ worldId }: { worldId: string }) {
   const [maxQuantity, setMaxQuantity] = useState('');
   const [minToList, setMinToList] = useState('0');
   const [ack, setAck] = useState(false);
+  /** Шаг 60 [Р-202]: запись количества не подтверждена владельцем — отказ ведёт на экран подключений */
+  const [toConnections, setToConnections] = useState(false);
   const refresh = () => { retry(); retryDivergences(); };
   const post = <T,>(path: string, body: Record<string, unknown>) => requestJson<T>(worldPath(worldId, 'stock', path), { method: 'POST', body, locale: m.locale });
 
@@ -52,7 +54,10 @@ export function StockScreen({ worldId }: { worldId: string }) {
   // Р-139: включение — задание; ход виден, итог приходит с заданием
   const enable = (channelAccountId: string) => void post<{ jobId: string; job?: BulkJobView; message: string }>('enable', {
     channelAccountId, bufferUnits: Number(buffer), maxQuantity: maxQuantity === '' ? null : Number(maxQuantity), minQuantityToList: Number(minToList), acknowledgeSideEffects: ack,
-  }).then((r) => { setError(null); setMessage(r.message); if (r.job) setJob(r.job); }).catch((e: unknown) => setError(errorText(e, m)));
+  }).then((r) => { setError(null); setToConnections(false); setMessage(r.message); if (r.job) setJob(r.job); }).catch((e: unknown) => {
+    setToConnections(e instanceof ApiError && e.failure.kind === 'SERVER' && e.failure.code === 'QUANTITY_WRITES_NOT_CONFIRMED');
+    setError(errorText(e, m));
+  });
 
   return (
     <Load resource={view} retry={retry}>
@@ -95,6 +100,7 @@ export function StockScreen({ worldId }: { worldId: string }) {
           <StockReturns worldId={worldId} onDecided={refresh} />
           {message ? <p className="notice" role="status">{message}</p> : null}
           {error ? <ErrorBox message={error} onRetry={refresh} /> : null}
+          {error && toConnections ? <p><a href={href(worldId, 'connections')}>{m.ui.app.screens.connections}</a></p> : null}
         </>
       )}
     </Load>

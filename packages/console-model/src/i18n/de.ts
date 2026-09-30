@@ -568,6 +568,10 @@ export const de: Messages = {
           ? `Der Abgleich läuft für ${r.awaitingAck} von ${r.scopes} Kanaleinheiten NOCH NICHT: sie warten auf Ihre Bestätigung der Nebenwirkung (${r.created} neue Einheiten, Schreibvorgänge erzeugt: ${r.writes}).`
           : `Abgleich für ${r.scopes} Kanaleinheiten eingeschaltet (${r.created} neu). Schreibvorgänge erzeugt: ${r.writes}.`,
         noOffers: 'Dieses Konto hat keine Angebote, deren Bestand wir führen.',
+        // Шаг 60 [Р-202]: запись количества выключена до подтверждения владельца на экране подключений
+        notConfirmed: (otherToolManagesStock: boolean): string => otherToolManagesStock
+          ? 'Bestände in diesen Kanal schreiben ist aus: Sie haben auf der Seite „Kanalverbindungen“ angegeben, dass ein anderes Tool hier Bestände aktualisiert, und zwei Tools, die Bestände schreiben, überschreiben sich gegenseitig. Schalten Sie das Tool ab und ändern Sie dort zuerst die Antwort.'
+          : 'Bestände in diesen Kanal schreiben ist aus: Der Inhaber hat auf der Seite „Kanalverbindungen“ noch nicht bestätigt, dass kein anderes Tool hier Bestände pflegt. Beantworten Sie dort die Frage und bestätigen Sie; danach schalten Sie den Abgleich ein.',
       },
       divergences: {
         title: 'Abweichungen: bei uns / im Kanal',
@@ -620,6 +624,30 @@ export const de: Messages = {
       noRight: 'Kanäle verbindet nur der Inhaber oder ein Administrator des Kontos.',
       tokenNote: 'Den Zugriff des Kanals bewahren wir verschlüsselt auf und zeigen ihn nie — nicht hier, nicht in Briefen, nicht in Protokollen. Sie können ihn jederzeit im Kanal selbst zurückziehen; wir bemerken das und sagen es Ihnen.',
       /** Шаг 49 [Р-190, E-21]: что мы на eBay в бою пока не видим — у каждого аккаунта eBay, словами */
+      /** Шаг 60 [Р-202]: внешние писатели канала — вопрос при подключении, запись количества по подтверждению владельца, внешние правки */
+      otherTools: {
+        question: 'Aktualisiert ein anderes Tool Bestände oder Preise in diesem Kanal?',
+        unanswered: 'Noch nicht beantwortet.',
+        current: (answer: string) => `Ihre Antwort: ${answer}.`,
+        answers: { NONE: 'kein anderes Tool', STOCK: 'ein anderes Tool aktualisiert Bestände', PRICES: 'ein anderes Tool aktualisiert Preise', STOCK_AND_PRICES: 'ein anderes Tool aktualisiert Bestände und Preise' } as Record<'NONE' | 'STOCK' | 'PRICES' | 'STOCK_AND_PRICES', string>,
+        options: { NONE: 'Kein anderes Tool', STOCK: 'Ja — Bestände', PRICES: 'Ja — Preise', STOCK_AND_PRICES: 'Ja — Bestände und Preise' } as Record<'NONE' | 'STOCK' | 'PRICES' | 'STOCK_AND_PRICES', string>,
+        twoRepricers: 'Zwei Repricer auf einem Kanal sind nicht zulässig: Jeder würde auf die Preise des anderen reagieren. Schalten Sie das andere Tool für diesen Kanal ab — oder lassen Sie unsere Preisautomatik hier aus (Konto im Schattenmodus lassen und Repricing nicht einschalten).',
+        answered: 'Antwort gespeichert.',
+      },
+      quantityWrites: {
+        off: 'Bestände in diesen Kanal schreiben: aus — der Inhaber muss bestätigen, dass kein anderes Tool hier Bestände pflegt.',
+        on: 'Bestände in diesen Kanal schreiben: an — vom Inhaber bestätigt.',
+        answerFirst: 'Beantworten Sie zuerst die Frage oben.',
+        otherToolManagesStock: 'Ein anderes Tool aktualisiert die Bestände in diesem Kanal: Würden wir ebenfalls Bestände schreiben, überschrieben sich beide gegenseitig. Das Schreiben von Beständen bleibt aus, bis das Tool abgeschaltet und die Antwort geändert ist.',
+        ownerOnly: 'Nur der Inhaber bestätigt das Schreiben von Beständen.',
+        hint: (id: string) => `Um zu bestätigen, dass kein anderes Tool Bestände in diesem Kanal pflegt, geben Sie die Kanalkonto-ID ein: ${id}`,
+        submit: 'Bestätigen und Bestände schreiben erlauben',
+        confirmed: 'Bestätigt: Bestände dürfen in diesen Kanal geschrieben werden. Schalten Sie den Abgleich auf der Seite „Bestand“ ein.',
+      },
+      externalEdits: {
+        count: (n: number) => `Fremde Änderungen in den letzten 24 Stunden: ${n}`,
+        note: 'Eine fremde Änderung ist ein Preis oder Bestand im Kanal, den wir nicht geschrieben haben und der von unserem Ziel abweicht: Jemand anderes — ein anderes Tool oder eine manuelle Änderung — verändert diesen Kanal.',
+      },
       ebayLiveLimits: 'Den Preis, den Käufer sehen, und Änderungen anderer Programme sehen wir auf eBay im Live-Betrieb noch nicht: Unsere Änderungen werden über den Angebotsdatensatz bestätigt, die Prüfung der Preisbasis ist eingeschränkt (Frage E-21).',
       connect: (channel: string) => `${channel} verbinden`,
       connectAnother: (channel: string) => `Weiteres ${channel}-Konto verbinden`,
@@ -690,6 +718,15 @@ export const de: Messages = {
         sellerTaken: 'Dieses Händlerkonto ist bereits verbunden — in einem anderen repracer-Konto oder als andere Verbindung. Es wurde nichts verbunden; wenden Sie sich an den Support, falls das unerwartet ist.',
         mfa: 'Das Erneuern des Zugriffs einer bestehenden Verbindung braucht Ihren zweiten Faktor. Melden Sie sich damit neu an und wiederholen Sie es.',
         connected: (reconnected: boolean): string => reconnected ? 'Zugriff erneuert. Das Konto arbeitet wie zuvor.' : 'Verbunden. Das Konto beginnt im Schattenmodus; Ihre Angebote erscheinen innerhalb von Minuten.',
+        // Шаг 60 [Р-202]: ответ о других инструментах и подтверждение записи количества — каждый исход своим текстом
+        badAnswer: 'Wählen Sie eine der Antworten.',
+        accountNotFound: 'Dieses Kanalkonto ist in diesem repracer-Konto nicht verbunden.',
+        answerConflictConfirmed: 'Das Schreiben von Beständen in diesen Kanal ist vom Inhaber bereits bestätigt: Pflegt hier ein anderes Tool die Bestände, überschreiben sich beide gegenseitig. Diese Antwort wird nicht angenommen.',
+        notOwner: 'Nur der Inhaber bestätigt das Schreiben von Beständen in einen Kanal.',
+        alreadyConfirmed: 'Das Schreiben von Beständen in diesen Kanal ist bereits bestätigt.',
+        confirmationMismatch: 'Der eingegebene Text stimmt nicht mit der Kanalkonto-ID überein. Geben Sie sie genau wie angezeigt ein.',
+        answerFirst: 'Beantworten Sie zuerst, ob ein anderes Tool Bestände oder Preise in diesem Kanal aktualisiert.',
+        otherToolManagesStock: 'Sie haben angegeben, dass ein anderes Tool die Bestände in diesem Kanal aktualisiert: Unsere Bestandsänderungen würden seine überschreiben und seine unsere. Das Schreiben von Beständen bleibt aus; schalten Sie zuerst das andere Tool ab und ändern Sie Ihre Antwort.',
       },
     },
     shadow: {

@@ -480,6 +480,10 @@ SELECT pg_temp.expect_fail('truncate tenant_data.cost_import', $q$ TRUNCATE tena
 -- Шаг 41 [Р-170]: журнал переключений теневого режима — тоже append-only, и TRUNCATE его не берёт
 SELECT pg_temp.expect_fail('truncate tenant_data.channel_write_mode_change', $q$ TRUNCATE tenant_data.channel_write_mode_change $q$,
   'TRUNCATE of tenant_data.channel_write_mode_change is forbidden');
+-- Шаг 60 [Р-202]: журналы внешних писателей неизменяемы
+SELECT pg_temp.expect_fail('truncate tenant_data.channel_quantity_writes_confirmation', $q$ TRUNCATE tenant_data.channel_quantity_writes_confirmation $q$,
+  'TRUNCATE of tenant_data.channel_quantity_writes_confirmation is forbidden');
+SELECT pg_temp.expect_fail('truncate channel_data.external_edit', $q$ TRUNCATE channel_data.external_edit $q$, 'TRUNCATE of channel_data.external_edit is forbidden');
 -- Шаг 43 [OQ-232]: удержания пола — производная от цены конкурента со сроком данных канала; TRUNCATE её не берёт
 SELECT pg_temp.expect_fail('truncate channel_data.floor_hold', $q$ TRUNCATE channel_data.floor_hold $q$,
   'TRUNCATE of channel_data.floor_hold is forbidden');
@@ -602,6 +606,19 @@ SELECT pg_temp.expect_fail('channel managed quantity moved to a merchant fulfill
   UPDATE channel_data.channel_quantity_current SET offer_mapping_id = (SELECT offer_mapping_id FROM tenant_data.offer_mapping
     WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a' AND fulfillment = 'MERCHANT' LIMIT 1)
    WHERE offer_mapping_id = 'ad000000-0000-0000-0000-0000000000f1' $q$, 'channel managed quantity belongs only to an offer fulfilled by the channel');
+
+-- Шаг 60 [Р-202]: внешняя правка канала — строка журнала правок (поведение функции наблюдений — тест store.pg «external edits»)
+INSERT INTO channel_data.external_edit (tenant_id, channel_account_id, write_scope_id, field, observed_value, our_value, currency, since_write_id, observed_at)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'a6000000-0000-0000-0000-000000000001', 'PRICE', 2199, 1999, 'EUR',
+        gen_random_uuid(), now());
+SELECT pg_temp.expect_fail('an external quantity edit carrying a currency (Р-202)', $q$
+  INSERT INTO channel_data.external_edit (tenant_id, channel_account_id, write_scope_id, field, observed_value, our_value, currency, since_write_id, observed_at)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'a6000000-0000-0000-0000-000000000001', 'QUANTITY', 5, 3, 'EUR', gen_random_uuid(), now()) $q$,
+  'external_edit_currency_of_price');
+SELECT pg_temp.expect_fail('an external edit of a field that does not exist (Р-202)', $q$
+  INSERT INTO channel_data.external_edit (tenant_id, channel_account_id, write_scope_id, field, observed_value, our_value, currency, since_write_id, observed_at)
+  VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'a6000000-0000-0000-0000-000000000001', 'TITLE', 5, 3, NULL, gen_random_uuid(), now()) $q$,
+  'external_edit_field_known');
 
 -- Находка 4 ревью шага 16, Р-93, Р-103: у каждой append-only таблицы есть строка, и изменение строки отклоняет именно триггер неизменяемости
 DO $$

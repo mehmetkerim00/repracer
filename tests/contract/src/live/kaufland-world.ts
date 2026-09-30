@@ -246,6 +246,10 @@ export async function kauflandLiveWorld(input: {
     if (source.status !== 'CREATED') throw new Error(`stock source of the world: ${source.status}`);
     const imported = await stock.importStock(seeded.tenantId, source.stockSourceId, input.products.map((p) => ({ sku: String(p.idProduct).slice(-6), quantity: input.stock!.onHand })), actor);
     if (imported.status !== 'APPLIED') throw new Error(`stock import of the world: ${imported.status}`);
+    // Шаг 60 [Р-202]: мир объявляет явно — другие инструменты количество в этом канале не ведут
+    await stock.answerOtherTools(seeded.tenantId, seeded.channelAccountId, 'NONE', actor);
+    const confirmed = await stock.confirmQuantityWrites(seeded.tenantId, seeded.channelAccountId, (await stock.quantityWritesState(seeded.tenantId, seeded.channelAccountId))!.externalAccountId, actor);
+    if (confirmed.status !== 'CONFIRMED') throw new Error(`quantity writes of the world: ${confirmed.status}`);
     const enabled = await stock.enableStockSync(seeded.tenantId, seeded.channelAccountId, { bufferUnits: input.stock.bufferUnits, maxQuantity: null, minQuantityToList: 0, acknowledgeSideEffects: false }, actor);
     if (enabled.status !== 'ENABLED') throw new Error(`stock sync of the world: ${enabled.status}`);
     await stock.recalculate(seeded.tenantId, null, clock.iso() as never);

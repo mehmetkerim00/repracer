@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { systemClock } from '@repracer/channel-port';
 import type { Instant, OrderLine } from '@repracer/channel-port';
 import {
-  type ConfirmOrdersOutcome, type DecideReturnOutcome, type OrderReturnRow,
+  type AnswerOtherToolsResult, type ConfirmOrdersOutcome, type ConfirmQuantityWritesResult, type DecideReturnOutcome, type QuantityWritesState, type OrderReturnRow, type OtherTools,
   availableOf, publishedQuantity, type CreateStockSourceResult, type EnableStockSyncInput, type EnableStockSyncResult, type InboundStockOutcome, type InboundStockRow,
   type OrderLinesOutcome, type RecalculationOutcome, type StockActor, type StockChannelRow, type StockDivergenceRow, type StockImportOutcome, type StockImportRow,
   type StockPage, type StockRow, type StockSourceMode, type StockSourceRow, type StockStore,
@@ -157,8 +157,10 @@ export class PgStockStore implements StockStore {
   async enableStockSync(tenantId: string, channelAccountId: string, input: EnableStockSyncInput, actor: StockActor): Promise<EnableStockSyncResult> {
     try {
       return await inTenant(this.options.adminPool, tenantId, async (tx) => {
-        const { rows: [acc] } = await tx.query(`SELECT channel FROM tenant_data.channel_account WHERE tenant_id = $1 AND channel_account_id = $2`, [tenantId, channelAccountId]);
+        const { rows: [acc] } = await tx.query(`SELECT channel, quantity_writes_confirmed, other_tools FROM tenant_data.channel_account WHERE tenant_id = $1 AND channel_account_id = $2`, [tenantId, channelAccountId]);
         if (!acc) return { status: 'NO_OFFERS' as const };
+        // Шаг 60 [Р-202]: запись количества выключена, пока владелец не подтвердил, что другие инструменты количество здесь не ведут (страж — база)
+        if (!acc.quantity_writes_confirmed) return { status: 'NOT_CONFIRMED' as const, otherTools: (acc.other_tools as OtherTools | null) ?? null };
         const { rows: [cap] } = await tx.query(
           `SELECT capability_id, version, write_scope_kind, write_scope_key_template, budget_scope_attribute, requires_side_effects_ack
              FROM platform.channel_capability WHERE channel = $1 AND field = 'QUANTITY' AND status = 'ACTIVE' ORDER BY valid_from DESC LIMIT 1`, [acc.channel]);
@@ -417,6 +419,52 @@ export class PgStockStore implements StockStore {
             AND t.last_quantity IS DISTINCT FROM (${PgStockStore.PUBLISHED_SQL})`, [tenantId, channelAccountId]);
       return rows.map((r) => String(r.product_id));
     });
+  }
+
+  async quantityWritesState(tenantId: string, channelAccountId: string): Promise<QuantityWritesState | null> {
+    return inTenant(this.options.adminPool, tenantId, async (tx) => {
+      const { rows: [a] } = await tx.query(`SELECT external_account_id, other_tools, quantity_writes_confirmed FROM tenant_data.channel_account WHERE tenant_id = $1 AND channel_account_id = $2`,
+        [tenantId, channelAccountId]);
+      return a ? { externalAccountId: String(a.external_account_id), otherTools: (a.other_tools as OtherTools | null) ?? null, confirmed: a.quantity_writes_confirmed === true } : null;
+    });
+  }
+
+  /** Шаг 60 [Р-202]: ответ владельца о других инструментах канала; автор и время ставит база, противоречие подтверждению отклоняет она же */
+  async answerOtherTools(tenantId: string, channelAccountId: string, answer: OtherTools, actor: StockActor): Promise<AnswerOtherToolsResult> {
+    try {
+      return await inTenant(this.options.adminPool, tenantId, async (tx) => {
+        const { rowCount } = await tx.query(`UPDATE tenant_data.channel_account SET other_tools = $3 WHERE tenant_id = $1 AND channel_account_id = $2`, [tenantId, channelAccountId, answer]);
+        return rowCount ? { status: 'ANSWERED' as const } : { status: 'NOT_FOUND' as const };
+      }, actor.userId, { mfa: actor.mfa });
+    } catch (error) {
+      const message = String((error as Error).message ?? '');
+      if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
+      if (/would make two writers/.test(message)) return { status: 'CONFLICT', reason: 'QUANTITY_WRITES_CONFIRMED' };
+      throw error;
+    }
+  }
+
+  /** Шаг 60 [Р-202]: подтверждение записи количества — строка журнала; кто, чем и после какого ответа — проверяет база, её отказы разобраны */
+  async confirmQuantityWrites(tenantId: string, channelAccountId: string, typedConfirmation: string, actor: StockActor): Promise<ConfirmQuantityWritesResult> {
+    try {
+      return await inTenant(this.options.adminPool, tenantId, async (tx) => {
+        const { rows: [a] } = await tx.query(`SELECT quantity_writes_confirmed FROM tenant_data.channel_account WHERE tenant_id = $1 AND channel_account_id = $2`, [tenantId, channelAccountId]);
+        if (!a) return { status: 'NOT_FOUND' as const };
+        if (a.quantity_writes_confirmed) return { status: 'ALREADY_CONFIRMED' as const };
+        await tx.query(
+          `INSERT INTO tenant_data.channel_quantity_writes_confirmation (tenant_id, channel_account_id, typed_confirmation, confirmed_by_membership_id) VALUES ($1, $2, $3, $4)`,
+          [tenantId, channelAccountId, typedConfirmation, actor.membershipId]);
+        return { status: 'CONFIRMED' as const };
+      }, actor.userId, { mfa: actor.mfa });
+    } catch (error) {
+      const message = String((error as Error).message ?? '');
+      if (/only the owner confirms/.test(message)) return { status: 'NOT_OWNER' };
+      if (/does not name the channel account/.test(message)) return { status: 'CONFIRMATION_MISMATCH' };
+      if (/answer first whether another tool/.test(message)) return { status: 'ANSWER_FIRST' };
+      if (/another tool updates stock in this channel/.test(message)) return { status: 'OTHER_TOOL_MANAGES_STOCK' };
+      if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
+      throw error;
+    }
   }
 
   /** Шаг 59 [Р-199]: возвраты тенанта — ждущие решения первыми */

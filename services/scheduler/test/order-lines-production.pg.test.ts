@@ -70,6 +70,10 @@ before(async () => {
   if (source.status !== 'CREATED') throw new Error(`stock source: ${source.status}`);
   const imported = await stock.importStock(seeded.tenantId, source.stockSourceId, [{ sku: String(ID_UNIT), quantity: ON_HAND }], actor);
   if (imported.status !== 'APPLIED' || imported.matched !== 1) throw new Error(`stock import: ${JSON.stringify(imported)}`);
+  // Шаг 60 [Р-202]: мир объявляет явно — другие инструменты количество в этом канале не ведут
+  await stock.answerOtherTools(seeded.tenantId, seeded.channelAccountId, 'NONE', actor);
+  const confirmed = await stock.confirmQuantityWrites(seeded.tenantId, seeded.channelAccountId, (await stock.quantityWritesState(seeded.tenantId, seeded.channelAccountId))!.externalAccountId, actor);
+  if (confirmed.status !== 'CONFIRMED') throw new Error(`quantity writes of the world: ${confirmed.status}`);
   const enabled = await stock.enableStockSync(seeded.tenantId, seeded.channelAccountId, { bufferUnits: BUFFER, maxQuantity: null, minQuantityToList: 0, acknowledgeSideEffects: false }, actor);
   if (enabled.status !== 'ENABLED') throw new Error(`stock sync: ${enabled.status}`);
   await stock.recalculate(seeded.tenantId, null, new Date().toISOString() as never);

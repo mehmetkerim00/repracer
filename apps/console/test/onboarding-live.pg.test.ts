@@ -14,12 +14,13 @@ import { STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract
 import { demoWorld, nextNineUtc, DEMO_COMPETITORS_PER_OFFER, DEMO_OFFERS, type DemoWorld } from '@repracer/contract-tests/live';
 import { createAuthenticator, MemoryIdentityDirectory, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
-import { seedPricingWorld, PgPricingStore, PgStockStore, type PgPool } from '@repracer/pricing-store-pg';
+import { seedPricingWorld, PgChannelConnectStore, PgPricingStore, PgStockStore, type PgPool } from '@repracer/pricing-store-pg';
 import { createPricingPipeline } from '@repracer/pricing-pipeline';
 import { KAUFLAND_DESCRIPTOR } from '@repracer/kaufland-adapter';
 import { createIsolatedDatabase, type IsolatedDatabase } from '../../../packages/pricing-store-pg/test/isolated-db.ts';
 import { createStandApi, createStandServer } from '../server/stand-server.ts';
 import type { BulkWorkerConfig } from '../server/bulk-worker.ts';
+import { confirmQuantityWritesAsOwner, connectionsOnly } from './quantity-writes.ts';
 import { setAccessToken, setApiOrigin } from '../src/api.ts';
 
 /**
@@ -192,6 +193,9 @@ before(async () => {
   const handle = createStandApi([demoLive, emptyLive], {
     authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory }),
     simulator: { token: (_a, options) => issuer.token('demo-owner', { email: 'owner@example.invalid', amr: options?.secondFactor === false ? ['pwd'] : ['pwd', 'otp'] }), expiresInSeconds: 900 },
+  }, {
+    // Шаг 60 [Р-202]: экран подключений демо-мира — аккаунты из базы; на нём владелец подтверждает запись количества
+    connect: (worldId) => (worldId === DEMO_WORLD ? connectionsOnly(new PgChannelConnectStore(adminPool)) : null),
   });
   server = createStandServer(handle);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -286,6 +290,8 @@ test('Р-149, Р-151: онбординг целиком на демо-тенан
   assert.equal(source.status, 200, JSON.stringify(source.body));
   const stockCsv = ['Artikelnummer;Bestand', ...Array.from({ length: DEMO_OFFERS }, (_, i) => `${String(340_100_001 + i).slice(-6)};12`)].join('\r\n');
   await runJob('stock/import', DEMO_WORLD, api(DEMO_WORLD, 'stock', 'import'), { fileName: 'bestand.csv', content: Buffer.from(stockCsv, 'utf8').toString('base64'), stockSourceId: source.body.stockSourceId });
+  // Шаг 60 [Р-202]: запись количества — после подтверждения владельца на экране подключений, как у продавца
+  await confirmQuantityWritesAsOwner((method, url, body) => measure(`connections ${method}`, method, url, body), api(DEMO_WORLD, 'connections'), demo.live.seeded.channelAccountId);
   // Идентификатор аккаунта МИРА, как у экрана остатков (находка 1 доказательства пути остатков)
   await runJob('stock/enable', DEMO_WORLD, api(DEMO_WORLD, 'stock', 'enable'), { channelAccountId: demo.live.seeded.channelAccountId, bufferUnits: 1, maxQuantity: null, minQuantityToList: 0 });
   view = await onboarding();

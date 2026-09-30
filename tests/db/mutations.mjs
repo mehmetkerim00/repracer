@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0157_verify_schema_invariants_v44.sql';
+const VERIFY = 'migrations/0159_verify_schema_invariants_v44.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -2125,6 +2125,47 @@ export const STEP59_ROWS = [
         smoke('closure evidence export recorded for a tenant that is not closed (Р-201)')),
       m(dropConstraint('tenant_purge_status_evidence_export_whole', 'maintenance.tenant_purge_status'), smoke('closure evidence export without a SHA-256 (Р-201)')),
       m(dropConstraint('tenant_purge_status_evidence_hold_explained', 'maintenance.tenant_purge_status'), smoke('price evidence held by a direct write without a reason (Р-201)')),
+    ],
+  },
+];
+
+/**
+ * Шаг 60 (0158) [Р-202]: внешние писатели канала — запись количества выключена до подтверждения владельца; ответ «остатки ведёт другой
+ * инструмент» подтверждение запрещает и не ставится поверх него; журнал правок канала — только известных полей
+ */
+export const STEP60_ROWS = [
+  {
+    row: 'шаг 60 (Р-202)', critical: false,
+    invariant: 'количество в канал пишется только у аккаунта с подтверждением владельца; подтверждает только владелец набранным идентификатором после ответа без «остатков»; подтверждённый аккаунт не получает ответа «остатки ведёт другой инструмент»',
+    mutations: [
+      m(dropTrigger('a3_write_scope_quantity_writes_confirmed', 'tenant_data.write_scope'), smoke('quantity sync on an account without the owner confirmation (Р-202)')),
+      m(dropTrigger('b_channel_quantity_writes_confirmation_guard', 'tenant_data.channel_quantity_writes_confirmation'),
+        smoke('quantity writes confirmed before the answer about other tools (Р-202)')),
+      m(replaceInFunction('tenant_data.channel_quantity_writes_confirmation_guard()', "IF m.role IS DISTINCT FROM 'OWNER' THEN", 'IF false THEN'),
+        smoke('quantity writes confirmed by a non-owner (Р-202)')),
+      m(replaceInFunction('tenant_data.channel_quantity_writes_confirmation_guard()', 'IF a.other_tools IS NULL THEN', 'IF false THEN'),
+        smoke('quantity writes confirmed before the answer about other tools (Р-202)')),
+      m(replaceInFunction('tenant_data.channel_quantity_writes_confirmation_guard()', "IF a.other_tools IN ('STOCK', 'STOCK_AND_PRICES') THEN", 'IF false THEN'),
+        smoke('quantity writes confirmed while another tool manages stock (Р-202)')),
+      m(replaceInFunction('tenant_data.channel_quantity_writes_confirmation_guard()', 'IF btrim(NEW.typed_confirmation) IS DISTINCT FROM a.external_account_id THEN', 'IF false THEN'),
+        smoke('quantity writes confirmed with a mistyped account (Р-202)')),
+      m(dropTrigger('a_channel_account_other_tools_guard', 'tenant_data.channel_account'),
+        smoke('the answer about other tools is stored with its author and time (Р-202)'), smoke('quantity writes switched on by a direct update (Р-202)')),
+      m(replaceInFunction('tenant_data.channel_account_other_tools_guard()', "IF NEW.other_tools IN ('STOCK', 'STOCK_AND_PRICES') AND NEW.quantity_writes_confirmed THEN", 'IF false THEN'),
+        smoke('another tool declared for stock after quantity writes are confirmed (Р-202)')),
+      m(dropConstraint('channel_account_other_tools_known', 'tenant_data.channel_account'), smoke('an answer about other tools that does not exist (Р-202)')),
+      m(dropConstraint('external_edit_currency_of_price', 'channel_data.external_edit'), smoke('an external quantity edit carrying a currency (Р-202)')),
+      m(dropConstraint('external_edit_field_known', 'channel_data.external_edit'), smoke('an external edit of a field that does not exist (Р-202)')),
+      m(dropTrigger('c_channel_quantity_writes_confirmation_apply', 'tenant_data.channel_quantity_writes_confirmation'),
+        smoke('another tool declared for stock after quantity writes are confirmed (Р-202)')),
+      m(dropTrigger('zz_append_only', 'tenant_data.channel_quantity_writes_confirmation'), smoke('append-only tenant_data.channel_quantity_writes_confirmation')),
+      m(dropTrigger('zz_no_truncate', 'tenant_data.channel_quantity_writes_confirmation'), smoke('truncate tenant_data.channel_quantity_writes_confirmation')),
+      m(dropTrigger('zz_append_only', 'channel_data.external_edit'), smoke('append-only channel_data.external_edit')),
+      m(dropTrigger('zz_no_truncate', 'channel_data.external_edit'), smoke('truncate channel_data.external_edit')),
+      m(dropTrigger('a0_admin_write_person_insert', 'tenant_data.channel_quantity_writes_confirmation'),
+        verify('tenant_data\\.channel_quantity_writes_confirmation: administrative INSERT without the person guard')),
+      m(dropTrigger('zc_channel_quantity_writes_confirmation_audit', 'tenant_data.channel_quantity_writes_confirmation'),
+        verify('tenant_data\\.channel_quantity_writes_confirmation: administrative INSERT is not written to the audit log')),
     ],
   },
 ];
