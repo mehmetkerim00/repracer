@@ -3,7 +3,7 @@ import { systemClock } from '@repracer/channel-port';
 import type { Instant, OrderLine } from '@repracer/channel-port';
 import { availableOf, publishedQuantity, type StockAllocation } from './published.ts';
 import type {
-  AnswerOtherToolsResult, ConfirmOrdersOutcome, ConfirmQuantityWritesResult, OtherTools, QuantityWritesState, CreateStockSourceResult, DecideReturnOutcome, EnableStockSyncInput, EnableStockSyncResult, InboundStockOutcome, InboundStockRow, OrderLinesOutcome, RecalculationOutcome,
+  AnswerOtherToolsResult, ConfirmOrdersOutcome, ConfirmQuantityWritesResult, RevokeQuantityWritesResult, OtherTools, QuantityWritesState, CreateStockSourceResult, DecideReturnOutcome, EnableStockSyncInput, EnableStockSyncResult, InboundStockOutcome, InboundStockRow, OrderLinesOutcome, RecalculationOutcome,
   OrderReturnRow, StockActor, StockChannelRow, StockDivergenceRow, StockImportOutcome, StockImportRow, StockPage, StockRow, StockSourceMode, StockSourceRow, StockStore,
 } from './store.ts';
 
@@ -22,6 +22,8 @@ export interface MemoryStockOffer {
   /** Побочный эффект записи остатка у канала — по возможности канала (Amazon EU: регион) */
   requiresSideEffectsAck?: boolean;
   sideEffectsText?: string | null;
+  /** Внешний идентификатор аккаунта в канале — его набирает владелец при подтверждении и отзыве [Р-202]; нет — идентификатор аккаунта */
+  externalAccountId?: string;
 }
 
 interface Pool { stockSourceId: string; mode: StockSourceMode; productId: string; onHand: number; asOf: Instant | null }
@@ -57,11 +59,14 @@ export class InMemoryStockStore implements StockStore {
   /** Тенант мира: ключ Inbound API принадлежит ему, и Р-31 требует сверки */
   private readonly tenantId: string;
   private readonly now: () => string;
-  constructor(offers: readonly MemoryStockOffer[], options: { canManage?: (actor: StockActor) => boolean; tenantId?: string; now?: () => string } = {}) {
+  /** Роль участника — как членство в базе: подтверждает и отзывает запись количества только владелец [Р-202]; без роли — отказ */
+  private readonly roleOf: (actor: StockActor) => string | null;
+  constructor(offers: readonly MemoryStockOffer[], options: { canManage?: (actor: StockActor) => boolean; roleOf?: (actor: StockActor) => string | null; tenantId?: string; now?: () => string } = {}) {
     this.now = options.now ?? systemClock.now;
     this.offers = offers;
     this.tenantId = options.tenantId ?? 'memory';
     this.canManage = options.canManage ?? (() => true);
+    this.roleOf = options.roleOf ?? (() => null);
   }
 
   async stockSources(): Promise<StockSourceRow[]> {
@@ -154,22 +159,48 @@ export class InMemoryStockStore implements StockStore {
     return { status: 'ANSWERED' };
   }
 
-  async quantityWritesState(_tenantId: string, channelAccountId: string): Promise<QuantityWritesState | null> {
-    if (!this.offers.some((o) => o.channelAccountId === channelAccountId)) return null;
-    return { externalAccountId: channelAccountId, otherTools: this.otherTools.get(channelAccountId) ?? null, confirmed: this.quantityWritesConfirmed.has(channelAccountId) };
+  /** Внешний идентификатор аккаунта — у предложений мира; без него (миры без канала) набирается идентификатор аккаунта */
+  private externalAccountIdOf(channelAccountId: string): string {
+    return this.offers.find((o) => o.channelAccountId === channelAccountId && o.externalAccountId)?.externalAccountId ?? channelAccountId;
   }
 
-  /** В памяти внешнего идентификатора аккаунта нет — набранным подтверждением служит идентификатор аккаунта */
+  async quantityWritesState(_tenantId: string, channelAccountId: string): Promise<QuantityWritesState | null> {
+    if (!this.offers.some((o) => o.channelAccountId === channelAccountId)) return null;
+    return { externalAccountId: this.externalAccountIdOf(channelAccountId), otherTools: this.otherTools.get(channelAccountId) ?? null, confirmed: this.quantityWritesConfirmed.has(channelAccountId) };
+  }
+
+  /** Шаг 61 (отложенное шага 60): порядок проверок — как у стража базы (0160): право, владелец, состояние, ответ, набранный идентификатор */
   async confirmQuantityWrites(_tenantId: string, channelAccountId: string, typedConfirmation: string, actor: StockActor): Promise<ConfirmQuantityWritesResult> {
     if (!this.canManage(actor)) return { status: 'FORBIDDEN' };
     if (!this.offers.some((o) => o.channelAccountId === channelAccountId)) return { status: 'NOT_FOUND' };
+    if (this.roleOf(actor) !== 'OWNER') return { status: 'NOT_OWNER' };
     if (this.quantityWritesConfirmed.has(channelAccountId)) return { status: 'ALREADY_CONFIRMED' };
     const answer = this.otherTools.get(channelAccountId);
     if (!answer) return { status: 'ANSWER_FIRST' };
     if (answer === 'STOCK' || answer === 'STOCK_AND_PRICES') return { status: 'OTHER_TOOL_MANAGES_STOCK' };
-    if (typedConfirmation.trim() !== channelAccountId) return { status: 'CONFIRMATION_MISMATCH' };
+    if (typedConfirmation.trim() !== this.externalAccountIdOf(channelAccountId)) return { status: 'CONFIRMATION_MISMATCH' };
     this.quantityWritesConfirmed.add(channelAccountId);
     return { status: 'CONFIRMED' };
+  }
+
+  /** Шаг 61 [Р-202]: отзыв — как в базе: синхронизация единиц аккаунта выключена, неотправленные версии сняты */
+  async revokeQuantityWrites(_tenantId: string, channelAccountId: string, typedConfirmation: string, actor: StockActor): Promise<RevokeQuantityWritesResult> {
+    if (!this.canManage(actor)) return { status: 'FORBIDDEN' };
+    if (!this.offers.some((o) => o.channelAccountId === channelAccountId)) return { status: 'NOT_FOUND' };
+    if (this.roleOf(actor) !== 'OWNER') return { status: 'NOT_OWNER' };
+    if (!this.quantityWritesConfirmed.has(channelAccountId)) return { status: 'NOT_CONFIRMED' };
+    if (typedConfirmation.trim() !== this.externalAccountIdOf(channelAccountId)) return { status: 'CONFIRMATION_MISMATCH' };
+    this.quantityWritesConfirmed.delete(channelAccountId);
+    const scopes = [...this.scopes.values()].filter((sc) => sc.offer.channelAccountId === channelAccountId);
+    let disabledScopes = 0;
+    for (const scope of scopes) if (scope.enabled) { scope.enabled = false; disabledScopes += 1; }
+    const ids = new Set(scopes.map((sc) => sc.writeScopeId));
+    let discardedWrites = 0;
+    for (const w of this.writes) {
+      if (ids.has(w.writeScopeId) && (w.status === 'PENDING' || w.status === 'BLOCKED' || w.status === 'FAILED')) { w.status = 'DISCARDED_STALE'; discardedWrites += 1; }
+    }
+    const inFlightWrites = this.writes.filter((w) => ids.has(w.writeScopeId) && (w.status === 'DISPATCHED' || w.status === 'ACCEPTED')).length;
+    return { status: 'REVOKED', disabledScopes, discardedWrites, inFlightWrites };
   }
 
   async enableStockSync(_tenantId: string, channelAccountId: string, input: EnableStockSyncInput, actor: StockActor): Promise<EnableStockSyncResult> {

@@ -456,7 +456,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         const rows = connect ? await connect.connections(live.tenantId) : { accounts: [], pending: [] };
         return ok(connectionsView({ worldId: live.id, role: viewer.role, now: systemClock.now() }, rows, connect ? connect.connectable() : [], m));
       }
-      if (req.method !== 'POST' || (param4 !== 'start' && param4 !== 'callback' && param4 !== 'cancel' && param4 !== 'other-tools' && param4 !== 'quantity-writes')) return fail(404, 'NOT_FOUND', s.notFound);
+      if (req.method !== 'POST' || (param4 !== 'start' && param4 !== 'callback' && param4 !== 'cancel' && param4 !== 'other-tools' && param4 !== 'quantity-writes' && param4 !== 'quantity-writes-revoke')) return fail(404, 'NOT_FOUND', s.notFound);
       if (!can(viewer.role, 'MANAGE_TENANT')) return fail(403, 'FORBIDDEN', t.noRight);
       const actor = { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) };
       /**
@@ -465,7 +465,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
        * вопрос тот же. Кто подтверждает (только владелец), что набрано и не противоречит ли ответу — проверяет база; консоль
        * лишь переводит её исход в код HTTP, не переписывая причину [Р-94]. Второй фактор не нужен [Р-202]
        */
-      if (param4 === 'other-tools' || param4 === 'quantity-writes') {
+      if (param4 === 'other-tools' || param4 === 'quantity-writes' || param4 === 'quantity-writes-revoke') {
         const e = t.errors;
         const accountId = typeof body.channelAccountId === 'string' ? body.channelAccountId : null;
         if (!accountId || !live.accounts.some((a) => a.channelAccountId === accountId)) return fail(404, 'ACCOUNT_NOT_FOUND', e.accountNotFound);
@@ -478,6 +478,24 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           if (answered.status === 'NOT_FOUND') return fail(404, 'ACCOUNT_NOT_FOUND', e.accountNotFound);
           if (answered.status === 'CONFLICT') return fail(409, 'QUANTITY_WRITES_CONFIRMED', e.answerConflictConfirmed);
           return fail(403, 'FORBIDDEN', t.noRight);
+        }
+        /**
+         * Шаг 61 [Р-202]: отзыв — тем же порядком, что выдача: владелец, набранный идентификатор аккаунта, журнал, аудит. Запись количества
+         * выключается сразу, неотправленные версии снимаются; ответ называет, сколько выключено и снято
+         */
+        if (param4 === 'quantity-writes-revoke') {
+          if (!live.stock.revokeQuantityWrites) return fail(404, 'NOT_FOUND', s.notFound);
+          if (typeof body.typedConfirmation !== 'string' || body.typedConfirmation.length > 256) return fail(400, 'CONFIRMATION_MISMATCH', e.confirmationMismatch);
+          const revoked = await live.stock.revokeQuantityWrites(live.tenantId, accountId, body.typedConfirmation, actor);
+          switch (revoked.status) {
+            case 'REVOKED': return ok({ revoked: true, disabledScopes: revoked.disabledScopes, discardedWrites: revoked.discardedWrites, inFlightWrites: revoked.inFlightWrites,
+              message: t.quantityWrites.revoked(revoked.disabledScopes, revoked.discardedWrites, revoked.inFlightWrites) });
+            case 'NOT_OWNER': return fail(403, 'NOT_OWNER', e.notOwner);
+            case 'FORBIDDEN': return fail(403, 'FORBIDDEN', t.noRight);
+            case 'NOT_FOUND': return fail(404, 'ACCOUNT_NOT_FOUND', e.accountNotFound);
+            case 'NOT_CONFIRMED': return fail(409, 'NOT_CONFIRMED', e.notConfirmedToRevoke);
+            case 'CONFIRMATION_MISMATCH': return fail(400, 'CONFIRMATION_MISMATCH', e.confirmationMismatch);
+          }
         }
         if (!live.stock.confirmQuantityWrites) return fail(404, 'NOT_FOUND', s.notFound);
         if (typeof body.typedConfirmation !== 'string' || body.typedConfirmation.length > 256) return fail(400, 'CONFIRMATION_MISMATCH', e.confirmationMismatch);

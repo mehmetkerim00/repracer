@@ -99,7 +99,8 @@ function ExternalWriters({ worldId, account: a, onChanged }: { worldId: string; 
   const [typed, setTyped] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const post = (path: 'other-tools' | 'quantity-writes', body: Record<string, unknown>) =>
+  const [typedRevoke, setTypedRevoke] = useState('');
+  const post = (path: 'other-tools' | 'quantity-writes' | 'quantity-writes-revoke', body: Record<string, unknown>) =>
     void requestJson<{ message: string }>(worldPath(worldId, 'connections', path), { method: 'POST', locale: m.locale, body: { channelAccountId: a.channelAccountId, ...body } })
       .then((r) => { setError(null); setMessage(r.message); onChanged(); })
       .catch((e: unknown) => { setMessage(null); setError(errorText(e, m)); });
@@ -121,6 +122,12 @@ function ExternalWriters({ worldId, account: a, onChanged }: { worldId: string; 
         <p>
           <label>{q.confirmationHint} <input value={typed} onChange={(e) => setTyped(e.currentTarget.value)} /></label>
           <button type="button" disabled={typed.trim() === ''} onClick={() => post('quantity-writes', { typedConfirmation: typed })}>{q.confirmLabel}</button>
+        </p>
+      ) : null}
+      {q.canRevoke ? (
+        <p>
+          <label>{q.revokeHint} <input value={typedRevoke} onChange={(e) => setTypedRevoke(e.currentTarget.value)} /></label>
+          <button type="button" disabled={typedRevoke.trim() === ''} onClick={() => post('quantity-writes-revoke', { typedConfirmation: typedRevoke })}>{q.revokeLabel}</button>
         </p>
       ) : null}
       <p>{a.externalEditsText}</p>

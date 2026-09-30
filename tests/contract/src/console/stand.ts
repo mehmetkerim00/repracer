@@ -140,7 +140,10 @@ export async function buildStandWorlds(options: StandOptions = {}): Promise<Live
       identityTenantId: c.identity.tenantId, membershipAlias: (id) => c.identity.membershipAlias(id),
       store: c.store, pipeline: c.pipeline, clock: c.clock,
       // Остатки мира сценария — в памяти, из его же предложений: экран остатков и путь «только остатки» показываются без базы
-      stock: new InMemoryStockStore(stockOffersOf(scenario, accounts), { tenantId: c.tenantId }),
+      // Шаг 61 (отложенное шага 60): подтверждает и отзывает запись количества только владелец — роль участника стенда, как членство в базе
+      stock: new InMemoryStockStore(stockOffersOf(scenario, accounts), {
+        tenantId: c.tenantId, roleOf: (actor) => STAND_ACCOUNTS.find((x) => x.membershipAlias === actor.membershipId)?.role ?? null,
+      }),
       callContext: (channelAccountId) => ({
         tenantId: c.tenantId as AdapterCallContext['tenantId'], channelAccountId: channelAccountId as AdapterCallContext['channelAccountId'],
         correlationId: `stand:${scenario.id}:${c.clock.nowMs()}`, deadline: c.clock.iso(60_000),
@@ -162,6 +165,8 @@ function stockOffersOf(scenario: Scenario, accounts: StandAccount[]): MemoryStoc
     const channel = account?.channel ?? 'KAUFLAND';
     return {
       productId: s.productId, sku: s.externalUnitId, gtin: s.gtin ?? null, channelAccountId: s.channelAccountId, channel,
+      // Набирает владелец при подтверждении записи количества [Р-202]: внешний идентификатор основного аккаунта сценария
+      ...(s.channelAccountId === scenario.world.channelAccountId && scenario.world.account?.externalAccountId ? { externalAccountId: scenario.world.account.externalAccountId } : {}),
       marketplaces: account?.marketplaces ?? [s.marketplace],
       externalOfferId: s.externalOfferId ?? (channel === 'AMAZON' ? s.externalUnitId : `offer-${s.externalUnitId}`),
       ...(channel === 'AMAZON' ? { requiresSideEffectsAck: true, sideEffectsText: 'остаток MFN — одно значение на SKU во всех маркетплейсах региона [Р-1]' } : { sideEffectsText: 'unit с одинаковым id_offer на разных витринах имеют общие количество и склад [Р-35]' }),

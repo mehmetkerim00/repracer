@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { systemClock } from '@repracer/channel-port';
 import type { Instant, OrderLine } from '@repracer/channel-port';
 import {
-  type AnswerOtherToolsResult, type ConfirmOrdersOutcome, type ConfirmQuantityWritesResult, type DecideReturnOutcome, type QuantityWritesState, type OrderReturnRow, type OtherTools,
+  type AnswerOtherToolsResult, type ConfirmOrdersOutcome, type ConfirmQuantityWritesResult, type RevokeQuantityWritesResult, type DecideReturnOutcome, type QuantityWritesState, type OrderReturnRow, type OtherTools,
   availableOf, publishedQuantity, type CreateStockSourceResult, type EnableStockSyncInput, type EnableStockSyncResult, type InboundStockOutcome, type InboundStockRow,
   type OrderLinesOutcome, type RecalculationOutcome, type StockActor, type StockChannelRow, type StockDivergenceRow, type StockImportOutcome, type StockImportRow,
   type StockPage, type StockRow, type StockSourceMode, type StockSourceRow, type StockStore,
@@ -459,9 +459,49 @@ export class PgStockStore implements StockStore {
     } catch (error) {
       const message = String((error as Error).message ?? '');
       if (/only the owner confirms/.test(message)) return { status: 'NOT_OWNER' };
+      if (/are already confirmed/.test(message)) return { status: 'ALREADY_CONFIRMED' };
       if (/does not name the channel account/.test(message)) return { status: 'CONFIRMATION_MISMATCH' };
       if (/answer first whether another tool/.test(message)) return { status: 'ANSWER_FIRST' };
       if (/another tool updates stock in this channel/.test(message)) return { status: 'OTHER_TOOL_MANAGES_STOCK' };
+      if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
+      throw error;
+    }
+  }
+
+  /**
+   * Шаг 61 [Р-202]: отзыв подтверждения — строка REVOKE того же журнала; кто и чем отзывает, проверяет база, она же в той же транзакции
+   * выключает синхронизацию и снимает неотправленные версии. Счётчики — до вставки, под той же транзакцией: показать продавцу, что снято
+   */
+  async revokeQuantityWrites(tenantId: string, channelAccountId: string, typedConfirmation: string, actor: StockActor): Promise<RevokeQuantityWritesResult> {
+    try {
+      return await inTenant(this.options.adminPool, tenantId, async (tx) => {
+        const { rows: [a] } = await tx.query(`SELECT quantity_writes_confirmed FROM tenant_data.channel_account WHERE tenant_id = $1 AND channel_account_id = $2`, [tenantId, channelAccountId]);
+        if (!a) return { status: 'NOT_FOUND' as const };
+        if (!a.quantity_writes_confirmed) return { status: 'NOT_CONFIRMED' as const };
+        /**
+         * Ревью шага 61, находка 2: счётчики — под той же исключительной блокировкой аккаунта, что берёт страж журнала (захваты
+         * диспетчера ждут её), а снятое — по самой строке отзыва в истории, а не прикидкой до вставки
+         */
+        await tx.query(`SELECT pg_advisory_xact_lock(202, hashtext($1::text))`, [channelAccountId]);
+        const { rows: [c] } = await tx.query(
+          `SELECT (SELECT count(*) FROM tenant_data.write_scope WHERE tenant_id = $1 AND channel_account_id = $2 AND field = 'QUANTITY' AND quantity_sync_enabled)::int AS scopes,
+                  (SELECT count(*) FROM tenant_data.channel_write w JOIN tenant_data.write_scope ws ON ws.tenant_id = w.tenant_id AND ws.write_scope_id = w.write_scope_id
+                    WHERE w.tenant_id = $1 AND ws.channel_account_id = $2 AND w.field = 'QUANTITY' AND w.status IN ('DISPATCHED', 'ACCEPTED'))::int AS in_flight`,
+          [tenantId, channelAccountId]);
+        const { rows: [r] } = await tx.query(
+          `INSERT INTO tenant_data.channel_quantity_writes_confirmation (tenant_id, channel_account_id, typed_confirmation, confirmed_by_membership_id, action)
+           VALUES ($1, $2, $3, $4, 'REVOKE') RETURNING confirmation_id`,
+          [tenantId, channelAccountId, typedConfirmation, actor.membershipId]);
+        const { rows: [d] } = await tx.query(
+          `SELECT count(*)::int AS n FROM tenant_data.channel_write_history
+            WHERE tenant_id = $1 AND end_reason = 'QUANTITY_WRITES_REVOKED' AND end_params->>'confirmationId' = $2::text`, [tenantId, r.confirmation_id]);
+        return { status: 'REVOKED' as const, disabledScopes: Number(c.scopes), discardedWrites: Number(d.n), inFlightWrites: Number(c.in_flight) };
+      }, actor.userId, { mfa: actor.mfa });
+    } catch (error) {
+      const message = String((error as Error).message ?? '');
+      if (/only the owner confirms or revokes/.test(message)) return { status: 'NOT_OWNER' };
+      if (/does not name the channel account/.test(message)) return { status: 'CONFIRMATION_MISMATCH' };
+      if (/nothing to revoke/.test(message)) return { status: 'NOT_CONFIRMED' };
       if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
       throw error;
     }

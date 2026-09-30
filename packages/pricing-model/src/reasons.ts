@@ -183,6 +183,8 @@ export const DISPATCH_REASON_CODES = [
   'CHANNEL_PRICE_BASIS_MISMATCH',
   // Р-169 (шаг 41): аккаунт ушёл в тень, пока запись была в полёте; повтор в канал не идёт
   'WRITE_HELD_IN_SHADOW',
+  // Р-202 (шаг 61): владелец отозвал подтверждение записи количества — неотправленная версия снята, повтор не идёт
+  'QUANTITY_WRITES_REVOKED',
 ] as const;
 export type DispatchReasonCode = (typeof DISPATCH_REASON_CODES)[number];
 
@@ -201,6 +203,7 @@ export const WRITE_END_REASON_CODES = [
   'WRITE_EDIT_BUDGET_EXHAUSTED',
   'WRITE_BUDGET_DAY_UNCONFIRMED',
   'WRITE_HELD_IN_SHADOW',
+  'QUANTITY_WRITES_REVOKED',
 ] as const satisfies readonly AnyReasonCode[];
 export type WriteEndReasonCode = (typeof WRITE_END_REASON_CODES)[number];
 
@@ -489,6 +492,8 @@ export const REASON_PARAMS: Readonly<Record<AnyReasonCode, ParamSchema>> = {
    * это единственное место, где факт виден (находка 6: тень перекрывает статус BLOCKED).
    */
   WRITE_HELD_IN_SHADOW: { channelAccountId: id('TENANT'), wouldSpendBudget: p('bool', 'TENANT', O), blockedUnit: p('bool', 'TENANT', O) },
+  // Шаг 61 [Р-202]: база кладёт аккаунт и строку журнала отзыва; распознанный отказ повтора — только аккаунт
+  QUANTITY_WRITES_REVOKED: { channelAccountId: id('TENANT'), confirmationId: id('TENANT', O) },
   // Р-116: отправленная цена — наша, применённая — прочитана из канала
   CHANNEL_PRICE_BASIS_MISMATCH: {
     basisError: oneOf(BASIS_MISMATCH_DIRECTIONS, 'TENANT'), vatRateBp: bp('TENANT'), sentMinor: money('TENANT'), observedMinor: money('CHANNEL'),

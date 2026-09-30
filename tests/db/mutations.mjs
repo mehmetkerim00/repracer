@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0159_verify_schema_invariants_v44.sql';
+const VERIFY = 'migrations/0161_verify_schema_invariants_v44.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -2142,7 +2142,7 @@ export const STEP60_ROWS = [
       m(dropTrigger('b_channel_quantity_writes_confirmation_guard', 'tenant_data.channel_quantity_writes_confirmation'),
         smoke('quantity writes confirmed before the answer about other tools (Р-202)')),
       m(replaceInFunction('tenant_data.channel_quantity_writes_confirmation_guard()', "IF m.role IS DISTINCT FROM 'OWNER' THEN", 'IF false THEN'),
-        smoke('quantity writes confirmed by a non-owner (Р-202)')),
+        smoke('quantity writes confirmed by a non-owner (Р-202)'), smoke('quantity writes revoked by a non-owner (Р-202)')),
       m(replaceInFunction('tenant_data.channel_quantity_writes_confirmation_guard()', 'IF a.other_tools IS NULL THEN', 'IF false THEN'),
         smoke('quantity writes confirmed before the answer about other tools (Р-202)')),
       m(replaceInFunction('tenant_data.channel_quantity_writes_confirmation_guard()', "IF a.other_tools IN ('STOCK', 'STOCK_AND_PRICES') THEN", 'IF false THEN'),
@@ -2166,6 +2166,34 @@ export const STEP60_ROWS = [
         verify('tenant_data\\.channel_quantity_writes_confirmation: administrative INSERT without the person guard')),
       m(dropTrigger('zc_channel_quantity_writes_confirmation_audit', 'tenant_data.channel_quantity_writes_confirmation'),
         verify('tenant_data\\.channel_quantity_writes_confirmation: administrative INSERT is not written to the audit log')),
+    ],
+  },
+];
+
+/**
+ * Шаг 61 (0160) [Р-202, решение владельца]: отзыв подтверждения записи количества — тем же журналом, что выдача (владелец, набранный
+ * идентификатор, аудит); отзыв сразу выключает синхронизацию количества и снимает неотправленные версии, повтор ушедшей записи держит
+ * страж отправки; повторное включение — только новым подтверждением. Смоук — tests/db/smoke_quantity_revoke.sql
+ */
+export const STEP61_ROWS = [
+  {
+    row: 'шаг 61 (Р-202, отзыв)', critical: false,
+    invariant: 'после отзыва подтверждения количество в канал не уходит: синхронизация выключена, неотправленные версии сняты, повтор ушедшей записи отклонён; выдача и отзыв — по очереди, повторная выдача — только после отзыва',
+    mutations: [
+      m(dropConstraint('channel_quantity_writes_confirmation_action_known', 'tenant_data.channel_quantity_writes_confirmation'),
+        smoke('a journal row of an unknown action (Р-202)')),
+      m(replaceInFunction('tenant_data.channel_quantity_writes_confirmation_guard()', 'IF NOT a.quantity_writes_confirmed THEN', 'IF false THEN'),
+        smoke('quantity writes revoked twice (Р-202)')),
+      m(replaceInFunction('tenant_data.channel_quantity_writes_confirmation_guard()', 'IF a.quantity_writes_confirmed THEN', 'IF false THEN'),
+        smoke('quantity writes confirmed twice (Р-202)')),
+      m(replaceInFunction('tenant_data.channel_quantity_writes_confirmation_apply()', "quantity_writes_confirmed = (NEW.action = 'CONFIRM')", 'quantity_writes_confirmed = true'),
+        smoke('a revocation switches quantity sync of the account off at once (Р-202)')),
+      m(replaceInFunction('tenant_data.channel_quantity_writes_confirmation_apply()', 'UPDATE tenant_data.write_scope SET quantity_sync_enabled = false',
+        'UPDATE tenant_data.write_scope SET quantity_sync_enabled = quantity_sync_enabled'),
+        smoke('a revocation switches quantity sync of the account off at once (Р-202)')),
+      m(replaceInFunction('tenant_data.channel_quantity_writes_confirmation_apply()', "AND w.field = 'QUANTITY' AND w.status IN ('PENDING', 'BLOCKED', 'FAILED')", 'AND false'),
+        smoke('a revocation discards the unsent quantity versions with its reason (Р-202)')),
+      m(dropTrigger('bd_channel_write_quantity_writes_guard', 'tenant_data.channel_write'), smoke('a retry sends quantity after the revocation (Р-202)')),
     ],
   },
 ];

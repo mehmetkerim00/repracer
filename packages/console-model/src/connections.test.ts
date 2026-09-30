@@ -194,6 +194,10 @@ test('шаг 60 [Р-202]: вопрос о других инструментах,
     // Подтверждено: включена, формы нет
     const on = account('OWNER', { otherTools: 'NONE', quantityWritesConfirmed: true, externalEdits24h: 3 });
     assert.deepEqual([on.quantityWrites.confirmed, on.quantityWrites.text, on.quantityWrites.canConfirm, on.quantityWrites.blockedText], [true, t.quantityWrites.on, false, null]);
+    // Шаг 61 [Р-202]: отзыв — у подтверждённого аккаунта и только владельцу, набранным тем же идентификатором
+    assert.deepEqual([on.quantityWrites.canRevoke, on.quantityWrites.typeToRevoke], [true, 'A3SYN']);
+    assert.ok(on.quantityWrites.revokeHint!.includes('A3SYN'), on.quantityWrites.revokeHint!);
+    assert.deepEqual([account('ADMIN', { otherTools: 'NONE', quantityWritesConfirmed: true }).quantityWrites.canRevoke, fresh.quantityWrites.canRevoke, fresh.quantityWrites.typeToRevoke], [false, false, null]);
     // Счётчик внешних правок — число из строки, а не константа
     assert.equal(on.externalEdits24h, 3);
     assert.ok(on.externalEditsText.endsWith(': 3'), on.externalEditsText);

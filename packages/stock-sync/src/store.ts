@@ -92,6 +92,12 @@ export type ConfirmQuantityWritesResult =
   | { status: 'CONFIRMED' }
   | { status: 'FORBIDDEN' | 'NOT_OWNER' | 'NOT_FOUND' | 'ALREADY_CONFIRMED' | 'CONFIRMATION_MISMATCH' | 'ANSWER_FIRST' | 'OTHER_TOOL_MANAGES_STOCK' };
 
+/** Шаг 61 [Р-202]: отзыв подтверждения — сколько единиц выключено и сколько неотправленных версий снято в той же транзакции */
+export type RevokeQuantityWritesResult =
+  /** inFlightWrites — версии, уже ушедшие в канал до отзыва: их не вернуть, и продавцу это говорится словами */
+  | { status: 'REVOKED'; disabledScopes: number; discardedWrites: number; inFlightWrites: number }
+  | { status: 'FORBIDDEN' | 'NOT_OWNER' | 'NOT_FOUND' | 'NOT_CONFIRMED' | 'CONFIRMATION_MISMATCH' };
+
 /** Пересчёт: какие записи созданы. Отправляет их диспетчер [Р-64], не пересчёт */
 export interface RecalculationOutcome {
   writes: Array<{ writeScopeId: string; quantity: number; version: number }>;
@@ -226,6 +232,12 @@ export interface StockStore {
   answerOtherTools?(tenantId: string, channelAccountId: string, answer: OtherTools, actor: StockActor): Promise<AnswerOtherToolsResult>;
   /** Шаг 60 [Р-202]: владелец подтверждает набранным идентификатором аккаунта, что количество в канале не ведут другие инструменты */
   confirmQuantityWrites?(tenantId: string, channelAccountId: string, typedConfirmation: string, actor: StockActor): Promise<ConfirmQuantityWritesResult>;
+  /**
+   * Шаг 61 [Р-202]: отзыв подтверждения — тем же порядком, что выдача (владелец, набранный идентификатор аккаунта, журнал, аудит).
+   * Запись количества выключается сразу: синхронизация единиц аккаунта выключена, неотправленные версии сняты; включить снова — только
+   * новым подтверждением
+   */
+  revokeQuantityWrites?(tenantId: string, channelAccountId: string, typedConfirmation: string, actor: StockActor): Promise<RevokeQuantityWritesResult>;
   /** Шаг 59 [Р-199]: возвраты — ждущие решения человека первыми, затем последние решённые и сведения по чужим пулам */
   listReturns?(tenantId: string, limit: number): Promise<OrderReturnRow[]>;
   /**

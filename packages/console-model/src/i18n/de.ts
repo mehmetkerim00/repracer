@@ -33,7 +33,7 @@ const titles: Record<AnyReasonCode, string> = {
   HALT_AUTO_RELEASED: 'Anhalten automatisch aufgehoben', HALT_REVIEW_FAILED: 'Anhalten verlängert', HALT_MANUALLY_RELEASED: 'Anhalten manuell aufgehoben',
   MARGIN_WITHOUT_COST: 'Marge ohne Einstandskosten', STRATEGY_MISSING: 'Keine Strategie', WRITE_SUPERSEDED_BY_NEWER_VERSION: 'Durch neueren Preis ersetzt', WRITE_RETRIES_EXHAUSTED: 'Wiederholungen ausgeschöpft',
   WRITE_PRICING_MODE_CHANGED: 'Preismodus geändert', WRITE_EDIT_BUDGET_EXHAUSTED: 'Änderungsbudget aufgebraucht', WRITE_QUEUED_BEHIND_IN_FLIGHT: 'Wartet auf vorherige Übertragung',
-  WRITE_RETRY_SCHEDULED: 'Wiederholung geplant', WRITE_OUTCOME_RECONCILED: 'Ergebnis abgeglichen', WRITE_SCOPE_BLOCKED: 'Angebot blockiert', WRITE_BUDGET_DAY_UNCONFIRMED: 'Tagesgrenze der Storefront unbestätigt', WRITE_HELD_IN_SHADOW: 'Vom Schattenmodus zurückgehalten',
+  WRITE_RETRY_SCHEDULED: 'Wiederholung geplant', WRITE_OUTCOME_RECONCILED: 'Ergebnis abgeglichen', WRITE_SCOPE_BLOCKED: 'Angebot blockiert', WRITE_BUDGET_DAY_UNCONFIRMED: 'Tagesgrenze der Storefront unbestätigt', QUANTITY_WRITES_REVOKED: 'Bestandsschreiben widerrufen', WRITE_HELD_IN_SHADOW: 'Vom Schattenmodus zurückgehalten',
   CHANNEL_PRICE_BASIS_MISMATCH: 'Falsche Preisbasis — Kanal nicht vertrauenswürdig',
   CHANNEL_DISTRUSTED: 'Kanal nicht vertrauenswürdig — alle Preise angehalten',
 };
@@ -154,6 +154,7 @@ const reasons: Record<AnyReasonCode, Template> = {
   WRITE_EDIT_BUDGET_EXHAUSTED: (f) => `Nicht gesendet: das tägliche Änderungsbudget ist aufgebraucht${f.has('used') && f.has('limit') ? ` (${f.count('used')} von ${f.count('limit')})` : ''}${opt(f, 'budgetDay', () => ` für ${f.date('budgetDay')}`)}${opt(f, 'timeZone', () => ` (${f.raw('timeZone')})`)}${opt(f, 'resetsAt', () => `; es erneuert sich ${f.when('resetsAt')}`)}.`,
   // Р-169 (шаг 41): аккаунт ушёл в тень, пока запись была в полёте — повтор в канал не идёт
   WRITE_HELD_IN_SHADOW: (f) => `Nicht gesendet: die Kanalverbindung ${f.raw('channelAccountId')} ist im Schattenmodus, es wird nichts in den Kanal geschrieben. Die Preisautomatik rechnet weiter; schalten Sie das Schreiben in der Konsole scharf, damit die Preise gesendet werden.`,
+  QUANTITY_WRITES_REVOKED: (f) => `Nicht gesendet: der Inhaber hat das Schreiben von Beständen für die Kanalverbindung ${f.raw('channelAccountId')} widerrufen, es wird kein Bestand in den Kanal geschrieben. Die Bestandssynchronisation lässt sich erst nach einer neuen Bestätigung wieder einschalten, dass kein anderes Werkzeug dort Bestände pflegt.`,
   WRITE_BUDGET_DAY_UNCONFIRMED: (f) => `Nicht gesendet: die Wiederholung braucht das Änderungsbudget des aktuellen Tages, aber die Tagesgrenze der Storefront ${f.raw('marketplace')} ist nicht bestätigt. Die Übertragung wurde beendet; eine neue Preisentscheidung ist möglich, sobald die Zeitzone der Storefront bestätigt ist.`,
   CHANNEL_DISTRUSTED: (f) => `Alle Preise angehalten (${f.value('stage')}): wir vertrauen nicht, wie der Kanal unsere Preise anwendet${opt(f, 'distrustReason', () => ` — ${f.value('distrustReason')}`)}${opt(f, 'detectedAt', () => ` seit ${f.when('detectedAt')}`)}. Ein Fest- oder Margenpreis nähme denselben fehlerhaften Weg. Nur eine Person kann das aufheben.`,
   CHANNEL_PRICE_BASIS_MISMATCH: (f) => `Alle Preise der Storefront ${f.raw('marketplace')} angehalten: gesendet ${f.money('sentMinor')}, Käufer sehen ${f.money('observedMinor')} — genau der Umsatzsteuersatz ${f.bp('vatRateBp')} ${f.value('basisError')}. Der Kanal verwendet eine andere Preisbasis als wir; jeder weitere Preis wäre um denselben Anteil falsch. Prüfen Sie die Preiseinstellungen des Kanalkontos und heben Sie das Misstrauen manuell auf.`,
@@ -643,6 +644,9 @@ export const de: Messages = {
         hint: (id: string) => `Um zu bestätigen, dass kein anderes Tool Bestände in diesem Kanal pflegt, geben Sie die Kanalkonto-ID ein: ${id}`,
         submit: 'Bestätigen und Bestände schreiben erlauben',
         confirmed: 'Bestätigt: Bestände dürfen in diesen Kanal geschrieben werden. Schalten Sie den Abgleich auf der Seite „Bestand“ ein.',
+        revokeHint: (id: string) => `Übernimmt ein anderes Tool die Bestände in diesem Kanal? Widerrufen Sie das Schreiben von Beständen: es stoppt sofort, noch nicht gesendete Bestandsänderungen werden verworfen, und wieder einschalten lässt es sich nur mit einer neuen Bestätigung. Geben Sie die Kanalkonto-ID ein: ${id}`,
+        revoke: 'Schreiben von Beständen widerrufen',
+        revoked: (scopes: number, writes: number, inFlight: number) => `Widerrufen: Bestände werden nicht mehr in diesen Kanal geschrieben. Abgleich für ${scopes} Angebot(e) ausgeschaltet, ${writes} nicht gesendete Bestandsänderung(en) verworfen.${inFlight > 0 ? ` ${inFlight} Änderung(en) waren vor dem Widerruf bereits an den Kanal gesendet und lassen sich nicht zurückholen; sie werden nicht wiederholt.` : ''}`,
       },
       externalEdits: {
         count: (n: number) => `Fremde Änderungen in den letzten 24 Stunden: ${n}`,
@@ -724,6 +728,7 @@ export const de: Messages = {
         answerConflictConfirmed: 'Das Schreiben von Beständen in diesen Kanal ist vom Inhaber bereits bestätigt: Pflegt hier ein anderes Tool die Bestände, überschreiben sich beide gegenseitig. Diese Antwort wird nicht angenommen.',
         notOwner: 'Nur der Inhaber bestätigt das Schreiben von Beständen in einen Kanal.',
         alreadyConfirmed: 'Das Schreiben von Beständen in diesen Kanal ist bereits bestätigt.',
+        notConfirmedToRevoke: 'Das Schreiben von Beständen in diesen Kanal ist nicht bestätigt: es gibt nichts zu widerrufen.',
         confirmationMismatch: 'Der eingegebene Text stimmt nicht mit der Kanalkonto-ID überein. Geben Sie sie genau wie angezeigt ein.',
         answerFirst: 'Beantworten Sie zuerst, ob ein anderes Tool Bestände oder Preise in diesem Kanal aktualisiert.',
         otherToolManagesStock: 'Sie haben angegeben, dass ein anderes Tool die Bestände in diesem Kanal aktualisiert: Unsere Bestandsänderungen würden seine überschreiben und seine unsere. Das Schreiben von Beständen bleibt aus; schalten Sie zuerst das andere Tool ab und ändern Sie Ihre Antwort.',

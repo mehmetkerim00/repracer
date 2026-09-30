@@ -88,6 +88,11 @@ export interface QuantityWritesView {
   typeToConfirm: string | null;
   confirmationHint: string | null;
   confirmLabel: string;
+  /** Шаг 61 [Р-202]: отзыв — тем же порядком, что выдача: только владелец, набранным идентификатором аккаунта */
+  canRevoke: boolean;
+  typeToRevoke: string | null;
+  revokeHint: string | null;
+  revokeLabel: string;
 }
 
 export interface ConnectionChannelView {
@@ -146,6 +151,8 @@ export function externalWritersView(
     : managesStock(answer) ? t.quantityWrites.otherToolManagesStock
     : !isOwner ? t.quantityWrites.ownerOnly : null;
   const canConfirm = !a.quantityWritesConfirmed && isOwner && answer !== null && !managesStock(answer);
+  // Отзыв — у подтверждённого аккаунта и только владельцу: база откажет остальным той же причиной, что при выдаче
+  const canRevoke = a.quantityWritesConfirmed && isOwner;
   return {
     otherTools: {
       answer, question: t.otherTools.question,
@@ -160,6 +167,10 @@ export function externalWritersView(
       typeToConfirm: canConfirm ? a.externalAccountId : null,
       confirmationHint: canConfirm ? t.quantityWrites.hint(a.externalAccountId) : null,
       confirmLabel: t.quantityWrites.submit,
+      canRevoke,
+      typeToRevoke: canRevoke ? a.externalAccountId : null,
+      revokeHint: canRevoke ? t.quantityWrites.revokeHint(a.externalAccountId) : null,
+      revokeLabel: t.quantityWrites.revoke,
     },
     externalEdits24h: a.externalEdits24h,
     externalEditsText: t.externalEdits.count(a.externalEdits24h),

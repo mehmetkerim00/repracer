@@ -32,7 +32,7 @@ const titles: Record<AnyReasonCode, string> = {
   HALT_AUTO_RELEASED: 'Halt released automatically', HALT_REVIEW_FAILED: 'Halt extended', HALT_MANUALLY_RELEASED: 'Halt released manually',
   MARGIN_WITHOUT_COST: 'Margin without cost', STRATEGY_MISSING: 'No strategy', WRITE_SUPERSEDED_BY_NEWER_VERSION: 'Replaced by a newer price', WRITE_RETRIES_EXHAUSTED: 'Retries exhausted',
   WRITE_PRICING_MODE_CHANGED: 'Pricing mode changed', WRITE_EDIT_BUDGET_EXHAUSTED: 'Edit budget used up', WRITE_QUEUED_BEHIND_IN_FLIGHT: 'Queued behind previous write',
-  WRITE_RETRY_SCHEDULED: 'Retry scheduled', WRITE_OUTCOME_RECONCILED: 'Outcome reconciled', WRITE_SCOPE_BLOCKED: 'Offer blocked', WRITE_BUDGET_DAY_UNCONFIRMED: 'Storefront day not confirmed', WRITE_HELD_IN_SHADOW: 'Held by shadow mode',
+  WRITE_RETRY_SCHEDULED: 'Retry scheduled', WRITE_OUTCOME_RECONCILED: 'Outcome reconciled', WRITE_SCOPE_BLOCKED: 'Offer blocked', WRITE_BUDGET_DAY_UNCONFIRMED: 'Storefront day not confirmed', QUANTITY_WRITES_REVOKED: 'Quantity writes revoked', WRITE_HELD_IN_SHADOW: 'Held by shadow mode',
   CHANNEL_PRICE_BASIS_MISMATCH: 'Wrong price basis — channel distrusted',
   CHANNEL_DISTRUSTED: 'Channel distrusted — all prices held',
 };
@@ -153,6 +153,7 @@ const reasons: Record<AnyReasonCode, Template> = {
   WRITE_EDIT_BUDGET_EXHAUSTED: (f) => `Not sent: the daily edit budget is used up${f.has('used') && f.has('limit') ? ` (${f.count('used')} of ${f.count('limit')})` : ''}${opt(f, 'budgetDay', () => ` for ${f.date('budgetDay')}`)}${opt(f, 'timeZone', () => ` (${f.raw('timeZone')})`)}${opt(f, 'resetsAt', () => `; it renews at ${f.when('resetsAt')}`)}.`,
   // Р-169 (шаг 41): аккаунт ушёл в тень, пока запись была в полёте — повтор в канал не идёт
   WRITE_HELD_IN_SHADOW: (f) => `Not sent: the channel connection ${f.raw('channelAccountId')} is in shadow mode, so nothing is written to the channel. The engine keeps computing prices; switch live writes on in the console to send them.`,
+  QUANTITY_WRITES_REVOKED: (f) => `Not sent: the owner revoked quantity writes for the channel connection ${f.raw('channelAccountId')}, so no quantity is written to the channel. Quantity sync switches on again only after a new confirmation that no other tool manages stock there.`,
   WRITE_BUDGET_DAY_UNCONFIRMED: (f) => `Not sent: the retry needs the edit budget of the current day, but the day boundary of storefront ${f.raw('marketplace')} is not confirmed. The write ended; a new price decision is possible once the storefront time zone is confirmed.`,
   CHANNEL_DISTRUSTED: (f) => `All prices held (${f.value('stage')}): we do not trust how the channel applies our prices${opt(f, 'distrustReason', () => ` — ${f.value('distrustReason')}`)}${opt(f, 'detectedAt', () => ` since ${f.when('detectedAt')}`)}. A fixed or margin price would take the same broken path. Only a person can release this.`,
   CHANNEL_PRICE_BASIS_MISMATCH: (f) => `All prices on storefront ${f.raw('marketplace')} halted: we sent ${f.money('sentMinor')}, buyers see ${f.money('observedMinor')} — exactly the VAT rate ${f.bp('vatRateBp')} ${f.value('basisError')}. The channel uses a different price basis than ours; every further price would be wrong by the same share. Check the price settings of the channel account and release the distrust manually.`,
@@ -644,6 +645,9 @@ export const en = {
         hint: (id: string) => `To confirm that no other tool manages stock in this channel, type the channel account ID: ${id}`,
         submit: 'Confirm and allow stock writes',
         confirmed: 'Confirmed: stock writes to this channel are allowed. Enable the synchronisation on the Stock screen.',
+        revokeHint: (id: string) => `Another tool starts managing stock in this channel? Revoke stock writes: they stop at once, unsent stock updates are dropped, and switching them on again needs a new confirmation. Type the channel account ID: ${id}`,
+        revoke: 'Revoke stock writes',
+        revoked: (scopes: number, writes: number, inFlight: number) => `Revoked: stock writes to this channel are off. Synchronisation switched off for ${scopes} offer(s), ${writes} unsent stock update(s) dropped.${inFlight > 0 ? ` ${inFlight} update(s) had already been sent to the channel before the revocation and cannot be recalled; they are not retried.` : ''}`,
       },
       externalEdits: {
         count: (n: number) => `External edits in the last 24 hours: ${n}`,
@@ -727,6 +731,7 @@ export const en = {
         answerConflictConfirmed: 'Stock writes to this channel are already confirmed by the owner: with another tool updating stock here, the two would overwrite each other. This answer is not accepted.',
         notOwner: 'Only the owner confirms stock writes to a channel.',
         alreadyConfirmed: 'Stock writes to this channel are already confirmed.',
+        notConfirmedToRevoke: 'Stock writes to this channel are not confirmed: there is nothing to revoke.',
         confirmationMismatch: 'The typed text does not match the channel account ID. Type it exactly as shown.',
         answerFirst: 'Answer first whether another tool updates stock or prices in this channel.',
         otherToolManagesStock: 'You told us another tool updates stock in this channel: our stock writes would overwrite it and it would overwrite ours. Stock writes stay off; switch that tool off and change your answer first.',

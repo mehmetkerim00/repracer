@@ -1130,7 +1130,7 @@ SELECT pg_temp.expect_fail('quantity writes confirmed by a non-owner (Р-202)', 
     PERFORM set_config('app.user_id', 'a1000000-0000-0000-0000-0000000000ad', true);
     INSERT INTO tenant_data.channel_quantity_writes_confirmation (tenant_id, channel_account_id, typed_confirmation, confirmed_by_membership_id)
     VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000002', 'A2SPID', 'a2000000-0000-0000-0000-0000000000ad');
-  END $d$ $q$, 'only the owner confirms quantity writes');
+  END $d$ $q$, 'only the owner confirms or revokes quantity writes');
 SELECT set_config('app.user_id', :uA, true) \gset
 SELECT pg_temp.expect_fail('quantity writes switched on by a direct update (Р-202)', $q$
   UPDATE tenant_data.channel_account SET quantity_writes_confirmed = true WHERE channel_account_id = 'a4000000-0000-0000-0000-000000000002' $q$, 'not directly');

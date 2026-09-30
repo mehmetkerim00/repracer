@@ -83,6 +83,12 @@ function dispatchRefusal(error: unknown, write: Row): { status: 'DISCARDED_STALE
    */
   m = /channel account (\S+) is in SHADOW mode: no write leaves the shadow/.exec(message);
   if (m) return { status: 'DISCARDED_STALE', reason: { code: 'WRITE_HELD_IN_SHADOW', params: { channelAccountId: m[1]! } } };
+  /**
+   * Шаг 61 [Р-202]: владелец отозвал подтверждение записи количества, пока запись была в полёте. Канал отказал, повтор упирается в страж
+   * отправки (0160) — отказ распознаётся, иначе обход диспетчера падал бы на каждом круге (находка 7 шага 15)
+   */
+  m = /quantity writes of channel account (\S+) are not confirmed by the owner: no quantity is sent/.exec(message);
+  if (m) return { status: 'DISCARDED_STALE', reason: { code: 'QUANTITY_WRITES_REVOKED', params: { channelAccountId: m[1]! } } };
   // Р-83 (0051): пол вычислен заново — min_price и пол маржи; пол не вычисляется — отдельное сообщение (не <NULL> в числе)
   m = /value (\d+) is below effective price floor (\d+) \(min_price (\d+), margin floor (\d+|none), min margin (\d+|none) bp\)/.exec(message);
   if (m) {

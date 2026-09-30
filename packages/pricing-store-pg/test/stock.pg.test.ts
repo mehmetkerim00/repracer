@@ -717,3 +717,61 @@ test('step 60 (Р-202): the channel showing a value we did not write is an exter
     `SELECT count(*) FILTER (WHERE field = 'QUANTITY')::int AS q, count(*) FILTER (WHERE field = 'PRICE')::int AS p FROM channel_data.external_edit WHERE channel_account_id = $1`, [account])).rows);
   assert.deepEqual([edits.q, edits.p], [1, 1]);
 });
+
+/**
+ * Шаг 61 [Р-202, решение владельца]: отзыв подтверждения — тем же порядком, что выдача (владелец, набранный идентификатор, журнал, аудит).
+ * С момента отзыва количество в канал не уходит: синхронизация единиц аккаунта выключена, неотправленная версия снята с причиной, а запись,
+ * бывшая в полёте, после отказа канала на повтор не идёт — диспетчер завершает её названной причиной. Включить снова — только новым подтверждением
+ */
+test('step 61 (Р-202): revoking quantity writes stops them at once — pending dropped, a retry ends with the reason, re-enabling needs a new confirmation', async () => {
+  const queue = new PgWriteQueueStore(db.pool('svc_app', 1));
+  const account = world.ids.dbId(KAUFLAND);
+  const sourceId = (await store.stockSources(world.tenantId))[0]!.stockSourceId;
+  const typed = (await store.quantityWritesState(world.tenantId, account))!.externalAccountId;
+  const scopeOf = async (sku: string) => (await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
+    `SELECT s.write_scope_id FROM tenant_data.write_scope s JOIN tenant_data.product p USING (tenant_id, product_id) WHERE s.field = 'QUANTITY' AND p.sku = $1`, [sku])).rows))[0]!.write_scope_id as string;
+  await store.enableStockSync(world.tenantId, account, { bufferUnits: 2, maxQuantity: null, minQuantityToList: 0, acknowledgeSideEffects: false }, owner());
+  await store.importStock(world.tenantId, sourceId, [{ sku: '3501', quantity: 31 }, { sku: '3502', quantity: 32 }], owner());
+  await store.recalculate(world.tenantId, null, now());
+  // Версия первого товара уходит в канал и остаётся в полёте; версия второго ждёт отправки
+  const flying = await scopeOf('syn-prod-1');
+  const claim = await queue.claimNext(world.tenantId, flying, now(), DEFAULT_RETRY_POLICY);
+  assert.equal(claim.kind, 'DISPATCH', `захват: ${JSON.stringify(claim)}`);
+  const inFlight = (claim as Extract<typeof claim, { kind: 'DISPATCH' }>).write;
+  const [before] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
+    `SELECT (SELECT count(*) FROM tenant_data.write_scope WHERE channel_account_id = $1 AND field = 'QUANTITY' AND quantity_sync_enabled)::int AS scopes,
+            (SELECT count(*) FROM tenant_data.channel_write w JOIN tenant_data.write_scope s USING (tenant_id, write_scope_id)
+              WHERE s.channel_account_id = $1 AND w.field = 'QUANTITY' AND w.status IN ('PENDING', 'BLOCKED', 'FAILED'))::int AS writes`, [account])).rows);
+  assert.ok(before.scopes > 0 && before.writes > 0, `до отзыва есть что выключать: ${JSON.stringify(before)}`);
+
+  // Неверный идентификатор — отказ базы своей причиной (не владелец — смоук базы и хранилище в памяти)
+  assert.deepEqual(await store.revokeQuantityWrites(world.tenantId, account, `${typed}-typo`, owner()), { status: 'CONFIRMATION_MISMATCH' });
+  assert.deepEqual(await store.revokeQuantityWrites(world.tenantId, account, typed, owner()),
+    { status: 'REVOKED', disabledScopes: before.scopes, discardedWrites: before.writes, inFlightWrites: 1 }, 'ответ называет, сколько выключено, снято и уже ушло');
+  assert.deepEqual(await store.revokeQuantityWrites(world.tenantId, account, typed, owner()), { status: 'NOT_CONFIRMED' }, 'отзывать нечего');
+  const [after] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
+    `SELECT (SELECT count(*) FROM tenant_data.write_scope WHERE channel_account_id = $1 AND field = 'QUANTITY' AND quantity_sync_enabled)::int AS scopes,
+            (SELECT count(*) FROM tenant_data.channel_write_history WHERE end_reason = 'QUANTITY_WRITES_REVOKED')::int AS discarded,
+            (SELECT typed_confirmation FROM tenant_data.channel_quantity_writes_confirmation WHERE channel_account_id = $1 AND action = 'REVOKE') AS typed`, [account])).rows);
+  assert.deepEqual([after.scopes, after.discarded, after.typed], [0, before.writes, 'matched'], 'синхронизация выключена, снятое — в истории с причиной, набранное не хранится');
+  assert.equal((await store.recalculate(world.tenantId, null, now())).writes.length, 0, 'после отзыва новых версий нет');
+
+  // Запись в полёте: канал отказал — повтор упирается в страж отправки, и диспетчер завершает её причиной, а не исключением
+  const failed = await queue.recordOutcome(world.tenantId, inFlight, { kind: 'RETRY', error: { code: 'KFL_C05', retryAt: null } } as never, now(), DEFAULT_RETRY_POLICY);
+  assert.equal(failed.status, 'FAILED', `итог канала: ${JSON.stringify(failed)}`);
+  const retried = await queue.claimNext(world.tenantId, flying, new Date(Date.now() + 600_000).toISOString(), DEFAULT_RETRY_POLICY);
+  assert.equal(retried.kind, 'ENDED', `повтор после отзыва: ${JSON.stringify(retried)}`);
+  if (retried.kind !== 'ENDED') return;
+  assert.deepEqual([retried.status, retried.reason.code], ['DISCARDED_STALE', 'QUANTITY_WRITES_REVOKED']);
+
+  // Включить снова — только новым подтверждением
+  assert.deepEqual(await store.enableStockSync(world.tenantId, account, { bufferUnits: 2, maxQuantity: null, minQuantityToList: 0, acknowledgeSideEffects: false }, owner()),
+    { status: 'NOT_CONFIRMED', otherTools: 'PRICES' });
+  assert.deepEqual(await store.confirmQuantityWrites(world.tenantId, account, typed, owner()), { status: 'CONFIRMED' });
+  assert.deepEqual(await store.confirmQuantityWrites(world.tenantId, account, typed, owner()), { status: 'ALREADY_CONFIRMED' });
+  const enabled = await store.enableStockSync(world.tenantId, account, { bufferUnits: 2, maxQuantity: null, minQuantityToList: 0, acknowledgeSideEffects: false }, owner());
+  assert.equal(enabled.status, 'ENABLED');
+  const [audit] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
+    `SELECT count(*)::int AS n FROM audit.audit_event WHERE entity_type LIKE '%channel_quantity_writes_confirmation'`)).rows);
+  assert.equal(audit.n, 3, 'выдача, отзыв и повторная выдача — три события аудита');
+});

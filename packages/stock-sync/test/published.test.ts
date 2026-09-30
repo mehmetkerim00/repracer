@@ -47,7 +47,7 @@ test('Р-152: файл остатков — две колонки по заго�
 
 test('Р-6: хранилище в памяти считает то же, что правило: заказ уменьшает доступное, отгрузка — пул', async () => {
   const offers = [{ productId: 'p-1', sku: 'A-1', channelAccountId: 'acc', channel: 'KAUFLAND', marketplaces: ['de', 'at'], externalOfferId: 'OFFER-1' }];
-  const store = new InMemoryStockStore(offers);
+  const store = new InMemoryStockStore(offers, { roleOf: (a) => (a.membershipId === 'm' ? 'OWNER' : 'ADMIN') });
   const actor = { membershipId: 'm', userId: 'u', mfa: true };
   const source = await store.createStockSource('t', { mode: 'INTERNAL_POOL', name: 'L' }, actor) as { stockSourceId: string };
   await store.importStock('t', source.stockSourceId, [{ sku: 'A-1', quantity: 10 }], actor);
@@ -68,4 +68,33 @@ test('Р-6: хранилище в памяти считает то же, что 
   // Отгрузка списала пул и закрыла резервацию: доступное то же, публикуемое не меняется — канал не трогаем зря
   assert.deepEqual([row.onHand, row.reserved, row.available, row.channels[0]!.published], [9, 0, 9, 7]);
   assert.equal((await store.recalculate('t', [row.productId], now as never)).writes.length, 0);
+});
+
+/**
+ * Шаг 61 (отложенное шага 60): хранилище в памяти подтверждает и отзывает запись количества теми же правилами, что база (0160): только
+ * владелец, набранным ВНЕШНИМ идентификатором аккаунта; отзыв выключает синхронизацию и снимает неотправленные версии, а включить снова
+ * можно только новым подтверждением
+ */
+test('Р-202: в памяти — как в базе: владелец и внешний идентификатор при подтверждении, отзыв снимает неотправленное', async () => {
+  const offers = [{ productId: 'p-1', sku: 'A-1', channelAccountId: 'acc', channel: 'KAUFLAND', marketplaces: ['de'], externalOfferId: 'OFFER-1', externalAccountId: 'syn-seller-1' }];
+  const store = new InMemoryStockStore(offers, { roleOf: (a) => (a.membershipId === 'owner' ? 'OWNER' : 'ADMIN') });
+  const owner = { membershipId: 'owner', userId: 'u', mfa: false };
+  const admin = { membershipId: 'admin', userId: 'v', mfa: true };
+  const source = await store.createStockSource('t', { mode: 'INTERNAL_POOL', name: 'L' }, owner) as { stockSourceId: string };
+  await store.importStock('t', source.stockSourceId, [{ sku: 'A-1', quantity: 10 }], owner);
+  await store.answerOtherTools('t', 'acc', 'NONE', owner);
+  assert.equal((await store.quantityWritesState('t', 'acc'))?.externalAccountId, 'syn-seller-1', 'экран называет внешний идентификатор, а не наш');
+  assert.equal((await store.confirmQuantityWrites('t', 'acc', 'syn-seller-1', admin)).status, 'NOT_OWNER', 'администратор не подтверждает — как в базе');
+  assert.equal((await store.confirmQuantityWrites('t', 'acc', 'acc', owner)).status, 'CONFIRMATION_MISMATCH', 'наш идентификатор аккаунта — не набранный внешний');
+  assert.equal((await store.confirmQuantityWrites('t', 'acc', ' syn-seller-1 ', owner)).status, 'CONFIRMED');
+  await store.enableStockSync('t', 'acc', { bufferUnits: 2, maxQuantity: null, minQuantityToList: 0, acknowledgeSideEffects: false }, owner);
+  assert.equal((await store.recalculate('t', null, new Date().toISOString() as never)).writes.length, 1, 'ждущая версия количества');
+  assert.equal((await store.revokeQuantityWrites('t', 'acc', 'syn-seller-1', admin)).status, 'NOT_OWNER');
+  assert.equal((await store.revokeQuantityWrites('t', 'acc', 'syn-seller-2', owner)).status, 'CONFIRMATION_MISMATCH');
+  assert.deepEqual(await store.revokeQuantityWrites('t', 'acc', 'syn-seller-1', owner), { status: 'REVOKED', disabledScopes: 1, discardedWrites: 1, inFlightWrites: 0 });
+  assert.equal((await store.revokeQuantityWrites('t', 'acc', 'syn-seller-1', owner)).status, 'NOT_CONFIRMED', 'отзывать нечего');
+  assert.equal((await store.stockPage('t', { offset: 0, limit: 10 })).summary.pendingWrites, 0, 'неотправленная версия снята');
+  assert.deepEqual(await store.enableStockSync('t', 'acc', { bufferUnits: 2, maxQuantity: null, minQuantityToList: 0, acknowledgeSideEffects: false }, owner),
+    { status: 'NOT_CONFIRMED', otherTools: 'NONE' }, 'включить снова — только новым подтверждением');
+  assert.equal((await store.confirmQuantityWrites('t', 'acc', 'syn-seller-1', owner)).status, 'CONFIRMED', 'новое подтверждение после отзыва');
 });

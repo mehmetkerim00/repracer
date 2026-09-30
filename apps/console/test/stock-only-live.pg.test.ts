@@ -346,6 +346,50 @@ test('шаг 60 [Р-202]: счётчик внешних правок на экр
   assert.match(after.externalEditsText, /: 2$/, after.externalEditsText);
 });
 
+/**
+ * Шаг 61 [Р-202, решение владельца]: отзыв подтверждения записи количества через консоль — тем же порядком, что выдача: владелец набирает
+ * идентификатор аккаунта; наблюдателю отказывает консоль, администратору — база. Запись количества выключается сразу, и включение без
+ * нового подтверждения снова отвечает 409. В конце — новое подтверждение и включение: следующим прогонам файла нужен работающий канал
+ */
+test('шаг 61 [Р-202]: отзыв записи количества через консоль — сразу выключено, включить снова — только новым подтверждением', async () => {
+  const accountId = demo.live.seeded.channelAccountId;
+  type Failure = { error: { code: string; message: string } };
+  const codeOf = (r: { status: number; text: string }) => [r.status, (JSON.parse(r.text) as Failure).error.code];
+  const connectionOf = async (name: string) => (await step<ConnectionsView>(name, 'GET', api('connections'))).body.accounts.find((a) => a.channelAccountId === accountId)!;
+  const revoke = (typedConfirmation: string, auth = owner) => call('POST', api('connections', 'quantity-writes-revoke'), { channelAccountId: accountId, typedConfirmation }, auth);
+  let connection = await connectionOf('экран подключений: запись количества включена, отзыв предложен');
+  assert.deepEqual([connection.quantityWrites.confirmed, connection.quantityWrites.canRevoke, connection.quantityWrites.canConfirm], [true, true, false]);
+  const typed = connection.quantityWrites.typeToRevoke!;
+  assert.ok(connection.quantityWrites.revokeHint!.includes(typed), 'экран показывает, что набрать для отзыва');
+  assert.deepEqual(codeOf(await revoke(typed, viewerAuth)), [403, 'FORBIDDEN']);
+  assert.deepEqual(codeOf(await revoke(typed, adminAuth)), [403, 'NOT_OWNER'], 'администратору отказывает база: отзывает только владелец');
+  assert.deepEqual(codeOf(await revoke(`${typed}x`)), [400, 'CONFIRMATION_MISMATCH']);
+  const revoked = await step<{ revoked: boolean; disabledScopes: number; discardedWrites: number; inFlightWrites: number; message: string }>('отзыв записи количества владельцем', 'POST',
+    api('connections', 'quantity-writes-revoke'), { channelAccountId: accountId, typedConfirmation: typed });
+  assert.equal(revoked.status, 200, JSON.stringify(revoked.body));
+  // Все записи пути уже подтверждены каналом — снимать нечего, выключается синхронизация каждой единицы
+  assert.deepEqual([revoked.body.disabledScopes, revoked.body.discardedWrites, revoked.body.inFlightWrites], [DEMO_OFFERS, 0, 0]);
+  assert.match(revoked.body.message, /Widerrufen/, revoked.body.message);
+  assert.deepEqual(codeOf(await revoke(typed)), [409, 'NOT_CONFIRMED'], 'отзывать нечего');
+  connection = await connectionOf('экран подключений после отзыва');
+  assert.deepEqual([connection.quantityWrites.confirmed, connection.quantityWrites.canRevoke, connection.quantityWrites.canConfirm], [false, false, true]);
+  const stockScreen = (await step<StockView>('экран остатков после отзыва', 'GET', api('stock'))).body;
+  assert.equal(stockScreen.summary.synced, 0, 'ни одна единица больше не синхронизируется');
+  const enableBody = { channelAccountId: accountId, bufferUnits: 2, maxQuantity: null, minQuantityToList: 0 };
+  const refused = await step<Failure>('включение после отзыва', 'POST', api('stock', 'enable'), enableBody);
+  assert.deepEqual([refused.status, refused.body.error.code], [409, 'QUANTITY_WRITES_NOT_CONFIRMED']);
+  const [journal] = (await observer.query(`SELECT count(*) FILTER (WHERE action = 'REVOKE')::int AS revokes, count(*)::int AS n FROM tenant_data.channel_quantity_writes_confirmation WHERE channel_account_id = $1`, [accountId])).rows;
+  assert.deepEqual([journal.revokes, journal.n], [1, 2], 'отзыв — строка того же журнала');
+
+  // Новое подтверждение и включение: запись количества снова идёт
+  const confirmed = await call('POST', api('connections', 'quantity-writes'), { channelAccountId: accountId, typedConfirmation: typed });
+  assert.equal(confirmed.status, 200, confirmed.text);
+  const enableJob = await step<JobCreatedResponse>('включение после нового подтверждения', 'POST', api('stock', 'enable'), enableBody);
+  assert.equal(enableJob.status, 200, JSON.stringify(enableJob.body).slice(0, 300));
+  assert.equal((await pollJob(enableJob.body.jobId)).status, 'SUCCEEDED');
+  assert.equal((await step<StockView>('экран остатков после нового подтверждения', 'GET', api('stock'))).body.summary.synced, DEMO_OFFERS);
+});
+
 test('Inbound API: ключ показан один раз; устаревшее значение не применяется; новое доходит до канала', async () => {
   const bad = await call('POST', '/inbound/v1/stock', { rows: [{ sku: '100001', quantity: 1, asOf: new Date().toISOString() }] }, { authorization: 'Bearer rpk_000000000000.0000000000000000000000000000000000000000000000000000', cookie: '' });
   assert.equal(bad.status, 401, 'неверный ключ — 401');
