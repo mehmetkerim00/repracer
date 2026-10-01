@@ -701,8 +701,16 @@ export interface PricingStore {
   stopPricing(tenantId: string, record: StopRecord): Promise<StopResult>;
   /** Снятие: тенант — только владелец, аккаунт и витрина — владелец и оператор; заметка обязательна */
   releaseStop(tenantId: string, stopId: string, release: StopRelease): Promise<StopResult>;
-  /** Состояние для экранов консоли [Р-67, Р-68]: объяснения — из слепков решений, а не из отчётов прогона */
-  readConsoleState(tenantId: string, now: Instant): Promise<ConsoleState>;
+  /**
+   * Состояние для экранов консоли [Р-67, Р-68]: объяснения — из слепков решений, а не из отчётов прогона.
+   * Шаг 66 (OQ-248): `scopeIds` — каталог только этих единиц (страница экрана); без него — весь каталог
+   */
+  readConsoleState(tenantId: string, now: Instant, options?: ConsoleStateOptions): Promise<ConsoleState>;
+  /**
+   * Шаг 66 (OQ-248): страница каталога и его итоги — базой, без каталога в памяти сервера. Порядок — тот же, что у каталога
+   * состояния; смещение за концом подтягивается к последней странице. Хранилищу в памяти не нужно: его каталог мал
+   */
+  consoleCatalogPage?(tenantId: string, now: Instant, query: { offset: number; limit: number }): Promise<ConsoleCatalogPage>;
   // --- Р-154 (шаг 35): потоки — страницами, окнами, агрегатами -----------------------------------------------------
   decisionPage(tenantId: string, query: DecisionPageQuery): Promise<DecisionPage>;
   decisionDetail(tenantId: string, decisionId: string): Promise<DecisionDetail | null>;
@@ -1012,6 +1020,21 @@ export interface DecisionDetail {
 }
 
 /** Решения показанных единиц: последнее и сколько всего в горячем буфере — только для строк страницы, не для каталога */
+export interface ConsoleStateOptions {
+  scopeIds?: readonly string[];
+}
+
+/** Шаг 66 (OQ-248): страница каталога и итоги по всему каталогу — правила те же, что у экрана товаров (`enabledCell`) */
+export interface ConsoleCatalogPage {
+  scopeIds: string[];
+  offset: number;
+  total: number;
+  enabled: number;
+  stopped: number;
+  off: number;
+  applying: number;
+}
+
 export interface ScopeDecisionStats {
   writeScopeId: string;
   latestDecisionId: string | null;

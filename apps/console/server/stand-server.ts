@@ -11,7 +11,7 @@ import {
   productPage, clampOffset, feedPageQuery, REJECTED_WINDOW_DAYS, stockView, stockDivergencesView, stockReturnsView, shadowView, SHADOW_PERIOD_DAYS,
 } from '@repracer/console-model';
 import { buildPreview, readTable, suggestMapping, TABLE_ENCODINGS } from '@repracer/cost-import';
-import type { BulkJobInput, DiscountAnnouncementInput } from '@repracer/pricing-pipeline';
+import type { BulkJobInput, ConsoleCatalogPage, DiscountAnnouncementInput } from '@repracer/pricing-pipeline';
 import {
   buildStandWorlds, memoryStandDirectory, pgStandJoinMember, pgStandUsers, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_EMAILS, STAND_ISSUER, type LiveWorld,
 } from '@repracer/contract-tests/stand';
@@ -550,7 +550,21 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       return fail(400, outcome.status, e.unknownState);
     }
 
-    const world = await live.view(viewer);
+    /**
+     * Шаг 66 (OQ-248): экран не грузит каталог целиком. На 50 000 предложений состояние каталога — 41,5 МБ памяти сервера и 6,4 с на
+     * КАЖДЫЙ запрос экрана, хотя экран показывает 50 строк. Товары и индекс границ: страницу и итоги по всему каталогу выбирает база
+     * (`consoleCatalogPage`), мир строится только из единиц страницы. Остаткам и тени каталог не нужен вовсе — их строки читает своё
+     * хранилище страницей. Хранилищу в памяти (миры сценариев) страница базы не нужна: его каталог мал
+     */
+    let catalog: ConsoleCatalogPage | null = null;
+    let catalogQuery: ListQuery | null = null;
+    if (req.method === 'GET' && (parts[3] === 'products' || (parts[3] === 'bounds' && parts[4] === undefined)) && live.store.consoleCatalogPage) {
+      catalogQuery = parseListQuery(url.searchParams);
+      if (!catalogQuery) return fail(400, 'BAD_PAGE', s.badRequest);
+      catalog = await live.store.consoleCatalogPage(live.tenantId, live.clock.iso() as never, catalogQuery);
+    }
+    const noCatalog = req.method === 'GET' && (parts[3] === 'stock' || parts[3] === 'shadow');
+    const world = await live.view(viewer, catalog ? { scopeIds: catalog.scopeIds } : noCatalog ? { scopeIds: [] } : undefined);
     /**
      * Р-151: признак демо — из БАЗЫ (`tenant.demo` в состоянии консоли), а не из настройки стенда. Первая редакция брала его
      * из поля, выставленного руками, и столбец базы не читал никто: забытая настройка сняла бы метку молча (ревью шага 34,
@@ -633,11 +647,11 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           return ok(stockView(world, page, clamped, sources, m));
         }
         case 'products': {
-          const query = parseListQuery(url.searchParams);
+          const query = catalogQuery ?? parseListQuery(url.searchParams);
           if (!query) return fail(400, 'BAD_PAGE', s.badRequest);
           // Р-154: статистика решений — только для показанных строк, по индексу единицы
-          const { shown } = productPage(world, m, query);
-          return ok(productList(world, m, query, await live.store.scopeDecisionStats(world.tenantId, shown.map((x) => x.writeScopeId))));
+          const shown = catalog ? catalog.scopeIds : productPage(world, m, query).shown.map((x) => x.writeScopeId);
+          return ok(productList(world, m, query, await live.store.scopeDecisionStats(world.tenantId, shown), catalog ?? undefined));
         }
         case 'decisions': {
           if (param === null) {
@@ -663,9 +677,9 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         case 'bounds': {
           if (param === null) {
             // Р-136: страница, а не весь каталог; список границ — тот же порядок, что у списка товаров
-            const query = parseListQuery(url.searchParams);
+            const query = catalogQuery ?? parseListQuery(url.searchParams);
             if (!query) return fail(400, 'BAD_PAGE', s.badRequest);
-            const list = productList(world, m, query);
+            const list = productList(world, m, query, undefined, catalog ?? undefined);
             return ok({
               items: list.rows.map((r): BoundsIndexItem => ({ writeScopeId: r.unit.writeScopeId, label: r.unit.label, minPrice: r.minPrice, maxPrice: r.maxPrice })),
               page: list.page,
@@ -1373,7 +1387,23 @@ export function consoleContentSecurityPolicy(identityOrigins: readonly string[])
   ].join('; ');
 }
 
-function send(res: ServerResponse, r: ApiResponse): void {
+/**
+ * Шаг 66 (OQ-248): предел ответа экрана. Экран отдаёт страницу, а не каталог: самый большой ответ экрана на 10 000 предложений —
+ * 98 КБ (шаг 57), на 50 000 — страница товаров 50 КБ. Ответ больше предела — признак экрана, забывшего страницу: он не уходит
+ * вовсе (500 со своим кодом), а журнал называет маршрут и размер. Файлы выгрузок идут своим путём [Р-145] и под предел не попадают
+ */
+export const SCREEN_RESPONSE_MAX_BYTES = 2 * 1024 * 1024;
+
+/** Тело JSON-ответа экрана с пределом: больше предела — 500 RESPONSE_TOO_LARGE и строка журнала с маршрутом и размером, без содержимого */
+export function screenBody(r: Pick<ApiResponse, 'status' | 'body'>, route = ''): { status: number; body: string } {
+  const body = JSON.stringify(r.body);
+  const bytes = Buffer.byteLength(body);
+  if (bytes <= SCREEN_RESPONSE_MAX_BYTES) return { status: r.status, body };
+  console.log(JSON.stringify({ level: 'ERROR', code: 'SCREEN_RESPONSE_TOO_LARGE', route, bytes, limit: SCREEN_RESPONSE_MAX_BYTES }));
+  return { status: 500, body: JSON.stringify({ error: { code: 'RESPONSE_TOO_LARGE', message: 'response exceeds the screen limit' } }) };
+}
+
+function send(res: ServerResponse, r: ApiResponse, route = '', method = 'GET'): void {
   if (r.file) {
     res.writeHead(r.status, {
       'content-type': `${r.file.contentType}; charset=utf-8`, 'cache-control': 'no-store',
@@ -1382,11 +1412,22 @@ function send(res: ServerResponse, r: ApiResponse): void {
     res.end(r.file.content);
     return;
   }
+  /**
+   * Предел — у ЭКРАНОВ (чтение мира). Ответ записи или Inbound API приходит после фиксации: подменить его отказом значило бы сказать
+   * «не применено» о применённом (ревью шага 66, находка 7)
+   */
+  const screen = method === 'GET' && route.startsWith('/api/worlds/') ? screenBody(r, route) : { status: r.status, body: JSON.stringify(r.body) };
+  if (screen.status !== r.status) {
+    res.writeHead(screen.status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+    res.end(screen.body);
+    return;
+  }
+  const body = screen.body;
   res.writeHead(r.status, {
     'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...(r.setCookies ? { 'set-cookie': r.setCookies } : {}),
     ...(r.retryAfterSeconds !== undefined ? { 'retry-after': String(r.retryAfterSeconds) } : {}),
   });
-  res.end(JSON.stringify(r.body));
+  res.end(body);
 }
 
 /**
@@ -1527,7 +1568,8 @@ export function createStandServer(
     }
     try {
       send(res, await handle({ method: req.method ?? 'GET', url: req.url ?? '/', body, authorization: req.headers.authorization,
-        idToken: typeof req.headers['x-repracer-id-token'] === 'string' ? req.headers['x-repracer-id-token'] : undefined, cookie: req.headers.cookie }));
+        idToken: typeof req.headers['x-repracer-id-token'] === 'string' ? req.headers['x-repracer-id-token'] : undefined, cookie: req.headers.cookie }),
+        (req.url ?? '/').split('?')[0], req.method ?? 'GET');
     } catch (error) {
       // Задача D шага 34: тенант без единого канала — не поломка стенда, а честное состояние [Р-150]
       if ((error as { cause?: unknown }).cause === 'NO_CHANNEL') return send(res, { status: 409, body: { error: { code: 'NO_CHANNEL', message: fallback.noChannel } } });

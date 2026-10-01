@@ -1,9 +1,9 @@
 import { can, COMPETITOR_DERIVED_RULES, type BoundResolution, type StrategyDefinition } from '@repracer/pricing-model';
 import { effectiveFloor } from './bounds.ts';
 import type { Messages } from './i18n/index.ts';
-import { listQuery, pageOf, type ListQuery, type PageInfo } from './page.ts';
+import { listQuery, pageInfo, pageOf, type ListQuery, type PageInfo } from './page.ts';
 import { gap, unitOf, type ConsoleScope, type ConsoleWrite, type Gap, type StandWorld, type StatusCell, type UnitRef } from './world.ts';
-import type { ScopeDecisionStats } from '@repracer/pricing-pipeline';
+import type { ConsoleCatalogPage, ScopeDecisionStats } from '@repracer/pricing-pipeline';
 
 /** Экран A: товары с явными статусами; действующий пол — главный, min_price — его составляющая (шаг 12, F) */
 
@@ -168,14 +168,26 @@ export function productPage(world: StandWorld, m: Messages, query?: ListQuery): 
 }
 
 /**
+ * Шаг 66 (ревью шага, находка 2): строки страницы — ровно те единицы, что выбрала база, и в её порядке. Мир, проигнорировавший список
+ * единиц, отдал бы весь каталог, и «страница» стала бы каталогом целиком
+ */
+export function catalogRows(scopes: readonly ConsoleScope[], catalog: ConsoleCatalogPage): ConsoleScope[] {
+  const byId = new Map(scopes.map((sc) => [sc.writeScopeId, sc]));
+  return catalog.scopeIds.flatMap((id) => { const sc = byId.get(id); return sc ? [sc] : []; });
+}
+
+/**
  * Р-154: статистика решений — только для ПОКАЗАННЫХ строк, запросом по индексу единицы; каталог целиком её не несёт.
  * Экрану без неё (границы) передавать нечего — тогда столбец решений честно пуст, а не «0».
  */
-export function productList(world: StandWorld, m: Messages, query?: ListQuery, stats?: readonly ScopeDecisionStats[]): ProductListView {
+export function productList(world: StandWorld, m: Messages, query?: ListQuery, stats?: readonly ScopeDecisionStats[], catalog?: ConsoleCatalogPage): ProductListView {
   const { state } = world;
   const p = m.ui.products;
-  // Р-136: строится только показанная страница
-  const { shown, page } = productPage(world, m, query);
+  /**
+   * Р-136: строится только показанная страница. Шаг 66 (OQ-248): страницу и итоги может выбрать база — тогда в состоянии мира только
+   * единицы страницы (в порядке каталога), а итоги по всему каталогу пришли числами
+   */
+  const { shown, page } = catalog ? { shown: catalogRows(state.scopes, catalog), page: pageInfo({ ...listQuery(query), offset: catalog.offset }, catalog.total, m) } : productPage(world, m, query);
   const statsById = new Map((stats ?? []).map((s) => [s.writeScopeId, s]));
   // «Применяется сейчас» считается по записям в полёте: они есть у немногих офферов, и это дешевле перебора каталога
   const scopesWithWrites = new Set(state.writes.map((w) => w.writeScopeId));
@@ -211,13 +223,15 @@ export function productList(world: StandWorld, m: Messages, query?: ListQuery, s
     worldId: world.id,
     now: m.when(world.now),
     // Итоги — по ВСЕМУ каталогу, а не по показанной странице: «включено 3 из 10 000» продавец читает как состояние дел
-    totals: {
-      total: state.scopes.length,
-      enabled: state.scopes.filter((sc) => enabledCell(sc, m).tone === 'ok').length,
-      applying: shownApplying,
-      stopped: state.scopes.filter((sc) => enabledCell(sc, m).tone === 'stop').length,
-      off: state.scopes.filter((sc) => enabledCell(sc, m).tone === 'off').length,
-    },
+    totals: catalog
+      ? { total: catalog.total, enabled: catalog.enabled, applying: catalog.applying, stopped: catalog.stopped, off: catalog.off }
+      : {
+          total: state.scopes.length,
+          enabled: state.scopes.filter((sc) => enabledCell(sc, m).tone === 'ok').length,
+          applying: shownApplying,
+          stopped: state.scopes.filter((sc) => enabledCell(sc, m).tone === 'stop').length,
+          off: state.scopes.filter((sc) => enabledCell(sc, m).tone === 'off').length,
+        },
     rows,
     page,
     gaps: [gap(m, 'PRODUCT_TITLE'), gap(m, 'NEXT_CHECK'), gap(m, 'USER_TIME_ZONE'), ...(state.pricingHealth.length > 0 ? [gap(m, 'PRICING_HEALTH_ISSUES')] : [])],

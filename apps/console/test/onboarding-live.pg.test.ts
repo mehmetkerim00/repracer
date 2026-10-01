@@ -141,9 +141,9 @@ before(async () => {
     accounts: demoAccounts, identityTenantId: seeded.tenantId, membershipAlias: (id) => id, failures: [],
     store: store as never, stock, pipeline: demo.live.pipelineForDbIds() as never, clock: { iso: nowIso, nowMs: () => demo.clock.nowMs() } as never,
     callContext: (channelAccountId) => ({ tenantId: seeded.tenantId as never, channelAccountId: channelAccountId as never, correlationId: 'onboarding-live', deadline: nowIso() }),
-    view: async (viewer) => ({
+    view: async (viewer, options) => ({
       id: DEMO_WORLD, title: 'Демо: Kaufland на симуляторе', description: `${DEMO_OFFERS} предложений`, tenantId: seeded.tenantId, now: nowIso(),
-      accounts: demoAccounts, viewer: { ...viewer }, state: await store.readConsoleState(seeded.tenantId, nowIso() as never),
+      accounts: demoAccounts, viewer: { ...viewer }, state: await store.readConsoleState(seeded.tenantId, nowIso() as never, options),
     }) as never,
   };
 
@@ -161,9 +161,9 @@ before(async () => {
     id: EMPTY_WORLD, title: 'Новый тенант', description: 'без данных', tenantId: empty.tenantId, accounts: [], identityTenantId: empty.tenantId,
     membershipAlias: (id) => id, failures: [], store: store as never, stock, pipeline: emptyPipeline as never, clock: { iso: nowIso, nowMs: () => demo.clock.nowMs() } as never,
     callContext: (channelAccountId) => ({ tenantId: empty.tenantId as never, channelAccountId: channelAccountId as never, correlationId: 'empty-live', deadline: nowIso() }),
-    view: async (viewer) => ({
+    view: async (viewer, options) => ({
       id: EMPTY_WORLD, title: 'Новый тенант', description: 'без данных', tenantId: empty.tenantId, now: nowIso(), accounts: [],
-      viewer: { ...viewer }, state: await store.readConsoleState(empty.tenantId, nowIso() as never),
+      viewer: { ...viewer }, state: await store.readConsoleState(empty.tenantId, nowIso() as never, options),
     }) as never,
   };
 

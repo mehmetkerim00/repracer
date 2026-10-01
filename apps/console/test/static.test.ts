@@ -185,3 +185,32 @@ test('step 53: the full content security policy allows only own code and the ide
   assert.match(csp, /connect-src 'self' https:\/\/syn-instance\.zitadel\.example(;|$)/);
   assert.ok(!csp.includes('unsafe-inline') && !csp.includes('unsafe-eval'));
 });
+
+/**
+ * Шаг 66 (OQ-248; ревью шага, находка 7): предел ответа экрана — через настоящий HTTP-слой. Экран мира (GET /api/worlds/…) больше
+ * предела не уходит клиенту вовсе; ответ записи — уходит: он приходит после фиксации, и отказ сказал бы «не применено» о применённом
+ */
+test('step 66: a screen response above the limit is refused with its own code; a write answer and a normal screen pass', async () => {
+  const { createStandServer, SCREEN_RESPONSE_MAX_BYTES } = await import('../server/stand-server.ts');
+  const huge = { items: Array.from({ length: SCREEN_RESPONSE_MAX_BYTES / 10 + 1 }, () => 'x'.repeat(8)) };
+  const handle = (async (r: { url: string }) => ({ status: 200, body: r.url.includes('small') ? { items: [1, 2, 3] } : huge })) as never;
+  const server = createStandServer(handle, 'en', serve);
+  await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+  try {
+    const { port } = server.address() as { port: number };
+    const call = async (method: string, path: string) => {
+      const r = await fetch(`http://127.0.0.1:${port}${path}`, { method, ...(method === 'POST' ? { body: '{}', headers: { 'content-type': 'application/json' } } : {}) });
+      const text = await r.text();
+      return { status: r.status, bytes: text.length, code: text.length < 500 ? (JSON.parse(text) as { error?: { code: string } }).error?.code : undefined };
+    };
+    const screen = await call('GET', '/api/worlds/w/products?offset=0');
+    assert.deepEqual([screen.status, screen.code], [500, 'RESPONSE_TOO_LARGE'], 'a screen response above the limit does not leave the server');
+    assert.ok(screen.bytes < 200, 'the refusal carries no part of the oversized body');
+    const small = await call('GET', '/api/worlds/w/small');
+    assert.equal(small.status, 200, 'a normal screen passes');
+    const write = await call('POST', '/api/worlds/w/stock');
+    assert.deepEqual([write.status, write.bytes > SCREEN_RESPONSE_MAX_BYTES], [200, true], 'a write answer is not replaced by a refusal');
+  } finally {
+    await new Promise<void>((done) => server.close(() => done()));
+  }
+});

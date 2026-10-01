@@ -207,10 +207,10 @@ before(async () => {
     callContext: (channelAccountId) => ({
       tenantId: world.tenantId as never, channelAccountId: channelAccountId as never, correlationId: 'console-live', deadline: now,
     }),
-    view: async (viewer) => ({
+    view: async (viewer, options) => ({
       id: WORLD_ID, title: 'Каталог целевого клиента', description: '10 000 предложений одного аккаунта', tenantId: world.tenantId,
       now, accounts: [{ channelAccountId: world.channelAccountId, channel: 'KAUFLAND', marketplaces: ['de'], haltRelease: 'SAMPLE' }],
-      viewer: { ...viewer }, state: await store.readConsoleState(world.tenantId, now as never),
+      viewer: { ...viewer }, state: await store.readConsoleState(world.tenantId, now as never, options),
     }) as never,
   };
   // Вход: пользователь и членство — настоящие, из засеянной базы; поставщик identity — имитатор стенда [Р-78]

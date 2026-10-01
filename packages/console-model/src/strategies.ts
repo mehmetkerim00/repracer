@@ -92,6 +92,9 @@ export interface StrategyScopeItem {
   canUnassign: boolean;
 }
 
+/** Шаг 66 (ревью, находка 7): сколько предложений с ценообразованием канала экран стратегий называет поимённо */
+export const CHANNEL_PRICING_SHOWN = 200;
+
 export interface StrategyListView {
   worldId: string;
   strategies: StrategyListItem[];
@@ -100,6 +103,8 @@ export interface StrategyListView {
   page: PageInfo;
   /** Р-120: все офферы аккаунтов с правилом или границами канала, найденные при обнаружении, — до назначения стратегии */
   channelPricingOffers: Array<{ label: string; detail: string; tone: Tone }>;
+  /** Шаг 66 (ревью, находка 7): сколько таких предложений всего — список ограничен, у мигрирующего продавца Amazon их тысячи */
+  channelPricingOffersTotal: number;
   canEdit: boolean;
   gaps: Gap[];
 }
@@ -151,6 +156,7 @@ export function strategiesView(world: StandWorld, m: Messages, canEdit: boolean,
       canUnassign: canEdit && s.strategy !== null && s.pricingMode !== 'ENGINE',
     };
   });
+  // Список — первые CHANNEL_PRICING_SHOWN и общее число: ответ экрана не растёт с каталогом [Р-136]
   const channelPricingOffers = world.accounts.flatMap((a) => {
     const channel = m.values[a.channel as keyof typeof m.values] ?? a.channel;
     const newest = new Map<string, (typeof world.state.offerChannelPricing)[number]>();
@@ -162,7 +168,8 @@ export function strategiesView(world: StandWorld, m: Messages, canEdit: boolean,
     }));
   });
   return {
-    worldId: world.id, strategies, scopes, page, channelPricingOffers, canEdit,
+    worldId: world.id, strategies, scopes, page, canEdit,
+    channelPricingOffers: channelPricingOffers.slice(0, CHANNEL_PRICING_SHOWN), channelPricingOffersTotal: channelPricingOffers.length,
     gaps: [
       gap(m, 'POSITION_STRATEGY'),
       ...(channelPricingOffers.length > 0 ? [gap(m, 'CHANNEL_PRICING_OFFERS_WITHOUT_SCOPE')] : []),

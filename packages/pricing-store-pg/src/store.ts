@@ -1,4 +1,5 @@
 import type { ExplanationRuleset as DictionaryRuleset } from '@repracer/pricing-model';
+import { COMPETITOR_DERIVED_RULES } from '@repracer/pricing-model';
 import {
   floorCauseFromDatabase, convertMinor, type FxQuote } from '@repracer/pricing-model';
 import { DEFAULT_RETRY_POLICY, retryPolicyFor } from '@repracer/write-dispatcher';
@@ -46,7 +47,7 @@ import type {
   ProductKey,
   ScopeEvaluationContext,
   ShiftWindow,
-  SnapshotOutcome, ConsoleAuditRow, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveredCatalogOffer, DiscoveryStop, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, ChannelObservation} from '@repracer/pricing-pipeline';
+  SnapshotOutcome, ConsoleAuditRow, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, ConsoleStateOptions, ConsoleCatalogPage, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveredCatalogOffer, DiscoveryStop, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, ChannelObservation} from '@repracer/pricing-pipeline';
 import { FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT, stalestFirst } from '@repracer/pricing-pipeline';
 import { inTenant, RollbackWith, type PgPool, type Tx } from './db.ts';
 import { PgWriteQueueStore } from './write-queue.ts';
@@ -1976,9 +1977,15 @@ export class PgPricingStore implements PricingStore {
    * Экраны консоли на рабочих данных: объяснение решения — из слепка (price_decision.explanation), а не из отчёта прогона.
    * Горячие окна: intent 3 дня, решение 30 дней (Р-28); дальше слепок доступен в ядре intent и архиве.
    */
-  async readConsoleState(tenantId: string, now: Instant): Promise<ConsoleState> {
+  async readConsoleState(tenantId: string, now: Instant, options: ConsoleStateOptions = {}): Promise<ConsoleState> {
     return inTenant(this.admin('readConsoleState'), tenantId, async (tx) => {
       const q = async (sql: string, params: unknown[] = [tenantId]) => (await tx.query(sql, params)).rows;
+      /**
+       * Шаг 66 (OQ-248): каталог — только названных единиц (страница экрана). На 50 000 предложений каталог целиком — 41,5 МБ памяти
+       * сервера и 6,4 с на КАЖДЫЙ запрос экрана, хотя экран показывает 50 строк. Справочники и состояния тенанта (остановки,
+       * стратегии, курсы) малы и читаются целиком: экран без них не построить
+       */
+      const only = options.scopeIds ? [...options.scopeIds] : null;
       /**
        * Каталог тенанта читается ЦЕЛИКОМ одним запросом, и верный план для него — хеш-соединения при любой статистике.
        * Сразу после загрузки каталога (новый тенант, демо, первый импорт) статистики у таблиц ещё нет, планировщик
@@ -1987,9 +1994,11 @@ export class PgPricingStore implements PricingStore {
        * экрана 10 с (найдено повторными прогонами шага 35, план — auto_explain). Коррелированные подзапросы по единице
        * это не затрагивает: они не соединения. Настройка возвращается сразу после запроса.
        */
-      await q(`SET LOCAL enable_nestloop = off`, []);
-      const [scopeJson] = await q(`WITH sc AS (SELECT ${SCOPE_COLUMNS} ${SCOPE_FROM})
-        SELECT coalesce(json_agg(${SCOPE_JSON} ORDER BY sc.created_at, sc.write_scope_id), '[]') AS scopes FROM sc`, [tenantId, now]);
+      // Шаг 66 (ревью, находка 8): для страницы из полусотни единиц хеш-соединения прошли бы все предложения тенанта — там вложенные циклы
+      // по индексу единицы и есть верный план
+      if (!only) await q(`SET LOCAL enable_nestloop = off`, []);
+      const [scopeJson] = await q(`WITH sc AS (SELECT ${SCOPE_COLUMNS} ${SCOPE_FROM}${only ? ' AND s.write_scope_id = ANY($3::uuid[])' : ''})
+        SELECT coalesce(json_agg(${SCOPE_JSON} ORDER BY sc.created_at, sc.write_scope_id), '[]') AS scopes FROM sc`, only ? [tenantId, now, only] : [tenantId, now]);
       await q(`SET LOCAL enable_nestloop = on`, []);
       const scopes = ((scopeJson?.scopes ?? []) as Row[]).map((j): ConsoleScopeRow => {
         const ctx = toScopeContext(j, now);
@@ -2015,7 +2024,8 @@ export class PgPricingStore implements PricingStore {
       // Р-154: только записи в полёте — одна на единицу; завершённые читаются лентой страницами
       const writes = (await q(`SELECT ${WRITE_HOT_COLUMNS} FROM tenant_data.channel_write w
                                  LEFT JOIN channel_data.price_decision d ON d.tenant_id = w.tenant_id AND d.price_decision_id = w.price_decision_id
-                                WHERE w.tenant_id = $1 AND w.field = 'PRICE' ORDER BY w.created_at, w.version`)).map(writeRow);
+                                WHERE w.tenant_id = $1 AND w.field = 'PRICE'${only ? ' AND w.write_scope_id = ANY($2::uuid[])' : ''} ORDER BY w.created_at, w.version`,
+                              only ? [tenantId, only] : [tenantId])).map(writeRow);
       const halts = (await q(`SELECT pricing_halt_id, channel_account_id, marketplace, reason_code, details, halted_at, next_review_at, released_at, released_kind
                                 FROM channel_data.pricing_halt WHERE tenant_id = $1 ORDER BY halted_at`))
         .map((r) => ({
@@ -2057,7 +2067,8 @@ export class PgPricingStore implements PricingStore {
         }));
       const stops = (await q(`SELECT ${PgPricingStore.STOP_COLUMNS} FROM tenant_data.price_stop WHERE tenant_id = $1 ORDER BY stopped_at`)).map(PgPricingStore.stopRow);
       const divergenceCases = (await q(`SELECT divergence_case_id, write_scope_id, expected_amount_minor, observed_amount_minor, cause, status
-                                          FROM channel_data.divergence_case WHERE tenant_id = $1 AND field = 'PRICE' ORDER BY opened_at`))
+                                          FROM channel_data.divergence_case WHERE tenant_id = $1 AND field = 'PRICE'${only ? ' AND write_scope_id = ANY($2::uuid[])' : ''} ORDER BY opened_at`,
+                                       only ? [tenantId, only] : [tenantId]))
         .map((r) => ({
           divergenceCaseId: r.divergence_case_id, writeScopeId: r.write_scope_id, expectedMinor: r.expected_amount_minor, observedMinor: r.observed_amount_minor,
           cause: r.cause, status: r.status,
@@ -2086,6 +2097,49 @@ export class PgPricingStore implements PricingStore {
         tenantId, demo: tenantRow?.demo === true, scopes, writes, halts, haltReviews, distrusts, offerChannelPricing, pricingHealth, stops, divergenceCases,
         fxRates: fx.map((f) => ({ source: 'ECB', rateDate: f.rate_date, base: 'EUR', quote: f.quote_currency, rateMicros: Number(f.rate_micros), availableFrom: f.available_from })),
         members, strategies, strategyVersions, explanationRulesets,
+      };
+    });
+  }
+
+  /**
+   * Шаг 66 (OQ-248): страница каталога и итоги по всему каталогу — одним обращением к базе. Состояние единицы — те же правила и те же
+   * фрагменты, что у каталога состояния и у `enabledCell` экрана товаров: выключено (OFF, Smart Pricing), остановлено (остановка
+   * человеком, недоверие каналу, единица не ACTIVE, системная остановка при стратегии из цен конкурентов), иначе включено.
+   * Равенство с `enabledCell` на настоящем каталоге держит тест `console-catalog-page.pg.test.ts`
+   */
+  async consoleCatalogPage(tenantId: string, now: Instant, query: { offset: number; limit: number }): Promise<ConsoleCatalogPage> {
+    void now;
+    return inTenant(this.admin('consoleCatalogPage'), tenantId, async (tx) => {
+      const { rows: [t] } = await tx.query(
+        `WITH sc AS (SELECT s.write_scope_id, s.channel_account_id, m.marketplace, s.pricing_mode, s.status, ps.params ->> 'type' AS strategy_type ${SCOPE_FROM}),
+              tone AS (
+                SELECT sc.write_scope_id,
+                       CASE WHEN sc.pricing_mode IN ('OFF', 'KAUFLAND_SMART_PRICING') THEN 'off'
+                            WHEN EXISTS (${ACTIVE_STOP}) OR EXISTS (${ACTIVE_DISTRUST}) OR sc.status <> 'ACTIVE' THEN 'stop'
+                            WHEN sc.strategy_type = ANY ($2::text[]) AND EXISTS (${ACTIVE_HALT}) THEN 'stop'
+                            ELSE 'ok' END AS tone
+                  FROM sc)
+         SELECT count(*)::int AS total,
+                count(*) FILTER (WHERE tone.tone = 'ok')::int AS enabled,
+                count(*) FILTER (WHERE tone.tone = 'stop')::int AS stopped,
+                count(*) FILTER (WHERE tone.tone = 'off')::int AS off,
+                -- «Применяется» — как applyingCell экрана: последняя запись в полёте ждёт, ушла, принята или ждёт повтора
+                (SELECT count(*) FROM (
+                   SELECT DISTINCT ON (w.write_scope_id) w.status, w.next_attempt_at FROM tenant_data.channel_write w
+                    WHERE w.tenant_id = $1 AND w.field = 'PRICE' AND w.status IN ('PENDING', 'DISPATCHED', 'FAILED', 'ACCEPTED', 'BLOCKED')
+                      AND w.write_scope_id IN (SELECT write_scope_id FROM sc)
+                    ORDER BY w.write_scope_id, w.version DESC) lw
+                  WHERE lw.status IN ('PENDING', 'DISPATCHED', 'ACCEPTED') OR (lw.status = 'FAILED' AND lw.next_attempt_at IS NOT NULL))::int AS applying
+           FROM tone`, [tenantId, [...COMPETITOR_DERIVED_RULES]]);
+      const total = Number(t!.total);
+      // Страница за концом списка — последняя, как у `pageOf` (ревью шага 29, находка 13)
+      const lastStart = total === 0 ? 0 : Math.floor((total - 1) / query.limit) * query.limit;
+      const offset = Math.min(query.offset, lastStart);
+      const { rows } = await tx.query(
+        `SELECT s.write_scope_id ${SCOPE_FROM} ORDER BY s.created_at, s.write_scope_id LIMIT $2 OFFSET $3`, [tenantId, query.limit, offset]);
+      return {
+        scopeIds: rows.map((r) => String(r.write_scope_id)), offset, total,
+        enabled: Number(t!.enabled), stopped: Number(t!.stopped), off: Number(t!.off), applying: Number(t!.applying),
       };
     });
   }

@@ -221,6 +221,7 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
       {view.channelPricingOffers.length === 0 ? <p className="muted">{t.channelPricingNone}</p> : (
         <ul className="index">{view.channelPricingOffers.map((o) => <li key={o.label}><Badge tone={o.tone}>{o.label}</Badge> <span className="small">{o.detail}</span></li>)}</ul>
       )}
+      {view.channelPricingOffersTotal > view.channelPricingOffers.length ? <p className="small">{t.channelPricingMore(view.channelPricingOffersTotal - view.channelPricingOffers.length)}</p> : null}
 
       <h3>{assigning ? t.assigning(assigning.draft.name, assigning.version) : form.strategyId ? t.editing(form.name, form.baseVersion ?? 0) : t.draftTitle}</h3>
       {!view.canEdit ? <p className="notice">{t.noRight}</p> : null}

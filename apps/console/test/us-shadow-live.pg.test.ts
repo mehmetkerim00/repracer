@@ -117,9 +117,9 @@ before(async () => {
     stock: new PgStockStore({ adminPool, stockPool: db.pool('svc_stock', 2) }),
     pipeline: world.pipelineForDbIds() as never, clock: { iso: nowIso, nowMs: () => clock.nowMs() } as never,
     callContext: (channelAccountId) => ({ tenantId: seeded.tenantId as never, channelAccountId: channelAccountId as never, correlationId: 'us-shadow', deadline: nowIso() }),
-    view: async (viewer) => ({
+    view: async (viewer, options) => ({
       id: WORLD, title: 'amazon.com в тени', description: `${OFFERS} предложений в USD`, tenantId: seeded.tenantId, now: nowIso(),
-      accounts, viewer: { ...viewer }, state: await store.readConsoleState(seeded.tenantId, nowIso() as never),
+      accounts, viewer: { ...viewer }, state: await store.readConsoleState(seeded.tenantId, nowIso() as never, options),
     }) as never,
   };
   const directory = new MemoryIdentityDirectory();

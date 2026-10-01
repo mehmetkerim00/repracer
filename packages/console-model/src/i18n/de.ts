@@ -1061,6 +1061,7 @@ export const de: Messages = {
       channelPricingTitle: 'Angebote, die der Kanal selbst bepreist',
       channelPricingIntro: 'Beim Lesen der Angebote des Kontos gefunden, bevor eine Strategie zugewiesen wird (Р-120). Zuerst den Kanal-Repricer oder die Kanal-Preisgrenzen abschalten; bis dahin lehnt die Datenbank eine Strategie ab.',
       channelPricingNone: 'Keine gefunden.',
+      channelPricingMore: (n: number) => `…und ${n} weitere.`,
       blockedUnavailable: 'Kann nicht gespeichert werden: der Kanal liefert für mindestens ein Angebot nicht die Wettbewerbsdaten, die diese Strategie braucht (Р-39).',
       blockedChannelPricing: (offers: string) => `Kann nicht gespeichert werden: der Kanal bepreist diese Angebote selbst — ${offers} (Р-120).`,
       confirmTitle: (offers: number) => `Speichern und ${offers} ${offers === 1 ? 'Angebot' : 'Angeboten'} zuweisen?`,

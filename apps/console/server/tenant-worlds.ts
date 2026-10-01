@@ -92,9 +92,9 @@ export function createTenantWorlds(pools: TenantWorldPools, now: () => string = 
       id, title: name, description: '', tenantId, accounts, identityTenantId: tenantId, membershipAlias: (m) => m, failures: [],
       store: store as never, stock, stockPipeline, shadow, pipeline: pipeline as never, clock,
       callContext: (channelAccountId) => ({ tenantId: tenantId as never, channelAccountId: channelAccountId as never, correlationId: `console:${id}`, deadline: now() as never }),
-      view: async (viewer) => ({
+      view: async (viewer, options) => ({
         id, title: name, description: '', tenantId, now: now(), accounts, viewer: { ...viewer },
-        state: await store.readConsoleState(tenantId, now() as never),
+        state: await store.readConsoleState(tenantId, now() as never, options),
       }) as never,
     };
   };

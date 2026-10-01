@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { createPool, PgPricingStore, PgShadowStore, type PgPool } from '@repracer/pricing-store-pg';
 import { pgJobDeps } from '@repracer/scheduler';
-import { messagesFor, productList, productPage } from '@repracer/console-model';
+import { messagesFor, productList } from '@repracer/console-model';
 import { createIsolatedDatabase, type IsolatedDatabase } from '../../../packages/pricing-store-pg/test/isolated-db.ts';
 import { kauflandLiveWorld, WallClock, type KauflandLiveWorld, type LiveProduct } from './live/index.ts';
 
@@ -16,19 +16,20 @@ import { kauflandLiveWorld, WallClock, type KauflandLiveWorld, type LiveProduct 
  *  - круг обнаружения (весь каталог канала через путь решения и функцию каталога базы) и выборка сверки (то, что круг сверки Amazon
  *    читает на каждом вызове);
  *  - суточные работы планировщика — те же функции, что зовёт его работа: закрытие суток, секции, удаление по сроку.
- * Пределы — пределы экрана [Р-136]: экран ≤ 10 с, ответ ≤ 8 МБ; работа — ≤ 60 с (половина срока вызова работы). Превышение предела —
+ * Пределы — пределы экрана [Р-136]: экран ≤ 10 с, ответ ≤ 2 МиБ (предел сервера, шаг 66); работа — ≤ 60 с (половина срока вызова работы). Превышение предела —
  * провал: узкое место названо числом. Данные синтетические.
  */
 const OFFERS = Number(process.env.REPRACER_SCALE_OFFERS ?? 50_000);
 const SCREEN_SECONDS = 10;
-const SCREEN_BYTES = 8 * 1024 * 1024;
+/** Предел ответа экрана — тот же, что у сервера консоли (`SCREEN_RESPONSE_MAX_BYTES`, шаг 66): больше — ответ не уходит вовсе */
+const SCREEN_BYTES = 2 * 1024 * 1024;
 const JOB_SECONDS = 60;
 
 let db: IsolatedDatabase;
 let k: KauflandLiveWorld;
 let observer: PgPool;
 let store: PgPricingStore;
-const measured: Array<{ operation: string; seconds: number; bytes?: number; rows?: number; heapMb?: number; limit: number }> = [];
+const measured: Array<{ operation: string; seconds: number; bytes?: number; rows?: number; heapMb?: number; queue?: string; limit: number }> = [];
 
 /**
  * Единица Kaufland — последние шесть цифр товара БЕЗ ведущих нулей (как у демо): канал отдаёт `id_unit` числом, и посев «000001» против
@@ -44,24 +45,37 @@ const channelOnly: LiveProduct[] = Array.from({ length: NEW_OFFERS }, (_, i) => 
 const heapMb = () => Math.round(process.memoryUsage().heapUsed / 1_048_576);
 
 /**
- * Статистика перед каждой операцией — та, при которой у запросов правильный план (вне замера): ANALYZE, а пустую очередь записей ещё и
- * VACUUM, который обрезает файл до нуля страниц. Без этого план поисков очереди зависит от того, когда автоочистка или автоанализ
- * застали её пустой: при статистике «0 строк на N страниц» поиски по единице идут индексом тенанта, и тот же пересчёт 50 000 единиц
- * шёл 16,7 с в одном прогоне и ~10 минут в другом (OQ-247). Таблица мерит продукт при правильном плане; ловушка — своей строкой ниже
+ * Шаг 66 (OQ-247, Р-203): перед каждой операцией прогон НАРОЧНО портит статистику очереди записей — так, как её портит работа: очередь
+ * была полна строками тенанта и опустела, а очистка не обрезала файл, — «0 строк на N страниц» (вне замера). Остальные таблицы
+ * анализируются: замер — про очередь. При такой статистике все пути к очереди стоят для планировщика одинаково, и до шага 66 пересчёт
+ * 50 000 единиц шёл ~10 минут вместо 17 с. Операции обязаны уложиться в свои пределы и так: большая транзакция обновляет статистику
+ * очереди сама (триггер `aa_channel_write_queue_stats`). Если в очереди есть живые строки, очистка их сосчитает — это честное состояние
  */
-async function settledStats(): Promise<void> {
+async function trappedQueueStatistics(): Promise<string> {
   await observer.query('ANALYZE');
-  const { rows: [q] } = await observer.query('SELECT count(*)::int AS n FROM tenant_data.channel_write');
-  if ((q as { n: number }).n === 0) await observer.query('VACUUM tenant_data.channel_write');
+  const client = await observer.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SET LOCAL session_replication_role = replica');
+    await client.query(`INSERT INTO tenant_data.channel_write (tenant_id, write_scope_id, field, version, idempotency_key, origin, status, quantity)
+      SELECT $1, gen_random_uuid(), 'QUANTITY', 1, 'scale-trap-' || i, 'STOCK_RECALC', 'PENDING', 1 FROM generate_series(1, $2::int) i`, [trapTenant, OFFERS]);
+    await client.query(`DELETE FROM tenant_data.channel_write WHERE idempotency_key LIKE 'scale-trap-%'`);
+    await client.query('COMMIT');
+  } finally {
+    client.release();
+  }
+  await observer.query('VACUUM (TRUNCATE false) tenant_data.channel_write');
+  const { rows: [q] } = await observer.query(`SELECT reltuples::bigint AS t, relpages AS p FROM pg_class WHERE oid = 'tenant_data.channel_write'::regclass`);
+  return `${(q as { t: number }).t} rows on ${(q as { p: number }).p} pages`;
 }
+let trapTenant = '';
 
-async function timed<T>(operation: string, limit: number, fn: () => Promise<T>, size?: (r: T) => { bytes?: number; rows?: number; heapMb?: number },
-  settle = true): Promise<T> {
-  if (settle) await settledStats();
+async function timed<T>(operation: string, limit: number, fn: () => Promise<T>, size?: (r: T) => { bytes?: number; rows?: number; heapMb?: number }): Promise<T> {
+  const queue = await trappedQueueStatistics();
   const started = performance.now();
   const result = await fn();
   const seconds = Math.round((performance.now() - started) / 10) / 100;
-  measured.push({ operation, seconds, limit, ...(size ? size(result) : {}) });
+  measured.push({ operation, seconds, limit, queue, ...(size ? size(result) : {}) });
   return result;
 }
 const bytesOf = (v: unknown) => ({ bytes: Buffer.byteLength(JSON.stringify(v)) });
@@ -100,6 +114,7 @@ after(async () => {
 
 test(`шаг 65: масштаб — каталог ${OFFERS} предложений: пересчёт, кандидаты, экраны, круги и суточные работы в своих пределах`, { timeout: 120 * 60_000 }, async () => {
   const tenant = k.seeded.tenantId;
+  trapTenant = tenant;
   const account = k.seeded.ids.dbId(k.world.channelAccountId);
   const now = () => k.clock.iso() as never;
   const owner = { membershipId: k.seeded.ownerMembershipId, userId: k.seeded.userId };
@@ -119,25 +134,37 @@ test(`шаг 65: масштаб — каталог ${OFFERS} предложен�
   assert.equal((await shadow.switchWriteMode(tenant, { channelAccountId: account, toMode: 'LIVE', ...owner, mfa: true, typedConfirmation: String(acc!.external_account_id) })).status, 'SWITCHED');
   assert.equal((await timed('order-lines candidate selection, every product a candidate', JOB_SECONDS, () => k.stock!.budgetRolledOverProducts(tenant, account), (r) => ({ rows: r.length }))).length,
     OFFERS, 'выборка находит каждый товар, которого канал не видел');
+  /**
+   * Шаг 66 (п. 3): боевой пересчёт — каждая из N записей ждёт диспетчера, и каждая объявляется ему при фиксации. «Уже объявлено в
+   * транзакции» до шага 66 было одной строкой, которую каждая запись просматривала и дописывала копией: на 50 000 — ~55 с одной транзакции
+   */
+  await k.stock!.importStock(tenant, source, products.map((p) => ({ sku: String(p.idProduct).slice(-6), quantity: 31 })), { ...owner, mfa: true });
+  assert.equal((await timed('stock recalculate, every unit changed, LIVE: every write announced to the dispatcher', JOB_SECONDS, () => k.stock!.recalculate(tenant, null, now()), (r) => ({ rows: r.writes.length }))).writes.length,
+    OFFERS, 'каждая единица получила запись, которая ждёт диспетчера');
 
   // ---------------------------------------------------------------- экраны консоли — методами, которыми их строит API
   /**
-   * Каждый экран консоли сверх списков строит мир: состояние каталога целиком (`readConsoleState`), затем страницу. Время экрана товаров —
-   * загрузка каталога и страница; размер ОТВЕТА — страница; размер состояния — память сервера на один запрос (предела экрана у неё нет)
+   * Шаг 66 (OQ-248): товары и остатки больше не грузят каталог. Товары — страница и итоги из базы (`consoleCatalogPage`), мир только из
+   * единиц страницы; остатки — мир без каталога и страница своего хранилища. Полное состояние каталога остаётся у экранов, которые его
+   * ещё читают (стратегии, поиск предложения, комплаенс, остановка, карточка границ) — своей строкой: это память сервера на их запрос
    */
-  await timed('server: catalog state loaded for every screen (memory per request)', SCREEN_SECONDS, () => store.readConsoleState(tenant, now()), bytesOf);
+  await timed('server: full catalog state — screens still loading it (strategies, offer search, compliance, stop)', SCREEN_SECONDS, () => store.readConsoleState(tenant, now()), bytesOf);
   const world = { id: 'scale', title: 'scale', description: '', tenantId: tenant, now: k.clock.iso(), accounts: [{ channelAccountId: account, channel: 'KAUFLAND', marketplaces: ['de'] }],
     viewer: { membershipId: k.seeded.ownerMembershipId, role: 'OWNER' } };
   const m = messagesFor('en');
-  await timed('screen: products page (catalog state + page)', SCREEN_SECONDS, async () => {
-    const state = await store.readConsoleState(tenant, now());
-    const w = { ...world, state } as never;
-    const { shown } = productPage(w, m, { offset: 0, limit: 50 });
-    return productList(w, m, { offset: 0, limit: 50 }, await store.scopeDecisionStats(tenant, shown.map((x) => x.writeScopeId)));
+  for (const [label, offset] of [['first', 0], ['last', OFFERS - 50]] as const) {
+    await timed(`screen: products page, ${label} (database page + world of the page)`, SCREEN_SECONDS, async () => {
+      const page = await store.consoleCatalogPage(tenant, now(), { offset, limit: 50 });
+      const state = await store.readConsoleState(tenant, now(), { scopeIds: page.scopeIds });
+      return productList({ ...world, state } as never, m, { offset, limit: 50 }, await store.scopeDecisionStats(tenant, page.scopeIds), page);
+    }, bytesOf);
+  }
+  await timed('screen: stock page (world without catalog + page)', SCREEN_SECONDS, async () => {
+    await store.readConsoleState(tenant, now(), { scopeIds: [] });
+    return k.stock!.stockPage(tenant, { offset: 0, limit: 50 });
   }, bytesOf);
   await timed('screen: world counters (list of worlds)', SCREEN_SECONDS, () => store.worldCounters(tenant, now()), bytesOf);
   await timed('screen: onboarding status', SCREEN_SECONDS, () => store.onboardingStatus(tenant), bytesOf);
-  await timed('screen: stock page', SCREEN_SECONDS, () => k.stock!.stockPage(tenant, { offset: 0, limit: 50 }), bytesOf);
   await timed('screen: stock page, last page', SCREEN_SECONDS, () => k.stock!.stockPage(tenant, { offset: OFFERS - 50, limit: 50 }), bytesOf);
   await timed('screen: stock divergences', SCREEN_SECONDS, () => k.stock!.stockDivergences(tenant, 50), bytesOf);
   await timed('screen: shadow page (7 days)', SCREEN_SECONDS, () => shadow.shadowPage(tenant, k.clock.iso(), { offset: 0, limit: 50, sinceDays: 7 }), bytesOf);
@@ -158,29 +185,6 @@ test(`шаг 65: масштаб — каталог ${OFFERS} предложен�
   const next = await timed('discovery circle, next: every offer already known', JOB_SECONDS * 10, discovery, (r) => ({ rows: r.offers, heapMb: heapMb() }));
   assert.deepEqual([next.stop, next.offers, next.catalogued], ['COMPLETED', OFFERS + NEW_OFFERS, 0], `следующий круг ничего не заводит: ${JSON.stringify(next).slice(0, 300)}`);
 
-  // ---------------------------------------------------------------- ловушка OQ-247
-  /**
-   * Очередь записей была полна (пересчёт каталога), опустела, и статистику сняли раньше, чем очистка обрезала файл: «0 строк на N
-   * страниц». В работе очередь пустеет постоянно, так что это не крайний случай. Здесь состояние воспроизводится нарочно: N записей
-   * тенанта вставлены и удалены (без стражей — режим репликации суперпользователя), затем ANALYZE. Мерится одна страница обнаружения
-   * (100 предложений) — тот же код, что в кругах выше. Предела у строки нет: это узкое место, названное числом
-   */
-  const client = await observer.connect();
-  try {
-    await client.query('BEGIN');
-    await client.query('SET LOCAL session_replication_role = replica');
-    await client.query(`INSERT INTO tenant_data.channel_write (tenant_id, write_scope_id, field, version, idempotency_key, origin, status, quantity)
-      SELECT $1, gen_random_uuid(), 'QUANTITY', 1, 'scale-trap-' || i, 'STOCK_RECALC', 'PENDING', 1 FROM generate_series(1, $2::int) i`, [tenant, OFFERS]);
-    await client.query(`DELETE FROM tenant_data.channel_write WHERE idempotency_key LIKE 'scale-trap-%'`);
-    await client.query('COMMIT');
-  } finally {
-    client.release();
-  }
-  await observer.query('ANALYZE tenant_data.channel_write');
-  const trapped = await timed('trap (OQ-247): one discovery page of 100 offers, queue statistics «0 rows on N pages»', Number.POSITIVE_INFINITY,
-    () => k.pipelineForDbIds().discoverOffers(ctx, { pageLimit: 100, maxPages: 1, deadlineMarginMs: 0 }), (r) => ({ rows: r.offers }), false);
-  assert.equal(trapped.offers, 100, 'ловушка мерит целую страницу');
-
   // ---------------------------------------------------------------- суточные работы — функции, которые зовёт работа планировщика
   const jobs = pgJobDeps({
     schedulerPool: db.pool('svc_scheduler', 2), exporterPool: db.pool('svc_exporter', 1), ingest: null as never, verifier: null as never,
@@ -192,7 +196,7 @@ test(`шаг 65: масштаб — каталог ${OFFERS} предложен�
   await timed('daily: retention (partitions, rows, reservations)', JOB_SECONDS, async () => (await jobs.maintenance.dropExpiredPartitions(at)) + (await jobs.maintenance.deleteExpiredRows(at))
     + (await jobs.maintenance.releaseExpiredReservations(at)) + (await jobs.maintenance.alertStaleConfirmedReservations(at)), (n) => ({ rows: n }));
 
-  // Предел 8 МБ — у ОТВЕТА экрана; состояние каталога в памяти сервера — отдельная строка таблицы, без предела ответа
+  // Предел 2 МиБ — у ОТВЕТА экрана; состояние каталога в памяти сервера — отдельная строка таблицы, без предела ответа
   const over = measured.filter((x) => x.seconds > x.limit || (x.bytes !== undefined && x.bytes > SCREEN_BYTES && !x.operation.startsWith('server:')));
   assert.ok(measured.every((x) => x.seconds <= x.limit), `за пределом времени на каталоге ${OFFERS}: ${JSON.stringify(over)}`);
   assert.deepEqual(over, [], `за пределами экрана или работы на каталоге ${OFFERS}`);

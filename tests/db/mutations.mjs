@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0170_verify_schema_invariants_v44.sql';
+const VERIFY = 'migrations/0172_verify_schema_invariants_v44.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -2267,6 +2267,22 @@ export const STEP64_ROWS = [
         smoke('the weekly shadow digest skips a demo tenant (step 64 review, finding 3)')),
       m(replaceInFunction('tenant_data.channel_write_mode_apply()', 'AND ss.last_shadow_amount_minor IS NOT NULL;', 'AND false;'),
         smoke('going live forgets the proposal of the previous shadow (step 64 review, finding 5)')),
+    ],
+  },
+];
+
+/**
+ * Шаг 66 (OQ-247, Р-203): большая транзакция обновляет статистику очереди записей сама — иначе после «пустой» статистики её поиски по
+ * единице идут индексом тенанта (O(n²)). Снять триггер — статистика после пересчёта остаётся «0 строк»
+ */
+export const STEP66_ROWS = [
+  {
+    row: 'шаг 66 (Р-203, статистика очереди)', critical: false,
+    invariant: 'транзакция, поставившая в очередь сотую запись, обновляет статистику очереди — поиски по единице идут индексом единицы',
+    mutations: [
+      m(dropTrigger('aa_channel_write_queue_stats', 'tenant_data.channel_write'),
+        node('packages/pricing-store-pg/test/write-queue-stats.pg.test.ts', 'step 66 (OQ-247): a transaction putting many writes',
+          'step 66: the bulk transaction refreshed the queue statistics with its own rows', '^false$')),
     ],
   },
 ];

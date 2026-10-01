@@ -6,7 +6,7 @@ import type { StandAccount, StandWorld, Viewer } from '@repracer/console-model';
 import { MemoryIdentityDirectory } from '@repracer/identity';
 import { inviteMember, issueSignupInvitation, type PgIdentityDirectory } from '@repracer/identity/pg';
 import { inTenant, type PgPool } from '@repracer/pricing-store-pg';
-import { DEFAULT_MEMBERS, type PricingPipeline, type PricingStore } from '@repracer/pricing-pipeline';
+import { DEFAULT_MEMBERS, type ConsoleStateOptions, type PricingPipeline, type PricingStore } from '@repracer/pricing-pipeline';
 import { AMAZON_DESCRIPTOR } from '@repracer/amazon-adapter';
 import { KAUFLAND_DESCRIPTOR } from '@repracer/kaufland-adapter';
 import { amazonUnderTest, kauflandUnderTest } from '../adapters.ts';
@@ -90,7 +90,8 @@ export interface LiveWorld {
   pipeline: PricingPipeline;
   clock: VirtualClock;
   callContext(channelAccountId: string): AdapterCallContext;
-  view(viewer: Viewer): Promise<StandWorld>;
+  /** Шаг 66 (OQ-248): `options.scopeIds` — каталог мира только из этих единиц (страница экрана); без него — весь */
+  view(viewer: Viewer, options?: ConsoleStateOptions): Promise<StandWorld>;
 }
 
 function accountsOf(scenario: Scenario): StandAccount[] {
@@ -148,9 +149,9 @@ export async function buildStandWorlds(options: StandOptions = {}): Promise<Live
         tenantId: c.tenantId as AdapterCallContext['tenantId'], channelAccountId: channelAccountId as AdapterCallContext['channelAccountId'],
         correlationId: `stand:${scenario.id}:${c.clock.nowMs()}`, deadline: c.clock.iso(60_000),
       }),
-      view: async (viewer) => ({
+      view: async (viewer, options) => ({
         id: scenario.id, title: scenario.title, description: scenario.description, tenantId: c.tenantId, now: c.clock.iso(), accounts,
-        viewer: { ...viewer }, state: await c.store.readConsoleState(c.tenantId, c.clock.iso() as never),
+        viewer: { ...viewer }, state: await c.store.readConsoleState(c.tenantId, c.clock.iso() as never, options),
       }),
     });
   }

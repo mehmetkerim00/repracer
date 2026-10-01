@@ -94,8 +94,8 @@ export async function startDemoWorld(options: DemoWorldOptions): Promise<Running
     pipeline: demo.live.pipelineForDbIds() as never,
     clock: { iso: nowIso, nowMs: () => demo.clock.nowMs() } as never,
     callContext: (channelAccountId: string) => ({ tenantId: seeded.tenantId as never, channelAccountId: channelAccountId as never, correlationId: 'console-demo', deadline: nowIso() }),
-    view: async (viewer: unknown) => ({
-      ...descriptor, now: nowIso(), viewer: { ...(viewer as object) }, state: await store.readConsoleState(seeded.tenantId, nowIso() as never),
+    view: async (viewer: unknown, options?: { scopeIds?: readonly string[] }) => ({
+      ...descriptor, now: nowIso(), viewer: { ...(viewer as object) }, state: await store.readConsoleState(seeded.tenantId, nowIso() as never, options),
     }) as never,
   } as unknown as LiveWorld;
 

@@ -1064,6 +1064,7 @@ export const en = {
       channelPricingTitle: 'Offers the channel prices itself',
       channelPricingIntro: 'Found when reading the offers of the account, before any strategy is assigned. Switch the channel repricer or the channel bounds off first; until then the database refuses a strategy.',
       channelPricingNone: 'None found.',
+      channelPricingMore: (n: number) => `…and ${n} more.`,
       blockedUnavailable: 'Cannot be saved: the channel does not deliver the competitor data this strategy needs for at least one offer.',
       blockedChannelPricing: (offers: string) => `Cannot be saved: the channel prices these offers itself — ${offers}.`,
       confirmTitle: (offers: number) => `Save and assign to ${offers} ${offers === 1 ? 'offer' : 'offers'}?`,

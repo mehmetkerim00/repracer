@@ -76,9 +76,9 @@ before(async () => {
     accounts, identityTenantId: seeded.tenantId, membershipAlias: (id) => id, failures: [],
     store: store as never, stock, pipeline: demo.live.pipelineForDbIds() as never, clock: { iso: nowIso, nowMs: () => demo.clock.nowMs() } as never,
     callContext: (channelAccountId) => ({ tenantId: seeded.tenantId as never, channelAccountId: channelAccountId as never, correlationId: 'demo-day', deadline: nowIso() }),
-    view: async (viewer) => ({
+    view: async (viewer, options) => ({
       id: DEMO_WORLD, title: 'Демо: Kaufland на симуляторе', description: `${DEMO_OFFERS} предложений`, tenantId: seeded.tenantId, now: nowIso(),
-      accounts, viewer: { ...viewer }, state: await store.readConsoleState(seeded.tenantId, nowIso() as never),
+      accounts, viewer: { ...viewer }, state: await store.readConsoleState(seeded.tenantId, nowIso() as never, options),
     }) as never,
   };
   const directory = new MemoryIdentityDirectory();

@@ -922,3 +922,17 @@ test('step 63 (Р-202): revocation, enabling quantity sync and dispatch are orde
     }
   }
 });
+
+test('step 66 (review, finding 3): two keys of one product in one file — the last line wins, the pool is not summed', async () => {
+  const sourceId = (await store.stockSources(world.tenantId))[0]!.stockSourceId;
+  const onHand = async () => Number((await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
+    `SELECT p.on_hand FROM tenant_data.stock_pool p JOIN tenant_data.write_scope s ON s.tenant_id = p.tenant_id AND s.product_id = p.product_id
+      WHERE p.stock_source_id = $1 AND s.write_scope_id = $2`, [sourceId, world.ids.dbId('ws-1')])).rows))[0]!.on_hand);
+  // Артикул единицы и ссылка канала — два ключа товара 1
+  const both = await store.importStock(world.tenantId, sourceId, [{ sku: '3501', quantity: 5 }, { sku: '362351', quantity: 7 }], owner());
+  assert.equal(both.status, 'APPLIED');
+  assert.equal(await onHand(), 7, 'the last line about the product wins, the pool does not get 5 + 7');
+  const zeros = await store.importStock(world.tenantId, sourceId, [{ sku: '3501', quantity: 0 }, { sku: '362351', quantity: 0 }], owner());
+  assert.equal(zeros.status, 'APPLIED', 'two zero lines of one product do not drive the pool below zero');
+  assert.equal(await onHand(), 0);
+});

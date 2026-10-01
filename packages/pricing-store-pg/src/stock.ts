@@ -70,11 +70,18 @@ export class PgStockStore implements StockStore {
         if (!source || source.mode !== 'INTERNAL_POOL') return { status: 'NOT_INTERNAL_POOL' as const };
         const out: StockImportOutcome = { status: 'APPLIED', matched: 0, changed: 0, unmatched: [], productIds: [] };
         const seen = new Set<string>();
-        // Чем продавец называет товар: артикул у канала, ссылка на товар канала, EAN, наш SKU — как у импорта себестоимости
+        /**
+         * Чем продавец называет товар: артикул у канала, ссылка на товар канала, EAN, наш SKU — как у импорта себестоимости.
+         * Шаг 66 (замер масштаба): каталог читается целиком, и верный план — хеш-соединение при любой статистике. Сразу после загрузки
+         * каталога статистики нет, планировщик соединял товары и предложения вложенным циклом: на 50 000 — 246 с одного запроса, на
+         * 10 000 — почти весь импорт (тот же случай, что у каталога консоли, шаг 35). Настройка возвращается сразу после запроса
+         */
+        await tx.query('SET LOCAL enable_nestloop = off');
         const { rows: targets } = await tx.query(
           `SELECT p.product_id, unnest(array_remove(ARRAY[p.sku, p.gtin, om.external_unit_id, om.external_sku, om.channel_product_ref], NULL)) AS key
              FROM tenant_data.product p LEFT JOIN tenant_data.offer_mapping om ON om.tenant_id = p.tenant_id AND om.product_id = p.product_id AND om.status = 'ACTIVE'
             WHERE p.tenant_id = $1`, [tenantId]);
+        await tx.query('SET LOCAL enable_nestloop = on');
         /**
          * Один ключ — один товар. Артикул, подошедший ДВУМ товарам (чужой EAN в графе артикула, два активных предложения),
          * не применяется вовсе: количество, ушедшее не тому товару, дороже пропущенной строки [Р-138].
@@ -85,6 +92,12 @@ export class PgStockStore implements StockStore {
           const known = byKey.get(key);
           byKey.set(key, known === undefined || known === t.product_id ? t.product_id : null);
         }
+        /**
+         * Товар — один раз, значение — ПОСЛЕДНЕЙ строки о нём (как прежде, когда строки применялись по одной). Разные ключи одного
+         * товара — артикул, EAN, ссылка канала — в одном файле не складываются: дельта считалась бы дважды от одного остатка, и пул
+         * получил бы сумму (ревью шага 66, находка 3)
+         */
+        const latest = new Map<string, number>();
         for (const r of rows) {
           if (seen.has(r.sku)) { out.unmatched.push({ sku: r.sku, reason: 'DUPLICATE_SKU' }); continue; }
           seen.add(r.sku);
@@ -93,17 +106,43 @@ export class PgStockStore implements StockStore {
           if (productId === undefined) { out.unmatched.push({ sku: r.sku, reason: 'UNKNOWN_SKU' }); continue; }
           if (productId === null) { out.unmatched.push({ sku: r.sku, reason: 'AMBIGUOUS_SKU' }); continue; }
           out.matched += 1;
-          const { rows: [pool] } = await tx.query(
-            `INSERT INTO tenant_data.stock_pool (tenant_id, stock_source_id, source_mode, product_id) VALUES ($1, $2, 'INTERNAL_POOL', $3)
-             ON CONFLICT (tenant_id, stock_source_id, product_id, location_ref) DO UPDATE SET location_ref = tenant_data.stock_pool.location_ref
-             RETURNING stock_pool_id, on_hand`, [tenantId, stockSourceId, productId]);
-          const delta = r.quantity - Number(pool!.on_hand);
-          if (delta === 0) continue;
+          latest.delete(productId);
+          latest.set(productId, r.quantity);
+        }
+        const matched = [...latest].map(([productId, quantity]) => ({ productId, quantity }));
+        /**
+         * Шаг 66 (CI шага 65: импорт 50 000 строк — 79,7 с на раннере): пулы и движения — множеством, пачками, а не два запроса на строку.
+         * Товар в пачке один раз (выше), поэтому остаток пула читается до его движения, как прежде
+         */
+        for (let at = 0; at < matched.length; at += 5000) {
+          const chunk = matched.slice(at, at + 5000);
+          /**
+           * Пул заводится только тем товарам, у которых его нет; существующие читаются. Прежнее «ON CONFLICT DO UPDATE SET location_ref =
+           * location_ref» ради RETURNING делало пустое обновление КАЖДОГО существующего пула — со стражами и строкой аудита «ничего не
+           * изменилось» на строку файла
+           */
+          const products = chunk.map((c) => c.productId);
+          await tx.query(
+            `INSERT INTO tenant_data.stock_pool (tenant_id, stock_source_id, source_mode, product_id)
+             SELECT $1, $2, 'INTERNAL_POOL', p FROM unnest($3::uuid[]) AS p
+             ON CONFLICT (tenant_id, stock_source_id, product_id, location_ref) DO NOTHING`, [tenantId, stockSourceId, products]);
+          const { rows: pools } = await tx.query(
+            `SELECT stock_pool_id, product_id, on_hand FROM tenant_data.stock_pool
+              WHERE tenant_id = $1 AND stock_source_id = $2 AND location_ref = 'default' AND product_id = ANY ($3::uuid[])`, [tenantId, stockSourceId, products]);
+          const poolOf = new Map(pools.map((p) => [String(p.product_id), p]));
+          const moves = chunk.flatMap((c) => {
+            const pool = poolOf.get(c.productId)!;
+            const delta = c.quantity - Number(pool.on_hand);
+            return delta === 0 ? [] : [{ poolId: String(pool.stock_pool_id), delta, productId: c.productId }];
+          });
+          if (moves.length === 0) continue;
           // Инвентаризация: внутренний пул меняется только движением [0007]; равный остаток движения не создаёт
-          await tx.query(`INSERT INTO tenant_data.stock_movement (tenant_id, stock_pool_id, delta, reason, created_by_membership_id, occurred_at) VALUES ($1, $2, $3, 'STOCKTAKE', $4, now())`,
-            [tenantId, pool!.stock_pool_id, delta, actor.membershipId]);
-          out.changed += 1;
-          out.productIds.push(productId);
+          await tx.query(
+            `INSERT INTO tenant_data.stock_movement (tenant_id, stock_pool_id, delta, reason, created_by_membership_id, occurred_at)
+             SELECT $1, m.pool, m.delta, 'STOCKTAKE', $4, now() FROM unnest($2::uuid[], $3::int[]) AS m(pool, delta)`,
+            [tenantId, moves.map((m) => m.poolId), moves.map((m) => m.delta), actor.membershipId]);
+          out.changed += moves.length;
+          out.productIds.push(...moves.map((m) => m.productId));
         }
         return out;
       }, actor.userId, { mfa: actor.mfa });
@@ -373,6 +412,13 @@ export class PgStockStore implements StockStore {
                     ORDER BY om.created_at LIMIT 1) END
              FROM target g JOIN tenant_data.write_scope qs ON qs.tenant_id = $1 AND qs.write_scope_id = g.write_scope_id
             WHERE g.last_quantity IS NULL OR g.last_quantity <> g.q
+           /**
+            * Шаг 66 (OQ-247): сортировка забирает и считает ВЕСЬ источник до первой вставки. Без неё подзапросы цели по очереди записей
+            * шли на каждой строке ВПЕРЕМЕШКУ со вставкой, и при статистике «0 строк на N страниц» каждый проходил индекс тенанта со всеми
+            * строками, уже вставленными этим же оператором: пересчёт 50 000 единиц — минуты. Обновление статистики триггером (0171)
+            * этому оператору не помогает — его план выбран до первой строки
+            */
+           ORDER BY g.write_scope_id
            RETURNING write_scope_id, quantity, version)
          SELECT (SELECT json_agg(json_build_object('writeScopeId', c.write_scope_id, 'quantity', c.quantity, 'version', c.version)) FROM created c) AS writes,
                 (SELECT count(*) FROM target g WHERE g.last_quantity = g.q)::int AS unchanged`,
