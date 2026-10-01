@@ -153,7 +153,7 @@ const reasons: Record<AnyReasonCode, Template> = {
   WRITE_PRICING_MODE_CHANGED: (f) => `Nicht gesendet: der Preismodus wurde auf ${f.value('mode')} geändert.`,
   WRITE_EDIT_BUDGET_EXHAUSTED: (f) => `Nicht gesendet: das tägliche Änderungsbudget ist aufgebraucht${f.has('used') && f.has('limit') ? ` (${f.count('used')} von ${f.count('limit')})` : ''}${opt(f, 'budgetDay', () => ` für ${f.date('budgetDay')}`)}${opt(f, 'timeZone', () => ` (${f.raw('timeZone')})`)}${opt(f, 'resetsAt', () => `; es erneuert sich ${f.when('resetsAt')}`)}.`,
   // Р-169 (шаг 41): аккаунт ушёл в тень, пока запись была в полёте — повтор в канал не идёт
-  WRITE_HELD_IN_SHADOW: (f) => `Nicht gesendet: die Kanalverbindung ${f.raw('channelAccountId')} ist im Schattenmodus, es wird nichts in den Kanal geschrieben. Die Preisautomatik rechnet weiter; schalten Sie das Schreiben in der Konsole scharf, damit die Preise gesendet werden.`,
+  WRITE_HELD_IN_SHADOW: (f) => `Nicht gesendet: diese Kanalverbindung ist im Schattenmodus, es wird nichts in den Kanal geschrieben. Die Preisautomatik rechnet weiter; schalten Sie das Schreiben in der Konsole scharf, damit die Preise gesendet werden.`,
   QUANTITY_WRITES_REVOKED: (f) => `Nicht gesendet: der Inhaber hat das Schreiben von Beständen für die Kanalverbindung ${f.raw('channelAccountId')} widerrufen, es wird kein Bestand in den Kanal geschrieben. Die Bestandssynchronisation lässt sich erst nach einer neuen Bestätigung wieder einschalten, dass kein anderes Werkzeug dort Bestände pflegt.`,
   WRITE_BUDGET_DAY_UNCONFIRMED: (f) => `Nicht gesendet: die Wiederholung braucht das Änderungsbudget des aktuellen Tages, aber die Tagesgrenze der Storefront ${f.raw('marketplace')} ist nicht bestätigt. Die Übertragung wurde beendet; eine neue Preisentscheidung ist möglich, sobald die Zeitzone der Storefront bestätigt ist.`,
   CHANNEL_DISTRUSTED: (f) => `Alle Preise angehalten (${f.value('stage')}): wir vertrauen nicht, wie der Kanal unsere Preise anwendet${opt(f, 'distrustReason', () => ` — ${f.value('distrustReason')}`)}${opt(f, 'detectedAt', () => ` seit ${f.when('detectedAt')}`)}. Ein Fest- oder Margenpreis nähme denselben fehlerhaften Weg. Nur eine Person kann das aufheben.`,
@@ -298,6 +298,8 @@ export const de: Messages = {
     app: {
       title: 'repracer · Verkäuferkonsole',
       stand: 'Stand, synthetische Daten',
+      // Шаг 64 (проход консоли): имя и описание демо-мира на языке интерфейса, а не строкой посева по-немецки
+      demoWorldTitle: 'Demo-Shop (Simulator)', demoWorldDescription: 'Synthetischer Shop auf dem Kanalsimulator: jedes Angebot hat drei Wettbewerber — einer driftet, einer unterbietet, einer in Preiswellen.',
       demoBadge: 'Demo', demoBanner: 'Demo-Mandant: synthetische Daten, echter Weg. Alle Beträge sind erfunden.',
       languages: { de: 'Deutsch', en: 'English' },
       worlds: 'Welten des Stands',
@@ -434,6 +436,8 @@ export const de: Messages = {
     /** Шаг 49 [Р-190], находка 9 ревью: запись подтверждена только нашей записью у канала (eBay в бою без Browse) */
     ownRecordConfirmation: 'bestätigt über den Angebotsdatensatz, nicht über das Live-Angebot (Frage E-21)',
     writeStatus: {
+      // Шаг 64 (проход консоли): удержанное тенью — словами, а не кодом SHADOW_HELD
+      SHADOW_HELD: 'vom Schattenmodus zurückgehalten (nicht gesendet)',
       PENDING: 'in Warteschlange', DISPATCHED: 'gesendet, wartet auf den Kanal', ACCEPTED: 'vom Kanal angenommen', APPLIED: 'vom Kanal übernommen', FAILED: 'vorübergehender Kanalfehler',
       SUPERSEDED: 'durch neueren Preis ersetzt', DISCARDED_STALE: 'nicht gesendet', BUDGET_EXHAUSTED: 'Änderungsbudget aufgebraucht', NOT_APPLIED: 'vom Kanal nicht übernommen', BLOCKED: 'blockiert',
     },
@@ -522,6 +526,7 @@ export const de: Messages = {
         published: (n: number) => `zu veröffentlichen: ${n}`,
         sent: (n: number, status: string, when: string) => `gesendet ${n} (${status}, ${when})`,
         notSent: 'noch nichts gesendet',
+        heldInShadow: (n: number, when: string) => `vom Schattenmodus zurückgehalten: würde ${n} senden (${when}) — nichts gesendet`,
         confirmed: (n: number, when: string) => `Kanal hat ${n} bestätigt (${when})`,
         notConfirmed: 'Kanal hat noch nicht bestätigt',
         off: 'Abgleich aus',
@@ -535,6 +540,7 @@ export const de: Messages = {
         title: 'Bevor etwas geschrieben wird',
         AMAZON: 'Amazon: der MFN-Bestand ist EIN Wert je SKU für die ganze Region (Р-1). Ein Schreiben für amazon.de ändert auch amazon.fr, .it, .es — selbst wenn Sie nur mit einer Storefront arbeiten. Das Einschalten erfordert Ihre Bestätigung.',
         KAUFLAND: 'Kaufland: den Bestand teilen sich alle Storefronts desselben Angebots (id_offer, Р-35). Ein Wert für de und at; die Reihenfolge, in der die Storefronts ihn übernehmen, ist nicht garantiert.',
+        AMAZON_NA: 'Amazon: den MFN-Bestand behandeln wir als EINEN Wert je SKU für die ganze Amazon-Region des Kontos — bei amazon.com ist das Nordamerika. Ein Schreiben für amazon.com kann auch den Bestand Ihrer anderen nordamerikanischen Storefronts ändern: Amazon hat den Bereich noch nicht bestätigt, daher gehen wir vom weiteren aus (A-16). Das Einschalten erfordert Ihre Bestätigung.',
         generic: (channel: string) => `${channel}: der Schreibbereich des Bestands ist weiter als der des Preises — vor dem Einschalten prüfen (Р-37).`,
       },
       sources: {

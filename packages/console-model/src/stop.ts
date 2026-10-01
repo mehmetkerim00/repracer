@@ -148,7 +148,12 @@ function targetLabel(world: StandWorld, target: StopTarget | ConsoleStop, m: Mes
   const channel = m.values[channelOf(world, accountId) as keyof typeof m.values] ?? channelOf(world, accountId);
   if (kind === 'CHANNEL_ACCOUNT') return m.ui.stop.account(channel);
   const marketplace = 'kind' in target ? (target as { marketplace: string }).marketplace : (target as ConsoleStop).marketplace!;
-  return m.ui.stop.storefront(channel, marketplace);
+  return m.ui.stop.storefront(channel, marketplaceName(marketplace, m));
+}
+
+/** Шаг 64 (проход консоли): витрина словами — «Amazon amazon.com», а не «Amazon ATVPDKIKX0DER» */
+function marketplaceName(marketplace: string, m: Messages): string {
+  return m.ui.connections.marketplaces[marketplace] ?? marketplace;
 }
 
 function stopCard(world: StandWorld, s: ConsoleStop, m: Messages): StopCard {
@@ -165,7 +170,7 @@ function haltCard(world: StandWorld, h: ConsoleHalt, m: Messages): HaltCard {
   const channel = m.values[channelOf(world, h.channelAccountId) as keyof typeof m.values] ?? channelOf(world, h.channelAccountId);
   return {
     haltId: h.haltId,
-    scopeLabel: h.marketplace === null ? m.ui.stop.account(channel) : m.ui.stop.storefront(channel, h.marketplace),
+    scopeLabel: h.marketplace === null ? m.ui.stop.account(channel) : m.ui.stop.storefront(channel, marketplaceName(h.marketplace, m)),
     reason: m.values[h.reasonCode], since: m.when(h.haltedAt),
     review: h.releasedAt ? ''
       : world.accounts.find((a) => a.channelAccountId === h.channelAccountId)?.haltRelease === 'MANUAL_ONLY' ? m.ui.stop.haltManualOnly(channel) : m.ui.stop.haltReview(m.when(h.nextReviewAt)),
@@ -180,7 +185,7 @@ function distrustCard(world: StandWorld, d: ConsoleDistrustRow, m: Messages): Di
   const channel = m.values[channelOf(world, d.channelAccountId) as keyof typeof m.values] ?? channelOf(world, d.channelAccountId);
   return {
     distrustId: d.distrustId,
-    scopeLabel: d.marketplace === null ? m.ui.stop.account(channel) : m.ui.stop.storefront(channel, d.marketplace),
+    scopeLabel: d.marketplace === null ? m.ui.stop.account(channel) : m.ui.stop.storefront(channel, marketplaceName(d.marketplace, m)),
     reason: m.values[d.reasonCode as keyof typeof m.values] ?? d.reasonCode, since: m.when(d.detectedAt), holds: m.ui.stop.distrustHolds,
     released: d.releasedAt ? m.ui.stop.releasedBy(m.when(d.releasedAt), memberLabel(world, d.releasedByMembershipId, m), d.releaseNote ?? '') : null,
     canRelease: d.releasedAt === null && can(world.viewer.role, 'RELEASE_CHANNEL_DISTRUST'),

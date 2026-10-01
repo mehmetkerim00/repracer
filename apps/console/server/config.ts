@@ -26,6 +26,8 @@ export interface ConsoleConfig {
    * в демо-тенанте без регистрации. `off` — кнопки нет и маршрут гостя отвечает 404.
    */
   publicDemo: boolean;
+  /** Шаг 64: профиль США в демо — аккаунты eBay US и Amazon US в тени рядом с Kaufland (`REPRACER_CONSOLE_DEMO_US=on`) */
+  demoUs: boolean;
   /** Каждые сколько часов демо-мир пересеивается заново (Р-160): демо, в котором продавец что-то «сломал», показывать нельзя */
   demoReseedHours: number;
   /**
@@ -148,6 +150,7 @@ export function loadConsoleConfig(env: Env = process.env, read: (path: string) =
     distDir: requiredValue(env.REPRACER_CONSOLE_DIST, 'REPRACER_CONSOLE_DIST'),
     locale,
     publicDemo,
+    demoUs: env.REPRACER_CONSOLE_DEMO_US === 'on',
     // Сутки по умолчанию: демо переживает рабочий день целиком, а следы вчерашних гостей не копятся
     demoReseedHours: intFromEnv(env, 'REPRACER_CONSOLE_DEMO_RESEED_HOURS', 24, 1, 24 * 30),
     guestKeyPem,

@@ -88,6 +88,8 @@ export const MEASURED_FILES = new Set([
   'apps/console/test/pilot-live.pg.test.ts',
   // Шаг 47, D: путь пилота с каналом eBay утверждает секунды экранов и держит под собой панель, модели поставщиков и исполнителя
   'apps/console/test/pilot-ebay-live.pg.test.ts',
+  // Шаг 64: путь продавца из США (EBAY_US, USD, английский) до записи цены в бою стенда
+  'apps/console/test/pilot-us-live.pg.test.ts',
 ]);
 
 /**

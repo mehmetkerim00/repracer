@@ -32,8 +32,9 @@ import {
   type TriggerType,
 } from '@repracer/pricing-model';
 import { runStrategy, strategyAvailability } from '@repracer/strategy-engine';
-import { channelRefusal, type DispatchStep, type WriteDispatcher } from '@repracer/write-dispatcher';
+import { channelRefusal, writeAlertCode, type DispatchStep, type WriteDispatcher } from '@repracer/write-dispatcher';
 import { planPollingTiers } from './polling.ts';
+import { PIPELINE_WRITE_FIELD } from './store.ts';
 import { comparedValue, DEFAULT_LOSS_GRACE_SECONDS, LOSS_GRACE_BASIS, reconcile, type HeldState } from './reconciliation.ts';
 import type {
   HaltSampleObservation,
@@ -305,7 +306,8 @@ export function createPricingPipeline(deps: PipelineDeps) {
         const ended = committed.endedUnsent;
         report.channelWriteId = ended.channelWriteId;
         report.stages.push({ stage: 'DISPATCH_PLAN', outcome: ended.status, reason: ended.reason as Reason });
-        await alerts.raise({ ...alertBase(ctx), code: 'PRICE_WRITE_NOT_SENT', severity: 'CRITICAL', details: {
+        // Шаг 64 (ревью шага 63, находка 7): имя алерта — тем же помощником, что у диспетчера; путь решения пишет только цену
+        await alerts.raise({ ...alertBase(ctx), code: writeAlertCode(PIPELINE_WRITE_FIELD, 'notSent'), severity: 'CRITICAL', details: {
           writeScopeId: committed.writeScopeId, channelWriteId: ended.channelWriteId, reason: ended.reason.code, status: ended.status } });
         return;
       }
@@ -376,11 +378,11 @@ export function createPricingPipeline(deps: PipelineDeps) {
       // Р-115: продавец видит, что именно у оффера в канале, а не только «заблокировано»
       ...(typeof blockedCode === 'string' ? { code: blockedCode } : {}) };
     if (recorded.scopeBlocked) {
-      await alerts.raise({ ...alertBase(ctx), code: 'PRICE_WRITE_SCOPE_BLOCKED', severity: 'CRITICAL', details });
+      await alerts.raise({ ...alertBase(ctx), code: writeAlertCode(PIPELINE_WRITE_FIELD, 'scopeBlocked'), severity: 'CRITICAL', details });
     } else if (recorded.status === 'DISCARDED_STALE' || recorded.status === 'BUDGET_EXHAUSTED' || recorded.status === 'NOT_APPLIED') {
       // Шаг 52 (п. 8): исчерпанный бюджет правок — ожидаемое ограничение канала, значение уйдёт после смены суток витрины: WARNING (дайджест)
       // Путь решения пишет только цену; количество (CRITICAL) — диспетчер (ревью шага 52, находка 3)
-      await alerts.raise({ ...alertBase(ctx), code: 'PRICE_WRITE_NOT_SENT', severity: recorded.status === 'BUDGET_EXHAUSTED' ? 'WARNING' : 'CRITICAL', details: { ...details, status: recorded.status } });
+      await alerts.raise({ ...alertBase(ctx), code: writeAlertCode(PIPELINE_WRITE_FIELD, 'notSent'), severity: recorded.status === 'BUDGET_EXHAUSTED' ? 'WARNING' : 'CRITICAL', details: { ...details, status: recorded.status } });
     }
     if (!deps.dispatcher || !recorded.queuedWaiting) return;
     const dispatched = await deps.dispatcher.dispatchScope(ctx.tenantId, writeScopeId);

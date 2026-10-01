@@ -89,6 +89,7 @@ import type {
   StopResult,
   StoredSnapshotRef,
 } from './store.ts';
+import { PIPELINE_WRITE_FIELD } from './store.ts';
 
 /**
  * Хранилище в памяти для стенда: один тенант. Повторяет инварианты БД, важные для пути решения
@@ -1005,7 +1006,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       if (candidate.attemptCount >= policy.maxAttempts) {
         const reason = { code: 'WRITE_RETRIES_EXHAUSTED', params: { attempts: candidate.attemptCount, code: 'MAX_ATTEMPTS' } };
         this.end(candidate, 'DISCARDED_STALE', reason);
-        return { kind: 'ENDED', channelWriteId: candidate.channelWriteId, field: 'PRICE', status: 'DISCARDED_STALE', reason };
+        return { kind: 'ENDED', channelWriteId: candidate.channelWriteId, field: PIPELINE_WRITE_FIELD, status: 'DISCARDED_STALE', reason };
       }
     }
     const refusal = this.dispatchRefusal(candidate, now);
@@ -1018,7 +1019,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       } else {
         this.end(candidate, refusal.status, refusal.reason);
       }
-      return { kind: 'ENDED', channelWriteId: candidate.channelWriteId, field: 'PRICE', status: refusal.status, reason: refusal.reason };
+      return { kind: 'ENDED', channelWriteId: candidate.channelWriteId, field: PIPELINE_WRITE_FIELD, status: refusal.status, reason: refusal.reason };
     }
     this.markDispatched(candidate, now);
     return { kind: 'DISPATCH', channelAccountId: row.channelAccountId, write: this.toFieldWrite(candidate) };

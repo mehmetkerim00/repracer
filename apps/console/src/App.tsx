@@ -260,7 +260,8 @@ export function App() {
       <div className="app" lang={locale}>
         <header>
           <h1>{m.ui.app.title}</h1>
-          <span className="muted small">{m.ui.app.stand}</span>
+          {/* Шаг 64 (проход консоли глазами клиента): «стенд, синтетические данные» — только у стенда с имитатором входа, не у продавца */}
+          {session.state === 'ready' && session.data.simulator ? <span className="muted small">{m.ui.app.stand}</span> : null}
           <span className="spacer" />
           {LOCALES.map((l) => (
             <button key={l} type="button" className={l === locale ? 'active' : ''} aria-pressed={l === locale} onClick={() => changeLocale(l)}>{m.ui.app.languages[l]}</button>

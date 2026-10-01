@@ -145,9 +145,10 @@ test('stand API serves every screen of every world in German and English and ref
       // Экран остатков и расхождений — у каждого мира, на обоих языках
       const stock = await get<StockView>(auth, api(w.id, 'stock') + q);
       // Ловушка названа СОДЕРЖАНИЕМ, а не длиной строки: у каждого канала — своя область записи остатка [OQ-204, находка 19]
-      const trapFact: Record<string, RegExp> = { KAUFLAND: /id_offer/, AMAZON: /Р-1\b/ };
+      // Шаг 64: английский интерфейс без ссылок на решения — факт ловушки назван словами
+      const trapFact: Record<string, RegExp> = { KAUFLAND: /id_offer/, AMAZON: /Р-1\b|ONE value per SKU|EINEN Wert je SKU/ };
       assert.ok(stock.traps.length > 0, `${w.id}: у мира есть каналы — есть и ловушки`);
-      for (const t of stock.traps) assert.match(t.text, trapFact[t.channel] ?? /Р-37/, `${w.id}: ловушка ${t.channel} называет свою область записи`);
+      for (const t of stock.traps) assert.match(t.text, trapFact[t.channel] ?? /Р-37|wider than/, `${w.id}: ловушка ${t.channel} называет свою область записи`);
       await get<unknown>(auth, api(w.id, 'stock', 'divergences') + q);
       assert.equal(path.demo, false, `${w.id}: мир сценария — не демо`);
       for (const d of (await get<DecisionListView>(auth, api(w.id, 'decisions') + q)).items) await get<DecisionTrace>(auth, api(w.id, 'decisions', d.decisionId) + q);
@@ -211,7 +212,7 @@ test('screens render from the dictionary: sign-in, products with the effective f
   const kept = await get<DecisionTrace>(auth, api(id, 'decisions', noChange.decisionId));
   assert.ok(kept.gaps.some((g) => g.code === 'NO_OP_NOT_EXPLAINED'));
   const keptHtml = await html('/src/screens/Decisions.tsx', 'TraceView', { trace: kept });
-  for (const text of ['Not kept for decisions that did not change the price (Р-74)', 'Explanation of a decision that kept the price']) assert.ok(keptHtml.includes(text), text);
+  for (const text of ['Not kept for decisions that did not change the price', 'Explanation of a decision that kept the price']) assert.ok(keptHtml.includes(text), text);
 
   const rejected = await html('/src/screens/Rejected.tsx', 'RejectedScreenView', { view: await get<RejectedView>(auth, api('kaufland/pipeline/above-max-price', 'rejected')) });
   for (const text of ['Your bounds stopped 1 dangerous change', 'dangerous', '53.2%']) assert.ok(rejected.includes(text), text);
@@ -521,7 +522,7 @@ test('step 23, B/C: the stop screen shows three kinds of stop; a channel distrus
   const card = view.distrusts.active[0]!;
   assert.match(card.holds, /all prices, including fixed and margin prices/);
   const markup = await html('/src/screens/Stop.tsx', 'StopScreenView', { view, onReleaseDistrust: () => {} });
-  for (const text of ['Three kinds of stop', 'Channel distrust (Р-118)', 'Channel distrusted by the system', 'Trust again…', 'wrong price basis']) assert.ok(markup.includes(text), text);
+  for (const text of ['Three kinds of stop', 'Channel distrust', 'Channel distrusted by the system', 'Trust again…', 'wrong price basis']) assert.ok(markup.includes(text), text);
 
   const products = await get<ProductListView>(owner, api(id, 'products'));
   const row = (sku: string) => products.rows.find((r) => r.unit.externalUnitId === sku)!;
@@ -585,7 +586,7 @@ test('step 23, F: bounds edit is offered only with the right; the feed filters a
    * Р-140 (шаг 30): «всё» — это весь каталог, а не показанная страница; выбор названного числа виден всегда, а листание его
    * сбрасывает. Проверяется то, что читает продавец: страница названа страницей, каталог — каталогом, и оба числа настоящие.
    */
-  assert.ok(panel.includes(`All ${index.page.total} offers of the catalogue — including those on other pages`), 'каталог назван каталогом');
+  assert.ok(panel.includes(`All ${index.page.total} offers of the catalog — including those on other pages`), 'каталог назван каталогом');
   assert.ok(panel.includes(`Select the ${index.items.length} on this page`), 'страница названа страницей, с её числом');
   assert.ok(panel.includes('Nothing selected'), 'ничего не выбрано — сказано прямо, а не пустотой');
   assert.ok(panel.includes('Paging or changing the filter clears the selection of individual rows.'), 'сброс выбора при листании назван до того, как он случится');

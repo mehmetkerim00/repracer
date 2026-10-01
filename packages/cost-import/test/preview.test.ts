@@ -104,3 +104,14 @@ test('Р-134 (ревью шага 28, находка 13): номер непри�
   const notFound = preview.skipped.find((r) => r.problem === 'OFFER_NOT_FOUND');
   assert.equal(notFound?.line, 6, 'строка NICHT-DA — шестая строка файла, а не четвёртая по порядку записей');
 });
+
+/**
+ * Шаг 64 (аудит профиля США): валюта, названная в ячейке суммы, — тоже заявление продавца. «€5» у предложения в долларах отклоняется
+ * причиной «валюта не та», а не превращается молча в $5 [Р-138]; «$5» у долларового и «5 USD» — принимаются
+ */
+test('шаг 64: «€5» у предложения в долларах не становится $5 — валюта в ячейке сверяется с валютой предложения', () => {
+  const sheet = parseCsv(['SKU,Unit cost,Fixed fee', 'A-3,€5.00,', 'A-3,$5.00,', 'A-1,5.00,$0.30'].join('\n'));
+  const preview = buildPreview({ sheet, mapping: suggestMapping(sheet).mapping, offers: OFFERS });
+  const reasons = preview.skipped.map((r) => [r.line, r.problem]);
+  assert.deepEqual(reasons.filter(([, p]) => p === 'CURRENCY_NOT_OF_OFFER').map(([l]) => l).sort(), [2, 4], `евро у долларового и доллар в комиссии евро-предложения: ${JSON.stringify(reasons)}`);
+});

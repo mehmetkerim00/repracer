@@ -269,6 +269,29 @@ VALUES (:tA, '2026-09-14 10:41+00', 'a7410000-0000-4000-8000-000000000001', :pSc
   1000, ARRAY[gen_random_uuid()], 5000, ARRAY[gen_random_uuid()], 'STEP_LIMIT', '{"stepLimitBp": 500}',
   '{"format":"r80.1","strategy":{"reason":{"code":"FIXED_PRICE"}}}', NULL, 'g74.1');
 
+/**
+ * Шаг 64 (ревью, находка 5): предложение тени живёт в пределах одного периода тени. Здесь тень удерживает цену 12,90 — движок
+ * сравнивает с ней следующее предложение (`last_shadow_amount_minor`). Ниже аккаунт уходит в бой, и смена режима обязана это
+ * предложение забыть: иначе после «тень → бой → тень» прежняя цена глушила бы новое предложение той же цены как повтор
+ */
+INSERT INTO channel_data.price_intent (tenant_id, price_intent_id, created_at, write_scope_id, created_by_membership_id, trigger_type, proposed_amount_minor, currency, price_basis, expires_at, rule_code)
+VALUES (:tA, 'a7410000-0000-4000-8000-000000000003', '2026-09-14 10:43+00', :pScope, :ownerM, 'MANUAL', 1290, 'EUR', 'GROSS', '2026-09-14 11:43+00', 'FIXED_PRICE');
+INSERT INTO channel_data.price_decision (tenant_id, price_decision_id, intent_created_at, price_intent_id, write_scope_id, outcome, final_amount_minor, currency, price_basis,
+  effective_floor_minor, min_price_ids, effective_ceiling_minor, max_price_ids, explanation, sanity_ruleset, gate_profile)
+VALUES (:tA, 'a8410000-0000-4000-8000-000000000003', '2026-09-14 10:43+00', 'a7410000-0000-4000-8000-000000000003', :pScope, 'APPROVED', 1290, 'EUR', 'GROSS',
+  1000, ARRAY[gen_random_uuid()], 5000, ARRAY[gen_random_uuid()], '{"format":"r80.1","strategy":{"reason":{"code":"FIXED_PRICE"}}}', NULL, 'g74.1');
+INSERT INTO tenant_data.channel_write (tenant_id, channel_write_id, write_scope_id, field, amount_minor, currency, price_basis, version, origin, price_decision_id)
+SELECT :tA, 'a9410000-0000-4000-8000-000000000031', :pScope, 'PRICE', 1290, 'EUR', 'GROSS',
+       coalesce((SELECT latest_version_created FROM tenant_data.write_scope_sync_state WHERE tenant_id = :tA AND write_scope_id = :pScope), 0) + 1,
+       'PRICE_DECISION', 'a8410000-0000-4000-8000-000000000003';
+SELECT pg_temp.ok('the shadow holds the price and remembers it as its proposal (Р-171)', format($q$
+  DO $i$
+  BEGIN
+    IF (SELECT last_shadow_amount_minor FROM tenant_data.write_scope_sync_state WHERE tenant_id = %L AND write_scope_id = %L) IS DISTINCT FROM 1290 THEN
+      RAISE EXCEPTION 'the price held by the shadow is not remembered as its proposal';
+    END IF;
+  END $i$ $q$, :tA, :pScope));
+
 -- --------------------------------------------------------------- включение боя [Р-170]
 SELECT pg_temp.expect_fail('switching to LIVE without a second factor (Р-170)', format($q$
   INSERT INTO tenant_data.channel_write_mode_change (tenant_id, channel_account_id, from_mode, to_mode, changed_by_membership_id, typed_confirmation)
@@ -292,6 +315,14 @@ SELECT set_config('app.user_id', :ownerU, false) \gset
 SELECT pg_temp.ok('the owner switches the account to LIVE with a second factor and a typed confirmation (Р-170)', format($q$
   INSERT INTO tenant_data.channel_write_mode_change (tenant_id, channel_account_id, from_mode, to_mode, changed_by_membership_id, typed_confirmation)
   VALUES (%L, %L, 'SHADOW', 'LIVE', %L, 'seller-A') $q$, :tA, :kAcc, :ownerM));
+-- Шаг 64 (ревью, находка 5): предложение прошлой тени забыто — следующая тень сравнивает только со своими предложениями
+SELECT pg_temp.ok('going live forgets the proposal of the previous shadow (step 64 review, finding 5)', format($q$
+  DO $i$
+  BEGIN
+    IF (SELECT last_shadow_amount_minor FROM tenant_data.write_scope_sync_state WHERE tenant_id = %L AND write_scope_id = %L) IS NOT NULL THEN
+      RAISE EXCEPTION 'the proposal of the previous shadow survives the switch of the write mode';
+    END IF;
+  END $i$ $q$, :tA, :pScope));
 -- Шаг 49 (находка 2 ревью, Р-192): журнал хранит отметку сверки, а не набранный идентификатор аккаунта (у eBay это userId)
 SELECT pg_temp.ok('the LIVE switch keeps a mark, not the typed account id (Р-192)', format($q$
   DO $i$

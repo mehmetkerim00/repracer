@@ -313,6 +313,19 @@ const SCENARIOS: Scenario[] = [];
       call('price', 'dispatch', [batch('b-us', [us as Write])], { outcomes: [{ status: 'ACCEPTED' }] }),
     ],
     { noAlerts: true, channel: { listings: [{ offer: { priceMinor: 1599, currency: 'USD' } }] } }));
+
+  // Шаг 64, E-27: минимальная цена EBAY_US — гипотеза по аналогии с EUR 1.00; вариант без минимума показывает, что адаптер не навязывает его сам
+  const cheap = structuredClone(us) as Write;
+  cheap.channelWriteId = 'cw-us-cheap' as never;
+  cheap.value = { field: 'PRICE', price: { amountMinor: 99, currency: 'USD', basis: 'NET' } };
+  SCENARIOS.push(scenario('ebay-sim/us-minimum-price', 'E-27 на модели: цена 0.99 USD на EBAY_US — по гипотезе ниже минимума (25016), без минимума — применена',
+    'Песочница показала минимум EUR 1.00 (25016) только на EBAY_DE. Для EBAY_US это гипотеза по аналогии: модель держит её параметром. Адаптер минимум сам не навязывает — только классифицирует ответ канала.',
+    world({ seed: 16, listings: [listing(16, { marketplace: 'EBAY_US' })] }, { account: { externalAccountId: 'syn_ebay_seller_0001', marketplaces: ['EBAY_US'], channel: 'EBAY' } }),
+    [call('price', 'dispatch', [batch('b-us-cheap', [{ ...cheap, writeScope: { ...cheap.writeScope, scopeKey: `ebay|acct|EBAY_US|${L(16).sku}`, identity: { ...cheap.writeScope.identity, externalSku: L(16).sku, externalOfferId: L(16).offerId, externalListingId: L(16).listingId } } } as Write])],
+      { outcomes: [{ status: 'REJECTED', error: { code: 'VALIDATION', channelCode: '25016', message: { $regex: 'MinValue USD 1\\.00' } } }] })],
+    { noAlerts: true },
+    [{ id: 'e27-no-us-minimum', question: 'E-27', params: { usdMinimumPrice: 'NONE' }, finding: 'без минимума запись 0.99 USD применена — адаптер минимум не навязывает',
+       stepExpect: { price: { outcomes: [{ status: 'ACCEPTED' }] } } }]));
 }
 
 // ------------------------------------------------------------------------------------------------ прогоны
@@ -336,7 +349,7 @@ for (const s of SCENARIOS) {
 
 test('every open eBay question in the model is exercised by a scenario variant and exists in channel-capabilities.md', () => {
   const asked = new Set(Object.values(EBAY_PARAMETERS).map((p) => p.question).filter((q): q is string => q !== null));
-  assert.deepEqual([...asked].sort(), ['E-02', 'E-04', 'E-06', 'E-12', 'E-13', 'E-15', 'E-16', 'E-17', 'E-22']);
+  assert.deepEqual([...asked].sort(), ['E-02', 'E-04', 'E-06', 'E-12', 'E-13', 'E-15', 'E-16', 'E-17', 'E-22', 'E-27']);
   const exercised = new Set(SCENARIOS.flatMap((s) => (s.variants ?? []).map((v) => v.question)));
   assert.deepEqual([...asked].filter((q) => !exercised.has(q)).sort(), []);
   const capabilities = readFileSync(fileURLToPath(new URL('../../../docs/channel-capabilities.md', import.meta.url)), 'utf8');

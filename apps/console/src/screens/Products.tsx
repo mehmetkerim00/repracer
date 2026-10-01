@@ -14,10 +14,11 @@ export function ProductsView({ view, onEnable, query, onQuery }: {
   return (
     <section>
       <h2>{p.title}</h2>
-      <p className="muted">{p.totals(view.totals)} {p.clock(view.now)}</p>
+      {/* Шаг 64: у пустого каталога — не строка нулей и шапка таблицы, а объяснение и путь */}
+      {view.rows.length > 0 ? <p className="muted">{p.totals(view.totals)}</p> : null}
       {/* Задача D шага 34: новый тенант без данных видит, ПОЧЕМУ пусто и куда идти, а не пустую таблицу */}
       {view.rows.length === 0 ? <p className="notice">{m.ui.onboarding.empty.products} <a href={href(view.worldId, 'onboarding')}>{m.ui.onboarding.empty.startHere}</a></p> : null}
-      <div className="table-wrap">
+      {view.rows.length > 0 ? <div className="table-wrap">
         <table>
           <thead>
             <tr>
@@ -58,8 +59,8 @@ export function ProductsView({ view, onEnable, query, onQuery }: {
             ))}
           </tbody>
         </table>
-      </div>
-      {query && onQuery ? <Pager page={view.page} query={query} onQuery={onQuery} /> : null}
+      </div> : null}
+      {query && onQuery && view.rows.length > 0 ? <Pager page={view.page} query={query} onQuery={onQuery} /> : null}
       <Gaps gaps={view.gaps} />
     </section>
   );

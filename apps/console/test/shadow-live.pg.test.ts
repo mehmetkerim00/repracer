@@ -81,9 +81,10 @@ before(async () => {
   const appPool: PgPool = db.pool('svc_app', 4);
   const adminPool: PgPool = db.pool('svc_admin', 4);
   deliveryPool = db.pool('svc_alert_delivery', 1);
-  // Мир подключён в ТЕНИ: так его получает продавец, подключивший канал [Р-170]
+  // Мир подключён в ТЕНИ: так его получает продавец, подключивший канал [Р-170]. Шаг 64: тенант — КЛИЕНТСКИЙ, а не демо: прогон играет
+  // настоящего продавца, а демо-тенанту недельный дайджест тени не пишется (0167)
   demo = await demoWorld({
-    tag: 4100, startIso: nextNineUtc(), bare: false, writeMode: 'SHADOW',
+    tag: 4100, startIso: nextNineUtc(), bare: false, writeMode: 'SHADOW', demo: false,
     appPool, adminPool, provisioningPool: db.pool('svc_provisioning', 1), dispatcherPool: db.pool('svc_dispatcher', 2),
     schedulerPool: db.pool('svc_scheduler', 3), exporterPool: db.pool('svc_exporter', 2), stockPool: db.pool('svc_stock', 2),
   });

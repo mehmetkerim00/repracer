@@ -116,7 +116,8 @@ export function StockScreenView({ view: v, worldId, query, onQuery }: { view: St
       <h2>{t.title}</h2>
       {v.demo ? <p className="notice"><Badge tone="warn">{m.ui.app.demoBadge}</Badge> {m.ui.app.demoBanner}</p> : null}
       <p className="muted">{v.intro}</p>
-      <p><strong>{v.summaryText}</strong></p>
+      {/* Шаг 64: у пустого экрана — не строка нулей, а объяснение ниже */}
+      {v.rows.length > 0 ? <p><strong>{v.summaryText}</strong></p> : null}
       {v.sources.length === 0 ? <p className="notice">{m.ui.onboarding.empty.stock} <a href={href(worldId, 'onboarding')}>{m.ui.onboarding.empty.startHere}</a></p>
         : <ul className="small">{v.sources.map((s) => <li key={s.stockSourceId}>{s.name} — {s.modeText}; {s.productsText}{s.hasKey ? `; ${t.sources.keyPresent}` : ''}</li>)}</ul>}
       {v.rows.length > 0 ? (

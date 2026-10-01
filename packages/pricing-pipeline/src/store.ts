@@ -1179,3 +1179,6 @@ export interface ChannelObservation {
   quantity: number | null;
   observedAt: Instant;
 }
+
+/** Шаг 64 (ревью шага 63, находки 6 и 7): путь решения пишет только цену — поле его записей для имени алерта (`writeAlertCode`) и заявок хранилища в памяти */
+export const PIPELINE_WRITE_FIELD = 'PRICE' as const;

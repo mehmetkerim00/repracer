@@ -29,7 +29,8 @@ export function requireEnv(name: string): string {
   return value;
 }
 
-export async function createIsolatedDatabase(prefix: string): Promise<IsolatedDatabase> {
+/** Шаг 64 [Р-60]: регион базы — место клиента; клиент из США живёт в базе региона US */
+export async function createIsolatedDatabase(prefix: string, options: { region?: 'EU' | 'US' } = {}): Promise<IsolatedDatabase> {
   const appUrl = new URL(requireEnv('REPRACER_PG_URL'));
   const adminUrl = requireEnv('REPRACER_PG_ADMIN_URL');
   const template = process.env.REPRACER_PG_TEMPLATE ?? 'repracer_template';
@@ -39,7 +40,7 @@ export async function createIsolatedDatabase(prefix: string): Promise<IsolatedDa
   try {
     await admin.query(`CREATE DATABASE ${name} TEMPLATE ${template}`);
     // Настройки базы шаблон не переносит
-    await admin.query(`ALTER DATABASE ${name} SET repracer.region = 'EU'`);
+    await admin.query(`ALTER DATABASE ${name} SET repracer.region = '${options.region === 'US' ? 'US' : 'EU'}'`);
   } finally {
     await admin.end();
   }

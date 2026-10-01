@@ -254,3 +254,27 @@ SELECT pg_temp.expect_fail('marking a delivered digest again (Р-174)', format($
   'is already recorded');
 
 RESET ROLE;
+
+-- ---------------------------------------------------------------- шаг 64 (ревью, находка 3): демо дайджеста не получает
+/**
+ * Демо — синтетика для показа [Р-151]: отчёт о нём не адресован никому. У демо смоук-мира заводится аккаунт в тени — ровно тот,
+ * что с шага 64 рождается у демо (витрины США, Р-176), — и дайджест обязан его не видеть, а клиентского тенанта — видеть
+ */
+SET ROLE repracer_admin;
+SELECT set_config('app.tenant_id', 'd0000000-0000-0000-0000-00000000000d', false), set_config('app.user_id', 'd1000000-0000-0000-0000-00000000000d', false) \gset
+INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, external_account_id, marketplaces, credentials_ref, connected_by_membership_id)
+VALUES ('d0000000-0000-0000-0000-00000000000d', 'd4410000-0000-4000-8000-000000000001', 'KAUFLAND', 'seller-demo-shadow', ARRAY['de'], 'vault://d/shadow',
+        'd2000000-0000-0000-0000-00000000000d');
+RESET ROLE;
+SET ROLE repracer_alert_delivery;
+SELECT pg_temp.ok('the weekly shadow digest skips a demo tenant (step 64 review, finding 3)', $q$
+  DO $i$
+  BEGIN
+    IF EXISTS (SELECT 1 FROM platform.shadow_digest_targets() WHERE tenant_id = 'd0000000-0000-0000-0000-00000000000d') THEN
+      RAISE EXCEPTION 'the shadow digest writes to the owner of a demo tenant';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM platform.shadow_digest_targets() WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a') THEN
+      RAISE EXCEPTION 'the shadow digest lost the customer tenant with a shadow account';
+    END IF;
+  END $i$ $q$);
+RESET ROLE;

@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0165_verify_schema_invariants_v44.sql';
+const VERIFY = 'migrations/0168_verify_schema_invariants_v44.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -2248,6 +2248,23 @@ export const STEP63_ROWS = [
         node(T('stock.pg.test.ts'), 'step 63', 'step 63: a claim racing a revocation ends with the refusal of the dispatch guard, not a deadlock', '^40P01$')),
       m(replaceInFunction('tenant_data.channel_write_quantity_writes_guard()', 'hashtext(account::text)', 'hashtext(NEW.tenant_id::text)'),
         node(T('stock.pg.test.ts'), 'step 63', 'step 63: a retry of a quantity write waits for a revocation in progress', 'resolved')),
+    ],
+  },
+];
+
+/**
+ * Шаг 64 (ревью шага): теневой режим на профиле США — дайджест не адресован демо-тенанту, смена режима забывает предложение тени (0167).
+ * Обе правки — тексты функций; своя проверка каждой — смоук, который без неё отказывает своей причиной [Р-99]
+ */
+export const STEP64_ROWS = [
+  {
+    row: 'шаг 64 (Р-171, демо и предложение тени)', critical: false,
+    invariant: 'недельный дайджест тени не пишет владельцу демо-тенанта; смена режима записи забывает предложение прошлого периода тени',
+    mutations: [
+      m(replaceInFunction('platform.shadow_digest_targets(interval)', "AND t.kind = 'CUSTOMER' AND NOT t.demo AND", "AND t.kind = 'CUSTOMER' AND"),
+        smoke('the weekly shadow digest skips a demo tenant (step 64 review, finding 3)')),
+      m(replaceInFunction('tenant_data.channel_write_mode_apply()', 'AND ss.last_shadow_amount_minor IS NOT NULL;', 'AND false;'),
+        smoke('going live forgets the proposal of the previous shadow (step 64 review, finding 5)')),
     ],
   },
 ];

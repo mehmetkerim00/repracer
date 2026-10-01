@@ -120,10 +120,15 @@ export async function demoWorld(input: {
   joinMember?: Parameters<typeof kauflandLiveWorld>[0]['joinMember'];
   /** Шаг 41 [Р-169]: демо в ТЕНИ — канал подключён, движок работает, записи не уходят */
   writeMode?: 'SHADOW' | 'LIVE';
+  /**
+   * Шаг 64: признак демо у тенанта [Р-151], по умолчанию — да. Прогон тени играет НАСТОЯЩЕГО продавца, который нам ещё не верит: ему
+   * нужен клиентский тенант — демо-тенанту недельный дайджест тени не пишется (0167)
+   */
+  demo?: boolean;
 }): Promise<DemoWorld> {
   const clock = input.wallClock ? new WallClock() : new VirtualClock(input.startIso);
   const live = await kauflandLiveWorld({
-    tag: input.tag, clock, products: demoProducts({ bare: input.bare }), seed: input.seed ?? input.tag, demo: true,
+    tag: input.tag, clock, products: demoProducts({ bare: input.bare }), seed: input.seed ?? input.tag, demo: input.demo ?? true,
     ...(input.writeMode ? { writeMode: input.writeMode } : {}),
     /**
      * Шаг 35 (задача D): демо показывает и остатки. У настроенного мира — источник с инвентаризацией и включённая

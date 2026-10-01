@@ -73,7 +73,9 @@ export function stockTraps(world: StandWorld, m: Messages): StockTrap[] {
   const t = m.ui.stock.traps;
   return world.accounts.map((a) => ({
     channel: a.channel, channelAccountId: a.channelAccountId,
-    text: a.channel === 'AMAZON' ? t.AMAZON : a.channel === 'KAUFLAND' ? t.KAUFLAND : t.generic(a.channel),
+    // Шаг 64: у amazon.com — регион Северная Америка, а не ЕС: продавцу из США нельзя называть amazon.fr, .it, .es
+    text: a.channel === 'AMAZON' ? (a.marketplaces.includes('ATVPDKIKX0DER') ? t.AMAZON_NA : t.AMAZON) : a.channel === 'KAUFLAND' ? t.KAUFLAND
+      : t.generic((m.values as Record<string, string | undefined>)[a.channel] ?? a.channel),
     requiresAck: a.channel === 'AMAZON',
   }));
 }
@@ -87,12 +89,14 @@ export function channelCell(c: StockChannelRow, m: Messages): StockChannelCell {
     writeScopeId: c.writeScopeId, channel: c.channel, label: `${channelName} · ${c.marketplaces.join(', ')}`,
     sharedText: c.marketplaces.length > 1 ? s.shared(c.marketplaces.join(', ')) : null,
     syncEnabled: c.syncEnabled, published: c.published,
-    sentText: c.sent ? s.sent(c.sent.quantity, status(c.sent.status), m.when(c.sent.at)) : s.notSent,
+    // Шаг 64: удержанное тенью не «отправлено» — в канал ничего не ушло [Р-169]
+    sentText: !c.sent ? s.notSent : c.sent.status === 'SHADOW_HELD' ? s.heldInShadow(c.sent.quantity, m.when(c.sent.at)) : s.sent(c.sent.quantity, status(c.sent.status), m.when(c.sent.at)),
     // Р-190 (находка 9 ревью шага 49): подтверждение только нашей записью у канала названо словами
     confirmedText: c.confirmed ? `${s.confirmed(c.confirmed.quantity, m.when(c.confirmed.at))}${c.confirmed.ownRecordOnly ? ` — ${m.ui.ownRecordConfirmation}` : ''}` : s.notConfirmed,
     divergedText: c.divergence ? s.diverged(status(c.divergence.status), m.when(c.divergence.since)) : null,
     awaitingAck,
-    tone: !c.syncEnabled ? (awaitingAck ? 'warn' : 'off') : c.divergence ? 'stop' : c.sent && c.confirmed && c.sent.quantity === c.confirmed.quantity ? 'ok' : c.sent ? 'progress' : 'off',
+    tone: !c.syncEnabled ? (awaitingAck ? 'warn' : 'off') : c.divergence ? 'stop' : c.sent?.status === 'SHADOW_HELD' ? 'off'
+      : c.sent && c.confirmed && c.sent.quantity === c.confirmed.quantity ? 'ok' : c.sent ? 'progress' : 'off',
   };
 }
 

@@ -29,7 +29,7 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
       {(v) => (
         <>
           <section className="card">
-            <h2>{m.ui.shadow.title}{v.demo ? <Badge tone="warn">DEMO</Badge> : null}</h2>
+            <h2>{m.ui.shadow.title}{v.demo ? <Badge tone="warn">{m.ui.app.demoBadge}</Badge> : null}</h2>
             <p>{v.intro}</p>
             <p>{v.periods.map((p) => (
               <button key={p.days} type="button" disabled={p.active}

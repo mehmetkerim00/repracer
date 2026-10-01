@@ -242,7 +242,7 @@ export async function kauflandLiveWorld(input: {
     // OQ-216: ожидание бюджета канала при чтении заказов двигает ВИРТУАЛЬНЫЕ часы — по ним же считает бюджет адаптера
     stockPipeline = createStockPipeline({ store: stock, now: () => clock.iso() as never, sleep: clock.sleep, dispatchScope: (t, ws) => dispatcher.dispatchScope(seeded.ids.fromDb(t), seeded.ids.fromDb(ws)) });
     const actor = { membershipId: seeded.ownerMembershipId, userId: seeded.userId, mfa: true };
-    const source = await stock.createStockSource(seeded.tenantId, { mode: 'INTERNAL_POOL', name: 'Lager' }, actor);
+    const source = await stock.createStockSource(seeded.tenantId, { mode: 'INTERNAL_POOL', name: 'Main warehouse' }, actor);
     if (source.status !== 'CREATED') throw new Error(`stock source of the world: ${source.status}`);
     const imported = await stock.importStock(seeded.tenantId, source.stockSourceId, input.products.map((p) => ({ sku: String(p.idProduct).slice(-6), quantity: input.stock!.onHand })), actor);
     if (imported.status !== 'APPLIED') throw new Error(`stock import of the world: ${imported.status}`);

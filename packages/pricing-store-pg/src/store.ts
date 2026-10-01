@@ -95,7 +95,12 @@ const SCOPE_COLUMNS = `
   s.write_scope_id, s.product_id, s.channel_account_id, s.channel, m.marketplace, m.region, m.external_unit_id, m.external_sku, m.external_listing_id, m.external_offer_id, m.channel_product_ref, m.condition,
   s.scope_key, p.gtin, s.currency, s.price_basis, s.tax_regime, s.pricing_mode, s.status, s.pricing_strategy_id, s.pricing_strategy_version, s.created_at,
   CASE WHEN ud.undercut_minor IS NULL THEN ps.params ELSE ps.params || jsonb_build_object('undercutMinor', ud.undercut_minor) END AS strategy_params,
-  ss.latest_version_accepted, ss.last_sent_amount_minor, ss.last_shadow_amount_minor`;
+  ss.latest_version_accepted, ss.last_sent_amount_minor,
+  -- Шаг 64 (живой прогон продавца из США): предложение тени — только у аккаунта В ТЕНИ. После перевода в бой оно в строке остаётся, и
+  -- движок считал цену «уже предложенной тенью» — фиксированная цена eBay в бою не уходила никогда
+  CASE WHEN (SELECT ca.write_mode FROM tenant_data.channel_account ca
+              WHERE ca.tenant_id = s.tenant_id AND ca.channel_account_id = s.channel_account_id) = 'SHADOW'
+       THEN ss.last_shadow_amount_minor END AS last_shadow_amount_minor`;
 
 const SCOPE_FROM = `
     FROM tenant_data.offer_mapping m
@@ -2427,7 +2432,15 @@ export class PgPricingStore implements PricingStore {
                       // единица без новой версии (NO_OP, пропуск) выбиралась бы каждым заходом и первой, занимая предел
                       // Ревью шага 55, находка 8: «решения после отказа не было» — ПОСЛЕДНЕЕ решение единицы и есть то, что породило упёршуюся
                       // запись (сравнение по идентичности, а не по времени решения против времени завершения записи — это часы разных процессов)
-                      extra: '(last.price_decision_id IS NULL OR h.price_decision_id IS NULL OR last.price_decision_id = h.price_decision_id)' })}))
+                      extra: '(last.price_decision_id IS NULL OR h.price_decision_id IS NULL OR last.price_decision_id = h.price_decision_id)' })})
+                 /**
+                  * Шаг 64 (живой прогон продавца из США): последнее решение удержано ТЕНЬЮ, а аккаунт уже в бою — единица должна сразу. Иначе
+                  * после перевода в бой цена канала без данных конкурентов (eBay) уходила бы только через сутки от теневого решения
+                  */
+                 OR (EXISTS (SELECT 1 FROM tenant_data.channel_account ca
+                              WHERE ca.tenant_id = s.tenant_id AND ca.channel_account_id = s.channel_account_id AND ca.write_mode = 'LIVE')
+                     AND EXISTS (SELECT 1 FROM tenant_data.channel_write_history sh
+                                  WHERE sh.tenant_id = s.tenant_id AND sh.price_decision_id = last.price_decision_id AND sh.final_status = 'SHADOW_HELD')))
           ORDER BY last.decided_at ASC NULLS FIRST, s.write_scope_id
           LIMIT $4`, [tenantId, channelAccountId, now, Math.max(0, limit)]);
       return rows.map((r) => r.write_scope_id as string);

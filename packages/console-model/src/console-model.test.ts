@@ -216,3 +216,36 @@ test('Р-199: возврат внутреннего пула ждёт решен
   const after = stockReturnsView({ id: 'w', demo: false, viewer: { role: 'OWNER' } } as never, await store.listReturns('t', 50), en);
   assert.deepEqual([after.pendingCount, after.items.find((x) => x.sku === 'syn-own')!.statusText, after.items.find((x) => x.sku === 'syn-own')!.note], [0, en.ui.stock.returns.status.ACCEPTED, 'ok']);
 });
+
+/**
+ * Шаг 64 (проход консоли глазами клиента из США): английский интерфейс не несёт ссылок на внутренние решения и открытые вопросы —
+ * «(Р-35)», «(OQ-77, Р-32)» продавцу ничего не говорят, а кириллическая «Р» выдаёт внутреннюю кухню. Правило читает ИСХОДНИК
+ * словаря без комментариев: так видны и тексты-функции, которые перебором значений не достать [Р-146].
+ */
+test('шаг 64: английский словарь без ссылок на решения (Р-NN), открытые вопросы (OQ-NN), миграции, шаги и риски', async () => {
+  const { readFileSync } = await import('node:fs');
+  const source = readFileSync(new URL('./i18n/en.ts', import.meta.url), 'utf8');
+  const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  // Ревью шага 64: и номера миграций «(0078)», и «since step 28», и «risk 17» — та же внутренняя кухня
+  const hasRef = (line: string) => /Р-\d+|OQ-\d+|\(0\d{3}\)|\bsteps? \d+\b|\brisk \d+\b/.test(line);
+  // Положительные контроли: правило видит каждый вид ссылки, и после снятия комментариев тексты на месте
+  for (const sample of ["KAUFLAND: 'the offer (id_offer, Р-35)'", '(OQ-77)', 'a second factor (0078)', 'since step 28', 'the remainder of risk 17']) {
+    assert.ok(hasRef(sample), sample);
+  }
+  assert.ok(code.includes('Loading…'), 'после снятия комментариев тексты словаря остались');
+  const hits = code.split('\n').filter(hasRef);
+  assert.deepEqual(hits.map((l) => l.trim().slice(0, 120)), [], 'ссылки на решения и вопросы в английских текстах');
+});
+
+/** Шаг 64: доллары у продавца из США — `$1,234.56` (en-US), без евро-привычек; немецкая консоль пишет те же доллары по-своему */
+test('шаг 64: сумма в USD — $1,234.56 по-английски и 1.234,56 $ по-немецки, минус и копейки без округления', async () => {
+  const { numberFormat } = await import('./i18n/shape.ts');
+  const en = numberFormat('en', '—');
+  const de = numberFormat('de', '—');
+  assert.equal(en.money(123456, 'USD'), '$1,234.56');
+  assert.equal(en.money(-99, 'USD'), '−$0.99');
+  assert.equal(en.money(100000005, 'USD'), '$1,000,000.05');
+  assert.equal(de.money(123456, 'USD'), '1.234,56 $');
+  assert.equal(en.money(123456, 'EUR'), '€1,234.56');
+  assert.equal(en.money(123456, null), '—', 'сумма без валюты не домысливается [Р-71]');
+});

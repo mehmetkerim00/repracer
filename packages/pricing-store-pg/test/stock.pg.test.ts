@@ -537,6 +537,11 @@ test('step 54: a quantity held by shadow is sent after the account goes live —
   try {
     await store.importStock(world.tenantId, sourceId, [{ sku: '3503', quantity: 2 }], owner());
     assert.deepEqual(writesFor(await store.recalculate(world.tenantId, null, now())), [0], 'held by shadow');
+    // Шаг 64 (проход консоли): удержанное тенью — не расхождение: в канал ничего не ушло, «канал показывает другое» было бы неправдой
+    const page = await store.stockPage(world.tenantId, { offset: 0, limit: 200 });
+    const cell = page.items.find((r) => r.productId === productId)!.channels.find((x) => x.writeScopeId === scope)!;
+    assert.equal(cell.sent?.status, 'SHADOW_HELD', JSON.stringify(cell));
+    assert.equal(cell.divergence, null, `a write held by shadow is not a divergence: ${JSON.stringify(cell)}`);
     assert.deepEqual(writesFor(await store.recalculate(world.tenantId, null, now())), [], 'while in shadow the held 0 is not held again');
     assert.deepEqual(await store.budgetRolledOverProducts(world.tenantId, account), [], 'nothing to resend while in shadow');
   } finally {
@@ -811,11 +816,22 @@ test('step 63 (Р-202): revocation, enabling quantity sync and dispatch are orde
   const sourceId = (await store.stockSources(world.tenantId)).find((x) => x.mode === 'INTERNAL_POOL')!.stockSourceId;
   const scopeOf = async (sku: string) => (await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
     `SELECT s.write_scope_id FROM tenant_data.write_scope s JOIN tenant_data.product p USING (tenant_id, product_id) WHERE s.field = 'QUANTITY' AND p.sku = $1`, [sku])).rows))[0]!.write_scope_id as string;
+  /**
+   * Шаг 64 (разбор полного прогона шага 63): каждый открытый сеанс учитывается и в конце откатывается и отпускается. Под мутацией
+   * утверждение падало раньше `COMMIT`/`release`, сеанс с блокировкой аккаунта оставался открытым, и файл не завершался до снятия
+   * раннером мутаций по сроку — 900 с на строку, четыре строки каталога добавили час полному прогону CI, и задание не уложилось в предел
+   */
+  const held = new Set<{ query(sql: string): Promise<unknown>; release(destroy?: boolean): void }>();
   const open = async (pool: typeof admin, lockTimeoutMs?: number) => {
     const c = await pool.connect();
+    held.add(c);
     await c.query(`BEGIN; SELECT set_config('app.tenant_id', '${world.tenantId}', true), set_config('app.user_id', '${world.userId}', true)`);
     if (lockTimeoutMs) await c.query(`SET LOCAL lock_timeout = '${lockTimeoutMs}ms'`);
     return c;
+  };
+  const end = async (c: Awaited<ReturnType<typeof open>>, how: 'COMMIT' | 'ROLLBACK') => {
+    held.delete(c);
+    try { await c.query(how); } finally { c.release(); }
   };
   const revokeIn = (c: Awaited<ReturnType<typeof open>>) => c.query(
     `INSERT INTO tenant_data.channel_quantity_writes_confirmation (tenant_id, channel_account_id, typed_confirmation, confirmed_by_membership_id, action) VALUES ($1, $2, $3, $4, 'REVOKE')`,
@@ -828,7 +844,7 @@ test('step 63 (Р-202): revocation, enabling quantity sync and dispatch are orde
     assert.deepEqual(await store.confirmQuantityWrites(world.tenantId, account, typed, owner()), { status: 'CONFIRMED' });
     assert.equal((await store.enableStockSync(world.tenantId, account, { bufferUnits: 2, maxQuantity: null, minQuantityToList: 0, acknowledgeSideEffects: false }, owner())).status, 'ENABLED');
   };
-  {
+  try {
     // Пулы теста закрывает база теста (`db.drop`) — здесь не закрываются
     // 1. Включение после начала отзыва: единица выключена заранее, отзыв держит исключительную блокировку
     await inTenant(admin, world.tenantId, (tx) => tx.query(`UPDATE tenant_data.write_scope SET quantity_sync_enabled = false WHERE write_scope_id = $1`, [second]), world.userId);
@@ -836,8 +852,8 @@ test('step 63 (Р-202): revocation, enabling quantity sync and dispatch are orde
     await revokeIn(r1);
     const e1 = await open(adminPool, 300);
     await assert.rejects(enableIn(e1, second), LOCK_TIMEOUT, 'step 63: enabling quantity sync waits for a revocation in progress');
-    await e1.query('ROLLBACK'); e1.release();
-    await r1.query('COMMIT'); r1.release();
+    await end(e1, 'ROLLBACK');
+    await end(r1, 'COMMIT');
     await assert.rejects(inTenant(admin, world.tenantId, (tx) => enableIn(tx as never, second), world.userId), /are not confirmed by the owner/,
       'after the revocation the enabling sees it and is refused');
     await reconfirm();
@@ -848,8 +864,8 @@ test('step 63 (Р-202): revocation, enabling quantity sync and dispatch are orde
     await enableIn(e2, second);
     const r2 = await open(adminPool, 300);
     await assert.rejects(revokeIn(r2), LOCK_TIMEOUT, 'step 63: a revocation waits for an enabling in progress');
-    await r2.query('ROLLBACK'); r2.release();
-    await e2.query('COMMIT'); e2.release();
+    await end(r2, 'ROLLBACK');
+    await end(e2, 'COMMIT');
     assert.equal((await store.revokeQuantityWrites(world.tenantId, account, typed, owner())).status, 'REVOKED');
     const [left] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(`SELECT quantity_sync_enabled FROM tenant_data.write_scope WHERE write_scope_id = $1`, [second])).rows);
     assert.equal(left.quantity_sync_enabled, false, 'the enabling that came first is switched off by the revocation itself');
@@ -868,8 +884,8 @@ test('step 63 (Р-202): revocation, enabling quantity sync and dispatch are orde
     await d3.query(`UPDATE tenant_data.channel_write SET status = 'FAILED', last_error_code = 'KFL_5XX', next_attempt_at = now() WHERE channel_write_id = $1`, [w.channelWriteId]);
     await assert.rejects(d3.query(`UPDATE tenant_data.channel_write SET status = 'DISPATCHED', attempt_count = attempt_count + 1, dispatched_at = now(), next_attempt_at = NULL WHERE channel_write_id = $1`, [w.channelWriteId]),
       LOCK_TIMEOUT, 'step 63: a retry of a quantity write waits for a revocation in progress');
-    await d3.query('ROLLBACK'); d3.release();
-    await r3.query('COMMIT'); r3.release();
+    await end(d3, 'ROLLBACK');
+    await end(r3, 'COMMIT');
     await reconfirm();
 
     /**
@@ -893,10 +909,16 @@ test('step 63 (Р-202): revocation, enabling quantity sync and dispatch are orde
       [pending.channel_write_id]).then(() => 'dispatched', (e: { code?: string; message?: string }) => { console.log('CLAIM REFUSAL', e.code, e.message); return e.code ?? 'error'; });
     // Отзыв не ждал занятую строку: его транзакция уже готова к фиксации, а захват упёрся в блокировку аккаунта до неё
     assert.equal(await revoking, 'revoked', 'step 63: the revocation skips the write held by a claim instead of waiting for it');
-    await r4.query('COMMIT'); r4.release();
+    await end(r4, 'COMMIT');
     const claimed = await claiming;
-    await d4.query('ROLLBACK').catch(() => undefined); d4.release();
+    await end(d4, 'ROLLBACK').catch(() => undefined);
     assert.equal(claimed, '23514', 'step 63: a claim racing a revocation ends with the refusal of the dispatch guard, not a deadlock');
     await reconfirm();
+  } finally {
+    // Утверждение, упавшее посреди гонки, не оставляет сеанс с блокировкой аккаунта: иначе файл не завершается вовсе
+    for (const c of held) {
+      await c.query('ROLLBACK').catch(() => undefined);
+      c.release(true);
+    }
   }
 });

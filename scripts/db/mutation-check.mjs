@@ -5,7 +5,7 @@
 // проверки соседней мутации той же строки — не поимка: такая мутация учитывается как непойманная (в отчёте — «только соседней»).
 //
 // Использование: PGHOST=… PGPORT=… PGUSER=<суперпользователь> REPRACER_PG_URL=… REPRACER_PG_ADMIN_URL=… \
-//   node scripts/db/mutation-check.mjs [--catalog tests/db/mutations.mjs] [--only '12;28, 32, 39, 40'] [--jobs 2] [--report path.md] [--measure]
+//   node scripts/db/mutation-check.mjs [--catalog tests/db/mutations.mjs] [--only '12;28, 32, 39, 40'] [--jobs 2] [--report path.md] [--measure] [--check-timeout 900]
 //   --measure — только отчёт (шаг 17, A); без него непойманная мутация делает прогон красным (CI).
 import { spawn } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';
@@ -21,6 +21,8 @@ const measure = process.argv.includes('--measure');
 const catalogPath = resolve(root, arg('catalog', 'tests/db/mutations.mjs'));
 // Имена строк содержат запятые («28, 32, 39, 40»): разделитель — точка с запятой
 const only = arg('only')?.split(';').map((s) => s.trim());
+// Шаг 64: срок одного файла теста (по умолчанию 900 с); короче — для положительного контроля правила «снятый по сроку — красный»
+const checkTimeoutMs = Number(arg('check-timeout') ?? 900) * 1000;
 const jobs = Number(arg('jobs', '2'));
 const reportPath = arg('report');
 const template = process.env.REPRACER_PG_TEMPLATE ?? 'repracer_template';
@@ -34,8 +36,9 @@ function run(cmd, args, { env = {}, cwd = root, timeoutMs = 900_000 } = {}) {
     let out = '';
     child.stdout.on('data', (d) => { out += d; });
     child.stderr.on('data', (d) => { out += d; });
-    const timer = setTimeout(() => { out += '\nTIMEOUT'; child.kill('SIGKILL'); }, timeoutMs);
-    child.on('close', (code) => { clearTimeout(timer); done({ code, out }); });
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; out += '\nTIMEOUT'; child.kill('SIGKILL'); }, timeoutMs);
+    child.on('close', (code) => { clearTimeout(timer); done({ code, out, timedOut }); });
   });
 }
 
@@ -113,7 +116,7 @@ async function nodeTest(file, db, tpl) {
   url.pathname = `/${db}`;
   const cwd = packageDir(file);
   const r = await run('node', ['--experimental-strip-types', '--disable-warning=ExperimentalWarning', '--test', '--test-reporter=tap', relative(cwd, resolve(root, file))],
-    { cwd, env: { REPRACER_PG_URL: url.toString(), REPRACER_PG_ADMIN_URL: adminUrl, REPRACER_PG_TEMPLATE: tpl } });
+    { cwd, env: { REPRACER_PG_URL: url.toString(), REPRACER_PG_ADMIN_URL: adminUrl, REPRACER_PG_TEMPLATE: tpl }, timeoutMs: checkTimeoutMs });
   const failed = [...r.out.matchAll(/^\s*not ok \d+ - (.*)$/gm)].map((m) => {
     // Шаг 19 [Р-99]: причина провала — ФАКТИЧЕСКИЙ результат: поле error без текста ожидаемого шаблона и поле actual.
     // Поле expected и шаблон в сообщении assert.match («did not match the regular expression /…/») не учитываются: они совпадают
@@ -124,7 +127,7 @@ async function nodeTest(file, db, tpl) {
     return { name: m[1], why: tapFailure(block), error: tapField(block, 'error', true), actual: tapField(block, 'actual') };
   });
   const passed = [...r.out.matchAll(/^\s*ok \d+ - (.*)$/gm)].map((m) => m[1]);
-  return { code: r.code, failed, passed, out: r.out };
+  return { code: r.code, failed, passed, out: r.out, timedOut: r.timedOut };
 }
 
 /** Поле YAML блока TAP: однострочное значение или блок «|-» до следующего ключа того же отступа; lines — сохранить переводы строк */
@@ -212,7 +215,7 @@ async function evaluate(expect, id, mutation) {
         // для assert.rejects — «Missing expected rejection: <метка>» (отказа не было вовсе); для остальных — поле actual (а если его
         // нет — остаток текста провала после метки) совпадает с объявленным шаблоном «без защиты»
         const own = hits.filter((t) => nodeOwnFailure(e, t));
-        results.push({ e, failed: hits.length > 0, ownReason: own.length > 0, why: hits.map((t) => t.why).join(' ; '),
+        results.push({ e, failed: hits.length > 0, ownReason: own.length > 0, why: hits.map((t) => t.why).join(' ; '), timedOut: r.timedOut,
           detail: hits.length > 0 ? hits.map((t) => `${t.name} [${t.why}]`).join('; ') : known ? '' : `test not found (exit ${r.code})` });
       }
     }
@@ -229,8 +232,8 @@ const describeExpect = (e) => e.smoke !== undefined ? `smoke «${e.smoke}»` : e
 const describeMutation = (m) => typeof m === 'string' ? m.replace(/\s+/g, ' ').slice(0, 110) : `${m.fn}: «${m.from.slice(0, 50)}…» → «${m.to.slice(0, 30)}…»`;
 const sameCheck = (a, b) => describeExpect(a) === describeExpect(b);
 
-const { R93_ROWS, STEP17_ROWS = [], STEP18_ROWS = [], STEP19_ROWS = [], STEP20_ROWS = [], STEP21_ROWS = [], STEP22_ROWS = [], STEP23_ROWS = [], STEP24_ROWS = [], STEP25_ROWS = [], STEP25_B_ROWS = [], STEP25_D_ROWS = [], STEP26_ROWS = [], STEP27_ROWS = [], STEP28_ROWS = [], STEP30_ROWS = [], STEP32_ROWS = [], STEP34_ROWS = [], STEP35_ROWS = [], STEP36_ROWS = [], STEP37_ROWS = [], STEP40_ROWS = [], STEP41_ROWS = [], STEP42_ROWS = [], STEP43_ROWS = [], STEP44_ROWS = [], STEP45_ROWS = [], STEP47_ROWS = [], STEP49_ROWS = [], STEP52_ROWS = [], STEP55_ROWS = [], STEP59_ROWS = [], STEP60_ROWS = [], STEP61_ROWS = [], STEP62_ROWS = [], STEP63_ROWS = [], R93_NOT_MUTATED = [] } = await import(pathToFileURL(catalogPath).href);
-const rows = [...R93_ROWS, ...(process.argv.includes('--r93-only') ? [] : [...STEP17_ROWS, ...STEP18_ROWS, ...STEP19_ROWS, ...STEP20_ROWS, ...STEP21_ROWS, ...STEP22_ROWS, ...STEP23_ROWS, ...STEP24_ROWS, ...STEP25_ROWS, ...STEP25_B_ROWS, ...STEP25_D_ROWS, ...STEP26_ROWS, ...STEP27_ROWS, ...STEP28_ROWS, ...STEP30_ROWS, ...STEP32_ROWS, ...STEP34_ROWS, ...STEP35_ROWS, ...STEP36_ROWS, ...STEP37_ROWS, ...STEP40_ROWS, ...STEP41_ROWS, ...STEP42_ROWS, ...STEP43_ROWS, ...STEP44_ROWS, ...STEP45_ROWS, ...STEP47_ROWS, ...STEP49_ROWS, ...STEP52_ROWS, ...STEP55_ROWS, ...STEP59_ROWS, ...STEP60_ROWS, ...STEP61_ROWS, ...STEP62_ROWS, ...STEP63_ROWS])]
+const { R93_ROWS, STEP17_ROWS = [], STEP18_ROWS = [], STEP19_ROWS = [], STEP20_ROWS = [], STEP21_ROWS = [], STEP22_ROWS = [], STEP23_ROWS = [], STEP24_ROWS = [], STEP25_ROWS = [], STEP25_B_ROWS = [], STEP25_D_ROWS = [], STEP26_ROWS = [], STEP27_ROWS = [], STEP28_ROWS = [], STEP30_ROWS = [], STEP32_ROWS = [], STEP34_ROWS = [], STEP35_ROWS = [], STEP36_ROWS = [], STEP37_ROWS = [], STEP40_ROWS = [], STEP41_ROWS = [], STEP42_ROWS = [], STEP43_ROWS = [], STEP44_ROWS = [], STEP45_ROWS = [], STEP47_ROWS = [], STEP49_ROWS = [], STEP52_ROWS = [], STEP55_ROWS = [], STEP59_ROWS = [], STEP60_ROWS = [], STEP61_ROWS = [], STEP62_ROWS = [], STEP63_ROWS = [], STEP64_ROWS = [], R93_NOT_MUTATED = [] } = await import(pathToFileURL(catalogPath).href);
+const rows = [...R93_ROWS, ...(process.argv.includes('--r93-only') ? [] : [...STEP17_ROWS, ...STEP18_ROWS, ...STEP19_ROWS, ...STEP20_ROWS, ...STEP21_ROWS, ...STEP22_ROWS, ...STEP23_ROWS, ...STEP24_ROWS, ...STEP25_ROWS, ...STEP25_B_ROWS, ...STEP25_D_ROWS, ...STEP26_ROWS, ...STEP27_ROWS, ...STEP28_ROWS, ...STEP30_ROWS, ...STEP32_ROWS, ...STEP34_ROWS, ...STEP35_ROWS, ...STEP36_ROWS, ...STEP37_ROWS, ...STEP40_ROWS, ...STEP41_ROWS, ...STEP42_ROWS, ...STEP43_ROWS, ...STEP44_ROWS, ...STEP45_ROWS, ...STEP47_ROWS, ...STEP49_ROWS, ...STEP52_ROWS, ...STEP55_ROWS, ...STEP59_ROWS, ...STEP60_ROWS, ...STEP61_ROWS, ...STEP62_ROWS, ...STEP63_ROWS, ...STEP64_ROWS])]
   .filter((r) => !only || only.includes(r.row))
   // Задача E шага 30 [OQ-203]: быстрый прогон CI гоняет критичные строки каталога — защиты, которыми держится цена
   .filter((r) => !process.argv.includes('--critical') || r.critical === true);
@@ -258,7 +261,7 @@ const allExpect = [];
 for (const r of rows) for (const e of r.expect) if (!allExpect.some((x) => sameCheck(x, e))) allExpect.push(e);
 console.log(`control run: ${allExpect.length} checks`);
 const control = await evaluate(allExpect, 'control', null);
-const redControl = control.filter((c) => c.failed || /not found|not reached/.test(c.detail));
+const redControl = control.filter((c) => c.failed || c.timedOut || /not found|not reached/.test(c.detail));
 if (redControl.length > 0) {
   for (const c of redControl) console.error(`CONTROL RED: ${describeExpect(c.e)} — ${c.detail}`);
   console.error('the checks are not green without mutations: the mutation check means nothing');
@@ -304,6 +307,17 @@ const lines = [
 ];
 console.log(`\n${lines.join('\n')}`);
 if (reportPath) writeFileSync(resolve(root, reportPath), `${lines.join('\n')}\n`);
+/**
+ * Шаг 64 (разбор полного прогона шага 63): файл теста, снятый по сроку, — не ответ. Под мутацией тест гонки двух сеансов падал раньше, чем
+ * отпускал свой сеанс, и файл висел до снятия: вердикт был верным (TAP до снятия разобран), но четыре строки по 900 с съели час полного
+ * прогона CI, и задание не уложилось в предел. Молча это больше не проходит: такой прогон красный
+ */
+const hung = outcomes.flatMap((o) => o.results.filter((x) => x.timedOut).map((x) => `${o.row.row}: ${describeMutation(o.mutation)} — ${describeExpect(x.e)}`));
+if (hung.length > 0) {
+  for (const h of [...new Set(hung)]) console.error(`CHECK KILLED BY THE TIME LIMIT: ${h}`);
+  console.error('MUTATION CHECK RED: a test file did not finish under a mutation — it must fail, not hang');
+  process.exit(1);
+}
 if (!measure && outcomes.some((o) => !o.caught)) {
   console.error('MUTATION CHECK RED: a protection can be removed while its checks stay green (Р-94, Р-95)');
   process.exit(1);

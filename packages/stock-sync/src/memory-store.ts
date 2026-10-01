@@ -9,6 +9,8 @@ import type {
 
 /** Запись «в полёте»: ещё не завершена. Тот же список, что у `PgStockStore`: PENDING, DISPATCHED, ACCEPTED */
 const IN_FLIGHT = ['PENDING', 'DISPATCHED', 'ACCEPTED'];
+/** Завершения, которые расхождением не являются: применено, вытеснено новой версией, удержано тенью [Р-169] */
+const NOT_DIVERGED = ['APPLIED', 'SUPERSEDED', 'SHADOW_HELD'];
 
 /** Предложение продавца, остаток которого ведём мы: то, что в базе — активная строка offer_mapping с MERCHANT */
 export interface MemoryStockOffer {
@@ -303,9 +305,10 @@ export class InMemoryStockStore implements StockStore {
     const confirmed = own.find((w) => w.status === 'APPLIED') ?? null;
     const allocation = this.allocations.get(scope.offer.channelAccountId) ?? { bufferUnits: 0, maxQuantity: null, minQuantityToList: 0 };
     // Расхождение — ОДНО правило на все три места, где оно показывается (строка, список, счётчик); в PostgreSQL то же
-    // правило записано один раз в `PgStockStore.DIVERGED_SQL`: ПОСЛЕДНЯЯ запись завершена не применением и повтора нет
+    // правило записано один раз в `PgStockStore.DIVERGED_SQL`: ПОСЛЕДНЯЯ запись завершена не применением и повтора нет. Шаг 64:
+    // удержанное тенью в канал не уходило — это не расхождение
     const inFlight = own.some((w) => IN_FLIGHT.includes(w.status));
-    const diverged = !inFlight && last !== null && !IN_FLIGHT.includes(last.status) && last.status !== 'APPLIED' && last.status !== 'SUPERSEDED' ? last : null;
+    const diverged = !inFlight && last !== null && !IN_FLIGHT.includes(last.status) && !NOT_DIVERGED.includes(last.status) ? last : null;
     return {
       writeScopeId: scope.writeScopeId, channelAccountId: scope.offer.channelAccountId, channel: scope.offer.channel, marketplaces: scope.offer.marketplaces,
       syncEnabled: scope.enabled, published: publishedQuantity(this.availableOfProduct(scope.offer.productId).available, allocation),

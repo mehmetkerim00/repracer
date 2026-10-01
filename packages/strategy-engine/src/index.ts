@@ -258,8 +258,9 @@ export function runStrategy(input: EngineInput): EngineResult {
   }
   /**
    * Р-171: то же самое предложение уже удержано тенью — повторять его незачем. Проверка стоит ПОСЛЕ сравнения с текущей
-   * ценой: в бою поле пустое, и ветка недостижима; в тени именно она превращает поток дублей в один held-write на
-   * изменение.
+   * ценой; в тени именно она превращает поток дублей в один held-write на изменение. В бою поле пустое: хранилище отдаёт
+   * предложение тени только у аккаунта в тени (шаг 64 — до этого оно оставалось после перевода в бой, и цена, уже
+   * предложенная тенью, в бою не уходила никогда).
    */
   if (heldInShadow !== null && Math.abs(proposed - heldInShadow) <= strategy.deadbandMinor) {
     const already = r('SHADOW_ALREADY_PROPOSED', { proposedMinor: proposed, heldMinor: heldInShadow, currency });

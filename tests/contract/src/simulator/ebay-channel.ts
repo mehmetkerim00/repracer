@@ -387,9 +387,12 @@ export class SimulatedEbayChannel implements ChannelBehaviour {
       return refuse(this.params.listingEditLimit!.status, { domain: 'SYNTHETIC', message: 'listing revision limit reached (model hypothesis E-02, the channel error code is unknown)' });
     }
     const minCurrency = CURRENCY[l.marketplace]!;
-    if (p.priceMinor !== null && p.priceMinor < 100) {
-      return refuse(400, restError(25016, `The The price in the listing is either invalid or below the minimum price of ${minCurrency} 1.00. value is invalid.`,
-        [{ name: 'MinValue', value: `${minCurrency} 1.00` }, { name: 'ItemID', value: l.listingId }, { name: 'SKU', value: l.sku }]));
+    // E-27: минимум EUR 1.00 наблюдён в песочнице EBAY_DE; для EBAY_US он — параметр-гипотеза модели
+    if (p.priceMinor !== null && p.priceMinor < 100 && (l.marketplace !== 'EBAY_US' || this.params.usdMinimumPrice === 'REJECTED_25016_BELOW_1_00')) {
+      const observed = restError(25016, `The The price in the listing is either invalid or below the minimum price of ${minCurrency} 1.00. value is invalid.`,
+        [{ name: 'MinValue', value: `${minCurrency} 1.00` }, { name: 'ItemID', value: l.listingId }, { name: 'SKU', value: l.sku }]);
+      // Ревью шага 64: ответ EBAY_US — гипотеза по аналогии с EBAY_DE, а не наблюдение: помечен, как остальные гипотезы модели
+      return refuse(400, l.marketplace === 'EBAY_US' ? { ...observed, domain: 'SYNTHETIC', message: `${observed.message} (model hypothesis E-27)` } : observed);
     }
     if (p.priceMinor !== null && p.currency !== null && p.currency !== minCurrency) {
       if (this.params.foreignCurrency === 'REJECTED_25709') return refuse(400, restError(25709, 'Invalid value for Offers.price.currency.'));

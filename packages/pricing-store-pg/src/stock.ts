@@ -342,10 +342,23 @@ export class PgStockStore implements StockStore {
         `WITH t AS (${PgStockStore.TARGETS_SQL} AND s.quantity_sync_enabled AND ($2::uuid[] IS NULL OR s.product_id = ANY($2))),
          target AS (SELECT t.write_scope_id, t.last_quantity, coalesce(t.latest_version_created, 0) + 1 AS version, ${PgStockStore.PUBLISHED_SQL} AS q FROM t WHERE t.allocation_active),
          created AS (
-           INSERT INTO tenant_data.channel_write (tenant_id, write_scope_id, field, quantity, version, origin, idempotency_key)
+           INSERT INTO tenant_data.channel_write (tenant_id, write_scope_id, field, quantity, version, origin, idempotency_key, budget_scope_key, budget_day)
            -- Время строки ставит триггер channel_write_before_insert часами базы
-          SELECT $1, g.write_scope_id, 'QUANTITY', g.q, g.version, 'STOCK_RECALC', 'stock:' || g.write_scope_id || ':' || g.version
-             FROM target g WHERE g.last_quantity IS NULL OR g.last_quantity <> g.q
+          /**
+           * Шаг 64 (живой прогон продавца из США): у eBay бюджет правок — на листинг и для количества тоже [Р-19, Р-163]. Пересчёт не ставил
+           * ключ бюджета, и триггер отклонял КАЖДУЮ запись количества eBay («budget_scope_key must match write_scope») — синхронизация
+           * остатков на eBay не работала ни на одной витрине, и ни один прогон её не проходил. Ключ — ключ единицы, день — местный день
+           * витрины, как у записи цены (store.ts); неподтверждённый пояс держат триггеры (Р-65, Р-188)
+           */
+          SELECT $1, g.write_scope_id, 'QUANTITY', g.q, g.version, 'STOCK_RECALC', 'stock:' || g.write_scope_id || ':' || g.version,
+                 qs.budget_scope_key,
+                 CASE WHEN qs.budget_scope_key IS NOT NULL THEN (
+                   SELECT (now() AT TIME ZONE m.time_zone)::date
+                     FROM tenant_data.offer_mapping om JOIN platform.marketplace m ON m.channel = qs.channel AND m.marketplace = om.marketplace
+                    WHERE om.tenant_id = qs.tenant_id AND om.quantity_write_scope_id = qs.write_scope_id
+                    ORDER BY om.created_at LIMIT 1) END
+             FROM target g JOIN tenant_data.write_scope qs ON qs.tenant_id = $1 AND qs.write_scope_id = g.write_scope_id
+            WHERE g.last_quantity IS NULL OR g.last_quantity <> g.q
            RETURNING write_scope_id, quantity, version)
          SELECT (SELECT json_agg(json_build_object('writeScopeId', c.write_scope_id, 'quantity', c.quantity, 'version', c.version)) FROM created c) AS writes,
                 (SELECT count(*) FROM target g WHERE g.last_quantity = g.q)::int AS unchanged`,
@@ -487,7 +500,8 @@ export class PgStockStore implements StockStore {
          * Шаг 63 (ревью шага 62, находка 5): блокировку и счётчики берёт только владелец — иначе отказ «не владелец» держал бы захваты
          * диспетчера этого аккаунта на время отказа. Решает по-прежнему страж базы: роль здесь лишь говорит, стоит ли брать блокировку
          */
-        const { rows: [member] } = await tx.query(`SELECT role FROM tenant_data.membership WHERE tenant_id = $1 AND membership_id = $2`, [tenantId, actor.membershipId]);
+        // Шаг 64 (ревью шага 63, находка 5): только действующее членство — как в формуле стража базы
+        const { rows: [member] } = await tx.query(`SELECT role FROM tenant_data.membership WHERE tenant_id = $1 AND membership_id = $2 AND status = 'ACTIVE'`, [tenantId, actor.membershipId]);
         const owner = member?.role === 'OWNER';
         if (owner) await tx.query(`SELECT pg_advisory_xact_lock(202, hashtext($1::text))`, [channelAccountId]);
         const { rows: [c] } = owner ? await tx.query(
@@ -711,7 +725,12 @@ export class PgStockStore implements StockStore {
    * (записи в полёте у единицы не осталось — пока она есть, продавцу показывают ход, а не расхождение). Считается в SQL,
    * как и публикуемое количество; в памяти то же правило — `InMemoryStockStore.channelRow`.
    */
-  private static readonly DIVERGED_SQL = `lw.finished AND lw.status NOT IN ('APPLIED', 'SUPERSEDED')
+  /**
+   * Шаг 64 (проход консоли глазами клиента): удержанная тенью запись — не расхождение. В канал она не уходила, и «канал показывает
+   * другое» было бы неправдой: экран демо в тени красил каждую строку с заказом в «DIVERGED», а сводка при этом говорила «расхождений 0»
+   * (кандидаты сводки — только отправленные версии). Определение одно для строки, списка и сводки
+   */
+  private static readonly DIVERGED_SQL = `lw.finished AND lw.status NOT IN ('APPLIED', 'SUPERSEDED', 'SHADOW_HELD')
     AND NOT EXISTS (SELECT 1 FROM tenant_data.channel_write w WHERE w.tenant_id = $1 AND w.write_scope_id = t.write_scope_id AND w.field = 'QUANTITY')`;
 
   /**

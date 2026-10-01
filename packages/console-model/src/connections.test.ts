@@ -95,7 +95,7 @@ test('Р-190: every eBay account and the eBay channel card say in words what liv
   const { shadowView } = await import('./shadow.ts');
   const ebayApps: ConnectableChannel[] = [{ channel: 'AMAZON', platformMissing: [], marketplaces: ['A1PA6795UKMFR9'] }, { channel: 'EBAY', platformMissing: [], marketplaces: ['EBAY_DE'] }];
   const expected = {
-    en: 'In live mode we do not yet see on eBay the price buyers see or edits made by other programs: our writes are confirmed by the offer record, and the price-basis check is limited (question E-21).',
+    en: 'In live mode we do not yet see on eBay the price buyers see or edits made by other programs: our writes are confirmed by the offer record, and the price-basis check is limited.',
     de: 'Den Preis, den Käufer sehen, und Änderungen anderer Programme sehen wir auf eBay im Live-Betrieb noch nicht: Unsere Änderungen werden über den Angebotsdatensatz bestätigt, die Prüfung der Preisbasis ist eingeschränkt (Frage E-21).',
   };
   for (const locale of ['de', 'en'] as const) {
@@ -127,7 +127,7 @@ test('Р-190: every eBay account and the eBay channel card say in words what liv
 test('Р-190: a write confirmed by our own offer record is named so on the price feed and the stock screen; a live-listing confirmation is not', async () => {
   const { feedItemOf } = await import('./price-feed.ts');
   const { channelCell } = await import('./stock.ts');
-  const expected = { en: 'confirmed by the offer record, not by the live listing (question E-21)', de: 'bestätigt über den Angebotsdatensatz, nicht über das Live-Angebot (Frage E-21)' };
+  const expected = { en: 'confirmed by the offer record, not by the live listing', de: 'bestätigt über den Angebotsdatensatz, nicht über das Live-Angebot (Frage E-21)' };
   const world = { id: 'w', title: 't', description: 'd', tenantId: 't', now: NOW, accounts: [], viewer: { membershipId: 'membership-owner', role: 'OWNER' }, state: { scopes: [], strategies: [] } } as never;
   const write = (own: boolean, status = 'APPLIED') => ({ channelWriteId: 'cw', writeScopeId: 'ws', decisionId: null, amountMinor: 1349, currency: 'EUR', basis: 'GROSS' as const, version: 1, status,
     attemptCount: 1, competitorDerived: false, createdAt: NOW, dispatchedAt: NOW, acceptedAt: NOW, nextAttemptAt: null, lastErrorCode: null, endReason: null, endParams: {},
@@ -202,5 +202,43 @@ test('шаг 60 [Р-202]: вопрос о других инструментах,
     assert.equal(on.externalEdits24h, 3);
     assert.ok(on.externalEditsText.endsWith(': 3'), on.externalEditsText);
     assert.ok(fresh.externalEditsText.endsWith(': 0'), fresh.externalEditsText);
+  }
+});
+
+/**
+ * Шаг 64 (проход консоли глазами клиента): количество, удержанное тенью, на экране остатков не «отправлено» — в канал ничего не ушло.
+ * Демо в тени показывало «sent 21 (SHADOW_HELD, …)» рядом с красным «DIVERGED»
+ */
+test('step 64: a stock quantity held by shadow mode is not shown as sent, and not in the alarm tone', async () => {
+  const { channelCell } = await import('./stock.ts');
+  const held = { writeScopeId: 'ws-q', channelAccountId: 'acc', channel: 'KAUFLAND', marketplaces: ['de'], syncEnabled: true, published: 21,
+    sent: { quantity: 21, status: 'SHADOW_HELD', at: NOW, version: 2 }, confirmed: null, divergence: null, sideEffects: { requiresAck: false, acknowledged: false, text: null } };
+  const expected = { en: 'held by shadow mode: 21 would be sent', de: 'vom Schattenmodus zurückgehalten: würde 21 senden' };
+  for (const locale of ['de', 'en'] as const) {
+    const c = channelCell(held as never, messagesFor(locale));
+    assert.ok(c.sentText.startsWith(expected[locale]), c.sentText);
+    assert.ok(!c.sentText.includes('SHADOW_HELD'), c.sentText);
+    assert.equal(c.tone, 'off');
+  }
+  // Контроль: отправленная запись по-прежнему «отправлена»
+  const sent = channelCell({ ...held, sent: { ...held.sent, status: 'APPLIED' } } as never, messagesFor('en'));
+  assert.ok(sent.sentText.startsWith('sent 21'), sent.sentText);
+});
+
+/**
+ * Шаг 64 (ревью, мелкая): ловушка остатка Amazon выбирается по витрине аккаунта — продавцу amazon.com нельзя называть amazon.fr, .it, .es,
+ * а продавцу amazon.de — Северную Америку. Правило теста консоли принимает оба текста, поэтому неверный выбор ловит только эта проверка
+ */
+test('step 64: the Amazon stock trap names North America for amazon.com and the EU storefronts for amazon.de', async () => {
+  const { stockTraps } = await import('./stock.ts');
+  const world = (marketplaces: string[]) => ({ id: 'w', title: 't', description: 'd', tenantId: 't', now: NOW, viewer: { membershipId: 'm', role: 'OWNER' },
+    accounts: [{ channelAccountId: 'acc', channel: 'AMAZON', marketplaces }], state: { scopes: [], strategies: [] } }) as never;
+  for (const locale of ['de', 'en'] as const) {
+    const m = messagesFor(locale);
+    const us = stockTraps(world(['ATVPDKIKX0DER']), m)[0]!;
+    const eu = stockTraps(world(['A1PA6795UKMFR9']), m)[0]!;
+    assert.ok(/amazon\.com/.test(us.text) && !/amazon\.fr/.test(us.text), us.text);
+    assert.ok(/amazon\.fr/.test(eu.text) && !/amazon\.com/.test(eu.text), eu.text);
+    assert.ok(us.requiresAck && eu.requiresAck, 'both need the confirmation of the side effect');
   }
 });

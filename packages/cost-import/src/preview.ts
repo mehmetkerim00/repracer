@@ -76,6 +76,17 @@ const MAX_UNIT_COST_MINOR = 1_000_000_000;
 const EXAMPLES_PER_PROBLEM = 5;
 
 /**
+ * Шаг 64 (аудит профиля США): валюта, названная в самой ячейке суммы («€5», «5 USD»), или null. Разбор числа её отбрасывает, и без этой
+ * проверки «€5» у предложения в долларах молча становилось $5 [Р-138]
+ */
+export function currencyInCell(raw: string): 'EUR' | 'USD' | null {
+  const text = raw.trim();
+  if (/^(EUR|€)|(EUR|€)$/i.test(text)) return 'EUR';
+  if (/^(USD|\$)|(USD|\$)$/i.test(text)) return 'USD';
+  return null;
+}
+
+/**
  * Число из выгрузки: «10,50», «1 234,56», «1,234.56», «10.5» — одно и то же. Разделитель дробной части — последний из «,» и «.»,
  * остальные такие знаки и пробелы считаются разделителями тысяч. Минорные единицы — два знака (EUR и USD, Р-57).
  * Ревью шага 28, находка 3: «10.505» — это либо десять тысяч пятьсот пять, либо десять с половиной. Угадывать нельзя: ошибка в
@@ -186,6 +197,11 @@ export function buildPreview(input: PreviewInput): ImportPreview {
     // Р-61 разрешает себестоимость в валюте её возникновения, но у импорта перевода нет: пересчёт по курсу — отдельное решение,
     // а молча принять число «в другой валюте» значит соврать про пол маржи
     if (currency !== offer.currency) { reject('CURRENCY_NOT_OF_OFFER', currencyRaw); return; }
+    // Валюта в самой ячейке — тоже заявление продавца: «€5» у предложения в долларах — не $5 [Р-138]
+    for (const cell of [costRaw, fixedRaw]) {
+      const named = cell === '' ? null : currencyInCell(cell);
+      if (named !== null && named !== offer.currency) { reject('CURRENCY_NOT_OF_OFFER', cell); return; }
+    }
     const parsed: PreviewRow = {
       ...base, writeScopeId: offer.writeScopeId, productId: offer.productId, label: offer.label,
       unitCostMinor: cost.minor, currency,

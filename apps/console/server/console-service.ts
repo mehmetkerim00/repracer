@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { channelApps, createHeartbeat, loadChannelAppsConfig, ProcessHealth, serveHealth, type Env } from '@repracer/service-runtime';
 import { ephemeralKeyring } from '@repracer/channel-oauth';
-import { createChannelConnectService } from './connect.ts';
+import { createChannelConnectService, readOnlyConnections } from './connect.ts';
 import { createTenantWorlds } from './tenant-worlds.ts';
 import { createAuthenticator, remoteJwks, remoteUserinfo, staticJwks, type Authenticator, type Principal } from '@repracer/identity';
 import { createLocalIssuer } from '@repracer/identity/test-issuer';
@@ -182,6 +182,7 @@ export async function startConsole(env: Env = process.env): Promise<RunningConso
       tag, memberUsers, memberEmails: STAND_EMAILS,
       joinMember: pgStandJoinMember(pools.admin as never, directory as never),
       log: (m) => console.log(JSON.stringify({ level: 'INFO', code: 'CONSOLE_DEMO', message: m })),
+      usAccounts: config.demoUs,
     });
     state.demo = started;
     worlds.length = 0;
@@ -235,6 +236,7 @@ export async function startConsole(env: Env = process.env): Promise<RunningConso
    * Демо-тенант настоящий канал не подключает: служба у мира демо отсутствует.
    */
   const apps = loadChannelAppsConfig(env);
+  const demoConnect = readOnlyConnections(new PgChannelConnectStore(pools.admin));
   const connectService = createChannelConnectService({
     store: new PgChannelConnectStore(pools.admin), keyring: apps.keyring ?? ephemeralKeyring('no-channel-apps'), providers: channelApps(apps),
     http: (url, init) => fetch(url, init),
@@ -253,9 +255,12 @@ export async function startConsole(env: Env = process.env): Promise<RunningConso
       acceptInvitation: (token, v) => directory.acceptInvitation(token, { issuer: v.issuer, subject: v.subject }, v.email, v.emailVerified),
     } : {}),
   }, {
-    connect: (worldId) => (worldId === state.demo?.world.id ? null : connectService),
+    // Шаг 64: у демо — подключения только для чтения: аккаунты и вопрос о других инструментах [Р-202] видны, подключать нечем
+    connect: (worldId) => (worldId === state.demo?.world.id ? demoConnect : connectService),
     tenantWorlds: (principal) => tenantWorlds.worldsFor(principal),
     inbound: (prefix, sha) => tenantWorlds.inbound(prefix, sha),
+    // Шаг 64 (ревью, находка 1): новый браузер без куки видит язык развёртывания — в регионе США английский
+    defaultLocale: config.locale,
   });
   // Шаг 53 (OWASP A04, A05): ограничение частоты и полная политика содержимого — адреса поставщика входа из конфигурации
   const server = createStandServer(api, config.locale, createStaticHandler(config.distDir), {

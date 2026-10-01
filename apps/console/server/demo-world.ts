@@ -45,6 +45,12 @@ export interface DemoWorldOptions {
   hours?: number;
   /** Шаг 41 [Р-169]: режим записи аккаунта демо; `SHADOW` — ни одной записи в канал */
   writeMode?: 'SHADOW' | 'LIVE';
+  /**
+   * Шаг 64: профиль США — в демо-тенанте ещё два аккаунта: eBay EBAY_US и Amazon amazon.com (регион NA), валюта USD. Оба рождаются
+   * в ТЕНИ [Р-176], каталог пишет та же функция базы, что обнаружение офферов [Р-179]; себестоимости у них нет, поэтому тень считать
+   * ещё не начала [Р-131], а вопрос о других инструментах [Р-202] не отвечен — ровно то, что видит продавец после «Connect»
+   */
+  usAccounts?: boolean;
   log?: (message: string) => void;
 }
 
@@ -71,7 +77,9 @@ export async function startDemoWorld(options: DemoWorldOptions): Promise<Running
     store: stock, now: () => demo.clock.iso() as never, sleep: demo.clock.sleep,
     dispatchScope: (t, ws) => demo.live.dispatchScope(t, ws),
   });
-  const accounts = [{ channelAccountId: seeded.channelAccountId, channel: 'KAUFLAND', marketplaces: ['de'], haltRelease: 'SAMPLE' as const }];
+  const accounts: Array<{ channelAccountId: string; channel: string; marketplaces: string[]; haltRelease: 'SAMPLE' | 'MANUAL_ONLY' }> =
+    [{ channelAccountId: seeded.channelAccountId, channel: 'KAUFLAND', marketplaces: ['de'], haltRelease: 'SAMPLE' as const }];
+  if (options.usAccounts) accounts.push(...await addUsAccounts(pools, seeded, store));
   const nowIso = () => demo.clock.iso();
   const descriptor = {
     id: 'demo/kaufland', title: 'Demo · Kaufland (Simulator)', tenantId: seeded.tenantId, accounts,
@@ -118,4 +126,46 @@ export async function startDemoWorld(options: DemoWorldOptions): Promise<Running
       stopWorker = true;
     },
   };
+}
+
+/** Сколько предложений у каждого аккаунта США в демо */
+export const DEMO_US_OFFERS = 12;
+
+/**
+ * Шаг 64: аккаунты США демо-тенанта — путём продукта, а не посевом цен: аккаунт (в тени по умолчанию, Р-170), затем каталог функцией
+ * обнаружения (`record_discovered_offers`). Строки — синтетические: номера листингов и SKU с приставкой SYN-DEMO-US
+ */
+async function addUsAccounts(pools: DemoWorldPools, seeded: { tenantId: string; userId: string; ownerMembershipId: string },
+  store: { recordDiscoveredOffers(tenantId: string, channelAccountId: string, offers: never[]): Promise<number> }):
+  Promise<Array<{ channelAccountId: string; channel: string; marketplaces: string[]; haltRelease: 'SAMPLE' | 'MANUAL_ONLY' }>> {
+  const { randomUUID } = await import('node:crypto');
+  const { inTenant } = await import('@repracer/pricing-store-pg');
+  const ebay = randomUUID();
+  const amazon = randomUUID();
+  /**
+   * Ревью шага 64, находка 2: внешний идентификатор аккаунта уникален по всей платформе среди неотключённых, а прежний демо-тенант
+   * остаётся в базе. Постоянный идентификатор ронял каждый пересев (23505) и старт консоли на той же базе — у каждого посева свой
+   */
+  const suffix = seeded.tenantId.replace(/-/g, '').slice(0, 8);
+  await inTenant(pools.admin, seeded.tenantId, async (tx) => {
+    for (const [id, channel, region, external, marketplace] of [
+      [ebay, 'EBAY', null, `syn_demo_ebay_us_${suffix}`, 'EBAY_US'], [amazon, 'AMAZON', 'NA', `A1SYNDEMOUS${suffix.toUpperCase()}`, 'ATVPDKIKX0DER']] as const) {
+      await tx.query(
+        `INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, region, external_account_id, marketplaces, credentials_ref, connected_by_membership_id)
+         VALUES ($1, $2, $3, $4, $5, $6, 'secret-ref:synthetic', $7)`, [seeded.tenantId, id, channel, region, external, [marketplace], seeded.ownerMembershipId]);
+    }
+  }, seeded.userId);
+  const n = (i: number) => String(i + 1).padStart(2, '0');
+  await store.recordDiscoveredOffers(seeded.tenantId, ebay, Array.from({ length: DEMO_US_OFFERS }, (_, i) => ({
+    marketplace: 'EBAY_US', externalSku: `SYN-DEMO-US-EBAY-${n(i)}`, externalUnitId: null, externalOfferId: `9640${n(i)}0000`, channelProductRef: null,
+    gtin: null, condition: 'new', fulfillment: 'MERCHANT', externalListingId: `16400000${n(i)}00`, listingFormat: 'FIXED_PRICE', writable: true,
+  })) as never[]);
+  await store.recordDiscoveredOffers(seeded.tenantId, amazon, Array.from({ length: DEMO_US_OFFERS }, (_, i) => ({
+    marketplace: 'ATVPDKIKX0DER', externalSku: `SYN-DEMO-US-AMZ-${n(i)}`, externalUnitId: null, externalOfferId: null, channelProductRef: `B0DEMOUS${n(i)}`,
+    gtin: null, condition: 'new', fulfillment: 'MERCHANT',
+  })) as never[]);
+  return [
+    { channelAccountId: ebay, channel: 'EBAY', marketplaces: ['EBAY_US'], haltRelease: 'MANUAL_ONLY' },
+    { channelAccountId: amazon, channel: 'AMAZON', marketplaces: ['ATVPDKIKX0DER'], haltRelease: 'MANUAL_ONLY' },
+  ];
 }

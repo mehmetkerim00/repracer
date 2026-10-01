@@ -205,6 +205,11 @@ export interface EbayModelParams {
   foreignCurrency: 'STORED_SILENTLY' | 'REJECTED_25709';
   /** E-12: цена с тремя знаками — песочница молча округлила ВВЕРХ (11.999 → 12.0) */
   subCentPrice: 'ROUNDED_UP_SILENTLY' | 'REJECTED_25709';
+  /**
+   * E-27 (шаг 64): минимальная цена EBAY_US. Песочница показала «ниже EUR 1.00 — 25016» только для EBAY_DE; для долларов это гипотеза
+   * по аналогии, а не наблюдение — модель держит её параметром, чтобы сценарий мог проверить и отсутствие минимума
+   */
+  usdMinimumPrice: 'REJECTED_25016_BELOW_1_00' | 'NONE';
   /** E-13: через сколько Browse видит правку живого листинга (песочница задержку не измеряла) */
   browseLagMs: number;
   /** E-15: Best Offer после bulk_migrate_listing — песочница его СОХРАНИЛА (вопреки документации, которую пересказывает Р-2) */
@@ -251,6 +256,10 @@ export const EBAY_PARAMETERS: { readonly [K in keyof EbayModelParams]: Parameter
   },
   subCentPrice: {
     question: 'E-12', status: 'OPEN', meaning: 'цена с тремя знаками', default: 'ROUNDED_UP_SILENTLY', alternatives: ['ROUNDED_UP_SILENTLY', 'REJECTED_25709'],
+  },
+  usdMinimumPrice: {
+    question: 'E-27', status: 'OPEN', meaning: 'минимальная цена EBAY_US (гипотеза по аналогии с EUR 1.00)', default: 'REJECTED_25016_BELOW_1_00',
+    alternatives: ['REJECTED_25016_BELOW_1_00', 'NONE'],
   },
   browseLagMs: { question: 'E-13', status: 'OPEN', meaning: 'задержка Browse после правки листинга', default: 0, alternatives: [0, 120_000, 900_000] },
   bestOfferOnMigration: {

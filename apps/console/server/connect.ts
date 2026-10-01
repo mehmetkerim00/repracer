@@ -151,3 +151,18 @@ export function createChannelConnectService(o: {
     },
   };
 }
+
+/**
+ * Шаг 64: подключения мира, в который подключать нечем (демо): аккаунты и их состояние читает то же хранилище, что в работе, а кнопок
+ * подключения нет — у мира нет приложений каналов. Без этого экран подключений демо был пуст, и вопрос о других инструментах [Р-202]
+ * показать было негде
+ */
+export function readOnlyConnections(store: PgChannelConnectStore): ChannelConnectService {
+  return {
+    connectable: () => [],
+    connections: (tenantId) => store.connections(tenantId),
+    start: async () => ({ status: 'UNAVAILABLE' }),
+    callback: async () => ({ status: 'BAD_CALLBACK' }),
+    cancel: async () => false,
+  };
+}

@@ -199,6 +199,11 @@ export interface StandServices {
   tenantWorlds?(principal: Principal): Promise<TenantWorldIndex>;
   /** Шаг 44 (находка 4 ревью): ключ Inbound API → тенант → его мир, вне списка миров стенда */
   inbound?(prefix: string, sha256Hex: string): Promise<{ tenantId: string; stockSourceId: string; world: LiveWorld } | null>;
+  /**
+   * Шаг 64 (ревью, находка 1): язык по умолчанию — развёртывания (`REPRACER_CONSOLE_LOCALE`), а не жёсткое `de`. Без него продавец из США
+   * в новом браузере (без куки) видел немецкий первый экран, а прогоны этого не видели: они шлют куку языка в каждом запросе
+   */
+  defaultLocale?: Locale;
 }
 
 export function createStandApi(worlds: readonly LiveWorld[], identity: StandIdentity, services: StandServices = {}) {
@@ -209,7 +214,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
     const jar = cookies(req.cookie);
     const requested = url.searchParams.get('locale');
-    const locale: Locale = isLocale(requested) ? requested : isLocale(jar[LOCALE_COOKIE]) ? jar[LOCALE_COOKIE] : 'de';
+    const locale: Locale = isLocale(requested) ? requested : isLocale(jar[LOCALE_COOKIE]) ? jar[LOCALE_COOKIE] : services.defaultLocale ?? 'de';
     const m = messagesFor(locale);
     const s = m.ui.server;
     const ok = (body: unknown, setCookies?: string[]): ApiResponse => ({ status: 200, body, ...(setCookies ? { setCookies } : {}) });
@@ -418,7 +423,9 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       return ok([...await Promise.all(visible.map(async ({ live, viewer }): Promise<WorldSummary> => {
         const [c, accounts] = await Promise.all([live.store.worldCounters(live.tenantId, live.clock.iso() as never), live.store.channelAccounts(live.tenantId)]);
         return {
-          id: live.id, title: live.title, description: live.description, failures: live.failures, scopes: c.scopes, decisionsLastDay: c.decisionsLastDay,
+          // Шаг 64: демо-мир назван на языке интерфейса — клиент из США видел описание посева по-немецки
+          id: live.id, title: c.demo ? m.ui.app.demoWorldTitle : live.title, description: c.demo ? m.ui.app.demoWorldDescription : live.description,
+          failures: live.failures, scopes: c.scopes, decisionsLastDay: c.decisionsLastDay,
           interventionsLastWeek: c.interventionsLastWeek, activeStops: c.activeStops, activeHalts: c.activeHalts, role: m.values[viewer.role],
           // Р-151: демо помечается уже в списке миров; Р-150: сколько каналов ждёт доступа — видно до входа в мир
           demo: c.demo,
@@ -1573,6 +1580,7 @@ async function main(): Promise<void> {
      *
      * Шаг 37 [Р-159]: тот же мир поднимает разворачиваемая консоль, поэтому он живёт одним модулем, а не двумя копиями.
      */
+    let demoWorldId: string | null = null;
     if (process.env.REPRACER_DEMO === 'on') {
       const { startDemoWorld } = await import('./demo-world.ts');
       const started = await startDemoWorld({
@@ -1582,10 +1590,20 @@ async function main(): Promise<void> {
         },
         pgUrl: url, tag: 3400, memberUsers, memberEmails: STAND_EMAILS,
         joinMember: pgStandJoinMember(adminPool, directory),
+        // Шаг 64: `REPRACER_DEMO_US=on` — профиль США в демо: аккаунты eBay US и Amazon US в тени (docs/demo-script.md)
+        usAccounts: process.env.REPRACER_DEMO_US === 'on',
+        // Шаг 64: `REPRACER_DEMO_SHADOW=on` — демо в тени [Р-169]: сценарий показа «система физически не может трогать цены»
+        ...(process.env.REPRACER_DEMO_SHADOW === 'on' ? { writeMode: 'SHADOW' as const } : {}),
       });
       worlds.push(started.world);
+      demoWorldId = started.world.id;
     }
-    handle = createStandApi(worlds, { authenticator: createAuthenticator({ ...verify, directory }), ...(simulator ? { simulator } : {}) });
+    // Шаг 64: у демо — подключения только для чтения (аккаунты и вопрос о других инструментах [Р-202]), подключать нечем
+    const { readOnlyConnections } = await import('./connect.ts');
+    const { PgChannelConnectStore } = await import('@repracer/pricing-store-pg');
+    const demoConnect = readOnlyConnections(new PgChannelConnectStore(adminPool));
+    handle = createStandApi(worlds, { authenticator: createAuthenticator({ ...verify, directory }), ...(simulator ? { simulator } : {}) },
+      { connect: (worldId) => (worldId === demoWorldId ? demoConnect : null) });
   } else {
     // Стенд не включает ничего молча и ничего молча не пропускает: демо живёт только на PostgreSQL (ревью шага 34, находка 9)
     if (process.env.REPRACER_DEMO === 'on') throw new Error('REPRACER_DEMO=on needs PostgreSQL: set REPRACER_PG_URL (the demo tenant runs the real decision path)');

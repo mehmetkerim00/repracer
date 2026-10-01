@@ -209,7 +209,9 @@ export function connectionsView(
         : t.discovery.running(hours(started, nowMs), completed !== null, a.channel === 'EBAY');
     return {
       discoveryText,
-      channelAccountId: a.channelAccountId, channel: a.channel, label: `${a.channel} · ${a.externalAccountId} · ${a.marketplaces.join(', ')}`, marketplaces: [...a.marketplaces],
+      channelAccountId: a.channelAccountId, channel: a.channel,
+      // Шаг 64 (проход консоли): имя канала и витрины словами — «eBay · … · ebay.com», а не коды EBAY и EBAY_US
+      label: `${(m.values as Record<string, string | undefined>)[a.channel] ?? a.channel} · ${a.externalAccountId} · ${a.marketplaces.map((id) => t.marketplaces[id] ?? id).join(', ')}`, marketplaces: [...a.marketplaces],
       state, stateText: t.states[state] ?? state, progressText, authorizationText, offers: a.offers, unmanagedOffers: a.unmanagedOffers, shadowDecisions24h: a.shadowDecisions24h,
       // eBay не называет продавца (E-11): повторное согласие создало бы второй аккаунт того же продавца (находка 6 ревью шага 43)
       canReconnect: canManage && a.channel === 'AMAZON' && a.oauth,

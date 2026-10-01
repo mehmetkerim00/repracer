@@ -34,11 +34,16 @@ const FORMS: readonly RegExp[] = [
 
 /** Тот же список форм, но код выбирается условием: `code: mismatch ? 'A' : 'B'` — обе ветви поднимают алерт */
 const BRANCHED: readonly RegExp[] = [
-  // Шаг 63: таблица имён алертов записи по полю (`writeAlertCode` диспетчера) — { notSent: 'X', scopeBlocked: 'Y' }
-  /\bnotSent:\s*'([A-Z][A-Z0-9_]+)',\s*scopeBlocked:\s*'([A-Z][A-Z0-9_]+)'/g,
   /raise\(\{[\s\S]{0,300}?\bcode:[^,\n]*\?\s*'([A-Z][A-Z0-9_]+)'\s*:\s*'([A-Z][A-Z0-9_]+)'/g,
   /\bkind:\s*'alert',\s*code:[^,\n]*\?\s*'([A-Z][A-Z0-9_]+)'\s*:\s*'([A-Z][A-Z0-9_]+)'/g,
 ];
+
+/**
+ * Шаг 64 (ревью шага 63, находка 8): таблица имён алертов — `const …_ALERT_CODES = { … } as const`. Коды в ней — все строковые литералы
+ * формы кода, сколько бы ключей ни было у записей таблицы (прежнее выражение знало ровно два ключа в одном порядке)
+ */
+const TABLE_FORM = /\bconst\s+[A-Z0-9_]*ALERT_CODES\s*=\s*\{([\s\S]*?)\}\s*as\s+const/g;
+const TABLE_CODE = /'([A-Z][A-Z0-9_]+)'/g;
 
 /** INSERT INTO tenant_data.alert (…) VALUES (тенант, 'X', 'CRITICAL', …) — алерт, который поднимает функция базы */
 const SQL_FORM = /INSERT INTO tenant_data\.alert\s*\([^)]*\)\s*VALUES\s*\([^,()]+,\s*'([A-Z][A-Z0-9_]+)'\s*,\s*'(?:WARNING|CRITICAL)'/g;
@@ -56,6 +61,10 @@ function raisedInSource(): Map<string, string[]> {
       }
       if (!path.endsWith('.ts') || path.endsWith('.test.ts')) continue;
       const source = readFileSync(path, 'utf8');
+      TABLE_FORM.lastIndex = 0;
+      for (let t = TABLE_FORM.exec(source); t; t = TABLE_FORM.exec(source)) {
+        for (const c of t[1]!.matchAll(TABLE_CODE)) found.set(c[1]!, [...(found.get(c[1]!) ?? []), path.slice(ROOT.length + 1)]);
+      }
       for (const form of [...FORMS, ...BRANCHED]) {
         form.lastIndex = 0;
         for (let m = form.exec(source); m; m = form.exec(source)) {
@@ -139,7 +148,8 @@ test('Р-161: события ПЛАТФОРМЫ написаны голосом 
     'NOTIFICATION_FOREIGN_APPLICATION', 'NOTIFICATION_GIVING_UP', 'ALERT_NOT_STORED', 'CHANNEL_APP_CREDENTIALS_REJECTED', 'CHANNEL_REVOCATIONS_SUSPICIOUS', 'CHANNEL_KEYRING_UNREADABLE'];
   // Обороты продавца: «от вас ничего не требуется», «сообщите нам», «откройте консоль», «ваш кабинет канала»
   const sellerVoiceDe = /Von Ihnen ist|sagen Sie uns|melden Sie sich bei uns|Melden Sie sich|Öffnen Sie die Konsole|Kanal-Konto/;
-  const sellerVoiceEn = /nothing is to be done by you|No action from you|contact us|tell us|Open the console|channel cabinet/i;
+  // Шаг 64: «channel cabinet» (калька) стал «seller account on the marketplace»
+  const sellerVoiceEn = /nothing is to be done by you|No action from you|contact us|tell us|Open the console|channel cabinet|seller account on the marketplace/i;
   for (const code of platform) {
     assert.ok(de[code] && en[code], `платформенное событие без текста: ${code}`);
     assert.ok(!sellerVoiceDe.test(de[code]!.step), `${code}/de: первое действие написано голосом продавца: ${de[code]!.step}`);
