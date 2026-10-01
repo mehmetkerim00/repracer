@@ -203,13 +203,27 @@ export class PgStockStore implements StockStore {
              RETURNING write_scope_id)
            SELECT count(*)::int AS n FROM created`,
           [tenantId, channelAccountId, acc.channel, cap.capability_id, cap.version, template, cap.write_scope_kind, cap.budget_scope_attribute ?? null]);
-        // Предложения ссылаются на свою единицу — и новые, и те, чья единица уже была (повторное включение)
+        /**
+         * Предложения ссылаются на свою единицу — и новые, и те, чья единица уже была (повторное включение).
+         *
+         * Шаг 65 (замер масштаба): единица ищется ПОДЗАПРОСОМ на каждое предложение — по уникальному индексу (тенант, аккаунт, поле, ключ),
+         * а не соединением по выражению. Единицы QUANTITY вставлены этой же транзакцией, статистики у них нет, и планировщик, считая их
+         * одной строкой, выбирал вложенный цикл с вычислением ключа на каждую ПАРУ «предложение × единица»: на 10 000 предложений включение
+         * синхронизации шло больше двух минут, на 50 000 — шло бы часы. Подзапрос — одна выборка по индексу на предложение при любой оценке
+         */
         await tx.query(
-          `UPDATE tenant_data.offer_mapping om SET quantity_write_scope_id = s.write_scope_id
-             FROM tenant_data.write_scope s
-            WHERE om.tenant_id = $1 AND om.channel_account_id = $2 AND om.status = 'ACTIVE' AND om.fulfillment = 'MERCHANT' AND om.quantity_write_scope_id IS NULL
-              AND s.tenant_id = om.tenant_id AND s.channel_account_id = om.channel_account_id AND s.field = 'QUANTITY' AND s.status <> 'RETIRED'
-              AND s.scope_key = tenant_data.derive_scope_key(${identitySql}, $3::text[])`, [tenantId, channelAccountId, template]);
+          `WITH keyed AS MATERIALIZED (
+             SELECT om.offer_mapping_id,
+                    (SELECT s.write_scope_id FROM tenant_data.write_scope s
+                      WHERE s.tenant_id = om.tenant_id AND s.channel_account_id = om.channel_account_id AND s.field = 'QUANTITY' AND s.status <> 'RETIRED'
+                        AND s.scope_key = tenant_data.derive_scope_key(${identitySql}, $3::text[])) AS write_scope_id
+               FROM tenant_data.offer_mapping om
+              WHERE om.tenant_id = $1 AND om.channel_account_id = $2 AND om.status = 'ACTIVE' AND om.fulfillment = 'MERCHANT' AND om.quantity_write_scope_id IS NULL)
+           UPDATE tenant_data.offer_mapping om SET quantity_write_scope_id = k.write_scope_id
+             FROM keyed k
+            WHERE om.tenant_id = $1 AND om.offer_mapping_id = k.offer_mapping_id AND k.write_scope_id IS NOT NULL
+              -- Перепроверка у самой строки (ревью шага 65): предложение, завершённое параллельно, единицы количества не получает
+              AND om.status = 'ACTIVE' AND om.quantity_write_scope_id IS NULL`, [tenantId, channelAccountId, template]);
         const { rows: [scopes] } = await tx.query(
           `SELECT count(*)::int AS n FROM tenant_data.write_scope s WHERE s.tenant_id = $1 AND s.channel_account_id = $2 AND s.field = 'QUANTITY' AND s.status <> 'RETIRED'`, [tenantId, channelAccountId]);
         // INV-11: побочный эффект (Amazon EU — весь регион) подтверждает человек; без подтверждения единицы есть, синхронизации нет

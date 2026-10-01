@@ -161,6 +161,8 @@ export class SimulatedKauflandChannel implements ChannelBehaviour {
   readonly params: KauflandModelParams;
   private readonly orders: SimOrderUnit[] = [];
   private nextOrderMs: number | null = null;
+  /** Шаг 65 (хаос): рынок на паузе с этого момента — ни заказов, ни отгрузок, ни движения конкурентов; при снятии паузы их время сдвигается */
+  private demandPausedAtMs: number | null = null;
   readonly stats: SimulatorStats = {
     requests: {}, rateLimited: 0, editLimited: 0, timeouts: 0, timeoutsApplied: 0, bulkItemsMissing: 0, bulkItemsFailed: 0,
     priceEditsApplied: 0, buyBoxChanges: 0, notificationsScheduled: 0, notificationsLost: 0, notificationsDelivered: 0, ordersPlaced: 0, ordersShipped: 0, ordersCancelled: 0,
@@ -258,6 +260,8 @@ export class SimulatedKauflandChannel implements ChannelBehaviour {
     }
     for (const c of this.competitors) {
       const b = c.behaviour;
+      // Шаг 65 (ревью, находка 6): на паузе рынка конкуренты стоят — сверка инвариантов хаоса идёт на неподвижном рынке
+      if (this.demandPausedAtMs !== null) continue;
       if (b.kind === 'RANDOM_WALK') {
         while (c.nextStepMs <= at) {
           const moved = Math.round(c.priceMinor * (1 + (this.rng.normal() * b.volatilityBp) / 10_000));
@@ -336,18 +340,37 @@ export class SimulatedKauflandChannel implements ChannelBehaviour {
     return this.params.listingPriceBasis === 'NET' ? Math.round(u.listingPriceMinor * (1 + u.vatBp / 10_000)) : u.listingPriceMinor;
   }
 
+  /**
+   * Шаг 65 (замер масштаба): предложения товара — по указателю «ключ товара → единицы и конкуренты», а не перебором всех. Перебор делал модель
+   * квадратичной: победитель считается по каждому товару на каждом шаге времени, и на 10 000 предложений один запрос к модели стоил ~2 с —
+   * замер круга обнаружения мерил модель, а не продукт. Указатель строится один раз и сбрасывается, когда единица удалена
+   */
+  private productIndex: Map<string, { units: UnitState[]; competitors: CompetitorState[] }> | null = null;
+
+  private offersIndex(): Map<string, { units: UnitState[]; competitors: CompetitorState[] }> {
+    if (this.productIndex) return this.productIndex;
+    const index = new Map<string, { units: UnitState[]; competitors: CompetitorState[] }>();
+    const slot = (key: string) => {
+      let e = index.get(key);
+      if (!e) { e = { units: [], competitors: [] }; index.set(key, e); }
+      return e;
+    };
+    for (const u of this.units.values()) slot(`${u.storefront}|${u.idProduct}|${u.condition}`).units.push(u);
+    for (const c of this.competitors) slot(`${c.storefront}|${c.idProduct}|${c.condition}`).competitors.push(c);
+    this.productIndex = index;
+    return index;
+  }
+
   offersOf(key: string): Offer[] {
-    const [storefront, idProduct, condition] = key.split('|');
     const offers: Offer[] = [];
-    for (const u of this.units.values()) {
-      if (u.storefront === storefront && String(u.idProduct) === idProduct && u.condition === condition && u.isLive && u.amount > 0) {
+    const entry = this.offersIndex().get(key);
+    for (const u of entry?.units ?? []) {
+      if (u.isLive && u.amount > 0) {
         offers.push({ self: true, sellerRef: this.spec.sellerPseudonym ?? 'Synthetic Seller', priceMinor: this.buyerPrice(u), shippingMinor: u.shippingMinor, unit: u, deliveryDays: u.deliveryDays });
       }
     }
-    for (const c of this.competitors) {
-      if (c.storefront === storefront && String(c.idProduct) === idProduct && c.condition === condition) {
-        offers.push({ self: false, sellerRef: c.sellerRef, priceMinor: c.priceMinor, shippingMinor: c.shippingMinor, deliveryDays: c.deliveryDays });
-      }
+    for (const c of entry?.competitors ?? []) {
+      offers.push({ self: false, sellerRef: c.sellerRef, priceMinor: c.priceMinor, shippingMinor: c.shippingMinor, deliveryDays: c.deliveryDays });
     }
     const previous = this.winners.get(key)?.sellerRef;
     // Упрощение модели: Buy Box — минимальная цена с доставкой; при равенстве — прежний победитель
@@ -458,7 +481,13 @@ export class SimulatedKauflandChannel implements ChannelBehaviour {
     }
     if (request.method === 'GET' && request.path === '/v2/units') {
       const units = [...this.units.values()].filter((u) => u.storefront === storefront && (!request.query.id_offer || u.idOffer === request.query.id_offer));
-      return respond(200, { data: units.map((u) => this.unitView(u)), pagination: { offset: 0, limit: Number(request.query.limit ?? 100), total: units.length } });
+      /**
+       * Шаг 65 (замер масштаба): страница — по `offset` и `limit`, как у канала (не больше 100, `KAUFLAND_LIMITS.unitsPageMax`). До шага модель
+       * отдавала ВЕСЬ каталог одной страницей: обнаружение 10 000 предложений шло одним вызовом, и круг обнаружения мерился не тем, чем в работе
+       */
+      const limit = Math.max(1, Math.min(Number(request.query.limit ?? 100), 100));
+      const offset = Math.max(0, Number(request.query.offset ?? 0));
+      return respond(200, { data: units.slice(offset, offset + limit).map((u) => this.unitView(u)), pagination: { offset, limit, total: units.length } });
     }
     if (request.method === 'POST' && request.path === '/v2/units/status') {
       const ids = ((request.body as { unit_ids?: number[] } | undefined)?.unit_ids ?? []);
@@ -557,9 +586,37 @@ export class SimulatedKauflandChannel implements ChannelBehaviour {
   }
 
   /** Спрос модели: новые заказы по расписанию, закрытие открытых по сроку */
+  /**
+   * Шаг 65 (хаос): пауза рынка на время сверки инвариантов — спрос и конкуренты стоят. Заказы, отгрузки и шаги цен, случившиеся бы за
+   * паузу, не теряются: их расписание сдвигается на длину паузы, как будто время рынка стояло. Расписание SCHEDULE не сдвигается
+   */
+  pauseMarket(nowMs: number): void {
+    this.advanceTo(nowMs);
+    this.demandPausedAtMs ??= nowMs;
+  }
+
+  resumeMarket(nowMs: number): void {
+    if (this.demandPausedAtMs === null) return;
+    const paused = Math.max(0, nowMs - this.demandPausedAtMs);
+    this.demandPausedAtMs = null;
+    if (this.nextOrderMs !== null) this.nextOrderMs += paused;
+    for (const o of this.orders) if (o.status === 'open') o.closesAtMs += paused;
+    for (const c of this.competitors) {
+      if (c.behaviour.kind === 'RANDOM_WALK') c.nextStepMs += paused;
+      if (c.reactToChangeAtMs !== null) c.reactToChangeAtMs += paused;
+    }
+    this.advanceTo(nowMs);
+  }
+
+  /** Шаг 65 (хаос): открытые строки заказов канала — по одной единице на строку, как у модели спроса */
+  openOrderLines(): Array<{ idOrderUnit: number; idOffer: string; storefront: string; quantity: number }> {
+    return this.orders.filter((o) => o.status === 'open').map((o) => ({ idOrderUnit: o.idOrderUnit, idOffer: o.idOffer, storefront: o.storefront, quantity: 1 }));
+  }
+
   private applyDemand(at: number): void {
     const d = this.spec.demand;
     if (!d) return;
+    if (this.demandPausedAtMs !== null) return;
     if (this.nextOrderMs === null) this.nextOrderMs = this.startMs + d.orderEveryMs;
     while (this.nextOrderMs <= at) {
       const inStock = [...this.units.values()].filter((u) => u.isLive && u.amount > 0);
@@ -599,6 +656,7 @@ export class SimulatedKauflandChannel implements ChannelBehaviour {
   removeUnit(idUnit: number): number {
     let removed = 0;
     for (const [key, u] of [...this.units]) if (u.idUnit === idUnit) { this.units.delete(key); removed += 1; }
+    this.productIndex = null;
     return removed;
   }
 

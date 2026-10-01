@@ -105,6 +105,11 @@ export async function kauflandLiveWorld(input: {
   /** Р-151: тенант — демо; помечается в базе */
   demo?: boolean;
   /**
+   * Шаг 65 (замер масштаба): предложения, которые есть только у КАНАЛА — в каталог тенанта посев их не кладёт. Первый круг обнаружения
+   * заводит их в каталог (как у продавца, выставившего новые товары или подключившего аккаунт), следующий круг — уже нет
+   */
+  channelOnly?: LiveProduct[];
+  /**
    * Шаг 41 [Р-169, Р-170]: режим записи аккаунта мира. `SHADOW` — путь решения работает целиком, а в канал не уходит
    * ничего: именно так живой прогон шага 41 проверяет, что вызовов записи к симулятору НОЛЬ.
    */
@@ -156,11 +161,11 @@ export async function kauflandLiveWorld(input: {
   const channelModel: KauflandChannelModelSpec = {
     seed: input.seed, webhookUrl: `https://hooks.example.invalid/kaufland/${webhookToken}`,
     ...(input.demand ? { demand: input.demand } : {}),
-    units: input.products.map((p) => ({
+    units: [...input.products, ...(input.channelOnly ?? [])].map((p) => ({
       idUnit: Number(String(p.idProduct).slice(-6)), storefront: p.marketplace, idOffer: `SYN-OFFER-${p.idProduct}`, idProduct: p.idProduct, listingPriceMinor: 1850, amount: 5,
       ...(p.channelMinimumPriceMinor ? { minimumPriceMinor: p.channelMinimumPriceMinor } : {}),
     })),
-    competitors: input.products.flatMap((p) => [{ sellerRef: `Synthetic Competitor ${p.idProduct}`, storefront: p.marketplace, idProduct: p.idProduct, priceMinor: p.competitorStartMinor ?? 1800, behaviour: p.behaviour },
+    competitors: [...input.products, ...(input.channelOnly ?? [])].flatMap((p) => [{ sellerRef: `Synthetic Competitor ${p.idProduct}`, storefront: p.marketplace, idProduct: p.idProduct, priceMinor: p.competitorStartMinor ?? 1800, behaviour: p.behaviour },
       // Шаг 34: дополнительные конкуренты товара — у демо с ними выходит три с разным поведением [Р-151]
       ...(p.moreCompetitors ?? []).map((c) => ({ sellerRef: c.sellerRef, storefront: p.marketplace, idProduct: p.idProduct, priceMinor: c.startMinor, behaviour: c.behaviour })),
     ]),

@@ -70,7 +70,7 @@ export function demoProducts(options: { bare: boolean }): LiveProduct[] {
 }
 
 /** Часы, которые не двигают — они идут сами: `advance` ничего не делает, пауза ждёт по-настоящему */
-class WallClock extends VirtualClock {
+export class WallClock extends VirtualClock {
   constructor() { super(new Date().toISOString()); }
   override nowMs(): number { return Date.now(); }
   override iso(offsetMs = 0): string { return new Date(Date.now() + offsetMs).toISOString(); }

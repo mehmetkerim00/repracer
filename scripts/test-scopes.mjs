@@ -34,6 +34,17 @@ export const INFRASTRUCTURE_TESTS = [
     why: 'витрина США в тени два виртуальных часа через консоль: решения в долларах, бой закрыт неизвестной границей суток, дайджест',
   },
   {
+    // Шаг 65, часть 1: хаос — настоящие процессы убиваются посреди работы, канал портит ответы; раунд — минута работы и до шести минут
+    // затишья (запись, оставленная убитым диспетчером в полёте, сверяется после срока в 120 с). Своё задание CI
+    file: 'tests/contract/src/chaos.pg.test.ts', needs: 'TIME',
+    why: 'раунды хаоса: SIGKILL планировщика, диспетчера, консоли и исполнителя заданий, порча канала, инварианты после каждого раунда',
+  },
+  {
+    // Шаг 65, часть 3: масштаб — каталог в 50 000 предложений: посев, пересчёт, кандидаты, экраны, круги и суточные работы. Своё задание CI
+    file: 'tests/contract/src/scale.pg.test.ts', needs: 'TIME',
+    why: 'каталог 50 000 предложений: пересчёт остатков, выборка кандидатов, экраны консоли, круги обнаружения и сверки, суточные работы',
+  },
+  {
     file: 'packages/pricing-store-pg/test/clickhouse-export.pg.test.ts', needs: 'CLICKHOUSE',
     why: 'выгрузка суток в аналитический слой и сверка разбора: пишет и читает настоящий ClickHouse',
   },
@@ -58,6 +69,10 @@ export const LONG_FILES = new Set(INFRASTRUCTURE_TESTS.filter((t) => t.needs ===
  * в том же задании его гарантированно перерастили бы.
  */
 export const SHADOW_FILES = new Set(['apps/console/test/shadow-live.pg.test.ts']);
+
+/** Шаг 65: хаос и масштаб — каждый своим заданием CI: в задании long (сутки демо и замеры) они не помещаются в предел */
+export const CHAOS_FILES = new Set(['tests/contract/src/chaos.pg.test.ts']);
+export const SCALE_FILES = new Set(['tests/contract/src/scale.pg.test.ts']);
 
 /**
  * Шаг 36: прогоны, которые УТВЕРЖДАЮТ время. Node запускает файлы одного рабочего пространства параллельно, и такой прогон
@@ -90,6 +105,11 @@ export const MEASURED_FILES = new Set([
   'apps/console/test/pilot-ebay-live.pg.test.ts',
   // Шаг 64: путь продавца из США (EBAY_US, USD, английский) до записи цены в бою стенда
   'apps/console/test/pilot-us-live.pg.test.ts',
+  // Шаг 65: хаос держит четыре настоящих процесса и ждёт затишья по секундам; масштаб утверждает секунды на 50 000 предложений
+  'tests/contract/src/chaos.pg.test.ts',
+  'tests/contract/src/scale.pg.test.ts',
+  // Шаг 65: учение восстановления утверждает время «от файлов копии до ответа консоли» и держит под собой процесс консоли
+  'packages/pricing-store-pg/test/disaster-recovery.pg.test.ts',
 ]);
 
 /**
@@ -97,12 +117,14 @@ export const MEASURED_FILES = new Set([
  * местах: здесь (какие файлы брать) и там (какое значение считать известным). Новая область `shadow` была добавлена только
  * здесь, и задание CI `shadow-day` падало строкой «неизвестная область прогона» — ни одного теста не запустив.
  */
-export const SCOPES = ['fast', 'full', 'long', 'shadow'];
+export const SCOPES = ['fast', 'full', 'long', 'shadow', 'chaos', 'scale'];
 
 /** Файлы области: быстрый прогон — всё, кроме инфраструктурных и долгих; полный — всё, кроме долгих; `long` — только долгие */
 export function filesForScope(included, scope) {
   if (scope === 'fast') return included.filter((f) => !INFRASTRUCTURE_FILES.has(f));
   if (scope === 'shadow') return included.filter((f) => SHADOW_FILES.has(f));
-  if (scope === 'long') return included.filter((f) => LONG_FILES.has(f) && !SHADOW_FILES.has(f));
+  if (scope === 'chaos') return included.filter((f) => CHAOS_FILES.has(f));
+  if (scope === 'scale') return included.filter((f) => SCALE_FILES.has(f));
+  if (scope === 'long') return included.filter((f) => LONG_FILES.has(f) && !SHADOW_FILES.has(f) && !CHAOS_FILES.has(f) && !SCALE_FILES.has(f));
   return included.filter((f) => !LONG_FILES.has(f));
 }

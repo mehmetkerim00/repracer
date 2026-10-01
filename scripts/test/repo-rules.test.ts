@@ -477,7 +477,9 @@ test('Р-146: каждый прогон, утверждающий секунды
    * прогон падает сам (`*_LIMIT_SECONDS` у опроса задания). Второй способ нашёлся сразу: `stock-only-live` секунд не
    * утверждает, но отказывает по пределу ожидания — одного детектора здесь мало.
    */
-  const ASSERTS_TIME = /assert\.ok\([^;]*\b(?:seconds|Seconds|ms|Ms|elapsed|duration)\b[^;]*[<>]=?[^;]*\)/;
+  // Шаг 65 (ревью, находка 4): и в составе имени — `totalSeconds`: граница слова перед «Seconds» внутри camelCase не стоит. Только «Seconds»:
+  // `atMs`, `longestGapMs` — время МОДЕЛИ на виртуальных часах, а не машины, и в замеры не записываются
+  const ASSERTS_TIME = /assert\.ok\([^;]*(?:\b(?:seconds|Seconds|ms|Ms|elapsed|duration)\b|[a-z]Seconds\b)[^;]*[<>]=?[^;]*\)/;
   const WAITS_BY_LIMIT = /\b[A-Z_]*LIMIT_(?:SECONDS|MS)\b/;
   const decidesByTime = (text: string) => ASSERTS_TIME.test(text) || WAITS_BY_LIMIT.test(text);
   // Положительный контроль: детектор действительно срабатывает — иначе пустой список «нарушителей» не значит ничего [Р-94]

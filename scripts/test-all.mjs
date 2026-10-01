@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { findUnincludedTests } from './check-test-inclusion.mjs';
-import { filesForScope, INFRASTRUCTURE_TESTS, MEASURED_FILES, SCOPES } from './test-scopes.mjs';
+import { CHAOS_FILES, filesForScope, INFRASTRUCTURE_TESTS, MEASURED_FILES, SCALE_FILES, SCOPES, SHADOW_FILES } from './test-scopes.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const inclusion = findUnincludedTests(root);
@@ -46,7 +46,9 @@ const selected = filesForScope(inclusion.included, scope);
 const deferred = inclusion.included.filter((f) => !selected.includes(f));
 console.log(`TEST SCOPE ${JSON.stringify({ scope, files: selected.length, deferred: deferred.length })}`);
 for (const t of INFRASTRUCTURE_TESTS) {
-  if (deferred.includes(t.file)) console.log(`   ${t.needs === 'TIME' ? 'идёт своим заданием CI (long)' : 'отложен до полного прогона'} (${t.needs}): ${t.file} — ${t.why}`);
+  // Шаг 65: у хаоса, масштаба и тени — свои задания CI; остальные долгие — в задании long
+  const job = SHADOW_FILES.has(t.file) ? 'shadow-day' : CHAOS_FILES.has(t.file) ? 'chaos' : SCALE_FILES.has(t.file) ? 'scale' : 'long';
+  if (deferred.includes(t.file)) console.log(`   ${t.needs === 'TIME' ? `идёт своим заданием CI (${job})` : 'отложен до полного прогона'} (${t.needs}): ${t.file} — ${t.why}`);
 }
 
 /** Рабочее пространство файла: ближайший вверх package.json */

@@ -20,6 +20,8 @@ export interface IsolatedDatabase {
    * базе. Нужно там, где проверяемая таблица не видна НИ ОДНОЙ роли процесса (приглашения входа, шаг 40).
    */
   rows<T>(sql: string, params?: unknown[]): Promise<T[]>;
+  /** Шаг 65: закрыть пулы теста, не удаляя базу — учение восстановления губит базу само и не должно оставлять ей соединений */
+  endPools(): Promise<void>;
   drop(): Promise<void>;
 }
 
@@ -80,8 +82,11 @@ export async function createIsolatedDatabase(prefix: string, options: { region?:
         await a.end();
       }
     },
+    async endPools() {
+      for (const p of pools.splice(0)) await p.end();
+    },
     async drop() {
-      for (const p of pools) await p.end();
+      for (const p of pools.splice(0)) await p.end();
       const a = createPool(adminUrl, { max: 1, applicationName: 'repracer-isolated-db' });
       try {
         await a.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);

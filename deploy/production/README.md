@@ -125,13 +125,17 @@ gpg --quick-gen-key 'repracer backup <владелец>' default default never  
 gpg --armor --export '<владелец>' > backup_public_key.asc                   # только этот файл уходит на сервер, в REPRACER_SECRETS_DIR
 ```
 
-Восстановление (закрытый ключ нужен только здесь; проверяется тестом сборки `backup-restore.pg.test.ts` — тот же скрипт, та же пара):
+Восстановление — [docs/runbook-disaster.md](../../docs/runbook-disaster.md) и скрипт [restore.sh](restore.sh) (закрытый ключ нужен только
+здесь; всю последовательность проверяет учение `disaster-recovery.pg.test.ts`):
 
 ```bash
-gpg --output repracer.dump --decrypt repracer-<время>.dump.gpg
-gpg --output globals.sql --decrypt repracer-<время>.globals.sql.gpg
-psql -d postgres -f globals.sql && createdb repracer_eu && pg_restore --dbname repracer_eu --exit-on-error repracer.dump   # без --no-owner
+GNUPGHOME=<ключи владельца> REPRACER_RESTORE_ADMIN_URL=postgres://postgres@127.0.0.1:5432/postgres \
+REPRACER_RESTORE_SECRETS_DIR=/srv/repracer/secrets REPRACER_RESTORE_LOGS_DIR=/srv/repracer/archive/platform=logs \
+deploy/production/restore.sh /srv/repracer/backups repracer-<время>
 ```
+
+Шаг 65: прежние команды здесь — `createdb` и `pg_restore` без `--create` — теряли настройку базы `repracer.region`, и восстановленная база
+не заводила ни одного тенанта (с публичным демо консоль не стартовала бы). Скрипт восстанавливает с `--create`.
 
 **Журналы ≥ 12 месяцев.** Таймер хоста `repracer-logs-archive.timer` (файлы в [systemd/](systemd/)) раз в сутки выгружает журналы
 контейнеров всех проектов (`docker compose -p <проект> logs`) от отметки «выгружено по» (`<проект>/.until`) до полуночи — пропущенные

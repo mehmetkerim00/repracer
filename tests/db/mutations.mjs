@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0168_verify_schema_invariants_v44.sql';
+const VERIFY = 'migrations/0170_verify_schema_invariants_v44.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -1861,7 +1861,8 @@ export const STEP45_ROWS = [
       m(replaceInFunction(DISCOVER, "AND om.price_write_scope_id = scope AND om.status <> 'ENDED'", 'AND om.price_write_scope_id = scope'),
         smoke('an ended offer listed again returns to the catalog on its own write scope (step 45)')),
       // Находка 7 ревью шага 45: первый пропуск «уже сопоставлено» тоже смотрит на статус — своя мутация
-      m(replaceInFunction(DISCOVER, "AND om.status <> 'ENDED'\n                             AND (coalesce(om.external_sku", 'AND (coalesce(om.external_sku'),
+      // Шаг 65: проверка переписана без выражения над столбцами (0169) — фрагмент мутации тот же по смыслу: снят только статус
+      m(replaceInFunction(DISCOVER, "AND om.status <> 'ENDED'\n                             -- Шаг 65:", '-- Шаг 65:'),
         smoke('an ended offer listed again returns to the catalog on its own write scope (step 45)')),
     ],
   },
@@ -1898,7 +1899,8 @@ export const STEP47_ROWS = [
       m(replaceInFunction(DISCOVER, "AND om.status IN ('MIGRATION_REQUIRED', 'INELIGIBLE') AND om.external_sku = o.external_sku", 'AND false'),
         smoke('eBay listings enter the catalog with an honest write status (step 47, Р-164)')),
       // Находка 3 ревью шага 47: SKU-less листинг узнаётся по номеру листинга и не дублируется
-      m(replaceInFunction(DISCOVER, "OR (acc.channel = 'EBAY' AND o.external_sku IS NULL AND om.external_listing_id = o.external_listing_id)", ''),
+      // Шаг 65 (0169): ветка eBay — своя проверка; мутация та же по смыслу — ветку «листинг без SKU узнаётся по номеру листинга» выключить
+      m(replaceInFunction(DISCOVER, "OR (acc.channel = 'EBAY' AND o.external_sku IS NULL AND EXISTS", 'OR (false AND EXISTS'),
         smoke('eBay listings enter the catalog with an honest write status (step 47, Р-164)')),
       m(dropConstraint('offer_mapping_ebay_identity', 'tenant_data.offer_mapping'),
         smoke('an eBay mapping without a listing id (step 47)')),
