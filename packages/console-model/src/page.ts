@@ -1,4 +1,5 @@
 import type { Messages } from './i18n/index.ts';
+import type { ConsoleScope, StandWorld } from './world.ts';
 
 /**
  * Р-136 (шаг 29): страницы списков — на сервере. Живой прогон через консоль на каталоге целевого клиента (10 000 предложений)
@@ -81,4 +82,15 @@ export function pageOf<T>(items: readonly T[], query: ListQuery, m: Messages): {
  */
 export function selectionAfterPaging(selected: readonly string[], shownPageKey: string, pageKey: string): string[] {
   return shownPageKey === pageKey ? [...selected] : [];
+}
+
+/**
+ * Шаг 67 (OQ-248): страница каталога мира — та, что выбрала база (`world.catalogPage`: единицы и смещение, итог по каталогу), или
+ * `pageOf` по каталогу целиком. Строки — ровно единицы базы в её порядке: мир, проигнорировавший список, не превратит страницу в каталог
+ */
+export function catalogPageOf(world: StandWorld, query: ListQuery, m: Messages): { items: ConsoleScope[]; page: PageInfo } {
+  const c = world.catalogPage;
+  if (!c) return pageOf(world.state.scopes, query, m);
+  const byId = new Map(world.state.scopes.map((sc) => [sc.writeScopeId, sc]));
+  return { items: c.scopeIds.flatMap((id) => { const sc = byId.get(id); return sc ? [sc] : []; }), page: pageInfo({ ...query, offset: c.offset }, c.total, m) };
 }

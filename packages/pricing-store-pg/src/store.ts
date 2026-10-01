@@ -47,7 +47,7 @@ import type {
   ProductKey,
   ScopeEvaluationContext,
   ShiftWindow,
-  SnapshotOutcome, ConsoleAuditRow, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, ConsoleStateOptions, ConsoleCatalogPage, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveredCatalogOffer, DiscoveryStop, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, ChannelObservation} from '@repracer/pricing-pipeline';
+  SnapshotOutcome, ConsoleAuditRow, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, ConsoleStateOptions, ConsoleCatalogPage, ConsoleCatalogFactsQuery, ConsoleCatalogFacts, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveredCatalogOffer, DiscoveryStop, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, ChannelObservation} from '@repracer/pricing-pipeline';
 import { FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT, stalestFirst } from '@repracer/pricing-pipeline';
 import { inTenant, RollbackWith, type PgPool, type Tx } from './db.ts';
 import { PgWriteQueueStore } from './write-queue.ts';
@@ -83,6 +83,8 @@ export interface PgPricingStoreOptions {
 }
 
 const dbCondition = (c: string) => c.toUpperCase();
+/** Форма идентификатора базы — строка не этой формы не находится (вместо отказа приведения типа) */
+const UUID_FORM = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const portCondition = (c: string) => c.toLowerCase();
 const iso = (v: string) => new Date(v).toISOString();
 
@@ -114,6 +116,19 @@ const SCOPE_FROM = `
     LEFT JOIN channel_data.pricing_strategy_undercut ud
       ON ud.tenant_id = ps.tenant_id AND ud.pricing_strategy_id = ps.pricing_strategy_id AND ud.version = ps.version
    WHERE m.tenant_id = $1 AND m.status <> 'ENDED'`;
+
+/**
+ * Шаг 67: каталог НАЗВАННЫХ единиц (страница экрана, найденные, примеры) — каждая таблица каталога ограничена своим списком: единица,
+ * предложение и состояние — списком единиц, товар — списком их товаров. Тогда при любом порядке соединений и любой статистике каждая
+ * таблица отдаёт не больше размера списка. Свободный план без статистики (свежий каталог: демо, новый тенант, первый импорт) соединял
+ * предложения тенанта × товары тенанта и отбрасывал миллионы строк: мир страницы демо из 200 предложений — 1 999 950 строк и 10 с на 50
+ * единицах. Закреплённый порядок соединений не помог — планировщик меняет стороны соединения местами: на 10 000 он взял внешними единицы
+ * тенанта и на каждую заново сканировал его предложения (22 с на 50 единицах, живой прогон консоли). Хеш-соединения, как у каталога
+ * целиком, прошли бы весь каталог ради страницы (ревью шага 66, находка 8)
+ */
+const listedScopes = (idsParam: string, productIdsParam: string) =>
+  ` AND s.write_scope_id = ANY (${idsParam}::uuid[]) AND m.price_write_scope_id = ANY (${idsParam}::uuid[])` +
+  ` AND ss.write_scope_id = ANY (${idsParam}::uuid[]) AND p.product_id = ANY (${productIdsParam}::uuid[])`;
 
 /** Последние версии границ на обоих уровнях — как tenant_data.effective_min_price / effective_max_price; alias sc */
 const BOUNDS_ROWS = `
@@ -1985,7 +2000,8 @@ export class PgPricingStore implements PricingStore {
        * сервера и 6,4 с на КАЖДЫЙ запрос экрана, хотя экран показывает 50 строк. Справочники и состояния тенанта (остановки,
        * стратегии, курсы) малы и читаются целиком: экран без них не построить
        */
-      const only = options.scopeIds ? [...options.scopeIds] : null;
+      // Шаг 67: номер не той формы (строка из запроса экрана) — не найден, а не отказ приведения типа
+      const only = options.scopeIds ? options.scopeIds.filter((id) => UUID_FORM.test(id)) : null;
       /**
        * Каталог тенанта читается ЦЕЛИКОМ одним запросом, и верный план для него — хеш-соединения при любой статистике.
        * Сразу после загрузки каталога (новый тенант, демо, первый импорт) статистики у таблиц ещё нет, планировщик
@@ -1994,12 +2010,17 @@ export class PgPricingStore implements PricingStore {
        * экрана 10 с (найдено повторными прогонами шага 35, план — auto_explain). Коррелированные подзапросы по единице
        * это не затрагивает: они не соединения. Настройка возвращается сразу после запроса.
        */
-      // Шаг 66 (ревью, находка 8): для страницы из полусотни единиц хеш-соединения прошли бы все предложения тенанта — там вложенные циклы
-      // по индексу единицы и есть верный план
+      /**
+       * Шаг 66 (ревью, находка 8): для страницы из полусотни единиц хеш-соединения прошли бы все предложения тенанта. Шаг 67: но и
+       * свободный план страницы без статистики — квадрат (10–22 с на 50 единицах): каждая таблица каталога ограничена своим списком
+       * (`listedScopes`), товары — списком товаров названных единиц, прочитанным точечно
+       */
+      const onlyProducts = only ? (await q(`SELECT DISTINCT product_id FROM tenant_data.write_scope WHERE tenant_id = $1 AND write_scope_id = ANY ($2::uuid[])`, [tenantId, only]))
+        .map((r) => String(r.product_id)) : null;
       if (!only) await q(`SET LOCAL enable_nestloop = off`, []);
-      const [scopeJson] = await q(`WITH sc AS (SELECT ${SCOPE_COLUMNS} ${SCOPE_FROM}${only ? ' AND s.write_scope_id = ANY($3::uuid[])' : ''})
-        SELECT coalesce(json_agg(${SCOPE_JSON} ORDER BY sc.created_at, sc.write_scope_id), '[]') AS scopes FROM sc`, only ? [tenantId, now, only] : [tenantId, now]);
-      await q(`SET LOCAL enable_nestloop = on`, []);
+      const [scopeJson] = await q(`WITH sc AS (SELECT ${SCOPE_COLUMNS} ${SCOPE_FROM}${only ? listedScopes('$3', '$4') : ''})
+        SELECT coalesce(json_agg(${SCOPE_JSON} ORDER BY sc.created_at, sc.write_scope_id), '[]') AS scopes FROM sc`, only ? [tenantId, now, only, onlyProducts] : [tenantId, now]);
+      if (!only) await q(`SET LOCAL enable_nestloop = on`, []);
       const scopes = ((scopeJson?.scopes ?? []) as Row[]).map((j): ConsoleScopeRow => {
         const ctx = toScopeContext(j, now);
         const c = j.cost as Row | null;
@@ -2038,10 +2059,19 @@ export class PgPricingStore implements PricingStore {
           haltId: r.pricing_halt_id, kind: r.kind, outcome: r.outcome, sampleSize: r.sample_size, failedCount: r.failed_count, details: r.details,
           ...(r.membership_id ? { membershipId: r.membership_id } : {}), ...(r.note ? { note: r.note } : {}), at: r.reviewed_at,
         }));
+      /**
+       * Шаг 67 (п. 3): у мира со списком единиц — наблюдения только этих единиц. У мигрирующего продавца Amazon это строка на
+       * предложение, и мир страницы из полусотни единиц читал все 50 000. Ключ — тот, по которому их сопоставляет экран
+       * (`channelNotes`: аккаунт, витрина, номер единицы); список предложений с ценообразованием канала по всему каталогу экран
+       * стратегий берёт фактами каталога
+       */
+      const onlyKeys = (cols: string, keys: string) => only
+        ? ` AND (${cols}) IN (SELECT ${keys} ${SCOPE_FROM}${listedScopes('$2', '$3')})` : '';
       const offerChannelPricing = (await q(`SELECT DISTINCT ON (channel_account_id, marketplace, external_sku)
                                                    channel_account_id, marketplace, external_sku, automated_pricing, channel_bounds, source, observed_at
                                               FROM channel_data.offer_channel_pricing WHERE tenant_id = $1
-                                             ORDER BY channel_account_id, marketplace, external_sku, observed_at DESC, recorded_at DESC`))
+                                                   ${onlyKeys('channel_account_id, marketplace, external_sku', `s.channel_account_id, m.marketplace, coalesce(m.external_unit_id, m.external_sku, '')`)}
+                                             ORDER BY channel_account_id, marketplace, external_sku, observed_at DESC, recorded_at DESC`, only ? [tenantId, only, onlyProducts] : [tenantId]))
         .map((r): ConsoleOfferChannelPricingRow => ({
           channelAccountId: r.channel_account_id, marketplace: r.marketplace, externalSku: r.external_sku, automatedPricing: r.automated_pricing,
           channelBounds: r.channel_bounds, source: r.source, observedAt: iso(r.observed_at),
@@ -2052,7 +2082,8 @@ export class PgPricingStore implements PricingStore {
                                         FROM channel_data.offer_pricing_health h
                                         LEFT JOIN platform.marketplace m ON m.channel = h.channel AND m.marketplace = h.marketplace
                                        WHERE h.tenant_id = $1
-                                       ORDER BY h.channel_account_id, h.marketplace, h.channel_product_ref, h.condition, h.event_time DESC, h.recorded_at DESC`))
+                                             ${onlyKeys('h.channel_account_id, h.marketplace, h.channel_product_ref, lower(h.condition)', `s.channel_account_id, m.marketplace, coalesce(m.channel_product_ref, ''), lower(m.condition)`)}
+                                       ORDER BY h.channel_account_id, h.marketplace, h.channel_product_ref, h.condition, h.event_time DESC, h.recorded_at DESC`, only ? [tenantId, only, onlyProducts] : [tenantId]))
         .map((r): ConsolePricingHealthRow => ({
           channelAccountId: r.channel_account_id, marketplace: r.marketplace, channelProductRef: r.channel_product_ref, condition: r.condition, issueType: r.issue_type,
           occurredAt: iso(r.event_time),
@@ -2102,6 +2133,16 @@ export class PgPricingStore implements PricingStore {
   }
 
   /**
+   * Запросы по каталогу ЦЕЛИКОМ (страница каталога и её итоги, факты каталога) — хеш-соединения при любой статистике, как у каталога
+   * состояния (шаг 35). Сразу после посева (демо, новый тенант, первый импорт) статистики у таблиц нет, планировщик ждёт по строке и
+   * соединяет предложения, товары и единицы вложенными циклами: страница каталога демо из 200 предложений — 7 979 900 отброшенных
+   * строк и 9,6 с, на CI экран товаров гостя шёл 19,2 с при пределе 10 (быстрый прогон шага 66). Действует до конца транзакции
+   */
+  private static async wholeCatalogPlan(tx: Tx): Promise<void> {
+    await tx.query('SET LOCAL enable_nestloop = off');
+  }
+
+  /**
    * Шаг 66 (OQ-248): страница каталога и итоги по всему каталогу — одним обращением к базе. Состояние единицы — те же правила и те же
    * фрагменты, что у каталога состояния и у `enabledCell` экрана товаров: выключено (OFF, Smart Pricing), остановлено (остановка
    * человеком, недоверие каналу, единица не ACTIVE, системная остановка при стратегии из цен конкурентов), иначе включено.
@@ -2110,6 +2151,7 @@ export class PgPricingStore implements PricingStore {
   async consoleCatalogPage(tenantId: string, now: Instant, query: { offset: number; limit: number }): Promise<ConsoleCatalogPage> {
     void now;
     return inTenant(this.admin('consoleCatalogPage'), tenantId, async (tx) => {
+      await PgPricingStore.wholeCatalogPlan(tx);
       const { rows: [t] } = await tx.query(
         `WITH sc AS (SELECT s.write_scope_id, s.channel_account_id, m.marketplace, s.pricing_mode, s.status, ps.params ->> 'type' AS strategy_type ${SCOPE_FROM}),
               tone AS (
@@ -2130,6 +2172,7 @@ export class PgPricingStore implements PricingStore {
                       AND w.write_scope_id IN (SELECT write_scope_id FROM sc)
                     ORDER BY w.write_scope_id, w.version DESC) lw
                   WHERE lw.status IN ('PENDING', 'DISPATCHED', 'ACCEPTED') OR (lw.status = 'FAILED' AND lw.next_attempt_at IS NOT NULL))::int AS applying
+                , EXISTS (SELECT 1 FROM channel_data.offer_pricing_health h WHERE h.tenant_id = $1) AS pricing_health
            FROM tone`, [tenantId, [...COMPETITOR_DERIVED_RULES]]);
       const total = Number(t!.total);
       // Страница за концом списка — последняя, как у `pageOf` (ревью шага 29, находка 13)
@@ -2140,7 +2183,101 @@ export class PgPricingStore implements PricingStore {
       return {
         scopeIds: rows.map((r) => String(r.write_scope_id)), offset, total,
         enabled: Number(t!.enabled), stopped: Number(t!.stopped), off: Number(t!.off), applying: Number(t!.applying),
+        pricingHealthIssues: t!.pricing_health === true,
       };
+    });
+  }
+
+  /**
+   * Шаг 67 (OQ-248): то, что экран знает о каталоге ЦЕЛИКОМ, — запросами базы по тем же фрагментам, что каталог состояния
+   * (`SCOPE_FROM`, порядок `created_at, write_scope_id`). Каждая часть — правило экрана, переписанное запросом: поиск предложения
+   * (`offers`), использование стратегий и ценообразование канала (`strategiesView`), влияние остановки (`impactOf`), первая единица
+   * по ключу снимка (`rejectedView`). Равенство с правилами экрана на всех мирах стенда держит `console-screens-targeted.pg.test.ts`
+   */
+  async consoleCatalogFacts(tenantId: string, query: ConsoleCatalogFactsQuery): Promise<ConsoleCatalogFacts> {
+    return inTenant(this.admin('consoleCatalogFacts'), tenantId, async (tx) => {
+      await PgPricingStore.wholeCatalogPlan(tx);
+      const ids = (rows: Row[]) => rows.map((r) => String(r.write_scope_id));
+      const { rows: [t] } = await tx.query(`SELECT count(*)::int AS total FROM (SELECT 1 ${SCOPE_FROM}) x`, [tenantId]);
+      const firstIds = query.first ? ids((await tx.query(`SELECT s.write_scope_id ${SCOPE_FROM} ORDER BY s.created_at, s.write_scope_id LIMIT $2`, [tenantId, query.first])).rows) : [];
+      let search: ConsoleCatalogFacts['search'] = null;
+      if (query.search) {
+        const { q, limit, labelTemplate, channelNames, unknownChannel } = query.search;
+        // Подпись экрана: `unitLabel(канал, витрина, номер)` — шаблоном с подстановками; подстрока — strpos, без шаблонов LIKE
+        const { rows: [r] } = await tx.query(
+          `WITH sc AS (SELECT s.write_scope_id, s.created_at, coalesce(m.external_unit_id, m.external_sku, '') AS unit, coalesce(m.channel_product_ref, '') AS ref,
+                              coalesce(p.gtin, '') AS gtin, m.marketplace, coalesce($3::jsonb ->> s.channel, $4) AS channel_name ${SCOPE_FROM}),
+                hit AS (SELECT write_scope_id, created_at FROM sc
+                         WHERE $2 = '' OR strpos(lower(replace(replace(replace($5, '{c}', channel_name), '{m}', marketplace), '{u}', unit)), $2) > 0
+                            OR strpos(lower(unit), $2) > 0 OR strpos(lower(ref), $2) > 0 OR strpos(lower(gtin), $2) > 0)
+           SELECT (SELECT count(*) FROM hit)::int AS total,
+                  coalesce((SELECT array_agg(x.write_scope_id::text ORDER BY x.created_at, x.write_scope_id)
+                              FROM (SELECT * FROM hit ORDER BY created_at, write_scope_id LIMIT $6) x), '{}') AS ids`,
+          [tenantId, q, JSON.stringify(channelNames), unknownChannel, labelTemplate, limit]);
+        search = { ids: (r!.ids as string[]).map(String), total: Number(r!.total) };
+      }
+      let strategyUsage: ConsoleCatalogFacts['strategyUsage'] = null;
+      if (query.strategyUsage) {
+        // Стратегия у единицы — когда есть и ссылка, и её версия (как `toStrategy`)
+        const { rows } = await tx.query(
+          `WITH sc AS (SELECT s.write_scope_id, s.created_at, s.currency, s.pricing_strategy_id,
+                              row_number() OVER (PARTITION BY s.pricing_strategy_id ORDER BY s.created_at, s.write_scope_id) AS rn
+                         ${SCOPE_FROM} AND s.pricing_strategy_id IS NOT NULL AND ps.params IS NOT NULL)
+           SELECT pricing_strategy_id, count(*)::int AS n,
+                  array_agg(write_scope_id::text ORDER BY rn) FILTER (WHERE rn <= $2) AS examples,
+                  min(currency) FILTER (WHERE rn = 1) AS first_currency
+             FROM sc GROUP BY pricing_strategy_id`, [tenantId, query.strategyUsage.examples]);
+        strategyUsage = rows.map((r) => ({ strategyId: String(r.pricing_strategy_id), count: Number(r.n), exampleIds: (r.examples ?? []) as string[], firstCurrency: String(r.first_currency) }));
+      }
+      let stopImpact: ConsoleCatalogFacts['stopImpact'] = null;
+      if (query.stopImpact) {
+        // Как `impactOf`: включённые движком предложения цели и записи цены у них — ждущие или ждущие повтора
+        const { rows } = await tx.query(
+          // Ревью шага 67, находка 7: единица — один раз, как `Set` экрана, даже если у неё несколько действующих сопоставлений
+          `WITH sc AS (SELECT DISTINCT s.write_scope_id, s.channel_account_id, m.marketplace, s.pricing_mode ${SCOPE_FROM}),
+                pw AS (SELECT w.write_scope_id, count(*) AS n FROM tenant_data.channel_write w
+                        WHERE w.tenant_id = $1 AND w.field = 'PRICE' AND (w.status = 'PENDING' OR (w.status = 'FAILED' AND w.next_attempt_at IS NOT NULL))
+                        GROUP BY w.write_scope_id)
+           SELECT sc.channel_account_id, sc.marketplace, count(*)::int AS engine, coalesce(sum(pw.n), 0)::int AS pending
+             FROM sc LEFT JOIN pw ON pw.write_scope_id = sc.write_scope_id
+            WHERE sc.pricing_mode = 'ENGINE'
+            GROUP BY sc.channel_account_id, sc.marketplace`, [tenantId]);
+        stopImpact = rows.map((r) => ({ channelAccountId: String(r.channel_account_id), marketplace: String(r.marketplace), enginePrices: Number(r.engine), pendingWrites: Number(r.pending) }));
+      }
+      let channelPricing: ConsoleCatalogFacts['channelPricing'] = null;
+      if (query.channelPricing) {
+        // Как экран стратегий: последнее наблюдение каждого предложения, с правилом или границами канала; порядок — витрина, SKU
+        const { rows } = await tx.query(
+          `WITH latest AS (SELECT DISTINCT ON (channel_account_id, marketplace, external_sku)
+                                  channel_account_id, marketplace, external_sku, automated_pricing, channel_bounds, source, observed_at
+                             FROM channel_data.offer_channel_pricing WHERE tenant_id = $1
+                            ORDER BY channel_account_id, marketplace, external_sku, observed_at DESC, recorded_at DESC),
+                flagged AS (SELECT l.*, row_number() OVER (PARTITION BY channel_account_id ORDER BY marketplace, external_sku) AS rn,
+                                   count(*) OVER (PARTITION BY channel_account_id) AS total
+                              FROM latest l WHERE automated_pricing OR channel_bounds)
+           SELECT * FROM flagged WHERE rn <= $2 ORDER BY channel_account_id, rn`, [tenantId, query.channelPricing.limit]);
+        const byAccount = new Map<string, { channelAccountId: string; total: number; rows: ConsoleOfferChannelPricingRow[] }>();
+        for (const r of rows) {
+          const a = byAccount.get(r.channel_account_id) ?? { channelAccountId: String(r.channel_account_id), total: Number(r.total), rows: [] };
+          a.rows.push({ channelAccountId: r.channel_account_id, marketplace: r.marketplace, externalSku: r.external_sku, automatedPricing: r.automated_pricing,
+            channelBounds: r.channel_bounds, source: r.source, observedAt: iso(r.observed_at) });
+          byAccount.set(r.channel_account_id, a);
+        }
+        channelPricing = [...byAccount.values()];
+      }
+      let keyed: ConsoleCatalogFacts['keyed'] = null;
+      if (query.keys) {
+        // Как отчёт отклонённых: ПЕРВАЯ единица каталога с той же витриной, ссылкой товара и состоянием
+        const { rows } = await tx.query(
+          `SELECT DISTINCT ON (k.marketplace, k.ref, k.cond) k.marketplace, k.ref, k.cond, x.write_scope_id
+             FROM jsonb_to_recordset($2::jsonb) AS k(marketplace text, ref text, cond text)
+             JOIN (SELECT s.write_scope_id, s.created_at, m.marketplace, coalesce(m.channel_product_ref, '') AS ref, lower(m.condition) AS cond ${SCOPE_FROM}) x
+               ON x.marketplace = k.marketplace AND x.ref = k.ref AND x.cond = k.cond
+            ORDER BY k.marketplace, k.ref, k.cond, x.created_at, x.write_scope_id`,
+          [tenantId, JSON.stringify(query.keys.map((k) => ({ marketplace: k.marketplace, ref: k.channelProductRef, cond: k.condition })))]);
+        keyed = rows.map((r) => ({ marketplace: String(r.marketplace), channelProductRef: String(r.ref), condition: String(r.cond), writeScopeId: String(r.write_scope_id) }));
+      }
+      return { total: Number(t!.total), firstIds, search, strategyUsage, stopImpact, channelPricing, keyed };
     });
   }
 
@@ -2166,6 +2303,8 @@ export class PgPricingStore implements PricingStore {
   }
 
   async decisionDetail(tenantId: string, decisionId: string): Promise<DecisionDetail | null> {
+    // Шаг 67 (тест равенства экранов): номер из адреса не той формы — «не найдено» (404), а не 500 приведения типа в базе
+    if (!UUID_FORM.test(decisionId)) return null;
     return inTenant(this.admin('decisionDetail'), tenantId, async (tx) => {
       const { rows: [d] } = await tx.query(`SELECT ${DECISION_COLUMNS} ${DECISION_FROM} WHERE d.tenant_id = $1 AND d.price_decision_id = $2`, [tenantId, decisionId]);
       if (!d) return null;

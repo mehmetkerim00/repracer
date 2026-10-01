@@ -110,6 +110,8 @@ export const MEASURED_FILES = new Set([
   'tests/contract/src/scale.pg.test.ts',
   // Шаг 65: учение восстановления утверждает время «от файлов копии до ответа консоли» и держит под собой процесс консоли
   'packages/pricing-store-pg/test/disaster-recovery.pg.test.ts',
+  // Шаг 67 (ревью, находка 1): чтения каталога без статистики — пределы в секундах и контроль, упирающийся в предел времени
+  'packages/pricing-store-pg/test/console-fresh-stats.pg.test.ts',
 ]);
 
 /**

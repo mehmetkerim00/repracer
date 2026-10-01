@@ -2,9 +2,9 @@ import { DANGEROUS_DEVIATION_BP, STRATEGY_TYPES, type StrategyDefinition, type S
 import type { StrategyPreview } from '@repracer/pricing-pipeline';
 import { describe, type HumanReason } from './explain.ts';
 import type { Messages } from './i18n/index.ts';
-import { listQuery, pageOf, type ListQuery, type PageInfo } from './page.ts';
+import { catalogPageOf, listQuery, type ListQuery, type PageInfo } from './page.ts';
 import { channelNotes, strategyLabel } from './products.ts';
-import { gap, scopeById, unitOf, type Gap, type StandWorld, type StatusCell, type Tone, type UnitRef } from './world.ts';
+import { catalogFirst, gap, scopeById, unitOf, type ConsoleScope, type Gap, type StandWorld, type StatusCell, type Tone, type UnitRef } from './world.ts';
 
 /**
  * Экран стратегий (шаг 21): черновик стратегии проверяется на реальных единицах записи до сохранения — те же движок и Gate, что
@@ -115,9 +115,25 @@ export function strategiesView(world: StandWorld, m: Messages, canEdit: boolean,
     const known = latest.get(d.strategyId);
     if (!known || d.version > known.version) latest.set(d.strategyId, d);
   }
+  /**
+   * Шаг 67 (OQ-248): у мира выбранных единиц использование стратегий — фактами базы (сколько предложений и первые из них), а не
+   * проходом по каталогу целиком
+   */
+  const usage = world.catalogFacts?.strategyUsage ?? null;
+  const usageOf = (strategyId: string): { count: number; examples: ConsoleScope[]; firstCurrency: string | undefined } => {
+    if (!usage) {
+      const using = world.state.scopes.filter((s) => s.strategy?.strategyId === strategyId);
+      return { count: using.length, examples: using.slice(0, STRATEGY_SCOPE_EXAMPLES), firstCurrency: using[0]?.currency };
+    }
+    const u = usage.find((x) => x.strategyId === strategyId);
+    return {
+      count: u?.count ?? 0, firstCurrency: u?.firstCurrency,
+      examples: (u?.exampleIds ?? []).slice(0, STRATEGY_SCOPE_EXAMPLES).flatMap((id) => { const sc = scopeById(world, id); return sc ? [sc] : []; }),
+    };
+  };
   const strategies = [...latest.values()].map((d): StrategyListItem => {
-    const using = world.state.scopes.filter((s) => s.strategy?.strategyId === d.strategyId);
-    const label = strategyLabel(d, using[0]?.currency ?? world.state.scopes[0]?.currency ?? '', m);
+    const using = usageOf(d.strategyId);
+    const label = strategyLabel(d, using.firstCurrency ?? catalogFirst(world, 1)[0]?.currency ?? '', m);
     const versions = world.state.strategyVersions.filter((x) => x.strategyId === d.strategyId);
     const name = versions.find((x) => x.version === d.version)?.name ?? versions.at(-1)?.name ?? null;
     const member = (id: string | null) => {
@@ -138,15 +154,15 @@ export function strategiesView(world: StandWorld, m: Messages, canEdit: boolean,
     const latestMeta = versions.find((x) => x.version === d.version);
     return {
       strategyId: d.strategyId, version: d.version, name, label: label.label, detail: label.detail,
-      scopes: using.slice(0, STRATEGY_SCOPE_EXAMPLES).map((s) => ({ unit: unitOf(world, s, m), version: s.strategy!.version })),
-      scopeCount: using.length,
+      scopes: using.examples.map((s) => ({ unit: unitOf(world, s, m), version: s.strategy!.version })),
+      scopeCount: using.count,
       draft: { name: name ?? label.label, params: { ...d.params }, deadbandMinor: d.deadbandMinor },
       versions: allVersions,
       assignable: canEdit && (latestMeta?.status ?? 'ACTIVE') === 'ACTIVE',
     };
   }).sort((a, b) => b.scopeCount - a.scopeCount || a.strategyId.localeCompare(b.strategyId));
   // Р-136: список предложений — страницей; ответ экрана на каталоге целевого клиента был 3,7 МБ
-  const { items: shownScopes, page } = pageOf(world.state.scopes, listQuery(query), m);
+  const { items: shownScopes, page } = catalogPageOf(world, listQuery(query), m);
   const scopes = shownScopes.map((s): StrategyScopeItem => {
     const notes = channelNotes(world, s, m).filter((n) => n.code !== 'PRICING_HEALTH');
     return {
@@ -156,12 +172,27 @@ export function strategiesView(world: StandWorld, m: Messages, canEdit: boolean,
       canUnassign: canEdit && s.strategy !== null && s.pricingMode !== 'ENGINE',
     };
   });
-  // Список — первые CHANNEL_PRICING_SHOWN и общее число: ответ экрана не растёт с каталогом [Р-136]
+  /**
+   * Список — первые CHANNEL_PRICING_SHOWN и общее число: ответ экрана не растёт с каталогом [Р-136]. Шаг 67 (п. 3): у мира выбранных
+   * единиц наблюдения ценообразования канала — только этих единиц, и список по всему каталогу приходит фактами базы: первые на аккаунт
+   * и сколько их у аккаунта
+   */
+  const factsPricing = world.catalogFacts?.channelPricing ?? null;
+  let channelPricingTotal = 0;
   const channelPricingOffers = world.accounts.flatMap((a) => {
     const channel = m.values[a.channel as keyof typeof m.values] ?? a.channel;
-    const newest = new Map<string, (typeof world.state.offerChannelPricing)[number]>();
-    for (const o of world.state.offerChannelPricing.filter((x) => x.channelAccountId === a.channelAccountId)) newest.set(`${o.marketplace}|${o.externalSku}`, o);
-    return [...newest.values()].filter((o) => o.automatedPricing || o.channelBounds).map((o) => ({
+    let flagged: Array<(typeof world.state.offerChannelPricing)[number]>;
+    if (factsPricing) {
+      const f = factsPricing.find((x) => x.channelAccountId === a.channelAccountId);
+      flagged = f?.rows ?? [];
+      channelPricingTotal += f?.total ?? 0;
+    } else {
+      const newest = new Map<string, (typeof world.state.offerChannelPricing)[number]>();
+      for (const o of world.state.offerChannelPricing.filter((x) => x.channelAccountId === a.channelAccountId)) newest.set(`${o.marketplace}|${o.externalSku}`, o);
+      flagged = [...newest.values()].filter((o) => o.automatedPricing || o.channelBounds);
+      channelPricingTotal += flagged.length;
+    }
+    return flagged.map((o) => ({
       label: m.ui.common.unitLabel(channel, o.marketplace, o.externalSku),
       detail: o.automatedPricing ? m.ui.channelNotes.automatedPricingDetail(m.when(o.observedAt)) : m.ui.channelNotes.channelBoundsDetail(m.when(o.observedAt)),
       tone: (o.automatedPricing ? 'stop' : 'warn') as Tone,
@@ -169,10 +200,10 @@ export function strategiesView(world: StandWorld, m: Messages, canEdit: boolean,
   });
   return {
     worldId: world.id, strategies, scopes, page, canEdit,
-    channelPricingOffers: channelPricingOffers.slice(0, CHANNEL_PRICING_SHOWN), channelPricingOffersTotal: channelPricingOffers.length,
+    channelPricingOffers: channelPricingOffers.slice(0, CHANNEL_PRICING_SHOWN), channelPricingOffersTotal: channelPricingTotal,
     gaps: [
       gap(m, 'POSITION_STRATEGY'),
-      ...(channelPricingOffers.length > 0 ? [gap(m, 'CHANNEL_PRICING_OFFERS_WITHOUT_SCOPE')] : []),
+      ...(channelPricingTotal > 0 ? [gap(m, 'CHANNEL_PRICING_OFFERS_WITHOUT_SCOPE')] : []),
     ],
   };
 }

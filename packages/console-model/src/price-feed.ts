@@ -4,7 +4,7 @@ import { OFFER_CHOICES } from './compliance.ts';
 import { strategyLabel } from './products.ts';
 import { describe, type HumanReason } from './explain.ts';
 import { explanationOf } from './trace.ts';
-import { gap, scopeById, unitOf, type Gap, type StandWorld, type Tone, type UnitRef } from './world.ts';
+import { catalogFirst, catalogTotal, gap, scopeById, unitOf, type Gap, type StandWorld, type Tone, type UnitRef } from './world.ts';
 
 /**
  * Лента изменений цен (шаг 21): каждая запись цены в канал — от решения до итога канала, новые сверху. Источник — записи и решения
@@ -131,8 +131,8 @@ export function priceFeed(world: StandWorld, m: Messages, filter: FeedQuery, pag
     query: { writeScopeId: filter.writeScopeId ?? null, status: filter.status ?? null, days: filter.days ?? null, offset: query.offset, limit: query.limit },
     page: { from, to, total: page.total, text: f.page(from, to, page.total), hasPrevious: query.offset > 0, hasNext: to < page.total },
     // Р-136: фильтр по офферу показывает первые N — на каталоге целевого клиента список фильтра сам весил мегабайты
-    offers: world.state.scopes.slice(0, OFFER_CHOICES).map((s) => unitOf(world, s, m)),
-    offersTotal: world.state.scopes.length,
+    offers: catalogFirst(world, OFFER_CHOICES).map((s) => unitOf(world, s, m)),
+    offersTotal: catalogTotal(world),
     gaps: [gap(m, 'FEED_WINDOW'), gap(m, 'PRICE_HISTORY_NOT_READ')],
   };
 }

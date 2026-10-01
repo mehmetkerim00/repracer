@@ -105,7 +105,11 @@ export function rejectedView(world: StandWorld, slice: InterventionSlice, m: Mes
   }
 
   for (const s of slice.rejectedSnapshots) {
-    const scope = state.scopes.find((x) => x.marketplace === s.key.marketplace && x.channelProductRef === s.key.channelProductRef && x.condition === s.key.condition);
+    // Шаг 67 (OQ-248): у мира выбранных единиц первую единицу каталога по ключу снимка называет база
+    const keyed = world.catalogFacts?.keyed;
+    const scope = keyed
+      ? (() => { const k = keyed.find((x) => x.marketplace === s.key.marketplace && x.channelProductRef === s.key.channelProductRef && x.condition === s.key.condition); return k ? scopeById(world, k.writeScopeId) : undefined; })()
+      : state.scopes.find((x) => x.marketplace === s.key.marketplace && x.channelProductRef === s.key.channelProductRef && x.condition === s.key.condition);
     rows.push({
       kind: s.verdict === 'HALT_CHANNEL' ? 'HALT' : 'INPUT', tone: 'stop', at: m.when(s.receivedAt), sortAt: s.receivedAt,
       unit: scope ? unitOf(world, scope, m) : null, productRef: r.productRef(s.key.marketplace, s.key.channelProductRef),

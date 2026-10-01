@@ -5,13 +5,13 @@ import { parseStockSheet } from '@repracer/stock-sync';
 import { createServer, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import {
-  boundsDiffView, boundsView, bulkJobsView, bulkJobView, can, canCancelBulkJob, channelNotes, onboardingView, complianceView, fingerprint, costImportView, currentStrategies, listQuery, MAX_SCOPES, OFFER_CHOICES, pageOf, parseListQuery, type ListQuery, discountCheckView, dangerousReport, decisionListView, decisionTrace, describe, expandBoundsEdit, importTargets, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, scopeById, unitOf,
+  boundsDiffView, boundsView, bulkJobsView, bulkJobView, can, canCancelBulkJob, catalogPageOf, catalogTotal, CHANNEL_PRICING_SHOWN, channelNotes, STRATEGY_SCOPE_EXAMPLES, onboardingView, complianceView, fingerprint, costImportView, currentStrategies, listQuery, MAX_SCOPES, OFFER_CHOICES, pageOf, parseListQuery, type ListQuery, discountCheckView, dangerousReport, decisionListView, decisionTrace, describe, expandBoundsEdit, importTargets, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, scopeById, unitOf,
   parseStrategyDraft, planStop, priceFeed, productList, rejectedView, REPORT_PERIODS_DAYS, stopView, strategiesView,
   type Locale, type Messages, type StandWorld, type StopTarget, type Viewer,
   productPage, clampOffset, feedPageQuery, REJECTED_WINDOW_DAYS, stockView, stockDivergencesView, stockReturnsView, shadowView, SHADOW_PERIOD_DAYS,
 } from '@repracer/console-model';
 import { buildPreview, readTable, suggestMapping, TABLE_ENCODINGS } from '@repracer/cost-import';
-import type { BulkJobInput, ConsoleCatalogPage, DiscountAnnouncementInput } from '@repracer/pricing-pipeline';
+import type { BulkJobInput, ConsoleCatalogFacts, ConsoleCatalogFactsQuery, ConsoleCatalogPage, DiscountAnnouncementInput, DiscountAnnouncementRow, InterventionSlice } from '@repracer/pricing-pipeline';
 import {
   buildStandWorlds, memoryStandDirectory, pgStandJoinMember, pgStandUsers, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_EMAILS, STAND_ISSUER, type LiveWorld,
 } from '@repracer/contract-tests/stand';
@@ -166,15 +166,16 @@ function parseDiscount(world: StandWorld, raw: unknown): DiscountAnnouncementInp
  * Р-123, Р-124: экран комплаенса — объявленные скидки с повторной проверкой по текущей истории и глубина видимой истории каждого оффера
  * на сейчас
  */
-async function compliance(live: LiveWorld, world: StandWorld, m: Messages, query?: ListQuery) {
-  const announcements = await live.store.discountAnnouncements(world.tenantId);
+async function compliance(live: LiveWorld, world: StandWorld, m: Messages, query?: ListQuery, prefetched?: readonly DiscountAnnouncementRow[]) {
+  const announcements = prefetched ? [...prefetched] : await live.store.discountAnnouncements(world.tenantId);
   const rechecks = new Map(await Promise.all(announcements.map(async (a) => [a.announcementId, await live.store.omnibusCheck(world.tenantId, a.writeScopeId, a.startsAt)] as const)));
   const now = live.clock.iso();
   /**
    * Р-136: глубина истории считается только у ПОКАЗАННЫХ предложений. На каталоге целевого клиента этот экран спрашивал базу
    * десять тысяч раз подряд: 24,8 секунды и 8,7 МБ ответа (живой прогон через консоль, шаг 29).
    */
-  const { items: shown } = pageOf(world.state.scopes, listQuery(query), m);
+  // Шаг 67 (OQ-248): страница — та, что выбрала база, у мира выбранных единиц
+  const { items: shown } = catalogPageOf(world, listQuery(query), m);
   const depth = new Map(await Promise.all(shown.map(async (sc) => [sc.writeScopeId, await live.store.omnibusCheck(world.tenantId, sc.writeScopeId, now)] as const)));
   return complianceView(world, announcements, rechecks, m, depth, listQuery(query));
 }
@@ -204,6 +205,11 @@ export interface StandServices {
    * в новом браузере (без куки) видел немецкий первый экран, а прогоны этого не видели: они шлют куку языка в каждом запросе
    */
   defaultLocale?: Locale;
+  /**
+   * Шаг 67 (OQ-248): ТОЛЬКО тест равенства — каждый экран строится из каталога целиком, без страниц и фактов базы. Ответы обоих путей
+   * обязаны совпадать (`console-screens-targeted.pg.test.ts`)
+   */
+  fullCatalogScreens?: boolean;
 }
 
 export function createStandApi(worlds: readonly LiveWorld[], identity: StandIdentity, services: StandServices = {}) {
@@ -551,28 +557,267 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     }
 
     /**
-     * Шаг 66 (OQ-248): экран не грузит каталог целиком. На 50 000 предложений состояние каталога — 41,5 МБ памяти сервера и 6,4 с на
-     * КАЖДЫЙ запрос экрана, хотя экран показывает 50 строк. Товары и индекс границ: страницу и итоги по всему каталогу выбирает база
-     * (`consoleCatalogPage`), мир строится только из единиц страницы. Остаткам и тени каталог не нужен вовсе — их строки читает своё
-     * хранилище страницей. Хранилищу в памяти (миры сценариев) страница базы не нужна: его каталог мал
+     * Шаги 66–67 (OQ-248): экран не грузит каталог целиком. На 50 000 предложений состояние каталога — 41,5 МБ памяти сервера и 4,4–6,4 с
+     * на КАЖДЫЙ запрос экрана, хотя экран показывает 50 строк. Каждый экран называет единицы, которые покажет (страницу, найденные,
+     * примеры, единицы отчёта), и спрашивает базу о каталоге целиком только то, что ему нужно (`consoleCatalogFacts`): число и первые
+     * предложения, поиск, использование стратегий, влияние остановки, ценообразование канала. Хранилищу в памяти (миры сценариев) это не
+     * нужно — его каталог мал. Тест равенства (`fullCatalogScreens`) строит те же экраны из каталога целиком и сравнивает ответы
      */
-    let catalog: ConsoleCatalogPage | null = null;
-    let catalogQuery: ListQuery | null = null;
-    if (req.method === 'GET' && (parts[3] === 'products' || (parts[3] === 'bounds' && parts[4] === undefined)) && live.store.consoleCatalogPage) {
-      catalogQuery = parseListQuery(url.searchParams);
-      if (!catalogQuery) return fail(400, 'BAD_PAGE', s.badRequest);
-      catalog = await live.store.consoleCatalogPage(live.tenantId, live.clock.iso() as never, catalogQuery);
-    }
-    const noCatalog = req.method === 'GET' && (parts[3] === 'stock' || parts[3] === 'shadow');
-    const world = await live.view(viewer, catalog ? { scopeIds: catalog.scopeIds } : noCatalog ? { scopeIds: [] } : undefined);
+    const targeted = !services.fullCatalogScreens && live.store.consoleCatalogFacts && live.store.consoleCatalogPage ? live.store : null;
     /**
-     * Р-151: признак демо — из БАЗЫ (`tenant.demo` в состоянии консоли), а не из настройки стенда. Первая редакция брала его
-     * из поля, выставленного руками, и столбец базы не читал никто: забытая настройка сняла бы метку молча (ревью шага 34,
-     * находка 4).
+     * Мир из названных единиц. Номер из запроса может быть любой строкой: единицу неверной формы хранилище не находит (а не роняет
+     * приведением типа), и экран отвечает тем же «не найдено», что и с каталогом целиком
      */
-    world.demo = world.state.demo;
+    const load = async (scopeIds: ReadonlyArray<unknown> | null, extra: { catalogPage?: ConsoleCatalogPage | null; facts?: ConsoleCatalogFacts | null } = {}): Promise<StandWorld> => {
+      const ids = targeted && scopeIds ? [...new Set(scopeIds.filter((x): x is string => typeof x === 'string' && x !== ''))] : null;
+      const w = await live.view(viewer, ids ? { scopeIds: ids } : undefined);
+      /**
+       * Р-151: признак демо — из БАЗЫ (`tenant.demo` в состоянии консоли), а не из настройки стенда. Первая редакция брала его
+       * из поля, выставленного руками, и столбец базы не читал никто: забытая настройка сняла бы метку молча (ревью шага 34,
+       * находка 4).
+       */
+      w.demo = w.state.demo;
+      if (targeted && extra.catalogPage) w.catalogPage = extra.catalogPage;
+      if (targeted && extra.facts) w.catalogFacts = extra.facts;
+      return w;
+    };
+    const facts = (query: ConsoleCatalogFactsQuery): Promise<ConsoleCatalogFacts | null> => targeted ? targeted.consoleCatalogFacts!(live.tenantId, query) : Promise.resolve(null);
+    const catalogPageFor = (query: ListQuery): Promise<ConsoleCatalogPage | null> =>
+      targeted ? targeted.consoleCatalogPage!(live.tenantId, live.clock.iso() as never, query) : Promise.resolve(null);
+    /** Единицы среза вмешательств: решения, намерения, снятые записи — отчёты отклонённых и опасных изменений */
+    const sliceScopeIds = (slice: InterventionSlice) => [...slice.decisions, ...slice.intents, ...slice.endedWrites].map((x) => x.writeScopeId);
     const screen = parts[3];
     const param = parts[4] ?? null;
+    /** Экраны, которые отдают и маршруты записи (ответ после действия) — одним построителем */
+    const strategiesScreen = async (canEdit: boolean, query?: ListQuery) => {
+      const [page, f] = await Promise.all([
+        catalogPageFor(listQuery(query)),
+        facts({ first: 1, strategyUsage: { examples: STRATEGY_SCOPE_EXAMPLES }, channelPricing: { limit: CHANNEL_PRICING_SHOWN } }),
+      ]);
+      const world = await load(page && f ? [...page.scopeIds, ...f.firstIds, ...(f.strategyUsage ?? []).flatMap((u) => u.exampleIds)] : null, { catalogPage: page, facts: f });
+      return strategiesView(world, m, canEdit, query);
+    };
+    const stopScreen = async () => {
+      const world = await load([], { facts: await facts({ stopImpact: true }) });
+      return stopView(world, await live.store.auditRecent(world.tenantId, AUDIT_RECENT), m);
+    };
+    const complianceScreen = async (query?: ListQuery) => {
+      const [announcements, page, f] = await Promise.all([live.store.discountAnnouncements(live.tenantId), catalogPageFor(listQuery(query)), facts({ first: OFFER_CHOICES })]);
+      const world = await load(page && f ? [...announcements.map((x) => x.writeScopeId), ...page.scopeIds, ...f.firstIds] : null, { catalogPage: page, facts: f });
+      return compliance(live, world, m, query, announcements);
+    };
+    if (req.method === 'GET') {
+      switch (screen) {
+        /**
+         * Шаг 41 [Р-169…Р-171]: теневой режим. Сводку считает база агрегатом [Р-154], список удержанных записей идёт
+         * страницей. У мира сценария в памяти режима нет — честный 404 вместо выдуманных чисел.
+         */
+        case 'shadow': {
+          if (param !== null) return fail(404, 'NOT_FOUND', s.notFound);
+          if (!live.shadow) return fail(404, 'NOT_FOUND', s.notFound);
+          const world = await load([]);
+          const query = parseListQuery(url.searchParams);
+          if (!query) return fail(400, 'BAD_PAGE', s.badRequest);
+          /**
+           * Находка 3 ревью шага 41: окно отчёта выбирается из НАЗВАННЫХ вариантов, а не приходит свободным числом —
+           * иначе «дней = 100000» прошло бы до запроса и прочитало всю историю тенанта [Р-154].
+           */
+          const daysParam = url.searchParams.get('days');
+          const days = daysParam === null ? SHADOW_PERIOD_DAYS[0] : Number(daysParam);
+          if (!(SHADOW_PERIOD_DAYS as readonly number[]).includes(days)) return fail(400, 'BAD_PAGE', s.badRequest);
+          const probe = await live.shadow.shadowPage(world.tenantId, live.clock.iso(), { offset: 0, limit: 1, sinceDays: days });
+          const clamped = { ...query, offset: clampOffset(query, probe.total) };
+          const page = await live.shadow.shadowPage(world.tenantId, live.clock.iso(), { ...clamped, sinceDays: days });
+          return ok(shadowView(world, page, clamped, m, days));
+        }
+        // Шаг 35 [Р-153]: остатки — страницей по товарам, сводка агрегатом, расхождения — отдельным списком
+        case 'stock': {
+          const world = await load([]);
+          if (param === 'divergences') return ok(stockDivergencesView(world, await live.stock.stockDivergences(world.tenantId, 200), m));
+          // Шаг 59 [Р-199]: возвраты — ждущие решения человека первыми; у хранилища без возвратов маршрута нет
+          if (param === 'returns') {
+            if (!live.stock.listReturns) return fail(404, 'NOT_FOUND', s.notFound);
+            return ok(stockReturnsView(world, await live.stock.listReturns(world.tenantId, RETURNS_LIST_LIMIT), m));
+          }
+          if (param !== null) return fail(404, 'NOT_FOUND', s.notFound);
+          const query = parseListQuery(url.searchParams);
+          if (!query) return fail(400, 'BAD_PAGE', s.badRequest);
+          // Смещение за концом подтягивается ДО выборки — иначе подпись «151–200 из 200» стоит над пустой таблицей
+          const probe = await live.stock.stockPage(world.tenantId, { offset: 0, limit: 1 });
+          const clamped = { ...query, offset: clampOffset(query, probe.total) };
+          const [page, sources] = await Promise.all([live.stock.stockPage(world.tenantId, clamped), live.stock.stockSources(world.tenantId)]);
+          return ok(stockView(world, page, clamped, sources, m));
+        }
+        case 'products': {
+          const query = parseListQuery(url.searchParams);
+          if (!query) return fail(400, 'BAD_PAGE', s.badRequest);
+          const catalog = await catalogPageFor(query);
+          const world = await load(catalog ? catalog.scopeIds : null, { catalogPage: catalog });
+          // Р-154: статистика решений — только для показанных строк, по индексу единицы
+          const shown = catalog ? catalog.scopeIds : productPage(world, m, query).shown.map((x) => x.writeScopeId);
+          return ok(productList(world, m, query, await live.store.scopeDecisionStats(world.tenantId, shown), catalog ?? undefined));
+        }
+        case 'decisions': {
+          if (param === null) {
+            // Р-154: страницу и итог отдаёт база; смещение за концом подтягивается к последней странице теми же правилами
+            const query = parseListQuery(url.searchParams);
+            if (!query) return fail(400, 'BAD_PAGE', s.badRequest);
+            const scopeFilter = url.searchParams.get('writeScopeId');
+            // Предложение фильтра есть в каталоге — до запроса страницы, как и раньше; шаг 67: по миру одной его единицы
+            if (scopeFilter && !scopeById(await load([scopeFilter]), scopeFilter)) return fail(400, 'BAD_PAGE', s.badRequest);
+            const probe = await live.store.decisionPage(live.tenantId, { offset: 0, limit: 1, ...(scopeFilter ? { writeScopeId: scopeFilter } : {}) });
+            const clamped = { ...query, offset: clampOffset(query, probe.total) };
+            const page = await live.store.decisionPage(live.tenantId, { ...clamped, ...(scopeFilter ? { writeScopeId: scopeFilter } : {}) });
+            return ok(decisionListView(await load([scopeFilter, ...page.items.map((d) => d.writeScopeId)]), page, clamped, m));
+          }
+          const detail = await live.store.decisionDetail(live.tenantId, param);
+          return detail ? ok(decisionTrace(await load([detail.decision.writeScopeId]), detail, m)) : fail(404, 'DECISION_NOT_FOUND', s.notFound);
+        }
+        case 'rejected': {
+          // Р-154: отчёт — по вмешательствам окна (неделя), «без изменения» до экрана не доходят
+          const to = live.clock.iso();
+          const from = new Date(Date.parse(to) - REJECTED_WINDOW_DAYS * 86_400_000).toISOString();
+          const slice = await live.store.interventions(live.tenantId, from as never, to as never);
+          // Отклонённый снимок называет предложение ключом канала: первую единицу каталога с этим ключом называет база
+          const f = await facts({ keys: slice.rejectedSnapshots.map((x) => ({ marketplace: x.key.marketplace, channelProductRef: x.key.channelProductRef, condition: x.key.condition })) });
+          return ok(rejectedView(await load([...sliceScopeIds(slice), ...(f?.keyed ?? []).map((k) => k.writeScopeId)], { facts: f }), slice, m));
+        }
+        case 'bounds': {
+          if (param === null) {
+            // Р-136: страница, а не весь каталог; список границ — тот же порядок, что у списка товаров
+            const query = parseListQuery(url.searchParams);
+            if (!query) return fail(400, 'BAD_PAGE', s.badRequest);
+            const catalog = await catalogPageFor(query);
+            const list = productList(await load(catalog ? catalog.scopeIds : null, { catalogPage: catalog }), m, query, undefined, catalog ?? undefined);
+            return ok({
+              items: list.rows.map((r): BoundsIndexItem => ({ writeScopeId: r.unit.writeScopeId, label: r.unit.label, minPrice: r.minPrice, maxPrice: r.maxPrice })),
+              page: list.page,
+              canEdit: can(viewer.role, 'MANAGE_PRICING'),
+            } satisfies BoundsIndexView);
+          }
+          const b = boundsView(await load([param]), param, m);
+          return b ? ok(b) : fail(404, 'SCOPE_NOT_FOUND', s.notFound);
+        }
+        case 'stop': return ok(await stopScreen());
+        /**
+         * Р-136 (ревью шага 29, находка 4): поиск предложения. Выпадающий список показывает первые OFFER_CHOICES, и без поиска
+         * предложения 201…10 000 были недостижимы: по ним нельзя было ни объявить скидку, ни выгрузить доказательство [Р-123].
+         */
+        case 'offers': {
+          const q = (url.searchParams.get('q') ?? '').trim().toLowerCase();
+          if (q.length > 100) return fail(400, 'BAD_QUERY', s.badRequest);
+          /**
+           * Шаг 67 (OQ-248): поиск — в базе, по тем же полям и той же подписи экрана (`unitLabel` шаблоном, имя канала аккаунта); мир —
+           * только найденных, первые OFFER_CHOICES в порядке каталога
+           */
+          if (targeted) {
+            const channelNames = Object.fromEntries(live.accounts.map((a) => [a.channel, m.values[a.channel as keyof typeof m.values] ?? a.channel]));
+            const unknownChannel = m.values['UNKNOWN_CHANNEL' as keyof typeof m.values] ?? 'UNKNOWN_CHANNEL';
+            const found = (await facts({ search: { q, limit: OFFER_CHOICES, labelTemplate: m.ui.common.unitLabel('{c}', '{m}', '{u}'), channelNames, unknownChannel } }))!.search!;
+            const world = await load(found.ids);
+            const items = found.ids.flatMap((id) => { const sc = scopeById(world, id); return sc ? [unitOf(world, sc, m)] : []; });
+            return ok({ items, total: found.total, shown: Math.min(found.total, OFFER_CHOICES) });
+          }
+          const world = await load(null);
+          const matches = world.state.scopes.filter((sc) => {
+            if (q === '') return true;
+            const unit = unitOf(world, sc, m);
+            return [unit.label, sc.externalUnitId, sc.channelProductRef, sc.gtin ?? ''].some((v) => String(v).toLowerCase().includes(q));
+          });
+          return ok({ items: matches.slice(0, OFFER_CHOICES).map((sc) => unitOf(world, sc, m)), total: matches.length, shown: Math.min(matches.length, OFFER_CHOICES) });
+        }
+        // Шаг 21: стратегии, лента цен, отчёт об опасных изменениях [Р-73]
+        case 'strategies': {
+          const query = parseListQuery(url.searchParams);
+          return query ? ok(await strategiesScreen(can(viewer.role, 'MANAGE_PRICING'), query)) : fail(400, 'BAD_PAGE', s.badRequest);
+        }
+        case 'feed': {
+          // Шаг 23: фильтры и страница — на сервере по всему окну ленты; неверный параметр — 400, а не молчаливое «все»
+          const query = parseFeedQuery(url.searchParams);
+          if (!query || (query.writeScopeId && !scopeById(await load([query.writeScopeId]), query.writeScopeId))) return fail(400, 'BAD_FEED_QUERY', s.badRequest);
+          const now = live.clock.iso();
+          /**
+           * Р-154: страницу, итог и счётчики групп отдаёт база. Итог берётся из ПЕРВОГО запроса, и по нему подтягивается
+           * смещение за концом: второй запрос идёт без подсчёта (`counts: false`) — иначе полный агрегат считался бы дважды
+           * на каждый показ экрана (ревью шага 35, находка 8).
+           */
+          const first = await live.store.feedPage(live.tenantId, now as never, feedPageQuery(query));
+          const pageQuery = feedPageQuery(query, first.total);
+          const page = pageQuery.offset === feedPageQuery(query).offset
+            ? first
+            : { ...await live.store.feedPage(live.tenantId, now as never, { ...pageQuery, counts: false }), counts: first.counts, total: first.total };
+          const f = await facts({ first: OFFER_CHOICES });
+          return ok(priceFeed(await load([query.writeScopeId, ...page.items.map((i) => i.write.writeScopeId), ...(f?.firstIds ?? [])], { facts: f }), m, query, page, pageQuery));
+        }
+        case 'dangerous': {
+          /**
+           * Находка 14 ревью шага 29: строка запроса не превращается в число вручную — `Number` принимает `0x10`, `1e3` и
+           * пробелы по краям. Период сверяется со списком допустимых КАК СТРОКА, и разбора числа здесь нет вовсе.
+           */
+          const raw = url.searchParams.get('days') ?? String(REPORT_PERIODS_DAYS[1]);
+          const days = REPORT_PERIODS_DAYS.find((d) => String(d) === raw);
+          if (days === undefined) return fail(400, 'BAD_PERIOD', s.badRequest);
+          const now = live.clock.iso();
+          const from = new Date(Date.parse(now) - days * 86_400_000).toISOString();
+          const slice = await live.store.interventions(live.tenantId, from as never, now as never);
+          return ok(dangerousReport(await load(sliceScopeIds(slice)), slice, days, m));
+        }
+        // Р-123: отчёт по объявленным скидкам — каждая проверяется заново по текущей истории цен (исправления свёртки, поздние цены)
+        case 'compliance': {
+          if (param === null) {
+            const query = parseListQuery(url.searchParams);
+            return query ? ok(await complianceScreen(query)) : fail(400, 'BAD_PAGE', s.badRequest);
+          }
+          return fail(404, 'NOT_FOUND', s.notFound);
+        }
+        /**
+         * Р-139: ход и история массовых операций. Состояние задания в базе, поэтому перезагрузка страницы ничего не теряет:
+         * экран собирается тем же запросом и через секунду, и через час. Задания — только своего тенанта [Р-16]: список
+         * приходит из хранилища под его `tenant_id`, чужой идентификатор не находится.
+         */
+        case 'jobs': {
+          if (param === null) {
+            // Список заданий называет готовые файлы: по ним продавец возвращается к заданию, с экрана которого ушёл
+            const jobs = await live.store.listBulkJobs(live.tenantId);
+            return ok(bulkJobsView(jobs, m, await live.store.bulkJobArtifactSummaries(live.tenantId, jobs.map((j) => j.jobId))));
+          }
+          const job = await live.store.bulkJob(live.tenantId, param);
+          if (!job) return fail(404, 'JOB_NOT_FOUND', m.ui.jobs.notFound);
+          if (parts[5] === 'artifact') {
+            const file = await live.store.bulkJobArtifact(live.tenantId, param);
+            if (!file) return fail(404, 'NO_FILE', m.ui.jobs.noFile);
+            return { status: 200, body: null, file: { contentType: file.contentType, content: file.content, fileName: file.fileName } };
+          }
+          if (parts.length > 5) return fail(404, 'NOT_FOUND', s.notFound);
+          const file = job.status === 'SUCCEEDED' ? await live.store.bulkJobArtifact(live.tenantId, param) : null;
+          return ok(bulkJobView(job, m, file ? { fileName: file.fileName, rows: file.rows, sha256: file.sha256 } : null));
+        }
+        default: return fail(404, 'NOT_FOUND', s.notFound);
+      }
+    }
+
+    // Находка 11 ревью шага 24: маршруты ниже — только POST
+    if (req.method !== 'POST') return fail(405, 'METHOD', s.method);
+    /**
+     * Шаг 67 (OQ-248): мир маршрутов записи — то, что маршрут на деле читает. Остановка и снятия (план, остановка, возобновление, снятие
+     * системной остановки и недоверия) — остановки тенанта и влияние по аккаунту и витрине. Маршруты, которым нужен только тенант
+     * (режим записи, остатки, путь и сужение онбординга, отмена задания, применение плана границ и импорта), — без каталога (ревью шага 67,
+     * находка 4: решение по возврату или включение одного предложения на 50 000 начинались с 5–8 с сборки каталога). Одно предложение —
+     * его единица: включение, проверка и объявление скидки, выгрузки (и число предложений каталога фактом). Каталог целиком строят только
+     * массовые операции, которым он нужен по смыслу («весь каталог», стратегии, план границ, план импорта, включение набора) — остаток OQ-248
+     */
+    const stopRoute = (screen === 'stop' && (param === 'plan' || param === null))
+      || ((screen === 'stops' && parts[5] === 'resume') || ((screen === 'halts' || screen === 'distrusts') && parts[5] === 'release')) && param !== null;
+    const tenantOnlyRoute = (screen === 'shadow' && param === 'mode') || (screen === 'stock' && param !== null)
+      || (screen === 'onboarding' && (param === 'path' || param === 'narrow')) || (screen === 'jobs' && param !== null && parts[5] === 'cancel')
+      || (screen === 'bounds' && param === 'apply') || (screen === 'cost-import' && param === 'apply');
+    const oneUnit = screen === 'scopes' && param !== null && parts[5] === 'enable' ? [param]
+      : screen === 'compliance' && (param === 'check' || param === 'announce' || param === 'evidence') ? [body.writeScopeId]
+        : screen === 'feed' && param === 'export' ? [((body.query ?? {}) as Record<string, unknown>).writeScopeId] : null;
+    const world = stopRoute ? await load([], { facts: await facts({ stopImpact: true }) })
+      : tenantOnlyRoute ? await load([])
+        : oneUnit ? await load(oneUnit, { facts: screen === 'compliance' && param === 'evidence' ? await facts({}) : null })
+          : await load(null);
     /**
      * Задача D шага 34: у тенанта без единого канала первого аккаунта нет. Раньше здесь стояло `live.accounts[0]!` — на пустом
      * тенанте это 500 вместо честного ответа «канал не подключён».
@@ -606,172 +851,6 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       return ok({ jobId: created.jobId, message, ...(job ? { job: bulkJobView(job, m) } : {}) });
     };
 
-    if (req.method === 'GET') {
-      switch (screen) {
-        /**
-         * Шаг 41 [Р-169…Р-171]: теневой режим. Сводку считает база агрегатом [Р-154], список удержанных записей идёт
-         * страницей. У мира сценария в памяти режима нет — честный 404 вместо выдуманных чисел.
-         */
-        case 'shadow': {
-          if (param !== null) return fail(404, 'NOT_FOUND', s.notFound);
-          if (!live.shadow) return fail(404, 'NOT_FOUND', s.notFound);
-          const query = parseListQuery(url.searchParams);
-          if (!query) return fail(400, 'BAD_PAGE', s.badRequest);
-          /**
-           * Находка 3 ревью шага 41: окно отчёта выбирается из НАЗВАННЫХ вариантов, а не приходит свободным числом —
-           * иначе «дней = 100000» прошло бы до запроса и прочитало всю историю тенанта [Р-154].
-           */
-          const daysParam = url.searchParams.get('days');
-          const days = daysParam === null ? SHADOW_PERIOD_DAYS[0] : Number(daysParam);
-          if (!(SHADOW_PERIOD_DAYS as readonly number[]).includes(days)) return fail(400, 'BAD_PAGE', s.badRequest);
-          const probe = await live.shadow.shadowPage(world.tenantId, live.clock.iso(), { offset: 0, limit: 1, sinceDays: days });
-          const clamped = { ...query, offset: clampOffset(query, probe.total) };
-          const page = await live.shadow.shadowPage(world.tenantId, live.clock.iso(), { ...clamped, sinceDays: days });
-          return ok(shadowView(world, page, clamped, m, days));
-        }
-        // Шаг 35 [Р-153]: остатки — страницей по товарам, сводка агрегатом, расхождения — отдельным списком
-        case 'stock': {
-          if (param === 'divergences') return ok(stockDivergencesView(world, await live.stock.stockDivergences(world.tenantId, 200), m));
-          // Шаг 59 [Р-199]: возвраты — ждущие решения человека первыми; у хранилища без возвратов маршрута нет
-          if (param === 'returns') {
-            if (!live.stock.listReturns) return fail(404, 'NOT_FOUND', s.notFound);
-            return ok(stockReturnsView(world, await live.stock.listReturns(world.tenantId, RETURNS_LIST_LIMIT), m));
-          }
-          if (param !== null) return fail(404, 'NOT_FOUND', s.notFound);
-          const query = parseListQuery(url.searchParams);
-          if (!query) return fail(400, 'BAD_PAGE', s.badRequest);
-          // Смещение за концом подтягивается ДО выборки — иначе подпись «151–200 из 200» стоит над пустой таблицей
-          const probe = await live.stock.stockPage(world.tenantId, { offset: 0, limit: 1 });
-          const clamped = { ...query, offset: clampOffset(query, probe.total) };
-          const [page, sources] = await Promise.all([live.stock.stockPage(world.tenantId, clamped), live.stock.stockSources(world.tenantId)]);
-          return ok(stockView(world, page, clamped, sources, m));
-        }
-        case 'products': {
-          const query = catalogQuery ?? parseListQuery(url.searchParams);
-          if (!query) return fail(400, 'BAD_PAGE', s.badRequest);
-          // Р-154: статистика решений — только для показанных строк, по индексу единицы
-          const shown = catalog ? catalog.scopeIds : productPage(world, m, query).shown.map((x) => x.writeScopeId);
-          return ok(productList(world, m, query, await live.store.scopeDecisionStats(world.tenantId, shown), catalog ?? undefined));
-        }
-        case 'decisions': {
-          if (param === null) {
-            // Р-154: страницу и итог отдаёт база; смещение за концом подтягивается к последней странице теми же правилами
-            const query = parseListQuery(url.searchParams);
-            if (!query) return fail(400, 'BAD_PAGE', s.badRequest);
-            const scopeFilter = url.searchParams.get('writeScopeId');
-            if (scopeFilter && !scopeById(world, scopeFilter)) return fail(400, 'BAD_PAGE', s.badRequest);
-            const probe = await live.store.decisionPage(world.tenantId, { offset: 0, limit: 1, ...(scopeFilter ? { writeScopeId: scopeFilter } : {}) });
-            const clamped = { ...query, offset: clampOffset(query, probe.total) };
-            const page = await live.store.decisionPage(world.tenantId, { ...clamped, ...(scopeFilter ? { writeScopeId: scopeFilter } : {}) });
-            return ok(decisionListView(world, page, clamped, m));
-          }
-          const detail = await live.store.decisionDetail(world.tenantId, param);
-          return detail ? ok(decisionTrace(world, detail, m)) : fail(404, 'DECISION_NOT_FOUND', s.notFound);
-        }
-        case 'rejected': {
-          // Р-154: отчёт — по вмешательствам окна (неделя), «без изменения» до экрана не доходят
-          const to = world.now;
-          const from = new Date(Date.parse(to) - REJECTED_WINDOW_DAYS * 86_400_000).toISOString();
-          return ok(rejectedView(world, await live.store.interventions(world.tenantId, from as never, to as never), m));
-        }
-        case 'bounds': {
-          if (param === null) {
-            // Р-136: страница, а не весь каталог; список границ — тот же порядок, что у списка товаров
-            const query = catalogQuery ?? parseListQuery(url.searchParams);
-            if (!query) return fail(400, 'BAD_PAGE', s.badRequest);
-            const list = productList(world, m, query, undefined, catalog ?? undefined);
-            return ok({
-              items: list.rows.map((r): BoundsIndexItem => ({ writeScopeId: r.unit.writeScopeId, label: r.unit.label, minPrice: r.minPrice, maxPrice: r.maxPrice })),
-              page: list.page,
-              canEdit: can(viewer.role, 'MANAGE_PRICING'),
-            } satisfies BoundsIndexView);
-          }
-          const b = boundsView(world, param, m);
-          return b ? ok(b) : fail(404, 'SCOPE_NOT_FOUND', s.notFound);
-        }
-        case 'stop': return ok(stopView(world, await live.store.auditRecent(world.tenantId, AUDIT_RECENT), m));
-        /**
-         * Р-136 (ревью шага 29, находка 4): поиск предложения. Выпадающий список показывает первые OFFER_CHOICES, и без поиска
-         * предложения 201…10 000 были недостижимы: по ним нельзя было ни объявить скидку, ни выгрузить доказательство [Р-123].
-         */
-        case 'offers': {
-          const q = (url.searchParams.get('q') ?? '').trim().toLowerCase();
-          if (q.length > 100) return fail(400, 'BAD_QUERY', s.badRequest);
-          const matches = world.state.scopes.filter((sc) => {
-            if (q === '') return true;
-            const unit = unitOf(world, sc, m);
-            return [unit.label, sc.externalUnitId, sc.channelProductRef, sc.gtin ?? ''].some((v) => String(v).toLowerCase().includes(q));
-          });
-          return ok({ items: matches.slice(0, OFFER_CHOICES).map((sc) => unitOf(world, sc, m)), total: matches.length, shown: Math.min(matches.length, OFFER_CHOICES) });
-        }
-        // Шаг 21: стратегии, лента цен, отчёт об опасных изменениях [Р-73]
-        case 'strategies': {
-          const query = parseListQuery(url.searchParams);
-          return query ? ok(strategiesView(world, m, can(viewer.role, 'MANAGE_PRICING'), query)) : fail(400, 'BAD_PAGE', s.badRequest);
-        }
-        case 'feed': {
-          // Шаг 23: фильтры и страница — на сервере по всему окну ленты; неверный параметр — 400, а не молчаливое «все»
-          const query = parseFeedQuery(url.searchParams);
-          if (!query || (query.writeScopeId && !scopeById(world, query.writeScopeId))) return fail(400, 'BAD_FEED_QUERY', s.badRequest);
-          /**
-           * Р-154: страницу, итог и счётчики групп отдаёт база. Итог берётся из ПЕРВОГО запроса, и по нему подтягивается
-           * смещение за концом: второй запрос идёт без подсчёта (`counts: false`) — иначе полный агрегат считался бы дважды
-           * на каждый показ экрана (ревью шага 35, находка 8).
-           */
-          const first = await live.store.feedPage(world.tenantId, world.now as never, feedPageQuery(query));
-          const pageQuery = feedPageQuery(query, first.total);
-          const page = pageQuery.offset === feedPageQuery(query).offset
-            ? first
-            : { ...await live.store.feedPage(world.tenantId, world.now as never, { ...pageQuery, counts: false }), counts: first.counts, total: first.total };
-          return ok(priceFeed(world, m, query, page, pageQuery));
-        }
-        case 'dangerous': {
-          /**
-           * Находка 14 ревью шага 29: строка запроса не превращается в число вручную — `Number` принимает `0x10`, `1e3` и
-           * пробелы по краям. Период сверяется со списком допустимых КАК СТРОКА, и разбора числа здесь нет вовсе.
-           */
-          const raw = url.searchParams.get('days') ?? String(REPORT_PERIODS_DAYS[1]);
-          const days = REPORT_PERIODS_DAYS.find((d) => String(d) === raw);
-          if (days === undefined) return fail(400, 'BAD_PERIOD', s.badRequest);
-          const from = new Date(Date.parse(world.now) - days * 86_400_000).toISOString();
-          return ok(dangerousReport(world, await live.store.interventions(world.tenantId, from as never, world.now as never), days, m));
-        }
-        // Р-123: отчёт по объявленным скидкам — каждая проверяется заново по текущей истории цен (исправления свёртки, поздние цены)
-        case 'compliance': {
-          if (param === null) {
-            const query = parseListQuery(url.searchParams);
-            return query ? ok(await compliance(live, world, m, query)) : fail(400, 'BAD_PAGE', s.badRequest);
-          }
-          return fail(404, 'NOT_FOUND', s.notFound);
-        }
-        /**
-         * Р-139: ход и история массовых операций. Состояние задания в базе, поэтому перезагрузка страницы ничего не теряет:
-         * экран собирается тем же запросом и через секунду, и через час. Задания — только своего тенанта [Р-16]: список
-         * приходит из хранилища под его `tenant_id`, чужой идентификатор не находится.
-         */
-        case 'jobs': {
-          if (param === null) {
-            // Список заданий называет готовые файлы: по ним продавец возвращается к заданию, с экрана которого ушёл
-            const jobs = await live.store.listBulkJobs(world.tenantId);
-            return ok(bulkJobsView(jobs, m, await live.store.bulkJobArtifactSummaries(world.tenantId, jobs.map((j) => j.jobId))));
-          }
-          const job = await live.store.bulkJob(world.tenantId, param);
-          if (!job) return fail(404, 'JOB_NOT_FOUND', m.ui.jobs.notFound);
-          if (parts[5] === 'artifact') {
-            const file = await live.store.bulkJobArtifact(world.tenantId, param);
-            if (!file) return fail(404, 'NO_FILE', m.ui.jobs.noFile);
-            return { status: 200, body: null, file: { contentType: file.contentType, content: file.content, fileName: file.fileName } };
-          }
-          if (parts.length > 5) return fail(404, 'NOT_FOUND', s.notFound);
-          const file = job.status === 'SUCCEEDED' ? await live.store.bulkJobArtifact(world.tenantId, param) : null;
-          return ok(bulkJobView(job, m, file ? { fileName: file.fileName, rows: file.rows, sha256: file.sha256 } : null));
-        }
-        default: return fail(404, 'NOT_FOUND', s.notFound);
-      }
-    }
-
-    // Находка 11 ревью шага 24: маршруты ниже — только POST
-    if (req.method !== 'POST') return fail(405, 'METHOD', s.method);
 
     /**
      * Р-123, Р-139, OQ-202: выгрузка доказательной истории — фоновое задание. Предел в 100 000 строк, введённый шагом 29, снят
@@ -785,7 +864,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       if (!isDay(from) || !isDay(to) || from > to || (ws && !scopeById(world, ws))) return fail(400, 'BAD_EVIDENCE_QUERY', s.badRequest);
       if ((Date.parse(to) - Date.parse(from)) / 86_400_000 + 1 > EVIDENCE_MAX_DAYS) return fail(400, 'EVIDENCE_TOO_LONG', s.evidenceTooLong(EVIDENCE_MAX_DAYS));
       return createJob('PRICE_EVIDENCE', { from, to, ...(ws ? { writeScopeId: ws } : {}) },
-        ws ? 1 : world.state.scopes.length, m.ui.jobs.createdEvidence);
+        ws ? 1 : catalogTotal(world), m.ui.jobs.createdEvidence);
     }
 
     /**
@@ -1003,7 +1082,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       if (result.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
       if (result.status === 'VIOLATION') return fail(400, 'OMNIBUS_VIOLATION', discountCheckView(world, input.writeScopeId, input.referencePriceMinor, result.check, m)!.headline);
       if (result.status === 'INVALID') return fail(400, result.cause, s.badDiscount);
-      return ok({ message: m.ui.compliance.announced, compliance: await compliance(live, await live.view(viewer), m) });
+      return ok({ message: m.ui.compliance.announced, compliance: await complianceScreen() });
     }
     if (screen === 'stop' && param === 'plan') {
       const target = parseTarget(live, body.target);
@@ -1027,7 +1106,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       });
       if (result.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
       if (result.status === 'ALREADY_ACTIVE') return fail(409, 'ALREADY_STOPPED', s.alreadyStopped);
-      return ok({ message: s.stopped(plan.impact.text), stop: stopView(await live.view(viewer), await live.store.auditRecent(world.tenantId, AUDIT_RECENT), m) });
+      return ok({ message: s.stopped(plan.impact.text), stop: await stopScreen() });
     }
 
     if (screen === 'stops' && param !== null && parts[5] === 'resume') {
@@ -1045,7 +1124,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       if (result.status === 'MFA_REQUIRED') return fail(403, 'MFA_REQUIRED', s.mfaRequired);
       if (result.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
       if (result.status !== 'RELEASED') return fail(404, 'NOT_ACTIVE', s.notActive);
-      return ok({ message: s.resumed, stop: stopView(await live.view(viewer), await live.store.auditRecent(world.tenantId, AUDIT_RECENT), m) });
+      return ok({ message: s.resumed, stop: await stopScreen() });
     }
 
     // Системная остановка витрины [Р-51, Р-52]: ручное снятие — с заметкой
@@ -1061,7 +1140,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       const mfa = hasSecondFactor(principal.amr);
       if (!mfa) return fail(403, 'MFA_REQUIRED', s.mfaRequired);
       const result = await live.pipeline.releaseHaltManually(ctx(halt.channelAccountId), halt.haltId, { membershipId: viewer.membershipId, userId: principal.userId, mfa }, text);
-      return result.released ? ok({ message: s.released, stop: stopView(await live.view(viewer), await live.store.auditRecent(world.tenantId, AUDIT_RECENT), m) }) : fail(404, 'NOT_ACTIVE', s.notActive);
+      return result.released ? ok({ message: s.released, stop: await stopScreen() }) : fail(404, 'NOT_ACTIVE', s.notActive);
     }
 
     // Р-118: снятие недоверия каналу — только человек с правом, от своего имени, со вторым фактором и заметкой; хранилище и БД проверяют то же
@@ -1077,7 +1156,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       if (!mfa) return fail(403, 'MFA_REQUIRED', s.mfaRequiredDistrust);
       try {
         const result = await live.pipeline.releaseDistrust(ctx(distrust.channelAccountId), distrust.distrustId, { membershipId: viewer.membershipId, userId: principal.userId, mfa }, text);
-        return result.released ? ok({ message: s.distrustReleased, stop: stopView(await live.view(viewer), await live.store.auditRecent(world.tenantId, AUDIT_RECENT), m) }) : fail(404, 'NOT_ACTIVE', s.notActive);
+        return result.released ? ok({ message: s.distrustReleased, stop: await stopScreen() }) : fail(404, 'NOT_ACTIVE', s.notActive);
       } catch (error) {
         // Отказ хранилища или БД (роль, пользователь сессии, второй фактор): текст отказа наружу не отдаётся
         const code = (error as { code?: string }).code;
@@ -1194,7 +1273,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         return fail(400, 'REPRICING_ENABLED', s.repricingEnabledUnassign(scope ? unitOf(world, scope, m).label : m.ui.common.noValue));
       }
       if (result.status !== 'UNASSIGNED') return fail(400, result.cause, s.badRequest);
-      return ok({ message: m.ui.strategies.unassigned, strategies: strategiesView(await live.view(viewer), m, true) } satisfies StrategySaveResponse);
+      return ok({ message: m.ui.strategies.unassigned, strategies: await strategiesScreen(true) } satisfies StrategySaveResponse);
     }
 
     /**

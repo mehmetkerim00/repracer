@@ -24,6 +24,12 @@ const SCREEN_LIMIT_SECONDS = 10;
  * поэтому ноль здесь недостижим; предел назван, чтобы «демо показывает пустые экраны» было провалом, а не привычкой.
  */
 const FIRST_DECISION_LIMIT_SECONDS = 180;
+/**
+ * Шаг 67 (Р-146): экран демо из 200 предложений линеен — доли секунды. Квадратичный план по каталогу на свежей статистике (демо поднято
+ * только что, автоанализ ещё не прошёл) давал экрану товаров 4–10 с на машине разработчика и 19,2 с на CI (быстрый прогон шага 66) — предел
+ * экрана в 10 с ловил это не всегда. Чтение экрана держится втрое строже предела, а не на его краю
+ */
+const DEMO_SCREEN_READ_SECONDS = 3;
 
 let db: IsolatedDatabase;
 let console_: RunningConsole;
@@ -187,6 +193,8 @@ test('Р-160: гость проходит от кнопки «посмотрет
 
   const slowest = journey.filter((x) => !x.step.startsWith('decisions (ожидание')).reduce((a, b) => (a.seconds > b.seconds ? a : b));
   assert.ok(slowest.seconds <= SCREEN_LIMIT_SECONDS, `самый долгий шаг гостя: ${slowest.step} — ${slowest.seconds} с`);
+  const slowReads = journey.filter((x) => x.method === 'GET' && x.url.startsWith('/api/worlds/') && !x.step.startsWith('decisions (ожидание') && x.seconds > DEMO_SCREEN_READ_SECONDS);
+  assert.deepEqual(slowReads.map((x) => `${x.step}: ${x.seconds} s`), [], `экраны демо из 200 предложений — не дольше ${DEMO_SCREEN_READ_SECONDS} с`);
 });
 
 test('Р-160: гость не может НИЧЕГО изменить — отказывает база, а не интерфейс', async () => {

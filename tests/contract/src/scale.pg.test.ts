@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { createPool, PgPricingStore, PgShadowStore, type PgPool } from '@repracer/pricing-store-pg';
 import { pgJobDeps } from '@repracer/scheduler';
-import { messagesFor, productList } from '@repracer/console-model';
+import {
+  boundsView, CHANNEL_PRICING_SHOWN, complianceView, dangerousReport, decisionListView, feedPageQuery, listQuery, messagesFor, OFFER_CHOICES, parseFeedQuery, priceFeed,
+  productList, rejectedView, scopeById, stopView, STRATEGY_SCOPE_EXAMPLES, strategiesView, unitOf,
+} from '@repracer/console-model';
+import { cpus, freemem, loadavg, totalmem } from 'node:os';
 import { createIsolatedDatabase, type IsolatedDatabase } from '../../../packages/pricing-store-pg/test/isolated-db.ts';
 import { kauflandLiveWorld, WallClock, type KauflandLiveWorld, type LiveProduct } from './live/index.ts';
 
@@ -43,6 +47,13 @@ const NEW_OFFERS = Math.round(OFFERS / 10);
 const channelOnly: LiveProduct[] = Array.from({ length: NEW_OFFERS }, (_, i) => product(365_100_001 + OFFERS + i));
 /** Куча процесса прогона: модель канала и мир живут в нём же, и куча у предела (2 ГБ на машине разработчика) мерила бы сборку мусора, а не продукт */
 const heapMb = () => Math.round(process.memoryUsage().heapUsed / 1_048_576);
+/**
+ * Шаг 67 (Р-146): состояние машины в выводе замера. Замер шага 66 на машине разработчика показал круг обнаружения вдвое медленнее (148 и
+ * 102 с против 78 и 71), и причиной была не очередь записей, а машина: чужой процесс на полном ядре десять часов и подкачка, занятая на
+ * 8 из 9 ГБ. Тот же код на CI — 77,5 и 71,3 с. Число замера без состояния машины — не число продукта
+ */
+const machine = () => ({ cpus: cpus().length, load: loadavg().map((x) => Math.round(x * 10) / 10), freeMemMb: Math.round(freemem() / 1_048_576), totalMemMb: Math.round(totalmem() / 1_048_576) });
+const machineAtStart = machine();
 
 /**
  * Шаг 66 (OQ-247, Р-203): перед каждой операцией прогон НАРОЧНО портит статистику очереди записей — так, как её портит работа: очередь
@@ -101,7 +112,7 @@ before(async () => {
 });
 
 after(async () => {
-  console.log(JSON.stringify({ scale: { offers: OFFERS, newOffers: NEW_OFFERS, measured } }, null, 1));
+  console.log(JSON.stringify({ scale: { offers: OFFERS, newOffers: NEW_OFFERS, machine: { atStart: machineAtStart, atEnd: machine() }, measured } }, null, 1));
   await observer?.end();
   // Учение восстановления на большой базе (docs/runbook-disaster.md) берёт её отсюда: база остаётся, её имя — в выводе
   if (process.env.REPRACER_SCALE_KEEP_DB === 'on') {
@@ -148,7 +159,8 @@ test(`шаг 65: масштаб — каталог ${OFFERS} предложен�
    * единиц страницы; остатки — мир без каталога и страница своего хранилища. Полное состояние каталога остаётся у экранов, которые его
    * ещё читают (стратегии, поиск предложения, комплаенс, остановка, карточка границ) — своей строкой: это память сервера на их запрос
    */
-  await timed('server: full catalog state — screens still loading it (strategies, offer search, compliance, stop)', SCREEN_SECONDS, () => store.readConsoleState(tenant, now()), bytesOf);
+  // Шаг 67: каталог целиком собирают только маршруты записи массовых операций («весь каталог», стратегии, границы, импорт) — остаток OQ-248
+  await timed('server: full catalog state — bulk write routes still loading it (all: true, strategy assign, bounds, import)', SCREEN_SECONDS, () => store.readConsoleState(tenant, now()), bytesOf);
   const world = { id: 'scale', title: 'scale', description: '', tenantId: tenant, now: k.clock.iso(), accounts: [{ channelAccountId: account, channel: 'KAUFLAND', marketplaces: ['de'] }],
     viewer: { membershipId: k.seeded.ownerMembershipId, role: 'OWNER' } };
   const m = messagesFor('en');
@@ -162,6 +174,55 @@ test(`шаг 65: масштаб — каталог ${OFFERS} предложен�
   await timed('screen: stock page (world without catalog + page)', SCREEN_SECONDS, async () => {
     await store.readConsoleState(tenant, now(), { scopeIds: [] });
     return k.stock!.stockPage(tenant, { offset: 0, limit: 50 });
+  }, bytesOf);
+  /**
+   * Шаг 67 (OQ-248): экраны, которые до шага собирали каталог целиком, — теми же вызовами, что их построители на сервере
+   * (`stand-server.ts`): единицы, которые экран покажет, факты базы о каталоге целиком, мир только из названных единиц. Равенство с
+   * экраном из каталога целиком держит `console-screens-targeted.pg.test.ts`, HTTP-путь на 10 000 — `console-live.pg.test.ts`
+   */
+  const worldOf = async (scopeIds: readonly string[], extra: { catalogPage?: unknown; catalogFacts?: unknown } = {}) =>
+    ({ ...world, state: await store.readConsoleState(tenant, now(), { scopeIds }), ...extra }) as never;
+  const q50 = listQuery({ offset: 0, limit: 50 });
+  await timed('screen: strategies (database page + strategy usage + channel pricing + world of the named units)', SCREEN_SECONDS, async () => {
+    const [page, f] = await Promise.all([store.consoleCatalogPage(tenant, now(), q50),
+      store.consoleCatalogFacts(tenant, { first: 1, strategyUsage: { examples: STRATEGY_SCOPE_EXAMPLES }, channelPricing: { limit: CHANNEL_PRICING_SHOWN } })]);
+    const ids = [...page.scopeIds, ...f.firstIds, ...(f.strategyUsage ?? []).flatMap((u) => u.exampleIds)];
+    return strategiesView(await worldOf(ids, { catalogPage: page, catalogFacts: f }), m, true, q50);
+  }, bytesOf);
+  const unitLabel = { labelTemplate: m.ui.common.unitLabel('{c}', '{m}', '{u}'), channelNames: { KAUFLAND: m.values.KAUFLAND }, unknownChannel: 'UNKNOWN_CHANNEL' };
+  for (const [label, q] of [['every offer matches', 'kaufland'], ['one offer matches', String(products[OFFERS - 1]!.idProduct).slice(-6)]] as const) {
+    await timed(`screen: offer search, ${label} (database search + world of the found)`, SCREEN_SECONDS, async () => {
+      const found = (await store.consoleCatalogFacts(tenant, { search: { q, limit: OFFER_CHOICES, ...unitLabel } })).search!;
+      const w = await worldOf(found.ids) as Parameters<typeof unitOf>[0];
+      return { items: found.ids.flatMap((id) => { const sc = scopeById(w, id); return sc ? [unitOf(w, sc, m)] : []; }), total: found.total };
+    }, bytesOf);
+  }
+  await timed('screen: compliance (database page + first offers + history depth of the shown)', SCREEN_SECONDS, async () => {
+    const [announcements, page, f] = await Promise.all([store.discountAnnouncements(tenant), store.consoleCatalogPage(tenant, now(), q50), store.consoleCatalogFacts(tenant, { first: OFFER_CHOICES })]);
+    const w = await worldOf([...announcements.map((x) => x.writeScopeId), ...page.scopeIds, ...f.firstIds], { catalogPage: page, catalogFacts: f });
+    const depth = new Map(await Promise.all(page.scopeIds.map(async (id) => [id, await store.omnibusCheck(tenant, id, now())] as const)));
+    return complianceView(w, announcements, new Map(), m, depth, q50);
+  }, bytesOf);
+  await timed('screen: stop (stop impact by account and storefront + world without catalog)', SCREEN_SECONDS, async () =>
+    stopView(await worldOf([], { catalogFacts: await store.consoleCatalogFacts(tenant, { stopImpact: true }) }), await store.auditRecent(tenant, 50), m), bytesOf);
+  const someScope = (await store.consoleCatalogPage(tenant, now(), { offset: Math.floor(OFFERS / 2), limit: 1 })).scopeIds[0]!;
+  await timed('screen: bounds card of one offer (world of one unit)', SCREEN_SECONDS, async () => boundsView(await worldOf([someScope]), someScope, m), bytesOf);
+  await timed('screen: decisions list (database page + world of its units)', SCREEN_SECONDS, async () => {
+    const page = await store.decisionPage(tenant, { offset: 0, limit: 50 } as never);
+    return decisionListView(await worldOf(page.items.map((d) => d.writeScopeId)), page, q50, m);
+  }, bytesOf);
+  await timed('screen: price feed (database page + first offers + world of its units)', SCREEN_SECONDS, async () => {
+    const filter = parseFeedQuery(new URLSearchParams())!;
+    const page = await store.feedPage(tenant, now(), feedPageQuery(filter));
+    const f = await store.consoleCatalogFacts(tenant, { first: OFFER_CHOICES });
+    return priceFeed(await worldOf([...page.items.map((i) => i.write.writeScopeId), ...f.firstIds], { catalogFacts: f }), m, filter, page, feedPageQuery(filter));
+  }, bytesOf);
+  await timed('screen: rejected and dangerous reports (interventions of the week + world of their units)', SCREEN_SECONDS, async () => {
+    const to = now() as unknown as string;
+    const slice = await store.interventions(tenant, new Date(Date.parse(to) - 7 * 86_400_000).toISOString() as never, to as never);
+    const f = await store.consoleCatalogFacts(tenant, { keys: slice.rejectedSnapshots.map((x) => x.key) });
+    const w = await worldOf([...[...slice.decisions, ...slice.intents, ...slice.endedWrites].map((x) => x.writeScopeId), ...(f.keyed ?? []).map((k) => k.writeScopeId)], { catalogFacts: f });
+    return { rejected: rejectedView(w, slice, m), dangerous: dangerousReport(w, slice, 7, m) };
   }, bytesOf);
   await timed('screen: world counters (list of worlds)', SCREEN_SECONDS, () => store.worldCounters(tenant, now()), bytesOf);
   await timed('screen: onboarding status', SCREEN_SECONDS, () => store.onboardingStatus(tenant), bytesOf);

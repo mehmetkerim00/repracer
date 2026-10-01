@@ -1,5 +1,5 @@
 import type {
-  ConsoleDecisionRow, ConsoleHaltRow, ConsoleIntentRow, ConsoleScopeRow, ConsoleState, ConsoleStopRow, ConsoleWriteRow,
+  ConsoleCatalogFacts, ConsoleCatalogPage, ConsoleDecisionRow, ConsoleHaltRow, ConsoleIntentRow, ConsoleScopeRow, ConsoleState, ConsoleStopRow, ConsoleWriteRow,
 } from '@repracer/pricing-pipeline';
 import type { MemberRole } from '@repracer/pricing-model';
 import type { Messages } from './i18n/index.ts';
@@ -35,6 +35,13 @@ export interface StandWorld {
   state: ConsoleState;
   /** Р-151: мир на симуляторе — данные синтетические, путь настоящий; помечается везде, где показываются деньги */
   demo?: boolean;
+  /**
+   * Шаг 67 (OQ-248): мир собран не из каталога целиком, а из единиц, которые назвал экран. Тогда то, что экран знает о каталоге
+   * целиком, — из базы: страница каталога (`catalogPage`) и факты (`catalogFacts`). Без них — каталог целиком в `state.scopes`
+   * (хранилище в памяти, тест равенства)
+   */
+  catalogPage?: ConsoleCatalogPage;
+  catalogFacts?: ConsoleCatalogFacts;
 }
 
 export type ConsoleScope = ConsoleScopeRow;
@@ -110,4 +117,17 @@ export function unitOf(world: StandWorld, scope: ConsoleScope, m: Messages): Uni
 
 export function scopeById(world: StandWorld, writeScopeId: string): ConsoleScope | undefined {
   return world.state.scopes.find((s) => s.writeScopeId === writeScopeId);
+}
+
+/** Шаг 67 (OQ-248): предложений в каталоге — из фактов базы у мира выбранных единиц, иначе по каталогу мира */
+export function catalogTotal(world: StandWorld): number {
+  return world.catalogFacts ? world.catalogFacts.total : world.state.scopes.length;
+}
+
+/** Шаг 67 (OQ-248): первые `n` предложений каталога в его порядке */
+export function catalogFirst(world: StandWorld, n: number): ConsoleScope[] {
+  const f = world.catalogFacts;
+  if (!f) return world.state.scopes.slice(0, n);
+  const byId = new Map(world.state.scopes.map((sc) => [sc.writeScopeId, sc]));
+  return f.firstIds.slice(0, n).flatMap((id) => { const sc = byId.get(id); return sc ? [sc] : []; });
 }

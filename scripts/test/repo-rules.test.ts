@@ -777,3 +777,44 @@ test('шаг 56: каждая необязательная возможност�
   const mapped = [...(/export const CAPABILITY_JOBS = \{([\s\S]*?)\} as const/.exec(jobs)?.[1] ?? '').matchAll(/^\s+([a-zA-Z]+):/gm)].map((m) => m[1]!).sort();
   assert.deepEqual(mapped, members(jobs).filter((m) => !(m in ABSENT_ON_PURPOSE)).sort(), 'CAPABILITY_JOBS names every optional capability of JobDeps');
 });
+
+/**
+ * Шаг 67 (п. 4, ADR-0048): ANALYZE большой транзакции держит блокировку анализа очереди до фиксации, а вторая большая транзакция ждёт её
+ * до 2 с. Цикл «держит анализ и ждёт чужую строку ↔ держит строку и ждёт анализ» уронил бы одну из них `40P01`. Сейчас он недостижим:
+ * в очередь вставляют ровно два места — путь решения (одна запись на транзакцию, до порога анализа не доходит) и пересчёт остатков,
+ * который берёт блокировку пересчётов тенанта ДО вставки (шаг 57), а после неё ждёт только маленькие транзакции (диспетчер, отзыв),
+ * которые анализа не ждут никогда. Третий массовый писатель очереди — повод заново разобрать цикл, и правило делает его видимым
+ */
+test('шаг 67: в очередь записей вставляют ровно два места кода, и вставка пересчёта остатков — под блокировкой пересчётов тенанта', async () => {
+  const { readdirSync, readFileSync, statSync } = await import('node:fs');
+  // Ревью шага 67, находка 3: имя таблицы — со схемой и без, в кавычках и без; история и журналы очереди — другие таблицы
+  const INSERT = /INSERT\s+INTO\s+(?:"?tenant_data"?\s*\.\s*)?"?channel_write"?(?=[\s(])/gi;
+  const inserts = (text: string) => [...text.matchAll(INSERT)].map((x) => x.index!);
+  const LOCK = "pg_advisory_xact_lock(hashtextextended('repracer.stock_recalculate:'";
+  /** Вставки без блокировки пересчётов тенанта в своей функции: блокировка — между началом функции (`async`) и вставкой */
+  const unlocked = (text: string) => inserts(text).filter((at) => {
+    const fn = text.lastIndexOf('async ', at);
+    const lock = text.lastIndexOf(LOCK, at);
+    return lock < 0 || lock < fn;
+  }).length;
+  // Положительные контроли: все формы имени видны, история и журналы — нет; вставка вне блокировки и в другой функции — видна
+  assert.equal(inserts('INSERT INTO tenant_data.channel_write (a) INSERT INTO channel_write (b) insert into "tenant_data"."channel_write" (c) INSERT INTO tenant_data.channel_write_history (d) INSERT INTO tenant_data.channel_write_mode_change (e)').length, 3);
+  assert.equal(unlocked(`async a() { ${LOCK}$1); INSERT INTO tenant_data.channel_write (x) } async b() { INSERT INTO channel_write (y) }`), 1);
+  assert.equal(unlocked(`async a() { ${LOCK}$1); INSERT INTO tenant_data.channel_write (x) }`), 0);
+  const walk = (dir: string): string[] => readdirSync(new URL(dir, root)).flatMap((name) => {
+    const rel = `${dir}${name}`;
+    if (name === 'node_modules' || name === 'dist' || name === 'test' || name === 'generated') return [];
+    return statSync(new URL(rel, root)).isDirectory() ? walk(`${rel}/`) : [rel];
+  });
+  const sites = Object.fromEntries(['packages/', 'services/', 'apps/'].flatMap(walk)
+    .filter((f) => /\.(ts|tsx|mjs)$/.test(f) && !f.includes('.test.'))
+    .map((f) => [f, inserts(readFileSync(new URL(f, root), 'utf8')).length] as const).filter(([, n]) => n > 0));
+  // Функции базы в очередь не вставляют: вставка в миграциях — только в проверках схемы (их транзакции откатываются)
+  for (const f of readdirSync(new URL('migrations/', root)).filter((x) => x.endsWith('.sql') && !x.includes('verify_schema'))) {
+    const n = inserts(read(`migrations/${f}`)).length;
+    if (n > 0) sites[`migrations/${f}`] = n;
+  }
+  assert.deepEqual(sites, { 'packages/pricing-store-pg/src/stock.ts': 1, 'packages/pricing-store-pg/src/store.ts': 1 },
+    'новый писатель очереди записей: разберите цикл анализа очереди (ADR-0048, 40P01) и допишите его сюда');
+  assert.equal(unlocked(read('packages/pricing-store-pg/src/stock.ts')), 0, 'каждая вставка пересчёта остатков — после блокировки пересчётов тенанта в той же функции');
+});

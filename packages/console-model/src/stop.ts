@@ -120,6 +120,20 @@ function impactOf(world: StandWorld, scopes: readonly ConsoleScope[], m: Message
   return { prices: ids.size, pendingWritesDropped: pending, text: m.ui.stop.impact(ids.size, pending) };
 }
 
+/**
+ * Влияние остановки на цель. Шаг 67 (OQ-248): у мира без каталога — фактами базы по аккаунту и витрине (то же правило: включённые
+ * движком предложения цели и ждущие записи цены у них), а не проходом по каталогу целиком
+ */
+function impactFor(world: StandWorld, target: StopTarget, m: Messages): StopImpact {
+  const f = world.catalogFacts?.stopImpact;
+  if (!f) return impactOf(world, scopesOf(world, target), m);
+  const rows = f.filter((r) => target.kind === 'TENANT'
+    || (r.channelAccountId === target.channelAccountId && (target.kind === 'CHANNEL_ACCOUNT' || r.marketplace === target.marketplace)));
+  const prices = rows.reduce((n, r) => n + r.enginePrices, 0);
+  const pending = rows.reduce((n, r) => n + r.pendingWrites, 0);
+  return { prices, pendingWritesDropped: pending, text: m.ui.stop.impact(prices, pending) };
+}
+
 function sameTarget(stop: ConsoleStop, target: StopTarget): boolean {
   if (stop.scope !== target.kind) return false;
   if (target.kind === 'TENANT') return true;
@@ -197,7 +211,7 @@ function targetCard(world: StandWorld, target: StopTarget, m: Messages): TargetC
     .sort((a, b) => ({ TENANT: 0, CHANNEL_ACCOUNT: 1, STOREFRONT: 2 }[a.scope] - { TENANT: 0, CHANNEL_ACCOUNT: 1, STOREFRONT: 2 }[b.scope]))[0];
   return {
     target, label: targetLabel(world, target, m), coveredBy: covering ? stopCard(world, covering, m) : null,
-    impact: impactOf(world, scopesOf(world, target), m), canStop: !covering && can(world.viewer.role, 'STOP_PRICING'),
+    impact: impactFor(world, target, m), canStop: !covering && can(world.viewer.role, 'STOP_PRICING'),
   };
 }
 
@@ -246,7 +260,7 @@ export function stopView(world: StandWorld, audit: readonly ConsoleAuditRow[], m
 }
 
 export function planStop(world: StandWorld, target: StopTarget, m: Messages): StopPlan {
-  const impact = impactOf(world, scopesOf(world, target), m);
+  const impact = impactFor(world, target, m);
   const label = targetLabel(world, target, m);
   return {
     target, impact,

@@ -711,6 +711,11 @@ export interface PricingStore {
    * состояния; смещение за концом подтягивается к последней странице. Хранилищу в памяти не нужно: его каталог мал
    */
   consoleCatalogPage?(tenantId: string, now: Instant, query: { offset: number; limit: number }): Promise<ConsoleCatalogPage>;
+  /**
+   * Шаг 67 (OQ-248): то, что экрану нужно знать о каталоге ЦЕЛИКОМ, — числа, первые предложения, поиск, использование стратегий,
+   * влияние остановки, ценообразование канала — базой, без каталога в памяти сервера. Хранилищу в памяти не нужно: его каталог мал
+   */
+  consoleCatalogFacts?(tenantId: string, query: ConsoleCatalogFactsQuery): Promise<ConsoleCatalogFacts>;
   // --- Р-154 (шаг 35): потоки — страницами, окнами, агрегатами -----------------------------------------------------
   decisionPage(tenantId: string, query: DecisionPageQuery): Promise<DecisionPage>;
   decisionDetail(tenantId: string, decisionId: string): Promise<DecisionDetail | null>;
@@ -1033,6 +1038,44 @@ export interface ConsoleCatalogPage {
   stopped: number;
   off: number;
   applying: number;
+  /**
+   * Шаг 67 (п. 3): уведомления PRICING_HEALTH есть у тенанта — пробел экрана товаров. Мир страницы несёт уведомления только своих
+   * единиц, и признак «есть вообще» считает база
+   */
+  pricingHealthIssues: boolean;
+}
+
+/**
+ * Шаг 67 (OQ-248): что экран спрашивает о каталоге целиком. Каждое поле — правило экрана, переписанное запросом базы; равенство с
+ * правилом экрана на всех мирах стенда держит `console-screens-targeted.pg.test.ts`
+ */
+export interface ConsoleCatalogFactsQuery {
+  /** Первые N предложений каталога в его порядке — выбор предложения в формах (комплаенс, лента) */
+  first?: number;
+  /**
+   * Поиск предложения — как `offers` консоли: подстрока (в нижнем регистре) подписи, номера единицы, ссылки товара или GTIN. Подпись
+   * собирается шаблоном экрана (`{c}`, `{m}`, `{u}`) с именем канала единицы (ключ — код канала); канал не из списка — `unknownChannel`
+   */
+  search?: { q: string; limit: number; labelTemplate: string; channelNames: Record<string, string>; unknownChannel: string };
+  /** Использование стратегий: сколько предложений у каждой и первые `examples` из них в порядке каталога */
+  strategyUsage?: { examples: number };
+  /** Влияние остановки: включённые движком предложения и ждущие записи цены у них — по аккаунту и витрине */
+  stopImpact?: boolean;
+  /** Р-120: предложения с ценообразованием канала — последнее наблюдение каждого, первые `limit` на аккаунт и сколько всего */
+  channelPricing?: { limit: number };
+  /** Первая единица каталога по ключу снимка (витрина, ссылка товара, состояние) — отчёт отклонённых */
+  keys?: ReadonlyArray<{ marketplace: string; channelProductRef: string; condition: string }>;
+}
+
+export interface ConsoleCatalogFacts {
+  /** Предложений в каталоге */
+  total: number;
+  firstIds: string[];
+  search: { ids: string[]; total: number } | null;
+  strategyUsage: Array<{ strategyId: string; count: number; exampleIds: string[]; firstCurrency: string }> | null;
+  stopImpact: Array<{ channelAccountId: string; marketplace: string; enginePrices: number; pendingWrites: number }> | null;
+  channelPricing: Array<{ channelAccountId: string; total: number; rows: ConsoleOfferChannelPricingRow[] }> | null;
+  keyed: Array<{ marketplace: string; channelProductRef: string; condition: string; writeScopeId: string }> | null;
 }
 
 export interface ScopeDecisionStats {

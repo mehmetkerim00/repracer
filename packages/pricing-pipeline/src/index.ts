@@ -91,5 +91,5 @@ export type { OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStat
 export { ONBOARDING_STOCK_STEPS, ONBOARDING_PRICING_STEPS, onboardingStepsOf } from './store.ts';
 export { ONBOARDING_STEPS, CHANNEL_ACCESS_BLOCKERS } from './store.ts';
 // Шаг 35 [Р-154]: потоки консоли — страницами, окнами, агрегатами
-export type { DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, ConsoleStateOptions, ConsoleCatalogPage, InterventionSlice, FeedStatusGroup, FeedPageQuery, FeedPageItem, FeedPage, WorldCounters } from './store.ts';
+export type { DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, ConsoleStateOptions, ConsoleCatalogPage, ConsoleCatalogFactsQuery, ConsoleCatalogFacts, InterventionSlice, FeedStatusGroup, FeedPageQuery, FeedPageItem, FeedPage, WorldCounters } from './store.ts';
 export { feedGroupOf, FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT } from './store.ts';

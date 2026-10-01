@@ -1,8 +1,8 @@
 import { can, omnibusVerdict, OMNIBUS_WINDOW_DAYS, type OmnibusPriorPrice, type OmnibusVerdict } from '@repracer/pricing-model';
 import type { DiscountAnnouncementRow, PriceEvidenceDay } from '@repracer/pricing-pipeline';
 import type { Messages } from './i18n/index.ts';
-import { listQuery, pageOf, type ListQuery, type PageInfo } from './page.ts';
-import { gap, scopeById, unitOf, type Gap, type StandWorld, type Tone, type UnitRef } from './world.ts';
+import { catalogPageOf, listQuery, type ListQuery, type PageInfo } from './page.ts';
+import { catalogFirst, catalogTotal, gap, scopeById, unitOf, type Gap, type StandWorld, type Tone, type UnitRef } from './world.ts';
 
 /**
  * Комплаенс-модуль Omnibus (шаг 24) [Р-123]: прежняя цена объявленной скидки не выше наименьшей цены оффера за 30 суток витрины до начала
@@ -134,13 +134,13 @@ export function complianceView(world: StandWorld, announcements: readonly Discou
   return {
     // Р-136: выбор оффера для объявления скидки — не весь каталог: столько браузер не покажет и человек не пролистает
     worldId: world.id, headline: c.headline(counts), counts, rows,
-    offers: world.state.scopes.slice(0, OFFER_CHOICES).map((s) => unitOf(world, s, m)),
-    offersTotal: world.state.scopes.length,
+    offers: catalogFirst(world, OFFER_CHOICES).map((s) => unitOf(world, s, m)),
+    offersTotal: catalogTotal(world),
     canAnnounce: can(world.viewer.role, 'MANAGE_PRICING'), cannotCheck: c.cannotCheck, notAGuarantee: c.depth.notAGuarantee,
     // Р-136: глубина истории — только у показанных предложений; страница та же, что у списка товаров
-    depth: pageOf(world.state.scopes, listQuery(query), m).items
+    depth: catalogPageOf(world, listQuery(query), m).items
       .flatMap((s) => { const d = depthToday.get(s.writeScopeId); return d ? [{ unit: unitOf(world, s, m), depth: historyDepthView(d, m) }] : []; }),
-    page: pageOf(world.state.scopes, listQuery(query), m).page,
+    page: catalogPageOf(world, listQuery(query), m).page,
     gaps: [gap(m, 'OMNIBUS_OUTSIDE_PRICES'), gap(m, 'OMNIBUS_TIME_ZONE_TO_VERIFY')],
   };
 }

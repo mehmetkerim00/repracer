@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { after, before, test } from 'node:test';
 import { startModelIdentityProvider, type ModelIdentityProvider } from '@repracer/identity/test-provider';
+import { DEFAULT_JOB_CONFIG } from '@repracer/scheduler';
 import { createIsolatedDatabase, type IsolatedDatabase } from '../../../packages/pricing-store-pg/test/isolated-db.ts';
 import { beginLogin, finishLogin } from '../../../apps/console/src/oidc.ts';
 import { demoProducts, kauflandLiveWorld, WallClock, type KauflandLiveWorld, type LiveProduct } from './live/index.ts';
@@ -291,6 +292,8 @@ async function quiesce(round: number): Promise<{ drained: boolean; waitedMs: num
   live.simulator.params.faults = { writeTimeoutShare: 0, timeoutAppliedShare: 0.5, bulkItemMissingShare: 0, bulkItemServerErrorShare: 0 };
   const pausedAt = Date.now();
   live.simulator.pauseMarket(pausedAt);
+  // Ревью шага 67, находка 12: с метками процессов и базы сравнивается момент паузы по часам БАЗЫ (не раньше паузы рынка)
+  const pausedAtDb = (await db.rows<{ now: string }>(`SELECT now()::text AS now`))[0]!.now;
   for (const kind of PROCESSES) if (!alive(procs.get(kind))) await start(kind);
   const started = Date.now();
   let left: unknown[] = [];
@@ -305,8 +308,19 @@ async function quiesce(round: number): Promise<{ drained: boolean; waitedMs: num
     const [busy] = await db.rows<{ jobs: number; writes: number; ordersRead: boolean }>(
       `SELECT (SELECT count(*)::int FROM tenant_data.bulk_job WHERE tenant_id = $1 AND status IN ('PENDING', 'RUNNING', 'INTERRUPTED')) AS jobs,
               (SELECT count(*)::int FROM tenant_data.channel_write WHERE tenant_id = $1) AS writes,
-              EXISTS (SELECT 1 FROM maintenance.scheduled_job_run WHERE job_name = 'order-lines' AND outcome = 'SUCCEEDED' AND started_at > to_timestamp($2 / 1000.0)) AS "ordersRead"`,
-      [live.seeded.tenantId, pausedAt]);
+              EXISTS (SELECT 1 FROM maintenance.scheduled_job_run WHERE job_name = 'order-lines' AND outcome = 'SUCCEEDED' AND started_at > to_timestamp($2 / 1000.0))
+              /**
+               * Шаг 67 (красный хаос шага 66, seed 2039802170): запуск, начатый после паузы, мог ДОЧИТЫВАТЬ цепочку, начатую раньше неё, — её
+               * окно канал отдаёт видом первой страницы (шаг 58), и продажа перед паузой в него не попадает. Затишье — когда дочитана цепочка,
+               * начавшая чтение после паузы: курсора нет, и начало следующего окна («начало чтения − интервал», jobs.ts) не раньше паузы − интервал
+               */
+              AND NOT EXISTS (SELECT 1 FROM tenant_data.channel_account a
+                               WHERE a.tenant_id = $1 AND a.disconnected_at IS NULL
+                                 AND NOT EXISTS (SELECT 1 FROM tenant_data.channel_discovery_circle c
+                                                  WHERE c.tenant_id = a.tenant_id AND c.channel_account_id = a.channel_account_id
+                                                    AND c.order_cursor IS NULL AND c.order_read_from IS NULL AND c.order_since IS NOT NULL
+                                                    AND c.order_since + make_interval(secs => $3) >= $4::timestamptz)) AS "ordersRead"`,
+      [live.seeded.tenantId, pausedAt, DEFAULT_JOB_CONFIG.orderLinesEverySeconds, pausedAtDb]);
     if (busy!.jobs === 0 && busy!.writes === 0 && busy!.ordersRead) {
       // Чтение заказов после паузы дошло и очередь пуста: проверка «очередь пуста» ещё раз — запись, вставшая между запросами, затишье отменяет
       const [again] = await db.rows<{ n: number }>(`SELECT count(*)::int AS n FROM tenant_data.channel_write WHERE tenant_id = $1`, [live.seeded.tenantId]);
