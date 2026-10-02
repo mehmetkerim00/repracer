@@ -608,6 +608,15 @@ export class SimulatedKauflandChannel implements ChannelBehaviour {
     this.advanceTo(nowMs);
   }
 
+  /**
+   * Шаг 67 (хаос, OQ-220): все заказы предложения — с состоянием и временем создания. Модель списывает `amount` при заказе (K-11) и при
+   * отмене его НЕ возвращает: заказ, созданный после нашей последней записи и отменённый до того, как мы его увидели, оставляет канал на
+   * единицу ниже нашей цели до следующей записи
+   */
+  orderHistory(idOffer: string): Array<{ status: 'open' | 'sent' | 'cancelled'; tsCreatedMs: number }> {
+    return this.orders.filter((o) => o.idOffer === idOffer).map((o) => ({ status: o.status, tsCreatedMs: o.tsCreatedMs }));
+  }
+
   /** Шаг 65 (хаос): открытые строки заказов канала — по одной единице на строку, как у модели спроса */
   openOrderLines(): Array<{ idOrderUnit: number; idOffer: string; storefront: string; quantity: number }> {
     return this.orders.filter((o) => o.status === 'open').map((o) => ({ idOrderUnit: o.idOrderUnit, idOffer: o.idOffer, storefront: o.storefront, quantity: 1 }));
@@ -678,7 +687,7 @@ export class SimulatedKauflandChannel implements ChannelBehaviour {
   dump(): unknown {
     return {
       units: [...this.units.values()].map((u) => ({
-        idUnit: u.idUnit, storefront: u.storefront, listingPriceMinor: u.listingPriceMinor, buyerPriceMinor: this.buyerPrice(u), amount: u.amount,
+        idUnit: u.idUnit, idOffer: u.idOffer, storefront: u.storefront, listingPriceMinor: u.listingPriceMinor, buyerPriceMinor: this.buyerPrice(u), amount: u.amount,
         pendingPriceMinor: u.pending?.priceMinor ?? null, winsBuyBox: this.offersOf(`${u.storefront}|${u.idProduct}|${u.condition}`)[0]?.unit === u,
       })),
       competitors: this.competitors.map((c) => ({ sellerRef: c.sellerRef, storefront: c.storefront, idProduct: c.idProduct, priceMinor: c.priceMinor })),

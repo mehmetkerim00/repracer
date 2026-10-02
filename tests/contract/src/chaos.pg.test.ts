@@ -76,6 +76,8 @@ let provider: ModelIdentityProvider;
 let secretsDir = '';
 let dist = '';
 const journal: KauflandWriteJournalEntry[] = [];
+/** Шаг 67: предложения, чьё расхождение количества объяснено OQ-220 в последней проверке, — число идёт в отчёт раунда, чтобы признание не стало слепым пятном */
+const oq220Seen = new Set<string>();
 const chaos: KauflandChaos = { random: prng(SEED ^ 0x5eed), dropMidResponseShare: 0, bulk500AfterApplyShare: 0, duplicateOrderLineShare: 0 };
 const ports: Record<string, number> = {};
 const procs = new Map<ProcessKind, ChildProcess>();
@@ -335,6 +337,7 @@ async function quiesce(round: number): Promise<{ drained: boolean; waitedMs: num
 }
 
 async function invariants(round: number): Promise<string[]> {
+  oq220Seen.clear();
   const t = live.seeded.tenantId;
   const problems: string[] = [];
 
@@ -402,7 +405,27 @@ async function invariants(round: number): Promise<string[]> {
   // равенство количеств выше: резервация открытой строки — ровно её количество
 
   // d) значение в канале = наша цель, или расхождение записано с причиной
-  const units = (live.simulator.dump() as { units: Array<{ idUnit: number; storefront: string; listingPriceMinor: number; amount: number }> }).units;
+  const units = (live.simulator.dump() as { units: Array<{ idUnit: number; idOffer: string; storefront: string; listingPriceMinor: number; amount: number }> }).units;
+  /**
+   * Шаг 67 (полный CI шагов 66 и 67, OQ-220 — решение владельца): модель канала списывает остаток при заказе и не возвращает его при
+   * отмене (допущение K-11, Kaufland не подтвердил). Заказ, созданный после нашей последней записи количества и отменённый раньше, чем
+   * работа заказов его прочитала, резервации не оставляет — канал держит на единицу меньше нашей цели до следующей записи (безопасная
+   * сторона). Объяснено — только РОВНО это: канал ниже нашего значения ровно на число отменённых заказов предложения, созданных после
+   * последней записи количества, дошедшей до модели (время записи — позднейшее возможное: чем позже, тем меньше заказов сосчитано)
+   */
+  const oq220Drift = (offer: string): number => {
+    const offerUnits = new Set(units.filter((u) => u.idOffer === offer).map((u) => `${u.idUnit}|${u.storefront}`));
+    const lastWriteAt = journal.filter((e) => e.units.some((u) => u.amount !== null && offerUnits.has(`${u.idUnit}|${u.storefront}`)))
+      .reduce((at, e) => Math.max(at, e.atMs), Number.NEGATIVE_INFINITY);
+    return live.simulator.orderHistory(offer).filter((o) => o.status === 'cancelled' && o.tsCreatedMs > lastWriteAt).length;
+  };
+  const knownOq220 = (s: { field: string; offer: string }, ours: number, channelValue: number): boolean => {
+    if (s.field !== 'QUANTITY' || channelValue >= ours) return false;
+    const drift = oq220Drift(s.offer);
+    if (drift === 0 || ours - channelValue !== drift) return false;
+    oq220Seen.add(`${s.offer}`);
+    return true;
+  };
   const scopes = await db.rows<{ field: string; unit: string; storefront: string; offer: string; scope_status: string; last_version: string | null; last_status: string | null; last_amount: number | null;
     last_quantity: number | null; reason: string | null; applied_amount: number | null; applied_quantity: number | null; open_divergence: boolean; scope_id: string; in_flight: boolean }>(
     `SELECT f.field, s.write_scope_id AS scope_id, om.external_unit_id AS unit, om.marketplace AS storefront, om.external_offer_id AS offer, s.status AS scope_status,
@@ -439,11 +462,11 @@ async function invariants(round: number): Promise<string[]> {
     if (s.last_status !== null && s.last_status !== 'APPLIED' && s.last_status !== 'SUPERSEDED' && s.reason === null && !explained) {
       problems.push(`d) ${s.field} ${s.unit}: the last write ended ${s.last_status} without a reason`);
     }
-    if (applied !== null && channelValue !== applied && !explained) {
+    if (applied !== null && channelValue !== applied && !explained && !knownOq220(s, applied, channelValue)) {
       problems.push(`d) ${s.field} ${s.unit}: the channel holds ${channelValue}, our last applied value is ${applied}, no divergence recorded (last write v${s.last_version} ${s.last_status})`);
     }
     const target = s.field === 'QUANTITY' ? published.get(s.scope_id) : undefined;
-    if (target !== undefined && channelValue !== target && !explained && s.last_status === 'APPLIED') {
+    if (target !== undefined && channelValue !== target && !explained && s.last_status === 'APPLIED' && !knownOq220(s, target, channelValue)) {
       problems.push(`d) QUANTITY ${s.unit}: the channel holds ${channelValue}, our target (published) is ${target}, and no write is on its way`);
     }
   }
@@ -510,7 +533,7 @@ test('шаг 65: хаос — процессы убиваются посреди
     }
     const settled = await quiesce(round);
     const problems = settled.drained ? await invariants(round) : [`queue did not drain in ${QUIESCE_LIMIT_MS / 1000} s: ${JSON.stringify(settled.left).slice(0, 600)}`];
-    const entry = { round, seed: SEED, faults, kills: roundKills, killedOnWrite: kills.filter((k) => k.round === round && k.atMs === -1).length, actions, quiesceMs: settled.waitedMs, budgetRowsChecked: lastBudgetRows, problems, journal: journal.length, violations: model.violations.slice(0, 3) };
+    const entry = { round, seed: SEED, faults, kills: roundKills, killedOnWrite: kills.filter((k) => k.round === round && k.atMs === -1).length, actions, quiesceMs: settled.waitedMs, budgetRowsChecked: lastBudgetRows, problems, knownOq220: oq220Seen.size, journal: journal.length, violations: model.violations.slice(0, 3) };
     report.push(entry);
     console.log(JSON.stringify({ chaosRound: entry }));
     violations.push(...problems.map((p) => `round ${round} (seed ${SEED}): ${p}`));
@@ -581,6 +604,23 @@ test('шаг 65: каждый инвариант хаоса краснеет н�
   live.simulator.reply({ method: 'PATCH', rawUrl: `http://model/v2/units/${unit.idUnit}?storefront=${unit.storefront}`, path: `/v2/units/${unit.idUnit}`,
     query: { storefront: unit.storefront }, rawBody: JSON.stringify({ listing_price: unit.listingPriceMinor + 77 }), body: { listing_price: unit.listingPriceMinor + 77 }, headers: {} } as never, Date.now());
   await expectProblem('d) чужая цена в канале', new RegExp(`^d\\) PRICE ${unit.idUnit}: the channel holds ${unit.listingPriceMinor + 77}`));
+
+  /**
+   * d) количество в канале ниже нашего, и это НЕ объясняется отменами (OQ-220): разница больше всех отмен предложения — признание OQ-220
+   * не должно глотать любое расхождение количества (шаг 67)
+   */
+  const quantityScopes = await db.rows<{ unit: string; storefront: string; offer: string; quantity: number }>(
+    `SELECT om.external_unit_id AS unit, om.marketplace AS storefront, om.external_offer_id AS offer, ap.quantity FROM tenant_data.offer_mapping om
+       CROSS JOIN LATERAL (SELECT h.quantity FROM tenant_data.channel_write_history h WHERE h.tenant_id = om.tenant_id AND h.write_scope_id = om.quantity_write_scope_id
+                            AND h.final_status = 'APPLIED' ORDER BY h.version DESC LIMIT 1) ap
+      WHERE om.tenant_id = $1 ORDER BY 1`, [t]);
+  // Разница — на две больше ВСЕХ отмен предложения: ни одно число неувиденных отмен с ней не совпадёт
+  const counted = quantityScopes.find((q) => q.quantity - live.simulator.orderHistory(q.offer).filter((o) => o.status === 'cancelled').length - 2 >= 0);
+  assert.ok(counted, 'у мира есть единица с применённым количеством — иначе контролю нечего портить');
+  const lowered = counted.quantity - live.simulator.orderHistory(counted.offer).filter((o) => o.status === 'cancelled').length - 2;
+  live.simulator.reply({ method: 'PATCH', rawUrl: `http://model/v2/units/${counted.unit}?storefront=${counted.storefront}`, path: `/v2/units/${counted.unit}`,
+    query: { storefront: counted.storefront }, rawBody: JSON.stringify({ amount: lowered }), body: { amount: lowered }, headers: {} } as never, Date.now());
+  await expectProblem('d) количество ниже нашего не по отменам', new RegExp(`^d\\) QUANTITY ${counted.unit}: the channel holds ${lowered}`));
 
   // d) последняя запись завершена не применением и БЕЗ причины — дефект «запись исчезла молча»
   // Последняя версия своей единицы — именно её смотрит проверка «завершена без причины»

@@ -194,14 +194,27 @@ export async function pgStandUsers(directory: PgIdentityDirectory, onboardingPoo
   const users: Record<string, string> = {};
   for (const account of STAND_ACCOUNTS) {
     const subject = { issuer: STAND_ISSUER, subject: account.subject };
-    const existing = await directory.resolve(subject);
-    if (existing) {
-      users[account.membershipAlias] = existing.userId;
-      continue;
+    /**
+     * Шаг 67 (полный CI шага 67): файлы рабочего пространства идут параллельно и заводят пользователей стенда в одной базе
+     * одновременно — «нет пользователя → завести» у двух файлов сразу, и проигравший падал на уникальности адреса (23505). Проигравший
+     * ждёт победителя и берёт его пользователя
+     */
+    for (let attempt = 0; ; attempt++) {
+      const existing = await directory.resolve(subject);
+      if (existing) {
+        users[account.membershipAlias] = existing.userId;
+        break;
+      }
+      try {
+        const { token } = await issueSignupInvitation(onboardingPool as never, account.email);
+        // Имитатор поставщика выдаёт синтетический адрес стенда как подтверждённый (email_verified); настоящий поставщик — ADR-0013
+        users[account.membershipAlias] = await directory.acceptInvitation(token, subject, account.email, true);
+        break;
+      } catch (error) {
+        if ((error as { code?: string }).code !== '23505' || attempt >= 40) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
     }
-    const { token } = await issueSignupInvitation(onboardingPool as never, account.email);
-    // Имитатор поставщика выдаёт синтетический адрес стенда как подтверждённый (email_verified); настоящий поставщик — ADR-0013
-    users[account.membershipAlias] = await directory.acceptInvitation(token, subject, account.email, true);
   }
   return users;
 }
