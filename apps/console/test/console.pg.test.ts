@@ -158,7 +158,7 @@ test('step 23 on PostgreSQL: the database refuses a strategy for an offer the ch
   const owner = await login('OWNER');
   const url = (...parts: string[]) => `/api/worlds/${[TRUST_WORLD, ...parts].map(encodeURIComponent).join('/')}`;
   const list = (await handle({ method: 'GET', url: url('strategies'), body: undefined, ...owner })).body as StrategyListView;
-  assert.deepEqual(list.channelPricingOffers.map((o) => o.label), ['Amazon A1PA6795UKMFR9 · unit SYN-SKU-8502']);
+  assert.deepEqual(list.channelPricingOffers.map((o) => o.label), ['SYN-SKU-8502 · amazon.de']);
   const ws = list.scopes.find((x) => x.unit.externalUnitId === 'SYN-SKU-8502')!.unit.writeScopeId;
   const draft = { name: 'Synthetic PG fixed', params: { type: 'FIXED', priceMinor: 2050 }, deadbandMinor: 0 };
   const trustWorld = worlds.find((w) => w.id === TRUST_WORLD)!;

@@ -16,6 +16,7 @@
     "@repracer/pricing-pipeline": "0.1.0",
     "@repracer/channel-port": "0.1.0",
     "@repracer/amazon-adapter": "0.1.0",
+    "@repracer/ebay-adapter": "0.1.0",
     "@repracer/kaufland-adapter": "0.1.0",
     "@repracer/stock-sync": "0.1.0",
     "@repracer/channel-oauth": "0.1.0",

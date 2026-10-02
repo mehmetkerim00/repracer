@@ -21,6 +21,8 @@ export interface WorldSummary {
   demo: boolean;
   /** Р-150: сколько каналов ждёт доступа */
   awaitingAccess: number;
+  /** Шаг 68 (K3): есть витрина в стране ЕС — вкладка Omnibus только тогда [Р-123] */
+  euStorefronts: boolean;
 }
 
 /** Вход [Р-78]: пользователь токена поставщика и язык; роль — своя в каждом мире, из членства; simulator — только стенд */

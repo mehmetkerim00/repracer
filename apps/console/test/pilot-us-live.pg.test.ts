@@ -483,12 +483,18 @@ test('шаг 64: путь продавца из США с eBay EBAY_US — от 
   const boundary = shadowScreen.body.properties.find((p) => p.marketplace === 'EBAY_US' && /Day boundary/.test(p.propertyText));
   assert.ok(boundary?.blocksLive && boundary.question === 'OQ-112', `граница суток EBAY_US держит бой и названа вопросом: ${JSON.stringify(boundary)}`);
   assert.ok(shadowScreen.body.liveBlockedText !== null, 'экран говорит про закрытый бой ДО нажатия кнопки');
+  // Шаг 68 (K3): у продавца только с витриной США вкладки Omnibus нет — правило ЕС [Р-123]; у демо с Kaufland de она есть (прогон демо США)
+  const worldsNow = await consoleCall<WorldSummary[]>('консоль: мои миры после подключения eBay US', 'GET', '/api/worlds');
+  assert.equal(worldsNow.body.find((x) => x.id === worldId())?.euStorefronts, false, 'тенант только с ebay.com — без витрины ЕС');
   // Условие 1 Р-188: перевод в бой при неподтверждённой границе — 409, и аккаунт остаётся в тени
   const live = await consoleCall<{ error: { code: string; message: string } }>('включить бой на EBAY_US — отказ', 'POST', api('shadow', 'mode'),
     { channelAccountId: ids.accountId, toMode: 'LIVE', typedConfirmation: SELLER });
   assert.equal(live.status, 409, `бой на витрине с неподтверждённой границей суток: ${JSON.stringify(live.body)}`);
   assert.equal(live.body.error.code, 'PROPERTY_UNKNOWN');
   assert.match(live.body.error.message, /day boundary/i, 'отказ называет свойство витрины');
+  // Шаг 68 (K2): словами — витрина, что не подтверждено и кто подтверждает; без идентификатора витрины и кода вопроса
+  assert.match(live.body.error.message, /Live writes on ebay\.com stay closed: .*not confirmed yet\. Only the channel can confirm it/, live.body.error.message);
+  assert.doesNotMatch(live.body.error.message, /EBAY_US|OQ-\d+|\b[AEK]-\d{2}\b|DAY_BOUNDARY/, live.body.error.message);
   const { rows: [still] } = await observer.query(`SELECT write_mode FROM tenant_data.channel_account WHERE channel_account_id = $1`, [ids.accountId]);
   assert.equal(still.write_mode, 'SHADOW', 'аккаунт остался в тени');
   const { rows: [t] } = await observer.query(`SELECT count(*)::int AS n FROM channel_data.price_decision WHERE tenant_id = $1 AND trigger_type = 'SCHEDULE'`, [ids.tenantId]);

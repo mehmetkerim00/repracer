@@ -66,3 +66,5 @@ button.danger { background: #c0392b; border-color: #c0392b; color: #fff; }
 .worlds { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
 .groups { display: flex; flex-wrap: wrap; gap: 12px; list-style: none; padding: 0; }
 .index li { margin: 4px 0; }
+/* Шаг 68 (K7): письмо-дайджест на экране тени — как текст письма: переносы строк сохраняются, шрифт обычный */
+.letter { white-space: pre-wrap; font: inherit; background: #f7f8fa; border: 1px solid #dde1e7; border-radius: 4px; padding: 10px 12px; margin: 6px 0 0; }

@@ -183,6 +183,7 @@ export async function startConsole(env: Env = process.env): Promise<RunningConso
       joinMember: pgStandJoinMember(pools.admin as never, directory as never),
       log: (m) => console.log(JSON.stringify({ level: 'INFO', code: 'CONSOLE_DEMO', message: m })),
       usAccounts: config.demoUs,
+      usPressDays: config.demoUs ? config.demoPressDays : 0,
     });
     state.demo = started;
     worlds.length = 0;

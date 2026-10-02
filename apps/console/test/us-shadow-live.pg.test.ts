@@ -173,6 +173,9 @@ test('Р-172: у amazon.com не известна граница суток — 
   assert.equal(live.status, 409, `бой на витрине с неизвестным свойством: ${JSON.stringify(live.body)}`);
   assert.equal(live.body.error.code, 'PROPERTY_UNKNOWN');
   assert.match(live.body.error.message, /Day boundary|day boundary/i, 'отказ называет СВОЙСТВО, а не «нельзя»');
+  // Шаг 68 (K2): отказ перевода amazon.com в бой — словами: витрина, что не подтверждено, кто подтверждает; без ATVPDKIKX0DER и A-03
+  assert.match(live.body.error.message, /amazon\.com/, live.body.error.message);
+  assert.doesNotMatch(live.body.error.message, /ATVPDKIKX0DER|DAY_BOUNDARY|\bA-\d{2}\b|OQ-\d+|Р-\d+/, live.body.error.message);
   Object.assign(numbers, { liveRefusal: live.body.error.message });
 });
 

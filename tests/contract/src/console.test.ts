@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { before, test } from 'node:test';
 import {
-  boundsView, LOCALES, messagesFor, planStop, productList,
+  boundsView, decisionTrace, LOCALES, messagesFor, planStop, productList,
   type HumanReason, type Messages, type StandWorld, type Viewer,
 } from '@repracer/console-model';
 import { decisionsOf, rejectedOf, stopOf, traceOf } from './console/streams.ts';
@@ -124,10 +124,18 @@ test('B: the happy path decision shows the whole way from snapshot to channel co
   assert.equal(gate.summary, 'Price €17.75 approved within €15.00–€25.00.');
   assert.ok(['LOWER_BOUND', 'UPPER_BOUND'].every((c) => gate.items.some((i) => i.outcome === 'PASS' && i.label === en.ui.gateChecks[c as 'LOWER_BOUND'])));
   const strategy = trace.steps.find((s) => s.key === 'STRATEGY')!;
-  // Buy Box — цена конкурента, данные канала: в вечном слепке её нет [Р-68]
-  // Р-85: цель «Buy Box минус подрез» выводит цену конкурента — в слепке её нет, экран так и говорит; предложенная цена — из решения
-  assert.match(strategy.summary, /^Proposed €17\.75 \(.+\): Undercut the Buy Box channel value not kept by €0\.05: channel value not kept\.$/);
-  assert.ok(trace.gaps.some((g) => g.code === 'CHANNEL_VALUES_WITHHELD'));
+  /**
+   * Buy Box — цена конкурента, данные канала: в вечном слепке её нет [Р-68, Р-85]. Шаг 68 (K11): пока у решения есть горячее
+   * намерение (3 дня, Р-28), строка стратегии называет суммы из него; без намерения — правило словами, а не заглушка на месте сумм
+   */
+  assert.match(strategy.summary, /^Proposed €17\.75 \(.+\): Undercut the Buy Box €17\.80 by €0\.05: €17\.75\.$/);
+  const detail = (await w.store.decisionDetail(world.tenantId, approved.decisionId))!;
+  const aged = decisionTrace(world, { ...detail, intent: null }, en);
+  const agedStrategy = aged.steps.find((s) => s.key === 'STRATEGY')!;
+  // Подрез — параметр версии стратегии [Р-91]: известен и без намерения; суммы Buy Box и цели — нет
+  assert.match(agedStrategy.summary, /^Proposed €17\.75 \(.+?\): Undercut the Buy Box price seen at that moment by €0\.05\. The decision keeps amounts taken from competitor prices for 3 days/);
+  assert.ok(!JSON.stringify(aged.steps).includes(en.ui.common.withheld), 'без горячего намерения — ни одной заглушки');
+  assert.ok(aged.gaps.some((g) => g.code === 'CHANNEL_VALUES_WITHHELD'), 'пробел «значения канала не хранятся» назван у решения без намерения');
   assert.ok(trace.gaps.some((g) => g.code === 'CONFIRMATION_SOURCE'));
   const anchors = trace.steps.find((s) => s.key === 'ANCHORS')!;
   assert.ok(anchors.items.some((i) => i.outcome === 'PASS'), 'at least one anchor was used');

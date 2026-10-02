@@ -70,7 +70,7 @@ export type {
   ReconciliationCompared,
   SnapshotDelivery,
 } from './store.ts';
-export { DEFAULT_MEMBERS, InMemoryPricingStore, standUserOf, type MemorySeed, type MemorySeedScope, type SeedBound } from './memory-store.ts';
+export { DEFAULT_MEMBERS, InMemoryPricingStore, seedSkuOf, standUserOf, type MemorySeed, type MemorySeedScope, type SeedBound } from './memory-store.ts';
 export {
   DEFAULT_TIERS,
   planPollingTiers,

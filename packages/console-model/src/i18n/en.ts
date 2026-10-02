@@ -179,6 +179,72 @@ const notes: Record<SanityNoteCode, Template> = {
   NO_FRESH_CROSS_CHANNEL_REFERENCE: (f) => `no reference for the same EAN on another channel younger than ${f.seconds('maxAgeSeconds')}`,
 };
 
+/**
+ * Шаг 68 (K11): заголовки заметок проверок входов. Без них «почему эта цена» показывал коды (`SMALL_MOVE`,
+ * `NO_FRESH_CROSS_CHANNEL_REFERENCE`) вместо названия проверки
+ */
+const noteTitles: Record<SanityNoteCode, string> = {
+  COST_NOT_DECLARED: 'Unit cost not declared',
+  TOO_FEW_COMPETITOR_OFFERS: 'Too few competitor offers',
+  HISTORY_TOO_SHORT: 'Price history too short',
+  HISTORY_AVAILABLE: 'Price history available',
+  NO_SCALE_REFERENCE: 'Nothing to check the scale against',
+  SINGLE_SELLER_MARKET_EVENT: 'One seller moved',
+  DISPERSED_MARKET_EVENT: 'The market moved unevenly',
+  SHIFT_BELOW_SHARE: 'Too few products moved for a halt',
+  SMALL_MOVE: 'Small move',
+  NO_PREVIOUS_SNAPSHOT: 'No previous snapshot',
+  REFERENCES_CONVERTED_AT_ECB: 'References converted at the ECB rate',
+  REFERENCES_WITHOUT_ECB_RATE: 'References without an ECB rate',
+  NO_FRESH_CROSS_CHANNEL_REFERENCE: 'No recent price on another channel',
+};
+
+/**
+ * Шаг 68 (K11): причина стратегии, у которой суммы конкурента в объяснении уже не хранятся [Р-85]. Горячее намерение держит их
+ * 3 дня, и «почему эта цена» берёт суммы оттуда; у решения старше — этот текст вместо заглушки на месте каждой суммы
+ */
+const keptNote = 'The decision keeps amounts taken from competitor prices for 3 days, so they are no longer shown; the full snapshot is linked in the snapshot step.';
+/** Подрез — параметр стратегии: известен, пока его версия в справочнике (18 месяцев после замены, Р-91) */
+const step = (f: Fmt) => (typeof f.get('undercutMinor') === 'number' ? f.money('undercutMinor') : 'the strategy step');
+const reasonsWithoutChannel: Partial<Record<AnyReasonCode | SanityNoteCode, Template>> = {
+  // Ревью шага 68, находка 4: суммы из цены конкурента решение держит 3 суток [Р-28]; сам снимок — 18 месяцев по ссылке шага снимка
+  BUYBOX_MATCH: () => `Matched the Buy Box price seen at that moment. ${keptNote}`,
+  BUYBOX_UNDERCUT: (f) => `Undercut the Buy Box price seen at that moment by ${step(f)}. ${keptNote}`,
+  LOWEST_MATCH: (f) => `Matched the lowest price ${f.get('scope') === 'MARKET' ? 'of the market' : 'among the visible offers'} seen at that moment. ${keptNote}`,
+  LOWEST_UNDERCUT: (f) => `Undercut the lowest price seen at that moment by ${step(f)}. ${keptNote}`,
+  /**
+   * Заметки и предупреждения проверки входов: их числа (сколько предложений, дней истории, какой продавец) — данные канала, и их нет ни
+   * в вечном объяснении, ни в горячем намерении. Текст называет правило и его порог, а не пустое место
+   */
+  TOO_FEW_COMPETITOR_OFFERS: (f) => `fewer competitor offers than the ${f.count('minOffers')} needed`,
+  HISTORY_TOO_SHORT: (f) => `less price history than the ${f.count('minHistoryDays')} days needed`,
+  HISTORY_AVAILABLE: () => 'enough price history to check against',
+  SINGLE_SELLER_MARKET_EVENT: () => 'one seller moved — market event',
+  DISPERSED_MARKET_EVENT: (f) => `different factors (spread above ${f.ratio('maxSpread')}) — market event`,
+  SHIFT_BELOW_SHARE: (f) => `fewer products moved than a halt needs (${f.count('minProducts')} and ${f.ratio('share')} of them)`,
+  NO_PLAUSIBILITY_ANCHOR: (f) => `Snapshot not used: nothing to check it against (unit cost ${f.get('costDeclared') ? 'declared' : 'missing'}). Declare the unit cost — it is the primary anchor.`,
+  OWN_PRICE_DEVIATION: (f) => `Warning: the ${f.value('field')} differed from our price ${f.money('ourPriceMinor')} by more than ${f.ratio('limit')}; the snapshot was accepted.`,
+  SELF_OFFER_DIVERGENCE: (f) => `Our offer showed a different price in the channel than our price ${f.money('ourPriceMinor')} — a divergence case was opened.`,
+  INTERNAL_OUTLIER_IGNORED: () => 'Warning: one offer was far from the median of the snapshot, but the strategy does not use it.',
+  MARKET_SHIFT_DISPERSED: () => 'Market event: products moved with different factors; prices keep working.',
+  MARKET_SHIFT_SINGLE_SELLER: () => 'Market event: one seller moved the prices of several products; prices keep working.',
+  // Цель стратегии выведена из цены конкурента [Р-85]: граница и решение — наши, их сумма остаётся
+  CAPPED_AT_MIN_PRICE: (f) => `The target from competitor prices was below min_price — capped at ${f.money('minMinor')}.`,
+  CAPPED_AT_MAX_PRICE: (f) => `The target from competitor prices was above max_price — capped at ${f.money('maxMinor')}.`,
+  ALREADY_AT_TARGET: () => 'The price already equalled the target.',
+  WITHIN_DEADBAND: (f) => `The difference to the target was below the threshold ${f.money('deadbandMinor')} — the price stays.`,
+  TARGET_OUTSIDE_BOUNDS_HOLD: (f) => `The target was outside ${f.money('minMinor')}–${f.money('maxMinor')}; the strategy is set to keep the price.`,
+  COMPETITOR_REQUIREMENT_NOT_MET: () => 'Strategy not evaluated: the channel data did not give what the strategy needs.',
+  ENGINE_CURRENCY_MISMATCH: (f) => `Strategy not evaluated: the ${f.value('source')} was in another currency than the offer (${f.raw('expected')}).`,
+  DIVERGENCE_CASE_OPENED: (f) => `Divergence case opened: the channel showed another price than the ${f.money('expectedMinor')} we expect.`,
+  // Отказ Gate у цены из данных конкурента: предложенная цена и отклонение выведены из цены конкурента [Р-85]; граница — наша
+  BELOW_MIN_PRICE: (f) => `Rejected: the proposed price was below min_price ${f.money('minMinor')}.`,
+  BELOW_MARGIN_FLOOR: (f) => `Rejected: the proposed price was below the minimum-margin floor ${f.money('floorMinor')}${opt(f, 'minMarginBp', () => ` (margin ${f.bp('minMarginBp')})`)}.`,
+  ABOVE_MAX_PRICE: (f) => `Rejected: the proposed price was above max_price ${f.money('maxMinor')}.`,
+  STEP_LIMIT: (f) => `Held: the change from ${f.money('currentMinor')} was larger than the allowed step ${f.bp('limitBp')}.`,
+  INTERNAL_BOUND_VIOLATION: (f) => `Rejected: internal error — ${f.value('check')} found the price outside ${f.money('floorMinor')}–${f.money('ceilingMinor')}; an alert was raised.`,
+};
+
 const values: Record<ValueKey, string> = {
   SELLER_DECLARED: 'declared by the seller', FEE_SCHEDULE: 'fee schedule', CHANNEL_API: 'from the channel', CALIBRATED: 'calibrated from payouts',
   buybox: 'the Buy Box', lowest: 'the lowest competitor price', suggested: 'the channel suggestion',
@@ -237,7 +303,7 @@ const limits: Record<LimitCode, string> = {
 };
 
 const gaps: Record<GapCode, { what: string; why: string }> = {
-  PRODUCT_TITLE: { what: 'Product title and seller SKU', why: 'There is no product catalog with titles yet; the offer is identified by channel unit, channel product and EAN.' },
+  PRODUCT_TITLE: { what: 'Product titles', why: 'An offer is named by its product title where one is known, otherwise by your SKU. Titles are not read from the channels yet, so offers found in a channel show your SKU.' },
   NEXT_CHECK: { what: 'Next check', why: 'The polling tier is computed but not stored; channel notifications arrive without a schedule.' },
   USER_TIME_ZONE: { what: 'Time in your time zone', why: 'The user or tenant time zone is not stored; times are shown in UTC.' },
   NO_EXPLANATION: { what: 'Explanation of the decision', why: 'The decision was stored without an explanation snapshot.' },
@@ -281,6 +347,8 @@ export const en = {
   titles,
   reasons,
   notes,
+  noteTitles,
+  reasonsWithoutChannel,
   values,
   limits,
   gaps,
@@ -288,9 +356,14 @@ export const en = {
     common: {
       noValue,
       withheld: 'channel value not kept',
+      /** Шаг 68 (K11): у причины без своего текста без канала — правило словами, а не пустое место посреди фразы */
+      withheldReason: (title: string) => `${title}. The channel's figures for this step are kept with the snapshot, not with the decision.`,
       amountWithoutCurrency: (v: string) => `${v} (currency missing)`,
       boundUnresolved: (cause: string) => `not set: ${cause}`,
-      unitLabel: (channel: string, marketplace: string, unit: string) => `${channel} ${marketplace} · unit ${unit}`,
+      /** Шаг 68 (K10): предложение — название или SKU продавца и витрина словами, а не «Kaufland de · unit 100200» */
+      unitLabel: (product: string, storefront: string) => `${product} · ${storefront}`,
+      /** Предложение без SKU и названия — номер единицы канала, но словом */
+      unitRef: (unit: string) => `unit ${unit}`,
       unknownReason: (code: string) => `Unknown reason ${code}`,
     },
     app: {
@@ -764,13 +837,32 @@ export const en = {
         notOwner: 'Only the owner of the account switches on live writes.',
         confirmation: 'The typed text does not match the account name. Type it exactly as shown.',
         marketplacesInvisible: (list: string) => `Live writes stay closed: this account names no storefront we know (${list || 'none named'}). Connect its storefronts, or it stays in the shadow.`,
-        propertyUnknown: (detail: string) => `Live writes stay closed: we do not know ${detail} for this storefront. The shadow keeps working — you keep seeing what the engine would do.`,
+        /** Шаг 68 (K2): отказ перевода в бой — витрина словами, что не подтверждено и кто подтверждает */
+        liveClosed: (storefront: string, property: string, where: string) => `Live writes on ${storefront} stay closed: the ${property.toLowerCase()} of this storefront is not confirmed yet. ${where} Until then the shadow keeps working — you keep seeing what the engine would do, and nothing is written.`,
+        liveClosedUnknown: 'Live writes stay closed: we cannot confirm what we need to know about the storefronts of this account — one of them may not be a storefront we support yet. The shadow keeps working meanwhile.',
         modeMismatch: 'The account is already in that mode — someone switched it while this screen was open.',
       },
       volume: (offers: number, scopes: number) => `${offers} offers, ${scopes} of them with the engine on`,
       properties: {
         title: 'What we still do not know about these storefronts',
         unknownValue: 'not known',
+        someProperty: 'a property',
+        /** Шаг 68 (K2): значения ревизии витрин словами */
+        valueWords: {
+          'GROSS / VAT_INCLUDED': 'gross, VAT included',
+          'NET / SALES_TAX_EXCLUDED': 'net, sales tax added at checkout',
+          ACCOUNT_REGION_SKU: 'one value per SKU for the whole region',
+          ACCOUNT_MARKETPLACE_SKU: 'one value per SKU per storefront',
+          ACCOUNT_OFFER: 'one value per offer, shared by all storefronts of the offer',
+        } as Record<string, string | undefined>,
+        /** Кто подтверждает свойство — по способу закрытия из ревизии витрин */
+        confirmWhere: {
+          // Ревью шага 68, находка 2: ни автоматики, ни срока — подтверждение ставит команда платформы руками, и текст это говорит
+          SHADOW_READ: 'It can be confirmed from what the channel shows while you are in the shadow; our team does that by hand, and there is no date for it yet. Nothing is needed from you — the Shadow mode screen shows it once it is confirmed.',
+          FIRST_LIVE_WRITE: 'It can only be confirmed by real writes to the channel, so it is not something the shadow can settle; there is no date for it yet.',
+          CHANNEL_SUPPORT: 'Only the channel can confirm it — through its support or its documentation; the question is open and there is no date for an answer. Nothing is needed from you — the Shadow mode screen shows it once it is confirmed.',
+        } as Record<string, string | undefined>,
+        confirmWhereUnknown: 'The Shadow mode screen lists how it gets confirmed.',
         names: {
           DAY_BOUNDARY: 'Day boundary of the price history',
           PRICE_TAX_BASIS: 'Tax basis of the price',
@@ -792,6 +884,9 @@ export const en = {
         subject: (tenant: string) => `repracer: what the engine would have done this week (${tenant})`,
         intro: (tenant: string, accounts: number) => `Your account "${tenant}" runs ${accounts} channel connection(s) in shadow mode: the engine works completely and writes nothing to the channel. Here is what it would have done last week (Monday to Sunday, UTC). The Shadow mode screen counts the last seven days up to now, so its numbers differ from this email.`,
         cta: 'If these numbers look right, switch live writes on for the channel in the console — Shadow mode screen. Only you as the owner can do it, and it needs your second factor.',
+        previewIntro: (tenant: string, accounts: number) => `Your account "${tenant}" runs ${accounts} channel connection(s) in shadow mode: the engine works completely and writes nothing to the channel. Here is what it would have done in the last seven days.`,
+        previewTitle: 'Weekly email — preview',
+        previewSynthetic: 'Demo: synthetic data. This is the email a seller in shadow mode receives every Monday; the real one covers the previous week, Monday to Sunday (UTC).',
         historyTitle: 'Weekly reports we sent you',
         notDelivered: 'not delivered yet',
         delivered: (when: string, kind: string) => `delivered ${when}${kind === 'DRY_RUN' ? ' (dry run: the email was built and sent nowhere)' : ''}`,
@@ -993,7 +1088,8 @@ export const en = {
       headline: (dangerous: number, corrected: number) => `Your bounds stopped ${dangerous} dangerous ${dangerous === 1 ? 'change' : 'changes'} and corrected ${corrected}`,
       summary: (s: { dangerous: number; corrected: number; unresolvable: number; limiterHolds: number; stops: number; inputRejects: number; halts: number }) =>
         `Dangerous (over 10% beyond a bound): ${s.dangerous} · corrected: ${s.corrected} · bound not computable: ${s.unresolvable} · step and frequency limits: ${s.limiterHolds} · stopped by a person: ${s.stops} · rejected snapshots: ${s.inputRejects} · storefront halts: ${s.halts}`,
-      none: 'Nothing was stopped.',
+      // Шаг 68 (K10): пустой экран объясняет, что значит пустота и когда здесь что-то появится
+      none: 'Nothing was stopped or corrected in the last 7 days. Every time a bound, a person or the input check stops or corrects a price, it appears here with the reason.',
       kinds: { GATE: 'Price Gate', STRATEGY_CAP: 'Strategy capped at a bound', WRITE_RECHECK: 'Recheck at dispatch', STOP: 'Stopped by a person', INPUT: 'Input check', HALT: 'Storefront halt' },
       interventions: { DANGEROUS: 'dangerous', CORRECTED: 'corrected' },
       columns: { when: 'When', where: 'Where', kind: 'Stopped by', proposed: 'Proposed', before: 'Before', change: 'Change', limit: 'Bound', deviation: 'Beyond bound', reason: 'Reason' },
@@ -1222,6 +1318,8 @@ export const en = {
     },
     compliance: {
       pageTitle: 'Omnibus: prior price of a discount',
+      /** Шаг 68 (K3): прямой адрес вкладки у тенанта без витрин ЕС */
+      notApplicable: 'The Omnibus rule for discount prices is EU law. None of your connected storefronts is in the EU, so there is nothing to check here.',
       intro: 'A discount may state as prior price at most the lowest price of this offer in the 30 days before the discount starts — separately per channel and storefront, days by the storefront time zone. The database refuses an announcement that breaks the rule.',
       checkTitle: 'Check a discount before announcing it',
       fields: { offer: 'Offer', reference: 'Stated prior price', sale: 'Discount price', startsAt: 'Discount starts', endsAt: 'Discount ends (optional)' },
@@ -1246,7 +1344,7 @@ export const en = {
       reportTitle: 'Announced discounts',
       headline: (c: { COMPLIANT: number; VIOLATION: number; UNVERIFIED: number }) => `Correct ${c.COMPLIANT} · incorrect ${c.VIOLATION} · not verifiable ${c.UNVERIFIED}`,
       columns: { offer: 'Offer', reference: 'Prior price', sale: 'Discount price', period: 'Period', atAnnouncement: 'At announcement', now: 'Checked again now' },
-      empty: 'No discounts announced.',
+      empty: 'No discounts announced yet. Before you announce a discount with a "was" price, check it above: the prior price may be at most the lowest price of the offer in the 30 days before the discount starts. Announced discounts and their check appear here.',
       evidenceByOffer: (n: number) => `The evidence is exported per offer (${n} in the catalog): a dispute is always about one offer.`,
       evidenceTitle: 'Evidence: price history for a period',
       evidenceHint: 'Storefront days with lowest, highest, first and last price; corrections are marked. The file carries a SHA-256 checksum.',

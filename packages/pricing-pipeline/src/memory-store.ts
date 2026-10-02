@@ -105,9 +105,16 @@ export interface SeedBound {
   isActive?: boolean;
 }
 
+/** SKU товара посева — одно правило у памяти и у посева PostgreSQL: подписи предложений миров совпадают */
+export function seedSkuOf(scope: { productId: string }): string {
+  return `syn-${scope.productId}`;
+}
+
 export interface MemorySeedScope {
   writeScopeId: string;
   productId: string;
+  /** Шаг 68 (K10): название товара (синтетическое у демо); SKU товара посева — `seedSkuOf` */
+  title?: string;
   channelAccountId: string;
   marketplace: string;
   externalUnitId: string;
@@ -2050,7 +2057,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
         const halt = this.activeHalt(s.channelAccountId, s.marketplace);
         const stop = this.activeStop(s.channelAccountId, s.marketplace);
         return {
-          writeScopeId: s.writeScopeId, productId: s.productId, channelAccountId: s.channelAccountId, marketplace: s.marketplace, externalUnitId: s.externalUnitId,
+          writeScopeId: s.writeScopeId, productId: s.productId, sku: seedSkuOf(s), title: s.title ?? null, channelAccountId: s.channelAccountId, marketplace: s.marketplace, externalUnitId: s.externalUnitId,
           channelProductRef: s.channelProductRef, condition: s.condition, gtin: s.gtin ?? null, currency: s.currency, basis: s.basis, taxRegime: s.taxRegime,
           pricingMode: s.pricingMode, status: s.status, strategy: s.strategy, currentPriceMinor: s.currentPriceMinor, bounds: this.boundsOf(s),
           cost: s.cost ?? null, minMarginBp: s.guardrails?.minMarginBp ?? null,
@@ -2173,6 +2180,8 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     const t = Date.parse(now);
     return {
       scopes: [...this.scopes.values()].filter((s) => s.status !== 'RETIRED').length, demo: this.demo,
+      // Миры памяти — витрины ЕС стенда (Kaufland de/at, amazon.de): цена брутто — режим НДС ЕС [Р-58]
+      euStorefronts: [...this.scopes.values()].some((s) => s.basis === 'GROSS'),
       decisionsLastDay: this.decisions.filter((d) => Date.parse(d.decidedAt) > t - 86_400_000).length,
       interventionsLastWeek: this.decisions.filter((d) => d.outcome !== 'NO_CHANGE' && Date.parse(d.decidedAt) > t - 7 * 86_400_000).length,
       activeStops: this.stops.filter((s) => s.releasedAt === null).length,

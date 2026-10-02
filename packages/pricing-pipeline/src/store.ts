@@ -833,6 +833,9 @@ export interface BulkJobArtifact {
 export interface ConsoleScopeRow {
   writeScopeId: string;
   productId: string;
+  /** Шаг 68 (K10): SKU продавца и название товара — подпись предложения словами, а не номером единицы канала */
+  sku?: string | null;
+  title?: string | null;
   channelAccountId: string;
   marketplace: string;
   externalUnitId: string;
@@ -1054,9 +1057,11 @@ export interface ConsoleCatalogFactsQuery {
   first?: number;
   /**
    * Поиск предложения — как `offers` консоли: подстрока (в нижнем регистре) подписи, номера единицы, ссылки товара или GTIN. Подпись
-   * собирается шаблоном экрана (`{c}`, `{m}`, `{u}`) с именем канала единицы (ключ — код канала); канал не из списка — `unknownChannel`
+   * собирается шаблоном экрана (`{p}` — название или SKU товара, `{s}` — витрина словами) — шаг 68 (K10). Витрина — правилом
+   * `storefrontName`: Kaufland — `kaufland.<код>`, иначе слово витрины из `marketplaceWords`, иначе имя канала единицы (ключ — код канала;
+   * канал не из списка — `unknownChannel`) и код витрины
    */
-  search?: { q: string; limit: number; labelTemplate: string; channelNames: Record<string, string>; unknownChannel: string };
+  search?: { q: string; limit: number; labelTemplate: string; marketplaceWords: Record<string, string | undefined>; channelNames: Record<string, string>; unknownChannel: string };
   /** Использование стратегий: сколько предложений у каждой и первые `examples` из них в порядке каталога */
   strategyUsage?: { examples: number };
   /** Влияние остановки: включённые движком предложения и ждущие записи цены у них — по аккаунту и витрине */
@@ -1156,6 +1161,11 @@ export interface WorldCounters {
   activeStops: number;
   activeHalts: number;
   demo: boolean;
+  /**
+   * Шаг 68 (K3): у тенанта есть витрина в стране ЕС (подключённый аккаунт). Omnibus и §11 PAngV — правила ЕС [Р-123]: продавцу только
+   * с витринами США вкладка проверки скидок ни о чём, кроме «не применимо», не скажет
+   */
+  euStorefronts: boolean;
 }
 
 // --- онбординг [Р-149], канал без доступов [Р-150] --------------------------------------------------------------------

@@ -94,6 +94,15 @@ const COMPETITOR_RULES = ['MATCH_BUYBOX', 'BEAT_LOWEST', 'POSITION'];
  * Строки единицы записи цены: предложение, единица, товар, версии записи, стратегия.
  * Р-91: подрез стратегии — из channel_data.pricing_strategy_undercut (18 месяцев после замены версии), не из вечной версии стратегии
  */
+/**
+ * Шаг 68 (K3): страны ЕС — правила Omnibus и §11 PAngV действуют там [Р-123]. Страну витрины знает справочник витрин (`platform.marketplace`);
+ * у тенанта витрина ЕС — когда она есть у неотключённого аккаунта. Список стран — состав ЕС, а не «цена брутто»: НДС есть и вне ЕС (A-24)
+ */
+const EU_COUNTRIES = ['AT', 'BE', 'BG', 'CY', 'CZ', 'DE', 'DK', 'EE', 'ES', 'FI', 'FR', 'GR', 'HR', 'HU', 'IE', 'IT', 'LT', 'LU', 'LV', 'MT', 'NL', 'PL', 'PT', 'RO', 'SE', 'SI', 'SK'] as const;
+const EU_STOREFRONTS_SQL = (tenant: string) => `EXISTS (SELECT 1 FROM tenant_data.channel_account a
+                 JOIN platform.marketplace pm ON pm.channel = a.channel AND pm.marketplace = ANY (a.marketplaces)
+                WHERE a.tenant_id = ${tenant} AND a.disconnected_at IS NULL AND pm.country IN (${EU_COUNTRIES.map((c) => `'${c}'`).join(', ')}))`;
+
 const SCOPE_COLUMNS = `
   s.write_scope_id, s.product_id, s.channel_account_id, s.channel, m.marketplace, m.region, m.external_unit_id, m.external_sku, m.external_listing_id, m.external_offer_id, m.channel_product_ref, m.condition,
   s.scope_key, p.gtin, s.currency, s.price_basis, s.tax_regime, s.pricing_mode, s.status, s.pricing_strategy_id, s.pricing_strategy_version, s.created_at,
@@ -2018,7 +2027,8 @@ export class PgPricingStore implements PricingStore {
       const onlyProducts = only ? (await q(`SELECT DISTINCT product_id FROM tenant_data.write_scope WHERE tenant_id = $1 AND write_scope_id = ANY ($2::uuid[])`, [tenantId, only]))
         .map((r) => String(r.product_id)) : null;
       if (!only) await q(`SET LOCAL enable_nestloop = off`, []);
-      const [scopeJson] = await q(`WITH sc AS (SELECT ${SCOPE_COLUMNS} ${SCOPE_FROM}${only ? listedScopes('$3', '$4') : ''})
+      // Шаг 68 (K10): SKU и название товара — подпись предложения на экране
+      const [scopeJson] = await q(`WITH sc AS (SELECT ${SCOPE_COLUMNS}, p.sku AS product_sku, p.title AS product_title ${SCOPE_FROM}${only ? listedScopes('$3', '$4') : ''})
         SELECT coalesce(json_agg(${SCOPE_JSON} ORDER BY sc.created_at, sc.write_scope_id), '[]') AS scopes FROM sc`, only ? [tenantId, now, only, onlyProducts] : [tenantId, now]);
       if (!only) await q(`SET LOCAL enable_nestloop = on`, []);
       const scopes = ((scopeJson?.scopes ?? []) as Row[]).map((j): ConsoleScopeRow => {
@@ -2027,7 +2037,7 @@ export class PgPricingStore implements PricingStore {
         const fee = (c?.fee ?? null) as { feeRateBp?: number; fixedFeeMinor?: number } | null;
         const row = j.row as Row;
         return {
-          ...ctx.scope, bounds: ctx.bounds,
+          ...ctx.scope, bounds: ctx.bounds, sku: row.product_sku ?? null, title: row.product_title ?? null,
           // Себестоимость в валюте возникновения; без действующей оценки комиссии пол по марже не считается (как в решении)
           cost: c && fee && Number.isSafeInteger(fee.feeRateBp) && Number.isSafeInteger(fee.fixedFeeMinor)
             ? {
@@ -2110,10 +2120,20 @@ export class PgPricingStore implements PricingStore {
       const members = (await q(`SELECT membership_id, user_id, role, status FROM tenant_data.membership WHERE tenant_id = $1 ORDER BY created_at`))
         .map((r) => ({ membershipId: r.membership_id, userId: r.user_id, role: r.role, status: r.status }));
       // Справочники слепка [Р-75]: версии стратегий тенанта и неизменяемые наборы правил и профили Gate
-      const strategies = (await q(`SELECT pricing_strategy_id, version, params FROM tenant_data.pricing_strategy WHERE tenant_id = $1 ORDER BY pricing_strategy_id, version`))
+      /**
+       * Шаг 68 (K11): подрез версии — из своей таблицы, пока он там есть (18 месяцев после замены версии [Р-91]). Без него строка
+       * стратегии «почему эта цена» говорила «подрез не хранится (18 месяцев после замены версии)» о ДЕЙСТВУЮЩЕЙ версии
+       */
+      const strategies = (await q(`SELECT ps.pricing_strategy_id, ps.version, ps.params, u.undercut_minor FROM tenant_data.pricing_strategy ps
+                                     LEFT JOIN channel_data.pricing_strategy_undercut u
+                                       ON u.tenant_id = ps.tenant_id AND u.pricing_strategy_id = ps.pricing_strategy_id AND u.version = ps.version
+                                    WHERE ps.tenant_id = $1 ORDER BY ps.pricing_strategy_id, ps.version`))
         .map((r): StrategyDefinition => {
           const { deadbandMinor, ...params } = r.params as Record<string, unknown>;
-          return { strategyId: r.pricing_strategy_id, version: r.version, params: params as unknown as StrategyDefinition['params'], deadbandMinor: Number(deadbandMinor ?? 0) };
+          return {
+            strategyId: r.pricing_strategy_id, version: r.version, deadbandMinor: Number(deadbandMinor ?? 0),
+            params: { ...params, ...(r.undercut_minor === null ? {} : { undercutMinor: Number(r.undercut_minor) }) } as unknown as StrategyDefinition['params'],
+          };
         });
       const strategyVersions = (await q(`SELECT pricing_strategy_id, version, name, status, created_at, created_by_membership_id
                                            FROM tenant_data.pricing_strategy WHERE tenant_id = $1 ORDER BY pricing_strategy_id, version`))
@@ -2202,18 +2222,24 @@ export class PgPricingStore implements PricingStore {
       const firstIds = query.first ? ids((await tx.query(`SELECT s.write_scope_id ${SCOPE_FROM} ORDER BY s.created_at, s.write_scope_id LIMIT $2`, [tenantId, query.first])).rows) : [];
       let search: ConsoleCatalogFacts['search'] = null;
       if (query.search) {
-        const { q, limit, labelTemplate, channelNames, unknownChannel } = query.search;
-        // Подпись экрана: `unitLabel(канал, витрина, номер)` — шаблоном с подстановками; подстрока — strpos, без шаблонов LIKE
+        const { q, limit, labelTemplate, marketplaceWords, channelNames, unknownChannel } = query.search;
+        /**
+         * Подпись экрана: `unitLabel(товар, витрина)` — шаблоном с подстановками; товар — название, иначе SKU (у товара он всегда есть),
+         * витрина — словами по паре канала и витрины. Подстрока — strpos, без шаблонов LIKE
+         */
         const { rows: [r] } = await tx.query(
           `WITH sc AS (SELECT s.write_scope_id, s.created_at, coalesce(m.external_unit_id, m.external_sku, '') AS unit, coalesce(m.channel_product_ref, '') AS ref,
-                              coalesce(p.gtin, '') AS gtin, m.marketplace, coalesce($3::jsonb ->> s.channel, $4) AS channel_name ${SCOPE_FROM}),
+                              coalesce(p.gtin, '') AS gtin, coalesce(p.title, p.sku) AS product,
+                              CASE WHEN s.channel = 'KAUFLAND' AND m.marketplace ~ '^[a-z]{2}$' THEN 'kaufland.' || m.marketplace
+                                   ELSE coalesce($7::jsonb ->> m.marketplace, coalesce($3::jsonb ->> s.channel, $4) || ' ' || m.marketplace) END AS storefront
+                              ${SCOPE_FROM}),
                 hit AS (SELECT write_scope_id, created_at FROM sc
-                         WHERE $2 = '' OR strpos(lower(replace(replace(replace($5, '{c}', channel_name), '{m}', marketplace), '{u}', unit)), $2) > 0
+                         WHERE $2 = '' OR strpos(lower(replace(replace($5, '{p}', product), '{s}', storefront)), $2) > 0
                             OR strpos(lower(unit), $2) > 0 OR strpos(lower(ref), $2) > 0 OR strpos(lower(gtin), $2) > 0)
            SELECT (SELECT count(*) FROM hit)::int AS total,
                   coalesce((SELECT array_agg(x.write_scope_id::text ORDER BY x.created_at, x.write_scope_id)
                               FROM (SELECT * FROM hit ORDER BY created_at, write_scope_id LIMIT $6) x), '{}') AS ids`,
-          [tenantId, q, JSON.stringify(channelNames), unknownChannel, labelTemplate, limit]);
+          [tenantId, q, JSON.stringify(channelNames), unknownChannel, labelTemplate, limit, JSON.stringify(marketplaceWords)]);
         search = { ids: (r!.ids as string[]).map(String), total: Number(r!.total) };
       }
       let strategyUsage: ConsoleCatalogFacts['strategyUsage'] = null;
@@ -2448,9 +2474,10 @@ export class PgPricingStore implements PricingStore {
                 (SELECT count(*) FROM channel_data.price_decision d WHERE d.tenant_id = $1 AND d.outcome <> 'NO_CHANGE' AND d.decided_at > $2::timestamptz - interval '7 days')::int AS interventions_week,
                 (SELECT count(*) FROM tenant_data.price_stop p WHERE p.tenant_id = $1 AND p.released_at IS NULL)::int AS stops,
                 (SELECT count(*) FROM channel_data.pricing_halt h WHERE h.tenant_id = $1 AND h.released_at IS NULL)::int AS halts,
-                (SELECT demo FROM tenant_data.tenant t WHERE t.tenant_id = $1) AS demo`, [tenantId, now]);
+                (SELECT demo FROM tenant_data.tenant t WHERE t.tenant_id = $1) AS demo,
+                ${EU_STOREFRONTS_SQL('$1')} AS eu`, [tenantId, now]);
       return { scopes: Number(r!.scopes), decisionsLastDay: Number(r!.decisions_day), interventionsLastWeek: Number(r!.interventions_week),
-        activeStops: Number(r!.stops), activeHalts: Number(r!.halts), demo: r!.demo === true };
+        activeStops: Number(r!.stops), activeHalts: Number(r!.halts), demo: r!.demo === true, euStorefronts: r!.eu === true };
     });
   }
 
@@ -2475,7 +2502,8 @@ export class PgPricingStore implements PricingStore {
              (SELECT count(*) FROM tenant_data.price_stop p WHERE p.tenant_id = '${t}' AND p.released_at IS NULL)::int AS stops,
              (SELECT count(*) FROM channel_data.pricing_halt h WHERE h.tenant_id = '${t}' AND h.released_at IS NULL)::int AS halts,
              (SELECT demo FROM tenant_data.tenant x WHERE x.tenant_id = '${t}') AS demo,
-             (SELECT count(*) FROM tenant_data.channel_account a WHERE a.tenant_id = '${t}' AND a.disconnected_at IS NULL AND a.auth_status = 'AWAITING_ACCESS')::int AS awaiting;`);
+             (SELECT count(*) FROM tenant_data.channel_account a WHERE a.tenant_id = '${t}' AND a.disconnected_at IS NULL AND a.auth_status = 'AWAITING_ACCESS')::int AS awaiting,
+             ${EU_STOREFRONTS_SQL(`'${t}'`)} AS eu;`);
     const client = await this.admin('worldSummaries').connect();
     try {
       const results = await client.query(`BEGIN READ ONLY; ${statements.join('\n')} COMMIT;`) as unknown as Array<{ rows: Row[] }>;
@@ -2484,7 +2512,7 @@ export class PgPricingStore implements PricingStore {
         if (!r || r.tenant_id === undefined) continue;
         out.set(r.tenant_id as string, {
           scopes: Number(r.scopes), decisionsLastDay: Number(r.decisions_day), interventionsLastWeek: Number(r.interventions_week),
-          activeStops: Number(r.stops), activeHalts: Number(r.halts), demo: r.demo === true, awaitingAccess: Number(r.awaiting),
+          activeStops: Number(r.stops), activeHalts: Number(r.halts), demo: r.demo === true, awaitingAccess: Number(r.awaiting), euStorefronts: r.eu === true,
         });
       }
       return out;

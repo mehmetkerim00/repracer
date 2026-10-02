@@ -94,16 +94,25 @@ export function describe(reason: { code: string; params: Params; withheld?: read
       .map((x) => (x.includes(':') ? x.split(':').map((part, i) => (i === 0 ? label(part) : part)).join(' ') : label(x))).join(', ')),
     raw: (key) => plain(key, (v) => v),
   };
-  const render = (m.reasons as Record<string, ((f: Fmt) => string) | undefined>)[reason.code]
+  /**
+   * Шаг 68 (K11): у причины, чьи суммы канала в объяснении не хранятся [Р-85], — текст без них, а не заглушка на месте каждой суммы
+   * («Undercut the Buy Box channel value not kept by channel value not kept»). Текст без канала есть у каждой причины, которая бывает
+   * в вечном объяснении (стратегия, проверка входов); у остальной, если её текст всё же упёрся в невыданное значение, — правило словами
+   */
+  const title = (m.titles as Record<string, string | undefined>)[reason.code] ?? (m.ui.rules as Record<string, string | undefined>)[reason.code]
+    ?? (m.noteTitles as Record<string, string | undefined>)[reason.code] ?? reason.code;
+  const withoutChannel = withheld.size > 0 ? (m.reasonsWithoutChannel as Record<string, ((f: Fmt) => string) | undefined>)[reason.code] : undefined;
+  const render = withoutChannel ?? (m.reasons as Record<string, ((f: Fmt) => string) | undefined>)[reason.code]
     ?? (m.notes as Record<string, ((f: Fmt) => string) | undefined>)[reason.code];
   if (!render) problems.push('UNKNOWN_CODE');
-  const text = render ? render(f) : m.ui.common.unknownReason(reason.code);
+  const rendered = render ? render(f) : m.ui.common.unknownReason(reason.code);
+  const text = withheld.size > 0 && rendered.includes(m.ui.common.withheld) ? m.ui.common.withheldReason(title) : rendered;
   // Схема сверяется для причин целиком; у причины из слепка часть обязательных параметров вырезана намеренно
   if (withheld.size === 0) for (const p of validateReason({ code: reason.code, params })) problems.push(`SCHEMA:${p}`);
   const limit = REASON_LIMITS[reason.code as AnyReasonCode];
   return {
     code: reason.code,
-    title: (m.titles as Record<string, string | undefined>)[reason.code] ?? (m.ui.rules as Record<string, string | undefined>)[reason.code] ?? reason.code,
+    title,
     text,
     problems: [...new Set(problems)],
     limit: limit ? m.limits[limit] : null,

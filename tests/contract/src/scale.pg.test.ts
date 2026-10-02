@@ -189,7 +189,7 @@ test(`шаг 65: масштаб — каталог ${OFFERS} предложен�
     const ids = [...page.scopeIds, ...f.firstIds, ...(f.strategyUsage ?? []).flatMap((u) => u.exampleIds)];
     return strategiesView(await worldOf(ids, { catalogPage: page, catalogFacts: f }), m, true, q50);
   }, bytesOf);
-  const unitLabel = { labelTemplate: m.ui.common.unitLabel('{c}', '{m}', '{u}'), channelNames: { KAUFLAND: m.values.KAUFLAND }, unknownChannel: 'UNKNOWN_CHANNEL' };
+  const unitLabel = { labelTemplate: m.ui.common.unitLabel('{p}', '{s}'), marketplaceWords: m.ui.connections.marketplaces, channelNames: { KAUFLAND: m.values.KAUFLAND }, unknownChannel: 'UNKNOWN_CHANNEL' };
   for (const [label, q] of [['every offer matches', 'kaufland'], ['one offer matches', String(products[OFFERS - 1]!.idProduct).slice(-6)]] as const) {
     await timed(`screen: offer search, ${label} (database search + world of the found)`, SCREEN_SECONDS, async () => {
       const found = (await store.consoleCatalogFacts(tenant, { search: { q, limit: OFFER_CHOICES, ...unitLabel } })).search!;

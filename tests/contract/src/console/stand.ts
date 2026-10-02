@@ -8,6 +8,7 @@ import { inviteMember, issueSignupInvitation, type PgIdentityDirectory } from '@
 import { inTenant, type PgPool } from '@repracer/pricing-store-pg';
 import { DEFAULT_MEMBERS, type ConsoleStateOptions, type PricingPipeline, type PricingStore } from '@repracer/pricing-pipeline';
 import { AMAZON_DESCRIPTOR } from '@repracer/amazon-adapter';
+import { EBAY_DESCRIPTOR } from '@repracer/ebay-adapter';
 import { KAUFLAND_DESCRIPTOR } from '@repracer/kaufland-adapter';
 import { amazonUnderTest, kauflandUnderTest } from '../adapters.ts';
 import { memoryStoreFactory, runScenario, type PricingStoreFactory } from '../harness/runner.ts';
@@ -25,7 +26,7 @@ const FIXTURES = fileURLToPath(new URL('../../fixtures/kaufland/', import.meta.u
 const AMAZON_FIXTURES = fileURLToPath(new URL('../../fixtures/amazon/', import.meta.url));
 
 /** Р-119: как снимается системная остановка — свойство канала из описания адаптера */
-const haltReleaseOf = (channel: string) => (channel === 'AMAZON' ? AMAZON_DESCRIPTOR : KAUFLAND_DESCRIPTOR).haltRelease.kind;
+const haltReleaseOf = (channel: string) => (channel === 'AMAZON' ? AMAZON_DESCRIPTOR : channel === 'EBAY' ? EBAY_DESCRIPTOR : KAUFLAND_DESCRIPTOR).haltRelease.kind;
 
 /** Членства стенда [OQ-125, OQ-129]: одинаковые во всех мирах — псевдоним членства и роль */
 export const STAND_USERS: readonly Viewer[] = DEFAULT_MEMBERS.map((m) => ({ ...m }));

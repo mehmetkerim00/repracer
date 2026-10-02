@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ALL_REASON_CODES, SANITY_NOTE_CODES } from '@repracer/pricing-model';
+import { ALL_REASON_CODES, COMPETITOR_RULE_DERIVED_KEYS, ENGINE_REASON_CODES, GATE_REASON_CODES, REASON_PARAMS, SANITY_NOTE_CODES, SANITY_NOTE_PARAMS, SANITY_WARNING_CODES, type ParamSchema, type ParamSpec } from '@repracer/pricing-model';
 import { describe, explainabilityCatalogue, FEED_PAGE_MAX, LOCALES, messagesFor, parseAmountInput, parseFeedQuery, parsePercentInput, REASON_LIMITS } from './index.ts';
 
 /** Р-71, Р-72: словарь DE/EN полон, суммы — только с валютой, значения канала вне слепка помечаются */
@@ -38,8 +38,62 @@ test('Р-71: an amount is formatted only with the currency of the reason; withou
 
 test('Р-68: a channel value withheld from the explanation is marked, not invented', () => {
   const r = describe({ code: 'BUYBOX_UNDERCUT', params: { undercutMinor: 5, targetMinor: 1775, currency: 'EUR' }, withheld: ['buyboxMinor'] }, messagesFor('en'));
-  assert.equal(r.text, 'Undercut the Buy Box channel value not kept by €0.05: €17.75.');
+  // Шаг 68 (K11): не заглушка посреди фразы («Undercut the Buy Box channel value not kept by …»), а текст без сумм канала
+  assert.equal(r.text, 'Undercut the Buy Box price seen at that moment by €0.05. The decision keeps amounts taken from competitor prices for 3 days, so they are no longer shown; the full snapshot is linked in the snapshot step.');
   assert.deepEqual([r.problems, r.withheld], [[], ['buyboxMinor']]);
+});
+
+/** Значение параметра по его виду — для правила ниже: каждый код описывается без единой подстановки руками */
+function sampleValue(spec: ParamSpec): string | number | boolean {
+  switch (spec.kind) {
+    case 'money': case 'count': case 'seconds': case 'minutes': return 1250;
+    case 'bp': return 1200;
+    case 'ratio': return 0.8;
+    case 'rateMicros': return 1_100_000;
+    case 'currency': return 'USD';
+    case 'instant': return '2026-10-01T09:00:00.000Z';
+    case 'date': return '2026-10-01';
+    case 'bool': return true;
+    case 'enum': return spec.values?.[0] ?? 'X';
+    case 'enumList': return spec.values?.[0] ?? 'X';
+    case 'storefrontList': return 'de';
+    default: return 'synthetic';
+  }
+}
+
+/**
+ * Шаг 68 (K11, Р-146): ни одна причина с параметрами канала не показывает заглушку посреди фразы — ни на одном языке. И у каждой причины,
+ * которая бывает в ВЕЧНОМ объяснении (стратегия, предупреждения и заметки проверки входов), — свой текст без сумм канала, а не общий
+ * «правило словами»: это строка экрана «почему эта цена», который видит каждый продавец через три дня после решения
+ */
+test('шаг 68 (K11): причины без значений канала читаются фразой, у причин объяснения — свой текст без канала', () => {
+  const schemas = { ...REASON_PARAMS, ...SANITY_NOTE_PARAMS } as Record<string, ParamSchema>;
+  // Ревью шага 68, находка 1: причина Gate тоже в вечном объяснении, и у цены из данных конкурента слепок вырезает ещё и ключи правила
+  // стратегии (`COMPETITOR_RULE_DERIVED_KEYS`) — правило перебирает и их
+  const inExplanation = new Set<string>([...ENGINE_REASON_CODES, ...SANITY_WARNING_CODES, ...SANITY_NOTE_CODES, ...GATE_REASON_CODES]);
+  const channelClass = (spec: ParamSpec, key = '') => spec.class === 'CHANNEL' || spec.class === 'CHANNEL_DERIVED' || COMPETITOR_RULE_DERIVED_KEYS.includes(key);
+  let checked = 0;
+  for (const locale of LOCALES) {
+    const m = messagesFor(locale);
+    for (const [code, schema] of Object.entries(schemas)) {
+      const withheld = Object.entries(schema).filter(([k, spec]) => channelClass(spec, k)).map(([k]) => k);
+      if (withheld.length === 0) continue;
+      const params = Object.fromEntries(Object.entries(schema).filter(([k, spec]) => !channelClass(spec, k)).map(([k, spec]) => [k, sampleValue(spec)]));
+      const r = describe({ code, params, withheld }, m);
+      assert.ok(!r.text.includes(m.ui.common.withheld), `${locale} ${code}: заглушка в тексте — ${r.text}`);
+      assert.deepEqual(r.problems.filter((x) => x === 'UNKNOWN_CODE'), [], `${locale} ${code}: текста нет`);
+      // Причина вечного объяснения не уходит в общий «правило словами»: свой текст без канала или шаблон, которому вырезанное не нужно
+      if (inExplanation.has(code)) assert.notEqual(r.text, m.ui.common.withheldReason(r.title), `${locale} ${code}: причина вечного объяснения без своего текста без канала`);
+      checked += 1;
+    }
+  }
+  // Положительный контроль: правило видит коды с параметрами канала (41 на шаге 68), а не пустой список
+  assert.ok(checked >= 2 * 40, `проверено ${checked}`);
+  // Отрицательный контроль: словарь без текстов без канала и с «правилом словами», вставляющим пометку, — правило её видит
+  const en = messagesFor('en');
+  const broken = { ...en, reasonsWithoutChannel: {}, ui: { ...en.ui, common: { ...en.ui.common, withheldReason: () => `x ${en.ui.common.withheld}` } } } as typeof en;
+  const r = describe({ code: 'BUYBOX_UNDERCUT', params: { undercutMinor: 5, targetMinor: 1775, currency: 'EUR' }, withheld: ['buyboxMinor'] }, broken);
+  assert.ok(r.text.includes(en.ui.common.withheld), r.text);
 });
 
 test('D: four codes stay limited, each with the reason a parameter is impossible', () => {
@@ -222,19 +276,22 @@ test('Р-199: возврат внутреннего пула ждёт решен
  * «(Р-35)», «(OQ-77, Р-32)» продавцу ничего не говорят, а кириллическая «Р» выдаёт внутреннюю кухню. Правило читает ИСХОДНИК
  * словаря без комментариев: так видны и тексты-функции, которые перебором значений не достать [Р-146].
  */
-test('шаг 64: английский словарь без ссылок на решения (Р-NN), открытые вопросы (OQ-NN), миграции, шаги и риски', async () => {
+test('шаг 64: английский и немецкий словари без ссылок на решения (Р-NN), открытые вопросы (OQ-NN), миграции, шаги и риски', async () => {
   const { readFileSync } = await import('node:fs');
-  const source = readFileSync(new URL('./i18n/en.ts', import.meta.url), 'utf8');
-  const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-  // Ревью шага 64: и номера миграций «(0078)», и «since step 28», и «risk 17» — та же внутренняя кухня
-  const hasRef = (line: string) => /Р-\d+|OQ-\d+|\(0\d{3}\)|\bsteps? \d+\b|\brisk \d+\b/.test(line);
+  // Ревью шага 64: и номера миграций «(0078)», и «since step 28», и «risk 17» — та же внутренняя кухня. Шаг 68 (K10): немецкий тоже —
+  // гость публичного демо открывает консоль по-немецки, и «(Р-74)» в объяснении решения видел первым
+  const hasRef = (line: string) => /Р-\d+|OQ-\d+|\b[AEK]-\d{2}\b|\(0\d{3}\)|\bsteps? \d+\b|\brisk \d+\b|\bSchritte?n? \d+\b|\bRisiko \d+\b/.test(line);
   // Положительные контроли: правило видит каждый вид ссылки, и после снятия комментариев тексты на месте
-  for (const sample of ["KAUFLAND: 'the offer (id_offer, Р-35)'", '(OQ-77)', 'a second factor (0078)', 'since step 28', 'the remainder of risk 17']) {
+  for (const sample of ["KAUFLAND: 'the offer (id_offer, Р-35)'", '(OQ-77)', 'not confirmed (A-16)', 'a second factor (0078)', 'since step 28', 'the remainder of risk 17', 'seit Schritt 28', 'Rest von Risiko 17']) {
     assert.ok(hasRef(sample), sample);
   }
-  assert.ok(code.includes('Loading…'), 'после снятия комментариев тексты словаря остались');
-  const hits = code.split('\n').filter(hasRef);
-  assert.deepEqual(hits.map((l) => l.trim().slice(0, 120)), [], 'ссылки на решения и вопросы в английских текстах');
+  for (const [file, loading] of [['en.ts', 'Loading…'], ['de.ts', 'Standdaten werden geladen']] as const) {
+    const source = readFileSync(new URL(`./i18n/${file}`, import.meta.url), 'utf8');
+    const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    assert.ok(code.includes(loading), `${file}: после снятия комментариев тексты словаря остались`);
+    const hits = code.split('\n').filter(hasRef);
+    assert.deepEqual(hits.map((l) => l.trim().slice(0, 120)), [], `${file}: ссылки на решения и вопросы в текстах`);
+  }
 });
 
 /** Шаг 64: доллары у продавца из США — `$1,234.56` (en-US), без евро-привычек; немецкая консоль пишет те же доллары по-своему */

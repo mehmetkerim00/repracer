@@ -82,16 +82,26 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
                 <tbody>
                   {v.properties.map((p) => (
                     <tr key={`${p.marketplace}/${p.propertyText}`}>
-                      <td>{p.marketplace}</td>
+                      <td>{p.storefrontText}</td>
                       <td>{p.propertyText}<div className="note">{p.valueText}</div></td>
                       <td>
                         <Badge tone={p.blocksLive ? 'warn' : 'ok'}>{p.statusText}</Badge>
-                        <div className="note">{p.closesByText}{p.question === null ? null : ` · ${p.question}`}</div>
+                        <div className="note">{p.closesByText}</div>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            </section>
+          )}
+
+          {/* Шаг 68 (K7): у демо — то самое недельное письмо, собранное за последние семь суток, с честной пометкой синтетики */}
+          {v.digestPreview === null ? null : (
+            <section className="card">
+              <h3>{v.digestPreview.title} <Badge tone="warn">{m.ui.app.demoBadge}</Badge></h3>
+              <p className="note">{v.digestPreview.synthetic}</p>
+              <p><strong>{v.digestPreview.subject}</strong></p>
+              <pre className="letter">{v.digestPreview.text}</pre>
             </section>
           )}
 

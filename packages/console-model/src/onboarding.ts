@@ -2,7 +2,7 @@ import type { ChannelAccountRow, OnboardingPath, OnboardingProgressRow, Onboardi
 import { onboardingStepsOf } from '@repracer/pricing-pipeline';
 import { can } from '@repracer/pricing-model';
 import type { Messages } from './i18n/index.ts';
-import type { StandWorld } from './world.ts';
+import { storefrontName, type StandWorld } from './world.ts';
 
 /**
  * Р-149 (шаг 34): онбординг — направляемый путь, а не набор экранов. Экран показывает шаги в порядке, состояние каждого,
@@ -108,7 +108,9 @@ export function onboardingView(world: Pick<StandWorld, 'id' | 'demo' | 'viewer'>
     : progress?.scopeWriteScopeIds ? { offered: false, withCost: costs?.doneCount ?? 0, total: costs?.totalCount ?? 0, narrowedTo: progress.scopeWriteScopeIds.length, hint: t.narrowed(progress.scopeWriteScopeIds.length) }
       : null;
   const channels: ChannelAccountView[] = accounts.map((a) => ({
-    channelAccountId: a.channelAccountId, channel: a.channel, label: a.displayName ?? `${a.channel} · ${a.marketplaces.join(', ')}`,
+    // Шаг 68 (K10): аккаунт словами — «Amazon · amazon.com», а не «AMAZON · ATVPDKIKX0DER»
+    channelAccountId: a.channelAccountId, channel: a.channel,
+    label: a.displayName ?? `${m.values[a.channel as keyof typeof m.values] ?? a.channel} · ${a.marketplaces.map((mk) => storefrontName(a.channel, mk, m)).join(', ')}`,
     status: a.authStatus, statusText: t.channels.status[a.authStatus],
     blockers: a.accessBlockers.map((code) => ({ code, text: t.channels.blockers[code] })),
     awaitingHint: a.authStatus === 'AWAITING_ACCESS' ? t.channels.awaitingHint : null,

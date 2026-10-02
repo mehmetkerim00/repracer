@@ -106,12 +106,29 @@ export function decisionTrace(world: StandWorld, detail: DecisionDetail, m: Mess
   const scope = scopeById(world, d.writeScopeId);
   const currency = d.currency;
   const money = (v: number | null) => m.money(v, currency);
-  const say = (r: ExpandedReason | Reason) => describe(r, m);
+  /**
+   * Шаг 68 (K11): суммы канала вечное объяснение не хранит [Р-85], а горячее намерение того же решения держит всю цепочку расчёта с ними
+   * 3 дня [Р-28]. Пока оно есть, причина показывается с настоящими суммами (цена Buy Box, шаг, цель); у решения старше — текстом без
+   * них. Сопоставление — по коду причины: цепочка намерения и слепок построены из одного расчёта
+   */
+  const fresh = new Map<string, Reason['params']>();
+  for (const r of detail.intent ? [detail.intent.reason, ...detail.intent.explanation] : []) if (!fresh.has(r.code)) fresh.set(r.code, r.params);
+  /**
+   * Ревью шага 68, находка 1: причина Gate у цены из данных конкурента теряет в слепке предложенную цену и отклонение
+   * (`COMPETITOR_RULE_DERIVED_KEYS`), а строка решения держит их 30 суток [Р-28] — это та же причина из тех же столбцов
+   */
+  if (!fresh.has(d.reason.code)) fresh.set(d.reason.code, d.reason.params);
+  const say = (r: ExpandedReason | Reason) => {
+    const withheld = 'withheld' in r ? r.withheld : [];
+    const full = withheld.length > 0 ? fresh.get(r.code) : undefined;
+    return describe(full ? { code: r.code, params: full } : r, m);
+  };
+  const stillWithheld = (r: ExpandedReason | null | undefined) => (r?.withheld.length ?? 0) > 0 && !fresh.has(r!.code);
   const expanded = explanationOf(world, d);
   const e = expanded?.value ?? null;
   const steps: TraceStep[] = [];
   const gaps: Gap[] = [];
-  const withheldSomewhere = (reasons: Array<ExpandedReason | null | undefined>) => reasons.some((r) => (r?.withheld.length ?? 0) > 0);
+  const withheldSomewhere = (reasons: Array<ExpandedReason | null | undefined>) => reasons.some((r) => stillWithheld(r));
   if (expanded && expanded.gaps.length > 0) gaps.push(gap(m, 'EXPLANATION_DICTIONARY_MISSING'));
   const kept = noChangeTitle(d, m);
 
@@ -154,7 +171,8 @@ export function decisionTrace(world: StandWorld, detail: DecisionDetail, m: Mess
         steps.push({ key: 'ANCHORS', title: t.titles.ANCHORS, status: 'UNKNOWN', summary: t.sanityMissing, items: [], gaps: [] });
       } else {
         const items: TraceItem[] = s.checks.map((c) => ({
-          label: (m.ui.rules as Record<string, string | undefined>)[c.rule] ?? (m.titles as Record<string, string | undefined>)[c.rule] ?? c.rule,
+          label: (m.ui.rules as Record<string, string | undefined>)[c.rule] ?? (m.titles as Record<string, string | undefined>)[c.rule]
+            ?? (m.noteTitles as Record<string, string | undefined>)[c.rule] ?? c.rule,
           outcome: c.outcome,
           ...(c.detail ? { reason: say(c.detail) } : {}),
         }));

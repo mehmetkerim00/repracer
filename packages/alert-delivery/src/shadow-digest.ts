@@ -1,4 +1,4 @@
-import { LOCALES, messagesFor, type Locale } from '@repracer/console-model';
+import { LOCALES, messagesFor, shadowDigestLetter, type Locale } from '@repracer/console-model';
 import type { ShadowDigestRecord, ShadowDigestTarget } from '@repracer/pricing-store-pg';
 import type { MailMessage, MailSender } from './index.ts';
 
@@ -47,28 +47,9 @@ export interface ShadowDigestOutcome {
 }
 
 export function shadowDigestMessage(target: ShadowDigestTarget, to: string, m: ReturnType<typeof messagesFor>): MailMessage {
-  const t = m.ui.shadow;
-  const lines = [
-    t.digest.intro(target.tenantName, target.shadowAccounts),
-    '',
-    t.summary.decisions(target.decisions, target.changes),
-    t.summary.floorHeld(target.floorHeld),
-    t.summary.ceilingHeld(target.ceilingHeld),
-    t.summary.held(target.heldWrites, target.heldPriceWrites, target.heldQuantityWrites),
-    t.summary.budget(target.wouldSpendBudget, target.wouldSpendUnconfirmed > 0),
-    /**
-     * Р-173: деньги — только когда пол действительно удерживал цену. «На 0,00 € дешевле» приучает не читать письмо, и
-     * рядом с числом стоит оговорка: это разница цен, а не прогноз выручки.
-     */
-    ...(target.floorSavings.length > 0
-      ? [t.summary.savings(target.floorSavings.map((x) => m.money(x.minor, x.currency)).join(', '), target.floorSavingsHolds), t.summary.savingsNote]
-      : []),
-    '',
-    t.digest.cta,
-    '',
-    t.cannot,
-  ];
-  return { to, subject: t.digest.subject(target.tenantName), text: lines.join('\n') };
+  // Шаг 68 (K7): текст письма — одна функция с предпросмотром демо на экране тени
+  const letter = shadowDigestLetter(target, m, 'WEEK');
+  return { to, subject: letter.subject, text: letter.lines.join('\n') };
 }
 
 export function createShadowDigest(deps: ShadowDigestDeps) {

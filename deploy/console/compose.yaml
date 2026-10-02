@@ -27,6 +27,7 @@ services:
       REPRACER_CONSOLE_DEMO_RESEED_HOURS: ${REPRACER_CONSOLE_DEMO_RESEED_HOURS:-24}
       # Шаг 64: профиль США в демо — аккаунты eBay US и Amazon US в тени рядом с Kaufland
       REPRACER_CONSOLE_DEMO_US: ${REPRACER_CONSOLE_DEMO_US:-off}
+      REPRACER_CONSOLE_DEMO_PRESS_DAYS: ${REPRACER_CONSOLE_DEMO_PRESS_DAYS:-0}
       # Шаг 53 (OWASP A04): ограничение частоты на клиента в минуту; адрес анонима из X-Forwarded-For — только за своим прокси
       REPRACER_CONSOLE_RATE_AUTHORIZED: ${REPRACER_CONSOLE_RATE_AUTHORIZED:-600}
       REPRACER_CONSOLE_RATE_ANONYMOUS: ${REPRACER_CONSOLE_RATE_ANONYMOUS:-120}

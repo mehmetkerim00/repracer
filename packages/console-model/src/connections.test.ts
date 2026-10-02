@@ -96,7 +96,7 @@ test('Р-190: every eBay account and the eBay channel card say in words what liv
   const ebayApps: ConnectableChannel[] = [{ channel: 'AMAZON', platformMissing: [], marketplaces: ['A1PA6795UKMFR9'] }, { channel: 'EBAY', platformMissing: [], marketplaces: ['EBAY_DE'] }];
   const expected = {
     en: 'In live mode we do not yet see on eBay the price buyers see or edits made by other programs: our writes are confirmed by the offer record, and the price-basis check is limited.',
-    de: 'Den Preis, den Käufer sehen, und Änderungen anderer Programme sehen wir auf eBay im Live-Betrieb noch nicht: Unsere Änderungen werden über den Angebotsdatensatz bestätigt, die Prüfung der Preisbasis ist eingeschränkt (Frage E-21).',
+    de: 'Den Preis, den Käufer sehen, und Änderungen anderer Programme sehen wir auf eBay im Live-Betrieb noch nicht: Unsere Änderungen werden über den Angebotsdatensatz bestätigt, die Prüfung der Preisbasis ist eingeschränkt.',
   };
   for (const locale of ['de', 'en'] as const) {
     const m = messagesFor(locale);
@@ -127,7 +127,7 @@ test('Р-190: every eBay account and the eBay channel card say in words what liv
 test('Р-190: a write confirmed by our own offer record is named so on the price feed and the stock screen; a live-listing confirmation is not', async () => {
   const { feedItemOf } = await import('./price-feed.ts');
   const { channelCell } = await import('./stock.ts');
-  const expected = { en: 'confirmed by the offer record, not by the live listing', de: 'bestätigt über den Angebotsdatensatz, nicht über das Live-Angebot (Frage E-21)' };
+  const expected = { en: 'confirmed by the offer record, not by the live listing', de: 'bestätigt über den Angebotsdatensatz, nicht über das Live-Angebot' };
   const world = { id: 'w', title: 't', description: 'd', tenantId: 't', now: NOW, accounts: [], viewer: { membershipId: 'membership-owner', role: 'OWNER' }, state: { scopes: [], strategies: [] } } as never;
   const write = (own: boolean, status = 'APPLIED') => ({ channelWriteId: 'cw', writeScopeId: 'ws', decisionId: null, amountMinor: 1349, currency: 'EUR', basis: 'GROSS' as const, version: 1, status,
     attemptCount: 1, competitorDerived: false, createdAt: NOW, dispatchedAt: NOW, acceptedAt: NOW, nextAttemptAt: null, lastErrorCode: null, endReason: null, endParams: {},

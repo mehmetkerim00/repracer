@@ -128,7 +128,8 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
       <nav className="tabs">
         <a href="#/">{m.ui.app.backToWorlds}</a>
         <strong>{world.title}</strong>
-        {SCREENS.map((key) => (
+        {/* Шаг 68 (K3): Omnibus — правило ЕС; продавцу только с витринами США вкладки нет [Р-123] */}
+        {SCREENS.filter((key) => key !== 'compliance' || world.euStorefronts).map((key) => (
           <a key={key} href={href(world.id, key)} className={route.screen === key ? 'active' : ''}>{m.ui.app.screens[key]}</a>
         ))}
       </nav>
@@ -145,7 +146,7 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
                 : route.screen === 'strategies' ? <StrategiesScreen worldId={world.id} />
                   : route.screen === 'feed' ? <FeedScreen worldId={world.id} />
                     : route.screen === 'dangerous' ? <DangerousScreen worldId={world.id} days={[1, 7, 30].includes(Number(route.param)) ? Number(route.param) : 7} />
-                      : route.screen === 'compliance' ? <ComplianceScreen worldId={world.id} />
+                      : route.screen === 'compliance' ? (world.euStorefronts ? <ComplianceScreen worldId={world.id} /> : <p className="notice">{m.ui.compliance.notApplicable}</p>)
                         : route.screen === 'jobs' ? <JobHistory worldId={world.id} />
                 : <p className="error">{m.ui.app.screenNotFound}</p>}
     </>

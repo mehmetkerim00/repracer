@@ -1,11 +1,10 @@
-import { AMAZON_DESCRIPTOR } from '@repracer/amazon-adapter';
 import { systemClock } from '@repracer/channel-port';
 import type { LiveWorld } from '@repracer/contract-tests/stand';
 import type { Principal } from '@repracer/identity';
-import { KAUFLAND_DESCRIPTOR } from '@repracer/kaufland-adapter';
 import { createPricingPipeline, type WorldCounters } from '@repracer/pricing-pipeline';
 import { PgAlertSink, PgPricingStore, PgShadowStore, PgStockStore, type PgPool } from '@repracer/pricing-store-pg';
 import { createStockPipeline } from '@repracer/stock-sync';
+import { consoleAdapter, haltReleaseOf } from './channel-descriptors.ts';
 
 /**
  * Шаг 44 [Р-178]: мир КАЖДОГО тенанта в работе. До шага 44 разворачиваемая консоль знала один мир — демо, и продавец с
@@ -45,12 +44,6 @@ export interface TenantWorldPools {
   stock: PgPool;
 }
 
-const noChannel = (): never => { throw Object.assign(new Error('CHANNEL_NOT_IN_CONSOLE: channel calls are made by the scheduler and the dispatcher'), { code: 'CHANNEL_NOT_IN_CONSOLE' }); };
-/** Адаптер без канала, но СО СВОИМ описанием: доступность стратегии и снятие остановок — свойства канала (находка 14 ревью шага 44) */
-const consoleAdapter = (channel: string) => new Proxy({ descriptor: channel === 'AMAZON' ? AMAZON_DESCRIPTOR : KAUFLAND_DESCRIPTOR } as Record<string, unknown>, {
-  get: (target, key) => (key in target ? target[key as string] : noChannel),
-}) as never;
-
 export function createTenantWorlds(pools: TenantWorldPools, now: () => string = systemClock.now) {
   const store = new PgPricingStore(pools.app, { adminPool: pools.admin, bulkWorkerPool: pools.bulkWorker });
   const stock = new PgStockStore({ adminPool: pools.admin, stockPool: pools.stock });
@@ -79,7 +72,7 @@ export function createTenantWorlds(pools: TenantWorldPools, now: () => string = 
     const rows = await store.channelAccounts(tenantId);
     const accounts = rows.map((a) => ({
       channelAccountId: a.channelAccountId, channel: a.channel, marketplaces: [...a.marketplaces],
-      haltRelease: (a.channel === 'AMAZON' ? AMAZON_DESCRIPTOR : KAUFLAND_DESCRIPTOR).haltRelease.kind,
+      haltRelease: haltReleaseOf(a.channel),
     }));
     const id = `${TENANT_WORLD_PREFIX}${tenantId}`;
     // Путь решения мира — по каналу аккаунта вызова: каждый метод получает контекст первым аргументом

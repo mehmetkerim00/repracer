@@ -191,7 +191,9 @@ export function connectionsView(
     const state = accountState(a);
     const found = state === 'SHADOW'
       ? (a.offers === 0 ? t.progress.discovering : a.shadowDecisions24h === 0 ? t.progress.shadowWaiting(a.offers) : t.progress.shadow(a.offers, a.shadowDecisions24h))
-      : state === 'LIVE' ? t.progress.live(a.offers) : state === 'AWAITING_ACCESS' ? t.progress.awaitingAccess(a.accessBlockers.join(', ')) : null;
+      : state === 'LIVE' ? t.progress.live(a.offers) : state === 'AWAITING_ACCESS'
+        // Шаг 68 (K10): чего не хватает — словами из словаря онбординга, а не кодами (NOTIFICATION_QUEUE, SELLER_AUTHORIZATION)
+        ? t.progress.awaitingAccess(a.accessBlockers.map((code) => (m.ui.onboarding.channels.blockers as Record<string, string | undefined>)[code] ?? code).join('; ')) : null;
     // Хвост шага 47: «нашли N» называет и те, что вести нельзя (немигрированные листинги и аукционы eBay, Р-164)
     const progressText = found !== null && (state === 'SHADOW' || state === 'LIVE') && a.offers > 0 && a.unmanagedOffers > 0
       ? `${found} ${t.progress.unmanaged(a.unmanagedOffers, a.offers - a.unmanagedOffers)}` : found;

@@ -350,7 +350,8 @@ test('Р-149, Р-151: онбординг целиком на демо-тенан
   assert.ok(earlyView.byCode.every((c) => c.title.length > 0 && c.title !== c.code), `у каждой причины есть название из словаря: ${JSON.stringify(earlyView.byCode)}`);
   assert.equal(earlyView.examples.length, 50, 'поимённо — первые пятьдесят');
   for (const e of earlyView.examples) {
-    assert.match(e.label, /Kaufland/, `предложение названо так же, как в списке товаров, а не идентификатором: ${e.label}`);
+    // Шаг 68 (K10): подпись — название товара и витрина словами, как в списке товаров, а не номер единицы канала
+    assert.match(e.label, /^[^·]+ · kaufland\.de$/, `предложение названо так же, как в списке товаров, а не идентификатором: ${e.label}`);
     assert.ok(e.reasons.length > 0 && e.reasons.every((r) => r.length > 20 && !/^[A-Z_]+$/.test(r)), `причины — словами: ${JSON.stringify(e.reasons)}`);
   }
   const stillOff = (await onboarding()).steps.find((s) => s.step === 'ENABLE')!;

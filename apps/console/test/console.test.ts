@@ -146,7 +146,7 @@ test('stand API serves every screen of every world in German and English and ref
       const stock = await get<StockView>(auth, api(w.id, 'stock') + q);
       // Ловушка названа СОДЕРЖАНИЕМ, а не длиной строки: у каждого канала — своя область записи остатка [OQ-204, находка 19]
       // Шаг 64: английский интерфейс без ссылок на решения — факт ловушки назван словами
-      const trapFact: Record<string, RegExp> = { KAUFLAND: /id_offer/, AMAZON: /Р-1\b|ONE value per SKU|EINEN Wert je SKU/ };
+      const trapFact: Record<string, RegExp> = { KAUFLAND: /id_offer/, AMAZON: /ONE value per SKU|EINE?N? Wert je SKU/ };
       assert.ok(stock.traps.length > 0, `${w.id}: у мира есть каналы — есть и ловушки`);
       for (const t of stock.traps) assert.match(t.text, trapFact[t.channel] ?? /Р-37|wider than/, `${w.id}: ловушка ${t.channel} называет свою область записи`);
       await get<unknown>(auth, api(w.id, 'stock', 'divergences') + q);
@@ -200,7 +200,10 @@ test('screens render from the dictionary: sign-in, products with the effective f
   const auth = await login('OWNER');
   const id = 'kaufland/pipeline/happy-path';
   const products = await html('/src/screens/Products.tsx', 'ProductsView', { view: await get<ProductListView>(auth, api(id, 'products')) });
-  for (const text of ['Effective floor', 'Next check', 'No data', 'Kaufland de · unit 4101', '€17.75', 'Why this price']) assert.ok(products.includes(text), text);
+  for (const text of ['Effective floor', 'Next check', 'No data', '€17.75', 'Why this price']) assert.ok(products.includes(text), text);
+  // Шаг 68 (K10): предложение — SKU продавца и витрина словами, а не «Kaufland de · unit 4101»
+  assert.match(products, /syn-[^ <]+ · kaufland\.de/);
+  assert.ok(!products.includes('unit 4101'), 'номер единицы канала не подпись предложения');
 
   const decisions = (await get<DecisionListView>(auth, api(id, 'decisions'))).items;
   const approved = decisions.find((d) => d.outcome === 'Approved')!;
@@ -217,7 +220,7 @@ test('screens render from the dictionary: sign-in, products with the effective f
   const rejected = await html('/src/screens/Rejected.tsx', 'RejectedScreenView', { view: await get<RejectedView>(auth, api('kaufland/pipeline/above-max-price', 'rejected')) });
   for (const text of ['Your bounds stopped 1 dangerous change', 'dangerous', '53.2%']) assert.ok(rejected.includes(text), text);
 
-  const usd = (await get<BoundsIndexView>(auth, api('kaufland/pipeline/fx-usd-floor-eur-cost', 'bounds'))).items.find((b) => b.label.includes('ATVPDKIKX0DER'))!;
+  const usd = (await get<BoundsIndexView>(auth, api('kaufland/pipeline/fx-usd-floor-eur-cost', 'bounds'))).items.find((b) => b.label.includes('amazon.com'))!;
   const bounds = await html('/src/screens/Bounds.tsx', 'BoundsScreenView', { view: await get<BoundsView>(auth, api('kaufland/pipeline/fx-usd-floor-eur-cost', 'bounds', usd.writeScopeId)) });
   for (const text of ['Effective floor', '$17.79', 'ECB rate', 'add up to the price to the cent']) assert.ok(bounds.includes(text), text);
 
@@ -551,7 +554,7 @@ test('step 23, C/F: offers the channel prices itself are listed before a strateg
   const id = 'amazon/pipeline/console-channel-trust';
   const owner = await login('OWNER');
   const list = await get<StrategyListView>(owner, api(id, 'strategies'));
-  assert.deepEqual(list.channelPricingOffers.map((o) => o.label), ['Amazon A1PA6795UKMFR9 · unit SYN-SKU-8502']);
+  assert.deepEqual(list.channelPricingOffers.map((o) => o.label), ['SYN-SKU-8502 · amazon.de']);
   assert.deepEqual(list.scopes.filter((s) => !s.assignable).map((s) => s.unit.externalUnitId), ['SYN-SKU-8502']);
   assert.ok(list.strategies.length >= 1 && list.strategies.every((s) => s.draft.params.type === 'FIXED'));
   assert.ok(list.strategies.length > 0 && list.strategies.every((x) => x.versions.length >= 1), 'OQ-170: every strategy lists its versions');

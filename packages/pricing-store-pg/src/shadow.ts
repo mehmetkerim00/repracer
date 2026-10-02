@@ -87,6 +87,9 @@ export interface ShadowWriteRow {
   channel: string;
   channelAccountId: string;
   sku: string | null;
+  /** Ревью шага 68, находка 3: название товара и витрина единицы цены — подпись строки словами, как у остальных экранов */
+  title: string | null;
+  marketplace: string | null;
   field: string;
   amountMinor: number | null;
   currency: string | null;
@@ -185,14 +188,24 @@ export class PgShadowStore {
              FROM tenant_data.channel_write_history h
             WHERE h.tenant_id = $1 AND h.final_status = 'SHADOW_HELD' AND h.finished_at >= $2`, [tenantId, since]),
         tx.query(
-          `SELECT h.channel_write_id, h.write_scope_id, ws.channel, ws.channel_account_id, p.sku, h.field,
-                  h.amount_minor, h.currency, h.quantity, h.price_decision_id, h.would_spend_budget, h.finished_at
-             FROM tenant_data.channel_write_history h
-             JOIN tenant_data.write_scope ws ON ws.tenant_id = h.tenant_id AND ws.write_scope_id = h.write_scope_id
+          /**
+           * Шаг 68: сперва страница удержанных записей, затем подписи (товар, витрина) только её строк — подзапрос витрины не
+           * исполняется на каждой удержанной записи окна, каким бы ни вышел план
+           */
+          `WITH page AS (SELECT h.channel_write_id, h.write_scope_id, h.field, h.amount_minor, h.currency, h.quantity, h.price_decision_id,
+                                h.would_spend_budget, h.finished_at
+                           FROM tenant_data.channel_write_history h
+                          WHERE h.tenant_id = $1 AND h.final_status = 'SHADOW_HELD' AND h.finished_at >= $2
+                          ORDER BY h.finished_at DESC, h.channel_write_id
+                          LIMIT $3 OFFSET $4)
+           SELECT page.channel_write_id, page.write_scope_id, ws.channel, ws.channel_account_id, p.sku, p.title, page.field,
+                  (SELECT om.marketplace FROM tenant_data.offer_mapping om
+                    WHERE om.tenant_id = ws.tenant_id AND om.price_write_scope_id = ws.write_scope_id LIMIT 1) AS marketplace,
+                  page.amount_minor, page.currency, page.quantity, page.price_decision_id, page.would_spend_budget, page.finished_at
+             FROM page
+             JOIN tenant_data.write_scope ws ON ws.tenant_id = $1 AND ws.write_scope_id = page.write_scope_id
              LEFT JOIN tenant_data.product p ON p.tenant_id = ws.tenant_id AND p.product_id = ws.product_id
-            WHERE h.tenant_id = $1 AND h.final_status = 'SHADOW_HELD' AND h.finished_at >= $2
-            ORDER BY h.finished_at DESC, h.channel_write_id
-            LIMIT $3 OFFSET $4`, [tenantId, since, query.limit, query.offset]),
+            ORDER BY page.finished_at DESC, page.channel_write_id`, [tenantId, since, query.limit, query.offset]),
         // Режим каждого аккаунта и последнее переключение [Р-170]
         tx.query(
           `SELECT ca.channel_account_id, ca.channel, ca.display_name, ca.external_account_id, ca.write_mode, ca.auth_status,
@@ -246,7 +259,8 @@ export class PgShadowStore {
         total: num(h.held),
         rows: list.rows.map((r) => ({
           channelWriteId: r.channel_write_id as string, writeScopeId: r.write_scope_id as string, channel: r.channel as string,
-          channelAccountId: r.channel_account_id as string, sku: (r.sku as string | null) ?? null, field: r.field as string,
+          channelAccountId: r.channel_account_id as string, sku: (r.sku as string | null) ?? null, title: (r.title as string | null) ?? null,
+          marketplace: (r.marketplace as string | null) ?? null, field: r.field as string,
           amountMinor: r.amount_minor === null ? null : Number(r.amount_minor), currency: (r.currency as string | null) ?? null,
           quantity: r.quantity === null ? null : Number(r.quantity), priceDecisionId: (r.price_decision_id as string | null) ?? null,
           wouldSpendBudget: Boolean(r.would_spend_budget), finishedAt: r.finished_at as Instant,

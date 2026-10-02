@@ -8,7 +8,7 @@ import {
   boundsDiffView, boundsView, bulkJobsView, bulkJobView, can, canCancelBulkJob, catalogPageOf, catalogTotal, CHANNEL_PRICING_SHOWN, channelNotes, STRATEGY_SCOPE_EXAMPLES, onboardingView, complianceView, fingerprint, costImportView, currentStrategies, listQuery, MAX_SCOPES, OFFER_CHOICES, pageOf, parseListQuery, type ListQuery, discountCheckView, dangerousReport, decisionListView, decisionTrace, describe, expandBoundsEdit, importTargets, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, scopeById, unitOf,
   parseStrategyDraft, planStop, priceFeed, productList, rejectedView, REPORT_PERIODS_DAYS, stopView, strategiesView,
   type Locale, type Messages, type StandWorld, type StopTarget, type Viewer,
-  productPage, clampOffset, feedPageQuery, REJECTED_WINDOW_DAYS, stockView, stockDivergencesView, stockReturnsView, shadowView, SHADOW_PERIOD_DAYS,
+  productPage, clampOffset, feedPageQuery, REJECTED_WINDOW_DAYS, stockView, stockDivergencesView, stockReturnsView, shadowView, liveRefusalText, SHADOW_PERIOD_DAYS,
 } from '@repracer/console-model';
 import { buildPreview, readTable, suggestMapping, TABLE_ENCODINGS } from '@repracer/cost-import';
 import type { BulkJobInput, ConsoleCatalogFacts, ConsoleCatalogFactsQuery, ConsoleCatalogPage, DiscountAnnouncementInput, DiscountAnnouncementRow, InterventionSlice } from '@repracer/pricing-pipeline';
@@ -79,6 +79,14 @@ export interface StandIdentity {
 export const LOCALE_COOKIE = 'repracer_locale';
 
 const isLocale = (v: unknown): v is Locale => typeof v === 'string' && (LOCALES as readonly string[]).includes(v);
+
+/** Шаг 68 (K7): суток прожатой тени США — целое 0…7; другое значение — отказ подъёма, а не тихий ноль */
+function pressDaysOf(raw: string | undefined): number {
+  if (raw === undefined || raw === '') return 0;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0 || n > 7) throw new Error(`REPRACER_DEMO_PRESS_DAYS must be an integer 0..7, got ${raw}`);
+  return n;
+}
 
 function cookies(header: string | undefined): Record<string, string> {
   const out: Record<string, string> = {};
@@ -422,7 +430,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         return [{
           id: e.id, title: e.title, description: '', failures: [], scopes: c.scopes, decisionsLastDay: c.decisionsLastDay,
           interventionsLastWeek: c.interventionsLastWeek, activeStops: c.activeStops, activeHalts: c.activeHalts, role: m.values[membership.role],
-          demo: c.demo, awaitingAccess: c.awaitingAccess,
+          demo: c.demo, awaitingAccess: c.awaitingAccess, euStorefronts: c.euStorefronts,
         }];
       });
       // Р-154: список миров — счётчики агрегатом, без чтения состояния ни одного мира
@@ -436,6 +444,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           // Р-151: демо помечается уже в списке миров; Р-150: сколько каналов ждёт доступа — видно до входа в мир
           demo: c.demo,
           awaitingAccess: accounts.filter((a) => a.authStatus === 'AWAITING_ACCESS').length,
+          euStorefronts: c.euStorefronts,
         };
       })), ...tenantRows]);
     }
@@ -713,7 +722,8 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           if (targeted) {
             const channelNames = Object.fromEntries(live.accounts.map((a) => [a.channel, m.values[a.channel as keyof typeof m.values] ?? a.channel]));
             const unknownChannel = m.values['UNKNOWN_CHANNEL' as keyof typeof m.values] ?? 'UNKNOWN_CHANNEL';
-            const found = (await facts({ search: { q, limit: OFFER_CHOICES, labelTemplate: m.ui.common.unitLabel('{c}', '{m}', '{u}'), channelNames, unknownChannel } }))!.search!;
+            // Шаг 68 (K10): витрина словами — правило подписи экрана (`storefrontName`) повторяет база, словарь витрин — целиком (ревью, находка 6)
+            const found = (await facts({ search: { q, limit: OFFER_CHOICES, labelTemplate: m.ui.common.unitLabel('{p}', '{s}'), marketplaceWords: m.ui.connections.marketplaces, channelNames, unknownChannel } }))!.search!;
             const world = await load(found.ids);
             const items = found.ids.flatMap((id) => { const sc = scopeById(world, id); return sc ? [unitOf(world, sc, m)] : []; });
             return ok({ items, total: found.total, shown: Math.min(found.total, OFFER_CHOICES) });
@@ -926,9 +936,13 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
        * База отдаёт код свойства (`DAY_BOUNDARY`), и переводит его словарь: продавцу нужна «граница суток», а не имя столбца.
        */
       if (outcome.status === 'PROPERTY_UNKNOWN') {
-        const names = m.ui.shadow.properties.names;
-        const detail = Object.entries(names).reduce((text, [code, name]) => (name ? text.replaceAll(code, name) : text), outcome.detail);
-        return fail(409, 'PROPERTY_UNKNOWN', e.propertyUnknown(detail));
+        /**
+         * Шаг 68 (K2): база называет «витрина / СВОЙСТВО (вопрос)»; продавцу — витрина словами, что не подтверждено и кто подтверждает
+         * (способ закрытия из ревизии витрин тенанта), без идентификатора витрины и кода нашего вопроса
+         */
+        const properties = (await live.shadow!.shadowPage(live.tenantId, live.clock.iso(), { offset: 0, limit: 1 })).properties;
+        const channel = live.accounts.find((a) => a.channelAccountId === body.channelAccountId)?.channel ?? '';
+        return fail(409, 'PROPERTY_UNKNOWN', liveRefusalText(channel, outcome.detail, properties, m));
       }
       // Р-172: витрины аккаунта не видны вовсе — это другой отказ, и подставлять в него имя свойства нечего
       if (outcome.status === 'PROPERTY_INVISIBLE') return fail(409, 'PROPERTY_UNKNOWN', e.marketplacesInvisible(outcome.detail));
@@ -1713,6 +1727,8 @@ async function main(): Promise<void> {
         joinMember: pgStandJoinMember(adminPool, directory),
         // Шаг 64: `REPRACER_DEMO_US=on` — профиль США в демо: аккаунты eBay US и Amazon US в тени (docs/demo-script.md)
         usAccounts: process.env.REPRACER_DEMO_US === 'on',
+        // Шаг 68 (K7): `REPRACER_DEMO_PRESS_DAYS=7` — неделя тени США прожата при подъёме: недельный отчёт показуем сразу (0…7)
+        usPressDays: process.env.REPRACER_DEMO_US === 'on' ? pressDaysOf(process.env.REPRACER_DEMO_PRESS_DAYS) : 0,
         // Шаг 64: `REPRACER_DEMO_SHADOW=on` — демо в тени [Р-169]: сценарий показа «система физически не может трогать цены»
         ...(process.env.REPRACER_DEMO_SHADOW === 'on' ? { writeMode: 'SHADOW' as const } : {}),
       });

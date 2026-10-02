@@ -88,7 +88,7 @@ test('step 67 (Р-146): with no catalog statistics, every console read over the 
   const listed = await timed(() => store.readConsoleState(tenant, now, { scopeIds: page.result.scopeIds }));
   assert.equal(listed.result.scopes.length, 50, 'the page world carries exactly the listed units');
   const facts = await timed(() => store.consoleCatalogFacts(tenant, {
-    first: 200, search: { q: '6702', limit: 200, labelTemplate: '{c} {m} · unit {u}', channelNames: { KAUFLAND: 'Kaufland' }, unknownChannel: 'UNKNOWN_CHANNEL' },
+    first: 200, search: { q: '6702', limit: 200, labelTemplate: '{p} · {s}', marketplaceWords: {}, channelNames: { KAUFLAND: 'Kaufland' }, unknownChannel: 'UNKNOWN_CHANNEL' },
     strategyUsage: { examples: 10 }, stopImpact: true, channelPricing: { limit: 200 }, keys: [{ marketplace: 'de', channelProductRef: '3670100', condition: 'new' }],
   }));
   assert.ok(facts.result.search!.total > 0 && facts.result.keyed!.length === 1, `the facts found what the catalog has: ${JSON.stringify({ search: facts.result.search!.total, keyed: facts.result.keyed })}`);

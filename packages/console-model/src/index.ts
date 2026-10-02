@@ -1,4 +1,4 @@
-export { catalogFirst, catalogTotal, channelOf, gap, GAP_CODES, scopeById, uniqueGaps, unitOf, type ConsoleDecision, type ConsoleHalt, type ConsoleIntent, type ConsoleScope, type ConsoleStop, type ConsoleWrite, type Gap, type GapCode, type StandAccount, type StandWorld, type StatusCell, type Tone, type UnitRef, type Viewer } from './world.ts';
+export { catalogFirst, catalogTotal, channelOf, gap, GAP_CODES, scopeById, storefrontName, uniqueGaps, unitOf, type ConsoleDecision, type ConsoleHalt, type ConsoleIntent, type ConsoleScope, type ConsoleStop, type ConsoleWrite, type Gap, type GapCode, type StandAccount, type StandWorld, type StatusCell, type Tone, type UnitRef, type Viewer } from './world.ts';
 export { describe, explainabilityCatalogue, LIMIT_CODES, REASON_LIMITS, type ExplainabilityRow, type HumanReason, type LimitCode } from './explain.ts';
 export { LOCALES, messagesFor, type Messages } from './i18n/index.ts';
 export type { Fmt, Locale, Template } from './i18n/types.ts';
@@ -22,8 +22,8 @@ export { COST_IMPORT_REPORT_HEADER, costImportReportRows, csvOf, PRICE_FEED_CSV_
 export { onboardingView, type OnboardingView, type OnboardingStepView, type ChannelAccountView, type EnableResultView, type OnboardingPathChoice } from './onboarding.ts';
 export { stockView, stockDivergencesView, stockReturnsView, stockTraps, type StockView, type StockRowView, type StockChannelCell, type StockTrap, type StockDivergencesView, type StockReturnsView, type StockReturnItem } from './stock.ts';
 // Шаг 41 [Р-169…Р-171]: экран теневого режима — сводка, would-be изменения и включение боя
-export { shadowView, shadowSummaryLines, SHADOW_PERIOD_DAYS, type ShadowView, type ShadowAccountView,
-  type ShadowWriteView, type MarketplacePropertyView, type ShadowDigestView, type ShadowPeriodChoice } from './shadow.ts';
+export { shadowView, shadowSummaryLines, liveRefusalText, SHADOW_PERIOD_DAYS, type ShadowView, type ShadowAccountView,
+  type ShadowWriteView, type MarketplacePropertyView, type ShadowDigestView, type ShadowPeriodChoice, shadowDigestLetter, type ShadowDigestLetterInput } from './shadow.ts';
 export { pageInfo, clampOffset } from './page.ts';
 export { lastChangeCell, productPage } from './products.ts';
 /** Р-154: окно отчёта об отклонённых — семь суток; счётчики и строки — по вмешательствам окна, не по буферу */

@@ -54,13 +54,25 @@ export function demoCompetitors(idProduct: number): NonNullable<LiveProduct['mor
  * Предложения демо. `bare` — как пришли с канала, до онбординга: без границ, себестоимости и стратегии. Это режим живого
  * прогона онбординга; для показа продавцу мир после прогона выглядит так же, как после настоящего пути.
  */
+/**
+ * Шаг 68 (K10): названия товаров демо — синтетические и общие (вид товара, цвет или размер), чтобы предложение на экране читалось
+ * товаром, а не номером единицы канала. Реальных товаров и брендов среди них нет
+ */
+const DEMO_KINDS = ['Water bottle', 'Desk lamp', 'Yoga mat', 'Phone stand', 'Kitchen scale', 'Travel mug', 'Wall clock', 'Laptop sleeve', 'Plant pot', 'Bike light'] as const;
+const DEMO_VARIANTS = ['black', 'white', 'grey', 'blue', 'green', 'red', 'small', 'large', 'oak', 'steel'] as const;
+const DEMO_SERIES = ['', ' II'] as const;
+
+export function demoTitle(i: number): string {
+  return `${DEMO_KINDS[i % DEMO_KINDS.length]}, ${DEMO_VARIANTS[Math.floor(i / DEMO_KINDS.length) % DEMO_VARIANTS.length]}${DEMO_SERIES[Math.floor(i / 100) % DEMO_SERIES.length]}`;
+}
+
 export function demoProducts(options: { bare: boolean }): LiveProduct[] {
   return Array.from({ length: DEMO_OFFERS }, (_, i) => {
     // Единица Kaufland — число БЕЗ ведущих нулей: адаптер берёт её из последних шести цифр товара и отклоняет «000001» как
     // неверную (первый прогон демо: 2710 записей цены отброшены VALIDATION, до канала не дошла ни одна)
     const idProduct = 340_100_001 + i;
     return {
-      cls: i % 5 === 0 ? 'HOT' : 'WARM', idProduct, marketplace: 'de',
+      cls: i % 5 === 0 ? 'HOT' : 'WARM', idProduct, marketplace: 'de', title: demoTitle(i),
       behaviour: DEMO_DRIFT, competitorStartMinor: 1850 + (i % 7) * 10 + 30,
       pastMovesEveryMinutes: i % 5 === 0 ? 30 : 180,
       ...(options.bare ? { bare: true } : { pricingMode: 'ENGINE' as const, costMinor: 1000 + (i % 9) * 25 }),

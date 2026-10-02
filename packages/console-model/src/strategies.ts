@@ -4,7 +4,7 @@ import { describe, type HumanReason } from './explain.ts';
 import type { Messages } from './i18n/index.ts';
 import { catalogPageOf, listQuery, type ListQuery, type PageInfo } from './page.ts';
 import { channelNotes, strategyLabel } from './products.ts';
-import { catalogFirst, gap, scopeById, unitOf, type ConsoleScope, type Gap, type StandWorld, type StatusCell, type Tone, type UnitRef } from './world.ts';
+import { catalogFirst, gap, scopeById, storefrontName, unitOf, type ConsoleScope, type Gap, type StandWorld, type StatusCell, type Tone, type UnitRef } from './world.ts';
 
 /**
  * Экран стратегий (шаг 21): черновик стратегии проверяется на реальных единицах записи до сохранения — те же движок и Gate, что
@@ -193,7 +193,7 @@ export function strategiesView(world: StandWorld, m: Messages, canEdit: boolean,
       channelPricingTotal += flagged.length;
     }
     return flagged.map((o) => ({
-      label: m.ui.common.unitLabel(channel, o.marketplace, o.externalSku),
+      label: m.ui.common.unitLabel(o.externalSku, storefrontName(a.channel, o.marketplace, m)),
       detail: o.automatedPricing ? m.ui.channelNotes.automatedPricingDetail(m.when(o.observedAt)) : m.ui.channelNotes.channelBoundsDetail(m.when(o.observedAt)),
       tone: (o.automatedPricing ? 'stop' : 'warn') as Tone,
     }));

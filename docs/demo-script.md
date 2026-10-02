@@ -14,14 +14,20 @@ PGHOST=127.0.0.1 PGPORT=5432 PGUSER=<суперпользователь PostgreS
 
 - создаёт свою базу `repracer_demo` (тестовую `repracer_eu` и шаблон тестов не трогает);
 - поднимает стенд с демо-тенантом в тени (`REPRACER_DEMO_SHADOW=on`) и с витринами США (`REPRACER_DEMO_US=on`);
+- шаг 68: витрины США считают тень в долларах (себестоимость, границы и стратегии заведены), и их **неделя тени прожимается** при подъёме
+  (`REPRACER_DEMO_PRESS_DAYS`, по умолчанию 7): решения ложатся в прошлые семь суток, недельное письмо показуемо сразу;
 - поднимает интерфейс на `http://127.0.0.1:5173`;
 - ждёт первых решений и печатает запрос-доказательство для шага «а».
 
-Ключей каналов не нужно: Kaufland — симулятор, аккаунты eBay US и Amazon US записаны функцией обнаружения каталога.
+Ключей каналов не нужно: Kaufland — симулятор, аккаунты eBay US и Amazon US записаны функцией обнаружения каталога; конкуренты amazon.com —
+модель порта Amazon (уведомления ANY_OFFER_CHANGED, конкурент сползает ниже пола и возвращается), у eBay US стратегия от себестоимости:
+конкурентов eBay в бою мы не видим [Р-190].
 
-**Запускайте за час до показа.** Время демо-мира настоящее, секунда в секунду (ускорять нельзя: у базы свои часы — ревью шага 34,
-находка 9). Конкурент с дрейфом двигает цену раз в 20 минут, первая волна цен — через ~40 минут, подрезчик отвечает на наши цены
-через 15 минут, заказ приходит раз в 4 минуты. В проходе шага 64 первые изменения цены появились через ~21 минуту; через час на
+**Запускайте за час до показа.** Время демо-мира настоящее, секунда в секунду (ускорять его нельзя: у базы свои часы — ревью шага 34,
+находка 9). Прожатая неделя США — исключение, и честное: она идёт на виртуальных часах ПРОШЛОЙ недели до настоящего момента, решения
+ложатся в прошлые сутки, а дальше витрины США живут настоящим временем; подъём из-за неё дольше на 0,5–2 минуты. Kaufland — с момента
+запуска: конкурент с дрейфом двигает цену раз в 20 минут, первая волна цен — через ~40 минут, подрезчик отвечает на наши цены через
+15 минут, заказ приходит раз в 4 минуты. В проходе шага 64 первые изменения цены Kaufland появились через ~21 минуту; через час на
 экранах есть и изменения цен, и резервации. Перезапуск команды — новый мир с нуля.
 
 В браузере: `http://127.0.0.1:5173` → **English** в правом верхнем углу → **Sign in as Owner** → мир **Demo store (simulator)** с
@@ -29,11 +35,11 @@ PGHOST=127.0.0.1 PGPORT=5432 PGUSER=<суперпользователь PostgreS
 
 ### Что демо не показывает (сказать клиенту прямо)
 
-- **«Неделя тени» — это то, что мир насчитал с запуска.** Период «Last 7 days» на экране тени считает последние семь суток до сейчас;
-  у мира, запущенного час назад, — час. Недельного письма-дайджеста за десять минут нет (отложено K7 — [проход консоли](evidence/step64-console-pass.md)).
-- **Решения — на Kaufland в евро.** У аккаунтов eBay US и Amazon US в демо нет модели канала и себестоимости: это «новорождённые»
-  аккаунты сразу после «Connect», тень по ним ещё не считает. Путь в долларах до записи $12.99 проходит живой прогон
-  `apps/console/test/pilot-us-live.pg.test.ts` (отложено K6).
+- **Неделя тени США — прожатая синтетика.** Это настоящий путь решения на виртуальных часах прошлой недели; цифры выдуманы, и экран и
+  письмо помечены «Demo: synthetic data». Kaufland (евро) — только с момента запуска.
+- **Конкуренты США — модель.** У amazon.com — модель порта Amazon; у eBay US конкурентов нет вовсе (в бою Browse недоступен, Р-190),
+  поэтому там цена от себестоимости. Запись в каналы США — только в тени: бой на amazon.com и ebay.com закрыт неподтверждённой границей
+  суток, и отказ это объясняет словами (шаг «а»).
 
 ## 0. Вход (30 с)
 
@@ -43,6 +49,9 @@ three competitors — one drifting, one undercutting, one in price waves.»
 **Внутри мира — баннер:** «Demo tenant: synthetic data, real path. Every amount is made up.»
 
 Что сказать: это тот же продукт, что у вас будет, — только канал симулирован и цифры выдуманы.
+
+Меню мира строится по витринам тенанта: вкладка **Omnibus** — правило ЕС, и у демо она есть только из-за Kaufland de. У продавца только с
+витринами США её нет вовсе (шаг 68, K3) — если клиент спросит, это ответ.
 
 ## а. Тень: «система физически не может трогать цены» (2,5 мин)
 
@@ -56,11 +65,19 @@ three competitors — one drifting, one undercutting, one in price waves.»
   - «Writes held by the shadow: X (prices P, stock S)»;
   - «Of them 0 would have used the external edit budget of the channel».
 
-  Через час после запуска: N — тысячи, P > 0.
+  Сразу после подъёма — неделя США: около тысячи решений, «Without the floor you would have sold $… cheaper — counted on … holds»; через
+  час добавляются тысячи решений Kaufland в евро.
+- **Блок «Weekly email — preview»** (шаг 68, K7): то самое недельное письмо тени, собранное той же функцией, что у доставки, за
+  последние семь суток, с пометкой «Demo: synthetic data. This is the email a seller in shadow mode receives every Monday…». Демо-тенанту
+  письмо не отправляется (0167) — поэтому оно на экране.
 - **Таблица аккаунтов:** Kaufland, eBay (syn_demo_ebay_us_…), Amazon (A1SYNDEMOUS…) — у каждого «shadow (nothing is written)». Ещё один
   аккаунт Amazon ЕС ожидает доступа [Р-150].
-- **Под таблицей:** «Live writes stay closed: we do not know … Day boundary of the price history». Что мы не знаем про витрину, держит
-  боевой режим закрытым [Р-172] — у amazon.com и ebay.com граница суток не подтверждена каналом.
+- **Под таблицей:** «Live writes stay closed: we do not know amazon.com · Day boundary of the price history, ebay.com · …». Что мы не
+  знаем про витрину, держит боевой режим закрытым [Р-172] — у amazon.com и ebay.com граница суток не подтверждена каналом. Таблица
+  «What we still do not know about these storefronts» — словами: витрина, свойство, значение («net, sales tax added at checkout»), кто
+  подтверждает. Если владелец всё же нажмёт «Switch on live writes» на amazon.com, отказ скажет: «Live writes on amazon.com stay closed:
+  the day boundary of the price history of this storefront is not confirmed yet. It can be confirmed from what the channel shows while you
+  are in the shadow; our team does that by hand, and there is no date for it yet…» (шаг 68, K2). Срока не обещать: его нет.
 - **Строки:** удержанные записи — offer, значение, время, ссылка **Why**.
 
 **Доказательство из базы** (в терминале; команду печатает подготовка):
@@ -89,10 +106,19 @@ psql -d repracer_demo -c "SELECT final_status, count(*) AS writes, count(dispatc
 
 ## б. «Почему эта цена» (2 мин)
 
-На экране тени — **Why** у строки с ценой. Или «Why this price» в меню → строка с исходом **Approved** (первые появляются через ~35 минут
-после запуска).
+На экране тени — **Why** у строки с ценой (строки amazon.com прожатой недели есть сразу). Или «Why this price» в меню → строка с исходом
+**Approved** (у Kaufland первые появляются через ~35 минут после запуска).
 
-**Экран решения** — шаги одного решения. Записано с демо (Kaufland de, цена конкурента сдвинулась):
+**Экран решения amazon.com** (шаг 68, записано прогоном `demo-us-live`): предложение подписано словами — «Plant pot, green · amazon.com».
+
+- **Заголовок:** «The price $14.00 was approved; write: held by shadow mode (not sent)».
+- **Strategy:** «Proposed $14.00 (−24.3%): Target $12.49 is below min_price — capped at $14.00.»; шаги расчёта — «Undercut the lowest
+  price $12.50 by $0.01: $12.49.» и «Target $12.49 is below min_price — capped at $14.00.»; стратегия — «Beat the lowest: undercut by
+  $0.01, against visible offers».
+- **Price Gate:** «Price $14.00 approved within $14.00–$50.00», пол $14.00, минимальная маржа 12 %.
+- **Input check:** «Too few competitor offers — fewer competitor offers than the 3 needed» — правило и порог, без чисел канала.
+
+**Экран решения Kaufland** (записано с демо, цена конкурента сдвинулась):
 
 - **Заголовок:** «The price €18.41 was approved; write: held by shadow mode (not sent)».
 - **Competitor snapshot:** источник «Kaufland, Buy Box request», время наблюдения; «Full snapshot — available until …» (полный снимок
@@ -109,8 +135,10 @@ psql -d repracer_demo -c "SELECT final_status, count(*) AS writes, count(dispatc
 Что сказать:
 
 - каждое решение объясняет себя само: снимок, проверки, стратегия, границы, итог;
-- цену конкурента в вечном объяснении мы **не храним** — это данные канала [Р-85]. Поэтому строка стратегии называет правило («Undercut
-  the Buy Box»), а суммы конкурента — «channel value not kept». Сейчас эта строка читается плохо (отложено K11 — предупредить заранее);
+- цену конкурента в вечном объяснении мы **не храним** — это данные канала [Р-85]. Три дня её держит горячая запись решения [Р-28], и
+  строка стратегии показывает суммы; у решения старше — правило словами: «Undercut the Buy Box price seen at that moment by €0.05. The
+  decision keeps amounts taken from competitor prices for 3 days, so they are no longer shown; the full snapshot is linked in the
+  snapshot step.» (шаг 68, K11);
 - решение без изменения цены хранит только код причины [Р-74], поэтому для показа берите строку с исходом **Approved**.
 
 ## в. Три стоп-крана (2 мин)
@@ -142,7 +170,7 @@ psql -d repracer_demo -c "SELECT final_status, count(*) AS writes, count(dispatc
 **Экран «Channel connections»**, аккаунт eBay (syn_demo_ebay_us_…, ebay.com):
 
 - «shadow: connected, nothing is written»;
-- «Found 12 offers. The shadow starts counting once the offers have costs, bounds and a strategy — continue in Setup…»;
+- «Found 12 offers; the shadow made N decisions in the last 24 hours.» (шаг 68: тень США считает);
 - **вопрос:** «Does another tool update stock or prices in this channel?» — «Not answered yet.»;
 - **запись остатка:** «Stock writes to this channel: off — the owner has to confirm that no other tool manages stock here.» и «Answer the
   question above first.»

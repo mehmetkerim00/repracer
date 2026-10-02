@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { existsSync } from 'node:fs';
-import type { ConnectionsView } from '@repracer/console-model';
+import { messagesFor, type ConnectionsView, type DecisionListView, type DecisionTrace, type ShadowView, type UnitRef } from '@repracer/console-model';
 import type { StandToken, WorldSummary } from '../src/api-types.ts';
 import { createIsolatedDatabase, type IsolatedDatabase } from '../../../packages/pricing-store-pg/test/isolated-db.ts';
 import { startConsole, type RunningConsole } from '../server/console-service.ts';
@@ -37,6 +37,8 @@ before(async () => {
     REPRACER_CONSOLE_DIST: new URL('../dist', import.meta.url).pathname,
     REPRACER_CONSOLE_PUBLIC_DEMO: 'on', REPRACER_CONSOLE_DEMO_US: 'on', REPRACER_CONSOLE_HEARTBEAT: 'off', REPRACER_CONSOLE_GUEST_KEY: 'ephemeral',
     REPRACER_CONSOLE_LOCALE: 'en',
+    // Шаг 68 (K7): неделя тени США прожата при посеве демо — недельное письмо показуемо сразу
+    REPRACER_CONSOLE_DEMO_PRESS_DAYS: '7',
     REPRACER_CONSOLE_APP_PG_URL: url('svc_app'), REPRACER_CONSOLE_ADMIN_PG_URL: url('svc_admin'),
     REPRACER_CONSOLE_AUTHENTICATOR_PG_URL: url('svc_authenticator'), REPRACER_CONSOLE_ONBOARDING_PG_URL: url('svc_onboarding'),
     REPRACER_CONSOLE_PROVISIONING_PG_URL: url('svc_provisioning'), REPRACER_CONSOLE_DISPATCHER_PG_URL: url('svc_dispatcher'),
@@ -92,6 +94,88 @@ test('шаг 64: демо с профилем США — аккаунты eBay U
   // Английский экран — без немецких следов и без евро у витрин США
   const text = JSON.stringify(us);
   assert.ok(!/[äöüßÄÖÜ„“€]/.test(text), `немецкие следы на экране подключений США: ${text.slice(0, 300)}`);
+});
+
+/**
+ * Шаг 68 (K6, K7, K11, K3, K10): что видит клиент из США в демо — как гость, по HTTP. Решения тени в ДОЛЛАРАХ на ebay.com и amazon.com
+ * (до шага 68 тень США молчала: у аккаунтов не было себестоимости, границ и стратегии), «почему эта цена» — настоящее объяснение без
+ * заглушки «channel value not kept» и без кодов, неделя тени прожата при посеве и видна письмом за десять минут, вкладка Omnibus — у
+ * тенанта с витриной ЕС (у демо — Kaufland), подписи предложений — словами
+ */
+test('шаг 68: демо США — решения в долларах, «почему эта цена» без заглушки, недельное письмо тени, Omnibus только при витрине ЕС', async () => {
+  const en = messagesFor('en');
+  const de = messagesFor('de');
+  const issued = await fetch(`${origin}/api/demo/guest`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  const guest = ((await issued.json()) as StandToken).accessToken;
+  const demo = (await call<WorldSummary[]>('GET', '/api/worlds', guest)).body.find((w) => w.demo)!;
+  // K3: у демо есть витрина ЕС (Kaufland de) — вкладка Omnibus на месте; без витрин ЕС её нет (прогон пилота США)
+  assert.equal(demo.euStorefronts, true, 'демо с Kaufland de — тенант с витриной ЕС');
+  const w = encodeURIComponent(demo.id);
+  const placeholder = [en.ui.common.withheld, de.ui.common.withheld];
+  // Коды, которых продавец видеть не должен: идентификаторы витрин, ссылки на решения и вопросы
+  const codes = /ATVPDKIKX0DER|A1PA6795UKMFR9|EBAY_US|EBAY_DE|Р-\d+|OQ-\d+|\b[AEK]-\d{2}\b/;
+  for (const [storefront, channel] of [['amazon.com', 'AMAZON'], ['ebay.com', 'EBAY']] as const) {
+    const found = await call<{ items: UnitRef[]; total: number }>('GET', `/api/worlds/${w}/offers?q=${encodeURIComponent(storefront)}`, guest);
+    assert.equal(found.status, 200);
+    // K10: подпись — название товара и витрина словами; поиск по подписи находит все предложения витрины
+    assert.equal(found.body.total, 12, `${storefront}: поиск по подписи находит предложения витрины — ${JSON.stringify(found.body.items.slice(0, 2))}`);
+    assert.ok(found.body.items.every((u) => u.channel === channel && u.label.endsWith(` · ${storefront}`) && !codes.test(u.label)), JSON.stringify(found.body.items[0]));
+    let changed: { trace: DecisionTrace; price: string } | null = null;
+    for (const unit of found.body.items) {
+      const list = await call<DecisionListView>('GET', `/api/worlds/${w}/decisions?writeScopeId=${unit.writeScopeId}`, guest);
+      const item = list.body.items.find((d) => d.outcome === en.ui.outcomes.APPROVED);
+      if (!item) continue;
+      changed = { trace: (await call<DecisionTrace>('GET', `/api/worlds/${w}/decisions/${item.decisionId}`, guest)).body, price: item.price };
+      break;
+    }
+    assert.ok(changed, `${storefront}: тень США приняла решение с изменением цены (K6)`);
+    // K6: решение в долларах
+    assert.match(changed.price, /^\$\d/, `${storefront}: цена решения в долларах — ${changed.price}`);
+    const strategy = changed.trace.steps.find((st) => st.key === 'STRATEGY')!;
+    assert.match(strategy.summary, /\$\d/, `${storefront}: строка стратегии с суммами в долларах — ${strategy.summary}`);
+    // K11: ни заглушки невыданного значения, ни кодов — во всём объяснении
+    const text = JSON.stringify(changed.trace.steps) + changed.trace.headline;
+    for (const p of placeholder) assert.ok(!text.includes(p), `${storefront}: заглушка в объяснении — ${text.slice(0, 400)}`);
+    const visible = changed.trace.steps.flatMap((st) => [st.summary, ...st.items.flatMap((i) => [i.label, i.value ?? '', i.reason?.title ?? '', i.reason?.text ?? ''])]);
+    assert.deepEqual(visible.filter((x) => codes.test(x) || /^[A-Z][A-Z_]{4,}$/.test(x)), [], `${storefront}: коды в объяснении`);
+    if (channel === 'AMAZON') {
+      // Цена из данных конкурента: подрез и цена конкурента названы суммами — горячее намерение решения ещё хранит их [Р-28]
+      assert.ok(strategy.items.some((i) => i.reason && /\$\d+\.\d{2} by \$0\.01/.test(i.reason.text)), `amazon.com: шаг подреза с суммами — ${JSON.stringify(strategy.items)}`);
+    }
+  }
+  // K7: недельное письмо тени — то же письмо, что уходит продавцу, собранное за семь суток прожатой недели, с пометкой синтетики
+  const shadow = await call<ShadowView>('GET', `/api/worlds/${w}/shadow`, guest);
+  assert.equal(shadow.status, 200);
+  const preview = shadow.body.digestPreview;
+  assert.ok(preview, 'у демо есть предпросмотр недельного письма');
+  assert.equal(preview.synthetic, en.ui.shadow.digest.previewSynthetic);
+  assert.match(preview.text, /without the floor you would have sold \$[\d,]+\.\d{2} cheaper/i, `письмо говорит деньгами в долларах: ${preview.text}`);
+  assert.ok(shadow.body.summary.decisions > 100, `неделя тени: ${shadow.body.summary.decisions} решений`);
+  /**
+   * Ревью шага 68, находка 9: начало окна сводки — всегда «сейчас − 7 суток», и утверждение о нём было тавтологией. Неделя прожата, когда
+   * самые старые решения лежат в прошлых сутках: последняя страница решений предложения amazon.com (страница за концом подтягивается к последней)
+   */
+  const oneAmazon = (await call<{ items: UnitRef[] }>('GET', `/api/worlds/${w}/offers?q=amazon.com`, guest)).body.items[0]!;
+  const oldest = (await call<DecisionListView>('GET', `/api/worlds/${w}/decisions?writeScopeId=${oneAmazon.writeScopeId}&offset=100000`, guest)).body.items.at(-1)!;
+  const oldestMs = Date.parse(oldest.decidedAt.replace(' UTC', 'Z').replace(' ', 'T'));
+  assert.ok(Number.isFinite(oldestMs) && Date.now() - oldestMs > 6 * 86_400_000, `самое старое решение amazon.com — в прошлой неделе: ${oldest.decidedAt}`);
+  // K2, K10: свойства витрин США — словами
+  assert.ok(shadow.body.properties.every((p) => !codes.test(p.storefrontText) && !/[A-Z]{3,}_[A-Z]/.test(p.valueText)), JSON.stringify(shadow.body.properties));
+});
+
+/**
+ * Шаг 68 (K2, Р-146): каждое значение ревизии витрин, кроме часового пояса, у продавца — словами на обоих языках. Правило читает ВСЕ строки
+ * `platform.marketplace_readiness()`, а не только витрины демо: новая витрина или значение без слов красит сборку, а не экран клиента
+ */
+test('шаг 68: значения ревизии витрин — словами на обоих языках', async () => {
+  // Пул закрывает удаление базы прогона
+  const { rows } = await db.pool('svc_admin', 1).query(`SELECT DISTINCT value FROM platform.marketplace_readiness() WHERE value IS NOT NULL`);
+  const values = rows.map((r) => String(r.value)).filter((v) => !/^[A-Z][a-z]+\/[A-Za-z_]+$/.test(v));
+  assert.ok(values.length >= 4, `значения ревизии есть: ${values.join(', ')}`);
+  for (const locale of ['en', 'de'] as const) {
+    const words = messagesFor(locale).ui.shadow.properties.valueWords;
+    assert.deepEqual(values.filter((v) => !words[v]), [], `${locale}: значения без слов`);
+  }
 });
 
 /**

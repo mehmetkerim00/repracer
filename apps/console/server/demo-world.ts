@@ -51,6 +51,11 @@ export interface DemoWorldOptions {
    * ещё не начала [Р-131], а вопрос о других инструментах [Р-202] не отвечен — ровно то, что видит продавец после «Connect»
    */
   usAccounts?: boolean;
+  /**
+   * Шаг 68 (K7): сколько суток тени США «прожать» до настоящего момента при подъёме — чтобы недельный отчёт тени был показуем сразу,
+   * а не через неделю. 0 (по умолчанию) — тень США считает с запуска. Только вместе с `usAccounts`
+   */
+  usPressDays?: number;
   log?: (message: string) => void;
 }
 
@@ -79,7 +84,18 @@ export async function startDemoWorld(options: DemoWorldOptions): Promise<Running
   });
   const accounts: Array<{ channelAccountId: string; channel: string; marketplaces: string[]; haltRelease: 'SAMPLE' | 'MANUAL_ONLY' }> =
     [{ channelAccountId: seeded.channelAccountId, channel: 'KAUFLAND', marketplaces: ['de'], haltRelease: 'SAMPLE' as const }];
-  if (options.usAccounts) accounts.push(...await addUsAccounts(pools, seeded, store));
+  let usMarket: { stop(): void } | null = null;
+  if (options.usAccounts) {
+    const us = await addUsAccounts(pools, seeded, store);
+    accounts.push(...us.accounts);
+    // Шаг 68 (K6): тень США считает — себестоимость, границы и стратегии в долларах, конкуренты amazon.com — модель порта Amazon
+    const { startDemoUsMarket } = await import('./demo-us.ts');
+    usMarket = await startDemoUsMarket({
+      pools: { admin: pools.admin, scheduler: pools.scheduler }, store,
+      accounts: { tenantId: seeded.tenantId, userId: seeded.userId, ownerMembershipId: seeded.ownerMembershipId, ebayAccountId: us.ebay, amazonAccountId: us.amazon },
+      pressDays: options.usPressDays ?? 0, log,
+    });
+  }
   const nowIso = () => demo.clock.iso();
   const descriptor = {
     id: 'demo/kaufland', title: 'Demo · Kaufland (Simulator)', tenantId: seeded.tenantId, accounts,
@@ -91,7 +107,11 @@ export async function startDemoWorld(options: DemoWorldOptions): Promise<Running
     store: store as never, stock, stockPipeline,
     // Шаг 41 [Р-169]: теневой режим читается у живого мира — режим лежит в базе у аккаунта
     shadow: new PgShadowStore({ adminPool: pools.admin }),
-    pipeline: demo.live.pipelineForDbIds() as never,
+    /**
+     * Шаг 68: путь решения мира — по каналу аккаунта вызова. Kaufland — путь живого мира симулятора; витрины США — свой путь со своим
+     * описанием канала (доступность стратегии [Р-39] у eBay и Amazon своя), каналу консоль не звонит
+     */
+    pipeline: channelPipeline(demo.live.pipelineForDbIds(), accounts, store, nowIso) as never,
     clock: { iso: nowIso, nowMs: () => demo.clock.nowMs() } as never,
     callContext: (channelAccountId: string) => ({ tenantId: seeded.tenantId as never, channelAccountId: channelAccountId as never, correlationId: 'console-demo', deadline: nowIso() }),
     view: async (viewer: unknown, options?: { scopeIds?: readonly string[] }) => ({
@@ -123,6 +143,7 @@ export async function startDemoWorld(options: DemoWorldOptions): Promise<Running
       stopped = true;
       // Останавливаются оба хода мира: планировщик (такт демо) и исполнитель заданий
       demo.stop();
+      usMarket?.stop();
       stopWorker = true;
     },
   };
@@ -137,7 +158,7 @@ export const DEMO_US_OFFERS = 12;
  */
 async function addUsAccounts(pools: DemoWorldPools, seeded: { tenantId: string; userId: string; ownerMembershipId: string },
   store: { recordDiscoveredOffers(tenantId: string, channelAccountId: string, offers: never[]): Promise<number> }):
-  Promise<Array<{ channelAccountId: string; channel: string; marketplaces: string[]; haltRelease: 'SAMPLE' | 'MANUAL_ONLY' }>> {
+  Promise<{ ebay: string; amazon: string; accounts: Array<{ channelAccountId: string; channel: string; marketplaces: string[]; haltRelease: 'SAMPLE' | 'MANUAL_ONLY' }> }> {
   const { randomUUID } = await import('node:crypto');
   const { inTenant } = await import('@repracer/pricing-store-pg');
   const ebay = randomUUID();
@@ -164,8 +185,32 @@ async function addUsAccounts(pools: DemoWorldPools, seeded: { tenantId: string; 
     marketplace: 'ATVPDKIKX0DER', externalSku: `SYN-DEMO-US-AMZ-${n(i)}`, externalUnitId: null, externalOfferId: null, channelProductRef: `B0DEMOUS${n(i)}`,
     gtin: null, condition: 'new', fulfillment: 'MERCHANT',
   })) as never[]);
-  return [
-    { channelAccountId: ebay, channel: 'EBAY', marketplaces: ['EBAY_US'], haltRelease: 'MANUAL_ONLY' },
-    { channelAccountId: amazon, channel: 'AMAZON', marketplaces: ['ATVPDKIKX0DER'], haltRelease: 'MANUAL_ONLY' },
-  ];
+  return {
+    ebay, amazon,
+    accounts: [
+      { channelAccountId: ebay, channel: 'EBAY', marketplaces: ['EBAY_US'], haltRelease: 'MANUAL_ONLY' },
+      { channelAccountId: amazon, channel: 'AMAZON', marketplaces: ['ATVPDKIKX0DER'], haltRelease: 'MANUAL_ONLY' },
+    ],
+  };
+}
+
+/** Путь решения демо-мира по каналу аккаунта вызова: Kaufland — путь симулятора, остальные каналы — путь со своим описанием */
+function channelPipeline(kaufland: object, accounts: ReadonlyArray<{ channelAccountId: string; channel: string }>, store: object, now: () => string): object {
+  const others = new Map<string, object>();
+  const pipelineOf = async (channel: string): Promise<object> => {
+    if (channel === 'KAUFLAND') return kaufland;
+    let p = others.get(channel);
+    if (!p) {
+      const [{ createPricingPipeline }, { consoleAdapter }] = await Promise.all([import('@repracer/pricing-pipeline'), import('./channel-descriptors.ts')]);
+      p = createPricingPipeline({ store: store as never, adapter: consoleAdapter(channel), alerts: { raise: async () => undefined }, logger: { log: () => undefined }, now: now as never });
+      others.set(channel, p);
+    }
+    return p;
+  };
+  return new Proxy({}, {
+    get: (_t, method) => async (ctx: { channelAccountId: string }, ...rest: unknown[]) => {
+      const channel = accounts.find((a) => a.channelAccountId === ctx.channelAccountId)?.channel ?? 'KAUFLAND';
+      return ((await pipelineOf(channel)) as Record<string, (...a: unknown[]) => unknown>)[method as string]!(ctx, ...rest);
+    },
+  });
 }

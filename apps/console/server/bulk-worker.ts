@@ -6,8 +6,7 @@ import { bulkWorldReader, runBulkWorker, type BulkWorldDescriptor } from '@repra
 import type { Instant } from '@repracer/channel-port';
 import { createPool, IdMap, PgPricingStore, PgStockStore, translateStore } from '@repracer/pricing-store-pg';
 import { createPricingPipeline, type PricingStore } from '@repracer/pricing-pipeline';
-import { AMAZON_DESCRIPTOR } from '@repracer/amazon-adapter';
-import { KAUFLAND_DESCRIPTOR } from '@repracer/kaufland-adapter';
+import { descriptorOf, haltReleaseOf } from './channel-descriptors.ts';
 import { ConfigError, createHeartbeat, intFromEnv, ProcessHealth, requiredValue, secretFromEnv, serveHealth, type Env } from '@repracer/service-runtime';
 
 /**
@@ -122,7 +121,7 @@ function stockStoreFor(config: BulkWorkerConfig): PgStockStore {
  * [Р-39]. Любое обращение к каналу из предпросмотра — ошибка, и она падает громко, а не проходит тишиной.
  */
 function previewPipelineFor(store: PricingStore, channel: string, now: () => Instant) {
-  const descriptor = channel === 'AMAZON' ? AMAZON_DESCRIPTOR : KAUFLAND_DESCRIPTOR;
+  const descriptor = descriptorOf(channel);
   const adapter = new Proxy({ descriptor } as Record<string, unknown>, {
     get: (target, key) => (key in target ? target[key as string] : () => { throw new Error(`предпросмотр стратегии обратился к каналу: ${String(key)}`); }),
   }) as never;
@@ -212,7 +211,7 @@ export async function runConfiguredWorker(config: BulkWorkerConfig, stopped: () 
             const accounts = await admin.channelAccounts(tenantId);
             (world.descriptor.accounts as unknown as Array<(typeof world.descriptor.accounts)[number]>).push(...accounts.map((a) => ({
               channelAccountId: a.channelAccountId, channel: a.channel, marketplaces: [...a.marketplaces],
-              haltRelease: (a.channel === 'AMAZON' ? AMAZON_DESCRIPTOR : KAUFLAND_DESCRIPTOR).haltRelease.kind,
+              haltRelease: haltReleaseOf(a.channel),
             })));
             worlds.set(tenantId, world);
             // Цикл уходит, когда ждущих заданий у тенанта не осталось (задание, которое уже идёт, он доделывает)

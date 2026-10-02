@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Instant } from '@repracer/channel-port';
 import type { CostInputs } from '@repracer/pricing-model';
-import { DEFAULT_MEMBERS, standUserOf, type MemorySeed, type MemorySeedScope, type PricingStore, type SeedBound } from '@repracer/pricing-pipeline';
+import { DEFAULT_MEMBERS, seedSkuOf, standUserOf, type MemorySeed, type MemorySeedScope, type PricingStore, type SeedBound } from '@repracer/pricing-pipeline';
 
 type SeedAccount = NonNullable<MemorySeed['accounts']>[number];
 import { inTenant, type PgPool, type Tx } from './db.ts';
@@ -275,8 +275,8 @@ export async function seedPricingWorld(_pool: PgPool, input: SeedWorldInput): Pr
     let productId = products.get(s.productId);
     if (!productId) {
       productId = randomUUID();
-      await tx.query(`INSERT INTO tenant_data.product (tenant_id, product_id, sku, kind, gtin) VALUES ($1, $2, $3, 'SIMPLE', $4)`,
-        [tenantId, productId, `syn-${s.productId}`, s.gtin ?? null]);
+      await tx.query(`INSERT INTO tenant_data.product (tenant_id, product_id, sku, kind, gtin, title) VALUES ($1, $2, $3, 'SIMPLE', $4, $5)`,
+        [tenantId, productId, seedSkuOf(s), s.gtin ?? null, s.title ?? null]);
       products.set(s.productId, productId);
       ids.alias(s.productId, productId);
     }

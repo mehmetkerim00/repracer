@@ -90,7 +90,8 @@ export function rejectedView(world: StandWorld, slice: InterventionSlice, m: Mes
         : code === 'BELOW_MARGIN_FLOOR' ? r.limitFloor(money(params.floorMinor as number))
           : code === 'ABOVE_MAX_PRICE' ? r.limitMax(money(params.maxMinor as number)) : null,
       deviation: d.boundDeviationBp === null ? null : m.percentBp(d.boundDeviationBp),
-      intervention, reason: describe(e?.gate.reason ?? d.reason, m), decisionId: d.decisionId,
+      // Ревью шага 68, находка 1: причина Gate — из строки решения (полные параметры, 30 суток), а не из слепка без сумм
+      intervention, reason: describe(!e || e.gate.reason.code === d.reason.code ? d.reason : e.gate.reason, m), decisionId: d.decisionId,
     });
   }
 

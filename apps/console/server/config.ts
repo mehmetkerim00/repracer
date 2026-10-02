@@ -28,6 +28,8 @@ export interface ConsoleConfig {
   publicDemo: boolean;
   /** Шаг 64: профиль США в демо — аккаунты eBay US и Amazon US в тени рядом с Kaufland (`REPRACER_CONSOLE_DEMO_US=on`) */
   demoUs: boolean;
+  /** Шаг 68 (K7): сколько суток тени США прожать при посеве демо (`REPRACER_CONSOLE_DEMO_PRESS_DAYS`, 0…7; 0 — считать с запуска) */
+  demoPressDays: number;
   /** Каждые сколько часов демо-мир пересеивается заново (Р-160): демо, в котором продавец что-то «сломал», показывать нельзя */
   demoReseedHours: number;
   /**
@@ -151,6 +153,7 @@ export function loadConsoleConfig(env: Env = process.env, read: (path: string) =
     locale,
     publicDemo,
     demoUs: env.REPRACER_CONSOLE_DEMO_US === 'on',
+    demoPressDays: intFromEnv(env, 'REPRACER_CONSOLE_DEMO_PRESS_DAYS', 0, 0, 7),
     // Сутки по умолчанию: демо переживает рабочий день целиком, а следы вчерашних гостей не копятся
     demoReseedHours: intFromEnv(env, 'REPRACER_CONSOLE_DEMO_RESEED_HOURS', 24, 1, 24 * 30),
     guestKeyPem,

@@ -111,8 +111,19 @@ export function unitOf(world: StandWorld, scope: ConsoleScope, m: Messages): Uni
   return {
     writeScopeId: scope.writeScopeId, channel, marketplace: scope.marketplace, externalUnitId: scope.externalUnitId,
     channelProductRef: scope.channelProductRef, condition: scope.condition, gtin: scope.gtin,
-    label: m.ui.common.unitLabel(m.values[channel as keyof typeof m.values] ?? channel, scope.marketplace, scope.externalUnitId),
+    label: m.ui.common.unitLabel(scope.title ?? scope.sku ?? m.ui.common.unitRef(scope.externalUnitId), storefrontName(channel, scope.marketplace, m)),
   };
+}
+
+/**
+ * Шаг 68 (K10): витрина словами — «amazon.com», «ebay.com», «kaufland.de», а не «Amazon ATVPDKIKX0DER». Kaufland называет витрины
+ * кодом страны, и код страны без канала другого канала не опознаёт, поэтому правило — по паре канал и витрина. Неизвестная витрина —
+ * имя канала и её код, а не пустота
+ */
+// Правило повторяет поиск в базе (`consoleCatalogFacts`, ключ `marketplaceWords`): изменение здесь — изменение там; равенство держит тест шага 67
+export function storefrontName(channel: string, marketplace: string, m: Messages): string {
+  if (channel === 'KAUFLAND' && /^[a-z]{2}$/.test(marketplace)) return `kaufland.${marketplace}`;
+  return m.ui.connections.marketplaces[marketplace] ?? `${m.values[channel as keyof typeof m.values] ?? channel} ${marketplace}`;
 }
 
 export function scopeById(world: StandWorld, writeScopeId: string): ConsoleScope | undefined {
