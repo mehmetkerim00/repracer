@@ -85,3 +85,11 @@ test('Р-183: страница панели входит у поставщика
     (({ clientId, scope }) => ({ clientId, scope }))(loadOperatorConfig(BASE, read).oidc),
     { clientId: '000000000000000003@repracer', scope: 'openid profile' });
 });
+
+/** Шаг 69 (K1, ревью, находка 6): язык нового тенанта по умолчанию — язык развёртывания региона, а не немецкий базы */
+test('шаг 69: язык нового тенанта по умолчанию — из развёртывания; вне списка — отказ при старте', () => {
+  assert.equal(loadOperatorConfig(BASE, read).defaultLocale, 'de', 'без настройки — прежнее умолчание');
+  assert.equal(loadOperatorConfig({ ...BASE, REPRACER_OPERATOR_DEFAULT_LOCALE: 'en' }, read).defaultLocale, 'en');
+  assert.throws(() => loadOperatorConfig({ ...BASE, REPRACER_OPERATOR_DEFAULT_LOCALE: 'fr' }, read),
+    (e: unknown) => e instanceof ConfigError && /REPRACER_OPERATOR_DEFAULT_LOCALE must be de or en/.test(e.message));
+});

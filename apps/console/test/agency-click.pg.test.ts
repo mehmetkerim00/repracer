@@ -192,9 +192,51 @@ test('Р-182: worldSummaries совпадает с worldCounters тенант з
   const ids = [a, b, c, tenantIds[13]!];
   const many = await store.worldSummaries(ids, now);
   for (const id of ids) {
-    const { awaitingAccess, ...counters } = many.get(id)!;
+    // Шаг 69 (K1, K4): язык и пояс показа — свойства тенанта в той же сводке, у счётчиков их нет
+    const { awaitingAccess, locale, timeZone, ...counters } = many.get(id)!;
     assert.deepEqual(counters, await store.worldCounters(id, now), `тенант ${id}`);
+    assert.ok(locale === 'de' || locale === 'en', `тенант ${id}: язык ${locale}`);
+    assert.equal(typeof timeZone, 'string');
     assert.equal(awaitingAccess, 0);
   }
   assert.deepEqual([many.get(a)!.activeStops, many.get(b)!.activeStops, many.get(c)!.demo], [1, 0, true], 'данные ненулевые');
+});
+
+/**
+ * Шаг 69 (K1, K4): язык и пояс показа — свойства тенанта, а не развёртывания и не куки. Агентство с тенантами DE и US видит каждый на
+ * его языке: кука браузера выбирает язык страницы входа и списка, а мир тенанта говорит языком тенанта. Время показа — в поясе
+ * тенанта со смещением; внутри системы — UTC.
+ */
+test('шаг 69 (K1, K4): агентство видит каждый тенант на его языке и в его поясе — кука браузера этого не меняет', async () => {
+  const [us, de] = [tenantIds[20]!, tenantIds[21]!];
+  const post = (tenant: string, body: unknown) => handle({ method: 'POST', url: `/api/worlds/tenant-${tenant}/settings`, body, authorization: `Bearer ${token}`, cookie: 'repracer_locale=de' });
+  const saved = await post(us, { locale: 'en', timeZone: 'Asia/Tokyo' });
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  assert.deepEqual(saved.body, { locale: 'en', timeZone: 'Asia/Tokyo', timeZoneSet: true, canChange: true });
+  // Пояс, которого нет в базе поясов, — отказ своей причиной; язык вне списка — отказ
+  assert.equal((await post(us, { timeZone: 'Mars/Olympus_Mons' })).status, 400);
+  assert.equal((await post(us, { locale: 'fr' })).status, 400);
+  // Немецкий тенант — по умолчанию; у тенанта без витрин пояс показа — UTC
+  const read = await handle({ method: 'GET', url: `/api/worlds/tenant-${de}/settings`, body: undefined, authorization: `Bearer ${token}`, cookie: 'repracer_locale=en' });
+  assert.deepEqual(read.body, { locale: 'de', timeZone: 'UTC', timeZoneSet: false, canChange: true });
+
+  // Кука — английская у одного запроса и немецкая у другого: экраны говорят языком тенанта, а не куки
+  const usStop = await handle({ method: 'GET', url: `/api/worlds/tenant-${us}/stop`, body: undefined, authorization: `Bearer ${token}`, cookie: 'repracer_locale=de' });
+  const deStop = await handle({ method: 'GET', url: `/api/worlds/tenant-${de}/stop`, body: undefined, authorization: `Bearer ${token}`, cookie: 'repracer_locale=en' });
+  assert.equal(usStop.status, 200, JSON.stringify(usStop.body).slice(0, 300));
+  assert.match(JSON.stringify(usStop.body), /Stop by a person/, 'тенант US — по-английски при немецкой куке');
+  assert.match(JSON.stringify(deStop.body), /Stopp durch einen Menschen/, 'тенант DE — по-немецки при английской куке');
+  const list = await click('/api/worlds');
+  const rows = list.body as Array<{ id: string; locale: string | null; timeZone: string | null }>;
+  assert.deepEqual([rows.find((r) => r.id === `tenant-${us}`)?.locale, rows.find((r) => r.id === `tenant-${us}`)?.timeZone], ['en', 'Asia/Tokyo'], 'список миров несёт язык и пояс тенанта');
+
+  // Время показа — в поясе тенанта: остановка цен, поставленная сейчас, подписана смещением Токио (без перехода на летнее время)
+  await db.superuser(`SET session_replication_role = replica;
+    INSERT INTO tenant_data.price_stop (tenant_id, scope_type, stopped_by_membership_id, stop_note)
+      SELECT m.tenant_id, 'TENANT', m.membership_id, 'synthetic stop for the time zone check'
+        FROM tenant_data.membership m WHERE m.user_id = '${userId}' AND m.tenant_id = '${us}';
+    SET session_replication_role = origin;`);
+  const stopped = JSON.stringify((await handle({ method: 'GET', url: `/api/worlds/tenant-${us}/stop`, body: undefined, authorization: `Bearer ${token}`, cookie: '' })).body);
+  assert.match(stopped, /\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\+9/, `время остановки — в поясе тенанта: ${stopped.slice(0, 400)}`);
+  assert.doesNotMatch(stopped, /\d{2}:\d{2}:\d{2} UTC"/, 'и не в UTC');
 });

@@ -149,7 +149,6 @@ export function decisionTrace(world: StandWorld, detail: DecisionDetail, m: Mess
       const source = (m.ui.sources as Record<string, string | undefined>)[e.snapshot.source];
       const ref = d.snapshotRef;
       const stepGaps: Gap[] = [gap(m, 'SNAPSHOT_CONTENT')];
-      if (!source) stepGaps.push(gap(m, 'SOURCE_NAME'));
       if (!ref) stepGaps.push(gap(m, 'SNAPSHOT_REF_EXPIRED'));
       steps.push({
         key: 'SNAPSHOT', title: t.titles.SNAPSHOT, status: 'OK',
@@ -266,7 +265,7 @@ function writeStep(d: ConsoleDecision, writes: readonly ConsoleWrite[], m: Messa
   const status = (s: string) => (m.ui.writeStatus as Record<string, string | undefined>)[s] ?? s;
   if (writes.length === 0) {
     if (d.outcome !== 'APPROVED') return { key: 'WRITE', title: t.titles.WRITE, status: 'SKIPPED', summary: t.nothingSent, items: [], gaps: [] };
-    return { key: 'WRITE', title: t.titles.WRITE, status: 'UNKNOWN', summary: t.writeMissing, items: [], gaps: [gap(m, 'DB_COMMIT_REJECTIONS')] };
+    return { key: 'WRITE', title: t.titles.WRITE, status: 'UNKNOWN', summary: t.writeMissing, items: [], gaps: [] };
   }
   const items: TraceItem[] = [];
   for (const w of writes) {
@@ -285,15 +284,14 @@ function channelStep(world: StandWorld, d: ConsoleDecision, writes: readonly Con
   const items: TraceItem[] = world.state.divergenceCases
     .filter((c) => c.writeScopeId === d.writeScopeId && c.status === 'OPEN')
     .map((c) => ({ label: t.divergence, outcome: 'INFO' as const, reason: describe({ code: 'DIVERGENCE_CASE_OPENED', params: { observedMinor: c.observedMinor, expectedMinor: c.expectedMinor, currency: d.currency } }, m) }));
-  const confirmation = [gap(m, 'CONFIRMATION_SOURCE')];
   if (!last) return { key: 'CHANNEL', title: t.titles.CHANNEL, status: 'SKIPPED', summary: t.nothingSent, items, gaps: [] };
   switch (last.status) {
     case 'APPLIED': {
       // Р-190 (находка 9 ревью шага 49): подтверждено только нашей записью у канала — продавец видит это словами, а не «подтверждено»
       const own: TraceItem[] = last.confirmedByOwnRecord ? [{ label: m.ui.ownRecordConfirmation, outcome: 'INFO' }] : [];
-      return { key: 'CHANNEL', title: t.titles.CHANNEL, status: items.length ? 'WARN' : 'OK', summary: t.channelApplied(money(last.amountMinor), m.when(last.acceptedAt)), items: [...items, ...own], gaps: confirmation };
+      return { key: 'CHANNEL', title: t.titles.CHANNEL, status: items.length ? 'WARN' : 'OK', summary: t.channelApplied(money(last.amountMinor), m.when(last.acceptedAt)), items: [...items, ...own], gaps: [] };
     }
-    case 'ACCEPTED': return { key: 'CHANNEL', title: t.titles.CHANNEL, status: 'WARN', summary: t.channelAccepted(money(last.amountMinor), m.when(last.acceptedAt)), items, gaps: confirmation };
+    case 'ACCEPTED': return { key: 'CHANNEL', title: t.titles.CHANNEL, status: 'WARN', summary: t.channelAccepted(money(last.amountMinor), m.when(last.acceptedAt)), items, gaps: [] };
     case 'DISPATCHED': return { key: 'CHANNEL', title: t.titles.CHANNEL, status: 'WARN', summary: t.channelWaiting(m.when(last.dispatchedAt)), items, gaps: [] };
     case 'NOT_APPLIED': return { key: 'CHANNEL', title: t.titles.CHANNEL, status: 'STOP', summary: t.channelNotApplied, items, gaps: [] };
     default: return { key: 'CHANNEL', title: t.titles.CHANNEL, status: 'SKIPPED', summary: t.channelNotConfirmed((m.ui.writeStatus as Record<string, string | undefined>)[last.status] ?? last.status), items, gaps: [] };

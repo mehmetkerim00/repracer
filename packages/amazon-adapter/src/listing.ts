@@ -3,7 +3,7 @@ import type { CompetitiveSummaryBatchRequest, CompetitiveSummaryBatchResponse, I
 import { logConservative } from './conservative.ts';
 import { AMAZON_MARKETPLACES, COMPETITIVE_SUMMARY_BATCH_MAX, COMPETITIVE_SUMMARY_PATH, FBA_SUMMARIES_PATH, FBA_SUMMARIES_SKUS_MAX, marketplaceInfo, ORDERS_PAGE_MAX, ORDERS_PATH, SEARCH_PAGE_MAX, SOURCE_COMPETITIVE_SUMMARY } from './descriptor.ts';
 import { ChannelCallError, channelError, classifyFailure } from './errors.ts';
-import { channelOwnedPricing, decimalToMinor, fulfillmentOf, merchantQuantity, purchasePrice } from './mapping.ts';
+import { channelOwnedPricing, decimalToMinor, fulfillmentOf, merchantQuantity, offerTitle, purchasePrice } from './mapping.ts';
 import { acquire, deadlinePassed, nowMs, observeRateLimit, openSession, type AmazonAdapterOptions, type Session } from './session.ts';
 
 /** Офферы аккаунта: searchListingsItems по витринам региона аккаунта, курсор — pageToken ответа */
@@ -35,10 +35,17 @@ export async function discoverOffersAmazon(options: AmazonAdapterOptions, ctx: A
     for (const s of item.summaries ?? []) {
       const price = purchasePrice(item, s.marketplaceId);
       const owned = channelOwnedPricing(item, s.marketplaceId);
+      /**
+       * Шаг 69 (OQ-249): название — `itemName` сводки витрины (набор summaries уже запрошен): vendor/amazon/sp-api-models/2026-09-29/models/
+       * listings-items-api-model/listingsItems_2021-08-01.json, definitions.ItemSummaryByMarketplace.properties.itemName — «Name, or title,
+       * associated with an Amazon catalog item», необязательное. В типе клиента поля нет — читается защитно
+       */
+      const title = offerTitle((s as { itemName?: unknown }).itemName);
       if (fulfillment.kind === 'AMAZON') fbaByMarketplace.set(s.marketplaceId, [...(fbaByMarketplace.get(s.marketplaceId) ?? []), item.sku]);
       items.push({
         identity: { region: session.region, marketplace: s.marketplaceId, externalSku: item.sku, ...(s.asin ? { channelProductRef: s.asin } : {}) },
         gtins: [], condition: (s as { conditionType?: string }).conditionType?.split('_')[0] ?? 'new',
+        ...(title !== undefined ? { title } : {}),
         // Неизвестный способ — CHANNEL: количество по нему не пишется (fail-closed)
         fulfillment: fulfillment.kind === 'MERCHANT' ? 'MERCHANT' : 'CHANNEL',
         ...(price ? { currentPrice: price } : {}), ...(quantity !== null ? { currentQuantity: quantity } : {}),

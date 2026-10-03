@@ -215,7 +215,7 @@ test('screens render from the dictionary: sign-in, products with the effective f
   const kept = await get<DecisionTrace>(auth, api(id, 'decisions', noChange.decisionId));
   assert.ok(kept.gaps.some((g) => g.code === 'NO_OP_NOT_EXPLAINED'));
   const keptHtml = await html('/src/screens/Decisions.tsx', 'TraceView', { trace: kept });
-  for (const text of ['Not kept for decisions that did not change the price', 'Explanation of a decision that kept the price']) assert.ok(keptHtml.includes(text), text);
+  for (const text of ['Not kept for decisions that did not change the price', 'Steps of a decision that kept the price']) assert.ok(keptHtml.includes(text), text);
 
   const rejected = await html('/src/screens/Rejected.tsx', 'RejectedScreenView', { view: await get<RejectedView>(auth, api('kaufland/pipeline/above-max-price', 'rejected')) });
   for (const text of ['Your bounds stopped 1 dangerous change', 'dangerous', '53.2%']) assert.ok(rejected.includes(text), text);
@@ -225,7 +225,7 @@ test('screens render from the dictionary: sign-in, products with the effective f
   for (const text of ['Effective floor', '$17.79', 'ECB rate', 'add up to the price to the cent']) assert.ok(bounds.includes(text), text);
 
   const stop = await html('/src/screens/Stop.tsx', 'StopScreenView', { view: await get<StopView>(auth, api('kaufland/pipeline/mass-shift-halt', 'stop')), onStop: () => {}, onResume: () => {}, onRelease: () => {} });
-  for (const text of ['Stop by a person', 'Storefront halts by the system', 'Stop the whole tenant…', 'Audit log of stops', 'Storefront halted by the system', 'Second factor']) assert.ok(stop.includes(text), text);
+  for (const text of ['Stop by a person', 'Storefront halts by the system', 'Stop the whole workspace…', 'Audit log of stops', 'Storefront halted by the system', 'the owner with a second factor']) assert.ok(stop.includes(text), text);
 
   const session = await get<SessionView>(auth, '/api/session?locale=de');
   const loginView = await html('/src/App.tsx', 'LoginView', { simulator: session.simulator, error: null, busy: false, onSignIn: () => {} }, 'de');
@@ -242,7 +242,7 @@ test('Р-69, Р-76, OQ-129: a viewer cannot stop; an operator stops; the operato
 
   const operator = await login('OPERATOR');
   const plan = (await call(operator, 'POST', api(id, 'stop', 'plan'), { target })).body as StopPlan;
-  assert.equal(plan.confirmTitle, 'Stop all price changes: the whole tenant?');
+  assert.equal(plan.confirmTitle, 'Stop all price changes: the whole workspace?');
   assert.equal((await call(operator, 'POST', api(id, 'stop'), { target, note: 'short', confirmed: true })).status, 400);
   assert.equal((await call(operator, 'POST', api(id, 'stop'), { target, note: 'Synthetic kill switch', confirmed: true })).status, 200);
   assert.equal((await call(operator, 'POST', api(id, 'stop'), { target, note: 'Synthetic kill switch', confirmed: true })).status, 409);
@@ -268,8 +268,8 @@ test('Р-69, Р-76, OQ-129: a viewer cannot stop; an operator stops; the operato
   assert.equal(forged.status, 'FORBIDDEN');
   const audit = (await get<StopView>(admin, `${api(id, 'stop')}?locale=en`)).audit;
   assert.deepEqual(audit.slice(0, 2).map((a) => [a.action, a.actor, a.scope, a.note]), [
-    ['Pricing resumed', 'Admin (you)', 'the whole tenant', 'Geprüft, wir setzen fort'],
-    ['Pricing stopped', 'Operator', 'the whole tenant', 'Synthetic kill switch'],
+    ['Pricing resumed', 'Admin (you)', 'the whole workspace', 'Geprüft, wir setzen fort'],
+    ['Pricing stopped', 'Operator', 'the whole workspace', 'Synthetic kill switch'],
   ]);
 });
 

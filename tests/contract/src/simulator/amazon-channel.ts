@@ -29,6 +29,11 @@ export interface SimAmazonOfferSpec {
   fulfillmentCode?: string | null;
   quantity: number;
   productType?: string;
+  /**
+   * Шаг 69 (OQ-249): название товара — `itemName` сводки витрины (definitions.ItemSummaryByMarketplace снимка, поле необязательное).
+   * По умолчанию синтетическое «Synthetic product <sku>»; null — сводка без названия
+   */
+  title?: string | null;
 }
 
 export interface SimAmazonOrderSpec {
@@ -61,6 +66,7 @@ interface OfferState {
   productType: string;
   fulfillmentCode: string | null;
   quantity: number;
+  title: string | null;
   pending: Array<{ atMs: number; priceMinor?: number; quantity?: number }>;
 }
 
@@ -132,6 +138,7 @@ export class SimulatedAmazonChannel implements ChannelBehaviour {
         this.offers.set(`${m}|${o.sku}`, {
           sku: o.sku, asin: o.asin, marketplace: m, priceMinor: o.priceMinor, productType: o.productType ?? 'SYNTHETIC_PRODUCT_TYPE',
           fulfillmentCode: o.fulfillmentCode === undefined ? 'DEFAULT' : o.fulfillmentCode, quantity: o.quantity, pending: [],
+          title: o.title === undefined ? `Synthetic product ${o.sku}` : o.title,
         });
       }
     }
@@ -164,7 +171,8 @@ export class SimulatedAmazonChannel implements ChannelBehaviour {
     const fa = first.fulfillmentCode === null ? [] : [{ fulfillmentChannelCode: first.fulfillmentCode, quantity: first.quantity }];
     return {
       sku,
-      ...(has('summaries') ? { summaries: list.map((o) => ({ marketplaceId: o.marketplace, asin: o.asin, productType: o.productType, conditionType: 'new_new', status: ['BUYABLE', 'DISCOVERABLE'], createdDate: new Date(this.startMs - 86_400_000).toISOString(), lastUpdatedDate: new Date(this.nowMs).toISOString() })) } : {}),
+      ...(has('summaries') ? { summaries: list.map((o) => ({ marketplaceId: o.marketplace, asin: o.asin, productType: o.productType, conditionType: 'new_new', status: ['BUYABLE', 'DISCOVERABLE'],
+        ...(o.title !== null ? { itemName: o.title } : {}), createdDate: new Date(this.startMs - 86_400_000).toISOString(), lastUpdatedDate: new Date(this.nowMs).toISOString() })) } : {}),
       ...(has('attributes') ? { attributes: {
         purchasable_offer: list.map((o) => ({ marketplace_id: o.marketplace, currency: CURRENCY[o.marketplace]?.currency ?? 'EUR', audience: 'ALL', our_price: [{ schedule: [{ value_with_tax: major(o.priceMinor) }] }] })),
         ...(first.fulfillmentCode === null ? {} : { fulfillment_availability: [{ fulfillment_channel_code: first.fulfillmentCode, quantity: first.quantity }] }),

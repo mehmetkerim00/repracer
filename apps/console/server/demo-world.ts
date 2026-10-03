@@ -56,6 +56,18 @@ export interface DemoWorldOptions {
    * а не через неделю. 0 (по умолчанию) — тень США считает с запуска. Только вместе с `usAccounts`
    */
   usPressDays?: number;
+  /**
+   * Шаг 69 [Р-204]: только прогоны — тот же мир симулятора у КЛИЕНТСКОГО тенанта, а не демо. Доказательством процедуры границы
+   * суток демо-тенант не бывает (его данные синтетические, Р-151), поэтому прогон процедуры оператора сеет мир без признака демо.
+   * Консоль публичного демо этот параметр не передаёт
+   */
+  customerTenant?: boolean;
+  /**
+   * Шаг 69 (K1, K4): язык и пояс показа демо-тенанта — как у любого тенанта, в базе. Язык — язык развёртывания (умолчание тенанта),
+   * пояс — заданный для показа (демо для клиента из США — его пояс); без пояса — пояс первой витрины демо
+   */
+  locale?: 'de' | 'en';
+  timeZone?: string | null;
   log?: (message: string) => void;
 }
 
@@ -74,9 +86,15 @@ export async function startDemoWorld(options: DemoWorldOptions): Promise<Running
     memberUsers: options.memberUsers, memberEmails: options.memberEmails, joinMember: options.joinMember,
     ...(options.writeMode ? { writeMode: options.writeMode } : {}),
     wallClock: true,
+    ...(options.customerTenant ? { demo: false } : {}),
   });
   const seeded = demo.live.seeded;
   const store = new PgPricingStore(pools.app, { adminPool: pools.admin, bulkWorkerPool: pools.bulkWorker });
+  if (options.locale || options.timeZone) {
+    const saved = await store.setTenantDisplay(seeded.tenantId, { ...(options.locale ? { locale: options.locale } : {}), ...(options.timeZone ? { timeZone: options.timeZone } : {}) },
+      { userId: seeded.userId, mfa: true });
+    if (saved.status !== 'SAVED') throw new Error(`demo tenant display settings refused: ${saved.status}`);
+  }
   const stock = new PgStockStore({ adminPool: pools.admin, stockPool: pools.stock });
   const stockPipeline = createStockPipeline({
     store: stock, now: () => demo.clock.iso() as never, sleep: demo.clock.sleep,
@@ -107,6 +125,11 @@ export async function startDemoWorld(options: DemoWorldOptions): Promise<Running
     store: store as never, stock, stockPipeline,
     // Шаг 41 [Р-169]: теневой режим читается у живого мира — режим лежит в базе у аккаунта
     shadow: new PgShadowStore({ adminPool: pools.admin }),
+    // Ревью шага 69, находка 5: демо — один тенант на всех гостей, и язык у него — язык гостя; клиентский тенант прогонов — свой язык
+    display: async () => {
+      const d = await store.tenantDisplay(seeded.tenantId);
+      return { locale: d.locale, timeZone: d.timeZone, timeZoneSet: d.timeZoneSet, ...(options.customerTenant ? {} : { followsRequestLocale: true }) };
+    },
     /**
      * Шаг 68: путь решения мира — по каналу аккаунта вызова. Kaufland — путь живого мира симулятора; витрины США — свой путь со своим
      * описанием канала (доступность стратегии [Р-39] у eBay и Amazon своя), каналу консоль не звонит

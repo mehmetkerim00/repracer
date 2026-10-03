@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { neverWrittenAttributes } from '@repracer/channel-port';
-import { decimalToMinor, minorToDecimal, patchBody, TwoLevelBudget } from '../src/index.ts';
+import { neverWrittenAttributes, type ChannelAccountId, type TenantId } from '@repracer/channel-port';
+import { createAmazonAdapter, decimalToMinor, minorToDecimal, patchBody, TwoLevelBudget } from '../src/index.ts';
+import { OFFER_TITLE_MAX } from '../src/mapping.ts';
 
 /** Модульные проверки адаптера Amazon (шаг 22). Данные синтетические */
 
@@ -54,4 +55,49 @@ test('E: two-level budget — the pair limit and the application limit, whicheve
   for (let i = 0; i < 5; i++) header.tryAcquire('S1', 'patchListingsItem', t);
   const slow = header.tryAcquire('S1', 'patchListingsItem', t);
   assert.ok(!slow.ok && slow.retryAtMs === t + 1000, 'x-amzn-RateLimit-Limit lowers the pair rate');
+});
+
+test('step 69 (OQ-249): discovery takes the product title from itemName of the marketplace summary — trimmed, capped, absent when missing or blank; no extra call', async () => {
+  const MARKETPLACE = 'A1PA6795UKMFR9';
+  const NOW = '2026-10-02T10:00:00.000Z';
+  const long = `Synthetisches Produkt ${'x'.repeat(300)}`;
+  const item = (sku: string, itemName: unknown) => ({
+    sku,
+    summaries: [{ marketplaceId: MARKETPLACE, asin: `B0${sku.replace(/\D/g, '').padStart(8, '0')}`, productType: 'SYN_TYPE', status: ['BUYABLE', 'DISCOVERABLE'],
+      ...(itemName === undefined ? {} : { itemName }), createdDate: NOW, lastUpdatedDate: NOW }],
+    fulfillmentAvailability: [{ fulfillmentChannelCode: 'DEFAULT', quantity: 3 }],
+  });
+  const calls: string[] = [];
+  const fetchFn = (async (input: string | URL | Request) => {
+    const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+    if (url.pathname === '/auth/o2/token') return new Response(JSON.stringify({ access_token: 'syn-lwa-access-token', expires_in: 3600 }), { status: 200 });
+    calls.push(url.pathname);
+    assert.equal(url.pathname, '/listings/2021-08-01/items/SYN_SELLER');
+    assert.ok(url.searchParams.getAll('includedData').join(',').includes('summaries'), 'the summaries set is already requested by discovery');
+    return new Response(JSON.stringify({ numberOfResults: 5, items: [
+      item('SYN-1', '  Synthetisches\n Produkt\t1  '), item('SYN-2', '   '), item('SYN-3', undefined), item('SYN-4', long), item('SYN-5', 42),
+    ] }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+  const adapter = createAmazonAdapter({
+    deps: {
+      accounts: { verify: async (tenantId, channelAccountId) => ({ ok: true, account: { tenantId, channelAccountId, channel: 'AMAZON', externalAccountId: 'SYN_SELLER', region: 'EU', marketplaces: [MARKETPLACE], credentialsRef: 'cred:seller' } }) },
+      credentials: { get: async (ref): Promise<Record<string, string>> => (ref === 'cred:seller' ? { refreshToken: 'syn-refresh' } : { clientId: 'syn-client', clientSecret: 'syn-secret' }) },
+      alerts: { raise: async () => {} },
+      logger: { log: () => {} },
+      now: () => NOW,
+    },
+    userAgent: 'repracer-test/1.0', applicationCredentialsRef: 'cred:app', fetch: fetchFn, endpoints: { EU: 'https://sp-api.invalid' }, timeoutMs: 1000,
+  });
+  const ctx = { tenantId: '10000000-0000-4000-8000-000000000001' as TenantId, channelAccountId: '20000000-0000-4000-8000-000000000001' as ChannelAccountId, correlationId: 'unit', deadline: '2026-10-02T10:05:00.000Z' };
+  const page = await adapter.discoverOffers(ctx, { limit: 20 });
+  assert.deepEqual(page.items.map((i) => i.identity.externalSku), ['SYN-1', 'SYN-2', 'SYN-3', 'SYN-4', 'SYN-5']);
+  const [one, blank, missing, capped, notString] = page.items;
+  assert.equal(one!.title, 'Synthetisches Produkt 1', 'whitespace and control characters collapse to one space, edges trimmed');
+  for (const o of [blank!, missing!, notString!]) {
+    assert.equal(o.title, undefined, `${o.identity.externalSku}: no title from the channel`);
+    assert.ok(!('title' in o), `${o.identity.externalSku}: the key is absent, not an empty string`);
+  }
+  assert.equal(Array.from(capped!.title!).length, OFFER_TITLE_MAX);
+  assert.ok(long.startsWith(capped!.title!));
+  assert.deepEqual(calls, ['/listings/2021-08-01/items/SYN_SELLER'], 'the title comes from the search response itself — no extra call');
 });

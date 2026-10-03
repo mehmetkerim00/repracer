@@ -2,7 +2,7 @@ import type { AdapterCallContext, DiscoveredOffer, Instant, OrderLine, Page, Pag
 import { logConservative } from './conservative.ts';
 import { KAUFLAND_LIMITS, KAUFLAND_STOREFRONTS } from './descriptor.ts';
 import { ChannelCallError, channelError, classifyTransportFailure } from './errors.ts';
-import { hasActiveMinimumPrice, unitIdentity, type KauflandUnit } from './mapping.ts';
+import { hasActiveMinimumPrice, offerTitle, unitIdentity, type KauflandUnit } from './mapping.ts';
 import { acquireBudget, deadlinePassed, nowMs, openSession, type KauflandAdapterOptions, type Session } from './session.ts';
 
 interface Cursor { s: number; o: number }
@@ -65,9 +65,12 @@ export async function discoverOffersKaufland(
         correlationId: ctx.correlationId, details: { idUnit: unit.id_unit ?? 0, storefront },
       });
     }
+    // Шаг 69 (OQ-249): название — `product.title` товара, встроенного по `embedded=products` (mapping.ts); лишних вызовов нет
+    const title = offerTitle(unit.product?.title);
     items.push({
       identity: unitIdentity(unit, storefront),
       gtins: unit.product?.eans ?? [],
+      ...(title !== undefined ? { title } : {}),
       condition: unit.condition ?? 'unknown',
       fulfillment: unit.fulfillment_type === 'fulfilled_by_kaufland' ? 'CHANNEL' : 'MERCHANT',
       ...(Number.isSafeInteger(unit.listing_price) && (unit.listing_price as number) > 0

@@ -100,3 +100,53 @@ export function numberFormat(locale: Locale, noValue: string): NumberFormat {
     rate: (micros) => decimal(micros / 1_000_000, 6),
   };
 }
+
+/**
+ * Шаг 69 (K4): время в поясе продавца — только ПОКАЗ, внутри системы всё в UTC. Пояс IANA (`Europe/Berlin`, `America/Los_Angeles`);
+ * у метки — смещение от UTC в момент времени («UTC+2», «UTC−7»), а не сокращение: сокращения Intl зависят от языка и данных ICU
+ * («MESZ», «GMT+2», «PDT»), смещение одинаково в Node и браузере. Календарная дата без времени (день бюджета, «2026-10-02») не
+ * сдвигается: это уже день, а не момент.
+ */
+export function zonedTimeFormat(locale: Locale, noValue: string, timeZone: string): Pick<NumberFormat, 'when' | 'date'> {
+  const p2 = (n: number) => String(n).padStart(2, '0');
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+  const wall = (d: Date) => {
+    const v = Object.fromEntries(parts.formatToParts(d).map((x) => [x.type, x.value])) as Record<string, string>;
+    const y = Number(v.year); const mo = Number(v.month); const da = Number(v.day); const h = Number(v.hour) % 24; const mi = Number(v.minute); const s = Number(v.second);
+    const offsetMin = Math.round((Date.UTC(y, mo - 1, da, h, mi, s) - Math.floor(d.getTime() / 1000) * 1000) / 60_000);
+    return { y, mo, da, h, mi, s, offsetMin };
+  };
+  const label = (offsetMin: number) => {
+    if (offsetMin === 0) return 'UTC';
+    const sign = offsetMin > 0 ? '+' : '−';
+    const a = Math.abs(offsetMin);
+    return `UTC${sign}${Math.floor(a / 60)}${a % 60 ? `:${p2(a % 60)}` : ''}`;
+  };
+  const parse = (value: string) => {
+    const ms = Date.parse(value);
+    return Number.isNaN(ms) ? null : new Date(ms);
+  };
+  return {
+    when(value) {
+      if (!value) return noValue;
+      const d = parse(value.length === 10 ? `${value}T00:00:00Z` : value);
+      if (!d) return value;
+      const w = wall(d);
+      const time = `${p2(w.h)}:${p2(w.mi)}:${p2(w.s)} ${label(w.offsetMin)}`;
+      return locale === 'de' ? `${p2(w.da)}.${p2(w.mo)}.${w.y}, ${time}` : `${w.y}-${p2(w.mo)}-${p2(w.da)} ${time}`;
+    },
+    date(value) {
+      if (!value) return noValue;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        const [y, mo, da] = value.split('-');
+        return locale === 'de' ? `${da}.${mo}.${y}` : value;
+      }
+      const d = parse(value);
+      if (!d) return value;
+      const w = wall(d);
+      return locale === 'de' ? `${p2(w.da)}.${p2(w.mo)}.${w.y}` : `${w.y}-${p2(w.mo)}-${p2(w.da)}`;
+    },
+  };
+}

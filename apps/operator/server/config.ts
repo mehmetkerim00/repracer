@@ -35,6 +35,11 @@ export interface OperatorConfig {
   invitationBaseUrl: string;
   /** Срок приглашения в часах: база принимает не больше 14 суток (0053) */
   invitationTtlHours: number;
+  /**
+   * Шаг 69 (K1, ревью, находка 6): язык нового тенанта по умолчанию — язык развёртывания региона (US — en), а не немецкий базы.
+   * Оператор может назвать другой при создании
+   */
+  defaultLocale: 'de' | 'en';
   /** Провайдер почты; null — СУХОЙ режим [шаг 37, OQ-224]: письмо собирается целиком и не уходит никуда */
   mail: { apiUrl: string; apiKey: string; from: string } | null;
   /** Р-127: отметка во внешнем сервисе — панель такой же процесс, как остальные */
@@ -109,6 +114,9 @@ export function loadOperatorConfig(env: Env = process.env, read: (path: string) 
     throw new ConfigError('CONFIG_INVALID: REPRACER_OPERATOR_INVITATION_URL must be https');
   }
 
+  const defaultLocale = env.REPRACER_OPERATOR_DEFAULT_LOCALE || 'de';
+  if (defaultLocale !== 'de' && defaultLocale !== 'en') throw new ConfigError('CONFIG_INVALID: REPRACER_OPERATOR_DEFAULT_LOCALE must be de or en');
+
   return {
     port: intFromEnv(env, 'REPRACER_OPERATOR_PORT', 4327, 0, 65_535),
     metricsPort: intFromEnv(env, 'REPRACER_OPERATOR_METRICS_PORT', 9471, 0, 65_535),
@@ -120,6 +128,7 @@ export function loadOperatorConfig(env: Env = process.env, read: (path: string) 
     profile,
     invitationBaseUrl,
     invitationTtlHours: intFromEnv(env, 'REPRACER_OPERATOR_INVITATION_TTL_HOURS', 168, 1, 14 * 24),
+    defaultLocale,
     mail,
     heartbeatUrl,
     standIssuerKeyPem: standKey,

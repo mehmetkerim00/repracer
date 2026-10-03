@@ -1015,7 +1015,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
         catalogued += await store.recordDiscoveredOffers(ctx.tenantId, ctx.channelAccountId, result.items.flatMap((o) => (o.identity.marketplace
           ? [{ marketplace: o.identity.marketplace, externalSku: o.identity.externalSku ?? null, externalUnitId: o.identity.externalUnitId ?? null,
               externalOfferId: o.identity.externalOfferId ?? null, channelProductRef: o.identity.channelProductRef ?? null, gtin: o.gtins[0] ?? null,
-              condition: o.condition, fulfillment: o.fulfillment,
+              condition: o.condition, fulfillment: o.fulfillment, ...(o.title ? { title: o.title } : {}),
               ...(o.listing ? { externalListingId: o.identity.externalListingId ?? null, listingFormat: o.listing.format, writable: o.listing.writable } : {}) }]
           : [])));
         // Шаг 52: количество, которым управляет канал (FBA), — наблюдение для экрана остатков; наша запись его не касается [Р-6]

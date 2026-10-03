@@ -39,6 +39,11 @@ export interface SimUnitSpec {
   deliveryDays?: { min: number; max: number };
   /** Продавец включил Smart Pricing в кабинете канала (Р-12): minimum_price unit в ответе GET /units */
   minimumPriceMinor?: number;
+  /**
+   * Шаг 69 (OQ-249): название товара — `product.title` в GET /units при `embedded=products` (Product снимка). По умолчанию синтетическое
+   * «Synthetic product <id_offer>»; null — товар приходит без названия (поле в Product снимка обязательное — это вариант отказа канала)
+   */
+  title?: string | null;
 }
 
 export interface SimCompetitorSpec {
@@ -83,7 +88,8 @@ interface SimOrderUnit {
   willCancel: boolean;
 }
 
-interface UnitState extends Required<Omit<SimUnitSpec, 'deliveryDays' | 'minimumPriceMinor'>> {
+interface UnitState extends Required<Omit<SimUnitSpec, 'deliveryDays' | 'minimumPriceMinor' | 'title'>> {
+  title: string | null;
   deliveryDays: { min: number; max: number };
   pending: { priceMinor: number; visibleAtMs: number } | null;
   pendingAmount: { amount: number; visibleAtMs: number } | null;
@@ -191,6 +197,7 @@ export class SimulatedKauflandChannel implements ChannelBehaviour {
       this.units.set(`${u.storefront}|${u.idUnit}`, {
         ...u, condition: u.condition ?? 'new', isLive: u.isLive ?? true, vatBp: u.vatBp ?? 1900, shippingMinor: u.shippingMinor ?? 0,
         deliveryDays: u.deliveryDays ?? { min: 1, max: 3 }, pending: null, pendingAmount: null, lastChangeMs: this.startMs, edits: [], minimumPriceMinor: u.minimumPriceMinor ?? null,
+        title: u.title === undefined ? `Synthetic product ${u.idOffer}` : u.title,
       });
     }
     this.competitors = spec.competitors.map((c) => ({
@@ -487,7 +494,11 @@ export class SimulatedKauflandChannel implements ChannelBehaviour {
        */
       const limit = Math.max(1, Math.min(Number(request.query.limit ?? 100), 100));
       const offset = Math.max(0, Number(request.query.offset ?? 0));
-      return respond(200, { data: units.slice(offset, offset + limit).map((u) => this.unitView(u)), pagination: { offset, limit, total: units.length } });
+      // Шаг 69 (OQ-249): товар единицы — только по `embedded=products`, как у канала (UnitEmbedded.product → Product снимка: id_product,
+      // storefront, title, eans); у модели EAN нет — список пуст, как и прежде (адаптер брал `product?.eans ?? []`)
+      const withProduct = (request.query.embedded ?? '').split(',').includes('products');
+      return respond(200, { data: units.slice(offset, offset + limit).map((u) => (withProduct ? { ...this.unitView(u), product: this.productView(u) } : this.unitView(u))),
+        pagination: { offset, limit, total: units.length } });
     }
     if (request.method === 'POST' && request.path === '/v2/units/status') {
       const ids = ((request.body as { unit_ids?: number[] } | undefined)?.unit_ids ?? []);
@@ -667,6 +678,10 @@ export class SimulatedKauflandChannel implements ChannelBehaviour {
     for (const [key, u] of [...this.units]) if (u.idUnit === idUnit) { this.units.delete(key); removed += 1; }
     this.productIndex = null;
     return removed;
+  }
+
+  private productView(u: UnitState): Record<string, unknown> {
+    return { id_product: u.idProduct, storefront: u.storefront, ...(u.title !== null ? { title: u.title } : {}), eans: [] };
   }
 
   private unitView(u: UnitState): Record<string, unknown> {

@@ -1489,6 +1489,39 @@ export class PgPricingStore implements PricingStore {
     }
   }
 
+  /**
+   * Шаг 69 (K1, K4): язык и пояс показа тенанта. Язык — `tenant.locale` (Р-161), пояс — заданный тенантом или пояс первой его витрины,
+   * иначе UTC (`tenant_data.display_time_zone`, 0173). Только показ: внутри системы времена в UTC
+   */
+  async tenantDisplay(tenantId: string): Promise<{ locale: 'de' | 'en'; timeZone: string; timeZoneSet: boolean }> {
+    return inTenant(this.admin('tenantDisplay'), tenantId, async (tx) => {
+      const { rows: [r] } = await tx.query(
+        `SELECT t.locale, t.time_zone, tenant_data.display_time_zone(t.tenant_id) AS tz FROM tenant_data.tenant t WHERE t.tenant_id = $1`, [tenantId]);
+      return { locale: r?.locale === 'en' ? 'en' : 'de', timeZone: String(r?.tz ?? 'UTC'), timeZoneSet: r?.time_zone !== null && r?.time_zone !== undefined };
+    });
+  }
+
+  /**
+   * Шаг 69 (K1, K4): язык и пояс показа меняет администратор тенанта — административной записью с автором и аудитом (страж 0066,
+   * действие MANAGE_TENANT). `timeZone: null` — вернуть пояс по умолчанию (пояс витрины). Неизвестный пояс отклоняет база (0173)
+   */
+  async setTenantDisplay(tenantId: string, change: { locale?: 'de' | 'en'; timeZone?: string | null }, actor: { userId: string; mfa: boolean }):
+    Promise<{ status: 'SAVED' } | { status: 'TIME_ZONE_UNKNOWN' | 'LOCALE_UNKNOWN' | 'FORBIDDEN' }> {
+    try {
+      await inTenant(this.admin('setTenantDisplay'), tenantId, async (tx) => {
+        if (change.locale !== undefined) await tx.query(`UPDATE tenant_data.tenant SET locale = $2 WHERE tenant_id = $1`, [tenantId, change.locale]);
+        if (change.timeZone !== undefined) await tx.query(`UPDATE tenant_data.tenant SET time_zone = $2 WHERE tenant_id = $1`, [tenantId, change.timeZone]);
+      }, actor.userId, { mfa: actor.mfa });
+      return { status: 'SAVED' };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/tenant_time_zone_known/.test(message)) return { status: 'TIME_ZONE_UNKNOWN' };
+      if (/tenant_locale_known/.test(message)) return { status: 'LOCALE_UNKNOWN' };
+      if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
+      throw error;
+    }
+  }
+
   async tenantIsDemo(tenantId: string): Promise<boolean> {
     return inTenant(this.admin('tenantIsDemo'), tenantId, async (tx) => {
       const { rows } = await tx.query(`SELECT demo FROM tenant_data.tenant WHERE tenant_id = $1`, [tenantId]);
@@ -1592,6 +1625,7 @@ export class PgPricingStore implements PricingStore {
         marketplace: o.marketplace, external_sku: o.externalSku, external_unit_id: o.externalUnitId, external_offer_id: o.externalOfferId,
         channel_product_ref: o.channelProductRef, gtin: o.gtin, condition: o.condition, fulfillment: o.fulfillment,
         external_listing_id: o.externalListingId ?? null, listing_format: o.listingFormat ?? null, writable: o.writable ?? null,
+        title: o.title ?? null,
       })))]);
       return Number(r!.created);
     });
@@ -2487,8 +2521,8 @@ export class PgPricingStore implements PricingStore {
    * транзакции. Значения идут в текст литералами, поэтому идентификаторы и время проверяются здесь же. До Р-182 список из
    * 50 тенантов стоил 452 обращения.
    */
-  async worldSummaries(tenantIds: readonly string[], now: Instant): Promise<Map<string, WorldCounters & { awaitingAccess: number }>> {
-    const out = new Map<string, WorldCounters & { awaitingAccess: number }>();
+  async worldSummaries(tenantIds: readonly string[], now: Instant): Promise<Map<string, WorldCounters & { awaitingAccess: number; locale: 'de' | 'en'; timeZone: string }>> {
+    const out = new Map<string, WorldCounters & { awaitingAccess: number; locale: 'de' | 'en'; timeZone: string }>();
     if (tenantIds.length === 0) return out;
     if (!tenantIds.every((t) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(t))) throw new Error('tenant ids must be UUIDs');
     const at = new Date(now);
@@ -2503,7 +2537,9 @@ export class PgPricingStore implements PricingStore {
              (SELECT count(*) FROM channel_data.pricing_halt h WHERE h.tenant_id = '${t}' AND h.released_at IS NULL)::int AS halts,
              (SELECT demo FROM tenant_data.tenant x WHERE x.tenant_id = '${t}') AS demo,
              (SELECT count(*) FROM tenant_data.channel_account a WHERE a.tenant_id = '${t}' AND a.disconnected_at IS NULL AND a.auth_status = 'AWAITING_ACCESS')::int AS awaiting,
-             ${EU_STOREFRONTS_SQL(`'${t}'`)} AS eu;`);
+             ${EU_STOREFRONTS_SQL(`'${t}'`)} AS eu,
+             -- Шаг 69 (K1, K4): язык и пояс показа тенанта — оболочка консоли переключается на них в его мире
+             (SELECT x.locale FROM tenant_data.tenant x WHERE x.tenant_id = '${t}') AS locale, tenant_data.display_time_zone('${t}') AS tz;`);
     const client = await this.admin('worldSummaries').connect();
     try {
       const results = await client.query(`BEGIN READ ONLY; ${statements.join('\n')} COMMIT;`) as unknown as Array<{ rows: Row[] }>;
@@ -2513,6 +2549,7 @@ export class PgPricingStore implements PricingStore {
         out.set(r.tenant_id as string, {
           scopes: Number(r.scopes), decisionsLastDay: Number(r.decisions_day), interventionsLastWeek: Number(r.interventions_week),
           activeStops: Number(r.stops), activeHalts: Number(r.halts), demo: r.demo === true, awaitingAccess: Number(r.awaiting), euStorefronts: r.eu === true,
+          locale: r.locale === 'en' ? 'en' : 'de', timeZone: String(r.tz ?? 'UTC'),
         });
       }
       return out;

@@ -47,7 +47,11 @@ export const AMAZON_DE = 'A1PA6795UKMFR9';
 export const AMAZON_US = 'ATVPDKIKX0DER';
 export const AMAZON_SIM_SOURCE = 'AMAZON_ANY_OFFER_CHANGED';
 
-export interface AmazonSkuSpec { sku: string; asin: string; marketplaces: string[]; priceMinor: number; quantity: number }
+/**
+ * Шаг 69 (OQ-249): `title` — название товара, которое адаптер берёт из `itemName` сводки searchListingsItems; по умолчанию синтетическое
+ * «Synthetic product <sku>», null — канал названия не отдал
+ */
+export interface AmazonSkuSpec { sku: string; asin: string; marketplaces: string[]; priceMinor: number; quantity: number; title?: string | null }
 export interface AmazonCompetitorSpec { sellerRef: string; marketplace: string; asin: string; priceMinor: number; schedule?: Array<{ atOffsetMs: number; priceMinor: number }> }
 export interface AmazonPortModelSpec {
   seed: number; params?: Partial<AmazonModelParams>; skus: AmazonSkuSpec[]; competitors: AmazonCompetitorSpec[];
@@ -55,7 +59,7 @@ export interface AmazonPortModelSpec {
   descriptor?: ChannelDescriptor;
 }
 
-interface Listing { sku: string; asin: string; marketplace: string; priceMinor: number; quantity: number; pendingPrice: { minor: number; at: number } | null; pendingQuantity: { value: number; at: number } | null; edits: number[] }
+interface Listing { sku: string; asin: string; marketplace: string; title: string | null; priceMinor: number; quantity: number; pendingPrice: { minor: number; at: number } | null; pendingQuantity: { value: number; at: number } | null; edits: number[] }
 
 class Bucket {
   private tokens: number;
@@ -130,7 +134,8 @@ export class SimulatedAmazonPort implements ChannelAdapter {
     this.nowMs = this.startMs;
     this.rng = new SeededRandom(spec.seed);
     for (const s of spec.skus) {
-      for (const m of s.marketplaces) this.listings.set(`${m}|${s.sku}`, { sku: s.sku, asin: s.asin, marketplace: m, priceMinor: s.priceMinor, quantity: s.quantity, pendingPrice: null, pendingQuantity: null, edits: [] });
+      const title = s.title === undefined ? `Synthetic product ${s.sku}` : s.title;
+      for (const m of s.marketplaces) this.listings.set(`${m}|${s.sku}`, { sku: s.sku, asin: s.asin, marketplace: m, title, priceMinor: s.priceMinor, quantity: s.quantity, pendingPrice: null, pendingQuantity: null, edits: [] });
     }
     this.competitors = spec.competitors.map((c) => ({ ...c, index: 0 }));
     const p = this.params.patchRate;
@@ -357,7 +362,7 @@ export class SimulatedAmazonPort implements ChannelAdapter {
     const { currency, basis } = this.money();
     const items: DiscoveredOffer[] = slice.map((l) => ({
       identity: { ...(this.descriptor.region ? { region: this.descriptor.region } : {}), marketplace: l.marketplace, externalSku: l.sku, channelProductRef: l.asin },
-      gtins: [], condition: 'new', fulfillment: 'MERCHANT', currentPrice: { amountMinor: l.priceMinor, currency, basis },
+      gtins: [], condition: 'new', fulfillment: 'MERCHANT', ...(l.title !== null ? { title: l.title } : {}), currentPrice: { amountMinor: l.priceMinor, currency, basis },
       currentQuantity: l.quantity, isLive: true, channelPricing: { automatedPricing: false, channelBounds: false },
     }));
     return { items, ...(from + slice.length < all.length ? { nextCursor: String(from + slice.length) } : {}) };

@@ -1,4 +1,4 @@
-import { LOCALES, messagesFor, type Locale, type Messages } from '@repracer/console-model';
+import { LOCALES, messagesFor, storefrontName, type Locale, type Messages } from '@repracer/console-model';
 import type { AlertDeliveryStore, AlertRow } from '@repracer/pricing-store-pg';
 
 /**
@@ -78,7 +78,9 @@ export function immediateMessage(row: AlertRow, tenant: string, to: string, m: M
   const severity = (m.ui.alerts.severity as Record<string, string>)[row.severity] ?? row.severity;
   const lines = [
     m.ui.alerts.tenantLine(tenant),
-    ...(row.channel ? [m.ui.alerts.channelLine(row.channel, row.marketplaces.join(', '))] : []),
+    // Шаг 69 (K9, K10): канал и витрины — словами («Kaufland (kaufland.de)»), а не кодами (`KAUFLAND (de)`, `ATVPDKIKX0DER`)
+    ...(row.channel ? [m.ui.alerts.channelLine((m.values as Record<string, string | undefined>)[row.channel] ?? row.channel,
+      row.marketplaces.map((mp) => storefrontName(row.channel!, mp, m)).join(', '))] : []),
     m.ui.alerts.whenLine(m.when(row.raisedAt)),
     m.ui.alerts.codeLine(row.code),
     '',
@@ -175,7 +177,8 @@ export function createAlertDelivery(deps: AlertDeliveryDeps) {
        * Язык письма — язык ТЕНАНТА, к которому относится событие [Р-161]. Правило одно и для платформенного тенанта:
        * язык оператора — это язык платформенной строки, и отдельной настройки у него нет.
        */
-      const m = messagesFor(localeOf(who?.locale));
+      // Шаг 69 (K4): время в письме — в поясе продавца, как на его экранах
+      const m = messagesFor(localeOf(who?.locale), { timeZone: who?.timeZone ?? null });
       const tenant = who?.name ?? tenantId;
       /**
        * Находка 13 ревью шага 36: остановка канала на каталоге в 10 000 предложений давала 10 000 отдельных писем

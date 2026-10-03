@@ -111,9 +111,9 @@ test('Р-156, сценарий 2: недоверие каналу — письм
   const letter = mail.sent[before]!;
   assert.equal(letter.to, ownerEmail);
   // Канал назван: у продавца их несколько, и «где-то не так» — не сообщение
-  assert.match(letter.text, /Kanal: KAUFLAND \(de\)/);
+  assert.match(letter.text, /Kanal: Kaufland \(kaufland.de\)/);
   assert.match(letter.text, /Der Kanal zeigt einen anderen Preis als den gesendeten/);
-  assert.match(letter.text, /Vergleichen Sie unseren Preis mit dem Preis im Kanal-Konto/);
+  assert.match(letter.text, /Vergleichen Sie unseren Preis mit dem Preis im Kanal-Backoffice/);
 });
 
 test('Р-156, сценарий 3: отставание выгрузки — письмо ОПЕРАТОРУ платформы дайджестом, а не продавцу', async () => {
@@ -188,7 +188,7 @@ test('Р-161, сценарий 5: письмо приходит на языке 
   const english = mail.sent[beforeEn]!;
   assert.equal(english.to, ownerEmail, 'получатель тот же владелец — изменился только язык');
   // Утверждается СОДЕРЖИМОЕ: подписи строк, текст события и первое действие — все три из английского словаря
-  assert.match(english.text, /Seller account: /);
+  assert.match(english.text, /Workspace: /);
   assert.match(english.text, /a storefront is halted: competitor prices shifted all at once/);
   assert.match(english.text, /First step: Open the console/);
   assert.ok(!english.text.includes('Eine Storefront ist angehalten'), `письмо целиком английское: ${english.text}`);
@@ -201,7 +201,7 @@ test('Р-161, сценарий 5: письмо приходит на языке 
   await halted('at');
   assert.equal((await delivery.deliver()).immediate, 1);
   const german = mail.sent.at(-1)!;
-  assert.match(german.text, /Verkäuferkonto: /);
+  assert.match(german.text, /Arbeitsbereich: /);
   assert.match(german.text, /Eine Storefront ist angehalten: Die Wettbewerbspreise haben sich auf einmal massenhaft verschoben/);
   assert.ok(!german.text.includes('a storefront is halted'), `письмо целиком немецкое: ${german.text}`);
 });

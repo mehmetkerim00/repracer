@@ -25,7 +25,7 @@ export const TENANT_WORLD_PREFIX = 'tenant-';
  */
 export interface TenantWorldIndex {
   entries: ReadonlyArray<{ id: string; tenantId: string; title: string }>;
-  summaries(): Promise<Map<string, WorldCounters & { awaitingAccess: number }>>;
+  summaries(): Promise<Map<string, WorldCounters & { awaitingAccess: number; locale: 'de' | 'en'; timeZone: string }>>;
   open(worldId: string): Promise<LiveWorld | null>;
 }
 
@@ -84,6 +84,8 @@ export function createTenantWorlds(pools: TenantWorldPools, now: () => string = 
     return {
       id, title: name, description: '', tenantId, accounts, identityTenantId: tenantId, membershipAlias: (m) => m, failures: [],
       store: store as never, stock, stockPipeline, shadow, pipeline: pipeline as never, clock,
+      // Шаг 69 (K1, K4): мир тенанта говорит на языке тенанта и показывает время в его поясе
+      display: async () => { const d = await store.tenantDisplay(tenantId); return { locale: d.locale, timeZone: d.timeZone, timeZoneSet: d.timeZoneSet }; },
       callContext: (channelAccountId) => ({ tenantId: tenantId as never, channelAccountId: channelAccountId as never, correlationId: `console:${id}`, deadline: now() as never }),
       view: async (viewer, options) => ({
         id, title: name, description: '', tenantId, now: now(), accounts, viewer: { ...viewer },

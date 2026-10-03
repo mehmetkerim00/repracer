@@ -36,6 +36,8 @@ export interface AlertRecipient {
    * хранилище не знает, какие языки есть у консоли, и сверяет их доставка [Р-72].
    */
   locale: string | null;
+  /** Шаг 69 (K4): пояс, в котором владельцу показываются времена письма (`tenant_data.display_time_zone`, 0173); нет — UTC */
+  timeZone?: string | null;
 }
 
 /** Вид отметки доставки: два настоящих письма и СУХОЙ прогон (шаг 37, OQ-224) — база знает все три (0124) */
@@ -149,13 +151,14 @@ export class PgAlertDeliveryStore implements AlertDeliveryStore {
   async recipients(tenantIds: readonly string[]): Promise<Map<string, AlertRecipient>> {
     if (tenantIds.length === 0) return new Map();
     const { rows } = await this.pool.query(
-      `SELECT t.tenant_id, t.name, t.locale, security.tenant_owner_email(t.tenant_id) AS email
+      `SELECT t.tenant_id, t.name, t.locale, security.tenant_owner_email(t.tenant_id) AS email, tenant_data.display_time_zone(t.tenant_id) AS time_zone
          FROM tenant_data.tenant t
         WHERE t.tenant_id = ANY($1::uuid[])`, [[...new Set(tenantIds)]]);
     return new Map(rows.map((r) => [String(r.tenant_id), {
       name: (r.name as string | null) ?? String(r.tenant_id),
       email: (r.email as string | null) ?? null,
       locale: (r.locale as string | null) ?? null,
+      timeZone: (r.time_zone as string | null) ?? null,
     }]));
   }
 

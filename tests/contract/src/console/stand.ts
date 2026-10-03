@@ -93,6 +93,13 @@ export interface LiveWorld {
   callContext(channelAccountId: string): AdapterCallContext;
   /** Шаг 66 (OQ-248): `options.scopeIds` — каталог мира только из этих единиц (страница экрана); без него — весь */
   view(viewer: Viewer, options?: ConsoleStateOptions): Promise<StandWorld>;
+  /**
+   * Шаг 69 (K1, K4): язык и пояс показа ТЕНАНТА — у миров тенантов и демо (настройки в базе). Экраны такого мира говорят на языке
+   * тенанта, время — в его поясе; у миров сценариев настроек нет, и экран говорит на языке запроса. Ревью шага 69, находка 5: демо —
+   * один тенант на всех гостей публичного демо, и язык у него — язык ГОСТЯ (кука, переключатель), а пояс — демо
+   * (`followsRequestLocale`)
+   */
+  display?(): Promise<{ locale: 'de' | 'en'; timeZone: string; timeZoneSet?: boolean; followsRequestLocale?: boolean }>;
 }
 
 function accountsOf(scenario: Scenario): StandAccount[] {

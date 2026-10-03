@@ -167,7 +167,7 @@ export function boundsView(world: StandWorld, writeScopeId: string, m: Messages)
     floorBreakdown: breakdown(b.floorBreakdown, floor.minor),
     currentBreakdown: breakdown(b.currentBreakdown, scope.currentPriceMinor),
     calculatorCheck: b.calculatorSteps(scope.taxRegime === 'VAT_INCLUDED'),
-    gaps: [gap(m, 'COST_COMPONENTS'), gap(m, 'FEE_TARIFF')],
+    gaps: [gap(m, 'COST_COMPONENTS')],
   };
 }
 

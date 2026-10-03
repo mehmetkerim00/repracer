@@ -147,9 +147,9 @@ test('Р-161: события ПЛАТФОРМЫ написаны голосом 
     'WRITE_DISPATCH_SWEEP_FAILED', 'NOTIFICATION_QUEUE_SILENT', 'NOTIFICATION_UNPARSEABLE', 'NOTIFICATION_UNKNOWN_SELLER',
     'NOTIFICATION_FOREIGN_APPLICATION', 'NOTIFICATION_GIVING_UP', 'ALERT_NOT_STORED', 'CHANNEL_APP_CREDENTIALS_REJECTED', 'CHANNEL_REVOCATIONS_SUSPICIOUS', 'CHANNEL_KEYRING_UNREADABLE'];
   // Обороты продавца: «от вас ничего не требуется», «сообщите нам», «откройте консоль», «ваш кабинет канала»
-  const sellerVoiceDe = /Von Ihnen ist|sagen Sie uns|melden Sie sich bei uns|Melden Sie sich|Öffnen Sie die Konsole|Kanal-Konto/;
-  // Шаг 64: «channel cabinet» (калька) стал «seller account on the marketplace»
-  const sellerVoiceEn = /nothing is to be done by you|No action from you|contact us|tell us|Open the console|channel cabinet|seller account on the marketplace/i;
+  const sellerVoiceDe = /Von Ihnen ist|sagen Sie uns|melden Sie sich bei uns|Melden Sie sich|Öffnen Sie die Konsole|Kanal-Backoffice/;
+  // Шаг 64: «channel cabinet» (калька) стал «seller account on the marketplace»; шаг 69 (K9, глоссарий) — «channel back office»
+  const sellerVoiceEn = /nothing is to be done by you|No action from you|contact us|tell us|Open the console|channel cabinet|channel back office/i;
   for (const code of platform) {
     assert.ok(de[code] && en[code], `платформенное событие без текста: ${code}`);
     assert.ok(!sellerVoiceDe.test(de[code]!.step), `${code}/de: первое действие написано голосом продавца: ${de[code]!.step}`);

@@ -53,11 +53,12 @@ export type ConsoleStop = ConsoleStopRow;
 
 /** Пробелы в данных, которые остаются после шага 12: экран говорит «нет данных», а не придумывает значение */
 export const GAP_CODES = [
-  'PRODUCT_TITLE', 'NEXT_CHECK', 'USER_TIME_ZONE', 'NO_EXPLANATION', 'SNAPSHOT_CONTENT', 'SNAPSHOT_REF_EXPIRED', 'CHANNEL_VALUES_WITHHELD',
-  'CONFIRMATION_SOURCE', 'DB_COMMIT_REJECTIONS', 'REJECTED_SNAPSHOT_CONTENT', 'COST_COMPONENTS', 'FEE_TARIFF', 'SELLER_NAMES', 'SOURCE_NAME', 'MFA_AT_PROVIDER',
+  // Шаг 69 (K5): пробелы — то, что клиенту полезно знать об экране; заметки разработчика (уровень опроса, источник подтверждения, отказы
+  // базы при фиксации, тариф комиссии, второй фактор на стенде, пояс показа — сделан K4, названия — OQ-249) убраны вместе с кодами
+  'NO_EXPLANATION', 'SNAPSHOT_CONTENT', 'SNAPSHOT_REF_EXPIRED', 'CHANNEL_VALUES_WITHHELD', 'COST_COMPONENTS',
   'NO_OP_NOT_EXPLAINED', 'EXPLANATION_DICTIONARY_MISSING',
   // Шаг 21: экраны стратегий, правки границ, ленты цен и отчёта об опасных изменениях
-  'PREVIEW_LAST_SNAPSHOT', 'PREVIEW_CURRENT_BOUNDS', 'BOUND_LEVELS', 'MASS_EDIT_MFA_PER_TRANSACTION', 'IMPORT_NO_FX', 'IMPORT_OFFER_KEYS', 'FEED_WINDOW', 'PRICE_HISTORY_NOT_READ',
+  'PREVIEW_LAST_SNAPSHOT', 'PREVIEW_CURRENT_BOUNDS', 'BOUND_LEVELS', 'MASS_EDIT_MFA_PER_TRANSACTION', 'IMPORT_NO_FX', 'IMPORT_OFFER_KEYS', 'FEED_WINDOW',
   'DANGEROUS_REPORT_WINDOW', 'DANGEROUS_THRESHOLD', 'FLOOR_HOLD_TARGET_WINDOW',
   // Шаг 35 [Р-153]: экран остатков; [Р-154]: срез вмешательств ограничен
   'STOCK_CHANNEL_NOT_READ', 'INTERVENTIONS_TRUNCATED',

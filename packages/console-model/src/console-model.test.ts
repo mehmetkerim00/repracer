@@ -306,3 +306,133 @@ test('шаг 64: сумма в USD — $1,234.56 по-английски и 1.23
   assert.equal(en.money(123456, 'EUR'), '€1,234.56');
   assert.equal(en.money(123456, null), '—', 'сумма без валюты не домысливается [Р-71]');
 });
+
+/**
+ * Шаг 69 (K9): единый словарь терминов консоли — [docs/console-glossary.md](../../../docs/console-glossary.md). Правило читает ТЕКСТЫ
+ * словарей (строки и шаблоны без подстановок, без комментариев и ключей): экраны и письма берут тексты только отсюда [Р-72]. Запрещённый
+ * синоним — красная сборка; исключение одно: «listing» — слово eBay, оно допустимо в тексте, который говорит об eBay или Trading API.
+ */
+export const GLOSSARY_FORBIDDEN: Readonly<Record<'en' | 'de', ReadonlyArray<{ pattern: RegExp; use: string }>>> = {
+  en: [
+    { pattern: /\btenants?\b/i, use: 'workspace' },
+    { pattern: /\bseller accounts?\b/i, use: 'workspace (repracer) or channel account (channel)' },
+    { pattern: /\baccount groups?\b/i, use: 'workspace' },
+    { pattern: /\bmarketplaces?\b/i, use: 'storefront (amazon.de) or channel (Amazon)' },
+    { pattern: /\bunits?\b(?! costs?)/i, use: 'offer; pieces for quantities (“unit cost” stays)' },
+    { pattern: /\bitems?\b/i, use: 'offer or product' },
+    { pattern: /\barticles?\b/i, use: 'product' },
+    { pattern: /\bchannel connections?\b/i, use: 'channel account' },
+    { pattern: /\bstand\b(?! still)/i, use: 'server (the stand is a test bench)' },
+  ],
+  de: [
+    { pattern: /\bMandant(en|in)?\b|Mandanten-?[Ss]topp/, use: 'Arbeitsbereich' },
+    { pattern: /\bMarktpl(atz|atzes|ätze|ätzen)\b/, use: 'Storefront oder Kanal' },
+    { pattern: /\bEinheit(en)?\b|Kanaleinheit/, use: 'Angebot; Stück für Mengen' },
+    { pattern: /\bArtikel\b/, use: 'Produkt' },
+    { pattern: /\bListings?\b/, use: 'Angebot' },
+    { pattern: /\bVerkäuferkont(o|en|os)\b|\bHändlerkont(o|en|os)\b/, use: 'Arbeitsbereich oder Kanalkonto' },
+    { pattern: /\bKanalverbindung(en)?\b/, use: 'Kanalkonto' },
+    { pattern: /\bKanal-Kont(o|os|en)\b/, use: 'Kanal-Backoffice (Verkäuferbereich des Kanals) oder Kanalkonto' },
+    { pattern: /\bStand(es|s)?\b|Standzeit/, use: 'Server (der Stand ist ein Prüfstand)' },
+  ],
+};
+const EBAY_LISTING = /\blistings?\b/i;
+
+/** Тексты исходника словаря: строки в кавычках и шаблоны без `${…}`, без комментариев */
+export function dictionaryTexts(source: string): string[] {
+  const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const out: string[] = [];
+  let i = 0;
+  const quoted = (q: string): void => {
+    let s = '';
+    i++;
+    while (i < code.length && code[i] !== q && code[i] !== '\n') {
+      if (code[i] === '\\') { s += code[i + 1]; i += 2; continue; }
+      s += code[i]; i++;
+    }
+    i++;
+    out.push(s);
+  };
+  const template = (): void => {
+    let s = '';
+    i++;
+    while (i < code.length && code[i] !== '`') {
+      if (code[i] === '\\') { s += code[i + 1]; i += 2; continue; }
+      if (code[i] === '$' && code[i + 1] === '{') {
+        let depth = 1;
+        i += 2;
+        s += ' ';
+        while (i < code.length && depth > 0) {
+          if (code[i] === '`') { template(); continue; }
+          if (code[i] === "'" || code[i] === '"') { quoted(code[i]!); continue; }
+          if (code[i] === '{') depth++;
+          else if (code[i] === '}') depth--;
+          i++;
+        }
+        continue;
+      }
+      s += code[i]; i++;
+    }
+    i++;
+    out.push(s);
+  };
+  while (i < code.length) {
+    const c = code[i]!;
+    if (c === '`') template();
+    else if (c === "'" || c === '"') quoted(c);
+    else i++;
+  }
+  return out;
+}
+
+export function glossaryViolations(lang: 'en' | 'de', texts: readonly string[]): string[] {
+  const hits: string[] = [];
+  for (const text of texts) {
+    // Строка из одного слова — ключ, код или значение перечисления, а не текст продавца
+    if (!/\s/.test(text)) continue;
+    for (const { pattern, use } of GLOSSARY_FORBIDDEN[lang]) {
+      if (!pattern.test(text)) continue;
+      if (lang === 'en' && pattern.source === EBAY_LISTING.source) continue;
+      hits.push(`${pattern} → ${use}: ${text.replace(/\s+/g, ' ').slice(0, 140)}`);
+    }
+    if (lang === 'en' && EBAY_LISTING.test(text) && !/eBay|Trading API/.test(text)) hits.push(`listing → offer (outside eBay): ${text.slice(0, 140)}`);
+  }
+  return hits;
+}
+
+test('шаг 69 (K9): словари EN и DE говорят терминами глоссария — запрещённых синонимов нет, «listing» — только об eBay', async () => {
+  const { readFileSync } = await import('node:fs');
+  // Положительные контроли: каждое запрещённое слово правило видит, разрешённое — пропускает
+  const en = (s: string) => glossaryViolations('en', [s]).length;
+  const de = (s: string) => glossaryViolations('de', [s]).length;
+  for (const bad of ['the whole tenant', 'Your seller account is ready', 'the account group stop', 'read from the marketplace', 'channel units in sync', 'the item may break',
+    'one article', 'Open the channel connections', 'The stand is unavailable', 'Check the listing in the channel']) assert.equal(en(bad), 1, bad);
+  for (const ok of ['the unit cost of this offer', 'prices stand still', 'older eBay listings', 'edits this listing through the Trading API', 'Workspace: Demo']) assert.equal(en(ok), 0, ok);
+  for (const bad of ['den gesamten Mandanten', 'ein Mandanten-Stopp', 'Rechner des Marktplatzes', 'neue Einheiten', 'Kanaleinheiten im Abgleich', 'ein Artikel hier',
+    'Ihr Verkäuferkonto ist da', 'dieses Händlerkonto ist verbunden', 'Öffnen Sie die Kanalverbindungen', 'im Kanal-Konto prüfen', 'Fehler des Stands.']) assert.equal(de(bad), 1, bad);
+  for (const ok of ['Kanalkonto verbinden', 'im Kanal-Backoffice prüfen', 'Ihre Stückkosten sind ein Betrag', 'Das Angebot steht still']) assert.equal(de(ok), 0, ok);
+  // Разбор исходника: подстановки шаблона и комментарии не считаются текстом, тексты-функции — считаются
+  assert.deepEqual(dictionaryTexts("/* tenant */ a: (t: string) => `Your ${t} tenant`, // tenant\n b: 'x y'"), ['Your   tenant', 'x y']);
+  for (const lang of ['en', 'de'] as const) {
+    const texts = dictionaryTexts(readFileSync(new URL(`./i18n/${lang}.ts`, import.meta.url), 'utf8'));
+    assert.ok(texts.length > 1000, `${lang}: тексты словаря прочитаны — ${texts.length}`);
+    assert.deepEqual(glossaryViolations(lang, texts), [], `${lang}: запрещённые синонимы глоссария`);
+  }
+});
+
+/**
+ * Шаг 69 (K4): время показа — в поясе продавца со смещением; внутри системы — UTC. Переход на летнее время берётся из настенного
+ * времени Intl, смещение с минутами подписано минутами, календарная дата не сдвигается, неизвестный среде пояс — UTC без падения
+ */
+test('шаг 69 (K4): время в поясе продавца — летнее и зимнее смещение, минуты смещения, дата без сдвига, неизвестный пояс', async () => {
+  const { messagesFor } = await import('./i18n/index.ts');
+  const la = messagesFor('en', { timeZone: 'America/Los_Angeles' });
+  assert.equal(la.when('2026-10-02T07:34:21Z'), '2026-10-02 00:34:21 UTC−7', 'летнее время Тихоокеанского побережья');
+  assert.equal(la.when('2026-12-02T07:34:21Z'), '2026-12-01 23:34:21 UTC−8', 'зимнее время — на час дальше, и сутки ещё вчерашние');
+  assert.equal(messagesFor('de', { timeZone: 'Europe/Berlin' }).when('2026-10-02T07:34:21Z'), '02.10.2026, 09:34:21 UTC+2');
+  assert.equal(messagesFor('en', { timeZone: 'Asia/Kolkata' }).when('2026-10-02T07:34:21Z'), '2026-10-02 13:04:21 UTC+5:30', 'смещение с минутами');
+  assert.equal(la.date('2026-10-02'), messagesFor('en').date('2026-10-02'), 'календарная дата — та же в любом поясе');
+  assert.equal(messagesFor('en', { timeZone: 'UTC' }).when('2026-10-02T07:34:21Z'), messagesFor('en').when('2026-10-02T07:34:21Z'), 'UTC — прежний вид');
+  // Ревью шага 69, находка 15: пояс, неизвестный среде, не роняет экран — время в UTC
+  assert.equal(messagesFor('en', { timeZone: 'Mars/Olympus_Mons' }).when('2026-10-02T07:34:21Z'), messagesFor('en').when('2026-10-02T07:34:21Z'));
+});

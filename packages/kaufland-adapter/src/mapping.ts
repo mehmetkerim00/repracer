@@ -21,8 +21,29 @@ export interface KauflandUnit {
   is_live?: boolean;
   date_lastchange_iso?: string;
   date_lastchange?: string;
-  product?: { eans?: string[] };
+  /**
+   * Товар единицы — приходит при `embedded=products` (обнаружение его уже запрашивает). Шаг 69 (OQ-249): название товара —
+   * `title`: vendor/kaufland/seller-api-v2/2026-09-14/openapi.json, components.schemas.UnitEmbedded.properties.product →
+   * components.schemas.Product.properties.title (в Product обязательное). Это название товара каталога Kaufland, а не данные конкурентов
+   */
+  product?: { eans?: string[]; title?: unknown };
   item?: { eans?: string[] };
+}
+
+/** Шаг 69 (OQ-249): предел длины названия товара из канала — столбец без предела, но название не должно быть книгой */
+export const OFFER_TITLE_MAX = 200;
+
+/**
+ * Шаг 69 (OQ-249): название товара из ответа канала. Пробелы и управляющие символы схлопываются в один пробел (NUL PostgreSQL в text не
+ * примет), края обрезаются, длина — не больше OFFER_TITLE_MAX символов (по кодовым точкам: суррогатная пара не режется пополам).
+ * Не строка или пусто — undefined: канал названия не отдал
+ */
+export function offerTitle(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const flat = raw.replace(/[\s\u0000-\u001f\u007f]+/g, ' ').trim();
+  if (flat.length === 0) return undefined;
+  const points = Array.from(flat);
+  return points.length <= OFFER_TITLE_MAX ? flat : points.slice(0, OFFER_TITLE_MAX).join('').trimEnd();
 }
 
 export function unitIdentity(unit: KauflandUnit, storefrontFallback?: string): OfferIdentity {

@@ -38,6 +38,12 @@ export interface SimEbayListingSpec {
   itemLocation?: boolean;
   /** Шаг 49 [Р-191]: у листинга есть платёжная бизнес-политика; по умолчанию — да */
   paymentPolicy?: boolean;
+  /**
+   * Шаг 69 (OQ-249): название товара инвентаря — `product.title` в странице GET inventory_item (Product снимка, sell_inventory_v1_oas3.json).
+   * По умолчанию синтетическое «Synthetic product <sku>»; null — товар без названия. В GetMyeBaySelling названия нет: поля нет ни в снимке,
+   * ни в записанном ответе песочницы
+   */
+  title?: string | null;
 }
 
 /** world.channelModel сценария eBay */
@@ -54,6 +60,7 @@ export interface EbayChannelModelSpec {
 interface ListingState {
   listingId: string;
   sku: string;
+  title: string | null;
   marketplace: 'EBAY_DE' | 'EBAY_US';
   format: 'FIXED_PRICE' | 'AUCTION';
   status: 'ACTIVE' | 'OUT_OF_STOCK' | 'ENDED';
@@ -143,7 +150,7 @@ export class SimulatedEbayChannel implements ChannelBehaviour {
       const edits = new Map<string, number>();
       if (l.revisionsToday) edits.set(day(this.nowMs), l.revisionsToday);
       this.listings.set(l.listingId, {
-        listingId: l.listingId, sku: l.sku, marketplace: l.marketplace, format: l.format ?? 'FIXED_PRICE', status: 'ACTIVE',
+        listingId: l.listingId, sku: l.sku, title: l.title === undefined ? `Synthetic product ${l.sku}` : l.title, marketplace: l.marketplace, format: l.format ?? 'FIXED_PRICE', status: 'ACTIVE',
         live: { priceMinor: l.priceMinor, currency, quantity: l.quantity },
         history: [{ atMs: this.nowMs - 86_400_000, priceMinor: l.priceMinor, currency, quantity: l.quantity, revision: 1 }], revision: 1,
         bestOffer: l.bestOffer ?? false,
@@ -242,7 +249,8 @@ export class SimulatedEbayChannel implements ChannelBehaviour {
       const page = managed.slice(offset, offset + limit);
       return json(200, { total: managed.length, size: page.length, limit, offset,
         ...(offset + page.length < managed.length ? { next: `https://api.sandbox.ebay.com/sell/inventory/v1/inventory_item?limit=${limit}&offset=${offset + page.length}` } : {}),
-        inventoryItems: page.map((l) => ({ sku: l.sku, condition: 'NEW', availability: { shipToLocationAvailability: { quantity: l.live.quantity } } })) });
+        inventoryItems: page.map((l) => ({ sku: l.sku, condition: 'NEW', availability: { shipToLocationAvailability: { quantity: l.live.quantity } },
+          ...(l.title !== null ? { product: { title: l.title } } : {}) })) });
     }
     if (method === 'GET' && path === '/sell/inventory/v1/offer') {
       const l = [...this.listings.values()].find((x) => x.sku === request.query.sku && x.offer);

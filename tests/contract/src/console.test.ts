@@ -136,7 +136,7 @@ test('B: the happy path decision shows the whole way from snapshot to channel co
   assert.match(agedStrategy.summary, /^Proposed €17\.75 \(.+?\): Undercut the Buy Box price seen at that moment by €0\.05\. The decision keeps amounts taken from competitor prices for 3 days/);
   assert.ok(!JSON.stringify(aged.steps).includes(en.ui.common.withheld), 'без горячего намерения — ни одной заглушки');
   assert.ok(aged.gaps.some((g) => g.code === 'CHANNEL_VALUES_WITHHELD'), 'пробел «значения канала не хранятся» назван у решения без намерения');
-  assert.ok(trace.gaps.some((g) => g.code === 'CONFIRMATION_SOURCE'));
+  // Шаг 69 (K5): заметка разработчика «как канал подтвердил» убрана из экрана вместе с кодом пробела
   const anchors = trace.steps.find((s) => s.key === 'ANCHORS')!;
   assert.ok(anchors.items.some((i) => i.outcome === 'PASS'), 'at least one anchor was used');
   const noChange = decisions.find((d) => d.outcome === 'NO_CHANGE')!;
@@ -227,7 +227,7 @@ test('Р-69: the kill-switch world holds a fixed price with PRICING_STOPPED; a s
   const gate = trace.steps.find((s) => s.key === 'GATE')!;
   assert.equal(gate.status, 'WARN');
   assert.ok(gate.items.some((i) => i.label === en.ui.gateChecks.PRICE_STOP && i.outcome === 'FAIL'));
-  assert.ok(gate.items.some((i) => i.label === en.ui.trace.priceStop && i.value?.startsWith('the whole account group since ')));
+  assert.ok(gate.items.some((i) => i.label === en.ui.trace.priceStop && i.value?.startsWith('the whole workspace since ')));
   assert.equal(trace.steps[0]!.status, 'SKIPPED', 'a fixed price uses no competitor snapshot');
   assert.ok((await rejectedOf(w.store, world, en)).items.some((i) => i.kind === 'STOP' && i.reason.code === 'PRICING_STOPPED'));
 

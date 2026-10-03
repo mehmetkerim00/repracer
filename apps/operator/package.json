@@ -16,6 +16,6 @@
   "scripts": {
     "start": "node --experimental-strip-types --disable-warning=ExperimentalWarning server/operator-service.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec test/operator-config.test.ts test/operator-live.pg.test.ts"
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec test/operator-config.test.ts test/operator-live.pg.test.ts test/day-boundary-live.pg.test.ts"
   }
 }

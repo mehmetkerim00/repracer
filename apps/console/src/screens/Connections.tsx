@@ -83,9 +83,61 @@ export function ConnectionsScreen({ worldId }: { worldId: string }) {
             </table>
             <p className="note">{v.tokenNote}</p>
           </section>
+          <AccountSettings worldId={worldId} />
         </>
       )}
     </Load>
+  );
+}
+
+/**
+ * Шаг 69 (K1, K4): язык и пояс показа тенанта. Форма видна там, где у мира есть настройки тенанта (миры тенантов и демо); у мира
+ * сценария стенда маршрут отвечает 404, и блока нет. Меняет администратор тенанта — отказ в праве приходит от сервера и базы
+ */
+function AccountSettings({ worldId }: { worldId: string }) {
+  const m = useMessages();
+  const t = m.ui.settings;
+  type SettingsView = { locale: 'de' | 'en'; timeZone: string; timeZoneSet: boolean; canChange: boolean };
+  const [view, setView] = useState<SettingsView | null>(null);
+  const [zone, setZone] = useState('');
+  const [language, setLanguage] = useState<'de' | 'en'>('en');
+  const [note, setNote] = useState<string | null>(null);
+  useEffect(() => {
+    void requestJson<SettingsView>(worldPath(worldId, 'settings'), { locale: m.locale })
+      // Ревью шага 69, находка 13: пояс по умолчанию поле не заполняет — иначе сохранение языка сделало бы умолчание явным
+      .then((v) => { setView(v); setZone(v.timeZoneSet ? v.timeZone : ''); setLanguage(v.locale); })
+      .catch(() => setView(null));
+  }, [worldId, m.locale]);
+  if (!view) return null;
+  const initialZone = view.timeZoneSet ? view.timeZone : '';
+  const save = () => void requestJson<SettingsView>(worldPath(worldId, 'settings'), {
+    method: 'POST', locale: m.locale,
+    // Пояс уходит, только если его правили: неизменённое поле не превращает умолчание витрины в заданный пояс
+    body: { locale: language, ...(zone.trim() === initialZone ? {} : { timeZone: zone.trim() === '' ? null : zone.trim() }) },
+  })
+    // Язык и пояс применяются ко всем экранам мира — список миров и экраны перечитываются заново
+    .then(() => { setNote(t.saved); window.location.reload(); })
+    .catch((e: unknown) => setNote(errorText(e, m)));
+  return (
+    <section className="card">
+      <h3>{t.title}</h3>
+      <p className="note">{t.intro}</p>
+      {view.canChange ? (
+        <p>
+          <label>{t.language}{' '}
+            <select value={language} onChange={(e) => setLanguage(e.currentTarget.value === 'de' ? 'de' : 'en')}>
+              <option value="en">English</option>
+              <option value="de">Deutsch</option>
+            </select>
+          </label>{' '}
+          <label>{t.timeZone}{' '}<input value={zone} placeholder={view.timeZoneSet ? '' : view.timeZone} onChange={(e) => setZone(e.currentTarget.value)} /></label>{' '}
+          <button type="button" onClick={save}>{t.save}</button>
+        </p>
+      ) : <p>{view.locale === 'de' ? 'Deutsch' : 'English'} · {view.timeZone}</p>}
+      {view.timeZoneSet ? null : <p className="note">{t.timeZoneDefault(view.timeZone)}</p>}
+      <p className="note">{view.canChange ? t.timeZoneHint : t.readOnly}</p>
+      {note ? <p className="notice">{note}</p> : null}
+    </section>
   );
 }
 

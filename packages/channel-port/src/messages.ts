@@ -222,6 +222,12 @@ export interface DiscoveredOffer {
    * или аукцион (`INELIGIBLE`). Нет поля — канал пишет во все обнаруженные офферы.
    */
   listing?: { format: 'FIXED_PRICE' | 'AUCTION'; writable: boolean };
+  /**
+   * Шаг 69 (OQ-249): название товара, как его показывает канал (Kaufland — товар единицы, Amazon — `itemName` сводки листинга, eBay —
+   * `product.title` товара инвентаря или `Title` листинга Trading). Нет поля — канал названия не отдал. Это данные продавца о его товаре,
+   * а не данные о конкурентах
+   */
+  title?: string;
 }
 
 export interface OrderLine {

@@ -36,6 +36,8 @@ export const PANEL_PAGE = `<!doctype html>
   <button data-screen="write-queue">write queue</button>
   <button data-screen="notifications">notifications</button>
   <button data-screen="snapshot-skips">snapshot skips</button>
+  <button data-screen="day-boundaries">day boundaries</button>
+  <button data-screen="day-boundary-acceptances">accepted day boundaries</button>
   <button data-screen="actions">operator actions</button>
 </nav>
 <main>
@@ -44,7 +46,7 @@ export const PANEL_PAGE = `<!doctype html>
     <h2>Actions</h2>
     <form id="pilot">
       <b>New pilot</b>
-      <input name="name" placeholder="seller account name" required>
+      <input name="name" placeholder="workspace name (the seller business)" required>
       <input name="region" value="EU" size="4" required>
       <input name="ownerEmail" type="email" placeholder="owner email" required>
       <select name="locale"><option value="de">de</option><option value="en">en</option></select>
@@ -69,6 +71,17 @@ export const PANEL_PAGE = `<!doctype html>
       <input name="note" placeholder="note for the record (10 characters or more)" size="40" required>
       <button>resolved</button>
     </form>
+    <form id="boundary">
+      <b>Accept a day boundary at the worst case</b>
+      <input name="channel" placeholder="channel" size="8" required>
+      <input name="marketplace" placeholder="storefront" size="14" required>
+      <input name="timeZone" placeholder="time zone, e.g. America/Los_Angeles" size="30" required>
+      <input name="tenantId" placeholder="evidence tenant id" size="38" required>
+      <input name="channelAccountId" placeholder="evidence account id" size="38" required>
+      <input name="note" placeholder="why this zone and what you checked (10 characters or more)" size="50" required>
+      <button>accept</button>
+      <span class="note">Runbook: docs/runbook-day-boundary.md. The database counts the evidence and refuses less than 7 shadow days.</span>
+    </form>
     <p class="note" id="result">Every action needs a second factor in your sign-in; the database refuses it otherwise.</p>
   </section>
   <table id="grid"></table>
@@ -80,7 +93,9 @@ const $ = (id) => document.getElementById(id);
 let token = '';
 let idToken = '';
 let screen = 'tenants';
-const KEYS = { tenants: 'tenants', jobs: 'jobs', alerts: 'alerts', 'write-queue': 'queue', notifications: 'notifications', 'snapshot-skips': 'skips', actions: 'actions' };
+const KEYS = { tenants: 'tenants', jobs: 'jobs', alerts: 'alerts', 'write-queue': 'queue', notifications: 'notifications', 'snapshot-skips': 'skips', actions: 'actions', 'day-boundaries': 'candidates', 'day-boundary-acceptances': 'acceptances' };
+/** Два экрана одного ответа: кандидаты и журнал принятых приходят одним запросом */
+const PATHS = { 'day-boundary-acceptances': 'day-boundaries' };
 async function call(path, method, payload) {
   const r = await fetch('/api/operator/' + path, {
     method: method || 'GET',
@@ -107,6 +122,7 @@ function action(id, request) {
 action('pilot', (f) => ({ path: 'tenants', method: 'POST', payload: { name: f.name, region: f.region, ownerEmail: f.ownerEmail, locale: f.locale } }));
 action('invite', (f) => ({ path: 'tenants/' + f.tenantId + '/invite', method: 'POST', payload: { email: f.email } }));
 action('ack', (f) => ({ path: 'alerts/' + f.alertId + '/acknowledge', method: 'POST', payload: { tenantId: f.tenantId } }));
+action('boundary', (f) => ({ path: 'day-boundaries/accept', method: 'POST', payload: { channel: f.channel, marketplace: f.marketplace, timeZone: f.timeZone, tenantId: f.tenantId, channelAccountId: f.channelAccountId, note: f.note } }));
 action('skip', (f) => ({ path: 'snapshot-skips/' + f.snapshotId + '/resolve', method: 'POST', payload: { resolution: f.resolution, note: f.note } }));
 function render(rows) {
   const grid = $('grid');
@@ -130,7 +146,8 @@ function render(rows) {
 async function load() {
   try {
     $('status').textContent = 'loading ' + screen + '…';
-    const body = await call(screen === 'alerts' || screen === 'snapshot-skips' ? screen + '?limit=200' : screen);
+    const path = PATHS[screen] || screen;
+    const body = await call(screen === 'alerts' || screen === 'snapshot-skips' ? screen + '?limit=200' : path);
     render(body[KEYS[screen]] || []);
   } catch (e) { $('status').textContent = 'error: ' + e.message; $('grid').innerHTML = ''; }
 }
@@ -148,6 +165,9 @@ async function session() {
     const s = await call('session');
     $('who').textContent = s.displayName + (s.secondFactor ? ' · second factor present' : ' · NO second factor: actions will be refused');
     $('actions').hidden = false;
+    // Шаг 69 (K1): язык нового тенанта по умолчанию — язык развёртывания региона
+    const cfg = await loginConfig();
+    if (cfg.defaultLocale) document.querySelector('#pilot select[name=locale]').value = cfg.defaultLocale;
     await load();
   } catch (e) { $('who').textContent = 'sign-in refused: ' + e.message; }
 }

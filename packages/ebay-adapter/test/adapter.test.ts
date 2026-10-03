@@ -920,3 +920,33 @@ test('step 55 (OQ-240): quotas are read from Developer Analytics — the applica
   const user = await w.adapter.readRateLimits(ctx, 'USER');
   assert.deepEqual(user, { ok: true, limits: [] });
 });
+
+test('step 69 (OQ-249): the Inventory phase takes the product title from product.title of the inventory item — trimmed, capped by code points, absent when missing or blank; no extra call', async () => {
+  const capped = `${'a'.repeat(199)}\u{1F600}`;
+  const items = [
+    { sku: 'SYN-T1', condition: 'NEW', product: { title: '  Synthetischer\r\nArtikel \t 1 ' } },
+    { sku: 'SYN-T2', condition: 'NEW', product: { title: '  ' } },
+    { sku: 'SYN-T3', condition: 'NEW' },
+    { sku: 'SYN-T4', condition: 'NEW', product: { title: null } },
+    { sku: 'SYN-T5', condition: 'NEW', product: { title: `${capped}tail beyond the cap` } },
+  ];
+  const w = world((r) => {
+    if (r.url.pathname === '/sell/inventory/v1/inventory_item') return { status: 200, body: { total: items.length, inventoryItems: items } };
+    assert.equal(r.url.pathname, '/sell/inventory/v1/offer');
+    const sku = r.url.searchParams.get('sku')!;
+    const n = sku.replace(/\D/g, '');
+    return { status: 200, body: { offers: [{ offerId: `91000000${n}`, sku, marketplaceId: 'EBAY_DE', format: 'FIXED_PRICE', availableQuantity: 1,
+      pricingSummary: { price: { value: '9.99', currency: 'EUR' } }, listing: { listingId: `1100000000${n}`, listingStatus: 'ACTIVE' } }] } };
+  }, { marketplaces: ['EBAY_DE'], requestBudget: new TokenBucket({ ratePerSecond: 1000, burst: 1000 }) });
+  const page = await w.adapter.discoverOffers(ctx, { limit: 10 });
+  assert.deepEqual(page.items.map((i) => i.identity.externalSku), ['SYN-T1', 'SYN-T2', 'SYN-T3', 'SYN-T4', 'SYN-T5']);
+  const bySku = new Map(page.items.map((i) => [i.identity.externalSku, i]));
+  assert.equal(bySku.get('SYN-T1')!.title, 'Synthetischer Artikel 1', 'whitespace and control characters collapse to one space, edges trimmed');
+  for (const sku of ['SYN-T2', 'SYN-T3', 'SYN-T4']) {
+    assert.equal(bySku.get(sku)!.title, undefined, `${sku}: no title from the channel`);
+    assert.ok(!('title' in bySku.get(sku)!), `${sku}: the key is absent, not an empty string`);
+  }
+  assert.equal(bySku.get('SYN-T5')!.title, capped, 'capped at 200 code points — the emoji at the edge is kept whole, not cut into a lone surrogate');
+  assert.deepEqual(w.seen.map((s) => s.url.pathname), ['/sell/inventory/v1/inventory_item', ...items.map(() => '/sell/inventory/v1/offer')],
+    'the title comes from the inventory page itself — no extra call per item');
+});

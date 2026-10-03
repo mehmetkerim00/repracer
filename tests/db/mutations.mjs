@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0172_verify_schema_invariants_v44.sql';
+const VERIFY = 'migrations/0174_verify_schema_invariants_v45.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -2283,6 +2283,58 @@ export const STEP66_ROWS = [
       m(dropTrigger('aa_channel_write_queue_stats', 'tenant_data.channel_write'),
         node('packages/pricing-store-pg/test/write-queue-stats.pg.test.ts', 'step 66 (OQ-247): a transaction putting many writes',
           'step 66: the bulk transaction refreshed the queue statistics with its own rows', '^false$')),
+    ],
+  },
+];
+
+/**
+ * Шаг 69 (0173): пояс показа тенанта [K4] и граница суток витрины, принятая худшим окном после недели тени [Р-204]. Статус ставит
+ * только журнал; журнал принимает неделю тени, решения, худшее окно в пределах бюджета правок, заметку и пояс IANA; подтверждённую
+ * границу принятие не трогает. Смоук — tests/db/smoke_append_only.sql
+ */
+export const STEP69_ROWS = [
+  {
+    row: 'шаг 69 (Р-204, K4)', critical: false,
+    invariant: 'граница суток витрины принимается худшим окном только строкой журнала с неделей тени, решениями и худшим окном в пределах бюджета правок; пояс показа тенанта — пояс IANA',
+    mutations: [
+      m(dropConstraint('tenant_time_zone_known', 'tenant_data.tenant'), smoke('a tenant display time zone that is not a time zone (K4)')),
+      m(dropConstraint('marketplace_time_zone_status_check', 'platform.marketplace'), smoke('a day boundary status that does not exist (Р-204)')),
+      m(dropTrigger('a0_marketplace_worst_case_only_by_journal', 'platform.marketplace'), smoke('a worst-case day boundary set without the journal (Р-204)')),
+      m(dropTrigger('b_day_boundary_acceptance_apply', 'platform.day_boundary_acceptance'),
+        smoke('an accepted day boundary keeps live writes open as a conservative value (Р-204)')),
+      m(dropConstraint('day_boundary_acceptance_week_of_shadow', 'platform.day_boundary_acceptance'), smoke('a day boundary accepted after less than a week of shadow (Р-204)')),
+      m(dropConstraint('day_boundary_acceptance_worst_window_within_limit', 'platform.day_boundary_acceptance'),
+        smoke('a day boundary accepted although the worst window exceeds the edit budget (Р-204)')),
+      m(dropConstraint('day_boundary_acceptance_decisions_seen', 'platform.day_boundary_acceptance'), smoke('a day boundary accepted without a single shadow decision (Р-204)')),
+      m(dropConstraint('day_boundary_acceptance_note_present', 'platform.day_boundary_acceptance'), smoke('a day boundary accepted without a note (Р-204)')),
+      m(dropConstraint('day_boundary_acceptance_time_zone_known', 'platform.day_boundary_acceptance'),
+        smoke('a day boundary accepted with a zone abbreviation instead of a zone (Р-204)')),
+      m(dropTrigger('zz_append_only', 'platform.day_boundary_acceptance'), smoke('append-only platform.day_boundary_acceptance')),
+      m(dropTrigger('zz_no_truncate', 'platform.day_boundary_acceptance'), smoke('truncate platform.day_boundary_acceptance')),
+      // Ревью шага 69: находка 3 — неделя тени без суток без решений; находка 1 — принятие не меняет уже заданный пояс витрины
+      m(dropConstraint('day_boundary_acceptance_every_day_seen', 'platform.day_boundary_acceptance'),
+        smoke('a day boundary accepted although some shadow days had no decisions (Р-204)')),
+      m(replaceInFunction('platform.day_boundary_acceptance_apply()', 'IF zone IS NOT NULL AND zone <> NEW.time_zone THEN', 'IF false THEN'),
+        smoke('a worst-case acceptance moves the time zone of a storefront that already has one (Р-204)')),
+      // Находка 2: кто бывает доказательством — смоук tests/db/smoke_us_digest.sql
+      m(replaceInFunction('platform.day_boundary_candidates()', 'AND NOT t.demo', ''), smoke('a demo tenant is never evidence of a day boundary (Р-204, Р-151)')),
+      m(replaceInFunction('platform.day_boundary_candidates()', "AND a.auth_status = 'ACTIVE'", ''), smoke('a revoked account is never evidence of a day boundary (Р-204)')),
+      m(replaceInFunction('platform.day_boundary_candidates()', "AND r.status = 'UNKNOWN'", ''),
+        smoke('a storefront whose day boundary does not hold live writes is not a candidate (Р-204)')),
+      // Находка 7: письмо за ту же неделю в прежнем поясе закрывает пересекающийся период [Р-174]
+      m(replaceInFunction('platform.shadow_digest_targets(interval)', 'sd.period_start <> w.from_ts AND sd.period_start < w.to_ts AND sd.period_end > w.from_ts', 'false'),
+        smoke('a digest of the same week in an earlier time zone closes the period (step 69 review, finding 7)')),
+    ],
+  },
+  {
+    row: 'шаг 69 (OQ-249, Р-3)', critical: false,
+    invariant: 'название товара из канала — данные канала: обнаружение не затирает название продавца, удаление по сроку стирает название, не читавшееся 18 месяцев',
+    mutations: [
+      m(replaceInFunction('tenant_data.record_discovered_offers(uuid, uuid, jsonb)', 'AND (p.title IS NULL OR p.title_channel_read_at IS NOT NULL)', ''),
+        smoke('a channel title names a new product and is refreshed; the seller title is never overwritten (OQ-249, Р-3)')),
+      m(replaceInFunction('maintenance.delete_expired_rows(timestamptz, integer)',
+        "UPDATE tenant_data.product SET title = NULL, title_channel_read_at = NULL WHERE title_channel_read_at < p_now - interval '18 months';", ''),
+        smoke('a channel title not read for 18 months is erased by retention (OQ-249, Р-3)')),
     ],
   },
 ];

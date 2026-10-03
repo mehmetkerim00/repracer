@@ -234,6 +234,6 @@ export function productList(world: StandWorld, m: Messages, query?: ListQuery, s
         },
     rows,
     page,
-    gaps: [gap(m, 'PRODUCT_TITLE'), gap(m, 'NEXT_CHECK'), gap(m, 'USER_TIME_ZONE'), ...((catalog ? catalog.pricingHealthIssues : state.pricingHealth.length > 0) ? [gap(m, 'PRICING_HEALTH_ISSUES')] : [])],
+    gaps: [...((catalog ? catalog.pricingHealthIssues : state.pricingHealth.length > 0) ? [gap(m, 'PRICING_HEALTH_ISSUES')] : [])],
   };
 }

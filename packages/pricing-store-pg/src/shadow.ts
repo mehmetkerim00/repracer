@@ -361,6 +361,8 @@ export interface ShadowDigestTarget {
   /** Окно письма — его же период в отметке доставки [Р-174] */
   periodStart: Instant;
   periodEnd: Instant;
+  /** Шаг 69 (K4): пояс продавца — неделя письма считается в нём, и письмо называет его */
+  timeZone: string;
 }
 
 /** Р-174: строка периода с отметкой доставки — «дайджест, живущий только в письме, недоказан» */
@@ -394,7 +396,7 @@ export class PgShadowDigestStore {
       heldQuantityWrites: num(r.held_quantity_writes), wouldSpendBudget: num(r.would_spend_budget),
       wouldSpendUnconfirmed: num(r.would_spend_unconfirmed),
       floorSavings: moneyList(r.floor_savings), floorSavingsHolds: num(r.floor_savings_holds),
-      periodStart: r.period_start as Instant, periodEnd: r.period_end as Instant,
+      periodStart: r.period_start as Instant, periodEnd: r.period_end as Instant, timeZone: String(r.time_zone ?? 'UTC'),
     }));
   }
 

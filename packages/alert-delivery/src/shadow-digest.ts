@@ -91,7 +91,8 @@ export function createShadowDigest(deps: ShadowDigestDeps) {
           log(JSON.stringify({ level: 'WARN', code: 'SHADOW_DIGEST_RETRY', message: 'дайджест за этот период записан, но не доставлен: повтор',
             details: { tenantId: target.tenantId, digestId: record.digestId } }));
         }
-        const message = shadowDigestMessage(target, target.ownerEmail, messagesFor(localeOf(target.locale)));
+        // Шаг 69 (K4): неделя письма и его времена — в поясе продавца
+        const message = shadowDigestMessage(target, target.ownerEmail, messagesFor(localeOf(target.locale), { timeZone: target.timeZone }));
         try {
           const sent = await deps.mail.send(message);
           await deps.store.markDelivered(target.tenantId, record.digestId, {

@@ -27,6 +27,8 @@ export interface PanelDeps {
   mail: MailSender;
   invitationBaseUrl: string;
   invitationTtlHours: number;
+  /** Шаг 69 (K1): язык нового тенанта, когда оператор его не назвал, — язык развёртывания региона */
+  defaultLocale?: 'de' | 'en';
   /** Счётчики процесса: панель считает вызовы так же, как остальные процессы */
   count?: (name: string) => void;
   now?: () => Date;
@@ -192,7 +194,7 @@ export function createPanel(deps: PanelDeps): Server {
     }
     // Где входить — до входа: издатель, клиент и scope страницы. Секретов нет: клиент публичный (PKCE)
     if (req.method === 'GET' && path === '/api/operator/login-config') {
-      json(res, 200, { issuer: deps.oidc.issuer, clientId: deps.oidc.clientId, scope: deps.oidc.scope });
+      json(res, 200, { issuer: deps.oidc.issuer, clientId: deps.oidc.clientId, scope: deps.oidc.scope, defaultLocale: deps.defaultLocale ?? 'de' });
       return;
     }
     if (!path.startsWith('/api/operator/')) {
@@ -218,6 +220,11 @@ export function createPanel(deps: PanelDeps): Server {
         case 'tenants': json(res, 200, { tenants: await read('SELECT * FROM platform.operator_tenants()') }); return;
         case 'snapshot-skips': json(res, 200, { skips: await read('SELECT * FROM platform.operator_snapshot_skips($1)', [limit]) }); return;
         case 'actions': json(res, 200, { actions: await read('SELECT * FROM platform.operator_actions_log($1, $2)', [url.searchParams.get('action'), limit]) }); return;
+        // Шаг 69 [Р-204]: витрины с неподтверждённой границей суток, теневые аккаунты-доказательства и уже принятые худшие окна
+        case 'day-boundaries': json(res, 200, {
+          candidates: await read('SELECT * FROM platform.operator_day_boundaries()'),
+          acceptances: await read('SELECT * FROM platform.operator_day_boundary_acceptances($1)', [limit]),
+        }); return;
         default: json(res, 404, { code: 'NOT_FOUND' }); return;
       }
     }
@@ -234,7 +241,7 @@ export function createPanel(deps: PanelDeps): Server {
       const region = str(body, 'region');
       const ownerEmail = str(body, 'ownerEmail').toLowerCase();
       // Язык, на котором продавец читает письма и экраны [Р-161]: список проверяет база, панель его не повторяет [Р-104]
-      const locale = typeof body.locale === 'string' && body.locale.trim() !== '' ? body.locale.trim() : 'de';
+      const locale = typeof body.locale === 'string' && body.locale.trim() !== '' ? body.locale.trim() : deps.defaultLocale ?? 'de';
       const tenantId = randomUUID();
       const ownerUserId = randomUUID();
       await act(who, async (query) => {
@@ -299,6 +306,25 @@ export function createPanel(deps: PanelDeps): Server {
       });
       count('alert_acknowledged');
       json(res, 200, { acknowledged: ack[1] });
+      return;
+    }
+
+    // ---- Действие 5: граница суток витрины принята худшим окном [Р-204, расширение Р-166]
+    if (rest === 'day-boundaries/accept') {
+      const channel = str(body, 'channel');
+      const marketplace = str(body, 'marketplace');
+      const timeZone = str(body, 'timeZone');
+      const tenantId = str(body, 'tenantId');
+      const channelAccountId = str(body, 'channelAccountId');
+      const note = str(body, 'note');
+      // Доказательство (сутки тени, решения, худшее окно) оператор не вводит — его считает база в той же транзакции
+      const acceptanceId = await act<string>(who, async (query) => {
+        const { rows } = await query('SELECT security.operator_accept_day_boundary($1, $2, $3, $4, $5, $6, $7) AS id',
+          [who.operatorId, channel, marketplace, timeZone, tenantId, channelAccountId, note]);
+        return (rows[0] as { id: string }).id;
+      });
+      count('day_boundary_accepted');
+      json(res, 201, { acceptanceId, channel, marketplace, timeZone });
       return;
     }
 

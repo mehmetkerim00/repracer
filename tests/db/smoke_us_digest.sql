@@ -184,7 +184,7 @@ SELECT set_config('app.tenant_id', :tA, false) \gset
 
 SELECT pg_temp.ok('the delivery role records a digest of a period (Р-174)', format($q$
   INSERT INTO tenant_data.shadow_digest (tenant_id, period_start, period_end, decisions, changes, held_writes, floor_held, floor_savings)
-  VALUES (%L, now() - interval '7 days', now(), 1200, 34, 48, 12, '[{"currency": "EUR", "minor": 4500}]'::jsonb) $q$, :tA));
+  VALUES (%L, now() - interval '35 days', now() - interval '28 days', 1200, 34, 48, 12, '[{"currency": "EUR", "minor": 4500}]'::jsonb) $q$, :tA));
 
 -- Одно письмо на период: второе отклоняет БАЗА, а не осторожность процесса
 SELECT pg_temp.expect_fail('a second digest for the same period (Р-174)', format($q$
@@ -278,3 +278,67 @@ SELECT pg_temp.ok('the weekly shadow digest skips a demo tenant (step 64 review,
     END IF;
   END $i$ $q$);
 RESET ROLE;
+
+-- ---------------------------------------------------------------- шаг 69 (ревью, находка 7): смена пояса не даёт второго письма за ту же неделю
+/**
+ * Неделя письма — в поясе тенанта (K4), а пояс может смениться. Письмо, уже собранное за неделю с ДРУГИМ началом, закрывает
+ * пересекающийся период [Р-174]. Проверка — в транзакции, которая откатывается: письмо за «ту же неделю в старом поясе» не остаётся
+ */
+BEGIN;
+SET LOCAL ROLE repracer_alert_delivery;
+SELECT set_config('app.tenant_id', :tA, true) \gset
+INSERT INTO tenant_data.shadow_digest (tenant_id, period_start, period_end, decisions, changes, held_writes, floor_held)
+SELECT :tA, t.period_start - interval '5 hours', t.period_end - interval '5 hours', 1, 1, 1, 1
+  FROM platform.shadow_digest_targets() t WHERE t.tenant_id = :tA;
+SELECT pg_temp.ok('a digest of the same week in an earlier time zone closes the period (step 69 review, finding 7)', $q$
+  DO $i$
+  BEGIN
+    IF EXISTS (SELECT 1 FROM platform.shadow_digest_targets() WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a') THEN
+      RAISE EXCEPTION 'a second weekly digest for an overlapping period';
+    END IF;
+  END $i$ $q$);
+ROLLBACK;
+
+-- ---------------------------------------------------------------- шаг 69 (ревью, находка 2): кто бывает доказательством границы суток [Р-204]
+/**
+ * Кандидат процедуры — теневой аккаунт клиентского тенанта с действующей авторизацией на витрине, у которой граница суток держит бой.
+ * Демо не бывает доказательством [Р-151], отозванный аккаунт — тоже, а витрина с известной границей кандидатом не бывает вовсе.
+ * Аккаунты-образцы заводятся суперпользователем без стражей (это мир проверки, а не путь продавца) и откатываются
+ */
+BEGIN;
+SET LOCAL session_replication_role = replica;
+INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, region, external_account_id, marketplaces, credentials_ref, connected_by_membership_id)
+VALUES ('d0000000-0000-0000-0000-00000000000d', 'd4420000-0000-4000-8000-000000000001', 'AMAZON', 'NA', 'seller-demo-us', ARRAY['ATVPDKIKX0DER'], 'vault://d/us',
+        'd2000000-0000-0000-0000-00000000000d');
+INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, region, external_account_id, marketplaces, credentials_ref, connected_by_membership_id, auth_status)
+VALUES (:tA, 'a4420000-0000-4000-8000-000000000009', 'AMAZON', 'NA', 'seller-us-revoked', ARRAY['ATVPDKIKX0DER'], 'vault://a/us9', :ownerM, 'REVOKED');
+SET LOCAL session_replication_role = origin;
+SELECT pg_temp.ok('a customer shadow account on a storefront with an unknown day boundary is a candidate (Р-204)', $q$
+  DO $i$
+  BEGIN
+    IF NOT EXISTS (SELECT 1 FROM platform.day_boundary_candidates() WHERE channel_account_id = 'a4420000-0000-4000-8000-000000000001') THEN
+      RAISE EXCEPTION 'the shadow account of a customer on amazon.com is not a candidate';
+    END IF;
+  END $i$ $q$);
+SELECT pg_temp.ok('a demo tenant is never evidence of a day boundary (Р-204, Р-151)', $q$
+  DO $i$
+  BEGIN
+    IF EXISTS (SELECT 1 FROM platform.day_boundary_candidates() WHERE tenant_id = 'd0000000-0000-0000-0000-00000000000d') THEN
+      RAISE EXCEPTION 'synthetic demo data is a candidate for a day boundary acceptance';
+    END IF;
+  END $i$ $q$);
+SELECT pg_temp.ok('a revoked account is never evidence of a day boundary (Р-204)', $q$
+  DO $i$
+  BEGIN
+    IF EXISTS (SELECT 1 FROM platform.day_boundary_candidates() WHERE channel_account_id = 'a4420000-0000-4000-8000-000000000009') THEN
+      RAISE EXCEPTION 'a revoked account is a candidate for a day boundary acceptance';
+    END IF;
+  END $i$ $q$);
+SELECT pg_temp.ok('a storefront whose day boundary does not hold live writes is not a candidate (Р-204)', $q$
+  DO $i$
+  BEGIN
+    IF EXISTS (SELECT 1 FROM platform.day_boundary_candidates() WHERE marketplace = 'de') THEN
+      RAISE EXCEPTION 'kaufland.de (day boundary conservative) is a candidate for a day boundary acceptance';
+    END IF;
+  END $i$ $q$);
+ROLLBACK;

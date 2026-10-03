@@ -255,7 +255,7 @@ export function stopView(world: StandWorld, audit: readonly ConsoleAuditRow[], m
       note: a.note,
     })),
     notStopped: m.ui.stop.notStopped,
-    gaps: [gap(m, 'MFA_AT_PROVIDER'), ...(world.state.distrusts.length > 0 ? [gap(m, 'DISTRUST_DETAILS')] : [])],
+    gaps: world.state.distrusts.length > 0 ? [gap(m, 'DISTRUST_DETAILS')] : [],
   };
 }
 

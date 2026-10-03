@@ -10,6 +10,7 @@ import { startKauflandHttpModel, type KauflandHttpModel } from '../../../tests/c
 import { SimulatedKauflandChannel } from '../../../tests/contract/src/simulator/kaufland-channel.ts';
 import { loadConfig } from '../src/config.ts';
 import { startScheduler, type SchedulerProcess } from '../src/main.ts';
+import { freePort } from './free-port.ts';
 
 /**
  * Шаг 58 (ревью шага 56, находка 15): живой прогон ПРОИЗВОДСТВЕННОГО состава работы `order-lines`. До этого шага её проверяли только
@@ -125,7 +126,7 @@ test('шаг 58: производственный процесс планиро�
     REPRACER_CH_VERIFIER_USER: 'syn-verifier', REPRACER_CH_VERIFIER_PASSWORD: 'syn-verifier',
     REPRACER_CHANNEL_SECRETS_DIR: secretsDir, REPRACER_KAUFLAND_BASE_URL: model.baseUrl, REPRACER_KAUFLAND_FALLBACK_EMAIL: 'ops@example.invalid',
     REPRACER_AMAZON_APPLICATION_CREDENTIALS_REF: 'secret-ref:amazon-application', REPRACER_SCHEDULER_HEARTBEAT: 'off', REPRACER_SCHEDULER_MAIL: 'off',
-    REPRACER_SCHEDULER_METRICS_PORT: String(20_000 + Math.floor(Math.random() * 20_000)), REPRACER_SCHEDULER_TICK_MS: '1000',
+    REPRACER_SCHEDULER_METRICS_PORT: String(await freePort()), REPRACER_SCHEDULER_TICK_MS: '1000',
   });
   const startedAt = Date.now();
   proc = await startScheduler(config, () => undefined);

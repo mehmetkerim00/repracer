@@ -19,6 +19,22 @@ export function decimalToMinor(value: unknown): number | null {
   return Number.isSafeInteger(minor) ? minor : null;
 }
 
+/** Шаг 69 (OQ-249): предел длины названия товара из канала — столбец без предела, но название не должно быть книгой */
+export const OFFER_TITLE_MAX = 200;
+
+/**
+ * Шаг 69 (OQ-249): название товара из ответа канала. Пробелы и управляющие символы схлопываются в один пробел (NUL PostgreSQL в text не
+ * примет), края обрезаются, длина — не больше OFFER_TITLE_MAX символов (по кодовым точкам: суррогатная пара не режется пополам).
+ * Не строка или пусто — undefined: канал названия не отдал
+ */
+export function offerTitle(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const flat = raw.replace(/[\s\u0000-\u001f\u007f]+/g, ' ').trim();
+  if (flat.length === 0) return undefined;
+  const points = Array.from(flat);
+  return points.length <= OFFER_TITLE_MAX ? flat : points.slice(0, OFFER_TITLE_MAX).join('').trimEnd();
+}
+
 /** Целые центы → число JSON без потери точности (сериализация 17.75, а не 17.749999) */
 export function minorToDecimal(minor: number): number {
   return Number(`${Math.trunc(minor / 100)}.${String(Math.abs(minor % 100)).padStart(2, '0')}`);

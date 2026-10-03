@@ -30,6 +30,8 @@ export interface ConsoleConfig {
   demoUs: boolean;
   /** Шаг 68 (K7): сколько суток тени США прожать при посеве демо (`REPRACER_CONSOLE_DEMO_PRESS_DAYS`, 0…7; 0 — считать с запуска) */
   demoPressDays: number;
+  /** Шаг 69 (K4): пояс показа демо-тенанта (`REPRACER_CONSOLE_DEMO_TIME_ZONE`, IANA); без него — пояс первой витрины демо */
+  demoTimeZone: string | null;
   /** Каждые сколько часов демо-мир пересеивается заново (Р-160): демо, в котором продавец что-то «сломал», показывать нельзя */
   demoReseedHours: number;
   /**
@@ -154,6 +156,7 @@ export function loadConsoleConfig(env: Env = process.env, read: (path: string) =
     publicDemo,
     demoUs: env.REPRACER_CONSOLE_DEMO_US === 'on',
     demoPressDays: intFromEnv(env, 'REPRACER_CONSOLE_DEMO_PRESS_DAYS', 0, 0, 7),
+    demoTimeZone: demoTimeZoneOf(env.REPRACER_CONSOLE_DEMO_TIME_ZONE),
     // Сутки по умолчанию: демо переживает рабочий день целиком, а следы вчерашних гостей не копятся
     demoReseedHours: intFromEnv(env, 'REPRACER_CONSOLE_DEMO_RESEED_HOURS', 24, 1, 24 * 30),
     guestKeyPem,
@@ -166,4 +169,11 @@ export function loadConsoleConfig(env: Env = process.env, read: (path: string) =
       trustProxy: env.REPRACER_CONSOLE_TRUST_PROXY === 'on',
     },
   };
+}
+
+/** Шаг 69 (K4): пояс показа демо — имя IANA или пусто; неверное имя — отказ старта, а не тихий UTC (известность пояса проверит база) */
+function demoTimeZoneOf(raw: string | undefined): string | null {
+  if (raw === undefined || raw.trim() === '') return null;
+  if (!/^(UTC|[A-Z][A-Za-z_]+(\/[A-Za-z0-9_+-]+){1,2})$/.test(raw.trim())) throw new ConfigError(`REPRACER_CONSOLE_DEMO_TIME_ZONE must be an IANA time zone, got ${raw}`);
+  return raw.trim();
 }

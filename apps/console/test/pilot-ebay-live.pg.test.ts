@@ -361,7 +361,8 @@ test('шаг 47, D: путь пилота с eBay — от оператора в
   assert.ok(account.offers >= MANAGED, `тень нашла листинги: ${account.offers} — ${account.progressText}`);
   // Шаг 48 (находка 9 ревью шага 47, находка 4 ревью шага 48): «нашли N» называет и то, что вести нельзя — аукцион и немигрированный
   assert.deepEqual([account.offers, account.unmanagedOffers], [MANAGED + 2, 2], `число найденных и неуправляемых: ${account.progressText}`);
-  assert.match(account.progressText ?? '', new RegExp(`Found ${MANAGED + 2} offers\\..* we can write to ${MANAGED}; 2 are not open for our writes`), 'экран говорит оба числа');
+  // Шаг 69 (K1): тенант пилота немецкий — экраны его мира говорят по-немецки, хотя кука браузера английская
+  assert.match(account.progressText ?? '', new RegExp(`${MANAGED + 2} Angebote gefunden\\..* Davon können wir ${MANAGED} ändern; 2 sind für unsere Änderungen nicht offen`), 'экран говорит оба числа');
   const { rows: catalog } = await observer.query<{ status: string; migration: string; format: string; n: number; scopes: number }>(
     `SELECT m.status, m.ebay_migration_status AS migration, m.ebay_listing_format AS format, count(*)::int AS n, count(m.price_write_scope_id)::int AS scopes
        FROM tenant_data.offer_mapping m WHERE m.tenant_id = $1 GROUP BY 1, 2, 3 ORDER BY 1`, [ids.tenantId]);
@@ -378,9 +379,12 @@ test('шаг 47, D: путь пилота с eBay — от оператора в
   const plan = await consoleCall<CostImportView>('себестоимость: предпросмотр', 'POST', api('cost-import', 'plan'), file);
   assert.equal(plan.body.summary?.apply, MANAGED, `сопоставлены все листинги под Inventory API: ${JSON.stringify(plan.body).slice(0, 300)}`);
   await job('себестоимость: применить', api('cost-import', 'apply'), { ...file, fingerprint: plan.body.fingerprint, confirmed: true });
-  const products = await consoleCall<{ rows: Array<{ unit: { writeScopeId: string } | null }> }>('товары', 'GET', `${api('products')}?limit=200`);
+  const products = await consoleCall<{ rows: Array<{ unit: { writeScopeId: string; label: string } | null }> }>('товары', 'GET', `${api('products')}?limit=200`);
   const scopes = products.body.rows.flatMap((r) => (r.unit ? [r.unit.writeScopeId] : []));
   assert.equal(scopes.length, MANAGED, 'единицы записи цены — только у листингов под Inventory API');
+  // OQ-249 (шаг 69): листинги под Inventory API названы `product.title` товара инвентаря; у старых листингов (Trading) названия нет — SKU
+  const labels = products.body.rows.flatMap((r) => (r.unit ? [r.unit.label] : []));
+  assert.ok(labels.every((l) => /^Synthetic product \S+ · ebay\.\w+$/.test(l)), `подписи — названия из eBay: ${labels.slice(0, 2).join('; ')}`);
   const boundsPlan = await job('границы: экран различий', api('bounds', 'plan'), { request: { writeScopeIds: scopes, min: { kind: 'SET', minor: 1000 }, max: { kind: 'SET', minor: 5000 } } });
   const diff = (boundsPlan.result as { view: BoundsDiffView }).view;
   await job('границы: применить', api('bounds', 'apply'), { planJobId: boundsPlan.jobId, planToken: diff.planToken, confirmed: true });
@@ -430,9 +434,9 @@ test('шаг 47, D: путь пилота с eBay — от оператора в
   assert.equal(shadowScreen.status, 200);
   assert.ok(shadowScreen.body.summary.wouldSpendBudget > 0, 'тень посчитала, сколько записей потратили бы бюджет правок');
   assert.equal(shadowScreen.body.summary.wouldSpendUnconfirmed, shadowScreen.body.summary.wouldSpendBudget, 'все они — на витрине без подтверждённой границы');
-  assert.ok(shadowScreen.body.summaryLines.some((l) => /about \d+ would have used the external edit budget .*approximate: the day boundary of the storefront is not confirmed/.test(l)),
+  assert.ok(shadowScreen.body.summaryLines.some((l) => /Davon hätten etwa \d+ das externe Änderungsbudget des Kanals verbraucht — ungefähr: die Tagesgrenze der Storefront ist nicht bestätigt/.test(l)),
     `строка сводки помечена приблизительной: ${JSON.stringify(shadowScreen.body.summaryLines)}`);
-  const boundary = shadowScreen.body.properties.find((p) => p.marketplace === 'EBAY_DE' && /Day boundary/.test(p.propertyText));
+  const boundary = shadowScreen.body.properties.find((p) => p.marketplace === 'EBAY_DE' && /Tagesgrenze/.test(p.propertyText));
   assert.ok(boundary?.blocksLive && boundary.question === 'OQ-112', `граница суток EBAY_DE держит бой и названа вопросом: ${JSON.stringify(boundary)}`);
   assert.ok(shadowScreen.body.liveBlockedText !== null, 'экран говорит про закрытый бой ДО нажатия кнопки');
   // Условие 1 Р-188: перевод в бой при неподтверждённой границе — 409, и аккаунт остаётся в тени
@@ -440,7 +444,8 @@ test('шаг 47, D: путь пилота с eBay — от оператора в
     { channelAccountId: ids.accountId, toMode: 'LIVE', typedConfirmation: SELLER });
   assert.equal(live.status, 409, `бой на витрине с неподтверждённой границей суток: ${JSON.stringify(live.body)}`);
   assert.equal(live.body.error.code, 'PROPERTY_UNKNOWN');
-  assert.match(live.body.error.message, /day boundary/i, 'отказ называет свойство витрины');
+  // Шаг 69: отказ — языком тенанта (K1) и с обещанием процесса Р-204: неделя тени, затем проверка командой платформы
+  assert.match(live.body.error.message, /Tagesgrenze.*In der Regel ist das innerhalb einer Woche Schattenmodus geklärt/, 'отказ называет свойство витрины и процесс');
   const { rows: [still] } = await observer.query(`SELECT write_mode FROM tenant_data.channel_account WHERE channel_account_id = $1`, [ids.accountId]);
   assert.equal(still.write_mode, 'SHADOW', 'аккаунт остался в тени');
   const { rows: [t] } = await observer.query(`SELECT count(*)::int AS n FROM channel_data.price_decision WHERE tenant_id = $1 AND trigger_type = 'SCHEDULE'`, [ids.tenantId]);

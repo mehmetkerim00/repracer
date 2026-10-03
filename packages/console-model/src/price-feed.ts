@@ -133,6 +133,6 @@ export function priceFeed(world: StandWorld, m: Messages, filter: FeedQuery, pag
     // Р-136: фильтр по офферу показывает первые N — на каталоге целевого клиента список фильтра сам весил мегабайты
     offers: catalogFirst(world, OFFER_CHOICES).map((s) => unitOf(world, s, m)),
     offersTotal: catalogTotal(world),
-    gaps: [gap(m, 'FEED_WINDOW'), gap(m, 'PRICE_HISTORY_NOT_READ')],
+    gaps: [gap(m, 'FEED_WINDOW')],
   };
 }

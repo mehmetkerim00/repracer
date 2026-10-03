@@ -163,7 +163,8 @@ test('Р-172: у amazon.com не известна граница суток — 
   assert.equal(unknown.length, 1, `ровно одно свойство неизвестно: ${JSON.stringify(unknown.map((p) => p.propertyText))}`);
   assert.match(unknown[0]!.propertyText, /Day boundary/, 'неизвестна граница суток');
   assert.equal(unknown[0]!.question, 'A-03', 'вопрос назван кодом');
-  assert.match(unknown[0]!.closesByText, /shadow closes it/, 'закрывает его ТЕНЬ: чтение канала без записи');
+  // Шаг 69 [Р-204]: граница суток закрывается неделей тени и проверкой команды платформы худшим окном — экран называет процесс
+  assert.match(unknown[0]!.closesByText, /usually settled within a week of shadow mode/, 'закрывает его неделя тени и проверка команды платформы');
   assert.ok(screen.body.liveBlockedText !== null, 'экран говорит про закрытый бой ДО нажатия кнопки');
 
   // Включение боя владельцем со вторым фактором и верным подтверждением — отказ по свойству витрины

@@ -229,8 +229,9 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     const jar = cookies(req.cookie);
     const requested = url.searchParams.get('locale');
     const locale: Locale = isLocale(requested) ? requested : isLocale(jar[LOCALE_COOKIE]) ? jar[LOCALE_COOKIE] : services.defaultLocale ?? 'de';
-    const m = messagesFor(locale);
-    const s = m.ui.server;
+    // Шаг 69 (K1, K4): в мире тенанта сообщения пересобираются на его языке и в его поясе (ниже, когда мир найден)
+    let m = messagesFor(locale);
+    let s = m.ui.server;
     const ok = (body: unknown, setCookies?: string[]): ApiResponse => ({ status: 200, body, ...(setCookies ? { setCookies } : {}) });
     const fail = (status: number, code: string, message: string): ApiResponse => ({ status, body: { error: { code, message } } });
     const body = (req.body ?? {}) as Record<string, unknown>;
@@ -430,12 +431,13 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         return [{
           id: e.id, title: e.title, description: '', failures: [], scopes: c.scopes, decisionsLastDay: c.decisionsLastDay,
           interventionsLastWeek: c.interventionsLastWeek, activeStops: c.activeStops, activeHalts: c.activeHalts, role: m.values[membership.role],
-          demo: c.demo, awaitingAccess: c.awaitingAccess, euStorefronts: c.euStorefronts,
+          demo: c.demo, awaitingAccess: c.awaitingAccess, euStorefronts: c.euStorefronts, locale: c.locale, timeZone: c.timeZone,
         }];
       });
       // Р-154: список миров — счётчики агрегатом, без чтения состояния ни одного мира
       return ok([...await Promise.all(visible.map(async ({ live, viewer }): Promise<WorldSummary> => {
-        const [c, accounts] = await Promise.all([live.store.worldCounters(live.tenantId, live.clock.iso() as never), live.store.channelAccounts(live.tenantId)]);
+        const [c, accounts, display] = await Promise.all([live.store.worldCounters(live.tenantId, live.clock.iso() as never), live.store.channelAccounts(live.tenantId),
+          live.display ? live.display() : Promise.resolve(null)]);
         return {
           // Шаг 64: демо-мир назван на языке интерфейса — клиент из США видел описание посева по-немецки
           id: live.id, title: c.demo ? m.ui.app.demoWorldTitle : live.title, description: c.demo ? m.ui.app.demoWorldDescription : live.description,
@@ -445,6 +447,8 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           demo: c.demo,
           awaitingAccess: accounts.filter((a) => a.authStatus === 'AWAITING_ACCESS').length,
           euStorefronts: c.euStorefronts,
+          // Ревью шага 69, находка 5: язык демо — язык гостя, поэтому список его не называет; пояс — называет
+          locale: display && !display.followsRequestLocale ? display.locale : null, timeZone: display?.timeZone ?? null,
         };
       })), ...tenantRows]);
     }
@@ -453,11 +457,45 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     const viewer = live ? viewerIn(live) : null;
     if (!live || !viewer) return fail(404, 'WORLD_NOT_FOUND', s.notFound);
     /**
+     * Шаг 69 (K1, K4): мир тенанта говорит на языке ТЕНАНТА, а время показывает в его поясе — агентство с тенантами DE и US видит
+     * каждый на его языке. Язык запроса (кука, развёртывание) остаётся у экранов вне мира и у миров сценариев стенда
+     */
+    const display = live.display ? await live.display() : null;
+    if (display) {
+      // Ревью шага 69, находка 5: у публичного демо язык — гостя (запроса), пояс — демо
+      m = messagesFor(display.followsRequestLocale ? m.locale : display.locale, { timeZone: display.timeZone });
+      s = m.ui.server;
+    }
+    /**
      * Р-149: экран пути читает ТОЛЬКО то, что показывает, — счётчики шагов, аккаунты, сужение и признак демо, — и не ждёт
      * состояния консоли целиком (`live.view` читает все решения тенанта, OQ-214). На раннере CI первый запрос экрана пути
      * демо-тенанта занял 10,98 с при пределе 10: остальные восемь — 0,04–0,09 с. Экран, у которого шесть чисел, не должен
      * зависеть от размера ленты решений.
      */
+    /**
+     * Шаг 69 (K1, K4): язык и пояс показа тенанта. Читает любой участник, меняет администратор тенанта (MANAGE_TENANT) —
+     * административной записью с автором и аудитом. У мира сценария стенда настроек нет — 404
+     */
+    if (parts[3] === 'settings' && parts[4] === undefined) {
+      const store = live.store as unknown as { setTenantDisplay?: (t: string, c: { locale?: Locale; timeZone?: string | null }, a: { userId: string; mfa: boolean }) => Promise<{ status: string }> };
+      if (!display || !store.setTenantDisplay) return fail(404, 'NOT_FOUND', s.notFound);
+      // Ревью шага 69, находка 13: экран различает «пояс задан» и «пояс по умолчанию» — иначе правка языка делала умолчание явным
+      const view = (d: { locale: Locale; timeZone: string; timeZoneSet?: boolean }) =>
+        ({ locale: d.locale, timeZone: d.timeZone, timeZoneSet: d.timeZoneSet ?? true, canChange: can(viewer.role, 'MANAGE_TENANT') });
+      if (req.method === 'GET') return ok(view(display));
+      if (req.method !== 'POST') return fail(405, 'METHOD_NOT_ALLOWED', s.notFound);
+      if (!can(viewer.role, 'MANAGE_TENANT')) return fail(403, 'FORBIDDEN', s.forbidden);
+      const nextLocale = body.locale === undefined ? undefined : isLocale(body.locale) ? body.locale : null;
+      const nextZone = body.timeZone === undefined ? undefined : body.timeZone === null || body.timeZone === '' ? null
+        : typeof body.timeZone === 'string' && body.timeZone.length <= 64 ? body.timeZone.trim() : false;
+      if (nextLocale === null || nextZone === false) return fail(400, 'BAD_SETTINGS', m.ui.settings.invalid);
+      const saved = await store.setTenantDisplay(live.tenantId, { ...(nextLocale ? { locale: nextLocale } : {}), ...(nextZone !== undefined ? { timeZone: nextZone } : {}) },
+        { userId: principal!.userId, mfa: hasSecondFactor(principal!.amr) });
+      if (saved.status === 'TIME_ZONE_UNKNOWN') return fail(400, 'TIME_ZONE_UNKNOWN', m.ui.settings.timeZoneUnknown);
+      if (saved.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
+      if (saved.status !== 'SAVED') return fail(400, 'BAD_SETTINGS', m.ui.settings.invalid);
+      return ok(view(await live.display!()));
+    }
     if (req.method === 'GET' && parts[3] === 'onboarding' && parts[4] === undefined) {
       const [progress, status, accounts, demo] = await Promise.all([
         live.store.onboardingProgress(live.tenantId), live.store.onboardingStatus(live.tenantId), live.store.channelAccounts(live.tenantId),
@@ -651,11 +689,16 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           if (param !== null) return fail(404, 'NOT_FOUND', s.notFound);
           const query = parseListQuery(url.searchParams);
           if (!query) return fail(400, 'BAD_PAGE', s.badRequest);
+          // Шаг 69 (K8): поиск по названию или SKU и фильтр «с резервациями»; неверный параметр — отказ, а не молчаливое «всё»
+          const search = (url.searchParams.get('q') ?? '').trim();
+          const reservedParam = url.searchParams.get('reserved');
+          if (search.length > 100 || (reservedParam !== null && reservedParam !== '1')) return fail(400, 'BAD_PAGE', s.badRequest);
+          const filter = { search: search === '' ? null : search, withReservations: reservedParam === '1' };
           // Смещение за концом подтягивается ДО выборки — иначе подпись «151–200 из 200» стоит над пустой таблицей
-          const probe = await live.stock.stockPage(world.tenantId, { offset: 0, limit: 1 });
+          const probe = await live.stock.stockPage(world.tenantId, { offset: 0, limit: 1, ...filter });
           const clamped = { ...query, offset: clampOffset(query, probe.total) };
-          const [page, sources] = await Promise.all([live.stock.stockPage(world.tenantId, clamped), live.stock.stockSources(world.tenantId)]);
-          return ok(stockView(world, page, clamped, sources, m));
+          const [page, sources] = await Promise.all([live.stock.stockPage(world.tenantId, { ...clamped, ...filter }), live.stock.stockSources(world.tenantId)]);
+          return ok(stockView(world, page, clamped, sources, m, filter));
         }
         case 'products': {
           const query = parseListQuery(url.searchParams);
@@ -851,8 +894,13 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
      * задание. Второй фактор предъявляется здесь, человеком; фоновый процесс предъявит базе само задание.
      */
     const createJob = async (kind: BulkJobInput['kind'], params: Record<string, unknown>, totalItems: number | null, message: string): Promise<ApiResponse> => {
-      // Язык — тот, на котором человек создал задание [Р-72]: тексты его итога пишет процесс, у которого запроса уже нет
-      const created = await live.store.createBulkJob(world.tenantId, { kind, params: { ...params, locale }, ...(totalItems === null ? {} : { totalItems }) },
+      /**
+       * Язык — тот, на котором говорит мир задания [Р-72]: тексты его итога пишет процесс, у которого запроса уже нет. Ревью шага 69,
+       * находка 8: у мира тенанта это язык тенанта (K1), и пояс тоже его (K4) — итог задания и файлы не должны говорить языком куки и UTC
+       */
+      const created = await live.store.createBulkJob(world.tenantId, {
+        kind, params: { ...params, locale: m.locale, ...(display ? { timeZone: display.timeZone } : {}) }, ...(totalItems === null ? {} : { totalItems }),
+      },
         { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) });
       if (created.status === 'MFA_REQUIRED') return fail(403, 'MFA_REQUIRED', kind === 'COST_IMPORT' ? m.ui.costImport.mfa : s.mfaRequiredBounds);
       if (created.status === 'QUEUE_FULL') return fail(409, 'QUEUE_FULL', m.ui.jobs.queueFull);
@@ -1729,6 +1777,9 @@ async function main(): Promise<void> {
         usAccounts: process.env.REPRACER_DEMO_US === 'on',
         // Шаг 68 (K7): `REPRACER_DEMO_PRESS_DAYS=7` — неделя тени США прожата при подъёме: недельный отчёт показуем сразу (0…7)
         usPressDays: process.env.REPRACER_DEMO_US === 'on' ? pressDaysOf(process.env.REPRACER_DEMO_PRESS_DAYS) : 0,
+        // Шаг 69 (K1, K4): язык и пояс демо-тенанта (команда подготовки демо для клиента из США ставит en и его пояс)
+        ...(process.env.REPRACER_DEMO_LOCALE === 'en' || process.env.REPRACER_DEMO_LOCALE === 'de' ? { locale: process.env.REPRACER_DEMO_LOCALE } : {}),
+        ...(process.env.REPRACER_DEMO_TIME_ZONE ? { timeZone: process.env.REPRACER_DEMO_TIME_ZONE } : {}),
         // Шаг 64: `REPRACER_DEMO_SHADOW=on` — демо в тени [Р-169]: сценарий показа «система физически не может трогать цены»
         ...(process.env.REPRACER_DEMO_SHADOW === 'on' ? { writeMode: 'SHADOW' as const } : {}),
       });

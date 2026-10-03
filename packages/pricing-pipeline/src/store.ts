@@ -1239,6 +1239,8 @@ export interface DiscoveredCatalogOffer {
   externalListingId?: string | null;
   listingFormat?: 'FIXED_PRICE' | 'AUCTION' | null;
   writable?: boolean | null;
+  /** Шаг 69 (OQ-249): название товара из канала — пишется в товар, только если у товара названия ещё нет */
+  title?: string | null;
 }
 
 /** Шаг 55: чем кончился заход обхода — круг закрыт, срок вызова, квота приложения, предел страниц захода */

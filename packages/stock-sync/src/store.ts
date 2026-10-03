@@ -163,6 +163,8 @@ export interface StockChannelRow {
 export interface StockRow {
   productId: string;
   sku: string;
+  /** Шаг 69 (K8, OQ-249): название товара, если известно (из канала при обнаружении или от продавца) — подпись строки вместо голого SKU */
+  title?: string | null;
   gtin: string | null;
   onHand: number;
   reserved: number;
@@ -187,8 +189,21 @@ export interface StockSummary {
 
 export interface StockPage {
   items: StockRow[];
+  /** Сколько товаров подходит под запрос (поиск и фильтр); без них — весь каталог */
   total: number;
+  /** Сводка — по всему каталогу, без поиска и фильтра */
   summary: StockSummary;
+}
+
+/**
+ * Шаг 69 (K8): страница экрана остатков. `search` — часть названия или SKU (без учёта регистра), `withReservations` — только товары с
+ * открытыми резервациями (то же правило «зарезервировано», что у счёта доступного)
+ */
+export interface StockPageQuery {
+  offset: number;
+  limit: number;
+  search?: string | null;
+  withReservations?: boolean;
 }
 
 export interface StockDivergenceRow {
@@ -251,7 +266,7 @@ export interface StockStore {
   recordOrderLines(tenantId: string, channelAccountId: string, lines: readonly OrderLine[], now: Instant): Promise<OrderLinesOutcome>;
   /** Шаг 52: товары аккаунта, чья последняя запись количества упёрлась в бюджет правок прошлого дня витрины — пересчитать после смены суток */
   budgetRolledOverProducts?(tenantId: string, channelAccountId: string): Promise<string[]>;
-  stockPage(tenantId: string, query: { offset: number; limit: number }): Promise<StockPage>;
+  stockPage(tenantId: string, query: StockPageQuery): Promise<StockPage>;
   stockDivergences(tenantId: string, limit: number): Promise<StockDivergenceRow[]>;
 }
 

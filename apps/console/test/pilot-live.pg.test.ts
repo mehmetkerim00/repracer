@@ -296,8 +296,9 @@ test('Р-179: путь пилота целиком — от оператора �
    * Р-183 (шаг 45, OQ-236): оператор входит СО СТРАНИЦЫ ПАНЕЛИ — где входить, панель говорит сама, а модуль входа
    * прогон берёт у панели по `/oidc.js` и исполняет его, как исполнил бы браузер. Второй фактор — в ID-токене [OQ-238].
    */
-  const panelLogin = await http<{ issuer: string; clientId: string; scope: string }>('панель: где входить', panelOrigin, 'GET', '/api/operator/login-config', undefined, '');
-  assert.deepEqual(panelLogin.body, { issuer: provider.issuer, clientId: 'operator-panel', scope: 'openid profile' });
+  const panelLogin = await http<{ issuer: string; clientId: string; scope: string; defaultLocale: string }>('панель: где входить', panelOrigin, 'GET', '/api/operator/login-config', undefined, '');
+  // Шаг 69 (K1): и язык нового тенанта по умолчанию — развёртывания (здесь не задан — немецкий)
+  assert.deepEqual(panelLogin.body, { issuer: provider.issuer, clientId: 'operator-panel', scope: 'openid profile', defaultLocale: 'de' });
   const panelModule = await import(`data:text/javascript,${encodeURIComponent(await (await fetch(`${panelOrigin}/oidc.js`)).text())}`) as LoginModule;
   const operator = await timed('оператор входит у поставщика со страницы панели', () => signIn(panelLogin.body, `${panelOrigin}/auth/callback`, { subject: OPERATOR_SUBJECT, email: 'operator@repracer.invalid', amr: ['pwd', 'otp'] }, panelModule));
   assert.ok(operator.id, 'поставщик выдал ID-токен: второй фактор оператора — только в нём');
@@ -367,7 +368,7 @@ test('Р-179: путь пилота целиком — от оператора �
     confirmQuantityWritesAsOwner((method, url, body) => consoleCall(`подключения ${method}`, method, url, body), api('connections'), ids.accountId));
   // Р-1: остаток Amazon ЕС пишется на весь регион — экран остатков называет это ДО записи, и продавец подтверждает
   const first = await job('остатки: синхронизация без подтверждения региона', api('stock', 'enable'), { channelAccountId: ids.accountId, bufferUnits: 1, maxQuantity: null, minQuantityToList: 0 });
-  assert.match(first.headline, new RegExp(`NOT running yet for ${OFFERS} of ${OFFERS} channel units`), `без подтверждения региона синхронизация ждёт его: ${first.headline}`);
+  assert.match(first.headline, new RegExp(`NOT running yet for ${OFFERS} of ${OFFERS} offers`), `без подтверждения региона синхронизация ждёт его: ${first.headline}`);
   assert.doesNotMatch(first.headline, /Synchronisation enabled/, 'заголовок не говорит «включено», пока единицы ждут подтверждения');
   const waitingSync = (await consoleCall<OnboardingView>('онбординг: синхронизация ждёт подтверждения', 'GET', api('onboarding'))).body;
   assert.equal(waitingSync.resumeAt, 'STOCK_SYNC', 'без подтверждения региона шаг не пройден');
@@ -387,9 +388,11 @@ test('Р-179: путь пилота целиком — от оператора �
   const plan = await consoleCall<CostImportView>('себестоимость: предпросмотр', 'POST', api('cost-import', 'plan'), file);
   assert.equal(plan.body.summary?.apply, OFFERS, `сопоставлены все офферы: ${JSON.stringify(plan.body).slice(0, 300)}`);
   await job('себестоимость: применить', api('cost-import', 'apply'), { ...file, fingerprint: plan.body.fingerprint, confirmed: true });
-  const products = await consoleCall<{ rows: Array<{ unit: { writeScopeId: string } }> }>('товары', 'GET', `${api('products')}?limit=200`);
+  const products = await consoleCall<{ rows: Array<{ unit: { writeScopeId: string; label: string } }> }>('товары', 'GET', `${api('products')}?limit=200`);
   const scopes = products.body.rows.map((r) => r.unit.writeScopeId);
   assert.equal(scopes.length, OFFERS);
+  // OQ-249 (шаг 69): после «Connect» товары названы так, как их назвал канал при обнаружении (`itemName` сводки), а не голым SKU
+  assert.ok(products.body.rows.every((r) => /^Synthetic product \S+ · amazon\.\w+$/.test(r.unit.label)), `подписи товаров — названия из канала: ${products.body.rows.slice(0, 2).map((r) => r.unit.label).join('; ')}`);
   const boundsPlan = await job('границы: экран различий', api('bounds', 'plan'), { request: { writeScopeIds: scopes, min: { kind: 'SET', minor: 1500 }, max: { kind: 'SET', minor: 5000 } } });
   const diff = (boundsPlan.result as { view: BoundsDiffView }).view;
   await job('границы: применить', api('bounds', 'apply'), { planJobId: boundsPlan.jobId, planToken: diff.planToken, confirmed: true });

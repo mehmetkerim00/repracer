@@ -493,7 +493,8 @@ test('шаг 64: путь продавца из США с eBay EBAY_US — от 
   assert.equal(live.body.error.code, 'PROPERTY_UNKNOWN');
   assert.match(live.body.error.message, /day boundary/i, 'отказ называет свойство витрины');
   // Шаг 68 (K2): словами — витрина, что не подтверждено и кто подтверждает; без идентификатора витрины и кода вопроса
-  assert.match(live.body.error.message, /Live writes on ebay\.com stay closed: .*not confirmed yet\. Only the channel can confirm it/, live.body.error.message);
+  // Шаг 69 [Р-204]: граница суток закрывается неделей тени и решением команды платформы — отказ называет этот процесс
+  assert.match(live.body.error.message, /Live writes on ebay\.com stay closed: .*not confirmed yet\. This is usually settled within a week of shadow mode/, live.body.error.message);
   assert.doesNotMatch(live.body.error.message, /EBAY_US|OQ-\d+|\b[AEK]-\d{2}\b|DAY_BOUNDARY/, live.body.error.message);
   const { rows: [still] } = await observer.query(`SELECT write_mode FROM tenant_data.channel_account WHERE channel_account_id = $1`, [ids.accountId]);
   assert.equal(still.write_mode, 'SHADOW', 'аккаунт остался в тени');

@@ -226,7 +226,7 @@ test('Р-152: путь «только остатки» — от выбора п�
   type Failure = { error: { code: string; message: string } };
   const notConfirmed = await step<Failure>('включение до подтверждения записи количества', 'POST', api('stock', 'enable'), enableBody);
   assert.deepEqual([notConfirmed.status, notConfirmed.body.error.code], [409, 'QUANTITY_WRITES_NOT_CONFIRMED'], JSON.stringify(notConfirmed.body));
-  assert.match(notConfirmed.body.error.message, /Kanalverbindungen/, 'отказ отправляет на экран подключений');
+  assert.match(notConfirmed.body.error.message, /Kanalkonten/, 'отказ отправляет на экран подключений');
   const connectionsOf = async (name: string) => {
     const screen = await step<ConnectionsView>(name, 'GET', api('connections'));
     assert.equal(screen.status, 200, JSON.stringify(screen.body).slice(0, 300));
@@ -490,6 +490,24 @@ test('Р-157: склад подтверждает заказ по Inbound API �
   // Продавец видит это на своём экране: 40 в пулах, 3 держит заказ, доступно 37
   const beforeRow = (await step<StockView>('экран остатков с заказом', 'GET', `${api('stock')}?limit=200`)).body.rows.find((r) => r.sku === productSku)!;
   assert.deepEqual([beforeRow.onHand, beforeRow.reserved, beforeRow.available], [40, 3, 37]);
+  // Шаг 69 (K8): фильтр «с резервациями» — ровно этот товар; поиск — по части SKU и по названию, без учёта регистра
+  const reservedOnly = (await step<StockView>('остатки: только с резервациями', 'GET', `${api('stock')}?reserved=1`)).body;
+  assert.deepEqual([reservedOnly.rows.map((r) => r.sku), reservedOnly.page.total], [[productSku], 1], JSON.stringify(reservedOnly.filter));
+  assert.match(reservedOnly.filter.matchedText ?? '', /^1 von \d+ Produkten passen\.$/);
+  const bySkuPart = (await step<StockView>('остатки: поиск по части SKU', 'GET', `${api('stock')}?q=340100001`)).body;
+  assert.deepEqual(bySkuPart.rows.map((r) => r.sku), [productSku]);
+  const titled = beforeRow.label !== beforeRow.sku ? beforeRow.label : null;
+  assert.ok(titled, `строка подписана названием товара, а не SKU: ${beforeRow.label}`);
+  const word = titled.split(/[ ,]+/)[0]!.toUpperCase();
+  const byTitle = (await step<StockView>('остатки: поиск по названию', 'GET', `${api('stock')}?q=${encodeURIComponent(word)}&limit=200`)).body;
+  assert.ok(byTitle.page.total > 0 && byTitle.page.total < byTitle.summary.products, `«${word}»: нашлись не все товары — ${byTitle.page.total} из ${byTitle.summary.products}`);
+  assert.ok(byTitle.rows.every((r) => r.label.toUpperCase().includes(word) || r.sku.toUpperCase().includes(word)), 'каждая найденная строка содержит искомое');
+  const both = (await step<StockView>('остатки: поиск и фильтр вместе', 'GET', `${api('stock')}?q=${encodeURIComponent(word)}&reserved=1`)).body;
+  assert.equal(both.page.total, byTitle.rows.some((r) => r.sku === productSku) ? 1 : 0, 'поиск и фильтр — пересечение');
+  // «%» продавца — буква, а не шаблон «всё»
+  const percent = (await step<StockView>('остатки: поиск «%»', 'GET', `${api('stock')}?q=%25`)).body;
+  assert.deepEqual([percent.page.total, percent.filter.noneText !== null], [0, true]);
+  assert.equal((await step<unknown>('остатки: неверный фильтр', 'GET', `${api('stock')}?reserved=yes`)).status, 400);
 
   // 1. Чужой ключ — 401 и названный код, без подробностей о том, чей заказ существует
   const bad = await call('POST', '/inbound/v1/orders', { orders: [{ externalOrderRef: orderRef }] },

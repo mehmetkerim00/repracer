@@ -21,7 +21,10 @@ function base64Of(bytes: Uint8Array): string {
 export function StockScreen({ worldId }: { worldId: string }) {
   const m = useMessages();
   const [query, setQuery] = useState<ListQuery>({ offset: 0, limit: 50 });
-  const [view, retry] = useResource<StockView>(`${worldPath(worldId, 'stock')}?offset=${query.offset}&limit=${query.limit}`, m.locale);
+  // Шаг 69 (K8): поиск и фильтр — параметры запроса; новая выборка начинается с первой страницы
+  const [filter, setFilter] = useState<{ search: string; withReservations: boolean }>({ search: '', withReservations: false });
+  const filterParams = `${filter.search ? `&q=${encodeURIComponent(filter.search)}` : ''}${filter.withReservations ? '&reserved=1' : ''}`;
+  const [view, retry] = useResource<StockView>(`${worldPath(worldId, 'stock')}?offset=${query.offset}&limit=${query.limit}${filterParams}`, m.locale);
   const [divergences, retryDivergences] = useResource<StockDivergencesView>(worldPath(worldId, 'stock', 'divergences'), m.locale);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -63,7 +66,7 @@ export function StockScreen({ worldId }: { worldId: string }) {
     <Load resource={view} retry={retry}>
       {(v) => (
         <>
-          <StockScreenView view={v} worldId={worldId} query={query} onQuery={setQuery} />
+          <StockScreenView view={v} worldId={worldId} query={query} onQuery={setQuery} onFilter={(f) => { setFilter(f); setQuery({ ...query, offset: 0 }); }} />
           {v.canManage ? (
             <section className="card">
               <h3>{m.ui.stock.sources.title}</h3>
@@ -108,9 +111,14 @@ export function StockScreen({ worldId }: { worldId: string }) {
 }
 
 /** Экран без запросов — то, что отрисовывает тест из ответа сервера */
-export function StockScreenView({ view: v, worldId, query, onQuery }: { view: StockView; worldId: string; query: ListQuery; onQuery: (q: ListQuery) => void }) {
+export function StockScreenView({ view: v, worldId, query, onQuery, onFilter }: {
+  view: StockView; worldId: string; query: ListQuery; onQuery: (q: ListQuery) => void;
+  onFilter?: (f: { search: string; withReservations: boolean }) => void;
+}) {
   const m = useMessages();
   const t = m.ui.stock;
+  const [search, setSearch] = useState(v.filter.search);
+  const [withReservations, setWithReservations] = useState(v.filter.withReservations);
   return (
     <section className="stock">
       <h2>{t.title}</h2>
@@ -120,13 +128,23 @@ export function StockScreenView({ view: v, worldId, query, onQuery }: { view: St
       {v.rows.length > 0 ? <p><strong>{v.summaryText}</strong></p> : null}
       {v.sources.length === 0 ? <p className="notice">{m.ui.onboarding.empty.stock} <a href={href(worldId, 'onboarding')}>{m.ui.onboarding.empty.startHere}</a></p>
         : <ul className="small">{v.sources.map((s) => <li key={s.stockSourceId}>{s.name} — {s.modeText}; {s.productsText}{s.hasKey ? `; ${t.sources.keyPresent}` : ''}</li>)}</ul>}
+      {onFilter && (v.rows.length > 0 || v.filter.matchedText) ? (
+        <form className="filters" onSubmit={(e) => { e.preventDefault(); onFilter({ search: search.trim(), withReservations }); }}>
+          <input type="search" value={search} placeholder={t.filter.search} aria-label={t.filter.search} onChange={(e) => setSearch(e.currentTarget.value)} />
+          <label><input type="checkbox" checked={withReservations} onChange={(e) => { setWithReservations(e.currentTarget.checked); onFilter({ search: search.trim(), withReservations: e.currentTarget.checked }); }} /> {t.filter.withReservations}</label>
+          <button type="submit">{t.filter.apply}</button>
+          {v.filter.matchedText ? <button type="button" onClick={() => { setSearch(''); setWithReservations(false); onFilter({ search: '', withReservations: false }); }}>{t.filter.reset}</button> : null}
+        </form>
+      ) : null}
+      {v.filter.matchedText ? <p className="small muted">{v.filter.matchedText}</p> : null}
+      {v.filter.noneText ? <p className="notice">{v.filter.noneText}</p> : null}
       {v.rows.length > 0 ? (
         <table>
           <thead><tr><th>{t.columns.product}</th><th>{t.columns.onHand}</th><th>{t.columns.reserved}</th><th>{t.columns.available}</th><th>{t.columns.channels}</th></tr></thead>
           <tbody>
             {v.rows.map((r) => (
               <tr key={r.productId}>
-                <td>{r.sku}{r.gtin ? <span className="small muted"> · {r.gtin}</span> : null}</td>
+                <td>{r.label}{r.label !== r.sku ? <span className="small muted"> · {r.sku}</span> : null}{r.gtin ? <span className="small muted"> · {r.gtin}</span> : null}</td>
                 <td>{r.onHand}</td><td>{r.reserved}</td><td>{r.available}</td>
                 <td>
                   {r.channelManaged.length > 0 ? <ul className="small muted">{r.channelManaged.map((text, i) => <li key={i}>{text}</li>)}</ul> : null}
@@ -160,7 +178,7 @@ export function StockDivergences({ view }: { view: StockDivergencesView }) {
     <section className="card">
       <h3>{m.ui.stock.divergences.title}</h3>
       {view.items.length === 0 ? <p className="muted">{view.none}</p> : (
-        <ul className="small">{view.items.map((d) => <li key={d.writeScopeId}><strong>{d.sku}</strong> · {(m.values as Record<string, string | undefined>)[d.channel] ?? d.channel} {d.marketplaces.join(', ')}: {d.text}</li>)}</ul>
+        <ul className="small">{view.items.map((d) => <li key={d.writeScopeId}><strong>{d.sku}</strong> · {(m.values as Record<string, string | undefined>)[d.channel] ?? d.channel} · {d.storefrontsText}: {d.text}</li>)}</ul>
       )}
     </section>
   );

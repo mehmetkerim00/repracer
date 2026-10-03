@@ -5,7 +5,7 @@ import {
   type AnswerOtherToolsResult, type ConfirmOrdersOutcome, type ConfirmQuantityWritesResult, type RevokeQuantityWritesResult, type DecideReturnOutcome, type QuantityWritesState, type OrderReturnRow, type OtherTools,
   availableOf, publishedQuantity, type CreateStockSourceResult, type EnableStockSyncInput, type EnableStockSyncResult, type InboundStockOutcome, type InboundStockRow,
   type OrderLinesOutcome, type RecalculationOutcome, type StockActor, type StockChannelRow, type StockDivergenceRow, type StockImportOutcome, type StockImportRow,
-  type StockPage, type StockRow, type StockSourceMode, type StockSourceRow, type StockStore,
+  type StockPage, type StockPageQuery, type StockRow, type StockSourceMode, type StockSourceRow, type StockStore,
 } from '@repracer/stock-sync';
 import { inTenant, type PgPool, type Tx } from './db.ts';
 
@@ -830,14 +830,28 @@ export class PgStockStore implements StockStore {
     };
   }
 
-  async stockPage(tenantId: string, query: { offset: number; limit: number }): Promise<StockPage> {
+  async stockPage(tenantId: string, query: StockPageQuery): Promise<StockPage> {
     return inTenant(this.options.adminPool, tenantId, async (tx) => {
-      // Страница товаров — по каталогу (единицы записи цены и остатка — предложения), итог и сводка — агрегатом [Р-154]
+      /**
+       * Страница товаров — по каталогу (единицы записи цены и остатка — предложения), итог и сводка — агрегатом [Р-154]. Шаг 69 (K8):
+       * поиск — часть названия или SKU без учёта регистра (`%` и `_` продавца — буквы, а не шаблон), фильтр — товары с открытыми
+       * резервациями по тому же правилу, что у счёта доступного. Индекса под поиск нет намеренно: подстрока по одному тенанту — проход
+       * его товаров (50 000 строк — доли секунды), а btree подстроку не ищет
+       */
+      const search = query.search?.trim() ? query.search.trim().replace(/[\\%_]/g, (c) => `\\${c}`) : null;
+      const matches = `p.tenant_id = $1
+             AND ($2::text IS NULL OR p.sku ILIKE '%' || $2 || '%' OR p.title ILIKE '%' || $2 || '%')
+             AND (NOT $3::boolean OR EXISTS (SELECT 1 FROM channel_data.reservation r WHERE r.tenant_id = p.tenant_id AND r.product_id = p.product_id AND ${PgStockStore.RESERVED_SQL}))`;
+      const filter = [tenantId, search, query.withReservations === true];
       const { rows: products } = await tx.query(
-        `SELECT p.product_id, p.sku, p.gtin,
+        `SELECT p.product_id, p.sku, p.title, p.gtin,
                 coalesce((SELECT sum(sp.on_hand) FROM tenant_data.stock_pool sp WHERE sp.tenant_id = p.tenant_id AND sp.product_id = p.product_id), 0)::int AS on_hand,
                 coalesce((SELECT sum(r.quantity) FROM channel_data.reservation r WHERE r.tenant_id = p.tenant_id AND r.product_id = p.product_id AND ${PgStockStore.RESERVED_SQL}), 0)::int AS reserved
-           FROM tenant_data.product p WHERE p.tenant_id = $1 ORDER BY p.sku, p.product_id LIMIT $2 OFFSET $3`, [tenantId, query.limit, query.offset]);
+           FROM tenant_data.product p WHERE ${matches} ORDER BY p.sku, p.product_id LIMIT $4 OFFSET $5`, [...filter, query.limit, query.offset]);
+      const filtered = search !== null || query.withReservations === true;
+      const { rows: [matched] } = filtered
+        ? await tx.query(`SELECT count(*)::int AS n FROM tenant_data.product p WHERE ${matches}`, filter)
+        : { rows: [null] };
       const ids = products.map((p) => p.product_id as string);
       const { rows: channels } = ids.length === 0 ? { rows: [] as Row[] } : await tx.query(
         PgStockStore.channelRowsSql().replace('__TARGETS__', `${PgStockStore.TARGETS_SQL} AND s.product_id = ANY($2::uuid[])`) + ' ORDER BY ca.channel, t.write_scope_id', [tenantId, ids]);
@@ -854,7 +868,7 @@ export class PgStockStore implements StockStore {
       const managedOf = new Map<string, NonNullable<StockRow['channelManaged']>>();
       for (const m of managed) managedOf.set(m.product_id, [...(managedOf.get(m.product_id) ?? []), { channel: m.channel, marketplace: m.marketplace, quantity: Number(m.quantity), observedAt: iso(m.observed_at) }]);
       const items: StockRow[] = products.map((p) => ({
-        productId: p.product_id, sku: p.sku, gtin: p.gtin ?? null, onHand: Number(p.on_hand), reserved: Number(p.reserved), available: availableOf(Number(p.on_hand), Number(p.reserved)),
+        productId: p.product_id, sku: p.sku, title: p.title ?? null, gtin: p.gtin ?? null, onHand: Number(p.on_hand), reserved: Number(p.reserved), available: availableOf(Number(p.on_hand), Number(p.reserved)),
         channels: byProduct.get(p.product_id) ?? [],
         ...(managedOf.has(p.product_id) ? { channelManaged: managedOf.get(p.product_id)! } : {}),
       }));
@@ -868,7 +882,7 @@ export class PgStockStore implements StockStore {
                 ${PgStockStore.divergedCountSql()} AS diverged`,
         [tenantId]);
       return {
-        items, total: Number(s!.products),
+        items, total: matched ? Number(matched.n) : Number(s!.products),
         summary: { products: Number(s!.products), withStock: Number(s!.with_stock), synced: Number(s!.synced), pendingWrites: Number(s!.pending), diverged: Number(s!.diverged), openReservations: Number(s!.open_reservations) },
       };
     });

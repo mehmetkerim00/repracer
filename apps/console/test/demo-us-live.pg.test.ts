@@ -37,6 +37,8 @@ before(async () => {
     REPRACER_CONSOLE_DIST: new URL('../dist', import.meta.url).pathname,
     REPRACER_CONSOLE_PUBLIC_DEMO: 'on', REPRACER_CONSOLE_DEMO_US: 'on', REPRACER_CONSOLE_HEARTBEAT: 'off', REPRACER_CONSOLE_GUEST_KEY: 'ephemeral',
     REPRACER_CONSOLE_LOCALE: 'en',
+    // Шаг 69 (K4): пояс показа демо для клиента из США — его пояс; без него — пояс первой витрины демо (Kaufland de)
+    REPRACER_CONSOLE_DEMO_TIME_ZONE: 'America/Los_Angeles',
     // Шаг 68 (K7): неделя тени США прожата при посеве демо — недельное письмо показуемо сразу
     REPRACER_CONSOLE_DEMO_PRESS_DAYS: '7',
     REPRACER_CONSOLE_APP_PG_URL: url('svc_app'), REPRACER_CONSOLE_ADMIN_PG_URL: url('svc_admin'),
@@ -157,10 +159,30 @@ test('шаг 68: демо США — решения в долларах, «по�
    */
   const oneAmazon = (await call<{ items: UnitRef[] }>('GET', `/api/worlds/${w}/offers?q=amazon.com`, guest)).body.items[0]!;
   const oldest = (await call<DecisionListView>('GET', `/api/worlds/${w}/decisions?writeScopeId=${oneAmazon.writeScopeId}&offset=100000`, guest)).body.items.at(-1)!;
-  const oldestMs = Date.parse(oldest.decidedAt.replace(' UTC', 'Z').replace(' ', 'T'));
+  // Шаг 69 (K4): времена — в поясе продавца с его смещением («2026-10-01 17:34:21 UTC−7»), внутри системы — UTC
+  const shown = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) UTC([+−])(\d{1,2})(?::(\d{2}))?$/.exec(oldest.decidedAt);
+  assert.ok(shown && shown[3] === '−' && ['7', '8'].includes(shown[4]!), `время решения — в поясе Тихоокеанского побережья: ${oldest.decidedAt}`);
+  const offsetMs = (Number(shown[4]) * 60 + Number(shown[5] ?? 0)) * 60_000 * (shown[3] === '−' ? -1 : 1);
+  const oldestMs = Date.parse(`${shown[1]}T${shown[2]}Z`) - offsetMs;
   assert.ok(Number.isFinite(oldestMs) && Date.now() - oldestMs > 6 * 86_400_000, `самое старое решение amazon.com — в прошлой неделе: ${oldest.decidedAt}`);
+  // Р-204: демо-тенант доказательством процедуры границы суток не бывает [Р-151] — хотя неделя тени у него есть
+  const [demoTenant] = await db.rows<{ tenant_id: string }>(`SELECT tenant_id FROM tenant_data.tenant WHERE demo`);
+  const [ebayUs] = await db.rows<{ channel_account_id: string }>(
+    `SELECT channel_account_id FROM tenant_data.channel_account WHERE tenant_id = $1 AND channel = 'EBAY'`, [demoTenant!.tenant_id]);
+  const [evidence] = await db.rows<{ shadow_days: number; days_without_decisions: number; demo: boolean }>(
+    `SELECT shadow_days, days_without_decisions, demo FROM platform.day_boundary_shadow_evidence($1, $2, 'EBAY_US')`, [demoTenant!.tenant_id, ebayUs!.channel_account_id]);
+  // Положительный контроль: тень у демо идёт каждые сутки прожатой недели (7 суток прожатия — 6 полных суток от первого решения до последнего)
+  assert.ok(evidence!.shadow_days >= 6 && evidence!.days_without_decisions === 0 && evidence!.demo, `положительный контроль: неделя тени у демо есть — ${JSON.stringify(evidence)}`);
+  const candidates = await db.rows<{ tenant_id: string }>(`SELECT tenant_id FROM platform.day_boundary_candidates()`);
+  assert.ok(!candidates.some((c) => c.tenant_id === demoTenant!.tenant_id), 'демо-тенант — не кандидат процедуры границы суток');
   // K2, K10: свойства витрин США — словами
   assert.ok(shadow.body.properties.every((p) => !codes.test(p.storefrontText) && !/[A-Z]{3,}_[A-Z]/.test(p.valueText)), JSON.stringify(shadow.body.properties));
+  // Шаг 69: что видит клиент — в журнал прогона (отчёт шага берёт строки отсюда, а не пересказывает)
+  console.log(JSON.stringify({ demoUsSeen: {
+    oldestDecision: oldest.decidedAt, offerLabel: oneAmazon.label, summaryLines: shadow.body.summaryLines,
+    digestSubject: preview.subject, digestFirstLines: preview.text.split('\n').slice(0, 4),
+    properties: shadow.body.properties.map((p) => [p.storefrontText, p.propertyText, p.valueText, p.closesByText]),
+  } }, null, 1));
 });
 
 /**

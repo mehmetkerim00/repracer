@@ -5,6 +5,7 @@ import { createIsolatedDatabase, type IsolatedDatabase } from '../../../packages
 import { loadConfig } from '../src/config.ts';
 import { CAPABILITY_JOBS } from '../src/jobs.ts';
 import { startScheduler, type SchedulerProcess } from '../src/main.ts';
+import { freePort } from './free-port.ts';
 
 /**
  * Шаг 57 (п. 2): производственный состав процесса планировщика — не правило о тексте `main.ts`, а запуск настоящего `startScheduler` в
@@ -47,7 +48,7 @@ test('step 57: the production scheduler process registers the job of every optio
     REPRACER_CHANNEL_SECRETS_DIR: '/nonexistent/repracer-channel-secrets', REPRACER_KAUFLAND_FALLBACK_EMAIL: 'ops@example.invalid',
     REPRACER_AMAZON_APPLICATION_CREDENTIALS_REF: 'secret-ref:amazon-application', REPRACER_SCHEDULER_HEARTBEAT: 'off',
     REPRACER_MAIL_API_URL: 'https://mail.example.invalid/v3/send', REPRACER_MAIL_API_KEY: 'syn-mail-key', REPRACER_MAIL_FROM: 'alerts@example.invalid',
-    REPRACER_OPERATOR_EMAIL: 'ops@example.invalid', REPRACER_SCHEDULER_METRICS_PORT: String(20_000 + Math.floor(Math.random() * 20_000)), REPRACER_SCHEDULER_TICK_MS: '1000',
+    REPRACER_OPERATOR_EMAIL: 'ops@example.invalid', REPRACER_SCHEDULER_METRICS_PORT: String(await freePort()), REPRACER_SCHEDULER_TICK_MS: '1000',
     REPRACER_AMAZON_APP_ID: 'amzn1.sellerapps.app.syn-composition', REPRACER_AMAZON_LWA_CLIENT_ID: 'amzn1.application-oa2-client.syn',
     REPRACER_AMAZON_LWA_CLIENT_SECRET: 'syn-client-secret', REPRACER_AMAZON_APP_DRAFT: 'on', REPRACER_CONNECT_REDIRECT_URL: 'https://app.example.invalid/connect/callback',
     REPRACER_CHANNEL_KEYRING: JSON.stringify({ current: 'k-syn', keys: { 'k-syn': Buffer.alloc(32, 57).toString('base64') } }),

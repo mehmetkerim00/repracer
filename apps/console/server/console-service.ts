@@ -184,6 +184,8 @@ export async function startConsole(env: Env = process.env): Promise<RunningConso
       log: (m) => console.log(JSON.stringify({ level: 'INFO', code: 'CONSOLE_DEMO', message: m })),
       usAccounts: config.demoUs,
       usPressDays: config.demoUs ? config.demoPressDays : 0,
+      // Шаг 69 (K1, K4): демо-тенант — на языке развёртывания и в поясе, заданном для демо (без него — пояс первой витрины)
+      locale: config.locale, timeZone: config.demoTimeZone,
     });
     state.demo = started;
     worlds.length = 0;

@@ -118,11 +118,17 @@ export function WorldList({ worlds }: { worlds: readonly WorldSummary[] }) {
 }
 
 function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; worlds: readonly WorldSummary[] }) {
-  const m = useMessages();
+  const outer = useMessages();
   const world = worlds.find((w) => w.id === route.worldId);
-  if (!world) return <p className="error">{m.ui.app.worldNotFound(route.worldId)} <a href="#/">{m.ui.app.backToWorlds}</a></p>;
+  if (!world) return <p className="error">{outer.ui.app.worldNotFound(route.worldId)} <a href="#/">{outer.ui.app.backToWorlds}</a></p>;
+  /**
+   * Шаг 69 (K1, K4): мир тенанта — на языке тенанта и со временем в его поясе: агентство с тенантами DE и US видит каждый на его
+   * языке. Переключатель языка в шапке остаётся для экранов вне мира; язык мира меняет администратор тенанта (экран подключений)
+   */
+  // Ревью шага 69, находка 5: у публичного демо язык не назван — он гостя (переключатель в шапке), а пояс — демо
+  const m = world.locale || world.timeZone ? messagesFor(world.locale ?? outer.locale, { timeZone: world.timeZone }) : outer;
   return (
-    <>
+    <MessagesContext.Provider value={m}>
       {/* Р-151: демо помечается на КАЖДОМ экране мира — деньги показываются на большинстве из них */}
       {world.demo ? <p className="notice demo-banner" role="note"><Badge tone="warn">{m.ui.app.demoBadge}</Badge> {m.ui.app.demoBanner}</p> : null}
       <nav className="tabs">
@@ -149,7 +155,7 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
                       : route.screen === 'compliance' ? (world.euStorefronts ? <ComplianceScreen worldId={world.id} /> : <p className="notice">{m.ui.compliance.notApplicable}</p>)
                         : route.screen === 'jobs' ? <JobHistory worldId={world.id} />
                 : <p className="error">{m.ui.app.screenNotFound}</p>}
-    </>
+    </MessagesContext.Provider>
   );
 }
 

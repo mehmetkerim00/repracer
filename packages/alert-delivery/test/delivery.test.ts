@@ -86,8 +86,8 @@ test('Р-156: CRITICAL уходит письмом СРАЗУ, и письмо �
   assert.equal(letter.to, 'inhaber@example.invalid');
   // Тенант — в теме и в теле: владелец нескольких аккаунтов должен понять, о каком речь
   assert.match(letter.subject, /Synthetischer Händler/);
-  assert.match(letter.text, /Verkäuferkonto: Synthetischer Händler/);
-  assert.match(letter.text, /Kanal: KAUFLAND \(de, at\)/);
+  assert.match(letter.text, /Arbeitsbereich: Synthetischer Händler/);
+  assert.match(letter.text, /Kanal: Kaufland \(kaufland.de, kaufland.at\)/);
   // Причина — человеческим языком, и рядом КОД события: им продавец ссылается на событие в поддержке [находка 4 ревью шага 36]
   assert.match(letter.text, /Die Preispflege wurde von einer Person gestoppt/);
   assert.match(letter.text, /Ereigniscode: PRICING_STOPPED_BY_PERSON \(bitte bei Rückfragen nennen\)/);
@@ -175,9 +175,9 @@ test('Р-161: у каждого тенанта СВОЙ язык в одном �
   assert.deepEqual([outcome.immediate, outcome.delivered, outcome.failed], [2, 2, 0]);
   const de = h.mail.sent.find((x) => x.to === 'inhaber@example.invalid')!;
   const en = h.mail.sent.find((x) => x.to === 'owner@example.invalid')!;
-  assert.match(de.text, /Verkäuferkonto: Synthetischer Händler/);
+  assert.match(de.text, /Arbeitsbereich: Synthetischer Händler/);
   assert.match(de.text, /Die Preispflege wurde von einer Person gestoppt/);
-  assert.match(en.text, /Seller account: Synthetic Trader/);
+  assert.match(en.text, /Workspace: Synthetic Trader/);
   assert.match(en.text, /pricing is stopped by a person/);
   // Р-161: получателей спрашивают один раз на уровень важности, а не по разу на тенанта и тем более не на событие
   assert.equal(h.store.recipientCalls - before, 2, 'два запроса получателей: CRITICAL и WARNING, независимо от числа тенантов');

@@ -2,7 +2,7 @@ import { can } from '@repracer/pricing-model';
 import type { OrderReturnRow, StockChannelRow, StockDivergenceRow, StockPage, StockRow, StockSourceRow } from '@repracer/stock-sync';
 import type { Messages } from './i18n/index.ts';
 import { pageInfo, type ListQuery, type PageInfo } from './page.ts';
-import { gap, type Gap, type StandWorld } from './world.ts';
+import { gap, storefrontName, type Gap, type StandWorld } from './world.ts';
 
 /**
  * Р-153 (шаг 35): экран остатков. По товару — физический остаток, резервации, доступно; по каждому каналу — что мы
@@ -27,6 +27,8 @@ export interface StockChannelCell {
 
 export interface StockRowView {
   productId: string;
+  /** Шаг 69 (K8, OQ-249): подпись строки — название товара, иначе SKU; SKU — рядом */
+  label: string;
   sku: string;
   gtin: string | null;
   onHand: number;
@@ -52,6 +54,8 @@ export interface StockView {
   summaryText: string;
   rows: StockRowView[];
   page: PageInfo;
+  /** Шаг 69 (K8): поиск и фильтр, которыми построена страница; `matchedText` — только когда они заданы */
+  filter: { search: string; withReservations: boolean; matchedText: string | null; noneText: string | null };
   sources: Array<StockSourceRow & { modeText: string; productsText: string }>;
   /** Ловушки каналов аккаунтов мира — до включения синхронизации */
   traps: StockTrap[];
@@ -63,7 +67,7 @@ export interface StockView {
 
 export interface StockDivergencesView {
   worldId: string;
-  items: Array<StockDivergenceRow & { text: string }>;
+  items: Array<StockDivergenceRow & { text: string; storefrontsText: string }>;
   none: string;
   cannot: string;
 }
@@ -80,14 +84,18 @@ export function stockTraps(world: StandWorld, m: Messages): StockTrap[] {
   }));
 }
 
+const storefronts = (channel: string, marketplaces: readonly string[], m: Messages): string =>
+  marketplaces.map((mp) => storefrontName(channel, mp, m)).join(', ');
+
 export function channelCell(c: StockChannelRow, m: Messages): StockChannelCell {
   const s = m.ui.stock.channel;
   const channelName = (m.values as Record<string, string | undefined>)[c.channel] ?? c.channel;
   const awaitingAck = c.sideEffects.requiresAck && !c.sideEffects.acknowledged;
   const status = (v: string) => (m.ui.writeStatus as Record<string, string | undefined>)[v] ?? v;
   return {
-    writeScopeId: c.writeScopeId, channel: c.channel, label: `${channelName} · ${c.marketplaces.join(', ')}`,
-    sharedText: c.marketplaces.length > 1 ? s.shared(c.marketplaces.join(', ')) : null,
+    // Шаг 69 (K10, K9): витрины — словами, как в подписи предложения, а не кодами (ATVPDKIKX0DER, EBAY_US)
+    writeScopeId: c.writeScopeId, channel: c.channel, label: `${channelName} · ${storefronts(c.channel, c.marketplaces, m)}`,
+    sharedText: c.marketplaces.length > 1 ? s.shared(storefronts(c.channel, c.marketplaces, m)) : null,
     syncEnabled: c.syncEnabled, published: c.published,
     // Шаг 64: удержанное тенью не «отправлено» — в канал ничего не ушло [Р-169]
     sentText: !c.sent ? s.notSent : c.sent.status === 'SHADOW_HELD' ? s.heldInShadow(c.sent.quantity, m.when(c.sent.at)) : s.sent(c.sent.quantity, status(c.sent.status), m.when(c.sent.at)),
@@ -100,18 +108,26 @@ export function channelCell(c: StockChannelRow, m: Messages): StockChannelCell {
   };
 }
 
-export function stockView(world: StandWorld, page: StockPage, query: ListQuery, sources: readonly StockSourceRow[], m: Messages): StockView {
+export function stockView(world: StandWorld, page: StockPage, query: ListQuery, sources: readonly StockSourceRow[], m: Messages,
+  filter: { search?: string | null; withReservations?: boolean } = {}): StockView {
   const t = m.ui.stock;
+  const search = filter.search?.trim() ?? '';
+  const filtered = search !== '' || filter.withReservations === true;
   return {
     worldId: world.id, demo: world.demo === true, intro: t.intro, summary: page.summary, summaryText: t.summary(page.summary),
-    rows: page.items.map((r: StockRow): StockRowView => ({ productId: r.productId, sku: r.sku, gtin: r.gtin, onHand: r.onHand, reserved: r.reserved, available: r.available, channels: r.channels.map((c) => channelCell(c, m)),
-      channelManaged: (r.channelManaged ?? []).map((c) => t.channel.managedByChannel((m.values as Record<string, string | undefined>)[c.channel] ?? c.channel, c.marketplace, c.quantity, m.when(c.observedAt))) })),
+    filter: {
+      search, withReservations: filter.withReservations === true,
+      matchedText: filtered ? t.filter.matched(page.total, page.summary.products) : null,
+      noneText: filtered && page.total === 0 ? t.filter.none : null,
+    },
+    rows: page.items.map((r: StockRow): StockRowView => ({ productId: r.productId, label: r.title ?? r.sku, sku: r.sku, gtin: r.gtin, onHand: r.onHand, reserved: r.reserved, available: r.available, channels: r.channels.map((c) => channelCell(c, m)),
+      channelManaged: (r.channelManaged ?? []).map((c) => t.channel.managedByChannel((m.values as Record<string, string | undefined>)[c.channel] ?? c.channel, storefrontName(c.channel, c.marketplace, m), c.quantity, m.when(c.observedAt))) })),
     page: pageInfo(query, page.total, m),
     sources: sources.map((s) => ({ ...s, modeText: t.sources.modes[s.mode], productsText: t.sources.products(s.products) })),
     traps: stockTraps(world, m),
     canManage: can(world.viewer.role, 'MANAGE_CATALOG'),
     cannot: t.divergences.cannot,
-    gaps: [gap(m, 'PRODUCT_TITLE'), gap(m, 'STOCK_CHANNEL_NOT_READ')],
+    gaps: [gap(m, 'STOCK_CHANNEL_NOT_READ')],
   };
 }
 
@@ -120,7 +136,7 @@ export function stockDivergencesView(world: StandWorld, rows: readonly StockDive
   const status = (v: string) => (m.ui.writeStatus as Record<string, string | undefined>)[v] ?? v;
   return {
     worldId: world.id,
-    items: rows.map((r) => ({ ...r, text: t.row(r.sent, r.confirmed === null ? '—' : String(r.confirmed), status(r.status), m.when(r.since)) })),
+    items: rows.map((r) => ({ ...r, storefrontsText: storefronts(r.channel, r.marketplaces, m), text: t.row(r.sent, r.confirmed === null ? '—' : String(r.confirmed), status(r.status), m.when(r.since)) })),
     none: t.none, cannot: t.cannot,
   };
 }

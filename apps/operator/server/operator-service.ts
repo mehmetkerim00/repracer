@@ -51,6 +51,7 @@ export async function startOperatorPanel(env: Env = process.env, overrides: Pane
     mail,
     invitationBaseUrl: config.invitationBaseUrl,
     invitationTtlHours: config.invitationTtlHours,
+    defaultLocale: config.defaultLocale,
     count: (name) => health.count(name),
   });
 

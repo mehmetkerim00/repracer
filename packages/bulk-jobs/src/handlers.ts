@@ -51,12 +51,17 @@ const localeOf = (job: BulkJobRow) => {
   const locale = (job.params as { locale?: unknown }).locale;
   return (LOCALES as readonly string[]).includes(locale as string) ? (locale as Locale) : 'de';
 };
+/** Шаг 69 (K1, K4; ревью, находка 8): тексты и времена итога задания — языком и в поясе мира, в котором его создали */
+const messagesOfJob = (job: BulkJobRow) => {
+  const zone = (job.params as { timeZone?: unknown }).timeZone;
+  return messagesFor(localeOf(job), { timeZone: typeof zone === 'string' ? zone : null });
+};
 
 export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
   return {
     /** Импорт себестоимости: разбор файла с видимым ходом, затем применение одной транзакцией [Р-134] */
     async COST_IMPORT(job: BulkJobRow, ctx: BulkJobContext): Promise<BulkJobWork> {
-      const m = messagesFor(localeOf(job));
+      const m = messagesOfJob(job);
       const p = job.params as { fileName: string; content: string; mapping?: ColumnMapping; encoding?: TableEncoding; fingerprint?: string };
       const sheet = readTable(Buffer.from(p.content, 'base64'), p.encoding);
       const suggested = suggestMapping(sheet);
@@ -166,7 +171,7 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
      * и то, что потом применяется: набор правок с границами, которые он видел.
      */
     async BOUNDS_PLAN(job: BulkJobRow, ctx: BulkJobContext): Promise<BulkJobWork> {
-      const m = messagesFor(localeOf(job));
+      const m = messagesOfJob(job);
       const world = await options.world(ctx);
       const request = parseBoundsEditRequest((job.params as { request: unknown }).request);
       if (!request) throw Object.assign(new Error('bad request'), { cause: 'BAD_REQUEST' });
@@ -195,7 +200,7 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
      * существующей версии (OQ-169) — тем же видом задания, потому что для продавца это одна операция.
      */
     async STRATEGY_ASSIGN(job: BulkJobRow, ctx: BulkJobContext): Promise<BulkJobWork> {
-      const m = messagesFor(localeOf(job));
+      const m = messagesOfJob(job);
       const p = job.params as { draft?: unknown; strategyId?: string | null; version?: number; previewJobId?: string };
       /**
        * Предложения и их стратегии берутся ИЗ ПРЕДПРОСМОТРА, а не раскрываются заново. «Весь каталог», раскрытый в момент
@@ -234,7 +239,7 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
      * решение считается по каждому предложению, итоги — по всем, на экран идут первые строки.
      */
     async STRATEGY_PREVIEW(job: BulkJobRow, ctx: BulkJobContext): Promise<BulkJobWork> {
-      const m = messagesFor(localeOf(job));
+      const m = messagesOfJob(job);
       const preview = options.previewStrategy;
       if (!preview) throw Object.assign(new Error('no preview'), { cause: 'UNKNOWN_JOB_KIND' });
       const p = job.params as { draft: unknown; writeScopeIds?: string[]; all?: boolean };
@@ -281,7 +286,7 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
      * количества создаёт записи в каналы, которые отправит диспетчер [Р-64]. Итог — поимённо с причинами, как у себестоимости.
      */
     async STOCK_IMPORT(job: BulkJobRow, ctx: BulkJobContext): Promise<BulkJobWork> {
-      const m = messagesFor(localeOf(job));
+      const m = messagesOfJob(job);
       const p = job.params as { fileName: string; content: string; stockSourceId: string; encoding?: TableEncoding };
       if (!options.stock) throw Object.assign(new Error('no stock store'), { cause: 'NOT_SUPPORTED' });
       const stock = options.stock;
@@ -343,7 +348,7 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
       return {
         total: chosen.length,
         async run(progress) {
-          const m = messagesFor(localeOf(job));
+          const m = messagesOfJob(job);
           const skipped: Array<{ writeScopeId: string; label: string; problems: string[]; reasons: string[] }> = [];
           let enabled = 0;
           let already = 0;
@@ -386,7 +391,7 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
      * показанным.
      */
     async PRICE_FEED_EXPORT(job: BulkJobRow, ctx: BulkJobContext): Promise<BulkJobWork> {
-      const m = messagesFor(localeOf(job));
+      const m = messagesOfJob(job);
       const raw = (job.params as { query?: Record<string, string> }).query ?? {};
       const query = parseFeedQuery(new URLSearchParams(raw));
       if (!query) throw Object.assign(new Error('bad query'), { cause: 'BAD_REQUEST' });
@@ -419,7 +424,7 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
      * 100 000 строк, введённый шагом 29, больше не нужен — ждать нечего, продавец скачивает готовое.
      */
     async PRICE_EVIDENCE(job: BulkJobRow, ctx: BulkJobContext): Promise<BulkJobWork> {
-      const m = messagesFor(localeOf(job));
+      const m = messagesOfJob(job);
       const p = job.params as { from: string; to: string; writeScopeId?: string | null };
       const world = await options.world(ctx);
       return {

@@ -570,6 +570,57 @@ SELECT pg_temp.ok('one Kaufland offer on two storefronts is one product; a chann
     END IF;
   END $inner$ $q$);
 ROLLBACK;
+-- Шаг 69 (OQ-249, Р-3): название из канала называет новый товар и обновляется при следующем обнаружении; название продавца
+-- (без отметки чтения) обнаружение не затирает
+BEGIN;
+CREATE FUNCTION pg_temp.set_seller_title(p_sku text, p_title text) RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $f$
+BEGIN
+  SET LOCAL session_replication_role = replica;
+  UPDATE tenant_data.product SET title = p_title, title_channel_read_at = NULL WHERE sku = p_sku;
+  SET LOCAL session_replication_role = origin;
+END $f$;
+SET LOCAL ROLE repracer_app;
+SELECT set_config('app.tenant_id', 'a0000000-0000-0000-0000-00000000000a', true) \gset
+SELECT pg_temp.ok('a channel title names a new product and is refreshed; the seller title is never overwritten (OQ-249, Р-3)', $q$
+  DO $inner$
+  DECLARE
+    t1 text;
+    r1 timestamptz;
+    t2 text;
+    seller text;
+  BEGIN
+    PERFORM tenant_data.record_discovered_offers('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001',
+      '[{"marketplace": "de", "external_unit_id": "944301", "external_sku": "SYN-TITLE-1", "channel_product_ref": null, "gtin": null, "condition": "new", "title": "Synthetic channel title A"}]');
+    SELECT title, title_channel_read_at INTO t1, r1 FROM tenant_data.product WHERE sku = 'SYN-TITLE-1';
+    PERFORM tenant_data.record_discovered_offers('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001',
+      '[{"marketplace": "de", "external_unit_id": "944301", "external_sku": "SYN-TITLE-1", "channel_product_ref": null, "gtin": null, "condition": "new", "title": "Synthetic channel title B"}]');
+    SELECT title INTO t2 FROM tenant_data.product WHERE sku = 'SYN-TITLE-1';
+    PERFORM pg_temp.set_seller_title('SYN-TITLE-1', 'Seller title of the product');
+    PERFORM tenant_data.record_discovered_offers('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001',
+      '[{"marketplace": "de", "external_unit_id": "944301", "external_sku": "SYN-TITLE-1", "channel_product_ref": null, "gtin": null, "condition": "new", "title": "Synthetic channel title C"}]');
+    SELECT title INTO seller FROM tenant_data.product WHERE sku = 'SYN-TITLE-1';
+    IF t1 IS DISTINCT FROM 'Synthetic channel title A' OR r1 IS NULL OR t2 IS DISTINCT FROM 'Synthetic channel title B'
+       OR seller IS DISTINCT FROM 'Seller title of the product' THEN
+      RAISE EXCEPTION 'channel title: new %, read at %, refreshed %, after the seller named it %', t1, r1, t2, seller;
+    END IF;
+  END $inner$ $q$);
+ROLLBACK;
+-- Название из канала, не читавшееся 18 месяцев, стирает удаление по сроку [Р-3]: товар остаётся, название — нет
+BEGIN;
+UPDATE tenant_data.product SET title = 'Synthetic stale channel title', title_channel_read_at = now() - interval '19 months'
+ WHERE product_id = (SELECT product_id FROM tenant_data.product WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a' ORDER BY sku LIMIT 1);
+SELECT maintenance.delete_expired_rows(now()) AS expired \gset
+SELECT pg_temp.ok('a channel title not read for 18 months is erased by retention (OQ-249, Р-3)', $q$
+  DO $inner$
+  BEGIN
+    IF EXISTS (SELECT 1 FROM tenant_data.product WHERE title = 'Synthetic stale channel title') THEN
+      RAISE EXCEPTION 'a channel title older than 18 months is still kept';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM tenant_data.product WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a') THEN
+      RAISE EXCEPTION 'retention removed the products instead of the stale title';
+    END IF;
+  END $inner$ $q$);
+ROLLBACK;
 -- Находка 15 ревью шага 44 (шаг 45, 0138): идемпотентность — по КЛЮЧУ единицы записи, а завершённое предложение
 -- возвращается в каталог. Прежняя функция роняла такт нарушением `write_scope_key_uq`, когда то же предложение
 -- приходило с SKU, а в первый раз — без него, и держала вне каталога навсегда предложение, выставленное снова

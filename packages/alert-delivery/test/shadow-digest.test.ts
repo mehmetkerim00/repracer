@@ -47,7 +47,7 @@ const target = (over: Partial<ShadowDigestTarget> = {}): ShadowDigestTarget => (
   decisions: 1440, changes: 212, floorHeld: 37, ceilingHeld: 4,
   heldWrites: 216, heldPriceWrites: 212, heldQuantityWrites: 4, wouldSpendBudget: 4, wouldSpendUnconfirmed: 0,
   floorSavings: [{ currency: 'EUR', minor: 4500 }], floorSavingsHolds: 30,
-  periodStart: '2026-09-19T09:00:00.000Z', periodEnd: '2026-09-26T09:00:00.000Z', ...over,
+  periodStart: '2026-09-19T09:00:00.000Z', periodEnd: '2026-09-26T09:00:00.000Z', timeZone: 'Europe/Berlin', ...over,
 });
 
 test('шаг 41: письмо несёт ТЕ ЖЕ числа, что экран, и ни одной цены', () => {
@@ -152,6 +152,6 @@ test('Р-188: «потратило бы» при неподтверждённо�
   const approx = shadowDigestMessage(target({ locale: 'de', wouldSpendUnconfirmed: 3 }), 'x@example.test', messagesFor('de'));
   const approxEn = shadowDigestMessage(target({ locale: 'en', wouldSpendUnconfirmed: 3 }), 'x@example.test', messagesFor('en'));
   assert.doesNotMatch(exact.text, /ungefähr|etwa \d/, 'граница подтверждена — число точное, пометки нет');
-  assert.match(approx.text, /Davon hätten etwa 4 .*ungefähr: die Tagesgrenze des Marktplatzes ist nicht bestätigt/, 'число помечено приблизительным и названа причина');
+  assert.match(approx.text, /Davon hätten etwa 4 .*ungefähr: die Tagesgrenze der Storefront ist nicht bestätigt/, 'число помечено приблизительным и названа причина');
   assert.match(approxEn.text, /Of them about 4 .*approximate: the day boundary of the storefront is not confirmed/, 'то же по-английски');
 });

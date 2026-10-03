@@ -6,6 +6,8 @@
 #   2. стенд с демо-тенантом [Р-151] в ТЕНИ [Р-169] и с витринами США (eBay EBAY_US, Amazon amazon.com, USD) — `REPRACER_DEMO_US`;
 #      шаг 68: витрины США СЧИТАЮТ тень (себестоимость, границы и стратегии в долларах), и неделя их тени ПРОЖИМАЕТСЯ при подъёме
 #      (`REPRACER_DEMO_PRESS_DAYS`, по умолчанию 7): недельное письмо тени показуемо сразу, а не через неделю;
+#    - шаг 69 (K1, K4): демо-тенант по-английски и в поясе клиента из США (`REPRACER_DEMO_LOCALE`, по умолчанию en;
+#      `REPRACER_DEMO_TIME_ZONE`, по умолчанию America/Los_Angeles) — язык и пояс принадлежат тенанту, а не браузеру;
 #   3. интерфейс консоли (vite) на 127.0.0.1:5173, API стенда — на 127.0.0.1:4318;
 #   4. ждёт, пока демо-мир примет первые решения, и печатает, куда идти.
 #
@@ -41,6 +43,7 @@ trap cleanup EXIT INT TERM
 echo "== стенд с демо-тенантом (тень, витрины США) на 127.0.0.1:${STAND_PORT}"
 STAND_IDENTITY=simulator REPRACER_PG_URL="postgres://svc_app@${PGHOST}:${PGPORT}/${DB}" \
   REPRACER_DEMO=on REPRACER_DEMO_SHADOW=on REPRACER_DEMO_US=on REPRACER_DEMO_PRESS_DAYS="${REPRACER_DEMO_PRESS_DAYS:-7}" \
+  REPRACER_DEMO_LOCALE="${REPRACER_DEMO_LOCALE:-en}" REPRACER_DEMO_TIME_ZONE="${REPRACER_DEMO_TIME_ZONE:-America/Los_Angeles}" \
   npm run stand -w @repracer/console > "${LOGS}/stand.log" 2>&1 &
 pids+=($!)
 

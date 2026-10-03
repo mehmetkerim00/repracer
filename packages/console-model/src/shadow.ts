@@ -113,7 +113,8 @@ export function liveRefusalText(channel: string, detail: string, properties: rea
   const [, marketplace, property] = parsed as unknown as [string, string, string];
   const known = properties.find((p) => p.marketplace === marketplace && p.property === property);
   return t.errors.liveClosed(storefrontName(known?.channel ?? channel, marketplace, m), t.properties.names[property] ?? t.properties.someProperty,
-    known ? t.properties.confirmWhere[known.closesBy] ?? t.properties.confirmWhereUnknown : t.properties.confirmWhereUnknown);
+    property === 'DAY_BOUNDARY' ? t.properties.dayBoundaryProcess
+      : known ? t.properties.confirmWhere[known.closesBy] ?? t.properties.confirmWhereUnknown : t.properties.confirmWhereUnknown);
 }
 
 /** Числа письма-дайджеста: те же, что у экрана тени [Р-171], и то, кому оно */
@@ -131,6 +132,8 @@ export interface ShadowDigestLetterInput {
   wouldSpendUnconfirmed: number;
   floorSavings: Array<{ currency: string; minor: number }>;
   floorSavingsHolds: number;
+  /** Шаг 69 (K4): пояс продавца — неделя письма идёт в нём, и вступление его называет */
+  timeZone?: string;
 }
 
 /**
@@ -143,7 +146,7 @@ export function shadowDigestLetter(input: ShadowDigestLetterInput, m: Messages, 
   return {
     subject: t.digest.subject(input.tenantName),
     lines: [
-      kind === 'WEEK' ? t.digest.intro(input.tenantName, input.shadowAccounts) : t.digest.previewIntro(input.tenantName, input.shadowAccounts),
+      kind === 'WEEK' ? t.digest.intro(input.tenantName, input.shadowAccounts, input.timeZone ?? 'UTC') : t.digest.previewIntro(input.tenantName, input.shadowAccounts),
       '',
       t.summary.decisions(input.decisions, input.changes),
       t.summary.floorHeld(input.floorHeld),
@@ -194,7 +197,8 @@ const propertyView = (p: MarketplaceProperty, m: Messages): MarketplacePropertyV
     // Шаг 68 (K2): значение словами — «net, sales tax added at checkout», а не «NET / SALES_TAX_EXCLUDED»
     valueText: p.value === null ? t.unknownValue : t.valueWords[p.value] ?? p.value,
     statusText: t.statuses[p.status] ?? p.status,
-    closesByText: t.closesBy[p.closesBy] ?? p.closesBy,
+    // Шаг 69 [Р-204]: неизвестная граница суток закрывается неделей тени и решением команды платформы — так экран и говорит
+    closesByText: p.property === 'DAY_BOUNDARY' && p.status === 'UNKNOWN' ? t.dayBoundaryProcess : t.closesBy[p.closesBy] ?? p.closesBy,
     question: p.question,
     blocksLive: p.status === 'UNKNOWN',
   };
@@ -273,6 +277,6 @@ export function shadowView(world: StandWorld, page: ShadowPage, query: ListQuery
     })),
     page: pageInfo(query, page.total, m),
     none: t.none, liveButton: t.liveButton, shadowButton: t.shadowButton, mfaHint: t.mfaHint, cannot: t.cannot,
-    gaps: [gap(m, 'PRODUCT_TITLE')],
+    gaps: [],
   };
 }

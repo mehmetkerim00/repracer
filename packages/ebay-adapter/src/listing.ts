@@ -2,7 +2,7 @@ import type { AdapterCallContext, CompetitorQuery, CompetitorReadResult, Discove
 import { logConservative } from './conservative.ts';
 import { FULFILLMENT_ORDER_PATH, INVENTORY_PATH, marketplaceInfo } from './descriptor.ts';
 import { ChannelCallError, channelError, classifyHttpFailure, firstRestError } from './errors.ts';
-import { LISTING_ID_RE, moneyOf } from './mapping.ts';
+import { LISTING_ID_RE, moneyOf, offerTitle } from './mapping.ts';
 import type { EbayOffer } from './readback.ts';
 import { call, nowMs, openSession, type ResolvedOptions, type Session } from './session.ts';
 
@@ -11,7 +11,12 @@ const INVENTORY_PAGE_MAX = 100;
 /** Страница GetMyeBaySelling: EntriesPerPage — наш предел (предел канала не проверялся, E-19) */
 const TRADING_PAGE_MAX = 100;
 
-interface InventoryItem { sku?: string; condition?: string; product?: { ean?: unknown; upc?: unknown } }
+/**
+ * Товар инвентаря (страница `GET inventory_item`). Шаг 69 (OQ-249): название — `product.title`: vendor/ebay/2026-09-28/sell_inventory_v1_oas3.json,
+ * paths./inventory_item.get → components.schemas.InventoryItems.properties.inventoryItems[] → InventoryItemWithSkuLocaleGroupid.properties.product →
+ * components.schemas.Product.properties.title [док]: «always be returned for an inventory item that is part of a published offer», Max Length 80
+ */
+interface InventoryItem { sku?: string; condition?: string; product?: { ean?: unknown; upc?: unknown; title?: unknown } }
 
 const XMLNS = 'urn:ebay:apis:eBLBaseComponents';
 
@@ -141,6 +146,7 @@ async function discoverInventory(options: ResolvedOptions, ctx: AdapterCallConte
     const offers = await offersOfSku(options, ctx, session, item.sku);
     if (offers === null) continue;
     const gtins = [item.product?.ean, item.product?.upc].flatMap((g) => (Array.isArray(g) ? g.filter((x): x is string => typeof x === 'string') : []));
+    const title = offerTitle(item.product?.title);
     for (const o of offers) {
       const marketplace = o.marketplaceId;
       const listingId = o.listing?.listingId;
@@ -151,6 +157,7 @@ async function discoverInventory(options: ResolvedOptions, ctx: AdapterCallConte
       items.push({
         identity: { marketplace, externalSku: item.sku, externalOfferId: o.offerId, externalListingId: listingId },
         gtins, condition: (item.condition ?? 'NEW').toLowerCase(), fulfillment: 'MERCHANT',
+        ...(title !== undefined ? { title } : {}),
         ...(price ? { currentPrice: price } : {}),
         ...(Number.isSafeInteger(o.availableQuantity) ? { currentQuantity: o.availableQuantity! } : {}),
         ...(o.listing?.listingStatus ? { isLive: o.listing.listingStatus === 'ACTIVE' } : {}),
@@ -221,6 +228,12 @@ async function discoverTrading(options: ResolvedOptions, ctx: AdapterCallContext
     const priceText = tag(item, 'CurrentPrice') ?? tag(item, 'BuyItNowPrice');
     const price = auction ? null : moneyOf({ value: priceText ?? undefined, currency: currency ?? info.currency }, marketplace);
     const available = Number(tag(item, 'QuantityAvailable') ?? tag(item, 'Quantity'));
+    /**
+     * Шаг 69 (OQ-249): у листинга фазы Trading названия нет — `title` не задаётся. Документации Trading API в снимке нет (vendor/ebay/SOURCE.md,
+     * «Чего в снимке нет»), а записанный ответ песочницы (tests/contract/fixtures/ebay/discover-legacy-and-auction.json, урезан до читаемых
+     * полей) несёт ItemID, SKU, ListingType, Quantity, QuantityAvailable и цены — поля названия в нём нет. Поле API не выдумывается: закрыть —
+     * страницей GetMyeBaySelling в снимке или записанным ответом песочницы с названием
+     */
     items.push({
       identity: { marketplace, externalListingId: listingId, ...(sku ? { externalSku: sku } : {}) },
       gtins: [], condition: 'new', fulfillment: 'MERCHANT', isLive: true,

@@ -139,6 +139,6 @@ export function rejectedView(world: StandWorld, slice: InterventionSlice, m: Mes
     },
     groups: [...counts].map(([code, count]) => ({ code, title: (m.titles as Record<string, string | undefined>)[code] ?? code, count })).sort((a, b) => b.count - a.count),
     items,
-    gaps: [gap(m, 'DB_COMMIT_REJECTIONS'), gap(m, 'REJECTED_SNAPSHOT_CONTENT'), ...(slice.truncated ? [gap(m, 'INTERVENTIONS_TRUNCATED')] : [])],
+    gaps: slice.truncated ? [gap(m, 'INTERVENTIONS_TRUNCATED')] : [],
   };
 }

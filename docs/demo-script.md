@@ -16,6 +16,8 @@ PGHOST=127.0.0.1 PGPORT=5432 PGUSER=<суперпользователь PostgreS
 - поднимает стенд с демо-тенантом в тени (`REPRACER_DEMO_SHADOW=on`) и с витринами США (`REPRACER_DEMO_US=on`);
 - шаг 68: витрины США считают тень в долларах (себестоимость, границы и стратегии заведены), и их **неделя тени прожимается** при подъёме
   (`REPRACER_DEMO_PRESS_DAYS`, по умолчанию 7): решения ложатся в прошлые семь суток, недельное письмо показуемо сразу;
+- шаг 69: демо-тенант говорит по-английски, а времена показывает в поясе клиента из США (`REPRACER_DEMO_LOCALE=en`,
+  `REPRACER_DEMO_TIME_ZONE=America/Los_Angeles` по умолчанию). Язык и пояс — свойства тенанта: переключатель языка браузера их не меняет;
 - поднимает интерфейс на `http://127.0.0.1:5173`;
 - ждёт первых решений и печатает запрос-доказательство для шага «а».
 
@@ -76,8 +78,10 @@ three competitors — one drifting, one undercutting, one in price waves.»
   знаем про витрину, держит боевой режим закрытым [Р-172] — у amazon.com и ebay.com граница суток не подтверждена каналом. Таблица
   «What we still do not know about these storefronts» — словами: витрина, свойство, значение («net, sales tax added at checkout»), кто
   подтверждает. Если владелец всё же нажмёт «Switch on live writes» на amazon.com, отказ скажет: «Live writes on amazon.com stay closed:
-  the day boundary of the price history of this storefront is not confirmed yet. It can be confirmed from what the channel shows while you
-  are in the shadow; our team does that by hand, and there is no date for it yet…» (шаг 68, K2). Срока не обещать: его нет.
+  the day boundary of the price history of this storefront is not confirmed yet. This is usually settled within a week of shadow mode: after
+  seven days of shadow decisions our team checks your shadow data… and then live writes open. Nothing is needed from you.» (шаг 69, Р-204).
+  Обещание — ровно это: неделя тени, затем проверка командой платформы. Процедура — [runbook-day-boundary.md](runbook-day-boundary.md);
+  подтверждением канала её не называть, вопрос каналу остаётся открытым.
 - **Строки:** удержанные записи — offer, значение, время, ссылка **Why**.
 
 **Доказательство из базы** (в терминале; команду печатает подготовка):

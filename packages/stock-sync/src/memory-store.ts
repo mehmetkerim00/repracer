@@ -4,7 +4,7 @@ import type { Instant, OrderLine } from '@repracer/channel-port';
 import { availableOf, publishedQuantity, type StockAllocation } from './published.ts';
 import type {
   AnswerOtherToolsResult, ConfirmOrdersOutcome, ConfirmQuantityWritesResult, RevokeQuantityWritesResult, OtherTools, QuantityWritesState, CreateStockSourceResult, DecideReturnOutcome, EnableStockSyncInput, EnableStockSyncResult, InboundStockOutcome, InboundStockRow, OrderLinesOutcome, RecalculationOutcome,
-  OrderReturnRow, StockActor, StockChannelRow, StockDivergenceRow, StockImportOutcome, StockImportRow, StockPage, StockRow, StockSourceMode, StockSourceRow, StockStore,
+  OrderReturnRow, StockActor, StockChannelRow, StockDivergenceRow, StockImportOutcome, StockImportRow, StockPage, StockPageQuery, StockRow, StockSourceMode, StockSourceRow, StockStore,
 } from './store.ts';
 
 /** Запись «в полёте»: ещё не завершена. Тот же список, что у `PgStockStore`: PENDING, DISPATCHED, ACCEPTED */
@@ -16,6 +16,8 @@ const NOT_DIVERGED = ['APPLIED', 'SUPERSEDED', 'SHADOW_HELD'];
 export interface MemoryStockOffer {
   productId: string;
   sku: string;
+  /** Шаг 69 (K8): название товара — для поиска и подписи строки экрана остатков */
+  title?: string | null;
   gtin?: string | null;
   channelAccountId: string;
   channel: string;
@@ -319,15 +321,19 @@ export class InMemoryStockStore implements StockStore {
     };
   }
 
-  async stockPage(_tenantId: string, query: { offset: number; limit: number }): Promise<StockPage> {
+  async stockPage(_tenantId: string, query: StockPageQuery): Promise<StockPage> {
     const products = [...new Map(this.offers.map((o) => [o.productId, o])).values()].sort((a, b) => a.sku.localeCompare(b.sku));
     const rows: StockRow[] = products.map((o) => ({
-      productId: o.productId, sku: o.sku, gtin: o.gtin ?? null, ...this.availableOfProduct(o.productId),
+      productId: o.productId, sku: o.sku, title: o.title ?? null, gtin: o.gtin ?? null, ...this.availableOfProduct(o.productId),
       channels: [...this.scopes.values()].filter((s) => s.offer.productId === o.productId).map((s) => this.channelRow(s)),
     }));
     const channelRows = rows.flatMap((r) => r.channels);
+    // Шаг 69 (K8): поиск по названию или SKU и фильтр «с резервациями» — тем же правилом, что у PostgreSQL
+    const needle = query.search?.trim().toLowerCase() ?? '';
+    const matched = rows.filter((r) => (needle === '' || r.sku.toLowerCase().includes(needle) || (r.title ?? '').toLowerCase().includes(needle))
+      && (!query.withReservations || r.reserved > 0));
     return {
-      items: rows.slice(query.offset, query.offset + query.limit), total: rows.length,
+      items: matched.slice(query.offset, query.offset + query.limit), total: matched.length,
       summary: {
         products: rows.length, withStock: rows.filter((r) => r.onHand > 0).length, synced: channelRows.filter((c) => c.syncEnabled).length,
         pendingWrites: this.writes.filter((w) => IN_FLIGHT.includes(w.status)).length,
