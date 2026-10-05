@@ -43,7 +43,7 @@ let amazonAccount = '';
 
 interface Candidate {
   channel: string; marketplace: string; status: string; question: string | null; tenant_id: string; tenant_name: string;
-  channel_account_id: string; shadow_days: number; days_without_decisions: number; shadow_since: string; decisions: string; held_writes: string; budget_writes: string;
+  channel_account_id: string; shadow_days: number; longest_gap_hours: number; shadow_since: string; decisions: string; held_writes: string; budget_writes: string;
   worst_window_max: string; budget_limit: number | null;
 }
 interface Acceptance { acceptance_id: string; channel: string; marketplace: string; time_zone: string; shadow_days: number; decisions: string; worst_window_max: string; budget_limit: number | null; operator: string; note: string }
@@ -144,8 +144,10 @@ test('Р-204: панель показывает витрины с неподтв
   assert.equal(Number(ebay.worst_window_max), byRows.worst, `худшее окно базы равно счёту по строкам: ${ebay.worst_window_max} и ${byRows.worst}`);
   assert.ok(byRows.worst > 0 && byRows.worst <= 250, `худшее окно в пределе бюджета: ${byRows.worst}`);
   /**
-   * Ревью шага 69, находка 3: сутки тени — ДЛИТЕЛЬНОСТЬ от первого до последнего теневого решения в целых сутках, а сутки без решений —
-   * даты между ними, в которые решений не было. Прогон считает обе величины по строкам решений сам, по временам, а не по датам базы
+   * Ревью шага 69, находка 3: сутки тени — ДЛИТЕЛЬНОСТЬ от первого до последнего теневого решения в целых сутках, а «подряд» — самый
+   * длинный перерыв между соседними решениями (не больше 36 часов). Прогон считает обе величины по строкам решений сам.
+   * Полный CI шага 69 (прогон с 19:00 UTC): первая редакция требовала решения в каждую дату UTC — пересчёт eBay раз в сутки сдвигался на
+   * такт за сутки, перешагнул полночь, и одна дата осталась пустой при непрерывной тени: «доказательство» отказывало честной неделе
    */
   const decided = (await db.rows<{ at: string }>(
     `SELECT pd.decided_at AS at
@@ -154,14 +156,14 @@ test('Р-204: панель показывает витрины с неподтв
     .map((r) => Date.parse(String(r.at)));
   const first = Math.min(...decided);
   const last = Math.max(...decided);
-  const dates = new Set(decided.map((t) => new Date(t).toISOString().slice(0, 10)));
   const span = Math.floor((last - first) / DAY_MS);
-  const datesInRange = Math.round((Date.parse(new Date(last).toISOString().slice(0, 10)) - Date.parse(new Date(first).toISOString().slice(0, 10))) / DAY_MS) + 1;
+  const sorted = [...decided].sort((a, b) => a - b);
+  const gapMs = sorted.slice(1).reduce((g, t, i) => Math.max(g, t - sorted[i]!), 0);
   assert.equal(ebay.shadow_days, span, `сутки тени — длительность по строкам решений: ${ebay.shadow_days} и ${span}`);
   assert.ok(span >= 7, `неделя тени по длительности: ${span}`);
-  assert.equal(ebay.days_without_decisions, datesInRange - dates.size, 'сутки без решений — те же, что по строкам');
-  assert.equal(ebay.days_without_decisions, 0, 'в каждые сутки тени решения были');
-  console.log(JSON.stringify({ dayBoundaryEvidence: mine.map((c) => ({ storefront: `${c.channel} ${c.marketplace}`, shadowDays: c.shadow_days, silentDays: c.days_without_decisions, decisions: c.decisions,
+  assert.equal(ebay.longest_gap_hours, Math.ceil(gapMs / 3_600_000), 'самый длинный перерыв — тот же, что по строкам');
+  assert.ok(ebay.longest_gap_hours > 0 && ebay.longest_gap_hours <= 36, `тень подряд: самый длинный перерыв ${ebay.longest_gap_hours} ч`);
+  console.log(JSON.stringify({ dayBoundaryEvidence: mine.map((c) => ({ storefront: `${c.channel} ${c.marketplace}`, shadowDays: c.shadow_days, longestGapHours: c.longest_gap_hours, decisions: c.decisions,
     heldWrites: c.held_writes, budgetWrites: c.budget_writes, worstWindow: c.worst_window_max, limit: c.budget_limit })), byRows }));
 });
 

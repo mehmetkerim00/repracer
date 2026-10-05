@@ -2311,9 +2311,10 @@ export const STEP69_ROWS = [
         smoke('a day boundary accepted with a zone abbreviation instead of a zone (Р-204)')),
       m(dropTrigger('zz_append_only', 'platform.day_boundary_acceptance'), smoke('append-only platform.day_boundary_acceptance')),
       m(dropTrigger('zz_no_truncate', 'platform.day_boundary_acceptance'), smoke('truncate platform.day_boundary_acceptance')),
-      // Ревью шага 69: находка 3 — неделя тени без суток без решений; находка 1 — принятие не меняет уже заданный пояс витрины
-      m(dropConstraint('day_boundary_acceptance_every_day_seen', 'platform.day_boundary_acceptance'),
-        smoke('a day boundary accepted although some shadow days had no decisions (Р-204)')),
+      // Ревью шага 69: находка 3 — неделя тени подряд (перерыв между решениями не дольше 36 часов); находка 1 — принятие не меняет уже
+      // заданный пояс витрины
+      m(dropConstraint('day_boundary_acceptance_no_long_gap', 'platform.day_boundary_acceptance'),
+        smoke('a day boundary accepted although the shadow paused longer than a day and a half (Р-204)')),
       m(replaceInFunction('platform.day_boundary_acceptance_apply()', 'IF zone IS NOT NULL AND zone <> NEW.time_zone THEN', 'IF false THEN'),
         smoke('a worst-case acceptance moves the time zone of a storefront that already has one (Р-204)')),
       // Находка 2: кто бывает доказательством — смоук tests/db/smoke_us_digest.sql

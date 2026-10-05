@@ -169,10 +169,11 @@ test('шаг 68: демо США — решения в долларах, «по�
   const [demoTenant] = await db.rows<{ tenant_id: string }>(`SELECT tenant_id FROM tenant_data.tenant WHERE demo`);
   const [ebayUs] = await db.rows<{ channel_account_id: string }>(
     `SELECT channel_account_id FROM tenant_data.channel_account WHERE tenant_id = $1 AND channel = 'EBAY'`, [demoTenant!.tenant_id]);
-  const [evidence] = await db.rows<{ shadow_days: number; days_without_decisions: number; demo: boolean }>(
-    `SELECT shadow_days, days_without_decisions, demo FROM platform.day_boundary_shadow_evidence($1, $2, 'EBAY_US')`, [demoTenant!.tenant_id, ebayUs!.channel_account_id]);
-  // Положительный контроль: тень у демо идёт каждые сутки прожатой недели (7 суток прожатия — 6 полных суток от первого решения до последнего)
-  assert.ok(evidence!.shadow_days >= 6 && evidence!.days_without_decisions === 0 && evidence!.demo, `положительный контроль: неделя тени у демо есть — ${JSON.stringify(evidence)}`);
+  const [evidence] = await db.rows<{ shadow_days: number; longest_gap_hours: number; demo: boolean }>(
+    `SELECT shadow_days, longest_gap_hours, demo FROM platform.day_boundary_shadow_evidence($1, $2, 'EBAY_US')`, [demoTenant!.tenant_id, ebayUs!.channel_account_id]);
+  // Положительный контроль: тень у демо идёт подряд всю прожатую неделю (7 суток прожатия — 6 полных суток от первого решения до последнего;
+  // пересчёт раз в сутки — перерыв чуть дольше суток, не больше 36 часов)
+  assert.ok(evidence!.shadow_days >= 6 && evidence!.longest_gap_hours <= 36 && evidence!.demo, `положительный контроль: неделя тени у демо есть — ${JSON.stringify(evidence)}`);
   const candidates = await db.rows<{ tenant_id: string }>(`SELECT tenant_id FROM platform.day_boundary_candidates()`);
   assert.ok(!candidates.some((c) => c.tenant_id === demoTenant!.tenant_id), 'демо-тенант — не кандидат процедуры границы суток');
   // K2, K10: свойства витрин США — словами
