@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Шаг 71: kill-test — отчёт решений по файлу каталога клиента (тень amazon.com, одноразовая база из шаблона).
+# Нужны переменные стенда PostgreSQL: REPRACER_PG_URL, REPRACER_PG_ADMIN_URL, REPRACER_PG_TEMPLATE (как у тестов, scripts/db/prepare.sh).
+# Файлы клиента и отчёты — только вне репозитория или в игнорируемом каталоге .killtest/.
+set -euo pipefail
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec node --experimental-strip-types --disable-warning=ExperimentalWarning "$root/tests/contract/src/killtest/main.ts" "$@"
