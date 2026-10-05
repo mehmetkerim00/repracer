@@ -286,8 +286,11 @@ CREATE TABLE platform.day_boundary_acceptance (
   -- Ревью шага 69, находка 3: «неделя тени» — ДЛИТЕЛЬНОСТЬ от первого до последнего теневого решения в целых сутках, а не число дат
   -- (решения с 23:59 первых суток до 00:01 седьмых дают семь дат за пять суток)
   shadow_days                 integer NOT NULL CONSTRAINT day_boundary_acceptance_week_of_shadow CHECK (shadow_days >= 7),
-  -- И ни одних суток (UTC) без решений между первым и последним: разрозненные дни за две недели неделей не считаются
-  days_without_decisions      integer NOT NULL CONSTRAINT day_boundary_acceptance_every_day_seen CHECK (days_without_decisions = 0),
+  -- И тень шла подряд: самый длинный перерыв между соседними решениями — не больше полутора суток. Разрозненные дни за две недели
+  -- неделей не считаются. Первая редакция требовала решения в каждую дату UTC — и отказывала аккаунту, чьи решения идут раз в сутки:
+  -- пересчёт по расписанию берёт единицу через 24 часа и такт после них, время решения сдвигается каждые сутки и однажды перешагивает
+  -- полночь UTC, дата остаётся пустой при непрерывной тени (поймал CI шага 69: прожатая неделя с 19:00 UTC, шаг пересчёта — час)
+  longest_gap_hours           integer NOT NULL CONSTRAINT day_boundary_acceptance_no_long_gap CHECK (longest_gap_hours <= 36),
   shadow_since                timestamptz NOT NULL,
   decisions                   bigint NOT NULL CONSTRAINT day_boundary_acceptance_decisions_seen CHECK (decisions > 0),
   worst_window_max            bigint NOT NULL,
@@ -373,7 +376,7 @@ GRANT SELECT (tenant_id, channel, field, status, object_edit_limit, valid_from, 
  * одному листингу в любые скользящие 24 часа. Принадлежит хранителю (читает данные тенантов без цен); отдаёт только счётчики.
  */
 CREATE FUNCTION platform.day_boundary_shadow_evidence(p_tenant_id uuid, p_channel_account_id uuid, p_marketplace text, p_days int DEFAULT 14)
-  RETURNS TABLE (shadow_days integer, days_without_decisions integer, shadow_since timestamptz, last_shadow_at timestamptz, decisions bigint,
+  RETURNS TABLE (shadow_days integer, longest_gap_hours integer, shadow_since timestamptz, last_shadow_at timestamptz, decisions bigint,
                  held_writes bigint, budget_writes bigint, worst_window_max bigint, budget_limit integer, account_mode text, demo boolean)
   LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog AS $fn$
   WITH acc AS (
@@ -399,12 +402,13 @@ CREATE FUNCTION platform.day_boundary_shadow_evidence(p_tenant_id uuid, p_channe
       FROM held WHERE would_spend_budget
   )
   /**
-   * Ревью шага 69, находка 3: сутки тени — ДЛИТЕЛЬНОСТЬ от первого до последнего решения в целых сутках; сутки без решений — даты UTC
-   * между первым и последним решением, в которые решений не было
+   * Ревью шага 69, находка 3: сутки тени — ДЛИТЕЛЬНОСТЬ от первого до последнего решения в целых сутках. Перерыв — самый длинный
+   * промежуток между соседними решениями в часах, с округлением вверх (0 — решение одно или их нет); даты UTC не считаются: решения раз
+   * в сутки сдвигаются и перешагивают полночь (см. столбец журнала)
    */
   SELECT (SELECT floor(extract(epoch FROM max(decided_at) - min(decided_at)) / 86400)::int FROM dec),
-         (SELECT ((max(decided_at) AT TIME ZONE 'UTC')::date - (min(decided_at) AT TIME ZONE 'UTC')::date + 1
-                  - count(DISTINCT (decided_at AT TIME ZONE 'UTC')::date))::int FROM dec),
+         (SELECT coalesce(ceil(max(extract(epoch FROM decided_at - prev)) / 3600), 0)::int
+            FROM (SELECT decided_at, lag(decided_at) OVER (ORDER BY decided_at) AS prev FROM dec) g),
          (SELECT min(decided_at) FROM dec), (SELECT max(decided_at) FROM dec), (SELECT count(*) FROM dec),
          (SELECT count(*) FROM held), (SELECT count(*) FROM held WHERE would_spend_budget),
          coalesce((SELECT max(n) FROM win), 0),
@@ -422,11 +426,11 @@ COMMENT ON FUNCTION platform.day_boundary_shadow_evidence(uuid, uuid, text, int)
  */
 CREATE FUNCTION platform.day_boundary_candidates() RETURNS TABLE (
   channel text, marketplace text, status text, question text, tenant_id uuid, tenant_name text, channel_account_id uuid,
-  shadow_days integer, days_without_decisions integer, shadow_since timestamptz, decisions bigint, held_writes bigint, budget_writes bigint,
+  shadow_days integer, longest_gap_hours integer, shadow_since timestamptz, decisions bigint, held_writes bigint, budget_writes bigint,
   worst_window_max bigint, budget_limit integer)
   LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog AS $fn$
   SELECT r.channel, r.marketplace, r.status, r.question, a.tenant_id, t.name, a.channel_account_id,
-         e.shadow_days, e.days_without_decisions, e.shadow_since, e.decisions, e.held_writes, e.budget_writes, e.worst_window_max, e.budget_limit
+         e.shadow_days, e.longest_gap_hours, e.shadow_since, e.decisions, e.held_writes, e.budget_writes, e.worst_window_max, e.budget_limit
     FROM platform.marketplace_readiness() r
     JOIN tenant_data.channel_account a ON a.channel = r.channel AND r.marketplace = ANY (a.marketplaces)
                                       AND a.disconnected_at IS NULL AND a.write_mode = 'SHADOW' AND a.auth_status = 'ACTIVE'
@@ -477,15 +481,15 @@ BEGIN
       p_channel_account_id, p_channel, p_marketplace USING ERRCODE = 'invalid_parameter_value';
   END IF;
   INSERT INTO platform.day_boundary_acceptance (channel, marketplace, time_zone, evidence_tenant_id, evidence_channel_account_id,
-                                                shadow_days, days_without_decisions, shadow_since, decisions, worst_window_max, budget_limit,
+                                                shadow_days, longest_gap_hours, shadow_since, decisions, worst_window_max, budget_limit,
                                                 operator_id, note)
   VALUES (p_channel, p_marketplace, p_time_zone, p_tenant_id, p_channel_account_id,
-          coalesce(e.shadow_days, 0), coalesce(e.days_without_decisions, 0), coalesce(e.shadow_since, now()), e.decisions, e.worst_window_max,
+          coalesce(e.shadow_days, 0), coalesce(e.longest_gap_hours, 0), coalesce(e.shadow_since, now()), e.decisions, e.worst_window_max,
           e.budget_limit, p_operator_id, p_note)
   RETURNING acceptance_id INTO id;
   PERFORM security.operator_audit(p_operator_id, security.platform_tenant_id(), 'operator.day_boundary_accepted', 'platform.day_boundary_acceptance', id,
     jsonb_build_object('channel', p_channel, 'marketplace', p_marketplace, 'time_zone', p_time_zone, 'shadow_days', e.shadow_days,
-                       'days_without_decisions', e.days_without_decisions,
+                       'longest_gap_hours', e.longest_gap_hours,
                        'worst_window_max', e.worst_window_max, 'budget_limit', e.budget_limit, 'operator', who));
   RETURN id;
 END $fn$;
@@ -493,16 +497,16 @@ END $fn$;
 /** Чтение панели [Р-168]: кандидаты и уже принятые */
 CREATE FUNCTION platform.operator_day_boundaries() RETURNS TABLE (
   channel text, marketplace text, status text, question text, tenant_id uuid, tenant_name text, channel_account_id uuid,
-  shadow_days integer, days_without_decisions integer, shadow_since timestamptz, decisions bigint, held_writes bigint, budget_writes bigint,
+  shadow_days integer, longest_gap_hours integer, shadow_since timestamptz, decisions bigint, held_writes bigint, budget_writes bigint,
   worst_window_max bigint, budget_limit integer)
   LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog AS $fn$
   SELECT * FROM platform.day_boundary_candidates()
 $fn$;
 CREATE FUNCTION platform.operator_day_boundary_acceptances(p_limit int DEFAULT 100) RETURNS TABLE (
-  acceptance_id uuid, channel text, marketplace text, time_zone text, shadow_days integer, days_without_decisions integer, decisions bigint,
+  acceptance_id uuid, channel text, marketplace text, time_zone text, shadow_days integer, longest_gap_hours integer, decisions bigint,
   worst_window_max bigint, budget_limit integer, operator text, note text, accepted_at timestamptz)
   LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog AS $fn$
-  SELECT j.acceptance_id, j.channel, j.marketplace, j.time_zone, j.shadow_days, j.days_without_decisions, j.decisions, j.worst_window_max, j.budget_limit,
+  SELECT j.acceptance_id, j.channel, j.marketplace, j.time_zone, j.shadow_days, j.longest_gap_hours, j.decisions, j.worst_window_max, j.budget_limit,
          o.display_name, j.note, j.accepted_at
     FROM platform.day_boundary_acceptance j JOIN platform.platform_operator o ON o.operator_id = j.operator_id
    ORDER BY j.accepted_at DESC LIMIT greatest(1, least(p_limit, 500))

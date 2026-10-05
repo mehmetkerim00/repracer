@@ -545,7 +545,7 @@ UPDATE platform.platform_operator SET active = false WHERE operator_id = 'a91820
 -- Шаг 69 [Р-204]: граница суток витрины, принятая худшим окном после недели тени. Строка журнала ставит пояс и статус витрины
 -- (откатывается вместе с файлом); всё, что журнал не принимает, отклоняет СВОЁ ограничение
 INSERT INTO platform.day_boundary_acceptance (channel, marketplace, time_zone, evidence_tenant_id, evidence_channel_account_id,
-                                              shadow_days, days_without_decisions, shadow_since, decisions, worst_window_max, budget_limit, operator_id, note)
+                                              shadow_days, longest_gap_hours, shadow_since, decisions, worst_window_max, budget_limit, operator_id, note)
 VALUES ('AMAZON', 'ATVPDKIKX0DER', 'America/Los_Angeles', 'a0000000-0000-0000-0000-00000000000a', 'a4410000-0000-4000-8000-000000000001',
         8, 0, now() - interval '8 days', 120, 0, NULL, 'a9182000-0000-4000-8000-000000000001', 'Synthetic acceptance after a week of shadow');
 SELECT pg_temp.ok('an accepted day boundary keeps live writes open as a conservative value (Р-204)', $q$
@@ -561,57 +561,57 @@ SELECT pg_temp.expect_fail('a worst-case day boundary set without the journal (�
   'is accepted by a row of platform.day_boundary_acceptance');
 SELECT pg_temp.expect_fail('a day boundary accepted after less than a week of shadow (Р-204)', $q$
   INSERT INTO platform.day_boundary_acceptance (channel, marketplace, time_zone, evidence_tenant_id, evidence_channel_account_id,
-                                                shadow_days, days_without_decisions, shadow_since, decisions, worst_window_max, budget_limit, operator_id, note)
+                                                shadow_days, longest_gap_hours, shadow_since, decisions, worst_window_max, budget_limit, operator_id, note)
   VALUES ('EBAY', 'EBAY_US', 'America/Los_Angeles', 'a0000000-0000-0000-0000-00000000000a', 'a4410000-0000-4000-8000-000000000001',
           6, 0, now() - interval '6 days', 120, 3, 250, 'a9182000-0000-4000-8000-000000000001', 'Synthetic acceptance after six days') $q$,
   'day_boundary_acceptance_week_of_shadow');
 SELECT pg_temp.expect_fail('a day boundary accepted although the worst window exceeds the edit budget (Р-204)', $q$
   INSERT INTO platform.day_boundary_acceptance (channel, marketplace, time_zone, evidence_tenant_id, evidence_channel_account_id,
-                                                shadow_days, days_without_decisions, shadow_since, decisions, worst_window_max, budget_limit, operator_id, note)
+                                                shadow_days, longest_gap_hours, shadow_since, decisions, worst_window_max, budget_limit, operator_id, note)
   VALUES ('EBAY', 'EBAY_US', 'America/Los_Angeles', 'a0000000-0000-0000-0000-00000000000a', 'a4410000-0000-4000-8000-000000000001',
           9, 0, now() - interval '9 days', 120, 251, 250, 'a9182000-0000-4000-8000-000000000001', 'Synthetic acceptance over the budget') $q$,
   'day_boundary_acceptance_worst_window_within_limit');
 SELECT pg_temp.expect_fail('a day boundary accepted without a single shadow decision (Р-204)', $q$
   INSERT INTO platform.day_boundary_acceptance (channel, marketplace, time_zone, evidence_tenant_id, evidence_channel_account_id,
-                                                shadow_days, days_without_decisions, shadow_since, decisions, worst_window_max, budget_limit, operator_id, note)
+                                                shadow_days, longest_gap_hours, shadow_since, decisions, worst_window_max, budget_limit, operator_id, note)
   VALUES ('EBAY', 'EBAY_US', 'America/Los_Angeles', 'a0000000-0000-0000-0000-00000000000a', 'a4410000-0000-4000-8000-000000000001',
           9, 0, now() - interval '9 days', 0, 0, 250, 'a9182000-0000-4000-8000-000000000001', 'Synthetic acceptance without decisions') $q$,
   'day_boundary_acceptance_decisions_seen');
 SELECT pg_temp.expect_fail('a day boundary accepted without a note (Р-204)', $q$
   INSERT INTO platform.day_boundary_acceptance (channel, marketplace, time_zone, evidence_tenant_id, evidence_channel_account_id,
-                                                shadow_days, days_without_decisions, shadow_since, decisions, worst_window_max, budget_limit, operator_id, note)
+                                                shadow_days, longest_gap_hours, shadow_since, decisions, worst_window_max, budget_limit, operator_id, note)
   VALUES ('EBAY', 'EBAY_US', 'America/Los_Angeles', 'a0000000-0000-0000-0000-00000000000a', 'a4410000-0000-4000-8000-000000000001',
           9, 0, now() - interval '9 days', 120, 3, 250, 'a9182000-0000-4000-8000-000000000001', 'ok') $q$,
   'day_boundary_acceptance_note_present');
 SELECT pg_temp.expect_fail('a day boundary accepted with a zone abbreviation instead of a zone (Р-204)', $q$
   INSERT INTO platform.day_boundary_acceptance (channel, marketplace, time_zone, evidence_tenant_id, evidence_channel_account_id,
-                                                shadow_days, days_without_decisions, shadow_since, decisions, worst_window_max, budget_limit, operator_id, note)
+                                                shadow_days, longest_gap_hours, shadow_since, decisions, worst_window_max, budget_limit, operator_id, note)
   VALUES ('EBAY', 'EBAY_US', 'PST', 'a0000000-0000-0000-0000-00000000000a', 'a4410000-0000-4000-8000-000000000001',
           9, 0, now() - interval '9 days', 120, 3, 250, 'a9182000-0000-4000-8000-000000000001', 'Synthetic acceptance with PST') $q$,
   'day_boundary_acceptance_time_zone_known');
--- Ревью шага 69, находка 3: неделя тени — без суток без решений между первым и последним
-SELECT pg_temp.expect_fail('a day boundary accepted although some shadow days had no decisions (Р-204)', $q$
+-- Ревью шага 69, находка 3: неделя тени — подряд. Перерыв между соседними решениями дольше полутора суток — не неделя (37 часов)
+SELECT pg_temp.expect_fail('a day boundary accepted although the shadow paused longer than a day and a half (Р-204)', $q$
   INSERT INTO platform.day_boundary_acceptance (channel, marketplace, time_zone, evidence_tenant_id, evidence_channel_account_id,
-                                                shadow_days, days_without_decisions, shadow_since, decisions, worst_window_max, budget_limit, operator_id, note)
+                                                shadow_days, longest_gap_hours, shadow_since, decisions, worst_window_max, budget_limit, operator_id, note)
   VALUES ('EBAY', 'EBAY_US', 'America/Los_Angeles', 'a0000000-0000-0000-0000-00000000000a', 'a4410000-0000-4000-8000-000000000001',
-          9, 2, now() - interval '9 days', 120, 3, 250, 'a9182000-0000-4000-8000-000000000001', 'Synthetic acceptance with two silent days') $q$,
-  'day_boundary_acceptance_every_day_seen');
+          9, 37, now() - interval '9 days', 120, 3, 250, 'a9182000-0000-4000-8000-000000000001', 'Synthetic acceptance after a 37 hour pause') $q$,
+  'day_boundary_acceptance_no_long_gap');
 -- Ревью шага 69, находка 1: витрина, чей пояс уже задан и не подтверждён (в смоук-мире — kaufland.de, Europe/Berlin), принятием пояса не меняет
 SELECT pg_temp.expect_fail('a worst-case acceptance moves the time zone of a storefront that already has one (Р-204)', $q$
   INSERT INTO platform.day_boundary_acceptance (channel, marketplace, time_zone, evidence_tenant_id, evidence_channel_account_id,
-                                                shadow_days, days_without_decisions, shadow_since, decisions, worst_window_max, budget_limit, operator_id, note)
+                                                shadow_days, longest_gap_hours, shadow_since, decisions, worst_window_max, budget_limit, operator_id, note)
   VALUES ('KAUFLAND', 'de', 'America/Los_Angeles', 'a0000000-0000-0000-0000-00000000000a', 'a4410000-0000-4000-8000-000000000001',
           9, 0, now() - interval '9 days', 120, 0, NULL, 'a9182000-0000-4000-8000-000000000001', 'Synthetic acceptance in a foreign zone') $q$,
   'a worst-case acceptance keeps that time zone');
--- Положительный контроль [Р-94]: тот же пояс витрины принимается
+-- Положительный контроль [Р-94]: тот же пояс витрины принимается; и перерыв ровно 36 часов — ещё неделя подряд (граница включена)
 SELECT pg_temp.ok('a worst-case acceptance keeps the zone a storefront already has (Р-204)', $q$
   INSERT INTO platform.day_boundary_acceptance (channel, marketplace, time_zone, evidence_tenant_id, evidence_channel_account_id,
-                                                shadow_days, days_without_decisions, shadow_since, decisions, worst_window_max, budget_limit, operator_id, note)
+                                                shadow_days, longest_gap_hours, shadow_since, decisions, worst_window_max, budget_limit, operator_id, note)
   VALUES ('KAUFLAND', 'de', 'Europe/Berlin', 'a0000000-0000-0000-0000-00000000000a', 'a4410000-0000-4000-8000-000000000001',
-          9, 0, now() - interval '9 days', 120, 0, NULL, 'a9182000-0000-4000-8000-000000000001', 'Synthetic acceptance in its own zone') $q$);
+          9, 36, now() - interval '9 days', 120, 0, NULL, 'a9182000-0000-4000-8000-000000000001', 'Synthetic acceptance in its own zone') $q$);
 SELECT pg_temp.expect_fail('a day boundary acceptance outside the platform tenant (Р-204)', $q$
   INSERT INTO platform.day_boundary_acceptance (tenant_id, channel, marketplace, time_zone, evidence_tenant_id, evidence_channel_account_id,
-                                                shadow_days, days_without_decisions, shadow_since, decisions, worst_window_max, budget_limit, operator_id, note)
+                                                shadow_days, longest_gap_hours, shadow_since, decisions, worst_window_max, budget_limit, operator_id, note)
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'EBAY', 'EBAY_US', 'America/Los_Angeles', 'a0000000-0000-0000-0000-00000000000a',
           'a4410000-0000-4000-8000-000000000001', 9, 0, now() - interval '9 days', 120, 3, 250, 'a9182000-0000-4000-8000-000000000001',
           'Synthetic acceptance in a tenant') $q$,
@@ -621,7 +621,7 @@ SELECT pg_temp.expect_fail('a day boundary acceptance outside the platform tenan
 UPDATE platform.marketplace SET time_zone_status = 'CONFIRMED' WHERE channel = 'KAUFLAND' AND marketplace = 'at';
 SELECT pg_temp.expect_fail('a day boundary accepted over a confirmed one (Р-204)', $q$
   INSERT INTO platform.day_boundary_acceptance (channel, marketplace, time_zone, evidence_tenant_id, evidence_channel_account_id,
-                                                shadow_days, days_without_decisions, shadow_since, decisions, worst_window_max, budget_limit, operator_id, note)
+                                                shadow_days, longest_gap_hours, shadow_since, decisions, worst_window_max, budget_limit, operator_id, note)
   VALUES ('KAUFLAND', 'at', 'Europe/Vienna', 'a0000000-0000-0000-0000-00000000000a', 'a4410000-0000-4000-8000-000000000001',
           9, 0, now() - interval '9 days', 120, 0, NULL, 'a9182000-0000-4000-8000-000000000001', 'Synthetic acceptance over confirmed') $q$,
   'marketplace_time_zone_question_named_while_unconfirmed');
