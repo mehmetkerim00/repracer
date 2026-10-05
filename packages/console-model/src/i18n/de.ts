@@ -266,6 +266,7 @@ const values: Record<ValueKey, string> = {
   AUTH_INVALID: 'ungültige Zugangsdaten', AUTH_EXPIRED: 'abgelaufene Zugangsdaten', ACCOUNT_INACTIVE: 'inaktives Kanalkonto', FORBIDDEN: 'vom Kanal verboten',
   VALIDATION: 'Wert vom Kanal abgelehnt', NOT_FOUND: 'Angebot im Kanal nicht gefunden', DUPLICATE_ACTION: 'doppelte Aktion', STALE_VERSION: 'veraltete Version',
   CHANNEL_REPRICER_ACTIVE: 'die automatische Preisgestaltung des Kanals ist für dieses Angebot aktiv', CHANNEL_BOUNDS_PRESENT: 'für das Angebot sind im Kanal Preisgrenzen gesetzt',
+  RESPONSE_MISMATCH: 'der Kanal hat zu einem anderen Angebot oder einer anderen Storefront geantwortet als angefragt: die Antwort wurde nicht verwendet',
   DISABLE_CHANNEL_REPRICER: 'Die Regel für automatische Preisgestaltung im Kanal vom Angebot entfernen (unsere Engine arbeitet nicht, solange sie gesetzt ist)', REMOVE_CHANNEL_BOUNDS: 'Den im Kanal gesetzten Mindest- und Höchstpreis entfernen: unsere Grenzen müssen die einzigen sein',
   ACTION_NOT_ALLOWED: 'Aktion vom Kanal nicht erlaubt', PRECONDITION_FAILED: 'Vorbedingung des Kanals nicht erfüllt', EDIT_BUDGET_EXHAUSTED: 'Änderungsbudget aufgebraucht',
   OFFER_NOT_LIVE: 'Angebot nicht online', POLICY_VIOLATION: 'Verstoß gegen Kanalrichtlinie', TENANT_MISMATCH: 'Konto gehört zu einem anderen Arbeitsbereich', SIGNATURE_INVALID: 'ungültige Signatur',

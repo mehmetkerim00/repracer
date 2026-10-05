@@ -93,6 +93,18 @@ const CURRENCY: Readonly<Record<string, { currency: string; region: 'EU' | 'NA' 
   A1PA6795UKMFR9: { currency: 'EUR', region: 'EU' }, ATVPDKIKX0DER: { currency: 'USD', region: 'NA' },
 };
 
+/**
+ * Шаг 70: регион витрины — страница marketplace-ids (https://developer-docs.amazon/sp-api/docs/marketplace-ids.md, updatedAt 2026-09-30,
+ * SHA-256 в vendor/amazon/sandbox/2026-10-05/SOURCE.md). Витрину чужого региона песочница отклоняет 403 (docs/evidence/step70-amazon-sandbox.md)
+ */
+const MARKETPLACE_REGION: Readonly<Record<string, 'NA' | 'EU' | 'FE'>> = {
+  A2EUQ1WTGCTBG2: 'NA', ATVPDKIKX0DER: 'NA', A1AM78C64UM0Y8: 'NA', A2Q3Y263D00KWC: 'NA',
+  A28R8C7NBKEWEA: 'EU', A1RKKUPIHCS9HS: 'EU', A1F83G8C2ARO7P: 'EU', A13V1IB3VIYZZH: 'EU', AMEN7PMS3EDWL: 'EU', A1805IZSGTT6HS: 'EU', A1PA6795UKMFR9: 'EU',
+  APJ6JRA9NG5V4: 'EU', A2NODRKZP88ZB9: 'EU', AE08WJ6YKNBMC: 'EU', A1C3SOZRARQ6R3: 'EU', ARBP9OOSHTCHU: 'EU', A33AVAJ2PDY3EV: 'EU', A17E79C6D8DWNP: 'EU',
+  A2VIGQ35RCS4UG: 'EU', A21TJRUUN4KGV: 'EU',
+  A19VAU5U5O7RUS: 'FE', A39IBJ37TRP1C6: 'FE', A1VC38T7YXB528: 'FE',
+};
+
 const major = (minor: number) => Number(`${Math.trunc(minor / 100)}.${String(Math.abs(minor % 100)).padStart(2, '0')}`);
 const listOf = (v: string | undefined) => (v ? v.split(',').map((x) => x.trim()).filter(Boolean) : []);
 const synError = (code: string, message: string) => ({ errors: [{ code: `SYN_${code}`, message: `${message} (model)` }] });
@@ -198,6 +210,17 @@ export class SimulatedAmazonChannel implements ChannelBehaviour {
     if (operation === 'lwaToken') return json(200, { access_token: this.accessToken, token_type: 'bearer', expires_in: 3600 });
     const plan = USAGE_PLAN[operation];
     if (!plan) return { violation: `${method} ${path}: the Amazon model has no such operation` };
+    /**
+     * Шаг 70 [песочница]: витрина другого региона — 403 с кодом `Unauthorized` и причиной в `details`, тело и заголовок — как у песочницы SP-API
+     * (адрес NA, витрина Японии). Идентификатор, которого нет на странице marketplace-ids, — 400 модели: песочница его не проверялась
+     */
+    const askedMarketplaces = listOf(request.query.marketplaceIds);
+    const unknownMarketplace = askedMarketplaces.find((m) => !MARKETPLACE_REGION[m]);
+    if (unknownMarketplace) return json(400, synError('INVALID_INPUT', `marketplace ${unknownMarketplace} is not on the marketplace-ids page`));
+    if (askedMarketplaces.some((m) => MARKETPLACE_REGION[m] !== this.spec.region)) {
+      return json(403, { errors: [{ code: 'Unauthorized', message: 'Access to requested resource is denied.', details: 'The marketplaces you provided are not valid for region.' }] },
+        { 'x-amzn-ErrorType': 'AccessDeniedException' });
+    }
     if (!this.buckets.get(operation)!.take(this.nowMs)) {
       this.stats.rateLimited += 1;
       return json(429, synError('QUOTA_EXCEEDED', `usage plan of ${operation} exceeded`), { 'x-amzn-RateLimit-Limit': String(plan.rate) });

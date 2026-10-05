@@ -112,3 +112,28 @@ export function productTypeOf(item: ListingsItem, marketplaceId: string): string
 export function listingPath(sellerId: string, sku: string): string {
   return `/listings/2021-08-01/items/${encodeURIComponent(sellerId)}/${encodeURIComponent(sku)}`;
 }
+
+/**
+ * Шаг 70 [Р-205, AMZ_C15]: ответ о том ли, что спрошено. Модель снимка (listingsItems_2021-08-01): `sku` обязателен у Item и у
+ * ListingsItemSubmissionResponse, `marketplaceId` — у ItemSummaryByMarketplace и ItemOfferByMarketplace. Сверяется: sku ответа равен
+ * запрошенному (`sku` null — запроса по SKU не было, у поиска); витрины сводок и офферов — только из marketplaceIds запроса (что SP-API их
+ * так ограничивает, снимок прямо не говорит — A-28, отсюда консервативное правило). Песочница отдала образец о чужом SKU с витриной вне
+ * запроса, и до шага адаптер его принял. Текст несовпадения не называет чужой SKU — только вид и витрины
+ */
+export type ResponseMismatch = { kind: 'SKU' | 'STOREFRONT'; message: string };
+
+export function responseIdentityMismatch(item: unknown, sku: string | null, marketplaces: readonly string[]): ResponseMismatch | null {
+  const body = (item && typeof item === 'object' ? item : {}) as { sku?: unknown; summaries?: unknown; offers?: unknown };
+  if (sku !== null && body.sku !== sku) return { kind: 'SKU', message: body.sku === undefined ? 'the response carries no sku' : 'the response is about another SKU than requested' };
+  const foreign = new Set<string>();
+  for (const list of [body.summaries, body.offers]) {
+    if (!Array.isArray(list)) continue;
+    for (const entry of list) {
+      const marketplace = (entry as { marketplaceId?: unknown } | null)?.marketplaceId;
+      if (typeof marketplace !== 'string' || !marketplaces.includes(marketplace)) foreign.add(typeof marketplace === 'string' ? marketplace : '(none)');
+    }
+  }
+  return foreign.size > 0
+    ? { kind: 'STOREFRONT', message: `the response holds storefronts outside the request: ${[...foreign].sort().join(', ').slice(0, 120)}` }
+    : null;
+}

@@ -261,7 +261,8 @@ export function validateScenario(s: Scenario): string[] {
       problems.push('a sandbox reconstruction needs sandbox: true, recordedAt and evidence');
     }
     if (!s.provenance.reviewedBy) problems.push('sandbox reconstruction has not been reviewed (provenance.reviewedBy is empty)');
-    if (s.channel !== 'EBAY') problems.push('RECONSTRUCTED_FROM_SANDBOX is used by eBay scenarios only (Р-162)');
+    // Шаг 70: песочница есть у eBay (шаг 39) и Amazon SP-API (шаг 70); у Kaufland её нет — сценарий «по песочнице» там выдумка
+    if (s.channel !== 'EBAY' && s.channel !== 'AMAZON') problems.push('RECONSTRUCTED_FROM_SANDBOX is used by eBay and Amazon scenarios only (Р-162)');
     for (const ex of s.exchanges ?? []) {
       if (ex.origin !== 'SANDBOX' && ex.origin !== 'SYNTHETIC') problems.push(`exchange ${ex.id}: origin must be SANDBOX or SYNTHETIC in a sandbox reconstruction`);
     }

@@ -114,7 +114,8 @@ export interface OrderItemRecord {
  * vendor/amazon/sp-api-models/2026-09-29/models/fba-inventory-api-model/fbaInventory.json. Только чтение: количество FBA ведёт Amazon [Р-6]
  */
 export interface InventorySummariesResponse {
-  payload?: { inventorySummaries?: InventorySummaryRecord[] };
+  /** definitions.GetInventorySummariesResult: granularity и inventorySummaries; `granularityId` у Marketplace — витрина (шаг 70) */
+  payload?: { granularity?: { granularityType?: string; granularityId?: string }; inventorySummaries?: InventorySummaryRecord[] };
   pagination?: { nextToken?: string };
 }
 

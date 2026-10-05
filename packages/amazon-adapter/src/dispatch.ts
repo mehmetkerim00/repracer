@@ -3,7 +3,7 @@ import type { ListingsItem, ListingsItemPatchRequest, ListingsItemSubmissionResp
 import { logConservative } from './conservative.ts';
 import { marketplaceInfo } from './descriptor.ts';
 import { channelError, classifyFailure, classifyIssue } from './errors.ts';
-import { channelOwnedPricing, fulfillmentOf, listingPath, minorToDecimal, productTypeOf } from './mapping.ts';
+import { channelOwnedPricing, fulfillmentOf, listingPath, minorToDecimal, productTypeOf, responseIdentityMismatch } from './mapping.ts';
 import { skuOf } from './planning.ts';
 import { acquire, deadlinePassed, nowMs, observeRateLimit, openSession, type AmazonAdapterOptions } from './session.ts';
 
@@ -57,6 +57,13 @@ export async function dispatchAmazon(options: AmazonAdapterOptions, ctx: Adapter
   });
   if (!read.ok) return rejectAll(batch, classifyFailure(read, 'ITEM', nowMs(options)), read.attempts.length);
   observeRateLimit(options, ctx, session, 'getListingsItem', read.headers);
+  // Шаг 70 [Р-205, AMZ_C15]: чтение перед записью о другом SKU или с витриной вне запроса — запись не уходит: тип товара и чужое
+  // ценообразование взяты были бы у другого предложения (песочница отдала LUGGAGE чужого товара, и PATCH ушёл с ним)
+  const readMismatch = responseIdentityMismatch(read.data, sku, marketplaces);
+  if (readMismatch) {
+    logConservative(options.deps.logger, ctx, 'AMZ_C15_RESPONSE_IDENTITY', { stage: 'DISPATCH_READ', kind: readMismatch.kind });
+    return rejectAll(batch, channelError('RESPONSE_MISMATCH', 'ITEM', `getListingsItem before the write: ${readMismatch.message}`, { raiseAlert: true }), read.attempts.length);
+  }
   const productType = productTypeOf(read.data, marketplaces[0]!);
   if (!productType) return rejectAll(batch, channelError('NOT_FOUND', 'ITEM', 'listing has no summary with a product type in the requested stores'), read.attempts.length);
   logConservative(options.deps.logger, ctx, 'AMZ_C09_PRODUCT_TYPE_FROM_SUMMARIES', { marketplaces: marketplaces.length });
@@ -117,6 +124,17 @@ export async function dispatchAmazon(options: AmazonAdapterOptions, ctx: Adapter
   }
   observeRateLimit(options, ctx, session, 'patchListingsItem', patched.headers);
   const submission = patched.data;
+  /**
+   * Шаг 70 [Р-205, AMZ_C15]: ответ на отправку о другом SKU — запись УШЛА, но принятие не о ней: отказом её не назвать (могла примениться),
+   * принятой — тоже. Исход неизвестен, ядро сверяет обратным чтением, а оно сверяет ответ так же
+   */
+  const submissionMismatch = responseIdentityMismatch(submission, sku, sendMarketplaces);
+  if (submissionMismatch) {
+    logConservative(options.deps.logger, ctx, 'AMZ_C15_RESPONSE_IDENTITY', { stage: 'DISPATCH_SUBMISSION', kind: submissionMismatch.kind });
+    const error = channelError('RESPONSE_MISMATCH', 'ITEM', `patchListingsItem: ${submissionMismatch.message}`, { raiseAlert: true });
+    for (const w of sendable) outcomes.push({ channelWriteId: w.channelWriteId, status: 'OUTCOME_UNKNOWN', error });
+    return { batchId: batch.batchId, outcomes, attemptsMade };
+  }
   const errors = (submission.issues ?? []).filter((i) => i.severity === 'ERROR');
   if (sendable.length > 1) logConservative(options.deps.logger, ctx, 'AMZ_C06_MULTI_MARKETPLACE_ISSUES', { marketplaces: sendable.length, errors: errors.length });
   for (const w of sendable) {

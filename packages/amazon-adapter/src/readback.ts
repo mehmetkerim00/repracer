@@ -3,7 +3,7 @@ import type { ListingsItem } from '@repracer/amazon-client';
 import { logConservative } from './conservative.ts';
 import { marketplaceInfo } from './descriptor.ts';
 import { channelError, classifyFailure } from './errors.ts';
-import { channelOwnedPricing, fulfillmentOf, hasDiscountedPrice, listingPath, merchantQuantity, ourPrice, purchasePrice } from './mapping.ts';
+import { channelOwnedPricing, fulfillmentOf, hasDiscountedPrice, listingPath, merchantQuantity, ourPrice, purchasePrice, responseIdentityMismatch } from './mapping.ts';
 import { skuOf } from './planning.ts';
 import { acquire, nowMs, observeRateLimit, openSession, type AmazonAdapterOptions } from './session.ts';
 
@@ -37,6 +37,14 @@ export async function readBackAmazon(options: AmazonAdapterOptions, ctx: Adapter
     });
     if (!read.ok) { const e = classifyFailure(read, 'ITEM', nowMs(options)); for (const r of group) failures.push({ writeScopeId: r.writeScope.writeScopeId, error: e }); continue; }
     observeRateLimit(options, ctx, session, 'getListingsItem', read.headers);
+    // Шаг 70 [Р-205, AMZ_C15]: ответ о другом SKU или с витриной вне запроса не читается — ни цена, ни количество, ни чужое ценообразование
+    const mismatch = responseIdentityMismatch(read.data, sku, marketplaces);
+    if (mismatch) {
+      logConservative(options.deps.logger, ctx, 'AMZ_C15_RESPONSE_IDENTITY', { stage: 'READBACK', kind: mismatch.kind });
+      const e = channelError('RESPONSE_MISMATCH', 'ITEM', `getListingsItem: ${mismatch.message}`, { raiseAlert: true });
+      for (const r of group) failures.push({ writeScopeId: r.writeScope.writeScopeId, error: e });
+      continue;
+    }
     const item = read.data;
     for (const r of group) {
       const marketplace = r.writeScope.identity.marketplace!;

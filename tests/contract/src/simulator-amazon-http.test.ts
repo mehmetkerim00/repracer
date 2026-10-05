@@ -240,3 +240,28 @@ test('step 52: short pages and an empty page with a token — discovery and orde
     assert.deepEqual(violations, []);
   }
 });
+
+/**
+ * Шаг 70: витрина другого региона — 403 `Unauthorized` с причиной в `details` и `x-amzn-ErrorType`, как ответила песочница SP-API
+ * (адрес NA, витрина Японии; docs/evidence/step70-amazon-sandbox.md). До шага модель принимала любую витрину. Своя витрина — ответ;
+ * идентификатор, которого нет на странице marketplace-ids, — 400 модели
+ */
+test('step 70: the model refuses a storefront of another region like the sandbox does', async () => {
+  const { SimulatedAmazonChannel } = await import('./simulator/amazon-channel.ts');
+  const w = amazonWorld();
+  const model = new SimulatedAmazonChannel({ seed: 70, sellerId: SELLER, region: 'EU', offers: [{ sku: 'SYN-SKU-70', asin: 'B0SYN00070', marketplaces: [DE], priceMinor: 1299, quantity: 3 }] },
+    w.clock, ACCESS_TOKEN);
+  const read = (marketplaceIds: string) => model.reply({ method: 'GET', rawUrl: '', path: `/listings/2021-08-01/items/${SELLER}/SYN-SKU-70`,
+    query: { marketplaceIds, includedData: 'summaries' }, rawBody: '', body: null, headers: {} }, Date.parse(w.clock));
+  for (const foreign of ['ATVPDKIKX0DER', 'A1VC38T7YXB528', `${DE},ATVPDKIKX0DER`]) {
+    const r = read(foreign);
+    assert.ok('reply' in r && r.reply.kind === 'response', foreign);
+    assert.equal(r.reply.status, 403, foreign);
+    assert.deepEqual(r.reply.body, { errors: [{ code: 'Unauthorized', message: 'Access to requested resource is denied.', details: 'The marketplaces you provided are not valid for region.' }] });
+    assert.equal(r.reply.headers['x-amzn-ErrorType'], 'AccessDeniedException');
+  }
+  const own = read(DE);
+  assert.ok('reply' in own && own.reply.kind === 'response' && own.reply.status === 200, 'positive control: the storefront of the region is answered');
+  const unknown = read('SYNUNKNOWN01');
+  assert.ok('reply' in unknown && unknown.reply.kind === 'response' && unknown.reply.status === 400);
+});

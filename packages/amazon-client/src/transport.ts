@@ -96,7 +96,12 @@ function backoff(attempt: number, p: RetryPolicy): number {
 async function readErrors(response: Response): Promise<SpApiError[]> {
   try {
     const body = (await response.json()) as { errors?: SpApiError[] };
-    return Array.isArray(body?.errors) ? body.errors.map((e) => ({ code: String(e.code ?? ''), message: String(e.message ?? '').slice(0, 500) })) : [];
+    /**
+     * Шаг 70 (песочница SP-API): у 403 код всегда `Unauthorized`, а причину — нет токена, токен недействителен, витрина не того региона —
+     * называет только `details`. Без него текст отказа говорил бы «Access to requested resource is denied.» и ничего больше
+     */
+    return Array.isArray(body?.errors) ? body.errors.map((e) => ({ code: String(e.code ?? ''), message: String(e.message ?? '').slice(0, 500),
+      ...(typeof e.details === 'string' && e.details.trim() !== '' ? { details: e.details.slice(0, 500) } : {}) })) : [];
   } catch {
     return [];
   }

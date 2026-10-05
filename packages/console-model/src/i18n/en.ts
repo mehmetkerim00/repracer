@@ -278,6 +278,7 @@ const values: Record<ValueKey, string> = {
   AUTH_INVALID: 'invalid credentials', AUTH_EXPIRED: 'expired credentials', ACCOUNT_INACTIVE: 'inactive channel account', FORBIDDEN: 'action forbidden by the channel',
   VALIDATION: 'value refused by the channel', NOT_FOUND: 'offer not found in the channel', DUPLICATE_ACTION: 'duplicate action', STALE_VERSION: 'outdated write version',
   CHANNEL_REPRICER_ACTIVE: 'the channel\'s own automated pricing is active for this offer', CHANNEL_BOUNDS_PRESENT: 'the offer has price bounds set in the channel',
+  RESPONSE_MISMATCH: 'the channel answered about a different offer or storefront than we asked for: the answer was not used',
   DISABLE_CHANNEL_REPRICER: 'Remove the automated pricing rule from the offer in the channel (our engine does not work while it is set)', REMOVE_CHANNEL_BOUNDS: 'Remove the minimum and maximum price set in the channel: our bounds must be the only ones',
   ACTION_NOT_ALLOWED: 'action not allowed by the channel', PRECONDITION_FAILED: 'channel precondition not met', EDIT_BUDGET_EXHAUSTED: 'edit budget used up',
   OFFER_NOT_LIVE: 'offer not live', POLICY_VIOLATION: 'channel policy violation', TENANT_MISMATCH: 'the account belongs to another workspace', SIGNATURE_INVALID: 'invalid signature',

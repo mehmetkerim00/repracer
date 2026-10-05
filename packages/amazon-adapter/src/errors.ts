@@ -17,7 +17,11 @@ export function channelError(code: ChannelErrorCode, scope: ErrorScope, message:
 /** Сбой HTTP по статусам модели patchListingsItem/getListingsItem: 400, 403, 404, 413, 415, 429, 500, 503 */
 export function classifyFailure(result: Extract<SpApiResult<unknown>, { ok: false }>, defaultScope: ErrorScope, nowMs: number): ChannelError {
   const first = result.errors[0];
-  const message = first ? `${first.code}: ${first.message}` : `HTTP ${String(result.status)}`;
+  // Шаг 70 [Р-205]: `details` — в тексте ошибки (у 403 SP-API причина только в нём). Текст ошибки — журнал разработчика, в базу не пишется
+  // Сообщение укорачивается до деталей: текст ошибки обрезается на 300 знаках, и длинное сообщение не должно вытеснить причину
+  // Повтор сообщения в деталях (у образцов песочницы «Invalid Input» дважды) не дописывается
+  const details = first?.details && first.details !== first.message ? first.details : null;
+  const message = first ? `${first.code}: ${details ? `${first.message.slice(0, 120)} — ${details.slice(0, 160)}` : first.message}` : `HTTP ${String(result.status)}`;
   const extra = { ...(first?.code ? { channelCode: first.code } : {}), ...(typeof result.status === 'number' ? { httpStatus: result.status } : {}) };
   if (result.tokenFailure) {
     // Токен LWA не получен: к SP-API запрос не отправлялся. Отказ сервера токенов — отозванное согласие или ключи приложения

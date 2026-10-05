@@ -313,6 +313,8 @@ export const WRITE_ERROR_CODES = [
   'MAX_ATTEMPTS', 'NOT_APPLIED', 'SCOPE_HELD', 'SCOPE_CONTESTED', 'SCOPE_BLOCKED', 'SCOPE_RETIRED',
   // Итог записи не узнать обратным чтением дольше предела: единица блокируется до разбора человеком (D1)
   'OUTCOME_UNRESOLVED',
+  // Шаг 70 [Р-205]: ответ канала не о том SKU или не о той витрине — не принимается (channel-port). Последним: порядок держит реестр базы (0175)
+  'RESPONSE_MISMATCH',
 ] as const;
 export const ERROR_CLASSES = ['TRANSIENT', 'PERMANENT', 'REQUIRES_HUMAN'] as const;
 export const CONTEXT_CHANGES = ['MIN_PRICE', 'MAX_PRICE', 'CHANNEL_HALT', 'CHANNEL_DISTRUST', 'PRICING_STOP'] as const;

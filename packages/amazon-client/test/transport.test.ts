@@ -89,5 +89,6 @@ test('step 70: a 403 Unauthorized drops the cached token, takes a new one and re
   const refused = await v.client.request('GET', '/orders/2026-01-01/orders', { query: { marketplaceIds: ['A1VC38T7YXB528'] } });
   assert.ok(!refused.ok && refused.status === 403 && !refused.tokenFailure, 'the second 403 is the answer, not a token failure');
   assert.equal(refused.errors[0]!.code, 'Unauthorized');
+  assert.equal(refused.errors[0]!.details, 'The marketplaces you provided are not valid for region.', 'the reason survives: only details names it');
   assert.equal(v.calls.length, 4, 'one new token and one repeat — no third attempt');
 });

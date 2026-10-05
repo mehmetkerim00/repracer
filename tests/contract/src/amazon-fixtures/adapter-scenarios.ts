@@ -363,5 +363,56 @@ export function buildAdapterScenarios(): Array<{ file: string; scenario: Scenari
       { ctx: { tenantId: '10000000-0000-4000-8000-00000000ffff' } })],
     [], { alerts: [{ code: 'AMAZON_TENANT_MISMATCH', severity: 'CRITICAL', count: 1 }] }));
 
+  /**
+   * Шаг 70 [Р-205, AMZ_C15]: ответы песочницы SP-API — образцы статической песочницы, взятые из протокола живого прогона
+   * (docs/evidence/step70-amazon-sandbox-exchanges.json, обмены readBack и dispatch). На чтение SYN-SKU песочница отдала образец о чужом
+   * товаре с витриной Канады вне запроса, на PATCH — принятие о чужом SKU. До шага адаптер взял из образца тип товара и отправил PATCH
+   */
+  const usPrice = priceWrite('cw-70', 1, 1299, US, 'USD', 'NET');
+  const usOffer = [{ marketplace: US, priceMinor: 1299, currency: 'USD' }];
+  const sandboxNow = '2021-03-01T00:00:00Z';
+  const SANDBOX_LISTING_SAMPLE = {
+    sku: 'GM-ZDPI-9B4E',
+    summaries: [US, 'A2EUQ1WTGCTBG2'].map((m, i) => ({ marketplaceId: m, asin: 'B071VG5N9D', productType: 'LUGGAGE', conditionType: 'new_new', status: i === 0 ? ['BUYABLE'] : [],
+      itemName: 'Hardside Carry-On Spinner Suitcase Luggage', createdDate: i === 0 ? '2021-02-01T00:00:00Z' : '2021-02-02T01:00:00Z', lastUpdatedDate: i === 0 ? sandboxNow : '2021-03-05T00:00:00Z' })),
+    offers: [
+      { marketplaceId: US, offerType: 'B2C', price: { currencyCode: 'USD', amount: '100.00' }, audience: { value: 'ALL', displayName: 'Sell on Amazon' }, replenishmentDiscount: { discountPercentage: 5 } },
+      { marketplaceId: 'A2EUQ1WTGCTBG2', offerType: 'B2C', price: { currencyCode: 'CAD', amount: '130.00' }, audience: { value: 'ALL', displayName: 'Sell on Amazon' } },
+    ],
+    fulfillmentAvailability: [{ fulfillmentChannelCode: 'DEFAULT', quantity: 100 }],
+  };
+  const SANDBOX_SUBMISSION_SAMPLE = { sku: 'GM-ZDPI-9B4E', status: 'ACCEPTED', submissionId: 'f1dc2914-75dd-11ea-bc55-0242ac130003', issues: [] };
+  const sandbox = <T extends Exchange>(e: T, origin: 'SANDBOX' | 'SYNTHETIC'): T => ({ ...e, origin });
+  const mismatch = (what: string) => ({ code: 'RESPONSE_MISMATCH', class: 'REQUIRES_HUMAN', scope: 'ITEM', raiseAlert: true, message: { $regex: what } });
+  out.push({ file: 'sandbox-response-mismatch.json', scenario: {
+    format: SCENARIO_FORMAT, id: 'amazon/sandbox/response-mismatch', channel: 'AMAZON', apiVersion: 'listings-items-2021-08-01',
+    title: 'Р-205: ответ песочницы о чужом товаре не принимается — ни чтение, ни запись',
+    description: 'Статическая песочница SP-API отвечает образцом модели на любой SKU: на чтение SYN-SKU-7001 — товар GM-ZDPI-9B4E и витрина Канады вне '
+      + 'запроса, на PATCH — принятие о чужом SKU. Обратное чтение — отказ RESPONSE_MISMATCH без наблюдения; запись после такого чтения не уходит; '
+      + 'запись, ушедшая со своим чтением, с ответом о чужом SKU — исход неизвестен (сверка обратным чтением), а не «принято».',
+    tags: ['sandbox', 'r205', 'readback', 'dispatch'],
+    provenance: { kind: 'RECONSTRUCTED_FROM_SANDBOX', sandbox: true, recordedAt: '2026-10-05', evidence: 'docs/evidence/step70-amazon-sandbox.md',
+      redactions: ['tokens were never recorded', 'request ids and response headers dropped', 'issues and mainImage of the listing sample dropped: the checks do not read them',
+        'our SKU and seller id are synthetic (SYN-SKU-7001, A1SYNSELLER0001); GM-ZDPI-9B4E and B071VG5N9D are the sample of the public SP-API model'],
+      reviewedBy: 'step70-review: обезличивание проверено — образцы песочницы взяты из публичной модели SP-API, наши идентификаторы синтетические' },
+    world: amazonWorld({}, 'NA'),
+    steps: [
+      call('readback-foreign-sample', 'readBack', [[{ writeScope: usPrice.writeScope, fields: ['PRICE'] }]],
+        { observations: [], failures: [{ writeScopeId: usPrice.writeScope.writeScopeId, error: mismatch('another SKU') }] }),
+      call('dispatch-after-foreign-read', 'dispatch', [batch('amz:b70a', [usPrice])],
+        { outcomes: [{ channelWriteId: 'cw-70', status: 'REJECTED', error: mismatch('before the write') }], attemptsMade: 1 }),
+      call('dispatch-foreign-submission', 'dispatch', [batch('amz:b70b', [{ ...usPrice, version: 2, idempotencyKey: 'cw-70:2' }])],
+        { outcomes: [{ channelWriteId: 'cw-70', status: 'OUTCOME_UNKNOWN', error: mismatch('patchListingsItem') }], attemptsMade: 2 }),
+    ],
+    exchanges: [
+      sandbox(tokenExchange(), 'SYNTHETIC'),
+      sandbox({ ...readBackExchange('readback-sample', SKU, usOffer), response: { status: 200, body: SANDBOX_LISTING_SAMPLE } }, 'SANDBOX'),
+      sandbox({ ...preReadExchange('pre-read-sample', SKU, usOffer), response: { status: 200, body: SANDBOX_LISTING_SAMPLE } }, 'SANDBOX'),
+      sandbox(preReadExchange('pre-read-own', SKU, usOffer), 'SYNTHETIC'),
+      sandbox(patchPriceExchange('patch-sample-answer', SKU, [{ marketplace: US, minor: 1299, currency: 'USD' }], { status: 200, body: SANDBOX_SUBMISSION_SAMPLE }), 'SANDBOX'),
+    ],
+    expect: { noAlerts: true, logs: [{ code: 'AMZ_C15_RESPONSE_IDENTITY', count: 3 }] },
+  } });
+
   return out;
 }

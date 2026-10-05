@@ -77,6 +77,11 @@ export const AMAZON_CONSERVATIVE_RULES = {
     behaviour: 'Шаг 51 [Р-6]: количеством FBA управляет Amazon. Запись QUANTITY по SKU, у которого чтение перед записью показывает сеть Amazon без кода DEFAULT или не показывает кодов вовсе, не отправляется; обратное чтение такого SKU (сеть Amazon) — отказ «нужен человек», и сверка блокирует единицу сразу (каталог считал оффер FBM, а он ушёл в FBA)',
     whenAnswered: '—',
   },
+  AMZ_C15_RESPONSE_IDENTITY: {
+    question: 'A-28',
+    behaviour: 'Шаг 70 [Р-205]: ответ сверяется с запросом — sku предмета и ответа записи равен запрошенному, витрины сводок и офферов только из marketplaceIds запроса, granularityId FBA — запрошенная витрина. Несовпадение — RESPONSE_MISMATCH, ответ не используется: чтение — отказ, запись до отправки — отказ, ответ на отправленную запись — исход неизвестен (сверка обратным чтением). Песочница отдала образец о чужом SKU с витриной вне запроса — до шага адаптер его принял',
+    whenAnswered: 'Если SP-API отдаёт сводки и офферы витрин вне marketplaceIds (A-28) — витрины вне запроса не отказ, а пропуск с записью в журнал; сверка SKU остаётся',
+  },
 } as const satisfies Record<string, ConservativeRule>;
 
 export type AmazonConservativeRuleCode = keyof typeof AMAZON_CONSERVATIVE_RULES;

@@ -1,0 +1,650 @@
+{
+ "recorded": "2026-10-05",
+ "what": "Amazon SP-API dynamic sandbox (FBA Inventory v1, NA): sandbox-only createInventoryItem and addInventory, then getInventorySummaries with the query of the adapter; secrets and tokens redacted; all request data synthetic",
+ "exchanges": [
+  {
+   "label": "createInventoryItem (model body)",
+   "at": "2026-10-05T19:35:02.863Z",
+   "durationMs": 3179,
+   "request": {
+    "method": "POST",
+    "host": "api.amazon.com",
+    "path": "/auth/o2/token",
+    "query": {},
+    "headers": {
+     "content-type": "application/x-www-form-urlencoded;charset=UTF-8"
+    },
+    "body": {
+     "grant_type": "refresh_token",
+     "refresh_token": "<redacted>",
+     "client_id": "<redacted>",
+     "client_secret": "<redacted>"
+    }
+   },
+   "response": {
+    "status": 200,
+    "headers": {
+     "cache-control": "no-cache, no-store, must-revalidate",
+     "connection": "keep-alive",
+     "content-length": "763",
+     "content-type": "application/json;charset=UTF-8",
+     "date": "Mon, 05 Oct 2026 19:35:05 GMT",
+     "pragma": "no-cache",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "vary": "User-Agent,Accept-Encoding",
+     "x-amz-date": "Mon, 05 Oct 2026 19:35:05 GMT",
+     "x-amz-rid": "M2PAZAEWQKCE07E1PVM2",
+     "x-amzn-requestid": "b56c05d8-dc93-4362-8094-9203f4f8e543"
+    },
+    "body": {
+     "access_token": "<redacted, form Atza|…, 353 chars>",
+     "refresh_token": "<redacted>",
+     "token_type": "bearer",
+     "expires_in": 3600
+    }
+   }
+  },
+  {
+   "label": "createInventoryItem (model body)",
+   "at": "2026-10-05T19:35:06.044Z",
+   "durationMs": 2562,
+   "request": {
+    "method": "POST",
+    "host": "sandbox.sellingpartnerapi-na.amazon.com",
+    "path": "/fba/inventory/v1/items",
+    "query": {},
+    "headers": {
+     "accept": "application/json",
+     "x-amz-access-token": "<access token, form Atza|…>",
+     "x-amz-date": "20261005T193506Z",
+     "user-agent": "repracer-sandbox-probe/0.1 (Language=TypeScript; Platform=Node)",
+     "content-type": "application/json"
+    },
+    "body": {
+     "sellerSku": "SYN-FBA-70",
+     "marketplaceId": "ATVPDKIKX0DER",
+     "productName": "Synthetic FBA item 70"
+    }
+   },
+   "response": {
+    "status": 200,
+    "headers": {
+     "connection": "keep-alive",
+     "content-length": "4",
+     "content-type": "application/json",
+     "date": "Mon, 05 Oct 2026 19:35:08 GMT",
+     "edge-cache-control": "no-store,no-cache,stale-if-error=0,stale-while-revalidate=0",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "vary": "User-Agent,Accept-Encoding",
+     "via": "1.1 31028316ebf6f55d1032e774dd501fc4.cloudfront.net (CloudFront)",
+     "x-amz-apigw-id": "OPFf8e401e53ee2",
+     "x-amz-cf-id": "3tf4J6f8oNRoX8rXG3UmM9A6DE7EVvbtXZSKXu-RbS7nM0yLYhr3xQ==",
+     "x-amz-cf-pop": "FRA56-P14",
+     "x-amz-rid": "W3R0PPB94Y0C6GY36AK8",
+     "x-amzn-ratelimit-limit": "5.0",
+     "x-amzn-requestid": "f8e401e5-3ee2-4d87-9ad1-3a2138a5c7a2",
+     "x-amzn-trace-id": "Root=1-6ac3fbec-f8e401e53ee24d87",
+     "x-cache": "Miss from cloudfront"
+    },
+    "body": {}
+   }
+  },
+  {
+   "label": "createInventoryItem (doc example body: marketplaceIds)",
+   "at": "2026-10-05T19:35:08.607Z",
+   "durationMs": 2645,
+   "request": {
+    "method": "POST",
+    "host": "sandbox.sellingpartnerapi-na.amazon.com",
+    "path": "/fba/inventory/v1/items",
+    "query": {},
+    "headers": {
+     "accept": "application/json",
+     "x-amz-access-token": "<access token, form Atza|…>",
+     "x-amz-date": "20261005T193508Z",
+     "user-agent": "repracer-sandbox-probe/0.1 (Language=TypeScript; Platform=Node)",
+     "content-type": "application/json"
+    },
+    "body": {
+     "sellerSku": "SYN-FBA-70-DOC",
+     "marketplaceIds": "ATVPDKIKX0DER",
+     "productName": "Synthetic FBA item 70 doc"
+    }
+   },
+   "response": {
+    "status": 400,
+    "headers": {
+     "connection": "keep-alive",
+     "content-length": "164",
+     "content-type": "application/json",
+     "date": "Mon, 05 Oct 2026 19:35:11 GMT",
+     "edge-cache-control": "no-store,no-cache,stale-if-error=0,stale-while-revalidate=0",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "vary": "User-Agent,Accept-Encoding",
+     "via": "1.1 d5e242bbdda7ca2285d7ad511c640472.cloudfront.net (CloudFront)",
+     "x-amz-apigw-id": "OPF8ee63e5a9bbc",
+     "x-amz-cf-id": "tgdifUyQPoXce8lxcWOuE4z5p7dhGbJA9Guf7qle7NZqJq9vNmwenw==",
+     "x-amz-cf-pop": "FRA56-P14",
+     "x-amz-rid": "V95AN26BDXJ50KVYCQSJ",
+     "x-amzn-ratelimit-limit": "5.0",
+     "x-amzn-requestid": "8ee63e5a-9bbc-4105-af23-1ae8c1e6d5f5",
+     "x-amzn-trace-id": "Root=1-6ac3fbef-8ee63e5a9bbc4105",
+     "x-cache": "Error from cloudfront"
+    },
+    "body": {
+     "errors": [
+      {
+       "code": "InvalidInput",
+       "message": "MarketplaceId is required for Operation: CreateInventoryItem",
+       "details": ""
+      }
+     ]
+    }
+   }
+  },
+  {
+   "label": "token for raw calls",
+   "at": "2026-10-05T19:35:11.253Z",
+   "durationMs": 331,
+   "request": {
+    "method": "GET",
+    "host": "sandbox.sellingpartnerapi-na.amazon.com",
+    "path": "/sellers/v1/marketplaceParticipations",
+    "query": {},
+    "headers": {
+     "accept": "application/json",
+     "x-amz-access-token": "<access token, form Atza|…>",
+     "x-amz-date": "20261005T193511Z",
+     "user-agent": "repracer-sandbox-probe/0.1 (Language=TypeScript; Platform=Node)"
+    }
+   },
+   "response": {
+    "status": 200,
+    "headers": {
+     "connection": "keep-alive",
+     "content-length": "280",
+     "content-type": "application/json",
+     "date": "Mon, 05 Oct 2026 19:35:11 GMT",
+     "edge-cache-control": "no-store,no-cache,stale-if-error=0,stale-while-revalidate=0",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "vary": "User-Agent,Accept-Encoding",
+     "via": "1.1 31028316ebf6f55d1032e774dd501fc4.cloudfront.net (CloudFront)",
+     "x-amz-apigw-id": "OPF19f2076da369",
+     "x-amz-cf-id": "fgd14Hg2YYpb-1s8WkIugWtcnXympGxX8z3pxmeeTJ3mT_LkcHV-ag==",
+     "x-amz-cf-pop": "FRA56-P14",
+     "x-amz-rid": "7CQ95ANEDM9VMP1B5888",
+     "x-amzn-ratelimit-limit": "5.0",
+     "x-amzn-requestid": "19f2076d-a369-4893-b03b-3b705817090a",
+     "x-amzn-trace-id": "Root=1-6ac3fbef-19f2076da3694893",
+     "x-cache": "Miss from cloudfront"
+    },
+    "body": {
+     "payload": [
+      {
+       "marketplace": {
+        "id": "ATVPDKIKX0DER",
+        "countryCode": "US",
+        "name": "Amazon.com",
+        "defaultCurrencyCode": "USD",
+        "defaultLanguageCode": "en_US",
+        "domainName": "www.amazon.com"
+       },
+       "storeName": "BestSellerStore",
+       "participation": {
+        "isParticipating": true,
+        "hasSuspendedListings": false
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "label": "addInventory 7",
+   "at": "2026-10-05T19:35:11.585Z",
+   "durationMs": 810,
+   "request": {
+    "method": "POST",
+    "host": "sandbox.sellingpartnerapi-na.amazon.com",
+    "path": "/fba/inventory/v1/items/inventory",
+    "query": {},
+    "headers": {
+     "user-agent": "repracer-sandbox-probe/0.1 (Language=TypeScript; Platform=Node)",
+     "x-amz-access-token": "<access token, form Atza|…>",
+     "content-type": "application/json",
+     "x-amzn-idempotency-token": "syn-idem-142e488a-1142-439f-ae70-d705ab595470"
+    },
+    "body": {
+     "inventoryItems": [
+      {
+       "sellerSku": "SYN-FBA-70",
+       "marketplaceId": "ATVPDKIKX0DER",
+       "quantity": 7
+      }
+     ]
+    }
+   },
+   "response": {
+    "status": 200,
+    "headers": {
+     "connection": "keep-alive",
+     "content-length": "4",
+     "content-type": "application/json",
+     "date": "Mon, 05 Oct 2026 19:35:12 GMT",
+     "edge-cache-control": "no-store,no-cache,stale-if-error=0,stale-while-revalidate=0",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "vary": "User-Agent,Accept-Encoding",
+     "via": "1.1 d5e242bbdda7ca2285d7ad511c640472.cloudfront.net (CloudFront)",
+     "x-amz-apigw-id": "OPF9ddb0e0c3823",
+     "x-amz-cf-id": "UP2V4fv6n9eyNMdPldBjS_0-g71mMYh9tp4dSa4A4l1-zVsVKZ8DzQ==",
+     "x-amz-cf-pop": "FRA56-P14",
+     "x-amz-rid": "2X8Z64ARHWSC40YKRMS2",
+     "x-amzn-ratelimit-limit": "5.0",
+     "x-amzn-requestid": "9ddb0e0c-3823-4f5a-9c90-07ea665a8152",
+     "x-amzn-trace-id": "Root=1-6ac3fbf0-9ddb0e0c38234f5a",
+     "x-cache": "Miss from cloudfront"
+    },
+    "body": {}
+   }
+  },
+  {
+   "label": "addInventory 7, same idempotency token",
+   "at": "2026-10-05T19:35:12.396Z",
+   "durationMs": 509,
+   "request": {
+    "method": "POST",
+    "host": "sandbox.sellingpartnerapi-na.amazon.com",
+    "path": "/fba/inventory/v1/items/inventory",
+    "query": {},
+    "headers": {
+     "user-agent": "repracer-sandbox-probe/0.1 (Language=TypeScript; Platform=Node)",
+     "x-amz-access-token": "<access token, form Atza|…>",
+     "content-type": "application/json",
+     "x-amzn-idempotency-token": "syn-idem-142e488a-1142-439f-ae70-d705ab595470"
+    },
+    "body": {
+     "inventoryItems": [
+      {
+       "sellerSku": "SYN-FBA-70",
+       "marketplaceId": "ATVPDKIKX0DER",
+       "quantity": 7
+      }
+     ]
+    }
+   },
+   "response": {
+    "status": 400,
+    "headers": {
+     "connection": "keep-alive",
+     "content-length": "137",
+     "content-type": "application/json",
+     "date": "Mon, 05 Oct 2026 19:35:13 GMT",
+     "edge-cache-control": "no-store,no-cache,stale-if-error=0,stale-while-revalidate=0",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "vary": "User-Agent,Accept-Encoding",
+     "via": "1.1 31028316ebf6f55d1032e774dd501fc4.cloudfront.net (CloudFront)",
+     "x-amz-apigw-id": "OPF79dc40f0721b",
+     "x-amz-cf-id": "r_zYiNRFujkNdYZ4n9zXflkTuNiRnG3B1r6Gw4XPptIvM7XBb3eLPQ==",
+     "x-amz-cf-pop": "FRA56-P14",
+     "x-amz-rid": "9CRGZX9BZP41C2HA3N9V",
+     "x-amzn-ratelimit-limit": "5.0",
+     "x-amzn-requestid": "79dc40f0-721b-4f55-8b7d-cb149eed5597",
+     "x-amzn-trace-id": "Root=1-6ac3fbf1-79dc40f0721b4f55",
+     "x-cache": "Error from cloudfront"
+    },
+    "body": {
+     "errors": [
+      {
+       "code": "InvalidInput",
+       "message": "Idempotency Token already exists.",
+       "details": ""
+      }
+     ]
+    }
+   }
+  },
+  {
+   "label": "getInventorySummaries (adapter query) after add",
+   "at": "2026-10-05T19:35:12.907Z",
+   "durationMs": 598,
+   "request": {
+    "method": "GET",
+    "host": "sandbox.sellingpartnerapi-na.amazon.com",
+    "path": "/fba/inventory/v1/summaries",
+    "query": {
+     "details": "true",
+     "granularityType": "Marketplace",
+     "granularityId": "ATVPDKIKX0DER",
+     "marketplaceIds": "ATVPDKIKX0DER",
+     "sellerSkus": "SYN-FBA-70"
+    },
+    "headers": {
+     "accept": "application/json",
+     "x-amz-access-token": "<access token, form Atza|…>",
+     "x-amz-date": "20261005T193512Z",
+     "user-agent": "repracer-sandbox-probe/0.1 (Language=TypeScript; Platform=Node)"
+    }
+   },
+   "response": {
+    "status": 200,
+    "headers": {
+     "connection": "keep-alive",
+     "content-length": "1155",
+     "content-type": "application/json",
+     "date": "Mon, 05 Oct 2026 19:35:13 GMT",
+     "edge-cache-control": "no-store,no-cache,stale-if-error=0,stale-while-revalidate=0",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "vary": "User-Agent,Accept-Encoding",
+     "via": "1.1 d5e242bbdda7ca2285d7ad511c640472.cloudfront.net (CloudFront)",
+     "x-amz-apigw-id": "OPF1e79cef23608",
+     "x-amz-cf-id": "ITr1K8NQlF6CEk_yOItCwSl03eapNSi6NWug5fsMlX6QtqkhkroNMA==",
+     "x-amz-cf-pop": "FRA56-P14",
+     "x-amz-rid": "68WKR28MSAPGHCJHYXQT",
+     "x-amzn-ratelimit-limit": "5.0",
+     "x-amzn-requestid": "1e79cef2-3608-4481-827d-7dddff918c40",
+     "x-amzn-trace-id": "Root=1-6ac3fbf1-1e79cef236084481",
+     "x-cache": "Miss from cloudfront"
+    },
+    "body": {
+     "payload": {
+      "granularity": {
+       "granularityType": "Marketplace",
+       "granularityId": "ATVPDKIKX0DER"
+      },
+      "inventorySummaries": [
+       {
+        "asin": "94010ebdae2cc4d7d30b182eff2fc3cb",
+        "fnSku": "ee2311e71a80798fc85365316b63cd24",
+        "sellerSku": "SYN-FBA-70",
+        "condition": "NEW",
+        "inventoryDetails": {
+         "fulfillableQuantity": 7,
+         "inboundWorkingQuantity": 0,
+         "inboundShippedQuantity": 0,
+         "inboundReceivingQuantity": 0,
+         "reservedQuantity": {
+          "totalReservedQuantity": 0,
+          "pendingCustomerOrderQuantity": 0,
+          "pendingTransshipmentQuantity": 0,
+          "fcProcessingQuantity": 0
+         },
+         "researchingQuantity": {
+          "totalResearchingQuantity": 0,
+          "researchingQuantityBreakdown": []
+         },
+         "unfulfillableQuantity": {
+          "totalUnfulfillableQuantity": 0,
+          "customerDamagedQuantity": 0,
+          "warehouseDamagedQuantity": 0,
+          "distributorDamagedQuantity": 0,
+          "carrierDamagedQuantity": 0,
+          "defectiveQuantity": 0,
+          "expiredQuantity": 0
+         },
+         "futureSupplyQuantity": {
+          "reservedFutureSupplyQuantity": 0,
+          "futureSupplyBuyableQuantity": 0
+         }
+        },
+        "lastUpdatedTime": "2026-10-05T19:35:12Z",
+        "productName": "Synthetic FBA item 70",
+        "totalQuantity": 7
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "label": "getInventorySummaries, unknown SKU",
+   "at": "2026-10-05T19:35:13.506Z",
+   "durationMs": 1179,
+   "request": {
+    "method": "GET",
+    "host": "sandbox.sellingpartnerapi-na.amazon.com",
+    "path": "/fba/inventory/v1/summaries",
+    "query": {
+     "details": "true",
+     "granularityType": "Marketplace",
+     "granularityId": "ATVPDKIKX0DER",
+     "marketplaceIds": "ATVPDKIKX0DER",
+     "sellerSkus": "SYN-FBA-NONE"
+    },
+    "headers": {
+     "accept": "application/json",
+     "x-amz-access-token": "<access token, form Atza|…>",
+     "x-amz-date": "20261005T193513Z",
+     "user-agent": "repracer-sandbox-probe/0.1 (Language=TypeScript; Platform=Node)"
+    }
+   },
+   "response": {
+    "status": 200,
+    "headers": {
+     "connection": "keep-alive",
+     "content-length": "166",
+     "content-type": "application/json",
+     "date": "Mon, 05 Oct 2026 19:35:14 GMT",
+     "edge-cache-control": "no-store,no-cache,stale-if-error=0,stale-while-revalidate=0",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "vary": "User-Agent,Accept-Encoding",
+     "via": "1.1 31028316ebf6f55d1032e774dd501fc4.cloudfront.net (CloudFront)",
+     "x-amz-apigw-id": "OPF9e9de5334e02",
+     "x-amz-cf-id": "81Q-4k3Uj7Y_aHm0b-_d0gecvQ_3RwIxXrloohLpK0PAOs3lOS8UfA==",
+     "x-amz-cf-pop": "FRA56-P14",
+     "x-amz-rid": "72A1G81Z18NRBPNJGHEF",
+     "x-amzn-ratelimit-limit": "5.0",
+     "x-amzn-requestid": "9e9de533-4e02-4d40-b9bf-3df1b6bc37a4",
+     "x-amzn-trace-id": "Root=1-6ac3fbf2-9e9de5334e024d40",
+     "x-cache": "Miss from cloudfront"
+    },
+    "body": {
+     "payload": {
+      "granularity": {
+       "granularityType": "Marketplace",
+       "granularityId": "ATVPDKIKX0DER"
+      },
+      "inventorySummaries": []
+     }
+    }
+   }
+  },
+  {
+   "label": "adapter discoverOffers: FBA quantity from the dynamic sandbox",
+   "at": "2026-10-05T19:35:14.689Z",
+   "durationMs": 1536,
+   "request": {
+    "method": "POST",
+    "host": "api.amazon.com",
+    "path": "/auth/o2/token",
+    "query": {},
+    "headers": {
+     "content-type": "application/x-www-form-urlencoded;charset=UTF-8"
+    },
+    "body": {
+     "grant_type": "refresh_token",
+     "refresh_token": "<redacted>",
+     "client_id": "<redacted>",
+     "client_secret": "<redacted>"
+    }
+   },
+   "response": {
+    "status": 200,
+    "headers": {
+     "cache-control": "no-cache, no-store, must-revalidate",
+     "connection": "keep-alive",
+     "content-length": "763",
+     "content-type": "application/json;charset=UTF-8",
+     "date": "Mon, 05 Oct 2026 19:35:16 GMT",
+     "pragma": "no-cache",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "vary": "User-Agent,Accept-Encoding",
+     "x-amz-date": "Mon, 05 Oct 2026 19:35:16 GMT",
+     "x-amz-rid": "PS8M1GRBN88SMNJGNQ7S",
+     "x-amzn-requestid": "af92dd24-30b9-4bc3-b20c-941efabbd760"
+    },
+    "body": {
+     "access_token": "<redacted, form Atza|…, 353 chars>",
+     "refresh_token": "<redacted>",
+     "token_type": "bearer",
+     "expires_in": 3600
+    }
+   }
+  },
+  {
+   "label": "adapter discoverOffers: FBA quantity from the dynamic sandbox",
+   "at": "2026-10-05T19:35:16.227Z",
+   "durationMs": 513,
+   "request": {
+    "method": "GET",
+    "host": "sandbox.sellingpartnerapi-na.amazon.com",
+    "path": "/fba/inventory/v1/summaries",
+    "query": {
+     "details": "true",
+     "granularityType": "Marketplace",
+     "granularityId": "ATVPDKIKX0DER",
+     "marketplaceIds": "ATVPDKIKX0DER",
+     "sellerSkus": "SYN-FBA-70"
+    },
+    "headers": {
+     "accept": "application/json",
+     "x-amz-access-token": "<access token, form Atza|…>",
+     "x-amz-date": "20261005T193516Z",
+     "user-agent": "repracer-sandbox-probe/0.1 (Language=TypeScript; Platform=Node)"
+    }
+   },
+   "response": {
+    "status": 200,
+    "headers": {
+     "connection": "keep-alive",
+     "content-length": "1155",
+     "content-type": "application/json",
+     "date": "Mon, 05 Oct 2026 19:35:16 GMT",
+     "edge-cache-control": "no-store,no-cache,stale-if-error=0,stale-while-revalidate=0",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "vary": "User-Agent,Accept-Encoding",
+     "via": "1.1 31028316ebf6f55d1032e774dd501fc4.cloudfront.net (CloudFront)",
+     "x-amz-apigw-id": "OPF1bbafe1ec597",
+     "x-amz-cf-id": "Y-3MNMW4GE7euugLfaRFOdGk72hqwicrkworqTkVaxuCmEbgX8kcyA==",
+     "x-amz-cf-pop": "FRA56-P14",
+     "x-amz-rid": "E78TG339056B5F8NP4P9",
+     "x-amzn-ratelimit-limit": "5.0",
+     "x-amzn-requestid": "1bbafe1e-c597-406b-baf1-b24320d7fd16",
+     "x-amzn-trace-id": "Root=1-6ac3fbf4-1bbafe1ec597406b",
+     "x-cache": "Miss from cloudfront"
+    },
+    "body": {
+     "payload": {
+      "granularity": {
+       "granularityType": "Marketplace",
+       "granularityId": "ATVPDKIKX0DER"
+      },
+      "inventorySummaries": [
+       {
+        "asin": "94010ebdae2cc4d7d30b182eff2fc3cb",
+        "fnSku": "ee2311e71a80798fc85365316b63cd24",
+        "sellerSku": "SYN-FBA-70",
+        "condition": "NEW",
+        "inventoryDetails": {
+         "fulfillableQuantity": 7,
+         "inboundWorkingQuantity": 0,
+         "inboundShippedQuantity": 0,
+         "inboundReceivingQuantity": 0,
+         "reservedQuantity": {
+          "totalReservedQuantity": 0,
+          "pendingCustomerOrderQuantity": 0,
+          "pendingTransshipmentQuantity": 0,
+          "fcProcessingQuantity": 0
+         },
+         "researchingQuantity": {
+          "totalResearchingQuantity": 0,
+          "researchingQuantityBreakdown": []
+         },
+         "unfulfillableQuantity": {
+          "totalUnfulfillableQuantity": 0,
+          "customerDamagedQuantity": 0,
+          "warehouseDamagedQuantity": 0,
+          "distributorDamagedQuantity": 0,
+          "carrierDamagedQuantity": 0,
+          "defectiveQuantity": 0,
+          "expiredQuantity": 0
+         },
+         "futureSupplyQuantity": {
+          "reservedFutureSupplyQuantity": 0,
+          "futureSupplyBuyableQuantity": 0
+         }
+        },
+        "lastUpdatedTime": "2026-10-05T19:35:12Z",
+        "productName": "Synthetic FBA item 70",
+        "totalQuantity": 7
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "label": "deleteInventoryItem (quantity is not 0)",
+   "at": "2026-10-05T19:35:16.741Z",
+   "durationMs": 560,
+   "request": {
+    "method": "DELETE",
+    "host": "sandbox.sellingpartnerapi-na.amazon.com",
+    "path": "/fba/inventory/v1/items/SYN-FBA-70",
+    "query": {
+     "marketplaceId": "ATVPDKIKX0DER"
+    },
+    "headers": {
+     "accept": "application/json",
+     "x-amz-access-token": "<access token, form Atza|…>",
+     "x-amz-date": "20261005T193516Z",
+     "user-agent": "repracer-sandbox-probe/0.1 (Language=TypeScript; Platform=Node)"
+    }
+   },
+   "response": {
+    "status": 400,
+    "headers": {
+     "connection": "keep-alive",
+     "content-length": "194",
+     "content-type": "application/json",
+     "date": "Mon, 05 Oct 2026 19:35:17 GMT",
+     "edge-cache-control": "no-store,no-cache,stale-if-error=0,stale-while-revalidate=0",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "vary": "User-Agent,Accept-Encoding",
+     "via": "1.1 d5e242bbdda7ca2285d7ad511c640472.cloudfront.net (CloudFront)",
+     "x-amz-apigw-id": "OPF205825b728dc",
+     "x-amz-cf-id": "Xqb2pVIo22q-zD1_3NFQznJapChJKc5f-vnq_lBPK6w_wTg2zmBCWw==",
+     "x-amz-cf-pop": "FRA56-P14",
+     "x-amz-rid": "7864WR2FJX2ZR069X12S",
+     "x-amzn-ratelimit-limit": "5.0",
+     "x-amzn-requestid": "205825b7-28dc-4b7c-883f-7201257eecdd",
+     "x-amzn-trace-id": "Root=1-6ac3fbf5-205825b728dc4b7c",
+     "x-cache": "Error from cloudfront"
+    },
+    "body": {
+     "errors": [
+      {
+       "code": "InvalidInput",
+       "message": "The availableQuantity and reservedQuantity should be 0 to allow deleting an inventory item",
+       "details": ""
+      }
+     ]
+    }
+   }
+  }
+ ],
+ "adapterLogCodes": [
+  "AMZ_C10_RATE_LIMIT_HEADER",
+  "AMZ_C13_FBA_BY_CHANNEL_CODE"
+ ]
+}

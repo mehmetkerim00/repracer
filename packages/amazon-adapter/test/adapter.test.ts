@@ -101,3 +101,128 @@ test('step 69 (OQ-249): discovery takes the product title from itemName of the m
   assert.ok(long.startsWith(capped!.title!));
   assert.deepEqual(calls, ['/listings/2021-08-01/items/SYN_SELLER'], 'the title comes from the search response itself — no extra call');
 });
+
+/**
+ * Шаг 70 [Р-205, AMZ_C15]: ответ сверяется с запросом. Песочница SP-API на чтение SYN-SKU отдала образец о чужом товаре (sku GM-ZDPI-9B4E,
+ * витрина Канады вне запроса), и до шага адаптер взял из него тип товара и отправил PATCH. Каждое место сверки — своим отказом с кодом
+ * RESPONSE_MISMATCH; чужой ответ не даёт ни наблюдения, ни записи
+ */
+test('step 70 (Р-205): a response about another SKU or with a storefront outside the request is refused with RESPONSE_MISMATCH, never used', async () => {
+  const { fbaQuantitiesOf } = await import('../src/listing.ts');
+  const { classifyFailure } = await import('../src/errors.ts');
+  const US = 'ATVPDKIKX0DER';
+  const CA = 'A2EUQ1WTGCTBG2';
+  const NOW = '2026-10-05T10:00:00.000Z';
+  const item = (sku: string | undefined, marketplaces: string[]) => ({
+    ...(sku === undefined ? {} : { sku }),
+    summaries: marketplaces.map((m) => ({ marketplaceId: m, asin: 'B0SYN00070', productType: 'SYN_TYPE', status: ['BUYABLE'], createdDate: NOW, lastUpdatedDate: NOW })),
+    attributes: { purchasable_offer: [{ marketplace_id: US, currency: 'USD', audience: 'ALL', our_price: [{ schedule: [{ value_with_tax: 12.99 }] }] }] },
+    offers: [{ marketplaceId: US, offerType: 'B2C', price: { currencyCode: 'USD', amount: '12.99' } }],
+    fulfillmentAvailability: [{ fulfillmentChannelCode: 'DEFAULT', quantity: 4 }],
+  });
+  let replies: Array<{ path: RegExp; method?: string; body: unknown }> = [];
+  let clockTicks = 0;
+  const sent: string[] = [];
+  const logs: string[] = [];
+  const fetchFn = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+    if (url.pathname === '/auth/o2/token') return new Response(JSON.stringify({ access_token: 'syn-lwa-access-token', expires_in: 3600 }), { status: 200 });
+    sent.push(`${init?.method ?? 'GET'} ${url.pathname}`);
+    const reply = replies.shift();
+    assert.ok(reply && reply.path.test(url.pathname) && (reply.method ?? 'GET') === (init?.method ?? 'GET'), `unexpected ${init?.method ?? 'GET'} ${url.pathname}`);
+    return new Response(JSON.stringify(reply.body), { status: 200, headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+  const adapter = createAmazonAdapter({
+    deps: {
+      accounts: { verify: async (tenantId, channelAccountId) => ({ ok: true, account: { tenantId, channelAccountId, channel: 'AMAZON', externalAccountId: 'SYN_SELLER', region: 'NA', marketplaces: [US], credentialsRef: 'cred:seller' } }) },
+      credentials: { get: async (ref): Promise<Record<string, string>> => (ref === 'cred:seller' ? { refreshToken: 'syn-refresh' } : { clientId: 'syn-client', clientSecret: 'syn-secret' }) },
+      alerts: { raise: async () => {} },
+      logger: { log: (e) => { logs.push(`${e.code}:${String((e.details as { stage?: string } | undefined)?.stage)}`); } },
+      // Часы идут: бюджет пары (burst 5) иначе кончился бы на шестом чтении теста
+      now: () => new Date(Date.parse(NOW) + (clockTicks += 1_000)).toISOString(),
+    },
+    userAgent: 'repracer-test/1.0', applicationCredentialsRef: 'cred:app', fetch: fetchFn, endpoints: { NA: 'https://sp-api.invalid' }, timeoutMs: 1000,
+  });
+  const ctx = { tenantId: '10000000-0000-4000-8000-000000000001' as TenantId, channelAccountId: '20000000-0000-4000-8000-000000000001' as ChannelAccountId, correlationId: 'unit', deadline: '2026-10-06T10:00:00.000Z' };
+  const scope = (field: 'PRICE' | 'QUANTITY') => ({ writeScopeId: `ws-${field}` as never, field, scopeKey: `syn|${field}`, identity: { region: 'NA', marketplace: US, externalSku: 'SYN-SKU-70' } });
+  const LISTING = /^\/listings\/2021-08-01\/items\/SYN_SELLER\/SYN-SKU-70$/;
+  const refused = (error: { code: string; class: string; raiseAlert: boolean; message: string } | undefined, what: RegExp) => {
+    assert.equal(error?.code, 'RESPONSE_MISMATCH');
+    assert.equal(error?.class, 'REQUIRES_HUMAN');
+    assert.equal(error?.raiseAlert, true);
+    assert.match(error!.message, what);
+    assert.ok(!error!.message.includes('GM-ZDPI'), 'the foreign SKU is not repeated in the message');
+  };
+
+  // Обратное чтение: чужой SKU, витрина вне запроса, ответ без sku — ни одного наблюдения
+  for (const [body, what] of [[item('GM-ZDPI-9B4E', [US, CA]), /another SKU/], [item('SYN-SKU-70', [US, CA]), new RegExp(`storefronts outside the request: ${CA}`)], [item(undefined, [US]), /carries no sku/]] as const) {
+    replies = [{ path: LISTING, body }];
+    const r = await adapter.readBack(ctx, [{ writeScope: scope('PRICE'), fields: ['PRICE'] }, { writeScope: scope('QUANTITY'), fields: ['QUANTITY'] }]);
+    assert.deepEqual(r.observations, [], 'a foreign answer gives no observation');
+    assert.equal(r.failures.length, 2);
+    for (const f of r.failures) refused(f.error, what);
+  }
+  // Положительный контроль: свой SKU и своя витрина — наблюдения есть
+  replies = [{ path: LISTING, body: item('SYN-SKU-70', [US]) }];
+  assert.equal((await adapter.readBack(ctx, [{ writeScope: scope('PRICE'), fields: ['PRICE'] }])).observations.length, 1);
+
+  // Запись: чтение перед записью о чужом SKU — PATCH не уходит
+  const write = { channelWriteId: 'cw-70' as never, writeScope: scope('PRICE'), version: 1, idempotencyKey: 'cw-70:1', attemptNo: 1,
+    value: { field: 'PRICE' as const, price: { amountMinor: 1299, currency: 'USD', basis: 'NET' as const } } };
+  const batch = { batchId: 'b-70', operation: 'patchListingsItem', items: [write], budgetCharges: [], requestCount: 2 };
+  sent.length = 0;
+  replies = [{ path: LISTING, body: item('GM-ZDPI-9B4E', [US, CA]) }];
+  const beforeWrite = await adapter.dispatch(ctx, batch);
+  assert.equal(beforeWrite.outcomes[0]!.status, 'REJECTED');
+  refused(beforeWrite.outcomes[0]!.error, /before the write: the response is about another SKU/);
+  assert.deepEqual(sent, ['GET /listings/2021-08-01/items/SYN_SELLER/SYN-SKU-70'], 'no PATCH after a foreign pre-read');
+
+  // Запись ушла, ответ о чужом SKU — исход неизвестен (не принято и не отказ), ядро сверит обратным чтением
+  replies = [{ path: LISTING, body: item('SYN-SKU-70', [US]) },
+    { path: LISTING, method: 'PATCH', body: { sku: 'GM-ZDPI-9B4E', status: 'ACCEPTED', submissionId: 'f1dc2914-75dd-11ea-bc55-0242ac130003', issues: [] } }];
+  const afterWrite = await adapter.dispatch(ctx, batch);
+  assert.equal(afterWrite.outcomes[0]!.status, 'OUTCOME_UNKNOWN');
+  refused(afterWrite.outcomes[0]!.error, /patchListingsItem: the response is about another SKU/);
+  replies = [{ path: LISTING, body: item('SYN-SKU-70', [US]) }, { path: LISTING, method: 'PATCH', body: { sku: 'SYN-SKU-70', status: 'ACCEPTED', submissionId: 'syn-70', issues: [] } }];
+  assert.equal((await adapter.dispatch(ctx, batch)).outcomes[0]!.status, 'ACCEPTED', 'positive control: own SKU is accepted');
+
+  // Обнаружение: витрина вне запроса или предмет без sku — страница не принимается целиком
+  for (const [items, what] of [[[item('SYN-1', [US]), item('SYN-2', [US, CA])], new RegExp(CA)], [[item('SYN-1', [US]), item(undefined, [US])], /carries no sku/]] as const) {
+    replies = [{ path: /^\/listings\/2021-08-01\/items\/SYN_SELLER$/, body: { numberOfResults: items.length, items } }];
+    await assert.rejects(adapter.discoverOffers(ctx, { limit: 20 }), (e: { error?: { code: string; message: string } }) => {
+      assert.equal(e.error?.code, 'RESPONSE_MISMATCH');
+      assert.match(e.error!.message, what);
+      return true;
+    });
+  }
+  // Обнаружение с SKU сети Amazon: сводки FBA другой витрины — количество неизвестно (не берётся), а не чужое; своя витрина — берётся
+  const fbaItem = { ...item('SYN-FBA-70', [US]), fulfillmentAvailability: [{ fulfillmentChannelCode: 'SYN_AMAZON_NETWORK', quantity: 0 }] };
+  const fbaReply = (granularityId: string) => ({ path: /^\/fba\/inventory\/v1\/summaries$/, body: { payload: { granularity: { granularityType: 'Marketplace', granularityId },
+    inventorySummaries: [{ sellerSku: 'SYN-FBA-70', inventoryDetails: { fulfillableQuantity: 9 } }] } } });
+  for (const [granularityId, quantity] of [[CA, undefined], [US, 9]] as const) {
+    replies = [{ path: /^\/listings\/2021-08-01\/items\/SYN_SELLER$/, body: { numberOfResults: 1, items: [fbaItem] } }, fbaReply(granularityId)];
+    const page = await adapter.discoverOffers(ctx, { limit: 20 });
+    assert.equal(page.items[0]!.fulfillment, 'CHANNEL');
+    assert.equal(page.items[0]!.currentQuantity, quantity, `FBA summaries of ${granularityId}`);
+  }
+  assert.deepEqual([...new Set(logs.filter((l) => l.startsWith('AMZ_C15')))].sort(),
+    ['AMZ_C15_RESPONSE_IDENTITY:DISCOVERY', 'AMZ_C15_RESPONSE_IDENTITY:DISPATCH_READ', 'AMZ_C15_RESPONSE_IDENTITY:DISPATCH_SUBMISSION', 'AMZ_C15_RESPONSE_IDENTITY:FBA_SUMMARIES',
+      'AMZ_C15_RESPONSE_IDENTITY:READBACK']);
+
+  // FBA: сводки другой витрины или чужого SKU — ни одного количества; свои — количество fulfillableQuantity
+  const fba = (granularityId: string | undefined, sku: string) => ({ payload: { ...(granularityId ? { granularity: { granularityType: 'Marketplace', granularityId } } : {}),
+    inventorySummaries: [{ sellerSku: sku, inventoryDetails: { fulfillableQuantity: 5 } }] } });
+  assert.equal(fbaQuantitiesOf(fba(CA, 'SYN-FBA-70'), US, ['SYN-FBA-70']).mismatch?.kind, 'STOREFRONT');
+  assert.equal(fbaQuantitiesOf(fba(US, 'SYN-OTHER'), US, ['SYN-FBA-70']).mismatch?.kind, 'SKU');
+  assert.equal(fbaQuantitiesOf(fba(US, 'SYN-OTHER'), US, ['SYN-FBA-70']).quantities.size, 0);
+  assert.deepEqual([...fbaQuantitiesOf(fba(US, 'SYN-FBA-70'), US, ['SYN-FBA-70']).quantities], [['SYN-FBA-70', 5]]);
+  assert.deepEqual([...fbaQuantitiesOf(fba(undefined, 'SYN-FBA-70'), US, ['SYN-FBA-70']).quantities], [['SYN-FBA-70', 5]], 'granularityId is optional in the model');
+
+  // details — в тексте ошибки (у 403 SP-API причина только в нём); повтор сообщения не дописывается
+  const failure = (errors: Array<{ code: string; message: string; details?: string }>) =>
+    classifyFailure({ ok: false, status: 403, errors, outcomeUnknown: false, tokenFailure: false, headers: null, attempts: [] }, 'BATCH', Date.parse(NOW));
+  assert.equal(failure([{ code: 'Unauthorized', message: 'Access to requested resource is denied.', details: 'The marketplaces you provided are not valid for region.' }]).message,
+    'Unauthorized: Access to requested resource is denied. — The marketplaces you provided are not valid for region.');
+  assert.equal(failure([{ code: 'InvalidInput', message: 'Invalid Input', details: 'Invalid Input' }]).message, 'InvalidInput: Invalid Input');
+  assert.match(failure([{ code: 'X', message: 'm'.repeat(500), details: 'the reason' }]).message, /— the reason$/, 'a long message does not push the reason out');
+});

@@ -34,6 +34,11 @@ export type ChannelErrorCode =
   | 'CHANNEL_REPRICER_ACTIVE'
   /** Р-114: у оффера в канале есть собственные границы цены (Amazon minimum/maximum_seller_allowed_price) — наши границы должны быть единственными */
   | 'CHANNEL_BOUNDS_PRESENT'
+  /**
+   * Шаг 70 [Р-205]: ответ канала не о том, что спрошено, — другой SKU или витрина вне запроса. Ответ не принимается: песочница Amazon
+   * отдала образец о чужом товаре, и до шага адаптер его съел. Класс — человек: молча ответ о чужом товаре не бывает
+   */
+  | 'RESPONSE_MISMATCH'
   | 'UNKNOWN';
 
 /** На что распространяется ошибка: один элемент, весь пакет или весь аккаунт (например, отозванные ключи) */
@@ -82,4 +87,5 @@ export const DEFAULT_ERROR_CLASS: Readonly<Record<ChannelErrorCode, ErrorClass>>
   SIGNATURE_INVALID: 'REQUIRES_HUMAN',
   CHANNEL_REPRICER_ACTIVE: 'REQUIRES_HUMAN',
   CHANNEL_BOUNDS_PRESENT: 'REQUIRES_HUMAN',
+  RESPONSE_MISMATCH: 'REQUIRES_HUMAN',
 };

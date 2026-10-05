@@ -1,0 +1,488 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "amazon/sandbox/response-mismatch",
+  "channel": "AMAZON",
+  "apiVersion": "listings-items-2021-08-01",
+  "title": "Р-205: ответ песочницы о чужом товаре не принимается — ни чтение, ни запись",
+  "description": "Статическая песочница SP-API отвечает образцом модели на любой SKU: на чтение SYN-SKU-7001 — товар GM-ZDPI-9B4E и витрина Канады вне запроса, на PATCH — принятие о чужом SKU. Обратное чтение — отказ RESPONSE_MISMATCH без наблюдения; запись после такого чтения не уходит; запись, ушедшая со своим чтением, с ответом о чужом SKU — исход неизвестен (сверка обратным чтением), а не «принято».",
+  "tags": [
+    "sandbox",
+    "r205",
+    "readback",
+    "dispatch"
+  ],
+  "provenance": {
+    "kind": "RECONSTRUCTED_FROM_SANDBOX",
+    "sandbox": true,
+    "recordedAt": "2026-10-05",
+    "evidence": "docs/evidence/step70-amazon-sandbox.md",
+    "redactions": [
+      "tokens were never recorded",
+      "request ids and response headers dropped",
+      "issues and mainImage of the listing sample dropped: the checks do not read them",
+      "our SKU and seller id are synthetic (SYN-SKU-7001, A1SYNSELLER0001); GM-ZDPI-9B4E and B071VG5N9D are the sample of the public SP-API model"
+    ],
+    "reviewedBy": "step70-review: обезличивание проверено — образцы песочницы взяты из публичной модели SP-API, наши идентификаторы синтетические"
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "A1SYNSELLER0001",
+      "marketplaces": [
+        "ATVPDKIKX0DER"
+      ],
+      "channel": "AMAZON",
+      "region": "NA"
+    },
+    "credentials": {
+      "seller": {
+        "refreshToken": "Atzr|syn-refresh-token-0001"
+      },
+      "application": {
+        "clientId": "amzn1.application-oa2-client.syn0001",
+        "clientSecret": "syn-lwa-client-secret-0001"
+      },
+      "accessToken": "Atza|syn-access-token-0001"
+    }
+  },
+  "steps": [
+    {
+      "id": "readback-foreign-sample",
+      "kind": "call",
+      "method": "readBack",
+      "args": [
+        [
+          {
+            "writeScope": {
+              "writeScopeId": "ws-amz-price-ATVPDKIKX0DER-7001",
+              "field": "PRICE",
+              "scopeKey": "amazon|acct-1|NA|ATVPDKIKX0DER|SYN-SKU-7001",
+              "identity": {
+                "region": "NA",
+                "marketplace": "ATVPDKIKX0DER",
+                "externalSku": "SYN-SKU-7001"
+              }
+            },
+            "fields": [
+              "PRICE"
+            ]
+          }
+        ]
+      ],
+      "expect": {
+        "observations": [],
+        "failures": [
+          {
+            "writeScopeId": "ws-amz-price-ATVPDKIKX0DER-7001",
+            "error": {
+              "code": "RESPONSE_MISMATCH",
+              "class": "REQUIRES_HUMAN",
+              "scope": "ITEM",
+              "raiseAlert": true,
+              "message": {
+                "$regex": "another SKU"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "dispatch-after-foreign-read",
+      "kind": "call",
+      "method": "dispatch",
+      "args": [
+        {
+          "batchId": "amz:b70a",
+          "operation": "patchListingsItem",
+          "items": [
+            {
+              "channelWriteId": "cw-70",
+              "version": 1,
+              "idempotencyKey": "cw-70:1",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-amz-price-ATVPDKIKX0DER-7001",
+                "field": "PRICE",
+                "scopeKey": "amazon|acct-1|NA|ATVPDKIKX0DER|SYN-SKU-7001",
+                "identity": {
+                  "region": "NA",
+                  "marketplace": "ATVPDKIKX0DER",
+                  "externalSku": "SYN-SKU-7001"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1299,
+                  "currency": "USD",
+                  "basis": "NET"
+                }
+              }
+            }
+          ],
+          "budgetCharges": [],
+          "requestCount": 2
+        }
+      ],
+      "expect": {
+        "outcomes": [
+          {
+            "channelWriteId": "cw-70",
+            "status": "REJECTED",
+            "error": {
+              "code": "RESPONSE_MISMATCH",
+              "class": "REQUIRES_HUMAN",
+              "scope": "ITEM",
+              "raiseAlert": true,
+              "message": {
+                "$regex": "before the write"
+              }
+            }
+          }
+        ],
+        "attemptsMade": 1
+      }
+    },
+    {
+      "id": "dispatch-foreign-submission",
+      "kind": "call",
+      "method": "dispatch",
+      "args": [
+        {
+          "batchId": "amz:b70b",
+          "operation": "patchListingsItem",
+          "items": [
+            {
+              "channelWriteId": "cw-70",
+              "version": 2,
+              "idempotencyKey": "cw-70:2",
+              "attemptNo": 1,
+              "writeScope": {
+                "writeScopeId": "ws-amz-price-ATVPDKIKX0DER-7001",
+                "field": "PRICE",
+                "scopeKey": "amazon|acct-1|NA|ATVPDKIKX0DER|SYN-SKU-7001",
+                "identity": {
+                  "region": "NA",
+                  "marketplace": "ATVPDKIKX0DER",
+                  "externalSku": "SYN-SKU-7001"
+                }
+              },
+              "value": {
+                "field": "PRICE",
+                "price": {
+                  "amountMinor": 1299,
+                  "currency": "USD",
+                  "basis": "NET"
+                }
+              }
+            }
+          ],
+          "budgetCharges": [],
+          "requestCount": 2
+        }
+      ],
+      "expect": {
+        "outcomes": [
+          {
+            "channelWriteId": "cw-70",
+            "status": "OUTCOME_UNKNOWN",
+            "error": {
+              "code": "RESPONSE_MISMATCH",
+              "class": "REQUIRES_HUMAN",
+              "scope": "ITEM",
+              "raiseAlert": true,
+              "message": {
+                "$regex": "patchListingsItem"
+              }
+            }
+          }
+        ],
+        "attemptsMade": 2
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "lwa-token",
+      "note": "Токен LWA по refresh_token (connecting-to-the-selling-partner-api); тело формы проверяет стенд",
+      "request": {
+        "method": "POST",
+        "path": "/auth/o2/token",
+        "body": {
+          "$type": "string"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "access_token": "Atza|syn-access-token-0001",
+          "token_type": "bearer",
+          "expires_in": 3600,
+          "refresh_token": "Atzr|syn-refresh-token-0001"
+        }
+      },
+      "origin": "SYNTHETIC"
+    },
+    {
+      "id": "readback-sample",
+      "request": {
+        "method": "GET",
+        "path": "/listings/2021-08-01/items/A1SYNSELLER0001/SYN-SKU-7001",
+        "query": {
+          "marketplaceIds": "ATVPDKIKX0DER",
+          "includedData": "summaries,attributes,offers,fulfillmentAvailability,issues"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "sku": "GM-ZDPI-9B4E",
+          "summaries": [
+            {
+              "marketplaceId": "ATVPDKIKX0DER",
+              "asin": "B071VG5N9D",
+              "productType": "LUGGAGE",
+              "conditionType": "new_new",
+              "status": [
+                "BUYABLE"
+              ],
+              "itemName": "Hardside Carry-On Spinner Suitcase Luggage",
+              "createdDate": "2021-02-01T00:00:00Z",
+              "lastUpdatedDate": "2021-03-01T00:00:00Z"
+            },
+            {
+              "marketplaceId": "A2EUQ1WTGCTBG2",
+              "asin": "B071VG5N9D",
+              "productType": "LUGGAGE",
+              "conditionType": "new_new",
+              "status": [],
+              "itemName": "Hardside Carry-On Spinner Suitcase Luggage",
+              "createdDate": "2021-02-02T01:00:00Z",
+              "lastUpdatedDate": "2021-03-05T00:00:00Z"
+            }
+          ],
+          "offers": [
+            {
+              "marketplaceId": "ATVPDKIKX0DER",
+              "offerType": "B2C",
+              "price": {
+                "currencyCode": "USD",
+                "amount": "100.00"
+              },
+              "audience": {
+                "value": "ALL",
+                "displayName": "Sell on Amazon"
+              },
+              "replenishmentDiscount": {
+                "discountPercentage": 5
+              }
+            },
+            {
+              "marketplaceId": "A2EUQ1WTGCTBG2",
+              "offerType": "B2C",
+              "price": {
+                "currencyCode": "CAD",
+                "amount": "130.00"
+              },
+              "audience": {
+                "value": "ALL",
+                "displayName": "Sell on Amazon"
+              }
+            }
+          ],
+          "fulfillmentAvailability": [
+            {
+              "fulfillmentChannelCode": "DEFAULT",
+              "quantity": 100
+            }
+          ]
+        }
+      },
+      "origin": "SANDBOX"
+    },
+    {
+      "id": "pre-read-sample",
+      "note": "Чтение оффера перед записью: тип товара и собственное ценообразование канала [AMZ_C03, AMZ_C09]",
+      "request": {
+        "method": "GET",
+        "path": "/listings/2021-08-01/items/A1SYNSELLER0001/SYN-SKU-7001",
+        "query": {
+          "marketplaceIds": "ATVPDKIKX0DER",
+          "includedData": "summaries,attributes"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "sku": "GM-ZDPI-9B4E",
+          "summaries": [
+            {
+              "marketplaceId": "ATVPDKIKX0DER",
+              "asin": "B071VG5N9D",
+              "productType": "LUGGAGE",
+              "conditionType": "new_new",
+              "status": [
+                "BUYABLE"
+              ],
+              "itemName": "Hardside Carry-On Spinner Suitcase Luggage",
+              "createdDate": "2021-02-01T00:00:00Z",
+              "lastUpdatedDate": "2021-03-01T00:00:00Z"
+            },
+            {
+              "marketplaceId": "A2EUQ1WTGCTBG2",
+              "asin": "B071VG5N9D",
+              "productType": "LUGGAGE",
+              "conditionType": "new_new",
+              "status": [],
+              "itemName": "Hardside Carry-On Spinner Suitcase Luggage",
+              "createdDate": "2021-02-02T01:00:00Z",
+              "lastUpdatedDate": "2021-03-05T00:00:00Z"
+            }
+          ],
+          "offers": [
+            {
+              "marketplaceId": "ATVPDKIKX0DER",
+              "offerType": "B2C",
+              "price": {
+                "currencyCode": "USD",
+                "amount": "100.00"
+              },
+              "audience": {
+                "value": "ALL",
+                "displayName": "Sell on Amazon"
+              },
+              "replenishmentDiscount": {
+                "discountPercentage": 5
+              }
+            },
+            {
+              "marketplaceId": "A2EUQ1WTGCTBG2",
+              "offerType": "B2C",
+              "price": {
+                "currencyCode": "CAD",
+                "amount": "130.00"
+              },
+              "audience": {
+                "value": "ALL",
+                "displayName": "Sell on Amazon"
+              }
+            }
+          ],
+          "fulfillmentAvailability": [
+            {
+              "fulfillmentChannelCode": "DEFAULT",
+              "quantity": 100
+            }
+          ]
+        }
+      },
+      "origin": "SANDBOX"
+    },
+    {
+      "id": "pre-read-own",
+      "note": "Чтение оффера перед записью: тип товара и собственное ценообразование канала [AMZ_C03, AMZ_C09]",
+      "request": {
+        "method": "GET",
+        "path": "/listings/2021-08-01/items/A1SYNSELLER0001/SYN-SKU-7001",
+        "query": {
+          "marketplaceIds": "ATVPDKIKX0DER",
+          "includedData": "summaries,attributes"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "sku": "SYN-SKU-7001",
+          "summaries": [
+            {
+              "marketplaceId": "ATVPDKIKX0DER",
+              "asin": "B000007001",
+              "productType": "SYNTHETIC_PRODUCT_TYPE",
+              "status": [
+                "BUYABLE",
+                "DISCOVERABLE"
+              ]
+            }
+          ],
+          "attributes": {
+            "purchasable_offer": [
+              {
+                "marketplace_id": "ATVPDKIKX0DER",
+                "currency": "USD",
+                "audience": "ALL",
+                "our_price": [
+                  {
+                    "schedule": [
+                      {
+                        "value_with_tax": 12.99
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "origin": "SYNTHETIC"
+    },
+    {
+      "id": "patch-sample-answer",
+      "request": {
+        "method": "PATCH",
+        "path": "/listings/2021-08-01/items/A1SYNSELLER0001/SYN-SKU-7001",
+        "query": {
+          "marketplaceIds": "ATVPDKIKX0DER",
+          "includedData": "issues"
+        },
+        "body": {
+          "productType": "SYNTHETIC_PRODUCT_TYPE",
+          "patches": [
+            {
+              "op": "merge",
+              "path": "/attributes/purchasable_offer",
+              "value": [
+                {
+                  "marketplace_id": "ATVPDKIKX0DER",
+                  "currency": "USD",
+                  "audience": "ALL",
+                  "our_price": [
+                    {
+                      "schedule": [
+                        {
+                          "value_with_tax": 12.99
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "sku": "GM-ZDPI-9B4E",
+          "status": "ACCEPTED",
+          "submissionId": "f1dc2914-75dd-11ea-bc55-0242ac130003",
+          "issues": []
+        }
+      },
+      "origin": "SANDBOX"
+    }
+  ],
+  "expect": {
+    "noAlerts": true,
+    "logs": [
+      {
+        "code": "AMZ_C15_RESPONSE_IDENTITY",
+        "count": 3
+      }
+    ]
+  }
+}
