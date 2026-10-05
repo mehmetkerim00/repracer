@@ -3,7 +3,7 @@ import type { CompetitiveSummaryBatchRequest, CompetitiveSummaryBatchResponse, I
 import { logConservative } from './conservative.ts';
 import { AMAZON_MARKETPLACES, COMPETITIVE_SUMMARY_BATCH_MAX, COMPETITIVE_SUMMARY_PATH, FBA_SUMMARIES_PATH, FBA_SUMMARIES_SKUS_MAX, marketplaceInfo, ORDERS_PAGE_MAX, ORDERS_PATH, SEARCH_PAGE_MAX, SOURCE_COMPETITIVE_SUMMARY } from './descriptor.ts';
 import { ChannelCallError, channelError, classifyFailure } from './errors.ts';
-import { channelOwnedPricing, decimalToMinor, fulfillmentOf, merchantQuantity, offerTitle, purchasePrice, responseIdentityMismatch, type ResponseMismatch } from './mapping.ts';
+import { channelOwnedPricing, decimalToMinor, fulfillmentOf, merchantQuantity, offerTitle, purchasePrice } from './mapping.ts';
 import { acquire, deadlinePassed, nowMs, observeRateLimit, openSession, type AmazonAdapterOptions, type Session } from './session.ts';
 
 /** Офферы аккаунта: searchListingsItems по витринам региона аккаунта, курсор — pageToken ответа */
@@ -25,26 +25,31 @@ export async function discoverOffersAmazon(options: AmazonAdapterOptions, ctx: A
   if (!result.ok) throw new ChannelCallError(classifyFailure(result, 'BATCH', nowMs(options)));
   observeRateLimit(options, ctx, session, 'searchListingsItems', result.headers);
   /**
-   * Шаг 70 [Р-205, AMZ_C15]: страница с витриной вне запроса или с предметом без sku не принимается ЦЕЛИКОМ — иначе каталог получил бы
-   * предложение витрины, которой у аккаунта нет. Проверка до разбора: частично принятой страницы не бывает
+   * Шаг 70 [Р-205, AMZ_C15]: предмет без sku и сводки витрин вне запроса в каталог не попадают — каталог не получит предложения витрины,
+   * которой у аккаунта нет. Ревью шага 70, находка 3: пропускаются поштучно с журналом, а не страницей целиком — отказ страницы на одном
+   * предмете остановил бы обход навсегда (первая страница — каталога нет вовсе, N-я — круг не закрывается)
    */
-  for (const item of result.data.items ?? []) {
-    const mismatch: ResponseMismatch | null = typeof item.sku === 'string' && item.sku !== ''
-      ? responseIdentityMismatch(item, null, marketplaces) : { kind: 'SKU', message: 'an item of the page carries no sku' };
-    if (mismatch) {
-      logConservative(options.deps.logger, ctx, 'AMZ_C15_RESPONSE_IDENTITY', { stage: 'DISCOVERY', kind: mismatch.kind });
-      throw new ChannelCallError(channelError('RESPONSE_MISMATCH', 'BATCH', `searchListingsItems: ${mismatch.message}`, { raiseAlert: true }));
-    }
-  }
+  const skipped = { noSku: 0, foreignSummaries: 0 };
+  const foreignSeen = new Set<string>();
+  const pageItems = (result.data.items ?? []).filter((item) => {
+    if (typeof item.sku === 'string' && item.sku !== '') return true;
+    skipped.noSku += 1;
+    return false;
+  });
   const items: DiscoveredOffer[] = [];
   // Шаг 51 [AMZ_C13]: FBA — по коду сети исполнения; SKU сети Amazon по витринам — для чтения количества FBA
   const fbaByMarketplace = new Map<string, string[]>();
   let unknownFulfillment = 0;
-  for (const item of result.data.items ?? []) {
+  for (const item of pageItems) {
     const quantity = merchantQuantity(item);
     const fulfillment = fulfillmentOf(item);
     if (fulfillment.kind === 'UNKNOWN') unknownFulfillment += 1;
     for (const s of item.summaries ?? []) {
+      if (!marketplaces.includes(s.marketplaceId)) {
+        skipped.foreignSummaries += 1;
+        foreignSeen.add(String(s.marketplaceId).slice(0, 20));
+        continue;
+      }
       const price = purchasePrice(item, s.marketplaceId);
       const owned = channelOwnedPricing(item, s.marketplaceId);
       /**
@@ -75,6 +80,10 @@ export async function discoverOffersAmazon(options: AmazonAdapterOptions, ctx: A
     logConservative(options.deps.logger, ctx, 'AMZ_C13_FBA_BY_CHANNEL_CODE', {
       fba: [...fbaByMarketplace.values()].reduce((a, b) => a + b.length, 0), unknown: unknownFulfillment, fbaQuantitiesRead: fba.size });
   }
+  if (skipped.noSku > 0 || skipped.foreignSummaries > 0) {
+    logConservative(options.deps.logger, ctx, 'AMZ_C15_RESPONSE_IDENTITY', { stage: 'DISCOVERY', itemsWithoutSku: skipped.noSku, foreignSummaries: skipped.foreignSummaries,
+      storefronts: [...foreignSeen].sort().join(',') });
+  }
   const next = result.data.pagination?.nextToken;
   return { items, ...(next ? { nextCursor: next } : {}) };
 }
@@ -96,11 +105,11 @@ async function readFbaQuantities(options: AmazonAdapterOptions, ctx: AdapterCall
       if (!r.ok) continue;
       observeRateLimit(options, ctx, session, 'getInventorySummaries', r.headers);
       const read = fbaQuantitiesOf(r.data, marketplace, part);
-      if (read.mismatch) {
-        // Шаг 70 [Р-205, AMZ_C15]: ответ не о той витрине или с чужим SKU — из него не берётся НИ ОДНО количество: неизвестно, а не неверно
-        logConservative(options.deps.logger, ctx, 'AMZ_C15_RESPONSE_IDENTITY', { stage: 'FBA_SUMMARIES', kind: read.mismatch.kind });
-        continue;
+      if (read.mismatch || read.withoutSku > 0) {
+        logConservative(options.deps.logger, ctx, 'AMZ_C15_RESPONSE_IDENTITY', { stage: 'FBA_SUMMARIES', kind: read.mismatch ?? 'NO_SKU', withoutSku: read.withoutSku });
       }
+      // Шаг 70 [Р-205, AMZ_C15]: ответ не о той витрине или с чужим SKU — fbaQuantitiesOf не отдаёт из него НИ ОДНОГО количества (на экране
+      // остаётся прежнее значение со своим временем, Р-196), а не чужое. Отдельный `continue` здесь был дублем — снят (мутация шага 70)
       for (const [sku, q] of read.quantities) out.set(`${marketplace}|${sku}`, q);
     }
   }
@@ -109,20 +118,23 @@ async function readFbaQuantities(options: AmazonAdapterOptions, ctx: AdapterCall
 
 /**
  * Разбор ответа getInventorySummaries (одна витрина, SKU части): количество — fulfillableQuantity. Шаг 70 [Р-205, AMZ_C15]: `granularityId`
- * (в модели снимка необязателен) — запрошенная витрина, `sellerSku` каждой сводки — из запроса; иначе ответ целиком не используется.
- * Вынесено ради проверки живьём (динамическая песочница FBA Inventory) и юнит-теста
+ * (в модели снимка необязателен) — запрошенная витрина, `sellerSku` сводки — из запроса; ответ другой витрины или о чужом SKU не используется
+ * целиком. Сводка без `sellerSku` (в модели необязателен) пропускается поштучно (ревью шага 70, находка 10). Вынесено ради проверки живьём
+ * (динамическая песочница FBA Inventory) и юнит-теста
  */
 export function fbaQuantitiesOf(response: InventorySummariesResponse | undefined, marketplace: string, skus: readonly string[]):
-  { quantities: Map<string, number>; mismatch: ResponseMismatch | null } {
+  { quantities: Map<string, number>; mismatch: 'STOREFRONT' | 'SKU' | null; withoutSku: number } {
   const quantities = new Map<string, number>();
   const granularityId = response?.payload?.granularity?.granularityId;
-  if (granularityId !== undefined && granularityId !== marketplace) return { quantities, mismatch: { kind: 'STOREFRONT', message: `inventory summaries of storefront ${String(granularityId).slice(0, 20)} instead of ${marketplace}` } };
+  if (granularityId !== undefined && granularityId !== marketplace) return { quantities, mismatch: 'STOREFRONT', withoutSku: 0 };
+  let withoutSku = 0;
   for (const summary of response?.payload?.inventorySummaries ?? []) {
-    if (typeof summary.sellerSku !== 'string' || !skus.includes(summary.sellerSku)) return { quantities: new Map(), mismatch: { kind: 'SKU', message: 'an inventory summary is about a SKU that was not requested' } };
+    if (summary.sellerSku === undefined) { withoutSku += 1; continue; }
+    if (!skus.includes(summary.sellerSku)) return { quantities: new Map(), mismatch: 'SKU', withoutSku };
     const q = summary.inventoryDetails?.fulfillableQuantity;
     if (Number.isSafeInteger(q) && (q as number) >= 0) quantities.set(summary.sellerSku, q as number);
   }
-  return { quantities, mismatch: null };
+  return { quantities, mismatch: null, withoutSku };
 }
 
 /**

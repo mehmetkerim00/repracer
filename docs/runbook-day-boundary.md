@@ -121,7 +121,7 @@
 | 403 `FORBIDDEN`, «second factor» | Вход без второго фактора — войти заново с ним |
 | 400 `INVALID_PARAMETER`, «is not a shadow account of a customer tenant on storefront…» | Аккаунт не в тени, не на этой витрине, демо, отозван — или граница витрины уже не `UNKNOWN` (принята или подтверждена) |
 | 409 `CONFLICT`, `day_boundary_acceptance_week_of_shadow` | Меньше 7 суток тени — подождать |
-| 409 `CONFLICT`, `day_boundary_acceptance_no_long_gap` | Тень прерывалась дольше 36 часов (планировщик стоял, аккаунт отключали) — подождать неделю подряд |
+| 409 `CONFLICT`, `day_boundary_acceptance_no_long_gap` | Тень прерывалась дольше 36 часов (планировщик стоял, аккаунт отключали). Доказательство смотрит последние 14 суток, поэтому отказ держится, пока пауза не выйдет из этого окна, — до 14 суток после неё, даже если неделя подряд после паузы уже есть (ревью шага 70, находка 6) |
 | 409 `CONFLICT`, «already counts its days in …» | У витрины уже есть пояс — назвать его |
 | 409 `CONFLICT`, `day_boundary_acceptance_worst_window_within_limit` | В какие-то 24 часа тень «потратила бы» больше лимита — разобраться до боя (стратегия меняет цену слишком часто) |
 | 409 `CONFLICT`, `day_boundary_acceptance_time_zone_known` | Пояс не из базы поясов PostgreSQL — назвать вида `America/Los_Angeles` |

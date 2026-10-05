@@ -394,7 +394,7 @@ export function buildAdapterScenarios(): Array<{ file: string; scenario: Scenari
     provenance: { kind: 'RECONSTRUCTED_FROM_SANDBOX', sandbox: true, recordedAt: '2026-10-05', evidence: 'docs/evidence/step70-amazon-sandbox.md',
       redactions: ['tokens were never recorded', 'request ids and response headers dropped', 'issues and mainImage of the listing sample dropped: the checks do not read them',
         'our SKU and seller id are synthetic (SYN-SKU-7001, A1SYNSELLER0001); GM-ZDPI-9B4E and B071VG5N9D are the sample of the public SP-API model'],
-      reviewedBy: 'step70-review: обезличивание проверено — образцы песочницы взяты из публичной модели SP-API, наши идентификаторы синтетические' },
+      reviewedBy: 'step70-review (находка 14): рецензент проверил — в фикстуре только образцы публичной модели SP-API (GM-ZDPI-9B4E, B071VG5N9D) и синтетические идентификаторы' },
     world: amazonWorld({}, 'NA'),
     steps: [
       call('readback-foreign-sample', 'readBack', [[{ writeScope: usPrice.writeScope, fields: ['PRICE'] }]],
@@ -411,7 +411,8 @@ export function buildAdapterScenarios(): Array<{ file: string; scenario: Scenari
       sandbox(preReadExchange('pre-read-own', SKU, usOffer), 'SYNTHETIC'),
       sandbox(patchPriceExchange('patch-sample-answer', SKU, [{ marketplace: US, minor: 1299, currency: 'USD' }], { status: 200, body: SANDBOX_SUBMISSION_SAMPLE }), 'SANDBOX'),
     ],
-    expect: { noAlerts: true, logs: [{ code: 'AMZ_C15_RESPONSE_IDENTITY', count: 3 }] },
+    // Ревью шага 70, находка 1: ответ на ушедшую запись о чужом SKU — алерт адаптера сразу (ядро флаг raiseAlert не читает)
+    expect: { alerts: [{ code: 'AMAZON_RESPONSE_MISMATCH', severity: 'WARNING', count: 1 }], logs: [{ code: 'AMZ_C15_RESPONSE_IDENTITY', count: 3 }] },
   } });
 
   return out;

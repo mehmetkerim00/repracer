@@ -636,6 +636,20 @@ export class SimulatedKauflandChannel implements ChannelBehaviour {
     return this.orders.filter((o) => o.idOffer === idOffer).map((o) => ({ idOrderUnit: o.idOrderUnit, status: o.status, tsCreatedMs: o.tsCreatedMs, tsUpdatedMs: o.tsUpdatedMs }));
   }
 
+  /**
+   * Ревью шага 70, находка 4 (контроли хаоса): количество предложения меняет кто-то другой — не наша запись, поэтому в применённые записи
+   * не попадает; и отменённый заказ предложения в момент atMs (как отмена, которую канал не вернул, K-11). Только для положительных
+   * контролей инвариантов: так выглядел бы дефект или OQ-220, не трогая журнала записей
+   */
+  setAmountExternally(idOffer: string, amount: number): void {
+    for (const u of this.units.values()) if (u.idOffer === idOffer) { u.amount = amount; u.pendingAmount = null; }
+  }
+
+  addCancelledOrderForControl(idOffer: string, storefront: string, atMs: number): void {
+    const id = this.orders.length + 1;
+    this.orders.push({ idOrderUnit: 900_000 + id, idOrder: `SYN-ORDER-${id}`, idOffer, storefront, status: 'cancelled', tsCreatedMs: atMs, tsUpdatedMs: atMs, closesAtMs: atMs, willCancel: true });
+  }
+
   /** Шаг 69 (хаос, OQ-220): применённые моделью записи количества предложения — по времени */
   appliedAmountWrites(idOffer: string): Array<{ atMs: number; amount: number }> {
     return [...(this.amountWrites.get(idOffer) ?? [])];

@@ -83,3 +83,20 @@ test('step 51 review, finding 6: a human-required precondition of the offer (Ama
   const token = { ...coreError('AUTH_INVALID', 'REQUIRES_HUMAN', 'token endpoint refused'), scope: 'ACCOUNT' as const };
   assert.equal(planReconciliationTransition('ACCEPTED', { kind: 'UNKNOWN', error: token }, 1, NOW, NOW, DEFAULT_RETRY_POLICY).to, 'RECONCILE');
 });
+
+/**
+ * Шаг 70 [Р-205] (ревью шага 70, находка 1): сверка получила ответ о другом SKU — единица блокируется СРАЗУ и с кодом RESPONSE_MISMATCH.
+ * Без этого сверка ходила по кругу час и блокировала единицу кодом OUTCOME_UNRESOLVED — свою причину человек не видел
+ */
+test('step 70: a reconciliation that got a response about another SKU blocks the scope at once with its own code', () => {
+  const mismatch = { class: 'REQUIRES_HUMAN' as const, code: 'RESPONSE_MISMATCH' as const, scope: 'ITEM' as const, message: 'getListingsItem: the response is about another SKU than requested', raiseAlert: true };
+  const t = planReconciliationTransition('DISPATCHED', { kind: 'UNKNOWN', error: mismatch }, 1, NOW, NOW, DEFAULT_RETRY_POLICY);
+  assert.equal(t.to, 'UNRESOLVED');
+  assert.equal((t as { errorCode: string }).errorCode, 'RESPONSE_MISMATCH');
+  assert.deepEqual((t as { reason: { code: string; params: Record<string, unknown> } }).reason.params.code, 'RESPONSE_MISMATCH');
+  // Ревью шага 70, находка 9: действие продавца — сказать команде платформы, а не поддержке канала (причина может быть в нашей проверке)
+  assert.equal((t as { reason: { params: Record<string, unknown> } }).reason.params.action, 'TELL_PLATFORM_TEAM');
+  // Положительный контроль: прочий отказ «нужен человек» не про оффер (сервер токенов) сразу не блокирует — сверка продолжается
+  const token = planReconciliationTransition('DISPATCHED', { kind: 'UNKNOWN', error: { ...mismatch, code: 'AUTH_INVALID' as const, scope: 'ACCOUNT' as const } }, 1, NOW, NOW, DEFAULT_RETRY_POLICY);
+  assert.equal(token.to, 'RECONCILE');
+});

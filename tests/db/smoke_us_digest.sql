@@ -342,3 +342,18 @@ SELECT pg_temp.ok('a storefront whose day boundary does not hold live writes is 
     END IF;
   END $i$ $q$);
 ROLLBACK;
+
+-- Шаг 70 (ревью шага 70, находка 5): перерыв между теневыми решениями — в часах с округлением ВВЕРХ; ровно 36 часов — ещё неделя
+-- подряд, 36 ч 1 мин — уже 37 и отказ ограничением журнала. Порядок моментов на входе не важен; один момент или ни одного — 0
+SELECT pg_temp.ok('the longest gap between shadow decisions rounds up to whole hours (Р-204)', $q$
+  DO $i$
+  DECLARE
+    exact int := platform.longest_gap_hours(ARRAY['2026-10-03 00:00+00', '2026-10-01 00:00+00', '2026-10-02 12:00+00']::timestamptz[]);
+    over int := platform.longest_gap_hours(ARRAY['2026-10-01 00:00+00', '2026-10-02 12:01+00']::timestamptz[]);
+    one int := platform.longest_gap_hours(ARRAY['2026-10-01 00:00+00']::timestamptz[]);
+    none int := platform.longest_gap_hours(NULL);
+  BEGIN
+    IF exact <> 36 OR over <> 37 OR one <> 0 OR none <> 0 THEN
+      RAISE EXCEPTION 'longest gap: 36 h -> %, 36 h 1 min -> %, one moment -> %, none -> %', exact, over, one, none;
+    END IF;
+  END $i$ $q$);

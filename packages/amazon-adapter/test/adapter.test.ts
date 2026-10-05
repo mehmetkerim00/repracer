@@ -104,30 +104,31 @@ test('step 69 (OQ-249): discovery takes the product title from itemName of the m
 
 /**
  * Шаг 70 [Р-205, AMZ_C15]: ответ сверяется с запросом. Песочница SP-API на чтение SYN-SKU отдала образец о чужом товаре (sku GM-ZDPI-9B4E,
- * витрина Канады вне запроса), и до шага адаптер взял из него тип товара и отправил PATCH. Каждое место сверки — своим отказом с кодом
- * RESPONSE_MISMATCH; чужой ответ не даёт ни наблюдения, ни записи
+ * витрина Канады вне запроса), и до шага адаптер взял из него тип товара и отправил PATCH. Ответ о другом SKU — отказ RESPONSE_MISMATCH на
+ * каждом месте сверки; записи витрин вне запроса не используются и называются в журнале, но не отказ (ревью шага 70, находки 2 и 3)
  */
-test('step 70 (Р-205): a response about another SKU or with a storefront outside the request is refused with RESPONSE_MISMATCH, never used', async () => {
+test('step 70 (Р-205): a response about another SKU is refused with RESPONSE_MISMATCH; entries of storefronts outside the request are skipped, not used', async () => {
   const { fbaQuantitiesOf } = await import('../src/listing.ts');
   const { classifyFailure } = await import('../src/errors.ts');
   const US = 'ATVPDKIKX0DER';
   const CA = 'A2EUQ1WTGCTBG2';
   const NOW = '2026-10-05T10:00:00.000Z';
-  const item = (sku: string | undefined, marketplaces: string[]) => ({
+  const item = (sku: string | undefined, marketplaces: string[], productType = 'SYN_TYPE') => ({
     ...(sku === undefined ? {} : { sku }),
-    summaries: marketplaces.map((m) => ({ marketplaceId: m, asin: 'B0SYN00070', productType: 'SYN_TYPE', status: ['BUYABLE'], createdDate: NOW, lastUpdatedDate: NOW })),
+    summaries: marketplaces.map((m) => ({ marketplaceId: m, asin: 'B0SYN00070', productType: m === US ? productType : 'FOREIGN_TYPE', status: ['BUYABLE'], createdDate: NOW, lastUpdatedDate: NOW })),
     attributes: { purchasable_offer: [{ marketplace_id: US, currency: 'USD', audience: 'ALL', our_price: [{ schedule: [{ value_with_tax: 12.99 }] }] }] },
-    offers: [{ marketplaceId: US, offerType: 'B2C', price: { currencyCode: 'USD', amount: '12.99' } }],
+    offers: marketplaces.map((m) => ({ marketplaceId: m, offerType: 'B2C', price: { currencyCode: m === US ? 'USD' : 'CAD', amount: m === US ? '12.99' : '17.00' } })),
     fulfillmentAvailability: [{ fulfillmentChannelCode: 'DEFAULT', quantity: 4 }],
   });
   let replies: Array<{ path: RegExp; method?: string; body: unknown }> = [];
   let clockTicks = 0;
-  const sent: string[] = [];
+  const sent: Array<{ route: string; body?: string }> = [];
   const logs: string[] = [];
+  const alerts: string[] = [];
   const fetchFn = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
     if (url.pathname === '/auth/o2/token') return new Response(JSON.stringify({ access_token: 'syn-lwa-access-token', expires_in: 3600 }), { status: 200 });
-    sent.push(`${init?.method ?? 'GET'} ${url.pathname}`);
+    sent.push({ route: `${init?.method ?? 'GET'} ${url.pathname}`, ...(typeof init?.body === 'string' ? { body: init.body } : {}) });
     const reply = replies.shift();
     assert.ok(reply && reply.path.test(url.pathname) && (reply.method ?? 'GET') === (init?.method ?? 'GET'), `unexpected ${init?.method ?? 'GET'} ${url.pathname}`);
     return new Response(JSON.stringify(reply.body), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -136,8 +137,8 @@ test('step 70 (Р-205): a response about another SKU or with a storefront outsid
     deps: {
       accounts: { verify: async (tenantId, channelAccountId) => ({ ok: true, account: { tenantId, channelAccountId, channel: 'AMAZON', externalAccountId: 'SYN_SELLER', region: 'NA', marketplaces: [US], credentialsRef: 'cred:seller' } }) },
       credentials: { get: async (ref): Promise<Record<string, string>> => (ref === 'cred:seller' ? { refreshToken: 'syn-refresh' } : { clientId: 'syn-client', clientSecret: 'syn-secret' }) },
-      alerts: { raise: async () => {} },
-      logger: { log: (e) => { logs.push(`${e.code}:${String((e.details as { stage?: string } | undefined)?.stage)}`); } },
+      alerts: { raise: async (a) => { alerts.push(`${a.code}:${a.severity}`); } },
+      logger: { log: (e) => { const d = e.details as { stage?: string; kind?: string } | undefined; logs.push(`${e.code}:${String(d?.stage)}:${String(d?.kind ?? '')}`); } },
       // Часы идут: бюджет пары (burst 5) иначе кончился бы на шестом чтении теста
       now: () => new Date(Date.parse(NOW) + (clockTicks += 1_000)).toISOString(),
     },
@@ -154,17 +155,21 @@ test('step 70 (Р-205): a response about another SKU or with a storefront outsid
     assert.ok(!error!.message.includes('GM-ZDPI'), 'the foreign SKU is not repeated in the message');
   };
 
-  // Обратное чтение: чужой SKU, витрина вне запроса, ответ без sku — ни одного наблюдения
-  for (const [body, what] of [[item('GM-ZDPI-9B4E', [US, CA]), /another SKU/], [item('SYN-SKU-70', [US, CA]), new RegExp(`storefronts outside the request: ${CA}`)], [item(undefined, [US]), /carries no sku/]] as const) {
+  // Обратное чтение: чужой SKU и ответ без sku — ни одного наблюдения, отказ своей причиной
+  for (const [body, what] of [[item('GM-ZDPI-9B4E', [US, CA]), /another SKU/], [item(undefined, [US]), /carries no sku/]] as const) {
     replies = [{ path: LISTING, body }];
     const r = await adapter.readBack(ctx, [{ writeScope: scope('PRICE'), fields: ['PRICE'] }, { writeScope: scope('QUANTITY'), fields: ['QUANTITY'] }]);
     assert.deepEqual(r.observations, [], 'a foreign answer gives no observation');
     assert.equal(r.failures.length, 2);
     for (const f of r.failures) refused(f.error, what);
   }
-  // Положительный контроль: свой SKU и своя витрина — наблюдения есть
-  replies = [{ path: LISTING, body: item('SYN-SKU-70', [US]) }];
-  assert.equal((await adapter.readBack(ctx, [{ writeScope: scope('PRICE'), fields: ['PRICE'] }])).observations.length, 1);
+  // Свой SKU и витрина Канады рядом — наблюдение своей витрины (цена USD, а не CAD) и запись в журнале; отказа нет
+  logs.length = 0;
+  replies = [{ path: LISTING, body: item('SYN-SKU-70', [US, CA]) }];
+  const own = await adapter.readBack(ctx, [{ writeScope: scope('PRICE'), fields: ['PRICE'] }, { writeScope: scope('QUANTITY'), fields: ['QUANTITY'] }]);
+  assert.deepEqual(own.failures, []);
+  assert.deepEqual(own.observations.map((o) => (o.value.field === 'PRICE' ? `${o.value.price.amountMinor} ${o.value.price.currency}` : o.value.field === 'QUANTITY' ? `qty ${o.value.quantity}` : 'other')), ['1299 USD', 'qty 4']);
+  assert.ok(logs.includes('AMZ_C15_RESPONSE_IDENTITY:READBACK:STOREFRONT'), `the foreign storefront is named in the log: ${logs.join(', ')}`);
 
   // Запись: чтение перед записью о чужом SKU — PATCH не уходит
   const write = { channelWriteId: 'cw-70' as never, writeScope: scope('PRICE'), version: 1, idempotencyKey: 'cw-70:1', attemptNo: 1,
@@ -175,48 +180,59 @@ test('step 70 (Р-205): a response about another SKU or with a storefront outsid
   const beforeWrite = await adapter.dispatch(ctx, batch);
   assert.equal(beforeWrite.outcomes[0]!.status, 'REJECTED');
   refused(beforeWrite.outcomes[0]!.error, /before the write: the response is about another SKU/);
-  assert.deepEqual(sent, ['GET /listings/2021-08-01/items/SYN_SELLER/SYN-SKU-70'], 'no PATCH after a foreign pre-read');
+  assert.deepEqual(sent.map((x) => x.route), ['GET /listings/2021-08-01/items/SYN_SELLER/SYN-SKU-70'], 'no PATCH after a foreign pre-read');
 
-  // Запись ушла, ответ о чужом SKU — исход неизвестен (не принято и не отказ), ядро сверит обратным чтением
+  // Свой SKU, рядом витрина Канады с другим типом товара: PATCH уходит с типом СВОЕЙ витрины (запасного хода к первой сводке нет)
+  sent.length = 0;
+  replies = [{ path: LISTING, body: item('SYN-SKU-70', [CA, US], 'OWN_TYPE') }, { path: LISTING, method: 'PATCH', body: { sku: 'SYN-SKU-70', status: 'ACCEPTED', submissionId: 'syn-70', issues: [] } }];
+  assert.equal((await adapter.dispatch(ctx, batch)).outcomes[0]!.status, 'ACCEPTED');
+  assert.equal(JSON.parse(sent[1]!.body!).productType, 'OWN_TYPE', 'product type of the requested storefront');
+  // Свой SKU, но сводка только витрины Канады: тип товара чужой витрины не берётся — PATCH не уходит (запасного хода к первой сводке нет)
+  sent.length = 0;
+  replies = [{ path: LISTING, body: item('SYN-SKU-70', [CA]) }];
+  const noOwnSummary = await adapter.dispatch(ctx, batch);
+  assert.equal(noOwnSummary.outcomes[0]!.status, 'REJECTED');
+  assert.equal(noOwnSummary.outcomes[0]!.error?.code, 'NOT_FOUND');
+  assert.deepEqual(sent.map((x) => x.route), ['GET /listings/2021-08-01/items/SYN_SELLER/SYN-SKU-70'], 'no PATCH with the product type of another storefront');
+
+  // Запись ушла, ответ о чужом SKU — исход неизвестен (не принято и не отказ), ядро сверит обратным чтением; алерт адаптера — сразу
+  alerts.length = 0;
   replies = [{ path: LISTING, body: item('SYN-SKU-70', [US]) },
     { path: LISTING, method: 'PATCH', body: { sku: 'GM-ZDPI-9B4E', status: 'ACCEPTED', submissionId: 'f1dc2914-75dd-11ea-bc55-0242ac130003', issues: [] } }];
   const afterWrite = await adapter.dispatch(ctx, batch);
   assert.equal(afterWrite.outcomes[0]!.status, 'OUTCOME_UNKNOWN');
   refused(afterWrite.outcomes[0]!.error, /patchListingsItem: the response is about another SKU/);
-  replies = [{ path: LISTING, body: item('SYN-SKU-70', [US]) }, { path: LISTING, method: 'PATCH', body: { sku: 'SYN-SKU-70', status: 'ACCEPTED', submissionId: 'syn-70', issues: [] } }];
-  assert.equal((await adapter.dispatch(ctx, batch)).outcomes[0]!.status, 'ACCEPTED', 'positive control: own SKU is accepted');
+  assert.deepEqual(alerts, ['AMAZON_RESPONSE_MISMATCH:WARNING'], 'the foreign submission is an alert, not only a log line');
 
-  // Обнаружение: витрина вне запроса или предмет без sku — страница не принимается целиком
-  for (const [items, what] of [[[item('SYN-1', [US]), item('SYN-2', [US, CA])], new RegExp(CA)], [[item('SYN-1', [US]), item(undefined, [US])], /carries no sku/]] as const) {
-    replies = [{ path: /^\/listings\/2021-08-01\/items\/SYN_SELLER$/, body: { numberOfResults: items.length, items } }];
-    await assert.rejects(adapter.discoverOffers(ctx, { limit: 20 }), (e: { error?: { code: string; message: string } }) => {
-      assert.equal(e.error?.code, 'RESPONSE_MISMATCH');
-      assert.match(e.error!.message, what);
-      return true;
-    });
-  }
-  // Обнаружение с SKU сети Amazon: сводки FBA другой витрины — количество неизвестно (не берётся), а не чужое; своя витрина — берётся
+  // Обнаружение: предмет без sku и сводка Канады пропускаются поштучно с журналом; остальное страницы — в каталоге
+  logs.length = 0;
+  replies = [{ path: /^\/listings\/2021-08-01\/items\/SYN_SELLER$/, body: { numberOfResults: 3, items: [item('SYN-1', [US]), item('SYN-2', [US, CA]), item(undefined, [US])] } }];
+  const page = await adapter.discoverOffers(ctx, { limit: 20 });
+  assert.deepEqual(page.items.map((i) => `${i.identity.externalSku}@${i.identity.marketplace}`), [`SYN-1@${US}`, `SYN-2@${US}`]);
+  assert.ok(logs.includes('AMZ_C15_RESPONSE_IDENTITY:DISCOVERY:'), `skipped entries are named in the log: ${logs.join(', ')}`);
+
+  // Обнаружение с SKU сети Amazon: сводки FBA другой витрины — количество не берётся (а не чужое); своя витрина — берётся
   const fbaItem = { ...item('SYN-FBA-70', [US]), fulfillmentAvailability: [{ fulfillmentChannelCode: 'SYN_AMAZON_NETWORK', quantity: 0 }] };
   const fbaReply = (granularityId: string) => ({ path: /^\/fba\/inventory\/v1\/summaries$/, body: { payload: { granularity: { granularityType: 'Marketplace', granularityId },
     inventorySummaries: [{ sellerSku: 'SYN-FBA-70', inventoryDetails: { fulfillableQuantity: 9 } }] } } });
   for (const [granularityId, quantity] of [[CA, undefined], [US, 9]] as const) {
     replies = [{ path: /^\/listings\/2021-08-01\/items\/SYN_SELLER$/, body: { numberOfResults: 1, items: [fbaItem] } }, fbaReply(granularityId)];
-    const page = await adapter.discoverOffers(ctx, { limit: 20 });
-    assert.equal(page.items[0]!.fulfillment, 'CHANNEL');
-    assert.equal(page.items[0]!.currentQuantity, quantity, `FBA summaries of ${granularityId}`);
+    const fbaPage = await adapter.discoverOffers(ctx, { limit: 20 });
+    assert.equal(fbaPage.items[0]!.fulfillment, 'CHANNEL');
+    assert.equal(fbaPage.items[0]!.currentQuantity, quantity, `FBA summaries of ${granularityId}`);
   }
-  assert.deepEqual([...new Set(logs.filter((l) => l.startsWith('AMZ_C15')))].sort(),
-    ['AMZ_C15_RESPONSE_IDENTITY:DISCOVERY', 'AMZ_C15_RESPONSE_IDENTITY:DISPATCH_READ', 'AMZ_C15_RESPONSE_IDENTITY:DISPATCH_SUBMISSION', 'AMZ_C15_RESPONSE_IDENTITY:FBA_SUMMARIES',
-      'AMZ_C15_RESPONSE_IDENTITY:READBACK']);
+  assert.ok(logs.includes('AMZ_C15_RESPONSE_IDENTITY:FBA_SUMMARIES:STOREFRONT'));
 
-  // FBA: сводки другой витрины или чужого SKU — ни одного количества; свои — количество fulfillableQuantity
-  const fba = (granularityId: string | undefined, sku: string) => ({ payload: { ...(granularityId ? { granularity: { granularityType: 'Marketplace', granularityId } } : {}),
-    inventorySummaries: [{ sellerSku: sku, inventoryDetails: { fulfillableQuantity: 5 } }] } });
-  assert.equal(fbaQuantitiesOf(fba(CA, 'SYN-FBA-70'), US, ['SYN-FBA-70']).mismatch?.kind, 'STOREFRONT');
-  assert.equal(fbaQuantitiesOf(fba(US, 'SYN-OTHER'), US, ['SYN-FBA-70']).mismatch?.kind, 'SKU');
-  assert.equal(fbaQuantitiesOf(fba(US, 'SYN-OTHER'), US, ['SYN-FBA-70']).quantities.size, 0);
-  assert.deepEqual([...fbaQuantitiesOf(fba(US, 'SYN-FBA-70'), US, ['SYN-FBA-70']).quantities], [['SYN-FBA-70', 5]]);
-  assert.deepEqual([...fbaQuantitiesOf(fba(undefined, 'SYN-FBA-70'), US, ['SYN-FBA-70']).quantities], [['SYN-FBA-70', 5]], 'granularityId is optional in the model');
+  // FBA: другая витрина или чужой SKU — ни одного количества; сводка без sellerSku (в модели необязателен) — пропуск поштучно
+  const fba = (granularityId: string | undefined, summaries: Array<{ sellerSku?: string; q: number }>) => ({ payload: {
+    ...(granularityId ? { granularity: { granularityType: 'Marketplace', granularityId } } : {}),
+    inventorySummaries: summaries.map((x) => ({ ...(x.sellerSku ? { sellerSku: x.sellerSku } : {}), inventoryDetails: { fulfillableQuantity: x.q } })) } });
+  assert.equal(fbaQuantitiesOf(fba(CA, [{ sellerSku: 'SYN-FBA-70', q: 5 }]), US, ['SYN-FBA-70']).mismatch, 'STOREFRONT');
+  const foreignSku = fbaQuantitiesOf(fba(US, [{ sellerSku: 'SYN-FBA-70', q: 5 }, { sellerSku: 'SYN-OTHER', q: 6 }]), US, ['SYN-FBA-70']);
+  assert.deepEqual([foreignSku.mismatch, foreignSku.quantities.size], ['SKU', 0], 'a foreign SKU drops the whole answer');
+  const noSku = fbaQuantitiesOf(fba(US, [{ q: 3 }, { sellerSku: 'SYN-FBA-70', q: 5 }]), US, ['SYN-FBA-70']);
+  assert.deepEqual([noSku.mismatch, noSku.withoutSku, [...noSku.quantities]], [null, 1, [['SYN-FBA-70', 5]]], 'a summary without sellerSku is skipped alone');
+  assert.deepEqual([...fbaQuantitiesOf(fba(undefined, [{ sellerSku: 'SYN-FBA-70', q: 5 }]), US, ['SYN-FBA-70']).quantities], [['SYN-FBA-70', 5]], 'granularityId is optional in the model');
 
   // details — в тексте ошибки (у 403 SP-API причина только в нём); повтор сообщения не дописывается
   const failure = (errors: Array<{ code: string; message: string; details?: string }>) =>

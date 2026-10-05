@@ -1058,7 +1058,9 @@ export function createPricingPipeline(deps: PipelineDeps) {
           // Ревью шага 56, находка 6: отказ на месте продолжения считается; круг сбрасывается к началу только на третьем подряд
           const saved = await store.saveDiscoveryCircle?.(ctx.tenantId, ctx.channelAccountId, { startedFrom, cursor: startedFrom, stop: 'FAILED', startedAt: runStartedAt, at: deps.now(), noProgress: true });
           if (saved === 'RESET') {
-            await emit(ctx, [{ kind: 'alert', code: 'DISCOVERY_CIRCLE_RESET', severity: 'WARNING', details: { reason: String((error as { code?: string })?.code ?? 'FAILED').slice(0, 60) } }]);
+            // Ревью шага 70, находка 3: у ChannelCallError код — в `.error.code`; прежнее чтение `.code` давало причину FAILED всегда
+            const reason = (error as { error?: { code?: string } })?.error?.code ?? (error as { code?: string })?.code ?? 'FAILED';
+            await emit(ctx, [{ kind: 'alert', code: 'DISCOVERY_CIRCLE_RESET', severity: 'WARNING', details: { reason: String(reason).slice(0, 60) } }]);
           }
         }
         throw error;

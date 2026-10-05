@@ -1,0 +1,16 @@
+{
+ "recorded": "2026-10-05",
+ "what": "two LWA refresh_token exchanges in a row with the sandbox app; only booleans and status codes, no tokens",
+ "first": 200,
+ "second": 200,
+ "responseKeys": [
+  "access_token",
+  "refresh_token",
+  "token_type",
+  "expires_in"
+ ],
+ "refreshTokenInResponseEqualsSent": true,
+ "refreshTokenInSecondResponseEqualsSent": true,
+ "sameAccessTokenTwice": false,
+ "sentRefreshTokenStillWorksAfterTwoExchanges": true
+}

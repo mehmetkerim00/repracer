@@ -624,21 +624,32 @@ test('шаг 65: каждый инвариант хаоса краснеет н�
   await expectProblem('d) чужая цена в канале', new RegExp(`^d\\) PRICE ${unit.idUnit}: the channel holds ${unit.listingPriceMinor + 77}`));
 
   /**
-   * d) количество в канале ниже нашего, и это НЕ объясняется отменами (OQ-220): разница больше всех отмен предложения — признание OQ-220
-   * не должно глотать любое расхождение количества (шаг 67)
+   * d) количество в канале ниже нашего: признание OQ-220 — ровно число отмен после последней применённой записи, не больше и не меньше.
+   * Ревью шага 70, находка 4: прежний контроль ставил количество нашей записью (`reply PATCH`), после шага 69 она считалась применённой —
+   * отмен после неё 0, и ветку «разница ≠ числу отмен» контроль не проверял. Теперь количество правит «кто-то другой», а отмена после
+   * записи — одна: разница 1 признаётся (OQ-220), разница 2 — расхождение
    */
   const quantityScopes = await db.rows<{ unit: string; storefront: string; offer: string; quantity: number }>(
     `SELECT om.external_unit_id AS unit, om.marketplace AS storefront, om.external_offer_id AS offer, ap.quantity FROM tenant_data.offer_mapping om
        CROSS JOIN LATERAL (SELECT h.quantity FROM tenant_data.channel_write_history h WHERE h.tenant_id = om.tenant_id AND h.write_scope_id = om.quantity_write_scope_id
                             AND h.final_status = 'APPLIED' ORDER BY h.version DESC LIMIT 1) ap
       WHERE om.tenant_id = $1 ORDER BY 1`, [t]);
-  // Разница — на две больше ВСЕХ отмен предложения: ни одно число неувиденных отмен с ней не совпадёт
-  const counted = quantityScopes.find((q) => q.quantity - live.simulator.orderHistory(q.offer).filter((o) => o.status === 'cancelled').length - 2 >= 0);
-  assert.ok(counted, 'у мира есть единица с применённым количеством — иначе контролю нечего портить');
-  const lowered = counted.quantity - live.simulator.orderHistory(counted.offer).filter((o) => o.status === 'cancelled').length - 2;
-  live.simulator.reply({ method: 'PATCH', rawUrl: `http://model/v2/units/${counted.unit}?storefront=${counted.storefront}`, path: `/v2/units/${counted.unit}`,
-    query: { storefront: counted.storefront }, rawBody: JSON.stringify({ amount: lowered }), body: { amount: lowered }, headers: {} } as never, Date.now());
-  await expectProblem('d) количество ниже нашего не по отменам', new RegExp(`^d\\) QUANTITY ${counted.unit}: the channel holds ${lowered}`));
+  // Единица чистая: канал держит применённое, открытых заказов нет и отмен после последней записи нет (иначе признанный OQ-220 сдвинул бы счёт)
+  const channelUnits = (live.simulator.dump() as { units: Array<{ idUnit: number; storefront: string; amount: number }> }).units;
+  const counted = quantityScopes.find((q) => {
+    const lastWrite = live.simulator.appliedAmountWrites(q.offer).reduce((at, w) => Math.max(at, w.atMs), Number.NEGATIVE_INFINITY);
+    const unit = channelUnits.find((u) => String(u.idUnit) === q.unit && u.storefront === q.storefront);
+    return q.quantity >= 2 && unit?.amount === q.quantity
+      && live.simulator.orderHistory(q.offer).every((o) => o.status !== 'open' && !(o.status === 'cancelled' && o.tsUpdatedMs > lastWrite));
+  });
+  assert.ok(counted, 'у мира есть чистая единица с применённым количеством ≥ 2 — иначе контролю нечего портить');
+  live.simulator.addCancelledOrderForControl(counted.offer, counted.storefront, Date.now());
+  const quantityProblem = new RegExp(`^d\\) QUANTITY ${counted.unit}: `);
+  live.simulator.setAmountExternally(counted.offer, counted.quantity - 1);
+  const recognised = await invariants(0);
+  assert.ok(!recognised.some((p) => quantityProblem.test(p)), `d) разница 1 при одной отмене после записи — OQ-220, не расхождение: ${JSON.stringify(recognised.filter((p) => quantityProblem.test(p))).slice(0, 400)}`);
+  live.simulator.setAmountExternally(counted.offer, counted.quantity - 2);
+  await expectProblem('d) количество ниже нашего больше, чем отмен после записи', new RegExp(`^d\\) QUANTITY ${counted.unit}: the channel holds ${counted.quantity - 2}`));
 
   // d) последняя запись завершена не применением и БЕЗ причины — дефект «запись исчезла молча»
   // Последняя версия своей единицы — именно её смотрит проверка «завершена без причины»

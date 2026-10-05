@@ -319,7 +319,10 @@ export const WRITE_ERROR_CODES = [
 export const ERROR_CLASSES = ['TRANSIENT', 'PERMANENT', 'REQUIRES_HUMAN'] as const;
 export const CONTEXT_CHANGES = ['MIN_PRICE', 'MAX_PRICE', 'CHANNEL_HALT', 'CHANNEL_DISTRUST', 'PRICING_STOP'] as const;
 export const RECONCILE_RESULTS = ['APPLIED', 'NOT_APPLIED'] as const;
-export const SELLER_ACTIONS = ['RECONNECT_ACCOUNT', 'CHECK_ACCOUNT_STATUS', 'CHECK_LISTING', 'REVIEW_CHANNEL_POLICY', 'CONTACT_CHANNEL_SUPPORT', 'REVIEW_OFFER_STATUS', 'DISABLE_CHANNEL_REPRICER', 'REMOVE_CHANNEL_BOUNDS'] as const;
+export const SELLER_ACTIONS = ['RECONNECT_ACCOUNT', 'CHECK_ACCOUNT_STATUS', 'CHECK_LISTING', 'REVIEW_CHANNEL_POLICY', 'CONTACT_CHANNEL_SUPPORT', 'REVIEW_OFFER_STATUS', 'DISABLE_CHANNEL_REPRICER', 'REMOVE_CHANNEL_BOUNDS',
+  // Шаг 70 [Р-205] (ревью шага 70, находка 9): ответ канала не о том предложении — причина у канала или в нашей проверке, поддержка канала
+  // тут не поможет. Последним: порядок держит реестр базы (0175)
+  'TELL_PLATFORM_TEAM'] as const;
 export const MARGIN_COST_CAUSES = ['COST_PROFILE_MISSING', 'FEE_ESTIMATE_MISSING', 'VAT_RATE_MISSING', 'FX_RATE_UNAVAILABLE', 'FX_RATE_STALE', 'UNSUPPORTED_CURRENCY', 'INVALID_INPUT'] as const;
 export const BUDGET_SOURCES = ['CHANNEL', 'DATABASE'] as const;
 /** Кому нужна себестоимость [Р-77]: стратегии целевой маржи и ограничению минимальной маржи — перечисляются явно */
@@ -611,6 +614,7 @@ export function sellerActionFor(errorCode: string): (typeof SELLER_ACTIONS)[numb
     // Р-115, Р-114: правило автоматического ценообразования или границы цены заданы в кабинете канала — снять их может только продавец
     case 'CHANNEL_REPRICER_ACTIVE': return 'DISABLE_CHANNEL_REPRICER';
     case 'CHANNEL_BOUNDS_PRESENT': return 'REMOVE_CHANNEL_BOUNDS';
+    case 'RESPONSE_MISMATCH': return 'TELL_PLATFORM_TEAM';
     default: return 'CONTACT_CHANNEL_SUPPORT';
   }
 }

@@ -169,10 +169,12 @@ test('step 56 (review of step 55, findings 3–4): a failure keeps the progress;
   let nowMs = Date.parse('2026-09-29T09:00:00.000Z');
   let failAt: string | null = 'p2';
   const alerts: string[] = [];
+  const reasons: string[] = [];
   const adapter = {
     descriptor: { channel: 'EBAY' },
     async discoverOffers(_ctx: unknown, page: { cursor?: string }) {
-      if (page.cursor === failAt) throw Object.assign(new Error('channel refused'), { code: 'CHANNEL_UNAVAILABLE' });
+      // Ревью шага 70, находка 3: отказ — формы ChannelCallError адаптеров (код в `.error.code`), а не голый `.code`
+      if (page.cursor === failAt) throw Object.assign(new Error('channel refused'), { error: { code: 'CHANNEL_UNAVAILABLE', class: 'TRANSIENT', scope: 'BATCH' } });
       const i = cursors.indexOf(page.cursor);
       return { items: [], ...(i + 1 < cursors.length ? { nextCursor: cursors[i + 1] } : {}) };
     },
@@ -192,7 +194,7 @@ test('step 56 (review of step 55, findings 3–4): a failure keeps the progress;
       return reset ? 'RESET' : 'SAVED';
     },
   } as unknown as PricingStore;
-  const pipeline = createPricingPipeline({ store, adapter, alerts: { raise: async (a: { code: string }) => { alerts.push(a.code); } } as never, logger: { log: () => undefined },
+  const pipeline = createPricingPipeline({ store, adapter, alerts: { raise: async (a: { code: string; details?: { reason?: string } }) => { alerts.push(a.code); if (a.details?.reason) reasons.push(a.details.reason); } } as never, logger: { log: () => undefined },
     now: () => new Date(nowMs).toISOString() as never, sleep: async () => undefined });
   const run = () => pipeline.discoverOffers(ctx(new Date(nowMs + 600_000).toISOString()), { pageLimit: 1, circleEveryMs: 86_400_000 });
   // Отказ на p2 после двух прочитанных страниц — место p2 записано, прогресс не пропал
@@ -204,6 +206,7 @@ test('step 56 (review of step 55, findings 3–4): a failure keeps the progress;
   assert.deepEqual([(state as { cursor: string | null } | null)?.cursor, alerts], ['p2', []], 'two failures at the resume point keep the place');
   await assert.rejects(run(), /channel refused/);
   assert.deepEqual([(state as { cursor: string | null } | null)?.cursor, alerts], [null, ['DISCOVERY_CIRCLE_RESET']]);
+  assert.deepEqual(reasons, ['CHANNEL_UNAVAILABLE'], 'the reset names the code of the channel error, not FAILED');
   // Канал ожил — круг с начала до конца; следующий заход в пределах суток канал не трогает
   failAt = null;
   assert.equal((await run()).stop, 'COMPLETED');

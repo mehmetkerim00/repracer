@@ -6,7 +6,8 @@
 --
 -- Реестр видов параметров (0099) переопределяется значением прежнего реестра, как в 0160: в КАЖДОМ перечислении, где есть
 -- `OUTCOME_UNRESOLVED` (последний код списка до шага), новый код дописывается в конец — порядок держит сравнение реестра базы с кодом
--- (тест «finding 15»). Ключи параметров не меняются, новых защит нет.
+-- (тест «finding 15»). Ключи параметров не меняются, новых защит нет. Так же — новое действие продавца TELL_PLATFORM_TEAM в двух
+-- перечислениях действий (ревью шага 70, находка 9).
 
 BEGIN;
 SET ROLE repracer_owner;
@@ -29,6 +30,22 @@ BEGIN
   -- Пять параметров перечисляют коды ошибок записи; иное число — реестр не тот, что ожидает шаг, и миграция не должна угадывать
   IF extended <> 5 THEN
     RAISE EXCEPTION '0175: expected 5 write error code lists in security.eternal_param_kinds(), found %', extended;
+  END IF;
+  /**
+   * Ревью шага 70, находка 9: у RESPONSE_MISMATCH своё действие продавца TELL_PLATFORM_TEAM (поддержка канала тут не поможет) — в каждом
+   * перечислении действий продавца (`SELLER_ACTIONS`: `WRITE_SCOPE_BLOCKED.action`, `SCOPE_NOT_ACTIVE.action`) — в конец
+   */
+  extended := 0;
+  FOR reason IN SELECT key, value FROM jsonb_each(kinds) LOOP
+    FOR param IN SELECT key, value FROM jsonb_each(reason.value) LOOP
+      IF param.value->>'k' = 'enum' AND (param.value->'v') ? 'REMOVE_CHANNEL_BOUNDS' AND NOT (param.value->'v') ? 'TELL_PLATFORM_TEAM' THEN
+        kinds := jsonb_set(kinds, ARRAY[reason.key, param.key, 'v'], (param.value->'v') || '["TELL_PLATFORM_TEAM"]'::jsonb);
+        extended := extended + 1;
+      END IF;
+    END LOOP;
+  END LOOP;
+  IF extended <> 2 THEN
+    RAISE EXCEPTION '0175: expected 2 seller action lists in security.eternal_param_kinds(), found %', extended;
   END IF;
   EXECUTE format($f$CREATE OR REPLACE FUNCTION security.eternal_param_kinds() RETURNS jsonb
     LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $b$ SELECT %L::jsonb $b$$f$, kinds);

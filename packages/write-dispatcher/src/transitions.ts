@@ -163,8 +163,11 @@ export function planReconciliationTransition(
   // сервера токенов) сразу не блокируют: они не про оффер и могут пройти (ревью шага 22, находка 2)
   // Шаг 51 (ревью, находка 6): так же — невыполненное условие ПРЕДЛОЖЕНИЯ (PRECONDITION_FAILED по элементу: Amazon FBA-SKU, количество которого
   // ведёт Amazon [AMZ_C14]; eBay — листинг не под Inventory API): сверка его не изменит, человек разбирает сразу и с кодом канала
+  // Шаг 70 [Р-205] (ревью шага 70, находка 1): ответ канала не о том SKU — сверка его не изменит; без этого RESPONSE_MISMATCH час ходил
+  // по кругу сверки и блокировал единицу кодом OUTCOME_UNRESOLVED, а свою причину человек не видел
   if (result.kind === 'UNKNOWN' && result.error?.class === 'REQUIRES_HUMAN'
-    && (CHANNEL_PRICING_CODES.has(result.error.code) || (result.error.code === 'PRECONDITION_FAILED' && result.error.scope === 'ITEM'))) {
+    && (CHANNEL_PRICING_CODES.has(result.error.code) || (result.error.code === 'PRECONDITION_FAILED' && result.error.scope === 'ITEM')
+      || result.error.code === 'RESPONSE_MISMATCH')) {
     const code = result.error.code;
     return { to: 'UNRESOLVED', errorCode: code, reason: { code: 'WRITE_SCOPE_BLOCKED', params: { code, action: sellerActionFor(code) } } };
   }

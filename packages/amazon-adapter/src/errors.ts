@@ -17,7 +17,10 @@ export function channelError(code: ChannelErrorCode, scope: ErrorScope, message:
 /** Сбой HTTP по статусам модели patchListingsItem/getListingsItem: 400, 403, 404, 413, 415, 429, 500, 503 */
 export function classifyFailure(result: Extract<SpApiResult<unknown>, { ok: false }>, defaultScope: ErrorScope, nowMs: number): ChannelError {
   const first = result.errors[0];
-  // Шаг 70 [Р-205]: `details` — в тексте ошибки (у 403 SP-API причина только в нём). Текст ошибки — журнал разработчика, в базу не пишется
+  // Шаг 70 [Р-205]: `details` — в тексте ошибки (у 403 SP-API причина только в нём). Текст ошибки — журнал разработчика; у отказов обнаружения
+  // и чтения заказов (ChannelCallError) он ложится и в `maintenance.scheduled_job.last_error` — экран работ панели оператора (ревью шага 70,
+  // находка 8). В песочнице `details` называл только причину (нет токена, токен недействителен, витрина не того региона); значения продавца
+  // в нём — (проверить) в бою: текст обрезается до 160 знаков, токенов и секретов в запросах SP-API нет — в адресе и теле их нечему отражать
   // Сообщение укорачивается до деталей: текст ошибки обрезается на 300 знаках, и длинное сообщение не должно вытеснить причину
   // Повтор сообщения в деталях (у образцов песочницы «Invalid Input» дважды) не дописывается
   const details = first?.details && first.details !== first.message ? first.details : null;
