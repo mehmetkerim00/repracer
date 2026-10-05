@@ -18,7 +18,7 @@
     "check:tests": "node scripts/check-test-inclusion.mjs"
   },
   "devDependencies": {
-    "@types/node": "22.20.2",
+    "@types/node": "26.6.4",
     "openapi-typescript": "7.13.0",
     "typescript": "5.9.3"
   }
