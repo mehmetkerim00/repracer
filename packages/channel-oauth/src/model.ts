@@ -139,10 +139,11 @@ export class ModelOAuthProvider {
         this.stats.refused += 1;
         return this.reply(400, { error: 'invalid_grant', error_description: 'refresh token is invalid, expired or revoked' });
       }
-      // eBay: обновление нового refresh-токена не выдаёт [песочница]
+      // eBay: обновление нового refresh-токена не выдаёт [песочница]. Amazon (шаг 70, песочница SP-API): LWA возвращает тот же
+      // refresh-токен без изменений — два обмена подряд, прежний работает и после них (docs/evidence/step70-amazon-sandbox.md)
       return this.reply(200, this.opts.channel === 'EBAY'
         ? { access_token: this.access(known.sellerId), expires_in: 7200, token_type: 'User Access Token' }
-        : { access_token: this.access(known.sellerId), token_type: 'bearer', expires_in: 3600 });
+        : { access_token: this.access(known.sellerId), refresh_token: form.get('refresh_token'), token_type: 'bearer', expires_in: 3600 });
     }
     this.stats.refused += 1;
     return this.reply(400, { error: 'unsupported_grant_type' });

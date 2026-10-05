@@ -65,3 +65,29 @@ test('an LWA refusal is a token failure: nothing is sent to SP-API', async () =>
   assert.ok(!r.ok && r.tokenFailure && r.errors[0]!.code === 'LWA_TOKEN_REFUSED');
   assert.equal(w.calls.length, 1);
 });
+
+/**
+ * Шаг 70 (песочница SP-API, docs/evidence/step70-amazon-sandbox.md): 403 SP-API — код `Unauthorized` при любой причине (нет токена,
+ * токен недействителен, витрина чужого региона, неизвестный путь); причину называет только `details`. Тела ниже — ответы песочницы.
+ * Клиент принимает 403 за протухший токен: сбрасывает кэш, берёт новый токен и повторяет запрос ОДИН раз (запрос не обработан, повтор
+ * безопасен и для PATCH); второй 403 — отказ с кодом канала, без третьей попытки
+ */
+const SANDBOX_403 = (details: string) => () => new Response(JSON.stringify({ errors: [{ code: 'Unauthorized', message: 'Access to requested resource is denied.', details }] }),
+  { status: 403, headers: { 'content-type': 'application/json', 'x-amzn-ErrorType': 'AccessDeniedException' } });
+
+test('step 70: a 403 Unauthorized drops the cached token, takes a new one and repeats the request once — a PATCH too', async () => {
+  const w = world();
+  w.replies.push(w.token, SANDBOX_403('The access token you provided is revoked, malformed or invalid.'), w.token, () => new Response('{"status":"ACCEPTED"}', { status: 200 }));
+  const r = await w.client.request('PATCH', '/listings/2021-08-01/items/SYN/SKU', { body: { productType: 'SYN', patches: [] } });
+  assert.ok(r.ok, 'the repeat with a fresh token succeeds');
+  assert.deepEqual(w.calls.map((c) => (c.url.endsWith('/auth/o2/token') ? 'LWA' : c.method)), ['LWA', 'PATCH', 'LWA', 'PATCH']);
+  assert.equal(r.attempts.length, 2);
+
+  const v = world();
+  v.replies.push(v.token, SANDBOX_403('The marketplaces you provided are not valid for region.'), v.token,
+    SANDBOX_403('The marketplaces you provided are not valid for region.'));
+  const refused = await v.client.request('GET', '/orders/2026-01-01/orders', { query: { marketplaceIds: ['A1VC38T7YXB528'] } });
+  assert.ok(!refused.ok && refused.status === 403 && !refused.tokenFailure, 'the second 403 is the answer, not a token failure');
+  assert.equal(refused.errors[0]!.code, 'Unauthorized');
+  assert.equal(v.calls.length, 4, 'one new token and one repeat — no third attempt');
+});

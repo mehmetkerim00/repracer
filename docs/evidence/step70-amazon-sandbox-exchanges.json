@@ -1,0 +1,1386 @@
+{
+ "recorded": "2026-10-05",
+ "what": "Amazon SP-API sandbox (NA) and LWA, one-off live run; secrets, tokens and the app id are redacted; all request data synthetic",
+ "exchanges": [
+  {
+   "label": "getMarketplaceParticipations",
+   "at": "2026-10-05T18:54:14.113Z",
+   "durationMs": 1838,
+   "request": {
+    "method": "POST",
+    "host": "api.amazon.com",
+    "path": "/auth/o2/token",
+    "query": {},
+    "headers": {
+     "content-type": "application/x-www-form-urlencoded;charset=UTF-8"
+    },
+    "body": {
+     "grant_type": "refresh_token",
+     "refresh_token": "<redacted>",
+     "client_id": "<redacted>",
+     "client_secret": "<redacted>"
+    }
+   },
+   "response": {
+    "status": 200,
+    "headers": {
+     "cache-control": "no-cache, no-store, must-revalidate",
+     "connection": "keep-alive",
+     "content-length": "763",
+     "content-type": "application/json;charset=UTF-8",
+     "date": "Mon, 05 Oct 2026 18:54:16 GMT",
+     "pragma": "no-cache",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "vary": "User-Agent,Accept-Encoding",
+     "x-amz-date": "Mon, 05 Oct 2026 18:54:16 GMT",
+     "x-amz-rid": "K66FCGG5PQM66DXNFSRQ",
+     "x-amzn-requestid": "40b181ff-b0b2-4f22-8871-a2f0080c60e1"
+    },
+    "body": {
+     "access_token": "<redacted, form Atza|…, 353 chars>",
+     "refresh_token": "<redacted>",
+     "token_type": "bearer",
+     "expires_in": 3600
+    }
+   }
+  },
+  {
+   "label": "getMarketplaceParticipations",
+   "at": "2026-10-05T18:54:15.952Z",
+   "durationMs": 2213,
+   "request": {
+    "method": "GET",
+    "host": "sandbox.sellingpartnerapi-na.amazon.com",
+    "path": "/sellers/v1/marketplaceParticipations",
+    "query": {},
+    "headers": {
+     "accept": "application/json",
+     "x-amz-access-token": "<access token, form Atza|…>",
+     "x-amz-date": "20261005T185415Z",
+     "user-agent": "repracer-sandbox-probe/0.1 (Language=TypeScript; Platform=Node)"
+    }
+   },
+   "response": {
+    "status": 200,
+    "headers": {
+     "connection": "keep-alive",
+     "content-length": "280",
+     "content-type": "application/json",
+     "date": "Mon, 05 Oct 2026 18:54:18 GMT",
+     "edge-cache-control": "no-store,no-cache,stale-if-error=0,stale-while-revalidate=0",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "vary": "User-Agent,Accept-Encoding",
+     "via": "1.1 dcf4626236e0bf59f93714e3cf1cf6ae.cloudfront.net (CloudFront)",
+     "x-amz-apigw-id": "OPF21d7bff0d15a",
+     "x-amz-cf-id": "ZrM9ZunwXexAaaSGZDFjReDbgXG4NzCrKDMDDpeRrdjJSD9g9qGVnQ==",
+     "x-amz-cf-pop": "FRA56-P14",
+     "x-amz-rid": "0XYEEWRNFJPRXM4445B1",
+     "x-amzn-ratelimit-limit": "5.0",
+     "x-amzn-requestid": "21d7bff0-d15a-46fa-b7d7-c13badf8702a",
+     "x-amzn-trace-id": "Root=1-6ac3f25a-21d7bff0d15a46fa",
+     "x-cache": "Miss from cloudfront"
+    },
+    "body": {
+     "payload": [
+      {
+       "marketplace": {
+        "id": "ATVPDKIKX0DER",
+        "countryCode": "US",
+        "name": "Amazon.com",
+        "defaultCurrencyCode": "USD",
+        "defaultLanguageCode": "en_US",
+        "domainName": "www.amazon.com"
+       },
+       "storeName": "BestSellerStore",
+       "participation": {
+        "isParticipating": true,
+        "hasSuspendedListings": false
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "label": "no access token",
+   "at": "2026-10-05T18:54:18.166Z",
+   "durationMs": 3088,
+   "request": {
+    "method": "GET",
+    "host": "sandbox.sellingpartnerapi-na.amazon.com",
+    "path": "/sellers/v1/marketplaceParticipations",
+    "query": {},
+    "headers": {
+     "user-agent": "repracer-sandbox-probe/0.1 (Language=TypeScript; Platform=Node)",
+     "x-amz-date": "20261005T185418Z"
+    }
+   },
+   "response": {
+    "status": 403,
+    "headers": {
+     "connection": "keep-alive",
+     "content-length": "189",
+     "content-type": "application/json",
+     "date": "Mon, 05 Oct 2026 18:54:20 GMT",
+     "edge-cache-control": "no-store,no-cache,stale-if-error=0,stale-while-revalidate=0",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "vary": "User-Agent,Accept-Encoding",
+     "via": "1.1 d5e242bbdda7ca2285d7ad511c640472.cloudfront.net (CloudFront)",
+     "x-amz-apigw-id": "OPF865c7c3f9db2",
+     "x-amz-cf-id": "JGnF9nVkRqthTD7Alz_XGRj8mjHdc6Pyg19fquQNDTkXL2PI1Qf5aw==",
+     "x-amz-cf-pop": "FRA56-P14",
+     "x-amz-rid": "CAEJHPZ3FKD1C8XAYWT7",
+     "x-amzn-errortype": "AccessDeniedException",
+     "x-amzn-requestid": "865c7c3f-9db2-4079-b570-4b5be8e00cd4",
+     "x-amzn-trace-id": "Root=1-6ac3f25c-865c7c3f9db24079",
+     "x-cache": "Error from cloudfront"
+    },
+    "body": {
+     "errors": [
+      {
+       "code": "Unauthorized",
+       "message": "Access to requested resource is denied.",
+       "details": "Access token is missing in the request header."
+      }
+     ]
+    }
+   }
+  },
+  {
+   "label": "synthetic access token",
+   "at": "2026-10-05T18:54:21.255Z",
+   "durationMs": 461,
+   "request": {
+    "method": "GET",
+    "host": "sandbox.sellingpartnerapi-na.amazon.com",
+    "path": "/sellers/v1/marketplaceParticipations",
+    "query": {},
+    "headers": {
+     "user-agent": "repracer-sandbox-probe/0.1 (Language=TypeScript; Platform=Node)",
+     "x-amz-access-token": "syn-not-a-token"
+    }
+   },
+   "response": {
+    "status": 403,
+    "headers": {
+     "connection": "keep-alive",
+     "content-length": "206",
+     "content-type": "application/json",
+     "date": "Mon, 05 Oct 2026 18:54:22 GMT",
+     "edge-cache-control": "no-store,no-cache,stale-if-error=0,stale-while-revalidate=0",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "vary": "User-Agent,Accept-Encoding",
+     "via": "1.1 dcf4626236e0bf59f93714e3cf1cf6ae.cloudfront.net (CloudFront)",
+     "x-amz-apigw-id": "OPF8fbb0304740e",
+     "x-amz-cf-id": "W8Kak5Q7NwNgLyb5aw5eOlShUI0EaeI4ErRl30oMARYMWzI5tk1KsA==",
+     "x-amz-cf-pop": "FRA56-P14",
+     "x-amz-rid": "PPAARAF3ZHQ225FSZX9G",
+     "x-amzn-errortype": "AccessDeniedException",
+     "x-amzn-requestid": "8fbb0304-740e-4bc6-8149-a91f13705c1b",
+     "x-amzn-trace-id": "Root=1-6ac3f25e-8fbb0304740e4bc6",
+     "x-cache": "Error from cloudfront"
+    },
+    "body": {
+     "errors": [
+      {
+       "code": "Unauthorized",
+       "message": "Access to requested resource is denied.",
+       "details": "The access token you provided is revoked, malformed or invalid."
+      }
+     ]
+    }
+   }
+  },
+  {
+   "label": "other region sandbox (EU)",
+   "at": "2026-10-05T18:54:21.717Z",
+   "durationMs": 3048,
+   "request": {
+    "method": "GET",
+    "host": "sandbox.sellingpartnerapi-eu.amazon.com",
+    "path": "/sellers/v1/marketplaceParticipations",
+    "query": {},
+    "headers": {
+     "user-agent": "repracer-sandbox-probe/0.1 (Language=TypeScript; Platform=Node)",
+     "x-amz-access-token": "<access token, form Atza|…>"
+    }
+   },
+   "response": {
+    "status": 200,
+    "headers": {
+     "connection": "keep-alive",
+     "content-length": "280",
+     "content-type": "application/json",
+     "date": "Mon, 05 Oct 2026 18:54:25 GMT",
+     "edge-cache-control": "no-store,no-cache,stale-if-error=0,stale-while-revalidate=0",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "vary": "User-Agent,Accept-Encoding",
+     "via": "1.1 b175f9087cfd5448c6eb5fe6119c8b78.cloudfront.net (CloudFront)",
+     "x-amz-apigw-id": "OPF90ba5d5c1fc4",
+     "x-amz-cf-id": "Axq2aJ0yuQSmk53sC6PV7nJojYkckcTd5Hspt4Jy9ryzskipgzFp9w==",
+     "x-amz-cf-pop": "FRA56-P16",
+     "x-amz-rid": "ANV0XDAPJD0RPD1K71Z4",
+     "x-amzn-ratelimit-limit": "5.0",
+     "x-amzn-requestid": "90ba5d5c-1fc4-430c-9773-571071eb7a8f",
+     "x-amzn-trace-id": "Root=1-6ac3f261-90ba5d5c1fc4430c",
+     "x-cache": "Miss from cloudfront"
+    },
+    "body": {
+     "payload": [
+      {
+       "marketplace": {
+        "id": "ATVPDKIKX0DER",
+        "countryCode": "US",
+        "name": "Amazon.com",
+        "defaultCurrencyCode": "USD",
+        "defaultLanguageCode": "en_US",
+        "domainName": "www.amazon.com"
+       },
+       "storeName": "BestSellerStore",
+       "participation": {
+        "isParticipating": true,
+        "hasSuspendedListings": false
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "label": "unknown path",
+   "at": "2026-10-05T18:54:24.766Z",
+   "durationMs": 459,
+   "request": {
+    "method": "GET",
+    "host": "sandbox.sellingpartnerapi-na.amazon.com",
+    "path": "/sellers/v1/syn-unknown",
+    "query": {},
+    "headers": {
+     "user-agent": "repracer-sandbox-probe/0.1 (Language=TypeScript; Platform=Node)",
+     "x-amz-access-token": "<access token, form Atza|…>"
+    }
+   },
+   "response": {
+    "status": 403,
+    "headers": {
+     "connection": "keep-alive",
+     "content-length": "143",
+     "content-type": "application/json",
+     "date": "Mon, 05 Oct 2026 18:54:25 GMT",
+     "edge-cache-control": "no-store,no-cache,stale-if-error=0,stale-while-revalidate=0",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "vary": "User-Agent,Accept-Encoding",
+     "via": "1.1 dcf4626236e0bf59f93714e3cf1cf6ae.cloudfront.net (CloudFront)",
+     "x-amz-apigw-id": "OPFa186df3d5bab",
+     "x-amz-cf-id": "SP2RZ2qLWj6smprt861u9tm6AO7pmh8lcsFkwETQaWSnwEvv_SJdIQ==",
+     "x-amz-cf-pop": "FRA56-P14",
+     "x-amz-rid": "NXK9PXEN458Q5QGS9PY0",
+     "x-amzn-errortype": "AccessDeniedException",
+     "x-amzn-requestid": "a186df3d-5bab-4fc6-a1a7-6483bbceff29",
+     "x-amzn-trace-id": "Root=1-6ac3f261-a186df3d5bab4fc6",
+     "x-cache": "Error from cloudfront"
+    },
+    "body": {
+     "errors": [
+      {
+       "code": "Unauthorized",
+       "message": "Access to requested resource is denied.",
+       "details": ""
+      }
+     ]
+    }
+   }
+  },
+  {
+   "label": "no user-agent header (fetch default)",
+   "at": "2026-10-05T18:54:25.225Z",
+   "durationMs": 499,
+   "request": {
+    "method": "GET",
+    "host": "sandbox.sellingpartnerapi-na.amazon.com",
+    "path": "/sellers/v1/marketplaceParticipations",
+    "query": {},
+    "headers": {
+     "x-amz-access-token": "<access token, form Atza|…>"
+    }
+   },
+   "response": {
+    "status": 200,
+    "headers": {
+     "connection": "keep-alive",
+     "content-length": "280",
+     "content-type": "application/json",
+     "date": "Mon, 05 Oct 2026 18:54:26 GMT",
+     "edge-cache-control": "no-store,no-cache,stale-if-error=0,stale-while-revalidate=0",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "vary": "User-Agent,Accept-Encoding",
+     "via": "1.1 d5e242bbdda7ca2285d7ad511c640472.cloudfront.net (CloudFront)",
+     "x-amz-apigw-id": "OPFda773056cef5",
+     "x-amz-cf-id": "5uVwzUC-d8vuQ4903OKfHF0Atposa_Wsfs6C7AG_RjM46WXuxUd6AQ==",
+     "x-amz-cf-pop": "FRA56-P14",
+     "x-amz-rid": "8EQGSBX2P59ZCKMN78QK",
+     "x-amzn-ratelimit-limit": "5.0",
+     "x-amzn-requestid": "da773056-cef5-49ce-adab-689a2ffe2226",
+     "x-amzn-trace-id": "Root=1-6ac3f262-da773056cef549ce",
+     "x-cache": "Miss from cloudfront"
+    },
+    "body": {
+     "payload": [
+      {
+       "marketplace": {
+        "id": "ATVPDKIKX0DER",
+        "countryCode": "US",
+        "name": "Amazon.com",
+        "defaultCurrencyCode": "USD",
+        "defaultLanguageCode": "en_US",
+        "domainName": "www.amazon.com"
+       },
+       "storeName": "BestSellerStore",
+       "participation": {
+        "isParticipating": true,
+        "hasSuspendedListings": false
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "label": "LWA: synthetic refresh token",
+   "at": "2026-10-05T18:54:25.725Z",
+   "durationMs": 1462,
+   "request": {
+    "method": "POST",
+    "host": "api.amazon.com",
+    "path": "/auth/o2/token",
+    "query": {},
+    "headers": {
+     "content-type": "application/x-www-form-urlencoded;charset=UTF-8"
+    },
+    "body": {
+     "grant_type": "refresh_token",
+     "refresh_token": "Atzr|syn-not-a-refresh-token",
+     "client_id": "<redacted>",
+     "client_secret": "<redacted>"
+    }
+   },
+   "response": {
+    "status": 400,
+    "headers": {
+     "cache-control": "no-cache, no-store, must-revalidate",
+     "connection": "keep-alive",
+     "content-length": "494",
+     "content-type": "application/json;charset=UTF-8",
+     "date": "Mon, 05 Oct 2026 18:54:27 GMT",
+     "pragma": "no-cache",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "vary": "User-Agent,Accept-Encoding",
+     "x-amz-date": "Mon, 05 Oct 2026 18:54:27 GMT",
+     "x-amz-rid": "9R4NA0R8ETB6CRERNP6G",
+     "x-amzn-errortype": "OA2InvalidRequestException:http://internal.amazon.com/coral/com.amazon.panda/",
+     "x-amzn-requestid": "ac8b1c32-0efb-4faa-8dec-9170c5261ed9"
+    },
+    "body": {
+     "error_index": "<opaque value, omitted>",
+     "error_description": "The request has an invalid grant parameter : refresh_token. User may have revoked or didn't grant the permission.",
+     "error": "invalid_grant",
+     "request_id": "ac8b1c32-0efb-4faa-8dec-9170c5261ed9"
+    }
+   }
+  },
+  {
+   "label": "LWA: wrong client secret",
+   "at": "2026-10-05T18:54:27.188Z",
+   "durationMs": 2214,
+   "request": {
+    "method": "POST",
+    "host": "api.amazon.com",
+    "path": "/auth/o2/token",
+    "query": {},
+    "headers": {
+     "content-type": "application/x-www-form-urlencoded;charset=UTF-8"
+    },
+    "body": {
+     "grant_type": "refresh_token",
+     "refresh_token": "<redacted>",
+     "client_id": "<redacted>",
+     "client_secret": "syn-wrong-client-secret"
+    }
+   },
+   "response": {
+    "status": 401,
+    "headers": {
+     "cache-control": "no-cache, no-store, must-revalidate",
+     "connection": "keep-alive",
+     "content-length": "77",
+     "content-type": "application/json;charset=UTF-8",
+     "date": "Mon, 05 Oct 2026 18:54:29 GMT",
+     "pragma": "no-cache",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "vary": "User-Agent,Accept-Encoding",
+     "x-amz-date": "Mon, 05 Oct 2026 18:54:29 GMT",
+     "x-amz-rid": "FPVZFK3N6DX8X6KN4XTW",
+     "x-amzn-errortype": "OA2InvalidClientException:http://internal.amazon.com/coral/com.amazon.panda/",
+     "x-amzn-requestid": "099d2423-e6e6-4bc9-adcf-3ae20a1610cc"
+    },
+    "body": {
+     "error_description": "Client authentication failed",
+     "error": "invalid_client"
+    }
+   }
+  },
+  {
+   "label": "adapter discoverOffers (searchListingsItems)",
+   "at": "2026-10-05T18:54:29.406Z",
+   "durationMs": 325,
+   "request": {
+    "method": "POST",
+    "host": "api.amazon.com",
+    "path": "/auth/o2/token",
+    "query": {},
+    "headers": {
+     "content-type": "application/x-www-form-urlencoded;charset=UTF-8"
+    },
+    "body": {
+     "grant_type": "refresh_token",
+     "refresh_token": "<redacted>",
+     "client_id": "<redacted>",
+     "client_secret": "<redacted>"
+    }
+   },
+   "response": {
+    "status": 200,
+    "headers": {
+     "cache-control": "no-cache, no-store, must-revalidate",
+     "connection": "keep-alive",
+     "content-length": "763",
+     "content-type": "application/json;charset=UTF-8",
+     "date": "Mon, 05 Oct 2026 18:54:30 GMT",
+     "pragma": "no-cache",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "vary": "User-Agent,Accept-Encoding",
+     "x-amz-date": "Mon, 05 Oct 2026 18:54:30 GMT",
+     "x-amz-rid": "M5Q67QWDPS08N5SMABZE",
+     "x-amzn-requestid": "2b1e5177-ce8b-4608-8989-3475ff4a6c9b"
+    },
+    "body": {
+     "access_token": "<redacted, form Atza|…, 353 chars>",
+     "refresh_token": "<redacted>",
+     "token_type": "bearer",
+     "expires_in": 3600
+    }
+   }
+  },
+  {
+   "label": "adapter discoverOffers (searchListingsItems)",
+   "at": "2026-10-05T18:54:29.731Z",
+   "durationMs": 1657,
+   "request": {
+    "method": "GET",
+    "host": "sandbox.sellingpartnerapi-na.amazon.com",
+    "path": "/listings/2021-08-01/items/A1SYNSELLER0001",
+    "query": {
+     "marketplaceIds": "ATVPDKIKX0DER",
+     "includedData": "summaries,attributes,offers,fulfillmentAvailability",
+     "pageSize": "20"
+    },
+    "headers": {
+     "accept": "application/json",
+     "x-amz-access-token": "<access token, form Atza|…>",
+     "x-amz-date": "20261005T185429Z",
+     "user-agent": "repracer-sandbox-probe/0.1 (Language=TypeScript; Platform=Node)"
+    }
+   },
+   "response": {
+    "status": 400,
+    "headers": {
+     "connection": "keep-alive",
+     "content-length": "135",
+     "content-type": "application/json",
+     "date": "Mon, 05 Oct 2026 18:54:31 GMT",
+     "edge-cache-control": "no-store,no-cache,stale-if-error=0,stale-while-revalidate=0",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "vary": "User-Agent,Accept-Encoding",
+     "via": "1.1 e9a2119419258b95d7e2b6ceb32fa340.cloudfront.net (CloudFront)",
+     "x-amz-apigw-id": "OPFdac5f9360a18",
+     "x-amz-cf-id": "d_but-hmcQrBFZIG7-6muEylk9SXIpWmT7rlbiDJzR082YT2RBavVw==",
+     "x-amz-cf-pop": "FRA56-P14",
+     "x-amz-rid": "XQAAMR47GGTJNE407BCP",
+     "x-amzn-ratelimit-limit": "5.0",
+     "x-amzn-requestid": "dac5f936-0a18-4ca7-9301-314a259c21a4",
+     "x-amzn-trace-id": "Root=1-6ac3f267-dac5f9360a184ca7",
+     "x-cache": "Error from cloudfront"
+    },
+    "body": {
+     "errors": [
+      {
+       "code": "InvalidInput",
+       "message": "Could not match input arguments",
+       "details": ""
+      }
+     ]
+    }
+   }
+  },
+  {
+   "label": "adapter readBack PRICE (getListingsItem)",
+   "at": "2026-10-05T18:54:31.390Z",
+   "durationMs": 1000,
+   "request": {
+    "method": "GET",
+    "host": "sandbox.sellingpartnerapi-na.amazon.com",
+    "path": "/listings/2021-08-01/items/A1SYNSELLER0001/SYN-SKU-70",
+    "query": {
+     "marketplaceIds": "ATVPDKIKX0DER",
+     "includedData": "summaries,attributes,offers,fulfillmentAvailability,issues"
+    },
+    "headers": {
+     "accept": "application/json",
+     "x-amz-access-token": "<access token, form Atza|…>",
+     "x-amz-date": "20261005T185431Z",
+     "user-agent": "repracer-sandbox-probe/0.1 (Language=TypeScript; Platform=Node)"
+    }
+   },
+   "response": {
+    "status": 200,
+    "headers": {
+     "connection": "keep-alive",
+     "content-encoding": "gzip",
+     "content-type": "application/json",
+     "date": "Mon, 05 Oct 2026 18:54:32 GMT",
+     "edge-cache-control": "no-store,no-cache,stale-if-error=0,stale-while-revalidate=0",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "transfer-encoding": "chunked",
+     "vary": "accept-encoding,User-Agent",
+     "via": "1.1 bc373ac1adac42ca6c9ad53da8111582.cloudfront.net (CloudFront)",
+     "x-amz-apigw-id": "OPFd3f3c856a962",
+     "x-amz-cf-id": "jtEj0xRHOZf6TWiWiSYzCFQLyOVhSWqRw0EdLzVPrQLB8PwSXGwOxw==",
+     "x-amz-cf-pop": "FRA56-P14",
+     "x-amz-rid": "3RNV3DRNFYB8F8B74HG5",
+     "x-amzn-ratelimit-limit": "5.0",
+     "x-amzn-requestid": "d3f3c856-a962-480e-aeb6-0e6ab843f147",
+     "x-amzn-trace-id": "Root=1-6ac3f268-d3f3c856a962480e",
+     "x-cache": "Miss from cloudfront"
+    },
+    "body": {
+     "sku": "GM-ZDPI-9B4E",
+     "summaries": [
+      {
+       "marketplaceId": "ATVPDKIKX0DER",
+       "asin": "B071VG5N9D",
+       "productType": "LUGGAGE",
+       "conditionType": "new_new",
+       "status": [
+        "BUYABLE"
+       ],
+       "itemName": "Hardside Carry-On Spinner Suitcase Luggage",
+       "createdDate": "2021-02-01T00:00:00Z",
+       "lastUpdatedDate": "2021-03-01T00:00:00Z",
+       "mainImage": {
+        "link": "https://www.example.com/luggage.png",
+        "height": 500,
+        "width": 500
+       }
+      },
+      {
+       "marketplaceId": "A2EUQ1WTGCTBG2",
+       "asin": "B071VG5N9D",
+       "productType": "LUGGAGE",
+       "conditionType": "new_new",
+       "status": [],
+       "itemName": "Hardside Carry-On Spinner Suitcase Luggage",
+       "createdDate": "2021-02-02T01:00:00Z",
+       "lastUpdatedDate": "2021-03-05T00:00:00Z",
+       "mainImage": {
+        "link": "https://www.example.com/luggage.png",
+        "height": 500,
+        "width": 500
+       }
+      }
+     ],
+     "offers": [
+      {
+       "marketplaceId": "ATVPDKIKX0DER",
+       "offerType": "B2C",
+       "price": {
+        "currencyCode": "USD",
+        "amount": "100.00"
+       },
+       "audience": {
+        "value": "ALL",
+        "displayName": "Sell on Amazon"
+       },
+       "replenishmentDiscount": {
+        "discountPercentage": 5
+       }
+      },
+      {
+       "marketplaceId": "A2EUQ1WTGCTBG2",
+       "offerType": "B2C",
+       "price": {
+        "currencyCode": "CAD",
+        "amount": "130.00"
+       },
+       "audience": {
+        "value": "ALL",
+        "displayName": "Sell on Amazon"
+       }
+      }
+     ],
+     "fulfillmentAvailability": [
+      {
+       "fulfillmentChannelCode": "DEFAULT",
+       "quantity": 100
+      }
+     ],
+     "issues": [
+      {
+       "code": "90220",
+       "message": "'size' is required but not supplied.",
+       "severity": "ERROR",
+       "attributeNames": [
+        "size"
+       ],
+       "categories": [
+        "MISSING_ATTRIBUTE",
+        "LISTING"
+       ],
+       "marketplaceIds": [
+        "ATVPDKIKX0DER"
+       ]
+      },
+      {
+       "code": "18027",
+       "message": "We believe the main image has text, logo, graphic, or watermark that is not permitted for this product type. Submit a compliant image to lift the suppression. Also refer to Product image requirements.",
+       "severity": "ERROR",
+       "categories": [
+        "INVALID_IMAGE",
+        "LISTING"
+       ],
+       "enforcements": {
+        "actions": [
+         {
+          "action": "SEARCH_SUPPRESSED"
+         }
+        ],
+        "exemption": {
+         "status": "EXEMPT_UNTIL_EXPIRY_DATE",
+         "expiryDate": "2025-05-28T00:36:48.914Z"
+        }
+       },
+       "marketplaceIds": [
+        "ATVPDKIKX0DER",
+        "A2EUQ1WTGCTBG2"
+       ]
+      },
+      {
+       "code": "99300",
+       "message": "Product Detail Page Rules Violation (Inaccurate information on product detail page).",
+       "severity": "ERROR",
+       "categories": [
+        "PRODUCT"
+       ],
+       "enforcements": {
+        "actions": [
+         {
+          "action": "ATTRIBUTE_SUPPRESSED"
+         }
+        ],
+        "exemption": {
+         "status": "EXEMPT"
+        }
+       },
+       "marketplaceIds": [
+        "ATVPDKIKX0DER",
+        "A2EUQ1WTGCTBG2"
+       ]
+      },
+      {
+       "code": "18155",
+       "message": "The 'minimum price' is greater than the selling price (excluding shipping) for the listing. Review and update your price and/or minimum price.",
+       "severity": "ERROR",
+       "categories": [
+        "INVALID_PRICE",
+        "LISTING"
+       ],
+       "enforcements": {
+        "actions": [
+         {
+          "action": "LISTING_SUPPRESSED"
+         }
+        ],
+        "exemption": {
+         "status": "NOT_EXEMPT"
+        }
+       },
+       "marketplaceIds": [
+        "ATVPDKIKX0DER"
+       ]
+      },
+      {
+       "code": "18742",
+       "message": "Restricted Products Policy Violation",
+       "severity": "ERROR",
+       "categories": [
+        "PRODUCT"
+       ],
+       "enforcements": {
+        "actions": [
+         {
+          "action": "CATALOG_ITEM_REMOVED"
+         }
+        ],
+        "exemption": {
+         "status": "NOT_EXEMPT"
+        }
+       },
+       "marketplaceIds": [
+        "ATVPDKIKX0DER"
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "label": "adapter readBack PRICE, sku BadSKU (sandbox 400 sample)",
+   "at": "2026-10-05T18:54:32.391Z",
+   "durationMs": 844,
+   "request": {
+    "method": "GET",
+    "host": "sandbox.sellingpartnerapi-na.amazon.com",
+    "path": "/listings/2021-08-01/items/A1SYNSELLER0001/BadSKU",
+    "query": {
+     "marketplaceIds": "ATVPDKIKX0DER",
+     "includedData": "summaries,attributes,offers,fulfillmentAvailability,issues"
+    },
+    "headers": {
+     "accept": "application/json",
+     "x-amz-access-token": "<access token, form Atza|…>",
+     "x-amz-date": "20261005T185432Z",
+     "user-agent": "repracer-sandbox-probe/0.1 (Language=TypeScript; Platform=Node)"
+    }
+   },
+   "response": {
+    "status": 400,
+    "headers": {
+     "connection": "keep-alive",
+     "content-length": "129",
+     "content-type": "application/json",
+     "date": "Mon, 05 Oct 2026 18:54:33 GMT",
+     "edge-cache-control": "no-store,no-cache,stale-if-error=0,stale-while-revalidate=0",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "vary": "User-Agent,Accept-Encoding",
+     "via": "1.1 e9a2119419258b95d7e2b6ceb32fa340.cloudfront.net (CloudFront)",
+     "x-amz-apigw-id": "OPF06bd8590793f",
+     "x-amz-cf-id": "WOO5XDX0kU86_f4tl5F_yeC2ggpTCYtpNoNFgnPrjaMHtHJpNKS1Aw==",
+     "x-amz-cf-pop": "FRA56-P14",
+     "x-amz-rid": "E16T001FMC02WDTKPWDK",
+     "x-amzn-ratelimit-limit": "5.0",
+     "x-amzn-requestid": "06bd8590-793f-45fc-a67c-472e50c78a9e",
+     "x-amzn-trace-id": "Root=1-6ac3f269-06bd8590793f45fc",
+     "x-cache": "Error from cloudfront"
+    },
+    "body": {
+     "errors": [
+      {
+       "code": "BAD_REQUEST",
+       "message": "Invalid input",
+       "details": "Invalid input"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "label": "adapter dispatch PRICE (getListingsItem + patchListingsItem)",
+   "at": "2026-10-05T18:54:33.236Z",
+   "durationMs": 327,
+   "request": {
+    "method": "GET",
+    "host": "sandbox.sellingpartnerapi-na.amazon.com",
+    "path": "/listings/2021-08-01/items/A1SYNSELLER0001/SYN-SKU-70",
+    "query": {
+     "marketplaceIds": "ATVPDKIKX0DER",
+     "includedData": "summaries,attributes"
+    },
+    "headers": {
+     "accept": "application/json",
+     "x-amz-access-token": "<access token, form Atza|…>",
+     "x-amz-date": "20261005T185433Z",
+     "user-agent": "repracer-sandbox-probe/0.1 (Language=TypeScript; Platform=Node)"
+    }
+   },
+   "response": {
+    "status": 200,
+    "headers": {
+     "connection": "keep-alive",
+     "content-encoding": "gzip",
+     "content-type": "application/json",
+     "date": "Mon, 05 Oct 2026 18:54:33 GMT",
+     "edge-cache-control": "no-store,no-cache,stale-if-error=0,stale-while-revalidate=0",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "transfer-encoding": "chunked",
+     "vary": "accept-encoding,User-Agent",
+     "via": "1.1 bc373ac1adac42ca6c9ad53da8111582.cloudfront.net (CloudFront)",
+     "x-amz-apigw-id": "OPF6af11693d924",
+     "x-amz-cf-id": "HmNshYLiBmaOD0-NHeY5n4xAExGXaz5CpusxzqSZfGrw78ehatGzQg==",
+     "x-amz-cf-pop": "FRA56-P14",
+     "x-amz-rid": "V1EFCC5C8HAG921JNTWS",
+     "x-amzn-ratelimit-limit": "5.0",
+     "x-amzn-requestid": "6af11693-d924-47de-982f-fd4550500e97",
+     "x-amzn-trace-id": "Root=1-6ac3f269-6af11693d92447de",
+     "x-cache": "Miss from cloudfront"
+    },
+    "body": {
+     "sku": "GM-ZDPI-9B4E",
+     "summaries": [
+      {
+       "marketplaceId": "ATVPDKIKX0DER",
+       "asin": "B071VG5N9D",
+       "productType": "LUGGAGE",
+       "conditionType": "new_new",
+       "status": [
+        "BUYABLE"
+       ],
+       "itemName": "Hardside Carry-On Spinner Suitcase Luggage",
+       "createdDate": "2021-02-01T00:00:00Z",
+       "lastUpdatedDate": "2021-03-01T00:00:00Z",
+       "mainImage": {
+        "link": "https://www.example.com/luggage.png",
+        "height": 500,
+        "width": 500
+       }
+      },
+      {
+       "marketplaceId": "A2EUQ1WTGCTBG2",
+       "asin": "B071VG5N9D",
+       "productType": "LUGGAGE",
+       "conditionType": "new_new",
+       "status": [],
+       "itemName": "Hardside Carry-On Spinner Suitcase Luggage",
+       "createdDate": "2021-02-02T01:00:00Z",
+       "lastUpdatedDate": "2021-03-05T00:00:00Z",
+       "mainImage": {
+        "link": "https://www.example.com/luggage.png",
+        "height": 500,
+        "width": 500
+       }
+      }
+     ],
+     "offers": [
+      {
+       "marketplaceId": "ATVPDKIKX0DER",
+       "offerType": "B2C",
+       "price": {
+        "currencyCode": "USD",
+        "amount": "100.00"
+       },
+       "audience": {
+        "value": "ALL",
+        "displayName": "Sell on Amazon"
+       },
+       "replenishmentDiscount": {
+        "discountPercentage": 5
+       }
+      },
+      {
+       "marketplaceId": "A2EUQ1WTGCTBG2",
+       "offerType": "B2C",
+       "price": {
+        "currencyCode": "CAD",
+        "amount": "130.00"
+       },
+       "audience": {
+        "value": "ALL",
+        "displayName": "Sell on Amazon"
+       }
+      }
+     ],
+     "fulfillmentAvailability": [
+      {
+       "fulfillmentChannelCode": "DEFAULT",
+       "quantity": 100
+      }
+     ],
+     "issues": [
+      {
+       "code": "90220",
+       "message": "'size' is required but not supplied.",
+       "severity": "ERROR",
+       "attributeNames": [
+        "size"
+       ],
+       "categories": [
+        "MISSING_ATTRIBUTE",
+        "LISTING"
+       ],
+       "marketplaceIds": [
+        "ATVPDKIKX0DER"
+       ]
+      },
+      {
+       "code": "18027",
+       "message": "We believe the main image has text, logo, graphic, or watermark that is not permitted for this product type. Submit a compliant image to lift the suppression. Also refer to Product image requirements.",
+       "severity": "ERROR",
+       "categories": [
+        "INVALID_IMAGE",
+        "LISTING"
+       ],
+       "enforcements": {
+        "actions": [
+         {
+          "action": "SEARCH_SUPPRESSED"
+         }
+        ],
+        "exemption": {
+         "status": "EXEMPT_UNTIL_EXPIRY_DATE",
+         "expiryDate": "2025-05-28T00:36:48.914Z"
+        }
+       },
+       "marketplaceIds": [
+        "ATVPDKIKX0DER",
+        "A2EUQ1WTGCTBG2"
+       ]
+      },
+      {
+       "code": "99300",
+       "message": "Product Detail Page Rules Violation (Inaccurate information on product detail page).",
+       "severity": "ERROR",
+       "categories": [
+        "PRODUCT"
+       ],
+       "enforcements": {
+        "actions": [
+         {
+          "action": "ATTRIBUTE_SUPPRESSED"
+         }
+        ],
+        "exemption": {
+         "status": "EXEMPT"
+        }
+       },
+       "marketplaceIds": [
+        "ATVPDKIKX0DER",
+        "A2EUQ1WTGCTBG2"
+       ]
+      },
+      {
+       "code": "18155",
+       "message": "The 'minimum price' is greater than the selling price (excluding shipping) for the listing. Review and update your price and/or minimum price.",
+       "severity": "ERROR",
+       "categories": [
+        "INVALID_PRICE",
+        "LISTING"
+       ],
+       "enforcements": {
+        "actions": [
+         {
+          "action": "LISTING_SUPPRESSED"
+         }
+        ],
+        "exemption": {
+         "status": "NOT_EXEMPT"
+        }
+       },
+       "marketplaceIds": [
+        "ATVPDKIKX0DER"
+       ]
+      },
+      {
+       "code": "18742",
+       "message": "Restricted Products Policy Violation",
+       "severity": "ERROR",
+       "categories": [
+        "PRODUCT"
+       ],
+       "enforcements": {
+        "actions": [
+         {
+          "action": "CATALOG_ITEM_REMOVED"
+         }
+        ],
+        "exemption": {
+         "status": "NOT_EXEMPT"
+        }
+       },
+       "marketplaceIds": [
+        "ATVPDKIKX0DER"
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "label": "adapter dispatch PRICE (getListingsItem + patchListingsItem)",
+   "at": "2026-10-05T18:54:33.563Z",
+   "durationMs": 544,
+   "request": {
+    "method": "PATCH",
+    "host": "sandbox.sellingpartnerapi-na.amazon.com",
+    "path": "/listings/2021-08-01/items/A1SYNSELLER0001/SYN-SKU-70",
+    "query": {
+     "marketplaceIds": "ATVPDKIKX0DER",
+     "includedData": "issues"
+    },
+    "headers": {
+     "accept": "application/json",
+     "x-amz-access-token": "<access token, form Atza|…>",
+     "x-amz-date": "20261005T185433Z",
+     "user-agent": "repracer-sandbox-probe/0.1 (Language=TypeScript; Platform=Node)",
+     "content-type": "application/json"
+    },
+    "body": {
+     "productType": "LUGGAGE",
+     "patches": [
+      {
+       "op": "merge",
+       "path": "/attributes/purchasable_offer",
+       "value": [
+        {
+         "marketplace_id": "ATVPDKIKX0DER",
+         "currency": "USD",
+         "audience": "ALL",
+         "our_price": [
+          {
+           "schedule": [
+            {
+             "value_with_tax": 12.99
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "response": {
+    "status": 200,
+    "headers": {
+     "connection": "keep-alive",
+     "content-length": "109",
+     "content-type": "application/json",
+     "date": "Mon, 05 Oct 2026 18:54:34 GMT",
+     "edge-cache-control": "no-store,no-cache,stale-if-error=0,stale-while-revalidate=0",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "vary": "User-Agent,Accept-Encoding",
+     "via": "1.1 e9a2119419258b95d7e2b6ceb32fa340.cloudfront.net (CloudFront)",
+     "x-amz-apigw-id": "OPF968443847d46",
+     "x-amz-cf-id": "4WtJ0z7lQDpY_Kp9nXaha8LY9cQ6O5aUZn5t1AB3cU9t5G27ptGYYg==",
+     "x-amz-cf-pop": "FRA56-P14",
+     "x-amz-rid": "JYAHY4ZQ5ZT5307JM6FE",
+     "x-amzn-ratelimit-limit": "5.0",
+     "x-amzn-requestid": "96844384-7d46-4573-a094-623d2d6958b9",
+     "x-amzn-trace-id": "Root=1-6ac3f26a-968443847d464573",
+     "x-cache": "Miss from cloudfront"
+    },
+    "body": {
+     "sku": "GM-ZDPI-9B4E",
+     "status": "ACCEPTED",
+     "submissionId": "f1dc2914-75dd-11ea-bc55-0242ac130003",
+     "issues": []
+    }
+   }
+  },
+  {
+   "label": "adapter readOrderLines (searchOrders)",
+   "at": "2026-10-05T18:54:34.108Z",
+   "durationMs": 323,
+   "request": {
+    "method": "GET",
+    "host": "sandbox.sellingpartnerapi-na.amazon.com",
+    "path": "/orders/2026-01-01/orders",
+    "query": {
+     "lastUpdatedAfter": "2026-10-04T18:54:34.107Z",
+     "marketplaceIds": "ATVPDKIKX0DER",
+     "fulfilledBy": "MERCHANT",
+     "includedData": "FULFILLMENT,CANCELLATION",
+     "maxResultsPerPage": "50"
+    },
+    "headers": {
+     "accept": "application/json",
+     "x-amz-access-token": "<access token, form Atza|…>",
+     "x-amz-date": "20261005T185434Z",
+     "user-agent": "repracer-sandbox-probe/0.1 (Language=TypeScript; Platform=Node)"
+    }
+   },
+   "response": {
+    "status": 400,
+    "headers": {
+     "connection": "keep-alive",
+     "content-length": "135",
+     "content-type": "application/json",
+     "date": "Mon, 05 Oct 2026 18:54:34 GMT",
+     "edge-cache-control": "no-store,no-cache,stale-if-error=0,stale-while-revalidate=0",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "vary": "User-Agent,Accept-Encoding",
+     "via": "1.1 bc373ac1adac42ca6c9ad53da8111582.cloudfront.net (CloudFront)",
+     "x-amz-apigw-id": "OPF8742b3c428db",
+     "x-amz-cf-id": "-3eCj-G5GAYN2-75_lk1dwewxOE-hDY74BIPvHYRBtWSpOZh0mpzaQ==",
+     "x-amz-cf-pop": "FRA56-P14",
+     "x-amz-rid": "WR4Y6X14VA0CZ2MYJS2B",
+     "x-amzn-ratelimit-limit": "5.0",
+     "x-amzn-requestid": "8742b3c4-28db-490f-81c9-6025876e5311",
+     "x-amzn-trace-id": "Root=1-6ac3f26a-8742b3c428db490f",
+     "x-cache": "Error from cloudfront"
+    },
+    "body": {
+     "errors": [
+      {
+       "code": "InvalidInput",
+       "message": "Could not match input arguments",
+       "details": ""
+      }
+     ]
+    }
+   }
+  },
+  {
+   "label": "adapter readCompetitors (getCompetitiveSummary)",
+   "at": "2026-10-05T18:54:34.432Z",
+   "durationMs": 732,
+   "request": {
+    "method": "POST",
+    "host": "sandbox.sellingpartnerapi-na.amazon.com",
+    "path": "/batches/products/pricing/2022-05-01/items/competitiveSummary",
+    "query": {},
+    "headers": {
+     "accept": "application/json",
+     "x-amz-access-token": "<access token, form Atza|…>",
+     "x-amz-date": "20261005T185434Z",
+     "user-agent": "repracer-sandbox-probe/0.1 (Language=TypeScript; Platform=Node)",
+     "content-type": "application/json"
+    },
+    "body": {
+     "requests": [
+      {
+       "asin": "B00ZIAODGE",
+       "marketplaceId": "ATVPDKIKX0DER",
+       "includedData": [
+        "lowestPricedOffers"
+       ],
+       "lowestPricedOffersInputs": [
+        {
+         "itemCondition": "New",
+         "offerType": "Consumer"
+        }
+       ],
+       "method": "GET",
+       "uri": "/products/pricing/2022-05-01/items/competitiveSummary"
+      }
+     ]
+    }
+   },
+   "response": {
+    "status": 400,
+    "headers": {
+     "connection": "keep-alive",
+     "content-length": "135",
+     "content-type": "application/json",
+     "date": "Mon, 05 Oct 2026 18:54:35 GMT",
+     "edge-cache-control": "no-store,no-cache,stale-if-error=0,stale-while-revalidate=0",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "vary": "User-Agent,Accept-Encoding",
+     "via": "1.1 e9a2119419258b95d7e2b6ceb32fa340.cloudfront.net (CloudFront)",
+     "x-amz-apigw-id": "OPF12bd83a0bcd7",
+     "x-amz-cf-id": "MYtvD56Aq9Jv3zH9Y1WRQLd7JSbduLScltp5Pfr2XnNaYUULw_KX3g==",
+     "x-amz-cf-pop": "FRA56-P14",
+     "x-amz-rid": "BHR81BX5BG3Y1V990MSC",
+     "x-amzn-ratelimit-limit": "5.0",
+     "x-amzn-requestid": "12bd83a0-bcd7-4e7f-9caa-5b851f25a3b1",
+     "x-amzn-trace-id": "Root=1-6ac3f26b-12bd83a0bcd74e7f",
+     "x-cache": "Error from cloudfront"
+    },
+    "body": {
+     "errors": [
+      {
+       "code": "InvalidInput",
+       "message": "Could not match input arguments",
+       "details": ""
+      }
+     ]
+    }
+   }
+  },
+  {
+   "label": "static sample: searchOrders createdAfter=TEST_CASE_400",
+   "at": "2026-10-05T18:54:35.164Z",
+   "durationMs": 332,
+   "request": {
+    "method": "GET",
+    "host": "sandbox.sellingpartnerapi-na.amazon.com",
+    "path": "/orders/2026-01-01/orders",
+    "query": {
+     "createdAfter": "TEST_CASE_400"
+    },
+    "headers": {
+     "user-agent": "repracer-sandbox-probe/0.1 (Language=TypeScript; Platform=Node)",
+     "x-amz-access-token": "<access token, form Atza|…>",
+     "accept": "application/json"
+    }
+   },
+   "response": {
+    "status": 400,
+    "headers": {
+     "connection": "keep-alive",
+     "content-length": "130",
+     "content-type": "application/json",
+     "date": "Mon, 05 Oct 2026 18:54:35 GMT",
+     "edge-cache-control": "no-store,no-cache,stale-if-error=0,stale-while-revalidate=0",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "vary": "User-Agent,Accept-Encoding",
+     "via": "1.1 bc373ac1adac42ca6c9ad53da8111582.cloudfront.net (CloudFront)",
+     "x-amz-apigw-id": "OPFbec8f4a71ffc",
+     "x-amz-cf-id": "8JC3h_Dyk0sSqlM-9K7IhqKWrXGGvixLQPBksjxRGUf6Gf2qalX4yA==",
+     "x-amz-cf-pop": "FRA56-P14",
+     "x-amz-rid": "8XSWNTMD10GDDGY6MFZN",
+     "x-amzn-ratelimit-limit": "5.0",
+     "x-amzn-requestid": "bec8f4a7-1ffc-4422-8e91-2e2fb2f52ed3",
+     "x-amzn-trace-id": "Root=1-6ac3f26b-bec8f4a71ffc4422",
+     "x-cache": "Error from cloudfront"
+    },
+    "body": {
+     "errors": [
+      {
+       "code": "InvalidInput",
+       "message": "Invalid Input",
+       "details": "Invalid Input"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "label": "static sample: searchOrders 200 (A1VC38T7YXB528, all includedData)",
+   "at": "2026-10-05T18:54:35.496Z",
+   "durationMs": 786,
+   "request": {
+    "method": "GET",
+    "host": "sandbox.sellingpartnerapi-na.amazon.com",
+    "path": "/orders/2026-01-01/orders",
+    "query": {
+     "createdAfter": "2024-12-25T00:00:00Z",
+     "marketplaceIds": "A1VC38T7YXB528",
+     "includedData": "BUYER,RECIPIENT,PROCEEDS,EXPENSE,PROMOTION,CANCELLATION,FULFILLMENT,PACKAGES"
+    },
+    "headers": {
+     "user-agent": "repracer-sandbox-probe/0.1 (Language=TypeScript; Platform=Node)",
+     "x-amz-access-token": "<access token, form Atza|…>",
+     "accept": "application/json"
+    }
+   },
+   "response": {
+    "status": 403,
+    "headers": {
+     "connection": "keep-alive",
+     "content-length": "198",
+     "content-type": "application/json",
+     "date": "Mon, 05 Oct 2026 18:54:36 GMT",
+     "edge-cache-control": "no-store,no-cache,stale-if-error=0,stale-while-revalidate=0",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "vary": "User-Agent,Accept-Encoding",
+     "via": "1.1 e9a2119419258b95d7e2b6ceb32fa340.cloudfront.net (CloudFront)",
+     "x-amz-apigw-id": "OPFc708371cf404",
+     "x-amz-cf-id": "KCIKzWFtpQQ4FoSHsp5mWCHHXJBOjfyOh6agAOsgtxc4B8wmK1Lz2g==",
+     "x-amz-cf-pop": "FRA56-P14",
+     "x-amz-rid": "65VCB58FM35RWT8RMTC0",
+     "x-amzn-errortype": "AccessDeniedException",
+     "x-amzn-requestid": "c708371c-f404-4b67-861f-f125dac3fed1",
+     "x-amzn-trace-id": "Root=1-6ac3f26c-c708371cf4044b67",
+     "x-cache": "Error from cloudfront"
+    },
+    "body": {
+     "errors": [
+      {
+       "code": "Unauthorized",
+       "message": "Access to requested resource is denied.",
+       "details": "The marketplaces you provided are not valid for region."
+      }
+     ]
+    }
+   }
+  },
+  {
+   "label": "FBA getInventorySummaries (dynamic sandbox per docs)",
+   "at": "2026-10-05T18:54:36.283Z",
+   "durationMs": 497,
+   "request": {
+    "method": "GET",
+    "host": "sandbox.sellingpartnerapi-na.amazon.com",
+    "path": "/fba/inventory/v1/summaries",
+    "query": {
+     "details": "true",
+     "granularityType": "Marketplace",
+     "granularityId": "ATVPDKIKX0DER",
+     "marketplaceIds": "ATVPDKIKX0DER",
+     "sellerSkus": "SYN-SKU-70"
+    },
+    "headers": {
+     "user-agent": "repracer-sandbox-probe/0.1 (Language=TypeScript; Platform=Node)",
+     "x-amz-access-token": "<access token, form Atza|…>",
+     "accept": "application/json"
+    }
+   },
+   "response": {
+    "status": 200,
+    "headers": {
+     "connection": "keep-alive",
+     "content-length": "166",
+     "content-type": "application/json",
+     "date": "Mon, 05 Oct 2026 18:54:37 GMT",
+     "edge-cache-control": "no-store,no-cache,stale-if-error=0,stale-while-revalidate=0",
+     "server": "Server",
+     "strict-transport-security": "max-age=47474747; includeSubDomains; preload",
+     "vary": "User-Agent,Accept-Encoding",
+     "via": "1.1 bc373ac1adac42ca6c9ad53da8111582.cloudfront.net (CloudFront)",
+     "x-amz-apigw-id": "OPF22369e965824",
+     "x-amz-cf-id": "Jl-Ie8Y1_1OsnJHTDkVbIL3tEqyshAu6NgLVoSytZH1HMEPjC0tiQQ==",
+     "x-amz-cf-pop": "FRA56-P14",
+     "x-amz-rid": "NXTN78ZJHXNMVYJEVKJ6",
+     "x-amzn-ratelimit-limit": "5.0",
+     "x-amzn-requestid": "22369e96-5824-4c7d-a4bd-ab206c003a86",
+     "x-amzn-trace-id": "Root=1-6ac3f26d-22369e9658244c7d",
+     "x-cache": "Miss from cloudfront"
+    },
+    "body": {
+     "payload": {
+      "granularity": {
+       "granularityType": "Marketplace",
+       "granularityId": "ATVPDKIKX0DER"
+      },
+      "inventorySummaries": []
+     }
+    }
+   }
+  }
+ ],
+ "adapterLogCodes": [
+  "AMZ_C07_COMPETITOR_PULL_UNAVAILABLE",
+  "AMZ_C09_PRODUCT_TYPE_FROM_SUMMARIES",
+  "AMZ_C10_RATE_LIMIT_HEADER",
+  "AMZ_C11_COMPETITIVE_SUMMARY_RECONCILIATION"
+ ],
+ "alerts": []
+}
