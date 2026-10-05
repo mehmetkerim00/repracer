@@ -1,11 +1,12 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CatalogError, readCatalog } from './catalog.ts';
-import { ACCEPTED_COLUMNS_TEXT, collectReport, internalLeaks, renderReport } from './report.ts';
+import type { IsolatedDatabase } from '../../../../packages/pricing-store-pg/test/isolated-db.ts';
+import { ACCEPTED_COLUMNS_TEXT, collectReport, internalLeaks, renderForLeakCheck, renderReport } from './report.ts';
 import { syntheticCatalog, type SyntheticVariant } from './synthetic.ts';
-import { buildKilltestWorld, DEFAULT_OPTIONS, type KilltestOptions } from './world.ts';
+import { buildKilltestWorld, DEFAULT_OPTIONS, dropStaleKilltestDatabases, type KilltestOptions } from './world.ts';
 
 /**
  * Шаг 71: команда kill-test — `scripts/killtest --in <файл клиента> [--out <отчёт.html>]`. Файл клиента и отчёт в репозиторий не
@@ -26,20 +27,41 @@ Options (defaults in brackets):
   --fee-pct N           Amazon referral fee [${DEFAULT_OPTIONS.feePct}]
   --assume-cost-pct N   run products without cost with an assumed cost of N% of the price (named in the report) [off]
   --max-products N      run at most N best-selling products [${DEFAULT_OPTIONS.maxProducts}]
-  --keep                keep the temporary database for inspection
+  --keep                keep the temporary database for inspection (its name and the command to delete it are printed;
+                        temporary databases older than a day are deleted by the next run)
 
-Client files and reports stay out of the repository: inside it, only the git-ignored .killtest/ directory is accepted.
+Client files and reports stay out of the repository: a path inside it is accepted only if git ignores it, such as .killtest/.
 Columns we understand:
 ${ACCEPTED_COLUMNS_TEXT}`;
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
+const repoRoot = realpathSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../../..'));
+
+/**
+ * Настоящий путь: ссылка ведёт туда, куда ведёт, а несуществующий хвост (файл отчёта, ещё не созданные каталоги) приставляется к
+ * настоящему пути ближайшего существующего предка. Ревью шага 71, находка 11: сравнение ТЕКСТА пути пропускало ссылку снаружи
+ * репозитория внутрь него и другой регистр букв на нечувствительной к регистру файловой системе macOS
+ */
+export function realPath(path: string): string {
+  let head = resolve(path);
+  const tail: string[] = [];
+  while (!existsSync(head)) {
+    const parent = dirname(head);
+    if (parent === head) break;
+    tail.unshift(basename(head));
+    head = parent;
+  }
+  return join(realpathSync(head), ...tail);
+}
 
 /** Внутри репозитория — только игнорируемый git путь; снаружи — любой */
 export function privacyProblem(path: string): string | null {
-  const full = resolve(path);
-  if (full !== repoRoot && !full.startsWith(repoRoot + sep)) return null;
+  const full = realPath(path);
+  const fold = (p: string) => (process.platform === 'darwin' || process.platform === 'win32' ? p.toLowerCase() : p);
+  if (fold(full) !== fold(repoRoot) && !fold(full).startsWith(fold(repoRoot) + sep)) return null;
+  const inside = full.slice(repoRoot.length + 1);
   try {
-    execFileSync('git', ['check-ignore', '-q', full], { cwd: repoRoot, stdio: 'ignore' });
+    if (inside === '') throw new Error('the repository root itself');
+    execFileSync('git', ['check-ignore', '-q', '--', inside], { cwd: repoRoot, stdio: 'ignore' });
     return null;
   } catch {
     return `${path} is inside the repository and not ignored by git: put client files and reports into .killtest/ or outside the repository`;
@@ -103,24 +125,45 @@ export async function main(argv: string[]): Promise<number> {
     throw e;
   }
   log(`catalog: ${catalog.rows.length} usable rows, ${catalog.rejected.length} rows not usable, ${catalog.recognized.length} columns read, ${catalog.ignored.length} ignored`);
+  const keep = a.has('keep');
+  const stale = await dropStaleKilltestDatabases();
+  if (stale.length > 0) log(`deleted ${stale.length} temporary databases of earlier runs older than a day`);
   const started = Date.now();
-  const world = await buildKilltestWorld(catalog, options, log);
-  let html: string;
-  let data;
+  // Ревью шага 71, находка 10: прерванный прогон удаляет свою базу (в ней каталог клиента) — и с --keep: недоделанную базу не держим
+  let active: IsolatedDatabase | null = null;
+  const interrupted = (signal: NodeJS.Signals) => {
+    log(`${signal}: deleting the temporary database`);
+    const done = () => process.exit(signal === 'SIGINT' ? 130 : 143);
+    if (active) active.drop().then(done, done); else done();
+  };
+  process.once('SIGINT', interrupted);
+  process.once('SIGTERM', interrupted);
   try {
-    data = await collectReport(catalog, world, options, a.has('keep'));
-    html = renderReport(data);
+    const world = await buildKilltestWorld(catalog, options, log, { onDatabase: (db) => { active = db; } });
+    let data;
+    try {
+      data = await collectReport(catalog, world, options, keep);
+    } finally {
+      await world.close(keep);
+      active = null;
+    }
+    if (keep) log(`database kept: ${world.db.name}; delete it with: psql "$REPRACER_PG_ADMIN_URL" -c 'DROP DATABASE ${world.db.name} WITH (FORCE)'`);
+    const c = data.counts;
+    // Ревью шага 71, находка 1: отчёт тени утверждает «ничего не отправлено» — отправленное хоть раз значит, что отчёт лжёт
+    if (c.sentToAmazon > 0) { log(`${c.dbDispatched} writes were dispatched and the channel model received ${c.portWrites}: a shadow run must send nothing, the report was not written`); return 4; }
+    const leaks = internalLeaks(renderForLeakCheck(data));
+    if (leaks.length > 0) { log(`the report would show internal codes and was not written: ${leaks.join('; ')}`); return 3; }
+    mkdirSync(dirname(resolve(report)), { recursive: true });
+    writeFileSync(report, renderReport(data));
+    process.stdout.write(`${JSON.stringify({ report: basename(report), seconds: Math.round((Date.now() - started) / 100) / 10, products: c.rows, priced: c.inEngine, decisions: c.decisions,
+      changes: c.changes, floorHeld: c.floorHeld, floorHeldMargin: c.floorHeldMargin, marginRefused: c.marginRefused, noCost: c.noCost, assumedCost: c.assumedCost, rejectedRows: c.rejectedRows,
+      belowFloorNow: data.belowFloorNow.length, heldWrites: c.heldWrites, sentToAmazon: c.sentToAmazon, portWrites: c.portWrites, top: data.top.length,
+      database: world.db.name, databaseKept: keep })}\n`);
+    return 0;
   } finally {
-    await world.close(a.has('keep'));
+    process.removeListener('SIGINT', interrupted);
+    process.removeListener('SIGTERM', interrupted);
   }
-  const leaks = internalLeaks(html, data.clientStrings);
-  if (leaks.length > 0) { log(`the report would show internal codes and was not written: ${leaks.join('; ')}`); return 3; }
-  mkdirSync(dirname(resolve(report)), { recursive: true });
-  writeFileSync(report, html);
-  const c = data.counts;
-  process.stdout.write(`${JSON.stringify({ report: basename(report), seconds: Math.round((Date.now() - started) / 100) / 10, products: c.rows, priced: c.inEngine, decisions: c.decisions,
-    changes: c.changes, floorHeld: c.floorHeld, noCost: c.noCost, rejectedRows: c.rejectedRows, sentToAmazon: c.sentToAmazon, top: data.top.length })}\n`);
-  return 0;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

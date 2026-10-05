@@ -30,7 +30,10 @@ export function syntheticItems(count: number, seed = 71): SyntheticItem[] {
   return Array.from({ length: count }, (_, i) => {
     const priceMinor = 500 + Math.floor(r() * 7500);
     // Каждый десятый товар — без себестоимости: честная пометка отчёта «без себестоимости движок не стартует» проверяется на них
-    const costMinor = i % 10 === 9 ? null : Math.round(priceMinor * (0.3 + r() * 0.3));
+    const usual = i % 10 === 9 ? null : Math.round(priceMinor * (0.3 + r() * 0.3));
+    // Каждый двадцать пятый (со своей себестоимостью) — себестоимость 80 % цены: при комиссии 15 % и марже 10 % нынешняя цена ниже пола
+    // маржи, и пометка отчёта «движок поднял бы цену» проверяется на них (ревью шага 71, находка 5)
+    const costMinor = usual !== null && i % 25 === 24 ? Math.round(priceMinor * 0.8) : usual;
     return { sku: `SYN-KT-${String(i + 1).padStart(4, '0')}`, title: demoTitle(i), priceMinor, quantity: Math.floor(r() * 60), costMinor, sales30d: Math.floor(r() * 120) };
   });
 }

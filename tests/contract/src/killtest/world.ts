@@ -1,7 +1,7 @@
 import type { AdapterCallContext, AdapterDependencies } from '@repracer/channel-port';
 import { createPricingPipeline, type MemorySeedScope } from '@repracer/pricing-pipeline';
-import { PgPricingStore, PgShadowStore, seedPricingWorld, translateStore, type PgPool, type SeededPricingWorld } from '@repracer/pricing-store-pg';
-import { createIsolatedDatabase, type IsolatedDatabase } from '../../../../packages/pricing-store-pg/test/isolated-db.ts';
+import { createPool, PgPricingStore, PgShadowStore, seedPricingWorld, translateStore, type PgPool, type SeededPricingWorld } from '@repracer/pricing-store-pg';
+import { createIsolatedDatabase, requireEnv, type IsolatedDatabase } from '../../../../packages/pricing-store-pg/test/isolated-db.ts';
 import { VirtualClock } from '../harness/world.ts';
 import { AMAZON_SIM_DESCRIPTOR_US, AMAZON_US, SimulatedAmazonPort } from '../simulator/amazon-port.ts';
 import type { Catalog, CatalogRow } from './catalog.ts';
@@ -63,6 +63,8 @@ export interface KilltestWorld {
   clock: VirtualClock;
   alerts: Array<{ code: string; severity: string }>;
   snapshots: number;
+  /** Вызовы записи у модели порта: в тени их быть не должно ни одного (отчёт с ненулём не пишется) */
+  portWriteCalls(): number;
   dbScopeId(p: KilltestProduct): string;
   close(keep: boolean): Promise<void>;
 }
@@ -71,6 +73,32 @@ const TENANT = '10000000-0000-4000-8000-00000000a071';
 const ACCOUNT = '20000000-0000-4000-8000-00000000a071';
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
+
+/**
+ * Ревью шага 71, находка 10: база прогона несёт каталог клиента, поэтому её имя несёт время создания (`killtest_<время base36>_<hex>`),
+ * а каждый запуск удаляет базы прогонов старше суток — прерванный прогон, упавший процесс или забытый `--keep` не оставляют данных
+ * клиента дольше суток. Прерывание (SIGINT, SIGTERM) удаляет базу сразу — это делает main.ts через `onDatabase`
+ */
+export const KILLTEST_DB_PATTERN = /^killtest_([0-9a-z]+)_[0-9a-f]{8}$/;
+export const KILLTEST_DB_STALE_MS = 24 * HOUR_MS;
+
+export async function dropStaleKilltestDatabases(nowMs: number = Date.now()): Promise<string[]> {
+  const admin = createPool(requireEnv('REPRACER_PG_ADMIN_URL'), { max: 1, applicationName: 'repracer-killtest-cleanup' });
+  const dropped: string[] = [];
+  try {
+    const { rows } = await admin.query<{ datname: string }>(`SELECT datname FROM pg_database WHERE datname LIKE 'killtest\\_%'`);
+    for (const { datname } of rows) {
+      const m = KILLTEST_DB_PATTERN.exec(datname);
+      if (!m || nowMs - parseInt(m[1]!, 36) <= KILLTEST_DB_STALE_MS) continue;
+      // Имя проверено шаблоном выше — только [a-z0-9_]
+      await admin.query(`DROP DATABASE IF EXISTS ${datname} WITH (FORCE)`);
+      dropped.push(datname);
+    }
+  } finally {
+    await admin.end();
+  }
+  return dropped;
+}
 
 /** Товары прогона: самые продаваемые за 30 дней, а без продаж — по порядку файла */
 export function selectProducts(catalog: Catalog, options: KilltestOptions): { chosen: CatalogRow[]; skipped: CatalogRow[] } {
@@ -88,10 +116,13 @@ export function productOf(row: CatalogRow, i: number, options: KilltestOptions):
   };
 }
 
-export async function buildKilltestWorld(catalog: Catalog, options: KilltestOptions, log: (line: string) => void = () => undefined): Promise<KilltestWorld> {
+export async function buildKilltestWorld(catalog: Catalog, options: KilltestOptions, log: (line: string) => void = () => undefined,
+  hooks: { onDatabase?: (db: IsolatedDatabase) => void } = {}): Promise<KilltestWorld> {
   // Регион базы — по умолчанию, как у живого прогона витрины США: посев заводит тенанта своей функцией с регионом EU, а база прогона
   // одноразовая — данные клиента удаляются вместе с ней в конце прогона (если не попросили оставить)
-  const db = await createIsolatedDatabase('killtest');
+  const db = await createIsolatedDatabase(`killtest_${Date.now().toString(36)}`);
+  hooks.onDatabase?.(db);
+  log(`temporary database ${db.name}`);
   // Пулы ведёт сама база прогона: drop() и endPools() закрывают их ровно один раз
   const pool = (role: Parameters<IsolatedDatabase['pool']>[0], max = 4): PgPool => db.pool(role, max);
   try {
@@ -158,6 +189,10 @@ export async function buildKilltestWorld(catalog: Catalog, options: KilltestOpti
         })),
       })),
     }, deps);
+    // Любой вызов записи модели порта считается, даже отклонённый ею самой: в тени путь решения не должен звать запись вовсе
+    let portWrites = 0;
+    const dispatch = port.dispatch.bind(port);
+    port.dispatch = async (...a: Parameters<typeof dispatch>) => { portWrites += a[1].items.length; return dispatch(...a); };
     const store = new PgPricingStore(appPool, { adminPool });
     const pipeline = createPricingPipeline({ store: translateStore(store, seeded.ids) as never, adapter: port, alerts: deps.alerts, logger: deps.logger, now: () => clock.iso() as never });
     const ctx = (): AdapterCallContext => ({ tenantId: TENANT as never, channelAccountId: ACCOUNT as never, correlationId: 'killtest', deadline: clock.iso(60_000) as never });
@@ -174,6 +209,7 @@ export async function buildKilltestWorld(catalog: Catalog, options: KilltestOpti
     }
     return {
       db, seeded, store, shadow: new PgShadowStore({ adminPool }), products, skippedByLimit: skipped, clock, alerts, snapshots,
+      portWriteCalls: () => portWrites,
       dbScopeId: (p) => seeded.ids.dbId(p.writeScopeId),
       async close(keep) {
         if (keep) await db.endPools(); else await db.drop();
