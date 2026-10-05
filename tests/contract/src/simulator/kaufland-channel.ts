@@ -169,6 +169,11 @@ export class SimulatedKauflandChannel implements ChannelBehaviour {
   private nextOrderMs: number | null = null;
   /** Шаг 65 (хаос): рынок на паузе с этого момента — ни заказов, ни отгрузок, ни движения конкурентов; при снятии паузы их время сдвигается */
   private demandPausedAtMs: number | null = null;
+  /**
+   * Шаг 69 (хаос, OQ-220): записи количества, которые модель ПРИМЕНИЛА, — по предложению, с моментом и значением. Журнал HTTP-модели
+   * знает только, что запрос дошёл: тайм-аут без применения, ошибка строки пакета и отказ по лимиту правок в нём тоже есть
+   */
+  private readonly amountWrites = new Map<string, Array<{ atMs: number; amount: number }>>();
   readonly stats: SimulatorStats = {
     requests: {}, rateLimited: 0, editLimited: 0, timeouts: 0, timeoutsApplied: 0, bulkItemsMissing: 0, bulkItemsFailed: 0,
     priceEditsApplied: 0, buyBoxChanges: 0, notificationsScheduled: 0, notificationsLost: 0, notificationsDelivered: 0, ordersPlaced: 0, ordersShipped: 0, ordersCancelled: 0,
@@ -584,6 +589,9 @@ export class SimulatedKauflandChannel implements ChannelBehaviour {
     if (typeof data.amount === 'number') {
       u.amount = data.amount;
       u.lastChangeMs = nowMs;
+      const applied = this.amountWrites.get(u.idOffer) ?? [];
+      applied.push({ atMs: nowMs, amount: data.amount });
+      this.amountWrites.set(u.idOffer, applied);
       // K-06: остаток общий для unit id_offer на витринах [Р-35]
       for (const sibling of this.units.values()) {
         if (sibling !== u && sibling.idOffer === u.idOffer) {
@@ -624,8 +632,13 @@ export class SimulatedKauflandChannel implements ChannelBehaviour {
    * отмене его НЕ возвращает: заказ, созданный после нашей последней записи и отменённый до того, как мы его увидели, оставляет канал на
    * единицу ниже нашей цели до следующей записи
    */
-  orderHistory(idOffer: string): Array<{ status: 'open' | 'sent' | 'cancelled'; tsCreatedMs: number }> {
-    return this.orders.filter((o) => o.idOffer === idOffer).map((o) => ({ status: o.status, tsCreatedMs: o.tsCreatedMs }));
+  orderHistory(idOffer: string): Array<{ idOrderUnit: number; status: 'open' | 'sent' | 'cancelled'; tsCreatedMs: number; tsUpdatedMs: number }> {
+    return this.orders.filter((o) => o.idOffer === idOffer).map((o) => ({ idOrderUnit: o.idOrderUnit, status: o.status, tsCreatedMs: o.tsCreatedMs, tsUpdatedMs: o.tsUpdatedMs }));
+  }
+
+  /** Шаг 69 (хаос, OQ-220): применённые моделью записи количества предложения — по времени */
+  appliedAmountWrites(idOffer: string): Array<{ atMs: number; amount: number }> {
+    return [...(this.amountWrites.get(idOffer) ?? [])];
   }
 
   /** Шаг 65 (хаос): открытые строки заказов канала — по одной единице на строку, как у модели спроса */

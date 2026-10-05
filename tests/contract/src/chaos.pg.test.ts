@@ -411,13 +411,30 @@ async function invariants(round: number): Promise<string[]> {
    * отмене (допущение K-11, Kaufland не подтвердил). Заказ, созданный после нашей последней записи количества и отменённый раньше, чем
    * работа заказов его прочитала, резервации не оставляет — канал держит на единицу меньше нашей цели до следующей записи (безопасная
    * сторона). Объяснено — только РОВНО это: канал ниже нашего значения ровно на число отменённых заказов предложения, созданных после
-   * последней записи количества, дошедшей до модели (время записи — позднейшее возможное: чем позже, тем меньше заказов сосчитано)
+   * последней записи количества, которую модель ПРИМЕНИЛА.
+   *
+   * Шаг 69 (полный CI 37109507914, семя 1781501529): до шага момент записи брался из журнала HTTP-модели — «запрос дошёл», в том числе
+   * тайм-аут без применения, ошибка строки пакета и отказ по лимиту правок. Отмена между настоящей последней записью и таким запросом
+   * не считалась, и OQ-220 не узнавался. Момент применения знает только модель
    */
+  const lastAppliedAmountAt = (offer: string): number =>
+    live.simulator.appliedAmountWrites(offer).reduce((at, w) => Math.max(at, w.atMs), Number.NEGATIVE_INFINITY);
   const oq220Drift = (offer: string): number => {
-    const offerUnits = new Set(units.filter((u) => u.idOffer === offer).map((u) => `${u.idUnit}|${u.storefront}`));
-    const lastWriteAt = journal.filter((e) => e.units.some((u) => u.amount !== null && offerUnits.has(`${u.idUnit}|${u.storefront}`)))
-      .reduce((at, e) => Math.max(at, e.atMs), Number.NEGATIVE_INFINITY);
+    const lastWriteAt = lastAppliedAmountAt(offer);
     return live.simulator.orderHistory(offer).filter((o) => o.status === 'cancelled' && o.tsCreatedMs > lastWriteAt).length;
+  };
+  /**
+   * Шаг 69: след количества предложения в сообщении проверки — запросы журнала к его единицам (дошёл ли ответ), записи, которые модель
+   * применила, и заказы. По одному сообщению CI видно, какая запись и какие заказы дали расхождение, без повтора прогона
+   */
+  const clock = (ms: number) => (Number.isFinite(ms) ? new Date(ms).toISOString().slice(11, 23) : String(ms));
+  const quantityTrail = (offer: string): string => {
+    const offerUnits = new Set(units.filter((u) => u.idOffer === offer).map((u) => `${u.idUnit}|${u.storefront}`));
+    const requests = journal.filter((e) => e.units.some((u) => u.amount !== null && offerUnits.has(`${u.idUnit}|${u.storefront}`))).slice(-8)
+      .map((e) => `${clock(e.atMs)} ${e.route} ${e.delivered}${e.status === null ? '' : ` ${e.status}`} amount=${e.units.find((u) => u.amount !== null && offerUnits.has(`${u.idUnit}|${u.storefront}`))!.amount}`);
+    const applied = live.simulator.appliedAmountWrites(offer).slice(-5).map((w) => `${clock(w.atMs)} amount=${w.amount}`);
+    const orders = live.simulator.orderHistory(offer).slice(-10).map((o) => `${o.idOrderUnit} ${o.status} created ${clock(o.tsCreatedMs)} updated ${clock(o.tsUpdatedMs)}`);
+    return ` | offer ${offer}: requests [${requests.join('; ')}] applied [${applied.join('; ')}] orders [${orders.join('; ')}]`;
   };
   const knownOq220 = (s: { field: string; offer: string }, ours: number, channelValue: number): boolean => {
     if (s.field !== 'QUANTITY' || channelValue >= ours) return false;
@@ -463,11 +480,12 @@ async function invariants(round: number): Promise<string[]> {
       problems.push(`d) ${s.field} ${s.unit}: the last write ended ${s.last_status} without a reason`);
     }
     if (applied !== null && channelValue !== applied && !explained && !knownOq220(s, applied, channelValue)) {
-      problems.push(`d) ${s.field} ${s.unit}: the channel holds ${channelValue}, our last applied value is ${applied}, no divergence recorded (last write v${s.last_version} ${s.last_status})`);
+      problems.push(`d) ${s.field} ${s.unit}: the channel holds ${channelValue}, our last applied value is ${applied}, no divergence recorded (last write v${s.last_version} ${s.last_status})`
+        + (s.field === 'QUANTITY' ? quantityTrail(s.offer) : ''));
     }
     const target = s.field === 'QUANTITY' ? published.get(s.scope_id) : undefined;
     if (target !== undefined && channelValue !== target && !explained && s.last_status === 'APPLIED' && !knownOq220(s, target, channelValue)) {
-      problems.push(`d) QUANTITY ${s.unit}: the channel holds ${channelValue}, our target (published) is ${target}, and no write is on its way`);
+      problems.push(`d) QUANTITY ${s.unit}: the channel holds ${channelValue}, our target (published) is ${target}, and no write is on its way${quantityTrail(s.offer)}`);
     }
   }
 
