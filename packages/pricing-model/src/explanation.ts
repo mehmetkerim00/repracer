@@ -438,7 +438,9 @@ export function expandExplanation(e: DecisionExplanation, row: ExplanationRow, d
        * показать её пройденной значило бы солгать на экране «почему эта цена»
        */
       const rung = row.outcome === 'APPROVED' && typeof row.reasonParams.finalMinor === 'number' && row.floorMinor !== null && row.reasonParams.finalMinor < row.floorMinor;
-      checks = [...order.slice(0, at).map((check) => (rung && check === 'LOWER_BOUND' ? { check, passed: false, detail: reason } : { check, passed: true, detail: null })), ...failedCheck()];
+      // Шаг 75 (ревью шага 73, находка 9): итоговая перепроверка у ступени — та же граница, она тоже заменена шагом к полу
+      const replacedByStep = (check: string) => rung && (check === 'LOWER_BOUND' || check === 'FINAL_RECHECK');
+      checks = [...order.slice(0, at).map((check) => (replacedByStep(check) ? { check, passed: false, detail: reason } : { check, passed: true, detail: null })), ...failedCheck()];
       notRun = order.slice(at + (failed ? 1 : 0));
     }
   }

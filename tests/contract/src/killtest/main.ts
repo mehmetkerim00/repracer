@@ -100,8 +100,9 @@ export function args(argv: string[]): Map<string, string | true> {
 const number = (a: Map<string, string | true>, name: string, fallback: number, min: number, max: number): number => {
   const v = a.get(name);
   if (v === undefined) return fallback;
-  const n = Number(v);
-  if (typeof v !== 'string' || !Number.isFinite(n) || n < min || n > max) throw new Error(`--${name} must be a number from ${min} to ${max}`);
+  // Шаг 75 (ревью шага 72, находка 8): число — только десятичная запись; `Number('')` — 0, `Number('0x10')` — 16, и опечатка проходила
+  const n = typeof v === 'string' && /^\d+(\.\d+)?$/.test(v) ? Number(v) : Number.NaN;
+  if (!Number.isFinite(n) || n < min || n > max) throw new Error(`--${name} must be a number from ${min} to ${max}`);
   return n;
 };
 
@@ -111,6 +112,10 @@ export async function main(argv: string[]): Promise<number> {
   try { a = args(argv); } catch (e) { log((e as Error).message); process.stderr.write(`${USAGE}\n`); return 2; }
   if (a.has('help') || a.size === 0) { process.stdout.write(`${USAGE}\n`); return a.has('help') ? 0 : 2; }
   const out = a.get('out');
+  // Шаг 75 (ревью шага 72, находка 8): ключ, неприменимый к режиму, — отказ, а не тишина
+  const notForSample = [...a.keys()].filter((k) => !['make-sample', 'out', 'rows'].includes(k));
+  if (a.has('make-sample') && notForSample.length > 0) { log(`${notForSample.map((k) => `--${k}`).join(', ')} does not apply to --make-sample`); return 2; }
+  if (!a.has('make-sample') && a.has('rows')) { log('--rows applies only to --make-sample'); return 2; }
   if (a.has('make-sample')) {
     const variant = a.get('make-sample') as SyntheticVariant;
     if (!['simple', 'listings', 'business'].includes(variant) || typeof out !== 'string') { process.stderr.write(`${USAGE}\n`); return 2; }
@@ -121,6 +126,8 @@ export async function main(argv: string[]): Promise<number> {
   const input = a.get('in');
   if (typeof input !== 'string') { process.stderr.write(`${USAGE}\n`); return 2; }
   const report = typeof out === 'string' ? out : join(dirname(input), `${basename(input, extname(input))}.report.html`);
+  // Шаг 75 (ревью шага 71, находка 22): отчёт поверх файла клиента затёр бы его
+  if (resolve(report) === resolve(input)) { log('--out is the client file itself: the report would overwrite it'); return 2; }
   for (const p of [input, report]) {
     const problem = privacyProblem(p);
     if (problem) { log(problem); return 2; }
@@ -134,6 +141,8 @@ export async function main(argv: string[]): Promise<number> {
       assumeCostPct: a.has('assume-cost-pct') ? number(a, 'assume-cost-pct', 0, 1, 99) : null, maxProducts: number(a, 'max-products', DEFAULT_OPTIONS.maxProducts, 1, 20_000),
       stepPct: a.has('step-pct') ? number(a, 'step-pct', 0, 1, 90) : null,
     };
+    // Шаг 75 (ревью шага 71, находка 22): комиссия и маржа вместе от 100 % — пол маржи невычислим, прогон был бы отказом каждой цены
+    if (options.feePct + options.marginPct >= 100) throw new Error('--fee-pct and --margin-pct together must stay below 100');
   } catch (e) { log((e as Error).message); return 2; }
   let catalog;
   try {

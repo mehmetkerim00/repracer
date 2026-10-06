@@ -2,6 +2,11 @@ import { decisionTrace, describe, messagesFor, shadowView, type DecisionTrace, t
 import { storefrontPriceForMarginBp } from '@repracer/pricing-model';
 import { COLUMN_ALIASES, type Catalog, type CatalogField, type RowNote, type RowProblem } from './catalog.ts';
 import type { KilltestOptions, KilltestProduct, KilltestWorld } from './world.ts';
+import { DEFAULT_SCHEDULED_RECOMPUTE_SECONDS } from '@repracer/channel-port';
+import { AMAZON_SIM_DESCRIPTOR_US } from '../simulator/amazon-port.ts';
+
+/** Шаг 75: пауза лестницы в тексте — из того же описания канала, по которому считает движок прогона (одно место правды, Р-212) */
+const LADDER_PACE_MINUTES = Math.round((AMAZON_SIM_DESCRIPTOR_US.scheduledRecomputeSeconds ?? DEFAULT_SCHEDULED_RECOMPUTE_SECONDS) / 60);
 
 /**
  * Шаг 71: отчёт kill-test — английский самодостаточный HTML для клиента: сводка, топ-15 решений с «почему эта цена» словами, «что мы
@@ -115,18 +120,26 @@ const clientSafe = (text: string): string => CLIENT_SAFE.reduce((t, [re, to]) =>
  */
 export function internalLeaks(html: string): string[] {
   const text = html.replace(/<style>[\s\S]*?<\/style>/, '');
+  const style = (html.match(/<style>[\s\S]*?<\/style>/) ?? [''])[0];
+  // Шаг 75 (ревью шага 71, находка 9): внешний ресурс прячется и в стиле — отчёт обязан быть одним файлом
+  const styleLeaks = /@import|url\(/i.test(style) ? [`external resource in style: ${(style.match(/@import|url\(/i) ?? [''])[0]}`] : [];
   const rules: Array<[string, RegExp]> = [
     ['uuid', /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i],
     ['UPPER_SNAKE code', /\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b/],
     ['lower_snake name', /\b[a-z]+_[a-z0-9_]+\b/],
     // Без флага u граница слова `\b` не видит кириллицу: «Р-205» проходил незамеченным (поймал положительный контроль теста)
-    ['decision or question number', /(?<![\p{L}\p{N}])(Р|R|A|E|K|OQ)-\d{2,3}(?![\p{L}\p{N}])/u],
+    // Шаг 75 (ревью шага 71, находка 9): и однозначные номера («Р-5»), и ADR
+    ['decision or question number', /(?<![\p{L}\p{N}])(Р|R|A|E|K|OQ)-\d{1,3}(?![\p{L}\p{N}])/u],
+    ['architecture decision', /\bADR-\d{4}\b/],
+    // Однословные коды исходов и статусов, которых в словах отчёта нет; «Price Gate» — внутренний термин (отчёт говорит «final price check»)
+    ['single-word code', /\b(APPROVED|REJECTED|HELD|CHANGED|DISPATCHED|ACCEPTED|APPLIED|SUPERSEDED)\b/],
+    ['internal term', /\bPrice Gate\b/],
     ['ruleset or profile version', /\b[rg]\d+\.\d+\b/],
     ['storefront id', /\bATVPDKIKX0DER\b/],
     ['synthetic world id', /\b(B0KT\d{6}|A1SYNKILLTEST|killtest)\b/],
     ['external resource', /<script|<link|<img|<iframe|https?:\/\//i],
   ];
-  return rules.filter(([, re]) => re.test(text)).map(([name, re]) => `${name}: ${(text.match(re) ?? [''])[0]}`);
+  return [...rules.filter(([, re]) => re.test(text)).map(([name, re]) => `${name}: ${(text.match(re) ?? [''])[0]}`), ...styleLeaks];
 }
 
 /** Отрисовка для проверки утечек: каждая строка клиента — заглушкой, так строка клиента не прячет и не изображает нашу утечку */
@@ -311,7 +324,9 @@ export async function collectReport(catalog: Catalog, world: KilltestWorld, opti
   const assumed = new Set(world.products.filter((p) => p.costSource === 'ASSUMED').map((p) => world.dbScopeId(p)));
   return {
     generatedAt: m.when(new Date().toISOString()), fileName: catalog.fileName, format: catalog.format, hours: options.hours, options,
-    salesHeader: catalog.recognized.find((c) => c.field === 'sales30d')?.header ?? null,
+    // Шаг 75 (ревью шага 71, находка 24): колонка продаж, из которой не прочитано ни одного числа, — не основание говорить «самые
+    // продаваемые»: отбор тогда шёл по порядку файла
+    salesHeader: catalog.rows.some((r) => r.sales30d !== null) ? catalog.recognized.find((c) => c.field === 'sales30d')?.header ?? null : null,
     counts: {
       rows: catalog.rows.length + catalog.rejected.length, rejectedRows: catalog.rejected.length, inRun: world.products.length,
       inEngine: world.products.filter((p) => p.costMinor !== null).length, withFileCost: world.products.filter((p) => p.costSource === 'FILE').length,
@@ -401,8 +416,8 @@ export function renderReport(d: ReportData, options: { client?: (s: string) => s
   const belowFloorSection = d.belowFloor.length > 0 ? `
     <section class="highlight"><h2>Products priced below your margin floor</h2>
       <p><strong>${d.belowFloor.length} of your products are priced below the margin floor computed from your unit cost</strong>, an assumed Amazon referral fee of ${d.options.feePct}% and a minimum margin of ${d.options.marginPct}%. The engine raises such a price to your margin floor, through the same final price check as every other price; it never goes above the maximum price. In this run the engine would have raised ${c.raisedToFloor} of them to the floor${c.ladders > 0 ? ` and ${c.ladders} one step toward it` : ''} (shadow mode: nothing was sent).${notInRun > 0 ? ` ${notInRun} of them were not in this run.` : ''} ${d.options.stepPct === null
-        ? 'No limit on the size of a price step was set in this run; with a step limit, a raise larger than the limit goes up step by step, at most one step every 15 minutes, until it reaches the floor.'
-        : `With the step limit of ${d.options.stepPct}% set for this run, a raise larger than the limit goes up step by step, at most one step every 15 minutes (competitor moves do not speed it up), until it reaches the floor; in shadow mode the price on Amazon does not move, so only the first step is shown, with the number of steps left.`}</p>
+        ? `No limit on the size of a price step was set in this run; with a step limit, a raise larger than the limit goes up step by step, at most one step every ${LADDER_PACE_MINUTES} minutes, until it reaches the floor.`
+        : `With the step limit of ${d.options.stepPct}% set for this run, a raise larger than the limit goes up step by step, at most one step every ${LADDER_PACE_MINUTES} minutes (competitor moves do not speed it up), until it reaches the floor; in shadow mode the price on Amazon does not move, so only the first step is shown, with the number of steps left.`}</p>
       <table><thead><tr><th>Product</th><th>Your price</th><th>Unit cost</th><th>Profit per unit at your price*</th><th>Margin floor</th><th>Engine's price</th></tr></thead><tbody>
       ${d.belowFloor.slice(0, 50).map((b) => `<tr><td>${cl(b.label)}<div class="muted">${cl(b.sku)}${b.sales !== null ? ` · ${b.sales} ${e(salesPeriod)}` : ''}</div></td><td>${e(money(m, b.priceMinor))}</td><td>${e(money(m, b.costMinor))}</td><td class="${b.profitMinor < 0 ? 'loss' : ''}">${e(money(m, b.profitMinor))}</td><td>${e(money(m, b.floorMinor))}</td><td>${engineCell(b)}</td></tr>`).join('')}
       </tbody></table>
@@ -452,7 +467,7 @@ ${c.skippedByLimit > 0 ? `<p class="muted">This run took ${c.inRun} of your prod
 </section>
 ${belowFloorSection}
 ${d.top.length > 0 ? `<h2>${d.top.length} decisions in detail</h2>
-<p class="muted">${d.salesHeader !== null ? 'Your products with the most units sold' : 'The first products of your file (it has no sales column)'}. We show different kinds of decisions in turn: where the floor stopped a lower price, where the engine followed a competitor down, and where it raised your price after a competitor went up.</p>
+<p class="muted">${d.salesHeader !== null ? 'Your products with the most units sold' : 'The first products of your file (it has no readable sales column)'}. We show different kinds of decisions in turn: where the floor stopped a lower price, where the engine followed a competitor down, and where it raised your price after a competitor went up.</p>
 ${top}` : `<section><h2>No decisions to show</h2><p>The engine made no decisions in this run: ${c.inEngine === 0 ? 'none of your products has a unit cost, and the engine never prices without one (see below). Send the same file with a unit cost column, or ask us for a run with an assumed cost.' : 'no competitor moved during the run.'}</p></section>`}
 <section><h2>What we did NOT do — and why</h2>
 ${d.notDone.map((n) => `<h4>${e(n.title)}</h4><p>${e(n.text)}</p>`).join('')}
@@ -468,7 +483,7 @@ ${rowsSection}
 <li>Storefront ${STOREFRONT}; prices are treated as US dollars excluding sales tax (our assumption for ${STOREFRONT}).</li>
 <li>Strategy: one cent below the lowest competitor, never below the floor and never above the ceiling.</li>
 <li>Your minimum and maximum prices were not in the file, so we assumed them: minimum ${d.options.minPct}% below your current price, maximum ${d.options.maxPct}% above it. In the pilot you set your own.</li>
-${d.options.stepPct !== null ? `<li>Step limit: a price changes by at most ${d.options.stepPct}% at a time; a larger raise to your margin floor goes step by step, at most one step every 15 minutes.</li>` : ''}
+${d.options.stepPct !== null ? `<li>Step limit: a price changes by at most ${d.options.stepPct}% at a time; a larger raise to your margin floor goes step by step, at most one step every ${LADDER_PACE_MINUTES} minutes.</li>` : ''}
 <li>Margin floor: unit cost + an assumed Amazon referral fee of ${d.options.feePct}% (the fee depends on the product category; yours may differ) + minimum margin ${d.options.marginPct}%. FBA fees, per-item minimum fees, closing fees and shipping are not included.</li>
 <li>${d.hours} simulated hours; each simulated competitor changed its price every ${d.options.competitorEveryMinutes} minutes (${c.competitorUpdates} competitor updates in total).</li>
 <li>Columns we read: ${d.columns.recognized.map((r) => `“${cl(r.header)}” as ${e(r.meaning)}`).join(', ')}.</li>

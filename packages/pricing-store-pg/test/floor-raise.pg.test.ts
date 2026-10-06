@@ -181,7 +181,7 @@ test('Р-208: a raise larger than the step limit climbs to the margin floor, one
   const started = alerts.filter((a) => a.code === 'PRICE_LADDER_STARTED' && (a.details as { writeScopeId?: string }).writeScopeId === ws(1));
   assert.equal(started.length, 1, 'the ladder start is told once');
   assert.deepEqual([started[0]!.severity, started[0]!.details], ['WARNING', {
-    writeScopeId: ws(1), offer: '7301', marketplace: 'de', currentMinor: 1000, floorMinor: 1524, steps: 5, stepLimitBp: 1000, paceMinutes: 15, currency: 'EUR',
+    writeScopeId: ws(1), offer: 'syn-prod-1', marketplace: 'de', currentMinor: 1000, floorMinor: 1524, steps: 5, stepLimitBp: 1000, paceMinutes: 15, currency: 'EUR',
   }]);
   // Вторая лестница тех же суток (ревью шага 74, находка 2): себестоимость 12,00 € поднимает пол до 18,29 € — ступень от 15,24 €, а не от
   // цены прошлой ступени, — новая лестница и новое уведомление
@@ -253,6 +253,12 @@ test('Р-210: the unit cost rose above the price — the database requests a re-
   await pipeline().recomputeScheduled(ctxOf(ACCOUNT), { limit: 100 });
   // Ревью шага 73, находка 8: запрос изменения снят — следующая проверка видит только новый
   assert.deepEqual(await requests(2), [], 'the fee change request is taken');
+  // Отрицательный контроль: перезапись той же оценки (повторный расчёт тарифа) — не изменение комиссии и не запрос
+  await db.superuser(`WITH t AS (SELECT set_config('app.tenant_id', $1::text, true))
+                      UPDATE channel_data.fee_estimate SET computed_at = computed_at
+                       WHERE tenant_id = $1::uuid AND write_scope_id = $2::uuid AND (SELECT count(*) FROM t) = 1`, [world.tenantId, ws(2)]);
+  const rewrite = await requests(2);
+  assert.ok(rewrite.length === 0, 'a rewrite of the same fee estimate is not a request');
   // Новая оценка комиссии (продавец объявил свою) — тоже повод
   await db.superuser(`WITH t AS (SELECT set_config('app.tenant_id', $1::text, true))
                       INSERT INTO channel_data.fee_estimate (tenant_id, write_scope_id, source, fee_model, computed_at, valid_until)

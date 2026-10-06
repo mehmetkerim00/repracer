@@ -326,7 +326,8 @@ export function createPricingPipeline(deps: PipelineDeps) {
         && intent.reason.code === 'RAISED_TOWARD_FLOOR') {
       const p = intent.reason.params as { currentMinor: number; floorMinor: number; stepsLeft: number; stepLimitBp: number };
       report.ladderStart = {
-        writeScopeId: scope.writeScopeId, offer: scope.externalUnitId, marketplace: scope.marketplace, currentMinor: p.currentMinor,
+        // Подпись — название товара или SKU продавца (как K10 консоли), а не код единицы канала; витрину словами добавит письмо
+        writeScopeId: scope.writeScopeId, offer: scope.productTitle ?? scope.productSku ?? scope.externalUnitId, marketplace: scope.marketplace, currentMinor: p.currentMinor,
         floorMinor: p.floorMinor, steps: p.stepsLeft + 1, stepLimitBp: p.stepLimitBp, currency: scope.currency,
         paceMinutes: Math.round((adapter.descriptor?.scheduledRecomputeSeconds ?? DEFAULT_SCHEDULED_RECOMPUTE_SECONDS) / 60),
       };
@@ -341,7 +342,14 @@ export function createPricingPipeline(deps: PipelineDeps) {
   async function dispatchCommitted(ctx: AdapterCallContext, committed: CommittedDecision, report: ScopeReport): Promise<void> {
     report.intentId = committed.intentId;
     report.decisionId = committed.decisionId;
-    // Р-212: старт лестницы — один раз на лестницу, только у записи, которая пойдёт в канал: не в тени и не с исчерпанным бюджетом
+    /**
+     * Р-212: старт лестницы — один раз на лестницу, только у записи, которая пойдёт в канал: не в тени и не с исчерпанным бюджетом.
+     * Уведомление поднимается ПОСЛЕ фиксации, а не внутри неё, осознанно (шаг 75, ревью шага 74, находка 11):
+     *  - уведомлять можно только о ступени, которая пойдёт в канал, а это знает лишь итог фиксации (тень, бюджет, запись в полёте);
+     *  - приёмник алертов — отдельный порт (база, журнал процесса), и его сбой не должен откатывать решение о цене: цена важнее письма;
+     *  - цена потери — процесс умер между фиксацией и этой строкой: лестница идёт дальше без уведомления о старте (следующая ступень —
+     *    продолжение, а не новый старт). Ступени при этом видны на экранах и в «почему эта цена»; вреда цене нет
+     */
     if (report.ladderStart && committed.heldInShadow !== true && !committed.endedUnsent) {
       await alerts.raise({ ...alertBase(ctx), code: 'PRICE_LADDER_STARTED', severity: 'WARNING', details: report.ladderStart });
     }

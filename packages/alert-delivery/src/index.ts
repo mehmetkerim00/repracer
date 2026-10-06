@@ -67,10 +67,14 @@ export function alertText(row: Pick<AlertRow, 'code'>, m: Messages): { what: str
  * Шаг 74 [Р-212]: у некоторых событий текст называет суммы самого события — уведомление о старте лестницы к полу говорит «X → Y,
  * ~N ступеней». Подробность собирает словарь из `details` алерта; у остальных кодов её нет
  */
-export function alertDetail(row: Pick<AlertRow, 'code' | 'details'>, m: Messages): string | null {
+export function alertDetail(row: Pick<AlertRow, 'code' | 'details'> & Partial<Pick<AlertRow, 'channel'>>, m: Messages): string | null {
   const codes = m.ui.alerts.codes as Record<string, { detail?: (d: Readonly<Record<string, unknown>>, n: Messages) => string } | undefined>;
   const detail = codes[row.code]?.detail;
-  return detail ? detail(row.details ?? {}, m) : null;
+  if (!detail) return null;
+  // Шаг 75: подпись предложения — как K10 консоли: название или SKU и витрина словами («Plant pot · kaufland.de»)
+  const details = row.details ?? {};
+  const storefront = row.channel && typeof details.marketplace === 'string' ? storefrontName(row.channel, details.marketplace, m) : null;
+  return detail({ ...details, ...(storefront ? { offer: m.ui.common.unitLabel(String(details.offer), storefront) } : {}) }, m);
 }
 
 /** Сколько подробностей одного дайджеста перечисляется поимённо; остальные — числом */

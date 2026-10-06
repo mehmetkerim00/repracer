@@ -1,4 +1,4 @@
-import type { ChannelDescriptor, PriceBasis } from '@repracer/channel-port';
+import { DEFAULT_SCHEDULED_RECOMPUTE_SECONDS, type ChannelDescriptor, type PriceBasis } from '@repracer/channel-port';
 
 /**
  * Витрины Amazon Release 1.0 [Р-56] — как строки platform.marketplace (0075): идентификаторы подтверждены страницей marketplace-ids,
@@ -95,8 +95,8 @@ export const AMAZON_DESCRIPTOR: ChannelDescriptor = {
   haltRelease: { kind: 'MANUAL_ONLY', basis: 'Р-119: no competitor polling on Amazon, a fresh independent sample cannot be taken' },
   // Р-124: модели SP-API 2026-09-16 (vendor/amazon/sp-api-models) не описывают истории цен оффера — полнота с подключения
   priceHistory: { kind: 'UNAVAILABLE', basis: 'SP-API models snapshot 2026-09-16 has no offer price history operation' },
-  // Р-212 (шаг 74): ступень лестницы к полу — не чаще планового пересчёта; решение проекта, а не факт канала
-  scheduledRecomputeSeconds: 900,
+  // Р-212 (шаг 74): ступень лестницы к полу — не чаще планового пересчёта; решение проекта, а не факт канала (шаг 75 — одна константа)
+  scheduledRecomputeSeconds: DEFAULT_SCHEDULED_RECOMPUTE_SECONDS,
   competitorSources: [
     {
       source: SOURCE_ANY_OFFER_CHANGED,

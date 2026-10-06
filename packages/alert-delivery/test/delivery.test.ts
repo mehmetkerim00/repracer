@@ -260,15 +260,16 @@ test('step 74: the ladder start names the offer, the price, the floor and the st
     raisedAt: '2026-10-06T10:00:00.000Z', deliveryAttempts: 0,
   });
   const en = messagesFor('en');
-  assert.equal(alertDetail(ladder('SYN-SKU-1', 1), en), 'SYN-SKU-1: €10.00 → €15.24, about 5 steps of at most 10% each, one step every 15 minutes at most.');
+  // Подпись — как K10 консоли: название или SKU и витрина словами
+  assert.equal(alertDetail(ladder('SYN-SKU-1', 1), en), 'SYN-SKU-1 · kaufland.de: €10.00 → €15.24, about 5 steps of at most 10% each, one step every 15 minutes at most.');
   assert.match(immediateMessage(ladder('SYN-SKU-1', 1), 'Synthetic seller', 'owner@example.invalid', en).text,
-    /a price below your floor is being raised to it step by step\nSYN-SKU-1: €10\.00 → €15\.24/);
+    /a price below your floor is being raised to it step by step\nSYN-SKU-1 · kaufland\.de: €10\.00 → €15\.24/);
   const de = messagesFor('de');
-  assert.match(alertDetail(ladder('SYN-SKU-1', 1), de)!, /^SYN-SKU-1: 10,00 € → 15,24 €, etwa 5 Schritte zu höchstens 10 %/);
+  assert.match(alertDetail(ladder('SYN-SKU-1', 1), de)!, /^SYN-SKU-1 · kaufland\.de: 10,00 € → 15,24 €, etwa 5 Schritte zu höchstens 10 %/);
   // Дайджест: каждое событие своей строкой, двадцать первое и дальше — числом
   const rows = Array.from({ length: 22 }, (_, i) => ladder(`SYN-SKU-${i + 1}`, i + 1));
   const digest = digestMessage(rows, 'Synthetic seller', 'owner@example.invalid', en).text;
-  assert.equal((digest.match(/: €10\.00 → €15\.24/g) ?? []).length, 20);
+  assert.equal((digest.match(/ · kaufland\.de: €10\.00 → €15\.24/g) ?? []).length, 20);
   assert.match(digest, /…and 2 more of these\./);
   // У кода без подробности строки нет
   assert.equal(alertDetail({ code: 'PRICE_WRITE_SCOPE_BLOCKED', details: {} }, en), null);

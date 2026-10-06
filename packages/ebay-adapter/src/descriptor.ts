@@ -1,4 +1,4 @@
-import type { ChannelDescriptor, PriceBasis } from '@repracer/channel-port';
+import { DEFAULT_SCHEDULED_RECOMPUTE_SECONDS, type ChannelDescriptor, type PriceBasis } from '@repracer/channel-port';
 
 /**
  * Шаг 39 [Р-162…Р-164]. Снимка спецификации eBay нет (E-01): документация отвечает 403 без ключей разработчика. Всё, что ниже
@@ -130,8 +130,8 @@ export const EBAY_DESCRIPTOR: ChannelDescriptor = {
   // Текст основания — как строка platform.channel_behaviour (0140); совпадение проверяет channel-reference.pg.test.ts
   haltRelease: { kind: 'MANUAL_ONLY', basis: 'Р-119: no competitor data on eBay, a fresh independent sample cannot be taken' },
   priceHistory: { kind: 'UNAVAILABLE', basis: 'no specification snapshot (E-01); the sandbox run found no offer price history operation' },
-  // Р-212 (шаг 74): ступень лестницы к полу — не чаще планового пересчёта; решение проекта, а не факт канала
-  scheduledRecomputeSeconds: 900,
+  // Р-212 (шаг 74): ступень лестницы к полу — не чаще планового пересчёта; решение проекта, а не факт канала (шаг 75 — одна константа)
+  scheduledRecomputeSeconds: DEFAULT_SCHEDULED_RECOMPUTE_SECONDS,
   competitorSources: [],
   /**
    * Шаг 51, Growth Check («retries for a maximum of two times for infrastructure errors», get-started-with-ebay-apis.html снимка

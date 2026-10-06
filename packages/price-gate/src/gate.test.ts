@@ -209,3 +209,13 @@ test('step 74 (Р-212): a ladder pause below the floor raises no «current price
   assert.equal(noChange('LADDER_PACED').alert, null);
   assert.deepEqual(noChange('ALREADY_AT_TARGET').alert, { code: 'CURRENT_PRICE_OUTSIDE_BOUNDS', severity: 'WARNING' });
 });
+
+/** Шаг 75: тень, уже удержавшая подъём, — без алерта «цена вне границ»; ступень от нулевой нынешней цены — не ступень (ревью шагов 72 и 73) */
+test('step 75: a shadow-held raise raises no outside-bounds alert; a step from a zero current price is not a step', () => {
+  const guardrails = { ...NO_GUARDRAILS, guardrailIds: ['g-1'], minMarginBp: 1000, maxStepChangeBp: 1000 };
+  const shadow = decide(gate(1400, { intent: intent(1400, { intentClass: 'NO_OP', currentMinor: 1400, reason: { code: 'SHADOW_ALREADY_PROPOSED', params: {} } }), guardrails, cost }));
+  assert.equal(shadow.alert, null);
+  const fromZero = decide(gate(1540, { intent: intent(1540, { currentMinor: 0, reason: { code: 'RAISED_TOWARD_FLOOR', params: {} } }), guardrails, cost }));
+  assert.equal(fromZero.rejectionReason, 'BELOW_MARGIN_FLOOR');
+});
+

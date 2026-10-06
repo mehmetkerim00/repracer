@@ -67,6 +67,9 @@ export interface PriceScopeContext {
   lastLadderStepAt?: Instant | null;
   /** Р-212: до какой цены дошла последняя БОЕВАЯ ступень за сутки — ступень от неё продолжает лестницу, от другой цены начинает новую */
   lastLadderStepFinalMinor?: number | null;
+  /** Шаг 75 (ревью шага 74): подпись предложения для писем — название товара или SKU продавца, как подпись K10 консоли */
+  productTitle?: string | null;
+  productSku?: string | null;
   /** Цены, которые канал может сейчас показывать: действующая и недавно отправленные */
   knownPricesMinor: number[];
 }

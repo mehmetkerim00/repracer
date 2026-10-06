@@ -259,7 +259,9 @@ export function decide(input: GateInput): PriceDecisionDraft {
     });
     // Р-212 (шаг 74): пауза лестницы — цена ниже пола по построению и уже поднимается к нему; алерт «текущая цена вне границ» с советом
     // проверить правку в кабинете или границы был бы ложным и поднимался бы на каждой оценке паузы (ревью шага 74, находка 1 по Р-212)
-    const ladderPaused = intent.reason.code === 'LADDER_PACED';
+    // Шаг 75 (ревью шага 72, находка 11): то же у предложения, уже удержанного тенью, — подъём к полу предложен, а в тени цена на витрине
+    // не движется; алерт на каждой оценке тени повторял бы одно и то же
+    const ladderPaused = intent.reason.code === 'LADDER_PACED' || intent.reason.code === 'SHADOW_ALREADY_PROPOSED';
     return finish('NO_CHANGE', { code: 'NO_CHANGE', params: {} }, null, null,
       inside || ladderPaused ? null : { code: 'CURRENT_PRICE_OUTSIDE_BOUNDS', severity: 'WARNING' });
   }
@@ -268,9 +270,10 @@ export function decide(input: GateInput): PriceDecisionDraft {
   const proposed = intent.proposedMinor;
   /**
    * Р-208 (шаг 73, OQ-251): ступень лестницы к полу — ниже пола, но выше нынешней цены. Пропускается ТОЛЬКО ступень: причина стратегии
-   * RAISED_TOWARD_FLOOR, предел шага задан, цена строго между нынешней и полом; размер шага проверяет проверка STEP ниже, как у любой цены
+   * RAISED_TOWARD_FLOOR, предел шага задан, цена строго между нынешней и полом; размер шага проверяет проверка STEP ниже, как у любой цены.
+   * Шаг 75 (ревью шага 73, находка 10): нынешняя цена больше нуля — от нуля проверка шага не считается, и ступень прошла бы любой
    */
-  rung = intent.reason.code === 'RAISED_TOWARD_FLOOR' && guardrails.maxStepChangeBp !== null && intent.currentMinor !== null
+  rung = intent.reason.code === 'RAISED_TOWARD_FLOOR' && guardrails.maxStepChangeBp !== null && intent.currentMinor !== null && intent.currentMinor > 0
     && proposed > intent.currentMinor && proposed < floor;
   // Отклонение от нарушенной границы — основа «опасного изменения» [Р-73]
   if (proposed < absolute.value.minMinor && !rung) {

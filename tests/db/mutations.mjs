@@ -2379,6 +2379,9 @@ export const STEP73_ROWS = [
         node(T('floor-raise.pg.test.ts'), 'Р-210: the unit cost rose above the price', 'a fee estimate change is a request too', '^false$')),
       m(dropTrigger('zf_fee_estimate_request_floor_raise', 'channel_data.fee_estimate'),
         node(T('floor-raise.pg.test.ts'), 'Р-210: the unit cost rose above the price', 'a new fee estimate is a request too', '^false$')),
+      // Шаг 75 (ревью шага 73, находка 8): перезапись той же оценки комиссии — не повод
+      m(replaceInFunction('tenant_data.request_floor_raise()', 'IF TG_OP = \'UPDATE\' AND OLD.fee_model IS NOT DISTINCT FROM NEW.fee_model THEN', 'IF false THEN'),
+        node(T('floor-raise.pg.test.ts'), 'Р-210: the unit cost rose above the price', 'a rewrite of the same fee estimate is not a request', '^false$')),
       m(dropTrigger('zf_channel_write_history_request_floor_raise', 'tenant_data.channel_write_history'),
         node(T('floor-raise.pg.test.ts'), 'Р-209: a write refused by the floor recheck', 'a write refused by the floor recheck is a request for a re-evaluation', '^false$')),
     ],

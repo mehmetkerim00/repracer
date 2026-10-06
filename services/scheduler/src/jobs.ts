@@ -1,5 +1,5 @@
 import type { DailyExportReport, DayRange, ExportGroup } from '@repracer/analytics-export';
-import type { AdapterCallContext, ChannelAccountId, ChannelDescriptor, Instant, TenantId } from '@repracer/channel-port';
+import { DEFAULT_SCHEDULED_RECOMPUTE_SECONDS, type AdapterCallContext, type ChannelAccountId, type ChannelDescriptor, type Instant, type TenantId } from '@repracer/channel-port';
 import { DEFAULT_LOSS_GRACE_SECONDS, type PricingPipeline } from '@repracer/pricing-pipeline';
 import { JobHoldsWindowError, type JobSource, type JobSpec } from './scheduler.ts';
 
@@ -62,7 +62,11 @@ export interface JobConfig {
   /** Шаг 43 [Р-177]: как часто заходит проверка авторизаций каналов обменом refresh-токена */
   authorizationCheckEverySeconds: number;
   /** Шаг 47: пересчёт цен, не зависящих от конкурентов (фиксированная, маржинальная) — допущение, как у обхода офферов */
-  scheduledRecomputeEverySeconds: number;
+  /**
+   * Шаг 75: период планового пересчёта — свойство КАНАЛА (`ChannelDescriptor.scheduledRecomputeSeconds`, одно место правды с паузой
+   * лестницы Р-212); здесь — только переопределение для прогонов на виртуальных часах
+   */
+  scheduledRecomputeEverySeconds?: number;
   /** Ревью шага 47, находка 5: предел единиц за заход — самые давние первыми, остальные — следующими заходами */
   scheduledRecomputeLimit: number;
 }
@@ -92,7 +96,6 @@ export const DEFAULT_JOB_CONFIG: JobConfig = {
   // Находка 3 ревью шага 43: заход ЕЖЕДНЕВНЫЙ — письмо о прошлой закрытой неделе, недоставленное повторяется каждые сутки
   shadowDigestEverySeconds: 86_400,
   authorizationCheckEverySeconds: 3_600,
-  scheduledRecomputeEverySeconds: 900,
   scheduledRecomputeLimit: 1_000,
 };
 
@@ -167,7 +170,7 @@ export const JOB_CATALOG: JobCatalogEntry[] = [
   { name: 'amazon-reconcile-rotation', scope: 'ACCOUNT', when: '31 с × число аккаунтов Amazon, аккаунты — со сдвигом на 31 с', missed: 'LATEST: окно круга — по числу успешных запусков; окно, отклонённое каналом, повторяется; пропуск не пропускает товары, круг сдвигается на время простоя' },
   { name: 'halt-review', scope: 'ACCOUNT', when: 'каждые 5 мин (каналы с выборкой)', missed: 'LATEST: остановка снимается позже' },
   { name: 'order-lines', scope: 'ACCOUNT', when: 'каждые 5 мин', missed: 'LATEST: окно чтения — с предыдущего запуска; пропуск ничего не теряет, резервации создаются позже, доступный остаток в каналах завышен на время пропуска' },
-  { name: 'scheduled-recompute', scope: 'ACCOUNT', when: 'каждые 15 мин: сперва единицы с запросом базы на переоценку и лестницы к полу (шаг 73), потом единицы без решения за 24 часа; до 1000 тех и других за заход', missed: 'LATEST: фиксированные и маржинальные цены пересчитываются позже, подъём к полу после роста себестоимости и ступени лестницы ждут; у канала без данных конкурентов (eBay) решений нет всё время простоя' },
+  { name: 'scheduled-recompute', scope: 'ACCOUNT', when: 'период планового пересчёта канала (15 мин): сперва единицы с запросом базы на переоценку и лестницы к полу (шаг 73), потом единицы без решения за 24 часа; до 1000 тех и других за заход', missed: 'LATEST: фиксированные и маржинальные цены пересчитываются позже, подъём к полу после роста себестоимости и ступени лестницы ждут; у канала без данных конкурентов (eBay) решений нет всё время простоя' },
   { name: 'offer-discovery', scope: 'ACCOUNT', when: 'раз в сутки', missed: 'LATEST: чужое ценообразование нового оффера обнаружится при записи или следующем обходе' },
   { name: 'analytics-export-day', scope: 'GLOBAL', when: 'сутки UTC, в 00:30 следующих суток', missed: 'EVERY_SLOT: каждые пропущенные сутки выгружаются по очереди; провалившиеся, непроверенные и изменившиеся после проверки сутки повторяются каждым запуском из отставания (13 суток); секции журнала не удаляются без проверенной выгрузки; отставание CRITICAL — с 72 часов, принудительное удаление через 14 суток — CRITICAL ANALYTICS_PARTITION_FORCE_DROPPED' },
   { name: 'price-days-close', scope: 'GLOBAL', when: 'каждый час', missed: 'LATEST: функция закрывает все незакрытые сутки по очереди; сырьё цен не удаляется, пока сутки не закрыты' },
@@ -484,7 +487,7 @@ export function jobSource(deps: JobDeps): JobSource {
         specs.push({
           // Шаг 47: снимок конкурентов будит только цены из данных конкурентов; фиксированную и маржинальную — расписание.
           // В канал ходит запись решения (в бою) — работа класса CHANNEL
-          name: 'scheduled-recompute', scope, retryKind: 'CHANNEL', intervalSeconds: cfg.scheduledRecomputeEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,
+          name: 'scheduled-recompute', scope, retryKind: 'CHANNEL', intervalSeconds: cfg.scheduledRecomputeEverySeconds ?? d?.scheduledRecomputeSeconds ?? DEFAULT_SCHEDULED_RECOMPUTE_SECONDS, catchUp: 'LATEST', firstDueAt: immediately,
           lagWarningSeconds: hours(1), lagCriticalSeconds: hours(6), leaseSeconds: 600,
           async run({ startedAt }) {
             const r = await pipeline().recomputeScheduled(ctxOf(a, startedAt, 'scheduled-recompute', 540), { limit: cfg.scheduledRecomputeLimit });

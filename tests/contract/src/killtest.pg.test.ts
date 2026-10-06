@@ -286,6 +286,13 @@ test('step 72: an unknown option or an option without its value is refused befor
   assert.match(bare.stderr, /--hours needs a value/);
   const twice = run(['--in', sample, '--in', sample]);
   assert.match(twice.stderr, /--in is given twice/);
+  // Шаг 75 (ревью шагов 71 и 72): число — только десятичная запись; неприменимый ключ, отчёт поверх файла клиента, комиссия + маржа ≥ 100 %
+  assert.match(run(['--in', sample, '--out', join(dir, 'options.report.html'), '--hours', '0x10']).stderr, /--hours must be a number from 1 to 72/);
+  assert.match(run(['--in', sample, '--out', join(dir, 'options.report.html'), '--rows', '50']).stderr, /--rows applies only to --make-sample/);
+  assert.match(run(['--make-sample', 'simple', '--out', join(dir, 'x.csv'), '--hours', '2']).stderr, /--hours does not apply to --make-sample/);
+  assert.match(run(['--in', sample, '--out', sample]).stderr, /--out is the client file itself/);
+  assert.match(run(['--in', sample, '--out', join(dir, 'options.report.html'), '--fee-pct', '60', '--margin-pct', '40']).stderr,
+    /--fee-pct and --margin-pct together must stay below 100/);
   assert.equal(existsSync(join(dir, 'options.report.html')), false, 'nothing was written');
 });
 
@@ -328,6 +335,13 @@ test('step 71: the leak check reads a render with every client string replaced �
     ['<p>storefront ATVPDKIKX0DER</p>', /^storefront id/],
     ['<p>offer B0KT000012</p>', /^synthetic world id/],
     ['<script src="x.js"></script>', /^external resource/],
+    // Шаг 75 (ревью шага 71, находка 9)
+    ['<p>see Р-5</p>', /^decision or question number/],
+    ['<p>see ADR-0052</p>', /^architecture decision/],
+    ['<p>outcome APPROVED</p>', /^single-word code/],
+    ['<p>the Price Gate held it</p>', /^internal term/],
+    ['<style>@import "x.css";</style><p>ok</p>', /^external resource in style/],
+    ['<style>body { background: url(x.png) }</style><p>ok</p>', /^external resource in style/],
   ];
   for (const [html, kind] of cases) assert.ok(internalLeaks(html).some((l) => kind.test(l)), `${html} → ${JSON.stringify(internalLeaks(html))}`);
   // Прежняя проверка вычитала строки клиента из текста: заголовок клиента «price» превращал «min_price» в «min_» и прятал утечку.

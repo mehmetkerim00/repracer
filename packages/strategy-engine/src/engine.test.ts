@@ -308,3 +308,11 @@ test('step 74 (Р-211): the reason of a raise names only an input that moves the
   assert.deepEqual(['FX_UPDATE', 'COST_UPDATE', 'BOUNDS_UPDATE', 'FLOOR_RECHECK'].map((a) => after(min, a as never)), [null, null, 'BOUNDS_UPDATE', 'FLOOR_RECHECK'],
     'min_price is moved only by the bounds');
 });
+
+/** Шаг 75 (ревью шага 72, находка 10): без конкурентов и без нынешней цены удержание — на полу стратегии, а не на min_price */
+test('step 75: with no competitors and no current price the hold is at the strategy floor, not at min_price', () => {
+  const beat = { type: 'BEAT_LOWEST' as const, undercutMinor: 1, scope: 'VISIBLE_TOP_N' as const, compareLanded: false, atBound: 'CAP' as const };
+  const bounds = { minMinor: 500, maxMinor: 3000, marginFloor: { amountMinor: 1524, minMarginBp: 1000 } };
+  const r = runStrategy(input(beat, { bounds, currentPriceMinor: null, snapshot: markAcceptedBySanity(snapshot({ offers: [] }), 'test') }));
+  assert.ok(r.kind === 'INTENT' && r.intent.intentClass === 'NO_OP' && r.intent.proposedMinor === 1524, JSON.stringify(r));
+});

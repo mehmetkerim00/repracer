@@ -28,7 +28,10 @@ export const COLUMN_ALIASES: Readonly<Record<CatalogField, readonly string[]>> =
 /** Обязательные поля: без SKU и цены решения о цене нет */
 export const REQUIRED_FIELDS: readonly CatalogField[] = ['sku', 'price'];
 
-/** Amazon: SKU продавца — не длиннее 40 знаков (тот же предел, что у плана записи адаптера Amazon) */
+/**
+ * НАШ предел SKU — 40 знаков, тот же, что у плана записи адаптера Amazon. Что это предел самого Amazon, снимком не подтверждено
+ * (проверить) — отчёт и говорит «we accept at most 40» (шаг 75, ревью шага 71, находка 25)
+ */
 export const SKU_MAX = 40;
 export const ROWS_MAX = 20_000;
 

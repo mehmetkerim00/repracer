@@ -306,7 +306,8 @@ export function runStrategy(input: EngineInput): EngineResult {
       if (!Number.isSafeInteger(params.undercutMinor) || params.undercutMinor < 0) return invalidMoney('undercutMinor', params.undercutMinor, 'NON_NEGATIVE');
       capable = true;
       const competitors = snapshot!.offers.filter((o) => !o.isSelf);
-      if (competitors.length === 0) return holdOrRaise(current ?? bounds.minMinor, r('NO_COMPETITOR_OFFERS'), [r('NO_COMPETITOR_OFFERS')], null);
+      // Шаг 75 (ревью шага 72, находка 10): без нынешней цены удержание — на полу стратегии (min_price или пол маржи), а не на min_price
+      if (competitors.length === 0) return holdOrRaise(current ?? floorMinor, r('NO_COMPETITOR_OFFERS'), [r('NO_COMPETITOR_OFFERS')], null);
       let ownShipping = 0;
       if (params.compareLanded) {
         const self = snapshot!.offers.find((o) => o.isSelf);
