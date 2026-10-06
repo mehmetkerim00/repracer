@@ -120,11 +120,12 @@ function floorHolds(world: StandWorld, slice: InterventionSlice, from: number, t
       seenIntents.add(i.intentId);
       // Р-154: оценка без удержания между двумя удержаниями в срез не входит, но закрывает эпизод — это говорит флаг из базы
       if (i.episodeStart) close();
-      const capped = i.explanation.find((x) => x.code === 'CAPPED_AT_MIN_PRICE');
+      // Р-207: пол — min_price или пол маржи; у удержания полом маржи граница — floorMinor
+      const capped = i.explanation.find((x) => x.code === 'CAPPED_AT_MIN_PRICE' || x.code === 'CAPPED_AT_MARGIN_FLOOR');
       const held = i.reason.code === 'TARGET_OUTSIDE_BOUNDS_HOLD' ? i.reason : null;
       const hit = capped ?? held;
       const target = Number(hit?.params.targetMinor);
-      const floor = Number(hit?.params.minMinor);
+      const floor = Number(hit?.code === 'CAPPED_AT_MARGIN_FLOOR' ? hit.params.floorMinor : hit?.params.minMinor);
       // Удержание у потолка — не работа пола
       if (!hit || !Number.isSafeInteger(target) || !Number.isSafeInteger(floor) || target >= floor) { close(); continue; }
       // kept — цена, которую удержал пол: сам пол (поставлена на пол) или текущая цена (оставлена без изменения)
@@ -142,9 +143,10 @@ function floorHolds(world: StandWorld, slice: InterventionSlice, from: number, t
   // без цели [Р-85]. Удержания без изменения цены (NO_OP) решения не создают и после 3 дней не видны вовсе (ревью шага 22, находка 7)
   for (const d of slice.decisions) {
     if (seenIntents.has(d.intentId) || !inPeriod(d.decidedAt, from, to)) continue;
-    const step = explanationOf(world, d)?.value.strategy.steps?.find((x) => x.code === 'CAPPED_AT_MIN_PRICE');
-    if (!step || !Number.isSafeInteger(step.params.minMinor)) continue;
-    push(d.decidedAt, d.writeScopeId, 'CAPPED', null, step.params.minMinor as number, step.params.minMinor as number, d.currency, step, d.decisionId);
+    const step = explanationOf(world, d)?.value.strategy.steps?.find((x) => x.code === 'CAPPED_AT_MIN_PRICE' || x.code === 'CAPPED_AT_MARGIN_FLOOR');
+    const bound = step?.code === 'CAPPED_AT_MARGIN_FLOOR' ? step.params.floorMinor : step?.params.minMinor;
+    if (!step || !Number.isSafeInteger(bound)) continue;
+    push(d.decidedAt, d.writeScopeId, 'CAPPED', null, bound as number, bound as number, d.currency, step, d.decisionId);
   }
   items.sort((a, b) => Date.parse(b.sortAt) - Date.parse(a.sortAt));
   return {

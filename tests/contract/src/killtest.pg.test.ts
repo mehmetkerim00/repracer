@@ -44,7 +44,7 @@ const INTERNAL = ['BEAT_LOWEST', 'APPROVED', 'REJECTED', 'NO_CHANGE', 'SHADOW_HE
   'min_price', 'max_price', 'write_scope', 'channel_write', 'price_decision', 'pricing_halt', 'effective_floor', 'ATVPDKIKX0DER', 'A1SYNKILLTEST', 'B0KT',
   'killtest', 'Р-', 'OQ-', 'r49.', 'undefined', 'NaN', '[object'];
 
-test('step 71: from a client file to a self-contained English report — numbers match the run database, nothing sent, no internal codes', async () => {
+test('step 71: from a client file to a self-contained English report — numbers match the run database, nothing sent, no internal codes', async (t) => {
   const input = join(dir, 'business-report.csv');
   const output = join(dir, 'business-report.report.html');
   writeFileSync(input, syntheticCatalog('business'));
@@ -54,14 +54,20 @@ test('step 71: from a client file to a self-contained English report — numbers
   assert.doesNotMatch(r.stderr + r.stdout, /SYN-KT-\d+|Plant pot|Water bottle/, 'the command log carries no client SKU or product name');
   const summary = summaryOf(r.stdout);
   const name = String(summary.database);
+  // Оставленная базой --keep копия каталога удаляется и тогда, когда утверждение ниже упало (шаг 72)
+  t.after(() => adminQuery(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`));
   assert.match(r.stderr, new RegExp(`database kept: ${name}; delete it with: psql .* -c 'DROP DATABASE ${name} WITH \\(FORCE\\)'`));
   const items = syntheticItems(300).slice(0, 295);
   const noCost = items.filter((x) => x.costMinor === null).length;
   // Пол маржи при комиссии 15 % и марже 10 % — не ниже себестоимости ÷ 0,75: себестоимость выше 75 % цены — цена ниже пола уже сейчас
   const belowFloor = items.filter((x) => x.costMinor !== null && x.costMinor > 0.75 * x.priceMinor).length;
-  assert.ok(belowFloor > 0, 'the synthetic file has products priced below their margin floor');
-  assert.deepEqual([summary.products, summary.rejectedRows, summary.priced, summary.noCost, summary.assumedCost, summary.top, summary.belowFloorNow],
+  // Пол маржи выше допущенного максимума (+30 %) — подъёма нет (ревью шага 72, находка 1): ⌈себестоимость · 4 / 3⌉ > ⌈цена · 1,3⌉
+  const raisable = items.filter((x) => x.costMinor !== null && x.costMinor > 0.75 * x.priceMinor && Math.ceil((x.costMinor * 4) / 3) <= Math.ceil((x.priceMinor * 130) / 100)).length;
+  assert.ok(raisable > 0 && raisable < belowFloor, `the synthetic file has products below the margin floor of both kinds: ${raisable} of ${belowFloor}`);
+  assert.deepEqual([summary.products, summary.rejectedRows, summary.priced, summary.noCost, summary.assumedCost, summary.top, summary.belowFloor],
     [300, 5, 295 - noCost, noCost, 0, 15, belowFloor]);
+  // Р-207 (шаг 72): движок поднимает цену ниже пола маржи до пола — у каждого товара, чей пол не выше допущенного максимума
+  assert.equal(summary.raisedToFloor, raisable, JSON.stringify(summary));
 
   // Пересчёт по базе прогона своими запросами — не функцией сводки тени, которой пользуется отчёт
   const pool = createPool(dbUrl(name), { max: 1 });
@@ -72,20 +78,52 @@ test('step 71: from a client file to a self-contained English report — numbers
               count(*) FILTER (WHERE final_amount_minor = effective_floor_minor)::int AS floor_held, count(*) FILTER (WHERE NOT shadow)::int AS live,
               count(*) FILTER (WHERE outcome = 'REJECTED' AND rejection_reason = 'BELOW_MARGIN_FLOOR')::int AS margin_refused
          FROM channel_data.price_decision`)).rows;
+    // Р-207: подъёмы до пола — главная причина намерения RAISED_TO_FLOOR; удержание пола маржи пишет строку floor_hold (0178)
+    const [i] = (await pool.query<Record<string, number>>(
+      `SELECT (SELECT count(DISTINCT d.write_scope_id)::int FROM channel_data.price_decision d
+                 JOIN channel_data.price_intent x ON x.tenant_id = d.tenant_id AND x.price_intent_id = d.price_intent_id
+                WHERE d.outcome = 'APPROVED' AND x.rationale -> 'reason' ->> 'code' = 'RAISED_TO_FLOOR'
+                  AND x.rationale -> 'reason' -> 'params' ->> 'bound' = 'margin_floor') AS raised_scopes,
+              (SELECT count(*)::int FROM channel_data.price_decision
+                WHERE rejection_reason = 'BOUND_UNRESOLVABLE' AND reason_params ->> 'cause' = 'MARGIN_FLOOR_ABOVE_MAX_PRICE') AS above_max,
+              count(*) FILTER (WHERE rationale -> 'reason' ->> 'code' = 'RAISED_TO_FLOOR' AND rationale -> 'reason' -> 'params' ->> 'bound' = 'margin_floor')::int AS raised,
+              (SELECT count(*)::int FROM channel_data.price_intent pi JOIN channel_data.floor_hold h ON h.tenant_id = pi.tenant_id AND h.price_intent_id = pi.price_intent_id
+                WHERE pi.rationale -> 'explanation' @> '[{"code": "CAPPED_AT_MARGIN_FLOOR"}]'::jsonb) AS margin_holds,
+              -- Ревью шага 72, находка 5: удержанная цена — пол из шага цепочки, и на повторном опросе тени («уже предложено» с ценой витрины)
+              (SELECT count(*) FILTER (WHERE pi.rationale -> 'reason' ->> 'code' = 'SHADOW_ALREADY_PROPOSED')::int
+                 FROM channel_data.price_intent pi JOIN channel_data.floor_hold h ON h.tenant_id = pi.tenant_id AND h.price_intent_id = pi.price_intent_id
+                WHERE pi.rationale -> 'explanation' @> '[{"code": "CAPPED_AT_MARGIN_FLOOR"}]'::jsonb) AS margin_holds_repeated,
+              (SELECT count(*)::int FROM channel_data.price_intent pi JOIN channel_data.floor_hold h ON h.tenant_id = pi.tenant_id AND h.price_intent_id = pi.price_intent_id
+                 CROSS JOIN LATERAL jsonb_array_elements(pi.rationale -> 'explanation') e
+                WHERE e ->> 'code' = 'CAPPED_AT_MARGIN_FLOOR'
+                  AND h.below_minor <> (e -> 'params' ->> 'floorMinor')::bigint - (e -> 'params' ->> 'targetMinor')::bigint) AS margin_hold_mismatch
+         FROM channel_data.price_intent`)).rows;
     const [w] = (await pool.query<Record<string, number>>(
       `SELECT (SELECT count(*)::int FROM tenant_data.channel_write_history WHERE final_status = 'SHADOW_HELD' AND field <> 'QUANTITY') AS held,
               (SELECT count(*)::int FROM tenant_data.channel_write WHERE dispatched_at IS NOT NULL)
             + (SELECT count(*)::int FROM tenant_data.channel_write_history WHERE dispatched_at IS NOT NULL) AS dispatched`)).rows;
-    recount = { ...d!, ...w! };
+    recount = { ...d!, ...w!, ...i! };
+    // Шаг 72 (находка 26 ревью шага 71): клиент amazon.com — регион хранения US [Р-60], и у базы, и у тенанта прогона
+    const [r] = (await pool.query<{ db: string; tenants: string[] }>(
+      `SELECT current_setting('repracer.region') AS db, array_agg(DISTINCT data_region) AS tenants FROM tenant_data.tenant WHERE kind <> 'PLATFORM'`)).rows;
+    assert.deepEqual([r!.db, r!.tenants], ['US', ['US']]);
   } finally {
     await pool.end();
   }
   assert.ok(recount.decisions! > 0 && recount.changes! > 0 && recount.floor_held! > 0, JSON.stringify(recount));
   assert.deepEqual([summary.decisions, summary.changes, summary.floorHeld, summary.heldWrites, summary.marginRefused],
     [recount.decisions, recount.changes, recount.floor_held, recount.held, recount.margin_refused]);
-  // Находка 5 и то, что нашёл этот тест: цене ниже пола маржи движок не поднимает цену до пола — итоговая проверка ОТКАЗЫВАЕТ, и цена
-  // остаётся прежней (Р-44: отказ, не округление); у товаров ниже пола маржи такие отказы есть
-  assert.ok(recount.margin_refused! > 0, 'a price below the margin floor was refused at least once');
+  /**
+   * Шаг 71 нашёл: цене ниже пола маржи движок не поднимал цену до пола — итоговая проверка ОТКАЗЫВАЛА, и цена оставалась прежней.
+   * Р-207 (шаг 72): стратегия встаёт на пол маржи сама — отказов ниже пола маржи нет, подъёмы есть, удержания пола маржи записаны
+   */
+  assert.equal(recount.margin_refused, 0, 'no price below the margin floor reaches the final check any more');
+  assert.ok(recount.raised! > 0 && recount.margin_holds! > 0 && recount.above_max! > 0, JSON.stringify(recount));
+  assert.ok(recount.margin_holds_repeated! > 0, `the repeated shadow polls are exercised: ${JSON.stringify(recount)}`);
+  assert.equal(recount.margin_hold_mismatch, 0, 'every margin floor hold is the floor minus the target, also on a repeated shadow poll');
+  // Находка 4 ревью шага 72: подъём — по товару, своим запросом: у КАЖДОГО поднимаемого товара — одобренное решение с причиной подъёма
+  // до пола маржи (до Р-207 таких решений не было вовсе, а цена выше пола вслед за конкурентом подъёмом не считается)
+  assert.equal(recount.raised_scopes, raisable, JSON.stringify(recount));
   assert.deepEqual([recount.live, recount.dispatched, summary.sentToAmazon, summary.portWrites], [0, 0, 0, 0], 'a shadow run sends nothing: no live decision, no dispatched write, no call to the channel model');
   await adminQuery(`DROP DATABASE ${name} WITH (FORCE)`);
   assert.deepEqual(await databases(name), [], 'the kept database is gone after the drop command');
@@ -102,22 +140,49 @@ test('step 71: from a client file to a self-contained English report — numbers
   assert.ok(split, 'the floor holds are broken down');
   assert.equal(Number(split[1]), summary.floorHeld);
   assert.equal(Number(split[2]) + Number(split[3]), Number(split[1]));
-  assert.equal(Number(split[3]), summary.floorHeldMargin);
-  assert.match(html, new RegExp(`<li>${recount.margin_refused} times the engine's price would have been below your margin floor: the final price check refused it, and the price stayed as it was\\.</li>`));
+  assert.ok(Number(split[3]) > 0 && Number(split[3]) === summary.floorHeldMargin, 'the price landed on the margin floor from the client cost');
+  assert.doesNotMatch(html, /the final price check refused it/);
   // Находка 4: что в пол не входит — названо
   assert.match(html, /does not include FBA fees, per-item minimum fees, closing fees or shipping/);
   assert.match(html, /prices are treated as US dollars excluding sales tax/);
   // Находки 1 и 3: ни «точно как в бою», ни выдуманного предела скорости
   assert.doesNotMatch(html, /exactly as (in )?live|per second|flood/i);
-  // Находка 5: ниже пола — только по своей себестоимости клиента, с формулой словами
-  assert.match(html, new RegExp(`<strong>${belowFloor} of your products are priced below the margin floor computed from your unit cost</strong>, an assumed Amazon referral fee of 15% and a minimum margin of 10%\\. The engine refuses every price below that floor for them`));
-  assert.doesNotMatch(html, /would raise their price/, 'the engine does not raise a price below the margin floor on its own');
+  // Р-207 (шаг 72): отдельный раздел — товары ниже пола маржи по СВОЕЙ себестоимости клиента: цена, себестоимость, прибыль на единицу,
+  // пол и цена движка; у каждого — подъём до пола маржи
+  const section = html.slice(html.indexOf('<h2>Products priced below your margin floor</h2>'), html.indexOf('decisions in detail</h2>'));
+  assert.match(section, new RegExp(`<strong>${belowFloor} of your products are priced below the margin floor computed from your unit cost</strong>, an assumed Amazon referral fee of 15% and a minimum margin of 10%\\. The engine raises such a price to your margin floor`));
+  assert.match(section, new RegExp(`In this run the engine would have raised ${raisable} of them to the floor \\(shadow mode: nothing was sent\\)\\.`));
+  // Находка 2: пределов шага и частоты в прогоне нет — отчёт не обещает их проверку и не показывает их «пройденными»
+  assert.match(section, /No limit on the size of a price step was set in this run/);
+  assert.doesNotMatch(html, /Step within limit|Change frequency within limit/);
+  const rows = section.split('<tr><td>').slice(1);
+  assert.equal(rows.length, belowFloor);
+  let losses = 0;
+  for (const row of rows) {
+    // Суммы со знаком: у товара с себестоимостью выше цены прибыль на единицу отрицательна
+    const [price, cost, profit, floor, engine] = [...row.matchAll(/(−|-)?\$([\d,]+\.\d\d)/g)].map((x) => (x[1] ? -1 : 1) * Math.round(Number(x[2]!.replace(/,/g, '')) * 100));
+    // Своя арифметика теста: прибыль = цена − 15 % − себестоимость; пол = ⌈себестоимость ÷ 0,75⌉ = ⌈себестоимость · 4 / 3⌉ (в целых)
+    assert.equal(profit, price! - Math.round(price! * 0.15) - cost!, row);
+    assert.equal(floor, Math.ceil((cost! * 4) / 3), row);
+    assert.ok(price! < floor!, row);
+    if (profit! < 0) { losses += 1; assert.match(row, /class="loss"/); }
+    if (floor! <= Math.ceil((price! * 130) / 100)) {
+      // Подъём до пола: цена движка — ровно пол маржи
+      assert.ok(engine === floor && /would be raised to your margin floor/.test(row), row);
+    } else {
+      assert.match(row, /not raised<div class="muted">your margin floor is above the maximum price we assumed \(30% above your price\)/);
+    }
+  }
+  assert.equal(losses, belowFloor - raisable, 'the products whose cost is above the price lose money on each sale at the assumed fee');
+  assert.match(html, new RegExp(`<h4>We did not go above the maximum price</h4><p>${recount.above_max} decisions were refused because your margin floor is above the maximum price we assumed`));
+  assert.match(html, /<div class="value">\d+<\/div><div class="label">priced below your margin floor<\/div>/);
   // Топ-15: у каждого решения «почему» словами и итог Price Gate
   const decisions = html.split('<article class="decision">').slice(1);
   assert.equal(decisions.length, 15);
   for (const d of decisions) {
     assert.match(d, /<h4>Why this price<\/h4>/);
-    assert.match(d, /approved within \$[\d,]+\.\d\d–\$[\d,]+\.\d\d|Rejected: \$[\d,]+\.\d\d is below the minimum-margin floor \$[\d,]+\.\d\d/, 'the Price Gate step is in words');
+    // Одобрено в границах — или отказ словами у товара, чей пол маржи выше допущенного максимума (себестоимость выше цены)
+    assert.match(d, /approved within \$[\d,]+\.\d\d–\$[\d,]+\.\d\d|Rejected: .*cannot be computed — the minimum-margin price is above the maximum price/, 'the Price Gate step is in words');
     // Находка 7: у «Units Ordered» нет периода в названии — период назван как период файла, а не «30 дней»
     assert.match(d, /units ordered in the period of your file/);
     assert.doesNotMatch(d, /assumed cost/, 'no assumed cost without --assume-cost-pct');
@@ -125,9 +190,6 @@ test('step 71: from a client file to a self-contained English report — numbers
   assert.ok(decisions.some((d) => /Undercut the lowest price \$[\d,]+\.\d\d by \$0\.01/.test(d)), 'the strategy step is in words, with amounts');
   assert.ok(decisions.some((d) => d.includes('stopped by your margin floor') || d.includes('stopped by the assumed minimum price')), 'a decision shows the floor stopping the price');
   assert.ok(decisions.some((d) => /<div class="muted">\+\d/.test(d)), 'at least one decision raised the price');
-  // Отказ цене ниже пола маржи показан как отказ: цена прежняя, «unchanged», причина словами
-  assert.ok(decisions.some((d) => d.includes('refused by the final price check') && d.includes('<div class="muted">unchanged</div>') && /Rejected: .* below the minimum-margin floor/.test(d)),
-    'a refused decision is shown as refused, with the price unchanged');
   // Негодные строки — своей причиной и номером строки в файле клиента (заголовок — строка 1)
   assert.match(html, /<td>no price<\/td><td>1<\/td><td>297<\/td>/);
   assert.match(html, /could be read two ways/);
@@ -189,6 +251,20 @@ test('step 71: an interrupted run deletes its database (it holds the client cata
   assert.equal(existsSync(output), false, 'no report from an interrupted run');
 });
 
+test('step 72: an unknown option or an option without its value is refused before anything is read — a typo does not change the run silently', () => {
+  const sample = join(dir, 'options.csv');
+  writeFileSync(sample, syntheticCatalog('simple', 20));
+  const typo = run(['--in', sample, '--out', join(dir, 'options.report.html'), '--assume-cost', '50']);
+  assert.equal(typo.status, 2);
+  assert.match(typo.stderr, /unknown option --assume-cost; did you mean --assume-cost-pct\?/);
+  const bare = run(['--in', sample, '--hours']);
+  assert.equal(bare.status, 2);
+  assert.match(bare.stderr, /--hours needs a value/);
+  const twice = run(['--in', sample, '--in', sample]);
+  assert.match(twice.stderr, /--in is given twice/);
+  assert.equal(existsSync(join(dir, 'options.report.html')), false, 'nothing was written');
+});
+
 test('step 71: a client file or a report inside the repository is refused — also through a link or in another letter case; git-ignored places are accepted', () => {
   const sample = join(dir, 'sample.csv');
   writeFileSync(sample, syntheticCatalog('simple', 20));
@@ -243,12 +319,13 @@ function minimalReport(x: { header: string; ourText: string; sku?: string }): Re
   return {
     generatedAt: 'Oct 6, 2026', fileName: 'client_file.csv', format: 'comma-separated text', hours: 1, options: DEFAULT_OPTIONS, salesHeader: x.header,
     counts: { rows: 1, rejectedRows: 0, inRun: 1, inEngine: 1, withFileCost: 1, assumedCost: 0, noCost: 0, skippedByLimit: 0, decisions: 1, assumedCostDecisions: 0,
-      changes: 1, floorHeld: 1, floorHeldAssumedMin: 0, floorHeldMargin: 1, marginRefused: 0, ceilingHeld: 0, heldWrites: 1, competitorUpdates: 1, sentToAmazon: 0, dbDispatched: 0, portWrites: 0 },
-    savings: null, belowFloorNow: [`${sku}_title`],
+      changes: 1, floorHeld: 1, floorHeldAssumedMin: 0, floorHeldMargin: 1, marginRefused: 0, ceilingHeld: 0, raisedToFloor: 1, heldWrites: 1, competitorUpdates: 1, sentToAmazon: 0, dbDispatched: 0, portWrites: 0 },
+    savings: null,
+    belowFloor: [{ label: `${sku}_title`, sku, sales: 1, priceMinor: 1000, costMinor: 800, profitMinor: 50, floorMinor: 1067, status: 'RAISED', engineMinor: 1067, refused: null }],
     top: [{ label: `${sku}_title`, sku, sales: 1, currentMinor: 1000, decidedMinor: 900, floorMinor: 900, ceilingMinor: 1300, floorKind: 'MARGIN', atFloor: true, refused: false,
       costSource: 'FILE', when: 'Oct 6, 2026', why: ['Undercut the lowest price $9.00 by $0.01'], checks: ['Floor'] }],
     notDone: [{ title: 'The price never went below the floor', text: x.ourText }],
-    noCostExamples: [], rejected: [], notes: [],
+    noCostExamples: [], rejected: [{ text: 'the currency column is not US dollars', lines: [2], values: [`${sku}_EUR`] }], notes: [],
     columns: { recognized: [{ header: x.header, meaning: 'units sold' }], ignored: [`${x.header}_extra`], duplicates: [] },
     databaseKept: false,
   };

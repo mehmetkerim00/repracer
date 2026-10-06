@@ -18,7 +18,7 @@ const titles: Record<AnyReasonCode, string> = {
   CROSS_CHANNEL_FX_UNAVAILABLE: 'No exchange rate for cross-channel check',
   FIXED_PRICE: 'Fixed price', MARGIN_TARGET: 'Target margin price', BUYBOX_MATCH: 'Match the Buy Box', BUYBOX_UNDERCUT: 'Undercut the Buy Box',
   LOWEST_MATCH: 'Match the lowest price', LOWEST_UNDERCUT: 'Undercut the lowest price', CAPPED_AT_MIN_PRICE: 'Target capped at min_price',
-  CAPPED_AT_MAX_PRICE: 'Target capped at max_price', ALREADY_AT_TARGET: 'Already at target', WITHIN_DEADBAND: 'Change below threshold', SHADOW_ALREADY_PROPOSED: 'Already proposed in shadow mode',
+  CAPPED_AT_MAX_PRICE: 'Target capped at max_price', CAPPED_AT_MARGIN_FLOOR: 'Target capped at the margin floor', RAISED_TO_FLOOR: 'Raised to the floor', ALREADY_AT_TARGET: 'Already at target', WITHIN_DEADBAND: 'Change below threshold', SHADOW_ALREADY_PROPOSED: 'Already proposed in shadow mode',
   ALREADY_WINNING_BUYBOX: 'Already winning the Buy Box', NO_COMPETITOR_OFFERS: 'No competitors', TARGET_OUTSIDE_BOUNDS_HOLD: 'Target outside bounds — kept',
   COMPETITOR_REQUIREMENT_NOT_MET: 'Not enough channel data', COST_INPUTS_MISSING: 'Cost data missing', MARGIN_UNATTAINABLE: 'Margin unattainable',
   BOUNDS_INVALID: 'Invalid bounds', ENGINE_CURRENCY_MISMATCH: 'Currency mismatch', INVALID_STRATEGY_PARAMS: 'Invalid strategy setting',
@@ -90,6 +90,10 @@ const reasons: Record<AnyReasonCode, Template> = {
   LOWEST_UNDERCUT: (f) => `Undercut the lowest price ${f.money('lowestMinor')} by ${f.money('undercutMinor')}: ${f.money('targetMinor')}.`,
   CAPPED_AT_MIN_PRICE: (f) => `Target ${f.money('targetMinor')} is below min_price — capped at ${f.money('minMinor')}.`,
   CAPPED_AT_MAX_PRICE: (f) => `Target ${f.money('targetMinor')} is above max_price — capped at ${f.money('maxMinor')}.`,
+  CAPPED_AT_MARGIN_FLOOR: (f) => `Target ${f.money('targetMinor')} is below your margin floor ${f.money('floorMinor')} (margin ${f.bp('minMarginBp')}) — set to the margin floor.`,
+  RAISED_TO_FLOOR: (f) => (f.get('bound') === 'margin_floor'
+    ? `Your price ${f.money('currentMinor')} was below your margin floor — raised to your margin floor ${f.money('floorMinor')}${opt(f, 'minMarginBp', () => ` (margin ${f.bp('minMarginBp')})`)}.`
+    : `Your price ${f.money('currentMinor')} was below min_price — raised to ${f.money('floorMinor')}.`),
   ALREADY_AT_TARGET: (f) => `The price already equals the target ${f.money('targetMinor')}.`,
   WITHIN_DEADBAND: (f) => `The difference ${f.money('deltaMinor')} is below the threshold ${f.money('deadbandMinor')} — the price stays.`,
   // Р-171 (шаг 41): то же предложение уже удержано тенью — повторять его незачем
@@ -231,6 +235,7 @@ const reasonsWithoutChannel: Partial<Record<AnyReasonCode | SanityNoteCode, Temp
   // Цель стратегии выведена из цены конкурента [Р-85]: граница и решение — наши, их сумма остаётся
   CAPPED_AT_MIN_PRICE: (f) => `The target from competitor prices was below min_price — capped at ${f.money('minMinor')}.`,
   CAPPED_AT_MAX_PRICE: (f) => `The target from competitor prices was above max_price — capped at ${f.money('maxMinor')}.`,
+  CAPPED_AT_MARGIN_FLOOR: (f) => `The target from competitor prices was below your margin floor — set to the margin floor ${f.money('floorMinor')} (margin ${f.bp('minMarginBp')}).`,
   ALREADY_AT_TARGET: () => 'The price already equalled the target.',
   WITHIN_DEADBAND: (f) => `The difference to the target was below the threshold ${f.money('deadbandMinor')} — the price stays.`,
   TARGET_OUTSIDE_BOUNDS_HOLD: (f) => `The target was outside ${f.money('minMinor')}–${f.money('maxMinor')}; the strategy is set to keep the price.`,

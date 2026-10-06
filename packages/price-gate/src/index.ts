@@ -45,6 +45,24 @@ export interface GuardrailSet {
 
 export const NO_GUARDRAILS: GuardrailSet = { guardrailIds: [], minMarginBp: null, maxStepChangeBp: null, maxChangesPerHour: null, onViolation: 'HOLD' };
 
+export type MarginFloorResolution =
+  | { kind: 'NONE' }
+  | { kind: 'OK'; floorMinor: number; minMarginBp: number }
+  | { kind: 'UNRESOLVABLE'; cause: string };
+
+/**
+ * Пол маржи — ОДИН расчёт для Gate и для стратегии (Р-207, шаг 72): стратегия, следующая за рынком, встаёт на пол маржи и
+ * поднимает до него цену, которая ниже; Gate проверяет ту же цену тем же расчётом, а база — своей формулой перед каждой
+ * отправкой [Р-83] (`tenant_data.price_for_margin_bp`, тот же `ceil`). Себестоимость приходит уже в валюте единицы записи.
+ */
+export function resolveMarginFloor(cost: CostInputs | null, minMarginBp: number | null, currency: string, costUnavailableCause?: string | null): MarginFloorResolution {
+  if (minMarginBp === null) return { kind: 'NONE' };
+  if (!cost) return { kind: 'UNRESOLVABLE', cause: costUnavailableCause ?? 'COST_PROFILE_MISSING' };
+  if (cost.currency !== currency) return { kind: 'UNRESOLVABLE', cause: 'COST_CURRENCY_MISMATCH' };
+  const priced = storefrontPriceForMarginBp(cost, minMarginBp);
+  return priced.ok ? { kind: 'OK', floorMinor: priced.priceMinor, minMarginBp } : { kind: 'UNRESOLVABLE', cause: priced.cause };
+}
+
 export interface GateInput {
   intent: PriceIntentDraft;
   scope: {
@@ -219,18 +237,13 @@ export function decide(input: GateInput): PriceDecisionDraft {
   ok('BOUNDS_RESOLVED');
 
   // 5. Пол маржи: задан ограничением — обязан вычисляться
-  let marginFloor: number | null = null;
-  if (guardrails.minMarginBp !== null) {
-    const cost = input.cost;
-    const cause = !cost ? (input.costUnavailableCause ?? 'COST_PROFILE_MISSING') : cost.currency !== scope.currency ? 'COST_CURRENCY_MISMATCH' : null;
+  const margin = resolveMarginFloor(input.cost, guardrails.minMarginBp, scope.currency, input.costUnavailableCause);
+  if (margin.kind !== 'NONE') {
     const marginFail = (c: string) => fail('MARGIN_FLOOR', 'BOUND_UNRESOLVABLE', { bound: 'margin_floor', cause: c, minMarginBp: guardrails.minMarginBp }, 'REJECTED',
       { code: 'PRICING_BOUND_UNRESOLVABLE', severity: 'CRITICAL' });
-    if (cause) return marginFail(cause);
-    const priced = storefrontPriceForMarginBp(cost!, guardrails.minMarginBp);
-    if (!priced.ok) return marginFail(priced.cause);
-    if (priced.priceMinor > ceiling) return marginFail('MARGIN_FLOOR_ABOVE_MAX_PRICE');
-    marginFloor = priced.priceMinor;
-    floor = Math.max(floor, marginFloor);
+    if (margin.kind === 'UNRESOLVABLE') return marginFail(margin.cause);
+    if (margin.floorMinor > ceiling) return marginFail('MARGIN_FLOOR_ABOVE_MAX_PRICE');
+    floor = Math.max(floor, margin.floorMinor);
   }
   ok('MARGIN_FLOOR');
 

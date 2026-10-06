@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import type { AlertSink, ChannelAdapter, FieldWrite } from '@repracer/channel-port';
 import { convertMinor, storefrontPriceForMarginBp, type CostInputs } from '@repracer/pricing-model';
+import { resolveMarginFloor } from '@repracer/price-gate';
 import type { MemorySeedScope } from '@repracer/pricing-pipeline';
 import { createWriteDispatcher, DEFAULT_RETRY_POLICY, type ScopeDispatchReport } from '@repracer/write-dispatcher';
 import { inTenant, PgPricingStore, PgWriteQueueStore, seedPricingWorld, type PgPool, type SeededPricingWorld } from '../src/index.ts';
@@ -73,6 +74,8 @@ before(async () => {
         scope(5), // контроль: ничего не меняется — запись уходит
         scope(6), // себестоимость выросла между чтением контекста и фиксацией
         scope(7), // повтор после временной ошибки — тоже отправка
+        scope(8), // Р-207: цена ровно на полу маржи — стратегия теперь ставит её туда сама
+        scope(9), // Р-141 + Р-207: две оценки комиссии — пол стратегии по наибольшему полу, как у базы
       ],
       accounts: [{ channelAccountId: US_ACCOUNT, channel: 'AMAZON', region: 'NA', marketplaces: ['ATVPDKIKX0DER'] }],
       marketplaces: { ATVPDKIKX0DER: { currency: 'USD', basis: 'NET' } },
@@ -150,6 +153,43 @@ test('Р-83 control: with nothing changed the queued write goes out after the in
   await finishInFlight(inFlight);
   await dispatcher().dispatchScope(world.tenantId, ws(5));
   assert.ok(sent.some((w) => w.channelWriteId === pendingWriteId), 'the control write must be sent — otherwise the tests below prove nothing');
+});
+
+/**
+ * Р-207 (шаг 72): стратегия, следующая за рынком, ставит цену РОВНО на пол маржи и поднимает до него цену ниже пола. Такая запись
+ * должна уходить: перепроверка базы перед отправкой [Р-83] считает пол той же формулой, граница включена. Пол — тем же расчётом,
+ * что у Gate и стратегии; на копейку выше — уже чужая цена, и запись, поставленная «на пол», ушла бы в отказ
+ */
+test('Р-207: a write exactly at the margin floor goes out — the database floor equals the strategy floor to the cent', async () => {
+  const floor = storefrontPriceForMarginBp(eurCost(1000), 1000);
+  assert.ok(floor.ok && floor.priceMinor === 1524, JSON.stringify(floor));
+  const { inFlight, pendingWriteId } = await queueBehindInFlight(8, 1600, floor.priceMinor);
+  await finishInFlight(inFlight);
+  const report = await dispatcher().dispatchScope(world.tenantId, ws(8));
+  assert.ok(sent.some((w) => w.channelWriteId === pendingWriteId && w.value.field === 'PRICE' && w.value.price.amountMinor === 1524), JSON.stringify(report.steps));
+  // Отрицательный контроль: на цент ниже пола решение не фиксируется вовсе — пол той же формулой считает база при вставке решения
+  const below = await commit(store, world.tenantId, await draft(8, floor.priceMinor - 1));
+  assert.ok(below.status === 'CONTEXT_CHANGED' && below.reason.code === 'BELOW_MARGIN_FLOOR', JSON.stringify(below));
+});
+
+/**
+ * Ревью шага 72, находка 1: контекст решения брал оценку комиссии по наибольшей СТАВКЕ, а база берёт наибольший ПОЛ по всем оценкам
+ * [Р-141]. Тариф 10 % и комиссия продавца «0 % + 5,00 €» при себестоимости 10,00 € и НДС 19 %: по тарифу пол 15,24 €, по комиссии
+ * продавца — 19,84 €. Стратегия ставит цену ровно на пол [Р-207] — пол ниже базового давал бы отказ базы на каждой оценке
+ */
+test('Р-207 + Р-141: with two fee estimates the decision context takes the higher margin floor, the same as the database', async () => {
+  await db.superuser(`INSERT INTO channel_data.fee_estimate (tenant_id, write_scope_id, source, fee_model, computed_at, valid_until)
+                      VALUES ($1, $2, 'SELLER_DECLARED', '{"feeRateBp": 0, "fixedFeeMinor": 500}'::jsonb, now(), now() + interval '30 days')`, [world.tenantId, ws(9)]);
+  const ctx = await contextOf(store, world.tenantId, ws(9));
+  const margin = resolveMarginFloor(ctx.cost, ctx.guardrails.minMarginBp, 'EUR');
+  const [dbFloor] = await inTenant(pool, world.tenantId, async (tx) => (await tx.query(
+    `SELECT margin_floor_minor::int AS margin FROM tenant_data.effective_price_floor($1, $2)`, [world.tenantId, ws(9)])).rows);
+  assert.deepEqual([margin.kind === 'OK' ? margin.floorMinor : margin, dbFloor?.margin], [1984, 1984], 'the decision floor equals the database floor');
+  const at = await commit(store, world.tenantId, await draft(9, 1984));
+  assert.equal(at.status, 'COMMITTED', JSON.stringify(at));
+  // Отрицательный контроль: пол по тарифу (15,24 €) ниже пола базы — решение на нём не фиксируется
+  const tariff = await commit(store, world.tenantId, await draft(9, 1524));
+  assert.ok(tariff.status === 'CONTEXT_CHANGED' && tariff.reason.code === 'BELOW_MARGIN_FLOOR', JSON.stringify(tariff));
 });
 
 test('Р-83: the unit cost rose between decision and dispatch — the margin floor blocks the write', async () => {

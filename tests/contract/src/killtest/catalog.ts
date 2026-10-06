@@ -10,7 +10,7 @@ import { parseMoneyMinor, readTable, TableReadError, currencyInCell } from '@rep
  * спецификации не подтверждены — (проверить) на первом настоящем файле клиента; таблица дополняется строкой, код не меняется.
  */
 
-export type CatalogField = 'sku' | 'title' | 'asin' | 'price' | 'quantity' | 'cost' | 'sales30d';
+export type CatalogField = 'sku' | 'title' | 'asin' | 'price' | 'quantity' | 'cost' | 'sales30d' | 'currency';
 
 /** Названия колонок по полю: сравнение без регистра, «-» и «_» — как пробел, лишние пробелы схлопываются */
 export const COLUMN_ALIASES: Readonly<Record<CatalogField, readonly string[]>> = {
@@ -21,6 +21,8 @@ export const COLUMN_ALIASES: Readonly<Record<CatalogField, readonly string[]>> =
   quantity: ['quantity', 'qty', 'available', 'stock', 'mfn fulfillable quantity', 'afn fulfillable quantity', 'fulfillable quantity'],
   cost: ['cost', 'unit cost', 'cogs', 'cost price', 'purchase price', 'landed cost'],
   sales30d: ['units ordered', 'units sold', 'sales 30d', 'sales (30 days)', 'units (30 days)', '30 day sales', 'sales last 30 days'],
+  // Шаг 72: валюта строки — цена и себестоимость в ней; не доллары — строка не годится, и отчёт называет валюту
+  currency: ['currency', 'currency code', 'price currency'],
 };
 
 /** Обязательные поля: без SKU и цены решения о цене нет */
@@ -32,7 +34,7 @@ export const ROWS_MAX = 20_000;
 
 export type RowProblem =
   | 'NO_SKU' | 'SKU_TOO_LONG' | 'DUPLICATE_SKU'
-  | 'PRICE_MISSING' | 'PRICE_NOT_A_NUMBER' | 'PRICE_AMBIGUOUS' | 'PRICE_NOT_POSITIVE' | 'PRICE_NOT_USD';
+  | 'PRICE_MISSING' | 'PRICE_NOT_A_NUMBER' | 'PRICE_AMBIGUOUS' | 'PRICE_NOT_POSITIVE' | 'PRICE_NOT_USD' | 'CURRENCY_NOT_USD';
 
 export type RowNote = 'COST_UNREADABLE' | 'COST_NOT_USD' | 'QUANTITY_UNREADABLE' | 'SALES_UNREADABLE';
 
@@ -54,7 +56,7 @@ export interface Catalog {
   format: string;
   rows: CatalogRow[];
   /** Строки, которые не годятся вовсе, — с причиной и номером строки файла */
-  rejected: Array<{ line: number; sku: string | null; problem: RowProblem }>;
+  rejected: Array<{ line: number; sku: string | null; problem: RowProblem; currency?: string }>;
   recognized: Array<{ field: CatalogField; header: string }>;
   ignored: string[];
   /** Поле узнано у нескольких колонок — взята первая слева, остальные названы */
@@ -127,6 +129,15 @@ export function readCatalog(content: Buffer, fileName: string): Catalog {
     if (sku === '') { rejected.push({ line, sku: null, problem: 'NO_SKU' }); continue; }
     if (sku.length > SKU_MAX) { rejected.push({ line, sku: sku.slice(0, SKU_MAX), problem: 'SKU_TOO_LONG' }); continue; }
     if (seen.has(sku)) { rejected.push({ line, sku, problem: 'DUPLICATE_SKU' }); continue; }
+    /**
+     * Шаг 72: колонка валюты не игнорируется. Пустая ячейка — доллары, как у файла без колонки; «USD», «US$», «$» — доллары; иное —
+     * строка не годится: amazon.com продаёт в долларах, а переводить валюты kill-test не берётся [Р-138]. Валюта называется в отчёте
+     */
+    const currencyRaw = (cell(row, 'currency') ?? '').trim();
+    if (currencyRaw !== '' && !/^(USD|US\$|\$|US DOLLARS?)$/i.test(currencyRaw)) {
+      rejected.push({ line, sku, problem: 'CURRENCY_NOT_USD', currency: currencyRaw.slice(0, 12) });
+      continue;
+    }
     const priceRaw = cell(row, 'price') ?? '';
     if (priceRaw === '') { rejected.push({ line, sku, problem: 'PRICE_MISSING' }); continue; }
     if (currencyInCell(priceRaw) === 'EUR') { rejected.push({ line, sku, problem: 'PRICE_NOT_USD' }); continue; }

@@ -1,4 +1,5 @@
 import { decisionTrace, describe, messagesFor, shadowView, type DecisionTrace, type Messages, type StandWorld } from '@repracer/console-model';
+import { storefrontPriceForMarginBp } from '@repracer/pricing-model';
 import { COLUMN_ALIASES, type Catalog, type CatalogField, type RowNote, type RowProblem } from './catalog.ts';
 import type { KilltestOptions, KilltestProduct, KilltestWorld } from './world.ts';
 
@@ -18,12 +19,13 @@ const STOREFRONT = 'amazon.com';
 const TOP = 15;
 
 const FIELD_NAMES: Readonly<Record<CatalogField, string>> = {
-  sku: 'SKU', title: 'product name', asin: 'ASIN', price: 'current price', quantity: 'stock', cost: 'unit cost', sales30d: 'units sold',
+  sku: 'SKU', title: 'product name', asin: 'ASIN', price: 'current price', quantity: 'stock', cost: 'unit cost', sales30d: 'units sold', currency: 'currency',
 };
 const PROBLEM_TEXT: Readonly<Record<RowProblem, string>> = {
   NO_SKU: 'no SKU', SKU_TOO_LONG: 'SKU longer than 40 characters (we accept at most 40)', DUPLICATE_SKU: 'the same SKU appears again (we kept the first row)',
   PRICE_MISSING: 'no price', PRICE_NOT_A_NUMBER: 'the price is not a number', PRICE_AMBIGUOUS: 'the price could be read two ways (for example 10.505) — we do not guess',
   PRICE_NOT_POSITIVE: 'the price is zero or negative', PRICE_NOT_USD: 'the price is in another currency (amazon.com sells in US dollars)',
+  CURRENCY_NOT_USD: 'the currency column is not US dollars (amazon.com sells in US dollars; we do not convert)',
 };
 const NOTE_TEXT: Readonly<Record<RowNote, string>> = {
   COST_UNREADABLE: 'unit cost could not be read', COST_NOT_USD: 'unit cost is in another currency (we do not convert)',
@@ -33,10 +35,29 @@ const NOTE_TEXT: Readonly<Record<RowNote, string>> = {
 interface DecisionRow {
   write_scope_id: string; price_decision_id: string; outcome: string; final_amount_minor: number | null; effective_floor_minor: number | null;
   effective_ceiling_minor: number | null; code: string | null;
+  /** Причина отказа «граница не вычисляется» — какая именно (пол маржи выше max_price и т. п.) */
+  cause: string | null;
+  /** Главная причина намерения решения и граница подъёма [Р-207]: подъём до пола маржи — RAISED_TO_FLOOR + margin_floor */
+  intent_reason: string | null; intent_bound: string | null;
 }
 
 /** Чем был пол решения: допущенный минимум (наш) или пол маржи из себестоимости клиента */
 type FloorKind = 'ASSUMED_MIN' | 'MARGIN';
+
+/**
+ * Р-207 (шаг 72): товар, чья нынешняя цена ниже пола маржи по СВОЕЙ себестоимости клиента. Пол — тем же расчётом, что у движка;
+ * прибыль на единицу при нынешней цене — цена минус допущенная комиссия минус себестоимость (FBA, доставка и прочее не входят)
+ */
+export interface BelowFloorRow {
+  label: string; sku: string; sales: number | null; priceMinor: number; costMinor: number; profitMinor: number; floorMinor: number;
+  /**
+   * RAISED — одобренный подъём до пола маржи (главная причина RAISED_TO_FLOOR, граница — пол маржи); ABOVE — цена поднята выше пола
+   * вслед за конкурентом; NOT_RAISED — подъёма нет, причина словами; NO_DECISION — решений нет; NOT_IN_RUN — товар не вошёл в прогон
+   */
+  status: 'RAISED' | 'ABOVE' | 'NOT_RAISED' | 'NO_DECISION' | 'NOT_IN_RUN';
+  engineMinor: number | null;
+  refused: string | null;
+}
 
 interface TopDecision {
   label: string; sku: string; sales: number | null; currentMinor: number; decidedMinor: number | null; floorMinor: number | null; ceilingMinor: number | null;
@@ -57,15 +78,17 @@ export interface ReportData {
     decisions: number; assumedCostDecisions: number; changes: number; floorHeld: number; floorHeldAssumedMin: number; floorHeldMargin: number;
     /** Цена стратегии оказалась ниже пола маржи — итоговая проверка отказала, цена осталась прежней (Р-44: отказ, не округление) */
     marginRefused: number; ceilingHeld: number;
+    /** Товары ниже пола маржи, поднятые до пола (одно правило для отчёта и итога команды) */
+    raisedToFloor: number;
     heldWrites: number; competitorUpdates: number;
     /** Отправлено в канал — записи базы со временем отправки плюс вызовы записи модели порта; больше нуля — отчёт не пишется (main.ts) */
     sentToAmazon: number; dbDispatched: number; portWrites: number };
   savings: string | null;
-  belowFloorNow: string[];
+  belowFloor: BelowFloorRow[];
   top: TopDecision[];
   notDone: Array<{ title: string; text: string }>;
   noCostExamples: string[];
-  rejected: Array<{ text: string; lines: number[] }>;
+  rejected: Array<{ text: string; lines: number[]; values: string[] }>;
   notes: Array<{ text: string; count: number }>;
   columns: { recognized: Array<{ header: string; meaning: string }>; ignored: string[]; duplicates: Array<{ meaning: string; used: string; skipped: string[] }> };
   /** База прогона оставлена для разбора (--keep) — отчёт не обещает, что она удалена */
@@ -119,9 +142,12 @@ export async function collectReport(catalog: Catalog, world: KilltestWorld, opti
   const s = shadowView(await worldFor([]), page, { offset: 0, limit: 1 } as never, m, 7).summary;
   const byScope = new Map<string, KilltestProduct>(world.products.map((p) => [world.dbScopeId(p), p]));
   const decisions = await world.db.rows<DecisionRow>(
-    `SELECT write_scope_id, price_decision_id, outcome, final_amount_minor, effective_floor_minor, effective_ceiling_minor,
-            coalesce(rejection_reason, no_change_reason) AS code
-       FROM channel_data.price_decision WHERE tenant_id = $1 ORDER BY decided_at`, [tenantId]);
+    `SELECT d.write_scope_id, d.price_decision_id, d.outcome, d.final_amount_minor, d.effective_floor_minor, d.effective_ceiling_minor,
+            coalesce(d.rejection_reason, d.no_change_reason) AS code, d.reason_params ->> 'cause' AS cause,
+            pi.rationale -> 'reason' ->> 'code' AS intent_reason, pi.rationale -> 'reason' -> 'params' ->> 'bound' AS intent_bound
+       FROM channel_data.price_decision d
+       LEFT JOIN channel_data.price_intent pi ON pi.tenant_id = d.tenant_id AND pi.price_intent_id = d.price_intent_id AND pi.created_at = d.intent_created_at
+      WHERE d.tenant_id = $1 ORDER BY d.decided_at`, [tenantId]);
   const perProduct = new Map<string, DecisionRow[]>();
   for (const d of decisions) {
     const list = perProduct.get(d.write_scope_id);
@@ -136,13 +162,38 @@ export async function collectReport(catalog: Catalog, world: KilltestWorld, opti
 
   /**
    * Нынешняя цена ниже пола маржи — только по СВОЕЙ себестоимости клиента: с допущенной себестоимостью вывод был бы нашим допущением
-   * (ревью, находка 5). Пол маржи — из решения движка: себестоимость + допущенная комиссия + маржа
+   * (ревью шага 71, находка 5). Пол маржи — той же функцией, что у движка и Gate: себестоимость + допущенная комиссия + маржа, цены
+   * без налога с продаж. Р-207 (шаг 72): движок поднимает такую цену до пола обычным путём решения — цена движка берётся из базы
    */
-  const belowFloorNow = world.products.filter((p) => {
-    if (p.costSource !== 'FILE') return false;
-    const floor = (perProduct.get(world.dbScopeId(p)) ?? []).find((d) => d.effective_floor_minor !== null)?.effective_floor_minor ?? null;
-    return floor !== null && floor > p.minMinor && p.row.priceMinor < floor;
-  });
+  /**
+   * Ревью шага 72, находка 3: по ВСЕМ строкам файла со своей себестоимостью, а не только по товарам прогона (предел maxProducts) —
+   * для арифметики пола движок не нужен; товар вне прогона назван «не в этом прогоне». Находка 4: «поднят» — только одобренное
+   * решение с главной причиной RAISED_TO_FLOOR у пола маржи; цена выше пола вслед за конкурентом — отдельный случай
+   */
+  const belowFloor: BelowFloorRow[] = [];
+  const runBySku = new Map(world.products.map((p) => [p.row.sku, p]));
+  for (const row of catalog.rows) {
+    if (row.costMinor === null) continue;
+    const priced = storefrontPriceForMarginBp({ currency: 'USD', costProfileId: 'report', unitCostMinor: row.costMinor, fixedFeeMinor: 0,
+      feeRateBp: Math.round(options.feePct * 100), tax: { regime: 'SALES_TAX_EXCLUDED' } }, Math.round(options.marginPct * 100));
+    if (!priced.ok || row.priceMinor >= priced.priceMinor) continue;
+    const p = runBySku.get(row.sku) ?? null;
+    const ds = p ? perProduct.get(world.dbScopeId(p)) ?? [] : [];
+    const raise = ds.find((d) => d.outcome === 'APPROVED' && d.intent_reason === 'RAISED_TO_FLOOR' && d.intent_bound === 'margin_floor') ?? null;
+    const above = ds.find((d) => d.outcome === 'APPROVED' && d.final_amount_minor !== null && d.final_amount_minor >= priced.priceMinor) ?? null;
+    const last = ds[ds.length - 1] ?? null;
+    // Находка 1: пол маржи выше допущенного max_price — причина из фактов, а не «граница не вычисляется»
+    const refused = p === null || raise || above || last === null ? null
+      : priced.priceMinor > p.maxMinor ? `your margin floor is above the maximum price we assumed (${options.maxPct}% above your price)`
+        : last.code ? clientSafe(describe({ code: last.code, params: {} } as never, m).title).toLowerCase() : 'no raise in this run';
+    belowFloor.push({
+      label: row.title ?? row.sku, sku: row.sku, sales: row.sales30d, priceMinor: row.priceMinor, costMinor: row.costMinor,
+      profitMinor: row.priceMinor - Math.round((row.priceMinor * options.feePct) / 100) - row.costMinor, floorMinor: priced.priceMinor,
+      status: p === null ? 'NOT_IN_RUN' : raise ? 'RAISED' : above ? 'ABOVE' : last === null ? 'NO_DECISION' : 'NOT_RAISED',
+      engineMinor: (raise ?? above)?.final_amount_minor ?? null, refused,
+    });
+  }
+  belowFloor.sort((a, b) => a.profitMinor - b.profitMinor || a.sku.localeCompare(b.sku));
 
   /**
    * Топ-15: самые продаваемые товары (без продаж — по порядку файла). Решения разные по очереди — пол остановил цену, итоговая
@@ -150,6 +201,7 @@ export async function collectReport(catalog: Catalog, world: KilltestWorld, opti
    * удержал» пятнадцать раз подряд не показывает, что движок делает ещё. Нет решения нужного вида — следующее по очереди, затем
    * последнее решение
    */
+  const unsetLimits = new Set([(m.ui.gateChecks as Record<string, string>).STEP, (m.ui.gateChecks as Record<string, string>).RATE]);
   const ranked = [...world.products].filter((p) => (perProduct.get(world.dbScopeId(p)) ?? []).length > 0)
     .sort((a, b) => (b.row.sales30d ?? -1) - (a.row.sales30d ?? -1) || a.row.line - b.row.line).slice(0, TOP);
   const kinds: Array<(d: DecisionRow, p: KilltestProduct) => boolean> = [
@@ -171,7 +223,8 @@ export async function collectReport(catalog: Catalog, world: KilltestWorld, opti
       ...(step('STRATEGY')?.items ?? []).filter((i) => i.reason).map((i) => i.reason!.text),
       ...(step('GATE') ? [step('GATE')!.summary] : []),
     ].map(clientSafe);
-    const checks = (step('GATE')?.items ?? []).filter((i) => i.outcome === 'PASS').map((i) => clientSafe(i.label));
+    // Ревью шага 72, находка 2: пределов шага и частоты в прогоне нет — их «пройдено» было бы обещанием проверки, которой не было
+    const checks = (step('GATE')?.items ?? []).filter((i) => i.outcome === 'PASS' && !unsetLimits.has(i.label)).map((i) => clientSafe(i.label));
     top.push({
       label: p.row.title ?? p.row.sku, sku: p.row.sku, sales: p.row.sales30d,
       currentMinor: p.row.priceMinor, decidedMinor: chosen.final_amount_minor, floorMinor: chosen.effective_floor_minor, ceilingMinor: chosen.effective_ceiling_minor,
@@ -196,7 +249,7 @@ export async function collectReport(catalog: Catalog, world: KilltestWorld, opti
     text: `The engine decided ${s.decisions} times and ${s.heldPriceWrites} price changes were held by shadow mode; ${sentToAmazon} were sent.${sentToAmazon === 0 ? ' Your listings are exactly as they were.' : ''}` });
   if (s.decisions > 0) {
     notDone.push({ title: 'The price never went below the floor',
-      text: `In this simulation the competitor dropped below the floor. Instead of following it, the price stopped on the floor ${floorDecisions.length} times`
+      text: `In this simulation the competitor dropped below the floor. The price did not follow it there: ${floorDecisions.length} times it landed on the floor`
         + (marginRefused > 0 ? `, and ${marginRefused} times a price below your margin floor was refused, so the price stayed as it was. ` : '. ')
         + 'The floor is the higher of the minimum price (assumed in this run) and your margin floor (unit cost + assumed Amazon referral fee + minimum margin). '
         + 'It does not include FBA fees, per-item minimum fees, closing fees or shipping: if they apply to you, your real break-even is higher.'
@@ -215,6 +268,12 @@ export async function collectReport(catalog: Catalog, world: KilltestWorld, opti
       continue;
     }
     const reason = describe({ code, params: {} } as never, m);
+    // Находка 1: пол маржи выше допущенного max_price — причина словами, не «граница не вычисляется»
+    const aboveMax = decisions.filter((d) => d.code === code && d.cause === 'MARGIN_FLOOR_ABOVE_MAX_PRICE').length;
+    if (code === 'BOUND_UNRESOLVABLE' && aboveMax === n) {
+      notDone.push({ title: 'We did not go above the maximum price', text: `${n} ${n === 1 ? 'decision was' : 'decisions were'} refused because your margin floor is above the maximum price we assumed (${options.maxPct}% above your price): the engine never prices above the maximum. In a pilot you set your own maximum price.` });
+      continue;
+    }
     notDone.push({ title: clientSafe(reason.title), text: `${n} ${n === 1 ? 'decision' : 'decisions'} ${outcome === 'NO_CHANGE' ? 'kept the price as it was' : outcome === 'REJECTED' ? 'were refused by the final price check' : 'held the price'}: ${clientSafe(reason.title).toLowerCase()}.` });
   }
   const refused = await world.db.rows<{ code: string; n: number }>(
@@ -228,7 +287,7 @@ export async function collectReport(catalog: Catalog, world: KilltestWorld, opti
   }
   // Ревью, находка 3: про бюджеты — только то, что известно; про скорость записи в бою прогон ничего не доказал, и пункта нет
   notDone.push({ title: 'No edit budget was spent',
-    text: 'We know of no daily limit on price edits per listing on amazon.com (eBay, for example, allows 250 edits a day), so none applies in this run. The engine\'s own limits on the size of a price step and on how often a price changes apply to every decision — they are among the safety checks of each decision below.' });
+    text: 'We know of no daily limit on price edits per listing on amazon.com (eBay, for example, allows 250 edits a day), so none applies in this run. No limit on the size of a price step or on how often a price changes was set in this run either; in a pilot you can set them, and every decision is checked against them.' });
 
   const noCost = world.products.filter((p) => p.costSource === 'NONE');
   const rejectedMap = new Map<RowProblem, number[]>();
@@ -250,13 +309,15 @@ export async function collectReport(catalog: Catalog, world: KilltestWorld, opti
       floorHeld: floorDecisions.length,
       floorHeldAssumedMin: floorDecisions.filter((d) => { const p = productOf(d); return p !== undefined && floorKindOf(d, p) === 'ASSUMED_MIN'; }).length,
       floorHeldMargin: floorDecisions.filter((d) => { const p = productOf(d); return p !== undefined && floorKindOf(d, p) === 'MARGIN'; }).length, marginRefused,
+      raisedToFloor: belowFloor.filter((b) => b.status === 'RAISED').length,
       ceilingHeld: s.ceilingHeld, heldWrites: s.heldPriceWrites, competitorUpdates: world.snapshots, sentToAmazon, dbDispatched, portWrites,
     },
     savings,
-    belowFloorNow: belowFloorNow.map((p) => p.row.title ? `${p.row.title} (${p.row.sku})` : p.row.sku),
+    belowFloor,
     top, notDone,
     noCostExamples: noCost.slice(0, 12).map((p) => p.row.title ? `${p.row.title} (${p.row.sku})` : p.row.sku),
-    rejected: [...rejectedMap.entries()].map(([problem, lines]) => ({ text: PROBLEM_TEXT[problem], lines })),
+    rejected: [...rejectedMap.entries()].map(([problem, lines]) => ({ text: PROBLEM_TEXT[problem], lines,
+      values: [...new Set(catalog.rejected.filter((r) => r.problem === problem && r.currency !== undefined).map((r) => r.currency!))] })),
     notes: [...noteMap.entries()].map(([note, count]) => ({ text: NOTE_TEXT[note], count })),
     columns: {
       recognized: catalog.recognized.map((c) => ({ header: c.header, meaning: FIELD_NAMES[c.field] })),
@@ -286,7 +347,8 @@ export function renderReport(d: ReportData, options: { client?: (s: string) => s
   const salesPeriod = d.salesHeader !== null && /30/.test(d.salesHeader) ? 'sold in 30 days' : 'units ordered in the period of your file';
   const card = (value: string | number, label: string) => `<div class="card"><div class="value">${e(String(value))}</div><div class="label">${e(label)}</div></div>`;
   const floorTag = (t: TopDecision) => (t.refused ? '<div class="tag">refused by the final price check</div>'
-    : t.atFloor ? `<div class="tag">${t.floorKind === 'MARGIN' ? 'stopped by your margin floor' : 'stopped by the assumed minimum price'}</div>` : '');
+    : t.atFloor ? `<div class="tag">${t.decidedMinor !== null && t.decidedMinor > t.currentMinor ? (t.floorKind === 'MARGIN' ? 'raised to your margin floor' : 'raised to the assumed minimum price')
+      : t.floorKind === 'MARGIN' ? 'stopped by your margin floor' : 'stopped by the assumed minimum price'}</div>` : '');
   const top = d.top.map((t, i) => `
     <article class="decision">
       <header><span class="rank">${i + 1}</span><div><h3>${cl(t.label)}</h3><div class="muted">${cl(t.sku)}${t.sales !== null ? ` · ${t.sales} ${e(salesPeriod)}` : ''}${t.costSource === 'ASSUMED' ? ' · <strong>assumed cost</strong>' : ''} · simulated time ${e(t.when)}</div></div></header>
@@ -311,9 +373,30 @@ export function renderReport(d: ReportData, options: { client?: (s: string) => s
       <p class="muted">Products without cost${d.noCostExamples.length < c.noCost ? ` (first ${d.noCostExamples.length})` : ''}: ${d.noCostExamples.map(cl).join('; ')}</p>` : ''}
       ${c.assumedCost > 0 ? `<p>${c.assumedCost} products had no cost in the file and ran with an <strong>assumed</strong> cost of ${d.options.assumeCostPct}% of the price, because you asked for it: ${c.assumedCostDecisions} of the decisions are on these products, and their floors are estimates. Such decisions are marked “assumed cost” below.</p>` : ''}
     </section>` : '';
+  /**
+   * Р-207 (шаг 72): самая продающая находка для владельца — товары, которые он продаёт ниже своего же пола маржи. Факты — его цена и
+   * себестоимость; комиссия и маржа — допущения, названные рядом; цена движка — из базы прогона, отказ — словами
+   */
+  const notInRun = d.belowFloor.filter((b) => b.status === 'NOT_IN_RUN').length;
+  const engineCell = (b: BelowFloorRow): string => {
+    if (b.status === 'RAISED') return `<strong>${e(money(m, b.engineMinor))}</strong><div class="muted">would be raised to your margin floor · ${e(pct(b.priceMinor, b.engineMinor!))}</div>`;
+    if (b.status === 'ABOVE') return `<strong>${e(money(m, b.engineMinor))}</strong><div class="muted">would be raised above your margin floor, following the simulated competitor · ${e(pct(b.priceMinor, b.engineMinor!))}</div>`;
+    if (b.status === 'NOT_RAISED') return `not raised<div class="muted">${e(b.refused ?? '')}</div>`;
+    if (b.status === 'NOT_IN_RUN') return '<span class="muted">not in this run</span>';
+    return '<span class="muted">no decision in this run</span>';
+  };
+  const belowFloorSection = d.belowFloor.length > 0 ? `
+    <section class="highlight"><h2>Products priced below your margin floor</h2>
+      <p><strong>${d.belowFloor.length} of your products are priced below the margin floor computed from your unit cost</strong>, an assumed Amazon referral fee of ${d.options.feePct}% and a minimum margin of ${d.options.marginPct}%. The engine raises such a price to your margin floor, through the same final price check as every other price; it never goes above the maximum price. In this run the engine would have raised ${c.raisedToFloor} of them to the floor (shadow mode: nothing was sent).${notInRun > 0 ? ` ${notInRun} of them were not in this run.` : ''} No limit on the size of a price step was set in this run; in a pilot, a step limit you set can hold back a large raise.</p>
+      <table><thead><tr><th>Product</th><th>Your price</th><th>Unit cost</th><th>Profit per unit at your price*</th><th>Margin floor</th><th>Engine's price</th></tr></thead><tbody>
+      ${d.belowFloor.slice(0, 50).map((b) => `<tr><td>${cl(b.label)}<div class="muted">${cl(b.sku)}${b.sales !== null ? ` · ${b.sales} ${e(salesPeriod)}` : ''}</div></td><td>${e(money(m, b.priceMinor))}</td><td>${e(money(m, b.costMinor))}</td><td class="${b.profitMinor < 0 ? 'loss' : ''}">${e(money(m, b.profitMinor))}</td><td>${e(money(m, b.floorMinor))}</td><td>${engineCell(b)}</td></tr>`).join('')}
+      </tbody></table>
+      ${d.belowFloor.length > 50 ? `<p class="muted">The first 50 of ${d.belowFloor.length}, with the lowest profit per unit first.</p>` : ''}
+      <p class="muted">* Your price minus the assumed ${d.options.feePct}% referral fee minus your unit cost. FBA fees, per-item minimum fees, closing fees and shipping are not included: if they apply to you, the real profit per unit is lower. Prices are treated as excluding sales tax. Whether buyers buy at the raised price is not something we know.</p>
+    </section>` : '';
   const rowsSection = d.rejected.length > 0 || d.notes.length > 0 ? `
     <section><h2>Rows we could not use</h2>
-      ${d.rejected.length > 0 ? `<table><thead><tr><th>Why</th><th>Rows</th><th>Line numbers in your file</th></tr></thead><tbody>${d.rejected.map((r) => `<tr><td>${e(r.text)}</td><td>${r.lines.length}</td><td>${e(r.lines.slice(0, 20).join(', '))}${r.lines.length > 20 ? ', …' : ''}</td></tr>`).join('')}</tbody></table>` : ''}
+      ${d.rejected.length > 0 ? `<table><thead><tr><th>Why</th><th>Rows</th><th>Line numbers in your file</th></tr></thead><tbody>${d.rejected.map((r) => `<tr><td>${e(r.text)}${r.values.length > 0 ? `: ${r.values.slice(0, 5).map(cl).join(', ')}` : ''}</td><td>${r.lines.length}</td><td>${e(r.lines.slice(0, 20).join(', '))}${r.lines.length > 20 ? ', …' : ''}</td></tr>`).join('')}</tbody></table>` : ''}
       ${d.notes.length > 0 ? `<p>Rows we used with a gap:</p><ul>${d.notes.map((n) => `<li>${e(n.text)}: ${n.count}</li>`).join('')}</ul>` : ''}
     </section>` : '';
   return `<!doctype html>
@@ -333,6 +416,7 @@ section{background:#fff;border:1px solid var(--line);border-radius:8px;padding:4
 ul{margin:4px 0 0;padding-left:20px}li{margin:2px 0}.checks{columns:2;font-size:13px;color:var(--muted)}details summary{cursor:pointer;color:var(--muted);font-size:13px;margin-top:8px}
 table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;border-bottom:1px solid var(--line);padding:6px 8px;vertical-align:top}
 .notice{background:#eef5ff;border:1px solid #c9dcff;border-radius:8px;padding:10px 14px;margin-top:14px}
+section.highlight{border-color:#e3b341;background:#fffbea}td.loss{color:#b42318;font-weight:600}
 @media (max-width:600px){.checks{columns:1}.prices{gap:10px}}
 </style></head>
 <body><main>
@@ -341,7 +425,7 @@ table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;b
 <p class="lead">We ran your catalog through our repricing engine in <strong>shadow mode</strong>: each decision went through the same checks as in live mode, and ${c.sentToAmazon} changes were sent to Amazon. Each decision below comes with the reason for its price.</p>
 <div class="notice"><strong>What is real and what is simulated.</strong> Your ${fromFile.slice(0, -1).join(', ')} and ${fromFile.at(-1)} come from your file. Simulated or assumed: your competitors (we cannot see them until you connect your Amazon account), your minimum and maximum prices, the Amazon referral fee and the minimum margin — see “How this run was set up”. The numbers about the floor describe this simulation, not your market.</div>
 <div class="cards">
-${card(c.rows, 'rows in your file')}${card(c.inEngine, 'priced by the engine')}${card(c.decisions, 'decisions')}${card(c.changes, 'would change the price')}${card(c.floorHeld, 'landed on the floor (simulation)')}${card(c.sentToAmazon, 'changes sent to Amazon')}
+${card(c.rows, 'rows in your file')}${card(c.inEngine, 'priced by the engine')}${d.belowFloor.length > 0 ? card(d.belowFloor.length, 'priced below your margin floor') : ''}${card(c.decisions, 'decisions')}${card(c.changes, 'would change the price')}${card(c.floorHeld, 'landed on the floor (simulation)')}${card(c.sentToAmazon, 'changes sent to Amazon')}
 </div>
 <section><h2>Summary</h2><ul>
 <li>${c.decisions} decisions on ${c.inEngine} products; ${c.changes} of them would have changed the price.${c.assumedCostDecisions > 0 ? ` ${c.assumedCostDecisions} of the decisions are on products with an assumed cost.` : ''}</li>
@@ -349,9 +433,9 @@ ${c.decisions > 0 ? `<li>In this simulation the price landed on the floor ${c.fl
 ${c.marginRefused > 0 ? `<li>${c.marginRefused} times the engine's price would have been below your margin floor: the final price check refused it, and the price stayed as it was.</li>` : ''}
 <li>${c.heldWrites} price changes were held by shadow mode; ${c.sentToAmazon} were sent to Amazon.</li>
 </ul>
-${d.belowFloorNow.length > 0 ? `<p><strong>${d.belowFloorNow.length} of your products are priced below the margin floor computed from your unit cost</strong>, an assumed Amazon referral fee of ${d.options.feePct}% and a minimum margin of ${d.options.marginPct}%. The engine refuses every price below that floor for them, so it moves their price only when a competitor leaves room at or above the floor; it does not raise a price on its own. ${d.belowFloorNow.slice(0, 10).map(cl).join('; ')}${d.belowFloorNow.length > 10 ? '; …' : ''}</p>` : ''}
 ${c.skippedByLimit > 0 ? `<p class="muted">This run took ${c.inRun} of your products${d.salesHeader !== null ? ' with the most units sold' : ' in the order of your file'}; ${c.skippedByLimit} more were not run.</p>` : ''}
 </section>
+${belowFloorSection}
 ${d.top.length > 0 ? `<h2>${d.top.length} decisions in detail</h2>
 <p class="muted">${d.salesHeader !== null ? 'Your products with the most units sold' : 'The first products of your file (it has no sales column)'}. We show different kinds of decisions in turn: where the floor stopped a lower price, where the engine followed a competitor down, and where it raised your price after a competitor went up.</p>
 ${top}` : `<section><h2>No decisions to show</h2><p>The engine made no decisions in this run: ${c.inEngine === 0 ? 'none of your products has a unit cost, and the engine never prices without one (see below). Send the same file with a unit cost column, or ask us for a run with an assumed cost.' : 'no competitor moved during the run.'}</p></section>`}

@@ -62,14 +62,14 @@ export function rejectedView(world: StandWorld, slice: InterventionSlice, m: Mes
     // [Р-85]: берётся из горячего intent (3 дня, данные канала); intent уже удалён — цели нет, экран это показывает
     const hot = hotIntents.get(d.intentId) ?? null;
     for (const step of e?.strategy.steps ?? []) {
-      if (step.code !== 'CAPPED_AT_MIN_PRICE' && step.code !== 'CAPPED_AT_MAX_PRICE') continue;
+      if (step.code !== 'CAPPED_AT_MIN_PRICE' && step.code !== 'CAPPED_AT_MAX_PRICE' && step.code !== 'CAPPED_AT_MARGIN_FLOOR') continue;
       const hotTarget = hot?.explanation.find((x) => x.code === step.code)?.params.targetMinor;
       const target = typeof hotTarget === 'number' ? hotTarget : null;
-      const bound = Number(step.code === 'CAPPED_AT_MIN_PRICE' ? step.params.minMinor : step.params.maxMinor);
+      const bound = Number(step.code === 'CAPPED_AT_MIN_PRICE' ? step.params.minMinor : step.code === 'CAPPED_AT_MARGIN_FLOOR' ? step.params.floorMinor : step.params.maxMinor);
       rows.push({
         kind: 'STRATEGY_CAP', tone: 'progress', at: m.when(d.decidedAt), sortAt: d.decidedAt, unit, productRef: null,
         proposed: money(target), current: money(e!.strategy.currentMinor), change: target === null ? null : m.change(e!.strategy.currentMinor, target),
-        limit: step.code === 'CAPPED_AT_MIN_PRICE' ? r.limitMin(money(bound)) : r.limitMax(money(bound)),
+        limit: step.code === 'CAPPED_AT_MIN_PRICE' ? r.limitMin(money(bound)) : step.code === 'CAPPED_AT_MARGIN_FLOOR' ? r.limitFloor(money(bound)) : r.limitMax(money(bound)),
         deviation: null, intervention: 'CORRECTED', reason: describe(step, m), decisionId: d.decisionId,
       });
     }

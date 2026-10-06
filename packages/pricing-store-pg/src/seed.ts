@@ -87,6 +87,8 @@ export interface SeedWorldInput {
   fxLoaderPool?: PgPool;
   /** Р-90: роль создания тенанта (repracer_provisioning) — тенант, пользователи и членства одной функцией security.provision_tenant */
   provisioningPool: PgPool;
+  /** Регион хранения тенанта [Р-60] — должен совпасть с регионом базы; по умолчанию EU (шаг 72: kill-test клиента amazon.com — US) */
+  tenantRegion?: 'EU' | 'US';
   /**
    * Р-90, Р-96: роль административного сервиса (repracer_admin). Конфигурация тенанта — аккаунты, товары, единицы записи, границы,
    * стратегии, себестоимость, остановки — действие человека в административном сервисе; у роли пути решения прав на это нет.
@@ -404,7 +406,7 @@ export async function seedPricingWorld(_pool: PgPool, input: SeedWorldInput): Pr
     memberUsers.set(m.membershipId, otherUser);
   }
   await input.provisioningPool.query('SELECT security.provision_tenant($1, $2, $3, $4::jsonb, $5)',
-    [tenantId, `Synthetic tenant ${tag}`, 'EU', JSON.stringify(provisioned), input.demo === true]);
+    [tenantId, `Synthetic tenant ${tag}`, input.tenantRegion ?? 'EU', JSON.stringify(provisioned), input.demo === true]);
   for (const m of invited) {
     const joined = await input.joinMember!({ tenantId, ownerUserId: userId, membershipAlias: m.membershipId, role: m.role, email: m.email });
     ids.alias(m.membershipId, joined.membershipId);

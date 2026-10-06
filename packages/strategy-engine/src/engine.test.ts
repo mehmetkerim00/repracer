@@ -141,3 +141,64 @@ test('шаг 41: то же предложение, уже удержанное �
   if (moved.kind !== 'INTENT') return;
   assert.equal(moved.intent.intentClass, 'CHANGED', 'изменившееся предложение по-прежнему изменение');
 });
+
+/**
+ * Р-207 (шаг 72, OQ-250): пол стратегии — наибольшее из min_price и пола маржи. Цель ниже пола маржи — цена на полу маржи
+ * (CAPPED_AT_MARGIN_FLOOR), нынешняя цена ниже пола — подъём до пола (RAISED_TO_FLOOR, главная причина изменения). Пол маржи выше
+ * max_price стратегия не берёт: противоречие настройки называет Gate.
+ */
+test('step 72 (Р-207): a target below the margin floor goes to the margin floor; a current price below the floor is raised to it', () => {
+  const margin = { amountMinor: 1820, minMarginBp: 1000 };
+  // Buy Box 1795, подрез 5 → цель 1790, пол маржи 1820 > min 1000; нынешняя 1850 выше пола — цена опускается на пол, это не подъём
+  const capped = runStrategy(input(matchBuybox(), { bounds: { minMinor: 1000, maxMinor: 3000, marginFloor: margin } }));
+  assert.ok(capped.kind === 'INTENT' && capped.intent.intentClass === 'CHANGED' && capped.intent.proposedMinor === 1820, JSON.stringify(capped));
+  assert.deepEqual(capped.intent.explanation.map((x) => x.code), ['BUYBOX_UNDERCUT', 'CAPPED_AT_MARGIN_FLOOR']);
+  assert.deepEqual(capped.intent.reason, { code: 'CAPPED_AT_MARGIN_FLOOR', params: { targetMinor: 1790, floorMinor: 1820, minMinor: 1000, minMarginBp: 1000, currency: 'EUR' } });
+  // Нынешняя 1700 ниже пола маржи: цена поднимается до пола, и главная причина — подъём
+  const raised = runStrategy(input(matchBuybox(), { bounds: { minMinor: 1000, maxMinor: 3000, marginFloor: margin }, currentPriceMinor: 1700 }));
+  assert.ok(raised.kind === 'INTENT' && raised.intent.intentClass === 'CHANGED' && raised.intent.proposedMinor === 1820);
+  assert.deepEqual(raised.intent.explanation.map((x) => x.code), ['BUYBOX_UNDERCUT', 'CAPPED_AT_MARGIN_FLOOR', 'RAISED_TO_FLOOR']);
+  assert.deepEqual(raised.intent.reason, { code: 'RAISED_TO_FLOOR', params: { currentMinor: 1700, floorMinor: 1820, bound: 'margin_floor', minMarginBp: 1000, currency: 'EUR' } });
+  // Отрицательный контроль: без пола маржи — прежнее поведение, цель 1790 выше min и проходит как есть
+  const without = runStrategy(input(matchBuybox(), { bounds: { minMinor: 1000, maxMinor: 3000 }, currentPriceMinor: 1700 }));
+  assert.ok(without.kind === 'INTENT' && without.intent.proposedMinor === 1790 && without.intent.reason.code === 'BUYBOX_UNDERCUT');
+});
+
+test('step 72 (Р-207): holding strategies and no-op paths do not keep a price below the floor; the deadband does not either', () => {
+  const margin = { amountMinor: 1820, minMarginBp: 1000 };
+  const bounds = { minMinor: 1000, maxMinor: 3000, marginFloor: margin };
+  // HOLD: цель ниже пола маржи и нынешняя выше пола — цена удерживается, нижняя граница удержания — пол маржи
+  const held = runStrategy(input(matchBuybox({ atBound: 'HOLD' }), { bounds }));
+  assert.ok(held.kind === 'INTENT' && held.intent.intentClass === 'NO_OP' && held.intent.reason.code === 'TARGET_OUTSIDE_BOUNDS_HOLD');
+  assert.equal(held.intent.reason.params.minMinor, 1820);
+  // HOLD при нынешней ниже пола — подъём до пола
+  const heldRaised = runStrategy(input(matchBuybox({ atBound: 'HOLD' }), { bounds, currentPriceMinor: 1700 }));
+  assert.ok(heldRaised.kind === 'INTENT' && heldRaised.intent.intentClass === 'CHANGED' && heldRaised.intent.proposedMinor === 1820);
+  assert.deepEqual(heldRaised.intent.explanation.map((x) => x.code), ['BUYBOX_UNDERCUT', 'TARGET_OUTSIDE_BOUNDS_HOLD', 'RAISED_TO_FLOOR']);
+  // Buy Box уже наш, но нынешняя ниже пола маржи — подъём, а не «уже выигрываем»
+  const winning = runStrategy(input(matchBuybox(), { bounds, currentPriceMinor: 1700,
+    snapshot: markAcceptedBySanity(snapshot({ buybox: { price: eur(1700), isSelf: true } }), 'test') }));
+  assert.ok(winning.kind === 'INTENT' && winning.intent.intentClass === 'CHANGED' && winning.intent.proposedMinor === 1820);
+  assert.deepEqual(winning.intent.explanation.map((x) => x.code), ['ALREADY_WINNING_BUYBOX', 'RAISED_TO_FLOOR']);
+  // Конкурентов нет, нынешняя ниже min_price (пол маржи не задан) — подъём до min_price
+  const lonely = runStrategy(input({ type: 'BEAT_LOWEST', undercutMinor: 1, scope: 'VISIBLE_TOP_N', compareLanded: false, atBound: 'CAP' }, {
+    bounds: { minMinor: 1500, maxMinor: 3000 }, currentPriceMinor: 1400,
+    snapshot: markAcceptedBySanity(snapshot({ offers: [{ rank: 1, isSelf: true, price: eur(1400), shipping: eur(0), totalPrice: eur(1400) }] }), 'test') }));
+  assert.ok(lonely.kind === 'INTENT' && lonely.intent.intentClass === 'CHANGED' && lonely.intent.proposedMinor === 1500, JSON.stringify(lonely));
+  assert.deepEqual(lonely.intent.reason.params, { currentMinor: 1400, floorMinor: 1500, bound: 'min', currency: 'EUR' });
+  // Зона нечувствительности 50 не держит нынешнюю 1810 ниже пола 1820
+  const deadband = runStrategy({ ...input(matchBuybox(), { bounds, currentPriceMinor: 1810 }), strategy: { strategyId: 'st-1', version: 1, params: matchBuybox(), deadbandMinor: 50 } });
+  assert.ok(deadband.kind === 'INTENT' && deadband.intent.intentClass === 'CHANGED' && deadband.intent.proposedMinor === 1820);
+  // Тень: подъём, уже удержанный тенью, не повторяется (SHADOW_ALREADY_PROPOSED), а не предлагается на каждом опросе
+  const shadow = runStrategy(input(matchBuybox(), { bounds, currentPriceMinor: 1700, shadowLastProposedMinor: 1820 }));
+  assert.ok(shadow.kind === 'INTENT' && shadow.intent.intentClass === 'NO_OP' && shadow.intent.reason.code === 'SHADOW_ALREADY_PROPOSED');
+});
+
+test('step 72 (Р-207): a margin floor above max price is left to the Gate; fixed and margin strategies are not lifted by the strategy', () => {
+  // Пол маржи 3200 выше max 3000 — стратегия встаёт на min, отказ MARGIN_FLOOR_ABOVE_MAX_PRICE даст Gate
+  const above = runStrategy(input(matchBuybox(), { bounds: { minMinor: 1000, maxMinor: 3000, marginFloor: { amountMinor: 3200, minMarginBp: 3000 } }, currentPriceMinor: 1700 }));
+  assert.ok(above.kind === 'INTENT' && above.intent.proposedMinor === 1790 && above.intent.reason.code === 'BUYBOX_UNDERCUT');
+  // Фиксированная цена ниже пола — конфликт настройки продавца, он идёт в Gate как прежде [Р-44]
+  const fixed = runStrategy(input({ type: 'FIXED', priceMinor: 1500 }, { bounds: { minMinor: 1000, maxMinor: 3000, marginFloor: { amountMinor: 1820, minMarginBp: 1000 } }, currentPriceMinor: 1700 }));
+  assert.ok(fixed.kind === 'INTENT' && fixed.intent.proposedMinor === 1500 && fixed.intent.reason.code === 'FIXED_PRICE');
+});

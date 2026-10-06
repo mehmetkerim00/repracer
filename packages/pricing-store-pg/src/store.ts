@@ -1,7 +1,7 @@
 import type { ExplanationRuleset as DictionaryRuleset } from '@repracer/pricing-model';
 import { COMPETITOR_DERIVED_RULES } from '@repracer/pricing-model';
 import {
-  floorCauseFromDatabase, convertMinor, type FxQuote } from '@repracer/pricing-model';
+  floorCauseFromDatabase, convertMinor, storefrontPriceForMarginBp, type FxQuote } from '@repracer/pricing-model';
 import { DEFAULT_RETRY_POLICY, retryPolicyFor } from '@repracer/write-dispatcher';
 import {
   type BulkJobArtifact, type BulkJobCreated, type BulkJobInput, type BulkJobOutcome, type BulkJobProgress, type BulkJobRow,
@@ -528,9 +528,31 @@ function toScopeContext(j: Row, now: Instant): ScopeEvaluationContext {
   };
   const bounds = (j.bounds ?? []) as Row[];
   const c = j.cost as Row | null;
-  const fee = (c?.fee ?? null) as { feeRateBp?: unknown; fixedFeeMinor?: unknown } | null;
   // Р-61: себестоимость в валюте возникновения переводится в валюту единицы записи по курсу ЕЦБ на момент решения (вверх)
   const converted = c ? convertMinor(Number(c.unitCost), c.currency, r.currency, toFxQuotes(j.fx), now, 'UP') : null;
+  const active = ((j.guardrails ?? []) as Row[]).filter((g) => g.is_active);
+  const pick = (col: string, f: (...v: number[]) => number) => {
+    const values = active.map((g) => g[col]).filter((v): v is number => typeof v === 'number');
+    return values.length ? f(...values) : null;
+  };
+  const minMarginBp = pick('min_margin_bp', Math.max);
+  /**
+   * Ревью шага 72, находка 1 (Р-141, Р-207): оценка комиссии для пола — та, что даёт НАИБОЛЬШИЙ пол маржи, как в базе
+   * (`tenant_data.effective_price_floor`, 0106), а не наибольшая ставка: «0 % + 5 €» дороже «10 %» на цене ниже 50 €. До Р-207
+   * расхождение срабатывало редко; теперь стратегия ставит цену РОВНО на пол, и пол ниже базового давал бы отказ базы на каждой оценке.
+   * Пол, не вычисляемый хоть по одной оценке, — та оценка и берётся: Gate откажет, как база (fail-closed). Без минимальной маржи —
+   * прежний порядок по ставке
+   */
+  const estimates = ((c?.feeEstimates ?? []) as Row[])
+    .filter((e) => Number.isSafeInteger(e.feeRateBp) && Number.isSafeInteger(e.fixedFeeMinor)) as Array<{ feeRateBp: number; fixedFeeMinor: number }>;
+  const floorBy = (e: { feeRateBp: number; fixedFeeMinor: number }) => (converted?.ok && minMarginBp !== null
+    ? storefrontPriceForMarginBp({ currency: r.currency, costProfileId: 'floor', unitCostMinor: converted.amountMinor, fixedFeeMinor: e.fixedFeeMinor, feeRateBp: e.feeRateBp,
+      tax: r.tax_regime === 'SALES_TAX_EXCLUDED' ? { regime: 'SALES_TAX_EXCLUDED' } : { regime: 'VAT_INCLUDED', vatRateBp: j.vatRateBp ?? null } }, minMarginBp)
+    : null);
+  const byFloor = estimates.length > 0 && converted?.ok && minMarginBp !== null
+    ? estimates.map((e) => ({ e, floor: floorBy(e)! })).reduce((best, x) => (!best.floor.ok ? best : !x.floor.ok ? x : x.floor.priceMinor > best.floor.priceMinor ? x : best)).e
+    : null;
+  const fee = (byFloor ?? c?.fee ?? null) as { feeRateBp?: unknown; fixedFeeMinor?: unknown } | null;
   // Без действующей оценки комиссии маржа не вычисляется: себестоимость для маржи не отдаётся (fail-closed)
   const cost: CostInputs | null = c && converted?.ok && fee && Number.isSafeInteger(fee.feeRateBp) && Number.isSafeInteger(fee.fixedFeeMinor)
     ? {
@@ -540,14 +562,9 @@ function toScopeContext(j: Row, now: Instant): ScopeEvaluationContext {
         fx: converted.fx,
       }
     : null;
-  const active = ((j.guardrails ?? []) as Row[]).filter((g) => g.is_active);
-  const pick = (col: string, f: (...v: number[]) => number) => {
-    const values = active.map((g) => g[col]).filter((v): v is number => typeof v === 'number');
-    return values.length ? f(...values) : null;
-  };
   const guardrails: GuardrailSet = {
     guardrailIds: active.map((g) => g.guardrail_id),
-    minMarginBp: pick('min_margin_bp', Math.max),
+    minMarginBp,
     maxStepChangeBp: pick('max_step_change_bp', Math.min),
     maxChangesPerHour: pick('max_changes_per_hour', Math.min),
     // CLAMP к границе запрещён [Р-44]: нарушение ограничения — удержание, если ни один уровень не требует отказа
@@ -2415,10 +2432,12 @@ export class PgPricingStore implements PricingStore {
                     SELECT ${INTENT_COLUMNS},
                            (rationale -> 'reason' ->> 'code' = 'TARGET_OUTSIDE_BOUNDS_HOLD'
                             OR rationale -> 'explanation' @> '[{"code": "CAPPED_AT_MIN_PRICE"}]'::jsonb
-                            OR rationale -> 'explanation' @> '[{"code": "CAPPED_AT_MAX_PRICE"}]'::jsonb) AS capped,
+                            OR rationale -> 'explanation' @> '[{"code": "CAPPED_AT_MAX_PRICE"}]'::jsonb
+                            OR rationale -> 'explanation' @> '[{"code": "CAPPED_AT_MARGIN_FLOOR"}]'::jsonb) AS capped,
                            coalesce(lag(rationale -> 'reason' ->> 'code' = 'TARGET_OUTSIDE_BOUNDS_HOLD'
                             OR rationale -> 'explanation' @> '[{"code": "CAPPED_AT_MIN_PRICE"}]'::jsonb
-                            OR rationale -> 'explanation' @> '[{"code": "CAPPED_AT_MAX_PRICE"}]'::jsonb)
+                            OR rationale -> 'explanation' @> '[{"code": "CAPPED_AT_MAX_PRICE"}]'::jsonb
+                            OR rationale -> 'explanation' @> '[{"code": "CAPPED_AT_MARGIN_FLOOR"}]'::jsonb)
                               OVER (PARTITION BY write_scope_id ORDER BY created_at, price_intent_id), false) AS prev_capped
                       FROM channel_data.price_intent
                      WHERE tenant_id = $1 AND created_at > $2::timestamptz AND created_at <= $3::timestamptz) t

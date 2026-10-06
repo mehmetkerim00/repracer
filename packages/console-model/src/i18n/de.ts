@@ -19,7 +19,7 @@ const titles: Record<AnyReasonCode, string> = {
   CROSS_CHANNEL_FX_UNAVAILABLE: 'Kein Wechselkurs für Kanalvergleich',
   FIXED_PRICE: 'Festpreis', MARGIN_TARGET: 'Preis für Zielmarge', BUYBOX_MATCH: 'Buy Box angleichen', BUYBOX_UNDERCUT: 'Buy Box unterbieten',
   LOWEST_MATCH: 'Niedrigsten Preis angleichen', LOWEST_UNDERCUT: 'Niedrigsten Preis unterbieten', CAPPED_AT_MIN_PRICE: 'Ziel auf min_price begrenzt',
-  CAPPED_AT_MAX_PRICE: 'Ziel auf max_price begrenzt', ALREADY_AT_TARGET: 'Ziel bereits erreicht', WITHIN_DEADBAND: 'Änderung unter Schwelle', SHADOW_ALREADY_PROPOSED: 'Im Schattenmodus bereits vorgeschlagen',
+  CAPPED_AT_MAX_PRICE: 'Ziel auf max_price begrenzt', CAPPED_AT_MARGIN_FLOOR: 'Ziel auf die Mindestmargen-Untergrenze begrenzt', RAISED_TO_FLOOR: 'Auf die Untergrenze angehoben', ALREADY_AT_TARGET: 'Ziel bereits erreicht', WITHIN_DEADBAND: 'Änderung unter Schwelle', SHADOW_ALREADY_PROPOSED: 'Im Schattenmodus bereits vorgeschlagen',
   ALREADY_WINNING_BUYBOX: 'Buy Box bereits gewonnen', NO_COMPETITOR_OFFERS: 'Keine Wettbewerber', TARGET_OUTSIDE_BOUNDS_HOLD: 'Ziel außerhalb der Grenzen — beibehalten',
   COMPETITOR_REQUIREMENT_NOT_MET: 'Kanaldaten reichen nicht', COST_INPUTS_MISSING: 'Kostendaten fehlen', MARGIN_UNATTAINABLE: 'Marge nicht erreichbar',
   BOUNDS_INVALID: 'Ungültige Grenzen', ENGINE_CURRENCY_MISMATCH: 'Währungen passen nicht', INVALID_STRATEGY_PARAMS: 'Ungültige Strategieeinstellung',
@@ -91,6 +91,10 @@ const reasons: Record<AnyReasonCode, Template> = {
   LOWEST_UNDERCUT: (f) => `Niedrigsten Preis ${f.money('lowestMinor')} um ${f.money('undercutMinor')} unterbieten: ${f.money('targetMinor')}.`,
   CAPPED_AT_MIN_PRICE: (f) => `Ziel ${f.money('targetMinor')} liegt unter min_price — begrenzt auf ${f.money('minMinor')}.`,
   CAPPED_AT_MAX_PRICE: (f) => `Ziel ${f.money('targetMinor')} liegt über max_price — begrenzt auf ${f.money('maxMinor')}.`,
+  CAPPED_AT_MARGIN_FLOOR: (f) => `Ziel ${f.money('targetMinor')} liegt unter Ihrer Mindestmargen-Untergrenze ${f.money('floorMinor')} (Marge ${f.bp('minMarginBp')}) — auf die Untergrenze gesetzt.`,
+  RAISED_TO_FLOOR: (f) => (f.get('bound') === 'margin_floor'
+    ? `Ihr Preis ${f.money('currentMinor')} lag unter Ihrer Mindestmargen-Untergrenze — auf die Untergrenze ${f.money('floorMinor')} angehoben${opt(f, 'minMarginBp', () => ` (Marge ${f.bp('minMarginBp')})`)}.`
+    : `Ihr Preis ${f.money('currentMinor')} lag unter min_price — auf ${f.money('floorMinor')} angehoben.`),
   ALREADY_AT_TARGET: (f) => `Der Preis entspricht bereits dem Ziel ${f.money('targetMinor')}.`,
   WITHIN_DEADBAND: (f) => `Die Differenz ${f.money('deltaMinor')} liegt unter der Schwelle ${f.money('deadbandMinor')} — der Preis bleibt.`,
   // Р-171 (шаг 41): то же предложение уже удержано тенью — повторять его незачем
@@ -219,6 +223,7 @@ const reasonsWithoutChannel: Partial<Record<AnyReasonCode | SanityNoteCode, Temp
   MARKET_SHIFT_SINGLE_SELLER: () => 'Marktereignis: ein Verkäufer hat die Preise mehrerer Produkte verschoben; die Preise arbeiten weiter.',
   CAPPED_AT_MIN_PRICE: (f) => `Das Ziel aus Wettbewerbspreisen lag unter min_price — begrenzt auf ${f.money('minMinor')}.`,
   CAPPED_AT_MAX_PRICE: (f) => `Das Ziel aus Wettbewerbspreisen lag über max_price — begrenzt auf ${f.money('maxMinor')}.`,
+  CAPPED_AT_MARGIN_FLOOR: (f) => `Das Ziel aus Wettbewerbspreisen lag unter Ihrer Mindestmargen-Untergrenze — auf die Untergrenze ${f.money('floorMinor')} gesetzt (Marge ${f.bp('minMarginBp')}).`,
   ALREADY_AT_TARGET: () => 'Der Preis entsprach bereits dem Ziel.',
   WITHIN_DEADBAND: (f) => `Die Differenz zum Ziel lag unter der Schwelle ${f.money('deadbandMinor')} — der Preis bleibt.`,
   TARGET_OUTSIDE_BOUNDS_HOLD: (f) => `Das Ziel lag außerhalb von ${f.money('minMinor')}–${f.money('maxMinor')}; die Strategie behält den Preis bei.`,

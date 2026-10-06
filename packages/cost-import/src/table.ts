@@ -323,7 +323,13 @@ export function parseXlsx(buffer: Buffer): Sheet {
       } else if (type === 'inlineStr') {
         for (const t of body.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)) value += unescapeXml(t[1]!);
       } else {
-        value = unescapeXml(/<v>([\s\S]*?)<\/v>/.exec(body)?.[1] ?? '');
+        const raw = unescapeXml(/<v>([\s\S]*?)<\/v>/.exec(body)?.[1] ?? '');
+        /**
+         * Шаг 72: число ячейки — двоичная дробь Excel (19.99 хранится как 19.989999999999998). 15 значащих цифр — точность, которую
+         * показывает сам Excel, и продавец видел именно её; иначе сумма с хвостом читалась как «два прочтения» или «не число». Только
+         * дробь и экспонента: целое записано точно, и 16-значный числовой SKU или EAN из выгрузки ERP округление испортило бы молча
+         */
+        value = type === 'n' && /^-?\d+(\.\d+|(\.\d+)?[eE][-+]?\d+)$/.test(raw) ? String(Number(Number(raw).toPrecision(15))) : raw;
       }
       while (cells.length < index) cells.push('');
       cells[index] = value;

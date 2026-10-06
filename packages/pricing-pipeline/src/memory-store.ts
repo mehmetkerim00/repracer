@@ -2133,7 +2133,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   async interventions(_tenantId: string, from: Instant, to: Instant): Promise<InterventionSlice> {
     const within = (at: string) => Date.parse(at) > Date.parse(from) && Date.parse(at) <= Date.parse(to);
     const capped = (i: ConsoleIntentRow) => i.reason.code === 'TARGET_OUTSIDE_BOUNDS_HOLD'
-      || i.explanation.some((x) => x.code === 'CAPPED_AT_MIN_PRICE' || x.code === 'CAPPED_AT_MAX_PRICE');
+      || i.explanation.some((x) => x.code === 'CAPPED_AT_MIN_PRICE' || x.code === 'CAPPED_AT_MAX_PRICE' || x.code === 'CAPPED_AT_MARGIN_FLOOR');
     /**
      * Граница эпизода — по намерениям единицы ВНУТРИ окна, в порядке времени, ровно как оконная функция базы: удержание,
      * начавшееся до окна и длящееся в нём, считается в окне одним удержанием. Прежняя редакция смотрела на все намерения,

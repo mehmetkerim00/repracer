@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { deflateRawSync } from 'node:zlib';
 import { test } from 'node:test';
 import { columnIndex, detectDelimiter, detectEncoding, parseCsv, parseXlsx, readTable, TableReadError } from '../src/index.ts';
+import { xlsx, zip } from './xlsx-fixture.ts';
 
 /** Р-134 (шаг 28): выгрузка продавца читается так, как он её видел. Данные синтетические. */
 
@@ -59,74 +59,6 @@ test('Р-134 (ревью шага 28, находки 11 и 12): книга не 
   assert.throws(() => parseXlsx(broken), (e: unknown) => e instanceof TableReadError && e.code === 'XLSX_BROKEN');
 });
 
-// --- синтетическая книга XLSX: тот же формат, что пишут Excel и выгрузки каналов ----------------------------------------------
-
-function xlsx(rows: string[][], options: { deflate?: boolean }): Buffer {
-  const shared: string[] = [];
-  const indexOf = (value: string) => {
-    const at = shared.indexOf(value);
-    if (at >= 0) return at;
-    shared.push(value);
-    return shared.length - 1;
-  };
-  const xmlRows = rows.map((row, r) => {
-    const cells = row.map((value, c) => {
-      if (value === '') return '';
-      const reference = `${String.fromCharCode(65 + c)}${r + 1}`;
-      return /^[0-9.]+$/.test(value) ? `<c r="${reference}"><v>${value}</v></c>` : `<c r="${reference}" t="s"><v>${indexOf(value)}</v></c>`;
-    }).join('');
-    return `<row r="${r + 1}">${cells}</row>`;
-  }).join('');
-  const sheet = `<?xml version="1.0"?><worksheet><sheetData>${xmlRows}</sheetData></worksheet>`;
-  const strings = `<?xml version="1.0"?><sst count="${shared.length}">${shared.map((s) => `<si><t>${s.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</t></si>`).join('')}</sst>`;
-  const workbook = '<?xml version="1.0"?><workbook><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>';
-  const rels = '<?xml version="1.0"?><Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>';
-  return zip([
-    ['xl/workbook.xml', workbook],
-    ['xl/_rels/workbook.xml.rels', rels],
-    ['xl/sharedStrings.xml', strings],
-    ['xl/worksheets/sheet1.xml', sheet],
-  ], options.deflate === true);
-}
-
-function zip(entries: Array<[string, string]>, deflate: boolean, options: { declaredSize?: number } = {}): Buffer {
-  const locals: Buffer[] = [];
-  const central: Buffer[] = [];
-  let offset = 0;
-  for (const [name, content] of entries) {
-    const raw = Buffer.from(content, 'utf8');
-    const data = deflate ? deflateRawSync(raw) : raw;
-    const method = deflate ? 8 : 0;
-    const nameBytes = Buffer.from(name, 'utf8');
-    const local = Buffer.alloc(30);
-    local.writeUInt32LE(0x04034b50, 0);
-    local.writeUInt16LE(20, 4);
-    local.writeUInt16LE(method, 8);
-    local.writeUInt32LE(0, 14);
-    local.writeUInt32LE(data.length, 18);
-    local.writeUInt32LE(options.declaredSize ?? raw.length, 22);
-    local.writeUInt16LE(nameBytes.length, 26);
-    locals.push(local, nameBytes, data);
-    const entry = Buffer.alloc(46);
-    entry.writeUInt32LE(0x02014b50, 0);
-    entry.writeUInt16LE(method, 10);
-    entry.writeUInt32LE(data.length, 20);
-    entry.writeUInt32LE(options.declaredSize ?? raw.length, 24);
-    entry.writeUInt16LE(nameBytes.length, 28);
-    entry.writeUInt32LE(offset, 42);
-    central.push(entry, nameBytes);
-    offset += local.length + nameBytes.length + data.length;
-  }
-  const centralBuffer = Buffer.concat(central);
-  const end = Buffer.alloc(22);
-  end.writeUInt32LE(0x06054b50, 0);
-  end.writeUInt16LE(entries.length, 8);
-  end.writeUInt16LE(entries.length, 10);
-  end.writeUInt32LE(centralBuffer.length, 12);
-  end.writeUInt32LE(offset, 16);
-  return Buffer.concat([...locals, centralBuffer, end]);
-}
-
 test('OQ-200 (шаг 29): кодировка определяется по BOM и по содержимому; где уверенности нет, это видно', () => {
   const german = 'Artikelnummer;Einstandspreis;Währung\nA-1;10,50 €;EUR\n';
   // Немецкая выгрузка Excel в Windows-1252: «€» и «ä» — байты 0x80 и 0xE4
@@ -146,4 +78,12 @@ test('OQ-200 (шаг 29): кодировка определяется по BOM �
   assert.deepEqual(readTable(utf16).rows[0], ['Artikelnummer', 'Einstandspreis', 'Währung']);
   // Выбор продавца сильнее догадки: тот же файл, прочитанный как UTF-8, не читается — и это сказано, а не заменено на вопросики
   assert.throws(() => readTable(cp1252, 'UTF-8'), (e: unknown) => e instanceof TableReadError && /UTF-8/.test(e.message));
+});
+
+test('шаг 72: число ячейки XLSX — без хвоста двоичной дроби (19.99 хранится как 19.989999999999998), текст ячейки не трогается', () => {
+  const sheet = parseXlsx(xlsx([['SKU', 'Price', 'Cost', 'Note'], ['A-1', '19.989999999999998', '3.0000000000000004', '0.1'], ['A-2', '1234.5', '7', '19.989999999999998x'],
+    ['1234567890123456', '1.5E+2', '7', '']], {}));
+  // 15 значащих цифр — точность, которую показывает сам Excel; строка с буквой — текст ячейки, а не число; целое (16-значный
+  // числовой SKU) не округляется — оно записано точно (ревью шага 72)
+  assert.deepEqual(sheet.rows.slice(1), [['A-1', '19.99', '3', '0.1'], ['A-2', '1234.5', '7', '19.989999999999998x'], ['1234567890123456', '150', '7', '']]);
 });

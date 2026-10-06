@@ -33,7 +33,9 @@ export function syntheticItems(count: number, seed = 71): SyntheticItem[] {
     const usual = i % 10 === 9 ? null : Math.round(priceMinor * (0.3 + r() * 0.3));
     // Каждый двадцать пятый (со своей себестоимостью) — себестоимость 80 % цены: при комиссии 15 % и марже 10 % нынешняя цена ниже пола
     // маржи, и пометка отчёта «движок поднял бы цену» проверяется на них (ревью шага 71, находка 5)
-    const costMinor = usual !== null && i % 25 === 24 ? Math.round(priceMinor * 0.8) : usual;
+    // Каждый пятидесятый с номером 12 — себестоимость 105 % цены: пол маржи выше допущенного максимума (+30 %), подъёма нет, и отчёт
+    // называет причину фактами (ревью шага 72, находка 1); убыток на единицу — проверка ячейки «loss»
+    const costMinor = usual !== null && i % 25 === 24 ? Math.round(priceMinor * 0.8) : usual !== null && i % 50 === 12 ? Math.round(priceMinor * 1.05) : usual;
     return { sku: `SYN-KT-${String(i + 1).padStart(4, '0')}`, title: demoTitle(i), priceMinor, quantity: Math.floor(r() * 60), costMinor, sales30d: Math.floor(r() * 120) };
   });
 }

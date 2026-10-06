@@ -118,9 +118,9 @@ export function productOf(row: CatalogRow, i: number, options: KilltestOptions):
 
 export async function buildKilltestWorld(catalog: Catalog, options: KilltestOptions, log: (line: string) => void = () => undefined,
   hooks: { onDatabase?: (db: IsolatedDatabase) => void } = {}): Promise<KilltestWorld> {
-  // Регион базы — по умолчанию, как у живого прогона витрины США: посев заводит тенанта своей функцией с регионом EU, а база прогона
-  // одноразовая — данные клиента удаляются вместе с ней в конце прогона (если не попросили оставить)
-  const db = await createIsolatedDatabase(`killtest_${Date.now().toString(36)}`);
+  // Регион базы и тенанта — US: клиент amazon.com, регион хранения — место клиента [Р-60] (шаг 72, находка 26 ревью шага 71). База
+  // прогона одноразовая — данные клиента удаляются вместе с ней в конце прогона (если не попросили оставить)
+  const db = await createIsolatedDatabase(`killtest_${Date.now().toString(36)}`, { region: 'US' });
   hooks.onDatabase?.(db);
   log(`temporary database ${db.name}`);
   // Пулы ведёт сама база прогона: drop() и endPools() закрывают их ровно один раз
@@ -155,7 +155,7 @@ export async function buildKilltestWorld(catalog: Catalog, options: KilltestOpti
     const firstPrice = (p: KilltestProduct, i: number) => Math.round(p.row.priceMinor * COMPETITOR_RAMP[i % COMPETITOR_RAMP.length]!);
     const seeded = await seedPricingWorld(appPool, {
       fixtureTenantId: TENANT, fixtureChannelAccountId: ACCOUNT, fixtureChannel: 'AMAZON', fixtureRegion: 'NA', fixtureExternalAccountId: 'A1SYNKILLTEST',
-      marketplaces: [AMAZON_US], clock: clock.iso(), provisioningPool: pool('svc_provisioning', 1), adminPool, writeMode: 'SHADOW',
+      marketplaces: [AMAZON_US], clock: clock.iso(), provisioningPool: pool('svc_provisioning', 1), tenantRegion: 'US', adminPool, writeMode: 'SHADOW',
       seed: {
         scopes, channel: 'AMAZON', region: 'NA', marketplaces: { [AMAZON_US]: { currency: 'USD', basis: 'NET' } },
         competitorState: Object.fromEntries(engine.map(({ p, i }) => [`${AMAZON_US}|${asinOf(p, i)}|new`,

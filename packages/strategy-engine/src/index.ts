@@ -24,8 +24,11 @@ export interface EngineInput {
   strategy: StrategyDefinition;
   snapshot: AcceptedSnapshot | null;
   cost: CostInputs | null;
-  /** Границы на момент расчёта; Gate перечитывает их из источника истины */
-  bounds: { minMinor: number; maxMinor: number };
+  /**
+   * Границы на момент расчёта; Gate перечитывает их из источника истины. `marginFloor` — пол маржи тем же расчётом, что у Gate
+   * (`resolveMarginFloor`), или null, если минимальная маржа не задана или не вычисляется (тогда отказ скажет Gate) [Р-207]
+   */
+  bounds: { minMinor: number; maxMinor: number; marginFloor?: { amountMinor: number; minMarginBp: number } | null };
   currentPriceMinor: number | null;
   /**
    * Р-171 (шаг 41): последнее предложение, УДЕРЖАННОЕ тенью. В теневом режиме цена на витрине не двигается, поэтому
@@ -148,6 +151,26 @@ export function runStrategy(input: EngineInput): EngineResult {
     if (foreign) return notEvaluated(r('ENGINE_CURRENCY_MISMATCH', { source: 'SNAPSHOT', actual: foreign.currency, expected: writeScope.currency }));
   }
 
+  /**
+   * Р-207 (шаг 72, OQ-250): пол стратегии — наибольшее из min_price и пола маржи [Р-5]. До решения стратегия, следующая за рынком,
+   * вставала на min_price, а пол маржи держала только Gate ОТКАЗОМ — и цена, уже стоящая ниже пола маржи, там и оставалась. Пол маржи
+   * выше max_price стратегия не берёт: это противоречие настройки, его называет Gate (MARGIN_FLOOR_ABOVE_MAX_PRICE).
+   */
+  const margin = bounds.marginFloor ?? null;
+  const marginBinding = margin !== null && Number.isSafeInteger(margin.amountMinor) && margin.amountMinor > bounds.minMinor && margin.amountMinor <= bounds.maxMinor;
+  const floorMinor = marginBinding ? margin!.amountMinor : bounds.minMinor;
+  /** Нынешняя цена ниже пола — подъём до пола: отдельный шаг объяснения, он и главная причина изменения */
+  const raised = (): Reason => r('RAISED_TO_FLOOR', {
+    currentMinor: current, floorMinor, bound: marginBinding ? 'margin_floor' : 'min', ...(marginBinding ? { minMarginBp: margin!.minMarginBp } : {}), currency,
+  });
+  const belowFloor = current !== null && current < floorMinor;
+  /**
+   * NO_OP стратегии, следующей за рынком (удержание вне границ, Buy Box уже наш, конкурентов нет), не держит цену ниже пола: при
+   * нынешней цене ниже пола она поднимается до пола обычным путём (сравнение с предложением тени, Gate, бюджет, журнал)
+   */
+  const holdOrRaise = (holdAt: number, main: Reason, chain: Reason[], reference: number | null): EngineResult =>
+    (belowFloor ? propose(floorMinor, [...chain, raised()], reference) : intent('NO_OP', holdAt, main, chain, reference));
+
   const explanation: Reason[] = [];
   let target: number;
   let referenceMinor: number | null = null;
@@ -188,11 +211,11 @@ export function runStrategy(input: EngineInput): EngineResult {
       capable = true;
       if (bb.isSelf) {
         if (params.holdWhenWinning) {
-          return intent('NO_OP', current ?? bb.price.amountMinor, r('ALREADY_WINNING_BUYBOX'), [r('ALREADY_WINNING_BUYBOX')], bb.price.amountMinor);
+          return holdOrRaise(current ?? bb.price.amountMinor, r('ALREADY_WINNING_BUYBOX'), [r('ALREADY_WINNING_BUYBOX')], bb.price.amountMinor);
         }
         // Не соревнуемся сами с собой: ориентир — лучшее чужое предложение по рангу
         const next = snapshot!.offers.filter((o) => !o.isSelf).sort((a, b) => (a.rank ?? Infinity) - (b.rank ?? Infinity))[0];
-        if (!next) return intent('NO_OP', current ?? bb.price.amountMinor, r('NO_COMPETITOR_OFFERS'), [r('NO_COMPETITOR_OFFERS')], null);
+        if (!next) return holdOrRaise(current ?? bb.price.amountMinor, r('NO_COMPETITOR_OFFERS'), [r('NO_COMPETITOR_OFFERS')], null);
         referenceMinor = next.price.amountMinor;
       } else {
         referenceMinor = bb.price.amountMinor;
@@ -207,7 +230,7 @@ export function runStrategy(input: EngineInput): EngineResult {
       if (!Number.isSafeInteger(params.undercutMinor) || params.undercutMinor < 0) return invalidMoney('undercutMinor', params.undercutMinor, 'NON_NEGATIVE');
       capable = true;
       const competitors = snapshot!.offers.filter((o) => !o.isSelf);
-      if (competitors.length === 0) return intent('NO_OP', current ?? bounds.minMinor, r('NO_COMPETITOR_OFFERS'), [r('NO_COMPETITOR_OFFERS')], null);
+      if (competitors.length === 0) return holdOrRaise(current ?? bounds.minMinor, r('NO_COMPETITOR_OFFERS'), [r('NO_COMPETITOR_OFFERS')], null);
       let ownShipping = 0;
       if (params.compareLanded) {
         const self = snapshot!.offers.find((o) => o.isSelf);
@@ -228,45 +251,56 @@ export function runStrategy(input: EngineInput): EngineResult {
   // Границы: стратегии, следующие за рынком, встают на границу или держат цену; фиксированная цена и маржа —
   // нет: конфликт настройки с границами должен дойти до Gate и быть виден как REJECTED_BY_GATE [Р-44]
   let proposed = target;
-  if (capable && (target < bounds.minMinor || target > bounds.maxMinor)) {
+  if (capable && (target < floorMinor || target > bounds.maxMinor)) {
     const atBound = (params as { atBound: 'CAP' | 'HOLD' }).atBound;
     if (atBound === 'HOLD') {
-      const held = r('TARGET_OUTSIDE_BOUNDS_HOLD', { targetMinor: target, minMinor: bounds.minMinor, maxMinor: bounds.maxMinor, currency });
+      // Нижняя граница удержания — пол стратегии (min_price или пол маржи, Р-207): цель ниже пола маржи не уходит в Gate на отказ
+      const held = r('TARGET_OUTSIDE_BOUNDS_HOLD', { targetMinor: target, minMinor: floorMinor, maxMinor: bounds.maxMinor, currency });
       if (current === null) return notEvaluated(held);
-      return intent('NO_OP', current, held, [...explanation, held], referenceMinor);
+      return holdOrRaise(current, held, [...explanation, held], referenceMinor);
     }
-    if (target < bounds.minMinor) {
-      proposed = bounds.minMinor;
-      explanation.push(r('CAPPED_AT_MIN_PRICE', { targetMinor: target, minMinor: bounds.minMinor, currency }));
+    if (target < floorMinor) {
+      proposed = floorMinor;
+      explanation.push(marginBinding
+        ? r('CAPPED_AT_MARGIN_FLOOR', { targetMinor: target, floorMinor, minMinor: bounds.minMinor, minMarginBp: margin!.minMarginBp, currency })
+        : r('CAPPED_AT_MIN_PRICE', { targetMinor: target, minMinor: bounds.minMinor, currency }));
+      if (belowFloor) explanation.push(raised());
     } else {
       proposed = bounds.maxMinor;
       explanation.push(r('CAPPED_AT_MAX_PRICE', { targetMinor: target, maxMinor: bounds.maxMinor, currency }));
     }
   }
   if (proposed <= 0) proposed = bounds.minMinor;
+  return propose(proposed, explanation, referenceMinor);
 
-  if (current !== null) {
-    const delta = Math.abs(proposed - current);
-    if (delta === 0) {
-      const same = r('ALREADY_AT_TARGET', { targetMinor: proposed, currency });
-      return intent('NO_OP', current, same, [...explanation, same], referenceMinor);
-    }
-    if (delta < strategy.deadbandMinor) {
-      const band = r('WITHIN_DEADBAND', { deltaMinor: delta, deadbandMinor: strategy.deadbandMinor, currency });
-      return intent('NO_OP', current, band, [...explanation, band], referenceMinor);
-    }
-  }
   /**
-   * Р-171: то же самое предложение уже удержано тенью — повторять его незачем. Проверка стоит ПОСЛЕ сравнения с текущей
-   * ценой; в тени именно она превращает поток дублей в один held-write на изменение. В бою поле пустое: хранилище отдаёт
-   * предложение тени только у аккаунта в тени (шаг 64 — до этого оно оставалось после перевода в бой, и цена, уже
-   * предложенная тенью, в бою не уходила никогда).
+   * Предложение цены: сравнение с нынешней ценой и с предложением тени. Подъём до пола (нынешняя ниже пола, предложение на полу или
+   * выше) зоной нечувствительности не глушится — она не держит цену ниже пола [Р-207]
    */
-  if (heldInShadow !== null && Math.abs(proposed - heldInShadow) <= strategy.deadbandMinor) {
-    const already = r('SHADOW_ALREADY_PROPOSED', { proposedMinor: proposed, heldMinor: heldInShadow, currency });
-    return intent('NO_OP', current ?? heldInShadow, already, [...explanation, already], referenceMinor);
+  function propose(proposed: number, chain: Reason[], reference: number | null): EngineResult {
+    if (current !== null && !(belowFloor && proposed >= floorMinor)) {
+      const delta = Math.abs(proposed - current);
+      if (delta === 0) {
+        const same = r('ALREADY_AT_TARGET', { targetMinor: proposed, currency });
+        return intent('NO_OP', current, same, [...chain, same], reference);
+      }
+      if (delta < strategy.deadbandMinor) {
+        const band = r('WITHIN_DEADBAND', { deltaMinor: delta, deadbandMinor: strategy.deadbandMinor, currency });
+        return intent('NO_OP', current, band, [...chain, band], reference);
+      }
+    }
+    /**
+     * Р-171: то же самое предложение уже удержано тенью — повторять его незачем. Проверка стоит ПОСЛЕ сравнения с текущей
+     * ценой; в тени именно она превращает поток дублей в один held-write на изменение. В бою поле пустое: хранилище отдаёт
+     * предложение тени только у аккаунта в тени (шаг 64 — до этого оно оставалось после перевода в бой, и цена, уже
+     * предложенная тенью, в бою не уходила никогда).
+     */
+    if (heldInShadow !== null && Math.abs(proposed - heldInShadow) <= strategy.deadbandMinor) {
+      const already = r('SHADOW_ALREADY_PROPOSED', { proposedMinor: proposed, heldMinor: heldInShadow, currency });
+      return intent('NO_OP', current ?? heldInShadow, already, [...chain, already], reference);
+    }
+    return intent('CHANGED', proposed, chain[chain.length - 1]!, chain, reference);
   }
-  return intent('CHANGED', proposed, explanation[explanation.length - 1]!, explanation, referenceMinor);
 
   function intent(intentClass: 'CHANGED' | 'NO_OP', proposedMinor: number, main: Reason, chain: Reason[], reference: number | null): EngineResult {
     const ttl = input.intentTtlSeconds ?? 600;

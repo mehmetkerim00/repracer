@@ -68,14 +68,30 @@ export function privacyProblem(path: string): string | null {
   }
 }
 
-function args(argv: string[]): Map<string, string | true> {
+/**
+ * Ключи команды. Шаг 72 (ревью шага 71, находка 22): неизвестный ключ — отказ, а не тишина: опечатка `--assume-cost` вместо
+ * `--assume-cost-pct` молча оставляла товары без себестоимости вне движка, и клиент получал отчёт не о том, что просили
+ */
+const VALUE_OPTIONS = ['in', 'out', 'hours', 'every-minutes', 'min-pct', 'max-pct', 'margin-pct', 'fee-pct', 'assume-cost-pct', 'max-products', 'make-sample', 'rows'] as const;
+const FLAG_OPTIONS = ['keep', 'help'] as const;
+
+export function args(argv: string[]): Map<string, string | true> {
   const out = new Map<string, string | true>();
+  const known = [...VALUE_OPTIONS, ...FLAG_OPTIONS] as readonly string[];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     if (!a.startsWith('--')) throw new Error(`unexpected argument ${a}`);
+    const name = a.slice(2);
+    if (!known.includes(name)) {
+      const near = known.filter((k) => k.startsWith(name) || name.startsWith(k));
+      throw new Error(`unknown option --${name}${near.length > 0 ? `; did you mean ${near.map((k) => `--${k}`).join(' or ')}?` : ''}`);
+    }
+    if (out.has(name)) throw new Error(`--${name} is given twice`);
     const next = argv[i + 1];
-    if (next === undefined || next.startsWith('--')) out.set(a.slice(2), true);
-    else { out.set(a.slice(2), next); i++; }
+    if ((FLAG_OPTIONS as readonly string[]).includes(name)) { out.set(name, true); continue; }
+    if (next === undefined || next.startsWith('--')) throw new Error(`--${name} needs a value`);
+    out.set(name, next);
+    i++;
   }
   return out;
 }
@@ -157,7 +173,7 @@ export async function main(argv: string[]): Promise<number> {
     writeFileSync(report, renderReport(data));
     process.stdout.write(`${JSON.stringify({ report: basename(report), seconds: Math.round((Date.now() - started) / 100) / 10, products: c.rows, priced: c.inEngine, decisions: c.decisions,
       changes: c.changes, floorHeld: c.floorHeld, floorHeldMargin: c.floorHeldMargin, marginRefused: c.marginRefused, noCost: c.noCost, assumedCost: c.assumedCost, rejectedRows: c.rejectedRows,
-      belowFloorNow: data.belowFloorNow.length, heldWrites: c.heldWrites, sentToAmazon: c.sentToAmazon, portWrites: c.portWrites, top: data.top.length,
+      belowFloor: data.belowFloor.length, raisedToFloor: c.raisedToFloor, heldWrites: c.heldWrites, sentToAmazon: c.sentToAmazon, portWrites: c.portWrites, top: data.top.length,
       database: world.db.name, databaseKept: keep })}\n`);
     return 0;
   } finally {

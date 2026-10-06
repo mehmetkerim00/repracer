@@ -16,7 +16,7 @@ import type {
 } from '@repracer/channel-port';
 import { waitingForBudget as waitForChannelBudget } from '@repracer/channel-port';
 import { assessShift, DEFAULT_SANITY_CONFIG, evaluateSnapshot, SANITY_RULESET, type AnchorName, type SanityCheck, type SanityConfig } from '@repracer/input-sanity';
-import { decide, GATE_PROFILE, repricingWarnings, validateRepricingEnablement } from '@repracer/price-gate';
+import { decide, GATE_PROFILE, repricingWarnings, resolveMarginFloor, validateRepricingEnablement } from '@repracer/price-gate';
 import {
   buildExplanation,
   isCompetitorDerived,
@@ -230,12 +230,18 @@ export function createPricingPipeline(deps: PipelineDeps) {
       effects.push({ kind: 'alert', code: 'PRICING_BOUND_UNRESOLVABLE', severity: 'CRITICAL', details: { writeScopeId: scope.writeScopeId, bound, cause } });
       return { report, toCommit: null, invoked: 0 };
     }
+    // Р-207: стратегия встаёт на пол маржи и поднимает до него цену ниже пола — тем же расчётом, что у Gate; невычислимый пол
+    // стратегии не передаётся, и отказ с причиной даёт Gate
+    const margin = resolveMarginFloor(sc.cost, sc.guardrails.minMarginBp, scope.currency, sc.costUnavailableCause ?? null);
     const result = runStrategy({
       writeScope: { writeScopeId: scope.writeScopeId, currency: scope.currency, basis: scope.basis },
       strategy: scope.strategy,
       snapshot,
       cost: sc.cost,
-      bounds: { minMinor: bounds.min.amountMinor, maxMinor: bounds.max.amountMinor },
+      bounds: {
+        minMinor: bounds.min.amountMinor, maxMinor: bounds.max.amountMinor,
+        marginFloor: margin.kind === 'OK' ? { amountMinor: margin.floorMinor, minMarginBp: margin.minMarginBp } : null,
+      },
       currentPriceMinor: scope.currentPriceMinor,
       // Р-171: в тени сравнение идёт и с уже удержанным предложением — иначе оно повторялось бы на каждом опросе
       ...(scope.shadowLastProposedMinor === null || scope.shadowLastProposedMinor === undefined ? {} : { shadowLastProposedMinor: scope.shadowLastProposedMinor }),

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { CatalogError, readCatalog } from './killtest/catalog.ts';
 import { syntheticCatalog, syntheticItems } from './killtest/synthetic.ts';
+import { xlsx } from '../../../packages/cost-import/test/xlsx-fixture.ts';
 
 /**
  * Шаг 71: kill-test читает каталог клиента из трёх разных выгрузок по одной таблице названий колонок; неизвестные колонки
@@ -59,4 +60,20 @@ test('step 71: a file without a SKU or a price column is refused with the accept
   const twice = readCatalog(Buffer.from('sku,price,your-price\nSYN-1,5.00,6.00\n'), 'twice.csv');
   assert.equal(twice.rows[0]!.priceMinor, 500);
   assert.deepEqual(twice.duplicates, [{ field: 'price', used: 'price', skipped: ['your-price'] }]);
+});
+
+test('step 72: the currency column is read — a row in another currency is named and not used; an empty cell is US dollars', () => {
+  const c = readCatalog(Buffer.from('sku,price,cost,currency\nSYN-1,12.50,5.00,USD\nSYN-2,9.99,,\nSYN-3,8.00,3.00,EUR\nSYN-4,7.00,2.00,US$\nSYN-5,6.00,2.00,GBP\n'), 'cur.csv');
+  assert.deepEqual(c.rows.map((r) => r.sku), ['SYN-1', 'SYN-2', 'SYN-4']);
+  assert.deepEqual(c.rejected.map((r) => [r.line, r.problem, r.currency]), [[4, 'CURRENCY_NOT_USD', 'EUR'], [6, 'CURRENCY_NOT_USD', 'GBP']]);
+  assert.deepEqual(c.recognized.map((x) => x.field), ['sku', 'price', 'cost', 'currency'], 'the currency column is read, not ignored');
+});
+
+test('step 72: numbers from an Excel workbook are read without binary float tails', () => {
+  // Excel хранит 19.99 как 19.989999999999998: без очистки такая цена была «прочтением в двух смыслах» и строка уходила в негодные
+  const book = xlsx([['SKU', 'Price', 'Unit Cost', 'Units Ordered'], ['SYN-X1', '19.989999999999998', '7.1000000000000005', '12'], ['SYN-X2', '1234.5', '600', '3']], {});
+  const c = readCatalog(book, 'catalog.xlsx');
+  assert.equal(c.format, 'Excel workbook');
+  assert.deepEqual(c.rejected, []);
+  assert.deepEqual(c.rows.map((r) => [r.sku, r.priceMinor, r.costMinor, r.sales30d]), [['SYN-X1', 1999, 710, 12], ['SYN-X2', 123450, 60000, 3]]);
 });

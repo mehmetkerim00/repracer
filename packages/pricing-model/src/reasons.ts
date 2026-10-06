@@ -105,6 +105,9 @@ export const ENGINE_REASON_CODES = [
   // шаги расчёта
   'CAPPED_AT_MIN_PRICE',
   'CAPPED_AT_MAX_PRICE',
+  // Р-207 (шаг 72): цель ниже пола маржи — цена на полу маржи; нынешняя цена ниже пола — подъём до пола
+  'CAPPED_AT_MARGIN_FLOOR',
+  'RAISED_TO_FLOOR',
   // NO_OP
   'ALREADY_AT_TARGET',
   'WITHIN_DEADBAND',
@@ -283,6 +286,8 @@ export const CURRENCY_SOURCES = ['SNAPSHOT', 'COST'] as const;
 export const STRATEGY_PARAM_NAMES = ['deadbandMinor', 'priceMinor', 'targetMarginBp', 'undercutMinor'] as const;
 export const PARAM_CONSTRAINTS = ['POSITIVE', 'NON_NEGATIVE', 'MARGIN_BELOW_100_PERCENT'] as const;
 export const BOUND_NAMES = ['min', 'max', 'margin_floor', 'both'] as const;
+/** Чем был пол, до которого поднята цена [Р-207]: min_price или пол маржи */
+export const FLOOR_BOUNDS = ['min', 'margin_floor'] as const;
 export const BOUND_CAUSES = [
   'MISSING', 'CURRENCY_MISMATCH', 'BASIS_MISMATCH', 'INVALID_AMOUNT', 'MIN_ABOVE_MAX', 'COST_PROFILE_MISSING', 'COST_CURRENCY_MISMATCH',
   'VAT_UNKNOWN', 'UNATTAINABLE', 'INVALID_INPUT', 'MARGIN_FLOOR_ABOVE_MAX_PRICE', 'FX_RATE_UNAVAILABLE', 'FX_RATE_STALE', 'UNSUPPORTED_CURRENCY',
@@ -387,6 +392,8 @@ export const REASON_PARAMS: Readonly<Record<AnyReasonCode, ParamSchema>> = {
   LOWEST_UNDERCUT: { lowestMinor: money('CHANNEL'), undercutMinor: money('CHANNEL_DERIVED'), scope: oneOf(LOWEST_SCOPES, 'TENANT'), n: count('CHANNEL', N), targetMinor: money('CHANNEL_DERIVED'), currency: currency() },
   CAPPED_AT_MIN_PRICE: { targetMinor: money('CHANNEL_DERIVED'), minMinor: money('TENANT'), currency: currency() },
   CAPPED_AT_MAX_PRICE: { targetMinor: money('CHANNEL_DERIVED'), maxMinor: money('TENANT'), currency: currency() },
+  CAPPED_AT_MARGIN_FLOOR: { targetMinor: money('CHANNEL_DERIVED'), floorMinor: money('TENANT'), minMinor: money('TENANT'), minMarginBp: bp('TENANT'), currency: currency() },
+  RAISED_TO_FLOOR: { currentMinor: money('TENANT'), floorMinor: money('TENANT'), bound: oneOf(FLOOR_BOUNDS, 'TENANT'), minMarginBp: bp('TENANT', O), currency: currency() },
   ALREADY_AT_TARGET: { targetMinor: money('CHANNEL_DERIVED'), currency: currency() },
   WITHIN_DEADBAND: { deltaMinor: money('CHANNEL_DERIVED'), deadbandMinor: money('TENANT'), currency: currency() },
   ALREADY_WINNING_BUYBOX: {},
