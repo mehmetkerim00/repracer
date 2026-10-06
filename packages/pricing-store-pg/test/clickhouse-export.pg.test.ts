@@ -60,7 +60,9 @@ const scope = (n: number): MemorySeedScope => ({
 test('Р-20: a day of intents and decisions is exported to ClickHouse, verified by count before verified_at, and a repeated export does not duplicate rows', async () => {
   const w = await seedPricingWorld(pool, {
     provisioningPool: provisioning, adminPool: admin, fixtureTenantId: '10000000-0000-4000-8000-000000000200', fixtureChannelAccountId: ACCOUNT,
-    marketplaces: ['de'], clock: new Date().toISOString(), seed: { scopes: [scope(1), scope(2), scope(3)] },
+    marketplaces: ['de'], clock: new Date().toISOString(),
+    // Шаг 73 [Р-208]: четвёртая единица — ступень лестницы к полу: нынешняя 18,50 €, пол 22,00 €, ступень 19,50 € ниже пола
+    seed: { scopes: [scope(1), scope(2), scope(3), { ...scope(4), minPrice: { amountMinor: 2200, id: 'min-4' } }] },
   });
   const store = new PgPricingStore(pool, { adminPool: admin });
   for (const n of [1, 2, 3]) {
@@ -68,6 +70,17 @@ test('Р-20: a day of intents and decisions is exported to ClickHouse, verified 
     const r = await store.commitEvaluation(w.tenantId, {
       key: { channelAccountId: ctx.scope.channelAccountId, marketplace: ctx.scope.marketplace, channelProductRef: ctx.scope.channelProductRef, condition: ctx.scope.condition },
       now: new Date().toISOString(), decisions: [explained(approved(ctx, 1900 + n))],
+    });
+    assert.equal(r.status, 'COMMITTED', JSON.stringify(r));
+  }
+  {
+    const ctx = await contextOf(store, w.tenantId, w.ids.dbId('ws-4'));
+    const rung = approved(ctx, 1950);
+    rung.intent.reason = { code: 'RAISED_TOWARD_FLOOR', params: { currentMinor: 1850, floorMinor: 2200, bound: 'min', stepLimitBp: 1000, stepsLeft: 1, currency: 'EUR' } };
+    rung.decision.ladderFromMinor = 1850;
+    const r = await store.commitEvaluation(w.tenantId, {
+      key: { channelAccountId: ctx.scope.channelAccountId, marketplace: ctx.scope.marketplace, channelProductRef: ctx.scope.channelProductRef, condition: ctx.scope.condition },
+      now: new Date().toISOString(), decisions: [explained(rung)],
     });
     assert.equal(r.status, 'COMMITTED', JSON.stringify(r));
   }
@@ -112,10 +125,15 @@ test('Р-20: a day of intents and decisions is exported to ClickHouse, verified 
   // состав частей меняется, и токены с ним — поэтому число строк тенанта сверяется и без FINAL (сырые части), и с FINAL
   const countOf = async (final: boolean) => Number((await verifier.rows<{ n: number }>(
     `SELECT count() AS n FROM repracer_analytics.price_decision${final ? ' FINAL' : ''} WHERE tenant_id = '${w.tenantId}'`))[0]!.n);
-  assert.equal(await countOf(false), 3, 'the three decisions of the synthetic tenant are in ClickHouse');
+  assert.equal(await countOf(false), 4, 'the four decisions of the synthetic tenant are in ClickHouse');
+  // Шаг 73 [Р-208]: ступень ниже пола прошла ограничение floor_respected (095_step73) и несёт цену, от которой поднялась
+  const ladder = await verifier.rows<{ from: string; final: string; floor: string }>(
+    `SELECT ladder_from_minor AS from, final_amount_minor AS final, effective_floor_minor AS floor FROM repracer_analytics.price_decision FINAL
+      WHERE tenant_id = '${w.tenantId}' AND ladder_from_minor IS NOT NULL`);
+  assert.deepEqual(ladder.map((x) => [Number(x.from), Number(x.final), Number(x.floor)]), [[1850, 1950, 2200]], 'the ladder step is exported below its floor');
   const second = await exportDecisionDay(exporter, ingest, verifier, range);
   assert.ok(second.every((p) => p.verified), JSON.stringify(second));
-  assert.equal(await countOf(true), 3, 'a repeated export leaves one row per decision');
+  assert.equal(await countOf(true), 4, 'a repeated export leaves one row per decision');
   const [hourlyAfter] = await verifier.rows<{ n: number }>(
     `SELECT sum(intents) AS n FROM repracer_analytics.price_intent_noop_hourly WHERE tenant_id = '${w.tenantId}'`);
   // Токен части — контрольная сумма её идентификаторов: если параллельные тесты пакета добавили NO_OP того же дня, часть другая и
@@ -126,7 +144,7 @@ test('Р-20: a day of intents and decisions is exported to ClickHouse, verified 
   } else {
     console.log(`CH_EXPORT_NOOP_DAY_CHANGED between exports (parallel tests): hourly intents of the tenant ${hourlyAfter!.n}`);
   }
-  console.log(`CH_EXPORT_REPEAT raw rows of the tenant after the repeat: ${await countOf(false)} (3 — the part token matched; more — chunks changed by parallel tests, merged by FINAL)`);
+  console.log(`CH_EXPORT_REPEAT raw rows of the tenant after the repeat: ${await countOf(false)} (4 — the part token matched; more — chunks changed by parallel tests, merged by FINAL)`);
 });
 
 test('Р-38, Р-23: the backtest reads the competitor history of one tenant through the tenant reader role and its row policy', async () => {

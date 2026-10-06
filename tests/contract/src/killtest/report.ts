@@ -39,6 +39,8 @@ interface DecisionRow {
   cause: string | null;
   /** Главная причина намерения решения и граница подъёма [Р-207]: подъём до пола маржи — RAISED_TO_FLOOR + margin_floor */
   intent_reason: string | null; intent_bound: string | null;
+  /** Р-208: ступень лестницы — сколько ступеней осталось до пола */
+  intent_steps_left: number | null;
 }
 
 /** Чем был пол решения: допущенный минимум (наш) или пол маржи из себестоимости клиента */
@@ -54,7 +56,9 @@ export interface BelowFloorRow {
    * RAISED — одобренный подъём до пола маржи (главная причина RAISED_TO_FLOOR, граница — пол маржи); ABOVE — цена поднята выше пола
    * вслед за конкурентом; NOT_RAISED — подъёма нет, причина словами; NO_DECISION — решений нет; NOT_IN_RUN — товар не вошёл в прогон
    */
-  status: 'RAISED' | 'ABOVE' | 'NOT_RAISED' | 'NO_DECISION' | 'NOT_IN_RUN';
+  status: 'RAISED' | 'LADDER' | 'ABOVE' | 'NOT_RAISED' | 'NO_DECISION' | 'NOT_IN_RUN';
+  /** Р-208: у ступени лестницы — сколько ступеней осталось до пола */
+  stepsLeft: number | null;
   engineMinor: number | null;
   refused: string | null;
 }
@@ -80,6 +84,8 @@ export interface ReportData {
     marginRefused: number; ceilingHeld: number;
     /** Товары ниже пола маржи, поднятые до пола (одно правило для отчёта и итога команды) */
     raisedToFloor: number;
+    /** Р-208: товары, у которых подъём к полу идёт лестницей (предел шага) */
+    ladders: number;
     heldWrites: number; competitorUpdates: number;
     /** Отправлено в канал — записи базы со временем отправки плюс вызовы записи модели порта; больше нуля — отчёт не пишется (main.ts) */
     sentToAmazon: number; dbDispatched: number; portWrites: number };
@@ -144,7 +150,8 @@ export async function collectReport(catalog: Catalog, world: KilltestWorld, opti
   const decisions = await world.db.rows<DecisionRow>(
     `SELECT d.write_scope_id, d.price_decision_id, d.outcome, d.final_amount_minor, d.effective_floor_minor, d.effective_ceiling_minor,
             coalesce(d.rejection_reason, d.no_change_reason) AS code, d.reason_params ->> 'cause' AS cause,
-            pi.rationale -> 'reason' ->> 'code' AS intent_reason, pi.rationale -> 'reason' -> 'params' ->> 'bound' AS intent_bound
+            pi.rationale -> 'reason' ->> 'code' AS intent_reason, pi.rationale -> 'reason' -> 'params' ->> 'bound' AS intent_bound,
+            (pi.rationale -> 'reason' -> 'params' ->> 'stepsLeft')::int AS intent_steps_left
        FROM channel_data.price_decision d
        LEFT JOIN channel_data.price_intent pi ON pi.tenant_id = d.tenant_id AND pi.price_intent_id = d.price_intent_id AND pi.created_at = d.intent_created_at
       WHERE d.tenant_id = $1 ORDER BY d.decided_at`, [tenantId]);
@@ -181,16 +188,18 @@ export async function collectReport(catalog: Catalog, world: KilltestWorld, opti
     const ds = p ? perProduct.get(world.dbScopeId(p)) ?? [] : [];
     const raise = ds.find((d) => d.outcome === 'APPROVED' && d.intent_reason === 'RAISED_TO_FLOOR' && d.intent_bound === 'margin_floor') ?? null;
     const above = ds.find((d) => d.outcome === 'APPROVED' && d.final_amount_minor !== null && d.final_amount_minor >= priced.priceMinor) ?? null;
+    // Р-208: предел шага — первая ступень лестницы к полу маржи (в тени лестница дальше первой ступени не идёт: цена на витрине не меняется)
+    const rung = ds.find((d) => d.outcome === 'APPROVED' && d.intent_reason === 'RAISED_TOWARD_FLOOR' && d.intent_bound === 'margin_floor') ?? null;
     const last = ds[ds.length - 1] ?? null;
     // Находка 1: пол маржи выше допущенного max_price — причина из фактов, а не «граница не вычисляется»
-    const refused = p === null || raise || above || last === null ? null
+    const refused = p === null || raise || rung || above || last === null ? null
       : priced.priceMinor > p.maxMinor ? `your margin floor is above the maximum price we assumed (${options.maxPct}% above your price)`
         : last.code ? clientSafe(describe({ code: last.code, params: {} } as never, m).title).toLowerCase() : 'no raise in this run';
     belowFloor.push({
       label: row.title ?? row.sku, sku: row.sku, sales: row.sales30d, priceMinor: row.priceMinor, costMinor: row.costMinor,
       profitMinor: row.priceMinor - Math.round((row.priceMinor * options.feePct) / 100) - row.costMinor, floorMinor: priced.priceMinor,
-      status: p === null ? 'NOT_IN_RUN' : raise ? 'RAISED' : above ? 'ABOVE' : last === null ? 'NO_DECISION' : 'NOT_RAISED',
-      engineMinor: (raise ?? above)?.final_amount_minor ?? null, refused,
+      status: p === null ? 'NOT_IN_RUN' : raise ? 'RAISED' : rung ? 'LADDER' : above ? 'ABOVE' : last === null ? 'NO_DECISION' : 'NOT_RAISED',
+      engineMinor: (raise ?? rung ?? above)?.final_amount_minor ?? null, refused, stepsLeft: raise ? null : rung?.intent_steps_left ?? null,
     });
   }
   belowFloor.sort((a, b) => a.profitMinor - b.profitMinor || a.sku.localeCompare(b.sku));
@@ -287,7 +296,9 @@ export async function collectReport(catalog: Catalog, world: KilltestWorld, opti
   }
   // Ревью, находка 3: про бюджеты — только то, что известно; про скорость записи в бою прогон ничего не доказал, и пункта нет
   notDone.push({ title: 'No edit budget was spent',
-    text: 'We know of no daily limit on price edits per listing on amazon.com (eBay, for example, allows 250 edits a day), so none applies in this run. No limit on the size of a price step or on how often a price changes was set in this run either; in a pilot you can set them, and every decision is checked against them.' });
+    text: `We know of no daily limit on price edits per listing on amazon.com (eBay, for example, allows 250 edits a day), so none applies in this run. ${options.stepPct === null
+      ? 'No limit on the size of a price step or on how often a price changes was set in this run either; in a pilot you can set them, and every decision is checked against them.'
+      : `A step limit of ${options.stepPct}% was set for this run, and every decision was checked against it; no limit on how often a price changes was set.`}` });
 
   const noCost = world.products.filter((p) => p.costSource === 'NONE');
   const rejectedMap = new Map<RowProblem, number[]>();
@@ -310,6 +321,7 @@ export async function collectReport(catalog: Catalog, world: KilltestWorld, opti
       floorHeldAssumedMin: floorDecisions.filter((d) => { const p = productOf(d); return p !== undefined && floorKindOf(d, p) === 'ASSUMED_MIN'; }).length,
       floorHeldMargin: floorDecisions.filter((d) => { const p = productOf(d); return p !== undefined && floorKindOf(d, p) === 'MARGIN'; }).length, marginRefused,
       raisedToFloor: belowFloor.filter((b) => b.status === 'RAISED').length,
+      ladders: belowFloor.filter((b) => b.status === 'LADDER').length,
       ceilingHeld: s.ceilingHeld, heldWrites: s.heldPriceWrites, competitorUpdates: world.snapshots, sentToAmazon, dbDispatched, portWrites,
     },
     savings,
@@ -380,6 +392,7 @@ export function renderReport(d: ReportData, options: { client?: (s: string) => s
   const notInRun = d.belowFloor.filter((b) => b.status === 'NOT_IN_RUN').length;
   const engineCell = (b: BelowFloorRow): string => {
     if (b.status === 'RAISED') return `<strong>${e(money(m, b.engineMinor))}</strong><div class="muted">would be raised to your margin floor · ${e(pct(b.priceMinor, b.engineMinor!))}</div>`;
+    if (b.status === 'LADDER') return `<strong>${e(money(m, b.engineMinor))}</strong><div class="muted">would be raised one step toward your margin floor · ${e(pct(b.priceMinor, b.engineMinor!))}${b.stepsLeft !== null ? ` · about ${b.stepsLeft} more ${b.stepsLeft === 1 ? 'step' : 'steps'}` : ''}</div>`;
     if (b.status === 'ABOVE') return `<strong>${e(money(m, b.engineMinor))}</strong><div class="muted">would be raised above your margin floor, following the simulated competitor · ${e(pct(b.priceMinor, b.engineMinor!))}</div>`;
     if (b.status === 'NOT_RAISED') return `not raised<div class="muted">${e(b.refused ?? '')}</div>`;
     if (b.status === 'NOT_IN_RUN') return '<span class="muted">not in this run</span>';
@@ -387,7 +400,9 @@ export function renderReport(d: ReportData, options: { client?: (s: string) => s
   };
   const belowFloorSection = d.belowFloor.length > 0 ? `
     <section class="highlight"><h2>Products priced below your margin floor</h2>
-      <p><strong>${d.belowFloor.length} of your products are priced below the margin floor computed from your unit cost</strong>, an assumed Amazon referral fee of ${d.options.feePct}% and a minimum margin of ${d.options.marginPct}%. The engine raises such a price to your margin floor, through the same final price check as every other price; it never goes above the maximum price. In this run the engine would have raised ${c.raisedToFloor} of them to the floor (shadow mode: nothing was sent).${notInRun > 0 ? ` ${notInRun} of them were not in this run.` : ''} No limit on the size of a price step was set in this run; in a pilot, a step limit you set can hold back a large raise.</p>
+      <p><strong>${d.belowFloor.length} of your products are priced below the margin floor computed from your unit cost</strong>, an assumed Amazon referral fee of ${d.options.feePct}% and a minimum margin of ${d.options.marginPct}%. The engine raises such a price to your margin floor, through the same final price check as every other price; it never goes above the maximum price. In this run the engine would have raised ${c.raisedToFloor} of them to the floor${c.ladders > 0 ? ` and ${c.ladders} one step toward it` : ''} (shadow mode: nothing was sent).${notInRun > 0 ? ` ${notInRun} of them were not in this run.` : ''} ${d.options.stepPct === null
+        ? 'No limit on the size of a price step was set in this run; with a step limit, a raise larger than the limit goes up step by step, one step per evaluation, until it reaches the floor.'
+        : `With the step limit of ${d.options.stepPct}% set for this run, a raise larger than the limit goes up step by step, one step per evaluation, until it reaches the floor; in shadow mode the price on Amazon does not move, so only the first step is shown, with the number of steps left.`}</p>
       <table><thead><tr><th>Product</th><th>Your price</th><th>Unit cost</th><th>Profit per unit at your price*</th><th>Margin floor</th><th>Engine's price</th></tr></thead><tbody>
       ${d.belowFloor.slice(0, 50).map((b) => `<tr><td>${cl(b.label)}<div class="muted">${cl(b.sku)}${b.sales !== null ? ` · ${b.sales} ${e(salesPeriod)}` : ''}</div></td><td>${e(money(m, b.priceMinor))}</td><td>${e(money(m, b.costMinor))}</td><td class="${b.profitMinor < 0 ? 'loss' : ''}">${e(money(m, b.profitMinor))}</td><td>${e(money(m, b.floorMinor))}</td><td>${engineCell(b)}</td></tr>`).join('')}
       </tbody></table>
@@ -453,6 +468,7 @@ ${rowsSection}
 <li>Storefront ${STOREFRONT}; prices are treated as US dollars excluding sales tax (our assumption for ${STOREFRONT}).</li>
 <li>Strategy: one cent below the lowest competitor, never below the floor and never above the ceiling.</li>
 <li>Your minimum and maximum prices were not in the file, so we assumed them: minimum ${d.options.minPct}% below your current price, maximum ${d.options.maxPct}% above it. In the pilot you set your own.</li>
+${d.options.stepPct !== null ? `<li>Step limit: a price changes by at most ${d.options.stepPct}% at a time; a larger raise to your margin floor goes step by step.</li>` : ''}
 <li>Margin floor: unit cost + an assumed Amazon referral fee of ${d.options.feePct}% (the fee depends on the product category; yours may differ) + minimum margin ${d.options.marginPct}%. FBA fees, per-item minimum fees, closing fees and shipping are not included.</li>
 <li>${d.hours} simulated hours; each simulated competitor changed its price every ${d.options.competitorEveryMinutes} minutes (${c.competitorUpdates} competitor updates in total).</li>
 <li>Columns we read: ${d.columns.recognized.map((r) => `“${cl(r.header)}” as ${e(r.meaning)}`).join(', ')}.</li>

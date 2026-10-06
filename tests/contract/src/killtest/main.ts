@@ -27,6 +27,7 @@ Options (defaults in brackets):
   --fee-pct N           Amazon referral fee [${DEFAULT_OPTIONS.feePct}]
   --assume-cost-pct N   run products without cost with an assumed cost of N% of the price (named in the report) [off]
   --max-products N      run at most N best-selling products [${DEFAULT_OPTIONS.maxProducts}]
+  --step-pct N          a price changes by at most N% at a time; a larger raise to the floor goes step by step [no limit]
   --keep                keep the temporary database for inspection (its name and the command to delete it are printed;
                         temporary databases older than a day are deleted by the next run)
 
@@ -72,7 +73,7 @@ export function privacyProblem(path: string): string | null {
  * Ключи команды. Шаг 72 (ревью шага 71, находка 22): неизвестный ключ — отказ, а не тишина: опечатка `--assume-cost` вместо
  * `--assume-cost-pct` молча оставляла товары без себестоимости вне движка, и клиент получал отчёт не о том, что просили
  */
-const VALUE_OPTIONS = ['in', 'out', 'hours', 'every-minutes', 'min-pct', 'max-pct', 'margin-pct', 'fee-pct', 'assume-cost-pct', 'max-products', 'make-sample', 'rows'] as const;
+const VALUE_OPTIONS = ['in', 'out', 'hours', 'every-minutes', 'min-pct', 'max-pct', 'margin-pct', 'fee-pct', 'assume-cost-pct', 'max-products', 'step-pct', 'make-sample', 'rows'] as const;
 const FLAG_OPTIONS = ['keep', 'help'] as const;
 
 export function args(argv: string[]): Map<string, string | true> {
@@ -131,6 +132,7 @@ export async function main(argv: string[]): Promise<number> {
       minPct: number(a, 'min-pct', DEFAULT_OPTIONS.minPct, 1, 90), maxPct: number(a, 'max-pct', DEFAULT_OPTIONS.maxPct, 1, 500),
       marginPct: number(a, 'margin-pct', DEFAULT_OPTIONS.marginPct, 0, 90), feePct: number(a, 'fee-pct', DEFAULT_OPTIONS.feePct, 0, 60),
       assumeCostPct: a.has('assume-cost-pct') ? number(a, 'assume-cost-pct', 0, 1, 99) : null, maxProducts: number(a, 'max-products', DEFAULT_OPTIONS.maxProducts, 1, 20_000),
+      stepPct: a.has('step-pct') ? number(a, 'step-pct', 0, 1, 90) : null,
     };
   } catch (e) { log((e as Error).message); return 2; }
   let catalog;
@@ -173,7 +175,7 @@ export async function main(argv: string[]): Promise<number> {
     writeFileSync(report, renderReport(data));
     process.stdout.write(`${JSON.stringify({ report: basename(report), seconds: Math.round((Date.now() - started) / 100) / 10, products: c.rows, priced: c.inEngine, decisions: c.decisions,
       changes: c.changes, floorHeld: c.floorHeld, floorHeldMargin: c.floorHeldMargin, marginRefused: c.marginRefused, noCost: c.noCost, assumedCost: c.assumedCost, rejectedRows: c.rejectedRows,
-      belowFloor: data.belowFloor.length, raisedToFloor: c.raisedToFloor, heldWrites: c.heldWrites, sentToAmazon: c.sentToAmazon, portWrites: c.portWrites, top: data.top.length,
+      belowFloor: data.belowFloor.length, raisedToFloor: c.raisedToFloor, ladders: c.ladders, heldWrites: c.heldWrites, sentToAmazon: c.sentToAmazon, portWrites: c.portWrites, top: data.top.length,
       database: world.db.name, databaseKept: keep })}\n`);
     return 0;
   } finally {

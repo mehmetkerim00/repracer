@@ -34,9 +34,11 @@ export interface KilltestOptions {
   assumeCostPct: number | null;
   /** Больше товаров — дольше прогон: берутся самые продаваемые (или первые по файлу) */
   maxProducts: number;
+  /** Р-208 (шаг 73): предел шага цены в процентах — подъём к полу больше предела идёт лестницей; null — предела нет */
+  stepPct: number | null;
 }
 
-export const DEFAULT_OPTIONS: KilltestOptions = { hours: 12, competitorEveryMinutes: 60, minPct: 15, maxPct: 30, marginPct: 10, feePct: 15, assumeCostPct: null, maxProducts: 2000 };
+export const DEFAULT_OPTIONS: KilltestOptions = { hours: 12, competitorEveryMinutes: 60, minPct: 15, maxPct: 30, marginPct: 10, feePct: 15, assumeCostPct: null, maxProducts: 2000, stepPct: null };
 
 /** Ступени конкурента относительно цены клиента: спуск ниже пола (−15 % по умолчанию) и возврат; каждая ступень не круче 20 % */
 export const COMPETITOR_RAMP = [0.99, 0.94, 0.88, 0.82, 0.76, 0.82, 0.88, 0.94, 0.99, 1.04, 1.09, 1.04] as const;
@@ -149,7 +151,8 @@ export async function buildKilltestWorld(catalog: Catalog, options: KilltestOpti
       cost: p.costMinor !== null
         ? { currency: 'USD', costProfileId: `cp-kt-${i}`, unitCostMinor: p.costMinor, fixedFeeMinor: 0, feeRateBp: Math.round(options.feePct * 100), tax: { regime: 'SALES_TAX_EXCLUDED' } }
         : null,
-      ...(p.costMinor !== null ? { guardrails: { minMarginBp: Math.round(options.marginPct * 100) } } : {}),
+      ...(p.costMinor !== null ? { guardrails: { minMarginBp: Math.round(options.marginPct * 100),
+        ...(options.stepPct !== null ? { maxStepChangeBp: Math.round(options.stepPct * 100) } : {}) } } : {}),
     }));
     const engine = products.map((p, i) => ({ p, i })).filter(({ p }) => p.costMinor !== null);
     const firstPrice = (p: KilltestProduct, i: number) => Math.round(p.row.priceMinor * COMPETITOR_RAMP[i % COMPETITOR_RAMP.length]!);

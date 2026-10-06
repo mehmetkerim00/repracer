@@ -19,7 +19,7 @@ const titles: Record<AnyReasonCode, string> = {
   CROSS_CHANNEL_FX_UNAVAILABLE: 'Kein Wechselkurs für Kanalvergleich',
   FIXED_PRICE: 'Festpreis', MARGIN_TARGET: 'Preis für Zielmarge', BUYBOX_MATCH: 'Buy Box angleichen', BUYBOX_UNDERCUT: 'Buy Box unterbieten',
   LOWEST_MATCH: 'Niedrigsten Preis angleichen', LOWEST_UNDERCUT: 'Niedrigsten Preis unterbieten', CAPPED_AT_MIN_PRICE: 'Ziel auf min_price begrenzt',
-  CAPPED_AT_MAX_PRICE: 'Ziel auf max_price begrenzt', CAPPED_AT_MARGIN_FLOOR: 'Ziel auf die Mindestmargen-Untergrenze begrenzt', RAISED_TO_FLOOR: 'Auf die Untergrenze angehoben', ALREADY_AT_TARGET: 'Ziel bereits erreicht', WITHIN_DEADBAND: 'Änderung unter Schwelle', SHADOW_ALREADY_PROPOSED: 'Im Schattenmodus bereits vorgeschlagen',
+  CAPPED_AT_MAX_PRICE: 'Ziel auf max_price begrenzt', CAPPED_AT_MARGIN_FLOOR: 'Ziel auf die Mindestmargen-Untergrenze begrenzt', RAISED_TO_FLOOR: 'Auf die Untergrenze angehoben', RAISED_TOWARD_FLOOR: 'Einen Schritt zur Untergrenze angehoben', ALREADY_AT_TARGET: 'Ziel bereits erreicht', WITHIN_DEADBAND: 'Änderung unter Schwelle', SHADOW_ALREADY_PROPOSED: 'Im Schattenmodus bereits vorgeschlagen',
   ALREADY_WINNING_BUYBOX: 'Buy Box bereits gewonnen', NO_COMPETITOR_OFFERS: 'Keine Wettbewerber', TARGET_OUTSIDE_BOUNDS_HOLD: 'Ziel außerhalb der Grenzen — beibehalten',
   COMPETITOR_REQUIREMENT_NOT_MET: 'Kanaldaten reichen nicht', COST_INPUTS_MISSING: 'Kostendaten fehlen', MARGIN_UNATTAINABLE: 'Marge nicht erreichbar',
   BOUNDS_INVALID: 'Ungültige Grenzen', ENGINE_CURRENCY_MISMATCH: 'Währungen passen nicht', INVALID_STRATEGY_PARAMS: 'Ungültige Strategieeinstellung',
@@ -38,6 +38,9 @@ const titles: Record<AnyReasonCode, string> = {
   CHANNEL_DISTRUSTED: 'Kanal nicht vertrauenswürdig — alle Preise angehalten',
 };
 
+/** Р-209, Р-210: wonach der Preis ohne Wettbewerberbeobachtung angehoben wurde */
+const raiseAfter = (f: Fmt): string => (f.get('after') === 'COST_UPDATE' ? ' nach der Kostenänderung'
+  : f.get('after') === 'FLOOR_RECHECK' ? ' nach der Neuberechnung der Untergrenze vor dem Senden (aktuelle Kosten, Gebühren, Wechselkurs und MwSt.)' : '');
 const deviation = (f: Fmt) => opt(f, 'deviationBp', () => ` um ${f.bp('deviationBp')}`);
 
 const reasons: Record<AnyReasonCode, Template> = {
@@ -93,8 +96,9 @@ const reasons: Record<AnyReasonCode, Template> = {
   CAPPED_AT_MAX_PRICE: (f) => `Ziel ${f.money('targetMinor')} liegt über max_price — begrenzt auf ${f.money('maxMinor')}.`,
   CAPPED_AT_MARGIN_FLOOR: (f) => `Ziel ${f.money('targetMinor')} liegt unter Ihrer Mindestmargen-Untergrenze ${f.money('floorMinor')} (Marge ${f.bp('minMarginBp')}) — auf die Untergrenze gesetzt.`,
   RAISED_TO_FLOOR: (f) => (f.get('bound') === 'margin_floor'
-    ? `Ihr Preis ${f.money('currentMinor')} lag unter Ihrer Mindestmargen-Untergrenze — auf die Untergrenze ${f.money('floorMinor')} angehoben${opt(f, 'minMarginBp', () => ` (Marge ${f.bp('minMarginBp')})`)}.`
-    : `Ihr Preis ${f.money('currentMinor')} lag unter min_price — auf ${f.money('floorMinor')} angehoben.`),
+    ? `Ihr Preis ${f.money('currentMinor')} lag unter Ihrer Mindestmargen-Untergrenze — auf die Untergrenze ${f.money('floorMinor')} angehoben${raiseAfter(f)}${opt(f, 'minMarginBp', () => ` (Marge ${f.bp('minMarginBp')})`)}.`
+    : `Ihr Preis ${f.money('currentMinor')} lag unter min_price — auf ${f.money('floorMinor')} angehoben${raiseAfter(f)}.`),
+  RAISED_TOWARD_FLOOR: (f) => `Ihr Preis ${f.money('currentMinor')} liegt unter ${f.get('bound') === 'margin_floor' ? 'Ihrer Mindestmargen-Untergrenze' : 'min_price'} ${f.money('floorMinor')} — einen Schritt angehoben${raiseAfter(f)}, so weit die Schrittgrenze von ${f.bp('stepLimitBp')} erlaubt; bis zur Untergrenze noch etwa ${f.count('stepsLeft')} ${f.get('stepsLeft') === 1 ? 'Schritt' : 'Schritte'}.`,
   ALREADY_AT_TARGET: (f) => `Der Preis entspricht bereits dem Ziel ${f.money('targetMinor')}.`,
   WITHIN_DEADBAND: (f) => `Die Differenz ${f.money('deltaMinor')} liegt unter der Schwelle ${f.money('deadbandMinor')} — der Preis bleibt.`,
   // Р-171 (шаг 41): то же предложение уже удержано тенью — повторять его незачем
@@ -109,7 +113,10 @@ const reasons: Record<AnyReasonCode, Template> = {
   ENGINE_CURRENCY_MISMATCH: (f) => `Strategie nicht berechnet: ${f.value('source')} ist in ${f.raw('actual')}, das Angebot in ${f.raw('expected')}.`,
   INVALID_STRATEGY_PARAMS: (f) => `Strategie nicht berechnet: die Einstellung ${f.value('param')}${opt(f, 'settingMinor', () => ` ${f.money('settingMinor')}`)}${opt(f, 'settingBp', () => ` ${f.bp('settingBp')}`)} muss ${f.value('allowed')} sein.`,
 
-  APPROVED: (f) => `Preis ${f.money('finalMinor')} innerhalb von ${f.money('floorMinor')}–${f.money('ceilingMinor')} freigegeben.`,
+  // Р-208: Stufe der Leiter unter der Untergrenze — als Schritt zur Untergrenze freigegeben, nicht «innerhalb der Grenzen»
+  APPROVED: (f) => (Number(f.get('finalMinor')) < Number(f.get('floorMinor'))
+    ? `Schritt auf ${f.money('finalMinor')} zur Untergrenze ${f.money('floorMinor')} freigegeben; der Preis liegt noch unter der Untergrenze.`
+    : `Preis ${f.money('finalMinor')} innerhalb von ${f.money('floorMinor')}–${f.money('ceilingMinor')} freigegeben.`),
   NO_CHANGE: () => 'Keine Preisänderung — die Entscheidung wird ohne Versand gespeichert.',
   BELOW_MIN_PRICE: (f) => `Abgelehnt: ${f.money('proposedMinor')} liegt unter min_price ${f.money('minMinor')}${deviation(f)}.`,
   BELOW_MARGIN_FLOOR: (f) => `Abgelehnt: ${f.money('proposedMinor')} liegt unter der Mindestmargen-Untergrenze ${f.money('floorMinor')}${opt(f, 'minMarginBp', () => ` (Marge ${f.bp('minMarginBp')})`)}${deviation(f)}.`,

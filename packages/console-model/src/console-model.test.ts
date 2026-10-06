@@ -436,3 +436,22 @@ test('шаг 69 (K4): время в поясе продавца — летнее
   // Ревью шага 69, находка 15: пояс, неизвестный среде, не роняет экран — время в UTC
   assert.equal(messagesFor('en', { timeZone: 'Mars/Olympus_Mons' }).when('2026-10-02T07:34:21Z'), messagesFor('en').when('2026-10-02T07:34:21Z'));
 });
+
+/** Шаг 73 [Р-208…Р-210]: подъём к полу словами — «after cost update», ступень с числом оставшихся шагов, одобрение ступени ниже пола */
+test('step 73: a raise after a cost update, a step toward the floor and its approval read in words on both languages', () => {
+  const en = messagesFor('en');
+  const de = messagesFor('de');
+  const afterCost = { code: 'RAISED_TO_FLOOR', params: { currentMinor: 1600, floorMinor: 1829, bound: 'margin_floor', minMarginBp: 1000, after: 'COST_UPDATE', currency: 'EUR' } } as const;
+  assert.equal(describe(afterCost, en).text, 'Your price €16.00 was below your margin floor — raised to your margin floor €18.29 after cost update (margin 10%).');
+  assert.match(describe(afterCost, de).text, /auf die Untergrenze 18,29 € angehoben nach der Kostenänderung/);
+  const recheck = { ...afterCost, params: { ...afterCost.params, after: 'FLOOR_RECHECK' } };
+  assert.match(describe(recheck, en).text, /raised to your margin floor €18\.29 after the floor was recomputed before sending \(current cost, fees, exchange rate and VAT\)/);
+  const step = { code: 'RAISED_TOWARD_FLOOR', params: { currentMinor: 1000, floorMinor: 1524, bound: 'margin_floor', minMarginBp: 1000, stepLimitBp: 1000, stepsLeft: 4, currency: 'EUR' } } as const;
+  assert.equal(describe(step, en).text, 'Your price €10.00 is below your margin floor €15.24 — raised one step, as far as the step limit of 10% allows; about 4 more steps to the floor.');
+  assert.match(describe({ ...step, params: { ...step.params, stepsLeft: 1 } }, en).text, /about 1 more step to the floor/);
+  assert.match(describe(step, de).text, /noch etwa 4 Schritte/);
+  // Одобрение ступени ниже пола — не «в границах»
+  const approvedStep = { code: 'APPROVED', params: { finalMinor: 1100, floorMinor: 1524, ceilingMinor: 3000, currency: 'EUR' } } as const;
+  assert.equal(describe(approvedStep, en).text, 'Step to €11.00 toward the floor €15.24 approved; the price is still below the floor.');
+  assert.equal(describe({ ...approvedStep, params: { ...approvedStep.params, finalMinor: 1600 } }, en).text, 'Price €16.00 approved within €15.24–€30.00.');
+});

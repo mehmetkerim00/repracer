@@ -2,7 +2,7 @@ import { systemClock } from '@repracer/channel-port';
 import { createHash } from 'node:crypto';
 import { EXPLANATION_RULESETS } from './dictionary.ts';
 import { stalestFirst } from './reconciliation.ts';
-import type { HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveryStop, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow} from './store.ts';
+import type { FloorRaiseAfter, FloorRaiseCandidate, HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveryStop, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow} from './store.ts';
 import { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, FILE_PRODUCING_JOB_KINDS, INTERVENTION_SLICE_LIMIT, READ_ONLY_JOB_KINDS } from './store.ts';
 import { feedGroupOf, type ConsoleScopeRow, type ConsoleWriteRow, type ConsoleIntentRow, type DecisionPage, type DecisionPageQuery, type DecisionDetail, type ScopeDecisionStats, type InterventionSlice, type FeedPage, type FeedPageItem, type FeedPageQuery, type FeedStatusGroup, type WorldCounters } from './store.ts';
 /** Записи в полёте: одна на единицу, показываются в состоянии консоли; завершённые — только в ленте [Р-154] */
@@ -743,15 +743,19 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       if (this.contextVersion(row) !== d.context.contextVersion) {
         return { status: 'CONTEXT_CHANGED', writeScopeId: row.writeScopeId, reason: this.contextChange(d.context, row) };
       }
+      // Р-208: ступень лестницы к полу — ниже пола, но выше нынешней цены единицы (как tenant_data.price_ladder_step_allowed, 0180)
+      const rung = d.decision.outcome === 'APPROVED' && d.decision.finalMinor !== null && this.ladderStepAllowed(row, d.decision.finalMinor, d.decision.ladderFromMinor ?? null);
       if (d.decision.outcome === 'APPROVED' && d.decision.finalMinor !== null) {
+        // Ступень снимает только отказ «ниже пола», как 5-аргументная сверка базы (0180): потолок, вычислимость пола и остановки — как у
+        // любой цены (ревью шага 73, находка 5)
         const recheck = assertWriteWithinBounds(d.decision.finalMinor, this.boundsOf(row), row.currency, row.basis);
-        if (!recheck.ok) return { status: 'CONTEXT_CHANGED', writeScopeId: row.writeScopeId, reason: recheck.reason };
+        if (!recheck.ok && !(rung && recheck.reason.params.violated === 'FLOOR')) return { status: 'CONTEXT_CHANGED', writeScopeId: row.writeScopeId, reason: recheck.reason };
         // Как assert_price_floor при вставке записи (0051): пол маржи по текущей себестоимости, курсу и НДС [Р-83]
         const floor = this.priceFloor(row, input.now);
         if (!floor.ok) {
           return { status: 'CONTEXT_CHANGED', writeScopeId: row.writeScopeId, reason: { code: 'BOUND_UNRESOLVABLE', params: { bound: floor.cause === 'MISSING' ? 'min' : 'margin_floor', cause: floor.cause } } };
         }
-        if (d.decision.finalMinor < floor.floorMinor) {
+        if (d.decision.finalMinor < floor.floorMinor && !rung) {
           return {
             status: 'CONTEXT_CHANGED', writeScopeId: row.writeScopeId,
             reason: floor.marginFloorMinor !== null && floor.marginFloorMinor > floor.minMinor
@@ -970,7 +974,11 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       return { status: 'DISCARDED_STALE', reason: { code: 'WRITE_BLOCKED_BY_BOUND_RECHECK', params: { amountMinor: w.amountMinor, floorMinor: null, ceilingMinor: null, violated: 'FLOOR_UNRESOLVABLE', cause: priced.cause, currency: w.currency } } };
     }
     const floor = priced.floorMinor;
-    if (w.amountMinor < floor) {
+    const decision = this.decisions.find((x) => x.decisionId === w.decisionId) as { finalMinor: number | null; ladderFromMinor?: number | null } | undefined;
+    const rung = decision?.finalMinor === w.amountMinor && this.ladderStepAllowed(row, w.amountMinor, decision.ladderFromMinor ?? null);
+    if (w.amountMinor < floor && !rung) {
+      // Р-209: отказ перепроверки пола — запрос на переоценку единицы, как триггер истории записей (0180)
+      this.requestFloorRaise(row.writeScopeId, 'FLOOR_RECHECK', now);
       return {
         status: 'DISCARDED_STALE',
         reason: {
@@ -1845,6 +1853,45 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
 
   /** Р-126: время последнего опроса товара (как channel_data.competitor_poll_state) */
   readonly pollState = new Map<string, Instant>();
+
+  /** Шаг 73: запросы на переоценку единицы [Р-209, Р-210] — как tenant_data.floor_raise_request (0180): ключ — единица и повод */
+  readonly floorRaiseRequests = new Map<string, { writeScopeId: string; after: FloorRaiseAfter; requestedAt: Instant }>();
+
+  requestFloorRaise(writeScopeId: string, after: FloorRaiseAfter, at: Instant): void {
+    this.floorRaiseRequests.set(`${writeScopeId}|${after}`, { writeScopeId, after, requestedAt: at });
+  }
+
+  /** Р-208: ступень — решение-ступень с этой суммой, и сумма выше нынешней цены единицы (как 0180) */
+  private ladderStepAllowed(row: { currentPriceMinor: number | null }, amountMinor: number, ladderFromMinor: number | null): boolean {
+    return ladderFromMinor !== null && row.currentPriceMinor !== null && amountMinor > row.currentPriceMinor;
+  }
+
+  async listFloorRaiseScopes(_tenantId: string, channelAccountId: string, now: Instant, limit: number): Promise<FloorRaiseCandidate[]> {
+    // Как FLOOR_RAISE_NOT_HELD в PostgreSQL: под остановкой человеком или недоверием каналу запрос ждёт снятия (ревью шага 73, находка 1)
+    const engine = (id: string) => {
+      const s = this.scopes.get(id);
+      return s !== undefined && s.channelAccountId === channelAccountId && s.pricingMode === 'ENGINE' && s.status === 'ACTIVE'
+        && !this.activeStop(s.channelAccountId, s.marketplace) && !this.activeDistrust(s.channelAccountId, s.marketplace);
+    };
+    const requests: FloorRaiseCandidate[] = [...this.floorRaiseRequests.values()].filter((r) => engine(r.writeScopeId))
+      .sort((a, b) => Date.parse(a.requestedAt) - Date.parse(b.requestedAt));
+    const seen = new Set(requests.map((r) => r.writeScopeId));
+    const ladders: FloorRaiseCandidate[] = [];
+    for (const s of this.scopes.values()) {
+      if (seen.has(s.writeScopeId) || !engine(s.writeScopeId)) continue;
+      const last = this.decisions.filter((d) => d.writeScopeId === s.writeScopeId).sort((x, y) => Date.parse(y.decidedAt) - Date.parse(x.decidedAt))[0] as { ladderFromMinor?: number | null; decidedAt: Instant } | undefined;
+      // Как в PostgreSQL (ревью шага 73, находка 5): «в полёте» — in_flight_write_id, окно ступеней — сутки
+      if (last?.ladderFromMinor !== null && last?.ladderFromMinor !== undefined && Date.parse(last.decidedAt) > Date.parse(now) - 86_400_000
+          && !this.inFlight(s.writeScopeId)) ladders.push({ writeScopeId: s.writeScopeId, after: null, requestedAt: null });
+    }
+    return [...requests, ...ladders].slice(0, Math.max(0, limit));
+  }
+
+  async consumeFloorRaise(_tenantId: string, writeScopeId: string, after: FloorRaiseAfter, requestedAt: Instant): Promise<void> {
+    const key = `${writeScopeId}|${after}`;
+    const r = this.floorRaiseRequests.get(key);
+    if (r && Date.parse(r.requestedAt) <= Date.parse(requestedAt)) this.floorRaiseRequests.delete(key);
+  }
 
   async listScheduledScopes(_tenantId: string, channelAccountId: string, now: Instant, limit: number): Promise<string[]> {
     const dayAgo = Date.parse(now) - 86_400_000;

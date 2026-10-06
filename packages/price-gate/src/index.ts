@@ -135,6 +135,7 @@ export function decide(input: GateInput): PriceDecisionDraft {
   let minIds: string[] = [];
   let maxIds: string[] = [];
   let deviationBp: number | null = null;
+  let rung = false;
   const currency = scope.currency;
 
   const finish = (
@@ -163,6 +164,7 @@ export function decide(input: GateInput): PriceDecisionDraft {
     // Р-61: курс, по которому себестоимость переведена в валюту цены, — вместе с решением
     fx: input.cost?.fx ?? null,
     boundDeviationBp: deviationBp,
+    ladderFromMinor: outcome === 'APPROVED' && rung ? intent.currentMinor : null,
   });
   const fail = (check: string, code: GateRejectionReason, params: Reason['params'], outcome: 'REJECTED' | 'HELD' = 'REJECTED', alert: PriceDecisionDraft['alert'] = null) => {
     const reason: Reason = { code, params };
@@ -261,13 +263,19 @@ export function decide(input: GateInput): PriceDecisionDraft {
 
   // 7–8. Проверка 1 из 3: предложенная цена против обеих границ
   const proposed = intent.proposedMinor;
+  /**
+   * Р-208 (шаг 73, OQ-251): ступень лестницы к полу — ниже пола, но выше нынешней цены. Пропускается ТОЛЬКО ступень: причина стратегии
+   * RAISED_TOWARD_FLOOR, предел шага задан, цена строго между нынешней и полом; размер шага проверяет проверка STEP ниже, как у любой цены
+   */
+  rung = intent.reason.code === 'RAISED_TOWARD_FLOOR' && guardrails.maxStepChangeBp !== null && intent.currentMinor !== null
+    && proposed > intent.currentMinor && proposed < floor;
   // Отклонение от нарушенной границы — основа «опасного изменения» [Р-73]
-  if (proposed < absolute.value.minMinor) {
+  if (proposed < absolute.value.minMinor && !rung) {
     deviationBp = boundDeviationBp(proposed, absolute.value.minMinor);
     return fail('LOWER_BOUND', 'BELOW_MIN_PRICE', { proposedMinor: proposed, minMinor: absolute.value.minMinor, deviationBp, source: 'GATE', currency }, 'REJECTED',
       { code: 'PRICE_REJECTED_BY_BOUND', severity: 'WARNING' });
   }
-  if (proposed < floor) {
+  if (proposed < floor && !rung) {
     deviationBp = boundDeviationBp(proposed, floor);
     return fail('LOWER_BOUND', 'BELOW_MARGIN_FLOOR', {
       proposedMinor: proposed, floorMinor: floor, minMinor: absolute.value.minMinor, minMarginBp: guardrails.minMarginBp, deviationBp, currency,
@@ -299,7 +307,7 @@ export function decide(input: GateInput): PriceDecisionDraft {
 
   // 11. Проверка 2 из 3: итоговая цена после всех корректировок
   const finalMinor = proposed;
-  if (finalMinor < floor || finalMinor > ceiling) {
+  if ((finalMinor < floor && !rung) || finalMinor > ceiling) {
     return fail('FINAL_RECHECK', 'INTERNAL_BOUND_VIOLATION', { check: 'FINAL_RECHECK', amountMinor: finalMinor, floorMinor: floor, ceilingMinor: ceiling, currency }, 'REJECTED',
       { code: 'PRICE_GATE_INTERNAL_VIOLATION', severity: 'CRITICAL' });
   }

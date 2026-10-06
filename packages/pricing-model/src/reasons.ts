@@ -108,6 +108,8 @@ export const ENGINE_REASON_CODES = [
   // Р-207 (шаг 72): цель ниже пола маржи — цена на полу маржи; нынешняя цена ниже пола — подъём до пола
   'CAPPED_AT_MARGIN_FLOOR',
   'RAISED_TO_FLOOR',
+  // Р-208 (шаг 73): подъём к полу больше предела шага — ступень на предел шага, «осталось ~N шагов»
+  'RAISED_TOWARD_FLOOR',
   // NO_OP
   'ALREADY_AT_TARGET',
   'WITHIN_DEADBAND',
@@ -288,6 +290,11 @@ export const PARAM_CONSTRAINTS = ['POSITIVE', 'NON_NEGATIVE', 'MARGIN_BELOW_100_
 export const BOUND_NAMES = ['min', 'max', 'margin_floor', 'both'] as const;
 /** Чем был пол, до которого поднята цена [Р-207]: min_price или пол маржи */
 export const FLOOR_BOUNDS = ['min', 'margin_floor'] as const;
+/**
+ * После чего поднята цена до пола без нового наблюдения конкурентов: себестоимость выросла (Р-210) или перепроверка базы перед
+ * отправкой отказала по новому курсу и единица переоценена (Р-209)
+ */
+export const RAISE_AFTER = ['COST_UPDATE', 'FLOOR_RECHECK'] as const;
 export const BOUND_CAUSES = [
   'MISSING', 'CURRENCY_MISMATCH', 'BASIS_MISMATCH', 'INVALID_AMOUNT', 'MIN_ABOVE_MAX', 'COST_PROFILE_MISSING', 'COST_CURRENCY_MISMATCH',
   'VAT_UNKNOWN', 'UNATTAINABLE', 'INVALID_INPUT', 'MARGIN_FLOOR_ABOVE_MAX_PRICE', 'FX_RATE_UNAVAILABLE', 'FX_RATE_STALE', 'UNSUPPORTED_CURRENCY',
@@ -393,7 +400,14 @@ export const REASON_PARAMS: Readonly<Record<AnyReasonCode, ParamSchema>> = {
   CAPPED_AT_MIN_PRICE: { targetMinor: money('CHANNEL_DERIVED'), minMinor: money('TENANT'), currency: currency() },
   CAPPED_AT_MAX_PRICE: { targetMinor: money('CHANNEL_DERIVED'), maxMinor: money('TENANT'), currency: currency() },
   CAPPED_AT_MARGIN_FLOOR: { targetMinor: money('CHANNEL_DERIVED'), floorMinor: money('TENANT'), minMinor: money('TENANT'), minMarginBp: bp('TENANT'), currency: currency() },
-  RAISED_TO_FLOOR: { currentMinor: money('TENANT'), floorMinor: money('TENANT'), bound: oneOf(FLOOR_BOUNDS, 'TENANT'), minMarginBp: bp('TENANT', O), currency: currency() },
+  RAISED_TO_FLOOR: {
+    currentMinor: money('TENANT'), floorMinor: money('TENANT'), bound: oneOf(FLOOR_BOUNDS, 'TENANT'), minMarginBp: bp('TENANT', O),
+    after: oneOf(RAISE_AFTER, 'TENANT', O), currency: currency(),
+  },
+  RAISED_TOWARD_FLOOR: {
+    currentMinor: money('TENANT'), floorMinor: money('TENANT'), bound: oneOf(FLOOR_BOUNDS, 'TENANT'), minMarginBp: bp('TENANT', O),
+    stepLimitBp: bp('TENANT'), stepsLeft: count('TENANT'), after: oneOf(RAISE_AFTER, 'TENANT', O), currency: currency(),
+  },
   ALREADY_AT_TARGET: { targetMinor: money('CHANNEL_DERIVED'), currency: currency() },
   WITHIN_DEADBAND: { deltaMinor: money('CHANNEL_DERIVED'), deadbandMinor: money('TENANT'), currency: currency() },
   ALREADY_WINNING_BUYBOX: {},

@@ -91,6 +91,8 @@ export function priceDecisionRow(decision: PgRow): PgRow {
     price_basis: decision.price_basis,
     effective_floor_minor: num(decision.effective_floor_minor),
     effective_ceiling_minor: num(decision.effective_ceiling_minor),
+    // Р-208: ступень лестницы к полу — в ClickHouse то же исключение из floor_respected, что в PostgreSQL (095_step73)
+    ladder_from_minor: num(decision.ladder_from_minor),
     min_price_ids: decision.min_price_ids ?? [],
     max_price_ids: decision.max_price_ids ?? [],
     guardrail_ids: decision.guardrail_ids ?? [],

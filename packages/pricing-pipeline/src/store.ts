@@ -537,6 +537,10 @@ export interface InboundNotificationEntry {
   receivedAt: Instant;
 }
 
+export type FloorRaiseAfter = 'COST_UPDATE' | 'FLOOR_RECHECK';
+/** Шаг 73: единица для подъёма к полу без наблюдения конкурентов; `after` — повод (null — следующая ступень лестницы [Р-208]) */
+export interface FloorRaiseCandidate { writeScopeId: string; after: FloorRaiseAfter | null; requestedAt: Instant | null }
+
 export interface PricingStore {
   loadEvaluationContext(tenantId: string, key: ProductKey, now: Instant, shift: ShiftWindow): Promise<EvaluationContext>;
   /** Пересчёт без нового снимка: контекст единицы и последний принятый снимок её товара */
@@ -634,6 +638,14 @@ export interface PricingStore {
    * первыми, не больше `limit`. Иначе 10 000 единиц давали бы ~960 000 решений NO_OP в сутки на тенанта
    */
   listScheduledScopes(tenantId: string, channelAccountId: string, now: Instant, limit: number): Promise<string[]>;
+  /**
+   * Шаг 73: единицы аккаунта, которые пересчёт поднимает к полу без наблюдения конкурентов — запрос на переоценку, поставленный базой
+   * (COST_UPDATE — себестоимость выросла [Р-210], FLOOR_RECHECK — перепроверка пола перед отправкой отказала [Р-209]), и лестница к
+   * полу в работе (последнее решение — ступень, записи в полёте нет [Р-208]). Самые давние первыми, не больше `limit`
+   */
+  listFloorRaiseScopes(tenantId: string, channelAccountId: string, now: Instant, limit: number): Promise<FloorRaiseCandidate[]>;
+  /** Запрос на переоценку исполнен — снимается, если с прочитанного момента новый не поставлен */
+  consumeFloorRaise(tenantId: string, writeScopeId: string, after: FloorRaiseAfter, requestedAt: Instant): Promise<void>;
   /** Р-126: опрос товаров выполнен — время последнего опроса */
   markPolled(tenantId: string, channelAccountId: string, queries: readonly CompetitorQuery[], at: Instant): Promise<void>;
   omnibusCheck(tenantId: string, writeScopeId: string, startsAt: Instant): Promise<OmnibusPriorPrice>;

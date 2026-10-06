@@ -251,6 +251,30 @@ test('step 71: an interrupted run deletes its database (it holds the client cata
   assert.equal(existsSync(output), false, 'no report from an interrupted run');
 });
 
+/**
+ * Шаг 73 [Р-208]: с пределом шага подъём к полу маржи — лестницей: отчёт показывает первую ступень и сколько ступеней осталось (в тени
+ * цена на витрине не меняется, и лестница дальше первой ступени не идёт), пределы называет словами
+ */
+test('step 73: with a step limit the report shows the first step toward the margin floor and the steps left', () => {
+  const input = join(dir, 'ladder.csv');
+  const output = join(dir, 'ladder.report.html');
+  writeFileSync(input, syntheticCatalog('simple', 60));
+  const r = run(['--in', input, '--out', output, '--hours', '2', '--step-pct', '5']);
+  assert.equal(r.status, 0, r.stderr.slice(-2000));
+  const summary = summaryOf(r.stdout);
+  // Товар 25-й (себестоимость 80 % цены): пол маржи ⌈0,8 · 4 / 3⌉ ≈ +6,7 % — больше предела 5 %: ступень +5 %, потом ещё одна до пола
+  assert.deepEqual([summary.belowFloor, summary.raisedToFloor, summary.ladders], [2, 0, 1], JSON.stringify(summary));
+  const html = readFileSync(output, 'utf8');
+  assert.match(html, /would be raised one step toward your margin floor · \+5% · about 1 more step/);
+  assert.match(html, /In this run the engine would have raised 0 of them to the floor and 1 one step toward it \(shadow mode: nothing was sent\)\./);
+  assert.match(html, /With the step limit of 5% set for this run, a raise larger than the limit goes up step by step/);
+  assert.match(html, /<li>Step limit: a price changes by at most 5% at a time/);
+  assert.match(html, /A step limit of 5% was set for this run/);
+  // Заголовок «sales_30d» этой синтетики — строка клиента: утечки на рендере с заменёнными строками клиента проверяет сам прогон
+  // (код 0 выше); здесь — что новые внутренние имена шага 73 в отчёт не попали
+  assert.doesNotMatch(html, /RAISED_TOWARD_FLOOR|stepsLeft|steps_left|LADDER|ladder_from/);
+});
+
 test('step 72: an unknown option or an option without its value is refused before anything is read — a typo does not change the run silently', () => {
   const sample = join(dir, 'options.csv');
   writeFileSync(sample, syntheticCatalog('simple', 20));
@@ -319,9 +343,9 @@ function minimalReport(x: { header: string; ourText: string; sku?: string }): Re
   return {
     generatedAt: 'Oct 6, 2026', fileName: 'client_file.csv', format: 'comma-separated text', hours: 1, options: DEFAULT_OPTIONS, salesHeader: x.header,
     counts: { rows: 1, rejectedRows: 0, inRun: 1, inEngine: 1, withFileCost: 1, assumedCost: 0, noCost: 0, skippedByLimit: 0, decisions: 1, assumedCostDecisions: 0,
-      changes: 1, floorHeld: 1, floorHeldAssumedMin: 0, floorHeldMargin: 1, marginRefused: 0, ceilingHeld: 0, raisedToFloor: 1, heldWrites: 1, competitorUpdates: 1, sentToAmazon: 0, dbDispatched: 0, portWrites: 0 },
+      changes: 1, floorHeld: 1, floorHeldAssumedMin: 0, floorHeldMargin: 1, marginRefused: 0, ceilingHeld: 0, raisedToFloor: 1, ladders: 0, heldWrites: 1, competitorUpdates: 1, sentToAmazon: 0, dbDispatched: 0, portWrites: 0 },
     savings: null,
-    belowFloor: [{ label: `${sku}_title`, sku, sales: 1, priceMinor: 1000, costMinor: 800, profitMinor: 50, floorMinor: 1067, status: 'RAISED', engineMinor: 1067, refused: null }],
+    belowFloor: [{ label: `${sku}_title`, sku, sales: 1, priceMinor: 1000, costMinor: 800, profitMinor: 50, floorMinor: 1067, status: 'RAISED', engineMinor: 1067, refused: null, stepsLeft: null }],
     top: [{ label: `${sku}_title`, sku, sales: 1, currentMinor: 1000, decidedMinor: 900, floorMinor: 900, ceilingMinor: 1300, floorKind: 'MARGIN', atFloor: true, refused: false,
       costSource: 'FILE', when: 'Oct 6, 2026', why: ['Undercut the lowest price $9.00 by $0.01'], checks: ['Floor'] }],
     notDone: [{ title: 'The price never went below the floor', text: x.ourText }],

@@ -469,9 +469,13 @@ SELECT pg_temp.ok('the database records how far below the floor the strategy wan
             now() + interval '1 hour', 'MATCH_BUYBOX'),
            (%L, 'a4430000-0000-4000-8000-0000000000f2', now(), 'a6000000-0000-0000-0000-000000000009', 'DIVERGENCE_REASSERT', 1300, 'EUR', 'GROSS', '{}',
             '{"intentClass":"CHANGED","reason":{"code":"BUYBOX_UNDERCUT"},"explanation":[{"code":"BUYBOX_UNDERCUT","params":{"targetMinor":1300,"currency":"EUR"}}]}',
+            now() + interval '1 hour', 'MATCH_BUYBOX'),
+           -- Шаг 73 (ревью, находка 4): ступень лестницы 11,00 € ниже цели 12,00 € — пол её не удержал, строки нет (пол 15,24 € — не удержанная цена)
+           (%L, 'a4430000-0000-4000-8000-0000000000f3', now(), 'a6000000-0000-0000-0000-000000000009', 'DIVERGENCE_REASSERT', 1100, 'EUR', 'GROSS', '{}',
+            '{"intentClass":"CHANGED","reason":{"code":"RAISED_TOWARD_FLOOR"},"explanation":[{"code":"BUYBOX_UNDERCUT","params":{"targetMinor":1200,"currency":"EUR"}},{"code":"CAPPED_AT_MARGIN_FLOOR","params":{"targetMinor":1200,"floorMinor":1524,"minMinor":500,"minMarginBp":1000,"currency":"EUR"}},{"code":"RAISED_TOWARD_FLOOR","params":{"currentMinor":1000,"floorMinor":1524,"bound":"margin_floor","stepLimitBp":1000,"stepsLeft":4,"currency":"EUR"}}]}',
             now() + interval '1 hour', 'MATCH_BUYBOX');
     SELECT count(*), max(below_minor), bool_and(shadow) INTO rows, held, marked FROM channel_data.floor_hold WHERE tenant_id = %L
-       AND price_intent_id IN ('a4430000-0000-4000-8000-0000000000f1', 'a4430000-0000-4000-8000-0000000000f2');
+       AND price_intent_id IN ('a4430000-0000-4000-8000-0000000000f1', 'a4430000-0000-4000-8000-0000000000f2', 'a4430000-0000-4000-8000-0000000000f3');
     IF rows <> 1 OR held <> 150 THEN
       RAISE EXCEPTION 'floor holds: %% rows, %% held — expected one row of 150 (OQ-232)', rows, held;
     END IF;
@@ -481,7 +485,7 @@ SELECT pg_temp.ok('the database records how far below the floor the strategy wan
        WHERE ws.write_scope_id = 'a6000000-0000-0000-0000-000000000009') THEN
       RAISE EXCEPTION 'the floor hold does not carry the write mode of its account (OQ-233)';
     END IF;
-  END $inner$ $q$, :tA, :tA, :tA));
+  END $inner$ $q$, :tA, :tA, :tA, :tA));
 ROLLBACK;
 
 -- ================================================================ Р-178 (шаг 44): миры тенантов без демо

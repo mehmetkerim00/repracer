@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0174_verify_schema_invariants_v45.sql';
+const VERIFY = 'migrations/0181_verify_schema_invariants_v48.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -178,8 +178,9 @@ export const R93_ROWS = [
   },
   {
     row: '42', critical: true, invariant: 'Р-83: пол с полом маржи перед каждой отправкой',
+    // Шаг 73 (0180): вызов получает решение записи — ступень лестницы к полу [Р-208]; без пересчёта пола — по-прежнему только min_price
     mutations: [m(replaceInFunction('tenant_data.channel_write_before_update()',
-      "NEW.floor_at_dispatch_minor := tenant_data.assert_price_floor(NEW.tenant_id, NEW.write_scope_id, NEW.amount_minor, 'at dispatch');",
+      "NEW.floor_at_dispatch_minor := tenant_data.assert_price_floor(NEW.tenant_id, NEW.write_scope_id, NEW.amount_minor, 'at dispatch', NEW.price_decision_id);",
       'NEW.floor_at_dispatch_minor := (SELECT f.min_price_minor FROM tenant_data.effective_price_floor(NEW.tenant_id, NEW.write_scope_id) f);'),
     verify('below the recomputed margin floor was dispatched'),
     node(T('write-recheck.pg.test.ts'), 'the unit cost rose between decision and dispatch', { re: 'cost: the write reached the channel: .*' }, '^false$'))],
@@ -2336,6 +2337,50 @@ export const STEP69_ROWS = [
       m(replaceInFunction('maintenance.delete_expired_rows(timestamptz, integer)',
         "UPDATE tenant_data.product SET title = NULL, title_channel_read_at = NULL WHERE title_channel_read_at < p_now - interval '18 months';", ''),
         smoke('a channel title not read for 18 months is erased by retention (OQ-249, Р-3)')),
+    ],
+  },
+];
+
+/**
+ * Шаг 73 [Р-208…Р-210]: ступень лестницы к полу — единственная цена ниже пола, которую пропускает база, и только выше нынешней цены,
+ * которую база знает сама; запросы на переоценку единицы ставит база (себестоимость, оценка комиссии, отказ перепроверки пола)
+ */
+export const STEP73_ROWS = [
+  {
+    row: 'шаг 73 (Р-208)', critical: true,
+    invariant: 'ниже пола — только ступень лестницы: решение-ступень с той же суммой, сумма выше нынешней цены по базе, форма ступени в решении',
+    mutations: [
+      m(dropConstraint('price_decision_ladder_step', 'channel_data.price_decision'), smoke('a ladder step not above the price it starts from')),
+      m(replaceInFunction('tenant_data.price_ladder_step_allowed(uuid,uuid,bigint,uuid)',
+        'RETURN current_minor IS NOT NULL AND p_amount_minor > current_minor;', 'RETURN true;'),
+        node(T('floor-raise.pg.test.ts'), 'below the floor the database lets a write through only as a step', { re: 'a step below the current price: .*' }, '^false$')),
+      m(replaceInFunction('tenant_data.price_ladder_step_allowed(uuid,uuid,bigint,uuid)',
+        "IF d.ladder_from_minor IS NULL OR d.outcome IS DISTINCT FROM 'APPROVED' OR d.final_amount_minor IS DISTINCT FROM p_amount_minor THEN", 'IF false THEN'),
+        node(T('floor-raise.pg.test.ts'), 'below the floor the database lets a write through only as a step', { re: 'a plain decision below the floor: .*' }, '^false$')),
+      m(replaceInFunction('tenant_data.assert_price_floor(uuid,uuid,bigint,text,uuid)',
+        'IF p_decision_id IS NOT NULL AND tenant_data.price_ladder_step_allowed(p_tenant_id, p_write_scope_id, p_amount_minor, p_decision_id) THEN', 'IF true THEN'),
+        node(T('floor-raise.pg.test.ts'), 'below the floor the database lets a write through only as a step', { re: 'a step below the current price: .*' }, '^false$')),
+      // Ревью шага 73, находка 3: витрина разошлась с отправленным — ступень выше и цены на витрине
+      m(replaceInFunction('tenant_data.price_ladder_step_allowed(uuid,uuid,bigint,uuid)',
+        "IF observed_status = 'DIVERGED' AND observed_minor IS NOT NULL THEN", 'IF false THEN'),
+        node(T('floor-raise.pg.test.ts'), 'after an external edit above our last price', { re: 'a step below the storefront price after an external edit: .*' }, '^false$')),
+      // Ревью шага 73, находка 4: удержанной у ступени считается сама ступень, а не пол — дайджест не приписывает полу денег
+      m(replaceInFunction('channel_data.price_intent_record_floor_hold()', "WHERE x ->> 'code' = 'RAISED_TOWARD_FLOOR') THEN", 'WHERE false) THEN'),
+        smoke('the database records how far below the floor the strategy wanted (OQ-232)')),
+    ],
+  },
+  {
+    row: 'шаг 73 (Р-209, Р-210)', critical: false,
+    invariant: 'запрос на переоценку единицы ставит база: новая версия себестоимости, изменение оценки комиссии, запись цены, завершённая отказом перепроверки пола',
+    mutations: [
+      m(dropTrigger('zf_cost_profile_request_floor_raise', 'tenant_data.cost_profile'),
+        node(T('floor-raise.pg.test.ts'), 'Р-210: the unit cost rose above the price', 'a new cost version is a request, set by the database', '^false$')),
+      m(dropTrigger('zf_fee_estimate_changed_request_floor_raise', 'channel_data.fee_estimate'),
+        node(T('floor-raise.pg.test.ts'), 'Р-210: the unit cost rose above the price', 'a fee estimate change is a request too', '^false$')),
+      m(dropTrigger('zf_fee_estimate_request_floor_raise', 'channel_data.fee_estimate'),
+        node(T('floor-raise.pg.test.ts'), 'Р-210: the unit cost rose above the price', 'a new fee estimate is a request too', '^false$')),
+      m(dropTrigger('zf_channel_write_history_request_floor_raise', 'tenant_data.channel_write_history'),
+        node(T('floor-raise.pg.test.ts'), 'Р-209: a write refused by the floor recheck', 'a write refused by the floor recheck is a request for a re-evaluation', '^false$')),
     ],
   },
 ];

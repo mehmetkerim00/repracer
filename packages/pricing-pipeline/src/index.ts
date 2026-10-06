@@ -1,4 +1,4 @@
-export { createPricingPipeline, type HaltReviewReport, type PipelineDeps, type PollOptions, type ReconciliationReport, type PricingPipeline, type ScopeReport, type SnapshotReport, type Stage, type StageRecord, type StrategyPreview } from './pipeline.ts';
+export { createPricingPipeline, floorRaiseRetryable, type HaltReviewReport, type PipelineDeps, type PollOptions, type ReconciliationReport, type PricingPipeline, type ScopeReport, type SnapshotReport, type Stage, type StageRecord, type StrategyPreview } from './pipeline.ts';
 export type {
   AdminActor,
   BoundsEditInput,
@@ -83,7 +83,7 @@ export {
   type TierConfig,
 } from './polling.ts';
 export { EXPLANATION_RULESETS } from './dictionary.ts';
-export type { ChannelObservation, ConsoleAuditRow, DiscoveredCatalogOffer, DiscoveryStop } from './store.ts';
+export type { ChannelObservation, ConsoleAuditRow, DiscoveredCatalogOffer, DiscoveryStop, FloorRaiseAfter, FloorRaiseCandidate } from './store.ts';
 export { comparedValue, DEFAULT_LOSS_GRACE_SECONDS, LOSS_GRACE_BASIS, reconcile, rotation, snapshotDigest, stalestFirst, type HeldState, type ReconciliationOutcome } from './reconciliation.ts';
 export { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, READ_ONLY_JOB_KINDS } from './store.ts';
 // Шаг 34 [Р-149, Р-150]: онбординг и честное состояние канала

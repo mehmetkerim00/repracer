@@ -47,7 +47,7 @@ import type {
   ProductKey,
   ScopeEvaluationContext,
   ShiftWindow,
-  SnapshotOutcome, ConsoleAuditRow, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, ConsoleStateOptions, ConsoleCatalogPage, ConsoleCatalogFactsQuery, ConsoleCatalogFacts, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveredCatalogOffer, DiscoveryStop, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, ChannelObservation} from '@repracer/pricing-pipeline';
+  SnapshotOutcome, ConsoleAuditRow, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, ConsoleStateOptions, ConsoleCatalogPage, ConsoleCatalogFactsQuery, ConsoleCatalogFacts, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveredCatalogOffer, DiscoveryStop, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, ChannelObservation, FloorRaiseAfter, FloorRaiseCandidate } from '@repracer/pricing-pipeline';
 import { FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT, stalestFirst } from '@repracer/pricing-pipeline';
 import { inTenant, RollbackWith, type PgPool, type Tx } from './db.ts';
 import { PgWriteQueueStore } from './write-queue.ts';
@@ -174,6 +174,21 @@ const DISTRUST_WHERE = `
    LIMIT 1`;
 const ACTIVE_DISTRUST = `SELECT d.channel_distrust_id ${DISTRUST_WHERE}`;
 const ACTIVE_DISTRUST_JSON = `SELECT json_build_object('distrustId', d.channel_distrust_id, 'reasonCode', d.reason_code, 'marketplace', d.marketplace, 'detectedAt', d.detected_at) ${DISTRUST_WHERE}`;
+
+/**
+ * Шаг 73 (ревью, находка 1): единица под остановкой человеком [Р-69] или недоверием каналу [Р-118] переоценку по запросу не получает —
+ * Gate всё равно удержал бы цену, а каждый заход оставлял бы решение; запрос ждёт снятия остановки. Как STOP_WHERE и DISTRUST_WHERE,
+ * но по единице `s` без её витрины в строке
+ */
+const FLOOR_RAISE_NOT_HELD = `NOT EXISTS (SELECT 1 FROM tenant_data.price_stop st
+                  WHERE st.tenant_id = s.tenant_id AND st.released_at IS NULL
+                    AND (st.scope_type = 'TENANT' OR (st.channel_account_id = s.channel_account_id AND (st.scope_type = 'CHANNEL_ACCOUNT'
+                         OR EXISTS (SELECT 1 FROM tenant_data.offer_mapping m
+                                     WHERE m.tenant_id = s.tenant_id AND m.price_write_scope_id = s.write_scope_id AND m.marketplace = st.marketplace)))))
+            AND NOT EXISTS (SELECT 1 FROM channel_data.channel_distrust d
+                  WHERE d.tenant_id = s.tenant_id AND d.channel_account_id = s.channel_account_id AND d.released_at IS NULL
+                    AND (d.marketplace IS NULL OR EXISTS (SELECT 1 FROM tenant_data.offer_mapping m
+                                     WHERE m.tenant_id = s.tenant_id AND m.price_write_scope_id = s.write_scope_id AND m.marketplace = d.marketplace)))`;
 
 /** Остановка человеком [Р-69, Р-70]: тенант — на любой аккаунт; аккаунт; витрина */
 const STOP_WHERE = `
@@ -984,8 +999,8 @@ export class PgPricingStore implements PricingStore {
       `INSERT INTO channel_data.price_decision
          (tenant_id, intent_created_at, price_intent_id, write_scope_id, decided_at, outcome, final_amount_minor, currency, price_basis,
           effective_floor_minor, effective_ceiling_minor, min_price_ids, max_price_ids, guardrail_ids, cost_profile_id, fee_inputs, violations,
-          rejection_reason, reason_params, checks, fx, explanation, bound_deviation_bp, no_change_reason, sanity_ruleset, gate_profile)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::uuid[], $13::uuid[], $14::uuid[], $15, $16, $17::text[], $18, $19, $20, $21, $22, $23, $24, $25, $26)
+          rejection_reason, reason_params, checks, fx, explanation, bound_deviation_bp, no_change_reason, sanity_ruleset, gate_profile, ladder_from_minor)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::uuid[], $13::uuid[], $14::uuid[], $15, $16, $17::text[], $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
        RETURNING price_decision_id`,
       [tenantId, intent.createdAt, intentId, scope.writeScopeId, decision.decidedAt, decision.outcome, decision.finalMinor, decision.currency, decision.basis,
        decision.effectiveFloorMinor, decision.effectiveCeilingMinor, decision.minPriceIds, decision.maxPriceIds, decision.guardrailIds,
@@ -997,7 +1012,8 @@ export class PgPricingStore implements PricingStore {
        // Р-75: ссылки слепка на справочник — столбцами с внешним ключом
        // Р-80: столбцы intent в решении заполняет триггер из price_intent — приложение их не передаёт
        decision.explanation ? JSON.stringify(decision.explanation) : null, decision.boundDeviationBp, decision.noChangeReason ?? null,
-       decision.sanityRuleset ?? null, decision.gateProfile ?? null],
+       // Р-208: ступень лестницы к полу — запись ниже пола база пропустит только как ступень выше нынешней цены (0180)
+       decision.sanityRuleset ?? null, decision.gateProfile ?? null, decision.ladderFromMinor ?? null],
     );
     const decisionId: string = decisionRow!.price_decision_id;
     // Ссылка на полный снимок — данные канала, 18 месяцев [Р-38, Р-68]; та же транзакция
@@ -2683,6 +2699,39 @@ export class PgPricingStore implements PricingStore {
         lastSeenMs: r.last_seen ? Date.parse(r.last_seen instanceof Date ? r.last_seen.toISOString() : String(r.last_seen)) : null,
       }));
       return { queries: stalestFirst(items, size, cycle), total: items.length };
+    });
+  }
+
+  async listFloorRaiseScopes(tenantId: string, channelAccountId: string, now: Instant, limit: number): Promise<FloorRaiseCandidate[]> {
+    return this.tx(tenantId, async (tx) => {
+      // Запросы, поставленные базой (0180), — по ключу таблицы; лестницы — ступени тенанта за сутки по частичному индексу
+      // price_decision_ladder_idx, у которых последнее решение единицы — ступень и записи в полёте нет
+      const { rows } = await tx.query(
+        // Время запроса — текстом с микросекундами: забор сравнивает «не новее прочитанного», а дата JS их теряет
+        `SELECT r.write_scope_id, r.reason AS after, to_char(r.requested_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS requested_at
+           FROM tenant_data.floor_raise_request r
+           JOIN tenant_data.write_scope s ON s.tenant_id = r.tenant_id AND s.write_scope_id = r.write_scope_id
+          WHERE r.tenant_id = $1 AND s.channel_account_id = $2 AND s.pricing_mode = 'ENGINE' AND s.status = 'ACTIVE' AND ${FLOOR_RAISE_NOT_HELD}
+         UNION ALL
+         SELECT l.write_scope_id, NULL, NULL
+           FROM (SELECT DISTINCT d.write_scope_id FROM channel_data.price_decision d
+                  WHERE d.tenant_id = $1 AND d.ladder_from_minor IS NOT NULL AND d.decided_at > $3::timestamptz - interval '1 day') l
+           JOIN tenant_data.write_scope s ON s.tenant_id = $1 AND s.write_scope_id = l.write_scope_id
+           JOIN tenant_data.write_scope_sync_state ss ON ss.tenant_id = s.tenant_id AND ss.write_scope_id = s.write_scope_id
+           JOIN LATERAL (SELECT d.ladder_from_minor FROM channel_data.price_decision d
+                          WHERE d.tenant_id = s.tenant_id AND d.write_scope_id = s.write_scope_id
+                          ORDER BY d.decided_at DESC LIMIT 1) last ON last.ladder_from_minor IS NOT NULL
+          WHERE s.channel_account_id = $2 AND s.pricing_mode = 'ENGINE' AND s.status = 'ACTIVE' AND ss.in_flight_write_id IS NULL AND ${FLOOR_RAISE_NOT_HELD}
+          ORDER BY 3 NULLS LAST, 1 LIMIT $4`,
+        [tenantId, channelAccountId, now, Math.max(0, limit)]);
+      return rows.map((r) => ({ writeScopeId: String(r.write_scope_id), after: r.after ?? null, requestedAt: r.requested_at ?? null }));
+    });
+  }
+
+  async consumeFloorRaise(tenantId: string, writeScopeId: string, after: FloorRaiseAfter, requestedAt: Instant): Promise<void> {
+    await this.tx(tenantId, async (tx) => {
+      await tx.query(`DELETE FROM tenant_data.floor_raise_request WHERE tenant_id = $1 AND write_scope_id = $2 AND reason = $3 AND requested_at <= $4::timestamptz`,
+        [tenantId, writeScopeId, after, requestedAt]);
     });
   }
 

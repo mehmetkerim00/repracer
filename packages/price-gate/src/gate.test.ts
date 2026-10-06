@@ -173,3 +173,28 @@ test('Р-118: distrust of the channel holds a fixed, a margin and a manual price
     if (ruleCode !== 'MATCH_BUYBOX') assert.equal(decide(gate(1790, { scope: { ...scope, channelHalt: halt }, intent: intent(1790, { ruleCode }) })).outcome, 'APPROVED', ruleCode);
   }
 });
+
+/**
+ * Р-208 (шаг 73): ступень лестницы к полу — единственная цена ниже пола, которую пропускает Gate. Только причина RAISED_TOWARD_FLOOR,
+ * только при заданном пределе шага, только строго между нынешней ценой и полом; шаг — в пределе, как у любой цены
+ */
+test('step 73 (Р-208): a ladder step below the floor is approved only as a step toward it — reason, step limit, above the current price', () => {
+  // Пол маржи: себестоимость 10,00 €, комиссия 15 %, НДС 19 %, маржа 10 % → 16,50 €; нынешняя 14,00 €, предел шага 10 % → ступень до 15,40 €
+  const guardrails = { ...NO_GUARDRAILS, guardrailIds: ['g-1'], minMarginBp: 1000, maxStepChangeBp: 1000 };
+  const step = (proposed: number, over: Partial<PriceIntentDraft> = {}) => decide(gate(proposed, {
+    intent: intent(proposed, { currentMinor: 1400, reason: { code: 'RAISED_TOWARD_FLOOR', params: {} }, ...over }), guardrails, cost,
+  }));
+  const ok = step(1540);
+  assert.ok(ok.outcome === 'APPROVED' && ok.finalMinor === 1540 && ok.ladderFromMinor === 1400, JSON.stringify(ok));
+  assert.equal(ok.effectiveFloorMinor, 1650, 'the step is below the floor');
+  // Без предела шага ступени нет — цена ниже пола отклоняется, как прежде
+  assert.equal(decide(gate(1540, { intent: intent(1540, { currentMinor: 1400, reason: { code: 'RAISED_TOWARD_FLOOR', params: {} } }), guardrails: { ...guardrails, maxStepChangeBp: null }, cost })).rejectionReason, 'BELOW_MARGIN_FLOOR');
+  // Другая причина стратегии — не ступень
+  assert.equal(step(1540, { reason: { code: 'BUYBOX_MATCH', params: {} } }).rejectionReason, 'BELOW_MARGIN_FLOOR');
+  // Ниже нынешней цены — не подъём
+  assert.equal(step(1350).rejectionReason, 'BELOW_MARGIN_FLOOR');
+  // Шаг больше предела — STEP_LIMIT, как у любой цены
+  assert.equal(step(1550).rejectionReason, 'STEP_LIMIT');
+  // Обычное решение ступенью не помечается
+  assert.equal(decide(gate(1790)).ladderFromMinor, null);
+});

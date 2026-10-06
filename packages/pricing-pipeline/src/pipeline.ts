@@ -34,7 +34,7 @@ import {
 import { runStrategy, strategyAvailability } from '@repracer/strategy-engine';
 import { channelRefusal, writeAlertCode, type DispatchStep, type WriteDispatcher } from '@repracer/write-dispatcher';
 import { planPollingTiers } from './polling.ts';
-import { PIPELINE_WRITE_FIELD } from './store.ts';
+import { PIPELINE_WRITE_FIELD, type FloorRaiseAfter, type FloorRaiseCandidate } from './store.ts';
 import { comparedValue, DEFAULT_LOSS_GRACE_SECONDS, LOSS_GRACE_BASIS, reconcile, type HeldState } from './reconciliation.ts';
 import type {
   HaltSampleObservation,
@@ -72,6 +72,18 @@ export interface StageRecord {
   stage: Stage;
   outcome: string;
   reason?: Reason;
+}
+
+/**
+ * Шаг 73 (ревью, находка 1): переоценку по запросу базы [Р-209, Р-210] нужно повторить — решение не зафиксировано (сбой фиксации,
+ * смена контекста до последней попытки), оценка пропущена бюджетом правок или Gate удержал цену остановкой человеком, недоверием
+ * каналу или частотой изменений. Отказ перепроверки пола базой при фиксации — суждение (алерт поднят), повторять его нечего
+ */
+export function floorRaiseRetryable(r: ScopeReport): boolean {
+  if (r.stages.some((s) => s.stage === 'COMMIT' && (s.outcome === 'ERROR' || s.outcome === 'BOUNDS_CHANGED'))) return true;
+  if (r.stages.some((s) => s.stage === 'SCOPE' && s.outcome === 'SKIPPED' && s.reason?.code === 'WRITE_EDIT_BUDGET_EXHAUSTED')) return true;
+  const held = r.decision?.rejectionReason;
+  return held === 'PRICING_STOPPED' || held === 'CHANNEL_DISTRUSTED' || held === 'CHANGE_RATE_LIMIT';
 }
 
 export interface ScopeReport {
@@ -210,6 +222,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
     sc: ScopeEvaluationContext, snapshot: AcceptedSnapshot | null, trigger: { type: TriggerType; sourceEventId?: string },
     now: Instant, effects: Effect[], stages: StageRecord[],
     source: { snapshotRef: SnapshotRef | null; sanity: SanitySummary | null },
+    raise: { after: FloorRaiseAfter | null } = { after: null },
   ): ScopeEvaluation {
     const { scope, bounds } = sc;
     const report: ScopeReport = { writeScopeId: scope.writeScopeId, stages };
@@ -242,6 +255,9 @@ export function createPricingPipeline(deps: PipelineDeps) {
         minMinor: bounds.min.amountMinor, maxMinor: bounds.max.amountMinor,
         marginFloor: margin.kind === 'OK' ? { amountMinor: margin.floorMinor, minMarginBp: margin.minMarginBp } : null,
       },
+      // Р-208: подъём к полу больше предела шага — лестницей; Р-209, Р-210: повод переоценки без наблюдения конкурентов
+      stepLimitBp: sc.guardrails.maxStepChangeBp,
+      raiseAfter: raise.after,
       currentPriceMinor: scope.currentPriceMinor,
       // Р-171: в тени сравнение идёт и с уже удержанным предложением — иначе оно повторялось бы на каждом опросе
       ...(scope.shadowLastProposedMinor === null || scope.shadowLastProposedMinor === undefined ? {} : { shadowLastProposedMinor: scope.shadowLastProposedMinor }),
@@ -834,30 +850,61 @@ export function createPricingPipeline(deps: PipelineDeps) {
      * их не будит, а на канале без данных конкурентов (eBay, Р-39) иначе не было бы ни одного решения. Сбой одной единицы не
      * останавливает остальные: он считается и возвращается.
      */
-    async recomputeScheduled(ctx: AdapterCallContext, options: { limit?: number } = {}): Promise<{ scopes: number; changed: number; failed: number; firstError: string | null }> {
-      // Ревью шага 47, находка 5: только должные (без решения за 24 часа), не больше предела за заход, самые давние первыми.
-      // Находка 6: запись, которой бюджет правок отказал, даёт CRITICAL PRICE_WRITE_NOT_SENT — при пересчёте раз в сутки не чаще раза в сутки
-      const ids = await store.listScheduledScopes(ctx.tenantId, ctx.channelAccountId, deps.now(), options.limit ?? 1_000);
+    async recomputeScheduled(ctx: AdapterCallContext, options: { limit?: number } = {}): Promise<{ scopes: number; changed: number; failed: number; firstError: string | null; raised: number }> {
       let changed = 0;
       let failed = 0;
+      let raised = 0;
       let firstError: string | null = null;
+      const failure = async (id: string, error: unknown) => {
+        failed += 1;
+        const name = String((error as { code?: string }).code ?? (error as Error).name ?? 'Error').slice(0, 60);
+        firstError ??= name;
+        await emit(ctx, [{ kind: 'log', level: 'WARN', code: 'SCHEDULED_RECOMPUTE_FAILED', message: 'SCHEDULED_RECOMPUTE_FAILED', details: { writeScopeId: id, error: name } }]);
+      };
+      /**
+       * Шаг 73: сначала — подъём к полу без наблюдения конкурентов. Запрос базы после роста себестоимости [Р-210] или после отказа
+       * перепроверки пола по новому курсу [Р-209] — переоценка с поводом «после чего»; лестница в работе [Р-208] — следующая ступень.
+       * Запрос снимается после переоценки (новый, поставленный за это время, остаётся)
+       */
+      const raises = await store.listFloorRaiseScopes(ctx.tenantId, ctx.channelAccountId, deps.now(), options.limit ?? 1_000);
+      // У единицы бывает два повода сразу (себестоимость и отказ перепроверки) — одна переоценка, снимаются оба (ревью шага 73, находка 2)
+      const byScope = new Map<string, FloorRaiseCandidate[]>();
+      for (const c of raises) byScope.set(c.writeScopeId, [...(byScope.get(c.writeScopeId) ?? []), c]);
+      const done = new Set<string>(byScope.keys());
+      for (const [writeScopeId, cs] of byScope) {
+        const after = cs.find((c) => c.after)?.after ?? null;
+        try {
+          const r = await this.recompute(ctx, writeScopeId, { type: after ? 'COST_CHANGE' : 'SCHEDULE' }, { raiseAfter: after });
+          const committed = r.decision !== undefined && !r.stages.some((x) => x.stage === 'COMMIT' || (x.stage === 'WRITE_RECHECK' && x.outcome === 'BLOCKED'));
+          if (committed && r.decision?.decisionClass === 'CHANGED') { changed += 1; raised += 1; }
+          // Ревью шага 73, находка 1: запрос снимается только суждением — решение зафиксировано и не удержано остановкой, частотой или
+          // бюджетом; сбой фиксации, пропуск по бюджету и удержание оставляют запрос до следующего захода (единицы под остановкой
+          // выборка не берёт, пока остановка действует)
+          if (!floorRaiseRetryable(r)) {
+            for (const c of cs) if (c.after && c.requestedAt) await store.consumeFloorRaise(ctx.tenantId, writeScopeId, c.after, c.requestedAt);
+          }
+        } catch (error) {
+          await failure(writeScopeId, error);
+        }
+      }
+      // Ревью шага 47, находка 5: только должные (без решения за 24 часа), не больше предела за заход, самые давние первыми.
+      // Находка 6: запись, которой бюджет правок отказал, даёт CRITICAL PRICE_WRITE_NOT_SENT — при пересчёте раз в сутки не чаще раза в сутки
+      const ids = (await store.listScheduledScopes(ctx.tenantId, ctx.channelAccountId, deps.now(), options.limit ?? 1_000)).filter((id) => !done.has(id));
       for (const id of ids) {
         try {
           const r = await this.recompute(ctx, id, { type: 'SCHEDULE' });
           if (r.decision?.decisionClass === 'CHANGED') changed += 1;
         } catch (error) {
-          failed += 1;
-          const name = String((error as { code?: string }).code ?? (error as Error).name ?? 'Error').slice(0, 60);
-          firstError ??= name;
           // Сбой единицы не молчит: код в журнал, число — в итог работы (все должные упали — работа FAILED, пауза Р-132)
-          await emit(ctx, [{ kind: 'log', level: 'WARN', code: 'SCHEDULED_RECOMPUTE_FAILED', message: 'SCHEDULED_RECOMPUTE_FAILED', details: { writeScopeId: id, error: name } }]);
+          await failure(id, error);
         }
       }
-      return { scopes: ids.length, changed, failed, firstError };
+      return { scopes: ids.length + done.size, changed, failed, firstError, raised };
     },
 
     /** Пересчёт единицы без нового снимка: изменилась себестоимость, расписание, ручной запуск */
-    async recompute(ctx: AdapterCallContext, writeScopeId: string, trigger: { type: TriggerType; sourceEventId?: string }): Promise<ScopeReport> {
+    async recompute(ctx: AdapterCallContext, writeScopeId: string, trigger: { type: TriggerType; sourceEventId?: string },
+      options: { raiseAfter?: FloorRaiseAfter | null } = {}): Promise<ScopeReport> {
       let report: ScopeReport = { writeScopeId, stages: [] };
       const outcome = await commitWithRetry(ctx, async () => {
         const now = deps.now();
@@ -868,7 +915,8 @@ export function createPricingPipeline(deps: PipelineDeps) {
           return { commit: { key: { channelAccountId: ctx.channelAccountId, marketplace: '', channelProductRef: '', condition: '' }, now, decisions: [] }, effects, reports: [report] };
         }
         const { scope } = loaded.context;
-        const evaluation = evaluateScope(loaded.context, loaded.snapshot, trigger, now, effects, [], { snapshotRef: loaded.snapshotRef, sanity: loaded.snapshotRef?.sanity ?? null });
+        const evaluation = evaluateScope(loaded.context, loaded.snapshot, trigger, now, effects, [], { snapshotRef: loaded.snapshotRef, sanity: loaded.snapshotRef?.sanity ?? null },
+          { after: options.raiseAfter ?? null });
         report = evaluation.report;
         const key = { channelAccountId: scope.channelAccountId, marketplace: scope.marketplace, channelProductRef: scope.channelProductRef, condition: scope.condition };
         return { commit: { key, now, decisions: evaluation.toCommit ? [evaluation.toCommit] : [] }, effects, reports: [report] };

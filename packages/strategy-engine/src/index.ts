@@ -36,6 +36,13 @@ export interface EngineInput {
    * предложили». В боевом режиме поле пустое.
    */
   shadowLastProposedMinor?: number | null;
+  /**
+   * Р-208 (шаг 73): предел шага (`max_step_change_bp` ограничений). Подъём к полу больше предела идёт лестницей: ступень на предел
+   * шага, следующая — на следующей оценке. Предел не снимается, Gate проверяет его как у любой цены
+   */
+  stepLimitBp?: number | null;
+  /** Р-209, Р-210 (шаг 73): переоценка без наблюдения конкурентов — после роста себестоимости или отказа перепроверки по новому курсу */
+  raiseAfter?: 'COST_UPDATE' | 'FLOOR_RECHECK' | null;
   now: Instant;
   trigger: { type: TriggerType; sourceEventId?: string };
   intentTtlSeconds?: number;
@@ -122,6 +129,12 @@ function r<C extends EngineReasonCode>(code: C, params: Reason['params'] = {}): 
   return { code, params };
 }
 
+/**
+ * Р-209, Р-210 (шаг 73): подъём к полу без снимка конкурентов — цена из данных продавца (себестоимость, комиссия, маржа). Своё правило:
+ * не «из данных конкурентов» (`COMPETITOR_DERIVED_RULES`), поэтому слепок снимка ему не нужен, а остановка таких цен его не держит
+ */
+export const FLOOR_RAISE_RULE = 'FLOOR_RAISE';
+
 export function runStrategy(input: EngineInput): EngineResult {
   const { strategy, snapshot, writeScope, bounds, currentPriceMinor: current, now } = input;
   const heldInShadow = input.shadowLastProposedMinor ?? null;
@@ -137,9 +150,71 @@ export function runStrategy(input: EngineInput): EngineResult {
   }
   if (!Number.isSafeInteger(strategy.deadbandMinor) || strategy.deadbandMinor < 0) return invalidMoney('deadbandMinor', strategy.deadbandMinor, 'NON_NEGATIVE');
 
+  /**
+   * Р-207 (шаг 72, OQ-250): пол стратегии — наибольшее из min_price и пола маржи [Р-5]. До решения стратегия, следующая за рынком,
+   * вставала на min_price, а пол маржи держала только Gate ОТКАЗОМ — и цена, уже стоящая ниже пола маржи, там и оставалась. Пол маржи
+   * выше max_price стратегия не берёт: это противоречие настройки, его называет Gate (MARGIN_FLOOR_ABOVE_MAX_PRICE).
+   */
+  const margin = bounds.marginFloor ?? null;
+  const marginBinding = margin !== null && Number.isSafeInteger(margin.amountMinor) && margin.amountMinor > bounds.minMinor && margin.amountMinor <= bounds.maxMinor;
+  const floorMinor = marginBinding ? margin!.amountMinor : bounds.minMinor;
+  const belowFloor = current !== null && current < floorMinor;
+  const stepLimit = input.stepLimitBp !== null && input.stepLimitBp !== undefined && Number.isSafeInteger(input.stepLimitBp) && input.stepLimitBp > 0 ? input.stepLimitBp : null;
+  const floorParams = { floorMinor, bound: marginBinding ? 'margin_floor' : 'min', ...(marginBinding ? { minMarginBp: margin!.minMarginBp } : {}),
+    // Повод «после изменения себестоимости» — только у пола маржи: min_price себестоимость не двигает (ревью шага 73, находка 2)
+    ...(input.raiseAfter && (input.raiseAfter !== 'COST_UPDATE' || marginBinding) ? { after: input.raiseAfter } : {}) };
+  /** Шаг в базисных пунктах, как его считает Gate: вверх до пункта */
+  const stepBp = (from: number, to: number) => Math.ceil(((to - from) * 10_000) / from);
+  /** Наибольшая цена, до которой Gate пропустит шаг от `from` */
+  const rungFrom = (from: number) => from + Math.floor((from * stepLimit!) / 10_000);
+  /**
+   * Подъём от нынешней цены ниже пола [Р-207]: до пола, если шаг в пределе; иначе — ступень на предел шага и «осталось ~N шагов»
+   * [Р-208]. Ступень ниже пола, но выше нынешней цены: её пропускают Gate и база только как ступень лестницы (0180)
+   */
+  const raiseStep = (): { to: number; reason: Reason } => {
+    const cur = current!;
+    if (stepLimit !== null && stepBp(cur, floorMinor) > stepLimit) {
+      const to = rungFrom(cur);
+      if (to > cur) {
+        let p = to;
+        let left = 0;
+        for (let guard = 0; p < floorMinor && guard < 10_000; guard += 1) {
+          left += 1;
+          if (stepBp(p, floorMinor) <= stepLimit) break;
+          const next = rungFrom(p);
+          if (next <= p) break;
+          p = next;
+        }
+        return { to, reason: r('RAISED_TOWARD_FLOOR', { currentMinor: cur, ...floorParams, stepLimitBp: stepLimit, stepsLeft: left, currency }) };
+      }
+    }
+    return { to: floorMinor, reason: r('RAISED_TO_FLOOR', { currentMinor: cur, ...floorParams, currency }) };
+  };
+  /**
+   * NO_OP стратегии, следующей за рынком (удержание вне границ, Buy Box уже наш, конкурентов нет), не держит цену ниже пола: при
+   * нынешней цене ниже пола она поднимается к полу обычным путём (сравнение с предложением тени, Gate, бюджет, журнал)
+   */
+  const holdOrRaise = (holdAt: number, main: Reason, chain: Reason[], reference: number | null): EngineResult => {
+    if (!belowFloor) return intent('NO_OP', holdAt, main, chain, reference);
+    const step = raiseStep();
+    return propose(step.to, [...chain, step.reason], reference, true);
+  };
+  const marketFollowing = params.type === 'MATCH_BUYBOX' || params.type === 'BEAT_LOWEST';
+
   const req = requirementOf(params);
   const unmet = unmetRequirements(req, snapshot, now);
   if (unmet.length > 0) {
+    /**
+     * Р-210 (шаг 73, OQ-253): нынешняя цена ниже пола — подъём к полу и без свежего снимка конкурентов: он опирается только на данные
+     * продавца (себестоимость, комиссию, маржу), а наблюдения конкурента можно ждать часами. Р-209: так же — переоценка после отказа
+     * перепроверки перед отправкой по новому курсу
+     */
+    if (marketFollowing && belowFloor) {
+      const step = raiseStep();
+      // Цена из данных продавца, а не конкурентов: своё правило — слепок снимка ей не нужен, остановка цен из данных конкурентов [Р-51]
+      // её не держит
+      return propose(step.to, [step.reason], null, true, FLOOR_RAISE_RULE);
+    }
     return notEvaluated(r('COMPETITOR_REQUIREMENT_NOT_MET', {
       unmet: unmet.join(','), requiredCompleteness: req.kind, requiredN: req.minN ?? null,
       actualCompleteness: snapshot?.completeness.kind ?? null, actualN: snapshot?.completeness.kind === 'TOP_N' ? snapshot.completeness.n : null,
@@ -150,26 +225,6 @@ export function runStrategy(input: EngineInput): EngineResult {
     const foreign = [snapshot.buybox?.price, ...snapshot.offers.map((o) => o.price)].find((m) => m && m.currency !== writeScope.currency);
     if (foreign) return notEvaluated(r('ENGINE_CURRENCY_MISMATCH', { source: 'SNAPSHOT', actual: foreign.currency, expected: writeScope.currency }));
   }
-
-  /**
-   * Р-207 (шаг 72, OQ-250): пол стратегии — наибольшее из min_price и пола маржи [Р-5]. До решения стратегия, следующая за рынком,
-   * вставала на min_price, а пол маржи держала только Gate ОТКАЗОМ — и цена, уже стоящая ниже пола маржи, там и оставалась. Пол маржи
-   * выше max_price стратегия не берёт: это противоречие настройки, его называет Gate (MARGIN_FLOOR_ABOVE_MAX_PRICE).
-   */
-  const margin = bounds.marginFloor ?? null;
-  const marginBinding = margin !== null && Number.isSafeInteger(margin.amountMinor) && margin.amountMinor > bounds.minMinor && margin.amountMinor <= bounds.maxMinor;
-  const floorMinor = marginBinding ? margin!.amountMinor : bounds.minMinor;
-  /** Нынешняя цена ниже пола — подъём до пола: отдельный шаг объяснения, он и главная причина изменения */
-  const raised = (): Reason => r('RAISED_TO_FLOOR', {
-    currentMinor: current, floorMinor, bound: marginBinding ? 'margin_floor' : 'min', ...(marginBinding ? { minMarginBp: margin!.minMarginBp } : {}), currency,
-  });
-  const belowFloor = current !== null && current < floorMinor;
-  /**
-   * NO_OP стратегии, следующей за рынком (удержание вне границ, Buy Box уже наш, конкурентов нет), не держит цену ниже пола: при
-   * нынешней цене ниже пола она поднимается до пола обычным путём (сравнение с предложением тени, Gate, бюджет, журнал)
-   */
-  const holdOrRaise = (holdAt: number, main: Reason, chain: Reason[], reference: number | null): EngineResult =>
-    (belowFloor ? propose(floorMinor, [...chain, raised()], reference) : intent('NO_OP', holdAt, main, chain, reference));
 
   const explanation: Reason[] = [];
   let target: number;
@@ -264,29 +319,42 @@ export function runStrategy(input: EngineInput): EngineResult {
       explanation.push(marginBinding
         ? r('CAPPED_AT_MARGIN_FLOOR', { targetMinor: target, floorMinor, minMinor: bounds.minMinor, minMarginBp: margin!.minMarginBp, currency })
         : r('CAPPED_AT_MIN_PRICE', { targetMinor: target, minMinor: bounds.minMinor, currency }));
-      if (belowFloor) explanation.push(raised());
+      if (belowFloor) {
+        const step = raiseStep();
+        proposed = step.to;
+        explanation.push(step.reason);
+      }
     } else {
       proposed = bounds.maxMinor;
       explanation.push(r('CAPPED_AT_MAX_PRICE', { targetMinor: target, maxMinor: bounds.maxMinor, currency }));
     }
   }
   if (proposed <= 0) proposed = bounds.minMinor;
-  return propose(proposed, explanation, referenceMinor);
+  /**
+   * Р-208: нынешняя цена ниже пола, предложение на полу или выше, но шаг до него больше предела — ступень к полу вместо отказа Gate
+   * STEP_LIMIT на каждой оценке; дальше пола лестница не ведёт
+   */
+  if (belowFloor && stepLimit !== null && proposed >= floorMinor && stepBp(current!, proposed) > stepLimit) {
+    const step = raiseStep();
+    proposed = step.to;
+    explanation.push(step.reason);
+  }
+  return propose(proposed, explanation, referenceMinor, belowFloor && proposed > current!);
 
   /**
-   * Предложение цены: сравнение с нынешней ценой и с предложением тени. Подъём до пола (нынешняя ниже пола, предложение на полу или
-   * выше) зоной нечувствительности не глушится — она не держит цену ниже пола [Р-207]
+   * Предложение цены: сравнение с нынешней ценой и с предложением тени. Подъём от цены ниже пола (до пола, ступенью или выше)
+   * зоной нечувствительности не глушится — она не держит цену ниже пола [Р-207, Р-208]
    */
-  function propose(proposed: number, chain: Reason[], reference: number | null): EngineResult {
-    if (current !== null && !(belowFloor && proposed >= floorMinor)) {
+  function propose(proposed: number, chain: Reason[], reference: number | null, raising = false, ruleCode: string = params.type): EngineResult {
+    if (current !== null && !raising) {
       const delta = Math.abs(proposed - current);
       if (delta === 0) {
         const same = r('ALREADY_AT_TARGET', { targetMinor: proposed, currency });
-        return intent('NO_OP', current, same, [...chain, same], reference);
+        return intent('NO_OP', current, same, [...chain, same], reference, ruleCode);
       }
       if (delta < strategy.deadbandMinor) {
         const band = r('WITHIN_DEADBAND', { deltaMinor: delta, deadbandMinor: strategy.deadbandMinor, currency });
-        return intent('NO_OP', current, band, [...chain, band], reference);
+        return intent('NO_OP', current, band, [...chain, band], reference, ruleCode);
       }
     }
     /**
@@ -297,12 +365,12 @@ export function runStrategy(input: EngineInput): EngineResult {
      */
     if (heldInShadow !== null && Math.abs(proposed - heldInShadow) <= strategy.deadbandMinor) {
       const already = r('SHADOW_ALREADY_PROPOSED', { proposedMinor: proposed, heldMinor: heldInShadow, currency });
-      return intent('NO_OP', current ?? heldInShadow, already, [...chain, already], reference);
+      return intent('NO_OP', current ?? heldInShadow, already, [...chain, already], reference, ruleCode);
     }
-    return intent('CHANGED', proposed, chain[chain.length - 1]!, chain, reference);
+    return intent('CHANGED', proposed, chain[chain.length - 1]!, chain, reference, ruleCode);
   }
 
-  function intent(intentClass: 'CHANGED' | 'NO_OP', proposedMinor: number, main: Reason, chain: Reason[], reference: number | null): EngineResult {
+  function intent(intentClass: 'CHANGED' | 'NO_OP', proposedMinor: number, main: Reason, chain: Reason[], reference: number | null, ruleCode: string = params.type): EngineResult {
     const ttl = input.intentTtlSeconds ?? 600;
     return {
       kind: 'INTENT',
@@ -311,7 +379,7 @@ export function runStrategy(input: EngineInput): EngineResult {
         strategyId: strategy.strategyId,
         strategyVersion: strategy.version,
         trigger: input.trigger,
-        ruleCode: params.type,
+        ruleCode,
         intentClass,
         proposedMinor,
         currentMinor: current,

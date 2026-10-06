@@ -202,3 +202,62 @@ test('step 72 (Р-207): a margin floor above max price is left to the Gate; fixe
   const fixed = runStrategy(input({ type: 'FIXED', priceMinor: 1500 }, { bounds: { minMinor: 1000, maxMinor: 3000, marginFloor: { amountMinor: 1820, minMarginBp: 1000 } }, currentPriceMinor: 1700 }));
   assert.ok(fixed.kind === 'INTENT' && fixed.intent.proposedMinor === 1500 && fixed.intent.reason.code === 'FIXED_PRICE');
 });
+
+/**
+ * Р-208 (шаг 73, OQ-251): предел шага не снимается — подъём к полу больше предела идёт лестницей: каждая оценка — ступень на предел
+ * шага, пока цена не дойдёт до пола; объяснение называет, сколько ступеней осталось
+ */
+test('step 73 (Р-208): a raise larger than the step limit climbs to the floor one step per evaluation, with the steps left named', () => {
+  const bounds = { minMinor: 500, maxMinor: 3000, marginFloor: { amountMinor: 1524, minMarginBp: 1000 } };
+  // Цель конкурента 1790 выше пола 1524, нынешняя 1000: шаг 79 % больше предела 10 % — ступень к полу, а не отказ Gate
+  const first = runStrategy(input(matchBuybox(), { bounds, currentPriceMinor: 1000, stepLimitBp: 1000 }));
+  assert.ok(first.kind === 'INTENT' && first.intent.intentClass === 'CHANGED' && first.intent.proposedMinor === 1100, JSON.stringify(first));
+  assert.deepEqual(first.intent.reason, { code: 'RAISED_TOWARD_FLOOR', params: { currentMinor: 1000, floorMinor: 1524, bound: 'margin_floor', minMarginBp: 1000, stepLimitBp: 1000, stepsLeft: 4, currency: 'EUR' } });
+  // Лестница целиком: каждая следующая оценка начинает с цены предыдущей ступени; пол — последней ступенью, причина — подъём до пола
+  const climbed: number[] = [];
+  let current = 1000;
+  for (let guard = 0; guard < 20 && current < 1524; guard += 1) {
+    const r = runStrategy(input(matchBuybox({ undercutMinor: 0 }), { bounds, currentPriceMinor: current, stepLimitBp: 1000,
+      snapshot: markAcceptedBySanity(snapshot({ buybox: { price: eur(1300), isSelf: false } }), 'test') }));
+    assert.ok(r.kind === 'INTENT' && r.intent.intentClass === 'CHANGED', JSON.stringify(r));
+    // Шаг ни разу не больше предела — Gate проверяет его как у любой цены
+    assert.ok(Math.ceil(((r.intent.proposedMinor - current) * 10_000) / current) <= 1000);
+    current = r.intent.proposedMinor;
+    climbed.push(current);
+  }
+  assert.deepEqual(climbed, [1100, 1210, 1331, 1464, 1524]);
+  // У цели ниже пола маржи цепочка называет и пол маржи, и ступень
+  const capped = runStrategy(input(matchBuybox(), { bounds, currentPriceMinor: 1000, stepLimitBp: 1000,
+    snapshot: markAcceptedBySanity(snapshot({ buybox: { price: eur(1300), isSelf: false } }), 'test') }));
+  assert.ok(capped.kind === 'INTENT');
+  assert.deepEqual(capped.intent.explanation.map((x) => x.code), ['BUYBOX_UNDERCUT', 'CAPPED_AT_MARGIN_FLOOR', 'RAISED_TOWARD_FLOOR']);
+  // Тень: ступень, уже удержанная тенью, не повторяется на каждой оценке
+  const shadow = runStrategy(input(matchBuybox(), { bounds, currentPriceMinor: 1000, stepLimitBp: 1000, shadowLastProposedMinor: 1100 }));
+  assert.ok(shadow.kind === 'INTENT' && shadow.intent.intentClass === 'NO_OP' && shadow.intent.reason.code === 'SHADOW_ALREADY_PROPOSED');
+  // Отрицательный контроль: без предела шага — сразу пол (прежнее Р-207)
+  const noLimit = runStrategy(input(matchBuybox(), { bounds, currentPriceMinor: 1000,
+    snapshot: markAcceptedBySanity(snapshot({ buybox: { price: eur(1300), isSelf: false } }), 'test') }));
+  assert.ok(noLimit.kind === 'INTENT' && noLimit.intent.proposedMinor === 1524 && noLimit.intent.reason.code === 'RAISED_TO_FLOOR');
+});
+
+/**
+ * Р-210 (шаг 73, OQ-253): нынешняя цена ниже пола — подъём сразу, без свежего снимка конкурентов, «after cost update»; Р-209 — так
+ * же после отказа перепроверки по новому курсу
+ */
+test('step 73 (Р-209, Р-210): without a usable competitor snapshot a price below the floor is still raised — after a cost update or a floor recheck', () => {
+  const bounds = { minMinor: 500, maxMinor: 3000, marginFloor: { amountMinor: 1524, minMarginBp: 1000 } };
+  const beat = { type: 'BEAT_LOWEST' as const, undercutMinor: 1, scope: 'VISIBLE_TOP_N' as const, compareLanded: false, atBound: 'CAP' as const };
+  const afterCost = runStrategy(input(beat, { bounds, currentPriceMinor: 1000, snapshot: null, raiseAfter: 'COST_UPDATE', trigger: { type: 'COST_CHANGE' } }));
+  assert.ok(afterCost.kind === 'INTENT' && afterCost.intent.intentClass === 'CHANGED' && afterCost.intent.proposedMinor === 1524, JSON.stringify(afterCost));
+  assert.deepEqual(afterCost.intent.reason, { code: 'RAISED_TO_FLOOR', params: { currentMinor: 1000, floorMinor: 1524, bound: 'margin_floor', minMarginBp: 1000, after: 'COST_UPDATE', currency: 'EUR' } });
+  // Цена из данных продавца, а не конкурентов: своё правило — слепок снимка не нужен, остановка цен из данных конкурентов не держит
+  assert.equal(afterCost.intent.ruleCode, 'FLOOR_RAISE');
+  // Устаревший снимок — то же самое; с пределом шага — ступень
+  const stale = markAcceptedBySanity(snapshot({ observedAt: '2026-09-14T08:00:00.000Z' }), 'test');
+  const recheck = runStrategy(input(beat, { bounds, currentPriceMinor: 1000, snapshot: stale, stepLimitBp: 1000, raiseAfter: 'FLOOR_RECHECK', trigger: { type: 'COST_CHANGE' } }));
+  assert.ok(recheck.kind === 'INTENT' && recheck.intent.proposedMinor === 1100 && recheck.intent.reason.code === 'RAISED_TOWARD_FLOOR');
+  assert.equal(recheck.intent.reason.params.after, 'FLOOR_RECHECK');
+  // Отрицательные контроли: цена не ниже пола — без снимка стратегия рынка не оценивается, как прежде
+  const above = runStrategy(input(beat, { bounds, currentPriceMinor: 1600, snapshot: null, raiseAfter: 'COST_UPDATE' }));
+  assert.ok(above.kind === 'NOT_EVALUATED' && above.reason.code === 'COMPETITOR_REQUIREMENT_NOT_MET');
+});

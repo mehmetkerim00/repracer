@@ -433,7 +433,12 @@ export function expandExplanation(e: DecisionExplanation, row: ExplanationRow, d
       checks = failedCheck();
     } else {
       profileKnown = true;
-      checks = [...order.slice(0, at).map((check) => ({ check, passed: true, detail: null })), ...failedCheck()];
+      /**
+       * Р-208 (шаг 73): ступень лестницы одобрена НИЖЕ пола — проверка «не ниже пола» для неё не пройдена, а заменена шагом к полу;
+       * показать её пройденной значило бы солгать на экране «почему эта цена»
+       */
+      const rung = row.outcome === 'APPROVED' && typeof row.reasonParams.finalMinor === 'number' && row.floorMinor !== null && row.reasonParams.finalMinor < row.floorMinor;
+      checks = [...order.slice(0, at).map((check) => (rung && check === 'LOWER_BOUND' ? { check, passed: false, detail: reason } : { check, passed: true, detail: null })), ...failedCheck()];
       notRun = order.slice(at + (failed ? 1 : 0));
     }
   }

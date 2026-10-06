@@ -18,7 +18,7 @@ const titles: Record<AnyReasonCode, string> = {
   CROSS_CHANNEL_FX_UNAVAILABLE: 'No exchange rate for cross-channel check',
   FIXED_PRICE: 'Fixed price', MARGIN_TARGET: 'Target margin price', BUYBOX_MATCH: 'Match the Buy Box', BUYBOX_UNDERCUT: 'Undercut the Buy Box',
   LOWEST_MATCH: 'Match the lowest price', LOWEST_UNDERCUT: 'Undercut the lowest price', CAPPED_AT_MIN_PRICE: 'Target capped at min_price',
-  CAPPED_AT_MAX_PRICE: 'Target capped at max_price', CAPPED_AT_MARGIN_FLOOR: 'Target capped at the margin floor', RAISED_TO_FLOOR: 'Raised to the floor', ALREADY_AT_TARGET: 'Already at target', WITHIN_DEADBAND: 'Change below threshold', SHADOW_ALREADY_PROPOSED: 'Already proposed in shadow mode',
+  CAPPED_AT_MAX_PRICE: 'Target capped at max_price', CAPPED_AT_MARGIN_FLOOR: 'Target capped at the margin floor', RAISED_TO_FLOOR: 'Raised to the floor', RAISED_TOWARD_FLOOR: 'Raised one step toward the floor', ALREADY_AT_TARGET: 'Already at target', WITHIN_DEADBAND: 'Change below threshold', SHADOW_ALREADY_PROPOSED: 'Already proposed in shadow mode',
   ALREADY_WINNING_BUYBOX: 'Already winning the Buy Box', NO_COMPETITOR_OFFERS: 'No competitors', TARGET_OUTSIDE_BOUNDS_HOLD: 'Target outside bounds — kept',
   COMPETITOR_REQUIREMENT_NOT_MET: 'Not enough channel data', COST_INPUTS_MISSING: 'Cost data missing', MARGIN_UNATTAINABLE: 'Margin unattainable',
   BOUNDS_INVALID: 'Invalid bounds', ENGINE_CURRENCY_MISMATCH: 'Currency mismatch', INVALID_STRATEGY_PARAMS: 'Invalid strategy setting',
@@ -37,6 +37,9 @@ const titles: Record<AnyReasonCode, string> = {
   CHANNEL_DISTRUSTED: 'Channel distrusted — all prices held',
 };
 
+/** Р-209, Р-210: после чего поднята цена без наблюдения конкурентов */
+const raiseAfter = (f: Fmt): string => (f.get('after') === 'COST_UPDATE' ? ' after cost update'
+  : f.get('after') === 'FLOOR_RECHECK' ? ' after the floor was recomputed before sending (current cost, fees, exchange rate and VAT)' : '');
 const deviation = (f: Fmt) => opt(f, 'deviationBp', () => ` by ${f.bp('deviationBp')}`);
 
 const reasons: Record<AnyReasonCode, Template> = {
@@ -92,8 +95,9 @@ const reasons: Record<AnyReasonCode, Template> = {
   CAPPED_AT_MAX_PRICE: (f) => `Target ${f.money('targetMinor')} is above max_price — capped at ${f.money('maxMinor')}.`,
   CAPPED_AT_MARGIN_FLOOR: (f) => `Target ${f.money('targetMinor')} is below your margin floor ${f.money('floorMinor')} (margin ${f.bp('minMarginBp')}) — set to the margin floor.`,
   RAISED_TO_FLOOR: (f) => (f.get('bound') === 'margin_floor'
-    ? `Your price ${f.money('currentMinor')} was below your margin floor — raised to your margin floor ${f.money('floorMinor')}${opt(f, 'minMarginBp', () => ` (margin ${f.bp('minMarginBp')})`)}.`
-    : `Your price ${f.money('currentMinor')} was below min_price — raised to ${f.money('floorMinor')}.`),
+    ? `Your price ${f.money('currentMinor')} was below your margin floor — raised to your margin floor ${f.money('floorMinor')}${raiseAfter(f)}${opt(f, 'minMarginBp', () => ` (margin ${f.bp('minMarginBp')})`)}.`
+    : `Your price ${f.money('currentMinor')} was below min_price — raised to ${f.money('floorMinor')}${raiseAfter(f)}.`),
+  RAISED_TOWARD_FLOOR: (f) => `Your price ${f.money('currentMinor')} is below ${f.get('bound') === 'margin_floor' ? 'your margin floor' : 'min_price'} ${f.money('floorMinor')} — raised one step${raiseAfter(f)}, as far as the step limit of ${f.bp('stepLimitBp')} allows; about ${f.count('stepsLeft')} more ${f.get('stepsLeft') === 1 ? 'step' : 'steps'} to the floor.`,
   ALREADY_AT_TARGET: (f) => `The price already equals the target ${f.money('targetMinor')}.`,
   WITHIN_DEADBAND: (f) => `The difference ${f.money('deltaMinor')} is below the threshold ${f.money('deadbandMinor')} — the price stays.`,
   // Р-171 (шаг 41): то же предложение уже удержано тенью — повторять его незачем
@@ -108,7 +112,10 @@ const reasons: Record<AnyReasonCode, Template> = {
   ENGINE_CURRENCY_MISMATCH: (f) => `Strategy not evaluated: the ${f.value('source')} is in ${f.raw('actual')}, the offer in ${f.raw('expected')}.`,
   INVALID_STRATEGY_PARAMS: (f) => `Strategy not evaluated: the setting ${f.value('param')}${opt(f, 'settingMinor', () => ` ${f.money('settingMinor')}`)}${opt(f, 'settingBp', () => ` ${f.bp('settingBp')}`)} must be ${f.value('allowed')}.`,
 
-  APPROVED: (f) => `Price ${f.money('finalMinor')} approved within ${f.money('floorMinor')}–${f.money('ceilingMinor')}.`,
+  // Р-208: ступень лестницы ниже пола — одобрена как шаг к полу, а не «в границах»
+  APPROVED: (f) => (Number(f.get('finalMinor')) < Number(f.get('floorMinor'))
+    ? `Step to ${f.money('finalMinor')} toward the floor ${f.money('floorMinor')} approved; the price is still below the floor.`
+    : `Price ${f.money('finalMinor')} approved within ${f.money('floorMinor')}–${f.money('ceilingMinor')}.`),
   NO_CHANGE: () => 'No price change — the decision is recorded without sending.',
   BELOW_MIN_PRICE: (f) => `Rejected: ${f.money('proposedMinor')} is below min_price ${f.money('minMinor')}${deviation(f)}.`,
   BELOW_MARGIN_FLOOR: (f) => `Rejected: ${f.money('proposedMinor')} is below the minimum-margin floor ${f.money('floorMinor')}${opt(f, 'minMarginBp', () => ` (margin ${f.bp('minMarginBp')})`)}${deviation(f)}.`,
