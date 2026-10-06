@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0183_verify_schema_invariants_v49.sql';
+const VERIFY = 'migrations/0184_verify_schema_invariants_v50.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -2417,5 +2417,16 @@ export const STEP74_ROWS = [
         node(T('floor-raise.pg.test.ts'), 'Р-211: a default VAT rate', 'a default VAT rate coming into force is a request for offers with VAT in the price', '^false$')),
     ],
   },
+  {
+    row: 'шаг 74 (ADR-0052)', critical: false,
+    invariant: 'роль доставки писем читает полезную нагрузку событий уведомлений, но не таблицы цен, решений, себестоимости и границ: права — ровно свой список',
+    mutations: [
+      m('GRANT SELECT ON channel_data.price_decision TO repracer_alert_delivery',
+        verify('channel_data\\.price_decision\\.[a-z_]+: SELECT of the alert delivery role is not in its allow list')),
+      m('GRANT SELECT (amount_minor) ON tenant_data.price_history TO repracer_alert_delivery',
+        verify('tenant_data\\.price_history\\.amount_minor: SELECT of the alert delivery role is not in its allow list')),
+      m('GRANT EXECUTE ON FUNCTION tenant_data.price_ladder_from(uuid,uuid) TO repracer_alert_delivery',
+        verify('tenant_data\\.price_ladder_from\\(uuid,uuid\\): SECURITY DEFINER function executable by the alert delivery role')),
+    ],
+  },
 ];
-
