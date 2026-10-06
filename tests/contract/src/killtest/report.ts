@@ -119,9 +119,10 @@ const clientSafe = (text: string): string => CLIENT_SAFE.reduce((t, [re, to]) =>
  * Проверяется отрисовка, где строки клиента уже заменены заглушкой (`renderReport(d, { client: () => … })`), — исключений здесь нет
  */
 export function internalLeaks(html: string): string[] {
-  const text = html.replace(/<style>[\s\S]*?<\/style>/, '');
-  const style = (html.match(/<style>[\s\S]*?<\/style>/) ?? [''])[0];
-  // Шаг 75 (ревью шага 71, находка 9): внешний ресурс прячется и в стиле — отчёт обязан быть одним файлом
+  const text = html.replace(/<style>[\s\S]*?<\/style>/g, '');
+  // Шаг 75 (ревью шага 71, находка 9): внешний ресурс прячется и в стиле — отчёт обязан быть одним файлом; все блоки стилей и атрибуты
+  // style (ревью шага 75, находка 7: смотрелся только первый блок)
+  const style = [...(html.match(/<style>[\s\S]*?<\/style>/g) ?? []), ...(html.match(/\sstyle\s*=\s*("[^"]*"|'[^']*')/gi) ?? [])].join('\n');
   const styleLeaks = /@import|url\(/i.test(style) ? [`external resource in style: ${(style.match(/@import|url\(/i) ?? [''])[0]}`] : [];
   const rules: Array<[string, RegExp]> = [
     ['uuid', /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i],
@@ -133,7 +134,8 @@ export function internalLeaks(html: string): string[] {
     ['architecture decision', /\bADR-\d{4}\b/],
     // Однословные коды исходов и статусов, которых в словах отчёта нет; «Price Gate» — внутренний термин (отчёт говорит «final price check»)
     ['single-word code', /\b(APPROVED|REJECTED|HELD|CHANGED|DISPATCHED|ACCEPTED|APPLIED|SUPERSEDED)\b/],
-    ['internal term', /\bPrice Gate\b/],
+    // Без регистра: отчёт переводит заголовки словаря в нижний регистр (ревью шага 75, находка 7)
+    ['internal term', /\bPrice Gate\b/i],
     ['ruleset or profile version', /\b[rg]\d+\.\d+\b/],
     ['storefront id', /\bATVPDKIKX0DER\b/],
     ['synthetic world id', /\b(B0KT\d{6}|A1SYNKILLTEST|killtest)\b/],

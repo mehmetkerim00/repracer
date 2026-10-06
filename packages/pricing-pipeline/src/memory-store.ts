@@ -414,7 +414,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       // Р-212: последняя боевая ступень лестницы единицы за сутки — как last_ladder_step в PostgreSQL. Признака тени у решения стенд в
       // памяти не хранит: ступени аккаунта, который сейчас в тени, не считаются
       ...this.lastLadderStep(row),
-      productTitle: row.title ?? null, productSku: null,
+      productTitle: row.title ?? null, productSku: seedSkuOf(row),
     };
   }
 

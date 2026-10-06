@@ -463,3 +463,22 @@ test('Р-208: a day with ladder steps closes — the daily row counts the steps 
             last_accepted_at, 2, 1524
        FROM tenant_data.price_daily WHERE tenant_id = $1 AND write_scope_id = $2`, [world.tenantId, ws(1)]), /price_daily_check3/);
 });
+
+/**
+ * Шаг 75 (ревью шага 75, находка 2): подпись предложения в событии алерта — название ПРОДАВЦА. Название, прочитанное из канала, живёт
+ * 18 месяцев [Р-3], а событие алерта — до закрытия тенанта: вместо него в подписи SKU продавца
+ */
+test('step 75: the offer label of an alert is the seller title, never a title read from the channel', async () => {
+  const label = async () => {
+    const c = await contextOf(store, world.tenantId, ws(2));
+    return [c.scope.productTitle ?? null, c.scope.productSku ?? null];
+  };
+  const setTitle = (title: string | null, readFromChannel: boolean) => db.superuser(
+    `UPDATE tenant_data.product p SET title = $1, title_channel_read_at = CASE WHEN $2::boolean THEN now() END
+       FROM tenant_data.write_scope s WHERE s.tenant_id = p.tenant_id AND s.product_id = p.product_id AND s.write_scope_id = $3`, [title, readFromChannel, ws(2)]);
+  await setTitle('Plant pot, green', false);
+  assert.deepEqual(await label(), ['Plant pot, green', 'syn-prod-2'], 'a title given by the seller labels the offer');
+  await setTitle('Channel catalog title', true);
+  assert.deepEqual(await label(), [null, 'syn-prod-2'], 'a title read from the channel does not go into the alert: the seller SKU does');
+  await setTitle(null, false);
+});

@@ -61,12 +61,11 @@ export interface JobConfig {
   shadowDigestEverySeconds: number;
   /** Шаг 43 [Р-177]: как часто заходит проверка авторизаций каналов обменом refresh-токена */
   authorizationCheckEverySeconds: number;
-  /** Шаг 47: пересчёт цен, не зависящих от конкурентов (фиксированная, маржинальная) — допущение, как у обхода офферов */
-  /**
-   * Шаг 75: период планового пересчёта — свойство КАНАЛА (`ChannelDescriptor.scheduledRecomputeSeconds`, одно место правды с паузой
-   * лестницы Р-212); здесь — только переопределение для прогонов на виртуальных часах
+  /*
+   * Шаг 47: пересчёт цен, не зависящих от конкурентов (фиксированная, маржинальная). Шаг 75: его период — свойство КАНАЛА
+   * (`ChannelDescriptor.scheduledRecomputeSeconds`), одно место правды с паузой лестницы [Р-212]; переопределения в конфигурации нет —
+   * оно развело бы период работы и паузу, которую движок берёт из того же описания (ревью шага 75, находка 10)
    */
-  scheduledRecomputeEverySeconds?: number;
   /** Ревью шага 47, находка 5: предел единиц за заход — самые давние первыми, остальные — следующими заходами */
   scheduledRecomputeLimit: number;
 }
@@ -487,7 +486,7 @@ export function jobSource(deps: JobDeps): JobSource {
         specs.push({
           // Шаг 47: снимок конкурентов будит только цены из данных конкурентов; фиксированную и маржинальную — расписание.
           // В канал ходит запись решения (в бою) — работа класса CHANNEL
-          name: 'scheduled-recompute', scope, retryKind: 'CHANNEL', intervalSeconds: cfg.scheduledRecomputeEverySeconds ?? d?.scheduledRecomputeSeconds ?? DEFAULT_SCHEDULED_RECOMPUTE_SECONDS, catchUp: 'LATEST', firstDueAt: immediately,
+          name: 'scheduled-recompute', scope, retryKind: 'CHANNEL', intervalSeconds: d?.scheduledRecomputeSeconds ?? DEFAULT_SCHEDULED_RECOMPUTE_SECONDS, catchUp: 'LATEST', firstDueAt: immediately,
           lagWarningSeconds: hours(1), lagCriticalSeconds: hours(6), leaseSeconds: 600,
           async run({ startedAt }) {
             const r = await pipeline().recomputeScheduled(ctxOf(a, startedAt, 'scheduled-recompute', 540), { limit: cfg.scheduledRecomputeLimit });

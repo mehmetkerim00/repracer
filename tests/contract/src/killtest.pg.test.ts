@@ -291,6 +291,10 @@ test('step 72: an unknown option or an option without its value is refused befor
   assert.match(run(['--in', sample, '--out', join(dir, 'options.report.html'), '--rows', '50']).stderr, /--rows applies only to --make-sample/);
   assert.match(run(['--make-sample', 'simple', '--out', join(dir, 'x.csv'), '--hours', '2']).stderr, /--hours does not apply to --make-sample/);
   assert.match(run(['--in', sample, '--out', sample]).stderr, /--out is the client file itself/);
+  // Ссылка на файл клиента — тот же файл (ревью шага 75, находка 6: прежнее сравнение текста пути её пропускало)
+  symlinkSync(sample, join(dir, 'link-to-client.csv'));
+  assert.match(run(['--in', sample, '--out', join(dir, 'link-to-client.csv')]).stderr, /--out is the client file itself/);
+  assert.equal(readFileSync(sample, 'utf8'), syntheticCatalog('simple', 20), 'the client file is untouched');
   assert.match(run(['--in', sample, '--out', join(dir, 'options.report.html'), '--fee-pct', '60', '--margin-pct', '40']).stderr,
     /--fee-pct and --margin-pct together must stay below 100/);
   assert.equal(existsSync(join(dir, 'options.report.html')), false, 'nothing was written');
@@ -342,6 +346,9 @@ test('step 71: the leak check reads a render with every client string replaced �
     ['<p>the Price Gate held it</p>', /^internal term/],
     ['<style>@import "x.css";</style><p>ok</p>', /^external resource in style/],
     ['<style>body { background: url(x.png) }</style><p>ok</p>', /^external resource in style/],
+    ['<style>p {}</style><style>body { background: url(x.png) }</style><p>ok</p>', /^external resource in style/],
+    ['<p style="background: url(x.png)">ok</p>', /^external resource in style/],
+    ['<p>the price gate held it</p>', /^internal term/],
   ];
   for (const [html, kind] of cases) assert.ok(internalLeaks(html).some((l) => kind.test(l)), `${html} → ${JSON.stringify(internalLeaks(html))}`);
   // Прежняя проверка вычитала строки клиента из текста: заголовок клиента «price» превращал «min_price» в «min_» и прятал утечку.

@@ -146,6 +146,33 @@ test('Р-74, Р-75, Р-80: the explanation references dictionaries, repeats no r
   assert.deepEqual(explainedReason({ code: 'UNKNOWN_CODE', params: { x: 1 } }).withheld, ['x'], 'undeclared parameters are withheld (fail-closed)');
 });
 
+/** Шаг 75 (ревью шага 73, находка 9): у ступени ниже пола и нижняя граница, и итоговая перепроверка — «заменены шагом к полу», а не пройдены */
+test('step 75: a ladder step below the floor shows the lower bound and the final recheck replaced by the step, not passed', () => {
+  const gate: GateProfile = { rulesetId: 'g75.1', kind: 'GATE', definition: { CHANGED: ['PRICE_STOP', 'LOWER_BOUND', 'STEP', 'FINAL_RECHECK'], NO_OP: ['PRICE_STOP'] } };
+  const step = { code: 'RAISED_TOWARD_FLOOR', params: { currentMinor: 1000, floorMinor: 1524, bound: 'margin_floor', minMarginBp: 1000, stepLimitBp: 1000, stepsLeft: 4, currency: 'EUR' } } as const;
+  const intent: PriceIntentDraft = {
+    writeScopeId: 'ws', strategyId: 'st', strategyVersion: 1, trigger: { type: 'SCHEDULE' }, ruleCode: 'BEAT_LOWEST', intentClass: 'CHANGED',
+    proposedMinor: 1100, currentMinor: 1000, referenceMinor: null, currency: 'EUR', basis: 'GROSS', reason: step, explanation: [step],
+    inputs: { boundsAtStrategy: { minMinor: 500, maxMinor: 3000 } }, createdAt: '2026-09-15T10:00:00.000Z', expiresAt: '2026-09-15T10:10:00.000Z',
+  };
+  const passed = (check: string) => ({ check, passed: true, detail: null });
+  const decision: PriceDecisionDraft = {
+    writeScopeId: 'ws', outcome: 'APPROVED', decisionClass: 'CHANGED', finalMinor: 1100, currency: 'EUR', basis: 'GROSS', effectiveFloorMinor: 1524,
+    effectiveCeilingMinor: 3000, minPriceIds: [], maxPriceIds: [], guardrailIds: [], rejectionReason: null,
+    reason: { code: 'APPROVED', params: { finalMinor: 1100, floorMinor: 1524, ceilingMinor: 3000, currency: 'EUR' } },
+    checks: ['PRICE_STOP', 'LOWER_BOUND', 'STEP', 'FINAL_RECHECK'].map(passed), alert: null, decidedAt: '2026-09-15T10:00:00.000Z', boundDeviationBp: null,
+  };
+  const built = buildExplanation({ snapshot: null, sanity: null, intent, decision, minMarginBp: 1000, channelHalt: null, channelDistrust: null, priceStop: null }, gate);
+  const row = explanationRowOf({ ...intent, trigger: intent.trigger.type }, { ...decision, gateProfile: built.gateProfile, sanityRuleset: built.sanityRuleset });
+  const view = expandExplanation(built.explanation, row, { rulesets: [gate], strategies: [] }).value.gate;
+  assert.deepEqual(view.checks.map((c) => [c.check, c.passed, c.detail?.code ?? null]),
+    [['PRICE_STOP', true, null], ['LOWER_BOUND', false, 'RAISED_TOWARD_FLOOR'], ['STEP', true, null], ['FINAL_RECHECK', false, 'RAISED_TOWARD_FLOOR']]);
+  // Цена на полу и выше — не ступень: обе проверки пройдены
+  const atFloor = { ...decision, finalMinor: 1524, reason: { code: 'APPROVED' as const, params: { finalMinor: 1524, floorMinor: 1524, ceilingMinor: 3000, currency: 'EUR' } } };
+  const atFloorRow = explanationRowOf({ ...intent, trigger: intent.trigger.type }, { ...atFloor, gateProfile: built.gateProfile, sanityRuleset: built.sanityRuleset });
+  assert.ok(expandExplanation(built.explanation, atFloorRow, { rulesets: [gate], strategies: [] }).value.gate.checks.every((c) => c.passed));
+});
+
 test('Р-69, Р-70, Р-73: stop coverage, roles and dangerous changes', () => {
   assert.equal(stopCovers({ scope: 'TENANT', channelAccountId: null, marketplace: null }, 'any-account', 'de'), true);
   assert.equal(stopCovers({ scope: 'STOREFRONT', channelAccountId: 'a', marketplace: 'de' }, 'a', 'at'), false);

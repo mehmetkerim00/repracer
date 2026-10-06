@@ -126,8 +126,10 @@ export async function main(argv: string[]): Promise<number> {
   const input = a.get('in');
   if (typeof input !== 'string') { process.stderr.write(`${USAGE}\n`); return 2; }
   const report = typeof out === 'string' ? out : join(dirname(input), `${basename(input, extname(input))}.report.html`);
-  // Шаг 75 (ревью шага 71, находка 22): отчёт поверх файла клиента затёр бы его
-  if (resolve(report) === resolve(input)) { log('--out is the client file itself: the report would overwrite it'); return 2; }
+  // Шаг 75 (ревью шага 71, находка 22): отчёт поверх файла клиента затёр бы его. Сравнивается НАСТОЯЩИЙ путь и без регистра на macOS и
+  // Windows — как у приватности (ревью шага 75, находка 6: `Catalog.csv` и `catalog.csv`, ссылка на файл клиента)
+  const fold = (p: string) => (process.platform === 'darwin' || process.platform === 'win32' ? p.toLowerCase() : p);
+  if (fold(realPath(report)) === fold(realPath(input))) { log('--out is the client file itself: the report would overwrite it'); return 2; }
   for (const p of [input, report]) {
     const problem = privacyProblem(p);
     if (problem) { log(problem); return 2; }

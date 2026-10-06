@@ -215,6 +215,12 @@ test('step 75: a shadow-held raise raises no outside-bounds alert; a step from a
   const guardrails = { ...NO_GUARDRAILS, guardrailIds: ['g-1'], minMarginBp: 1000, maxStepChangeBp: 1000 };
   const shadow = decide(gate(1400, { intent: intent(1400, { intentClass: 'NO_OP', currentMinor: 1400, reason: { code: 'SHADOW_ALREADY_PROPOSED', params: {} } }), guardrails, cost }));
   assert.equal(shadow.alert, null);
+  // Контроль: та же цена ниже пола без предложенного подъёма — алерт есть (утверждение выше не пустое)
+  const noRaise = decide(gate(1400, { intent: intent(1400, { intentClass: 'NO_OP', currentMinor: 1400, reason: { code: 'NO_COMPETITOR_OFFERS', params: {} } }), guardrails, cost }));
+  assert.equal(noRaise.alert?.code, 'CURRENT_PRICE_OUTSIDE_BOUNDS');
+  // Тень выше потолка — сигнал «границы не подходят к вашим ценам» остаётся (ревью шага 75, находка 4)
+  const aboveCeiling = decide(gate(1400, { intent: intent(1400, { intentClass: 'NO_OP', currentMinor: 9000, reason: { code: 'SHADOW_ALREADY_PROPOSED', params: {} } }), guardrails, cost }));
+  assert.equal(aboveCeiling.alert?.code, 'CURRENT_PRICE_OUTSIDE_BOUNDS');
   const fromZero = decide(gate(1540, { intent: intent(1540, { currentMinor: 0, reason: { code: 'RAISED_TOWARD_FLOOR', params: {} } }), guardrails, cost }));
   assert.equal(fromZero.rejectionReason, 'BELOW_MARGIN_FLOOR');
 });

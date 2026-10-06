@@ -105,7 +105,7 @@ const EU_STOREFRONTS_SQL = (tenant: string) => `EXISTS (SELECT 1 FROM tenant_dat
 
 const SCOPE_COLUMNS = `
   s.write_scope_id, s.product_id, s.channel_account_id, s.channel, m.marketplace, m.region, m.external_unit_id, m.external_sku, m.external_listing_id, m.external_offer_id, m.channel_product_ref, m.condition,
-  s.scope_key, p.gtin, p.sku AS label_sku, p.title AS label_title, s.currency, s.price_basis, s.tax_regime, s.pricing_mode, s.status, s.pricing_strategy_id, s.pricing_strategy_version, s.created_at,
+  s.scope_key, p.gtin, p.sku AS label_sku, CASE WHEN p.title_channel_read_at IS NULL THEN p.title END AS label_title, s.currency, s.price_basis, s.tax_regime, s.pricing_mode, s.status, s.pricing_strategy_id, s.pricing_strategy_version, s.created_at,
   CASE WHEN ud.undercut_minor IS NULL THEN ps.params ELSE ps.params || jsonb_build_object('undercutMinor', ud.undercut_minor) END AS strategy_params,
   ss.latest_version_accepted, ss.last_sent_amount_minor,
   -- Шаг 64 (живой прогон продавца из США): предложение тени — только у аккаунта В ТЕНИ. После перевода в бой оно в строке остаётся, и
