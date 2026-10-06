@@ -112,7 +112,15 @@ const SCOPE_COLUMNS = `
   -- движок считал цену «уже предложенной тенью» — фиксированная цена eBay в бою не уходила никогда
   CASE WHEN (SELECT ca.write_mode FROM tenant_data.channel_account ca
               WHERE ca.tenant_id = s.tenant_id AND ca.channel_account_id = s.channel_account_id) = 'SHADOW'
-       THEN ss.last_shadow_amount_minor END AS last_shadow_amount_minor`;
+       THEN ss.last_shadow_amount_minor END AS last_shadow_amount_minor,
+  -- Р-212 (шаг 74): последняя БОЕВАЯ ступень лестницы к полу за сутки — от неё пауза до следующей, и её цена отличает продолжение
+  -- лестницы от новой; индекс price_decision_ladder_scope_idx (0182). Секции решений — по времени намерения: оно не раньше решения
+  -- больше чем на срок намерения, и фильтр по нему отсекает старые секции (ревью шага 74)
+  (SELECT json_build_object('at', ld.decided_at, 'final', ld.final_amount_minor) FROM channel_data.price_decision ld
+    WHERE ld.tenant_id = s.tenant_id AND ld.write_scope_id = s.write_scope_id AND ld.ladder_from_minor IS NOT NULL AND NOT ld.shadow
+      AND ld.decided_at > $2::timestamptz - interval '1 day' AND ld.decided_at <= $2::timestamptz
+      AND ld.intent_created_at > $2::timestamptz - interval '2 days'
+    ORDER BY ld.decided_at DESC LIMIT 1) AS last_ladder_step`;
 
 const SCOPE_FROM = `
     FROM tenant_data.offer_mapping m
@@ -539,6 +547,8 @@ function toScopeContext(j: Row, now: Instant): ScopeEvaluationContext {
     currentPriceMinor: current,
     // Р-171 (шаг 41): в тени движок сравнивает предложение с уже удержанным, а не с неподвижной ценой витрины
     shadowLastProposedMinor: r.last_shadow_amount_minor === null || r.last_shadow_amount_minor === undefined ? null : Number(r.last_shadow_amount_minor),
+    lastLadderStepAt: r.last_ladder_step ? iso((r.last_ladder_step as Row).at) : null,
+    lastLadderStepFinalMinor: r.last_ladder_step ? Number((r.last_ladder_step as Row).final) : null,
     knownPricesMinor: [...known],
   };
   const bounds = (j.bounds ?? []) as Row[];
@@ -2718,14 +2728,25 @@ export class PgPricingStore implements PricingStore {
                   WHERE d.tenant_id = $1 AND d.ladder_from_minor IS NOT NULL AND d.decided_at > $3::timestamptz - interval '1 day') l
            JOIN tenant_data.write_scope s ON s.tenant_id = $1 AND s.write_scope_id = l.write_scope_id
            JOIN tenant_data.write_scope_sync_state ss ON ss.tenant_id = s.tenant_id AND ss.write_scope_id = s.write_scope_id
+           -- Шаг 74: последнее одобренное ИЗМЕНЕНИЕ — ступень (за ним бывают «без изменения» паузы лестницы, Р-212)
            JOIN LATERAL (SELECT d.ladder_from_minor FROM channel_data.price_decision d
-                          WHERE d.tenant_id = s.tenant_id AND d.write_scope_id = s.write_scope_id
+                          WHERE d.tenant_id = s.tenant_id AND d.write_scope_id = s.write_scope_id AND d.intent_class = 'CHANGED' AND d.outcome = 'APPROVED'
                           ORDER BY d.decided_at DESC LIMIT 1) last ON last.ladder_from_minor IS NOT NULL
           WHERE s.channel_account_id = $2 AND s.pricing_mode = 'ENGINE' AND s.status = 'ACTIVE' AND ss.in_flight_write_id IS NULL AND ${FLOOR_RAISE_NOT_HELD}
-          ORDER BY 3 NULLS LAST, 1 LIMIT $4`,
+            -- В тени цена на витрине не движется: продолжать лестницу нечего, и каждый заход давал бы «уже предложено»
+            AND EXISTS (SELECT 1 FROM tenant_data.channel_account ca
+                         WHERE ca.tenant_id = s.tenant_id AND ca.channel_account_id = s.channel_account_id AND ca.write_mode = 'LIVE')
+          -- Продолжения лестниц — первыми: их немного, а очередь запросов (курс, гардрейл тенанта) бывает больше предела захода (ревью шага 74)
+          ORDER BY 3 NULLS FIRST, 1 LIMIT $4`,
         [tenantId, channelAccountId, now, Math.max(0, limit)]);
       return rows.map((r) => ({ writeScopeId: String(r.write_scope_id), after: r.after ?? null, requestedAt: r.requested_at ?? null }));
     });
+  }
+
+  async requestFloorRaiseForPlatformInputs(tenantId: string, channelAccountId: string, now: Instant): Promise<number> {
+    // Р-211: запросы по курсу ЕЦБ и НДС по умолчанию ставит функция базы в границе тенанта (0182); отметка аккаунта — у неё
+    return this.tx(tenantId, async (tx) => Number((await tx.query(
+      'SELECT tenant_data.request_floor_raise_for_platform_inputs($1, $2) AS n', [channelAccountId, now])).rows[0].n));
   }
 
   async consumeFloorRaise(tenantId: string, writeScopeId: string, after: FloorRaiseAfter, requestedAt: Instant): Promise<void> {

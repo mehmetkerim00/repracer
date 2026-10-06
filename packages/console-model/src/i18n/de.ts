@@ -1,8 +1,8 @@
-import type { AnyReasonCode, SanityNoteCode } from '@repracer/pricing-model';
+import type { AnyReasonCode, FloorRaiseReason, SanityNoteCode } from '@repracer/pricing-model';
 import type { LimitCode } from '../explain.ts';
 import type { GapCode } from '../world.ts';
 import type { Messages } from './index.ts';
-import { numberFormat, type ValueKey } from './shape.ts';
+import { numberFormat, type AlertNumbers, type ValueKey } from './shape.ts';
 import type { Fmt, Locale, Template } from './types.ts';
 
 const noValue = 'kein Wert';
@@ -19,7 +19,7 @@ const titles: Record<AnyReasonCode, string> = {
   CROSS_CHANNEL_FX_UNAVAILABLE: 'Kein Wechselkurs für Kanalvergleich',
   FIXED_PRICE: 'Festpreis', MARGIN_TARGET: 'Preis für Zielmarge', BUYBOX_MATCH: 'Buy Box angleichen', BUYBOX_UNDERCUT: 'Buy Box unterbieten',
   LOWEST_MATCH: 'Niedrigsten Preis angleichen', LOWEST_UNDERCUT: 'Niedrigsten Preis unterbieten', CAPPED_AT_MIN_PRICE: 'Ziel auf min_price begrenzt',
-  CAPPED_AT_MAX_PRICE: 'Ziel auf max_price begrenzt', CAPPED_AT_MARGIN_FLOOR: 'Ziel auf die Mindestmargen-Untergrenze begrenzt', RAISED_TO_FLOOR: 'Auf die Untergrenze angehoben', RAISED_TOWARD_FLOOR: 'Einen Schritt zur Untergrenze angehoben', ALREADY_AT_TARGET: 'Ziel bereits erreicht', WITHIN_DEADBAND: 'Änderung unter Schwelle', SHADOW_ALREADY_PROPOSED: 'Im Schattenmodus bereits vorgeschlagen',
+  CAPPED_AT_MAX_PRICE: 'Ziel auf max_price begrenzt', CAPPED_AT_MARGIN_FLOOR: 'Ziel auf die Mindestmargen-Untergrenze begrenzt', RAISED_TO_FLOOR: 'Auf die Untergrenze angehoben', RAISED_TOWARD_FLOOR: 'Einen Schritt zur Untergrenze angehoben', ALREADY_AT_TARGET: 'Ziel bereits erreicht', WITHIN_DEADBAND: 'Änderung unter Schwelle', SHADOW_ALREADY_PROPOSED: 'Im Schattenmodus bereits vorgeschlagen', LADDER_PACED: 'Nächster Schritt zur Untergrenze später',
   ALREADY_WINNING_BUYBOX: 'Buy Box bereits gewonnen', NO_COMPETITOR_OFFERS: 'Keine Wettbewerber', TARGET_OUTSIDE_BOUNDS_HOLD: 'Ziel außerhalb der Grenzen — beibehalten',
   COMPETITOR_REQUIREMENT_NOT_MET: 'Kanaldaten reichen nicht', COST_INPUTS_MISSING: 'Kostendaten fehlen', MARGIN_UNATTAINABLE: 'Marge nicht erreichbar',
   BOUNDS_INVALID: 'Ungültige Grenzen', ENGINE_CURRENCY_MISMATCH: 'Währungen passen nicht', INVALID_STRATEGY_PARAMS: 'Ungültige Strategieeinstellung',
@@ -39,8 +39,15 @@ const titles: Record<AnyReasonCode, string> = {
 };
 
 /** Р-209, Р-210: wonach der Preis ohne Wettbewerberbeobachtung angehoben wurde */
-const raiseAfter = (f: Fmt): string => (f.get('after') === 'COST_UPDATE' ? ' nach der Kostenänderung'
-  : f.get('after') === 'FLOOR_RECHECK' ? ' nach der Neuberechnung der Untergrenze vor dem Senden (aktuelle Kosten, Gebühren, Wechselkurs und MwSt.)' : '');
+const RAISE_AFTER_TEXT: Readonly<Record<FloorRaiseReason, string>> = {
+  COST_UPDATE: ' nach der Kostenänderung',
+  FLOOR_RECHECK: ' nach der Neuberechnung der Untergrenze vor dem Senden (aktuelle Kosten, Gebühren, Wechselkurs und MwSt.)',
+  FX_UPDATE: ' nach der Änderung des EZB-Wechselkurses',
+  BOUNDS_UPDATE: ' nach der Änderung von min_price oder max_price',
+  GUARDRAIL_UPDATE: ' nach der Änderung Ihrer Mindestmarge oder Schrittgrenze',
+  VAT_UPDATE: ' nach der Änderung des MwSt.-Satzes',
+};
+const raiseAfter = (f: Fmt): string => RAISE_AFTER_TEXT[String(f.get('after') ?? '') as FloorRaiseReason] ?? '';
 const deviation = (f: Fmt) => opt(f, 'deviationBp', () => ` um ${f.bp('deviationBp')}`);
 
 const reasons: Record<AnyReasonCode, Template> = {
@@ -102,6 +109,7 @@ const reasons: Record<AnyReasonCode, Template> = {
   ALREADY_AT_TARGET: (f) => `Der Preis entspricht bereits dem Ziel ${f.money('targetMinor')}.`,
   WITHIN_DEADBAND: (f) => `Die Differenz ${f.money('deltaMinor')} liegt unter der Schwelle ${f.money('deadbandMinor')} — der Preis bleibt.`,
   // Р-171 (шаг 41): то же предложение уже удержано тенью — повторять его незачем
+  LADDER_PACED: (f) => `Ihr Preis ${f.money('currentMinor')} liegt unter der Untergrenze ${f.money('floorMinor')}; der nächste Schritt dorthin kommt frühestens ${f.when('nextStepAt')} — ein Schritt je geplanter Neuberechnung, Bewegungen der Wettbewerber beschleunigen ihn nicht.`,
   SHADOW_ALREADY_PROPOSED: (f) => `Nichts gesendet: der Schattenmodus hält genau diesen Preis (${f.money('heldMinor')}) bereits zurück, die Preisautomatik schlägt ihn nicht erneut vor. In den Kanal gehen Preise erst, wenn das Schreiben scharf geschaltet ist.`,
   ALREADY_WINNING_BUYBOX: () => 'Wir gewinnen die Buy Box bereits — der Preis bleibt.',
   NO_COMPETITOR_OFFERS: () => 'Keine Wettbewerbsangebote — nichts zum Folgen.',
@@ -906,6 +914,7 @@ export const de: Messages = {
       repeated: (count: number, last: string) => `Das ist ${count}-mal passiert, zuletzt um ${last}. Ein Brief für alle.`,
       unknown: (code: string) => `Ereignis ${code}`,
       unknownStep: 'Öffnen Sie die Konsole: Das Ereignis ist dort mit seinen Einzelheiten festgehalten.',
+      digestDetailsMore: (count: number) => `…und ${count} weitere davon.`,
       codes: {
         // --- События ПРОДАВЦА: письмо уходит владельцу тенанта, и «первый шаг» — то, что делает он сам ---
         PRICING_STOPPED_BY_PERSON: { what: 'Die Preispflege wurde von einer Person gestoppt', step: 'Waren Sie das nicht, heben Sie den Stopp in der Konsole auf und prüfen Sie, wer ihn gesetzt hat: Der Urheber steht im Prüfprotokoll.' },
@@ -919,6 +928,11 @@ export const de: Messages = {
         PRICE_GATE_INTERNAL_VIOLATION: { what: 'Eine interne Prüfung hat einen Preis kurz vor dem Senden gestoppt', step: 'Der Preis wurde NICHT gesendet, und von Ihnen ist nichts zu tun. Melden Sie sich bei uns mit dem Ereigniscode: Wir sehen das Ereignis ebenfalls.' },
         CURRENT_PRICE_OUTSIDE_BOUNDS: { what: 'Der aktuelle Preis eines Angebots liegt außerhalb Ihrer Grenzen', step: 'Öffnen Sie das Angebot in der Konsole: Entweder wurde der Preis im Kanal-Backoffice von Hand geändert, oder die Grenzen passen nicht mehr zu den Einstandskosten.' },
         PRICE_WRITE_SCOPE_BLOCKED: { what: 'Ein Angebot ist blockiert: Seine Preisänderung ging nicht durch', step: 'Öffnen Sie das Angebot in der Konsole: Der Grund der Ablehnung steht dort. Die meisten Ablehnungen brauchen eine Handlung im Kanal-Backoffice.' },
+        PRICE_LADDER_STARTED: {
+          what: 'Ein Preis unter Ihrer Untergrenze wird schrittweise auf sie angehoben',
+          step: 'Nichts zu tun: jeder Schritt bleibt innerhalb Ihrer Schrittgrenze. Soll der Preis die Untergrenze schneller erreichen, erhöhen Sie die Schrittgrenze; wirkt die Untergrenze zu hoch, prüfen Sie Stückkosten und Mindestmarge in der Konsole.',
+          detail: (d: Readonly<Record<string, unknown>>, n: AlertNumbers) => `${String(d.offer)}: ${n.money(Number(d.currentMinor), String(d.currency))} → ${n.money(Number(d.floorMinor), String(d.currency))}, etwa ${Number(d.steps)} Schritte zu höchstens ${n.percentBp(Number(d.stepLimitBp))}, höchstens ein Schritt alle ${Number(d.paceMinutes)} Minuten.`,
+        },
         PRICE_WRITE_NOT_SENT: { what: 'Eine Preisänderung wurde nicht an den Kanal gesendet', step: 'Öffnen Sie die Preisänderungen in der Konsole und prüfen Sie die Angebote dieses Kanals.' },
         QUANTITY_WRITE_SCOPE_BLOCKED: { what: 'Bestandsänderungen eines Angebots sind blockiert: der Kanal hat eine Bestandsänderung abgelehnt, das Angebot wartet auf eine Person', step: 'Öffnen Sie in der Konsole die Seite „Bestand“, prüfen Sie das Angebot und die Antwort des Kanals und heben Sie die Blockade auf.' },
         QUANTITY_WRITE_NOT_SENT: { what: 'Eine Bestandsänderung wurde nicht an den Kanal gesendet, der Kanal zeigt womöglich einen nicht beabsichtigten Bestand', step: 'Öffnen Sie in der Konsole die Seite „Bestand“ und prüfen Sie dieses Angebot: der Grund steht bei der Änderung. Wurde das Schreiben von Beständen bewusst widerrufen, ist nichts weiter zu tun.' },

@@ -36,7 +36,15 @@ export interface ChannelDescriptor {
    * первую), и повторяется только временная ошибка из `retryOn`; прочие временные завершаются отказом канала без повтора.
    */
   writeRetry?: WriteRetryRule;
+  /**
+   * Р-212 (шаг 74): период планового пересчёта цен канала, секунды. Ступень лестницы к полу — не чаще него: наблюдения конкурентов
+   * лестницу не ускоряют. Нет — `DEFAULT_SCHEDULED_RECOMPUTE_SECONDS` ядра. Решение проекта, а не факт канала
+   */
+  scheduledRecomputeSeconds?: number;
 }
+
+/** Р-212: период планового пересчёта по умолчанию — работа `scheduled-recompute` каждые 15 минут */
+export const DEFAULT_SCHEDULED_RECOMPUTE_SECONDS = 900;
 
 export interface WriteRetryRule {
   maxAttempts: number;

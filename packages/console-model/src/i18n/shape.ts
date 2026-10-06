@@ -22,6 +22,9 @@ export type ValueKey =
   // Р-138 (шаг 29): источники оценки комиссии — продавец видит, чьё это число
   | 'SELLER_DECLARED' | 'FEE_SCHEDULE' | 'CHANNEL_API' | 'CALIBRATED';
 
+/** Шаг 74: числа, которыми текст алерта подставляет суммы события (уведомление о старте лестницы к полу) */
+export type AlertNumbers = Pick<NumberFormat, 'money' | 'percentBp'>;
+
 export interface NumberFormat {
   money(minor: number | null | undefined, currency: string | null | undefined): string;
   percentBp(bp: number | null | undefined): string;

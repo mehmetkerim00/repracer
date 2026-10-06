@@ -1,7 +1,7 @@
-import type { AnyReasonCode, SanityNoteCode } from '@repracer/pricing-model';
+import type { AnyReasonCode, FloorRaiseReason, SanityNoteCode } from '@repracer/pricing-model';
 import type { LimitCode } from '../explain.ts';
 import type { GapCode } from '../world.ts';
-import { numberFormat, type ValueKey } from './shape.ts';
+import { numberFormat, type AlertNumbers, type ValueKey } from './shape.ts';
 import type { Fmt, Locale, Template } from './types.ts';
 
 const noValue = 'no value';
@@ -18,7 +18,7 @@ const titles: Record<AnyReasonCode, string> = {
   CROSS_CHANNEL_FX_UNAVAILABLE: 'No exchange rate for cross-channel check',
   FIXED_PRICE: 'Fixed price', MARGIN_TARGET: 'Target margin price', BUYBOX_MATCH: 'Match the Buy Box', BUYBOX_UNDERCUT: 'Undercut the Buy Box',
   LOWEST_MATCH: 'Match the lowest price', LOWEST_UNDERCUT: 'Undercut the lowest price', CAPPED_AT_MIN_PRICE: 'Target capped at min_price',
-  CAPPED_AT_MAX_PRICE: 'Target capped at max_price', CAPPED_AT_MARGIN_FLOOR: 'Target capped at the margin floor', RAISED_TO_FLOOR: 'Raised to the floor', RAISED_TOWARD_FLOOR: 'Raised one step toward the floor', ALREADY_AT_TARGET: 'Already at target', WITHIN_DEADBAND: 'Change below threshold', SHADOW_ALREADY_PROPOSED: 'Already proposed in shadow mode',
+  CAPPED_AT_MAX_PRICE: 'Target capped at max_price', CAPPED_AT_MARGIN_FLOOR: 'Target capped at the margin floor', RAISED_TO_FLOOR: 'Raised to the floor', RAISED_TOWARD_FLOOR: 'Raised one step toward the floor', ALREADY_AT_TARGET: 'Already at target', WITHIN_DEADBAND: 'Change below threshold', SHADOW_ALREADY_PROPOSED: 'Already proposed in shadow mode', LADDER_PACED: 'Next step to the floor later',
   ALREADY_WINNING_BUYBOX: 'Already winning the Buy Box', NO_COMPETITOR_OFFERS: 'No competitors', TARGET_OUTSIDE_BOUNDS_HOLD: 'Target outside bounds — kept',
   COMPETITOR_REQUIREMENT_NOT_MET: 'Not enough channel data', COST_INPUTS_MISSING: 'Cost data missing', MARGIN_UNATTAINABLE: 'Margin unattainable',
   BOUNDS_INVALID: 'Invalid bounds', ENGINE_CURRENCY_MISMATCH: 'Currency mismatch', INVALID_STRATEGY_PARAMS: 'Invalid strategy setting',
@@ -38,8 +38,15 @@ const titles: Record<AnyReasonCode, string> = {
 };
 
 /** Р-209, Р-210: после чего поднята цена без наблюдения конкурентов */
-const raiseAfter = (f: Fmt): string => (f.get('after') === 'COST_UPDATE' ? ' after cost update'
-  : f.get('after') === 'FLOOR_RECHECK' ? ' after the floor was recomputed before sending (current cost, fees, exchange rate and VAT)' : '');
+const RAISE_AFTER_TEXT: Readonly<Record<FloorRaiseReason, string>> = {
+  COST_UPDATE: ' after cost update',
+  FLOOR_RECHECK: ' after the floor was recomputed before sending (current cost, fees, exchange rate and VAT)',
+  FX_UPDATE: ' after the ECB exchange rate changed',
+  BOUNDS_UPDATE: ' after your min_price or max_price changed',
+  GUARDRAIL_UPDATE: ' after your minimum margin or step limit changed',
+  VAT_UPDATE: ' after the VAT rate changed',
+};
+const raiseAfter = (f: Fmt): string => RAISE_AFTER_TEXT[String(f.get('after') ?? '') as FloorRaiseReason] ?? '';
 const deviation = (f: Fmt) => opt(f, 'deviationBp', () => ` by ${f.bp('deviationBp')}`);
 
 const reasons: Record<AnyReasonCode, Template> = {
@@ -101,6 +108,7 @@ const reasons: Record<AnyReasonCode, Template> = {
   ALREADY_AT_TARGET: (f) => `The price already equals the target ${f.money('targetMinor')}.`,
   WITHIN_DEADBAND: (f) => `The difference ${f.money('deltaMinor')} is below the threshold ${f.money('deadbandMinor')} — the price stays.`,
   // Р-171 (шаг 41): то же предложение уже удержано тенью — повторять его незачем
+  LADDER_PACED: (f) => `Your price ${f.money('currentMinor')} is below the floor ${f.money('floorMinor')}; the next step toward it comes at ${f.when('nextStepAt')} at the earliest — one step per scheduled recompute, competitor moves do not speed it up.`,
   SHADOW_ALREADY_PROPOSED: (f) => `Nothing sent: the shadow mode already holds this very price (${f.money('heldMinor')}), so the engine does not propose it again. Prices reach the channel only after live writes are switched on.`,
   ALREADY_WINNING_BUYBOX: () => 'We already win the Buy Box — the price stays.',
   NO_COMPETITOR_OFFERS: () => 'No competitor offers — nothing to follow.',
@@ -933,6 +941,7 @@ export const en = {
       repeated: (count: number, last: string) => `This happened ${count} times, the last at ${last}. One email for all of them.`,
       unknown: (code: string) => `event ${code}`,
       unknownStep: 'Open the console: the event is recorded there with its details.',
+      digestDetailsMore: (count: number) => `…and ${count} more of these.`,
       codes: {
         // --- События ПРОДАВЦА: письмо уходит владельцу тенанта, и «первый шаг» — то, что делает он сам ---
         PRICING_STOPPED_BY_PERSON: { what: 'pricing is stopped by a person', step: 'If this was not you, remove the stop in the console and check who did it: the author is in the audit log.' },
@@ -946,6 +955,12 @@ export const en = {
         PRICE_GATE_INTERNAL_VIOLATION: { what: 'an internal check stopped a price right before sending', step: 'The price was NOT sent and nothing is to be done by you. Contact us with the event code: we see the event as well.' },
         CURRENT_PRICE_OUTSIDE_BOUNDS: { what: 'the current price of an offer lies outside your bounds', step: 'Open the offer in the console: either the price was changed by hand in the channel back office, or the bounds no longer match the unit cost.' },
         PRICE_WRITE_SCOPE_BLOCKED: { what: 'an offer is blocked: its price change did not go through', step: 'Open the offer in the console: the reason of the refusal is written there. Most refusals need an action in the channel back office.' },
+        // Р-212 (шаг 74): старт лестницы к полу — один раз на лестницу; суммы и число ступеней — из события
+        PRICE_LADDER_STARTED: {
+          what: 'a price below your floor is being raised to it step by step',
+          step: 'Nothing to do: every step stays within your step limit. To reach the floor faster, raise the step limit; if the floor looks too high, check the unit cost and the minimum margin in the console.',
+          detail: (d: Readonly<Record<string, unknown>>, n: AlertNumbers) => `${String(d.offer)}: ${n.money(Number(d.currentMinor), String(d.currency))} → ${n.money(Number(d.floorMinor), String(d.currency))}, about ${Number(d.steps)} steps of at most ${n.percentBp(Number(d.stepLimitBp))} each, one step every ${Number(d.paceMinutes)} minutes at most.`,
+        },
         PRICE_WRITE_NOT_SENT: { what: 'a price change was not sent to the channel', step: 'Open the price feed in the console and check the offers of this channel.' },
         QUANTITY_WRITE_SCOPE_BLOCKED: { what: 'stock updates of an offer are blocked: the channel refused a stock write and the offer waits for a person', step: 'Open the Stock screen in the console, check the offer and the answer of the channel, then release the block.' },
         QUANTITY_WRITE_NOT_SENT: { what: 'a stock update was not sent to the channel, so the channel may show a stock we did not intend', step: 'Open the Stock screen in the console and check this offer: the reason is shown next to the update. If stock writes were revoked on purpose, nothing else is needed.' },

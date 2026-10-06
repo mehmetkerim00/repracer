@@ -14,7 +14,7 @@ import type {
   Instant,
   WriteOutcome,
 } from '@repracer/channel-port';
-import { waitingForBudget as waitForChannelBudget } from '@repracer/channel-port';
+import { DEFAULT_SCHEDULED_RECOMPUTE_SECONDS, waitingForBudget as waitForChannelBudget } from '@repracer/channel-port';
 import { assessShift, DEFAULT_SANITY_CONFIG, evaluateSnapshot, SANITY_RULESET, type AnchorName, type SanityCheck, type SanityConfig } from '@repracer/input-sanity';
 import { decide, GATE_PROFILE, repricingWarnings, resolveMarginFloor, validateRepricingEnablement } from '@repracer/price-gate';
 import {
@@ -83,6 +83,8 @@ export function floorRaiseRetryable(r: ScopeReport): boolean {
   if (r.stages.some((s) => s.stage === 'COMMIT' && (s.outcome === 'ERROR' || s.outcome === 'BOUNDS_CHANGED'))) return true;
   if (r.stages.some((s) => s.stage === 'SCOPE' && s.outcome === 'SKIPPED' && s.reason?.code === 'WRITE_EDIT_BUDGET_EXHAUSTED')) return true;
   const held = r.decision?.rejectionReason;
+  // Шаг 74 [Р-212]: пауза лестницы — запрос ждёт следующей ступени, и её объяснение сохраняет повод (ревью шага 74, находка 7 по Р-212)
+  if (r.intent?.reason.code === 'LADDER_PACED') return true;
   return held === 'PRICING_STOPPED' || held === 'CHANNEL_DISTRUSTED' || held === 'CHANGE_RATE_LIMIT';
 }
 
@@ -99,6 +101,11 @@ export interface ScopeReport {
   queue?: DispatchStep[];
   /** Сколько раз оценка повторена из-за смены контекста решения */
   boundsRetries?: number;
+  /** Р-212 (шаг 74): решение — первая ступень лестницы к полу; после фиксации — уведомление владельцу */
+  ladderStart?: {
+    writeScopeId: string; offer: string; marketplace: string; currentMinor: number; floorMinor: number; steps: number; stepLimitBp: number;
+    paceMinutes: number; currency: string;
+  };
 }
 
 export interface SnapshotReport {
@@ -255,9 +262,11 @@ export function createPricingPipeline(deps: PipelineDeps) {
         minMinor: bounds.min.amountMinor, maxMinor: bounds.max.amountMinor,
         marginFloor: margin.kind === 'OK' ? { amountMinor: margin.floorMinor, minMarginBp: margin.minMarginBp } : null,
       },
-      // Р-208: подъём к полу больше предела шага — лестницей; Р-209, Р-210: повод переоценки без наблюдения конкурентов
+      // Р-208: подъём к полу больше предела шага — лестницей; Р-209…Р-211: повод переоценки без наблюдения конкурентов
       stepLimitBp: sc.guardrails.maxStepChangeBp,
       raiseAfter: raise.after,
+      // Р-212: ступень лестницы — не чаще периода планового пересчёта канала, откуда бы ни пришла оценка
+      ladderPace: { lastStepAt: scope.lastLadderStepAt ?? null, paceSeconds: adapter.descriptor?.scheduledRecomputeSeconds ?? DEFAULT_SCHEDULED_RECOMPUTE_SECONDS },
       currentPriceMinor: scope.currentPriceMinor,
       // Р-171: в тени сравнение идёт и с уже удержанным предложением — иначе оно повторялось бы на каждом опросе
       ...(scope.shadowLastProposedMinor === null || scope.shadowLastProposedMinor === undefined ? {} : { shadowLastProposedMinor: scope.shadowLastProposedMinor }),
@@ -306,6 +315,22 @@ export function createPricingPipeline(deps: PipelineDeps) {
     stages.push({ stage: 'GATE', outcome: decision.outcome, reason: decision.reason });
     report.intent = intent;
     report.decision = decision;
+    /**
+     * Р-212: первая ступень лестницы (ступеней за сутки не было) — уведомление владельцу «подъём к полу X → Y, ~N ступеней»; поднимается
+     * после фиксации и только если запись не удержана тенью: в тени цена на витрине не движется
+     */
+    // Старт — ступень не от цены, до которой дошла прошлая БОЕВАЯ ступень за сутки: продолжение лестницы начинается с цены своей прошлой
+    // ступени, а новая лестница — с другой (вторая лестница тех же суток, первая боевая после тени — ревью шага 74, находка 2 по Р-212)
+    const continues = scope.lastLadderStepFinalMinor !== null && scope.lastLadderStepFinalMinor !== undefined && scope.lastLadderStepFinalMinor === decision.ladderFromMinor;
+    if (decision.outcome === 'APPROVED' && decision.ladderFromMinor !== null && decision.ladderFromMinor !== undefined && !continues
+        && intent.reason.code === 'RAISED_TOWARD_FLOOR') {
+      const p = intent.reason.params as { currentMinor: number; floorMinor: number; stepsLeft: number; stepLimitBp: number };
+      report.ladderStart = {
+        writeScopeId: scope.writeScopeId, offer: scope.externalUnitId, marketplace: scope.marketplace, currentMinor: p.currentMinor,
+        floorMinor: p.floorMinor, steps: p.stepsLeft + 1, stepLimitBp: p.stepLimitBp, currency: scope.currency,
+        paceMinutes: Math.round((adapter.descriptor?.scheduledRecomputeSeconds ?? DEFAULT_SCHEDULED_RECOMPUTE_SECONDS) / 60),
+      };
+    }
     if (decision.alert) {
       effects.push({ kind: 'alert', code: decision.alert.code, severity: decision.alert.severity, details: { writeScopeId: scope.writeScopeId, reason: decision.reason.code } });
     }
@@ -316,6 +341,10 @@ export function createPricingPipeline(deps: PipelineDeps) {
   async function dispatchCommitted(ctx: AdapterCallContext, committed: CommittedDecision, report: ScopeReport): Promise<void> {
     report.intentId = committed.intentId;
     report.decisionId = committed.decisionId;
+    // Р-212: старт лестницы — один раз на лестницу, только у записи, которая пойдёт в канал: не в тени и не с исчерпанным бюджетом
+    if (report.ladderStart && committed.heldInShadow !== true && !committed.endedUnsent) {
+      await alerts.raise({ ...alertBase(ctx), code: 'PRICE_LADDER_STARTED', severity: 'WARNING', details: report.ladderStart });
+    }
     const write = committed.write;
     if (!write) {
       // Р-169: тень — своя причина с готовым текстом DE/EN, а не «ждёт впереди идущей записи» (находка 7 ревью шага 41)
@@ -866,6 +895,14 @@ export function createPricingPipeline(deps: PipelineDeps) {
        * перепроверки пола по новому курсу [Р-209] — переоценка с поводом «после чего»; лестница в работе [Р-208] — следующая ступень.
        * Запрос снимается после переоценки (новый, поставленный за это время, остаётся)
        */
+      // Р-211 (шаг 74): курс ЕЦБ и НДС по умолчанию, ставшие действующими, — запросы базы на переоценку единиц аккаунта (данные платформы).
+      // Сбой здесь не останавливает заход: должные единицы и лестницы аккаунта пересчитываются и без него (ревью шага 74, находка 7)
+      try {
+        await store.requestFloorRaiseForPlatformInputs(ctx.tenantId, ctx.channelAccountId, deps.now());
+      } catch (error) {
+        const name = String((error as { code?: string }).code ?? (error as Error).name ?? 'Error').slice(0, 60);
+        await emit(ctx, [{ kind: 'log', level: 'WARN', code: 'FLOOR_INPUTS_REQUEST_FAILED', message: 'FLOOR_INPUTS_REQUEST_FAILED', details: { error: name } }]);
+      }
       const raises = await store.listFloorRaiseScopes(ctx.tenantId, ctx.channelAccountId, deps.now(), options.limit ?? 1_000);
       // У единицы бывает два повода сразу (себестоимость и отказ перепроверки) — одна переоценка, снимаются оба (ревью шага 73, находка 2)
       const byScope = new Map<string, FloorRaiseCandidate[]>();
@@ -874,7 +911,9 @@ export function createPricingPipeline(deps: PipelineDeps) {
       for (const [writeScopeId, cs] of byScope) {
         const after = cs.find((c) => c.after)?.after ?? null;
         try {
-          const r = await this.recompute(ctx, writeScopeId, { type: after ? 'COST_CHANGE' : 'SCHEDULE' }, { raiseAfter: after });
+          // Повод оценки — «себестоимость» только у себестоимости; прочие входы — плановая проверка, а сам вход называет объяснение
+          // подъёма (ревью шага 74, находка 2 по Р-211)
+          const r = await this.recompute(ctx, writeScopeId, { type: after === 'COST_UPDATE' ? 'COST_CHANGE' : 'SCHEDULE' }, { raiseAfter: after });
           const committed = r.decision !== undefined && !r.stages.some((x) => x.stage === 'COMMIT' || (x.stage === 'WRITE_RECHECK' && x.outcome === 'BLOCKED'));
           if (committed && r.decision?.decisionClass === 'CHANGED') { changed += 1; raised += 1; }
           // Ревью шага 73, находка 1: запрос снимается только суждением — решение зафиксировано и не удержано остановкой, частотой или

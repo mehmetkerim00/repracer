@@ -246,3 +246,30 @@ test('сухой режим: письмо собрано, не отправле�
   // Ни получателя, ни тела в журнале: всухую они такие же настоящие, как в работе
   assert.doesNotMatch(lines[0]!, /@/, 'адрес получателя в журнал не попадает');
 });
+
+/**
+ * Р-212 (шаг 74): старт лестницы к полу — уведомление владельцу с суммами самого события: «X → Y, ~N ступеней». В срочном письме —
+ * строкой под причиной, в часовом дайджесте — каждое событие своей строкой (группировка по коду теряла бы суммы), не больше двадцати
+ */
+test('step 74: the ladder start names the offer, the price, the floor and the steps — in its letter and in the hourly digest', async () => {
+  const { alertDetail, digestMessage, immediateMessage } = await import('../src/index.ts');
+  const { messagesFor } = await import('@repracer/console-model');
+  const ladder = (offer: string, i: number): AlertRow => ({
+    tenantId: 't-1', alertId: `l-${i}`, code: 'PRICE_LADDER_STARTED', severity: 'WARNING', channelAccountId: null, channel: 'KAUFLAND', marketplaces: ['de'],
+    details: { writeScopeId: `ws-${i}`, offer, marketplace: 'de', currentMinor: 1000, floorMinor: 1524, steps: 5, stepLimitBp: 1000, paceMinutes: 15, currency: 'EUR' },
+    raisedAt: '2026-10-06T10:00:00.000Z', deliveryAttempts: 0,
+  });
+  const en = messagesFor('en');
+  assert.equal(alertDetail(ladder('SYN-SKU-1', 1), en), 'SYN-SKU-1: €10.00 → €15.24, about 5 steps of at most 10% each, one step every 15 minutes at most.');
+  assert.match(immediateMessage(ladder('SYN-SKU-1', 1), 'Synthetic seller', 'owner@example.invalid', en).text,
+    /a price below your floor is being raised to it step by step\nSYN-SKU-1: €10\.00 → €15\.24/);
+  const de = messagesFor('de');
+  assert.match(alertDetail(ladder('SYN-SKU-1', 1), de)!, /^SYN-SKU-1: 10,00 € → 15,24 €, etwa 5 Schritte zu höchstens 10 %/);
+  // Дайджест: каждое событие своей строкой, двадцать первое и дальше — числом
+  const rows = Array.from({ length: 22 }, (_, i) => ladder(`SYN-SKU-${i + 1}`, i + 1));
+  const digest = digestMessage(rows, 'Synthetic seller', 'owner@example.invalid', en).text;
+  assert.equal((digest.match(/: €10\.00 → €15\.24/g) ?? []).length, 20);
+  assert.match(digest, /…and 2 more of these\./);
+  // У кода без подробности строки нет
+  assert.equal(alertDetail({ code: 'PRICE_WRITE_SCOPE_BLOCKED', details: {} }, en), null);
+});

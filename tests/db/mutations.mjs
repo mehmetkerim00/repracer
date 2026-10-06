@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0181_verify_schema_invariants_v48.sql';
+const VERIFY = 'migrations/0183_verify_schema_invariants_v49.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -2384,3 +2384,38 @@ export const STEP73_ROWS = [
     ],
   },
 ];
+
+/**
+ * Шаг 74 [Р-211]: запрос на переоценку единицы ставит база при ЛЮБОМ изменении входов пола — версии min_price, гардрейла и НДС товара
+ * (триггеры), курс ЕЦБ и НДС по умолчанию (функция платформенных входов с отметкой аккаунта: один запрос на курс)
+ */
+export const STEP74_ROWS = [
+  {
+    row: 'шаг 74 (Р-211)', critical: false,
+    invariant: 'любое изменение входов пола — запрос на переоценку: версии min_price и max_price, гардрейла и НДС товара, курс ЕЦБ (только поднявший пол) и НДС по умолчанию; один запрос на курс',
+    mutations: [
+      m(dropTrigger('zf_min_price_request_floor_raise', 'tenant_data.min_price'),
+        node(T('floor-raise.pg.test.ts'), 'Р-211: a new min_price, guardrail or product VAT', 'a new min_price version is a request, set by the database', '^false$')),
+      m(dropTrigger('zf_max_price_request_floor_raise', 'tenant_data.max_price'),
+        node(T('floor-raise.pg.test.ts'), 'Р-211: a new min_price, guardrail or product VAT', 'a new max_price version is a request too', '^false$')),
+      m(dropTrigger('zf_guardrail_request_floor_raise', 'tenant_data.guardrail'),
+        node(T('floor-raise.pg.test.ts'), 'Р-211: a new min_price, guardrail or product VAT', 'a new guardrail version is a request, set by the database', '^false$')),
+      m(dropTrigger('zf_product_vat_rate_request_floor_raise', 'tenant_data.product_vat_rate'),
+        node(T('floor-raise.pg.test.ts'), 'Р-211: a new min_price, guardrail or product VAT', 'a new VAT rate of the product is a request, set by the database', '^false$')),
+      m(replaceInFunction('tenant_data.request_floor_raise_for_platform_inputs(uuid,timestamp with time zone)',
+        'ON q.new_ratio > coalesce(q.old_ratio, 0)', 'ON false'),
+        node(T('floor-raise.pg.test.ts'), 'Р-211: a new ECB rate is a request', 'a new ECB rate is a request for an offer priced from a cost in another currency', '^false$')),
+      // Ревью шага 74, находка 4 по Р-211: курс, понизивший пол, — не запрос (иначе ежедневный курс ставил бы запрос всему каталогу)
+      m(replaceInFunction('tenant_data.request_floor_raise_for_platform_inputs(uuid,timestamp with time zone)',
+        'ON q.new_ratio > coalesce(q.old_ratio, 0)', 'ON q.new_ratio IS NOT NULL'),
+        node(T('floor-raise.pg.test.ts'), 'Р-211: a new ECB rate is a request', 'a rate that lowers the floor is not a request', '^false$')),
+      m(replaceInFunction('tenant_data.request_floor_raise_for_platform_inputs(uuid,timestamp with time zone)',
+        'UPDATE tenant_data.floor_raise_watermark SET fx_seen = fx_now, vat_seen = vat_now', 'UPDATE tenant_data.floor_raise_watermark SET fx_seen = w.fx_seen, vat_seen = w.vat_seen'),
+        node(T('floor-raise.pg.test.ts'), 'Р-211: a new ECB rate is a request', 'the same rate is not requested twice', '^false$')),
+      m(replaceInFunction('tenant_data.request_floor_raise_for_platform_inputs(uuid,timestamp with time zone)',
+        '(vat_now -> mk.country) IS DISTINCT FROM (w.vat_seen -> mk.country)', 'false'),
+        node(T('floor-raise.pg.test.ts'), 'Р-211: a default VAT rate', 'a default VAT rate coming into force is a request for offers with VAT in the price', '^false$')),
+    ],
+  },
+];
+

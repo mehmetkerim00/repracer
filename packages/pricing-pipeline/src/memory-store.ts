@@ -284,6 +284,8 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   private readonly competitorState = new Map<string, CompetitorRow>();
   private readonly crossChannel: Record<string, CrossChannelReference[]>;
   private readonly fxRates: FxQuote[];
+  /** Р-211: действующие курсы ЕЦБ, уже обращённые в запросы, — по аккаунту, как tenant_data.floor_raise_watermark */
+  private readonly platformInputsSeen = new Map<string, Map<string, FxQuote>>();
   private readonly marketplaces: Record<string, { currency: string; basis: PriceBasis; timeZone?: string | null }>;
   /** Р-123 (шаг 24): применённые цены — как tenant_data.price_history (суточной свёртки у двойника нет, сутки считаются из сырья) */
   readonly priceHistory: Array<{ writeScopeId: string; acceptedAt: Instant; amountMinor: number; currency: string; basis: PriceBasis; channelWriteId?: string; notApplied?: boolean }> = [];
@@ -409,7 +411,21 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       scopeKey: `${this.channel.toLowerCase()}|${row.channelAccountId}|${this.region ? `${this.region}|` : ''}${row.marketplace}|${row.externalUnitId}`, gtin: row.gtin ?? null,
       currency: row.currency, basis: row.basis, taxRegime: row.taxRegime, pricingMode: row.pricingMode, status: row.status, strategy: row.strategy,
       currentPriceMinor: row.currentPriceMinor, knownPricesMinor: [...row.knownPricesMinor],
+      // Р-212: последняя боевая ступень лестницы единицы за сутки — как last_ladder_step в PostgreSQL. Признака тени у решения стенд в
+      // памяти не хранит: ступени аккаунта, который сейчас в тени, не считаются
+      ...this.lastLadderStep(row),
     };
+  }
+
+  private lastLadderStep(row: ScopeRow): { lastLadderStepAt: Instant | null; lastLadderStepFinalMinor: number | null } {
+    const nowMs = this.nowMs();
+    const live = this.seedAccounts.find((a) => a.channelAccountId === row.channelAccountId)?.writeMode !== 'SHADOW';
+    const rungs = live ? (this.decisions as Array<{ writeScopeId: string; decidedAt: Instant; finalMinor: number | null; ladderFromMinor?: number | null }>)
+      .filter((d) => d.writeScopeId === row.writeScopeId && d.ladderFromMinor !== null && d.ladderFromMinor !== undefined
+        && Date.parse(d.decidedAt) <= nowMs && Date.parse(d.decidedAt) > nowMs - 86_400_000) : [];
+    if (rungs.length === 0) return { lastLadderStepAt: null, lastLadderStepFinalMinor: null };
+    const last = rungs.reduce((a, b) => (Date.parse(a.decidedAt) >= Date.parse(b.decidedAt) ? a : b));
+    return { lastLadderStepAt: last.decidedAt, lastLadderStepFinalMinor: last.finalMinor };
   }
 
   private activeHalt(channelAccountId: string, marketplace: string): HaltRow | undefined {
@@ -1454,7 +1470,14 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       rows.push({ writeScopeId: row.writeScopeId, currency: row.currency, before, after });
       planned.push({ row, min, max });
     }
-    if (mode === 'APPLY') for (const p of planned) { p.row.minPrice = p.min ?? null; p.row.maxPrice = p.max ?? null; }
+    if (mode === 'APPLY') {
+      for (const p of planned) {
+        p.row.minPrice = p.min ?? null;
+        p.row.maxPrice = p.max ?? null;
+        // Р-211: новая версия min_price или max_price — запрос на переоценку, как триггеры базы (0182)
+        if ((p.min !== undefined || p.max !== undefined) && p.row.pricingMode === 'ENGINE') this.requestFloorRaise(p.row.writeScopeId, 'BOUNDS_UPDATE', this.now());
+      }
+    }
     return { status: mode === 'APPLY' ? 'APPLIED' : 'PREVIEWED', rows };
   }
 
@@ -1714,7 +1737,11 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     // Р-135: второй фактор проверяется после разбора — продавец видит содержательную причину отказа, а не «нет второго фактора» на мусорный файл
     if (mode === 'APPLY' && !actor.mfa && !this.jobSecondFactor(actor, ['COST_IMPORT'])) return { status: 'MFA_REQUIRED' };
     if (mode === 'PREVIEW') return { status: 'PREVIEWED', rows: batch.rows.length, offers };
-    for (const p of planned) p.row.cost = p.cost;
+    for (const p of planned) {
+      p.row.cost = p.cost;
+      // Р-210: новая себестоимость — запрос на переоценку, как триггер базы (0180; ревью шага 73, находка 7 по Р-209/Р-210)
+      if (p.row.pricingMode === 'ENGINE') this.requestFloorRaise(p.row.writeScopeId, 'COST_UPDATE', this.now());
+    }
     return { status: 'APPLIED', importId: `import-${batch.fingerprint}`, rows: batch.rows.length, offers };
   }
 
@@ -1879,12 +1906,50 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     const ladders: FloorRaiseCandidate[] = [];
     for (const s of this.scopes.values()) {
       if (seen.has(s.writeScopeId) || !engine(s.writeScopeId)) continue;
-      const last = this.decisions.filter((d) => d.writeScopeId === s.writeScopeId).sort((x, y) => Date.parse(y.decidedAt) - Date.parse(x.decidedAt))[0] as { ladderFromMinor?: number | null; decidedAt: Instant } | undefined;
-      // Как в PostgreSQL (ревью шага 73, находка 5): «в полёте» — in_flight_write_id, окно ступеней — сутки
+      // Шаг 74: последнее одобренное ИЗМЕНЕНИЕ — ступень (за ним бывают «без изменения» паузы лестницы, Р-212); только боевой аккаунт —
+      // в тени цена на витрине не движется, и продолжать нечего. Как в PostgreSQL: «в полёте» — in_flight_write_id, окно — сутки
+      const last = (this.decisions as Array<{ writeScopeId: string; decidedAt: Instant; decisionClass: string; outcome: string; ladderFromMinor?: number | null }>)
+        .filter((d) => d.writeScopeId === s.writeScopeId && d.decisionClass === 'CHANGED' && d.outcome === 'APPROVED')
+        .sort((x, y) => Date.parse(y.decidedAt) - Date.parse(x.decidedAt))[0];
+      const live = this.seedAccounts.find((a) => a.channelAccountId === s.channelAccountId)?.writeMode !== 'SHADOW';
       if (last?.ladderFromMinor !== null && last?.ladderFromMinor !== undefined && Date.parse(last.decidedAt) > Date.parse(now) - 86_400_000
-          && !this.inFlight(s.writeScopeId)) ladders.push({ writeScopeId: s.writeScopeId, after: null, requestedAt: null });
+          && live && !this.inFlight(s.writeScopeId)) ladders.push({ writeScopeId: s.writeScopeId, after: null, requestedAt: null });
     }
-    return [...requests, ...ladders].slice(0, Math.max(0, limit));
+    // Продолжения лестниц — первыми: их немного, а очередь запросов (курс, гардрейл тенанта) бывает больше предела захода
+    return [...ladders, ...requests].slice(0, Math.max(0, limit));
+  }
+
+  /**
+   * Р-211: как tenant_data.request_floor_raise_for_platform_inputs (0182) — курсы ЕЦБ, ставшие действующими с прошлого захода, у единиц
+   * с себестоимостью в другой валюте; первый заход аккаунта ставит отметку. НДС по умолчанию стенд в памяти не ведёт
+   */
+  async requestFloorRaiseForPlatformInputs(_tenantId: string, channelAccountId: string, now: Instant): Promise<number> {
+    // Действующий курс каждой валюты — по ключу (дата курса), как отметка в базе; запрос — только если пол поднялся
+    const current = new Map<string, FxQuote>();
+    for (const r of this.fxRates) {
+      if (Date.parse(r.availableFrom) > Date.parse(now) || r.rateDate > now.slice(0, 10)) continue;
+      const seenQuote = current.get(r.quote);
+      if (!seenQuote || r.rateDate > seenQuote.rateDate) current.set(r.quote, r);
+    }
+    const seen = this.platformInputsSeen.get(channelAccountId);
+    this.platformInputsSeen.set(channelAccountId, current);
+    if (seen === undefined) return 0;
+    const ratio = (rates: Map<string, FxQuote>, to: string, from: string) => {
+      const rate = (c: string) => (c === 'EUR' ? 1 : rates.get(c) ? rates.get(c)!.rateMicros : null);
+      const u = rate(to);
+      const c = rate(from);
+      return u === null || c === null || c === 0 ? null : u / c;
+    };
+    let n = 0;
+    for (const row of this.scopes.values()) {
+      if (row.channelAccountId !== channelAccountId || row.pricingMode !== 'ENGINE' || !row.cost || row.cost.currency === row.currency) continue;
+      const after = ratio(current, row.currency, row.cost.currency);
+      const before = ratio(seen, row.currency, row.cost.currency);
+      if (after === null || after <= (before ?? 0)) continue;
+      this.requestFloorRaise(row.writeScopeId, 'FX_UPDATE', now);
+      n += 1;
+    }
+    return n;
   }
 
   async consumeFloorRaise(_tenantId: string, writeScopeId: string, after: FloorRaiseAfter, requestedAt: Instant): Promise<void> {

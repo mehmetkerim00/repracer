@@ -198,3 +198,14 @@ test('step 73 (Р-208): a ladder step below the floor is approved only as a step
   // Обычное решение ступенью не помечается
   assert.equal(decide(gate(1790)).ladderFromMinor, null);
 });
+
+/**
+ * Р-212 (шаг 74, ревью — находка 1): пауза лестницы — «без изменения» при цене ниже пола по построению. Алерт «текущая цена вне
+ * границ» с советом проверить правку в кабинете был бы ложным и поднимался бы на каждой оценке паузы; у прочих «без изменения» он остаётся
+ */
+test('step 74 (Р-212): a ladder pause below the floor raises no «current price outside bounds» alert; another no-change still does', () => {
+  const guardrails = { ...NO_GUARDRAILS, guardrailIds: ['g-1'], minMarginBp: 1000, maxStepChangeBp: 1000 };
+  const noChange = (code: 'LADDER_PACED' | 'ALREADY_AT_TARGET') => decide(gate(1400, { intent: intent(1400, { intentClass: 'NO_OP', currentMinor: 1400, reason: { code, params: {} } }), guardrails, cost }));
+  assert.equal(noChange('LADDER_PACED').alert, null);
+  assert.deepEqual(noChange('ALREADY_AT_TARGET').alert, { code: 'CURRENT_PRICE_OUTSIDE_BOUNDS', severity: 'WARNING' });
+});

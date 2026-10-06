@@ -64,6 +64,19 @@ export function alertText(row: Pick<AlertRow, 'code'>, m: Messages): { what: str
 }
 
 /**
+ * Шаг 74 [Р-212]: у некоторых событий текст называет суммы самого события — уведомление о старте лестницы к полу говорит «X → Y,
+ * ~N ступеней». Подробность собирает словарь из `details` алерта; у остальных кодов её нет
+ */
+export function alertDetail(row: Pick<AlertRow, 'code' | 'details'>, m: Messages): string | null {
+  const codes = m.ui.alerts.codes as Record<string, { detail?: (d: Readonly<Record<string, unknown>>, n: Messages) => string } | undefined>;
+  const detail = codes[row.code]?.detail;
+  return detail ? detail(row.details ?? {}, m) : null;
+}
+
+/** Сколько подробностей одного дайджеста перечисляется поимённо; остальные — числом */
+const DIGEST_DETAILS = 20;
+
+/**
  * Письмо об одном событии: тенант, канал, причина человеческим языком и первое действие [Р-156].
  *
  * Находка 4 ревью шага 36: КОД события дайджест печатал, а срочное письмо запрещало — два правила об одном, и одно из
@@ -85,6 +98,7 @@ export function immediateMessage(row: AlertRow, tenant: string, to: string, m: M
     m.ui.alerts.codeLine(row.code),
     '',
     what,
+    ...(alertDetail(row, m) ? [alertDetail(row, m)!] : []),
     '',
     m.ui.alerts.firstStepLine(step),
   ];
@@ -103,6 +117,13 @@ export function digestMessage(rows: readonly AlertRow[], tenant: string, to: str
     '',
     m.ui.alerts.digestIntro(rows.length),
     ...[...byCode.entries()].map(([code, x]) => m.ui.alerts.digestRow(code, alertText({ code }, m).what, x.count, m.when(x.last))),
+    // Шаг 74: события с подробностью (старт лестницы к полу) — каждое своей строкой: группировка по коду теряла бы суммы
+    ...(() => {
+      const details = rows.map((r) => alertDetail(r, m)).filter((d): d is string => d !== null);
+      if (details.length === 0) return [];
+      return ['', ...details.slice(0, DIGEST_DETAILS).map((d) => `  ${d}`),
+        ...(details.length > DIGEST_DETAILS ? [`  ${m.ui.alerts.digestDetailsMore(details.length - DIGEST_DETAILS)}`] : [])];
+    })(),
     '',
     m.ui.alerts.digestFirstStep,
   ];

@@ -261,3 +261,50 @@ test('step 73 (Р-209, Р-210): without a usable competitor snapshot a price bel
   const above = runStrategy(input(beat, { bounds, currentPriceMinor: 1600, snapshot: null, raiseAfter: 'COST_UPDATE' }));
   assert.ok(above.kind === 'NOT_EVALUATED' && above.reason.code === 'COMPETITOR_REQUIREMENT_NOT_MET');
 });
+
+/**
+ * Р-212 (шаг 74, OQ-255): ступень лестницы — не чаще периода планового пересчёта. Внутри паузы подъём от цены ниже пола — «без
+ * изменения» LADDER_PACED с моментом следующей ступени; откуда пришла оценка — снимок конкурента или запрос базы — не важно
+ */
+test('step 74 (Р-212): within the pause after a step neither a competitor observation nor a re-evaluation request makes the next step', () => {
+  const bounds = { minMinor: 500, maxMinor: 3000, marginFloor: { amountMinor: 1524, minMarginBp: 1000 } };
+  const lastStepAt = '2026-09-14T09:59:00.000Z';
+  const paced = runStrategy(input(matchBuybox(), { bounds, currentPriceMinor: 1100, stepLimitBp: 1000, ladderPace: { lastStepAt, paceSeconds: 900 } }));
+  assert.ok(paced.kind === 'INTENT' && paced.intent.intentClass === 'NO_OP', JSON.stringify(paced));
+  assert.deepEqual(paced.intent.reason, { code: 'LADDER_PACED', params: { currentMinor: 1100, floorMinor: 1524, nextStepAt: '2026-09-14T10:14:00.000Z', currency: 'EUR' } });
+  // Запрос базы без снимка конкурентов — тоже пауза: подъём к полу из данных продавца не обгоняет лестницу
+  const beat = { type: 'BEAT_LOWEST' as const, undercutMinor: 1, scope: 'VISIBLE_TOP_N' as const, compareLanded: false, atBound: 'CAP' as const };
+  const request = runStrategy(input(beat, { bounds, currentPriceMinor: 1100, snapshot: null, stepLimitBp: 1000, raiseAfter: 'COST_UPDATE', ladderPace: { lastStepAt, paceSeconds: 900 } }));
+  assert.ok(request.kind === 'INTENT' && request.intent.reason.code === 'LADDER_PACED', JSON.stringify(request));
+  // После паузы — следующая ступень; без прошлой ступени пауза не держит; цена не ниже пола паузой не держится вовсе
+  const after = runStrategy(input(matchBuybox(), { bounds, currentPriceMinor: 1100, stepLimitBp: 1000, ladderPace: { lastStepAt: '2026-09-14T09:44:00.000Z', paceSeconds: 900 } }));
+  assert.ok(after.kind === 'INTENT' && after.intent.proposedMinor === 1210 && after.intent.reason.code === 'RAISED_TOWARD_FLOOR', JSON.stringify(after));
+  const fresh = runStrategy(input(matchBuybox(), { bounds, currentPriceMinor: 1100, stepLimitBp: 1000, ladderPace: { lastStepAt: null, paceSeconds: 900 } }));
+  assert.ok(fresh.kind === 'INTENT' && fresh.intent.proposedMinor === 1210, JSON.stringify(fresh));
+  const above = runStrategy(input(matchBuybox(), { bounds, currentPriceMinor: 1600, ladderPace: { lastStepAt, paceSeconds: 900 } }));
+  assert.ok(above.kind === 'INTENT' && above.intent.reason.code !== 'LADDER_PACED', JSON.stringify(above));
+  // Допуск в минуту — только пересчёту, на его собственный ход: ступень 14 мин 30 с назад плановую оценку уже не держит, 13 мин назад —
+  // держит; наблюдение конкурента допуска не получает вовсе
+  const nearlyPace = { lastStepAt: '2026-09-14T09:45:30.000Z', paceSeconds: 900 };
+  const nearly = runStrategy(input(matchBuybox(), { bounds, currentPriceMinor: 1100, stepLimitBp: 1000, ladderPace: nearlyPace, trigger: { type: 'SCHEDULE' } }));
+  assert.equal(nearly.kind === 'INTENT' && nearly.intent.reason.code, 'RAISED_TOWARD_FLOOR');
+  const early = runStrategy(input(matchBuybox(), { bounds, currentPriceMinor: 1100, stepLimitBp: 1000, ladderPace: { lastStepAt: '2026-09-14T09:47:00.000Z', paceSeconds: 900 }, trigger: { type: 'SCHEDULE' } }));
+  assert.equal(early.kind === 'INTENT' && early.intent.reason.code, 'LADDER_PACED');
+  const observed = runStrategy(input(matchBuybox(), { bounds, currentPriceMinor: 1100, stepLimitBp: 1000, ladderPace: nearlyPace, trigger: { type: 'COMPETITOR_CHANGE' } }));
+  assert.equal(observed.kind === 'INTENT' && observed.intent.reason.code, 'LADDER_PACED', 'a competitor observation gets no tolerance');
+});
+
+/** Р-211 (шаг 74): повод подъёма называется только у пола, который он двигает — границы и отказ перепроверки у любого, остальные входы у пола маржи */
+test('step 74 (Р-211): the reason of a raise names only an input that moves the floor in force', () => {
+  const beat = { type: 'BEAT_LOWEST' as const, undercutMinor: 1, scope: 'VISIBLE_TOP_N' as const, compareLanded: false, atBound: 'CAP' as const };
+  const margin = { minMinor: 500, maxMinor: 3000, marginFloor: { amountMinor: 1524, minMarginBp: 1000 } };
+  const min = { minMinor: 1700, maxMinor: 3000, marginFloor: { amountMinor: 1524, minMarginBp: 1000 } };
+  const after = (bounds: typeof margin, raiseAfter: NonNullable<EngineInput['raiseAfter']>) => {
+    const r = runStrategy(input(beat, { bounds, currentPriceMinor: 1000, snapshot: null, raiseAfter }));
+    return r.kind === 'INTENT' ? r.intent.reason.params.after ?? null : 'NOT_EVALUATED';
+  };
+  assert.deepEqual(['FX_UPDATE', 'GUARDRAIL_UPDATE', 'VAT_UPDATE', 'COST_UPDATE', 'BOUNDS_UPDATE', 'FLOOR_RECHECK'].map((a) => after(margin, a as never)),
+    ['FX_UPDATE', 'GUARDRAIL_UPDATE', 'VAT_UPDATE', 'COST_UPDATE', 'BOUNDS_UPDATE', 'FLOOR_RECHECK'], 'the margin floor is moved by cost, fee, rate, guardrail, VAT and max_price');
+  assert.deepEqual(['FX_UPDATE', 'COST_UPDATE', 'BOUNDS_UPDATE', 'FLOOR_RECHECK'].map((a) => after(min, a as never)), [null, null, 'BOUNDS_UPDATE', 'FLOOR_RECHECK'],
+    'min_price is moved only by the bounds');
+});

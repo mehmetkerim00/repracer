@@ -84,6 +84,8 @@ export const KAUFLAND_DESCRIPTOR: ChannelDescriptor = {
   haltRelease: { kind: 'SAMPLE', basis: 'Р-52: fresh sample by polling GET /buybox' },
   // Р-124: в openapi.json 2.44.0 (vendor/kaufland/seller-api-v2) нет пути и схемы истории цен unit — полнота с подключения
   priceHistory: { kind: 'UNAVAILABLE', basis: 'Seller API 2.44.0 snapshot has no price history resource for units' },
+  // Р-212 (шаг 74): ступень лестницы к полу — не чаще планового пересчёта; решение проекта, а не факт канала
+  scheduledRecomputeSeconds: 900,
   competitorSources: [
     {
       // Ранний доступ у аккаунт-менеджера; до получения Р-36 не активна (Р-45)

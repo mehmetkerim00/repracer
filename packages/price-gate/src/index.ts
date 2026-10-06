@@ -257,8 +257,11 @@ export function decide(input: GateInput): PriceDecisionDraft {
       check: 'CURRENT_WITHIN_BOUNDS', passed: inside,
       detail: inside ? null : { code: 'INTERNAL_BOUND_VIOLATION', params: { check: 'CURRENT_WITHIN_BOUNDS', amountMinor: current, floorMinor: floor, ceilingMinor: ceiling, currency } },
     });
+    // Р-212 (шаг 74): пауза лестницы — цена ниже пола по построению и уже поднимается к нему; алерт «текущая цена вне границ» с советом
+    // проверить правку в кабинете или границы был бы ложным и поднимался бы на каждой оценке паузы (ревью шага 74, находка 1 по Р-212)
+    const ladderPaused = intent.reason.code === 'LADDER_PACED';
     return finish('NO_CHANGE', { code: 'NO_CHANGE', params: {} }, null, null,
-      inside ? null : { code: 'CURRENT_PRICE_OUTSIDE_BOUNDS', severity: 'WARNING' });
+      inside || ladderPaused ? null : { code: 'CURRENT_PRICE_OUTSIDE_BOUNDS', severity: 'WARNING' });
   }
 
   // 7–8. Проверка 1 из 3: предложенная цена против обеих границ

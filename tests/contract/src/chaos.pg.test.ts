@@ -149,15 +149,36 @@ const ENTRY: Record<ProcessKind, string> = {
 /** Жив ли процесс: убитый сигналом получает `signalCode`, а `exitCode` у него остаётся null (ревью шага 65, находка 3) */
 const alive = (child: ChildProcess | undefined): child is ChildProcess => child !== undefined && child.exitCode === null && child.signalCode === null;
 
+/** Строку готовности диспетчер печатает до первого обхода — флаг процесса ставится один раз и не выпадает из хвоста вывода */
+const readyPrinted = new Set<ChildProcess>();
+const printedReady = (kind: ProcessKind) => {
+  const child = procs.get(kind);
+  return kind === 'dispatcher' && child !== undefined && readyPrinted.has(child);
+};
+
 async function ready(kind: ProcessKind): Promise<void> {
   const deadline = Date.now() + 60_000;
   for (;;) {
     const child = procs.get(kind);
-    if (!alive(child)) throw new Error(`${kind} exited before it was ready: ${(tails.get(kind) ?? []).slice(-5).join(' | ')}`);
+    if (!alive(child)) {
+      /**
+       * Шаг 74 (полный прогон шага 73, семя 137298324): диспетчер, убитый моделью в момент первой же записи, мог умереть раньше, чем
+       * родитель прочёл его строку готовности: событие выхода приходит раньше, чем дочитан вывод. Выход судится по ДОЧИТАННОМУ выводу:
+       * напечатал готовность — был готов (умер уже в работе, обход раунда поднимет его снова); не напечатал — отказ с кодом выхода
+       */
+      // Охранник `alive` сужает тип до «нет процесса»: умерший процесс берётся заново, без сужения
+      const dead = procs.get(kind) as ChildProcess | undefined;
+      if (dead && [dead.stdout, dead.stderr].some((x) => x && !x.readableEnded)) {
+        await new Promise<void>((resolve) => { dead.once('close', () => resolve()); setTimeout(resolve, 2_000); });
+      }
+      // Готовым засчитывается только процесс, убитый моделью (SIGKILL) после строки готовности; любой другой выход — отказ старта
+      if (printedReady(kind) && dead?.signalCode === 'SIGKILL') return;
+      throw new Error(`${kind} exited before it was ready (code ${dead?.exitCode ?? '-'}, signal ${dead?.signalCode ?? '-'}): ${(tails.get(kind) ?? []).slice(-5).join(' | ')}`);
+    }
     const probe = kind === 'console' ? `${consoleOrigin}/api/session`
       : kind === 'dispatcher' ? null : `http://127.0.0.1:${kind === 'scheduler' ? ports.scheduler : ports['bulk-worker']}/healthz`;
     if (probe === null) {
-      if ((tails.get(kind) ?? []).some((l) => l.includes('CHAOS_DISPATCHER_READY'))) return;
+      if (printedReady(kind)) return;
     } else {
       const ok = await fetch(probe).then((r) => r.ok, () => false);
       if (ok) return;
@@ -173,7 +194,9 @@ async function start(kind: ProcessKind): Promise<void> {
     { cwd: root, env: envOf(kind), stdio: ['ignore', 'pipe', 'pipe'] });
   const keep = (chunk: Buffer) => {
     const lines = tails.get(kind)!;
-    lines.push(...chunk.toString().split('\n').filter(Boolean));
+    const text = chunk.toString();
+    if (text.includes('CHAOS_DISPATCHER_READY')) readyPrinted.add(child);
+    lines.push(...text.split('\n').filter(Boolean));
     if (lines.length > 200) lines.splice(0, lines.length - 200);
   };
   child.stdout?.on('data', keep);

@@ -115,6 +115,8 @@ export const ENGINE_REASON_CODES = [
   'WITHIN_DEADBAND',
   // Р-171 (шаг 41): в ТЕНИ цена на витрине не двигается, и то же предложение повторялось бы на каждом опросе
   'SHADOW_ALREADY_PROPOSED',
+  // Р-212 (шаг 74): ступень лестницы к полу — не чаще периода планового пересчёта; оценка внутри паузы — без изменения
+  'LADDER_PACED',
   'ALREADY_WINNING_BUYBOX',
   'NO_COMPETITOR_OFFERS',
   'TARGET_OUTSIDE_BOUNDS_HOLD',
@@ -291,10 +293,12 @@ export const BOUND_NAMES = ['min', 'max', 'margin_floor', 'both'] as const;
 /** Чем был пол, до которого поднята цена [Р-207]: min_price или пол маржи */
 export const FLOOR_BOUNDS = ['min', 'margin_floor'] as const;
 /**
- * После чего поднята цена до пола без нового наблюдения конкурентов: себестоимость выросла (Р-210) или перепроверка базы перед
- * отправкой отказала по новому курсу и единица переоценена (Р-209)
+ * После чего поднята цена до пола без нового наблюдения конкурентов: себестоимость или комиссия выросли (Р-210), перепроверка базы
+ * перед отправкой отказала и единица переоценена (Р-209), изменились курс ЕЦБ, min_price или max_price, гардрейл (минимальная маржа) или ставка НДС
+ * (Р-211, шаг 74). Порядок — как в реестре базы (0182)
  */
-export const RAISE_AFTER = ['COST_UPDATE', 'FLOOR_RECHECK'] as const;
+export const RAISE_AFTER = ['COST_UPDATE', 'FLOOR_RECHECK', 'FX_UPDATE', 'BOUNDS_UPDATE', 'GUARDRAIL_UPDATE', 'VAT_UPDATE'] as const;
+export type FloorRaiseReason = (typeof RAISE_AFTER)[number];
 export const BOUND_CAUSES = [
   'MISSING', 'CURRENCY_MISMATCH', 'BASIS_MISMATCH', 'INVALID_AMOUNT', 'MIN_ABOVE_MAX', 'COST_PROFILE_MISSING', 'COST_CURRENCY_MISMATCH',
   'VAT_UNKNOWN', 'UNATTAINABLE', 'INVALID_INPUT', 'MARGIN_FLOOR_ABOVE_MAX_PRICE', 'FX_RATE_UNAVAILABLE', 'FX_RATE_STALE', 'UNSUPPORTED_CURRENCY',
@@ -493,6 +497,7 @@ export const REASON_PARAMS: Readonly<Record<AnyReasonCode, ParamSchema>> = {
    * тени превышал боевой в двадцать раз.
    */
   SHADOW_ALREADY_PROPOSED: { proposedMinor: money('TENANT'), heldMinor: money('TENANT'), currency: currency() },
+  LADDER_PACED: { currentMinor: money('TENANT'), floorMinor: money('TENANT'), nextStepAt: instant('TENANT'), currency: currency() },
 
   WRITE_SUPERSEDED_BY_NEWER_VERSION: { newerVersion: count('TENANT'), newerWriteId: id('TENANT', O) },
   WRITE_RETRIES_EXHAUSTED: { attempts: count('TENANT'), code: oneOf(WRITE_ERROR_CODES, 'TENANT') },

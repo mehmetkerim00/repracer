@@ -1,4 +1,4 @@
-import type { OmnibusPriorPrice } from '@repracer/pricing-model';
+import type { FloorRaiseReason, OmnibusPriorPrice } from '@repracer/pricing-model';
 import type { DecisionExplanation, DistrustRef, ExplanationIntentColumns, SanitySummary, FxFailureCause, FxQuote, HaltRef, HaltReasonCode, MemberRole, PriceIntentDraft as IntentDraft, StopRef, StopScope } from '@repracer/pricing-model';
 import type { ExplanationRuleset, StopScope as AuditStopScope } from '@repracer/pricing-model';
 import type { CompetitorQuery, CompetitorSnapshot, FieldWrite, Instant, Money, OfferIdentity, PriceBasis, PricingHealthObservation, WriteOutcome, WriteRetryRule } from '@repracer/channel-port';
@@ -60,6 +60,13 @@ export interface PriceScopeContext {
    * не бывает. В тени она не двигается никогда, и без этого поля движок предлагал бы одно и то же на каждом опросе.
    */
   shadowLastProposedMinor?: number | null;
+  /**
+   * Р-212 (шаг 74): время последней БОЕВОЙ ступени лестницы к полу за сутки (решение с `ladder_from_minor`, не в тени) — от него
+   * считается пауза до следующей
+   */
+  lastLadderStepAt?: Instant | null;
+  /** Р-212: до какой цены дошла последняя БОЕВАЯ ступень за сутки — ступень от неё продолжает лестницу, от другой цены начинает новую */
+  lastLadderStepFinalMinor?: number | null;
   /** Цены, которые канал может сейчас показывать: действующая и недавно отправленные */
   knownPricesMinor: number[];
 }
@@ -537,7 +544,8 @@ export interface InboundNotificationEntry {
   receivedAt: Instant;
 }
 
-export type FloorRaiseAfter = 'COST_UPDATE' | 'FLOOR_RECHECK';
+/** Повод запроса на переоценку — вход пола, который изменился [Р-209…Р-211]; тот же перечень, что у причины подъёма */
+export type FloorRaiseAfter = FloorRaiseReason;
 /** Шаг 73: единица для подъёма к полу без наблюдения конкурентов; `after` — повод (null — следующая ступень лестницы [Р-208]) */
 export interface FloorRaiseCandidate { writeScopeId: string; after: FloorRaiseAfter | null; requestedAt: Instant | null }
 
@@ -640,12 +648,18 @@ export interface PricingStore {
   listScheduledScopes(tenantId: string, channelAccountId: string, now: Instant, limit: number): Promise<string[]>;
   /**
    * Шаг 73: единицы аккаунта, которые пересчёт поднимает к полу без наблюдения конкурентов — запрос на переоценку, поставленный базой
-   * (COST_UPDATE — себестоимость выросла [Р-210], FLOOR_RECHECK — перепроверка пола перед отправкой отказала [Р-209]), и лестница к
-   * полу в работе (последнее решение — ступень, записи в полёте нет [Р-208]). Самые давние первыми, не больше `limit`
+   * (повод — изменившийся вход пола [Р-209…Р-211]), и лестница к полу в работе у боевого аккаунта (последнее одобренное изменение —
+   * ступень, записи в полёте нет [Р-208]). Самые давние первыми, не больше `limit`
    */
   listFloorRaiseScopes(tenantId: string, channelAccountId: string, now: Instant, limit: number): Promise<FloorRaiseCandidate[]>;
   /** Запрос на переоценку исполнен — снимается, если с прочитанного момента новый не поставлен */
   consumeFloorRaise(tenantId: string, writeScopeId: string, after: FloorRaiseAfter, requestedAt: Instant): Promise<void>;
+  /**
+   * Р-211 (шаг 74): курсы ЕЦБ и ставки НДС по умолчанию, ставшие действующими с прошлого захода, — запросы на переоценку единиц аккаунта
+   * (FX_UPDATE, VAT_UPDATE). Это данные платформы: запрос ставит функция базы в границе тенанта, отметка «видели до» — у аккаунта.
+   * Возвращает число поставленных запросов
+   */
+  requestFloorRaiseForPlatformInputs(tenantId: string, channelAccountId: string, now: Instant): Promise<number>;
   /** Р-126: опрос товаров выполнен — время последнего опроса */
   markPolled(tenantId: string, channelAccountId: string, queries: readonly CompetitorQuery[], at: Instant): Promise<void>;
   omnibusCheck(tenantId: string, writeScopeId: string, startsAt: Instant): Promise<OmnibusPriorPrice>;

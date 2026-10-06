@@ -5,6 +5,7 @@ import {
   type CompetitorRequirement,
   type CostInputs,
   type EngineReasonCode,
+  type FloorRaiseReason,
   type PriceIntentDraft,
   type Reason,
   type StrategyDefinition,
@@ -41,8 +42,14 @@ export interface EngineInput {
    * шага, следующая — на следующей оценке. Предел не снимается, Gate проверяет его как у любой цены
    */
   stepLimitBp?: number | null;
-  /** Р-209, Р-210 (шаг 73): переоценка без наблюдения конкурентов — после роста себестоимости или отказа перепроверки по новому курсу */
-  raiseAfter?: 'COST_UPDATE' | 'FLOOR_RECHECK' | null;
+  /** Р-209…Р-211: переоценка без наблюдения конкурентов — повод, изменившийся вход пола (себестоимость, курс, min_price, маржа, НДС, отказ перепроверки) */
+  raiseAfter?: FloorRaiseReason | null;
+  /**
+   * Р-212 (шаг 74): пауза лестницы — ступень к полу не чаще периода планового пересчёта (свойство канала). `lastStepAt` — последняя
+   * ступень единицы за сутки; внутри паузы подъём от цены ниже пола — «без изменения» LADDER_PACED, и наблюдения конкурентов его не
+   * ускоряют
+   */
+  ladderPace?: { lastStepAt: Instant | null; paceSeconds: number } | null;
   now: Instant;
   trigger: { type: TriggerType; sourceEventId?: string };
   intentTtlSeconds?: number;
@@ -135,9 +142,22 @@ function r<C extends EngineReasonCode>(code: C, params: Reason['params'] = {}): 
  */
 export const FLOOR_RAISE_RULE = 'FLOOR_RAISE';
 
+/** Р-212: допуск паузы лестницы на ход самого пересчёта (не больше десятой части паузы) */
+export const LADDER_PACE_TOLERANCE_SECONDS = 60;
+
+/**
+ * Какой пол двигает повод переоценки: границы (min_price — пол сам, max_price — действует ли пол маржи) и отказ перепроверки — любой;
+ * себестоимость, комиссия, курс, гардрейл и НДС — только пол маржи
+ */
+function raiseAfterMoves(after: FloorRaiseReason, marginBinding: boolean): boolean {
+  if (after === 'FLOOR_RECHECK' || after === 'BOUNDS_UPDATE') return true;
+  return marginBinding;
+}
+
 export function runStrategy(input: EngineInput): EngineResult {
   const { strategy, snapshot, writeScope, bounds, currentPriceMinor: current, now } = input;
   const heldInShadow = input.shadowLastProposedMinor ?? null;
+  const pace = input.ladderPace && Number.isSafeInteger(input.ladderPace.paceSeconds) && input.ladderPace.paceSeconds > 0 ? input.ladderPace : null;
   const params = strategy.params;
   const currency = writeScope.currency;
   const notEvaluated = (reason: Reason<EngineReasonCode>): EngineResult => ({ kind: 'NOT_EVALUATED', strategyType: params.type, reason });
@@ -161,8 +181,9 @@ export function runStrategy(input: EngineInput): EngineResult {
   const belowFloor = current !== null && current < floorMinor;
   const stepLimit = input.stepLimitBp !== null && input.stepLimitBp !== undefined && Number.isSafeInteger(input.stepLimitBp) && input.stepLimitBp > 0 ? input.stepLimitBp : null;
   const floorParams = { floorMinor, bound: marginBinding ? 'margin_floor' : 'min', ...(marginBinding ? { minMarginBp: margin!.minMarginBp } : {}),
-    // Повод «после изменения себестоимости» — только у пола маржи: min_price себестоимость не двигает (ревью шага 73, находка 2)
-    ...(input.raiseAfter && (input.raiseAfter !== 'COST_UPDATE' || marginBinding) ? { after: input.raiseAfter } : {}) };
+    // Повод — только у пола, который он двигает (ревью шага 73, находка 2): min_price двигает только новая версия min_price, пол маржи —
+    // себестоимость, комиссия, курс, гардрейл и НДС; отказ перепроверки — любой пол
+    ...(input.raiseAfter && raiseAfterMoves(input.raiseAfter, marginBinding) ? { after: input.raiseAfter } : {}) };
   /** Шаг в базисных пунктах, как его считает Gate: вверх до пункта */
   const stepBp = (from: number, to: number) => Math.ceil(((to - from) * 10_000) / from);
   /** Наибольшая цена, до которой Gate пропустит шаг от `from` */
@@ -346,6 +367,20 @@ export function runStrategy(input: EngineInput): EngineResult {
    * зоной нечувствительности не глушится — она не держит цену ниже пола [Р-207, Р-208]
    */
   function propose(proposed: number, chain: Reason[], reference: number | null, raising = false, ruleCode: string = params.type): EngineResult {
+    /**
+     * Р-212 (шаг 74): подъём от цены ниже пола — ступень лестницы; после ступени следующая не раньше паузы (период планового пересчёта),
+     * откуда бы ни пришла оценка — снимок конкурента, запрос базы или расписание. Допуск в минуту (не больше десятой паузы) — только
+     * пересчёту, на его собственный ход: единица одного захода оценивается в разные секунды
+     */
+    if (raising && belowFloor && pace !== null && pace.lastStepAt !== null) {
+      // Допуск — только оценке пересчёта (расписание, запрос базы): наблюдение конкурента ступень не ускоряет даже на минуту
+      const tolerance = input.trigger.type === 'COMPETITOR_CHANGE' ? 0 : Math.min(LADDER_PACE_TOLERANCE_SECONDS, Math.floor(pace.paceSeconds / 10));
+      const nextAt = Date.parse(pace.lastStepAt) + pace.paceSeconds * 1000;
+      if (Date.parse(now) < nextAt - tolerance * 1000) {
+        const paced = r('LADDER_PACED', { currentMinor: current!, floorMinor, nextStepAt: new Date(nextAt).toISOString(), currency });
+        return intent('NO_OP', current!, paced, [...chain, paced], reference, ruleCode);
+      }
+    }
     if (current !== null && !raising) {
       const delta = Math.abs(proposed - current);
       if (delta === 0) {

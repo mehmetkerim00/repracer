@@ -401,8 +401,8 @@ export function renderReport(d: ReportData, options: { client?: (s: string) => s
   const belowFloorSection = d.belowFloor.length > 0 ? `
     <section class="highlight"><h2>Products priced below your margin floor</h2>
       <p><strong>${d.belowFloor.length} of your products are priced below the margin floor computed from your unit cost</strong>, an assumed Amazon referral fee of ${d.options.feePct}% and a minimum margin of ${d.options.marginPct}%. The engine raises such a price to your margin floor, through the same final price check as every other price; it never goes above the maximum price. In this run the engine would have raised ${c.raisedToFloor} of them to the floor${c.ladders > 0 ? ` and ${c.ladders} one step toward it` : ''} (shadow mode: nothing was sent).${notInRun > 0 ? ` ${notInRun} of them were not in this run.` : ''} ${d.options.stepPct === null
-        ? 'No limit on the size of a price step was set in this run; with a step limit, a raise larger than the limit goes up step by step, one step per evaluation, until it reaches the floor.'
-        : `With the step limit of ${d.options.stepPct}% set for this run, a raise larger than the limit goes up step by step, one step per evaluation, until it reaches the floor; in shadow mode the price on Amazon does not move, so only the first step is shown, with the number of steps left.`}</p>
+        ? 'No limit on the size of a price step was set in this run; with a step limit, a raise larger than the limit goes up step by step, at most one step every 15 minutes, until it reaches the floor.'
+        : `With the step limit of ${d.options.stepPct}% set for this run, a raise larger than the limit goes up step by step, at most one step every 15 minutes (competitor moves do not speed it up), until it reaches the floor; in shadow mode the price on Amazon does not move, so only the first step is shown, with the number of steps left.`}</p>
       <table><thead><tr><th>Product</th><th>Your price</th><th>Unit cost</th><th>Profit per unit at your price*</th><th>Margin floor</th><th>Engine's price</th></tr></thead><tbody>
       ${d.belowFloor.slice(0, 50).map((b) => `<tr><td>${cl(b.label)}<div class="muted">${cl(b.sku)}${b.sales !== null ? ` · ${b.sales} ${e(salesPeriod)}` : ''}</div></td><td>${e(money(m, b.priceMinor))}</td><td>${e(money(m, b.costMinor))}</td><td class="${b.profitMinor < 0 ? 'loss' : ''}">${e(money(m, b.profitMinor))}</td><td>${e(money(m, b.floorMinor))}</td><td>${engineCell(b)}</td></tr>`).join('')}
       </tbody></table>
@@ -468,7 +468,7 @@ ${rowsSection}
 <li>Storefront ${STOREFRONT}; prices are treated as US dollars excluding sales tax (our assumption for ${STOREFRONT}).</li>
 <li>Strategy: one cent below the lowest competitor, never below the floor and never above the ceiling.</li>
 <li>Your minimum and maximum prices were not in the file, so we assumed them: minimum ${d.options.minPct}% below your current price, maximum ${d.options.maxPct}% above it. In the pilot you set your own.</li>
-${d.options.stepPct !== null ? `<li>Step limit: a price changes by at most ${d.options.stepPct}% at a time; a larger raise to your margin floor goes step by step.</li>` : ''}
+${d.options.stepPct !== null ? `<li>Step limit: a price changes by at most ${d.options.stepPct}% at a time; a larger raise to your margin floor goes step by step, at most one step every 15 minutes.</li>` : ''}
 <li>Margin floor: unit cost + an assumed Amazon referral fee of ${d.options.feePct}% (the fee depends on the product category; yours may differ) + minimum margin ${d.options.marginPct}%. FBA fees, per-item minimum fees, closing fees and shipping are not included.</li>
 <li>${d.hours} simulated hours; each simulated competitor changed its price every ${d.options.competitorEveryMinutes} minutes (${c.competitorUpdates} competitor updates in total).</li>
 <li>Columns we read: ${d.columns.recognized.map((r) => `“${cl(r.header)}” as ${e(r.meaning)}`).join(', ')}.</li>

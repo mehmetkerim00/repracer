@@ -267,7 +267,7 @@ test('step 73: with a step limit the report shows the first step toward the marg
   const html = readFileSync(output, 'utf8');
   assert.match(html, /would be raised one step toward your margin floor · \+5% · about 1 more step/);
   assert.match(html, /In this run the engine would have raised 0 of them to the floor and 1 one step toward it \(shadow mode: nothing was sent\)\./);
-  assert.match(html, /With the step limit of 5% set for this run, a raise larger than the limit goes up step by step/);
+  assert.match(html, /With the step limit of 5% set for this run, a raise larger than the limit goes up step by step, at most one step every 15 minutes \(competitor moves do not speed it up\)/);
   assert.match(html, /<li>Step limit: a price changes by at most 5% at a time/);
   assert.match(html, /A step limit of 5% was set for this run/);
   // Заголовок «sales_30d» этой синтетики — строка клиента: утечки на рендере с заменёнными строками клиента проверяет сам прогон

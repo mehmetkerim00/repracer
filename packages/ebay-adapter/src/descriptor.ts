@@ -130,6 +130,8 @@ export const EBAY_DESCRIPTOR: ChannelDescriptor = {
   // Текст основания — как строка platform.channel_behaviour (0140); совпадение проверяет channel-reference.pg.test.ts
   haltRelease: { kind: 'MANUAL_ONLY', basis: 'Р-119: no competitor data on eBay, a fresh independent sample cannot be taken' },
   priceHistory: { kind: 'UNAVAILABLE', basis: 'no specification snapshot (E-01); the sandbox run found no offer price history operation' },
+  // Р-212 (шаг 74): ступень лестницы к полу — не чаще планового пересчёта; решение проекта, а не факт канала
+  scheduledRecomputeSeconds: 900,
   competitorSources: [],
   /**
    * Шаг 51, Growth Check («retries for a maximum of two times for infrastructure errors», get-started-with-ebay-apis.html снимка

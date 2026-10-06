@@ -1,5 +1,6 @@
 export type * from './primitives.ts';
 export type * from './descriptor.ts';
+export { DEFAULT_SCHEDULED_RECOMPUTE_SECONDS } from './descriptor.ts';
 export type * from './messages.ts';
 export { waitingForBudget, type BudgetWaitDeps } from './budget-wait.ts';
 export { DEFAULT_ERROR_CLASS, type ChannelError, type ChannelErrorCode, type ErrorClass, type ErrorScope } from './errors.ts';
