@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { LIST_PAGE_DEFAULT, type ComplianceView, type DiscountCheckView, type HistoryDepthView, type ListQuery } from '@repracer/console-model';
 import { requestJson, useResource, worldPath } from '../api.ts';
 import type { DiscountAnnounceResponse, JobCreatedResponse } from '../api-types.ts';
-import { Badge, errorText, Gaps, Load, OfferPicker, Pager, useMessages } from '../components.tsx';
+import { Badge, errorText, Gaps, Load, OfferPicker, Pager, useMessages, Intro, DateTimeField } from '../components.tsx';
 import { JobProgress } from './Jobs.tsx';
 
 /** Сумма из поля ввода в минимальных единицах: «19,99» и «19.99»; неверное — null */
@@ -17,7 +17,7 @@ function minorOf(text: string): number | null {
 export function DepthLine({ depth }: { depth: HistoryDepthView }) {
   return (
     <div className="small">
-      <p><Badge tone={depth.tone}>{depth.complete ? '✓' : '!'}</Badge> {depth.seen} <strong>{depth.reliability}</strong></p>
+      <p><Badge tone={depth.tone} symbol>{depth.complete ? '✓' : '!'}</Badge> {depth.seen} <strong>{depth.reliability}</strong></p>
       {depth.externalChanges ? <p className="notice">{depth.externalChanges}</p> : null}
       <p className="muted">{depth.limit}</p>
     </div>
@@ -76,8 +76,8 @@ export function ComplianceScreenView({ worldId, initial }: { worldId: string; in
   return (
     <section>
       <h2>{c.pageTitle}</h2>
+      <Intro text={c.intro} />
       <p className="notice" role="note">{view.notAGuarantee}</p>
-      <p className="muted">{c.intro}</p>
       {message ? <p className="notice">{message}</p> : null}
       {error ? <p className="error">{error}</p> : null}
 
@@ -86,8 +86,8 @@ export function ComplianceScreenView({ worldId, initial }: { worldId: string; in
         <label>{c.fields.offer} <OfferPicker worldId={worldId} value={form.writeScopeId} onChange={(writeScopeId) => edit({ writeScopeId })} /></label>
         <label>{c.fields.reference} <input inputMode="decimal" value={form.reference} onChange={(e) => edit({ reference: e.target.value })} /></label>
         <label>{c.fields.sale} <input inputMode="decimal" value={form.sale} onChange={(e) => edit({ sale: e.target.value })} /></label>
-        <label>{c.fields.startsAt} <input type="datetime-local" value={form.startsAt} onChange={(e) => edit({ startsAt: e.target.value })} /></label>
-        <label>{c.fields.endsAt} <input type="datetime-local" value={form.endsAt} onChange={(e) => edit({ endsAt: e.target.value })} /></label>
+        <label>{c.fields.startsAt} <DateTimeField value={form.startsAt} onChange={(startsAt) => edit({ startsAt })} /></label>
+        <label>{c.fields.endsAt} <DateTimeField value={form.endsAt} onChange={(endsAt) => edit({ endsAt })} /></label>
         <button type="button" disabled={busy} onClick={runCheck}>{busy ? c.checking : c.check}</button>
       </div>
       {check ? (
@@ -152,8 +152,8 @@ export function ComplianceScreenView({ worldId, initial }: { worldId: string; in
       <p className="muted small">{c.evidenceByOffer(view.offersTotal)}</p>
       <p className="muted small">{c.evidenceHint}</p>
       <div className="form">
-        <label>{c.evidenceFrom} <input type="date" value={evidence.from} onChange={(e) => setEvidence({ ...evidence, from: e.target.value })} /></label>
-        <label>{c.evidenceTo} <input type="date" value={evidence.to} onChange={(e) => setEvidence({ ...evidence, to: e.target.value })} /></label>
+        <label>{c.evidenceFrom} <DateTimeField withTime={false} value={evidence.from} onChange={(from) => setEvidence({ ...evidence, from })} /></label>
+        <label>{c.evidenceTo} <DateTimeField withTime={false} value={evidence.to} onChange={(to) => setEvidence({ ...evidence, to })} /></label>
         <label>{c.fields.offer} <OfferPicker worldId={worldId} value={evidence.writeScopeId} allowEmpty emptyLabel={c.evidenceAll}
           onChange={(writeScopeId) => setEvidence({ ...evidence, writeScopeId })} /></label>
         <button type="button" disabled={busy || !evidence.from || !evidence.to} onClick={loadEvidence}>{c.download}</button>

@@ -4,7 +4,7 @@ import type { JobCreatedResponse, StrategySaveResponse } from '../api-types.ts';
 import type { BulkJobView } from '@repracer/console-model';
 import { JobProgress } from './Jobs.tsx';
 import { ApiError, requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, useMessages, When } from '../components.tsx';
+import { Badge, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, shortWhen, useMessages, When } from '../components.tsx';
 
 /**
  * Экран стратегий (шаги 21, 23): черновик или новая версия существующей стратегии → превью на выбранных офферах (движок и Gate на
@@ -77,7 +77,7 @@ export function PreviewTable({ view }: { view: StrategyPreviewView }) {
           <tbody>
             {view.rows.map((r) => (
               <tr key={r.unit.writeScopeId} className={r.dangerous ? 'dangerous' : ''}>
-                <td>{r.unit.label}</td>
+                <td className="offer">{r.unit.label}</td>
                 <td className="small nowrap"><When value={r.asOf} /></td>
                 <td className="num">{r.current}</td>
                 <td className="num">{r.proposed ?? '–'}</td>
@@ -127,6 +127,8 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
   const [jobId, setJobId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Шаг 78: список предложений стратегии раскрывается по ссылке «Show offers» — по умолчанию только сводка по витринам
+  const [openOffers, setOpenOffers] = useState<string | null>(null);
   /**
    * Р-136 (ревью шага 29, находка 3): выбор относится к ПОКАЗАННОЙ странице. Он сбрасывается при листании — иначе продавец,
    * ушедший на третью страницу, сохранял бы стратегию предложениям первой. Весь каталог выбирается отдельным флагом, и его
@@ -203,14 +205,24 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
       <ul className="index strategy-cards">
         {view.strategies.map((s) => (
           <li key={s.strategyId} className="card">
-            <div className="strategy-title"><strong>{s.name ?? t.unnamed}</strong> · {s.label} {t.versionShort(s.version)}</div>
+            {/* Шаг 78: заголовок — имя для человека; тип — приглушённо и только если имя другое */}
+            <div className="strategy-title"><strong>{s.name ?? s.label}</strong>{s.name && s.name !== s.label ? <span className="muted"> · {s.label}</span> : null}</div>
             <div className="small muted">{s.detail}</div>
-            {/* Р-136: показаны примеры, а сколько всего — числом: у стратегии каталога предложений могут быть тысячи */}
-            <div className="small">{s.scopeCount === 0 ? <span className="muted">{t.notUsed}</span> : (
-              <><span className="clamp-2" title={s.scopes.map((u) => `${u.unit.label} (${t.versionShort(u.version)})`).join(', ')}>{s.scopes.map((u) => `${u.unit.label} (${t.versionShort(u.version)})`).join(', ')}</span>
-                {s.scopeCount > s.scopes.length ? <span className="muted"> {t.usedBy(s.scopeCount)}</span> : null}</>
+            {/* Р-136, шаг 78: сводка — сколько и где; сами предложения (примеры, всего — числом) — по ссылке, а не стеной через запятую */}
+            <div className="strategy-usage">{s.scopeCount === 0 ? <span className="muted">{t.notUsed}</span> : (
+              <>
+                <span>{t.offersOn(s.scopeCount, s.storefronts.length === 1 ? s.storefronts[0]!.label : s.storefronts.map((x) => `${x.label} ${x.count}`).join(' · '))}</span>
+                {s.scopes.length > 0 ? <button type="button" className="link" aria-expanded={openOffers === s.strategyId}
+                  onClick={() => setOpenOffers(openOffers === s.strategyId ? null : s.strategyId)}>{openOffers === s.strategyId ? t.hideOffers : t.showOffers}</button> : null}
+              </>
             )}</div>
-            <div className="small muted">{t.versionsTitle}: {s.versions.map((v) => t.versionLine(v.version, v.status, v.author, v.createdAt)).join('; ')}</div>
+            {openOffers === s.strategyId ? (
+              <ul className="offer-list small">
+                {s.scopes.map((u) => <li key={u.unit.writeScopeId}>{u.unit.label}{u.version !== s.version ? <span className="muted"> · {t.versionShort(u.version)}</span> : null}</li>)}
+                {s.scopeCount > s.scopes.length ? <li className="muted">{t.moreOffers(s.scopeCount - s.scopes.length)}</li> : null}
+              </ul>
+            ) : null}
+            <div className="small muted">{s.versions.map((v) => t.versionLine(v.version, v.status, v.author, shortWhen(v.createdAt))).join('; ')}</div>
             <div className="buttons">
               {view.canEdit ? <button type="button" disabled={busy} onClick={() => { setAssigning(null); setForm(formOf(s)); changed(); setMessage(null); }}>{t.newVersion}</button> : null}
               {s.assignable ? <button type="button" disabled={busy} onClick={() => { setAssigning(s); changed(); setMessage(null); }}>{t.assignVersion}</button> : null}

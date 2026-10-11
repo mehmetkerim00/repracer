@@ -237,6 +237,7 @@ test('шаг 69 (K1, K4): агентство видит каждый тенан�
         FROM tenant_data.membership m WHERE m.user_id = '${userId}' AND m.tenant_id = '${us}';
     SET session_replication_role = origin;`);
   const stopped = JSON.stringify((await handle({ method: 'GET', url: `/api/worlds/tenant-${us}/stop`, body: undefined, authorization: `Bearer ${token}`, cookie: '' })).body);
-  assert.match(stopped, /\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\+9/, `время остановки — в поясе тенанта: ${stopped.slice(0, 400)}`);
-  assert.doesNotMatch(stopped, /\d{2}:\d{2}:\d{2} UTC"/, 'и не в UTC');
+  // Шаг 78 (п. 15): «11. Okt. 2026, 04:45 UTC+9» — человечно, со смещением пояса тенанта
+  assert.match(stopped, /\d{4}, \d{2}:\d{2} UTC\+9/, `время остановки — в поясе тенанта: ${stopped.slice(0, 400)}`);
+  assert.doesNotMatch(stopped, /\d{4}, \d{2}:\d{2} UTC"/, 'и не в UTC');
 });

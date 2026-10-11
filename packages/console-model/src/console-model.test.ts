@@ -29,8 +29,8 @@ test('Р-71: an amount is formatted only with the currency of the reason; withou
   const de = messagesFor('de');
   const reason = { code: 'BELOW_MIN_PRICE', params: { proposedMinor: 900, minMinor: 1000, deviationBp: 1000, currency: 'USD' } };
   const r = describe(reason, en);
-  assert.deepEqual([r.text, r.problems], ['Rejected: $9.00 is below min_price $10.00 by 10%.', []]);
-  assert.equal(describe(reason, de).text, 'Abgelehnt: 9,00 $ liegt unter min_price 10,00 $ um 10 %.');
+  assert.deepEqual([r.text, r.problems], ['Rejected: $9.00 is below your minimum price $10.00 by 10%.', []]);
+  assert.equal(describe(reason, de).text, 'Abgelehnt: 9,00 $ liegt unter Ihrem Mindestpreis 10,00 $ um 10 %.');
   const noCurrency = describe({ code: 'BELOW_MIN_PRICE', params: { proposedMinor: 900, minMinor: 1000 } }, en);
   assert.ok(noCurrency.problems.includes('AMOUNT_WITHOUT_CURRENCY'));
   assert.match(noCurrency.text, /900 \(currency missing\)/);
@@ -427,11 +427,14 @@ test('шаг 69 (K9): словари EN и DE говорят терминами 
 test('шаг 69 (K4): время в поясе продавца — летнее и зимнее смещение, минуты смещения, дата без сдвига, неизвестный пояс', async () => {
   const { messagesFor } = await import('./i18n/index.ts');
   const la = messagesFor('en', { timeZone: 'America/Los_Angeles' });
-  assert.equal(la.when('2026-10-02T07:34:21Z'), '2026-10-02 00:34:21 UTC−7', 'летнее время Тихоокеанского побережья');
-  assert.equal(la.when('2026-12-02T07:34:21Z'), '2026-12-01 23:34:21 UTC−8', 'зимнее время — на час дальше, и сутки ещё вчерашние');
-  assert.equal(messagesFor('de', { timeZone: 'Europe/Berlin' }).when('2026-10-02T07:34:21Z'), '02.10.2026, 09:34:21 UTC+2');
-  assert.equal(messagesFor('en', { timeZone: 'Asia/Kolkata' }).when('2026-10-02T07:34:21Z'), '2026-10-02 13:04:21 UTC+5:30', 'смещение с минутами');
+  assert.equal(la.when('2026-10-02T07:34:21Z'), 'Oct 2, 2026, 00:34 UTC−7', 'летнее время Тихоокеанского побережья');
+  assert.equal(la.when('2026-12-02T07:34:21Z'), 'Dec 1, 2026, 23:34 UTC−8', 'зимнее время — на час дальше, и сутки ещё вчерашние');
+  assert.equal(messagesFor('de', { timeZone: 'Europe/Berlin' }).when('2026-10-02T07:34:21Z'), '2. Okt. 2026, 09:34 UTC+2');
+  assert.equal(messagesFor('en', { timeZone: 'Asia/Kolkata' }).when('2026-10-02T07:34:21Z'), 'Oct 2, 2026, 13:04 UTC+5:30', 'смещение с минутами');
   assert.equal(la.date('2026-10-02'), messagesFor('en').date('2026-10-02'), 'календарная дата — та же в любом поясе');
+  // Шаг 78 (п. 15): дата и время во фразах — человечно, без секунд, с годом
+  assert.equal(messagesFor('en').date('2026-10-02'), 'Oct 2, 2026');
+  assert.equal(messagesFor('de').date('2026-10-02'), '2. Okt. 2026');
   assert.equal(messagesFor('en', { timeZone: 'UTC' }).when('2026-10-02T07:34:21Z'), messagesFor('en').when('2026-10-02T07:34:21Z'), 'UTC — прежний вид');
   // Ревью шага 69, находка 15: пояс, неизвестный среде, не роняет экран — время в UTC
   assert.equal(messagesFor('en', { timeZone: 'Mars/Olympus_Mons' }).when('2026-10-02T07:34:21Z'), messagesFor('en').when('2026-10-02T07:34:21Z'));

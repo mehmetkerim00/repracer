@@ -110,6 +110,8 @@ export interface ReportData {
 const CLIENT_SAFE: ReadonlyArray<[RegExp, string]> = [
   [/\bmin_price and max_price set\b/g, 'minimum and maximum price set'],
   [/\bmin_price\b/g, 'the minimum price'], [/\bmax_price\b/g, 'the maximum price'],
+  // Шаг 78: словарь консоли говорит «your minimum price»; в отчёте kill-test минимальная цена — допущение прогона, а не настройка клиента
+  [/\byour minimum price\b/g, 'the minimum price'], [/\byour maximum price\b/g, 'the maximum price'],
   [/\bANY_OFFER_CHANGED notification\b/g, 'notification of a competitor price change'],
 ];
 const clientSafe = (text: string): string => CLIENT_SAFE.reduce((t, [re, to]) => t.replace(re, to), text);

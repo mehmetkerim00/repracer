@@ -20,15 +20,82 @@ export function errorText(error: unknown, m: Messages): string {
 }
 
 /**
- * Шаг 77: время в таблицах — по-человечески, «Oct 11, 03:57 · UTC−7» вторичным цветом; полное значение (с годом и секундами, как его
- * отдаёт сервер) — во всплывающей подсказке. Строка не того вида показывается как есть
+ * Шаг 77: время в таблицах — по-человечески, «Oct 11, 03:57 · UTC−7» вторичным цветом; полное значение (с годом, как его отдаёт сервер,
+ * шаг 78) — во всплывающей подсказке. Строка не того вида показывается как есть
  */
-export function humanWhen(value: string, locale: string): string {
-  const r = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})(?::\d{2})? (UTC.*)$/.exec(value);
-  if (!r) return value;
-  const day = new Intl.DateTimeFormat(locale === 'de' ? 'de-DE' : 'en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
-    .format(new Date(Date.UTC(Number(r[1]), Number(r[2]) - 1, Number(r[3]))));
-  return `${day}, ${r[4]}:${r[5]} · ${r[6]}`;
+export function humanWhen(value: string, _locale: string): string {
+  const en = /^([A-Z][a-z]{2}) (\d{1,2}), \d{4}, (\d{2}:\d{2}) (UTC.*)$/.exec(value);
+  if (en) return `${en[1]} ${en[2]}, ${en[3]} · ${en[4]}`;
+  const de = /^(\d{1,2})\. (\S+) \d{4}, (\d{2}:\d{2}) (UTC.*)$/.exec(value);
+  if (de) return `${de[1]}. ${de[2]}, ${de[3]} · ${de[4]}`;
+  return value;
+}
+
+/**
+ * Шаг 78 (п. 13): вступление экрана — подзаголовком в одно предложение, остальное — по «Learn more». Тексты прежние и целиком в
+ * разметке (скрытая часть — атрибутом hidden): вступление, важное юридически (Omnibus), не сокращается — сворачивается
+ */
+export function Intro({ text }: { text: string }) {
+  const m = useMessages();
+  const [open, setOpen] = useState(false);
+  const split = /^(.+?[.!?])\s+(\S[\s\S]*)$/.exec(text);
+  if (!split || text.length <= 160) return <p className="subtitle">{text}</p>;
+  return (
+    <div className="intro">
+      <p className="subtitle">{split[1]}{' '}
+        <span hidden={!open}>{split[2]} </span>
+        <button type="button" className="link" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? m.ui.common.showLess : m.ui.common.learnMore}</button>
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Шаг 78 (п. 17): дата и время — на языке экрана, а не браузера. Родное поле `datetime-local` берёт формат и подсказку у браузера
+ * («дд.мм.гггг» у русского Chrome на английском экране); здесь текстовое поле с форматом языка: EN «mm/dd/yyyy hh:mm», DE
+ * «TT.MM.JJJJ hh:mm». Значение наружу — тот же вид, что у родного поля («2026-10-11T14:30», дата — «2026-10-11»), логика формы прежняя
+ */
+export function DateTimeField({ value, onChange, withTime = true }: { value: string; onChange: (value: string) => void; withTime?: boolean }) {
+  const m = useMessages();
+  const de = m.locale === 'de';
+  const p2 = (n: number | string) => String(n).padStart(2, '0');
+  const shown = (v: string): string => {
+    const r = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?$/.exec(v);
+    if (!r) return '';
+    const day = de ? `${r[3]}.${r[2]}.${r[1]}` : `${r[2]}/${r[3]}/${r[1]}`;
+    return withTime && r[4] ? `${day} ${r[4]}:${r[5]}` : day;
+  };
+  const [text, setText] = useState(shown(value));
+  const [bad, setBad] = useState(false);
+  const parse = (t: string): string | null => {
+    const r = (de ? /^(\d{1,2})\.(\d{1,2})\.(\d{4})(?:[ ,]+(\d{1,2}):(\d{2}))?$/ : /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ ,]+(\d{1,2}):(\d{2}))?$/).exec(t.trim());
+    if (!r) return null;
+    const [day, month] = de ? [Number(r[1]), Number(r[2])] : [Number(r[2]), Number(r[1])];
+    const y = Number(r[3]);
+    const probe = new Date(Date.UTC(y, month - 1, day));
+    if (probe.getUTCMonth() !== month - 1 || probe.getUTCDate() !== day) return null;
+    if (!withTime) return `${y}-${p2(month)}-${p2(day)}`;
+    const h = Number(r[4] ?? 0); const mi = Number(r[5] ?? 0);
+    if (h > 23 || mi > 59) return null;
+    return `${y}-${p2(month)}-${p2(day)}T${p2(h)}:${p2(mi)}`;
+  };
+  const pattern = withTime ? m.ui.common.dateTimePattern : m.ui.common.datePattern;
+  return (
+    <span className="date-field">
+      <input type="text" inputMode="numeric" value={text} placeholder={pattern} aria-invalid={bad}
+        onChange={(e) => { const t = e.currentTarget.value; setText(t); const v = t.trim() === '' ? '' : parse(t); setBad(v === null); onChange(v ?? ''); }} />
+      {bad ? <span className="small gap-note">{m.ui.common.formatHint(pattern)}</span> : null}
+    </span>
+  );
+}
+
+/** Шаг 78: момент во вторичной строке — без года и пояса («Oct 11, 04:45»; версия стратегии, не таблица) */
+export function shortWhen(value: string): string {
+  const en = /^([A-Z][a-z]{2}) (\d{1,2}), \d{4}, (\d{2}:\d{2}) UTC.*$/.exec(value);
+  if (en) return `${en[1]} ${en[2]}, ${en[3]}`;
+  const de = /^(\d{1,2})\. (\S+) \d{4}, (\d{2}:\d{2}) UTC.*$/.exec(value);
+  if (de) return `${de[1]}. ${de[2]}, ${de[3]}`;
+  return value;
 }
 
 export function When({ value }: { value: string | null | undefined }) {

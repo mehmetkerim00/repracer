@@ -334,7 +334,7 @@ export async function seedPricingWorld(_pool: PgPool, input: SeedWorldInput): Pr
           await tx.query(
             `INSERT INTO tenant_data.pricing_strategy (tenant_id, pricing_strategy_id, version, name, type, params, triggers, status, created_by_membership_id)
              VALUES ($1, $2, $3, $4, $5, $6, $7, 'ACTIVE', $8)`,
-            [tenantId, strategyId, v, s.strategy.strategyId, s.strategy.params.type,
+            [tenantId, strategyId, v, s.strategyName ?? s.strategy.strategyId, s.strategy.params.type,
              JSON.stringify({ ...stored, deadbandMinor: s.strategy.deadbandMinor }), ['COMPETITOR_CHANGE', 'COST_CHANGE', 'SCHEDULE'], membershipId],
           );
           if (undercutMinor !== undefined) {

@@ -148,7 +148,7 @@ test('Р-73, C: a Gate rejection more than 10 % beyond the bound is dangerous; t
   const world = await w.view(user('OWNER'));
   const view = await rejectedOf(w.store, world, en);
   const item = view.items.find((i) => i.kind === 'GATE')!;
-  assert.deepEqual([item.proposed, item.limit, item.intervention], ['€38.30', 'max_price €25.00', 'DANGEROUS']);
+  assert.deepEqual([item.proposed, item.limit, item.intervention], ['€38.30', 'your maximum price €25.00', 'DANGEROUS']);
   assert.equal(view.summary.dangerous, 1);
   assert.match(view.headline, /^Your bounds stopped 1 dangerous change and corrected \d+$/);
   assert.equal(item.deviation, '53.2%');
@@ -165,7 +165,7 @@ test('D, F: the product list shows the effective floor with min_price as its par
   const decisions = (await w.store.decisionPage(world.tenantId, { offset: 0, limit: 200 })).items;
   const rows = productList(world, en).rows;
   const deRow = rows.find((r) => r.unit.writeScopeId === 'ws-price-de-4501')!;
-  assert.deepEqual([deRow.floor.amount, deRow.floor.parts, deRow.minPrice], ['€19.15', '= minimum margin 20% → €19.15; min_price €10.00', '€10.00']);
+  assert.deepEqual([deRow.floor.amount, deRow.floor.parts, deRow.minPrice], ['€19.15', 'from minimum margin 20% (your minimum price €10.00)', '€10.00']);
   assert.equal(productList(world, de).rows.find((r) => r.unit.writeScopeId === 'ws-price-de-4501')!.floor.amount, '19,15 €');
   for (const scope of world.state.scopes) {
     const view = boundsView(world, scope.writeScopeId, en)!;

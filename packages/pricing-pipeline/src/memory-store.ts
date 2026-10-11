@@ -135,6 +135,8 @@ export interface MemorySeedScope {
   pricingMode: PriceScopeContext['pricingMode'];
   status?: PriceScopeContext['status'];
   strategy: StrategyDefinition | null;
+  /** Шаг 78: имя стратегии для человека («Buy Box»); без него посев называет её идентификатором сценария */
+  strategyName?: string;
   currentPriceMinor: number | null;
   minPrice?: SeedBound | null;
   maxPrice?: SeedBound | null;
@@ -2274,7 +2276,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     const at = (w: WriteRow) => Date.parse(w.acceptedAt ?? w.dispatchedAt ?? w.createdAt);
     const since = query.sinceDays ? Date.parse(now) - query.sinceDays * 86_400_000 : null;
     const scoped = this.writes.filter((w) => (!query.writeScopeId || w.writeScopeId === query.writeScopeId) && (since === null || at(w) >= since));
-    const counts: Record<FeedStatusGroup, number> = { APPLIED: 0, IN_FLIGHT: 0, NOT_SENT: 0, SUPERSEDED: 0 };
+    const counts: Record<FeedStatusGroup, number> = { APPLIED: 0, IN_FLIGHT: 0, NOT_SENT: 0, SUPERSEDED: 0, SHADOW_HELD: 0 };
     if (query.counts !== false) for (const w of scoped) counts[feedGroupOf(w.status)] += 1;
     const rows = scoped.filter((w) => !query.status || feedGroupOf(w.status) === query.status).sort((a, b) => at(b) - at(a) || b.version - a.version);
     const items = rows.slice(query.offset, query.offset + query.limit).map((w): FeedPageItem => {

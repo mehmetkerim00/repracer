@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { existsSync } from 'node:fs';
-import { messagesFor, type ConnectionsView, type DecisionListView, type DecisionTrace, type ShadowView, type UnitRef } from '@repracer/console-model';
+import { messagesFor, type ConnectionsView, type DecisionListView, type DecisionTrace, type PriceFeedView, type ShadowView, type UnitRef } from '@repracer/console-model';
 import type { StandToken, WorldSummary } from '../src/api-types.ts';
 import { createIsolatedDatabase, type IsolatedDatabase } from '../../../packages/pricing-store-pg/test/isolated-db.ts';
 import { startConsole, type RunningConsole } from '../server/console-service.ts';
@@ -161,11 +161,21 @@ test('шаг 68: демо США — решения в долларах, «по�
    */
   const oneAmazon = (await call<{ items: UnitRef[] }>('GET', `/api/worlds/${w}/offers?q=amazon.com`, guest)).body.items[0]!;
   const oldest = (await call<DecisionListView>('GET', `/api/worlds/${w}/decisions?writeScopeId=${oneAmazon.writeScopeId}&offset=100000`, guest)).body.items.at(-1)!;
-  // Шаг 69 (K4): времена — в поясе продавца с его смещением («2026-10-01 17:34:21 UTC−7»), внутри системы — UTC
-  const shown = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) UTC([+−])(\d{1,2})(?::(\d{2}))?$/.exec(oldest.decidedAt);
-  assert.ok(shown && shown[3] === '−' && ['7', '8'].includes(shown[4]!), `время решения — в поясе Тихоокеанского побережья: ${oldest.decidedAt}`);
-  const offsetMs = (Number(shown[4]) * 60 + Number(shown[5] ?? 0)) * 60_000 * (shown[3] === '−' ? -1 : 1);
-  const oldestMs = Date.parse(`${shown[1]}T${shown[2]}Z`) - offsetMs;
+  // Шаг 78 (п. 16): удержанное тенью в ленте цен — своя группа на базе: счётчик «held by shadow mode», фильтр отдаёт ровно его, и в
+  // «replaced by a newer price» удержанное тенью не попадает (до шага 78 экран сценария говорил «replaced 513» о записях, которых не было)
+  const feed = (await call<PriceFeedView>('GET', `/api/worlds/${w}/feed`, guest)).body;
+  assert.ok(feed.counts.shadowHeld > 0, `лента демо в тени считает удержанное тенью своей группой: ${JSON.stringify(feed.counts)}`);
+  const held = (await call<PriceFeedView>('GET', `/api/worlds/${w}/feed?status=SHADOW_HELD`, guest)).body;
+  assert.equal(held.page.total, feed.counts.shadowHeld, 'фильтр «held by shadow mode» отдаёт ровно столько, сколько говорит счётчик');
+  const heldText = messagesFor('en').ui.feed.statuses.SHADOW_HELD;
+  assert.ok(held.items.length > 0 && held.items.every((i) => i.status === heldText), `строки фильтра — удержанные тенью: ${held.items.slice(0, 3).map((i) => i.status).join(', ')}`);
+  const replaced = (await call<PriceFeedView>('GET', `/api/worlds/${w}/feed?status=SUPERSEDED`, guest)).body;
+  assert.ok(replaced.items.every((i) => i.status !== heldText), 'в «replaced by a newer price» нет удержанных тенью');
+  // Шаг 69 (K4): времена — в поясе продавца с его смещением, внутри системы — UTC; шаг 78 — человечно: «Oct 1, 2026, 17:34 UTC−7»
+  const shown = /^([A-Z][a-z]{2}) (\d{1,2}), (\d{4}), (\d{2}:\d{2}) UTC([+−])(\d{1,2})(?::(\d{2}))?$/.exec(oldest.decidedAt);
+  assert.ok(shown && shown[5] === '−' && ['7', '8'].includes(shown[6]!), `время решения — в поясе Тихоокеанского побережья: ${oldest.decidedAt}`);
+  const offsetMs = (Number(shown[6]) * 60 + Number(shown[7] ?? 0)) * 60_000 * (shown[5] === '−' ? -1 : 1);
+  const oldestMs = Date.parse(`${shown[1]} ${shown[2]}, ${shown[3]} ${shown[4]} UTC`) - offsetMs;
   assert.ok(Number.isFinite(oldestMs) && Date.now() - oldestMs > 6 * 86_400_000, `самое старое решение amazon.com — в прошлой неделе: ${oldest.decidedAt}`);
   // Р-204: демо-тенант доказательством процедуры границы суток не бывает [Р-151] — хотя неделя тени у него есть
   const [demoTenant] = await db.rows<{ tenant_id: string }>(`SELECT tenant_id FROM tenant_data.tenant WHERE demo`);

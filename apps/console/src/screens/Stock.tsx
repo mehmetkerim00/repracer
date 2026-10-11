@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { BulkJobView, StockDivergencesView, StockReturnsView, StockView } from '@repracer/console-model';
 import type { ListQuery } from '@repracer/console-model';
 import { ApiError, requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, ErrorBox, errorText, Gaps, href, Load, Pager, useMessages } from '../components.tsx';
+import { Badge, ErrorBox, errorText, Gaps, href, Load, Pager, useMessages, Intro } from '../components.tsx';
 import { JobProgress } from './Jobs.tsx';
 
 /**
@@ -123,7 +123,7 @@ export function StockScreenView({ view: v, worldId, query, onQuery, onFilter }: 
     <section className="stock">
       <h2>{t.title}</h2>
       {/* Шаг 77: пометку демо даёт полоса под шапкой на каждом экране мира [Р-151] — второй баннер на экране не нужен */}
-      <p className="muted">{v.intro}</p>
+      <Intro text={v.intro} />
       {/* Шаг 64: у пустого экрана — не строка нулей, а объяснение ниже */}
       {v.rows.length > 0 ? <p><strong>{v.summaryText}</strong></p> : null}
       {v.sources.length === 0 ? <p className="notice">{m.ui.onboarding.empty.stock} <a href={href(worldId, 'onboarding')}>{m.ui.onboarding.empty.startHere}</a></p>

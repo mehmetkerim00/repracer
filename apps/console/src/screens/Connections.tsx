@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ConnectionAccountView, ConnectionsView } from '@repracer/console-model';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, ErrorBox, errorText, Load, useMessages } from '../components.tsx';
+import { Badge, ErrorBox, errorText, Load, useMessages, Intro } from '../components.tsx';
 
 /**
  * Р-175…Р-177 (шаг 43): экран «Подключение каналов». Кнопка открывает страницу согласия КАНАЛА в этой же вкладке — как
@@ -33,8 +33,9 @@ export function ConnectionsScreen({ worldId }: { worldId: string }) {
         <>
           {/* Заголовок страницы — над карточками, как на остальных экранах */}
           <h2>{v.title}</h2>
-          <section className="card">
-            <p>{v.intro}</p>
+          <Intro text={v.intro} />
+          {/* Шаг 78: вступление вынесено в подзаголовок — карточка подключения только там, где есть что показать */}
+          {v.noRightText || error || v.channels.length > 0 ? <section className="card">
             {v.noRightText ? <p className="notice">{v.noRightText}</p> : null}
             {error ? <ErrorBox message={error} /> : null}
             {v.channels.map((c) => {
@@ -64,7 +65,7 @@ export function ConnectionsScreen({ worldId }: { worldId: string }) {
                 </div>
               );
             })}
-          </section>
+          </section> : null}
           {/* Шаг 77: аккаунт — карточкой: слева аккаунт, состояние и доступ, справа другие инструменты, запись остатков, внешние правки */}
           <div className="accounts">
             {v.accounts.map((a) => (

@@ -31,7 +31,8 @@ export function ProductsView({ view, onEnable, query, onQuery }: {
               <tr key={r.unit.writeScopeId}>
                 <td className="offer">
                   <strong>{r.unit.label}</strong>
-                  <div className="muted small">{p.productRef(r.unit.channelProductRef, r.unit.condition, r.unit.gtin)}</div>
+                  {/* Шаг 78: номер товара канала — приглушённо, состояние — отдельной пилюлей */}
+                  <div className="product-ref">{p.productId(r.unit.channelProductRef, r.unit.gtin)} {r.unit.condition ? <Badge tone="off">{r.unit.condition}</Badge> : null}</div>
                 </td>
                 <td className="num money">{r.currentPrice}</td>
                 <td className="num floor">
@@ -39,20 +40,21 @@ export function ProductsView({ view, onEnable, query, onQuery }: {
                   <div className="muted small">{r.floor.parts}</div>
                 </td>
                 <td className="num">{r.maxPrice}</td>
-                <td className="strategy">
-                  {r.strategy.label} {r.strategy.competitorDerived ? <Badge tone="progress">{p.competitorBadge}</Badge> : null}
-                  <div className="muted small clamp-2" title={r.strategy.detail}>{r.strategy.detail}</div>
+                {/* Шаг 78: источник пилюлей и короткое имя; подробности стратегии — подсказкой и на «Why this price» */}
+                <td className="strategy" title={r.strategy.detail}>
+                  {r.strategy.competitorDerived ? <Badge tone="progress">{p.competitorBadge}</Badge> : null} <span className="strategy-name">{r.strategy.label}</span>
                 </td>
                 <td><Cell cell={r.enabled} /></td>
                 <td><Cell cell={r.applying} /></td>
                 <td><Cell cell={r.lastChange} /></td>
                 <td><Cell cell={r.nextCheck} /></td>
                 <td>{r.channelNotes.length === 0 ? '–' : r.channelNotes.map((n) => <Cell key={n.code} cell={n} />)}</td>
+                {/* Шаг 78: одна колонка действий — основная «Why this price», под ней мелкая вторичная «Bounds» */}
                 <td className="actions">
                   {r.latestDecisionId
                     ? <a className="row-link" href={href(view.worldId, 'decisions', r.latestDecisionId)}>{p.why}</a>
                     : <span className="muted small">{p.noDecisions}</span>}
-                  <a href={href(view.worldId, 'bounds', r.unit.writeScopeId)}>{p.bounds}</a>
+                  <a className="secondary-link" href={href(view.worldId, 'bounds', r.unit.writeScopeId)}>{m.ui.app.screens.bounds}</a>
                   {r.canEnable && onEnable ? <button type="button" onClick={() => onEnable(r)}>{p.enable}</button> : null}
                 </td>
               </tr>

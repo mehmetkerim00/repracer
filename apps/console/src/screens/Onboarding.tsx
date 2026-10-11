@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { BulkJobView, EnableResultView, OnboardingView } from '@repracer/console-model';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, ErrorBox, errorText, href, Load, useMessages } from '../components.tsx';
+import { Badge, ErrorBox, errorText, href, Load, useMessages, Intro } from '../components.tsx';
 import { JobProgress } from './Jobs.tsx';
 
 /**
@@ -58,7 +58,7 @@ export function OnboardingScreenView({ view: v, worldId, busy, onNarrow, onEnabl
   return (
     <section className="onboarding">
       <h2>{t.title}</h2>
-      <p className="muted">{v.intro}</p>
+      <Intro text={v.intro} />
       <p className="notice resume"><strong>{v.resumeText}</strong></p>
       {v.pathText ? <p className="small muted">{v.pathText}{v.canAddPricing && onChoosePath ? <> <button type="button" onClick={() => onChoosePath('STOCK_AND_PRICING')}>{t.paths.addPricing}</button></> : null}</p> : null}
       {v.choices.length > 0 ? (

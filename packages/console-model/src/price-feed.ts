@@ -27,7 +27,7 @@ export interface FeedItem {
   confirmation: string | null;
 }
 
-export const FEED_STATUS_GROUPS = ['APPLIED', 'IN_FLIGHT', 'NOT_SENT', 'SUPERSEDED'] as const;
+export const FEED_STATUS_GROUPS = ['APPLIED', 'IN_FLIGHT', 'NOT_SENT', 'SUPERSEDED', 'SHADOW_HELD'] as const;
 export type FeedStatusGroup = (typeof FEED_STATUS_GROUPS)[number];
 export const FEED_PERIODS_DAYS = [1, 7, 30] as const;
 /** Страница ленты — не больше 200 записей за запрос */
@@ -45,7 +45,7 @@ export interface FeedQuery {
 export interface PriceFeedView {
   worldId: string;
   items: FeedItem[];
-  counts: { applied: number; inFlight: number; notSent: number; superseded: number };
+  counts: { applied: number; inFlight: number; notSent: number; superseded: number; shadowHeld: number };
   query: { writeScopeId: string | null; status: FeedStatusGroup | null; days: number | null; offset: number; limit: number };
   page: { from: number; to: number; total: number; text: string; hasPrevious: boolean; hasNext: boolean };
   /** Офферы для фильтра: первые OFFER_CHOICES [Р-136] */
@@ -127,7 +127,7 @@ export function priceFeed(world: StandWorld, m: Messages, filter: FeedQuery, pag
   return {
     worldId: world.id, items,
     // Счётчики — по офферу и периоду без фильтра статуса: сколько в каждой группе
-    counts: { applied: page.counts.APPLIED, inFlight: page.counts.IN_FLIGHT, notSent: page.counts.NOT_SENT, superseded: page.counts.SUPERSEDED },
+    counts: { applied: page.counts.APPLIED, inFlight: page.counts.IN_FLIGHT, notSent: page.counts.NOT_SENT, superseded: page.counts.SUPERSEDED, shadowHeld: page.counts.SHADOW_HELD },
     query: { writeScopeId: filter.writeScopeId ?? null, status: filter.status ?? null, days: filter.days ?? null, offset: query.offset, limit: query.limit },
     page: { from, to, total: page.total, text: f.page(from, to, page.total), hasPrevious: query.offset > 0, hasNext: to < page.total },
     // Р-136: фильтр по офферу показывает первые N — на каталоге целевого клиента список фильтра сам весил мегабайты

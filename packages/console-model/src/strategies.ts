@@ -4,7 +4,7 @@ import { describe, type HumanReason } from './explain.ts';
 import type { Messages } from './i18n/index.ts';
 import { catalogPageOf, listQuery, type ListQuery, type PageInfo } from './page.ts';
 import { channelNotes, strategyLabel } from './products.ts';
-import { catalogFirst, gap, scopeById, storefrontName, unitOf, type ConsoleScope, type Gap, type StandWorld, type StatusCell, type Tone, type UnitRef } from './world.ts';
+import { catalogFirst, channelOf, gap, scopeById, storefrontName, unitOf, type ConsoleScope, type Gap, type StandWorld, type StatusCell, type Tone, type UnitRef } from './world.ts';
 
 /**
  * Экран стратегий (шаг 21): черновик стратегии проверяется на реальных единицах записи до сохранения — те же движок и Gate, что
@@ -70,6 +70,8 @@ export interface StrategyListItem {
   scopes: Array<{ unit: UnitRef; version: number }>;
   /** Сколько предложений пользуются стратегией всего */
   scopeCount: number;
+  /** Шаг 78: сколько их на каждой витрине — сводка карточки («200 offers · kaufland.de») вместо стены подписей через запятую */
+  storefronts: Array<{ label: string; count: number }>;
   /** Черновик новой версии — параметры последней версии */
   draft: StrategyDraft;
   /** OQ-170 (шаг 24): версии с автором, моментом и статусом — от новой к старой; у стратегий посева в памяти — только номер */
@@ -120,14 +122,23 @@ export function strategiesView(world: StandWorld, m: Messages, canEdit: boolean,
    * проходом по каталогу целиком
    */
   const usage = world.catalogFacts?.strategyUsage ?? null;
-  const usageOf = (strategyId: string): { count: number; examples: ConsoleScope[]; firstCurrency: string | undefined } => {
+  // Витрины — одним правилом на оба пути (факты базы и каталог мира): по числу предложений, затем по подписи
+  const storefrontsOf = (rows: Array<{ channel: string; marketplace: string; count: number }>) => {
+    const byLabel = new Map<string, number>();
+    for (const r of rows) { const label = storefrontName(r.channel, r.marketplace, m); byLabel.set(label, (byLabel.get(label) ?? 0) + r.count); }
+    return [...byLabel].map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+  };
+  const usageOf = (strategyId: string): { count: number; examples: ConsoleScope[]; firstCurrency: string | undefined; storefronts: Array<{ label: string; count: number }> } => {
     if (!usage) {
       const using = world.state.scopes.filter((s) => s.strategy?.strategyId === strategyId);
-      return { count: using.length, examples: using.slice(0, STRATEGY_SCOPE_EXAMPLES), firstCurrency: using[0]?.currency };
+      return {
+        count: using.length, examples: using.slice(0, STRATEGY_SCOPE_EXAMPLES), firstCurrency: using[0]?.currency,
+        storefronts: storefrontsOf(using.map((s) => ({ channel: channelOf(world, s.channelAccountId), marketplace: s.marketplace, count: 1 }))),
+      };
     }
     const u = usage.find((x) => x.strategyId === strategyId);
     return {
-      count: u?.count ?? 0, firstCurrency: u?.firstCurrency,
+      count: u?.count ?? 0, firstCurrency: u?.firstCurrency, storefronts: storefrontsOf(u?.storefronts ?? []),
       examples: (u?.exampleIds ?? []).slice(0, STRATEGY_SCOPE_EXAMPLES).flatMap((id) => { const sc = scopeById(world, id); return sc ? [sc] : []; }),
     };
   };
@@ -140,7 +151,8 @@ export function strategiesView(world: StandWorld, m: Messages, canEdit: boolean,
       if (!id) return m.ui.strategies.authorUnknown;
       const role = world.state.members.find((x) => x.membershipId === id)?.role;
       const label = role ? m.values[role] : m.ui.strategies.authorUnknown;
-      return id === world.viewer.membershipId ? m.ui.stop.you(label) : label;
+      // Шаг 78: автор версии — «you», а не «Owner (you)»: строка версии короткая
+      return id === world.viewer.membershipId ? m.ui.strategies.you : label;
     };
     const allVersions = [...new Set([...versions.map((x) => x.version), ...world.state.strategies.filter((x) => x.strategyId === d.strategyId).map((x) => x.version), d.version])]
       .sort((a, b) => b - a)
@@ -155,7 +167,7 @@ export function strategiesView(world: StandWorld, m: Messages, canEdit: boolean,
     return {
       strategyId: d.strategyId, version: d.version, name, label: label.label, detail: label.detail,
       scopes: using.examples.map((s) => ({ unit: unitOf(world, s, m), version: s.strategy!.version })),
-      scopeCount: using.count,
+      scopeCount: using.count, storefronts: using.storefronts,
       draft: { name: name ?? label.label, params: { ...d.params }, deadbandMinor: d.deadbandMinor },
       versions: allVersions,
       assignable: canEdit && (latestMeta?.status ?? 'ACTIVE') === 'ACTIVE',
@@ -328,7 +340,7 @@ export function strategyPreviewView(world: StandWorld, draft: StrategyDraft, pre
   const saveBlocked = rows.some((r) => r.unavailable !== null) ? t.blockedUnavailable
     : channelPriced.length > 0 ? t.blockedChannelPricing(channelPriced.slice(0, 5).map((r) => r.unit.label).join(', ')) : null;
   return {
-    worldId: world.id, draft: { title: `${draft.name} · ${label.label}`, detail: label.detail }, rows: rows.slice(0, shownRows), summary, saveBlocked,
+    worldId: world.id, draft: { title: draft.name === label.label ? draft.name : `${draft.name} · ${label.label}`, detail: label.detail }, rows: rows.slice(0, shownRows), summary, saveBlocked,
     shown: { rows: Math.min(rows.length, shownRows), of: rows.length },
     sample: { shown: previews.length, total, text: total > previews.length ? t.sample(previews.length, total) : null },
     headline: t.headline(summary), previewToken: previewToken(draft, previews, world),

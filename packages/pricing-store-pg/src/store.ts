@@ -2324,14 +2324,21 @@ export class PgPricingStore implements PricingStore {
       if (query.strategyUsage) {
         // Стратегия у единицы — когда есть и ссылка, и её версия (как `toStrategy`)
         const { rows } = await tx.query(
-          `WITH sc AS (SELECT s.write_scope_id, s.created_at, s.currency, s.pricing_strategy_id,
+          `WITH sc AS (SELECT s.write_scope_id, s.created_at, s.currency, s.pricing_strategy_id, s.channel, m.marketplace,
                               row_number() OVER (PARTITION BY s.pricing_strategy_id ORDER BY s.created_at, s.write_scope_id) AS rn
                          ${SCOPE_FROM} AND s.pricing_strategy_id IS NOT NULL AND ps.params IS NOT NULL)
            SELECT pricing_strategy_id, count(*)::int AS n,
                   array_agg(write_scope_id::text ORDER BY rn) FILTER (WHERE rn <= $2) AS examples,
-                  min(currency) FILTER (WHERE rn = 1) AS first_currency
+                  min(currency) FILTER (WHERE rn = 1) AS first_currency,
+                  -- шаг 78: по витринам — сводка карточки стратегии («200 offers · kaufland.de»)
+                  (SELECT jsonb_agg(jsonb_build_object('channel', x.channel, 'marketplace', x.marketplace, 'count', x.c))
+                     FROM (SELECT s2.channel, s2.marketplace, count(*)::int AS c FROM sc s2
+                            WHERE s2.pricing_strategy_id = sc.pricing_strategy_id GROUP BY s2.channel, s2.marketplace) x) AS storefronts
              FROM sc GROUP BY pricing_strategy_id`, [tenantId, query.strategyUsage.examples]);
-        strategyUsage = rows.map((r) => ({ strategyId: String(r.pricing_strategy_id), count: Number(r.n), exampleIds: (r.examples ?? []) as string[], firstCurrency: String(r.first_currency) }));
+        strategyUsage = rows.map((r) => ({
+          strategyId: String(r.pricing_strategy_id), count: Number(r.n), exampleIds: (r.examples ?? []) as string[], firstCurrency: String(r.first_currency),
+          storefronts: ((r.storefronts ?? []) as Array<{ channel: string; marketplace: string; count: number }>).map((x) => ({ channel: String(x.channel), marketplace: String(x.marketplace), count: Number(x.count) })),
+        }));
       }
       let stopImpact: ConsoleCatalogFacts['stopImpact'] = null;
       if (query.stopImpact) {
@@ -2492,7 +2499,8 @@ export class PgPricingStore implements PricingStore {
 
   async feedPage(tenantId: string, now: Instant, query: FeedPageQuery): Promise<FeedPage> {
     return inTenant(this.admin('feedPage'), tenantId, async (tx) => {
-      const groupSql = `CASE WHEN u.status = 'APPLIED' THEN 'APPLIED'
+      // Группы — правилом `feedGroupOf` порта хранилища (память — тем же правилом): удержанное тенью — своя группа (шаг 78)
+      const groupSql = `CASE WHEN u.status = 'APPLIED' THEN 'APPLIED' WHEN u.status = 'SHADOW_HELD' THEN 'SHADOW_HELD'
                              WHEN u.status IN (${FEED_IN_FLIGHT_STATUSES.map((x) => `'${x}'`).join(', ')}) THEN 'IN_FLIGHT'
                              WHEN u.status IN (${FEED_NOT_SENT_STATUSES.map((x) => `'${x}'`).join(', ')}) THEN 'NOT_SENT' ELSE 'SUPERSEDED' END`;
       const since = query.sinceDays ? new Date(Date.parse(now) - query.sinceDays * 86_400_000).toISOString() : null;
@@ -2505,7 +2513,7 @@ export class PgPricingStore implements PricingStore {
             LEFT JOIN channel_data.price_decision d ON d.tenant_id = h.tenant_id AND d.price_decision_id = h.price_decision_id
            WHERE h.tenant_id = $1 AND h.field = 'PRICE' AND ($2::uuid IS NULL OR h.write_scope_id = $2) AND ($3::timestamptz IS NULL OR ${WRITE_AT('h')} >= $3))`;
       const base: unknown[] = [tenantId, query.writeScopeId ?? null, since];
-      const groups: Record<FeedStatusGroup, number> = { APPLIED: 0, IN_FLIGHT: 0, NOT_SENT: 0, SUPERSEDED: 0 };
+      const groups: Record<FeedStatusGroup, number> = { APPLIED: 0, IN_FLIGHT: 0, NOT_SENT: 0, SUPERSEDED: 0, SHADOW_HELD: 0 };
       const [counted, { rows }] = await Promise.all([
         query.counts === false ? null : tx.query(`${scoped} SELECT ${groupSql} AS g, count(*)::int AS n FROM u GROUP BY 1`, base),
         tx.query(`${scoped} SELECT u.* FROM u WHERE ($4::text IS NULL OR ${groupSql} = $4) ORDER BY u.at DESC, u.version DESC LIMIT $5 OFFSET $6`,

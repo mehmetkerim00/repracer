@@ -83,16 +83,13 @@ export function numberFormat(locale: Locale, noValue: string): NumberFormat {
       if (!value) return noValue;
       const d = iso(value);
       if (!d) return value;
-      const time = `${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}:${p2(d.getUTCSeconds())} UTC`;
-      return locale === 'de'
-        ? `${p2(d.getUTCDate())}.${p2(d.getUTCMonth() + 1)}.${d.getUTCFullYear()}, ${time}`
-        : `${d.getUTCFullYear()}-${p2(d.getUTCMonth() + 1)}-${p2(d.getUTCDate())} ${time}`;
+      return humanWhen(locale, d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), d.getUTCHours(), d.getUTCMinutes(), 'UTC');
     },
     date(value) {
       if (!value) return noValue;
       const d = iso(value);
       if (!d) return value;
-      return locale === 'de' ? `${p2(d.getUTCDate())}.${p2(d.getUTCMonth() + 1)}.${d.getUTCFullYear()}` : `${d.getUTCFullYear()}-${p2(d.getUTCMonth() + 1)}-${p2(d.getUTCDate())}`;
+      return humanDate(locale, d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
     },
     change(from, to) {
       if (from === null || from === undefined || to === null || to === undefined || from <= 0) return null;
@@ -102,6 +99,23 @@ export function numberFormat(locale: Locale, noValue: string): NumberFormat {
     },
     rate: (micros) => decimal(micros / 1_000_000, 6),
   };
+}
+
+/**
+ * Шаг 78 (п. 15): время и дата во фразах — человечно: «Oct 11, 2026, 04:45 UTC−7», «11. Okt. 2026, 04:45 UTC−7»; без секунд, с годом
+ * (строка разбирается без часов системы — год не выводится из «сейчас»), смещение — как прежде. Таблицы показывают её без года
+ * (компонент `When` консоли), полная — подсказкой.
+ */
+const MONTHS: Record<Locale, readonly string[]> = {
+  en: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+  de: ['Jan.', 'Feb.', 'März', 'Apr.', 'Mai', 'Juni', 'Juli', 'Aug.', 'Sept.', 'Okt.', 'Nov.', 'Dez.'],
+};
+export function humanDate(locale: Locale, y: number, mo: number, da: number): string {
+  const month = MONTHS[locale][mo - 1]!;
+  return locale === 'de' ? `${da}. ${month} ${y}` : `${month} ${da}, ${y}`;
+}
+export function humanWhen(locale: Locale, y: number, mo: number, da: number, h: number, mi: number, zone: string): string {
+  return `${humanDate(locale, y, mo, da)}, ${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')} ${zone}`;
 }
 
 /**
@@ -137,19 +151,18 @@ export function zonedTimeFormat(locale: Locale, noValue: string, timeZone: strin
       const d = parse(value.length === 10 ? `${value}T00:00:00Z` : value);
       if (!d) return value;
       const w = wall(d);
-      const time = `${p2(w.h)}:${p2(w.mi)}:${p2(w.s)} ${label(w.offsetMin)}`;
-      return locale === 'de' ? `${p2(w.da)}.${p2(w.mo)}.${w.y}, ${time}` : `${w.y}-${p2(w.mo)}-${p2(w.da)} ${time}`;
+      return humanWhen(locale, w.y, w.mo, w.da, w.h, w.mi, label(w.offsetMin));
     },
     date(value) {
       if (!value) return noValue;
       if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
         const [y, mo, da] = value.split('-');
-        return locale === 'de' ? `${da}.${mo}.${y}` : value;
+        return humanDate(locale, Number(y), Number(mo), Number(da));
       }
       const d = parse(value);
       if (!d) return value;
       const w = wall(d);
-      return locale === 'de' ? `${p2(w.da)}.${p2(w.mo)}.${w.y}` : `${w.y}-${p2(w.mo)}-${p2(w.da)}`;
+      return humanDate(locale, w.y, w.mo, w.da);
     },
   };
 }

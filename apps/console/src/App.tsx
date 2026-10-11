@@ -52,6 +52,9 @@ const NAV_GROUPS = [
 ] as const;
 
 /** Вход [Р-78]: у поставщика identity; на стенде — имитатор с синтетическими пользователями. Паролей у нас нет */
+/** Знак роли на карточке входа — две буквы, у каждой роли свой */
+const ROLE_MARKS: Readonly<Record<string, string>> = { OWNER: 'Ow', ADMIN: 'Ad', OPERATOR: 'Op', PRICING_MANAGER: 'PM', INVENTORY_MANAGER: 'IM', VIEWER: 'Vw' };
+
 export function LoginView({ simulator, demoGuest, oidc, error, busy, onSignIn, onDemo }: {
   /** Шаг 44 [Р-178]: настоящий вход у поставщика identity */
   oidc?: SessionView['oidc'];
@@ -88,11 +91,13 @@ export function LoginView({ simulator, demoGuest, oidc, error, busy, onSignIn, o
       {simulator ? (
         <>
           <p className="test-line">{l.simulator}</p>
-          {/* Шаг 77: роли — сеткой карточек; буква роли рисуется стилями (data-initial), текст кнопки — прежний */}
+          {/* Шаг 77: роли — сеткой карточек; знак роли рисуется стилями (data-initial). Шаг 78: у каждой роли свой знак (Owner и
+              Operator оба были «O»), подпись — словарём на языке экрана (роли стенда по-немецки были английскими) */}
           <div className="role-grid">
-            {simulator.map((a) => (
-              <button key={a.role} type="button" className="role-card" data-initial={a.label.slice(0, 1)} disabled={busy} onClick={() => onSignIn(a.role)}>{l.asAccount(a.label)}</button>
-            ))}
+            {simulator.map((a) => {
+              const label = (m.values as Record<string, string | undefined>)[a.role] ?? a.label;
+              return <button key={a.role} type="button" className="role-card" data-initial={ROLE_MARKS[a.role] ?? label.slice(0, 2)} disabled={busy} onClick={() => onSignIn(a.role)}>{l.asAccount(label)}</button>;
+            })}
           </div>
         </>
       ) : <p className="notice">{l.noSimulator}</p>}
@@ -314,7 +319,8 @@ export function App() {
           </span>
           {user ? (
             <>
-              <span className="user">{m.ui.app.login.signedIn(user.email ?? user.subject)}</span>
+              {/* Шаг 78: в шапке — только адрес; «Signed in: …» остаётся подсказкой */}
+              <span className="user" title={m.ui.app.login.signedIn(user.email ?? user.subject)}>{user.email ?? user.subject}</span>
               <button type="button" className="ghost" onClick={() => { setAccessToken(null); loadSession(); }}>{m.ui.app.login.logout}</button>
             </>
           ) : null}

@@ -86,7 +86,8 @@ async function pollJob(jobId: string): Promise<BulkJobView> {
   }
 }
 
-const NO_PRICING_WORDS = /Strateg|Selbstkosten|Einstandspreis|Grenzen|Repricing|Preisregel|min_price|max_price/;
+// Шаг 78: границы цены называются словами («Mindestpreis»), а не кодами — правило держит и слова
+const NO_PRICING_WORDS = /Strateg|Selbstkosten|Einstandspreis|Grenzen|Repricing|Preisregel|min_price|max_price|Mindestpreis|Höchstpreis|minimum price|maximum price/;
 
 before(async () => {
   db = await createIsolatedDatabase('stockonly');

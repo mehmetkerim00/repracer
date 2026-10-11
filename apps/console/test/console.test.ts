@@ -567,7 +567,7 @@ test('step 23, C/F: offers the channel prices itself are listed before a strateg
   assert.deepEqual([refused.status, (refused.body as { error: { code: string } }).error.code], [400, 'CHANNEL_PRICING_ACTIVE']);
 
   const screen = await html('/src/screens/Strategies.tsx', 'StrategiesScreenView', { view: list, worldId: id, initialPreview: preview.view });
-  for (const text of ['Offers the channel prices itself', 'cannot be assigned', 'New version…', 'Cannot be saved: the channel prices these offers itself']) assert.ok(screen.includes(text), text);
+  for (const text of ['Offers the channel prices itself', 'cannot be assigned', 'New version', 'Cannot be saved: the channel prices these offers itself']) assert.ok(screen.includes(text), text);
   assert.match(screen, /<button type="button" class="danger" disabled="">Save and assign…<\/button>/, 'the save button is disabled while the preview is blocked');
   const deScreen = await html('/src/screens/Strategies.tsx', 'StrategiesScreenView', { view: await get<StrategyListView>(await login('OWNER', 'de'), api(id, 'strategies')), worldId: id }, 'de');
   assert.ok(deScreen.includes('Angebote, die der Kanal selbst bepreist'));
@@ -627,9 +627,9 @@ test('step 24, OQ-169/170: an existing strategy version is assigned without a ne
   assert.equal(savedJob.status, 'SUCCEEDED', savedJob.error ?? '');
   const afterSave = await get<StrategyListView>(owner, api(id, 'strategies'));
   const created = afterSave.strategies.find((x) => x.name === 'Synthetic author check')!;
-  assert.deepEqual(created.versions.map((v) => [v.version, v.status, v.author]), [[1, 'active', 'Owner (you)']]);
+  assert.deepEqual(created.versions.map((v) => [v.version, v.status, v.author]), [[1, 'active', 'you']]);
   const markup = await html('/src/screens/Strategies.tsx', 'StrategiesScreenView', { view: afterSave, worldId: id });
-  for (const text of ['Assign this version…', 'Versions: v1 · active · Owner (you)']) assert.ok(markup.includes(text), text);
+  for (const text of ['>Assign<', 'v1 · active · you']) assert.ok(markup.includes(text), text);
 
   // OQ-169: прежняя версия возвращается офферу без новой версии — после превью её параметров
   const item = afterSave.strategies.find((x) => x.strategyId === original.strategyId)!;

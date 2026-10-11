@@ -1109,7 +1109,8 @@ export interface ConsoleCatalogFacts {
   total: number;
   firstIds: string[];
   search: { ids: string[]; total: number } | null;
-  strategyUsage: Array<{ strategyId: string; count: number; exampleIds: string[]; firstCurrency: string }> | null;
+  /** Шаг 78: `storefronts` — сколько предложений стратегии на каждой витрине (сводка карточки стратегии вместо списка через запятую) */
+  strategyUsage: Array<{ strategyId: string; count: number; exampleIds: string[]; firstCurrency: string; storefronts: Array<{ channel: string; marketplace: string; count: number }> }> | null;
   stopImpact: Array<{ channelAccountId: string; marketplace: string; enginePrices: number; pendingWrites: number }> | null;
   channelPricing: Array<{ channelAccountId: string; total: number; rows: ConsoleOfferChannelPricingRow[] }> | null;
   keyed: Array<{ marketplace: string; channelProductRef: string; condition: string; writeScopeId: string }> | null;
@@ -1148,11 +1149,12 @@ export interface InterventionSlice {
   rejectedSnapshots: ConsoleRejectedSnapshotRow[];
 }
 
-export type FeedStatusGroup = 'APPLIED' | 'IN_FLIGHT' | 'NOT_SENT' | 'SUPERSEDED';
+// Шаг 78 (п. 16): удержанное тенью — своя группа: «заменено новой ценой» о нём неправда, а это экран сценария показа
+export type FeedStatusGroup = 'APPLIED' | 'IN_FLIGHT' | 'NOT_SENT' | 'SUPERSEDED' | 'SHADOW_HELD';
 export const FEED_IN_FLIGHT_STATUSES: readonly string[] = ['PENDING', 'DISPATCHED', 'ACCEPTED', 'BLOCKED'];
 export const FEED_NOT_SENT_STATUSES: readonly string[] = ['FAILED', 'NOT_APPLIED', 'DISCARDED_STALE', 'BUDGET_EXHAUSTED'];
 export function feedGroupOf(status: string): FeedStatusGroup {
-  return status === 'APPLIED' ? 'APPLIED' : FEED_IN_FLIGHT_STATUSES.includes(status) ? 'IN_FLIGHT' : FEED_NOT_SENT_STATUSES.includes(status) ? 'NOT_SENT' : 'SUPERSEDED';
+  return status === 'APPLIED' ? 'APPLIED' : status === 'SHADOW_HELD' ? 'SHADOW_HELD' : FEED_IN_FLIGHT_STATUSES.includes(status) ? 'IN_FLIGHT' : FEED_NOT_SENT_STATUSES.includes(status) ? 'NOT_SENT' : 'SUPERSEDED';
 }
 
 export interface FeedPageQuery {

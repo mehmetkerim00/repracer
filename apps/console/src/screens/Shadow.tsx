@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { ListQuery, ShadowView } from '@repracer/console-model';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, ErrorBox, errorText, Gaps, href, Load, Pager, useMessages, When } from '../components.tsx';
+import { Badge, ErrorBox, errorText, Gaps, href, Load, Pager, useMessages, When, Intro } from '../components.tsx';
 
 /**
  * Р-169…Р-171 (шаг 41): экран «Теневой режим». Канал подключён, движок работает целиком, в канал не уходит ничего.
@@ -32,8 +32,8 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
         <>
           {/* Заголовок страницы — над карточками, как на остальных экранах */}
           <h2>{m.ui.shadow.title}{v.demo ? <Badge tone="warn">{m.ui.app.demoBadge}</Badge> : null}</h2>
+          <Intro text={v.intro} />
           <section className="card">
-            <p>{v.intro}</p>
             <div className="periods">{v.periods.map((p) => (
               <button key={p.days} type="button" disabled={p.active}
                 onClick={() => { setDays(p.days); setQuery({ ...query, offset: 0 }); }}>{p.label}</button>
