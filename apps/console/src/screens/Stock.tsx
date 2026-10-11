@@ -122,7 +122,7 @@ export function StockScreenView({ view: v, worldId, query, onQuery, onFilter }: 
   return (
     <section className="stock">
       <h2>{t.title}</h2>
-      {v.demo ? <p className="notice"><Badge tone="warn">{m.ui.app.demoBadge}</Badge> {m.ui.app.demoBanner}</p> : null}
+      {/* Шаг 77: пометку демо даёт полоса под шапкой на каждом экране мира [Р-151] — второй баннер на экране не нужен */}
       <p className="muted">{v.intro}</p>
       {/* Шаг 64: у пустого экрана — не строка нулей, а объяснение ниже */}
       {v.rows.length > 0 ? <p><strong>{v.summaryText}</strong></p> : null}
@@ -139,13 +139,14 @@ export function StockScreenView({ view: v, worldId, query, onQuery, onFilter }: 
       {v.filter.matchedText ? <p className="small muted">{v.filter.matchedText}</p> : null}
       {v.filter.noneText ? <p className="notice">{v.filter.noneText}</p> : null}
       {v.rows.length > 0 ? (
+        <div className="table-wrap">
         <table>
-          <thead><tr><th>{t.columns.product}</th><th>{t.columns.onHand}</th><th>{t.columns.reserved}</th><th>{t.columns.available}</th><th>{t.columns.channels}</th></tr></thead>
+          <thead><tr><th>{t.columns.product}</th><th className="num">{t.columns.onHand}</th><th className="num">{t.columns.reserved}</th><th className="num">{t.columns.available}</th><th>{t.columns.channels}</th></tr></thead>
           <tbody>
             {v.rows.map((r) => (
               <tr key={r.productId}>
-                <td>{r.label}{r.label !== r.sku ? <span className="small muted"> · {r.sku}</span> : null}{r.gtin ? <span className="small muted"> · {r.gtin}</span> : null}</td>
-                <td>{r.onHand}</td><td>{r.reserved}</td><td>{r.available}</td>
+                <td className="product">{r.label}{r.label !== r.sku ? <span className="small muted nowrap"> · {r.sku}</span> : null}{r.gtin ? <span className="small muted nowrap"> · {r.gtin}</span> : null}</td>
+                <td className="num">{r.onHand}</td><td className="num">{r.reserved}</td><td className="num money">{r.available}</td>
                 <td>
                   {r.channelManaged.length > 0 ? <ul className="small muted">{r.channelManaged.map((text, i) => <li key={i}>{text}</li>)}</ul> : null}
                   {r.channels.length === 0 ? (r.channelManaged.length > 0 ? null : <span className="muted">—</span>) : (
@@ -164,6 +165,7 @@ export function StockScreenView({ view: v, worldId, query, onQuery, onFilter }: 
             ))}
           </tbody>
         </table>
+        </div>
       ) : null}
       <Pager page={v.page} query={query} onQuery={onQuery} />
       <p className="small muted">{v.cannot}</p>
@@ -177,7 +179,7 @@ export function StockDivergences({ view }: { view: StockDivergencesView }) {
   return (
     <section className="card">
       <h3>{m.ui.stock.divergences.title}</h3>
-      {view.items.length === 0 ? <p className="muted">{view.none}</p> : (
+      {view.items.length === 0 ? <p className="muted empty">{view.none}</p> : (
         <ul className="small">{view.items.map((d) => <li key={d.writeScopeId}><strong>{d.sku}</strong> · {(m.values as Record<string, string | undefined>)[d.channel] ?? d.channel} · {d.storefrontsText}: {d.text}</li>)}</ul>
       )}
     </section>
@@ -221,7 +223,7 @@ export function StockReturnsList({ view: v, notes, busy, onNote, onDecide, messa
       <h3>{t.title}</h3>
       <p className="small muted">{v.intro}</p>
       <p><strong>{v.pendingText}</strong></p>
-      {v.items.length === 0 ? <p className="muted">{v.none}</p> : (
+      {v.items.length === 0 ? <p className="muted empty">{v.none}</p> : (
         <ul className="small">
           {v.items.map((r) => (
             <li key={r.orderReturnId}>

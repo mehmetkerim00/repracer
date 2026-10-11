@@ -75,6 +75,7 @@ export function CostImportPreview({ view, onMapping, onEncoding }: {
       {view.rows.length > 0 ? (
         <>
           <h4>{t.rowsTitle(view.rows.length, view.summary.apply)}</h4>
+          <div className="table-wrap">
           <table>
             <thead>
               <tr><th>{t.columns.line}</th><th>{t.columns.offer}</th><th>{t.columns.key}</th><th>{t.columns.cost}</th><th>{t.columns.fee}</th></tr>
@@ -91,6 +92,7 @@ export function CostImportPreview({ view, onMapping, onEncoding }: {
               ))}
             </tbody>
           </table>
+          </div>
         </>
       ) : null}
       {view.skipped.length > 0 ? (
@@ -180,9 +182,14 @@ function CostImportForm({ worldId }: { worldId: string }) {
       {error ? <ErrorBox message={error} /> : null}
       {message ? <p className="notice" role="status">{message}</p> : null}
       {jobId ? <JobProgress worldId={worldId} jobId={jobId} /> : null}
-      <label>
-        {t.file}
-        <input type="file" accept=".csv,.xlsx,text/csv" onChange={(e) => void choose(e.currentTarget)} disabled={busy} />
+      {/* Шаг 77: своё поле выбора файла — кнопка браузера говорит на языке БРАУЗЕРА («Выберите файл»), а не консоли */}
+      <label className={`file-drop${busy ? ' disabled' : ''}`}>
+        <input type="file" className="visually-hidden" accept=".csv,.xlsx,text/csv" onChange={(e) => void choose(e.currentTarget)} disabled={busy} />
+        <svg className="file-drop-icon" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M12 17v-6" /><path d="m9.5 13.5 2.5-2.5 2.5 2.5" />
+        </svg>
+        <span className="file-drop-label">{t.file}</span>
+        {file ? <span className="file-drop-name">{file.name}</span> : null}
       </label>
       <div className="buttons">
         <button type="button" onClick={() => void plan()} disabled={busy || !file}>{t.plan}</button>

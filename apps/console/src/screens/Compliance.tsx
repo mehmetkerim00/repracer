@@ -92,7 +92,7 @@ export function ComplianceScreenView({ worldId, initial }: { worldId: string; in
       </div>
       {check ? (
         <div className={`card ${check.verdict === 'VIOLATION' ? 'dangerous' : ''}`} role="status">
-          <p><Badge tone={check.tone}>{check.verdict === 'VIOLATION' ? '✕' : check.verdict === 'COMPLIANT' ? '✓' : '?'}</Badge> <strong>{check.headline}</strong></p>
+          <p><Badge tone={check.tone} symbol>{check.verdict === 'VIOLATION' ? '✕' : check.verdict === 'COMPLIANT' ? '✓' : '?'}</Badge> <strong>{check.headline}</strong></p>
           <p className="small">{check.detail}</p>
           <p className="small muted">{c.lowest}: {check.lowest} · {check.window}</p>
           <DepthLine depth={check.depth} />
@@ -108,16 +108,16 @@ export function ComplianceScreenView({ worldId, initial }: { worldId: string; in
       ) : null}
 
       <h3>{c.depth.title}</h3>
-      {view.depth.length === 0 ? <p className="muted">{c.depth.none}</p> : (
+      {view.depth.length === 0 ? <p className="muted empty">{c.depth.none}</p> : (
         <div className="table-wrap">
           <table>
             <thead><tr><th>{c.depth.columns.offer}</th><th>{c.depth.columns.seen}</th><th>{c.depth.columns.reliability}</th></tr></thead>
             <tbody>
               {view.depth.map((d) => (
                 <tr key={d.unit.writeScopeId}>
-                  <td>{d.unit.label}</td>
-                  <td>{d.depth.seen}</td>
-                  <td><Badge tone={d.depth.tone}>{d.depth.complete ? '✓' : '!'}</Badge> {d.depth.reliability}{d.depth.externalChanges ? ` ${d.depth.externalChanges}` : ''}</td>
+                  <td className="offer">{d.unit.label}</td>
+                  <td className="nowrap">{d.depth.seen}</td>
+                  <td><Badge tone={d.depth.tone} symbol>{d.depth.complete ? '✓' : '!'}</Badge> {d.depth.reliability}{d.depth.externalChanges ? ` ${d.depth.externalChanges}` : ''}</td>
                 </tr>
               ))}
             </tbody>
@@ -127,7 +127,7 @@ export function ComplianceScreenView({ worldId, initial }: { worldId: string; in
 
       <h3>{c.reportTitle}</h3>
       <p className="headline">{view.headline}</p>
-      {view.rows.length === 0 ? <p className="muted">{c.empty}</p> : (
+      {view.rows.length === 0 ? <p className="muted empty">{c.empty}</p> : (
         <div className="table-wrap">
           <table>
             <thead><tr><th>{c.columns.offer}</th><th>{c.columns.reference}</th><th>{c.columns.sale}</th><th>{c.columns.period}</th><th>{c.columns.atAnnouncement}</th><th>{c.columns.now}</th></tr></thead>

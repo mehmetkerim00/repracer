@@ -39,7 +39,9 @@ export async function launchBrowser(): Promise<Browser> {
   const profile = mkdtempSync(join(tmpdir(), 'repracer-chrome-'));
   const args = ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--window-size=1440,900', '--no-first-run',
     '--no-default-browser-check', '--disable-gpu', ...(process.platform === 'linux' ? ['--no-sandbox', '--disable-dev-shm-usage'] : []), 'about:blank'];
-  const chrome: ChildProcess = spawn(chromePath(), args, { stdio: 'ignore' });
+  // Своя группа процессов: на Linux помощники Chrome (zygote, crashpad) переживают сам браузер и пишут в профиль — закрытие гасит
+  // группу целиком (CI шага 76: удаление профиля падало после зелёного теста, стенд оставался открытым, и задание висело до срока)
+  const chrome: ChildProcess = spawn(chromePath(), args, { stdio: 'ignore', detached: process.platform !== 'win32' });
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   // Порт отладки Chrome пишет в профиль, когда готов
   let port = 0;
@@ -107,9 +109,11 @@ export async function launchBrowser(): Promise<Browser> {
     errors: () => [...errors],
     async close() {
       try { ws.close(); } catch { /* уже закрыт */ }
-      chrome.kill();
-      await new Promise((r) => (chrome.exitCode !== null ? r(null) : chrome.once('exit', r)));
-      rmSync(profile, { recursive: true, force: true });
+      const exited = new Promise((r) => (chrome.exitCode !== null || chrome.signalCode !== null ? r(null) : chrome.once('exit', r)));
+      try { process.kill(-chrome.pid!, 'SIGKILL'); } catch { chrome.kill('SIGKILL'); }
+      await Promise.race([exited, sleep(10_000)]);
+      // Временный профиль: остаток в каталоге временных файлов — не результат теста, поэтому повторы и без отказа
+      try { rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch { /* остаётся во временном каталоге */ }
     },
   };
 }

@@ -48,10 +48,15 @@ before(async () => {
   pageUrl = vite.resolvedUrls!.local[0]!;
   browser = await launchBrowser();
 });
+// Уборка — каждый шаг отдельно: отказ одного не оставляет открытыми остальные (CI шага 76: исключение в первом шаге оставляло стенд и
+// Vite слушать, процесс теста не завершался, и задание висело до своего срока); первый отказ — провал файла после всей уборки
 after(async () => {
-  await browser?.close();
-  await vite?.close();
-  await new Promise((r) => (stand ? stand.close(r) : r(null)));
+  const failures: unknown[] = [];
+  const step = async (f: () => Promise<unknown> | undefined) => { try { await f(); } catch (e) { failures.push(e); } };
+  await step(() => browser?.close());
+  await step(() => vite?.close());
+  await step(() => new Promise((r) => { if (!stand) return r(null); stand.closeAllConnections(); stand.close(r); }));
+  if (failures.length > 0) throw failures[0];
 });
 
 /** Экран готов: «Loading…» ушло; сообщение об ошибке экрана — провал с его текстом */

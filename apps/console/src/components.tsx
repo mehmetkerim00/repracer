@@ -19,15 +19,34 @@ export function errorText(error: unknown, m: Messages): string {
   }
 }
 
-export function Badge({ tone, children }: { tone: string; children: ReactNode }) {
-  return <span className={`badge tone-${tone}`}>{children}</span>;
+/**
+ * Шаг 77: время в таблицах — по-человечески, «Oct 11, 03:57 · UTC−7» вторичным цветом; полное значение (с годом и секундами, как его
+ * отдаёт сервер) — во всплывающей подсказке. Строка не того вида показывается как есть
+ */
+export function humanWhen(value: string, locale: string): string {
+  const r = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})(?::\d{2})? (UTC.*)$/.exec(value);
+  if (!r) return value;
+  const day = new Intl.DateTimeFormat(locale === 'de' ? 'de-DE' : 'en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+    .format(new Date(Date.UTC(Number(r[1]), Number(r[2]) - 1, Number(r[3]))));
+  return `${day}, ${r[4]}:${r[5]} · ${r[6]}`;
+}
+
+export function When({ value }: { value: string | null | undefined }) {
+  const m = useMessages();
+  if (!value) return null;
+  return <span className="when" title={value}>{humanWhen(value, m.locale)}</span>;
+}
+
+/** `symbol` — пилюля из одного знака (✓, !, ✕): без точки тона перед ним */
+export function Badge({ tone, children, symbol }: { tone: string; children: ReactNode; symbol?: boolean }) {
+  return <span className={`badge tone-${tone}${symbol ? ' symbol' : ''}`}>{children}</span>;
 }
 
 export function Cell({ cell }: { cell: StatusCell }) {
   return (
-    <div className="cell">
+    <div className={`cell cell-${cell.tone}`} title={cell.detail}>
       <Badge tone={cell.tone}>{cell.label}</Badge>
-      <div className="muted small">{cell.detail}</div>
+      <div className="muted small cell-detail">{cell.detail}</div>
     </div>
   );
 }
@@ -36,7 +55,7 @@ export function ReasonLine({ reason }: { reason: HumanReason }) {
   const m = useMessages();
   return (
     <div className="reason">
-      <span>{reason.text}</span>
+      <span title={reason.text}>{reason.text}</span>
       {reason.limit ? <div className="gap-note small">{m.ui.trace.limitNote(reason.limit)}</div> : null}
       {reason.problems.length > 0 ? <div className="gap-note small">{reason.problems.join('; ')}</div> : null}
     </div>

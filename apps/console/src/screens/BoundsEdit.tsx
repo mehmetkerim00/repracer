@@ -149,7 +149,7 @@ function BoundsEditForm({ worldId, items, total }: { worldId: string; items: rea
         {wholeCatalog ? t.selectionWhole(total) : selected.length === 0 ? t.selectionNone : t.selectionCount(selected.length, total)}
       </p>
       <p className="small muted">{t.selectionReset}</p>
-      <ul className="index">
+      <ul className="index pick-list">
         {items.map((i) => (
           <li key={i.writeScopeId}><label><input type="checkbox" checked={selected.includes(i.writeScopeId)}
             onChange={(e) => { setSelected(e.target.checked ? [...selected, i.writeScopeId] : selected.filter((x) => x !== i.writeScopeId)); reset(); }} /> {i.label}</label>

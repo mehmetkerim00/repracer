@@ -254,7 +254,7 @@ export function decisionTrace(world: StandWorld, detail: DecisionDetail, m: Mess
       : say(e?.gate.reason ?? d.reason).text;
   return {
     worldId: world.id, decisionId: d.decisionId, unit: scope ? unitOf(world, scope, m) : null, decidedAt: m.when(d.decidedAt), headline,
-    tone: last?.status === 'APPLIED' ? 'ok' : OUTCOME_TONE[d.outcome] ?? 'unknown', dangerous: isDangerous(d), steps,
+    tone: last?.status === 'APPLIED' ? 'ok' : last?.status === 'SHADOW_HELD' ? 'warn' : OUTCOME_TONE[d.outcome] ?? 'unknown', dangerous: isDangerous(d), steps,
     gaps: uniqueGaps([...gaps, ...steps.flatMap((s) => s.gaps)]),
   };
 }
@@ -273,7 +273,8 @@ function writeStep(d: ConsoleDecision, writes: readonly ConsoleWrite[], m: Messa
     if (w.endReason) items.push({ label: t.endReason, outcome: 'INFO', reason: describe({ code: w.endReason, params: w.endParams }, m) });
   }
   const last = writes[writes.length - 1]!;
-  const st: StepStatus = last.status === 'APPLIED' || last.status === 'ACCEPTED' ? 'OK' : ['PENDING', 'DISPATCHED', 'FAILED', 'SUPERSEDED'].includes(last.status) ? 'WARN' : 'STOP';
+  // Шаг 77: удержанное тенью — янтарным (тень — внимание, а не отказ), как пилюля режима на экране тени
+  const st: StepStatus = last.status === 'APPLIED' || last.status === 'ACCEPTED' ? 'OK' : ['PENDING', 'DISPATCHED', 'FAILED', 'SUPERSEDED', 'SHADOW_HELD'].includes(last.status) ? 'WARN' : 'STOP';
   return { key: 'WRITE', title: t.titles.WRITE, status: st, summary: `${money(last.amountMinor)}: ${status(last.status)}`, items, gaps: [] };
 }
 

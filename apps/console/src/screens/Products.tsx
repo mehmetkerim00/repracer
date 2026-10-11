@@ -19,29 +19,29 @@ export function ProductsView({ view, onEnable, query, onQuery }: {
       {/* Задача D шага 34: новый тенант без данных видит, ПОЧЕМУ пусто и куда идти, а не пустую таблицу */}
       {view.rows.length === 0 ? <p className="notice">{m.ui.onboarding.empty.products} <a href={href(view.worldId, 'onboarding')}>{m.ui.onboarding.empty.startHere}</a></p> : null}
       {view.rows.length > 0 ? <div className="table-wrap">
-        <table>
+        <table className="products sticky-end">
           <thead>
             <tr>
-              <th>{c.unit}</th><th>{c.current}</th><th>{c.floor}</th><th>{c.ceiling}</th><th>{c.strategy}</th>
+              <th>{c.unit}</th><th className="num">{c.current}</th><th className="num">{c.floor}</th><th className="num">{c.ceiling}</th><th>{c.strategy}</th>
               <th>{c.enabled}</th><th>{c.applying}</th><th>{c.lastChange}</th><th>{c.nextCheck}</th><th>{c.channel}</th><th />
             </tr>
           </thead>
           <tbody>
             {view.rows.map((r) => (
               <tr key={r.unit.writeScopeId}>
-                <td>
+                <td className="offer">
                   <strong>{r.unit.label}</strong>
                   <div className="muted small">{p.productRef(r.unit.channelProductRef, r.unit.condition, r.unit.gtin)}</div>
                 </td>
-                <td className="num">{r.currentPrice}</td>
+                <td className="num money">{r.currentPrice}</td>
                 <td className="num floor">
                   <strong>{r.floor.amount}</strong>
                   <div className="muted small">{r.floor.parts}</div>
                 </td>
                 <td className="num">{r.maxPrice}</td>
-                <td>
+                <td className="strategy">
                   {r.strategy.label} {r.strategy.competitorDerived ? <Badge tone="progress">{p.competitorBadge}</Badge> : null}
-                  <div className="muted small">{r.strategy.detail}</div>
+                  <div className="muted small clamp-2" title={r.strategy.detail}>{r.strategy.detail}</div>
                 </td>
                 <td><Cell cell={r.enabled} /></td>
                 <td><Cell cell={r.applying} /></td>
@@ -50,7 +50,7 @@ export function ProductsView({ view, onEnable, query, onQuery }: {
                 <td>{r.channelNotes.length === 0 ? '–' : r.channelNotes.map((n) => <Cell key={n.code} cell={n} />)}</td>
                 <td className="actions">
                   {r.latestDecisionId
-                    ? <a href={href(view.worldId, 'decisions', r.latestDecisionId)}>{p.why}</a>
+                    ? <a className="row-link" href={href(view.worldId, 'decisions', r.latestDecisionId)}>{p.why}</a>
                     : <span className="muted small">{p.noDecisions}</span>}
                   <a href={href(view.worldId, 'bounds', r.unit.writeScopeId)}>{p.bounds}</a>
                   {r.canEnable && onEnable ? <button type="button" onClick={() => onEnable(r)}>{p.enable}</button> : null}

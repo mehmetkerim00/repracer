@@ -13,7 +13,7 @@ export function BreakdownTable({ breakdown, currency }: { breakdown: PriceBreakd
       <h3>{breakdown.title}</h3>
       <div className="table-wrap">
         <table>
-          <thead><tr><th>{b.columns.part}</th><th>{b.columns.amount(currency)}</th><th>{b.columns.formula}</th></tr></thead>
+          <thead><tr><th>{b.columns.part}</th><th className="num">{b.columns.amount(currency)}</th><th>{b.columns.formula}</th></tr></thead>
           <tbody>
             {breakdown.lines.map((l) => (
               <tr key={l.key} className={`line-${l.key}`}>
@@ -83,9 +83,9 @@ export function BoundsIndexView({ worldId, items }: { worldId: string; items: re
       <h2>{m.ui.bounds.indexTitle}</h2>
       {/* Задача D шага 34: пустой тенант видит, почему пусто и куда идти */}
       {items.length === 0 ? <p className="notice">{m.ui.onboarding.empty.bounds} <a href={href(worldId, 'onboarding')}>{m.ui.onboarding.empty.startHere}</a></p> : null}
-      <ul className="index">
+      <ul className="index link-list">
         {items.map((i) => (
-          <li key={i.writeScopeId}><a href={href(worldId, 'bounds', i.writeScopeId)}>{i.label}</a> <span className="muted small">{i.minPrice} – {i.maxPrice}</span></li>
+          <li key={i.writeScopeId}><a href={href(worldId, 'bounds', i.writeScopeId)}>{i.label}</a> <span className="muted small range">{i.minPrice} – {i.maxPrice}</span></li>
         ))}
       </ul>
     </section>

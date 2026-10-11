@@ -31,8 +31,9 @@ export function ConnectionsScreen({ worldId }: { worldId: string }) {
     <Load resource={view} retry={retry}>
       {(v) => (
         <>
+          {/* Заголовок страницы — над карточками, как на остальных экранах */}
+          <h2>{v.title}</h2>
           <section className="card">
-            <h2>{v.title}</h2>
             <p>{v.intro}</p>
             {v.noRightText ? <p className="notice">{v.noRightText}</p> : null}
             {error ? <ErrorBox message={error} /> : null}
@@ -64,25 +65,24 @@ export function ConnectionsScreen({ worldId }: { worldId: string }) {
               );
             })}
           </section>
-          <section className="card">
-            <table>
-              <tbody>
-                {v.accounts.map((a) => (
-                  <tr key={a.channelAccountId}>
-                    <td>{a.label}</td>
-                    <td>
-                      <Badge tone={tone(a.state)}>{a.stateText}</Badge>{a.progressText ? <div className="note">{a.progressText}</div> : null}
-                      {a.channelLimitText ? <div className="note">{a.channelLimitText}</div> : null}
-                    </td>
-                    <td className="note">{a.authorizationText}{a.discoveryText ? <><br />{a.discoveryText}</> : null}</td>
-                    <td>{a.canReconnect ? <button type="button" onClick={() => start(a.channel, a.marketplaces)}>{a.reconnectLabel}</button> : null}</td>
-                    <td><ExternalWriters worldId={worldId} account={a} onChanged={retry} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          {/* Шаг 77: аккаунт — карточкой: слева аккаунт, состояние и доступ, справа другие инструменты, запись остатков, внешние правки */}
+          <div className="accounts">
+            {v.accounts.map((a) => (
+              <article key={a.channelAccountId} className="card account">
+                <div className="account-main">
+                  <div className="account-title">{a.label}</div>
+                  <p><Badge tone={tone(a.state)}>{a.stateText}</Badge></p>
+                  {a.progressText ? <p className="note">{a.progressText}</p> : null}
+                  {a.channelLimitText ? <p className="note">{a.channelLimitText}</p> : null}
+                  <p className="note">{a.authorizationText}</p>
+                  {a.discoveryText ? <p className="note">{a.discoveryText}</p> : null}
+                  {a.canReconnect ? <button type="button" onClick={() => start(a.channel, a.marketplaces)}>{a.reconnectLabel}</button> : null}
+                </div>
+                <div className="account-writers"><ExternalWriters worldId={worldId} account={a} onChanged={retry} /></div>
+              </article>
+            ))}
             <p className="note">{v.tokenNote}</p>
-          </section>
+          </div>
           <AccountSettings worldId={worldId} />
         </>
       )}
@@ -161,26 +161,27 @@ function ExternalWriters({ worldId, account: a, onChanged }: { worldId: string; 
     <div>
       <p><strong>{a.otherTools.question}</strong> {a.otherTools.text}</p>
       {a.otherTools.options.length > 0 ? (
-        <p>
+        <div className="segmented">
           {a.otherTools.options.map((o) => (
-            <button key={o.answer} type="button" disabled={o.answer === a.otherTools.answer} onClick={() => post('other-tools', { answer: o.answer })}>{o.label}</button>
+            <button key={o.answer} type="button" disabled={o.answer === a.otherTools.answer} aria-pressed={o.answer === a.otherTools.answer} onClick={() => post('other-tools', { answer: o.answer })}>{o.label}</button>
           ))}
-        </p>
+        </div>
       ) : null}
       {a.otherTools.warning ? <p className="notice" role="alert">{a.otherTools.warning}</p> : null}
-      <p><Badge tone={q.confirmed ? 'ok' : 'warn'}>{q.text}</Badge></p>
+      {/* Шаг 77: это фраза, а не короткий статус — блоком своего тона, а не пилюлей в две строки */}
+      <p className={`status-line tone-${q.confirmed ? 'ok' : 'warn'}`}>{q.text}</p>
       {q.blockedText ? <p className="note">{q.blockedText}</p> : null}
       {q.canConfirm ? (
-        <p>
+        <div className="typed-confirm">
           <label>{q.confirmationHint} <input value={typed} onChange={(e) => setTyped(e.currentTarget.value)} /></label>
           <button type="button" disabled={typed.trim() === ''} onClick={() => post('quantity-writes', { typedConfirmation: typed })}>{q.confirmLabel}</button>
-        </p>
+        </div>
       ) : null}
       {q.canRevoke ? (
-        <p>
+        <div className="typed-confirm">
           <label>{q.revokeHint} <input value={typedRevoke} onChange={(e) => setTypedRevoke(e.currentTarget.value)} /></label>
           <button type="button" disabled={typedRevoke.trim() === ''} onClick={() => post('quantity-writes-revoke', { typedConfirmation: typedRevoke })}>{q.revokeLabel}</button>
-        </p>
+        </div>
       ) : null}
       <p>{a.externalEditsText}</p>
       <p className="note">{a.externalEditsNote}</p>

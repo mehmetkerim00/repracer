@@ -43,7 +43,13 @@ export function parseHash(hash: string): Route {
  * (находка 8 ревью шага 31).
  */
 /** Р-149 (шаг 34): путь онбординга — первый экран: с него продавец начинает и к нему возвращается, пока путь не пройден */
-const SCREENS = ['onboarding', 'connections', 'shadow', 'stock', 'products', 'decisions', 'strategies', 'feed', 'rejected', 'dangerous', 'bounds', 'cost-import', 'compliance', 'jobs', 'stop'] as const;
+/** Шаг 77: экраны мира — группами боковой панели (порядок групп и экранов — порядок показа продукта) */
+const NAV_GROUPS = [
+  ['overview', ['onboarding', 'shadow']],
+  ['pricing', ['decisions', 'strategies', 'feed', 'rejected', 'dangerous', 'bounds']],
+  ['stock', ['stock', 'products', 'cost-import']],
+  ['account', ['connections', 'compliance', 'jobs', 'stop']],
+] as const;
 
 /** Вход [Р-78]: у поставщика identity; на стенде — имитатор с синтетическими пользователями. Паролей у нас нет */
 export function LoginView({ simulator, demoGuest, oidc, error, busy, onSignIn, onDemo }: {
@@ -60,33 +66,39 @@ export function LoginView({ simulator, demoGuest, oidc, error, busy, onSignIn, o
   const m = useMessages();
   const l = m.ui.app.login;
   return (
+    <div className="login-wrap">
     <section className="card login">
+      <div className="login-brand"><span className="brand-mark" aria-hidden="true">r</span>{m.ui.app.brand}</div>
       <h2>{l.title}</h2>
       <p className="muted">{l.hint}</p>
       {oidc ? (
         <div className="buttons">
-          <button type="button" disabled={busy} onClick={() => void startLogin(oidc)}>{m.ui.app.signIn}</button>
+          <button type="button" className="primary" disabled={busy} onClick={() => void startLogin(oidc)}>{m.ui.app.signIn}</button>
           {pendingInvitation() ? <p className="notice">{m.ui.app.invitation.signInFirst}</p> : null}
         </div>
       ) : null}
       {demoGuest ? (
         <>
-          <p className="notice">{l.demoGuestHint}</p>
+          <p className="muted">{l.demoGuestHint}</p>
           <div className="buttons">
-            <button type="button" disabled={busy} onClick={onDemo}>{l.demoGuest}</button>
+            <button type="button" className="primary" disabled={busy} onClick={onDemo}>{l.demoGuest}</button>
           </div>
         </>
       ) : null}
       {simulator ? (
         <>
-          <p className="notice">{l.simulator}</p>
-          <div className="buttons">
-            {simulator.map((a) => <button key={a.role} type="button" disabled={busy} onClick={() => onSignIn(a.role)}>{l.asAccount(a.label)}</button>)}
+          <p className="test-line">{l.simulator}</p>
+          {/* Шаг 77: роли — сеткой карточек; буква роли рисуется стилями (data-initial), текст кнопки — прежний */}
+          <div className="role-grid">
+            {simulator.map((a) => (
+              <button key={a.role} type="button" className="role-card" data-initial={a.label.slice(0, 1)} disabled={busy} onClick={() => onSignIn(a.role)}>{l.asAccount(a.label)}</button>
+            ))}
           </div>
         </>
       ) : <p className="notice">{l.noSimulator}</p>}
       {error ? <p className="error" role="alert">{error}</p> : null}
     </section>
+    </div>
   );
 }
 
@@ -104,14 +116,15 @@ export function WorldList({ worlds }: { worlds: readonly WorldSummary[] }) {
                 сервер (демо в бою и миры продавцов — товары) */}
             <h3><a href={href(w.id, w.landing)}>{w.title}</a></h3>
             <p className="small muted">{w.description}</p>
-            <p className="small">
-              {w.demo ? <><Badge tone="warn">{m.ui.app.demoBadge}</Badge> · </> : null}
-              {w.awaitingAccess > 0 ? <><Badge tone="warn">{m.ui.onboarding.channels.status.AWAITING_ACCESS}: {w.awaitingAccess}</Badge> · </> : null}
-              {w.role} · {m.ui.app.counts(w.scopes, w.decisionsLastDay, w.interventionsLastWeek)}
-              {w.activeStops > 0 ? <> · <Badge tone="stop">{m.ui.app.activeStops(w.activeStops)}</Badge></> : null}
-              {w.activeHalts > 0 ? <> · <Badge tone="warn">{m.ui.app.activeHalts(w.activeHalts)}</Badge></> : null}
-              {w.failures.length > 0 ? <> · <Badge tone="warn">{m.ui.app.diverged(w.failures.length)}</Badge></> : null}
-            </p>
+            {/* Шаг 77: пилюли — своей строкой, роль и счётчики — строкой под ними, без перемешивания с «·» */}
+            <div className="world-pills">
+              {w.demo ? <Badge tone="warn">{m.ui.app.demoBadge}</Badge> : null}
+              {w.awaitingAccess > 0 ? <Badge tone="warn">{m.ui.onboarding.channels.status.AWAITING_ACCESS}: {w.awaitingAccess}</Badge> : null}
+              {w.activeStops > 0 ? <Badge tone="stop">{m.ui.app.activeStops(w.activeStops)}</Badge> : null}
+              {w.activeHalts > 0 ? <Badge tone="warn">{m.ui.app.activeHalts(w.activeHalts)}</Badge> : null}
+              {w.failures.length > 0 ? <Badge tone="warn">{m.ui.app.diverged(w.failures.length)}</Badge> : null}
+            </div>
+            <p className="small world-meta">{w.role} · {m.ui.app.counts(w.scopes, w.decisionsLastDay, w.interventionsLastWeek)}</p>
           </li>
         ))}
       </ul>
@@ -131,16 +144,29 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
   const m = world.locale || world.timeZone ? messagesFor(world.locale ?? outer.locale, { timeZone: world.timeZone }) : outer;
   return (
     <MessagesContext.Provider value={m}>
-      {/* Р-151: демо помечается на КАЖДОМ экране мира — деньги показываются на большинстве из них */}
-      {world.demo ? <p className="notice demo-banner" role="note"><Badge tone="warn">{m.ui.app.demoBadge}</Badge> {m.ui.app.demoBanner}</p> : null}
-      <nav className="tabs">
-        <a href="#/">{m.ui.app.backToWorlds}</a>
-        <strong>{world.title}</strong>
-        {/* Шаг 68 (K3): Omnibus — правило ЕС; продавцу только с витринами США вкладки нет [Р-123] */}
-        {SCREENS.filter((key) => key !== 'compliance' || world.euStorefronts).map((key) => (
-          <a key={key} href={href(world.id, key)} className={route.screen === key ? 'active' : ''}>{m.ui.app.screens[key]}</a>
-        ))}
-      </nav>
+      {/* Р-151: демо помечается на КАЖДОМ экране мира — деньги показываются на большинстве из них; шаг 77 — тонкой полосой под шапкой */}
+      {world.demo ? <p className="demo-strip demo-banner" role="note"><Badge tone="warn">{m.ui.app.demoBadge}</Badge> {m.ui.app.demoBanner}</p> : null}
+      <div className="world-layout">
+      <aside className="sidebar">
+        <div className="sidebar-inner">
+        <div className="workspace">
+          <div className="name">{world.title}</div>
+          <a href="#/">{m.ui.app.backToWorlds}</a>
+        </div>
+        <nav className="tabs-nav" aria-label={world.title}>
+          {NAV_GROUPS.map(([group, keys]) => (
+            <div key={group} className="nav-group">
+              <div className="group-title">{m.ui.app.navGroups[group]}</div>
+              {/* Шаг 68 (K3): Omnibus — правило ЕС; продавцу только с витринами США пункта нет [Р-123] */}
+              {keys.filter((key) => key !== 'compliance' || world.euStorefronts).map((key) => (
+                <a key={key} href={href(world.id, key)} className={route.screen === key ? 'active' : ''} aria-current={route.screen === key ? 'page' : undefined}>{m.ui.app.screens[key]}</a>
+              ))}
+            </div>
+          ))}
+        </nav>
+        </div>
+      </aside>
+      <div className="world-content">
       {route.screen === 'onboarding' ? <OnboardingScreen worldId={world.id} />
         : route.screen === 'connections' ? <ConnectionsScreen worldId={world.id} />
         : route.screen === 'shadow' ? <ShadowScreen worldId={world.id} />
@@ -155,8 +181,10 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
                   : route.screen === 'feed' ? <FeedScreen worldId={world.id} />
                     : route.screen === 'dangerous' ? <DangerousScreen worldId={world.id} days={[1, 7, 30].includes(Number(route.param)) ? Number(route.param) : 7} />
                       : route.screen === 'compliance' ? (world.euStorefronts ? <ComplianceScreen worldId={world.id} /> : <p className="notice">{m.ui.compliance.notApplicable}</p>)
-                        : route.screen === 'jobs' ? <JobHistory worldId={world.id} />
+                        : route.screen === 'jobs' ? <><h2>{m.ui.jobs.pageTitle}</h2><JobHistory worldId={world.id} /></>
                 : <p className="error">{m.ui.app.screenNotFound}</p>}
+      </div>
+      </div>
     </MessagesContext.Provider>
   );
 }
@@ -274,22 +302,24 @@ export function App() {
   return (
     <MessagesContext.Provider value={m}>
       <div className="app" lang={locale}>
-        <header>
-          <h1>{m.ui.app.title}</h1>
+        <header className="topbar">
+          <h1 className="brand"><span className="brand-mark" aria-hidden="true">r</span>{m.ui.app.title}</h1>
           {/* Шаг 64 (проход консоли глазами клиента): «стенд, синтетические данные» — только у стенда с имитатором входа, не у продавца */}
-          {session.state === 'ready' && session.data.simulator ? <span className="muted small">{m.ui.app.stand}</span> : null}
+          {session.state === 'ready' && session.data.simulator ? <span className="env">{m.ui.app.stand}</span> : null}
           <span className="spacer" />
-          {LOCALES.map((l) => (
-            <button key={l} type="button" className={l === locale ? 'active' : ''} aria-pressed={l === locale} onClick={() => changeLocale(l)}>{m.ui.app.languages[l]}</button>
-          ))}
+          <span className="lang">
+            {LOCALES.map((l) => (
+              <button key={l} type="button" className={l === locale ? 'active' : ''} aria-pressed={l === locale} onClick={() => changeLocale(l)}>{m.ui.app.languages[l]}</button>
+            ))}
+          </span>
           {user ? (
             <>
-              <span className="small">{m.ui.app.login.signedIn(user.email ?? user.subject)}</span>
-              <button type="button" onClick={() => { setAccessToken(null); loadSession(); }}>{m.ui.app.login.logout}</button>
+              <span className="user">{m.ui.app.login.signedIn(user.email ?? user.subject)}</span>
+              <button type="button" className="ghost" onClick={() => { setAccessToken(null); loadSession(); }}>{m.ui.app.login.logout}</button>
             </>
           ) : null}
         </header>
-        <main>
+        <main className={`page${user && route.worldId !== null ? ' world' : ''}`}>
           {session.state === 'loading' ? <p className="loading" role="status">{m.ui.app.loading(8)}</p>
             : session.state === 'error' ? <ErrorBox message={errorText(session.error, m)} onRetry={loadSession} />
               : user

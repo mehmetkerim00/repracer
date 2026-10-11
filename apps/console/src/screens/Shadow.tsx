@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { ListQuery, ShadowView } from '@repracer/console-model';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, ErrorBox, errorText, Gaps, href, Load, Pager, useMessages } from '../components.tsx';
+import { Badge, ErrorBox, errorText, Gaps, href, Load, Pager, useMessages, When } from '../components.tsx';
 
 /**
  * Р-169…Р-171 (шаг 41): экран «Теневой режим». Канал подключён, движок работает целиком, в канал не уходит ничего.
@@ -24,23 +24,43 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
     }).then(() => { setError(null); retry(); }).catch((e: unknown) => setError(errorText(e, m)));
 
   const c = m.ui.shadow.columns;
+  const st = m.ui.shadow.stats;
+  const n = (v: number) => new Intl.NumberFormat(m.locale === 'de' ? 'de-DE' : 'en-US').format(v);
   return (
     <Load resource={view} retry={retry}>
       {(v) => (
         <>
+          {/* Заголовок страницы — над карточками, как на остальных экранах */}
+          <h2>{m.ui.shadow.title}{v.demo ? <Badge tone="warn">{m.ui.app.demoBadge}</Badge> : null}</h2>
           <section className="card">
-            <h2>{m.ui.shadow.title}{v.demo ? <Badge tone="warn">{m.ui.app.demoBadge}</Badge> : null}</h2>
             <p>{v.intro}</p>
-            <p>{v.periods.map((p) => (
+            <div className="periods">{v.periods.map((p) => (
               <button key={p.days} type="button" disabled={p.active}
                 onClick={() => { setDays(p.days); setQuery({ ...query, offset: 0 }); }}>{p.label}</button>
-            ))}</p>
-            {v.anyShadow ? <ul>{v.summaryLines.map((line) => <li key={line}>{line}</li>)}</ul> : <p>{v.none}</p>}
+            ))}</div>
+            {/* Шаг 77: витрина показа — числа сводки карточками; строки сводки целиком — вторичным текстом под ними */}
+            {v.anyShadow ? (
+              <>
+                <div className="stats">
+                  <div className="stat"><div className="stat-label">{st.decisions}</div><div className="stat-value">{n(v.summary.decisions)}</div></div>
+                  <div className="stat"><div className="stat-label">{st.changes}</div><div className="stat-value">{n(v.summary.changes)}</div></div>
+                  <div className="stat"><div className="stat-label">{st.held}</div><div className="stat-value">{n(v.summary.heldWrites)}</div></div>
+                  {v.summary.floorSavings.map((f) => (
+                    <div key={f.currency} className="stat accent">
+                      <div className="stat-label">{st.savings}</div>
+                      <div className="stat-value">{m.money(f.minor, f.currency)}</div>
+                      <div className="stat-sub">{st.notForecast}</div>
+                    </div>
+                  ))}
+                </div>
+                <ul className="explain">{v.summaryLines.map((line) => <li key={line}>{line}</li>)}</ul>
+              </>
+            ) : <p>{v.none}</p>}
             <p className="note">{v.cannot}</p>
           </section>
 
-          <section className="card">
-            <table>
+          <section className="card table-card">
+            <table className="accounts-modes">
               <thead><tr><th>{c.account}</th><th>{c.mode}</th><th>{c.action}</th></tr></thead>
               <tbody>
                 {v.accounts.map((a) => (
@@ -54,13 +74,15 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
                     </td>
                     <td>
                       {a.canGoLive ? (
-                        <>
+                        <div className="live-card">
                           <div className="note">{a.confirmationHint}</div>
                           <input value={typed[a.channelAccountId] ?? ''} placeholder={a.externalAccountId}
                             onChange={(e) => setTyped({ ...typed, [a.channelAccountId]: e.currentTarget.value })} />
-                          <button type="button" onClick={() => switchMode(a.channelAccountId, 'LIVE')}>{v.liveButton}</button>
+                          {/* Яркая кнопка — только когда имя набрано верно: до этого глаз не ведут к самому опасному действию экрана */}
+                          <button type="button" className={(typed[a.channelAccountId] ?? '') === a.externalAccountId ? 'primary' : ''}
+                            onClick={() => switchMode(a.channelAccountId, 'LIVE')}>{v.liveButton}</button>
                           <div className="note">{v.mfaHint}</div>
-                        </>
+                        </div>
                       ) : null}
                       {a.canGoShadow ? (
                         <button type="button" onClick={() => switchMode(a.channelAccountId, 'SHADOW')}>{v.shadowButton}</button>
@@ -126,14 +148,14 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
           <section className="card">
             {v.rows.length === 0 ? <p>{v.none}</p> : (
               <table>
-                <thead><tr><th>{c.offer}</th><th>{c.value}</th><th>{c.when}</th><th /></tr></thead>
+                <thead><tr><th>{c.offer}</th><th className="num">{c.value}</th><th>{c.when}</th><th /></tr></thead>
                 <tbody>
                   {v.rows.map((r) => (
                     <tr key={r.channelWriteId}>
                       <td>{r.label}</td>
-                      <td>{r.valueText}{r.budgetText === null ? null : <div className="note">{r.budgetText}</div>}</td>
-                      <td>{r.whenText}</td>
-                      <td>{r.priceDecisionId === null ? null : <a href={href(worldId, 'decisions', r.priceDecisionId)}>{c.why}</a>}</td>
+                      <td className="money">{r.valueText}{r.budgetText === null ? null : <div className="note">{r.budgetText}</div>}</td>
+                      <td><When value={r.whenText} /></td>
+                      <td className="num">{r.priceDecisionId === null ? null : <a className="row-link" href={href(worldId, 'decisions', r.priceDecisionId)}>{c.why}</a>}</td>
                     </tr>
                   ))}
                 </tbody>

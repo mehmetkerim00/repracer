@@ -4,7 +4,7 @@ import type { JobCreatedResponse, StrategySaveResponse } from '../api-types.ts';
 import type { BulkJobView } from '@repracer/console-model';
 import { JobProgress } from './Jobs.tsx';
 import { ApiError, requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, useMessages } from '../components.tsx';
+import { Badge, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, useMessages, When } from '../components.tsx';
 
 /**
  * Экран стратегий (шаги 21, 23): черновик или новая версия существующей стратегии → превью на выбранных офферах (движок и Gate на
@@ -73,12 +73,12 @@ export function PreviewTable({ view }: { view: StrategyPreviewView }) {
       {view.saveBlocked ? <p className="notice" role="alert">{view.saveBlocked}</p> : null}
       <div className="table-wrap">
         <table>
-          <thead><tr><th>{c.offer}</th><th>{c.asOf}</th><th>{c.current}</th><th>{c.proposed}</th><th>{c.final}</th><th>{c.change}</th><th>{c.outcome}</th><th>{c.reason}</th></tr></thead>
+          <thead><tr><th>{c.offer}</th><th>{c.asOf}</th><th className="num">{c.current}</th><th className="num">{c.proposed}</th><th className="num">{c.final}</th><th className="num">{c.change}</th><th>{c.outcome}</th><th>{c.reason}</th></tr></thead>
           <tbody>
             {view.rows.map((r) => (
               <tr key={r.unit.writeScopeId} className={r.dangerous ? 'dangerous' : ''}>
                 <td>{r.unit.label}</td>
-                <td className="small nowrap">{r.asOf}</td>
+                <td className="small nowrap"><When value={r.asOf} /></td>
                 <td className="num">{r.current}</td>
                 <td className="num">{r.proposed ?? '–'}</td>
                 <td className="num">{r.final ?? '–'}</td>
@@ -200,25 +200,28 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
       <h3>{t.inUse}</h3>
       {/* Задача D шага 34: новый тенант без стратегий и офферов видит объяснение, а не пустой список */}
       {view.strategies.length === 0 ? <p className="notice">{m.ui.onboarding.empty.strategies} <a href={href(view.worldId, 'onboarding')}>{m.ui.onboarding.empty.startHere}</a></p> : null}
-      <ul className="index">
+      <ul className="index strategy-cards">
         {view.strategies.map((s) => (
-          <li key={s.strategyId}>
-            <strong>{s.name ?? t.unnamed}</strong> · {s.label} {t.versionShort(s.version)} <span className="small muted">{s.detail}</span>
+          <li key={s.strategyId} className="card">
+            <div className="strategy-title"><strong>{s.name ?? t.unnamed}</strong> · {s.label} {t.versionShort(s.version)}</div>
+            <div className="small muted">{s.detail}</div>
             {/* Р-136: показаны примеры, а сколько всего — числом: у стратегии каталога предложений могут быть тысячи */}
             <div className="small">{s.scopeCount === 0 ? <span className="muted">{t.notUsed}</span> : (
-              <>{s.scopes.map((u) => `${u.unit.label} (${t.versionShort(u.version)})`).join(', ')}
+              <><span className="clamp-2" title={s.scopes.map((u) => `${u.unit.label} (${t.versionShort(u.version)})`).join(', ')}>{s.scopes.map((u) => `${u.unit.label} (${t.versionShort(u.version)})`).join(', ')}</span>
                 {s.scopeCount > s.scopes.length ? <span className="muted"> {t.usedBy(s.scopeCount)}</span> : null}</>
             )}</div>
             <div className="small muted">{t.versionsTitle}: {s.versions.map((v) => t.versionLine(v.version, v.status, v.author, v.createdAt)).join('; ')}</div>
-            {view.canEdit ? <button type="button" disabled={busy} onClick={() => { setAssigning(null); setForm(formOf(s)); changed(); setMessage(null); }}>{t.newVersion}</button> : null}
-            {s.assignable ? <button type="button" disabled={busy} onClick={() => { setAssigning(s); changed(); setMessage(null); }}>{t.assignVersion}</button> : null}
+            <div className="buttons">
+              {view.canEdit ? <button type="button" disabled={busy} onClick={() => { setAssigning(null); setForm(formOf(s)); changed(); setMessage(null); }}>{t.newVersion}</button> : null}
+              {s.assignable ? <button type="button" disabled={busy} onClick={() => { setAssigning(s); changed(); setMessage(null); }}>{t.assignVersion}</button> : null}
+            </div>
           </li>
         ))}
       </ul>
 
       <h3>{t.channelPricingTitle}</h3>
       <p className="muted small">{t.channelPricingIntro}</p>
-      {view.channelPricingOffers.length === 0 ? <p className="muted">{t.channelPricingNone}</p> : (
+      {view.channelPricingOffers.length === 0 ? <p className="muted empty">{t.channelPricingNone}</p> : (
         <ul className="index">{view.channelPricingOffers.map((o) => <li key={o.label}><Badge tone={o.tone}>{o.label}</Badge> <span className="small">{o.detail}</span></li>)}</ul>
       )}
       {view.channelPricingOffersTotal > view.channelPricingOffers.length ? <p className="small">{t.channelPricingMore(view.channelPricingOffersTotal - view.channelPricingOffers.length)}</p> : null}
@@ -227,7 +230,7 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
       {!view.canEdit ? <p className="notice">{t.noRight}</p> : null}
       {form.strategyId || assigning ? <button type="button" disabled={busy} onClick={() => { setAssigning(null); setForm(EMPTY_DRAFT); changed(); }}>{t.newStrategy}</button> : null}
       {assigning ? <p className="small muted">{assigning.label} · {assigning.detail}</p> : null}
-      <div className="form" hidden={assigning !== null}>
+      <div className="form draft-form card" hidden={assigning !== null}>
         <label>{t.name} <input value={form.name} maxLength={80} onChange={(e) => set('name', e.target.value)} /></label>
         <label>{t.type} <select value={form.type} onChange={(e) => set('type', e.target.value as DraftForm['type'])}>
           {(Object.keys(t.types) as Array<keyof typeof t.types>).map((k) => <option key={k} value={k}>{t.types[k]}</option>)}
@@ -269,7 +272,7 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
         {wholeCatalog ? t.selectionWhole(view.page.total) : selected.length === 0 ? t.selectionNone : t.selectionCount(selected.length, view.page.total)}
       </p>
       <p className="small muted">{t.selectionReset}</p>
-      <ul className="index">
+      <ul className="index pick-list">
         {view.scopes.map((s) => (
           <li key={s.unit.writeScopeId}>
             <label><input type="checkbox" disabled={!s.assignable} checked={selected.includes(s.unit.writeScopeId)}

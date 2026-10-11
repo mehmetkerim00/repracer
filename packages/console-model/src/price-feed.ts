@@ -81,7 +81,7 @@ export function parseFeedQuery(params: URLSearchParams): FeedQuery | null {
 
 const STATUS_TONE: Readonly<Record<string, Tone>> = {
   APPLIED: 'ok', ACCEPTED: 'progress', DISPATCHED: 'progress', PENDING: 'progress', BLOCKED: 'warn', FAILED: 'stop', NOT_APPLIED: 'stop',
-  SUPERSEDED: 'off', DISCARDED_STALE: 'stop', BUDGET_EXHAUSTED: 'stop',
+  SUPERSEDED: 'off', DISCARDED_STALE: 'stop', BUDGET_EXHAUSTED: 'stop', SHADOW_HELD: 'warn', // шаг 77: удержанное тенью — янтарным, как тень везде
 };
 // Группы статусов — одно определение на базу и память: `feedGroupOf` из порта хранилища [Р-154]
 

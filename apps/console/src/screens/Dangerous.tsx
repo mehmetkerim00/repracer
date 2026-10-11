@@ -1,6 +1,6 @@
 import type { DangerousReportView } from '@repracer/console-model';
 import { useResource, worldPath } from '../api.ts';
-import { Badge, Gaps, href, Load, ReasonLine, useMessages } from '../components.tsx';
+import { Badge, Gaps, href, Load, ReasonLine, useMessages, When } from '../components.tsx';
 
 const PERIODS = [1, 7, 30] as const;
 
@@ -19,21 +19,21 @@ export function DangerousScreenView({ view }: { view: DangerousReportView }) {
       <p className="muted small">{view.from} – {view.to}</p>
       {view.truncated ? <p className="notice">{d.truncated}</p> : null}
       <h3>{d.floorTitle}</h3>
-      {view.floorHolds.count === 0 ? <p className="muted">{d.none}</p> : (
+      {view.floorHolds.count === 0 ? <p className="muted empty">{d.none}</p> : (
         <div className="table-wrap">
-          <table>
-            <thead><tr><th>{d.floorColumns.when}</th><th>{d.floorColumns.offer}</th><th>{d.floorColumns.kind}</th><th>{d.floorColumns.target}</th><th>{d.floorColumns.floor}</th><th>{d.floorColumns.below}</th><th>{d.floorColumns.reason}</th><th /></tr></thead>
+          <table className="dense sticky-end">
+            <thead><tr><th>{d.floorColumns.when}</th><th>{d.floorColumns.offer}</th><th>{d.floorColumns.kind}</th><th className="num">{d.floorColumns.target}</th><th className="num">{d.floorColumns.floor}</th><th className="num">{d.floorColumns.below}</th><th>{d.floorColumns.reason}</th><th /></tr></thead>
             <tbody>
               {view.floorHolds.items.map((i, n) => (
                 <tr key={`${i.decisionId ?? 'hold'}-${n}`}>
-                  <td className="nowrap">{i.at}</td>
-                  <td>{i.unit?.label ?? m.ui.common.noValue}</td>
+                  <td className="nowrap"><When value={i.at} /></td>
+                  <td className="offer">{i.unit?.label ?? m.ui.common.noValue}</td>
                   <td>{d.floorKinds[i.kind]}</td>
                   <td className="num">{i.target ?? m.ui.common.noValue}</td>
-                  <td className="num">{i.floor}</td>
+                  <td className="num money">{i.floor}</td>
                   <td className="num">{i.below ?? m.ui.common.noValue}</td>
                   <td><ReasonLine reason={i.reason} /></td>
-                  <td>{i.decisionId ? <a href={href(view.worldId, 'decisions', i.decisionId)}>{m.ui.rejected.path}</a> : null}</td>
+                  <td className="nowrap">{i.decisionId ? <a className="row-link" href={href(view.worldId, 'decisions', i.decisionId)}>{m.ui.rejected.path}</a> : null}</td>
                 </tr>
               ))}
             </tbody>
@@ -42,7 +42,7 @@ export function DangerousScreenView({ view }: { view: DangerousReportView }) {
       )}
       <h3>{d.gateTitle}</h3>
       <p className="muted">{view.gateHeadline}</p>
-      {view.count === 0 ? <p className="muted">{d.none}</p> : (
+      {view.count === 0 ? <p className="muted empty">{d.none}</p> : (
         <>
           <div className="cards">
             <div className="card emphasis"><h3>{d.prevented}</h3>{view.prevented.map((p) => <p key={p.currency} className="big">{p.amount}</p>)}</div>
@@ -50,18 +50,18 @@ export function DangerousScreenView({ view }: { view: DangerousReportView }) {
             <div className="card"><h3>{d.byBound}</h3><ul className="small">{view.byBound.map((b) => <li key={b.code}><Badge tone="stop">{b.count}</Badge> {b.title}</li>)}</ul></div>
           </div>
           <div className="table-wrap">
-            <table>
-              <thead><tr><th>{c.when}</th><th>{c.offer}</th><th>{c.proposed}</th><th>{c.bound}</th><th>{c.deviation}</th><th>{c.reason}</th><th /></tr></thead>
+            <table className="dense sticky-end">
+              <thead><tr><th>{c.when}</th><th>{c.offer}</th><th className="num">{c.proposed}</th><th className="num">{c.bound}</th><th className="num">{c.deviation}</th><th>{c.reason}</th><th /></tr></thead>
               <tbody>
                 {view.items.map((i) => (
                   <tr key={i.decisionId} className="dangerous">
-                    <td className="nowrap">{i.at}</td>
-                    <td>{i.unit?.label ?? m.ui.common.noValue}</td>
+                    <td className="nowrap"><When value={i.at} /></td>
+                    <td className="offer">{i.unit?.label ?? m.ui.common.noValue}</td>
                     <td className="num">{i.proposed}</td>
                     <td className="num">{i.bound}</td>
                     <td className="num">{i.deviation}</td>
                     <td><ReasonLine reason={i.reason} /></td>
-                    <td><a href={href(view.worldId, 'decisions', i.decisionId)}>{m.ui.rejected.path}</a></td>
+                    <td className="nowrap"><a className="row-link" href={href(view.worldId, 'decisions', i.decisionId)}>{m.ui.rejected.path}</a></td>
                   </tr>
                 ))}
               </tbody>

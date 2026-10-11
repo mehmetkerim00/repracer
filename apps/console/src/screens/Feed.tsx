@@ -3,7 +3,7 @@ import { FEED_PERIODS_DAYS, FEED_STATUS_GROUPS, type FeedQuery, type PriceFeedVi
 import { requestJson, useResource, worldPath } from '../api.ts';
 import type { JobCreatedResponse } from '../api-types.ts';
 import { JobProgress } from './Jobs.tsx';
-import { OfferPicker, Badge, ErrorBox, errorText, Gaps, href, Load, ReasonLine, useMessages } from '../components.tsx';
+import { OfferPicker, Badge, ErrorBox, errorText, Gaps, href, Load, ReasonLine, useMessages, When } from '../components.tsx';
 
 /**
  * Лента изменений цен (шаги 21, 23): запись в канал от решения до итога, новые сверху. Фильтры по статусу, офферу и периоду и
@@ -79,22 +79,22 @@ export function FeedScreenView({ view, onQuery }: { view: PriceFeedView; onQuery
       ) : null}
       {exportError ? <ErrorBox message={exportError} /> : null}
       {exportJobId ? <JobProgress worldId={view.worldId} jobId={exportJobId} /> : null}
-      {view.items.length === 0 ? <p className="muted">{f.empty}</p> : (
+      {view.items.length === 0 ? <p className="muted empty">{f.empty}</p> : (
         <div className="table-wrap">
-          <table>
-            <thead><tr><th>{c.when}</th><th>{c.offer}</th><th>{c.from}</th><th>{c.to}</th><th>{c.change}</th><th>{c.status}</th><th>{c.source}</th><th>{c.reason}</th><th /></tr></thead>
+          <table className="feed dense sticky-end">
+            <thead><tr><th>{c.when}</th><th>{c.offer}</th><th className="num">{c.from}</th><th className="num">{c.to}</th><th className="num">{c.change}</th><th>{c.status}</th><th>{c.source}</th><th>{c.reason}</th><th /></tr></thead>
             <tbody>
               {view.items.map((i, n) => (
                 <tr key={n}>
-                  <td className="nowrap">{i.at}</td>
-                  <td>{i.unit?.label ?? m.ui.common.noValue}</td>
+                  <td className="nowrap"><When value={i.at} /></td>
+                  <td className="offer">{i.unit?.label ?? m.ui.common.noValue}</td>
                   <td className="num">{i.from ?? '–'}</td>
-                  <td className="num">{i.to}</td>
+                  <td className="num money">{i.to}</td>
                   <td className="num">{i.change ?? '–'}</td>
                   <td><Badge tone={i.tone}>{i.status}</Badge>{i.confirmation ? <div className="note">{i.confirmation}</div> : null}</td>
-                  <td>{i.source}</td>
+                  <td className="nowrap">{i.source}</td>
                   <td>{i.reason ? <ReasonLine reason={i.reason} /> : null}</td>
-                  <td>{i.decisionId ? <a href={href(view.worldId, 'decisions', i.decisionId)}>{m.ui.rejected.path}</a> : null}</td>
+                  <td className="nowrap">{i.decisionId ? <a className="row-link" href={href(view.worldId, 'decisions', i.decisionId)}>{m.ui.rejected.path}</a> : null}</td>
                 </tr>
               ))}
             </tbody>

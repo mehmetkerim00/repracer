@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { DistrustCard, HaltCard, StopCard, StopPlan, StopTarget, StopView, TargetCard } from '@repracer/console-model';
 import { NOTE_MIN } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, ErrorBox, errorText, Gaps, Load, NoteConfirm, useMessages } from '../components.tsx';
+import { Badge, ErrorBox, errorText, Gaps, Load, NoteConfirm, useMessages, When } from '../components.tsx';
 
 /**
  * Экран E — три вида остановки, каждый своим разделом: остановка человеком (все цены) [Р-69], системная остановка витрины по
@@ -14,7 +14,7 @@ function TargetCardView({ card, onStop }: { card: TargetCard; onStop?: (target: 
   const m = useMessages();
   const s = m.ui.stop;
   return (
-    <div className={`card ${card.coveredBy ? 'stopped' : ''}`}>
+    <div className={`card target-card${card.target.kind === 'TENANT' ? ' whole' : ''} ${card.coveredBy ? 'stopped' : ''}`}>
       <h3>{card.label}</h3>
       <p>{card.coveredBy ? <Badge tone="stop">{s.stopped}</Badge> : <Badge tone="ok">{s.running}</Badge>}</p>
       {card.coveredBy ? <p className="small">{s.coveredBy(card.coveredBy.scopeLabel, card.coveredBy.since)}</p> : null}
@@ -109,7 +109,7 @@ export function StopScreenView({ view, onStop, onResume, onRelease, onReleaseDis
         <p><strong>{s.notStoppedTitle}</strong></p>
         <ul>{view.notStopped.map((n) => <li key={n}>{n}</li>)}</ul>
         <h4>{s.activeStops}</h4>
-        {view.stops.active.length === 0 ? <p className="muted">{s.none}</p>
+        {view.stops.active.length === 0 ? <p className="muted empty">{s.none}</p>
           : <div className="cards">{view.stops.active.map((st) => <StopCardView key={st.stopId} stop={st} {...(onResume ? { onResume } : {})} />)}</div>}
         {view.stops.history.length > 0 ? (
           <>
@@ -123,7 +123,7 @@ export function StopScreenView({ view, onStop, onResume, onRelease, onReleaseDis
         <h3>{s.systemTitle}</h3>
         <p className="muted">{s.systemIntro}</p>
         <h4>{s.activeHalts}</h4>
-        {view.halts.active.length === 0 ? <p className="muted">{s.none}</p>
+        {view.halts.active.length === 0 ? <p className="muted empty">{s.none}</p>
           : <div className="cards">{view.halts.active.map((h) => <HaltCardView key={h.haltId} halt={h} {...(onRelease ? { onRelease } : {})} />)}</div>}
         {view.halts.history.length > 0 ? (
           <>
@@ -136,7 +136,7 @@ export function StopScreenView({ view, onStop, onResume, onRelease, onReleaseDis
         <h3>{s.distrustTitle}</h3>
         <p className="muted">{s.distrustIntro}</p>
         <h4>{s.activeDistrusts}</h4>
-        {view.distrusts.active.length === 0 ? <p className="muted">{s.none}</p>
+        {view.distrusts.active.length === 0 ? <p className="muted empty">{s.none}</p>
           : <div className="cards">{view.distrusts.active.map((d) => <DistrustCardView key={d.distrustId} distrust={d} {...(onReleaseDistrust ? { onRelease: onReleaseDistrust } : {})} />)}</div>}
         {view.distrusts.history.length > 0 ? (
           <>
@@ -153,7 +153,7 @@ export function StopScreenView({ view, onStop, onResume, onRelease, onReleaseDis
               <tbody>
                 {view.audit.map((a, i) => (
                   <tr key={i}>
-                    <td className="nowrap">{a.at}</td>
+                    <td className="nowrap"><When value={a.at} /></td>
                     <td>{a.action}</td>
                     <td>{a.actor}</td>
                     <td>{a.scope}</td>

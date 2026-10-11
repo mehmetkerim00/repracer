@@ -107,7 +107,7 @@ export function JobHistory({ worldId }: { worldId: string }) {
   return (
     <section className="jobs">
       <h3>{t.historyTitle}</h3>
-      {view.items.length === 0 ? <p className="muted">{t.none}</p> : (
+      {view.items.length === 0 ? <p className="muted empty">{t.none}</p> : (
         <ul className="index">
           {view.items.map((j) => (
             <li key={j.jobId}>

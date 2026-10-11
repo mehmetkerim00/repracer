@@ -58,33 +58,34 @@ export function OnboardingScreenView({ view: v, worldId, busy, onNarrow, onEnabl
   return (
     <section className="onboarding">
       <h2>{t.title}</h2>
-      {v.demo ? <p className="notice"><Badge tone="warn">{m.ui.app.demoBadge}</Badge> {m.ui.app.demoBanner}</p> : null}
       <p className="muted">{v.intro}</p>
-      <p className="notice"><strong>{v.resumeText}</strong></p>
+      <p className="notice resume"><strong>{v.resumeText}</strong></p>
       {v.pathText ? <p className="small muted">{v.pathText}{v.canAddPricing && onChoosePath ? <> <button type="button" onClick={() => onChoosePath('STOCK_AND_PRICING')}>{t.paths.addPricing}</button></> : null}</p> : null}
       {v.choices.length > 0 ? (
         <div className="choices">
           {v.choices.map((c) => (
-            <div key={c.path} className="card">
+            <div key={c.path} className="choice">
+              {/* Шаг 77: путь — карточкой с иконкой: остатки — коробка, остатки и цены — коробка с ценником */}
+              <span className="choice-icon" aria-hidden="true">{c.path === 'STOCK' ? <BoxIcon /> : <TagIcon />}</span>
               <h3>{c.title}</h3>
               <p className="small">{c.detail}</p>
-              {onChoosePath ? <button type="button" onClick={() => onChoosePath(c.path)}>{t.paths.choose}</button> : null}
+              {onChoosePath ? <button type="button" className="primary" onClick={() => onChoosePath(c.path)}>{t.paths.choose}</button> : null}
             </div>
           ))}
         </div>
       ) : null}
       {!v.canLead ? <p className="muted">{t.noRight}</p> : null}
       {!v.canEnable ? <p className="muted">{t.noRightEnable}</p> : null}
-      <ol className="steps">
+      <ol className="onboarding-steps">
         {v.steps.map((s) => (
           <li key={s.step} className={s.done ? 'done' : s.current ? 'current' : 'pending'} aria-current={s.current ? 'step' : undefined}>
             <h3>
-              {s.title} <Badge tone={s.done ? 'ok' : s.current ? 'warn' : 'muted'}>{s.done ? t.done : s.current ? t.current : t.pending}</Badge>
+              {s.title} <Badge tone={s.done ? 'ok' : s.current ? 'progress' : 'off'}>{s.done ? t.done : s.current ? t.current : t.pending}</Badge>
               {s.awaiting ? <> <Badge tone="warn">{t.channels.status.AWAITING_ACCESS}</Badge></> : null}
             </h3>
             <p className="small muted">{s.hint}</p>
             <p className="small">{s.progress}</p>
-            {s.goTo && !s.done ? <a href={href(worldId, s.goTo.screen)}>{s.goTo.label}</a> : null}
+            {s.goTo && !s.done ? <a className="row-link" href={href(worldId, s.goTo.screen)}>{s.goTo.label}</a> : null}
             {s.step === 'COSTS' && v.narrowing && v.canLead ? (
               <div className="narrowing">
                 <p className="small">{v.narrowing.hint}</p>
@@ -94,7 +95,7 @@ export function OnboardingScreenView({ view: v, worldId, busy, onNarrow, onEnabl
             ) : null}
             {/* Пока задание идёт, кнопка не нажимается: второе нажатие создало бы второе задание (ревью шага 34, находка 13) */}
             {s.step === 'ENABLE' && s.current && v.canEnable && v.enableCount > 0
-              ? <button type="button" disabled={busy} onClick={onEnable}>{t.enable(v.enableCount)}</button> : null}
+              ? <button type="button" className="primary" disabled={busy} onClick={onEnable}>{t.enable(v.enableCount)}</button> : null}
           </li>
         ))}
       </ol>
@@ -102,7 +103,7 @@ export function OnboardingScreenView({ view: v, worldId, busy, onNarrow, onEnabl
       {v.channels.length === 0 ? <p className="notice">{t.channels.none}</p> : (
         <ul className="channels">
           {v.channels.map((c) => (
-            <li key={c.channelAccountId} className="card">
+            <li key={c.channelAccountId} className="card channel">
               <strong>{c.label}</strong> <Badge tone={c.status === 'ACTIVE' ? 'ok' : 'warn'}>{c.statusText}</Badge>
               {c.awaitingHint ? <p className="small muted">{c.awaitingHint}</p> : null}
               {c.blockers.length > 0 ? <ul className="small">{c.blockers.map((b) => <li key={b.code}>{b.text}</li>)}</ul> : null}
@@ -111,6 +112,22 @@ export function OnboardingScreenView({ view: v, worldId, busy, onNarrow, onEnabl
         </ul>
       )}
     </section>
+  );
+}
+
+/** Шаг 77: иконки выбора пути — встроенный SVG, без внешних ресурсов */
+function BoxIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 8l-9-5-9 5 9 5 9-5z" /><path d="M3 8v8l9 5 9-5V8" /><path d="M12 13v8" />
+    </svg>
+  );
+}
+function TagIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20.6 13.4l-7.2 7.2a2 2 0 01-2.8 0L3 13V3h10l7.6 7.6a2 2 0 010 2.8z" /><circle cx="7.5" cy="7.5" r="1.5" />
+    </svg>
   );
 }
 
