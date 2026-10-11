@@ -9,7 +9,7 @@
     "tests/contract"
   ],
   "engines": {
-    "node": ">=22"
+    "node": ">=22.3"
   },
   "scripts": {
     "typecheck": "npm run typecheck --workspaces --if-present",

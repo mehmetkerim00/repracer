@@ -759,8 +759,8 @@ export const de: Messages = {
       },
       discovery: {
         // Шаг 58 (ревью шага 56, находка 9): пояснение о старых листингах eBay — только у аккаунта eBay
-        running: (h: number, hadCircle: boolean, ebay: boolean) => `Katalogsuche: Der aktuelle Durchlauf läuft seit ${h} Std.${hadCircle ? '' : ' (der erste)'} — ein Angebot, das nur ein vollständiger Durchlauf sieht${ebay ? ' (ältere eBay-Angebote)' : ''}, erscheint nach etwa zwei Durchläufen und einem Tag; die Stunden nennen wir, sobald ein Durchlauf abgeschlossen ist.`,
-        completed: (h: number, at: string, boundH: number, ebay: boolean) => `Katalogsuche: Der letzte vollständige Durchlauf dauerte ${h === 0 ? 'weniger als eine Stunde' : `${h} Std.`}, abgeschlossen ${at} — ein Angebot, das nur ein vollständiger Durchlauf sieht${ebay ? ' (ältere eBay-Angebote)' : ''}, erscheint nach etwa ${boundH} Std. (zwei Durchläufe und ein Tag), sofern der nächste Durchlauf nicht länger dauert als der letzte.`,
+        running: (h: number, hadCircle: boolean, ebay: boolean) => `Katalogsuche: Der aktuelle Durchlauf läuft seit ${h < 1 ? 'weniger als einer Stunde' : `${h} Std.`}${hadCircle ? '' : ' (der erste)'} — ein Angebot, das nur ein vollständiger Durchlauf sieht${ebay ? ' (ältere eBay-Angebote)' : ''}, erscheint nach etwa zwei Durchläufen und einem Tag; die Stunden nennen wir, sobald ein Durchlauf abgeschlossen ist.`,
+        completed: (h: number, at: string, boundH: number, ebay: boolean) => `Katalogsuche: Der letzte vollständige Durchlauf dauerte ${h < 1 ? 'weniger als eine Stunde' : `${h} Std.`}, abgeschlossen ${at} — ein Angebot, das nur ein vollständiger Durchlauf sieht${ebay ? ' (ältere eBay-Angebote)' : ''}, erscheint nach etwa ${boundH} Std. (zwei Durchläufe und ein Tag), sofern der nächste Durchlauf nicht länger dauert als der letzte.`,
       },
       authorization: {
         revoked: 'Der Zugriff wurde im Kanal zurückgezogen: verbinden Sie erneut, um fortzufahren.',

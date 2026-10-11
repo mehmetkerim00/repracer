@@ -1067,3 +1067,18 @@ test('step 76: the stand token lifetime is 15 minutes by default, a show day whe
   assert.equal(standTokenSecondsOf('43200'), 43_200);
   for (const bad of ['0', '59', '43201', '1.5', 'day', '-60']) assert.throws(() => standTokenSecondsOf(bad), /REPRACER_STAND_TOKEN_SECONDS must be an integer 60\.\.43200/);
 });
+
+/** Шаг 76 (ревью, находка 3): экран входа мира выбирает сервер — объявленный миром (демо в тени — тень), иначе товары */
+test('step 76: a world opens on the screen it declares — shadow for a demo in shadow, products otherwise', async () => {
+  const owner = await login('OWNER');
+  const before = await get<WorldSummary[]>(owner, '/api/worlds');
+  assert.ok(before.length > 1 && before.every((w) => w.landing === 'products'), 'without a declaration every world opens on products');
+  const first = worlds[0]!;
+  first.landing = 'shadow';
+  try {
+    const after = await get<WorldSummary[]>(owner, '/api/worlds');
+    assert.deepEqual(after.filter((w) => w.landing === 'shadow').map((w) => w.id), [first.id]);
+  } finally {
+    delete first.landing;
+  }
+});

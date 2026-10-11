@@ -781,8 +781,8 @@ export const en = {
         // Шаг 57 (ревью шага 56, находка 5): честная граница — остаток текущего круга, пауза до нового (сутки после закрытия, плюс час
         // захода) и ещё один круг: листинг, появившийся позади курсора, текущий круг уже не увидит
         // Шаг 58 (ревью шага 56, находка 9): пояснение о старых листингах eBay — только у аккаунта eBay
-        running: (h: number, hadCircle: boolean, ebay: boolean) => `Catalog discovery: the current circle has been running ${h} h${hadCircle ? '' : ' (the first one)'} — an offer only a full circle sees${ebay ? ' (older eBay listings)' : ''} appears within about two circles and a day; the hours are named once a circle closes.`,
-        completed: (h: number, at: string, boundH: number, ebay: boolean) => `Catalog discovery: the last full circle took ${h === 0 ? 'less than an hour' : `${h} h`}, closed ${at} — an offer only a full circle sees${ebay ? ' (older eBay listings)' : ''} appears within about ${boundH} h (two circles and a day), if the next circle is not longer than the last one.`,
+        running: (h: number, hadCircle: boolean, ebay: boolean) => `Catalog discovery: the current circle has been running ${h < 1 ? 'less than an hour' : `${h} h`}${hadCircle ? '' : ' (the first one)'} — an offer only a full circle sees${ebay ? ' (older eBay listings)' : ''} appears within about two circles and a day; the hours are named once a circle closes.`,
+        completed: (h: number, at: string, boundH: number, ebay: boolean) => `Catalog discovery: the last full circle took ${h < 1 ? 'less than an hour' : `${h} h`}, closed ${at} — an offer only a full circle sees${ebay ? ' (older eBay listings)' : ''} appears within about ${boundH} h (two circles and a day), if the next circle is not longer than the last one.`,
       },
       authorization: {
         revoked: 'Access was withdrawn in the channel: connect again to continue.',

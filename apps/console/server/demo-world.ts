@@ -122,6 +122,7 @@ export async function startDemoWorld(options: DemoWorldOptions): Promise<Running
   const world = {
     id: descriptor.id, title: descriptor.title, description: descriptor.description,
     tenantId: seeded.tenantId, accounts, identityTenantId: seeded.tenantId, membershipAlias: (id: string) => id, failures: [],
+    ...(options.writeMode === 'SHADOW' ? { landing: 'shadow' as const } : {}),
     store: store as never, stock, stockPipeline,
     // Шаг 41 [Р-169]: теневой режим читается у живого мира — режим лежит в базе у аккаунта
     shadow: new PgShadowStore({ adminPool: pools.admin }),

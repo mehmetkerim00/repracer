@@ -35,6 +35,7 @@ mkdir -p "${LOGS}"
 # Шаг 76 (предполётный прогон демо): чужой процесс на порту стенда — старый стенд прошлого запуска: проверка «стенд поднялся» ответила бы
 # им, и показ шёл бы на старом мире. Интерфейс держит 127.0.0.1:5173 строго; чужое приложение на [::1]:5173 (другой проект на vite)
 # забирает адрес «localhost:5173» — открывать только http://127.0.0.1:5173
+command -v lsof > /dev/null || { echo "нужен lsof (проверка занятых портов): без него показ мог бы пойти на старом стенде"; exit 1; }
 if lsof -nP -iTCP:"${STAND_PORT}" -sTCP:LISTEN > /dev/null 2>&1; then
   echo "порт стенда ${STAND_PORT} занят — остановите прошлый запуск (Ctrl+C в его терминале) или процесс:"; lsof -nP -iTCP:"${STAND_PORT}" -sTCP:LISTEN; exit 1
 fi
@@ -73,11 +74,13 @@ curl -sf "http://127.0.0.1:${STAND_PORT}/api/session" > /dev/null || { echo "с�
 echo "== интерфейс консоли на 127.0.0.1:5173"
 npm run dev -w @repracer/console > "${LOGS}/ui.log" 2>&1 &
 pids+=($!)
+# Отвечает именно наш интерфейс (его страница грузит /src/main.tsx), а не чужое приложение на том же порту (ревью шага 76, находка 11)
+ours() { curl -sf "http://127.0.0.1:5173/" 2> /dev/null | grep -q '/src/main.tsx'; }
 for _ in $(seq 1 60); do
-  curl -sf -o /dev/null "http://127.0.0.1:5173/" && break
+  ours && break
   sleep 1
 done
-curl -sf -o /dev/null "http://127.0.0.1:5173/" || { echo "интерфейс не поднялся — см. ${LOGS}/ui.log"; exit 1; }
+ours || { echo "интерфейс консоли не отвечает на 127.0.0.1:5173 — см. ${LOGS}/ui.log"; exit 1; }
 
 # Первые решения демо-мира: доказательство тени считает то, что уже случилось
 DEMO_TENANT="(SELECT tenant_id FROM tenant_data.tenant WHERE demo)"

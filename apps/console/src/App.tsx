@@ -100,9 +100,9 @@ export function WorldList({ worlds }: { worlds: readonly WorldSummary[] }) {
       <ul className="worlds">
         {worlds.map((w) => (
           <li key={w.id} className="card">
-            {/* Шаг 76 (предполётный прогон демо): демо открывается экраном тени — с него начинается показ; плотная таблица товаров
-                первым экраном ничего не объясняет зрителю. Мир продавца — по-прежнему с товаров */}
-            <h3><a href={href(w.id, w.demo ? 'shadow' : 'products')}>{w.title}</a></h3>
+            {/* Шаг 76 (предполётный прогон демо): демо в тени открывается экраном тени — с него начинается показ; экран входа выбирает
+                сервер (демо в бою и миры продавцов — товары) */}
+            <h3><a href={href(w.id, w.landing)}>{w.title}</a></h3>
             <p className="small muted">{w.description}</p>
             <p className="small">
               {w.demo ? <><Badge tone="warn">{m.ui.app.demoBadge}</Badge> · </> : null}
@@ -182,6 +182,13 @@ export function App() {
   const [loginNotice, setLoginNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const m = messagesFor(locale);
+
+  // Шаг 76 (ревью предполётного прогона, находка 2): заголовок вкладки и язык документа — на языке экрана; в index.html они были
+  // русскими («консоль продавца (стенд)», lang="ru"), и зритель из США видел кириллицу на вкладке
+  useEffect(() => {
+    document.documentElement.lang = locale;
+    document.title = m.ui.app.title;
+  }, [locale]);
 
   useEffect(() => {
     const onChange = () => setRoute(parseHash(window.location.hash));

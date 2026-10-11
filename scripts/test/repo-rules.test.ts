@@ -826,19 +826,39 @@ test('шаг 67: в очередь записей вставляют ровно 
  * Живые прогоны ходят через HTTP API и React не исполняют — пустую страницу увидел только проход показа браузером.
  */
 test('шаг 76: страница консоли не тянет встроенных модулей Node — интерфейс исполняется в браузере', async () => {
-  const { browserBuiltinChains, valueImports } = await import(new URL('scripts/browser-imports.mjs', root).href) as {
-    browserBuiltinChains(entries?: string[]): { found: { builtin: string; chain: string[] }[]; modules: number };
-    valueImports(source: string): string[];
+  type Problem = { kind: string; spec: string; chain: string[] };
+  const { browserImportProblems, valueImports } = await import(new URL('scripts/browser-imports.mjs', root).href) as {
+    browserImportProblems(entries?: string[]): { problems: Problem[]; reached: string[] };
+    valueImports(source: string, fileName?: string): string[];
   };
-  // Зубы [Р-94]: импорт значения из встроенного модуля виден, импорт типа и тип `typeof import(…)` — нет
-  assert.deepEqual(valueImports(`import { inflateRawSync } from 'node:zlib';\nimport x from "node:crypto";\nexport { a } from './a.ts';`), ['node:zlib', 'node:crypto', './a.ts']);
-  assert.deepEqual(valueImports(`import type { Pool } from 'pg';\nimport { type A, type B } from 'node:fs';\nexport type { C } from './c.ts';\nconst z = 1 as unknown as typeof import('node:zlib');`), []);
-  assert.deepEqual(valueImports(`import { type A, b } from './b.ts';\nimport 'node:fs';\nconst m = await import('node:os');`), ['./b.ts', 'node:fs', 'node:os']);
-  // Положительный контроль на настоящем графе: точка входа сервера консоли достигает модулей Node — обход видит пакеты рабочего пространства
-  assert.ok(browserBuiltinChains(['packages/pricing-pipeline/src/index.ts']).found.some((f) => f.builtin === 'node:crypto'),
-    'the walk must reach node:crypto from the decision path entry — otherwise it sees nothing');
-  const { found, modules } = browserBuiltinChains();
-  assert.ok(modules > 20, `the walk from the console page saw only ${modules} modules`);
-  assert.deepEqual(found.map((f) => `${f.builtin}: ${f.chain.join(' → ')}`), [],
-    'код страницы консоли импортирует модуль Node — в браузере страница будет пустой; возьмите значение из модуля без него (подпуть пакета)');
+  // Зубы [Р-94]: импорт значения виден; `import type`, `export type` и тип `typeof import(…)` — нет; импорт, где все имена — типы,
+  // остаётся (verbatimModuleSyntax пишет `import {} from 'x'`, модуль загружается — ревью шага 76, находка 6)
+  assert.deepEqual(valueImports(`import { inflateRawSync } from 'node:zlib';\nimport x from "node:crypto";\nexport { a } from './a.ts';\nexport * from './b.ts';`),
+    ['node:zlib', 'node:crypto', './a.ts', './b.ts']);
+  assert.deepEqual(valueImports(`import type { Pool } from 'pg';\nexport type { C } from './c.ts';\nconst z = 1 as unknown as typeof import('node:zlib');`), []);
+  assert.deepEqual(valueImports(`import { type A, type B } from 'node:fs';\nimport x, { type Y } from './y.ts';\nimport 'node:os';\nconst m = await import('node:path');`),
+    ['node:fs', './y.ts', 'node:os', 'node:path']);
+  // Строки и комментарии — не импорты (регулярное выражение первой редакции ловило «: { k: » в строке объяснения)
+  assert.deepEqual(valueImports(`const s = "import x from 'node:fs'"; /* import y from 'node:os' */ export type X = 1;\nexport { y } from './y.ts';`), ['./y.ts']);
+  // Обход пересекает границы пакетов: от страницы консоли — через @repracer/console-model в cost-import и подпуть pricing-pipeline
+  const { problems, reached } = browserImportProblems();
+  for (const f of ['packages/console-model/src/index.ts', 'packages/cost-import/src/table.ts', 'packages/pricing-pipeline/src/store.ts']) {
+    assert.ok(reached.includes(f), `the walk from the console page must reach ${f} — otherwise it does not follow workspace packages`);
+  }
+  // Положительный контроль через пакет: вход ДРУГОГО пакета (хранилище на PostgreSQL), импортирующего путь решения целиком, доходит до node:crypto
+  const viaPackage = browserImportProblems(['packages/pricing-store-pg/src/index.ts']).problems;
+  assert.ok(viaPackage.some((p) => p.kind === 'NODE_BUILTIN' && p.chain.some((c) => c.startsWith('packages/pricing-pipeline/src/'))),
+    'a node built-in reached through @repracer/pricing-pipeline from another package must be found');
+  assert.ok(viaPackage.some((p) => p.kind === 'NOT_A_BROWSER_PACKAGE' && p.spec === 'pg'), 'a Node-only external package (pg) must be found');
+  assert.deepEqual(problems.map((p) => `${p.kind} ${p.spec}: ${p.chain.join(' → ')}`), [],
+    'код страницы консоли импортирует модуль Node или серверный пакет — в браузере страница будет пустой; возьмите значение из модуля без него (подпуть пакета)');
+});
+
+/** Шаг 76 (ревью предполётного прогона, находка 2): страница консоли до первого кадра React — без кириллицы и русского языка документа */
+test('шаг 76: index.html консоли не говорит по-русски — заголовок вкладки и язык документа видит клиент', () => {
+  const page = read('apps/console/index.html');
+  assert.equal(/[А-Яа-яЁё]/.test(page), false, 'кириллица в index.html консоли: её видит клиент на вкладке браузера');
+  assert.match(page, /<html lang="(en|de)">/);
+  // Зубы [Р-94]: правило видит русский заголовок прежней редакции
+  assert.equal(/[А-Яа-яЁё]/.test('<title>repracer — консоль продавца (стенд)</title>'), true);
 });

@@ -444,7 +444,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         return [{
           id: e.id, title: e.title, description: '', failures: [], scopes: c.scopes, decisionsLastDay: c.decisionsLastDay,
           interventionsLastWeek: c.interventionsLastWeek, activeStops: c.activeStops, activeHalts: c.activeHalts, role: m.values[membership.role],
-          demo: c.demo, awaitingAccess: c.awaitingAccess, euStorefronts: c.euStorefronts, locale: c.locale, timeZone: c.timeZone,
+          demo: c.demo, awaitingAccess: c.awaitingAccess, euStorefronts: c.euStorefronts, locale: c.locale, timeZone: c.timeZone, landing: 'products',
         }];
       });
       // Р-154: список миров — счётчики агрегатом, без чтения состояния ни одного мира
@@ -462,6 +462,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           euStorefronts: c.euStorefronts,
           // Ревью шага 69, находка 5: язык демо — язык гостя, поэтому список его не называет; пояс — называет
           locale: display && !display.followsRequestLocale ? display.locale : null, timeZone: display?.timeZone ?? null,
+          landing: live.landing ?? 'products',
         };
       })), ...tenantRows]);
     }
@@ -1746,8 +1747,9 @@ async function main(): Promise<void> {
   const tokenSeconds = standTokenSecondsOf(process.env.REPRACER_STAND_TOKEN_SECONDS);
   // Шаг 76 (предполётный прогон демо): язык первого экрана стенда — как у развёрнутой консоли (`REPRACER_CONSOLE_LOCALE`); без него
   // зритель из США видел немецкий экран входа до нажатия «English»
+  // Как у развёрнутой консоли (config.ts): не задано — язык по умолчанию, задано — только de или en (ревью шага 76, находка 13)
   const consoleLocale = process.env.REPRACER_CONSOLE_LOCALE;
-  if (consoleLocale !== undefined && consoleLocale !== '' && !isLocale(consoleLocale)) throw new Error(`REPRACER_CONSOLE_LOCALE must be de or en, got ${consoleLocale}`);
+  if (consoleLocale !== undefined && !isLocale(consoleLocale)) throw new Error(`REPRACER_CONSOLE_LOCALE must be de or en, got ${consoleLocale}`);
   const defaultLocale = isLocale(consoleLocale) ? { defaultLocale: consoleLocale } : {};
   const simulator = issuer
     ? {
@@ -1820,6 +1822,7 @@ async function main(): Promise<void> {
   } else {
     // Стенд не включает ничего молча и ничего молча не пропускает: демо живёт только на PostgreSQL (ревью шага 34, находка 9)
     if (process.env.REPRACER_DEMO === 'on') throw new Error('REPRACER_DEMO=on needs PostgreSQL: set REPRACER_PG_URL (the demo tenant runs the real decision path)');
+    if (process.env.REPRACER_DEMO_ONLY === 'on') throw new Error('REPRACER_DEMO_ONLY=on needs the demo on PostgreSQL: set REPRACER_DEMO=on and REPRACER_PG_URL');
     const worlds = await buildStandWorlds();
     handle = createStandApi(worlds, { authenticator: createAuthenticator({ ...verify, directory: memoryStandDirectory(worlds) }), ...(simulator ? { simulator } : {}) }, { ...defaultLocale });
   }

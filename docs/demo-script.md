@@ -38,8 +38,9 @@ PGHOST=127.0.0.1 PGPORT=5432 PGUSER=<суперпользователь PostgreS
 находка 9). Прожатая неделя США — исключение, и честное: она идёт на виртуальных часах ПРОШЛОЙ недели до настоящего момента, решения
 ложатся в прошлые сутки, а дальше витрины США живут настоящим временем; подъём из-за неё дольше на 0,5–2 минуты. Kaufland — с момента
 запуска: конкурент с дрейфом двигает цену раз в 20 минут, первая волна цен — через ~40 минут, подрезчик отвечает на наши цены через
-15 минут, заказ приходит раз в 4 минуты. В проходе шага 64 первые изменения цены Kaufland появились через ~21 минуту; через час на
-экранах есть и изменения цен, и резервации. Перезапуск команды — новый мир с нуля.
+15 минут, заказ приходит раз в 4 минуты. Замер шага 76: первая резервация — на 5-й минуте после «Демо готово», первое изменение
+цены Kaufland — на 19-й (у шага 64 — на 21-й); через час на экранах есть и изменения цен, и резервации. Перезапуск команды — новый мир
+с нуля.
 
 В браузере: `http://127.0.0.1:5173` (не `localhost`) → экран входа уже по-английски → **Sign in as Owner** → одна карточка
 **Demo store (simulator)** с пометкой **Demo** → нажатие открывает сразу **Shadow mode**. Перезагрузка страницы (F5) — выход: токен
@@ -59,7 +60,7 @@ PGHOST=127.0.0.1 PGPORT=5432 PGUSER=<суперпользователь PostgreS
 every offer has three competitors — one drifting, one undercutting, one in price waves.», пометки **Demo** и **awaiting access: 1**
 (аккаунт Amazon ЕС ждёт доступа [Р-150]), счётчики «Owner · Offers 224 · decisions (24 h) … · interventions (7 days) …».
 
-**Внутри мира — баннер:** «Demo tenant: synthetic data, real path. Every amount is made up.»
+**Внутри мира — баннер:** «Demo workspace: synthetic data, real path. Every amount is made up.»
 
 Что сказать: это тот же продукт, что у вас будет, — только канал симулирован и цифры выдуманы.
 
@@ -149,7 +150,7 @@ psql -d repracer_demo -c "SELECT final_status, count(*) AS writes, count(dispatc
 - **Strategy:** «Proposed €18.41 (−0.5%)», «Price before €18.50», «Bounds at calculation €12.00 – €30.00».
 - **Price Gate:** «Price €18.41 approved within €12.00–€30.00» и список проверок: не остановлено человеком, границы заданы, пол маржи
   посчитан, не ниже пола, не выше потолка [Р-44, Р-83].
-- **Write to the channel:** «€18.41: held by shadow mode (not sent)». Причина: «Not sent: this channel connection is in shadow mode…».
+- **Write to the channel:** «€18.41: held by shadow mode (not sent)». Причина: «Not sent: this channel account is in shadow mode, so nothing is written to the channel…».
 - **Channel confirmation:** пропущено — записи не было.
 
 Что сказать:
@@ -160,6 +161,13 @@ psql -d repracer_demo -c "SELECT final_status, count(*) AS writes, count(dispatc
   decision keeps amounts taken from competitor prices for 3 days, so they are no longer shown; the full snapshot is linked in the
   snapshot step.» (шаг 68, K11);
 - решение без изменения цены хранит только код причины [Р-74], поэтому для показа берите строку с исходом **Approved**.
+
+**Границы — только у amazon.com.** Рядом с подписью предложения на экране решения — ссылка **«Bounds and floor»** (шаг 76): разбивка пола
+до цента. У товара amazon.com она отвечает на вопрос «что помешает продать ниже себестоимости»: себестоимость $5.00, пол маржи $6.85
+(минимальная маржа 12 %), действующий пол $14.00 = min_price, маржа на полу +$6.90. **У товаров Kaufland демо минимальная маржа не
+задана**: пол = min_price €12.00 при себестоимости €10.75, и экран честно покажет маржу на полу −€2.47. Если зритель откроет её сам —
+это ответ, а не сбой: «без минимальной маржи пол — только min_price, который вы задали; экран видит убыток до цента; задайте минимальную
+маржу — и пол поднимется до неё, а цену ниже пола движок поднимет сам» (Р-207). Отложено в [deferred.md](deferred.md).
 
 ## в. Три стоп-крана (2 мин)
 
