@@ -12,11 +12,15 @@ export function DangerousScreenView({ view }: { view: DangerousReportView }) {
   return (
     <section>
       <h2>{d.pageTitle}</h2>
+      <p className="subtitle">{m.ui.app.subtitles.dangerous}</p>
       <nav className="tabs small">
         {PERIODS.map((p) => <a key={p} href={href(view.worldId, 'dangerous', String(p))} className={p === view.days ? 'active' : ''}>{d.period(p)}</a>)}
       </nav>
-      <p className="headline">{view.headline}</p>
-      <p className="muted small">{view.from} – {view.to}</p>
+      {/* Шаг 79: итог периода — карточкой-сводкой */}
+      <section className="card summary-card">
+        <p className="headline">{view.headline}</p>
+        <p className="muted small">{view.from} – {view.to}</p>
+      </section>
       {view.truncated ? <p className="notice">{d.truncated}</p> : null}
       <h3>{d.floorTitle}</h3>
       {view.floorHolds.count === 0 ? <p className="muted empty">{d.none}</p> : (
@@ -41,7 +45,7 @@ export function DangerousScreenView({ view }: { view: DangerousReportView }) {
         </div>
       )}
       <h3>{d.gateTitle}</h3>
-      <p className="muted">{view.gateHeadline}</p>
+      <p className="section-sub">{view.gateHeadline}</p>
       {view.count === 0 ? <p className="muted empty">{d.none}</p> : (
         <>
           <div className="cards">
@@ -77,5 +81,5 @@ export function DangerousScreenView({ view }: { view: DangerousReportView }) {
 export function DangerousScreen({ worldId, days }: { worldId: string; days: number }) {
   const m = useMessages();
   const [resource, retry] = useResource<DangerousReportView>(`${worldPath(worldId, 'dangerous')}?days=${days}`, m.locale);
-  return <Load resource={resource} retry={retry}>{(view) => <DangerousScreenView view={view} />}</Load>;
+  return <Load shape="table" resource={resource} retry={retry}>{(view) => <DangerousScreenView view={view} />}</Load>;
 }

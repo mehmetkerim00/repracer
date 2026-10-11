@@ -285,7 +285,7 @@ test('шаг 64: английский и немецкий словари без 
   for (const sample of ["KAUFLAND: 'the offer (id_offer, Р-35)'", '(OQ-77)', 'not confirmed (A-16)', 'a second factor (0078)', 'since step 28', 'the remainder of risk 17', 'seit Schritt 28', 'Rest von Risiko 17']) {
     assert.ok(hasRef(sample), sample);
   }
-  for (const [file, loading] of [['en.ts', 'Loading…'], ['de.ts', 'Standdaten werden geladen']] as const) {
+  for (const [file, loading] of [['en.ts', 'Loading…'], ['de.ts', 'Daten werden geladen']] as const) {
     const source = readFileSync(new URL(`./i18n/${file}`, import.meta.url), 'utf8');
     const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
     assert.ok(code.includes(loading), `${file}: после снятия комментариев тексты словаря остались`);
@@ -323,6 +323,8 @@ export const GLOSSARY_FORBIDDEN: Readonly<Record<'en' | 'de', ReadonlyArray<{ pa
     { pattern: /\barticles?\b/i, use: 'product' },
     { pattern: /\bchannel connections?\b/i, use: 'channel account' },
     { pattern: /\bstand\b(?! still)/i, use: 'server (the stand is a test bench)' },
+    // Шаг 79: себестоимость — одно слово «unit cost» на всех экранах (визуальное ревью нашло «cost price» на импорте)
+    { pattern: /\bcost prices?\b|\bproduct costs?\b/i, use: 'unit cost' },
   ],
   de: [
     { pattern: /\bMandant(en|in)?\b|Mandanten-?[Ss]topp/, use: 'Arbeitsbereich' },
@@ -333,7 +335,9 @@ export const GLOSSARY_FORBIDDEN: Readonly<Record<'en' | 'de', ReadonlyArray<{ pa
     { pattern: /\bVerkäuferkont(o|en|os)\b|\bHändlerkont(o|en|os)\b/, use: 'Arbeitsbereich oder Kanalkonto' },
     { pattern: /\bKanalverbindung(en)?\b/, use: 'Kanalkonto' },
     { pattern: /\bKanal-Kont(o|os|en)\b/, use: 'Kanal-Backoffice (Verkäuferbereich des Kanals) oder Kanalkonto' },
-    { pattern: /\bStand(es|s)?\b|Standzeit/, use: 'Server (der Stand ist ein Prüfstand)' },
+    { pattern: /\bStand(es|s)?\b|Standzeit|Standdaten/, use: 'Server (der Stand ist ein Prüfstand)' },
+    // Шаг 79: три слова для одной суммы на штуку (Selbst-, Einstands-, Stückkosten) — остаётся одно
+    { pattern: /Selbstkosten|Einstandskosten|Einstandspreis/, use: 'Stückkosten' },
   ],
 };
 const EBAY_LISTING = /\blistings?\b/i;
@@ -406,10 +410,11 @@ test('шаг 69 (K9): словари EN и DE говорят терминами 
   const en = (s: string) => glossaryViolations('en', [s]).length;
   const de = (s: string) => glossaryViolations('de', [s]).length;
   for (const bad of ['the whole tenant', 'Your seller account is ready', 'the account group stop', 'read from the marketplace', 'channel units in sync', 'the item may break',
-    'one article', 'Open the channel connections', 'The stand is unavailable', 'Check the listing in the channel']) assert.equal(en(bad), 1, bad);
+    'one article', 'Open the channel connections', 'The stand is unavailable', 'Check the listing in the channel', 'Import cost prices', 'enter the product cost']) assert.equal(en(bad), 1, bad);
   for (const ok of ['the unit cost of this offer', 'prices stand still', 'older eBay listings', 'edits this listing through the Trading API', 'Workspace: Demo']) assert.equal(en(ok), 0, ok);
   for (const bad of ['den gesamten Mandanten', 'ein Mandanten-Stopp', 'Rechner des Marktplatzes', 'neue Einheiten', 'Kanaleinheiten im Abgleich', 'ein Artikel hier',
-    'Ihr Verkäuferkonto ist da', 'dieses Händlerkonto ist verbunden', 'Öffnen Sie die Kanalverbindungen', 'im Kanal-Konto prüfen', 'Fehler des Stands.']) assert.equal(de(bad), 1, bad);
+    'Ihr Verkäuferkonto ist da', 'dieses Händlerkonto ist verbunden', 'Öffnen Sie die Kanalverbindungen', 'im Kanal-Konto prüfen', 'Fehler des Stands.',
+    'Standdaten werden geladen', 'Selbstkosten importieren', 'ohne Einstandskosten']) assert.equal(de(bad), 1, bad);
   for (const ok of ['Kanalkonto verbinden', 'im Kanal-Backoffice prüfen', 'Ihre Stückkosten sind ein Betrag', 'Das Angebot steht still']) assert.equal(de(ok), 0, ok);
   // Разбор исходника: подстановки шаблона и комментарии не считаются текстом, тексты-функции — считаются
   assert.deepEqual(dictionaryTexts("/* tenant */ a: (t: string) => `Your ${t} tenant`, // tenant\n b: 'x y'"), ['Your   tenant', 'x y']);

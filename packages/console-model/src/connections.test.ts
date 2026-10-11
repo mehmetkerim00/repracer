@@ -218,7 +218,8 @@ test('step 64: a stock quantity held by shadow mode is not shown as sent, and no
     const c = channelCell(held as never, messagesFor(locale));
     assert.ok(c.sentText.startsWith(expected[locale]), c.sentText);
     assert.ok(!c.sentText.includes('SHADOW_HELD'), c.sentText);
-    assert.equal(c.tone, 'off');
+    // Шаг 79: тень — янтарным, как на всех экранах; тревожного красного по-прежнему нет
+    assert.equal(c.tone, 'warn');
   }
   // Контроль: отправленная запись по-прежнему «отправлена»
   const sent = channelCell({ ...held, sent: { ...held.sent, status: 'APPLIED' } } as never, messagesFor('en'));

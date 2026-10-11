@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { BulkJobView, StockDivergencesView, StockReturnsView, StockView } from '@repracer/console-model';
 import type { ListQuery } from '@repracer/console-model';
 import { ApiError, requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, ErrorBox, errorText, Gaps, href, Load, Pager, useMessages, Intro } from '../components.tsx';
+import { Badge, ErrorBox, errorText, FileDrop, Gaps, href, Load, Pager, useMessages, Intro } from '../components.tsx';
 import { JobProgress } from './Jobs.tsx';
 
 /**
@@ -63,7 +63,7 @@ export function StockScreen({ worldId }: { worldId: string }) {
   });
 
   return (
-    <Load resource={view} retry={retry}>
+    <Load shape="table" resource={view} retry={retry}>
       {(v) => (
         <>
           <StockScreenView view={v} worldId={worldId} query={query} onQuery={setQuery} onFilter={(f) => { setFilter(f); setQuery({ ...query, offset: 0 }); }} />
@@ -83,7 +83,7 @@ export function StockScreen({ worldId }: { worldId: string }) {
                 <option value="">—</option>
                 {v.sources.filter((s) => s.mode === 'INTERNAL_POOL').map((s) => <option key={s.stockSourceId} value={s.stockSourceId}>{s.name}</option>)}
               </select>
-              <input type="file" accept=".csv,.xlsx,text/csv" onChange={(e) => void choose(e.currentTarget)} />
+              <FileDrop label={m.ui.stock.importFile.chooseFile} fileName={file ? file.name : null} onChoose={(input) => void choose(input)} />
               <button type="button" onClick={importFile} disabled={!file || sourceId === '' || job !== null}>{m.ui.stock.importFile.submit}</button>
               {job ? <JobProgress worldId={worldId} jobId={job.jobId} onFinished={() => { setJob(null); refresh(); }} /> : null}
               <h3>{m.ui.stock.enable.title}</h3>
@@ -98,12 +98,12 @@ export function StockScreen({ worldId }: { worldId: string }) {
                 </div>
               ))}
             </section>
-          ) : <p className="muted">{m.ui.stock.noRight}</p>}
-          <Load resource={divergences} retry={retryDivergences}>{(d) => <StockDivergences view={d} />}</Load>
+          ) : <p className="notice">{m.ui.stock.noRight}</p>}
+          <Load shape="table" resource={divergences} retry={retryDivergences}>{(d) => <StockDivergences view={d} />}</Load>
           <StockReturns worldId={worldId} onDecided={refresh} />
           {message ? <p className="notice" role="status">{message}</p> : null}
           {error ? <ErrorBox message={error} onRetry={refresh} /> : null}
-          {error && toConnections ? <p><a href={href(worldId, 'connections')}>{m.ui.app.screens.connections}</a></p> : null}
+          {error && toConnections ? <p className="back"><a href={href(worldId, 'connections')}>{m.ui.app.screens.connections}</a></p> : null}
         </>
       )}
     </Load>
@@ -125,18 +125,22 @@ export function StockScreenView({ view: v, worldId, query, onQuery, onFilter }: 
       {/* Шаг 77: пометку демо даёт полоса под шапкой на каждом экране мира [Р-151] — второй баннер на экране не нужен */}
       <Intro text={v.intro} />
       {/* Шаг 64: у пустого экрана — не строка нулей, а объяснение ниже */}
-      {v.rows.length > 0 ? <p><strong>{v.summaryText}</strong></p> : null}
-      {v.sources.length === 0 ? <p className="notice">{m.ui.onboarding.empty.stock} <a href={href(worldId, 'onboarding')}>{m.ui.onboarding.empty.startHere}</a></p>
-        : <ul className="small">{v.sources.map((s) => <li key={s.stockSourceId}>{s.name} — {s.modeText}; {s.productsText}{s.hasKey ? `; ${t.sources.keyPresent}` : ''}</li>)}</ul>}
+      {v.sources.length === 0 ? <p className="notice">{m.ui.onboarding.empty.stock} <a href={href(worldId, 'onboarding')}>{m.ui.onboarding.empty.startHere}</a></p> : (
+        // Шаг 79: итоги и источники — карточкой над таблицей, а не текстом на фоне страницы
+        <div className="toolbar stock-summary">
+          {v.rows.length > 0 ? <strong>{v.summaryText}</strong> : null}
+          <ul className="small plain">{v.sources.map((s) => <li key={s.stockSourceId}>{s.name} — {s.modeText}; {s.productsText}{s.hasKey ? `; ${t.sources.keyPresent}` : ''}</li>)}</ul>
+        </div>
+      )}
       {onFilter && (v.rows.length > 0 || v.filter.matchedText) ? (
-        <form className="filters" onSubmit={(e) => { e.preventDefault(); onFilter({ search: search.trim(), withReservations }); }}>
+        <form className="filters toolbar" onSubmit={(e) => { e.preventDefault(); onFilter({ search: search.trim(), withReservations }); }}>
           <input type="search" value={search} placeholder={t.filter.search} aria-label={t.filter.search} onChange={(e) => setSearch(e.currentTarget.value)} />
           <label><input type="checkbox" checked={withReservations} onChange={(e) => { setWithReservations(e.currentTarget.checked); onFilter({ search: search.trim(), withReservations: e.currentTarget.checked }); }} /> {t.filter.withReservations}</label>
           <button type="submit">{t.filter.apply}</button>
           {v.filter.matchedText ? <button type="button" onClick={() => { setSearch(''); setWithReservations(false); onFilter({ search: '', withReservations: false }); }}>{t.filter.reset}</button> : null}
         </form>
       ) : null}
-      {v.filter.matchedText ? <p className="small muted">{v.filter.matchedText}</p> : null}
+      {v.filter.matchedText ? <p className="section-sub">{v.filter.matchedText}</p> : null}
       {v.filter.noneText ? <p className="notice">{v.filter.noneText}</p> : null}
       {v.rows.length > 0 ? (
         <div className="table-wrap">
@@ -148,13 +152,15 @@ export function StockScreenView({ view: v, worldId, query, onQuery, onFilter }: 
                 <td className="product">{r.label}{r.label !== r.sku ? <span className="small muted nowrap"> · {r.sku}</span> : null}{r.gtin ? <span className="small muted nowrap"> · {r.gtin}</span> : null}</td>
                 <td className="num">{r.onHand}</td><td className="num">{r.reserved}</td><td className="num money">{r.available}</td>
                 <td>
-                  {r.channelManaged.length > 0 ? <ul className="small muted">{r.channelManaged.map((text, i) => <li key={i}>{text}</li>)}</ul> : null}
+                  {r.channelManaged.length > 0 ? <ul className="small muted plain">{r.channelManaged.map((text, i) => <li key={i}>{text}</li>)}</ul> : null}
                   {r.channels.length === 0 ? (r.channelManaged.length > 0 ? null : <span className="muted">—</span>) : (
-                    <ul className="small">
+                    <ul className="small plain stock-channels">
                       {r.channels.map((c) => (
                         <li key={c.writeScopeId}>
-                          <Badge tone={c.tone}>{c.label}</Badge> {c.sharedText ? <em>{c.sharedText}; </em> : null}
-                          {c.syncEnabled ? <>{t.channel.published(c.published)}; {c.sentText}; {c.confirmedText}</> : c.awaitingAck ? t.channel.awaitingAck : t.channel.off}
+                          {/* Шаг 79 (ревью): витрина — текстом, состояние — пилюлей своего цвета; подробности — строкой ниже */}
+                          <span className="channel-name">{c.label}</span> <Badge tone={c.tone}>{c.statusText}</Badge>
+                          <div className="muted">{c.sharedText ? <em>{c.sharedText}; </em> : null}
+                            {c.syncEnabled ? <>{t.channel.published(c.published)}; {c.sentText}; {c.confirmedText}</> : c.awaitingAck ? t.channel.awaitingAck : t.channel.off}</div>
                           {c.divergedText ? <p className="error">{c.divergedText}</p> : null}
                         </li>
                       ))}
@@ -165,10 +171,11 @@ export function StockScreenView({ view: v, worldId, query, onQuery, onFilter }: 
             ))}
           </tbody>
         </table>
+        {/* Шаг 79: чего экран не видит — подвалом таблицы, а не текстом на фоне страницы */}
+        <p className="table-foot">{v.cannot}</p>
         </div>
-      ) : null}
+      ) : <p className="notice">{v.cannot}</p>}
       <Pager page={v.page} query={query} onQuery={onQuery} />
-      <p className="small muted">{v.cannot}</p>
       <Gaps gaps={v.gaps} />
     </section>
   );
@@ -205,7 +212,7 @@ export function StockReturns({ worldId, onDecided }: { worldId: string; onDecide
       .finally(() => { setBusy(null); retry(); onDecided(); });
   };
   return (
-    <Load resource={view} retry={retry}>
+    <Load shape="table" resource={view} retry={retry}>
       {(v) => <StockReturnsList view={v} notes={notes} busy={busy} onNote={(id, text) => setNotes((n) => ({ ...n, [id]: text }))} onDecide={decide} message={message} error={error} onRetry={retry} />}
     </Load>
   );

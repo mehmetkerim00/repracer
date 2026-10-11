@@ -95,6 +95,11 @@ export async function startDemoWorld(options: DemoWorldOptions): Promise<Running
       { userId: seeded.userId, mfa: true });
     if (saved.status !== 'SAVED') throw new Error(`demo tenant display settings refused: ${saved.status}`);
   }
+  // Шаг 79: демо настроено целиком — путь онбординга «остатки и цены» выбран, как его выбрал бы продавец; иначе экран Setup
+  // спрашивал «что сделать сначала», когда цены уже работают, и выбранный путь нечем было показать
+  const pathSaved = await store.saveOnboardingProgress(seeded.tenantId, { path: 'STOCK_AND_PRICING' },
+    { membershipId: seeded.ownerMembershipId, userId: seeded.userId, mfa: true });
+  if (pathSaved !== 'SAVED') throw new Error(`demo onboarding path refused: ${pathSaved}`);
   const stock = new PgStockStore({ adminPool: pools.admin, stockPool: pools.stock });
   const stockPipeline = createStockPipeline({
     store: stock, now: () => demo.clock.iso() as never, sleep: demo.clock.sleep,

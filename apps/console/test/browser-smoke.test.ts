@@ -87,10 +87,24 @@ test('step 76: the console page runs in a real browser — sign-in, workspace li
   await b.click((await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`)));
   await settled(b, 'products');
   const world = worldLink.split('/')[2]!;
+  /**
+   * Шаг 79 (визуальное ревью, находка 1): у широкой таблицы последняя колонка закреплена справа, и всё, что шире окна, уходило ПОД неё —
+   * статус предложения и причина в лентах не были видны. Правило [Р-146]: при окне 1440 таблица с закреплённой колонкой помещается в свою рамку
+   */
+  const stickyTables = () => b.evaluate<Array<{ table: number; wrap: number }>>(
+    `[...document.querySelectorAll('.table-wrap')].filter((w) => w.querySelector('table.sticky-end')).map((w) => ({ table: w.querySelector('table').scrollWidth, wrap: w.clientWidth }))`);
   for (const screen of ['products', 'decisions', 'strategies', 'feed', 'rejected', 'bounds', 'stop', 'stock', 'jobs']) {
     await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${screen}`)}, true)`);
     await settled(b, screen);
+    for (const t of await stickyTables()) assert.ok(t.table <= t.wrap + 1, `${screen}: the table is ${t.table}px wide in a ${t.wrap}px frame — columns hide under the pinned action column`);
   }
+  // Положительный контроль правила: в суженной рамке та же таблица товаров обязана НЕ поместиться — иначе проверка выше ничего не мерит
+  await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/products`)}, true)`);
+  await settled(b, 'products (control)');
+  assert.ok((await stickyTables()).length > 0, 'the products screen of the smoke world has a table with a pinned column');
+  await b.evaluate(`(document.querySelector('.table-wrap').style.width = '480px', true)`);
+  const squeezed = await stickyTables();
+  assert.ok(squeezed[0]!.table > squeezed[0]!.wrap + 1, `control: a 480px frame must overflow — ${JSON.stringify(squeezed)}`);
   // Положительный контроль сборщика ошибок: исключение страницы им видно — иначе пустой список ниже ничего не значит [Р-94]
   await b.evaluate(`(setTimeout(() => { throw new Error('smoke control'); }), true)`);
   for (let i = 0; i < 50 && !b.errors().some((e) => e.includes('smoke control')); i++) await new Promise((r) => setTimeout(r, 100));

@@ -87,7 +87,8 @@ async function pollJob(jobId: string): Promise<BulkJobView> {
 }
 
 // Шаг 78: границы цены называются словами («Mindestpreis»), а не кодами — правило держит и слова
-const NO_PRICING_WORDS = /Strateg|Selbstkosten|Einstandspreis|Grenzen|Repricing|Preisregel|min_price|max_price|Mindestpreis|Höchstpreis|minimum price|maximum price/;
+// Шаг 79: себестоимость на экранах — «unit cost» / «Stückkosten»; прежние слова остаются, чтобы правило не ослабло на старом тексте
+const NO_PRICING_WORDS = /Strateg|Stückkosten|Selbstkosten|Einstandskosten|Einstandspreis|[Uu]nit cost|[Cc]ost price|Grenzen|Repricing|Preisregel|min_price|max_price|Mindestpreis|Höchstpreis|minimum price|maximum price/;
 
 before(async () => {
   db = await createIsolatedDatabase('stockonly');
@@ -215,7 +216,8 @@ test('Р-152: путь «только остатки» — от выбора п�
 
   // 4. Ловушка канала названа ДО включения; включение с буфером 2
   let stockScreen = (await step<StockView>('экран остатков', 'GET', api('stock'))).body;
-  assert.ok(stockScreen.traps.some((t) => t.channel === 'KAUFLAND' && /id_offer/.test(t.text)), 'ловушка Kaufland названа до записи');
+  // Шаг 79: ключ канала назван словами («Kaufland offer ID»), а не именем поля API
+  assert.ok(stockScreen.traps.some((t) => t.channel === 'KAUFLAND' && /offer ID|Angebots-ID/.test(t.text)), 'ловушка Kaufland названа до записи');
   assert.deepEqual([stockScreen.summary.products, stockScreen.summary.withStock, stockScreen.summary.synced], [DEMO_OFFERS, DEMO_OFFERS, 0]);
 
   /**

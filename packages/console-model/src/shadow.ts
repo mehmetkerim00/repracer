@@ -1,7 +1,8 @@
 import { can } from '@repracer/pricing-model';
 import type { MarketplaceProperty, ShadowAccountRow, ShadowPage, ShadowSummary, ShadowWriteRow } from '@repracer/pricing-store-pg';
-import { channelLimitText } from './connections.ts';
+import { accountState, channelLimitText } from './connections.ts';
 import type { Messages } from './i18n/index.ts';
+import { zoneName } from './i18n/shape.ts';
 import { pageInfo, type ListQuery, type PageInfo } from './page.ts';
 import { gap, storefrontName, type Gap, type StandWorld } from './world.ts';
 
@@ -23,6 +24,12 @@ export interface ShadowAccountView extends ShadowAccountRow {
   canGoShadow: boolean;
   /** Шаг 49 [Р-190, E-21]: чего на этом канале в бою пока не видно — до кнопки «включить бой», словами */
   channelLimitText: string | null;
+  /**
+   * Шаг 79 (отложенное шага 76): аккаунт без доступа [Р-150] или с отозванным доступом писать не может ни в каком режиме —
+   * поля «включить бой» у него нет, вместо него состояние доступа и куда идти
+   */
+  accessText: string | null;
+  accessHint: string | null;
 }
 
 export interface ShadowWriteView extends ShadowWriteRow {
@@ -188,14 +195,15 @@ export function shadowSummaryLines(summary: ShadowSummary, m: Messages): string[
   ];
 }
 
-const propertyView = (p: MarketplaceProperty, m: Messages): MarketplacePropertyView => {
+const propertyView = (p: MarketplaceProperty, m: Messages, now: string): MarketplacePropertyView => {
   const t = m.ui.shadow.properties;
   return {
     marketplace: p.marketplace,
     storefrontText: storefrontName(p.channel, p.marketplace, m),
     propertyText: t.names[p.property] ?? p.property,
     // Шаг 68 (K2): значение словами — «net, sales tax added at checkout», а не «NET / SALES_TAX_EXCLUDED»
-    valueText: p.value === null ? t.unknownValue : t.valueWords[p.value] ?? p.value,
+    // Шаг 79: граница суток — пояс словами («Central European Time (UTC+2)»), а не код IANA
+    valueText: p.value === null ? t.unknownValue : p.property === 'DAY_BOUNDARY' && p.value.includes('/') ? zoneName(m.locale, p.value, now) : t.valueWords[p.value] ?? p.value,
     statusText: t.statuses[p.status] ?? p.status,
     // Шаг 69 [Р-204]: неизвестная граница суток закрывается неделей тени и решением команды платформы — так экран и говорит
     closesByText: p.property === 'DAY_BOUNDARY' && p.status === 'UNKNOWN' ? t.dayBoundaryProcess : t.closesBy[p.closesBy] ?? p.closesBy,
@@ -207,6 +215,8 @@ const propertyView = (p: MarketplaceProperty, m: Messages): MarketplacePropertyV
 function accountView(a: ShadowAccountRow, world: StandWorld, m: Messages): ShadowAccountView {
   const t = m.ui.shadow;
   const channelName = (m.values as Record<string, string | undefined>)[a.channel] ?? a.channel;
+  const state = accountState(a);
+  const noAccess = state === 'AWAITING_ACCESS' || state === 'REVOKED' ? state : null;
   return {
     ...a,
     label: `${channelName} · ${a.displayName ?? a.externalAccountId}`,
@@ -214,9 +224,11 @@ function accountView(a: ShadowAccountRow, world: StandWorld, m: Messages): Shado
     changedText: a.changedAt === null ? null : t.changed(a.changedFrom === 'SHADOW' ? t.modes.SHADOW : t.modes.LIVE, m.when(a.changedAt)),
     confirmationHint: t.confirmationHint(a.externalAccountId),
     // Включить бой может только владелец [Р-170]; вернуть в тень — он же и администратор
-    canGoLive: a.writeMode === 'SHADOW' && world.viewer.role === 'OWNER',
+    canGoLive: noAccess === null && a.writeMode === 'SHADOW' && world.viewer.role === 'OWNER',
     canGoShadow: a.writeMode === 'LIVE' && can(world.viewer.role, 'MANAGE_TENANT'),
     channelLimitText: channelLimitText(a.channel, m),
+    accessText: noAccess === null ? null : m.ui.connections.states[noAccess] ?? null,
+    accessHint: noAccess === null ? null : t.noAccess[noAccess],
   };
 }
 
@@ -242,7 +254,7 @@ export function shadowView(world: StandWorld, page: ShadowPage, query: ListQuery
   return {
     worldId: world.id, demo: world.demo === true, intro: t.intro,
     periods: SHADOW_PERIOD_DAYS.map((d) => ({ days: d, label: t.period(d), active: d === days })),
-    properties: page.properties.map((p) => propertyView(p, m)),
+    properties: page.properties.map((p) => propertyView(p, m, world.now)),
     /**
      * Р-172: если бой закрыт неизвестным свойством, экран говорит это ДО нажатия кнопки. Иначе продавец нажимает,
      * получает отказ базы и решает, что сломано.

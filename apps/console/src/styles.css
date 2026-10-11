@@ -85,7 +85,11 @@ main.page.world { max-width: none; margin: 0; padding: 0; display: flex; flex-di
 .world-content section > p.muted:not(.empty), .world-content > p.muted:not(.empty) { max-width: 860px; }
 /* подзаголовок страницы — одно предложение вступления, остальное по «Learn more» (шаг 78) */
 p.subtitle { color: var(--text-2); max-width: 860px; margin: calc(-1 * var(--space-1)) 0 var(--space-3); }
-p.subtitle button.link { margin-left: var(--space-1); }
+p.subtitle button.link { margin-left: 0; }
+/* выбранный путь онбординга — акцентной рамкой (шаг 79) */
+.choice.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow); }
+.choice h3 .badge { margin-left: var(--space-2); }
+.awaiting-note { color: var(--warning); margin: 0 0 var(--space-1); }
 /* «с чего продолжить» в онбординге — заголовок раздела, а не серое поле */
 p.notice.resume { background: none; border: 0; padding: 0; margin: var(--space-4) 0 var(--space-2); font-size: 16px; color: var(--text); }
 
@@ -230,6 +234,44 @@ tbody tr:last-child td { border-bottom: 0; }
 .card table:last-child tbody tr:last-child td { border-bottom: 0; }
 td.cell .muted, .cell .muted { margin-top: 2px; max-width: 280px; font-size: var(--font-size-sm); }
 /* колонка предложения и причины держат читаемую ширину: таблица шире экрана листается внутри своей рамки */
+/* шаг 79: зебра у всех таблиц — глаз держит строку */
+tbody tr:nth-child(even) td { background: #FBFBFD; }
+tbody tr:hover td { background: var(--row-hover); }
+/* закреплённые колонки (предложение слева, ссылка справа) — с той же зеброй, они непрозрачны */
+table.products tbody tr:nth-child(even) td.offer, table.sticky-end tbody tr:nth-child(even) td:last-child { background: #FBFBFD; }
+table.products tbody tr:hover td.offer, table.sticky-end tbody tr:hover td:last-child { background: var(--row-hover); }
+/* шапка внутри рамки таблицы: итоги, счётчики и действия над строками */
+.table-head {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4);
+  padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border); color: var(--text-2); position: sticky; left: 0;
+  /* шаг 79 (ревью): липкая шапка — свой слой; меню колонок из неё ложится поверх строк и закреплённых колонок таблицы */
+  z-index: 5;
+}
+.table-head .buttons { margin: 0; }
+.table-foot { margin: 0; padding: var(--space-2) var(--space-4) var(--space-3); color: var(--text-2); font-size: var(--font-size-sm); border-top: 1px solid var(--divider); position: sticky; left: 0; }
+/* панель над содержимым: фильтры, выбор, итоги — карточкой, а не текстом на фоне страницы */
+.toolbar {
+  display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-3) var(--space-4); padding: var(--space-3) var(--space-4);
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow);
+}
+.toolbar > * { margin: 0; }
+/* соседние блоки экрана — карточки, панели, таблицы, уведомления — с одинаковым зазором */
+:is(.card, .toolbar, .table-wrap, .notice, p.empty, .error, .cards, ul.link-list) + :is(.card, .toolbar, .table-wrap, .notice, p.empty, .error, .cards, ul.link-list) { margin-top: var(--space-3); }
+/* шаг 79 (ревью): в сетках зазор даёт gap — правило соседей выше не должно поднимать первую карточку над остальными */
+:is(.cards, .worlds, .stats, .choices) > :is(.card, .toolbar, .table-wrap, .notice, p.empty, .error, .cards, ul.link-list) { margin-top: 0; }
+.toolbar.filters { align-items: flex-start; }
+.toolbar .toolbar-end { margin-left: auto; align-self: flex-end; }
+.toolbar.form > button { margin-top: 20px; }
+.toolbar.stock-summary { flex-direction: column; gap: var(--space-1); }
+ul.plain { list-style: none; padding: 0; margin: 0; color: var(--text-2); }
+ul.plain.cost-lines { color: var(--text); }
+ul.plain.cost-lines li, ul.fee-estimates.plain li { padding: 2px 0; }
+ul.fee-estimates.plain { margin-top: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--divider); }
+/* подзаголовок раздела и строка «назад» — заголовочная часть, а не текст на фоне */
+.summary-card p.headline { margin: 0 0 var(--space-1); }
+.summary-card .groups { margin: var(--space-2) 0 0; }
+p.section-sub { color: var(--text-2); max-width: 860px; margin: calc(-1 * var(--space-1)) 0 var(--space-3); font-size: var(--font-size-sm); }
+p.back { margin: 0 0 var(--space-1); font-size: var(--font-size-sm); }
 td.offer { min-width: 180px; }
 td.product { min-width: 380px; }
 td .reason { min-width: 260px; max-width: 420px; }
@@ -240,11 +282,18 @@ table.dense th, table.dense td { padding-left: 10px; padding-right: 10px; }
 table.dense td.offer { min-width: 150px; }
 table.dense td .reason { min-width: 180px; }
 /* у широкой таблицы последняя колонка (ссылка на решение, действия) закреплена справа: таблица листается, ссылка остаётся на экране */
-table.sticky-end th:last-child, table.sticky-end td:last-child { position: sticky; right: 0; z-index: 1; background: var(--surface); box-shadow: -1px 0 0 var(--divider); }
+/* шаг 79 (ревью): тень слева у закреплённой колонки — видно, что под ней листается содержимое */
+table.sticky-end th:last-child, table.sticky-end td:last-child { position: sticky; right: 0; z-index: 1; background: var(--surface); box-shadow: -1px 0 0 var(--divider), -10px 0 10px -10px rgba(15, 23, 42, 0.22); }
 table.sticky-end th:last-child { z-index: 3; background: var(--surface-muted); }
 table.sticky-end tbody tr:hover td:last-child { background: var(--row-hover); }
 table.dense td .reason { max-width: 300px; }
 td.actions { white-space: nowrap; }
+/* граница в ленте остановленных — «your minimum price $14.00» в две строки, а не в четыре (шаг 79) */
+td.bound { min-width: 130px; }
+/* причины отказа включения — красными маркерами (шаг 79) */
+ul.problems li::marker { color: var(--danger); }
+/* строка экрана различий, требующая внимания, — янтарной чертой слева у предложения (шаг 79) */
+td.offer.attention { box-shadow: inset 3px 0 0 var(--warning); }
 td.pills { min-width: 170px; }
 td.pills .badge { margin: 0 var(--space-1) var(--space-1) 0; }
 table.dense th { white-space: normal; }
@@ -265,14 +314,36 @@ table.products .cell { cursor: help; }
 table.products td.offer, table.products th:first-child { position: sticky; left: 0; z-index: 1; background: var(--surface); box-shadow: 1px 0 0 var(--divider); }
 table.products th:first-child { z-index: 3; background: var(--surface-muted); }
 table.products tbody tr:hover td.offer { background: var(--row-hover); }
-/* шаг 78: лёгкая зебра — глаз держит строку на 11 колонках */
-table.products tbody tr:nth-child(even) td { background: #FBFBFD; }
-table.products tbody tr:hover td { background: var(--row-hover); }
 .product-ref { font-size: var(--font-size-xs); color: var(--text-3); margin-top: 2px; }
+/* откуда пол — пояснение переносится, а не раздвигает таблицу */
+td.floor .floor-parts { white-space: normal; min-width: 120px; max-width: 200px; margin-left: auto; }
+/* шаг 79: вид таблицы товаров — выбор колонок (меню) и компактные строки */
+.view-options { display: inline-flex; align-items: center; gap: var(--space-4); }
+details.column-picker { position: relative; }
+details.column-picker > summary {
+  list-style: none; cursor: pointer; padding: 4px var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface);
+  font-weight: var(--weight-medium); color: var(--text); font-size: var(--font-size-sm);
+}
+details.column-picker > summary::-webkit-details-marker { display: none; }
+details.column-picker > summary::after { content: ' ▾'; color: var(--text-3); }
+details.column-picker[open] > summary { border-color: var(--accent); }
+details.column-picker .menu {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 10; min-width: 220px; display: flex; flex-direction: column; gap: 2px; padding: var(--space-2);
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lg);
+}
+details.column-picker .menu label { display: flex; align-items: center; gap: var(--space-2); padding: 4px var(--space-2); border-radius: var(--radius-sm); color: var(--text); font-size: var(--font-size-sm); }
+details.column-picker .menu label:hover { background: var(--row-hover); }
+.compact-toggle { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--font-size-sm); color: var(--text); }
+td.status-cell .cell + .cell { margin-top: var(--space-1); }
+table.products.compact td { padding-top: 6px; padding-bottom: 6px; }
+table.products.compact .product-ref, table.products.compact .floor-parts, table.products.compact .cell-detail, table.products.compact a.secondary-link { display: none; }
 .product-ref .badge { margin-left: var(--space-1); }
 td.strategy .strategy-name { font-weight: var(--weight-medium); }
-a.secondary-link { font-size: var(--font-size-xs); color: var(--text-2); padding-left: var(--space-2); }
-a.secondary-link:hover { color: var(--accent); }
+/* версии стратегии — строкой на версию, статус пилюлей (шаг 79) */
+ul.versions { list-style: none; padding: 0; margin: var(--space-2) 0 0; display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); }
+/* шаг 79 (ревью): вторичная ссылка — тоже ссылка, цветом акцента, только мельче основной */
+a.secondary-link { font-size: var(--font-size-xs); color: var(--accent-text); padding-left: var(--space-2); }
+a.secondary-link:hover { color: var(--accent); text-decoration: underline; }
 
 /* «Why this price →» — компактная кнопка-ссылка */
 a.row-link {
@@ -317,22 +388,43 @@ p.notice[role='status'] { background: var(--accent-soft); color: var(--accent-te
   content: ''; flex: none; width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--accent);
   animation: spin 0.8s linear infinite;
 }
-.loading::after {
-  content: ''; flex: 1; max-width: 360px; height: 10px; border-radius: var(--radius-pill);
-  background: linear-gradient(90deg, var(--divider) 25%, var(--border) 50%, var(--divider) 75%); background-size: 200% 100%;
-  animation: shimmer 1.4s ease-in-out infinite;
-}
+
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+/* шаг 79: скелет загрузки по форме экрана — таблица, карточки, таймлайн, статистика */
+.loading-block .loading { padding: var(--space-2) 0 var(--space-3); }
+.sk-bar {
+  display: block; height: 10px; border-radius: var(--radius-pill); margin: 6px 0;
+  background: linear-gradient(90deg, var(--divider) 25%, var(--border) 50%, var(--divider) 75%); background-size: 200% 100%; animation: shimmer 1.4s ease-in-out infinite;
+}
+.sk-table { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+.sk-row { display: flex; gap: var(--space-5); padding: 10px var(--space-4); border-bottom: 1px solid var(--divider); }
+.sk-row.sk-head { background: var(--surface-muted); border-bottom-color: var(--border); }
+.sk-row:last-child { border-bottom: 0; }
+.sk-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: var(--space-4) var(--space-5); flex: 1; }
+.sk-cards { display: grid; gap: var(--space-3); }
+.sk-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-3); margin-bottom: var(--space-3); }
+.sk-trace { display: grid; gap: var(--space-3); }
+.sk-step { display: flex; gap: var(--space-3); align-items: flex-start; }
+.sk-dot { width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--border); flex: none; }
+@media (prefers-reduced-motion: reduce) { .sk-bar { animation: none; } }
 .gaps { margin-top: var(--space-4); padding: var(--space-3) var(--space-4); border: 1px dashed var(--warning-border); background: var(--warning-soft); border-radius: var(--radius); }
 .gaps h3 { margin-top: 0; font-size: var(--font-size); }
 .gap-note { color: var(--warning); }
 
 /* ---------- окно подтверждения ---------- */
+/*
+ * Шаг 79 (ревью): окно — поверх страницы по центру, с затемнением, а не карточкой над заголовком экрана, далеко от кнопки, что его
+ * открыла. Прозрачная подложка ::before ловит нажатия мимо окна: страница под ним не нажимается. Красная полоса сверху — только у
+ * окна с опасным действием (остановка, снятие, «всё равно включить»); у сохранения и объявления — цвет акцента
+ */
 .confirm {
-  background: var(--surface); border: 1px solid var(--danger-border); border-top: 3px solid var(--danger); border-radius: var(--radius);
-  box-shadow: var(--shadow-lg); padding: var(--space-4) var(--space-5); margin: 0 0 var(--space-4); max-width: 720px;
+  position: fixed; inset: 0; margin: auto !important; z-index: 60; height: fit-content; width: min(600px, calc(100vw - 32px)); max-height: calc(100vh - 64px); overflow: auto;
+  background: var(--surface); border: 1px solid var(--border); border-top: 3px solid var(--accent); border-radius: var(--radius);
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.25), 0 0 0 100vmax rgba(15, 23, 42, 0.35); padding: var(--space-4) var(--space-5);
 }
+.confirm::before { content: ''; position: fixed; inset: 0; z-index: -1; }
+.confirm:has(button.danger) { border-color: var(--danger-border); border-top-color: var(--danger); }
 .confirm h3 { margin-top: 0; }
 .confirm textarea { display: block; width: 100%; margin-top: var(--space-1); }
 
@@ -358,6 +450,11 @@ p.headline::before { display: none; }
 .step-head h3 { margin: 0; }
 .step > p { margin: var(--space-1) 0 var(--space-2); }
 .step .items { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-2) var(--space-3); margin: var(--space-2) 0 0; box-shadow: var(--shadow-sm); }
+/* шаг 79: таймлайн — в карточке; пункты шага внутри неё — светло-серой подложкой, без второй тени */
+.trace-card { padding: var(--space-4) var(--space-5); }
+.trace-card .steps { margin: 0; }
+.trace-card .step .items { background: var(--surface-muted); box-shadow: none; }
+.trace-card .step:last-child { padding-bottom: 0; }
 .status-OK::before { border-color: var(--success); color: var(--success); background: var(--success-soft); }
 .status-STOP::before { border-color: var(--danger); color: var(--danger); background: var(--danger-soft); }
 .status-WARN::before { border-color: var(--warning); color: var(--warning); background: var(--warning-soft); }
@@ -479,6 +576,8 @@ ul.link-list > li:hover a::after { opacity: 1; }
 ul.link-list > li { display: flex; justify-content: space-between; gap: var(--space-4); margin: 0; padding: 9px var(--space-4); border-bottom: 1px solid var(--divider); }
 ul.link-list > li:last-child { border-bottom: 0; }
 ul.link-list > li:hover { background: var(--row-hover); }
+ul.link-list.job-list > li { display: block; }
+ul.link-list.job-list > li button { margin: var(--space-2) var(--space-2) 0 0; }
 ul.link-list .range { white-space: nowrap; font-variant-numeric: tabular-nums; }
 /* пояснение под таблицей разбивки — отдельной строкой ниже рамки */
 .table-wrap + p, .table-wrap + .note { margin-top: var(--space-2); }
@@ -521,3 +620,37 @@ p.status-line { padding: 6px var(--space-3); border-radius: var(--radius-sm); bo
   .world-content { padding: var(--space-4); }
   .topbar .user, .topbar .env { display: none; }
 }
+
+/* шаг 79 (ревью): сопоставление колонок импорта — сеткой «поле — выбор колонки», а не рваным списком */
+ul.column-choice { list-style: none; padding: 0; margin: var(--space-3) 0 0; display: grid; gap: var(--space-2); }
+ul.column-choice li label { display: grid; grid-template-columns: minmax(160px, 220px) minmax(0, 1fr); align-items: center; gap: var(--space-3); }
+ul.column-choice select { max-width: 520px; }
+ul.columns { margin: var(--space-1) 0 0; padding-left: var(--space-4); color: var(--text-2); }
+
+/* строки каналов в остатках — витрина и пилюля состояния, подробности ниже (шаг 79) */
+ul.stock-channels li + li { margin-top: var(--space-2); }
+ul.stock-channels .channel-name { font-weight: var(--weight-medium); }
+
+/* «не найдено» — карточкой читаемой ширины с полями, и когда у страницы нет боковой панели (шаг 79, ревью) */
+.card.not-found { max-width: 720px; }
+main.page.world > .card.not-found { margin: var(--space-7) auto; width: calc(100% - 2 * var(--space-5)); }
+
+/*
+ * шаг 79 (ревью): широкие таблицы помещаются в окно 1440 — ничего не уходит под закреплённую колонку действий: у статуса предложения
+ * своя ширина, в лентах пилюли идут столбиком, время переносится по «·», длинные немецкие заголовки переносятся по слогам
+ */
+table.products td.status-cell .cell { min-width: 96px; }
+table.products td.offer { min-width: 200px; }
+td.pills .badge { display: block; width: fit-content; }
+table.dense td.nowrap:has(.when) { white-space: normal; min-width: 96px; max-width: 120px; }
+table.dense td.nowrap .when { white-space: normal; }
+table.dense th { hyphens: auto; }
+td.pills .badge { white-space: normal; max-width: 160px; }
+table.dense td.bound { min-width: 110px; }
+table.dense td .reason { min-width: 160px; }
+/* выбор витрин у подключения канала — с зазорами, кнопка — после них (шаг 79) */
+p.connect-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); }
+p.connect-row label { display: inline-flex; align-items: center; gap: var(--space-1); }
+/* «на момент» в предпросмотре стратегии — в две строки (шаг 79) */
+td.as-of { min-width: 120px; max-width: 160px; }
+td.as-of .when { white-space: normal; }

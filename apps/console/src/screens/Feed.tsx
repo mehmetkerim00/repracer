@@ -56,9 +56,10 @@ export function FeedScreenView({ view, onQuery }: { view: PriceFeedView; onQuery
   return (
     <section>
       <h2>{f.pageTitle}</h2>
-      <p className="muted">{f.counts(view.counts)}</p>
+      <p className="subtitle">{m.ui.app.subtitles.feed}</p>
+      {/* Шаг 79: фильтры и выгрузка — карточкой-панелью; счётчики групп — в шапке таблицы */}
       {onQuery ? (
-        <div className="form filters">
+        <div className="form filters toolbar">
           <label>{f.filters.status} <select value={q.status ?? ''} onChange={(e) => change({ status: (e.target.value || undefined) as FeedQuery['status'] })}>
             <option value="">{f.filters.all}</option>
             {FEED_STATUS_GROUPS.map((g) => <option key={g} value={g}>{f.statusGroups[g]}</option>)}
@@ -70,19 +71,16 @@ export function FeedScreenView({ view, onQuery }: { view: PriceFeedView; onQuery
             <option value="">{f.filters.all}</option>
             {FEED_PERIODS_DAYS.map((d) => <option key={d} value={d}>{f.periodDays(d)}</option>)}
           </select></label>
-        </div>
-      ) : null}
-      {onQuery ? (
-        <div className="buttons">
-          <button type="button" onClick={() => void exportFeed()}>{f.exportAll(view.page.total)}</button>
+          <button type="button" className="toolbar-end" disabled={view.page.total === 0} onClick={() => void exportFeed()}>{f.exportAll(view.page.total)}</button>
         </div>
       ) : null}
       {exportError ? <ErrorBox message={exportError} /> : null}
       {exportJobId ? <JobProgress worldId={view.worldId} jobId={exportJobId} /> : null}
       {view.items.length === 0 ? <p className="muted empty">{f.empty}</p> : (
         <div className="table-wrap">
+          <div className="table-head"><span>{f.counts(view.counts)}</span></div>
           <table className="feed dense sticky-end">
-            <thead><tr><th>{c.when}</th><th>{c.offer}</th><th className="num">{c.from}</th><th className="num">{c.to}</th><th className="num">{c.change}</th><th>{c.status}</th><th>{c.source}</th><th>{c.reason}</th><th /></tr></thead>
+            <thead><tr><th>{c.when}</th><th>{c.offer}</th><th className="num">{c.from}</th><th className="num">{c.to}</th><th className="num">{c.change}</th><th>{c.status}</th><th>{c.reason}</th><th /></tr></thead>
             <tbody>
               {view.items.map((i, n) => (
                 <tr key={n}>
@@ -92,8 +90,8 @@ export function FeedScreenView({ view, onQuery }: { view: PriceFeedView; onQuery
                   <td className="num money">{i.to}</td>
                   <td className="num">{i.change ?? '–'}</td>
                   <td><Badge tone={i.tone}>{i.status}</Badge>{i.confirmation ? <div className="note">{i.confirmation}</div> : null}</td>
-                  <td className="nowrap">{i.source}</td>
-                  <td>{i.reason ? <ReasonLine reason={i.reason} /> : null}</td>
+                  {/* Шаг 79 (ревью): источник — подписью над причиной, а не своей колонкой: таблица помещается в окно */}
+                  <td><div className="note">{i.source}</div>{i.reason ? <ReasonLine reason={i.reason} /> : null}</td>
                   <td className="nowrap">{i.decisionId ? <a className="row-link" href={href(view.worldId, 'decisions', i.decisionId)}>{m.ui.rejected.path}</a> : null}</td>
                 </tr>
               ))}
@@ -101,7 +99,7 @@ export function FeedScreenView({ view, onQuery }: { view: PriceFeedView; onQuery
           </table>
         </div>
       )}
-      <div className="buttons">
+      {view.page.total === 0 ? null : <div className="buttons">
         <span className="small muted">{view.page.text}</span>
         {onQuery ? (
           <>
@@ -109,7 +107,7 @@ export function FeedScreenView({ view, onQuery }: { view: PriceFeedView; onQuery
             <button type="button" disabled={!view.page.hasNext} onClick={() => onQuery({ ...current, offset: q.offset + q.limit })}>{f.next}</button>
           </>
         ) : null}
-      </div>
+      </div>}
       <Gaps gaps={view.gaps} />
     </section>
   );
@@ -119,5 +117,5 @@ export function FeedScreen({ worldId }: { worldId: string }) {
   const m = useMessages();
   const [query, setQuery] = useState<FeedQuery>({});
   const [resource, retry] = useResource<PriceFeedView>(feedPath(worldId, query), m.locale);
-  return <Load resource={resource} retry={retry}>{(view) => <FeedScreenView view={view} onQuery={setQuery} />}</Load>;
+  return <Load shape="table" resource={resource} retry={retry}>{(view) => <FeedScreenView view={view} onQuery={setQuery} />}</Load>;
 }

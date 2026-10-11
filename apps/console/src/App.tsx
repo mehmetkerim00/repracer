@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { LOCALES, messagesFor, type Locale } from '@repracer/console-model';
 import type { SessionView, StandToken, WorldSummary } from './api-types.ts';
 import { requestJson, setAccessToken, useResource, type Resource } from './api.ts';
-import { Badge, ErrorBox, errorText, href, Load, MessagesContext, useMessages } from './components.tsx';
+import { Badge, ErrorBox, errorText, href, Intro, Load, MessagesContext, NotFound, useMessages } from './components.tsx';
 import { BoundsScreen } from './screens/Bounds.tsx';
 import { ComplianceScreen } from './screens/Compliance.tsx';
 import { JobHistory } from './screens/Jobs.tsx';
@@ -53,7 +53,6 @@ const NAV_GROUPS = [
 
 /** Вход [Р-78]: у поставщика identity; на стенде — имитатор с синтетическими пользователями. Паролей у нас нет */
 /** Знак роли на карточке входа — две буквы, у каждой роли свой */
-const ROLE_MARKS: Readonly<Record<string, string>> = { OWNER: 'Ow', ADMIN: 'Ad', OPERATOR: 'Op', PRICING_MANAGER: 'PM', INVENTORY_MANAGER: 'IM', VIEWER: 'Vw' };
 
 export function LoginView({ simulator, demoGuest, oidc, error, busy, onSignIn, onDemo }: {
   /** Шаг 44 [Р-178]: настоящий вход у поставщика identity */
@@ -73,7 +72,8 @@ export function LoginView({ simulator, demoGuest, oidc, error, busy, onSignIn, o
     <section className="card login">
       <div className="login-brand"><span className="brand-mark" aria-hidden="true">r</span>{m.ui.app.brand}</div>
       <h2>{l.title}</h2>
-      <p className="muted">{l.hint}</p>
+      {/* Шаг 79 (ревью): вступление входа — одно предложение и «Learn more», как подзаголовки экранов */}
+      <Intro text={l.hint} />
       {oidc ? (
         <div className="buttons">
           <button type="button" className="primary" disabled={busy} onClick={() => void startLogin(oidc)}>{m.ui.app.signIn}</button>
@@ -96,7 +96,7 @@ export function LoginView({ simulator, demoGuest, oidc, error, busy, onSignIn, o
           <div className="role-grid">
             {simulator.map((a) => {
               const label = (m.values as Record<string, string | undefined>)[a.role] ?? a.label;
-              return <button key={a.role} type="button" className="role-card" data-initial={ROLE_MARKS[a.role] ?? label.slice(0, 2)} disabled={busy} onClick={() => onSignIn(a.role)}>{l.asAccount(label)}</button>;
+              return <button key={a.role} type="button" className="role-card" data-initial={(l.roleMarks as Record<string, string | undefined>)[a.role] ?? label.slice(0, 2)} disabled={busy} onClick={() => onSignIn(a.role)}>{l.asAccount(label)}</button>;
             })}
           </div>
         </>
@@ -107,13 +107,14 @@ export function LoginView({ simulator, demoGuest, oidc, error, busy, onSignIn, o
   );
 }
 
+/** Шаг 79: страница не найдена — карточка с заголовком, объяснением и путём обратно */
 export function WorldList({ worlds }: { worlds: readonly WorldSummary[] }) {
   const m = useMessages();
   if (worlds.length === 0) return <p className="notice">{m.ui.app.login.noWorlds}</p>;
   return (
     <section>
       <h2>{m.ui.app.worlds}</h2>
-      <p className="muted">{m.ui.app.worldsHint}</p>
+      <p className="subtitle">{m.ui.app.worldsHint}</p>
       <ul className="worlds">
         {worlds.map((w) => (
           <li key={w.id} className="card">
@@ -140,7 +141,8 @@ export function WorldList({ worlds }: { worlds: readonly WorldSummary[] }) {
 function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; worlds: readonly WorldSummary[] }) {
   const outer = useMessages();
   const world = worlds.find((w) => w.id === route.worldId);
-  if (!world) return <p className="error">{outer.ui.app.worldNotFound(route.worldId)} <a href="#/">{outer.ui.app.backToWorlds}</a></p>;
+  // Шаг 79: «не найдено» — карточкой с заголовком и путём обратно, а не строкой ошибки на фоне страницы
+  if (!world) return <NotFound title={outer.ui.app.worldNotFoundTitle} text={outer.ui.app.worldNotFound(route.worldId)} back={outer.ui.app.backToWorlds} />;
   /**
    * Шаг 69 (K1, K4): мир тенанта — на языке тенанта и со временем в его поясе: агентство с тенантами DE и US видит каждый на его
    * языке. Переключатель языка в шапке остаётся для экранов вне мира; язык мира меняет администратор тенанта (экран подключений)
@@ -185,9 +187,9 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
                 : route.screen === 'strategies' ? <StrategiesScreen worldId={world.id} />
                   : route.screen === 'feed' ? <FeedScreen worldId={world.id} />
                     : route.screen === 'dangerous' ? <DangerousScreen worldId={world.id} days={[1, 7, 30].includes(Number(route.param)) ? Number(route.param) : 7} />
-                      : route.screen === 'compliance' ? (world.euStorefronts ? <ComplianceScreen worldId={world.id} /> : <p className="notice">{m.ui.compliance.notApplicable}</p>)
-                        : route.screen === 'jobs' ? <><h2>{m.ui.jobs.pageTitle}</h2><JobHistory worldId={world.id} /></>
-                : <p className="error">{m.ui.app.screenNotFound}</p>}
+                      : route.screen === 'compliance' ? (world.euStorefronts ? <ComplianceScreen worldId={world.id} /> : <><h2>{m.ui.compliance.pageTitle}</h2><p className="subtitle">{m.ui.app.subtitles.compliance}</p><p className="notice">{m.ui.compliance.notApplicable}</p></>)
+                        : route.screen === 'jobs' ? <><h2>{m.ui.jobs.pageTitle}</h2><p className="subtitle">{m.ui.app.subtitles.jobs}</p><JobHistory worldId={world.id} /></>
+                : <NotFound title={m.ui.app.notFoundTitle} text={m.ui.app.screenNotFound} back={m.ui.app.screens.onboarding} href={href(world.id, 'onboarding')} />}
       </div>
       </div>
     </MessagesContext.Provider>

@@ -23,6 +23,8 @@ export interface StockChannelCell {
   divergedText: string | null;
   awaitingAck: boolean;
   tone: 'ok' | 'progress' | 'stop' | 'off' | 'warn';
+  /** Шаг 79: состояние словом для пилюли — «in sync», «held by shadow mode», «diverged»; подробности — строкой ниже */
+  statusText: string;
 }
 
 export interface StockRowView {
@@ -103,8 +105,11 @@ export function channelCell(c: StockChannelRow, m: Messages): StockChannelCell {
     confirmedText: c.confirmed ? `${s.confirmed(c.confirmed.quantity, m.when(c.confirmed.at))}${c.confirmed.ownRecordOnly ? ` — ${m.ui.ownRecordConfirmation}` : ''}` : s.notConfirmed,
     divergedText: c.divergence ? s.diverged(status(c.divergence.status), m.when(c.divergence.since)) : null,
     awaitingAck,
-    tone: !c.syncEnabled ? (awaitingAck ? 'warn' : 'off') : c.divergence ? 'stop' : c.sent?.status === 'SHADOW_HELD' ? 'off'
+    // Шаг 79: удержанное тенью — янтарным, как тень на всех экранах
+    tone: !c.syncEnabled ? (awaitingAck ? 'warn' : 'off') : c.divergence ? 'stop' : c.sent?.status === 'SHADOW_HELD' ? 'warn'
       : c.sent && c.confirmed && c.sent.quantity === c.confirmed.quantity ? 'ok' : c.sent ? 'progress' : 'off',
+    statusText: !c.syncEnabled ? (awaitingAck ? s.states.awaiting : s.states.off) : c.divergence ? s.states.diverged : c.sent?.status === 'SHADOW_HELD' ? s.states.shadow
+      : c.sent && c.confirmed && c.sent.quantity === c.confirmed.quantity ? s.states.synced : c.sent ? s.states.sending : s.states.idle,
   };
 }
 

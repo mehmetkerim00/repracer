@@ -10,18 +10,22 @@ export function RejectedScreenView({ view }: { view: RejectedView }) {
   return (
     <section>
       <h2>{r.pageTitle}</h2>
-      <p className="headline">{view.headline}</p>
-      <p className="muted">{r.summary(view.summary)}</p>
-      {view.groups.length > 0 ? (
-        <ul className="groups">
-          {view.groups.map((g) => <li key={g.code}><Badge tone="off">{g.count}</Badge> {g.title}</li>)}
-        </ul>
-      ) : null}
+      <p className="subtitle">{m.ui.app.subtitles.rejected}</p>
+      {/* Шаг 79: итог, сводка и группы — карточкой-сводкой, а не текстом на фоне страницы */}
+      <section className="card summary-card">
+        <p className="headline">{view.headline}</p>
+        <p className="muted small">{r.summary(view.summary)}</p>
+        {view.groups.length > 0 ? (
+          <ul className="groups">
+            {view.groups.map((g) => <li key={g.code}><Badge tone="off">{g.count}</Badge> {g.title}</li>)}
+          </ul>
+        ) : null}
+      </section>
       {view.items.length === 0 ? <p className="muted empty">{r.none}</p> : (
         <div className="table-wrap">
           <table className="dense sticky-end">
             <thead>
-              <tr><th>{c.when}</th><th>{c.where}</th><th>{c.kind}</th><th className="num">{c.proposed}</th><th className="num">{c.before}</th><th className="num">{c.change}</th><th>{c.limit}</th><th className="num">{c.deviation}</th><th>{c.reason}</th><th /></tr>
+              <tr><th>{c.when}</th><th>{c.where}</th><th>{c.kind}</th><th className="num">{c.proposed}</th><th className="num">{c.before}</th><th>{c.limit}</th><th className="num">{c.deviation}</th><th>{c.reason}</th><th /></tr>
             </thead>
             <tbody>
               {view.items.map((item, i) => (
@@ -33,10 +37,10 @@ export function RejectedScreenView({ view }: { view: RejectedView }) {
                     {/* шаг 77: «скорректировано» — спокойным серым, опасное — красным; обе пилюли в строку */}
                     {item.intervention ? <Badge tone={item.intervention === 'DANGEROUS' ? 'stop' : 'off'}>{r.interventions[item.intervention]}</Badge> : null}
                   </td>
-                  <td className="num money">{item.proposed ?? '–'}</td>
+                  {/* Шаг 79 (ревью): изменение — подписью под предложенной ценой, а не своей колонкой: таблица помещается в окно */}
+                  <td className="num money">{item.proposed ?? '–'}{item.change ? <div className="note">{item.change}</div> : null}</td>
                   <td className="num">{item.current ?? '–'}</td>
-                  <td className="num">{item.change ?? '–'}</td>
-                  <td>{item.limit ?? '–'}</td>
+                  <td className="bound">{item.limit ?? '–'}</td>
                   <td className="num">{item.deviation ?? '–'}</td>
                   <td><ReasonLine reason={item.reason} /></td>
                   <td className="nowrap">{item.decisionId ? <a className="row-link" href={href(view.worldId, 'decisions', item.decisionId)}>{r.path}</a> : null}</td>
@@ -54,5 +58,5 @@ export function RejectedScreenView({ view }: { view: RejectedView }) {
 export function RejectedScreen({ worldId }: { worldId: string }) {
   const m = useMessages();
   const [resource, retry] = useResource<RejectedView>(worldPath(worldId, 'rejected'), m.locale);
-  return <Load resource={resource} retry={retry}>{(view) => <RejectedScreenView view={view} />}</Load>;
+  return <Load shape="table" resource={resource} retry={retry}>{(view) => <RejectedScreenView view={view} />}</Load>;
 }

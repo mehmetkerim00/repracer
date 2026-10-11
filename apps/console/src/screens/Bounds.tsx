@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { LIST_PAGE_DEFAULT, type BoundsView, type ListQuery, type PriceBreakdown } from '@repracer/console-model';
 import type { BoundsIndexItem, BoundsIndexView as BoundsIndexData } from '../api-types.ts';
 import { useResource, worldPath } from '../api.ts';
-import { Gaps, href, Load, Pager, useMessages } from '../components.tsx';
+import { Gaps, href, Load, NotFound, Pager, useMessages } from '../components.tsx';
 import { BoundsEditPanel } from './BoundsEdit.tsx';
 
 export function BreakdownTable({ breakdown, currency }: { breakdown: PriceBreakdown; currency: string }) {
@@ -24,8 +24,9 @@ export function BreakdownTable({ breakdown, currency }: { breakdown: PriceBreakd
             ))}
           </tbody>
         </table>
+        {/* Шаг 79: как читать разбивку — подвалом таблицы */}
+        <p className="table-foot">{b.exactMargin(breakdown.marginExact)} {b.balance(breakdown.balanced)} {breakdown.note}.</p>
       </div>
-      <p className="small">{b.exactMargin(breakdown.marginExact)} {b.balance(breakdown.balanced)} {breakdown.note}.</p>
     </div>
   );
 }
@@ -35,9 +36,9 @@ export function BoundsScreenView({ view }: { view: BoundsView }) {
   const b = m.ui.bounds;
   return (
     <section>
-      <p><a href={href(view.worldId, 'bounds')}>{b.back}</a></p>
+      <p className="back"><a href={href(view.worldId, 'bounds')}>{b.back}</a></p>
       <h2>{b.pageTitle}</h2>
-      <p className="muted">{view.unit.label} · {view.currency}, {view.priceBasis} · {view.taxRegime}</p>
+      <p className="subtitle">{view.unit.label} · {view.currency}, {view.priceBasis} · {view.taxRegime}</p>
       <div className="cards">
         <div className="card emphasis"><h3>{b.effectiveFloor}</h3><p className="big">{view.effectiveFloor.amount}</p><p className="small muted">{view.effectiveFloor.source}</p></div>
         <div className="card"><h3>{b.minPrice}</h3><p className="big">{view.minPrice.amount}</p><p className="small muted">{view.minPrice.source}</p></div>
@@ -50,27 +51,31 @@ export function BoundsScreenView({ view }: { view: BoundsView }) {
         <div className="card"><h3>{b.maxPrice}</h3><p className="big">{view.maxPrice.amount}</p><p className="small muted">{view.maxPrice.source}</p></div>
       </div>
 
-      <h3>{b.costAndFees}</h3>
-      {view.cost.unavailable ? <p className="gap-note">{view.cost.unavailable}</p> : (
-        <ul>
-          {view.cost.lines.map((l) => <li key={l.key}>{l.label}: <strong>{l.amount}</strong> <span className="small muted">({l.formula})</span></li>)}
-        </ul>
-      )}
-
-      {view.feeEstimates.length > 0 ? (
-        <ul className="fee-estimates">
-          {/* Р-138: число продавца и тарифная таблица — рядом; помечено то, по которому считается пол */}
-          {view.feeEstimates.map((f) => (
-            <li key={f.source} className={f.used ? 'used' : 'muted'}>{f.text}{f.used ? ` — ${b.feeUsed}` : ''}</li>
-          ))}
-        </ul>
-      ) : null}
+      {/* Шаг 79: себестоимость и комиссии — карточкой */}
+      <section className="card">
+        <h3>{b.costAndFees}</h3>
+        {view.cost.unavailable ? <p className="gap-note">{view.cost.unavailable}</p> : (
+          <ul className="plain cost-lines">
+            {view.cost.lines.map((l) => <li key={l.key}>{l.label}: <strong>{l.amount}</strong> <span className="small muted">({l.formula})</span></li>)}
+          </ul>
+        )}
+        {view.feeEstimates.length > 0 ? (
+          <ul className="fee-estimates plain">
+            {/* Р-138: число продавца и тарифная таблица — рядом; помечено то, по которому считается пол */}
+            {view.feeEstimates.map((f) => (
+              <li key={f.source} className={f.used ? 'used' : 'muted'}>{f.text}{f.used ? ` — ${b.feeUsed}` : ''}</li>
+            ))}
+          </ul>
+        ) : null}
+      </section>
 
       {view.floorBreakdown ? <BreakdownTable breakdown={view.floorBreakdown} currency={view.currency} /> : null}
       {view.currentBreakdown ? <BreakdownTable breakdown={view.currentBreakdown} currency={view.currency} /> : null}
 
-      <h3>{b.calculator}</h3>
-      <ol>{view.calculatorCheck.map((c) => <li key={c}>{c}</li>)}</ol>
+      <section className="card">
+        <h3>{b.calculator}</h3>
+        <ol>{view.calculatorCheck.map((c) => <li key={c}>{c}</li>)}</ol>
+      </section>
       <Gaps gaps={view.gaps} />
     </section>
   );
@@ -78,16 +83,31 @@ export function BoundsScreenView({ view }: { view: BoundsView }) {
 
 export function BoundsIndexView({ worldId, items }: { worldId: string; items: readonly BoundsIndexItem[] }) {
   const m = useMessages();
+  const c = m.ui.bounds.indexColumns;
   return (
     <section>
       <h2>{m.ui.bounds.indexTitle}</h2>
+      <p className="subtitle">{m.ui.app.subtitles.bounds}</p>
       {/* Задача D шага 34: пустой тенант видит, почему пусто и куда идти */}
       {items.length === 0 ? <p className="notice">{m.ui.onboarding.empty.bounds} <a href={href(worldId, 'onboarding')}>{m.ui.onboarding.empty.startHere}</a></p> : null}
-      <ul className="index link-list">
-        {items.map((i) => (
-          <li key={i.writeScopeId}><a href={href(worldId, 'bounds', i.writeScopeId)}>{i.label}</a> <span className="muted small range">{i.minPrice} – {i.maxPrice}</span></li>
-        ))}
-      </ul>
+      {/* Шаг 79 (ревью): список границ — таблицей с шапкой и зеброй; суммы — вправо, ссылка на разбивку пола — в своей колонке */}
+      {items.length === 0 ? null : (
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>{c.offer}</th><th className="num">{c.min}</th><th className="num">{c.max}</th><th /></tr></thead>
+            <tbody>
+              {items.map((i) => (
+                <tr key={i.writeScopeId}>
+                  <td className="offer"><a href={href(worldId, 'bounds', i.writeScopeId)}>{i.label}</a></td>
+                  <td className="num money">{i.minPrice}</td>
+                  <td className="num money">{i.maxPrice}</td>
+                  <td className="num"><a className="row-link" href={href(worldId, 'bounds', i.writeScopeId)}>{c.floor}</a></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </section>
   );
 }
@@ -102,12 +122,13 @@ function BoundsIndex({ worldId }: { worldId: string }) {
   const [query, setQuery] = useState<ListQuery>({ offset: 0, limit: LIST_PAGE_DEFAULT });
   const [resource, retry] = useResource<BoundsIndexData>(`${worldPath(worldId, 'bounds')}?offset=${query.offset}&limit=${query.limit}`, m.locale);
   return (
-    <Load resource={resource} retry={retry}>
+    <Load shape="table" resource={resource} retry={retry}>
       {(view) => (
         <>
           <BoundsIndexView worldId={worldId} items={view.items} />
           <Pager page={view.page} query={query} onQuery={setQuery} />
-          <BoundsEditPanel worldId={worldId} items={view.items} total={view.page.total} canEdit={view.canEdit} />
+          {/* Шаг 79 (ревью): массовая правка на ноль предложений — не форма, её просто нет */}
+          {view.page.total === 0 ? null : <BoundsEditPanel worldId={worldId} items={view.items} total={view.page.total} canEdit={view.canEdit} />}
         </>
       )}
     </Load>
@@ -117,5 +138,6 @@ function BoundsIndex({ worldId }: { worldId: string }) {
 function BoundsDetail({ worldId, writeScopeId }: { worldId: string; writeScopeId: string }) {
   const m = useMessages();
   const [resource, retry] = useResource<BoundsView>(worldPath(worldId, 'bounds', writeScopeId), m.locale);
-  return <Load resource={resource} retry={retry}>{(view) => <BoundsScreenView view={view} />}</Load>;
+  const missing = <NotFound title={m.ui.bounds.missingTitle} text={m.ui.bounds.missingText} back={m.ui.bounds.back} href={href(worldId, 'bounds')} />;
+  return <Load shape="cards" resource={resource} retry={retry} notFound={missing}>{(view) => <BoundsScreenView view={view} />}</Load>;
 }

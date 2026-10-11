@@ -56,6 +56,8 @@ export interface OnboardingPathChoice {
   path: OnboardingPath;
   title: string;
   detail: string;
+  /** Шаг 79: выбранный путь — отмечен на своей карточке */
+  selected: boolean;
 }
 
 export interface OnboardingView {
@@ -118,10 +120,14 @@ export function onboardingView(world: Pick<StandWorld, 'id' | 'demo' | 'viewer'>
     awaitingHint: a.authStatus === 'AWAITING_ACCESS' ? t.channels.awaitingHint : null,
   }));
   const enable = byStep.get('ENABLE');
-  const choices: OnboardingPathChoice[] = (['STOCK', 'STOCK_AND_PRICING'] as const).map((p) => ({ path: p, title: t.paths[p].title, detail: t.paths[p].detail }));
+  // Шаг 79: выбранный путь виден карточкой с отметкой (раньше после выбора карточки исчезали). На пути остатков — только его карточка
+  // и без описания: экран этого пути не говорит о ценах ни словом [Р-152], даже «цены не нужны»
+  const choices: OnboardingPathChoice[] = path === 'STOCK'
+    ? [{ path: 'STOCK', title: t.paths.STOCK.title, detail: '', selected: true }]
+    : (['STOCK', 'STOCK_AND_PRICING'] as const).map((p) => ({ path: p, title: t.paths[p].title, detail: t.paths[p].detail, selected: p === path }));
   return {
     worldId: world.id, demo: world.demo === true, intro: `${world.demo === true ? `${t.demoIntro} ` : ''}${path === 'STOCK' ? t.introStock : t.intro}`, steps,
-    path, pathText: path ? t.paths.chosen(t.paths[path].title) : null, choices: path ? [] : choices, canAddPricing: path === 'STOCK',
+    path, pathText: path ? t.paths.chosen(t.paths[path].title) : null, choices, canAddPricing: path === 'STOCK',
     // Без выбранного пути «готово» не бывает: путь не пройден, пока не выбран
     resumeAt: path === null && resumeAt === 'DONE' ? 'CHANNEL' : resumeAt,
     resumeText: path === null ? t.paths.title : resumeAt === 'DONE' ? t.completed : t.resumeAt(t.steps[resumeAt]),

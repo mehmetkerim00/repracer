@@ -225,7 +225,7 @@ test('шаг 69 (K1, K4): агентство видит каждый тенан�
   const deStop = await handle({ method: 'GET', url: `/api/worlds/tenant-${de}/stop`, body: undefined, authorization: `Bearer ${token}`, cookie: 'repracer_locale=en' });
   assert.equal(usStop.status, 200, JSON.stringify(usStop.body).slice(0, 300));
   assert.match(JSON.stringify(usStop.body), /Stop by a person/, 'тенант US — по-английски при немецкой куке');
-  assert.match(JSON.stringify(deStop.body), /Stopp durch einen Menschen/, 'тенант DE — по-немецки при английской куке');
+  assert.match(JSON.stringify(deStop.body), /Stopp durch eine Person/, 'тенант DE — по-немецки при английской куке');
   const list = await click('/api/worlds');
   const rows = list.body as Array<{ id: string; locale: string | null; timeZone: string | null }>;
   assert.deepEqual([rows.find((r) => r.id === `tenant-${us}`)?.locale, rows.find((r) => r.id === `tenant-${us}`)?.timeZone], ['en', 'Asia/Tokyo'], 'список миров несёт язык и пояс тенанта');

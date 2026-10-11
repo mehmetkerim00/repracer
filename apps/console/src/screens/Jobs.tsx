@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { BulkJobView, BulkJobsView } from '@repracer/console-model';
 import { downloadFile, requestJson, worldPath } from '../api.ts';
-import { ErrorBox, errorText, useMessages } from '../components.tsx';
+import { Badge, ErrorBox, errorText, useMessages } from '../components.tsx';
 
 /**
  * Р-139 (шаг 30): экран массовой операции. Продавец нажал «применить» — и с этого момента смотрит на ХОД, а не ждёт ответа.
@@ -48,11 +48,11 @@ export function JobProgress({ worldId, jobId, onFinished }: { worldId: string; j
   if (error && !job) return <ErrorBox message={error} />;
   if (!job) return <p className="notice" role="status">{t.queued}</p>;
   return (
-    <section className="job" aria-live="polite">
-      <h4>{job.title}</h4>
+    <section className="job card" aria-live="polite">
+      <h4>{job.title} <Badge tone={job.tone}>{job.statusText}</Badge></h4>
       <p className="headline">{job.headline}</p>
       {job.progress === null ? null : (
-        <progress value={job.done} max={job.total ?? job.done} aria-label={job.headline}>{Math.round(job.progress * 100)}%</progress>
+        <progress value={job.progress} max={1} aria-label={job.headline}>{Math.round(job.progress * 100)}%</progress>
       )}
       <p className="small muted">{job.effect}</p>
       {/* OQ-207: отменить можно только то, что ещё ждёт очереди — идущее применение целиком или никак [Р-134] */}
@@ -65,8 +65,7 @@ export function JobProgress({ worldId, jobId, onFinished }: { worldId: string; j
         <p>
           {/* Файл запрашивается с токеном и отдаётся браузеру объектом: по обычной ссылке заголовок авторизации не уходит */}
           <button type="button" onClick={() => void downloadFile(`${worldPath(worldId, 'jobs', jobId)}/artifact`, job.artifact!.fileName, m.locale)
-            .catch((e: unknown) => setError(errorText(e, m)))}>{t.download}</button>{' '}
-          <span className="small muted">{t.checksum(job.artifact.sha256)}</span>
+            .catch((e: unknown) => setError(errorText(e, m)))} title={t.checksum(job.artifact.sha256)}>{t.download}</button>
         </p>
       ) : null}
       {job.error ? <ErrorBox message={job.error} /> : null}
@@ -108,10 +107,11 @@ export function JobHistory({ worldId }: { worldId: string }) {
     <section className="jobs">
       <h3>{t.historyTitle}</h3>
       {view.items.length === 0 ? <p className="muted empty">{t.none}</p> : (
-        <ul className="index">
+        <ul className="index link-list job-list">
           {view.items.map((j) => (
             <li key={j.jobId}>
-              <strong>{j.title}</strong> — {j.headline}
+              {/* Шаг 79: статус — пилюлей; «Done:» в начале итога она уже сказала */}
+              <Badge tone={j.tone}>{j.statusText}</Badge> <strong>{j.title}</strong> — {j.headline.startsWith(t.donePrefix) ? j.headline.slice(t.donePrefix.length) : j.headline}
               <div className="small muted">{j.effect}{j.finishedAt ? ` · ${m.when(j.finishedAt)}` : ''}</div>
               {/* Р-142: к готовому файлу продавец возвращается отсюда — он не привязан к экрану, с которого ушёл */}
               {j.artifact ? (

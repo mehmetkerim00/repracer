@@ -231,7 +231,7 @@ other…».
 
 **Экран «Stock».** Сводка сверху:
 
-> «Products 224: with stock 200; channel units in sync 200; writes in flight 0; divergences 0; open reservations R.»
+> «Products 224: with stock 200; offers in sync 200; writes in flight 0; divergences 0; open reservations R.»
 
 Заказ в симуляторе приходит раз в 4 минуты, поэтому через час R > 0.
 

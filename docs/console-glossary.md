@@ -20,8 +20,8 @@
 | Предложение | **offer** | **Angebot** | listing (кроме разговора об eBay), unit, item / Listing, Einheit | Товар на одной витрине одного аккаунта канала: цена, границы, стратегия, запись в канал. Подпись — название товара или SKU и витрина: «Water bottle, black · kaufland.de» |
 | Листинг eBay | **eBay listing** | **eBay-Angebot** | — | Слово eBay. Допустимо только в тексте, который говорит об eBay или Trading API (миграция, старые листинги) |
 | Количество в штуках | **pieces** | **Stück** | units / Einheiten | «3 pieces reserved», буфер канала — «pieces kept back» |
-| Себестоимость | **unit cost** | **Stückkosten** | — | Одна сумма на штуку; «unit cost» — единственное разрешённое «unit» |
-| Сервер консоли | **server** | **Server** | stand / Stand | «The server is unavailable». Стенд — испытательный стенд разработчика; на экранах стенда — «test environment» / «Testumgebung» |
+| Себестоимость | **unit cost** | **Stückkosten** | cost price, product cost / Selbstkosten, Einstandskosten, Einstandspreis | Одна сумма на штуку; «unit cost» — единственное разрешённое «unit» |
+| Сервер консоли | **server** | **Server** | stand / Stand, Standdaten | «The server is unavailable». Стенд — испытательный стенд разработчика; на экранах стенда — «test environment» / «Testumgebung» |
 | Остановка всего | **stop of the whole workspace** | **Stopp des gesamten Arbeitsbereichs** | tenant stop / Mandantenstopp | Kill switch человеком на весь workspace [Р-69, Р-70] |
 
 Остальные слова экранов остаются, как были, — правило их не трогает:

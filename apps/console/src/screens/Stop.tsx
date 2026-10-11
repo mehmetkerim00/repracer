@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { DistrustCard, HaltCard, StopCard, StopPlan, StopTarget, StopView, TargetCard } from '@repracer/console-model';
 import { NOTE_MIN } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, ErrorBox, errorText, Gaps, Load, NoteConfirm, useMessages, When } from '../components.tsx';
+import { Badge, ErrorBox, errorText, Gaps, href, Load, NoteConfirm, useMessages, When } from '../components.tsx';
 
 /**
  * Экран E — три вида остановки, каждый своим разделом: остановка человеком (все цены) [Р-69], системная остановка витрины по
@@ -78,6 +78,7 @@ export function StopScreenView({ view, onStop, onResume, onRelease, onReleaseDis
   return (
     <section>
       <h2>{s.pageTitle}</h2>
+      <p className="subtitle">{m.ui.app.subtitles.stop}</p>
 
       <section className="stop-kinds">
         <h3>{s.kindsTitle}</h3>
@@ -98,18 +99,23 @@ export function StopScreenView({ view, onStop, onResume, onRelease, onReleaseDis
 
       <section className="stop-human">
         <h3>{s.humanTitle}</h3>
-        <p className="muted">{s.humanIntro}</p>
+        <p className="section-sub">{s.humanIntro}</p>
         {!view.permissions.canStop ? <p className="notice">{s.noRight}</p> : null}
         <h4>{s.tenantTitle}</h4>
         <div className="cards"><TargetCardView card={view.tenant} {...(onStop ? { onStop } : {})} /></div>
         <h4>{s.accountsTitle}</h4>
-        <div className="cards">{view.accounts.map((c) => <TargetCardView key={c.label} card={c} {...(onStop ? { onStop } : {})} />)}</div>
-        <h4>{s.storefrontsTitle}</h4>
-        <div className="cards">{view.storefronts.map((c) => <TargetCardView key={c.label} card={c} {...(onStop ? { onStop } : {})} />)}</div>
-        <p><strong>{s.notStoppedTitle}</strong></p>
-        <ul>{view.notStopped.map((n) => <li key={n}>{n}</li>)}</ul>
+        {/* Шаг 79: без аккаунтов канала разделы аккаунтов и витрин — одной строкой с путём, а не двумя пустыми заголовками */}
+        {view.accounts.length === 0 ? <p className="muted empty">{s.noAccounts} <a href={href(view.worldId, 'connections')}>{m.ui.app.connectChannel}</a></p> : (
+          <>
+            <div className="cards">{view.accounts.map((c) => <TargetCardView key={c.label} card={c} {...(onStop ? { onStop } : {})} />)}</div>
+            <h4>{s.storefrontsTitle}</h4>
+            <div className="cards">{view.storefronts.map((c) => <TargetCardView key={c.label} card={c} {...(onStop ? { onStop } : {})} />)}</div>
+          </>
+        )}
+        {/* Шаг 79: что остановка не останавливает — карточкой-пояснением, а не списком на фоне страницы */}
+        <div className="notice not-stopped"><strong>{s.notStoppedTitle}</strong><ul>{view.notStopped.map((n) => <li key={n}>{n}</li>)}</ul></div>
         <h4>{s.activeStops}</h4>
-        {view.stops.active.length === 0 ? <p className="muted empty">{s.none}</p>
+        {view.stops.active.length === 0 ? <p className="muted empty">{s.noneStops}</p>
           : <div className="cards">{view.stops.active.map((st) => <StopCardView key={st.stopId} stop={st} {...(onResume ? { onResume } : {})} />)}</div>}
         {view.stops.history.length > 0 ? (
           <>
@@ -121,9 +127,9 @@ export function StopScreenView({ view, onStop, onResume, onRelease, onReleaseDis
 
       <section className="stop-system">
         <h3>{s.systemTitle}</h3>
-        <p className="muted">{s.systemIntro}</p>
+        <p className="section-sub">{s.systemIntro}</p>
         <h4>{s.activeHalts}</h4>
-        {view.halts.active.length === 0 ? <p className="muted empty">{s.none}</p>
+        {view.halts.active.length === 0 ? <p className="muted empty">{s.noneHalts}</p>
           : <div className="cards">{view.halts.active.map((h) => <HaltCardView key={h.haltId} halt={h} {...(onRelease ? { onRelease } : {})} />)}</div>}
         {view.halts.history.length > 0 ? (
           <>
@@ -134,9 +140,9 @@ export function StopScreenView({ view, onStop, onResume, onRelease, onReleaseDis
       </section>
       <section className="stop-distrust">
         <h3>{s.distrustTitle}</h3>
-        <p className="muted">{s.distrustIntro}</p>
+        <p className="section-sub">{s.distrustIntro}</p>
         <h4>{s.activeDistrusts}</h4>
-        {view.distrusts.active.length === 0 ? <p className="muted empty">{s.none}</p>
+        {view.distrusts.active.length === 0 ? <p className="muted empty">{s.noneDistrusts}</p>
           : <div className="cards">{view.distrusts.active.map((d) => <DistrustCardView key={d.distrustId} distrust={d} {...(onReleaseDistrust ? { onRelease: onReleaseDistrust } : {})} />)}</div>}
         {view.distrusts.history.length > 0 ? (
           <>
@@ -147,7 +153,7 @@ export function StopScreenView({ view, onStop, onResume, onRelease, onReleaseDis
       </section>
       <section className="stop-audit">
         <h3>{s.auditTitle}</h3>
-        {view.audit.length === 0 ? <p className="muted">{s.auditEmpty}</p> : (
+        {view.audit.length === 0 ? <p className="muted empty">{s.auditEmpty}</p> : (
           <div className="table-wrap">
             <table>
               <tbody>
@@ -241,7 +247,7 @@ export function StopScreen({ worldId }: { worldId: string }) {
       {pending?.kind === 'resume' ? <NoteConfirm {...dialog} title={d.resumeTitle(pending.stop.scopeLabel)} text={d.resumeText} confirmLabel={d.confirmResume} /> : null}
       {pending?.kind === 'release' ? <NoteConfirm {...dialog} title={d.releaseTitle(pending.halt.scopeLabel)} text={d.releaseText} confirmLabel={d.confirmRelease} /> : null}
       {pending?.kind === 'distrust' ? <NoteConfirm {...dialog} title={d.releaseDistrustTitle(pending.distrust.scopeLabel)} text={d.releaseDistrustText} confirmLabel={d.confirmReleaseDistrust} /> : null}
-      <Load resource={resource} retry={retry}>
+      <Load shape="cards" resource={resource} retry={retry}>
         {(view) => (
           <StopScreenView
             view={view}

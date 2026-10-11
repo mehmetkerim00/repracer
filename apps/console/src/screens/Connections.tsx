@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ConnectionAccountView, ConnectionsView } from '@repracer/console-model';
+import { zoneName, type ConnectionAccountView, type ConnectionsView } from '@repracer/console-model';
 import { requestJson, useResource, worldPath } from '../api.ts';
 import { Badge, ErrorBox, errorText, Load, useMessages, Intro } from '../components.tsx';
 
@@ -28,7 +28,7 @@ export function ConnectionsScreen({ worldId }: { worldId: string }) {
       })
       .catch((e: unknown) => setError(errorText(e, m)));
   return (
-    <Load resource={view} retry={retry}>
+    <Load shape="cards" resource={view} retry={retry}>
       {(v) => (
         <>
           {/* Заголовок страницы — над карточками, как на остальных экранах */}
@@ -42,7 +42,7 @@ export function ConnectionsScreen({ worldId }: { worldId: string }) {
               const picked = chosen[c.channel] ?? (c.marketplaces[0] ? [c.marketplaces[0].id] : []);
               return (
                 <div key={c.channel} className="card">
-                  <h3>{c.channel} <Badge tone={tone(c.state)}>{c.stateText}</Badge></h3>
+                  <h3>{c.name} <Badge tone={tone(c.state)}>{c.stateText}</Badge></h3>
                   {c.missingText ? <p className="note">{c.missingText}</p> : null}
                   {c.channelLimitText ? <p className="notice">{c.channelLimitText}</p> : null}
                   {c.pendingText ? <p className="note">{c.pendingText}</p> : null}
@@ -51,7 +51,7 @@ export function ConnectionsScreen({ worldId }: { worldId: string }) {
                       .then(() => retry()).catch((e: unknown) => setError(errorText(e, m)))}>{c.cancelLabel}</button>
                   ) : null}
                   {c.canConnect ? (
-                    <p>
+                    <p className="connect-row">
                       {c.marketplaces.map((mk) => (
                         <label key={mk.id}>
                           <input type="checkbox" checked={picked.includes(mk.id)}
@@ -59,7 +59,7 @@ export function ConnectionsScreen({ worldId }: { worldId: string }) {
                           {mk.label}
                         </label>
                       ))}
-                      <button type="button" disabled={picked.length === 0} onClick={() => start(c.channel, picked)}>{c.connectLabel}</button>
+                      <button type="button" className="primary" disabled={picked.length === 0} onClick={() => start(c.channel, picked)}>{c.connectLabel}</button>
                     </p>
                   ) : null}
                 </div>
@@ -82,14 +82,20 @@ export function ConnectionsScreen({ worldId }: { worldId: string }) {
                 <div className="account-writers"><ExternalWriters worldId={worldId} account={a} onChanged={retry} /></div>
               </article>
             ))}
-            <p className="note">{v.tokenNote}</p>
           </div>
+          {/* Шаг 79: пустое рабочее пространство — не пустая страница: подключить нечем, только если сервер не настроил каналы */}
+          {v.channels.length === 0 && v.accounts.length === 0 ? <section className="card"><p className="muted empty">{m.ui.connections.noChannels}</p></section> : null}
+          {/* Как мы храним доступ — пояснением в рамке, а не строкой на фоне страницы */}
+          {v.accounts.length > 0 ? <p className="notice">{v.tokenNote}</p> : null}
           <AccountSettings worldId={worldId} />
         </>
       )}
     </Load>
   );
 }
+
+/** Шаг 79: пояса витрин Release 1.0 и США — по одному на смещение, чтобы подписи не повторялись; заданный иной пояс добавляется в список */
+const ZONE_CHOICES: readonly string[] = ['Europe/Berlin', 'Europe/London', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Phoenix', 'America/Los_Angeles', 'UTC'];
 
 /**
  * Шаг 69 (K1, K4): язык и пояс показа тенанта. Форма видна там, где у мира есть настройки тенанта (миры тенантов и демо); у мира
@@ -110,6 +116,9 @@ function AccountSettings({ worldId }: { worldId: string }) {
       .catch(() => setView(null));
   }, [worldId, m.locale]);
   if (!view) return null;
+  // Смещение — на сейчас: летнее и зимнее время различаются; часы браузера здесь — только для подписи
+  const nowIso = new Date().toISOString();
+  const zones = view.timeZoneSet && !ZONE_CHOICES.includes(view.timeZone) ? [view.timeZone, ...ZONE_CHOICES] : ZONE_CHOICES;
   const initialZone = view.timeZoneSet ? view.timeZone : '';
   const save = () => void requestJson<SettingsView>(worldPath(worldId, 'settings'), {
     method: 'POST', locale: m.locale,
@@ -131,11 +140,17 @@ function AccountSettings({ worldId }: { worldId: string }) {
               <option value="de">Deutsch</option>
             </select>
           </label>{' '}
-          <label>{t.timeZone}{' '}<input value={zone} placeholder={view.timeZoneSet ? '' : view.timeZone} onChange={(e) => setZone(e.currentTarget.value)} /></label>{' '}
+          <label>{t.timeZone}{' '}
+            {/* Шаг 79: пояс — выбором из списка с человеческими названиями, а не полем для кода IANA; значение наружу — тот же код */}
+            <select value={zone} onChange={(e) => setZone(e.currentTarget.value)}>
+              <option value="">{t.timeZoneFromStorefront(zoneName(m.locale, view.timeZone, nowIso))}</option>
+              {zones.map((z) => <option key={z} value={z}>{zoneName(m.locale, z, nowIso)}</option>)}
+            </select>
+          </label>{' '}
           <button type="button" onClick={save}>{t.save}</button>
         </p>
-      ) : <p>{view.locale === 'de' ? 'Deutsch' : 'English'} · {view.timeZone}</p>}
-      {view.timeZoneSet ? null : <p className="note">{t.timeZoneDefault(view.timeZone)}</p>}
+      ) : <p>{view.locale === 'de' ? 'Deutsch' : 'English'} · {zoneName(m.locale, view.timeZone, nowIso)}</p>}
+      {view.timeZoneSet ? null : <p className="note">{t.timeZoneDefault(zoneName(m.locale, view.timeZone, nowIso))}</p>}
       <p className="note">{view.canChange ? t.timeZoneHint : t.readOnly}</p>
       {note ? <p className="notice">{note}</p> : null}
     </section>

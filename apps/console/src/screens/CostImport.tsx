@@ -4,7 +4,7 @@ import type { BoundsIndexView } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
 import type { JobCreatedResponse } from '../api-types.ts';
 import { JobProgress } from './Jobs.tsx';
-import { ErrorBox, errorText, Load, useMessages } from '../components.tsx';
+import { ErrorBox, errorText, FileDrop, Load, useMessages } from '../components.tsx';
 
 /**
  * Р-134 (шаг 28): экран массового импорта себестоимости. Продавец видит предпросмотр ДО применения — что применится, что не
@@ -31,19 +31,26 @@ export function CostImportPreview({ view, onMapping, onEncoding }: {
   const t = m.ui.costImport;
   return (
     <section className={`import-preview ${view.tone}`}>
+      {/* Шаг 79: предпросмотр — карточками: сводка и источник, выбор колонок, строки, пропущенное */}
+      <div className="card summary-card">
       <p className="headline">{view.headline}</p>
       <p className="source">{t.sourceRead(view.source.format, view.source.delimiter)} · {view.source.name}</p>
       {view.source.encoding ? (
         <p className={`source ${view.source.encodingConfident ? '' : 'warn'}`}>
-          {t.encodingRead(view.source.encoding, view.source.encodingConfident)}
+          {/* Шаг 79 (ревью): уверенно прочитанная кодировка — подписью у выбора, а не «UTF-8 [UTF-8 ▾]» дважды */}
+          {onEncoding && view.source.encodingConfident ? null : t.encodingRead(view.source.encoding, view.source.encodingConfident)}
           {onEncoding ? (
-            <select value={view.source.encoding} onChange={(e) => onEncoding(e.currentTarget.value)}>
-              {view.encodings.map((e) => <option key={e} value={e}>{e}</option>)}
-            </select>
+            <label>{view.source.encodingConfident ? t.encodingLabel : null}{' '}
+              <select value={view.source.encoding} onChange={(e) => onEncoding(e.currentTarget.value)}>
+                {view.encodings.map((e) => <option key={e} value={e}>{e}</option>)}
+              </select>
+            </label>
           ) : null}
         </p>
       ) : null}
       {view.blocked ? <p className="notice warn">{view.blocked}</p> : null}
+      </div>
+      {view.columns.length > 0 || onMapping ? <div className="card">
       {view.columns.length > 0 ? (
         <>
           <h4>{t.columnsTitle}</h4>
@@ -72,22 +79,23 @@ export function CostImportPreview({ view, onMapping, onEncoding }: {
           ))}
         </ul>
       ) : null}
+      </div> : null}
       {view.rows.length > 0 ? (
         <>
-          <h4>{t.rowsTitle(view.rows.length, view.summary.apply)}</h4>
           <div className="table-wrap">
+          <div className="table-head"><strong>{t.rowsTitle(view.rows.length, view.summary.apply)}</strong></div>
           <table>
             <thead>
-              <tr><th>{t.columns.line}</th><th>{t.columns.offer}</th><th>{t.columns.key}</th><th>{t.columns.cost}</th><th>{t.columns.fee}</th></tr>
+              <tr><th className="num">{t.columns.line}</th><th>{t.columns.offer}</th><th>{t.columns.key}</th><th className="num">{t.columns.cost}</th><th className="num">{t.columns.fee}</th></tr>
             </thead>
             <tbody>
               {view.rows.map((r) => (
                 <tr key={r.line}>
-                  <td>{r.line}</td>
-                  <td>{r.unit ? r.unit.label : m.ui.common.noValue}</td>
+                  <td className="num">{r.line}</td>
+                  <td className="offer">{r.unit ? r.unit.label : m.ui.common.noValue}</td>
                   <td>{r.offerKey}</td>
-                  <td>{r.cost}</td>
-                  <td>{r.fee ?? m.ui.common.noValue}</td>
+                  <td className="num money">{r.cost}</td>
+                  <td className="num">{r.fee ?? m.ui.common.noValue}</td>
                 </tr>
               ))}
             </tbody>
@@ -96,7 +104,7 @@ export function CostImportPreview({ view, onMapping, onEncoding }: {
         </>
       ) : null}
       {view.skipped.length > 0 ? (
-        <>
+        <div className="card">
           <h4>{t.skippedTitle}</h4>
           <ul className="skipped">
             {view.skipped.map((g) => (
@@ -106,7 +114,7 @@ export function CostImportPreview({ view, onMapping, onEncoding }: {
               </li>
             ))}
           </ul>
-        </>
+        </div>
       ) : null}
       {view.stillWithoutCost > 0 ? <p className="notice">{t.stillWithoutCost(view.stillWithoutCost)}</p> : null}
       <p className="notice">{t.allOrNothing}</p>
@@ -116,17 +124,19 @@ export function CostImportPreview({ view, onMapping, onEncoding }: {
   );
 }
 
-export function CostImportPanel({ worldId, canEdit }: { worldId: string; canEdit: boolean }) {
+export function CostImportPanel({ worldId, canEdit, asPage = false }: { worldId: string; canEdit: boolean; asPage?: boolean }) {
   const m = useMessages();
   const t = m.ui.costImport;
-  if (!canEdit) return <section className="cost-import"><h3>{t.pageTitle}</h3><p className="notice">{t.noRight}</p></section>;
-  return <CostImportForm worldId={worldId} />;
+  if (!canEdit) return <section className="cost-import">{asPage ? <h2>{t.pageTitle}</h2> : <h3>{t.pageTitle}</h3>}<p className="notice">{t.noRight}</p></section>;
+  return <CostImportForm worldId={worldId} asPage={asPage} />;
 }
 
-function CostImportForm({ worldId }: { worldId: string }) {
+function CostImportForm({ worldId, asPage }: { worldId: string; asPage: boolean }) {
   const m = useMessages();
   const t = m.ui.costImport;
   const [file, setFile] = useState<{ name: string; content: string } | null>(null);
+  // Шаг 79: сервер ждёт имя файла полем `fileName`; страница слала `name`, и предпросмотр, задание и отчёт звали любой файл «import»
+  const wire = (f: { name: string; content: string }) => ({ fileName: f.name, content: f.content });
   const [view, setView] = useState<CostImportView | null>(null);
   // Ревью шага 28, находка 8: выбор продавца сильнее подсказки — он уходит на сервер и предпросмотр строится заново
   const [mapping, setMapping] = useState<Record<string, number | null> | null>(null);
@@ -152,7 +162,7 @@ function CostImportForm({ worldId }: { worldId: string }) {
     const chosenEncoding = override?.encoding === undefined ? encoding : override.encoding;
     try {
       setView(await requestJson<CostImportView>(worldPath(worldId, 'cost-import', 'plan'),
-        { method: 'POST', body: { ...file, ...(chosenMapping ? { mapping: chosenMapping } : {}), ...(chosenEncoding ? { encoding: chosenEncoding } : {}) }, locale: m.locale }));
+        { method: 'POST', body: { ...wire(file), ...(chosenMapping ? { mapping: chosenMapping } : {}), ...(chosenEncoding ? { encoding: chosenEncoding } : {}) }, locale: m.locale }));
     } catch (e) { setError(errorText(e, m)); } finally { setBusy(false); }
   };
   const changeMapping = (field: string, index: number | null) => {
@@ -171,30 +181,24 @@ function CostImportForm({ worldId }: { worldId: string }) {
     try {
       // Р-139: применение идёт фоновым заданием — дальше продавец смотрит на ход, а файл в браузере больше не нужен
       const r = await requestJson<JobCreatedResponse>(worldPath(worldId, 'cost-import', 'apply'),
-        { method: 'POST', body: { ...file, ...(mapping ? { mapping } : {}), ...(encoding ? { encoding } : {}), fingerprint: view.fingerprint, confirmed: true }, locale: m.locale });
+        { method: 'POST', body: { ...wire(file), ...(mapping ? { mapping } : {}), ...(encoding ? { encoding } : {}), fingerprint: view.fingerprint, confirmed: true }, locale: m.locale });
       setMessage(r.message); setJobId(r.jobId); setView(null); setFile(null); setMapping(null);
     } catch (e) { setError(errorText(e, m)); } finally { setBusy(false); }
   };
 
   return (
     <section className="cost-import">
-      <h3>{t.pageTitle}</h3>
+      {/* Шаг 79: на своём экране — заголовок страницы, внутри онбординга — заголовок раздела */}
+      {asPage ? <h2>{t.pageTitle}</h2> : <h3>{t.pageTitle}</h3>}
+      <p className="subtitle">{m.ui.app.subtitles['cost-import']}</p>
       {error ? <ErrorBox message={error} /> : null}
       {message ? <p className="notice" role="status">{message}</p> : null}
       {jobId ? <JobProgress worldId={worldId} jobId={jobId} /> : null}
-      {/* Шаг 77: своё поле выбора файла — кнопка браузера говорит на языке БРАУЗЕРА («Выберите файл»), а не консоли */}
-      <label className={`file-drop${busy ? ' disabled' : ''}`}>
-        <input type="file" className="visually-hidden" accept=".csv,.xlsx,text/csv" onChange={(e) => void choose(e.currentTarget)} disabled={busy} />
-        <svg className="file-drop-icon" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M12 17v-6" /><path d="m9.5 13.5 2.5-2.5 2.5 2.5" />
-        </svg>
-        <span className="file-drop-label">{t.file}</span>
-        {file ? <span className="file-drop-name">{file.name}</span> : null}
-      </label>
+      <FileDrop label={t.file} fileName={file ? file.name : null} disabled={busy} onChoose={(input) => void choose(input)} />
       <div className="buttons">
-        <button type="button" onClick={() => void plan()} disabled={busy || !file}>{t.plan}</button>
+        <button type="button" className={file && !view ? 'primary' : ''} onClick={() => void plan()} disabled={busy || !file}>{t.plan}</button>
         {view && !view.blocked && view.summary.apply > 0
-          ? <button type="button" className="danger" onClick={() => void apply()} disabled={busy}>{t.apply}</button>
+          ? <button type="button" className="primary" onClick={() => void apply()} disabled={busy}>{t.apply}</button>
           : null}
         {view ? <button type="button" onClick={() => { setView(null); setFile(null); setMapping(null); }} disabled={busy}>{t.back}</button> : null}
       </div>
@@ -208,8 +212,8 @@ export function CostImportScreen({ worldId }: { worldId: string }) {
   const m = useMessages();
   const [resource, retry] = useResource<BoundsIndexView>(worldPath(worldId, 'bounds'), m.locale);
   return (
-    <Load resource={resource} retry={retry}>
-      {(view) => <CostImportPanel worldId={worldId} canEdit={view.canEdit} />}
+    <Load shape="cards" resource={resource} retry={retry}>
+      {(view) => <CostImportPanel worldId={worldId} canEdit={view.canEdit} asPage />}
     </Load>
   );
 }

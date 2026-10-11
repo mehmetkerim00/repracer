@@ -1,6 +1,7 @@
 import { can, type MemberRole } from '@repracer/pricing-model';
 import type { ConnectionRow, PendingRequestRow } from '@repracer/pricing-store-pg';
 import type { Messages } from './i18n/index.ts';
+import { storefrontName } from './world.ts';
 
 /**
  * Р-175…Р-177 (шаг 43): экран «Подключение каналов». Продавец подключает канал САМ — кнопкой, согласием на стороне
@@ -101,6 +102,8 @@ export interface ConnectionChannelView {
   stateText: string;
   canConnect: boolean;
   connectLabel: string;
+  /** Название канала словом */
+  name: string;
   marketplaces: Array<{ id: string; label: string }>;
   missingText: string | null;
   pendingText: string | null;
@@ -213,7 +216,7 @@ export function connectionsView(
       discoveryText,
       channelAccountId: a.channelAccountId, channel: a.channel,
       // Шаг 64 (проход консоли): имя канала и витрины словами — «eBay · … · ebay.com», а не коды EBAY и EBAY_US
-      label: `${(m.values as Record<string, string | undefined>)[a.channel] ?? a.channel} · ${a.externalAccountId} · ${a.marketplaces.map((id) => t.marketplaces[id] ?? id).join(', ')}`, marketplaces: [...a.marketplaces],
+      label: `${(m.values as Record<string, string | undefined>)[a.channel] ?? a.channel} · ${a.externalAccountId} · ${a.marketplaces.map((id) => storefrontName(a.channel, id, m)).join(', ')}`, marketplaces: [...a.marketplaces],
       state, stateText: t.states[state] ?? state, progressText, authorizationText, offers: a.offers, unmanagedOffers: a.unmanagedOffers, shadowDecisions24h: a.shadowDecisions24h,
       // eBay не называет продавца (E-11): повторное согласие создало бы второй аккаунт того же продавца (находка 6 ревью шага 43)
       canReconnect: canManage && a.channel === 'AMAZON' && a.oauth,
@@ -231,10 +234,12 @@ export function connectionsView(
     const latest = rows.pending.find((p) => p.channel === c.channel && p.status !== 'PENDING') ?? null;
     const failed = latest && latest.status !== 'COMPLETED' && latest.failureCode !== 'CANCELLED' ? latest : null;
     const has = newest !== null;
+    // Шаг 79 (ревью): канал — словом («Amazon», «eBay»), а не кодом AMAZON / EBAY — и в заголовке, и на кнопке
+    const name = (m.values as Record<string, string | undefined>)[c.channel] ?? c.channel;
     return {
-      channel: c.channel, state, stateText: t.states[state] ?? state,
+      channel: c.channel, name, state, stateText: t.states[state] ?? state,
       canConnect: canManage && c.platformMissing.length === 0 && pending === null,
-      connectLabel: has ? t.connectAnother(c.channel) : t.connect(c.channel),
+      connectLabel: has ? t.connectAnother(name) : t.connect(name),
       marketplaces: c.marketplaces.map((id) => ({ id, label: t.marketplaces[id] ?? id })),
       missingText: c.platformMissing.length > 0 ? t.platformMissing(c.platformMissing.map((code) => t.missing[code] ?? code).join('; ')) : null,
       pendingText: pending ? t.pending(pending.expiresAt) : failed ? t.failed(t.failures[failed.failureCode ?? failed.status] ?? failed.failureCode ?? failed.status) : null,

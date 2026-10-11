@@ -4,6 +4,29 @@ import type { EnableResult } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
 import { Badge, Cell, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, useMessages } from '../components.tsx';
 
+/** Шаг 79: колонки, которые продавец может скрыть; предложение, цена, пол, статус и действия — всегда */
+const OPTIONAL_COLUMNS = ['ceiling', 'strategy', 'lastChange', 'nextCheck', 'channel'] as const;
+type OptionalColumn = (typeof OPTIONAL_COLUMNS)[number];
+const VIEW_KEY = 'repracer.products.view';
+/**
+ * «Следующая проверка» у всех предложений сейчас одна и та же («нет данных») — по умолчанию скрыта; «Канал сообщает» — когда есть что
+ * сообщить. «Последнее изменение» по умолчанию скрыто: оно есть на «Why this price» и в ленте цен, а таблица должна помещаться в окно 1440
+ * без прокрутки под закреплённую колонку действий (визуальное ревью шага 79); включается в «Columns»
+ */
+function defaultColumns(view: ProductListView): Record<OptionalColumn, boolean> {
+  return { ceiling: true, strategy: true, lastChange: false, nextCheck: false, channel: view.rows.some((r) => r.channelNotes.length > 0) };
+}
+/** Выбор колонок и плотность — удобство одного зрителя: браузерное хранилище, без него — умолчания (шаг 79) */
+function readView(view: ProductListView): { columns: Record<OptionalColumn, boolean>; compact: boolean } {
+  const fallback = { columns: defaultColumns(view), compact: false };
+  try {
+    const raw = globalThis.localStorage?.getItem(VIEW_KEY);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw) as { columns?: Partial<Record<OptionalColumn, boolean>>; compact?: boolean };
+    return { columns: { ...fallback.columns, ...(parsed.columns ?? {}) }, compact: parsed.compact === true };
+  } catch { return fallback; }
+}
+
 /** Экран A: действующий пол — главная цифра, min_price — его составляющая (шаг 12, F) */
 export function ProductsView({ view, onEnable, query, onQuery }: {
   view: ProductListView; onEnable?: (row: ProductRow) => void; query?: ListQuery; onQuery?: (q: ListQuery) => void;
@@ -11,19 +34,41 @@ export function ProductsView({ view, onEnable, query, onQuery }: {
   const m = useMessages();
   const p = m.ui.products;
   const c = p.columns;
+  const [shown, setShown] = useState(() => readView(view));
+  const update = (next: typeof shown) => {
+    setShown(next);
+    try { globalThis.localStorage?.setItem(VIEW_KEY, JSON.stringify(next)); } catch { /* без хранилища — до перезагрузки страницы */ }
+  };
+  const col = shown.columns;
   return (
     <section>
       <h2>{p.title}</h2>
-      {/* Шаг 64: у пустого каталога — не строка нулей и шапка таблицы, а объяснение и путь */}
-      {view.rows.length > 0 ? <p className="muted">{p.totals(view.totals)}</p> : null}
+      <p className="subtitle">{m.ui.app.subtitles.products}</p>
       {/* Задача D шага 34: новый тенант без данных видит, ПОЧЕМУ пусто и куда идти, а не пустую таблицу */}
       {view.rows.length === 0 ? <p className="notice">{m.ui.onboarding.empty.products} <a href={href(view.worldId, 'onboarding')}>{m.ui.onboarding.empty.startHere}</a></p> : null}
       {view.rows.length > 0 ? <div className="table-wrap">
-        <table className="products sticky-end">
+        {/* Шаг 79: итоги и вид таблицы — в её шапке; колонки выбираются, строки бывают компактными */}
+        <div className="table-head">
+          <span>{p.totals(view.totals)}</span>
+          <span className="view-options">
+            <details className="column-picker">
+              <summary>{p.viewOptions.columns}</summary>
+              <div className="menu">
+                {OPTIONAL_COLUMNS.map((k) => (
+                  <label key={k}><input type="checkbox" checked={col[k]} onChange={(e) => update({ ...shown, columns: { ...col, [k]: e.currentTarget.checked } })} /> {c[k]}</label>
+                ))}
+              </div>
+            </details>
+            <label className="compact-toggle"><input type="checkbox" checked={shown.compact} onChange={(e) => update({ ...shown, compact: e.currentTarget.checked })} /> {p.viewOptions.compact}</label>
+          </span>
+        </div>
+        <table className={`products sticky-end${shown.compact ? ' compact' : ''}`}>
           <thead>
             <tr>
-              <th>{c.unit}</th><th className="num">{c.current}</th><th className="num">{c.floor}</th><th className="num">{c.ceiling}</th><th>{c.strategy}</th>
-              <th>{c.enabled}</th><th>{c.applying}</th><th>{c.lastChange}</th><th>{c.nextCheck}</th><th>{c.channel}</th><th />
+              {/* Шаг 79 (ревью): статус — сразу после предложения: широкая таблица листается под закреплённой колонкой действий, и статус не прячется */}
+              <th>{c.unit}</th><th>{c.status}</th><th className="num">{c.current}</th><th className="num">{c.floor}</th>{col.ceiling ? <th className="num">{c.ceiling}</th> : null}
+              {col.strategy ? <th>{c.strategy}</th> : null}{col.lastChange ? <th>{c.lastChange}</th> : null}
+              {col.nextCheck ? <th>{c.nextCheck}</th> : null}{col.channel ? <th>{c.channel}</th> : null}<th />
             </tr>
           </thead>
           <tbody>
@@ -32,23 +77,25 @@ export function ProductsView({ view, onEnable, query, onQuery }: {
                 <td className="offer">
                   <strong>{r.unit.label}</strong>
                   {/* Шаг 78: номер товара канала — приглушённо, состояние — отдельной пилюлей */}
-                  <div className="product-ref">{p.productId(r.unit.channelProductRef, r.unit.gtin)} {r.unit.condition ? <Badge tone="off">{r.unit.condition}</Badge> : null}</div>
+                  {/* Шаг 79: «новый» — обычное состояние, пилюлю не показываем; иное — словами на языке экрана, а не кодом канала */}
+                  <div className="product-ref">{p.productId(r.unit.channelProductRef, r.unit.gtin)} {r.unit.condition && r.unit.condition.toLowerCase() !== 'new'
+                    ? <Badge tone="off">{(p.conditions as Record<string, string | undefined>)[r.unit.condition.toLowerCase()] ?? r.unit.condition}</Badge> : null}</div>
                 </td>
+                {/* Шаг 79: «On» и «In progress» — одна колонка: включённость всегда, ход — только когда что-то идёт */}
+                <td className="status-cell"><Cell cell={r.enabled} />{r.applying.tone !== 'ok' ? <Cell cell={r.applying} /> : null}</td>
                 <td className="num money">{r.currentPrice}</td>
                 <td className="num floor">
                   <strong>{r.floor.amount}</strong>
-                  <div className="muted small">{r.floor.parts}</div>
+                  <div className="muted small floor-parts">{r.floor.parts}</div>
                 </td>
-                <td className="num">{r.maxPrice}</td>
+                {col.ceiling ? <td className="num">{r.maxPrice}</td> : null}
                 {/* Шаг 78: источник пилюлей и короткое имя; подробности стратегии — подсказкой и на «Why this price» */}
-                <td className="strategy" title={r.strategy.detail}>
+                {col.strategy ? <td className="strategy" title={r.strategy.detail}>
                   {r.strategy.competitorDerived ? <Badge tone="progress">{p.competitorBadge}</Badge> : null} <span className="strategy-name">{r.strategy.label}</span>
-                </td>
-                <td><Cell cell={r.enabled} /></td>
-                <td><Cell cell={r.applying} /></td>
-                <td><Cell cell={r.lastChange} /></td>
-                <td><Cell cell={r.nextCheck} /></td>
-                <td>{r.channelNotes.length === 0 ? '–' : r.channelNotes.map((n) => <Cell key={n.code} cell={n} />)}</td>
+                </td> : null}
+                {col.lastChange ? <td><Cell cell={r.lastChange} /></td> : null}
+                {col.nextCheck ? <td><Cell cell={r.nextCheck} /></td> : null}
+                {col.channel ? <td>{r.channelNotes.length === 0 ? '–' : r.channelNotes.map((n) => <Cell key={n.code} cell={n} />)}</td> : null}
                 {/* Шаг 78: одна колонка действий — основная «Why this price», под ней мелкая вторичная «Bounds» */}
                 <td className="actions">
                   {r.latestDecisionId
@@ -69,20 +116,25 @@ export function ProductsView({ view, onEnable, query, onQuery }: {
 }
 
 /** Итог попытки включения: отказы, предупреждения и явное «всё равно включить» (шаг 12, G) */
-export function EnableResultView(props: { unit: string; result: EnableResult | null; busy: boolean; error: string | null; onAcknowledge: () => void; onClose: () => void }) {
+export function EnableResultView(props: { unit: string; worldId?: string; result: EnableResult | null; busy: boolean; error: string | null; onAcknowledge: () => void; onClose: () => void }) {
   const m = useMessages();
   const d = m.ui.app.dialog;
   const { result } = props;
+  // Шаг 79 (ревью): заголовок говорит исход, а не повторяет вопрос после отказа; отказ — красной пилюлей
+  const refused = result !== null && !result.enabled && result.problems.length > 0;
+  const title = result?.enabled ? d.enabledTitle(props.unit) : refused ? d.refusedTitle(props.unit) : d.enableTitle(props.unit);
   return (
     <div className="confirm" role="dialog" aria-modal="false" aria-labelledby="enable-title">
-      <h3 id="enable-title">{d.enableTitle(props.unit)}</h3>
+      <h3 id="enable-title">{title}{refused ? <> <Badge tone="stop">{d.refused}</Badge></> : result?.enabled ? <> <Badge tone="ok">{d.enabledBadge}</Badge></> : null}</h3>
       {props.error ? <ErrorBox message={props.error} /> : null}
       {!result ? <p className="loading" role="status">{d.busy(8)}</p> : null}
       {result?.enabled ? <p className="notice" role="status">{d.enabled}</p> : null}
       {result && result.problems.length > 0 ? (
         <>
           <p><strong>{d.enableProblems}</strong></p>
-          <ul>{result.problems.map((r) => <li key={r.code}><ReasonLine reason={r} /></li>)}</ul>
+          <ul className="problems">{result.problems.map((r) => <li key={r.code}><ReasonLine reason={r} /></li>)}</ul>
+          {props.worldId && result.problems.some((r) => r.code === 'COST_REQUIRED')
+            ? <p><a className="row-link" href={href(props.worldId, 'cost-import')}>{d.addCost}</a></p> : null}
         </>
       ) : null}
       {result && !result.enabled && result.problems.length === 0 && result.warnings.length > 0 ? (
@@ -95,7 +147,7 @@ export function EnableResultView(props: { unit: string; result: EnableResult | n
         {result && !result.enabled && result.problems.length === 0 && result.warnings.length > 0
           ? <button type="button" className="danger" disabled={props.busy} onClick={props.onAcknowledge}>{d.enableAnyway}</button>
           : null}
-        <button type="button" onClick={props.onClose} disabled={props.busy}>{d.cancel}</button>
+        <button type="button" onClick={props.onClose} disabled={props.busy}>{result ? d.close : d.cancel}</button>
       </div>
     </div>
   );
@@ -128,8 +180,8 @@ export function ProductsScreen({ worldId }: { worldId: string }) {
 
   return (
     <>
-      {row ? <EnableResultView unit={row.unit.label} result={result} busy={busy} error={error} onAcknowledge={() => void enable(row, true)} onClose={close} /> : null}
-      <Load resource={resource} retry={retry}>
+      {row ? <EnableResultView unit={row.unit.label} worldId={worldId} result={result} busy={busy} error={error} onAcknowledge={() => void enable(row, true)} onClose={close} /> : null}
+      <Load shape="table" resource={resource} retry={retry}>
         {(view) => <ProductsView view={view} query={query} onQuery={setQuery} onEnable={(r) => { setRow(r); setResult(null); void enable(r, false); }} />}
       </Load>
     </>

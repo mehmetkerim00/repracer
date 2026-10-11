@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { parseAmountInput, parsePercentInput, selectionAfterPaging, type BoundAdjust, type BoundsDiffView, type BoundsEditRequest } from '@repracer/console-model';
 import type { BoundsIndexItem, JobCreatedResponse } from '../api-types.ts';
 import { requestJson, worldPath } from '../api.ts';
-import { Badge, ErrorBox, errorText, Gaps, useMessages } from '../components.tsx';
+import { ErrorBox, errorText, Gaps, useMessages } from '../components.tsx';
 import type { BulkJobView } from '@repracer/console-model';
 import { JobProgress } from './Jobs.tsx';
 
@@ -39,7 +39,8 @@ export function BoundsDiffTable({ view }: { view: BoundsDiffView }) {
           <tbody>
             {view.rows.map((r) => (
               <tr key={r.unit.writeScopeId}>
-                <td><Badge tone={r.tone}>{r.unit.label}</Badge></td>
+                {/* Шаг 79 (ревью): предложение — текстом; внимание к строке — в колонке пометок, а не цветом названия */}
+                <td className={`offer${r.tone === 'warn' ? ' attention' : ''}`}>{r.unit.label}</td>
                 <td className="num">{r.minBefore}</td>
                 <td className="num">{r.minAfter}{r.minChange ? <div className="small muted">{r.minChange}</div> : null}</td>
                 <td className="num">{r.maxBefore}</td>
@@ -135,6 +136,8 @@ function BoundsEditForm({ worldId, items, total }: { worldId: string; items: rea
   return (
     <section className="bounds-edit">
       <h3>{t.pageTitle}</h3>
+      {/* Шаг 79: выбор предложений и правка — карточкой; экран различий — своей таблицей ниже */}
+      <div className="card">
       <h4>{t.select}</h4>
       {/* Р-136, Р-140: «всё» — это весь каталог, а не показанная страница; раскрывает выбор сервер */}
       <label className="whole-catalog">
@@ -148,7 +151,7 @@ function BoundsEditForm({ worldId, items, total }: { worldId: string; items: rea
       <p className="notice" role="status">
         {wholeCatalog ? t.selectionWhole(total) : selected.length === 0 ? t.selectionNone : t.selectionCount(selected.length, total)}
       </p>
-      <p className="small muted">{t.selectionReset}</p>
+      <p className="section-sub">{t.selectionReset}</p>
       <ul className="index pick-list">
         {items.map((i) => (
           <li key={i.writeScopeId}><label><input type="checkbox" checked={selected.includes(i.writeScopeId)}
@@ -160,9 +163,10 @@ function BoundsEditForm({ worldId, items, total }: { worldId: string; items: rea
       <div className="buttons">
         {diff === null
           ? <button type="button" disabled={busy || (selected.length === 0 && !wholeCatalog)} onClick={() => void plan()}>{t.plan}</button>
-          : <><button type="button" className="danger" disabled={busy} onClick={() => void apply()}>{t.apply}</button><button type="button" disabled={busy} onClick={reset}>{t.back}</button></>}
+          : <><button type="button" className="primary" disabled={busy} onClick={() => void apply()}>{t.apply}</button><button type="button" disabled={busy} onClick={reset}>{t.back}</button></>}
       </div>
-      {diff ? <p className="small muted">{t.shownRows(diff.view.shown.rows, diff.view.shown.of)}</p> : null}
+      {diff ? <p className="section-sub">{t.shownRows(diff.view.shown.rows, diff.view.shown.of)}</p> : null}
+      </div>
       {error ? <ErrorBox message={error} /> : null}
       {message ? <p className="notice" role="status">{message}</p> : null}
       {planJobId && !diff ? <JobProgress worldId={worldId} jobId={planJobId} onFinished={planReady} /> : null}

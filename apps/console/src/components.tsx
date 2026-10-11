@@ -145,7 +145,39 @@ export function Gaps({ gaps }: { gaps: readonly Gap[] }) {
 }
 
 /** Ожидание с обратным отсчётом до тайм-аута: после него — ошибка, не вечный спиннер */
-export function Loading({ startedAt }: { startedAt: number }) {
+/** Шаг 79: форма скелета загрузки — как у экрана, который придёт: таблица, карточки, таймлайн шагов, статистика тени */
+export type SkeletonShape = 'table' | 'cards' | 'trace' | 'stats';
+
+function Skeleton({ shape }: { shape: SkeletonShape }) {
+  const bar = (w: string, key?: number) => <span key={key} className="sk-bar" style={{ width: w }} />;
+  if (shape === 'table') {
+    return (
+      <div className="skeleton sk-table" aria-hidden="true">
+        <div className="sk-row sk-head">{bar('18%')}{bar('12%')}{bar('12%')}{bar('16%')}{bar('10%')}</div>
+        {[0, 1, 2, 3, 4, 5].map((i) => <div key={i} className="sk-row">{bar('22%')}{bar('9%')}{bar('9%')}{bar('18%')}{bar('12%')}</div>)}
+      </div>
+    );
+  }
+  if (shape === 'stats') {
+    return (
+      <div className="skeleton" aria-hidden="true">
+        <div className="sk-stats">{[0, 1, 2, 3].map((i) => <div key={i} className="sk-card">{bar('50%')}{bar('35%')}</div>)}</div>
+        <div className="sk-card sk-wide">{bar('70%')}{bar('55%')}{bar('62%')}</div>
+      </div>
+    );
+  }
+  if (shape === 'trace') {
+    return (
+      <div className="skeleton sk-trace" aria-hidden="true">
+        <div className="sk-card sk-wide">{bar('60%')}</div>
+        {[0, 1, 2, 3].map((i) => <div key={i} className="sk-step"><span className="sk-dot" /><div className="sk-card">{bar('30%')}{bar('75%')}{bar('55%')}</div></div>)}
+      </div>
+    );
+  }
+  return <div className="skeleton sk-cards" aria-hidden="true">{[0, 1, 2].map((i) => <div key={i} className="sk-card">{bar('40%')}{bar('80%')}{bar('65%')}</div>)}</div>;
+}
+
+export function Loading({ startedAt, shape = 'cards' }: { startedAt: number; shape?: SkeletonShape }) {
   const m = useMessages();
   const [now, setNow] = useState(startedAt);
   useEffect(() => {
@@ -153,24 +185,69 @@ export function Loading({ startedAt }: { startedAt: number }) {
     return () => clearInterval(timer);
   }, []);
   const left = Math.max(0, Math.ceil((startedAt + REQUEST_TIMEOUT_MS - now) / 1000));
-  return <p className="loading" role="status">{m.ui.app.loading(left)}</p>;
+  return (
+    <div className="loading-block">
+      <p className="loading" role="status">{m.ui.app.loading(left)}</p>
+      <Skeleton shape={shape} />
+    </div>
+  );
 }
 
-export function ErrorBox({ message, onRetry }: { message: string; onRetry?: () => void }) {
+export function ErrorBox({ message, onRetry, title }: { message: string; onRetry?: () => void; title?: string }) {
   const m = useMessages();
   return (
-    <div className="error" role="alert">
+    <div className={`error${title ? ' load-error' : ''}`} role="alert">
+      {title ? <h3>{title}</h3> : null}
       <p>{message}</p>
       {onRetry ? <button type="button" onClick={onRetry}>{m.ui.app.retry}</button> : null}
     </div>
   );
 }
 
-export function Load<T>({ resource, retry, children }: { resource: Resource<T>; retry: () => void; children: (data: T) => ReactNode }) {
+export function Load<T>({ resource, retry, children, shape, notFound }: {
+  resource: Resource<T>; retry: () => void; children: (data: T) => ReactNode; shape?: SkeletonShape;
+  /** Что показать, если сервер ответил 404: «не найдено» с путём назад, а не «не загрузилось» с бесполезным повтором */
+  notFound?: ReactNode;
+}) {
   const m = useMessages();
-  if (resource.state === 'loading') return <Loading startedAt={resource.startedAt} />;
-  if (resource.state === 'error') return <ErrorBox message={errorText(resource.error, m)} onRetry={retry} />;
+  if (resource.state === 'loading') return <Loading startedAt={resource.startedAt} {...(shape ? { shape } : {})} />;
+  if (resource.state === 'error') {
+    const failure = resource.error instanceof ApiError ? resource.error.failure : null;
+    const status = failure && 'status' in failure ? failure.status : null;
+    if (status === 404 && notFound) return <>{notFound}</>;
+    // Шаг 79: экран, который не загрузился, — карточкой с заголовком и причиной; повтор — только там, где он может помочь (сеть, 5xx)
+    const retryable = status === null || status >= 500;
+    return <ErrorBox title={m.ui.app.loadFailedTitle} message={errorText(resource.error, m)} {...(retryable ? { onRetry: retry } : {})} />;
+  }
   return <>{children(resource.data)}</>;
+}
+
+/**
+ * Шаг 77, 79: своё поле выбора файла — кнопка браузера говорит на языке БРАУЗЕРА («Выберите файл»), а не консоли. Одна площадка у
+ * импорта себестоимости и у файла остатков
+ */
+export function FileDrop({ label, fileName, disabled = false, onChoose }: { label: string; fileName: string | null; disabled?: boolean; onChoose: (input: HTMLInputElement) => void }) {
+  return (
+    <label className={`file-drop${disabled ? ' disabled' : ''}`}>
+      <input type="file" className="visually-hidden" accept=".csv,.xlsx,text/csv" onChange={(e) => onChoose(e.currentTarget)} disabled={disabled} />
+      <svg className="file-drop-icon" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M12 17v-6" /><path d="m9.5 13.5 2.5-2.5 2.5 2.5" />
+      </svg>
+      <span className="file-drop-label">{label}</span>
+      {fileName ? <span className="file-drop-name">{fileName}</span> : null}
+    </label>
+  );
+}
+
+/** Шаг 79: «не найдено» — карточкой с заголовком, пояснением и путём назад (мир, экран, решение) */
+export function NotFound({ title, text, back, href: to = '#/' }: { title: string; text: string; back: string; href?: string }) {
+  return (
+    <section className="card not-found">
+      <h2>{title}</h2>
+      <p className="subtitle">{text}</p>
+      <p className="back"><a href={to}>{back}</a></p>
+    </section>
+  );
 }
 
 /** Подтверждение действия с заметкой: без заметки второе нажатие недоступно */
@@ -219,6 +296,8 @@ export function NoteConfirm(props: {
 export function Pager({ page, query, onQuery }: { page: PageInfo; query: ListQuery; onQuery: (q: ListQuery) => void }) {
   const m = useMessages();
   const f = m.ui.feed;
+  // Шаг 79: под пустым списком листать нечего — переключатель страниц не показывается
+  if (page.total === 0) return null;
   return (
     <div className="buttons">
       <span className="small muted">{page.text}</span>

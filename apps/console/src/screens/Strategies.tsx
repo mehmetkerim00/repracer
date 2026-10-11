@@ -34,20 +34,23 @@ export const EMPTY_DRAFT: DraftForm = {
   holdWhenWinning: true, atBound: 'CAP', scope: 'VISIBLE_TOP_N', compareLanded: false,
 };
 
-const amountText = (minor: number | undefined) => (minor === undefined ? '' : (minor / 100).toFixed(2));
-const percentText = (bp: number | undefined) => (bp === undefined ? '' : String(bp / 100));
+// Шаг 79 (ревью): суммы черновика — в формате языка экрана («0,05» по-немецки); разбор принимает и запятую, и точку
+const amountText = (minor: number | undefined, locale = 'en') => (minor === undefined ? '' : (minor / 100).toFixed(2).replace('.', locale === 'de' ? ',' : '.'));
+const percentText = (bp: number | undefined, locale = 'en') => (bp === undefined ? '' : String(bp / 100).replace('.', locale === 'de' ? ',' : '.'));
+/** Пустой черновик на языке экрана */
+export const emptyDraft = (locale: string): DraftForm => ({ ...EMPTY_DRAFT, undercut: amountText(5, locale), deadband: '0' });
 /** Неразборчивый ввод уходит как есть — сервер назовёт поле и проблему */
 const minorOf = (text: string): number | string => parseAmountInput(text) ?? text;
 const bpOf = (text: string): number | string => parsePercentInput(text) ?? text;
 
 /** Черновик новой версии: параметры последней версии стратегии */
-export function formOf(item: StrategyListItem): DraftForm {
+export function formOf(item: StrategyListItem, locale = 'en'): DraftForm {
   const p = item.draft.params as unknown as Record<string, unknown>;
   const type = p.type as DraftForm['type'];
   return {
     ...EMPTY_DRAFT, strategyId: item.strategyId, baseVersion: item.version, name: item.draft.name, type,
-    price: amountText(p.priceMinor as number | undefined), targetMargin: percentText(p.targetMarginBp as number | undefined),
-    undercut: amountText(p.undercutMinor as number | undefined), deadband: amountText(item.draft.deadbandMinor),
+    price: amountText(p.priceMinor as number | undefined, locale), targetMargin: percentText(p.targetMarginBp as number | undefined, locale),
+    undercut: amountText(p.undercutMinor as number | undefined, locale), deadband: amountText(item.draft.deadbandMinor, locale),
     holdWhenWinning: p.holdWhenWinning === true, atBound: p.atBound === 'HOLD' ? 'HOLD' : 'CAP', scope: p.scope === 'MARKET' ? 'MARKET' : 'VISIBLE_TOP_N',
     compareLanded: p.compareLanded === true,
   };
@@ -71,14 +74,15 @@ export function PreviewTable({ view }: { view: StrategyPreviewView }) {
       <p className="muted small">{view.draft.detail}</p>
       <p className="headline">{view.headline}</p>
       {view.saveBlocked ? <p className="notice" role="alert">{view.saveBlocked}</p> : null}
+      {/* Шаг 79 (ревью): плотная таблица и переносимое «на момент» — колонка «почему» не уходит за край рамки */}
       <div className="table-wrap">
-        <table>
+        <table className="dense">
           <thead><tr><th>{c.offer}</th><th>{c.asOf}</th><th className="num">{c.current}</th><th className="num">{c.proposed}</th><th className="num">{c.final}</th><th className="num">{c.change}</th><th>{c.outcome}</th><th>{c.reason}</th></tr></thead>
           <tbody>
             {view.rows.map((r) => (
               <tr key={r.unit.writeScopeId} className={r.dangerous ? 'dangerous' : ''}>
                 <td className="offer">{r.unit.label}</td>
-                <td className="small nowrap"><When value={r.asOf} /></td>
+                <td className="small as-of"><When value={r.asOf} /></td>
                 <td className="num">{r.current}</td>
                 <td className="num">{r.proposed ?? '–'}</td>
                 <td className="num">{r.final ?? '–'}</td>
@@ -104,7 +108,7 @@ export function SaveConfirm({ offers, busy, onConfirm, onCancel, assign = false 
       <h3 id="strategy-confirm-title">{t.confirmTitle(offers)}</h3>
       <p>{assign ? t.assignConfirmText : t.confirmText}</p>
       <div className="buttons">
-        <button type="button" className="danger" disabled={busy} onClick={onConfirm}>{t.confirmSave}</button>
+        <button type="button" className="primary" disabled={busy} onClick={onConfirm}>{t.confirmSave}</button>
         <button type="button" disabled={busy} onClick={onCancel}>{t.cancel}</button>
       </div>
     </div>
@@ -115,7 +119,7 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
   const m = useMessages();
   const t = m.ui.strategies;
   const assignable = view.scopes.filter((s) => s.assignable).map((s) => s.unit.writeScopeId);
-  const [form, setForm] = useState<DraftForm>(EMPTY_DRAFT);
+  const [form, setForm] = useState<DraftForm>(() => emptyDraft(m.locale));
   /** OQ-169: назначается существующая версия — черновик не редактируется, превью и сохранение по её параметрам */
   const [assigning, setAssigning] = useState<StrategyListItem | null>(null);
   const [removing, setRemoving] = useState<StrategyListView['scopes'][number] | null>(null);
@@ -199,6 +203,7 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
   return (
     <section>
       <h2>{t.pageTitle}</h2>
+      <p className="subtitle">{m.ui.app.subtitles.strategies}</p>
       <h3>{t.inUse}</h3>
       {/* Задача D шага 34: новый тенант без стратегий и офферов видит объяснение, а не пустой список */}
       {view.strategies.length === 0 ? <p className="notice">{m.ui.onboarding.empty.strategies} <a href={href(view.worldId, 'onboarding')}>{m.ui.onboarding.empty.startHere}</a></p> : null}
@@ -219,12 +224,15 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
             {openOffers === s.strategyId ? (
               <ul className="offer-list small">
                 {s.scopes.map((u) => <li key={u.unit.writeScopeId}>{u.unit.label}{u.version !== s.version ? <span className="muted"> · {t.versionShort(u.version)}</span> : null}</li>)}
-                {s.scopeCount > s.scopes.length ? <li className="muted">{t.moreOffers(s.scopeCount - s.scopes.length)}</li> : null}
+                {s.scopeCount > s.scopes.length ? <li className="muted">{t.moreOffers(s.scopeCount - s.scopes.length)} — <a href={href(worldId, 'products')}>{m.ui.app.screens.products}</a></li> : null}
               </ul>
             ) : null}
-            <div className="small muted">{s.versions.map((v) => t.versionLine(v.version, v.status, v.author, shortWhen(v.createdAt))).join('; ')}</div>
+            {/* Шаг 79: статус версии — пилюлей, а не словом в строке */}
+            <ul className="versions small muted">{s.versions.map((v) => (
+              <li key={v.version}>v{v.version} <Badge tone={v.tone}>{v.status}</Badge> {t.versionBy(v.author, shortWhen(v.createdAt))}</li>
+            ))}</ul>
             <div className="buttons">
-              {view.canEdit ? <button type="button" disabled={busy} onClick={() => { setAssigning(null); setForm(formOf(s)); changed(); setMessage(null); }}>{t.newVersion}</button> : null}
+              {view.canEdit ? <button type="button" disabled={busy} onClick={() => { setAssigning(null); setForm(formOf(s, m.locale)); changed(); setMessage(null); }}>{t.newVersion}</button> : null}
               {s.assignable ? <button type="button" disabled={busy} onClick={() => { setAssigning(s); changed(); setMessage(null); }}>{t.assignVersion}</button> : null}
             </div>
           </li>
@@ -232,15 +240,15 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
       </ul>
 
       <h3>{t.channelPricingTitle}</h3>
-      <p className="muted small">{t.channelPricingIntro}</p>
+      <p className="section-sub">{t.channelPricingIntro}</p>
       {view.channelPricingOffers.length === 0 ? <p className="muted empty">{t.channelPricingNone}</p> : (
-        <ul className="index">{view.channelPricingOffers.map((o) => <li key={o.label}><Badge tone={o.tone}>{o.label}</Badge> <span className="small">{o.detail}</span></li>)}</ul>
+        <ul className="index link-list">{view.channelPricingOffers.map((o) => <li key={o.label}><Badge tone={o.tone}>{o.label}</Badge> <span className="small">{o.detail}</span></li>)}</ul>
       )}
-      {view.channelPricingOffersTotal > view.channelPricingOffers.length ? <p className="small">{t.channelPricingMore(view.channelPricingOffersTotal - view.channelPricingOffers.length)}</p> : null}
+      {view.channelPricingOffersTotal > view.channelPricingOffers.length ? <p className="section-sub">{t.channelPricingMore(view.channelPricingOffersTotal - view.channelPricingOffers.length)}</p> : null}
 
       <h3>{assigning ? t.assigning(assigning.draft.name, assigning.version) : form.strategyId ? t.editing(form.name, form.baseVersion ?? 0) : t.draftTitle}</h3>
       {!view.canEdit ? <p className="notice">{t.noRight}</p> : null}
-      {form.strategyId || assigning ? <button type="button" disabled={busy} onClick={() => { setAssigning(null); setForm(EMPTY_DRAFT); changed(); }}>{t.newStrategy}</button> : null}
+      {form.strategyId || assigning ? <button type="button" disabled={busy} onClick={() => { setAssigning(null); setForm(emptyDraft(m.locale)); changed(); }}>{t.newStrategy}</button> : null}
       {assigning ? <p className="small muted">{assigning.label} · {assigning.detail}</p> : null}
       <div className="form draft-form card" hidden={assigning !== null}>
         <label>{t.name} <input value={form.name} maxLength={80} onChange={(e) => set('name', e.target.value)} /></label>
@@ -269,7 +277,11 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
         <label>{t.fields.deadbandMinor} <input inputMode="decimal" value={form.deadband} onChange={(e) => set('deadband', e.target.value)} /></label>
       </div>
 
+      {/* Шаг 79: выбор предложений, предпросмотр и сохранение — одной карточкой, а не текстом и кнопками на фоне страницы */}
+      <section className="card pick-card">
       <h4>{t.pick}</h4>
+      {/* Шаг 79 (ревью): без предложений выбирать нечего — пустое состояние с путём, а не форма на ноль предложений */}
+      {view.page.total === 0 ? <p className="muted empty">{t.noOffers} <a href={href(worldId, 'connections')}>{m.ui.app.connectChannel}</a></p> : <>
       {/* Р-140 (шаг 30): «всё» — это весь каталог, а не показанная страница; страница выбирается отдельной кнопкой, и так и названа */}
       <label className="whole-catalog">
         <input type="checkbox" checked={wholeCatalog} disabled={busy}
@@ -283,7 +295,7 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
       <p className="notice" role="status">
         {wholeCatalog ? t.selectionWhole(view.page.total) : selected.length === 0 ? t.selectionNone : t.selectionCount(selected.length, view.page.total)}
       </p>
-      <p className="small muted">{t.selectionReset}</p>
+      <p className="section-sub">{t.selectionReset}</p>
       <ul className="index pick-list">
         {view.scopes.map((s) => (
           <li key={s.unit.writeScopeId}>
@@ -298,10 +310,12 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
       <div className="buttons">
         <button type="button" disabled={busy || (selected.length === 0 && !wholeCatalog)} onClick={() => void run()}>{t.preview}</button>
         {view.canEdit
-          ? <button type="button" className="danger" disabled={busy || !preview || preview.saveBlocked !== null || confirming} onClick={() => setConfirming(true)}>{t.save}</button>
+          ? <button type="button" className="primary" disabled={busy || !preview || preview.saveBlocked !== null || confirming} onClick={() => setConfirming(true)}>{t.save}</button>
           : null}
       </div>
-      <p className="small muted">{t.saveHint}</p>
+      <p className="section-sub">{t.saveHint}</p>
+      </>}
+      </section>
       {confirming && preview ? <SaveConfirm offers={preview.rows.length} busy={busy} assign={assigning !== null} onConfirm={() => void save()} onCancel={() => setConfirming(false)} /> : null}
       {removing ? (
         <div className="confirm" role="dialog" aria-modal="false" aria-labelledby="strategy-remove-title">
@@ -328,7 +342,7 @@ export function StrategiesScreen({ worldId }: { worldId: string }) {
   const [query, setQuery] = useState<ListQuery>({ offset: 0, limit: LIST_PAGE_DEFAULT });
   const [resource, retry] = useResource<StrategyListView>(`${worldPath(worldId, 'strategies')}?offset=${query.offset}&limit=${query.limit}`, m.locale);
   return (
-    <Load resource={resource} retry={retry}>
+    <Load shape="cards" resource={resource} retry={retry}>
       {(view) => <><StrategiesScreenView view={view} worldId={worldId} /><Pager page={view.page} query={query} onQuery={setQuery} /></>}
     </Load>
   );

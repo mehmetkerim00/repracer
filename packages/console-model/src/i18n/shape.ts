@@ -95,7 +95,8 @@ export function numberFormat(locale: Locale, noValue: string): NumberFormat {
       if (from === null || from === undefined || to === null || to === undefined || from <= 0) return null;
       const pct = ((to - from) * 100) / from;
       const sign = pct > 0 ? '+' : pct < 0 ? '−' : '±';
-      return `${sign}${decimal(Math.abs(pct), 1)}${locale === 'de' ? ' %' : '%'}`;
+      // Шаг 79 (ревью): всегда один знак после запятой — «−19.0%» рядом с «−24.3%», столбец читается ровно
+      return `${sign}${Math.abs(pct).toFixed(1).replace('.', decimalSep)}${locale === 'de' ? ' %' : '%'}`;
     },
     rate: (micros) => decimal(micros / 1_000_000, 6),
   };
@@ -124,6 +125,42 @@ export function humanWhen(locale: Locale, y: number, mo: number, da: number, h: 
  * («MESZ», «GMT+2», «PDT»), смещение одинаково в Node и браузере. Календарная дата без времени (день бюджета, «2026-10-02») не
  * сдвигается: это уже день, а не момент.
  */
+/** Смещение пояса от UTC в момент `d` — «UTC+2», «UTC−7», «UTC»; пояс, которого Intl не знает, — null */
+function utcOffsetLabel(timeZone: string, d: Date): string | null {
+  let v: Record<string, string>;
+  try {
+    v = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+      timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+    }).formatToParts(d).map((x) => [x.type, x.value])) as Record<string, string>;
+  } catch { return null; }
+  const offsetMin = Math.round((Date.UTC(Number(v.year), Number(v.month) - 1, Number(v.day), Number(v.hour) % 24, Number(v.minute), Number(v.second))
+    - Math.floor(d.getTime() / 1000) * 1000) / 60_000);
+  if (offsetMin === 0) return 'UTC';
+  const a = Math.abs(offsetMin);
+  return `UTC${offsetMin > 0 ? '+' : '−'}${Math.floor(a / 60)}${a % 60 ? `:${String(a % 60).padStart(2, '0')}` : ''}`;
+}
+
+/**
+ * Шаг 79 (визуальное ревью): пояс — словами для продавца, «Central European Time (UTC+2)» / «Mitteleuropäische Zeit (UTC+2)»,
+ * а не код IANA (`Europe/Berlin`). Название — родовое имя пояса на языке экрана; где его нет, — город из кода. Смещение — в момент
+ * `at` (летнее и зимнее время различаются). Неизвестный пояс показывается как есть — подменять нечем.
+ */
+export function zoneName(locale: Locale, timeZone: string, at: string): string {
+  const d = new Date(Date.parse(at));
+  if (Number.isNaN(d.getTime())) return timeZone;
+  const offset = utcOffsetLabel(timeZone, d);
+  if (offset === null) return timeZone;
+  if (timeZone === 'UTC' || timeZone === 'Etc/UTC') return 'UTC';
+  let generic: string | null = null;
+  try {
+    generic = new Intl.DateTimeFormat(locale === 'de' ? 'de-DE' : 'en-US', { timeZone, timeZoneName: 'longGeneric' })
+      .formatToParts(d).find((x) => x.type === 'timeZoneName')?.value ?? null;
+  } catch { generic = null; }
+  const city = timeZone.split('/').pop()!.replace(/_/g, ' ');
+  const name = generic && !/^(GMT|UTC)/.test(generic) ? generic : city;
+  return `${name} (${offset})`;
+}
+
 export function zonedTimeFormat(locale: Locale, noValue: string, timeZone: string): Pick<NumberFormat, 'when' | 'date'> {
   const p2 = (n: number) => String(n).padStart(2, '0');
   const parts = new Intl.DateTimeFormat('en-US', {

@@ -1,7 +1,7 @@
 import { can, type StopScope } from '@repracer/pricing-model';
 import type { Messages } from './i18n/index.ts';
 import type { ConsoleAuditRow, ConsoleDistrustRow } from '@repracer/pricing-pipeline';
-import { channelOf, gap, type ConsoleHalt, type ConsoleScope, type ConsoleStop, type Gap, type StandWorld } from './world.ts';
+import { channelOf, gap, storefrontName, type ConsoleHalt, type ConsoleScope, type ConsoleStop, type Gap, type StandWorld } from './world.ts';
 
 /**
  * Экран E: три вида остановки, у каждого своя таблица, своя причина и свой путь снятия.
@@ -162,13 +162,9 @@ function targetLabel(world: StandWorld, target: StopTarget | ConsoleStop, m: Mes
   const channel = m.values[channelOf(world, accountId) as keyof typeof m.values] ?? channelOf(world, accountId);
   if (kind === 'CHANNEL_ACCOUNT') return m.ui.stop.account(channel);
   const marketplace = 'kind' in target ? (target as { marketplace: string }).marketplace : (target as ConsoleStop).marketplace!;
-  return m.ui.stop.storefront(channel, marketplaceName(marketplace, m));
+  return m.ui.stop.storefront(channel, storefrontName(channelOf(world, accountId), marketplace, m));
 }
 
-/** Шаг 64 (проход консоли): витрина словами — «Amazon amazon.com», а не «Amazon ATVPDKIKX0DER» */
-function marketplaceName(marketplace: string, m: Messages): string {
-  return m.ui.connections.marketplaces[marketplace] ?? marketplace;
-}
 
 function stopCard(world: StandWorld, s: ConsoleStop, m: Messages): StopCard {
   const role = world.viewer.role;
@@ -184,7 +180,7 @@ function haltCard(world: StandWorld, h: ConsoleHalt, m: Messages): HaltCard {
   const channel = m.values[channelOf(world, h.channelAccountId) as keyof typeof m.values] ?? channelOf(world, h.channelAccountId);
   return {
     haltId: h.haltId,
-    scopeLabel: h.marketplace === null ? m.ui.stop.account(channel) : m.ui.stop.storefront(channel, marketplaceName(h.marketplace, m)),
+    scopeLabel: h.marketplace === null ? m.ui.stop.account(channel) : m.ui.stop.storefront(channel, storefrontName(channelOf(world, h.channelAccountId), h.marketplace, m)),
     reason: m.values[h.reasonCode], since: m.when(h.haltedAt),
     review: h.releasedAt ? ''
       : world.accounts.find((a) => a.channelAccountId === h.channelAccountId)?.haltRelease === 'MANUAL_ONLY' ? m.ui.stop.haltManualOnly(channel) : m.ui.stop.haltReview(m.when(h.nextReviewAt)),
@@ -199,7 +195,7 @@ function distrustCard(world: StandWorld, d: ConsoleDistrustRow, m: Messages): Di
   const channel = m.values[channelOf(world, d.channelAccountId) as keyof typeof m.values] ?? channelOf(world, d.channelAccountId);
   return {
     distrustId: d.distrustId,
-    scopeLabel: d.marketplace === null ? m.ui.stop.account(channel) : m.ui.stop.storefront(channel, marketplaceName(d.marketplace, m)),
+    scopeLabel: d.marketplace === null ? m.ui.stop.account(channel) : m.ui.stop.storefront(channel, storefrontName(channelOf(world, d.channelAccountId), d.marketplace, m)),
     reason: m.values[d.reasonCode as keyof typeof m.values] ?? d.reasonCode, since: m.when(d.detectedAt), holds: m.ui.stop.distrustHolds,
     released: d.releasedAt ? m.ui.stop.releasedBy(m.when(d.releasedAt), memberLabel(world, d.releasedByMembershipId, m), d.releaseNote ?? '') : null,
     canRelease: d.releasedAt === null && can(world.viewer.role, 'RELEASE_CHANNEL_DISTRUST'),

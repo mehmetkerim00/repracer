@@ -17,7 +17,8 @@ function minorOf(text: string): number | null {
 export function DepthLine({ depth }: { depth: HistoryDepthView }) {
   return (
     <div className="small">
-      <p><Badge tone={depth.tone} symbol>{depth.complete ? '✓' : '!'}</Badge> {depth.seen} <strong>{depth.reliability}</strong></p>
+      {/* Шаг 79: глубина истории — пилюлей со словом, а не значком «!» */}
+      <p><Badge tone={depth.tone}>{depth.short}</Badge> {depth.seen} {depth.reliability}</p>
       {depth.externalChanges ? <p className="notice">{depth.externalChanges}</p> : null}
       <p className="muted">{depth.limit}</p>
     </div>
@@ -82,26 +83,31 @@ export function ComplianceScreenView({ worldId, initial }: { worldId: string; in
       {error ? <p className="error">{error}</p> : null}
 
       <h3>{c.checkTitle}</h3>
-      <div className="form">
+      {/* Шаг 79: формы — карточками-панелями, итог отчёта — в шапке таблицы, «что не проверяется» — карточкой */}
+      <div className="form toolbar">
         <label>{c.fields.offer} <OfferPicker worldId={worldId} value={form.writeScopeId} onChange={(writeScopeId) => edit({ writeScopeId })} /></label>
         <label>{c.fields.reference} <input inputMode="decimal" value={form.reference} onChange={(e) => edit({ reference: e.target.value })} /></label>
         <label>{c.fields.sale} <input inputMode="decimal" value={form.sale} onChange={(e) => edit({ sale: e.target.value })} /></label>
         <label>{c.fields.startsAt} <DateTimeField value={form.startsAt} onChange={(startsAt) => edit({ startsAt })} /></label>
         <label>{c.fields.endsAt} <DateTimeField value={form.endsAt} onChange={(endsAt) => edit({ endsAt })} /></label>
-        <button type="button" disabled={busy} onClick={runCheck}>{busy ? c.checking : c.check}</button>
+        <button type="button" className="primary" disabled={busy} onClick={runCheck}>{busy ? c.checking : c.check}</button>
       </div>
       {check ? (
         <div className={`card ${check.verdict === 'VIOLATION' ? 'dangerous' : ''}`} role="status">
-          <p><Badge tone={check.tone} symbol>{check.verdict === 'VIOLATION' ? '✕' : check.verdict === 'COMPLIANT' ? '✓' : '?'}</Badge> <strong>{check.headline}</strong></p>
+          {/* Шаг 79: итог проверки — словом на пилюле; «соответствует» не пишем — модуль соответствия не гарантирует [Р-124] */}
+          <p><Badge tone={check.tone}>{c.verdicts[check.verdict]}</Badge> <strong>{check.headline}</strong></p>
           <p className="small">{check.detail}</p>
           <p className="small muted">{c.lowest}: {check.lowest} · {check.window}</p>
           <DepthLine depth={check.depth} />
           {check.canAnnounce && !confirming ? <button type="button" disabled={busy} onClick={() => setConfirming(true)}>{c.announce}</button> : null}
           {confirming ? (
-            <div className="confirm" role="dialog" aria-modal="false">
+            <div className="confirm" role="dialog" aria-modal="false" aria-labelledby="announce-title">
+              <h3 id="announce-title">{c.announceTitle}</h3>
               <p>{c.announceConfirm}</p>
-              <button type="button" className="danger" disabled={busy} onClick={announce}>{busy ? c.announcing : c.announce}</button>
-              <button type="button" disabled={busy} onClick={() => setConfirming(false)}>{m.ui.strategies.cancel}</button>
+              <div className="buttons">
+                <button type="button" className="primary" disabled={busy} onClick={announce}>{busy ? c.announcing : c.announce}</button>
+                <button type="button" disabled={busy} onClick={() => setConfirming(false)}>{m.ui.strategies.cancel}</button>
+              </div>
             </div>
           ) : null}
         </div>
@@ -117,7 +123,7 @@ export function ComplianceScreenView({ worldId, initial }: { worldId: string; in
                 <tr key={d.unit.writeScopeId}>
                   <td className="offer">{d.unit.label}</td>
                   <td className="nowrap">{d.depth.seen}</td>
-                  <td><Badge tone={d.depth.tone} symbol>{d.depth.complete ? '✓' : '!'}</Badge> {d.depth.reliability}{d.depth.externalChanges ? ` ${d.depth.externalChanges}` : ''}</td>
+                  <td><Badge tone={d.depth.tone}>{d.depth.short}</Badge><div className="note">{d.depth.reliability}</div>{d.depth.externalChanges ? <div className="note">{d.depth.externalChanges}</div> : null}</td>
                 </tr>
               ))}
             </tbody>
@@ -126,9 +132,9 @@ export function ComplianceScreenView({ worldId, initial }: { worldId: string; in
       )}
 
       <h3>{c.reportTitle}</h3>
-      <p className="headline">{view.headline}</p>
-      {view.rows.length === 0 ? <p className="muted empty">{c.empty}</p> : (
+      {view.rows.length === 0 ? <p className="muted empty">{view.headline} · {c.empty}</p> : (
         <div className="table-wrap">
+          <div className="table-head"><strong>{view.headline}</strong></div>
           <table>
             <thead><tr><th>{c.columns.offer}</th><th>{c.columns.reference}</th><th>{c.columns.sale}</th><th>{c.columns.period}</th><th>{c.columns.atAnnouncement}</th><th>{c.columns.now}</th></tr></thead>
             <tbody>
@@ -149,9 +155,8 @@ export function ComplianceScreenView({ worldId, initial }: { worldId: string; in
 
       <h3>{c.evidenceTitle}</h3>
       {/* OQ-202 (шаг 30): каталог целиком выгружается тоже — файл готовит задание, а не ответ экрана */}
-      <p className="muted small">{c.evidenceByOffer(view.offersTotal)}</p>
-      <p className="muted small">{c.evidenceHint}</p>
-      <div className="form">
+      <p className="section-sub">{c.evidenceByOffer(view.offersTotal)} {c.evidenceHint}</p>
+      <div className="form toolbar">
         <label>{c.evidenceFrom} <DateTimeField withTime={false} value={evidence.from} onChange={(from) => setEvidence({ ...evidence, from })} /></label>
         <label>{c.evidenceTo} <DateTimeField withTime={false} value={evidence.to} onChange={(to) => setEvidence({ ...evidence, to })} /></label>
         <label>{c.fields.offer} <OfferPicker worldId={worldId} value={evidence.writeScopeId} allowEmpty emptyLabel={c.evidenceAll}
@@ -160,8 +165,10 @@ export function ComplianceScreenView({ worldId, initial }: { worldId: string; in
       </div>
       {evidenceJobId ? <JobProgress worldId={worldId} jobId={evidenceJobId} /> : null}
 
-      <h3>{c.cannotCheckTitle}</h3>
-      <ul className="small">{view.cannotCheck.map((t) => <li key={t}>{t}</li>)}</ul>
+      <section className="card">
+        <h3>{c.cannotCheckTitle}</h3>
+        <ul className="small">{view.cannotCheck.map((t) => <li key={t}>{t}</li>)}</ul>
+      </section>
       <Gaps gaps={view.gaps} />
     </section>
   );
@@ -173,7 +180,7 @@ export function ComplianceScreen({ worldId }: { worldId: string }) {
   const [query, setQuery] = useState<ListQuery>({ offset: 0, limit: LIST_PAGE_DEFAULT });
   const [resource, retry] = useResource<ComplianceView>(`${worldPath(worldId, 'compliance')}?offset=${query.offset}&limit=${query.limit}`, m.locale);
   return (
-    <Load resource={resource} retry={retry}>
+    <Load shape="table" resource={resource} retry={retry}>
       {(view) => (
         <>
           <ComplianceScreenView key={`${view.worldId}:${query.offset}`} worldId={worldId} initial={view} />

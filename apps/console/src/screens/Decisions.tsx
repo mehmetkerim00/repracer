@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { LIST_PAGE_DEFAULT, type DecisionListItem, type DecisionListView, type DecisionTrace, type ListQuery, type StepStatus } from '@repracer/console-model';
 import { useResource, worldPath } from '../api.ts';
-import { Badge, Gaps, href, Load, Pager, ReasonLine, useMessages, When } from '../components.tsx';
+import { Badge, Gaps, href, Load, NotFound, Pager, ReasonLine, useMessages, When } from '../components.tsx';
 
 const STATUS_TONE: Readonly<Record<StepStatus, string>> = { OK: 'ok', STOP: 'stop', WARN: 'warn', SKIPPED: 'off', UNKNOWN: 'unknown' };
 
@@ -11,7 +11,8 @@ export function DecisionsView({ worldId, items }: { worldId: string; items: read
   return (
     <section>
       <h2>{t.listTitle}</h2>
-      {items.length === 0 ? <p className="muted">{t.noDecisions}</p> : (
+      <p className="subtitle">{m.ui.app.subtitles.decisions}</p>
+      {items.length === 0 ? <p className="muted empty">{t.noDecisions}</p> : (
         <div className="table-wrap">
           <table>
             <thead><tr><th>{t.columns.when}</th><th>{t.columns.unit}</th><th>{t.columns.outcome}</th><th className="num">{t.columns.price}</th><th>{t.columns.reason}</th><th /></tr></thead>
@@ -39,13 +40,15 @@ export function TraceView({ trace }: { trace: DecisionTrace }) {
   const t = m.ui.trace;
   return (
     <article className="trace">
-      <p><a href={href(trace.worldId, 'decisions')}>{t.back}</a></p>
+      <p className="back"><a href={href(trace.worldId, 'decisions')}>{t.back}</a></p>
       <h2>{t.pageTitle}</h2>
-      <p className={`headline tone-${trace.tone}`}>{trace.headline}{trace.dangerous ? <> <Badge tone="stop">{t.dangerousBadge}</Badge></> : null}</p>
-      <p className="muted">{t.meta(trace.unit?.label ?? m.ui.common.noValue, trace.decisionId, trace.decidedAt)}
+      <p className="subtitle">{t.meta(trace.unit?.label ?? m.ui.common.noValue, trace.decisionId, trace.decidedAt)}
         {/* Шаг 76 (предполётный прогон демо): от решения — к границам и разбивке пола этого же предложения. Без ссылки вопрос «что
             помешает продать ниже себестоимости» вёл на экран товаров без поиска, где нужное предложение — на пятой странице */}
         {trace.unit ? <> · <a href={href(trace.worldId, 'bounds', trace.unit.writeScopeId)}>{m.ui.products.bounds}</a></> : null}</p>
+      <p className={`headline tone-${trace.tone}`}>{trace.headline}{trace.dangerous ? <> <Badge tone="stop">{t.dangerousBadge}</Badge></> : null}</p>
+      {/* Шаг 79 (ревью): шаги расчёта — в карточке, а не на сером фоне страницы */}
+      <section className="card trace-card">
       <ol className="steps">
         {trace.steps.map((step) => (
           <li key={step.key} className={`step status-${step.status}`}>
@@ -69,6 +72,7 @@ export function TraceView({ trace }: { trace: DecisionTrace }) {
           </li>
         ))}
       </ol>
+      </section>
       <Gaps gaps={trace.gaps} />
     </article>
   );
@@ -79,7 +83,7 @@ export function DecisionsScreen({ worldId }: { worldId: string }) {
   const [query, setQuery] = useState<ListQuery>({ offset: 0, limit: LIST_PAGE_DEFAULT });
   const [resource, retry] = useResource<DecisionListView>(`${worldPath(worldId, 'decisions')}?offset=${query.offset}&limit=${query.limit}`, m.locale);
   return (
-    <Load resource={resource} retry={retry}>
+    <Load shape="table" resource={resource} retry={retry}>
       {(view) => (<><DecisionsView worldId={worldId} items={view.items} /><Pager page={view.page} query={query} onQuery={setQuery} /></>)}
     </Load>
   );
@@ -88,5 +92,7 @@ export function DecisionsScreen({ worldId }: { worldId: string }) {
 export function TraceScreen({ worldId, decisionId }: { worldId: string; decisionId: string }) {
   const m = useMessages();
   const [resource, retry] = useResource<DecisionTrace>(worldPath(worldId, 'decisions', decisionId), m.locale);
-  return <Load resource={resource} retry={retry}>{(trace) => <TraceView trace={trace} />}</Load>;
+  const d = m.ui.trace;
+  const missing = <NotFound title={d.missingTitle} text={d.missingText} back={d.back} href={href(worldId, 'decisions')} />;
+  return <Load shape="trace" resource={resource} retry={retry} notFound={missing}>{(trace) => <TraceView trace={trace} />}</Load>;
 }

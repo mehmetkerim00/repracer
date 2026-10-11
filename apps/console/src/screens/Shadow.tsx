@@ -27,12 +27,17 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
   const st = m.ui.shadow.stats;
   const n = (v: number) => new Intl.NumberFormat(m.locale === 'de' ? 'de-DE' : 'en-US').format(v);
   return (
-    <Load resource={view} retry={retry}>
+    <Load shape="stats" resource={view} retry={retry}>
       {(v) => (
         <>
           {/* Заголовок страницы — над карточками, как на остальных экранах */}
           <h2>{m.ui.shadow.title}{v.demo ? <Badge tone="warn">{m.ui.app.demoBadge}</Badge> : null}</h2>
-          <Intro text={v.intro} />
+          {/* Вступление говорит «канал подключён» — без аккаунта оно было бы неправдой; пустое состояние ниже объясняет экран само */}
+          {v.accounts.length === 0 ? <p className="subtitle">{m.ui.app.subtitles.shadow}</p> : <Intro text={v.intro} />}
+          {/* Шаг 79: без аккаунта канала тени нечего показать — пустое состояние с путём, а не таблица без строк */}
+          {v.accounts.length === 0 ? (
+            <section className="card"><p className="muted empty">{m.ui.shadow.noAccounts} <a href={href(worldId, 'connections')}>{m.ui.app.connectChannel}</a></p></section>
+          ) : <>
           <section className="card">
             <div className="periods">{v.periods.map((p) => (
               <button key={p.days} type="button" disabled={p.active}
@@ -53,10 +58,13 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
                     </div>
                   ))}
                 </div>
-                <ul className="explain">{v.summaryLines.map((line) => <li key={line}>{line}</li>)}</ul>
+                {/* Шаг 79 (ревью): строку «решений столько-то» уже сказали плитки выше — под ними её не повторяем */}
+                <ul className="explain">{v.summaryLines.filter((line) => line !== m.ui.shadow.summary.decisions(v.summary.decisions, v.summary.changes))
+                  .map((line) => <li key={line}>{line}</li>)}</ul>
               </>
             ) : <p>{v.none}</p>}
-            <p className="note">{v.cannot}</p>
+            {/* «Не прогноз выручки» уже сказано строкой о деньгах — второй раз под ней не повторяем */}
+            {v.summary.floorSavings.length > 0 ? null : <p className="note">{v.cannot}</p>}
           </section>
 
           <section className="card table-card">
@@ -73,6 +81,12 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
                       {a.channelLimitText === null ? null : <div className="note">{a.channelLimitText}</div>}
                     </td>
                     <td>
+                      {a.accessText === null ? null : (
+                        <>
+                          <Badge tone={a.authStatus === 'REVOKED' ? 'stop' : 'warn'}>{a.accessText}</Badge>
+                          <div className="note">{a.accessHint}</div>
+                        </>
+                      )}
                       {a.canGoLive ? (
                         <div className="live-card">
                           <div className="note">{a.confirmationHint}</div>
@@ -164,6 +178,7 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
             <Pager page={v.page} query={query} onQuery={setQuery} />
             <Gaps gaps={v.gaps} />
           </section>
+          </>}
         </>
       )}
     </Load>

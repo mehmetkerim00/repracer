@@ -32,7 +32,7 @@ export function OnboardingScreen({ worldId }: { worldId: string }) {
       .catch((e: unknown) => setError(errorText(e, m)));
 
   return (
-    <Load resource={view} retry={retry}>
+    <Load shape="cards" resource={view} retry={retry}>
       {(v) => (
         <>
           <OnboardingScreenView view={v} worldId={worldId} busy={job !== null} onNarrow={narrow} onEnable={enable} onChoosePath={choosePath} />
@@ -60,31 +60,35 @@ export function OnboardingScreenView({ view: v, worldId, busy, onNarrow, onEnabl
       <h2>{t.title}</h2>
       <Intro text={v.intro} />
       <p className="notice resume"><strong>{v.resumeText}</strong></p>
-      {v.pathText ? <p className="small muted">{v.pathText}{v.canAddPricing && onChoosePath ? <> <button type="button" onClick={() => onChoosePath('STOCK_AND_PRICING')}>{t.paths.addPricing}</button></> : null}</p> : null}
       {v.choices.length > 0 ? (
         <div className="choices">
           {v.choices.map((c) => (
-            <div key={c.path} className="choice">
-              {/* Шаг 77: путь — карточкой с иконкой: остатки — коробка, остатки и цены — коробка с ценником */}
+            <div key={c.path} className={`choice${c.selected ? ' selected' : ''}`}>
+              {/* Шаг 77: путь — карточкой с иконкой: остатки — коробка, остатки и цены — коробка с ценником. Шаг 79: выбранный — отмечен */}
               <span className="choice-icon" aria-hidden="true">{c.path === 'STOCK' ? <BoxIcon /> : <TagIcon />}</span>
-              <h3>{c.title}</h3>
-              <p className="small">{c.detail}</p>
-              {onChoosePath ? <button type="button" className="primary" onClick={() => onChoosePath(c.path)}>{t.paths.choose}</button> : null}
+              <h3>{c.title}{c.selected ? <Badge tone="ok">{t.paths.selected}</Badge> : v.path === 'STOCK_AND_PRICING' && c.path === 'STOCK' ? <Badge tone="off">{t.paths.included}</Badge> : null}</h3>
+              {c.detail ? <p className="small">{c.detail}</p> : null}
+              {v.path === null && onChoosePath ? <button type="button" className="primary" onClick={() => onChoosePath(c.path)}>{t.paths.choose}</button> : null}
+              {v.path === 'STOCK' && c.selected && v.canAddPricing && onChoosePath ? <button type="button" onClick={() => onChoosePath('STOCK_AND_PRICING')}>{t.paths.addPricing}</button> : null}
             </div>
           ))}
         </div>
       ) : null}
-      {!v.canLead ? <p className="muted">{t.noRight}</p> : null}
-      {!v.canEnable ? <p className="muted">{t.noRightEnable}</p> : null}
+      {v.pathText ? <p className="section-sub">{v.pathText}</p> : null}
+      {!v.canLead ? <p className="notice">{t.noRight}</p> : null}
+      {!v.canEnable ? <p className="notice">{t.noRightEnable}</p> : null}
       <ol className="onboarding-steps">
         {v.steps.map((s) => (
           <li key={s.step} className={s.done ? 'done' : s.current ? 'current' : 'pending'} aria-current={s.current ? 'step' : undefined}>
             <h3>
-              {s.title} <Badge tone={s.done ? 'ok' : s.current ? 'progress' : 'off'}>{s.done ? t.done : s.current ? t.current : t.pending}</Badge>
-              {s.awaiting ? <> <Badge tone="warn">{t.channels.status.AWAITING_ACCESS}</Badge></> : null}
+              {/* Шаг 79: одна пилюля на шаг — «ждёт доступа» вместо «впереди», а у выполненного шага ожидание — строкой с объяснением */}
+              {s.title} {s.done ? <Badge tone="ok">{t.done}</Badge> : s.awaiting ? <Badge tone="warn">{t.channels.status.AWAITING_ACCESS}</Badge>
+                : <Badge tone={s.current ? 'progress' : 'off'}>{s.current ? t.current : t.pending}</Badge>}
             </h3>
+            {s.done && s.awaiting ? <p className="small awaiting-note">{t.paths.awaitingNote}</p> : null}
             <p className="small muted">{s.hint}</p>
-            <p className="small">{s.progress}</p>
+            {/* Шаг 79 (ревью): «0 of 0» ничего не говорит — счёт только там, где есть что считать */}
+            {s.totalCount > 0 ? <p className="small">{s.progress}</p> : null}
             {s.goTo && !s.done ? <a className="row-link" href={href(worldId, s.goTo.screen)}>{s.goTo.label}</a> : null}
             {s.step === 'COSTS' && v.narrowing && v.canLead ? (
               <div className="narrowing">
@@ -100,7 +104,7 @@ export function OnboardingScreenView({ view: v, worldId, busy, onNarrow, onEnabl
         ))}
       </ol>
       <h3>{t.channels.title}</h3>
-      {v.channels.length === 0 ? <p className="notice">{t.channels.none}</p> : (
+      {v.channels.length === 0 ? <p className="notice">{t.channels.none} <a href={href(worldId, 'connections')}>{m.ui.app.connectChannel}</a></p> : (
         <ul className="channels">
           {v.channels.map((c) => (
             <li key={c.channelAccountId} className="card channel">

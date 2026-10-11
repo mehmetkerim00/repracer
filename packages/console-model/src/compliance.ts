@@ -1,6 +1,7 @@
 import { can, omnibusVerdict, OMNIBUS_WINDOW_DAYS, type OmnibusPriorPrice, type OmnibusVerdict } from '@repracer/pricing-model';
 import type { DiscountAnnouncementRow, PriceEvidenceDay } from '@repracer/pricing-pipeline';
 import type { Messages } from './i18n/index.ts';
+import { zoneName } from './i18n/shape.ts';
 import { catalogPageOf, listQuery, type ListQuery, type PageInfo } from './page.ts';
 import { catalogFirst, catalogTotal, gap, scopeById, unitOf, type Gap, type StandWorld, type Tone, type UnitRef } from './world.ts';
 
@@ -26,6 +27,8 @@ export interface HistoryDepthView {
   seen: string;
   /** «Проверка достоверна по известной нам истории» / «Проверка неполная: …» */
   reliability: string;
+  /** Шаг 79: подпись пилюли — «Reliable» / «Incomplete»; фраза целиком — рядом */
+  short: string;
   externalChanges: string | null;
   /** Всегда: модуль не видит цен, выставленных мимо repracer */
   limit: string;
@@ -38,6 +41,7 @@ export function historyDepthView(check: OmnibusPriorPrice, m: Messages): History
     days: check.historyDays, since: check.historySince ? m.date(check.historySince) : m.ui.common.noValue, complete, tone: complete ? 'ok' : 'warn',
     seen: check.historySince ? c.seen(check.historyDays, m.date(check.historySince)) : c.none,
     reliability: complete ? c.reliable : c.incomplete[check.status as keyof typeof c.incomplete]?.(check.historyDays, OMNIBUS_WINDOW_DAYS) ?? c.incomplete.INCOMPLETE_HISTORY(check.historyDays, OMNIBUS_WINDOW_DAYS),
+    short: complete ? c.reliableShort : c.incompleteShort,
     externalChanges: check.externalChanges > 0 ? c.external(check.externalChanges) : null,
     limit: c.limit,
   };
@@ -62,7 +66,7 @@ export function discountCheckView(world: StandWorld, writeScopeId: string, refer
   const c = m.ui.compliance;
   const verdict = omnibusVerdict(check, referencePriceMinor);
   const money = (v: number | null) => m.money(v, scope.currency);
-  const window = check.windowFrom && check.windowTo ? c.window(m.date(check.windowFrom), m.date(check.windowTo), check.timeZone ?? '') : c.windowUnknown;
+  const window = check.windowFrom && check.windowTo ? c.window(m.date(check.windowFrom), m.date(check.windowTo), check.timeZone ? zoneName(m.locale, check.timeZone, check.windowTo) : '') : c.windowUnknown;
   return {
     unit: unitOf(world, scope, m), verdict, tone: TONE[verdict],
     headline: verdict === 'VIOLATION' ? c.violation(money(referencePriceMinor), money(check.lowestMinor), OMNIBUS_WINDOW_DAYS)

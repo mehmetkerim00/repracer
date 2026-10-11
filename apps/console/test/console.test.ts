@@ -146,7 +146,8 @@ test('stand API serves every screen of every world in German and English and ref
       const stock = await get<StockView>(auth, api(w.id, 'stock') + q);
       // Ловушка названа СОДЕРЖАНИЕМ, а не длиной строки: у каждого канала — своя область записи остатка [OQ-204, находка 19]
       // Шаг 64: английский интерфейс без ссылок на решения — факт ловушки назван словами
-      const trapFact: Record<string, RegExp> = { KAUFLAND: /id_offer/, AMAZON: /ONE value per SKU|EINE?N? Wert je SKU/ };
+      // Шаг 79: ключ канала назван словами («offer ID»), а не именем поля API
+      const trapFact: Record<string, RegExp> = { KAUFLAND: /offer ID|Angebots-ID/, AMAZON: /ONE value per SKU|EINE?N? Wert je SKU/ };
       assert.ok(stock.traps.length > 0, `${w.id}: у мира есть каналы — есть и ловушки`);
       for (const t of stock.traps) assert.match(t.text, trapFact[t.channel] ?? /Р-37|wider than/, `${w.id}: ловушка ${t.channel} называет свою область записи`);
       await get<unknown>(auth, api(w.id, 'stock', 'divergences') + q);
@@ -200,7 +201,8 @@ test('screens render from the dictionary: sign-in, products with the effective f
   const auth = await login('OWNER');
   const id = 'kaufland/pipeline/happy-path';
   const products = await html('/src/screens/Products.tsx', 'ProductsView', { view: await get<ProductListView>(auth, api(id, 'products')) });
-  for (const text of ['Effective floor', 'Next check', 'No data', '€17.75', 'Why this price']) assert.ok(products.includes(text), text);
+  // Шаг 79: «Next check» — колонка по выбору (у всех предложений «нет данных», по умолчанию скрыта); её название — в выборе колонок
+  for (const text of ['Effective floor', 'Next check', 'Status', '€17.75', 'Why this price']) assert.ok(products.includes(text), text);
   // Шаг 68 (K10): предложение — SKU продавца и витрина словами, а не «Kaufland de · unit 4101»
   assert.match(products, /syn-[^ <]+ · kaufland\.de/);
   assert.ok(!products.includes('unit 4101'), 'номер единицы канала не подпись предложения');
@@ -225,7 +227,7 @@ test('screens render from the dictionary: sign-in, products with the effective f
   for (const text of ['Effective floor', '$17.79', 'ECB rate', 'add up to the price to the cent']) assert.ok(bounds.includes(text), text);
 
   const stop = await html('/src/screens/Stop.tsx', 'StopScreenView', { view: await get<StopView>(auth, api('kaufland/pipeline/mass-shift-halt', 'stop')), onStop: () => {}, onResume: () => {}, onRelease: () => {} });
-  for (const text of ['Stop by a person', 'Storefront halts by the system', 'Stop the whole workspace…', 'Audit log of stops', 'Storefront halted by the system', 'the owner with a second factor']) assert.ok(stop.includes(text), text);
+  for (const text of ['Stop by a person', 'Storefront halts by the system', 'Stop the whole workspace', 'Audit log of stops', 'Storefront halted by the system', 'the owner with a second factor']) assert.ok(stop.includes(text), text);
 
   const session = await get<SessionView>(auth, '/api/session?locale=de');
   const loginView = await html('/src/App.tsx', 'LoginView', { simulator: session.simulator, error: null, busy: false, onSignIn: () => {} }, 'de');
@@ -295,7 +297,7 @@ test('Р-131, G: without the declared cost the screen shows a requirement, not a
   const first = (await call(operator, 'POST', api(id, 'scopes', scope.unit.writeScopeId, 'enable'), { acknowledgeWarnings: false })).body as EnableResult;
   assert.deepEqual([first.enabled, first.problems.map((p) => p.code), first.warnings.map((w) => [w.code, w.problems])],
     [false, ['COST_REQUIRED'], [['MARGIN_WITHOUT_COST', []]]]);
-  assert.equal(first.warnings[0]!.text, 'Hinweis: die Strategie Zielmarge und die Mindestmarge 15 % brauchen die Einstandskosten, aber die Einstandskosten sind nicht gesetzt. Bis dahin würde jeder Preis abgelehnt.');
+  assert.equal(first.warnings[0]!.text, 'Hinweis: die Strategie Zielmarge und die Mindestmarge 15 % brauchen die Stückkosten, aber die Stückkosten sind nicht gesetzt. Bis dahin würde jeder Preis abgelehnt.');
   const dialog = await html('/src/screens/Products.tsx', 'EnableResultView', { unit: scope.unit.label, result: first, busy: false, error: null, onAcknowledge: () => {}, onClose: () => {} }, 'de');
   assert.ok(dialog.includes(first.problems[0]!.text), first.problems[0]!.text);
   // Р-131: подтверждения нет — кнопки «всё равно включить» на экране с препятствием не существует
@@ -380,7 +382,7 @@ test('Р-134, Р-135 (шаг 28): импорт себестоимости — п
     'до работы исполнителя задание ждёт, и экран говорит, что в базе ничего не изменено');
   const done = await finishJob(id, created);
   assert.equal(done.status, 'SUCCEEDED', done.error ?? '');
-  assert.match(done.headline, /Selbstkosten von 1 Angebot importiert \(1 Zeilen/);
+  assert.match(done.headline, /Stückkosten von 1 Angebot importiert \(1 Zeilen/);
   assert.equal(done.effect, messagesFor('de').ui.jobs.effectApplied);
 });
 
@@ -525,7 +527,7 @@ test('step 23, B/C: the stop screen shows three kinds of stop; a channel distrus
   const card = view.distrusts.active[0]!;
   assert.match(card.holds, /all prices, including fixed and margin prices/);
   const markup = await html('/src/screens/Stop.tsx', 'StopScreenView', { view, onReleaseDistrust: () => {} });
-  for (const text of ['Three kinds of stop', 'Channel distrust', 'Channel distrusted by the system', 'Trust again…', 'wrong price basis']) assert.ok(markup.includes(text), text);
+  for (const text of ['Three kinds of stop', 'Channel distrust', 'Channel distrusted by the system', 'Trust again', 'wrong price basis']) assert.ok(markup.includes(text), text);
 
   const products = await get<ProductListView>(owner, api(id, 'products'));
   const row = (sku: string) => products.rows.find((r) => r.unit.externalUnitId === sku)!;
@@ -568,7 +570,8 @@ test('step 23, C/F: offers the channel prices itself are listed before a strateg
 
   const screen = await html('/src/screens/Strategies.tsx', 'StrategiesScreenView', { view: list, worldId: id, initialPreview: preview.view });
   for (const text of ['Offers the channel prices itself', 'cannot be assigned', 'New version', 'Cannot be saved: the channel prices these offers itself']) assert.ok(screen.includes(text), text);
-  assert.match(screen, /<button type="button" class="danger" disabled="">Save and assign…<\/button>/, 'the save button is disabled while the preview is blocked');
+  // Шаг 79: сохранение — основной кнопкой (не красной: это не остановка), и по-прежнему недоступно при заблокированном предпросмотре
+  assert.match(screen, /<button type="button" class="primary" disabled="">Save and assign<\/button>/, 'the save button is disabled while the preview is blocked');
   const deScreen = await html('/src/screens/Strategies.tsx', 'StrategiesScreenView', { view: await get<StrategyListView>(await login('OWNER', 'de'), api(id, 'strategies')), worldId: id }, 'de');
   assert.ok(deScreen.includes('Angebote, die der Kanal selbst bepreist'));
 });
@@ -629,7 +632,8 @@ test('step 24, OQ-169/170: an existing strategy version is assigned without a ne
   const created = afterSave.strategies.find((x) => x.name === 'Synthetic author check')!;
   assert.deepEqual(created.versions.map((v) => [v.version, v.status, v.author]), [[1, 'active', 'you']]);
   const markup = await html('/src/screens/Strategies.tsx', 'StrategiesScreenView', { view: afterSave, worldId: id });
-  for (const text of ['>Assign<', 'v1 · active · you']) assert.ok(markup.includes(text), text);
+  // Шаг 79: статус версии — пилюлей: «v1 [active] you · …»
+  for (const text of ['>Assign<', 'v1 <span class="badge tone-ok">active</span> you · ']) assert.ok(markup.includes(text), text);
 
   // OQ-169: прежняя версия возвращается офферу без новой версии — после превью её параметров
   const item = afterSave.strategies.find((x) => x.strategyId === original.strategyId)!;

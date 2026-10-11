@@ -1,5 +1,7 @@
 import { can, type MemberRole, type PricingAction } from '@repracer/pricing-model';
 import type { BulkJobKind, BulkJobRow, BulkJobStatus } from '@repracer/pricing-pipeline';
+import { READ_ONLY_JOB_KINDS } from '@repracer/pricing-pipeline/store';
+import type { Tone } from './world.ts';
 import type { Messages } from './i18n/index.ts';
 
 /**
@@ -48,6 +50,8 @@ export interface BulkJobView {
   jobId: string;
   kind: BulkJobKind;
   status: BulkJobStatus;
+  statusText: string;
+  tone: Tone;
   title: string;
   /** Одна строка про состояние: «применяется, 6 200 из 10 000» или «готово: 10 000 строк» */
   headline: string;
@@ -127,6 +131,9 @@ function outcomeText(job: BulkJobRow, m: Messages): string {
  * Истекла ли аренда, решает ХРАНИЛИЩЕ по часам базы (`leaseExpired`): у экрана свои часы, и их расхождение с базой показывало
  * бы идущее применение как прерванное или наоборот (находка 11 ревью шага 30).
  */
+/** Шаг 79: статус задания — пилюлей в семантическом цвете */
+const STATUS_TONE: Record<BulkJobStatus, Tone> = { PENDING: 'progress', RUNNING: 'progress', SUCCEEDED: 'ok', FAILED: 'stop', INTERRUPTED: 'warn', CANCELLED: 'off' };
+
 export function bulkJobView(job: BulkJobRow, m: Messages, artifact: { fileName: string; rows: number; sha256: string } | null = null): BulkJobView {
   const t = m.ui.jobs;
   const total = job.totalItems;
@@ -146,14 +153,18 @@ export function bulkJobView(job: BulkJobRow, m: Messages, artifact: { fileName: 
    * Что осталось в базе. Ответ один и тот же на всех незавершённых состояниях, включая прерванное: НИЧЕГО. Применение — одна
    * транзакция [Р-134], упавший процесс её откатывает, а задание возвращается в очередь и начинается заново с первого шага.
    */
-  const effect = job.status === 'SUCCEEDED' ? t.effectApplied
+  // Шаг 79 (ревью): задание, которое только читает (предпросмотр, экран различий, выгрузки), ничего в базе не меняет — и так и говорит
+  const effect = READ_ONLY_JOB_KINDS.includes(job.kind) && job.status !== 'FAILED' && job.status !== 'CANCELLED' ? t.effectReadOnly
+    : job.status === 'SUCCEEDED' ? t.effectApplied
     : job.status === 'FAILED' ? t.effectNothing
     : job.status === 'CANCELLED' ? t.effectNothing
     : job.status === 'INTERRUPTED' ? t.effectInterrupted
     : t.effectPending;
   return {
     jobId: job.jobId, kind: job.kind, status: job.status, title, headline,
-    progress: total === null || total === 0 ? null : Math.min(1, done / total),
+    statusText: t.statusLabels[job.status], tone: STATUS_TONE[job.status],
+    // Шаг 79 (ревью): готовое задание — полоса целиком; у предпросмотра по выборке «сделано» меньше каталога, и «Done» стоял на четверти
+    progress: job.status === 'SUCCEEDED' ? 1 : total === null || total === 0 ? null : Math.min(1, done / total),
     done, total, effect, active: ACTIVE.has(job.status), cancellable: job.status === 'PENDING',
     error: job.status === 'FAILED' ? errorTextOf(job, m) : null,
     artifact, result: screenResult(job),

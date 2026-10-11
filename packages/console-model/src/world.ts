@@ -124,6 +124,8 @@ export function unitOf(world: StandWorld, scope: ConsoleScope, m: Messages): Uni
 // Правило повторяет поиск в базе (`consoleCatalogFacts`, ключ `marketplaceWords`): изменение здесь — изменение там; равенство держит тест шага 67
 export function storefrontName(channel: string, marketplace: string, m: Messages): string {
   if (channel === 'KAUFLAND' && /^[a-z]{2}$/.test(marketplace)) return `kaufland.${marketplace}`;
+  // Шаг 79: аккаунт Amazon, записанный кодом страны (демо, ожидание доступа), — тоже витриной, а не «Amazon de»
+  if (channel === 'AMAZON' && (marketplace === 'de' || marketplace === 'us')) return marketplace === 'de' ? 'amazon.de' : 'amazon.com';
   return m.ui.connections.marketplaces[marketplace] ?? `${m.values[channel as keyof typeof m.values] ?? channel} ${marketplace}`;
 }
 

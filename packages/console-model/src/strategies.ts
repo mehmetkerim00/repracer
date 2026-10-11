@@ -75,7 +75,7 @@ export interface StrategyListItem {
   /** Черновик новой версии — параметры последней версии */
   draft: StrategyDraft;
   /** OQ-170 (шаг 24): версии с автором, моментом и статусом — от новой к старой; у стратегий посева в памяти — только номер */
-  versions: Array<{ version: number; status: string; author: string; createdAt: string }>;
+  versions: Array<{ version: number; status: string; tone: Tone; author: string; createdAt: string }>;
   /** OQ-169: последнюю версию можно назначить выбранным офферам без новой версии — только действующую */
   assignable: boolean;
 }
@@ -160,6 +160,8 @@ export function strategiesView(world: StandWorld, m: Messages, canEdit: boolean,
         const meta = versions.find((x) => x.version === version);
         return {
           version, status: meta ? m.ui.strategies.statuses[meta.status] : m.ui.strategies.statusUnknown,
+          // Шаг 79: статус версии — пилюлей: действующая зелёная, черновик янтарный, остальное серым
+          tone: (meta?.status === 'ACTIVE' ? 'ok' : meta?.status === 'DRAFT' ? 'warn' : 'off') as Tone,
           author: meta ? member(meta.createdByMembershipId) : m.ui.strategies.authorUnknown, createdAt: meta?.createdAt ? m.when(meta.createdAt) : m.ui.common.noValue,
         };
       });
@@ -322,7 +324,8 @@ export function strategyPreviewView(world: StandWorld, draft: StrategyDraft, pre
     let tone: Tone = 'unknown';
     if (!d) summary.notEvaluated += 1;
     else if (d.outcome === 'APPROVED') { summary.changes += 1; tone = 'progress'; }
-    else if (d.outcome === 'NO_CHANGE') { summary.unchanged += 1; tone = 'ok'; }
+    // Шаг 79 (ревью): «без изменения» — спокойным серым, как в ленте и в «почему эта цена», а не зелёным успехом
+    else if (d.outcome === 'NO_CHANGE') { summary.unchanged += 1; tone = 'off'; }
     else { summary.rejected += 1; tone = dangerous ? 'stop' : 'warn'; }
     if (dangerous) summary.dangerous += 1;
     const reason = d ? describe(d.reason, m) : strategy?.reason ? describe(strategy.reason, m) : null;
