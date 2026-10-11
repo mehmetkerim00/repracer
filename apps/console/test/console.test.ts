@@ -10,7 +10,7 @@ import { createAuthenticator, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
 import type { BoundsIndexView, DiscountAnnounceResponse, EnableResult, JobCreatedResponse, SessionView, StandToken, WorldSummary } from '../src/api-types.ts';
 import { createHash } from 'node:crypto';
-import { createStandApi, EVIDENCE_MAX_DAYS, resolveStandIdentityMode } from '../server/stand-server.ts';
+import { createStandApi, EVIDENCE_MAX_DAYS, resolveStandIdentityMode, standTokenSecondsOf } from '../server/stand-server.ts';
 import { runJob, runPendingJobs } from './run-jobs.ts';
 
 /**
@@ -1058,4 +1058,12 @@ test('находка 17 ревью шага 44: отказ приглашени�
   assert.equal((noUserinfo.body as { error: { message: string } }).error.message, messagesFor('en').ui.app.invitation.providerUnavailable);
   const accepted = await api(async () => 'user-1')(request);
   assert.deepEqual(accepted.body, { accepted: true, message: messagesFor('en').ui.app.invitation.accepted });
+});
+
+/** Шаг 76 (предполётный прогон демо): токен имитатора входа живёт 15 минут, если подготовка демо не задала день показа; мусор — отказ подъёма */
+test('step 76: the stand token lifetime is 15 minutes by default, a show day when set, and nonsense is refused', () => {
+  assert.equal(standTokenSecondsOf(undefined), 900);
+  assert.equal(standTokenSecondsOf(''), 900);
+  assert.equal(standTokenSecondsOf('43200'), 43_200);
+  for (const bad of ['0', '59', '43201', '1.5', 'day', '-60']) assert.throws(() => standTokenSecondsOf(bad), /REPRACER_STAND_TOKEN_SECONDS must be an integer 60\.\.43200/);
 });

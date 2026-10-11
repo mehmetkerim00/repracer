@@ -782,7 +782,7 @@ export const en = {
         // захода) и ещё один круг: листинг, появившийся позади курсора, текущий круг уже не увидит
         // Шаг 58 (ревью шага 56, находка 9): пояснение о старых листингах eBay — только у аккаунта eBay
         running: (h: number, hadCircle: boolean, ebay: boolean) => `Catalog discovery: the current circle has been running ${h} h${hadCircle ? '' : ' (the first one)'} — an offer only a full circle sees${ebay ? ' (older eBay listings)' : ''} appears within about two circles and a day; the hours are named once a circle closes.`,
-        completed: (h: number, at: string, boundH: number, ebay: boolean) => `Catalog discovery: the last full circle took ${h} h, closed ${at} — an offer only a full circle sees${ebay ? ' (older eBay listings)' : ''} appears within about ${boundH} h (two circles and a day), if the next circle is not longer than the last one.`,
+        completed: (h: number, at: string, boundH: number, ebay: boolean) => `Catalog discovery: the last full circle took ${h === 0 ? 'less than an hour' : `${h} h`}, closed ${at} — an offer only a full circle sees${ebay ? ' (older eBay listings)' : ''} appears within about ${boundH} h (two circles and a day), if the next circle is not longer than the last one.`,
       },
       authorization: {
         revoked: 'Access was withdrawn in the channel: connect again to continue.',
@@ -1432,7 +1432,7 @@ export const en = {
         SYSTEM_HALT: { title: 'Storefront halt', holds: 'Only competitor-derived prices', setBy: 'System: broken input data', release: 'Fresh sample where the channel allows it, otherwise a person' },
         CHANNEL_DISTRUST: { title: 'Channel distrust', holds: 'All prices and the channel price threshold', setBy: 'System: the channel changes our numbers', release: 'Only a person: owner or admin, second factor, note' },
       },
-      running: 'Running', stopped: 'Stopped', coveredBy: (label: string, since: string) => `Stopped by: ${label} since ${since}`,
+      running: 'Running', stopped: 'Stopped', stoppedAt: (when: string) => `stopped ${when}`, coveredBy: (label: string, since: string) => `Stopped by: ${label} since ${since}`,
       stopTenant: 'Stop the whole workspace…', stopTarget: 'Stop…', resume: 'Resume…', release: 'Release…',
       activeStops: 'Active stops', stopHistory: 'Resumed', activeHalts: 'Active halts', haltHistory: 'Released halts', none: 'None.',
       by: (who: string) => `By: ${who}`, noteLabel: (note: string) => `Note: “${note}”`, notStoppedTitle: 'Not stopped:',

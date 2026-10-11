@@ -818,3 +818,27 @@ test('шаг 67: в очередь записей вставляют ровно 
     'новый писатель очереди записей: разберите цикл анализа очереди (ADR-0048, 40P01) и допишите его сюда');
   assert.equal(unlocked(read('packages/pricing-store-pg/src/stock.ts')), 0, 'каждая вставка пересчёта остатков — после блокировки пересчётов тенанта в той же функции');
 });
+
+/**
+ * Шаг 76 (предполётный прогон демо): код, который исполняет браузер, не импортирует встроенных модулей Node. Страница консоли была
+ * ПУСТОЙ с шага 29: модели экранов импортировали значения из пакетов сервера (`@repracer/cost-import` → `node:zlib`,
+ * `@repracer/pricing-pipeline` → `node:crypto`), а Vite подменяет встроенный модуль Node заглушкой, которая падает при загрузке.
+ * Живые прогоны ходят через HTTP API и React не исполняют — пустую страницу увидел только проход показа браузером.
+ */
+test('шаг 76: страница консоли не тянет встроенных модулей Node — интерфейс исполняется в браузере', async () => {
+  const { browserBuiltinChains, valueImports } = await import(new URL('scripts/browser-imports.mjs', root).href) as {
+    browserBuiltinChains(entries?: string[]): { found: { builtin: string; chain: string[] }[]; modules: number };
+    valueImports(source: string): string[];
+  };
+  // Зубы [Р-94]: импорт значения из встроенного модуля виден, импорт типа и тип `typeof import(…)` — нет
+  assert.deepEqual(valueImports(`import { inflateRawSync } from 'node:zlib';\nimport x from "node:crypto";\nexport { a } from './a.ts';`), ['node:zlib', 'node:crypto', './a.ts']);
+  assert.deepEqual(valueImports(`import type { Pool } from 'pg';\nimport { type A, type B } from 'node:fs';\nexport type { C } from './c.ts';\nconst z = 1 as unknown as typeof import('node:zlib');`), []);
+  assert.deepEqual(valueImports(`import { type A, b } from './b.ts';\nimport 'node:fs';\nconst m = await import('node:os');`), ['./b.ts', 'node:fs', 'node:os']);
+  // Положительный контроль на настоящем графе: точка входа сервера консоли достигает модулей Node — обход видит пакеты рабочего пространства
+  assert.ok(browserBuiltinChains(['packages/pricing-pipeline/src/index.ts']).found.some((f) => f.builtin === 'node:crypto'),
+    'the walk must reach node:crypto from the decision path entry — otherwise it sees nothing');
+  const { found, modules } = browserBuiltinChains();
+  assert.ok(modules > 20, `the walk from the console page saw only ${modules} modules`);
+  assert.deepEqual(found.map((f) => `${f.builtin}: ${f.chain.join(' → ')}`), [],
+    'код страницы консоли импортирует модуль Node — в браузере страница будет пустой; возьмите значение из модуля без него (подпуть пакета)');
+});

@@ -88,6 +88,19 @@ function pressDaysOf(raw: string | undefined): number {
   return n;
 }
 
+/**
+ * Шаг 76 (предполётный прогон демо): срок токена имитатора входа стенда, секунды. По умолчанию 15 минут, как прежде; живой показ дольше
+ * — вход за десять минут до начала истекал посреди показа, и каждый экран отвечал «Sign in first.» при «Signed in» в шапке.
+ * Подготовка демо (`scripts/demo-prepare.sh`) ставит рабочий день. Имитатор входа есть только у стенда, у продавца вход — поставщик
+ * identity со своим сроком [Р-78, Р-180]
+ */
+export function standTokenSecondsOf(raw: string | undefined): number {
+  if (raw === undefined || raw === '') return 900;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 60 || n > 43_200) throw new Error(`REPRACER_STAND_TOKEN_SECONDS must be an integer 60..43200, got ${raw}`);
+  return n;
+}
+
 function cookies(header: string | undefined): Record<string, string> {
   const out: Record<string, string> = {};
   for (const part of (header ?? '').split(';')) {
@@ -1730,11 +1743,17 @@ async function main(): Promise<void> {
   const mode = resolveStandIdentityMode(process.env);
   const external = mode.kind === 'oidc' ? { issuer: mode.issuer, audience: mode.audience, jwks: remoteJwks(mode.jwksUrl) } : null;
   const issuer = external ? null : createTestIssuer({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE });
+  const tokenSeconds = standTokenSecondsOf(process.env.REPRACER_STAND_TOKEN_SECONDS);
+  // Шаг 76 (предполётный прогон демо): язык первого экрана стенда — как у развёрнутой консоли (`REPRACER_CONSOLE_LOCALE`); без него
+  // зритель из США видел немецкий экран входа до нажатия «English»
+  const consoleLocale = process.env.REPRACER_CONSOLE_LOCALE;
+  if (consoleLocale !== undefined && consoleLocale !== '' && !isLocale(consoleLocale)) throw new Error(`REPRACER_CONSOLE_LOCALE must be de or en, got ${consoleLocale}`);
+  const defaultLocale = isLocale(consoleLocale) ? { defaultLocale: consoleLocale } : {};
   const simulator = issuer
     ? {
       token: (a: (typeof STAND_ACCOUNTS)[number], options?: { secondFactor?: boolean }) =>
-        issuer.token(a.subject, { email: a.email, amr: options?.secondFactor === false ? ['pwd'] : ['pwd', 'otp'] }),
-      expiresInSeconds: 900,
+        issuer.token(a.subject, { email: a.email, amr: options?.secondFactor === false ? ['pwd'] : ['pwd', 'otp'], expiresInSeconds: tokenSeconds }),
+      expiresInSeconds: tokenSeconds,
     }
     : undefined;
   const verify = external ?? { issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer!.jwks) };
@@ -1750,8 +1769,14 @@ async function main(): Promise<void> {
     const adminPool = role('svc_admin', 4);
     const directory = new PgIdentityDirectory(role('svc_authenticator', 2) as never);
     const memberUsers = await pgStandUsers(directory, role('svc_onboarding', 1));
+    /**
+     * Шаг 76 (предполётный прогон демо): `REPRACER_DEMO_ONLY=on` — на стенде показа только демо-магазин. Без него после входа зритель
+     * видел три десятка миров сценариев стенда с описаниями для разработчиков (по-русски, с кодами) и демо последним в списке
+     */
+    const demoOnly = process.env.REPRACER_DEMO_ONLY === 'on';
+    if (demoOnly && process.env.REPRACER_DEMO !== 'on') throw new Error('REPRACER_DEMO_ONLY=on needs REPRACER_DEMO=on: a stand without worlds shows nothing');
     const worlds = await buildStandWorlds({
-      filter: (sc) => !sc.tags.includes('memory-only'),
+      filter: (sc) => !demoOnly && !sc.tags.includes('memory-only'),
       storeFactory: pgStoreFactory(pool, role('svc_dispatcher', 2), role('svc_fx_loader', 1), {
         memberUsers, memberEmails: STAND_EMAILS, adminPool, provisioningPool: role('svc_provisioning', 1),
         joinMember: pgStandJoinMember(adminPool, directory),
@@ -1791,12 +1816,12 @@ async function main(): Promise<void> {
     const { PgChannelConnectStore } = await import('@repracer/pricing-store-pg');
     const demoConnect = readOnlyConnections(new PgChannelConnectStore(adminPool));
     handle = createStandApi(worlds, { authenticator: createAuthenticator({ ...verify, directory }), ...(simulator ? { simulator } : {}) },
-      { connect: (worldId) => (worldId === demoWorldId ? demoConnect : null) });
+      { connect: (worldId) => (worldId === demoWorldId ? demoConnect : null), ...defaultLocale });
   } else {
     // Стенд не включает ничего молча и ничего молча не пропускает: демо живёт только на PostgreSQL (ревью шага 34, находка 9)
     if (process.env.REPRACER_DEMO === 'on') throw new Error('REPRACER_DEMO=on needs PostgreSQL: set REPRACER_PG_URL (the demo tenant runs the real decision path)');
     const worlds = await buildStandWorlds();
-    handle = createStandApi(worlds, { authenticator: createAuthenticator({ ...verify, directory: memoryStandDirectory(worlds) }), ...(simulator ? { simulator } : {}) });
+    handle = createStandApi(worlds, { authenticator: createAuthenticator({ ...verify, directory: memoryStandDirectory(worlds) }), ...(simulator ? { simulator } : {}) }, { ...defaultLocale });
   }
   const server = createStandServer(handle);
   server.listen(port, '127.0.0.1', () => console.log(`stand on http://127.0.0.1:${port}/api/session (${process.env.REPRACER_PG_URL ? 'PostgreSQL' : 'memory'})`));

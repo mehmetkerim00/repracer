@@ -760,7 +760,7 @@ export const de: Messages = {
       discovery: {
         // Шаг 58 (ревью шага 56, находка 9): пояснение о старых листингах eBay — только у аккаунта eBay
         running: (h: number, hadCircle: boolean, ebay: boolean) => `Katalogsuche: Der aktuelle Durchlauf läuft seit ${h} Std.${hadCircle ? '' : ' (der erste)'} — ein Angebot, das nur ein vollständiger Durchlauf sieht${ebay ? ' (ältere eBay-Angebote)' : ''}, erscheint nach etwa zwei Durchläufen und einem Tag; die Stunden nennen wir, sobald ein Durchlauf abgeschlossen ist.`,
-        completed: (h: number, at: string, boundH: number, ebay: boolean) => `Katalogsuche: Der letzte vollständige Durchlauf dauerte ${h} Std., abgeschlossen ${at} — ein Angebot, das nur ein vollständiger Durchlauf sieht${ebay ? ' (ältere eBay-Angebote)' : ''}, erscheint nach etwa ${boundH} Std. (zwei Durchläufe und ein Tag), sofern der nächste Durchlauf nicht länger dauert als der letzte.`,
+        completed: (h: number, at: string, boundH: number, ebay: boolean) => `Katalogsuche: Der letzte vollständige Durchlauf dauerte ${h === 0 ? 'weniger als eine Stunde' : `${h} Std.`}, abgeschlossen ${at} — ein Angebot, das nur ein vollständiger Durchlauf sieht${ebay ? ' (ältere eBay-Angebote)' : ''}, erscheint nach etwa ${boundH} Std. (zwei Durchläufe und ein Tag), sofern der nächste Durchlauf nicht länger dauert als der letzte.`,
       },
       authorization: {
         revoked: 'Der Zugriff wurde im Kanal zurückgezogen: verbinden Sie erneut, um fortzufahren.',
@@ -1407,7 +1407,7 @@ export const de: Messages = {
         SYSTEM_HALT: { title: 'Anhalten der Storefront', holds: 'Nur Preise aus Wettbewerbsdaten', setBy: 'System: fehlerhafte Eingangsdaten', release: 'Frische Stichprobe, wo der Kanal sie erlaubt, sonst ein Mensch' },
         CHANNEL_DISTRUST: { title: 'Misstrauen gegenüber dem Kanal', holds: 'Alle Preise und die Kanal-Preisschwelle', setBy: 'System: der Kanal ändert unsere Zahlen', release: 'Nur ein Mensch: Inhaber oder Admin, zweiter Faktor, Notiz' },
       },
-      running: 'Läuft', stopped: 'Gestoppt', coveredBy: (label: string, since: string) => `Gestoppt durch: ${label} seit ${since}`,
+      running: 'Läuft', stopped: 'Gestoppt', stoppedAt: (when: string) => `gestoppt ${when}`, coveredBy: (label: string, since: string) => `Gestoppt durch: ${label} seit ${since}`,
       stopTenant: 'Gesamten Arbeitsbereich stoppen…', stopTarget: 'Stoppen…', resume: 'Fortsetzen…', release: 'Aufheben…',
       activeStops: 'Aktive Stopps', stopHistory: 'Fortgesetzt', activeHalts: 'Aktive Anhaltungen', haltHistory: 'Aufgehobene Anhaltungen', none: 'Keine.',
       by: (who: string) => `Von: ${who}`, noteLabel: (note: string) => `Notiz: „${note}“`, notStoppedTitle: 'Nicht gestoppt:',

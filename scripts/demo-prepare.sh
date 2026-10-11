@@ -32,6 +32,21 @@ LOGS="${TMPDIR:-/tmp}"
 LOGS="${LOGS%/}/repracer-demo"
 mkdir -p "${LOGS}"
 
+# Шаг 76 (предполётный прогон демо): чужой процесс на порту стенда — старый стенд прошлого запуска: проверка «стенд поднялся» ответила бы
+# им, и показ шёл бы на старом мире. Интерфейс держит 127.0.0.1:5173 строго; чужое приложение на [::1]:5173 (другой проект на vite)
+# забирает адрес «localhost:5173» — открывать только http://127.0.0.1:5173
+if lsof -nP -iTCP:"${STAND_PORT}" -sTCP:LISTEN > /dev/null 2>&1; then
+  echo "порт стенда ${STAND_PORT} занят — остановите прошлый запуск (Ctrl+C в его терминале) или процесс:"; lsof -nP -iTCP:"${STAND_PORT}" -sTCP:LISTEN; exit 1
+fi
+if lsof -nP -iTCP:5173 -sTCP:LISTEN > /dev/null 2>&1; then
+  if lsof -nP -iTCP@127.0.0.1:5173 -sTCP:LISTEN > /dev/null 2>&1; then
+    echo "127.0.0.1:5173 занят — интерфейс демо не поднимется:"; lsof -nP -iTCP:5173 -sTCP:LISTEN; exit 1
+  fi
+  echo "ВНИМАНИЕ: на 5173 слушает другое приложение (не на 127.0.0.1) — адрес localhost:5173 откроет ЕГО. Открывайте только http://127.0.0.1:5173"
+fi
+# Код, который исполняет браузер, не импортирует модулей Node: иначе страница консоли пустая (шаг 76)
+node scripts/browser-imports.mjs > "${LOGS}/browser-imports.log" 2>&1 || { echo "интерфейс тянет модули Node — страница будет пустой; см. ${LOGS}/browser-imports.log"; exit 1; }
+
 echo "== база ${DB} (миграции и смоук-проверки схемы, несколько минут)"
 REPRACER_PG_TEMPLATE=repracer_demo_template scripts/db/prepare.sh "${DB}" > "${LOGS}/prepare.log" 2>&1 \
   || { echo "подготовка базы не прошла — см. ${LOGS}/prepare.log"; exit 1; }
@@ -42,8 +57,9 @@ trap cleanup EXIT INT TERM
 
 echo "== стенд с демо-тенантом (тень, витрины США) на 127.0.0.1:${STAND_PORT}"
 STAND_IDENTITY=simulator REPRACER_PG_URL="postgres://svc_app@${PGHOST}:${PGPORT}/${DB}" \
-  REPRACER_DEMO=on REPRACER_DEMO_SHADOW=on REPRACER_DEMO_US=on REPRACER_DEMO_PRESS_DAYS="${REPRACER_DEMO_PRESS_DAYS:-7}" \
+  REPRACER_DEMO=on REPRACER_DEMO_ONLY=on REPRACER_DEMO_SHADOW=on REPRACER_DEMO_US=on REPRACER_DEMO_PRESS_DAYS="${REPRACER_DEMO_PRESS_DAYS:-7}" \
   REPRACER_DEMO_LOCALE="${REPRACER_DEMO_LOCALE:-en}" REPRACER_DEMO_TIME_ZONE="${REPRACER_DEMO_TIME_ZONE:-America/Los_Angeles}" \
+  REPRACER_CONSOLE_LOCALE="${REPRACER_DEMO_LOCALE:-en}" REPRACER_STAND_TOKEN_SECONDS="${REPRACER_STAND_TOKEN_SECONDS:-43200}" \
   npm run stand -w @repracer/console > "${LOGS}/stand.log" 2>&1 &
 pids+=($!)
 
@@ -57,6 +73,11 @@ curl -sf "http://127.0.0.1:${STAND_PORT}/api/session" > /dev/null || { echo "с�
 echo "== интерфейс консоли на 127.0.0.1:5173"
 npm run dev -w @repracer/console > "${LOGS}/ui.log" 2>&1 &
 pids+=($!)
+for _ in $(seq 1 60); do
+  curl -sf -o /dev/null "http://127.0.0.1:5173/" && break
+  sleep 1
+done
+curl -sf -o /dev/null "http://127.0.0.1:5173/" || { echo "интерфейс не поднялся — см. ${LOGS}/ui.log"; exit 1; }
 
 # Первые решения демо-мира: доказательство тени считает то, что уже случилось
 DEMO_TENANT="(SELECT tenant_id FROM tenant_data.tenant WHERE demo)"

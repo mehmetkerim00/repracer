@@ -152,6 +152,8 @@ test('шаг 68: демо США — решения в долларах, «по�
   assert.ok(preview, 'у демо есть предпросмотр недельного письма');
   assert.equal(preview.synthetic, en.ui.shadow.digest.previewSynthetic);
   assert.match(preview.text, /without the floor you would have sold \$[\d,]+\.\d{2} cheaper/i, `письмо говорит деньгами в долларах: ${preview.text}`);
+  // Шаг 76 (предполётный прогон демо): письмо называет магазин так же, как карточка в списке миров, а не служебным заголовком стенда
+  assert.ok(preview.text.includes(`"${en.ui.app.demoWorldTitle}"`) && !preview.text.includes('Kaufland (Simulator)'), `имя магазина в письме: ${preview.text.slice(0, 160)}`);
   assert.ok(shadow.body.summary.decisions > 100, `неделя тени: ${shadow.body.summary.decisions} решений`);
   /**
    * Ревью шага 68, находка 9: начало окна сводки — всегда «сейчас − 7 суток», и утверждение о нём было тавтологией. Неделя прожата, когда

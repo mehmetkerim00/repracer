@@ -1,4 +1,11 @@
-import { inflateRawSync } from 'node:zlib';
+/**
+ * Шаг 76 (предполётный прогон демо): распаковка берётся из Node ЛЕНИВО, а не импортом модуля. Модуль импортирует и консоль в браузере
+ * (подсказки колонок и кодировки — через `console-model`), а `import … from 'node:zlib'` в браузере падает при загрузке: Vite подменяет
+ * встроенный модуль Node заглушкой, и интерфейс консоли не исполнялся вовсе. Читает XLSX только сервер (Node ≥ 22); правило репозитория
+ * держит, что код, достижимый из интерфейса, встроенных модулей Node не импортирует
+ */
+const inflateRawSync = (raw: Buffer, options: { maxOutputLength: number }): Buffer =>
+  (process.getBuiltinModule('node:zlib') as typeof import('node:zlib')).inflateRawSync(raw, options);
 
 /**
  * Р-134 (шаг 28): чтение типичных выгрузок продавца — CSV и XLSX. Новой зависимости для этого не заводим: XLSX — это ZIP с XML,

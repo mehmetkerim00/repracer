@@ -1,5 +1,7 @@
 import type { ChannelAccountRow, OnboardingPath, OnboardingProgressRow, OnboardingStep, OnboardingStepStatus } from '@repracer/pricing-pipeline';
-import { onboardingStepsOf } from '@repracer/pricing-pipeline';
+// Шаг 76: функция шагов — из модуля типов хранилища, а не из входа пакета: вход тянет путь решения с `node:crypto`, и интерфейс консоли
+// в браузере падал при загрузке (правило — scripts/browser-imports.mjs)
+import { onboardingStepsOf } from '@repracer/pricing-pipeline/store';
 import { can } from '@repracer/pricing-model';
 import type { Messages } from './i18n/index.ts';
 import { storefrontName, type StandWorld } from './world.ts';

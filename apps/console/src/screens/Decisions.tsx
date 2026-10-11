@@ -42,7 +42,10 @@ export function TraceView({ trace }: { trace: DecisionTrace }) {
       <p><a href={href(trace.worldId, 'decisions')}>{t.back}</a></p>
       <h2>{t.pageTitle}</h2>
       <p className={`headline tone-${trace.tone}`}>{trace.headline}{trace.dangerous ? <> <Badge tone="stop">{t.dangerousBadge}</Badge></> : null}</p>
-      <p className="muted">{t.meta(trace.unit?.label ?? m.ui.common.noValue, trace.decisionId, trace.decidedAt)}</p>
+      <p className="muted">{t.meta(trace.unit?.label ?? m.ui.common.noValue, trace.decisionId, trace.decidedAt)}
+        {/* Шаг 76 (предполётный прогон демо): от решения — к границам и разбивке пола этого же предложения. Без ссылки вопрос «что
+            помешает продать ниже себестоимости» вёл на экран товаров без поиска, где нужное предложение — на пятой странице */}
+        {trace.unit ? <> · <a href={href(trace.worldId, 'bounds', trace.unit.writeScopeId)}>{m.ui.products.bounds}</a></> : null}</p>
       <ol className="steps">
         {trace.steps.map((step) => (
           <li key={step.key} className={`step status-${step.status}`}>

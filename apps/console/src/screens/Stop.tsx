@@ -30,7 +30,8 @@ function StopCardView({ stop, onResume }: { stop: StopCard; onResume?: (stop: St
   return (
     <div className={`card ${stop.released ? '' : 'stopped'}`}>
       <h3>{stop.scopeLabel}</h3>
-      <p><Badge tone={stop.released ? 'off' : 'stop'}>{stop.released ? s.stopHistory : s.stopped}</Badge> {stop.since}</p>
+      {/* Шаг 76 (предполётный прогон демо): у снятой остановки рядом с «Resumed» стояло время НАЧАЛА остановки без подписи */}
+      <p><Badge tone={stop.released ? 'off' : 'stop'}>{stop.released ? s.stopHistory : s.stopped}</Badge> {stop.released ? s.stoppedAt(stop.since) : stop.since}</p>
       <p className="small">{s.by(stop.by)}</p>
       <p className="small">{s.noteLabel(stop.note)}</p>
       {stop.released ? <p className="small muted">{stop.released}</p> : null}

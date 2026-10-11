@@ -1,8 +1,9 @@
 # Демо-сценарий показа клиенту (~10 минут)
 
 Воспроизводимый показ на демо-тенанте [Р-151]: данные синтетические, путь настоящий — те же роли базы, путь решения и исполнитель
-заданий, что у продавца. Язык показа — английский (первый пилотный клиент — продавец из США). Ожидаемые экраны ниже записаны
-проходом демо через API стенда с английской локалью (шаг 64, [проход консоли](evidence/step64-console-pass.md)).
+заданий, что у продавца. Язык показа — английский (первый пилотный клиент — продавец из США). Ожидаемые экраны ниже сверены
+**проходом браузером** (шаг 76: безголовый Chrome по `http://127.0.0.1:5173`, снимок и текст каждого экрана) — до него сценарий
+сверялся только через API стенда, и страница консоли в браузере была пустой. День показа — [чеклист](demo-preflight.md).
 
 ## Подготовка — одна команда
 
@@ -12,14 +13,22 @@ PGHOST=127.0.0.1 PGPORT=5432 PGUSER=<суперпользователь PostgreS
 
 Команда [scripts/demo-prepare.sh](../scripts/demo-prepare.sh):
 
+- проверяет, что порт стенда 4318 свободен (иначе показ пошёл бы на старом мире), что `127.0.0.1:5173` свободен, и предупреждает,
+  если на 5173 слушает чужое приложение — тогда адрес `localhost:5173` откроет его, открывайте только `http://127.0.0.1:5173`;
+- проверяет, что код страницы консоли не тянет модулей Node (`scripts/browser-imports.mjs`) — иначе страница пустая (шаг 76);
 - создаёт свою базу `repracer_demo` (тестовую `repracer_eu` и шаблон тестов не трогает);
-- поднимает стенд с демо-тенантом в тени (`REPRACER_DEMO_SHADOW=on`) и с витринами США (`REPRACER_DEMO_US=on`);
+- поднимает стенд с демо-тенантом в тени (`REPRACER_DEMO_SHADOW=on`) и с витринами США (`REPRACER_DEMO_US=on`); на стенде **только
+  демо-магазин** (`REPRACER_DEMO_ONLY=on`, шаг 76: без него после входа зритель видел три десятка миров сценариев стенда с описаниями
+  для разработчиков); первый экран — английский (`REPRACER_CONSOLE_LOCALE=en`); вход живёт 12 часов (`REPRACER_STAND_TOKEN_SECONDS`;
+  прежние 15 минут истекали посреди показа);
 - шаг 68: витрины США считают тень в долларах (себестоимость, границы и стратегии заведены), и их **неделя тени прожимается** при подъёме
   (`REPRACER_DEMO_PRESS_DAYS`, по умолчанию 7): решения ложатся в прошлые семь суток, недельное письмо показуемо сразу;
 - шаг 69: демо-тенант говорит по-английски, а времена показывает в поясе клиента из США (`REPRACER_DEMO_LOCALE=en`,
   `REPRACER_DEMO_TIME_ZONE=America/Los_Angeles` по умолчанию). Язык и пояс — свойства тенанта: переключатель языка браузера их не меняет;
-- поднимает интерфейс на `http://127.0.0.1:5173`;
+- поднимает интерфейс на `http://127.0.0.1:5173` и ждёт, пока он ответит;
 - ждёт первых решений и печатает запрос-доказательство для шага «а».
+
+Замер шага 76 (машина разработчика): от запуска до «Демо готово» — **1 мин 25 с** (база 19 с, прожатая неделя США 61 с).
 
 Ключей каналов не нужно: Kaufland — симулятор, аккаунты eBay US и Amazon US записаны функцией обнаружения каталога; конкуренты amazon.com —
 модель порта Amazon (уведомления ANY_OFFER_CHANGED, конкурент сползает ниже пола и возвращается), у eBay US стратегия от себестоимости:
@@ -32,8 +41,9 @@ PGHOST=127.0.0.1 PGPORT=5432 PGUSER=<суперпользователь PostgreS
 15 минут, заказ приходит раз в 4 минуты. В проходе шага 64 первые изменения цены Kaufland появились через ~21 минуту; через час на
 экранах есть и изменения цен, и резервации. Перезапуск команды — новый мир с нуля.
 
-В браузере: `http://127.0.0.1:5173` → **English** в правом верхнем углу → **Sign in as Owner** → мир **Demo store (simulator)** с
-пометкой **Demo**.
+В браузере: `http://127.0.0.1:5173` (не `localhost`) → экран входа уже по-английски → **Sign in as Owner** → одна карточка
+**Demo store (simulator)** с пометкой **Demo** → нажатие открывает сразу **Shadow mode**. Перезагрузка страницы (F5) — выход: токен
+живёт только в памяти вкладки; снова «Sign in as Owner», адрес экрана сохраняется.
 
 ### Что демо не показывает (сказать клиенту прямо)
 
@@ -45,8 +55,9 @@ PGHOST=127.0.0.1 PGPORT=5432 PGUSER=<суперпользователь PostgreS
 
 ## 0. Вход (30 с)
 
-**Экран — список миров:** «Demo store (simulator)», пометка **Demo**, описание «Synthetic store on the channel simulator: every offer has
-three competitors — one drifting, one undercutting, one in price waves.»
+**Экран — список миров («Your workspaces»):** одна карточка «Demo store (simulator)», описание «Synthetic store on the channel simulator:
+every offer has three competitors — one drifting, one undercutting, one in price waves.», пометки **Demo** и **awaiting access: 1**
+(аккаунт Amazon ЕС ждёт доступа [Р-150]), счётчики «Owner · Offers 224 · decisions (24 h) … · interventions (7 days) …».
 
 **Внутри мира — баннер:** «Demo tenant: synthetic data, real path. Every amount is made up.»
 
@@ -65,15 +76,17 @@ three competitors — one drifting, one undercutting, one in price waves.»
   - «Decisions made: N; of them the price would have changed M times»;
   - «The price landed exactly on the floor K times — the floor decided it, and without the floor it would have gone lower»;
   - «Writes held by the shadow: X (prices P, stock S)»;
-  - «Of them 0 would have used the external edit budget of the channel».
+  - «Of them about N would have used the external edit budget of the channel — approximate: the day boundary of the storefront is not
+    confirmed…» — бюджет правок есть у eBay, а граница его суток не подтверждена, поэтому «примерно» [Р-188].
 
   Сразу после подъёма — неделя США: около тысячи решений, «Without the floor you would have sold $… cheaper — counted on … holds»; через
   час добавляются тысячи решений Kaufland в евро.
 - **Блок «Weekly email — preview»** (шаг 68, K7): то самое недельное письмо тени, собранное той же функцией, что у доставки, за
   последние семь суток, с пометкой «Demo: synthetic data. This is the email a seller in shadow mode receives every Monday…». Демо-тенанту
   письмо не отправляется (0167) — поэтому оно на экране.
-- **Таблица аккаунтов:** Kaufland, eBay (syn_demo_ebay_us_…), Amazon (A1SYNDEMOUS…) — у каждого «shadow (nothing is written)». Ещё один
-  аккаунт Amazon ЕС ожидает доступа [Р-150].
+- **Таблица аккаунтов:** Amazon (syn-amazon-…, **0 offers** — это аккаунт Amazon ЕС, ожидающий доступа [Р-150]; чего он ждёт, называет
+  экран Channel accounts), Kaufland (syn-…, 200 offers), eBay (syn_demo_ebay_us_…, 12), Amazon (A1SYNDEMOUS…, 12) — у каждого
+  «shadow (nothing is written)» и поле «type the account name exactly» с кнопкой «Switch on live writes».
 - **Под таблицей:** «Live writes stay closed: we do not know amazon.com · Day boundary of the price history, ebay.com · …». Что мы не
   знаем про витрину, держит боевой режим закрытым [Р-172] — у amazon.com и ebay.com граница суток не подтверждена каналом. Таблица
   «What we still do not know about these storefronts» — словами: витрина, свойство, значение («net, sales tax added at checkout»), кто
@@ -110,8 +123,9 @@ psql -d repracer_demo -c "SELECT final_status, count(*) AS writes, count(dispatc
 
 ## б. «Почему эта цена» (2 мин)
 
-На экране тени — **Why** у строки с ценой (строки amazon.com прожатой недели есть сразу). Или «Why this price» в меню → строка с исходом
-**Approved** (у Kaufland первые появляются через ~35 минут после запуска).
+На экране тени — **Why this price** в строке таблицы удержанных записей (строки amazon.com прожатой недели есть сразу; ссылка в меню
+с тем же именем ведёт на список решений, а не на строку). В меню «Why this price» список начинается со строк Kaufland «No change» —
+фильтра по исходу нет, строку **Approved** листайте; поэтому показывайте из экрана тени.
 
 **Экран решения amazon.com** (шаг 68, записано прогоном `demo-us-live`): предложение подписано словами — «Plant pot, green · amazon.com».
 
@@ -120,7 +134,9 @@ psql -d repracer_demo -c "SELECT final_status, count(*) AS writes, count(dispatc
   price $12.50 by $0.01: $12.49.» и «Target $12.49 is below min_price — capped at $14.00.»; стратегия — «Beat the lowest: undercut by
   $0.01, against visible offers».
 - **Price Gate:** «Price $14.00 approved within $14.00–$50.00», пол $14.00, минимальная маржа 12 %.
-- **Input check:** «Too few competitor offers — fewer competitor offers than the 3 needed» — правило и порог, без чисел канала.
+- **Input check (rule set r49.1):** «Snapshot accepted: 9 rules checked»; «Anchor 2: consistency of the snapshot — skipped: fewer
+  competitor offers than the 3 needed» — правило и порог, без чисел канала.
+- **Write to the channel:** «$14.00: held by shadow mode (not sent)», «Not sent: this channel account is in shadow mode…».
 
 **Экран решения Kaufland** (записано с демо, цена конкурента сдвинулась):
 
@@ -157,11 +173,15 @@ psql -d repracer_demo -c "SELECT final_status, count(*) AS writes, count(dispatc
 
 **Живое действие — остановка человеком:**
 
-1. Витрина **Kaufland de** → «Stop». Окно подтверждения: «Stop all price changes: Kaufland de?» и «All prices of 200 offers stop
-   changing. The owner or an operator can resume it with a note.»
-2. Заметка, например «Demo: checking the stop crane», → подтвердить. Ответ: «Stopped. All prices of 200 offers stop changing.»
-3. Внизу — активная остановка («by Owner (you)», заметка) и строка журнала «Pricing stopped». Новые решения по витрине — «Pricing stopped by a person».
-4. «Resume» с заметкой → «Pricing resumed.»; в журнале вторая строка, остановка уходит в историю с временем и заметкой снятия.
+1. Блок **Storefronts** → карточка **Kaufland de** → кнопка **«Stop…»**. Окно подтверждения сверху страницы: «Stop all price changes:
+   Kaufland de?», «All prices of 200 offers stop changing. The owner or an operator can resume it with a note.» и «Not stopped: Stock
+   synchronization; A write already sent to the channel».
+2. Заметка — **не короче 10 символов** (кнопка «Yes, stop» до этого неактивна), например «Demo: checking the stop crane», → **«Yes,
+   stop»**. Ответ: «Stopped. All prices of 200 offers stop changing.»
+3. Ниже — «Active stops»: Kaufland de, «Stopped … · By: Owner (you)», заметка; «Audit log of stops» — строка «Pricing stopped». Новые
+   решения по витрине — «Pricing stopped by a person».
+4. **«Resume…»** с заметкой → **«Yes, resume»** → «Pricing resumed.»; в журнале вторая строка, остановка уходит в «Resumed» со временем
+   остановки и заметкой снятия. Весь шаг в проходе шага 76 — 2,5 с без ожиданий.
 
 **Две системные остановки** в демо вручную не вызываются: их ставит система, когда вход испорчен (массовый сдвиг цен конкурентов) или
 канал меняет наши числа (цена покупателя отличается от отправленной ровно на ставку налога) [Р-118]. Показать таблицу и сказать: они в
@@ -171,7 +191,7 @@ psql -d repracer_demo -c "SELECT final_status, count(*) AS writes, count(dispatc
 
 ## г. Внешние писатели: «мы не подерёмся с вашим PrepShipHub» (1,5 мин)
 
-**Экран «Channel connections»**, аккаунт eBay (syn_demo_ebay_us_…, ebay.com):
+**Экран «Channel accounts»**, аккаунт eBay (syn_demo_ebay_us_…, ebay.com):
 
 - «shadow: connected, nothing is written»;
 - «Found 12 offers; the shadow made N decisions in the last 24 hours.» (шаг 68: тень США считает);
@@ -179,7 +199,8 @@ psql -d repracer_demo -c "SELECT final_status, count(*) AS writes, count(dispatc
 - **запись остатка:** «Stock writes to this channel: off — the owner has to confirm that no other tool manages stock here.» и «Answer the
   question above first.»
 
-**Живое действие:** ответить **«Yes — stock»** (пусть это PrepShipHub клиента). Ожидаемое:
+**Живое действие:** нажать **«Yes — stock»** у аккаунта eBay (ответ сохраняется сразу, отдельной кнопки нет; пусть это PrepShipHub
+клиента). Ожидаемое:
 
 - «Your answer: another tool updates stock.»;
 - «Another tool updates stock in this channel: if we wrote stock too, the two would overwrite each other. Stock writes stay off until that
@@ -206,7 +227,9 @@ other…».
 
 Заказ в симуляторе приходит раз в 4 минуты, поэтому через час R > 0.
 
-Строку с заказом ищите листанием — поиска на экране нет (отложено K8). Ожидаемая строка, например:
+Сверху таблицы — 24 товара США с нулями: источник остатков демо ведёт только каталог Kaufland (цены США показаны на тени и в «Why this
+price»). Поставьте флажок **«Only products with reservations»** (или ищите по названию и SKU в поле «Search», шаг 69, K8) — останутся
+строки с заказами. Первая резервация в проходе шага 76 появилась на 5-й минуте после запуска. Ожидаемая строка, например:
 
 | SKU | On hand | Reserved | Available | Channel |
 |---|---|---|---|---|
@@ -219,13 +242,11 @@ other…».
 - **в тени и это количество удержано**, в канал ничего не ушло;
 - через час симулятор отгружает заказ: резервация закрывается, и на складе остаётся 23 — списание движением базы, а не правкой числа.
 
-Выше таблицы — «Before anything is written». Там названы ловушки каналов ДО первой записи [Р-153]:
+Под таблицей — «Before anything is written». Там названы ловушки каналов ДО первой записи [Р-153]:
 
 - у Kaufland остаток общий для витрин;
 - у Amazon остаток MFN — одно значение на весь регион аккаунта; для amazon.com это Северная Америка.
 
 ## Если что-то пошло не так
 
-- Экран пустой или «The service did not answer» — смотрите журнал стенда (путь печатает подготовка).
-- На экране тени «would have changed 0 times» — мир младше ~20 минут: конкуренты ещё не сдвинули цены.
-- Остановить показ — Ctrl+C в терминале подготовки: стенд и интерфейс останавливаются, база `repracer_demo` остаётся до следующего запуска.
+Порядок действий и перезапуск — [docs/demo-preflight.md](demo-preflight.md), раздел «Если завис экран или упал процесс».

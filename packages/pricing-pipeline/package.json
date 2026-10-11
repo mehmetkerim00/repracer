@@ -5,7 +5,8 @@
   "description": "End-to-end price decision path: snapshot → input sanity → strategy → intent → Price Gate → write plan → channel adapter. Storage behind a port; in-memory store for the contract stand.",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./store": "./src/store.ts"
   },
   "dependencies": {
     "@repracer/channel-port": "0.1.0",

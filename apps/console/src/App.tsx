@@ -100,7 +100,9 @@ export function WorldList({ worlds }: { worlds: readonly WorldSummary[] }) {
       <ul className="worlds">
         {worlds.map((w) => (
           <li key={w.id} className="card">
-            <h3><a href={href(w.id, 'products')}>{w.title}</a></h3>
+            {/* Шаг 76 (предполётный прогон демо): демо открывается экраном тени — с него начинается показ; плотная таблица товаров
+                первым экраном ничего не объясняет зрителю. Мир продавца — по-прежнему с товаров */}
+            <h3><a href={href(w.id, w.demo ? 'shadow' : 'products')}>{w.title}</a></h3>
             <p className="small muted">{w.description}</p>
             <p className="small">
               {w.demo ? <><Badge tone="warn">{m.ui.app.demoBadge}</Badge> · </> : null}
