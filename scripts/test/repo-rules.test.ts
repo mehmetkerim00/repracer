@@ -862,3 +862,24 @@ test('шаг 76: index.html консоли не говорит по-русски
   // Зубы [Р-94]: правило видит русский заголовок прежней редакции
   assert.equal(/[А-Яа-яЁё]/.test('<title>repracer — консоль продавца (стенд)</title>'), true);
 });
+
+/**
+ * Шаг 80: подготовка демо держит машину бодрствующей с начала и до своего выхода (`caffeinate -w $$`), то есть и весь показ. Сон macOS
+ * остановил подготовку шага 79 на 34 минуты вместо полутора: миграции и прожатая неделя США мерились настенными часами вместе со сном
+ * (журнал питания), а журнал PostgreSQL в это время был пуст. Посреди показа сон остановил бы и часы демо-мира. Правило [Р-146]:
+ * `caffeinate … -w $$` стоит в скрипте ДО фазы базы — иначе первые минуты подготовки снова может съесть сон.
+ */
+test('шаг 80: подготовка демо держит машину бодрствующей с первой фазы и до Ctrl+C (caffeinate -w $$)', () => {
+  const awakeBeforeDatabase = (text: string) => {
+    const code = text.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+    const awake = code.search(/caffeinate\s+-[a-z]*i[a-z]*\s+-w\s+\$\$/);
+    const database = code.indexOf('scripts/db/prepare.sh');
+    return awake >= 0 && database >= 0 && awake < database;
+  };
+  // Зубы [Р-94]: без caffeinate, с caffeinate после фазы базы и только в комментарии правило краснеет
+  assert.equal(awakeBeforeDatabase('scripts/db/prepare.sh demo'), false);
+  assert.equal(awakeBeforeDatabase('scripts/db/prepare.sh demo\ncaffeinate -dims -w $$ &'), false);
+  assert.equal(awakeBeforeDatabase('# caffeinate -dims -w $$ &\nscripts/db/prepare.sh demo'), false);
+  assert.equal(awakeBeforeDatabase('caffeinate -dims -w $$ &\nscripts/db/prepare.sh demo'), true);
+  assert.ok(awakeBeforeDatabase(read('scripts/demo-prepare.sh')), 'scripts/demo-prepare.sh: caffeinate -w $$ before the database phase');
+});

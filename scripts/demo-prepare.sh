@@ -13,6 +13,7 @@
 #
 # Время демо-мира — НАСТОЯЩЕЕ (ревью шага 34, находка 9). Kaufland считает с момента запуска; витрины США — прожатая неделя до запуска
 # (виртуальные часы прошлой недели, решения ложатся в прошлые сутки) и дальше настоящее время. Данные синтетические и так помечены.
+# Подготовка держит машину бодрствующей до Ctrl+C (caffeinate, шаг 80) и печатает время каждой фазы.
 # Запускайте заранее: прожатая неделя — около минуты, первые изменения цен Kaufland — через ~20 минут; база переживает перезапуск стенда
 # только пересевом (новый тенант).
 #
@@ -48,9 +49,21 @@ fi
 # Код, который исполняет браузер, не импортирует модулей Node: иначе страница консоли пустая (шаг 76)
 node scripts/browser-imports.mjs > "${LOGS}/browser-imports.log" 2>&1 || { echo "интерфейс тянет модули Node — страница будет пустой; см. ${LOGS}/browser-imports.log"; exit 1; }
 
-echo "== база ${DB} (миграции и смоук-проверки схемы, несколько минут)"
+# Шаг 80: машина не засыпает, пока работает подготовка и идёт показ (до Ctrl+C). Сон macOS остановил подготовку шага 79 на 34 минуты
+# (журнал питания: «Sleep Service Back to Sleep» в 04:59:38 и 05:16:35 — миграции и прожатая неделя мерились вместе со сном), а посреди
+# показа сон остановил бы часы демо-мира. caffeinate завершается вместе с этим скриптом (-w), крышку ноутбука закрывать всё равно нельзя
+if command -v caffeinate > /dev/null; then
+  caffeinate -dims -w $$ &
+else
+  echo "ВНИМАНИЕ: нет caffeinate — не дайте машине уснуть до конца показа, иначе подготовка и часы демо-мира остановятся"
+fi
+# Шаг 80: время каждой фазы — в итоге подготовки: медленный подъём (шаг 79 — 34 минуты вместо полутора) виден сразу и по фазам
+SECONDS=0
+mark=0
+echo "== база ${DB} (миграции и смоук-проверки схемы, обычно меньше минуты)"
 REPRACER_PG_TEMPLATE=repracer_demo_template scripts/db/prepare.sh "${DB}" > "${LOGS}/prepare.log" 2>&1 \
   || { echo "подготовка базы не прошла — см. ${LOGS}/prepare.log"; exit 1; }
+t_db=$((SECONDS - mark)); mark=${SECONDS}
 
 pids=()
 cleanup() { for p in "${pids[@]}"; do kill "$p" 2> /dev/null || true; done; }
@@ -70,6 +83,7 @@ for _ in $(seq 1 600); do
   sleep 1
 done
 curl -sf "http://127.0.0.1:${STAND_PORT}/api/session" > /dev/null || { echo "стенд не поднялся — см. ${LOGS}/stand.log"; exit 1; }
+t_stand=$((SECONDS - mark)); mark=${SECONDS}
 
 echo "== интерфейс консоли на 127.0.0.1:5173"
 npm run dev -w @repracer/console > "${LOGS}/ui.log" 2>&1 &
@@ -81,6 +95,7 @@ for _ in $(seq 1 60); do
   sleep 1
 done
 ours || { echo "интерфейс консоли не отвечает на 127.0.0.1:5173 — см. ${LOGS}/ui.log"; exit 1; }
+t_ui=$((SECONDS - mark)); mark=${SECONDS}
 
 # Первые решения демо-мира: доказательство тени считает то, что уже случилось
 DEMO_TENANT="(SELECT tenant_id FROM tenant_data.tenant WHERE demo)"
@@ -90,10 +105,13 @@ for _ in $(seq 1 120); do
   [ "${n:-0}" -gt 0 ] && break
   sleep 5
 done
+t_first=$((SECONDS - mark)); mark=${SECONDS}
+# Прожатие недели США стенд печатает сам («demo US week pressed: … N s»)
+pressed=$(grep -o 'demo US week pressed: .*' "${LOGS}/stand.log" | grep -oE '[0-9.]+ s$' || true)
 
 cat << EOF
 
-Демо готово: http://127.0.0.1:5173
+Демо готово: http://127.0.0.1:5173 — подготовка ${SECONDS} с: база ${t_db} с, стенд ${t_stand} с (из них неделя США ${pressed:-?}), интерфейс ${t_ui} с, первые решения ${t_first} с
   - вход: «Owner» (владелец), язык — English в правом верхнем углу;
   - мир: «Demo» с пометкой DEMO; сценарий показа — docs/demo-script.md;
   - неделя тени США (ebay.com, amazon.com, доллары) прожата; недельное письмо — экран «Shadow mode», блок «Weekly email — preview».

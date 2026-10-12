@@ -28,10 +28,12 @@ PGHOST=127.0.0.1 PGPORT=5432 PGUSER=<суперпользователь PostgreS
 - поднимает интерфейс на `http://127.0.0.1:5173` и ждёт, пока он ответит;
 - ждёт первых решений и печатает запрос-доказательство для шага «а».
 
-Замер шага 76 (машина разработчика): от запуска до «Демо готово» — **1 мин 25 с** (база 19 с, прожатая неделя США 61 с).
+Замер шага 80 (машина разработчика): от запуска до «Демо готово» — **85 с** (база 18 с, стенд 66 с, из них прожатая неделя США 61 с,
+интерфейс 1 с); строка «Демо готово» печатает эти числа сама. Подготовка держит машину бодрствующей до Ctrl+C (`caffeinate`, шаг 80):
+сон macOS остановил подготовку шага 79 на 34 минуты — машина спала, а не считала.
 
 Ключей каналов не нужно: Kaufland — симулятор, аккаунты eBay US и Amazon US записаны функцией обнаружения каталога; конкуренты amazon.com —
-модель порта Amazon (уведомления ANY_OFFER_CHANGED, конкурент сползает ниже пола и возвращается), у eBay US стратегия от себестоимости:
+модель порта Amazon (уведомления о смене цены конкурента — на экране «Amazon, notification of a competitor price change»; конкурент сползает ниже пола и возвращается), у eBay US стратегия от себестоимости:
 конкурентов eBay в бою мы не видим [Р-190].
 
 **Запускайте за час до показа.** Время демо-мира настоящее, секунда в секунду (ускорять его нельзя: у базы свои часы — ревью шага 34,
@@ -64,30 +66,36 @@ every offer has three competitors — one drifting, one undercutting, one in pri
 
 Что сказать: это тот же продукт, что у вас будет, — только канал симулирован и цифры выдуманы.
 
-Меню мира строится по витринам тенанта: вкладка **Omnibus** — правило ЕС, и у демо она есть только из-за Kaufland de. У продавца только с
+**Меню слева** (шаг 79): **Overview** — Setup, Shadow mode; **Pricing** — Why this price, Strategies, Price changes, Stopped changes,
+Dangerous changes, Bounds; **Stock** — Stock, Offers, Unit cost import; **Workspace** — Channel accounts, Omnibus, Bulk operations,
+Stop pricing. Над меню — имя магазина и ссылка **«← All workspaces»** (к списку магазинов).
+
+Меню мира строится по витринам тенанта: вкладка **Omnibus** — правило ЕС, и у демо она есть только из-за kaufland.de. У продавца только с
 витринами США её нет вовсе (шаг 68, K3) — если клиент спросит, это ответ.
 
 ## а. Тень: «система физически не может трогать цены» (2,5 мин)
 
 **Экран «Shadow mode».** Ожидаемое:
 
-- **Вступление:** «The channel is connected and the engine runs completely — snapshots, checks, strategy, bounds, explanation. Nothing is
-  written to the channel: every change below was held.»
-- **Сводка за «Last 7 days»:**
-  - «Decisions made: N; of them the price would have changed M times»;
+- **Подзаголовок:** «The channel is connected and the engine runs completely — snapshots, checks, strategy, bounds, explanation.» и ссылка
+  **«Learn more»** — раскрывает: «Nothing is written to the channel: every change below was held.»
+- **Сводка за «Last 7 days»** (переключатель «Last 7 days» / «Last 30 days») — сначала четыре плитки: **Decisions**, **Price would
+  change**, **Writes held**, **Without the floor** с подписью «not a forecast»; под ними строкой — «Period: … — …» и:
   - «The price landed exactly on the floor K times — the floor decided it, and without the floor it would have gone lower»;
   - «Writes held by the shadow: X (prices P, stock S)»;
   - «Of them about N would have used the external edit budget of the channel — approximate: the day boundary of the storefront is not
-    confirmed…» — бюджет правок есть у eBay, а граница его суток не подтверждена, поэтому «примерно» [Р-188].
+    confirmed…» — бюджет правок есть у eBay, а граница его суток не подтверждена, поэтому «примерно» [Р-188];
+  - «Without the floor you would have sold $… cheaper in total — counted on the N holds where we still keep what the strategy wanted».
 
-  Сразу после подъёма — неделя США: около тысячи решений, «Without the floor you would have sold $… cheaper — counted on … holds»; через
-  час добавляются тысячи решений Kaufland в евро.
+  Сразу после подъёма — неделя США: около тысячи решений в плитке **Decisions**; через час добавляются тысячи решений Kaufland в евро.
 - **Блок «Weekly email — preview»** (шаг 68, K7): то самое недельное письмо тени, собранное той же функцией, что у доставки, за
   последние семь суток, с пометкой «Demo: synthetic data. This is the email a seller in shadow mode receives every Monday…». Демо-тенанту
   письмо не отправляется (0167) — поэтому оно на экране.
-- **Таблица аккаунтов:** Amazon (syn-amazon-…, **0 offers** — это аккаунт Amazon ЕС, ожидающий доступа [Р-150]; чего он ждёт, называет
-  экран Channel accounts), Kaufland (syn-…, 200 offers), eBay (syn_demo_ebay_us_…, 12), Amazon (A1SYNDEMOUS…, 12) — у каждого
-  «shadow (nothing is written)» и поле «type the account name exactly» с кнопкой «Switch on live writes».
+- **Таблица аккаунтов** (колонки «Channel account», «Write mode», «Live writes»): **Amazon · syn-amazon-…** — «0 offers, 0 of them with
+  the engine on»; это аккаунт Amazon ЕС, ожидающий доступа [Р-150]: вместо поля включения — пилюля **«waiting for access»** и «Nothing to
+  switch on yet: this account is still waiting for access. What is missing is listed under Channel accounts.» Дальше **Kaufland · syn-…**
+  (200 offers), **Amazon · A1SYNDEMOUS…** (12), **eBay · syn_demo_ebay_us_…** (12) — у каждого «shadow (nothing is written)», «To switch
+  on live writes, type the account name exactly: …», поле и кнопка «Switch on live writes».
 - **Под таблицей:** «Live writes stay closed: we do not know amazon.com · Day boundary of the price history, ebay.com · …». Что мы не
   знаем про витрину, держит боевой режим закрытым [Р-172] — у amazon.com и ebay.com граница суток не подтверждена каналом. Таблица
   «What we still do not know about these storefronts» — словами: витрина, свойство, значение («net, sales tax added at checkout»), кто
@@ -96,7 +104,8 @@ every offer has three competitors — one drifting, one undercutting, one in pri
   seven days of shadow decisions our team checks your shadow data… and then live writes open. Nothing is needed from you.» (шаг 69, Р-204).
   Обещание — ровно это: неделя тени, затем проверка командой платформы. Процедура — [runbook-day-boundary.md](runbook-day-boundary.md);
   подтверждением канала её не называть, вопрос каналу остаётся открытым.
-- **Строки:** удержанные записи — offer, значение, время, ссылка **Why**.
+- **Строки** (колонки «Offer», «Would have been written», «Held at»): удержанные записи, новые сверху; у цены — ссылка **«Why this price»**,
+  у остатка («… pieces») ссылки нет.
 
 **Доказательство из базы** (в терминале; команду печатает подготовка):
 
@@ -125,33 +134,37 @@ psql -d repracer_demo -c "SELECT final_status, count(*) AS writes, count(dispatc
 ## б. «Почему эта цена» (2 мин)
 
 На экране тени — **Why this price** в строке таблицы удержанных записей (строки amazon.com прожатой недели есть сразу; ссылка в меню
-с тем же именем ведёт на список решений, а не на строку). В меню «Why this price» список начинается со строк Kaufland «No change» —
-фильтра по исходу нет, строку **Approved** листайте; поэтому показывайте из экрана тени.
+с тем же именем ведёт на список решений, а не на строку). В меню «Why this price» открывается список «Price decisions»: он начинается со
+строк Kaufland «No change» (ссылка в строке — «Why»), фильтра по исходу нет, строку **Approved** листайте; поэтому показывайте из экрана
+тени.
 
 **Экран решения amazon.com** (шаг 68, записано прогоном `demo-us-live`): предложение подписано словами — «Plant pot, green · amazon.com».
 
 - **Заголовок:** «The price $14.00 was approved; write: held by shadow mode (not sent)».
-- **Strategy:** «Proposed $14.00 (−24.3%): Target $12.49 is below min_price — capped at $14.00.»; шаги расчёта — «Undercut the lowest
-  price $12.50 by $0.01: $12.49.» и «Target $12.49 is below min_price — capped at $14.00.»; стратегия — «Beat the lowest: undercut by
-  $0.01, against visible offers».
-- **Price Gate:** «Price $14.00 approved within $14.00–$50.00», пол $14.00, минимальная маржа 12 %.
-- **Input check (rule set r49.1):** «Snapshot accepted: 9 rules checked»; «Anchor 2: consistency of the snapshot — skipped: fewer
-  competitor offers than the 3 needed» — правило и порог, без чисел канала.
+- **Competitor snapshot:** «Amazon, notification of a competitor price change», время наблюдения.
+- **Strategy:** «Proposed $14.00 (−24.3%): Target $12.49 is below your minimum price — capped at $14.00.»; шаги расчёта («Calculation
+  step») — «Undercut the lowest price $12.50 by $0.01: $12.49.» и «Target $12.49 is below your minimum price — capped at $14.00.»;
+  стратегия — «Beat the lowest: undercut by $0.01, against visible offers; outside bounds — use the bound (version 1)».
+- **Price Gate:** «Price $14.00 approved within $14.00–$50.00.», «Floor: $14.00», «Minimum margin: 12%».
+- **Input check:** «Snapshot accepted: 9 rules checked»; «Anchor 2: consistency of the snapshot» — «skipped», «fewer competitor offers
+  than the 3 needed» — правило и порог, без чисел канала.
 - **Write to the channel:** «$14.00: held by shadow mode (not sent)», «Not sent: this channel account is in shadow mode…».
 
 **Экран решения Kaufland** (записано с демо, цена конкурента сдвинулась):
 
 - **Заголовок:** «The price €18.41 was approved; write: held by shadow mode (not sent)».
-- **Competitor snapshot:** источник «Kaufland, Buy Box request», время наблюдения; «Full snapshot — available until …» (полный снимок
+- **Competitor snapshot:** источник «Kaufland, Buy Box request», время наблюдения; «Full snapshot: available until …» (полный снимок
   хранится 18 месяцев [Р-68]).
-- **Input check (rule set r49.1):** «Snapshot accepted: 9 rules checked» — витрина не остановлена, структура снимка, свежесть, массовый
-  сдвиг, ошибка ×100, якоря [Р-42].
+- **Input check:** «Snapshot accepted: 9 rules checked» — витрина не остановлена, структура снимка, свежесть, массовый сдвиг, ошибка
+  ×100, якоря [Р-42].
 - **Plausibility anchors:** «Used: unit cost, other offers in the snapshot, price history» [Р-49].
-- **Strategy:** «Proposed €18.41 (−0.5%)», «Price before €18.50», «Bounds at calculation €12.00 – €30.00».
-- **Price Gate:** «Price €18.41 approved within €12.00–€30.00» и список проверок: не остановлено человеком, границы заданы, пол маржи
+- **Strategy:** «Proposed €17.85 (−3.5%): Undercut the Buy Box €17.90 by €0.05: €17.85.», «Price before: €18.50», «Bounds at calculation:
+  €12.00 – €30.00» (суммы у каждого решения свои).
+- **Price Gate:** «Price €17.85 approved within €12.00–€30.00.» и список проверок: не остановлено человеком, границы заданы, пол маржи
   посчитан, не ниже пола, не выше потолка [Р-44, Р-83].
-- **Write to the channel:** «€18.41: held by shadow mode (not sent)». Причина: «Not sent: this channel account is in shadow mode, so nothing is written to the channel…».
-- **Channel confirmation:** пропущено — записи не было.
+- **Write to the channel:** «€17.85: held by shadow mode (not sent)». Причина («Ended because»): «Not sent: this channel account is in
+  shadow mode, so nothing is written to the channel…».
+- **Channel confirmation:** «not needed» — «No channel confirmation: the write is held by shadow mode (not sent)».
 
 Что сказать:
 
@@ -163,33 +176,36 @@ psql -d repracer_demo -c "SELECT final_status, count(*) AS writes, count(dispatc
 - решение без изменения цены хранит только код причины [Р-74], поэтому для показа берите строку с исходом **Approved**.
 
 **Границы — только у amazon.com.** Рядом с подписью предложения на экране решения — ссылка **«Bounds and floor»** (шаг 76): разбивка пола
-до цента. У товара amazon.com она отвечает на вопрос «что помешает продать ниже себестоимости»: себестоимость $5.00, пол маржи $6.85
-(минимальная маржа 12 %), действующий пол $14.00 = min_price, маржа на полу +$6.90. **У товаров Kaufland демо минимальная маржа не
-задана**: пол = min_price €12.00 при себестоимости €10.75, и экран честно покажет маржу на полу −€2.47. Если зритель откроет её сам —
-это ответ, а не сбой: «без минимальной маржи пол — только min_price, который вы задали; экран видит убыток до цента; задайте минимальную
+до цента (экран «Bounds and price floor»). У товара amazon.com она отвечает на вопрос «что помешает продать ниже себестоимости»:
+«Unit cost: $5.00 (as you declared it)», «Minimum margin $6.85 — margin at least 12%», «Effective floor $14.00 — from your minimum
+price», в разбивке пола «Margin $6.90». **У товаров Kaufland демо минимальная маржа не задана**: «Effective floor €12.00 — from your
+minimum price» при себестоимости €10.75, и экран честно покажет маржу на полу −€2.47. Если зритель откроет её сам — это ответ, а не сбой:
+«без минимальной маржи пол — только минимальная цена (minimum price), которую вы задали; экран видит убыток до цента; задайте минимальную
 маржу — и пол поднимется до неё, а цену ниже пола движок поднимет сам» (Р-207). Отложено в [deferred.md](deferred.md).
 
 ## в. Три стоп-крана (2 мин)
 
 **Экран «Stop pricing».** Таблица трёх видов остановки:
 
-| Вид | Holds | Set by | Release |
+| Kind | What it holds | Who sets it | How it ends |
 |---|---|---|---|
-| Stop by a person | All prices | Owner or operator, with a note | A person with a note; a tenant stop — the owner with a second factor |
+| Stop by a person | All prices | Owner or operator, with a note | A person with a note; the whole workspace — the owner with a second factor |
 | Storefront halt | Only competitor-derived prices | System: broken input data | Fresh sample where the channel allows it, otherwise a person |
 | Channel distrust | All prices and the channel price threshold | System: the channel changes our numbers | Only a person: owner or admin, second factor, note |
 
 **Живое действие — остановка человеком:**
 
-1. Блок **Storefronts** → карточка **Kaufland de** → кнопка **«Stop…»**. Окно подтверждения сверху страницы: «Stop all price changes:
-   Kaufland de?», «All prices of 200 offers stop changing. The owner or an operator can resume it with a note.» и «Not stopped: Stock
-   synchronization; A write already sent to the channel».
-2. Заметка — **не короче 10 символов** (кнопка «Yes, stop» до этого неактивна), например «Demo: checking the stop crane», → **«Yes,
-   stop»**. Ответ: «Stopped. All prices of 200 offers stop changing.»
-3. Ниже — «Active stops»: Kaufland de, «Stopped … · By: Owner (you)», заметка; «Audit log of stops» — строка «Pricing stopped». Новые
-   решения по витрине — «Pricing stopped by a person».
-4. **«Resume…»** с заметкой → **«Yes, resume»** → «Pricing resumed.»; в журнале вторая строка, остановка уходит в «Resumed» со временем
-   остановки и заметкой снятия. Весь шаг в проходе шага 76 — 2,5 с без ожиданий.
+1. Блок **Storefronts** → карточка **kaufland.de** («Running», «All prices of 200 offers stop changing») → кнопка **«Stop»**. Окно
+   подтверждения открывается поверх страницы, по центру (страница затемнена): «Stop all price changes: kaufland.de?», «All prices of 200
+   offers stop changing. The owner or an operator can resume it with a note.» и «Not stopped: Stock synchronization; A write already sent
+   to the channel: its outcome is accepted».
+2. Поле «Note — why (at least 10 characters)» — заметка **не короче 10 символов** (кнопка «Yes, stop» до этого неактивна), например
+   «Demo: checking the stop crane», → **«Yes, stop»**. Ответ: «Stopped. All prices of 200 offers stop changing.»
+3. Ниже — «Active stops»: карточка kaufland.de с пилюлей «Stopped» и временем, «By: Owner (you)», «Note: “…”»; «Audit log of stops» —
+   строка «Pricing stopped». Новые решения по витрине — «Pricing stopped by a person».
+4. На карточке остановки — **«Resume»** → окно «Resume pricing: kaufland.de?» с заметкой → **«Yes, resume»** → «Pricing resumed.»; в
+   журнале вторая строка, остановка уходит в «Resumed» со временем остановки и заметкой снятия. Весь шаг в проходе шага 76 — 2,5 с без
+   ожиданий.
 
 **Две системные остановки** в демо вручную не вызываются: их ставит система, когда вход испорчен (массовый сдвиг цен конкурентов) или
 канал меняет наши числа (цена покупателя отличается от отправленной ровно на ставку налога) [Р-118]. Показать таблицу и сказать: они в
@@ -199,7 +215,7 @@ psql -d repracer_demo -c "SELECT final_status, count(*) AS writes, count(dispatc
 
 ## г. Внешние писатели: «мы не подерёмся с вашим PrepShipHub» (1,5 мин)
 
-**Экран «Channel accounts»**, аккаунт eBay (syn_demo_ebay_us_…, ebay.com):
+**Экран «Channel accounts»**, карточка **eBay · syn_demo_ebay_us_… · ebay.com**:
 
 - «shadow: connected, nothing is written»;
 - «Found 12 offers; the shadow made N decisions in the last 24 hours.» (шаг 68: тень США считает);
@@ -210,7 +226,7 @@ psql -d repracer_demo -c "SELECT final_status, count(*) AS writes, count(dispatc
 **Живое действие:** нажать **«Yes — stock»** у аккаунта eBay (ответ сохраняется сразу, отдельной кнопки нет; пусть это PrepShipHub
 клиента). Ожидаемое:
 
-- «Your answer: another tool updates stock.»;
+- «Answer saved.» и в строке вопроса — «Your answer: another tool updates stock.»;
 - «Another tool updates stock in this channel: if we wrote stock too, the two would overwrite each other. Stock writes stay off until that
   tool is switched off and the answer is changed.»;
 - кнопки подтверждения записи остатка нет.
@@ -236,12 +252,13 @@ other…».
 Заказ в симуляторе приходит раз в 4 минуты, поэтому через час R > 0.
 
 Сверху таблицы — 24 товара США с нулями: источник остатков демо ведёт только каталог Kaufland (цены США показаны на тени и в «Why this
-price»). Поставьте флажок **«Only products with reservations»** (или ищите по названию и SKU в поле «Search», шаг 69, K8) — останутся
-строки с заказами. Первая резервация в проходе шага 76 появилась на 5-й минуте после запуска. Ожидаемая строка, например:
+price»). Поставьте флажок **«Only products with reservations»** — список фильтруется сразу, над таблицей «N of 224 products match.» и
+кнопка «Show all» (или ищите по названию и SKU: поле «Search by name or SKU» и кнопка «Search», шаг 69, K8) — останутся строки с
+заказами. Первая резервация в проходе шага 76 появилась на 5-й минуте после запуска. Ожидаемая строка, например:
 
-| SKU | On hand | Reserved | Available | Channel |
+| Product | On hand | Reserved | Available | Channels |
 |---|---|---|---|---|
-| syn-prod-de-340100168 | 24 | 1 | 23 | Kaufland · de — «held by shadow mode: 21 would be sent (…) — nothing was sent» |
+| Plant pot, large · syn-prod-de-340100079 | 24 | 1 | 23 | Kaufland · kaufland.de, пилюля «held by shadow mode»; ниже «to publish: 21; held by shadow mode: 21 would be sent (…) — nothing was sent; channel has not confirmed yet» |
 
 Что сказать:
 
