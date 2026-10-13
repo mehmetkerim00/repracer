@@ -3,6 +3,7 @@ import { LOCALES, messagesFor, type Locale } from '@repracer/console-model';
 import type { SessionView, StandToken, WorldSummary } from './api-types.ts';
 import { requestJson, setAccessToken, useResource, type Resource } from './api.ts';
 import { Badge, ErrorBox, errorText, href, Intro, Load, MessagesContext, NotFound, useMessages } from './components.tsx';
+import { Icon } from './icons.tsx';
 import { BoundsScreen } from './screens/Bounds.tsx';
 import { ComplianceScreen } from './screens/Compliance.tsx';
 import { JobHistory } from './screens/Jobs.tsx';
@@ -50,6 +51,13 @@ const NAV_GROUPS = [
   ['stock', ['stock', 'products', 'cost-import']],
   ['account', ['connections', 'compliance', 'jobs', 'stop']],
 ] as const;
+
+/** Шаг 81: знак у каждого пункта боковой панели — подпись та же, иконка только помогает глазу найти пункт */
+const NAV_ICONS: Record<string, string> = {
+  onboarding: 'home', shadow: 'shadow', decisions: 'help', strategies: 'strategy', feed: 'arrows', rejected: 'shield',
+  dangerous: 'alert', bounds: 'bounds', stock: 'box', products: 'list', 'cost-import': 'import',
+  connections: 'accounts', compliance: 'scales', jobs: 'zap', stop: 'stop',
+};
 
 /** Вход [Р-78]: у поставщика identity; на стенде — имитатор с синтетическими пользователями. Паролей у нас нет */
 /** Знак роли на карточке входа — две буквы, у каждой роли свой */
@@ -166,7 +174,7 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
               <div className="group-title">{m.ui.app.navGroups[group]}</div>
               {/* Шаг 68 (K3): Omnibus — правило ЕС; продавцу только с витринами США пункта нет [Р-123] */}
               {keys.filter((key) => key !== 'compliance' || world.euStorefronts).map((key) => (
-                <a key={key} href={href(world.id, key)} className={route.screen === key ? 'active' : ''} aria-current={route.screen === key ? 'page' : undefined}>{m.ui.app.screens[key]}</a>
+                <a key={key} href={href(world.id, key)} className={route.screen === key ? 'active' : ''} aria-current={route.screen === key ? 'page' : undefined}><Icon name={NAV_ICONS[key] ?? ''} size={16} />{m.ui.app.screens[key]}</a>
               ))}
             </div>
           ))}

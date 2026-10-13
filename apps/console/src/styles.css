@@ -73,12 +73,20 @@ main.page.world { max-width: none; margin: 0; padding: 0; display: flex; flex-di
   padding: 0 var(--space-2); margin-bottom: var(--space-1); font-size: 11px; font-weight: var(--weight-heading); letter-spacing: 0.06em;
   text-transform: uppercase; color: var(--text-3);
 }
+/* Шаг 81: пункт — иконка и подпись в строку; наведение и выбор — плавно, 150 мс */
 .nav-group a {
-  display: block; padding: 6px var(--space-2); border-radius: var(--radius-sm); color: var(--text); font-size: var(--font-size);
-  line-height: 20px; text-decoration: none;
+  display: flex; align-items: center; gap: 10px; padding: 6px var(--space-2); border-radius: var(--radius-sm); color: var(--text);
+  font-size: var(--font-size); line-height: 20px; text-decoration: none; position: relative;
+  transition: background-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
 }
+.nav-group a .icon { flex: none; color: var(--text-3); transition: color 150ms ease; }
 .nav-group a:hover { background: var(--neutral-soft); text-decoration: none; color: var(--text); }
-.nav-group a.active { background: var(--accent-soft); color: var(--accent-text); font-weight: var(--weight-medium); }
+.nav-group a:hover .icon { color: var(--text-2); }
+.nav-group a.active {
+  background: var(--accent-soft); color: var(--accent-text); font-weight: var(--weight-medium);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.nav-group a.active .icon { color: var(--accent); }
 .world-content { min-width: 0; padding: var(--space-5) var(--space-6) var(--space-7); }
 .world-content > * + * { margin-top: var(--space-4); }
 /* вводный абзац экрана — читаемой длины строки, а не на всю ширину */
