@@ -83,13 +83,13 @@ export function StopScreenView({ view, onStop, onResume, onRelease, onReleaseDis
       <section className="stop-kinds">
         <h3>{s.kindsTitle}</h3>
         <div className="table-wrap">
-          <table>
+          <table className="cardify">
             <thead><tr><th>{k.kind}</th><th>{k.holds}</th><th>{k.setBy}</th><th>{k.release}</th><th>{k.active}</th></tr></thead>
             <tbody>
               {view.kinds.map((row) => (
                 <tr key={row.kind}>
-                  <td><strong>{row.title}</strong></td><td>{row.holds}</td><td>{row.setBy}</td><td>{row.release}</td>
-                  <td className="num">{row.active > 0 ? <Badge tone="stop">{row.active}</Badge> : row.active}</td>
+                  <td className="card-title"><strong>{row.title}</strong></td><td className="text-cell" data-label={k.holds}>{row.holds}</td><td className="text-cell" data-label={k.setBy}>{row.setBy}</td><td className="text-cell" data-label={k.release}>{row.release}</td>
+                  <td className="num" data-label={k.active}>{row.active > 0 ? <Badge tone="stop">{row.active}</Badge> : row.active}</td>
                 </tr>
               ))}
             </tbody>
@@ -155,12 +155,12 @@ export function StopScreenView({ view, onStop, onResume, onRelease, onReleaseDis
         <h3>{s.auditTitle}</h3>
         {view.audit.length === 0 ? <p className="muted empty">{s.auditEmpty}</p> : (
           <div className="table-wrap">
-            <table>
+            <table className="cardify">
               <tbody>
                 {view.audit.map((a, i) => (
                   <tr key={i}>
                     <td className="nowrap"><When value={a.at} /></td>
-                    <td>{a.action}</td>
+                    <td className="card-title">{a.action}</td>
                     <td>{a.actor}</td>
                     <td>{a.scope}</td>
                     <td>{a.note ? s.noteLabel(a.note) : ''}</td>

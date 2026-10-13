@@ -144,14 +144,14 @@ export function StockScreenView({ view: v, worldId, query, onQuery, onFilter }: 
       {v.filter.noneText ? <p className="notice">{v.filter.noneText}</p> : null}
       {v.rows.length > 0 ? (
         <div className="table-wrap">
-        <table>
+        <table className="stock-table cardify">
           <thead><tr><th>{t.columns.product}</th><th className="num">{t.columns.onHand}</th><th className="num">{t.columns.reserved}</th><th className="num">{t.columns.available}</th><th>{t.columns.channels}</th></tr></thead>
           <tbody>
             {v.rows.map((r) => (
               <tr key={r.productId}>
-                <td className="product">{r.label}{r.label !== r.sku ? <span className="small muted nowrap"> · {r.sku}</span> : null}{r.gtin ? <span className="small muted nowrap"> · {r.gtin}</span> : null}</td>
-                <td className="num">{r.onHand}</td><td className="num">{r.reserved}</td><td className="num money">{r.available}</td>
-                <td>
+                <td className="product card-title">{r.label}{r.label !== r.sku ? <span className="small muted nowrap"> · {r.sku}</span> : null}{r.gtin ? <span className="small muted nowrap"> · {r.gtin}</span> : null}</td>
+                <td className="num" data-label={t.columns.onHand}>{r.onHand}</td><td className="num" data-label={t.columns.reserved}>{r.reserved}</td><td className="num money" data-label={t.columns.available}>{r.available}</td>
+                <td className="text-cell" data-label={t.columns.channels}>
                   {r.channelManaged.length > 0 ? <ul className="small muted plain">{r.channelManaged.map((text, i) => <li key={i}>{text}</li>)}</ul> : null}
                   {r.channels.length === 0 ? (r.channelManaged.length > 0 ? null : <span className="muted">—</span>) : (
                     <ul className="small plain stock-channels">

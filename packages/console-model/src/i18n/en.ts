@@ -430,6 +430,8 @@ export const en = {
       connectChannel: 'Connect a channel →', notFoundTitle: 'Page not found', worldNotFoundTitle: 'Workspace not found', loadFailedTitle: 'This screen could not be loaded',
       gapsTitle: 'Good to know about this screen',
       /** Шаг 84: мини-показатели карточки рабочего пространства — подпись над числом */
+      /** Шаг 85: кнопки выдвижной навигации на узких экранах — доступные имена */
+      menu: 'Menu', closeMenu: 'Close menu',
       metrics: { offers: 'Offers', decisions: 'Decisions 24h', interventions: 'Interventions 7d' },
       counts: (scopes: number, decisionsLastDay: number, interventionsLastWeek: number) =>
         `Offers ${scopes} · decisions (24 h) ${decisionsLastDay} · interventions (7 days) ${interventionsLastWeek}`,

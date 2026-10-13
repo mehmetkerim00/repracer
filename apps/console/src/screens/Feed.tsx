@@ -91,21 +91,21 @@ export function FeedScreenView({ view, onQuery }: { view: PriceFeedView; onQuery
           <div className="table-head"><span>{f.counts(view.counts)}</span>
             {onQuery ? <button type="button" disabled={view.page.total === 0} onClick={() => void exportFeed()}>{f.exportAll(view.page.total)}</button> : null}
             {shared.map((text) => <span key={text} className="head-note">{text}</span>)}</div>
-          <table className="feed dense sticky-end">
+          <table className="feed dense sticky-end cardify">
             <thead><tr><th><WhenHead label={c.when} zone={zone} /></th><th>{c.offer}</th><th className="num">{c.from}</th><th className="num">{c.to}</th><th className="num">{c.change}</th><th>{c.status}</th><th>{c.reason}</th><th /></tr></thead>
             <tbody>
               {view.items.map((i, n) => (
                 <tr key={n}>
-                  <td className="nowrap"><When value={i.at} zone={!zone} /></td>
-                  <td className="offer">{i.unit?.label ?? m.ui.common.noValue}</td>
-                  <td className="num cur">{i.from ?? '–'}</td>
-                  <td className="num money cur">{i.to}</td>
-                  <td className="num">{i.change ?? '–'}</td>
-                  <td><Badge tone={i.tone}>{i.status}</Badge>{i.confirmation ? <div className="note">{i.confirmation}</div> : null}</td>
+                  <td className="nowrap" data-label={`${c.when}${zone ? ` · ${zone}` : ''}`}><When value={i.at} zone={!zone} /></td>
+                  <td className="offer card-title">{i.unit?.label ?? m.ui.common.noValue}</td>
+                  <td className="num cur" data-label={c.from}>{i.from ?? '–'}</td>
+                  <td className="num money cur" data-label={c.to}>{i.to}</td>
+                  <td className="num" data-label={c.change}>{i.change ?? '–'}</td>
+                  <td className="card-status"><Badge tone={i.tone}>{i.status}</Badge>{i.confirmation ? <div className="note">{i.confirmation}</div> : null}</td>
                   {/* Шаг 79 (ревью): источник — подписью над причиной, а не своей колонкой: таблица помещается в окно */}
-                  <td>{i.reason && shared.includes(i.reason.text) ? <span className="basis">{i.source}</span>
+                  <td data-label={c.reason}>{i.reason && shared.includes(i.reason.text) ? <span className="basis">{i.source}</span>
                     : <><div className="note">{i.source}</div>{i.reason ? <ReasonLine reason={i.reason} /> : null}</>}</td>
-                  <td className="nowrap">{i.decisionId ? <a className="row-link" href={href(view.worldId, 'decisions', i.decisionId)}>{m.ui.rejected.path}</a> : null}</td>
+                  <td className="nowrap card-action">{i.decisionId ? <a className="row-link" href={href(view.worldId, 'decisions', i.decisionId)}>{m.ui.rejected.path}</a> : null}</td>
                 </tr>
               ))}
             </tbody>

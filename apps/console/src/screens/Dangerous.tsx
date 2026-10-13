@@ -29,20 +29,20 @@ export function DangerousScreenView({ view }: { view: DangerousReportView }) {
       <h3>{d.floorTitle}</h3>
       {view.floorHolds.count === 0 ? <p className="muted empty">{d.none}</p> : (
         <div className="table-wrap">
-          <table className="dense sticky-end">
+          <table className="dense sticky-end cardify">
             <thead><tr><th><WhenHead label={d.floorColumns.when} zone={holdZone} /></th><th>{d.floorColumns.offer}</th><th>{d.floorColumns.kind}</th><th className="num">{d.floorColumns.target}</th><th className="num">{d.floorColumns.floor}</th><th className="num">{d.floorColumns.below}</th><th>{d.floorColumns.reason}</th><th /></tr></thead>
             <tbody>
               {view.floorHolds.items.map((i, n) => (
                 <tr key={`${i.decisionId ?? 'hold'}-${n}`}>
-                  <td className="nowrap"><When value={i.at} zone={!holdZone} /></td>
-                  <td className="offer">{i.unit?.label ?? m.ui.common.noValue}</td>
-                  <td>{d.floorKinds[i.kind]}</td>
-                  <td className="num cur">{i.target ?? m.ui.common.noValue}</td>
-                  <td className="num money cur">{i.floor}</td>
-                  <td className="num cur">{i.below ?? m.ui.common.noValue}</td>
+                  <td className="nowrap" data-label={`${d.floorColumns.when}${holdZone ? ` · ${holdZone}` : ''}`}><When value={i.at} zone={!holdZone} /></td>
+                  <td className="offer card-title">{i.unit?.label ?? m.ui.common.noValue}</td>
+                  <td data-label={d.floorColumns.kind}>{d.floorKinds[i.kind]}</td>
+                  <td className="num cur" data-label={d.floorColumns.target}>{i.target ?? m.ui.common.noValue}</td>
+                  <td className="num money cur" data-label={d.floorColumns.floor}>{i.floor}</td>
+                  <td className="num cur" data-label={d.floorColumns.below}>{i.below ?? m.ui.common.noValue}</td>
                   {/* Шаг 84: стандартная причина пересказывала бы колонки цели, пола и разницы — короткой формой; полный текст — подсказкой */}
-                  <td>{STANDARD_FLOOR_HOLDS.has(i.reason.code) ? <span className="reason" title={i.reason.text}>{i.reason.title}</span> : <ReasonLine reason={i.reason} />}</td>
-                  <td className="nowrap">{i.decisionId ? <a className="row-link" href={href(view.worldId, 'decisions', i.decisionId)}>{m.ui.rejected.path}</a> : null}</td>
+                  <td data-label={d.floorColumns.reason}>{STANDARD_FLOOR_HOLDS.has(i.reason.code) ? <span className="reason" title={i.reason.text}>{i.reason.title}</span> : <ReasonLine reason={i.reason} />}</td>
+                  <td className="nowrap card-action">{i.decisionId ? <a className="row-link" href={href(view.worldId, 'decisions', i.decisionId)}>{m.ui.rejected.path}</a> : null}</td>
                 </tr>
               ))}
             </tbody>
@@ -59,18 +59,18 @@ export function DangerousScreenView({ view }: { view: DangerousReportView }) {
             <div className="card"><h3>{d.byBound}</h3><ul className="small">{view.byBound.map((b) => <li key={b.code}><Badge tone="stop">{b.count}</Badge> {b.title}</li>)}</ul></div>
           </div>
           <div className="table-wrap">
-            <table className="dense sticky-end">
+            <table className="dense sticky-end cardify">
               <thead><tr><th><WhenHead label={c.when} zone={gateZone} /></th><th>{c.offer}</th><th className="num">{c.proposed}</th><th className="num">{c.bound}</th><th className="num">{c.deviation}</th><th>{c.reason}</th><th /></tr></thead>
               <tbody>
                 {view.items.map((i) => (
                   <tr key={i.decisionId} className="dangerous">
-                    <td className="nowrap"><When value={i.at} zone={!gateZone} /></td>
-                    <td className="offer">{i.unit?.label ?? m.ui.common.noValue}</td>
-                    <td className="num cur">{i.proposed}</td>
-                    <td className="num cur">{i.bound}</td>
-                    <td className="num">{i.deviation}</td>
-                    <td><ReasonLine reason={i.reason} /></td>
-                    <td className="nowrap"><a className="row-link" href={href(view.worldId, 'decisions', i.decisionId)}>{m.ui.rejected.path}</a></td>
+                    <td className="nowrap" data-label={`${c.when}${gateZone ? ` · ${gateZone}` : ''}`}><When value={i.at} zone={!gateZone} /></td>
+                    <td className="offer card-title">{i.unit?.label ?? m.ui.common.noValue}</td>
+                    <td className="num cur" data-label={c.proposed}>{i.proposed}</td>
+                    <td className="num cur" data-label={c.bound}>{i.bound}</td>
+                    <td className="num" data-label={c.deviation}>{i.deviation}</td>
+                    <td data-label={c.reason}><ReasonLine reason={i.reason} /></td>
+                    <td className="nowrap card-action"><a className="row-link" href={href(view.worldId, 'decisions', i.decisionId)}>{m.ui.rejected.path}</a></td>
                   </tr>
                 ))}
               </tbody>

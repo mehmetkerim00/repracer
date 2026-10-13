@@ -93,15 +93,15 @@ export function BoundsIndexView({ worldId, items }: { worldId: string; items: re
       {/* Шаг 79 (ревью): список границ — таблицей с шапкой и зеброй; суммы — вправо, ссылка на разбивку пола — в своей колонке */}
       {items.length === 0 ? null : (
         <div className="table-wrap">
-          <table>
+          <table className="cardify">
             <thead><tr><th>{c.offer}</th><th className="num">{c.min}</th><th className="num">{c.max}</th><th /></tr></thead>
             <tbody>
               {items.map((i) => (
                 <tr key={i.writeScopeId}>
-                  <td className="offer"><a href={href(worldId, 'bounds', i.writeScopeId)}>{i.label}</a></td>
-                  <td className="num money cur">{i.minPrice}</td>
-                  <td className="num money cur">{i.maxPrice}</td>
-                  <td className="num"><a className="row-link" href={href(worldId, 'bounds', i.writeScopeId)}>{c.floor}</a></td>
+                  <td className="offer card-title"><a href={href(worldId, 'bounds', i.writeScopeId)}>{i.label}</a></td>
+                  <td className="num money cur" data-label={c.min}>{i.minPrice}</td>
+                  <td className="num money cur" data-label={c.max}>{i.maxPrice}</td>
+                  <td className="num card-action"><a className="row-link" href={href(worldId, 'bounds', i.writeScopeId)}>{c.floor}</a></td>
                 </tr>
               ))}
             </tbody>

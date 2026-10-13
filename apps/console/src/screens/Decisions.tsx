@@ -18,17 +18,17 @@ export function DecisionsView({ worldId, items }: { worldId: string; items: read
       <p className="subtitle">{m.ui.app.subtitles.decisions}</p>
       {items.length === 0 ? <p className="muted empty">{t.noDecisions}</p> : (
         <div className="table-wrap">
-          <table>
+          <table className="cardify">
             <thead><tr><th><WhenHead label={t.columns.when} zone={zone} /></th><th>{t.columns.unit}</th><th>{t.columns.outcome}</th><th className="num">{t.columns.price}</th><th>{t.columns.reason}</th><th /></tr></thead>
             <tbody>
               {items.map((d) => (
                 <tr key={d.decisionId}>
-                  <td><When value={d.decidedAt} zone={!zone} /></td>
-                  <td>{d.unit?.label ?? m.ui.common.noValue}</td>
-                  <td><Badge tone={d.tone}>{d.outcome}</Badge>{d.dangerous ? <> <Badge tone="stop">{t.dangerousBadge}</Badge></> : null}</td>
-                  <td className="money cur">{d.price}</td>
-                  <td>{d.reason}</td>
-                  <td className="num"><a className="row-link" href={href(worldId, 'decisions', d.decisionId)}>{t.why}</a></td>
+                  <td data-label={`${t.columns.when}${zone ? ` · ${zone}` : ''}`}><When value={d.decidedAt} zone={!zone} /></td>
+                  <td className="card-title">{d.unit?.label ?? m.ui.common.noValue}</td>
+                  <td className="card-status"><Badge tone={d.tone}>{d.outcome}</Badge>{d.dangerous ? <> <Badge tone="stop">{t.dangerousBadge}</Badge></> : null}</td>
+                  <td className="money cur" data-label={t.columns.price}>{d.price}</td>
+                  <td data-label={t.columns.reason}>{d.reason}</td>
+                  <td className="num card-action"><a className="row-link" href={href(worldId, 'decisions', d.decisionId)}>{t.why}</a></td>
                 </tr>
               ))}
             </tbody>

@@ -7,6 +7,7 @@ import { messagesFor } from '@repracer/console-model';
 import { buildStandWorlds, memoryStandDirectory, STAND_AUDIENCE, STAND_ISSUER } from '@repracer/contract-tests/stand';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
+import type { ShadowPage } from '@repracer/pricing-store-pg';
 import { createStandApi, createStandServer } from '../server/stand-server.ts';
 import { launchBrowser, type Browser } from './browser.ts';
 
@@ -24,6 +25,37 @@ let vite: ViteDevServer | null = null;
 let browser: Browser | null = null;
 let pageUrl = '';
 
+/** Синтетическая неделя тени для смоука адаптива: только форма экрана, ничего из базы */
+function syntheticShadow() {
+  const page = (now: string, sinceDays = 7): ShadowPage => {
+    const until = Date.parse(now);
+    const at = (msAgo: number) => new Date(until - msAgo).toISOString() as never;
+    const hour = 3_600_000;
+    return {
+      summary: { since: at(sinceDays * 24 * hour), until: at(0), decisions: 3070, changes: 505, floorHeld: 131, ceilingHeld: 0, heldWrites: 719,
+        heldPriceWrites: 515, heldQuantityWrites: 204, wouldSpendBudget: 10, wouldSpendUnconfirmed: 10, floorSavings: [{ currency: 'EUR', minor: 188826 }], floorSavingsHolds: 626 },
+      rows: Array.from({ length: 12 }, (_, i) => ({ channelWriteId: `smoke-write-${i}`, writeScopeId: `smoke-scope-${i}`, channel: 'KAUFLAND', channelAccountId: 'smoke-account',
+        sku: `syn-smoke-${100 + i}`, title: `Synthetic desk lamp, size ${i + 1}`, marketplace: 'de', field: i % 3 === 0 ? 'QUANTITY' : 'PRICE',
+        amountMinor: i % 3 === 0 ? null : 1838 + i, currency: i % 3 === 0 ? null : 'EUR', quantity: i % 3 === 0 ? 24 : null, priceDecisionId: null,
+        wouldSpendBudget: i === 0, finishedAt: at(i * hour) })),
+      total: 719,
+      accounts: [{ channelAccountId: 'smoke-account', channel: 'KAUFLAND', displayName: 'Kaufland', externalAccountId: 'syn-smoke-account', writeMode: 'SHADOW',
+        authStatus: 'ACTIVE', changedAt: null, changedByMembershipId: null, changedFrom: null, offers: 200, engineScopes: 200 }],
+      properties: [
+        { channel: 'AMAZON', marketplace: 'ATVPDKIKX0DER', country: 'US', property: 'DAY_BOUNDARY', value: null, status: 'UNKNOWN', question: 'A-03', closesBy: 'SHADOW_READ', source: 'synthetic' },
+        { channel: 'AMAZON', marketplace: 'ATVPDKIKX0DER', country: 'US', property: 'PRICE_TAX_BASIS', value: 'NET', status: 'CONSERVATIVE', question: 'A-02', closesBy: 'FIRST_LIVE_WRITE', source: 'synthetic' },
+      ],
+      digests: [{ periodStart: at(14 * 24 * hour), periodEnd: at(7 * 24 * hour), decisions: 2900, heldWrites: 700, floorSavings: [{ currency: 'EUR', minor: 150000 }],
+        deliveredAt: at(7 * 24 * hour - hour), deliveryKind: 'DRY_RUN' }],
+      decisionsByHour: Array.from({ length: sinceDays * 24 }, (_, i) => ({ hour: at((i + 1) * hour), decisions: 18 + (i % 7) })),
+    };
+  };
+  return {
+    shadowPage: async (_tenantId: string, now: string, query: { sinceDays?: number }) => page(now, query.sinceDays ?? 7),
+    switchWriteMode: async () => ({ status: 'NOT_OWNER' as const }),
+  };
+}
+
 const freePort = () => new Promise<number>((resolve, reject) => {
   const s = createNetServer();
   s.once('error', reject);
@@ -32,7 +64,9 @@ const freePort = () => new Promise<number>((resolve, reject) => {
 
 before(async () => {
   const issuer = createTestIssuer({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE });
-  const worlds = await buildStandWorlds({ filter: (s) => s.id === 'kaufland/pipeline/happy-path' });
+  // Шаг 85: у мира сценария в памяти тени нет (экран отвечает 404) — смоуку адаптива нужен и экран тени, поэтому у смоук-мира — синтетическая
+  // неделя тени: плитки, график по дням, сводка, аккаунт, свойства витрин, письмо и строки удержанных записей (числа выдуманы, как у демо)
+  const worlds = (await buildStandWorlds({ filter: (s) => s.id === 'kaufland/pipeline/happy-path' })).map((w) => ({ ...w, shadow: syntheticShadow() }));
   const handle = createStandApi(worlds, {
     authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory: memoryStandDirectory(worlds) }),
     simulator: { token: (a) => issuer.token(a.subject, { email: a.email }), expiresInSeconds: 900 },
@@ -112,4 +146,87 @@ test('step 76: the console page runs in a real browser — sign-in, workspace li
   const errors = b.errors();
   assert.ok(errors.some((e) => e.includes('smoke control')), 'the page error collector must see a thrown error');
   assert.deepEqual(errors.filter((e) => !e.includes('smoke control')), [], 'the console page threw or logged errors');
+});
+
+/**
+ * Шаг 85 (адаптив): консоль пригодна от телефона 375px до широкого монитора. Правила [Р-146]: на каждой ширине — ноль ошибок страницы;
+ * при 375 и 768 страница НИГДЕ не листается вбок (листается только таблица внутри своей рамки), цели касания — не ниже 44px, навигация —
+ * выдвижной панелью, которую закрывают выбор пункта, крестик, клик мимо и Esc; при 1012 и шире — прежняя боковая панель без кнопки меню
+ */
+const SCREENS = ['shadow', 'products', 'stock', 'feed', 'decisions', 'rejected', 'dangerous', 'bounds', 'stop', 'connections', 'strategies', 'onboarding', 'compliance', 'jobs', 'cost-import'];
+const WIDTHS: ReadonlyArray<readonly [number, number]> = [[375, 812], [768, 1024], [1012, 800], [1440, 900]];
+
+/** Ширина прокрутки документа против ширины окна (без полосы прокрутки) и элементы, которые торчат за окно не внутри своей рамки прокрутки */
+const PAGE_FIT = `(() => {
+  const root = document.documentElement, vw = root.clientWidth;
+  const scroller = (el) => { for (let p = el.parentElement; p; p = p.parentElement) { const o = getComputedStyle(p).overflowX; if (o === 'auto' || o === 'scroll' || o === 'hidden') return true; } return false; };
+  const out = [...document.querySelectorAll('body *')].filter((el) => el.checkVisibility({ visibilityProperty: true }) && el.getBoundingClientRect().width > 0
+    && el.getBoundingClientRect().right > vw + 0.5 && !scroller(el)).slice(0, 3).map((el) => el.tagName.toLowerCase() + '.' + String(el.className) + ' «' + (el.textContent ?? '').trim().slice(0, 30) + '»');
+  return { scrollWidth: root.scrollWidth, width: vw, out };
+})()`;
+/** Цели касания ниже 44px: кнопки, выборы, поля, пункты меню, ссылки строк, вкладки, меню колонок */
+const SMALL_TARGETS = `[...document.querySelectorAll('button, select, input:not([type=checkbox]):not([type=radio]):not([type=file]), .nav-group a, a.row-link, .tabs a, summary')]
+  .filter((el) => el.checkVisibility({ visibilityProperty: true }) && el.getBoundingClientRect().height > 0 && el.getBoundingClientRect().height < 43.5)
+  .slice(0, 5).map((el) => el.tagName.toLowerCase() + ' «' + (el.textContent ?? el.getAttribute('aria-label') ?? '').trim().slice(0, 30) + '» ' + Math.round(el.getBoundingClientRect().height) + 'px')`;
+
+test('step 85: the console works from a 375px phone to a wide monitor — no page errors, no sideways page scroll, 44px touch targets, a drawer for the nav', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  const owner = en.ui.app.login.asAccount(en.values.OWNER);
+  for (const [width, height] of WIDTHS) {
+    const narrow = width < 1012;
+    await b.setViewport(width, height);
+    // токен — только в памяти страницы: открыть заново — новый вход на этой ширине
+    await b.open(pageUrl);
+    await b.waitText(en.ui.app.login.roleCan.OWNER);
+    const checkPage = async (what: string) => {
+      const fit = await b.evaluate<{ scrollWidth: number; width: number; out: string[] }>(PAGE_FIT);
+      if (width <= 768) {
+        assert.ok(fit.scrollWidth <= fit.width, `${width}px, ${what}: the page scrolls sideways — ${fit.scrollWidth}px in a ${fit.width}px window; sticking out: ${fit.out.join('; ')}`);
+        assert.deepEqual(fit.out, [], `${width}px, ${what}: elements stick out of the window`);
+      }
+      if (narrow) assert.deepEqual(await b.evaluate<string[]>(SMALL_TARGETS), [], `${width}px, ${what}: touch targets lower than 44px`);
+    };
+    await checkPage('sign-in');
+    await b.click(owner);
+    await b.waitText(en.ui.app.worlds);
+    await checkPage('workspaces');
+    const world = (await b.evaluate<string>(`document.querySelector('h3 a').getAttribute('href')`)).split('/')[2]!;
+    for (const screen of SCREENS) {
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${screen}`)}, true)`);
+      await settled(b, `${width}px ${screen}`);
+      await checkPage(screen);
+    }
+    // навигация: на узком — выдвижная панель за кнопкой меню, на широком — боковая панель на месте, кнопки меню нет
+    const nav = () => b.evaluate<{ menu: boolean; sidebar: boolean; screen: string }>(
+      `({ menu: !!document.querySelector('.menu-button')?.checkVisibility({ visibilityProperty: true }), sidebar: document.querySelector('.sidebar').checkVisibility({ visibilityProperty: true }), screen: location.hash.split('/')[3] ?? '' })`);
+    if (!narrow) {
+      assert.deepEqual(await nav(), { menu: false, sidebar: true, screen: 'cost-import' }, `${width}px: the side nav stays in place without a menu button`);
+      continue;
+    }
+    assert.deepEqual(await nav(), { menu: true, sidebar: false, screen: 'cost-import' }, `${width}px: the nav hides behind the menu button`);
+    const open = async () => { await b.click(en.ui.app.menu); assert.equal((await nav()).sidebar, true, `${width}px: the menu button opens the drawer`); };
+    await open();
+    // пункты меню, «← All workspaces», язык и выход видны только в открытой панели — и проверяются в ней
+    assert.deepEqual(await b.evaluate<string[]>(SMALL_TARGETS), [], `${width}px, open drawer: touch targets lower than 44px`);
+    await b.click(en.ui.app.screens.stock, '.nav-group a');
+    assert.deepEqual(await nav(), { menu: true, sidebar: false, screen: 'stock' }, `${width}px: choosing an item navigates and closes the drawer`);
+    await settled(b, `${width}px stock after the drawer`);
+    await open();
+    await b.click(en.ui.app.closeMenu);
+    assert.equal((await nav()).sidebar, false, `${width}px: the cross closes the drawer`);
+    await open();
+    await b.evaluate(`(document.querySelector('.nav-backdrop').click(), true)`);
+    assert.equal((await nav()).sidebar, false, `${width}px: a click beside the drawer closes it`);
+    await open();
+    await b.evaluate(`(window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })), true)`);
+    assert.equal((await nav()).sidebar, false, `${width}px: Esc closes the drawer`);
+    // Положительный контроль [Р-94]: элемент шире окна правило обязано увидеть — иначе проверка выше ничего не мерит
+    await b.evaluate(`(document.querySelector('.world-content').insertAdjacentHTML('beforeend', '<div id="wide-control" style="width:${width + 200}px;height:1px"></div>'), true)`);
+    const control = await b.evaluate<{ scrollWidth: number; width: number; out: string[] }>(PAGE_FIT);
+    assert.ok(control.scrollWidth > control.width && control.out.length > 0, `${width}px control: a too-wide element must make the page scroll sideways — ${JSON.stringify(control)}`);
+    await b.evaluate(`(document.getElementById('wide-control').remove(), true)`);
+  }
+  await b.setViewport(1440, 900);
+  assert.deepEqual(b.errors().slice(before), [], 'the console page threw or logged errors at some width');
 });

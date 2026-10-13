@@ -88,6 +88,23 @@ export function styleProblems(stylesCss: string): string[] {
   return problems;
 }
 
+/**
+ * Шаг 85: брейкпоинты адаптива — только со шкалы Primer (`--breakpoint-*`: 544 / 768 / 1012 / 1280 и края шкалы). В условии `@media`
+ * каждая длина — значение токена пакета в rem, а не своё число: «960px» или «1100px» — красная сборка
+ */
+export function mediaProblems(stylesCss: string, primer: ReadonlyMap<string, string>): string[] {
+  const allowed = new Set([...primer].filter(([k]) => k.startsWith('--breakpoint-')).map(([, v]) => norm(v)));
+  if (allowed.size === 0) throw new Error('primer breakpoints are not in the package');
+  const problems: string[] = [];
+  const css = stylesCss.replace(/\/\*[\s\S]*?\*\//g, '');
+  for (const media of css.matchAll(/@media([^{]*)\{/g)) {
+    for (const length of media[1]!.matchAll(/(\d+(?:\.\d+)?)(px|rem|em)\b/g)) {
+      if (!allowed.has(norm(length[0]))) problems.push(`@media${media[1]!.trimEnd()}: ${length[0]} is not a primer breakpoint`);
+    }
+  }
+  return problems;
+}
+
 test('step 83: every value in tokens.css is the GitHub Primer token it names — nothing invented', () => {
   const primer = primerTokens();
   const tokensCss = readFileSync(join(consoleDir, 'src', 'tokens.css'), 'utf8');
@@ -111,4 +128,17 @@ test('step 83: styles.css takes colours, font sizes, radii and font stacks only 
   assert.match(styleProblems('.a { font-family: Inter, sans-serif; }').join(), /font stack as a literal/);
   assert.match(styleProblems('.a { border-radius: 10px; }').join(), /radius as a literal/);
   assert.deepEqual(styleProblems('.a { color: var(--text); border-radius: 50%; font-size: var(--font-size); background: transparent; }'), []);
+});
+
+test('step 85: media queries break only at GitHub Primer breakpoints', () => {
+  const primer = primerTokens();
+  const stylesCss = readFileSync(join(consoleDir, 'src', 'styles.css'), 'utf8');
+  assert.deepEqual(mediaProblems(stylesCss, primer), []);
+  // правило не зеленеет на файле без адаптива: узкие экраны в стилях есть
+  assert.ok((stylesCss.match(/@media/g) ?? []).length >= 3, 'styles.css has responsive rules');
+  // Положительные контроли [Р-94]: свои числа краснеют, брейкпоинты Primer — нет
+  assert.match(mediaProblems('@media (max-width: 960px) { .a { display: none; } }', primer).join(), /960px is not a primer breakpoint/);
+  assert.match(mediaProblems('@media (width < 1100px) { .a { display: none; } }', primer).join(), /1100px is not a primer breakpoint/);
+  assert.match(mediaProblems('@media (width >= 50rem) { .a { display: none; } }', primer).join(), /50rem is not a primer breakpoint/);
+  assert.deepEqual(mediaProblems('@media (width < 63.25rem) { .a { display: none; } } @media (34rem <= width < 48rem) { .b { color: var(--text); } }', primer), []);
 });

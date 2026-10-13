@@ -122,13 +122,13 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
           {v.properties.length === 0 ? null : (
             <section className="card">
               <h3>{v.propertiesTitle}</h3>
-              <table>
+              <table className="cardify">
                 <tbody>
                   {v.properties.map((p) => (
                     <tr key={`${p.marketplace}/${p.propertyText}`}>
-                      <td>{p.storefrontText}</td>
+                      <td className="card-title">{p.storefrontText}</td>
                       <td>{p.propertyText}<div className="note">{p.valueText}</div></td>
-                      <td>
+                      <td className="card-status">
                         <Badge tone={p.blocksLive ? 'warn' : 'ok'}>{p.statusText}</Badge>
                         <div className="note">{p.closesByText}</div>
                       </td>
@@ -153,13 +153,13 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
           {v.digests.length === 0 ? null : (
             <section className="card">
               <h3>{v.digestsTitle}</h3>
-              <table>
+              <table className="cardify">
                 <tbody>
                   {v.digests.map((d) => (
                     <tr key={d.periodText}>
-                      <td>{d.periodText}</td>
+                      <td className="card-title">{d.periodText}</td>
                       <td>{d.decisions} / {d.heldWrites}{d.savingsText === null ? null : <div className="note">{d.savingsText}</div>}</td>
-                      <td><Badge tone={d.delivered ? 'ok' : 'warn'}>{d.deliveryText}</Badge></td>
+                      <td className="card-status"><Badge tone={d.delivered ? 'ok' : 'warn'}>{d.deliveryText}</Badge></td>
                     </tr>
                   ))}
                 </tbody>
@@ -169,15 +169,15 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
 
           <section className="card">
             {v.rows.length === 0 ? <p>{v.none}</p> : (
-              <table>
+              <table className="cardify">
                 <thead><tr><th>{c.offer}</th><th className="num">{c.value}</th><th><WhenHead label={c.when} zone={commonZone(v.rows.map((r) => r.whenText))} /></th><th /></tr></thead>
                 <tbody>
                   {v.rows.map((r) => (
                     <tr key={r.channelWriteId}>
-                      <td>{r.label}</td>
-                      <td className={r.field === 'QUANTITY' ? 'money' : 'money cur'}>{r.valueText}{r.budgetText === null ? null : <div className="note">{r.budgetText}</div>}</td>
-                      <td><When value={r.whenText} zone={!commonZone(v.rows.map((x) => x.whenText))} /></td>
-                      <td className="num">{r.priceDecisionId === null ? null : <a className="row-link" href={href(worldId, 'decisions', r.priceDecisionId)}>{c.why}</a>}</td>
+                      <td className="card-title">{r.label}</td>
+                      <td className={r.field === 'QUANTITY' ? 'money' : 'money cur'} data-label={c.value}>{r.valueText}{r.budgetText === null ? null : <div className="note">{r.budgetText}</div>}</td>
+                      <td data-label={`${c.when}${commonZone(v.rows.map((x) => x.whenText)) ? ` · ${commonZone(v.rows.map((x) => x.whenText))}` : ''}`}><When value={r.whenText} zone={!commonZone(v.rows.map((x) => x.whenText))} /></td>
+                      <td className="num card-action">{r.priceDecisionId === null ? null : <a className="row-link" href={href(worldId, 'decisions', r.priceDecisionId)}>{c.why}</a>}</td>
                     </tr>
                   ))}
                 </tbody>

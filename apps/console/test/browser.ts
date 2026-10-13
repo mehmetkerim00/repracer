@@ -30,6 +30,8 @@ export interface Browser {
   /** Нажать кнопку или ссылку с ровно таким текстом */
   click(label: string, selector?: string): Promise<void>;
   evaluate<T>(expression: string): Promise<T>;
+  /** Шаг 85: ширина и высота окна страницы (эмуляция устройства CDP) — телефон, планшет, ноутбук, монитор */
+  setViewport(width: number, height: number): Promise<void>;
   /** Исключения страницы и вызовы console.error с начала работы */
   errors(): string[];
   close(): Promise<void>;
@@ -76,8 +78,15 @@ export async function launchBrowser(): Promise<Browser> {
       errors.push((m.params!.args as { value?: unknown; description?: string }[]).map((a) => String(a.value ?? a.description)).join(' '));
     }
   });
+  // Шаг 85: у команды срок — ответ, не пришедший за минуту (страница перезагрузилась посреди вычисления, браузер завис), — отказ с
+  // именем команды, а не тест, висящий до срока задания CI
   const send = (method: string, params: Record<string, unknown> = {}) =>
-    new Promise<{ result?: Record<string, unknown> }>((resolve) => { const id = ++seq; pending.set(id, resolve); ws.send(JSON.stringify({ id, method, params })); });
+    new Promise<{ result?: Record<string, unknown> }>((resolve, reject) => {
+      const id = ++seq;
+      const timer = setTimeout(() => { pending.delete(id); reject(new Error(`Chrome did not answer ${method} within 60 s`)); }, 60_000);
+      pending.set(id, (m) => { clearTimeout(timer); resolve(m); });
+      ws.send(JSON.stringify({ id, method, params }));
+    });
   await send('Page.enable');
   await send('Runtime.enable');
 
@@ -90,6 +99,7 @@ export async function launchBrowser(): Promise<Browser> {
   const text = () => evaluate<string>('(document.querySelector("main") ?? document.body).innerText');
   return {
     async open(url) { await send('Page.navigate', { url }); },
+    async setViewport(width, height) { await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false }); },
     text,
     async waitText(needle, timeoutMs = 60_000) {
       const started = Date.now();

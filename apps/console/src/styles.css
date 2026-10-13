@@ -684,17 +684,8 @@ p.status-line { padding: var(--space-2) var(--space-3); border-radius: var(--rad
 .segmented button { border: var(--border-width) solid transparent; border-radius: var(--radius); box-shadow: none; background: transparent; font-size: var(--font-size); padding: var(--space-1) var(--space-3); }
 .segmented button:hover:not(:disabled) { background: var(--control-bg-hover); }
 .segmented button:disabled { opacity: 1; background: var(--knob-bg); border-color: var(--border); font-weight: var(--weight-heading); cursor: default; }
-@media (max-width: 1100px) { .card.account { grid-template-columns: 1fr; } .account-writers { border-left: 0; padding-left: 0; border-top: 1px solid var(--divider); padding-top: var(--space-3); } }
-/* узкое окно (проектор, маленький ноутбук): панель — над экраном, группы — в строку */
-@media (max-width: 960px) {
-  .world-layout { grid-template-columns: minmax(0, 1fr); }
-  .sidebar { border-right: 0; border-bottom: 1px solid var(--border); }
-  .sidebar-inner { position: static; max-height: none; display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-5); align-items: flex-start; }
-  .sidebar .workspace { flex-basis: 100%; }
-  .nav-group { margin-bottom: 0; }
-  .world-content { padding: var(--space-4); }
-  .topbar .user, .topbar .env { display: none; }
-}
+/* шаг 85: брейкпоинт — со шкалы Primer (large, 1012) вместо своего 1100 */
+@media (width < 63.25rem) { .card.account { grid-template-columns: 1fr; } .account-writers { border-left: 0; padding-left: 0; border-top: 1px solid var(--divider); padding-top: var(--space-3); } }
 
 /* шаг 79 (ревью): сопоставление колонок импорта — сеткой «поле — выбор колонки», а не рваным списком */
 ul.column-choice { list-style: none; padding: 0; margin: var(--space-3) 0 0; display: grid; gap: var(--space-2); }
@@ -743,7 +734,166 @@ section.account-modes { display: flex; flex-direction: column; gap: var(--space-
 .am-account .note, .am-mode .note { margin-top: var(--space-1); }
 .am-action .live-card { max-width: none; }
 p.notice.live-blocked { margin: 0; }
-@media (max-width: 960px) { .account-mode { grid-template-columns: 1fr; } }
+@media (width < 63.25rem) { .account-mode { grid-template-columns: 1fr; } }
 .live-row { display: flex; gap: var(--space-2); align-items: center; }
 .live-row input { flex: 1 1 auto; min-width: 0; }
 .live-row button { flex: none; white-space: nowrap; }
+
+/*
+ * ---------- шаг 85: адаптив — от телефона 375px до широкого монитора ----------
+ * Брейкпоинты — только шкала Primer (правило в design-tokens.test.ts): small 34rem (544), medium 48rem (768), large 63.25rem (1012).
+ * При ширине от 1012 вид прежний: всё ниже — в условиях «уже 1012». Декора нет: панель выезжает без анимации.
+ */
+/* элементы узкого экрана на широком не видны */
+.menu-button, .nav-close, .sidebar-extras, .nav-backdrop { display: none; }
+
+@media (width < 63.25rem) {
+  /* каркас: боковая навигация — выдвижной панелью слева под шапкой; кнопка меню — в шапке; закрывает выбор пункта, крестик, клик мимо и Esc */
+  .world-layout { grid-template-columns: minmax(0, 1fr); }
+  .sidebar {
+    position: fixed; top: var(--topbar-h); left: 0; bottom: 0; z-index: 40; width: var(--drawer-w); max-width: calc(100vw - var(--space-7));
+    overflow-y: auto; border-right: var(--border-width) solid var(--border); box-shadow: var(--shadow-lg); visibility: hidden; transform: translateX(-100%);
+  }
+  .nav-open .sidebar { visibility: visible; transform: none; }
+  .sidebar-inner { position: relative; top: 0; max-height: none; overflow: visible; padding-top: var(--space-2); }
+  .nav-backdrop { display: block; position: fixed; top: var(--topbar-h); left: 0; right: 0; bottom: 0; z-index: 35; background: var(--backdrop); }
+  .nav-close {
+    display: flex; align-items: center; justify-content: center; width: var(--touch-target); margin: 0 0 var(--space-1) auto; padding: 0; color: var(--text-2);
+    border-color: transparent; background: transparent; box-shadow: none;
+  }
+  .nav-close:hover { background: var(--nav-hover); color: var(--text); }
+  .sidebar .workspace { padding-top: 0; }
+  .sidebar-extras {
+    display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-2); padding: var(--space-3) var(--space-2) 0;
+    border-top: var(--border-width) solid var(--border);
+  }
+  .sidebar-extras .user { flex-basis: 100%; color: var(--text-2); font-size: var(--font-size-sm); overflow-wrap: anywhere; }
+  .menu-button { display: inline-flex; align-items: center; justify-content: center; padding: 0 var(--space-2); }
+  /* шапка внутри рабочего пространства: кнопка меню, знак, имя — язык, адрес и выход уехали в панель */
+  .topbar.in-world .lang, .topbar.in-world .user, .topbar.in-world > button.ghost:not(.menu-button) { display: none; }
+  .topbar .user { display: none; }
+  .topbar { gap: var(--space-2); padding: 0 var(--space-3); }
+  .world-content { padding: var(--space-4); }
+  /* жёлтая полоса демо переносится по строкам, а не обрезается */
+  .demo-strip { flex-wrap: wrap; align-items: flex-start; }
+  /* плитки тени: 4 в ряд → 2×2 */
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* таблица в карточке прилегает к краям карточки (у карточки на узком экране отступ space-4) и листается внутри неё */
+  .card table { margin: 0 calc(-1 * var(--space-4)); width: calc(100% + 2 * var(--space-4)); }
+  .card table th:first-child, .card table td:first-child { padding-left: var(--space-4); }
+  .card table th:last-child, .card table td:last-child { padding-right: var(--space-4); }
+  .card:has(> table:not(.cardify)) { overflow-x: auto; }
+  /* остатки на планшете: колонке товара — не десктопные 380px, иначе каналы обрезаны рамкой */
+  td.product { min-width: 240px; }
+  table.stock-table td:last-child { min-width: 220px; }
+  /* окно подтверждения — с полями экрана */
+  .confirm { width: calc(100vw - 2 * var(--space-4)); }
+  /* элементы касания — не ниже 44px (Primer: минимальная цель касания грубого указателя) */
+  button, select, input:not([type='checkbox']):not([type='radio']):not([type='file']), details.column-picker > summary { min-height: var(--touch-target); }
+  details.column-picker > summary { display: inline-flex; align-items: center; }
+  button.link { min-height: var(--touch-target); display: inline-flex; align-items: center; }
+  .nav-group a, .sidebar .workspace a, a.row-link, .tabs a, p.back a { min-height: var(--touch-target); display: inline-flex; align-items: center; }
+  .nav-group a { display: flex; }
+  button.role-row { min-height: var(--touch-target); }
+  .periods button, .segmented button, .lang button { min-height: var(--touch-target); }
+  .form > label:has(> input[type='checkbox']), .filters > label:has(> input[type='checkbox']), .form > label:has(> input[type='radio']), .filters > label:has(> input[type='radio']) { min-height: var(--touch-target); padding-bottom: 0; }
+  ul.link-list > li { min-height: var(--touch-target); align-items: center; }
+  .form > button, .toolbar.form > button { margin-top: 0; align-self: flex-end; }
+}
+
+@media (width < 48rem) {
+  /* шапка: пометка стенда уходит, на входе и в списке остаются знак, язык и выход */
+  .topbar .env { display: none; }
+  /* сетка рабочих пространств — в одну колонку на всю ширину */
+  .worlds, .worlds-page .worlds { grid-template-columns: minmax(0, 1fr); justify-content: stretch; }
+  /* ряды фильтров — столбиком, элементы на всю ширину, счётчик — под ними */
+  .toolbar.filters, form.filters { flex-direction: column; align-items: stretch; }
+  .toolbar.filters > *, form.filters > * { width: 100%; max-width: none; }
+  .filters input[type='search'], .filters select, .offer-picker.inline input[type='search'], .offer-picker.inline select { min-width: 0; width: 100%; max-width: none; }
+  .offer-picker, .offer-picker.inline { flex-direction: column; width: 100%; }
+  .filters > label { width: 100%; }
+  .filters > label > select, .filters > label > input:not([type='checkbox']):not([type='radio']) { width: 100%; }
+  .filters-count { margin-left: 0; padding-top: 0; align-self: flex-start; order: 99; }
+  .toolbar .toolbar-end { margin-left: 0; align-self: stretch; }
+  .date-field, .date-field input { width: 100%; }
+  /* выбор со списком длинных значений (пояс времени) — не шире экрана */
+  .form > label, .filters > label { max-width: 100%; }
+  select { max-width: 100%; }
+  .typed-confirm label { flex-basis: 100%; }
+  ul.offer-list { columns: 1; }
+  ul.column-choice li label { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }
+  .live-row { flex-wrap: wrap; }
+  .live-row button { flex: 1 1 auto; }
+
+  /*
+   * Таблицы-ленты (выбор «а»): строка — карточка. Первой строкой — предложение, дальше пары «подпись — значение» (подпись — из
+   * data-label ячейки, те же слова, что в шапке колонки), пилюля статуса и ссылка «Decision path» — внизу
+   */
+  table.cardify, table.cardify tbody { display: block; width: 100%; margin: 0; }
+  table.cardify thead { display: none; }
+  table.cardify tr { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-3) var(--space-4); border-bottom: var(--border-width) solid var(--border); }
+  table.cardify tbody tr:last-child { border-bottom: 0; }
+  table.cardify td {
+    display: block; padding: 0; border: 0; min-width: 0; max-width: none; width: auto; text-align: right; white-space: normal;
+    position: static; box-shadow: none; background: transparent;
+  }
+  .card table.cardify td:first-child, .card table.cardify td:last-child { padding-left: 0; padding-right: 0; }
+  /* закреплённая колонка ленты в карточке не нужна — без своей тени и фона */
+  table.cardify.sticky-end td:last-child, table.cardify.sticky-end tbody tr:hover td:last-child { position: static; box-shadow: none; background: transparent; }
+  table.cardify tbody tr:hover td { background: transparent; }
+  table.cardify td[data-label]::before {
+    content: attr(data-label); float: left; margin-right: var(--space-3); color: var(--text-2); font-family: var(--font); font-size: var(--font-size-sm);
+    font-weight: 400; text-align: left;
+  }
+  table.cardify td.card-title { order: -1; text-align: left; font-weight: var(--weight-heading); min-width: 0; }
+  table.cardify td.card-status { order: 90; text-align: left; }
+  table.cardify td.card-status .badge { display: inline-flex; margin: 0 var(--space-1) 0 0; }
+  /* длинная пилюля («delivered Oct 6, 2026, 11:01 UTC») переносится, как в лентах шага 79, — с обычным радиусом Primer */
+  table.cardify .badge { white-space: normal; max-width: 100%; border-radius: var(--radius); }
+  table.cardify td.card-action { order: 100; text-align: left; }
+  table.cardify td:empty { display: none; }
+  /* у таблицы без шапки (свойства витрин, письма, журнал остановок) ячейка говорит сама за себя — без подписи, по левому краю */
+  table.cardify td:not([data-label]) { text-align: left; }
+  /* причина — подписью над текстом, по левому краю, без своей ширины колонки */
+  table.cardify td:has(.reason), table.cardify td.reason-cell, table.cardify td.text-cell { text-align: left; }
+  table.cardify td:has(.reason)::before, table.cardify td.reason-cell::before, table.cardify td.text-cell::before { float: none; display: block; margin: 0 0 var(--space-1); }
+  table.cardify td .reason { min-width: 0; max-width: none; }
+  table.cardify td .when, table.cardify td.nowrap .when { white-space: nowrap; }
+  table.cardify td.nowrap:has(.when) { max-width: none; }
+
+  /*
+   * Плотные справочные таблицы (выбор «б»): листается сама таблица внутри своей рамки, а не страница; закреплена первая колонка
+   * (предложение или товар), закрепление последней колонки на узком экране снято — иначе на телефоне не остаётся места для данных
+   */
+  table.sticky-end:not(.cardify) th:last-child, table.sticky-end:not(.cardify) td:last-child { position: static; box-shadow: none; }
+  .table-wrap > table:not(.cardify) th:first-child, .table-wrap > table:not(.cardify) td:first-child {
+    position: sticky; left: 0; z-index: 1; background: var(--surface); box-shadow: 1px 0 0 var(--divider);
+  }
+  .table-wrap > table:not(.cardify) th:first-child { z-index: 3; background: var(--surface-muted); }
+  .table-wrap > table:not(.cardify) tbody tr:hover td:first-child, .table-wrap > table:not(.cardify) tr:is(.line-MARGIN, .line-PRICE) td:first-child { background: var(--surface-muted); }
+  table.products td.offer { min-width: 160px; }
+  td.product, table.stock-table td:last-child { min-width: 0; }
+  /* остатки — карточкой: SKU и EAN переносятся под названием, каналы — списком с подписью сверху */
+  table.stock-table td.product .nowrap { white-space: normal; }
+  table.stock-table ul.stock-channels { margin-top: var(--space-1); }
+  td .reason { min-width: 0; }
+}
+
+@media (width < 34rem) {
+  /* плитки тени — одной колонкой */
+  .stats { grid-template-columns: minmax(0, 1fr); }
+  /* на телефоне имя продукта в шапке уступает место кнопке меню и языку */
+  .topbar .brand-title { display: none; }
+  .login-wrap { padding: var(--space-5) var(--space-4); }
+  .card.login { padding: var(--space-4) var(--space-3); }
+  /* строка роли: имя и «что может» — двумя строками рядом с кружком */
+  button.role-row { flex-wrap: wrap; align-items: flex-start; row-gap: 0; }
+  button.role-row .role-name { flex: 1 1 auto; }
+  button.role-row .role-name::after { content: none; }
+  button.role-row .role-can { flex-basis: 100%; padding-left: calc(var(--control-h) + var(--space-3)); font-size: var(--font-size-sm); }
+  .summary-row { flex-wrap: wrap; gap: var(--space-1) var(--space-3); }
+  .summary-row dd { text-align: left; }
+  .summary-head { flex-wrap: wrap; }
+  .periods, .segmented { flex-wrap: wrap; }
+  ul.link-list > li { flex-wrap: wrap; gap: var(--space-1) var(--space-3); }
+}

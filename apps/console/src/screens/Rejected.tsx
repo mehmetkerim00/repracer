@@ -24,27 +24,27 @@ export function RejectedScreenView({ view }: { view: RejectedView }) {
       </section>
       {view.items.length === 0 ? <p className="muted empty">{r.none}</p> : (
         <div className="table-wrap">
-          <table className="dense sticky-end">
+          <table className="dense sticky-end cardify">
             <thead>
               <tr><th><WhenHead label={c.when} zone={zone} /></th><th>{c.where}</th><th>{c.kind}</th><th className="num">{c.proposed}</th><th className="num">{c.before}</th><th>{c.limit}</th><th className="num">{c.deviation}</th><th>{c.reason}</th><th /></tr>
             </thead>
             <tbody>
               {view.items.map((item, i) => (
                 <tr key={i} className={item.intervention === 'DANGEROUS' ? 'dangerous' : ''}>
-                  <td className="nowrap"><When value={item.at} zone={!zone} /></td>
-                  <td className="offer">{item.unit?.label ?? item.productRef ?? m.ui.common.noValue}</td>
-                  <td className="pills">
+                  <td className="nowrap" data-label={`${c.when}${zone ? ` · ${zone}` : ''}`}><When value={item.at} zone={!zone} /></td>
+                  <td className="offer card-title">{item.unit?.label ?? item.productRef ?? m.ui.common.noValue}</td>
+                  <td className="pills card-status">
                     <Badge tone={item.tone}>{r.kinds[item.kind]}</Badge>
                     {/* шаг 77: «скорректировано» — спокойным серым, опасное — красным; обе пилюли в строку */}
                     {item.intervention ? <Badge tone={item.intervention === 'DANGEROUS' ? 'stop' : 'off'}>{r.interventions[item.intervention]}</Badge> : null}
                   </td>
                   {/* Шаг 79 (ревью): изменение — подписью под предложенной ценой, а не своей колонкой: таблица помещается в окно */}
-                  <td className="num money cur">{item.proposed ?? '–'}{item.change ? <div className="note">{item.change}</div> : null}</td>
-                  <td className="num cur">{item.current ?? '–'}</td>
-                  <td className="bound">{item.limit ?? '–'}</td>
-                  <td className="num">{item.deviation ?? '–'}</td>
-                  <td><ReasonLine reason={item.reason} /></td>
-                  <td className="nowrap">{item.decisionId ? <a className="row-link" href={href(view.worldId, 'decisions', item.decisionId)}>{r.path}</a> : null}</td>
+                  <td className="num money cur" data-label={c.proposed}>{item.proposed ?? '–'}{item.change ? <div className="note">{item.change}</div> : null}</td>
+                  <td className="num cur" data-label={c.before}>{item.current ?? '–'}</td>
+                  <td className="bound" data-label={c.limit}>{item.limit ?? '–'}</td>
+                  <td className="num" data-label={c.deviation}>{item.deviation ?? '–'}</td>
+                  <td data-label={c.reason}><ReasonLine reason={item.reason} /></td>
+                  <td className="nowrap card-action">{item.decisionId ? <a className="row-link" href={href(view.worldId, 'decisions', item.decisionId)}>{r.path}</a> : null}</td>
                 </tr>
               ))}
             </tbody>

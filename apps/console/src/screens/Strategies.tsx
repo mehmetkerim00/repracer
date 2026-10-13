@@ -68,6 +68,7 @@ export function PreviewTable({ view }: { view: StrategyPreviewView }) {
   const m = useMessages();
   const t = m.ui.strategies;
   const c = t.columns;
+  const asOfZone = commonZone(view.rows.map((r) => r.asOf));
   return (
     <section className="preview">
       <h3>{view.draft.title}</h3>
@@ -76,19 +77,19 @@ export function PreviewTable({ view }: { view: StrategyPreviewView }) {
       {view.saveBlocked ? <p className="notice" role="alert">{view.saveBlocked}</p> : null}
       {/* Шаг 79 (ревью): плотная таблица и переносимое «на момент» — колонка «почему» не уходит за край рамки */}
       <div className="table-wrap">
-        <table className="dense">
-          <thead><tr><th>{c.offer}</th><th><WhenHead label={c.asOf} zone={commonZone(view.rows.map((r) => r.asOf))} /></th><th className="num">{c.current}</th><th className="num">{c.proposed}</th><th className="num">{c.final}</th><th className="num">{c.change}</th><th>{c.outcome}</th><th>{c.reason}</th></tr></thead>
+        <table className="dense cardify">
+          <thead><tr><th>{c.offer}</th><th><WhenHead label={c.asOf} zone={asOfZone} /></th><th className="num">{c.current}</th><th className="num">{c.proposed}</th><th className="num">{c.final}</th><th className="num">{c.change}</th><th>{c.outcome}</th><th>{c.reason}</th></tr></thead>
           <tbody>
             {view.rows.map((r) => (
               <tr key={r.unit.writeScopeId} className={r.dangerous ? 'dangerous' : ''}>
-                <td className="offer">{r.unit.label}</td>
-                <td className="small as-of"><When value={r.asOf} zone={!commonZone(view.rows.map((x) => x.asOf))} /></td>
-                <td className="num cur">{r.current}</td>
-                <td className="num cur">{r.proposed ?? '–'}</td>
-                <td className="num cur">{r.final ?? '–'}</td>
-                <td className="num">{r.change ?? '–'}</td>
-                <td><Badge tone={r.tone}>{r.outcome}</Badge>{r.dangerous ? <div className="small"><Badge tone="stop">{t.dangerous}</Badge></div> : null}</td>
-                <td>{r.reason ? <ReasonLine reason={r.reason} /> : null}{r.unavailable ? <div className="gap-note small">{r.unavailable}</div> : null}</td>
+                <td className="offer card-title">{r.unit.label}</td>
+                <td className="small as-of" data-label={`${c.asOf}${asOfZone ? ` · ${asOfZone}` : ''}`}><When value={r.asOf} zone={!asOfZone} /></td>
+                <td className="num cur" data-label={c.current}>{r.current}</td>
+                <td className="num cur" data-label={c.proposed}>{r.proposed ?? '–'}</td>
+                <td className="num cur" data-label={c.final}>{r.final ?? '–'}</td>
+                <td className="num" data-label={c.change}>{r.change ?? '–'}</td>
+                <td className="card-status"><Badge tone={r.tone}>{r.outcome}</Badge>{r.dangerous ? <div className="small"><Badge tone="stop">{t.dangerous}</Badge></div> : null}</td>
+                <td className="reason-cell" data-label={c.reason}>{r.reason ? <ReasonLine reason={r.reason} /> : null}{r.unavailable ? <div className="gap-note small">{r.unavailable}</div> : null}</td>
               </tr>
             ))}
           </tbody>

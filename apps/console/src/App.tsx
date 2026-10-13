@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { LOCALES, messagesFor, type Locale } from '@repracer/console-model';
 import type { SessionView, StandToken, WorldSummary } from './api-types.ts';
 import { requestJson, setAccessToken, useResource, type Resource } from './api.ts';
@@ -51,6 +51,13 @@ const NAV_GROUPS = [
   ['stock', ['stock', 'products', 'cost-import']],
   ['account', ['connections', 'compliance', 'jobs', 'stop']],
 ] as const;
+
+/**
+ * Шаг 85: на узких экранах (< 1012px, брейкпоинт large Primer) навигация — выдвижной панелью. Состояние — у приложения: кнопка меню живёт
+ * в шапке, панель — у рабочего пространства; туда же на узких экранах переезжают переключатель языка, адрес и «Sign out» (`extras`)
+ */
+interface NavState { open: boolean; setOpen: (open: boolean) => void; extras: ReactNode }
+const NavContext = createContext<NavState>({ open: false, setOpen: () => undefined, extras: null });
 
 /** Шаг 81: знак у каждого пункта боковой панели — подпись та же, иконка только помогает глазу найти пункт */
 const NAV_ICONS: Record<string, string> = {
@@ -170,6 +177,16 @@ export function WorldList({ worlds }: { worlds: readonly WorldSummary[] }) {
 
 function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; worlds: readonly WorldSummary[] }) {
   const outer = useMessages();
+  const nav = useContext(NavContext);
+  const { setOpen } = nav;
+  // Панель закрывается переходом на другой экран (выбор пункта) и клавишей Esc
+  useEffect(() => { setOpen(false); }, [route.worldId, route.screen, route.param, setOpen]);
+  useEffect(() => {
+    if (!nav.open) return undefined;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [nav.open, setOpen]);
   const world = worlds.find((w) => w.id === route.worldId);
   // Шаг 79: «не найдено» — карточкой с заголовком и путём обратно, а не строкой ошибки на фоне страницы
   if (!world) return <NotFound title={outer.ui.app.worldNotFoundTitle} text={outer.ui.app.worldNotFound(route.worldId)} back={outer.ui.app.backToWorlds} />;
@@ -183,9 +200,11 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
     <MessagesContext.Provider value={m}>
       {/* Р-151: демо помечается на КАЖДОМ экране мира — деньги показываются на большинстве из них; шаг 77 — тонкой полосой под шапкой */}
       {world.demo ? <p className="demo-strip demo-banner" role="note"><Badge tone="warn">{m.ui.app.demoBadge}</Badge> {m.ui.app.demoBanner}</p> : null}
-      <div className="world-layout">
-      <aside className="sidebar">
+      <div className={`world-layout${nav.open ? ' nav-open' : ''}`}>
+      <aside className="sidebar" id="world-nav">
         <div className="sidebar-inner">
+        {/* Шаг 85: крестик — только у выдвижной панели узкого экрана */}
+        <button type="button" className="nav-close ghost" aria-label={m.ui.app.closeMenu} onClick={() => setOpen(false)}><Icon name="x" size={20} /></button>
         <div className="workspace">
           <div className="name">{world.title}</div>
           <a href="#/">{m.ui.app.backToWorlds}</a>
@@ -196,13 +215,16 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
               <div className="group-title">{m.ui.app.navGroups[group]}</div>
               {/* Шаг 68 (K3): Omnibus — правило ЕС; продавцу только с витринами США пункта нет [Р-123] */}
               {keys.filter((key) => key !== 'compliance' || world.euStorefronts).map((key) => (
-                <a key={key} href={href(world.id, key)} className={route.screen === key ? 'active' : ''} aria-current={route.screen === key ? 'page' : undefined}><Icon name={NAV_ICONS[key] ?? ''} size={20} />{m.ui.app.screens[key]}</a>
+                <a key={key} href={href(world.id, key)} className={route.screen === key ? 'active' : ''} aria-current={route.screen === key ? 'page' : undefined} onClick={() => setOpen(false)}><Icon name={NAV_ICONS[key] ?? ''} size={20} />{m.ui.app.screens[key]}</a>
               ))}
             </div>
           ))}
         </nav>
+        {nav.extras ? <div className="sidebar-extras">{nav.extras}</div> : null}
         </div>
       </aside>
+      {/* клик мимо выдвинутой панели её закрывает */}
+      {nav.open ? <div className="nav-backdrop" aria-hidden="true" onClick={() => setOpen(false)} /> : null}
       <div className="world-content">
       {route.screen === 'onboarding' ? <OnboardingScreen worldId={world.id} />
         : route.screen === 'connections' ? <ConnectionsScreen worldId={world.id} />
@@ -336,11 +358,31 @@ export function App() {
   };
 
   const user = session.state === 'ready' ? session.data.user : null;
+  const [navOpen, setNavOpen] = useState(false);
+  // Шаг 85: на узких экранах внутри рабочего пространства язык, адрес и выход — в выдвижной панели; разметка та же, что в шапке
+  const extras = user ? (
+    <>
+      <span className="lang">
+        {LOCALES.map((l) => (
+          <button key={l} type="button" className={l === locale ? 'active' : ''} aria-pressed={l === locale} onClick={() => changeLocale(l)}>{m.ui.app.languages[l]}</button>
+        ))}
+      </span>
+      <span className="user">{user.email ?? user.subject}</span>
+      <button type="button" onClick={() => { setAccessToken(null); loadSession(); }}>{m.ui.app.login.logout}</button>
+    </>
+  ) : null;
   return (
+    <NavContext.Provider value={{ open: navOpen, setOpen: setNavOpen, extras }}>
     <MessagesContext.Provider value={m}>
       <div className="app" lang={locale}>
-        <header className="topbar">
-          <h1 className="brand"><span className="brand-mark" aria-hidden="true">r</span>{m.ui.app.title}</h1>
+        <header className={`topbar${user && route.worldId !== null ? ' in-world' : ''}`}>
+          {/* Шаг 85: кнопка меню — только внутри рабочего пространства и только на узких экранах (стили) */}
+          {user && route.worldId !== null ? (
+            <button type="button" className="menu-button ghost" aria-label={m.ui.app.menu} aria-expanded={navOpen} aria-controls="world-nav" onClick={() => setNavOpen(!navOpen)}>
+              <Icon name="menu" size={20} />
+            </button>
+          ) : null}
+          <h1 className="brand"><span className="brand-mark" aria-hidden="true">r</span><span className="brand-title">{m.ui.app.title}</span></h1>
           {/* Шаг 64 (проход консоли глазами клиента): «стенд, синтетические данные» — только у стенда с имитатором входа, не у продавца */}
           {/* Шаг 84: внутри рабочего пространства демо говорят жёлтая полоса и пилюля у заголовка — третья пометка в шапке лишняя */}
           {session.state === 'ready' && session.data.simulator && route.worldId === null ? <span className="env">{m.ui.app.stand}</span> : null}
@@ -372,5 +414,6 @@ export function App() {
         </main>
       </div>
     </MessagesContext.Provider>
+    </NavContext.Provider>
   );
 }

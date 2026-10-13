@@ -1,5 +1,6 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { ShadowChartView, ShadowView } from '@repracer/console-model';
+import { barValuesFit, dayLabelled, dayLabelStep } from '../chart.ts';
 import { useMessages } from '../components.tsx';
 
 /**
@@ -28,9 +29,21 @@ function DayChart({ chart }: { chart: ShadowChartView }) {
   const n = chart.points.length;
   const ticks = axisTicks(Math.max(0, ...chart.points.map((p) => p.value)));
   const top = ticks[ticks.length - 1]!;
-  // У месяца подписи — через одну пятую, последняя (сегодня) — всегда
-  const every = n > 10 ? Math.ceil(n / 6) : 1;
-  const labelled = (i: number) => (i % every === 0 || i === n - 1) && !(i !== n - 1 && n - 1 - i < every / 2);
+  // Шаг 85: ширина ряда подписей — измеряется; на узком экране подписи прореживаются, числа над столбиками уходят в подсказку
+  const daysRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const el = daysRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => setWidth(el.clientWidth));
+    observer.observe(el);
+    setWidth(el.clientWidth);
+    return () => observer.disconnect();
+  }, []);
+  // У месяца подписи — около шести, последняя (сегодня) — всегда; при тесноте — реже
+  const every = dayLabelStep(chart.points.map((p) => p.label), width);
+  const labelled = (i: number) => dayLabelled(i, n, every);
+  const values = barValuesFit(chart.points.map((p) => nf.format(p.value)), width);
   return (
     <figure className="card day-chart" aria-label={chart.title}>
       <figcaption>{chart.title}</figcaption>
@@ -43,13 +56,13 @@ function DayChart({ chart }: { chart: ShadowChartView }) {
           <div className="chart-bars">
             {chart.points.map((p, i) => (
               <div key={p.day} className={`chart-slot${i === n - 1 ? ' today' : ''}`} title={p.title}>
-                {n <= 7 ? <span className="chart-value">{nf.format(p.value)}</span> : null}
+                {values ? <span className="chart-value">{nf.format(p.value)}</span> : null}
                 <span className="chart-bar" style={{ height: p.value > 0 ? `max(2px, ${(p.value / top) * 100}%)` : '0' }} />
               </div>
             ))}
           </div>
         </div>
-        <div className="chart-days" aria-hidden="true">
+        <div className="chart-days" aria-hidden="true" ref={daysRef}>
           {chart.points.map((p, i) => <span key={p.day} className={i === n - 1 ? 'today' : undefined}>{labelled(i) ? p.label : ''}</span>)}
         </div>
       </div>

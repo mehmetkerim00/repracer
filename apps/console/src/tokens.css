@@ -119,6 +119,9 @@
   --space-7: 3rem; /* primer: --base-size-48 */
   --control-h: 2rem; /* primer: --control-medium-size */
   --badge-h: 1.25rem; /* primer: --base-size-20 */
+  /* Шаг 85, адаптив: ширина выдвижной навигации (Primer Overlay small) и цель касания на узком экране (Primer, грубый указатель) */
+  --drawer-w: 20rem; /* primer: --overlay-width-small */
+  --touch-target: 2.75rem; /* primer: --control-minTarget-coarse */
 
   /* Каркас — размеры раскладки консоли, а не значения дизайн-системы (исключения правила, названы в тесте) */
   --topbar-h: 56px;

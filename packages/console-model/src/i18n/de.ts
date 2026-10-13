@@ -413,6 +413,8 @@ export const de: Messages = {
       connectChannel: 'Kanal verbinden →', notFoundTitle: 'Seite nicht gefunden', worldNotFoundTitle: 'Arbeitsbereich nicht gefunden', loadFailedTitle: 'Diese Seite konnte nicht geladen werden',
       gapsTitle: 'Gut zu wissen zu dieser Seite',
       /** Шаг 84: мини-показатели карточки рабочего пространства — подпись над числом */
+      /** Шаг 85: кнопки выдвижной навигации на узких экранах — доступные имена */
+      menu: 'Menü', closeMenu: 'Menü schließen',
       metrics: { offers: 'Angebote', decisions: 'Entscheidungen 24 h', interventions: 'Eingriffe 7 Tage' },
       counts: (scopes: number, decisionsLastDay: number, interventionsLastWeek: number) =>
         `Angebote ${scopes} · Entscheidungen (24 h) ${decisionsLastDay} · Eingriffe (7 Tage) ${interventionsLastWeek}`,
