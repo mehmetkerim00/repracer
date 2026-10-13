@@ -36,7 +36,7 @@ export function Icon({ name, size = 16, className }: { name: string; size?: numb
   if (!path) return null;
   return (
     <svg className={`icon${className ? ` ${className}` : ''}`} viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor"
-      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+      strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
       {path}
     </svg>
   );

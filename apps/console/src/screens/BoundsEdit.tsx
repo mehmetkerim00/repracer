@@ -41,11 +41,11 @@ export function BoundsDiffTable({ view }: { view: BoundsDiffView }) {
               <tr key={r.unit.writeScopeId}>
                 {/* Шаг 79 (ревью): предложение — текстом; внимание к строке — в колонке пометок, а не цветом названия */}
                 <td className={`offer${r.tone === 'warn' ? ' attention' : ''}`}>{r.unit.label}</td>
-                <td className="num">{r.minBefore}</td>
-                <td className="num">{r.minAfter}{r.minChange ? <div className="small muted">{r.minChange}</div> : null}</td>
-                <td className="num">{r.maxBefore}</td>
-                <td className="num">{r.maxAfter}{r.maxChange ? <div className="small muted">{r.maxChange}</div> : null}</td>
-                <td className="num">{r.currentPrice}</td>
+                <td className="num cur">{r.minBefore}</td>
+                <td className="num cur">{r.minAfter}{r.minChange ? <div className="small muted">{r.minChange}</div> : null}</td>
+                <td className="num cur">{r.maxBefore}</td>
+                <td className="num cur">{r.maxAfter}{r.maxChange ? <div className="small muted">{r.maxChange}</div> : null}</td>
+                <td className="num cur">{r.currentPrice}</td>
                 <td>{r.flags.length === 0 ? '–' : <ul className="small">{r.flags.map((f) => <li key={f.code}>{f.text}</li>)}</ul>}</td>
               </tr>
             ))}

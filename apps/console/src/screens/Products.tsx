@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { LIST_PAGE_DEFAULT, type ListQuery, type ProductListView, type ProductRow } from '@repracer/console-model';
 import type { EnableResult } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, Cell, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, useMessages, WithAvatar } from '../components.tsx';
+import { Badge, Cell, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, useMessages } from '../components.tsx';
 
 /** Шаг 79: колонки, которые продавец может скрыть; предложение, цена, пол, статус и действия — всегда */
 const OPTIONAL_COLUMNS = ['ceiling', 'strategy', 'lastChange', 'nextCheck', 'channel'] as const;
@@ -75,22 +75,20 @@ export function ProductsView({ view, onEnable, query, onQuery }: {
             {view.rows.map((r) => (
               <tr key={r.unit.writeScopeId}>
                 <td className="offer">
-                  <WithAvatar label={r.unit.label}>
                   <strong>{r.unit.label}</strong>
                   {/* Шаг 78: номер товара канала — приглушённо, состояние — отдельной пилюлей */}
                   {/* Шаг 79: «новый» — обычное состояние, пилюлю не показываем; иное — словами на языке экрана, а не кодом канала */}
                   <div className="product-ref">{p.productId(r.unit.channelProductRef, r.unit.gtin)} {r.unit.condition && r.unit.condition.toLowerCase() !== 'new'
                     ? <Badge tone="off">{(p.conditions as Record<string, string | undefined>)[r.unit.condition.toLowerCase()] ?? r.unit.condition}</Badge> : null}</div>
-                  </WithAvatar>
                 </td>
                 {/* Шаг 79: «On» и «In progress» — одна колонка: включённость всегда, ход — только когда что-то идёт */}
                 <td className="status-cell"><Cell cell={r.enabled} />{r.applying.tone !== 'ok' ? <Cell cell={r.applying} /> : null}</td>
-                <td className="num money">{r.currentPrice}</td>
-                <td className="num floor">
+                <td className="num money cur">{r.currentPrice}</td>
+                <td className="num cur floor">
                   <strong>{r.floor.amount}</strong>
                   <div className="muted small floor-parts">{r.floor.parts}</div>
                 </td>
-                {col.ceiling ? <td className="num">{r.maxPrice}</td> : null}
+                {col.ceiling ? <td className="num cur">{r.maxPrice}</td> : null}
                 {/* Шаг 78: источник пилюлей и короткое имя; подробности стратегии — подсказкой и на «Why this price» */}
                 {col.strategy ? <td className="strategy" title={r.strategy.detail}>
                   {r.strategy.competitorDerived ? <Badge tone="progress">{p.competitorBadge}</Badge> : null} <span className="strategy-name">{r.strategy.label}</span>

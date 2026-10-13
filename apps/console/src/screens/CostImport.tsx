@@ -94,7 +94,7 @@ export function CostImportPreview({ view, onMapping, onEncoding }: {
                   <td className="num">{r.line}</td>
                   <td className="offer">{r.unit ? r.unit.label : m.ui.common.noValue}</td>
                   <td>{r.offerKey}</td>
-                  <td className="num money">{r.cost}</td>
+                  <td className="num money cur">{r.cost}</td>
                   <td className="num">{r.fee ?? m.ui.common.noValue}</td>
                 </tr>
               ))}

@@ -83,9 +83,9 @@ export function PreviewTable({ view }: { view: StrategyPreviewView }) {
               <tr key={r.unit.writeScopeId} className={r.dangerous ? 'dangerous' : ''}>
                 <td className="offer">{r.unit.label}</td>
                 <td className="small as-of"><When value={r.asOf} /></td>
-                <td className="num">{r.current}</td>
-                <td className="num">{r.proposed ?? '–'}</td>
-                <td className="num">{r.final ?? '–'}</td>
+                <td className="num cur">{r.current}</td>
+                <td className="num cur">{r.proposed ?? '–'}</td>
+                <td className="num cur">{r.final ?? '–'}</td>
                 <td className="num">{r.change ?? '–'}</td>
                 <td><Badge tone={r.tone}>{r.outcome}</Badge>{r.dangerous ? <div className="small"><Badge tone="stop">{t.dangerous}</Badge></div> : null}</td>
                 <td>{r.reason ? <ReasonLine reason={r.reason} /> : null}{r.unavailable ? <div className="gap-note small">{r.unavailable}</div> : null}</td>

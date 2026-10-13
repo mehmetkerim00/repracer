@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="7" fill="#13233A"/>
-  <path d="M12 23.5V12.5M12 16.8c0-2.6 2-4.3 4.6-4.3H20" fill="none" stroke="#FFFFFF" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
-  <rect x="9" y="26" width="14" height="2.2" rx="1.1" fill="#3FCB9F"/>
+  <!-- шаг 83: знак шапки — круг цвета Primer header (--header-bgColor) и белая «r» (--header-fgColor-logo) -->
+  <circle cx="16" cy="16" r="16" fill="#25292e"/>
+  <path d="M12.5 22.5V12.5M12.5 16.5c0-2.4 1.9-4 4.3-4H19.5" fill="none" stroke="#ffffff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

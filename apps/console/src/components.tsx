@@ -98,26 +98,6 @@ export function shortWhen(value: string): string {
   return value;
 }
 
-/**
- * Шаг 82: квадратик-аватар товара 28px — инициал и цвет из палитры по хэшу SKU (без SKU — по товарной части подписи). Детерминированно:
- * тот же товар — тот же цвет на всех экранах. Инициал рисуют стили (`data-initial`), в текст строки он не входит
- */
-const AVATAR_TONES = 8;
-export function productSeed(label: string, sku?: string | null): string {
-  return sku ?? label.split(' · ')[0] ?? label;
-}
-export function Avatar({ label, sku }: { label: string; sku?: string | null }) {
-  let h = 2166136261;
-  for (const ch of productSeed(label, sku)) { h ^= ch.codePointAt(0)!; h = Math.imul(h, 16777619); }
-  const initial = (label.trim().match(/[\p{L}\p{N}]/u)?.[0] ?? '#').toUpperCase();
-  return <span className={`avatar avatar-${(h >>> 0) % AVATAR_TONES}`} data-initial={initial} aria-hidden="true" />;
-}
-
-/** Ячейка товара: аватар слева, подпись и её подробности — справа */
-export function WithAvatar({ label, sku, children }: { label: string; sku?: string | null; children: ReactNode }) {
-  return <div className="with-avatar"><Avatar label={label} sku={sku} /><div className="with-avatar-body">{children}</div></div>;
-}
-
 export function When({ value }: { value: string | null | undefined }) {
   const m = useMessages();
   if (!value) return null;

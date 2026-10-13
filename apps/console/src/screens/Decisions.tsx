@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { LIST_PAGE_DEFAULT, type DecisionListItem, type DecisionListView, type DecisionTrace, type ListQuery, type StepStatus } from '@repracer/console-model';
 import { useResource, worldPath } from '../api.ts';
-import { Badge, Gaps, href, Load, NotFound, Pager, ReasonLine, useMessages, When, WithAvatar } from '../components.tsx';
+import { Badge, Gaps, href, Load, NotFound, Pager, ReasonLine, useMessages, When } from '../components.tsx';
 import { Icon } from '../icons.tsx';
 
 const STATUS_TONE: Readonly<Record<StepStatus, string>> = { OK: 'ok', STOP: 'stop', WARN: 'warn', SKIPPED: 'off', UNKNOWN: 'unknown' };
@@ -23,9 +23,9 @@ export function DecisionsView({ worldId, items }: { worldId: string; items: read
               {items.map((d) => (
                 <tr key={d.decisionId}>
                   <td><When value={d.decidedAt} /></td>
-                  <td>{d.unit ? <WithAvatar label={d.unit.label}>{d.unit.label}</WithAvatar> : m.ui.common.noValue}</td>
+                  <td>{d.unit?.label ?? m.ui.common.noValue}</td>
                   <td><Badge tone={d.tone}>{d.outcome}</Badge>{d.dangerous ? <> <Badge tone="stop">{t.dangerousBadge}</Badge></> : null}</td>
-                  <td className="money">{d.price}</td>
+                  <td className="money cur">{d.price}</td>
                   <td>{d.reason}</td>
                   <td className="num"><a className="row-link" href={href(worldId, 'decisions', d.decisionId)}>{t.why}</a></td>
                 </tr>

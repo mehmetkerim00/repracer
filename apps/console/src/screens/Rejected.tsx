@@ -1,6 +1,6 @@
 import type { RejectedView } from '@repracer/console-model';
 import { useResource, worldPath } from '../api.ts';
-import { Badge, Gaps, href, Load, ReasonLine, useMessages, When, WithAvatar } from '../components.tsx';
+import { Badge, Gaps, href, Load, ReasonLine, useMessages, When } from '../components.tsx';
 
 /** Экран C: опасные изменения (отклонение от границы больше 10 %) отдельно от скорректированных [Р-73] */
 export function RejectedScreenView({ view }: { view: RejectedView }) {
@@ -31,15 +31,15 @@ export function RejectedScreenView({ view }: { view: RejectedView }) {
               {view.items.map((item, i) => (
                 <tr key={i} className={item.intervention === 'DANGEROUS' ? 'dangerous' : ''}>
                   <td className="nowrap"><When value={item.at} /></td>
-                  <td className="offer">{item.unit ? <WithAvatar label={item.unit.label}>{item.unit.label}</WithAvatar> : item.productRef ?? m.ui.common.noValue}</td>
+                  <td className="offer">{item.unit?.label ?? item.productRef ?? m.ui.common.noValue}</td>
                   <td className="pills">
                     <Badge tone={item.tone}>{r.kinds[item.kind]}</Badge>
                     {/* шаг 77: «скорректировано» — спокойным серым, опасное — красным; обе пилюли в строку */}
                     {item.intervention ? <Badge tone={item.intervention === 'DANGEROUS' ? 'stop' : 'off'}>{r.interventions[item.intervention]}</Badge> : null}
                   </td>
                   {/* Шаг 79 (ревью): изменение — подписью под предложенной ценой, а не своей колонкой: таблица помещается в окно */}
-                  <td className="num money">{item.proposed ?? '–'}{item.change ? <div className="note">{item.change}</div> : null}</td>
-                  <td className="num">{item.current ?? '–'}</td>
+                  <td className="num money cur">{item.proposed ?? '–'}{item.change ? <div className="note">{item.change}</div> : null}</td>
+                  <td className="num cur">{item.current ?? '–'}</td>
                   <td className="bound">{item.limit ?? '–'}</td>
                   <td className="num">{item.deviation ?? '–'}</td>
                   <td><ReasonLine reason={item.reason} /></td>

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { ListQuery, ShadowView } from '@repracer/console-model';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, ErrorBox, errorText, Gaps, href, Intro, Load, Pager, useMessages, When, WithAvatar } from '../components.tsx';
+import { Badge, ErrorBox, errorText, Gaps, href, Intro, Load, Pager, useMessages, When } from '../components.tsx';
 import { ShadowHero } from './ShadowHero.tsx';
 
 /**
@@ -37,7 +37,7 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
           {v.accounts.length === 0 ? (
             <section className="card"><p className="muted empty">{m.ui.shadow.noAccounts} <a href={href(worldId, 'connections')}>{m.ui.app.connectChannel}</a></p></section>
           ) : <>
-          {/* Шаг 82: окно отчёта — переключатель в шапке hero; сводка — hero на чернилах, строки сводки — светлой карточкой под ним */}
+          {/* Шаг 82: окно отчёта — переключатель над сводкой; шаг 83: сводка — белые плитки и график, строки сводки — карточкой под ними */}
           {(() => {
             const periods = (
               <div className="periods">{v.periods.map((p) => (
@@ -49,7 +49,7 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
             const lines = v.summaryLines.filter((line) => line !== m.ui.shadow.summary.decisions(v.summary.decisions, v.summary.changes));
             return v.anyShadow ? (
               <>
-                <ShadowHero worldId={worldId} view={v} periods={periods} />
+                <ShadowHero view={v} periods={periods} />
                 <section className="card ledger-lines">
                   <ul className="explain">{lines.map((line) => <li key={line}>{line}</li>)}</ul>
                   {/* «Не прогноз выручки» уже сказано строкой о деньгах — второй раз под ней не повторяем */}
@@ -167,8 +167,8 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
                 <tbody>
                   {v.rows.map((r) => (
                     <tr key={r.channelWriteId}>
-                      <td><WithAvatar label={r.label} sku={r.sku}>{r.label}</WithAvatar></td>
-                      <td className="money">{r.valueText}{r.budgetText === null ? null : <div className="note">{r.budgetText}</div>}</td>
+                      <td>{r.label}</td>
+                      <td className={r.field === 'QUANTITY' ? 'money' : 'money cur'}>{r.valueText}{r.budgetText === null ? null : <div className="note">{r.budgetText}</div>}</td>
                       <td><When value={r.whenText} /></td>
                       <td className="num">{r.priceDecisionId === null ? null : <a className="row-link" href={href(worldId, 'decisions', r.priceDecisionId)}>{c.why}</a>}</td>
                     </tr>

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { BulkJobView, StockDivergencesView, StockReturnsView, StockView } from '@repracer/console-model';
 import type { ListQuery } from '@repracer/console-model';
 import { ApiError, requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, ErrorBox, errorText, FileDrop, Gaps, href, Intro, Load, Pager, useMessages, WithAvatar } from '../components.tsx';
+import { Badge, ErrorBox, errorText, FileDrop, Gaps, href, Intro, Load, Pager, useMessages } from '../components.tsx';
 import { JobProgress } from './Jobs.tsx';
 
 /**
@@ -149,7 +149,7 @@ export function StockScreenView({ view: v, worldId, query, onQuery, onFilter }: 
           <tbody>
             {v.rows.map((r) => (
               <tr key={r.productId}>
-                <td className="product"><WithAvatar label={r.label} sku={r.sku}>{r.label}{r.label !== r.sku ? <span className="small muted nowrap"> · {r.sku}</span> : null}{r.gtin ? <span className="small muted nowrap"> · {r.gtin}</span> : null}</WithAvatar></td>
+                <td className="product">{r.label}{r.label !== r.sku ? <span className="small muted nowrap"> · {r.sku}</span> : null}{r.gtin ? <span className="small muted nowrap"> · {r.gtin}</span> : null}</td>
                 <td className="num">{r.onHand}</td><td className="num">{r.reserved}</td><td className="num money">{r.available}</td>
                 <td>
                   {r.channelManaged.length > 0 ? <ul className="small muted plain">{r.channelManaged.map((text, i) => <li key={i}>{text}</li>)}</ul> : null}

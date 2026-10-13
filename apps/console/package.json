@@ -6,8 +6,6 @@
   "type": "module",
   "dependencies": {
     "@fontsource/ibm-plex-mono": "5.3.0",
-    "@fontsource/ibm-plex-sans": "5.3.0",
-    "@fontsource/inter": "5.3.0",
     "@repracer/amazon-adapter": "0.1.0",
     "@repracer/bulk-jobs": "0.1.0",
     "@repracer/channel-oauth": "0.1.0",
@@ -30,10 +28,11 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec test/console.test.ts test/browser-smoke.test.ts test/static.test.ts test/config.test.ts test/console.pg.test.ts test/console-catalog-page.pg.test.ts test/console-screens-targeted.pg.test.ts test/console-live.pg.test.ts test/onboarding-live.pg.test.ts test/stock-only-live.pg.test.ts test/guest-demo-live.pg.test.ts test/demo-day-live.pg.test.ts test/shadow-live.pg.test.ts test/us-shadow-live.pg.test.ts test/connect-live.pg.test.ts test/pilot-live.pg.test.ts test/pilot-ebay-live.pg.test.ts test/pilot-us-live.pg.test.ts test/demo-us-live.pg.test.ts test/agency-click.pg.test.ts test/connect-ebay-identity.test.ts",
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-reporter=spec test/console.test.ts test/design-tokens.test.ts test/browser-smoke.test.ts test/static.test.ts test/config.test.ts test/console.pg.test.ts test/console-catalog-page.pg.test.ts test/console-screens-targeted.pg.test.ts test/console-live.pg.test.ts test/onboarding-live.pg.test.ts test/stock-only-live.pg.test.ts test/guest-demo-live.pg.test.ts test/demo-day-live.pg.test.ts test/shadow-live.pg.test.ts test/us-shadow-live.pg.test.ts test/connect-live.pg.test.ts test/pilot-live.pg.test.ts test/pilot-ebay-live.pg.test.ts test/pilot-us-live.pg.test.ts test/demo-us-live.pg.test.ts test/agency-click.pg.test.ts test/connect-ebay-identity.test.ts",
     "bulk-worker": "node --experimental-strip-types --disable-warning=ExperimentalWarning server/bulk-worker.ts"
   },
   "devDependencies": {
+    "@primer/primitives": "11.10.0",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "vite": "8.3.0"

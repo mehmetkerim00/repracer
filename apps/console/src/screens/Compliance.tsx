@@ -141,8 +141,8 @@ export function ComplianceScreenView({ worldId, initial }: { worldId: string; in
               {view.rows.map((r) => (
                 <tr key={r.announcementId} className={r.now.verdict === 'VIOLATION' ? 'dangerous' : ''}>
                   <td>{r.unit?.label ?? m.ui.common.noValue}</td>
-                  <td className="num">{r.reference}</td>
-                  <td className="num">{r.sale}</td>
+                  <td className="num cur">{r.reference}</td>
+                  <td className="num cur">{r.sale}</td>
                   <td className="nowrap">{r.period}</td>
                   <td><Badge tone={r.atAnnouncement.tone}>{r.atAnnouncement.verdict}</Badge> <span className="small">{r.atAnnouncement.text}</span></td>
                   <td><Badge tone={r.now.tone}>{r.now.verdict}</Badge> <span className="small">{r.now.text}</span><DepthLine depth={r.depth} /></td>

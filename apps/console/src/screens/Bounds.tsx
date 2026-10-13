@@ -18,7 +18,7 @@ export function BreakdownTable({ breakdown, currency }: { breakdown: PriceBreakd
             {breakdown.lines.map((l) => (
               <tr key={l.key} className={`line-${l.key}`}>
                 <td>{l.label}</td>
-                <td className="num">{l.amount}</td>
+                <td className="num cur">{l.amount}</td>
                 <td className="small">{l.formula}</td>
               </tr>
             ))}
@@ -99,8 +99,8 @@ export function BoundsIndexView({ worldId, items }: { worldId: string; items: re
               {items.map((i) => (
                 <tr key={i.writeScopeId}>
                   <td className="offer"><a href={href(worldId, 'bounds', i.writeScopeId)}>{i.label}</a></td>
-                  <td className="num money">{i.minPrice}</td>
-                  <td className="num money">{i.maxPrice}</td>
+                  <td className="num money cur">{i.minPrice}</td>
+                  <td className="num money cur">{i.maxPrice}</td>
                   <td className="num"><a className="row-link" href={href(worldId, 'bounds', i.writeScopeId)}>{c.floor}</a></td>
                 </tr>
               ))}

@@ -1,88 +1,111 @@
 /*
  * Шаг 77: дизайн-токены консоли — единственное место цветов, отступов, радиусов и шрифта. Экраны и стили берут значения отсюда,
- * своих цветов не заводят. Сетка отступов — 8px (половинный шаг 4px — только внутри мелких элементов).
+ * своих цветов не заводят.
  *
- * Шаг 82: облик «Ink & Ledger» — точный денежный инструмент с журналом доказательств. Тёмная чернильная рама (шапка, боковая
- * панель, hero тени) вокруг светлого «гроссбуха»: бумага на подложке, тонкие линейки, строгие табличные цифры. Герои интерфейса —
- * цифры денег: все суммы и числа — IBM Plex Mono; заголовки и крупные числа — IBM Plex Sans; основной текст — Inter.
+ * Шаг 83: НИЧЕГО не изобретать — каждое значение взято из дизайн-системы GitHub Primer (пакет @primer/primitives 11.10.0, лицензия
+ * MIT; светлая тема). Пометка `primer: --имя` у строки — токен Primer, из которого значение взято; правило-тест
+ * (apps/console/test/design-tokens.test.ts) сверяет каждое помеченное значение с пакетом и не пускает непомеченных, кроме названных
+ * исключений. Polaris (Shopify) не используется: его лицензия не разрешает самостоятельному приложению вид, похожий на продукты Shopify.
  */
 :root {
-  /* Чернила: рама и hero. Именно синий, не почти-чёрный */
-  --ink: #13233A;
-  --ink-raised: #1A2E4A;
-  --ink-line: rgba(255, 255, 255, 0.08);
-  --ink-text: #E8EDF4;
-  --ink-text-2: #A7B4C6;
-  --ink-text-3: #7C8BA1;
-  /* изумруд на чернилах — светлее основного, иначе на тёмном фоне не читается */
-  --accent-on-ink: #3FCB9F;
-
-  /* Бумага: контент на подложке, тонкие линейки */
-  --bg: #F2F4F7;
-  --surface: #FFFFFF;
-  --surface-muted: #F8F9FB;
-  --border: #E4E7EC;
-  --divider: #E4E7EC;
-  --row-hover: #F3F8F6;
-  --shadow-sm: 0 1px 2px rgba(19, 35, 58, 0.05);
-  --shadow: 0 1px 2px rgba(19, 35, 58, 0.04), 0 1px 3px rgba(19, 35, 58, 0.06);
-  --shadow-lg: 0 8px 24px rgba(19, 35, 58, 0.10), 0 2px 6px rgba(19, 35, 58, 0.06);
-  --radius: 10px;
-  --radius-sm: 6px;
-  --radius-pill: 999px;
+  /* Поверхности */
+  --bg: #f6f8fa; /* primer: --bgColor-muted */
+  --surface: #ffffff; /* primer: --bgColor-default */
+  --surface-muted: #f6f8fa; /* primer: --bgColor-muted */
+  --border: #d1d9e0; /* primer: --borderColor-default */
+  --divider: #d1d9e0b3; /* primer: --borderColor-muted */
+  --shadow-lg: 0 0 0 1px #d1d9e040, 0 6px 12px -3px #25292e0a, 0 6px 18px 0 #25292e1f; /* primer: --shadow-floating-small */
+  --backdrop: #c8d1da66; /* primer: --overlay-backdrop-bgColor */
+  --radius: 0.375rem; /* primer: --borderRadius-medium */
+  --radius-sm: 0.1875rem; /* primer: --borderRadius-small */
+  --radius-lg: 0.75rem; /* primer: --borderRadius-large */
+  --radius-pill: 624.9375rem; /* primer: --borderRadius-full */
+  --border-width: 0.0625rem; /* primer: --borderWidth-thin */
 
   /* Текст */
-  --text: #101828;
-  --text-2: #5B677A;
-  --text-3: #98A2B3;
-  /* деньги в таблицах — чуть темнее остального текста */
-  --text-money: #0B1626;
+  --text: #1f2328; /* primer: --fgColor-default */
+  --text-2: #59636e; /* primer: --fgColor-muted */
+  --text-3: #818b98; /* primer: --fgColor-disabled */
+  --text-money: #1f2328; /* primer: --fgColor-default */
+  --on-emphasis: #ffffff; /* primer: --fgColor-onEmphasis */
 
-  /* Акцент денег и действий — глубокий изумруд: кнопки, ссылки, активный пункт меню, бой */
-  --accent: #0B7A62;
-  --accent-hover: #08624F;
-  --accent-soft: #E6F3EF;
-  --accent-border: #A9D9CA;
-  --accent-text: #075A48;
-  --focus-ring: 0 0 0 3px rgba(11, 122, 98, 0.20);
+  /* Ссылки, фокус, выбранное — акцент Primer (синий) */
+  --accent: #0969da; /* primer: --fgColor-accent */
+  --accent-hover: #0969da; /* primer: --fgColor-link */
+  --accent-soft: #ddf4ff; /* primer: --bgColor-accent-muted */
+  --accent-border: #54aeff66; /* primer: --borderColor-accent-muted */
+  --accent-text: #0969da; /* primer: --fgColor-accent */
+  --accent-emphasis: #0969da; /* primer: --borderColor-accent-emphasis */
+  --focus-color: #0969da; /* primer: --focus-outline-color */
+  --focus-width: 0.125rem; /* primer: --focus-outline-width */
+  --focus-ring: 0 0 0 var(--focus-width) var(--focus-color);
+
+  /* Кнопки: основная — как у Primer (зелёная), обычная — фон и граница контрола */
+  --primary: #1f883d; /* primer: --button-primary-bgColor-rest */
+  --primary-hover: #1c8139; /* primer: --button-primary-bgColor-hover */
+  --primary-border: #1f232826; /* primer: --button-primary-borderColor-rest */
+  --control-bg: #f6f8fa; /* primer: --control-bgColor-rest */
+  --control-bg-hover: #eff2f5; /* primer: --control-bgColor-hover */
+  --control-bg-active: #e6eaef; /* primer: --control-bgColor-active */
+  --control-fg: #25292e; /* primer: --control-fgColor-rest */
+  --button-shadow: 0 1px 0 0 #1f23280a; /* primer: --button-default-shadow-resting */
+  --track-bg: #e6eaef; /* primer: --controlTrack-bgColor-rest */
+  --knob-bg: #ffffff; /* primer: --controlKnob-bgColor-rest */
 
   /* Семантика: успех и бой — зелёный, тень и внимание — янтарный, отказы и опасное — красный */
-  --success: #067A57;
-  --success-soft: #ECFDF3;
-  --success-border: #ABEFC6;
-  --success-strong: #079455;
-  --warning: #B45309;
-  --warning-soft: #FFFAEB;
-  --warning-border: #FEDF89;
-  --warning-strong: #DC6803;
-  --danger: #B42318;
-  --danger-soft: #FEF3F2;
-  --danger-border: #FECDCA;
-  --danger-strong: #D92D20;
-  --neutral-soft: #F2F4F7;
+  --success: #1a7f37; /* primer: --fgColor-success */
+  --success-soft: #dafbe1; /* primer: --bgColor-success-muted */
+  --success-border: #4ac26b66; /* primer: --borderColor-success-muted */
+  --success-strong: #1f883d; /* primer: --bgColor-success-emphasis */
+  --warning: #9a6700; /* primer: --fgColor-attention */
+  --warning-soft: #fff8c5; /* primer: --bgColor-attention-muted */
+  --warning-border: #d4a72c66; /* primer: --borderColor-attention-muted */
+  --warning-strong: #9a6700; /* primer: --bgColor-attention-emphasis */
+  --danger: #d1242f; /* primer: --fgColor-danger */
+  --danger-soft: #ffebe9; /* primer: --bgColor-danger-muted */
+  --danger-border: #ff818266; /* primer: --borderColor-danger-muted */
+  --danger-strong: #cf222e; /* primer: --bgColor-danger-emphasis */
+  --neutral-soft: #818b981f; /* primer: --bgColor-neutral-muted */
+  /* рамка badge (Primer Label) — цвет «emphasis» границы своего тона */
+  --success-line: #1a7f37; /* primer: --borderColor-success-emphasis */
+  --warning-line: #9a6700; /* primer: --borderColor-attention-emphasis */
+  --danger-line: #cf222e; /* primer: --borderColor-danger-emphasis */
 
-  /* Шрифты — локальные пакеты @fontsource, без CDN: текст — Inter, заголовки — IBM Plex Sans, числа — IBM Plex Mono */
-  --font: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-display: 'IBM Plex Sans', 'Inter', system-ui, sans-serif;
+  /* Рама: шапка — тёмная нейтральная (Primer header), боковая навигация — светлая (Primer NavList) */
+  --header-bg: #25292e; /* primer: --header-bgColor */
+  --header-fg: #ffffffb3; /* primer: --header-fgColor-default */
+  --header-fg-logo: #ffffff; /* primer: --header-fgColor-logo */
+  --header-divider: #818b98; /* primer: --header-borderColor-divider */
+  --nav-hover: #818b981a; /* primer: --control-transparent-bgColor-hover */
+  --nav-selected: #818b9826; /* primer: --control-transparent-bgColor-selected */
+
+  /* Шрифты: интерфейс — системный стек Primer; IBM Plex Mono — только денежные колонки таблиц (решение владельца, шаг 83) */
+  --font: "Mona Sans VF", -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans Backtick Fix", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji"; /* primer: --fontStack-system */
+  --font-code: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace; /* primer: --fontStack-monospace */
   --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-  --font-size: 14px;
-  --font-size-sm: 13px;
-  --font-size-xs: 12px;
-  --line-height: 1.5;
-  --weight-medium: 500;
-  --weight-heading: 600;
+  --font-size: 0.875rem; /* primer: --base-text-size-sm */
+  --font-size-sm: 0.75rem; /* primer: --base-text-size-xs */
+  --font-size-xs: 0.75rem; /* primer: --base-text-size-xs */
+  --font-size-md: 1rem; /* primer: --base-text-size-md */
+  --font-size-lg: 1.25rem; /* primer: --base-text-size-lg */
+  --font-size-xl: 2rem; /* primer: --base-text-size-xl */
+  --line-height: 1.5; /* primer: --base-text-lineHeight-normal */
+  --line-height-tight: 1.25; /* primer: --base-text-lineHeight-tight */
+  --weight-medium: 500; /* primer: --base-text-weight-medium */
+  --weight-heading: 600; /* primer: --base-text-weight-semibold */
 
-  /* Сетка отступов 8px */
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 24px;
-  --space-6: 32px;
-  --space-7: 48px;
+  /* Сетка отступов — шкала Primer base-size */
+  --space-1: 0.25rem; /* primer: --base-size-4 */
+  --space-2: 0.5rem; /* primer: --base-size-8 */
+  --space-3: 0.75rem; /* primer: --base-size-12 */
+  --space-4: 1rem; /* primer: --base-size-16 */
+  --space-5: 1.5rem; /* primer: --base-size-24 */
+  --space-6: 2rem; /* primer: --base-size-32 */
+  --space-7: 3rem; /* primer: --base-size-48 */
+  --control-h: 2rem; /* primer: --control-medium-size */
+  --badge-h: 1.25rem; /* primer: --base-size-20 */
 
-  /* Каркас */
+  /* Каркас — размеры раскладки консоли, а не значения дизайн-системы (исключения правила, названы в тесте) */
   --topbar-h: 56px;
   --sidebar-w: 240px;
-  --row-h: 42px;
 }

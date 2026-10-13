@@ -59,17 +59,6 @@ const NAV_ICONS: Record<string, string> = {
   connections: 'accounts', compliance: 'scales', jobs: 'zap', stop: 'stop',
 };
 
-/** Шаг 81: тонкая полоса сверху при смене экрана — глаз видит, что переход случился; украшение, загрузку не ждёт и не держит */
-function RouteProgress({ routeKey }: { routeKey: string }) {
-  const first = useRef(true);
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    if (first.current) { first.current = false; return; }
-    setTick((t) => t + 1);
-  }, [routeKey]);
-  return tick === 0 ? null : <div key={tick} className="route-progress" aria-hidden="true" />;
-}
-
 /** Вход [Р-78]: у поставщика identity; на стенде — имитатор с синтетическими пользователями. Паролей у нас нет */
 /** Знак роли на карточке входа — две буквы, у каждой роли свой */
 
@@ -88,11 +77,11 @@ export function LoginView({ simulator, demoGuest, oidc, error, busy, onSignIn, o
   const l = m.ui.app.login;
   return (
     <div className="login-wrap">
-    {/* Шаг 81: бренд-панель слева — знак, имя и одна строка о продукте; карточка входа справа */}
-    <aside className="login-hero">
+    {/* Шаг 83: без бренд-панели и градиентов — знак, имя и строка о продукте над карточкой входа, как у входа Primer */}
+    <header className="login-head">
       <div className="login-brand"><span className="brand-mark" aria-hidden="true">r</span>{m.ui.app.brand}</div>
       <p className="login-tagline">{l.tagline}</p>
-    </aside>
+    </header>
     <section className="card login">
       <h2>{l.title}</h2>
       {/* Шаг 79 (ревью): вступление входа — одно предложение и «Learn more», как подзаголовки экранов */}
@@ -189,7 +178,7 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
               <div className="group-title">{m.ui.app.navGroups[group]}</div>
               {/* Шаг 68 (K3): Omnibus — правило ЕС; продавцу только с витринами США пункта нет [Р-123] */}
               {keys.filter((key) => key !== 'compliance' || world.euStorefronts).map((key) => (
-                <a key={key} href={href(world.id, key)} className={route.screen === key ? 'active' : ''} aria-current={route.screen === key ? 'page' : undefined}><Icon name={NAV_ICONS[key] ?? ''} size={16} />{m.ui.app.screens[key]}</a>
+                <a key={key} href={href(world.id, key)} className={route.screen === key ? 'active' : ''} aria-current={route.screen === key ? 'page' : undefined}><Icon name={NAV_ICONS[key] ?? ''} size={20} />{m.ui.app.screens[key]}</a>
               ))}
             </div>
           ))}
@@ -332,7 +321,6 @@ export function App() {
   return (
     <MessagesContext.Provider value={m}>
       <div className="app" lang={locale}>
-        <RouteProgress routeKey={JSON.stringify(route)} />
         <header className="topbar">
           <h1 className="brand"><span className="brand-mark" aria-hidden="true">r</span>{m.ui.app.title}</h1>
           {/* Шаг 64 (проход консоли глазами клиента): «стенд, синтетические данные» — только у стенда с имитатором входа, не у продавца */}
