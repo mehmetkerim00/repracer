@@ -536,15 +536,15 @@ p.headline::before { display: none; }
   justify-content: center; font-size: var(--font-size-sm); font-weight: var(--weight-heading); background: var(--surface); border: 2px solid var(--border);
   color: var(--text-2); z-index: 1;
 }
-/* шаг 81: линия от шага к следующему — цветом шага, кружок исхода — заливкой с белой цифрой и мягким ореолом */
-.step::after { content: ''; position: absolute; left: 14px; top: 34px; bottom: 4px; width: 2px; border-radius: 1px; background: var(--border); }
+/* шаг 82: линия таймлайна — тонкая чернильная, маркер шага — заливкой цвета исхода с белой цифрой */
+.step::after { content: ''; position: absolute; left: 14.5px; top: 34px; bottom: 4px; width: 1px; background: rgba(19, 35, 58, 0.28); }
 .step:last-child::after { display: none; }
 .step > * { margin-left: 0; }
 .step-head { display: flex; gap: var(--space-2); align-items: center; padding-top: 4px; }
 .step-head h3 { margin: 0; }
 .step > p { margin: var(--space-1) 0 var(--space-2); }
 .step .items { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-2) var(--space-3); margin: var(--space-2) 0 0; box-shadow: var(--shadow-sm); }
-/* шаг 79: таймлайн — в карточке; пункты шага внутри неё — светло-серой подложкой, без второй тени */
+/* шаг 79: таймлайн — в карточке; пункты шага внутри неё — светлой подложкой, без второй тени */
 .trace-card { padding: var(--space-4) var(--space-5); }
 .trace-card .steps { margin: 0; }
 .trace-card .step .items { background: var(--surface-muted); box-shadow: none; }
@@ -553,21 +553,22 @@ p.headline::before { display: none; }
 .status-STOP::before { border-color: var(--danger); color: var(--danger); background: var(--danger-soft); }
 .status-WARN::before { border-color: var(--warning); color: var(--warning); background: var(--warning-soft); }
 .status-UNKNOWN::before { border-style: dashed; }
-.trace-card .status-OK::before { background: #059669; border-color: #059669; color: #fff; box-shadow: 0 0 0 4px var(--success-soft); }
-.trace-card .status-STOP::before { background: #DC2626; border-color: #DC2626; color: #fff; box-shadow: 0 0 0 4px var(--danger-soft); }
-.trace-card .status-WARN::before { background: #D97706; border-color: #D97706; color: #fff; box-shadow: 0 0 0 4px var(--warning-soft); }
-.trace-card .status-SKIPPED::before { background: var(--neutral-soft); border-color: var(--border); color: var(--text-3); }
-.trace-card .status-OK::after { background: linear-gradient(#6EE7B7, var(--success-border)); }
-.trace-card .status-STOP::after { background: linear-gradient(#FCA5A5, var(--danger-border)); }
-.trace-card .status-WARN::after { background: linear-gradient(#FCD34D, var(--warning-border)); }
+.trace-card .step::before { font-family: var(--font-mono); font-weight: 600; font-size: 13px; }
+.trace-card .status-OK::before { background: var(--success-strong); border-color: var(--success-strong); color: #fff; box-shadow: 0 0 0 4px var(--success-soft); }
+.trace-card .status-STOP::before { background: var(--danger-strong); border-color: var(--danger-strong); color: #fff; box-shadow: 0 0 0 4px var(--danger-soft); }
+.trace-card .status-WARN::before { background: var(--warning-strong); border-color: var(--warning-strong); color: #fff; box-shadow: 0 0 0 4px var(--warning-soft); }
+.trace-card .status-SKIPPED::before { background: var(--surface); border-color: var(--border); color: var(--text-3); }
+.trace-card .status-UNKNOWN::before { background: var(--surface); border-color: var(--text-3); color: var(--text-2); }
 .trace-card .step-head h3 { font-size: 15px; }
 
-/* шаг 81: итог решения — карточка своего тона: полоса слева, знак исхода в круге, итоговая цена крупно, фраза итога под ней */
+/*
+ * Шаг 81: итог решения — карточка своего тона. Шаг 82: итоговая цена — Plex Mono 40px, герой карточки; отказ — красной рамкой #B42318
+ * и причиной крупно (цены у отказа нет — фраза причины и есть главное)
+ */
 .verdict {
   --v-color: var(--text-3);
   position: relative; overflow: hidden; display: flex; align-items: flex-start; gap: var(--space-4); padding: 20px 24px 20px 28px; margin: var(--space-3) 0 var(--space-4);
-  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05), 0 4px 12px -4px rgba(16, 24, 40, 0.08);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow);
 }
 .verdict::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--v-color); }
 .verdict-icon {
@@ -576,16 +577,18 @@ p.headline::before { display: none; }
 }
 .verdict-body { min-width: 0; }
 .verdict-price {
-  font-size: 40px; line-height: 44px; font-weight: 700; letter-spacing: -0.025em; font-variant-numeric: tabular-nums; color: var(--text);
+  font-family: var(--font-mono); font-size: 40px; line-height: 46px; font-weight: 600; letter-spacing: -0.045em; font-variant-numeric: tabular-nums;
+  color: var(--text-money);
 }
-.verdict p.headline { margin: 6px 0 0; font-size: 15px; line-height: 22px; font-weight: var(--weight-medium); color: var(--text-2); }
+.verdict p.headline { margin: 4px 0 0; font-size: 15px; line-height: 22px; font-weight: var(--weight-medium); color: var(--text-2); }
 /* без цены (отказ, «цена осталась») фраза итога и есть главное — крупно */
-.verdict-body > p.headline:first-child { margin-top: 9px; font-size: 20px; line-height: 28px; font-weight: var(--weight-heading); color: var(--text); }
-.verdict-ok { --v-color: #059669; border-color: var(--success-border); background: linear-gradient(120deg, var(--success-soft) 0%, var(--surface) 55%); }
-.verdict-warn { --v-color: #D97706; border-color: var(--warning-border); background: linear-gradient(120deg, var(--warning-soft) 0%, var(--surface) 55%); }
-.verdict-stop { --v-color: #DC2626; border-color: var(--danger-border); background: linear-gradient(120deg, #FEE2E2 0%, var(--danger-soft) 60%); }
-.verdict-stop .verdict-body > p.headline { color: #991B1B; }
-.verdict-progress { --v-color: var(--accent); border-color: #C7D2FE; background: linear-gradient(120deg, var(--accent-soft) 0%, var(--surface) 55%); }
+.verdict-body > p.headline:first-child { margin-top: 8px; font-family: var(--font-display); font-size: 22px; line-height: 30px; font-weight: var(--weight-heading); letter-spacing: -0.02em; color: var(--text); }
+.verdict-ok { --v-color: var(--success-strong); border-color: var(--success-border); background: linear-gradient(120deg, var(--success-soft) 0%, var(--surface) 55%); }
+.verdict-warn { --v-color: var(--warning-strong); border-color: var(--warning-border); background: linear-gradient(120deg, var(--warning-soft) 0%, var(--surface) 55%); }
+.verdict-stop { --v-color: var(--danger); border: 1.5px solid var(--danger); background: var(--danger-soft); box-shadow: 0 10px 24px -16px rgba(180, 35, 24, 0.55); }
+.verdict-stop::before { display: none; }
+.verdict-stop .verdict-body > p.headline { color: var(--danger); font-size: 24px; line-height: 32px; }
+.verdict-progress { --v-color: var(--accent); border-color: var(--accent-border); background: linear-gradient(120deg, var(--accent-soft) 0%, var(--surface) 55%); }
 .verdict-unknown { border-style: dashed; }
 .items { list-style: none; padding-left: 0; margin: var(--space-1) 0; }
 .items li { margin: 0; padding: 3px 0; }
