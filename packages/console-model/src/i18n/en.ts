@@ -444,6 +444,8 @@ export const en = {
         logout: 'Sign out',
         noWorlds: 'You don’t have access to any workspace yet. Ask the workspace owner for an invitation.',
         demoGuest: 'View the demo',
+        /** Шаг 81: строка бренд-панели входа */
+        tagline: 'Repricing you can audit',
         demoGuestHint: 'No sign-up needed: you see a demo workspace as an observer. The data is synthetic, the path is real — you cannot change anything in it.',
       },
       dialog: {

@@ -548,11 +548,40 @@ p.headline::before { display: none; }
 .line-PRICE td { background: var(--surface-muted); }
 
 /* ---------- вход ---------- */
-.login-wrap { min-height: calc(100vh - var(--topbar-h) - 2 * var(--space-5)); display: flex; align-items: flex-start; justify-content: center; padding-top: 8vh; }
-.card.login { width: 100%; max-width: 560px; padding: var(--space-6); box-shadow: var(--shadow-lg); }
-.card.login .login-brand { display: flex; align-items: center; gap: var(--space-2); font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: var(--space-4); }
-.card.login .login-brand .brand-mark { width: 32px; height: 32px; font-size: 16px; border-radius: 9px; }
-.card.login h2 { font-size: 18px; }
+/* шаг 81: слева бренд-панель (градиент акцента, знак, имя, строка о продукте), справа карточка входа; на узком экране — друг под другом */
+.login-wrap {
+  min-height: calc(100vh - var(--topbar-h) - 2 * var(--space-5)); display: grid; grid-template-columns: minmax(300px, 420px) minmax(0, 560px);
+  justify-content: center; align-items: stretch; align-content: start; gap: var(--space-5); padding-top: 6vh;
+}
+.login-hero {
+  position: relative; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; gap: var(--space-6);
+  padding: 36px 36px 40px; border-radius: 16px; color: #fff;
+  background:
+    radial-gradient(circle at 85% 12%, rgba(255, 255, 255, 0.18) 0, rgba(255, 255, 255, 0) 42%),
+    radial-gradient(circle at 10% 95%, rgba(129, 140, 248, 0.55) 0, rgba(129, 140, 248, 0) 50%),
+    linear-gradient(150deg, #4F46E5 0%, #4338CA 45%, #312E81 100%);
+  box-shadow: 0 20px 40px -18px rgba(49, 46, 129, 0.6);
+}
+/* тонкая сетка поверх градиента — фактура, а не картинка: внешних ресурсов у консоли нет */
+.login-hero::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none; opacity: 0.35;
+  background-image: linear-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+  background-size: 28px 28px; mask-image: linear-gradient(180deg, transparent 0%, #000 45%, #000 100%);
+}
+.login-hero > * { position: relative; }
+.login-hero .login-brand { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
+.login-hero .brand-mark {
+  width: 36px; height: 36px; font-size: 20px; border-radius: 10px; background: rgba(255, 255, 255, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35), 0 6px 16px -6px rgba(0, 0, 0, 0.35);
+}
+.login-tagline { margin: 0; font-size: 34px; line-height: 40px; font-weight: 700; letter-spacing: -0.03em; max-width: 12ch; text-wrap: balance; }
+.card.login { width: 100%; max-width: 560px; padding: var(--space-6); box-shadow: var(--shadow-lg); margin: 0; }
+.card.login h2 { font-size: 22px; line-height: 30px; letter-spacing: -0.02em; }
+@media (max-width: 900px) {
+  .login-wrap { grid-template-columns: minmax(0, 560px); padding-top: var(--space-4); }
+  .login-hero { padding: var(--space-5); gap: var(--space-4); }
+  .login-tagline { font-size: 26px; line-height: 32px; max-width: none; }
+}
 .test-line { font-size: var(--font-size-xs); color: var(--text-2); margin: var(--space-3) 0; padding-left: var(--space-3); border-left: 2px solid var(--border); }
 /* роли — две колонки одинаковой высоты: без дырки в сетке 3 + 2 и без рядов разной высоты */
 /* роли — по три в ряд, неполный ряд — по центру (3 + 2), высота карточек одинаковая */

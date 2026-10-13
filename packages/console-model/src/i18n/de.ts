@@ -427,6 +427,8 @@ export const de: Messages = {
         logout: 'Abmelden',
         noWorlds: 'Sie haben noch keinen Zugang zu einem Arbeitsbereich. Bitten Sie den Inhaber um eine Einladung.',
         demoGuest: 'Demo ansehen',
+        /** Шаг 81: строка бренд-панели входа */
+        tagline: 'Repricing, das sich nachprüfen lässt',
         demoGuestHint: 'Ohne Registrierung: Sie sehen einen Demo-Arbeitsbereich als Beobachter. Die Daten sind synthetisch, der Weg ist echt — ändern können Sie darin nichts.',
       },
       dialog: {

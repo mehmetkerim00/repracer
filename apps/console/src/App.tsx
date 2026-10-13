@@ -88,8 +88,12 @@ export function LoginView({ simulator, demoGuest, oidc, error, busy, onSignIn, o
   const l = m.ui.app.login;
   return (
     <div className="login-wrap">
-    <section className="card login">
+    {/* Шаг 81: бренд-панель слева — знак, имя и одна строка о продукте; карточка входа справа */}
+    <aside className="login-hero">
       <div className="login-brand"><span className="brand-mark" aria-hidden="true">r</span>{m.ui.app.brand}</div>
+      <p className="login-tagline">{l.tagline}</p>
+    </aside>
+    <section className="card login">
       <h2>{l.title}</h2>
       {/* Шаг 79 (ревью): вступление входа — одно предложение и «Learn more», как подзаголовки экранов */}
       <Intro text={l.hint} />
