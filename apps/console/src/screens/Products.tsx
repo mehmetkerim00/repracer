@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { LIST_PAGE_DEFAULT, type ListQuery, type ProductListView, type ProductRow } from '@repracer/console-model';
 import type { EnableResult } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, Cell, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, useMessages } from '../components.tsx';
+import { Badge, Cell, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, useMessages, WithAvatar } from '../components.tsx';
 
 /** Шаг 79: колонки, которые продавец может скрыть; предложение, цена, пол, статус и действия — всегда */
 const OPTIONAL_COLUMNS = ['ceiling', 'strategy', 'lastChange', 'nextCheck', 'channel'] as const;
@@ -75,11 +75,13 @@ export function ProductsView({ view, onEnable, query, onQuery }: {
             {view.rows.map((r) => (
               <tr key={r.unit.writeScopeId}>
                 <td className="offer">
+                  <WithAvatar label={r.unit.label}>
                   <strong>{r.unit.label}</strong>
                   {/* Шаг 78: номер товара канала — приглушённо, состояние — отдельной пилюлей */}
                   {/* Шаг 79: «новый» — обычное состояние, пилюлю не показываем; иное — словами на языке экрана, а не кодом канала */}
                   <div className="product-ref">{p.productId(r.unit.channelProductRef, r.unit.gtin)} {r.unit.condition && r.unit.condition.toLowerCase() !== 'new'
                     ? <Badge tone="off">{(p.conditions as Record<string, string | undefined>)[r.unit.condition.toLowerCase()] ?? r.unit.condition}</Badge> : null}</div>
+                  </WithAvatar>
                 </td>
                 {/* Шаг 79: «On» и «In progress» — одна колонка: включённость всегда, ход — только когда что-то идёт */}
                 <td className="status-cell"><Cell cell={r.enabled} />{r.applying.tone !== 'ok' ? <Cell cell={r.applying} /> : null}</td>

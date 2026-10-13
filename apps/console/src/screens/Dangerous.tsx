@@ -1,6 +1,6 @@
 import type { DangerousReportView } from '@repracer/console-model';
 import { useResource, worldPath } from '../api.ts';
-import { Badge, Gaps, href, Load, ReasonLine, useMessages, When } from '../components.tsx';
+import { Badge, Gaps, href, Load, ReasonLine, useMessages, When, WithAvatar } from '../components.tsx';
 
 const PERIODS = [1, 7, 30] as const;
 
@@ -31,7 +31,7 @@ export function DangerousScreenView({ view }: { view: DangerousReportView }) {
               {view.floorHolds.items.map((i, n) => (
                 <tr key={`${i.decisionId ?? 'hold'}-${n}`}>
                   <td className="nowrap"><When value={i.at} /></td>
-                  <td className="offer">{i.unit?.label ?? m.ui.common.noValue}</td>
+                  <td className="offer">{i.unit ? <WithAvatar label={i.unit.label}>{i.unit.label}</WithAvatar> : m.ui.common.noValue}</td>
                   <td>{d.floorKinds[i.kind]}</td>
                   <td className="num">{i.target ?? m.ui.common.noValue}</td>
                   <td className="num money">{i.floor}</td>
@@ -60,7 +60,7 @@ export function DangerousScreenView({ view }: { view: DangerousReportView }) {
                 {view.items.map((i) => (
                   <tr key={i.decisionId} className="dangerous">
                     <td className="nowrap"><When value={i.at} /></td>
-                    <td className="offer">{i.unit?.label ?? m.ui.common.noValue}</td>
+                    <td className="offer">{i.unit ? <WithAvatar label={i.unit.label}>{i.unit.label}</WithAvatar> : m.ui.common.noValue}</td>
                     <td className="num">{i.proposed}</td>
                     <td className="num">{i.bound}</td>
                     <td className="num">{i.deviation}</td>

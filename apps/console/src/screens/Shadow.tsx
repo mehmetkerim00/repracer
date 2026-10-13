@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { ListQuery, ShadowView } from '@repracer/console-model';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, ErrorBox, errorText, Gaps, href, Load, Pager, useMessages, When, Intro } from '../components.tsx';
+import { Badge, ErrorBox, errorText, Gaps, href, Intro, Load, Pager, useMessages, When, WithAvatar } from '../components.tsx';
 import { ShadowHero } from './ShadowHero.tsx';
 
 /**
@@ -167,7 +167,7 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
                 <tbody>
                   {v.rows.map((r) => (
                     <tr key={r.channelWriteId}>
-                      <td>{r.label}</td>
+                      <td><WithAvatar label={r.label} sku={r.sku}>{r.label}</WithAvatar></td>
                       <td className="money">{r.valueText}{r.budgetText === null ? null : <div className="note">{r.budgetText}</div>}</td>
                       <td><When value={r.whenText} /></td>
                       <td className="num">{r.priceDecisionId === null ? null : <a className="row-link" href={href(worldId, 'decisions', r.priceDecisionId)}>{c.why}</a>}</td>

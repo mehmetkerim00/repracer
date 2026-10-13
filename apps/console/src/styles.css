@@ -310,12 +310,29 @@ tbody tr:last-child td { border-bottom: 0; }
 .card table:last-child tbody tr:last-child td { border-bottom: 0; }
 td.cell .muted, .cell .muted { margin-top: 2px; max-width: 280px; font-size: var(--font-size-sm); }
 /* колонка предложения и причины держат читаемую ширину: таблица шире экрана листается внутри своей рамки */
-/* шаг 79: зебра у всех таблиц — глаз держит строку */
-tbody tr:nth-child(even) td { background: #FBFBFD; }
+/* шаг 82: гроссбух — вместо зебры тонкие горизонтальные линейки; строка под курсором — лёгкий изумрудный оттенок */
 tbody tr:hover td { background: var(--row-hover); }
-/* закреплённые колонки (предложение слева, ссылка справа) — с той же зеброй, они непрозрачны */
-table.products tbody tr:nth-child(even) td.offer, table.sticky-end tbody tr:nth-child(even) td:last-child { background: #FBFBFD; }
+/* закреплённые колонки (предложение слева, ссылка справа) непрозрачны — оттенок наведения и у них */
 table.products tbody tr:hover td.offer, table.sticky-end tbody tr:hover td:last-child { background: var(--row-hover); }
+th { font-family: var(--font); }
+
+/* шаг 82: аватар товара — квадратик 28px, инициал и цвет из палитры по хэшу SKU */
+.with-avatar { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.with-avatar-body { min-width: 0; }
+.avatar {
+  flex: none; width: 28px; height: 28px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center;
+  margin-top: -4px; font-family: var(--font-display); font-weight: 600; font-size: 13px; letter-spacing: -0.01em;
+  box-shadow: inset 0 0 0 1px rgba(19, 35, 58, 0.06);
+}
+.avatar::before { content: attr(data-initial); }
+.avatar-0 { background: #E3F2EC; color: #0B6B55; }
+.avatar-1 { background: #E5EBF5; color: #23426D; }
+.avatar-2 { background: #FCEFE3; color: #A34A0C; }
+.avatar-3 { background: #F1E7F5; color: #6E3A84; }
+.avatar-4 { background: #E2F0F5; color: #1C627D; }
+.avatar-5 { background: #F6E6E4; color: #93372F; }
+.avatar-6 { background: #EDEFE0; color: #55621C; }
+.avatar-7 { background: #E9E8F5; color: #463F8A; }
 /* шапка внутри рамки таблицы: итоги, счётчики и действия над строками */
 .table-head {
   display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4);

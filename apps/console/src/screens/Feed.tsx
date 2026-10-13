@@ -3,7 +3,7 @@ import { FEED_PERIODS_DAYS, FEED_STATUS_GROUPS, type FeedQuery, type PriceFeedVi
 import { requestJson, useResource, worldPath } from '../api.ts';
 import type { JobCreatedResponse } from '../api-types.ts';
 import { JobProgress } from './Jobs.tsx';
-import { OfferPicker, Badge, ErrorBox, errorText, Gaps, href, Load, ReasonLine, useMessages, When } from '../components.tsx';
+import { Badge, ErrorBox, errorText, Gaps, href, Load, OfferPicker, ReasonLine, useMessages, When, WithAvatar } from '../components.tsx';
 
 /**
  * Лента изменений цен (шаги 21, 23): запись в канал от решения до итога, новые сверху. Фильтры по статусу, офферу и периоду и
@@ -85,7 +85,7 @@ export function FeedScreenView({ view, onQuery }: { view: PriceFeedView; onQuery
               {view.items.map((i, n) => (
                 <tr key={n}>
                   <td className="nowrap"><When value={i.at} /></td>
-                  <td className="offer">{i.unit?.label ?? m.ui.common.noValue}</td>
+                  <td className="offer">{i.unit ? <WithAvatar label={i.unit.label}>{i.unit.label}</WithAvatar> : m.ui.common.noValue}</td>
                   <td className="num">{i.from ?? '–'}</td>
                   <td className="num money">{i.to}</td>
                   <td className="num">{i.change ?? '–'}</td>
