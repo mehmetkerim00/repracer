@@ -141,7 +141,8 @@ p.empty {
 .card.stopped { border-color: var(--danger-border); background: var(--danger-soft); }
 .card.dangerous { border-color: var(--danger-border); }
 .card.emphasis { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow); }
-.card .big { font-size: 24px; line-height: 32px; font-weight: var(--weight-heading); margin: var(--space-1) 0; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+/* шаг 82: крупная сумма карточки (границы, худшее отклонение) — Plex Mono, как все деньги */
+.card .big { font-family: var(--font-mono); font-size: 26px; line-height: 32px; font-weight: 600; margin: var(--space-1) 0; font-variant-numeric: tabular-nums; letter-spacing: -0.04em; color: var(--text-money); }
 .card h3 { margin-top: 0; }
 
 /* Карточки-статистики (экран тени): число крупно, подпись мелко */
