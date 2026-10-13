@@ -45,9 +45,10 @@ PGHOST=127.0.0.1 PGPORT=5432 PGUSER=<суперпользователь PostgreS
 с нуля.
 
 В браузере: `http://127.0.0.1:5173` (не `localhost`) → экран входа уже по-английски (шаг 83: по центру знак **repracer** и строка
-«Repricing you can audit», под ними карточка входа с ролями) → **Sign in as Owner** → одна карточка
+«Repricing you can audit», под ними карточка входа; шаг 84 — роли строками: цветной кружок, имя роли и что роль может) → строка
+**Owner** («full access, can stop pricing and switch on live writes») → одна карточка
 **Demo store (simulator)** с пометкой **Demo** → нажатие открывает сразу **Shadow mode**. Перезагрузка страницы (F5) — выход: токен
-живёт только в памяти вкладки; снова «Sign in as Owner», адрес экрана сохраняется.
+живёт только в памяти вкладки; снова строка «Owner», адрес экрана сохраняется.
 
 ### Что демо не показывает (сказать клиенту прямо)
 
@@ -61,7 +62,9 @@ PGHOST=127.0.0.1 PGPORT=5432 PGUSER=<суперпользователь PostgreS
 
 **Экран — список миров («Your workspaces»):** одна карточка «Demo store (simulator)», описание «Synthetic store on the channel simulator:
 every offer has three competitors — one drifting, one undercutting, one in price waves.», пометки **Demo** и **awaiting access: 1**
-(аккаунт Amazon ЕС ждёт доступа [Р-150]), счётчики «Owner · Offers 224 · decisions (24 h) … · interventions (7 days) …».
+(аккаунт Amazon ЕС ждёт доступа [Р-150]); под ними показатели (шаг 84) — **Offers** 224, **Decisions 24h** …, **Interventions 7d** …
+и подпись роли «Owner». Пометка «test environment, synthetic data» в шапке — только здесь и на входе: внутри магазина её роль играет
+жёлтая полоса.
 
 **Внутри мира — баннер:** «Demo workspace: synthetic data, real path. Every amount is made up.»
 
@@ -82,16 +85,22 @@ Stop pricing. Над меню — имя магазина и ссылка **«�
   **«Learn more»** — раскрывает: «Nothing is written to the channel: every change below was held.»
 - **Сводка за «Last 7 days»** (переключатель «Last 7 days» / «Last 30 days» над сводкой) — четыре белые плитки с крупным числом
   (шаг 83): **Decisions**, **Price would change**, **Writes held**, **Without the floor** с подписью «not a forecast». Под ними — карточка
-  с графиком **«Decisions per day»** (шаг 82): решения тени по суткам в поясе магазина, тонкая зелёная линия, подписи дней снизу,
-  последняя точка — сегодня; наведение на точку показывает дату и число. Ниже карточкой строкой — «Period: … — …» и:
-  - «The price landed exactly on the floor K times — the floor decided it, and without the floor it would have gone lower»;
-  - «Writes held by the shadow: X (prices P, stock S)»;
-  - «Of them about N would have used the external edit budget of the channel — approximate: the day boundary of the storefront is not
-    confirmed…» — бюджет правок есть у eBay, а граница его суток не подтверждена, поэтому «примерно» [Р-188];
-  - «Without the floor you would have sold $… cheaper in total — counted on the N holds where we still keep what the strategy wanted».
+  с графиком **«Decisions per day»** (шаги 82, 84): зелёные столбики решений тени по суткам в поясе магазина, ось значений слева, число
+  над каждым столбиком, подписи дней снизу, последний столбик — сегодня. Ниже — карточка-список «показатель — значение» (шаг 84):
+  - **Period** — «… — …»;
+  - **Price landed exactly on the floor** — «K times», под подписью «the floor decided it, and without the floor it would have gone lower»;
+  - **Price landed exactly on the ceiling** — «0 times»;
+  - **Writes held by the shadow** — «X — prices P, stock S»;
+  - **Would have used the external edit budget of the channel** — «about N»: бюджет правок есть у eBay, а граница его суток не
+    подтверждена, поэтому «примерно» [Р-188];
+  - **Without the floor you would have sold cheaper by** — «$…», под подписью «counted on the N holds where we still keep what the
+    strategy wanted».
+
+  Под списком сноской — «Approximate: the day boundary of the storefront is not confirmed, so the budget cannot be split by day.» и «That
+  number is the difference between your floor and what the strategy wanted — not a forecast of revenue…».
 
   Сразу после подъёма — неделя США: больше тысячи решений в числе **Decisions**, на графике — ровная неделя (≈ 156 решений в сутки) и
-  сегодняшняя точка. Уже через 10–15 минут сегодняшняя точка уходит резко вверх: Kaufland демо работает только с момента запуска, и его
+  сегодняшний столбик. Уже через 10–15 минут сегодняшний столбик уходит резко вверх: Kaufland демо работает только с момента запуска, и его
   решения за сегодня — сотни, через час — тысячи. Это честная картина, а не сбой: «неделя — прожатая тень США, сегодня — ещё и Kaufland».
 - **Блок «Weekly email — preview»** (шаг 68, K7): то самое недельное письмо тени, собранное той же функцией, что у доставки, за
   последние семь суток, с пометкой «Demo: synthetic data. This is the email a seller in shadow mode receives every Monday…». Демо-тенанту
