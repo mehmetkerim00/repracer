@@ -167,16 +167,19 @@ p.empty {
 .shadow-hero .periods button:disabled { background: rgba(255, 255, 255, 0.12); color: #fff; }
 .hero-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .hero-metrics.with-money { grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(0, 1.5fr); }
-.hero-metric { padding: 2px 24px 4px; border-left: 1px solid var(--ink-line); min-width: 0; }
+/* подпись — сверху, число — по нижнему краю: длинная немецкая подпись в две строки не сдвигает своё число ниже соседних */
+.hero-metrics { padding-bottom: 14px; }
+.hero-metric { position: relative; display: flex; flex-direction: column; padding: 2px 24px 4px; border-left: 1px solid var(--ink-line); min-width: 0; }
 .hero-metric:first-child { padding-left: 0; border-left: 0; }
 .hero-metric .label { font-size: 11.5px; font-weight: var(--weight-medium); letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-text-2); }
 .hero-metric .value {
-  margin-top: 8px; font-family: var(--font-mono); font-weight: 500; font-size: 38px; line-height: 44px; letter-spacing: -0.04em;
+  margin-top: auto; padding-top: 8px; font-family: var(--font-mono); font-weight: 500; font-size: 38px; line-height: 44px; letter-spacing: -0.04em;
   color: #fff; font-variant-numeric: tabular-nums; white-space: nowrap;
 }
-.hero-money .value { font-size: 46px; line-height: 52px; margin-top: 4px; color: var(--accent-on-ink); font-weight: 600; }
+.hero-money .value { font-size: 46px; line-height: 52px; padding-top: 4px; color: var(--accent-on-ink); font-weight: 600; }
 .hero-metric .money-line { display: block; }
-.hero-metric .sub { margin-top: 2px; font-size: var(--font-size-xs); color: var(--ink-text-3); }
+.hero-metric .sub { position: absolute; left: 24px; bottom: -14px; font-size: var(--font-size-xs); color: var(--ink-text-3); }
+.hero-metric:first-child .sub { left: 0; }
 .hero-chart { margin: 22px 0 0; }
 .hero-chart figcaption { font-size: 11.5px; font-weight: var(--weight-medium); letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-text-3); margin-bottom: 6px; }
 .chart-plot { position: relative; height: 128px; }

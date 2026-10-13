@@ -41,19 +41,29 @@ function useIntro(key: string): number {
   return t;
 }
 
-/** Плавная линия через точки (Catmull-Rom → кривые Безье); опоры по высоте зажаты в поле графика, чтобы линия не уходила за ноль */
-function smoothPath(points: ReadonlyArray<readonly [number, number]>, top: number, bottom: number): string {
-  if (points.length === 0) return '';
-  if (points.length === 1) return `M${points[0]![0]},${points[0]![1]}`;
-  const clamp = (y: number) => Math.min(bottom, Math.max(top, y));
-  let d = `M${points[0]![0].toFixed(2)},${points[0]![1].toFixed(2)}`;
-  for (let i = 0; i < points.length - 1; i++) {
-    const p0 = points[Math.max(0, i - 1)]!; const p1 = points[i]!; const p2 = points[i + 1]!; const p3 = points[Math.min(points.length - 1, i + 2)]!;
-    const c1x = p1[0] + (p2[0] - p0[0]) / 6; const c1y = clamp(p1[1] + (p2[1] - p0[1]) / 6);
-    const c2x = p2[0] - (p3[0] - p1[0]) / 6; const c2y = clamp(p2[1] - (p3[1] - p1[1]) / 6);
-    d += ` C${c1x.toFixed(2)},${c1y.toFixed(2)} ${c2x.toFixed(2)},${c2y.toFixed(2)} ${p2[0].toFixed(2)},${p2[1].toFixed(2)}`;
+/**
+ * Плавная линия через точки — монотонная кубическая (Фрич — Карлсон): между двумя точками кривая не выходит за их значения, то есть не
+ * рисует провалов и пиков, которых в данных нет (Catmull-Rom проседал перед резким ростом ниже ровной недели)
+ */
+function smoothPath(points: ReadonlyArray<readonly [number, number]>): string {
+  const n = points.length;
+  if (n === 0) return '';
+  if (n === 1) return `M${points[0]![0]},${points[0]![1]}`;
+  const xs = points.map((p) => p[0]); const ys = points.map((p) => p[1]);
+  const h = xs.slice(1).map((x, i) => x - xs[i]!);
+  const d = ys.slice(1).map((y, i) => (y - ys[i]!) / h[i]!);
+  const t: number[] = [d[0]!, ...d.slice(1).map((di, i) => (d[i]! * di <= 0 ? 0 : (d[i]! + di) / 2)), d[n - 2]!];
+  for (let i = 0; i < n - 1; i++) {
+    if (d[i] === 0) { t[i] = 0; t[i + 1] = 0; continue; }
+    const a = t[i]! / d[i]!; const b = t[i + 1]! / d[i]!; const r = a * a + b * b;
+    if (r > 9) { const k = 3 / Math.sqrt(r); t[i] = k * a * d[i]!; t[i + 1] = k * b * d[i]!; }
   }
-  return d;
+  let path = `M${xs[0]!.toFixed(2)},${ys[0]!.toFixed(2)}`;
+  for (let i = 0; i < n - 1; i++) {
+    const third = h[i]! / 3;
+    path += ` C${(xs[i]! + third).toFixed(2)},${(ys[i]! + t[i]! * third).toFixed(2)} ${(xs[i + 1]! - third).toFixed(2)},${(ys[i + 1]! - t[i + 1]! * third).toFixed(2)} ${xs[i + 1]!.toFixed(2)},${ys[i + 1]!.toFixed(2)}`;
+  }
+  return path;
 }
 
 /** Поле графика в единицах viewBox; по краям — поля, чтобы крайние подписи дней не обрезались */
@@ -70,7 +80,7 @@ function DayChart({ chart, t }: { chart: ShadowChartView; t: number }) {
   const xPct = (i: number) => (n === 1 ? 50 : PAD_X + (i / (n - 1)) * (100 - 2 * PAD_X));
   const yOf = (v: number) => BOTTOM - (v / max) * (BOTTOM - TOP);
   const pts = chart.points.map((p, i) => [(xPct(i) / 100) * W, yOf(p.value)] as const);
-  const line = smoothPath(pts, TOP, BOTTOM);
+  const line = smoothPath(pts);
   const area = pts.length > 0 ? `${line} L${pts[pts.length - 1]![0].toFixed(2)},${H} L${pts[0]![0].toFixed(2)},${H} Z` : '';
   // У месяца подписи — через одну пятую, последняя (сегодня) — всегда
   const every = n > 10 ? Math.ceil(n / 6) : 1;

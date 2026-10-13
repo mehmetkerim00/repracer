@@ -44,7 +44,8 @@ PGHOST=127.0.0.1 PGPORT=5432 PGUSER=<суперпользователь PostgreS
 цены Kaufland — на 19-й (у шага 64 — на 21-й); через час на экранах есть и изменения цен, и резервации. Перезапуск команды — новый мир
 с нуля.
 
-В браузере: `http://127.0.0.1:5173` (не `localhost`) → экран входа уже по-английски → **Sign in as Owner** → одна карточка
+В браузере: `http://127.0.0.1:5173` (не `localhost`) → экран входа уже по-английски (шаг 82: слева тёмная панель со словознаком
+**repracer** и строкой «Repricing you can audit», справа карточка входа с ролями) → **Sign in as Owner** → одна карточка
 **Demo store (simulator)** с пометкой **Demo** → нажатие открывает сразу **Shadow mode**. Перезагрузка страницы (F5) — выход: токен
 живёт только в памяти вкладки; снова «Sign in as Owner», адрес экрана сохраняется.
 
@@ -79,15 +80,20 @@ Stop pricing. Над меню — имя магазина и ссылка **«�
 
 - **Подзаголовок:** «The channel is connected and the engine runs completely — snapshots, checks, strategy, bounds, explanation.» и ссылка
   **«Learn more»** — раскрывает: «Nothing is written to the channel: every change below was held.»
-- **Сводка за «Last 7 days»** (переключатель «Last 7 days» / «Last 30 days») — сначала четыре плитки: **Decisions**, **Price would
-  change**, **Writes held**, **Without the floor** с подписью «not a forecast»; под ними строкой — «Period: … — …» и:
+- **Сводка за «Last 7 days»** (шаг 82 — тёмная панель вверху экрана; переключатель «Last 7 days» / «Last 30 days» — в её левом верхнем
+  углу) — четыре числа: **Decisions**, **Price would change**, **Writes held** и самое крупное, изумрудом, **Without the floor** с
+  подписью «not a forecast»; при открытии экрана числа один раз считаются вверх (около секунды). Под ними — график **«Decisions per
+  day»**: решения тени по суткам (в поясе магазина), подписи дней снизу, последняя точка — сегодня; наведение на точку показывает дату и
+  число. Под панелью, светлой карточкой, строкой — «Period: … — …» и:
   - «The price landed exactly on the floor K times — the floor decided it, and without the floor it would have gone lower»;
   - «Writes held by the shadow: X (prices P, stock S)»;
   - «Of them about N would have used the external edit budget of the channel — approximate: the day boundary of the storefront is not
     confirmed…» — бюджет правок есть у eBay, а граница его суток не подтверждена, поэтому «примерно» [Р-188];
   - «Without the floor you would have sold $… cheaper in total — counted on the N holds where we still keep what the strategy wanted».
 
-  Сразу после подъёма — неделя США: около тысячи решений в плитке **Decisions**; через час добавляются тысячи решений Kaufland в евро.
+  Сразу после подъёма — неделя США: больше тысячи решений в числе **Decisions**, на графике — ровная неделя (≈ 156 решений в сутки) и
+  сегодняшняя точка. Уже через 10–15 минут сегодняшняя точка уходит резко вверх: Kaufland демо работает только с момента запуска, и его
+  решения за сегодня — сотни, через час — тысячи. Это честная картина, а не сбой: «неделя — прожатая тень США, сегодня — ещё и Kaufland».
 - **Блок «Weekly email — preview»** (шаг 68, K7): то самое недельное письмо тени, собранное той же функцией, что у доставки, за
   последние семь суток, с пометкой «Demo: synthetic data. This is the email a seller in shadow mode receives every Monday…». Демо-тенанту
   письмо не отправляется (0167) — поэтому оно на экране.
@@ -140,8 +146,9 @@ psql -d repracer_demo -c "SELECT final_status, count(*) AS writes, count(dispatc
 
 **Экран решения amazon.com** (шаг 68, записано прогоном `demo-us-live`): предложение подписано словами — «Plant pot, green · amazon.com».
 
-- **Итог** (шаг 81 — карточка янтарного тона, цена крупно): **$14.00**, под ней «The price $14.00 was approved; write: held by shadow mode
-  (not sent)». У отказа карточка красная, без цены — одной фразой причины.
+- **Итог** (шаги 81–82 — карточка янтарного тона, цена крупно моноширинными цифрами): **$14.00**, под ней «The price $14.00 was approved;
+  write: held by shadow mode (not sent)». У отказа — красная рамка, без цены, причина крупно одной фразой. Шаги расчёта — номера в цветных
+  кружках (зелёный — пройден, красный — остановлен, серый — не нужен) на тонкой линии.
 - **Competitor snapshot:** «Amazon, notification of a competitor price change», время наблюдения.
 - **Strategy:** «Proposed $14.00 (−24.3%): Target $12.49 is below your minimum price — capped at $14.00.»; шаги расчёта («Calculation
   step») — «Undercut the lowest price $12.50 by $0.01: $12.49.» и «Target $12.49 is below your minimum price — capped at $14.00.»;
@@ -252,7 +259,8 @@ other…».
 
 Заказ в симуляторе приходит раз в 4 минуты, поэтому через час R > 0.
 
-Сверху таблицы — 24 товара США с нулями: источник остатков демо ведёт только каталог Kaufland (цены США показаны на тени и в «Why this
+У каждой строки слева — квадратик с первой буквой товара (шаг 82; цвет — по товару, один и тот же на всех экранах). Сверху таблицы —
+24 товара США с нулями: источник остатков демо ведёт только каталог Kaufland (цены США показаны на тени и в «Why this
 price»). Поставьте флажок **«Only products with reservations»** — список фильтруется сразу, над таблицей «N of 224 products match.» и
 кнопка «Show all» (или ищите по названию и SKU: поле «Search by name or SKU» и кнопка «Search», шаг 69, K8) — останутся строки с
 заказами. Первая резервация в проходе шага 76 появилась на 5-й минуте после запуска. Ожидаемая строка, например:
