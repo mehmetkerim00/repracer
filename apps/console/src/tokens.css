@@ -1,48 +1,70 @@
 /*
  * Шаг 77: дизайн-токены консоли — единственное место цветов, отступов, радиусов и шрифта. Экраны и стили берут значения отсюда,
  * своих цветов не заводят. Сетка отступов — 8px (половинный шаг 4px — только внутри мелких элементов).
+ *
+ * Шаг 82: облик «Ink & Ledger» — точный денежный инструмент с журналом доказательств. Тёмная чернильная рама (шапка, боковая
+ * панель, hero тени) вокруг светлого «гроссбуха»: бумага на подложке, тонкие линейки, строгие табличные цифры. Герои интерфейса —
+ * цифры денег: все суммы и числа — IBM Plex Mono; заголовки и крупные числа — IBM Plex Sans; основной текст — Inter.
  */
 :root {
-  /* Поверхности */
-  --bg: #F7F8FA;
+  /* Чернила: рама и hero. Именно синий, не почти-чёрный */
+  --ink: #13233A;
+  --ink-raised: #1A2E4A;
+  --ink-line: rgba(255, 255, 255, 0.08);
+  --ink-text: #E8EDF4;
+  --ink-text-2: #A7B4C6;
+  --ink-text-3: #7C8BA1;
+  /* изумруд на чернилах — светлее основного, иначе на тёмном фоне не читается */
+  --accent-on-ink: #3FCB9F;
+
+  /* Бумага: контент на подложке, тонкие линейки */
+  --bg: #F2F4F7;
   --surface: #FFFFFF;
-  --surface-muted: #F9FAFB;
-  --border: #E5E7EB;
-  --divider: #F3F4F6;
-  --row-hover: #F5F6FF; /* шаг 81: наведение видно поверх зебры — лёгкий оттенок акцента */
-  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
-  --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
-  --shadow-lg: 0 8px 24px rgba(16, 24, 40, 0.10), 0 2px 6px rgba(16, 24, 40, 0.06);
+  --surface-muted: #F8F9FB;
+  --border: #E4E7EC;
+  --divider: #E4E7EC;
+  --row-hover: #F3F8F6;
+  --shadow-sm: 0 1px 2px rgba(19, 35, 58, 0.05);
+  --shadow: 0 1px 2px rgba(19, 35, 58, 0.04), 0 1px 3px rgba(19, 35, 58, 0.06);
+  --shadow-lg: 0 8px 24px rgba(19, 35, 58, 0.10), 0 2px 6px rgba(19, 35, 58, 0.06);
   --radius: 10px;
   --radius-sm: 6px;
   --radius-pill: 999px;
 
   /* Текст */
-  --text: #111827;
-  --text-2: #6B7280;
-  --text-3: #9CA3AF;
+  --text: #101828;
+  --text-2: #5B677A;
+  --text-3: #98A2B3;
+  /* деньги в таблицах — чуть темнее остального текста */
+  --text-money: #0B1626;
 
-  /* Акцент: кнопки, ссылки, активная навигация */
-  --accent: #4F46E5;
-  --accent-hover: #4338CA;
-  --accent-soft: #EEF2FF;
-  --accent-text: #3730A3;
-  --focus-ring: 0 0 0 3px rgba(79, 70, 229, 0.18);
+  /* Акцент денег и действий — глубокий изумруд: кнопки, ссылки, активный пункт меню, бой */
+  --accent: #0B7A62;
+  --accent-hover: #08624F;
+  --accent-soft: #E6F3EF;
+  --accent-border: #A9D9CA;
+  --accent-text: #075A48;
+  --focus-ring: 0 0 0 3px rgba(11, 122, 98, 0.20);
 
   /* Семантика: успех и бой — зелёный, тень и внимание — янтарный, отказы и опасное — красный */
-  --success: #047857;
-  --success-soft: #ECFDF5;
-  --success-border: #A7F3D0;
+  --success: #067A57;
+  --success-soft: #ECFDF3;
+  --success-border: #ABEFC6;
+  --success-strong: #079455;
   --warning: #B45309;
-  --warning-soft: #FFFBEB;
-  --warning-border: #FDE68A;
-  --danger: #B91C1C;
-  --danger-soft: #FEF2F2;
-  --danger-border: #FECACA;
-  --neutral-soft: #F3F4F6;
+  --warning-soft: #FFFAEB;
+  --warning-border: #FEDF89;
+  --warning-strong: #DC6803;
+  --danger: #B42318;
+  --danger-soft: #FEF3F2;
+  --danger-border: #FECDCA;
+  --danger-strong: #D92D20;
+  --neutral-soft: #F2F4F7;
 
-  /* Шрифт: Inter из локального пакета (@fontsource/inter), без CDN */
+  /* Шрифты — локальные пакеты @fontsource, без CDN: текст — Inter, заголовки — IBM Plex Sans, числа — IBM Plex Mono */
   --font: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'IBM Plex Sans', 'Inter', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
   --font-size: 14px;
   --font-size-sm: 13px;
   --font-size-xs: 12px;
