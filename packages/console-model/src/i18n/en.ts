@@ -429,6 +429,8 @@ export const en = {
       screenNotFound: 'There is no such screen.',
       connectChannel: 'Connect a channel →', notFoundTitle: 'Page not found', worldNotFoundTitle: 'Workspace not found', loadFailedTitle: 'This screen could not be loaded',
       gapsTitle: 'Good to know about this screen',
+      /** Шаг 84: мини-показатели карточки рабочего пространства — подпись над числом */
+      metrics: { offers: 'Offers', decisions: 'Decisions 24h', interventions: 'Interventions 7d' },
       counts: (scopes: number, decisionsLastDay: number, interventionsLastWeek: number) =>
         `Offers ${scopes} · decisions (24 h) ${decisionsLastDay} · interventions (7 days) ${interventionsLastWeek}`,
       diverged: (n: number) => `scenario differs from its expectations: ${n}`,
@@ -439,6 +441,12 @@ export const en = {
         hint: 'Sign-in, the second factor, password reset and invitations are handled by the identity provider. Your roles come from your memberships and are checked on every action.',
         simulator: 'Test environment: the identity provider is simulated locally. Choose a synthetic account; the simulator signs its token.',
         noSimulator: 'Sign-in goes through the identity provider, which is not connected yet.',
+        /** Шаг 84: что может роль — строкой рядом с именем роли на входе (по матрице прав, policy.ts) */
+        roleCan: {
+          OWNER: 'full access, can stop pricing and switch on live writes', ADMIN: 'manages the workspace, prices and stock, can stop pricing',
+          OPERATOR: 'can stop pricing and switch repricing on, does not edit prices', PRICING_MANAGER: 'edits prices, bounds and strategies, can stop pricing',
+          INVENTORY_MANAGER: 'manages products and stock, sees prices read-only', VIEWER: 'read-only',
+        },
         roleMarks: { OWNER: 'Ow', ADMIN: 'Ad', OPERATOR: 'Op', PRICING_MANAGER: 'PM', INVENTORY_MANAGER: 'IM', VIEWER: 'Vw' }, asAccount: (role: string) => `Sign in as ${role}`,
         signedIn: (name: string) => `Signed in: ${name}`,
         logout: 'Sign out',
@@ -868,6 +876,15 @@ export const en = {
     shadow: {
       /** Шаг 82: подпись графика в hero тени */
       chartTitle: 'Decisions per day',
+      /** Шаг 84: сводка экрана — списком «показатель — значение», оговорки — сноской под ним (смысл тот же, что у строк summary) */
+      list: {
+        period: 'Period', floorHeld: 'Price landed exactly on the floor', floorHeldHint: 'the floor decided it, and without the floor it would have gone lower',
+        ceilingHeld: 'Price landed exactly on the ceiling', times: (n: number) => `${n} times`, held: 'Writes held by the shadow',
+        heldSplit: (all: number, prices: number, stock: number) => `${all} — prices ${prices}, stock ${stock}`,
+        budget: 'Would have used the external edit budget of the channel', about: (n: number) => `about ${n}`,
+        budgetNote: 'Approximate: the day boundary of the storefront is not confirmed, so the budget cannot be split by day.',
+        savings: 'Without the floor you would have sold cheaper by', savingsHolds: (holds: number) => `counted on the ${holds} holds where we still keep what the strategy wanted`,
+      },
       stats: { decisions: 'Decisions', changes: 'Price would change', held: 'Writes held', savings: 'Without the floor', notForecast: 'not a forecast' },
       title: 'Shadow mode',
       intro: 'The channel is connected and the engine runs completely — snapshots, checks, strategy, bounds, explanation. Nothing is written to the channel: every change below was held.',

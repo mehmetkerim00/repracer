@@ -77,7 +77,8 @@ test('step 76: the console page runs in a real browser — sign-in, workspace li
   await b.open(pageUrl);
   // Экран входа — на языке развёртывания (стенд с `defaultLocale: 'en'`), имитатор входа даёт кнопки ролей
   const owner = en.ui.app.login.asAccount(en.values.OWNER);
-  await b.waitText(owner);
+  // Шаг 84: роли — строками «имя роли — что может»; «Sign in as Owner» — доступное имя кнопки
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
   assert.equal(await b.evaluate<string>('document.documentElement.lang'), 'en', 'the document language follows the screen');
   assert.equal(await b.evaluate<string>('document.title'), en.ui.app.title, 'the tab title is the console title, not a Russian placeholder');
   await b.click(owner);

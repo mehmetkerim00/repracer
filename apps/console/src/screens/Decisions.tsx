@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { LIST_PAGE_DEFAULT, type DecisionListItem, type DecisionListView, type DecisionTrace, type ListQuery, type StepStatus } from '@repracer/console-model';
 import { useResource, worldPath } from '../api.ts';
-import { Badge, Gaps, href, Load, NotFound, Pager, ReasonLine, useMessages, When } from '../components.tsx';
+import { Badge, commonZone, Gaps, href, Load, NotFound, Pager, ReasonLine, useMessages, When, WhenHead } from '../components.tsx';
 import { Icon } from '../icons.tsx';
 
 const STATUS_TONE: Readonly<Record<StepStatus, string>> = { OK: 'ok', STOP: 'stop', WARN: 'warn', SKIPPED: 'off', UNKNOWN: 'unknown' };
@@ -11,6 +11,7 @@ const VERDICT_ICON: Readonly<Record<string, string>> = { ok: 'check', warn: 'shi
 export function DecisionsView({ worldId, items }: { worldId: string; items: readonly DecisionListItem[] }) {
   const m = useMessages();
   const t = m.ui.trace;
+  const zone = commonZone(items.map((d) => d.decidedAt));
   return (
     <section>
       <h2>{t.listTitle}</h2>
@@ -18,11 +19,11 @@ export function DecisionsView({ worldId, items }: { worldId: string; items: read
       {items.length === 0 ? <p className="muted empty">{t.noDecisions}</p> : (
         <div className="table-wrap">
           <table>
-            <thead><tr><th>{t.columns.when}</th><th>{t.columns.unit}</th><th>{t.columns.outcome}</th><th className="num">{t.columns.price}</th><th>{t.columns.reason}</th><th /></tr></thead>
+            <thead><tr><th><WhenHead label={t.columns.when} zone={zone} /></th><th>{t.columns.unit}</th><th>{t.columns.outcome}</th><th className="num">{t.columns.price}</th><th>{t.columns.reason}</th><th /></tr></thead>
             <tbody>
               {items.map((d) => (
                 <tr key={d.decisionId}>
-                  <td><When value={d.decidedAt} /></td>
+                  <td><When value={d.decidedAt} zone={!zone} /></td>
                   <td>{d.unit?.label ?? m.ui.common.noValue}</td>
                   <td><Badge tone={d.tone}>{d.outcome}</Badge>{d.dangerous ? <> <Badge tone="stop">{t.dangerousBadge}</Badge></> : null}</td>
                   <td className="money cur">{d.price}</td>

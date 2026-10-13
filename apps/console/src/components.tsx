@@ -98,10 +98,28 @@ export function shortWhen(value: string): string {
   return value;
 }
 
-export function When({ value }: { value: string | null | undefined }) {
+/** Шаг 84: пояс времени строки («UTC−7») — для шапки колонки */
+export function zoneOf(value: string | null | undefined): string | null {
+  const z = value ? /(UTC\S*)$/.exec(value) : null;
+  return z ? z[1]! : null;
+}
+
+/** Шаг 84: пояс один на всю таблицу — тогда он в шапке колонки, а строки без него; разные пояса (переход часов в окне) — у каждой строки */
+export function commonZone(values: ReadonlyArray<string | null | undefined>): string | null {
+  const zones = new Set(values.filter((v): v is string => Boolean(v)).map((v) => zoneOf(v)));
+  return zones.size === 1 ? [...zones][0] ?? null : null;
+}
+
+/** Подпись колонки времени с поясом, если он у таблицы один */
+export function WhenHead({ label, zone }: { label: string; zone: string | null }) {
+  return <>{label}{zone ? <span className="th-zone"> · {zone}</span> : null}</>;
+}
+
+export function When({ value, zone = true }: { value: string | null | undefined; zone?: boolean }) {
   const m = useMessages();
   if (!value) return null;
-  return <span className="when" title={value}>{humanWhen(value, m.locale)}</span>;
+  const text = humanWhen(value, m.locale);
+  return <span className="when" title={value}>{zone ? text : text.replace(/ · UTC\S*$/, '')}</span>;
 }
 
 /** `symbol` — пилюля из одного знака (✓, !, ✕): без точки тона перед ним */
@@ -312,8 +330,10 @@ export function Pager({ page, query, onQuery }: { page: PageInfo; query: ListQue
  * поиска предложения за их пределами были недостижимы — а доказательство Omnibus [Р-123] и объявление скидки нужны по
  * КОНКРЕТНОМУ предложению.
  */
-export function OfferPicker({ worldId, value, onChange, allowEmpty = false, emptyLabel = '' }: {
+export function OfferPicker({ worldId, value, onChange, allowEmpty = false, emptyLabel = '', onCounter }: {
   worldId: string; value: string; onChange: (writeScopeId: string) => void; allowEmpty?: boolean; emptyLabel?: string;
+  /** Шаг 84: счётчик найденного — экрану, который ставит его в конец ряда фильтров; без него счётчик — под полем, как прежде */
+  onCounter?: (text: string | null) => void;
 }) {
   const m = useMessages();
   const [query, setQuery] = useState('');
@@ -329,16 +349,16 @@ export function OfferPicker({ worldId, value, onChange, allowEmpty = false, empt
     return () => { clearTimeout(id); cancel.abort(); };
   }, [worldId, query, m.locale]);
   const o = m.ui.offerPicker;
+  const counter = error ? null : found && found.total > found.shown ? o.narrow(found.shown, found.total) : found ? o.found(found.total) : null;
+  useEffect(() => { onCounter?.(counter); }, [counter, onCounter]);
   return (
-    <span className="offer-picker">
+    <span className={`offer-picker${onCounter ? ' inline' : ''}`}>
       <input type="search" value={query} placeholder={o.search} onChange={(e) => setQuery(e.target.value)} />
       <select value={value} onChange={(e) => onChange(e.target.value)}>
         {allowEmpty ? <option value="">{emptyLabel}</option> : null}
         {(found?.items ?? []).map((u) => <option key={u.writeScopeId} value={u.writeScopeId}>{u.label}</option>)}
       </select>
-      {error ? <span className="small warn">{error}</span> : found && found.total > found.shown
-        ? <span className="small muted">{o.narrow(found.shown, found.total)}</span>
-        : found ? <span className="small muted">{o.found(found.total)}</span> : null}
+      {error ? <span className="small warn">{error}</span> : onCounter || counter === null ? null : <span className="small muted">{counter}</span>}
     </span>
   );
 }

@@ -1,14 +1,18 @@
 import type { DangerousReportView } from '@repracer/console-model';
 import { useResource, worldPath } from '../api.ts';
-import { Badge, Gaps, href, Load, ReasonLine, useMessages, When } from '../components.tsx';
+import { Badge, commonZone, Gaps, href, Load, ReasonLine, useMessages, When, WhenHead } from '../components.tsx';
 
 const PERIODS = [1, 7, 30] as const;
+/** Шаг 84: причины удержания полом, которые говорят только то, что уже видно в колонках «Strategy wanted», «Floor», «Cheaper by» */
+const STANDARD_FLOOR_HOLDS = new Set(['CAPPED_AT_MIN_PRICE', 'CAPPED_AT_MARGIN_FLOOR']);
 
 /** Отчёт о работе границ за период: удержания полом [Р-117] и отклонения Gate больше 10 % [Р-73] */
 export function DangerousScreenView({ view }: { view: DangerousReportView }) {
   const m = useMessages();
   const d = m.ui.dangerous;
   const c = d.columns;
+  const holdZone = commonZone(view.floorHolds.items.map((i) => i.at));
+  const gateZone = commonZone(view.items.map((i) => i.at));
   return (
     <section>
       <h2>{d.pageTitle}</h2>
@@ -26,17 +30,18 @@ export function DangerousScreenView({ view }: { view: DangerousReportView }) {
       {view.floorHolds.count === 0 ? <p className="muted empty">{d.none}</p> : (
         <div className="table-wrap">
           <table className="dense sticky-end">
-            <thead><tr><th>{d.floorColumns.when}</th><th>{d.floorColumns.offer}</th><th>{d.floorColumns.kind}</th><th className="num">{d.floorColumns.target}</th><th className="num">{d.floorColumns.floor}</th><th className="num">{d.floorColumns.below}</th><th>{d.floorColumns.reason}</th><th /></tr></thead>
+            <thead><tr><th><WhenHead label={d.floorColumns.when} zone={holdZone} /></th><th>{d.floorColumns.offer}</th><th>{d.floorColumns.kind}</th><th className="num">{d.floorColumns.target}</th><th className="num">{d.floorColumns.floor}</th><th className="num">{d.floorColumns.below}</th><th>{d.floorColumns.reason}</th><th /></tr></thead>
             <tbody>
               {view.floorHolds.items.map((i, n) => (
                 <tr key={`${i.decisionId ?? 'hold'}-${n}`}>
-                  <td className="nowrap"><When value={i.at} /></td>
+                  <td className="nowrap"><When value={i.at} zone={!holdZone} /></td>
                   <td className="offer">{i.unit?.label ?? m.ui.common.noValue}</td>
                   <td>{d.floorKinds[i.kind]}</td>
                   <td className="num cur">{i.target ?? m.ui.common.noValue}</td>
                   <td className="num money cur">{i.floor}</td>
                   <td className="num cur">{i.below ?? m.ui.common.noValue}</td>
-                  <td><ReasonLine reason={i.reason} /></td>
+                  {/* Шаг 84: стандартная причина пересказывала бы колонки цели, пола и разницы — короткой формой; полный текст — подсказкой */}
+                  <td>{STANDARD_FLOOR_HOLDS.has(i.reason.code) ? <span className="reason" title={i.reason.text}>{i.reason.title}</span> : <ReasonLine reason={i.reason} />}</td>
                   <td className="nowrap">{i.decisionId ? <a className="row-link" href={href(view.worldId, 'decisions', i.decisionId)}>{m.ui.rejected.path}</a> : null}</td>
                 </tr>
               ))}
@@ -55,11 +60,11 @@ export function DangerousScreenView({ view }: { view: DangerousReportView }) {
           </div>
           <div className="table-wrap">
             <table className="dense sticky-end">
-              <thead><tr><th>{c.when}</th><th>{c.offer}</th><th className="num">{c.proposed}</th><th className="num">{c.bound}</th><th className="num">{c.deviation}</th><th>{c.reason}</th><th /></tr></thead>
+              <thead><tr><th><WhenHead label={c.when} zone={gateZone} /></th><th>{c.offer}</th><th className="num">{c.proposed}</th><th className="num">{c.bound}</th><th className="num">{c.deviation}</th><th>{c.reason}</th><th /></tr></thead>
               <tbody>
                 {view.items.map((i) => (
                   <tr key={i.decisionId} className="dangerous">
-                    <td className="nowrap"><When value={i.at} /></td>
+                    <td className="nowrap"><When value={i.at} zone={!gateZone} /></td>
                     <td className="offer">{i.unit?.label ?? m.ui.common.noValue}</td>
                     <td className="num cur">{i.proposed}</td>
                     <td className="num cur">{i.bound}</td>

@@ -412,6 +412,8 @@ export const de: Messages = {
       screenNotFound: 'Diese Seite gibt es nicht.',
       connectChannel: 'Kanal verbinden →', notFoundTitle: 'Seite nicht gefunden', worldNotFoundTitle: 'Arbeitsbereich nicht gefunden', loadFailedTitle: 'Diese Seite konnte nicht geladen werden',
       gapsTitle: 'Gut zu wissen zu dieser Seite',
+      /** Шаг 84: мини-показатели карточки рабочего пространства — подпись над числом */
+      metrics: { offers: 'Angebote', decisions: 'Entscheidungen 24 h', interventions: 'Eingriffe 7 Tage' },
       counts: (scopes: number, decisionsLastDay: number, interventionsLastWeek: number) =>
         `Angebote ${scopes} · Entscheidungen (24 h) ${decisionsLastDay} · Eingriffe (7 Tage) ${interventionsLastWeek}`,
       diverged: (n: number) => `Szenario weicht von seinen Erwartungen ab: ${n}`,
@@ -422,6 +424,12 @@ export const de: Messages = {
         hint: 'Anmeldung, zweiter Faktor, Passwort-Zurücksetzen und Einladungen übernimmt der Identitätsanbieter. Ihre Rollen stammen aus Ihren Mitgliedschaften und werden bei jeder Aktion geprüft.',
         simulator: 'Testumgebung: Der Identitätsanbieter wird lokal simuliert. Wählen Sie ein synthetisches Konto; der Simulator signiert sein Token.',
         noSimulator: 'Die Anmeldung läuft über den Identitätsanbieter, der noch nicht verbunden ist.',
+        /** Шаг 84: что может роль — строкой рядом с именем роли на входе (по матрице прав, policy.ts) */
+        roleCan: {
+          OWNER: 'voller Zugriff, kann Preise stoppen und Schreiben scharf schalten', ADMIN: 'verwaltet Arbeitsbereich, Preise und Bestand, kann Preise stoppen',
+          OPERATOR: 'kann Preise stoppen und Repricing einschalten, ändert keine Preise', PRICING_MANAGER: 'ändert Preise, Grenzen und Strategien, kann Preise stoppen',
+          INVENTORY_MANAGER: 'verwaltet Produkte und Bestand, sieht Preise nur lesend', VIEWER: 'nur lesend',
+        },
         roleMarks: { OWNER: 'In', ADMIN: 'Ad', OPERATOR: 'Op', PRICING_MANAGER: 'PM', INVENTORY_MANAGER: 'BM', VIEWER: 'Be' }, asAccount: (role: string) => `Anmelden als ${role}`,
         signedIn: (name: string) => `Angemeldet: ${name}`,
         logout: 'Abmelden',
@@ -844,6 +852,15 @@ export const de: Messages = {
     shadow: {
       /** Шаг 82: подпись графика в hero тени */
       chartTitle: 'Entscheidungen pro Tag',
+      /** Шаг 84: сводка экрана — списком «показатель — значение», оговорки — сноской под ним (смысл тот же, что у строк summary) */
+      list: {
+        period: 'Zeitraum', floorHeld: 'Preis landete genau auf der Untergrenze', floorHeldHint: 'sie hat ihn bestimmt, ohne sie wäre er tiefer gegangen',
+        ceilingHeld: 'Preis landete genau auf der Obergrenze', times: (n: number) => `${n}-mal`, held: 'Vom Schatten zurückgehaltene Schreibvorgänge',
+        heldSplit: (all: number, prices: number, stock: number) => `${all} — Preise ${prices}, Bestand ${stock}`,
+        budget: 'Hätten das externe Änderungsbudget des Kanals verbraucht', about: (n: number) => `etwa ${n}`,
+        budgetNote: 'Ungefähr: die Tagesgrenze der Storefront ist nicht bestätigt, das Budget lässt sich nicht nach Tagen aufteilen.',
+        savings: 'Ohne die Untergrenze hätten Sie billiger verkauft um', savingsHolds: (holds: number) => `gerechnet auf die ${holds} Haltevorgänge, deren Strategieziel wir noch haben`,
+      },
       stats: { decisions: 'Entscheidungen', changes: 'Preis würde sich ändern', held: 'Zurückgehaltene Schreibvorgänge', savings: 'Ohne die Untergrenze', notForecast: 'keine Prognose' },
       title: 'Schattenmodus',
       intro: 'Der Kanal ist verbunden und die Preisautomatik läuft vollständig — Snapshots, Prüfungen, Strategie, Grenzen, Begründung. In den Kanal wird nichts geschrieben: jede Änderung unten wurde zurückgehalten.',

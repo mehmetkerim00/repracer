@@ -4,7 +4,7 @@ import type { JobCreatedResponse, StrategySaveResponse } from '../api-types.ts';
 import type { BulkJobView } from '@repracer/console-model';
 import { JobProgress } from './Jobs.tsx';
 import { ApiError, requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, shortWhen, useMessages, When } from '../components.tsx';
+import { Badge, commonZone, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, shortWhen, useMessages, When, WhenHead } from '../components.tsx';
 
 /**
  * Экран стратегий (шаги 21, 23): черновик или новая версия существующей стратегии → превью на выбранных офферах (движок и Gate на
@@ -77,12 +77,12 @@ export function PreviewTable({ view }: { view: StrategyPreviewView }) {
       {/* Шаг 79 (ревью): плотная таблица и переносимое «на момент» — колонка «почему» не уходит за край рамки */}
       <div className="table-wrap">
         <table className="dense">
-          <thead><tr><th>{c.offer}</th><th>{c.asOf}</th><th className="num">{c.current}</th><th className="num">{c.proposed}</th><th className="num">{c.final}</th><th className="num">{c.change}</th><th>{c.outcome}</th><th>{c.reason}</th></tr></thead>
+          <thead><tr><th>{c.offer}</th><th><WhenHead label={c.asOf} zone={commonZone(view.rows.map((r) => r.asOf))} /></th><th className="num">{c.current}</th><th className="num">{c.proposed}</th><th className="num">{c.final}</th><th className="num">{c.change}</th><th>{c.outcome}</th><th>{c.reason}</th></tr></thead>
           <tbody>
             {view.rows.map((r) => (
               <tr key={r.unit.writeScopeId} className={r.dangerous ? 'dangerous' : ''}>
                 <td className="offer">{r.unit.label}</td>
-                <td className="small as-of"><When value={r.asOf} /></td>
+                <td className="small as-of"><When value={r.asOf} zone={!commonZone(view.rows.map((x) => x.asOf))} /></td>
                 <td className="num cur">{r.current}</td>
                 <td className="num cur">{r.proposed ?? '–'}</td>
                 <td className="num cur">{r.final ?? '–'}</td>

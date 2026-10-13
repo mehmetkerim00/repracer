@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ALL_REASON_CODES, COMPETITOR_RULE_DERIVED_KEYS, ENGINE_REASON_CODES, GATE_REASON_CODES, REASON_PARAMS, SANITY_NOTE_CODES, SANITY_NOTE_PARAMS, SANITY_WARNING_CODES, type ParamSchema, type ParamSpec } from '@repracer/pricing-model';
-import { describe, explainabilityCatalogue, FEED_PAGE_MAX, LOCALES, messagesFor, parseAmountInput, parseFeedQuery, parsePercentInput, REASON_LIMITS, shadowChart } from './index.ts';
+import { describe, explainabilityCatalogue, FEED_PAGE_MAX, LOCALES, messagesFor, parseAmountInput, parseFeedQuery, parsePercentInput, REASON_LIMITS, shadowChart, shadowSummaryList } from './index.ts';
 
 /** Р-71, Р-72: словарь DE/EN полон, суммы — только с валютой, значения канала вне слепка помечаются */
 
@@ -482,4 +482,26 @@ test('step 82: the shadow chart folds hourly decisions into the seller\'s own da
   assert.deepEqual(shadowChart(byHour, until, 7, en, null).points.map((p) => p.value), [0, 0, 0, 0, 0, 0, 7]);
   assert.equal(shadowChart(byHour, until, 30, en, 'Mars/Olympus_Mons').points.length, 30, 'an unknown zone falls back to UTC and does not break the screen');
   assert.deepEqual([shadowChart([], until, 7, messagesFor('de'), 'Europe/Berlin').points[6]!.label, shadowChart([], until, 30, messagesFor('de'), 'Europe/Berlin').points[29]!.label], ['Di', '13. Okt.']);
+});
+
+test('step 84: the shadow summary as «metric — value» says what the sentences said, caveats go to the footnote', () => {
+  const en = messagesFor('en');
+  const base = { since: '2026-10-06T07:00:00Z', until: '2026-10-13T07:00:00Z', decisions: 1669, changes: 503, floorHeld: 131, ceilingHeld: 0,
+    heldWrites: 722, heldPriceWrites: 517, heldQuantityWrites: 205, wouldSpendBudget: 10, wouldSpendUnconfirmed: 3,
+    floorSavings: [{ currency: 'USD', minor: 188325 }], floorSavingsHolds: 625 };
+  const full = shadowSummaryList(base, en);
+  assert.deepEqual(full.rows.map((r) => [r.label, r.value]), [
+    ['Period', `${en.when(base.since)} — ${en.when(base.until)}`],
+    ['Price landed exactly on the floor', '131 times'],
+    ['Price landed exactly on the ceiling', '0 times'],
+    ['Writes held by the shadow', '722 — prices 517, stock 205'],
+    ['Would have used the external edit budget of the channel', 'about 10'],
+    ['Without the floor you would have sold cheaper by', '$1,883.25'],
+  ]);
+  assert.deepEqual(full.notes, [en.ui.shadow.list.budgetNote, en.ui.shadow.summary.savingsNote], 'approximate budget and «not a forecast» — footnotes');
+  // Control: confirmed day boundary and no floor holds — exact number, no money row, no footnotes
+  const quiet = shadowSummaryList({ ...base, wouldSpendUnconfirmed: 0, floorSavings: [] }, en);
+  assert.equal(quiet.rows.find((r) => r.label === 'Would have used the external edit budget of the channel')!.value, '10');
+  assert.ok(!quiet.rows.some((r) => r.label === 'Without the floor you would have sold cheaper by'));
+  assert.deepEqual(quiet.notes, []);
 });

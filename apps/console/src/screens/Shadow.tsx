@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { ListQuery, ShadowView } from '@repracer/console-model';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, ErrorBox, errorText, Gaps, href, Intro, Load, Pager, useMessages, When } from '../components.tsx';
+import { Badge, commonZone, ErrorBox, errorText, Gaps, href, Intro, Load, Pager, useMessages, When, WhenHead } from '../components.tsx';
 import { ShadowHero } from './ShadowHero.tsx';
 
 /**
@@ -45,15 +45,22 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
                   onClick={() => { setDays(p.days); setQuery({ ...query, offset: 0 }); }}>{p.label}</button>
               ))}</div>
             );
-            // Шаг 79 (ревью): строку «решений столько-то» уже сказали метрики — под ними её не повторяем
-            const lines = v.summaryLines.filter((line) => line !== m.ui.shadow.summary.decisions(v.summary.decisions, v.summary.changes));
             return v.anyShadow ? (
               <>
                 <ShadowHero view={v} periods={periods} />
-                <section className="card ledger-lines">
-                  <ul className="explain">{lines.map((line) => <li key={line}>{line}</li>)}</ul>
-                  {/* «Не прогноз выручки» уже сказано строкой о деньгах — второй раз под ней не повторяем */}
-                  {v.summary.floorSavings.length > 0 ? null : <p className="note">{v.cannot}</p>}
+                {/* Шаг 84: сводка — списком «показатель — значение» с разделителями; оговорки — сноской под списком */}
+                <section className="card summary-list-card">
+                  <dl className="summary-list">
+                    {v.summaryList.map((row) => (
+                      <div key={row.label} className="summary-row">
+                        <dt>{row.label}{row.hint ? <span className="hint">{row.hint}</span> : null}</dt>
+                        <dd>{row.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                  {v.summaryNotes.length > 0 ? <div className="summary-notes">{v.summaryNotes.map((note) => <p key={note}>{note}</p>)}</div> : null}
+                  {/* «Не прогноз выручки» уже сказано сноской о деньгах — второй раз не повторяем */}
+                  {v.summary.floorSavings.length > 0 ? null : <p className="summary-notes">{v.cannot}</p>}
                 </section>
               </>
             ) : (
@@ -163,13 +170,13 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
           <section className="card">
             {v.rows.length === 0 ? <p>{v.none}</p> : (
               <table>
-                <thead><tr><th>{c.offer}</th><th className="num">{c.value}</th><th>{c.when}</th><th /></tr></thead>
+                <thead><tr><th>{c.offer}</th><th className="num">{c.value}</th><th><WhenHead label={c.when} zone={commonZone(v.rows.map((r) => r.whenText))} /></th><th /></tr></thead>
                 <tbody>
                   {v.rows.map((r) => (
                     <tr key={r.channelWriteId}>
                       <td>{r.label}</td>
                       <td className={r.field === 'QUANTITY' ? 'money' : 'money cur'}>{r.valueText}{r.budgetText === null ? null : <div className="note">{r.budgetText}</div>}</td>
-                      <td><When value={r.whenText} /></td>
+                      <td><When value={r.whenText} zone={!commonZone(v.rows.map((x) => x.whenText))} /></td>
                       <td className="num">{r.priceDecisionId === null ? null : <a className="row-link" href={href(worldId, 'decisions', r.priceDecisionId)}>{c.why}</a>}</td>
                     </tr>
                   ))}

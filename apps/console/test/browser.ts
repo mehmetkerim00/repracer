@@ -101,7 +101,8 @@ export async function launchBrowser(): Promise<Browser> {
       throw new Error(`the page did not show «${String(needle)}»; it shows: ${(await text().catch(() => '')).slice(0, 400)}; page errors: ${errors.join(' | ')}`);
     },
     async click(label, selector = 'button, a') {
-      const ok = await evaluate<boolean>(`(() => { const el = [...document.querySelectorAll(${JSON.stringify(selector)})].find((e) => e.textContent.trim() === ${JSON.stringify(label)});
+      // Шаг 84: кнопка с доступным именем (aria-label) — по нему, как её назвал бы экранный чтец: строка роли на входе называет роль и её права
+      const ok = await evaluate<boolean>(`(() => { const el = [...document.querySelectorAll(${JSON.stringify(selector)})].find((e) => e.textContent.trim() === ${JSON.stringify(label)} || e.getAttribute('aria-label') === ${JSON.stringify(label)});
         if (!el) return false; el.click(); return true; })()`);
       if (!ok) throw new Error(`nothing to click with the text «${label}»`);
     },

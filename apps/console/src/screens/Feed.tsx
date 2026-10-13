@@ -3,7 +3,7 @@ import { FEED_PERIODS_DAYS, FEED_STATUS_GROUPS, type FeedQuery, type PriceFeedVi
 import { requestJson, useResource, worldPath } from '../api.ts';
 import type { JobCreatedResponse } from '../api-types.ts';
 import { JobProgress } from './Jobs.tsx';
-import { Badge, ErrorBox, errorText, Gaps, href, Load, OfferPicker, ReasonLine, useMessages, When } from '../components.tsx';
+import { Badge, commonZone, ErrorBox, errorText, Gaps, href, Load, OfferPicker, ReasonLine, useMessages, When, WhenHead } from '../components.tsx';
 
 /**
  * Лента изменений цен (шаги 21, 23): запись в канал от решения до итога, новые сверху. Фильтры по статусу, офферу и периоду и
@@ -48,6 +48,15 @@ export function FeedScreenView({ view, onQuery }: { view: PriceFeedView; onQuery
     } catch (e) { setExportError(errorText(e, m)); }
   };
 
+  const zone = commonZone(view.items.map((i) => i.at));
+  const [pickerCount, setPickerCount] = useState<string | null>(null);
+  /**
+   * Шаг 84: одинаковая причина у многих строк (у тени — «Not sent: this channel account is in shadow mode…») — один раз строкой при полосе
+   * итогов; в строке остаётся основание решения («Buy Box»). Причина, своя у строки, остаётся в строке; полный текст — в «Decision path»
+   */
+  const reasonCount = new Map<string, number>();
+  for (const i of view.items) if (i.reason) reasonCount.set(i.reason.text, (reasonCount.get(i.reason.text) ?? 0) + 1);
+  const shared = [...reasonCount].filter(([, n]) => n > 1).map(([text]) => text);
   const change = (patch: Partial<FeedQuery>) => {
     const next: FeedQuery = { ...current, ...patch, offset: 0 };
     for (const key of Object.keys(patch) as Array<keyof FeedQuery>) if (patch[key] === undefined) delete next[key];
@@ -66,32 +75,36 @@ export function FeedScreenView({ view, onQuery }: { view: PriceFeedView; onQuery
           </select></label>
           {/* Р-136 (ревью шага 29, находка 4): предложение выбирается поиском — список показывает первые несколько сотен из каталога */}
           <label>{f.filters.offer} <OfferPicker worldId={view.worldId} value={q.writeScopeId ?? ''} allowEmpty emptyLabel={f.filters.all}
-            onChange={(writeScopeId) => change({ writeScopeId: writeScopeId || undefined })} /></label>
+            onChange={(writeScopeId) => change({ writeScopeId: writeScopeId || undefined })} onCounter={setPickerCount} /></label>
           <label>{f.filters.period} <select value={q.days ?? ''} onChange={(e) => change({ days: (e.target.value ? Number(e.target.value) : undefined) as FeedQuery['days'] })}>
             <option value="">{f.filters.all}</option>
             {FEED_PERIODS_DAYS.map((d) => <option key={d} value={d}>{f.periodDays(d)}</option>)}
           </select></label>
-          <button type="button" className="toolbar-end" disabled={view.page.total === 0} onClick={() => void exportFeed()}>{f.exportAll(view.page.total)}</button>
+          {pickerCount ? <span className="filters-count">{pickerCount}</span> : null}
         </div>
       ) : null}
       {exportError ? <ErrorBox message={exportError} /> : null}
       {exportJobId ? <JobProgress worldId={view.worldId} jobId={exportJobId} /> : null}
       {view.items.length === 0 ? <p className="muted empty">{f.empty}</p> : (
         <div className="table-wrap">
-          <div className="table-head"><span>{f.counts(view.counts)}</span></div>
+          {/* Шаг 84: выгрузка — действие над таблицей, в её полосе итогов; ряд фильтров остаётся одним рядом */}
+          <div className="table-head"><span>{f.counts(view.counts)}</span>
+            {onQuery ? <button type="button" disabled={view.page.total === 0} onClick={() => void exportFeed()}>{f.exportAll(view.page.total)}</button> : null}
+            {shared.map((text) => <span key={text} className="head-note">{text}</span>)}</div>
           <table className="feed dense sticky-end">
-            <thead><tr><th>{c.when}</th><th>{c.offer}</th><th className="num">{c.from}</th><th className="num">{c.to}</th><th className="num">{c.change}</th><th>{c.status}</th><th>{c.reason}</th><th /></tr></thead>
+            <thead><tr><th><WhenHead label={c.when} zone={zone} /></th><th>{c.offer}</th><th className="num">{c.from}</th><th className="num">{c.to}</th><th className="num">{c.change}</th><th>{c.status}</th><th>{c.reason}</th><th /></tr></thead>
             <tbody>
               {view.items.map((i, n) => (
                 <tr key={n}>
-                  <td className="nowrap"><When value={i.at} /></td>
+                  <td className="nowrap"><When value={i.at} zone={!zone} /></td>
                   <td className="offer">{i.unit?.label ?? m.ui.common.noValue}</td>
                   <td className="num cur">{i.from ?? '–'}</td>
                   <td className="num money cur">{i.to}</td>
                   <td className="num">{i.change ?? '–'}</td>
                   <td><Badge tone={i.tone}>{i.status}</Badge>{i.confirmation ? <div className="note">{i.confirmation}</div> : null}</td>
                   {/* Шаг 79 (ревью): источник — подписью над причиной, а не своей колонкой: таблица помещается в окно */}
-                  <td><div className="note">{i.source}</div>{i.reason ? <ReasonLine reason={i.reason} /> : null}</td>
+                  <td>{i.reason && shared.includes(i.reason.text) ? <span className="basis">{i.source}</span>
+                    : <><div className="note">{i.source}</div>{i.reason ? <ReasonLine reason={i.reason} /> : null}</>}</td>
                   <td className="nowrap">{i.decisionId ? <a className="row-link" href={href(view.worldId, 'decisions', i.decisionId)}>{m.ui.rejected.path}</a> : null}</td>
                 </tr>
               ))}

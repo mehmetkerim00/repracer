@@ -23,7 +23,7 @@ export { COST_IMPORT_REPORT_HEADER, costImportReportRows, csvOf, PRICE_FEED_CSV_
 export { onboardingView, type OnboardingView, type OnboardingStepView, type ChannelAccountView, type EnableResultView, type OnboardingPathChoice } from './onboarding.ts';
 export { stockView, stockDivergencesView, stockReturnsView, stockTraps, type StockView, type StockRowView, type StockChannelCell, type StockTrap, type StockDivergencesView, type StockReturnsView, type StockReturnItem } from './stock.ts';
 // Шаг 41 [Р-169…Р-171]: экран теневого режима — сводка, would-be изменения и включение боя
-export { shadowView, shadowSummaryLines, shadowChart, type ShadowChartView, liveRefusalText, SHADOW_PERIOD_DAYS, type ShadowView, type ShadowAccountView,
+export { shadowView, shadowSummaryLines, shadowSummaryList, type ShadowSummaryRow, shadowChart, type ShadowChartView, liveRefusalText, SHADOW_PERIOD_DAYS, type ShadowView, type ShadowAccountView,
   type ShadowWriteView, type MarketplacePropertyView, type ShadowDigestView, type ShadowPeriodChoice, shadowDigestLetter, type ShadowDigestLetterInput } from './shadow.ts';
 export { pageInfo, clampOffset } from './page.ts';
 export { lastChangeCell, productPage } from './products.ts';

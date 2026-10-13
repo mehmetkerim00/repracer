@@ -1,12 +1,13 @@
 import type { RejectedView } from '@repracer/console-model';
 import { useResource, worldPath } from '../api.ts';
-import { Badge, Gaps, href, Load, ReasonLine, useMessages, When } from '../components.tsx';
+import { Badge, commonZone, Gaps, href, Load, ReasonLine, useMessages, When, WhenHead } from '../components.tsx';
 
 /** Экран C: опасные изменения (отклонение от границы больше 10 %) отдельно от скорректированных [Р-73] */
 export function RejectedScreenView({ view }: { view: RejectedView }) {
   const m = useMessages();
   const r = m.ui.rejected;
   const c = r.columns;
+  const zone = commonZone(view.items.map((item) => item.at));
   return (
     <section>
       <h2>{r.pageTitle}</h2>
@@ -25,12 +26,12 @@ export function RejectedScreenView({ view }: { view: RejectedView }) {
         <div className="table-wrap">
           <table className="dense sticky-end">
             <thead>
-              <tr><th>{c.when}</th><th>{c.where}</th><th>{c.kind}</th><th className="num">{c.proposed}</th><th className="num">{c.before}</th><th>{c.limit}</th><th className="num">{c.deviation}</th><th>{c.reason}</th><th /></tr>
+              <tr><th><WhenHead label={c.when} zone={zone} /></th><th>{c.where}</th><th>{c.kind}</th><th className="num">{c.proposed}</th><th className="num">{c.before}</th><th>{c.limit}</th><th className="num">{c.deviation}</th><th>{c.reason}</th><th /></tr>
             </thead>
             <tbody>
               {view.items.map((item, i) => (
                 <tr key={i} className={item.intervention === 'DANGEROUS' ? 'dangerous' : ''}>
-                  <td className="nowrap"><When value={item.at} /></td>
+                  <td className="nowrap"><When value={item.at} zone={!zone} /></td>
                   <td className="offer">{item.unit?.label ?? item.productRef ?? m.ui.common.noValue}</td>
                   <td className="pills">
                     <Badge tone={item.tone}>{r.kinds[item.kind]}</Badge>

@@ -14,6 +14,7 @@
   --surface-muted: #f6f8fa; /* primer: --bgColor-muted */
   --border: #d1d9e0; /* primer: --borderColor-default */
   --divider: #d1d9e0b3; /* primer: --borderColor-muted */
+  --shadow: 0 1px 1px 0 #1f23280a, 0 1px 2px 0 #1f232808; /* primer: --shadow-resting-small */
   --shadow-lg: 0 0 0 1px #d1d9e040, 0 6px 12px -3px #25292e0a, 0 6px 18px 0 #25292e1f; /* primer: --shadow-floating-small */
   --backdrop: #c8d1da66; /* primer: --overlay-backdrop-bgColor */
   --radius: 0.375rem; /* primer: --borderRadius-medium */
@@ -78,6 +79,20 @@
   --header-divider: #818b98; /* primer: --header-borderColor-divider */
   --nav-hover: #818b981a; /* primer: --control-transparent-bgColor-hover */
   --nav-selected: #818b9826; /* primer: --control-transparent-bgColor-selected */
+
+  /* Шаг 84: кружки ролей на входе — шкалы Primer Label, у каждой роли свой цвет */
+  --role-owner-bg: #d1f0ff; /* primer: --label-blue-bgColor-rest */
+  --role-owner-fg: #005fcc; /* primer: --label-blue-fgColor-rest */
+  --role-admin-bg: #f1e5ff; /* primer: --label-purple-bgColor-rest */
+  --role-admin-fg: #783ae4; /* primer: --label-purple-fgColor-rest */
+  --role-operator-bg: #ffe7d1; /* primer: --label-orange-bgColor-rest */
+  --role-operator-fg: #a24610; /* primer: --label-orange-fgColor-rest */
+  --role-pricing-bg: #caf7ca; /* primer: --label-green-bgColor-rest */
+  --role-pricing-fg: #2b6e3f; /* primer: --label-green-fgColor-rest */
+  --role-inventory-bg: #c7f5ef; /* primer: --label-teal-bgColor-rest */
+  --role-inventory-fg: #106e75; /* primer: --label-teal-fgColor-rest */
+  --role-viewer-bg: #e8ecf2; /* primer: --label-gray-bgColor-rest */
+  --role-viewer-fg: #5c6570; /* primer: --label-gray-fgColor-rest */
 
   /* Шрифты: интерфейс — системный стек Primer; IBM Plex Mono — только денежные колонки таблиц (решение владельца, шаг 83) */
   --font: "Mona Sans VF", -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans Backtick Fix", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji"; /* primer: --fontStack-system */

@@ -81,6 +81,9 @@ export interface ShadowView {
   anyShadow: boolean;
   summary: ShadowSummary;
   summaryLines: string[];
+  /** Шаг 84: сводка экрана списком «показатель — значение» и оговорки сноской — тот же смысл, что у `summaryLines` (их читает письмо) */
+  summaryList: ShadowSummaryRow[];
+  summaryNotes: string[];
   /** Шаг 82: график hero — решения тени по суткам в поясе продавца, последние `days` суток окна (последние — сегодня, неполные) */
   chart: ShadowChartView;
   accounts: ShadowAccountView[];
@@ -104,6 +107,37 @@ export interface ShadowView {
   mfaHint: string;
   cannot: string;
   gaps: Gap[];
+}
+
+export interface ShadowSummaryRow {
+  label: string;
+  value: string;
+  hint: string | null;
+}
+
+/**
+ * Шаг 84: строки сводки — списком «показатель — значение»; решения и изменения цены уже сказали плитки над ним, поэтому их здесь нет.
+ * Оговорки («приблизительно», «не прогноз») — сноской под списком. Деньги — только когда пол действительно удерживал цену (Р-173)
+ */
+export function shadowSummaryList(summary: ShadowSummary, m: Messages): { rows: ShadowSummaryRow[]; notes: string[] } {
+  const t = m.ui.shadow.list;
+  const n = (v: number) => new Intl.NumberFormat(m.locale === 'de' ? 'de-DE' : 'en-US').format(v);
+  const approximate = summary.wouldSpendUnconfirmed > 0;
+  const rows: ShadowSummaryRow[] = [
+    { label: t.period, value: `${m.when(summary.since)} — ${m.when(summary.until)}`, hint: null },
+    { label: t.floorHeld, value: t.times(summary.floorHeld), hint: t.floorHeldHint },
+    { label: t.ceilingHeld, value: t.times(summary.ceilingHeld), hint: null },
+    { label: t.held, value: t.heldSplit(summary.heldWrites, summary.heldPriceWrites, summary.heldQuantityWrites), hint: null },
+    { label: t.budget, value: approximate ? t.about(summary.wouldSpendBudget) : n(summary.wouldSpendBudget), hint: null },
+    ...(summary.floorSavings.length > 0
+      ? [{ label: t.savings, value: summary.floorSavings.map((x) => m.money(x.minor, x.currency)).join(', '), hint: t.savingsHolds(summary.floorSavingsHolds) }]
+      : []),
+  ];
+  const notes = [
+    ...(approximate ? [t.budgetNote] : []),
+    ...(summary.floorSavings.length > 0 ? [m.ui.shadow.summary.savingsNote] : []),
+  ];
+  return { rows, notes };
 }
 
 export interface ShadowChartView {
@@ -315,6 +349,7 @@ export function shadowView(world: StandWorld, page: ShadowPage, query: ListQuery
      */
     anyShadow: accounts.some((a) => a.writeMode === 'SHADOW' && a.authStatus === 'ACTIVE'),
     summary: page.summary, summaryLines: shadowSummaryLines(page.summary, m),
+    ...(() => { const l = shadowSummaryList(page.summary, m); return { summaryList: l.rows, summaryNotes: l.notes }; })(),
     chart: shadowChart(page.decisionsByHour, page.summary.until, days, m, timeZone),
     digestPreview: world.demo === true && days === 7 ? digestPreview(world, page, accounts, m) : null,
     accounts,

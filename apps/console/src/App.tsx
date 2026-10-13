@@ -104,13 +104,23 @@ export function LoginView({ simulator, demoGuest, oidc, error, busy, onSignIn, o
         <>
           <p className="test-line">{l.simulator}</p>
           {/* Шаг 77: роли — сеткой карточек; знак роли рисуется стилями (data-initial). Шаг 78: у каждой роли свой знак (Owner и
-              Operator оба были «O»), подпись — словарём на языке экрана (роли стенда по-немецки были английскими) */}
-          <div className="role-grid">
+              Operator оба были «O»), подпись — словарём на языке экрана (роли стенда по-немецки были английскими). Шаг 84: роли — одной
+              колонкой: цветной кружок (шкала Primer Label, у роли свой цвет), имя роли и одной строкой, что роль может; «Sign in as …» —
+              доступное имя кнопки */}
+          <ul className="role-list">
             {simulator.map((a) => {
               const label = (m.values as Record<string, string | undefined>)[a.role] ?? a.label;
-              return <button key={a.role} type="button" className="role-card" data-initial={(l.roleMarks as Record<string, string | undefined>)[a.role] ?? label.slice(0, 2)} disabled={busy} onClick={() => onSignIn(a.role)}>{l.asAccount(label)}</button>;
+              return (
+                <li key={a.role}>
+                  <button type="button" className={`role-row role-${a.role}`} aria-label={l.asAccount(label)} disabled={busy} onClick={() => onSignIn(a.role)}>
+                    <span className="role-dot" aria-hidden="true">{(l.roleMarks as Record<string, string | undefined>)[a.role] ?? label.slice(0, 2)}</span>
+                    <span className="role-name">{label}</span>
+                    <span className="role-can">{(l.roleCan as Record<string, string | undefined>)[a.role] ?? ''}</span>
+                  </button>
+                </li>
+              );
             })}
-          </div>
+          </ul>
         </>
       ) : <p className="notice">{l.noSimulator}</p>}
       {error ? <p className="error" role="alert">{error}</p> : null}
@@ -123,6 +133,7 @@ export function LoginView({ simulator, demoGuest, oidc, error, busy, onSignIn, o
 export function WorldList({ worlds }: { worlds: readonly WorldSummary[] }) {
   const m = useMessages();
   if (worlds.length === 0) return <p className="notice">{m.ui.app.login.noWorlds}</p>;
+  const nf = new Intl.NumberFormat(m.locale === 'de' ? 'de-DE' : 'en-US');
   return (
     <section>
       <h2>{m.ui.app.worlds}</h2>
@@ -142,7 +153,13 @@ export function WorldList({ worlds }: { worlds: readonly WorldSummary[] }) {
               {w.activeHalts > 0 ? <Badge tone="warn">{m.ui.app.activeHalts(w.activeHalts)}</Badge> : null}
               {w.failures.length > 0 ? <Badge tone="warn">{m.ui.app.diverged(w.failures.length)}</Badge> : null}
             </div>
-            <p className="small world-meta">{w.role} · {m.ui.app.counts(w.scopes, w.decisionsLastDay, w.interventionsLastWeek)}</p>
+            {/* Шаг 84: показатели — подпись мелко над числом, вместо строки через точки; роль — подписью под ними */}
+            <dl className="world-metrics">
+              <div><dt>{m.ui.app.metrics.offers}</dt><dd>{nf.format(w.scopes)}</dd></div>
+              <div><dt>{m.ui.app.metrics.decisions}</dt><dd>{nf.format(w.decisionsLastDay)}</dd></div>
+              <div><dt>{m.ui.app.metrics.interventions}</dt><dd>{nf.format(w.interventionsLastWeek)}</dd></div>
+            </dl>
+            <p className="small muted world-meta">{w.role}</p>
           </li>
         ))}
       </ul>
@@ -324,7 +341,8 @@ export function App() {
         <header className="topbar">
           <h1 className="brand"><span className="brand-mark" aria-hidden="true">r</span>{m.ui.app.title}</h1>
           {/* Шаг 64 (проход консоли глазами клиента): «стенд, синтетические данные» — только у стенда с имитатором входа, не у продавца */}
-          {session.state === 'ready' && session.data.simulator ? <span className="env">{m.ui.app.stand}</span> : null}
+          {/* Шаг 84: внутри рабочего пространства демо говорят жёлтая полоса и пилюля у заголовка — третья пометка в шапке лишняя */}
+          {session.state === 'ready' && session.data.simulator && route.worldId === null ? <span className="env">{m.ui.app.stand}</span> : null}
           <span className="spacer" />
           <span className="lang">
             {LOCALES.map((l) => (
