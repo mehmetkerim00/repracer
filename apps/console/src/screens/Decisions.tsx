@@ -2,8 +2,11 @@ import { useState } from 'react';
 import { LIST_PAGE_DEFAULT, type DecisionListItem, type DecisionListView, type DecisionTrace, type ListQuery, type StepStatus } from '@repracer/console-model';
 import { useResource, worldPath } from '../api.ts';
 import { Badge, Gaps, href, Load, NotFound, Pager, ReasonLine, useMessages, When } from '../components.tsx';
+import { Icon } from '../icons.tsx';
 
 const STATUS_TONE: Readonly<Record<StepStatus, string>> = { OK: 'ok', STOP: 'stop', WARN: 'warn', SKIPPED: 'off', UNKNOWN: 'unknown' };
+/** Шаг 81: знак исхода в карточке итога — по тону решения */
+const VERDICT_ICON: Readonly<Record<string, string>> = { ok: 'check', warn: 'shieldCheck', stop: 'x', off: 'equal', unknown: 'help', progress: 'activity' };
 
 export function DecisionsView({ worldId, items }: { worldId: string; items: readonly DecisionListItem[] }) {
   const m = useMessages();
@@ -46,7 +49,14 @@ export function TraceView({ trace }: { trace: DecisionTrace }) {
         {/* Шаг 76 (предполётный прогон демо): от решения — к границам и разбивке пола этого же предложения. Без ссылки вопрос «что
             помешает продать ниже себестоимости» вёл на экран товаров без поиска, где нужное предложение — на пятой странице */}
         {trace.unit ? <> · <a href={href(trace.worldId, 'bounds', trace.unit.writeScopeId)}>{m.ui.products.bounds}</a></> : null}</p>
-      <p className={`headline tone-${trace.tone}`}>{trace.headline}{trace.dangerous ? <> <Badge tone="stop">{t.dangerousBadge}</Badge></> : null}</p>
+      {/* Шаг 81: итог — карточкой своего тона: знак исхода, итоговая цена крупно (та же сумма, что во фразе), фраза итога под ней */}
+      <section className={`verdict verdict-${trace.tone}`}>
+        <span className="verdict-icon"><Icon name={VERDICT_ICON[trace.tone] ?? 'help'} size={22} /></span>
+        <div className="verdict-body">
+          {trace.headlinePrice ? <div className="verdict-price">{trace.headlinePrice}</div> : null}
+          <p className="headline">{trace.headline}{trace.dangerous ? <> <Badge tone="stop">{t.dangerousBadge}</Badge></> : null}</p>
+        </div>
+      </section>
       {/* Шаг 79 (ревью): шаги расчёта — в карточке, а не на сером фоне страницы */}
       <section className="card trace-card">
       <ol className="steps">

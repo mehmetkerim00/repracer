@@ -59,6 +59,17 @@ const NAV_ICONS: Record<string, string> = {
   connections: 'accounts', compliance: 'scales', jobs: 'zap', stop: 'stop',
 };
 
+/** Шаг 81: тонкая полоса сверху при смене экрана — глаз видит, что переход случился; украшение, загрузку не ждёт и не держит */
+function RouteProgress({ routeKey }: { routeKey: string }) {
+  const first = useRef(true);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (first.current) { first.current = false; return; }
+    setTick((t) => t + 1);
+  }, [routeKey]);
+  return tick === 0 ? null : <div key={tick} className="route-progress" aria-hidden="true" />;
+}
+
 /** Вход [Р-78]: у поставщика identity; на стенде — имитатор с синтетическими пользователями. Паролей у нас нет */
 /** Знак роли на карточке входа — две буквы, у каждой роли свой */
 
@@ -317,6 +328,7 @@ export function App() {
   return (
     <MessagesContext.Provider value={m}>
       <div className="app" lang={locale}>
+        <RouteProgress routeKey={JSON.stringify(route)} />
         <header className="topbar">
           <h1 className="brand"><span className="brand-mark" aria-hidden="true">r</span>{m.ui.app.title}</h1>
           {/* Шаг 64 (проход консоли глазами клиента): «стенд, синтетические данные» — только у стенда с имитатором входа, не у продавца */}

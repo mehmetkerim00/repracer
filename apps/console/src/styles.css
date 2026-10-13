@@ -12,6 +12,8 @@ body {
 }
 h1, h2, h3, h4 { font-weight: var(--weight-heading); color: var(--text); letter-spacing: -0.01em; }
 h2 { font-size: 20px; line-height: 28px; margin: 0 0 var(--space-2); }
+/* шаг 81: заголовок страницы — крупнее, плотнее по буквам, с воздухом над вступлением */
+.world-content h2, main > h2 { font-size: 26px; line-height: 34px; letter-spacing: -0.022em; margin-bottom: 6px; }
 h3 { font-size: 15px; line-height: 22px; margin: var(--space-4) 0 var(--space-2); }
 /* экран, который открывается и сам по себе, и внутри онбординга (импорт себестоимости), начинается с h3 — на своём месте он заголовок страницы */
 .world-content > section:first-child > h3:first-child { font-size: 20px; line-height: 28px; margin: 0 0 var(--space-2); }
@@ -39,8 +41,11 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-si
 }
 .brand { display: flex; align-items: center; gap: var(--space-2); margin: 0; font-weight: 700; font-size: 16px; letter-spacing: -0.02em; color: var(--text); }
 .brand-mark {
-  width: 24px; height: 24px; border-radius: 7px; background: var(--accent); color: #fff; display: inline-flex; align-items: center;
-  justify-content: center; font-size: 13px; font-weight: 700;
+  width: 26px; height: 26px; border-radius: 8px; color: #fff; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 16px; line-height: 1; font-weight: 800; letter-spacing: -0.04em; padding-bottom: 2px;
+  /* шаг 81: знак — тем же градиентом, что значок вкладки (public/favicon.svg), с бликом сверху и мягкой тенью */
+  background: linear-gradient(135deg, #6366F1 0%, #4338CA 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 2px 6px -2px rgba(67, 56, 202, 0.55);
 }
 .topbar .env { font-size: var(--font-size-xs); color: var(--text-2); padding: 2px var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-pill); }
 .topbar .user { font-size: var(--font-size-sm); color: var(--text-2); }
@@ -87,12 +92,13 @@ main.page.world { max-width: none; margin: 0; padding: 0; display: flex; flex-di
   box-shadow: inset 3px 0 0 var(--accent);
 }
 .nav-group a.active .icon { color: var(--accent); }
-.world-content { min-width: 0; padding: var(--space-5) var(--space-6) var(--space-7); }
+.world-content { min-width: 0; padding: var(--space-6) var(--space-6) var(--space-7); }
 .world-content > * + * { margin-top: var(--space-4); }
 /* вводный абзац экрана — читаемой длины строки, а не на всю ширину */
 .world-content section > p.muted:not(.empty), .world-content > p.muted:not(.empty) { max-width: 860px; }
 /* подзаголовок страницы — одно предложение вступления, остальное по «Learn more» (шаг 78) */
 p.subtitle { color: var(--text-2); max-width: 860px; margin: calc(-1 * var(--space-1)) 0 var(--space-3); }
+.world-content p.subtitle { font-size: 15px; line-height: 22px; margin-bottom: var(--space-5); }
 p.subtitle button.link { margin-left: 0; }
 /* выбранный путь онбординга — акцентной рамкой (шаг 79) */
 .choice.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow); }
@@ -173,13 +179,14 @@ table.accounts-modes td:last-child { width: 40%; }
 button {
   font: inherit; font-weight: var(--weight-medium); font-size: var(--font-size); line-height: 20px; padding: 6px var(--space-3);
   border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer;
-  box-shadow: var(--shadow-sm); transition: background 0.12s, border-color 0.12s, color 0.12s;
+  box-shadow: var(--shadow-sm); transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
 }
-button:hover { background: var(--surface-muted); border-color: #D1D5DB; }
+button:hover { background: var(--surface-muted); border-color: #D1D5DB; box-shadow: 0 2px 6px -2px rgba(16, 24, 40, 0.12); }
+button:not(:disabled):active { transform: translateY(1px); box-shadow: var(--shadow-sm); }
 button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-button.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+button.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); box-shadow: 0 4px 12px -4px rgba(79, 70, 229, 0.55); }
 button.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
 button.danger:hover { background: #991B1B; border-color: #991B1B; }
 /* «Остановить» на карточках целей — контуром: залитый красный — только в окне подтверждения, иначе экран выглядит как авария */
@@ -248,7 +255,7 @@ th {
   font-size: var(--font-size-xs); text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid var(--border); white-space: nowrap;
 }
 .table-wrap th { top: 0; }
-td { line-height: 20px; }
+td { line-height: 20px; transition: background-color 150ms ease; }
 tbody tr:hover td { background: var(--row-hover); }
 tbody tr:last-child td { border-bottom: 0; }
 .card table { margin: 0 calc(-1 * var(--space-5)); width: calc(100% + 2 * var(--space-5)); }
@@ -466,7 +473,8 @@ p.headline::before { display: none; }
   justify-content: center; font-size: var(--font-size-sm); font-weight: var(--weight-heading); background: var(--surface); border: 2px solid var(--border);
   color: var(--text-2); z-index: 1;
 }
-.step::after { content: ''; position: absolute; left: 14px; top: 30px; bottom: 0; width: 2px; background: var(--border); }
+/* шаг 81: линия от шага к следующему — цветом шага, кружок исхода — заливкой с белой цифрой и мягким ореолом */
+.step::after { content: ''; position: absolute; left: 14px; top: 34px; bottom: 4px; width: 2px; border-radius: 1px; background: var(--border); }
 .step:last-child::after { display: none; }
 .step > * { margin-left: 0; }
 .step-head { display: flex; gap: var(--space-2); align-items: center; padding-top: 4px; }
@@ -482,6 +490,40 @@ p.headline::before { display: none; }
 .status-STOP::before { border-color: var(--danger); color: var(--danger); background: var(--danger-soft); }
 .status-WARN::before { border-color: var(--warning); color: var(--warning); background: var(--warning-soft); }
 .status-UNKNOWN::before { border-style: dashed; }
+.trace-card .status-OK::before { background: #059669; border-color: #059669; color: #fff; box-shadow: 0 0 0 4px var(--success-soft); }
+.trace-card .status-STOP::before { background: #DC2626; border-color: #DC2626; color: #fff; box-shadow: 0 0 0 4px var(--danger-soft); }
+.trace-card .status-WARN::before { background: #D97706; border-color: #D97706; color: #fff; box-shadow: 0 0 0 4px var(--warning-soft); }
+.trace-card .status-SKIPPED::before { background: var(--neutral-soft); border-color: var(--border); color: var(--text-3); }
+.trace-card .status-OK::after { background: linear-gradient(#6EE7B7, var(--success-border)); }
+.trace-card .status-STOP::after { background: linear-gradient(#FCA5A5, var(--danger-border)); }
+.trace-card .status-WARN::after { background: linear-gradient(#FCD34D, var(--warning-border)); }
+.trace-card .step-head h3 { font-size: 15px; }
+
+/* шаг 81: итог решения — карточка своего тона: полоса слева, знак исхода в круге, итоговая цена крупно, фраза итога под ней */
+.verdict {
+  --v-color: var(--text-3);
+  position: relative; overflow: hidden; display: flex; align-items: flex-start; gap: var(--space-4); padding: 20px 24px 20px 28px; margin: var(--space-3) 0 var(--space-4);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05), 0 4px 12px -4px rgba(16, 24, 40, 0.08);
+}
+.verdict::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--v-color); }
+.verdict-icon {
+  flex: none; width: 44px; height: 44px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--v-color); color: #fff; box-shadow: 0 6px 14px -6px var(--v-color);
+}
+.verdict-body { min-width: 0; }
+.verdict-price {
+  font-size: 40px; line-height: 44px; font-weight: 700; letter-spacing: -0.025em; font-variant-numeric: tabular-nums; color: var(--text);
+}
+.verdict p.headline { margin: 6px 0 0; font-size: 15px; line-height: 22px; font-weight: var(--weight-medium); color: var(--text-2); }
+/* без цены (отказ, «цена осталась») фраза итога и есть главное — крупно */
+.verdict-body > p.headline:first-child { margin-top: 9px; font-size: 20px; line-height: 28px; font-weight: var(--weight-heading); color: var(--text); }
+.verdict-ok { --v-color: #059669; border-color: var(--success-border); background: linear-gradient(120deg, var(--success-soft) 0%, var(--surface) 55%); }
+.verdict-warn { --v-color: #D97706; border-color: var(--warning-border); background: linear-gradient(120deg, var(--warning-soft) 0%, var(--surface) 55%); }
+.verdict-stop { --v-color: #DC2626; border-color: var(--danger-border); background: linear-gradient(120deg, #FEE2E2 0%, var(--danger-soft) 60%); }
+.verdict-stop .verdict-body > p.headline { color: #991B1B; }
+.verdict-progress { --v-color: var(--accent); border-color: #C7D2FE; background: linear-gradient(120deg, var(--accent-soft) 0%, var(--surface) 55%); }
+.verdict-unknown { border-style: dashed; }
 .items { list-style: none; padding-left: 0; margin: var(--space-1) 0; }
 .items li { margin: 0; padding: 3px 0; }
 .items li + li { border-top: 1px solid var(--divider); }
@@ -696,3 +738,16 @@ p.notice.live-blocked { margin: 0; }
 .live-row { display: flex; gap: var(--space-2); align-items: center; }
 .live-row input { flex: 1 1 auto; min-width: 0; }
 .live-row button { flex: none; white-space: nowrap; }
+
+/* ---------- шаг 81: полоса перехода между экранами ---------- */
+.route-progress {
+  position: fixed; top: 0; left: 0; right: 0; height: 2px; z-index: 100; pointer-events: none; transform-origin: left center;
+  background: linear-gradient(90deg, var(--accent) 0%, #818CF8 100%); box-shadow: 0 0 8px rgba(79, 70, 229, 0.45);
+  animation: route-progress 650ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+@keyframes route-progress {
+  0% { transform: scaleX(0); opacity: 1; }
+  70% { transform: scaleX(0.9); opacity: 1; }
+  100% { transform: scaleX(1); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .route-progress { animation: none; display: none; } }

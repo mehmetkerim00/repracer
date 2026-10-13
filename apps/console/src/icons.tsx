@@ -26,6 +26,7 @@ const PATHS: Record<string, ReactNode> = {
   banknote: <><rect x="2.5" y="6" width="19" height="12" rx="2" /><circle cx="12" cy="12" r="2.5" /><path d="M6 12h.01" /><path d="M18 12h.01" /></>,
   check: <path d="m5 12.5 4.5 4.5L19 7.5" />,
   x: <><path d="M6 6l12 12" /><path d="M18 6 6 18" /></>,
+  equal: <><path d="M5 9h14" /><path d="M5 15h14" /></>,
 };
 
 export type IconName = keyof typeof PATHS;

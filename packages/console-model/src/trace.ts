@@ -41,6 +41,8 @@ export interface DecisionTrace {
   unit: UnitRef | null;
   decidedAt: string;
   headline: string;
+  /** Шаг 81: итоговая цена одобренного решения — та же сумма, что во фразе итога; экран показывает её крупно. У остальных — null */
+  headlinePrice: string | null;
   tone: Tone;
   /** Р-73: опасное изменение, остановленное границей */
   dangerous: boolean;
@@ -254,6 +256,7 @@ export function decisionTrace(world: StandWorld, detail: DecisionDetail, m: Mess
       : say(e?.gate.reason ?? d.reason).text;
   return {
     worldId: world.id, decisionId: d.decisionId, unit: scope ? unitOf(world, scope, m) : null, decidedAt: m.when(d.decidedAt), headline,
+    headlinePrice: d.outcome === 'APPROVED' ? money(d.finalMinor) : null,
     tone: last?.status === 'APPLIED' ? 'ok' : last?.status === 'SHADOW_HELD' ? 'warn' : OUTCOME_TONE[d.outcome] ?? 'unknown', dangerous: isDangerous(d), steps,
     gaps: uniqueGaps([...gaps, ...steps.flatMap((s) => s.gaps)]),
   };
