@@ -1154,7 +1154,8 @@ export const de: Messages = {
     offerPicker: {
       search: 'Angebot suchen (SKU, EAN, Name)',
       found: (n: number) => `${n} Angebote gefunden`,
-      narrow: (shown: number, total: number) => `${shown} von ${total} gezeigt — Suche eingrenzen`,
+      /** Шаг 84.1: счётчик — о предложениях в выпадающем списке, а не о записях ленты рядом: слово «Angebote» говорит это прямо */
+      narrow: (shown: number, total: number) => `${shown} von ${total} Angeboten in der Liste — Suche eingrenzen`,
     },
     bounds: {
       feeUsed: 'danach wird der Boden gerechnet (die höhere Schätzung)',

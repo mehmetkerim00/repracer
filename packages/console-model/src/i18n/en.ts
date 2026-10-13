@@ -1185,7 +1185,8 @@ export const en = {
     offerPicker: {
       search: 'Search an offer (SKU, EAN, name)',
       found: (n: number) => `${n} offers found`,
-      narrow: (shown: number, total: number) => `${shown} of ${total} shown — narrow the search`,
+      /** Шаг 84.1: счётчик — о предложениях в выпадающем списке, а не о записях ленты рядом: слово «offers» говорит это прямо */
+      narrow: (shown: number, total: number) => `${shown} of ${total} offers in the list — narrow the search`,
     },
     bounds: {
       feeUsed: 'the floor is computed from this one (the higher estimate)',

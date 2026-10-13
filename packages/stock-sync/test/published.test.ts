@@ -98,3 +98,14 @@ test('Р-202: в памяти — как в базе: владелец и вне
     { status: 'NOT_CONFIRMED', otherTools: 'NONE' }, 'включить снова — только новым подтверждением');
   assert.equal((await store.confirmQuantityWrites('t', 'acc', 'syn-seller-1', owner)).status, 'CONFIRMED', 'новое подтверждение после отзыва');
 });
+
+test('step 84.1: the stock page opens with products that have something to sell — available descending, zeros last, then SKU', async () => {
+  // SKU по алфавиту ставили бы нули первыми: «A-…» и «B-…» без остатка раньше «C-…» и «D-…» с остатком
+  const offers = ['A-ZERO', 'B-ZERO', 'C-STOCK', 'D-MORE'].map((sku, i) => ({ productId: `p-${i}`, sku, channelAccountId: 'acc', channel: 'KAUFLAND', marketplaces: ['de'], externalOfferId: `OFFER-${sku}` }));
+  const store = new InMemoryStockStore(offers, { roleOf: () => 'OWNER' });
+  const actor = { membershipId: 'm', userId: 'u', mfa: true };
+  const source = await store.createStockSource('t', { mode: 'INTERNAL_POOL', name: 'L' }, actor) as { stockSourceId: string };
+  await store.importStock('t', source.stockSourceId, [{ sku: 'C-STOCK', quantity: 3 }, { sku: 'D-MORE', quantity: 12 }], actor);
+  const page = await store.stockPage('t', { offset: 0, limit: 10 });
+  assert.deepEqual(page.items.map((r) => [r.sku, r.available]), [['D-MORE', 12], ['C-STOCK', 3], ['A-ZERO', 0], ['B-ZERO', 0]]);
+});

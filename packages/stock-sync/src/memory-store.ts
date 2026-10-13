@@ -322,11 +322,12 @@ export class InMemoryStockStore implements StockStore {
   }
 
   async stockPage(_tenantId: string, query: StockPageQuery): Promise<StockPage> {
-    const products = [...new Map(this.offers.map((o) => [o.productId, o])).values()].sort((a, b) => a.sku.localeCompare(b.sku));
+    const products = [...new Map(this.offers.map((o) => [o.productId, o])).values()];
+    // Шаг 84.1: порядок — как у PostgreSQL: по убыванию доступного, затем резервов, затем по SKU (байтово, как сортировка базы)
     const rows: StockRow[] = products.map((o) => ({
       productId: o.productId, sku: o.sku, title: o.title ?? null, gtin: o.gtin ?? null, ...this.availableOfProduct(o.productId),
       channels: [...this.scopes.values()].filter((s) => s.offer.productId === o.productId).map((s) => this.channelRow(s)),
-    }));
+    })).sort((a, b) => b.available - a.available || b.reserved - a.reserved || (a.sku < b.sku ? -1 : a.sku > b.sku ? 1 : 0) || (a.productId < b.productId ? -1 : 1));
     const channelRows = rows.flatMap((r) => r.channels);
     // Шаг 69 (K8): поиск по названию или SKU и фильтр «с резервациями» — тем же правилом, что у PostgreSQL
     const needle = query.search?.trim().toLowerCase() ?? '';

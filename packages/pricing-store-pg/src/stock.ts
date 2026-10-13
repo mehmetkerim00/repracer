@@ -843,11 +843,18 @@ export class PgStockStore implements StockStore {
              AND ($2::text IS NULL OR p.sku ILIKE '%' || $2 || '%' OR p.title ILIKE '%' || $2 || '%')
              AND (NOT $3::boolean OR EXISTS (SELECT 1 FROM channel_data.reservation r WHERE r.tenant_id = p.tenant_id AND r.product_id = p.product_id AND ${PgStockStore.RESERVED_SQL}))`;
       const filter = [tenantId, search, query.withReservations === true];
+      /**
+       * Шаг 84.1: сначала товары, которые есть чем продавать, — по убыванию доступного, при равенстве — по резервам, затем по SKU; нули —
+       * вниз (у демо прежний порядок по SKU ставил наверх товары США без остатка, и экран открывался строками нулей). Остаток и резервы —
+       * коррелированными подзапросами по индексам товара, как прежде: план не зависит от свежести статистики (шаг 67)
+       */
       const { rows: products } = await tx.query(
-        `SELECT p.product_id, p.sku, p.title, p.gtin,
-                coalesce((SELECT sum(sp.on_hand) FROM tenant_data.stock_pool sp WHERE sp.tenant_id = p.tenant_id AND sp.product_id = p.product_id), 0)::int AS on_hand,
-                coalesce((SELECT sum(r.quantity) FROM channel_data.reservation r WHERE r.tenant_id = p.tenant_id AND r.product_id = p.product_id AND ${PgStockStore.RESERVED_SQL}), 0)::int AS reserved
-           FROM tenant_data.product p WHERE ${matches} ORDER BY p.sku, p.product_id LIMIT $4 OFFSET $5`, [...filter, query.limit, query.offset]);
+        `SELECT q.* FROM (
+           SELECT p.product_id, p.sku, p.title, p.gtin,
+                  coalesce((SELECT sum(sp.on_hand) FROM tenant_data.stock_pool sp WHERE sp.tenant_id = p.tenant_id AND sp.product_id = p.product_id), 0)::int AS on_hand,
+                  coalesce((SELECT sum(r.quantity) FROM channel_data.reservation r WHERE r.tenant_id = p.tenant_id AND r.product_id = p.product_id AND ${PgStockStore.RESERVED_SQL}), 0)::int AS reserved
+             FROM tenant_data.product p WHERE ${matches}) q
+          ORDER BY greatest(q.on_hand - q.reserved, 0) DESC, q.reserved DESC, q.sku, q.product_id LIMIT $4 OFFSET $5`, [...filter, query.limit, query.offset]);
       const filtered = search !== null || query.withReservations === true;
       const { rows: [matched] } = filtered
         ? await tx.query(`SELECT count(*)::int AS n FROM tenant_data.product p WHERE ${matches}`, filter)

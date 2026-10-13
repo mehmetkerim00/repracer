@@ -266,6 +266,7 @@ export interface StockStore {
   recordOrderLines(tenantId: string, channelAccountId: string, lines: readonly OrderLine[], now: Instant): Promise<OrderLinesOutcome>;
   /** Шаг 52: товары аккаунта, чья последняя запись количества упёрлась в бюджет правок прошлого дня витрины — пересчитать после смены суток */
   budgetRolledOverProducts?(tenantId: string, channelAccountId: string): Promise<string[]>;
+  /** Шаг 84.1: порядок строк — по убыванию доступного, затем резервов, затем по SKU: экран открывается товарами, которые есть чем продавать */
   stockPage(tenantId: string, query: StockPageQuery): Promise<StockPage>;
   stockDivergences(tenantId: string, limit: number): Promise<StockDivergenceRow[]>;
 }

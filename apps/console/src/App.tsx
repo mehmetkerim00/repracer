@@ -135,7 +135,8 @@ export function WorldList({ worlds }: { worlds: readonly WorldSummary[] }) {
   if (worlds.length === 0) return <p className="notice">{m.ui.app.login.noWorlds}</p>;
   const nf = new Intl.NumberFormat(m.locale === 'de' ? 'de-DE' : 'en-US');
   return (
-    <section>
+    // Шаг 84.1: заголовок и сетка карточек — по центру страницы: одна карточка не висит у левого края
+    <section className="worlds-page">
       <h2>{m.ui.app.worlds}</h2>
       <p className="subtitle">{m.ui.app.worldsHint}</p>
       <ul className="worlds">
