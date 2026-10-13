@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { ListQuery, ShadowView } from '@repracer/console-model';
 import { requestJson, useResource, worldPath } from '../api.ts';
 import { Badge, ErrorBox, errorText, Gaps, href, Load, Pager, useMessages, When, Intro } from '../components.tsx';
+import { Icon } from '../icons.tsx';
 
 /**
  * Р-169…Р-171 (шаг 41): экран «Теневой режим». Канал подключён, движок работает целиком, в канал не уходит ничего.
@@ -46,13 +47,14 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
             {/* Шаг 77: витрина показа — числа сводки карточками; строки сводки целиком — вторичным текстом под ними */}
             {v.anyShadow ? (
               <>
+                {/* Шаг 81: плитки — подпись сверху, иконка в цветном кружке, крупное число; денежная плитка — акцентная */}
                 <div className="stats">
-                  <div className="stat"><div className="stat-label">{st.decisions}</div><div className="stat-value">{n(v.summary.decisions)}</div></div>
-                  <div className="stat"><div className="stat-label">{st.changes}</div><div className="stat-value">{n(v.summary.changes)}</div></div>
-                  <div className="stat"><div className="stat-label">{st.held}</div><div className="stat-value">{n(v.summary.heldWrites)}</div></div>
+                  <div className="stat"><div className="stat-top"><div className="stat-label">{st.decisions}</div><span className="stat-icon icon-indigo"><Icon name="activity" size={18} /></span></div><div className="stat-value">{n(v.summary.decisions)}</div></div>
+                  <div className="stat"><div className="stat-top"><div className="stat-label">{st.changes}</div><span className="stat-icon icon-sky"><Icon name="swap" size={18} /></span></div><div className="stat-value">{n(v.summary.changes)}</div></div>
+                  <div className="stat"><div className="stat-top"><div className="stat-label">{st.held}</div><span className="stat-icon icon-amber"><Icon name="shieldCheck" size={18} /></span></div><div className="stat-value">{n(v.summary.heldWrites)}</div></div>
                   {v.summary.floorSavings.map((f) => (
                     <div key={f.currency} className="stat accent">
-                      <div className="stat-label">{st.savings}</div>
+                      <div className="stat-top"><div className="stat-label">{st.savings}</div><span className="stat-icon icon-accent"><Icon name="banknote" size={18} /></span></div>
                       <div className="stat-value">{m.money(f.minor, f.currency)}</div>
                       <div className="stat-sub">{st.notForecast}</div>
                     </div>
@@ -67,20 +69,23 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
             {v.summary.floorSavings.length > 0 ? null : <p className="note">{v.cannot}</p>}
           </section>
 
-          <section className="card table-card">
-            <table className="accounts-modes">
-              <thead><tr><th>{c.account}</th><th>{c.mode}</th><th>{c.action}</th></tr></thead>
-              <tbody>
+          {/* Шаг 81: аккаунты — карточками; подписи бывших колонок («Channel account», «Write mode», «Live writes») — у полей карточки */}
+          <section className="account-modes">
                 {v.accounts.map((a) => (
-                  <tr key={a.channelAccountId}>
-                    <td>{a.label}</td>
-                    <td>
-                      <Badge tone={a.writeMode === 'SHADOW' ? 'warn' : 'ok'}>{a.modeText}</Badge>
-                      {a.changedText === null ? null : <div className="note">{a.changedText}</div>}
+                  <article key={a.channelAccountId} className="account-mode">
+                    <div className="am-account">
+                      <div className="am-label">{c.account}</div>
+                      <div className="am-name">{a.label}</div>
                       <div className="note">{m.ui.shadow.volume(a.offers, a.engineScopes)}</div>
                       {a.channelLimitText === null ? null : <div className="note">{a.channelLimitText}</div>}
-                    </td>
-                    <td>
+                    </div>
+                    <div className="am-mode">
+                      <div className="am-label">{c.mode}</div>
+                      <Badge tone={a.writeMode === 'SHADOW' ? 'warn' : 'ok'}>{a.modeText}</Badge>
+                      {a.changedText === null ? null : <div className="note">{a.changedText}</div>}
+                    </div>
+                    <div className="am-action">
+                      <div className="am-label">{c.action}</div>
                       {a.accessText === null ? null : (
                         <>
                           <Badge tone={a.authStatus === 'REVOKED' ? 'stop' : 'warn'}>{a.accessText}</Badge>
@@ -90,23 +95,23 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
                       {a.canGoLive ? (
                         <div className="live-card">
                           <div className="note">{a.confirmationHint}</div>
-                          <input value={typed[a.channelAccountId] ?? ''} placeholder={a.externalAccountId}
-                            onChange={(e) => setTyped({ ...typed, [a.channelAccountId]: e.currentTarget.value })} />
-                          {/* Яркая кнопка — только когда имя набрано верно: до этого глаз не ведут к самому опасному действию экрана */}
-                          <button type="button" className={(typed[a.channelAccountId] ?? '') === a.externalAccountId ? 'primary' : ''}
-                            onClick={() => switchMode(a.channelAccountId, 'LIVE')}>{v.liveButton}</button>
+                          <div className="live-row">
+                            <input value={typed[a.channelAccountId] ?? ''} placeholder={a.externalAccountId}
+                              onChange={(e) => setTyped({ ...typed, [a.channelAccountId]: e.currentTarget.value })} />
+                            {/* Яркая кнопка — только когда имя набрано верно: до этого глаз не ведут к самому опасному действию экрана */}
+                            <button type="button" className={(typed[a.channelAccountId] ?? '') === a.externalAccountId ? 'primary' : ''}
+                              onClick={() => switchMode(a.channelAccountId, 'LIVE')}>{v.liveButton}</button>
+                          </div>
                           <div className="note">{v.mfaHint}</div>
                         </div>
                       ) : null}
                       {a.canGoShadow ? (
                         <button type="button" onClick={() => switchMode(a.channelAccountId, 'SHADOW')}>{v.shadowButton}</button>
                       ) : null}
-                    </td>
-                  </tr>
+                    </div>
+                  </article>
                 ))}
-              </tbody>
-            </table>
-            {v.liveBlockedText === null ? null : <p className="note">{v.liveBlockedText}</p>}
+            {v.liveBlockedText === null ? null : <p className="notice live-blocked">{v.liveBlockedText}</p>}
             {error === null ? null : <ErrorBox message={error} />}
           </section>
 

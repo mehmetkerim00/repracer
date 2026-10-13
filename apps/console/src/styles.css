@@ -117,12 +117,27 @@ p.empty {
 
 /* Карточки-статистики (экран тени): число крупно, подпись мелко */
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--space-3); margin: var(--space-4) 0 var(--space-3); }
-.stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-3) var(--space-4); box-shadow: var(--shadow-sm); }
-.stat .stat-label { font-size: var(--font-size-sm); color: var(--text-2); }
-.stat .stat-value { font-size: 26px; line-height: 34px; font-weight: var(--weight-heading); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; color: var(--text); }
-.stat .stat-sub { font-size: var(--font-size-xs); color: var(--text-3); }
-.stat.accent { border-color: var(--warning-border); background: var(--warning-soft); }
-.stat.accent .stat-value { color: var(--warning); }
+/* шаг 81: плитки тени — главный экран показа: подпись сверху, иконка в цветном кружке, крупное число, тень и подъём при наведении */
+.stat {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: var(--space-4) 20px 18px;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05), 0 1px 3px rgba(16, 24, 40, 0.06);
+  transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+}
+.stat:hover { transform: translateY(-2px); box-shadow: 0 10px 24px -8px rgba(16, 24, 40, 0.18), 0 2px 4px rgba(16, 24, 40, 0.04); }
+.stat-top { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.stat .stat-label { font-size: 13px; font-weight: var(--weight-medium); color: var(--text-2); }
+.stat .stat-value { margin-top: var(--space-2); font-size: 30px; line-height: 38px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.025em; color: var(--text); }
+.stat .stat-sub { margin-top: 2px; font-size: var(--font-size-xs); color: var(--text-3); }
+.stat-icon { flex: none; width: 36px; height: 36px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; }
+.icon-indigo { background: #EEF2FF; color: #4F46E5; }
+.icon-sky { background: #E0F2FE; color: #0369A1; }
+.icon-amber { background: var(--warning-soft); color: var(--warning); }
+.icon-accent { background: var(--accent); color: #FFFFFF; box-shadow: 0 4px 10px -4px rgba(79, 70, 229, 0.6); }
+/* денежная плитка «Without the floor» — акцентная: индиговая рамка и мягкий градиент */
+.stat.accent { border-color: #C7D2FE; background: linear-gradient(135deg, #EEF2FF 0%, #F5F3FF 45%, #FFFFFF 100%); }
+.stat.accent:hover { border-color: #A5B4FC; }
+.stat.accent .stat-value { color: var(--accent-text); }
+.stat.accent .stat-sub { color: #6366F1; }
 ul.explain { list-style: none; padding: 0; margin: 0 0 var(--space-3); color: var(--text-2); font-size: var(--font-size-sm); }
 ul.explain li { padding: 2px 0; }
 .periods { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; margin: var(--space-2) 0 0; }
@@ -654,3 +669,22 @@ p.connect-row label { display: inline-flex; align-items: center; gap: var(--spac
 /* «на момент» в предпросмотре стратегии — в две строки (шаг 79) */
 td.as-of { min-width: 120px; max-width: 160px; }
 td.as-of .when { white-space: normal; }
+
+/* шаг 81: аккаунты на экране тени — карточками: аккаунт, режим записи пилюлей покрупнее, включение боя */
+section.account-modes { display: flex; flex-direction: column; gap: var(--space-3); }
+.account-mode {
+  display: grid; grid-template-columns: minmax(220px, 1.1fr) minmax(200px, 0.9fr) minmax(280px, 1.4fr); gap: var(--space-3) var(--space-5);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05); transition: box-shadow 150ms ease, border-color 150ms ease;
+}
+.account-mode:hover { border-color: #D1D5DB; box-shadow: 0 6px 16px -8px rgba(16, 24, 40, 0.16); }
+.am-label { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); margin-bottom: var(--space-2); }
+.am-name { font-size: 15px; font-weight: var(--weight-heading); color: var(--text); word-break: break-word; }
+.am-account .note, .am-mode .note { margin-top: var(--space-1); }
+.am-mode .badge, .am-action > .badge { font-size: 13px; padding: 4px 12px; }
+.am-action .live-card { max-width: none; }
+p.notice.live-blocked { margin: 0; }
+@media (max-width: 960px) { .account-mode { grid-template-columns: 1fr; } }
+.live-row { display: flex; gap: var(--space-2); align-items: center; }
+.live-row input { flex: 1 1 auto; min-width: 0; }
+.live-row button { flex: none; white-space: nowrap; }
