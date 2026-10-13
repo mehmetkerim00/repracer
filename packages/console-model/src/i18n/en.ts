@@ -866,6 +866,8 @@ export const en = {
       },
     },
     shadow: {
+      /** Шаг 82: подпись графика в hero тени */
+      chartTitle: 'Decisions per day',
       stats: { decisions: 'Decisions', changes: 'Price would change', held: 'Writes held', savings: 'Without the floor', notForecast: 'not a forecast' },
       title: 'Shadow mode',
       intro: 'The channel is connected and the engine runs completely — snapshots, checks, strategy, bounds, explanation. Nothing is written to the channel: every change below was held.',

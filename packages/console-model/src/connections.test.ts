@@ -114,7 +114,7 @@ test('Р-190: every eBay account and the eBay channel card say in words what liv
       { id: 'w', title: 't', description: 'd', tenantId: 't', now: NOW, accounts: [], viewer: { membershipId: 'membership-owner', role: 'OWNER' }, state: {} as never },
       { summary: { since: NOW, until: NOW, decisions: 0, changes: 0, floorHeld: 0, ceilingHeld: 0, heldWrites: 0, heldPriceWrites: 0, heldQuantityWrites: 0,
         wouldSpendBudget: 0, wouldSpendUnconfirmed: 0, floorSavings: [], floorSavingsHolds: 0 } as never,
-        rows: [], total: 0, accounts: [account('ebay', 'EBAY'), account('amazon', 'AMAZON')], properties: [], digests: [] },
+        rows: [], total: 0, accounts: [account('ebay', 'EBAY'), account('amazon', 'AMAZON')], properties: [], digests: [], decisionsByHour: [] },
       { offset: 0, limit: 20 } as never, m, 7);
     assert.deepEqual(shadow.accounts.map((a) => [a.channelAccountId, a.channelLimitText]), [['ebay', expected[locale]], ['amazon', null]], 'the shadow screen says it before the live button');
   }

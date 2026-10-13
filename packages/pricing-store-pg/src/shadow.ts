@@ -109,6 +109,11 @@ export interface ShadowPage {
   /** Р-174: последние дайджесты с отметкой доставки — «отчёт, который никто не получил, не отчёт» */
   digests: Array<{ periodStart: Instant; periodEnd: Instant; decisions: number; heldWrites: number;
     floorSavings: Array<{ currency: string; minor: number }>; deliveredAt: Instant | null; deliveryKind: string | null }>;
+  /**
+   * Шаг 82: решения тени окна отчёта по часам UTC — для графика «решения по дням». Сутки складывает модель экрана в поясе продавца
+   * (тот же пояс, что у всех времён экрана, K4); часы, а не сутки, — чтобы граница суток не зависела от пояса сеанса базы
+   */
+  decisionsByHour: Array<{ hour: Instant; decisions: number }>;
 }
 
 export interface ShadowModeChange {
@@ -166,7 +171,7 @@ export class PgShadowStore {
     }
     const since = new Date(Date.parse(now) - sinceDays * 86_400_000).toISOString();
     return inTenant(this.pools.adminPool, tenantId, async (tx) => {
-      const [decisions, held, list, accounts, savings, properties, digests, unconfirmed] = await Promise.all([
+      const [decisions, held, list, accounts, savings, properties, digests, unconfirmed, byHour] = await Promise.all([
         // Решения тени: считает база, и только по окну отчёта [Р-154]
         tx.query(
           /**
@@ -245,6 +250,12 @@ export class PgShadowStore {
              FROM tenant_data.shadow_digest WHERE tenant_id = $1 ORDER BY period_start DESC LIMIT 8`, [tenantId]),
         // Р-188: «потратило бы» при неподтверждённой границе суток — приблизительно; окно — то же, что у счётчиков экрана
         tx.query(`SELECT platform.shadow_would_spend_unconfirmed($1, $2::timestamptz, $3::timestamptz) AS n`, [tenantId, since, now]),
+        // Шаг 82: те же решения, что у счётчика выше (то же условие и окно), — по часам UTC для графика экрана
+        tx.query(
+          `SELECT to_char(date_trunc('hour', d.decided_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD"T"HH24:00:00"Z"') AS hour, count(*)::int AS decisions
+             FROM channel_data.price_decision d
+            WHERE d.tenant_id = $1 AND d.shadow AND d.decided_at >= $2
+            GROUP BY 1 ORDER BY 1`, [tenantId, since]),
       ]);
       const d = decisions.rows[0] ?? {};
       const h = held.rows[0] ?? {};
@@ -283,6 +294,7 @@ export class PgShadowStore {
           decisions: num(r.decisions), heldWrites: num(r.held_writes), floorSavings: moneyList(r.floor_savings),
           deliveredAt: (r.delivered_at as Instant | null) ?? null, deliveryKind: (r.delivery_kind as string | null) ?? null,
         })),
+        decisionsByHour: byHour.rows.map((r) => ({ hour: r.hour as Instant, decisions: num(r.decisions) })),
       };
     });
   }

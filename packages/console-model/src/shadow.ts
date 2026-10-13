@@ -81,6 +81,8 @@ export interface ShadowView {
   anyShadow: boolean;
   summary: ShadowSummary;
   summaryLines: string[];
+  /** Шаг 82: график hero — решения тени по суткам в поясе продавца, последние `days` суток окна (последние — сегодня, неполные) */
+  chart: ShadowChartView;
   accounts: ShadowAccountView[];
   /** Р-172: ревизия свойств витрин аккаунтов — она же объясняет, почему бой может быть закрыт */
   properties: MarketplacePropertyView[];
@@ -102,6 +104,41 @@ export interface ShadowView {
   mfaHint: string;
   cannot: string;
   gaps: Gap[];
+}
+
+export interface ShadowChartView {
+  title: string;
+  points: Array<{ day: string; label: string; value: number; title: string }>;
+}
+
+/**
+ * Шаг 82: сутки — в поясе продавца, тем же поясом, что у всех времён экрана (K4). Часы базы складываются в местные сутки; ряд —
+ * ровно `days` суток, заканчивая сегодняшними, пустые сутки — нулём (провал на графике честнее, чем пропущенный день). Пояс, которого не
+ * знает Intl среды, — UTC, как у `messagesFor`
+ */
+export function shadowChart(byHour: ShadowPage['decisionsByHour'], until: string, days: number, m: Messages, timeZone: string | null | undefined): ShadowChartView {
+  const make = (tz: string) => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' });
+  let fmt: Intl.DateTimeFormat;
+  try { fmt = make(timeZone || 'UTC'); } catch (error) { if (!(error instanceof RangeError)) throw error; fmt = make('UTC'); }
+  const localDay = (iso: string) => fmt.format(new Date(Date.parse(iso)));
+  const last = localDay(until);
+  const [y, mo, d] = last.split('-').map(Number) as [number, number, number];
+  const dayKeys = Array.from({ length: days }, (_, i) => new Date(Date.UTC(y, mo - 1, d - (days - 1 - i))).toISOString().slice(0, 10));
+  const totals = new Map<string, number>(dayKeys.map((k) => [k, 0]));
+  for (const b of byHour) {
+    const k = localDay(b.hour);
+    if (totals.has(k)) totals.set(k, (totals.get(k) ?? 0) + b.decisions);
+  }
+  const intl = m.locale === 'de' ? 'de-DE' : 'en-US';
+  const label = new Intl.DateTimeFormat(intl, days <= 7 ? { weekday: 'short', timeZone: 'UTC' } : { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  const nf = new Intl.NumberFormat(intl);
+  return {
+    title: m.ui.shadow.chartTitle,
+    points: dayKeys.map((k) => {
+      const value = totals.get(k) ?? 0;
+      return { day: k, label: label.format(new Date(`${k}T00:00:00Z`)), value, title: `${m.date(k)} · ${nf.format(value)}` };
+    }),
+  };
 }
 
 const money = (m: Messages, minor: number | null, currency: string | null): string =>
@@ -248,7 +285,7 @@ function digestPreview(world: StandWorld, page: ShadowPage, accounts: readonly S
   return { title: m.ui.shadow.digest.previewTitle, synthetic: m.ui.shadow.digest.previewSynthetic, subject: letter.subject, text: letter.lines.join('\n') };
 }
 
-export function shadowView(world: StandWorld, page: ShadowPage, query: ListQuery, m: Messages, days: number): ShadowView {
+export function shadowView(world: StandWorld, page: ShadowPage, query: ListQuery, m: Messages, days: number, timeZone?: string | null): ShadowView {
   const t = m.ui.shadow;
   const accounts = page.accounts.map((a) => accountView(a, world, m));
   return {
@@ -278,6 +315,7 @@ export function shadowView(world: StandWorld, page: ShadowPage, query: ListQuery
      */
     anyShadow: accounts.some((a) => a.writeMode === 'SHADOW' && a.authStatus === 'ACTIVE'),
     summary: page.summary, summaryLines: shadowSummaryLines(page.summary, m),
+    chart: shadowChart(page.decisionsByHour, page.summary.until, days, m, timeZone),
     digestPreview: world.demo === true && days === 7 ? digestPreview(world, page, accounts, m) : null,
     accounts,
     rows: page.rows.map((r): ShadowWriteView => ({

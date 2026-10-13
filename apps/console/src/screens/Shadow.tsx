@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { ListQuery, ShadowView } from '@repracer/console-model';
 import { requestJson, useResource, worldPath } from '../api.ts';
 import { Badge, ErrorBox, errorText, Gaps, href, Load, Pager, useMessages, When, Intro } from '../components.tsx';
-import { Icon } from '../icons.tsx';
+import { ShadowHero } from './ShadowHero.tsx';
 
 /**
  * Р-169…Р-171 (шаг 41): экран «Теневой режим». Канал подключён, движок работает целиком, в канал не уходит ничего.
@@ -25,8 +25,6 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
     }).then(() => { setError(null); retry(); }).catch((e: unknown) => setError(errorText(e, m)));
 
   const c = m.ui.shadow.columns;
-  const st = m.ui.shadow.stats;
-  const n = (v: number) => new Intl.NumberFormat(m.locale === 'de' ? 'de-DE' : 'en-US').format(v);
   return (
     <Load shape="stats" resource={view} retry={retry}>
       {(v) => (
@@ -39,35 +37,33 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
           {v.accounts.length === 0 ? (
             <section className="card"><p className="muted empty">{m.ui.shadow.noAccounts} <a href={href(worldId, 'connections')}>{m.ui.app.connectChannel}</a></p></section>
           ) : <>
-          <section className="card">
-            <div className="periods">{v.periods.map((p) => (
-              <button key={p.days} type="button" disabled={p.active}
-                onClick={() => { setDays(p.days); setQuery({ ...query, offset: 0 }); }}>{p.label}</button>
-            ))}</div>
-            {/* Шаг 77: витрина показа — числа сводки карточками; строки сводки целиком — вторичным текстом под ними */}
-            {v.anyShadow ? (
+          {/* Шаг 82: окно отчёта — переключатель в шапке hero; сводка — hero на чернилах, строки сводки — светлой карточкой под ним */}
+          {(() => {
+            const periods = (
+              <div className="periods">{v.periods.map((p) => (
+                <button key={p.days} type="button" disabled={p.active}
+                  onClick={() => { setDays(p.days); setQuery({ ...query, offset: 0 }); }}>{p.label}</button>
+              ))}</div>
+            );
+            // Шаг 79 (ревью): строку «решений столько-то» уже сказали метрики — под ними её не повторяем
+            const lines = v.summaryLines.filter((line) => line !== m.ui.shadow.summary.decisions(v.summary.decisions, v.summary.changes));
+            return v.anyShadow ? (
               <>
-                {/* Шаг 81: плитки — подпись сверху, иконка в цветном кружке, крупное число; денежная плитка — акцентная */}
-                <div className="stats">
-                  <div className="stat"><div className="stat-top"><div className="stat-label">{st.decisions}</div><span className="stat-icon icon-indigo"><Icon name="activity" size={18} /></span></div><div className="stat-value">{n(v.summary.decisions)}</div></div>
-                  <div className="stat"><div className="stat-top"><div className="stat-label">{st.changes}</div><span className="stat-icon icon-sky"><Icon name="swap" size={18} /></span></div><div className="stat-value">{n(v.summary.changes)}</div></div>
-                  <div className="stat"><div className="stat-top"><div className="stat-label">{st.held}</div><span className="stat-icon icon-amber"><Icon name="shieldCheck" size={18} /></span></div><div className="stat-value">{n(v.summary.heldWrites)}</div></div>
-                  {v.summary.floorSavings.map((f) => (
-                    <div key={f.currency} className="stat accent">
-                      <div className="stat-top"><div className="stat-label">{st.savings}</div><span className="stat-icon icon-accent"><Icon name="banknote" size={18} /></span></div>
-                      <div className="stat-value">{m.money(f.minor, f.currency)}</div>
-                      <div className="stat-sub">{st.notForecast}</div>
-                    </div>
-                  ))}
-                </div>
-                {/* Шаг 79 (ревью): строку «решений столько-то» уже сказали плитки выше — под ними её не повторяем */}
-                <ul className="explain">{v.summaryLines.filter((line) => line !== m.ui.shadow.summary.decisions(v.summary.decisions, v.summary.changes))
-                  .map((line) => <li key={line}>{line}</li>)}</ul>
+                <ShadowHero worldId={worldId} view={v} periods={periods} />
+                <section className="card ledger-lines">
+                  <ul className="explain">{lines.map((line) => <li key={line}>{line}</li>)}</ul>
+                  {/* «Не прогноз выручки» уже сказано строкой о деньгах — второй раз под ней не повторяем */}
+                  {v.summary.floorSavings.length > 0 ? null : <p className="note">{v.cannot}</p>}
+                </section>
               </>
-            ) : <p>{v.none}</p>}
-            {/* «Не прогноз выручки» уже сказано строкой о деньгах — второй раз под ней не повторяем */}
-            {v.summary.floorSavings.length > 0 ? null : <p className="note">{v.cannot}</p>}
-          </section>
+            ) : (
+              <section className="card">
+                {periods}
+                <p>{v.none}</p>
+                {v.summary.floorSavings.length > 0 ? null : <p className="note">{v.cannot}</p>}
+              </section>
+            );
+          })()}
 
           {/* Шаг 81: аккаунты — карточками; подписи бывших колонок («Channel account», «Write mode», «Live writes») — у полей карточки */}
           <section className="account-modes">

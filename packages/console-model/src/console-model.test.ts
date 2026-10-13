@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ALL_REASON_CODES, COMPETITOR_RULE_DERIVED_KEYS, ENGINE_REASON_CODES, GATE_REASON_CODES, REASON_PARAMS, SANITY_NOTE_CODES, SANITY_NOTE_PARAMS, SANITY_WARNING_CODES, type ParamSchema, type ParamSpec } from '@repracer/pricing-model';
-import { describe, explainabilityCatalogue, FEED_PAGE_MAX, LOCALES, messagesFor, parseAmountInput, parseFeedQuery, parsePercentInput, REASON_LIMITS } from './index.ts';
+import { describe, explainabilityCatalogue, FEED_PAGE_MAX, LOCALES, messagesFor, parseAmountInput, parseFeedQuery, parsePercentInput, REASON_LIMITS, shadowChart } from './index.ts';
 
 /** Р-71, Р-72: словарь DE/EN полон, суммы — только с валютой, значения канала вне слепка помечаются */
 
@@ -462,4 +462,24 @@ test('step 73: a raise after a cost update, a step toward the floor and its appr
   const approvedStep = { code: 'APPROVED', params: { finalMinor: 1100, floorMinor: 1524, ceilingMinor: 3000, currency: 'EUR' } } as const;
   assert.equal(describe(approvedStep, en).text, 'Step to €11.00 toward the floor €15.24 approved; the price is still below the floor.');
   assert.equal(describe({ ...approvedStep, params: { ...approvedStep.params, finalMinor: 1600 } }, en).text, 'Price €16.00 approved within €15.24–€30.00.');
+});
+
+test('step 82: the shadow chart folds hourly decisions into the seller\'s own days — the same zone as every time on the screen', () => {
+  const en = messagesFor('en');
+  const until = '2026-10-13T20:00:00Z';
+  const byHour = [
+    // 03:00 UTC on Oct 13 is still Oct 12 in Los Angeles (UTC−7); 08:00 UTC is Oct 13 there
+    { hour: '2026-10-13T03:00:00Z', decisions: 5 }, { hour: '2026-10-13T08:00:00Z', decisions: 2 },
+    // Oct 6 in Los Angeles — before the seven days that end today (Oct 7…13): not on the chart
+    { hour: '2026-10-06T20:00:00Z', decisions: 9 },
+  ];
+  const la = shadowChart(byHour, until, 7, en, 'America/Los_Angeles');
+  assert.deepEqual(la.points.map((p) => [p.day, p.value]),
+    [['2026-10-07', 0], ['2026-10-08', 0], ['2026-10-09', 0], ['2026-10-10', 0], ['2026-10-11', 0], ['2026-10-12', 5], ['2026-10-13', 2]],
+    'seven days ending today, empty days as zero, hours in the seller\'s days');
+  assert.deepEqual([la.points[6]!.label, la.title], ['Tue', 'Decisions per day']);
+  // Control: the same hours in UTC fall into other days — the zone is what moves them, not the order of the rows
+  assert.deepEqual(shadowChart(byHour, until, 7, en, null).points.map((p) => p.value), [0, 0, 0, 0, 0, 0, 7]);
+  assert.equal(shadowChart(byHour, until, 30, en, 'Mars/Olympus_Mons').points.length, 30, 'an unknown zone falls back to UTC and does not break the screen');
+  assert.deepEqual([shadowChart([], until, 7, messagesFor('de'), 'Europe/Berlin').points[6]!.label, shadowChart([], until, 30, messagesFor('de'), 'Europe/Berlin').points[29]!.label], ['Di', '13. Okt.']);
 });

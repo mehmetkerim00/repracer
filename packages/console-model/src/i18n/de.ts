@@ -842,6 +842,8 @@ export const de: Messages = {
       },
     },
     shadow: {
+      /** Шаг 82: подпись графика в hero тени */
+      chartTitle: 'Entscheidungen pro Tag',
       stats: { decisions: 'Entscheidungen', changes: 'Preis würde sich ändern', held: 'Zurückgehaltene Schreibvorgänge', savings: 'Ohne die Untergrenze', notForecast: 'keine Prognose' },
       title: 'Schattenmodus',
       intro: 'Der Kanal ist verbunden und die Preisautomatik läuft vollständig — Snapshots, Prüfungen, Strategie, Grenzen, Begründung. In den Kanal wird nichts geschrieben: jede Änderung unten wurde zurückgehalten.',

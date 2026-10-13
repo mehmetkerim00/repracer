@@ -689,7 +689,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           const probe = await live.shadow.shadowPage(world.tenantId, live.clock.iso(), { offset: 0, limit: 1, sinceDays: days });
           const clamped = { ...query, offset: clampOffset(query, probe.total) };
           const page = await live.shadow.shadowPage(world.tenantId, live.clock.iso(), { ...clamped, sinceDays: days });
-          return ok(shadowView(world, page, clamped, m, days));
+          return ok(shadowView(world, page, clamped, m, days, display?.timeZone ?? null));
         }
         // Шаг 35 [Р-153]: остатки — страницей по товарам, сводка агрегатом, расхождения — отдельным списком
         case 'stock': {
