@@ -230,3 +230,63 @@ test('step 85: the console works from a 375px phone to a wide monitor — no pag
   await b.setViewport(1440, 900);
   assert.deepEqual(b.errors().slice(before), [], 'the console page threw or logged errors at some width');
 });
+
+/**
+ * Шаг 86: пункт меню и заголовок его страницы — одни и те же слова (ревью 79: «Why this price» вело на «Price decisions»,
+ * «Dangerous changes» — на «What your bounds prevented»). Правило [Р-146] — на каждом пункте навигации, на обоих языках
+ */
+/**
+ * Шаг 86: содержимое не выступает за свою рамку — карточку, плитку, кнопку, пилюлю, пункт меню, панель фильтров (немецкий проход нашёл
+ * таблицы в карточках тени, выступавшие за рамку на 7px; немецкие тексты длиннее английских). Листаемое внутри своей рамки — не выступ
+ */
+const OUT_OF_BOX = `(() => {
+  const visible = (el) => el.checkVisibility({ visibilityProperty: true }) && el.getBoundingClientRect().width > 0;
+  const scrollerBetween = (el, stop) => { for (let p = el.parentElement; p && p !== stop; p = p.parentElement) { const o = getComputedStyle(p).overflowX; if (o === 'auto' || o === 'scroll' || o === 'hidden') return true; } return false; };
+  const out = [];
+  for (const box of document.querySelectorAll('.card, .stats > *, button, .badge, .nav-group a, .toolbar, .verdict, .notice')) {
+    if (!visible(box)) continue;
+    const bb = box.getBoundingClientRect();
+    for (const el of box.querySelectorAll('*')) {
+      if (!visible(el) || scrollerBetween(el, box)) continue;
+      const b = el.getBoundingClientRect();
+      if (b.right > bb.right + 1.5 || b.left < bb.left - 1.5) { out.push(el.tagName.toLowerCase() + ' «' + (el.textContent ?? '').trim().slice(0, 40) + '» sticks out of ' + box.tagName.toLowerCase() + '.' + String(box.className) + ' by ' + Math.round(Math.max(b.right - bb.right, bb.left - b.left)) + 'px'); break; }
+    }
+  }
+  return out.slice(0, 5);
+})()`;
+
+test('step 86: every menu item and the heading of its page are the same words — English and German', async () => {
+  const b = browser!;
+  const de = messagesFor('de');
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  for (const m of [en, de]) {
+    if (m === de) {
+      await b.click(en.ui.app.languages.de, '.topbar .lang button');
+      await b.waitText(de.ui.app.screens.stock);
+    }
+    const links = await b.evaluate<Array<{ text: string; href: string }>>(
+      `[...document.querySelectorAll('.nav-group a')].map((a) => ({ text: a.textContent.trim(), href: a.getAttribute('href') }))`);
+    assert.ok(links.length >= 12, `${m.locale}: the navigation shows its items — ${links.length}`);
+    assert.ok(links.some((l) => l.text === m.ui.app.screens.decisions), `${m.locale}: the navigation speaks the screen language`);
+    const mismatches: string[] = [];
+    for (const l of links) {
+      await b.evaluate(`(location.hash = ${JSON.stringify(l.href)}, true)`);
+      await settled(b, `${m.locale} ${l.text}`);
+      const heading = await b.evaluate<string>(`(document.querySelector('.world-content h2') ?? document.querySelector('.world-content h3'))?.childNodes[0]?.textContent?.trim() ?? ''`);
+      if (heading !== l.text) mismatches.push(`«${l.text}» → «${heading}»`);
+      assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${m.locale} ${l.text}: content sticks out of its frame`);
+    }
+    assert.deepEqual(mismatches, [], `${m.locale}: a menu item leads to a page with another heading`);
+  }
+  // Положительный контроль [Р-94]: таблица, растянутая за поля карточки, как была до шага 86, — выступ, и правило его видит
+  await b.evaluate(`(document.querySelector('.world-content').insertAdjacentHTML('beforeend', '<section class="card" id="out-control"><table style="margin: 0 -24px; width: calc(100% + 48px)"><tbody><tr><td>control</td></tr></tbody></table></section>'), true)`);
+  assert.match((await b.evaluate<string[]>(OUT_OF_BOX)).join(' | '), /sticks out of section\.card by 7px/);
+  await b.evaluate(`(document.getElementById('out-control').remove(), true)`);
+  await b.click(de.ui.app.languages.en, '.topbar .lang button');
+});

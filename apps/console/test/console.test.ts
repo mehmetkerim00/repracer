@@ -746,9 +746,9 @@ test('step 24, Р-123: a discount is checked before it is announced; a prior pri
 
   // Экран на обоих языках
   const en = await html('/src/screens/Compliance.tsx', 'ComplianceScreenView', { worldId: id, initial: report });
-  for (const text of ['Omnibus: prior price of a discount', 'Announced discounts', 'What this module cannot check', 'Download CSV', 'This module does not guarantee compliance', 'How much price history we see', 'We see ']) assert.ok(en.includes(text), text);
+  for (const text of ['<h2>Omnibus</h2>', 'Announced discounts', 'What this module cannot check', 'Download CSV', 'This module does not guarantee compliance', 'How much price history we see', 'We see ']) assert.ok(en.includes(text), text);
   const de = await html('/src/screens/Compliance.tsx', 'ComplianceScreenView', { worldId: id, initial: await get<ComplianceView>(await login('OWNER', 'de'), api(id, 'compliance')) }, 'de');
-  for (const text of ['Omnibus: vorheriger Preis eines Rabatts', 'Angekündigte Rabatte', 'Was dieses Modul nicht prüfen kann', 'Dieses Modul garantiert keine Rechtskonformität', 'Wir sehen ']) assert.ok(de.includes(text), text);
+  for (const text of ['<h2>Omnibus</h2>', 'Angekündigte Rabatte', 'Was dieses Modul nicht prüfen kann', 'Dieses Modul garantiert keine Rechtskonformität', 'Wir sehen ']) assert.ok(de.includes(text), text);
 });
 
 /**

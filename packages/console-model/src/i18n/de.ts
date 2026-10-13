@@ -9,11 +9,11 @@ const noValue = 'kein Wert';
 const opt = (f: Fmt, key: string, render: () => string): string => (f.has(key) ? render() : '');
 
 const titles: Record<AnyReasonCode, string> = {
-  INVALID_AMOUNT: 'Ungültiger Betrag im Snapshot', CURRENCY_MISMATCH: 'Fremdwährung im Snapshot', PRICE_BASIS_MISMATCH: 'Brutto und netto verwechselt',
-  INCONSISTENT_SNAPSHOT: 'Widersprüchlicher Snapshot', SNAPSHOT_FROM_FUTURE: 'Snapshot aus der Zukunft', SNAPSHOT_TOO_OLD: 'Veralteter Snapshot', OUT_OF_ORDER: 'Snapshot außer der Reihe',
+  INVALID_AMOUNT: 'Ungültiger Betrag in den Wettbewerbsdaten', CURRENCY_MISMATCH: 'Fremdwährung in den Wettbewerbsdaten', PRICE_BASIS_MISMATCH: 'Brutto und netto verwechselt',
+  INCONSISTENT_SNAPSHOT: 'Widersprüchliche Wettbewerbsdaten', SNAPSHOT_FROM_FUTURE: 'Wettbewerbsdaten aus der Zukunft', SNAPSHOT_TOO_OLD: 'Veraltete Wettbewerbsdaten', OUT_OF_ORDER: 'Wettbewerbsdaten außer der Reihe',
   CHANNEL_HALTED: 'Preise aus Wettbewerbsdaten angehalten', CHANNEL_MASS_SHIFT: 'Massenhafte Preisverschiebung — Storefront angehalten', UNIT_SCALE_X100: 'Preis genau ×100',
   UNIT_SCALE_X0_01: 'Preis genau ×0,01', PRICE_BELOW_COST_ANCHOR: 'Wettbewerbspreis unter Stückkosten', PRICE_ABOVE_COST_ANCHOR: 'Wettbewerbspreis weit über Stückkosten',
-  SNAPSHOT_INTERNAL_OUTLIER: 'Ausreißer im Snapshot', CROSS_CHANNEL_MISMATCH: 'Abweichung zu anderem Kanal', OUTSIDE_HISTORY_BAND: 'Außerhalb der Preishistorie',
+  SNAPSHOT_INTERNAL_OUTLIER: 'Ausreißer in den Wettbewerbsdaten', CROSS_CHANNEL_MISMATCH: 'Abweichung zu anderem Kanal', OUTSIDE_HISTORY_BAND: 'Außerhalb der Preishistorie',
   NO_PLAUSIBILITY_ANCHOR: 'Keine Vergleichsbasis', OWN_PRICE_DEVIATION: 'Weit von unserem Preis', SELF_OFFER_DIVERGENCE: 'Unser Preis im Kanal weicht ab',
   INTERNAL_OUTLIER_IGNORED: 'Ausreißer nicht verwendet', MARKET_SHIFT_DISPERSED: 'Marktweite Preisbewegung', MARKET_SHIFT_SINGLE_SELLER: 'Ein Verkäufer hat Preise verschoben',
   CROSS_CHANNEL_FX_UNAVAILABLE: 'Kein Wechselkurs für Kanalvergleich',
@@ -51,42 +51,42 @@ const raiseAfter = (f: Fmt): string => RAISE_AFTER_TEXT[String(f.get('after') ??
 const deviation = (f: Fmt) => opt(f, 'deviationBp', () => ` um ${f.bp('deviationBp')}`);
 
 const reasons: Record<AnyReasonCode, Template> = {
-  INVALID_AMOUNT: (f) => `Snapshot abgelehnt: ungültiger Betrag bei ${f.value('field')}${opt(f, 'offerRank', () => ` von Angebot Nr. ${f.count('offerRank')}`)}${opt(f, 'valueMinor', () => `: ${f.money('valueMinor')}`)}.`,
-  CURRENCY_MISMATCH: (f) => `Snapshot abgelehnt: ${f.value('field')} ist in ${f.raw('actual')}, das Angebot ist in ${f.raw('expected')} bepreist.`,
-  PRICE_BASIS_MISMATCH: (f) => `Snapshot abgelehnt: ${f.value('field')} ist ${f.value('actual')}, die Preise dieser Storefront sind ${f.value('expected')}.`,
+  INVALID_AMOUNT: (f) => `Wettbewerbsdaten abgelehnt: ungültiger Betrag bei ${f.value('field')}${opt(f, 'offerRank', () => ` von Angebot Nr. ${f.count('offerRank')}`)}${opt(f, 'valueMinor', () => `: ${f.money('valueMinor')}`)}.`,
+  CURRENCY_MISMATCH: (f) => `Wettbewerbsdaten abgelehnt: ${f.value('field')} ist in ${f.raw('actual')}, das Angebot ist in ${f.raw('expected')} bepreist.`,
+  PRICE_BASIS_MISMATCH: (f) => `Wettbewerbsdaten abgelehnt: ${f.value('field')} ist ${f.value('actual')}, die Preise dieser Storefront sind ${f.value('expected')}.`,
   INCONSISTENT_SNAPSHOT: (f) => {
     switch (f.get('inconsistency')) {
       case 'OFFER_TOTAL_NOT_PRICE_PLUS_SHIPPING':
-        return `Snapshot abgelehnt: Angebot Nr. ${f.count('offerRank')} kostet insgesamt ${f.money('totalMinor')}, Preis ${f.money('offerPriceMinor')} plus Versand ${f.money('shippingMinor')} ergeben etwas anderes.`;
+        return `Wettbewerbsdaten abgelehnt: Angebot Nr. ${f.count('offerRank')} kostet insgesamt ${f.money('totalMinor')}, Preis ${f.money('offerPriceMinor')} plus Versand ${f.money('shippingMinor')} ergeben etwas anderes.`;
       case 'MORE_OFFERS_THAN_TOP_N':
-        return `Snapshot abgelehnt: er enthält ${f.count('offers')} Angebote, obwohl der Kanal die besten ${f.count('topN')} zusagt.`;
+        return `Wettbewerbsdaten abgelehnt: sie enthalten ${f.count('offers')} Angebote, obwohl der Kanal die besten ${f.count('topN')} zusagt.`;
       default:
-        return `Snapshot abgelehnt: die Buy Box ${f.money('buyboxMinor')} weicht vom Angebot auf Rang 1 ${f.money('rankOneMinor')} ab.`;
+        return `Wettbewerbsdaten abgelehnt: die Buy Box ${f.money('buyboxMinor')} weicht vom Angebot auf Rang 1 ${f.money('rankOneMinor')} ab.`;
     }
   },
-  SNAPSHOT_FROM_FUTURE: (f) => `Snapshot abgelehnt: ${f.seconds('skewSeconds')} in der Zukunft beobachtet (erlaubt ${f.seconds('maxSkewSeconds')}).`,
-  SNAPSHOT_TOO_OLD: (f) => `Snapshot abgelehnt: die Daten sind ${f.seconds('ageSeconds')} alt (Grenze ${f.seconds('maxAgeSeconds')}).`,
-  OUT_OF_ORDER: (f) => `Snapshot übersprungen: ein neuerer Snapshot vom ${f.when('lastAcceptedAt')} wird bereits verwendet.`,
+  SNAPSHOT_FROM_FUTURE: (f) => `Wettbewerbsdaten abgelehnt: ${f.seconds('skewSeconds')} in der Zukunft beobachtet (erlaubt ${f.seconds('maxSkewSeconds')}).`,
+  SNAPSHOT_TOO_OLD: (f) => `Wettbewerbsdaten abgelehnt: die Daten sind ${f.seconds('ageSeconds')} alt (Grenze ${f.seconds('maxAgeSeconds')}).`,
+  OUT_OF_ORDER: (f) => `Wettbewerbsdaten übersprungen: neuere Wettbewerbsdaten vom ${f.when('lastAcceptedAt')} werden bereits verwendet.`,
   CHANNEL_HALTED: (f) => {
     const since = opt(f, 'haltedAt', () => ` seit ${f.when('haltedAt')}`);
     const why = opt(f, 'haltReason', () => ` (${f.value('haltReason')})`);
     switch (f.get('stage')) {
-      case 'INPUT': return `Wettbewerbsdaten dieser Storefront sind angehalten${since}${why}; der Snapshot wird bis zur Freigabe nicht verwendet.`;
+      case 'INPUT': return `Wettbewerbsdaten dieser Storefront sind angehalten${since}${why}; sie werden bis zur Freigabe nicht verwendet.`;
       case 'GATE': return `Zurückgehalten: Preise aus Wettbewerbsdaten sind auf dieser Storefront angehalten${since}${why}.`;
       case 'DISPATCH': return 'Nicht gesendet: die Storefront wurde vor dem Versand für Preise aus Wettbewerbsdaten angehalten.';
       default: return 'Von der Datenbank abgelehnt: die Storefront ist für Preise aus Wettbewerbsdaten angehalten.';
     }
   },
   CHANNEL_MASS_SHIFT: (f) => `Preise aus Wettbewerbsdaten angehalten: ${f.count('sameDirection')} von ${f.count('products')} Produkten haben sich innerhalb von ${f.minutes('windowMinutes')} fast um denselben Faktor ${f.ratio('medianFactor')} ${f.value('direction')} bewegt (Streuung ${f.ratio('spread')}) — das sieht nach einem Einlesefehler aus.`,
-  UNIT_SCALE_X100: (f) => `Snapshot abgelehnt: ${f.value('field')} ${f.money('valueMinor')} ist genau das 100-Fache der Referenz ${f.money('referenceMinor')} (${f.value('anchor')}) — vermutlich ein Einheitenfehler.`,
-  UNIT_SCALE_X0_01: (f) => `Snapshot abgelehnt: ${f.value('field')} ${f.money('valueMinor')} ist genau 1/100 der Referenz ${f.money('referenceMinor')} (${f.value('anchor')}) — vermutlich ein Einheitenfehler.`,
-  PRICE_BELOW_COST_ANCHOR: (f) => `Snapshot abgelehnt: ${f.value('field')} ${f.money('valueMinor')} liegt unter ${f.ratio('limit')} der Stückkosten ${f.money('costMinor')} — unplausibel.`,
-  PRICE_ABOVE_COST_ANCHOR: (f) => `Snapshot abgelehnt: ${f.value('field')} ${f.money('valueMinor')} liegt über dem ${f.ratio('limit')} der Stückkosten ${f.money('costMinor')} — unplausibel.`,
-  SNAPSHOT_INTERNAL_OUTLIER: (f) => `Snapshot abgelehnt: ein Angebot zu ${f.money('valueMinor')} liegt mehr als ${f.ratio('outlierFactor')} vom Median ${f.money('medianMinor')} aus ${f.count('offers')} Angeboten entfernt.`,
-  CROSS_CHANNEL_MISMATCH: (f) => `Snapshot abgelehnt: ${f.value('field')} ${f.money('valueMinor')} weicht um ${f.ratio('ratio')} von derselben EAN auf ${f.list('referenceStorefronts')} ab (${f.money('referenceMinor')}, Grenze ${f.ratio('limit')})${opt(f, 'fxRateDate', () => `, umgerechnet zum EZB-Kurs vom ${f.date('fxRateDate')}`)}.`,
-  OUTSIDE_HISTORY_BAND: (f) => `Snapshot abgelehnt: ${f.value('field')} ${f.money('valueMinor')} liegt außerhalb von ${f.money('bandLowMinor')}–${f.money('bandHighMinor')} der letzten ${f.count('days')} Tage.`,
-  NO_PLAUSIBILITY_ANCHOR: (f) => `Snapshot nicht verwendet: keine Vergleichsbasis (${f.count('competitorOffers')} Wettbewerbsangebote, ${f.count('historyDays')} Tage Historie, Stückkosten ${f.get('costDeclared') ? 'hinterlegt' : 'fehlen'}). Hinterlegen Sie die Stückkosten — sie sind der wichtigste Anker.`,
-  OWN_PRICE_DEVIATION: (f) => `Hinweis: ${f.value('field')} ${f.money('valueMinor')} weicht um ${f.ratio('ratio')} von unserem Preis ${f.money('ourPriceMinor')} ab; der Snapshot wurde angenommen.`,
+  UNIT_SCALE_X100: (f) => `Wettbewerbsdaten abgelehnt: ${f.value('field')} ${f.money('valueMinor')} ist genau das 100-Fache der Referenz ${f.money('referenceMinor')} (${f.value('anchor')}) — vermutlich ein Einheitenfehler.`,
+  UNIT_SCALE_X0_01: (f) => `Wettbewerbsdaten abgelehnt: ${f.value('field')} ${f.money('valueMinor')} ist genau 1/100 der Referenz ${f.money('referenceMinor')} (${f.value('anchor')}) — vermutlich ein Einheitenfehler.`,
+  PRICE_BELOW_COST_ANCHOR: (f) => `Wettbewerbsdaten abgelehnt: ${f.value('field')} ${f.money('valueMinor')} liegt unter ${f.ratio('limit')} der Stückkosten ${f.money('costMinor')} — unplausibel.`,
+  PRICE_ABOVE_COST_ANCHOR: (f) => `Wettbewerbsdaten abgelehnt: ${f.value('field')} ${f.money('valueMinor')} liegt über dem ${f.ratio('limit')} der Stückkosten ${f.money('costMinor')} — unplausibel.`,
+  SNAPSHOT_INTERNAL_OUTLIER: (f) => `Wettbewerbsdaten abgelehnt: ein Angebot zu ${f.money('valueMinor')} liegt mehr als ${f.ratio('outlierFactor')} vom Median ${f.money('medianMinor')} aus ${f.count('offers')} Angeboten entfernt.`,
+  CROSS_CHANNEL_MISMATCH: (f) => `Wettbewerbsdaten abgelehnt: ${f.value('field')} ${f.money('valueMinor')} weicht um ${f.ratio('ratio')} von derselben EAN auf ${f.list('referenceStorefronts')} ab (${f.money('referenceMinor')}, Grenze ${f.ratio('limit')})${opt(f, 'fxRateDate', () => `, umgerechnet zum EZB-Kurs vom ${f.date('fxRateDate')}`)}.`,
+  OUTSIDE_HISTORY_BAND: (f) => `Wettbewerbsdaten abgelehnt: ${f.value('field')} ${f.money('valueMinor')} liegt außerhalb von ${f.money('bandLowMinor')}–${f.money('bandHighMinor')} der letzten ${f.count('days')} Tage.`,
+  NO_PLAUSIBILITY_ANCHOR: (f) => `Wettbewerbsdaten nicht verwendet: keine Vergleichsbasis (${f.count('competitorOffers')} Wettbewerbsangebote, ${f.count('historyDays')} Tage Historie, Stückkosten ${f.get('costDeclared') ? 'hinterlegt' : 'fehlen'}). Hinterlegen Sie die Stückkosten — sie sind der wichtigste Anker.`,
+  OWN_PRICE_DEVIATION: (f) => `Hinweis: ${f.value('field')} ${f.money('valueMinor')} weicht um ${f.ratio('ratio')} von unserem Preis ${f.money('ourPriceMinor')} ab; die Wettbewerbsdaten wurden angenommen.`,
   SELF_OFFER_DIVERGENCE: (f) => `Unser Angebot zeigt im Kanal ${f.money('valueMinor')}, unser Preis ist ${f.money('ourPriceMinor')} — ein Abweichungsfall wurde eröffnet.`,
   INTERNAL_OUTLIER_IGNORED: (f) => `Hinweis: ein Angebot zu ${f.money('valueMinor')} liegt weit vom Median ${f.money('medianMinor')}, die Strategie verwendet es aber nicht.`,
   MARKET_SHIFT_DISPERSED: (f) => `Marktereignis: ${f.count('sameDirection')} von ${f.count('products')} Produkten haben sich mit unterschiedlichen Faktoren ${f.value('direction')} bewegt (Streuung ${f.ratio('spread')}); die Preise arbeiten weiter.`,
@@ -151,7 +151,7 @@ const reasons: Record<AnyReasonCode, Template> = {
   BOUNDS_INVERTED: (f) => `Repricing nicht aktiviert: Ihr Mindestpreis ${f.money('minMinor')} liegt über Ihrem Höchstpreis ${f.money('maxMinor')}.`,
   BOUND_CURRENCY_MISMATCH: (f) => `Repricing nicht aktiviert: ${f.value('bound')} ist ${f.has('cause') ? f.value('cause') : 'widersprüchlich'}${opt(f, 'boundCurrency', () => ` (${f.raw('boundCurrency')} ${f.has('boundBasis') ? f.value('boundBasis') : ''})`)}; das Angebot ist ${f.raw('scopeCurrency')} ${f.value('scopeBasis')}.`,
   SCOPE_NOT_ENGINE: () => 'Repricing ist für dieses Angebot aus.',
-  NO_SCOPE_FOR_PRODUCT: () => 'Der Snapshot gehört zu keinem unserer Angebote mit Repricing.',
+  NO_SCOPE_FOR_PRODUCT: () => 'Die Wettbewerbsdaten gehören zu keinem unserer Angebote mit Repricing.',
   WRITE_BLOCKED_BY_BOUND_RECHECK: (f) => f.get('violated') === 'FLOOR_UNRESOLVABLE'
     ? `Nicht gesendet: beim Versand ließ sich die Untergrenze nicht neu berechnen — ${f.value('cause')}.`
     : `Nicht gesendet: beim Versand liegt ${f.money('amountMinor')} ${f.get('violated') === 'FLOOR' ? `unter der Untergrenze ${f.money('floorMinor')}${opt(f, 'marginFloorMinor', () => ` (Margenuntergrenze ${f.money('marginFloorMinor')} bei Mindestmarge ${f.bp('minMarginBp')}, neu berechnet aus aktuellen Kosten, Gebühr, Kurs und MwSt.)`)}` : `über der Obergrenze ${f.money('ceilingMinor')}`}.`,
@@ -193,7 +193,7 @@ const notes: Record<SanityNoteCode, Template> = {
   DISPERSED_MARKET_EVENT: (f) => `unterschiedliche Faktoren (Streuung ${f.ratio('spread')} über ${f.ratio('maxSpread')}) — Marktereignis`,
   SHIFT_BELOW_SHARE: (f) => `${f.count('sameDirection')} von ${f.count('products')} Produkten bewegt, für ein Anhalten nötig: ${f.count('minProducts')} und Anteil ${f.ratio('share')}`,
   SMALL_MOVE: (f) => `kleine Bewegung (unter ${f.ratio('minFactor')})`,
-  NO_PREVIOUS_SNAPSHOT: () => 'kein vorheriger Snapshot',
+  NO_PREVIOUS_SNAPSHOT: () => 'keine früheren Wettbewerbsdaten',
   REFERENCES_CONVERTED_AT_ECB: (f) => `Referenzen ${f.raw('fxFrom')}→${f.raw('currency')} zum EZB-Kurs vom ${f.date('fxRateDate')} umgerechnet`,
   REFERENCES_WITHOUT_ECB_RATE: () => 'Referenzen in anderer Währung ohne EZB-Kurs',
   NO_FRESH_CROSS_CHANNEL_REFERENCE: (f) => `keine Referenz derselben EAN auf einem anderen Kanal jünger als ${f.seconds('maxAgeSeconds')}`,
@@ -210,14 +210,14 @@ const noteTitles: Record<SanityNoteCode, string> = {
   DISPERSED_MARKET_EVENT: 'Der Markt hat sich uneinheitlich bewegt',
   SHIFT_BELOW_SHARE: 'Zu wenige Produkte für einen Stopp bewegt',
   SMALL_MOVE: 'Kleine Bewegung',
-  NO_PREVIOUS_SNAPSHOT: 'Kein vorheriger Snapshot',
+  NO_PREVIOUS_SNAPSHOT: 'Keine früheren Wettbewerbsdaten',
   REFERENCES_CONVERTED_AT_ECB: 'Referenzen zum EZB-Kurs umgerechnet',
   REFERENCES_WITHOUT_ECB_RATE: 'Referenzen ohne EZB-Kurs',
   NO_FRESH_CROSS_CHANNEL_REFERENCE: 'Kein aktueller Preis auf einem anderen Kanal',
 };
 
 /** Шаг 68 (K11): причина стратегии без сумм конкурента — у решения старше горячего намерения (3 дня) [Р-85] */
-const keptNote = 'Beträge aus Wettbewerbspreisen behält die Entscheidung 3 Tage, daher werden sie nicht mehr gezeigt; der vollständige Snapshot ist im Snapshot-Schritt verlinkt.';
+const keptNote = 'Beträge aus Wettbewerbspreisen behält die Entscheidung 3 Tage, daher werden sie nicht mehr gezeigt; die vollständigen Wettbewerbsdaten sind im Schritt „Wettbewerbsdaten“ verlinkt.';
 const step = (f: Fmt) => (typeof f.get('undercutMinor') === 'number' ? f.money('undercutMinor') : 'den Schritt der Strategie');
 const reasonsWithoutChannel: Partial<Record<AnyReasonCode | SanityNoteCode, Template>> = {
   BUYBOX_MATCH: () => `Am Buy-Box-Preis dieses Moments ausgerichtet. ${keptNote}`,
@@ -230,10 +230,10 @@ const reasonsWithoutChannel: Partial<Record<AnyReasonCode | SanityNoteCode, Temp
   SINGLE_SELLER_MARKET_EVENT: () => 'ein Verkäufer hat sich bewegt — Marktereignis',
   DISPERSED_MARKET_EVENT: (f) => `unterschiedliche Faktoren (Streuung über ${f.ratio('maxSpread')}) — Marktereignis`,
   SHIFT_BELOW_SHARE: (f) => `weniger Produkte bewegt, als ein Anhalten braucht (${f.count('minProducts')} und Anteil ${f.ratio('share')})`,
-  NO_PLAUSIBILITY_ANCHOR: (f) => `Snapshot nicht verwendet: keine Vergleichsbasis (Stückkosten ${f.get('costDeclared') ? 'hinterlegt' : 'fehlen'}). Hinterlegen Sie die Stückkosten — sie sind der wichtigste Anker.`,
-  OWN_PRICE_DEVIATION: (f) => `Hinweis: ${f.value('field')} wich um mehr als ${f.ratio('limit')} von unserem Preis ${f.money('ourPriceMinor')} ab; der Snapshot wurde angenommen.`,
+  NO_PLAUSIBILITY_ANCHOR: (f) => `Wettbewerbsdaten nicht verwendet: keine Vergleichsbasis (Stückkosten ${f.get('costDeclared') ? 'hinterlegt' : 'fehlen'}). Hinterlegen Sie die Stückkosten — sie sind der wichtigste Anker.`,
+  OWN_PRICE_DEVIATION: (f) => `Hinweis: ${f.value('field')} wich um mehr als ${f.ratio('limit')} von unserem Preis ${f.money('ourPriceMinor')} ab; die Wettbewerbsdaten wurden angenommen.`,
   SELF_OFFER_DIVERGENCE: (f) => `Unser Angebot zeigte im Kanal einen anderen Preis als unseren Preis ${f.money('ourPriceMinor')} — ein Abweichungsfall wurde eröffnet.`,
-  INTERNAL_OUTLIER_IGNORED: () => 'Hinweis: ein Angebot lag weit vom Median des Snapshots, die Strategie verwendet es aber nicht.',
+  INTERNAL_OUTLIER_IGNORED: () => 'Hinweis: ein Angebot lag weit vom Median der Wettbewerbsdaten, die Strategie verwendet es aber nicht.',
   MARKET_SHIFT_DISPERSED: () => 'Marktereignis: Produkte haben sich mit unterschiedlichen Faktoren bewegt; die Preise arbeiten weiter.',
   MARKET_SHIFT_SINGLE_SELLER: () => 'Marktereignis: ein Verkäufer hat die Preise mehrerer Produkte verschoben; die Preise arbeiten weiter.',
   CAPPED_AT_MIN_PRICE: (f) => `Das Ziel aus Wettbewerbspreisen lag unter Ihrem Mindestpreis — begrenzt auf ${f.money('minMinor')}.`,
@@ -262,12 +262,12 @@ const values: Record<ValueKey, string> = {
   CHANNEL_MASS_SHIFT: 'massenhafte Preisverschiebung', UP: 'nach oben', DOWN: 'nach unten',
   PRICE_BASIS_MISMATCH: 'falsche Preisbasis',
   TAX_ADDED: 'aufgeschlagen', TAX_REMOVED: 'abgezogen',
-  COST: 'Stückkosten', INTERNAL: 'andere Angebote im Snapshot', CROSS_CHANNEL: 'dieselbe EAN auf anderem Kanal', HISTORY: 'Preishistorie', LAST_ACCEPTED: 'der zuletzt angenommene Snapshot',
+  COST: 'Stückkosten', INTERNAL: 'andere Angebote in den Wettbewerbsdaten', CROSS_CHANNEL: 'dieselbe EAN auf anderem Kanal', HISTORY: 'Preishistorie', LAST_ACCEPTED: 'die zuletzt angenommenen Wettbewerbsdaten',
   KAUFLAND: 'Kaufland', AMAZON: 'Amazon', EBAY: 'eBay', OTTO: 'Otto', UNKNOWN_CHANNEL: 'unbekannter Kanal',
   FX_RATE_UNAVAILABLE: 'kein EZB-Kurs', FX_RATE_STALE: 'der EZB-Kurs ist veraltet', UNSUPPORTED_CURRENCY: 'die Währung wird nicht unterstützt', INVALID_INPUT: 'die Kostendaten sind ungültig',
   FIXED: 'Festpreis', TARGET_MARGIN: 'Zielmarge', MATCH_BUYBOX: 'der Buy Box folgen', BEAT_LOWEST: 'den niedrigsten Preis schlagen', POSITION: 'Position',
   VISIBLE_TOP_N: 'sichtbare Angebote', MARKET: 'gesamter Markt',
-  NO_COMPETITOR_SOURCE: 'keine Quelle für Wettbewerbsdaten in diesem Kanal', NO_SNAPSHOT: 'einen Wettbewerbs-Snapshot', COMPLETENESS: 'eine vollständige Angebotsliste', BUYBOX_WINNER: 'den Buy-Box-Gewinner', OWN_RANK: 'unseren Rang', SHIPPING: 'Versandpreise der Wettbewerber',
+  NO_COMPETITOR_SOURCE: 'keine Quelle für Wettbewerbsdaten in diesem Kanal', NO_SNAPSHOT: 'Wettbewerbsdaten', COMPLETENESS: 'eine vollständige Angebotsliste', BUYBOX_WINNER: 'den Buy-Box-Gewinner', OWN_RANK: 'unseren Rang', SHIPPING: 'Versandpreise der Wettbewerber',
   CONDITION: 'den Artikelzustand', STALENESS: 'aktuelle Daten', OWN_SHIPPING: 'unseren Versandpreis',
   TOP_N: 'beste Angebote', CHEAPEST_ONLY: 'nur günstigste Preise', FULL: 'alle Angebote',
   COST_PROFILE: 'die Stückkosten', VAT_RATE: 'der USt.-Satz des Produkts', SNAPSHOT: 'Wettbewerbsdaten',
@@ -358,7 +358,7 @@ export const de: Messages = {
       learnMore: 'Mehr erfahren', showLess: 'Weniger anzeigen',
       datePattern: 'TT.MM.JJJJ', dateTimePattern: 'TT.MM.JJJJ hh:mm', formatHint: (pattern: string) => `Format: ${pattern}`,
       withheld: 'Kanalwert nicht gespeichert',
-      withheldReason: (title: string) => `${title}. Die Kanalwerte dieses Schritts werden beim Snapshot aufbewahrt, nicht bei der Entscheidung.`,
+      withheldReason: (title: string) => `${title}. Die Kanalwerte dieses Schritts werden bei den Wettbewerbsdaten aufbewahrt, nicht bei der Entscheidung.`,
       amountWithoutCurrency: (v: string) => `${v} (Währung fehlt)`,
       boundUnresolved: (cause: string) => `nicht gesetzt: ${cause}`,
       unitLabel: (product: string, storefront: string) => `${product} · ${storefront}`,
@@ -390,7 +390,7 @@ export const de: Messages = {
         compliance: 'Nachweise Ihrer früheren Preise für Rabatte auf EU-Storefronts (Omnibus).',
         products: 'Jedes Angebot mit Preis, Grenzen und Strategie — eine Zeile pro Angebot.',
         decisions: 'Jede Preisentscheidung, die neueste zuerst; öffnen Sie eine, um zu sehen, warum der Preis so ist.',
-        trace: 'Eine Entscheidung Schritt für Schritt: Wettbewerbs-Snapshot, Prüfungen, Strategie, Price Gate und Schreibvorgang.',
+        trace: 'Eine Entscheidung Schritt für Schritt: Wettbewerbsdaten, Prüfungen, Strategie, Price Gate und Schreibvorgang.',
         strategies: 'Wie Preise berechnet werden: Ihre Strategien, wo sie gelten, und eine Vorschau, bevor etwas gespeichert wird.',
         feed: 'Jeder Preis, der an einen Kanal ging oder zurückgehalten wurde — von der Entscheidung bis zum Ergebnis.',
         rejected: 'Änderungen, die Ihre Grenzen gestoppt oder korrigiert haben — gefährliche getrennt.',
@@ -865,7 +865,7 @@ export const de: Messages = {
       },
       stats: { decisions: 'Entscheidungen', changes: 'Preis würde sich ändern', held: 'Zurückgehaltene Schreibvorgänge', savings: 'Ohne die Untergrenze', notForecast: 'keine Prognose' },
       title: 'Schattenmodus',
-      intro: 'Der Kanal ist verbunden und die Preisautomatik läuft vollständig — Snapshots, Prüfungen, Strategie, Grenzen, Begründung. In den Kanal wird nichts geschrieben: jede Änderung unten wurde zurückgehalten.',
+      intro: 'Der Kanal ist verbunden und die Preisautomatik läuft vollständig — Wettbewerbsdaten, Prüfungen, Strategie, Grenzen, Begründung. In den Kanal wird nichts geschrieben: jede Änderung unten wurde zurückgehalten.',
       modes: { SHADOW: 'Schatten (es wird nichts geschrieben)', LIVE: 'scharf (Preise werden geschrieben)' },
       changed: (from: string, when: string) => `umgeschaltet von ${from} am ${when}`,
       confirmationHint: (account: string) => `Zum Einschalten des Schreibens tippen Sie den Kontonamen genau ab: ${account}`,
@@ -1081,9 +1081,9 @@ export const de: Messages = {
     },
     outcomes: { APPROVED: 'Freigegeben', NO_CHANGE: 'Keine Änderung', REJECTED: 'Abgelehnt', HELD: 'Zurückgehalten' },
     rules: {
-      CHANNEL_HALTED: 'Storefront nicht angehalten', STRUCTURE: 'Aufbau des Snapshots: Beträge, Währung, Preisbasis', FRESHNESS: 'Aktualität und Reihenfolge',
+      CHANNEL_HALTED: 'Storefront nicht angehalten', STRUCTURE: 'Aufbau der Wettbewerbsdaten: Beträge, Währung, Preisbasis', FRESHNESS: 'Aktualität und Reihenfolge',
       CHANNEL_MASS_SHIFT: 'Massenhafte Preisverschiebung auf der Storefront', UNIT_SCALE: 'Einheitenfehler (genau ×100 oder ×0,01)',
-      COST_ANCHOR: 'Anker 1: Stückkosten', INTERNAL_ANCHOR: 'Anker 2: Stimmigkeit des Snapshots', CROSS_CHANNEL_ANCHOR: 'Anker 3: dieselbe EAN auf anderem Kanal', HISTORY_ANCHOR: 'Anker 4: Preishistorie',
+      COST_ANCHOR: 'Anker 1: Stückkosten', INTERNAL_ANCHOR: 'Anker 2: Stimmigkeit der Wettbewerbsdaten', CROSS_CHANNEL_ANCHOR: 'Anker 3: dieselbe EAN auf anderem Kanal', HISTORY_ANCHOR: 'Anker 4: Preishistorie',
     },
     gateChecks: {
       PRICE_STOP: 'Preisänderungen nicht von einer Person gestoppt', SCOPE: 'Angebot aktiv und automatisch bepreist', CHANNEL_DISTRUST: 'Der Kanal wendet unsere Preise wie gesendet an', CHANNEL_HALT: 'Storefront nicht für Preise aus Wettbewerbsdaten angehalten',
@@ -1100,22 +1100,22 @@ export const de: Messages = {
       AMAZON_ANY_OFFER_CHANGED: 'Amazon, Benachrichtigung über eine Wettbewerbspreisänderung', AMAZON_COMPETITIVE_SUMMARY: 'Amazon, Wettbewerbsübersicht',
     },
     trace: {
-      missingTitle: 'Entscheidung nicht gefunden', missingText: 'Dieser Link führt zu keiner Preisentscheidung dieses Arbeitsbereichs. Die Liste zeigt jede Entscheidung mit ihrer Begründung.', pageTitle: 'Warum dieser Preis', back: '← Alle Entscheidungen', listTitle: 'Preisentscheidungen', noDecisions: 'Noch keine Preisentscheidungen. Sie erscheinen, sobald Repricing oder der Schattenmodus für ein Angebot läuft.',
+      missingTitle: 'Entscheidung nicht gefunden', missingText: 'Dieser Link führt zu keiner Preisentscheidung dieses Arbeitsbereichs. Die Liste zeigt jede Entscheidung mit ihrer Begründung.', pageTitle: 'Warum dieser Preis', back: '← Alle Entscheidungen', noDecisions: 'Noch keine Preisentscheidungen. Sie erscheinen, sobald Repricing oder der Schattenmodus für ein Angebot läuft.',
       columns: { when: 'Wann', unit: 'Angebot', outcome: 'Ergebnis', price: 'Preis', reason: 'Grund' }, why: 'Warum',
       meta: (unit: string, _id: string, when: string) => `${unit} · ${when}`,
       dangerousBadge: 'gefährliche Änderung', limitNote: (text: string) => `Nicht weiter erklärbar: ${text}`,
       status: { OK: 'bestanden', STOP: 'gestoppt', WARN: 'mit Hinweisen', SKIPPED: 'nicht nötig', UNKNOWN: 'keine Daten' },
       marks: { PASS: '✓ bestanden', FAIL: '✗ nicht bestanden', SKIPPED: '– übersprungen', NOT_RUN: '· nicht geprüft', INFO: '•' },
-      titles: { SNAPSHOT: 'Wettbewerbs-Snapshot', SANITY: 'Eingangsprüfung', ANCHORS: 'Plausibilitätsanker', STRATEGY: 'Strategie', GATE: 'Price Gate', WRITE: 'Übertragung an den Kanal', CHANNEL: 'Bestätigung des Kanals' },
+      titles: { SNAPSHOT: 'Wettbewerbsdaten', SANITY: 'Eingangsprüfung', ANCHORS: 'Plausibilitätsanker', STRATEGY: 'Strategie', GATE: 'Price Gate', WRITE: 'Übertragung an den Kanal', CHANNEL: 'Bestätigung des Kanals' },
       noOpNotExplained: 'Bei Entscheidungen ohne Preisänderung nicht gespeichert',
-      noExplanation: 'Die Entscheidung hat keinen Erklärungs-Snapshot',
+      noExplanation: 'Zu dieser Entscheidung ist keine Begründung gespeichert',
       snapshotNotUsed: 'Die Strategie verwendet keine Wettbewerbsdaten',
       snapshotSummary: (source: string, observed: string) => `${source}, beobachtet ${observed}`,
-      source: 'Quelle', observed: 'Beobachtet', snapshotRef: 'Vollständiger Snapshot', refUntil: (when: string) => `verfügbar bis ${when}`, refExpired: 'Verweis abgelaufen',
-      sanityMissing: 'Das Ergebnis der Eingangsprüfung wurde nicht mit dem Snapshot gespeichert',
+      source: 'Quelle', observed: 'Beobachtet', snapshotRef: 'Vollständige Wettbewerbsdaten', refUntil: (when: string) => `verfügbar bis ${when}`, refExpired: 'Verweis abgelaufen',
+      sanityMissing: 'Das Ergebnis der Eingangsprüfung wurde nicht mit den Wettbewerbsdaten gespeichert',
       warning: 'Hinweis',
       sanityTitle: (_ruleset: string) => 'Eingangsprüfung',
-      sanityAccepted: (checks: number, warnings: number) => `Snapshot angenommen: ${checks} Regeln geprüft${warnings ? `, ${warnings} Hinweise` : ''}`,
+      sanityAccepted: (checks: number, warnings: number) => `Wettbewerbsdaten angenommen: ${checks} Regeln geprüft${warnings ? `, ${warnings} Hinweise` : ''}`,
       anchorNotRun: 'nicht geprüft: die Prüfung endete vorher', anchorPassed: 'bestanden',
       anchorsUsed: (list: string) => `Verwendet: ${list}`, noAnchor: 'Kein Anker wurde verwendet',
       proposed: (price: string, change: string | null, text: string) => `Vorgeschlagen ${price}${change ? ` (${change})` : ''}: ${text}`,
@@ -1144,7 +1144,7 @@ export const de: Messages = {
       pageTitle: 'Gestoppte Änderungen',
       headline: (dangerous: number, corrected: number) => `Ihre Grenzen haben ${dangerous} gefährliche ${dangerous === 1 ? 'Änderung' : 'Änderungen'} gestoppt und ${corrected} korrigiert`,
       summary: (s: { dangerous: number; corrected: number; unresolvable: number; limiterHolds: number; stops: number; inputRejects: number; halts: number }) =>
-        `Gefährlich (mehr als 10 % jenseits einer Grenze): ${s.dangerous} · korrigiert: ${s.corrected} · Grenze nicht berechenbar: ${s.unresolvable} · Schritt- und Häufigkeitsgrenzen: ${s.limiterHolds} · von einer Person gestoppt: ${s.stops} · abgelehnte Snapshots: ${s.inputRejects} · Anhaltungen von Storefronts: ${s.halts}`,
+        `Gefährlich (mehr als 10 % jenseits einer Grenze): ${s.dangerous} · korrigiert: ${s.corrected} · Grenze nicht berechenbar: ${s.unresolvable} · Schritt- und Häufigkeitsgrenzen: ${s.limiterHolds} · von einer Person gestoppt: ${s.stops} · abgelehnte Wettbewerbsdaten: ${s.inputRejects} · Anhaltungen von Storefronts: ${s.halts}`,
       none: 'In den letzten 7 Tagen wurde nichts gestoppt oder korrigiert. Jedes Mal, wenn eine Grenze, eine Person oder die Eingangsprüfung einen Preis stoppt oder korrigiert, erscheint er hier mit dem Grund.',
       kinds: { GATE: 'Price Gate', STRATEGY_CAP: 'Strategie an Grenze begrenzt', WRITE_RECHECK: 'Prüfung beim Versand', STOP: 'Von einer Person gestoppt', INPUT: 'Eingangsprüfung', HALT: 'Anhalten der Storefront' },
       interventions: { DANGEROUS: 'gefährlich', CORRECTED: 'korrigiert' },
@@ -1162,7 +1162,7 @@ export const de: Messages = {
     bounds: {
       feeUsed: 'danach wird der Boden gerechnet (die höhere Schätzung)',
       feeEstimate: (source: string, rate: string, fixed: string, scheduleVersion: string | null) => `${source}: ${rate} + ${fixed}${scheduleVersion ? ` (${scheduleVersion})` : ''}`,
-      indexColumns: { offer: 'Angebot', min: 'Mindestpreis', max: 'Höchstpreis', floor: 'Untergrenze' }, missingTitle: 'Angebot nicht gefunden', missingText: 'Dieser Link führt zu keinem Angebot dieses Arbeitsbereichs. Die Liste zeigt die Grenzen jedes Angebots.', pageTitle: 'Grenzen und Preisuntergrenze', indexTitle: 'Grenzen und Preisuntergrenze', back: '← Alle Angebote',
+      indexColumns: { offer: 'Angebot', min: 'Mindestpreis', max: 'Höchstpreis', floor: 'Untergrenze' }, missingTitle: 'Angebot nicht gefunden', missingText: 'Dieser Link führt zu keinem Angebot dieses Arbeitsbereichs. Die Liste zeigt die Grenzen jedes Angebots.', pageTitle: 'Grenzen und Preisuntergrenze', back: '← Alle Angebote',
       minPrice: 'Mindestpreis', maxPrice: 'Höchstpreis', minMargin: 'Mindestmarge', marginNotSet: 'nicht gesetzt — die Untergrenze entspricht Ihrem Mindestpreis',
       marginAtLeast: (pct: string) => `Marge mindestens ${pct}`, effectiveFloor: 'Wirksame Untergrenze', costAndFees: 'Kosten und Gebühren',
       columns: { part: 'Bestandteil', amount: (currency: string) => `Betrag, ${currency}`, formula: 'Berechnung' },
@@ -1200,7 +1200,7 @@ export const de: Messages = {
       columns: { offer: 'Angebot', asOf: 'Zeitpunkt', current: 'Aktuell', proposed: 'Vorschlag', final: 'Nach Gate', change: 'Änderung', outcome: 'Ergebnis', reason: 'Warum' },
       headline: (s: { changes: number; unchanged: number; rejected: number; dangerous: number; notEvaluated: number }) =>
         `Würde ändern ${s.changes} · halten ${s.unchanged} · vom Gate abgelehnt ${s.rejected}${s.dangerous ? ` (gefährlich ${s.dangerous})` : ''} · nicht berechnet ${s.notEvaluated}`,
-      asOfSnapshot: (when: string) => `Snapshot vom ${when}`, asOfNow: (when: string) => `kein Snapshot, ${when}`, notEvaluated: 'Nicht berechnet',
+      asOfSnapshot: (when: string) => `Wettbewerbsdaten vom ${when}`, asOfNow: (when: string) => `keine Wettbewerbsdaten, ${when}`, notEvaluated: 'Nicht berechnet',
       unavailable: (text: string) => `Der Kanal liefert nicht, was diese Strategie braucht: ${text}`,
       dangerous: 'gefährlich', saved: (version: number, offers: number) => `Als Version ${version} gespeichert, ${offers} ${offers === 1 ? 'Angebot' : 'Angeboten'} zugewiesen.`,
       noRight: 'Ihre Rolle darf Strategien in der Vorschau prüfen, aber nicht speichern.',
@@ -1371,7 +1371,6 @@ export const de: Messages = {
       previous: '← Neuere', next: 'Ältere →',
     },
     dangerous: {
-      pageTitle: 'Was Ihre Grenzen verhindert haben',
       floorHeadline: (n: number, days: number, amounts: string[], unknown: number) => n === 0
         ? `Die Untergrenze musste in den letzten ${days} ${days === 1 ? 'Tag' : 'Tagen'} keinen Preis halten`
         : `Die Untergrenze hat den Preis in den letzten ${days} ${days === 1 ? 'Tag' : 'Tagen'} ${n}-mal gehalten${amounts.length ? `; ohne sie hätten Sie ${amounts.join(' + ')} billiger verkauft` : ''}${unknown ? ` (Betrag bei ${unknown} unbekannt)` : ''}`,
@@ -1395,7 +1394,6 @@ export const de: Messages = {
       timeZoneUnknown: 'Diese Zeitzone ist unbekannt. Wählen Sie eine aus der Liste.',
     },
     compliance: {
-      pageTitle: 'Omnibus: vorheriger Preis eines Rabatts',
       notApplicable: 'Die Omnibus-Regel für Rabattpreise ist EU-Recht. Keine Ihrer verbundenen Storefronts liegt in der EU — hier gibt es nichts zu prüfen.',
       intro: 'Ein Rabatt darf als vorherigen Preis höchstens den niedrigsten Preis dieses Angebots in den 30 Tagen vor Rabattbeginn angeben — getrennt je Kanal und Storefront, Tage nach der Zeitzone der Storefront. Eine regelwidrige Ankündigung lehnt die Datenbank ab.',
       checkTitle: 'Rabatt vor der Ankündigung prüfen',

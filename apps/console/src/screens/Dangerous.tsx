@@ -15,7 +15,8 @@ export function DangerousScreenView({ view }: { view: DangerousReportView }) {
   const gateZone = commonZone(view.items.map((i) => i.at));
   return (
     <section>
-      <h2>{d.pageTitle}</h2>
+      {/* Шаг 86: заголовок страницы — тот же текст, что пункт меню; «что предотвратили границы» говорит подзаголовок */}
+      <h2>{m.ui.app.screens.dangerous}</h2>
       <p className="subtitle">{m.ui.app.subtitles.dangerous}</p>
       <nav className="tabs small">
         {PERIODS.map((p) => <a key={p} href={href(view.worldId, 'dangerous', String(p))} className={p === view.days ? 'active' : ''}>{d.period(p)}</a>)}

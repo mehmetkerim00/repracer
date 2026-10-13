@@ -177,7 +177,7 @@ async function insertCost(tx: Tx, tenantId: string, membershipId: string, s: Sco
   );
   await tx.query(
     `INSERT INTO channel_data.fee_estimate (tenant_id, write_scope_id, source, fee_model, fee_schedule_version, computed_at, valid_until)
-     VALUES ($1, $2, 'FEE_SCHEDULE', $3, 'synthetic', $4, $4::timestamptz + interval '365 days')
+     VALUES ($1, $2, 'FEE_SCHEDULE', $3, to_char($4::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM'), $4, $4::timestamptz + interval '365 days')
      ON CONFLICT (tenant_id, write_scope_id, source) DO UPDATE
        SET fee_model = EXCLUDED.fee_model, computed_at = EXCLUDED.computed_at, valid_until = EXCLUDED.valid_until`,
     [tenantId, s.writeScopeId, JSON.stringify({ feeRateBp: cost.feeRateBp, fixedFeeMinor: cost.fixedFeeMinor }), validFrom],

@@ -14,7 +14,8 @@ export function DecisionsView({ worldId, items }: { worldId: string; items: read
   const zone = commonZone(items.map((d) => d.decidedAt));
   return (
     <section>
-      <h2>{t.listTitle}</h2>
+      {/* Шаг 86: заголовок страницы — тот же текст, что пункт меню */}
+      <h2>{m.ui.app.screens.decisions}</h2>
       <p className="subtitle">{m.ui.app.subtitles.decisions}</p>
       {items.length === 0 ? <p className="muted empty">{t.noDecisions}</p> : (
         <div className="table-wrap">

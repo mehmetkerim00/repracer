@@ -99,7 +99,8 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
                         <div className="live-card">
                           <div className="note">{a.confirmationHint}</div>
                           <div className="live-row">
-                            <input value={typed[a.channelAccountId] ?? ''} placeholder={a.externalAccountId}
+                            {/* Шаг 86: поле не уже имени, которое набирают дословно (по-немецки кнопка длиннее, и имя обрезалось) */}
+                            <input value={typed[a.channelAccountId] ?? ''} placeholder={a.externalAccountId} size={a.externalAccountId.length + 2}
                               onChange={(e) => setTyped({ ...typed, [a.channelAccountId]: e.currentTarget.value })} />
                             {/* Яркая кнопка — только когда имя набрано верно: до этого глаз не ведут к самому опасному действию экрана */}
                             <button type="button" className={(typed[a.channelAccountId] ?? '') === a.externalAccountId ? 'primary' : ''}

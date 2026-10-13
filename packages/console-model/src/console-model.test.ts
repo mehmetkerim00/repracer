@@ -338,6 +338,8 @@ export const GLOSSARY_FORBIDDEN: Readonly<Record<'en' | 'de', ReadonlyArray<{ pa
     { pattern: /\bStand(es|s)?\b|Standzeit|Standdaten/, use: 'Server (der Stand ist ein Prüfstand)' },
     // Шаг 79: три слова для одной суммы на штуку (Selbst-, Einstands-, Stückkosten) — остаётся одно
     { pattern: /Selbstkosten|Einstandskosten|Einstandspreis/, use: 'Stückkosten' },
+    // Шаг 86 (отложенное 79, ревью 21): данные конкурентов на момент — «Wettbewerbsdaten», а не английское «Snapshot» (было 43 текста)
+    { pattern: /Snapshot|Momentaufnahme/, use: 'Wettbewerbsdaten (Plural; Zeitpunkt — „Wettbewerbsdaten vom …“)' },
   ],
 };
 const EBAY_LISTING = /\blistings?\b/i;

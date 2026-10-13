@@ -1130,7 +1130,7 @@ export const en = {
       AMAZON_ANY_OFFER_CHANGED: 'Amazon, notification of a competitor price change', AMAZON_COMPETITIVE_SUMMARY: 'Amazon, competitive summary',
     },
     trace: {
-      missingTitle: 'Decision not found', missingText: 'This link does not lead to a price decision of this workspace. The list shows every decision with its explanation.', pageTitle: 'Why this price', back: '← All decisions', listTitle: 'Price decisions', noDecisions: 'No pricing decisions yet. They appear once repricing or Shadow mode runs for an offer.',
+      missingTitle: 'Decision not found', missingText: 'This link does not lead to a price decision of this workspace. The list shows every decision with its explanation.', pageTitle: 'Why this price', back: '← All decisions', noDecisions: 'No pricing decisions yet. They appear once repricing or Shadow mode runs for an offer.',
       columns: { when: 'When', unit: 'Offer', outcome: 'Outcome', price: 'Price', reason: 'Reason' }, why: 'Why',
       meta: (unit: string, _id: string, when: string) => `${unit} · ${when}`,
       dangerousBadge: 'dangerous change', limitNote: (text: string) => `Cannot be explained further: ${text}`,
@@ -1138,7 +1138,7 @@ export const en = {
       marks: { PASS: '✓ passed', FAIL: '✗ failed', SKIPPED: '– skipped', NOT_RUN: '· not checked', INFO: '•' },
       titles: { SNAPSHOT: 'Competitor snapshot', SANITY: 'Input check', ANCHORS: 'Plausibility anchors', STRATEGY: 'Strategy', GATE: 'Price Gate', WRITE: 'Write to the channel', CHANNEL: 'Channel confirmation' },
       noOpNotExplained: 'Not kept for decisions that did not change the price',
-      noExplanation: 'The decision has no explanation snapshot',
+      noExplanation: 'No explanation is stored for this decision',
       snapshotNotUsed: 'The strategy does not use competitor data',
       snapshotSummary: (source: string, observed: string) => `${source}, observed ${observed}`,
       source: 'Source', observed: 'Observed', snapshotRef: 'Full snapshot', refUntil: (when: string) => `available until ${when}`, refExpired: 'reference expired',
@@ -1193,7 +1193,7 @@ export const en = {
     bounds: {
       feeUsed: 'the floor is computed from this one (the higher estimate)',
       feeEstimate: (source: string, rate: string, fixed: string, scheduleVersion: string | null) => `${source}: ${rate} + ${fixed}${scheduleVersion ? ` (${scheduleVersion})` : ''}`,
-      indexColumns: { offer: 'Offer', min: 'Minimum price', max: 'Maximum price', floor: 'Floor' }, missingTitle: 'Offer not found', missingText: 'This link does not lead to an offer of this workspace. The list shows the bounds of every offer.', pageTitle: 'Bounds and price floor', indexTitle: 'Bounds and price floor', back: '← All offers',
+      indexColumns: { offer: 'Offer', min: 'Minimum price', max: 'Maximum price', floor: 'Floor' }, missingTitle: 'Offer not found', missingText: 'This link does not lead to an offer of this workspace. The list shows the bounds of every offer.', pageTitle: 'Bounds and price floor', back: '← All offers',
       minPrice: 'Minimum price', maxPrice: 'Maximum price', minMargin: 'Minimum margin', marginNotSet: 'not set — the floor equals your minimum price',
       marginAtLeast: (pct: string) => `margin at least ${pct}`, effectiveFloor: 'Effective floor', costAndFees: 'Cost and fees',
       columns: { part: 'Component', amount: (currency: string) => `Amount, ${currency}`, formula: 'How it is calculated' },
@@ -1396,7 +1396,6 @@ export const en = {
       previous: '← Newer', next: 'Older →',
     },
     dangerous: {
-      pageTitle: 'What your bounds prevented',
       floorHeadline: (n: number, days: number, amounts: string[], unknown: number) => n === 0
         ? `The floor did not have to hold a price in the last ${days} ${days === 1 ? 'day' : 'days'}`
         : `The floor held the price ${n} ${n === 1 ? 'time' : 'times'} in the last ${days} ${days === 1 ? 'day' : 'days'}${amounts.length ? `; without it you would have sold ${amounts.join(' + ')} cheaper` : ''}${unknown ? ` (amount unknown for ${unknown})` : ''}`,
@@ -1421,7 +1420,6 @@ export const en = {
       timeZoneUnknown: 'This time zone is not known. Choose one from the list.',
     },
     compliance: {
-      pageTitle: 'Omnibus: prior price of a discount',
       /** Шаг 68 (K3): прямой адрес вкладки у тенанта без витрин ЕС */
       notApplicable: 'The Omnibus rule for discount prices is EU law. None of your connected storefronts is in the EU, so there is nothing to check here.',
       intro: 'A discount may state as prior price at most the lowest price of this offer in the 30 days before the discount starts — separately per channel and storefront, days by the storefront time zone. The database refuses an announcement that breaks the rule.',

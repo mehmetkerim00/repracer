@@ -86,7 +86,8 @@ export function BoundsIndexView({ worldId, items }: { worldId: string; items: re
   const c = m.ui.bounds.indexColumns;
   return (
     <section>
-      <h2>{m.ui.bounds.indexTitle}</h2>
+      {/* Шаг 86: заголовок страницы — тот же текст, что пункт меню */}
+      <h2>{m.ui.app.screens.bounds}</h2>
       <p className="subtitle">{m.ui.app.subtitles.bounds}</p>
       {/* Задача D шага 34: пустой тенант видит, почему пусто и куда идти */}
       {items.length === 0 ? <p className="notice">{m.ui.onboarding.empty.bounds} <a href={href(worldId, 'onboarding')}>{m.ui.onboarding.empty.startHere}</a></p> : null}

@@ -21,6 +21,7 @@
 | Листинг eBay | **eBay listing** | **eBay-Angebot** | — | Слово eBay. Допустимо только в тексте, который говорит об eBay или Trading API (миграция, старые листинги) |
 | Количество в штуках | **pieces** | **Stück** | units / Einheiten | «3 pieces reserved», буфер канала — «pieces kept back» |
 | Себестоимость | **unit cost** | **Stückkosten** | cost price, product cost / Selbstkosten, Einstandskosten, Einstandspreis | Одна сумма на штуку; «unit cost» — единственное разрешённое «unit» |
+| Данные конкурентов на момент | **snapshot** (competitor snapshot) | **Wettbewerbsdaten** (мн. ч.; момент — «Wettbewerbsdaten vom …») | — / Snapshot, Momentaufnahme | Прочитанные у канала предложения конкурентов и Buy Box на один момент: их проверяют до движка, по ним считает стратегия. Слово «Wettbewerbsdaten» уже было в немецком словаре; английское «Snapshot» в немецких текстах (43 текста) заменено на шаге 86 |
 | Сервер консоли | **server** | **Server** | stand / Stand, Standdaten | «The server is unavailable». Стенд — испытательный стенд разработчика; на экранах стенда — «test environment» / «Testumgebung» |
 | Остановка всего | **stop of the whole workspace** | **Stopp des gesamten Arbeitsbereichs** | tenant stop / Mandantenstopp | Kill switch человеком на весь workspace [Р-69, Р-70] |
 

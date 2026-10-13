@@ -127,7 +127,7 @@ export function CostImportPreview({ view, onMapping, onEncoding }: {
 export function CostImportPanel({ worldId, canEdit, asPage = false }: { worldId: string; canEdit: boolean; asPage?: boolean }) {
   const m = useMessages();
   const t = m.ui.costImport;
-  if (!canEdit) return <section className="cost-import">{asPage ? <h2>{t.pageTitle}</h2> : <h3>{t.pageTitle}</h3>}<p className="notice">{t.noRight}</p></section>;
+  if (!canEdit) return <section className="cost-import">{asPage ? <h2>{m.ui.app.screens['cost-import']}</h2> : <h3>{t.pageTitle}</h3>}<p className="notice">{t.noRight}</p></section>;
   return <CostImportForm worldId={worldId} asPage={asPage} />;
 }
 
@@ -189,7 +189,8 @@ function CostImportForm({ worldId, asPage }: { worldId: string; asPage: boolean 
   return (
     <section className="cost-import">
       {/* Шаг 79: на своём экране — заголовок страницы, внутри онбординга — заголовок раздела */}
-      {asPage ? <h2>{t.pageTitle}</h2> : <h3>{t.pageTitle}</h3>}
+      {/* Шаг 86: как отдельная страница — заголовок пункта меню; внутри онбординга — шаг «Import unit costs» */}
+      {asPage ? <h2>{m.ui.app.screens['cost-import']}</h2> : <h3>{t.pageTitle}</h3>}
       <p className="subtitle">{m.ui.app.subtitles['cost-import']}</p>
       {error ? <ErrorBox message={error} /> : null}
       {message ? <p className="notice" role="status">{message}</p> : null}

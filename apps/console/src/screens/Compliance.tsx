@@ -76,7 +76,8 @@ export function ComplianceScreenView({ worldId, initial }: { worldId: string; in
   // Р-136 (ревью шага 29, находка 4): предложение выбирается поиском — их десять тысяч, список показывает первые
   return (
     <section>
-      <h2>{c.pageTitle}</h2>
+      {/* Шаг 86: заголовок страницы — тот же текст, что пункт меню */}
+      <h2>{m.ui.app.screens.compliance}</h2>
       <Intro text={c.intro} />
       <p className="notice" role="note">{view.notAGuarantee}</p>
       {message ? <p className="notice">{message}</p> : null}

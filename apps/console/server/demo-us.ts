@@ -98,7 +98,7 @@ async function configure(admin: PgPool, a: DemoUsAccounts, validFrom: string): P
         [a.tenantId, s.productId, s.channelAccountId, s.marketplace, validFrom, costMinor, a.ownerMembershipId]);
       await tx.query(
         `INSERT INTO channel_data.fee_estimate (tenant_id, write_scope_id, source, fee_model, fee_schedule_version, computed_at, valid_until)
-         VALUES ($1, $2, 'FEE_SCHEDULE', $3, 'synthetic', $4, $4::timestamptz + interval '400 days')`,
+         VALUES ($1, $2, 'FEE_SCHEDULE', $3, to_char($4::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM'), $4, $4::timestamptz + interval '400 days')`,
         [a.tenantId, s.writeScopeId, JSON.stringify(fee), validFrom]);
       for (const [table, amount] of [['min_price', ebay ? 1200 : 1400], ['max_price', 5000]] as const) {
         await tx.query(
