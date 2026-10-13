@@ -91,7 +91,7 @@ Stop pricing. Над меню — имя магазина и ссылка **«�
 - **Блок «Weekly email — preview»** (шаг 68, K7): то самое недельное письмо тени, собранное той же функцией, что у доставки, за
   последние семь суток, с пометкой «Demo: synthetic data. This is the email a seller in shadow mode receives every Monday…». Демо-тенанту
   письмо не отправляется (0167) — поэтому оно на экране.
-- **Таблица аккаунтов** (колонки «Channel account», «Write mode», «Live writes»): **Amazon · syn-amazon-…** — «0 offers, 0 of them with
+- **Карточки аккаунтов** (поля карточки «Channel account», «Write mode», «Live writes»): **Amazon · syn-amazon-…** — «0 offers, 0 of them with
   the engine on»; это аккаунт Amazon ЕС, ожидающий доступа [Р-150]: вместо поля включения — пилюля **«waiting for access»** и «Nothing to
   switch on yet: this account is still waiting for access. What is missing is listed under Channel accounts.» Дальше **Kaufland · syn-…**
   (200 offers), **Amazon · A1SYNDEMOUS…** (12), **eBay · syn_demo_ebay_us_…** (12) — у каждого «shadow (nothing is written)», «To switch
@@ -140,7 +140,8 @@ psql -d repracer_demo -c "SELECT final_status, count(*) AS writes, count(dispatc
 
 **Экран решения amazon.com** (шаг 68, записано прогоном `demo-us-live`): предложение подписано словами — «Plant pot, green · amazon.com».
 
-- **Заголовок:** «The price $14.00 was approved; write: held by shadow mode (not sent)».
+- **Итог** (шаг 81 — карточка янтарного тона, цена крупно): **$14.00**, под ней «The price $14.00 was approved; write: held by shadow mode
+  (not sent)». У отказа карточка красная, без цены — одной фразой причины.
 - **Competitor snapshot:** «Amazon, notification of a competitor price change», время наблюдения.
 - **Strategy:** «Proposed $14.00 (−24.3%): Target $12.49 is below your minimum price — capped at $14.00.»; шаги расчёта («Calculation
   step») — «Undercut the lowest price $12.50 by $0.01: $12.49.» и «Target $12.49 is below your minimum price — capped at $14.00.»;
@@ -152,7 +153,7 @@ psql -d repracer_demo -c "SELECT final_status, count(*) AS writes, count(dispatc
 
 **Экран решения Kaufland** (записано с демо, цена конкурента сдвинулась):
 
-- **Заголовок:** «The price €18.41 was approved; write: held by shadow mode (not sent)».
+- **Итог:** **€18.41** крупно, под ней «The price €18.41 was approved; write: held by shadow mode (not sent)».
 - **Competitor snapshot:** источник «Kaufland, Buy Box request», время наблюдения; «Full snapshot: available until …» (полный снимок
   хранится 18 месяцев [Р-68]).
 - **Input check:** «Snapshot accepted: 9 rules checked» — витрина не остановлена, структура снимка, свежесть, массовый сдвиг, ошибка
