@@ -3,6 +3,7 @@ import type { StockPipeline } from '@repracer/stock-sync';
 import { systemClock } from '@repracer/channel-port';
 import { createPricingPipeline } from '@repracer/pricing-pipeline';
 import { inTenant, type PgPool, type PgPricingStore } from '@repracer/pricing-store-pg';
+import { WALMART_PUBLISHED, WALMART_UNPUBLISHED } from '@repracer/console-model';
 import { consoleAdapter } from './channel-descriptors.ts';
 
 /**
@@ -28,11 +29,13 @@ export interface DemoUsAccounts {
   ownerMembershipId: string;
   ebayAccountId: string;
   amazonAccountId: string;
+  /** Шаг 89: walmart.com — на симуляторе по правилам настоящего Walmart; нет — демо без Walmart */
+  walmartAccountId?: string | null;
 }
 
 export interface DemoUsMarket {
   /** Решения тени, принятые прожатой неделей: по каналу */
-  pressed: { amazon: number; ebay: number; seconds: number } | null;
+  pressed: { amazon: number; ebay: number; walmart: number; seconds: number } | null;
   stop(): void;
 }
 
@@ -48,6 +51,8 @@ const SCHEDULE_DAYS = 400;
 /** Ход настоящего времени после прожатой недели */
 const LIVE_TICK_MS = 30_000;
 const EBAY_RECOMPUTE_EVERY_MS = 15 * MINUTE_MS;
+/** Шаг 89: количество товара на walmart.com в модели канала — запись количества Walmart в демо выключена [Р-202], значение только читается */
+const DEMO_WALMART_QUANTITY = 60;
 /**
  * Шаг 87 [Р-214]: спрос amazon.com американского демо — синтетические заказы FBM, без данных покупателя [Р-4]: первый — через две
  * минуты после запуска, дальше раз в 10 минут по кругу предложений; отгрузка через час, каждый десятый отменяется через 20 минут.
@@ -57,6 +62,20 @@ const ORDER_FIRST_MS = 2 * MINUTE_MS;
 const ORDER_EVERY_MS = 10 * MINUTE_MS;
 const ORDER_SHIP_AFTER_MS = HOUR_MS;
 const ORDER_CANCEL_AFTER_MS = 20 * MINUTE_MS;
+
+/**
+ * Шаг 89: walmart.com американского демо. Цена на витрине — $18.99, у двух товаров (03 и 07) — $24.99, а тот же товар на другой
+ * площадке стоит $19.99: правило неконкурентной цены Walmart снимает их с публикации (порог — 10 %, W-10). Демо в тени — наша цена в
+ * Walmart не уходит, поэтому снятие держится и видно на экране; движок его не чинит — решение владельца (шаг 89). Ещё у двух товаров
+ * (01 и 02) цена другой площадки есть, но наша в пределах порога — опубликованы. Конкуренты — три поведения модели Buy Box
+ */
+const WALMART_LISTING_MINOR = (k: number) => (k === 2 || k === 6 ? 2499 : 1899);
+const WALMART_ELSEWHERE_MINOR = (k: number) => (k === 2 || k === 6 ? 1999 : k === 0 || k === 1 ? 1950 : null);
+/** Опрос Buy Box: прожатая неделя — раз в два часа на товар (со сдвигом 10 минут), настоящее время — раз в 15 минут; статусы — раз в 10 минут */
+const WALMART_PRESS_POLL_MS = 2 * HOUR_MS;
+const WALMART_LIVE_POLL_MS = 15 * MINUTE_MS;
+const WALMART_STATUS_EVERY_MS = 10 * MINUTE_MS;
+
 
 /** Строки заказов, изменившиеся с `sinceMs`: открытые — по времени заказа, отгруженные и отменённые — по времени смены статуса */
 export function demoOrderLines(skus: readonly string[], fromMs: number, nowMs: number, sinceMs: number, marketplace: string): OrderLine[] {
@@ -91,7 +110,7 @@ async function configure(admin: PgPool, a: DemoUsAccounts, validFrom: string): P
          FROM tenant_data.write_scope ws
          JOIN tenant_data.offer_mapping om ON om.tenant_id = ws.tenant_id AND om.price_write_scope_id = ws.write_scope_id
         WHERE ws.tenant_id = $1 AND ws.channel_account_id = ANY ($2::uuid[]) AND ws.field = 'PRICE'
-        ORDER BY om.external_sku`, [a.tenantId, [a.ebayAccountId, a.amazonAccountId]]);
+        ORDER BY om.external_sku`, [a.tenantId, [a.ebayAccountId, a.amazonAccountId, ...(a.walmartAccountId ? [a.walmartAccountId] : [])]]);
     const scopes: UsScope[] = rows.map((r) => ({
       writeScopeId: r.write_scope_id, productId: r.product_id, channelAccountId: r.channel_account_id, marketplace: r.marketplace,
       channelProductRef: r.channel_product_ref, sku: r.external_sku,
@@ -113,6 +132,7 @@ async function configure(admin: PgPool, a: DemoUsAccounts, validFrom: string): P
       { type: 'BEAT_LOWEST', scope: 'VISIBLE_TOP_N', compareLanded: false, atBound: 'CAP' }, 1);
     for (const s of scopes) {
       const ebay = s.channelAccountId === a.ebayAccountId;
+      const walmart = s.channelAccountId === a.walmartAccountId;
       const k = scopes.filter((x) => x.channelAccountId === s.channelAccountId).indexOf(s);
       /**
        * eBay: себестоимость от $6.00 до $11.50 — цена целевой маржи у дешёвых ниже `min_price` (пол держит $12.00), у дорогих выше нынешних
@@ -137,11 +157,11 @@ async function configure(admin: PgPool, a: DemoUsAccounts, validFrom: string): P
         `INSERT INTO tenant_data.guardrail (tenant_id, scope_type, write_scope_id, min_margin_bp, on_violation, version, created_by_membership_id)
          VALUES ($1, 'WRITE_SCOPE', $2, 1200, 'HOLD', 1, $3)`, [a.tenantId, s.writeScopeId, a.ownerMembershipId]);
       // Шаг 68 (K10): название товара — синтетическое, как у Kaufland демо; обнаружение каталога названий не пишет
-      await tx.query(`UPDATE tenant_data.product SET title = $3 WHERE tenant_id = $1 AND product_id = $2`, [a.tenantId, s.productId, demoTitle(ebay ? 20 + k : 40 + k)]);
-      // Нынешняя цена на витрине — как прочитало бы обнаружение: $19.99 у eBay, $18.50 у amazon.com
+      await tx.query(`UPDATE tenant_data.product SET title = $3 WHERE tenant_id = $1 AND product_id = $2`, [a.tenantId, s.productId, demoTitle(ebay ? 20 + k : walmart ? 60 + k : 40 + k)]);
+      // Нынешняя цена на витрине — как прочитало бы обнаружение: $19.99 у eBay, $18.50 у amazon.com, у walmart.com — цена модели канала
       await tx.query(
         `INSERT INTO channel_data.observed_channel_state (tenant_id, write_scope_id, field, observed_amount_minor, observed_at, received_at, source, sync_status)
-         VALUES ($1, $2, 'PRICE', $3, $4, $4, 'READBACK', 'IN_SYNC')`, [a.tenantId, s.writeScopeId, ebay ? 1999 : 1850, validFrom]);
+         VALUES ($1, $2, 'PRICE', $3, $4, $4, 'READBACK', 'IN_SYNC')`, [a.tenantId, s.writeScopeId, ebay ? 1999 : walmart ? WALMART_LISTING_MINOR(k) : 1850, validFrom]);
       await tx.query(
         `UPDATE tenant_data.write_scope SET pricing_mode = 'ENGINE', pricing_strategy_id = $3, pricing_strategy_version = 1
           WHERE tenant_id = $1 AND write_scope_id = $2`, [a.tenantId, s.writeScopeId, ebay ? margin : beat]);
@@ -176,6 +196,7 @@ export async function startDemoUsMarket(input: {
   }
   const scopes = await configure(pools.admin, a, new Date(begin - DAY_MS).toISOString());
   const amazonScopes = scopes.filter((s) => s.channelAccountId === a.amazonAccountId);
+  const walmartScopes = scopes.filter((s) => s.channelAccountId === a.walmartAccountId);
 
   /**
    * Алерты демо США — в памяти процесса, как у Kaufland демо: строка алерта в базе ушла бы доставкой письмом на синтетический адрес
@@ -209,7 +230,7 @@ export async function startDemoUsMarket(input: {
   const ctx = (channelAccountId: string): AdapterCallContext => ({
     tenantId: a.tenantId as never, channelAccountId: channelAccountId as never, correlationId: 'console-demo-us', deadline: new Date(Date.parse(nowIso()) + MINUTE_MS).toISOString() as never,
   });
-  const counts = { amazon: 0, ebay: 0 };
+  const counts = { amazon: 0, ebay: 0, walmart: 0 };
   const deliver = async () => {
     for (const snapshot of port.drainSnapshots()) {
       await amazon.processSnapshot(ctx(a.amazonAccountId), snapshot);
@@ -217,6 +238,62 @@ export async function startDemoUsMarket(input: {
     }
   };
   const recomputeEbay = async () => { counts.ebay += (await ebay.recomputeScheduled(ctx(a.ebayAccountId), { limit: 100 })).scopes; };
+
+  /**
+   * Шаг 89: walmart.com — модель канала по правилам настоящего Walmart (HTTP, корзины токенов с заголовками) и НАСТОЯЩИЙ адаптер Walmart
+   * поверх неё: конкуренты — опрос Buy Box, решения — тем же путём, что у продавца (в тени — запись удерживается). Статус публикации
+   * читается опросом: переход в «снят с публикации» (и обратно) — строка журнала наблюдений канала, её показывают Offers и журнал «Stop pricing»
+   */
+  const walmartSim = walmartScopes.length > 0 && a.walmartAccountId ? await (async () => {
+    const [{ SimulatedWalmartChannel }, { WalmartAdapter, WALMART_US }] = await Promise.all([import('@repracer/contract-tests/simulator'), import('@repracer/walmart-adapter')]);
+    const clock = {
+      nowMs: () => Date.parse(nowIso()),
+      // Корзина пуста — ждать пополнения: в прожатой неделе — виртуальным временем, дальше — настоящим
+      sleep: (ms: number) => (virtualMs === null ? new Promise<void>((resolve) => setTimeout(resolve, ms)) : (virtualMs += ms, Promise.resolve())),
+    };
+    const channel = new SimulatedWalmartChannel({
+      seed: 89, clientId: 'syn-walmart-demo', clientSecret: 'syn-walmart-demo-secret', nowMs: clock.nowMs,
+      items: walmartScopes.map((sc, k) => ({ sku: sc.sku, productName: `Synthetic product ${sc.sku}`, priceMinor: WALMART_LISTING_MINOR(k), quantity: DEMO_WALMART_QUANTITY,
+        otherMarketplacePriceMinor: WALMART_ELSEWHERE_MINOR(k), competitorBaseMinor: 1850 + 10 * k })),
+    });
+    const walmartDeps: AdapterDependencies = {
+      ...deps,
+      accounts: { async verify(tenantId, channelAccountId) {
+        if (channelAccountId !== a.walmartAccountId) return { ok: false, reason: 'NOT_FOUND' };
+        if (tenantId !== a.tenantId) return { ok: false, reason: 'TENANT_MISMATCH' };
+        return { ok: true, account: { tenantId, channelAccountId, channel: 'WALMART', externalAccountId: 'synthetic', marketplaces: [WALMART_US], credentialsRef: 'secret-ref:synthetic' } };
+      } },
+      credentials: { async get() { return { clientId: 'syn-walmart-demo', clientSecret: 'syn-walmart-demo-secret' }; } },
+    };
+    const adapter = new WalmartAdapter(walmartDeps, { baseUrl: 'https://sandbox.walmartapis.com', fetch: channel.fetch, clock });
+    const pipeline = createPricingPipeline({ store: store as never, adapter, alerts, logger: deps.logger, now: nowIso as never });
+    return { channel, adapter, pipeline, marketplace: WALMART_US, account: a.walmartAccountId as string };
+  })() : null;
+  const walmartKnown = new Map<string, boolean>();
+  const pollWalmart = async (skus: readonly string[]) => {
+    if (!walmartSim || skus.length === 0) return;
+    const c = ctx(walmartSim.account);
+    const read = await walmartSim.adapter.readCompetitors(c, skus.map((sku) => ({ marketplace: walmartSim.marketplace, channelProductRef: sku, condition: 'new' })));
+    for (const snapshot of read.snapshots) {
+      await walmartSim.pipeline.processSnapshot(c, snapshot);
+      counts.walmart += 1;
+    }
+  };
+  const syncWalmartStatuses = async () => {
+    if (!walmartSim) return;
+    const at = nowIso();
+    for (const st of await walmartSim.adapter.listingStatuses(ctx(walmartSim.account), walmartScopes.map((sc) => sc.sku))) {
+      const was = walmartKnown.get(st.sku);
+      walmartKnown.set(st.sku, st.published);
+      // Запись — только при переходе: первое наблюдение «снят» и смена состояния; опубликованный с самого начала строки не даёт
+      if (was === st.published || (was === undefined && st.published)) continue;
+      await store.recordPricingHealth(a.tenantId, walmartSim.account, {
+        marketplace: walmartSim.marketplace, channelProductRef: st.sku, condition: 'new',
+        issueType: st.published ? WALMART_PUBLISHED : WALMART_UNPUBLISHED, occurredAt: at as never,
+        competitivePriceThreshold: st.published ? null : st.referencePrice, sourceEventId: `walmart-status:${st.sku}:${at}`,
+      });
+    }
+  };
   // Шаг 87: заказы amazon.com — с настоящего момента запуска (прожатая неделя заказов не несёт); окно чтения с запасом в минуту
   const orders = input.orders;
   let ordersSince = realStart;
@@ -238,6 +315,9 @@ export async function startDemoUsMarket(input: {
       try {
         await deliver();
         if ((t - begin) % HOUR_MS === 0) await recomputeEbay();
+        if (t === begin) await syncWalmartStatuses();
+        // Шаг 89: Buy Box Walmart — товар раз в два часа, товары со сдвигом в 10 минут
+        await pollWalmart(walmartScopes.filter((_sc, i) => (t - begin - i * 10 * MINUTE_MS) >= 0 && (t - begin - i * 10 * MINUTE_MS) % WALMART_PRESS_POLL_MS === 0).map((sc) => sc.sku));
       } catch (error) {
         failures += 1;
         if (failures === 1) log(`demo US press step failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -245,13 +325,17 @@ export async function startDemoUsMarket(input: {
     }
     if (failures > 0) log(`demo US press: ${failures} failed steps`);
     virtualMs = null;
-    pressed = { amazon: counts.amazon, ebay: counts.ebay, seconds: Math.round((systemClock.nowMs() - realStart) / 100) / 10 };
-    log(`demo US week pressed: ${input.pressDays} days, amazon.com snapshots ${pressed.amazon}, eBay US recomputed ${pressed.ebay}, alerts kept in memory ${alertCount}, ${pressed.seconds} s`);
+    pressed = { amazon: counts.amazon, ebay: counts.ebay, walmart: counts.walmart, seconds: Math.round((systemClock.nowMs() - realStart) / 100) / 10 };
+    log(`demo US week pressed: ${input.pressDays} days, amazon.com snapshots ${pressed.amazon}, eBay US recomputed ${pressed.ebay}, walmart.com snapshots ${pressed.walmart}, alerts kept in memory ${alertCount}, ${pressed.seconds} s`);
   }
 
   // Дальше — настоящее время: снимки по сроку доставки, пересчёт eBay по расписанию (должные — без решения за сутки)
+  // Без прожатой недели статусы Walmart читаются сразу при старте
+  if (input.pressDays === 0) await syncWalmartStatuses().catch((error: unknown) => log(`demo walmart.com statuses failed: ${error instanceof Error ? error.message : String(error)}`));
   let stopped = false;
   let lastEbay = 0;
+  let lastWalmartPoll = 0;
+  let lastWalmartStatus = systemClock.nowMs();
   let wake: (() => void) | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   const loop = (async () => {
@@ -259,6 +343,8 @@ export async function startDemoUsMarket(input: {
       try {
         await deliver();
         if (systemClock.nowMs() - lastEbay >= EBAY_RECOMPUTE_EVERY_MS) { lastEbay = systemClock.nowMs(); await recomputeEbay(); }
+        if (systemClock.nowMs() - lastWalmartPoll >= WALMART_LIVE_POLL_MS) { lastWalmartPoll = systemClock.nowMs(); await pollWalmart(walmartScopes.map((sc) => sc.sku)); }
+        if (systemClock.nowMs() - lastWalmartStatus >= WALMART_STATUS_EVERY_MS) { lastWalmartStatus = systemClock.nowMs(); await syncWalmartStatuses(); }
         await syncOrders();
       } catch (error) {
         if (!stopped) log(`demo US market tick failed: ${error instanceof Error ? error.message : String(error)}`);

@@ -16,7 +16,7 @@ import type { ConnectionRow, ConnectOutcome, PendingRequestRow, PgChannelConnect
  */
 
 export interface ConnectProvider {
-  channel: 'AMAZON' | 'EBAY';
+  channel: 'AMAZON' | 'EBAY' | 'WALMART';
   /** Витрины, которые умеет приложение платформы; регион — свойство витрины */
   marketplaces: Array<{ id: string; region: 'EU' | 'NA' | null }>;
   /** Нет приложения — нечем подключать: коды того, чего не хватает платформе [Р-150] */
@@ -71,7 +71,8 @@ export function createChannelConnectService(o: {
 
     async start(tenantId, input, actor) {
       const p = byChannel(input.channel);
-      if (!p || !p.provider || p.platformMissing.length > 0) return { status: 'UNAVAILABLE' };
+      // Шаг 89: у Walmart поставщика согласия нет до живого адаптера (W-09) — подключения нет, как у канала без приложения платформы
+      if (!p || !p.provider || p.platformMissing.length > 0 || p.channel === 'WALMART') return { status: 'UNAVAILABLE' };
       const chosen = p.marketplaces.filter((m) => input.marketplaces.includes(m.id));
       const regions = new Set(chosen.map((m) => m.region));
       // Витрины двух регионов одним согласием не авторизовать: у Amazon это разные Seller Central

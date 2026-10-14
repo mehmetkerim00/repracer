@@ -84,6 +84,8 @@ export interface AuditCard {
   actor: string;
   scope: string;
   note: string | null;
+  /** Шаг 89: объяснение события канала — не заметка человека, поэтому без кавычек «Note» */
+  detail?: string | null;
 }
 
 export interface StopView {
@@ -241,7 +243,13 @@ export function stopView(world: StandWorld, audit: readonly ConsoleAuditRow[], m
       active: world.state.distrusts.filter((d) => d.releasedAt === null).map((d) => distrustCard(world, d, m)),
       history: world.state.distrusts.filter((d) => d.releasedAt !== null).map((d) => distrustCard(world, d, m)),
     },
-    audit: audit.map((a): AuditCard => ({
+    audit: audit.map((a): AuditCard => (a.action === 'channel.offer_unpublished' ? {
+      // Шаг 89: событие канала — актёр канал, предмет — предложение словами (название или SKU · витрина), объяснение — почему
+      at: m.when(a.at), action: m.ui.stop.auditActions[a.action],
+      actor: (m.values as Record<string, string | undefined>)[a.channel ?? ''] ?? a.channel ?? m.ui.stop.system,
+      scope: m.ui.common.unitLabel(a.offerName ?? '', storefrontName(a.channel ?? '', a.marketplace ?? '', m)),
+      note: null, detail: m.ui.stop.offerUnpublishedDetail(a.elsewhere ? m.money(a.elsewhere.amountMinor, a.elsewhere.currency) : null),
+    } : {
       at: m.when(a.at),
       action: m.ui.stop.auditActions[a.action],
       actor: a.actorType === 'SYSTEM' || !a.role ? m.ui.stop.system

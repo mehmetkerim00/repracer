@@ -4,6 +4,7 @@ import { AMAZON_DESCRIPTOR } from '@repracer/amazon-adapter';
 import type { ChannelDescriptor } from '@repracer/channel-port';
 import { EBAY_DESCRIPTOR } from '@repracer/ebay-adapter';
 import { KAUFLAND_DESCRIPTOR } from '@repracer/kaufland-adapter';
+import { WALMART_DESCRIPTOR } from '@repracer/walmart-adapter';
 import type { StrategyParams } from '@repracer/pricing-model';
 import { standUserOf } from '@repracer/pricing-pipeline';
 import { createPool, inTenant, PgPricingStore, seedPricingWorld } from '@repracer/pricing-store-pg';
@@ -21,7 +22,8 @@ const provisioning = createPool(PG_URL.replace('svc_app@', 'svc_provisioning@'),
 after(async () => { await pool.end(); await admin.end(); await provisioning.end(); });
 
 // Шаг 47: у eBay есть строка channel_behaviour (0140) и нет источников конкурентов — стратегии по ним недоступны (Р-39)
-const DESCRIPTORS: ChannelDescriptor[] = [KAUFLAND_DESCRIPTOR, AMAZON_DESCRIPTOR, EBAY_DESCRIPTOR];
+// Шаг 89: Walmart — тоже: справочники базы (0186) и описание адаптера обязаны совпадать
+const DESCRIPTORS: ChannelDescriptor[] = [KAUFLAND_DESCRIPTOR, AMAZON_DESCRIPTOR, EBAY_DESCRIPTOR, WALMART_DESCRIPTOR];
 
 test('Р-119, Р-39: platform.channel_behaviour and platform.competitor_source equal the adapter descriptors', async () => {
   const { rows: behaviour } = await pool.query('SELECT channel, halt_release, basis FROM platform.channel_behaviour ORDER BY channel');

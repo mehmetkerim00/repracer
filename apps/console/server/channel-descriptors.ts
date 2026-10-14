@@ -2,6 +2,7 @@ import { AMAZON_DESCRIPTOR } from '@repracer/amazon-adapter';
 import type { ChannelDescriptor } from '@repracer/channel-port';
 import { EBAY_DESCRIPTOR } from '@repracer/ebay-adapter';
 import { KAUFLAND_DESCRIPTOR } from '@repracer/kaufland-adapter';
+import { WALMART_DESCRIPTOR } from '@repracer/walmart-adapter';
 
 /**
  * Описание канала по его коду — одно место для консоли (мир тенанта, демо). Шаг 68: до него консоль знала два канала, и аккаунт eBay
@@ -13,6 +14,8 @@ export function descriptorOf(channel: string): ChannelDescriptor {
     case 'KAUFLAND': return KAUFLAND_DESCRIPTOR;
     case 'AMAZON': return AMAZON_DESCRIPTOR;
     case 'EBAY': return EBAY_DESCRIPTOR;
+    // Шаг 89: Walmart — на симуляторе, по правилам настоящего Walmart (docs/channels/walmart.md)
+    case 'WALMART': return WALMART_DESCRIPTOR;
     default: throw new Error(`no channel descriptor for ${channel}`);
   }
 }

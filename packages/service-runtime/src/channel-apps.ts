@@ -125,7 +125,7 @@ const AMAZON_MARKETPLACES = Object.keys(AMAZON_SELLER_CENTRAL).map((id) => ({ id
 const EBAY_MARKETPLACES = [{ id: 'EBAY_DE', region: null }, { id: 'EBAY_US', region: null }];
 
 export interface ChannelApp {
-  channel: 'AMAZON' | 'EBAY';
+  channel: 'AMAZON' | 'EBAY' | 'WALMART';
   marketplaces: Array<{ id: string; region: 'EU' | 'NA' | null }>;
   platformMissing: string[];
   provider: OAuthProvider | null;
@@ -142,5 +142,7 @@ export function channelApps(c: ChannelAppsConfig): ChannelApp[] {
     c.ebay
       ? { channel: 'EBAY', marketplaces: EBAY_MARKETPLACES, platformMissing: c.ebay.accountDeletionRegistered ? [] : ['EBAY_ACCOUNT_DELETION_ENDPOINT'], provider: ebayOAuth({ environment: c.ebay.environment, clientId: c.ebay.clientId, clientSecret: c.ebay.clientSecret, redirectUri: c.ebay.ruName, scopes: c.ebay.scopes, ...(c.ebay.endpoints ? { endpoints: c.ebay.endpoints } : {}) }) }
       : { channel: 'EBAY', marketplaces: EBAY_MARKETPLACES, platformMissing: ['EBAY_DEVELOPER_KEYS'], provider: null },
+    // Шаг 89: Walmart — на симуляторе; подключение продавцом откроется с живым адаптером после ключей (W-09), до того — «ждёт платформу»
+    { channel: 'WALMART', marketplaces: [{ id: 'WALMART_US', region: null }], platformMissing: ['WALMART_API_KEYS'], provider: null },
   ];
 }

@@ -383,6 +383,11 @@ details.column-picker .menu label { display: flex; align-items: center; gap: var
 details.column-picker .menu label:hover { background: var(--nav-hover); }
 .compact-toggle { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--font-size-sm); color: var(--text); }
 td.status-cell .cell + .cell { margin-top: var(--space-1); }
+/* шаг 89: колонка «Channel says» (снят с публикации Walmart) — длинная пилюля и пояснение переносятся, стратегия тоже: таблица
+   с этой колонкой помещается в рамку при 1440, а без неё вид прежний */
+table.products td.channel-says .cell { min-width: 150px; max-width: 180px; }
+table.products td.channel-says .badge { white-space: normal; }
+table.products.with-channel td.strategy { white-space: normal; min-width: 140px; }
 table.products.compact td { padding-top: 6px; padding-bottom: 6px; }
 table.products.compact .product-ref, table.products.compact .floor-parts, table.products.compact .cell-detail, table.products.compact a.secondary-link { display: none; }
 .product-ref .badge { margin-left: var(--space-1); }

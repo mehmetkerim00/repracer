@@ -43,6 +43,8 @@ export const emptyWorldConnect: ChannelConnectService = {
   connectable: () => [
     { channel: 'AMAZON', platformMissing: [], marketplaces: ['A1PA6795UKMFR9', 'ATVPDKIKX0DER'] },
     { channel: 'EBAY', platformMissing: [], marketplaces: ['EBAY_DE', 'EBAY_US'] },
+    // Шаг 89: Walmart — подключение ждёт ключей платформы, как в работе до живого адаптера
+    { channel: 'WALMART', platformMissing: ['WALMART_API_KEYS'], marketplaces: ['WALMART_US'] },
   ],
   connections: async () => ({ accounts: [], pending: [] }),
   start: async () => ({ status: 'UNAVAILABLE' }),

@@ -1011,8 +1011,12 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
        * базы приходил 500-м. Право на управление тенантом проверяется здесь, а роль владельца для перехода в бой —
        * по-прежнему в базе: консоль не решает, кому это можно, но и не пускает заведомо чужих.
        */
-      if (!can(viewer.role, 'MANAGE_TENANT')) return fail(403, 'FORBIDDEN', m.ui.shadow.errors.notOwner);
       const toMode = body.toMode === 'LIVE' ? 'LIVE' : body.toMode === 'SHADOW' ? 'SHADOW' : null;
+      // Шаг 89 (ADR-0054): обратно в тень — безопасная сторона, право матрицы RETURN_TO_SHADOW (и у менеджера); в бой — управление
+      // аккаунтом канала (владелец), и база сверх того требует роль владельца и второй фактор [Р-170]
+      if (!can(viewer.role, toMode === 'SHADOW' ? 'RETURN_TO_SHADOW' : 'MANAGE_TENANT')) {
+        return fail(403, 'FORBIDDEN', toMode === 'SHADOW' ? m.ui.shadow.errors.noShadowRight : m.ui.shadow.errors.notOwner);
+      }
       if (typeof body.channelAccountId !== 'string' || toMode === null) return fail(400, 'BAD_REQUEST', s.badRequest);
       const outcome = await live.shadow.switchWriteMode(world.tenantId, {
         channelAccountId: body.channelAccountId, toMode,
@@ -1023,7 +1027,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       const e = m.ui.shadow.errors;
       if (outcome.status === 'SWITCHED') return ok({ mode: outcome.mode, message: outcome.mode === 'LIVE' ? e.live : e.shadow });
       if (outcome.status === 'MFA_REQUIRED') return fail(403, 'MFA_REQUIRED', e.mfa);
-      if (outcome.status === 'NOT_OWNER') return fail(403, 'FORBIDDEN', e.notOwner);
+      if (outcome.status === 'NOT_OWNER') return fail(403, 'FORBIDDEN', toMode === 'SHADOW' ? e.noShadowRight : e.notOwner);
       if (outcome.status === 'CONFIRMATION_MISMATCH') return fail(400, 'CONFIRMATION_MISMATCH', e.confirmation);
       if (outcome.status === 'MODE_MISMATCH') return fail(409, 'MODE_MISMATCH', e.modeMismatch);
       /**

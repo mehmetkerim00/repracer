@@ -123,7 +123,7 @@ cat << EOF
 Демо готово: http://127.0.0.1:5173 — профиль ${MARKET}, подготовка ${SECONDS} с: база ${t_db} с, стенд ${t_stand} с (из них неделя США ${pressed:-?}), интерфейс ${t_ui} с, первые решения ${t_first} с
   - вход: «Owner» (владелец); в профиле us язык один — английский, переключателя нет;
   - мир: «Demo» с пометкой DEMO; сценарий показа — docs/demo-script.md;
-  - неделя тени США (ebay.com, amazon.com, доллары) прожата; недельное письмо — экран «Shadow mode», блок «Weekly email — preview».
+  - неделя тени США (amazon.com, ebay.com, walmart.com, доллары) прожата; недельное письмо — экран «Shadow mode», блок «Weekly email — preview».
 Доказательство тени из базы (шаг «а» сценария) — записи демо-тенанта: удержано тенью и отправлено в канал:
   psql -d ${DB} -c "SELECT final_status, count(*) AS writes, count(dispatched_at) AS sent_to_channel FROM tenant_data.channel_write_history WHERE tenant_id IN ${DEMO_TENANT} GROUP BY 1"
 Журналы: ${LOGS}/stand.log, ${LOGS}/ui.log. Ctrl+C — остановить.

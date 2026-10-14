@@ -141,7 +141,7 @@ export async function startDemoWorld(options: DemoWorldOptions): Promise<Running
     const { startDemoUsMarket } = await import('./demo-us.ts');
     usMarket = await startDemoUsMarket({
       pools: { admin: pools.admin, scheduler: pools.scheduler }, store,
-      accounts: { tenantId: seeded.tenantId, userId: seeded.userId, ownerMembershipId: seeded.ownerMembershipId, ebayAccountId: us.ebay, amazonAccountId: us.amazon },
+      accounts: { tenantId: seeded.tenantId, userId: seeded.userId, ownerMembershipId: seeded.ownerMembershipId, ebayAccountId: us.ebay, amazonAccountId: us.amazon, walmartAccountId: us.walmart },
       pressDays: options.usPressDays ?? 0, log,
     });
   }
@@ -214,19 +214,23 @@ export const DEMO_US_OFFERS = 12;
 async function addUsAccounts(pools: DemoWorldPools, seeded: { tenantId: string; userId: string; ownerMembershipId: string },
   store: { recordDiscoveredOffers(tenantId: string, channelAccountId: string, offers: never[]): Promise<number> },
   /** Шаг 87: аккаунт amazon.com уже заведён посевом американского демо — заводится только eBay */
-  existingAmazon: string | null = null):
-  Promise<{ ebay: string; amazon: string; accounts: Array<{ channelAccountId: string; channel: string; marketplaces: string[]; haltRelease: 'SAMPLE' | 'MANUAL_ONLY' }> }> {
+  existingAmazon: string | null = null,
+  /** Шаг 89: американское демо — и walmart.com (на симуляторе) */
+  withWalmart = false):
+  Promise<{ ebay: string; amazon: string; walmart: string | null; accounts: Array<{ channelAccountId: string; channel: string; marketplaces: string[]; haltRelease: 'SAMPLE' | 'MANUAL_ONLY' }> }> {
   const { randomUUID } = await import('node:crypto');
   const { inTenant } = await import('@repracer/pricing-store-pg');
   const ebay = randomUUID();
   const amazon = existingAmazon ?? randomUUID();
+  const walmart = withWalmart ? randomUUID() : null;
   /**
    * Ревью шага 64, находка 2: внешний идентификатор аккаунта уникален по всей платформе среди неотключённых, а прежний демо-тенант
    * остаётся в базе. Постоянный идентификатор ронял каждый пересев (23505) и старт консоли на той же базе — у каждого посева свой
    */
   const suffix = seeded.tenantId.replace(/-/g, '').slice(0, 8);
   await inTenant(pools.admin, seeded.tenantId, async (tx) => {
-    const rows = [[ebay, 'EBAY', null, `syn_demo_ebay_us_${suffix}`, 'EBAY_US'], [amazon, 'AMAZON', 'NA', `A1SYNDEMOUS${suffix.toUpperCase()}`, 'ATVPDKIKX0DER']] as const;
+    const rows = [[ebay, 'EBAY', null, `syn_demo_ebay_us_${suffix}`, 'EBAY_US'], [amazon, 'AMAZON', 'NA', `A1SYNDEMOUS${suffix.toUpperCase()}`, 'ATVPDKIKX0DER'],
+      ...(walmart ? [[walmart, 'WALMART', null, `syn-demo-walmart-${suffix}`, 'WALMART_US']] : [])] as const;
     for (const [id, channel, region, external, marketplace] of rows.filter((r) => !(existingAmazon && r[1] === 'AMAZON'))) {
       await tx.query(
         `INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, region, external_account_id, marketplaces, credentials_ref, connected_by_membership_id)
@@ -242,11 +246,19 @@ async function addUsAccounts(pools: DemoWorldPools, seeded: { tenantId: string; 
     marketplace: 'ATVPDKIKX0DER', externalSku: `SYN-DEMO-US-AMZ-${n(i)}`, externalUnitId: null, externalOfferId: null, channelProductRef: `B0DEMOUS${n(i)}`,
     gtin: null, condition: 'new', fulfillment: 'MERCHANT',
   })) as never[]);
+  // Шаг 89: walmart.com — 12 предложений; ссылка на товар у Walmart — SKU продавца (опрос Buy Box спрашивает по нему, W-05)
+  if (walmart) {
+    await store.recordDiscoveredOffers(seeded.tenantId, walmart, Array.from({ length: DEMO_US_OFFERS }, (_, i) => ({
+      marketplace: 'WALMART_US', externalSku: `SYN-DEMO-US-WMT-${n(i)}`, externalUnitId: null, externalOfferId: null, channelProductRef: `SYN-DEMO-US-WMT-${n(i)}`,
+      gtin: null, condition: 'new', fulfillment: 'MERCHANT',
+    })) as never[]);
+  }
   return {
-    ebay, amazon,
+    ebay, amazon, walmart,
     accounts: [
       { channelAccountId: ebay, channel: 'EBAY', marketplaces: ['EBAY_US'], haltRelease: 'MANUAL_ONLY' },
       { channelAccountId: amazon, channel: 'AMAZON', marketplaces: ['ATVPDKIKX0DER'], haltRelease: 'MANUAL_ONLY' },
+      ...(walmart ? [{ channelAccountId: walmart, channel: 'WALMART', marketplaces: ['WALMART_US'], haltRelease: 'MANUAL_ONLY' as const }] : []),
     ],
   };
 }
@@ -315,7 +327,7 @@ async function startUsDemoWorld(options: DemoWorldOptions): Promise<RunningDemoW
   const actor = { membershipId: seeded.ownerMembershipId, userId: seeded.userId, mfa: true };
   const pathSaved = await store.saveOnboardingProgress(seeded.tenantId, { path: 'STOCK_AND_PRICING' }, actor);
   if (pathSaved !== 'SAVED') throw new Error(`demo onboarding path refused: ${pathSaved}`);
-  const us = await addUsAccounts(pools, seeded, store as never, seeded.channelAccountId);
+  const us = await addUsAccounts(pools, seeded, store as never, seeded.channelAccountId, true);
 
   // Остатки: склад, инвентаризация каждого товара, синхронизация количества amazon.com (вопрос о других инструментах — «нет»)
   const stock = new PgStockStore({ adminPool: pools.admin, stockPool: pools.stock });
@@ -336,7 +348,7 @@ async function startUsDemoWorld(options: DemoWorldOptions): Promise<RunningDemoW
 
   const usMarket = await startDemoUsMarket({
     pools: { admin: pools.admin, scheduler: pools.scheduler }, store,
-    accounts: { tenantId: seeded.tenantId, userId: seeded.userId, ownerMembershipId: seeded.ownerMembershipId, ebayAccountId: us.ebay, amazonAccountId: us.amazon },
+    accounts: { tenantId: seeded.tenantId, userId: seeded.userId, ownerMembershipId: seeded.ownerMembershipId, ebayAccountId: us.ebay, amazonAccountId: us.amazon, walmartAccountId: us.walmart },
     pressDays: options.usPressDays ?? 0, log,
     orders: { pipeline: stockPipeline, skus: skus.filter((sku) => sku.includes('-AMZ-')) },
   });
@@ -344,7 +356,7 @@ async function startUsDemoWorld(options: DemoWorldOptions): Promise<RunningDemoW
   const nowIso = () => systemClock.now();
   const descriptor = {
     id: 'demo/us', title: 'Demo · amazon.com (Simulator)', tenantId: seeded.tenantId, accounts,
-    description: `${DEMO_US_OFFERS} offers on amazon.com and ${DEMO_US_OFFERS} on ebay.com, a warehouse in Newark, Delaware`,
+    description: `${DEMO_US_OFFERS} offers each on amazon.com, ebay.com and walmart.com, a warehouse in Newark, Delaware`,
   };
   const world = {
     id: descriptor.id, title: descriptor.title, description: descriptor.description,
@@ -372,7 +384,7 @@ async function startUsDemoWorld(options: DemoWorldOptions): Promise<RunningDemoW
   }, () => stopWorker)
     .catch((error: unknown) => { if (!stopped) log(`demo bulk worker stopped: ${error instanceof Error ? error.message : String(error)}`); });
   void worker;
-  log(`demo tenant ready (market us): ${DEMO_US_OFFERS} offers on amazon.com, ${DEMO_US_OFFERS} on ebay.com, warehouse ${DEMO_US_WAREHOUSE}`);
+  log(`demo tenant ready (market us): ${DEMO_US_OFFERS} offers each on amazon.com, ebay.com and walmart.com, warehouse ${DEMO_US_WAREHOUSE}`);
   return {
     world, tenantId: seeded.tenantId,
     stop() {

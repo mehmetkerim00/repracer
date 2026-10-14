@@ -1495,6 +1495,18 @@ export const STEP41_ROWS = [
     ],
   },
   {
+    /**
+     * Шаг 89 (ADR-0054, решение владельца): обратно в тень — право матрицы RETURN_TO_SHADOW (владелец, менеджер, прежний администратор).
+     * До шага ту же границу держал и общий страж административной записи аккаунта (MANAGE_TENANT) — ветка журнала была дублем; теперь
+     * смену режима общий страж оставляет журналу (0186), и ветка — единственная, кто не пускает наблюдателя
+     */
+    row: 'шаг 89 (ADR-0054)', invariant: 'обратно в тень переводит только роль с правом RETURN_TO_SHADOW: менеджер — да, наблюдатель — нет',
+    mutations: [
+      m(replaceInFunction('tenant_data.channel_write_mode_change_guard()', "ELSIF NOT security.pricing_permission(m.role, 'RETURN_TO_SHADOW') THEN", 'ELSIF false THEN'),
+        node(T('roles-step89.pg.test.ts'), 'a manager switches a live account back to shadow', 'step 89: a viewer does not switch an account back to SHADOW', '^SWITCHED$')),
+    ],
+  },
+  {
     row: 'Р-170', critical: true,
     invariant: 'режим переключает строка журнала: направление, текущий режим, роль владельца, второй фактор и набранное подтверждение',
     mutations: [

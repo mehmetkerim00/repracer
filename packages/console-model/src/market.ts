@@ -14,8 +14,8 @@ export type MarketProfile = (typeof MARKET_PROFILES)[number];
 /** Профиль по умолчанию — первый рынок продукта [Р-214] */
 export const DEFAULT_MARKET_PROFILE: MarketProfile = 'us';
 
-/** Витрины США: amazon.com и ebay.com. Остальные наши витрины — Европа (amazon.de, ebay.de, kaufland.de и .at) */
-export const US_STOREFRONTS: Readonly<Record<string, readonly string[]>> = { AMAZON: ['ATVPDKIKX0DER'], EBAY: ['EBAY_US'] };
+/** Витрины США: amazon.com, ebay.com и (шаг 89) walmart.com. Остальные наши витрины — Европа (amazon.de, ebay.de, kaufland.de и .at) */
+export const US_STOREFRONTS: Readonly<Record<string, readonly string[]>> = { AMAZON: ['ATVPDKIKX0DER'], EBAY: ['EBAY_US'], WALMART: ['WALMART_US'] };
 
 export interface MarketScope {
   profile: MarketProfile;
@@ -30,9 +30,10 @@ export interface MarketScope {
 }
 
 const SCOPES: Readonly<Record<MarketProfile, MarketScope>> = {
-  us: { profile: 'us', channels: ['AMAZON', 'EBAY'], locales: ['en'], omnibus: false, currencies: ['USD'] },
+  // Шаг 89: Walmart — канал рынка США; в профиле eu его нет (витрина одна — walmart.com)
+  us: { profile: 'us', channels: ['AMAZON', 'EBAY', 'WALMART'], locales: ['en'], omnibus: false, currencies: ['USD'] },
   eu: { profile: 'eu', channels: ['KAUFLAND', 'AMAZON', 'EBAY'], locales: ['de', 'en'], omnibus: true, currencies: ['EUR'] },
-  global: { profile: 'global', channels: ['KAUFLAND', 'AMAZON', 'EBAY'], locales: ['de', 'en'], omnibus: true, currencies: ['EUR', 'USD'] },
+  global: { profile: 'global', channels: ['KAUFLAND', 'AMAZON', 'EBAY', 'WALMART'], locales: ['de', 'en'], omnibus: true, currencies: ['EUR', 'USD'] },
 };
 
 export function isMarketProfile(value: unknown): value is MarketProfile {

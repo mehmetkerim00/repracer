@@ -81,7 +81,7 @@ export function stockTraps(world: StandWorld, m: Messages): StockTrap[] {
     channel: a.channel, channelAccountId: a.channelAccountId,
     // Шаг 64: у amazon.com — регион Северная Америка, а не ЕС: продавцу из США нельзя называть amazon.fr, .it, .es
     text: a.channel === 'AMAZON' ? (a.marketplaces.includes('ATVPDKIKX0DER') ? t.AMAZON_NA : t.AMAZON) : a.channel === 'KAUFLAND' ? t.KAUFLAND
-      : t.generic((m.values as Record<string, string | undefined>)[a.channel] ?? a.channel),
+      : a.channel === 'WALMART' ? t.WALMART : t.generic((m.values as Record<string, string | undefined>)[a.channel] ?? a.channel),
     requiresAck: a.channel === 'AMAZON',
   }));
 }

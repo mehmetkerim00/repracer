@@ -85,21 +85,22 @@ test('шаг 64: демо с профилем США — аккаунты eBay U
   assert.ok(demo, `демо-мир в списке: ${JSON.stringify(worlds.body)}`);
   const screen = await call<ConnectionsView>('GET', `/api/worlds/${encodeURIComponent(demo.id)}/connections`, guest);
   assert.equal(screen.status, 200, JSON.stringify(screen.body).slice(0, 300));
-  // Шаг 87: у американского демо аккаунтов ровно два — amazon.com и ebay.com; Kaufland и Amazon ЕС «ожидает доступа» нет вовсе
-  const us = screen.body.accounts.filter((a) => a.marketplaces.includes('EBAY_US') || a.marketplaces.includes('ATVPDKIKX0DER'));
-  assert.deepEqual(us.map((a) => a.channel).sort(), ['AMAZON', 'EBAY'], `аккаунты витрин США на экране подключений: ${JSON.stringify(screen.body.accounts.map((a) => a.channel))}`);
-  assert.equal(screen.body.accounts.length, 2, `кроме витрин США аккаунтов нет: ${JSON.stringify(screen.body.accounts.map((a) => [a.channel, a.marketplaces]))}`);
+  // Шаг 87: у американского демо аккаунты только витрин США — amazon.com и ebay.com, с шага 89 и walmart.com; Kaufland и Amazon ЕС нет вовсе
+  const us = screen.body.accounts.filter((a) => a.marketplaces.includes('EBAY_US') || a.marketplaces.includes('ATVPDKIKX0DER') || a.marketplaces.includes('WALMART_US'));
+  assert.deepEqual(us.map((a) => a.channel).sort(), ['AMAZON', 'EBAY', 'WALMART'], `аккаунты витрин США на экране подключений: ${JSON.stringify(screen.body.accounts.map((a) => a.channel))}`);
+  assert.equal(screen.body.accounts.length, 3, `кроме витрин США аккаунтов нет: ${JSON.stringify(screen.body.accounts.map((a) => [a.channel, a.marketplaces]))}`);
   for (const a of us) {
     assert.equal(a.state, 'SHADOW', `${a.channel}: аккаунт рождён в тени`);
     assert.equal(a.offers, 12, `${a.channel}: каталог из обнаружения — ${a.progressText}`);
     assert.equal(a.otherTools.question, 'Does another tool update stock or prices in this channel?');
     // Шаг 87: остатки amazon.com ведёт склад демо — владелец ответил «других инструментов нет» и подтвердил запись количества [Р-202];
-    // у ebay.com вопрос не отвечен: на нём сценарий показа отвечает «Yes — stock»
+    // у ebay.com вопрос не отвечен: на нём сценарий показа отвечает «Yes — stock». Шаг 89: у walmart.com запись количества тоже
+    // выключена до подтверждения владельца — внешние писатели по умолчанию [Р-202]
     const amazon = a.channel === 'AMAZON';
     assert.equal(a.otherTools.answer, amazon ? 'NONE' : null, `${a.channel}: ответ о других инструментах`);
     assert.equal(a.quantityWrites.confirmed, amazon, `${a.channel}: запись количества ${amazon ? 'подтверждена' : 'выключена до подтверждения владельца'}`);
     // Проход консоли (шаг 64): аккаунт назван словами — «eBay · … · ebay.com», а не кодами канала и витрины
-    assert.ok(!/\bEBAY\b|EBAY_US|ATVPDKIKX0DER/.test(a.label), `${a.channel}: подпись аккаунта кодами: ${a.label}`);
+    assert.ok(!/\bEBAY\b|EBAY_US|ATVPDKIKX0DER|WALMART_US|\bWALMART\b/.test(a.label), `${a.channel}: подпись аккаунта кодами: ${a.label}`);
   }
   // Гость — наблюдатель: ответить на вопрос о других инструментах не может [Р-160]
   const answered = await call<{ error: { code: string } }>('POST', `/api/worlds/${encodeURIComponent(demo.id)}/connections/other-tools`, guest,
@@ -254,6 +255,41 @@ test('шаг 87: демо профиля us — американский про�
   const bounds = (await call<{ feeEstimates: Array<{ text: string }> }>('GET', `/api/worlds/${w}/bounds/${amazon.writeScopeId}`, guest)).body;
   assert.ok(bounds.feeEstimates.some((f) => /\(\d{4}-\d{2}\)$/.test(f.text)) && !bounds.feeEstimates.some((f) => /synthetic/.test(f.text)),
     `версия тарифа — месяц действия: ${JSON.stringify(bounds.feeEstimates)}`);
+});
+
+/**
+ * Шаг 89: walmart.com в американском демо — 12 предложений в долларах рядом с amazon.com и ebay.com, конкуренты — опрос Buy Box модели
+ * канала по правилам настоящего Walmart. Два предложения (03 и 07) Walmart снял с публикации правилом неконкурентной цены: их цена $24.99,
+ * тот же товар в другом месте — $19.99. Это видно состоянием у предложения (Offers) и событием журнала (Stop pricing) — с объяснением и без
+ * обещания, что движок это починит: решение за владельцем
+ */
+test('шаг 89: walmart.com в демо — два предложения сняты с публикации неконкурентной ценой: состояние у предложения и событие в журнале', async () => {
+  const issued = await fetch(`${origin}/api/demo/guest`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  const guest = ((await issued.json()) as StandToken).accessToken;
+  const w = encodeURIComponent((await call<WorldSummary[]>('GET', '/api/worlds', guest)).body[0]!.id);
+  const products = (await call<{ rows: Array<{ unit: UnitRef; currentPrice: string; channelNotes: Array<{ code: string; label: string; detail: string }> }> }>(
+    'GET', `/api/worlds/${w}/products?offset=0&limit=50`, guest)).body;
+  const walmart = products.rows.filter((r) => r.unit.label.endsWith('· walmart.com'));
+  assert.equal(walmart.length, 12, `предложения walmart.com: ${JSON.stringify(products.rows.map((r) => r.unit.label))}`);
+  assert.ok(walmart.every((r) => r.currentPrice.startsWith('$')), 'walmart.com — в долларах');
+  const unpublished = walmart.filter((r) => r.channelNotes.some((n) => n.code === 'WALMART_UNPUBLISHED'));
+  assert.equal(unpublished.length, 2, `сняты с публикации: ${JSON.stringify(walmart.map((r) => [r.unit.label, r.channelNotes.map((n) => n.code)]))}`);
+  for (const r of unpublished) {
+    const note = r.channelNotes.find((n) => n.code === 'WALMART_UNPUBLISHED')!;
+    assert.equal(note.label, 'Unpublished (uncompetitive price)');
+    assert.match(note.detail, /cheaper elsewhere \(\$19\.99\)/, 'объяснение называет цену в другом месте');
+    assert.match(note.detail, /repracer does not change the price for you here/, 'и не обещает, что движок это починит');
+  }
+  // Журнал «Stop pricing»: событие канала — Walmart, какое предложение и почему
+  const stop = (await call<{ audit: Array<{ action: string; actor: string; scope: string; detail?: string | null }> }>('GET', `/api/worlds/${w}/stop`, guest)).body;
+  const events = stop.audit.filter((a) => a.action === 'Offer unpublished: uncompetitive price');
+  assert.equal(events.length, 2, JSON.stringify(stop.audit.map((a) => a.action)));
+  assert.ok(events.every((e) => e.actor === 'Walmart' && e.scope.endsWith('· walmart.com') && /\$19\.99/.test(e.detail ?? '')), JSON.stringify(events));
+  // Тень считает и walmart.com: аккаунт в тени, решения есть (опрос Buy Box прожатой недели)
+  const shadow = (await call<ShadowView>('GET', `/api/worlds/${w}/shadow`, guest)).body;
+  const account = shadow.accounts.find((a) => a.label.startsWith('Walmart · '));
+  assert.ok(account, `аккаунт walmart.com на экране тени: ${JSON.stringify(shadow.accounts.map((a) => a.label))}`);
+  assert.equal(account.writeMode, 'SHADOW');
 });
 
 test('шаг 64: перезапуск консоли на той же базе пересевает демо с аккаунтами США, а не падает на старте', async () => {

@@ -17,12 +17,14 @@ test('step 87: the deployment market profile is us unless set, and a wrong value
 
 test('step 87: the us profile offers amazon.com and ebay.com in English without Omnibus; eu keeps the European offer whole', () => {
   const us = marketScope('us'), eu = marketScope('eu'), global = marketScope('global');
-  assert.deepEqual([us.channels, us.locales, us.omnibus, us.currencies], [['AMAZON', 'EBAY'], ['en'], false, ['USD']]);
+  // Шаг 89: Walmart — канал рынка США, только в us и global
+  assert.deepEqual([us.channels, us.locales, us.omnibus, us.currencies], [['AMAZON', 'EBAY', 'WALMART'], ['en'], false, ['USD']]);
   assert.deepEqual([eu.channels, eu.locales, eu.omnibus], [['KAUFLAND', 'AMAZON', 'EBAY'], ['de', 'en'], true]);
   const cases: Array<[string, string, boolean, boolean, boolean]> = [
     // канал, витрина, us, eu, global
     ['AMAZON', 'ATVPDKIKX0DER', true, false, true],
     ['EBAY', 'EBAY_US', true, false, true],
+    ['WALMART', 'WALMART_US', true, false, true],
     ['AMAZON', 'A1PA6795UKMFR9', false, true, true],
     ['EBAY', 'EBAY_DE', false, true, true],
     ['KAUFLAND', 'de', false, true, true],

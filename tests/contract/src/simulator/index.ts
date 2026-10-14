@@ -5,3 +5,5 @@ export { AMAZON_PARAMETERS, defaultAmazonParams, defaultEbayParams, defaultKaufl
 export { SeededRandom } from './random.ts';
 /** Шаг 47: транспорт fetch поверх модели канала — для адаптера, собранного вне стенда сценариев (прогон пилота eBay) */
 export { channelFetch, type TraceEntry } from '../harness/channel.ts';
+/** Шаг 89: модель Walmart Marketplace (HTTP): корзины токенов с заголовками, правило неконкурентной цены, три конкурента Buy Box */
+export { defaultWalmartParams, SimulatedWalmartChannel, WALMART_PARAMETERS, type WalmartCompetitorBehaviour, type WalmartItemSpec, type WalmartModelParams, type WalmartModelSpec, type WalmartSimulatorStats } from './walmart-channel.ts';

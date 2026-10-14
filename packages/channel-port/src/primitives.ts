@@ -12,7 +12,7 @@ export type ChannelWriteId = Brand<string, 'ChannelWriteId'>;
 /** Момент времени, ISO-8601 в UTC. Строка — чтобы типы порта без потерь проходили через брокер. */
 export type Instant = string;
 
-export type Channel = 'AMAZON' | 'EBAY' | 'KAUFLAND' | 'OTTO';
+export type Channel = 'AMAZON' | 'EBAY' | 'KAUFLAND' | 'OTTO' | 'WALMART';
 
 /** Поле единицы записи (tenant_data.write_scope.field) */
 export type ScopeField = 'PRICE' | 'QUANTITY';

@@ -275,7 +275,7 @@ const values: Record<ValueKey, string> = {
   CHANNEL_MASS_SHIFT: 'mass price shift', UP: 'up', DOWN: 'down',
   PRICE_BASIS_MISMATCH: 'wrong price basis', TAX_ADDED: 'added on top', TAX_REMOVED: 'taken out',
   COST: 'unit cost', INTERNAL: 'other offers in the snapshot', CROSS_CHANNEL: 'the same EAN on another channel', HISTORY: 'price history', LAST_ACCEPTED: 'the last accepted snapshot',
-  KAUFLAND: 'Kaufland', AMAZON: 'Amazon', EBAY: 'eBay', OTTO: 'Otto', UNKNOWN_CHANNEL: 'unknown channel',
+  KAUFLAND: 'Kaufland', AMAZON: 'Amazon', EBAY: 'eBay', OTTO: 'Otto', WALMART: 'Walmart', UNKNOWN_CHANNEL: 'unknown channel',
   FX_RATE_UNAVAILABLE: 'no ECB rate', FX_RATE_STALE: 'the ECB rate is outdated', UNSUPPORTED_CURRENCY: 'the currency is not supported', INVALID_INPUT: 'the cost data is invalid',
   FIXED: 'fixed price', TARGET_MARGIN: 'target margin', MATCH_BUYBOX: 'follow the Buy Box', BEAT_LOWEST: 'beat the lowest price', POSITION: 'position',
   VISIBLE_TOP_N: 'visible offers', MARKET: 'whole market',
@@ -386,7 +386,7 @@ export const en = {
       // Шаг 64 (проход консоли): имя и описание демо-мира на языке интерфейса, а не строкой посева по-немецки
       demoWorldTitle: 'Demo store (simulator)', demoWorldDescription: 'Synthetic store on the channel simulator: every offer has three competitors — one drifting, one undercutting, one in price waves.',
       /** Шаг 87 [Р-214]: демо профиля us — американский продавец */
-      demoWorldDescriptionUs: 'Synthetic American seller on the channel simulator: offers on amazon.com and ebay.com, a warehouse in Newark, Delaware.',
+      demoWorldDescriptionUs: 'Synthetic American seller on the channel simulator: offers on amazon.com, ebay.com and walmart.com, a warehouse in Newark, Delaware.',
       demoBadge: 'Demo', demoBanner: 'Demo workspace: synthetic data, real path. Every amount is made up.',
       languages: { de: 'Deutsch', en: 'English' },
       worlds: 'Your workspaces',
@@ -546,6 +546,11 @@ export const en = {
       channelBoundsDetail: (when: string) => `The offer has minimum/maximum seller allowed prices in the channel (seen ${when}): a second set of bounds we do not write`,
       pricingHealth: (issue: string) => `Channel: ${issue}`,
       pricingHealthDetail: (when: string, threshold: string | null) => `The offer lost the Featured Offer because of its price (${when})${threshold ? `; competitive price threshold of the channel ${threshold}` : ''}`,
+      /** Шаг 89: Walmart снял предложение с публикации — правило неконкурентной цены; движок за это цену не меняет */
+      unpublished: 'Unpublished (uncompetitive price)',
+      /** Шаг 89: строка таблицы — коротко; полное объяснение — подсказкой и в журнале */
+      unpublishedShort: (when: string, elsewhere: string | null) => `${elsewhere ? `Cheaper elsewhere: ${elsewhere}.` : 'Cheaper elsewhere.'} Since ${when}; repracer does not change the price here.`,
+      unpublishedDetail: (when: string, elsewhere: string | null) => `Walmart took this offer off walmart.com on ${when}: the same product is cheaper elsewhere${elsewhere ? ` (${elsewhere})` : ''} — on another channel or sold by Walmart itself — and shoppers on walmart.com no longer see it. Bring the walmart.com price close to that price and Walmart publishes the offer again; repracer does not change the price for you here.`,
     },
     applying: {
       idle: 'Nothing in progress', idleDetail: 'Every decided price reached the channel or ended with a reason',
@@ -673,6 +678,8 @@ export const en = {
         KAUFLAND: 'Kaufland: the stock is shared by all storefronts of the same Kaufland offer ID. One value for de and at; the order in which storefronts apply it is not guaranteed.',
         // Шаг 64: у amazon.com регион — Северная Америка; текст про amazon.fr, .it, .es продавцу из США неверен (A-16 открыт)
         AMAZON_NA: 'Amazon: we treat the MFN stock as ONE value per SKU for the whole Amazon region of the account — for amazon.com that is North America. A write for amazon.com may change the stock of your other North American storefronts too: Amazon has not confirmed the scope yet, so we assume the wider one. Enabling requires your confirmation.',
+        // Шаг 89: у Walmart область цены и остатка одна (аккаунт + витрина + SKU); неизвестное — склады продавца (W-04)
+        WALMART: 'Walmart: we write ONE stock value per SKU on walmart.com — to the default ship node of the account. If you ship from several Walmart ship nodes, Walmart has not confirmed how that value applies to them — check it before enabling.',
         generic: (channel: string) => `${channel}: the write scope of stock is wider than the write scope of price — check it before enabling.`,
       },
       sources: {
@@ -839,10 +846,12 @@ export const en = {
         ATVPDKIKX0DER: 'amazon.com',
         EBAY_DE: 'ebay.de',
         EBAY_US: 'ebay.com',
+        WALMART_US: 'walmart.com',
       } as Record<string, string | undefined>,
       missing: {
         AMAZON_APPLICATION: 'our Amazon application (SP-API) is not registered yet',
         EBAY_DEVELOPER_KEYS: 'our eBay developer keys are not issued yet',
+        WALMART_API_KEYS: 'our Walmart API keys are not issued yet — until then Walmart runs on the simulator',
         EBAY_ACCOUNT_DELETION_ENDPOINT: 'eBay account deletion notifications are not received for this region — eBay cannot be connected until our address is registered in the eBay developer portal',
       } as Record<string, string | undefined>,
       failures: {
@@ -909,6 +918,8 @@ export const en = {
         shadow: 'Back in the shadow: nothing is written to the channel any more.',
         mfa: 'Switching on live writes needs your second factor. Sign in again with it and repeat.',
         notOwner: 'Only the owner of the account switches on live writes.',
+        /** Шаг 89: обратно в тень — право владельца и менеджера */
+        noShadowRight: 'Only the owner or a manager switches an account back to shadow mode.',
         confirmation: 'The typed text does not match the account name. Type it exactly as shown.',
         marketplacesInvisible: (list: string) => `Live writes stay closed: this account names no storefront we know (${list || 'none named'}). Connect its storefronts, or it stays in the shadow.`,
         /** Шаг 68 (K2): отказ перевода в бой — витрина словами, что не подтверждено и кто подтверждает */
@@ -1497,7 +1508,7 @@ export const en = {
       kinds: {
         HUMAN: { title: 'Stop by a person', holds: 'All prices', setBy: 'Owner or manager, with a note', release: 'Owner or manager, with a note; the whole workspace — with a second factor' },
         SYSTEM_HALT: { title: 'Storefront halt', holds: 'Only competitor-derived prices', setBy: 'System: broken input data', release: 'Fresh sample where the channel allows it, otherwise a person' },
-        CHANNEL_DISTRUST: { title: 'Channel distrust', holds: 'All prices and the channel price threshold', setBy: 'System: the channel changes our numbers', release: 'Only a person: owner or manager, second factor, note' },
+        CHANNEL_DISTRUST: { title: 'Channel distrust', holds: 'All prices and the channel price threshold', setBy: 'System: the channel changes our numbers', release: 'Only a person: the owner, second factor, note' },
       },
       running: 'Running', stopped: 'Stopped', stoppedAt: (when: string) => `stopped ${when}`, coveredBy: (label: string, since: string) => `Stopped by: ${label} since ${since}`,
       stopTenant: 'Stop the whole workspace', stopTarget: 'Stop', resume: 'Resume', release: 'Release',
@@ -1511,9 +1522,11 @@ export const en = {
       releasedBy: (when: string, who: string, note: string) => `${when} by ${who}${note ? `: “${note}”` : ''}`,
       haltReview: (when: string) => `Fresh sample check after ${when}`, haltReleasedAuto: (when: string) => `automatically by a fresh sample ${when}`,
       notStopped: ['Stock synchronization', 'A write already sent to the channel: its outcome is accepted'],
-      auditTitle: 'Audit log: stops and roles',
-      auditEmpty: 'No stops or role changes yet. Every stop, resume and role change is listed here with its author.',
-      auditActions: { 'pricing.stop_created': 'Pricing stopped', 'pricing.stop_released': 'Pricing resumed', 'pricing.halt_created': 'Storefront halted by the system', 'pricing.halt_released': 'Storefront halt released', 'pricing.distrust_created': 'Channel distrusted by the system — all prices held', 'pricing.distrust_released': 'Distrust of the channel released', 'membership.role_changed': 'Role changed' },
+      auditTitle: 'Audit log: stops, roles and channel events',
+      auditEmpty: 'No stops, role changes or channel events yet. Every stop, resume and role change is listed here with its author, and every offer a channel took off sale with the reason.',
+      auditActions: { 'pricing.stop_created': 'Pricing stopped', 'pricing.stop_released': 'Pricing resumed', 'pricing.halt_created': 'Storefront halted by the system', 'pricing.halt_released': 'Storefront halt released', 'pricing.distrust_created': 'Channel distrusted by the system — all prices held', 'pricing.distrust_released': 'Distrust of the channel released', 'membership.role_changed': 'Role changed', 'channel.offer_unpublished': 'Offer unpublished: uncompetitive price' },
+      /** Шаг 89: почему канал снял предложение — словами и с ценой «в другом месте», если канал её назвал */
+      offerUnpublishedDetail: (elsewhere: string | null) => `The same product is cheaper elsewhere${elsewhere ? ` (${elsewhere})` : ''} — on another channel or sold by Walmart itself. repracer does not change the price for you here.`,
       /** Шаг 88 [Р-213]: чья роль и как сменилась — прежняя и новая роль; в памяти стенда адреса участника нет */
       roleChanged: (member: string | null, from: string, to: string) => (member ? `${member}: ${from} → ${to}` : `${from} → ${to}`),
       system: 'System',

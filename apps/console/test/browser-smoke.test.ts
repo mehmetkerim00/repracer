@@ -349,6 +349,8 @@ test('step 87: the us market profile shows no German, no Omnibus, no Kaufland an
     await settled(b, 'us connections');
     const connectText = await b.evaluate<string>('document.body.innerText');
     assert.ok(connectText.includes('amazon.com') && connectText.includes('ebay.com'), `us: amazon.com and ebay.com are offered — ${connectText.slice(0, 300)}`);
+    // Шаг 89: Walmart — канал рынка США; подключить его нельзя, пока у платформы нет ключей, и экран говорит это словами
+    assert.ok(/\bWalmart\b/.test(connectText) && connectText.includes(en.ui.connections.missing.WALMART_API_KEYS!), `us: Walmart is named and waits for our keys — ${connectText.slice(0, 400)}`);
   } finally {
     currentApi = euApi;
   }
@@ -361,6 +363,7 @@ test('step 87: the us market profile shows no German, no Omnibus, no Kaufland an
   await settled(b, 'eu connections');
   const eu = await europeOnPage();
   assert.ok(eu !== null && /amazon\.de|Deutsch/.test(eu), `eu: the rule sees Europe — ${eu}`);
+  assert.ok(!/\bWalmart\b/.test(await b.evaluate<string>('document.body.innerText')), 'eu: Walmart is a channel of the us market only');
   const euMenu = await b.evaluate<string[]>(`[...document.querySelectorAll('.nav-group a')].map((a) => a.textContent.trim())`);
   assert.ok(euMenu.includes(en.ui.app.screens.compliance), `eu: the same workspace has the Omnibus tab — ${euMenu.join(', ')}`);
 });

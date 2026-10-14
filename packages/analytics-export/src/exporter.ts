@@ -133,6 +133,8 @@ export async function exportCompletedWritesDay(pgExporter: pg.Pool, ingest: Clic
 /** Источники снимков, которые принимает ограничение source_known таблицы competitor_snapshot (030) */
 export const CLICKHOUSE_SNAPSHOT_SOURCES: readonly string[] = [
   'AMAZON_ANY_OFFER_CHANGED', 'AMAZON_COMPETITIVE_SUMMARY', 'KAUFLAND_BUY_BOX_CHANGED', 'KAUFLAND_BUYBOX', 'KAUFLAND_COMPETITORS_COMPARER',
+  // Шаг 89: опрос Buy Box Walmart (096_step89.sql)
+  'WALMART_BUY_BOX',
 ];
 /** Валюты ограничения currency_supported (050) */
 const CLICKHOUSE_CURRENCIES = new Set(['EUR', 'USD']);
@@ -148,7 +150,8 @@ export type SnapshotSkipReason = 'NO_PRICES' | 'CURRENCY_UNSUPPORTED' | 'SOURCE_
  */
 export function snapshotLogRow(row: PgRow, storefront?: { currency: string; basis: string }): { ok: true; row: CompetitorSnapshotRow } | { ok: false; reason: SnapshotSkipReason } {
   const channel = String(row.channel);
-  if (channel !== 'KAUFLAND' && channel !== 'AMAZON') return { ok: false, reason: 'CHANNEL_UNSUPPORTED' };
+  // Шаг 89: у Walmart есть опрос Buy Box — его снимки выгружаются; у eBay конкурентов в бою нет [Р-190]
+  if (channel !== 'KAUFLAND' && channel !== 'AMAZON' && channel !== 'WALMART') return { ok: false, reason: 'CHANNEL_UNSUPPORTED' };
   const snapshot = row.snapshot as CompetitorSnapshot;
   if (!CLICKHOUSE_SNAPSHOT_SOURCES.includes(snapshot.source)) return { ok: false, reason: 'SOURCE_UNKNOWN' };
   if (snapshot.completeness?.kind === 'TOP_N' && !(snapshot.completeness.n > 0)) return { ok: false, reason: 'COMPLETENESS_INVALID' };

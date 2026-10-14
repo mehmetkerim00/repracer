@@ -228,7 +228,7 @@ test('screens render from the dictionary: sign-in, products with the effective f
   for (const text of ['Effective floor', '$17.79', 'ECB rate', 'add up to the price to the cent']) assert.ok(bounds.includes(text), text);
 
   const stop = await html('/src/screens/Stop.tsx', 'StopScreenView', { view: await get<StopView>(auth, api('kaufland/pipeline/mass-shift-halt', 'stop')), onStop: () => {}, onResume: () => {}, onRelease: () => {} });
-  for (const text of ['Stop by a person', 'Storefront halts by the system', 'Stop the whole workspace', 'Audit log: stops and roles', 'Storefront halted by the system', 'the whole workspace — with a second factor']) assert.ok(stop.includes(text), text);
+  for (const text of ['Stop by a person', 'Storefront halts by the system', 'Stop the whole workspace', 'Audit log: stops, roles and channel events', 'Storefront halted by the system', 'the whole workspace — with a second factor']) assert.ok(stop.includes(text), text);
 
   const session = await get<SessionView>(auth, '/api/session?locale=de');
   const loginView = await html('/src/App.tsx', 'LoginView', { simulator: session.simulator, error: null, busy: false, onSignIn: () => {} }, 'de');
@@ -251,7 +251,8 @@ test('step 88 (Р-213): sign-in offers three roles, five with the extended roles
 
   const manager = await login('MANAGER');
   const stop = await get<StopView>(manager, api(id, 'stop'));
-  assert.deepEqual([stop.permissions.canStop, stop.permissions.canResumeTenant, stop.permissions.canReleaseDistrust], [true, true, true], 'the manager owns the stop crane');
+  // Шаг 89 (ADR-0054, решение владельца): снова поверить каналу — только владелец; стоп-кран и возобновление — у менеджера
+  assert.deepEqual([stop.permissions.canStop, stop.permissions.canResumeTenant, stop.permissions.canReleaseDistrust], [true, true, false], 'the manager owns the stop crane, not the channel distrust');
   assert.equal((await get<ConnectionsView>(manager, api(id, 'connections'))).canManage, false, 'channel accounts stay with the owner');
   const target = { kind: 'TENANT' };
   assert.equal((await call(manager, 'POST', api(id, 'stop'), { target, note: 'Manager pulls the stop crane', confirmed: true })).status, 200);

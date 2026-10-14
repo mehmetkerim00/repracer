@@ -22,7 +22,7 @@ export type ConnectionState = 'NOT_CONNECTED' | 'AWAITING_CONSENT' | 'AWAITING_P
 
 /** Канал, который процесс умеет подключать: есть ли у платформы приложение и каких витрин оно касается */
 export interface ConnectableChannel {
-  channel: 'AMAZON' | 'EBAY';
+  channel: 'AMAZON' | 'EBAY' | 'WALMART';
   /** Пусто — приложение есть; иначе — коды того, чего не хватает платформе (E-01, регистрация приложения SP-API) */
   platformMissing: string[];
   marketplaces: string[];
@@ -97,7 +97,7 @@ export interface QuantityWritesView {
 }
 
 export interface ConnectionChannelView {
-  channel: 'AMAZON' | 'EBAY';
+  channel: 'AMAZON' | 'EBAY' | 'WALMART';
   state: ConnectionState;
   stateText: string;
   canConnect: boolean;

@@ -918,16 +918,24 @@ export interface ConsoleAuditRow {
   /** Время действия (остановки, снятия, смены роли) */
   at: Instant;
   action: 'pricing.stop_created' | 'pricing.stop_released' | 'pricing.halt_created' | 'pricing.halt_released' | 'pricing.distrust_created' | 'pricing.distrust_released'
-    | 'membership.role_changed';
+    | 'membership.role_changed' | 'channel.offer_unpublished';
   actorType: 'USER' | 'SYSTEM';
   membershipId: string | null;
   /** Роль участника в момент действия (у смены роли — роль автора) */
   role: MemberRole | null;
-  entityType: 'price_stop' | 'pricing_halt' | 'channel_distrust' | 'membership';
+  entityType: 'price_stop' | 'pricing_halt' | 'channel_distrust' | 'membership' | 'offer_pricing_health';
   /** Шаг 88 [Р-213]: смена роли — прежняя и новая роль и чья (адрес участника; в памяти адресов нет — null) */
   roleFrom?: MemberRole | null;
   roleTo?: MemberRole | null;
   memberEmail?: string | null;
+  /**
+   * Шаг 89: событие канала в журнале — Walmart снял предложение с публикации (правило неконкурентной цены). Канал, витрина, о каком
+   * предложении (название продавца или SKU) и цена «в другом месте», если канал её назвал (W-10). Это наблюдение канала, а не действие
+   * человека: в журнал аудита базы оно не пишется, консоль показывает его рядом
+   */
+  channel?: string | null;
+  offerName?: string | null;
+  elsewhere?: Money | null;
   entityId: string;
   scope: AuditStopScope | null;
   channelAccountId: string | null;

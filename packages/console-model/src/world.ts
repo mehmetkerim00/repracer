@@ -90,6 +90,8 @@ export interface StatusCell {
   tone: Tone;
   label: string;
   detail: string;
+  /** Шаг 89: короткая строка для тесной ячейки таблицы; полный `detail` — подсказкой */
+  short?: string;
 }
 
 export interface UnitRef {

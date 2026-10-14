@@ -75,7 +75,7 @@ export type SnapshotDeliveryKind = 'UNKNOWN' | 'PUSH' | 'PUSH_FETCH' | 'POLL' | 
 
 /** Снимок → строка ClickHouse. Писатель — exportCompetitorSnapshotsDay (шаг 24) из журнала пути решения */
 export function competitorSnapshotRow(
-  tenantId: string, channelAccountId: string, channel: 'KAUFLAND' | 'AMAZON', snapshotId: string, snapshot: CompetitorSnapshot, receivedAt: string,
+  tenantId: string, channelAccountId: string, channel: 'KAUFLAND' | 'AMAZON' | 'WALMART', snapshotId: string, snapshot: CompetitorSnapshot, receivedAt: string,
   sanityVerdict: SnapshotSanityVerdict = 'ACCEPT', delivery: SnapshotDeliveryKind = 'UNKNOWN',
   /** OQ-181 (шаг 25): валюта и база цены витрины — для снимка без цен («конкурентов нет»), валюта не домысливается [Р-71] */
   storefront?: { currency: string; basis: string },

@@ -136,7 +136,7 @@ export function Cell({ cell }: { cell: StatusCell }) {
   return (
     <div className={`cell cell-${cell.tone}`} title={cell.detail}>
       <Badge tone={cell.tone}>{cell.label}</Badge>
-      <div className="muted small cell-detail">{cell.detail}</div>
+      <div className="muted small cell-detail">{cell.short ?? cell.detail}</div>
     </div>
   );
 }

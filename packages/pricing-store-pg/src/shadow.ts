@@ -327,7 +327,8 @@ export class PgShadowStore {
        * Находка 5 ревью шага 41: у отказа «в тень переводит владелец ИЛИ администратор» текст другой, и он не
        * распознавался — наблюдатель получал 500 вместо 403. Оба отказа о роли ловятся одним выражением.
        */
-      if (/only the owner (switches|or an admin switches)/.test(message)) return { status: 'NOT_OWNER' };
+      // Шаг 89: «обратно в тень» отказывает по праву матрицы — «only the owner or a manager switches … back to SHADOW»
+      if (/only the owner (switches|or an admin switches|or a manager switches)/.test(message)) return { status: 'NOT_OWNER' };
       if (/typed confirmation does not name/.test(message)) return { status: 'CONFIRMATION_MISMATCH' };
       /**
        * Р-172: отказ называет витрину, свойство и вопрос — эта строка доходит до продавца целиком, потому что «бой

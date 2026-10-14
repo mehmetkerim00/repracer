@@ -243,3 +243,19 @@ test('step 64: the Amazon stock trap names North America for amazon.com and the 
     assert.ok(us.requiresAck && eu.requiresAck, 'both need the confirmation of the side effect');
   }
 });
+
+/**
+ * Шаг 89: у Walmart область цены и остатка одна (аккаунт + витрина + SKU) — общий текст «остаток шире цены» был бы неправдой;
+ * ловушка Walmart называет склад по умолчанию и вопрос о нескольких складах (W-04), подтверждения побочного эффекта не требует
+ */
+test('step 89: the Walmart stock trap names the default ship node, not a wider stock scope', async () => {
+  const { stockTraps } = await import('./stock.ts');
+  const world = { id: 'w', title: 't', description: 'd', tenantId: 't', now: NOW, viewer: { membershipId: 'm', role: 'OWNER' },
+    accounts: [{ channelAccountId: 'acc', channel: 'WALMART', marketplaces: ['WALMART_US'] }], state: { scopes: [], strategies: [] } } as never;
+  for (const locale of ['de', 'en'] as const) {
+    const t = stockTraps(world, messagesFor(locale))[0]!;
+    assert.ok(/walmart\.com/.test(t.text) && /Ship Node|ship node/.test(t.text), t.text);
+    assert.ok(!/wider|weiter als/.test(t.text), `no generic «wider» text: ${t.text}`);
+    assert.equal(t.requiresAck, false);
+  }
+});

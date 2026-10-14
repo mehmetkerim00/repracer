@@ -1,0 +1,17 @@
+{
+  "name": "@repracer/walmart-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WalmartAdapter (step 89): @repracer/channel-port for Walmart Marketplace on the simulator, by the rules of the real Walmart API as stated by the owner (no specification snapshot, W-01): OAuth token, token-bucket rate limits read from response headers, single price and inventory updates, item publish status. The live adapter against the real API is a separate step after keys.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@repracer/channel-port": "0.1.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test test/pacer.test.ts"
+  }
+}

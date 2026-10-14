@@ -1,8 +1,8 @@
-# Демо-сценарий показа клиенту (~10 минут)
+# Демо-сценарий показа клиенту (~11 минут)
 
 Воспроизводимый показ на демо-тенанте [Р-151]: данные синтетические, путь настоящий — те же роли базы, путь решения и исполнитель
 заданий, что у продавца. Язык показа — английский (первый пилотный клиент — продавец из США). Шаг 87 [Р-214]: развёртывание и демо — в
-профиле рынка **us**: американский продавец (amazon.com и ebay.com, доллары, склад «Warehouse Newark, DE»), без Kaufland, витрин ЕС,
+профиле рынка **us**: американский продавец (amazon.com, ebay.com и с шага 89 walmart.com, доллары, склад «Warehouse Newark, DE»), без Kaufland, витрин ЕС,
 немецкого и вкладки Omnibus; прежнее европейское демо поднимается `REPRACER_MARKET_PROFILE=eu`. Ожидаемые экраны ниже сверены
 **проходом браузером** (шаг 76: безголовый Chrome по `http://127.0.0.1:5173`, снимок и текст каждого экрана) — до него сценарий
 сверялся только через API стенда, и страница консоли в браузере была пустой. День показа — [чеклист](demo-preflight.md).
@@ -21,7 +21,7 @@ PGHOST=127.0.0.1 PGPORT=5432 PGUSER=<суперпользователь PostgreS
 - создаёт свою базу `repracer_demo` (тестовую `repracer_eu` и шаблон тестов не трогает); в профиле us база — региона US [Р-60]: данные
   американского продавца живут в базе его региона;
 - поднимает стенд в профиле рынка `REPRACER_MARKET_PROFILE` (по умолчанию **us**) с демо-тенантом в тени (`REPRACER_DEMO_SHADOW=on`):
-  тенант рождается с аккаунтом amazon.com, рядом — ebay.com, по 12 предложений; на стенде **только
+  тенант рождается с аккаунтом amazon.com, рядом — ebay.com и walmart.com (шаг 89), по 12 предложений; на стенде **только
   демо-магазин** (`REPRACER_DEMO_ONLY=on`, шаг 76: без него после входа зритель видел три десятка миров сценариев стенда с описаниями
   для разработчиков); первый экран — английский (`REPRACER_CONSOLE_LOCALE=en`); вход живёт 12 часов (`REPRACER_STAND_TOKEN_SECONDS`;
   прежние 15 минут истекали посреди показа);
@@ -37,16 +37,21 @@ PGHOST=127.0.0.1 PGPORT=5432 PGUSER=<суперпользователь PostgreS
 
 Замер шага 87 (машина разработчика, профиль us): от запуска до «Демо готово» — **51 с** (база 19 с, стенд 31 с, из них прожатая неделя
 США 29,7 с, интерфейс 1 с; у европейского демо шага 80 — 85 с); строка «Демо готово» печатает эти числа сама. Подготовка держит машину бодрствующей до Ctrl+C (`caffeinate`, шаг 80):
-сон macOS остановил подготовку шага 79 на 34 минуты — машина спала, а не считала.
+сон macOS остановил подготовку шага 79 на 34 минуты — машина спала, а не считала. Шаг 89 добавил прожатую неделю walmart.com (опрос
+Buy Box раз в два часа на товар): подготовка дольше примерно на 20 с — замер — в [отчёте шага](evidence/step89-walmart.md).
 
 Ключей каналов не нужно: аккаунты eBay US и Amazon US записаны функцией обнаружения каталога; конкуренты amazon.com —
 модель порта Amazon (уведомления о смене цены конкурента — на экране «Amazon, notification of a competitor price change»; конкурент сползает ниже пола и возвращается), у eBay US стратегия от себестоимости:
-конкурентов eBay в бою мы не видим [Р-190].
+конкурентов eBay в бою мы не видим [Р-190]. Walmart (шаг 89) — HTTP-модель канала по правилам настоящего Walmart (ключей Walmart у
+платформы нет, [docs/channels/walmart.md](channels/walmart.md)): конкуренты Buy Box — три поведения, как у amazon.com (дрейф, подрезчик,
+волна), квоты — корзиной токенов с заголовками настоящего Walmart, и правило неконкурентной цены — у двух товаров цена на walmart.com
+$24.99, а тот же товар «в другом месте» — $19.99, и модель снимает их с публикации.
 
 **Запускайте за полчаса до показа.** Время демо-мира настоящее, секунда в секунду (ускорять его нельзя: у базы свои часы — ревью шага 34,
 находка 9). Прожатая неделя США — исключение, и честное: она идёт на виртуальных часах ПРОШЛОЙ недели до настоящего момента, решения
 ложатся в прошлые сутки, а дальше витрины США живут настоящим временем. После запуска: конкурент amazon.com меняет цену раз в два часа
-у каждого предложения (со сдвигом по предложениям), пересчёт eBay — раз в 15 минут, заказ amazon.com — раз в 10 минут. Замер шага 87:
+у каждого предложения (со сдвигом по предложениям), пересчёт eBay — раз в 15 минут, Buy Box walmart.com — раз в 15 минут, состояние
+публикации walmart.com — раз в 10 минут, заказ amazon.com — раз в 10 минут. Замер шага 87:
 первая резервация — на 2-й минуте после «Демо готово». Перезапуск команды — новый мир с нуля.
 
 В браузере: `http://127.0.0.1:5173` (не `localhost`) → экран входа уже по-английски (шаг 83: по центру знак **repracer** и строка
@@ -63,14 +68,17 @@ unit cost import, bulk operations, stop pricing», **Viewer** «read-only») →
   письмо помечены «Demo: synthetic data».
 - **Заказы — тоже модель:** синтетические заказы amazon.com без данных покупателя; резервация, отгрузка и списание — настоящий путь.
 - **Конкуренты США — модель.** У amazon.com — модель порта Amazon; у eBay US конкурентов нет вовсе (в бою Browse недоступен, Р-190),
-  поэтому там цена от себестоимости. Запись в каналы США — только в тени: бой на amazon.com и ebay.com закрыт неподтверждённой границей
-  суток, и отказ это объясняет словами (шаг «а»).
+  поэтому там цена от себестоимости. Запись в каналы США — только в тени: бой на amazon.com, ebay.com и walmart.com закрыт неподтверждённой
+  границей суток, и отказ это объясняет словами (шаг «а»).
+- **Walmart — целиком на симуляторе** (шаг 89): ключей Walmart у платформы нет, подключить его продавец пока не может (экран подключений
+  говорит это словами), живой адаптер — отдельным шагом. Порог правила неконкурентной цены (10 %) и цена «в другом месте» — параметры
+  модели, а не факты Walmart (вопросы W-10, W-11). Движок снятие с публикации не чинит — только показывает.
 
 ## 0. Вход (30 с)
 
 **Экран — список миров («Your workspaces»):** одна карточка «Demo store (simulator)», описание «Synthetic American seller on the channel
-simulator: offers on amazon.com and ebay.com, a warehouse in Newark, Delaware.», пометка **Demo**; под ними показатели (шаг 84) —
-**Offers** 24, **Decisions 24h** …, **Interventions 7d** … и подпись роли «Owner». Пометка «test environment, synthetic data» в шапке — только здесь и на входе: внутри магазина её роль играет
+simulator: offers on amazon.com, ebay.com and walmart.com, a warehouse in Newark, Delaware.», пометка **Demo**; под ними показатели
+(шаг 84) — **Offers** 36, **Decisions 24h** …, **Interventions 7d** … и подпись роли «Owner». Пометка «test environment, synthetic data» в шапке — только здесь и на входе: внутри магазина её роль играет
 жёлтая полоса.
 
 **Внутри мира — баннер:** «Demo workspace: synthetic data, real path. Every amount is made up.»
@@ -111,11 +119,11 @@ Dangerous changes, Bounds; **Stock** — Stock, Offers, Unit cost import; **Work
 - **Блок «Weekly email — preview»** (шаг 68, K7): то самое недельное письмо тени, собранное той же функцией, что у доставки, за
   последние семь суток, с пометкой «Demo: synthetic data. This is the email a seller in shadow mode receives every Monday…». Демо-тенанту
   письмо не отправляется (0167) — поэтому оно на экране.
-- **Карточки аккаунтов** (поля карточки «Channel account», «Write mode», «Live writes»): **Amazon · A1SYNDEMOUS… · amazon.com** и
-  **eBay · syn_demo_ebay_us_… · ebay.com** — «12 offers, 12 of them with the engine on», у каждого «shadow (nothing is written)», «To
+- **Карточки аккаунтов** (поля карточки «Channel account», «Write mode», «Live writes»): **Amazon · A1SYNDEMOUS… · amazon.com**,
+  **eBay · syn_demo_ebay_us_… · ebay.com** и **Walmart · syn-demo-walmart-…** (шаг 89) — «12 offers, 12 of them with the engine on», у каждого «shadow (nothing is written)», «To
   switch on live writes, type the account name exactly: …», поле и кнопка «Switch on live writes».
-- **Под таблицей:** «Live writes stay closed: we do not know amazon.com · Day boundary of the price history, ebay.com · …». Что мы не
-  знаем про витрину, держит боевой режим закрытым [Р-172] — у amazon.com и ebay.com граница суток не подтверждена каналом. Таблица
+- **Под таблицей:** «Live writes stay closed: we do not know amazon.com · Day boundary of the price history, ebay.com · …, walmart.com · …».
+  Что мы не знаем про витрину, держит боевой режим закрытым [Р-172] — у всех трёх витрин граница суток не подтверждена каналом. Таблица
   «What we still do not know about these storefronts» — словами: витрина, свойство, значение («net, sales tax added at checkout»), кто
   подтверждает. Если владелец всё же нажмёт «Switch on live writes» на amazon.com, отказ скажет: «Live writes on amazon.com stay closed:
   the day boundary of the price history of this storefront is not confirmed yet. This is usually settled within a week of shadow mode: after
@@ -189,7 +197,7 @@ declared it)», «Minimum margin $6.85 — margin at least 12%», «Effective fl
 |---|---|---|---|
 | Stop by a person | All prices | Owner or manager, with a note | Owner or manager, with a note; the whole workspace — with a second factor |
 | Storefront halt | Only competitor-derived prices | System: broken input data | Fresh sample where the channel allows it, otherwise a person |
-| Channel distrust | All prices and the channel price threshold | System: the channel changes our numbers | Only a person: owner or manager, second factor, note |
+| Channel distrust | All prices and the channel price threshold | System: the channel changes our numbers | Only a person: the owner, second factor, note |
 
 **Живое действие — остановка человеком:**
 
@@ -199,7 +207,7 @@ declared it)», «Minimum margin $6.85 — margin at least 12%», «Effective fl
    to the channel: its outcome is accepted».
 2. Поле «Note — why (at least 10 characters)» — заметка **не короче 10 символов** (кнопка «Yes, stop» до этого неактивна), например
    «Demo: checking the stop crane», → **«Yes, stop»**. Ответ: «Stopped. All prices of 12 offers stop changing.»
-3. Ниже — «Active stops»: карточка amazon.com с пилюлей «Stopped» и временем, «By: Owner (you)», «Note: “…”»; **«Audit log: stops and roles»** —
+3. Ниже — «Active stops»: карточка amazon.com с пилюлей «Stopped» и временем, «By: Owner (you)», «Note: “…”»; **«Audit log: stops, roles and channel events»** —
    строка «Pricing stopped». Ниже в том же журнале уже есть строка с подготовки демо: **«Role changed»** · «Owner (you)» ·
    «manager@stand.repracer.test: Viewer → Manager» (шаг 88: менеджер пришёл наблюдателем, владелец повысил его; у человека в пространстве одна
    роль — новая заменила прежнюю). Новые решения по витрине — «Pricing stopped by a person».
@@ -209,7 +217,8 @@ declared it)», «Minimum margin $6.85 — margin at least 12%», «Effective fl
 
 **Две системные остановки** в демо вручную не вызываются: их ставит система, когда вход испорчен (массовый сдвиг цен конкурентов) или
 канал меняет наши числа (цена покупателя отличается от отправленной ровно на ставку налога) [Р-118]. Показать таблицу и сказать: они в
-том же списке, снимает их только человек, а у недоверия каналу — владелец или админ со вторым фактором.
+том же списке, снимает их только человек, а недоверие каналу — только владелец со вторым фактором (шаг 89: снова поверить каналу — не
+повседневная остановка, менеджеру это право не дано).
 
 Внизу экрана: «Stock synchronization» и «A write already sent to the channel: its outcome is accepted» — чего остановка НЕ касается.
 
@@ -250,15 +259,16 @@ the owner.» — так выглядит канал, остатки которо
 
 **Экран «Stock».** Сводка сверху:
 
-> «Products 24: with stock 24; offers in sync 12; writes in flight 0; divergences 0; open reservations R.»
+> «Products 36: with stock 36; offers in sync 12; writes in flight 0; divergences 0; open reservations R.»
 >
-> «Warehouse Newark, DE — File import (internal pool); 24 products with figures»
+> «Warehouse Newark, DE — File import (internal pool); 36 products with figures»
 
 Заказ amazon.com приходит раз в 10 минут (первый — через 2 минуты после запуска), отгрузка — через час, поэтому R — от одного до шести.
-«offers in sync 12» — синхронизацию количества ведёт amazon.com; у ebay.com она выключена (вопрос о других инструментах — шаг «г»).
+«offers in sync 12» — синхронизацию количества ведёт amazon.com; у ebay.com и walmart.com она выключена (вопрос о других инструментах —
+шаг «г», запись количества по Р-202 выключена до подтверждения владельца).
 
 Сверху таблицы — товары с остатком по убыванию «Available», при равенстве выше — с резервами (шаг 84.1). Поставьте флажок **«Only products
-with reservations»** — список фильтруется сразу, над таблицей «N of 24 products match.» и
+with reservations»** — список фильтруется сразу, над таблицей «N of 36 products match.» и
 кнопка «Show all» (или ищите по названию и SKU: поле «Search by name or SKU» и кнопка «Search», шаг 69, K8) — останутся строки с
 заказами. Первая резервация в проходе шага 76 появилась на 5-й минуте после запуска. Ожидаемая строка, например:
 
@@ -276,7 +286,40 @@ with reservations»** — список фильтруется сразу, над
 Под таблицей — «Before anything is written». Там названы ловушки каналов ДО первой записи [Р-153]:
 
 - у Amazon остаток MFN — одно значение на весь регион аккаунта; для amazon.com это Северная Америка (владелец подтвердил это при
-  включении синхронизации).
+  включении синхронизации);
+- у Walmart — одно значение на SKU на складе аккаунта по умолчанию; как оно ложится на несколько складов (ship nodes), Walmart не
+  подтвердил (шаг 89, W-04).
+
+## е. Walmart: паритет цен — «мы видим все каналы сразу» (1 мин)
+
+**Экран «Offers»** (меню Stock → Offers): «Total 36: on 36, …» — предложения трёх витрин одной таблицей. У двух предложений walmart.com
+в колонке **«Channel says»** — красная пилюля **«Unpublished (uncompetitive price)»** и под ней коротко: «Cheaper elsewhere: $19.99.
+Since Oct 7, 2026, 15:31 UTC−4; repracer does not change the price here.» Наведите курсор на ячейку — подсказка с полным объяснением:
+
+> «Walmart took this offer off walmart.com on Oct 7, 2026, 15:31 UTC−4: the same product is cheaper elsewhere ($19.99) — on another channel
+> or sold by Walmart itself — and shoppers on walmart.com no longer see it. Bring the walmart.com price close to that price and Walmart
+> publishes the offer again; repracer does not change the price for you here.»
+
+Время — момент подготовки демо минус неделя: Walmart снял их в первом же опросе прожатой недели. На телефоне таблица Offers листается
+в своей рамке — колонка «Channel says» правее.
+
+Это **Wall clock, small · walmart.com** и **Yoga mat, small · walmart.com**: «Current price» у них $24.99.
+
+**Экран «Stop pricing»**, журнал **«Audit log: stops, roles and channel events»**: две строки «Offer unpublished: uncompetitive price» ·
+«Walmart» · подпись предложения · «The same product is cheaper elsewhere ($19.99) — on another channel or sold by Walmart itself. repracer
+does not change the price for you here.» — событие канала рядом с остановками и сменами ролей, со временем.
+
+Что сказать — паритет как причина пользоваться repracer, а не страшилка:
+
+- у Walmart есть правило: если тот же товар заметно дешевле на другой площадке или у самого Walmart, листинг снимается с публикации.
+  Продавец, который ведёт цены каждой площадки отдельно, узнаёт об этом, когда продажи walmart.com уже встали;
+- repracer видит все каналы сразу — одна таблица, одно состояние у предложения, одно событие в журнале со временем и причиной;
+- что делать с ценой — решает продавец: движок снятие с публикации сам не чинит (шаг 89), автоматический ответ — отдельное решение;
+- честно: Walmart в демо — модель по правилам настоящего Walmart; ключей Walmart у нас пока нет, порог 10 % и цена «в другом месте» —
+  параметры модели (W-10, W-11 в [docs/channels/walmart.md](channels/walmart.md)).
+
+Если спросят «а тень?» — на экране тени у этих предложений уже есть удержанные записи ниже $19.99 по стратегии «Beat the lowest»: движок
+считает цену как обычно, но в тени ничего не пишется, поэтому листинг остаётся снятым.
 
 ## Если что-то пошло не так
 

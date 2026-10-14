@@ -278,6 +278,16 @@ function rejectedSnapshotRow(r: Row): ConsoleRejectedSnapshotRow {
 }
 
 function auditRow(r: Row): ConsoleAuditRow {
+  // Шаг 89: событие канала — из журнала наблюдений канала, а не из журнала аудита; актёр — канал
+  if (r.action === 'channel.offer_unpublished') {
+    return {
+      at: new Date(r.changes.at).toISOString(), action: r.action, actorType: 'SYSTEM', membershipId: null, role: null, entityType: 'offer_pricing_health',
+      entityId: r.entity_id, scope: null, channelAccountId: r.changes.channelAccountId ?? null, marketplace: r.changes.marketplace ?? null, note: null,
+      channel: r.changes.channel ?? null, offerName: r.changes.offerName ?? null,
+      elsewhere: r.changes.elsewhereMinor === null || r.changes.elsewhereMinor === undefined || !r.changes.currency ? null
+        : { amountMinor: Number(r.changes.elsewhereMinor), currency: r.changes.currency, basis: 'NET' },
+    };
+  }
   const roleChange = r.action === 'membership.role_changed';
   return {
     at: new Date(r.changes.at).toISOString(), action: r.action, actorType: r.actor_type, membershipId: r.actor_membership_id,
@@ -2569,6 +2579,20 @@ export class PgPricingStore implements PricingStore {
               LEFT JOIN platform.app_user u ON u.user_id = tm.user_id
              WHERE e.tenant_id = $1 AND e.entity_type = 'membership' AND e.action = 'membership.role_changed'
              ORDER BY e.changes ->> 'at' DESC, e.recorded_at DESC, e.audit_event_id DESC LIMIT $2)
+           UNION ALL
+           -- Шаг 89: события канала — Walmart снял предложение с публикации; предложение называется названием продавца или SKU
+           (SELECT 'channel.offer_unpublished', 'SYSTEM', NULL::uuid, 'offer_pricing_health', h.offer_pricing_health_id,
+                   jsonb_build_object('at', h.event_time, 'channel', h.channel,
+                                      'channelAccountId', h.channel_account_id, 'marketplace', h.marketplace,
+                                      'offerName', coalesce(p.title, om.external_sku, h.channel_product_ref),
+                                      'elsewhereMinor', h.competitive_price_threshold_minor, 'currency', h.currency),
+                   h.recorded_at, h.offer_pricing_health_id, NULL::text, NULL::text
+              FROM channel_data.offer_pricing_health h
+              LEFT JOIN tenant_data.offer_mapping om ON om.tenant_id = h.tenant_id AND om.channel_account_id = h.channel_account_id
+                                                     AND om.marketplace = h.marketplace AND om.channel_product_ref = h.channel_product_ref AND om.status = 'ACTIVE'
+              LEFT JOIN tenant_data.product p ON p.tenant_id = om.tenant_id AND p.product_id = om.product_id
+             WHERE h.tenant_id = $1 AND h.issue_type = 'WALMART_UNPUBLISHED_UNCOMPETITIVE_PRICE'
+             ORDER BY h.event_time DESC, h.recorded_at DESC LIMIT $2)
          ) a ORDER BY a.changes ->> 'at' DESC, a.recorded_at DESC, a.audit_event_id DESC LIMIT $2`, [tenantId, limit]);
       return rows.map(auditRow);
     });

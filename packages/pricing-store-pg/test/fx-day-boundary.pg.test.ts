@@ -136,7 +136,7 @@ test('Р-63 on PostgreSQL: with only a stale ECB rate the same-EAN anchor declin
   assert.deepEqual(verdict.checks.find((c) => c.rule === 'CROSS_CHANNEL_ANCHOR'), { rule: 'CROSS_CHANNEL_ANCHOR', outcome: 'SKIPPED', detail: { code: 'REFERENCES_WITHOUT_ECB_RATE', params: {} } });
 });
 
-test('Р-65: a US storefront has no substituted day boundary; Amazon US and eBay US are marked to verify separately', { skip }, async () => {
+test('Р-65: a US storefront has no substituted day boundary; Amazon US, eBay US and (step 89) Walmart are marked to verify separately', { skip }, async () => {
   const world = await seedUs(8301, []);
   const ws = world.ids.dbId('ws-us-8301');
   const { tz, storefronts } = await inTenant(pool!, world.tenantId, async (tx) => ({
@@ -144,8 +144,9 @@ test('Р-65: a US storefront has no substituted day boundary; Amazon US and eBay
     storefronts: (await tx.query(`SELECT marketplace, time_zone, time_zone_status, time_zone_source FROM platform.marketplace WHERE country = 'US' ORDER BY marketplace`)).rows,
   }));
   assert.equal(tz, null, 'no shared US time zone is substituted (Р-65)');
-  assert.deepEqual(storefronts.map((r) => [r.marketplace, r.time_zone, r.time_zone_status]), [['ATVPDKIKX0DER', null, 'TO_VERIFY'], ['EBAY_US', null, 'TO_VERIFY']]);
-  assert.notEqual(storefronts[0].time_zone_source, storefronts[1].time_zone_source);
+  assert.deepEqual(storefronts.map((r) => [r.marketplace, r.time_zone, r.time_zone_status]),
+    [['ATVPDKIKX0DER', null, 'TO_VERIFY'], ['EBAY_US', null, 'TO_VERIFY'], ['WALMART_US', null, 'TO_VERIFY']]);
+  assert.equal(new Set(storefronts.map((r) => r.time_zone_source)).size, 3, 'each US storefront has its own note: they are verified separately');
   assert.match(storefronts[1].time_zone_source, /250/, 'the eBay US note names the edit budget that depends on the day boundary');
   // Свёртку пишет только задание закрытия дня (repracer_retention): без пояса витрины день не закрывается ни в каком поясе
   const scheduler = createPool(PG_URL!.replace('svc_app@', 'svc_scheduler@'), { max: 1, applicationName: 'repracer-fx-test-scheduler' });

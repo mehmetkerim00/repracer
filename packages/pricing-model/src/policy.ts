@@ -71,11 +71,12 @@ export function offeredRoles(extended: boolean): readonly MemberRole[] {
 }
 
 export type PricingAction = 'VIEW_PRICING' | 'STOP_PRICING' | 'RESUME_TENANT_STOP' | 'RESUME_CHANNEL_STOP' | 'RELEASE_CHANNEL_HALT' | 'RELEASE_CHANNEL_DISTRUST' | 'ENABLE_REPRICING'
-  | 'MANAGE_PRICING' | 'MANAGE_CATALOG' | 'MANAGE_TENANT' | 'GIVE_MIGRATION_CONSENT';
+  | 'RETURN_TO_SHADOW' | 'MANAGE_PRICING' | 'MANAGE_CATALOG' | 'MANAGE_TENANT' | 'GIVE_MIGRATION_CONSENT';
 
 /**
  * Права на цены (шаг 13, OQ-129; шаг 88, Р-213). Стоп-кран — у каждого, кто отвечает за цены. Менеджер (MANAGER) — ежедневная
- * работа: цены, границы, стратегии, остатки, импорт себестоимости, массовые операции и стоп-кран целиком; управление людьми и
+ * работа: цены, границы, стратегии, остатки, импорт себестоимости, массовые операции, стоп-кран и перевод аккаунта обратно в тень
+ * (снятие недоверия каналу — владельцу, шаг 89); управление людьми и
  * аккаунтами каналов (MANAGE_TENANT) — у владельца (и прежнего администратора). Только владельцу база отдаёт и то, чего в матрице
  * нет отдельной строкой: перевод в бой [Р-170], подтверждение и отзыв записи количества [Р-202]. Менеджер остатков и наблюдатель
  * только смотрят на цены. Матрица дублирована в БД (`security.pricing_permission`, 0185) — совпадение проверяет тест.
@@ -86,9 +87,12 @@ export const PRICING_PERMISSIONS: Readonly<Record<PricingAction, readonly Member
   RESUME_TENANT_STOP: ['OWNER', 'MANAGER', 'ADMIN'],
   RESUME_CHANNEL_STOP: ['OWNER', 'MANAGER', 'ADMIN', 'OPERATOR', 'PRICING_MANAGER'],
   RELEASE_CHANNEL_HALT: ['OWNER', 'MANAGER', 'ADMIN', 'OPERATOR', 'PRICING_MANAGER'],
-  // Р-118: канал искажает наши цены — снять недоверие могут те, кто отвечает за цены тенанта целиком (как возобновление тенанта)
-  RELEASE_CHANNEL_DISTRUST: ['OWNER', 'MANAGER', 'ADMIN'],
+  // Р-118: канал искажает наши цены — снять недоверие значит снова поверить каналу. Шаг 89 (ADR-0054, решение владельца): только
+  // владелец (и прежний администратор), не менеджер
+  RELEASE_CHANNEL_DISTRUST: ['OWNER', 'ADMIN'],
   ENABLE_REPRICING: ['OWNER', 'MANAGER', 'ADMIN', 'OPERATOR', 'PRICING_MANAGER'],
+  // Шаг 89 (ADR-0054, решение владельца): обратно в тень — безопасная сторона, и у менеджера; в бой — только владелец, свой страж базы [Р-170]
+  RETURN_TO_SHADOW: ['OWNER', 'MANAGER', 'ADMIN'],
   // Шаг 18 [Р-100]: административная запись проверяет роль, а не только членство (security.admin_write_action, 0068)
   MANAGE_PRICING: ['OWNER', 'MANAGER', 'ADMIN', 'PRICING_MANAGER'],
   MANAGE_CATALOG: ['OWNER', 'MANAGER', 'ADMIN', 'INVENTORY_MANAGER'],
@@ -98,7 +102,7 @@ export const PRICING_PERMISSIONS: Readonly<Record<PricingAction, readonly Member
 };
 
 export const PRICING_ACTIONS: readonly PricingAction[] = ['VIEW_PRICING', 'STOP_PRICING', 'RESUME_TENANT_STOP', 'RESUME_CHANNEL_STOP', 'RELEASE_CHANNEL_HALT', 'RELEASE_CHANNEL_DISTRUST', 'ENABLE_REPRICING',
-  'MANAGE_PRICING', 'MANAGE_CATALOG', 'MANAGE_TENANT', 'GIVE_MIGRATION_CONSENT'];
+  'RETURN_TO_SHADOW', 'MANAGE_PRICING', 'MANAGE_CATALOG', 'MANAGE_TENANT', 'GIVE_MIGRATION_CONSENT'];
 
 export function can(role: MemberRole, action: PricingAction): boolean {
   return PRICING_PERMISSIONS[action].includes(role);

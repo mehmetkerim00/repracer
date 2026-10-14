@@ -62,7 +62,7 @@ export function ProductsView({ view, onEnable, query, onQuery }: {
             <label className="compact-toggle"><input type="checkbox" checked={shown.compact} onChange={(e) => update({ ...shown, compact: e.currentTarget.checked })} /> {p.viewOptions.compact}</label>
           </span>
         </div>
-        <table className={`products sticky-end${shown.compact ? ' compact' : ''}`}>
+        <table className={`products sticky-end${shown.compact ? ' compact' : ''}${col.channel ? ' with-channel' : ''}`}>
           <thead>
             <tr>
               {/* Шаг 79 (ревью): статус — сразу после предложения: широкая таблица листается под закреплённой колонкой действий, и статус не прячется */}
@@ -95,7 +95,7 @@ export function ProductsView({ view, onEnable, query, onQuery }: {
                 </td> : null}
                 {col.lastChange ? <td><Cell cell={r.lastChange} /></td> : null}
                 {col.nextCheck ? <td><Cell cell={r.nextCheck} /></td> : null}
-                {col.channel ? <td>{r.channelNotes.length === 0 ? '–' : r.channelNotes.map((n) => <Cell key={n.code} cell={n} />)}</td> : null}
+                {col.channel ? <td className="channel-says">{r.channelNotes.length === 0 ? '–' : r.channelNotes.map((n) => <Cell key={n.code} cell={n} />)}</td> : null}
                 {/* Шаг 78: одна колонка действий — основная «Why this price», под ней мелкая вторичная «Bounds» */}
                 <td className="actions">
                   {r.latestDecisionId

@@ -296,7 +296,8 @@ function accountView(a: ShadowAccountRow, world: StandWorld, m: Messages): Shado
     confirmationHint: t.confirmationHint(a.externalAccountId),
     // Включить бой может только владелец [Р-170]; вернуть в тень — он же и администратор
     canGoLive: noAccess === null && a.writeMode === 'SHADOW' && world.viewer.role === 'OWNER',
-    canGoShadow: a.writeMode === 'LIVE' && can(world.viewer.role, 'MANAGE_TENANT'),
+    // Шаг 89 (ADR-0054): обратно в тень — безопасная сторона, своё право матрицы (у менеджера тоже)
+    canGoShadow: a.writeMode === 'LIVE' && can(world.viewer.role, 'RETURN_TO_SHADOW'),
     channelLimitText: channelLimitText(a.channel, m),
     accessText: noAccess === null ? null : m.ui.connections.states[noAccess] ?? null,
     accessHint: noAccess === null ? null : t.noAccess[noAccess],

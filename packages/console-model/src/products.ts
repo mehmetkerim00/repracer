@@ -42,7 +42,7 @@ export interface ProductRow {
 }
 
 /** AUTOMATED_PRICING и CHANNEL_BOUNDS — стратегию не назначит база (0082, Р-120); PRICING_HEALTH — только предупреждение */
-export type ChannelNote = StatusCell & { code: 'AUTOMATED_PRICING' | 'CHANNEL_BOUNDS' | 'PRICING_HEALTH' };
+export type ChannelNote = StatusCell & { code: 'AUTOMATED_PRICING' | 'CHANNEL_BOUNDS' | 'PRICING_HEALTH' | 'WALMART_UNPUBLISHED' };
 
 export interface ProductListView {
   worldId: string;
@@ -143,6 +143,10 @@ export function lastChangeCell(scope: ConsoleScope, writes: readonly ConsoleWrit
   return { tone: 'ok', label: m.money(applied.amountMinor, scope.currency), detail: l.applied(m.when(applied.acceptedAt)) };
 }
 
+/** Шаг 89: состояния публикации Walmart в журнале наблюдений канала (channel_data.offer_pricing_health) — коды проекта, не канала (W-10) */
+export const WALMART_UNPUBLISHED = 'WALMART_UNPUBLISHED_UNCOMPETITIVE_PRICE';
+export const WALMART_PUBLISHED = 'WALMART_PUBLISHED';
+
 /** Шаг 23: наблюдения канала по офферу — последнее наблюдение ценообразования канала и последнее состояние PRICING_HEALTH */
 export function channelNotes(world: StandWorld, scope: ConsoleScope, m: Messages): ChannelNote[] {
   const n = m.ui.channelNotes;
@@ -152,7 +156,19 @@ export function channelNotes(world: StandWorld, scope: ConsoleScope, m: Messages
   if (pricing?.channelBounds) notes.push({ code: 'CHANNEL_BOUNDS', tone: 'warn', label: n.channelBounds, detail: n.channelBoundsDetail(m.when(pricing.observedAt)) });
   const health = world.state.pricingHealth.find((h) => h.channelAccountId === scope.channelAccountId && h.marketplace === scope.marketplace
     && h.channelProductRef === scope.channelProductRef && h.condition === scope.condition);
-  if (health) {
+  /**
+   * Шаг 89: Walmart снял листинг с публикации — правило неконкурентной цены (тот же товар заметно дешевле на другой площадке). Это
+   * состояние предложения, а не просто заметка: на walmart.com его не видно. Движок цену за это не чинит — решение владельца; экран
+   * говорит, что случилось и что сделать. Последняя строка «опубликован снова» снимает состояние
+   */
+  if (health?.issueType === WALMART_UNPUBLISHED) {
+    const elsewhere = health.competitivePriceThreshold ? m.money(health.competitivePriceThreshold.amountMinor, health.competitivePriceThreshold.currency) : null;
+    notes.push({
+      code: 'WALMART_UNPUBLISHED', tone: 'stop', label: n.unpublished,
+      detail: n.unpublishedDetail(m.when(health.occurredAt), elsewhere),
+      short: n.unpublishedShort(m.when(health.occurredAt), elsewhere),
+    });
+  } else if (health && health.issueType !== WALMART_PUBLISHED) {
     notes.push({
       code: 'PRICING_HEALTH', tone: 'warn', label: n.pricingHealth(health.issueType),
       detail: n.pricingHealthDetail(m.when(health.occurredAt), health.competitivePriceThreshold ? m.money(health.competitivePriceThreshold.amountMinor, health.competitivePriceThreshold.currency) : null),
