@@ -91,6 +91,9 @@
   --role-pricing-fg: #2b6e3f; /* primer: --label-green-fgColor-rest */
   --role-inventory-bg: #c7f5ef; /* primer: --label-teal-bgColor-rest */
   --role-inventory-fg: #106e75; /* primer: --label-teal-fgColor-rest */
+  /* Шаг 88 [Р-213]: менеджер — ежедневная работа, зелёный прежнего менеджера цен (их не показывают вместе) */
+  --role-manager-bg: #caf7ca; /* primer: --label-green-bgColor-rest */
+  --role-manager-fg: #2b6e3f; /* primer: --label-green-fgColor-rest */
   --role-viewer-bg: #e8ecf2; /* primer: --label-gray-bgColor-rest */
   --role-viewer-fg: #5c6570; /* primer: --label-gray-fgColor-rest */
 

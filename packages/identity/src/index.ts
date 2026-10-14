@@ -184,7 +184,11 @@ export class MemoryIdentityDirectory implements IdentityDirectory {
     this.links.set(key, userId);
   }
 
+  /** Шаг 88 [Р-213]: у человека в тенанте одно членство и одна роль — как в базе (`membership_tenant_id_user_id_key`) */
   addMembership(userId: string, membership: MembershipRecord): void {
+    if (this.rows.some((r) => r.userId === userId && r.tenantId === membership.tenantId)) {
+      throw new Error(`user ${userId} already has a role in ${membership.tenantId}: one person has one role in a workspace (Р-213)`);
+    }
     this.rows.push({ ...membership, userId });
   }
 

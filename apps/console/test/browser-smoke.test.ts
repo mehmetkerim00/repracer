@@ -28,6 +28,8 @@ let pageUrl = '';
 /** Шаг 87: два экземпляра API на одних мирах — профиль eu (Kaufland, немецкий, Omnibus) и профиль us; сервер стенда ходит в текущий */
 let euApi: ReturnType<typeof createStandApi>;
 let usApi: ReturnType<typeof createStandApi>;
+/** Шаг 88 [Р-213]: профиль us с флагом расширенных ролей — вход предлагает пять ролей */
+let extendedApi: ReturnType<typeof createStandApi>;
 let currentApi: ReturnType<typeof createStandApi>;
 
 /** Синтетическая неделя тени для смоука адаптива: только форма экрана, ничего из базы */
@@ -86,6 +88,7 @@ before(async () => {
   // Основной стенд — профиль eu: смоук Kaufland и немецкие проходы шагов 76–86 гоняются на нём (Европа заморожена, не удалена)
   euApi = createStandApi(all, identity, { defaultLocale: 'en', market: 'eu', connect });
   usApi = createStandApi(all, identity, { market: 'us', connect });
+  extendedApi = createStandApi(all, identity, { market: 'us', connect, extendedRoles: true });
   currentApi = euApi;
   stand = createStandServer((req) => currentApi(req));
   await new Promise<void>((resolve) => stand!.listen(0, '127.0.0.1', resolve));
@@ -360,4 +363,43 @@ test('step 87: the us market profile shows no German, no Omnibus, no Kaufland an
   assert.ok(eu !== null && /amazon\.de|Deutsch/.test(eu), `eu: the rule sees Europe — ${eu}`);
   const euMenu = await b.evaluate<string[]>(`[...document.querySelectorAll('.nav-group a')].map((a) => a.textContent.trim())`);
   assert.ok(euMenu.includes(en.ui.app.screens.compliance), `eu: the same workspace has the Omnibus tab — ${euMenu.join(', ')}`);
+});
+
+test('step 88 (Р-213): sign-in offers three roles at 375 and 1440, five with the extended roles flag; the manager does not manage channel accounts; the audit log names roles', async () => {
+  const b = browser!;
+  const rows = () => b.evaluate<string[]>(`[...document.querySelectorAll('.role-row .role-name')].map((e) => e.textContent.trim())`);
+  const can = () => b.evaluate<string[]>(`[...document.querySelectorAll('.role-row .role-can')].map((e) => e.textContent.trim())`);
+  currentApi = usApi;
+  try {
+    for (const width of [375, 1440]) {
+      await b.setViewport(width, 900);
+      await b.open(pageUrl);
+      await b.waitText(en.ui.app.login.roleCan.MANAGER);
+      assert.deepEqual(await rows(), ['Owner', 'Manager', 'Viewer'], `${width}: three visible roles`);
+      assert.deepEqual(await can(), [en.ui.app.login.roleCan.OWNER, en.ui.app.login.roleCan.MANAGER, en.ui.app.login.roleCan.VIEWER], `${width}: each role says what it may do`);
+      assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), `${width}: no sideways scroll on sign-in`);
+    }
+    await b.setViewport(1440, 900);
+    // Положительный контроль флага: тот же стенд с расширенными ролями — пять строк, прежние роли за флагом живы
+    currentApi = extendedApi;
+    await b.open(pageUrl);
+    await b.waitText(en.ui.app.login.roleCan.OPERATOR);
+    assert.deepEqual(await rows(), ['Owner', 'Manager', 'Viewer', 'Admin', 'Operator'], 'the extended roles flag adds admin and operator');
+    currentApi = usApi;
+    await b.open(pageUrl);
+    await b.waitText(en.ui.app.login.roleCan.MANAGER);
+    await b.click(en.ui.app.login.asAccount(en.values.MANAGER));
+    await b.waitText(en.ui.app.worlds);
+    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${encodeURIComponent(EMPTY_WORLD_ID)}/connections`)}, true)`);
+    await settled(b, 'manager connections');
+    const connections = await b.evaluate<string>('document.body.innerText');
+    assert.ok(connections.includes(en.ui.connections.noRight), 'the manager reads that channel accounts are the owner’s');
+    assert.equal(await b.evaluate<number>(`[...document.querySelectorAll('button')].filter((x) => /^Connect/.test(x.textContent.trim())).length`), 0, 'no connect button for the manager');
+    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${encodeURIComponent(EMPTY_WORLD_ID)}/stop`)}, true)`);
+    await settled(b, 'manager stop');
+    assert.ok((await b.evaluate<string>('document.body.innerText')).includes(en.ui.stop.auditTitle), 'the audit log of stops and roles');
+  } finally {
+    currentApi = euApi;
+    await b.setViewport(1440, 900);
+  }
 });

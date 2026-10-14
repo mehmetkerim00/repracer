@@ -104,10 +104,13 @@ test('Р-78, Р-76, finding 4 on PostgreSQL: the stop and the resume are audited
   const resumed = await handle({ method: 'POST', url: api('stops', stopId, 'resume'), body: { note: 'Admin resumes after the check', confirmed: true }, ...admin });
   assert.equal(resumed.status, 200, JSON.stringify(resumed.body));
   const audit = (resumed.body as { stop: StopView }).stop.audit;
-  assert.deepEqual(audit.slice(0, 2).map((a) => [a.action, a.actor, a.note]), [
+  assert.deepEqual(audit.filter((a) => a.action !== 'Role changed').slice(0, 2).map((a) => [a.action, a.actor, a.note]), [
     ['Pricing resumed', 'Admin (you)', 'Admin resumes after the check'],
     ['Pricing stopped', 'Operator', 'Synthetic kill switch on PostgreSQL'],
   ]);
+  // Шаг 88 [Р-213]: смена роли в базе — в том же журнале: кто сменил, чья роль и как (время — часов базы, у остановок стенда — часов мира)
+  assert.deepEqual(audit.filter((a) => a.action === 'Role changed').map((a) => [a.actor, a.scope]),
+    [['Owner', `${STAND_ACCOUNTS.find((a) => a.role === 'OPERATOR')!.email}: Operator → Viewer`]]);
 });
 
 test('Р-74 on PostgreSQL: a NO_OP decision has no explanation in the database and the trace names the gap', async () => {

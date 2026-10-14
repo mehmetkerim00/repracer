@@ -78,6 +78,23 @@ export interface DemoWorldOptions {
   log?: (message: string) => void;
 }
 
+/**
+ * Шаг 88 [Р-213]: в журнале демо видна смена роли. Синтетический менеджер приходит в демо наблюдателем, и владелец своим входом со
+ * вторым фактором повышает его до менеджера — настоящим путём: роль меняет база (`membership_role_change_guard`), событие
+ * «кто, когда, наблюдатель → менеджер» пишет триггер аудита. У человека в пространстве одна роль: новая заменяет прежнюю
+ */
+const DEMO_PROMOTED_MEMBER = 'membership-manager';
+const joinedAsViewer = (join: DemoWorldOptions['joinMember']): DemoWorldOptions['joinMember'] =>
+  join ? (input) => join({ ...input, role: input.membershipAlias === DEMO_PROMOTED_MEMBER ? 'VIEWER' : input.role }) : join;
+
+async function promoteDemoManager(store: { changeMemberRole: import('@repracer/pricing-pipeline').PricingStore['changeMemberRole'] },
+  seeded: { tenantId: string; userId: string; ids: { dbId(alias: string): string } }, joined: boolean): Promise<void> {
+  // Без приглашения (участники созданы вместе с тенантом) менеджер сразу менеджер — повышать некого
+  if (!joined) return;
+  const changed = await store.changeMemberRole(seeded.tenantId, seeded.ids.dbId(DEMO_PROMOTED_MEMBER), 'MANAGER', { userId: seeded.userId, mfa: true });
+  if (changed.status !== 'CHANGED') throw new Error(`demo manager promotion refused: ${changed.status}`);
+}
+
 export async function startDemoWorld(options: DemoWorldOptions): Promise<RunningDemoWorld> {
   if (options.market === 'us') return startUsDemoWorld(options);
   const { pools, tag } = options;
@@ -91,13 +108,14 @@ export async function startDemoWorld(options: DemoWorldOptions): Promise<Running
     tag, startIso: systemClock.now(), bare: false, appPool: pools.app, adminPool: pools.admin,
     provisioningPool: pools.provisioning, dispatcherPool: pools.dispatcher, schedulerPool: pools.scheduler,
     exporterPool: pools.exporter, stockPool: pools.stock,
-    memberUsers: options.memberUsers, memberEmails: options.memberEmails, joinMember: options.joinMember,
+    memberUsers: options.memberUsers, memberEmails: options.memberEmails, joinMember: joinedAsViewer(options.joinMember),
     ...(options.writeMode ? { writeMode: options.writeMode } : {}),
     wallClock: true,
     ...(options.customerTenant ? { demo: false } : {}),
   });
   const seeded = demo.live.seeded;
   const store = new PgPricingStore(pools.app, { adminPool: pools.admin, bulkWorkerPool: pools.bulkWorker });
+  await promoteDemoManager(store, seeded, Boolean(options.joinMember && options.memberUsers?.[DEMO_PROMOTED_MEMBER]));
   if (options.locale || options.timeZone) {
     const saved = await store.setTenantDisplay(seeded.tenantId, { ...(options.locale ? { locale: options.locale } : {}), ...(options.timeZone ? { timeZone: options.timeZone } : {}) },
       { userId: seeded.userId, mfa: true });
@@ -285,9 +303,10 @@ async function startUsDemoWorld(options: DemoWorldOptions): Promise<RunningDemoW
     provisioningPool: pools.provisioning, adminPool: pools.admin, tenantRegion: region?.region === 'US' ? 'US' : 'EU',
     // Р-169: демо в тени — в канал не уходит ничего; бой на amazon.com база и не откроет, пока граница суток не подтверждена [Р-172]
     writeMode: options.writeMode ?? 'SHADOW', ...(options.customerTenant ? {} : { demo: true }),
-    memberUsers: options.memberUsers, memberEmails: options.memberEmails, joinMember: options.joinMember,
+    memberUsers: options.memberUsers, memberEmails: options.memberEmails, joinMember: joinedAsViewer(options.joinMember),
   });
   const store = new PgPricingStore(pools.app, { adminPool: pools.admin, bulkWorkerPool: pools.bulkWorker });
+  await promoteDemoManager(store, seeded, Boolean(options.joinMember && options.memberUsers?.[DEMO_PROMOTED_MEMBER]));
   if (options.locale || options.timeZone) {
     const saved = await store.setTenantDisplay(seeded.tenantId, { ...(options.locale ? { locale: options.locale } : {}), ...(options.timeZone ? { timeZone: options.timeZone } : {}) },
       { userId: seeded.userId, mfa: true });

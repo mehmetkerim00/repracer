@@ -50,8 +50,10 @@ PGHOST=127.0.0.1 PGPORT=5432 PGUSER=<суперпользователь PostgreS
 первая резервация — на 2-й минуте после «Демо готово». Перезапуск команды — новый мир с нуля.
 
 В браузере: `http://127.0.0.1:5173` (не `localhost`) → экран входа уже по-английски (шаг 83: по центру знак **repracer** и строка
-«Repricing you can audit», под ними карточка входа; шаг 84 — роли строками: цветной кружок, имя роли и что роль может) → строка
-**Owner** («full access, can stop pricing and switch on live writes»; переключателя языка в шапке нет — профиль us) → одна карточка
+«Repricing you can audit», под ними карточка входа; шаг 84 — роли строками: цветной кружок, имя роли и что роль может; шаг 88 —
+ровно три роли: **Owner** «everything, plus people, channel accounts and live writes», **Manager** «prices, bounds, strategies, stock,
+unit cost import, bulk operations, stop pricing», **Viewer** «read-only») → строка **Owner** (переключателя языка в шапке нет —
+профиль us) → одна карточка
 **Demo store (simulator)** с пометкой **Demo** → нажатие открывает сразу **Shadow mode**. Перезагрузка страницы (F5) — выход: токен
 живёт только в памяти вкладки; снова строка «Owner», адрес экрана сохраняется.
 
@@ -185,20 +187,22 @@ declared it)», «Minimum margin $6.85 — margin at least 12%», «Effective fl
 
 | Kind | What it holds | Who sets it | How it ends |
 |---|---|---|---|
-| Stop by a person | All prices | Owner or operator, with a note | A person with a note; the whole workspace — the owner with a second factor |
+| Stop by a person | All prices | Owner or manager, with a note | Owner or manager, with a note; the whole workspace — with a second factor |
 | Storefront halt | Only competitor-derived prices | System: broken input data | Fresh sample where the channel allows it, otherwise a person |
-| Channel distrust | All prices and the channel price threshold | System: the channel changes our numbers | Only a person: owner or admin, second factor, note |
+| Channel distrust | All prices and the channel price threshold | System: the channel changes our numbers | Only a person: owner or manager, second factor, note |
 
 **Живое действие — остановка человеком:**
 
 1. Блок **Storefronts** → карточка **amazon.com** («Running», «All prices of 12 offers stop changing») → кнопка **«Stop»**. Окно
    подтверждения открывается поверх страницы, по центру (страница затемнена): «Stop all price changes: amazon.com?», «All prices of 12
-   offers stop changing. The owner or an operator can resume it with a note.» и «Not stopped: Stock synchronization; A write already sent
+   offers stop changing. The owner or a manager can resume it with a note.» и «Not stopped: Stock synchronization; A write already sent
    to the channel: its outcome is accepted».
 2. Поле «Note — why (at least 10 characters)» — заметка **не короче 10 символов** (кнопка «Yes, stop» до этого неактивна), например
    «Demo: checking the stop crane», → **«Yes, stop»**. Ответ: «Stopped. All prices of 12 offers stop changing.»
-3. Ниже — «Active stops»: карточка amazon.com с пилюлей «Stopped» и временем, «By: Owner (you)», «Note: “…”»; «Audit log of stops» —
-   строка «Pricing stopped». Новые решения по витрине — «Pricing stopped by a person».
+3. Ниже — «Active stops»: карточка amazon.com с пилюлей «Stopped» и временем, «By: Owner (you)», «Note: “…”»; **«Audit log: stops and roles»** —
+   строка «Pricing stopped». Ниже в том же журнале уже есть строка с подготовки демо: **«Role changed»** · «Owner (you)» ·
+   «manager@stand.repracer.test: Viewer → Manager» (шаг 88: менеджер пришёл наблюдателем, владелец повысил его; у человека в пространстве одна
+   роль — новая заменила прежнюю). Новые решения по витрине — «Pricing stopped by a person».
 4. На карточке остановки — **«Resume»** → окно «Resume pricing: amazon.com?» с заметкой → **«Yes, resume»** → «Pricing resumed.»; в
    журнале вторая строка, остановка уходит в «Resumed» со временем остановки и заметкой снятия. Весь шаг в проходе шага 87 — 1,5 с без
    ожиданий.

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { ConfigError, intFromEnv, requiredValue, secretFromEnv, type Env } from '@repracer/service-runtime';
-import { marketProfileOf, marketScope, type MarketProfile } from '@repracer/console-model';
+import { extendedRolesOf, marketProfileOf, marketScope, type MarketProfile } from '@repracer/console-model';
 
 /**
  * Р-159 (шаг 37, OQ-221): консоль продавца — РАЗВОРАЧИВАЕМЫЙ процесс, а не только сервер стенда, запускаемый руками.
@@ -27,6 +27,11 @@ export interface ConsoleConfig {
    * языки и правила консоль предлагает, и какое демо сеется: в us — американский продавец без Kaufland
    */
   market: MarketProfile;
+  /**
+   * Шаг 88 [Р-213]: флаг «расширенные роли» (`REPRACER_EXTENDED_ROLES`: on или off, по умолчанию off) — консоль предлагает три роли
+   * (владелец, менеджер, наблюдатель) или пять (ещё администратор и оператор); назначенные роли работают в любом положении
+   */
+  extendedRoles: boolean;
   /**
    * Р-160: публичный демо-режим. `on` — на странице входа есть кнопка «посмотреть демо», и гость получает НАБЛЮДАТЕЛЯ
    * в демо-тенанте без регистрации. `off` — кнопки нет и маршрут гостя отвечает 404.
@@ -126,6 +131,9 @@ export function loadConsoleConfig(env: Env = process.env, read: (path: string) =
     }
   }
 
+  let extendedRoles: boolean;
+  try { extendedRoles = extendedRolesOf(env.REPRACER_EXTENDED_ROLES); } catch (error) { throw new ConfigError(`CONFIG_INVALID: ${(error as Error).message}`); }
+
   const publicDemo = env.REPRACER_CONSOLE_PUBLIC_DEMO === 'on';
   /**
    * Ключ гостевого издателя — из файла секретов, как все ключи. Временный ключ в памяти разрешён только ЯВНО
@@ -166,6 +174,7 @@ export function loadConsoleConfig(env: Env = process.env, read: (path: string) =
     distDir: requiredValue(env.REPRACER_CONSOLE_DIST, 'REPRACER_CONSOLE_DIST'),
     locale,
     market,
+    extendedRoles,
     publicDemo,
     demoUs: env.REPRACER_CONSOLE_DEMO_US === 'on',
     demoPressDays: intFromEnv(env, 'REPRACER_CONSOLE_DEMO_PRESS_DAYS', 0, 0, 7),

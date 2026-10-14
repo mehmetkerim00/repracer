@@ -24,6 +24,8 @@ services:
       # Шаг 87 [Р-214]: профиль рынка, по умолчанию us; язык по умолчанию — язык профиля (немецкий в us — отказ при старте)
       REPRACER_MARKET_PROFILE: ${REPRACER_MARKET_PROFILE:-us}
       REPRACER_CONSOLE_LOCALE: ${REPRACER_CONSOLE_LOCALE:-en}
+      # Шаг 88 [Р-213]: расширенные роли, по умолчанию off — консоль предлагает три роли (владелец, менеджер, наблюдатель)
+      REPRACER_EXTENDED_ROLES: ${REPRACER_EXTENDED_ROLES:-off}
       # Р-160: публичное демо. `off` — кнопки «посмотреть демо» нет и маршрут гостя отвечает 404
       REPRACER_CONSOLE_PUBLIC_DEMO: ${REPRACER_CONSOLE_PUBLIC_DEMO:-on}
       REPRACER_CONSOLE_DEMO_RESEED_HOURS: ${REPRACER_CONSOLE_DEMO_RESEED_HOURS:-24}

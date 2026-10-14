@@ -42,7 +42,7 @@
 
 | Проверка | Ожидаемое | Если нет |
 |---|---|---|
-| Экран входа | по-английски: по центру знак «repracer» и «Repricing you can audit», под ними карточка входа: роли строками — цветной кружок, «Owner — full access, can stop pricing and switch on live writes», «Admin — …» и др. | пустая белая страница — раздел 5, «Пустая страница» |
+| Экран входа | по-английски: по центру знак «repracer» и «Repricing you can audit», под ними карточка входа: ровно три роли строками (шаг 88) — цветной кружок, «Owner — everything, plus people, channel accounts and live writes», «Manager — prices, bounds, strategies, stock, unit cost import, bulk operations, stop pricing», «Viewer — read-only» | пустая белая страница — раздел 5, «Пустая страница» |
 | Строка «Owner» | «Your workspaces», одна карточка **Demo store (simulator)** — «Synthetic American seller on the channel simulator: offers on amazon.com and ebay.com, a warehouse in Newark, Delaware.», пометка Demo и показатели Offers 24 / Decisions 24h / Interventions 7d | десятки карточек с русским текстом — подготовка запущена без `REPRACER_DEMO_ONLY`: перезапустить подготовку |
 | Нажать карточку | сразу **Shadow mode**, баннер «Demo workspace: synthetic data, real path» | — |
 | Сводка тени | белые плитки: «Decisions» — больше 1000; «Without the floor» в долларах; график «Decisions per day» — семь столбиков с числами, неделя не нулевая, сегодняшний столбик через 15 минут после запуска — выше недели; под графиком — список «показатель — значение» со сноской; строка «Without the floor you would have sold $… cheaper in total» | «Price would change» — 0: мир младше ~20 минут; столбики на нуле все дни, кроме сегодняшнего, — неделя США не прожата: перезапустить подготовку |
@@ -135,7 +135,8 @@
 |---|---|
 | «Что будет с записью, которая уже ушла?» | Блок «Not stopped»: «A write already sent to the channel: its outcome is accepted» — остановка не отзывает отправленное, а новых записей не создаёт |
 | «Остановка цен останавливает и остатки?» | Нет — «Not stopped: Stock synchronization»: продажи продолжают уменьшать остаток в каналах |
-| «Кто может остановить и снять, и видно ли это потом?» | Таблица «Three kinds of stop»: колонки «Who sets it» и «How it ends»; останавливают владелец или оператор с заметкой; снятие — с заметкой, а снятие остановки всего магазина — только владелец со вторым фактором; «Audit log of stops» хранит кто, когда и с какой заметкой |
+| «Кто может остановить и снять, и видно ли это потом?» | Таблица «Three kinds of stop»: колонки «Who sets it» и «How it ends»; останавливают владелец или менеджер с заметкой; снятие — с заметкой, а снятие остановки всего магазина — со вторым фактором; «Audit log: stops and roles» хранит кто, когда и с какой заметкой |
+| «Кто у вас что может? Можно дать человеку две роли?» | Вход: три роли — Owner, Manager, Viewer, у каждой строка «что может». Одна роль на человека в магазине (база не даст вторую); нужны права двух — назначается одна старшая. Менеджер — ежедневная работа и стоп-кран; люди, аккаунты каналов и включение записи в канал — только владелец. Смена роли видна в «Audit log: stops and roles»: «Role changed · …: Viewer → Manager», кто и когда |
 
 ### г. Channel accounts
 

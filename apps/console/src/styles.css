@@ -572,6 +572,7 @@ button.role-row:hover { background: var(--surface-muted); }
 .role-OPERATOR .role-dot { background: var(--role-operator-bg); color: var(--role-operator-fg); }
 .role-PRICING_MANAGER .role-dot { background: var(--role-pricing-bg); color: var(--role-pricing-fg); }
 .role-INVENTORY_MANAGER .role-dot { background: var(--role-inventory-bg); color: var(--role-inventory-fg); }
+.role-MANAGER .role-dot { background: var(--role-manager-bg); color: var(--role-manager-fg); }
 .role-VIEWER .role-dot { background: var(--role-viewer-bg); color: var(--role-viewer-fg); }
 .role-name { font-weight: var(--weight-heading); color: var(--text); white-space: nowrap; }
 .role-name::after { content: ' —'; color: var(--text-3); font-weight: 400; }

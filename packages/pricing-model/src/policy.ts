@@ -53,30 +53,45 @@ export function stopCovers(stop: Pick<StopRef, 'scope' | 'channelAccountId' | 'm
 // Роли [OQ-125, шаг 12; OQ-129, шаг 13]
 // ---------------------------------------------------------------------------
 
-export const MEMBER_ROLES = ['OWNER', 'ADMIN', 'OPERATOR', 'PRICING_MANAGER', 'INVENTORY_MANAGER', 'VIEWER'] as const;
+export const MEMBER_ROLES = ['OWNER', 'MANAGER', 'VIEWER', 'ADMIN', 'OPERATOR', 'PRICING_MANAGER', 'INVENTORY_MANAGER'] as const;
 export type MemberRole = (typeof MEMBER_ROLES)[number];
+
+/**
+ * Шаг 88 [Р-213]: у человека в рабочем пространстве ровно одна роль (одно членство на тенант и пользователя — база, 0002, 0185).
+ * Видимых ролей три: владелец — всё, менеджер — ежедневная работа, наблюдатель — только чтение. Прежние роли не удалены: их
+ * назначения работают, а консоль показывает администратора и оператора только с флагом развёртывания «расширенные роли»
+ * (`REPRACER_EXTENDED_ROLES=on`); менеджер цен и менеджер остатков — роли прежних назначений, новых им не предлагается.
+ */
+export const VISIBLE_ROLES: readonly MemberRole[] = ['OWNER', 'MANAGER', 'VIEWER'];
+export const EXTENDED_ROLES: readonly MemberRole[] = [...VISIBLE_ROLES, 'ADMIN', 'OPERATOR'];
+
+/** Роли, которые консоль предлагает (вход стенда, описания ролей): три видимые или пять с флагом расширенных ролей */
+export function offeredRoles(extended: boolean): readonly MemberRole[] {
+  return extended ? EXTENDED_ROLES : VISIBLE_ROLES;
+}
 
 export type PricingAction = 'VIEW_PRICING' | 'STOP_PRICING' | 'RESUME_TENANT_STOP' | 'RESUME_CHANNEL_STOP' | 'RELEASE_CHANNEL_HALT' | 'RELEASE_CHANNEL_DISTRUST' | 'ENABLE_REPRICING'
   | 'MANAGE_PRICING' | 'MANAGE_CATALOG' | 'MANAGE_TENANT' | 'GIVE_MIGRATION_CONSENT';
 
 /**
- * Права на цены (шаг 13, OQ-129). Стоп-кран — у каждого, кто отвечает за цены: владелец, администратор, оператор,
- * менеджер цен. Возобновить весь тенант — владелец и администратор тенанта (агентство управляет клиентом без владельца);
- * витрину или аккаунт — все, кто может остановить. Менеджер остатков и наблюдатель только смотрят.
- * Матрица дублирована в БД (`security.pricing_permission`, 0045) — совпадение проверяет тест.
+ * Права на цены (шаг 13, OQ-129; шаг 88, Р-213). Стоп-кран — у каждого, кто отвечает за цены. Менеджер (MANAGER) — ежедневная
+ * работа: цены, границы, стратегии, остатки, импорт себестоимости, массовые операции и стоп-кран целиком; управление людьми и
+ * аккаунтами каналов (MANAGE_TENANT) — у владельца (и прежнего администратора). Только владельцу база отдаёт и то, чего в матрице
+ * нет отдельной строкой: перевод в бой [Р-170], подтверждение и отзыв записи количества [Р-202]. Менеджер остатков и наблюдатель
+ * только смотрят на цены. Матрица дублирована в БД (`security.pricing_permission`, 0185) — совпадение проверяет тест.
  */
 export const PRICING_PERMISSIONS: Readonly<Record<PricingAction, readonly MemberRole[]>> = {
   VIEW_PRICING: MEMBER_ROLES,
-  STOP_PRICING: ['OWNER', 'ADMIN', 'OPERATOR', 'PRICING_MANAGER'],
-  RESUME_TENANT_STOP: ['OWNER', 'ADMIN'],
-  RESUME_CHANNEL_STOP: ['OWNER', 'ADMIN', 'OPERATOR', 'PRICING_MANAGER'],
-  RELEASE_CHANNEL_HALT: ['OWNER', 'ADMIN', 'OPERATOR', 'PRICING_MANAGER'],
-  // Р-118: канал искажает наши цены — снять недоверие могут те, кто отвечает за тенант целиком (как возобновление тенанта)
-  RELEASE_CHANNEL_DISTRUST: ['OWNER', 'ADMIN'],
-  ENABLE_REPRICING: ['OWNER', 'ADMIN', 'OPERATOR', 'PRICING_MANAGER'],
+  STOP_PRICING: ['OWNER', 'MANAGER', 'ADMIN', 'OPERATOR', 'PRICING_MANAGER'],
+  RESUME_TENANT_STOP: ['OWNER', 'MANAGER', 'ADMIN'],
+  RESUME_CHANNEL_STOP: ['OWNER', 'MANAGER', 'ADMIN', 'OPERATOR', 'PRICING_MANAGER'],
+  RELEASE_CHANNEL_HALT: ['OWNER', 'MANAGER', 'ADMIN', 'OPERATOR', 'PRICING_MANAGER'],
+  // Р-118: канал искажает наши цены — снять недоверие могут те, кто отвечает за цены тенанта целиком (как возобновление тенанта)
+  RELEASE_CHANNEL_DISTRUST: ['OWNER', 'MANAGER', 'ADMIN'],
+  ENABLE_REPRICING: ['OWNER', 'MANAGER', 'ADMIN', 'OPERATOR', 'PRICING_MANAGER'],
   // Шаг 18 [Р-100]: административная запись проверяет роль, а не только членство (security.admin_write_action, 0068)
-  MANAGE_PRICING: ['OWNER', 'ADMIN', 'PRICING_MANAGER'],
-  MANAGE_CATALOG: ['OWNER', 'ADMIN', 'INVENTORY_MANAGER'],
+  MANAGE_PRICING: ['OWNER', 'MANAGER', 'ADMIN', 'PRICING_MANAGER'],
+  MANAGE_CATALOG: ['OWNER', 'MANAGER', 'ADMIN', 'INVENTORY_MANAGER'],
   MANAGE_TENANT: ['OWNER', 'ADMIN'],
   // Р-101: согласие на необратимую миграцию eBay — только владелец (и только от своего имени, со вторым фактором — в БД)
   GIVE_MIGRATION_CONSENT: ['OWNER'],

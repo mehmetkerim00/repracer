@@ -129,3 +129,14 @@ test('шаг 45, находка 10: сбой userinfo — «поставщик �
   const fine = remoteUserinfo(ISSUER, (async (url: string) => new Response(JSON.stringify(answer(url)))) as typeof fetch);
   assert.deepEqual(await fine('syn-access'), { email: 'owner@example.test', emailVerified: true });
 });
+
+test('шаг 88 [Р-213]: у человека в рабочем пространстве одна роль; в разных пространствах роли разные', async () => {
+  const { idp, directory, auth } = world();
+  // Вторая роль того же человека в том же пространстве — отказ, как у базы (одно членство на тенант и пользователя)
+  assert.throws(() => directory.addMembership('user-operator', { tenantId: 'tenant-1', membershipId: 'membership-second', role: 'MANAGER' }),
+    /one person has one role in a workspace/);
+  // В другом пространстве у того же человека своя роль (агентство)
+  directory.addMembership('user-operator', { tenantId: 'tenant-2', membershipId: 'membership-agency', role: 'MANAGER' });
+  const principal = await auth.authenticate(`Bearer ${idp.token('sub-operator')}`);
+  assert.deepEqual(principal?.memberships.map((m) => [m.tenantId, m.role]), [['tenant-1', 'OPERATOR'], ['tenant-2', 'MANAGER']]);
+});

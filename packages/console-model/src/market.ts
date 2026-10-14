@@ -79,3 +79,14 @@ export function connectableInMarket<T extends { channel: string; marketplaces: r
     return marketplaces.length === 0 ? [] : [{ ...c, marketplaces }];
   });
 }
+
+/**
+ * Шаг 88 [Р-213]: флаг развёртывания «расширенные роли» (`REPRACER_EXTENDED_ROLES`: on или off, по умолчанию off) — по образцу
+ * профиля рынка. Выключен: консоль предлагает три видимые роли (владелец, менеджер, наблюдатель); включён — ещё администратора и
+ * оператора. Назначенные роли флаг не трогает: человек с прежней ролью работает в любом положении флага
+ */
+export function extendedRolesOf(raw: string | undefined): boolean {
+  if (raw === undefined || raw === '' || raw === 'off') return false;
+  if (raw === 'on') return true;
+  throw new Error(`REPRACER_EXTENDED_ROLES must be on or off, got ${raw}`);
+}

@@ -312,7 +312,7 @@ const values: Record<ValueKey, string> = {
   REVIEW_CHANNEL_POLICY: 'Review the channel policy notice', CONTACT_CHANNEL_SUPPORT: 'Contact the channel support', REVIEW_OFFER_STATUS: 'Review the offer status',
   FEE_ESTIMATE_MISSING: 'the channel fee estimate is missing', VAT_RATE_MISSING: 'the product VAT rate is not set',
   CHANNEL: 'the channel',
-  OWNER: 'Owner', ADMIN: 'Admin', OPERATOR: 'Operator', PRICING_MANAGER: 'Pricing manager', INVENTORY_MANAGER: 'Inventory manager', VIEWER: 'Viewer',
+  OWNER: 'Owner', MANAGER: 'Manager', ADMIN: 'Admin', OPERATOR: 'Operator', PRICING_MANAGER: 'Pricing manager', INVENTORY_MANAGER: 'Inventory manager', VIEWER: 'Viewer',
   STRATEGY: 'the strategy', MIN_MARGIN: 'the minimum margin',
   VAT_INCLUDED: 'VAT included in the price (EU)', SALES_TAX_EXCLUDED: 'sales tax added at checkout (US)',
 };
@@ -447,11 +447,12 @@ export const en = {
         noSimulator: 'Sign-in goes through the identity provider, which is not connected yet.',
         /** Шаг 84: что может роль — строкой рядом с именем роли на входе (по матрице прав, policy.ts) */
         roleCan: {
-          OWNER: 'full access, can stop pricing and switch on live writes', ADMIN: 'manages the workspace, prices and stock, can stop pricing',
+          OWNER: 'everything, plus people, channel accounts and live writes',
+          MANAGER: 'prices, bounds, strategies, stock, unit cost import, bulk operations, stop pricing', ADMIN: 'manages the workspace, prices and stock, can stop pricing',
           OPERATOR: 'can stop pricing and switch repricing on, does not edit prices', PRICING_MANAGER: 'edits prices, bounds and strategies, can stop pricing',
           INVENTORY_MANAGER: 'manages products and stock, sees prices read-only', VIEWER: 'read-only',
         },
-        roleMarks: { OWNER: 'Ow', ADMIN: 'Ad', OPERATOR: 'Op', PRICING_MANAGER: 'PM', INVENTORY_MANAGER: 'IM', VIEWER: 'Vw' }, asAccount: (role: string) => `Sign in as ${role}`,
+        roleMarks: { OWNER: 'Ow', MANAGER: 'Mg', ADMIN: 'Ad', OPERATOR: 'Op', PRICING_MANAGER: 'PM', INVENTORY_MANAGER: 'IM', VIEWER: 'Vw' }, asAccount: (role: string) => `Sign in as ${role}`,
         signedIn: (name: string) => `Signed in: ${name}`,
         logout: 'Sign out',
         noWorlds: 'You don’t have access to any workspace yet. Ask the workspace owner for an invitation.',
@@ -764,7 +765,7 @@ export const en = {
       noChannels: 'No channel account yet, and connecting channels is not set up on this server yet — the platform team enables it.', 
       title: 'Channel accounts',
       intro: 'You connect a channel yourself: the button opens the consent page of the channel, you allow access there, and the channel sends you back here. A new connection starts in the shadow — the engine works completely and writes nothing.',
-      noRight: 'Only the owner or an administrator of the account connects channels.',
+      noRight: 'Only the workspace owner connects channel accounts.',
       tokenNote: 'We keep the access of the channel encrypted and never show it — not here, not in emails, not in logs. You can withdraw it at any time in the channel itself; we notice that and tell you.',
       /** Шаг 49 [Р-190, E-21]: что мы на eBay в бою пока не видим — у каждого аккаунта eBay, словами */
       /** Шаг 60 [Р-202]: внешние писатели канала — вопрос при подключении, запись количества по подтверждению владельца, внешние правки */
@@ -1417,7 +1418,7 @@ export const en = {
       intro: 'Screens and emails of this workspace use this language, and times are shown in this time zone. Inside the system all times are kept in UTC.',
       language: 'Language', timeZone: 'Time zone',
       timeZoneHint: 'Times on every screen and in every email of this workspace are shown in this time zone.', timeZoneFromStorefront: (zone: string) => `From your first storefront — ${zone}`,
-      save: 'Save', saved: 'Saved.', readOnly: 'Only the owner or an admin of this workspace can change these settings.',
+      save: 'Save', saved: 'Saved.', readOnly: 'Only the owner of this workspace can change these settings.',
       timeZoneDefault: (zone: string) => `Now ${zone} — the default from your first storefront; choose a time zone to set your own.`,
       invalid: 'These settings cannot be saved: choose English or Deutsch and a time zone from the list.',
       timeZoneUnknown: 'This time zone is not known. Choose one from the list.',
@@ -1494,9 +1495,9 @@ export const en = {
       kindsTitle: 'Three kinds of stop',
       kindsColumns: { kind: 'Kind', holds: 'What it holds', setBy: 'Who sets it', release: 'How it ends', active: 'Active' },
       kinds: {
-        HUMAN: { title: 'Stop by a person', holds: 'All prices', setBy: 'Owner or operator, with a note', release: 'A person with a note; the whole workspace — the owner with a second factor' },
+        HUMAN: { title: 'Stop by a person', holds: 'All prices', setBy: 'Owner or manager, with a note', release: 'Owner or manager, with a note; the whole workspace — with a second factor' },
         SYSTEM_HALT: { title: 'Storefront halt', holds: 'Only competitor-derived prices', setBy: 'System: broken input data', release: 'Fresh sample where the channel allows it, otherwise a person' },
-        CHANNEL_DISTRUST: { title: 'Channel distrust', holds: 'All prices and the channel price threshold', setBy: 'System: the channel changes our numbers', release: 'Only a person: owner or admin, second factor, note' },
+        CHANNEL_DISTRUST: { title: 'Channel distrust', holds: 'All prices and the channel price threshold', setBy: 'System: the channel changes our numbers', release: 'Only a person: owner or manager, second factor, note' },
       },
       running: 'Running', stopped: 'Stopped', stoppedAt: (when: string) => `stopped ${when}`, coveredBy: (label: string, since: string) => `Stopped by: ${label} since ${since}`,
       stopTenant: 'Stop the whole workspace', stopTarget: 'Stop', resume: 'Resume', release: 'Release',
@@ -1510,13 +1511,15 @@ export const en = {
       releasedBy: (when: string, who: string, note: string) => `${when} by ${who}${note ? `: “${note}”` : ''}`,
       haltReview: (when: string) => `Fresh sample check after ${when}`, haltReleasedAuto: (when: string) => `automatically by a fresh sample ${when}`,
       notStopped: ['Stock synchronization', 'A write already sent to the channel: its outcome is accepted'],
-      auditTitle: 'Audit log of stops',
-      auditEmpty: 'No stops yet. Every stop and resume is listed here with its author and note.',
-      auditActions: { 'pricing.stop_created': 'Pricing stopped', 'pricing.stop_released': 'Pricing resumed', 'pricing.halt_created': 'Storefront halted by the system', 'pricing.halt_released': 'Storefront halt released', 'pricing.distrust_created': 'Channel distrusted by the system — all prices held', 'pricing.distrust_released': 'Distrust of the channel released' },
+      auditTitle: 'Audit log: stops and roles',
+      auditEmpty: 'No stops or role changes yet. Every stop, resume and role change is listed here with its author.',
+      auditActions: { 'pricing.stop_created': 'Pricing stopped', 'pricing.stop_released': 'Pricing resumed', 'pricing.halt_created': 'Storefront halted by the system', 'pricing.halt_released': 'Storefront halt released', 'pricing.distrust_created': 'Channel distrusted by the system — all prices held', 'pricing.distrust_released': 'Distrust of the channel released', 'membership.role_changed': 'Role changed' },
+      /** Шаг 88 [Р-213]: чья роль и как сменилась — прежняя и новая роль; в памяти стенда адреса участника нет */
+      roleChanged: (member: string | null, from: string, to: string) => (member ? `${member}: ${from} → ${to}` : `${from} → ${to}`),
       system: 'System',
       confirmTitle: (label: string) => `Stop all price changes: ${label}?`,
       confirmTenant: (impact: string) => `${impact}. The stop also covers channel accounts connected later. Only the owner can resume it.`,
-      confirmChannel: (impact: string) => `${impact}. The owner or an operator can resume it with a note.`,
+      confirmChannel: (impact: string) => `${impact}. The owner or a manager can resume it with a note.`,
     },
   },
 };

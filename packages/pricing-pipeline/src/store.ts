@@ -754,8 +754,13 @@ export interface PricingStore {
   scopeDecisionStats(tenantId: string, writeScopeIds: readonly string[]): Promise<ScopeDecisionStats[]>;
   interventions(tenantId: string, from: Instant, to: Instant): Promise<InterventionSlice>;
   feedPage(tenantId: string, now: Instant, query: FeedPageQuery): Promise<FeedPage>;
-  /** Последние события аудита остановок [Р-76], свежие первыми */
+  /** Последние события аудита остановок [Р-76] и смен ролей [Р-213], свежие первыми */
   auditRecent(tenantId: string, limit: number): Promise<ConsoleAuditRow[]>;
+  /**
+   * Шаг 88 [Р-213]: смена роли участника — одна роль на человека, новая заменяет прежнюю. Меняет владелец (или прежний администратор)
+   * со вторым фактором; в журнал аудита событие пишет база (кто, когда, прежняя → новая), журнал только на добавление
+   */
+  changeMemberRole(tenantId: string, membershipId: string, role: MemberRole, actor: { userId: string; mfa: boolean }): Promise<MemberRoleChangeResult>;
   worldCounters(tenantId: string, now: Instant): Promise<WorldCounters>;
 }
 
@@ -908,16 +913,21 @@ export interface ConsoleDecisionRow extends PriceDecisionDraft, ExplanationInten
   snapshotRef: SnapshotRef | null;
 }
 
-/** Остановки и системные остановки в журнале аудита [Р-76] */
+/** Остановки и системные остановки в журнале аудита [Р-76]; с шага 88 [Р-213] — и смены ролей участников */
 export interface ConsoleAuditRow {
-  /** Время действия (остановки, снятия) */
+  /** Время действия (остановки, снятия, смены роли) */
   at: Instant;
-  action: 'pricing.stop_created' | 'pricing.stop_released' | 'pricing.halt_created' | 'pricing.halt_released' | 'pricing.distrust_created' | 'pricing.distrust_released';
+  action: 'pricing.stop_created' | 'pricing.stop_released' | 'pricing.halt_created' | 'pricing.halt_released' | 'pricing.distrust_created' | 'pricing.distrust_released'
+    | 'membership.role_changed';
   actorType: 'USER' | 'SYSTEM';
   membershipId: string | null;
-  /** Роль участника в момент действия */
+  /** Роль участника в момент действия (у смены роли — роль автора) */
   role: MemberRole | null;
-  entityType: 'price_stop' | 'pricing_halt' | 'channel_distrust';
+  entityType: 'price_stop' | 'pricing_halt' | 'channel_distrust' | 'membership';
+  /** Шаг 88 [Р-213]: смена роли — прежняя и новая роль и чья (адрес участника; в памяти адресов нет — null) */
+  roleFrom?: MemberRole | null;
+  roleTo?: MemberRole | null;
+  memberEmail?: string | null;
   entityId: string;
   scope: AuditStopScope | null;
   channelAccountId: string | null;
@@ -997,6 +1007,8 @@ export interface ConsoleDivergenceRow {
   cause: string;
   status: string;
 }
+
+export type MemberRoleChangeResult = { status: 'CHANGED' | 'UNCHANGED' } | { status: 'FORBIDDEN' | 'MFA_REQUIRED' | 'NOT_FOUND' };
 
 export interface ConsoleMemberRow {
   membershipId: string;

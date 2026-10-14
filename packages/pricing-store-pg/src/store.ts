@@ -1,4 +1,4 @@
-import type { ExplanationRuleset as DictionaryRuleset } from '@repracer/pricing-model';
+import type { ExplanationRuleset as DictionaryRuleset, MemberRole } from '@repracer/pricing-model';
 import { COMPETITOR_DERIVED_RULES } from '@repracer/pricing-model';
 import {
   floorCauseFromDatabase, convertMinor, storefrontPriceForMarginBp, type FxQuote } from '@repracer/pricing-model';
@@ -47,7 +47,7 @@ import type {
   ProductKey,
   ScopeEvaluationContext,
   ShiftWindow,
-  SnapshotOutcome, ConsoleAuditRow, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, ConsoleStateOptions, ConsoleCatalogPage, ConsoleCatalogFactsQuery, ConsoleCatalogFacts, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveredCatalogOffer, DiscoveryStop, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, ChannelObservation, FloorRaiseAfter, FloorRaiseCandidate } from '@repracer/pricing-pipeline';
+  SnapshotOutcome, ConsoleAuditRow, MemberRoleChangeResult, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, ConsoleStateOptions, ConsoleCatalogPage, ConsoleCatalogFactsQuery, ConsoleCatalogFacts, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveredCatalogOffer, DiscoveryStop, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, ChannelObservation, FloorRaiseAfter, FloorRaiseCandidate } from '@repracer/pricing-pipeline';
 import { FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT, stalestFirst } from '@repracer/pricing-pipeline';
 import { inTenant, RollbackWith, type PgPool, type Tx } from './db.ts';
 import { PgWriteQueueStore } from './write-queue.ts';
@@ -278,10 +278,14 @@ function rejectedSnapshotRow(r: Row): ConsoleRejectedSnapshotRow {
 }
 
 function auditRow(r: Row): ConsoleAuditRow {
+  const roleChange = r.action === 'membership.role_changed';
   return {
-    at: new Date(r.changes.at).toISOString(), action: r.action, actorType: r.actor_type, membershipId: r.actor_membership_id, role: r.changes.role ?? null,
+    at: new Date(r.changes.at).toISOString(), action: r.action, actorType: r.actor_type, membershipId: r.actor_membership_id,
+    // Шаг 88 [Р-213]: у остановки роль автора в момент действия пишет триггер; у смены роли (триггер 0058 её не пишет) — роль автора сейчас
+    role: roleChange ? r.actor_role ?? null : r.changes.role ?? null,
     entityType: r.entity_type, entityId: r.entity_id, scope: r.changes.scope ?? null, channelAccountId: r.changes.channelAccountId ?? null,
     marketplace: r.changes.marketplace ?? null, note: r.changes.note ?? null,
+    ...(roleChange ? { roleFrom: r.changes.roleFrom ?? null, roleTo: r.changes.roleTo ?? null, memberEmail: r.member_email ?? null } : {}),
   };
 }
 
@@ -2546,12 +2550,50 @@ export class PgPricingStore implements PricingStore {
 
   async auditRecent(tenantId: string, limit: number): Promise<ConsoleAuditRow[]> {
     return inTenant(this.admin('auditRecent'), tenantId, async (tx) => {
-      // Остановки в журнале аудита [Р-76]: время действия — из события, роль — в момент действия; свежие первыми, не весь журнал
-      const { rows } = await tx.query(`SELECT action, actor_type, actor_membership_id, entity_type, entity_id, changes FROM audit.audit_event
-                                          WHERE tenant_id = $1 AND entity_type IN ('price_stop', 'pricing_halt')
-                                          ORDER BY changes ->> 'at' DESC, recorded_at DESC, audit_event_id DESC LIMIT $2`, [tenantId, limit]);
+      // Остановки в журнале аудита [Р-76]: время действия — из события, роль — в момент действия; свежие первыми, не весь журнал.
+      // Шаг 88 [Р-213]: и смены ролей — второй частью: у остановок свой частичный индекс (0117), смены ролей редки и берутся по
+      // индексу сущности; чья роль сменилась — адрес участника, кто сменил — роль автора
+      const { rows } = await tx.query(
+        `SELECT * FROM (
+           (SELECT e.action, e.actor_type, e.actor_membership_id, e.entity_type, e.entity_id, e.changes, e.recorded_at, e.audit_event_id,
+                   NULL::text AS actor_role, NULL::text AS member_email
+              FROM audit.audit_event e
+             WHERE e.tenant_id = $1 AND e.entity_type IN ('price_stop', 'pricing_halt')
+             ORDER BY e.changes ->> 'at' DESC, e.recorded_at DESC, e.audit_event_id DESC LIMIT $2)
+           UNION ALL
+           (SELECT e.action, e.actor_type, e.actor_membership_id, e.entity_type, e.entity_id, e.changes, e.recorded_at, e.audit_event_id,
+                   am.role AS actor_role, u.email AS member_email
+              FROM audit.audit_event e
+              LEFT JOIN tenant_data.membership am ON am.tenant_id = e.tenant_id AND am.membership_id = e.actor_membership_id
+              LEFT JOIN tenant_data.membership tm ON tm.tenant_id = e.tenant_id AND tm.membership_id = e.entity_id
+              LEFT JOIN platform.app_user u ON u.user_id = tm.user_id
+             WHERE e.tenant_id = $1 AND e.entity_type = 'membership' AND e.action = 'membership.role_changed'
+             ORDER BY e.changes ->> 'at' DESC, e.recorded_at DESC, e.audit_event_id DESC LIMIT $2)
+         ) a ORDER BY a.changes ->> 'at' DESC, a.recorded_at DESC, a.audit_event_id DESC LIMIT $2`, [tenantId, limit]);
       return rows.map(auditRow);
     });
+  }
+
+  /**
+   * Шаг 88 [Р-213]: смена роли участника — административная запись человека. Кто может, проверяет база (`membership_role_change_guard`:
+   * другой действующий владелец или администратор, второй фактор, роль владельца — только владелец), событие с прежней и новой ролью
+   * пишет триггер аудита (0058). Одна роль на человека: роль — один столбец членства, новая заменяет прежнюю
+   */
+  async changeMemberRole(tenantId: string, membershipId: string, role: MemberRole, actor: { userId: string; mfa: boolean }): Promise<MemberRoleChangeResult> {
+    try {
+      return await inTenant(this.admin('changeMemberRole'), tenantId, async (tx) => {
+        const { rows: [m] } = await tx.query(`SELECT role FROM tenant_data.membership WHERE tenant_id = $1 AND membership_id = $2 AND status <> 'REVOKED'`, [tenantId, membershipId]);
+        if (!m) return { status: 'NOT_FOUND' as const };
+        if (m.role === role) return { status: 'UNCHANGED' as const };
+        await tx.query(`UPDATE tenant_data.membership SET role = $3 WHERE tenant_id = $1 AND membership_id = $2`, [tenantId, membershipId, role]);
+        return { status: 'CHANGED' as const };
+      }, actor.userId, { mfa: actor.mfa });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/requires a second factor/.test(message)) return { status: 'MFA_REQUIRED' };
+      if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
+      throw error;
+    }
   }
 
   async worldCounters(tenantId: string, now: Instant): Promise<WorldCounters> {

@@ -2,7 +2,7 @@ import { systemClock } from '@repracer/channel-port';
 import { createHash } from 'node:crypto';
 import { EXPLANATION_RULESETS } from './dictionary.ts';
 import { stalestFirst } from './reconciliation.ts';
-import type { FloorRaiseAfter, FloorRaiseCandidate, HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveryStop, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow} from './store.ts';
+import type { FloorRaiseAfter, FloorRaiseCandidate, HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, MemberRoleChangeResult, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveryStop, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow} from './store.ts';
 import { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, FILE_PRODUCING_JOB_KINDS, INTERVENTION_SLICE_LIMIT, READ_ONLY_JOB_KINDS } from './store.ts';
 import { feedGroupOf, type ConsoleScopeRow, type ConsoleWriteRow, type ConsoleIntentRow, type DecisionPage, type DecisionPageQuery, type DecisionDetail, type ScopeDecisionStats, type InterventionSlice, type FeedPage, type FeedPageItem, type FeedPageQuery, type FeedStatusGroup, type WorldCounters } from './store.ts';
 /** Записи в полёте: одна на единицу, показываются в состоянии консоли; завершённые — только в ленте [Р-154] */
@@ -201,6 +201,8 @@ export const DEFAULT_MEMBERS: ReadonlyArray<{ membershipId: string; role: Member
   { membershipId: 'membership-operator', role: 'OPERATOR', userId: 'user-operator' },
   { membershipId: 'membership-pricing-manager', role: 'PRICING_MANAGER', userId: 'user-pricing-manager' },
   { membershipId: 'membership-viewer', role: 'VIEWER', userId: 'user-viewer' },
+  // Шаг 88 [Р-213]: видимая роль ежедневной работы; прежние роли выше остаются — их назначения и тесты живут
+  { membershipId: 'membership-manager', role: 'MANAGER', userId: 'user-manager' },
 ];
 
 interface ScopeRow extends MemorySeedScope {
@@ -2289,6 +2291,29 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
 
   async auditRecent(_tenantId: string, limit: number): Promise<ConsoleAuditRow[]> {
     return [...this.audit].reverse().slice(0, limit).map((a) => ({ ...a }));
+  }
+
+  /**
+   * Шаг 88 [Р-213]: смена роли — как `membership_role_change_guard` и `membership_audit` (0053, 0058): меняет другой действующий
+   * владелец или администратор своим входом со вторым фактором; роль владельца — только владелец, администратор не трогает
+   * администраторов; одна роль на человека — новая заменяет прежнюю, в журнал — автор, время, прежняя и новая роль
+   */
+  async changeMemberRole(_tenantId: string, membershipId: string, role: MemberRole, actor: { userId: string; mfa: boolean }): Promise<MemberRoleChangeResult> {
+    const target = this.members.find((m) => m.membershipId === membershipId && m.status !== 'REVOKED');
+    if (!target) return { status: 'NOT_FOUND' };
+    if (target.role === role) return { status: 'UNCHANGED' };
+    const by = this.members.find((m) => m.userId === actor.userId && m.status === 'ACTIVE' && m.membershipId !== membershipId && (m.role === 'OWNER' || m.role === 'ADMIN'));
+    if (!by) return { status: 'FORBIDDEN' };
+    if (!actor.mfa) return { status: 'MFA_REQUIRED' };
+    if ((role === 'OWNER' || target.role === 'OWNER') && by.role !== 'OWNER') return { status: 'FORBIDDEN' };
+    if (by.role === 'ADMIN' && (role === 'ADMIN' || target.role === 'ADMIN')) return { status: 'FORBIDDEN' };
+    const roleFrom = target.role;
+    target.role = role;
+    this.audit.push({
+      at: systemClock.now(), action: 'membership.role_changed', actorType: 'USER', membershipId: by.membershipId, role: by.role, entityType: 'membership',
+      entityId: membershipId, scope: null, channelAccountId: null, marketplace: null, note: null, roleFrom, roleTo: role, memberEmail: null,
+    });
+    return { status: 'CHANGED' };
   }
 
   async worldCounters(_tenantId: string, now: Instant): Promise<WorldCounters> {

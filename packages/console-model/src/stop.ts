@@ -246,7 +246,10 @@ export function stopView(world: StandWorld, audit: readonly ConsoleAuditRow[], m
       action: m.ui.stop.auditActions[a.action],
       actor: a.actorType === 'SYSTEM' || !a.role ? m.ui.stop.system
         : a.membershipId === world.viewer.membershipId ? m.ui.stop.you(m.values[a.role]) : m.values[a.role],
-      scope: a.scope === null ? m.ui.stop.wholeTenant
+      // Шаг 88 [Р-213]: смена роли — чья и как: прежняя роль → новая (роли — словами словаря)
+      scope: a.action === 'membership.role_changed'
+        ? m.ui.stop.roleChanged(a.memberEmail ?? null, a.roleFrom ? m.values[a.roleFrom] : m.ui.stop.unknownMember, a.roleTo ? m.values[a.roleTo] : m.ui.stop.unknownMember)
+        : a.scope === null ? m.ui.stop.wholeTenant
         : targetLabel(world, { scope: a.scope, channelAccountId: a.channelAccountId, marketplace: a.marketplace } as ConsoleStop, m),
       note: a.note,
     })),

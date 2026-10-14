@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer, type ViteDevServer } from 'vite';
-import { describe, messagesFor, type EnableResultView, type OnboardingView, type StockView, type DecisionListView, type BulkJobView, type ComplianceView, type CostImportView, type DiscountCheckView, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
+import { describe, messagesFor, type ConnectionsView, type EnableResultView, type OnboardingView, type StockView, type DecisionListView, type BulkJobView, type ComplianceView, type CostImportView, type DiscountCheckView, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
 import { buildStandWorlds, memoryStandDirectory, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
@@ -98,7 +98,8 @@ async function html(module: string, component: string, props: Record<string, unk
 test('Р-78: no password and no session — every request carries a provider token; missing, forged, expired, foreign or unlinked tokens are refused alike', async () => {
   assert.equal((await handle({ method: 'GET', url: '/api/worlds', body: undefined })).status, 401);
   const session = (await handle({ method: 'GET', url: '/api/session?locale=en', body: undefined })).body as SessionView;
-  assert.deepEqual([session.user, session.simulator?.map((a) => a.role)], [null, STAND_ACCOUNTS.map((a) => a.role)]);
+  // Шаг 88 [Р-213]: вход предлагает три видимые роли; остальные — за флагом расширенных ролей (тест шага 88 ниже)
+  assert.deepEqual([session.user, session.simulator?.map((a) => a.role)], [null, ['OWNER', 'MANAGER', 'VIEWER']]);
 
   const owner = await login('OWNER');
   assert.deepEqual((await get<SessionView>(owner, '/api/session')).user, { subject: account('OWNER').subject, email: account('OWNER').email });
@@ -227,12 +228,45 @@ test('screens render from the dictionary: sign-in, products with the effective f
   for (const text of ['Effective floor', '$17.79', 'ECB rate', 'add up to the price to the cent']) assert.ok(bounds.includes(text), text);
 
   const stop = await html('/src/screens/Stop.tsx', 'StopScreenView', { view: await get<StopView>(auth, api('kaufland/pipeline/mass-shift-halt', 'stop')), onStop: () => {}, onResume: () => {}, onRelease: () => {} });
-  for (const text of ['Stop by a person', 'Storefront halts by the system', 'Stop the whole workspace', 'Audit log of stops', 'Storefront halted by the system', 'the owner with a second factor']) assert.ok(stop.includes(text), text);
+  for (const text of ['Stop by a person', 'Storefront halts by the system', 'Stop the whole workspace', 'Audit log: stops and roles', 'Storefront halted by the system', 'the whole workspace — with a second factor']) assert.ok(stop.includes(text), text);
 
   const session = await get<SessionView>(auth, '/api/session?locale=de');
   const loginView = await html('/src/App.tsx', 'LoginView', { simulator: session.simulator, error: null, busy: false, onSignIn: () => {} }, 'de');
   for (const text of ['Anmelden', 'Identitätsanbieter', 'Anmelden als Inhaber']) assert.ok(loginView.includes(text), text);
   assert.ok(!loginView.includes('type="password"'), 'no password field (Р-78)');
+});
+
+test('step 88 (Р-213): sign-in offers three roles, five with the extended roles flag; earlier roles still sign in; the manager runs the stop crane but not people or channel accounts; a role change is in the audit log', async () => {
+  const id = 'kaufland/pipeline/happy-path';
+  const identity = {
+    authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory: memoryStandDirectory(worlds) }),
+    simulator: { token: (a: (typeof STAND_ACCOUNTS)[number]) => issuer.token(a.subject, { email: a.email }), expiresInSeconds: 900 },
+  };
+  const extended = createStandApi(worlds, identity, { extendedRoles: true });
+  const offered = ((await extended({ method: 'GET', url: '/api/session?locale=en', body: undefined })).body as SessionView).simulator?.map((a) => [a.role, a.label]);
+  assert.deepEqual(offered, [['OWNER', 'Owner'], ['MANAGER', 'Manager'], ['VIEWER', 'Viewer'], ['ADMIN', 'Admin'], ['OPERATOR', 'Operator']]);
+  // Прежние назначения работают и без флага: роль, которой нет в списке входа, входит и видит свои права
+  const legacy = await login('PRICING_MANAGER');
+  assert.equal((await get<StopView>(legacy, api(id, 'stop'))).permissions.canStop, true);
+
+  const manager = await login('MANAGER');
+  const stop = await get<StopView>(manager, api(id, 'stop'));
+  assert.deepEqual([stop.permissions.canStop, stop.permissions.canResumeTenant, stop.permissions.canReleaseDistrust], [true, true, true], 'the manager owns the stop crane');
+  assert.equal((await get<ConnectionsView>(manager, api(id, 'connections'))).canManage, false, 'channel accounts stay with the owner');
+  const target = { kind: 'TENANT' };
+  assert.equal((await call(manager, 'POST', api(id, 'stop'), { target, note: 'Manager pulls the stop crane', confirmed: true })).status, 200);
+  const stopId = (await get<StopView>(manager, api(id, 'stop'))).stops.active[0]!.stopId;
+  assert.equal((await call(manager, 'POST', api(id, 'stops', stopId, 'resume'), { note: 'Manager checked and resumes', confirmed: true })).status, 200);
+
+  // Смена роли — событие журнала: кто, когда, прежняя → новая. Менеджер ролей не меняет, без второго фактора не меняет никто
+  const live = liveOf(id);
+  assert.deepEqual(await live.store.changeMemberRole(live.tenantId, 'membership-viewer', 'MANAGER', { userId: 'user-manager', mfa: true }), { status: 'FORBIDDEN' });
+  assert.deepEqual(await live.store.changeMemberRole(live.tenantId, 'membership-viewer', 'MANAGER', { userId: 'user-owner', mfa: false }), { status: 'MFA_REQUIRED' });
+  assert.deepEqual(await live.store.changeMemberRole(live.tenantId, 'membership-viewer', 'MANAGER', { userId: 'user-owner', mfa: true }), { status: 'CHANGED' });
+  assert.deepEqual(await live.store.changeMemberRole(live.tenantId, 'membership-viewer', 'VIEWER', { userId: 'user-owner', mfa: true }), { status: 'CHANGED' });
+  const owner = await login('OWNER');
+  const audit = (await get<StopView>(owner, api(id, 'stop'))).audit.filter((a) => a.action === 'Role changed');
+  assert.deepEqual(audit.map((a) => [a.actor, a.scope]), [['Owner (you)', 'Manager → Viewer'], ['Owner (you)', 'Viewer → Manager']], 'newest first, author and old → new');
 });
 
 test('Р-69, Р-76, OQ-129: a viewer cannot stop; an operator stops; the operator and the pricing manager cannot resume a tenant stop, the admin can; every step is in the audit log', async () => {

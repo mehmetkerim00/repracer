@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { after, test } from 'node:test';
-import { createPool, inTenant, seedPricingWorld } from '@repracer/pricing-store-pg';
+import { MEMBER_ROLES } from '@repracer/pricing-model';
+import { createPool, inTenant, PgPricingStore, seedPricingWorld } from '@repracer/pricing-store-pg';
 import { createAuthenticator, staticJwks } from '../src/index.ts';
 import { inviteMember, inviteRelink, issueSignupInvitation, PgIdentityDirectory } from '../src/pg.ts';
 import { createTestIssuer } from '../src/test-issuer.ts';
@@ -45,7 +46,7 @@ function worldOf(owner: { userId: string; address: string }, n: number) {
   });
 }
 
-const invite = (tenantId: string, userId: string, address: string, role: 'PRICING_MANAGER' | 'VIEWER' = 'PRICING_MANAGER') =>
+const invite = (tenantId: string, userId: string, address: string, role: 'PRICING_MANAGER' | 'MANAGER' | 'VIEWER' = 'PRICING_MANAGER') =>
   inTenant(admin, tenantId, (tx) => inviteMember(tx, { tenantId, email: address, role }), userId, { mfa: true });
 
 test('Р-88, findings 11 and 13: a provider subject is linked only by accepting an invitation for its own verified email; the decision path neither links nor resolves', async () => {
@@ -212,3 +213,78 @@ test('Р-98, step 18 finding 6: a sign-in is linked only in READ COMMITTED — a
   }
 });
 
+
+/**
+ * Шаг 88 [Р-213]: у человека в рабочем пространстве ровно одна роль — одно членство на (тенант, пользователь); в разных
+ * пространствах роли разные. Смена роли — событие журнала аудита (кто, когда, прежняя → новая), журнал только на добавление.
+ * Менеджер ролей не меняет: управление людьми — у владельца. Набор ролей, который принимает база, равен набору модели.
+ */
+test('step 88 (Р-213): one role per person in a workspace, different roles across workspaces; a role change is audited who, when, old → new; a manager changes no roles', async () => {
+  const ownerA = await signUp(email('owner-a88'));
+  const ownerB = await signUp(email('owner-b88'));
+  const worldA = await worldOf(ownerA, 9);
+  const worldB = await worldOf(ownerB, 10);
+  const address = email('manager88');
+  const toA = await invite(worldA.tenantId, ownerA.userId, address, 'MANAGER');
+  const subject = { issuer: ISSUER, subject: `sub-${randomUUID()}` };
+  await directory.acceptInvitation(toA.token, subject, address, true);
+  const toB = await invite(worldB.tenantId, ownerB.userId, address, 'VIEWER');
+  await directory.acceptInvitation(toB.token, subject, address, true);
+  const roles = new Map((await directory.resolve(subject))!.memberships.map((m) => [m.tenantId, m.role]));
+  assert.deepEqual([roles.get(worldA.tenantId), roles.get(worldB.tenantId)], ['MANAGER', 'VIEWER'], 'one person, a different role in each workspace');
+
+  // Вторая роль того же человека в том же пространстве — отказ базы ограничением «одно членство на тенант и пользователя»
+  await assert.rejects(invite(worldA.tenantId, ownerA.userId, address, 'VIEWER'), /membership_tenant_id_user_id_key/, 'a second role in the same workspace');
+
+  const store = new PgPricingStore(pool, { adminPool: admin });
+  const viewerMembership = worldA.ids.dbId('membership-viewer');
+  // Менеджер не меняет роли (управление людьми — у владельца), без второго фактора не меняет никто
+  assert.deepEqual(await store.changeMemberRole(worldA.tenantId, viewerMembership, 'MANAGER', { userId: toA.userId, mfa: true }), { status: 'FORBIDDEN' });
+  assert.deepEqual(await store.changeMemberRole(worldA.tenantId, viewerMembership, 'MANAGER', { userId: ownerA.userId, mfa: false }), { status: 'MFA_REQUIRED' });
+  assert.deepEqual(await store.changeMemberRole(worldA.tenantId, viewerMembership, 'VIEWER', { userId: ownerA.userId, mfa: true }), { status: 'UNCHANGED' });
+  const before = Date.now();
+  assert.deepEqual(await store.changeMemberRole(worldA.tenantId, viewerMembership, 'MANAGER', { userId: ownerA.userId, mfa: true }), { status: 'CHANGED' });
+
+  // Журнал: кто (владелец), когда, прежняя → новая — из события базы, а не из ответа хранилища
+  const { rows: [event] } = await inTenant(admin, worldA.tenantId, (tx) => tx.query(
+    `SELECT actor_type, actor_user_id, actor_membership_id, changes FROM audit.audit_event
+      WHERE tenant_id = $1 AND entity_type = 'membership' AND entity_id = $2 AND action = 'membership.role_changed'`, [worldA.tenantId, viewerMembership]), ownerA.userId);
+  assert.deepEqual([event!.actor_type, event!.actor_user_id, event!.actor_membership_id, event!.changes.roleFrom, event!.changes.roleTo, event!.changes.secondFactor],
+    ['USER', ownerA.userId, worldA.ownerMembershipId, 'VIEWER', 'MANAGER', true]);
+  assert.ok(Date.parse(event!.changes.at) >= before - 5_000, 'the event carries the time of the change');
+  const shown = (await store.auditRecent(worldA.tenantId, 10)).find((a) => a.action === 'membership.role_changed')!;
+  assert.deepEqual([shown.role, shown.roleFrom, shown.roleTo], ['OWNER', 'VIEWER', 'MANAGER']);
+  // Чья роль сменилась — адрес участника-наблюдателя посева (`viewer-…@example.test`), а не автора
+  assert.match(shown.memberEmail ?? '', /^viewer-.*@example\.test$/, 'the log names whose role changed');
+
+  // Журнал только на добавление: переписать событие административной роли нечем
+  await assert.rejects(inTenant(admin, worldA.tenantId, (tx) => tx.query(`UPDATE audit.audit_event SET changes = '{}' WHERE tenant_id = $1`, [worldA.tenantId]), ownerA.userId, { mfa: true }),
+    /permission denied for table audit_event/);
+  await assert.rejects(inTenant(admin, worldA.tenantId, (tx) => tx.query(`DELETE FROM audit.audit_event WHERE tenant_id = $1`, [worldA.tenantId]), ownerA.userId, { mfa: true }),
+    /permission denied for table audit_event/);
+});
+
+test('step 88 (Р-213): the database accepts exactly the roles of the model — console roles and database roles do not drift apart', async () => {
+  // Проба по копии таблицы с её ограничениями: принимает ли база роль, решает ограничение, а не текст его определения [Р-93]
+  const accepted: string[] = [];
+  // Копию таблицы строит административная роль: у пути решения нет даже чтения членств (Р-90)
+  const client = await admin.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('CREATE TEMP TABLE probe_membership (LIKE tenant_data.membership INCLUDING CONSTRAINTS INCLUDING DEFAULTS) ON COMMIT DROP');
+    for (const role of [...MEMBER_ROLES, 'PRICING_ADMIN', 'manager']) {
+      await client.query('SAVEPOINT p');
+      try {
+        await client.query(`INSERT INTO probe_membership (tenant_id, user_id, role) VALUES (gen_random_uuid(), gen_random_uuid(), $1)`, [role]);
+        accepted.push(role);
+      } catch (error) {
+        assert.match(String((error as Error).message), /membership_role_check/, `${role}: ${(error as Error).message}`);
+      }
+      await client.query('ROLLBACK TO SAVEPOINT p');
+    }
+    await client.query('ROLLBACK');
+  } finally {
+    client.release();
+  }
+  assert.deepEqual(accepted.sort(), [...MEMBER_ROLES].sort(), 'every model role and nothing else');
+});

@@ -268,6 +268,8 @@ export async function startConsole(env: Env = process.env): Promise<RunningConso
     defaultLocale: config.locale,
     // Шаг 87 [Р-214]: профиль рынка — что консоль предлагает: каналы и витрины подключения, языки, Omnibus
     market: config.market,
+    // Шаг 88 [Р-213]: три видимые роли или пять — флаг развёртывания
+    extendedRoles: config.extendedRoles,
   });
   // Шаг 53 (OWASP A04, A05): ограничение частоты и полная политика содержимого — адреса поставщика входа из конфигурации
   const server = createStandServer(api, config.locale, createStaticHandler(config.distDir), {

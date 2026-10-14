@@ -17,7 +17,7 @@ import {
 } from '@repracer/contract-tests/stand';
 import { createAuthenticator, hasSecondFactor, remoteJwks, staticJwks, type Authenticator, type Principal } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
-import { connectableInMarket, connectionsView, localeInMarket, marketProfileOf, marketScope, OTHER_TOOLS_ANSWERS, storefrontInMarket, worldInMarket, type MarketProfile } from '@repracer/console-model';
+import { connectableInMarket, connectionsView, extendedRolesOf, offeredRoles, localeInMarket, marketProfileOf, marketScope, OTHER_TOOLS_ANSWERS, storefrontInMarket, worldInMarket, type MarketProfile } from '@repracer/console-model';
 import type { ChannelConnectService } from './connect.ts';
 import {
   NOTE_MAX, NOTE_MIN, type BoundsIndexItem, type BoundsIndexView, type EnableResult, type NoteRequest, type SessionView, type StopRequest, type StrategySaveResponse, type WorldSummary,
@@ -237,6 +237,11 @@ export interface StandServices {
    * предложение сразу: так библиотеку зовут тесты, которым профиль не важен
    */
   market?: MarketProfile;
+  /**
+   * Шаг 88 [Р-213]: флаг «расширенные роли» — вход стенда предлагает три видимые роли (владелец, менеджер, наблюдатель) или пять
+   * (ещё администратор и оператор). Вход по роли, которой нет в списке, имитатор принимает: назначения прежних ролей работают
+   */
+  extendedRoles?: boolean;
 }
 
 /** Шаг 87 [Р-214]: подключение — только каналы и витрины профиля; витрину вне профиля не начать и прямым запросом */
@@ -273,7 +278,9 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     const principal: Principal | null = await identity.authenticator.authenticate(req.authorization, req.idToken);
     const sessionView = (l: Locale): SessionView => ({
       user: principal ? { subject: principal.subject, email: principal.email } : null, locale: l,
-      simulator: identity.simulator ? STAND_ACCOUNTS.map((a) => ({ role: a.role, label: m.values[a.role] })) : null,
+      simulator: identity.simulator
+        ? offeredRoles(services.extendedRoles === true).flatMap((role) => STAND_ACCOUNTS.filter((a) => a.role === role)).map((a) => ({ role: a.role, label: m.values[a.role] }))
+        : null,
       demoGuest: Boolean(identity.guest),
       oidc: identity.oidc ?? null,
       market: { profile: market.profile, locales: [...market.locales], omnibus: market.omnibus },
@@ -1784,7 +1791,8 @@ async function main(): Promise<void> {
   if (isLocale(consoleLocale) && !marketScope(market).locales.includes(consoleLocale)) {
     throw new Error(`REPRACER_CONSOLE_LOCALE=${consoleLocale} is not a language of the market profile ${market}`);
   }
-  const defaultLocale = { market, ...(isLocale(consoleLocale) ? { defaultLocale: consoleLocale } : {}) };
+  // Шаг 88 [Р-213]: тот же флаг «расширенные роли», что у развёрнутой консоли; по умолчанию вход предлагает три роли
+  const defaultLocale = { market, extendedRoles: extendedRolesOf(process.env.REPRACER_EXTENDED_ROLES), ...(isLocale(consoleLocale) ? { defaultLocale: consoleLocale } : {}) };
   const simulator = issuer
     ? {
       token: (a: (typeof STAND_ACCOUNTS)[number], options?: { secondFactor?: boolean }) =>

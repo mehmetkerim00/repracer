@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { connectableInMarket, localeInMarket, marketProfileOf, marketScope, storefrontInMarket, worldInMarket } from './market.ts';
+import { connectableInMarket, extendedRolesOf, localeInMarket, marketProfileOf, marketScope, storefrontInMarket, worldInMarket } from './market.ts';
 
 /**
  * Шаг 87 [Р-214]: профиль рынка. США — сейчас: amazon.com и ebay.com, английский, без Omnibus. Европа заморожена, не удалена: профиль
@@ -51,4 +51,9 @@ test('step 87: connect offers only the channels and storefronts of the profile; 
   assert.equal(worldInMarket(marketScope('us'), usDemo), true);
   assert.equal(worldInMarket(marketScope('eu'), usDemo), false);
   assert.equal(worldInMarket(marketScope('us'), []), true, 'an empty workspace is shown everywhere — onboarding starts there');
+});
+
+test('step 88 (Р-213): the extended roles flag is on or off, off by default; anything else is refused, not silently off', () => {
+  assert.deepEqual([extendedRolesOf(undefined), extendedRolesOf(''), extendedRolesOf('off'), extendedRolesOf('on')], [false, false, false, true]);
+  assert.throws(() => extendedRolesOf('yes'), /REPRACER_EXTENDED_ROLES must be on or off, got yes/);
 });
