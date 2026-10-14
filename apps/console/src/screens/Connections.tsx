@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useRef, useState } from 'react';
 import { zoneName, type ConnectionAccountView, type ConnectionsView } from '@repracer/console-model';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, ErrorBox, errorText, Load, useMessages, Intro } from '../components.tsx';
+import { Badge, ErrorBox, errorText, Load, MarketContext, useMessages, Intro } from '../components.tsx';
 
 /**
  * Р-175…Р-177 (шаг 43): экран «Подключение каналов». Кнопка открывает страницу согласия КАНАЛА в этой же вкладке — как
@@ -103,6 +103,7 @@ const ZONE_CHOICES: readonly string[] = ['Europe/Berlin', 'Europe/London', 'Amer
  */
 function AccountSettings({ worldId }: { worldId: string }) {
   const m = useMessages();
+  const market = useContext(MarketContext);
   const t = m.ui.settings;
   type SettingsView = { locale: 'de' | 'en'; timeZone: string; timeZoneSet: boolean; canChange: boolean };
   const [view, setView] = useState<SettingsView | null>(null);
@@ -134,12 +135,12 @@ function AccountSettings({ worldId }: { worldId: string }) {
       <p className="note">{t.intro}</p>
       {view.canChange ? (
         <p>
-          <label>{t.language}{' '}
+          {/* Шаг 87 [Р-214]: язык рабочего пространства — из языков профиля; при одном языке выбора нет */}
+          {market.locales.length > 1 ? (<><label>{t.language}{' '}
             <select value={language} onChange={(e) => setLanguage(e.currentTarget.value === 'de' ? 'de' : 'en')}>
-              <option value="en">English</option>
-              <option value="de">Deutsch</option>
+              {market.locales.map((l) => <option key={l} value={l}>{m.ui.app.languages[l]}</option>)}
             </select>
-          </label>{' '}
+          </label>{' '}</>) : null}
           <label>{t.timeZone}{' '}
             {/* Шаг 79: пояс — выбором из списка с человеческими названиями, а не полем для кода IANA; значение наружу — тот же код */}
             <select value={zone} onChange={(e) => setZone(e.currentTarget.value)}>
@@ -149,7 +150,7 @@ function AccountSettings({ worldId }: { worldId: string }) {
           </label>{' '}
           <button type="button" onClick={save}>{t.save}</button>
         </p>
-      ) : <p>{view.locale === 'de' ? 'Deutsch' : 'English'} · {zoneName(m.locale, view.timeZone, nowIso)}</p>}
+      ) : <p>{market.locales.length > 1 ? `${m.ui.app.languages[view.locale]} · ` : ''}{zoneName(m.locale, view.timeZone, nowIso)}</p>}
       {view.timeZoneSet ? null : <p className="note">{t.timeZoneDefault(zoneName(m.locale, view.timeZone, nowIso))}</p>}
       <p className="note">{view.canChange ? t.timeZoneHint : t.readOnly}</p>
       {note ? <p className="notice">{note}</p> : null}

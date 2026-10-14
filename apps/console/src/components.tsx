@@ -1,9 +1,14 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import { messagesFor, type Gap, type HumanReason, type ListQuery, type Messages, type PageInfo, type StatusCell, type UnitRef } from '@repracer/console-model';
+import { LOCALES, messagesFor, type Gap, type HumanReason, type ListQuery, type Locale, type Messages, type PageInfo, type StatusCell, type UnitRef } from '@repracer/console-model';
 import { ApiError, REQUEST_TIMEOUT_MS, requestJson, worldPath, type Resource } from './api.ts';
 
 /** Словарь интерфейса текущего языка [Р-72]: все подписи экранов — отсюда */
 export const MessagesContext = createContext<Messages>(messagesFor('de'));
+/**
+ * Шаг 87 [Р-214]: профиль рынка развёртывания на странице — языки интерфейса (один язык — переключателя нет) и правило Omnibus. Без
+ * поставщика (отрисовка экрана в тестах) — всё предложение, как у профиля global
+ */
+export const MarketContext = createContext<{ locales: readonly Locale[]; omnibus: boolean }>({ locales: LOCALES, omnibus: true });
 export const useMessages = (): Messages => useContext(MessagesContext);
 
 export const href = (worldId: string, ...parts: string[]) => `#/w/${[worldId, ...parts].map(encodeURIComponent).join('/')}`;

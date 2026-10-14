@@ -87,7 +87,8 @@ before(async () => {
     pgUrlsByRole: { admin: db.url('svc_admin'), bulk_worker: db.url('svc_bulk_worker'), stock: db.url('svc_stock') },
     tag: 4000, memberUsers, memberEmails: STAND_EMAILS,
     joinMember: pgStandJoinMember(pools.admin as never, directory as never),
-    hours: DEMO_HOURS, log: () => undefined,
+    // Шаг 87 [Р-214]: демо на симуляторе Kaufland — путь профиля eu
+    market: 'eu', hours: DEMO_HOURS, log: () => undefined,
   });
 
   /**

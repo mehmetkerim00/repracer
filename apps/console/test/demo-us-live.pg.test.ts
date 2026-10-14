@@ -7,6 +7,9 @@ import { createIsolatedDatabase, type IsolatedDatabase } from '../../../packages
 import { startConsole, type RunningConsole } from '../server/console-service.ts';
 
 /**
+ * Шаг 87 [Р-214]: профиль рынка развёртывания us — демо американского продавца: amazon.com и ebay.com, доллары, склад в Делавэре, без
+ * Kaufland и без витрин ЕС; немецкого и Omnibus нет. Ниже — прежние утверждения шагов 64–69 о витринах США, теперь на этом демо.
+ *
  * Шаг 64: профиль США в демо (`REPRACER_CONSOLE_DEMO_US=on`) — через разворачиваемую консоль, как браузер гостя [Р-136, Р-160]:
  * рядом с Kaufland в демо-тенанте два аккаунта витрин США — eBay EBAY_US и Amazon amazon.com. Оба рождены в тени [Р-176], каталог
  * записан функцией обнаружения [Р-179], вопрос о других инструментах [Р-202] не отвечен и задан по-английски. До шага 64 у демо не
@@ -35,6 +38,7 @@ before(async () => {
   env = {
     REPRACER_MODE: 'stand', REPRACER_CONSOLE_PORT: '0', REPRACER_CONSOLE_METRICS_PORT: '0',
     REPRACER_CONSOLE_DIST: new URL('../dist', import.meta.url).pathname,
+    REPRACER_MARKET_PROFILE: 'us',
     REPRACER_CONSOLE_PUBLIC_DEMO: 'on', REPRACER_CONSOLE_DEMO_US: 'on', REPRACER_CONSOLE_HEARTBEAT: 'off', REPRACER_CONSOLE_GUEST_KEY: 'ephemeral',
     REPRACER_CONSOLE_LOCALE: 'en',
     // Шаг 69 (K4): пояс показа демо для клиента из США — его пояс; без него — пояс первой витрины демо (Kaufland de)
@@ -61,11 +65,15 @@ after(async () => {
  * Шаг 64 (ревью, находка 1): язык развёртывания — язык первого экрана нового браузера. Прогоны шлют куку языка в каждом запросе и
  * этого не видели: консоль региона США с `REPRACER_CONSOLE_LOCALE=en` открывалась по-немецки
  */
-test('шаг 64: новый браузер без куки видит язык развёртывания; выбранный язык (кука) — сильнее', async () => {
-  const first = (await (await fetch(`${origin}/api/session`)).json()) as { locale: string };
+test('шаг 64, 87: новый браузер без куки видит язык развёртывания; в профиле us немецкого нет — и кука его не включает', async () => {
+  const first = (await (await fetch(`${origin}/api/session`)).json()) as { locale: string; market: { profile: string; locales: string[]; omnibus: boolean } };
   assert.equal(first.locale, 'en', 'первый экран консоли региона США — английский');
+  assert.deepEqual(first.market, { profile: 'us', locales: ['en'], omnibus: false }, 'профиль us: один язык (без переключателя), без Omnibus');
+  // Шаг 87: немецкий словарь остаётся в репозитории, но профиль us его не предлагает — кука «de» не делает экран немецким
   const chosen = (await (await fetch(`${origin}/api/session`, { headers: { cookie: 'repracer_locale=de' } })).json()) as { locale: string };
-  assert.equal(chosen.locale, 'de', 'язык, выбранный продавцом, сильнее языка развёртывания');
+  assert.equal(chosen.locale, 'en', 'кука de в профиле us — английский экран');
+  const switched = await fetch(`${origin}/api/session/locale`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ locale: 'de' }) });
+  assert.equal(switched.status, 400, 'переключить на немецкий в профиле us нельзя и прямым запросом');
 });
 
 test('шаг 64: демо с профилем США — аккаунты eBay US и Amazon US в тени, каталог найден, вопрос о других инструментах задан по-английски', async () => {
@@ -77,15 +85,19 @@ test('шаг 64: демо с профилем США — аккаунты eBay U
   assert.ok(demo, `демо-мир в списке: ${JSON.stringify(worlds.body)}`);
   const screen = await call<ConnectionsView>('GET', `/api/worlds/${encodeURIComponent(demo.id)}/connections`, guest);
   assert.equal(screen.status, 200, JSON.stringify(screen.body).slice(0, 300));
-  // Витрины США — по их идентификаторам: рядом в демо живёт ещё аккаунт Amazon ЕС «ожидает доступа» [Р-150]
+  // Шаг 87: у американского демо аккаунтов ровно два — amazon.com и ebay.com; Kaufland и Amazon ЕС «ожидает доступа» нет вовсе
   const us = screen.body.accounts.filter((a) => a.marketplaces.includes('EBAY_US') || a.marketplaces.includes('ATVPDKIKX0DER'));
   assert.deepEqual(us.map((a) => a.channel).sort(), ['AMAZON', 'EBAY'], `аккаунты витрин США на экране подключений: ${JSON.stringify(screen.body.accounts.map((a) => a.channel))}`);
+  assert.equal(screen.body.accounts.length, 2, `кроме витрин США аккаунтов нет: ${JSON.stringify(screen.body.accounts.map((a) => [a.channel, a.marketplaces]))}`);
   for (const a of us) {
     assert.equal(a.state, 'SHADOW', `${a.channel}: аккаунт рождён в тени`);
     assert.equal(a.offers, 12, `${a.channel}: каталог из обнаружения — ${a.progressText}`);
-    assert.equal(a.otherTools.answer, null, `${a.channel}: вопрос о других инструментах ещё не отвечен`);
     assert.equal(a.otherTools.question, 'Does another tool update stock or prices in this channel?');
-    assert.equal(a.quantityWrites.confirmed, false, `${a.channel}: запись количества выключена до подтверждения владельца`);
+    // Шаг 87: остатки amazon.com ведёт склад демо — владелец ответил «других инструментов нет» и подтвердил запись количества [Р-202];
+    // у ebay.com вопрос не отвечен: на нём сценарий показа отвечает «Yes — stock»
+    const amazon = a.channel === 'AMAZON';
+    assert.equal(a.otherTools.answer, amazon ? 'NONE' : null, `${a.channel}: ответ о других инструментах`);
+    assert.equal(a.quantityWrites.confirmed, amazon, `${a.channel}: запись количества ${amazon ? 'подтверждена' : 'выключена до подтверждения владельца'}`);
     // Проход консоли (шаг 64): аккаунт назван словами — «eBay · … · ebay.com», а не кодами канала и витрины
     assert.ok(!/\bEBAY\b|EBAY_US|ATVPDKIKX0DER/.test(a.label), `${a.channel}: подпись аккаунта кодами: ${a.label}`);
   }
@@ -110,8 +122,8 @@ test('шаг 68: демо США — решения в долларах, «по�
   const issued = await fetch(`${origin}/api/demo/guest`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
   const guest = ((await issued.json()) as StandToken).accessToken;
   const demo = (await call<WorldSummary[]>('GET', '/api/worlds', guest)).body.find((w) => w.demo)!;
-  // K3: у демо есть витрина ЕС (Kaufland de) — вкладка Omnibus на месте; без витрин ЕС её нет (прогон пилота США)
-  assert.equal(demo.euStorefronts, true, 'демо с Kaufland de — тенант с витриной ЕС');
+  // K3, шаг 87: у американского демо витрины ЕС нет — вкладки Omnibus нет (и профиль us её не предлагает)
+  assert.equal(demo.euStorefronts, false, 'американское демо — без витрины ЕС');
   const w = encodeURIComponent(demo.id);
   const placeholder = [en.ui.common.withheld, de.ui.common.withheld];
   // Коды, которых продавец видеть не должен: идентификаторы витрин, ссылки на решения и вопросы
@@ -217,6 +229,33 @@ test('шаг 68: значения ревизии витрин — словами
  * Шаг 64 (ревью, находка 2): консоль, перезапущенная на той же базе, сеет демо заново — прежний демо-тенант с аккаунтами США остаётся
  * в базе, и постоянный внешний идентификатор ронял старт (23505 на `channel_account_external_uq`). Пересев по таймеру — тот же путь
  */
+/**
+ * Шаг 87 [Р-214]: американское демо — ничего европейского на экранах продавца: ни Kaufland, ни amazon.de и ebay.de, ни евро; склад —
+ * «Warehouse Newark, DE»; версия тарифа — месяц действия, а не служебное слово посева
+ */
+test('шаг 87: демо профиля us — американский продавец без Kaufland, витрин ЕС и евро; склад в Делавэре, тариф по месяцу', async () => {
+  const issued = await fetch(`${origin}/api/demo/guest`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  const guest = ((await issued.json()) as StandToken).accessToken;
+  const worlds = (await call<WorldSummary[]>('GET', '/api/worlds', guest)).body;
+  assert.deepEqual(worlds.map((x) => x.demo), [true], `в списке — только американское демо: ${JSON.stringify(worlds.map((x) => x.title))}`);
+  const w = encodeURIComponent(worlds[0]!.id);
+  const europe = /Kaufland|kaufland\.|amazon\.de|ebay\.de|A1PA6795UKMFR9|EBAY_DE|€|EUR\b/;
+  for (const screen of ['shadow', 'products', 'stock', 'feed', 'decisions', 'rejected', 'dangerous', 'bounds', 'stop', 'connections', 'strategies', 'onboarding', 'jobs']) {
+    const r = await call<unknown>('GET', `/api/worlds/${w}/${screen}`, guest);
+    assert.equal(r.status, 200, `${screen}: ${JSON.stringify(r.body).slice(0, 200)}`);
+    const found = europe.exec(JSON.stringify(r.body));
+    assert.equal(found, null, `${screen}: европейское на экране американского демо — «${found?.[0]}» в ${JSON.stringify(r.body).slice(Math.max(0, (found?.index ?? 0) - 120), (found?.index ?? 0) + 60)}`);
+  }
+  // Положительный контроль правила: европейское оно видит
+  assert.ok(europe.test(JSON.stringify({ label: 'Plant pot · kaufland.de' })) && europe.test('€12.00'));
+  const stock = (await call<{ sources: Array<{ name: string }> }>('GET', `/api/worlds/${w}/stock`, guest)).body;
+  assert.deepEqual(stock.sources.map((x) => x.name), ['Warehouse Newark, DE'], 'склад американского продавца');
+  const amazon = (await call<{ items: UnitRef[] }>('GET', `/api/worlds/${w}/offers?q=amazon.com`, guest)).body.items[0]!;
+  const bounds = (await call<{ feeEstimates: Array<{ text: string }> }>('GET', `/api/worlds/${w}/bounds/${amazon.writeScopeId}`, guest)).body;
+  assert.ok(bounds.feeEstimates.some((f) => /\(\d{4}-\d{2}\)$/.test(f.text)) && !bounds.feeEstimates.some((f) => /synthetic/.test(f.text)),
+    `версия тарифа — месяц действия: ${JSON.stringify(bounds.feeEstimates)}`);
+});
+
 test('шаг 64: перезапуск консоли на той же базе пересевает демо с аккаунтами США, а не падает на старте', async () => {
   // Одна реплика консоли на базу — гарантия шага 57: прежний процесс останавливается, новый стартует на той же базе
   await console_.close();

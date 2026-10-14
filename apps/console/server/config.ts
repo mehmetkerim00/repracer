@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { ConfigError, intFromEnv, requiredValue, secretFromEnv, type Env } from '@repracer/service-runtime';
+import { marketProfileOf, marketScope, type MarketProfile } from '@repracer/console-model';
 
 /**
  * Р-159 (шаг 37, OQ-221): консоль продавца — РАЗВОРАЧИВАЕМЫЙ процесс, а не только сервер стенда, запускаемый руками.
@@ -19,8 +20,13 @@ export interface ConsoleConfig {
   metricsPort: number;
   /** Каталог собранного интерфейса (`npm run build -w apps/console`) */
   distDir: string;
-  /** Язык по умолчанию, пока браузер не выбрал свой [Р-72] */
+  /** Язык по умолчанию, пока браузер не выбрал свой [Р-72]; по умолчанию — первый язык профиля рынка */
   locale: 'de' | 'en';
+  /**
+   * Шаг 87 [Р-214]: профиль рынка развёртывания (`REPRACER_MARKET_PROFILE`: us, eu, global; по умолчанию us) — какие каналы, витрины,
+   * языки и правила консоль предлагает, и какое демо сеется: в us — американский продавец без Kaufland
+   */
+  market: MarketProfile;
   /**
    * Р-160: публичный демо-режим. `on` — на странице входа есть кнопка «посмотреть демо», и гость получает НАБЛЮДАТЕЛЯ
    * в демо-тенанте без регистрации. `off` — кнопки нет и маршрут гостя отвечает 404.
@@ -77,8 +83,14 @@ const secret = (env: Env, name: string, read: (path: string) => string) => secre
 const required = requiredValue;
 
 export function loadConsoleConfig(env: Env = process.env, read: (path: string) => string = (p) => readFileSync(p, 'utf8')): ConsoleConfig {
-  const locale = env.REPRACER_CONSOLE_LOCALE ?? 'de';
+  let market: MarketProfile;
+  try { market = marketProfileOf(env.REPRACER_MARKET_PROFILE); } catch (error) { throw new ConfigError(`CONFIG_INVALID: ${(error as Error).message}`); }
+  const locale = env.REPRACER_CONSOLE_LOCALE ?? marketScope(market).locales[0]!;
   if (locale !== 'de' && locale !== 'en') throw new ConfigError('CONFIG_INVALID: REPRACER_CONSOLE_LOCALE must be de or en');
+  // Шаг 87: язык развёртывания — язык профиля; немецкий первый экран в профиле us без переключателя назад — противоречие конфигурации
+  if (!marketScope(market).locales.includes(locale)) {
+    throw new ConfigError(`CONFIG_INVALID: REPRACER_CONSOLE_LOCALE=${locale} is not a language of the market profile ${market} (${marketScope(market).locales.join(', ')})`);
+  }
 
   const pgUrls = {} as Record<ConsoleRole, string>;
   for (const role of CONSOLE_ROLES) {
@@ -153,6 +165,7 @@ export function loadConsoleConfig(env: Env = process.env, read: (path: string) =
     metricsPort: intFromEnv(env, 'REPRACER_CONSOLE_METRICS_PORT', 9467, 0, 65_535),
     distDir: requiredValue(env.REPRACER_CONSOLE_DIST, 'REPRACER_CONSOLE_DIST'),
     locale,
+    market,
     publicDemo,
     demoUs: env.REPRACER_CONSOLE_DEMO_US === 'on',
     demoPressDays: intFromEnv(env, 'REPRACER_CONSOLE_DEMO_PRESS_DAYS', 0, 0, 7),

@@ -2,6 +2,9 @@
 # Шаг 64: ОДНА команда подготовки демо-мира для показа клиенту (docs/demo-script.md).
 #
 # Что делает:
+#   0. шаг 87 [Р-214]: профиль рынка `REPRACER_MARKET_PROFILE` (по умолчанию us) — в us демо — американский продавец: amazon.com и ebay.com,
+#      доллары, склад «Warehouse Newark, DE», без Kaufland и витрин ЕС, по-английски, без Omnibus; база демо — региона US [Р-60];
+#      `REPRACER_MARKET_PROFILE=eu` (или global) — прежнее демо на симуляторе Kaufland с витринами США рядом;
 #   1. своя база `repracer_demo` (и свой шаблон) — тестовую базу `repracer_eu` и шаблон тестов не трогает;
 #   2. стенд с демо-тенантом [Р-151] в ТЕНИ [Р-169] и с витринами США (eBay EBAY_US, Amazon amazon.com, USD) — `REPRACER_DEMO_US`;
 #      шаг 68: витрины США СЧИТАЮТ тень (себестоимость, границы и стратегии в долларах), и неделя их тени ПРОЖИМАЕТСЯ при подъёме
@@ -27,6 +30,10 @@ cd "$(dirname "$0")/.."
 : "${PGUSER:=postgres}"
 export PGHOST PGPORT PGUSER
 DB=repracer_demo
+# Шаг 87 [Р-214]: профиль рынка показа; пояс по умолчанию — первого клиента (Делавэр, восточное время) в us, Западного побережья — иначе
+MARKET="${REPRACER_MARKET_PROFILE:-us}"
+case "${MARKET}" in us|eu|global) ;; *) echo "REPRACER_MARKET_PROFILE должен быть us, eu или global, а не ${MARKET}"; exit 1 ;; esac
+if [ "${MARKET}" = us ]; then DEMO_TZ_DEFAULT=America/New_York; else DEMO_TZ_DEFAULT=America/Los_Angeles; fi
 STAND_PORT="${STAND_PORT:-4318}"
 export STAND_PORT
 LOGS="${TMPDIR:-/tmp}"
@@ -63,16 +70,18 @@ mark=0
 echo "== база ${DB} (миграции и смоук-проверки схемы, обычно меньше минуты)"
 REPRACER_PG_TEMPLATE=repracer_demo_template scripts/db/prepare.sh "${DB}" > "${LOGS}/prepare.log" 2>&1 \
   || { echo "подготовка базы не прошла — см. ${LOGS}/prepare.log"; exit 1; }
+# Шаг 87 [Р-60]: данные американского продавца — в базе региона US; регион нужен только при создании тенанта, смоук-мир базы его не задевает
+if [ "${MARKET}" = us ]; then psql -v ON_ERROR_STOP=1 -q -d postgres -c "ALTER DATABASE ${DB} SET repracer.region = 'US'"; fi
 t_db=$((SECONDS - mark)); mark=${SECONDS}
 
 pids=()
 cleanup() { for p in "${pids[@]}"; do kill "$p" 2> /dev/null || true; done; }
 trap cleanup EXIT INT TERM
 
-echo "== стенд с демо-тенантом (тень, витрины США) на 127.0.0.1:${STAND_PORT}"
-STAND_IDENTITY=simulator REPRACER_PG_URL="postgres://svc_app@${PGHOST}:${PGPORT}/${DB}" \
+echo "== стенд с демо-тенантом (профиль ${MARKET}, тень, витрины США) на 127.0.0.1:${STAND_PORT}"
+STAND_IDENTITY=simulator REPRACER_PG_URL="postgres://svc_app@${PGHOST}:${PGPORT}/${DB}" REPRACER_MARKET_PROFILE="${MARKET}" \
   REPRACER_DEMO=on REPRACER_DEMO_ONLY=on REPRACER_DEMO_SHADOW=on REPRACER_DEMO_US=on REPRACER_DEMO_PRESS_DAYS="${REPRACER_DEMO_PRESS_DAYS:-7}" \
-  REPRACER_DEMO_LOCALE="${REPRACER_DEMO_LOCALE:-en}" REPRACER_DEMO_TIME_ZONE="${REPRACER_DEMO_TIME_ZONE:-America/Los_Angeles}" \
+  REPRACER_DEMO_LOCALE="${REPRACER_DEMO_LOCALE:-en}" REPRACER_DEMO_TIME_ZONE="${REPRACER_DEMO_TIME_ZONE:-${DEMO_TZ_DEFAULT}}" \
   REPRACER_CONSOLE_LOCALE="${REPRACER_DEMO_LOCALE:-en}" REPRACER_STAND_TOKEN_SECONDS="${REPRACER_STAND_TOKEN_SECONDS:-43200}" \
   npm run stand -w @repracer/console > "${LOGS}/stand.log" 2>&1 &
 pids+=($!)
@@ -111,8 +120,8 @@ pressed=$(grep -o 'demo US week pressed: .*' "${LOGS}/stand.log" | grep -oE '[0-
 
 cat << EOF
 
-Демо готово: http://127.0.0.1:5173 — подготовка ${SECONDS} с: база ${t_db} с, стенд ${t_stand} с (из них неделя США ${pressed:-?}), интерфейс ${t_ui} с, первые решения ${t_first} с
-  - вход: «Owner» (владелец), язык — English в правом верхнем углу;
+Демо готово: http://127.0.0.1:5173 — профиль ${MARKET}, подготовка ${SECONDS} с: база ${t_db} с, стенд ${t_stand} с (из них неделя США ${pressed:-?}), интерфейс ${t_ui} с, первые решения ${t_first} с
+  - вход: «Owner» (владелец); в профиле us язык один — английский, переключателя нет;
   - мир: «Demo» с пометкой DEMO; сценарий показа — docs/demo-script.md;
   - неделя тени США (ebay.com, amazon.com, доллары) прожата; недельное письмо — экран «Shadow mode», блок «Weekly email — preview».
 Доказательство тени из базы (шаг «а» сценария) — записи демо-тенанта: удержано тенью и отправлено в канал:

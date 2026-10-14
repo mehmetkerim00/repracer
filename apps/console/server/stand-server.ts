@@ -17,7 +17,7 @@ import {
 } from '@repracer/contract-tests/stand';
 import { createAuthenticator, hasSecondFactor, remoteJwks, staticJwks, type Authenticator, type Principal } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
-import { connectionsView, OTHER_TOOLS_ANSWERS } from '@repracer/console-model';
+import { connectableInMarket, connectionsView, localeInMarket, marketProfileOf, marketScope, OTHER_TOOLS_ANSWERS, storefrontInMarket, worldInMarket, type MarketProfile } from '@repracer/console-model';
 import type { ChannelConnectService } from './connect.ts';
 import {
   NOTE_MAX, NOTE_MIN, type BoundsIndexItem, type BoundsIndexView, type EnableResult, type NoteRequest, type SessionView, type StopRequest, type StrategySaveResponse, type WorldSummary,
@@ -231,17 +231,38 @@ export interface StandServices {
    * обязаны совпадать (`console-screens-targeted.pg.test.ts`)
    */
   fullCatalogScreens?: boolean;
+  /**
+   * Шаг 87 [Р-214]: профиль рынка развёртывания — что консоль предлагает и называет: каналы и витрины подключения, языки, вкладку
+   * Omnibus. Процессы (стенд и консоль) читают `REPRACER_MARKET_PROFILE`, по умолчанию `us`; без значения здесь — `global`, всё
+   * предложение сразу: так библиотеку зовут тесты, которым профиль не важен
+   */
+  market?: MarketProfile;
+}
+
+/** Шаг 87 [Р-214]: подключение — только каналы и витрины профиля; витрину вне профиля не начать и прямым запросом */
+function connectInMarket(connect: ChannelConnectService, scope: ReturnType<typeof marketScope>): ChannelConnectService {
+  return {
+    ...connect,
+    connectable: () => connectableInMarket(scope, connect.connectable()),
+    start: async (tenantId, input, actor) => (input.marketplaces.length > 0 && input.marketplaces.every((mp) => storefrontInMarket(scope, input.channel, mp))
+      ? connect.start(tenantId, input, actor) : { status: 'BAD_MARKETPLACES' as const }),
+  };
 }
 
 export function createStandApi(worlds: readonly LiveWorld[], identity: StandIdentity, services: StandServices = {}) {
   const localeCookie = (l: Locale) => `${LOCALE_COOKIE}=${l}; SameSite=Strict; Path=/; Max-Age=31536000`;
+  const market = marketScope(services.market ?? 'global');
+  // Шаг 87: миры стенда (сценарии, демо) — только те, у которых есть витрина профиля; миры тенантов продавцов не фильтруются
+  const marketWorlds = worlds.filter((w) => worldInMarket(market, w.accounts));
 
   return async function handle(req: ApiRequest): Promise<ApiResponse> {
     const url = new URL(req.url, 'http://stand');
     const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
     const jar = cookies(req.cookie);
     const requested = url.searchParams.get('locale');
-    const locale: Locale = isLocale(requested) ? requested : isLocale(jar[LOCALE_COOKIE]) ? jar[LOCALE_COOKIE] : services.defaultLocale ?? 'de';
+    // Шаг 87: язык — только язык профиля; немецкий в профиле us — английский, а не немецкий экран без переключателя назад
+    const locale: Locale = localeInMarket(market,
+      isLocale(requested) ? requested : isLocale(jar[LOCALE_COOKIE]) ? jar[LOCALE_COOKIE] : services.defaultLocale ?? market.locales[0]!);
     // Шаг 69 (K1, K4): в мире тенанта сообщения пересобираются на его языке и в его поясе (ниже, когда мир найден)
     let m = messagesFor(locale);
     let s = m.ui.server;
@@ -255,6 +276,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       simulator: identity.simulator ? STAND_ACCOUNTS.map((a) => ({ role: a.role, label: m.values[a.role] })) : null,
       demoGuest: Boolean(identity.guest),
       oidc: identity.oidc ?? null,
+      market: { profile: market.profile, locales: [...market.locales], omnibus: market.omnibus },
     });
 
     /**
@@ -344,7 +366,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     if (parts[1] === 'session') {
       if (req.method === 'GET' && parts.length === 2) return ok(sessionView(locale));
       if (req.method === 'POST' && parts[2] === 'locale') {
-        if (!isLocale(body.locale)) return fail(400, 'BAD_LOCALE', s.notFound);
+        if (!isLocale(body.locale) || !market.locales.includes(body.locale)) return fail(400, 'BAD_LOCALE', s.notFound);
         return ok(sessionView(body.locale), [localeCookie(body.locale)]);
       }
       return fail(404, 'NOT_FOUND', s.notFound);
@@ -428,7 +450,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
 
     if (parts.length === 2) {
       if (req.method !== 'GET') return fail(405, 'METHOD', s.method);
-      const visible = worlds.flatMap((live) => {
+      const visible = marketWorlds.flatMap((live) => {
         const viewer = viewerIn(live);
         return viewer ? [{ live, viewer }] : [];
       });
@@ -444,7 +466,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         return [{
           id: e.id, title: e.title, description: '', failures: [], scopes: c.scopes, decisionsLastDay: c.decisionsLastDay,
           interventionsLastWeek: c.interventionsLastWeek, activeStops: c.activeStops, activeHalts: c.activeHalts, role: m.values[membership.role],
-          demo: c.demo, awaitingAccess: c.awaitingAccess, euStorefronts: c.euStorefronts, locale: c.locale, timeZone: c.timeZone, landing: 'products',
+          demo: c.demo, awaitingAccess: c.awaitingAccess, euStorefronts: c.euStorefronts, locale: c.locale ? localeInMarket(market, c.locale) : c.locale, timeZone: c.timeZone, landing: 'products',
         }];
       });
       // Р-154: список миров — счётчики агрегатом, без чтения состояния ни одного мира
@@ -453,7 +475,9 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           live.display ? live.display() : Promise.resolve(null)]);
         return {
           // Шаг 64: демо-мир назван на языке интерфейса — клиент из США видел описание посева по-немецки
-          id: live.id, title: c.demo ? m.ui.app.demoWorldTitle : live.title, description: c.demo ? m.ui.app.demoWorldDescription : live.description,
+          id: live.id, title: c.demo ? m.ui.app.demoWorldTitle : live.title,
+          // Шаг 87: демо профиля us — американский продавец, а не магазин на симуляторе Kaufland с тремя конкурентами
+          description: c.demo ? (market.profile === 'us' ? m.ui.app.demoWorldDescriptionUs : m.ui.app.demoWorldDescription) : live.description,
           failures: live.failures, scopes: c.scopes, decisionsLastDay: c.decisionsLastDay,
           interventionsLastWeek: c.interventionsLastWeek, activeStops: c.activeStops, activeHalts: c.activeHalts, role: m.values[viewer.role],
           // Р-151: демо помечается уже в списке миров; Р-150: сколько каналов ждёт доступа — видно до входа в мир
@@ -461,13 +485,13 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           awaitingAccess: accounts.filter((a) => a.authStatus === 'AWAITING_ACCESS').length,
           euStorefronts: c.euStorefronts,
           // Ревью шага 69, находка 5: язык демо — язык гостя, поэтому список его не называет; пояс — называет
-          locale: display && !display.followsRequestLocale ? display.locale : null, timeZone: display?.timeZone ?? null,
+          locale: display && !display.followsRequestLocale ? localeInMarket(market, display.locale) : null, timeZone: display?.timeZone ?? null,
           landing: live.landing ?? 'products',
         };
       })), ...tenantRows]);
     }
 
-    const live = worlds.find((w) => w.id === parts[2]) ?? (await tenantIndex?.open(parts[2]!)) ?? undefined;
+    const live = marketWorlds.find((w) => w.id === parts[2]) ?? (await tenantIndex?.open(parts[2]!)) ?? undefined;
     const viewer = live ? viewerIn(live) : null;
     if (!live || !viewer) return fail(404, 'WORLD_NOT_FOUND', s.notFound);
     /**
@@ -477,7 +501,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     const display = live.display ? await live.display() : null;
     if (display) {
       // Ревью шага 69, находка 5: у публичного демо язык — гостя (запроса), пояс — демо
-      m = messagesFor(display.followsRequestLocale ? m.locale : display.locale, { timeZone: display.timeZone });
+      m = messagesFor(display.followsRequestLocale ? m.locale : localeInMarket(market, display.locale), { timeZone: display.timeZone });
       s = m.ui.server;
     }
     /**
@@ -499,7 +523,8 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       if (req.method === 'GET') return ok(view(display));
       if (req.method !== 'POST') return fail(405, 'METHOD_NOT_ALLOWED', s.notFound);
       if (!can(viewer.role, 'MANAGE_TENANT')) return fail(403, 'FORBIDDEN', s.forbidden);
-      const nextLocale = body.locale === undefined ? undefined : isLocale(body.locale) ? body.locale : null;
+      // Шаг 87: язык рабочего пространства — только язык профиля (в us — один английский)
+      const nextLocale = body.locale === undefined ? undefined : isLocale(body.locale) && market.locales.includes(body.locale) ? body.locale : null;
       const nextZone = body.timeZone === undefined ? undefined : body.timeZone === null || body.timeZone === '' ? null
         : typeof body.timeZone === 'string' && body.timeZone.length <= 64 ? body.timeZone.trim() : false;
       if (nextLocale === null || nextZone === false) return fail(400, 'BAD_SETTINGS', m.ui.settings.invalid);
@@ -523,7 +548,8 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
      * наблюдатель получают 403 здесь, а запись без права всё равно отклонит база (страж административной записи).
      */
     if (parts[3] === 'connections') {
-      const connect = services.connect?.(live.id) ?? null;
+      const offered = services.connect?.(live.id) ?? null;
+      const connect = offered ? connectInMarket(offered, market) : null;
       const param4 = parts[4] ?? null;
       const t = m.ui.connections;
       if (req.method === 'GET' && param4 === null) {
@@ -1750,7 +1776,15 @@ async function main(): Promise<void> {
   // Как у развёрнутой консоли (config.ts): не задано — язык по умолчанию, задано — только de или en (ревью шага 76, находка 13)
   const consoleLocale = process.env.REPRACER_CONSOLE_LOCALE;
   if (consoleLocale !== undefined && !isLocale(consoleLocale)) throw new Error(`REPRACER_CONSOLE_LOCALE must be de or en, got ${consoleLocale}`);
-  const defaultLocale = isLocale(consoleLocale) ? { defaultLocale: consoleLocale } : {};
+  /**
+   * Шаг 87 [Р-214]: профиль рынка стенда — тот же `REPRACER_MARKET_PROFILE`, что у развёрнутой консоли, по умолчанию us: Kaufland,
+   * витрины ЕС, немецкий и Omnibus спрятаны, демо — американский продавец. `eu` и `global` открывают Европу одним значением
+   */
+  const market = marketProfileOf(process.env.REPRACER_MARKET_PROFILE);
+  if (isLocale(consoleLocale) && !marketScope(market).locales.includes(consoleLocale)) {
+    throw new Error(`REPRACER_CONSOLE_LOCALE=${consoleLocale} is not a language of the market profile ${market}`);
+  }
+  const defaultLocale = { market, ...(isLocale(consoleLocale) ? { defaultLocale: consoleLocale } : {}) };
   const simulator = issuer
     ? {
       token: (a: (typeof STAND_ACCOUNTS)[number], options?: { secondFactor?: boolean }) =>
@@ -1798,12 +1832,12 @@ async function main(): Promise<void> {
           app: pool, admin: adminPool, provisioning: role('svc_provisioning', 1), dispatcher: role('svc_dispatcher', 2),
           scheduler: role('svc_scheduler', 3), exporter: role('svc_exporter', 2), stock: role('svc_stock', 2), bulkWorker: role('svc_bulk_worker', 2),
         },
-        pgUrl: url, tag: 3400, memberUsers, memberEmails: STAND_EMAILS,
+        pgUrl: url, tag: 3400, memberUsers, memberEmails: STAND_EMAILS, market,
         joinMember: pgStandJoinMember(adminPool, directory),
         // Шаг 64: `REPRACER_DEMO_US=on` — профиль США в демо: аккаунты eBay US и Amazon US в тени (docs/demo-script.md)
         usAccounts: process.env.REPRACER_DEMO_US === 'on',
         // Шаг 68 (K7): `REPRACER_DEMO_PRESS_DAYS=7` — неделя тени США прожата при подъёме: недельный отчёт показуем сразу (0…7)
-        usPressDays: process.env.REPRACER_DEMO_US === 'on' ? pressDaysOf(process.env.REPRACER_DEMO_PRESS_DAYS) : 0,
+        usPressDays: market === 'us' || process.env.REPRACER_DEMO_US === 'on' ? pressDaysOf(process.env.REPRACER_DEMO_PRESS_DAYS) : 0,
         // Шаг 69 (K1, K4): язык и пояс демо-тенанта (команда подготовки демо для клиента из США ставит en и его пояс)
         ...(process.env.REPRACER_DEMO_LOCALE === 'en' || process.env.REPRACER_DEMO_LOCALE === 'de' ? { locale: process.env.REPRACER_DEMO_LOCALE } : {}),
         ...(process.env.REPRACER_DEMO_TIME_ZONE ? { timeZone: process.env.REPRACER_DEMO_TIME_ZONE } : {}),

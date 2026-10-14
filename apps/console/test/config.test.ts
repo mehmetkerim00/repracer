@@ -44,3 +44,13 @@ test('шаг 54: больше одной реплики консоли — от�
   assert.equal(loadConsoleConfig({ ...base, REPRACER_CONSOLE_REPLICAS: '1' }, read).profile, 'default', 'одна реплика — законно');
   assert.throws(() => loadConsoleConfig({ ...base, REPRACER_CONSOLE_REPLICAS: '2' }, read), /REPRACER_CONSOLE_REPLICAS=2 — нужен общий счётчик частоты/);
 });
+
+test('шаг 87 [Р-214]: профиль рынка развёртывания — по умолчанию us и английский; неверное значение и немецкий в us — отказ при старте', () => {
+  const us = loadConsoleConfig(base, read);
+  assert.deepEqual([us.market, us.locale], ['us', 'en'], 'не задан — профиль us, язык профиля');
+  const eu = loadConsoleConfig({ ...base, REPRACER_MARKET_PROFILE: 'eu' }, read);
+  assert.deepEqual([eu.market, eu.locale], ['eu', 'de'], 'Европа открывается одним значением — с прежним языком по умолчанию');
+  assert.equal(loadConsoleConfig({ ...base, REPRACER_MARKET_PROFILE: 'global', REPRACER_CONSOLE_LOCALE: 'en' }, read).locale, 'en');
+  assert.throws(() => loadConsoleConfig({ ...base, REPRACER_MARKET_PROFILE: 'europe' }, read), /CONFIG_INVALID: REPRACER_MARKET_PROFILE must be one of us, eu, global, got europe/);
+  assert.throws(() => loadConsoleConfig({ ...base, REPRACER_CONSOLE_LOCALE: 'de' }, read), /CONFIG_INVALID: REPRACER_CONSOLE_LOCALE=de is not a language of the market profile us/);
+});

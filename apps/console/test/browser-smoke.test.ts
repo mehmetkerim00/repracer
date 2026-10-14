@@ -10,6 +10,7 @@ import { createTestIssuer } from '@repracer/identity/test-issuer';
 import type { ShadowPage } from '@repracer/pricing-store-pg';
 import { createStandApi, createStandServer } from '../server/stand-server.ts';
 import { launchBrowser, type Browser } from './browser.ts';
+import { EMPTY_WORLD_ID, emptyWorld, emptyWorldConnect } from './empty-world.ts';
 
 /**
  * Шаг 76 (предполётный прогон демо, ревью — находка 7): страница консоли исполняется настоящим браузером. Страница была ПУСТОЙ с шага 29
@@ -24,6 +25,10 @@ let stand: ReturnType<typeof createStandServer> | null = null;
 let vite: ViteDevServer | null = null;
 let browser: Browser | null = null;
 let pageUrl = '';
+/** Шаг 87: два экземпляра API на одних мирах — профиль eu (Kaufland, немецкий, Omnibus) и профиль us; сервер стенда ходит в текущий */
+let euApi: ReturnType<typeof createStandApi>;
+let usApi: ReturnType<typeof createStandApi>;
+let currentApi: ReturnType<typeof createStandApi>;
 
 /** Синтетическая неделя тени для смоука адаптива: только форма экрана, ничего из базы */
 function syntheticShadow() {
@@ -67,11 +72,22 @@ before(async () => {
   // Шаг 85: у мира сценария в памяти тени нет (экран отвечает 404) — смоуку адаптива нужен и экран тени, поэтому у смоук-мира — синтетическая
   // неделя тени: плитки, график по дням, сводка, аккаунт, свойства витрин, письмо и строки удержанных записей (числа выдуманы, как у демо)
   const worlds = (await buildStandWorlds({ filter: (s) => s.id === 'kaufland/pipeline/happy-path' })).map((w) => ({ ...w, shadow: syntheticShadow() }));
-  const handle = createStandApi(worlds, {
-    authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory: memoryStandDirectory(worlds) }),
+  // Шаг 87: рядом — пустое рабочее пространство (онбординг и подключение предлагают каналы и витрины профиля)
+  const empty = emptyWorld(worlds[0]!.clock);
+  // Счётчики пустого пространства говорят «есть витрина ЕС»: тогда вкладку Omnibus в профиле us прячет ИМЕННО профиль, а в eu она на месте
+  const counters = empty.store.worldCounters.bind(empty.store);
+  (empty.store as { worldCounters: typeof counters }).worldCounters = async (...args) => ({ ...(await counters(...args)), euStorefronts: true });
+  const all = [...worlds, empty];
+  const identity: Parameters<typeof createStandApi>[1] = {
+    authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory: memoryStandDirectory(all) }),
     simulator: { token: (a) => issuer.token(a.subject, { email: a.email }), expiresInSeconds: 900 },
-  }, { defaultLocale: 'en' });
-  stand = createStandServer(handle);
+  };
+  const connect = (worldId: string) => (worldId === EMPTY_WORLD_ID ? emptyWorldConnect : null);
+  // Основной стенд — профиль eu: смоук Kaufland и немецкие проходы шагов 76–86 гоняются на нём (Европа заморожена, не удалена)
+  euApi = createStandApi(all, identity, { defaultLocale: 'en', market: 'eu', connect });
+  usApi = createStandApi(all, identity, { market: 'us', connect });
+  currentApi = euApi;
+  stand = createStandServer((req) => currentApi(req));
   await new Promise<void>((resolve) => stand!.listen(0, '127.0.0.1', resolve));
   const standPort = (stand.address() as { port: number }).port;
   vite = await createServer({
@@ -289,4 +305,59 @@ test('step 86: every menu item and the heading of its page are the same words �
   assert.match((await b.evaluate<string[]>(OUT_OF_BOX)).join(' | '), /sticks out of section\.card by 7px/);
   await b.evaluate(`(document.getElementById('out-control').remove(), true)`);
   await b.click(de.ui.app.languages.en, '.topbar .lang button');
+});
+
+/**
+ * Шаг 87 [Р-214]: профиль рынка us — продукт выходит в США. Европейское спрятано, но не удалено: в профиле us нет переключателя языка,
+ * вкладки Omnibus, канала Kaufland и витрин ЕС ни на одном экране; рабочие пространства без витрины профиля не показываются; пункт меню
+ * по-прежнему равен заголовку страницы. Профиль eu на тех же мирах показывает Европу — положительный контроль правила
+ */
+const EUROPE = /Kaufland|kaufland\.|amazon\.de|ebay\.de|€|\bEUR\b|Deutsch|Omnibus/;
+
+test('step 87: the us market profile shows no German, no Omnibus, no Kaufland and no European storefront on any screen; eu still does', async () => {
+  const b = browser!;
+  const owner = en.ui.app.login.asAccount(en.values.OWNER);
+  const europeOnPage = async () => { const t = await b.evaluate<string>('document.body.innerText'); const found = EUROPE.exec(t); return found ? `«${found[0]}» in …${t.slice(Math.max(0, found.index - 80), found.index + 40)}…` : null; };
+  currentApi = usApi;
+  try {
+    await b.setViewport(1440, 900);
+    await b.open(pageUrl);
+    await b.waitText(en.ui.app.login.roleCan.OWNER);
+    assert.equal(await b.evaluate<number>(`document.querySelectorAll('.lang button').length`), 0, 'us: no language switch on sign-in');
+    assert.equal(await europeOnPage(), null, 'us: sign-in');
+    await b.click(owner);
+    await b.waitText(en.ui.app.worlds);
+    const titles = await b.evaluate<string[]>(`[...document.querySelectorAll('h3 a')].map((a) => a.textContent.trim())`);
+    assert.deepEqual(titles, ['Empty workspace'], 'us: a workspace whose storefronts are all European is not offered; an empty one is');
+    await b.click('Empty workspace');
+    await settled(b, 'us empty workspace');
+    const links = await b.evaluate<Array<{ text: string; href: string }>>(
+      `[...document.querySelectorAll('.nav-group a')].map((a) => ({ text: a.textContent.trim(), href: a.getAttribute('href') }))`);
+    assert.ok(links.length >= 12 && !links.some((l) => l.text === en.ui.app.screens.compliance), `us: no Omnibus in the menu — ${links.map((l) => l.text).join(', ')}`);
+    for (const l of links) {
+      await b.evaluate(`(location.hash = ${JSON.stringify(l.href)}, true)`);
+      await settled(b, `us ${l.text}`);
+      const heading = await b.evaluate<string>(`(document.querySelector('.world-content h2') ?? document.querySelector('.world-content h3'))?.childNodes[0]?.textContent?.trim() ?? ''`);
+      assert.equal(heading, l.text, `us: the menu item and the heading of its page`);
+      assert.equal(await europeOnPage(), null, `us: ${l.text}`);
+    }
+    // Подключение предлагает витрины США — словами — и только их
+    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${encodeURIComponent(EMPTY_WORLD_ID)}/connections`)}, true)`);
+    await settled(b, 'us connections');
+    const connectText = await b.evaluate<string>('document.body.innerText');
+    assert.ok(connectText.includes('amazon.com') && connectText.includes('ebay.com'), `us: amazon.com and ebay.com are offered — ${connectText.slice(0, 300)}`);
+  } finally {
+    currentApi = euApi;
+  }
+  // Положительный контроль [Р-94]: на профиле eu тот же экран подключений предлагает amazon.de, и есть переключатель «Deutsch»
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(owner);
+  await b.waitText(en.ui.app.worlds);
+  await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${encodeURIComponent(EMPTY_WORLD_ID)}/connections`)}, true)`);
+  await settled(b, 'eu connections');
+  const eu = await europeOnPage();
+  assert.ok(eu !== null && /amazon\.de|Deutsch/.test(eu), `eu: the rule sees Europe — ${eu}`);
+  const euMenu = await b.evaluate<string[]>(`[...document.querySelectorAll('.nav-group a')].map((a) => a.textContent.trim())`);
+  assert.ok(euMenu.includes(en.ui.app.screens.compliance), `eu: the same workspace has the Omnibus tab — ${euMenu.join(', ')}`);
 });

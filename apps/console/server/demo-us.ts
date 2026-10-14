@@ -1,4 +1,5 @@
-import type { AdapterCallContext, AdapterDependencies } from '@repracer/channel-port';
+import type { AdapterCallContext, AdapterDependencies, ChannelAdapter, OrderLine } from '@repracer/channel-port';
+import type { StockPipeline } from '@repracer/stock-sync';
 import { systemClock } from '@repracer/channel-port';
 import { createPricingPipeline } from '@repracer/pricing-pipeline';
 import { inTenant, type PgPool, type PgPricingStore } from '@repracer/pricing-store-pg';
@@ -47,6 +48,33 @@ const SCHEDULE_DAYS = 400;
 /** Ход настоящего времени после прожатой недели */
 const LIVE_TICK_MS = 30_000;
 const EBAY_RECOMPUTE_EVERY_MS = 15 * MINUTE_MS;
+/**
+ * Шаг 87 [Р-214]: спрос amazon.com американского демо — синтетические заказы FBM, без данных покупателя [Р-4]: первый — через две
+ * минуты после запуска, дальше раз в 10 минут по кругу предложений; отгрузка через час, каждый десятый отменяется через 20 минут.
+ * Продажа становится резервацией [Р-25], отгрузка списывает склад, отмена освобождает — тем же конвейером остатков, что у продавца
+ */
+const ORDER_FIRST_MS = 2 * MINUTE_MS;
+const ORDER_EVERY_MS = 10 * MINUTE_MS;
+const ORDER_SHIP_AFTER_MS = HOUR_MS;
+const ORDER_CANCEL_AFTER_MS = 20 * MINUTE_MS;
+
+/** Строки заказов, изменившиеся с `sinceMs`: открытые — по времени заказа, отгруженные и отменённые — по времени смены статуса */
+export function demoOrderLines(skus: readonly string[], fromMs: number, nowMs: number, sinceMs: number, marketplace: string): OrderLine[] {
+  const lines: OrderLine[] = [];
+  if (skus.length === 0) return lines;
+  for (let k = 0; fromMs + ORDER_FIRST_MS + k * ORDER_EVERY_MS <= nowMs; k++) {
+    const at = fromMs + ORDER_FIRST_MS + k * ORDER_EVERY_MS;
+    const cancelled = k % 10 === 9;
+    const changeAt = at + (cancelled ? ORDER_CANCEL_AFTER_MS : ORDER_SHIP_AFTER_MS);
+    const status: OrderLine['status'] = changeAt <= nowMs ? (cancelled ? 'CANCELLED' : 'SHIPPED') : 'OPEN';
+    if ((status === 'OPEN' ? at : changeAt) < sinceMs) continue;
+    // Номер заказа — вида Amazon (3-7-7), синтетический
+    const ref = `114-${String(3_000_000 + k).padStart(7, '0')}-${String((k * 7_919) % 10_000_000).padStart(7, '0')}`;
+    lines.push({ externalOrderRef: ref, externalOrderLineRef: `${ref}-1`, identity: { marketplace, externalSku: skus[k % skus.length]! }, quantity: 1,
+      orderedAt: new Date(at).toISOString() as OrderLine['orderedAt'], status });
+  }
+  return lines;
+}
 
 interface UsScope { writeScopeId: string; productId: string; channelAccountId: string; marketplace: string; channelProductRef: string | null; sku: string }
 
@@ -129,6 +157,8 @@ export async function startDemoUsMarket(input: {
   /** Сколько суток прожать до настоящего момента; 0 — тень США считает с запуска */
   pressDays: number;
   log: (message: string) => void;
+  /** Шаг 87: спрос amazon.com — конвейер остатков и SKU предложений amazon.com; без него заказов нет (демо рядом с Kaufland) */
+  orders?: { pipeline: StockPipeline; skus: readonly string[] };
 }): Promise<DemoUsMarket> {
   const { pools, store, accounts: a, log } = input;
   const { SimulatedAmazonPort, AMAZON_SIM_DESCRIPTOR_US, AMAZON_US } = await import('@repracer/contract-tests/simulator');
@@ -187,6 +217,17 @@ export async function startDemoUsMarket(input: {
     }
   };
   const recomputeEbay = async () => { counts.ebay += (await ebay.recomputeScheduled(ctx(a.ebayAccountId), { limit: 100 })).scopes; };
+  // Шаг 87: заказы amazon.com — с настоящего момента запуска (прожатая неделя заказов не несёт); окно чтения с запасом в минуту
+  const orders = input.orders;
+  let ordersSince = realStart;
+  const ordersAdapter = { readOrderLines: async (_c: AdapterCallContext, q: { since: string }) =>
+    ({ items: demoOrderLines(orders?.skus ?? [], realStart, systemClock.nowMs(), Date.parse(q.since), AMAZON_US) }) } as unknown as ChannelAdapter;
+  const syncOrders = async () => {
+    if (!orders) return;
+    const at = systemClock.nowMs();
+    await orders.pipeline.syncOrders(ctx(a.amazonAccountId), ordersAdapter, new Date(ordersSince - MINUTE_MS).toISOString() as never);
+    ordersSince = at;
+  };
 
   let pressed: DemoUsMarket['pressed'] = null;
   if (virtualMs !== null) {
@@ -218,6 +259,7 @@ export async function startDemoUsMarket(input: {
       try {
         await deliver();
         if (systemClock.nowMs() - lastEbay >= EBAY_RECOMPUTE_EVERY_MS) { lastEbay = systemClock.nowMs(); await recomputeEbay(); }
+        await syncOrders();
       } catch (error) {
         if (!stopped) log(`demo US market tick failed: ${error instanceof Error ? error.message : String(error)}`);
       }

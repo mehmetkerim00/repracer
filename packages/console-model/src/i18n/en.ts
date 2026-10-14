@@ -385,6 +385,8 @@ export const en = {
       stand: 'test environment, synthetic data',
       // Шаг 64 (проход консоли): имя и описание демо-мира на языке интерфейса, а не строкой посева по-немецки
       demoWorldTitle: 'Demo store (simulator)', demoWorldDescription: 'Synthetic store on the channel simulator: every offer has three competitors — one drifting, one undercutting, one in price waves.',
+      /** Шаг 87 [Р-214]: демо профиля us — американский продавец */
+      demoWorldDescriptionUs: 'Synthetic American seller on the channel simulator: offers on amazon.com and ebay.com, a warehouse in Newark, Delaware.',
       demoBadge: 'Demo', demoBanner: 'Demo workspace: synthetic data, real path. Every amount is made up.',
       languages: { de: 'Deutsch', en: 'English' },
       worlds: 'Your workspaces',
@@ -587,7 +589,8 @@ export const en = {
       stepHints: {
         TENANT: 'The workspace exists; members join by invitation.',
         STOCK_SOURCE: 'Where the stock comes from: a file you upload, or your warehouse system pushing to the Inbound API. The source is connected once it has delivered at least one stock figure.',
-        STOCK_SYNC: 'The published quantity is the shared stock minus a per-channel buffer. Channel traps are shown before anything is written: Amazon EU stock is one value for the whole region; Kaufland stock is shared across storefronts of the same offer.',
+        // Шаг 87 [Р-214]: подсказка верна в любом профиле рынка — ловушки называет экран остатков по аккаунтам, а не перечень каналов здесь
+        STOCK_SYNC: 'The published quantity is the shared stock minus a per-channel buffer. Where a channel writes stock wider than one storefront — for example one value for a whole Amazon region — this is shown before anything is written.',
         CHANNEL: 'A channel counts as connected when an account with access exists. An account without access shows what is missing.',
         COSTS: 'Repricing does not start without declared unit costs AND the channel commission (rate and fixed part): without the commission the margin floor cannot be computed. This step cannot be skipped — only the set of offers can be narrowed.',
         BOUNDS: 'Every offer needs a floor and a ceiling.',

@@ -1,4 +1,5 @@
 import { systemClock } from '@repracer/channel-port';
+import { US_STOREFRONTS, type MarketProfile } from '@repracer/console-model';
 import type { PgPool } from '@repracer/pricing-store-pg';
 import type { LiveWorld } from '@repracer/contract-tests/stand';
 
@@ -43,6 +44,12 @@ export interface DemoWorldOptions {
   joinMember: Parameters<typeof import('@repracer/contract-tests/live').demoWorld>[0]['joinMember'];
   /** Сколько виртуальных часов гонять мир вперёд (на настоящих часах — столько же настоящих) */
   hours?: number;
+  /**
+   * Шаг 87 [Р-214]: профиль рынка развёртывания. `us` — американский продавец: amazon.com и ebay.com, доллары, склад в Делавэре, без
+   * Kaufland и без витрин ЕС; `eu` и `global` — прежнее демо на симуляторе Kaufland (и витрины США рядом при `usAccounts`). Обязателен:
+   * какое демо сеять, решает тот, кто поднимает процесс, а не умолчание библиотеки
+   */
+  market: MarketProfile;
   /** Шаг 41 [Р-169]: режим записи аккаунта демо; `SHADOW` — ни одной записи в канал */
   writeMode?: 'SHADOW' | 'LIVE';
   /**
@@ -72,6 +79,7 @@ export interface DemoWorldOptions {
 }
 
 export async function startDemoWorld(options: DemoWorldOptions): Promise<RunningDemoWorld> {
+  if (options.market === 'us') return startUsDemoWorld(options);
   const { pools, tag } = options;
   const log = options.log ?? ((m: string) => console.log(m));
   const { demoWorld, DEMO_OFFERS, DEMO_COMPETITORS_PER_OFFER } = await import('@repracer/contract-tests/live');
@@ -186,20 +194,22 @@ export const DEMO_US_OFFERS = 12;
  * обнаружения (`record_discovered_offers`). Строки — синтетические: номера листингов и SKU с приставкой SYN-DEMO-US
  */
 async function addUsAccounts(pools: DemoWorldPools, seeded: { tenantId: string; userId: string; ownerMembershipId: string },
-  store: { recordDiscoveredOffers(tenantId: string, channelAccountId: string, offers: never[]): Promise<number> }):
+  store: { recordDiscoveredOffers(tenantId: string, channelAccountId: string, offers: never[]): Promise<number> },
+  /** Шаг 87: аккаунт amazon.com уже заведён посевом американского демо — заводится только eBay */
+  existingAmazon: string | null = null):
   Promise<{ ebay: string; amazon: string; accounts: Array<{ channelAccountId: string; channel: string; marketplaces: string[]; haltRelease: 'SAMPLE' | 'MANUAL_ONLY' }> }> {
   const { randomUUID } = await import('node:crypto');
   const { inTenant } = await import('@repracer/pricing-store-pg');
   const ebay = randomUUID();
-  const amazon = randomUUID();
+  const amazon = existingAmazon ?? randomUUID();
   /**
    * Ревью шага 64, находка 2: внешний идентификатор аккаунта уникален по всей платформе среди неотключённых, а прежний демо-тенант
    * остаётся в базе. Постоянный идентификатор ронял каждый пересев (23505) и старт консоли на той же базе — у каждого посева свой
    */
   const suffix = seeded.tenantId.replace(/-/g, '').slice(0, 8);
   await inTenant(pools.admin, seeded.tenantId, async (tx) => {
-    for (const [id, channel, region, external, marketplace] of [
-      [ebay, 'EBAY', null, `syn_demo_ebay_us_${suffix}`, 'EBAY_US'], [amazon, 'AMAZON', 'NA', `A1SYNDEMOUS${suffix.toUpperCase()}`, 'ATVPDKIKX0DER']] as const) {
+    const rows = [[ebay, 'EBAY', null, `syn_demo_ebay_us_${suffix}`, 'EBAY_US'], [amazon, 'AMAZON', 'NA', `A1SYNDEMOUS${suffix.toUpperCase()}`, 'ATVPDKIKX0DER']] as const;
+    for (const [id, channel, region, external, marketplace] of rows.filter((r) => !(existingAmazon && r[1] === 'AMAZON'))) {
       await tx.query(
         `INSERT INTO tenant_data.channel_account (tenant_id, channel_account_id, channel, region, external_account_id, marketplaces, credentials_ref, connected_by_membership_id)
          VALUES ($1, $2, $3, $4, $5, $6, 'secret-ref:synthetic', $7)`, [seeded.tenantId, id, channel, region, external, [marketplace], seeded.ownerMembershipId]);
@@ -224,10 +234,10 @@ async function addUsAccounts(pools: DemoWorldPools, seeded: { tenantId: string; 
 }
 
 /** Путь решения демо-мира по каналу аккаунта вызова: Kaufland — путь симулятора, остальные каналы — путь со своим описанием */
-function channelPipeline(kaufland: object, accounts: ReadonlyArray<{ channelAccountId: string; channel: string }>, store: object, now: () => string): object {
+function channelPipeline(kaufland: object | null, accounts: ReadonlyArray<{ channelAccountId: string; channel: string }>, store: object, now: () => string): object {
   const others = new Map<string, object>();
   const pipelineOf = async (channel: string): Promise<object> => {
-    if (channel === 'KAUFLAND') return kaufland;
+    if (channel === 'KAUFLAND' && kaufland) return kaufland;
     let p = others.get(channel);
     if (!p) {
       const [{ createPricingPipeline }, { consoleAdapter }] = await Promise.all([import('@repracer/pricing-pipeline'), import('./channel-descriptors.ts')]);
@@ -238,8 +248,118 @@ function channelPipeline(kaufland: object, accounts: ReadonlyArray<{ channelAcco
   };
   return new Proxy({}, {
     get: (_t, method) => async (ctx: { channelAccountId: string }, ...rest: unknown[]) => {
-      const channel = accounts.find((a) => a.channelAccountId === ctx.channelAccountId)?.channel ?? 'KAUFLAND';
+      const channel = accounts.find((a) => a.channelAccountId === ctx.channelAccountId)?.channel ?? (kaufland ? 'KAUFLAND' : 'AMAZON');
       return ((await pipelineOf(channel)) as Record<string, (...a: unknown[]) => unknown>)[method as string]!(ctx, ...rest);
     },
   });
+}
+
+/** Шаг 87: сколько штук каждого товара на складе американского демо — спрос amazon.com съедает их не раньше, чем через несколько суток */
+export const DEMO_US_ON_HAND = 60;
+/** Шаг 87: склад американского продавца — первый клиент в Делавэре [Р-214] */
+export const DEMO_US_WAREHOUSE = 'Warehouse Newark, DE';
+
+/**
+ * Шаг 87 [Р-214]: демо профиля us — американский продавец на симуляторе. Тенант рождается с аккаунтом amazon.com (регион NA, доллары),
+ * рядом — eBay US; Kaufland и витрин ЕС нет вовсе. Каталог — функцией обнаружения, цены, себестоимость, комиссия (версия тарифа — месяц
+ * действия), границы и стратегии — тем же модулем, что тень США до шага 87 (`demo-us.ts`), с прожатой неделей. Остатки — склад
+ * «Warehouse Newark, DE», синхронизация количества amazon.com включена (в тени запись удерживается), спрос — синтетические заказы
+ * amazon.com: продажа становится резервацией. Регион тенанта — регион базы: подготовка демо ставит базе US [Р-60], прогоны — как есть
+ */
+async function startUsDemoWorld(options: DemoWorldOptions): Promise<RunningDemoWorld> {
+  const { pools, tag } = options;
+  const log = options.log ?? ((m: string) => console.log(m));
+  const { randomUUID } = await import('node:crypto');
+  const { seedPricingWorld, PgPricingStore, PgStockStore, PgShadowStore, inTenant } = await import('@repracer/pricing-store-pg');
+  const { createStockPipeline } = await import('@repracer/stock-sync');
+  const { runConfiguredWorker } = await import('./bulk-worker.ts');
+  const { startDemoUsMarket } = await import('./demo-us.ts');
+  const AMAZON_US = US_STOREFRONTS.AMAZON![0]!;
+  const { rows: [region] } = await pools.app.query(`SELECT current_setting('repracer.region', true) AS region`);
+  const suffix = randomUUID().replace(/-/g, '').slice(0, 8);
+  const seeded = await seedPricingWorld(pools.app, {
+    fixtureTenantId: `10000000-0000-4000-8000-00000000${String(tag).padStart(4, '0')}`,
+    fixtureChannelAccountId: `20000000-0000-4000-8000-00000000${String(tag).padStart(4, '0')}`,
+    fixtureChannel: 'AMAZON', fixtureRegion: 'NA', fixtureExternalAccountId: `A1SYNDEMOUS${suffix.toUpperCase()}`,
+    marketplaces: [AMAZON_US], clock: systemClock.now() as never, seed: { scopes: [], marketplaces: { [AMAZON_US]: { currency: 'USD', basis: 'NET' } } } as never,
+    provisioningPool: pools.provisioning, adminPool: pools.admin, tenantRegion: region?.region === 'US' ? 'US' : 'EU',
+    // Р-169: демо в тени — в канал не уходит ничего; бой на amazon.com база и не откроет, пока граница суток не подтверждена [Р-172]
+    writeMode: options.writeMode ?? 'SHADOW', ...(options.customerTenant ? {} : { demo: true }),
+    memberUsers: options.memberUsers, memberEmails: options.memberEmails, joinMember: options.joinMember,
+  });
+  const store = new PgPricingStore(pools.app, { adminPool: pools.admin, bulkWorkerPool: pools.bulkWorker });
+  if (options.locale || options.timeZone) {
+    const saved = await store.setTenantDisplay(seeded.tenantId, { ...(options.locale ? { locale: options.locale } : {}), ...(options.timeZone ? { timeZone: options.timeZone } : {}) },
+      { userId: seeded.userId, mfa: true });
+    if (saved.status !== 'SAVED') throw new Error(`demo tenant display settings refused: ${saved.status}`);
+  }
+  const actor = { membershipId: seeded.ownerMembershipId, userId: seeded.userId, mfa: true };
+  const pathSaved = await store.saveOnboardingProgress(seeded.tenantId, { path: 'STOCK_AND_PRICING' }, actor);
+  if (pathSaved !== 'SAVED') throw new Error(`demo onboarding path refused: ${pathSaved}`);
+  const us = await addUsAccounts(pools, seeded, store as never, seeded.channelAccountId);
+
+  // Остатки: склад, инвентаризация каждого товара, синхронизация количества amazon.com (вопрос о других инструментах — «нет»)
+  const stock = new PgStockStore({ adminPool: pools.admin, stockPool: pools.stock });
+  const source = await stock.createStockSource(seeded.tenantId, { mode: 'INTERNAL_POOL', name: DEMO_US_WAREHOUSE }, actor);
+  if (source.status !== 'CREATED') throw new Error(`demo stock source: ${source.status}`);
+  const skus = await inTenant(pools.admin, seeded.tenantId, async (tx) =>
+    (await tx.query(`SELECT sku FROM tenant_data.product WHERE tenant_id = $1 ORDER BY sku`, [seeded.tenantId])).rows.map((r) => String(r.sku)), seeded.userId);
+  const imported = await stock.importStock(seeded.tenantId, source.stockSourceId, skus.map((sku) => ({ sku, quantity: DEMO_US_ON_HAND })), actor);
+  if (imported.status !== 'APPLIED') throw new Error(`demo stock import: ${imported.status}`);
+  await stock.answerOtherTools(seeded.tenantId, us.amazon, 'NONE', actor);
+  const confirmed = await stock.confirmQuantityWrites(seeded.tenantId, us.amazon, (await stock.quantityWritesState(seeded.tenantId, us.amazon))!.externalAccountId, actor);
+  if (confirmed.status !== 'CONFIRMED') throw new Error(`demo quantity writes: ${confirmed.status}`);
+  // Р-1: у amazon.com остаток MFN — одно значение на регион аккаунта (Северная Америка); ловушку продавец подтверждает до записи [Р-153]
+  const enabled = await stock.enableStockSync(seeded.tenantId, us.amazon, { bufferUnits: 2, maxQuantity: null, minQuantityToList: 0, acknowledgeSideEffects: true }, actor);
+  if (enabled.status !== 'ENABLED') throw new Error(`demo stock sync: ${enabled.status}`);
+  await stock.recalculate(seeded.tenantId, null, systemClock.now() as never);
+  const stockPipeline = createStockPipeline({ store: stock, now: () => systemClock.now() as never });
+
+  const usMarket = await startDemoUsMarket({
+    pools: { admin: pools.admin, scheduler: pools.scheduler }, store,
+    accounts: { tenantId: seeded.tenantId, userId: seeded.userId, ownerMembershipId: seeded.ownerMembershipId, ebayAccountId: us.ebay, amazonAccountId: us.amazon },
+    pressDays: options.usPressDays ?? 0, log,
+    orders: { pipeline: stockPipeline, skus: skus.filter((sku) => sku.includes('-AMZ-')) },
+  });
+  const accounts = us.accounts;
+  const nowIso = () => systemClock.now();
+  const descriptor = {
+    id: 'demo/us', title: 'Demo · amazon.com (Simulator)', tenantId: seeded.tenantId, accounts,
+    description: `${DEMO_US_OFFERS} offers on amazon.com and ${DEMO_US_OFFERS} on ebay.com, a warehouse in Newark, Delaware`,
+  };
+  const world = {
+    id: descriptor.id, title: descriptor.title, description: descriptor.description,
+    tenantId: seeded.tenantId, accounts, identityTenantId: seeded.tenantId, membershipAlias: (id: string) => id, failures: [],
+    landing: 'shadow' as const,
+    store: store as never, stock, stockPipeline,
+    shadow: new PgShadowStore({ adminPool: pools.admin }),
+    display: async () => {
+      const d = await store.tenantDisplay(seeded.tenantId);
+      return { locale: d.locale, timeZone: d.timeZone, timeZoneSet: d.timeZoneSet, ...(options.customerTenant ? {} : { followsRequestLocale: true }) };
+    },
+    pipeline: channelPipeline(null, accounts, store, nowIso) as never,
+    clock: { iso: nowIso, nowMs: () => systemClock.nowMs() } as never,
+    callContext: (channelAccountId: string) => ({ tenantId: seeded.tenantId as never, channelAccountId: channelAccountId as never, correlationId: 'console-demo', deadline: nowIso() }),
+    view: async (viewer: unknown, viewOptions?: { scopeIds?: readonly string[] }) => ({
+      ...descriptor, now: nowIso(), viewer: { ...(viewer as object) }, state: await store.readConsoleState(seeded.tenantId, nowIso() as never, viewOptions),
+    }) as never,
+  } as unknown as LiveWorld;
+
+  let stopped = false;
+  let stopWorker = false;
+  const worker = runConfiguredWorker({
+    pgUrl: options.pgUrl, idleMs: 500, worlds: [{ descriptor, now: 'WALL_CLOCK' }],
+    ...(options.pgUrlsByRole ? { pgUrlsByRole: options.pgUrlsByRole } : {}),
+  }, () => stopWorker)
+    .catch((error: unknown) => { if (!stopped) log(`demo bulk worker stopped: ${error instanceof Error ? error.message : String(error)}`); });
+  void worker;
+  log(`demo tenant ready (market us): ${DEMO_US_OFFERS} offers on amazon.com, ${DEMO_US_OFFERS} on ebay.com, warehouse ${DEMO_US_WAREHOUSE}`);
+  return {
+    world, tenantId: seeded.tenantId,
+    stop() {
+      stopped = true;
+      usMarket.stop();
+      stopWorker = true;
+    },
+  };
 }

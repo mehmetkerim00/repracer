@@ -42,6 +42,8 @@ export interface SessionView {
   demoGuest: boolean;
   /** Шаг 44 [Р-178]: вход продавца у поставщика identity (код с PKCE); null — настоящего входа нет, только стенд или гость */
   oidc: { issuer: string; clientId: string; scope: string } | null;
+  /** Шаг 87 [Р-214]: профиль рынка развёртывания — языки интерфейса (один язык — без переключателя) и вкладка Omnibus */
+  market: { profile: 'us' | 'eu' | 'global'; locales: Locale[]; omnibus: boolean };
 }
 
 /** Токен имитатора поставщика стенда */

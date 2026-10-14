@@ -182,8 +182,10 @@ export async function startConsole(env: Env = process.env): Promise<RunningConso
       tag, memberUsers, memberEmails: STAND_EMAILS,
       joinMember: pgStandJoinMember(pools.admin as never, directory as never),
       log: (m) => console.log(JSON.stringify({ level: 'INFO', code: 'CONSOLE_DEMO', message: m })),
+      // Шаг 87 [Р-214]: профиль us — американский продавец без Kaufland (amazon.com и ebay.com); eu и global — прежнее демо
+      market: config.market,
       usAccounts: config.demoUs,
-      usPressDays: config.demoUs ? config.demoPressDays : 0,
+      usPressDays: config.market === 'us' || config.demoUs ? config.demoPressDays : 0,
       // Шаг 69 (K1, K4): демо-тенант — на языке развёртывания и в поясе, заданном для демо (без него — пояс первой витрины)
       locale: config.locale, timeZone: config.demoTimeZone,
     });
@@ -264,6 +266,8 @@ export async function startConsole(env: Env = process.env): Promise<RunningConso
     inbound: (prefix, sha) => tenantWorlds.inbound(prefix, sha),
     // Шаг 64 (ревью, находка 1): новый браузер без куки видит язык развёртывания — в регионе США английский
     defaultLocale: config.locale,
+    // Шаг 87 [Р-214]: профиль рынка — что консоль предлагает: каналы и витрины подключения, языки, Omnibus
+    market: config.market,
   });
   // Шаг 53 (OWASP A04, A05): ограничение частоты и полная политика содержимого — адреса поставщика входа из конфигурации
   const server = createStandServer(api, config.locale, createStaticHandler(config.distDir), {

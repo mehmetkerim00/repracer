@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { LOCALES, messagesFor, type Locale } from '@repracer/console-model';
 import type { SessionView, StandToken, WorldSummary } from './api-types.ts';
 import { requestJson, setAccessToken, useResource, type Resource } from './api.ts';
-import { Badge, ErrorBox, errorText, href, Intro, Load, MessagesContext, NotFound, useMessages } from './components.tsx';
+import { Badge, ErrorBox, errorText, href, Intro, Load, MarketContext, MessagesContext, NotFound, useMessages } from './components.tsx';
 import { Icon } from './icons.tsx';
 import { BoundsScreen } from './screens/Bounds.tsx';
 import { ComplianceScreen } from './screens/Compliance.tsx';
@@ -178,6 +178,7 @@ export function WorldList({ worlds }: { worlds: readonly WorldSummary[] }) {
 function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; worlds: readonly WorldSummary[] }) {
   const outer = useMessages();
   const nav = useContext(NavContext);
+  const market = useContext(MarketContext);
   const { setOpen } = nav;
   // Панель закрывается переходом на другой экран (выбор пункта) и клавишей Esc
   useEffect(() => { setOpen(false); }, [route.worldId, route.screen, route.param, setOpen]);
@@ -214,7 +215,8 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
             <div key={group} className="nav-group">
               <div className="group-title">{m.ui.app.navGroups[group]}</div>
               {/* Шаг 68 (K3): Omnibus — правило ЕС; продавцу только с витринами США пункта нет [Р-123] */}
-              {keys.filter((key) => key !== 'compliance' || world.euStorefronts).map((key) => (
+              {/* Шаг 87 [Р-214]: Omnibus — правило ЕС; в профиле без правила ЕС пункта меню нет вовсе */}
+              {keys.filter((key) => key !== 'compliance' || (world.euStorefronts && market.omnibus)).map((key) => (
                 <a key={key} href={href(world.id, key)} className={route.screen === key ? 'active' : ''} aria-current={route.screen === key ? 'page' : undefined} onClick={() => setOpen(false)}><Icon name={NAV_ICONS[key] ?? ''} size={20} />{m.ui.app.screens[key]}</a>
               ))}
             </div>
@@ -239,7 +241,7 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
                 : route.screen === 'strategies' ? <StrategiesScreen worldId={world.id} />
                   : route.screen === 'feed' ? <FeedScreen worldId={world.id} />
                     : route.screen === 'dangerous' ? <DangerousScreen worldId={world.id} days={[1, 7, 30].includes(Number(route.param)) ? Number(route.param) : 7} />
-                      : route.screen === 'compliance' ? (world.euStorefronts ? <ComplianceScreen worldId={world.id} /> : <><h2>{m.ui.app.screens.compliance}</h2><p className="subtitle">{m.ui.app.subtitles.compliance}</p><p className="notice">{m.ui.compliance.notApplicable}</p></>)
+                      : route.screen === 'compliance' ? (world.euStorefronts && market.omnibus ? <ComplianceScreen worldId={world.id} /> : <><h2>{m.ui.app.screens.compliance}</h2><p className="subtitle">{m.ui.app.subtitles.compliance}</p><p className="notice">{m.ui.compliance.notApplicable}</p></>)
                         : route.screen === 'jobs' ? <><h2>{m.ui.jobs.pageTitle}</h2><p className="subtitle">{m.ui.app.subtitles.jobs}</p><JobHistory worldId={world.id} /></>
                 : <NotFound title={m.ui.app.notFoundTitle} text={m.ui.app.screenNotFound} back={m.ui.app.screens.onboarding} href={href(world.id, 'onboarding')} />}
       </div>
@@ -262,7 +264,8 @@ function SignedIn({ route }: { route: Route }) {
 
 export function App() {
   const [route, setRoute] = useState<Route>(() => parseHash(window.location.hash));
-  const [locale, setLocale] = useState<Locale>('de');
+  // Шаг 87: до ответа сессии — английский: первый рынок продукта — США [Р-214]
+  const [locale, setLocale] = useState<Locale>('en');
   const [session, setSession] = useState<Resource<SessionView>>(() => ({ state: 'loading', startedAt: Date.now() }));
   const [loginError, setLoginError] = useState<string | null>(null);
   // Находка 17 ревью шага 44: принятое приглашение называется словами — раньше продавец не видел ничего
@@ -359,20 +362,30 @@ export function App() {
 
   const user = session.state === 'ready' ? session.data.user : null;
   const [navOpen, setNavOpen] = useState(false);
+  /**
+   * Шаг 87 [Р-214]: языки — профиля рынка развёртывания. В профиле us язык один, и переключателя нет вовсе (немецкий словарь остаётся
+   * и гоняется на профиле eu); до ответа сессии переключателя тоже нет — иначе мелькал бы «Deutsch»
+   */
+  const marketLocales: readonly Locale[] = session.state === 'ready' ? session.data.market.locales : [];
+  const market = { locales: session.state === 'ready' ? session.data.market.locales : LOCALES, omnibus: session.state === 'ready' ? session.data.market.omnibus : false };
+  const langSwitch = marketLocales.length > 1 ? (
+    <span className="lang">
+      {marketLocales.map((l) => (
+        <button key={l} type="button" className={l === locale ? 'active' : ''} aria-pressed={l === locale} onClick={() => changeLocale(l)}>{m.ui.app.languages[l]}</button>
+      ))}
+    </span>
+  ) : null;
   // Шаг 85: на узких экранах внутри рабочего пространства язык, адрес и выход — в выдвижной панели; разметка та же, что в шапке
   const extras = user ? (
     <>
-      <span className="lang">
-        {LOCALES.map((l) => (
-          <button key={l} type="button" className={l === locale ? 'active' : ''} aria-pressed={l === locale} onClick={() => changeLocale(l)}>{m.ui.app.languages[l]}</button>
-        ))}
-      </span>
+      {langSwitch}
       <span className="user">{user.email ?? user.subject}</span>
       <button type="button" onClick={() => { setAccessToken(null); loadSession(); }}>{m.ui.app.login.logout}</button>
     </>
   ) : null;
   return (
     <NavContext.Provider value={{ open: navOpen, setOpen: setNavOpen, extras }}>
+    <MarketContext.Provider value={market}>
     <MessagesContext.Provider value={m}>
       <div className="app" lang={locale}>
         <header className={`topbar${user && route.worldId !== null ? ' in-world' : ''}`}>
@@ -387,11 +400,7 @@ export function App() {
           {/* Шаг 84: внутри рабочего пространства демо говорят жёлтая полоса и пилюля у заголовка — третья пометка в шапке лишняя */}
           {session.state === 'ready' && session.data.simulator && route.worldId === null ? <span className="env">{m.ui.app.stand}</span> : null}
           <span className="spacer" />
-          <span className="lang">
-            {LOCALES.map((l) => (
-              <button key={l} type="button" className={l === locale ? 'active' : ''} aria-pressed={l === locale} onClick={() => changeLocale(l)}>{m.ui.app.languages[l]}</button>
-            ))}
-          </span>
+          {langSwitch}
           {user ? (
             <>
               {/* Шаг 78: в шапке — только адрес; «Signed in: …» остаётся подсказкой */}
@@ -414,6 +423,7 @@ export function App() {
         </main>
       </div>
     </MessagesContext.Provider>
+    </MarketContext.Provider>
     </NavContext.Provider>
   );
 }

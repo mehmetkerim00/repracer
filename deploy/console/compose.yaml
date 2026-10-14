@@ -21,7 +21,9 @@ services:
       REPRACER_CONSOLE_METRICS_PORT: "9467"
       # Собранный интерфейс: `npm run build -w apps/console` кладёт его сюда, контейнер только читает
       REPRACER_CONSOLE_DIST: /app/apps/console/dist
-      REPRACER_CONSOLE_LOCALE: ${REPRACER_CONSOLE_LOCALE:-de}
+      # Шаг 87 [Р-214]: профиль рынка, по умолчанию us; язык по умолчанию — язык профиля (немецкий в us — отказ при старте)
+      REPRACER_MARKET_PROFILE: ${REPRACER_MARKET_PROFILE:-us}
+      REPRACER_CONSOLE_LOCALE: ${REPRACER_CONSOLE_LOCALE:-en}
       # Р-160: публичное демо. `off` — кнопки «посмотреть демо» нет и маршрут гостя отвечает 404
       REPRACER_CONSOLE_PUBLIC_DEMO: ${REPRACER_CONSOLE_PUBLIC_DEMO:-on}
       REPRACER_CONSOLE_DEMO_RESEED_HOURS: ${REPRACER_CONSOLE_DEMO_RESEED_HOURS:-24}

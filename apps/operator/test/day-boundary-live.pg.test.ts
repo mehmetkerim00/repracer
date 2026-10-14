@@ -76,7 +76,8 @@ before(async () => {
     pgUrlsByRole: { admin: db.url('svc_admin'), bulk_worker: db.url('svc_bulk_worker'), stock: db.url('svc_stock') },
     tag: 6900, memberUsers, memberEmails: STAND_EMAILS,
     joinMember: pgStandJoinMember(pools.admin as never, directory as never),
-    hours: 1, usAccounts: true, usPressDays: PRESS_DAYS, customerTenant: true, log: () => undefined,
+    // Шаг 87 [Р-214]: мир симулятора Kaufland с витринами США рядом — путь профиля eu (Европа заморожена, не удалена)
+    market: 'eu', hours: 1, usAccounts: true, usPressDays: PRESS_DAYS, customerTenant: true, log: () => undefined,
   });
   tenantId = world.tenantId;
   const accounts = await db.rows<{ channel_account_id: string; channel: string }>(

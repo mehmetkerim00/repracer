@@ -370,6 +370,7 @@ export const de: Messages = {
       stand: 'Testumgebung, synthetische Daten',
       // Шаг 64 (проход консоли): имя и описание демо-мира на языке интерфейса, а не строкой посева по-немецки
       demoWorldTitle: 'Demo-Shop (Simulator)', demoWorldDescription: 'Synthetischer Shop auf dem Kanalsimulator: jedes Angebot hat drei Wettbewerber — einer driftet, einer unterbietet, einer in Preiswellen.',
+      demoWorldDescriptionUs: 'Synthetischer US-Händler auf dem Kanalsimulator: Angebote auf amazon.com und ebay.com, ein Lager in Newark, Delaware.',
       demoBadge: 'Demo', demoBanner: 'Demo-Arbeitsbereich: synthetische Daten, echter Weg. Alle Beträge sind erfunden.',
       languages: { de: 'Deutsch', en: 'English' },
       worlds: 'Ihre Arbeitsbereiche',
@@ -570,7 +571,7 @@ export const de: Messages = {
       stepHints: {
         TENANT: 'Der Arbeitsbereich besteht; Mitglieder werden per Einladung aufgenommen.',
         STOCK_SOURCE: 'Woher der Bestand kommt: eine hochgeladene Datei oder Ihr Lagersystem, das an die Inbound-API sendet. Die Quelle gilt als verbunden, sobald sie mindestens einen Bestandswert geliefert hat.',
-        STOCK_SYNC: 'Die veröffentlichte Menge ist der gemeinsame Bestand minus Puffer je Kanal. Kanalfallen werden vor dem ersten Schreiben gezeigt: bei Amazon EU ist der Bestand ein Wert für die ganze Region; bei Kaufland teilen sich die Storefronts desselben Angebots den Bestand.',
+        STOCK_SYNC: 'Die veröffentlichte Menge ist der gemeinsame Bestand minus Puffer je Kanal. Wo ein Kanal Bestand breiter als eine Storefront schreibt — etwa einen Wert für eine ganze Amazon-Region —, wird das vor dem ersten Schreiben gezeigt.',
         CHANNEL: 'Ein Kanal ist verbunden, wenn ein Konto mit Zugang existiert. Ein Konto ohne Zugang zeigt, was fehlt.',
         COSTS: 'Ohne deklarierte Stückkosten UND Provision des Kanals (Satz und Fixanteil) schaltet sich Repricing nicht ein: ohne Provision lässt sich die Margenuntergrenze nicht rechnen. Diesen Schritt kann man nicht überspringen — nur die Auswahl der Angebote verkleinern.',
         BOUNDS: 'Jedes Angebot braucht Untergrenze und Obergrenze.',

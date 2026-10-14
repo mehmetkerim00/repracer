@@ -30,3 +30,5 @@ export { lastChangeCell, productPage } from './products.ts';
 /** Р-154: окно отчёта об отклонённых — семь суток; счётчики и строки — по вмешательствам окна, не по буферу */
 export { REJECTED_WINDOW_DAYS } from './rejected.ts';
 export { connectionsView, accountState, channelLimitText, externalWritersView, OTHER_TOOLS_ANSWERS, type ConnectionsView, type ConnectionAccountView, type ConnectionChannelView, type ConnectionState, type ConnectableChannel, type OtherToolsAnswer, type OtherToolsView, type QuantityWritesView } from './connections.ts';
+// Шаг 87 [Р-214]: профиль рынка развёртывания — каналы, витрины, языки и правило Omnibus, которые консоль предлагает
+export { connectableInMarket, DEFAULT_MARKET_PROFILE, isMarketProfile, localeInMarket, MARKET_PROFILES, marketProfileOf, marketScope, storefrontInMarket, US_STOREFRONTS, worldInMarket, type MarketProfile, type MarketScope } from './market.ts';

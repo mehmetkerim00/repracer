@@ -74,6 +74,8 @@ before(async () => {
   const url = (login: Parameters<typeof db.url>[0]) => db.url(login);
   consoleEnv = {
     REPRACER_MODE: 'stand',
+    // Шаг 87 [Р-214]: гость демо на симуляторе Kaufland — путь профиля eu (Европа заморожена, не удалена)
+    REPRACER_MARKET_PROFILE: 'eu',
     REPRACER_CONSOLE_PORT: '0', REPRACER_CONSOLE_METRICS_PORT: '0',
     REPRACER_CONSOLE_DIST: new URL('../dist', import.meta.url).pathname,
     REPRACER_CONSOLE_PUBLIC_DEMO: 'on',
