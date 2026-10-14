@@ -101,7 +101,7 @@ export class WalmartAdapter implements ChannelAdapter {
     if (!verified.ok) {
       const error = channelError(verified.reason === 'TENANT_MISMATCH' ? 'TENANT_MISMATCH' : 'ACCOUNT_INACTIVE', 'ACCOUNT', `channel account ${verified.reason}`, { raiseAlert: true });
       if (verified.reason === 'TENANT_MISMATCH') {
-        await this.deps.alerts.raise({ code: 'TENANT_MISMATCH', severity: 'CRITICAL', tenantId: ctx.tenantId, channelAccountId: ctx.channelAccountId, details: { channel: 'WALMART' } });
+        await this.deps.alerts.raise({ code: 'WALMART_TENANT_MISMATCH', severity: 'CRITICAL', tenantId: ctx.tenantId, channelAccountId: ctx.channelAccountId, details: { channel: 'WALMART' } });
       }
       throw new ChannelCallError(error);
     }

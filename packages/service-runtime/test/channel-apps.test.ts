@@ -24,11 +24,11 @@ const amazonEnv = {
   REPRACER_AMAZON_APP_DRAFT: 'on',
 };
 
-test('Р-150: ничего не настроено — процесс стартует, оба канала «ожидают доступа платформы» с причиной', () => {
+test('Р-150: ничего не настроено — процесс стартует, каждый канал «ожидает доступа платформы» с причиной (шаг 89: и Walmart)', () => {
   const c = loadChannelAppsConfig({}, read);
   assert.deepEqual([c.amazon, c.ebay, c.keyring], [null, null, null]);
   assert.deepEqual(channelApps(c).map((a) => [a.channel, a.platformMissing, a.provider]), [
-    ['AMAZON', ['AMAZON_APPLICATION'], null], ['EBAY', ['EBAY_DEVELOPER_KEYS'], null],
+    ['AMAZON', ['AMAZON_APPLICATION'], null], ['EBAY', ['EBAY_DEVELOPER_KEYS'], null], ['WALMART', ['WALMART_API_KEYS'], null],
   ]);
 });
 
