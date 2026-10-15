@@ -365,7 +365,7 @@ observes('alerts-deliver', 'Р-156 (шаг 36): алерты суток дост
   assert.equal(Number(a.wrong_kind), 0, 'CRITICAL доставляется письмом немедленно, а не дайджестом');
   // Письма — настоящие по содержанию: у каждого есть получатель, тема и тело, и их столько же, сколько отмеченных доставок
   assert.ok(mail.sent.length > 0, `писем за сутки: ${mail.sent.length}`);
-  assert.ok(mail.sent.every((x) => x.to.includes('@') && x.subject.includes('repracer') && x.text.length > 40),
+  assert.ok(mail.sent.every((x) => x.to.includes('@') && x.subject.includes('PriceTrail') && x.text.length > 40),
     `каждое письмо названо и не пусто: ${JSON.stringify(mail.sent[0])}`);
   console.log(JSON.stringify({ alerts: a, letters: mail.sent.length, subjects: [...new Set(mail.sent.map((x) => x.subject.slice(0, 60)))].slice(0, 5) }));
 });

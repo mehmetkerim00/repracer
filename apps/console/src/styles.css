@@ -46,10 +46,10 @@ td.cur .note, td.cur .muted, td.cur .small, td.cur a, td.cur .badge, td.cur .flo
   padding: 0 var(--space-4); background: var(--header-bg); color: var(--header-fg);
 }
 .brand { display: flex; align-items: center; gap: var(--space-2); margin: 0; font-weight: var(--weight-heading); font-size: var(--font-size); color: var(--header-fg-logo); }
-.brand-mark {
-  width: var(--control-h); height: var(--control-h); border-radius: var(--radius-pill); display: inline-flex; align-items: center; justify-content: center;
-  font-size: var(--font-size-md); line-height: 1; font-weight: var(--weight-heading); background: var(--header-fg-logo); color: var(--header-bg);
-}
+/* Шаг 92 [Р-216]: знак PriceTrail — линия цвета контекста (в шапке — белый знак шапки), конечная точка — зелёный Primer своего контекста */
+.brand-mark { flex: none; display: block; }
+.brand-mark-end { fill: var(--success); }
+.topbar .brand-mark-end { fill: var(--header-mark-end); }
 .topbar .env { font-size: var(--font-size-xs); color: var(--header-fg); padding: 0 var(--space-2); border: var(--border-width) solid var(--header-divider); border-radius: var(--radius-pill); }
 .topbar .user { font-size: var(--font-size-sm); color: var(--header-fg); }
 .lang { display: inline-flex; padding: var(--space-1) 0; }
@@ -554,7 +554,6 @@ p.headline[class*='tone-'] { padding: var(--space-3) var(--space-4); border-radi
 .login-wrap { min-height: calc(100vh - var(--topbar-h)); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-4); padding: var(--space-6) var(--space-4); }
 .login-head { text-align: center; }
 .login-head .login-brand { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--font-size-lg); font-weight: var(--weight-heading); color: var(--text); }
-.login-head .brand-mark { background: var(--header-bg); color: var(--header-fg-logo); }
 .login-tagline { margin: var(--space-1) 0 0; color: var(--text-2); font-size: var(--font-size); }
 .card.login { width: 100%; max-width: 680px; padding: var(--space-4); margin: 0; }
 .card.login h2 { font-size: var(--font-size-lg); }

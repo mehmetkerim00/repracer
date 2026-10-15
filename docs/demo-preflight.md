@@ -42,7 +42,7 @@
 
 | Проверка | Ожидаемое | Если нет |
 |---|---|---|
-| Экран входа | по-английски: по центру знак «repracer» и «Repricing you can audit», под ними карточка входа: ровно три роли строками (шаг 88) — цветной кружок, «Owner — everything, plus people, channel accounts and live writes», «Manager — prices, bounds, strategies, stock, unit cost import, bulk operations, stop pricing», «Viewer — read-only» | пустая белая страница — раздел 5, «Пустая страница» |
+| Экран входа | по-английски: по центру знак PriceTrail (линия цены, удержанная в конце) и строчное имя «pricetrail», под ними «Repricing you can audit», под ними карточка входа: ровно три роли строками (шаг 88) — цветной кружок, «Owner — everything, plus people, channel accounts and live writes», «Manager — prices, bounds, strategies, stock, unit cost import, bulk operations, stop pricing», «Viewer — read-only» | пустая белая страница — раздел 5, «Пустая страница» |
 | Строка «Owner» | «Your workspaces», три карточки (шаг 91): **Demo store (simulator)** — «Synthetic American seller on the channel simulator: offers on amazon.com, ebay.com and walmart.com, a warehouse in Newark, Delaware.», пометка Demo, показатели Offers 36 / Decisions 24h / Interventions 7d, роль «Owner»; **Blue Ridge Trading** — Offers 12, роль «Manager»; **Lakeside Home Goods** — Offers 10, роль «Viewer»; у обоих Decisions 24h и Interventions 7d не нули | десятки карточек с русским текстом — подготовка запущена без `REPRACER_DEMO_ONLY`: перезапустить подготовку |
 | Нажать карточку | сразу **Shadow mode**, баннер «Demo workspace: synthetic data, real path» | — |
 | Сводка тени | белые плитки: «Decisions» — больше 1000; «Without the floor» в долларах; график «Decisions per day» — семь столбиков с числами, неделя не нулевая, сегодняшний столбик через 15 минут после запуска — выше недели; под графиком — список «показатель — значение» со сноской; строка «Without the floor you would have sold $… cheaper in total» | «Price would change» — 0: мир младше ~20 минут; столбики на нуле все дни, кроме сегодняшнего, — неделя США не прожата: перезапустить подготовку |
@@ -162,7 +162,7 @@
 | Вопрос | Ответ и где он |
 |---|---|
 | «Почему Walmart снял мой товар?» | Offers, колонка «Channel says»: «Unpublished (uncompetitive price)» и фраза — тот же товар дешевле в другом месте ($19.99), на другой площадке или у самого Walmart. Событие с временем — в журнале Stop pricing |
-| «А repracer это сам исправит?» | Нет — фраза так и говорит: «repracer does not change the price for you here». Что делать с ценой — решает продавец; автоматический ответ на снятие — отдельное решение. Наша ценность здесь — видеть все каналы сразу и узнать о снятии, а не по провалу продаж |
+| «А PriceTrail это сам исправит?» | Нет — фраза так и говорит: «PriceTrail does not change the price for you here». Что делать с ценой — решает продавец; автоматический ответ на снятие — отдельное решение. Наша ценность здесь — видеть все каналы сразу и узнать о снятии, а не по провалу продаж |
 | «Вы уже работаете с настоящим Walmart?» | Нет: Walmart в демо — модель канала по правилам настоящего Walmart (OAuth, корзина токенов, правило неконкурентной цены); ключей Walmart у платформы пока нет — экран Channel accounts говорит это словами; живое подключение — отдельным шагом. Порог 10 % — параметр модели |
 
 ### ж. Для преп-центра (шаг 91)

@@ -42,3 +42,19 @@ export function Icon({ name, size = 16, className }: { name: string; size?: numb
     </svg>
   );
 }
+
+/**
+ * Шаг 92 [Р-216]: знак PriceTrail «held trail» — линия цены, удержанная в конце. Линия и промежуточные точки — цвет контекста
+ * (`currentColor`: на входе — текст, в тёмной шапке — белый знак шапки), конечная точка — зелёный Primer своего контекста (класс
+ * `brand-mark-end`, значение — токен в tokens.css). Своих цветов у знака нет
+ */
+export function BrandMark({ size = 24, className }: { size?: number; className?: string }) {
+  return (
+    <svg className={`brand-mark${className ? ` ${className}` : ''}`} width={size} height={size} viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+      <path d="M8 44 L24 26 L36 34 L52 34" fill="none" stroke="currentColor" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="8" cy="44" r="4.5" fill="currentColor" />
+      <circle cx="24" cy="26" r="4.5" fill="currentColor" />
+      <circle className="brand-mark-end" cx="52" cy="34" r="7" />
+    </svg>
+  );
+}

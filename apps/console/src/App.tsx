@@ -3,7 +3,7 @@ import { LOCALES, messagesFor, type Locale } from '@repracer/console-model';
 import type { SessionView, StandToken, WorldSummary } from './api-types.ts';
 import { requestJson, setAccessToken, useResource, type Resource } from './api.ts';
 import { Badge, ErrorBox, errorText, href, Intro, Load, MarketContext, MessagesContext, NotFound, useMessages } from './components.tsx';
-import { Icon } from './icons.tsx';
+import { BrandMark, Icon } from './icons.tsx';
 import { BoundsScreen } from './screens/Bounds.tsx';
 import { ComplianceScreen } from './screens/Compliance.tsx';
 import { JobHistory } from './screens/Jobs.tsx';
@@ -86,7 +86,7 @@ export function LoginView({ simulator, demoGuest, oidc, error, busy, onSignIn, o
     <div className="login-wrap">
     {/* Шаг 83: без бренд-панели и градиентов — знак, имя и строка о продукте над карточкой входа, как у входа Primer */}
     <header className="login-head">
-      <div className="login-brand"><span className="brand-mark" aria-hidden="true">r</span>{m.ui.app.brand}</div>
+      <div className="login-brand"><BrandMark size={32} />{m.ui.app.brand}</div>
       <p className="login-tagline">{l.tagline}</p>
     </header>
     <section className="card login">
@@ -277,7 +277,7 @@ export function App() {
   // русскими («консоль продавца (стенд)», lang="ru"), и зритель из США видел кириллицу на вкладке
   useEffect(() => {
     document.documentElement.lang = locale;
-    document.title = m.ui.app.title;
+    document.title = m.ui.app.documentTitle;
   }, [locale]);
 
   useEffect(() => {
@@ -395,7 +395,7 @@ export function App() {
               <Icon name="menu" size={20} />
             </button>
           ) : null}
-          <h1 className="brand"><span className="brand-mark" aria-hidden="true">r</span><span className="brand-title">{m.ui.app.title}</span></h1>
+          <h1 className="brand"><BrandMark size={28} /><span className="brand-title">{m.ui.app.title}</span></h1>
           {/* Шаг 64 (проход консоли глазами клиента): «стенд, синтетические данные» — только у стенда с имитатором входа, не у продавца */}
           {/* Шаг 84: внутри рабочего пространства демо говорят жёлтая полоса и пилюля у заголовка — третья пометка в шапке лишняя */}
           {session.state === 'ready' && session.data.simulator && route.worldId === null ? <span className="env">{m.ui.app.stand}</span> : null}

@@ -133,7 +133,21 @@ test('step 76: the console page runs in a real browser — sign-in, workspace li
   // Шаг 84: роли — строками «имя роли — что может»; «Sign in as Owner» — доступное имя кнопки
   await b.waitText(en.ui.app.login.roleCan.OWNER);
   assert.equal(await b.evaluate<string>('document.documentElement.lang'), 'en', 'the document language follows the screen');
-  assert.equal(await b.evaluate<string>('document.title'), en.ui.app.title, 'the tab title is the console title, not a Russian placeholder');
+  // Шаг 92 [Р-216]: вкладка называет продукт в прозе — «PriceTrail · seller console»
+  assert.equal(await b.evaluate<string>('document.title'), en.ui.app.documentTitle, 'the tab title names the product, not a Russian placeholder');
+  /**
+   * Шаг 92 [Р-216]: знак PriceTrail — SVG «held trail», а не кружок с буквой «r»; имя знака — строчное «pricetrail». Линия — цвет контекста,
+   * конечная точка — зелёный Primer своего контекста: на светлом входе — `--fgColor-success`, в тёмной шапке — зелёный тёмной темы
+   */
+  const mark = (where: string) => b.evaluate<{ svg: boolean; text: string; line: string; end: string } | null>(`(() => {
+    const host = document.querySelector(${JSON.stringify(where)}); const svg = host?.querySelector('svg.brand-mark');
+    if (!host || !svg) return null;
+    return { svg: true, text: host.textContent.trim(), line: getComputedStyle(svg).color, end: getComputedStyle(svg.querySelector('.brand-mark-end')).fill };
+  })()`);
+  assert.deepEqual(await mark('.login-brand'), { svg: true, text: en.ui.app.brand, line: 'rgb(31, 35, 40)', end: 'rgb(26, 127, 55)' }, 'sign-in: the mark on light, the lowercase name');
+  assert.equal(en.ui.app.brand, 'pricetrail');
+  assert.deepEqual(await mark('.topbar .brand'), { svg: true, text: en.ui.app.title, line: 'rgb(255, 255, 255)', end: 'rgb(46, 160, 67)' }, 'header: the mark on dark');
+  assert.equal(await b.evaluate<number>(`[...document.querySelectorAll('.brand-mark')].filter((e) => e.textContent.trim() === 'r').length`), 0, 'the old «r» mark is gone');
   await b.click(owner);
   await b.waitText(en.ui.app.worlds);
   const worldLink = await b.evaluate<string>(`[...document.querySelectorAll('h3 a')].map((a) => a.getAttribute('href'))[0] ?? ''`);

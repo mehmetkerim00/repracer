@@ -22,9 +22,13 @@ const EXCEPTIONS: Readonly<Record<string, string>> = {
   '--sidebar-w': 'ширина боковой панели — размер раскладки консоли, не значение дизайн-системы',
 };
 
-function primerTokens(): Map<string, string> {
+/**
+ * Шаг 92 [Р-216]: тема пакета, с которой сверяется значение. Консоль — светлая тема Primer с тёмной шапкой; знак в шапке берёт зелёный,
+ * которого в светлой теме нет, — такое значение помечается `primer-dark: --имя` и сверяется с тёмной темой
+ */
+function primerTokens(theme: 'light' | 'dark' = 'light'): Map<string, string> {
   const files = [
-    join(primerDir, 'functional', 'themes', 'light.css'),
+    join(primerDir, 'functional', 'themes', `${theme}.css`),
     ...['functional/size', 'functional/typography', 'base/size', 'base/typography'].flatMap((d) =>
       readdirSync(join(primerDir, d)).filter((f) => f.endsWith('.css')).map((f) => join(primerDir, d, f))),
   ];
@@ -46,15 +50,15 @@ function primerTokens(): Map<string, string> {
 const norm = (v: string) => v.replace(/\s+/g, ' ').trim().toLowerCase();
 
 /** Проблемы tokens.css: значение не равно токену Primer, непомеченное значение, ссылка на токен, которого в пакете нет */
-export function tokenProblems(tokensCss: string, primer: ReadonlyMap<string, string>): string[] {
+export function tokenProblems(tokensCss: string, primer: ReadonlyMap<string, string>, primerDark: ReadonlyMap<string, string> = primerTokens('dark')): string[] {
   const problems: string[] = [];
-  const body = tokensCss.replace(/\/\*(?!\s*primer:)[\s\S]*?\*\//g, '');
+  const body = tokensCss.replace(/\/\*(?!\s*primer(?:-dark)?:)[\s\S]*?\*\//g, '');
   for (const line of body.split('\n')) {
-    const m = /^\s*(--[A-Za-z0-9-]+)\s*:\s*(.+?);\s*(?:\/\*\s*primer:\s*(--[A-Za-z0-9-]+)\s*\*\/)?\s*$/.exec(line);
+    const m = /^\s*(--[A-Za-z0-9-]+)\s*:\s*(.+?);\s*(?:\/\*\s*primer(-dark)?:\s*(--[A-Za-z0-9-]+)\s*\*\/)?\s*$/.exec(line);
     if (!m) continue;
-    const [, name, value, source] = m as unknown as [string, string, string, string | undefined];
+    const [, name, value, dark, source] = m as unknown as [string, string, string, string | undefined, string | undefined];
     if (source !== undefined) {
-      const expected = primer.get(source);
+      const expected = (dark ? primerDark : primer).get(source);
       if (expected === undefined) problems.push(`${name}: primer token ${source} is not in the package`);
       else if (norm(value) !== norm(expected)) problems.push(`${name}: ${value} is not primer ${source} (${expected})`);
     } else if (!(name in EXCEPTIONS) && !/^(?:\s|,|\b0\b|var\(--[A-Za-z0-9-]+\))+$/.test(value)) {
@@ -114,6 +118,10 @@ test('step 83: every value in tokens.css is the GitHub Primer token it names —
   assert.match(tokenProblems('  --brand: #0B7A62;', primer).join(), /has no primer source/);
   assert.match(tokenProblems('  --x: #ffffff; /* primer: --fgColor-madeUp */', primer).join(), /is not in the package/);
   assert.deepEqual(tokenProblems('  --ring: 0 0 0 var(--focus-width) var(--focus-color);', primer), [], 'a value composed of tokens needs no source');
+  // Шаг 92: пометка тёмной темы сверяется с тёмной темой — и только с ней
+  assert.deepEqual(tokenProblems('  --x: #2ea043; /* primer-dark: --contribution-default-bgColor-3 */', primer), []);
+  assert.match(tokenProblems('  --x: #2ea043; /* primer: --contribution-default-bgColor-3 */', primer).join(), /is not primer --contribution-default-bgColor-3/, 'the light theme has another value');
+  assert.match(tokenProblems('  --x: #123456; /* primer-dark: --contribution-default-bgColor-3 */', primer).join(), /is not primer --contribution-default-bgColor-3/);
   // Пометок не меньше, чем значений Primer в файле: правило не зеленеет на пустом файле
   assert.ok((tokensCss.match(/primer: --/g) ?? []).length >= 60, 'tokens.css names its primer sources');
 });

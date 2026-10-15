@@ -129,6 +129,9 @@ test('step 71: from a client file to a self-contained English report — numbers
   assert.deepEqual(await databases(name), [], 'the kept database is gone after the drop command');
 
   const html = readFileSync(output, 'utf8');
+  // Шаг 92 [Р-216]: отчёт называет продукт — знак и имя в шапке и во вкладке
+  assert.match(html, /<title>PriceTrail · Repricing decisions for your catalog<\/title>/);
+  assert.match(html, /<div class="brand"><svg [^>]*viewBox="0 0 64 64"[\s\S]*?<\/svg><span>pricetrail<\/span><\/div>/);
   for (const heading of ['Repricing decisions for your catalog', 'What is real and what is simulated', '15 decisions in detail', 'What we did NOT do — and why',
     'Without your unit cost', 'Rows we could not use', 'How this run differs from live pricing', 'How this run was set up']) {
     assert.ok(html.includes(heading), `section «${heading}» is in the report`);

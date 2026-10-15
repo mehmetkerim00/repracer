@@ -11,7 +11,8 @@
 
 | Понятие | EN | DE | Запрещено (EN / DE) | Что это |
 |---|---|---|---|---|
-| Тенант | **workspace** | **Arbeitsbereich** | tenant, seller account, account group / Mandant, Verkäuferkonto, Händlerkonto | Бизнес продавца в repracer: его участники, каналы, каталог, границы. У агентства их несколько, у каждого свои язык и пояс (K1, K4) |
+| Продукт | **PriceTrail** | **PriceTrail** | repracer (прежнее имя), Pricetrail, Price Trail / то же | Шаг 92 [Р-216]: в прозе — PriceTrail с заглавными P и T; строчное **pricetrail** — только знак в шапке и на входе. Технические имена (`@repracer/*`, `REPRACER_*`, база) не меняются |
+| Тенант | **workspace** | **Arbeitsbereich** | tenant, seller account, account group / Mandant, Verkäuferkonto, Händlerkonto | Бизнес продавца в PriceTrail: его участники, каналы, каталог, границы. У агентства их несколько, у каждого свои язык и пояс (K1, K4) |
 | Канал | **channel** | **Kanal** | marketplace (о канале) / Marktplatz | Amazon, eBay, Kaufland |
 | Витрина | **storefront** | **Storefront** | marketplace / Marktplatz | amazon.de, amazon.com, ebay.com, kaufland.de — страна или сайт канала. На экране — словами, не кодом (`ATVPDKIKX0DER`, `EBAY_US`) |
 | Аккаунт канала | **channel account** (рядом с названием канала — «Amazon account») | **Kanalkonto** («Amazon-Konto») | seller account, channel connection / Kanalverbindung, Kanal-Konto | Аккаунт продавца в канале, подключённый к workspace. Экран — «Channel accounts» / «Kanalkonten» |

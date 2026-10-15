@@ -76,6 +76,8 @@
   --header-bg: #25292e; /* primer: --header-bgColor */
   --header-fg: #ffffffb3; /* primer: --header-fgColor-default */
   --header-fg-logo: #ffffff; /* primer: --header-fgColor-logo */
+  /* шаг 92 [Р-216]: конечная точка знака в тёмной шапке — зелёный тёмной темы Primer; в светлой теме этого значения нет, сверка — с тёмной */
+  --header-mark-end: #2ea043; /* primer-dark: --contribution-default-bgColor-3 */
   --header-divider: #818b98; /* primer: --header-borderColor-divider */
   --nav-hover: #818b981a; /* primer: --control-transparent-bgColor-hover */
   --nav-selected: #818b9826; /* primer: --control-transparent-bgColor-selected */

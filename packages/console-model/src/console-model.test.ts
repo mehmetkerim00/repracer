@@ -325,6 +325,9 @@ export const GLOSSARY_FORBIDDEN: Readonly<Record<'en' | 'de', ReadonlyArray<{ pa
     { pattern: /\bstand\b(?! still)/i, use: 'server (the stand is a test bench)' },
     // Шаг 79: себестоимость — одно слово «unit cost» на всех экранах (визуальное ревью нашло «cost price» на импорте)
     { pattern: /\bcost prices?\b|\bproduct costs?\b/i, use: 'unit cost' },
+    // Шаг 92 [Р-216]: продукт — PriceTrail; прежнее имя и неверные написания краснеют, строчное «pricetrail» — только знак
+    { pattern: /\brepracer\b/i, use: 'PriceTrail' },
+    { pattern: /\bPricetrail\b|\bPrice ?[Tt]rail\b(?<!\bPriceTrail)|\bPRICE ?TRAIL\b/, use: 'PriceTrail (the wordmark pricetrail is lowercase)' },
   ],
   de: [
     { pattern: /\bMandant(en|in)?\b|Mandanten-?[Ss]topp/, use: 'Arbeitsbereich' },
@@ -340,6 +343,8 @@ export const GLOSSARY_FORBIDDEN: Readonly<Record<'en' | 'de', ReadonlyArray<{ pa
     { pattern: /Selbstkosten|Einstandskosten|Einstandspreis/, use: 'Stückkosten' },
     // Шаг 86 (отложенное 79, ревью 21): данные конкурентов на момент — «Wettbewerbsdaten», а не английское «Snapshot» (было 43 текста)
     { pattern: /Snapshot|Momentaufnahme/, use: 'Wettbewerbsdaten (Plural; Zeitpunkt — „Wettbewerbsdaten vom …“)' },
+    { pattern: /\brepracer\b/i, use: 'PriceTrail' },
+    { pattern: /\bPricetrail\b|\bPrice ?[Tt]rail\b(?<!\bPriceTrail)|\bPRICE ?TRAIL\b/, use: 'PriceTrail (das Wortzeichen pricetrail ist klein geschrieben)' },
   ],
 };
 const EBAY_LISTING = /\blistings?\b/i;
@@ -414,6 +419,11 @@ test('шаг 69 (K9): словари EN и DE говорят терминами 
   for (const bad of ['the whole tenant', 'Your seller account is ready', 'the account group stop', 'read from the marketplace', 'channel units in sync', 'the item may break',
     'one article', 'Open the channel connections', 'The stand is unavailable', 'Check the listing in the channel', 'Import cost prices', 'enter the product cost']) assert.equal(en(bad), 1, bad);
   for (const ok of ['the unit cost of this offer', 'prices stand still', 'older eBay listings', 'edits this listing through the Trading API', 'Workspace: Demo']) assert.equal(en(ok), 0, ok);
+  // Шаг 92 [Р-216]: имя продукта — PriceTrail; прежнее имя и неверные написания — нет, строчный знак «pricetrail» — да
+  for (const bad of ['Prices set outside repracer', 'Pricetrail does not change it', 'set in Price Trail', 'PRICETRAIL alert']) assert.equal(en(bad), 1, bad);
+  for (const ok of ['Prices set outside PriceTrail', 'pricetrail · seller console']) assert.equal(en(ok), 0, ok);
+  assert.equal(de('außerhalb von repracer'), 1);
+  assert.equal(de('PriceTrail ändert den Preis nicht'), 0);
   for (const bad of ['den gesamten Mandanten', 'ein Mandanten-Stopp', 'Rechner des Marktplatzes', 'neue Einheiten', 'Kanaleinheiten im Abgleich', 'ein Artikel hier',
     'Ihr Verkäuferkonto ist da', 'dieses Händlerkonto ist verbunden', 'Öffnen Sie die Kanalverbindungen', 'im Kanal-Konto prüfen', 'Fehler des Stands.',
     'Standdaten werden geladen', 'Selbstkosten importieren', 'ohne Einstandskosten']) assert.equal(de(bad), 1, bad);

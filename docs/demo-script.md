@@ -60,7 +60,7 @@ $24.99, а тот же товар «в другом месте» — $19.99, и 
 публикации walmart.com — раз в 10 минут, заказ amazon.com — раз в 10 минут. Замер шага 87:
 первая резервация — на 2-й минуте после «Демо готово». Перезапуск команды — новый мир с нуля.
 
-В браузере: `http://127.0.0.1:5173` (не `localhost`) → экран входа уже по-английски (шаг 83: по центру знак **repracer** и строка
+В браузере: `http://127.0.0.1:5173` (не `localhost`) → экран входа уже по-английски (шаг 92: по центру знак PriceTrail — линия цены, удержанная в конце, — и строчное имя **pricetrail**, под ними строка
 «Repricing you can audit», под ними карточка входа; шаг 84 — роли строками: цветной кружок, имя роли и что роль может; шаг 88 —
 ровно три роли: **Owner** «everything, plus people, channel accounts and live writes», **Manager** «prices, bounds, strategies, stock,
 unit cost import, bulk operations, stop pricing», **Viewer** «read-only») → строка **Owner** (переключателя языка в шапке нет —
@@ -305,11 +305,11 @@ with reservations»** — список фильтруется сразу, над
 
 **Экран «Offers»** (меню Stock → Offers): «Total 36: on 36, …» — предложения трёх витрин одной таблицей. У двух предложений walmart.com
 в колонке **«Channel says»** — красная пилюля **«Unpublished (uncompetitive price)»** и под ней коротко: «Cheaper elsewhere: $19.99.
-Since Oct 7, 2026, 15:31 UTC−4; repracer does not change the price here.» Наведите курсор на ячейку — подсказка с полным объяснением:
+Since Oct 7, 2026, 15:31 UTC−4; PriceTrail does not change the price here.» Наведите курсор на ячейку — подсказка с полным объяснением:
 
 > «Walmart took this offer off walmart.com on Oct 7, 2026, 15:31 UTC−4: the same product is cheaper elsewhere ($19.99) — on another channel
 > or sold by Walmart itself — and shoppers on walmart.com no longer see it. Bring the walmart.com price close to that price and Walmart
-> publishes the offer again; repracer does not change the price for you here.»
+> publishes the offer again; PriceTrail does not change the price for you here.»
 
 Время — момент подготовки демо минус неделя: Walmart снял их в первом же опросе прожатой недели. На телефоне таблица Offers листается
 в своей рамке — колонка «Channel says» правее.
@@ -317,14 +317,14 @@ Since Oct 7, 2026, 15:31 UTC−4; repracer does not change the price here.» Н�
 Это **Wall clock, small · walmart.com** и **Yoga mat, small · walmart.com**: «Current price» у них $24.99.
 
 **Экран «Stop pricing»**, журнал **«Audit log: stops, roles and channel events»**: две строки «Offer unpublished: uncompetitive price» ·
-«Walmart» · подпись предложения · «The same product is cheaper elsewhere ($19.99) — on another channel or sold by Walmart itself. repracer
+«Walmart» · подпись предложения · «The same product is cheaper elsewhere ($19.99) — on another channel or sold by Walmart itself. PriceTrail
 does not change the price for you here.» — событие канала рядом с остановками и сменами ролей, со временем.
 
-Что сказать — паритет как причина пользоваться repracer, а не страшилка:
+Что сказать — паритет как причина пользоваться PriceTrail, а не страшилка:
 
 - у Walmart есть правило: если тот же товар заметно дешевле на другой площадке или у самого Walmart, листинг снимается с публикации.
   Продавец, который ведёт цены каждой площадки отдельно, узнаёт об этом, когда продажи walmart.com уже встали;
-- repracer видит все каналы сразу — одна таблица, одно состояние у предложения, одно событие в журнале со временем и причиной;
+- PriceTrail видит все каналы сразу — одна таблица, одно состояние у предложения, одно событие в журнале со временем и причиной;
 - что делать с ценой — решает продавец: движок снятие с публикации сам не чинит (шаг 89), автоматический ответ — отдельное решение;
 - честно: Walmart в демо — модель по правилам настоящего Walmart; ключей Walmart у нас пока нет, порог 10 % и цена «в другом месте» —
   параметры модели (W-10, W-11 в [docs/channels/walmart.md](channels/walmart.md)).

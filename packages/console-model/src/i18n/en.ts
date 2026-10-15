@@ -348,7 +348,7 @@ const gaps: Record<GapCode, { what: string; why: string }> = {
   CHANNEL_PRICING_OFFERS_WITHOUT_SCOPE: { what: 'Names of offers with the channel’s own repricer', why: 'An offer we do not reprice may be shown by your SKU only.' },
   PRICING_HEALTH_ISSUES: { what: 'Issue type reported by Amazon', why: 'Amazon names the issue type in its own words; it is shown as Amazon sent it.' },
   POSITION_STRATEGY: { what: 'Strategy “position in the ranking”', why: 'Not offered yet: it cannot be drafted or previewed.' },
-  OMNIBUS_OUTSIDE_PRICES: { what: 'Prices set outside repracer', why: 'The 30-day window is built from our price history. A price set in the channel back office or before the offer was connected is not in it — a window that starts before our first price is “not verifiable”, not “correct”.' },
+  OMNIBUS_OUTSIDE_PRICES: { what: 'Prices set outside PriceTrail', why: 'The 30-day window is built from our price history. A price set in the channel back office or before the offer was connected is not in it — a window that starts before our first price is “not verifiable”, not “correct”.' },
   OMNIBUS_TIME_ZONE_TO_VERIFY: { what: 'Storefront day boundary', why: 'Days are counted in the time zone of the storefront. For Kaufland de and at it is still being confirmed with Kaufland.' },
   DANGEROUS_THRESHOLD: { what: 'Why “dangerous”', why: 'A change stopped by the Price Gate that is more than 10% beyond the bound it broke. Smaller ones are “corrected”.' },
 };
@@ -381,7 +381,9 @@ export const en = {
       unknownReason: (code: string) => `Unknown reason ${code}`,
     },
     app: {
-      title: 'repracer · seller console',
+      /** Шаг 92 [Р-216]: знак и строчное имя «pricetrail» в шапке; вкладка — имя в прозе (documentTitle) */
+      title: 'pricetrail · seller console',
+      documentTitle: 'PriceTrail · seller console',
       stand: 'test environment, synthetic data',
       // Шаг 64 (проход консоли): имя и описание демо-мира на языке интерфейса, а не строкой посева по-немецки
       demoWorldTitle: 'Demo store (simulator)', demoWorldDescription: 'Synthetic store on the channel simulator: every offer has three competitors — one drifting, one undercutting, one in price waves.',
@@ -421,7 +423,7 @@ export const en = {
         jobs: 'Bulk operations of this workspace: progress, result and files to download.',
         stop: 'Stop price changes of the whole workspace, a channel account or a storefront — and see who stopped what.',
       },
-      brand: 'repracer',
+      brand: 'pricetrail',
       screens: { connections: 'Channel accounts', onboarding: 'Setup', shadow: 'Shadow mode', stock: 'Stock', products: 'Offers', decisions: 'Why this price', rejected: 'Stopped changes', bounds: 'Bounds', 'cost-import': 'Unit cost import', stop: 'Stop pricing', strategies: 'Strategies', feed: 'Price changes', dangerous: 'Dangerous changes', compliance: 'Omnibus', jobs: 'Bulk operations' },
       loading: (seconds: number) => `Loading… If there is no answer within ${seconds} s, an error is shown.`,
       timeout: (seconds: number) => `The service did not answer within ${seconds} s. Try again in a minute.`,
@@ -551,8 +553,8 @@ export const en = {
       /** Шаг 89: Walmart снял предложение с публикации — правило неконкурентной цены; движок за это цену не меняет */
       unpublished: 'Unpublished (uncompetitive price)',
       /** Шаг 89: строка таблицы — коротко; полное объяснение — подсказкой и в журнале */
-      unpublishedShort: (when: string, elsewhere: string | null) => `${elsewhere ? `Cheaper elsewhere: ${elsewhere}.` : 'Cheaper elsewhere.'} Since ${when}; repracer does not change the price here.`,
-      unpublishedDetail: (when: string, elsewhere: string | null) => `Walmart took this offer off walmart.com on ${when}: the same product is cheaper elsewhere${elsewhere ? ` (${elsewhere})` : ''} — on another channel or sold by Walmart itself — and shoppers on walmart.com no longer see it. Bring the walmart.com price close to that price and Walmart publishes the offer again; repracer does not change the price for you here.`,
+      unpublishedShort: (when: string, elsewhere: string | null) => `${elsewhere ? `Cheaper elsewhere: ${elsewhere}.` : 'Cheaper elsewhere.'} Since ${when}; PriceTrail does not change the price here.`,
+      unpublishedDetail: (when: string, elsewhere: string | null) => `Walmart took this offer off walmart.com on ${when}: the same product is cheaper elsewhere${elsewhere ? ` (${elsewhere})` : ''} — on another channel or sold by Walmart itself — and shoppers on walmart.com no longer see it. Bring the walmart.com price close to that price and Walmart publishes the offer again; PriceTrail does not change the price for you here.`,
     },
     applying: {
       idle: 'Nothing in progress', idleDetail: 'Every decided price reached the channel or ended with a reason',
@@ -758,13 +760,13 @@ export const en = {
      * дальше продавец идёт своим онбордингом [Р-149] — поэтому письмо говорит, что будет дальше, а не «добро пожаловать».
      */
     invitation: {
-      subject: (tenant: string) => `repracer: you are invited as the owner of ${tenant}`,
-      intro: (tenant: string) => `Your workspace "${tenant}" has been created in repracer.`,
+      subject: (tenant: string) => `PriceTrail: you are invited as the owner of ${tenant}`,
+      intro: (tenant: string) => `Your workspace "${tenant}" has been created in PriceTrail.`,
       roleLine: 'You are invited as the OWNER: you decide who else gets access and what the engine is allowed to do.',
       acceptLine: (url: string) => `Accept the invitation: ${url}`,
       expiresLine: (when: string) => `The invitation is valid until ${when}. After that ask us for a new one.`,
       nextLine: 'After accepting you are guided step by step: channel, unit cost, bounds, strategy, switching the engine on. Nothing changes prices until you switch it on yourself.',
-      signature: 'repracer',
+      signature: 'PriceTrail',
     },
     /**
      * Шаг 41 [Р-169…Р-171]: теневой режим. Тексты написаны для продавца, который каналу пока не верит: они говорят, что
@@ -875,12 +877,12 @@ export const en = {
         denied: 'You declined on the page of the channel. Nothing was connected.',
         exchange: 'The channel did not confirm the consent. Nothing was connected; start again.',
         identityUnknown: 'eBay does not tell us which seller signed in, so a second eBay connection could be the same seller twice. Reconnecting eBay becomes possible once we can identify the seller.',
-        sellerTaken: 'This channel account is already connected — in another repracer workspace or as another channel account. Nothing was connected; contact support if this is unexpected.',
+        sellerTaken: 'This channel account is already connected — in another PriceTrail workspace or as another channel account. Nothing was connected; contact support if this is unexpected.',
         mfa: 'Renewing the access of an existing connection needs your second factor. Sign in again with it and repeat.',
         connected: (reconnected: boolean): string => reconnected ? 'Access renewed. The account works as before.' : 'Connected. The account starts in the shadow; your offers appear within minutes.',
         // Шаг 60 [Р-202]: ответ о других инструментах и подтверждение записи количества — каждый исход своим текстом
         badAnswer: 'Choose one of the answers.',
-        accountNotFound: 'This channel account is not connected in this repracer workspace.',
+        accountNotFound: 'This channel account is not connected in this PriceTrail workspace.',
         answerConflictConfirmed: 'Stock writes to this channel are already confirmed by the owner: with another tool updating stock here, the two would overwrite each other. This answer is not accepted.',
         notOwner: 'Only the owner confirms or revokes stock writes to a channel.',
         alreadyConfirmed: 'Stock writes to this channel are already confirmed.',
@@ -975,7 +977,7 @@ export const en = {
         blocksLive: (list: string) => `Live writes stay closed: we do not know ${list}. The shadow keeps working, and you keep seeing what the engine would do.`,
       },
       digest: {
-        subject: (tenant: string) => `repracer: what the engine would have done this week (${tenant})`,
+        subject: (tenant: string) => `PriceTrail: what the engine would have done this week (${tenant})`,
         intro: (tenant: string, accounts: number, zone: string) => `Your workspace "${tenant}" runs ${accounts} channel ${accounts === 1 ? 'account' : 'accounts'} in shadow mode: the engine works completely and writes nothing to the channel. Here is what it would have done last week (Monday to Sunday, ${zone}). The Shadow mode screen counts the last seven days up to now, so its numbers differ from this email.`,
         cta: 'If these numbers look right, switch live writes on for the channel in the console — Shadow mode screen. Only you as the owner can do it, and it needs your second factor.',
         previewIntro: (tenant: string, accounts: number) => `Your workspace "${tenant}" runs ${accounts} channel ${accounts === 1 ? 'account' : 'accounts'} in shadow mode: the engine works completely and writes nothing to the channel. Here is what it would have done in the last seven days.`,
@@ -1001,14 +1003,14 @@ export const en = {
       },
     },
     alerts: {
-      subject: (severity: string, what: string, tenant: string) => `repracer ${severity}: ${what} (${tenant})`,
+      subject: (severity: string, what: string, tenant: string) => `PriceTrail ${severity}: ${what} (${tenant})`,
       severity: { CRITICAL: 'urgent', WARNING: 'attention' },
       tenantLine: (tenant: string) => `Workspace: ${tenant}`,
       channelLine: (channel: string, marketplaces: string) => `Channel: ${channel} (${marketplaces})`,
       whenLine: (when: string) => `Happened: ${when}`,
       codeLine: (code: string) => `Event code: ${code} (name it when you ask us about the event)`,
       firstStepLine: (step: string) => `First step: ${step}`,
-      digestSubject: (count: number, tenant: string) => `repracer: ${count} events of the last hour (${tenant})`,
+      digestSubject: (count: number, tenant: string) => `PriceTrail: ${count} events of the last hour (${tenant})`,
       digestIntro: (count: number) => `${count} events that do not need an immediate reaction happened in the last hour:`,
       digestRow: (code: string, what: string, count: number, when: string) => `- ${what} (${code}) — ${count} times, last at ${when}`,
       digestFirstStep: 'First step: open the console and check the offers of the channels named above.',
@@ -1455,7 +1457,7 @@ export const en = {
         NO_PRICE_HISTORY: (_since: string) => 'No price of ours for this offer before the discount starts.',
         TIME_ZONE_UNKNOWN: (_since: string) => 'The storefront time zone is not set: storefront days cannot be counted.',
         WINDOW_OPEN: (_since: string) => 'The discount starts later: prices until its start are not known yet — check again when it starts.',
-        EXTERNAL_CHANGES: (_since: string) => 'Prices set outside repracer were noticed in the window: they are included, the check is not reliable.',
+        EXTERNAL_CHANGES: (_since: string) => 'Prices set outside PriceTrail were noticed in the window: they are included, the check is not reliable.',
       },
       window: (from: string, to: string, tz: string) => `Window ${from} – ${to} (${tz})`,
       windowUnknown: 'Window unknown',
@@ -1478,17 +1480,17 @@ export const en = {
         incomplete: {
           INCOMPLETE_HISTORY: (days: number, needed: number) => `The check is incomplete: the window needs ${needed} days, we see ${days}.`,
           NO_PRICE_HISTORY: (_days: number, _needed: number) => 'The check is incomplete: we know no price of this offer.',
-          EXTERNAL_CHANGES: (_days: number, _needed: number) => 'The check is incomplete: prices were set outside repracer in the window.',
+          EXTERNAL_CHANGES: (_days: number, _needed: number) => 'The check is incomplete: prices were set outside PriceTrail in the window.',
           WINDOW_OPEN: (_days: number, _needed: number) => 'The check is incomplete: the discount starts later, prices until then are not known yet.',
           TIME_ZONE_UNKNOWN: (_days: number, _needed: number) => 'The check is incomplete: the storefront day boundary is not set.',
         },
-        external: (n: number) => `${n} ${n === 1 ? 'price change' : 'price changes'} made outside repracer noticed in the window — included in the lowest price.`,
+        external: (n: number) => `${n} ${n === 1 ? 'price change' : 'price changes'} made outside PriceTrail noticed in the window — included in the lowest price.`,
         limit: 'Prices set in the channel back office or by another tool that our reconciliation did not notice are not visible.',
         columns: { offer: 'Offer', seen: 'History we see', reliability: 'Check' },
       },
       cannotCheckTitle: 'What this module cannot check',
       cannotCheck: [
-        'Prices set outside repracer (in the channel back office, by another tool) before the offer was connected: the history starts with our first price.',
+        'Prices set outside PriceTrail (in the channel back office, by another tool) before the offer was connected: the history starts with our first price.',
         'Discounts shown by the channel itself (strike-through prices, coupons, Lightning Deals) that were not announced here.',
         'Storefronts without a confirmed time zone (amazon.com, eBay US): storefront days cannot be counted.',
         'Whether the channel actually displayed the stated prior price: the channel does not return the displayed reference price.',
@@ -1529,7 +1531,7 @@ export const en = {
       auditEmpty: 'No stops, role changes or channel events yet. Every stop, resume and role change is listed here with its author, and every offer a channel took off sale with the reason.',
       auditActions: { 'pricing.stop_created': 'Pricing stopped', 'pricing.stop_released': 'Pricing resumed', 'pricing.halt_created': 'Storefront halted by the system', 'pricing.halt_released': 'Storefront halt released', 'pricing.distrust_created': 'Channel distrusted by the system — all prices held', 'pricing.distrust_released': 'Distrust of the channel released', 'membership.role_changed': 'Role changed', 'channel.offer_unpublished': 'Offer unpublished: uncompetitive price' },
       /** Шаг 89: почему канал снял предложение — словами и с ценой «в другом месте», если канал её назвал */
-      offerUnpublishedDetail: (elsewhere: string | null) => `The same product is cheaper elsewhere${elsewhere ? ` (${elsewhere})` : ''} — on another channel or sold by Walmart itself. repracer does not change the price for you here.`,
+      offerUnpublishedDetail: (elsewhere: string | null) => `The same product is cheaper elsewhere${elsewhere ? ` (${elsewhere})` : ''} — on another channel or sold by Walmart itself. PriceTrail does not change the price for you here.`,
       /** Шаг 88 [Р-213]: чья роль и как сменилась — прежняя и новая роль; в памяти стенда адреса участника нет */
       roleChanged: (member: string | null, from: string, to: string) => (member ? `${member}: ${from} → ${to}` : `${from} → ${to}`),
       system: 'System',

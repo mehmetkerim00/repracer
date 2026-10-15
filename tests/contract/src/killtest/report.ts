@@ -120,6 +120,12 @@ const clientSafe = (text: string): string => CLIENT_SAFE.reduce((t, [re, to]) =>
  * Утечки внутреннего в тексте отчёта: коды, идентификаторы, наши номера решений и вопросов, синтетика мира прогона, внешние ресурсы.
  * Проверяется отрисовка, где строки клиента уже заменены заглушкой (`renderReport(d, { client: () => … })`), — исключений здесь нет
  */
+/**
+ * Шаг 92 [Р-216]: знак PriceTrail в отчёте — тот же «held trail», что у консоли, в светлом контексте. Без `xmlns`: внутри HTML он не нужен,
+ * а адрес пространства имён проверка утечек приняла бы за внешний ресурс
+ */
+const BRAND_MARK = '<svg width="24" height="24" viewBox="0 0 64 64" aria-hidden="true"><path d="M8 44 L24 26 L36 34 L52 34" fill="none" stroke="#1f2328" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="8" cy="44" r="4.5" fill="#1f2328"/><circle cx="24" cy="26" r="4.5" fill="#1f2328"/><circle cx="52" cy="34" r="7" fill="#1a7f37"/></svg>';
+
 export function internalLeaks(html: string): string[] {
   const text = html.replace(/<style>[\s\S]*?<\/style>/g, '');
   // Шаг 75 (ревью шага 71, находка 9): внешний ресурс прячется и в стиле — отчёт обязан быть одним файлом; все блоки стилей и атрибуты
@@ -435,12 +441,12 @@ export function renderReport(d: ReportData, options: { client?: (s: string) => s
     </section>` : '';
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Repricing decisions for your catalog</title>
+<title>PriceTrail · Repricing decisions for your catalog</title>
 <style>
 :root{--ink:#1d2733;--muted:#5d6b7a;--line:#dde3ea;--bg:#f6f8fa;--accent:#1f6feb;--floor:#8a5a00;--floorbg:#fff4d6}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
 main{max-width:960px;margin:0 auto;padding:24px 16px 48px}h1{font-size:26px;margin:0 0 4px}h2{font-size:19px;margin:32px 0 10px}h3{font-size:16px;margin:0}h4{font-size:14px;margin:14px 0 4px}
-.muted{color:var(--muted);font-size:13px}.lead{font-size:16px}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:18px 0}
+.brand{display:flex;align-items:center;gap:8px;font-weight:600;font-size:15px;margin:0 0 14px}.brand svg{flex:none}.muted{color:var(--muted);font-size:13px}.lead{font-size:16px}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:18px 0}
 .card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px}.card .value{font-size:24px;font-weight:600}.card .label{color:var(--muted);font-size:13px}
 section{background:#fff;border:1px solid var(--line);border-radius:8px;padding:4px 18px 14px;margin-top:16px}section h2{margin-top:14px}
 .decision{background:#fff;border:1px solid var(--line);border-radius:8px;padding:14px 16px;margin:10px 0}.decision header{display:flex;gap:12px;align-items:flex-start}
@@ -454,9 +460,10 @@ section.highlight{border-color:#e3b341;background:#fffbea}td.loss{color:#b42318;
 @media (max-width:600px){.checks{columns:1}.prices{gap:10px}}
 </style></head>
 <body><main>
+<div class="brand">${BRAND_MARK}<span>pricetrail</span></div>
 <h1>Repricing decisions for your catalog</h1>
 <div class="muted">Shadow run on ${STOREFRONT} · ${e(d.generatedAt)} · ${d.hours} simulated hours · file: ${cl(d.fileName)} (${e(d.format)})</div>
-<p class="lead">We ran your catalog through our repricing engine in <strong>shadow mode</strong>: each decision went through the same checks as in live mode, and ${c.sentToAmazon} changes were sent to Amazon. Each decision below comes with the reason for its price.</p>
+<p class="lead">We ran your catalog through the PriceTrail repricing engine in <strong>shadow mode</strong>: each decision went through the same checks as in live mode, and ${c.sentToAmazon} changes were sent to Amazon. Each decision below comes with the reason for its price.</p>
 <div class="notice"><strong>What is real and what is simulated.</strong> Your ${fromFile.slice(0, -1).join(', ')} and ${fromFile.at(-1)} come from your file. Simulated or assumed: your competitors (we cannot see them until you connect your Amazon account), your minimum and maximum prices, the Amazon referral fee and the minimum margin — see “How this run was set up”. The numbers about the floor describe this simulation, not your market.</div>
 <div class="cards">
 ${card(c.rows, 'rows in your file')}${card(c.inEngine, 'priced by the engine')}${d.belowFloor.length > 0 ? card(d.belowFloor.length, 'priced below your margin floor') : ''}${card(c.decisions, 'decisions')}${card(c.changes, 'would change the price')}${card(c.floorHeld, 'landed on the floor (simulation)')}${card(c.sentToAmazon, 'changes sent to Amazon')}
