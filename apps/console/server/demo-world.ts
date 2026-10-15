@@ -211,12 +211,14 @@ export const DEMO_US_OFFERS = 12;
  * Шаг 64: аккаунты США демо-тенанта — путём продукта, а не посевом цен: аккаунт (в тени по умолчанию, Р-170), затем каталог функцией
  * обнаружения (`record_discovered_offers`). Строки — синтетические: номера листингов и SKU с приставкой SYN-DEMO-US
  */
-async function addUsAccounts(pools: DemoWorldPools, seeded: { tenantId: string; userId: string; ownerMembershipId: string },
+export async function addUsAccounts(pools: DemoWorldPools, seeded: { tenantId: string; userId: string; ownerMembershipId: string },
   store: { recordDiscoveredOffers(tenantId: string, channelAccountId: string, offers: never[]): Promise<number> },
   /** Шаг 87: аккаунт amazon.com уже заведён посевом американского демо — заводится только eBay */
   existingAmazon: string | null = null,
   /** Шаг 89: американское демо — и walmart.com (на симуляторе) */
-  withWalmart = false):
+  withWalmart = false,
+  /** Шаг 91: сколько предложений у каждого аккаунта — у лёгких продавцов вида преп-центра меньше */
+  offers = DEMO_US_OFFERS):
   Promise<{ ebay: string; amazon: string; walmart: string | null; accounts: Array<{ channelAccountId: string; channel: string; marketplaces: string[]; haltRelease: 'SAMPLE' | 'MANUAL_ONLY' }> }> {
   const { randomUUID } = await import('node:crypto');
   const { inTenant } = await import('@repracer/pricing-store-pg');
@@ -238,17 +240,17 @@ async function addUsAccounts(pools: DemoWorldPools, seeded: { tenantId: string; 
     }
   }, seeded.userId);
   const n = (i: number) => String(i + 1).padStart(2, '0');
-  await store.recordDiscoveredOffers(seeded.tenantId, ebay, Array.from({ length: DEMO_US_OFFERS }, (_, i) => ({
+  await store.recordDiscoveredOffers(seeded.tenantId, ebay, Array.from({ length: offers }, (_, i) => ({
     marketplace: 'EBAY_US', externalSku: `SYN-DEMO-US-EBAY-${n(i)}`, externalUnitId: null, externalOfferId: `9640${n(i)}0000`, channelProductRef: null,
     gtin: null, condition: 'new', fulfillment: 'MERCHANT', externalListingId: `16400000${n(i)}00`, listingFormat: 'FIXED_PRICE', writable: true,
   })) as never[]);
-  await store.recordDiscoveredOffers(seeded.tenantId, amazon, Array.from({ length: DEMO_US_OFFERS }, (_, i) => ({
+  await store.recordDiscoveredOffers(seeded.tenantId, amazon, Array.from({ length: offers }, (_, i) => ({
     marketplace: 'ATVPDKIKX0DER', externalSku: `SYN-DEMO-US-AMZ-${n(i)}`, externalUnitId: null, externalOfferId: null, channelProductRef: `B0DEMOUS${n(i)}`,
     gtin: null, condition: 'new', fulfillment: 'MERCHANT',
   })) as never[]);
   // Шаг 89: walmart.com — 12 предложений; ссылка на товар у Walmart — SKU продавца (опрос Buy Box спрашивает по нему, W-05)
   if (walmart) {
-    await store.recordDiscoveredOffers(seeded.tenantId, walmart, Array.from({ length: DEMO_US_OFFERS }, (_, i) => ({
+    await store.recordDiscoveredOffers(seeded.tenantId, walmart, Array.from({ length: offers }, (_, i) => ({
       marketplace: 'WALMART_US', externalSku: `SYN-DEMO-US-WMT-${n(i)}`, externalUnitId: null, externalOfferId: null, channelProductRef: `SYN-DEMO-US-WMT-${n(i)}`,
       gtin: null, condition: 'new', fulfillment: 'MERCHANT',
     })) as never[]);
@@ -264,7 +266,7 @@ async function addUsAccounts(pools: DemoWorldPools, seeded: { tenantId: string; 
 }
 
 /** Путь решения демо-мира по каналу аккаунта вызова: Kaufland — путь симулятора, остальные каналы — путь со своим описанием */
-function channelPipeline(kaufland: object | null, accounts: ReadonlyArray<{ channelAccountId: string; channel: string }>, store: object, now: () => string): object {
+export function channelPipeline(kaufland: object | null, accounts: ReadonlyArray<{ channelAccountId: string; channel: string }>, store: object, now: () => string): object {
   const others = new Map<string, object>();
   const pipelineOf = async (channel: string): Promise<object> => {
     if (channel === 'KAUFLAND' && kaufland) return kaufland;

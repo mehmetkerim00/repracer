@@ -102,7 +102,11 @@ interface UsScope { writeScopeId: string; productId: string; channelAccountId: s
  * что это массовая правка (окно Р-135: больше пяти предложений за десять минут): в демо её «сделал» владелец со вторым фактором.
  * `validFrom` — до начала прожатой недели: себестоимость действует на момент каждого решения [Р-131]
  */
-async function configure(admin: PgPool, a: DemoUsAccounts, validFrom: string): Promise<UsScope[]> {
+/** Шаг 91: с какого номера синтетического названия товара (`demoTitle`) начинаются предложения каждого канала — у лёгких продавцов свои */
+export interface DemoTitleOffsets { ebay: number; amazon: number; walmart: number }
+const DEMO_TITLE_OFFSETS: DemoTitleOffsets = { ebay: 20, amazon: 40, walmart: 60 };
+
+async function configure(admin: PgPool, a: DemoUsAccounts, validFrom: string, titles: DemoTitleOffsets = DEMO_TITLE_OFFSETS): Promise<UsScope[]> {
   const { demoTitle } = await import('@repracer/contract-tests/live');
   return inTenant(admin, a.tenantId, async (tx) => {
     const { rows } = await tx.query(
@@ -157,7 +161,7 @@ async function configure(admin: PgPool, a: DemoUsAccounts, validFrom: string): P
         `INSERT INTO tenant_data.guardrail (tenant_id, scope_type, write_scope_id, min_margin_bp, on_violation, version, created_by_membership_id)
          VALUES ($1, 'WRITE_SCOPE', $2, 1200, 'HOLD', 1, $3)`, [a.tenantId, s.writeScopeId, a.ownerMembershipId]);
       // Шаг 68 (K10): название товара — синтетическое, как у Kaufland демо; обнаружение каталога названий не пишет
-      await tx.query(`UPDATE tenant_data.product SET title = $3 WHERE tenant_id = $1 AND product_id = $2`, [a.tenantId, s.productId, demoTitle(ebay ? 20 + k : walmart ? 60 + k : 40 + k)]);
+      await tx.query(`UPDATE tenant_data.product SET title = $3 WHERE tenant_id = $1 AND product_id = $2`, [a.tenantId, s.productId, demoTitle(ebay ? titles.ebay + k : walmart ? titles.walmart + k : titles.amazon + k)]);
       // Нынешняя цена на витрине — как прочитало бы обнаружение: $19.99 у eBay, $18.50 у amazon.com, у walmart.com — цена модели канала
       await tx.query(
         `INSERT INTO channel_data.observed_channel_state (tenant_id, write_scope_id, field, observed_amount_minor, observed_at, received_at, source, sync_status)
@@ -179,6 +183,8 @@ export async function startDemoUsMarket(input: {
   log: (message: string) => void;
   /** Шаг 87: спрос amazon.com — конвейер остатков и SKU предложений amazon.com; без него заказов нет (демо рядом с Kaufland) */
   orders?: { pipeline: StockPipeline; skus: readonly string[] };
+  /** Шаг 91: названия товаров лёгкого продавца — свой диапазон, чтобы его товары не повторяли товары главного демо */
+  titleOffsets?: DemoTitleOffsets;
 }): Promise<DemoUsMarket> {
   const { pools, store, accounts: a, log } = input;
   const { SimulatedAmazonPort, AMAZON_SIM_DESCRIPTOR_US, AMAZON_US } = await import('@repracer/contract-tests/simulator');
@@ -194,7 +200,7 @@ export async function startDemoUsMarket(input: {
       await pools.scheduler.query('SELECT maintenance.ensure_partitions($1::timestamptz)', [new Date(realStart - d * DAY_MS).toISOString()]);
     }
   }
-  const scopes = await configure(pools.admin, a, new Date(begin - DAY_MS).toISOString());
+  const scopes = await configure(pools.admin, a, new Date(begin - DAY_MS).toISOString(), input.titleOffsets);
   const amazonScopes = scopes.filter((s) => s.channelAccountId === a.amazonAccountId);
   const walmartScopes = scopes.filter((s) => s.channelAccountId === a.walmartAccountId);
 

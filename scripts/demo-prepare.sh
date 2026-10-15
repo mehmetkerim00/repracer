@@ -11,6 +11,9 @@
 #      (`REPRACER_DEMO_PRESS_DAYS`, по умолчанию 7): недельное письмо тени показуемо сразу, а не через неделю;
 #    - шаг 69 (K1, K4): демо-тенант по-английски и в поясе клиента из США (`REPRACER_DEMO_LOCALE`, по умолчанию en;
 #      `REPRACER_DEMO_TIME_ZONE`, по умолчанию America/Los_Angeles) — язык и пояс принадлежат тенанту, а не браузеру;
+#    - шаг 91 (вид преп-центра): в профиле us рядом с главным демо — два лёгких продавца («Blue Ridge Trading», «Lakeside Home Goods»),
+#      владелец стенда — менеджер у одного и наблюдатель у другого (`REPRACER_DEMO_SELLERS`, в us по умолчанию on); их неделя тени прожата
+#      так же, предложений меньше — подготовка растёт на секунды;
 #   3. интерфейс консоли (vite) на 127.0.0.1:5173, API стенда — на 127.0.0.1:4318;
 #   4. ждёт, пока демо-мир примет первые решения, и печатает, куда идти.
 #
@@ -81,6 +84,7 @@ trap cleanup EXIT INT TERM
 echo "== стенд с демо-тенантом (профиль ${MARKET}, тень, витрины США) на 127.0.0.1:${STAND_PORT}"
 STAND_IDENTITY=simulator REPRACER_PG_URL="postgres://svc_app@${PGHOST}:${PGPORT}/${DB}" REPRACER_MARKET_PROFILE="${MARKET}" \
   REPRACER_DEMO=on REPRACER_DEMO_ONLY=on REPRACER_DEMO_SHADOW=on REPRACER_DEMO_US=on REPRACER_DEMO_PRESS_DAYS="${REPRACER_DEMO_PRESS_DAYS:-7}" \
+  REPRACER_DEMO_SELLERS="${REPRACER_DEMO_SELLERS:-$([ "${MARKET}" = us ] && echo on || echo off)}" \
   REPRACER_DEMO_LOCALE="${REPRACER_DEMO_LOCALE:-en}" REPRACER_DEMO_TIME_ZONE="${REPRACER_DEMO_TIME_ZONE:-${DEMO_TZ_DEFAULT}}" \
   REPRACER_CONSOLE_LOCALE="${REPRACER_DEMO_LOCALE:-en}" REPRACER_STAND_TOKEN_SECONDS="${REPRACER_STAND_TOKEN_SECONDS:-43200}" \
   npm run stand -w @repracer/console > "${LOGS}/stand.log" 2>&1 &
@@ -115,14 +119,16 @@ for _ in $(seq 1 120); do
   sleep 5
 done
 t_first=$((SECONDS - mark)); mark=${SECONDS}
-# Прожатие недели США стенд печатает сам («demo US week pressed: … N s»)
-pressed=$(grep -o 'demo US week pressed: .*' "${LOGS}/stand.log" | grep -oE '[0-9.]+ s$' || true)
+# Прожатие недели США стенд печатает сам («demo US week pressed: … N s»); у лёгких продавцов строка начинается с их имени (шаг 91)
+pressed=$(grep '^demo US week pressed: ' "${LOGS}/stand.log" | grep -oE '[0-9.]+ s$' || true)
+sellers=$(grep -o 'demo sellers ready: .*' "${LOGS}/stand.log" | grep -oE '[0-9.]+ s$' || true)
 
 cat << EOF
 
-Демо готово: http://127.0.0.1:5173 — профиль ${MARKET}, подготовка ${SECONDS} с: база ${t_db} с, стенд ${t_stand} с (из них неделя США ${pressed:-?}), интерфейс ${t_ui} с, первые решения ${t_first} с
+Демо готово: http://127.0.0.1:5173 — профиль ${MARKET}, подготовка ${SECONDS} с: база ${t_db} с, стенд ${t_stand} с (из них неделя США ${pressed:-?}${sellers:+, лёгкие продавцы ${sellers}}), интерфейс ${t_ui} с, первые решения ${t_first} с
   - вход: «Owner» (владелец); в профиле us язык один — английский, переключателя нет;
-  - мир: «Demo» с пометкой DEMO; сценарий показа — docs/demo-script.md;
+  - мир: «Demo» с пометкой DEMO; сценарий показа — docs/demo-script.md;${sellers:+
+  - вид преп-центра: «Your workspaces» — три продавца (Owner, Manager у «Blue Ridge Trading», Viewer у «Lakeside Home Goods»);}
   - неделя тени США (amazon.com, ebay.com, walmart.com, доллары) прожата; недельное письмо — экран «Shadow mode», блок «Weekly email — preview».
 Доказательство тени из базы (шаг «а» сценария) — записи демо-тенанта: удержано тенью и отправлено в канал:
   psql -d ${DB} -c "SELECT final_status, count(*) AS writes, count(dispatched_at) AS sent_to_channel FROM tenant_data.channel_write_history WHERE tenant_id IN ${DEMO_TENANT} GROUP BY 1"

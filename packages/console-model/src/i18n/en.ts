@@ -387,6 +387,8 @@ export const en = {
       demoWorldTitle: 'Demo store (simulator)', demoWorldDescription: 'Synthetic store on the channel simulator: every offer has three competitors — one drifting, one undercutting, one in price waves.',
       /** Шаг 87 [Р-214]: демо профиля us — американский продавец */
       demoWorldDescriptionUs: 'Synthetic American seller on the channel simulator: offers on amazon.com, ebay.com and walmart.com, a warehouse in Newark, Delaware.',
+      /** Шаг 91 (вид преп-центра): лёгкий продавец рядом с главным демо — у него своё имя, описание общее */
+      demoSellerDescription: 'Synthetic American seller on the channel simulator: offers on amazon.com and ebay.com, in shadow mode.',
       demoBadge: 'Demo', demoBanner: 'Demo workspace: synthetic data, real path. Every amount is made up.',
       languages: { de: 'Deutsch', en: 'English' },
       worlds: 'Your workspaces',

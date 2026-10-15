@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import type { ConnectionsView, ShadowView, StopView } from '@repracer/console-model';
-import { pgStandJoinMember, pgStandUsers, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_EMAILS, STAND_ISSUER } from '@repracer/contract-tests/stand';
+import { messagesFor, type ConnectionsView, type ShadowView, type StopView } from '@repracer/console-model';
+import { pgStandJoinAs, pgStandJoinMember, pgStandUsers, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_EMAILS, STAND_ISSUER } from '@repracer/contract-tests/stand';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
 import { PgIdentityDirectory } from '@repracer/identity/pg';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
@@ -12,6 +12,7 @@ import type { SessionView, StandToken, WorldSummary } from '../src/api-types.ts'
 import { createIsolatedDatabase, type IsolatedDatabase } from '../../../packages/pricing-store-pg/test/isolated-db.ts';
 import { readOnlyConnections } from '../server/connect.ts';
 import { startDemoWorld, type RunningDemoWorld } from '../server/demo-world.ts';
+import { startDemoSellers, type RunningDemoSellers } from '../server/demo-sellers.ts';
 import { createStandApi, createStandServer } from '../server/stand-server.ts';
 
 /**
@@ -28,6 +29,7 @@ import { createStandApi, createStandServer } from '../server/stand-server.ts';
 
 let db: IsolatedDatabase;
 let demo: RunningDemoWorld;
+let sellers: RunningDemoSellers;
 let server: Server;
 let origin = '';
 let worldId = '';
@@ -62,8 +64,23 @@ before(async () => {
     joinMember: pgStandJoinMember(admin, directory), log: () => undefined,
   });
   worldId = demo.world.id;
+  /**
+   * Шаг 91 (вид преп-центра): тот же посев, что у стенда показа (`REPRACER_DEMO_SELLERS=on`), — два лёгких продавца; владелец стенда
+   * менеджер у одного и наблюдатель у другого
+   */
+  const owner = STAND_ACCOUNTS.find((a) => a.role === 'OWNER')!;
+  sellers = await startDemoSellers({
+    pools: {
+      app: db.pool('svc_app', 4), admin, provisioning: db.pool('svc_provisioning', 1), dispatcher: db.pool('svc_dispatcher', 1),
+      scheduler: db.pool('svc_scheduler', 2), exporter: db.pool('svc_exporter', 1), stock: db.pool('svc_stock', 1), bulkWorker: db.pool('svc_bulk_worker', 1),
+    },
+    pgUrl: db.url('svc_app'), pgUrlsByRole: { admin: db.url('svc_admin'), bulk_worker: db.url('svc_bulk_worker'), stock: db.url('svc_stock') },
+    tag: 3891, standOwnerUserId: memberUsers[owner.membershipAlias]!, standOwnerEmail: owner.email,
+    // Прогон — двое суток тени: живые показатели карточек есть и так, а прогон короче
+    joinAs: pgStandJoinAs(admin, directory, owner.membershipAlias), pressDays: 2, locale: 'en', log: () => undefined,
+  });
   const issuer = createTestIssuer({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE });
-  const handle = createStandApi([demo.world], {
+  const handle = createStandApi([demo.world, ...sellers.worlds], {
     authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory }),
     simulator: { token: (a: (typeof STAND_ACCOUNTS)[number]) => issuer.token(a.subject, { email: a.email, amr: ['pwd', 'otp'] }), expiresInSeconds: 3600 },
   }, { connect: () => readOnlyConnections(new PgChannelConnectStore(admin)), market: 'us' });
@@ -74,6 +91,7 @@ before(async () => {
 
 after(async () => {
   demo?.stop();
+  sellers?.stop();
   server?.close();
   await db?.drop();
 });
@@ -138,6 +156,54 @@ test('step 88 (Р-213): the viewer changes nothing', async () => {
   assert.equal((await call('POST', api('bounds', 'plan'), viewer, { request: { all: true, min: { mode: 'SET', amountMinor: 100 } } })).status, 403);
   const account = (await call<ShadowView>('GET', api('shadow'), viewer)).body.accounts[0]!.channelAccountId;
   assert.equal((await call('POST', api('shadow', 'mode'), viewer, { channelAccountId: account, toMode: 'SHADOW' })).status, 403);
+});
+
+/**
+ * Шаг 91 (вид преп-центра): на вопрос «как я увижу своих продавцов?» отвечает экран — «Your workspaces» владельца стенда показывает
+ * три пространства с тремя ролями, у лёгких продавцов — живые показатели и свои имена; пометка демо остаётся [Р-151]
+ */
+test('step 91: the stand owner sees three workspaces with three roles — Owner, Manager, Viewer — and live figures on each seller card', async () => {
+  const owner = await signIn('OWNER');
+  const worlds = (await call<WorldSummary[]>('GET', '/api/worlds', owner)).body;
+  assert.deepEqual(worlds.map((w) => [w.title, w.role]), [['Demo store (simulator)', 'Owner'], ['Blue Ridge Trading', 'Manager'], ['Lakeside Home Goods', 'Viewer']]);
+  for (const w of worlds.slice(1)) {
+    assert.equal(w.demo, true, 'Р-151: a light seller is synthetic and marked as demo');
+    assert.equal(w.description, messagesFor('en').ui.app.demoSellerDescription);
+    assert.equal(w.landing, 'shadow');
+    assert.ok(w.scopes > 0 && w.decisionsLastDay > 0 && w.interventionsLastWeek > 0, `live figures on the card: ${JSON.stringify(w)}`);
+  }
+  // У одного человека в пространстве одна роль [Р-213]: у менеджера стенда своих лёгких продавцов нет
+  assert.deepEqual((await call<WorldSummary[]>('GET', '/api/worlds', await signIn('MANAGER'))).body.map((w) => w.title), ['Demo store (simulator)']);
+
+  // Менеджер у Blue Ridge: Shadow mode его продавца — оба аккаунта в тени, в бой переводит только владелец пространства (Р-170)
+  const blueRidge = `/api/worlds/${encodeURIComponent(worlds[1]!.id)}`;
+  const shadow = (await call<ShadowView>('GET', `${blueRidge}/shadow`, owner)).body;
+  assert.equal(shadow.accounts.length, 2);
+  assert.ok(shadow.accounts.every((a) => a.writeMode === 'SHADOW' && !a.canGoLive), JSON.stringify(shadow.accounts));
+  assert.ok(shadow.digestPreview && shadow.digestPreview.subject.includes('Blue Ridge Trading'), `the weekly email names the seller: ${shadow.digestPreview?.subject}`);
+});
+
+test('step 91: where the stand owner is a Viewer (Lakeside Home Goods), a change is refused — by the console and, around it, by the database', async () => {
+  const owner = await signIn('OWNER');
+  const worlds = (await call<WorldSummary[]>('GET', '/api/worlds', owner)).body;
+  const lakeside = worlds.find((w) => w.title === 'Lakeside Home Goods')!;
+  const at = (...p: string[]) => `/api/worlds/${[lakeside.id, ...p].map(encodeURIComponent).join('/')}`;
+  const stop = (await call<StopView>('GET', at('stop'), owner)).body;
+  assert.deepEqual(Object.values(stop.permissions), [false, false, false, false, false]);
+  assert.equal((await call('POST', at('stop'), owner, { target: { kind: 'TENANT' }, note: 'Owner of the stand tries a stop here', confirmed: true })).status, 403);
+  assert.equal((await call('POST', at('bounds', 'plan'), owner, { request: { all: true, min: { mode: 'SET', amountMinor: 100 } } })).status, 403);
+  // Та же роль у владельца стенда в ЕГО пространстве — владелец: отказ выше — роль этого пространства, а не человека
+  assert.equal(worlds.find((w) => w.title === 'Demo store (simulator)')!.role, 'Owner');
+
+  // В обход консоли: остановку цен пространства наблюдателем отклоняет база (роль — из членства в этом тенанте)
+  const tenantId = sellers.worlds.find((w) => w.title === 'Lakeside Home Goods')!.tenantId;
+  const viewer = await memberOf(tenantId, 'OWNER');
+  const store = new PgPricingStore(db.pool('svc_app', 1), { adminPool: db.pool('svc_admin', 1) });
+  const refused = await store.stopPricing(tenantId, {
+    scope: 'TENANT', channelAccountId: null, marketplace: null, stoppedAt: new Date().toISOString() as never,
+    stoppedByMembershipId: viewer.membershipId, stoppedByUserId: viewer.userId, note: 'Viewer stops around the console',
+  } as never);
+  assert.equal(refused.status, 'FORBIDDEN', 'the database refuses a stop by a viewer');
 });
 
 /** Членство синтетического участника стенда в демо по его роли — из базы, как его увидит страж */

@@ -312,7 +312,7 @@ function digestPreview(world: StandWorld, page: ShadowPage, accounts: readonly S
   const letter = shadowDigestLetter({
     // Шаг 76 (предполётный прогон демо): имя демо — то же, что у карточки в списке миров («Demo store (simulator)»), а не служебный
     // заголовок мира стенда
-    tenantName: world.demo === true ? m.ui.app.demoWorldTitle : world.title, shadowAccounts: accounts.filter((a) => a.writeMode === 'SHADOW' && a.authStatus === 'ACTIVE').length,
+    tenantName: world.demo === true && world.ownName !== true ? m.ui.app.demoWorldTitle : world.title, shadowAccounts: accounts.filter((a) => a.writeMode === 'SHADOW' && a.authStatus === 'ACTIVE').length,
     decisions: s.decisions, changes: s.changes, floorHeld: s.floorHeld, ceilingHeld: s.ceilingHeld, heldWrites: s.heldWrites,
     heldPriceWrites: s.heldPriceWrites, heldQuantityWrites: s.heldQuantityWrites, wouldSpendBudget: s.wouldSpendBudget,
     wouldSpendUnconfirmed: s.wouldSpendUnconfirmed, floorSavings: s.floorSavings, floorSavingsHolds: s.floorSavingsHolds,

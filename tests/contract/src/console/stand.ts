@@ -56,12 +56,22 @@ export const STAND_EMAILS: Readonly<Record<string, string>> = Object.fromEntries
  * входом у имитатора поставщика (находка 5 ревью шага 16 — существующий пользователь не присоединяется созданием тенанта).
  */
 export function pgStandJoinMember(adminPool: PgPool, directory: PgIdentityDirectory) {
+  return async (input: { tenantId: string; ownerUserId: string; membershipAlias: string; role: string; email: string }) =>
+    pgStandJoinAs(adminPool, directory, input.membershipAlias)(input);
+}
+
+/**
+ * Шаг 91 (вид преп-центра): участник стенда входит в ЧУЖОЕ пространство на роль слота — например, владелец стенда менеджером у одного
+ * продавца и наблюдателем у другого. Тот же путь, что у входа участника: приглашение владельца того пространства со вторым фактором и
+ * приём своим входом; адрес и subject — самого участника, а не слота
+ */
+export function pgStandJoinAs(adminPool: PgPool, directory: PgIdentityDirectory, standAlias: string) {
+  const account = STAND_ACCOUNTS.find((a) => a.membershipAlias === standAlias);
+  if (!account) throw new Error(`unknown stand member ${standAlias}`);
   return async (input: { tenantId: string; ownerUserId: string; membershipAlias: string; role: string; email: string }) => {
-    const account = STAND_ACCOUNTS.find((a) => a.membershipAlias === input.membershipAlias);
-    if (!account) throw new Error(`unknown stand member ${input.membershipAlias}`);
     const invitation = await inTenant(adminPool, input.tenantId,
-      (tx) => inviteMember(tx, { tenantId: input.tenantId, email: input.email, role: input.role as never }), input.ownerUserId, { mfa: true });
-    const userId = await directory.acceptInvitation(invitation.token, { issuer: STAND_ISSUER, subject: account.subject }, input.email, true);
+      (tx) => inviteMember(tx, { tenantId: input.tenantId, email: account.email, role: input.role as never }), input.ownerUserId, { mfa: true });
+    const userId = await directory.acceptInvitation(invitation.token, { issuer: STAND_ISSUER, subject: account.subject }, account.email, true);
     return { userId, membershipId: invitation.membershipId };
   };
 }
@@ -84,6 +94,11 @@ export interface LiveWorld {
    * его экран тени пуст и говорил бы неправду (ревью шага 76, находка 3)
    */
   landing?: 'shadow';
+  /**
+   * Шаг 91: демо-тенант со СВОИМ именем — лёгкий продавец вида преп-центра («Blue Ridge Trading»). Пометка демо остаётся [Р-151], а имя
+   * и описание в списке миров — его, а не общее «Demo store (simulator)»
+   */
+  ownName?: boolean;
   store: PricingStore;
   /** Шаг 35 [Р-152, Р-153]: остатки — своё хранилище; у миров сценариев оно в памяти, у живых миров — PostgreSQL */
   stock: StockStore;

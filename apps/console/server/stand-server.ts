@@ -13,7 +13,7 @@ import {
 import { buildPreview, readTable, suggestMapping, TABLE_ENCODINGS } from '@repracer/cost-import';
 import type { BulkJobInput, ConsoleCatalogFacts, ConsoleCatalogFactsQuery, ConsoleCatalogPage, DiscountAnnouncementInput, DiscountAnnouncementRow, InterventionSlice } from '@repracer/pricing-pipeline';
 import {
-  buildStandWorlds, memoryStandDirectory, pgStandJoinMember, pgStandUsers, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_EMAILS, STAND_ISSUER, type LiveWorld,
+  buildStandWorlds, memoryStandDirectory, pgStandJoinAs, pgStandJoinMember, pgStandUsers, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_EMAILS, STAND_ISSUER, type LiveWorld,
 } from '@repracer/contract-tests/stand';
 import { createAuthenticator, hasSecondFactor, remoteJwks, staticJwks, type Authenticator, type Principal } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
@@ -482,9 +482,10 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           live.display ? live.display() : Promise.resolve(null)]);
         return {
           // Шаг 64: демо-мир назван на языке интерфейса — клиент из США видел описание посева по-немецки
-          id: live.id, title: c.demo ? m.ui.app.demoWorldTitle : live.title,
+          // Шаг 91: лёгкий продавец вида преп-центра — демо со своим именем; пометка демо остаётся (Р-151)
+          id: live.id, title: c.demo && !live.ownName ? m.ui.app.demoWorldTitle : live.title,
           // Шаг 87: демо профиля us — американский продавец, а не магазин на симуляторе Kaufland с тремя конкурентами
-          description: c.demo ? (market.profile === 'us' ? m.ui.app.demoWorldDescriptionUs : m.ui.app.demoWorldDescription) : live.description,
+          description: c.demo ? (live.ownName ? m.ui.app.demoSellerDescription : market.profile === 'us' ? m.ui.app.demoWorldDescriptionUs : m.ui.app.demoWorldDescription) : live.description,
           failures: live.failures, scopes: c.scopes, decisionsLastDay: c.decisionsLastDay,
           interventionsLastWeek: c.interventionsLastWeek, activeStops: c.activeStops, activeHalts: c.activeHalts, role: m.values[viewer.role],
           // Р-151: демо помечается уже в списке миров; Р-150: сколько каналов ждёт доступа — видно до входа в мир
@@ -1837,6 +1838,7 @@ async function main(): Promise<void> {
      * Шаг 37 [Р-159]: тот же мир поднимает разворачиваемая консоль, поэтому он живёт одним модулем, а не двумя копиями.
      */
     let demoWorldId: string | null = null;
+    const demoSellerIds: string[] = [];
     if (process.env.REPRACER_DEMO === 'on') {
       const { startDemoWorld } = await import('./demo-world.ts');
       const started = await startDemoWorld({
@@ -1858,13 +1860,35 @@ async function main(): Promise<void> {
       });
       worlds.push(started.world);
       demoWorldId = started.world.id;
+      /**
+       * Шаг 91 (вид преп-центра): `REPRACER_DEMO_SELLERS=on` — рядом с главным демо два лёгких продавца с американскими именами; владелец
+       * стенда — менеджер у одного и наблюдатель у другого [Р-213]. Только демо профиля us: продавцы — американские
+       */
+      if (process.env.REPRACER_DEMO_SELLERS === 'on') {
+        if (market !== 'us') throw new Error('REPRACER_DEMO_SELLERS=on needs the us market profile: the sellers are American');
+        const { startDemoSellers } = await import('./demo-sellers.ts');
+        const owner = STAND_ACCOUNTS.find((a) => a.role === 'OWNER')!;
+        const sellers = await startDemoSellers({
+          pools: {
+            app: pool, admin: adminPool, provisioning: role('svc_provisioning', 1), dispatcher: role('svc_dispatcher', 1),
+            scheduler: role('svc_scheduler', 2), exporter: role('svc_exporter', 1), stock: role('svc_stock', 1), bulkWorker: role('svc_bulk_worker', 1),
+          },
+          pgUrl: url, tag: 3410, standOwnerUserId: memberUsers[owner.membershipAlias]!, standOwnerEmail: owner.email,
+          joinAs: pgStandJoinAs(adminPool, directory, owner.membershipAlias),
+          pressDays: pressDaysOf(process.env.REPRACER_DEMO_PRESS_DAYS),
+          ...(process.env.REPRACER_DEMO_LOCALE === 'en' || process.env.REPRACER_DEMO_LOCALE === 'de' ? { locale: process.env.REPRACER_DEMO_LOCALE } : {}),
+          ...(process.env.REPRACER_DEMO_TIME_ZONE ? { timeZone: process.env.REPRACER_DEMO_TIME_ZONE } : {}),
+        });
+        worlds.push(...sellers.worlds);
+        demoSellerIds.push(...sellers.worlds.map((w) => w.id));
+      }
     }
     // Шаг 64: у демо — подключения только для чтения (аккаунты и вопрос о других инструментах [Р-202]), подключать нечем
     const { readOnlyConnections } = await import('./connect.ts');
     const { PgChannelConnectStore } = await import('@repracer/pricing-store-pg');
     const demoConnect = readOnlyConnections(new PgChannelConnectStore(adminPool));
     handle = createStandApi(worlds, { authenticator: createAuthenticator({ ...verify, directory }), ...(simulator ? { simulator } : {}) },
-      { connect: (worldId) => (worldId === demoWorldId ? demoConnect : null), ...defaultLocale });
+      { connect: (worldId) => (worldId === demoWorldId || demoSellerIds.includes(worldId) ? demoConnect : null), ...defaultLocale });
   } else {
     // Стенд не включает ничего молча и ничего молча не пропускает: демо живёт только на PostgreSQL (ревью шага 34, находка 9)
     if (process.env.REPRACER_DEMO === 'on') throw new Error('REPRACER_DEMO=on needs PostgreSQL: set REPRACER_PG_URL (the demo tenant runs the real decision path)');

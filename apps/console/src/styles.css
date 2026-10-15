@@ -594,6 +594,8 @@ button.role-row:hover { background: var(--surface-muted); }
 .world-metrics dt { font-size: var(--font-size-xs); color: var(--text-2); }
 .world-metrics dd { margin: 0; font-size: var(--font-size-lg); line-height: var(--line-height-tight); font-weight: var(--weight-heading); font-variant-numeric: tabular-nums; }
 .worlds h3 { margin-top: 0; font-size: var(--font-size-lg); }
+/* шаг 91: в сетке карточек отступ даёт gap — общий отступ «карточка после карточки» сдвигал вторую и третью карточку ряда вниз */
+.worlds > .card + .card { margin-top: 0; }
 .world-pills { display: flex; flex-wrap: wrap; gap: var(--space-1); margin: var(--space-2) 0 var(--space-1); }
 .world-pills:empty { display: none; }
 .world-meta { color: var(--text-2); margin: 0; }
