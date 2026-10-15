@@ -105,7 +105,7 @@ export function StopScreenView({ view, onStop, onResume, onRelease, onReleaseDis
         <div className="cards"><TargetCardView card={view.tenant} {...(onStop ? { onStop } : {})} /></div>
         <h4>{s.accountsTitle}</h4>
         {/* Шаг 79: без аккаунтов канала разделы аккаунтов и витрин — одной строкой с путём, а не двумя пустыми заголовками */}
-        {view.accounts.length === 0 ? <p className="muted empty">{s.noAccounts} <a href={href(view.worldId, 'connections')}>{m.ui.app.connectChannel}</a></p> : (
+        {view.accounts.length === 0 ? <p className="muted empty">{s.noAccounts} <a href={href(view.worldId, 'channels', 'accounts')}>{m.ui.app.connectChannel}</a></p> : (
           <>
             <div className="cards">{view.accounts.map((c) => <TargetCardView key={c.label} card={c} {...(onStop ? { onStop } : {})} />)}</div>
             <h4>{s.storefrontsTitle}</h4>

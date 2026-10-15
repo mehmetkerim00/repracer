@@ -36,7 +36,7 @@ export function BoundsScreenView({ view }: { view: BoundsView }) {
   const b = m.ui.bounds;
   return (
     <section>
-      <p className="back"><a href={href(view.worldId, 'bounds')}>{b.back}</a></p>
+      <p className="back"><a href={href(view.worldId, 'costs')}>{b.back}</a></p>
       <h2>{b.pageTitle}</h2>
       <p className="subtitle">{view.unit.label} · {view.currency}, {view.priceBasis} · {view.taxRegime}</p>
       <div className="cards">
@@ -81,16 +81,16 @@ export function BoundsScreenView({ view }: { view: BoundsView }) {
   );
 }
 
-export function BoundsIndexView({ worldId, items }: { worldId: string; items: readonly BoundsIndexItem[] }) {
+export function BoundsIndexView({ worldId, items, embedded = false }: { worldId: string; items: readonly BoundsIndexItem[]; embedded?: boolean }) {
   const m = useMessages();
   const c = m.ui.bounds.indexColumns;
   return (
     <section>
-      {/* Шаг 86: заголовок страницы — тот же текст, что пункт меню */}
-      <h2>{m.ui.app.screens.bounds}</h2>
-      <p className="subtitle">{m.ui.app.subtitles.bounds}</p>
+      {/* Шаг 86: заголовок страницы — тот же текст, что пункт меню; шаг 95 [Р-217] — список границ разделом Costs & floors */}
+      {embedded ? <h3>{m.ui.costs.boundsTitle}</h3> : <h2>{m.ui.app.screens.bounds}</h2>}
+      <p className={embedded ? 'section-sub' : 'subtitle'}>{m.ui.app.subtitles.bounds}</p>
       {/* Задача D шага 34: пустой тенант видит, почему пусто и куда идти */}
-      {items.length === 0 ? <p className="notice">{m.ui.onboarding.empty.bounds} <a href={href(worldId, 'onboarding')}>{m.ui.onboarding.empty.startHere}</a></p> : null}
+      {items.length === 0 ? <p className="notice">{m.ui.onboarding.empty.bounds} <a href={href(worldId, 'channels')}>{m.ui.onboarding.empty.startHere}</a></p> : null}
       {/* Шаг 79 (ревью): список границ — таблицей с шапкой и зеброй; суммы — вправо, ссылка на разбивку пола — в своей колонке */}
       {items.length === 0 ? null : (
         <div className="table-wrap">
@@ -113,11 +113,12 @@ export function BoundsIndexView({ worldId, items }: { worldId: string; items: re
   );
 }
 
-export function BoundsScreen({ worldId, writeScopeId }: { worldId: string; writeScopeId: string | null }) {
-  return writeScopeId === null ? <BoundsIndex worldId={worldId} /> : <BoundsDetail worldId={worldId} writeScopeId={writeScopeId} />;
+/** Шаг 95 [Р-217]: страница одного предложения «Bounds and price floor» — своим адресом; список границ — раздел Costs & floors */
+export function BoundsScreen({ worldId, writeScopeId }: { worldId: string; writeScopeId: string }) {
+  return <BoundsDetail worldId={worldId} writeScopeId={writeScopeId} />;
 }
 
-function BoundsIndex({ worldId }: { worldId: string }) {
+export function BoundsIndex({ worldId }: { worldId: string }) {
   const m = useMessages();
   // Р-136: страница списка; массовая правка применяется к показанной странице — выбор продавца всегда виден на экране
   const [query, setQuery] = useState<ListQuery>({ offset: 0, limit: LIST_PAGE_DEFAULT });
@@ -126,7 +127,7 @@ function BoundsIndex({ worldId }: { worldId: string }) {
     <Load shape="table" resource={resource} retry={retry}>
       {(view) => (
         <>
-          <BoundsIndexView worldId={worldId} items={view.items} />
+          <BoundsIndexView worldId={worldId} items={view.items} embedded />
           <Pager page={view.page} query={query} onQuery={setQuery} />
           {/* Шаг 79 (ревью): массовая правка на ноль предложений — не форма, её просто нет */}
           {view.page.total === 0 ? null : <BoundsEditPanel worldId={worldId} items={view.items} total={view.page.total} canEdit={view.canEdit} />}
@@ -139,6 +140,6 @@ function BoundsIndex({ worldId }: { worldId: string }) {
 function BoundsDetail({ worldId, writeScopeId }: { worldId: string; writeScopeId: string }) {
   const m = useMessages();
   const [resource, retry] = useResource<BoundsView>(worldPath(worldId, 'bounds', writeScopeId), m.locale);
-  const missing = <NotFound title={m.ui.bounds.missingTitle} text={m.ui.bounds.missingText} back={m.ui.bounds.back} href={href(worldId, 'bounds')} />;
+  const missing = <NotFound title={m.ui.bounds.missingTitle} text={m.ui.bounds.missingText} back={m.ui.bounds.back} href={href(worldId, 'costs')} />;
   return <Load shape="cards" resource={resource} retry={retry} notFound={missing}>{(view) => <BoundsScreenView view={view} />}</Load>;
 }

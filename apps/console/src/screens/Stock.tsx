@@ -127,7 +127,7 @@ export function StockScreen({ worldId }: { worldId: string }) {
           <StockReturns worldId={worldId} onDecided={refresh} />
           {message ? <p className="notice" role="status">{message}</p> : null}
           {error ? <ErrorBox message={error} onRetry={refresh} /> : null}
-          {error && toConnections ? <p className="back"><a href={href(worldId, 'connections')}>{m.ui.app.screens.connections}</a></p> : null}
+          {error && toConnections ? <p className="back"><a href={href(worldId, 'channels', 'accounts')}>{m.ui.app.screens.channels}</a></p> : null}
         </>
       )}
     </Load>
@@ -149,7 +149,7 @@ export function StockScreenView({ view: v, worldId, query, onQuery, onFilter }: 
       {/* Шаг 77: пометку демо даёт полоса под шапкой на каждом экране мира [Р-151] — второй баннер на экране не нужен */}
       <Intro text={v.intro} />
       {/* Шаг 64: у пустого экрана — не строка нулей, а объяснение ниже */}
-      {v.sources.length === 0 ? <p className="notice">{m.ui.onboarding.empty.stock} <a href={href(worldId, 'onboarding')}>{m.ui.onboarding.empty.startHere}</a></p> : (
+      {v.sources.length === 0 ? <p className="notice">{m.ui.onboarding.empty.stock} <a href={href(worldId, 'channels')}>{m.ui.onboarding.empty.startHere}</a></p> : (
         // Шаг 79: итоги и источники — карточкой над таблицей, а не текстом на фоне страницы
         <div className="toolbar stock-summary">
           {v.rows.length > 0 ? <strong>{v.summaryText}</strong> : null}

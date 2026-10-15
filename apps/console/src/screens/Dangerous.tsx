@@ -7,7 +7,8 @@ const PERIODS = [1, 7, 30] as const;
 const STANDARD_FLOOR_HOLDS = new Set(['CAPPED_AT_MIN_PRICE', 'CAPPED_AT_MARGIN_FLOOR']);
 
 /** Отчёт о работе границ за период: удержания полом [Р-117] и отклонения Gate больше 10 % [Р-73] */
-export function DangerousScreenView({ view }: { view: DangerousReportView }) {
+/** Шаг 95 [Р-217]: отчёт — вкладка «Prevented by rules» страницы Protections (`embedded`); витрина «пол удержал» — сверху вкладки */
+export function DangerousScreenView({ view, embedded = false }: { view: DangerousReportView; embedded?: boolean }) {
   const m = useMessages();
   const d = m.ui.dangerous;
   const c = d.columns;
@@ -16,10 +17,9 @@ export function DangerousScreenView({ view }: { view: DangerousReportView }) {
   return (
     <section>
       {/* Шаг 86: заголовок страницы — тот же текст, что пункт меню; «что предотвратили границы» говорит подзаголовок */}
-      <h2>{m.ui.app.screens.dangerous}</h2>
-      <p className="subtitle">{m.ui.app.subtitles.dangerous}</p>
+      {embedded ? null : <><h2>{m.ui.app.screens.dangerous}</h2><p className="subtitle">{m.ui.app.subtitles.dangerous}</p></>}
       <nav className="tabs small">
-        {PERIODS.map((p) => <a key={p} href={href(view.worldId, 'dangerous', String(p))} className={p === view.days ? 'active' : ''}>{d.period(p)}</a>)}
+        {PERIODS.map((p) => <a key={p} href={href(view.worldId, 'protections', 'rules', String(p))} className={p === view.days ? 'active' : ''}>{d.period(p)}</a>)}
       </nav>
       {/* Шаг 79: итог периода — карточкой-сводкой */}
       <section className="card summary-card">
@@ -87,5 +87,5 @@ export function DangerousScreenView({ view }: { view: DangerousReportView }) {
 export function DangerousScreen({ worldId, days }: { worldId: string; days: number }) {
   const m = useMessages();
   const [resource, retry] = useResource<DangerousReportView>(`${worldPath(worldId, 'dangerous')}?days=${days}`, m.locale);
-  return <Load shape="table" resource={resource} retry={retry}>{(view) => <DangerousScreenView view={view} />}</Load>;
+  return <Load shape="table" resource={resource} retry={retry}>{(view) => <DangerousScreenView view={view} embedded />}</Load>;
 }

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { LOCALES, messagesFor, type Gap, type HumanReason, type ListQuery, type Locale, type Messages, type PageInfo, type StatusCell, type UnitRef } from '@repracer/console-model';
 import { ApiError, REQUEST_TIMEOUT_MS, requestJson, worldPath, type Resource } from './api.ts';
 import { Field, FormActions } from './forms.tsx';
@@ -377,4 +377,20 @@ export function OfferPicker({ worldId, value, onChange, allowEmpty = false, empt
       {error ? <span className="small warn">{error}</span> : onCounter || counter === null ? null : <span className="small muted">{counter}</span>}
     </span>
   );
+}
+
+/**
+ * Шаг 95 [Р-217]: раздел слитого экрана, на который ведёт прежний адрес или ссылка («импорт себестоимости» на Costs & floors,
+ * «аккаунты» на Channels). Разделы выше грузятся своими запросами и сдвигают страницу — прокрутка повторяется, пока они приходят
+ */
+export function SectionAnchor({ id, focus }: { id: string; focus: boolean }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!focus) return undefined;
+    const go = () => ref.current?.scrollIntoView({ block: 'start' });
+    go();
+    const timers = [300, 900, 1800].map((ms) => setTimeout(go, ms));
+    return () => { for (const t of timers) clearTimeout(t); };
+  }, [focus]);
+  return <span id={id} ref={ref} className="section-anchor" aria-hidden="true" />;
 }

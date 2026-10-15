@@ -1,10 +1,9 @@
 import { useState } from 'react';
 import type { CostImportView } from '@repracer/console-model';
-import type { BoundsIndexView } from '../api-types.ts';
-import { requestJson, useResource, worldPath } from '../api.ts';
+import { requestJson, worldPath } from '../api.ts';
 import type { JobCreatedResponse } from '../api-types.ts';
 import { JobProgress } from './Jobs.tsx';
-import { ErrorBox, errorText, FileDrop, Load, useMessages } from '../components.tsx';
+import { ErrorBox, errorText, FileDrop, useMessages } from '../components.tsx';
 import { Field, FieldGrid, FormActions } from '../forms.tsx';
 
 /**
@@ -208,16 +207,5 @@ function CostImportForm({ worldId, asPage }: { worldId: string; asPage: boolean 
       </div>
       {view ? <CostImportPreview view={view} onMapping={changeMapping} onEncoding={changeEncoding} /> : null}
     </section>
-  );
-}
-
-/** Экран целиком: право на импорт — то же, что на правку границ (менеджер цен); его сообщает сервер вместе с данными экрана */
-export function CostImportScreen({ worldId }: { worldId: string }) {
-  const m = useMessages();
-  const [resource, retry] = useResource<BoundsIndexView>(worldPath(worldId, 'bounds'), m.locale);
-  return (
-    <Load shape="cards" resource={resource} retry={retry}>
-      {(view) => <CostImportPanel worldId={worldId} canEdit={view.canEdit} asPage />}
-    </Load>
   );
 }

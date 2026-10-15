@@ -1,10 +1,30 @@
 import { useState } from 'react';
-import { FEED_PERIODS_DAYS, FEED_STATUS_GROUPS, type FeedQuery, type PriceFeedView } from '@repracer/console-model';
+import { FEED_PERIODS_DAYS, FEED_STATUS_GROUPS, LIST_PAGE_DEFAULT, type DecisionListView, type FeedQuery, type ListQuery, type PriceFeedView } from '@repracer/console-model';
 import { requestJson, useResource, worldPath } from '../api.ts';
 import type { JobCreatedResponse } from '../api-types.ts';
 import { JobProgress } from './Jobs.tsx';
-import { Badge, commonZone, ErrorBox, errorText, Gaps, href, Load, OfferPicker, ReasonLine, useMessages, When, WhenHead } from '../components.tsx';
+import { DecisionsView } from './Decisions.tsx';
+import { Badge, commonZone, ErrorBox, errorText, Gaps, href, Load, OfferPicker, Pager, ReasonLine, useMessages, When, WhenHead } from '../components.tsx';
 import { Field } from '../forms.tsx';
+
+/**
+ * Шаг 95 [Р-217]: Price changes — единственный журнал цен. «Kind» выбирает, что в нём: записи в канал (как было) или все решения —
+ * с записью и без (прежний список «Why this price»). Фильтры двух видов не совмещаются без потери смысла: статус записи и период есть
+ * только у записей, у решений — только предложение; поэтому у вида решений из фильтров остаётся предложение, и экран говорит это строкой
+ */
+export type FeedKind = 'writes' | 'decisions';
+
+function KindField({ kind, onKind }: { kind: FeedKind; onKind: (kind: FeedKind) => void }) {
+  const k = useMessages().ui.feed.kind;
+  return (
+    <Field label={k.label}>
+      <select value={kind} onChange={(e) => onKind(e.currentTarget.value as FeedKind)}>
+        <option value="writes">{k.writes}</option>
+        <option value="decisions">{k.decisions}</option>
+      </select>
+    </Field>
+  );
+}
 
 /**
  * Лента изменений цен (шаги 21, 23): запись в канал от решения до итога, новые сверху. Фильтры по статусу, офферу и периоду и
@@ -22,7 +42,7 @@ export function feedPath(worldId: string, q: FeedQuery): string {
   return `${worldPath(worldId, 'feed')}${query ? `?${query}` : ''}`;
 }
 
-export function FeedScreenView({ view, onQuery }: { view: PriceFeedView; onQuery?: (q: FeedQuery) => void }) {
+export function FeedScreenView({ view, onQuery, onKind }: { view: PriceFeedView; onQuery?: (q: FeedQuery) => void; onKind?: (kind: FeedKind) => void }) {
   const m = useMessages();
   const f = m.ui.feed;
   const c = f.columns;
@@ -70,6 +90,7 @@ export function FeedScreenView({ view, onQuery }: { view: PriceFeedView; onQuery
       {/* Шаг 79: фильтры и выгрузка — карточкой-панелью; счётчики групп — в шапке таблицы */}
       {onQuery ? (
         <div className="filters toolbar field-toolbar">
+          {onKind ? <KindField kind="writes" onKind={onKind} /> : null}
           {/* Шаг 94: фильтры — поля стандарта: подпись над выбором */}
           <Field label={f.filters.status}><select value={q.status ?? ''} onChange={(e) => change({ status: (e.target.value || undefined) as FeedQuery['status'] })}>
             <option value="">{f.filters.all}</option>
@@ -128,9 +149,40 @@ export function FeedScreenView({ view, onQuery }: { view: PriceFeedView; onQuery
   );
 }
 
-export function FeedScreen({ worldId }: { worldId: string }) {
+export function FeedScreen({ worldId, kind }: { worldId: string; kind: FeedKind }) {
+  const onKind = (next: FeedKind) => { window.location.hash = next === 'decisions' ? href(worldId, 'feed', 'decisions') : href(worldId, 'feed'); };
+  return kind === 'decisions' ? <DecisionJournal worldId={worldId} onKind={onKind} /> : <WriteJournal worldId={worldId} onKind={onKind} />;
+}
+
+function WriteJournal({ worldId, onKind }: { worldId: string; onKind: (kind: FeedKind) => void }) {
   const m = useMessages();
   const [query, setQuery] = useState<FeedQuery>({});
   const [resource, retry] = useResource<PriceFeedView>(feedPath(worldId, query), m.locale);
-  return <Load shape="table" resource={resource} retry={retry}>{(view) => <FeedScreenView view={view} onQuery={setQuery} />}</Load>;
+  return <Load shape="table" resource={resource} retry={retry}>{(view) => <FeedScreenView view={view} onQuery={setQuery} onKind={onKind} />}</Load>;
+}
+
+/** Все решения журнала — страницами базы [Р-154]; строка ведёт на квитанцию решения «Why this price» */
+function DecisionJournal({ worldId, onKind }: { worldId: string; onKind: (kind: FeedKind) => void }) {
+  const m = useMessages();
+  const f = m.ui.feed;
+  const [query, setQuery] = useState<ListQuery & { writeScopeId?: string }>({ offset: 0, limit: LIST_PAGE_DEFAULT });
+  const [pickerCount, setPickerCount] = useState<string | null>(null);
+  const path = `${worldPath(worldId, 'decisions')}?offset=${query.offset}&limit=${query.limit}${query.writeScopeId ? `&writeScopeId=${encodeURIComponent(query.writeScopeId)}` : ''}`;
+  const [resource, retry] = useResource<DecisionListView>(path, m.locale);
+  return (
+    <section>
+      <h2>{f.pageTitle}</h2>
+      <p className="subtitle">{m.ui.app.subtitles.feed}</p>
+      <div className="filters toolbar field-toolbar">
+        <KindField kind="decisions" onKind={onKind} />
+        <Field label={f.filters.offer}><OfferPicker worldId={worldId} value={query.writeScopeId ?? ''} allowEmpty emptyLabel={f.filters.all}
+          onChange={(writeScopeId) => setQuery({ offset: 0, limit: query.limit, ...(writeScopeId ? { writeScopeId } : {}) })} onCounter={setPickerCount} /></Field>
+        {pickerCount ? <span className="filters-count">{pickerCount}</span> : null}
+      </div>
+      <p className="section-sub">{f.kind.decisionsCaption}</p>
+      <Load shape="table" resource={resource} retry={retry}>
+        {(view) => (<><DecisionsView worldId={worldId} items={view.items} /><Pager page={view.page} query={query} onQuery={(q) => setQuery({ ...query, ...q })} /></>)}
+      </Load>
+    </section>
+  );
 }

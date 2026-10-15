@@ -36,7 +36,7 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
           {v.accounts.length === 0 ? <p className="subtitle">{m.ui.app.subtitles.shadow}</p> : <Intro text={v.intro} />}
           {/* Шаг 79: без аккаунта канала тени нечего показать — пустое состояние с путём, а не таблица без строк */}
           {v.accounts.length === 0 ? (
-            <section className="card"><p className="muted empty">{m.ui.shadow.noAccounts} <a href={href(worldId, 'connections')}>{m.ui.app.connectChannel}</a></p></section>
+            <section className="card"><p className="muted empty">{m.ui.shadow.noAccounts} <a href={href(worldId, 'channels', 'accounts')}>{m.ui.app.connectChannel}</a></p></section>
           ) : <>
           {/* Шаг 82: окно отчёта — переключатель над сводкой; шаг 83: сводка — белые плитки и график, строки сводки — карточкой под ними */}
           {(() => {

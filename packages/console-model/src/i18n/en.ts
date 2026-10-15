@@ -417,7 +417,7 @@ export const en = {
         decisions: 'Every price decision, newest first; open one to see why the price is what it is.',
         trace: 'One decision, step by step: the competitor snapshot, the checks, the strategy, the Price Gate and the write.',
         strategies: 'How prices are computed: your strategies, where they apply and a preview before anything is saved.',
-        feed: 'Every price sent to a channel or held, from the decision to the result.',
+        feed: 'Every price sent to a channel or held, and every decision behind it — open one to see why the price is what it is.',
         rejected: 'Changes your bounds stopped or corrected — dangerous ones are shown separately.',
         dangerous: 'What your floor and your bounds prevented over a period.',
         bounds: 'Minimum and maximum price of every offer; open an offer to see where its floor comes from.',
@@ -425,9 +425,14 @@ export const en = {
         'cost-import': 'Import unit costs from your export file: a preview first, then everything at once.',
         jobs: 'Bulk operations of this workspace: progress, result and files to download.',
         stop: 'Stop price changes of the whole workspace, a channel account or a storefront — and see who stopped what.',
+        costs: 'Minimum and maximum price of every offer and the unit costs behind its floor; open an offer to see where its floor comes from.',
+        protections: 'What stopped or prevented a price change: people who stopped prices, and the rules — your floor, your bounds and the input check.',
+        channels: 'Your channel accounts — connection, stock writes, language and time zone — and the setup checklist until it is done.',
       },
       brand: 'pricetrail',
-      screens: { connections: 'Channel accounts', onboarding: 'Setup', shadow: 'Shadow mode', stock: 'Stock', products: 'Offers', decisions: 'Why this price', rejected: 'Stopped changes', bounds: 'Bounds', 'cost-import': 'Unit cost import', stop: 'Stop pricing', strategies: 'Strategies', feed: 'Price changes', dangerous: 'Dangerous changes', compliance: 'Omnibus', jobs: 'Bulk operations' },
+      screens: { connections: 'Channel accounts', onboarding: 'Setup', shadow: 'Shadow mode', stock: 'Stock', products: 'Offers', decisions: 'Why this price', rejected: 'Stopped changes', bounds: 'Bounds', 'cost-import': 'Unit cost import', stop: 'Stop pricing', strategies: 'Strategies', feed: 'Price changes', dangerous: 'Dangerous changes', compliance: 'Omnibus', jobs: 'Bulk operations',
+        // Шаг 95 [Р-217]: слитые экраны меню — 9 пунктов вместо 14; прежние имена остаются заголовками разделов и ссылок
+        costs: 'Costs & floors', protections: 'Protections', channels: 'Channels' },
       loading: (seconds: number) => `Loading… If there is no answer within ${seconds} s, an error is shown.`,
       timeout: (seconds: number) => `The service did not answer within ${seconds} s. Try again in a minute.`,
       unavailable: (detail: string) => `The server is unavailable: ${detail}`,
@@ -1134,6 +1139,8 @@ export const en = {
     },
     products: {
       title: 'Offers',
+      /** Шаг 95 [Р-217]: массовые операции — кнопкой с Offers, пункта меню у них нет */
+      bulkEdit: 'Bulk edit',
       totals: (t: { total: number; enabled: number; applying: number; stopped: number; off: number }) => `Total ${t.total}: on ${t.enabled}, in progress ${t.applying}, stopped ${t.stopped}, off ${t.off}.`,
       clock: (now: string) => `Simulated time: ${now}.`,
       columns: { unit: 'Offer', current: 'Current price', floor: 'Effective floor', ceiling: 'Maximum price', strategy: 'Strategy', enabled: 'On', applying: 'In progress', lastChange: 'Last change', nextCheck: 'Next check', channel: 'Channel says', status: 'Status' },
@@ -1170,7 +1177,7 @@ export const en = {
       WALMART_BUY_BOX: 'Walmart, Buy Box request',
     },
     trace: {
-      missingTitle: 'Decision not found', missingText: 'This link does not lead to a price decision of this workspace. The list shows every decision with its explanation.', pageTitle: 'Why this price', back: '← All decisions', noDecisions: 'No pricing decisions yet. They appear once repricing or Shadow mode runs for an offer.',
+      missingTitle: 'Decision not found', missingText: 'This link does not lead to a price decision of this workspace. The list shows every decision with its explanation.', pageTitle: 'Why this price', back: '← Price changes', noDecisions: 'No pricing decisions yet. They appear once repricing or Shadow mode runs for an offer.',
       columns: { when: 'When', unit: 'Offer', outcome: 'Outcome', price: 'Price', reason: 'Reason' }, why: 'Why',
       meta: (unit: string, _id: string, when: string) => `${unit} · ${when}`,
       dangerousBadge: 'dangerous change', limitNote: (text: string) => `Cannot be explained further: ${text}`,
@@ -1251,7 +1258,7 @@ export const en = {
     bounds: {
       feeUsed: 'the floor is computed from this one (the higher estimate)',
       feeEstimate: (source: string, rate: string, fixed: string, scheduleVersion: string | null) => `${source}: ${rate} + ${fixed}${scheduleVersion ? ` (${scheduleVersion})` : ''}`,
-      indexColumns: { offer: 'Offer', min: 'Minimum price', max: 'Maximum price', floor: 'Floor' }, missingTitle: 'Offer not found', missingText: 'This link does not lead to an offer of this workspace. The list shows the bounds of every offer.', pageTitle: 'Bounds and price floor', back: '← All offers',
+      indexColumns: { offer: 'Offer', min: 'Minimum price', max: 'Maximum price', floor: 'Floor' }, missingTitle: 'Offer not found', missingText: 'This link does not lead to an offer of this workspace. The list shows the bounds of every offer.', pageTitle: 'Bounds and price floor', back: '← Costs & floors',
       minPrice: 'Minimum price', maxPrice: 'Maximum price', minMargin: 'Minimum margin', marginNotSet: 'not set — the floor equals your minimum price',
       marginAtLeast: (pct: string) => `margin at least ${pct}`, effectiveFloor: 'Effective floor', costAndFees: 'Cost and fees',
       columns: { part: 'Component', amount: (currency: string) => `Amount, ${currency}`, formula: 'How it is calculated' },
@@ -1338,7 +1345,7 @@ export const en = {
       unassigned: 'Strategy removed.',
     },
     jobs: {
-      pageTitle: 'Bulk operations', historyTitle: 'Past operations', none: 'No bulk operations yet. They appear here when you import unit costs, change the bounds of many offers or assign a strategy to many offers.',
+      pageTitle: 'Bulk operations', back: '← Offers', historyTitle: 'Past operations', none: 'No bulk operations yet. They appear here when you import unit costs, change the bounds of many offers or assign a strategy to many offers.',
       kinds: {
         COST_IMPORT: 'Import unit costs', REPRICING_ENABLE: 'Enable repricing', STOCK_IMPORT: 'Import stock', STOCK_SYNC_ENABLE: 'Enable stock synchronization', BOUNDS_EDIT: 'Change bounds', BOUNDS_PLAN: 'Compute the bounds differences',
         STRATEGY_ASSIGN: 'Assign strategy', STRATEGY_PREVIEW: 'Preview strategy', PRICE_EVIDENCE: 'Export price evidence',
@@ -1389,6 +1396,17 @@ export const en = {
         UNKNOWN_JOB_KIND: 'the background process does not know this operation',
         TOO_MANY_ATTEMPTS: 'the operation failed repeatedly and is not retried any further',
       },
+    },
+    /** Шаг 95 [Р-217]: Costs & floors — границы сверху, импорт себестоимости — разделом того же экрана */
+    costs: { boundsTitle: 'Bounds', importAction: 'Import unit costs ↓' },
+    /** Шаг 95 [Р-217]: Protections — два вида защиты одной страницей */
+    protections: {
+      people: 'Stopped by people', rules: 'Prevented by rules',
+      peopleHeadline: (n: number) => n === 0 ? 'No price change was stopped by a person in the last 7 days' : `People stopped ${n} price ${n === 1 ? 'change' : 'changes'} in the last 7 days`,
+      peopleNone: 'Nothing here: a change appears when someone stops prices on Stop pricing while a price was on its way.',
+      whoStopped: 'Who stopped what — Stop pricing',
+      otherTitle: 'Also stopped or corrected in the last 7 days',
+      rulesNone: 'Nothing else was stopped or corrected in the last 7 days. Every time a bound, the input check or a storefront halt stops or corrects a price, it appears here with the reason.',
     },
     costImport: {
       requiredCaption: 'Required.', fileLabel: 'Export file', fileCaption: 'CSV or XLSX. Nothing changes until you apply the preview.',
@@ -1455,6 +1473,8 @@ export const en = {
       noRight: 'Your role may view bounds but not change them.',
     },
     feed: {
+      /** Шаг 95 [Р-217]: единственный журнал цен — записи в канал или все решения (с записью и без) */
+      kind: { label: 'Kind', writes: 'Price writes', decisions: 'All decisions', writesCaption: 'Prices sent to a channel or held.', decisionsCaption: 'Every decision, with or without a write. Only the offer filter applies here.' },
       pageTitle: 'Price changes', empty: 'No price changes yet. They appear once repricing is on and a price is sent to a channel.',
       exportAll: (n: number) => `All ${n} entries as a file`,
       columns: { when: 'When', offer: 'Offer', from: 'From', to: 'To', change: 'Change', status: 'Status', source: 'Source', reason: 'Reason' },

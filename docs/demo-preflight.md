@@ -50,7 +50,7 @@
 | Доказательство из базы (команду печатает подготовка) | одна строка `SHADOW_HELD | N | 0` | любая другая строка — не показывать шаг «а», разобрать после |
 | Stock | «Warehouse Newark, DE — File import (internal pool)»; флажок «Only products with reservations» — «N of 36 products match.», хотя бы одна строка «… · SYN-DEMO-US-AMZ-…» с 1 в колонке «Reserved» | мир младше ~2 минут |
 | Offers (шаг 89) | «Total 36»; у двух предложений walmart.com («Wall clock, small», «Yoga mat, small») пилюля «Unpublished (uncompetitive price)» и строка «Cheaper elsewhere: $19.99. Since …»; в Stop pricing — две строки «Offer unpublished: uncompetitive price» | пилюль нет — мир младше ~1 минуты или неделя не прожата: перезапустить подготовку |
-| Шапка и меню | переключателя языка нет; в меню нет «Omnibus»; нигде нет Kaufland, витрин ЕС и евро | есть — подготовка запущена в профиле eu или global: перезапустить без `REPRACER_MARKET_PROFILE` |
+| Шапка и меню | переключателя языка нет; в меню девять пунктов (шаг 95): Shadow mode, Price changes, Strategies, Costs & floors, Protections, Offers, Stock, Channels, Stop pricing — «Omnibus» нет; нигде нет Kaufland, витрин ЕС и евро | есть — подготовка запущена в профиле eu или global: перезапустить без `REPRACER_MARKET_PROFILE` |
 
 Терминал подготовки не закрывать: Ctrl+C в нём останавливает стенд и интерфейс.
 
@@ -141,7 +141,7 @@
 | «Кто может остановить и снять, и видно ли это потом?» | Таблица «Three kinds of stop»: колонки «Who sets it» и «How it ends»; останавливают владелец или менеджер с заметкой; снятие — с заметкой, а снятие остановки всего магазина — со вторым фактором; «Audit log: stops, roles and channel events» хранит кто, когда и с какой заметкой. Недоверие каналу снимает только владелец со вторым фактором (шаг 89) |
 | «Кто у вас что может? Можно дать человеку две роли?» | Вход: три роли — Owner, Manager, Viewer, у каждой строка «что может». Одна роль на человека в магазине (база не даст вторую); нужны права двух — назначается одна старшая. Менеджер — ежедневная работа и стоп-кран; люди, аккаунты каналов и включение записи в канал — только владелец. Смена роли видна в «Audit log: stops, roles and channel events»: «Role changed · …: Viewer → Manager», кто и когда. Вернуть аккаунт в тень может и менеджер — это безопасная сторона (шаг 89) |
 
-### г. Channel accounts
+### г. Channels (раздел «Channel accounts»)
 
 | Вопрос | Ответ и где он |
 |---|---|

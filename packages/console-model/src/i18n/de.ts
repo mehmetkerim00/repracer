@@ -397,7 +397,7 @@ export const de: Messages = {
         decisions: 'Jede Preisentscheidung, die neueste zuerst; öffnen Sie eine, um zu sehen, warum der Preis so ist.',
         trace: 'Eine Entscheidung Schritt für Schritt: Wettbewerbsdaten, Prüfungen, Strategie, Price Gate und Schreibvorgang.',
         strategies: 'Wie Preise berechnet werden: Ihre Strategien, wo sie gelten, und eine Vorschau, bevor etwas gespeichert wird.',
-        feed: 'Jeder Preis, der an einen Kanal ging oder zurückgehalten wurde — von der Entscheidung bis zum Ergebnis.',
+        feed: 'Jeder Preis, der an einen Kanal ging oder zurückgehalten wurde, und jede Entscheidung dahinter — öffnen Sie eine, um zu sehen, warum der Preis so ist.',
         rejected: 'Änderungen, die Ihre Grenzen gestoppt oder korrigiert haben — gefährliche getrennt.',
         dangerous: 'Was Ihre Untergrenze und Ihre Grenzen in einem Zeitraum verhindert haben.',
         bounds: 'Mindest- und Höchstpreis jedes Angebots; öffnen Sie ein Angebot, um zu sehen, woher seine Untergrenze kommt.',
@@ -405,9 +405,13 @@ export const de: Messages = {
         'cost-import': 'Stückkosten aus Ihrer Exportdatei importieren: erst die Vorschau, dann alles auf einmal.',
         jobs: 'Massenvorgänge dieses Arbeitsbereichs: Fortschritt, Ergebnis und Dateien zum Herunterladen.',
         stop: 'Preisänderungen des gesamten Arbeitsbereichs, eines Kanalkontos oder einer Storefront stoppen — und sehen, wer was gestoppt hat.',
+        costs: 'Mindest- und Höchstpreis jedes Angebots und die Stückkosten hinter seiner Untergrenze; öffnen Sie ein Angebot, um zu sehen, woher seine Untergrenze kommt.',
+        protections: 'Was eine Preisänderung gestoppt oder verhindert hat: Menschen, die Preise gestoppt haben, und die Regeln — Ihre Untergrenze, Ihre Grenzen und die Eingangsprüfung.',
+        channels: 'Ihre Kanalkonten — Verbindung, Schreiben von Beständen, Sprache und Zeitzone — und die Einrichtungsliste, bis sie erledigt ist.',
       },
       brand: 'pricetrail',
-      screens: { connections: 'Kanalkonten', onboarding: 'Einrichtung', shadow: 'Schattenmodus', stock: 'Bestand', products: 'Angebote', decisions: 'Warum dieser Preis', rejected: 'Gestoppte Änderungen', bounds: 'Grenzen', 'cost-import': 'Stückkosten-Import', stop: 'Preise stoppen', strategies: 'Strategien', feed: 'Preisänderungen', dangerous: 'Gefährliche Änderungen', compliance: 'Omnibus', jobs: 'Massenvorgänge' },
+      screens: { connections: 'Kanalkonten', onboarding: 'Einrichtung', shadow: 'Schattenmodus', stock: 'Bestand', products: 'Angebote', decisions: 'Warum dieser Preis', rejected: 'Gestoppte Änderungen', bounds: 'Grenzen', 'cost-import': 'Stückkosten-Import', stop: 'Preise stoppen', strategies: 'Strategien', feed: 'Preisänderungen', dangerous: 'Gefährliche Änderungen', compliance: 'Omnibus', jobs: 'Massenvorgänge',
+        costs: 'Kosten & Untergrenzen', protections: 'Schutz', channels: 'Kanäle' },
       loading: (seconds: number) => `Daten werden geladen. Ohne Antwort innerhalb von ${seconds} s wird ein Fehler angezeigt.`,
       timeout: (seconds: number) => `Der Dienst hat nicht innerhalb von ${seconds} s geantwortet. Versuchen Sie es in einer Minute erneut.`,
       unavailable: (detail: string) => `Der Server ist nicht erreichbar: ${detail}`,
@@ -1093,6 +1097,7 @@ export const de: Messages = {
     },
     products: {
       title: 'Angebote',
+      bulkEdit: 'Massenbearbeitung',
       totals: (t: { total: number; enabled: number; applying: number; stopped: number; off: number }) => `Gesamt ${t.total}: an ${t.enabled}, in Arbeit ${t.applying}, gestoppt ${t.stopped}, aus ${t.off}.`,
       clock: (now: string) => `Simulierte Zeit: ${now}.`,
       columns: { unit: 'Angebot', current: 'Aktueller Preis', floor: 'Untergrenze', ceiling: 'Höchstpreis', strategy: 'Strategie', enabled: 'An', applying: 'In Arbeit', lastChange: 'Letzte Änderung', nextCheck: 'Nächste Prüfung', channel: 'Kanal meldet', status: 'Status' },
@@ -1129,7 +1134,7 @@ export const de: Messages = {
       WALMART_BUY_BOX: 'Walmart, Buy-Box-Abfrage',
     },
     trace: {
-      missingTitle: 'Entscheidung nicht gefunden', missingText: 'Dieser Link führt zu keiner Preisentscheidung dieses Arbeitsbereichs. Die Liste zeigt jede Entscheidung mit ihrer Begründung.', pageTitle: 'Warum dieser Preis', back: '← Alle Entscheidungen', noDecisions: 'Noch keine Preisentscheidungen. Sie erscheinen, sobald Repricing oder der Schattenmodus für ein Angebot läuft.',
+      missingTitle: 'Entscheidung nicht gefunden', missingText: 'Dieser Link führt zu keiner Preisentscheidung dieses Arbeitsbereichs. Die Liste zeigt jede Entscheidung mit ihrer Begründung.', pageTitle: 'Warum dieser Preis', back: '← Preisänderungen', noDecisions: 'Noch keine Preisentscheidungen. Sie erscheinen, sobald Repricing oder der Schattenmodus für ein Angebot läuft.',
       columns: { when: 'Wann', unit: 'Angebot', outcome: 'Ergebnis', price: 'Preis', reason: 'Grund' }, why: 'Warum',
       meta: (unit: string, _id: string, when: string) => `${unit} · ${when}`,
       dangerousBadge: 'gefährliche Änderung', limitNote: (text: string) => `Nicht weiter erklärbar: ${text}`,
@@ -1208,7 +1213,7 @@ export const de: Messages = {
     bounds: {
       feeUsed: 'danach wird der Boden gerechnet (die höhere Schätzung)',
       feeEstimate: (source: string, rate: string, fixed: string, scheduleVersion: string | null) => `${source}: ${rate} + ${fixed}${scheduleVersion ? ` (${scheduleVersion})` : ''}`,
-      indexColumns: { offer: 'Angebot', min: 'Mindestpreis', max: 'Höchstpreis', floor: 'Untergrenze' }, missingTitle: 'Angebot nicht gefunden', missingText: 'Dieser Link führt zu keinem Angebot dieses Arbeitsbereichs. Die Liste zeigt die Grenzen jedes Angebots.', pageTitle: 'Grenzen und Preisuntergrenze', back: '← Alle Angebote',
+      indexColumns: { offer: 'Angebot', min: 'Mindestpreis', max: 'Höchstpreis', floor: 'Untergrenze' }, missingTitle: 'Angebot nicht gefunden', missingText: 'Dieser Link führt zu keinem Angebot dieses Arbeitsbereichs. Die Liste zeigt die Grenzen jedes Angebots.', pageTitle: 'Grenzen und Preisuntergrenze', back: '← Kosten & Untergrenzen',
       minPrice: 'Mindestpreis', maxPrice: 'Höchstpreis', minMargin: 'Mindestmarge', marginNotSet: 'nicht gesetzt — die Untergrenze entspricht Ihrem Mindestpreis',
       marginAtLeast: (pct: string) => `Marge mindestens ${pct}`, effectiveFloor: 'Wirksame Untergrenze', costAndFees: 'Kosten und Gebühren',
       columns: { part: 'Bestandteil', amount: (currency: string) => `Betrag, ${currency}`, formula: 'Berechnung' },
@@ -1299,7 +1304,7 @@ export const de: Messages = {
      * страницу, понял три вещи: что делается, сколько осталось и что сейчас в базе.
      */
     jobs: {
-      pageTitle: 'Massenvorgänge', historyTitle: 'Bisherige Vorgänge', none: 'Noch keine Massenvorgänge. Sie erscheinen hier, wenn Sie Stückkosten importieren, die Grenzen vieler Angebote ändern oder vielen Angeboten eine Strategie zuweisen.',
+      pageTitle: 'Massenvorgänge', back: '← Angebote', historyTitle: 'Bisherige Vorgänge', none: 'Noch keine Massenvorgänge. Sie erscheinen hier, wenn Sie Stückkosten importieren, die Grenzen vieler Angebote ändern oder vielen Angeboten eine Strategie zuweisen.',
       kinds: {
         COST_IMPORT: 'Stückkosten importieren', REPRICING_ENABLE: 'Repricing einschalten', STOCK_IMPORT: 'Bestand importieren', STOCK_SYNC_ENABLE: 'Bestandsabgleich einschalten', BOUNDS_EDIT: 'Grenzen ändern', BOUNDS_PLAN: 'Unterschiede der Grenzen rechnen',
         STRATEGY_ASSIGN: 'Strategie zuweisen', STRATEGY_PREVIEW: 'Strategie vorab rechnen', PRICE_EVIDENCE: 'Preisnachweis ausgeben',
@@ -1350,6 +1355,15 @@ export const de: Messages = {
         UNKNOWN_JOB_KIND: 'diesen Vorgang kennt der Hintergrundprozess nicht',
         TOO_MANY_ATTEMPTS: 'der Vorgang ist mehrfach gescheitert und wird nicht weiter versucht',
       },
+    },
+    costs: { boundsTitle: 'Grenzen', importAction: 'Stückkosten importieren ↓' },
+    protections: {
+      people: 'Von Menschen gestoppt', rules: 'Durch Regeln verhindert',
+      peopleHeadline: (n: number) => n === 0 ? 'In den letzten 7 Tagen hat kein Mensch eine Preisänderung gestoppt' : `Menschen haben in den letzten 7 Tagen ${n} ${n === 1 ? 'Preisänderung' : 'Preisänderungen'} gestoppt`,
+      peopleNone: 'Hier ist nichts: Eine Änderung erscheint, wenn jemand unter „Preise stoppen“ Preise stoppt, während ein Preis unterwegs war.',
+      whoStopped: 'Wer was gestoppt hat — Preise stoppen',
+      otherTitle: 'Außerdem in den letzten 7 Tagen gestoppt oder korrigiert',
+      rulesNone: 'Sonst wurde in den letzten 7 Tagen nichts gestoppt oder korrigiert. Jedes Mal, wenn eine Grenze, die Eingangsprüfung oder das Anhalten einer Storefront einen Preis stoppt oder korrigiert, erscheint es hier mit dem Grund.',
     },
     costImport: {
       requiredCaption: 'Pflichtfeld.', fileLabel: 'Exportdatei', fileCaption: 'CSV oder XLSX. Vor dem Anwenden der Vorschau ändert sich nichts.',
@@ -1416,6 +1430,7 @@ export const de: Messages = {
       noRight: 'Ihre Rolle darf Grenzen ansehen, aber nicht ändern.',
     },
     feed: {
+      kind: { label: 'Art', writes: 'Preisübertragungen', decisions: 'Alle Entscheidungen', writesCaption: 'Preise, die an einen Kanal gingen oder zurückgehalten wurden.', decisionsCaption: 'Jede Entscheidung, mit oder ohne Übertragung. Hier gilt nur der Angebotsfilter.' },
       pageTitle: 'Preisänderungen', empty: 'Noch keine Preisänderungen. Sie erscheinen, sobald Repricing eingeschaltet ist und ein Preis an einen Kanal gesendet wird.',
       // Р-142 (шаг 31): весь период уносится файлом — на экране страница не больше 200 записей
       exportAll: (n: number) => `Alle ${n} Einträge als Datei`,

@@ -442,6 +442,20 @@ a.secondary-link { font-size: var(--font-size-xs); color: var(--accent-text); pa
 a.secondary-link:hover { color: var(--accent); text-decoration: underline; }
 
 /* «Why this price →» — ссылка строки (Primer Link) */
+/* шаг 95 [Р-217]: ссылка, которая выглядит кнопкой Primer (Button как ссылка): «Bulk edit» на Offers */
+a.button-link {
+  display: inline-flex; align-items: center; min-height: var(--control-h); padding: var(--space-1) var(--space-3); border: var(--border-width) solid var(--border);
+  border-radius: var(--radius); background: var(--control-bg); color: var(--control-fg); font-weight: var(--weight-medium); font-size: var(--font-size);
+  line-height: var(--line-height-tight); box-shadow: var(--button-shadow); text-decoration: none; white-space: nowrap;
+}
+a.button-link:hover { background: var(--control-bg-hover); text-decoration: none; }
+/* шаг 95: раздел слитого экрана, к которому ведёт прежний адрес, — под липкой шапкой, а не за ней */
+.section-anchor { display: block; scroll-margin-top: calc(var(--topbar-h) + var(--space-3)); }
+.page-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 0 0 var(--space-3); }
+.costs > section + .section-anchor + section, .channels-page > .section-anchor + * { margin-top: var(--space-5); }
+.setup-section { margin-bottom: var(--space-5); }
+/* шаг 95: строка о виде журнала под рядом фильтров — не вплотную к нему и к таблице */
+.toolbar + p.section-sub { margin: var(--space-2) 0 var(--space-3); }
 a.row-link { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--font-size); color: var(--accent); white-space: nowrap; }
 a.row-link::after { content: '→'; }
 
@@ -834,7 +848,7 @@ p.notice.live-blocked { margin: 0; }
   button, select, input:not([type='checkbox']):not([type='radio']):not([type='file']), details.column-picker > summary { min-height: var(--touch-target); }
   details.column-picker > summary { display: inline-flex; align-items: center; }
   button.link { min-height: var(--touch-target); display: inline-flex; align-items: center; }
-  .nav-group a, .sidebar .workspace a, a.row-link, .tabs a, p.back a { min-height: var(--touch-target); display: inline-flex; align-items: center; }
+  .nav-group a, .sidebar .workspace a, a.row-link, a.button-link, .tabs a, p.back a { min-height: var(--touch-target); display: inline-flex; align-items: center; }
   .nav-group a { display: flex; }
   button.role-row { min-height: var(--touch-target); }
   .theme-button { min-width: var(--touch-target); min-height: var(--touch-target); }

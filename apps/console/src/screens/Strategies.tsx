@@ -208,7 +208,7 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
       <p className="subtitle">{m.ui.app.subtitles.strategies}</p>
       <h3>{t.inUse}</h3>
       {/* Задача D шага 34: новый тенант без стратегий и офферов видит объяснение, а не пустой список */}
-      {view.strategies.length === 0 ? <p className="notice">{m.ui.onboarding.empty.strategies} <a href={href(view.worldId, 'onboarding')}>{m.ui.onboarding.empty.startHere}</a></p> : null}
+      {view.strategies.length === 0 ? <p className="notice">{m.ui.onboarding.empty.strategies} <a href={href(view.worldId, 'channels')}>{m.ui.onboarding.empty.startHere}</a></p> : null}
       <ul className="index strategy-cards">
         {view.strategies.map((s) => (
           <li key={s.strategyId} className="card">
@@ -290,7 +290,7 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
       {/* Шаг 79: выбор предложений, предпросмотр и сохранение — одной карточкой; шаг 94: чекбоксы — поля стандарта, кнопки — рядом в конце */}
       <FieldGroup className="pick-card" title={t.pick}>
       {/* Шаг 79 (ревью): без предложений выбирать нечего — пустое состояние с путём, а не форма на ноль предложений */}
-      {view.page.total === 0 ? <p className="muted empty">{t.noOffers} <a href={href(worldId, 'connections')}>{m.ui.app.connectChannel}</a></p> : <>
+      {view.page.total === 0 ? <p className="muted empty">{t.noOffers} <a href={href(worldId, 'channels', 'accounts')}>{m.ui.app.connectChannel}</a></p> : <>
       {/* Р-140 (шаг 30): «всё» — это весь каталог, а не показанная страница; страница выбирается отдельной кнопкой, и так и названа */}
       <CheckField label={t.selectAllCatalog(view.page.total)} caption={t.selectionReset} checked={wholeCatalog} disabled={busy}
         onChange={(v) => { setWholeCatalog(v); setSelected([]); changed(); }} />

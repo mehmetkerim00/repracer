@@ -15,7 +15,7 @@
 | Тенант | **workspace** | **Arbeitsbereich** | tenant, seller account, account group / Mandant, Verkäuferkonto, Händlerkonto | Бизнес продавца в PriceTrail: его участники, каналы, каталог, границы. У агентства их несколько, у каждого свои язык и пояс (K1, K4) |
 | Канал | **channel** | **Kanal** | marketplace (о канале) / Marktplatz | Amazon, eBay, Kaufland |
 | Витрина | **storefront** | **Storefront** | marketplace / Marktplatz | amazon.de, amazon.com, ebay.com, kaufland.de — страна или сайт канала. На экране — словами, не кодом (`ATVPDKIKX0DER`, `EBAY_US`) |
-| Аккаунт канала | **channel account** (рядом с названием канала — «Amazon account») | **Kanalkonto** («Amazon-Konto») | seller account, channel connection / Kanalverbindung, Kanal-Konto | Аккаунт продавца в канале, подключённый к workspace. Экран — «Channel accounts» / «Kanalkonten» |
+| Аккаунт канала | **channel account** (рядом с названием канала — «Amazon account») | **Kanalkonto** («Amazon-Konto») | seller account, channel connection / Kanalverbindung, Kanal-Konto | Аккаунт продавца в канале, подключённый к workspace. Раздел «Channel accounts» / «Kanalkonten» экрана «Channels» / «Kanäle» (шаг 95) |
 | Кабинет продавца в канале | **channel back office** | **Kanal-Backoffice** | seller account on the marketplace / Kanal-Konto | Seller Central, Seller Hub, Kaufland Seller Portal — где продавец правит предложения руками |
 | Товар | **product** | **Produkt** | item, article / Artikel | Вещь продавца с его SKU: себестоимость, общий остаток. У товара может быть несколько предложений |
 | Предложение | **offer** | **Angebot** | listing (кроме разговора об eBay), unit, item / Listing, Einheit | Товар на одной витрине одного аккаунта канала: цена, границы, стратегия, запись в канал. Подпись — название товара или SKU и витрина: «Water bottle, black · kaufland.de» |
@@ -31,6 +31,26 @@
 - «Shadow mode» / «Schattenmodus», «live writes» / «echte Schreibvorgänge» [Р-169];
 - «bounds» / «Grenzen», «floor» / «Untergrenze»;
 - «strategy» / «Strategie», «Price Gate».
+
+## Меню рабочего пространства (шаг 95, Р-217)
+
+Девять пунктов; пункт меню и заголовок его страницы — одни и те же слова (правило браузерного смоука «step 86» на обоих языках).
+
+| Пункт | EN | DE | Что внутри |
+|---|---|---|---|
+| Тень | **Shadow mode** | **Schattenmodus** | Что движок сделал бы, пока ничего не пишется [Р-169] |
+| Журнал цен | **Price changes** | **Preisänderungen** | Единственный журнал цен. «Kind» / «Art»: **Price writes** / **Preisübertragungen** — записи в канал; **All decisions** / **Alle Entscheidungen** — все решения, с записью и без. Строка ведёт на квитанцию **Why this price** / **Warum dieser Preis** — своей страницей |
+| Стратегии | **Strategies** | **Strategien** | Стратегии, назначение, предпросмотр |
+| Себестоимость и пол | **Costs & floors** | **Kosten & Untergrenzen** | Границы всех предложений и массовая правка, ниже — импорт себестоимости («Import unit costs» / «Stückkosten importieren»). Страница предложения — **Bounds and price floor** / **Grenzen und Preisuntergrenze** |
+| Защита | **Protections** | **Schutz** | **Stopped by people** / **Von Menschen gestoppt** и **Prevented by rules** / **Durch Regeln verhindert** (сверху — «пол удержал цену N раз») |
+| Предложения | **Offers** | **Angebote** | Кнопка **Bulk edit** / **Massenbearbeitung** ведёт на массовые операции (**Bulk operations** / **Massenvorgänge**) |
+| Остатки | **Stock** | **Bestand** | Источники, синхронизация, расхождения, возвраты |
+| Каналы | **Channels** | **Kanäle** | Путь подключения (**Setup** / **Einrichtung**) — сверху, пока не пройден; ниже **Channel accounts** / **Kanalkonten**, разрешения записи количества, язык и пояс |
+| Остановка | **Stop pricing** | **Preise stoppen** | Три вида остановки и журнал |
+
+Omnibus — десятым пунктом только у пространства с витриной ЕС в профиле `eu` или `global` [Р-214]. Прежние имена экранов (Setup,
+Channel accounts, Why this price, Stopped changes, Dangerous changes, Bounds, Unit cost import, Bulk operations) живут заголовками
+разделов и страниц внутри новых пунктов; их адреса перенаправляются.
 
 ## Роли (шаг 88, Р-213)
 
@@ -60,7 +80,7 @@
 - Неделя дайджеста тени считается с понедельника по воскресенье в поясе workspace; после смены пояса письмо за ту же неделю второй раз не уходит.
 - Итоги и файлы фоновых заданий — языком и в поясе workspace, а не браузера.
 - Публичное демо — один workspace на всех гостей: язык у него — гостя (переключатель в шапке), пояс — демо.
-- Меняет язык и пояс владелец (или прежний администратор) на экране «Channel accounts» → «Language and time zone of this workspace». Пояс по
+- Меняет язык и пояс владелец (или прежний администратор) на экране «Channels» → «Language and time zone of this workspace». Пояс по
   умолчанию экран называет отдельно и не превращает в заданный, пока его не правили.
 
 ## Блоки «Good to know about this screen» (K5)

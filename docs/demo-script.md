@@ -97,8 +97,10 @@ channel simulator: offers on amazon.com and ebay.com, in shadow mode.»; их п
 
 Что сказать: это тот же продукт, что у вас будет, — только канал симулирован и цифры выдуманы.
 
-**Меню слева** (шаг 79): **Overview** — Setup, Shadow mode; **Pricing** — Why this price, Strategies, Price changes, Stopped changes,
-Dangerous changes, Bounds; **Stock** — Stock, Offers, Unit cost import; **Workspace** — Channel accounts, Bulk operations, Stop pricing.
+**Меню слева** (шаг 95 [Р-217] — девять пунктов вместо четырнадцати): **Overview** — Shadow mode; **Pricing** — Price changes,
+Strategies, Costs & floors, Protections; **Stock** — Offers, Stock; **Workspace** — Channels, Stop pricing. Что сказать: «функции те же —
+меньше дверей»: журнал цен один (решения — фильтром Kind), границы и себестоимость — на одном экране, защиты — на одном, путь подключения
+и аккаунты каналов — на одном, массовые операции — кнопкой «Bulk edit» на Offers.
 Над меню — имя магазина и ссылка **«← All workspaces»** (к списку магазинов).
 
 Вкладки **Omnibus** нет: это правило ЕС о прежней цене скидки, а профиль us его не предлагает (шаг 87) — у продавца только с витринами
@@ -171,9 +173,10 @@ psql -d repracer_demo -c "SELECT final_status, count(*) AS writes, count(dispatc
 
 ## б. «Почему эта цена» (2 мин)
 
-На экране тени — **Why this price** в строке таблицы удержанных записей (строки amazon.com прожатой недели есть сразу; ссылка в меню
-с тем же именем ведёт на список решений, а не на строку). В меню «Why this price» открывается список решений с тем же заголовком (шаг 86):
-там вперемешку решения пересчёта eBay и amazon.com, многие — «No change», фильтра по исходу нет; поэтому показывайте из экрана тени.
+На экране тени — **Why this price** в строке таблицы удержанных записей (строки amazon.com прожатой недели есть сразу). Пункта меню
+«Why this price» больше нет (шаг 95): все решения — в **Price changes** с фильтром **Kind → All decisions**; там вперемешку решения
+пересчёта eBay и amazon.com, многие — «No change», фильтра по исходу нет; поэтому показывайте из экрана тени. Квитанция решения
+остаётся своей страницей «Why this price», пункт меню над ней — Price changes.
 
 **Экран решения amazon.com** (шаг 68, записано прогоном `demo-us-live`): предложение подписано словами — «Plant pot, green · amazon.com».
 
@@ -236,7 +239,9 @@ declared it)», «Minimum margin $6.85 — margin at least 12%», «Effective fl
 
 ## г. Внешние писатели: «мы не подерёмся с вашим PrepShipHub» (1,5 мин)
 
-**Экран «Channel accounts»**, карточка **eBay · syn_demo_ebay_us_… · ebay.com**:
+**Экран «Channels»** (шаг 95). Сверху — раздел **Setup**: у демо путь не пройден и не пройдётся сам — «Resume at: Stock synchronization
+enabled», 12 of 36 (запись количества eBay и Walmart ждёт подтверждения владельца [Р-202], об этом и рассказ ниже). Прокрутите к разделу
+**«Channel accounts»** (или откройте адрес `…/channels/accounts`), карточка **eBay · syn_demo_ebay_us_… · ebay.com**:
 
 - «shadow: connected, nothing is written»;
 - «Found 12 offers; the shadow made N decisions in the last 24 hours.» (шаг 68: тень США считает);
@@ -304,7 +309,7 @@ with reservations»** — список фильтруется сразу, над
 
 ## е. Walmart: паритет цен — «мы видим все каналы сразу» (1 мин)
 
-**Экран «Offers»** (меню Stock → Offers): «Total 36: on 36, …» — предложения трёх витрин одной таблицей. У двух предложений walmart.com
+**Экран «Offers»** (меню Stock → Offers; справа в шапке таблицы — кнопка **«Bulk edit»** к массовым операциям): «Total 36: on 36, …» — предложения трёх витрин одной таблицей. У двух предложений walmart.com
 в колонке **«Channel says»** — красная пилюля **«Unpublished (uncompetitive price)»** и под ней коротко: «Cheaper elsewhere: $19.99.
 Since Oct 7, 2026, 15:31 UTC−4; PriceTrail does not change the price here.» Наведите курсор на ячейку — подсказка с полным объяснением:
 

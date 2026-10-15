@@ -24,8 +24,8 @@ export interface OnboardingStepView {
   totalCount: number;
   /** Только у шага канала: хотя бы один аккаунт ждёт доступа [Р-150] */
   awaiting: boolean;
-  /** Куда идти, чтобы сделать шаг — экран консоли */
-  goTo: { screen: string; label: string } | null;
+  /** Куда идти, чтобы сделать шаг — экран консоли; `param` — раздел экрана (шаг 95: импорт себестоимости — раздел Costs & floors) */
+  goTo: { screen: string; param: string | null; label: string } | null;
 }
 
 /**
@@ -85,7 +85,10 @@ export interface OnboardingView {
   enableCount: number;
 }
 
-const GO_TO: Record<Exclude<OnboardingStep, 'TENANT'>, string> = { CHANNEL: 'onboarding', STOCK_SOURCE: 'stock', STOCK_SYNC: 'stock', COSTS: 'cost-import', BOUNDS: 'bounds', STRATEGY: 'strategies', ENABLE: 'products' };
+/** Шаг 95 [Р-217]: экраны меню из 9 пунктов — канал на Channels, себестоимость разделом и границы на Costs & floors */
+const GO_TO: Record<Exclude<OnboardingStep, 'TENANT'>, readonly [string, string | null]> = {
+  CHANNEL: ['channels', 'accounts'], STOCK_SOURCE: ['stock', null], STOCK_SYNC: ['stock', null], COSTS: ['costs', 'import'], BOUNDS: ['costs', null], STRATEGY: ['strategies', null], ENABLE: ['products', null],
+};
 
 /** От мира экрану пути нужны три поля — не состояние консоли целиком: оно читает все решения тенанта (OQ-214) */
 export function onboardingView(world: Pick<StandWorld, 'id' | 'demo' | 'viewer'>, progress: OnboardingProgressRow | null, status: OnboardingStepStatus[],
@@ -102,7 +105,7 @@ export function onboardingView(world: Pick<StandWorld, 'id' | 'demo' | 'viewer'>
     return {
       step, title: t.steps[step], hint: t.stepHints[step], done: s.done, current: step === resumeAt,
       progress: t.progress(s.doneCount, s.totalCount), doneCount: s.doneCount, totalCount: s.totalCount, awaiting: s.awaiting,
-      goTo: step === 'TENANT' ? null : { screen: GO_TO[step], label: t.goTo[step] },
+      goTo: step === 'TENANT' ? null : { screen: GO_TO[step][0], param: GO_TO[step][1], label: t.goTo[step] },
     };
   });
   // Сужение набора — шаг себестоимости; на пути остатков его нет, и предлагать сузить нечего [Р-152]

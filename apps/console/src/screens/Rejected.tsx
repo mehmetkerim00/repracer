@@ -2,34 +2,47 @@ import type { RejectedView } from '@repracer/console-model';
 import { useResource, worldPath } from '../api.ts';
 import { Badge, commonZone, Gaps, href, Load, ReasonLine, useMessages, When, WhenHead } from '../components.tsx';
 
-/** Экран C: опасные изменения (отклонение от границы больше 10 %) отдельно от скорректированных [Р-73] */
-export function RejectedScreenView({ view }: { view: RejectedView }) {
+/**
+ * Экран C: опасные изменения (отклонение от границы больше 10 %) отдельно от скорректированных [Р-73].
+ * Шаг 95 [Р-217]: страницы «Stopped changes» нет — список делится вкладками Protections: `only="STOP"` — то, что остановил человек,
+ * `only="RULES"` — всё остальное (границы, проверка входов, перепроверка при отправке, остановка витрины). Окно — та же неделя целиком
+ * (список не постраничный), поэтому деление на экране ничего не теряет
+ */
+export function RejectedScreenView({ view, only = null }: { view: RejectedView; only?: 'STOP' | 'RULES' | null }) {
   const m = useMessages();
   const r = m.ui.rejected;
+  const p = m.ui.protections;
   const c = r.columns;
-  const zone = commonZone(view.items.map((item) => item.at));
+  const items = only === 'STOP' ? view.items.filter((i) => i.kind === 'STOP') : only === 'RULES' ? view.items.filter((i) => i.kind !== 'STOP') : view.items;
+  const zone = commonZone(items.map((item) => item.at));
   return (
     <section>
-      <h2>{r.pageTitle}</h2>
-      <p className="subtitle">{m.ui.app.subtitles.rejected}</p>
+      {only === null ? <><h2>{r.pageTitle}</h2><p className="subtitle">{m.ui.app.subtitles.rejected}</p></> : only === 'RULES' ? <h3>{p.otherTitle}</h3> : null}
       {/* Шаг 79: итог, сводка и группы — карточкой-сводкой, а не текстом на фоне страницы */}
-      <section className="card summary-card">
-        <p className="headline">{view.headline}</p>
-        <p className="muted small">{r.summary(view.summary)}</p>
-        {view.groups.length > 0 ? (
-          <ul className="groups">
-            {view.groups.map((g) => <li key={g.code}><Badge tone="off">{g.count}</Badge> {g.title}</li>)}
-          </ul>
-        ) : null}
-      </section>
-      {view.items.length === 0 ? <p className="muted empty">{r.none}</p> : (
+      {only === 'STOP' ? (
+        <section className="card summary-card">
+          <p className="headline">{p.peopleHeadline(items.length)}</p>
+          <p className="small"><a href={href(view.worldId, 'stop')}>{p.whoStopped}</a></p>
+        </section>
+      ) : (
+        <section className="card summary-card">
+          <p className="headline">{view.headline}</p>
+          <p className="muted small">{r.summary(view.summary)}</p>
+          {view.groups.length > 0 ? (
+            <ul className="groups">
+              {view.groups.map((g) => <li key={g.code}><Badge tone="off">{g.count}</Badge> {g.title}</li>)}
+            </ul>
+          ) : null}
+        </section>
+      )}
+      {items.length === 0 ? <p className="muted empty">{only === 'STOP' ? p.peopleNone : only === 'RULES' ? p.rulesNone : r.none}</p> : (
         <div className="table-wrap">
           <table className="dense sticky-end cardify">
             <thead>
               <tr><th><WhenHead label={c.when} zone={zone} /></th><th>{c.where}</th><th>{c.kind}</th><th className="num">{c.proposed}</th><th className="num">{c.before}</th><th>{c.limit}</th><th className="num">{c.deviation}</th><th>{c.reason}</th><th /></tr>
             </thead>
             <tbody>
-              {view.items.map((item, i) => (
+              {items.map((item, i) => (
                 <tr key={i} className={item.intervention === 'DANGEROUS' ? 'dangerous' : ''}>
                   <td className="nowrap" data-label={`${c.when}${zone ? ` · ${zone}` : ''}`}><When value={item.at} zone={!zone} /></td>
                   <td className="offer card-title">{item.unit?.label ?? item.productRef ?? m.ui.common.noValue}</td>
@@ -56,8 +69,8 @@ export function RejectedScreenView({ view }: { view: RejectedView }) {
   );
 }
 
-export function RejectedScreen({ worldId }: { worldId: string }) {
+export function RejectedScreen({ worldId, only }: { worldId: string; only: 'STOP' | 'RULES' }) {
   const m = useMessages();
   const [resource, retry] = useResource<RejectedView>(worldPath(worldId, 'rejected'), m.locale);
-  return <Load shape="table" resource={resource} retry={retry}>{(view) => <RejectedScreenView view={view} />}</Load>;
+  return <Load shape="table" resource={resource} retry={retry}>{(view) => <RejectedScreenView view={view} only={only} />}</Load>;
 }

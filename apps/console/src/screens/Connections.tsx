@@ -1,7 +1,7 @@
 import { useContext, useEffect, useRef, useState } from 'react';
 import { zoneName, type ConnectionAccountView, type ConnectionsView } from '@repracer/console-model';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, ErrorBox, errorText, Load, MarketContext, useMessages, Intro } from '../components.tsx';
+import { Badge, ErrorBox, errorText, href, Load, MarketContext, useMessages, Intro } from '../components.tsx';
 import { CheckField, Field, FieldGrid, FormActions } from '../forms.tsx';
 
 /**
@@ -16,7 +16,8 @@ const PENDING_WORLD = 'repracer.connect.world';
 
 const tone = (state: string): 'ok' | 'warn' | 'stop' => (state === 'LIVE' ? 'ok' : state === 'REVOKED' ? 'stop' : 'warn');
 
-export function ConnectionsScreen({ worldId }: { worldId: string }) {
+/** Шаг 95 [Р-217]: аккаунты — разделом Channels (`embedded`): заголовок раздела, страница называется пунктом меню */
+export function ConnectionsScreen({ worldId, embedded = false }: { worldId: string; embedded?: boolean }) {
   const m = useMessages();
   const [view, retry] = useResource<ConnectionsView>(worldPath(worldId, 'connections'), m.locale);
   const [error, setError] = useState<string | null>(null);
@@ -33,7 +34,7 @@ export function ConnectionsScreen({ worldId }: { worldId: string }) {
       {(v) => (
         <>
           {/* Заголовок страницы — над карточками, как на остальных экранах */}
-          <h2>{v.title}</h2>
+          {embedded ? <h3>{v.title}</h3> : <h2>{v.title}</h2>}
           <Intro text={v.intro} />
           {/* Шаг 78: вступление вынесено в подзаголовок — карточка подключения только там, где есть что показать */}
           {v.noRightText || error || v.channels.length > 0 ? <section className="card">
@@ -258,7 +259,8 @@ export function ConnectCallback({ onDone }: { onDone: () => void }) {
     } catch { worldId = null; }
     if (!worldId) { setMessage(m.ui.connections.errors.unknownState); return; }
     void requestJson<{ message: string }>(worldPath(worldId, 'connections', 'callback'), { method: 'POST', locale: m.locale, body: { params } })
-      .then(() => { window.location.hash = `#/worlds/${encodeURIComponent(worldId!)}/connections`; onDone(); })
+      // Шаг 95: прежний адрес `#/worlds/…/connections` разбор не знал (`w`, а не `worlds`) — возврат вёл на список пространств
+      .then(() => { window.location.hash = href(worldId!, 'channels', 'accounts'); onDone(); })
       .catch((e: unknown) => setMessage(errorText(e, m)));
   }, []);
   return <section className="card"><p>{message ?? '…'}</p></section>;

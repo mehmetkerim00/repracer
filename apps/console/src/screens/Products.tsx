@@ -46,12 +46,14 @@ export function ProductsView({ view, onEnable, query, onQuery }: {
       <h2>{p.title}</h2>
       <p className="subtitle">{m.ui.app.subtitles.products}</p>
       {/* Задача D шага 34: новый тенант без данных видит, ПОЧЕМУ пусто и куда идти, а не пустую таблицу */}
-      {view.rows.length === 0 ? <p className="notice">{m.ui.onboarding.empty.products} <a href={href(view.worldId, 'onboarding')}>{m.ui.onboarding.empty.startHere}</a></p> : null}
+      {view.rows.length === 0 ? <p className="notice">{m.ui.onboarding.empty.products} <a href={href(view.worldId, 'channels')}>{m.ui.onboarding.empty.startHere}</a></p> : null}
       {view.rows.length > 0 ? <div className="table-wrap">
         {/* Шаг 79: итоги и вид таблицы — в её шапке; колонки выбираются, строки бывают компактными */}
         <div className="table-head">
           <span>{p.totals(view.totals)}</span>
           <span className="view-options">
+            {/* Шаг 95 [Р-217]: массовые операции — кнопкой с Offers; своего пункта меню у них нет */}
+            <a className="button-link" href={href(view.worldId, 'products', 'bulk')}>{p.bulkEdit}</a>
             <details className="column-picker">
               <summary>{p.viewOptions.columns}</summary>
               <div className="menu">
@@ -135,7 +137,7 @@ export function EnableResultView(props: { unit: string; worldId?: string; result
           <p><strong>{d.enableProblems}</strong></p>
           <ul className="problems">{result.problems.map((r) => <li key={r.code}><ReasonLine reason={r} /></li>)}</ul>
           {props.worldId && result.problems.some((r) => r.code === 'COST_REQUIRED')
-            ? <p><a className="row-link" href={href(props.worldId, 'cost-import')}>{d.addCost}</a></p> : null}
+            ? <p><a className="row-link" href={href(props.worldId, 'costs', 'import')}>{d.addCost}</a></p> : null}
         </>
       ) : null}
       {result && !result.enabled && result.problems.length === 0 && result.warnings.length > 0 ? (

@@ -175,7 +175,8 @@ test('step 76: the console page runs in a real browser — sign-in, workspace li
   // Шаг 93: правило — в обеих темах (светлой и тёмной системной)
   for (const scheme of ['light', 'dark'] as const) {
     await b.setColorScheme(scheme);
-    for (const screen of ['products', 'decisions', 'strategies', 'feed', 'rejected', 'bounds', 'stop', 'stock', 'jobs']) {
+    // Шаг 95 [Р-217]: экраны нового меню и их вкладки — журнал решений, люди и правила защиты, массовые операции
+    for (const screen of ['products', 'feed', 'feed/decisions', 'strategies', 'costs', 'protections', 'protections/people', 'stop', 'stock', 'products/bulk']) {
       await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${screen}`)}, true)`);
       await settled(b, `${scheme} ${screen}`);
       for (const t of await stickyTables()) assert.ok(t.table <= t.wrap + 1, `${scheme} ${screen}: the table is ${t.table}px wide in a ${t.wrap}px frame — columns hide under the pinned action column`);
@@ -208,7 +209,10 @@ test('step 76: the console page runs in a real browser — sign-in, workspace li
  * при 375 и 768 страница НИГДЕ не листается вбок (листается только таблица внутри своей рамки), цели касания — не ниже 44px, навигация —
  * выдвижной панелью, которую закрывают выбор пункта, крестик, клик мимо и Esc; при 1012 и шире — прежняя боковая панель без кнопки меню
  */
-const SCREENS = ['shadow', 'products', 'stock', 'feed', 'decisions', 'rejected', 'dangerous', 'bounds', 'stop', 'connections', 'strategies', 'onboarding', 'compliance', 'jobs', 'cost-import'];
+/** Шаг 95 [Р-217]: меню из 9 пунктов в профиле us (в eu у пространства с витриной ЕС перед «Stop pricing» — Omnibus) */
+const MENU_US = ['shadow', 'feed', 'strategies', 'costs', 'protections', 'products', 'stock', 'channels', 'stop'];
+/** Шаг 95 [Р-217]: экраны меню из 9 пунктов и их вкладки; последним — Costs & floors (на нём проверяется навигация ниже) */
+const SCREENS = ['shadow', 'products', 'products/bulk', 'stock', 'feed', 'feed/decisions', 'protections', 'protections/people', 'stop', 'channels', 'strategies', 'compliance', 'costs'];
 const WIDTHS: ReadonlyArray<readonly [number, number]> = [[375, 812], [768, 1024], [1012, 800], [1440, 900]];
 
 /** Ширина прокрутки документа против ширины окна (без полосы прокрутки) и элементы, которые торчат за окно не внутри своей рамки прокрутки */
@@ -333,17 +337,17 @@ test('step 85: the console works from a 375px phone to a wide monitor — no pag
         await b.evaluate(`(document.getElementById('form-control').remove(), true)`);
         assert.ok(broken.length > 0, `control: «${css}» breaks the form standard and the rule sees it`);
       }
-      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/cost-import`)}, true)`);
-      await settled(b, `${width}px back to cost-import`);
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/costs`)}, true)`);
+      await settled(b, `${width}px back to costs`);
     }
     // навигация: на узком — выдвижная панель за кнопкой меню, на широком — боковая панель на месте, кнопки меню нет
     const nav = () => b.evaluate<{ menu: boolean; sidebar: boolean; screen: string }>(
       `({ menu: !!document.querySelector('.menu-button')?.checkVisibility({ visibilityProperty: true }), sidebar: document.querySelector('.sidebar').checkVisibility({ visibilityProperty: true }), screen: location.hash.split('/')[3] ?? '' })`);
     if (!narrow) {
-      assert.deepEqual(await nav(), { menu: false, sidebar: true, screen: 'cost-import' }, `${width}px: the side nav stays in place without a menu button`);
+      assert.deepEqual(await nav(), { menu: false, sidebar: true, screen: 'costs' }, `${width}px: the side nav stays in place without a menu button`);
       continue;
     }
-    assert.deepEqual(await nav(), { menu: true, sidebar: false, screen: 'cost-import' }, `${width}px: the nav hides behind the menu button`);
+    assert.deepEqual(await nav(), { menu: true, sidebar: false, screen: 'costs' }, `${width}px: the nav hides behind the menu button`);
     const open = async () => { await b.click(en.ui.app.menu); assert.equal((await nav()).sidebar, true, `${width}px: the menu button opens the drawer`); };
     await open();
     // пункты меню, «← All workspaces», язык и выход видны только в открытой панели — и проверяются в ней
@@ -414,8 +418,9 @@ test('step 86: every menu item and the heading of its page are the same words �
     }
     const links = await b.evaluate<Array<{ text: string; href: string }>>(
       `[...document.querySelectorAll('.nav-group a')].map((a) => ({ text: a.textContent.trim(), href: a.getAttribute('href') }))`);
-    assert.ok(links.length >= 12, `${m.locale}: the navigation shows its items — ${links.length}`);
-    assert.ok(links.some((l) => l.text === m.ui.app.screens.decisions), `${m.locale}: the navigation speaks the screen language`);
+    // Шаг 95 [Р-217]: девять пунктов и Omnibus — у смоук-мира витрины ЕС
+    assert.deepEqual(links.map((l) => l.href.split('/')[3]), [...MENU_US.slice(0, 8), 'compliance', 'stop'], `${m.locale}: the menu of nine items and Omnibus`);
+    assert.ok(links.some((l) => l.text === m.ui.app.screens.feed), `${m.locale}: the navigation speaks the screen language`);
     const mismatches: string[] = [];
     for (const l of links) {
       await b.evaluate(`(location.hash = ${JSON.stringify(l.href)}, true)`);
@@ -434,6 +439,111 @@ test('step 86: every menu item and the heading of its page are the same words �
   await b.evaluate(`(document.querySelector('.world-content').insertAdjacentHTML('beforeend', '<section class="card" id="out-control"><table style="margin: 0 -24px; width: calc(100% + 48px)"><tbody><tr><td>control</td></tr></tbody></table></section>'), true)`);
   assert.match((await b.evaluate<string[]>(OUT_OF_BOX)).join(' | '), /sticks out of section\.card by 7px/);
   await b.evaluate(`(document.getElementById('out-control').remove(), true)`);
+});
+
+/**
+ * Шаг 95 [Р-217]: меню из 9 пунктов вместо 14 — функции не исчезают, исчезают лишние двери. Прежние адреса (закладки, ссылки из писем,
+ * старые вкладки) ведут на новые места, к нужному разделу, заменой адреса: «назад» не возвращает на перенаправление. Квитанция решения
+ * «Why this price» и страница предложения «Bounds and price floor» остаются своими адресами, пункт меню над ними — журнал цен и Costs & floors
+ */
+const OLD_ROUTES: ReadonlyArray<readonly [string, string, string]> = [
+  ['decisions', 'feed/decisions', 'feed'], ['rejected', 'protections/rules', 'protections'], ['dangerous', 'protections/rules', 'protections'],
+  ['dangerous/30', 'protections/rules/30', 'protections'], ['bounds', 'costs', 'costs'], ['cost-import', 'costs/import', 'costs'],
+  ['connections', 'channels/accounts', 'channels'], ['onboarding', 'channels', 'channels'], ['jobs', 'products/bulk', 'products'],
+];
+
+test('step 95 (Р-217): nine menu items; every old address leads to its new place and section; a decision receipt and an offer page keep their addresses', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  await b.setViewport(1440, 900);
+  await b.setColorScheme(null);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  const go = async (to: string) => { await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${to}`)}, true)`); };
+  const at = () => b.evaluate<string>(`location.hash.split('/').slice(3).join('/')`);
+  const waitAt = async (want: string) => { for (let i = 0; i < 50 && (await at()) !== want; i++) await new Promise((r) => setTimeout(r, 100)); return at(); };
+  const page = () => b.evaluate<{ heading: string; active: string | null }>(`({ heading: document.querySelector('.world-content h2')?.textContent.trim() ?? '',
+    active: document.querySelector('.nav-group a.active')?.getAttribute('href').split('/')[3] ?? null })`);
+  const headingOf: Record<string, string> = { feed: en.ui.app.screens.feed, protections: en.ui.app.screens.protections, costs: en.ui.app.screens.costs, channels: en.ui.app.screens.channels, products: en.ui.jobs.pageTitle };
+  for (const [old, to, menu] of OLD_ROUTES) {
+    await go('stock');
+    await settled(b, 'stock');
+    await go(old);
+    assert.equal(await waitAt(to), to, `«${old}» leads to «${to}»`);
+    await settled(b, to);
+    assert.deepEqual(await page(), { heading: headingOf[menu]!, active: menu }, `«${old}»: the page and its menu item`);
+    // Раздел, к которому ведёт адрес, — под шапкой окна, а не ниже первого экрана
+    const section = to === 'costs/import' ? 'cost-import' : to === 'channels/accounts' ? 'channel-accounts' : null;
+    if (section) {
+      // короткая страница до верха не прокручивается — тогда раздел в окне, а страница прокручена до конца
+      const where = () => b.evaluate<{ top: number; bottom: boolean; height: number }>(`(() => { const r = document.getElementById(${JSON.stringify(section)}).getBoundingClientRect();
+        return { top: Math.round(r.top), bottom: window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 1, height: window.innerHeight }; })()`);
+      let w = await where();
+      for (let i = 0; i < 30 && !(w.top >= 0 && (w.top < 200 || w.bottom)); i++) { await new Promise((r) => setTimeout(r, 100)); w = await where(); }
+      assert.ok(w.top >= 0 && w.top < w.height - 100 && (w.top < 200 || w.bottom), `«${old}»: the section «${section}» is in the window — ${JSON.stringify(w)}`);
+    }
+    // «Назад» ведёт туда, откуда пришли, а не на прежний адрес (он перенаправил бы снова)
+    await b.evaluate('(history.back(), true)');
+    assert.equal(await waitAt('stock'), 'stock', `«${old}»: back returns to the page before, not to the redirect`);
+  }
+  // Положительный контроль: без раздела в адресе страница остаётся наверху — условие «раздел в окне» выше само собой не выполняется
+  await go('costs');
+  await settled(b, 'costs, top');
+  const plain = await b.evaluate<{ top: number; scrollY: number }>(`({ top: Math.round(document.getElementById('cost-import').getBoundingClientRect().top), scrollY: Math.round(window.scrollY) })`);
+  assert.ok(plain.scrollY === 0 && plain.top >= 200, `control: «costs» without a section stays at the top — ${JSON.stringify(plain)}`);
+  // Положительный контроль: неизвестный адрес — «не найдено», а не перенаправление
+  await go('nonsense');
+  await settled(b, 'nonsense');
+  assert.equal((await b.evaluate<string>(`document.querySelector('.world-content h2')?.textContent.trim() ?? ''`)), en.ui.app.notFoundTitle);
+  // Журнал цен: вид «All decisions» — фильтр Kind; строки ведут на квитанцию «Why this price» своим адресом, пункт меню — журнал
+  await go('feed');
+  await settled(b, 'feed');
+  await b.evaluate(`(() => { const s = [...document.querySelectorAll('.toolbar select')].find((x) => [...x.options].some((o) => o.value === 'decisions'));
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, 'decisions'); s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  assert.equal(await waitAt('feed/decisions'), 'feed/decisions', 'Kind «All decisions» switches the journal');
+  await settled(b, 'feed/decisions');
+  const fields = await b.evaluate<string[]>(`[...document.querySelectorAll('.toolbar .field-label')].map((l) => l.textContent.trim())`);
+  assert.deepEqual(fields, [en.ui.feed.kind.label, en.ui.feed.filters.offer], 'decisions are filtered by offer only — status and period belong to price writes');
+  const receipt = await b.evaluate<string>(`document.querySelector('.world-content table a.row-link').getAttribute('href')`);
+  await b.evaluate(`(location.hash = ${JSON.stringify(receipt)}, true)`);
+  await settled(b, 'receipt');
+  assert.match(await at(), /^decisions\/[^/]+$/, 'the receipt keeps its address');
+  assert.deepEqual(await b.evaluate<{ heading: string; active: string | null }>(`({ heading: document.querySelector('.world-content h2')?.textContent.trim() ?? '', active: document.querySelector('.nav-group a.active')?.getAttribute('href').split('/')[3] ?? null })`),
+    { heading: en.ui.trace.pageTitle, active: 'feed' }, 'the receipt «Why this price» under Price changes');
+  // Страница предложения — своим адресом под Costs & floors
+  await go('costs');
+  await settled(b, 'costs');
+  await b.evaluate(`(location.hash = document.querySelector('.world-content table a.row-link').getAttribute('href'), true)`);
+  await settled(b, 'offer bounds');
+  assert.match(await at(), /^bounds\/[^/]+$/);
+  assert.deepEqual(await page(), { heading: en.ui.bounds.pageTitle, active: 'costs' }, 'the offer page «Bounds and price floor» under Costs & floors');
+  // Protections: вкладки «Stopped by people» и «Prevented by rules»; витрина «пол удержал» — сверху вкладки правил
+  await go('protections');
+  await settled(b, 'protections');
+  const tabs = await b.evaluate<string[]>(`[...document.querySelectorAll('.protections > nav.tabs a')].map((a) => a.textContent.trim() + (a.classList.contains('active') ? ' *' : ''))`);
+  assert.deepEqual(tabs, [en.ui.protections.people, `${en.ui.protections.rules} *`]);
+  assert.match(await b.evaluate<string>(`document.querySelector('.protections .summary-card .headline').textContent`), /^The floor /, 'the floor showcase opens the rules tab');
+  await b.click(en.ui.protections.people, '.protections > nav.tabs a');
+  assert.equal(await waitAt('protections/people'), 'protections/people');
+  await settled(b, 'protections/people');
+  // Offers: «Bulk edit» открывает массовые операции, пункт меню — Offers
+  await go('products');
+  await settled(b, 'products');
+  await b.click(en.ui.products.bulkEdit, 'a.button-link');
+  assert.equal(await waitAt('products/bulk'), 'products/bulk');
+  await settled(b, 'bulk');
+  assert.deepEqual(await page(), { heading: en.ui.jobs.pageTitle, active: 'products' });
+  // Channels: путь подключения — верхним разделом, пока не пройден (у смоук-мира путь не выбран)
+  await go('channels');
+  await settled(b, 'channels');
+  assert.ok(await b.evaluate<boolean>(`(() => { const s = document.querySelector('.setup-section'), a = document.getElementById('channel-accounts');
+    return !!s && !!a && s.getBoundingClientRect().top < a.getBoundingClientRect().top; })()`), 'the unfinished setup checklist stands above the channel accounts');
+  assert.deepEqual(b.errors().slice(before), [], 'the console page threw or logged errors');
 });
 
 /**
@@ -527,7 +637,7 @@ test('step 87: the us market profile shows no German, no Omnibus, no Kaufland an
     await settled(b, 'us empty workspace');
     const links = await b.evaluate<Array<{ text: string; href: string }>>(
       `[...document.querySelectorAll('.nav-group a')].map((a) => ({ text: a.textContent.trim(), href: a.getAttribute('href') }))`);
-    assert.ok(links.length >= 12 && !links.some((l) => l.text === en.ui.app.screens.compliance), `us: no Omnibus in the menu — ${links.map((l) => l.text).join(', ')}`);
+    assert.deepEqual(links.map((l) => l.href.split('/')[3]), MENU_US, `us: nine menu items, no Omnibus — ${links.map((l) => l.text).join(', ')}`);
     for (const l of links) {
       await b.evaluate(`(location.hash = ${JSON.stringify(l.href)}, true)`);
       await settled(b, `us ${l.text}`);
@@ -536,7 +646,7 @@ test('step 87: the us market profile shows no German, no Omnibus, no Kaufland an
       assert.equal(await europeOnPage(), null, `us: ${l.text}`);
     }
     // Подключение предлагает витрины США — словами — и только их
-    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${encodeURIComponent(EMPTY_WORLD_ID)}/connections`)}, true)`);
+    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${encodeURIComponent(EMPTY_WORLD_ID)}/channels`)}, true)`);
     await settled(b, 'us connections');
     const connectText = await b.evaluate<string>('document.body.innerText');
     assert.ok(connectText.includes('amazon.com') && connectText.includes('ebay.com'), `us: amazon.com and ebay.com are offered — ${connectText.slice(0, 300)}`);
@@ -550,7 +660,7 @@ test('step 87: the us market profile shows no German, no Omnibus, no Kaufland an
   await b.waitText(en.ui.app.login.roleCan.OWNER);
   await b.click(owner);
   await b.waitText(en.ui.app.worlds);
-  await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${encodeURIComponent(EMPTY_WORLD_ID)}/connections`)}, true)`);
+  await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${encodeURIComponent(EMPTY_WORLD_ID)}/channels`)}, true)`);
   await settled(b, 'eu connections');
   const eu = await europeOnPage();
   assert.ok(eu !== null && /amazon\.de|Deutsch/.test(eu), `eu: the rule sees Europe — ${eu}`);
@@ -584,7 +694,7 @@ test('step 88 (Р-213): sign-in offers three roles at 375 and 1440, five with th
     await b.waitText(en.ui.app.login.roleCan.MANAGER);
     await b.click(en.ui.app.login.asAccount(en.values.MANAGER));
     await b.waitText(en.ui.app.worlds);
-    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${encodeURIComponent(EMPTY_WORLD_ID)}/connections`)}, true)`);
+    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${encodeURIComponent(EMPTY_WORLD_ID)}/channels`)}, true)`);
     await settled(b, 'manager connections');
     const connections = await b.evaluate<string>('document.body.innerText');
     assert.ok(connections.includes(en.ui.connections.noRight), 'the manager reads that channel accounts are the owner’s');

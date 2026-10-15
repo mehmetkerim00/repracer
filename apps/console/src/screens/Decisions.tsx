@@ -1,7 +1,6 @@
-import { useState } from 'react';
-import { LIST_PAGE_DEFAULT, type DecisionListItem, type DecisionListView, type DecisionTrace, type ListQuery, type StepStatus } from '@repracer/console-model';
+import type { DecisionListItem, DecisionTrace, StepStatus } from '@repracer/console-model';
 import { useResource, worldPath } from '../api.ts';
-import { Badge, commonZone, Gaps, href, Load, NotFound, Pager, ReasonLine, useMessages, When, WhenHead } from '../components.tsx';
+import { Badge, commonZone, Gaps, href, Load, NotFound, ReasonLine, useMessages, When, WhenHead } from '../components.tsx';
 import { Icon } from '../icons.tsx';
 
 const STATUS_TONE: Readonly<Record<StepStatus, string>> = { OK: 'ok', STOP: 'stop', WARN: 'warn', SKIPPED: 'off', UNKNOWN: 'unknown' };
@@ -14,9 +13,7 @@ export function DecisionsView({ worldId, items }: { worldId: string; items: read
   const zone = commonZone(items.map((d) => d.decidedAt));
   return (
     <section>
-      {/* Шаг 86: заголовок страницы — тот же текст, что пункт меню */}
-      <h2>{m.ui.app.screens.decisions}</h2>
-      <p className="subtitle">{m.ui.app.subtitles.decisions}</p>
+      {/* Шаг 95 [Р-217]: список решений — вид журнала Price changes (Kind: All decisions); заголовок страницы — у журнала */}
       {items.length === 0 ? <p className="muted empty">{t.noDecisions}</p> : (
         <div className="table-wrap">
           <table className="cardify">
@@ -45,7 +42,7 @@ export function TraceView({ trace }: { trace: DecisionTrace }) {
   const t = m.ui.trace;
   return (
     <article className="trace">
-      <p className="back"><a href={href(trace.worldId, 'decisions')}>{t.back}</a></p>
+      <p className="back"><a href={href(trace.worldId, 'feed', 'decisions')}>{t.back}</a></p>
       <h2>{t.pageTitle}</h2>
       <p className="subtitle">{t.meta(trace.unit?.label ?? m.ui.common.noValue, trace.decisionId, trace.decidedAt)}
         {/* Шаг 76 (предполётный прогон демо): от решения — к границам и разбивке пола этого же предложения. Без ссылки вопрос «что
@@ -90,21 +87,10 @@ export function TraceView({ trace }: { trace: DecisionTrace }) {
   );
 }
 
-export function DecisionsScreen({ worldId }: { worldId: string }) {
-  const m = useMessages();
-  const [query, setQuery] = useState<ListQuery>({ offset: 0, limit: LIST_PAGE_DEFAULT });
-  const [resource, retry] = useResource<DecisionListView>(`${worldPath(worldId, 'decisions')}?offset=${query.offset}&limit=${query.limit}`, m.locale);
-  return (
-    <Load shape="table" resource={resource} retry={retry}>
-      {(view) => (<><DecisionsView worldId={worldId} items={view.items} /><Pager page={view.page} query={query} onQuery={setQuery} /></>)}
-    </Load>
-  );
-}
-
 export function TraceScreen({ worldId, decisionId }: { worldId: string; decisionId: string }) {
   const m = useMessages();
   const [resource, retry] = useResource<DecisionTrace>(worldPath(worldId, 'decisions', decisionId), m.locale);
   const d = m.ui.trace;
-  const missing = <NotFound title={d.missingTitle} text={d.missingText} back={d.back} href={href(worldId, 'decisions')} />;
+  const missing = <NotFound title={d.missingTitle} text={d.missingText} back={d.back} href={href(worldId, 'feed', 'decisions')} />;
   return <Load shape="trace" resource={resource} retry={retry} notFound={missing}>{(trace) => <TraceView trace={trace} />}</Load>;
 }

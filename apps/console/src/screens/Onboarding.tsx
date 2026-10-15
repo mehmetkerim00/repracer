@@ -9,7 +9,11 @@ import { JobProgress } from './Jobs.tsx';
  * где шаг делается; единственное, что он пишет, — сужение набора [Р-131]. Состояние шагов приходит
  * с сервера ВЫВЕДЕННЫМ из данных: галочек здесь нет.
  */
-export function OnboardingScreen({ worldId }: { worldId: string }) {
+/**
+ * Шаг 95 [Р-217]: отдельного пункта «Setup» нет — путь живёт верхним разделом Channels, пока не пройден (`embedded`): заголовок
+ * раздела вместо заголовка страницы, без списка каналов (аккаунты — ниже на той же странице), пройденный путь не показывается вовсе
+ */
+export function OnboardingScreen({ worldId, embedded = false }: { worldId: string; embedded?: boolean }) {
   const m = useMessages();
   const [view, retry] = useResource<OnboardingView>(worldPath(worldId, 'onboarding'), m.locale);
   const [error, setError] = useState<string | null>(null);
@@ -33,9 +37,9 @@ export function OnboardingScreen({ worldId }: { worldId: string }) {
 
   return (
     <Load shape="cards" resource={view} retry={retry}>
-      {(v) => (
+      {(v) => embedded && v.resumeAt === 'DONE' && job === null && result === null && error === null ? null : (
         <>
-          <OnboardingScreenView view={v} worldId={worldId} busy={job !== null} onNarrow={narrow} onEnable={enable} onChoosePath={choosePath} />
+          <OnboardingScreenView view={v} worldId={worldId} busy={job !== null} onNarrow={narrow} onEnable={enable} onChoosePath={choosePath} embedded={embedded} />
           {job ? <JobProgress worldId={worldId} jobId={job.jobId} onFinished={(done) => {
             setJob(null);
             setResult((done.result?.view ?? null) as EnableResultView | null);
@@ -50,14 +54,14 @@ export function OnboardingScreen({ worldId }: { worldId: string }) {
 }
 
 /** Экран без запросов: то, что отрисовывает тест из ответа сервера, — как у остальных экранов консоли */
-export function OnboardingScreenView({ view: v, worldId, busy, onNarrow, onEnable, onChoosePath }: {
-  view: OnboardingView; worldId: string; busy: boolean; onNarrow: (widen: boolean) => void; onEnable: () => void; onChoosePath?: (path: 'STOCK' | 'STOCK_AND_PRICING') => void;
+export function OnboardingScreenView({ view: v, worldId, busy, onNarrow, onEnable, onChoosePath, embedded = false }: {
+  view: OnboardingView; worldId: string; busy: boolean; onNarrow: (widen: boolean) => void; onEnable: () => void; onChoosePath?: (path: 'STOCK' | 'STOCK_AND_PRICING') => void; embedded?: boolean;
 }) {
   const m = useMessages();
   const t = m.ui.onboarding;
   return (
-    <section className="onboarding">
-      <h2>{t.title}</h2>
+    <section className={`onboarding${embedded ? ' card setup-section' : ''}`}>
+      {embedded ? <h3>{t.title}</h3> : <h2>{t.title}</h2>}
       <Intro text={v.intro} />
       <p className="notice resume"><strong>{v.resumeText}</strong></p>
       {v.choices.length > 0 ? (
@@ -89,7 +93,7 @@ export function OnboardingScreenView({ view: v, worldId, busy, onNarrow, onEnabl
             <p className="small muted">{s.hint}</p>
             {/* Шаг 79 (ревью): «0 of 0» ничего не говорит — счёт только там, где есть что считать */}
             {s.totalCount > 0 ? <p className="small">{s.progress}</p> : null}
-            {s.goTo && !s.done ? <a className="row-link" href={href(worldId, s.goTo.screen)}>{s.goTo.label}</a> : null}
+            {s.goTo && !s.done ? <a className="row-link" href={href(worldId, s.goTo.screen, ...(s.goTo.param ? [s.goTo.param] : []))}>{s.goTo.label}</a> : null}
             {s.step === 'COSTS' && v.narrowing && v.canLead ? (
               <div className="narrowing">
                 <p className="small">{v.narrowing.hint}</p>
@@ -103,8 +107,8 @@ export function OnboardingScreenView({ view: v, worldId, busy, onNarrow, onEnabl
           </li>
         ))}
       </ol>
-      <h3>{t.channels.title}</h3>
-      {v.channels.length === 0 ? <p className="notice">{t.channels.none} <a href={href(worldId, 'connections')}>{m.ui.app.connectChannel}</a></p> : (
+      {embedded ? null : <h3>{t.channels.title}</h3>}
+      {embedded ? null : v.channels.length === 0 ? <p className="notice">{t.channels.none} <a href={href(worldId, 'channels', 'accounts')}>{m.ui.app.connectChannel}</a></p> : (
         <ul className="channels">
           {v.channels.map((c) => (
             <li key={c.channelAccountId} className="card channel">

@@ -6,38 +6,61 @@ import { Badge, ErrorBox, errorText, href, Intro, Load, MarketContext, MessagesC
 import { BrandMark, Icon } from './icons.tsx';
 import { applyTheme, storedTheme, THEME_CHOICES, type ThemeChoice } from './theme.ts';
 import { BoundsScreen } from './screens/Bounds.tsx';
+import { ChannelsScreen } from './screens/Channels.tsx';
 import { ComplianceScreen } from './screens/Compliance.tsx';
+import { CostsScreen } from './screens/Costs.tsx';
 import { JobHistory } from './screens/Jobs.tsx';
-import { OnboardingScreen } from './screens/Onboarding.tsx';
+import { ProtectionsScreen } from './screens/Protections.tsx';
 import { ShadowScreen } from './screens/Shadow.tsx';
 import { captureLoginReturns, completeLogin, forgetInvitation, pendingInvitation, startLogin } from './login.ts';
-import { captureConnectCallback, ConnectCallback, ConnectionsScreen, pendingConnectCallback } from './screens/Connections.tsx';
+import { captureConnectCallback, ConnectCallback, pendingConnectCallback } from './screens/Connections.tsx';
 
 // Р-175: возврат от канала запоминается ДО входа — адрес стирается сразу, код согласия в истории браузера не живёт
 captureConnectCallback();
 // Шаг 44 [Р-178]: возврат от поставщика входа и ссылка приглашения — тоже до входа
 captureLoginReturns();
 import { StockScreen } from './screens/Stock.tsx';
-import { DangerousScreen } from './screens/Dangerous.tsx';
 import { FeedScreen } from './screens/Feed.tsx';
 import { StrategiesScreen } from './screens/Strategies.tsx';
-import { DecisionsScreen, TraceScreen } from './screens/Decisions.tsx';
-import { CostImportScreen } from './screens/CostImport.tsx';
+import { TraceScreen } from './screens/Decisions.tsx';
 import { ProductsScreen } from './screens/Products.tsx';
-import { RejectedScreen } from './screens/Rejected.tsx';
 import { StopScreen } from './screens/Stop.tsx';
 
 export interface Route {
   worldId: string | null;
   screen: string;
   param: string | null;
+  /** Шаг 95: второй параметр — период вкладки «Prevented by rules» (`protections/rules/30`) */
+  param2?: string | null;
 }
 
 export function parseHash(hash: string): Route {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
   if (parts[0] !== 'w' || !parts[1]) return { worldId: null, screen: 'worlds', param: null };
-  return { worldId: parts[1], screen: parts[2] ?? 'products', param: parts[3] ?? null };
+  return { worldId: parts[1], screen: parts[2] ?? 'products', param: parts[3] ?? null, param2: parts[4] ?? null };
 }
+
+/**
+ * Шаг 95 [Р-217]: меню из 9 пунктов. Прежние адреса не ломаются — закладки, ссылки из писем и старые вкладки ведут на новые места,
+ * к нужному разделу. Квитанция решения (`decisions/<id>`, «Why this price») и страница предложения (`bounds/<id>`, «Bounds and price
+ * floor») остаются своими адресами
+ */
+export function redirectOf(route: Pick<Route, 'screen' | 'param'>): string[] | null {
+  switch (route.screen) {
+    case 'decisions': return route.param === null ? ['feed', 'decisions'] : null;
+    case 'rejected': return ['protections', 'rules'];
+    case 'dangerous': return ['protections', 'rules', ...(route.param ? [route.param] : [])];
+    case 'bounds': return route.param === null ? ['costs'] : null;
+    case 'cost-import': return ['costs', 'import'];
+    case 'connections': return ['channels', 'accounts'];
+    case 'onboarding': return ['channels'];
+    case 'jobs': return ['products', 'bulk'];
+    default: return null;
+  }
+}
+
+/** Пункт меню экрана, у которого своего пункта нет: квитанция решения — журнал цен, страница предложения — Costs & floors */
+const MENU_OF: Readonly<Record<string, string>> = { decisions: 'feed', bounds: 'costs' };
 
 /**
  * Р-142 (шаг 31): у массовых операций есть СВОЙ экран. Без него готовый файл и кнопка отмены жили только в состоянии того
@@ -46,11 +69,12 @@ export function parseHash(hash: string): Route {
  */
 /** Р-149 (шаг 34): путь онбординга — первый экран: с него продавец начинает и к нему возвращается, пока путь не пройден */
 /** Шаг 77: экраны мира — группами боковой панели (порядок групп и экранов — порядок показа продукта) */
+/** Шаг 95 [Р-217]: 9 пунктов вместо 14 — функции те же, лишних дверей нет; Omnibus — только где действует правило ЕС */
 const NAV_GROUPS = [
-  ['overview', ['onboarding', 'shadow']],
-  ['pricing', ['decisions', 'strategies', 'feed', 'rejected', 'dangerous', 'bounds']],
-  ['stock', ['stock', 'products', 'cost-import']],
-  ['account', ['connections', 'compliance', 'jobs', 'stop']],
+  ['overview', ['shadow']],
+  ['pricing', ['feed', 'strategies', 'costs', 'protections']],
+  ['stock', ['products', 'stock']],
+  ['account', ['channels', 'compliance', 'stop']],
 ] as const;
 
 /**
@@ -62,9 +86,8 @@ const NavContext = createContext<NavState>({ open: false, setOpen: () => undefin
 
 /** Шаг 81: знак у каждого пункта боковой панели — подпись та же, иконка только помогает глазу найти пункт */
 const NAV_ICONS: Record<string, string> = {
-  onboarding: 'home', shadow: 'shadow', decisions: 'help', strategies: 'strategy', feed: 'arrows', rejected: 'shield',
-  dangerous: 'alert', bounds: 'bounds', stock: 'box', products: 'list', 'cost-import': 'import',
-  connections: 'accounts', compliance: 'scales', jobs: 'zap', stop: 'stop',
+  shadow: 'shadow', feed: 'arrows', strategies: 'strategy', costs: 'bounds', protections: 'shield',
+  products: 'list', stock: 'box', channels: 'accounts', compliance: 'scales', stop: 'stop',
 };
 
 /** Вход [Р-78]: у поставщика identity; на стенде — имитатор с синтетическими пользователями. Паролей у нас нет */
@@ -189,6 +212,10 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [nav.open, setOpen]);
+  // Шаг 95 [Р-217]: прежний адрес — замена адреса, а не новая запись истории: «назад» не возвращает на перенаправление
+  const redirect = redirectOf(route);
+  const redirectTo = redirect ? href(route.worldId, ...redirect) : null;
+  useEffect(() => { if (redirectTo) window.location.replace(redirectTo); }, [redirectTo]);
   const world = worlds.find((w) => w.id === route.worldId);
   // Шаг 79: «не найдено» — карточкой с заголовком и путём обратно, а не строкой ошибки на фоне страницы
   if (!world) return <NotFound title={outer.ui.app.worldNotFoundTitle} text={outer.ui.app.worldNotFound(route.worldId)} back={outer.ui.app.backToWorlds} />;
@@ -198,6 +225,7 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
    */
   // Ревью шага 69, находка 5: у публичного демо язык не назван — он гостя (переключатель в шапке), а пояс — демо
   const m = world.locale || world.timeZone ? messagesFor(world.locale ?? outer.locale, { timeZone: world.timeZone }) : outer;
+  const active = MENU_OF[route.screen] ?? route.screen;
   return (
     <MessagesContext.Provider value={m}>
       {/* Р-151: демо помечается на КАЖДОМ экране мира — деньги показываются на большинстве из них; шаг 77 — тонкой полосой под шапкой */}
@@ -218,7 +246,7 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
               {/* Шаг 68 (K3): Omnibus — правило ЕС; продавцу только с витринами США пункта нет [Р-123] */}
               {/* Шаг 87 [Р-214]: Omnibus — правило ЕС; в профиле без правила ЕС пункта меню нет вовсе */}
               {keys.filter((key) => key !== 'compliance' || (world.euStorefronts && market.omnibus)).map((key) => (
-                <a key={key} href={href(world.id, key)} className={route.screen === key ? 'active' : ''} aria-current={route.screen === key ? 'page' : undefined} onClick={() => setOpen(false)}><Icon name={NAV_ICONS[key] ?? ''} size={20} />{m.ui.app.screens[key]}</a>
+                <a key={key} href={href(world.id, key)} className={active === key ? 'active' : ''} aria-current={active === key ? 'page' : undefined} onClick={() => setOpen(false)}><Icon name={NAV_ICONS[key] ?? ''} size={20} />{m.ui.app.screens[key]}</a>
               ))}
             </div>
           ))}
@@ -229,22 +257,22 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
       {/* клик мимо выдвинутой панели её закрывает */}
       {nav.open ? <div className="nav-backdrop" aria-hidden="true" onClick={() => setOpen(false)} /> : null}
       <div className="world-content">
-      {route.screen === 'onboarding' ? <OnboardingScreen worldId={world.id} />
-        : route.screen === 'connections' ? <ConnectionsScreen worldId={world.id} />
+      {redirectTo ? null
         : route.screen === 'shadow' ? <ShadowScreen worldId={world.id} />
-        : route.screen === 'stock' ? <StockScreen worldId={world.id} />
+        : route.screen === 'feed' ? <FeedScreen worldId={world.id} kind={route.param === 'decisions' ? 'decisions' : 'writes'} />
+        : route.screen === 'decisions' && route.param ? <TraceScreen worldId={world.id} decisionId={route.param} />
+        : route.screen === 'strategies' ? <StrategiesScreen worldId={world.id} />
+        : route.screen === 'costs' ? <CostsScreen worldId={world.id} section={route.param} />
+        : route.screen === 'bounds' && route.param ? <BoundsScreen worldId={world.id} writeScopeId={route.param} />
+        : route.screen === 'protections' ? <ProtectionsScreen worldId={world.id} tab={route.param === 'people' ? 'people' : 'rules'} days={[1, 7, 30].includes(Number(route.param2)) ? Number(route.param2) : 7} />
+        : route.screen === 'products' && route.param === 'bulk'
+          ? <><p className="back"><a href={href(world.id, 'products')}>{m.ui.jobs.back}</a></p><h2>{m.ui.jobs.pageTitle}</h2><p className="subtitle">{m.ui.app.subtitles.jobs}</p><JobHistory worldId={world.id} /></>
         : route.screen === 'products' ? <ProductsScreen worldId={world.id} />
-        : route.screen === 'decisions' ? (route.param ? <TraceScreen worldId={world.id} decisionId={route.param} /> : <DecisionsScreen worldId={world.id} />)
-          : route.screen === 'rejected' ? <RejectedScreen worldId={world.id} />
-            : route.screen === 'bounds' ? <BoundsScreen worldId={world.id} writeScopeId={route.param} />
-              : route.screen === 'cost-import' ? <CostImportScreen worldId={world.id} />
-              : route.screen === 'stop' ? <StopScreen worldId={world.id} />
-                : route.screen === 'strategies' ? <StrategiesScreen worldId={world.id} />
-                  : route.screen === 'feed' ? <FeedScreen worldId={world.id} />
-                    : route.screen === 'dangerous' ? <DangerousScreen worldId={world.id} days={[1, 7, 30].includes(Number(route.param)) ? Number(route.param) : 7} />
-                      : route.screen === 'compliance' ? (world.euStorefronts && market.omnibus ? <ComplianceScreen worldId={world.id} /> : <><h2>{m.ui.app.screens.compliance}</h2><p className="subtitle">{m.ui.app.subtitles.compliance}</p><p className="notice">{m.ui.compliance.notApplicable}</p></>)
-                        : route.screen === 'jobs' ? <><h2>{m.ui.jobs.pageTitle}</h2><p className="subtitle">{m.ui.app.subtitles.jobs}</p><JobHistory worldId={world.id} /></>
-                : <NotFound title={m.ui.app.notFoundTitle} text={m.ui.app.screenNotFound} back={m.ui.app.screens.onboarding} href={href(world.id, 'onboarding')} />}
+        : route.screen === 'stock' ? <StockScreen worldId={world.id} />
+        : route.screen === 'channels' ? <ChannelsScreen worldId={world.id} section={route.param} />
+        : route.screen === 'compliance' ? (world.euStorefronts && market.omnibus ? <ComplianceScreen worldId={world.id} /> : <><h2>{m.ui.app.screens.compliance}</h2><p className="subtitle">{m.ui.app.subtitles.compliance}</p><p className="notice">{m.ui.compliance.notApplicable}</p></>)
+        : route.screen === 'stop' ? <StopScreen worldId={world.id} />
+        : <NotFound title={m.ui.app.notFoundTitle} text={m.ui.app.screenNotFound} back={m.ui.app.screens.channels} href={href(world.id, 'channels')} />}
       </div>
       </div>
     </MessagesContext.Provider>

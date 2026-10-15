@@ -195,7 +195,8 @@ test('Р-149, задача D: экран пути, итог включения �
     const emptyStrategies = await html('/src/screens/Strategies.tsx', 'StrategiesScreenView', { view: { ...strategies, strategies: [], scopes: [] }, worldId: id }, locale);
     for (const [screen, markup, text] of [['products', emptyProducts, m.ui.onboarding.empty.products], ['strategies', emptyStrategies, m.ui.onboarding.empty.strategies]] as const) {
       assert.ok(markup.includes(text), `${locale}: пустой экран ${screen} объясняет пустоту`);
-      assert.ok(markup.includes(m.ui.onboarding.empty.startHere) && markup.includes('onboarding'), `${locale}: пустой экран ${screen} ведёт на путь`);
+      // Шаг 95 [Р-217]: путь подключения — верхний раздел Channels
+      assert.ok(markup.includes(m.ui.onboarding.empty.startHere) && markup.includes('/channels"'), `${locale}: пустой экран ${screen} ведёт на путь`);
     }
   }
 });
