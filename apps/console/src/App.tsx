@@ -378,15 +378,17 @@ export function App() {
   ) : null;
   // Шаг 93: тема — свойство устройства: системная, светлая или тёмная; выбор хранится в браузере
   const [theme, setTheme] = useState<ThemeChoice>(storedTheme);
-  // На телефоне вне рабочего пространства выбор в шапке — иконкой 44×44 поверх того же списка (стили): подписи вариантов не влезают рядом с языком и выходом
+  /**
+   * Шаг 94: тема — кнопкой-иконкой, как в приложениях: солнце, луна или монитор (как у системы); нажатие ведёт по кругу
+   * Light → Dark → System. Подпись для экранного диктора и подсказка называют нынешний выбор и следующий
+   */
+  const nextTheme = THEME_CHOICES[(THEME_CHOICES.indexOf(theme) + 1) % THEME_CHOICES.length]!;
+  const themeLabel = m.ui.app.theme.switchTo(m.ui.app.theme[theme], m.ui.app.theme[nextTheme]);
   const themeSwitch = (
-    <span className="theme-switch">
-      <Icon name="contrast" size={20} />
-      <select className="theme-select" aria-label={m.ui.app.theme.label} title={m.ui.app.theme.label} value={theme}
-        onChange={(e) => { const next = e.target.value as ThemeChoice; setTheme(next); applyTheme(next); }}>
-        {THEME_CHOICES.map((t) => <option key={t} value={t}>{m.ui.app.theme[t]}</option>)}
-      </select>
-    </span>
+    <button type="button" className="ghost theme-button" aria-label={themeLabel} title={themeLabel} data-theme-choice={theme}
+      onClick={() => { setTheme(nextTheme); applyTheme(nextTheme); }}>
+      <Icon name={theme === 'light' ? 'sun' : theme === 'dark' ? 'moon' : 'monitor'} size={20} />
+    </button>
   );
   // Шаг 85: на узких экранах внутри рабочего пространства язык, адрес и выход — в выдвижной панели; разметка та же, что в шапке
   // Шаг 93: человек — по имени от поставщика identity, если оно есть, иначе по адресу; адрес — подсказкой

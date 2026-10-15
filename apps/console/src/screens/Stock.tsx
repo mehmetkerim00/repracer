@@ -4,6 +4,7 @@ import type { ListQuery } from '@repracer/console-model';
 import { ApiError, requestJson, useResource, worldPath } from '../api.ts';
 import { Badge, ErrorBox, errorText, FileDrop, Gaps, href, Intro, Load, Pager, useMessages } from '../components.tsx';
 import { JobProgress } from './Jobs.tsx';
+import { Banner, CheckField, Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
 
 /**
  * Р-153 (шаг 35): экран остатков. По товару — физический остаток, резервации, доступно; по каналу — что посчитано,
@@ -68,36 +69,59 @@ export function StockScreen({ worldId }: { worldId: string }) {
         <>
           <StockScreenView view={v} worldId={worldId} query={query} onQuery={setQuery} onFilter={(f) => { setFilter(f); setQuery({ ...query, offset: 0 }); }} />
           {v.canManage ? (
-            <section className="card">
-              <h3>{m.ui.stock.sources.title}</h3>
-              <label>{m.ui.stock.sources.name} <input value={sourceName} onChange={(e) => setSourceName(e.currentTarget.value)} /></label>
-              <select value={sourceMode} onChange={(e) => setSourceMode(e.currentTarget.value as 'INTERNAL_POOL' | 'INBOUND_API')}>
-                <option value="INTERNAL_POOL">{m.ui.stock.sources.modes.INTERNAL_POOL}</option>
-                <option value="INBOUND_API">{m.ui.stock.sources.modes.INBOUND_API}</option>
-              </select>
-              <button type="button" onClick={createSource} disabled={sourceName.trim() === ''}>{m.ui.stock.sources.create}</button>
-              {apiKey ? <p className="notice"><strong>{m.ui.stock.sources.keyOnce}</strong> <code>{apiKey}</code><br /><span className="small muted">{m.ui.stock.sources.keyHint(window.location.origin)}</span></p> : null}
-              <h3>{m.ui.stock.importFile.title}</h3>
-              <p className="small muted">{m.ui.stock.importFile.hint}</p>
-              <select value={sourceId} onChange={(e) => setSourceId(e.currentTarget.value)}>
-                <option value="">—</option>
-                {v.sources.filter((s) => s.mode === 'INTERNAL_POOL').map((s) => <option key={s.stockSourceId} value={s.stockSourceId}>{s.name}</option>)}
-              </select>
-              <FileDrop label={m.ui.stock.importFile.chooseFile} fileName={file ? file.name : null} onChoose={(input) => void choose(input)} />
-              <button type="button" onClick={importFile} disabled={!file || sourceId === '' || job !== null}>{m.ui.stock.importFile.submit}</button>
-              {job ? <JobProgress worldId={worldId} jobId={job.jobId} onFinished={() => { setJob(null); refresh(); }} /> : null}
-              <h3>{m.ui.stock.enable.title}</h3>
-              <label>{m.ui.stock.enable.buffer} <input value={buffer} onChange={(e) => setBuffer(e.currentTarget.value)} /></label>
-              <label>{m.ui.stock.enable.maxQuantity} <input value={maxQuantity} onChange={(e) => setMaxQuantity(e.currentTarget.value)} /></label>
-              <label>{m.ui.stock.enable.minToList} <input value={minToList} onChange={(e) => setMinToList(e.currentTarget.value)} /></label>
-              {v.traps.map((t) => (
-                <div key={t.channelAccountId} className="notice">
-                  <p><Badge tone="warn">{m.ui.stock.traps.title}</Badge> {t.text}</p>
-                  {t.requiresAck ? <label><input type="checkbox" checked={ack} onChange={(e) => setAck(e.currentTarget.checked)} /> {m.ui.stock.enable.acknowledge}</label> : null}
-                  <button type="button" onClick={() => enable(t.channelAccountId)} disabled={(t.requiresAck && !ack) || job !== null}>{m.ui.stock.enable.submit}</button>
-                </div>
-              ))}
-            </section>
+            <>
+              {/* Шаг 94: управление остатками — три группы полей стандарта; подпись над полем, пояснение под ним, кнопка — в конце группы */}
+              <FieldGroup title={m.ui.stock.sources.title}>
+                <FieldGrid cols={2}>
+                  <Field label={m.ui.stock.sources.name} caption={m.ui.stock.sources.nameCaption}><input value={sourceName} onChange={(e) => setSourceName(e.currentTarget.value)} /></Field>
+                  <Field label={m.ui.stock.sources.mode}><select value={sourceMode} onChange={(e) => setSourceMode(e.currentTarget.value as 'INTERNAL_POOL' | 'INBOUND_API')}>
+                    <option value="INTERNAL_POOL">{m.ui.stock.sources.modes.INTERNAL_POOL}</option>
+                    <option value="INBOUND_API">{m.ui.stock.sources.modes.INBOUND_API}</option>
+                  </select></Field>
+                </FieldGrid>
+                <FormActions hint={sourceName.trim() === '' ? m.ui.forms.why.name : null}>
+                  <button type="button" onClick={createSource} disabled={sourceName.trim() === ''} title={sourceName.trim() === '' ? m.ui.forms.why.name : undefined}>{m.ui.stock.sources.create}</button>
+                </FormActions>
+                {apiKey ? <p className="notice"><strong>{m.ui.stock.sources.keyOnce}</strong> <code>{apiKey}</code><br /><span className="small muted">{m.ui.stock.sources.keyHint(window.location.origin)}</span></p> : null}
+              </FieldGroup>
+              <FieldGroup title={m.ui.stock.importFile.title} caption={m.ui.stock.importFile.hint}>
+                <FieldGrid cols={2}>
+                  <Field label={m.ui.stock.importFile.source} caption={m.ui.stock.importFile.sourceCaption}><select value={sourceId} onChange={(e) => setSourceId(e.currentTarget.value)}>
+                    <option value="">—</option>
+                    {v.sources.filter((s) => s.mode === 'INTERNAL_POOL').map((s) => <option key={s.stockSourceId} value={s.stockSourceId}>{s.name}</option>)}
+                  </select></Field>
+                  <Field label={m.ui.stock.importFile.file}><FileDrop label={m.ui.stock.importFile.chooseFile} fileName={file ? file.name : null} onChoose={(input) => void choose(input)} /></Field>
+                </FieldGrid>
+                {(() => {
+                  const why = sourceId === '' ? m.ui.forms.why.source : !file ? m.ui.forms.why.file : job !== null ? m.ui.forms.why.jobRunning : null;
+                  return (
+                    <FormActions hint={why}>
+                      <button type="button" className="primary" onClick={importFile} disabled={why !== null} title={why ?? undefined}>{m.ui.stock.importFile.submit}</button>
+                    </FormActions>
+                  );
+                })()}
+                {job ? <JobProgress worldId={worldId} jobId={job.jobId} onFinished={() => { setJob(null); refresh(); }} /> : null}
+              </FieldGroup>
+              <FieldGroup title={m.ui.stock.enable.title}>
+                <FieldGrid cols={3}>
+                  <Field label={m.ui.stock.enable.buffer} caption={m.ui.stock.enable.bufferCaption}><input inputMode="numeric" value={buffer} onChange={(e) => setBuffer(e.currentTarget.value)} /></Field>
+                  <Field label={m.ui.stock.enable.maxQuantity} caption={m.ui.stock.enable.maxQuantityCaption}><input inputMode="numeric" value={maxQuantity} onChange={(e) => setMaxQuantity(e.currentTarget.value)} /></Field>
+                  <Field label={m.ui.stock.enable.minToList} caption={m.ui.stock.enable.minToListCaption}><input inputMode="numeric" value={minToList} onChange={(e) => setMinToList(e.currentTarget.value)} /></Field>
+                </FieldGrid>
+                {/* Ловушки каналов — плашкой: канал и пилюля, суть в одну-две строки, подробности — по раскрытию [Р-153] */}
+                {v.traps.map((t) => {
+                  const why = t.requiresAck && !ack ? m.ui.forms.why.confirmSideEffect : job !== null ? m.ui.forms.why.jobRunning : null;
+                  return (
+                    <Banner key={t.channelAccountId} title={t.title} badge={<Badge tone="warn">{m.ui.stock.traps.title}</Badge>} summary={t.summary} details={t.text}>
+                      {t.requiresAck ? <CheckField label={m.ui.stock.enable.acknowledge} caption={m.ui.stock.enable.acknowledgeCaption} checked={ack} onChange={setAck} /> : null}
+                      <FormActions hint={why}>
+                        <button type="button" onClick={() => enable(t.channelAccountId)} disabled={why !== null} title={why ?? undefined}>{m.ui.stock.enable.submit}</button>
+                      </FormActions>
+                    </Banner>
+                  );
+                })}
+              </FieldGroup>
+            </>
           ) : <p className="notice">{m.ui.stock.noRight}</p>}
           <Load shape="table" resource={divergences} retry={retryDivergences}>{(d) => <StockDivergences view={d} />}</Load>
           <StockReturns worldId={worldId} onDecided={refresh} />
@@ -133,11 +157,14 @@ export function StockScreenView({ view: v, worldId, query, onQuery, onFilter }: 
         </div>
       )}
       {onFilter && (v.rows.length > 0 || v.filter.matchedText) ? (
-        <form className="filters toolbar" onSubmit={(e) => { e.preventDefault(); onFilter({ search: search.trim(), withReservations }); }}>
-          <input type="search" value={search} placeholder={t.filter.search} aria-label={t.filter.search} onChange={(e) => setSearch(e.currentTarget.value)} />
-          <label><input type="checkbox" checked={withReservations} onChange={(e) => { setWithReservations(e.currentTarget.checked); onFilter({ search: search.trim(), withReservations: e.currentTarget.checked }); }} /> {t.filter.withReservations}</label>
-          <button type="submit">{t.filter.apply}</button>
-          {v.filter.matchedText ? <button type="button" onClick={() => { setSearch(''); setWithReservations(false); onFilter({ search: '', withReservations: false }); }}>{t.filter.reset}</button> : null}
+        // Шаг 94: фильтр — поле стандарта с подписью над ним, галочка — своей ячейкой, кнопки — в конце ряда
+        <form className="filters toolbar field-toolbar" onSubmit={(e) => { e.preventDefault(); onFilter({ search: search.trim(), withReservations }); }}>
+          <Field label={t.filter.searchLabel}><input type="search" value={search} placeholder={t.filter.search} onChange={(e) => setSearch(e.currentTarget.value)} /></Field>
+          <CheckField label={t.filter.withReservations} checked={withReservations} onChange={(on) => { setWithReservations(on); onFilter({ search: search.trim(), withReservations: on }); }} />
+          <div className="form-actions-row">
+            <button type="submit">{t.filter.apply}</button>
+            {v.filter.matchedText ? <button type="button" onClick={() => { setSearch(''); setWithReservations(false); onFilter({ search: '', withReservations: false }); }}>{t.filter.reset}</button> : null}
+          </div>
         </form>
       ) : null}
       {v.filter.matchedText ? <p className="section-sub">{v.filter.matchedText}</p> : null}
@@ -237,10 +264,12 @@ export function StockReturnsList({ view: v, notes, busy, onNote, onDecide, messa
               <Badge tone={r.pending ? 'warn' : r.infoOnly ? 'off' : 'ok'}>{r.statusText}</Badge> <strong>{r.sku}</strong> · {r.channel} · {r.channelOrderLineRef}: {r.text}
               {r.note ? <em> — {r.note}</em> : null}
               {r.pending && v.canDecide ? (
-                <div>
-                  <label>{t.note} <input value={notes[r.orderReturnId] ?? ''} onChange={(e) => onNote(r.orderReturnId, e.currentTarget.value)} maxLength={500} /></label>
-                  <button type="button" onClick={() => onDecide(r.orderReturnId, true)} disabled={busy !== null}>{t.accept}</button>
-                  <button type="button" onClick={() => onDecide(r.orderReturnId, false)} disabled={busy !== null}>{t.dismiss}</button>
+                <div className="return-decision">
+                  <Field label={t.note}><input value={notes[r.orderReturnId] ?? ''} onChange={(e) => onNote(r.orderReturnId, e.currentTarget.value)} maxLength={500} /></Field>
+                  <FormActions>
+                    <button type="button" className="primary" onClick={() => onDecide(r.orderReturnId, true)} disabled={busy !== null}>{t.accept}</button>
+                    <button type="button" onClick={() => onDecide(r.orderReturnId, false)} disabled={busy !== null}>{t.dismiss}</button>
+                  </FormActions>
                 </div>
               ) : null}
             </li>

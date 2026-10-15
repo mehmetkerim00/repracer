@@ -855,6 +855,28 @@ test('шаг 76: страница консоли не тянет встроен�
 });
 
 /** Шаг 76 (ревью предполётного прогона, находка 2): страница консоли до первого кадра React — без кириллицы и русского языка документа */
+test('шаг 94: поле ввода консоли живёт только внутри поля стандарта — подпись над контролом, пояснение под ним', async () => {
+  type Problem = { file: string; line: number; control: string; component: string | null };
+  const { formFieldProblems, fieldProblemsIn } = await import(new URL('scripts/form-fields.mjs', root).href) as {
+    formFieldProblems(dir?: string): { problems: Problem[]; controls: number };
+    fieldProblemsIn(source: string, fileName?: string): Problem[];
+  };
+  // Зубы [Р-94]: голый контрол, контрол в родном label, компонент-контрол вне поля и контрол в помощнике, которого зовут внутри поля, —
+  // нарушения; контрол в поле (в том числе сквозь .map и условие) и тело компонента-контрола в файле стандарта — нет
+  const controls = (src: string, file = 'apps/console/src/screens/X.tsx') => fieldProblemsIn(src, file).map((p) => p.control);
+  assert.deepEqual(controls('export function A() { return <div><input value="" /></div>; }'), ['input'], 'голый input роняет правило');
+  assert.deepEqual(controls('export function A() { return <label>Name <select><option /></select> tail</label>; }'), ['select'], 'родной label — не поле стандарта');
+  assert.deepEqual(controls('export function A() { return <OfferPicker worldId="w" value="" onChange={() => {}} />; }'), ['OfferPicker']);
+  assert.deepEqual(controls('export function A() { const f = () => <textarea />; return <Field label="x">{f()}</Field>; }'), ['textarea'], 'поле в вызывающем коде не прячет помощник');
+  assert.deepEqual(controls('export function A() { return <Field label="x"><input value="" /></Field>; }'), []);
+  assert.deepEqual(controls('export function A({ xs }) { return <FieldGrid>{xs.map((x) => (x ? <Field key={x} label={x}><select /></Field> : null))}</FieldGrid>; }'), []);
+  assert.deepEqual(controls('export function OfferPicker() { return <span><input type="search" /><select /></span>; }', 'apps/console/src/components.tsx'), [], 'тело компонента-контрола в файле стандарта');
+  assert.deepEqual(controls('export function OfferPicker() { return <span><input type="search" /></span>; }'), ['input'], 'одноимённый компонент вне файлов стандарта — не исключение');
+  const { problems, controls: total } = formFieldProblems();
+  assert.ok(total >= 40, `правило видит контролы консоли: ${total}`);
+  assert.deepEqual(problems.map((p) => `${p.file}:${p.line} <${p.control}>`), [], 'каждый контрол консоли — в поле стандарта');
+});
+
 test('шаг 76: index.html консоли не говорит по-русски — заголовок вкладки и язык документа видит клиент', () => {
   const page = read('apps/console/index.html');
   assert.equal(/[А-Яа-яЁё]/.test(page), false, 'кириллица в index.html консоли: её видит клиент на вкладке браузера');

@@ -608,7 +608,9 @@ test('step 23, C/F: offers the channel prices itself are listed before a strateg
   const screen = await html('/src/screens/Strategies.tsx', 'StrategiesScreenView', { view: list, worldId: id, initialPreview: preview.view });
   for (const text of ['Offers the channel prices itself', 'cannot be assigned', 'New version', 'Cannot be saved: the channel prices these offers itself']) assert.ok(screen.includes(text), text);
   // Шаг 79: сохранение — основной кнопкой (не красной: это не остановка), и по-прежнему недоступно при заблокированном предпросмотре
-  assert.match(screen, /<button type="button" class="primary" disabled="">Save and assign<\/button>/, 'the save button is disabled while the preview is blocked');
+  // Шаг 94: недоступная кнопка говорит почему — подсказкой при наведении и строкой под рядом кнопок
+  assert.match(screen, /<button type="button" class="primary" disabled="" title="Cannot be saved: the channel prices these offers itself[^"]*">Save and assign<\/button>/, 'the save button is disabled while the preview is blocked and says why');
+  assert.match(screen, /<p class="field-caption form-hint" role="status">Cannot be saved: the channel prices these offers itself/, 'the reason stands under the buttons');
   const deScreen = await html('/src/screens/Strategies.tsx', 'StrategiesScreenView', { view: await get<StrategyListView>(await login('OWNER', 'de'), api(id, 'strategies')), worldId: id }, 'de');
   assert.ok(deScreen.includes('Angebote, die der Kanal selbst bepreist'));
 });

@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { LOCALES, messagesFor, type Gap, type HumanReason, type ListQuery, type Locale, type Messages, type PageInfo, type StatusCell, type UnitRef } from '@repracer/console-model';
 import { ApiError, REQUEST_TIMEOUT_MS, requestJson, worldPath, type Resource } from './api.ts';
+import { Field, FormActions } from './forms.tsx';
 
 /** Словарь интерфейса текущего языка [Р-72]: все подписи экранов — отсюда */
 export const MessagesContext = createContext<Messages>(messagesFor('de'));
@@ -60,7 +61,11 @@ export function Intro({ text }: { text: string }) {
  * («дд.мм.гггг» у русского Chrome на английском экране); здесь текстовое поле с форматом языка: EN «mm/dd/yyyy hh:mm», DE
  * «TT.MM.JJJJ hh:mm». Значение наружу — тот же вид, что у родного поля («2026-10-11T14:30», дата — «2026-10-11»), логика формы прежняя
  */
-export function DateTimeField({ value, onChange, withTime = true }: { value: string; onChange: (value: string) => void; withTime?: boolean }) {
+export function DateTimeField({ value, onChange, withTime = true, id, 'aria-describedby': describedBy }: {
+  value: string; onChange: (value: string) => void; withTime?: boolean;
+  /** Шаг 94: подпись поля стандарта ведёт на поле ввода */
+  id?: string; 'aria-describedby'?: string;
+}) {
   const m = useMessages();
   const de = m.locale === 'de';
   const p2 = (n: number | string) => String(n).padStart(2, '0');
@@ -87,7 +92,7 @@ export function DateTimeField({ value, onChange, withTime = true }: { value: str
   const pattern = withTime ? m.ui.common.dateTimePattern : m.ui.common.datePattern;
   return (
     <span className="date-field">
-      <input type="text" inputMode="numeric" value={text} placeholder={pattern} aria-invalid={bad}
+      <input type="text" inputMode="numeric" value={text} placeholder={pattern} aria-invalid={bad} {...(id ? { id } : {})} {...(describedBy ? { 'aria-describedby': describedBy } : {})}
         onChange={(e) => { const t = e.currentTarget.value; setText(t); const v = t.trim() === '' ? '' : parse(t); setBad(v === null); onChange(v ?? ''); }} />
       {bad ? <span className="small gap-note">{m.ui.common.formatHint(pattern)}</span> : null}
     </span>
@@ -249,10 +254,13 @@ export function Load<T>({ resource, retry, children, shape, notFound }: {
  * Шаг 77, 79: своё поле выбора файла — кнопка браузера говорит на языке БРАУЗЕРА («Выберите файл»), а не консоли. Одна площадка у
  * импорта себестоимости и у файла остатков
  */
-export function FileDrop({ label, fileName, disabled = false, onChoose }: { label: string; fileName: string | null; disabled?: boolean; onChoose: (input: HTMLInputElement) => void }) {
+export function FileDrop({ label, fileName, disabled = false, onChoose, id, 'aria-describedby': describedBy }: {
+  label: string; fileName: string | null; disabled?: boolean; onChoose: (input: HTMLInputElement) => void; id?: string; 'aria-describedby'?: string;
+}) {
   return (
     <label className={`file-drop${disabled ? ' disabled' : ''}`}>
-      <input type="file" className="visually-hidden" accept=".csv,.xlsx,text/csv" onChange={(e) => onChoose(e.currentTarget)} disabled={disabled} />
+      <input type="file" className="visually-hidden" accept=".csv,.xlsx,text/csv" onChange={(e) => onChoose(e.currentTarget)} disabled={disabled}
+        {...(id ? { id } : {})} {...(describedBy ? { 'aria-describedby': describedBy } : {})} />
       <svg className="file-drop-icon" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M12 17v-6" /><path d="m9.5 13.5 2.5-2.5 2.5 2.5" />
       </svg>
@@ -299,15 +307,16 @@ export function NoteConfirm(props: {
           <ul>{props.list.items.map((n) => <li key={n}>{n}</li>)}</ul>
         </>
       ) : null}
-      <label>
-        {m.ui.app.dialog.note(props.noteMin)}
+      {/* Шаг 94: заметка — поле стандарта; кнопки окна — по Primer Dialog: справа, «Отмена» перед главным действием */}
+      <Field label={m.ui.app.dialog.noteLabel} caption={m.ui.app.dialog.noteCaption(props.noteMin)}>
         <textarea value={props.note} onChange={(e) => props.onNote(e.target.value)} rows={3} maxLength={2000} />
-      </label>
+      </Field>
       {props.error ? <ErrorBox message={props.error} /> : null}
-      <div className="buttons">
-        <button type="button" className="danger" disabled={!ready} onClick={props.onConfirm}>{props.busy ? m.ui.app.dialog.busy(REQUEST_TIMEOUT_MS / 1000) : props.confirmLabel}</button>
+      <FormActions dialog hint={!ready && !props.busy ? m.ui.forms.why.note(props.noteMin) : null}>
         <button type="button" onClick={props.onCancel} disabled={props.busy}>{m.ui.app.dialog.cancel}</button>
-      </div>
+        <button type="button" className="danger" disabled={!ready} title={!ready && !props.busy ? m.ui.forms.why.note(props.noteMin) : undefined}
+          onClick={props.onConfirm}>{props.busy ? m.ui.app.dialog.busy(REQUEST_TIMEOUT_MS / 1000) : props.confirmLabel}</button>
+      </FormActions>
     </div>
   );
 }
@@ -335,8 +344,10 @@ export function Pager({ page, query, onQuery }: { page: PageInfo; query: ListQue
  * поиска предложения за их пределами были недостижимы — а доказательство Omnibus [Р-123] и объявление скидки нужны по
  * КОНКРЕТНОМУ предложению.
  */
-export function OfferPicker({ worldId, value, onChange, allowEmpty = false, emptyLabel = '', onCounter }: {
+export function OfferPicker({ worldId, value, onChange, allowEmpty = false, emptyLabel = '', onCounter, id, 'aria-describedby': describedBy }: {
   worldId: string; value: string; onChange: (writeScopeId: string) => void; allowEmpty?: boolean; emptyLabel?: string;
+  /** Шаг 94: подпись поля стандарта ведёт на поле поиска; список — его продолжение */
+  id?: string; 'aria-describedby'?: string;
   /** Шаг 84: счётчик найденного — экрану, который ставит его в конец ряда фильтров; без него счётчик — под полем, как прежде */
   onCounter?: (text: string | null) => void;
 }) {
@@ -358,8 +369,8 @@ export function OfferPicker({ worldId, value, onChange, allowEmpty = false, empt
   useEffect(() => { onCounter?.(counter); }, [counter, onCounter]);
   return (
     <span className={`offer-picker${onCounter ? ' inline' : ''}`}>
-      <input type="search" value={query} placeholder={o.search} onChange={(e) => setQuery(e.target.value)} />
-      <select value={value} onChange={(e) => onChange(e.target.value)}>
+      <input type="search" value={query} placeholder={o.search} onChange={(e) => setQuery(e.target.value)} {...(id ? { id } : {})} {...(describedBy ? { 'aria-describedby': describedBy } : {})} />
+      <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={o.choose}>
         {allowEmpty ? <option value="">{emptyLabel}</option> : null}
         {(found?.items ?? []).map((u) => <option key={u.writeScopeId} value={u.writeScopeId}>{u.label}</option>)}
       </select>

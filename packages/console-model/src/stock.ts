@@ -44,6 +44,9 @@ export interface StockRowView {
 export interface StockTrap {
   channel: string;
   channelAccountId: string;
+  /** Шаг 94: плашка канала — заголовок (канал и витрины словами), суть в одну-две строки, подробности (`text`) — по раскрытию */
+  title: string;
+  summary: string;
   text: string;
   requiresAck: boolean;
 }
@@ -77,8 +80,12 @@ export interface StockDivergencesView {
 /** Ловушка канала по его возможности; текст — словарь, код — канал [Р-153] */
 export function stockTraps(world: StandWorld, m: Messages): StockTrap[] {
   const t = m.ui.stock.traps;
+  const name = (channel: string) => (m.values as Record<string, string | undefined>)[channel] ?? channel;
   return world.accounts.map((a) => ({
     channel: a.channel, channelAccountId: a.channelAccountId,
+    title: `${name(a.channel)} · ${storefronts(a.channel, a.marketplaces, m)}`,
+    summary: a.channel === 'AMAZON' ? (a.marketplaces.includes('ATVPDKIKX0DER') ? t.summary.AMAZON_NA : t.summary.AMAZON) : a.channel === 'KAUFLAND' ? t.summary.KAUFLAND
+      : a.channel === 'WALMART' ? t.summary.WALMART : t.summary.generic,
     // Шаг 64: у amazon.com — регион Северная Америка, а не ЕС: продавцу из США нельзя называть amazon.fr, .it, .es
     text: a.channel === 'AMAZON' ? (a.marketplaces.includes('ATVPDKIKX0DER') ? t.AMAZON_NA : t.AMAZON) : a.channel === 'KAUFLAND' ? t.KAUFLAND
       : a.channel === 'WALMART' ? t.WALMART : t.generic((m.values as Record<string, string | undefined>)[a.channel] ?? a.channel),

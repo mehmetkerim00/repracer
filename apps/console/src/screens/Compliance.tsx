@@ -3,6 +3,7 @@ import { LIST_PAGE_DEFAULT, type ComplianceView, type DiscountCheckView, type Hi
 import { requestJson, useResource, worldPath } from '../api.ts';
 import type { DiscountAnnounceResponse, JobCreatedResponse } from '../api-types.ts';
 import { Badge, errorText, Gaps, Load, OfferPicker, Pager, useMessages, Intro, DateTimeField } from '../components.tsx';
+import { Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
 import { JobProgress } from './Jobs.tsx';
 
 /** Сумма из поля ввода в минимальных единицах: «19,99» и «19.99»; неверное — null */
@@ -83,16 +84,17 @@ export function ComplianceScreenView({ worldId, initial }: { worldId: string; in
       {message ? <p className="notice">{message}</p> : null}
       {error ? <p className="error">{error}</p> : null}
 
-      <h3>{c.checkTitle}</h3>
-      {/* Шаг 79: формы — карточками-панелями, итог отчёта — в шапке таблицы, «что не проверяется» — карточкой */}
-      <div className="form toolbar">
-        <label>{c.fields.offer} <OfferPicker worldId={worldId} value={form.writeScopeId} onChange={(writeScopeId) => edit({ writeScopeId })} /></label>
-        <label>{c.fields.reference} <input inputMode="decimal" value={form.reference} onChange={(e) => edit({ reference: e.target.value })} /></label>
-        <label>{c.fields.sale} <input inputMode="decimal" value={form.sale} onChange={(e) => edit({ sale: e.target.value })} /></label>
-        <label>{c.fields.startsAt} <DateTimeField value={form.startsAt} onChange={(startsAt) => edit({ startsAt })} /></label>
-        <label>{c.fields.endsAt} <DateTimeField value={form.endsAt} onChange={(endsAt) => edit({ endsAt })} /></label>
-        <button type="button" className="primary" disabled={busy} onClick={runCheck}>{busy ? c.checking : c.check}</button>
-      </div>
+      {/* Шаг 79: формы — карточками-панелями; шаг 94 — поля стандарта сеткой, кнопка — в конце группы */}
+      <FieldGroup title={c.checkTitle}>
+        <FieldGrid>
+          <Field label={c.fields.offer} wide><OfferPicker worldId={worldId} value={form.writeScopeId} onChange={(writeScopeId) => edit({ writeScopeId })} /></Field>
+          <Field label={c.fields.reference}><input inputMode="decimal" value={form.reference} onChange={(e) => edit({ reference: e.target.value })} /></Field>
+          <Field label={c.fields.sale}><input inputMode="decimal" value={form.sale} onChange={(e) => edit({ sale: e.target.value })} /></Field>
+          <Field label={c.fields.startsAt}><DateTimeField value={form.startsAt} onChange={(startsAt) => edit({ startsAt })} /></Field>
+          <Field label={c.fields.endsAt}><DateTimeField value={form.endsAt} onChange={(endsAt) => edit({ endsAt })} /></Field>
+        </FieldGrid>
+        <FormActions><button type="button" className="primary" disabled={busy} onClick={runCheck}>{busy ? c.checking : c.check}</button></FormActions>
+      </FieldGroup>
       {check ? (
         <div className={`card ${check.verdict === 'VIOLATION' ? 'dangerous' : ''}`} role="status">
           {/* Шаг 79: итог проверки — словом на пилюле; «соответствует» не пишем — модуль соответствия не гарантирует [Р-124] */}
@@ -105,10 +107,10 @@ export function ComplianceScreenView({ worldId, initial }: { worldId: string; in
             <div className="confirm" role="dialog" aria-modal="false" aria-labelledby="announce-title">
               <h3 id="announce-title">{c.announceTitle}</h3>
               <p>{c.announceConfirm}</p>
-              <div className="buttons">
-                <button type="button" className="primary" disabled={busy} onClick={announce}>{busy ? c.announcing : c.announce}</button>
+              <FormActions dialog>
                 <button type="button" disabled={busy} onClick={() => setConfirming(false)}>{m.ui.strategies.cancel}</button>
-              </div>
+                <button type="button" className="primary" disabled={busy} onClick={announce}>{busy ? c.announcing : c.announce}</button>
+              </FormActions>
             </div>
           ) : null}
         </div>
@@ -154,16 +156,19 @@ export function ComplianceScreenView({ worldId, initial }: { worldId: string; in
         </div>
       )}
 
-      <h3>{c.evidenceTitle}</h3>
       {/* OQ-202 (шаг 30): каталог целиком выгружается тоже — файл готовит задание, а не ответ экрана */}
-      <p className="section-sub">{c.evidenceByOffer(view.offersTotal)} {c.evidenceHint}</p>
-      <div className="form toolbar">
-        <label>{c.evidenceFrom} <DateTimeField withTime={false} value={evidence.from} onChange={(from) => setEvidence({ ...evidence, from })} /></label>
-        <label>{c.evidenceTo} <DateTimeField withTime={false} value={evidence.to} onChange={(to) => setEvidence({ ...evidence, to })} /></label>
-        <label>{c.fields.offer} <OfferPicker worldId={worldId} value={evidence.writeScopeId} allowEmpty emptyLabel={c.evidenceAll}
-          onChange={(writeScopeId) => setEvidence({ ...evidence, writeScopeId })} /></label>
-        <button type="button" disabled={busy || !evidence.from || !evidence.to} onClick={loadEvidence}>{c.download}</button>
-      </div>
+      <FieldGroup title={c.evidenceTitle} caption={`${c.evidenceByOffer(view.offersTotal)} ${c.evidenceHint}`}>
+        <FieldGrid>
+          <Field label={c.evidenceFrom}><DateTimeField withTime={false} value={evidence.from} onChange={(from) => setEvidence({ ...evidence, from })} /></Field>
+          <Field label={c.evidenceTo}><DateTimeField withTime={false} value={evidence.to} onChange={(to) => setEvidence({ ...evidence, to })} /></Field>
+          <Field label={c.fields.offer} span={2}><OfferPicker worldId={worldId} value={evidence.writeScopeId} allowEmpty emptyLabel={c.evidenceAll}
+            onChange={(writeScopeId) => setEvidence({ ...evidence, writeScopeId })} /></Field>
+        </FieldGrid>
+        {(() => {
+          const why = !evidence.from || !evidence.to ? m.ui.forms.why.period : null;
+          return <FormActions hint={why}><button type="button" className="primary" disabled={busy || why !== null} title={why ?? undefined} onClick={loadEvidence}>{c.download}</button></FormActions>;
+        })()}
+      </FieldGroup>
       {evidenceJobId ? <JobProgress worldId={worldId} jobId={evidenceJobId} /> : null}
 
       <section className="card">

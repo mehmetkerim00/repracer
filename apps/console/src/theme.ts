@@ -4,7 +4,8 @@
  * недоступно (приватное окно) — тогда выбор живёт до перезагрузки, страница работает
  */
 export type ThemeChoice = 'system' | 'light' | 'dark';
-export const THEME_CHOICES: readonly ThemeChoice[] = ['system', 'light', 'dark'];
+/** Шаг 94: порядок круга кнопки темы — Light → Dark → System */
+export const THEME_CHOICES: readonly ThemeChoice[] = ['light', 'dark', 'system'];
 const THEME_KEY = 'repracer.theme';
 
 export function storedTheme(): ThemeChoice {

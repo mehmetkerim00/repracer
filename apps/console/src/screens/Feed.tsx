@@ -4,6 +4,7 @@ import { requestJson, useResource, worldPath } from '../api.ts';
 import type { JobCreatedResponse } from '../api-types.ts';
 import { JobProgress } from './Jobs.tsx';
 import { Badge, commonZone, ErrorBox, errorText, Gaps, href, Load, OfferPicker, ReasonLine, useMessages, When, WhenHead } from '../components.tsx';
+import { Field } from '../forms.tsx';
 
 /**
  * Лента изменений цен (шаги 21, 23): запись в канал от решения до итога, новые сверху. Фильтры по статусу, офферу и периоду и
@@ -68,18 +69,19 @@ export function FeedScreenView({ view, onQuery }: { view: PriceFeedView; onQuery
       <p className="subtitle">{m.ui.app.subtitles.feed}</p>
       {/* Шаг 79: фильтры и выгрузка — карточкой-панелью; счётчики групп — в шапке таблицы */}
       {onQuery ? (
-        <div className="form filters toolbar">
-          <label>{f.filters.status} <select value={q.status ?? ''} onChange={(e) => change({ status: (e.target.value || undefined) as FeedQuery['status'] })}>
+        <div className="filters toolbar field-toolbar">
+          {/* Шаг 94: фильтры — поля стандарта: подпись над выбором */}
+          <Field label={f.filters.status}><select value={q.status ?? ''} onChange={(e) => change({ status: (e.target.value || undefined) as FeedQuery['status'] })}>
             <option value="">{f.filters.all}</option>
             {FEED_STATUS_GROUPS.map((g) => <option key={g} value={g}>{f.statusGroups[g]}</option>)}
-          </select></label>
+          </select></Field>
           {/* Р-136 (ревью шага 29, находка 4): предложение выбирается поиском — список показывает первые несколько сотен из каталога */}
-          <label>{f.filters.offer} <OfferPicker worldId={view.worldId} value={q.writeScopeId ?? ''} allowEmpty emptyLabel={f.filters.all}
-            onChange={(writeScopeId) => change({ writeScopeId: writeScopeId || undefined })} onCounter={setPickerCount} /></label>
-          <label>{f.filters.period} <select value={q.days ?? ''} onChange={(e) => change({ days: (e.target.value ? Number(e.target.value) : undefined) as FeedQuery['days'] })}>
+          <Field label={f.filters.offer}><OfferPicker worldId={view.worldId} value={q.writeScopeId ?? ''} allowEmpty emptyLabel={f.filters.all}
+            onChange={(writeScopeId) => change({ writeScopeId: writeScopeId || undefined })} onCounter={setPickerCount} /></Field>
+          <Field label={f.filters.period}><select value={q.days ?? ''} onChange={(e) => change({ days: (e.target.value ? Number(e.target.value) : undefined) as FeedQuery['days'] })}>
             <option value="">{f.filters.all}</option>
             {FEED_PERIODS_DAYS.map((d) => <option key={d} value={d}>{f.periodDays(d)}</option>)}
-          </select></label>
+          </select></Field>
           {pickerCount ? <span className="filters-count">{pickerCount}</span> : null}
         </div>
       ) : null}

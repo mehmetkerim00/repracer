@@ -385,7 +385,8 @@ export const en = {
       title: 'pricetrail · seller console',
       documentTitle: 'PriceTrail · seller console',
       /** Шаг 93: тема — свойство устройства */
-      theme: { label: 'Theme', system: 'System theme', light: 'Light', dark: 'Dark' },
+      // Шаг 94: тема — кнопкой-иконкой; подпись называет нынешний выбор и следующий по кругу
+      theme: { label: 'Theme', system: 'System', light: 'Light', dark: 'Dark', switchTo: (current: string, next: string) => `Theme: ${current}. Switch to ${next}` },
       stand: 'test environment, synthetic data',
       // Шаг 64 (проход консоли): имя и описание демо-мира на языке интерфейса, а не строкой посева по-немецки
       demoWorldTitle: 'Demo store (simulator)', demoWorldDescription: 'Synthetic store on the channel simulator: every offer has three competitors — one drifting, one undercutting, one in price waves.',
@@ -468,7 +469,7 @@ export const en = {
         demoGuestHint: 'No sign-up needed: you see a demo workspace as an observer. The data is synthetic, the path is real — you cannot change anything in it.',
       },
       dialog: {
-        note: (min: number) => `Note — why (at least ${min} characters):`,
+        noteLabel: 'Note', noteCaption: (min: number) => `Why you do it — at least ${min} characters.`,
         cancel: 'Cancel',
         busy: (seconds: number) => `Working… (up to ${seconds} s)`,
         confirmStop: 'Yes, stop',
@@ -659,7 +660,7 @@ export const en = {
       columns: { product: 'Product', onHand: 'On hand', reserved: 'Reserved', available: 'Available', channels: 'Channels' },
       // Шаг 69 (K8): поиск по названию или SKU и фильтр «с резервациями»
       filter: {
-        search: 'Search by name or SKU', withReservations: 'Only products with reservations', apply: 'Search', reset: 'Show all',
+        searchLabel: 'Find a product', search: 'Search by name or SKU', withReservations: 'Only products with reservations', apply: 'Search', reset: 'Show all',
         matched: (n: number, total: number) => `${n} of ${total} products match.`,
         none: 'No product matches the search or the filter.',
       },
@@ -680,6 +681,14 @@ export const en = {
       // Р-153: the traps are named BEFORE the first write, from the channel capability, not discovered afterwards
       traps: {
         title: 'Before anything is written',
+        // шаг 94: суть ловушки в одну-две строки — плашка; полный текст ниже — по раскрытию
+        summary: {
+          AMAZON: 'One stock value per SKU for the whole Amazon region — not only this storefront. Enabling needs your confirmation.',
+          AMAZON_NA: 'One stock value per SKU for the whole North American region of Amazon. Enabling needs your confirmation.',
+          KAUFLAND: 'One stock value for all storefronts of the same Kaufland offer ID.',
+          WALMART: 'One stock value per SKU, sent to the default ship node of the account.',
+          generic: 'On this channel stock is written wider than price — check it before enabling.',
+        },
         AMAZON: 'Amazon: the MFN stock is ONE value per SKU for the whole region. Writing it for amazon.de changes amazon.fr, .it, .es too — even if you only work with one storefront. Enabling requires your confirmation.',
         KAUFLAND: 'Kaufland: the stock is shared by all storefronts of the same Kaufland offer ID. One value for de and at; the order in which storefronts apply it is not guaranteed.',
         // Шаг 64: у amazon.com регион — Северная Америка; текст про amazon.fr, .it, .es продавцу из США неверен (A-16 открыт)
@@ -695,12 +704,15 @@ export const en = {
         products: (n: number) => `${n} products with figures`,
         create: 'Add source',
         name: 'Name',
+        nameCaption: 'Your own name for this source, for example the warehouse.',
+        mode: 'How the stock arrives',
         keyOnce: 'API key — shown ONCE. Copy it now: the service keeps only its fingerprint.',
         keyHint: (origin: string) => `POST ${origin}/inbound/v1/stock with header Authorization: Bearer <key> and body {"rows":[{"sku":"…","quantity":12,"asOf":"2026-09-23T10:00:00Z"}]}. A value with an older asOf than the known one is not applied.`,
         keyPresent: 'key issued',
       },
       importFile: {
         chooseFile: 'Choose your stock file (CSV or XLSX)',
+        source: 'Source', sourceCaption: 'The file import source the stocktake goes to.', file: 'File',
         title: 'Stock file',
         hint: 'Two columns: SKU and quantity (headers in German or English). The file becomes a stocktake of the internal pool: every listed product gets exactly the listed figure.',
         choose: 'Choose file',
@@ -712,9 +724,11 @@ export const en = {
       },
       enable: {
         title: 'Synchronization',
-        buffer: 'Buffer per channel (pieces kept back)',
-        maxQuantity: 'Maximum published (empty — no cap)',
-        minToList: 'Below this the offer is listed as 0',
+        // шаг 94: подпись короткая, пояснение — под полем, а не в скобках подписи
+        buffer: 'Buffer per channel', bufferCaption: 'Pieces kept back from every channel.',
+        maxQuantity: 'Maximum published', maxQuantityCaption: 'Leave empty for no cap.',
+        minToList: 'Minimum to list', minToListCaption: 'Below this number the offer is listed as 0.',
+        acknowledgeCaption: 'Without your confirmation synchronization of this account does not start.',
         acknowledge: 'I understand the side effect of this channel and confirm it',
         submit: 'Enable synchronization',
         // Находка шага 44: при ждущем подтверждении заголовок не говорит «включено» — синхронизация этих единиц ещё не идёт
@@ -800,7 +814,9 @@ export const en = {
         hint: (id: string) => `To confirm that no other tool manages stock in this channel, type the channel account ID: ${id}`,
         submit: 'Confirm and allow stock writes',
         confirmed: 'Confirmed: stock writes to this channel are allowed. Enable the synchronization on the Stock screen.',
-        revokeHint: (id: string) => `Another tool starts managing stock in this channel? Revoke stock writes: they stop at once, unsent stock updates are dropped, and switching them on again needs a new confirmation. Type the channel account ID: ${id}`,
+        revokeHint: (id: string) => `To revoke, type the channel account ID: ${id}`,
+        // Шаг 94: пояснение под полем отзыва — что будет, а не подпись в три предложения
+        revokeCaption: 'Another tool starts managing stock here? Stock writes stop at once, unsent stock updates are dropped, and switching them on again needs a new confirmation.',
         revoke: 'Revoke stock writes',
         revoked: (scopes: number, writes: number, inFlight: number) => `Revoked: stock writes to this channel are off. Synchronization switched off for ${scopes} ${scopes === 1 ? 'offer' : 'offers'}, ${writes} unsent stock ${writes === 1 ? 'update' : 'updates'} dropped.${inFlight > 0 ? ` ${inFlight} ${inFlight === 1 ? 'update' : 'updates'} had already been sent to the channel before the revocation and cannot be recalled; they are not retried.` : ''}`,
       },
@@ -1210,9 +1226,25 @@ export const en = {
       limitMin: (amount: string) => `your minimum price ${amount}`, limitFloor: (amount: string) => `minimum-margin floor ${amount}`, limitMax: (amount: string) => `your maximum price ${amount}`,
       productRef: (marketplace: string, ref: string) => `${marketplace} · product ${ref}`,
     },
+    // Шаг 94: почему кнопка формы недоступна — подсказкой при наведении и строкой под рядом кнопок
+    forms: {
+      why: {
+        name: 'Enter a name first.',
+        source: 'Choose a source first.',
+        file: 'Choose a file first.',
+        jobRunning: 'Wait until the running job finishes.',
+        confirmSideEffect: 'Confirm the side effect of this channel first.',
+        selectOffers: 'Select at least one offer first.',
+        previewFirst: 'Show the preview first: saving applies exactly what the preview showed.',
+        storefront: 'Choose at least one storefront first.',
+        typeName: 'Type the identifier shown above exactly first.',
+        period: 'Enter both dates first.',
+        note: (min: number) => `Write a note of at least ${min} characters first.`,
+      },
+    },
     offerPicker: {
-      search: 'Search an offer (SKU, EAN, name)',
-      found: (n: number) => `${n} offers found`,
+      search: 'Search an offer (SKU, EAN, name)', choose: 'Offer',
+      found: (n: number) => `${n} ${n === 1 ? 'offer' : 'offers'} found`,
       /** Шаг 84.1: счётчик — о предложениях в выпадающем списке, а не о записях ленты рядом: слово «offers» говорит это прямо */
       narrow: (shown: number, total: number) => `${shown} of ${total} offers in the list — narrow the search`,
     },
@@ -1248,6 +1280,18 @@ export const en = {
       ],
     },
     strategies: {
+      // Шаг 94: пояснения под полями черновика — что параметр делает, а не скобки в подписи
+      captions: {
+        name: 'Your name for the strategy; it shows in lists and on Why this price.',
+        priceMinor: 'The price the offer keeps — always within your bounds.',
+        targetMarginBp: 'The margin the price aims at, after unit cost and fees.',
+        undercutMinor: 'How far below the competitor price to go.',
+        atBound: 'What happens when the target lands outside your bounds.',
+        scope: 'Which competitor offers count.',
+        deadbandMinor: 'Smaller changes than this are not made — the price does not flap.',
+        holdWhenWinning: 'While the Buy Box is yours, the price is not lowered.',
+        compareLanded: 'Compare prices with shipping included.',
+      },
       pageTitle: 'Strategies', inUse: 'Strategies in use', offers: 'Offers', draftTitle: 'Draft', name: 'Name', type: 'Type',
       types: { FIXED: 'Fixed price', TARGET_MARGIN: 'Target margin', MATCH_BUYBOX: 'Match the Buy Box', BEAT_LOWEST: 'Beat the lowest price' },
       fields: { priceMinor: 'Price', targetMarginBp: 'Margin, %', undercutMinor: 'Undercut', deadbandMinor: 'Threshold', holdWhenWinning: 'Keep when winning', atBound: 'Outside bounds', scope: 'Compare against', compareLanded: 'Including shipping' },
@@ -1347,6 +1391,7 @@ export const en = {
       },
     },
     costImport: {
+      requiredCaption: 'Required.', fileLabel: 'Export file', fileCaption: 'CSV or XLSX. Nothing changes until you apply the preview.',
       pageTitle: 'Import unit costs', file: 'Choose your export file (CSV or XLSX)', plan: 'Show the preview', apply: 'Apply', back: 'Choose another file',
       sourceRead: (format: string, delimiter: string | null) => `Read as ${format}${delimiter ? ` with the separator “${delimiter === '\t' ? 'tab' : delimiter}”` : ''}`,
       encodingLabel: 'Character set', encodingRead: (encoding: string, confident: boolean) => confident ? `Character set: ${encoding}` : `Character set is probably ${encoding} — check it and change if needed`,
@@ -1384,6 +1429,7 @@ export const en = {
       },
     },
     boundsEdit: {
+      amountLabel: 'New amount', percentLabel: 'Change, %',
       pageTitle: 'Change bounds', select: 'Offers', minPrice: 'Minimum price', maxPrice: 'Maximum price', keep: 'unchanged', set: 'set to (amount)', percent: 'change by (%)',
       shownRows: (shown: number, of: number) => `Showing ${shown} of ${of} rows — the flagged ones first`,
       selectPage: (n: number) => `Select the ${n} on this page`,

@@ -93,6 +93,8 @@ export interface QuantityWritesView {
   canRevoke: boolean;
   typeToRevoke: string | null;
   revokeHint: string | null;
+  /** Шаг 94: что делает отзыв — пояснением под полем */
+  revokeCaption: string | null;
   revokeLabel: string;
 }
 
@@ -173,6 +175,7 @@ export function externalWritersView(
       canRevoke,
       typeToRevoke: canRevoke ? a.externalAccountId : null,
       revokeHint: canRevoke ? t.quantityWrites.revokeHint(a.externalAccountId) : null,
+      revokeCaption: canRevoke ? t.quantityWrites.revokeCaption : null,
       revokeLabel: t.quantityWrites.revoke,
     },
     externalEdits24h: a.externalEdits24h,

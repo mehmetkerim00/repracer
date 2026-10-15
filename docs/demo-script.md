@@ -64,7 +64,7 @@ $24.99, а тот же товар «в другом месте» — $19.99, и 
 «Repricing you can audit», под ними карточка входа; шаг 84 — роли строками: цветной кружок, имя роли и что роль может; шаг 88 —
 ровно три роли: **Owner** «everything, plus people, channel accounts and live writes», **Manager** «prices, bounds, strategies, stock,
 unit cost import, bulk operations, stop pricing», **Viewer** «read-only») → строка **Owner** (переключателя языка в шапке нет —
-профиль us; шаг 93: справа в шапке — выбор темы «System theme / Light / Dark», он хранится в этом браузере, а после входа там имя
+профиль us; шаг 94: справа в шапке — кнопка темы иконкой (солнце, луна, монитор): нажатие ведёт по кругу Light → Dark → System, выбор хранится в этом браузере, «System» следует теме системы; после входа там имя
 человека **Alex Porter**, адрес — подсказкой при наведении) → три карточки (шаг 91): **Demo store (simulator)** — «Owner», **Blue Ridge Trading** — «Manager», **Lakeside Home Goods** —
 «Viewer», у всех пометка **Demo** → нажатие на «Demo store (simulator)» открывает сразу **Shadow mode**. Перезагрузка страницы (F5) — выход: токен
 живёт только в памяти вкладки; снова строка «Owner», адрес экрана сохраняется.

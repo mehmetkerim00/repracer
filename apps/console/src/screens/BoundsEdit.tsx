@@ -3,6 +3,7 @@ import { parseAmountInput, parsePercentInput, selectionAfterPaging, type BoundAd
 import type { BoundsIndexItem, JobCreatedResponse } from '../api-types.ts';
 import { requestJson, worldPath } from '../api.ts';
 import { ErrorBox, errorText, Gaps, useMessages } from '../components.tsx';
+import { CheckField, Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
 import type { BulkJobView } from '@repracer/console-model';
 import { JobProgress } from './Jobs.tsx';
 
@@ -124,26 +125,31 @@ function BoundsEditForm({ worldId, items, total }: { worldId: string; items: rea
       setMessage(r.message); setJobId(r.jobId); setDiff(null); setPlanJobId(null);
     } catch (e) { setError(errorText(e, m)); } finally { setBusy(false); }
   };
+  // Шаг 94: граница — два поля стандарта: что сделать (подпись — имя границы) и значение (подпись — сумма или процент)
   const adjust = (label: string, value: AdjustForm, onChange: (v: AdjustForm) => void) => (
-    <label>{label}{' '}
-      <select value={value.mode} onChange={(e) => { onChange({ ...value, mode: e.target.value as AdjustForm['mode'] }); reset(); }}>
-        <option value="KEEP">{t.keep}</option><option value="SET">{t.set}</option><option value="PERCENT">{t.percent}</option>
-      </select>
-      {value.mode !== 'KEEP' ? <input inputMode="decimal" value={value.value} onChange={(e) => { onChange({ ...value, value: e.target.value }); reset(); }} /> : null}
-    </label>
+    <>
+      <Field label={label}>
+        <select value={value.mode} onChange={(e) => { onChange({ ...value, mode: e.target.value as AdjustForm['mode'] }); reset(); }}>
+          <option value="KEEP">{t.keep}</option><option value="SET">{t.set}</option><option value="PERCENT">{t.percent}</option>
+        </select>
+      </Field>
+      {value.mode !== 'KEEP' ? (
+        <Field label={value.mode === 'SET' ? t.amountLabel : t.percentLabel}>
+          <input inputMode="decimal" value={value.value} onChange={(e) => { onChange({ ...value, value: e.target.value }); reset(); }} />
+        </Field>
+      ) : <div aria-hidden="true" />}
+    </>
   );
 
   return (
     <section className="bounds-edit">
       <h3>{t.pageTitle}</h3>
       {/* Шаг 79: выбор предложений и правка — карточкой; экран различий — своей таблицей ниже */}
-      <div className="card">
-      <h4>{t.select}</h4>
+      {/* Шаг 94: выбор предложений и правка — группой полей стандарта; галочки — контрол слева, кнопки — рядом в конце */}
+      <FieldGroup title={t.select}>
       {/* Р-136, Р-140: «всё» — это весь каталог, а не показанная страница; раскрывает выбор сервер */}
-      <label className="whole-catalog">
-        <input type="checkbox" checked={wholeCatalog} disabled={busy}
-          onChange={(e) => { setWholeCatalog(e.target.checked); setSelected([]); reset(); }} /> {t.selectAllCatalog(total)}
-      </label>
+      <CheckField label={t.selectAllCatalog(total)} caption={t.selectionReset} checked={wholeCatalog} disabled={busy}
+        onChange={(on) => { setWholeCatalog(on); setSelected([]); reset(); }} />
       <div className="buttons">
         <button type="button" disabled={busy || wholeCatalog} onClick={() => { setSelected(items.map((i) => i.writeScopeId)); reset(); }}>{t.selectPage(items.length)}</button>
         <button type="button" disabled={busy || wholeCatalog} onClick={() => { setSelected([]); reset(); }}>{t.selectNone}</button>
@@ -151,22 +157,27 @@ function BoundsEditForm({ worldId, items, total }: { worldId: string; items: rea
       <p className="notice" role="status">
         {wholeCatalog ? t.selectionWhole(total) : selected.length === 0 ? t.selectionNone : t.selectionCount(selected.length, total)}
       </p>
-      <p className="section-sub">{t.selectionReset}</p>
       <ul className="index pick-list">
         {items.map((i) => (
-          <li key={i.writeScopeId}><label><input type="checkbox" checked={selected.includes(i.writeScopeId)}
-            onChange={(e) => { setSelected(e.target.checked ? [...selected, i.writeScopeId] : selected.filter((x) => x !== i.writeScopeId)); reset(); }} /> {i.label}</label>
-            <span className="muted small"> {i.minPrice} – {i.maxPrice}</span></li>
+          <li key={i.writeScopeId}>
+            <CheckField label={i.label} caption={`${i.minPrice} – ${i.maxPrice}`} checked={selected.includes(i.writeScopeId)}
+              onChange={(on) => { setSelected(on ? [...selected, i.writeScopeId] : selected.filter((x) => x !== i.writeScopeId)); reset(); }} />
+          </li>
         ))}
       </ul>
-      <div className="form">{adjust(t.minPrice, min, setMin)}{adjust(t.maxPrice, max, setMax)}</div>
-      <div className="buttons">
-        {diff === null
-          ? <button type="button" disabled={busy || (selected.length === 0 && !wholeCatalog)} onClick={() => void plan()}>{t.plan}</button>
-          : <><button type="button" className="primary" disabled={busy} onClick={() => void apply()}>{t.apply}</button><button type="button" disabled={busy} onClick={reset}>{t.back}</button></>}
-      </div>
+      <FieldGrid cols={4}>{adjust(t.minPrice, min, setMin)}{adjust(t.maxPrice, max, setMax)}</FieldGrid>
+      {(() => {
+        const nothing = selected.length === 0 && !wholeCatalog;
+        return (
+          <FormActions hint={diff === null && nothing ? m.ui.forms.why.selectOffers : null}>
+            {diff === null
+              ? <button type="button" className="primary" disabled={busy || nothing} title={nothing ? m.ui.forms.why.selectOffers : undefined} onClick={() => void plan()}>{t.plan}</button>
+              : <><button type="button" className="primary" disabled={busy} onClick={() => void apply()}>{t.apply}</button><button type="button" disabled={busy} onClick={reset}>{t.back}</button></>}
+          </FormActions>
+        );
+      })()}
       {diff ? <p className="section-sub">{t.shownRows(diff.view.shown.rows, diff.view.shown.of)}</p> : null}
-      </div>
+      </FieldGroup>
       {error ? <ErrorBox message={error} /> : null}
       {message ? <p className="notice" role="status">{message}</p> : null}
       {planJobId && !diff ? <JobProgress worldId={worldId} jobId={planJobId} onFinished={planReady} /> : null}

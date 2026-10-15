@@ -5,6 +5,7 @@ import type { BulkJobView } from '@repracer/console-model';
 import { JobProgress } from './Jobs.tsx';
 import { ApiError, requestJson, useResource, worldPath } from '../api.ts';
 import { Badge, commonZone, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, shortWhen, useMessages, When, WhenHead } from '../components.tsx';
+import { CheckField, Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
 
 /**
  * Экран стратегий (шаги 21, 23): черновик или новая версия существующей стратегии → превью на выбранных офферах (движок и Gate на
@@ -108,10 +109,10 @@ export function SaveConfirm({ offers, busy, onConfirm, onCancel, assign = false 
     <div className="confirm" role="dialog" aria-modal="false" aria-labelledby="strategy-confirm-title">
       <h3 id="strategy-confirm-title">{t.confirmTitle(offers)}</h3>
       <p>{assign ? t.assignConfirmText : t.confirmText}</p>
-      <div className="buttons">
-        <button type="button" className="primary" disabled={busy} onClick={onConfirm}>{t.confirmSave}</button>
+      <FormActions dialog>
         <button type="button" disabled={busy} onClick={onCancel}>{t.cancel}</button>
-      </div>
+        <button type="button" className="primary" disabled={busy} onClick={onConfirm}>{t.confirmSave}</button>
+      </FormActions>
     </div>
   );
 }
@@ -251,43 +252,48 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
       {!view.canEdit ? <p className="notice">{t.noRight}</p> : null}
       {form.strategyId || assigning ? <button type="button" disabled={busy} onClick={() => { setAssigning(null); setForm(emptyDraft(m.locale)); changed(); }}>{t.newStrategy}</button> : null}
       {assigning ? <p className="small muted">{assigning.label} · {assigning.detail}</p> : null}
-      <div className="form draft-form card" hidden={assigning !== null}>
-        <label>{t.name} <input value={form.name} maxLength={80} onChange={(e) => set('name', e.target.value)} /></label>
-        <label>{t.type} <select value={form.type} onChange={(e) => set('type', e.target.value as DraftForm['type'])}>
-          {(Object.keys(t.types) as Array<keyof typeof t.types>).map((k) => <option key={k} value={k}>{t.types[k]}</option>)}
-        </select></label>
-        {form.type === 'FIXED' ? <label>{t.fields.priceMinor} <input inputMode="decimal" value={form.price} onChange={(e) => set('price', e.target.value)} /></label> : null}
-        {form.type === 'TARGET_MARGIN' ? <label>{t.fields.targetMarginBp} <input inputMode="decimal" value={form.targetMargin} onChange={(e) => set('targetMargin', e.target.value)} /></label> : null}
-        {form.type === 'MATCH_BUYBOX' || form.type === 'BEAT_LOWEST' ? (
-          <>
-            <label>{t.fields.undercutMinor} <input inputMode="decimal" value={form.undercut} onChange={(e) => set('undercut', e.target.value)} /></label>
-            <label>{t.fields.atBound} <select value={form.atBound} onChange={(e) => set('atBound', e.target.value as DraftForm['atBound'])}>
-              <option value="CAP">{t.atBound.CAP}</option><option value="HOLD">{t.atBound.HOLD}</option>
-            </select></label>
-          </>
-        ) : null}
-        {form.type === 'MATCH_BUYBOX' ? <label><input type="checkbox" checked={form.holdWhenWinning} onChange={(e) => set('holdWhenWinning', e.target.checked)} /> {t.fields.holdWhenWinning}</label> : null}
-        {form.type === 'BEAT_LOWEST' ? (
-          <>
-            <label>{t.fields.scope} <select value={form.scope} onChange={(e) => set('scope', e.target.value as DraftForm['scope'])}>
-              <option value="VISIBLE_TOP_N">{t.scopes.VISIBLE_TOP_N}</option><option value="MARKET">{t.scopes.MARKET}</option>
-            </select></label>
-            <label><input type="checkbox" checked={form.compareLanded} onChange={(e) => set('compareLanded', e.target.checked)} /> {t.fields.compareLanded}</label>
-          </>
-        ) : null}
-        <label>{t.fields.deadbandMinor} <input inputMode="decimal" value={form.deadband} onChange={(e) => set('deadband', e.target.value)} /></label>
-      </div>
+      {/*
+        * Шаг 94: черновик — поля стандарта сеткой: имя и тип первой строкой, параметры типа второй (их столько, сколько колонок, —
+        * ни одно не остаётся сиротой на новой строке), галочка — своей строкой: контрол слева, подпись справа, пояснение под ней
+        */}
+      {assigning === null ? (
+        <FieldGroup className="draft-form">
+          <FieldGrid cols={3}>
+            <Field label={t.name} caption={t.captions.name} span={2}><input value={form.name} maxLength={80} onChange={(e) => set('name', e.target.value)} /></Field>
+            <Field label={t.type}><select value={form.type} onChange={(e) => set('type', e.target.value as DraftForm['type'])}>
+              {(Object.keys(t.types) as Array<keyof typeof t.types>).map((k) => <option key={k} value={k}>{t.types[k]}</option>)}
+            </select></Field>
+          </FieldGrid>
+          <FieldGrid cols={form.type === 'BEAT_LOWEST' ? 4 : form.type === 'MATCH_BUYBOX' ? 3 : 2}>
+            {form.type === 'FIXED' ? <Field label={t.fields.priceMinor} caption={t.captions.priceMinor}><input inputMode="decimal" value={form.price} onChange={(e) => set('price', e.target.value)} /></Field> : null}
+            {form.type === 'TARGET_MARGIN' ? <Field label={t.fields.targetMarginBp} caption={t.captions.targetMarginBp}><input inputMode="decimal" value={form.targetMargin} onChange={(e) => set('targetMargin', e.target.value)} /></Field> : null}
+            {form.type === 'MATCH_BUYBOX' || form.type === 'BEAT_LOWEST' ? (
+              <>
+                <Field label={t.fields.undercutMinor} caption={t.captions.undercutMinor}><input inputMode="decimal" value={form.undercut} onChange={(e) => set('undercut', e.target.value)} /></Field>
+                <Field label={t.fields.atBound} caption={t.captions.atBound}><select value={form.atBound} onChange={(e) => set('atBound', e.target.value as DraftForm['atBound'])}>
+                  <option value="CAP">{t.atBound.CAP}</option><option value="HOLD">{t.atBound.HOLD}</option>
+                </select></Field>
+              </>
+            ) : null}
+            {form.type === 'BEAT_LOWEST' ? (
+              <Field label={t.fields.scope} caption={t.captions.scope}><select value={form.scope} onChange={(e) => set('scope', e.target.value as DraftForm['scope'])}>
+                <option value="VISIBLE_TOP_N">{t.scopes.VISIBLE_TOP_N}</option><option value="MARKET">{t.scopes.MARKET}</option>
+              </select></Field>
+            ) : null}
+            <Field label={t.fields.deadbandMinor} caption={t.captions.deadbandMinor}><input inputMode="decimal" value={form.deadband} onChange={(e) => set('deadband', e.target.value)} /></Field>
+          </FieldGrid>
+          {form.type === 'MATCH_BUYBOX' ? <CheckField label={t.fields.holdWhenWinning} caption={t.captions.holdWhenWinning} checked={form.holdWhenWinning} onChange={(v) => set('holdWhenWinning', v)} /> : null}
+          {form.type === 'BEAT_LOWEST' ? <CheckField label={t.fields.compareLanded} caption={t.captions.compareLanded} checked={form.compareLanded} onChange={(v) => set('compareLanded', v)} /> : null}
+        </FieldGroup>
+      ) : null}
 
-      {/* Шаг 79: выбор предложений, предпросмотр и сохранение — одной карточкой, а не текстом и кнопками на фоне страницы */}
-      <section className="card pick-card">
-      <h4>{t.pick}</h4>
+      {/* Шаг 79: выбор предложений, предпросмотр и сохранение — одной карточкой; шаг 94: чекбоксы — поля стандарта, кнопки — рядом в конце */}
+      <FieldGroup className="pick-card" title={t.pick}>
       {/* Шаг 79 (ревью): без предложений выбирать нечего — пустое состояние с путём, а не форма на ноль предложений */}
       {view.page.total === 0 ? <p className="muted empty">{t.noOffers} <a href={href(worldId, 'connections')}>{m.ui.app.connectChannel}</a></p> : <>
       {/* Р-140 (шаг 30): «всё» — это весь каталог, а не показанная страница; страница выбирается отдельной кнопкой, и так и названа */}
-      <label className="whole-catalog">
-        <input type="checkbox" checked={wholeCatalog} disabled={busy}
-          onChange={(e) => { setWholeCatalog(e.target.checked); setSelected([]); changed(); }} /> {t.selectAllCatalog(view.page.total)}
-      </label>
+      <CheckField label={t.selectAllCatalog(view.page.total)} caption={t.selectionReset} checked={wholeCatalog} disabled={busy}
+        onChange={(v) => { setWholeCatalog(v); setSelected([]); changed(); }} />
       <div className="buttons">
         <button type="button" disabled={busy || wholeCatalog} onClick={() => pick(assignable)}>{t.selectPage(assignable.length)}</button>
         <button type="button" disabled={busy || wholeCatalog} onClick={() => pick([])}>{t.selectNone}</button>
@@ -296,36 +302,42 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
       <p className="notice" role="status">
         {wholeCatalog ? t.selectionWhole(view.page.total) : selected.length === 0 ? t.selectionNone : t.selectionCount(selected.length, view.page.total)}
       </p>
-      <p className="section-sub">{t.selectionReset}</p>
       <ul className="index pick-list">
         {view.scopes.map((s) => (
           <li key={s.unit.writeScopeId}>
-            <label><input type="checkbox" disabled={!s.assignable} checked={selected.includes(s.unit.writeScopeId)}
-              onChange={(e) => pick(e.target.checked ? [...selected, s.unit.writeScopeId] : selected.filter((x) => x !== s.unit.writeScopeId))} /> {s.unit.label}</label>
-            <span className="small muted"> · {s.strategy} · {s.mode}</span>
-            {s.channelPricing ? <div className="small"><Badge tone={s.channelPricing.tone}>{t.notAssignable}</Badge> {s.channelPricing.detail}</div> : null}
-            {s.canUnassign ? <button type="button" disabled={busy} onClick={() => { setRemoving(s); setMessage(null); }}>{t.unassign}</button> : null}
+            <CheckField label={s.unit.label} caption={`${s.strategy} · ${s.mode}`} disabled={!s.assignable} checked={selected.includes(s.unit.writeScopeId)}
+              {...(s.assignable ? {} : { title: t.notAssignable })}
+              onChange={(v) => pick(v ? [...selected, s.unit.writeScopeId] : selected.filter((x) => x !== s.unit.writeScopeId))} />
+            {s.channelPricing ? <div className="small pick-note"><Badge tone={s.channelPricing.tone}>{t.notAssignable}</Badge> {s.channelPricing.detail}</div> : null}
+            {s.canUnassign ? <button type="button" className="pick-action" disabled={busy} onClick={() => { setRemoving(s); setMessage(null); }}>{t.unassign}</button> : null}
           </li>
         ))}
       </ul>
-      <div className="buttons">
-        <button type="button" disabled={busy || (selected.length === 0 && !wholeCatalog)} onClick={() => void run()}>{t.preview}</button>
-        {view.canEdit
-          ? <button type="button" className="primary" disabled={busy || !preview || preview.saveBlocked !== null || confirming} onClick={() => setConfirming(true)}>{t.save}</button>
-          : null}
-      </div>
-      <p className="section-sub">{t.saveHint}</p>
+      {(() => {
+        const nothing = selected.length === 0 && !wholeCatalog;
+        const saveWhy = !preview ? m.ui.forms.why.previewFirst : preview.saveBlocked !== null ? preview.saveBlocked : null;
+        const hint = nothing ? m.ui.forms.why.selectOffers : view.canEdit && !busy && saveWhy && !confirming ? saveWhy : null;
+        return (
+          <FormActions hint={hint}>
+            {view.canEdit
+              ? <button type="button" className="primary" disabled={busy || !preview || preview.saveBlocked !== null || confirming} title={saveWhy ?? undefined} onClick={() => setConfirming(true)}>{t.save}</button>
+              : null}
+            <button type="button" disabled={busy || nothing} title={nothing ? m.ui.forms.why.selectOffers : undefined} onClick={() => void run()}>{t.preview}</button>
+          </FormActions>
+        );
+      })()}
+      <p className="field-caption">{t.saveHint}</p>
       </>}
-      </section>
+      </FieldGroup>
       {confirming && preview ? <SaveConfirm offers={preview.rows.length} busy={busy} assign={assigning !== null} onConfirm={() => void save()} onCancel={() => setConfirming(false)} /> : null}
       {removing ? (
         <div className="confirm" role="dialog" aria-modal="false" aria-labelledby="strategy-remove-title">
           <h3 id="strategy-remove-title">{t.unassignTitle(removing.unit.label)}</h3>
           <p>{t.unassignText}</p>
-          <div className="buttons">
-            <button type="button" className="danger" disabled={busy} onClick={() => void unassign()}>{t.unassign}</button>
+          <FormActions dialog>
             <button type="button" disabled={busy} onClick={() => setRemoving(null)}>{t.cancel}</button>
-          </div>
+            <button type="button" className="danger" disabled={busy} onClick={() => void unassign()}>{t.unassign}</button>
+          </FormActions>
         </div>
       ) : null}
       {error ? <ErrorBox message={error} /> : null}

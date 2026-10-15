@@ -5,6 +5,7 @@ import { requestJson, useResource, worldPath } from '../api.ts';
 import type { JobCreatedResponse } from '../api-types.ts';
 import { JobProgress } from './Jobs.tsx';
 import { ErrorBox, errorText, FileDrop, Load, useMessages } from '../components.tsx';
+import { Field, FieldGrid, FormActions } from '../forms.tsx';
 
 /**
  * Р-134 (шаг 28): экран массового импорта себестоимости. Продавец видит предпросмотр ДО применения — что применится, что не
@@ -36,17 +37,18 @@ export function CostImportPreview({ view, onMapping, onEncoding }: {
       <p className="headline">{view.headline}</p>
       <p className="source">{t.sourceRead(view.source.format, view.source.delimiter)} · {view.source.name}</p>
       {view.source.encoding ? (
-        <p className={`source ${view.source.encodingConfident ? '' : 'warn'}`}>
+        <div className={`source ${view.source.encodingConfident ? '' : 'warn'}`}>
           {/* Шаг 79 (ревью): уверенно прочитанная кодировка — подписью у выбора, а не «UTF-8 [UTF-8 ▾]» дважды */}
-          {onEncoding && view.source.encodingConfident ? null : t.encodingRead(view.source.encoding, view.source.encodingConfident)}
+          {onEncoding ? null : t.encodingRead(view.source.encoding, view.source.encodingConfident)}
+          {/* Шаг 94: кодировка — поле стандарта; неуверенное чтение — пояснением под выбором, а не текстом перед ним */}
           {onEncoding ? (
-            <label>{view.source.encodingConfident ? t.encodingLabel : null}{' '}
+            <Field label={t.encodingLabel} caption={view.source.encodingConfident ? null : t.encodingRead(view.source.encoding, view.source.encodingConfident)}>
               <select value={view.source.encoding} onChange={(e) => onEncoding(e.currentTarget.value)}>
                 {view.encodings.map((e) => <option key={e} value={e}>{e}</option>)}
               </select>
-            </label>
+            </Field>
           ) : null}
-        </p>
+        </div>
       ) : null}
       {view.blocked ? <p className="notice warn">{view.blocked}</p> : null}
       </div>
@@ -60,24 +62,22 @@ export function CostImportPreview({ view, onMapping, onEncoding }: {
         </>
       ) : null}
       {onMapping ? (
-        <ul className="column-choice">
+        // Шаг 94: выбор колонки на каждое поле — поля стандарта сеткой: подпись над выбором, обязательное — пояснением под ним
+        <FieldGrid cols={2}>
           {view.fields.map((f) => (
-            <li key={f.field}>
-              <label>
-                {f.label}{f.required ? ' *' : ''}
-                <select
-                  value={f.columnIndex === null ? '' : String(f.columnIndex)}
-                  onChange={(e) => onMapping(f.field, e.currentTarget.value === '' ? null : Number(e.currentTarget.value))}
-                >
-                  <option value="">{m.ui.common.noValue}</option>
-                  {view.fileColumns.map((c) => (
-                    <option key={c.index} value={String(c.index)}>{t.columnOption(c.name, c.header, c.sample)}</option>
-                  ))}
-                </select>
-              </label>
-            </li>
+            <Field key={f.field} label={f.label} caption={f.required ? t.requiredCaption : null}>
+              <select
+                value={f.columnIndex === null ? '' : String(f.columnIndex)}
+                onChange={(e) => onMapping(f.field, e.currentTarget.value === '' ? null : Number(e.currentTarget.value))}
+              >
+                <option value="">{m.ui.common.noValue}</option>
+                {view.fileColumns.map((c) => (
+                  <option key={c.index} value={String(c.index)}>{t.columnOption(c.name, c.header, c.sample)}</option>
+                ))}
+              </select>
+            </Field>
           ))}
-        </ul>
+        </FieldGrid>
       ) : null}
       </div> : null}
       {view.rows.length > 0 ? (
@@ -195,13 +195,16 @@ function CostImportForm({ worldId, asPage }: { worldId: string; asPage: boolean 
       {error ? <ErrorBox message={error} /> : null}
       {message ? <p className="notice" role="status">{message}</p> : null}
       {jobId ? <JobProgress worldId={worldId} jobId={jobId} /> : null}
-      <FileDrop label={t.file} fileName={file ? file.name : null} disabled={busy} onChoose={(input) => void choose(input)} />
-      <div className="buttons">
-        <button type="button" className={file && !view ? 'primary' : ''} onClick={() => void plan()} disabled={busy || !file}>{t.plan}</button>
-        {view && !view.blocked && view.summary.apply > 0
-          ? <button type="button" className="primary" onClick={() => void apply()} disabled={busy}>{t.apply}</button>
-          : null}
-        {view ? <button type="button" onClick={() => { setView(null); setFile(null); setMapping(null); }} disabled={busy}>{t.back}</button> : null}
+      {/* Шаг 94: файл — поле стандарта; кнопки — одним рядом, главное действие первым, недоступное объясняет почему */}
+      <div className="card field-group">
+        <Field label={t.fileLabel} caption={t.fileCaption}><FileDrop label={t.file} fileName={file ? file.name : null} disabled={busy} onChoose={(input) => void choose(input)} /></Field>
+        <FormActions hint={!file && !busy ? m.ui.forms.why.file : null}>
+          {view && !view.blocked && view.summary.apply > 0
+            ? <button type="button" className="primary" onClick={() => void apply()} disabled={busy}>{t.apply}</button>
+            : null}
+          <button type="button" className={file && !view ? 'primary' : ''} onClick={() => void plan()} disabled={busy || !file} title={!file ? m.ui.forms.why.file : undefined}>{t.plan}</button>
+          {view ? <button type="button" onClick={() => { setView(null); setFile(null); setMapping(null); }} disabled={busy}>{t.back}</button> : null}
+        </FormActions>
       </div>
       {view ? <CostImportPreview view={view} onMapping={changeMapping} onEncoding={changeEncoding} /> : null}
     </section>

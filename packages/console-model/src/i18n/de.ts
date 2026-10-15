@@ -369,7 +369,7 @@ export const de: Messages = {
       /** Шаг 92 [Р-216]: знак и строчное имя «pricetrail» в шапке; вкладка — имя в прозе (documentTitle) */
       title: 'pricetrail · Verkäuferkonsole',
       documentTitle: 'PriceTrail · Verkäuferkonsole',
-      theme: { label: 'Darstellung', system: 'Wie das System', light: 'Hell', dark: 'Dunkel' },
+      theme: { label: 'Darstellung', system: 'Wie das System', light: 'Hell', dark: 'Dunkel', switchTo: (current: string, next: string) => `Darstellung: ${current}. Wechseln zu ${next}` },
       stand: 'Testumgebung, synthetische Daten',
       // Шаг 64 (проход консоли): имя и описание демо-мира на языке интерфейса, а не строкой посева по-немецки
       demoWorldTitle: 'Demo-Shop (Simulator)', demoWorldDescription: 'Synthetischer Shop auf dem Kanalsimulator: jedes Angebot hat drei Wettbewerber — einer driftet, einer unterbietet, einer in Preiswellen.',
@@ -448,7 +448,7 @@ export const de: Messages = {
         demoGuestHint: 'Ohne Registrierung: Sie sehen einen Demo-Arbeitsbereich als Beobachter. Die Daten sind synthetisch, der Weg ist echt — ändern können Sie darin nichts.',
       },
       dialog: {
-        note: (min: number) => `Notiz — warum (mindestens ${min} Zeichen):`,
+        noteLabel: 'Notiz', noteCaption: (min: number) => `Warum Sie es tun — mindestens ${min} Zeichen.`,
         cancel: 'Abbrechen',
         busy: (seconds: number) => `Wird ausgeführt… (bis zu ${seconds} s)`,
         confirmStop: 'Ja, stoppen',
@@ -635,7 +635,7 @@ export const de: Messages = {
         `Produkte ${s.products}: mit Bestand ${s.withStock}; Angebote im Abgleich ${s.synced}; Schreibvorgänge unterwegs ${s.pendingWrites}; Abweichungen ${s.diverged}; offene Reservierungen ${s.openReservations}.`,
       columns: { product: 'Produkt', onHand: 'Physisch', reserved: 'Reserviert', available: 'Verfügbar', channels: 'Kanäle' },
       filter: {
-        search: 'Nach Name oder SKU suchen', withReservations: 'Nur Produkte mit Reservierungen', apply: 'Suchen', reset: 'Alle zeigen',
+        searchLabel: 'Produkt suchen', search: 'Nach Name oder SKU suchen', withReservations: 'Nur Produkte mit Reservierungen', apply: 'Suchen', reset: 'Alle zeigen',
         matched: (n: number, total: number) => `${n} von ${total} Produkten passen.`,
         none: 'Kein Produkt passt zur Suche oder zum Filter.',
       },
@@ -656,6 +656,14 @@ export const de: Messages = {
       // Р-153: die Fallen werden VOR dem ersten Schreiben aus der Kanalfähigkeit benannt, nicht danach entdeckt
       traps: {
         title: 'Bevor etwas geschrieben wird',
+        // шаг 94: суть ловушки в одну-две строки — плашка; полный текст ниже — по раскрытию
+        summary: {
+          AMAZON: 'Ein Bestandswert je SKU für die ganze Amazon-Region — nicht nur diese Storefront. Das Einschalten erfordert Ihre Bestätigung.',
+          AMAZON_NA: 'Ein Bestandswert je SKU für die ganze nordamerikanische Amazon-Region. Das Einschalten erfordert Ihre Bestätigung.',
+          KAUFLAND: 'Ein Bestandswert für alle Storefronts derselben Kaufland-Angebots-ID.',
+          WALMART: 'Ein Bestandswert je SKU, an den Standard-Versandknoten des Kontos.',
+          generic: 'In diesem Kanal wird der Bestand weiter geschrieben als der Preis — vor dem Einschalten prüfen.',
+        },
         AMAZON: 'Amazon: der MFN-Bestand ist EIN Wert je SKU für die ganze Region. Ein Schreiben für amazon.de ändert auch amazon.fr, .it, .es — selbst wenn Sie nur mit einer Storefront arbeiten. Das Einschalten erfordert Ihre Bestätigung.',
         KAUFLAND: 'Kaufland: den Bestand teilen sich alle Storefronts derselben Kaufland-Angebots-ID. Ein Wert für de und at; die Reihenfolge, in der die Storefronts ihn übernehmen, ist nicht garantiert.',
         AMAZON_NA: 'Amazon: den MFN-Bestand behandeln wir als EINEN Wert je SKU für die ganze Amazon-Region des Kontos — bei amazon.com ist das Nordamerika. Ein Schreiben für amazon.com kann auch den Bestand Ihrer anderen nordamerikanischen Storefronts ändern: Amazon hat den Bereich noch nicht bestätigt, daher gehen wir vom weiteren aus. Das Einschalten erfordert Ihre Bestätigung.',
@@ -669,12 +677,15 @@ export const de: Messages = {
         products: (n: number) => `${n} Produkte mit Werten`,
         create: 'Quelle anlegen',
         name: 'Name',
+        nameCaption: 'Ihr eigener Name für diese Quelle, zum Beispiel das Lager.',
+        mode: 'Wie der Bestand ankommt',
         keyOnce: 'API-Schlüssel — wird EINMAL angezeigt. Jetzt kopieren: der Dienst behält nur seinen Fingerabdruck.',
         keyHint: (origin: string) => `POST ${origin}/inbound/v1/stock mit Header Authorization: Bearer <Schlüssel> und Body {"rows":[{"sku":"…","quantity":12,"asOf":"2026-09-23T10:00:00Z"}]}. Ein Wert mit älterem asOf als dem bekannten wird nicht übernommen.`,
         keyPresent: 'Schlüssel ausgestellt',
       },
       importFile: {
         chooseFile: 'Bestandsdatei wählen (CSV oder XLSX)',
+        source: 'Quelle', sourceCaption: 'Die Dateiimport-Quelle, die die Inventur erhält.', file: 'Datei',
         title: 'Bestandsdatei',
         hint: 'Zwei Spalten: SKU und Menge (Überschriften deutsch oder englisch). Die Datei wird zur Inventur des internen Pools: jedes genannte Produkt erhält genau den genannten Wert.',
         choose: 'Datei wählen',
@@ -686,9 +697,10 @@ export const de: Messages = {
       },
       enable: {
         title: 'Abgleich',
-        buffer: 'Puffer je Kanal (zurückgehaltene Stück)',
-        maxQuantity: 'Höchstens veröffentlichen (leer — keine Obergrenze)',
-        minToList: 'Darunter wird das Angebot mit 0 gelistet',
+        buffer: 'Puffer je Kanal', bufferCaption: 'Stück, die jedem Kanal vorenthalten werden.',
+        maxQuantity: 'Höchstens veröffentlichen', maxQuantityCaption: 'Leer lassen — keine Obergrenze.',
+        minToList: 'Mindestens listen', minToListCaption: 'Darunter wird das Angebot mit 0 gelistet.',
+        acknowledgeCaption: 'Ohne Ihre Bestätigung startet der Abgleich dieses Kontos nicht.',
         acknowledge: 'Ich verstehe die Nebenwirkung dieses Kanals und bestätige sie',
         submit: 'Abgleich einschalten',
         done: (r: { scopes: number; created: number; awaitingAck: number; writes: number }) => r.awaitingAck > 0
@@ -771,7 +783,8 @@ export const de: Messages = {
         hint: (id: string) => `Um zu bestätigen, dass kein anderes Tool Bestände in diesem Kanal pflegt, geben Sie die Kanalkonto-ID ein: ${id}`,
         submit: 'Bestätigen und Bestände schreiben erlauben',
         confirmed: 'Bestätigt: Bestände dürfen in diesen Kanal geschrieben werden. Schalten Sie den Abgleich auf der Seite „Bestand“ ein.',
-        revokeHint: (id: string) => `Übernimmt ein anderes Tool die Bestände in diesem Kanal? Widerrufen Sie das Schreiben von Beständen: es stoppt sofort, noch nicht gesendete Bestandsänderungen werden verworfen, und wieder einschalten lässt es sich nur mit einer neuen Bestätigung. Geben Sie die Kanalkonto-ID ein: ${id}`,
+        revokeHint: (id: string) => `Zum Widerrufen die Kanalkonto-ID eingeben: ${id}`,
+        revokeCaption: 'Übernimmt ein anderes Tool hier die Bestände? Das Schreiben von Beständen stoppt sofort, noch nicht gesendete Bestandsänderungen werden verworfen, und wieder einschalten lässt es sich nur mit einer neuen Bestätigung.',
         revoke: 'Schreiben von Beständen widerrufen',
         revoked: (scopes: number, writes: number, inFlight: number) => `Widerrufen: Bestände werden nicht mehr in diesen Kanal geschrieben. Abgleich für ${scopes} Angebot(e) ausgeschaltet, ${writes} nicht gesendete Bestandsänderung(en) verworfen.${inFlight > 0 ? ` ${inFlight} Änderung(en) waren vor dem Widerruf bereits an den Kanal gesendet und lassen sich nicht zurückholen; sie werden nicht wiederholt.` : ''}`,
       },
@@ -1171,9 +1184,24 @@ export const de: Messages = {
       limitMin: (amount: string) => `Mindestpreis ${amount}`, limitFloor: (amount: string) => `Mindestmargen-Untergrenze ${amount}`, limitMax: (amount: string) => `Höchstpreis ${amount}`,
       productRef: (marketplace: string, ref: string) => `${marketplace} · Produkt ${ref}`,
     },
+    forms: {
+      why: {
+        name: 'Zuerst einen Namen eingeben.',
+        source: 'Zuerst eine Quelle wählen.',
+        file: 'Zuerst eine Datei wählen.',
+        jobRunning: 'Warten, bis der laufende Massenvorgang fertig ist.',
+        confirmSideEffect: 'Zuerst die Nebenwirkung dieses Kanals bestätigen.',
+        selectOffers: 'Zuerst mindestens ein Angebot auswählen.',
+        previewFirst: 'Zuerst die Vorschau anzeigen: gespeichert wird genau, was die Vorschau gezeigt hat.',
+        storefront: 'Zuerst mindestens eine Storefront wählen.',
+        typeName: 'Zuerst die oben genannte Kennung genau eintippen.',
+        period: 'Zuerst beide Daten eingeben.',
+        note: (min: number) => `Zuerst eine Notiz mit mindestens ${min} Zeichen schreiben.`,
+      },
+    },
     offerPicker: {
-      search: 'Angebot suchen (SKU, EAN, Name)',
-      found: (n: number) => `${n} Angebote gefunden`,
+      search: 'Angebot suchen (SKU, EAN, Name)', choose: 'Angebot',
+      found: (n: number) => `${n} ${n === 1 ? 'Angebot' : 'Angebote'} gefunden`,
       /** Шаг 84.1: счётчик — о предложениях в выпадающем списке, а не о записях ленты рядом: слово «Angebote» говорит это прямо */
       narrow: (shown: number, total: number) => `${shown} von ${total} Angeboten in der Liste — Suche eingrenzen`,
     },
@@ -1209,6 +1237,17 @@ export const de: Messages = {
       ],
     },
     strategies: {
+      captions: {
+        name: 'Ihr Name für die Strategie; er erscheint in Listen und unter Warum dieser Preis.',
+        priceMinor: 'Der Preis, den das Angebot hält — immer innerhalb Ihrer Grenzen.',
+        targetMarginBp: 'Die Marge, auf die der Preis zielt — nach Stückkosten und Gebühren.',
+        undercutMinor: 'Wie weit unter den Preis des Wettbewerbers gegangen wird.',
+        atBound: 'Was passiert, wenn das Ziel außerhalb Ihrer Grenzen liegt.',
+        scope: 'Welche Angebote der Wettbewerber zählen.',
+        deadbandMinor: 'Kleinere Änderungen als diese werden nicht vorgenommen — der Preis springt nicht hin und her.',
+        holdWhenWinning: 'Solange die Buy Box Ihnen gehört, wird der Preis nicht gesenkt.',
+        compareLanded: 'Preise einschließlich Versand vergleichen.',
+      },
       pageTitle: 'Strategien', inUse: 'Verwendete Strategien', offers: 'Angebote', draftTitle: 'Entwurf', name: 'Name', type: 'Typ',
       types: { FIXED: 'Festpreis', TARGET_MARGIN: 'Zielmarge', MATCH_BUYBOX: 'Buy Box angleichen', BEAT_LOWEST: 'Niedrigsten Preis unterbieten' },
       fields: { priceMinor: 'Preis', targetMarginBp: 'Marge, %', undercutMinor: 'Unterbietung', deadbandMinor: 'Schwelle', holdWhenWinning: 'Bei Gewinn halten', atBound: 'Außerhalb der Grenzen', scope: 'Vergleich mit', compareLanded: 'Inklusive Versand' },
@@ -1313,6 +1352,7 @@ export const de: Messages = {
       },
     },
     costImport: {
+      requiredCaption: 'Pflichtfeld.', fileLabel: 'Exportdatei', fileCaption: 'CSV oder XLSX. Vor dem Anwenden der Vorschau ändert sich nichts.',
       pageTitle: 'Stückkosten importieren', file: 'Exportdatei wählen (CSV oder XLSX)', plan: 'Vorschau zeigen', apply: 'Anwenden', back: 'Andere Datei wählen',
       sourceRead: (format: string, delimiter: string | null) => `Gelesen als ${format}${delimiter ? ` mit dem Trennzeichen „${delimiter === '\t' ? 'Tabulator' : delimiter}“` : ''}`,
       encodingLabel: 'Zeichensatz', encodingRead: (encoding: string, confident: boolean) => confident ? `Zeichensatz: ${encoding}` : `Zeichensatz vermutlich ${encoding} — bitte prüfen und bei Bedarf ändern`,
@@ -1350,6 +1390,7 @@ export const de: Messages = {
       },
     },
     boundsEdit: {
+      amountLabel: 'Neuer Betrag', percentLabel: 'Änderung, %',
       pageTitle: 'Grenzen ändern', select: 'Angebote', minPrice: 'Mindestpreis', maxPrice: 'Höchstpreis', keep: 'unverändert', set: 'setzen auf (Betrag)', percent: 'ändern um (%)',
       shownRows: (shown: number, of: number) => `Gezeigt werden ${shown} von ${of} Zeilen — zuerst die mit Hinweisen`,
       selectPage: (n: number) => `Die ${n} auf dieser Seite auswählen`,

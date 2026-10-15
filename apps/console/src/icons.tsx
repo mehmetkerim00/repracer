@@ -28,8 +28,10 @@ const PATHS: Record<string, ReactNode> = {
   x: <><path d="M6 6l12 12" /><path d="M18 6 6 18" /></>,
   menu: <><path d="M4 6h16" /><path d="M4 12h16" /><path d="M4 18h16" /></>,
   equal: <><path d="M5 9h14" /><path d="M5 15h14" /></>,
-  // шаг 93: тема — круг наполовину залит (светлая и тёмная половины); цвет — текущий цвет текста
-  contrast: <><circle cx="12" cy="12" r="9" /><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" /></>,
+  // шаг 94: тема — солнце (светлая), луна (тёмная), монитор (как у системы)
+  sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2" /><path d="M12 20v2" /><path d="m4.9 4.9 1.4 1.4" /><path d="m17.7 17.7 1.4 1.4" /><path d="M2 12h2" /><path d="M20 12h2" /><path d="m4.9 19.1 1.4-1.4" /><path d="m17.7 6.3 1.4-1.4" /></>,
+  moon: <path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z" />,
+  monitor: <><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8" /><path d="M12 16v4" /></>,
 };
 
 export type IconName = keyof typeof PATHS;

@@ -59,11 +59,11 @@ td.cur .note, td.cur .muted, td.cur .small, td.cur a, td.cur .badge, td.cur .flo
 .topbar .lang button:hover { color: var(--header-fg-logo); background: transparent; }
 .topbar .lang button.active { color: var(--header-fg-logo); background: transparent; text-decoration: underline; text-underline-offset: var(--space-1); }
 /* шаг 93: выбор темы — в шапке прозрачный, цветом шапки; в выдвижной панели — обычный контрол */
-.theme-switch { position: relative; display: inline-flex; align-items: center; }
-.theme-switch > .icon { display: none; }
-.theme-select { font-size: var(--font-size-sm); padding: var(--base-size-2) var(--space-2); border-radius: var(--radius); border: var(--border-width) solid var(--border); background: var(--control-bg); color: var(--control-fg); }
-.topbar .theme-select { background: transparent; color: var(--header-fg); border-color: var(--header-divider); }
-.topbar .theme-select option { background: var(--surface); color: var(--text); }
+/* шаг 94: тема — кнопкой-иконкой рядом с именем и выходом; на узком экране — 44×44 */
+.theme-button { display: inline-flex; align-items: center; justify-content: center; min-width: var(--control-h); min-height: var(--control-h); padding: 0; }
+.topbar .theme-button { color: var(--header-fg); }
+.topbar .theme-button:hover { color: var(--header-fg-logo); }
+.sidebar-extras .theme-button { border: var(--border-width) solid var(--border); background: var(--control-bg); color: var(--control-fg); }
 .topbar button.ghost { border-color: transparent; background: transparent; box-shadow: none; color: var(--header-fg); }
 .topbar button.ghost:hover { background: transparent; color: var(--header-fg-logo); }
 main.page { max-width: 1200px; margin: 0 auto; padding: var(--space-5) var(--space-5) var(--space-7); }
@@ -212,12 +212,13 @@ button.danger { background: var(--control-bg); border-color: var(--border); colo
 button.danger:hover { background: var(--danger-strong); border-color: var(--danger-strong); color: var(--on-emphasis); }
 /* подпись «the whole workspace» начинается со строчной — заголовком карточки она с заглавной (только у неё: «eBay» трогать нельзя) */
 .target-card.whole h3::first-letter { text-transform: uppercase; }
-.buttons { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
+.buttons { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-3); }
 input, select, textarea {
   font: inherit; font-size: var(--font-size); color: var(--text); background: var(--surface); border: var(--border-width) solid var(--border);
   border-radius: var(--radius); padding: var(--space-1) var(--space-3); line-height: var(--line-height-tight); min-height: var(--control-h);
 }
-input[type='checkbox'], input[type='radio'] { padding: 0; accent-color: var(--accent); }
+/* шаг 94: галочка — своего размера, без высоты поля ввода: иначе она стоит ниже своей подписи */
+input[type='checkbox'], input[type='radio'] { padding: 0; min-height: 0; accent-color: var(--accent); }
 input::placeholder { color: var(--text-3); }
 input[type='file'] { padding: var(--space-1); }
 /* дата и время на языке экрана (шаг 78) */
@@ -242,32 +243,64 @@ input[type='file']::file-selector-button {
 }
 input[type='file']::file-selector-button:hover { background: var(--control-bg-hover); }
 label { color: var(--text); }
-.form, .filters { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3); align-items: center; margin: var(--space-2) 0; }
-.form select, .filters select { max-width: 320px; }
-/* подпись — над полем, мелким вторичным; флажок — в строку со своей подписью */
-.form { align-items: flex-start; gap: var(--space-3) var(--space-4); }
-/* кнопка формы — на линии полей (под подписями), а не на линии подписей */
-.form > button { margin-top: var(--base-size-20); }
-.form > label, .filters > label {
-  display: inline-flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); font-size: var(--font-size-xs);
-  font-weight: var(--weight-medium); color: var(--text-2);
-}
-.form > label:has(> input[type='checkbox']), .form > label:has(> input[type='radio']),
-.filters > label:has(> input[type='checkbox']), .filters > label:has(> input[type='radio']) {
-  flex-direction: row; align-items: center; gap: var(--space-2); font-size: var(--font-size); font-weight: 400; color: var(--text); padding-bottom: var(--base-size-6);
-}
+/*
+ * Шаг 94: стандарт формы по образцу Primer FormControl (компоненты — forms.tsx). Подпись — над контролом, пояснение — мелким
+ * приглушённым под ним, ошибка — под пояснением; поля — сеткой с зазорами шкалы; чекбокс — контрол слева, подпись справа; кнопки —
+ * одним рядом в конце группы; плашка канала — заголовок, пилюля, суть и подробности по раскрытию, текст не шире ~80 знаков
+ */
+.field { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.field-label { font-weight: var(--weight-heading); font-size: var(--font-size); color: var(--text); line-height: var(--line-height-tight); }
+.field > input:not([type='checkbox']):not([type='radio']), .field > select, .field > textarea { width: 100%; max-width: 100%; }
+.field-caption { margin: 0; font-size: var(--font-size-sm); color: var(--text-2); max-width: 80ch; }
+.field-error { margin: 0; font-size: var(--font-size-sm); color: var(--danger); }
+.field-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: var(--space-4) var(--space-5); align-items: start; margin: var(--space-3) 0; }
+.field-grid > .field-wide { grid-column: 1 / -1; }
+.field-grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.field-grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.field-grid.cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.field-grid > .field-span-2 { grid-column: span 2; }
+.check-field { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: var(--space-2); row-gap: var(--base-size-2); align-items: start; }
+/* галочка 13px — по середине первой строки подписи (строка 21px: 4 + 6,5 = 10,5) */
+.check-field > input { margin: var(--space-1) 0 0; }
+.check-field > label { font-weight: var(--weight-heading); color: var(--text); }
+.check-field > .field-caption { grid-column: 2; }
+.check-field.disabled > label { color: var(--text-3); }
+.field-group > .field-group-title { margin: 0; }
+.field-group > .field-group-caption { margin-top: var(--space-1); }
+.field-group + .field-group { margin-top: var(--space-4); }
+.form-actions { display: flex; flex-direction: column; gap: var(--space-1); margin-top: var(--space-4); }
+.form-actions-row { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.dialog-actions { align-items: flex-end; }
+.dialog-actions .form-actions-row { justify-content: flex-end; }
+.banner { border: var(--border-width) solid var(--warning-border); background: var(--warning-soft); border-radius: var(--radius); padding: var(--space-3) var(--space-4); margin: var(--space-3) 0; }
+.banner-info { border-color: var(--border); background: var(--surface-muted); }
+.banner-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.banner-title { font-weight: var(--weight-heading); }
+.banner-summary, .banner-details { margin: var(--space-1) 0 0; max-width: 80ch; }
+.banner-details { font-size: var(--font-size-sm); color: var(--text-2); }
+.banner > button.link { margin-top: var(--space-1); }
+.banner > .check-field { margin-top: var(--space-3); }
+/* шаг 94: ряд фильтров — поля стандарта в строку: подписи над полями, низ полей на одной линии, кнопки — в конце ряда */
+.field-toolbar { align-items: flex-end; }
+.field-toolbar > .field { flex: 0 1 18rem; min-width: 14rem; }
+/* короткий выбор (статус, период) — уже поля поиска: ряд фильтров ленты помещается в одну строку при 1440 */
+.field-toolbar > .field:has(> select) { flex-basis: 12rem; min-width: 10rem; }
+/* галочка в ряду фильтров — на линии полей: блок высотой поля, строка галочки — по его середине */
+.field-toolbar > .check-field { align-self: flex-end; min-height: var(--control-h); align-content: center; }
 /* поиск предложения: поле поиска, список и счётчик — столбиком одной ширины */
 .offer-picker { display: inline-flex; flex-direction: column; gap: var(--space-1); width: 300px; }
 .offer-picker input[type='search'], .offer-picker select { width: 100%; max-width: none; }
 .offer-picker .small { font-weight: 400; }
-.filters { align-items: flex-start; }
-.filters input[type='search'] { min-width: 280px; }
+/* шаг 94: в поле стандарта выбор предложения — на ширину поля */
+.field > .offer-picker:not(.inline) { width: 100%; }
+.field > .date-field, .field > .date-field input { width: 100%; }
 /* шаг 84: поиск и выбор предложения — в строку; счётчик найденного — в конце ряда фильтров */
-.toolbar.filters { align-items: flex-end; }
+.field-toolbar > .field:has(.offer-picker.inline) { flex-basis: auto; }
 .offer-picker.inline { flex-direction: row; width: auto; gap: var(--space-2); }
-.offer-picker.inline input[type='search'] { min-width: 0; width: 272px; }
-.offer-picker.inline select { width: 260px; }
-.filters-count { margin-left: auto; font-size: var(--font-size-sm); color: var(--text-2); align-self: center; padding-top: var(--space-4); }
+.offer-picker.inline input[type='search'] { min-width: 0; width: 15rem; }
+.offer-picker.inline select { width: 15rem; }
+/* счётчик найденного — в конце ряда, на линии полей: высота строки равна высоте поля */
+.filters-count { margin-left: auto; font-size: var(--font-size-sm); color: var(--text-2); align-self: flex-end; line-height: var(--control-h); }
 
 /* ---------- таблицы ---------- */
 .table-wrap { overflow-x: auto; background: var(--surface); border: var(--border-width) solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
@@ -316,8 +349,9 @@ td .basis { color: var(--text); }
 :is(.cards, .worlds, .stats, .choices) > :is(.card, .toolbar, .table-wrap, .notice, p.empty, .error, .cards, ul.link-list),
 :is(.cards, .worlds, .stats, .choices) > :is(.card, .toolbar, .table-wrap, .notice, p.empty, .error, .cards, ul.link-list) + :is(.card, .toolbar, .table-wrap, .notice, p.empty, .error, .cards, ul.link-list) { margin-top: 0; }
 .toolbar.filters { align-items: flex-start; }
+/* шаг 94: ряд полей стандарта — низ полей и кнопки на одной линии (сильнее правила фильтров выше) */
+.toolbar.field-toolbar { align-items: flex-end; }
 .toolbar .toolbar-end { margin-left: auto; align-self: flex-end; }
-.toolbar.form > button { margin-top: var(--base-size-20); }
 .toolbar.stock-summary { flex-direction: column; gap: var(--space-1); }
 ul.plain { list-style: none; padding: 0; margin: 0; color: var(--text-2); }
 ul.plain.cost-lines { color: var(--text); }
@@ -387,9 +421,10 @@ details.column-picker .menu {
   position: absolute; right: 0; top: calc(100% + 4px); z-index: 10; min-width: 220px; display: flex; flex-direction: column; gap: var(--base-size-2); padding: var(--space-2);
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lg);
 }
-details.column-picker .menu label { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm); color: var(--text); font-size: var(--font-size-sm); }
-details.column-picker .menu label:hover { background: var(--nav-hover); }
-.compact-toggle { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--font-size-sm); color: var(--text); }
+/* шаг 94: галочки колонок — поля стандарта; в меню — строками с подсветкой наведения */
+details.column-picker .menu .check-field { padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm); }
+details.column-picker .menu .check-field:hover { background: var(--nav-hover); }
+details.column-picker .menu .check-field > label, .view-options .check-field > label { font-weight: 400; font-size: var(--font-size-sm); }
 td.status-cell .cell + .cell { margin-top: var(--space-1); }
 /* шаг 89: колонка «Channel says» (снят с публикации Walmart) — длинная пилюля и пояснение переносятся, стратегия тоже: таблица
    с этой колонкой помещается в рамку при 1440, а без неё вид прежний */
@@ -673,7 +708,6 @@ ul.link-list .range { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .letter { white-space: pre-wrap; font-family: var(--font); font-size: var(--font-size-sm); background: var(--surface-muted); border: var(--border-width) solid var(--border); border-radius: var(--radius); padding: var(--space-3) var(--space-4); margin: var(--space-2) 0 0; color: var(--text); }
 .import-preview.warn, .source.warn { border-color: var(--warning-border); }
 .skipped { color: var(--text-3); }
-.whole-catalog { font-weight: var(--weight-medium); }
 
 /* Списки карточек (каналы онбординга, аккаунты): без маркеров, с отступом сетки */
 ul.channels { list-style: none; padding: 0; display: grid; gap: var(--space-2); margin: var(--space-2) 0; }
@@ -688,8 +722,8 @@ ul.channels > li.card ul { margin: var(--space-2) 0 0; }
 /* статус-фраза — блоком своего тона (тон-классы дают фон, цвет и границу) */
 p.status-line { padding: var(--space-2) var(--space-3); border-radius: var(--radius); border-width: var(--border-width); border-style: solid; font-size: var(--font-size-sm); }
 /* подтверждение набранным идентификатором: подсказка над полем, поле и кнопка — отдельной строкой */
-.typed-confirm { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-2); margin: var(--space-2) 0; }
-.typed-confirm label { display: flex; flex-direction: column; gap: var(--space-1); flex: 1 1 320px; font-size: var(--font-size-sm); color: var(--text-2); }
+/* шаг 94: набранное подтверждение — поле стандарта; набирают идентификатор — моноширинным */
+.typed-confirm { margin: var(--space-3) 0; }
 .typed-confirm input { font-family: var(--font-code); font-size: var(--font-size-sm); }
 .account-writers { border-left: 1px solid var(--divider); padding-left: var(--space-5); min-width: 0; }
 .account-writers p { margin: 0 0 var(--space-2); }
@@ -702,9 +736,6 @@ p.status-line { padding: var(--space-2) var(--space-3); border-radius: var(--rad
 @media (width < 63.25rem) { .card.account { grid-template-columns: 1fr; } .account-writers { border-left: 0; padding-left: 0; border-top: 1px solid var(--divider); padding-top: var(--space-3); } }
 
 /* шаг 79 (ревью): сопоставление колонок импорта — сеткой «поле — выбор колонки», а не рваным списком */
-ul.column-choice { list-style: none; padding: 0; margin: var(--space-3) 0 0; display: grid; gap: var(--space-2); }
-ul.column-choice li label { display: grid; grid-template-columns: minmax(160px, 220px) minmax(0, 1fr); align-items: center; gap: var(--space-3); }
-ul.column-choice select { max-width: 520px; }
 ul.columns { margin: var(--space-1) 0 0; padding-left: var(--space-4); color: var(--text-2); }
 
 /* строки каналов в остатках — витрина и пилюля состояния, подробности ниже (шаг 79) */
@@ -731,8 +762,8 @@ td.pills .badge, .account .badge { border-radius: var(--radius); }
 table.dense td.bound { min-width: 110px; }
 table.dense td .reason { min-width: 160px; }
 /* выбор витрин у подключения канала — с зазорами, кнопка — после них (шаг 79) */
-p.connect-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); }
-p.connect-row label { display: inline-flex; align-items: center; gap: var(--space-1); }
+/* шаг 94: витрины подключения — галочками стандарта в ряд */
+.connect-row .check-row { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-5); margin-top: var(--space-2); }
 /* «на момент» в предпросмотре стратегии — в две строки (шаг 79) */
 td.as-of { min-width: 120px; max-width: 160px; }
 td.as-of .when { white-space: normal; }
@@ -750,9 +781,6 @@ section.account-modes { display: flex; flex-direction: column; gap: var(--space-
 p.notice.live-blocked { margin: 0; }
 @media (width < 63.25rem) { .account-mode { grid-template-columns: 1fr; } }
 /* шаг 86: поле имени не сжимается уже самого имени (ширина — по `size`), кнопка при нехватке места уходит строкой ниже */
-.live-row { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
-.live-row input { flex: 1 0 auto; width: auto; min-width: 0; max-width: 100%; }
-.live-row button { flex: none; white-space: nowrap; }
 
 /*
  * ---------- шаг 85: адаптив — от телефона 375px до широкого монитора ----------
@@ -763,6 +791,8 @@ p.notice.live-blocked { margin: 0; }
 .menu-button, .nav-close, .sidebar-extras, .nav-backdrop { display: none; }
 
 @media (width < 63.25rem) {
+  /* шаг 94: ряды полей — по две колонки; поле на две колонки остаётся на две */
+  .field-grid.cols-3, .field-grid.cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   /* каркас: боковая навигация — выдвижной панелью слева под шапкой; кнопка меню — в шапке; закрывает выбор пункта, крестик, клик мимо и Esc */
   .world-layout { grid-template-columns: minmax(0, 1fr); }
   .sidebar {
@@ -785,7 +815,7 @@ p.notice.live-blocked { margin: 0; }
   .sidebar-extras .user { flex-basis: 100%; color: var(--text-2); font-size: var(--font-size-sm); overflow-wrap: anywhere; }
   .menu-button { display: inline-flex; align-items: center; justify-content: center; padding: 0 var(--space-2); }
   /* шапка внутри рабочего пространства: кнопка меню, знак, имя — язык, адрес и выход уехали в панель */
-  .topbar.in-world .lang, .topbar.in-world .theme-switch, .topbar.in-world .user, .topbar.in-world > button.ghost:not(.menu-button) { display: none; }
+  .topbar.in-world .lang, .topbar.in-world .theme-button, .topbar.in-world .user, .topbar.in-world > button.ghost:not(.menu-button) { display: none; }
   .topbar .user { display: none; }
   .topbar { gap: var(--space-2); padding: 0 var(--space-3); }
   .world-content { padding: var(--space-4); }
@@ -807,35 +837,33 @@ p.notice.live-blocked { margin: 0; }
   .nav-group a, .sidebar .workspace a, a.row-link, .tabs a, p.back a { min-height: var(--touch-target); display: inline-flex; align-items: center; }
   .nav-group a { display: flex; }
   button.role-row { min-height: var(--touch-target); }
+  .theme-button { min-width: var(--touch-target); min-height: var(--touch-target); }
   .periods button, .segmented button, .lang button { min-height: var(--touch-target); }
-  .form > label:has(> input[type='checkbox']), .filters > label:has(> input[type='checkbox']), .form > label:has(> input[type='radio']), .filters > label:has(> input[type='radio']) { min-height: var(--touch-target); padding-bottom: 0; }
+  /* шаг 94: галочка стандарта — цель касания не ниже 44px */
+  /* галочка остаётся на линии ПЕРВОЙ строки подписи: по середине блока встаёт вся строка, а не галочка против двух строк */
+  .check-field { min-height: var(--touch-target); align-content: center; }
   ul.link-list > li { min-height: var(--touch-target); align-items: center; }
-  .form > button, .toolbar.form > button { margin-top: 0; align-self: flex-end; }
 }
 
 @media (width < 48rem) {
+  /* шаг 94: поля формы — одной колонкой на всю ширину */
+  .field-grid, .field-grid.cols-2, .field-grid.cols-3, .field-grid.cols-4 { grid-template-columns: minmax(0, 1fr); }
+  .field-grid > .field-span-2 { grid-column: auto; }
   /* шапка: пометка стенда уходит, на входе и в списке остаются знак, язык и выход */
   .topbar .env { display: none; }
   /* сетка рабочих пространств — в одну колонку на всю ширину */
   .worlds, .worlds-page .worlds { grid-template-columns: minmax(0, 1fr); justify-content: stretch; }
   /* ряды фильтров — столбиком, элементы на всю ширину, счётчик — под ними */
-  .toolbar.filters, form.filters { flex-direction: column; align-items: stretch; }
-  .toolbar.filters > *, form.filters > * { width: 100%; max-width: none; }
-  .filters input[type='search'], .filters select, .offer-picker.inline input[type='search'], .offer-picker.inline select { min-width: 0; width: 100%; max-width: none; }
+  .field-toolbar, .toolbar.field-toolbar { flex-direction: column; align-items: stretch; }
+  .field-toolbar > * { width: 100%; max-width: none; flex-basis: auto; }
+  .offer-picker.inline input[type='search'], .offer-picker.inline select { min-width: 0; width: 100%; max-width: none; }
   .offer-picker, .offer-picker.inline { flex-direction: column; width: 100%; }
-  .filters > label { width: 100%; }
-  .filters > label > select, .filters > label > input:not([type='checkbox']):not([type='radio']) { width: 100%; }
-  .filters-count { margin-left: 0; padding-top: 0; align-self: flex-start; order: 99; }
+  .filters-count { margin-left: 0; align-self: flex-start; line-height: inherit; order: 99; }
   .toolbar .toolbar-end { margin-left: 0; align-self: stretch; }
   .date-field, .date-field input { width: 100%; }
   /* выбор со списком длинных значений (пояс времени) — не шире экрана */
-  .form > label, .filters > label { max-width: 100%; }
   select { max-width: 100%; }
-  .typed-confirm label { flex-basis: 100%; }
   ul.offer-list { columns: 1; }
-  ul.column-choice li label { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }
-  .live-row { flex-wrap: wrap; }
-  .live-row button { flex: 1 1 auto; }
 
   /*
    * Таблицы-ленты (выбор «а»): строка — карточка. Первой строкой — предложение, дальше пары «подпись — значение» (подпись — из
@@ -896,11 +924,6 @@ p.notice.live-blocked { margin: 0; }
   .stats { grid-template-columns: minmax(0, 1fr); }
   /* на телефоне имя продукта в шапке уступает место кнопке меню и языку */
   .topbar .brand-title { display: none; }
-  /* шаг 93: вне рабочего пространства в шапке телефона — знак, язык, тема и выход; подписи темы («System theme», «Wie das System») рядом
-     не влезают — выбор темы иконкой 44×44 поверх того же списка, варианты в раскрытом списке — прежним текстом */
-  .topbar .theme-switch > .icon { display: block; position: absolute; inset: 0; margin: auto; pointer-events: none; color: var(--header-fg); }
-  .topbar .theme-select { appearance: none; width: var(--touch-target); padding: 0; color: transparent; }
-  .topbar .theme-switch:hover > .icon { color: var(--header-fg-logo); }
   .login-wrap { padding: var(--space-5) var(--space-4); }
   .card.login { padding: var(--space-4) var(--space-3); }
   /* строка роли: имя и «что может» — двумя строками рядом с кружком */

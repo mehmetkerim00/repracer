@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { ListQuery, ShadowView } from '@repracer/console-model';
 import { requestJson, useResource, worldPath } from '../api.ts';
 import { Badge, commonZone, ErrorBox, errorText, Gaps, href, Intro, Load, Pager, useMessages, When, WhenHead } from '../components.tsx';
+import { Field, FormActions } from '../forms.tsx';
 import { ShadowHero } from './ShadowHero.tsx';
 
 /**
@@ -97,16 +98,16 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
                       )}
                       {a.canGoLive ? (
                         <div className="live-card">
-                          <div className="note">{a.confirmationHint}</div>
-                          <div className="live-row">
-                            {/* Шаг 86: поле не уже имени, которое набирают дословно (по-немецки кнопка длиннее, и имя обрезалось) */}
+                          {/* Шаг 94: подсказка — подписью над полем, второй фактор — пояснением под ним; поле не уже имени (шаг 86) */}
+                          <Field label={a.confirmationHint} caption={v.mfaHint}>
                             <input value={typed[a.channelAccountId] ?? ''} placeholder={a.externalAccountId} size={a.externalAccountId.length + 2}
                               onChange={(e) => setTyped({ ...typed, [a.channelAccountId]: e.currentTarget.value })} />
+                          </Field>
+                          <FormActions>
                             {/* Яркая кнопка — только когда имя набрано верно: до этого глаз не ведут к самому опасному действию экрана */}
                             <button type="button" className={(typed[a.channelAccountId] ?? '') === a.externalAccountId ? 'primary' : ''}
                               onClick={() => switchMode(a.channelAccountId, 'LIVE')}>{v.liveButton}</button>
-                          </div>
-                          <div className="note">{v.mfaHint}</div>
+                          </FormActions>
                         </div>
                       ) : null}
                       {a.canGoShadow ? (

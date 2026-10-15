@@ -233,6 +233,36 @@ const ROW_MISALIGNED = `[...document.querySelectorAll('.cards, .worlds, .stats, 
     if (b.r.left > a.r.left && Math.abs(b.r.top - a.r.top) > 1) bad.push(g.className + ' › ' + (b.k.querySelector('h2, h3, h4, dt')?.textContent ?? b.k.textContent).trim().slice(0, 40) + ' — ' + Math.round(b.r.top - a.r.top) + 'px');
   }
   return bad; })`;
+/**
+ * Шаг 94 [Р-146]: стандарт формы — геометрией, а не договорённостью. У поля стандарта подпись стоит НАД контролом, пояснение — ПОД ним;
+ * у галочки контрол слева от подписи и на линии её первой строки. Отзыв владельца после шага 93: поля «летали» — подпись, поле и хвост фразы
+ * одной строкой, чекбокс в углу; правило репозитория `scripts/form-fields.mjs` держит, что поле в стандарте есть, это — что оно так стоит
+ */
+const FORM_GEOMETRY = `(() => {
+  const vis = (el) => el && el.checkVisibility({ visibilityProperty: true }) && el.getBoundingClientRect().width > 0;
+  const bad = [];
+  for (const f of document.querySelectorAll('.field')) {
+    if (!vis(f)) continue;
+    const label = f.querySelector(':scope > .field-label'), control = label?.nextElementSibling, caption = f.querySelector(':scope > .field-caption');
+    const name = (label?.textContent ?? '?').trim().slice(0, 30);
+    if (!label || !vis(control)) { bad.push('«' + name + '»: no label or control'); continue; }
+    const l = label.getBoundingClientRect(), c = control.getBoundingClientRect();
+    if (l.bottom > c.top + 0.5) bad.push('«' + name + '»: the label is not above its control (' + Math.round(l.bottom - c.top) + 'px)');
+    if (vis(caption) && caption.getBoundingClientRect().top < c.bottom - 0.5) bad.push('«' + name + '»: the caption is not under its control');
+  }
+  for (const f of document.querySelectorAll('.check-field')) {
+    if (!vis(f)) continue;
+    const box = f.querySelector(':scope > input'), label = f.querySelector(':scope > label');
+    const name = (label?.textContent ?? '?').trim().slice(0, 30);
+    if (!vis(box) || !vis(label)) { bad.push('«' + name + '»: no checkbox or label'); continue; }
+    const r = document.createRange(); r.selectNodeContents(label);
+    const line = r.getClientRects()[0] ?? label.getBoundingClientRect(), x = box.getBoundingClientRect();
+    if (x.right > line.left + 0.5) bad.push('«' + name + '»: the checkbox is not left of its label');
+    const off = Math.abs((x.top + x.bottom) / 2 - (line.top + line.bottom) / 2);
+    if (off > 3) bad.push('«' + name + '»: the checkbox is ' + Math.round(off) + 'px off the first line of its label');
+  }
+  return bad.slice(0, 5);
+})()`;
 const SMALL_TARGETS = `[...document.querySelectorAll('button, select, input:not([type=checkbox]):not([type=radio]):not([type=file]), .nav-group a, a.row-link, .tabs a, summary')]
   .filter((el) => el.checkVisibility({ visibilityProperty: true }) && el.getBoundingClientRect().height > 0 && el.getBoundingClientRect().height < 43.5)
   .slice(0, 5).map((el) => el.tagName.toLowerCase() + ' «' + (el.textContent ?? el.getAttribute('aria-label') ?? '').trim().slice(0, 30) + '» ' + Math.round(el.getBoundingClientRect().height) + 'px')`;
@@ -241,8 +271,8 @@ test('step 85: the console works from a 375px phone to a wide monitor — no pag
   const b = browser!;
   const before = b.errors().length;
   const owner = en.ui.app.login.asAccount(en.values.OWNER);
-  // Шаг 93: светлая тема — на всех ширинах, тёмная — на телефоне и мониторе
-  const RUNS: ReadonlyArray<readonly ['light' | 'dark', number, number]> = [...WIDTHS.map(([w, h]) => ['light', w, h] as const), ['dark', 375, 812], ['dark', 1440, 900]];
+  // Шаг 93: светлая тема — на всех ширинах, тёмная — на телефоне и мониторе; шаг 94 — обе темы на всех четырёх ширинах
+  const RUNS: ReadonlyArray<readonly ['light' | 'dark', number, number]> = (['light', 'dark'] as const).flatMap((scheme) => WIDTHS.map(([w, h]) => [scheme, w, h] as const));
   for (const [scheme, width, height] of RUNS) {
     const narrow = width < 1012;
     await b.setColorScheme(scheme);
@@ -258,7 +288,11 @@ test('step 85: the console works from a 375px phone to a wide monitor — no pag
       }
       if (narrow) assert.deepEqual(await b.evaluate<string[]>(SMALL_TARGETS), [], `${width}px, ${what}: touch targets lower than 44px`);
       assert.deepEqual(await b.evaluate<string[]>(ROW_MISALIGNED), [], `${scheme} ${width}px, ${what}: cards of one row do not stand on one line`);
+      assert.deepEqual(await b.evaluate<string[]>(FORM_GEOMETRY), [], `${scheme} ${width}px, ${what}: a form field breaks the standard`);
     };
+    // поля стандарта, которые правило геометрии увидело на этой ширине: без них проверка выше ничего не мерит
+    let fieldsSeen = 0;
+    let checksSeen = 0;
     await checkPage('sign-in');
     // Шаг 93: тема действительно та — канва страницы цветом своей темы Primer (`--bgColor-muted`: светлая #f6f8fa, тёмная #151b23)
     assert.equal(await b.evaluate<string>('getComputedStyle(document.body).backgroundColor'), scheme === 'dark' ? 'rgb(21, 27, 35)' : 'rgb(246, 248, 250)', `${scheme} ${width}px: the canvas`);
@@ -266,7 +300,7 @@ test('step 85: the console works from a 375px phone to a wide monitor — no pag
     await b.waitText(en.ui.app.worlds);
     await checkPage('workspaces');
     if (narrow) {
-      // Шаг 93: шапка телефона вне пространства — знак, язык, тема и выход; немецкие подписи длиннее («Wie das System», «Abmelden»)
+      // Шаг 93: шапка телефона вне пространства — знак, язык, тема и выход; немецкие подписи длиннее («Abmelden»); шаг 94 — тема иконкой
       await b.click(de.ui.app.languages.de, '.topbar .lang button');
       await b.waitText(de.ui.app.worlds);
       await checkPage('workspaces, German');
@@ -278,7 +312,10 @@ test('step 85: the console works from a 375px phone to a wide monitor — no pag
       await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${screen}`)}, true)`);
       await settled(b, `${width}px ${screen}`);
       await checkPage(screen);
+      fieldsSeen += await b.evaluate<number>(`document.querySelectorAll('.field').length`);
+      checksSeen += await b.evaluate<number>(`document.querySelectorAll('.check-field').length`);
     }
+    assert.ok(fieldsSeen >= 10 && checksSeen >= 3, `${scheme} ${width}px: the screens show fields of the standard — ${fieldsSeen} fields, ${checksSeen} checkboxes`);
     if (width === 1440 && scheme === 'light') {
       // положительный контроль: прежний отступ «карточка после карточки» внутри сетки — правило краснеет на экране остановок
       await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/stop`)}, true)`);
@@ -287,6 +324,15 @@ test('step 85: the console works from a 375px phone to a wide monitor — no pag
       const bad = await b.evaluate<string[]>(ROW_MISALIGNED);
       await b.evaluate(`(document.getElementById('row-control').remove(), true)`);
       assert.ok(bad.length > 0, 'control: a card pushed down inside a row is caught');
+      // положительный контроль стандарта формы: подпись сбоку от поля и галочка высотой поля ввода (так было до шага 94) — правило краснеет
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/stock`)}, true)`);
+      await settled(b, `${width}px stock, form control`);
+      for (const css of ['.field { flex-direction: row !important; }', ".check-field > input { min-height: var(--control-h) !important; }"]) {
+        await b.evaluate(`(() => { const st = document.createElement('style'); st.id = 'form-control'; st.textContent = ${JSON.stringify(css)}; document.head.append(st); return true; })()`);
+        const broken = await b.evaluate<string[]>(FORM_GEOMETRY);
+        await b.evaluate(`(document.getElementById('form-control').remove(), true)`);
+        assert.ok(broken.length > 0, `control: «${css}» breaks the form standard and the rule sees it`);
+      }
       await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/cost-import`)}, true)`);
       await settled(b, `${width}px back to cost-import`);
     }
@@ -393,9 +439,11 @@ test('step 86: every menu item and the heading of its page are the same words �
 /**
  * Шаг 93: тема — свойство устройства. По умолчанию — системная (`prefers-color-scheme`); ручной выбор «светлая» или «тёмная» перебивает
  * систему и переживает перезагрузку; «как система» возвращает системную. Значения — пары Primer: канва `--bgColor-muted`, карточка
- * `--bgColor-default`, текст `--fgColor-default`. Шапка называет человека по имени от поставщика identity, адрес — подсказкой
+ * `--bgColor-default`, текст `--fgColor-default`. Шапка называет человека по имени от поставщика identity, адрес — подсказкой.
+ * Шаг 94: выбор — кнопкой-иконкой (солнце, луна, монитор) по кругу Light → Dark → System; имя кнопки и подсказка говорят, какая тема
+ * сейчас и на какую переключит; «System» следует системе НА ЛЕТУ — смена системной темы без перезагрузки меняет страницу
  */
-test('step 93: the theme belongs to the device — system by default, light, dark or system by hand, kept over a reload; the header names the person', async () => {
+test('step 93/94: the theme belongs to the device — an icon button cycles light, dark and system, kept over a reload; system follows the system live; the header names the person', async () => {
   const b = browser!;
   await b.setViewport(1440, 900);
   await b.setColorScheme('dark');
@@ -403,30 +451,53 @@ test('step 93: the theme belongs to the device — system by default, light, dar
   await b.waitText(en.ui.app.login.roleCan.OWNER);
   const colours = () => b.evaluate<{ canvas: string; card: string; text: string }>(`(() => { const card = document.querySelector('.card.login') ?? document.querySelector('.card');
     return { canvas: getComputedStyle(document.body).backgroundColor, card: getComputedStyle(card).backgroundColor, text: getComputedStyle(card).color }; })()`);
-  const choose = (v: string) => b.evaluate(`(() => { const s = document.querySelector('.topbar .theme-select'); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, ${JSON.stringify(v)});
-    s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  const button = () => b.evaluate<{ choice: string; label: string; title: string; icon: boolean; selects: number } | null>(`(() => { const x = document.querySelector('.topbar .theme-button');
+    return x ? { choice: x.dataset.themeChoice, label: x.getAttribute('aria-label'), title: x.getAttribute('title'), icon: !!x.querySelector('svg'),
+      selects: document.querySelectorAll('.topbar select').length } : null; })()`);
+  const press = () => b.evaluate(`(document.querySelector('.topbar .theme-button').click(), true)`);
+  const t = en.ui.app.theme;
+  const expectButton = async (choice: 'system' | 'light' | 'dark', next: 'system' | 'light' | 'dark') => {
+    const label = t.switchTo(t[choice], t[next]);
+    assert.deepEqual(await button(), { choice, label, title: label, icon: true, selects: 0 }, `the button shows «${choice}» and offers «${next}»`);
+  };
   const DARK = { canvas: 'rgb(21, 27, 35)', card: 'rgb(13, 17, 23)', text: 'rgb(240, 246, 252)' };
   const LIGHT = { canvas: 'rgb(246, 248, 250)', card: 'rgb(255, 255, 255)', text: 'rgb(31, 35, 40)' };
   assert.deepEqual(await colours(), DARK, 'a dark system gets the dark Primer pairs without a choice');
-  assert.deepEqual(await b.evaluate<string[]>(`[...document.querySelectorAll('.topbar .theme-select option')].map((o) => o.textContent)`),
-    [en.ui.app.theme.system, en.ui.app.theme.light, en.ui.app.theme.dark]);
-  await choose('light');
+  await expectButton('system', 'light');
+  // «System» на лету: системная тема меняется без перезагрузки — страница за ней (жалоба владельца после шага 93)
+  await b.setColorScheme('light');
+  assert.deepEqual(await colours(), LIGHT, '«system» follows a system switched to light without a reload');
+  await b.setColorScheme('dark');
+  assert.deepEqual(await colours(), DARK, '«system» follows a system switched back to dark without a reload');
+  await press();
+  await expectButton('light', 'dark');
   assert.deepEqual(await colours(), LIGHT, 'the light choice wins over a dark system');
   await b.open(pageUrl);
   await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await expectButton('light', 'dark');
   assert.deepEqual(await colours(), LIGHT, 'the choice is kept on the device over a reload');
-  await choose('system');
-  assert.deepEqual(await colours(), DARK, '«system» follows the system again');
   await b.setColorScheme('light');
-  await choose('dark');
+  await press();
+  await expectButton('dark', 'system');
   assert.deepEqual(await colours(), DARK, 'the dark choice wins over a light system');
-  await choose('system');
-  assert.deepEqual(await colours(), LIGHT);
+  await press();
+  await expectButton('system', 'light');
+  assert.deepEqual(await colours(), LIGHT, '«system» follows the system again');
+  await b.setColorScheme('dark');
+  assert.deepEqual(await colours(), DARK, 'and keeps following it live');
+  // на узком экране кнопка темы — цель касания 44×44
+  await b.setViewport(375, 812);
+  assert.deepEqual(await b.evaluate<{ w: number; h: number }>(`(() => { const r = document.querySelector('.topbar .theme-button').getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height) }; })()`),
+    { w: 44, h: 44 }, '375px: the theme button is a 44px touch target');
+  await b.setViewport(1440, 900);
   // Шапка: человек по имени, адрес — подсказкой
   await b.click(en.ui.app.login.asAccount(en.values.OWNER));
   await b.waitText(en.ui.app.worlds);
   assert.deepEqual(await b.evaluate<{ text: string; title: string }>(`(() => { const u = document.querySelector('.topbar .user'); return { text: u.textContent.trim(), title: u.getAttribute('title') }; })()`),
     { text: 'Alex Porter', title: en.ui.app.login.signedIn('owner@stand.repracer.test') });
+  // в шапке рабочего пространства кнопка темы стоит рядом с именем и выходом
+  assert.ok(await b.evaluate<boolean>(`(() => { const x = document.querySelector('.topbar .theme-button'), u = document.querySelector('.topbar .user'); return !!x && !!u && x.parentElement === u.parentElement; })()`),
+    'the theme button sits next to the name and Sign out');
   await b.setColorScheme(null);
 });
 

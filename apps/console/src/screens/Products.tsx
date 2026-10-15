@@ -3,6 +3,7 @@ import { LIST_PAGE_DEFAULT, type ListQuery, type ProductListView, type ProductRo
 import type { EnableResult } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
 import { Badge, Cell, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, useMessages } from '../components.tsx';
+import { CheckField, FormActions } from '../forms.tsx';
 
 /** Шаг 79: колонки, которые продавец может скрыть; предложение, цена, пол, статус и действия — всегда */
 const OPTIONAL_COLUMNS = ['ceiling', 'strategy', 'lastChange', 'nextCheck', 'channel'] as const;
@@ -55,11 +56,11 @@ export function ProductsView({ view, onEnable, query, onQuery }: {
               <summary>{p.viewOptions.columns}</summary>
               <div className="menu">
                 {OPTIONAL_COLUMNS.map((k) => (
-                  <label key={k}><input type="checkbox" checked={col[k]} onChange={(e) => update({ ...shown, columns: { ...col, [k]: e.currentTarget.checked } })} /> {c[k]}</label>
+                  <CheckField key={k} label={c[k]} checked={col[k]} onChange={(on) => update({ ...shown, columns: { ...col, [k]: on } })} />
                 ))}
               </div>
             </details>
-            <label className="compact-toggle"><input type="checkbox" checked={shown.compact} onChange={(e) => update({ ...shown, compact: e.currentTarget.checked })} /> {p.viewOptions.compact}</label>
+            <CheckField label={p.viewOptions.compact} checked={shown.compact} onChange={(on) => update({ ...shown, compact: on })} />
           </span>
         </div>
         <table className={`products sticky-end${shown.compact ? ' compact' : ''}${col.channel ? ' with-channel' : ''}`}>
@@ -143,12 +144,13 @@ export function EnableResultView(props: { unit: string; worldId?: string; result
           <ul>{result.warnings.map((r) => <li key={r.code}><ReasonLine reason={r} /></li>)}</ul>
         </>
       ) : null}
-      <div className="buttons">
+      {/* Шаг 94: ряд кнопок окна — справа, «Отмена»/«Закрыть» перед главным действием (Primer Dialog) */}
+      <FormActions dialog>
+        <button type="button" onClick={props.onClose} disabled={props.busy}>{result ? d.close : d.cancel}</button>
         {result && !result.enabled && result.problems.length === 0 && result.warnings.length > 0
           ? <button type="button" className="danger" disabled={props.busy} onClick={props.onAcknowledge}>{d.enableAnyway}</button>
           : null}
-        <button type="button" onClick={props.onClose} disabled={props.busy}>{result ? d.close : d.cancel}</button>
-      </div>
+      </FormActions>
     </div>
   );
 }

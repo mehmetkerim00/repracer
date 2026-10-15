@@ -2,6 +2,7 @@ import { useContext, useEffect, useRef, useState } from 'react';
 import { zoneName, type ConnectionAccountView, type ConnectionsView } from '@repracer/console-model';
 import { requestJson, useResource, worldPath } from '../api.ts';
 import { Badge, ErrorBox, errorText, Load, MarketContext, useMessages, Intro } from '../components.tsx';
+import { CheckField, Field, FieldGrid, FormActions } from '../forms.tsx';
 
 /**
  * Р-175…Р-177 (шаг 43): экран «Подключение каналов». Кнопка открывает страницу согласия КАНАЛА в этой же вкладке — как
@@ -51,16 +52,18 @@ export function ConnectionsScreen({ worldId }: { worldId: string }) {
                       .then(() => retry()).catch((e: unknown) => setError(errorText(e, m)))}>{c.cancelLabel}</button>
                   ) : null}
                   {c.canConnect ? (
-                    <p className="connect-row">
-                      {c.marketplaces.map((mk) => (
-                        <label key={mk.id}>
-                          <input type="checkbox" checked={picked.includes(mk.id)}
-                            onChange={(e) => setChosen({ ...chosen, [c.channel]: e.currentTarget.checked ? [...picked, mk.id] : picked.filter((x) => x !== mk.id) })} />
-                          {mk.label}
-                        </label>
-                      ))}
-                      <button type="button" className="primary" disabled={picked.length === 0} onClick={() => start(c.channel, picked)}>{c.connectLabel}</button>
-                    </p>
+                    // Шаг 94: витрины — галочками стандарта в ряд, кнопка подключения — в конце, недоступная говорит почему
+                    <div className="connect-row">
+                      <div className="check-row">
+                        {c.marketplaces.map((mk) => (
+                          <CheckField key={mk.id} label={mk.label} checked={picked.includes(mk.id)}
+                            onChange={(on) => setChosen({ ...chosen, [c.channel]: on ? [...picked, mk.id] : picked.filter((x) => x !== mk.id) })} />
+                        ))}
+                      </div>
+                      <FormActions hint={picked.length === 0 ? m.ui.forms.why.storefront : null}>
+                        <button type="button" className="primary" disabled={picked.length === 0} title={picked.length === 0 ? m.ui.forms.why.storefront : undefined} onClick={() => start(c.channel, picked)}>{c.connectLabel}</button>
+                      </FormActions>
+                    </div>
                   ) : null}
                 </div>
               );
@@ -134,25 +137,30 @@ function AccountSettings({ worldId }: { worldId: string }) {
       <h3>{t.title}</h3>
       <p className="note">{t.intro}</p>
       {view.canChange ? (
-        <p>
-          {/* Шаг 87 [Р-214]: язык рабочего пространства — из языков профиля; при одном языке выбора нет */}
-          {market.locales.length > 1 ? (<><label>{t.language}{' '}
-            <select value={language} onChange={(e) => setLanguage(e.currentTarget.value === 'de' ? 'de' : 'en')}>
-              {market.locales.map((l) => <option key={l} value={l}>{m.ui.app.languages[l]}</option>)}
-            </select>
-          </label>{' '}</>) : null}
-          <label>{t.timeZone}{' '}
+        <>
+          {/* Шаг 94: язык и пояс — поля стандарта сеткой, пояснение — под выбором пояса, кнопка — в конце */}
+          <FieldGrid cols={2}>
+            {/* Шаг 87 [Р-214]: язык рабочего пространства — из языков профиля; при одном языке выбора нет */}
+            {market.locales.length > 1 ? (
+              <Field label={t.language}>
+                <select value={language} onChange={(e) => setLanguage(e.currentTarget.value === 'de' ? 'de' : 'en')}>
+                  {market.locales.map((l) => <option key={l} value={l}>{m.ui.app.languages[l]}</option>)}
+                </select>
+              </Field>
+            ) : null}
             {/* Шаг 79: пояс — выбором из списка с человеческими названиями, а не полем для кода IANA; значение наружу — тот же код */}
-            <select value={zone} onChange={(e) => setZone(e.currentTarget.value)}>
-              <option value="">{t.timeZoneFromStorefront(zoneName(m.locale, view.timeZone, nowIso))}</option>
-              {zones.map((z) => <option key={z} value={z}>{zoneName(m.locale, z, nowIso)}</option>)}
-            </select>
-          </label>{' '}
-          <button type="button" onClick={save}>{t.save}</button>
-        </p>
+            <Field label={t.timeZone} caption={t.timeZoneHint}>
+              <select value={zone} onChange={(e) => setZone(e.currentTarget.value)}>
+                <option value="">{t.timeZoneFromStorefront(zoneName(m.locale, view.timeZone, nowIso))}</option>
+                {zones.map((z) => <option key={z} value={z}>{zoneName(m.locale, z, nowIso)}</option>)}
+              </select>
+            </Field>
+          </FieldGrid>
+          <FormActions><button type="button" className="primary" onClick={save}>{t.save}</button></FormActions>
+        </>
       ) : <p>{market.locales.length > 1 ? `${m.ui.app.languages[view.locale]} · ` : ''}{zoneName(m.locale, view.timeZone, nowIso)}</p>}
       {view.timeZoneSet ? null : <p className="note">{t.timeZoneDefault(zoneName(m.locale, view.timeZone, nowIso))}</p>}
-      <p className="note">{view.canChange ? t.timeZoneHint : t.readOnly}</p>
+      {view.canChange ? null : <p className="note">{t.readOnly}</p>}
       {note ? <p className="notice">{note}</p> : null}
     </section>
   );
@@ -176,28 +184,34 @@ function ExternalWriters({ worldId, account: a, onChanged }: { worldId: string; 
   const q = a.quantityWrites;
   return (
     <div>
-      <p><strong>{a.otherTools.question}</strong> {a.otherTools.text}</p>
+      {/* Шаг 94: вопрос — подписью над сегментами, ответ словами — пояснением под ними */}
       {a.otherTools.options.length > 0 ? (
-        <div className="segmented">
-          {a.otherTools.options.map((o) => (
-            <button key={o.answer} type="button" disabled={o.answer === a.otherTools.answer} aria-pressed={o.answer === a.otherTools.answer} onClick={() => post('other-tools', { answer: o.answer })}>{o.label}</button>
-          ))}
-        </div>
-      ) : null}
+        <Field group label={a.otherTools.question} caption={a.otherTools.text}>
+          <div className="segmented">
+            {a.otherTools.options.map((o) => (
+              <button key={o.answer} type="button" disabled={o.answer === a.otherTools.answer} aria-pressed={o.answer === a.otherTools.answer} onClick={() => post('other-tools', { answer: o.answer })}>{o.label}</button>
+            ))}
+          </div>
+        </Field>
+      ) : <p><strong>{a.otherTools.question}</strong> {a.otherTools.text}</p>}
       {a.otherTools.warning ? <p className="notice" role="alert">{a.otherTools.warning}</p> : null}
       {/* Шаг 77: это фраза, а не короткий статус — блоком своего тона, а не пилюлей в две строки */}
       <p className={`status-line tone-${q.confirmed ? 'ok' : 'warn'}`}>{q.text}</p>
       {q.blockedText ? <p className="note">{q.blockedText}</p> : null}
       {q.canConfirm ? (
         <div className="typed-confirm">
-          <label>{q.confirmationHint} <input value={typed} onChange={(e) => setTyped(e.currentTarget.value)} /></label>
-          <button type="button" disabled={typed.trim() === ''} onClick={() => post('quantity-writes', { typedConfirmation: typed })}>{q.confirmLabel}</button>
+          <Field label={q.confirmationHint}><input value={typed} onChange={(e) => setTyped(e.currentTarget.value)} /></Field>
+          <FormActions hint={typed.trim() === '' ? m.ui.forms.why.typeName : null}>
+            <button type="button" disabled={typed.trim() === ''} title={typed.trim() === '' ? m.ui.forms.why.typeName : undefined} onClick={() => post('quantity-writes', { typedConfirmation: typed })}>{q.confirmLabel}</button>
+          </FormActions>
         </div>
       ) : null}
       {q.canRevoke ? (
         <div className="typed-confirm">
-          <label>{q.revokeHint} <input value={typedRevoke} onChange={(e) => setTypedRevoke(e.currentTarget.value)} /></label>
-          <button type="button" disabled={typedRevoke.trim() === ''} onClick={() => post('quantity-writes-revoke', { typedConfirmation: typedRevoke })}>{q.revokeLabel}</button>
+          <Field label={q.revokeHint} caption={q.revokeCaption}><input value={typedRevoke} onChange={(e) => setTypedRevoke(e.currentTarget.value)} /></Field>
+          <FormActions hint={typedRevoke.trim() === '' ? m.ui.forms.why.typeName : null}>
+            <button type="button" disabled={typedRevoke.trim() === ''} title={typedRevoke.trim() === '' ? m.ui.forms.why.typeName : undefined} onClick={() => post('quantity-writes-revoke', { typedConfirmation: typedRevoke })}>{q.revokeLabel}</button>
+          </FormActions>
         </div>
       ) : null}
       <p>{a.externalEditsText}</p>
