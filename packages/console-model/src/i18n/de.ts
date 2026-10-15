@@ -1112,6 +1112,8 @@ export const de: Messages = {
     sources: {
       KAUFLAND_BUYBOX: 'Kaufland, Buy-Box-Abfrage', KAUFLAND_BUY_BOX_CHANGED: 'Kaufland, Benachrichtigung über Buy-Box-Änderung', KAUFLAND_COMPETITORS_COMPARER: 'Kaufland, Wettbewerbervergleich (Abgleich)',
       AMAZON_ANY_OFFER_CHANGED: 'Amazon, Benachrichtigung über eine Wettbewerbspreisänderung', AMAZON_COMPETITIVE_SUMMARY: 'Amazon, Wettbewerbsübersicht',
+      // шаг 93: опрос Buy Box Walmart (Р-215) — словами, как у Kaufland; код источника на экран не выходит
+      WALMART_BUY_BOX: 'Walmart, Buy-Box-Abfrage',
     },
     trace: {
       missingTitle: 'Entscheidung nicht gefunden', missingText: 'Dieser Link führt zu keiner Preisentscheidung dieses Arbeitsbereichs. Die Liste zeigt jede Entscheidung mit ihrer Begründung.', pageTitle: 'Warum dieser Preis', back: '← Alle Entscheidungen', noDecisions: 'Noch keine Preisentscheidungen. Sie erscheinen, sobald Repricing oder der Schattenmodus für ein Angebot läuft.',
@@ -1125,6 +1127,8 @@ export const de: Messages = {
       noExplanation: 'Zu dieser Entscheidung ist keine Begründung gespeichert',
       snapshotNotUsed: 'Die Strategie verwendet keine Wettbewerbsdaten',
       snapshotSummary: (source: string, observed: string) => `${source}, beobachtet ${observed}`,
+      // шаг 93: источник без слов в словаре — общими словами, а не кодом
+      sourceUnnamed: 'Wettbewerbsdaten des Kanals',
       source: 'Quelle', observed: 'Beobachtet', snapshotRef: 'Vollständige Wettbewerbsdaten', refUntil: (when: string) => `verfügbar bis ${when}`, refExpired: 'Verweis abgelaufen',
       sanityMissing: 'Das Ergebnis der Eingangsprüfung wurde nicht mit den Wettbewerbsdaten gespeichert',
       warning: 'Hinweis',

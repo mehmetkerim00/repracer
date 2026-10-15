@@ -148,15 +148,16 @@ export function decisionTrace(world: StandWorld, detail: DecisionDetail, m: Mess
     if (!e.snapshot) {
       steps.push({ key: 'SNAPSHOT', title: t.titles.SNAPSHOT, status: 'SKIPPED', summary: t.snapshotNotUsed, items: [], gaps: [] });
     } else {
-      const source = (m.ui.sources as Record<string, string | undefined>)[e.snapshot.source];
+      // Шаг 93: источник — словами словаря; неизвестный — общими словами «данные конкурентов канала», код источника на экран не выходит
+      const source = (m.ui.sources as Record<string, string | undefined>)[e.snapshot.source] ?? t.sourceUnnamed;
       const ref = d.snapshotRef;
       const stepGaps: Gap[] = [gap(m, 'SNAPSHOT_CONTENT')];
       if (!ref) stepGaps.push(gap(m, 'SNAPSHOT_REF_EXPIRED'));
       steps.push({
         key: 'SNAPSHOT', title: t.titles.SNAPSHOT, status: 'OK',
-        summary: t.snapshotSummary(source ?? e.snapshot.source, ref ? m.when(ref.observedAt) : t.refExpired),
+        summary: t.snapshotSummary(source, ref ? m.when(ref.observedAt) : t.refExpired),
         items: [
-          { label: t.source, value: source ?? e.snapshot.source },
+          { label: t.source, value: source },
           { label: t.observed, value: ref ? m.when(ref.observedAt) : t.refExpired },
           ...(ref ? [{ label: t.snapshotRef, value: t.refUntil(m.when(snapshotRefUntil(d.decidedAt))) }] : []),
         ],

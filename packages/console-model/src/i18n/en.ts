@@ -1150,6 +1150,8 @@ export const en = {
     sources: {
       KAUFLAND_BUYBOX: 'Kaufland, Buy Box request', KAUFLAND_BUY_BOX_CHANGED: 'Kaufland, notification of a Buy Box change', KAUFLAND_COMPETITORS_COMPARER: 'Kaufland, competitors comparer (reconciliation)',
       AMAZON_ANY_OFFER_CHANGED: 'Amazon, notification of a competitor price change', AMAZON_COMPETITIVE_SUMMARY: 'Amazon, competitive summary',
+      // шаг 93: опрос Buy Box Walmart (Р-215) — словами, как у Kaufland; код источника на экран не выходит
+      WALMART_BUY_BOX: 'Walmart, Buy Box request',
     },
     trace: {
       missingTitle: 'Decision not found', missingText: 'This link does not lead to a price decision of this workspace. The list shows every decision with its explanation.', pageTitle: 'Why this price', back: '← All decisions', noDecisions: 'No pricing decisions yet. They appear once repricing or Shadow mode runs for an offer.',
@@ -1163,6 +1165,8 @@ export const en = {
       noExplanation: 'No explanation is stored for this decision',
       snapshotNotUsed: 'The strategy does not use competitor data',
       snapshotSummary: (source: string, observed: string) => `${source}, observed ${observed}`,
+      // шаг 93: источник без слов в словаре — общими словами, а не кодом
+      sourceUnnamed: 'Competitor data from the channel',
       source: 'Source', observed: 'Observed', snapshotRef: 'Full snapshot', refUntil: (when: string) => `available until ${when}`, refExpired: 'reference expired',
       sanityMissing: 'The input check result was not stored with the snapshot',
       warning: 'Warning',

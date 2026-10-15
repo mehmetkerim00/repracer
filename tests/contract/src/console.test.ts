@@ -7,6 +7,11 @@ import {
 import { decisionsOf, rejectedOf, stopOf, traceOf } from './console/streams.ts';
 import { buildStandWorlds, STAND_USERS, type LiveWorld } from './console/stand.ts';
 import { standUserOf } from '@repracer/pricing-pipeline';
+import { AMAZON_DESCRIPTOR } from '@repracer/amazon-adapter';
+import { CLICKHOUSE_SNAPSHOT_SOURCES } from '@repracer/analytics-export';
+import { EBAY_DESCRIPTOR } from '@repracer/ebay-adapter';
+import { KAUFLAND_DESCRIPTOR } from '@repracer/kaufland-adapter';
+import { WALMART_DESCRIPTOR } from '@repracer/walmart-adapter';
 
 /**
  * Р-67, шаг 12: экраны строятся из состояния хранилища (readConsoleState) и слепков объяснения [Р-68], тексты — из словаря
@@ -108,6 +113,40 @@ test('Р-71, Р-72: every reason the stand shows is fully explained in both lang
   t.diagnostic(`reason codes seen on stand screens: ${codes.size}`);
   assert.deepEqual([...new Set(problems)], []);
   assert.ok(codes.size >= 25);
+});
+
+/**
+ * Шаг 93 [Р-146]: источник снимка на «почему эта цена» — словами на обоих языках. Источники берутся оттуда, где их объявляют: описания
+ * всех каналов (`competitorSources`) и список, который принимает хранилище снимков. У каждого есть слова в словаре, и экран показывает
+ * их, а не код (шаг 89 объявил WALMART_BUY_BOX, а слов не дал — экран показывал код). Возврат сырого кода ловит контроль: источник без
+ * слов в словаре называется общими словами, и код не выходит нигде в объяснении
+ */
+test('step 93: the snapshot source on «Why this price» is words in both languages for every source a channel declares — never a raw code', async () => {
+  const w = live('kaufland/pipeline/happy-path');
+  const world = await w.view(user('OWNER'));
+  const approved = (await w.store.decisionPage(world.tenantId, { offset: 0, limit: 200 })).items.find((d) => d.outcome === 'APPROVED')!;
+  const detail = (await w.store.decisionDetail(world.tenantId, approved.decisionId))!;
+  assert.ok(detail.decision.explanation?.snapshot, 'решение со снимком: шаг «снимок» есть в объяснении');
+  const withSource = (source: string) => ({ ...detail, decision: { ...detail.decision, explanation: { ...detail.decision.explanation!, snapshot: { source } } } });
+  const declared = [KAUFLAND_DESCRIPTOR, AMAZON_DESCRIPTOR, EBAY_DESCRIPTOR, WALMART_DESCRIPTOR].flatMap((d) => (d.competitorSources ?? []).map((s) => s.source));
+  const sources = [...new Set([...declared, ...CLICKHOUSE_SNAPSHOT_SOURCES])].sort();
+  // правило не зеленеет на пустом списке (OQ-204): источников Kaufland, Amazon и Walmart — шесть
+  assert.ok(sources.length >= 6 && sources.includes('WALMART_BUY_BOX'), `источники: ${sources.join(', ')}`);
+  const snapshotStep = (source: string, m: Messages) => decisionTrace(world, withSource(source), m).steps.find((s) => s.key === 'SNAPSHOT')!;
+  for (const [lang, m] of [['EN', en], ['DE', de]] as const) {
+    for (const source of sources) {
+      const words = (m.ui.sources as Record<string, string | undefined>)[source];
+      assert.ok(words !== undefined && words !== source, `${lang} ${source}: у источника есть слова в словаре`);
+      const step = snapshotStep(source, m);
+      assert.equal(step.items.find((i) => i.label === m.ui.trace.source)?.value, words, `${lang} ${source}: строка «источник» — словами`);
+      assert.ok(step.summary.startsWith(words), `${lang} ${source}: итог шага начинается со слов: ${step.summary}`);
+      assert.ok(!JSON.stringify(step).includes(source), `${lang} ${source}: кода источника на экране нет`);
+    }
+    // Положительный контроль: источник, которого словарь не знает, — общими словами; код не выходит ни в шаге, ни в объяснении целиком
+    const unnamed = decisionTrace(world, withSource('SYN_UNNAMED_SOURCE'), m);
+    assert.equal(unnamed.steps.find((s) => s.key === 'SNAPSHOT')!.items.find((i) => i.label === m.ui.trace.source)?.value, m.ui.trace.sourceUnnamed);
+    assert.ok(!JSON.stringify(unnamed).includes('SYN_UNNAMED_SOURCE'), `${lang}: неизвестный источник не выходит кодом`);
+  }
 });
 
 test('B: the happy path decision shows the whole way from snapshot to channel confirmation, in both languages', async () => {
