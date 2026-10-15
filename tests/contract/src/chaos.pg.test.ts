@@ -12,6 +12,7 @@ import { createIsolatedDatabase, type IsolatedDatabase } from '../../../packages
 import { beginLogin, finishLogin } from '../../../apps/console/src/oidc.ts';
 import { demoProducts, kauflandLiveWorld, WallClock, type KauflandLiveWorld, type LiveProduct } from './live/index.ts';
 import { startKauflandHttpModel, type KauflandChaos, type KauflandHttpModel, type KauflandWriteJournalEntry } from './live/kaufland-http.ts';
+import { lastAppliedWrite, oq220Drift as uncountedCancellations, recognisedAsOq220, type ChannelOrder, type QuantityVersion } from './chaos/oq220.ts';
 
 /**
  * Шаг 65, часть 1: ХАОС. Повторяемое задание: семя печатается первой строкой, и по нему же повторяется план — какие сбои канала в
@@ -78,6 +79,8 @@ let dist = '';
 const journal: KauflandWriteJournalEntry[] = [];
 /** Шаг 67: предложения, чьё расхождение количества объяснено OQ-220 в последней проверке, — число идёт в отчёт раунда, чтобы признание не стало слепым пятном */
 const oq220Seen = new Set<string>();
+/** Шаг 90: из признанных — те, что окно до шага 90 (отмены после ПРИМЕНЕНИЯ по времени канала) назвало бы расхождением: класс в отчёте раунда */
+const oq220BeyondOldWindow = new Set<string>();
 const chaos: KauflandChaos = { random: prng(SEED ^ 0x5eed), dropMidResponseShare: 0, bulk500AfterApplyShare: 0, duplicateOrderLineShare: 0 };
 const ports: Record<string, number> = {};
 const procs = new Map<ProcessKind, ChildProcess>();
@@ -359,8 +362,29 @@ async function quiesce(round: number): Promise<{ drained: boolean; waitedMs: num
   }
 }
 
+/**
+ * Шаг 90 (OQ-220): факты базы для признания — моменты расчёта версий записей количества (по единице) и моменты, когда мы освободили
+ * резервацию строки заказа (прочли отмену). Время базы и время модели канала — одни часы машины прогона
+ */
+async function oq220Facts(t: string): Promise<{ versionsOf: Map<string, QuantityVersion[]>; ordersOf: (offer: string) => ChannelOrder[] }> {
+  const versions = await db.rows<{ scope: string; quantity: number | null; created_ms: number }>(
+    `SELECT write_scope_id AS scope, quantity, extract(epoch FROM created_at)::float8 * 1000 AS created_ms FROM tenant_data.channel_write_history WHERE tenant_id = $1 AND field = 'QUANTITY'
+     UNION ALL SELECT write_scope_id, quantity, extract(epoch FROM created_at)::float8 * 1000 FROM tenant_data.channel_write WHERE tenant_id = $1 AND field = 'QUANTITY'
+     ORDER BY 3`, [t]);
+  const versionsOf = new Map<string, QuantityVersion[]>();
+  for (const v of versions) versionsOf.set(v.scope, [...(versionsOf.get(v.scope) ?? []), { createdAtMs: Number(v.created_ms), quantity: v.quantity }]);
+  const reservations = await db.rows<{ line: string; released_ms: number | null }>(
+    `SELECT channel_order_line_ref AS line, max(extract(epoch FROM released_at)::float8 * 1000) AS released_ms FROM channel_data.reservation WHERE tenant_id = $1 GROUP BY 1`, [t]);
+  const released = new Map(reservations.map((r) => [r.line, r.released_ms === null ? null : Number(r.released_ms)]));
+  const ordersOf = (offer: string): ChannelOrder[] => live.simulator.orderHistory(offer).map((o) => ({
+    status: o.status, tsUpdatedMs: o.tsUpdatedMs, ...(released.has(String(o.idOrderUnit)) ? { releasedAtMs: released.get(String(o.idOrderUnit))! } : {}),
+  }));
+  return { versionsOf, ordersOf };
+}
+
 async function invariants(round: number): Promise<string[]> {
   oq220Seen.clear();
+  oq220BeyondOldWindow.clear();
   const t = live.seeded.tenantId;
   const problems: string[] = [];
 
@@ -440,30 +464,39 @@ async function invariants(round: number): Promise<string[]> {
    * 491299693): считались отмены только заказов, СОЗДАННЫХ после записи, — а заказ, созданный до записи и отменённый после неё, тоже не
    * возвращён каналом (освобождённое тут же занял новый заказ: наша цель не изменилась, новой записи не было). Счёт — по моменту отмены
    */
-  const lastAppliedAmountAt = (offer: string): number =>
-    live.simulator.appliedAmountWrites(offer).reduce((at, w) => Math.max(at, w.atMs), Number.NEGATIVE_INFINITY);
-  const oq220Drift = (offer: string): number => {
-    const lastWriteAt = lastAppliedAmountAt(offer);
-    return live.simulator.orderHistory(offer).filter((o) => o.status === 'cancelled' && o.tsUpdatedMs > lastWriteAt).length;
-  };
+  const { versionsOf, ordersOf } = await oq220Facts(t);
+  /**
+   * Шаг 90 (OQ-220, решение владельца): окно признания — от РАСЧЁТА последней применённой записи, а не от её применения; отмена считается,
+   * если расчёт её не видел (резервацию освободили позже начала расчёта). Два красных полных CI (семена 823065306 и 374308551) — отмены,
+   * которые расчёт не видел, а канал отменил ДО применения записи; правило и его тест класса — `chaos/oq220.ts`
+   */
+  const oq220Drift = (offer: string, scopeId: string): number =>
+    uncountedCancellations(live.simulator.appliedAmountWrites(offer), versionsOf.get(scopeId) ?? [], ordersOf(offer));
   /**
    * Шаг 69: след количества предложения в сообщении проверки — запросы журнала к его единицам (дошёл ли ответ), записи, которые модель
    * применила, и заказы. По одному сообщению CI видно, какая запись и какие заказы дали расхождение, без повтора прогона
    */
   const clock = (ms: number) => (Number.isFinite(ms) ? new Date(ms).toISOString().slice(11, 23) : String(ms));
-  const quantityTrail = (offer: string): string => {
+  const quantityTrail = (offer: string, scopeId: string): string => {
     const offerUnits = new Set(units.filter((u) => u.idOffer === offer).map((u) => `${u.idUnit}|${u.storefront}`));
     const requests = journal.filter((e) => e.units.some((u) => u.amount !== null && offerUnits.has(`${u.idUnit}|${u.storefront}`))).slice(-8)
       .map((e) => `${clock(e.atMs)} ${e.route} ${e.delivered}${e.status === null ? '' : ` ${e.status}`} amount=${e.units.find((u) => u.amount !== null && offerUnits.has(`${u.idUnit}|${u.storefront}`))!.amount}`);
     const applied = live.simulator.appliedAmountWrites(offer).slice(-5).map((w) => `${clock(w.atMs)} amount=${w.amount}`);
-    const orders = live.simulator.orderHistory(offer).slice(-10).map((o) => `${o.idOrderUnit} ${o.status} created ${clock(o.tsCreatedMs)} updated ${clock(o.tsUpdatedMs)}`);
-    return ` | offer ${offer}: requests [${requests.join('; ')}] applied [${applied.join('; ')}] orders [${orders.join('; ')}]`;
+    // Шаг 90: моменты расчёта версий и чтения отмен — то, чего не хватало для разбора шагов 82 и 84.1
+    const computed = (versionsOf.get(scopeId) ?? []).slice(-5).map((v) => `${clock(v.createdAtMs)} quantity=${v.quantity}`);
+    const last = lastAppliedWrite(live.simulator.appliedAmountWrites(offer), versionsOf.get(scopeId) ?? []);
+    const read = ordersOf(offer);
+    const orders = live.simulator.orderHistory(offer).map((o, i) => ({ o, released: read[i]!.releasedAtMs })).slice(-10)
+      .map(({ o, released }) => `${o.idOrderUnit} ${o.status} created ${clock(o.tsCreatedMs)} updated ${clock(o.tsUpdatedMs)}${released === undefined ? ' never read' : released === null ? '' : ` released ${clock(released)}`}`);
+    return ` | offer ${offer}: requests [${requests.join('; ')}] applied [${applied.join('; ')}] computed [${computed.join('; ')}]`
+      + ` last write computed ${last ? clock(last.computedAtMs) : '-'} orders [${orders.join('; ')}]`;
   };
-  const knownOq220 = (s: { field: string; offer: string }, ours: number, channelValue: number): boolean => {
-    if (s.field !== 'QUANTITY' || channelValue >= ours) return false;
-    const drift = oq220Drift(s.offer);
-    if (drift === 0 || ours - channelValue !== drift) return false;
+  const knownOq220 = (s: { field: string; offer: string; scope_id: string }, ours: number, channelValue: number): boolean => {
+    if (s.field !== 'QUANTITY' || !recognisedAsOq220(ours, channelValue, oq220Drift(s.offer, s.scope_id))) return false;
     oq220Seen.add(`${s.offer}`);
+    const appliedAt = live.simulator.appliedAmountWrites(s.offer).reduce((at, w) => Math.max(at, w.atMs), Number.NEGATIVE_INFINITY);
+    const oldDrift = live.simulator.orderHistory(s.offer).filter((o) => o.status === 'cancelled' && o.tsUpdatedMs > appliedAt).length;
+    if (!recognisedAsOq220(ours, channelValue, oldDrift)) oq220BeyondOldWindow.add(`${s.offer}`);
     return true;
   };
   const scopes = await db.rows<{ field: string; unit: string; storefront: string; offer: string; scope_status: string; last_version: string | null; last_status: string | null; last_amount: number | null;
@@ -504,11 +537,11 @@ async function invariants(round: number): Promise<string[]> {
     }
     if (applied !== null && channelValue !== applied && !explained && !knownOq220(s, applied, channelValue)) {
       problems.push(`d) ${s.field} ${s.unit}: the channel holds ${channelValue}, our last applied value is ${applied}, no divergence recorded (last write v${s.last_version} ${s.last_status})`
-        + (s.field === 'QUANTITY' ? quantityTrail(s.offer) : ''));
+        + (s.field === 'QUANTITY' ? quantityTrail(s.offer, s.scope_id) : ''));
     }
     const target = s.field === 'QUANTITY' ? published.get(s.scope_id) : undefined;
     if (target !== undefined && channelValue !== target && !explained && s.last_status === 'APPLIED' && !knownOq220(s, target, channelValue)) {
-      problems.push(`d) QUANTITY ${s.unit}: the channel holds ${channelValue}, our target (published) is ${target}, and no write is on its way${quantityTrail(s.offer)}`);
+      problems.push(`d) QUANTITY ${s.unit}: the channel holds ${channelValue}, our target (published) is ${target}, and no write is on its way${quantityTrail(s.offer, s.scope_id)}`);
     }
   }
 
@@ -574,7 +607,7 @@ test('шаг 65: хаос — процессы убиваются посреди
     }
     const settled = await quiesce(round);
     const problems = settled.drained ? await invariants(round) : [`queue did not drain in ${QUIESCE_LIMIT_MS / 1000} s: ${JSON.stringify(settled.left).slice(0, 600)}`];
-    const entry = { round, seed: SEED, faults, kills: roundKills, killedOnWrite: kills.filter((k) => k.round === round && k.atMs === -1).length, actions, quiesceMs: settled.waitedMs, budgetRowsChecked: lastBudgetRows, problems, knownOq220: oq220Seen.size, journal: journal.length, violations: model.violations.slice(0, 3) };
+    const entry = { round, seed: SEED, faults, kills: roundKills, killedOnWrite: kills.filter((k) => k.round === round && k.atMs === -1).length, actions, quiesceMs: settled.waitedMs, budgetRowsChecked: lastBudgetRows, problems, knownOq220: oq220Seen.size, knownOq220BeyondOldWindow: oq220BeyondOldWindow.size, journal: journal.length, violations: model.violations.slice(0, 3) };
     report.push(entry);
     console.log(JSON.stringify({ chaosRound: entry }));
     violations.push(...problems.map((p) => `round ${round} (seed ${SEED}): ${p}`));
@@ -652,18 +685,19 @@ test('шаг 65: каждый инвариант хаоса краснеет н�
    * отмен после неё 0, и ветку «разница ≠ числу отмен» контроль не проверял. Теперь количество правит «кто-то другой», а отмена после
    * записи — одна: разница 1 признаётся (OQ-220), разница 2 — расхождение
    */
-  const quantityScopes = await db.rows<{ unit: string; storefront: string; offer: string; quantity: number }>(
-    `SELECT om.external_unit_id AS unit, om.marketplace AS storefront, om.external_offer_id AS offer, ap.quantity FROM tenant_data.offer_mapping om
+  const quantityScopes = await db.rows<{ unit: string; storefront: string; offer: string; quantity: number; scope: string }>(
+    `SELECT om.external_unit_id AS unit, om.marketplace AS storefront, om.external_offer_id AS offer, ap.quantity, om.quantity_write_scope_id AS scope FROM tenant_data.offer_mapping om
        CROSS JOIN LATERAL (SELECT h.quantity FROM tenant_data.channel_write_history h WHERE h.tenant_id = om.tenant_id AND h.write_scope_id = om.quantity_write_scope_id
                             AND h.final_status = 'APPLIED' ORDER BY h.version DESC LIMIT 1) ap
       WHERE om.tenant_id = $1 ORDER BY 1`, [t]);
-  // Единица чистая: канал держит применённое, открытых заказов нет и отмен после последней записи нет (иначе признанный OQ-220 сдвинул бы счёт)
+  // Единица чистая: канал держит применённое, открытых заказов нет и отмен, которых расчёт последней записи не видел, нет (шаг 90 — то же
+  // правило, что у признания; иначе признанный OQ-220 сдвинул бы счёт)
   const channelUnits = (live.simulator.dump() as { units: Array<{ idUnit: number; storefront: string; amount: number }> }).units;
+  const facts = await oq220Facts(t);
   const counted = quantityScopes.find((q) => {
-    const lastWrite = live.simulator.appliedAmountWrites(q.offer).reduce((at, w) => Math.max(at, w.atMs), Number.NEGATIVE_INFINITY);
     const unit = channelUnits.find((u) => String(u.idUnit) === q.unit && u.storefront === q.storefront);
-    return q.quantity >= 2 && unit?.amount === q.quantity
-      && live.simulator.orderHistory(q.offer).every((o) => o.status !== 'open' && !(o.status === 'cancelled' && o.tsUpdatedMs > lastWrite));
+    return q.quantity >= 2 && unit?.amount === q.quantity && live.simulator.orderHistory(q.offer).every((o) => o.status !== 'open')
+      && uncountedCancellations(live.simulator.appliedAmountWrites(q.offer), facts.versionsOf.get(q.scope) ?? [], facts.ordersOf(q.offer)) === 0;
   });
   assert.ok(counted, 'у мира есть чистая единица с применённым количеством ≥ 2 — иначе контролю нечего портить');
   live.simulator.addCancelledOrderForControl(counted.offer, counted.storefront, Date.now());
