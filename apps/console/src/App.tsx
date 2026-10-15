@@ -4,6 +4,7 @@ import type { SessionView, StandToken, WorldSummary } from './api-types.ts';
 import { requestJson, setAccessToken, useResource, type Resource } from './api.ts';
 import { Badge, ErrorBox, errorText, href, Intro, Load, MarketContext, MessagesContext, NotFound, useMessages } from './components.tsx';
 import { BrandMark, Icon } from './icons.tsx';
+import { applyTheme, storedTheme, THEME_CHOICES, type ThemeChoice } from './theme.ts';
 import { BoundsScreen } from './screens/Bounds.tsx';
 import { ComplianceScreen } from './screens/Compliance.tsx';
 import { JobHistory } from './screens/Jobs.tsx';
@@ -375,11 +376,27 @@ export function App() {
       ))}
     </span>
   ) : null;
+  // Шаг 93: тема — свойство устройства: системная, светлая или тёмная; выбор хранится в браузере
+  const [theme, setTheme] = useState<ThemeChoice>(storedTheme);
+  // На телефоне вне рабочего пространства выбор в шапке — иконкой 44×44 поверх того же списка (стили): подписи вариантов не влезают рядом с языком и выходом
+  const themeSwitch = (
+    <span className="theme-switch">
+      <Icon name="contrast" size={20} />
+      <select className="theme-select" aria-label={m.ui.app.theme.label} title={m.ui.app.theme.label} value={theme}
+        onChange={(e) => { const next = e.target.value as ThemeChoice; setTheme(next); applyTheme(next); }}>
+        {THEME_CHOICES.map((t) => <option key={t} value={t}>{m.ui.app.theme[t]}</option>)}
+      </select>
+    </span>
+  );
   // Шаг 85: на узких экранах внутри рабочего пространства язык, адрес и выход — в выдвижной панели; разметка та же, что в шапке
+  // Шаг 93: человек — по имени от поставщика identity, если оно есть, иначе по адресу; адрес — подсказкой
+  const who = user ? user.name ?? user.email ?? user.subject : '';
+  const whoHint = user ? m.ui.app.login.signedIn(user.email ?? user.subject) : '';
   const extras = user ? (
     <>
       {langSwitch}
-      <span className="user">{user.email ?? user.subject}</span>
+      {themeSwitch}
+      <span className="user" title={whoHint}>{who}</span>
       <button type="button" onClick={() => { setAccessToken(null); loadSession(); }}>{m.ui.app.login.logout}</button>
     </>
   ) : null;
@@ -401,10 +418,11 @@ export function App() {
           {session.state === 'ready' && session.data.simulator && route.worldId === null ? <span className="env">{m.ui.app.stand}</span> : null}
           <span className="spacer" />
           {langSwitch}
+          {themeSwitch}
           {user ? (
             <>
-              {/* Шаг 78: в шапке — только адрес; «Signed in: …» остаётся подсказкой */}
-              <span className="user" title={m.ui.app.login.signedIn(user.email ?? user.subject)}>{user.email ?? user.subject}</span>
+              {/* Шаг 78: в шапке — один человек; шаг 93 — имя, а «Signed in: адрес» подсказкой */}
+              <span className="user" title={whoHint}>{who}</span>
               <button type="button" className="ghost" onClick={() => { setAccessToken(null); loadSession(); }}>{m.ui.app.login.logout}</button>
             </>
           ) : null}

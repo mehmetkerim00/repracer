@@ -162,7 +162,7 @@ export function StopScreenView({ view, onStop, onResume, onRelease, onReleaseDis
                     <td className="nowrap"><When value={a.at} /></td>
                     <td className="card-title">{a.action}</td>
                     <td>{a.actor}</td>
-                    <td>{a.scope}</td>
+                    <td title={a.scopeHint ?? undefined}>{a.scope}</td>
                     <td>{a.note ? s.noteLabel(a.note) : a.detail ?? ''}</td>
                   </tr>
                 ))}

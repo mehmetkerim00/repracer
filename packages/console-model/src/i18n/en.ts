@@ -384,6 +384,8 @@ export const en = {
       /** Шаг 92 [Р-216]: знак и строчное имя «pricetrail» в шапке; вкладка — имя в прозе (documentTitle) */
       title: 'pricetrail · seller console',
       documentTitle: 'PriceTrail · seller console',
+      /** Шаг 93: тема — свойство устройства */
+      theme: { label: 'Theme', system: 'System theme', light: 'Light', dark: 'Dark' },
       stand: 'test environment, synthetic data',
       // Шаг 64 (проход консоли): имя и описание демо-мира на языке интерфейса, а не строкой посева по-немецки
       demoWorldTitle: 'Demo store (simulator)', demoWorldDescription: 'Synthetic store on the channel simulator: every offer has three competitors — one drifting, one undercutting, one in price waves.',

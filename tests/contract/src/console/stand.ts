@@ -39,14 +39,26 @@ export const STAND_AUDIENCE = 'repracer-console-stand';
  * Синтетические пользователи стенда: у каждого членства — свой пользователь и свой subject у имитатора поставщика.
  * userAlias совпадает с пользователем участника хранилища (DEFAULT_MEMBERS) — автор действия сверяется с ним (находка 4).
  */
+/**
+ * Шаг 93: люди стенда — человеческие имена вместо стендовых адресов на экране (адрес — подсказкой). Имена синтетические; идентификаторы,
+ * адреса и журнал аудита не меняются — меняется только показ
+ */
+const STAND_NAMES: Readonly<Record<string, string>> = {
+  'membership-owner': 'Alex Porter', 'membership-manager': 'Jamie Lee', 'membership-viewer': 'Riley Chen',
+  'membership-admin': 'Sam Ortiz', 'membership-operator': 'Casey Nguyen', 'membership-pricing-manager': 'Morgan Diaz',
+};
+
 export const STAND_ACCOUNTS: ReadonlyArray<{ membershipAlias: string; userAlias: string; role: Viewer['role']; subject: string; email: string; displayName: string }> = DEFAULT_MEMBERS.map((m) => ({
   membershipAlias: m.membershipId,
   userAlias: m.userId,
   role: m.role,
   subject: `stand-${m.userId}`,
   email: `${m.membershipId.slice('membership-'.length)}@stand.repracer.test`,
-  displayName: `Stand ${m.role.toLowerCase().replace('_', ' ')}`,
+  displayName: STAND_NAMES[m.membershipId] ?? `Stand ${m.role.toLowerCase().replace('_', ' ')}`,
 }));
+
+/** Шаг 93: имена людей стенда по адресу — справочник показа (адрес → имя); журнал хранит адреса и идентификаторы, как прежде */
+export const STAND_PEOPLE: Readonly<Record<string, string>> = Object.fromEntries(STAND_ACCOUNTS.map((a) => [a.email, a.displayName]));
 
 /** Адреса участников стенда (псевдоним членства → email): создание тенанта сверяет адрес существующего пользователя (находка 5, 0066) */
 export const STAND_EMAILS: Readonly<Record<string, string>> = Object.fromEntries(STAND_ACCOUNTS.map((a) => [a.membershipAlias, a.email]));

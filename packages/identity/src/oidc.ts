@@ -42,6 +42,11 @@ export interface VerifiedToken {
   email: string | null;
   /** OIDC email_verified: адрес подтверждён поставщиком; без true приглашение не принимается (находка 11) */
   emailVerified: boolean;
+  /**
+   * Шаг 93: имя человека — стандартное утверждение OIDC `name`, если поставщик его выдал. Только для показа (шапка консоли);
+   * ни права, ни сопоставление по нему не решаются: человек — это (издатель, subject)
+   */
+  name: string | null;
   /** `iat` — время выпуска; по нему ID-токен привязывается к токену доступа того же обмена кода (шаг 45) */
   issuedAt: number | null;
   /**
@@ -129,6 +134,7 @@ export async function verifyToken(token: string, options: VerifyOptions): Promis
     amr: Array.isArray(claims.amr) ? claims.amr.filter((x): x is string => typeof x === 'string') : [],
     email: typeof claims.email === 'string' ? claims.email : null,
     emailVerified: claims.email_verified === true,
+    name: typeof claims.name === 'string' && claims.name.trim() !== '' ? claims.name.trim().slice(0, 200) : null,
     issuedAt: typeof claims.iat === 'number' ? claims.iat : null,
     idTokenShaped: claims.auth_time !== undefined || claims.nonce !== undefined,
   };

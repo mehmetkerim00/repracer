@@ -8,6 +8,8 @@
  * исключений. Polaris (Shopify) не используется: его лицензия не разрешает самостоятельному приложению вид, похожий на продукты Shopify.
  */
 :root {
+  /* шаг 93: схема цвета системных элементов (полосы прокрутки, поля дат) — светлая; тёмная тема ниже объявляет тёмную */
+  color-scheme: light;
   /* Поверхности */
   --bg: #f6f8fa; /* primer: --bgColor-muted */
   --surface: #ffffff; /* primer: --bgColor-default */
@@ -76,9 +78,11 @@
   --header-bg: #25292e; /* primer: --header-bgColor */
   --header-fg: #ffffffb3; /* primer: --header-fgColor-default */
   --header-fg-logo: #ffffff; /* primer: --header-fgColor-logo */
-  /* шаг 92 [Р-216]: конечная точка знака в тёмной шапке — зелёный тёмной темы Primer; в светлой теме этого значения нет, сверка — с тёмной */
-  --header-mark-end: #2ea043; /* primer-dark: --contribution-default-bgColor-3 */
+  /* шаг 92 [Р-216], шаг 93: конечная точка знака в тёмной шапке — зелёный успеха тёмной темы Primer; сверка — с тёмной темой */
+  --header-mark-end: #3fb950; /* primer-dark: --fgColor-success */
   --header-divider: #818b98; /* primer: --header-borderColor-divider */
+  /* шаг 93: нижний край шапки — в светлой теме цветом самой шапки (не виден), в тёмной шапка того же цвета, что канва, и край её отделяет */
+  --header-edge: #25292e; /* primer: --header-bgColor */
   --nav-hover: #818b981a; /* primer: --control-transparent-bgColor-hover */
   --nav-selected: #818b9826; /* primer: --control-transparent-bgColor-selected */
 
@@ -122,6 +126,11 @@
   --space-5: 1.5rem; /* primer: --base-size-24 */
   --space-6: 2rem; /* primer: --base-size-32 */
   --space-7: 3rem; /* primer: --base-size-48 */
+  /* шаг 93: остальные отступы шкалы Primer, которыми консоль пользуется, — под именами Primer */
+  --base-size-2: 0.125rem; /* primer: --base-size-2 */
+  --base-size-6: 0.375rem; /* primer: --base-size-6 */
+  --base-size-20: 1.25rem; /* primer: --base-size-20 */
+  --base-size-96: 6rem; /* primer: --base-size-96 */
   --control-h: 2rem; /* primer: --control-medium-size */
   --badge-h: 1.25rem; /* primer: --base-size-20 */
   /* Шаг 85, адаптив: ширина выдвижной навигации (Primer Overlay small) и цель касания на узком экране (Primer, грубый указатель) */
@@ -131,4 +140,154 @@
   /* Каркас — размеры раскладки консоли, а не значения дизайн-системы (исключения правила, названы в тесте) */
   --topbar-h: 56px;
   --sidebar-w: 240px;
+}
+
+/*
+ * Шаг 93: ТЁМНАЯ тема — те же имена токенов, значения тёмной темы Primer (@primer/primitives, `functional/themes/dark.css`), пометка
+ * `primer-dark: --имя`. Пары контраста — пары Primer (фон и текст одного токена темы), не подобраны на глаз. Тема — свойство устройства:
+ * по умолчанию системная (`prefers-color-scheme`), ручной выбор пишет `data-theme` на корне страницы. Оба блока ниже одинаковы — это
+ * держит токен-тест: каждое значение светлой темы из темы Primer имеет пару в обоих.
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #151b23; /* primer-dark: --bgColor-muted */
+    --surface: #0d1117; /* primer-dark: --bgColor-default */
+    --surface-muted: #151b23; /* primer-dark: --bgColor-muted */
+    --border: #3d444d; /* primer-dark: --borderColor-default */
+    --divider: #3d444db3; /* primer-dark: --borderColor-muted */
+    --shadow: 0 1px 1px 0 #01040999, 0 1px 3px 0 #01040999; /* primer-dark: --shadow-resting-small */
+    --shadow-lg: 0 0 0 1px #3d444d, 0 6px 12px -3px #01040966, 0 6px 18px 0 #01040966; /* primer-dark: --shadow-floating-small */
+    --backdrop: #21283066; /* primer-dark: --overlay-backdrop-bgColor */
+    --text: #f0f6fc; /* primer-dark: --fgColor-default */
+    --text-2: #9198a1; /* primer-dark: --fgColor-muted */
+    --text-3: #656c76; /* primer-dark: --fgColor-disabled */
+    --text-money: #f0f6fc; /* primer-dark: --fgColor-default */
+    --on-emphasis: #ffffff; /* primer-dark: --fgColor-onEmphasis */
+    --accent: #4493f8; /* primer-dark: --fgColor-accent */
+    --accent-hover: #4493f8; /* primer-dark: --fgColor-link */
+    --accent-soft: #388bfd1a; /* primer-dark: --bgColor-accent-muted */
+    --accent-border: #388bfd66; /* primer-dark: --borderColor-accent-muted */
+    --accent-text: #4493f8; /* primer-dark: --fgColor-accent */
+    --accent-emphasis: #1f6feb; /* primer-dark: --borderColor-accent-emphasis */
+    --focus-color: #1f6feb; /* primer-dark: --focus-outline-color */
+    --primary: #238636; /* primer-dark: --button-primary-bgColor-rest */
+    --primary-hover: #29903b; /* primer-dark: --button-primary-bgColor-hover */
+    --primary-border: #ffffff26; /* primer-dark: --button-primary-borderColor-rest */
+    --control-bg: #212830; /* primer-dark: --control-bgColor-rest */
+    --control-bg-hover: #262c36; /* primer-dark: --control-bgColor-hover */
+    --control-bg-active: #2a313c; /* primer-dark: --control-bgColor-active */
+    --control-fg: #f0f6fc; /* primer-dark: --control-fgColor-rest */
+    --button-shadow: 0 0 0 0 #00000000; /* primer-dark: --button-default-shadow-resting */
+    --track-bg: #010409; /* primer-dark: --controlTrack-bgColor-rest */
+    --knob-bg: #262c36; /* primer-dark: --controlKnob-bgColor-rest */
+    --success: #3fb950; /* primer-dark: --fgColor-success */
+    --success-soft: #2ea04326; /* primer-dark: --bgColor-success-muted */
+    --success-border: #2ea04366; /* primer-dark: --borderColor-success-muted */
+    --success-strong: #238636; /* primer-dark: --bgColor-success-emphasis */
+    --warning: #d29922; /* primer-dark: --fgColor-attention */
+    --warning-soft: #bb800926; /* primer-dark: --bgColor-attention-muted */
+    --warning-border: #bb800966; /* primer-dark: --borderColor-attention-muted */
+    --warning-strong: #9e6a03; /* primer-dark: --bgColor-attention-emphasis */
+    --danger: #f85149; /* primer-dark: --fgColor-danger */
+    --danger-soft: #f851491a; /* primer-dark: --bgColor-danger-muted */
+    --danger-border: #f8514966; /* primer-dark: --borderColor-danger-muted */
+    --danger-strong: #da3633; /* primer-dark: --bgColor-danger-emphasis */
+    --neutral-soft: #656c7633; /* primer-dark: --bgColor-neutral-muted */
+    --success-line: #238636; /* primer-dark: --borderColor-success-emphasis */
+    --warning-line: #9e6a03; /* primer-dark: --borderColor-attention-emphasis */
+    --danger-line: #da3633; /* primer-dark: --borderColor-danger-emphasis */
+    --header-bg: #151b23f2; /* primer-dark: --header-bgColor */
+    --header-fg: #ffffffb3; /* primer-dark: --header-fgColor-default */
+    --header-fg-logo: #f0f6fc; /* primer-dark: --header-fgColor-logo */
+    --header-divider: #656c76; /* primer-dark: --header-borderColor-divider */
+    --header-edge: #3d444db3; /* primer-dark: --borderColor-muted */
+    --nav-hover: #656c7633; /* primer-dark: --control-transparent-bgColor-hover */
+    --nav-selected: #656c7633; /* primer-dark: --control-transparent-bgColor-selected */
+    --role-owner-bg: #001a47; /* primer-dark: --label-blue-bgColor-rest */
+    --role-owner-fg: #4da0ff; /* primer-dark: --label-blue-fgColor-rest */
+    --role-admin-bg: #211047; /* primer-dark: --label-purple-bgColor-rest */
+    --role-admin-fg: #b687f7; /* primer-dark: --label-purple-fgColor-rest */
+    --role-operator-bg: #311708; /* primer-dark: --label-orange-bgColor-rest */
+    --role-operator-fg: #ed8326; /* primer-dark: --label-orange-fgColor-rest */
+    --role-pricing-bg: #122117; /* primer-dark: --label-green-bgColor-rest */
+    --role-pricing-fg: #41b445; /* primer-dark: --label-green-fgColor-rest */
+    --role-inventory-bg: #041f25; /* primer-dark: --label-teal-bgColor-rest */
+    --role-inventory-fg: #1cb0ab; /* primer-dark: --label-teal-fgColor-rest */
+    --role-manager-bg: #122117; /* primer-dark: --label-green-bgColor-rest */
+    --role-manager-fg: #41b445; /* primer-dark: --label-green-fgColor-rest */
+    --role-viewer-bg: #1c1c1c; /* primer-dark: --label-gray-bgColor-rest */
+    --role-viewer-fg: #92a1b5; /* primer-dark: --label-gray-fgColor-rest */
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #151b23; /* primer-dark: --bgColor-muted */
+  --surface: #0d1117; /* primer-dark: --bgColor-default */
+  --surface-muted: #151b23; /* primer-dark: --bgColor-muted */
+  --border: #3d444d; /* primer-dark: --borderColor-default */
+  --divider: #3d444db3; /* primer-dark: --borderColor-muted */
+  --shadow: 0 1px 1px 0 #01040999, 0 1px 3px 0 #01040999; /* primer-dark: --shadow-resting-small */
+  --shadow-lg: 0 0 0 1px #3d444d, 0 6px 12px -3px #01040966, 0 6px 18px 0 #01040966; /* primer-dark: --shadow-floating-small */
+  --backdrop: #21283066; /* primer-dark: --overlay-backdrop-bgColor */
+  --text: #f0f6fc; /* primer-dark: --fgColor-default */
+  --text-2: #9198a1; /* primer-dark: --fgColor-muted */
+  --text-3: #656c76; /* primer-dark: --fgColor-disabled */
+  --text-money: #f0f6fc; /* primer-dark: --fgColor-default */
+  --on-emphasis: #ffffff; /* primer-dark: --fgColor-onEmphasis */
+  --accent: #4493f8; /* primer-dark: --fgColor-accent */
+  --accent-hover: #4493f8; /* primer-dark: --fgColor-link */
+  --accent-soft: #388bfd1a; /* primer-dark: --bgColor-accent-muted */
+  --accent-border: #388bfd66; /* primer-dark: --borderColor-accent-muted */
+  --accent-text: #4493f8; /* primer-dark: --fgColor-accent */
+  --accent-emphasis: #1f6feb; /* primer-dark: --borderColor-accent-emphasis */
+  --focus-color: #1f6feb; /* primer-dark: --focus-outline-color */
+  --primary: #238636; /* primer-dark: --button-primary-bgColor-rest */
+  --primary-hover: #29903b; /* primer-dark: --button-primary-bgColor-hover */
+  --primary-border: #ffffff26; /* primer-dark: --button-primary-borderColor-rest */
+  --control-bg: #212830; /* primer-dark: --control-bgColor-rest */
+  --control-bg-hover: #262c36; /* primer-dark: --control-bgColor-hover */
+  --control-bg-active: #2a313c; /* primer-dark: --control-bgColor-active */
+  --control-fg: #f0f6fc; /* primer-dark: --control-fgColor-rest */
+  --button-shadow: 0 0 0 0 #00000000; /* primer-dark: --button-default-shadow-resting */
+  --track-bg: #010409; /* primer-dark: --controlTrack-bgColor-rest */
+  --knob-bg: #262c36; /* primer-dark: --controlKnob-bgColor-rest */
+  --success: #3fb950; /* primer-dark: --fgColor-success */
+  --success-soft: #2ea04326; /* primer-dark: --bgColor-success-muted */
+  --success-border: #2ea04366; /* primer-dark: --borderColor-success-muted */
+  --success-strong: #238636; /* primer-dark: --bgColor-success-emphasis */
+  --warning: #d29922; /* primer-dark: --fgColor-attention */
+  --warning-soft: #bb800926; /* primer-dark: --bgColor-attention-muted */
+  --warning-border: #bb800966; /* primer-dark: --borderColor-attention-muted */
+  --warning-strong: #9e6a03; /* primer-dark: --bgColor-attention-emphasis */
+  --danger: #f85149; /* primer-dark: --fgColor-danger */
+  --danger-soft: #f851491a; /* primer-dark: --bgColor-danger-muted */
+  --danger-border: #f8514966; /* primer-dark: --borderColor-danger-muted */
+  --danger-strong: #da3633; /* primer-dark: --bgColor-danger-emphasis */
+  --neutral-soft: #656c7633; /* primer-dark: --bgColor-neutral-muted */
+  --success-line: #238636; /* primer-dark: --borderColor-success-emphasis */
+  --warning-line: #9e6a03; /* primer-dark: --borderColor-attention-emphasis */
+  --danger-line: #da3633; /* primer-dark: --borderColor-danger-emphasis */
+  --header-bg: #151b23f2; /* primer-dark: --header-bgColor */
+  --header-fg: #ffffffb3; /* primer-dark: --header-fgColor-default */
+  --header-fg-logo: #f0f6fc; /* primer-dark: --header-fgColor-logo */
+  --header-divider: #656c76; /* primer-dark: --header-borderColor-divider */
+  --header-edge: #3d444db3; /* primer-dark: --borderColor-muted */
+  --nav-hover: #656c7633; /* primer-dark: --control-transparent-bgColor-hover */
+  --nav-selected: #656c7633; /* primer-dark: --control-transparent-bgColor-selected */
+  --role-owner-bg: #001a47; /* primer-dark: --label-blue-bgColor-rest */
+  --role-owner-fg: #4da0ff; /* primer-dark: --label-blue-fgColor-rest */
+  --role-admin-bg: #211047; /* primer-dark: --label-purple-bgColor-rest */
+  --role-admin-fg: #b687f7; /* primer-dark: --label-purple-fgColor-rest */
+  --role-operator-bg: #311708; /* primer-dark: --label-orange-bgColor-rest */
+  --role-operator-fg: #ed8326; /* primer-dark: --label-orange-fgColor-rest */
+  --role-pricing-bg: #122117; /* primer-dark: --label-green-bgColor-rest */
+  --role-pricing-fg: #41b445; /* primer-dark: --label-green-fgColor-rest */
+  --role-inventory-bg: #041f25; /* primer-dark: --label-teal-bgColor-rest */
+  --role-inventory-fg: #1cb0ab; /* primer-dark: --label-teal-fgColor-rest */
+  --role-manager-bg: #122117; /* primer-dark: --label-green-bgColor-rest */
+  --role-manager-fg: #41b445; /* primer-dark: --label-green-fgColor-rest */
+  --role-viewer-bg: #1c1c1c; /* primer-dark: --label-gray-bgColor-rest */
+  --role-viewer-fg: #92a1b5; /* primer-dark: --label-gray-fgColor-rest */
 }

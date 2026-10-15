@@ -13,7 +13,7 @@ import {
 import { buildPreview, readTable, suggestMapping, TABLE_ENCODINGS } from '@repracer/cost-import';
 import type { BulkJobInput, ConsoleCatalogFacts, ConsoleCatalogFactsQuery, ConsoleCatalogPage, DiscountAnnouncementInput, DiscountAnnouncementRow, InterventionSlice } from '@repracer/pricing-pipeline';
 import {
-  buildStandWorlds, memoryStandDirectory, pgStandJoinAs, pgStandJoinMember, pgStandUsers, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_EMAILS, STAND_ISSUER, type LiveWorld,
+  buildStandWorlds, memoryStandDirectory, pgStandJoinAs, pgStandJoinMember, pgStandUsers, STAND_ACCOUNTS, STAND_PEOPLE, STAND_AUDIENCE, STAND_EMAILS, STAND_ISSUER, type LiveWorld,
 } from '@repracer/contract-tests/stand';
 import { createAuthenticator, hasSecondFactor, remoteJwks, staticJwks, type Authenticator, type Principal } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
@@ -242,6 +242,11 @@ export interface StandServices {
    * (ещё администратор и оператор). Вход по роли, которой нет в списке, имитатор принимает: назначения прежних ролей работают
    */
   extendedRoles?: boolean;
+  /**
+   * Шаг 93: справочник показа «адрес → имя» для людей, которых знает процесс (стенд: участники посева и владельцы лёгких продавцов).
+   * Без него люди называются именем из базы или адресом. Развёрнутая консоль его не передаёт: синтетики в работе нет
+   */
+  people?: Readonly<Record<string, string>>;
 }
 
 /** Шаг 87 [Р-214]: подключение — только каналы и витрины профиля; витрину вне профиля не начать и прямым запросом */
@@ -277,7 +282,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     // Токен поставщика проверяется при каждом запросе; недействительный токен — как его отсутствие
     const principal: Principal | null = await identity.authenticator.authenticate(req.authorization, req.idToken);
     const sessionView = (l: Locale): SessionView => ({
-      user: principal ? { subject: principal.subject, email: principal.email } : null, locale: l,
+      user: principal ? { subject: principal.subject, email: principal.email, name: principal.name ?? null } : null, locale: l,
       simulator: identity.simulator
         ? offeredRoles(services.extendedRoles === true).flatMap((role) => STAND_ACCOUNTS.filter((a) => a.role === role)).map((a) => ({ role: a.role, label: m.values[a.role] }))
         : null,
@@ -672,6 +677,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
        * находка 4).
        */
       w.demo = w.state.demo;
+      if (services.people) w.people = services.people;
       if (targeted && extra.catalogPage) w.catalogPage = extra.catalogPage;
       if (targeted && extra.facts) w.catalogFacts = extra.facts;
       return w;
@@ -1801,7 +1807,8 @@ async function main(): Promise<void> {
   const simulator = issuer
     ? {
       token: (a: (typeof STAND_ACCOUNTS)[number], options?: { secondFactor?: boolean }) =>
-        issuer.token(a.subject, { email: a.email, amr: options?.secondFactor === false ? ['pwd'] : ['pwd', 'otp'], expiresInSeconds: tokenSeconds }),
+        // Шаг 93: имя человека стенда — утверждением OIDC `name`, как у настоящего поставщика
+        issuer.token(a.subject, { email: a.email, amr: options?.secondFactor === false ? ['pwd'] : ['pwd', 'otp'], expiresInSeconds: tokenSeconds, extra: { name: a.displayName } }),
       expiresInSeconds: tokenSeconds,
     }
     : undefined;
@@ -1839,6 +1846,8 @@ async function main(): Promise<void> {
      */
     let demoWorldId: string | null = null;
     const demoSellerIds: string[] = [];
+    // Шаг 93: люди стенда по адресу — участники посева и владельцы лёгких продавцов; экран называет их по имени
+    const people: Record<string, string> = { ...STAND_PEOPLE };
     if (process.env.REPRACER_DEMO === 'on') {
       const { startDemoWorld } = await import('./demo-world.ts');
       const started = await startDemoWorld({
@@ -1881,6 +1890,7 @@ async function main(): Promise<void> {
         });
         worlds.push(...sellers.worlds);
         demoSellerIds.push(...sellers.worlds.map((w) => w.id));
+        Object.assign(people, sellers.people);
       }
     }
     // Шаг 64: у демо — подключения только для чтения (аккаунты и вопрос о других инструментах [Р-202]), подключать нечем
@@ -1888,13 +1898,13 @@ async function main(): Promise<void> {
     const { PgChannelConnectStore } = await import('@repracer/pricing-store-pg');
     const demoConnect = readOnlyConnections(new PgChannelConnectStore(adminPool));
     handle = createStandApi(worlds, { authenticator: createAuthenticator({ ...verify, directory }), ...(simulator ? { simulator } : {}) },
-      { connect: (worldId) => (worldId === demoWorldId || demoSellerIds.includes(worldId) ? demoConnect : null), ...defaultLocale });
+      { connect: (worldId) => (worldId === demoWorldId || demoSellerIds.includes(worldId) ? demoConnect : null), people, ...defaultLocale });
   } else {
     // Стенд не включает ничего молча и ничего молча не пропускает: демо живёт только на PostgreSQL (ревью шага 34, находка 9)
     if (process.env.REPRACER_DEMO === 'on') throw new Error('REPRACER_DEMO=on needs PostgreSQL: set REPRACER_PG_URL (the demo tenant runs the real decision path)');
     if (process.env.REPRACER_DEMO_ONLY === 'on') throw new Error('REPRACER_DEMO_ONLY=on needs the demo on PostgreSQL: set REPRACER_DEMO=on and REPRACER_PG_URL');
     const worlds = await buildStandWorlds();
-    handle = createStandApi(worlds, { authenticator: createAuthenticator({ ...verify, directory: memoryStandDirectory(worlds) }), ...(simulator ? { simulator } : {}) }, { ...defaultLocale });
+    handle = createStandApi(worlds, { authenticator: createAuthenticator({ ...verify, directory: memoryStandDirectory(worlds) }), ...(simulator ? { simulator } : {}) }, { people: STAND_PEOPLE, ...defaultLocale });
   }
   const server = createStandServer(handle);
   server.listen(port, '127.0.0.1', () => console.log(`stand on http://127.0.0.1:${port}/api/session (${process.env.REPRACER_PG_URL ? 'PostgreSQL' : 'memory'})`));

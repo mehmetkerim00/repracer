@@ -211,7 +211,16 @@ test('Р-168: семь экранов панели отвечают на жив�
    */
   assert.ok(!Object.hasOwn(row, 'processed'), 'экран не показывает счётчик, равный другому счётчику по определению');
 
-  const jobs = await walk<{ jobs: Array<{ job_key: string; runs_completed: number }> }>('работы планировщика', 'GET', '/api/operator/jobs');
+  /**
+   * Шаг 93 (CI шага 92, полный прогон 38712733050): очередь записей наполняет путь решения раньше, чем планировщик закончит первый
+   * запуск, — экран работ ждёт первый завершённый запуск так же, как очередь ждёт первую запись, а не читается один раз
+   */
+  type Jobs = { jobs: Array<{ job_key: string; runs_completed: number }> };
+  let jobs = await walk<Jobs>('работы планировщика', 'GET', '/api/operator/jobs');
+  for (let i = 0; i < 30 && !jobs.body.jobs.some((j) => j.runs_completed > 0); i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    jobs = await walk<Jobs>('работы планировщика', 'GET', '/api/operator/jobs');
+  }
   assert.ok(jobs.body.jobs.length >= 8, `в каталоге работ ${jobs.body.jobs.length} строк — работы планировщика видны все, а не выборкой`);
   assert.ok(jobs.body.jobs.some((j) => j.runs_completed > 0), 'хотя бы одна работа уже отработала: экран показывает живой фон, а не пустую таблицу');
 });

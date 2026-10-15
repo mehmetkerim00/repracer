@@ -3,8 +3,8 @@ import { createServer as createNetServer } from 'node:net';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { createServer, type ViteDevServer } from 'vite';
-import { messagesFor } from '@repracer/console-model';
-import { buildStandWorlds, memoryStandDirectory, STAND_AUDIENCE, STAND_ISSUER } from '@repracer/contract-tests/stand';
+import { messagesFor, WALMART_UNPUBLISHED } from '@repracer/console-model';
+import { buildStandWorlds, memoryStandDirectory, STAND_AUDIENCE, STAND_ISSUER, STAND_PEOPLE, STAND_USERS } from '@repracer/contract-tests/stand';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
 import type { ShadowPage } from '@repracer/pricing-store-pg';
@@ -21,6 +21,7 @@ import { EMPTY_WORLD_ID, emptyWorld, emptyWorldConnect } from './empty-world.ts'
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const en = messagesFor('en');
+const de = messagesFor('de');
 let stand: ReturnType<typeof createStandServer> | null = null;
 let vite: ViteDevServer | null = null;
 let browser: Browser | null = null;
@@ -74,6 +75,16 @@ before(async () => {
   // Шаг 85: у мира сценария в памяти тени нет (экран отвечает 404) — смоуку адаптива нужен и экран тени, поэтому у смоук-мира — синтетическая
   // неделя тени: плитки, график по дням, сводка, аккаунт, свойства витрин, письмо и строки удержанных записей (числа выдуманы, как у демо)
   const worlds = (await buildStandWorlds({ filter: (s) => s.id === 'kaufland/pipeline/happy-path' })).map((w) => ({ ...w, shadow: syntheticShadow() }));
+  /**
+   * Шаг 93: у предложения смоук-мира — заметка канала «снят с публикации» (самая длинная пилюля и строка таблицы Offers), чтобы правило
+   * ширины таблицы видело колонку «Channel says» (шаг 89 нашёл её переполнение проходом, а не смоуком — в мирах смоука заметок не было)
+   */
+  const w0 = worlds[0]!;
+  const scope0 = (await w0.view(STAND_USERS[0] as never) as { state: { scopes: Array<{ channelAccountId: string; marketplace: string; channelProductRef: string; condition: string }> } }).state.scopes[0]!;
+  await w0.store.recordPricingHealth(w0.tenantId, scope0.channelAccountId, {
+    marketplace: scope0.marketplace, channelProductRef: scope0.channelProductRef, condition: scope0.condition, issueType: WALMART_UNPUBLISHED,
+    occurredAt: w0.clock.iso(), competitivePriceThreshold: { amountMinor: 1999, currency: 'EUR' }, sourceEventId: 'smoke-unpublished',
+  } as never);
   // Шаг 87: рядом — пустое рабочее пространство (онбординг и подключение предлагают каналы и витрины профиля)
   const empty = emptyWorld(worlds[0]!.clock);
   // Счётчики пустого пространства говорят «есть витрина ЕС»: тогда вкладку Omnibus в профиле us прячет ИМЕННО профиль, а в eu она на месте
@@ -82,13 +93,13 @@ before(async () => {
   const all = [...worlds, empty];
   const identity: Parameters<typeof createStandApi>[1] = {
     authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory: memoryStandDirectory(all) }),
-    simulator: { token: (a) => issuer.token(a.subject, { email: a.email }), expiresInSeconds: 900 },
+    simulator: { token: (a) => issuer.token(a.subject, { email: a.email, extra: { name: a.displayName } }), expiresInSeconds: 900 },
   };
   const connect = (worldId: string) => (worldId === EMPTY_WORLD_ID ? emptyWorldConnect : null);
   // Основной стенд — профиль eu: смоук Kaufland и немецкие проходы шагов 76–86 гоняются на нём (Европа заморожена, не удалена)
-  euApi = createStandApi(all, identity, { defaultLocale: 'en', market: 'eu', connect });
-  usApi = createStandApi(all, identity, { market: 'us', connect });
-  extendedApi = createStandApi(all, identity, { market: 'us', connect, extendedRoles: true });
+  euApi = createStandApi(all, identity, { defaultLocale: 'en', market: 'eu', connect, people: STAND_PEOPLE });
+  usApi = createStandApi(all, identity, { market: 'us', connect, people: STAND_PEOPLE });
+  extendedApi = createStandApi(all, identity, { market: 'us', connect, extendedRoles: true, people: STAND_PEOPLE });
   currentApi = euApi;
   stand = createStandServer((req) => currentApi(req));
   await new Promise<void>((resolve) => stand!.listen(0, '127.0.0.1', resolve));
@@ -146,7 +157,7 @@ test('step 76: the console page runs in a real browser — sign-in, workspace li
   })()`);
   assert.deepEqual(await mark('.login-brand'), { svg: true, text: en.ui.app.brand, line: 'rgb(31, 35, 40)', end: 'rgb(26, 127, 55)' }, 'sign-in: the mark on light, the lowercase name');
   assert.equal(en.ui.app.brand, 'pricetrail');
-  assert.deepEqual(await mark('.topbar .brand'), { svg: true, text: en.ui.app.title, line: 'rgb(255, 255, 255)', end: 'rgb(46, 160, 67)' }, 'header: the mark on dark');
+  assert.deepEqual(await mark('.topbar .brand'), { svg: true, text: en.ui.app.title, line: 'rgb(255, 255, 255)', end: 'rgb(63, 185, 80)' }, 'header: the mark on dark');
   assert.equal(await b.evaluate<number>(`[...document.querySelectorAll('.brand-mark')].filter((e) => e.textContent.trim() === 'r').length`), 0, 'the old «r» mark is gone');
   await b.click(owner);
   await b.waitText(en.ui.app.worlds);
@@ -161,15 +172,26 @@ test('step 76: the console page runs in a real browser — sign-in, workspace li
    */
   const stickyTables = () => b.evaluate<Array<{ table: number; wrap: number }>>(
     `[...document.querySelectorAll('.table-wrap')].filter((w) => w.querySelector('table.sticky-end')).map((w) => ({ table: w.querySelector('table').scrollWidth, wrap: w.clientWidth }))`);
-  for (const screen of ['products', 'decisions', 'strategies', 'feed', 'rejected', 'bounds', 'stop', 'stock', 'jobs']) {
-    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${screen}`)}, true)`);
-    await settled(b, screen);
-    for (const t of await stickyTables()) assert.ok(t.table <= t.wrap + 1, `${screen}: the table is ${t.table}px wide in a ${t.wrap}px frame — columns hide under the pinned action column`);
+  // Шаг 93: правило — в обеих темах (светлой и тёмной системной)
+  for (const scheme of ['light', 'dark'] as const) {
+    await b.setColorScheme(scheme);
+    for (const screen of ['products', 'decisions', 'strategies', 'feed', 'rejected', 'bounds', 'stop', 'stock', 'jobs']) {
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${screen}`)}, true)`);
+      await settled(b, `${scheme} ${screen}`);
+      for (const t of await stickyTables()) assert.ok(t.table <= t.wrap + 1, `${scheme} ${screen}: the table is ${t.table}px wide in a ${t.wrap}px frame — columns hide under the pinned action column`);
+    }
   }
+  await b.setColorScheme(null);
   // Положительный контроль правила: в суженной рамке та же таблица товаров обязана НЕ поместиться — иначе проверка выше ничего не мерит
   await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/products`)}, true)`);
   await settled(b, 'products (control)');
   assert.ok((await stickyTables()).length > 0, 'the products screen of the smoke world has a table with a pinned column');
+  // Шаг 93: правило видит колонку «Channel says» — она есть у смоук-мира; контроль — прежняя растянутая колонка (до шага 89) краснеет
+  assert.ok(await b.evaluate<boolean>(`!!document.querySelector('table.products.with-channel td.channel-says .badge')`), 'the smoke world has the «Channel says» column');
+  await b.evaluate(`(document.head.insertAdjacentHTML('beforeend', '<style id="wide-channel">table.products td.channel-says .cell { max-width: none; } table.products td.channel-says .badge, table.products td.channel-says .cell-detail, table.products.with-channel td.strategy { white-space: nowrap; }</style>'), true)`);
+  const stretched = await stickyTables();
+  assert.ok(stretched[0]!.table > stretched[0]!.wrap + 1, `control: the stretched «Channel says» column of step 89 must overflow — ${JSON.stringify(stretched)}`);
+  await b.evaluate(`(document.getElementById('wide-channel').remove(), true)`);
   await b.evaluate(`(document.querySelector('.table-wrap').style.width = '480px', true)`);
   const squeezed = await stickyTables();
   assert.ok(squeezed[0]!.table > squeezed[0]!.wrap + 1, `control: a 480px frame must overflow — ${JSON.stringify(squeezed)}`);
@@ -198,6 +220,19 @@ const PAGE_FIT = `(() => {
   return { scrollWidth: root.scrollWidth, width: vw, out };
 })()`;
 /** Цели касания ниже 44px: кнопки, выборы, поля, пункты меню, ссылки строк, вкладки, меню колонок */
+/**
+ * Шаг 93 [Р-146]: в сетке карточек (`.cards`, `.worlds`, `.stats`, `.choices`) зазор даёт gap — дети одного ряда стоят на одной линии.
+ * Общее правило «блок после блока — отступ сверху» дважды сдвигало вторую и третью карточку ряда вниз (шаг 91 — «Your workspaces», шаг 93 —
+ * «Stop pricing»: правило соседей сильнее сброса в сетке по специфичности). Ряд — дети, идущие слева направо
+ */
+const ROW_MISALIGNED = `[...document.querySelectorAll('.cards, .worlds, .stats, .choices')].filter((g) => g.checkVisibility()).flatMap((g) => {
+  const kids = [...g.children].filter((k) => k.checkVisibility()).map((k) => ({ k, r: k.getBoundingClientRect() }));
+  const bad = [];
+  for (let i = 1; i < kids.length; i += 1) {
+    const a = kids[i - 1], b = kids[i];
+    if (b.r.left > a.r.left && Math.abs(b.r.top - a.r.top) > 1) bad.push(g.className + ' › ' + (b.k.querySelector('h2, h3, h4, dt')?.textContent ?? b.k.textContent).trim().slice(0, 40) + ' — ' + Math.round(b.r.top - a.r.top) + 'px');
+  }
+  return bad; })`;
 const SMALL_TARGETS = `[...document.querySelectorAll('button, select, input:not([type=checkbox]):not([type=radio]):not([type=file]), .nav-group a, a.row-link, .tabs a, summary')]
   .filter((el) => el.checkVisibility({ visibilityProperty: true }) && el.getBoundingClientRect().height > 0 && el.getBoundingClientRect().height < 43.5)
   .slice(0, 5).map((el) => el.tagName.toLowerCase() + ' «' + (el.textContent ?? el.getAttribute('aria-label') ?? '').trim().slice(0, 30) + '» ' + Math.round(el.getBoundingClientRect().height) + 'px')`;
@@ -206,8 +241,11 @@ test('step 85: the console works from a 375px phone to a wide monitor — no pag
   const b = browser!;
   const before = b.errors().length;
   const owner = en.ui.app.login.asAccount(en.values.OWNER);
-  for (const [width, height] of WIDTHS) {
+  // Шаг 93: светлая тема — на всех ширинах, тёмная — на телефоне и мониторе
+  const RUNS: ReadonlyArray<readonly ['light' | 'dark', number, number]> = [...WIDTHS.map(([w, h]) => ['light', w, h] as const), ['dark', 375, 812], ['dark', 1440, 900]];
+  for (const [scheme, width, height] of RUNS) {
     const narrow = width < 1012;
+    await b.setColorScheme(scheme);
     await b.setViewport(width, height);
     // токен — только в памяти страницы: открыть заново — новый вход на этой ширине
     await b.open(pageUrl);
@@ -219,16 +257,38 @@ test('step 85: the console works from a 375px phone to a wide monitor — no pag
         assert.deepEqual(fit.out, [], `${width}px, ${what}: elements stick out of the window`);
       }
       if (narrow) assert.deepEqual(await b.evaluate<string[]>(SMALL_TARGETS), [], `${width}px, ${what}: touch targets lower than 44px`);
+      assert.deepEqual(await b.evaluate<string[]>(ROW_MISALIGNED), [], `${scheme} ${width}px, ${what}: cards of one row do not stand on one line`);
     };
     await checkPage('sign-in');
+    // Шаг 93: тема действительно та — канва страницы цветом своей темы Primer (`--bgColor-muted`: светлая #f6f8fa, тёмная #151b23)
+    assert.equal(await b.evaluate<string>('getComputedStyle(document.body).backgroundColor'), scheme === 'dark' ? 'rgb(21, 27, 35)' : 'rgb(246, 248, 250)', `${scheme} ${width}px: the canvas`);
     await b.click(owner);
     await b.waitText(en.ui.app.worlds);
     await checkPage('workspaces');
+    if (narrow) {
+      // Шаг 93: шапка телефона вне пространства — знак, язык, тема и выход; немецкие подписи длиннее («Wie das System», «Abmelden»)
+      await b.click(de.ui.app.languages.de, '.topbar .lang button');
+      await b.waitText(de.ui.app.worlds);
+      await checkPage('workspaces, German');
+      await b.click(de.ui.app.languages.en, '.topbar .lang button');
+      await b.waitText(en.ui.app.worlds);
+    }
     const world = (await b.evaluate<string>(`document.querySelector('h3 a').getAttribute('href')`)).split('/')[2]!;
     for (const screen of SCREENS) {
       await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${screen}`)}, true)`);
       await settled(b, `${width}px ${screen}`);
       await checkPage(screen);
+    }
+    if (width === 1440 && scheme === 'light') {
+      // положительный контроль: прежний отступ «карточка после карточки» внутри сетки — правило краснеет на экране остановок
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/stop`)}, true)`);
+      await settled(b, `${width}px stop, control`);
+      await b.evaluate(`(() => { const st = document.createElement('style'); st.id = 'row-control'; st.textContent = '.cards > .card + .card { margin-top: var(--space-3) !important; }'; document.head.append(st); return true; })()`);
+      const bad = await b.evaluate<string[]>(ROW_MISALIGNED);
+      await b.evaluate(`(document.getElementById('row-control').remove(), true)`);
+      assert.ok(bad.length > 0, 'control: a card pushed down inside a row is caught');
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/cost-import`)}, true)`);
+      await settled(b, `${width}px back to cost-import`);
     }
     // навигация: на узком — выдвижная панель за кнопкой меню, на широком — боковая панель на месте, кнопки меню нет
     const nav = () => b.evaluate<{ menu: boolean; sidebar: boolean; screen: string }>(
@@ -260,6 +320,7 @@ test('step 85: the console works from a 375px phone to a wide monitor — no pag
     assert.ok(control.scrollWidth > control.width && control.out.length > 0, `${width}px control: a too-wide element must make the page scroll sideways — ${JSON.stringify(control)}`);
     await b.evaluate(`(document.getElementById('wide-control').remove(), true)`);
   }
+  await b.setColorScheme(null);
   await b.setViewport(1440, 900);
   assert.deepEqual(b.errors().slice(before), [], 'the console page threw or logged errors at some width');
 });
@@ -290,7 +351,6 @@ const OUT_OF_BOX = `(() => {
 
 test('step 86: every menu item and the heading of its page are the same words — English and German', async () => {
   const b = browser!;
-  const de = messagesFor('de');
   await b.setViewport(1440, 900);
   await b.open(pageUrl);
   await b.waitText(en.ui.app.login.roleCan.OWNER);
@@ -298,6 +358,9 @@ test('step 86: every menu item and the heading of its page are the same words �
   await b.waitText(en.ui.app.worlds);
   await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
   await settled(b, 'first screen');
+  // Шаг 93: правило — в обеих темах
+  for (const scheme of ['light', 'dark'] as const) {
+  await b.setColorScheme(scheme);
   for (const m of [en, de]) {
     if (m === de) {
       await b.click(en.ui.app.languages.de, '.topbar .lang button');
@@ -315,13 +378,56 @@ test('step 86: every menu item and the heading of its page are the same words �
       if (heading !== l.text) mismatches.push(`«${l.text}» → «${heading}»`);
       assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${m.locale} ${l.text}: content sticks out of its frame`);
     }
-    assert.deepEqual(mismatches, [], `${m.locale}: a menu item leads to a page with another heading`);
+    assert.deepEqual(mismatches, [], `${scheme} ${m.locale}: a menu item leads to a page with another heading`);
   }
+  await b.click(de.ui.app.languages.en, '.topbar .lang button');
+  await b.waitText(en.ui.app.screens.stock);
+  }
+  await b.setColorScheme(null);
   // Положительный контроль [Р-94]: таблица, растянутая за поля карточки, как была до шага 86, — выступ, и правило его видит
   await b.evaluate(`(document.querySelector('.world-content').insertAdjacentHTML('beforeend', '<section class="card" id="out-control"><table style="margin: 0 -24px; width: calc(100% + 48px)"><tbody><tr><td>control</td></tr></tbody></table></section>'), true)`);
   assert.match((await b.evaluate<string[]>(OUT_OF_BOX)).join(' | '), /sticks out of section\.card by 7px/);
   await b.evaluate(`(document.getElementById('out-control').remove(), true)`);
-  await b.click(de.ui.app.languages.en, '.topbar .lang button');
+});
+
+/**
+ * Шаг 93: тема — свойство устройства. По умолчанию — системная (`prefers-color-scheme`); ручной выбор «светлая» или «тёмная» перебивает
+ * систему и переживает перезагрузку; «как система» возвращает системную. Значения — пары Primer: канва `--bgColor-muted`, карточка
+ * `--bgColor-default`, текст `--fgColor-default`. Шапка называет человека по имени от поставщика identity, адрес — подсказкой
+ */
+test('step 93: the theme belongs to the device — system by default, light, dark or system by hand, kept over a reload; the header names the person', async () => {
+  const b = browser!;
+  await b.setViewport(1440, 900);
+  await b.setColorScheme('dark');
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  const colours = () => b.evaluate<{ canvas: string; card: string; text: string }>(`(() => { const card = document.querySelector('.card.login') ?? document.querySelector('.card');
+    return { canvas: getComputedStyle(document.body).backgroundColor, card: getComputedStyle(card).backgroundColor, text: getComputedStyle(card).color }; })()`);
+  const choose = (v: string) => b.evaluate(`(() => { const s = document.querySelector('.topbar .theme-select'); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, ${JSON.stringify(v)});
+    s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  const DARK = { canvas: 'rgb(21, 27, 35)', card: 'rgb(13, 17, 23)', text: 'rgb(240, 246, 252)' };
+  const LIGHT = { canvas: 'rgb(246, 248, 250)', card: 'rgb(255, 255, 255)', text: 'rgb(31, 35, 40)' };
+  assert.deepEqual(await colours(), DARK, 'a dark system gets the dark Primer pairs without a choice');
+  assert.deepEqual(await b.evaluate<string[]>(`[...document.querySelectorAll('.topbar .theme-select option')].map((o) => o.textContent)`),
+    [en.ui.app.theme.system, en.ui.app.theme.light, en.ui.app.theme.dark]);
+  await choose('light');
+  assert.deepEqual(await colours(), LIGHT, 'the light choice wins over a dark system');
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  assert.deepEqual(await colours(), LIGHT, 'the choice is kept on the device over a reload');
+  await choose('system');
+  assert.deepEqual(await colours(), DARK, '«system» follows the system again');
+  await b.setColorScheme('light');
+  await choose('dark');
+  assert.deepEqual(await colours(), DARK, 'the dark choice wins over a light system');
+  await choose('system');
+  assert.deepEqual(await colours(), LIGHT);
+  // Шапка: человек по имени, адрес — подсказкой
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  assert.deepEqual(await b.evaluate<{ text: string; title: string }>(`(() => { const u = document.querySelector('.topbar .user'); return { text: u.textContent.trim(), title: u.getAttribute('title') }; })()`),
+    { text: 'Alex Porter', title: en.ui.app.login.signedIn('owner@stand.repracer.test') });
+  await b.setColorScheme(null);
 });
 
 /**

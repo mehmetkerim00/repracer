@@ -35,7 +35,8 @@ before(async () => {
   worlds = await buildStandWorlds({ filter: (s) => WORLDS.includes(s.id) });
   handle = createStandApi(worlds, {
     authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory: memoryStandDirectory(worlds) }),
-    simulator: { token: (a) => issuer.token(a.subject, { email: a.email }), expiresInSeconds: 900 },
+    // Шаг 93: имя человека стенда — утверждением OIDC `name`, как у стенда и настоящего поставщика
+    simulator: { token: (a) => issuer.token(a.subject, { email: a.email, extra: { name: a.displayName } }), expiresInSeconds: 900 },
   });
   vite = await createServer({ root, configFile: `${root}vite.config.ts`, server: { middlewareMode: true, hmr: false }, appType: 'custom', logLevel: 'silent' });
 });
@@ -102,7 +103,8 @@ test('Р-78: no password and no session — every request carries a provider tok
   assert.deepEqual([session.user, session.simulator?.map((a) => a.role)], [null, ['OWNER', 'MANAGER', 'VIEWER']]);
 
   const owner = await login('OWNER');
-  assert.deepEqual((await get<SessionView>(owner, '/api/session')).user, { subject: account('OWNER').subject, email: account('OWNER').email });
+  // Шаг 93: сессия называет человека именем от поставщика (утверждение `name`), адрес остаётся рядом
+  assert.deepEqual((await get<SessionView>(owner, '/api/session')).user, { subject: account('OWNER').subject, email: account('OWNER').email, name: 'Alex Porter' });
   assert.equal((await get<WorldSummary[]>(owner, '/api/worlds')).length, WORLDS.length);
 
   const refused = async (authorization: string, why: string) => {

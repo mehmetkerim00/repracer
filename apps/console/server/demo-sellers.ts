@@ -26,12 +26,14 @@ export interface DemoSellerSpec {
   offers: number;
   /** С какого номера синтетического названия товара начинаются предложения каналов */
   titles: { amazon: number; ebay: number };
+  /** Шаг 93: владелец пространства — синтетический продавец с человеческим именем; адрес — синтетический, у каждого посева свой */
+  owner: { name: string; mailbox: string };
 }
 
 /** Шаг 91: два лёгких продавца — Manager у одного, Viewer у другого (Р-213: одна роль на человека в пространстве) */
 export const DEMO_SELLERS: readonly DemoSellerSpec[] = [
-  { key: 'blue-ridge', title: 'Blue Ridge Trading', slot: 'membership-manager', offers: 6, titles: { amazon: 80, ebay: 90 } },
-  { key: 'lakeside', title: 'Lakeside Home Goods', slot: 'membership-viewer', offers: 5, titles: { amazon: 120, ebay: 130 } },
+  { key: 'blue-ridge', title: 'Blue Ridge Trading', slot: 'membership-manager', offers: 6, titles: { amazon: 80, ebay: 90 }, owner: { name: 'Dana Whitfield', mailbox: 'dana.whitfield' } },
+  { key: 'lakeside', title: 'Lakeside Home Goods', slot: 'membership-viewer', offers: 5, titles: { amazon: 120, ebay: 130 }, owner: { name: 'Chris Holloway', mailbox: 'chris.holloway' } },
 ];
 
 /** Шаг 91: сколько суток тени прожать у лёгкого продавца — по умолчанию неделя, как у главного демо (недельное письмо и график полные) */
@@ -39,6 +41,8 @@ export const DEMO_SELLER_PRESS_DAYS = 7;
 
 export interface RunningDemoSellers {
   worlds: LiveWorld[];
+  /** Шаг 93: владельцы пространств по адресу — для справочника показа стенда («адрес → имя») */
+  people: Readonly<Record<string, string>>;
   /** Сколько секунд заняли посев и прожатие обоих продавцов */
   seconds: number;
   stop(): void;
@@ -72,6 +76,7 @@ export async function startDemoSellers(options: {
   const pressDays = options.pressDays ?? DEMO_SELLER_PRESS_DAYS;
 
   const worlds: LiveWorld[] = [];
+  const people: Record<string, string> = {};
   const markets: Array<{ stop(): void }> = [];
   const descriptors: Array<{ id: string; title: string; tenantId: string; accounts: unknown[]; description: string }> = [];
   for (const [i, spec] of DEMO_SELLERS.entries()) {
@@ -85,8 +90,11 @@ export async function startDemoSellers(options: {
       provisioningPool: pools.provisioning, adminPool: pools.admin, tenantRegion: region?.region === 'US' ? 'US' : 'EU',
       writeMode: 'SHADOW', demo: true,
       // Владелец пространства — синтетический продавец; владелец стенда входит на роль слота
-      memberUsers: { [spec.slot]: options.standOwnerUserId }, memberEmails: { [spec.slot]: options.standOwnerEmail }, joinMember: options.joinAs,
+      memberUsers: { [spec.slot]: options.standOwnerUserId },
+      memberEmails: { [spec.slot]: options.standOwnerEmail, 'membership-owner': `${spec.owner.mailbox}.${suffix}@${spec.key}.example.test` },
+      joinMember: options.joinAs,
     });
+    people[`${spec.owner.mailbox}.${suffix}@${spec.key}.example.test`] = spec.owner.name;
     const store = new PgPricingStore(pools.app, { adminPool: pools.admin, bulkWorkerPool: pools.bulkWorker });
     if (options.locale || options.timeZone) {
       const saved = await store.setTenantDisplay(seeded.tenantId, { ...(options.locale ? { locale: options.locale } : {}), ...(options.timeZone ? { timeZone: options.timeZone } : {}) },
@@ -136,7 +144,7 @@ export async function startDemoSellers(options: {
   const seconds = Math.round((systemClock.nowMs() - started) / 100) / 10;
   log(`demo sellers ready: ${DEMO_SELLERS.map((s) => `${s.title} (${s.offers} offers each on amazon.com and ebay.com)`).join(', ')}, ${pressDays} days pressed, ${seconds} s`);
   return {
-    worlds, seconds,
+    worlds, seconds, people,
     stop() {
       stopped = true;
       for (const m of markets) m.stop();

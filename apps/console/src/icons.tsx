@@ -28,6 +28,8 @@ const PATHS: Record<string, ReactNode> = {
   x: <><path d="M6 6l12 12" /><path d="M18 6 6 18" /></>,
   menu: <><path d="M4 6h16" /><path d="M4 12h16" /><path d="M4 18h16" /></>,
   equal: <><path d="M5 9h14" /><path d="M5 15h14" /></>,
+  // шаг 93: тема — круг наполовину залит (светлая и тёмная половины); цвет — текущий цвет текста
+  contrast: <><circle cx="12" cy="12" r="9" /><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" /></>,
 };
 
 export type IconName = keyof typeof PATHS;

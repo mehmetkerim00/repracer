@@ -278,7 +278,7 @@ test('шаг 89: walmart.com в демо — два предложения сн�
     const note = r.channelNotes.find((n) => n.code === 'WALMART_UNPUBLISHED')!;
     assert.equal(note.label, 'Unpublished (uncompetitive price)');
     assert.match(note.detail, /cheaper elsewhere \(\$19\.99\)/, 'объяснение называет цену в другом месте');
-    assert.match(note.detail, /repracer does not change the price for you here/, 'и не обещает, что движок это починит');
+    assert.match(note.detail, /PriceTrail does not change the price for you here/, 'и не обещает, что движок это починит');
   }
   // Журнал «Stop pricing»: событие канала — Walmart, какое предложение и почему
   const stop = (await call<{ audit: Array<{ action: string; actor: string; scope: string; detail?: string | null }> }>('GET', `/api/worlds/${w}/stop`, guest)).body;

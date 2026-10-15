@@ -64,7 +64,8 @@ $24.99, а тот же товар «в другом месте» — $19.99, и 
 «Repricing you can audit», под ними карточка входа; шаг 84 — роли строками: цветной кружок, имя роли и что роль может; шаг 88 —
 ровно три роли: **Owner** «everything, plus people, channel accounts and live writes», **Manager** «prices, bounds, strategies, stock,
 unit cost import, bulk operations, stop pricing», **Viewer** «read-only») → строка **Owner** (переключателя языка в шапке нет —
-профиль us) → три карточки (шаг 91): **Demo store (simulator)** — «Owner», **Blue Ridge Trading** — «Manager», **Lakeside Home Goods** —
+профиль us; шаг 93: справа в шапке — выбор темы «System theme / Light / Dark», он хранится в этом браузере, а после входа там имя
+человека **Alex Porter**, адрес — подсказкой при наведении) → три карточки (шаг 91): **Demo store (simulator)** — «Owner», **Blue Ridge Trading** — «Manager», **Lakeside Home Goods** —
 «Viewer», у всех пометка **Demo** → нажатие на «Demo store (simulator)» открывает сразу **Shadow mode**. Перезагрузка страницы (F5) — выход: токен
 живёт только в памяти вкладки; снова строка «Owner», адрес экрана сохраняется.
 
@@ -220,8 +221,8 @@ declared it)», «Minimum margin $6.85 — margin at least 12%», «Effective fl
    «Demo: checking the stop crane», → **«Yes, stop»**. Ответ: «Stopped. All prices of 12 offers stop changing.»
 3. Ниже — «Active stops»: карточка amazon.com с пилюлей «Stopped» и временем, «By: Owner (you)», «Note: “…”»; **«Audit log: stops, roles and channel events»** —
    строка «Pricing stopped». Ниже в том же журнале уже есть строка с подготовки демо: **«Role changed»** · «Owner (you)» ·
-   «manager@stand.repracer.test: Viewer → Manager» (шаг 88: менеджер пришёл наблюдателем, владелец повысил его; у человека в пространстве одна
-   роль — новая заменила прежнюю). Новые решения по витрине — «Pricing stopped by a person».
+   «Jamie Lee: Viewer → Manager» (шаг 88: менеджер пришёл наблюдателем, владелец повысил его; у человека в пространстве одна
+   роль — новая заменила прежнюю; шаг 93: человек назван по имени, адрес — подсказкой при наведении). Новые решения по витрине — «Pricing stopped by a person».
 4. На карточке остановки — **«Resume»** → окно «Resume pricing: amazon.com?» с заметкой → **«Yes, resume»** → «Pricing resumed.»; в
    журнале вторая строка, остановка уходит в «Resumed» со временем остановки и заметкой снятия. Весь шаг в проходе шага 87 — 1,5 с без
    ожиданий.

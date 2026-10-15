@@ -369,6 +369,7 @@ export const de: Messages = {
       /** Шаг 92 [Р-216]: знак и строчное имя «pricetrail» в шапке; вкладка — имя в прозе (documentTitle) */
       title: 'pricetrail · Verkäuferkonsole',
       documentTitle: 'PriceTrail · Verkäuferkonsole',
+      theme: { label: 'Darstellung', system: 'Wie das System', light: 'Hell', dark: 'Dunkel' },
       stand: 'Testumgebung, synthetische Daten',
       // Шаг 64 (проход консоли): имя и описание демо-мира на языке интерфейса, а не строкой посева по-немецки
       demoWorldTitle: 'Demo-Shop (Simulator)', demoWorldDescription: 'Synthetischer Shop auf dem Kanalsimulator: jedes Angebot hat drei Wettbewerber — einer driftet, einer unterbietet, einer in Preiswellen.',

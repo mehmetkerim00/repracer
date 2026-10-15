@@ -44,6 +44,8 @@ export interface Principal extends ResolvedUser, ExternalSubject {
   email: string | null;
   emailVerified: boolean;
   amr: string[];
+  /** Шаг 93: имя человека от поставщика (`name`) — только для показа; у ZITADEL — из ID-токена того же входа */
+  name: string | null;
 }
 
 /**
@@ -76,13 +78,18 @@ export const ID_TOKEN_IAT_SKEW_SECONDS = 10;
  * `at_hash`, который привязал бы их точнее, снимок ZITADEL не называет. Иначе — «второго фактора нет», а не ошибка.
  */
 export async function amrFromIdToken(idToken: string | undefined, access: VerifiedToken, options: VerifyOptions): Promise<string[]> {
-  if (!idToken || !JWT.test(idToken)) return [];
+  return (await idTokenOf(idToken, access, options))?.amr ?? [];
+}
+
+/** ID-токен того же входа по правилам выше — или null: из него берутся методы входа и (шаг 93) имя человека */
+export async function idTokenOf(idToken: string | undefined, access: VerifiedToken, options: VerifyOptions): Promise<VerifiedToken | null> {
+  if (!idToken || !JWT.test(idToken)) return null;
   try {
     const id = await verifyToken(idToken, options);
     const sameExchange = id.issuedAt !== null && access.issuedAt !== null && Math.abs(id.issuedAt - access.issuedAt) <= ID_TOKEN_IAT_SKEW_SECONDS;
-    return id.idTokenShaped && sameExchange && id.subject === access.subject && id.issuer === access.issuer ? id.amr : [];
+    return id.idTokenShaped && sameExchange && id.subject === access.subject && id.issuer === access.issuer ? id : null;
   } catch (error) {
-    if (error instanceof TokenError) return [];
+    if (error instanceof TokenError) return null;
     throw error;
   }
 }
@@ -101,9 +108,12 @@ export function createAuthenticator(options: AuthenticatorOptions) {
       throw error;
     }
   };
-  /** Методы входа: из ID-токена того же обмена кода, иначе — из самого токена доступа (стенд) */
-  const amrOf = async (token: Awaited<ReturnType<typeof verifyToken>>, idToken: string | undefined): Promise<string[]> =>
-    options.idTokenAudience ? [...new Set([...token.amr, ...await amrFromIdToken(idToken, token, { ...options, audience: options.idTokenAudience })])] : token.amr;
+  /** Методы входа и имя: из ID-токена того же обмена кода, иначе — из самого токена доступа (стенд) */
+  const fromIdToken = async (token: Awaited<ReturnType<typeof verifyToken>>, idToken: string | undefined): Promise<{ amr: string[]; name: string | null }> => {
+    if (!options.idTokenAudience) return { amr: token.amr, name: token.name };
+    const id = await idTokenOf(idToken, token, { ...options, audience: options.idTokenAudience });
+    return { amr: [...new Set([...token.amr, ...(id?.amr ?? [])])], name: token.name ?? id?.name ?? null };
+  };
   return {
     /**
      * Заголовок `Authorization: Bearer <token>` → пользователь с членствами; null — нет токена, токен недействителен или
@@ -114,7 +124,9 @@ export function createAuthenticator(options: AuthenticatorOptions) {
       if (!access) return null;
       const { token } = access;
       const user = await options.directory.resolve({ issuer: token.issuer, subject: token.subject });
-      return user ? { ...user, issuer: token.issuer, subject: token.subject, email: token.email, emailVerified: token.emailVerified, amr: await amrOf(token, idToken) } : null;
+      if (!user) return null;
+      const { amr, name } = await fromIdToken(token, idToken);
+      return { ...user, issuer: token.issuer, subject: token.subject, email: token.email, emailVerified: token.emailVerified, amr, name };
     },
     /**
      * Шаг 44 [Р-178]: проверенный токен БЕЗ сопоставления — только для приёма приглашения: новый владелец входит у

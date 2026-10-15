@@ -78,6 +78,11 @@ export interface TargetCard {
 }
 
 /** Запись журнала аудита остановок [Р-76]: кто (роль в момент действия), что, где, с какой заметкой */
+/** Шаг 93: как назван участник журнала — имя из базы, иначе из справочника показа мира, иначе адрес */
+function personName(a: { memberEmail?: string | null; memberName?: string | null }, world: { people?: Readonly<Record<string, string>> }): string | null {
+  return a.memberName ?? (a.memberEmail ? world.people?.[a.memberEmail] ?? a.memberEmail : null);
+}
+
 export interface AuditCard {
   at: string;
   action: string;
@@ -86,6 +91,8 @@ export interface AuditCard {
   note: string | null;
   /** Шаг 89: объяснение события канала — не заметка человека, поэтому без кавычек «Note» */
   detail?: string | null;
+  /** Шаг 93: адрес человека, названного в ячейке по имени, — подсказкой при наведении */
+  scopeHint?: string | null;
 }
 
 export interface StopView {
@@ -256,10 +263,12 @@ export function stopView(world: StandWorld, audit: readonly ConsoleAuditRow[], m
         : a.membershipId === world.viewer.membershipId ? m.ui.stop.you(m.values[a.role]) : m.values[a.role],
       // Шаг 88 [Р-213]: смена роли — чья и как: прежняя роль → новая (роли — словами словаря)
       scope: a.action === 'membership.role_changed'
-        ? m.ui.stop.roleChanged(a.memberEmail ?? null, a.roleFrom ? m.values[a.roleFrom] : m.ui.stop.unknownMember, a.roleTo ? m.values[a.roleTo] : m.ui.stop.unknownMember)
+        ? m.ui.stop.roleChanged(personName(a, world), a.roleFrom ? m.values[a.roleFrom] : m.ui.stop.unknownMember, a.roleTo ? m.values[a.roleTo] : m.ui.stop.unknownMember)
         : a.scope === null ? m.ui.stop.wholeTenant
         : targetLabel(world, { scope: a.scope, channelAccountId: a.channelAccountId, marketplace: a.marketplace } as ConsoleStop, m),
       note: a.note,
+      // Шаг 93: участник назван по имени — его адрес подсказкой
+      ...(a.action === 'membership.role_changed' && a.memberEmail && personName(a, world) !== a.memberEmail ? { scopeHint: a.memberEmail } : {}),
     })),
     notStopped: m.ui.stop.notStopped,
     gaps: world.state.distrusts.length > 0 ? [gap(m, 'DISTRUST_DETAILS')] : [],

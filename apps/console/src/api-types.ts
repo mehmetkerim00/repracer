@@ -35,7 +35,8 @@ export interface WorldSummary {
 
 /** Вход [Р-78]: пользователь токена поставщика и язык; роль — своя в каждом мире, из членства; simulator — только стенд */
 export interface SessionView {
-  user: { subject: string; email: string | null } | null;
+  /** Шаг 93: имя — от поставщика identity, если он его выдал; шапка показывает имя, адрес — подсказкой */
+  user: { subject: string; email: string | null; name?: string | null } | null;
   locale: Locale;
   simulator: Array<{ role: MemberRole; label: string }> | null;
   /** Р-160: публичное демо включено — на странице входа есть кнопка «посмотреть демо», вход без регистрации */

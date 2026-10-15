@@ -92,6 +92,89 @@ export function styleProblems(stylesCss: string): string[] {
   return problems;
 }
 
+/** Имена токенов САМОЙ темы Primer (functional/themes) — значения, зависящие от темы; размеры и шрифты к ним не относятся */
+function themeTokenNames(): Set<string> {
+  return new Set([...readFileSync(join(primerDir, 'functional', 'themes', 'light.css'), 'utf8').matchAll(/(--[A-Za-z0-9-]+)\s*:/g)].map((m) => m[1]!));
+}
+
+/** Строки «токен → (значение, источник)» блока tokens.css по селектору */
+function tokenLines(block: string): Map<string, { value: string; source: string; dark: boolean }> {
+  const out = new Map<string, { value: string; source: string; dark: boolean }>();
+  for (const m of block.matchAll(/^\s*(--[A-Za-z0-9-]+)\s*:\s*(.+?);\s*\/\*\s*primer(-dark)?:\s*(--[A-Za-z0-9-]+)\s*\*\//gm)) {
+    out.set(m[1]!, { value: m[2]!, source: m[4]!, dark: m[3] !== undefined });
+  }
+  return out;
+}
+
+/**
+ * Шаг 93: тёмная тема — целиком. Каждое значение светлого `:root`, взятое из темы Primer, имеет в ОБОИХ тёмных блоках (системная тема и
+ * ручной выбор) пару с тем же токеном и пометкой `primer-dark`; блоки одинаковы. Значения пар сверяет `tokenProblems` с тёмной темой пакета
+ */
+/**
+ * Шаг 93: исключения правила пар — токен, у которого тёмная тема берёт ДРУГОЕ имя Primer, названное здесь с причиной. Значение по-прежнему
+ * сверяется с пакетом (tokenProblems); правило проверяет, что тёмная пара — ровно названная
+ */
+export const THEME_EXCEPTIONS: Readonly<Record<string, { dark: string; why: string }>> = {
+  '--header-edge': {
+    dark: '--borderColor-muted',
+    why: 'нижний край шапки: в светлой теме цветом самой шапки (не виден), в тёмной шапка (--header-bgColor) того же цвета, что канва (--bgColor-muted), и край её отделяет',
+  },
+};
+
+export function themeProblems(tokensCss: string, themed: ReadonlySet<string>, exceptions: Readonly<Record<string, { dark: string }>> = THEME_EXCEPTIONS): string[] {
+  const problems: string[] = [];
+  const blockOf = (open: RegExp): string | null => {
+    const m = open.exec(tokensCss);
+    if (!m) return null;
+    let depth = 0;
+    for (let i = m.index + m[0].length - 1; i < tokensCss.length; i++) {
+      if (tokensCss[i] === '{') depth++;
+      if (tokensCss[i] === '}' && --depth === 0) return tokensCss.slice(m.index, i + 1);
+    }
+    return null;
+  };
+  const light = blockOf(/^:root \{/m);
+  const media = blockOf(/@media \(prefers-color-scheme: dark\) \{/);
+  const manual = blockOf(/^:root\[data-theme="dark"\] \{/m);
+  if (!light || !media || !manual) return [`tokens.css: a theme block is missing (light ${!!light}, system dark ${!!media}, manual dark ${!!manual})`];
+  const lightTokens = [...tokenLines(light)].filter(([, t]) => !t.dark && themed.has(t.source));
+  for (const [where, block] of [['system dark', media], ['manual dark', manual]] as const) {
+    const darkTokens = tokenLines(block);
+    for (const [name, t] of lightTokens) {
+      const d = darkTokens.get(name);
+      if (!d) problems.push(`${where}: ${name} has no dark value`);
+      else if (!d.dark || d.source !== (exceptions[name]?.dark ?? t.source)) problems.push(`${where}: ${name} takes ${d.source} instead of the dark ${exceptions[name]?.dark ?? t.source}`);
+    }
+  }
+  const norm2 = (b: string) => [...tokenLines(b)].map(([k, v]) => `${k}=${v.value}`).sort().join('\n');
+  if (norm2(media) !== norm2(manual)) problems.push('the system dark block and the manual dark block differ');
+  return problems;
+}
+
+/**
+ * Шаг 93: отступы — только шкала Primer. `padding`, `margin`, `gap` (и их стороны) в styles.css — токены (`var(--…)`, а токены сверены с
+ * пакетом выше), `0`, `auto` и выражения из токенов; число с единицей — красная сборка. Исключения — списком с причиной
+ */
+export const SPACING_EXCEPTIONS: Readonly<Record<string, string>> = {};
+
+export function spacingProblems(stylesCss: string): string[] {
+  const problems: string[] = [];
+  const css = stylesCss.replace(/\/\*[\s\S]*?\*\//g, '');
+  for (const block of css.matchAll(/([^{}]*)\{([^{}]*)\}/g)) {
+    const selector = block[1]!.trim();
+    for (const decl of block[2]!.split(';')) {
+      const i = decl.indexOf(':');
+      if (i < 0) continue;
+      const prop = decl.slice(0, i).trim().toLowerCase();
+      if (!/^(?:padding|margin|gap|row-gap|column-gap)(?:-[a-z-]+)?$/.test(prop)) continue;
+      const value = decl.slice(i + 1).trim();
+      const literal = value.replace(/var\(--[A-Za-z0-9-]+\)/g, '').match(/\d*\.?\d+(?:px|rem|em|%|vh|vw|ch)\b/);
+      if (literal && !(`${selector} ${prop}` in SPACING_EXCEPTIONS)) problems.push(`${selector} { ${prop}: ${value} } — ${literal[0]} is not on the Primer spacing scale`);
+    }
+  }
+  return problems;
+}
+
 /**
  * Шаг 85: брейкпоинты адаптива — только со шкалы Primer (`--breakpoint-*`: 544 / 768 / 1012 / 1280 и края шкалы). В условии `@media`
  * каждая длина — значение токена пакета в rem, а не своё число: «960px» или «1100px» — красная сборка
@@ -136,6 +219,33 @@ test('step 83: styles.css takes colours, font sizes, radii and font stacks only 
   assert.match(styleProblems('.a { font-family: Inter, sans-serif; }').join(), /font stack as a literal/);
   assert.match(styleProblems('.a { border-radius: 10px; }').join(), /radius as a literal/);
   assert.deepEqual(styleProblems('.a { color: var(--text); border-radius: 50%; font-size: var(--font-size); background: transparent; }'), []);
+});
+
+test('step 93: the dark theme is complete — every themed light value has its GitHub Primer dark pair, in both dark blocks', () => {
+  const tokensCss = readFileSync(join(consoleDir, 'src', 'tokens.css'), 'utf8');
+  const themed = themeTokenNames();
+  assert.deepEqual(themeProblems(tokensCss, themed), []);
+  assert.ok((tokensCss.match(/primer-dark: --/g) ?? []).length >= 120, 'both dark blocks carry their pairs');
+  // Положительные контроли [Р-94]: выкинутая пара, пара не того токена и разошедшиеся блоки краснеют
+  const dropped = tokensCss.replace(/\n\s*--danger: #f85149; \/\* primer-dark: --fgColor-danger \*\//, '');
+  assert.match(themeProblems(dropped, themed).join(), /--danger has no dark value/);
+  const swapped = tokensCss.replace('--text: #f0f6fc; /* primer-dark: --fgColor-default */', '--text: #9198a1; /* primer-dark: --fgColor-muted */');
+  assert.match(themeProblems(swapped, themed).join(), /--text takes --fgColor-muted instead of the dark --fgColor-default/);
+  // исключение пропускает ровно названную пару: без него край шапки краснеет, с чужой парой — тоже
+  assert.match(themeProblems(tokensCss, themed, {}).join(), /--header-edge takes --borderColor-muted instead of the dark --header-bgColor/);
+  assert.match(themeProblems(tokensCss, themed, { '--header-edge': { dark: '--borderColor-default' } }).join(), /--header-edge takes --borderColor-muted instead of the dark --borderColor-default/);
+});
+
+test('step 93: padding, margin and gap in styles.css are on the GitHub Primer spacing scale', () => {
+  const stylesCss = readFileSync(join(consoleDir, 'src', 'styles.css'), 'utf8');
+  assert.deepEqual(spacingProblems(stylesCss), []);
+  // Положительные контроли [Р-94]: подсунутый «13px» роняет сборку, токены, ноль, auto и выражения из токенов — нет
+  assert.match(spacingProblems('.a { padding: 13px var(--space-2); }').join(), /13px is not on the Primer spacing scale/);
+  assert.match(spacingProblems('.a { margin-top: 0.8rem; }').join(), /0\.8rem/);
+  assert.match(spacingProblems('.a { gap: 10px; }').join(), /10px/);
+  assert.deepEqual(spacingProblems('.a { padding: 0 var(--space-3); margin: 0 auto; gap: var(--base-size-2); margin-left: calc(-1 * var(--space-4)); }'), []);
+  // правило не зеленеет на пустом файле: отступов в стилях сотни
+  assert.ok((stylesCss.match(/padding|margin|gap/g) ?? []).length > 200);
 });
 
 test('step 85: media queries break only at GitHub Primer breakpoints', () => {

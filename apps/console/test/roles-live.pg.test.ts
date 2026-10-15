@@ -3,7 +3,7 @@ import { after, before, test } from 'node:test';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { messagesFor, type ConnectionsView, type ShadowView, type StopView } from '@repracer/console-model';
-import { pgStandJoinAs, pgStandJoinMember, pgStandUsers, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_EMAILS, STAND_ISSUER } from '@repracer/contract-tests/stand';
+import { pgStandJoinAs, pgStandJoinMember, pgStandUsers, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_EMAILS, STAND_ISSUER, STAND_PEOPLE } from '@repracer/contract-tests/stand';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
 import { PgIdentityDirectory } from '@repracer/identity/pg';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
@@ -82,8 +82,8 @@ before(async () => {
   const issuer = createTestIssuer({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE });
   const handle = createStandApi([demo.world, ...sellers.worlds], {
     authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory }),
-    simulator: { token: (a: (typeof STAND_ACCOUNTS)[number]) => issuer.token(a.subject, { email: a.email, amr: ['pwd', 'otp'] }), expiresInSeconds: 3600 },
-  }, { connect: () => readOnlyConnections(new PgChannelConnectStore(admin)), market: 'us' });
+    simulator: { token: (a: (typeof STAND_ACCOUNTS)[number]) => issuer.token(a.subject, { email: a.email, amr: ['pwd', 'otp'], extra: { name: a.displayName } }), expiresInSeconds: 3600 },
+  }, { connect: () => readOnlyConnections(new PgChannelConnectStore(admin)), market: 'us', people: { ...STAND_PEOPLE, ...sellers.people } });
   server = createStandServer(handle);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -107,7 +107,11 @@ test('step 88 (Р-213): sign-in offers three roles; the demo log shows the owner
   const audit = (await call<StopView>('GET', api('stop'), owner)).body.audit.filter((a) => a.action === 'Role changed');
   assert.equal(audit.length, 1, JSON.stringify(audit));
   assert.equal(audit[0]!.actor, 'Owner (you)');
-  assert.match(audit[0]!.scope, /^manager@stand\.repracer\.test: Viewer → Manager$/, 'whose role, old → new');
+  // Шаг 93: участник назван по имени, адрес — подсказкой; журнал хранит то же, что прежде
+  assert.equal(audit[0]!.scope, 'Jamie Lee: Viewer → Manager', 'whose role, old → new — by name');
+  assert.equal(audit[0]!.scopeHint, 'manager@stand.repracer.test', 'the address stays as a hint');
+  const signedIn = (await (await fetch(`${origin}/api/session?locale=en`, { headers: { authorization: `Bearer ${owner}` } })).json()) as SessionView;
+  assert.deepEqual([signedIn.user?.name, signedIn.user?.email], ['Alex Porter', 'owner@stand.repracer.test'], 'the header names the person; the address is the hint');
   // Когда — в поясе продавца (New York: летом UTC−4, зимой UTC−5); само время события держит тест базы (identity.pg, шаг 88)
   assert.match(audit[0]!.at, /UTC−[45]$/, 'when — in the seller time zone');
 });

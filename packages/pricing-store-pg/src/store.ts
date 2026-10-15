@@ -295,7 +295,7 @@ function auditRow(r: Row): ConsoleAuditRow {
     role: roleChange ? r.actor_role ?? null : r.changes.role ?? null,
     entityType: r.entity_type, entityId: r.entity_id, scope: r.changes.scope ?? null, channelAccountId: r.changes.channelAccountId ?? null,
     marketplace: r.changes.marketplace ?? null, note: r.changes.note ?? null,
-    ...(roleChange ? { roleFrom: r.changes.roleFrom ?? null, roleTo: r.changes.roleTo ?? null, memberEmail: r.member_email ?? null } : {}),
+    ...(roleChange ? { roleFrom: r.changes.roleFrom ?? null, roleTo: r.changes.roleTo ?? null, memberEmail: r.member_email ?? null, memberName: r.member_name ?? null } : {}),
   };
 }
 
@@ -2566,13 +2566,13 @@ export class PgPricingStore implements PricingStore {
       const { rows } = await tx.query(
         `SELECT * FROM (
            (SELECT e.action, e.actor_type, e.actor_membership_id, e.entity_type, e.entity_id, e.changes, e.recorded_at, e.audit_event_id,
-                   NULL::text AS actor_role, NULL::text AS member_email
+                   NULL::text AS actor_role, NULL::text AS member_email, NULL::text AS member_name
               FROM audit.audit_event e
              WHERE e.tenant_id = $1 AND e.entity_type IN ('price_stop', 'pricing_halt')
              ORDER BY e.changes ->> 'at' DESC, e.recorded_at DESC, e.audit_event_id DESC LIMIT $2)
            UNION ALL
            (SELECT e.action, e.actor_type, e.actor_membership_id, e.entity_type, e.entity_id, e.changes, e.recorded_at, e.audit_event_id,
-                   am.role AS actor_role, u.email AS member_email
+                   am.role AS actor_role, u.email AS member_email, u.display_name AS member_name
               FROM audit.audit_event e
               LEFT JOIN tenant_data.membership am ON am.tenant_id = e.tenant_id AND am.membership_id = e.actor_membership_id
               LEFT JOIN tenant_data.membership tm ON tm.tenant_id = e.tenant_id AND tm.membership_id = e.entity_id
@@ -2586,7 +2586,7 @@ export class PgPricingStore implements PricingStore {
                                       'channelAccountId', h.channel_account_id, 'marketplace', h.marketplace,
                                       'offerName', coalesce(p.title, om.external_sku, h.channel_product_ref),
                                       'elsewhereMinor', h.competitive_price_threshold_minor, 'currency', h.currency),
-                   h.recorded_at, h.offer_pricing_health_id, NULL::text, NULL::text
+                   h.recorded_at, h.offer_pricing_health_id, NULL::text, NULL::text, NULL::text
               FROM channel_data.offer_pricing_health h
               LEFT JOIN tenant_data.offer_mapping om ON om.tenant_id = h.tenant_id AND om.channel_account_id = h.channel_account_id
                                                      AND om.marketplace = h.marketplace AND om.channel_product_ref = h.channel_product_ref AND om.status = 'ACTIVE'

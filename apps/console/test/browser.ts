@@ -32,6 +32,8 @@ export interface Browser {
   evaluate<T>(expression: string): Promise<T>;
   /** Шаг 85: ширина и высота окна страницы (эмуляция устройства CDP) — телефон, планшет, ноутбук, монитор */
   setViewport(width: number, height: number): Promise<void>;
+  /** Шаг 93: системная тема устройства (`prefers-color-scheme`) — эмуляцией CDP; null — как у машины прогона */
+  setColorScheme(scheme: 'light' | 'dark' | null): Promise<void>;
   /** Исключения страницы и вызовы console.error с начала работы */
   errors(): string[];
   close(): Promise<void>;
@@ -100,6 +102,7 @@ export async function launchBrowser(): Promise<Browser> {
   return {
     async open(url) { await send('Page.navigate', { url }); },
     async setViewport(width, height) { await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false }); },
+    async setColorScheme(scheme) { await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme ?? '' }] }); },
     text,
     async waitText(needle, timeoutMs = 60_000) {
       const started = Date.now();

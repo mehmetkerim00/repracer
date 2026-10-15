@@ -109,6 +109,31 @@ test('шаг 45: ID-токен даёт второй фактор только �
   assert.equal(await auth.identify(`Bearer ${idFor()}`), null, 'и не принимает приглашения');
 });
 
+test('шаг 93: имя человека — утверждение OIDC `name` токена доступа, иначе ID-токена того же входа; пустое и чужое имя не берутся', async () => {
+  const { generateKeyPairSync: keys } = await import('node:crypto');
+  const { createLocalIssuer } = await import('./test-issuer.ts');
+  const pem = keys('ec', { namedCurve: 'prime256v1' }).privateKey.export({ format: 'pem', type: 'pkcs8' }).toString();
+  const CLIENT = 'console-spa';
+  const clock = Date.parse('2026-10-15T10:00:00Z');
+  const access = createLocalIssuer({ issuer: ISSUER, audience: AUDIENCE, privateKeyPem: pem, now: () => clock });
+  const id = (extra: Record<string, unknown>, sub = 'sub-operator') => createLocalIssuer({ issuer: ISSUER, audience: CLIENT, privateKeyPem: pem, now: () => clock })
+    .token(sub, { amr: ['pwd'], extra: { aud: [CLIENT, AUDIENCE], auth_time: Math.floor(clock / 1000), ...extra } });
+  const directory = new MemoryIdentityDirectory();
+  directory.link({ issuer: ISSUER, subject: 'sub-operator' }, 'user-operator');
+  const jwks = staticJwks(createLocalIssuer({ issuer: ISSUER, audience: AUDIENCE, privateKeyPem: pem }).jwks);
+  const auth = createAuthenticator({ issuer: ISSUER, audience: AUDIENCE, jwks, directory, idTokenAudience: CLIENT, now: () => clock });
+  const name = async (accessExtra: Record<string, unknown>, idToken?: string) =>
+    (await auth.authenticate(`Bearer ${access.token('sub-operator', { extra: accessExtra })}`, idToken))?.name;
+
+  assert.equal(await name({ name: '  Alex Porter ' }), 'Alex Porter', 'из токена доступа, без пробелов по краям');
+  assert.equal(await name({}, id({ name: 'Alex Porter' })), 'Alex Porter', 'ZITADEL: в токене доступа имени нет — из ID-токена того же входа');
+  assert.equal(await name({ name: 'Alex Porter' }, id({ name: 'Someone Else' })), 'Alex Porter', 'токен доступа главнее');
+  assert.equal(await name({}, id({ name: 'Mallory' }, 'sub-someone-else')), null, 'ID-токен чужого субъекта имени не даёт');
+  assert.equal(await name({ name: '   ' }), null, 'пустое имя — не имя: консоль покажет адрес');
+  assert.equal(await name({ name: 42 }), null, 'не строка — не имя');
+  assert.equal((await name({ name: 'x'.repeat(500) }))?.length, 200, 'длинное имя обрезается: это подпись в шапке, а не данные');
+});
+
 test('шаг 45, находка 10: сбой userinfo — «поставщик недоступен», а не «адрес не подтверждён»', async () => {
   const { remoteUserinfo, UserinfoUnavailable } = await import('./index.ts');
   const discovery = { userinfo_endpoint: 'https://idp.stand.repracer.test/oidc/v1/userinfo' };
